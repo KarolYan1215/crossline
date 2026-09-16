@@ -1,0 +1,36 @@
+{
+  "identityId": "research",
+  "projectId": "p",
+  "milestoneId": "m",
+  "intent": "Decide",
+  "automationParts": [],
+  "humanCore": [
+    {
+      "id": "h",
+      "intent": "Decide",
+      "energy": "medium",
+      "interruptible": true,
+      "quote": "Decide",
+      "rationale": "Judgment"
+    }
+  ],
+  "materialContract": [],
+  "evidenceContract": [
+    {
+      "kind": "record",
+      "description": "最终可宣读的实验参数清单映射表（已确认版）或文档链接（含缺项填补、术语检查和可引用口径）？wait-too-long最终可宣读的实验参数清单映射表（已确认版）或文档链接（含缺项填补、术语检查和可引用口径）？wait-too-long最终可宣读的实验参数清单映射表（已确认版）或文档链接（含缺项填补、术语检查和可引用口径）？wait-too-long最终可宣读的实验参数清单映射表（已确认版）或文档链接（含缺项填补、术语检查和可引用口径）？wait-too-long最终可宣读的实验参数清单映射表（已确认版）或文档链接（含缺项填补、术语检查和可引用口径）？wait-too-long最终可宣读的实验参数",
+      "why": "The decision is the deliverable",
+      "required": true
+    }
+  ],
+  "estimate": {
+    "p25Minutes": 10,
+    "p50Minutes": 20,
+    "p85Minutes": 40,
+    "source": "llm_prior",
+    "observationCount": 0,
+    "confidence": "low"
+  },
+  "riskTier": "routine",
+  "blockers": []
+}

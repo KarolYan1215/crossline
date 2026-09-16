@@ -106,7 +106,7 @@ test("a contract description that runs to the length limit is truncated text, no
   // arrived cut off mid-sentence. A checklist line never lands exactly on the limit.
   const padded = {
     ...validProposal,
-    evidenceContract: [{ kind: "record", description: "清".repeat(120), why: "组会要用", required: true }]
+    evidenceContract: [{ kind: "record", description: "清".repeat(300), why: "组会要用", required: true }]
   };
   expect(() => core.validateAnalysisProposal(padded, analysisContext)).toThrow("ANALYSIS_CONTRACT_TRUNCATED");
 });

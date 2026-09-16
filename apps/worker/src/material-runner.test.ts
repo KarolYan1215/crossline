@@ -3,9 +3,11 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { CrosslineStore } from "@crossline/db";
-import { JsonLineRpcClient } from "@crossline/codex";
 import type { CostSignal } from "@crossline/core";
 import { createMaterialPreparer, pendingMaterialWorkOrders, MATERIAL_SKILL } from "./material-runner";
+import { fakeRuntime as sharedRuntime } from "./testing/fake-runtime";
+
+const fakeRuntime = (answers: string[]) => sharedRuntime(answers, MATERIAL_SKILL);
 
 const WORKSPACE = "personal-crossline";
 let store: CrosslineStore;
@@ -27,32 +29,6 @@ afterEach(() => {
   store.close();
   rmSync(projectRoot, { recursive: true, force: true });
 });
-
-/** Answers each turn with `answers[turn - 1]`, mirroring the analysis runtime fake. */
-function fakeRuntime(answers: string[]): { rpc: JsonLineRpcClient; turns: () => number } {
-  let turns = 0;
-  const rpc = new JsonLineRpcClient((line) => {
-    const request = JSON.parse(line);
-    const result = request.method === "skills/list"
-      ? { data: [{ cwd: "C:\\repo", errors: [], skills: [{ name: MATERIAL_SKILL, path: "C:\\skill\\SKILL.md", enabled: true }] }] }
-      : request.method === "account/read" ? { account: { type: "chatgpt" } }
-      : request.method === "config/read" ? { config: {} }
-      : request.method === "thread/start" ? { thread: { id: `thread-${turns + 1}` }, approvalPolicy: "untrusted", sandbox: { type: "readOnly" }, instructionSources: [] }
-      : { turn: { id: `turn-${turns + 1}`, status: "inProgress" } };
-    queueMicrotask(() => rpc.receiveLine(JSON.stringify({ id: request.id, result })));
-    if (request.method === "turn/start") {
-      turns++;
-      const threadId = `thread-${turns}`;
-      const turnId = `turn-${turns}`;
-      const text = answers[turns - 1] ?? answers[answers.length - 1]!;
-      setTimeout(() => {
-        rpc.receiveLine(JSON.stringify({ method: "item/completed", params: { threadId, turnId, item: { type: "agentMessage", phase: "final_answer", text } } }));
-        rpc.receiveLine(JSON.stringify({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed" } } }));
-      }, 1);
-    }
-  });
-  return { rpc, turns: () => turns };
-}
 
 const healthy: CostSignal = { available: true, limitReached: false,
   short: { usedPercent: 10, windowDurationMins: 300, resetsAt: null },

@@ -19,7 +19,11 @@ export type StoredCapture = {
   id: string; ownerId: string; workspaceId: string; title: string; context: string;
   state: "captured" | "analyzing" | "awaiting_plan_approval" | "blocked" | "promoted" | "discarded";
   attempt: number;
-  audit: { threadId?: string; turnId?: string; contextVersion?: string; blocker?: { code: string; message: string } };
+  audit: { threadId?: string; turnId?: string; contextVersion?: string;
+    /** How many times the validator sent the answer back to be fixed. A schema that needs this every
+     * run is a schema problem, and it only reads as one if the count is on the record. */
+    repairs?: number;
+    blocker?: { code: string; message: string } };
 };
 
 export type StoredMilestone = {

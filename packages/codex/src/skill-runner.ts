@@ -1,6 +1,10 @@
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import type { CodexRpcBoundary } from "./index";
 
-export type AnalysisAudit = { threadId?: string; turnId?: string };
+export type AnalysisAudit = { threadId?: string; turnId?: string;
+  /** How many times the validator sent the answer back to be fixed. Absent means it passed first try. */
+  repairs?: number };
 export type SkillRunResult<T> = { ok: true; output: T; audit: AnalysisAudit }
   | { ok: false; blocker: { code: string; message: string }; audit: AnalysisAudit };
 
@@ -26,6 +30,24 @@ export type SkillRunOptions<T> = {
 };
 const record = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+
+/**
+ * Writes what the model actually answered to `CROSSLINE_RECORD_DIR`, when that is set.
+ *
+ * Every test double in this repo answers with clean JSON somebody typed by hand, which is why three
+ * acceptance rounds kept turning up defects the unit suite could not see: no test had ever been shown
+ * a real answer. Recording is off unless the variable is set, costs one file write when it is on, and
+ * captures the rejected answers too — those are the ones worth replaying.
+ */
+function recordAnswer(skillName: string, text: string | undefined): void {
+  const dir = process.env.CROSSLINE_RECORD_DIR?.trim();
+  if (!dir || text === undefined) return;
+  try {
+    mkdirSync(dir, { recursive: true });
+    const name = `${skillName.replace(/[^a-zA-Z0-9-]/g, "_")}-${Date.now()}.txt`;
+    writeFileSync(join(dir, name), text, "utf8");
+  } catch { /* recording is a diagnostic; never fail a real run because the disk said no */ }
+}
 const identifier = (value: unknown): value is string => typeof value === "string" && /^[a-zA-Z0-9_-]{1,128}$/.test(value);
 function fail(code: string): never { throw new Error(code); }
 
@@ -166,7 +188,12 @@ async function runSkillTurn<T>(client: CodexRpcBoundary, input: unknown, options
     audit.threadId = threadId;
     options.onAudit({ ...audit });
     if (started?.approvalPolicy !== "untrusted" || record(started.sandbox)?.type !== "readOnly" || !Array.isArray(started.instructionSources) || started.instructionSources.length) fail("SKILL_PERMISSION_DENIED");
-    const completed = new Promise<void>((resolve, reject) => {
+    // One subscription, re-armed per turn. A repair attempt is another turn on the same thread, so
+    // the handler stays put and each turn hands it a fresh pair of callbacks to settle.
+    let settle: { resolve: (text: string | undefined) => void; reject: (error: Error) => void } | undefined;
+    {
+      const resolve = () => settle?.resolve(finalText);
+      const reject = (error: Error) => settle?.reject(error);
       unsubscribe = client.onNotification((message) => {
         if (message.method === "crossline/runtimeDisconnected") return reject(new Error("SKILL_RUNTIME_EXITED"));
         const params = record(message.params);
@@ -204,24 +231,66 @@ async function runSkillTurn<T>(client: CodexRpcBoundary, input: unknown, options
           }
         }
       });
-    });
-    // Attach a rejection handler immediately, including events that beat the RPC response.
-    void completed.catch(() => {});
-    const turn = record(record(await rpc("turn/start", {
-      threadId, environments: [], input: [{ type: "text", text: `$${options.skillName}\n\n${JSON.stringify(prepared)}`, text_elements: [] }], outputSchema: options.outputSchema
-    }))?.turn);
-    if (!identifier(turn?.id)) fail("SKILL_PROTOCOL_INVALID");
-    audit.turnId = turn.id;
-    options.onAudit({ ...audit });
-    await Promise.race([completed, canceled]);
-    if (!finalText) fail("SKILL_REFUSED");
-    let output: unknown;
-    // Models routinely wrap JSON in a ```json fence even when told to return JSON only. That is a
-    // transport habit, not invented content, so it is unwrapped rather than treated as a refusal —
-    // every trust check still runs on whatever is inside.
-    const unfenced = finalText.trim().replace(/^```(?:json)?\s*\n?/, "").replace(/\n?```$/, "");
-    try { output = JSON.parse(unfenced); } catch { fail("SKILL_SCHEMA_INVALID"); }
-    return { ok: true, output: options.validateOutput(output, prepared), audit };
+    }
+
+    /** One turn on the already-started thread, from prompt to parsed JSON. */
+    const runTurn = async (text: string): Promise<unknown> => {
+      finalText = undefined;
+      // Cleared so the handler's "events can precede the turn/start response" guard arms again.
+      delete audit.turnId;
+      const completed = new Promise<string | undefined>((resolve, reject) => { settle = { resolve, reject }; });
+      // Attach a rejection handler immediately, including events that beat the RPC response.
+      void completed.catch(() => {});
+      const turn = record(record(await rpc("turn/start", {
+        threadId, environments: [], input: [{ type: "text", text, text_elements: [] }], outputSchema: options.outputSchema
+      }))?.turn);
+      if (!identifier(turn?.id)) fail("SKILL_PROTOCOL_INVALID");
+      audit.turnId = turn.id;
+      options.onAudit({ ...audit });
+      // The turn carries its own answer out rather than the caller reading the handler's scratch
+      // variable: that read was narrowed to `undefined` by the reset above, because the only writer
+      // TypeScript can see is this function.
+      const answer = await Promise.race([completed, canceled]);
+      recordAnswer(options.skillName, answer);
+      if (!answer) return fail("SKILL_REFUSED");
+      // Models routinely wrap JSON in a ```json fence even when told to return JSON only. That is a
+      // transport habit, not invented content, so it is unwrapped rather than treated as a refusal —
+      // every trust check still runs on whatever is inside.
+      const unfenced = answer.trim().replace(/^```(?:json)?\s*\n?/, "").replace(/\n?```$/, "");
+      try { return JSON.parse(unfenced); } catch { return fail("SKILL_SCHEMA_INVALID"); }
+    };
+
+    /**
+     * Ask the model to fix what the validator rejected, rather than quietly repairing it here.
+     *
+     * The validator's own words are the whole point: it already says which field is wrong and why, and
+     * the model cannot know any of that unless it is told. This is the standard structured-output
+     * repair loop, and it needs no library — the throw from `validateOutput` is the signal, and the
+     * thread already carries the original request, so a repair turn costs one short message.
+     *
+     * Only a validation rejection is repairable. A timeout, a spent quota or a forbidden tool call
+     * throws out of `runTurn` and past this loop, because re-asking cannot fix any of them.
+     */
+    const MAX_REPAIRS = 2;
+    let rejection: Error | undefined;
+    for (let attempt = 0; ; attempt += 1) {
+      const output = await runTurn(attempt === 0
+        ? `$${options.skillName}\n\n${JSON.stringify(prepared)}`
+        : `Your previous answer was rejected by the receiving layer: ${rejection?.message}`
+          + `${(rejection as Error & { detail?: string } | undefined)?.detail ? ` — ${(rejection as Error & { detail?: string }).detail}` : ""}\n\n`
+          + "Return the corrected JSON object in full. Change only what the rejection names; do not "
+          + "explain, apologise, or add commentary outside the JSON.");
+      try {
+        return { ok: true, output: options.validateOutput(output, prepared), audit };
+      } catch (error) {
+        rejection = error instanceof Error ? error : new Error(String(error));
+        if (attempt >= MAX_REPAIRS) throw rejection;
+        // Recorded so a schema that needs repairing every time is visible as a schema problem rather
+        // than absorbed as a cost of doing business.
+        audit.repairs = attempt + 1;
+        options.onAudit({ ...audit });
+      }
+    }
   } catch (error) {
     if (audit.threadId && audit.turnId) void client.request("turn/interrupt", { threadId: audit.threadId, turnId: audit.turnId }).catch(() => {});
     const message = error instanceof Error ? error.message : "";

@@ -29,12 +29,14 @@ const kind = choice("file", "link", "record", "telemetry");
  *
  * `description` alone used to be the entire item, and every run padded it — restated policy, its own
  * self-checks, once its raw scratch text — until it hit whatever cap was in place and arrived cut off.
- * Four caps were tried (4000 → 300 → 200 → 80) and each was treated as a target, which is what finally
- * gave the reason away: every split in this schema carries a `rationale`, and a contract item carried
- * none. The model had something real to say and one field to say it in. So it has a `why` now, and
- * `description` can be what it was always meant to be — the line you read on a checklist.
+ * Four caps were tried, 4000 → 300 → 200 → 80, and each was treated as a target. Tightening was the
+ * wrong instinct twice over. The direct cause was that every split in this schema carries a
+ * `rationale` and a contract item carried none, so the model had something real to say and one field
+ * to say it in; that is what `why` fixes. And tightening actively made it worse: constrained decoding
+ * concentrates repetition at field terminals, so a narrower field exhausts its valid continuations
+ * sooner and degenerates earlier. Three hundred, with a repair turn behind it, not eighty.
  */
-const CONTRACT_LINE_LIMIT = 120;
+const CONTRACT_LINE_LIMIT = 300;
 const line: Schema = { type: "string", minLength: 1, maxLength: CONTRACT_LINE_LIMIT };
 const why: Schema = { type: "string", minLength: 1, maxLength: 300 };
 export const ANALYSIS_OUTPUT_SCHEMA = object({
