@@ -1,0 +1,27 @@
+{
+  "verdict": "pass",
+  "criteriaVerdict": [
+    {
+      "criterionId": "c",
+      "met": "unmet",
+      "observed": "证据里没有关于这条的任何内容",
+      "evidenceQuote": "",
+      "shortfall": "还差一份"
+    }
+  ],
+  "contractCoverage": [
+    {
+      "requirement": "结论记录",
+      "satisfiedBy": "claim-1",
+      "reasoning": "已提交",
+      "quote": "我写完了结论记录"
+    }
+  ],
+  "unplannedGains": [],
+  "improvements": [],
+  "incomplete": [],
+  "flywheelAssessment": [],
+  "gaps": [],
+  "proposedNextMilestones": [],
+  "blockers": []
+}
