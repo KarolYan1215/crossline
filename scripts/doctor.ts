@@ -1,0 +1,86 @@
+/**
+ * Reads the live ledger and reports anything structurally wrong with it.
+ *
+ *   pnpm exec tsx scripts/doctor.ts            # the live ledger
+ *   pnpm exec tsx scripts/doctor.ts path.db    # some other file, e.g. a restored backup
+ *
+ * This is what stands in for foreign keys. SQLite cannot add one to an existing table without
+ * rebuilding it, and the relationship that matters most — `work_orders.milestone_id` — cannot have one
+ * at all, because `milestones` is keyed `(id, version)` so a single id is not a unique target. Four
+ * table rebuilds to constrain the easy half, while the important half stayed unconstrained, is a poor
+ * trade against the app being the only writer. Detection is the honest alternative: it cannot prevent
+ * an orphan, but it will not let one sit unnoticed either.
+ *
+ * Exits non-zero when it finds something, so it can gate a release without anyone reading the output.
+ */
+// Relative import, not @crossline/db: the repo root is not a workspace package, so it has no such deps.
+import Database from "better-sqlite3";
+import { statSync } from "node:fs";
+import path from "node:path";
+
+const file = process.argv[2] ?? path.resolve(process.cwd(), "data", "crossline.db");
+const db = new Database(file, { readonly: true });
+const findings: string[] = [];
+
+/** Rows whose reference points at nothing. */
+const orphans = (label: string, sql: string): void => {
+  const rows = db.prepare(sql).all() as Array<{ id: string; target: string }>;
+  for (const row of rows) findings.push(`${label}: ${row.id} → 找不到 ${row.target}`);
+};
+
+orphans("work_order 指向不存在的里程碑",
+  `SELECT w.id AS id, w.milestone_id AS target FROM work_orders w
+   WHERE NOT EXISTS (SELECT 1 FROM milestones m WHERE m.id = w.milestone_id AND m.workspace_id = w.workspace_id)`);
+orphans("execution 指向不存在的作业",
+  `SELECT e.id AS id, e.work_order_id AS target FROM executions e
+   WHERE NOT EXISTS (SELECT 1 FROM work_orders w WHERE w.id = e.work_order_id AND w.workspace_id = e.workspace_id)`);
+orphans("evidence 指向不存在的作业",
+  `SELECT c.id AS id, c.work_order_id AS target FROM evidence_claims c
+   WHERE NOT EXISTS (SELECT 1 FROM work_orders w WHERE w.id = c.work_order_id AND w.workspace_id = c.workspace_id)`);
+orphans("material 指向不存在的作业",
+  `SELECT m.id AS id, m.work_order_id AS target FROM materials m
+   WHERE NOT EXISTS (SELECT 1 FROM work_orders w WHERE w.id = m.work_order_id AND w.workspace_id = m.workspace_id)`);
+orphans("plan_change 指向不存在的计划版本",
+  `SELECT c.id AS id, c.plan_version_id AS target FROM plan_changes c
+   WHERE NOT EXISTS (SELECT 1 FROM plan_versions v WHERE v.id = c.plan_version_id)`);
+orphans("关系指向不存在的里程碑",
+  `SELECT r.id AS id, r.to_milestone_id AS target FROM milestone_relations r
+   WHERE NOT EXISTS (SELECT 1 FROM milestones m WHERE m.id = r.to_milestone_id AND m.workspace_id = r.workspace_id)`);
+
+// A capture and the work order it was promoted into share an id. A promoted capture with no work
+// order means the promotion half-happened.
+orphans("已上板的捕获没有对应作业",
+  `SELECT c.id AS id, c.id AS target FROM captures c WHERE c.state = 'promoted'
+   AND NOT EXISTS (SELECT 1 FROM work_orders w WHERE w.id = c.id AND w.workspace_id = c.workspace_id)`);
+
+// A database stopped between two steps of the old probe-based migration would sit here forever with
+// nothing to notice it. The migration runner replaced that, but an old file can still arrive.
+const columns = (table: string) =>
+  (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map((row) => row.name);
+const expected: Array<[string, string]> = [
+  ["milestones", "success_criteria_json"], ["milestones", "verifiability"], ["milestones", "project_id"],
+  ["captures", "attempt"], ["work_orders", "recurrence_json"], ["work_orders", "tombstone_json"],
+  ["milestone_relations", "explanation"], ["milestone_relations", "refuted_when"], ["milestone_relations", "evidence_json"]
+];
+for (const [table, column] of expected) {
+  if (!columns(table).includes(column)) findings.push(`schema 不完整：${table} 缺少 ${column}（半迁移）`);
+}
+const retired = ["outbox", "identities", "projects", "milestone_versions", "insight_proposals", "skill_versions"];
+const present = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>)
+  .map((row) => row.name);
+for (const table of retired.filter((name) => present.includes(name))) {
+  findings.push(`schema 陈旧：${table} 本应在迁移 4 删除`);
+}
+
+const version = Number(db.pragma("user_version", { simple: true }));
+const wal = (() => { try { return statSync(`${file}-wal`).size; } catch { return 0; } })();
+const counts = Object.fromEntries(["events", "work_orders", "captures", "milestones", "materials"]
+  .map((table) => [table, (db.prepare(`SELECT COUNT(*) AS c FROM ${table}`).get() as { c: number }).c]));
+db.close();
+
+console.log(JSON.stringify({ file, schemaVersion: version, walBytes: wal, counts, findings }, null, 2));
+if (findings.length) {
+  console.error(`\n${findings.length} 项需要处理。`);
+  process.exit(1);
+}
+console.log("\n未发现问题。");

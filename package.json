@@ -17,7 +17,8 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "typecheck": "pnpm -r typecheck",
-    "build": "pnpm --filter @crossline/web build"
+    "build": "pnpm --filter @crossline/web build",
+    "doctor": "tsx scripts/doctor.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",

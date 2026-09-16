@@ -57,11 +57,8 @@ export default function WorkbenchPage() {
   const discardedCaptures = getStore().listCaptures(WORKSPACE_ID).filter((capture) => capture.state === "discarded");
   const executions = getStore().listExecutions(WORKSPACE_ID);
   const materials = getStore().listMaterials(WORKSPACE_ID);
-  const events = getStore().listEvents().filter((event) => event.workspaceId === WORKSPACE_ID
-    && event.type.startsWith("materials."));
-  const discardReasons = new Map(getStore().listEvents()
-    .filter((event) => event.workspaceId === WORKSPACE_ID
-      && (event.type === "work_order.archived" || event.type === "capture.discarded"))
+  const events = getStore().listEvents(WORKSPACE_ID).filter((event) => event.type.startsWith("materials."));
+  const discardReasons = new Map(getStore().listEvents(WORKSPACE_ID, { type: ["work_order.archived", "capture.discarded"] })
     .map((event) => [event.entityId, (event.payload as { reason?: string }).reason ?? ""]));
   return <SubpageShell eyebrow="04 / AI WORK ORDERS" title="AI 作业台" description="这里呈现 SQLite 中真实的 WorkOrder、估时、材料和阻塞；不让用户编辑内部 DAG。">
     <section className="work-order-list">{captures.map((capture) => <article key={capture.id}>

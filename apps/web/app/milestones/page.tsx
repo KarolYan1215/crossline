@@ -13,8 +13,7 @@ export default function MilestonesPage() {
   const relations = store.listMilestoneRelations(WORKSPACE_ID);
   // Why a proposed milestone was suggested is part of reviewing it: approving a goal without the
   // reasoning is the same problem as approving a relation with no stated claim.
-  const rationales = new Map(store.listEvents()
-    .filter((event) => event.type === "milestone.proposed")
+  const rationales = new Map(store.listEvents(WORKSPACE_ID, { type: "milestone.proposed" })
     .map((event) => [event.entityId, String((event.payload as { rationale?: string }).rationale ?? "")]));
 
   // Every gate judgement leaves a per-criterion reading. The best one seen for a criterion is the
@@ -22,8 +21,7 @@ export default function MilestonesPage() {
   const rank = { unverifiable: 0, unmet: 1, partial: 2, met: 3 } as const;
   type Met = keyof typeof rank;
   const progress = new Map<string, Record<string, Met>>();
-  for (const event of store.listEvents()) {
-    if (event.workspaceId !== WORKSPACE_ID || event.type !== "milestone_gate.judged") continue;
+  for (const event of store.listEvents(WORKSPACE_ID, { type: "milestone_gate.judged" })) {
     const payload = event.payload as { milestoneId?: string; criteriaVerdict?: Array<{ criterionId: string; met: Met }> };
     if (!payload.milestoneId) continue;
     const current = progress.get(payload.milestoneId) ?? {};

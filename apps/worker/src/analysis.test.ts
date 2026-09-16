@@ -25,7 +25,7 @@ test("duplicate Analyze requests share one durable run and publish only a propos
   await analyze(rpc, "c");
   expect(turns()).toBe(1);
   expect(store.listWorkOrders("personal-crossline")).toHaveLength(1);
-  expect(store.listEvents().map((e) => (e.payload as { to?: string }).to).filter(Boolean)).toEqual(["analyzing", "awaiting_plan_approval"]);
+  expect(store.listEvents("personal-crossline").map((e) => (e.payload as { to?: string }).to).filter(Boolean)).toEqual(["analyzing", "awaiting_plan_approval"]);
 });
 
 test("a blocked analysis can be retried instead of stranding the capture forever", async () => {

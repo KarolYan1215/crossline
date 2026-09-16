@@ -32,7 +32,7 @@ const daysBetween = (fromIso: string, to: Date) =>
 export function loadWeeklyReview(now = new Date()): WeeklyReview {
   const store = getStore();
   const since = new Date(now.getTime() - 7 * 86_400_000).toISOString();
-  const events = store.listEvents();
+  const events = store.listEvents(WORKSPACE_ID);
   const orders = store.listWorkOrders(WORKSPACE_ID);
   const milestones = store.listMilestones(WORKSPACE_ID);
 

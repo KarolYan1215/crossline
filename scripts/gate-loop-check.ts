@@ -109,7 +109,7 @@ try {
   const verdict = await judge(ORDER_ID);
   check("gate_ran", verdict.state !== "blocked", verdict);
   const finalState = store.listWorkOrders(WORKSPACE)[0]?.state;
-  const autoAccepted = store.listEvents().some((event) => event.type === "milestone_gate.auto_accepted");
+  const autoAccepted = store.listEvents(WORKSPACE).some((event) => event.type === "milestone_gate.auto_accepted");
   console.info(JSON.stringify({ step: "gate_outcome", verdict, finalState, autoAccepted }, null, 1));
   // A `pass` must auto-accept with no human step; anything else must NOT reach `accepted`.
   if (verdict.state === "accepted") {

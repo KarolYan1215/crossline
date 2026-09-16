@@ -78,10 +78,10 @@ test("the gate accepts the work order while reporting the milestone criterion as
   expect(store.listWorkOrders(WORKSPACE)[0]?.state).toBe("accepted");
   // An unmet criterion carries no quote, because there is nothing in the evidence to quote. Demanding
   // one left the model a choice between inventing a quote and failing the whole run.
-  const judged = store.listEvents().find((event) => event.type === "milestone_gate.judged");
+  const judged = store.listEvents(WORKSPACE).find((event) => event.type === "milestone_gate.judged");
   expect((judged?.payload as { criteriaVerdict: Array<{ met: string }> }).criteriaVerdict[0]?.met).toBe("unmet");
   // Delivered is not the same as achieved, and the ledger keeps them apart.
-  expect(store.listEvents().some((event) => event.type === "milestone_gate.auto_accepted")).toBe(true);
+  expect(store.listEvents(WORKSPACE).some((event) => event.type === "milestone_gate.auto_accepted")).toBe(true);
 });
 
 test("the gate cannot be passed by reporting nothing", async () => {
@@ -92,7 +92,7 @@ test("the gate cannot be passed by reporting nothing", async () => {
   // to buy a free pass on an order that declared one.
   expect(await judge("w1")).toMatchObject({ state: "blocked", code: "GATE_VERDICT_INCONSISTENT" });
   expect(store.listWorkOrders(WORKSPACE)[0]?.state).toBe("evidence_review");
-  expect(store.listEvents().some((event) => event.type === "milestone_gate.auto_accepted")).toBe(false);
+  expect(store.listEvents(WORKSPACE).some((event) => event.type === "milestone_gate.auto_accepted")).toBe(false);
   // Asked to fix it twice before giving up.
   expect(turns()).toBe(3);
 });

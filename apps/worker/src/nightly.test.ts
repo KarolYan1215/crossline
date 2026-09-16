@@ -30,7 +30,7 @@ test("a refused night is written to the ledger, so the morning can tell stale fr
     const decision = await run(localNight(2));
     expect(decision).toMatchObject({ run: false, code: "COST_SIGNAL_UNAVAILABLE" });
     expect(expand).not.toHaveBeenCalled();
-    expect(store.listEvents().map((event) => event.type)).toEqual(["flywheel.nightly.skipped"]);
+    expect(store.listEvents("w").map((event) => event.type)).toEqual(["flywheel.nightly.skipped"]);
   } finally { store.close(); }
 });
 
@@ -46,7 +46,7 @@ test("the night is claimed before spending, so a crashed run cannot become a sec
     const decision = await run(new Date(at.getTime() + 6 * 60_000));
     expect(decision.run).toBe(true);
     expect(store.getSetting("w", NIGHTLY_LAST_RUN)).toBeDefined();
-    expect(store.listEvents().map((event) => event.type)).toEqual(["flywheel.nightly.failed"]);
+    expect(store.listEvents("w").map((event) => event.type)).toEqual(["flywheel.nightly.failed"]);
 
     // Same night again: the claim holds even though the first attempt failed.
     const second = await run(new Date(at.getTime() + 20 * 60_000));
@@ -85,7 +85,7 @@ test("a successful run records how much of the window it was allowed to use", as
       expand: async () => 4
     });
     await run(new Date(at.getTime() + 6 * 60_000));
-    const event = store.listEvents().at(-1)!;
+    const event = store.listEvents("w").at(-1)!;
     expect(event.type).toBe("flywheel.nightly.ran");
     expect(event.payload).toMatchObject({ proposals: 4, mode: "normal", headroomPercent: 75 });
   } finally { store.close(); }

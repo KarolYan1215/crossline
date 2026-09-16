@@ -104,7 +104,7 @@ test("a completion with no evidence is typed as such instead of getting a stand-
     store.transitionWorkOrder("w", "w1", { type: "human.completed" }, "done:w1");
     expect(store.listEvidenceClaims("w")).toEqual([]);
     expect(store.listExecutions("w")[0]).toMatchObject({ outcome: "completed_without_evidence", durationObserved: false });
-    expect(JSON.stringify(store.listEvents())).not.toContain("manual_confirmation");
+    expect(JSON.stringify(store.listEvents("w"))).not.toContain("manual_confirmation");
   } finally { store.close(); }
 });
 
@@ -142,7 +142,7 @@ test("a replayed idempotency key writes nothing and reports the current state, s
     expect(store.transitionWorkOrder("w", "c", { type: "analysis.proposed", proposalId: "c" }, "a0:finish"))
       .toEqual({ changed: false, state: "blocked" });
     expect(store.listCaptures("w")[0]?.state).toBe("blocked");
-    expect(store.listEvents()).toHaveLength(3);
+    expect(store.listEvents("w")).toHaveLength(3);
   } finally { store.close(); }
 });
 

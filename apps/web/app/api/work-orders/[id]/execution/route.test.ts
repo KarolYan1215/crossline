@@ -45,6 +45,6 @@ test("discarding a work order needs a reason, and the reason is kept on the ledg
   expect(store.listWorkOrders("personal-crossline")[0]?.state).not.toBe("archived");
   expect((await post({ action: "archive", reason: "提案读不通，重收一次" })).status).toBe(200);
   expect(store.listWorkOrders("personal-crossline")[0]?.state).toBe("archived");
-  expect(store.listEvents().find((event) => event.type === "work_order.archived")?.payload)
+  expect(store.listEvents("personal-crossline").find((event) => event.type === "work_order.archived")?.payload)
     .toEqual({ reason: "提案读不通，重收一次" });
 });

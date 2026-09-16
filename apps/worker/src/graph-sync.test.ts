@@ -95,7 +95,7 @@ test("a conflict can actually be resolved, so a plan is not permanently unapprov
   expect(store.listPlanChanges(draftId)[0]?.status).toBe("excluded");
   // Resolving twice is not a second decision.
   expect(store.resolvePlanChange(WORKSPACE, change.id, "approved", "k2")).toEqual({ changed: false });
-  expect(store.listEvents().filter((e) => e.type === "plan_change.resolved")).toHaveLength(1);
+  expect(store.listEvents("personal-crossline").filter((e) => e.type === "plan_change.resolved")).toHaveLength(1);
 });
 
 test("a deleted event is removed even when its tombstone arrives after its creation", async () => {

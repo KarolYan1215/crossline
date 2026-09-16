@@ -8,7 +8,7 @@ test("analysis transitions and event ledger are atomic and invalid transitions c
     expect(store.transitionWorkOrder("w", "c", { type: "analysis.proposed", proposalId: "c" }, "start:c")).toMatchObject({ changed: true, state: "analyzing" });
     expect(store.transitionWorkOrder("w", "c", { type: "analysis.proposed", proposalId: "c" }, "start:c")).toMatchObject({ changed: false });
     expect(() => store.transitionWorkOrder("w", "c", { type: "plan.approved", approvalId: "fake" }, "bad:c")).toThrow("INVALID_WORK_ORDER_TRANSITION");
-    expect(store.listEvents()).toHaveLength(2);
+    expect(store.listEvents("w")).toHaveLength(2);
     expect(store.listCaptures("w")[0]?.state).toBe("analyzing");
     expect(store.listWorkOrders("w")).toEqual([]);
     store.transitionWorkOrder("w", "c", { type: "blocked", reason: "ANALYSIS_UNAUTHENTICATED" }, "blocked:c");
@@ -25,7 +25,7 @@ test("valid analysis creates only an awaiting proposal with audit IDs; rejected 
     const proposal = { identityId: "research", projectId: "p", milestoneId: "m", intent: "Decide", automationParts: [], humanCore: [{ id: "h", intent: "Decide", energy: "medium", interruptible: true, quote: "Decide", rationale: "Human judgment" }], materialContract: [], evidenceContract: [{ kind: "record", description: "Decision", why: "The decision is the deliverable", required: true }], estimate: { p25Minutes: 10, p50Minutes: 20, p85Minutes: 40, source: "llm_prior", observationCount: 0, confidence: "low" }, riskTier: "routine", blockers: [] };
     store.transitionWorkOrder("w", "c", { type: "analysis.proposed", proposalId: "c" }, "start:c");
     expect(() => store.transitionWorkOrder("w", "c", { type: "analysis.accepted", approvalId: "schema-validation" }, "finish:c", { proposal: { ...proposal, surprise: true }, context, audit: { threadId: "t", turnId: "u" } })).toThrow();
-    expect(store.listEvents()).toHaveLength(2);
+    expect(store.listEvents("w")).toHaveLength(2);
     expect(store.listWorkOrders("w")).toEqual([]);
     store.transitionWorkOrder("w", "c", { type: "analysis.accepted", approvalId: "schema-validation" }, "finish:c", { proposal, context, audit: { threadId: "t", turnId: "u" } });
     expect(store.listWorkOrders("w")[0]).toMatchObject({ state: "awaiting_plan_approval", payload: { audit: { threadId: "t", turnId: "u" }, humanCore: proposal.humanCore } });
@@ -48,7 +48,7 @@ test("a blocked capture may be re-analysed, but a blocked work order stays on th
     expect(store.transitionWorkOrder("w", "c", { type: "analysis.proposed", proposalId: "c" }, "a1:start", { attempt: 1 }))
       .toMatchObject({ changed: true, state: "analyzing" });
     expect(store.listCaptures("w")[0]).toMatchObject({ state: "analyzing", attempt: 1 });
-    expect(store.listEvents().at(-1)?.payload).toMatchObject({ from: "blocked", to: "analyzing" });
+    expect(store.listEvents("w").at(-1)?.payload).toMatchObject({ from: "blocked", to: "analyzing" });
     // The retry must not become a back door into approval.
     expect(() => store.transitionWorkOrder("w", "c", { type: "plan.approved", approvalId: "fake" }, "a1:approve")).toThrow("INVALID_WORK_ORDER_TRANSITION");
   } finally { store.close(); }
@@ -128,7 +128,7 @@ test("milestone gate auto-accepts, can be revoked without losing evidence, and r
     };
     expect(store.applyMilestoneGate("w", "wo", result, ["three records support reuse"], "gate:wo"))
       .toMatchObject({ state: "accepted" });
-    expect(store.listEvents().some((event) => event.type === "milestone_gate.auto_accepted")).toBe(true);
+    expect(store.listEvents("w").some((event) => event.type === "milestone_gate.auto_accepted")).toBe(true);
     // A spent key must not quietly record a second acceptance that never moved the work order.
     expect(() => store.applyMilestoneGate("w", "wo", result, ["three records support reuse"], "gate:wo"))
       .toThrow();
@@ -187,7 +187,7 @@ test("the ledger reads back in the order things happened, even within one millis
       store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: `k${i}`, type: "probe", entityId: "e", payload: { i } });
     }
     // These all land in the same millisecond; a UUID tiebreak would shuffle them.
-    expect(store.listEvents().map((event) => (event.payload as { i: number }).i))
+    expect(store.listEvents("w").map((event) => (event.payload as { i: number }).i))
       .toEqual(Array.from({ length: 40 }, (_, i) => i));
   } finally { store.close(); }
 });
@@ -201,11 +201,11 @@ test("a raw capture can be thrown away with a reason, and a promoted one cannot"
     expect(store.listCaptures("w")[0]?.state).toBe("captured");
     expect(store.discardCapture("w", "c1", "和上一条重了")).toEqual({ changed: true });
     expect(store.listCaptures("w")[0]?.state).toBe("discarded");
-    expect(store.listEvents().find((event) => event.type === "capture.discarded")?.payload)
+    expect(store.listEvents("w").find((event) => event.type === "capture.discarded")?.payload)
       .toEqual({ reason: "和上一条重了" });
     // Idempotent: the second click after a slow reload must not append a second reason.
     expect(store.discardCapture("w", "c1", "再来一次")).toEqual({ changed: false });
-    expect(store.listEvents().filter((event) => event.type === "capture.discarded")).toHaveLength(1);
+    expect(store.listEvents("w").filter((event) => event.type === "capture.discarded")).toHaveLength(1);
 
     // Once promoted the WorkOrder is the live thing; discarding the archived raw text would hide it.
     store.capture({ id: "c2", ownerId: "o", workspaceId: "w", title: "已上板", context: "" }, "cap:c2");

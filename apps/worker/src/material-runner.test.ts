@@ -52,7 +52,7 @@ test("a prepared work order gets real files on disk and moves to ready_for_human
   expect(store.listMaterials(WORKSPACE, "w1")).toHaveLength(1);
   expect(store.listWorkOrders(WORKSPACE)[0]?.state).toBe("ready_for_human");
   // Questions the Skill could not answer belong to the person, so they are kept rather than dropped.
-  expect(store.listEvents().some((event) => event.type === "materials.questions")).toBe(true);
+  expect(store.listEvents(WORKSPACE).some((event) => event.type === "materials.questions")).toBe(true);
 });
 
 test("a refused preparation leaves the work order in preparing so the human path stays open", async () => {

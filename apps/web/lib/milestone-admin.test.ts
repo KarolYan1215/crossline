@@ -22,7 +22,7 @@ test("a new milestone starts at version 1 and records that it was created", () =
   expect(stored).toMatchObject({ title: "把方法讲清楚", status: "draft", verifiability: "measurable" });
   // An empty projectId becomes the identity's default rather than a NULL that analysis would skip.
   expect(stored?.projectId).toBe("research-default");
-  expect(store.listEvents().some((event) => event.type === "milestone.created")).toBe(true);
+  expect(store.listEvents(WORKSPACE_ID).some((event) => event.type === "milestone.created")).toBe(true);
 });
 
 test("editing writes a new version instead of overwriting the one a gate judged against", () => {

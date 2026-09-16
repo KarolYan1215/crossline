@@ -145,8 +145,7 @@ export function createMilestoneGate(store: CrosslineStore, workspaceId: string, 
     // of the same order — after the person added evidence and resubmitted — reused a spent key, the
     // transition became a no-op, and the order stayed in `evidence_review` while the ledger recorded
     // an acceptance that never happened.
-    const attempt = store.listEvents().filter((event) => event.workspaceId === workspaceId
-      && event.entityId === workOrderId && event.type === "milestone_gate.judged").length;
+    const attempt = store.listEvents(workspaceId, { type: "milestone_gate.judged", entityId: workOrderId }).length;
     const applied = store.applyMilestoneGate(workspaceId, workOrderId, result.output, evidenceTexts,
       `milestone-gate:${workOrderId}:${context.milestone.version}:${attempt}`);
     return {
@@ -162,8 +161,9 @@ export function pendingMilestoneGates(store: CrosslineStore, workspaceId: string
   // Same last-word-wins rule material preparation uses: a recorded failure closes the order to the
   // timer, and an explicit request from the person reopens it.
   const decided = new Map<string, "closed" | "retry">();
-  for (const event of store.listEvents()) {
-    if (event.workspaceId !== workspaceId) continue;
+  for (const event of store.listEvents(workspaceId, {
+    type: ["milestone_gate.blocked", "milestone_gate.auto_acceptance_revoked", "milestone_gate.retry_requested"]
+  })) {
     // A revoked acceptance closes the order to the timer just as a failed run does. Without it the
     // gate re-judged the same unchanged evidence on the next tick, passed it again, and undid the
     // person's override — a revoke button that revokes for fifteen minutes is not a revoke button.

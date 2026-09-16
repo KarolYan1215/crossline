@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { randomUUID } from "node:crypto";
 import { existsSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import Database from "better-sqlite3";
 import { CrosslineStore } from "./index";
 
@@ -11,7 +13,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  for (const suffix of ["", "-wal", "-shm", ".v1.bak", ".pre-r2.bak"]) {
+  for (const suffix of ["", "-wal", "-shm", ".v1.bak", ".pre-r2.bak", ".v0.bak", ".v2.bak", ".v3.bak"]) {
     const file = `${path}${suffix}`;
     if (existsSync(file)) rmSync(file);
   }
@@ -38,7 +40,7 @@ describe("event ledger", () => {
     });
     expect(first.inserted).toBe(true);
     expect(duplicate).toEqual({ inserted: false, eventId: first.eventId });
-    expect(store.listEvents()).toHaveLength(1);
+    expect(store.listEvents("workspace-1")).toHaveLength(1);
     store.close();
   });
 
@@ -113,7 +115,8 @@ describe("event ledger", () => {
     legacy.close();
 
     const store = new CrosslineStore(path);
-    expect(store.schemaVersion()).toBe(2);
+    // The migration runner advances it; the old code wrote 2 unconditionally and gated nothing on it.
+    expect(store.schemaVersion()).toBeGreaterThanOrEqual(3);
     expect(store.listCapacityCommitments("workspace-1")).toEqual([
       expect.objectContaining({
         id: "health-1",
@@ -207,4 +210,36 @@ describe("event ledger", () => {
     expect(JSON.stringify(store.listEnergyObservations("workspace-1"))).not.toContain("expiresAt");
     store.close();
   });
+});
+
+test("a pending migration backs the file up first and advances the version once", () => {
+  const path = join(tmpdir(), `crossline-migrate-${process.pid}-${Date.now()}.db`);
+  try {
+    // A database left at the level the probe-based code used to write unconditionally.
+    const stale = new Database(path);
+    stale.pragma("user_version = 2");
+    stale.exec("CREATE TABLE events (event_id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, workspace_id TEXT NOT NULL, idempotency_key TEXT NOT NULL, type TEXT NOT NULL, entity_id TEXT NOT NULL, payload_json TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(workspace_id, idempotency_key))");
+    stale.prepare("INSERT INTO events VALUES ('e1','o','w','k','capture.created','c','{}','2026-01-01T00:00:00.000Z')").run();
+    stale.close();
+
+    const store = new CrosslineStore(path);
+    // Every rebuild before this ran against the live file with no way back: the only backup the old
+    // code took was on the legacy-tasks path, which a v2 database has already been through.
+    expect(existsSync(`${path}.v2.bak`)).toBe(true);
+    expect(store.schemaVersion()).toBeGreaterThanOrEqual(3);
+    expect(store.listEvents("w")).toHaveLength(1);
+    store.close();
+
+    // Re-opening is a no-op: nothing pending, so no second backup and no second run.
+    rmSync(`${path}.v2.bak`, { force: true });
+    const reopened = new CrosslineStore(path);
+    expect(existsSync(`${path}.v2.bak`)).toBe(false);
+    reopened.close();
+  } finally {
+    // Windows releases the file handle a moment after `close()`, so a failed unlink here is the
+    // operating system being slow, not the migration being wrong.
+    for (const suffix of ["", "-wal", "-shm", ".v2.bak"]) {
+      try { rmSync(`${path}${suffix}`, { force: true }); } catch { /* temp dir, next run overwrites */ }
+    }
+  }
 });

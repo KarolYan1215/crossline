@@ -38,14 +38,14 @@ switch (command) {
       materials: store.listMaterials(WORKSPACE_ID, order.id),
       executions: store.listExecutions(WORKSPACE_ID).filter((e) => e.workOrderId === order.id),
       evidence: store.listEvidenceClaims(WORKSPACE_ID).filter((e) => e.workOrderId === order.id),
-      events: store.listEvents().filter((e) => e.workspaceId === WORKSPACE_ID && e.entityId === order.id)
+      events: store.listEvents(WORKSPACE_ID).filter((e) => e.workspaceId === WORKSPACE_ID && e.entityId === order.id)
         .map((e) => ({ type: e.type, at: e.createdAt, payload: e.payload }))
     });
     break;
   }
   case "events": {
     const limit = Number(arg2 ?? 30);
-    const events = store.listEvents().filter((e) => e.workspaceId === WORKSPACE_ID && matches(e.entityId));
+    const events = store.listEvents(WORKSPACE_ID).filter((e) => e.workspaceId === WORKSPACE_ID && matches(e.entityId));
     out(events.slice(-limit).map((e) => ({ type: e.type, entityId: e.entityId, at: e.createdAt, payload: e.payload })));
     break;
   }

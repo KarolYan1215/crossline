@@ -40,7 +40,7 @@ test("a batch approval moves only the candidates and records one event", () => {
   const result = store.decideMilestoneRelations(WORKSPACE, ["r1", "r2"], "approved", "batch-1");
   expect(result).toEqual({ decided: ["r1", "r2"], skipped: [] });
   expect(store.listMilestoneRelations(WORKSPACE).map((item) => item.status)).toEqual(["approved", "approved"]);
-  expect(store.listEvents().filter((event) => event.type === "milestone_relations.decided")).toHaveLength(1);
+  expect(store.listEvents("workspace-1").filter((event) => event.type === "milestone_relations.decided")).toHaveLength(1);
 });
 
 test("a decision already made is never silently re-decided", () => {

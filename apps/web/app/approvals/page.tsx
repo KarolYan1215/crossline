@@ -15,8 +15,7 @@ export default function ApprovalsPage() {
   // A revoked acceptance puts the order back here with the same evidence, and the gate deliberately
   // will not re-judge it on its own — so without the reason on screen the order looks stuck for no
   // stated cause, and the button that would move it looks like it does nothing.
-  const revocations = new Map(getStore().listEvents()
-    .filter((event) => event.workspaceId === WORKSPACE_ID && event.type === "milestone_gate.auto_acceptance_revoked")
+  const revocations = new Map(getStore().listEvents(WORKSPACE_ID, { type: "milestone_gate.auto_acceptance_revoked" })
     .map((event) => [event.entityId, String((event.payload as { reason?: string }).reason ?? "")]));
   const executions = getStore().listExecutions(WORKSPACE_ID);
   return <SubpageShell eyebrow="05 / APPROVAL CONTROL" title="审批与验收" description="计划差异批量批准；外部动作逐项批准；里程碑证据由 AI 闸门判定并保留人工撤销权。">

@@ -84,7 +84,7 @@ test("a snapshot rebuilds an identical workspace in an empty database", () => {
   const restored = freshStore();
   const counts = restored.importSnapshot(snapshot);
   expect(counts.work_orders).toBe(1);
-  expect(counts.events).toBe(source.listEvents().length);
+  expect(counts.events).toBe(source.listEvents("workspace-1").length);
 
   // Re-exporting is the real check: it proves the rebuilt rows drive the same reads, not merely that
   // some INSERT succeeded. `exportedAt` is the only field allowed to differ.
@@ -92,7 +92,7 @@ test("a snapshot rebuilds an identical workspace in an empty database", () => {
   const { exportedAt: _after, ...afterRestore } = restored.exportSnapshot(WORKSPACE);
   expect(afterRestore).toEqual(beforeRestore);
   expect(restored.listWorkOrders(WORKSPACE)).toEqual(source.listWorkOrders(WORKSPACE));
-  expect(restored.listEvents()).toEqual(source.listEvents());
+  expect(restored.listEvents("workspace-1")).toEqual(source.listEvents("workspace-1"));
   expect(restored.getSetting(WORKSPACE, "localActivity.consent")).toBe("granted");
 });
 
@@ -121,4 +121,40 @@ test("table names in the snapshot are validated instead of reaching SQL", () => 
   snapshot.tables["work_orders; DROP TABLE events"] = [];
   expect(() => store.importSnapshot(snapshot)).toThrow("RESTORE_UNKNOWN_TABLE");
   expect(store.tableNames()).toContain("events");
+});
+
+test("a snapshot older than the migration that dropped tables and columns still restores", () => {
+  // Caught by the restore drill, not by a test: the first real backup taken before migration 4 came
+  // back `RESTORE_UNKNOWN_COLUMN`. A backup that cannot be restored is not a backup.
+  const source = freshStore();
+  source.capture({ id: "c1", ownerId: "o", workspaceId: "workspace-1", title: "旧快照", context: "" }, "cap:c1");
+  const snapshot = source.exportSnapshot("workspace-1");
+
+  // Shaped like a pre-migration export: six tables that never carried a row, and the dropped column.
+  const aged = {
+    ...snapshot,
+    tables: {
+      ...snapshot.tables,
+      outbox: [], identities: [], projects: [],
+      milestone_versions: [], insight_proposals: [], skill_versions: [],
+      energy_observations: [{ id: "e1", owner_id: "o", workspace_id: "workspace-1", source: "self_report",
+        level: "medium", confidence: "high", aggregate_json: "{}", observed_at: "2026-01-01T00:00:00.000Z",
+        expires_at: null }]
+    }
+  } as typeof snapshot;
+
+  const target = freshStore();
+  expect(() => target.importSnapshot(aged)).not.toThrow();
+  expect(target.listCaptures("workspace-1")).toHaveLength(1);
+  expect(target.listEnergyObservations("workspace-1")).toHaveLength(1);
+});
+
+test("a retired table or column that turns out to hold data is refused, not skipped", () => {
+  const source = freshStore();
+  const snapshot = source.exportSnapshot("workspace-1");
+
+  // Skipping these would mean the decision to drop them was wrong and the data vanished quietly.
+  const withRows = { ...snapshot, tables: { ...snapshot.tables, outbox: [{ id: "o1" }] } } as typeof snapshot;
+  const target = freshStore();
+  expect(() => target.importSnapshot(withRows)).toThrow("RESTORE_RETIRED_TABLE_NOT_EMPTY");
 });

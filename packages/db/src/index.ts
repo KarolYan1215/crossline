@@ -146,6 +146,18 @@ export type StoredEnergyObservation = {
   observedAt: string;
 };
 
+/**
+ * Tables that once existed and never carried a row.
+ *
+ * Dropped at migration 4. Named here because a snapshot taken before that still lists them, and a
+ * restore has to step over an empty one rather than refuse the whole backup — while still refusing
+ * if one somehow has rows, because skipping those would be losing data quietly.
+ */
+const RETIRED_TABLES = ["outbox", "identities", "projects", "milestone_versions", "insight_proposals", "skill_versions"] as const;
+
+/** Columns a migration dropped, by table. Same reason as `RETIRED_TABLES`: old snapshots still list them. */
+const RETIRED_COLUMNS: Record<string, readonly string[]> = { energy_observations: ["expires_at"] };
+
 export class CrosslineStore {
   readonly #db: Database.Database;
 
@@ -257,7 +269,7 @@ export class CrosslineStore {
       CREATE TABLE IF NOT EXISTS energy_observations (
         id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
         source TEXT NOT NULL, level TEXT NOT NULL, confidence TEXT NOT NULL,
-        aggregate_json TEXT NOT NULL, observed_at TEXT NOT NULL, expires_at TEXT
+        aggregate_json TEXT NOT NULL, observed_at TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS insight_proposals (
         id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
@@ -282,60 +294,121 @@ export class CrosslineStore {
         source_task_id TEXT, updated_at TEXT NOT NULL
       );
     `);
-    if (!(this.#db.prepare("PRAGMA table_info(milestones)").all() as Array<{ name: string }>).some((column) => column.name === "project_id")) {
-      this.#db.exec("ALTER TABLE milestones ADD COLUMN project_id TEXT");
-    }
-    if (!(this.#db.prepare("PRAGMA table_info(captures)").all() as Array<{ name: string }>).some((column) => column.name === "attempt")) {
-      this.#db.exec("ALTER TABLE captures ADD COLUMN attempt INTEGER NOT NULL DEFAULT 0");
-    }
+    if (hasLegacyTasks) this.#migrateLegacyTasks();
+    this.#runMigrations(path);
+    this.#markPromotedCaptures();
+  }
+
+  /**
+   * Applies every migration the database has not seen, in order, one transaction each.
+   *
+   * What this replaces was a run of `PRAGMA table_info` probes, and it was broken in a way that could
+   * not be noticed: several probed for one column and then added two. Die between the two `exec`
+   * calls and the guard column exists while the second does not, so the condition is false forever —
+   * a permanently half-migrated database with nothing to detect it. `user_version` was written
+   * unconditionally at the end and gated nothing.
+   *
+   * That was survivable while one person had one database. It is not survivable once anyone else runs
+   * this, because a schema change then executes against databases nobody can inspect — which is the
+   * real thing standing between this and being shippable, far more than any query or index.
+   *
+   * Rules: append only, never edit a shipped step, and keep each one idempotent anyway so a
+   * half-applied step from the old regime can still be stepped over.
+   */
+  #runMigrations(path: string): void {
     const has = (table: string, column: string) =>
       (this.#db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).some((item) => item.name === column);
-    // Existing milestones predate success criteria. They are marked `unstated` rather than given
-    // invented criteria — the gate refuses them until a human writes what would count.
-    if (!has("milestones", "success_criteria_json")) {
-      this.#db.exec("ALTER TABLE milestones ADD COLUMN success_criteria_json TEXT NOT NULL DEFAULT '[]'");
-      this.#db.exec("ALTER TABLE milestones ADD COLUMN verifiability TEXT NOT NULL DEFAULT 'unstated'");
+
+    const migrations: Array<{ version: number; up: () => void }> = [
+      // Everything through v2 is what the probe-based code used to do, restated as ordered steps. A
+      // database that already ran the probes lands here at user_version 2 and skips all of it.
+      { version: 3, up: () => {
+        if (!has("milestones", "project_id")) this.#db.exec("ALTER TABLE milestones ADD COLUMN project_id TEXT");
+        if (!has("captures", "attempt")) this.#db.exec("ALTER TABLE captures ADD COLUMN attempt INTEGER NOT NULL DEFAULT 0");
+        // Existing milestones predate success criteria. They are marked `unstated` rather than given
+        // invented criteria — the gate refuses them until a human writes what would count.
+        if (!has("milestones", "success_criteria_json")) this.#db.exec("ALTER TABLE milestones ADD COLUMN success_criteria_json TEXT NOT NULL DEFAULT '[]'");
+        if (!has("milestones", "verifiability")) this.#db.exec("ALTER TABLE milestones ADD COLUMN verifiability TEXT NOT NULL DEFAULT 'unstated'");
+        if (!has("work_orders", "recurrence_json")) this.#db.exec("ALTER TABLE work_orders ADD COLUMN recurrence_json TEXT");
+        if (!has("work_orders", "tombstone_json")) this.#db.exec("ALTER TABLE work_orders ADD COLUMN tombstone_json TEXT");
+        // SQLite cannot widen a CHECK in place, so the relation table is rebuilt once to admit
+        // `refuted` and to carry the evidence a relation needs before it may influence anything.
+        if (!has("milestone_relations", "evidence_json")) {
+          this.#db.exec(`
+            CREATE TABLE milestone_relations_v2 (
+              id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
+              from_milestone_id TEXT NOT NULL, to_milestone_id TEXT NOT NULL,
+              kind TEXT NOT NULL CHECK(kind IN ('enables','reuses','informs','constrains','recurring_feedback')),
+              status TEXT NOT NULL CHECK(status IN ('candidate','approved','archived','refuted')),
+              evidence_json TEXT NOT NULL DEFAULT '[]',
+              counterexample_json TEXT NOT NULL DEFAULT '[]',
+              cost_minutes REAL,
+              last_validated_at TEXT,
+              updated_at TEXT NOT NULL
+            );
+            INSERT INTO milestone_relations_v2
+              (id, owner_id, workspace_id, from_milestone_id, to_milestone_id, kind, status, updated_at)
+              SELECT id, owner_id, workspace_id, from_milestone_id, to_milestone_id, kind, status, updated_at
+              FROM milestone_relations;
+            DROP TABLE milestone_relations;
+            ALTER TABLE milestone_relations_v2 RENAME TO milestone_relations;
+          `);
+        }
+        // A relation used to be two milestone ids and a kind — an arrow with no stated claim, which
+        // nobody can review and nothing can refute. `explanation` is what it asserts, `refuted_when`
+        // is what would show it wrong. Existing rows keep NULL rather than an invented reason.
+        if (!has("milestone_relations", "explanation")) this.#db.exec("ALTER TABLE milestone_relations ADD COLUMN explanation TEXT");
+        if (!has("milestone_relations", "refuted_when")) this.#db.exec("ALTER TABLE milestone_relations ADD COLUMN refuted_when TEXT");
+      } },
+
+      // Six tables nothing has ever written, and one column nothing has ever read. They were carried
+      // into every backup, every snapshot and every restore drill, and reading the schema suggested
+      // capabilities that do not exist. `expires_at` is left over from the energy expiry model that
+      // was deliberately removed.
+      { version: 4, up: () => {
+        for (const table of RETIRED_TABLES) {
+          const rows = this.#hasTable(table)
+            ? (this.#db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number }).count
+            : 0;
+          // Never drop data. These are empty everywhere they have been looked at, but a row here would
+          // mean the assumption was wrong, and finding that out by deleting it is not acceptable.
+          if (rows > 0) throw new Error("MIGRATION_RETIRED_TABLE_NOT_EMPTY");
+          this.#db.exec(`DROP TABLE IF EXISTS ${table}`);
+        }
+        if (has("energy_observations", "expires_at")) this.#db.exec("ALTER TABLE energy_observations DROP COLUMN expires_at");
+
+        // Every table's only index was the implicit one on its PRIMARY KEY, so each `WHERE
+        // workspace_id = ?` was a full scan — fine at 146 events, not fine after a year of daily use,
+        // and nothing here ever deletes a row.
+        this.#db.exec(`
+          CREATE INDEX IF NOT EXISTS events_workspace_type ON events(workspace_id, type);
+          CREATE INDEX IF NOT EXISTS events_workspace_entity ON events(workspace_id, entity_id);
+          CREATE INDEX IF NOT EXISTS work_orders_workspace_state ON work_orders(workspace_id, state);
+          CREATE INDEX IF NOT EXISTS captures_workspace_state ON captures(workspace_id, state);
+          CREATE INDEX IF NOT EXISTS executions_workspace_order ON executions(workspace_id, work_order_id);
+          CREATE INDEX IF NOT EXISTS evidence_workspace_order ON evidence_claims(workspace_id, work_order_id);
+          CREATE INDEX IF NOT EXISTS materials_workspace_order ON materials(workspace_id, work_order_id);
+          CREATE INDEX IF NOT EXISTS plan_changes_version ON plan_changes(plan_version_id);
+          CREATE INDEX IF NOT EXISTS milestones_workspace ON milestones(workspace_id, id);
+        `);
+      } }
+    ];
+
+    const current = Number(this.#db.pragma("user_version", { simple: true }));
+    const pending = migrations.filter((migration) => migration.version > current);
+    if (!pending.length) return;
+    // A copy before the first change, not only on the legacy-tasks path where the old code took one.
+    // Every rebuild until now ran against the live file with no way back.
+    if (path !== ":memory:" && existsSync(path)) {
+      this.#db.pragma("wal_checkpoint(TRUNCATE)");
+      copyFileSync(path, `${path}.v${current}.bak`);
     }
-    if (!has("work_orders", "recurrence_json")) {
-      this.#db.exec("ALTER TABLE work_orders ADD COLUMN recurrence_json TEXT");
-      this.#db.exec("ALTER TABLE work_orders ADD COLUMN tombstone_json TEXT");
+    for (const migration of pending) {
+      this.#db.transaction(() => {
+        migration.up();
+        this.#db.pragma(`user_version = ${migration.version}`);
+      })();
     }
-    // SQLite cannot widen a CHECK in place, so the relation table is rebuilt once to admit `refuted`
-    // and to carry the evidence a relation needs before it may influence anything.
-    if (!has("milestone_relations", "evidence_json")) {
-      this.#db.exec(`
-        CREATE TABLE milestone_relations_v2 (
-          id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
-          from_milestone_id TEXT NOT NULL, to_milestone_id TEXT NOT NULL,
-          kind TEXT NOT NULL CHECK(kind IN ('enables','reuses','informs','constrains','recurring_feedback')),
-          status TEXT NOT NULL CHECK(status IN ('candidate','approved','archived','refuted')),
-          evidence_json TEXT NOT NULL DEFAULT '[]',
-          counterexample_json TEXT NOT NULL DEFAULT '[]',
-          cost_minutes REAL,
-          last_validated_at TEXT,
-          updated_at TEXT NOT NULL
-        );
-        INSERT INTO milestone_relations_v2
-          (id, owner_id, workspace_id, from_milestone_id, to_milestone_id, kind, status, updated_at)
-          SELECT id, owner_id, workspace_id, from_milestone_id, to_milestone_id, kind, status, updated_at
-          FROM milestone_relations;
-        DROP TABLE milestone_relations;
-        ALTER TABLE milestone_relations_v2 RENAME TO milestone_relations;
-      `);
-    }
-    // After the rebuild, not before: a fresh database goes through the rebuild above, so adding these
-    // earlier would have skipped exactly the databases that need them.
-    //
-    // A relation used to be two milestone ids and a kind — an arrow with no stated claim, which nobody
-    // can review and nothing can refute. `explanation` is what it asserts, `refuted_when` is what would
-    // show it wrong. Existing rows keep NULL rather than being handed an invented reason.
-    if (!has("milestone_relations", "explanation")) {
-      this.#db.exec("ALTER TABLE milestone_relations ADD COLUMN explanation TEXT");
-      this.#db.exec("ALTER TABLE milestone_relations ADD COLUMN refuted_when TEXT");
-    }
-    if (hasLegacyTasks) this.#migrateLegacyTasks();
-    this.#markPromotedCaptures();
-    this.#db.pragma("user_version = 2");
   }
 
   #hasTable(name: string): boolean {
@@ -391,6 +464,12 @@ export class CrosslineStore {
     `).run();
   }
 
+  /**
+   * The database's migration level (`PRAGMA user_version`), advanced by the migration runner.
+   *
+   * Not the same number as `CrosslineSnapshot.schemaVersion`, which versions the export format and
+   * moves only when the snapshot shape changes. They were both 2 for a while, which was a coincidence.
+   */
   schemaVersion(): number {
     return Number(this.#db.pragma("user_version", { simple: true }));
   }
@@ -673,10 +752,34 @@ export class CrosslineStore {
     return { inserted: true, eventId };
   }
 
-  listEvents(): LedgerEvent[] {
+  /**
+   * Events in the order they happened, scoped to one workspace.
+   *
+   * The workspace used to be the caller's problem: this took no arguments, read the whole table and
+   * `JSON.parse`d every row, and forty-odd call sites filtered afterwards — several of them only by
+   * `type`, so they would have read another workspace's rows the moment a second one existed. Making
+   * it a parameter fixes the scoping and the full scan together, since `events_workspace_type` can
+   * only be used by a query that names the workspace.
+   *
+   * `type` and `entityId` narrow it further. Passing them matters: the worker's timer paths were
+   * walking the entire ledger every tick to build a two-entry map.
+   */
+  listEvents(workspaceId: string, options: { type?: string | string[]; entityId?: string } = {}): LedgerEvent[] {
+    const types = options.type === undefined ? [] : Array.isArray(options.type) ? options.type : [options.type];
+    const where = ["workspace_id = ?"];
+    const values: string[] = [workspaceId];
+    if (types.length) {
+      where.push(`type IN (${types.map(() => "?").join(", ")})`);
+      values.push(...types);
+    }
+    if (options.entityId !== undefined) {
+      where.push("entity_id = ?");
+      values.push(options.entityId);
+    }
     // rowid is the order things actually happened. Ordering by (created_at, event_id) let a random
     // UUID decide the sequence of same-millisecond events, which defeats an append-only ledger.
-    const rows = this.#db.prepare("SELECT * FROM events ORDER BY rowid").all() as Array<Record<string, string>>;
+    const rows = this.#db.prepare(`SELECT * FROM events WHERE ${where.join(" AND ")} ORDER BY rowid`)
+      .all(...values) as Array<Record<string, string>>;
     return rows.map((row) => ({
       eventId: row.event_id!,
       ownerId: row.owner_id!,
@@ -839,6 +942,11 @@ export class CrosslineStore {
 
   applyMilestoneGate(workspaceId: string, workOrderId: string, result: MilestoneGateResult,
     evidenceTexts: string[], idempotencyKey: string): { changed: boolean; state: WorkOrderState } {
+    // One transaction, not the dozen this used to be. The audit event, the transition, the payload
+    // merge and any relation refutation each committed on their own, so a crash or a concurrent writer
+    // between any two left the ledger and the row disagreeing — which is exactly the shape of the
+    // "ledger says accepted, order still in evidence_review" state seen on the real database.
+    return this.#db.transaction(() => {
     const order = this.listWorkOrders(workspaceId).find((item) => item.id === workOrderId);
     if (!order || order.state !== "evidence_review") throw new Error("EVIDENCE_REVIEW_NOT_READY");
     const milestone = this.listMilestones(workspaceId).find((item) => item.id === order.milestoneId && item.status === "approved");
@@ -886,9 +994,13 @@ export class CrosslineStore {
     this.appendEvent({ ownerId: order.ownerId, workspaceId, idempotencyKey: `${idempotencyKey}:audit`,
       type: "milestone_gate.auto_accepted", entityId: workOrderId, payload: { milestoneId: milestone.id, relationIds } });
     return transitioned;
+    })["immediate"]();
   }
 
   revokeAutoAcceptance(workspaceId: string, workOrderId: string, reason: string, idempotencyKey: string): { changed: boolean; state: WorkOrderState } {
+    // Read, check `state !== "accepted"`, transition, merge, append — five separate writes with no
+    // outer transaction, so a revoke could half-happen.
+    return this.#db.transaction(() => {
     const order = this.listWorkOrders(workspaceId).find((item) => item.id === workOrderId);
     const payload = order?.payload as { autoAcceptance?: Record<string, unknown> } | undefined;
     if (!order || order.state !== "accepted" || !payload?.autoAcceptance) throw new Error("AUTO_ACCEPTANCE_NOT_REVOCABLE");
@@ -901,9 +1013,13 @@ export class CrosslineStore {
     this.appendEvent({ ownerId: order.ownerId, workspaceId, idempotencyKey: `${idempotencyKey}:audit`,
       type: "milestone_gate.auto_acceptance_revoked", entityId: workOrderId, payload: { reason: reason.trim() } });
     return transitioned;
+    })["immediate"]();
   }
 
   refuteMilestoneRelation(workspaceId: string, relationId: string, note: string, idempotencyKey: string): void {
+    // The relation write, one payload merge per affected work order, and the ledger entry were all
+    // separate; two concurrent merges on the same order also lost one of the patches.
+    this.#db.transaction(() => {
     const relation = this.listMilestoneRelations(workspaceId).find((item) => item.id === relationId);
     if (!relation) throw new Error("MILESTONE_RELATION_NOT_FOUND");
     const observedAt = new Date().toISOString();
@@ -918,6 +1034,7 @@ export class CrosslineStore {
     }
     this.appendEvent({ ownerId: relation.ownerId, workspaceId, idempotencyKey,
       type: "milestone_relation.refuted", entityId: relationId, payload: { note } });
+    })["immediate"]();
   }
 
   /**
@@ -928,8 +1045,8 @@ export class CrosslineStore {
   upsertDailyActivity(input: { ownerId: string; workspaceId: string; day: string; aggregate: Record<string, number>; observedAt: string }): void {
     this.#db.prepare(`
       INSERT INTO energy_observations (
-        id, owner_id, workspace_id, source, level, confidence, aggregate_json, observed_at, expires_at
-      ) VALUES (?, ?, ?, 'local_activity', 'uncalibrated', 'low', ?, ?, NULL)
+        id, owner_id, workspace_id, source, level, confidence, aggregate_json, observed_at
+      ) VALUES (?, ?, ?, 'local_activity', 'uncalibrated', 'low', ?, ?)
       ON CONFLICT(id) DO UPDATE SET aggregate_json = excluded.aggregate_json, observed_at = excluded.observed_at
     `).run(`local-activity:${input.day}`, input.ownerId, input.workspaceId,
       JSON.stringify(input.aggregate), input.observedAt);
@@ -938,13 +1055,13 @@ export class CrosslineStore {
   saveEnergyObservation(observation: StoredEnergyObservation): void {
     this.#db.prepare(`
       INSERT INTO energy_observations (
-        id, owner_id, workspace_id, source, level, confidence, aggregate_json, observed_at, expires_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        id, owner_id, workspace_id, source, level, confidence, aggregate_json, observed_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO NOTHING
     `).run(
       observation.id, observation.ownerId, observation.workspaceId, observation.source,
       observation.level, observation.confidence, JSON.stringify(observation.aggregate),
-      observation.observedAt, null
+      observation.observedAt
     );
   }
 
@@ -1087,10 +1204,10 @@ export class CrosslineStore {
     const tableNames = [
       "events", "milestones",
       "captures",
-      "identities", "projects", "milestone_versions", "milestone_relations",
+      "milestone_relations",
       "work_orders", "executions", "evidence_claims", "plan_versions", "plan_changes",
       "materials",
-      "energy_observations", "insight_proposals", "skill_versions", "external_bindings",
+      "energy_observations", "external_bindings",
       "capacity_commitments",
       // Consent state is part of the ledger: a restore that silently re-enables collection is not a restore.
       "settings"
@@ -1101,14 +1218,11 @@ export class CrosslineStore {
       tableName,
       this.#db.prepare(`SELECT * FROM ${tableName} WHERE workspace_id = ? ORDER BY rowid`).all(workspaceId) as Array<Record<string, string | number | null>>
     ]));
-    tables.outbox = this.#db.prepare(`
-      SELECT o.* FROM outbox o JOIN events e ON e.event_id = o.event_id WHERE e.workspace_id = ? ORDER BY o.rowid
-    `).all(workspaceId) as Array<Record<string, string | number | null>>;
     return {
       schemaVersion: 2,
       exportedAt: new Date().toISOString(),
       workspaceId,
-      events: this.listEvents().filter((event) => event.workspaceId === workspaceId),
+      events: this.listEvents(workspaceId),
       milestones: this.listMilestones(workspaceId),
       capacityCommitments: this.listCapacityCommitments(workspaceId),
       workOrders: this.listWorkOrders(workspaceId),
@@ -1152,18 +1266,21 @@ export class CrosslineStore {
    */
   resolvePlanChange(workspaceId: string, changeId: string, status: "approved" | "excluded",
     idempotencyKey: string): { changed: boolean } {
-    const row = this.#db.prepare(
-      "SELECT plan_version_id, status FROM plan_changes WHERE workspace_id = ? AND id = ?"
-    ).get(workspaceId, changeId) as { plan_version_id?: string; status?: string } | undefined;
-    if (!row || row.status !== "pending") return { changed: false };
-    this.#db.prepare("UPDATE plan_changes SET status = ? WHERE workspace_id = ? AND id = ?")
-      .run(status, workspaceId, changeId);
-    this.appendEvent({
-      ownerId: "local-owner", workspaceId, idempotencyKey,
-      type: "plan_change.resolved", entityId: changeId,
-      payload: { status, planVersionId: row.plan_version_id }
-    });
-    return { changed: true };
+    // Check-then-act: two callers could both read `pending` and both append a resolution event.
+    return this.#db.transaction(() => {
+      const row = this.#db.prepare(
+        "SELECT plan_version_id, status FROM plan_changes WHERE workspace_id = ? AND id = ?"
+      ).get(workspaceId, changeId) as { plan_version_id?: string; status?: string } | undefined;
+      if (!row || row.status !== "pending") return { changed: false };
+      this.#db.prepare("UPDATE plan_changes SET status = ? WHERE workspace_id = ? AND id = ?")
+        .run(status, workspaceId, changeId);
+      this.appendEvent({
+        ownerId: "local-owner", workspaceId, idempotencyKey,
+        type: "plan_change.resolved", entityId: changeId,
+        payload: { status, planVersionId: row.plan_version_id }
+      });
+      return { changed: true };
+    })["immediate"]();
   }
 
   /** Every real table in this database, so the restore path can validate against reality. */
@@ -1191,7 +1308,15 @@ export class CrosslineStore {
     // A snapshot is a file read off disk, so its table and column names are untrusted input that would
     // otherwise be interpolated straight into SQL.
     const known = new Set(this.tableNames());
-    for (const tableName of Object.keys(snapshot.tables)) {
+    const retired: Set<string> = new Set(RETIRED_TABLES);
+    for (const [tableName, rows] of Object.entries(snapshot.tables)) {
+      // A backup taken before migration 4 still lists the six tables that never carried a row. An
+      // empty one is stepped over; one with rows is not, because the assumption behind dropping them
+      // would have been wrong and skipping it would lose data without saying so.
+      if (!known.has(tableName) && retired.has(tableName)) {
+        if (rows.length) throw new Error("RESTORE_RETIRED_TABLE_NOT_EMPTY");
+        continue;
+      }
       if (!known.has(tableName)) throw new Error("RESTORE_UNKNOWN_TABLE");
       const columns = this.#columnsOf(tableName);
       const occupied = columns.includes("workspace_id")
@@ -1206,12 +1331,23 @@ export class CrosslineStore {
       // at commit instead of demanding the importer know the dependency order between tables.
       this.#db.pragma("defer_foreign_keys = ON");
       for (const [tableName, rows] of Object.entries(snapshot.tables)) {
+        if (!known.has(tableName)) continue;
         counts[tableName] = rows.length;
         const first = rows[0];
         if (!first) continue;
-        const columns = Object.keys(first);
         const allowed = new Set(this.#columnsOf(tableName));
-        for (const column of columns) if (!allowed.has(column)) throw new Error("RESTORE_UNKNOWN_COLUMN");
+        // A snapshot older than a migration that dropped a column still carries it. Dropping it from
+        // the insert is only safe while every row's value is empty — otherwise the migration threw
+        // away something real, and refusing the restore is the correct way to find that out.
+        const columns = Object.keys(first).filter((column) => {
+          if (allowed.has(column)) return true;
+          const retiredHere: readonly string[] = RETIRED_COLUMNS[tableName] ?? [];
+          if (!retiredHere.includes(column)) throw new Error("RESTORE_UNKNOWN_COLUMN");
+          if (rows.some((row) => row[column] !== null && row[column] !== undefined)) {
+            throw new Error("RESTORE_RETIRED_COLUMN_NOT_EMPTY");
+          }
+          return false;
+        });
         const statement = this.#db.prepare(
           `INSERT INTO ${tableName} (${columns.join(", ")}) VALUES (${columns.map(() => "?").join(", ")})`
         );

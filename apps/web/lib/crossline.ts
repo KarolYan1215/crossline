@@ -258,7 +258,7 @@ export function loadCalendarConnectorState(): CalendarConnectorState {
   const plan = store.listPlanVersions(WORKSPACE_ID)[0];
   const blocks = ((plan?.payload as { blocks?: Array<{ id?: string }> } | undefined)?.blocks ?? [])
     .filter((block) => String(block.id).startsWith("graph_calendar:"));
-  const last = store.listEvents().filter((event) => event.type === "plan.reality_changed").at(-1);
+  const last = store.listEvents(WORKSPACE_ID, { type: "plan.reality_changed" }).at(-1);
   return {
     synced: Boolean(cursor),
     importedBlocks: blocks.length,
@@ -596,7 +596,7 @@ export const LOCAL_ACTIVITY_CONSENT = "localActivity.consent";
  */
 function lastNight(now: Date): DashboardData["lastNight"] {
   const since = new Date(now.getTime() - 36 * 60 * 60_000).toISOString();
-  const event = [...getStore().listEvents()]
+  const event = [...getStore().listEvents(WORKSPACE_ID)]
     .reverse()
     .find((item) => item.type.startsWith("flywheel.nightly.") && item.createdAt >= since);
   if (!event) return { state: "none" };

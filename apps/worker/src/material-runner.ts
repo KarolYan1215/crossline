@@ -153,8 +153,7 @@ export function pendingMaterialWorkOrders(store: CrosslineStore, workspaceId: st
   // failure after that closes it again. Without the retry side, an order blocked by a bug that has
   // since been fixed could never be tried again.
   const decidedAt = new Map<string, "blocked" | "retry">();
-  for (const event of store.listEvents()) {
-    if (event.workspaceId !== workspaceId) continue;
+  for (const event of store.listEvents(workspaceId, { type: ["materials.blocked", "materials.retry_requested"] })) {
     if (event.type === "materials.blocked") decidedAt.set(event.entityId, "blocked");
     else if (event.type === "materials.retry_requested") decidedAt.set(event.entityId, "retry");
   }

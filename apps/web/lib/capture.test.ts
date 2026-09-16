@@ -14,7 +14,7 @@ test("capture persists text without classification, estimate or executable task,
     id: "capture-1", ownerId: "local-owner", workspaceId: WORKSPACE_ID,
     title: "分析论文", context: "只保留我提供的内容", state: "captured", attempt: 0, audit: {}
   }]);
-  expect(store.listEvents()).toHaveLength(1);
+  expect(store.listEvents(WORKSPACE_ID)).toHaveLength(1);
 });
 
 test("seeding repairs starter milestones that an earlier version stored without a project", () => {

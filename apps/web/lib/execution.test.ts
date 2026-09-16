@@ -74,7 +74,7 @@ test("the explicit execution path can honestly record completion without evidenc
   expect(store.listExecutions(WORKSPACE_ID)[0]).toMatchObject({
     durationObserved: true, outcome: "completed_without_evidence"
   });
-  expect(JSON.stringify(store.listEvents())).not.toContain("manual_confirmation");
+  expect(JSON.stringify(store.listEvents(WORKSPACE_ID))).not.toContain("manual_confirmation");
 });
 
 test("a human can block an evidence review, and acceptance is the only gate to accepted", () => {
