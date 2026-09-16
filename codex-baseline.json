@@ -1,0 +1,25 @@
+{
+  "repository": "https://github.com/openai/codex.git",
+  "commit": "5b1d6560181680f95cde95c14ed042acc02248ed",
+  "integration": "app-server-stdio",
+  "patches": [],
+  "runtimeVersion": "codex-cli 0.133.0",
+  "runtimeUserAgent": "Codex Desktop/0.133.0 (Windows 10.0.26200; x86_64) dumb (crossline; 0.1.0)",
+  "generatedProtocol": {
+    "command": "codex app-server generate-ts --experimental --out <temporary-directory>",
+    "sha256": "7a3db76bc09206252e8e74a6d579edfb9bc0fb8a14f2ed64785f81f45468b4c1",
+    "fileCount": 847,
+    "observedAgainstRuntime": "codex-cli 0.154.0-alpha.6.2",
+    "note": "Generated against a Codex Desktop runtime that is no longer the runtime this repository spawns; the hash is retained as a historical observation and does not describe codex-cli 0.133.0."
+  },
+  "contractTest": {
+    "command": "pnpm exec tsx scripts/codex-smoke.ts",
+    "result": "passed",
+    "observedOn": "2026-09-15",
+    "observedRuntime": "Codex Desktop/0.133.0",
+    "verified": ["plugin/install", "skills/list", "9 namespaced Crossline skills discovered"]
+  },
+  "relationStatus": "unverified",
+  "relationNote": "The installed runtime and generated protocol were observed together; no evidence proves that runtime was built from the recorded source commit.",
+  "environmentNote": "Under the packaged Claude desktop app, writes to %LOCALAPPDATA%/Crossline are redirected by Windows to the package LocalCache (Packages/Claude_pzs8sxrjxfjjc/LocalCache/Local). A codex-home created from such a session is therefore not the codex-home a normally started Windows worker reads, so isolated-home login must be verified from a non-packaged shell."
+}

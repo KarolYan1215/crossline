@@ -1,0 +1,15 @@
+import { discardCapture } from "../../../../../lib/crossline";
+import { isCrossSiteWrite } from "../../../../../lib/same-origin";
+
+/** Throws away a raw capture, with the reason on the record. */
+export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  const { id } = await context.params;
+  if (isCrossSiteWrite(request)) return Response.json({ ok: false, code: "REQUEST_FORBIDDEN" }, { status: 403 });
+  if (!/^[a-zA-Z0-9_-]{1,128}$/.test(id)) return Response.json({ ok: false, code: "CAPTURE_NOT_FOUND" }, { status: 404 });
+  const body = (await request.json().catch(() => ({}))) as { reason?: unknown };
+  const result = discardCapture(id, String(body.reason ?? ""));
+  if (result.ok) return Response.json(result);
+  const status = result.code === "CAPTURE_NOT_FOUND" ? 404
+    : result.code === "DISCARD_REASON_REQUIRED" ? 400 : 409;
+  return Response.json(result, { status });
+}

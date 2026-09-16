@@ -1,0 +1,403 @@
+/*
+ * Crossline visual system, migrated to the reference sheet (karols-wandering-again.html).
+ *
+ * The signature of that design is what this file reproduces: paper ground with a 28px hairline grid,
+ * ink-on-paper with no radius and no shadow, cells separated by 1px mist rules rather than cards,
+ * uppercase mono micro-labels, Archivo Black only for display numerals and section titles, and a
+ * single green reserved for "now" — never for decoration.
+ *
+ * Every class name the app already uses is styled here, so the migration is a stylesheet change rather
+ * than a component rewrite. Dark mode is a real second palette (system preference plus an explicit
+ * data-theme override), not an inverted filter.
+ */
+
+:root{
+  --paper:#FBF9F3;
+  --ink:#010904;
+  --graphite:#5A5B54;
+  --shade:#9C9B8D;
+  --mist:#DCD7C9;
+  --chalk:#F2EFE4;
+  --grid:rgba(1,9,4,.022);
+  --block:#010904;
+  --now:#2FBF89;
+  --now-ink:#0A6544;
+  --f-display:"Archivo Black","Noto Sans SC",system-ui,sans-serif;
+  --f-sans:"Noto Sans SC",-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  color-scheme:light;
+  /* Kept as aliases so any stylesheet or component still reaching for the old names lands on a real
+     colour instead of an unset variable. */
+  --line:var(--mist);
+  --muted:var(--graphite);
+  --signal:var(--ink);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --paper:#010904; --ink:#EDE9DC; --graphite:#948F80; --shade:#6A6659;
+    --mist:#2B3230; --chalk:#07110E; --grid:rgba(237,233,220,.028);
+    --block:#E7E2D3; --now:#5FE3AE; --now-ink:#5FE3AE;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --paper:#010904; --ink:#EDE9DC; --graphite:#948F80; --shade:#6A6659;
+  --mist:#2B3230; --chalk:#07110E; --grid:rgba(237,233,220,.028);
+  --block:#E7E2D3; --now:#5FE3AE; --now-ink:#5FE3AE;
+}
+
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  margin:0;background:var(--paper);color:var(--ink);
+  font-family:var(--f-sans);font-size:14px;line-height:1.55;
+  -webkit-font-smoothing:antialiased;
+  background-image:
+    repeating-linear-gradient(to right,var(--grid) 0 1px,transparent 1px 28px),
+    repeating-linear-gradient(to bottom,var(--grid) 0 1px,transparent 1px 28px);
+}
+a{color:inherit;text-decoration:none}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer;padding:0}
+input,select,textarea{font:inherit;color:inherit;background:var(--paper);border:1px solid var(--mist);border-radius:0;padding:7px 9px}
+input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-visible,a:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--ink);outline-offset:1px}
+.mono{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+.micro,.mono-label,.eyebrow{font-family:var(--f-mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--graphite)}
+.muted{color:var(--graphite)}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+
+/* ── shell ─────────────────────────────────── */
+.page{width:min(1440px,100%);min-height:100vh;margin:0 auto;padding-inline:20px;padding-block:0 64px}
+.running-head{
+  position:sticky;top:0;z-index:40;display:flex;align-items:center;gap:14px;
+  padding:8px 0 7px;background:var(--paper);border-bottom:1.5px solid var(--ink);
+}
+.wordmark,.brand-mark{font-family:var(--f-display);font-size:15px;letter-spacing:.01em;white-space:nowrap}
+.wordmark sup{margin-left:9px;font-family:var(--f-mono);font-weight:500;font-size:10px;letter-spacing:.18em;color:var(--graphite);text-transform:uppercase;vertical-align:baseline}
+.running-head nav{display:flex;gap:2px;flex-wrap:wrap}
+.running-head nav a{font-family:var(--f-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;padding:6px 13px;color:var(--graphite);border:1px solid transparent}
+.running-head nav a:hover{color:var(--ink)}
+.running-head nav a.active{background:var(--ink);color:var(--paper)}
+/* The hairline that pushes the status stamp to the far edge — the reference's one structural flourish. */
+.running-head::after{content:"";flex:1;height:1px;background:var(--mist);min-width:10px;order:2}
+.running-head nav{order:1}
+.system-state{order:3;display:flex;align-items:center;gap:10px;white-space:nowrap;font-family:var(--f-mono);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--graphite)}
+.system-state b,.system-state strong{border:1px solid var(--mist);padding:2px 6px;font-weight:400}
+.status-badge{font-family:var(--f-mono);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;border:1px solid var(--mist);padding:2px 6px;color:var(--graphite)}
+
+/* ── day head ──────────────────────────────── */
+.day-head{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:clamp(16px,2.4vw,26px);align-items:center;padding:26px 0 18px;border-bottom:1.5px solid var(--ink)}
+.analog-clock{width:clamp(96px,12vw,140px);height:auto;flex:none;display:block}
+.analog-clock .ac-ring{fill:none;stroke:var(--ink);stroke-width:1.5}
+.analog-clock .ac-tick{stroke:var(--mist);stroke-width:1}
+.analog-clock .ac-tick.major{stroke:var(--ink);stroke-width:2.6}
+.analog-clock .ac-nums text{fill:var(--graphite);font-family:var(--f-mono);font-size:9.5px;letter-spacing:.08em}
+.analog-clock .ac-hand{stroke-linecap:butt}
+.analog-clock .ac-hand.hour{stroke:var(--ink);stroke-width:5.5}
+.analog-clock .ac-hand.minute{stroke:var(--ink);stroke-width:3}
+/* The single green stays reserved for "now": here it is the second hand and nothing else. */
+.analog-clock .ac-hand.second{stroke:var(--now);stroke-width:1.4}
+.analog-clock .ac-second-dot{fill:var(--now)}
+.analog-clock .ac-pin{fill:var(--ink)}
+.analog-clock .ac-pin-core{fill:var(--paper)}
+.day-number{font-family:var(--f-display);font-size:clamp(46px,8vw,104px);line-height:.86;letter-spacing:-.02em}
+.now-state{justify-self:end;display:grid;gap:4px;justify-items:end;font-family:var(--f-mono);font-size:10px;letter-spacing:.1em;color:var(--graphite)}
+/* Ink, not green. The single green is reserved for "now" — the clock hand and the current-time mark —
+   and spending it on a capacity reading would make the one live signal stop meaning anything. */
+.now-state strong{color:var(--ink);font-weight:600}
+.now-state span{color:var(--now-ink);font-weight:600}
+
+/* ── care band ─────────────────────────────── */
+.care-band{display:grid;grid-template-columns:minmax(140px,auto) 1fr;gap:clamp(14px,2vw,24px);align-items:center;padding:14px 0;border-bottom:1px solid var(--ink)}
+.care-band>strong{font-family:var(--f-mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;font-weight:500}
+.care-band dl{margin:0;display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:1px;background:var(--mist);border:1px solid var(--mist);overflow-x:auto}
+.care-band dl div{background:var(--paper);padding:10px 12px;min-width:120px}
+.care-band dt{font-family:var(--f-mono);font-size:8.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--shade)}
+.care-band dd{margin:5px 0 0;font-size:12px}
+.energy-probe{display:flex;gap:4px;align-items:center;flex-wrap:wrap}
+.energy-probe button{border:1px solid var(--mist);font-family:var(--f-mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;padding:7px 10px;line-height:1}
+.energy-probe button:hover{border-color:var(--ink)}
+.energy-probe em,.energy-probe-state{font-family:var(--f-mono);font-size:9px;font-style:normal;letter-spacing:.1em;color:var(--now-ink)}
+.consent-ask{padding:14px 0;border-bottom:1px solid var(--mist);display:grid;gap:8px}
+.consent-ask h2{margin:0;font-size:13px;font-weight:700;letter-spacing:.06em}
+.consent-ask p{margin:0;color:var(--graphite);font-size:12px;line-height:1.7;max-width:76ch}
+.consent-ask div{display:flex;gap:8px;flex-wrap:wrap}
+.last-night{font-family:var(--f-mono);font-size:9.5px;letter-spacing:.1em;color:var(--shade)}
+
+/* ── capture ───────────────────────────────── */
+.capture-line{display:grid;grid-template-columns:minmax(140px,auto) 1fr;gap:clamp(14px,2vw,24px);align-items:end;padding:18px 0;border-bottom:1px solid var(--ink)}
+.capture-line h2{margin:4px 0 0;font-size:14px;font-weight:700;letter-spacing:.06em}
+.capture-form{display:flex;gap:0;flex-wrap:wrap}
+.capture-form label{flex:1 1 220px;min-width:0}
+.capture-form input{width:100%;min-height:38px;border-right-width:0}
+.capture-form>small{flex-basis:100%;margin-top:6px}
+.primary-button,.secondary-button,.text-button{
+  min-height:38px;padding:7px 16px;border:1px solid var(--ink);border-radius:0;
+  font-family:var(--f-mono);font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;cursor:pointer;
+}
+.primary-button,.capture-form .secondary-button{background:var(--ink);color:var(--paper)}
+.primary-button:hover,.capture-form .secondary-button:hover{background:var(--paper);color:var(--ink)}
+.secondary-button,.text-button{background:transparent;color:var(--ink);border-color:var(--mist)}
+.secondary-button:hover,.text-button:hover{border-color:var(--ink)}
+button:disabled{opacity:.4;cursor:not-allowed}
+
+/* ── today grid ────────────────────────────── */
+.today-grid{display:grid;grid-template-columns:minmax(0,2fr) minmax(260px,.8fr);gap:1px;background:var(--mist);border-bottom:1px solid var(--ink)}
+.hero-action,.action-margin{background:var(--paper)}
+.hero-action{padding:28px 0 42px;padding-right:clamp(20px,3vw,42px)}
+.hero-action>header,.timeline-list>header,.milestone-pulse>header,.alt-action>header{display:flex;justify-content:space-between;gap:12px;font-family:var(--f-mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--graphite)}
+.hero-action h1{max-width:780px;margin:18px 0;font-family:var(--f-display);font-size:clamp(30px,4.4vw,58px);line-height:1.02;letter-spacing:-.02em}
+.hero-action>p{max-width:700px;color:var(--graphite);line-height:1.75}
+.hero-action dl{margin:30px 0 0;display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:1px;background:var(--mist);border:1px solid var(--mist)}
+.hero-action dl div{background:var(--paper);padding:10px 12px}
+.hero-action dt{font-family:var(--f-mono);font-size:8.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--shade)}
+.hero-action dd{margin:5px 0 0;font-size:11px}
+.action-margin{display:grid;grid-template-rows:1fr 1fr;gap:1px;background:var(--mist)}
+.alt-action{background:var(--paper);padding:24px clamp(14px,2vw,24px)}
+.alt-action h3{margin:36px 0 10px;font-family:var(--f-display);font-size:20px;letter-spacing:-.01em;line-height:1.1}
+.alt-action p{color:var(--graphite);font-size:11.5px;line-height:1.7}
+.alt-action small{font-family:var(--f-mono);font-size:8.5px;letter-spacing:.12em;color:var(--shade)}
+
+/* ── lists ─────────────────────────────────── */
+.lower-grid{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:1px;background:var(--mist)}
+.timeline-list,.milestone-pulse{background:var(--paper)}
+.timeline-list>header,.milestone-pulse>header{padding:20px 18px;border-bottom:1px solid var(--ink)}
+.timeline-list article{display:grid;grid-template-columns:130px 14px 1fr;gap:10px;align-items:center;padding:12px 18px;border-bottom:1px solid var(--mist)}
+.timeline-list time{font-family:var(--f-mono);font-size:9.5px;letter-spacing:.06em;color:var(--graphite)}
+/* Shape-coded identity marker on the Today timeline: a diamond, a circle, a bar — colour is only ever
+   secondary, so the row stays readable in monochrome and for anyone who cannot separate the hues. */
+.line-symbol{width:9px;height:9px;border:1px solid var(--ink);rotate:45deg}
+.line-symbol.startup{border-style:dashed;border-radius:50%;rotate:none}
+.line-symbol.media{width:12px;height:0;border-width:0 0 2px;rotate:none;box-shadow:0 4px 0 -1px var(--ink)}
+.line-symbol.investment{border-radius:50%;rotate:none}
+.timeline-list article div,.milestone-pulse article{display:grid;gap:4px}
+.timeline-list strong,.milestone-pulse strong{font-size:12.5px;font-weight:700}
+.timeline-list small,.milestone-pulse small{font-family:var(--f-mono);font-size:8.5px;letter-spacing:.06em;color:var(--graphite)}
+.milestone-pulse article{grid-template-columns:82px 1fr;align-items:center;padding:14px 18px;border-bottom:1px solid var(--mist)}
+.milestone-pulse article span{grid-row:1/3;font-family:var(--f-mono);font-size:9px;letter-spacing:.12em;color:var(--shade);text-transform:uppercase}
+.capacity-blocker{font-family:var(--f-mono);font-size:9px;letter-spacing:.08em;color:var(--ink)}
+
+/* Shape, not colour, carries state — the reference uses the same glyph vocabulary. */
+.gly{display:inline-block;width:9px;height:9px;border:1px solid var(--ink);margin-right:7px;vertical-align:baseline}
+.gly[data-s="active"],.gly[data-s="doing"]{background:linear-gradient(to right,var(--ink) 0 50%,transparent 50% 100%)}
+.gly[data-s="ready_for_human"],.gly[data-s="wait"]{border-radius:50%}
+.gly[data-s="accepted"],.gly[data-s="done"]{background:repeating-linear-gradient(135deg,var(--ink) 0 2px,transparent 2px 4px)}
+.gly[data-s="blocked"]{background:var(--ink);box-shadow:inset 0 0 0 2px var(--paper)}
+
+/* ── subpages ──────────────────────────────── */
+.subpage{display:block}
+.subpage-header{display:flex;align-items:flex-end;justify-content:space-between;gap:14px;padding:24px 0 11px;flex-wrap:wrap;border-bottom:1.5px solid var(--ink)}
+.subpage-header h1{margin:0;font-family:var(--f-display);font-size:clamp(20px,2.6vw,27px);letter-spacing:-.005em;line-height:1}
+/* The 26×10 ink block that opens every section title in the reference. */
+.subpage-header h1::before{content:"";display:inline-block;width:26px;height:10px;background:var(--block);margin-right:11px;vertical-align:middle}
+.subpage-header p{margin:6px 0 0;max-width:80ch;color:var(--graphite);font-size:12px;line-height:1.7}
+.subpage-inner{padding:18px 0 0;display:grid;gap:22px}
+
+/* ── plan ──────────────────────────────────── */
+.plan-view{display:grid;gap:0}
+.plan-tabs{display:flex;align-items:center;gap:2px;flex-wrap:wrap;border-top:1px solid var(--mist);border-bottom:1.5px solid var(--ink);padding:9px 0;position:sticky;top:41px;background:var(--paper);z-index:30}
+.plan-tabs button{font-family:var(--f-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;padding:6px 13px;color:var(--graphite);border:1px solid transparent}
+.plan-tabs button[aria-selected="true"]{background:var(--ink);color:var(--paper)}
+.dual-timeline{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:1px;background:var(--mist);border-bottom:1px solid var(--mist)}
+.plan-lane{background:var(--paper);padding:14px 16px;display:grid;gap:10px;align-content:start}
+.plan-lane>header{display:grid;gap:2px}
+.plan-lane>header span{font-family:var(--f-mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--graphite)}
+.plan-lane>header small{font-size:11px;color:var(--shade)}
+.lane-track{display:grid;gap:7px}
+/* A row, not a flex column: `time` is a fixed rail and the title takes the rest. Without the explicit
+   grid the title collapsed to one character per line. */
+.lane-track article{display:grid;grid-template-columns:96px minmax(0,1fr);gap:10px;align-items:baseline;border:1px solid var(--mist);padding:8px 10px}
+.lane-track article:hover{border-color:var(--ink)}
+.lane-track article.draft{border-left:3px solid var(--mist)}
+.lane-track article.readonly{border-left:3px solid var(--ink)}
+.lane-track time{font-family:var(--f-mono);font-size:9.5px;letter-spacing:.06em;color:var(--graphite)}
+.lane-track strong{font-size:13px;line-height:1.45;font-weight:400;word-break:break-word}
+.lane-track small{grid-column:2;font-family:var(--f-mono);font-size:8.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--shade)}
+.change-ledger{display:grid;border-top:1.5px solid var(--ink)}
+.change-ledger header{display:grid;grid-template-columns:96px 1fr 200px;gap:10px;padding:9px 0;border-bottom:1px solid var(--ink);font-family:var(--f-mono);font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--graphite)}
+.change-ledger article{display:grid;grid-template-columns:96px 1fr 200px;gap:10px;padding:11px 0;border-bottom:1px solid var(--mist);align-items:start}
+.change-ledger b{font-size:11px;font-weight:700;letter-spacing:.1em}
+.change-ledger p{margin:0;font-size:12.5px;line-height:1.6}
+.change-ledger span{font-family:var(--f-mono);font-size:9.5px;letter-spacing:.08em;color:var(--graphite)}
+.change-ledger footer{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:14px 0}
+.change-ledger footer button{min-height:34px;padding:7px 16px;border:1px solid var(--ink);background:var(--ink);color:var(--paper);font-family:var(--f-mono);font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase}
+.change-ledger footer button:hover{background:var(--paper);color:var(--ink)}
+.change-resolve{display:inline-flex;gap:4px;margin-left:8px}
+.change-resolve button{min-height:22px;padding:1px 7px;border:1px solid var(--mist);font-family:var(--f-mono);font-size:8.5px;letter-spacing:.1em;text-transform:uppercase}
+.change-resolve button:hover{border-color:var(--ink)}
+.approved-mark{font-family:var(--f-mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--now-ink)}
+.calendar-detail{border-top:1.5px solid var(--ink);padding-top:12px}
+
+/* ── work orders ───────────────────────────── */
+.work-order-list{display:grid;gap:12px}
+.work-order-list article,.work-order-drawer{border:1px solid var(--mist);border-left:4px solid var(--ink);padding:12px 14px;display:grid;gap:6px}
+.work-order-list article:hover{border-color:var(--ink);border-left-color:var(--ink)}
+.work-order-list header{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;font-family:var(--f-mono);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--graphite)}
+.work-order-list h3{margin:0;font-size:14px;font-weight:700;line-height:1.4}
+.work-order-list p{margin:0;color:var(--graphite);font-size:12px;line-height:1.7}
+.work-order-list small,.work-order-drawer small{font-family:var(--f-mono);font-size:9px;letter-spacing:.08em;color:var(--graphite)}
+.execution-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}
+.execution-actions button,.execution-actions a{min-height:30px;padding:5px 12px;border:1px solid var(--mist);font-family:var(--f-mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase}
+.execution-actions button:hover,.execution-actions a:hover{border-color:var(--ink)}
+
+/* ── review / approvals ────────────────────── */
+.review-block{padding:18px 0;border-bottom:1px solid var(--mist)}
+.review-block h2{margin:0 0 8px;font-family:var(--f-display);font-size:18px;letter-spacing:-.005em}
+.review-note{margin:0 0 12px;color:var(--graphite);font-size:12px;line-height:1.7;max-width:84ch}
+.review-empty{margin:0;color:var(--shade);font-size:12px}
+.review-list{margin:0;padding:0;list-style:none;display:grid;gap:10px}
+.review-list li{display:grid;gap:4px;padding:11px 12px;border:1px solid var(--mist)}
+.review-list li[data-highlighted="1"]{border-color:var(--ink);border-left-width:4px}
+.review-list b{font-size:13px;font-weight:700}
+.review-list small{font-family:var(--f-mono);font-size:9px;letter-spacing:.06em;color:var(--graphite)}
+.review-list a{font-family:var(--f-mono);font-size:9px;letter-spacing:.1em;border-bottom:1px solid var(--mist)}
+.review-list a:hover{border-color:var(--ink)}
+.review-flag{font-family:var(--f-mono);font-size:9.5px;font-style:normal;letter-spacing:.06em;color:var(--ink);border-left:3px solid var(--ink);padding-left:8px}
+.review-milestone{padding:12px 0;border-top:1px solid var(--mist)}
+.review-milestone ul{margin:6px 0 0;padding-left:18px;color:var(--graphite);font-size:11.5px;line-height:1.7}
+.revoke-acceptance{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px}
+.revoke-acceptance input{min-height:28px;padding:5px 8px;font-family:var(--f-mono);font-size:10px}
+.revoke-acceptance button{min-height:28px;padding:5px 12px;border:1px solid var(--mist);font-family:var(--f-mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase}
+.revoke-acceptance button:hover{border-color:var(--ink)}
+.revoke-acceptance em{font-style:normal;font-family:var(--f-mono);font-size:10px;color:var(--ink)}
+.approval-ledger,.approval-policies{display:grid;gap:10px}
+.approval-ledger article,.approval-policies article{border:1px solid var(--mist);padding:11px 12px;display:grid;gap:4px}
+.status-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1px;background:var(--mist);border:1px solid var(--mist)}
+.status-card{background:var(--paper);padding:14px;display:grid;gap:6px;align-content:start}
+.status-card h2{margin:0;font-family:var(--f-display);font-size:24px;letter-spacing:-.01em}
+.status-card p{margin:0;color:var(--graphite);font-size:11.5px;line-height:1.7}
+
+/* ── candidate relations ───────────────────── */
+.decide-relations{display:grid;gap:14px}
+.relation-pick{display:flex;gap:8px;align-items:flex-start;cursor:pointer}
+.relation-pick input{margin-top:3px;accent-color:var(--ink)}
+.relation-kind{font-family:var(--f-mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--graphite)}
+.relation-claim{margin:4px 0 0;font-size:12.5px;line-height:1.65}
+.relation-claim-missing{color:var(--shade);font-style:italic}
+.relation-falsifier{margin:2px 0 0;color:var(--graphite);font-size:11.5px;line-height:1.65}
+.relation-evidence{margin:4px 0 0;padding-left:16px;display:grid;gap:2px}
+.relation-evidence li{display:block;padding:0;border:0;font-family:var(--f-mono);font-size:9px;letter-spacing:.05em}
+.relation-evidence-missing,.relation-facts{font-family:var(--f-mono);font-size:9px;letter-spacing:.05em;color:var(--graphite)}
+.relation-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.relation-actions button{min-height:32px;padding:6px 14px;border:1px solid var(--ink);font-family:var(--f-mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase}
+.relation-actions em{font-style:normal;font-family:var(--f-mono);font-size:10px;color:var(--ink)}
+
+/* ── milestones ────────────────────────────── */
+.milestone-map{border:1px solid var(--mist);height:min(60vh,520px)}
+.milestone-admin{display:grid;gap:18px;margin-top:12px}
+.milestone-admin-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.milestone-admin-actions button,.milestone-admin-buttons button,.milestone-form-actions button{
+  min-height:32px;padding:6px 14px;border:1px solid var(--ink);font-family:var(--f-mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+}
+.milestone-admin-actions em{font-style:normal;font-family:var(--f-mono);font-size:10px;color:var(--ink)}
+.milestone-ask{flex:1 1 240px}
+.milestone-ask input,.milestone-form input,.milestone-form select{width:100%;min-height:30px;font-family:var(--f-mono);font-size:11px}
+.milestone-form{display:grid;gap:10px;padding:14px;border:1px solid var(--ink)}
+.milestone-form h3{margin:0;font-size:13px;font-weight:700}
+.milestone-form h4{margin:6px 0 0;font-size:12px;font-weight:700}
+.milestone-form-row{display:grid;gap:8px;grid-template-columns:2fr 1fr 1fr}
+.milestone-form label span:not(.sr-only){display:block;margin-bottom:3px;font-family:var(--f-mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--graphite)}
+.milestone-hint{margin:0;color:var(--graphite);font-size:11.5px;line-height:1.7}
+.criterion-row{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:0;padding:8px;border:1px solid var(--mist)}
+.criterion-statement{flex:1 1 220px}
+.criterion-required{display:flex;gap:4px;align-items:center;white-space:nowrap;font-family:var(--f-mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--graphite)}
+.criterion-required input{width:auto;min-height:auto;accent-color:var(--ink)}
+.criterion-remove{min-height:26px;padding:2px 9px;border:1px solid var(--mist);font-family:var(--f-mono)}
+.criterion-remove:hover{border-color:var(--ink)}
+.measure-fields{display:flex;gap:6px;flex:1 1 200px}
+.milestone-form-actions{display:flex;gap:8px;flex-wrap:wrap}
+.milestone-admin-list{margin:0;padding:0;list-style:none;display:grid;gap:12px}
+.milestone-admin-list li{display:grid;gap:5px;padding:12px;border:1px solid var(--mist)}
+.milestone-admin-list li[data-status="archived"]{opacity:.5}
+.milestone-admin-list li[data-status="draft"]{border-style:dashed}
+.milestone-admin-head{display:flex;gap:10px;align-items:baseline;justify-content:space-between;flex-wrap:wrap}
+.milestone-admin-head b{font-size:13.5px;font-weight:700}
+.milestone-admin-head small{font-family:var(--f-mono);font-size:9px;letter-spacing:.06em;color:var(--graphite)}
+.milestone-rationale{margin:0;color:var(--graphite);font-size:11.5px;line-height:1.7}
+.criterion-view{margin:0;padding:0;list-style:none;display:grid;gap:4px}
+.criterion-view li{display:flex;gap:6px;align-items:baseline;flex-wrap:wrap;font-size:11.5px;line-height:1.65}
+.criterion-view small{font-family:var(--f-mono);font-size:9px;letter-spacing:.06em;color:var(--graphite)}
+.criterion-tag{padding:1px 6px;border:1px solid var(--mist);font-family:var(--f-mono);font-size:8px;letter-spacing:.1em;text-transform:uppercase;white-space:nowrap;color:var(--graphite)}
+.criterion-tag[data-evidence="outcome"]{border-color:var(--ink);background:var(--ink);color:var(--paper)}
+.criterion-tag[data-evidence="unlabelled"]{font-style:italic;color:var(--shade)}
+.criterion-progress{font-family:var(--f-mono);font-size:9px;letter-spacing:.06em;color:var(--graphite);border-bottom:1px solid var(--mist)}
+.milestone-admin-buttons{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
+
+/* ── offline ───────────────────────────────── */
+.offline-page{min-height:100vh;display:grid;place-items:center;padding:42px 16px}
+.offline-page h1{margin:12px 0 6px;font-family:var(--f-display);font-size:clamp(24px,4vw,38px);letter-spacing:-.02em}
+.dead-letters{display:grid;gap:6px;margin-top:10px;padding:10px 12px;border:1px solid var(--ink);border-left-width:4px}
+.dead-letters ul,.dead-letter-list{margin:0;padding:0;list-style:none;display:grid;gap:6px}
+.dead-letters li,.dead-letter-list li{display:grid;gap:2px;font-size:12px}
+.dead-letters small,.dead-letter-list small{font-family:var(--f-mono);font-size:9px;letter-spacing:.06em;color:var(--graphite)}
+
+.plan-sync{margin-left:auto;padding:5px 12px;border:1px solid var(--mist);background:transparent;color:var(--ink);font-family:var(--f-mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase}
+.plan-sync:hover:not(:disabled){border-color:var(--ink)}
+.plan-sync:disabled{color:var(--shade)}
+.plan-sync-note{font-family:var(--f-mono);font-size:9.5px;letter-spacing:.06em;color:var(--graphite)}
+
+/* ── dialogs ───────────────────────────────── */
+.dialog-overlay{position:fixed;inset:0;background:color-mix(in srgb,var(--ink) 42%,transparent);z-index:50}
+.dialog-sheet{position:fixed;z-index:51;top:50%;left:50%;translate:-50% -50%;width:min(520px,calc(100vw - 32px));background:var(--paper);border:1.5px solid var(--ink);padding:20px;display:grid;gap:10px}
+.dialog-sheet h2{margin:0;font-family:var(--f-display);font-size:20px;letter-spacing:-.01em}
+.dialog-sheet p{margin:0;color:var(--graphite);font-size:12.5px;line-height:1.7}
+.dialog-actions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:6px}
+.dialog-actions button{min-height:34px;padding:7px 16px;border:1px solid var(--ink);background:var(--ink);color:var(--paper);font-family:var(--f-mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase}
+.dialog-actions .secondary{background:transparent;color:var(--ink);border-color:var(--mist)}
+.dialog-actions .secondary:hover{border-color:var(--ink)}
+.codex-account-card{border:1px solid var(--mist);padding:12px 14px;display:grid;gap:6px}
+
+/* ── responsive ────────────────────────────── */
+@media (max-width:900px){
+  .today-grid,.lower-grid{grid-template-columns:1fr}
+  .day-head,.care-band,.capture-line{grid-template-columns:1fr}
+  .now-state{justify-self:start;justify-items:start}
+  .change-ledger header{display:none}
+  .change-ledger article{grid-template-columns:1fr;gap:4px}
+  .milestone-form-row{grid-template-columns:1fr}
+  .measure-fields{flex:1 1 100%}
+}
+@media (max-width:680px){
+  .page{padding-inline:14px}
+  .running-head{flex-wrap:wrap;gap:8px}
+  .running-head::after{display:none}
+  .timeline-list article{grid-template-columns:1fr;gap:4px}
+  .relation-actions button,.milestone-admin-buttons button{flex:1 1 auto}
+}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.001ms!important;transition-duration:.001ms!important;scroll-behavior:auto!important}
+}
+
+/* React Flow ships its own light palette; these follow the theme tokens instead of a second one. */
+.milestone-map .react-flow__edge-text{fill:var(--graphite);font-family:var(--f-mono);font-size:9px}
+.milestone-map .react-flow__edge-textbg{fill:var(--paper)}
+.milestone-map .react-flow__controls-button{background:var(--paper);border-bottom:1px solid var(--mist);fill:var(--ink)}
+.milestone-map .react-flow__controls-button:hover{background:var(--chalk)}
+.milestone-map .react-flow__attribution{background:transparent;color:var(--shade)}
+
+/* ── A lens ────────────────────────────────── */
+/* FullCalendar ships a rounded blue theme. These map it onto the same ink-on-paper system as every
+   other surface, so switching to the week view does not look like switching applications. */
+.calendar-detail{border-top:1.5px solid var(--ink);padding-top:14px}
+.calendar-detail .fc{--fc-border-color:var(--mist);--fc-page-bg-color:var(--paper);--fc-neutral-bg-color:var(--chalk);--fc-today-bg-color:var(--chalk);--fc-now-indicator-color:var(--now);font-family:var(--f-sans)}
+.calendar-detail .fc a{color:inherit}
+.calendar-detail .fc-toolbar{gap:10px;flex-wrap:wrap}
+.calendar-detail .fc-toolbar-title{font-family:var(--f-display);font-size:18px!important;letter-spacing:-.01em}
+.calendar-detail .fc .fc-button{border-radius:0;border:1px solid var(--mist);background:transparent;color:var(--ink);box-shadow:none;font-family:var(--f-mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;padding:5px 11px}
+.calendar-detail .fc .fc-button:hover{background:transparent;border-color:var(--ink)}
+.calendar-detail .fc .fc-button-primary:not(:disabled).fc-button-active,
+.calendar-detail .fc .fc-button-primary:not(:disabled):active{background:var(--ink);border-color:var(--ink);color:var(--paper)}
+.calendar-detail .fc .fc-button:focus-visible{outline:2px solid var(--ink);outline-offset:1px;box-shadow:none}
+.calendar-detail .fc .fc-button:disabled{opacity:.4}
+.calendar-detail .fc-col-header-cell-cushion,.calendar-detail .fc-timegrid-axis-cushion,.calendar-detail .fc-timegrid-slot-label-cushion{font-family:var(--f-mono);font-size:9.5px;letter-spacing:.08em;color:var(--graphite);text-transform:uppercase}
+.calendar-detail .fc-day-today .fc-col-header-cell-cushion{color:var(--ink);font-weight:600}
+.calendar-detail .fc-timegrid-now-indicator-line{border-color:var(--now);border-top-width:1.5px}
+.calendar-detail .fc-timegrid-now-indicator-arrow{border-color:var(--now);color:var(--now)}
+/* Reality is solid ink; an example is outlined — the same distinction the B lens draws with its
+   left border, so neither view can quietly present demo data as a real commitment. */
+.calendar-detail .fc-event{border-radius:0;border:1px solid var(--ink);background:var(--ink);color:var(--paper);box-shadow:none;padding:1px 2px}
+.calendar-detail .fc-event .fc-event-time{font-family:var(--f-mono);font-size:9px;letter-spacing:.04em}
+.calendar-detail .fc-event .fc-event-title{font-size:11px;line-height:1.35}
+.calendar-detail .fc-event.calendar-example{background:var(--paper);color:var(--ink);border-style:dashed;border-color:var(--shade)}
+.calendar-detail .fc-event.calendar-ai{background:var(--paper);color:var(--ink);border-left-width:4px}
+.calendar-detail .fc-event.calendar-ai.calendar-example{border-left-style:solid;border-left-color:var(--mist)}

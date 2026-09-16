@@ -1,0 +1,177 @@
+import {
+  MILESTONE_GATE_OUTPUT_SCHEMA, validateMilestoneGateResult,
+  type MilestoneGateContext, type MilestoneGateResult
+} from "@crossline/core";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
+import type { CrosslineStore } from "@crossline/db";
+
+const OWNER_ID = "local-owner";
+export const MILESTONE_GATE_SKILL = "crossline:crossline-milestone-gate";
+// Enough of an artifact to judge, bounded so one large file cannot crowd out the rest of the evidence.
+const ARTIFACT_TEXT_LIMIT = 40_000;
+
+const INSTRUCTIONS = "Judge the submitted evidence. Return only the requested JSON. Every quote must be "
+  + "copied verbatim from the supplied evidence text — never paraphrased, never invented. `verdict` "
+  + "answers one question only: did this work order deliver what its evidenceContract promised? `pass` "
+  + "is allowed exactly when every supplied evidenceContract requirement appears in contractCoverage "
+  + "with a non-null satisfiedBy, nothing incomplete blocks passing, and there are no blockers. Copy "
+  + "each requirement string back verbatim; a paraphrased or omitted requirement counts as uncovered. "
+  + "Separately, judge every milestone criterion exactly once and report it honestly; a milestone spans "
+  + "many work orders, so an unmet criterion is normal and is not a reason to withhold pass, and a "
+  + "criterion must never be marked met to justify a verdict. Quote verbatim only for met or partial; "
+  + "for unmet or unverifiable leave evidenceQuote empty and explain in observed and shortfall. Do not "
+  + "modify criteria, do not perform missing work, and do not accept external effects.";
+
+type GateOutcome =
+  | { state: "accepted" | "held"; workOrderId: string; verdict: MilestoneGateResult["verdict"] }
+  | { state: "blocked"; workOrderId: string; code: string; message: string };
+
+export function buildMilestoneGateContext(store: CrosslineStore, workspaceId: string, workOrderId: string):
+  { context: MilestoneGateContext; evidenceTexts: string[] } | { blocker: { code: string; message: string } } {
+  const order = store.listWorkOrders(workspaceId).find((item) => item.id === workOrderId);
+  if (!order) return { blocker: { code: "WORK_ORDER_NOT_FOUND", message: "找不到该作业。" } };
+  if (order.state !== "evidence_review") return { blocker: { code: "EVIDENCE_REVIEW_NOT_READY", message: "该作业不在证据审阅阶段。" } };
+  const milestone = store.listMilestones(workspaceId).find((item) => item.id === order.milestoneId && item.status === "approved");
+  if (!milestone) return { blocker: { code: "MILESTONE_NOT_FOUND", message: "找不到已批准的里程碑。" } };
+  // The gate is not allowed to invent a standard. A milestone with no stated criteria is refused here
+  // rather than being judged against whatever the model imagines the bar was.
+  if (milestone.verifiability === "unstated") {
+    return { blocker: { code: "MILESTONE_NEEDS_CRITERIA", message: "该里程碑还没有达成标准；先补指标再提交验收。" } };
+  }
+
+  const claims = store.listEvidenceClaims(workspaceId).filter((claim) => claim.workOrderId === workOrderId);
+  const execution = store.listExecutions(workspaceId).find((item) => item.workOrderId === workOrderId);
+  const relations = store.listMilestoneRelations(workspaceId)
+    .filter((relation) => relation.fromMilestoneId === milestone.id && relation.status !== "archived");
+  const milestonesById = new Map(store.listMilestones(workspaceId).map((item) => [item.id, item]));
+  const payload = order.payload as { evidenceContract?: Array<{ description?: string; kind?: string }> };
+
+  // Readable artifact text, as the Skill contract expects. Only materials this app wrote itself are
+  // read: their paths come from the `materials` table, never from anything the model supplied.
+  const artifacts: Array<{ id: string; kind: string; text: string }> = [];
+  for (const material of store.listMaterials(workspaceId, workOrderId)) {
+    if (!material.uri.startsWith("file://")) continue;
+    try {
+      artifacts.push({ id: material.id, kind: "artifact",
+        text: readFileSync(fileURLToPath(material.uri), "utf8").slice(0, ARTIFACT_TEXT_LIMIT) });
+    } catch { /* a material removed from disk simply cannot be quoted */ }
+  }
+
+  const evidenceClaims = [
+    ...claims.map((claim) => ({ id: claim.id, kind: claim.kind, text: claim.description })),
+    ...artifacts
+  ];
+  // Exactly the strings the gate may quote. This same array goes to the Skill and to the validator: a
+  // quote check against different text would prove nothing.
+  const evidenceTexts = evidenceClaims.map((claim) => claim.text);
+
+  return {
+    evidenceTexts,
+    context: {
+      version: "crossline.milestone-gate.v1",
+      milestone: {
+        id: milestone.id, title: milestone.title, version: milestone.version,
+        successCriteria: milestone.successCriteria
+      },
+      evidencePolicy: "tiered",
+      evidenceClaims,
+      evidenceContract: (payload.evidenceContract ?? [])
+        .map((item) => ({ requirement: item.description ?? item.kind ?? "" }))
+        .filter((item) => item.requirement),
+      execution: {
+        startedAt: execution?.startedAt ?? null,
+        endedAt: execution?.endedAt ?? null,
+        pauseMinutes: execution?.pauseMinutes ?? 0,
+        interruptions: (execution?.interruptions ?? []).map((item) => ({ reason: item.reason }))
+      },
+      outgoingRelations: relations.map((relation) => ({
+        id: relation.id,
+        targetMilestoneId: relation.toMilestoneId,
+        targetIdentityId: milestonesById.get(relation.toMilestoneId)?.identityId ?? "",
+        kind: relation.kind,
+        status: relation.status
+      }))
+    }
+  };
+}
+
+/**
+ * Runs the milestone gate for one WorkOrder sitting in `evidence_review`.
+ *
+ * A `pass` auto-accepts without asking, which is a deliberate decision — and the reason the checks
+ * around it are strict: the verdict must be internally consistent, every quote must really appear in
+ * the submitted evidence, the acceptance is revocable, and a relation the evidence contradicts is
+ * refuted rather than quietly left standing. All of that lives in `applyMilestoneGate`.
+ */
+export function createMilestoneGate(store: CrosslineStore, workspaceId: string, cwd: string,
+  getClient: () => CodexRpcBoundary | undefined) {
+  return async function judge(workOrderId: string): Promise<GateOutcome> {
+    const client = getClient();
+    if (!client) return { state: "blocked", workOrderId, code: "CODEX_SUPERVISOR_UNAVAILABLE", message: "Codex 运行时不可用。" };
+
+    const built = buildMilestoneGateContext(store, workspaceId, workOrderId);
+    if ("blocker" in built) return { state: "blocked", workOrderId, ...built.blocker };
+    const { context, evidenceTexts } = built;
+
+    const result = await runCodexSkill<MilestoneGateResult>(client, context, {
+      skillName: MILESTONE_GATE_SKILL,
+      cwd,
+      developerInstructions: INSTRUCTIONS,
+      outputSchema: MILESTONE_GATE_OUTPUT_SCHEMA,
+      prepareInput: () => context,
+      // Quotes are checked against the submitted evidence before the verdict is allowed to mean
+      // anything, so a fluent judgement built on invented text cannot accept the work.
+      validateOutput: (output) => validateMilestoneGateResult(output as MilestoneGateResult,
+        context.milestone.successCriteria, evidenceTexts,
+        context.evidenceContract.map((item) => item.requirement)),
+      onAudit: () => {},
+      timeoutMs: 10 * 60_000
+    });
+    if (!result.ok) {
+      // A gate that could not run (timeout, quota, runtime gone) leaves the order in `evidence_review`.
+      // Recorded so the tick stops re-running it: judging is premium spend, and fifteen minutes later
+      // with the same inputs would fail the same way. `pendingMilestoneGates` reopens it on request.
+      store.appendEvent({
+        ownerId: OWNER_ID, workspaceId,
+        idempotencyKey: `milestone-gate:blocked:${workOrderId}:${result.blocker.code}`,
+        type: "milestone_gate.blocked", entityId: workOrderId, payload: result.blocker
+      });
+      return { state: "blocked", workOrderId, code: result.blocker.code, message: result.blocker.message };
+    }
+
+    // Keyed on the attempt, not just the milestone version. With only the version, a second judgement
+    // of the same order — after the person added evidence and resubmitted — reused a spent key, the
+    // transition became a no-op, and the order stayed in `evidence_review` while the ledger recorded
+    // an acceptance that never happened.
+    const attempt = store.listEvents().filter((event) => event.workspaceId === workspaceId
+      && event.entityId === workOrderId && event.type === "milestone_gate.judged").length;
+    const applied = store.applyMilestoneGate(workspaceId, workOrderId, result.output, evidenceTexts,
+      `milestone-gate:${workOrderId}:${context.milestone.version}:${attempt}`);
+    return {
+      state: applied.state === "accepted" ? "accepted" : "held",
+      workOrderId,
+      verdict: result.output.verdict
+    };
+  };
+}
+
+/** Every WorkOrder waiting on the milestone gate whose judging has not already failed. */
+export function pendingMilestoneGates(store: CrosslineStore, workspaceId: string): string[] {
+  // Same last-word-wins rule material preparation uses: a recorded failure closes the order to the
+  // timer, and an explicit request from the person reopens it.
+  const decided = new Map<string, "closed" | "retry">();
+  for (const event of store.listEvents()) {
+    if (event.workspaceId !== workspaceId) continue;
+    // A revoked acceptance closes the order to the timer just as a failed run does. Without it the
+    // gate re-judged the same unchanged evidence on the next tick, passed it again, and undid the
+    // person's override — a revoke button that revokes for fifteen minutes is not a revoke button.
+    if (event.type === "milestone_gate.blocked" || event.type === "milestone_gate.auto_acceptance_revoked") {
+      decided.set(event.entityId, "closed");
+    } else if (event.type === "milestone_gate.retry_requested") decided.set(event.entityId, "retry");
+  }
+  return store.listWorkOrders(workspaceId)
+    .filter((order) => order.state === "evidence_review" && order.milestoneId && decided.get(order.id) !== "closed")
+    .map((order) => order.id);
+}

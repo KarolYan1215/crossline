@@ -1,0 +1,28 @@
+node_modules/
+.next/
+.next-e2e/
+*.log
+.artifacts/
+crossline-test-*.db*
+coverage/
+dist/
+data/
+backups/
+restored/
+*.db
+*.db-shm
+*.db-wal
+.env*
+!.env.example
+playwright-report/
+test-results/
+.pnpm-store/
+.vendor/
+.superpowers/
+apps/web/public/sw.js
+apps/web/public/sw.js.map
+
+# Materials the preparer writes for a work order. The ledger rows that point at them live in
+# `data/`, which is ignored — committing the files without the rows that give them meaning would
+# put personal work product in version control and still not restore to anything usable.
+.crossline-materials/

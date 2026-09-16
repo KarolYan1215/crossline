@@ -1,0 +1,12 @@
+packages:
+  - apps/*
+  - packages/*
+
+onlyBuiltDependencies:
+  - better-sqlite3
+  - esbuild
+allowBuilds:
+  '@azure/msal-node-extensions': true
+  better-sqlite3: set this to true or false
+  esbuild: true
+  keytar: true

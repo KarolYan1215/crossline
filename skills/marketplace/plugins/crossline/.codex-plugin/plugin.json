@@ -1,0 +1,19 @@
+{
+  "name": "crossline",
+  "version": "0.1.0",
+  "description": "Evidence-first local orchestration skills for Crossline.",
+  "author": {
+    "name": "Crossline"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Crossline",
+    "shortDescription": "Evidence-first local work orchestration",
+    "longDescription": "Local skills for bounded work analysis, preparation, planning, milestone gating, and cross-identity reuse.",
+    "developerName": "Crossline",
+    "category": "Productivity",
+    "capabilities": ["Interactive"],
+    "defaultPrompt": ["Use Crossline to analyze this captured work item."],
+    "brandColor": "#6D5EF5"
+  }
+}

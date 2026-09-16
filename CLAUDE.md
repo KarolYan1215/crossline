@@ -1,0 +1,156 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## What this is
+
+Crossline (跨人生主线执行看板) — a local-first execution board that unifies tasks and evidence across multiple "identities" (研究/科研, 创业, 自媒体, 投资) sharing one task/evidence ledger, with health treated as a capacity constraint rather than a competing identity. Everything runs on one machine against a local SQLite ledger; there is currently no live external write path (see Safety boundaries below). UI copy and commit-facing text in this repo are in Chinese.
+
+Current closed loop (per README): natural-language capture → system infers identity + duration bucket → a `WorkOrder` is generated → next-action recommendation → B/C/A plan preview with batch approval → manual completion submission → evidence acceptance on the approvals page. Plan versions, recurring milestone relations, state transitions, and approval events are written to local SQLite WAL — not static frontend data.
+
+## Commands
+
+Run from the repo root (pnpm workspace, Node >=22, pnpm 11.19.0):
+
+```powershell
+pnpm install
+pnpm dev              # starts @crossline/web (Next.js) on http://127.0.0.1:3210
+pnpm worker           # starts @crossline/worker in watch mode
+pnpm test             # vitest run, across packages/**/*.test.ts and apps/**/*.test.{ts,tsx}
+pnpm test:watch       # vitest watch mode
+pnpm test:e2e         # playwright test (visual regression + flow coverage, see e2e/)
+pnpm typecheck        # tsc --noEmit in every workspace package (pnpm -r typecheck)
+pnpm build            # next build for @crossline/web
+```
+
+Single test file / single package:
+
+```powershell
+pnpm vitest run packages/planner/src/planner.test.ts
+pnpm --filter @crossline/db typecheck
+pnpm exec playwright test e2e/crossline.spec.ts
+```
+
+Worker one-shot run (used for smoke checks — ticks once and exits instead of looping):
+
+```powershell
+$env:CROSSLINE_RUN_ONCE='1'; pnpm worker:start
+```
+
+Export a full ledger snapshot to JSON:
+
+```powershell
+pnpm export -- C:\path\to\crossline.json
+```
+
+Rebuild a database from a snapshot (never writes to the live ledger; target must not already exist):
+
+```powershell
+pnpm restore -- C:\path\to\crossline.json C:\path\to\target.db
+```
+
+Codex app-server contract smoke test (pins against the commit recorded in `codex-baseline.json`):
+
+```powershell
+pnpm exec tsx scripts\codex-smoke.ts
+```
+
+Production start / scheduled-task install / backup / restore are PowerShell scripts under `scripts/` — see "Operational scripts" below. Do not run `install-startup.ps1` unless the user explicitly asks; it registers a Windows Scheduled Task.
+
+## Architecture
+
+**Workspace layout:** `pnpm-workspace.yaml` wires `apps/*` and `packages/*`. Packages export raw TypeScript directly (`"exports": "./src/index.ts"`, no build step) and are consumed by `apps/web` and `apps/worker` via `workspace:*`. `better-sqlite3` and `esbuild` need `onlyBuiltDependencies` approval in `pnpm-workspace.yaml`.
+
+**The day head clock (`apps/web/app/analog-clock.tsx`):** a real dial — ticks, numerals, hour/minute hands, a green second hand — placed from the same instant the rest of the page uses, read in `CROSSLINE_TIME_ZONE` (falling back to `America/Chicago`) rather than the browser's own zone so the dial and the 「周三 11:25」 label cannot disagree. Under `CROSSLINE_FIXED_NOW` it does not tick and drops the second hand, which is what keeps the visual-regression snapshot reproducible. It replaced a bare circle with one motionless dot that carried `aria-label="此刻 …"` and showed nothing.
+
+**Data flow:** `apps/web/lib/crossline.ts` is the sole server-side entry point into persistence for the web app — it lazily creates a singleton `CrosslineStore` (SQLite, WAL mode) rooted at `CROSSLINE_DATA_DIR` (default `../../data` relative to `apps/web`), seeds starter milestones/relations/work-orders/a draft plan on first run, and exposes read/write helpers used by the Next.js route handlers under `apps/web/app/api/`. `CROSSLINE_FIXED_NOW` overrides the dashboard's notion of "now" (used by e2e tests for deterministic snapshots); `CROSSLINE_PRIMARY_CLOCK_ID` (default `research`) picks which identity gets deadline-tier priority as the master clock.
+
+**Event-sourced ledger (`packages/db`):** `CrosslineStore` owns the SQLite schema: an append-only `events` table keyed by `(workspace_id, idempotency_key)` plus current-state tables led by `work_orders`, versioned milestones, relations, plans, executions, evidence, capacity and connector bindings. `StoredTask` is gone. If an old `tasks` table exists, open-time migration first copies a file DB to `.v1.bak` or `.pre-r2.bak`, migrates non-health rows to WorkOrders and health rows to capacity commitments, then drops the legacy table. New databases never create it. `exportSnapshot()` returns typed current models plus the generic workspace-scoped table dump.
+
+**Offline command replay:** `CommandEnvelope` is validated and posted to `apps/web/app/api/commands/route.ts`, which re-checks scope and currently permits only `task.capture`. `clientCommandId` is the ledger idempotency key. Completion is intentionally not an offline shortcut: Today links to Workbench, where execution and evidence follow the WorkOrder state machine.
+
+**Natural-language capture:** `addCapturedTaskWithId` in `apps/web/lib/crossline.ts` writes one `captures` row and nothing else — no identity, no estimate, no `Task` and no `WorkOrder`. Classification only happens when an explicit Analyze runs the `crossline-automation-stripper` Skill through the worker-owned Codex app-server (`apps/worker/src/analysis.ts`, `packages/codex/src/analysis.ts`) and the result passes `validateAnalysisProposal` (`packages/core/src/analysis.ts`); only then does `transitionWorkOrder` atomically promote the capture to an `awaiting_plan_approval` WorkOrder. A failed, refused, timed-out or unauthenticated analysis leaves a typed blocker on the capture, and a blocked capture can be re-analysed (each attempt gets its own idempotency key via `captures.attempt`). There is no keyword-regex identity guess and no 25/30/60 minute default anywhere in this path.
+
+**Work orders:** WorkOrder is the only executable model: `captured → analyzing → awaiting_plan_approval → approved → preparing → ready_for_human → active → evidence_review → accepted`, plus `blocked`/`archived`. All execution and evidence changes route through `transitionWorkOrder`; a milestone-bound WorkOrder cannot be accepted with zero evidence. `archiveWorkOrder` (the 丢弃 button, reason required) is the only thing that emits `archived`; discarded orders leave the board for a drawer, never the ledger. Starting an order that already has materials on disk skips `preparing` — going back there would strand it, because the worker skips orders that already have materials.
+
+**Approval policy is centralized:** `requiredApproval(action)` in `packages/core` is the single source of truth for whether an action is `"automatic" | "batch" | "per_item" | "never"`. Actions like `broker_order` and `silent_source_calendar_write` are permanently `"never"` — connectors and UI should defer to this function rather than re-deriving policy.
+
+**Plan versions (B/C/A):** `apps/web/app/plan/page.tsx` + `plan-view.tsx` render one shared timeline in three lenses — B (reality + AI blocks in parallel), C (approve/reject diffs), A (day/week detail via `calendar-detail.tsx`, built on FullCalendar). All three read the same `StoredPlanVersion`/`StoredPlanChange` rows. `approvePlanVersion(planId)` (`apps/web/lib/crossline.ts`, exposed at `apps/web/app/api/plans/[id]/approve/route.ts`) refuses to approve a plan with an unresolved `conflict`-kind change (`PLAN_HAS_UNRESOLVED_CONFLICT`), otherwise marks all pending changes approved and the plan version approved in one step, appending a `plan.approved` event.
+
+**Milestones:** `(id, version)` is the primary key and `listMilestones` returns only `MAX(version)`, so an edit writes a new version and the criteria a gate already judged against stay readable. `apps/web/app/milestones/milestone-admin.tsx` is the create/revise/approve/archive surface; `POST /api/milestones` is the single write path (`saveMilestoneEdit`). `SuccessCriterion.evidenceOf` declares whether a criterion measures an **output** (something now exists) or an **outcome** (something changed) — the distinction is a judgement, so it is declared and reviewed rather than computed, and `criteriaCoverOutcome` only warns: an all-output milestone still saves, because the criteria belong to the user. `POST /api/milestones/propose` reaches the supervisor's `/v1/milestones/propose`, which runs `crossline-milestone-architect` and stores everything as `draft` — analysis and the gate only ever look at `approved`, so a draft is inert until the user approves it.
+
+**Calendar reality (`apps/worker/src/graph-sync.ts`):** `GraphReadSource` is a read-only class with no write methods at all, kept separate from `MicrosoftGraphConnector` on purpose — that connector's `Crossline` name lock is what keeps writes off a real calendar, and reading the user's own calendar needs no lock because this class structurally cannot write. Delta cursors live in `external_bindings` via `saveSyncCursor`/`readSyncCursor`. A 410 `resyncRequired` restarts from the base URL and the result is treated as the complete current set — items deleted during the gap never come back as tombstones, so anything locally present and missing from the resync is dropped. A **draft** plan is updated in place; an **approved** plan is never rewritten, and reality moving under it opens a new draft version whose changes are all `conflict`. `resolvePlanChange` plus the C-lens buttons exist because `approvePlanVersion` refuses while a conflict is pending and nothing could previously clear one — a single calendar change would otherwise have made the plan permanently unapprovable.
+
+**Milestone relations:** `apps/web/app/milestones/page.tsx` + `milestone-map.tsx` render a graph of `milestone_relations` (`enables`/`reuses`/`informs`/`constrains`/`recurring_feedback`) between milestones across identities — cycles are allowed (e.g. media → research is a deliberate `recurring_feedback` loop), and there is intentionally no LLM-generated cross-identity score. A relation carries `explanation` (what it claims) and `refutedWhen` (what would show it wrong); both are NULL on pre-existing seed rows, which the review page shows as unreviewable rather than dressing up. The nightly flywheel proposes relations as `candidate` only, with a stable id (`flywheel:<from>-><to>:<kind>`) so re-proposals update one row; it never touches a relation that is already `approved` or `refuted`, and never clears recorded counterexamples. `decideMilestoneRelations` is the batch approval (`requiredApproval("approve_milestone_relations")` → `"batch"`, route at `apps/web/app/api/milestone-relations/decide/route.ts`): it moves only candidates, refuses to approve a relation with no evidence, and returns everything it did not move in `skipped`. Rejection writes `archived`; `refuted` stays reserved for the milestone gate finding evidence that contradicts a relation.
+
+**Planner (`packages/planner`):** Greedy `planSchedule` assigns WorkOrder-shaped inputs to availability slots while respecting declared energy, deadline and continuity, returning typed capacity blockers. Unknown energy stays unset and cannot become a low-energy recommendation. `recommendNextActions` uses lexicographic ordering; there is no contribution score, switching-cost score or HiGHS shadow solver.
+
+**Energy observations (`apps/web/app/energy-probe.tsx` + `app/api/energy-observations/route.ts`):** The active input path is a 5-second L/M/H self-report. The MediaPipe/camera path and expiry model are removed. The API rejects camera input, raw media, unknown fields and non-aggregate features.
+
+**Connectors (`packages/connectors`):** `ConnectorAdapter` is the common interface (`probe/pull/push/verify/health`) implemented by `MicrosoftGraphConnector` (personal Outlook calendar + Microsoft To Do, both hard-locked to targets literally named `"Crossline"` — the constructor throws `GRAPH_TARGET_NOT_CROSSLINE` otherwise) and `ContentOpsConnector` (idempotent `POST /v1/jobs` + authenticated `GET /v1/jobs/{id}` polling). Graph writes require `payload.approved === true` and, for updates, both an `etag` (`if-match`) and `externalId`; a 409/412 response surfaces as `GRAPH_SOURCE_VERSION_CONFLICT`. `reconcileExternalItems` dedups by `iCalUid`/`provider:externalId` and flags same-title-near-time items as `fuzzyGroups`, plus multi-etag `SOURCE_VERSION_CONFLICT`s. `longbridgeToolAllowed` is a hard allowlist of read-only market-data tool names — account/trading tools are never permitted here. Per the README, the MSAL/Graph adapter code path exists but is not yet live (no Entra app client ID configured, no real read evidence).
+
+**Codex app-server bridge (`packages/codex` + `apps/worker` + `apps/web/lib/codex-runtime.ts`):** The worker owns one isolated app-server sidecar. On startup it installs `skills/marketplace/.agents/plugins/marketplace.json` into the isolated CODEX_HOME and verifies all nine `crossline:crossline-*` skills through `skills/list`. Analysis serializes the global skill setting, enables the target by path, invokes it with `$crossline:crossline-automation-stripper`, and restores the original state. SKILL.md text is never read into `baseInstructions`. The supervisor exposes safe status/account/login/cancel endpoints and typed runtime/plugin blockers.
+
+**Skill wire contracts** all live in `packages/core`: `analysis.ts`, `flywheel-schema.ts` (findings + candidate relations), `materials-schema.ts`, `milestone-gate-schema.ts` (gate result, criteria proposal, milestone proposal), and `reality.ts` (the pure calendar-vs-plan diff). Keeping them there is what stops a Skill's shape and its trust checks drifting apart.
+
+A contract item is `{ kind, description, why, required }` in both `materialContract` and `evidenceContract`. `description` is the checklist line (≤120, no `{}[]`, refused if it lands exactly on the limit — that means it was cut off); `why` is the reason and carries no punctuation rule, because a reason is a sentence and sentences quote things. `why` exists because every split in the schema has a `rationale` and a contract item had none: the model had something real to say and one field to say it in, so it packed the reason into the name and filled whatever cap was set — 4000, then 300, then 200, then 80, each treated as a target. With `why` in place the names came back at 6–8 characters. Two normalizations run before validation, both of which only ever remove text that repeats text already present: a tail of one character repeated eight or more times is trimmed, and a sentence whose whole second half already appeared earlier is dropped. `required` on `materialContract` is what lets the preparer tell "I cannot start without this" from "this would help" — without it one nice-to-have the person had not supplied blocked the entire preparation and they got nothing. `validateAnalysisProposal` names the offending quote or contract line in its blocker, because a bare code gave the person nothing to retry against.
+
+**Skill deadlines are uniform at ten minutes** — analysis, material preparation and the milestone gate. Analysis previously had two, the tightest in the system despite being the Skill every capture goes through, and a real capture overran it. Nothing waits on that number any more: `POST /v1/captures/:id/analyze` answers after twenty seconds with `{state:"analyzing"}`, which is a true reading of the ledger (the analyzer claims the row before its first await), and the run finishes in the background and writes its own outcome.
+
+**The worker tick never overlaps itself.** `setInterval` fires a guarded callback that skips and logs `worker.tick_skipped` while the previous tick is still running; the web health probe is additionally bounded by a hard ten-second race. Material preparation and the gate each allow ten minutes against a fifteen-minute interval, so overlap is the normal case — two concurrent ticks read the same pending list before either writes, prepare or judge the same order twice, and race on one delta cursor.
+
+**Identity packs (`packages/identity-packs`):** `defaultIdentityPacks()` is the static registry of the four identities plus the `health` capacity pack (`kind: "capacity"`), each declaring its `workflowTemplates` and `evidencePolicy` (`"tiered"` vs `"telemetry"`). `research` is currently the only pack with `masterClock: true`.
+
+**Skills (`skills/marketplace/plugins/crossline/skills`):** The repo-local `crossline` plugin contains one orchestration skill and eight phase-specific skills. Identity structure remains in `packages/identity-packs`; user-specific overlay data remains under ignored `data/`. Do not duplicate plugin skills back into top-level `skills/`.
+
+## End-to-end tests
+
+`e2e/crossline.spec.ts` (Playwright, config at `playwright.config.ts`) drives a dedicated `next dev` instance on port 3310 (3211 belongs to the resident worker's Codex supervisor) with its own temp data dir (`CROSSLINE_DATA_DIR` under the OS temp dir, keyed by PID) and `CROSSLINE_NEXT_DIR=.next-e2e` so it never collides with the port-3210 dev server or its `.next` build. `CROSSLINE_FIXED_NOW` pins the clock so visual-regression PNGs (`e2e/crossline.spec.ts-snapshots/`) are reproducible. Runs `desktop-chrome` and `mobile-chrome` (Pixel 7) projects, `colorScheme: "light"`, `fullyParallel: false`. When intentionally changing layout, regenerate snapshots with `pnpm exec playwright test --update-snapshots` rather than hand-editing the PNGs.
+
+## Safety boundaries (do not casually change)
+
+These constraints are enforced in code, not just docs — read the relevant source before loosening any of them:
+
+- Microsoft Graph writes only ever target a calendar/list literally named `Crossline`; `connectorWritePolicy` returns `"read_only"` for everything else and Graph writes require explicit approval (`payload.approved === true`) plus ETag-checked updates.
+- UW Outlook and Google Calendar are read-only, imported only via the official Codex plugin (not implemented in this repo's connectors).
+- Longbridge (`longbridgeToolAllowed`) permits only market-data/reference tools — no account or order-placement tools.
+- `content-ops` only accepts idempotent `POST /v1/jobs` and reads real terminal state via authenticated `GET /v1/jobs/{id}`.
+- No real Graph OAuth, outreach, publishing, or trading is currently wired up — `requiredApproval` returns `"never"` for `broker_order` and `silent_source_calendar_write` by design.
+- The camera energy probe has been removed entirely; no browser media capture exists in this app. The energy API accepts only `self_report` with a numeric `responseSeconds` aggregate (`CAMERA_ENERGY_PATH_REMOVED`, `RAW_MEDIA_OR_UNKNOWN_FIELD_FORBIDDEN`, `AGGREGATE_FEATURES_ONLY`). Re-introducing any camera path requires an explicit decision, not a refactor.
+
+If a change would add or enable a real external write path (Graph OAuth, publishing, trading, outreach) or would let raw camera/media data leave the browser, flag it explicitly — these are deliberate, currently-unimplemented boundaries per the project README, not oversights.
+
+## Release gate status (from README, update as gates change)
+
+- Gate 1 (local correctness): automated — SQLite v2 schema, WorkOrder lifecycle, Skills, Codex app-server contract, plan approval, offline UI, and visual regression all have test coverage. Re-run the full command list above before every release regardless.
+- Gate 2 (read-only external import): done (real run, 2026-09-16). The resident worker pulls the UW calendar with a persisted DPAPI token — no second device code — and writes today's events into the plan's reality lane; cursors live in `external_bindings`. Recurring occurrences arrive from `calendarView/delta` without a subject (12 of 21 on the first real run), so `GraphReadSource` resolves the title from the series master, once per series. Write-back stays off.
+- Gate 3 (Graph write-back): disabled — personal `Crossline` calendar/To Do write-back stays off until real read-only sync + plan-diff acceptance is demonstrated.
+- Gate 4 (Codex material prep): done (real run on the live ledger, 2026-09-16). `apps/worker/src/material-runner.ts` invokes `crossline-material-preparer` for work orders sitting in `preparing`; `apps/worker/src/milestone-gate-runner.ts` invokes `crossline-milestone-gate` for work orders in `evidence_review`. **Both now run on the worker tick and both have a run-it-now supervisor route** (`/v1/work-orders/:id/prepare-materials`, `/v1/work-orders/:id/milestone-gate`, each answering 202 and finishing in the background) behind the 重新准备材料 and 现在判定 buttons — until 2026-09-16 the gate existed only inside `scripts/gate-loop-check.ts`, so on the real ledger nothing ever judged a submission. Neither job is retried on a timer: `pendingMaterialWorkOrders` and `pendingMilestoneGates` both apply last-word-wins over a `…blocked`/`…retry_requested` pair, and the gate additionally treats a revoked acceptance as closed, or the next tick would re-judge the same evidence and undo the revocation.
+
+  **What `pass` means.** The gate answers one question: did this work order deliver what its own `evidenceContract` promised? It used to require every required measured criterion of the whole *milestone* to be met by one submission, which on a real ledger is almost never true — correct work came back 「证据不足」 and blocked. The milestone's criteria are still judged, all of them, and every judgement appends `milestone_gate.judged`; that is the milestone's progress record (best reading per criterion wins) and is what the Milestones and Review pages show. `applyMilestoneGate` throws `GATE_ALREADY_APPLIED` on a spent idempotency key rather than writing an acceptance audit for a transition that did not happen.
+
+  Three things that check keeps honest, each of which it got wrong once: `validateMilestoneGateResult` takes the work order's **own** `evidenceContract` and requires every requirement back verbatim with a non-null `satisfiedBy` — `contractCoverage.every(...)` alone is satisfied by an empty array, so the gate could be passed by reporting nothing. A verbatim quote is demanded only for `met`/`partial`; `unmet` and `unverifiable` carry an empty `evidenceQuote`, because there is no text to quote for something the evidence does not contain and an unmet milestone criterion is now the normal case. And the two run-it-now routes detach through `runDetached`, not `void p.finally(...)` — the latter still propagates the rejection, and since Node 15 an unhandled rejection terminates the process, so one click on an order the store then refused would have taken the worker down.
+
+**Calendar sync on demand:** `POST /v1/calendar/sync` → `/api/calendar/sync` → the Plan page's 立即同步日历. A read, awaited (unlike the two Skill routes) because it takes a second and the person clicked it to find out what changed; it only reloads the page when something did.
+
+**Discarding:** a WorkOrder leaves the board through `archiveWorkOrder`, a raw capture through `CrosslineStore.discardCapture` (state `discarded`, event `capture.discarded`). Both require a reason and both land in the Workbench's 已丢弃 drawer. A capture previously had `分析` as its only exit, so removing a duplicate cost a real Codex turn.
+- Gate 5 (content-ops / investment): partial — the content-ops authenticated read-only status endpoint passes its full check, but no real endpoint/token is configured for this deployment; investment tools only have the pre-call allowlist, no real report-run evidence yet.
+- Gates 6–7 (long-run validation): partial — HiGHS was removed in v2, and the **encrypted-restore drill really ran on 2026-09-15** (DPAPI decrypt → unzip → rebuild SQLite → read every table back; 8 events / 6 work orders / 4 milestones / 28 rows matching the live ledger). The 14-day comparison and the 4-week personal trial still need real run data.
+
+Design §12's nine acceptance criteria have reproducible evidence scripts: `gate-analysis-check.ts` (§12-1/2, a real Codex analysis into `awaiting_plan_approval`), `gate-loop-check.ts` (§12-3/4, material preparation through auto-acceptance), `gate-flywheel-check.ts` (§12-5, the only web-enabled Skill — expensive, never run as a side effect), and `gate-capacity-budget-check.ts` (§12-6/7). §12-8 is proven by `apps/web/lib/generality.test.ts`, which swaps the whole pack registry. All nine pass by real runs as of 2026-09-16; `docs/implementation-todo.md` carries the table and the evidence.
+
+**Skill wire contracts live in `packages/core`** (`analysis.ts`, `flywheel-schema.ts`, `materials-schema.ts`, `milestone-gate-schema.ts`). Two rules learned the hard way: structured output runs in strict mode, so every schema object needs `additionalProperties: false` *and* every property listed in `required` (express a union with `anyOf`, not optional fields); and this runtime's `web_search` takes `disabled | cached | live` — the wrong variant fails the whole `thread/start`, which is why the flywheel could never run before 2026-09-16.
+
+## Operational scripts (`scripts/`)
+
+- `start-crossline.ps1` — launches the **built** web app + worker as background processes (requires `pnpm build` first; fails fast if `apps/web/.next/BUILD_ID` is missing). Idempotent by design: it skips the web app when port 3210 already listens, and always launches the worker because a free supervisor port does not prove the worker is dead. The worker guards itself with a heartbeat lock at `data/worker.lock` — a redundant copy logs `worker.already_running` and exits 0 rather than opening a second SQLite writer, a stale heartbeat (3× the tick interval) is taken over, and `EPERM` from `process.kill(pid, 0)` counts as alive.
+- `install-startup.ps1` — registers a Windows Scheduled Task with two triggers: at logon, and repeating every 15 minutes. The repeating one is the watchdog — the launcher exits as soon as it has spawned its children, so Task Scheduler's own restart settings would never fire. Modifies Windows Task Scheduler; only run when the user explicitly asks.
+- `backup-crossline.ps1` — exports the ledger to JSON, zips it, encrypts with DPAPI (current Windows user), and verifies SHA-256 before deleting the plaintext temp file.
+- `restore-crossline-backup.ps1` — decrypts a backup and **rebuilds a working SQLite ledger** from it via `pnpm restore`, then reads every table back through the normal query path to verify. `CrosslineStore.importSnapshot` only ever rebuilds into an empty workspace (`RESTORE_TARGET_NOT_EMPTY`), the CLI refuses the live database (`RESTORE_TARGET_IS_LIVE_LEDGER`) and refuses to overwrite an existing file (`RESTORE_TARGET_EXISTS`). Replacing the live ledger stays a manual act. Snapshot table and column names are validated against `sqlite_master`/`PRAGMA table_info` before reaching SQL.
+
+## Notes
+
+- `apps/web/CLAUDE.md` is auto-generated by `next dev` (see `node_modules/next/dist/server/lib/generate-agent-files.js`) and just points at `apps/web/AGENTS.md`, which itself is regenerated boilerplate about the current Next.js version. Don't hand-edit either; regenerating them is expected and safe to commit.
+- Local dev DB files (`*.db`, `*.db-shm`, `*.db-wal`, `data/`, `backups/`) and `.env*` (except `.env.example`) are gitignored — never commit these. `apps/web/data-e2e/` (the e2e Playwright data dir) and `apps/web/.next-e2e/` fall under the same `.next*`/`*.db*` ignore patterns.
+- `tsconfig.base.json` sets `strict`, `noUncheckedIndexedAccess`, and `exactOptionalPropertyTypes` for the whole workspace; per-package `tsconfig.json` files extend it.
+- No commits exist on the current branch (`codex/crossline-mvp`) yet — everything in the working tree is untracked.

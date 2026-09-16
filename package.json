@@ -1,0 +1,33 @@
+{
+  "name": "crossline",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.19.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @crossline/web dev",
+    "worker": "pnpm --filter @crossline/worker dev",
+    "worker:start": "pnpm --filter @crossline/worker start",
+    "export": "pnpm --filter @crossline/worker export",
+    "restore": "pnpm --filter @crossline/worker restore",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "typecheck": "pnpm -r typecheck",
+    "build": "pnpm --filter @crossline/web build"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@types/better-sqlite3": "latest",
+    "@types/node": "latest",
+    "@vitejs/plugin-react": "6.1.1",
+    "typescript": "latest",
+    "vitest": "latest"
+  },
+  "dependencies": {
+    "better-sqlite3": "13.0.3"
+  }
+}

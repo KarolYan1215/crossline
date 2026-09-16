@@ -1,0 +1,23 @@
+{
+  "name": "@crossline/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "export": "tsx src/export.ts",
+    "restore": "tsx src/restore.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@crossline/codex": "workspace:*",
+    "@crossline/core": "workspace:*",
+    "@crossline/identity-packs": "workspace:*",
+    "@crossline/connectors": "workspace:*",
+    "@crossline/db": "workspace:*",
+    "@crossline/planner": "workspace:*",
+    "tsx": "4.23.13"
+  },
+  "devDependencies": { "@types/node": "26.5.1" }
+}

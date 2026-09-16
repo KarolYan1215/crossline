@@ -1,0 +1,42 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { getStore, WORKSPACE_ID } from "../../../../../lib/crossline";
+
+/**
+ * Serves one prepared material back to the person who asked for it.
+ *
+ * The board recorded materials as raw `file:///…` URIs, which a browser will not open — so a work order
+ * could finish preparation and the person still had no way to read what was prepared without leaving
+ * the app and pasting a path into a file manager.
+ *
+ * The URI is not taken from the query string: the caller names a work order, and the path comes from
+ * the ledger row. Anything that is not a recorded material for that work order, or that resolves
+ * outside that work order's own materials folder, is not served.
+ */
+const PROJECT_ROOT = path.resolve(process.cwd(), "..", "..");
+
+export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
+  const { id } = await context.params;
+  if (!/^[a-zA-Z0-9_-]{1,128}$/.test(id)) return new Response("NOT_FOUND", { status: 404 });
+  const uri = new URL(request.url).searchParams.get("uri") ?? "";
+  const material = getStore().listMaterials(WORKSPACE_ID, id).find((item) => item.uri === uri);
+  if (!material) return new Response("MATERIAL_NOT_FOUND", { status: 404 });
+
+  const root = path.resolve(PROJECT_ROOT, ".crossline-materials", id);
+  let file: string;
+  try { file = fileURLToPath(material.uri); } catch { return new Response("MATERIAL_NOT_FOUND", { status: 404 }); }
+  const relative = path.relative(root, file);
+  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+    return new Response("MATERIAL_PATH_OUTSIDE_ROOT", { status: 403 });
+  }
+  try {
+    return new Response(readFileSync(file, "utf8"), {
+      headers: {
+        // Always text/plain: the material is displayed, never executed, whatever media type it claims.
+        "content-type": "text/plain; charset=utf-8",
+        "content-disposition": `inline; filename="${path.basename(file)}"`
+      }
+    });
+  } catch { return new Response("MATERIAL_UNREADABLE", { status: 404 }); }
+}

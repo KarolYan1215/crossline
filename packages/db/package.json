@@ -1,0 +1,10 @@
+{
+  "name": "@crossline/db",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "dependencies": { "better-sqlite3": "13.0.3", "@crossline/core": "workspace:*" },
+  "devDependencies": { "@types/better-sqlite3": "9.6.0" },
+  "scripts": { "typecheck": "tsc --noEmit -p tsconfig.json" }
+}
