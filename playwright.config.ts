@@ -16,8 +16,14 @@ export default defineConfig({
   },
   // Port 3310, not 3211: the resident worker owns 3211 for the Codex supervisor. Sharing it meant e2e
   // either failed to bind or — worse — answered the web app's own supervisor calls with itself.
+  //
+  // A production build, not `next dev`. `next.config.mjs` disables Serwist in development, so the
+  // whole offline story — the app's headline claim — had no service worker to test against and could
+  // not have been verified here no matter what a test asserted. Building costs a few seconds and buys
+  // an environment that matches what actually runs.
   webServer: {
-    command: "pnpm --filter @crossline/web exec next dev --webpack --hostname 127.0.0.1 --port 3310",
+    command: "pnpm --filter @crossline/web exec next build --webpack"
+      + " && pnpm --filter @crossline/web exec next start --hostname 127.0.0.1 --port 3310",
     url: "http://127.0.0.1:3310/api/health",
     env: {
       CROSSLINE_DATA_DIR: e2eDataDir,
@@ -25,7 +31,7 @@ export default defineConfig({
       CROSSLINE_FIXED_NOW: "2026-09-14T16:45:00.000Z"
     },
     reuseExistingServer: false,
-    timeout: 120_000
+    timeout: 240_000
   },
   projects: [
     { name: "desktop-chrome", use: { ...devices["Desktop Chrome"], channel: "chrome", viewport: { width: 1440, height: 1100 } } },

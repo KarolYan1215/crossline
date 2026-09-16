@@ -77,3 +77,54 @@ test("mobile navigation and reduced motion remain usable", async ({ page }, test
   await expect(page.getByRole("link", { name: "Approvals" })).toBeVisible();
   await expect(page.locator(".hero-action")).toBeVisible();
 });
+
+/**
+ * The offline claim, tested against a real service worker for the first time.
+ *
+ * This could not be verified before: the suite ran `next dev`, and `next.config.mjs` disables Serwist
+ * in development, so no service worker was ever registered here. It was not "unverified", it was
+ * unverifiable, and no assertion written against that setup would have meant anything.
+ */
+test("the app opens with the network down, and the offline capture queues", async ({ page, context }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-chrome");
+
+  await page.goto("/");
+  // First load installs it; a second load is what puts it in control of the page.
+  await page.waitForFunction(() => navigator.serviceWorker.ready.then(() => true), null, { timeout: 30_000 });
+  await page.reload();
+  expect(await page.evaluate(() => Boolean(navigator.serviceWorker.controller))).toBe(true);
+
+  await context.setOffline(true);
+
+  // Proves the offline switch actually bit. Without this the test would pass just as happily if
+  // `setOffline` were a no-op — Playwright's interception of service-worker requests has a history of
+  // being unreliable, so the cut has to be demonstrated rather than assumed.
+  const reachable = await page.evaluate(() => fetch("/api/health", { cache: "no-store" }).then(() => true, () => false));
+  expect(reachable).toBe(false);
+
+  await page.reload();
+  // The headline claim: the shell came from the cache, not the server.
+  await expect(page.getByRole("link", { name: "Workbench" })).toBeVisible();
+  await expect(page.locator(".analog-clock")).toBeVisible();
+
+  // And a capture taken while down is kept rather than lost.
+  await page.getByPlaceholder("写下一项任务、想法，或粘贴一个链接…").fill("断网时记下的一条");
+  await page.getByRole("button", { name: "CAPTURE ↗" }).click();
+  await expect(page.getByRole("status")).toContainText("已离线保存，联网后自动同步");
+
+  const queued = await page.evaluate(async () => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open("crossline-offline", 1);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    return new Promise<number>((resolve, reject) => {
+      const query = db.transaction("pending", "readonly").objectStore("pending").getAll();
+      query.onsuccess = () => resolve(query.result.length);
+      query.onerror = () => reject(query.error);
+    });
+  });
+  expect(queued).toBe(1);
+
+  await context.setOffline(false);
+});
