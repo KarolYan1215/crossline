@@ -149,6 +149,11 @@ export class CrosslineStore {
     this.#db = new Database(path);
     this.#db.pragma("journal_mode = WAL");
     this.#db.pragma("foreign_keys = ON");
+    // Deliberately no `busy_timeout` and no `journal_size_limit` here. Both looked necessary and
+    // measured out as non-problems: better-sqlite3 already defaults the busy timeout to 5000ms, and
+    // the 4 MB WAL beside this 352 KB database is not a missing checkpoint — it is the automatic
+    // checkpoint threshold doing its job, with the file reused rather than truncated. Four megabytes
+    // costs nothing, and a `journal_size_limit` equal to the threshold would not have shrunk it.
     const previousVersion = Number(this.#db.pragma("user_version", { simple: true }));
     const hasLegacyTasks = this.#hasTable("tasks");
     if (hasLegacyTasks && path !== ":memory:" && existsSync(path)) {
