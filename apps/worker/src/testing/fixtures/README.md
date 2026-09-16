@@ -24,6 +24,7 @@ $env:CROSSLINE_RECORD_DIR='C:\path\to\recordings'; pnpm worker:start
 | `analysis-degenerate-combining-mark-padding` | 一句完整的话后面挂着同一个组合符重复四十次，把字段填到上限 —— 逐字来自真实运行 |
 | `analysis-degenerate-phrase-echo` | 理由字段在自己的尾巴上循环，碎句逐次衰减 —— 逐字来自真实运行 |
 | `analysis-degenerate-truncated-description` | 描述一路写到上限因而被截断，末尾还带着 `wait too long` —— 片段逐字来自真实运行 |
+| `analysis-real-clean-4-contract-items` | **完全真实的一份**：放宽上限并加上 `why` 之后，录制到的第一次运行。description 6–12 字、why 32–45 字、零退化、零重试 |
 
 四份退化夹具的**退化文本是真的**，外层 JSON 信封是按测试所用的那条捕获重建的（真实运行
 里那些回答对应的是别的捕获内容）。信封是脚手架，退化文本才是被测的东西。
