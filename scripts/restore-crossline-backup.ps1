@@ -42,7 +42,12 @@ if ($null -eq $json) { throw 'Backup contained no crossline-*.json snapshot.' }
 
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $targetDb = Join-Path $OutputDirectory "crossline-restored-$stamp.db"
-& pnpm --dir $repo restore -- $json.FullName $targetDb
+# pnpm writes its banner to stderr. Under `$ErrorActionPreference = 'Stop'`, PowerShell 5.1 turns a
+# native command's stderr line into a terminating NativeCommandError whenever stderr is redirected —
+# which is exactly what happens under a scheduled task or any non-interactive host. The script then
+# died before it could read $LASTEXITCODE, so the backup worked by hand and silently never ran
+# unattended. The exit code is the authority here, so stderr must not be allowed to pre-empt it.
+& { $ErrorActionPreference = 'Continue'; & pnpm --dir $repo restore -- $json.FullName $targetDb }
 if ($LASTEXITCODE -ne 0) { throw 'Restore verification failed; the backup did not rebuild a readable ledger.' }
 
 # The backup script goes to the trouble of shredding its plaintext temp file; leaving the decrypted

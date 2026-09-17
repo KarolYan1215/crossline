@@ -91,6 +91,10 @@ describe("work order domain rules", () => {
     expect(requiredApproval("publish_content")).toBe("per_item");
     expect(requiredApproval("write_focus_block")).toBe("batch");
     expect(requiredApproval("read_sync")).toBe("automatic");
+    // Fail closed. The old shape ended in `return "automatic"`, so one mistyped action name at a call
+    // site quietly became the weakest tier in the function everything else is told to defer to.
+    expect(requiredApproval("publish_contents" as never)).toBe("per_item");
+    expect(requiredApproval("" as never)).toBe("per_item");
   });
 
   test("notification is emitted only for a real state transition", () => {

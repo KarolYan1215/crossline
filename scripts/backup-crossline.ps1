@@ -18,7 +18,12 @@ function Get-Sha256Hex([byte[]]$Bytes) {
 }
 
 try {
-  & pnpm --dir $repo export -- $json
+  # pnpm writes its banner to stderr. Under `$ErrorActionPreference = 'Stop'`, PowerShell 5.1 turns a
+  # native command's stderr line into a terminating NativeCommandError whenever stderr is redirected —
+  # which is exactly what happens under a scheduled task or any non-interactive host. The script then
+  # died before it could read $LASTEXITCODE, so the backup worked by hand and silently never ran
+  # unattended. The exit code is the authority here, so stderr must not be allowed to pre-empt it.
+  & { $ErrorActionPreference = 'Continue'; & pnpm --dir $repo export -- $json }
   if ($LASTEXITCODE -ne 0) { throw 'Crossline JSON export failed.' }
   Compress-Archive -LiteralPath $json -DestinationPath $zip -CompressionLevel Optimal
 

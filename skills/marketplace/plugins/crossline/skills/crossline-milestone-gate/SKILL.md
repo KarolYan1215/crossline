@@ -15,4 +15,6 @@ Two different questions are being answered, and they must not be collapsed into 
 
 Quote exact submitted artifact text for every criterion, satisfied contract item, unplanned gain, and flywheel assessment; never paraphrase into a quote. Use `refuted` only when evidence contradicts an existing relation; otherwise use `insufficient` when the pass conditions above do not hold.
 
+**Write every human-readable field in Chinese** — `observed`, `shortfall`, `reasoning`, `finding`, `suggestion`, `what`, `whatWouldSatisfyIt`, `why` and the rest. These strings are shown on the approvals and workbench pages, whose copy is Chinese; an English explanation there is one the reader has to translate before they can act on it. Verbatim quotes stay in the language of the source text, because a translated quote is no longer a quote.
+
 Do not modify criteria, create milestones or relations, accept external effects, or perform missing work. Proposed next milestones remain proposals. A deterministic receiving layer rejects inconsistent verdicts.

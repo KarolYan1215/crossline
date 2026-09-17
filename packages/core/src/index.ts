@@ -264,15 +264,42 @@ export function tombstoneWorkOrder<T extends object>(workOrder: T, reason: strin
   return { ...workOrder, state: "archived", tombstone: { reason: reason.trim(), createdAt: new Date().toISOString() } };
 }
 
-export function requiredApproval(_action: string): "automatic" | "batch" | "per_item" | "never" {
-  if (["broker_order", "silent_source_calendar_write"].includes(_action)) return "never";
-  if (["send_outreach_email", "publish_content", "research_submission", "high_risk_external_use"].includes(_action)) {
-    return "per_item";
-  }
+/**
+ * Every action this policy knows about, and the tier it gets.
+ *
+ * A closed table, not a chain of `includes` with a fall-through. The old shape answered `"automatic"`
+ * for anything it did not recognise, which meant one typo at a call site — `publish_contents` — turned
+ * the strictest tier into the weakest one, silently, in the function the whole codebase is told to
+ * defer to. Nothing caught it because the parameter was `string`. Now an unknown name does not
+ * type-check, and if one reaches here at runtime it is refused rather than waved through.
+ */
+const APPROVAL_TIERS = {
+  // Permanently off by design; see the safety boundaries in CLAUDE.md.
+  broker_order: "never",
+  silent_source_calendar_write: "never",
+
+  send_outreach_email: "per_item",
+  publish_content: "per_item",
+  research_submission: "per_item",
+  high_risk_external_use: "per_item",
+
   // Candidate relations are reviewed together in the weekly pass, so batch is the honest mode: they
   // are cheap individually and only mean anything compared against each other.
-  if (["approve_milestones", "approve_milestone_relations", "approve_plan_changes", "write_focus_block"].includes(_action)) return "batch";
-  return "automatic";
+  approve_milestones: "batch",
+  approve_milestone_relations: "batch",
+  approve_plan_changes: "batch",
+  write_focus_block: "batch",
+
+  // Reads. Listed rather than left to a default, because being a read is the reason, and a reason that
+  // lives in a fall-through is a reason nobody can check.
+  read_sync: "automatic"
+} as const satisfies Record<string, "automatic" | "batch" | "per_item" | "never">;
+
+export type ApprovalAction = keyof typeof APPROVAL_TIERS;
+
+export function requiredApproval(action: ApprovalAction): "automatic" | "batch" | "per_item" | "never" {
+  // Fail closed. An action that is not in the table is not known to be safe.
+  return APPROVAL_TIERS[action] ?? "per_item";
 }
 
 export function notificationForTransition(_from: string, _to: string, _entityId: string): {
