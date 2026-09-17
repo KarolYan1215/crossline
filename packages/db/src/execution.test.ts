@@ -74,7 +74,9 @@ test("an existing database whose capture was promoted before this marker is back
     expect(after.listCaptures("w")[0]?.state).toBe("promoted");
     after.close();
   } finally {
-    for (const suffix of ["", "-wal", "-shm"]) if (existsSync(`${path}${suffix}`)) rmSync(`${path}${suffix}`);
+    // `.v0.bak` too: opening a file database runs the migrations, and the runner backs up first.
+    // Leaving it behind littered the repo root with one stray backup per run of this test.
+    for (const suffix of ["", "-wal", "-shm", ".v0.bak"]) if (existsSync(`${path}${suffix}`)) rmSync(`${path}${suffix}`);
   }
 });
 

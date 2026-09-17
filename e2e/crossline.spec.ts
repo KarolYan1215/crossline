@@ -1,4 +1,40 @@
 import { expect, test } from "@playwright/test";
+import path from "node:path";
+// Relative, not @crossline/db: the repo root is not a workspace package and has no such dependency.
+import { CrosslineStore } from "../packages/db/src/index.js";
+import { DEFAULT_AVAILABILITY } from "../packages/core/src/index.js";
+
+/**
+ * Two pending diffs on the starter plan, written the way a calendar sync writes them.
+ *
+ * The seeded ledger used to ship two example diffs so the C lens had something to show. They pointed
+ * at example blocks that no longer exist — the AI lane is the scheduler's real output now — so they
+ * were removed, and with them the only thing the approval flow could be driven against. A test that
+ * needs a precondition should create it: this opens the same SQLite file the server has open (WAL,
+ * two writers, which is how this app already runs) rather than putting demo rows back in production.
+ */
+async function seedPendingChanges(baseURL: string): Promise<void> {
+  // Touch a page first: the plan version is created by the server's own first-run seeding, and a
+  // change row cannot reference a plan that does not exist yet.
+  await fetch(`${baseURL}/plan`);
+  const store = new CrosslineStore(path.join(process.env.CROSSLINE_E2E_DATA_DIR!, "crossline.db"));
+  try {
+    const workspaceId = "personal-crossline";
+    if (store.listPlanChanges("personal-plan-v1").length > 0) return;
+    const event = store.appendEvent({
+      ownerId: "local-owner", workspaceId, idempotencyKey: "e2e:plan-diff",
+      type: "calendar.synced", entityId: "personal-plan-v1", payload: { source: "e2e" }
+    });
+    for (const [index, explanation] of ["把写作挪到上午的高精力段", "为下午的会议让出一小时"].entries()) {
+      store.savePlanChange({
+        id: `e2e-change-${index + 1}`, ownerId: "local-owner", workspaceId,
+        planVersionId: "personal-plan-v1", kind: "move", triggerEventId: event.eventId,
+        explanation, status: "pending"
+      });
+    }
+  } finally { store.close(); }
+}
+
 
 test("Today keeps capture semantic-only and health outside identity navigation", async ({ page }, testInfo) => {
   await page.goto("/");
@@ -11,8 +47,9 @@ test("Today keeps capture semantic-only and health outside identity navigation",
   if (testInfo.project.name === "desktop-chrome") await expect(page).toHaveScreenshot("today-paper-grid.png", { fullPage: true });
 });
 
-test("Plan exposes B/C/A over one version and workflow redirects", async ({ page }, testInfo) => {
+test("Plan exposes B/C/A over one version and workflow redirects", async ({ page, baseURL }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-chrome");
+  await seedPendingChanges(baseURL!);
   await page.goto("/plan");
   const plan = page.locator("[data-plan-version]");
   await expect(plan).toHaveAttribute("data-plan-version", "personal-plan-v1");
@@ -27,8 +64,33 @@ test("Plan exposes B/C/A over one version and workflow redirects", async ({ page
   await expect(page).toHaveURL(/\/workbench$/);
 });
 
-test("Plan approval is confirmed and persisted", async ({ page }, testInfo) => {
+test("editing availability re-runs the scheduler instead of only storing a preference", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-chrome");
+  await page.goto("/plan");
+  // 「已排程」 is what `planSchedule` stamps on a block it placed; the calendar's own blocks say 「只读」.
+  const scheduled = page.locator(".lane-track article").filter({ hasText: "已排程" });
+  const before = await scheduled.count();
+  expect(before).toBeGreaterThan(0);
+
+  await page.getByText(/^可用时间 · /).click();
+  // Close every declared window down to five minutes — below the minimum usable slot, so the honest
+  // result is an empty lane. A preference that stored cleanly and changed nothing on screen would mean
+  // the schedule was still example data wearing the setting's clothes.
+  for (const row of await page.locator(".availability-row").all()) {
+    await row.locator("input[type=time]").first().fill("08:00");
+    await row.locator("input[type=time]").nth(1).fill("08:05");
+  }
+  await page.getByRole("button", { name: "保存并重排" }).click();
+  await expect(scheduled).toHaveCount(0);
+
+  // Put it back: these tests share one ledger, and a crippled week would silently change what every
+  // later assertion is looking at.
+  await page.request.post("/api/settings/availability", { data: { windows: DEFAULT_AVAILABILITY } });
+});
+
+test("Plan approval is confirmed and persisted", async ({ page, baseURL }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-chrome");
+  await seedPendingChanges(baseURL!);
   await page.goto("/plan");
   await page.getByRole("tab", { name: "C · 计划差异" }).click();
   await page.getByRole("button", { name: "批准本批变更" }).click();

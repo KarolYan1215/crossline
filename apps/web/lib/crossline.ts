@@ -3,9 +3,10 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { CrosslineStore, type EvidenceClaimInput, type StoredMilestone } from "@crossline/db";
-import { deriveCapacity, requiredApproval, type SuccessCriterion } from "@crossline/core";
+import { availableSlots, deriveCapacity, requiredApproval, validateAvailability, DEFAULT_AVAILABILITY,
+  type AvailabilityWindow, type SuccessCriterion } from "@crossline/core";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
-import { recommendNextActions } from "@crossline/planner";
+import { planSchedule, recommendNextActions } from "@crossline/planner";
 import type { DashboardAction, DashboardData } from "../app/dashboard-view";
 
 export type PersistedScheduleBlock = {
@@ -23,6 +24,33 @@ export type PersistedScheduleBlock = {
 /** The local day the plan is centred on. One definition, so B, A and the sync cannot disagree. */
 export function planToday(now = process.env.CROSSLINE_FIXED_NOW ? new Date(process.env.CROSSLINE_FIXED_NOW) : new Date()): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: process.env.CROSSLINE_TIME_ZONE ?? "America/Chicago" }).format(now);
+}
+
+/** The key the weekly availability lives under. One settings row, not a new table. */
+export const AVAILABILITY_SETTING = "schedule.availability";
+
+/**
+ * When the person said they are free, as the scheduler needs it.
+ *
+ * In the ledger rather than an environment variable, because a backup that does not carry it restores
+ * a plan that cannot be rebuilt. A stored value that no longer parses falls back to the default rather
+ * than emptying the plan silently — an unreadable setting is a bug to fix, not a reason to show a
+ * blank week as though the person had no time.
+ */
+export function readAvailability(): AvailabilityWindow[] {
+  const raw = getStore().getSetting(WORKSPACE_ID, AVAILABILITY_SETTING);
+  if (!raw) return DEFAULT_AVAILABILITY;
+  try { return validateAvailability(JSON.parse(raw)); } catch { return DEFAULT_AVAILABILITY; }
+}
+
+export function saveAvailability(windows: unknown): { ok: true } | { ok: false; code: string } {
+  try {
+    const validated = validateAvailability(windows);
+    getStore().setSetting(WORKSPACE_ID, AVAILABILITY_SETTING, JSON.stringify(validated));
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, code: error instanceof Error ? error.message : "AVAILABILITY_INVALID" };
+  }
 }
 
 export type PersistedPlan = {
@@ -89,24 +117,8 @@ function identityPrior(identityId: string, family: string) {
     source: "identity_prior" as const, observationCount: 0, confidence: "low" as const };
 }
 
-// Naming a connector here would claim an import that never happened: no calendar is authorised and no
-// Codex material run exists. These blocks only exist to show what the B/C/A lens looks like.
-const SEED_SOURCE = "示例数据";
-// Kept as constants so the repair below can tell a stale seed from an edited one. The earlier text
-// said the AI "will have prepared the inputs by 08:50" — a promise about these example blocks that
-// nothing was ever going to keep. Material preparation is real now, but it only runs for work orders
-// the user approved into `preparing`; it will never fire because of a demo block.
-const SEED_CHANGE_TEXT: Record<string, string> = {
-  "personal-plan-v1-change-1": "示例：新增 10:30 人工审阅块。这是演示数据，不会被真实执行。",
-  "personal-plan-v1-change-2": "示例：新增组会材料准备块。真实材料准备只对已批准的作业运行，不会因这块触发。"
-};
-const starterPlanBlocks: PersistedScheduleBlock[] = [
-  { id: "class", lane: "human", title: "课程 / 主时钟", start: "09:00", end: "10:15", source: SEED_SOURCE, readOnly: true },
-  { id: "meeting", lane: "human", title: "组会", start: "14:00", end: "15:00", source: SEED_SOURCE, readOnly: true },
-  { id: "deep-work", lane: "human", title: "审阅实验结论", start: "10:30", end: "11:30", source: SEED_SOURCE, readOnly: false },
-  { id: "prep", lane: "ai", title: "汇总论文与实验异常", start: "08:10", end: "08:50", source: SEED_SOURCE, readOnly: false },
-  { id: "brief", lane: "ai", title: "生成组会材料包", start: "12:45", end: "13:25", source: SEED_SOURCE, readOnly: false }
-];
+/** The two example diffs a pre-scheduler database was seeded with, cleared once on open. */
+const RETIRED_SEED_CHANGES = ["personal-plan-v1-change-1", "personal-plan-v1-change-2"];
 
 declare global {
   // eslint-disable-next-line no-var
@@ -172,45 +184,83 @@ export function ensureSeeded(): void {
     }
   }
   if (store.listPlanVersions(WORKSPACE_ID).length === 0) {
-    const planId = "personal-plan-v1";
+    // An empty plan, not five example blocks. The lanes fill from two real sources now — the calendar
+    // and the scheduler — and seeding a fake day meant the first thing a new database showed was a
+    // schedule nobody had made, in a view whose whole job is to say what is really committed.
     store.savePlanVersion({
-      id: planId, ownerId: OWNER_ID, workspaceId: WORKSPACE_ID,
-      version: 1, status: "draft", payload: { blocks: starterPlanBlocks }
-    });
-    store.savePlanChange({
-      id: "personal-plan-v1-change-1", ownerId: OWNER_ID, workspaceId: WORKSPACE_ID,
-      planVersionId: planId, kind: "add", triggerEventId: "seed:plan:constraints",
-      explanation: SEED_CHANGE_TEXT["personal-plan-v1-change-1"]!,
-      after: { blockId: "deep-work" }, status: "pending"
-    });
-    store.savePlanChange({
-      id: "personal-plan-v1-change-2", ownerId: OWNER_ID, workspaceId: WORKSPACE_ID,
-      planVersionId: planId, kind: "add", triggerEventId: "seed:plan:materials",
-      explanation: SEED_CHANGE_TEXT["personal-plan-v1-change-2"]!,
-      after: { blockId: "brief" }, status: "pending"
+      id: "personal-plan-v1", ownerId: OWNER_ID, workspaceId: WORKSPACE_ID,
+      version: 1, status: "draft", payload: { blocks: [] }
     });
   }
 
-  // Earlier seeds labelled the example blocks "UW Outlook" and "Codex" — naming connectors that were
-  // never authorised, so the plan claimed imports that never happened while the page above it said the
-  // opposite. Changing `SEED_SOURCE` fixed new databases only; existing rows kept the old claim, so
-  // they are repaired here. Only the known seed block ids are touched: a real imported block carries
-  // its own id prefix and must never be relabelled as an example.
-  for (const [changeId, text] of Object.entries(SEED_CHANGE_TEXT)) {
+  // A database seeded before the scheduler was wired up still holds the five example blocks and the
+  // two example diffs. `loadCurrentPlan` no longer reads the blocks, but the diffs are `pending` and
+  // `approvePlanVersion` refuses while anything is pending — so leaving them would make the plan
+  // permanently unapprovable over demo rows that no longer mean anything.
+  for (const changeId of RETIRED_SEED_CHANGES) {
     const change = store.listPlanChanges("personal-plan-v1").find((item) => item.id === changeId);
-    if (change && change.explanation !== text) store.savePlanChange({ ...change, explanation: text });
+    if (change && change.status === "pending") store.savePlanChange({ ...change, status: "excluded" });
   }
-  const seedBlockIds = new Set(starterPlanBlocks.map((block) => block.id));
   for (const plan of store.listPlanVersions(WORKSPACE_ID)) {
     const blocks = (plan.payload as { blocks?: PersistedScheduleBlock[] }).blocks ?? [];
-    if (!blocks.some((block) => seedBlockIds.has(block.id) && block.source !== SEED_SOURCE)) continue;
-    store.savePlanVersion({
-      ...plan,
-      payload: {
-        blocks: blocks.map((block) => seedBlockIds.has(block.id) ? { ...block, source: SEED_SOURCE } : block)
-      }
-    });
+    const real = blocks.filter((block) => block.id.startsWith("graph_calendar:"));
+    if (real.length === blocks.length) continue;
+    store.savePlanVersion({ ...plan, payload: { blocks: real } });
   }
+}
+
+/** Days the plan covers: today plus the sync window, so the A lens and the scheduler agree. */
+function planDays(today: string, days = Number(process.env.CROSSLINE_PLAN_WINDOW_DAYS ?? 7)): string[] {
+  return Array.from({ length: days }, (_, offset) => {
+    const date = new Date(`${today}T00:00:00`);
+    date.setDate(date.getDate() + offset);
+    return new Intl.DateTimeFormat("en-CA").format(date);
+  });
+}
+
+/**
+ * The work orders, placed into the time the calendar has not already taken.
+ *
+ * This is the first production caller `planSchedule` has ever had. Until now the AI lane was seed
+ * data — example blocks that looked like a schedule and were computed from nothing — because no part
+ * of the app knew when the person was free. Reading demo data as a commitment is the mistake the rest
+ * of this codebase works to prevent, so the examples are gone and this is what replaces them.
+ */
+function scheduledBlocks(today: string, calendar: PersistedScheduleBlock[]): PersistedScheduleBlock[] {
+  const days = planDays(today);
+  const busy = calendar.filter((block) => block.day)
+    .map((block) => ({ day: block.day!, start: block.start, end: block.end }));
+  const slots = availableSlots(readAvailability(), days, busy);
+  if (!slots.length) return [];
+
+  // ponytail: wall-clock pinned to `Z`, the same trick `availableSlots` documents. Every value here is
+  // in one declared zone, so only the intervals matter. Upgrade path is the same: convert once, here.
+  const iso = (day: string, time: string) => `${day}T${time}:00.000Z`;
+  const capacityIds = new Set(defaultIdentityPacks().filter((pack) => pack.kind === "capacity").map((pack) => pack.id));
+  const orders = getStore().listWorkOrders(WORKSPACE_ID)
+    .filter((order) => ACTIONABLE.includes(order.state) && !capacityIds.has(order.identityId));
+
+  const result = planSchedule({
+    now: new Date(iso(today, "00:00")),
+    horizonDays: days.length,
+    tasks: orders.map(plannerTaskOf),
+    availability: slots.map((slot) => ({ start: iso(slot.day, slot.start), end: iso(slot.day, slot.end), energy: slot.energy })),
+    frozenBlocks: []
+  });
+  // An infeasible plan still places nothing rather than inventing a block; the blockers it returns are
+  // about capacity, and the honest answer to "no room" is an empty lane, not a pretend one.
+  const placed = result.status === "feasible" ? result.plan.blocks : [];
+  const titles = new Map(orders.map((order) => [order.id, order.intent]));
+  return placed.map((block) => ({
+    id: `scheduled:${block.taskId}`,
+    lane: "human" as const,
+    title: titles.get(block.taskId) ?? block.taskId,
+    day: block.start.slice(0, 10),
+    start: block.start.slice(11, 16),
+    end: block.end.slice(11, 16),
+    source: "已排程",
+    readOnly: false
+  }));
 }
 
 export function loadCurrentPlan(): PersistedPlan {
@@ -219,11 +269,14 @@ export function loadCurrentPlan(): PersistedPlan {
   const stored = store.listPlanVersions(WORKSPACE_ID)[0];
   if (!stored) throw new Error("PLAN_VERSION_NOT_FOUND");
   const payload = stored.payload as { blocks?: PersistedScheduleBlock[] };
+  // The calendar's blocks are stored; the scheduled ones are derived on read. Persisting a schedule
+  // would mean the plan disagreed with the work orders the moment one of them moved.
+  const calendar = (payload.blocks ?? []).filter((block) => block.id.startsWith("graph_calendar:"));
   return {
     id: stored.id,
     version: stored.version,
     status: stored.status,
-    blocks: payload.blocks ?? [],
+    blocks: [...calendar, ...scheduledBlocks(planToday(), calendar)],
     changes: store.listPlanChanges(stored.id).map((change) => {
       const after = change.after as { blockId?: string } | undefined;
       return {

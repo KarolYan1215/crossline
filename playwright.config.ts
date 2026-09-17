@@ -2,7 +2,11 @@ import { defineConfig, devices } from "@playwright/test";
 import os from "node:os";
 import path from "node:path";
 
-const e2eDataDir = path.join(os.tmpdir(), `crossline-e2e-${process.pid}`);
+// Computed once in the main process and handed down through the environment. Test workers re-load
+// this config in their own processes, where `process.pid` is a different number — without the stash a
+// test could not find the ledger the server is using, and one that writes its own precondition must.
+const e2eDataDir = process.env.CROSSLINE_E2E_DATA_DIR ?? path.join(os.tmpdir(), `crossline-e2e-${process.pid}`);
+process.env.CROSSLINE_E2E_DATA_DIR = e2eDataDir;
 
 export default defineConfig({
   testDir: "./e2e",

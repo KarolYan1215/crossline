@@ -17,7 +17,7 @@ afterEach(() => {
   // handle open, and Windows refuses to delete an open file, turning one failure into a cascade.
   for (const { path, store } of opened) {
     try { store.close(); } catch { /* a test may have closed it already */ }
-    for (const suffix of ["", "-wal", "-shm"]) {
+    for (const suffix of ["", "-wal", "-shm", ".v0.bak"]) {
       if (existsSync(`${path}${suffix}`)) rmSync(`${path}${suffix}`);
     }
   }

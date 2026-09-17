@@ -243,3 +243,35 @@ test("a pending migration backs the file up first and advances the version once"
     }
   }
 });
+
+test("a retired table stays gone after the database is closed and opened again", () => {
+  // The bug this pins: migration 4 dropped six tables and the base DDL, which runs on every open,
+  // created them all back. The live ledger sat at user_version 4 with every one of them present for
+  // a whole phase. Nothing caught it because every round-trip assertion compares against
+  // `tableNames()`, which agreed with itself whichever way the schema went — only a check against
+  // the names themselves can fail here.
+  const retired = ["outbox", "identities", "projects", "milestone_versions", "insight_proposals", "skill_versions"];
+  const path = `crossline-test-${randomUUID()}.db`;
+  try {
+    new CrosslineStore(path).close();
+    // Shaped like a database that recorded version 4 while the base DDL was still recreating the
+    // tables. Written with a raw connection on purpose: the store has no escape hatch for this, and
+    // adding one to production code so a test can reach in would be the wrong trade.
+    const raw = new Database(path);
+    for (const table of retired) raw.exec(`CREATE TABLE IF NOT EXISTS ${table} (id TEXT PRIMARY KEY)`);
+    raw.pragma("user_version = 4");
+    raw.close();
+
+    const reopened = new CrosslineStore(path);
+    expect(reopened.tableNames().filter((name) => retired.includes(name))).toEqual([]);
+    reopened.close();
+
+    const third = new CrosslineStore(path);
+    expect(third.tableNames().filter((name) => retired.includes(name))).toEqual([]);
+    third.close();
+  } finally {
+    for (const suffix of ["", "-wal", "-shm", ".v0.bak", ".v4.bak"]) {
+      if (existsSync(`${path}${suffix}`)) { try { rmSync(`${path}${suffix}`); } catch { /* Windows handle */ } }
+    }
+  }
+});

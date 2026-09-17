@@ -401,3 +401,15 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .calendar-detail .fc-event.calendar-example{background:var(--paper);color:var(--ink);border-style:dashed;border-color:var(--shade)}
 .calendar-detail .fc-event.calendar-ai{background:var(--paper);color:var(--ink);border-left-width:4px}
 .calendar-detail .fc-event.calendar-ai.calendar-example{border-left-style:solid;border-left-color:var(--mist)}
+
+.availability-editor{margin:0 0 20px;border:1px solid var(--rule);padding:12px 14px}
+.availability-editor summary{cursor:pointer;font-family:var(--f-mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--graphite)}
+.availability-editor[open] summary{margin-bottom:12px}
+.availability-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px}
+.availability-days{display:inline-flex;gap:2px}
+.availability-days button{width:24px;height:24px;border:1px solid var(--rule);background:var(--paper);color:var(--graphite);font-size:11px;cursor:pointer}
+.availability-days button[aria-pressed="true"]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.availability-row input,.availability-row select{border:1px solid var(--rule);background:var(--paper);color:var(--ink);padding:3px 5px;font:inherit;font-size:12px}
+.availability-row>button:last-child{border:1px solid var(--rule);background:var(--paper);color:var(--graphite);padding:3px 8px;font-size:11px;cursor:pointer}
+.availability-actions{display:flex;gap:8px;margin-top:10px}
+.availability-actions button{padding:5px 12px;font-size:12px}

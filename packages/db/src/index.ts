@@ -196,15 +196,6 @@ export class CrosslineStore {
         created_at TEXT NOT NULL,
         UNIQUE(workspace_id, idempotency_key)
       );
-      CREATE TABLE IF NOT EXISTS outbox (
-        id TEXT PRIMARY KEY,
-        event_id TEXT NOT NULL REFERENCES events(event_id),
-        destination TEXT NOT NULL,
-        status TEXT NOT NULL DEFAULT 'pending',
-        attempts INTEGER NOT NULL DEFAULT 0,
-        available_at TEXT NOT NULL,
-        UNIQUE(event_id, destination)
-      );
       CREATE TABLE IF NOT EXISTS milestones (
         id TEXT NOT NULL,
         owner_id TEXT NOT NULL,
@@ -215,19 +206,6 @@ export class CrosslineStore {
         status TEXT NOT NULL CHECK (status IN ('draft', 'approved', 'archived')),
         updated_at TEXT NOT NULL,
         PRIMARY KEY(id, version)
-      );
-      CREATE TABLE IF NOT EXISTS identities (
-        id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
-        name TEXT NOT NULL, status TEXT NOT NULL, updated_at TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS projects (
-        id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
-        identity_id TEXT NOT NULL, title TEXT NOT NULL, status TEXT NOT NULL, updated_at TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS milestone_versions (
-        id TEXT NOT NULL, version INTEGER NOT NULL, owner_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
-        project_id TEXT NOT NULL, title TEXT NOT NULL, status TEXT NOT NULL, payload_json TEXT NOT NULL,
-        updated_at TEXT NOT NULL, PRIMARY KEY(id, version)
       );
       CREATE TABLE IF NOT EXISTS milestone_relations (
         id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
@@ -270,17 +248,6 @@ export class CrosslineStore {
         id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
         source TEXT NOT NULL, level TEXT NOT NULL, confidence TEXT NOT NULL,
         aggregate_json TEXT NOT NULL, observed_at TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS insight_proposals (
-        id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
-        claim TEXT NOT NULL, observation_count INTEGER NOT NULL, period_from TEXT NOT NULL,
-        period_to TEXT NOT NULL, evidence_json TEXT NOT NULL, overlay_patch_json TEXT NOT NULL,
-        status TEXT NOT NULL, created_at TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS skill_versions (
-        id TEXT NOT NULL, version INTEGER NOT NULL, owner_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
-        manifest_json TEXT NOT NULL, source_hash TEXT NOT NULL, created_at TEXT NOT NULL,
-        PRIMARY KEY(id, version)
       );
       CREATE TABLE IF NOT EXISTS external_bindings (
         id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
@@ -391,6 +358,20 @@ export class CrosslineStore {
           CREATE INDEX IF NOT EXISTS plan_changes_version ON plan_changes(plan_version_id);
           CREATE INDEX IF NOT EXISTS milestones_workspace ON milestones(workspace_id, id);
         `);
+      } },
+
+      // Migration 4 dropped the six tables and the base DDL created them straight back on the next
+      // open, so the live ledger sat at version 4 with every one of them present. Found by
+      // `pnpm doctor:ledger` on the real database, not by a test — the round-trip tests all compare
+      // against `tableNames()`, which agreed with itself either way. The DDL no longer creates them;
+      // this drops them once more for a database that already recorded version 4.
+      { version: 5, up: () => {
+        for (const table of RETIRED_TABLES) {
+          if (!this.#hasTable(table)) continue;
+          const rows = (this.#db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number }).count;
+          if (rows > 0) throw new Error("MIGRATION_RETIRED_TABLE_NOT_EMPTY");
+          this.#db.exec(`DROP TABLE ${table}`);
+        }
       } }
     ];
 
