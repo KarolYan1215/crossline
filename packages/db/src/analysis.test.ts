@@ -141,6 +141,53 @@ test("milestone gate auto-accepts, can be revoked without losing evidence, and r
   } finally { store.close(); }
 });
 
+test("revoking auto-acceptance a second time on the same work order does not silently no-op", () => {
+  // The bug this pins: `revokeAutoAcceptance` used to be keyed only on the work order id, with no
+  // attempt counter. A work order that gets auto-accepted, revoked, re-judged and auto-accepted again
+  // is a normal cycle (the milestone gate itself is retried this way), and a second revoke reused the
+  // first revoke's idempotency key. `appendEvent` silently no-ops on a repeated key, `transitionWorkOrder`
+  // returned `{ changed: false }`, and the caller returned success anyway without checking — the person
+  // saw the UI reload and believed the revoke worked, while the ledger never left `accepted`.
+  const store = new CrosslineStore(":memory:");
+  try {
+    store.saveMilestone({ id: "m", ownerId: "o", workspaceId: "w", identityId: "research", projectId: "p",
+      title: "Measured", version: 1, status: "approved",
+      successCriteria: [{ id: "c", statement: "three records", required: true, measure: { kind: "count", unit: "records", atLeast: 3 } }] });
+    store.saveWorkOrder({ id: "wo", ownerId: "o", workspaceId: "w", identityId: "research", projectId: "p", milestoneId: "m",
+      intent: "Measure", state: "ready_for_human", riskTier: "milestone", payload: {},
+      estimate: { p25Minutes: 10, p50Minutes: 20, p85Minutes: 40, source: "llm_prior", observationCount: 0, confidence: "low" } });
+    store.transitionWorkOrder("w", "wo", { type: "human.started" }, "start");
+    store.transitionWorkOrder("w", "wo", { type: "human.completed" }, "complete", {
+      evidence: [{ kind: "record", uri: "local://result", description: "three records support reuse" }]
+    });
+    const passResult = {
+      verdict: "pass" as const,
+      criteriaVerdict: [{ criterionId: "c", met: "met" as const, observed: "3", evidenceQuote: "three records", shortfall: null }],
+      contractCoverage: [], unplannedGains: [], improvements: [], incomplete: [],
+      flywheelAssessment: [], gaps: [], proposedNextMilestones: [], blockers: []
+    };
+
+    // First cycle: accept, then revoke. This much already worked.
+    store.applyMilestoneGate("w", "wo", passResult, ["three records support reuse"], "gate:wo:0");
+    expect(store.revokeAutoAcceptance("w", "wo", "first look", "revoke:wo:0")).toMatchObject({ state: "evidence_review" });
+
+    // Re-judged and auto-accepted again — a real second acceptance, keyed on its own attempt.
+    store.applyMilestoneGate("w", "wo", passResult, ["three records support reuse"], "gate:wo:1");
+    expect(store.listWorkOrders("w")[0]?.state).toBe("accepted");
+
+    // Revoking again with the FIRST revoke's key is the exact collision the bug depended on: it must
+    // throw rather than report success, and the work order must still be exactly where it was.
+    expect(() => store.revokeAutoAcceptance("w", "wo", "second look, same stale key", "revoke:wo:0"))
+      .toThrow("REVOCATION_ALREADY_APPLIED");
+    expect(store.listWorkOrders("w")[0]?.state).toBe("accepted");
+
+    // A correctly-numbered second attempt must still work — the fix is the counter, not a refusal to
+    // ever revoke twice.
+    expect(store.revokeAutoAcceptance("w", "wo", "second look, own key", "revoke:wo:1")).toMatchObject({ state: "evidence_review" });
+    expect(store.listEvidenceClaims("w")[0]?.reviewStatus).toBe("submitted");
+  } finally { store.close(); }
+});
+
 test("milestone gate inconsistency leaves state and evidence untouched", () => {
   const store = new CrosslineStore(":memory:");
   try {

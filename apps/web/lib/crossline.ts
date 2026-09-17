@@ -597,8 +597,16 @@ export function acceptWorkOrderEvidence(workOrderId: string): ExecutionResult {
 }
 
 export function revokeAutoAcceptedWorkOrder(workOrderId: string, reason: string): ExecutionResult {
+  const store = getStore();
+  // Keyed on the attempt, not just the work order — the same reason a gate re-judgement is. A work
+  // order can be auto-accepted, revoked, re-judged and auto-accepted again more than once, and a key
+  // that only named the work order reused a spent one on the second revoke: `appendEvent` silently
+  // no-ops on a repeated idempotency key, `transitionWorkOrder` returned `changed: false`, and this
+  // function returned `{ ok: true }` anyway without checking. The person saw the page reload and
+  // believed the revoke worked; the ledger never left `accepted`.
+  const attempt = store.listEvents(WORKSPACE_ID, { type: "milestone_gate.auto_acceptance_revoked", entityId: workOrderId }).length;
   try {
-    getStore().revokeAutoAcceptance(WORKSPACE_ID, workOrderId, reason, `auto-acceptance-revoked:${workOrderId}`);
+    store.revokeAutoAcceptance(WORKSPACE_ID, workOrderId, reason, `auto-acceptance-revoked:${workOrderId}:${attempt}`);
     return { ok: true };
   } catch (error) {
     const code = error instanceof Error && /^[A-Z_]+$/.test(error.message) ? error.message : "AUTO_ACCEPTANCE_REVOKE_FAILED";

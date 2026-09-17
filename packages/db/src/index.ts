@@ -988,6 +988,13 @@ export class CrosslineStore {
     if (!reason.trim()) throw new Error("REVOCATION_REASON_REQUIRED");
     const transitioned = this.transitionWorkOrder(workspaceId, workOrderId,
       { type: "acceptance.revoked", reason: reason.trim() }, idempotencyKey);
+    // `transitionWorkOrder` no-ops silently on a spent idempotency key (`{ changed: false }`), which is
+    // right for a genuine retry but wrong here if it happens anyway: the caller is expected to key each
+    // attempt uniquely, and a collision reaching this point means the transition did NOT happen, not
+    // that it happened before. Proceeding to merge the payload and append the audit event under that
+    // assumption is exactly the bug this guard closes — the caller reported success for a revoke that
+    // never touched the work order's state.
+    if (!transitioned.changed) throw new Error("REVOCATION_ALREADY_APPLIED");
     this.#mergeWorkOrderPayload(workspaceId, workOrderId, {
       autoAcceptance: { ...payload.autoAcceptance, revokedAt: new Date().toISOString(), revocationReason: reason.trim() }
     });

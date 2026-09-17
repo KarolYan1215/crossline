@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { saveMilestoneEdit, type MilestoneInput } from "../../../lib/crossline";
+import { isCrossSiteWrite } from "../../../lib/same-origin";
 import type { SuccessCriterion } from "@crossline/core";
 
 const MEASURE_KINDS = new Set(["count", "threshold", "artifact", "judgement"]);
@@ -25,6 +26,7 @@ function readCriteria(value: unknown): SuccessCriterion[] | undefined {
 }
 
 export async function POST(request: Request) {
+  if (isCrossSiteWrite(request)) return NextResponse.json({ ok: false, code: "REQUEST_FORBIDDEN" }, { status: 403 });
   let body: unknown;
   try { body = await request.json(); } catch { return NextResponse.json({ ok: false, code: "INVALID_JSON" }, { status: 400 }); }
   const input = (body ?? {}) as Record<string, unknown>;

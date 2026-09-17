@@ -4,7 +4,7 @@ vi.mock("server-only", () => ({}));
 import {
   acceptWorkOrderEvidence, approveWorkOrderProposal, blockWorkOrderEvidence,
   completeWorkOrderExecution, getStore, markMaterialsReady, pauseWorkOrderExecution, resumeWorkOrderExecution,
-  startWorkOrderExecution, WORKSPACE_ID
+  revokeAutoAcceptedWorkOrder, startWorkOrderExecution, WORKSPACE_ID
 } from "./crossline";
 
 afterEach(() => { globalThis.crosslineStore?.close(); globalThis.crosslineStore = undefined; });
@@ -100,4 +100,40 @@ test("a blocked work order shows its reason and can be recovered by the same hum
   expect(approveWorkOrderProposal("w")).toEqual({ ok: true });
   expect(store.listWorkOrders(WORKSPACE_ID)[0]?.state).toBe("approved");
   expect((store.listWorkOrders(WORKSPACE_ID)[0]?.payload as { blocker?: unknown }).blocker).toBeUndefined();
+});
+
+test("revoking auto-acceptance twice on the same work order works both times", () => {
+  // `revokeAutoAcceptedWorkOrder` computes its own idempotency key from how many times this work order
+  // has already been revoked, rather than trusting a caller to number the attempt — a real revoke →
+  // re-judge → revoke cycle used to reuse the first attempt's key on the second call and report success
+  // for a revoke that silently never happened (packages/db/src/analysis.test.ts pins the store side).
+  const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
+  store.saveMilestone({ id: "m", ownerId: "local-owner", workspaceId: WORKSPACE_ID, identityId: "research",
+    projectId: "p", title: "Measured", version: 1, status: "approved",
+    successCriteria: [{ id: "c", statement: "three records", required: true, measure: { kind: "count", unit: "records", atLeast: 3 } }] });
+  store.saveWorkOrder({ id: "w1", ownerId: "local-owner", workspaceId: WORKSPACE_ID, identityId: "research",
+    projectId: "p", milestoneId: "m", intent: "Measure", state: "ready_for_human", riskTier: "milestone", payload: {},
+    estimate: { p25Minutes: 10, p50Minutes: 20, p85Minutes: 40, source: "llm_prior", observationCount: 0, confidence: "low" } });
+  store.transitionWorkOrder(WORKSPACE_ID, "w1", { type: "human.started" }, "start:w1");
+  store.transitionWorkOrder(WORKSPACE_ID, "w1", { type: "human.completed" }, "complete:w1", {
+    evidence: [{ kind: "record", uri: "local://result", description: "three records support reuse" }]
+  });
+  const passResult = {
+    verdict: "pass" as const,
+    criteriaVerdict: [{ criterionId: "c", met: "met" as const, observed: "3", evidenceQuote: "three records", shortfall: null }],
+    contractCoverage: [], unplannedGains: [], improvements: [], incomplete: [],
+    flywheelAssessment: [], gaps: [], proposedNextMilestones: [], blockers: []
+  };
+
+  store.applyMilestoneGate(WORKSPACE_ID, "w1", passResult, ["three records support reuse"], "gate:w1:0");
+  expect(revokeAutoAcceptedWorkOrder("w1", "第一次撤销")).toEqual({ ok: true });
+  expect(store.listWorkOrders(WORKSPACE_ID)[0]?.state).toBe("evidence_review");
+
+  store.applyMilestoneGate(WORKSPACE_ID, "w1", passResult, ["three records support reuse"], "gate:w1:1");
+  expect(store.listWorkOrders(WORKSPACE_ID)[0]?.state).toBe("accepted");
+
+  // Before the fix this returned { ok: true } while leaving the state exactly where it was.
+  expect(revokeAutoAcceptedWorkOrder("w1", "第二次撤销")).toEqual({ ok: true });
+  expect(store.listWorkOrders(WORKSPACE_ID)[0]?.state).toBe("evidence_review");
+  expect(store.listEvidenceClaims(WORKSPACE_ID)[0]?.reviewStatus).toBe("submitted");
 });

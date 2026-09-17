@@ -1,11 +1,15 @@
 import { NextResponse } from "next/server";
 import { requestCodexSupervisor, CodexSupervisorRequestError } from "../../../../lib/codex-runtime";
+import { isCrossSiteWrite } from "../../../../lib/same-origin";
 
 /**
  * Asks the architect Skill for new milestones. Everything it returns lands as a `draft`, so this route
- * can never add something the user is committed to — only something they have to look at.
+ * can never add something the user is committed to — only something they have to look at. Still gated
+ * on origin: draft or not, this spends real Codex quota per call, which another site should not be able
+ * to trigger just by being open in another tab.
  */
 export async function POST(request: Request) {
+  if (isCrossSiteWrite(request)) return NextResponse.json({ ok: false, blocker: { code: "REQUEST_FORBIDDEN", message: "Use the local Web API" } }, { status: 403 });
   let body: unknown = {};
   try { body = await request.json(); } catch { /* an empty request means "look at the whole picture" */ }
   const ask = (body ?? {}) as { request?: unknown };

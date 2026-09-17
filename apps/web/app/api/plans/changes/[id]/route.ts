@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { resolvePlanChange } from "../../../../../lib/crossline";
+import { isCrossSiteWrite } from "../../../../../lib/same-origin";
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  if (isCrossSiteWrite(request)) return NextResponse.json({ ok: false, code: "REQUEST_FORBIDDEN" }, { status: 403 });
   const { id } = await context.params;
   let body: unknown;
   try { body = await request.json(); } catch { return NextResponse.json({ ok: false, code: "INVALID_JSON" }, { status: 400 }); }

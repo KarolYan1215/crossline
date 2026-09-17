@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { CodexSupervisorRequestError, requestCodexSupervisor } from "../../../../lib/codex-runtime";
+import { isCrossSiteWrite } from "../../../../lib/same-origin";
 
 export const runtime = "nodejs";
 
@@ -27,7 +28,11 @@ export async function GET() {
   }
 }
 
-export async function POST() {
+// Starts a real OAuth flow, so a cross-site POST here is not a nuisance write — it is a forged sign-in
+// attempt against the account this board is bound to. A CSRF probe reached this route once and got a
+// live authUrl back before either guard existed.
+export async function POST(request: Request) {
+  if (isCrossSiteWrite(request)) return NextResponse.json({ code: "REQUEST_FORBIDDEN" }, { status: 403 });
   try {
     return NextResponse.json(await requestCodexSupervisor("/v1/codex/login", { method: "POST" }));
   } catch (error) {
@@ -35,7 +40,8 @@ export async function POST() {
   }
 }
 
-export async function DELETE() {
+export async function DELETE(request: Request) {
+  if (isCrossSiteWrite(request)) return NextResponse.json({ code: "REQUEST_FORBIDDEN" }, { status: 403 });
   try {
     return NextResponse.json(await requestCodexSupervisor("/v1/codex/login/cancel", { method: "POST" }));
   } catch (error) {

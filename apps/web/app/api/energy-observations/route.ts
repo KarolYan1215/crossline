@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { getStore, WORKSPACE_ID } from "../../../lib/crossline";
+import { isCrossSiteWrite } from "../../../lib/same-origin";
 
 const numericAggregateKeys = new Set(["responseSeconds"]);
 
 export async function POST(request: Request) {
+  if (isCrossSiteWrite(request)) return NextResponse.json({ ok: false, code: "REQUEST_FORBIDDEN" }, { status: 403 });
   const body = await request.json() as Record<string, unknown>;
   const allowedTopLevel = new Set(["source", "level", "confidence", "aggregate"]);
   if (Object.keys(body).some((key) => !allowedTopLevel.has(key))) {

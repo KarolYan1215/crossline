@@ -3,8 +3,10 @@ import {
   addCapturedTaskWithId,
   WORKSPACE_ID
 } from "../../../lib/crossline";
+import { isCrossSiteWrite } from "../../../lib/same-origin";
 
 export async function POST(request: Request) {
+  if (isCrossSiteWrite(request)) return Response.json({ code: "REQUEST_FORBIDDEN" }, { status: 403 });
   const validation = validateCommandEnvelope(await request.json().catch(() => null));
   if (!validation.ok) return Response.json(validation.blocker, { status: 400 });
   const command = validation.command;
