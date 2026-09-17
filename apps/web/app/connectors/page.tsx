@@ -1,5 +1,6 @@
 import { SubpageShell } from "../subpage-shell";
 import { CodexAccountControl } from "./codex-account-control";
+import { CalendarSources } from "./calendar-sources";
 import { loadCalendarConnectorState } from "../../lib/crossline";
 
 export const dynamic = "force-dynamic";
@@ -23,6 +24,7 @@ export default function ConnectorsPage() {
     description="工作日历一行是观测到的真实状态；其余各行是声明的目标，尚未配置凭据，也没有跑过任何探测。">
     <section className="status-grid">
       <CodexAccountControl />
+      <CalendarSources />
       <article className="status-card">
         <span className="status-badge">{calendar.synced ? "只读同步中" : "尚未连接"}</span>
         <h2>工作日历（Microsoft Graph）</h2>

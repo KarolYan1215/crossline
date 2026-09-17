@@ -314,6 +314,10 @@ export async function startCodexSupervisor(options: {
   prepareMaterials?: (workOrderId: string) => Promise<unknown>;
   judgeMilestone?: (workOrderId: string) => Promise<unknown>;
   syncCalendar?: () => Promise<unknown>;
+  /** The accounts and calendars available, with what is currently ticked. A read. */
+  listCalendarSources?: () => Promise<unknown>;
+  /** Replaces the ticked set with exactly these `<accountId>:<calendarId>` keys. */
+  saveCalendarSources?: (keys: string[]) => Promise<unknown>;
   plugin?: LocalPluginContract;
 } = {}): Promise<CodexSupervisor> {
   const host = options.host ?? "127.0.0.1";
@@ -472,6 +476,34 @@ export async function startCodexSupervisor(options: {
         judging.add(id);
         runDetached(() => options.judgeMilestone!(id), () => judging.delete(id));
         sendJson(response, 202, { started: true });
+        return;
+      }
+      // Which calendars exist and which are read. Separate from the sync because listing is cheap and
+      // safe to do while looking at a settings page, whereas a sync rewrites the plan's reality lane.
+      if (request.method === "GET" && pathname === "/v1/calendar/sources" && options.listCalendarSources) {
+        try { sendJson(response, 200, await options.listCalendarSources()); }
+        catch (error) {
+          sendJson(response, 502, { blocker: { code: "GRAPH_CALENDARS_UNAVAILABLE",
+            message: error instanceof Error ? error.message : "读取日历列表失败" } });
+        }
+        return;
+      }
+      if (request.method === "POST" && pathname === "/v1/calendar/sources" && options.saveCalendarSources) {
+        if (request.headers.origin || !request.headers["content-type"]?.startsWith("application/json")) {
+          sendJson(response, 403, { blocker: { code: "SYNC_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
+          return;
+        }
+        const body = await readJsonBody(request).catch(() => undefined) as { keys?: unknown } | undefined;
+        const keys = Array.isArray(body?.keys) ? body.keys.filter((key): key is string => typeof key === "string") : undefined;
+        if (!keys) {
+          sendJson(response, 400, { blocker: { code: "CALENDAR_KEYS_REQUIRED", message: "需要 keys 数组" } });
+          return;
+        }
+        try { sendJson(response, 200, await options.saveCalendarSources(keys)); }
+        catch (error) {
+          sendJson(response, 502, { blocker: { code: "GRAPH_CALENDARS_UNAVAILABLE",
+            message: error instanceof Error ? error.message : "保存日历选择失败" } });
+        }
         return;
       }
       // Pull the calendar now. The tick is fifteen minutes wide, which makes "change your calendar and

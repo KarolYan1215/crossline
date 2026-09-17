@@ -20,7 +20,18 @@ export type RealityBlock = {
   /** Local wall-clock `HH:MM`. */
   start: string;
   end: string;
+  /** What to show on the block, e.g. 「日历 · kyan47」. */
   source: string;
+  /**
+   * Which calendar this block was read from, as `<accountId>:<calendarId>`.
+   *
+   * Not for display — it is what lets a sync know which of the plan's existing blocks a given source
+   * is entitled to delete. Without it, one account failing to read would look exactly like that
+   * account's events having been deleted, and the plan would drop them.
+   *
+   * Absent on a block imported before there was more than one source, and on seeded blocks.
+   */
+  sourceKey?: string;
 };
 
 export type RealityChange =
@@ -89,7 +100,7 @@ export function realityChanges(previous: RealityBlock[], next: RealityBlock[], t
  */
 export function toRealityBlock(item: {
   provider: string; externalId: string; title: string; start?: string; end?: string;
-}, timeZone?: string): RealityBlock | undefined {
+}, timeZone?: string, source?: { key: string; label: string }): RealityBlock | undefined {
   if (!item.start || !item.end) return undefined;
   const start = new Date(item.start.endsWith("Z") ? item.start : `${item.start}Z`);
   const end = new Date(item.end.endsWith("Z") ? item.end : `${item.end}Z`);
@@ -108,7 +119,8 @@ export function toRealityBlock(item: {
     day,
     start: clock.format(start),
     end: clock.format(end),
-    source: item.provider === "graph_calendar" ? "日历" : item.provider
+    source: source?.label ?? (item.provider === "graph_calendar" ? "日历" : item.provider),
+    ...(source ? { sourceKey: source.key } : {})
   };
 }
 

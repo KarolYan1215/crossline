@@ -1,7 +1,7 @@
 import { beforeEach, expect, test } from "vitest";
 import { CrosslineStore } from "@crossline/db";
 import type { GraphDeltaPage } from "@crossline/connectors";
-import { createGraphSync } from "./graph-sync";
+import { createGraphSync, type CalendarSource } from "./graph-sync";
 
 const WORKSPACE = "personal-crossline";
 const NOW = () => new Date("2026-09-16T12:00:00.000Z");
@@ -21,6 +21,14 @@ const reader = (pages: GraphDeltaPage[]) => {
   return { pullCalendar: async () => pages[Math.min(call++, pages.length - 1)]!, calls: () => call };
 };
 
+/** The single source these cases were written against, before a second account was possible. */
+const SOURCE_KEY = "account-1:calendar-1";
+/** Wraps one reader as the only selected calendar, so these cases test exactly what they always did. */
+const only = (pages: GraphDeltaPage[]) => {
+  const one = reader(pages);
+  return { sources: () => [{ key: SOURCE_KEY, label: "日历", reader: one }], calls: one.calls };
+};
+
 const seedPlan = (status: "draft" | "approved", blocks: unknown[]) => {
   store.savePlanVersion({ id: "plan-1", ownerId: "local-owner", workspaceId: WORKSPACE,
     version: 1, status, payload: { blocks } });
@@ -30,7 +38,7 @@ const imported = (id: string, title: string, start: string, end: string) =>
 
 test("calendar events become read-only reality blocks on the day plan", async () => {
   const sync = createGraphSync(store, WORKSPACE, {
-    reader: reader([{ items: [event("a", "组会", "06:00", "07:00")], cursor: "delta-1" }]),
+    sources: only([{ items: [event("a", "组会", "06:00", "07:00")], cursor: "delta-1" }]).sources,
     now: NOW, timeZone: "UTC"
   });
   seedPlan("draft", []);
@@ -40,14 +48,14 @@ test("calendar events become read-only reality blocks on the day plan", async ()
   const blocks = (store.listPlanVersions(WORKSPACE)[0]?.payload as { blocks: Array<Record<string, unknown>> }).blocks;
   // Read-only because the calendar owns it: an edit here would diverge and the next sync would undo it.
   expect(blocks[0]).toMatchObject({ id: "graph_calendar:a", title: "组会", start: "06:00", end: "07:00", readOnly: true });
-  expect(store.readSyncCursor(WORKSPACE, "graph_calendar", "calendarView")).toBe("delta-1");
+  expect(store.readSyncCursor(WORKSPACE, "graph_calendar", SOURCE_KEY)).toBe("delta-1");
 });
 
 test("a draft plan is updated in place; blocks the user authored are kept", async () => {
   seedPlan("draft", [imported("a", "组会", "06:00", "07:00"),
     { id: "mine", lane: "human", title: "深度工作", start: "08:00", end: "09:00", source: "自建", readOnly: false }]);
   const sync = createGraphSync(store, WORKSPACE, {
-    reader: reader([{ items: [event("a", "组会", "06:30", "07:30")], cursor: "delta-2" }]),
+    sources: only([{ items: [event("a", "组会", "06:30", "07:30")], cursor: "delta-2" }]).sources,
     now: NOW, timeZone: "UTC"
   });
   await sync();
@@ -65,7 +73,7 @@ test("a draft plan is updated in place; blocks the user authored are kept", asyn
 test("an approved plan is never rewritten: reality moving becomes a new draft of conflicts", async () => {
   seedPlan("approved", [imported("a", "组会", "06:00", "07:00")]);
   const sync = createGraphSync(store, WORKSPACE, {
-    reader: reader([{ items: [event("a", "组会", "09:00", "10:00")], cursor: "delta-3" }]),
+    sources: only([{ items: [event("a", "组会", "09:00", "10:00")], cursor: "delta-3" }]).sources,
     now: NOW, timeZone: "UTC"
   });
   const outcome = await sync();
@@ -84,7 +92,7 @@ test("an approved plan is never rewritten: reality moving becomes a new draft of
 test("a conflict can actually be resolved, so a plan is not permanently unapprovable", async () => {
   seedPlan("approved", [imported("a", "组会", "06:00", "07:00")]);
   const sync = createGraphSync(store, WORKSPACE, {
-    reader: reader([{ items: [event("a", "组会", "09:00", "10:00")], cursor: "c" }]),
+    sources: only([{ items: [event("a", "组会", "09:00", "10:00")], cursor: "c" }]).sources,
     now: NOW, timeZone: "UTC"
   });
   const outcome = await sync();
@@ -101,10 +109,10 @@ test("a conflict can actually be resolved, so a plan is not permanently unapprov
 test("a deleted event is removed even when its tombstone arrives after its creation", async () => {
   seedPlan("draft", [imported("a", "组会", "06:00", "07:00")]);
   const sync = createGraphSync(store, WORKSPACE, {
-    reader: reader([{ items: [
+    sources: only([{ items: [
       event("a", "组会", "06:00", "07:00"),
       { ...event("a", "组会", "06:00", "07:00"), removed: true }
-    ], cursor: "c" }]),
+    ], cursor: "c" }]).sources,
     now: NOW, timeZone: "UTC"
   });
   await sync();
@@ -118,7 +126,7 @@ test("a resync drops what the gap deleted, even though no tombstone ever arrives
   const sync = createGraphSync(store, WORKSPACE, {
     // Graph answers 410: the cursor is too old. The retry returns the CURRENT state, and "b" is simply
     // absent — deletions during the gap are never replayed as tombstones.
-    reader: reader([{ items: [], resyncRequired: true }, { items: [event("a", "组会", "06:00", "07:00")], cursor: "fresh" }]),
+    sources: only([{ items: [], resyncRequired: true }, { items: [event("a", "组会", "06:00", "07:00")], cursor: "fresh" }]).sources,
     now: NOW, timeZone: "UTC"
   });
   const outcome = await sync();
@@ -126,17 +134,17 @@ test("a resync drops what the gap deleted, even though no tombstone ever arrives
   expect(outcome).toMatchObject({ state: "synced", resynced: true });
   const blocks = (store.listPlanVersions(WORKSPACE)[0]?.payload as { blocks: Array<Record<string, unknown>> }).blocks;
   expect(blocks.map((block) => block.id)).toEqual(["graph_calendar:a"]);
-  expect(store.readSyncCursor(WORKSPACE, "graph_calendar", "calendarView")).toBe("fresh");
+  expect(store.readSyncCursor(WORKSPACE, "graph_calendar", SOURCE_KEY)).toBe("fresh");
 });
 
 test("an event that is not a block on today's strip is counted, not silently dropped", async () => {
   seedPlan("draft", []);
   const sync = createGraphSync(store, WORKSPACE, {
-    reader: reader([{ items: [
+    sources: only([{ items: [
       // A multi-day trip would be drawn as a bar burying every real commitment beneath it.
       event("trip", "出差", "06:00", "07:00", { end: "2026-09-19T07:00:00.000Z" }),
       { provider: "graph_calendar", externalId: "noTime", title: "全天" }
-    ], cursor: "c" }]),
+    ], cursor: "c" }]).sources,
     now: NOW, timeZone: "UTC"
   });
   // Reported as skipped so the day is not presented as emptier than it is.
@@ -146,27 +154,28 @@ test("an event that is not a block on today's strip is counted, not silently dro
 test("a failed read leaves the plan exactly as it was", async () => {
   seedPlan("approved", [imported("a", "组会", "06:00", "07:00")]);
   const sync = createGraphSync(store, WORKSPACE, {
-    reader: { pullCalendar: async () => { throw new Error("GRAPH_READ_FAILED:503"); } },
+    sources: () => [{ key: SOURCE_KEY, label: "日历",
+      reader: { pullCalendar: async () => { throw new Error("GRAPH_READ_FAILED:503"); } } }],
     now: NOW, timeZone: "UTC"
   });
   expect(await sync()).toMatchObject({ state: "blocked", code: "GRAPH_READ_FAILED" });
   expect(store.listPlanVersions(WORKSPACE)).toHaveLength(1);
   // Losing the cursor would force a full re-read; a transient failure must not cost that.
-  expect(store.readSyncCursor(WORKSPACE, "graph_calendar", "calendarView")).toBeNull();
+  expect(store.readSyncCursor(WORKSPACE, "graph_calendar", SOURCE_KEY)).toBeNull();
 });
 
 test("the plan carries a week of reality, not just today", async () => {
   // Importing only today threw away twenty of every twenty-one events already paid for, and left the
   // A lens week view with nothing to show.
   const sync = createGraphSync(store, WORKSPACE, {
-    reader: reader([{ items: [
+    sources: only([{ items: [
       event("today", "今天的组会", "06:00", "07:00"),
       { ...event("tomorrow", "明天的课", "14:00", "15:00"),
         start: "2026-09-17T14:00:00.000Z", end: "2026-09-17T15:00:00.000Z" },
       // Beyond the seven-day window: read, but not carried into the plan.
       { ...event("far", "下个月", "14:00", "15:00"),
         start: "2026-10-20T14:00:00.000Z", end: "2026-10-20T15:00:00.000Z" }
-    ], cursor: "c" }]),
+    ], cursor: "c" }]).sources,
     now: NOW, timeZone: "UTC"
   });
   seedPlan("draft", []);
@@ -182,7 +191,7 @@ test("a block from before the plan carried days is not reported as having moved"
   seedPlan("draft", [{ id: "graph_calendar:a", lane: "human", title: "组会",
     start: "06:00", end: "07:00", source: "日历", readOnly: true }]);
   const sync = createGraphSync(store, WORKSPACE, {
-    reader: reader([{ items: [event("a", "组会", "06:00", "07:00")], cursor: "c" }]),
+    sources: only([{ items: [event("a", "组会", "06:00", "07:00")], cursor: "c" }]).sources,
     now: NOW, timeZone: "UTC"
   });
   expect(await sync()).toMatchObject({ state: "synced", changes: 0 });
@@ -192,8 +201,8 @@ test("a day change on an approved plan is described with the date, not just the 
   seedPlan("approved", [{ id: "graph_calendar:a", lane: "human", title: "组会", day: "2026-09-16",
     start: "06:00", end: "07:00", source: "日历", readOnly: true }]);
   const sync = createGraphSync(store, WORKSPACE, {
-    reader: reader([{ items: [{ ...event("a", "组会", "06:00", "07:00"),
-      start: "2026-09-18T06:00:00.000Z", end: "2026-09-18T07:00:00.000Z" }], cursor: "c" }]),
+    sources: only([{ items: [{ ...event("a", "组会", "06:00", "07:00"),
+      start: "2026-09-18T06:00:00.000Z", end: "2026-09-18T07:00:00.000Z" }], cursor: "c" }]).sources,
     now: NOW, timeZone: "UTC"
   });
   const outcome = await sync();
@@ -214,10 +223,10 @@ test("a long calendar id keeps add and move as separate changes", async () => {
   });
   seedPlan("draft", []);
   const sync = createGraphSync(store, WORKSPACE, {
-    reader: reader([
+    sources: only([
       { items: [longEvent("06:00", "07:00")], cursor: "c1" },
       { items: [longEvent("09:00", "10:00")], cursor: "c2" }
-    ]),
+    ]).sources,
     now: NOW, timeZone: "UTC"
   });
   await sync();
@@ -236,7 +245,7 @@ test("a block that aged out of the window is not reported as deleted", async () 
   seedPlan("draft", [{ id: "graph_calendar:yesterday", lane: "human", title: "昨天的组会",
     day: "2026-09-15", start: "11:00", end: "12:00", source: "日历", readOnly: true }]);
   const sync = createGraphSync(store, WORKSPACE, {
-    reader: reader([{ items: [event("today", "今天的课", "06:00", "07:00")], cursor: "c" }]),
+    sources: only([{ items: [event("today", "今天的课", "06:00", "07:00")], cursor: "c" }]).sources,
     now: NOW, timeZone: "UTC"
   });
   const outcome = await sync();
@@ -249,7 +258,7 @@ test("a block inside the window that really disappeared is still reported", asyn
   seedPlan("draft", [{ id: "graph_calendar:soon", lane: "human", title: "后天的会",
     day: "2026-09-18", start: "11:00", end: "12:00", source: "日历", readOnly: true }]);
   const sync = createGraphSync(store, WORKSPACE, {
-    reader: reader([{ items: [], cursor: "c" }]), now: NOW, timeZone: "UTC"
+    sources: only([{ items: [], cursor: "c" }]).sources, now: NOW, timeZone: "UTC"
   });
   await sync();
   const changes = store.listPlanChanges("plan-1");
@@ -262,10 +271,10 @@ test("an incremental page lists what changed, not the whole calendar", async () 
   // set wiped the plan and reported every block as deleted — the sync destroyed its own work daily.
   seedPlan("draft", []);
   const sync = createGraphSync(store, WORKSPACE, {
-    reader: reader([
+    sources: only([
       { items: [event("a", "组会", "06:00", "07:00")], cursor: "c1" },
       { items: [], cursor: "c2" }
-    ]),
+    ]).sources,
     now: NOW, timeZone: "UTC"
   });
   await sync();
@@ -279,10 +288,10 @@ test("an incremental page lists what changed, not the whole calendar", async () 
 test("an incremental page still applies its tombstones", async () => {
   seedPlan("draft", []);
   const sync = createGraphSync(store, WORKSPACE, {
-    reader: reader([
+    sources: only([
       { items: [event("a", "组会", "06:00", "07:00"), event("b", "课程", "08:00", "09:00")], cursor: "c1" },
       { items: [{ ...event("a", "组会", "06:00", "07:00"), removed: true }], cursor: "c2" }
-    ]),
+    ]).sources,
     now: NOW, timeZone: "UTC"
   });
   await sync();
@@ -290,4 +299,111 @@ test("an incremental page still applies its tombstones", async () => {
   const blocks = (store.listPlanVersions(WORKSPACE)[0]?.payload as { blocks: Array<Record<string, string>> }).blocks;
   // "a" was explicitly tombstoned; "b" was simply not mentioned, which means unchanged.
   expect(blocks.map((block) => block.id)).toEqual(["graph_calendar:b"]);
+});
+
+const twoAccounts = (uw: GraphDeltaPage[], personal: GraphDeltaPage[]): CalendarSource[] => [
+  { key: "uw:cal", label: "日历 · kyan47", reader: reader(uw) },
+  { key: "personal:cal", label: "日历 · karolyan1215", reader: reader(personal) }
+];
+
+test("two accounts contribute to one timeline, each block saying which one it came from", async () => {
+  seedPlan("draft", []);
+  const sync = createGraphSync(store, WORKSPACE, {
+    sources: () => twoAccounts(
+      [{ items: [event("a", "组会", "06:00", "07:00")], cursor: "uw-1" }],
+      [{ items: [event("b", "体检", "09:00", "10:00")], cursor: "personal-1" }]
+    ),
+    now: NOW, timeZone: "UTC"
+  });
+
+  expect(await sync()).toMatchObject({ state: "synced", imported: 2 });
+  const blocks = (store.listPlanVersions(WORKSPACE)[0]?.payload as { blocks: Array<Record<string, unknown>> }).blocks;
+  expect(blocks.map((block) => [block.title, block.source])).toEqual([
+    ["组会", "日历 · kyan47"], ["体检", "日历 · karolyan1215"]
+  ]);
+  // A cursor each. One shared cursor was what limited this to a single calendar in the first place.
+  expect(store.readSyncCursor(WORKSPACE, "graph_calendar", "uw:cal")).toBe("uw-1");
+  expect(store.readSyncCursor(WORKSPACE, "graph_calendar", "personal:cal")).toBe("personal-1");
+});
+
+test("one account failing does not delete its blocks, and does not stop the others", async () => {
+  seedPlan("draft", []);
+  const sources = twoAccounts(
+    [{ items: [event("a", "组会", "06:00", "07:00")], cursor: "uw-1" }],
+    [{ items: [event("b", "体检", "09:00", "10:00")], cursor: "personal-1" }]
+  );
+  const sync = createGraphSync(store, WORKSPACE, { sources: () => sources, now: NOW, timeZone: "UTC" });
+  await sync();
+
+  // The personal account is now signed out. Its events did not disappear from the calendar — the app
+  // simply cannot see them, and reporting that as 「日历中已不存在」 would be a lie that also deletes.
+  sources[1]!.reader = { pullCalendar: async () => { throw new Error("GRAPH_CREDENTIAL_UNAVAILABLE"); } };
+  const outcome = await sync();
+
+  expect(outcome).toMatchObject({
+    state: "synced", changes: 0,
+    failed: [{ key: "personal:cal", code: "GRAPH_CREDENTIAL_UNAVAILABLE" }]
+  });
+  const blocks = (store.listPlanVersions(WORKSPACE)[0]?.payload as { blocks: Array<Record<string, unknown>> }).blocks;
+  expect(blocks.map((block) => block.title).sort()).toEqual(["体检", "组会"]);
+});
+
+test("unticking a calendar takes its blocks off the plan", async () => {
+  seedPlan("draft", []);
+  const both = twoAccounts(
+    [{ items: [event("a", "组会", "06:00", "07:00")], cursor: "uw-1" }],
+    [{ items: [event("b", "体检", "09:00", "10:00")], cursor: "personal-1" }]
+  );
+  let selected = both;
+  const sync = createGraphSync(store, WORKSPACE, { sources: () => selected, now: NOW, timeZone: "UTC" });
+  await sync();
+
+  // Unticked, not broken: nothing will ever update these blocks again, so leaving them would strand
+  // them on the plan forever.
+  selected = [both[0]!];
+  expect(await sync()).toMatchObject({ state: "synced" });
+  const blocks = (store.listPlanVersions(WORKSPACE)[0]?.payload as { blocks: Array<Record<string, unknown>> }).blocks;
+  expect(blocks.map((block) => block.title)).toEqual(["组会"]);
+});
+
+test("blocks imported before there were multiple calendars are adopted, not stranded", async () => {
+  // Shaped like a plan written by the single-source sync: no `sourceKey` on either block.
+  seedPlan("draft", [imported("a", "组会", "06:00", "07:00"), imported("gone", "已删掉的会", "11:00", "12:00")]);
+  const sync = createGraphSync(store, WORKSPACE, {
+    sources: only([{ items: [event("a", "组会", "06:00", "07:00")], cursor: "delta-1" }]).sources,
+    now: NOW, timeZone: "UTC"
+  });
+  await sync();
+
+  const blocks = (store.listPlanVersions(WORKSPACE)[0]?.payload as { blocks: Array<Record<string, unknown>> }).blocks;
+  // The one the calendar still reports is re-keyed; the one it does not is a ghost no source owns.
+  expect(blocks.map((block) => block.title)).toEqual(["组会"]);
+  expect(blocks[0]).toMatchObject({ sourceKey: SOURCE_KEY });
+});
+
+test("no calendar selected is said out loud rather than reported as an empty calendar", async () => {
+  seedPlan("draft", [imported("a", "组会", "06:00", "07:00")]);
+  const sync = createGraphSync(store, WORKSPACE, { sources: () => [], now: NOW, timeZone: "UTC" });
+  expect(await sync()).toMatchObject({ state: "blocked", code: "GRAPH_NO_CALENDAR_SELECTED" });
+  // Blocked means blocked: an empty selection must not be a quiet way to wipe the plan.
+  expect((store.listPlanVersions(WORKSPACE)[0]?.payload as { blocks: unknown[] }).blocks).toHaveLength(1);
+});
+
+test("ticking a second calendar does not delete blocks the first one still owns", async () => {
+  // The exact shape that broke a real approved plan: pre-multi-source blocks with no `sourceKey`, an
+  // original calendar reading incrementally, and a newly ticked one reading in full for the first time.
+  seedPlan("approved", [imported("a", "组会", "06:00", "07:00")]);
+  const original = { key: "uw:cal", label: "日历 · kyan47", reader: reader([{ items: [], cursor: "uw-2" }]) };
+  store.saveSyncCursor({ ownerId: "local-owner", workspaceId: WORKSPACE,
+    provider: "graph_calendar", collection: "uw:cal", cursor: "uw-1" });
+  const added = { key: "uw:birthdays", label: "生日 · kyan47", reader: reader([{ items: [], cursor: "b-1" }]) };
+
+  const sync = createGraphSync(store, WORKSPACE, { sources: () => [original, added], now: NOW, timeZone: "UTC" });
+  const outcome = await sync();
+
+  // Nothing changed in either calendar, so nothing may change on the plan — and above all an approved
+  // plan must not fork into a draft of 「已不存在」 conflicts for an event nobody touched.
+  expect(outcome).toMatchObject({ state: "synced", imported: 1, changes: 0 });
+  expect(store.listPlanVersions(WORKSPACE)).toHaveLength(1);
+  expect(store.listPlanVersions(WORKSPACE)[0]?.status).toBe("approved");
 });

@@ -11,8 +11,12 @@ import { createMaterialPreparer, pendingMaterialWorkOrders } from "./material-ru
 import { createMilestoneGate, pendingMilestoneGates } from "./milestone-gate-runner";
 import { createMilestoneProposer } from "./milestone-proposer";
 import { createGraphSync, type SyncOutcome } from "./graph-sync";
-import { createGraphAuthSession, GraphReadSource } from "@crossline/connectors";
+import {
+  buildSources, calendarLabel, listCatalogue, readSelection, saveSelection, seedNewAccounts, sourceKey
+} from "./calendar-sources";
+import { createGraphAuthSession, GraphReadSource, type GraphCredentialProvider } from "@crossline/connectors";
 
+const WORKSPACE_ID = "personal-crossline";
 const repoRoot = path.resolve(import.meta.dirname, "../../..");
 // The worker runs with its own package as cwd, and nothing else here reads .env files — so without
 // this the calendar client id was simply never present and the sync could never switch on, silently.
@@ -85,8 +89,8 @@ async function tick(): Promise<void> {
   }
   // Calendar reality is pulled every tick. It never rewrites an approved plan — a change there becomes
   // a new draft whose diffs are conflicts for the person to look at.
-  if (syncCalendar) {
-    const outcome = await syncCalendar().catch((error): SyncOutcome =>
+  if (calendar) {
+    const outcome = await calendar.sync().catch((error): SyncOutcome =>
       ({ state: "blocked", code: "GRAPH_SYNC_FAILED", message: error instanceof Error ? error.message : "" }));
     if (outcome.state === "blocked" || outcome.changes > 0 || outcome.resynced) {
       console.info(JSON.stringify({ type: `graph.${outcome.state}`, checkedAt, ...outcome }));
@@ -148,7 +152,7 @@ const judgeMilestone = createMilestoneGate(analysisStore, "personal-crossline", 
  * Calendar sync only exists when a client id is configured. Without one there is nothing to read, and
  * inventing a connector that always fails would put a permanent blocker on every tick.
  */
-const syncCalendar = await (async () => {
+const calendar = await (async () => {
   const clientId = process.env.CROSSLINE_MS_CLIENT_ID?.trim();
   // Said out loud: "no log at all" made an unconfigured sync indistinguishable from a broken one.
   if (!clientId) { console.info(JSON.stringify({ type: "graph.not_configured" })); return undefined; }
@@ -164,10 +168,47 @@ const syncCalendar = await (async () => {
       console.info(JSON.stringify({ type: "graph.not_signed_in" }));
       return undefined;
     }
-    return createGraphSync(analysisStore, "personal-crossline", {
-      reader: new GraphReadSource({ credential }),
-      ...(process.env.CROSSLINE_TIME_ZONE ? { timeZone: process.env.CROSSLINE_TIME_ZONE } : {})
-    });
+    const reader = (bound: GraphCredentialProvider, calendarId?: string) =>
+      new GraphReadSource({ credential: bound, ...(calendarId ? { calendarId } : {}) });
+
+    // One catalogue read at startup, so a newly signed-in account arrives with its default calendar
+    // already ticked instead of appearing to do nothing.
+    const catalogue = await listCatalogue(credential, analysisStore, WORKSPACE_ID, reader);
+    seedNewAccounts(analysisStore, WORKSPACE_ID, catalogue);
+    console.info(JSON.stringify({
+      type: "graph.calendars", accounts: catalogue.length,
+      selected: readSelection(analysisStore, WORKSPACE_ID).length
+    }));
+
+    return {
+      sync: createGraphSync(analysisStore, WORKSPACE_ID, {
+        // Resolved per tick, so unticking a calendar takes effect on the next sync with no restart.
+        sources: () => buildSources(analysisStore, WORKSPACE_ID, credential, reader),
+        ...(process.env.CROSSLINE_TIME_ZONE ? { timeZone: process.env.CROSSLINE_TIME_ZONE } : {})
+      }),
+      listSources: async () => {
+        const fresh = await listCatalogue(credential, analysisStore, WORKSPACE_ID, reader);
+        seedNewAccounts(analysisStore, WORKSPACE_ID, fresh);
+        // Re-read rather than reuse: seeding may have ticked a calendar that the first pass showed
+        // unticked, and showing the person a list that is already one step stale is how a checkbox
+        // ends up disagreeing with what the next sync actually reads.
+        return listCatalogue(credential, analysisStore, WORKSPACE_ID, reader);
+      },
+      saveSources: async (keys: string[]) => {
+        const fresh = await listCatalogue(credential, analysisStore, WORKSPACE_ID, reader);
+        const wanted = new Set(keys);
+        const selection = fresh.flatMap((account) => account.calendars
+          .filter((calendar) => wanted.has(sourceKey(account.accountId, calendar.id)))
+          .map((calendar) => ({
+            accountId: account.accountId, calendarId: calendar.id,
+            label: calendarLabel(calendar.name, account.username)
+          })));
+        // A key naming a calendar this account cannot see is dropped rather than stored: the stored
+        // selection is what the next tick reads, and a source nobody can read is a permanent failure.
+        saveSelection(analysisStore, WORKSPACE_ID, selection);
+        return listCatalogue(credential, analysisStore, WORKSPACE_ID, reader);
+      }
+    };
   } catch {
     console.warn(JSON.stringify({ type: "worker.blocked", code: "GRAPH_AUTH_UNAVAILABLE" }));
     return undefined;
@@ -196,7 +237,11 @@ try {
     judgeMilestone: (workOrderId) => judgeMilestone(workOrderId),
     // Undefined when no client id is configured or nobody has signed in, in which case the route is
     // simply not mounted and the button says the connector is unavailable rather than lying.
-    ...(syncCalendar ? { syncCalendar: () => syncCalendar() } : {})
+    ...(calendar ? {
+      syncCalendar: () => calendar.sync(),
+      listCalendarSources: () => calendar.listSources(),
+      saveCalendarSources: (keys: string[]) => calendar.saveSources(keys)
+    } : {})
   });
   console.info(JSON.stringify({ type: "codex.supervisor.ready", url: codexSupervisor.url }));
 } catch {

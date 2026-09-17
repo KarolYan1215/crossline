@@ -112,6 +112,12 @@ export interface GraphCredentialProvider {
   getAccessToken(): Promise<string | undefined>;
 }
 
+/** One signed-in mailbox. `id` is MSAL's `homeAccountId`, which is stable across token refreshes. */
+export type GraphAccount = { id: string; username: string };
+
+/** One calendar inside one account. `accountId` is what ties it back to a credential. */
+export type GraphCalendar = { accountId: string; id: string; name: string; isDefault: boolean };
+
 export function graphCacheConfiguration(localAppData = process.env.LOCALAPPDATA) {
   if (!localAppData) throw new Error("LOCALAPPDATA_UNAVAILABLE");
   return {
@@ -146,6 +152,10 @@ export async function createGraphAuthSession(config: {
   access?: "read" | "write";
 }): Promise<GraphCredentialProvider & {
   loginWithDeviceCode(onCode: (info: { userCode: string; verificationUri: string; message: string }) => void): Promise<{ username: string }>;
+  /** Every account the persisted cache holds, in the order MSAL returns them. */
+  listAccounts(): Promise<GraphAccount[]>;
+  /** A credential bound to one account, so two accounts can be read in the same tick. */
+  credentialFor(accountId: string): GraphCredentialProvider;
 }> {
   if (!config.clientId.trim()) throw new Error("GRAPH_CLIENT_ID_REQUIRED");
   const persistenceConfig = graphCacheConfiguration(config.localAppData);
@@ -159,12 +169,33 @@ export async function createGraphAuthSession(config: {
     cache: { cachePlugin: new PersistenceCachePlugin(persistence) }
   });
   const scopes = config.access === "write" ? GRAPH_WRITE_SCOPES : GRAPH_READ_SCOPES;
+  const accountById = async (accountId: string) =>
+    (await client.getTokenCache().getAllAccounts()).find((account) => account.homeAccountId === accountId);
   return {
+    // Kept for the callers that only ever want "some signed-in account" — the status probe and the
+    // single-account write connector. Reading calendars goes through `credentialFor` instead, because
+    // "the first account" silently discarded every account after it.
     async getAccessToken() {
       const account = (await client.getTokenCache().getAllAccounts())[0];
       if (!account) return undefined;
       const result = await client.acquireTokenSilent({ account, scopes });
       return result.accessToken;
+    },
+    async listAccounts() {
+      return (await client.getTokenCache().getAllAccounts())
+        .map((account) => ({ id: account.homeAccountId, username: account.username }));
+    },
+    credentialFor(accountId) {
+      return {
+        async getAccessToken() {
+          const account = await accountById(accountId);
+          // A signed-out account is not an error the tick should die on: the other accounts still
+          // have tokens, and this one simply contributes nothing until it is signed in again.
+          if (!account) return undefined;
+          const result = await client.acquireTokenSilent({ account, scopes });
+          return result.accessToken;
+        }
+      };
     },
     async loginWithDeviceCode(onCode) {
       const result = await client.acquireTokenByDeviceCode({
@@ -457,12 +488,22 @@ export class GraphReadSource {
   readonly #now: () => Date;
   readonly #pastDays: number;
   readonly #futureDays: number;
+  readonly #calendarId: string | undefined;
   readonly #baseUrl = "https://graph.microsoft.com/v1.0";
   /** Series titles resolved so far. A long-running worker pays each lookup once. */
   readonly #seriesTitles = new Map<string, string>();
 
   constructor(config: {
     credential: GraphCredentialProvider;
+    /**
+     * Which calendar to read. Omitted means the account's default calendar.
+     *
+     * One instance reads one calendar, because `calendarView/delta` has no cursor that spans
+     * calendars — each needs its own. Reading only the default one is how this class started, and an
+     * event put on a newly created calendar was invisible with no way to tell from the outside: the
+     * sync answered 「日历没有变化」, which was true and useless.
+     */
+    calendarId?: string;
     fetchImpl?: typeof fetch;
     now?: () => Date;
     pastDays?: number;
@@ -473,6 +514,22 @@ export class GraphReadSource {
     this.#now = config.now ?? (() => new Date());
     this.#pastDays = config.pastDays ?? 7;
     this.#futureDays = config.futureDays ?? 30;
+    this.#calendarId = config.calendarId;
+  }
+
+  /** Every calendar this account can see, so the person can choose rather than guess. */
+  async listCalendars(accountId: string): Promise<GraphCalendar[]> {
+    const response = await this.#request(`${this.#baseUrl}/me/calendars?$select=id,name,isDefaultCalendar`);
+    if (!response.ok) throw new Error(`GRAPH_READ_FAILED:${response.status}`);
+    const body = await response.json() as { value?: Array<Record<string, unknown>> };
+    return (body.value ?? [])
+      .filter((row) => typeof row.id === "string")
+      .map((row) => ({
+        accountId,
+        id: String(row.id),
+        name: typeof row.name === "string" && row.name ? row.name : "(未命名日历)",
+        isDefault: row.isDefaultCalendar === true
+      }));
   }
 
   async #request(url: string): Promise<Response> {
@@ -488,7 +545,8 @@ export class GraphReadSource {
     start.setUTCDate(start.getUTCDate() - this.#pastDays);
     end.setUTCDate(end.getUTCDate() + this.#futureDays);
     const params = new URLSearchParams({ startDateTime: start.toISOString(), endDateTime: end.toISOString() });
-    return `${this.#baseUrl}/me/calendarView/delta?${params}`;
+    const scope = this.#calendarId ? `/me/calendars/${encodeURIComponent(this.#calendarId)}` : "/me";
+    return `${this.#baseUrl}${scope}/calendarView/delta?${params}`;
   }
 
   async #deltaWithSeries(url: string, provider: string, read: (row: Record<string, unknown>) => ExternalItem): Promise<GraphDeltaPage> {

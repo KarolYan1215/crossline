@@ -413,3 +413,9 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .availability-row>button:last-child{border:1px solid var(--rule);background:var(--paper);color:var(--graphite);padding:3px 8px;font-size:11px;cursor:pointer}
 .availability-actions{display:flex;gap:8px;margin-top:10px}
 .availability-actions button{padding:5px 12px;font-size:12px}
+
+.calendar-sources .calendar-account{margin:10px 0 0}
+.calendar-sources h3{margin:0 0 4px;font-family:var(--f-mono);font-size:10px;letter-spacing:.12em;text-transform:none;color:var(--graphite)}
+.calendar-sources label{display:flex;gap:6px;align-items:center;font-size:13px;line-height:1.9}
+.calendar-sources-actions{margin-top:12px}
+.calendar-sources-actions button{padding:5px 12px;font-size:12px}
