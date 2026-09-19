@@ -199,6 +199,8 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .plan-tabs button{font-family:var(--f-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;padding:6px 13px;color:var(--graphite);border:1px solid transparent}
 .plan-tabs button[aria-selected="true"]{background:var(--ink);color:var(--paper)}
 .dual-timeline{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:1px;background:var(--mist);border-bottom:1px solid var(--mist)}
+.schedule-status{grid-column:1/-1;background:var(--paper);padding:10px 16px;font-size:12px}
+.schedule-status p{margin:4px 0 0;color:var(--graphite)}
 .plan-lane{background:var(--paper);padding:14px 16px;display:grid;gap:10px;align-content:start}
 .plan-lane>header{display:grid;gap:2px}
 .plan-lane>header span{font-family:var(--f-mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--graphite)}
@@ -399,6 +401,7 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .calendar-detail .fc-event .fc-event-time{font-family:var(--f-mono);font-size:9px;letter-spacing:.04em}
 .calendar-detail .fc-event .fc-event-title{font-size:11px;line-height:1.35}
 .calendar-detail .fc-event.calendar-example{background:var(--paper);color:var(--ink);border-style:dashed;border-color:var(--shade)}
+.calendar-detail .fc-event.calendar-suggestion{background:var(--paper);color:var(--ink);border-style:dashed;border-color:var(--shade)}
 .calendar-detail .fc-event.calendar-ai{background:var(--paper);color:var(--ink);border-left-width:4px}
 .calendar-detail .fc-event.calendar-ai.calendar-example{border-left-style:solid;border-left-color:var(--mist)}
 
@@ -413,9 +416,34 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .availability-row>button:last-child{border:1px solid var(--rule);background:var(--paper);color:var(--graphite);padding:3px 8px;font-size:11px;cursor:pointer}
 .availability-actions{display:flex;gap:8px;margin-top:10px}
 .availability-actions button{padding:5px 12px;font-size:12px}
+.availability-importance{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0;font-size:12px}
+.availability-importance label{display:inline-flex;gap:5px;align-items:center}
+.rest-prompt{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:8px 0;font-size:12px}
+.rest-prompt p{margin:0}
+.energy-probe select{border:1px solid var(--rule);background:var(--paper);color:var(--ink);padding:4px}
+.schedule-setup{display:grid;gap:12px;margin:0 0 20px;padding:18px;border:1px solid var(--rule)}
+.schedule-setup h2,.schedule-setup h3,.schedule-setup p{margin:0}
+.schedule-setup>label{display:grid;gap:5px;max-width:640px;font-size:13px}
+.schedule-setup>label input,.schedule-setup>label select,.availability-editor>label select{padding:6px;border:1px solid var(--rule);background:var(--paper);color:var(--ink)}
+.schedule-setup>.primary-button{justify-self:start}
 
 .calendar-sources .calendar-account{margin:10px 0 0}
 .calendar-sources h3{margin:0 0 4px;font-family:var(--f-mono);font-size:10px;letter-spacing:.12em;text-transform:none;color:var(--graphite)}
 .calendar-sources label{display:flex;gap:6px;align-items:center;font-size:13px;line-height:1.9}
 .calendar-sources-actions{margin-top:12px}
 .calendar-sources-actions button{padding:5px 12px;font-size:12px}
+.permission-mode-panel { max-height: 58vh; overflow: auto; padding: 1rem; border: 1px solid var(--line, #777); }
+.permission-mode-panel ul { padding-left: 1.25rem; }
+.permission-mode-panel li { margin: .6rem 0; }
+.permission-mode-panel li small { display: block; }
+.goal-controls { display: flex; flex-wrap: wrap; gap: .7rem; align-items: end; margin: .8rem 0; }
+.goal-controls label { display: grid; gap: .2rem; }
+.goal-backplan { display: flex; gap: .5rem; align-items: center; }
+.goal-forecast { margin: 2rem 0; padding: 1rem; border: 1px solid var(--line, #777); }
+.goal-forecast ol { display: grid; grid-template-columns: repeat(auto-fit,minmax(15rem,1fr));
+  gap: .5rem; padding: 0; list-style: none; }
+.goal-forecast ol li { padding: .6rem; border: 1px solid #d9d2c5; line-height: 1.5; }
+.goal-forecast > ul { padding-left: 1.25rem; line-height: 1.7; }
+.goal-forecast > ul li { margin: .4rem 0; }
+.forecast-delta { margin: .8rem 0; padding: .75rem; background: #f1ede3; }
+.forecast-delta ul { margin: .3rem 0 0; }

@@ -27,7 +27,8 @@ export function CalendarDetail({ blocks, today }: { blocks: ScheduleBlockData[];
         // example, and the week view has to keep saying so as plainly as the B lens does.
         classNames: [
           block.lane === "ai" ? "calendar-ai" : "calendar-human",
-          block.id.startsWith("graph_calendar:") ? "calendar-real" : "calendar-example"
+          block.id.startsWith("graph_calendar:") ? "calendar-real"
+            : block.id.startsWith("scheduled:") ? "calendar-suggestion" : "calendar-example"
         ]
       }))}
     />

@@ -11,7 +11,7 @@ export default withSerwist({
   reactStrictMode: true,
   distDir: process.env.CROSSLINE_NEXT_DIR ?? ".next",
   devIndicators: false,
-  serverExternalPackages: ["better-sqlite3"],
+  serverExternalPackages: ["better-sqlite3", "highs"],
   transpilePackages: [
     "@crossline/core",
     "@crossline/db",

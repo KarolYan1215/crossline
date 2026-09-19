@@ -11,6 +11,12 @@ describe("energy probe", () => {
     for (const label of ["记录低精力", "记录中精力", "记录高精力"]) expect(html).toContain(label);
   });
 
+  test("after-task check allows the actual load to be skipped", () => {
+    const html = renderToStaticMarkup(<EnergyProbe context="after_task" workOrderId="work-1" />);
+    expect(html).toContain("实际负荷（可跳过）");
+    expect(html).toContain("跳过");
+  });
+
   test("no longer offers a camera sampling control", () => {
     const html = renderToStaticMarkup(<EnergyProbe />);
     expect(html).not.toContain("12s");

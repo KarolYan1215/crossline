@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import path from "node:path";
 import * as codexModule from "./index";
 import { buildContextBundle, codexProcessEnvironment, JsonLineRpcClient, normalizeCodexEvent } from "./index";
 
@@ -187,9 +188,11 @@ describe("Codex app-server boundary", () => {
   });
 
   test("sidecar authentication is isolated from Codex Desktop state", () => {
-    const env = codexProcessEnvironment({ CODEX_HOME: "C:\\Users\\karol\\.codex", SAFE: "1" }, "C:\\Users\\karol\\AppData\\Local");
+    const env = codexProcessEnvironment({ CODEX_HOME: "C:\\Users\\karol\\.codex", SAFE: "1",
+      CODEX_INTERNAL_ORIGINATOR_OVERRIDE: "Codex Desktop" }, "C:\\Users\\karol\\AppData\\Local");
     expect(env.CODEX_HOME).toBe("C:\\Users\\karol\\AppData\\Local\\Crossline\\codex-home");
     expect(env.CROSSLINE_CODEX_HOME).toBe(env.CODEX_HOME);
+    expect(env.CODEX_INTERNAL_ORIGINATOR_OVERRIDE).toBeUndefined();
     expect(env.SAFE).toBe("1");
   });
 
@@ -249,8 +252,8 @@ describe("Codex app-server boundary", () => {
         accountRevision: 1,
         contract: {
           runtimeVersion: "codex-cli/0.154.0-alpha.6.2",
-          sourceBaseline: "5b1d6560181680f95cde95c14ed042acc02248ed",
-          generatedProtocolSha256: "7a3db76bc09206252e8e74a6d579edfb9bc0fb8a14f2ed64785f81f45468b4c1",
+          sourceBaseline: codexModule.CODEX_BASELINE_COMMIT,
+          generatedProtocolSha256: codexModule.CODEX_GENERATED_PROTOCOL_SHA256,
           contractTestResult: "passed",
           relationStatus: "unverified"
         }
@@ -333,21 +336,34 @@ describe("Codex app-server boundary", () => {
 });
 
 describe("codex executable resolution", () => {
-  const npm = "C:\\Users\\k\\npm";
-  const js = `${npm}\\node_modules\\@openai\\codex\\bin\\codex.js`;
+  const fork = path.resolve(import.meta.dirname, "../../../.vendor/codex-fork/codex-rs/target/debug/codex.exe");
+  const desktop = "C:\\Users\\k\\AppData\\Local\\OpenAI\\Codex\\bin\\codex.exe";
 
-  test("a node-shim install resolves to a directly spawnable node process", () => {
-    const resolved = codexModule.resolveCodexCommand({ Path: `C:\\Windows;${npm}` }, (file) => file === js, "win32");
-    expect(resolved).toEqual({ command: process.execPath, args: [js] });
+  test("the pinned fork build is selected even when Desktop is on PATH", () => {
+    const resolved = codexModule.resolveCodexCommand({ Path: path.dirname(desktop) },
+      (file) => file === fork || file === desktop, "win32", () => codexModule.CODEX_FORK_BINARY_SHA256);
+    expect(resolved).toEqual({ command: fork, args: [] });
   });
 
-  test("a native executable on PATH is preferred over the node shim", () => {
-    const exe = `${npm}\\codex.exe`;
-    const resolved = codexModule.resolveCodexCommand({ Path: npm }, (file) => file === exe || file === js, "win32");
-    expect(resolved).toEqual({ command: exe, args: [] });
+  test("status identifies a sidecar launched from the pinned fork", async () => {
+    const sidecar = fakeSidecar();
+    const supervisor = await codexModule.startCodexSupervisor({ port: 0,
+      sidecarFactory: async () => ({ ...sidecar.handle, forkVerified: true }) });
+    try {
+      const status = await (await fetch(`${supervisor.url}/v1/codex/status`)).json() as { contract: { relationStatus: string } };
+      expect(status.contract.relationStatus).toBe("verified");
+    } finally { await supervisor.stop(); }
   });
 
-  test("a missing codex install is a typed blocker rather than an opaque spawn failure", () => {
-    expect(() => codexModule.resolveCodexCommand({ Path: "C:\\Windows" }, () => false, "win32")).toThrow("CODEX_EXECUTABLE_NOT_FOUND");
+  test("an absent fork never falls back to Desktop", () => {
+    expect(() => codexModule.resolveCodexCommand({ Path: path.dirname(desktop) },
+      (file) => file === desktop, "win32", () => codexModule.CODEX_FORK_BINARY_SHA256))
+      .toThrow("CODEX_FORK_BINARY_NOT_FOUND");
+  });
+
+  test("a changed executable is refused before app-server starts", () => {
+    expect(() => codexModule.resolveCodexCommand({ CROSSLINE_CODEX_PATH: fork },
+      (file) => file === fork, "win32", () => "different"))
+      .toThrow("CODEX_FORK_BINARY_MISMATCH");
   });
 });

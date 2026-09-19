@@ -25,6 +25,9 @@ export type PlanVersionData = {
   version: number;
   status: "draft" | "approved" | "superseded";
   blocks: ScheduleBlockData[];
+  schedule?: { status: "feasible" | "partial" | "infeasible";
+    blockers: Array<{ taskId: string; code: string; message: string }>;
+    solver: "optimal" | "feasible_time_limit" | "fallback"; bufferRelaxed?: boolean };
   changes: Array<{ id: string; kind: "add" | "move" | "remove" | "conflict"; explanation: string; afterBlockId?: string; status: "pending" | "approved" | "excluded" }>;
 };
 
@@ -87,7 +90,8 @@ export function PlanView({ plan, today }: { plan: PlanVersionData; today: string
       <time>{block.start}—{block.end}</time><strong>{block.title}</strong>{/* Not 「待写回」: calendar write-back is switched off by design (Gate 3), so nothing is queued to
           be written anywhere. A label promising a pending external write would be describing a feature
           this build deliberately does not have. */}
-      <small>{block.source} {block.readOnly ? "· 只读" : plan.status === "approved" ? "· 已批准 · 仅本地" : "· 草案 · 仅本地"}</small>
+      <small>{block.source} {block.id.startsWith("scheduled:") ? "· 仅本地" : block.readOnly ? "· 只读"
+        : plan.status === "approved" ? "· 已批准 · 仅本地" : "· 草案 · 仅本地"}</small>
     </article>)}</div>
   </section>;
 
@@ -103,7 +107,15 @@ export function PlanView({ plan, today }: { plan: PlanVersionData; today: string
       </button>
       {syncState === "done" && <span role="status" className="plan-sync-note">{syncNote}</span>}
     </div>
-    {view === "B" && <div id="plan-panel-B" role="tabpanel" aria-labelledby="plan-tab-B" className="dual-timeline">{lane("human", "USER REALITY")}{lane("ai", "AI AHEAD")}</div>}
+    {view === "B" && <div id="plan-panel-B" role="tabpanel" aria-labelledby="plan-tab-B" className="dual-timeline">
+      {plan.schedule && <section className="schedule-status" role="status">
+        <strong>{plan.schedule.status === "feasible" ? "建议时段已排入"
+          : plan.schedule.status === "partial" ? "部分作业尚未排入" : "当前没有可行的建议时段"}</strong>
+        {plan.schedule.solver === "feasible_time_limit" && <p>已显示验证过的可行安排；未证明最优。</p>}
+        {plan.schedule.solver === "fallback" && <p>优化器未给出可用解；已显示验证过的保底安排。</p>}
+        {plan.schedule.bufferRelaxed && <p>为守住已确认截止时间，已放宽当天的缓冲规则。</p>}
+        {plan.schedule.blockers.map((blocker) => <p key={blocker.taskId}>{blocker.message}</p>)}
+      </section>}{lane("human", "USER REALITY")}{lane("ai", "AI AHEAD")}</div>}
     {view === "C" && <section id="plan-panel-C" role="tabpanel" aria-labelledby="plan-tab-C" className="change-ledger">
       <header><span>KIND</span><span>CHANGE</span><span>STATUS</span></header>
       {plan.changes.map((change) => <article key={change.id}>

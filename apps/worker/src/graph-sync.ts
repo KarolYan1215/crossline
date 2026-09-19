@@ -10,10 +10,10 @@ const MAX_PAGES = 20;
 /**
  * How many days of reality the plan carries, starting today.
  *
- * Seven, because the A lens is a day/week view: importing only today meant the week view had nothing
- * to show and the sync threw away twenty of every twenty-one events it had already paid to read.
+ * Eight weeks of real events feed the long-range forecast. The scheduler still fine-plans seven days;
+ * these read-only blocks also let the calendar's week view navigate forward without invented occupancy.
  */
-const WINDOW_DAYS = Number(process.env.CROSSLINE_PLAN_WINDOW_DAYS ?? 7);
+const WINDOW_DAYS = Number(process.env.CROSSLINE_CALENDAR_WINDOW_DAYS ?? 56);
 
 export type CalendarReader = { pullCalendar(cursor?: string): Promise<GraphDeltaPage> };
 
@@ -108,21 +108,27 @@ export function createGraphSync(store: CrosslineStore, workspaceId: string, opti
   /** Resolved fresh on each tick, because the person can change which calendars are read. */
   sources: () => CalendarSource[];
   now?: () => Date;
-  timeZone?: string;
+  timeZone?: string | (() => string | undefined);
 }) {
   const now = options.now ?? (() => new Date());
   return async function sync(): Promise<SyncOutcome> {
+    const timeZone = typeof options.timeZone === "function" ? options.timeZone() : options.timeZone;
     const sources = options.sources();
     if (!sources.length) {
       return { state: "blocked", code: "GRAPH_NO_CALENDAR_SELECTED", message: "没有勾选任何日历；在连接页选一个再同步。" };
     }
 
-    const days = new Set(syncWindowDays(now(), WINDOW_DAYS, options.timeZone));
+    const days = new Set(syncWindowDays(now(), WINDOW_DAYS, timeZone));
     const today = [...days][0]!;
 
     const reads: SourceRead[] = [];
     for (const source of sources) {
-      const storedCursor = store.readSyncCursor(workspaceId, PROVIDER, source.key);
+      // A delta cursor cannot replay unchanged events in a new zone or a wider read window.
+      const zoneKey = `calendar.sync_zone:${source.key}`;
+      const previousZone = store.getSetting(workspaceId, zoneKey);
+      const scope = `${timeZone ?? ""}|${WINDOW_DAYS}`;
+      const storedCursor = previousZone === scope
+        ? store.readSyncCursor(workspaceId, PROVIDER, source.key) : null;
       let page: Awaited<ReturnType<typeof readAll>>;
       try {
         page = await readAll(source.reader, storedCursor);
@@ -143,7 +149,7 @@ export function createGraphSync(store: CrosslineStore, workspaceId: string, opti
       const blocks: RealityBlock[] = [];
       let skipped = 0;
       for (const item of reconciled) {
-        const block = toRealityBlock(item, options.timeZone, { key: source.key, label: source.label });
+        const block = toRealityBlock(item, timeZone, { key: source.key, label: source.label });
         // Outside the window is not a skip worth reporting: the delta range is wider than the plan on
         // purpose, so that a change just beyond the edge is already known when the window rolls onto it.
         if (!block) { skipped += 1; continue; }
@@ -154,6 +160,7 @@ export function createGraphSync(store: CrosslineStore, workspaceId: string, opti
         authoritative: page.resynced || !storedCursor
       });
       store.saveSyncCursor({ ownerId: OWNER_ID, workspaceId, provider: PROVIDER, collection: source.key, cursor: page.cursor });
+      store.setSetting(workspaceId, zoneKey, scope);
     }
 
     const read = reads.filter((entry): entry is Extract<SourceRead, { ok: true }> => entry.ok);

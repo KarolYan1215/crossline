@@ -1,8 +1,9 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { createHash } from "node:crypto";
 import { createInterface } from "node:readline";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import { existsSync, mkdirSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readSync } from "node:fs";
 import path from "node:path";
 import { readCostSignal } from "./cost";
 import type { CostSignal } from "@crossline/core";
@@ -105,8 +106,9 @@ export class JsonLineRpcClient {
   }
 }
 
-export const CODEX_BASELINE_COMMIT = "5b1d6560181680f95cde95c14ed042acc02248ed";
-export const CODEX_GENERATED_PROTOCOL_SHA256 = "7a3db76bc09206252e8e74a6d579edfb9bc0fb8a14f2ed64785f81f45468b4c1";
+export const CODEX_BASELINE_COMMIT = "f0a1b8f0849d90960bc406b848f32e5a129b0457";
+export const CODEX_GENERATED_PROTOCOL_SHA256 = "cff5bf0f8f52d3d4fd2d00145462c5a3e21df86ec3b3b652668884831eb5c6a3";
+export const CODEX_FORK_BINARY_SHA256 = "ad13bb69310fd20019c5552d158dfaa5489a213c09246d5a5f6715761c7270f7";
 
 export async function readCodexAccount(client: JsonLineRpcClient): Promise<unknown> {
   return client.request("account/read", { refreshToken: false });
@@ -131,37 +133,49 @@ export function codexProcessEnvironment(
     ? path.win32.join(base.USERPROFILE, "AppData", "Local")
     : localAppData;
   const crosslineHome = path.win32.join(durableLocalAppData, "Crossline", "codex-home");
-  return { ...base, CODEX_HOME: crosslineHome, CROSSLINE_CODEX_HOME: crosslineHome };
+  const env: NodeJS.ProcessEnv = { ...base, CODEX_HOME: crosslineHome, CROSSLINE_CODEX_HOME: crosslineHome };
+  delete env.CODEX_INTERNAL_ORIGINATOR_OVERRIDE;
+  return env;
 }
 
-// `codex` on Windows is a node shim, not an executable: spawn() cannot resolve it and a
-// `.cmd` would need a shell, whose cmd.exe wrapper would orphan the sidecar on stop().
+function fileSha256(file: string): string {
+  const hash = createHash("sha256");
+  const handle = openSync(file, "r");
+  try {
+    const chunk = Buffer.allocUnsafe(1024 * 1024);
+    let size: number;
+    while ((size = readSync(handle, chunk, 0, chunk.length, null)) > 0) hash.update(chunk.subarray(0, size));
+    return hash.digest("hex");
+  } finally { closeSync(handle); }
+}
+
+// The runtime is built from the pinned fork in this checkout. PATH can contain both the official npm
+// shim and Codex Desktop; neither proves the source of the child the worker owns.
 export function resolveCodexCommand(
   env: NodeJS.ProcessEnv = process.env,
   exists: (file: string) => boolean = existsSync,
-  platform: string = process.platform
+  platform: string = process.platform,
+  sha256: (file: string) => string = fileSha256
 ): { command: string; args: string[] } {
-  if (env.CROSSLINE_CODEX_PATH) return { command: env.CROSSLINE_CODEX_PATH, args: [] };
-  if (platform !== "win32") return { command: "codex", args: [] };
-  for (const dir of (env.Path ?? env.PATH ?? "").split(";").filter(Boolean)) {
-    const exe = path.win32.join(dir, "codex.exe");
-    if (exists(exe)) return { command: exe, args: [] };
-    const js = path.win32.join(dir, "node_modules", "@openai", "codex", "bin", "codex.js");
-    if (exists(js)) return { command: process.execPath, args: [js] };
-  }
-  throw new Error("CODEX_EXECUTABLE_NOT_FOUND");
+  const fork = path.resolve(import.meta.dirname, "../../../.vendor/codex-fork/codex-rs/target/debug",
+    platform === "win32" ? "codex.exe" : "codex");
+  const executable = env.CROSSLINE_CODEX_PATH ?? fork;
+  if (!path.isAbsolute(executable) || !exists(executable)) throw new Error("CODEX_FORK_BINARY_NOT_FOUND");
+  if (sha256(executable) !== CODEX_FORK_BINARY_SHA256) throw new Error("CODEX_FORK_BINARY_MISMATCH");
+  return { command: executable, args: [] };
 }
 
-export async function startCodexAppServer(options: { codexPath?: string } = {}): Promise<{
+export async function startCodexAppServer(): Promise<{
   client: JsonLineRpcClient;
   process: ChildProcessWithoutNullStreams;
+  forkVerified: true;
   initializeResult: unknown;
   onExit: (handler: () => void) => () => void;
   stop: () => void;
 }> {
   const env = codexProcessEnvironment();
   mkdirSync(env.CODEX_HOME!, { recursive: true });
-  const codex = options.codexPath ? { command: options.codexPath, args: [] } : resolveCodexCommand(env);
+  const codex = resolveCodexCommand(env);
   const child = spawn(codex.command, [...codex.args, "app-server", "--listen", "stdio://", "--strict-config"], {
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
@@ -190,6 +204,7 @@ export async function startCodexAppServer(options: { codexPath?: string } = {}):
   return {
     client,
     process: child,
+    forkVerified: true as const,
     initializeResult,
     onExit: (handler) => {
       exitHandlers.add(handler);
@@ -209,6 +224,7 @@ export type CodexRpcBoundary = Pick<JsonLineRpcClient, "request" | "onNotificati
 type CodexSidecar = {
   client: CodexRpcBoundary;
   initializeResult: unknown;
+  forkVerified?: true;
   onExit: (handler: () => void) => () => void;
   stop: () => void;
 };
@@ -234,7 +250,7 @@ export type CodexSupervisorStatus = {
     sourceBaseline: string;
     generatedProtocolSha256: string;
     contractTestResult: "passed";
-    relationStatus: "unverified";
+    relationStatus: "verified" | "unverified";
   };
 };
 
@@ -311,6 +327,7 @@ export async function startCodexSupervisor(options: {
   sidecarFactory?: () => Promise<CodexSidecar>;
   analyzeCapture?: (client: CodexRpcBoundary, id: string, signal: AbortSignal) => Promise<unknown>;
   proposeMilestones?: (client: CodexRpcBoundary, request: string, signal: AbortSignal) => Promise<unknown>;
+  backplanGoal?: (client: CodexRpcBoundary, milestoneId: string, signal: AbortSignal) => Promise<unknown>;
   prepareMaterials?: (workOrderId: string) => Promise<unknown>;
   judgeMilestone?: (workOrderId: string) => Promise<unknown>;
   syncCalendar?: () => Promise<unknown>;
@@ -372,7 +389,7 @@ export async function startCodexSupervisor(options: {
     sourceBaseline: CODEX_BASELINE_COMMIT,
     generatedProtocolSha256: CODEX_GENERATED_PROTOCOL_SHA256,
     contractTestResult: "passed",
-    relationStatus: "unverified"
+    relationStatus: sidecar.forkVerified === true ? "verified" : "unverified"
   };
   const unsubscribe = sidecar.client.onNotification((message) => {
     const params = record(message.params);
@@ -546,6 +563,20 @@ export async function startCodexSupervisor(options: {
         const controller = new AbortController();
         proposing = controller;
         try { sendJson(response, 200, await options.proposeMilestones(sidecar.client, String(body?.request ?? ""), controller.signal)); }
+        finally { if (proposing === controller) proposing = undefined; }
+        return;
+      }
+      if (request.method === "POST" && pathname === "/v1/goals/backplan" && options.backplanGoal) {
+        if (request.headers.origin || !request.headers["content-type"]?.startsWith("application/json")) {
+          sendJson(response, 403, { blocker: { code: "BACKPLAN_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
+          return;
+        }
+        if (runtimeBlocker) { sendJson(response, 503, { blocker: runtimeBlocker }); return; }
+        if (proposing) { sendJson(response, 409, { blocker: { code: "PROPOSAL_ALREADY_RUNNING", message: "已有一次提议在运行" } }); return; }
+        const body = await readJsonBody(request);
+        const controller = new AbortController();
+        proposing = controller;
+        try { sendJson(response, 200, await options.backplanGoal(sidecar.client, String(body?.milestoneId ?? ""), controller.signal)); }
         finally { if (proposing === controller) proposing = undefined; }
         return;
       }

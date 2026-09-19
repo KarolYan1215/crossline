@@ -12,7 +12,17 @@ const supervisor = await startCodexSupervisor({
   }
 });
 try {
-  const status = await (await fetch(`${supervisor.url}/v1/codex/status`)).json() as { state?: string };
-  if (status.state !== "ready") throw new Error(`CODEX_PLUGIN_SMOKE_FAILED ${JSON.stringify(status)}`);
-  console.log(JSON.stringify({ status: "ok", baselineCommit: CODEX_BASELINE_COMMIT, supervisor: status }));
+  const status = await (await fetch(`${supervisor.url}/v1/codex/status`)).json() as {
+    state?: string; contract?: { runtimeVersion?: string; relationStatus?: string }
+  };
+  if (status.state !== "ready" || status.contract?.relationStatus !== "verified"
+    || !status.contract.runtimeVersion?.startsWith("crossline/0.155.0 "))
+    throw new Error(`CODEX_FORK_SMOKE_FAILED ${JSON.stringify(status)}`);
+  const started = await supervisor.client.request("thread/start", {
+    cwd: repoRoot, sandbox: "read-only", approvalPolicy: "untrusted", ephemeral: true
+  }) as { thread?: { id?: string }; approvalPolicy?: string; sandbox?: { type?: string } };
+  if (!started.thread?.id || started.approvalPolicy !== "untrusted" || started.sandbox?.type !== "readOnly")
+    throw new Error(`CODEX_THREAD_SMOKE_FAILED ${JSON.stringify(started)}`);
+  console.log(JSON.stringify({ status: "ok", baselineCommit: CODEX_BASELINE_COMMIT,
+    threadId: started.thread.id, supervisor: status }));
 } finally { await supervisor.stop(); }

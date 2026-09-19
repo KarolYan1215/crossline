@@ -3,6 +3,7 @@ import { loadWeeklyReview } from "../../lib/review";
 import { SubpageShell } from "../subpage-shell";
 import { RevokeAcceptance } from "./revoke-acceptance";
 import { DecideRelations } from "./decide-relations";
+import { RevokeInsight } from "./revoke-insight";
 
 export const dynamic = "force-dynamic";
 
@@ -64,7 +65,9 @@ export default function ReviewPage() {
           <b>{finding.summary}</b>
           <small>{finding.sourceTitle} · {finding.retrievedAt.slice(0, 10)} · 里程碑 {finding.milestoneId}</small>
           <small>失效条件：{finding.staleWhen}</small>
+          <small>洞察状态：{finding.status === "approved" ? "已批准可用于反推" : finding.status === "candidate" ? "候选，尚不用于决策" : finding.status === "revoked" ? "已撤销" : "已拒绝"}</small>
           <a href={finding.sourceUrl} rel="noreferrer noopener" target="_blank">来源 ↗</a>
+          {finding.status === "approved" && <RevokeInsight eventId={finding.eventId} />}
         </li>)}</ul>}
     </section>
 

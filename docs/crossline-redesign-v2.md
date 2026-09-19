@@ -90,6 +90,8 @@ PluginInstallParams { marketplacePath: 绝对路径 }    ← 可从本地目录�
 
 > 若将来确需改 codex 源码，先记录**为什么现有协议不够**，再改；本设计不预留 fork。
 
+> 2026-09-18 运行实现更新：依用户要求，Crossline 现从[自有 fork](codex-fork-runtime.md)构建并固定 Codex 可执行文件；fork 有一处 Windows 状态库迁移兼容补丁。上文的 Desktop 版本和“不 fork”是原设计决策的历史记录。
+
 ### 3.2 三层职责
 
 **A. 通用编排核心**（`crossline-core`，与身份无关）
@@ -594,7 +596,7 @@ client id 与 tenant id 不是机密（OAuth 公开标识符），但仍放进 `
 
 ## 14. 明确不做
 
-- 不 fork codex 源码（现有 plugin/skill 协议够用）
+- 不修改 Codex 内核协议来重做现有 plugin/skill 能力；运行时来源见[自有 fork 记录](codex-fork-runtime.md)
 - 不做 DAG、不做流程图编辑器、不做任务拆解关系图
 - 不做任何合成指数、综合评分、跨身份总分
 - 不做医学推断、健康建议、连续疲劳分数

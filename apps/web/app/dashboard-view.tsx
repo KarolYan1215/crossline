@@ -31,7 +31,10 @@ export type DashboardData = {
     basis: Array<"self_report" | "execution_history" | "local_activity">;
     blockers: Array<{ code: string; message: string }>;
   };
+  energyLearning?: { status: "rule_only" | "personal_unvalidated" | "personal_calibrated";
+    count: number; predictedCorrect: number; baselineCorrect: number };
   primary?: DashboardAction;
+  higherPriority?: DashboardAction;
   lowEnergy?: DashboardAction;
   shortGap?: DashboardAction;
   care: Array<{ title: string; minimumMinutes: number }>;
@@ -86,6 +89,9 @@ export function DashboardView({ data }: { data: DashboardData }) {
       <div><span className="mono-label">TODAY / {data.monthLabel}</span><div className="day-number">{data.dateLabel}</div></div>
       <div className="now-state"><Clock3 size={14} aria-hidden="true" /><span>{data.nowLabel}</span><strong>{capacityLabel(data.capacity)}</strong>
         {data.capacity.blockers.map((blocker) => <em key={blocker.code} className="capacity-blocker">{blocker.message}</em>)}
+        {data.energyLearning && <em className="capacity-blocker">{data.energyLearning.status === "personal_calibrated"
+          ? `个人已校准 · ${data.energyLearning.count} 次前瞻记录`
+          : `精力转移采用可解释规则 · ${data.energyLearning.count} 次前瞻记录，尚未证明优于静态基线`}</em>}
       </div>
     </section>
 
@@ -95,6 +101,10 @@ export function DashboardView({ data }: { data: DashboardData }) {
         : <div><dt>容量承诺</dt><dd>未设置 · 在 Workbench 记录后显示</dd></div>}
         <div><dt>ENERGY CHECK</dt><dd><EnergyProbe /></dd></div></dl>
       <LocalActivityConsent asked={data.localActivityAsked} />
+      {data.capacity.level === "low" && <div className="rest-prompt">
+        <p>当前精力低：建议留 10 分钟休息。休息后重新自评，系统会重排今天的建议；高负荷任务暂不视为已准备好。</p>
+        <EnergyProbe context="after_rest" />
+      </div>}
       {data.lastNight.state !== "none" && <p className="last-night">
         {data.lastNight.state === "ran"
           ? `昨夜扩展 · 产出 ${data.lastNight.proposals} 条候选`
@@ -125,7 +135,11 @@ export function DashboardView({ data }: { data: DashboardData }) {
         </> : <p>先收集一项真实工作，系统会拆解并等待计划批准。</p>}
       </article>
 
-      <aside className="action-margin">{action(data.lowEnergy, "LOW ENERGY · 低精力备选")}{action(data.shortGap, "SHORT GAP · 短空档备选")}</aside>
+      <aside className="action-margin">
+        {data.higherPriority && action(data.higherPriority, "HIGHER PRIORITY · 更高优先级")}
+        {action(data.lowEnergy, "LOW ENERGY · 低精力备选")}
+        {action(data.shortGap, "SHORT GAP · 短空档备选")}
+      </aside>
     </section>
 
     <section className="lower-grid">

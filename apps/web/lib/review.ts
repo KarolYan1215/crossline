@@ -7,7 +7,8 @@ export type WeeklyReview = {
   autoAccepted: Array<{ workOrderId: string; intent: string; milestoneId: string; acceptedAt: string; questioned: boolean }>;
   milestoneProgress: Array<{ id: string; title: string; identityId: string; verifiability: string;
     criteria: Array<{ statement: string; kind: string; met?: "met" | "partial" | "unmet" | "unverifiable" }> }>;
-  findings: Array<{ milestoneId: string; summary: string; sourceUrl: string; sourceTitle: string; retrievedAt: string; staleWhen: string }>;
+  findings: Array<{ eventId: string; status: "candidate" | "approved" | "revoked" | "rejected";
+    milestoneId: string; summary: string; sourceUrl: string; sourceTitle: string; retrievedAt: string; staleWhen: string }>;
   /**
    * Ranked candidates joined with what each one actually claims. Approving an arrow between two ids
    * with no stated claim is not a review, so the detail travels with the ranking.
@@ -74,9 +75,13 @@ export function loadWeeklyReview(now = new Date()): WeeklyReview {
     gateProgress.set(payload.milestoneId, current);
   }
 
+  const insightDecisions = new Map(events.filter((event) => ["insight.approved", "insight.revoked", "insight.rejected"].includes(event.type))
+    .map((event) => [event.entityId, event.type]));
   const findings = events
     .filter((event) => event.type === "flywheel.finding" && event.createdAt >= since)
-    .map((event) => event.payload as WeeklyReview["findings"][number]);
+    .map((event) => ({ ...(event.payload as Omit<WeeklyReview["findings"][number], "eventId" | "status">),
+      eventId: event.eventId,
+      status: (insightDecisions.get(event.eventId)?.replace("insight.", "") ?? "candidate") as WeeklyReview["findings"][number]["status"] }));
 
   // Every ranking input below is counted, not scored: stall days, reuse, counterexamples, real minutes.
   const lastPassByMilestone = new Map<string, string>();

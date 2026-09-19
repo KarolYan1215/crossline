@@ -32,4 +32,17 @@ describe("PlanView", () => {
     expect(html).toContain('aria-controls="plan-panel-B"');
     expect(html).toContain('role="tabpanel"');
   });
+
+  test("an approved plan still labels derived blocks as unapproved suggestions and shows omissions", () => {
+    const html = renderToStaticMarkup(<PlanView today="2026-09-15" plan={{ ...plan, status: "approved",
+      blocks: [{ id: "scheduled:w1", lane: "human", title: "写结论", day: "2026-09-15",
+        start: "10:00", end: "11:00", source: "建议·未批准", readOnly: true }],
+      schedule: { status: "partial", blockers: [{ taskId: "w2", code: "NO_CAPACITY", message: "复核数据没有可用容量" }],
+        solver: "feasible_time_limit" }
+    }} />);
+    expect(html).toContain("建议·未批准");
+    expect(html).toContain("复核数据没有可用容量");
+    expect(html).toContain("未证明最优");
+    expect(html).not.toContain("建议·未批准 · 只读 · 已批准");
+  });
 });

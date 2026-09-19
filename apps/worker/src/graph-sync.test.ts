@@ -164,25 +164,24 @@ test("a failed read leaves the plan exactly as it was", async () => {
   expect(store.readSyncCursor(WORKSPACE, "graph_calendar", SOURCE_KEY)).toBeNull();
 });
 
-test("the plan carries a week of reality, not just today", async () => {
-  // Importing only today threw away twenty of every twenty-one events already paid for, and left the
-  // A lens week view with nothing to show.
+test("the plan carries eight weeks of real events for the forecast, not just today's calendar", async () => {
   const sync = createGraphSync(store, WORKSPACE, {
     sources: only([{ items: [
       event("today", "今天的组会", "06:00", "07:00"),
       { ...event("tomorrow", "明天的课", "14:00", "15:00"),
         start: "2026-09-17T14:00:00.000Z", end: "2026-09-17T15:00:00.000Z" },
-      // Beyond the seven-day window: read, but not carried into the plan.
+      // Next month is inside the eight-week forecast window.
       { ...event("far", "下个月", "14:00", "15:00"),
         start: "2026-10-20T14:00:00.000Z", end: "2026-10-20T15:00:00.000Z" }
     ], cursor: "c" }]).sources,
     now: NOW, timeZone: "UTC"
   });
   seedPlan("draft", []);
-  expect(await sync()).toMatchObject({ state: "synced", imported: 2 });
+  expect(await sync()).toMatchObject({ state: "synced", imported: 3 });
 
   const blocks = (store.listPlanVersions(WORKSPACE)[0]?.payload as { blocks: Array<Record<string, string>> }).blocks;
-  expect(blocks.map((block) => `${block.day} ${block.start}`)).toEqual(["2026-09-16 06:00", "2026-09-17 14:00"]);
+  expect(blocks.map((block) => `${block.day} ${block.start}`)).toEqual([
+    "2026-09-16 06:00", "2026-09-17 14:00", "2026-10-20 14:00"]);
 });
 
 test("a block from before the plan carried days is not reported as having moved", async () => {
@@ -396,6 +395,7 @@ test("ticking a second calendar does not delete blocks the first one still owns"
   const original = { key: "uw:cal", label: "日历 · kyan47", reader: reader([{ items: [], cursor: "uw-2" }]) };
   store.saveSyncCursor({ ownerId: "local-owner", workspaceId: WORKSPACE,
     provider: "graph_calendar", collection: "uw:cal", cursor: "uw-1" });
+  store.setSetting(WORKSPACE, "calendar.sync_zone:uw:cal", "UTC|56");
   const added = { key: "uw:birthdays", label: "生日 · kyan47", reader: reader([{ items: [], cursor: "b-1" }]) };
 
   const sync = createGraphSync(store, WORKSPACE, { sources: () => [original, added], now: NOW, timeZone: "UTC" });
@@ -406,4 +406,25 @@ test("ticking a second calendar does not delete blocks the first one still owns"
   expect(outcome).toMatchObject({ state: "synced", imported: 1, changes: 0 });
   expect(store.listPlanVersions(WORKSPACE)).toHaveLength(1);
   expect(store.listPlanVersions(WORKSPACE)[0]?.status).toBe("approved");
+});
+
+test("changing the declared time zone rereads unchanged events and updates their local clock", async () => {
+  let zone = "UTC";
+  const cursors: Array<string | undefined> = [];
+  const source: CalendarSource = { key: SOURCE_KEY, label: "日历", reader: {
+    pullCalendar: async (cursor?: string) => {
+      cursors.push(cursor);
+      return { items: cursor ? [] : [event("a", "组会", "14:00", "15:00")],
+        cursor: cursor ? "delta-2" : "delta-1" };
+    }
+  } };
+  seedPlan("draft", []);
+  const sync = createGraphSync(store, WORKSPACE, { sources: () => [source], now: NOW,
+    timeZone: () => zone });
+  await sync();
+  zone = "America/Chicago";
+  await sync();
+  const blocks = (store.listPlanVersions(WORKSPACE)[0]!.payload as { blocks: Array<{ start: string }> }).blocks;
+  expect(cursors).toEqual([undefined, "delta-1", undefined, "delta-1"]);
+  expect(blocks[0]?.start).toBe("09:00");
 });

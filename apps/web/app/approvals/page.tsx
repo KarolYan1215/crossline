@@ -2,12 +2,14 @@ import { ensureSeeded, getStore, loadCurrentPlan, WORKSPACE_ID } from "../../lib
 import { SubpageShell } from "../subpage-shell";
 import { AcceptEvidenceButton, ApproveProposalButton, JudgeMilestoneButton } from "./approval-actions";
 import type { AnalysisProposal } from "@crossline/core";
+import { permissionCandidates, permissionModeEnabled } from "../../lib/permission-mode";
+import { PermissionModePanel } from "./permission-mode-panel";
 
 export const dynamic = "force-dynamic";
 
-export default function ApprovalsPage() {
+export default async function ApprovalsPage() {
   ensureSeeded();
-  const plan = loadCurrentPlan();
+  const plan = await loadCurrentPlan();
   const pendingPlanChanges = plan.changes.filter((change) => change.status === "pending").length;
   const evidenceReviews = getStore().listWorkOrders(WORKSPACE_ID).filter((item) => item.state === "evidence_review");
   const proposals = getStore().listWorkOrders(WORKSPACE_ID).filter((item) => item.state === "awaiting_plan_approval");
@@ -19,6 +21,7 @@ export default function ApprovalsPage() {
     .map((event) => [event.entityId, String((event.payload as { reason?: string }).reason ?? "")]));
   const executions = getStore().listExecutions(WORKSPACE_ID);
   return <SubpageShell eyebrow="05 / APPROVAL CONTROL" title="审批与验收" description="计划差异批量批准；外部动作逐项批准；里程碑证据由 AI 闸门判定并保留人工撤销权。">
+    <PermissionModePanel initialEnabled={permissionModeEnabled()} initialCandidates={permissionCandidates()} />
     <section className="approval-ledger">
       <header><span>TYPE</span><span>ITEM</span><span>WHY NOW</span><span>ACTION</span></header>
       <article><b>PLAN DIFF</b><strong>Personal Plan v{plan.version} · {pendingPlanChanges} pending</strong><p>{plan.status === "approved" ? "该计划版本已经落入批准账本" : "新增 AI Ahead 准备与人工核心行动块"}</p><a href="/plan">打开 C 视图 →</a></article>

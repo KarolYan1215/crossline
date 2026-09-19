@@ -35,6 +35,22 @@ async function seedPendingChanges(baseURL: string): Promise<void> {
   } finally { store.close(); }
 }
 
+async function ensureScheduleSetup(baseURL: string): Promise<void> {
+  await fetch(`${baseURL}/plan`);
+  const result = await fetch(`${baseURL}/api/settings/schedule`, { method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ timeZone: "America/Chicago", mode: "buffered",
+      windows: DEFAULT_AVAILABILITY, importance: {
+        "research-starter": "important", "startup-starter": "important",
+        "media-starter": "important", "investment-starter": "ordinary"
+      } }) });
+  expect(result.ok).toBe(true);
+}
+
+test.beforeEach(async ({ baseURL }, testInfo) => {
+  if (testInfo.project.name === "desktop-chrome") await ensureScheduleSetup(baseURL!);
+});
+
 
 test("Today keeps capture semantic-only and health outside identity navigation", async ({ page }, testInfo) => {
   await page.goto("/");
@@ -67,8 +83,8 @@ test("Plan exposes B/C/A over one version and workflow redirects", async ({ page
 test("editing availability re-runs the scheduler instead of only storing a preference", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-chrome");
   await page.goto("/plan");
-  // 「已排程」 is what `planSchedule` stamps on a block it placed; the calendar's own blocks say 「只读」.
-  const scheduled = page.locator(".lane-track article").filter({ hasText: "已排程" });
+  // Suggestions are explicitly unapproved; real calendar blocks remain read-only.
+  const scheduled = page.locator(".lane-track article").filter({ hasText: "建议·未批准" });
   const before = await scheduled.count();
   expect(before).toBeGreaterThan(0);
 
@@ -112,8 +128,12 @@ test("energy check keeps self report only and rejects the removed camera path", 
   test.skip(testInfo.project.name !== "desktop-chrome");
   await page.goto("/");
   await expect(page.getByRole("button", { name: "运行十二秒本地摄像头代理采样" })).toHaveCount(0);
+  const submitted = page.waitForResponse((response) => response.url().endsWith("/api/energy-observations") && response.request().method() === "POST");
   await page.getByRole("button", { name: "记录中精力" }).click();
-  await expect(page.getByText("已记录")).toBeVisible();
+  expect((await submitted).ok()).toBe(true);
+  const store = new CrosslineStore(path.join(process.env.CROSSLINE_E2E_DATA_DIR!, "crossline.db"));
+  try { expect(store.listEnergyObservations("personal-crossline").some((item) => item.level === "medium")).toBe(true); }
+  finally { store.close(); }
   const cameraRejected = await request.post("/api/energy-observations", {
     data: { source: "camera_proxy", level: "unclassified", confidence: "low", aggregate: {} }
   });
@@ -129,6 +149,44 @@ test("energy check keeps self report only and rejects the removed camera path", 
   });
   expect(blinkRejected.status()).toBe(400);
   expect(await blinkRejected.json()).toMatchObject({ code: "AGGREGATE_FEATURES_ONLY" });
+});
+
+test("goal confirmation and permission-mode rejection persist through the real pages", async ({ page, request }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-chrome");
+  await page.goto("/milestones");
+  const goal = page.locator(".milestone-admin-list > li").filter({ hasText: "稳定推进当前实验与论文" });
+  await goal.locator('input[type="date"]').fill("2026-09-30");
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: "load" }),
+    goal.getByRole("button", { name: "确认目标约束" }).click()
+  ]);
+  await expect(goal.locator('input[type="date"]')).toHaveValue("2026-09-30");
+  await page.goto("/plan");
+  await expect(page.getByText("已确认硬截止 2026-09-30")).toBeVisible();
+
+  const store = new CrosslineStore(path.join(process.env.CROSSLINE_E2E_DATA_DIR!, "crossline.db"));
+  try { store.appendEvent({ ownerId: "local-owner", workspaceId: "personal-crossline",
+    idempotencyKey: "e2e:insight-candidate", type: "flywheel.finding", entityId: "research-starter",
+    payload: { milestoneId: "research-starter", summary: "可复用的实验记录模板",
+      sourceUrl: "https://example.org/source", sourceTitle: "记录模板", retrievedAt: "2026-09-14T00:00:00Z",
+      staleWhen: "方法变更" } }); }
+  finally { store.close(); }
+  await page.goto("/approvals");
+  await expect(page.getByRole("button", { name: "开启默认批准" })).toBeVisible();
+  await page.getByRole("button", { name: "开启默认批准" }).click();
+  await expect(page.getByRole("button", { name: "关闭默认批准" })).toBeVisible();
+  const insight = page.locator(".permission-mode-panel li").filter({ hasText: "可复用的实验记录模板" });
+  await expect(insight).toBeVisible();
+  await insight.getByRole("button", { name: "拒绝" }).click();
+  await expect(page.locator(".permission-mode-panel li").filter({ hasText: "可复用的实验记录模板" })).toHaveCount(0);
+  const rejected = new CrosslineStore(path.join(process.env.CROSSLINE_E2E_DATA_DIR!, "crossline.db"));
+  try { expect(rejected.listEvents("personal-crossline", { type: "insight.rejected" })).toHaveLength(1); }
+  finally { rejected.close(); }
+  const forbidden = await request.post("/api/goals/research-starter", {
+    headers: { Origin: "https://attacker.example" },
+    data: { importance: "ordinary", confirmedDeadline: null }
+  });
+  expect(forbidden.status()).toBe(403);
 });
 
 test("mobile navigation and reduced motion remain usable", async ({ page }, testInfo) => {

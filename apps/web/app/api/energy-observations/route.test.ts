@@ -3,12 +3,21 @@ import { describe, expect, test, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
 const saved: Array<Record<string, unknown>> = [];
+const events: Array<Record<string, unknown>> = [];
 
 vi.mock("../../../lib/crossline", () => ({
   WORKSPACE_ID: "test-workspace",
   getStore: () => ({
     saveEnergyObservation: (observation: Record<string, unknown>) => { saved.push(observation); },
-    appendEvent: () => undefined
+    appendEvent: (event: Record<string, unknown>) => { events.push(event); },
+    listEvents: (_workspaceId: string, options: { type?: string | string[]; entityId?: string }) =>
+      events.filter((event) => (!options.type || (Array.isArray(options.type)
+        ? options.type.includes(String(event.type)) : options.type === event.type)) &&
+        (!options.entityId || options.entityId === event.entityId)),
+    listWorkOrders: () => [{ id: "work-1", payload: { humanCore: [{ energy: "high" }] } }],
+    listExecutions: () => [{ workOrderId: "work-1", startedAt: "2026-09-18T10:00:00.000Z",
+      endedAt: "2026-09-18T11:10:00.000Z", pauseMinutes: 10,
+      durationObserved: true, interruptions: [{ reason: "call" }] }]
   })
 }));
 
@@ -47,5 +56,25 @@ describe("energy observation route", () => {
     expect(saved).toHaveLength(1);
     expect(saved[0]).toMatchObject({ source: "self_report", level: "high" });
     expect(saved[0]).not.toHaveProperty("expiresAt");
+  });
+
+  test("records before, after and rest context with observed duration and optional actual load", async () => {
+    saved.length = 0; events.length = 0;
+    expect((await post({ source: "self_report", level: "low", confidence: "high",
+      aggregate: {}, context: "before_task", workOrderId: "work-1" })).status).toBe(200);
+    expect((await post({ source: "self_report", level: "medium", confidence: "high",
+      aggregate: {}, context: "after_task", workOrderId: "work-1", actualLoad: "high" })).status).toBe(200);
+    expect((await post({ source: "self_report", level: "high", confidence: "high",
+      aggregate: {}, context: "after_rest" })).status).toBe(200);
+    expect(saved[1]?.aggregate).toMatchObject({ durationMinutes: 60, interruptionCount: 1 });
+    expect(events.find((event) => event.type === "energy.observed" &&
+      (event.payload as { context?: string }).context === "after_task")?.payload)
+      .toMatchObject({ context: "after_task", workOrderId: "work-1",
+      actualLoad: "high" });
+    expect(events.find((event) => event.type === "energy.transition_outcome")?.payload)
+      .toMatchObject({ before: "low", taskEnergy: "high", actual: "medium" });
+    expect(events.find((event) => event.type === "energy.observed" &&
+      (event.payload as { context?: string }).context === "after_rest")?.payload)
+      .toMatchObject({ context: "after_rest" });
   });
 });

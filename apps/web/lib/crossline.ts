@@ -2,11 +2,13 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
+import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 import { CrosslineStore, type EvidenceClaimInput, type StoredMilestone } from "@crossline/db";
 import { availableSlots, deriveCapacity, requiredApproval, validateAvailability, DEFAULT_AVAILABILITY,
   type AvailabilityWindow, type SuccessCriterion } from "@crossline/core";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
-import { planSchedule, recommendNextActions } from "@crossline/planner";
+import { forecastGoals, planSchedule, recommendNextActions, type ForecastResult, type PlanResult } from "@crossline/planner";
+import { energyCalibration, predictEnergyTransition, readTransitionOutcomes } from "./energy-learning";
 import type { DashboardAction, DashboardData } from "../app/dashboard-view";
 
 export type PersistedScheduleBlock = {
@@ -23,11 +25,102 @@ export type PersistedScheduleBlock = {
 
 /** The local day the plan is centred on. One definition, so B, A and the sync cannot disagree. */
 export function planToday(now = process.env.CROSSLINE_FIXED_NOW ? new Date(process.env.CROSSLINE_FIXED_NOW) : new Date()): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: process.env.CROSSLINE_TIME_ZONE ?? "America/Chicago" }).format(now);
+  return new Intl.DateTimeFormat("en-CA", { timeZone: readSchedulePreferences()?.timeZone
+    ?? process.env.CROSSLINE_TIME_ZONE ?? "America/Chicago" }).format(now);
 }
 
 /** The key the weekly availability lives under. One settings row, not a new table. */
 export const AVAILABILITY_SETTING = "schedule.availability";
+const PREFERENCES_SETTING = "schedule.preferences";
+export type SchedulePreferences = { timeZone: string; mode: "buffered" | "asap";
+  importance: Record<string, "important" | "ordinary"> };
+
+export type GoalSettings = { importance: "important" | "ordinary";
+  confirmedDeadline: string | null; sourceQuote: string | null };
+const goalKey = (id: string) => `goal.settings:${id}`;
+
+export function readGoalSettings(id: string): GoalSettings | null {
+  const raw = getStore().getSetting(WORKSPACE_ID, goalKey(id));
+  if (!raw) return null;
+  try { return JSON.parse(raw) as GoalSettings; } catch { return null; }
+}
+
+export function saveGoalSettings(id: string, input: { importance: unknown; confirmedDeadline: unknown;
+  sourceQuote?: unknown }): { ok: true } | { ok: false; code: string } {
+  ensureSeeded();
+  const milestone = getStore().listMilestones(WORKSPACE_ID).find((item) => item.id === id && item.status === "approved");
+  if (!milestone) return { ok: false, code: "GOAL_NOT_APPROVED" };
+  if (input.importance !== "important" && input.importance !== "ordinary")
+    return { ok: false, code: "GOAL_IMPORTANCE_INVALID" };
+  const date = input.confirmedDeadline;
+  if (date !== null && (typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date)
+    || Number.isNaN(Date.parse(`${date}T00:00:00Z`)) || new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) !== date))
+    return { ok: false, code: "GOAL_DEADLINE_INVALID" };
+  const quote = typeof input.sourceQuote === "string" ? input.sourceQuote.trim() : "";
+  if (quote.length > 500) return { ok: false, code: "GOAL_QUOTE_TOO_LONG" };
+  const next: GoalSettings = { importance: input.importance, confirmedDeadline: date as string | null,
+    sourceQuote: quote || null };
+  const store = getStore();
+  const previous = readGoalSettings(id);
+  if (JSON.stringify(previous) === JSON.stringify(next)) return { ok: true };
+  store.setSetting(WORKSPACE_ID, goalKey(id), JSON.stringify(next));
+  store.appendEvent({ ownerId: OWNER_ID, workspaceId: WORKSPACE_ID,
+    idempotencyKey: `goal:settings:${id}:${randomUUID()}`, type: "goal.settings_confirmed", entityId: id,
+    payload: { milestoneVersion: milestone.version, previous, next } });
+  return { ok: true };
+}
+
+export function readSchedulePreferences(): SchedulePreferences | null {
+  const raw = getStore().getSetting(WORKSPACE_ID, PREFERENCES_SETTING);
+  if (!raw) return null;
+  try {
+    const value = JSON.parse(raw) as SchedulePreferences;
+    new Intl.DateTimeFormat("en", { timeZone: value.timeZone });
+    return value.mode === "buffered" || value.mode === "asap" ? value : null;
+  } catch { return null; }
+}
+
+export function saveSchedulePreferences(input: {
+  timeZone: unknown; mode: unknown; windows: unknown; importance: unknown
+}): { ok: true } | { ok: false; code: string } {
+  ensureSeeded();
+  const timeZone = typeof input.timeZone === "string" ? input.timeZone.trim() : "";
+  try { new Intl.DateTimeFormat("en", { timeZone }); }
+  catch { return { ok: false, code: "SCHEDULE_TIME_ZONE_INVALID" }; }
+  if (input.mode !== "buffered" && input.mode !== "asap")
+    return { ok: false, code: "SCHEDULE_MODE_INVALID" };
+  let windows: AvailabilityWindow[];
+  try { windows = validateAvailability(input.windows); }
+  catch (error) { return { ok: false, code: error instanceof Error ? error.message : "AVAILABILITY_INVALID" }; }
+  if (!windows.length || windows.some((window) => !window.days.length))
+    return { ok: false, code: "AVAILABILITY_INVALID" };
+  const importance = input.importance;
+  if (!importance || typeof importance !== "object" || Array.isArray(importance))
+    return { ok: false, code: "SCHEDULE_IMPORTANCE_REQUIRED" };
+  const approved = getStore().listMilestones(WORKSPACE_ID).filter((milestone) => milestone.status === "approved");
+  if (approved.some((milestone) => !["important", "ordinary"].includes(
+    (importance as Record<string, string>)[milestone.id] ?? "")))
+    return { ok: false, code: "SCHEDULE_IMPORTANCE_REQUIRED" };
+  const selected = Object.fromEntries(approved.map((milestone) => [milestone.id,
+    (importance as Record<string, "important" | "ordinary">)[milestone.id]!]));
+  const store = getStore();
+  store.setSetting(WORKSPACE_ID, AVAILABILITY_SETTING, JSON.stringify(windows));
+  store.setSetting(WORKSPACE_ID, PREFERENCES_SETTING, JSON.stringify({ timeZone, mode: input.mode,
+    importance: selected } satisfies SchedulePreferences));
+  for (const [id, importance] of Object.entries(selected)) {
+    const goal = readGoalSettings(id);
+    if (!goal || goal.importance === importance) continue;
+    const next = { ...goal, importance };
+    store.setSetting(WORKSPACE_ID, goalKey(id), JSON.stringify(next));
+    store.appendEvent({ ownerId: OWNER_ID, workspaceId: WORKSPACE_ID,
+      idempotencyKey: `goal:importance:${id}:${randomUUID()}`, type: "goal.settings_confirmed",
+      entityId: id, payload: { previous: goal, next, source: "schedule_preferences" } });
+  }
+  store.appendEvent({ ownerId: OWNER_ID, workspaceId: WORKSPACE_ID,
+    idempotencyKey: `schedule:preferences:${randomUUID()}`, type: "schedule.preferences_saved",
+    entityId: WORKSPACE_ID, payload: { timeZone, mode: input.mode, milestoneCount: approved.length } });
+  return { ok: true };
+}
 
 /**
  * When the person said they are free, as the scheduler needs it.
@@ -58,6 +151,7 @@ export type PersistedPlan = {
   version: number;
   status: "draft" | "approved" | "superseded";
   blocks: PersistedScheduleBlock[];
+  schedule: Pick<PlanResult, "status" | "blockers" | "solver" | "bufferRelaxed">;
   changes: Array<{
     id: string;
     kind: "add" | "move" | "remove" | "conflict";
@@ -69,12 +163,8 @@ export type PersistedPlan = {
 
 const OWNER_ID = "local-owner";
 export const WORKSPACE_ID = "personal-crossline";
-// The master clock is declared by a pack, so any pack set has one. Hardcoding "research" meant a
-// different pack set silently had no deadline-tier identity at all.
 const PRIMARY_CLOCK_ID = process.env.CROSSLINE_PRIMARY_CLOCK_ID
-  ?? defaultIdentityPacks().find((pack) => pack.kind === "identity" && pack.masterClock)?.id
-  ?? "";
-
+  ?? defaultIdentityPacks().find((pack) => pack.kind === "identity" && pack.masterClock)?.id ?? "";
 const accents: Record<string, string> = {
   research: "#6D5EF5",
   startup: "#FF8A5B",
@@ -203,7 +293,7 @@ export function ensureSeeded(): void {
   }
   for (const plan of store.listPlanVersions(WORKSPACE_ID)) {
     const blocks = (plan.payload as { blocks?: PersistedScheduleBlock[] }).blocks ?? [];
-    const real = blocks.filter((block) => block.id.startsWith("graph_calendar:"));
+    const real = blocks.filter((block) => block.source !== "示例数据");
     if (real.length === blocks.length) continue;
     store.savePlanVersion({ ...plan, payload: { blocks: real } });
   }
@@ -226,44 +316,145 @@ function planDays(today: string, days = Number(process.env.CROSSLINE_PLAN_WINDOW
  * of the app knew when the person was free. Reading demo data as a commitment is the mistake the rest
  * of this codebase works to prevent, so the examples are gone and this is what replaces them.
  */
-function scheduledBlocks(today: string, calendar: PersistedScheduleBlock[]): PersistedScheduleBlock[] {
-  const days = planDays(today);
-  const busy = calendar.filter((block) => block.day)
-    .map((block) => ({ day: block.day!, start: block.start, end: block.end }));
-  const slots = availableSlots(readAvailability(), days, busy);
-  if (!slots.length) return [];
-
-  // ponytail: wall-clock pinned to `Z`, the same trick `availableSlots` documents. Every value here is
-  // in one declared zone, so only the intervals matter. Upgrade path is the same: convert once, here.
-  const iso = (day: string, time: string) => `${day}T${time}:00.000Z`;
-  const capacityIds = new Set(defaultIdentityPacks().filter((pack) => pack.kind === "capacity").map((pack) => pack.id));
-  const orders = getStore().listWorkOrders(WORKSPACE_ID)
-    .filter((order) => ACTIONABLE.includes(order.state) && !capacityIds.has(order.identityId));
-
-  const result = planSchedule({
-    now: new Date(iso(today, "00:00")),
-    horizonDays: days.length,
-    tasks: orders.map(plannerTaskOf),
-    availability: slots.map((slot) => ({ start: iso(slot.day, slot.start), end: iso(slot.day, slot.end), energy: slot.energy })),
-    frozenBlocks: []
-  });
-  // An infeasible plan still places nothing rather than inventing a block; the blockers it returns are
-  // about capacity, and the honest answer to "no room" is an empty lane, not a pretend one.
-  const placed = result.status === "feasible" ? result.plan.blocks : [];
-  const titles = new Map(orders.map((order) => [order.id, order.intent]));
-  return placed.map((block) => ({
-    id: `scheduled:${block.taskId}`,
-    lane: "human" as const,
-    title: titles.get(block.taskId) ?? block.taskId,
-    day: block.start.slice(0, 10),
-    start: block.start.slice(11, 16),
-    end: block.end.slice(11, 16),
-    source: "已排程",
-    readOnly: false
-  }));
+export function toZonedInstant(day: string, time: string, zone: string): string {
+  const instant = fromZonedTime(`${day}T${time}:00`, zone);
+  const local = `${day} ${time}`;
+  if (!Number.isFinite(instant.getTime()) || formatInTimeZone(instant, zone, "yyyy-MM-dd HH:mm") !== local) {
+    throw new Error("AVAILABILITY_LOCAL_TIME_INVALID");
+  }
+  if ([30, 60, 90, 120].some((minutes) => [-1, 1].some((direction) =>
+    formatInTimeZone(new Date(instant.getTime() + direction * minutes * 60_000), zone,
+      "yyyy-MM-dd HH:mm") === local))) throw new Error("AVAILABILITY_LOCAL_TIME_AMBIGUOUS");
+  return instant.toISOString();
 }
 
-export function loadCurrentPlan(): PersistedPlan {
+async function scheduledBlocks(today: string, committed: PersistedScheduleBlock[]): Promise<{
+  blocks: PersistedScheduleBlock[]; schedule: PersistedPlan["schedule"]
+}> {
+  const days = planDays(today);
+  const busy = committed.filter((block) => block.day)
+    .map((block) => ({ day: block.day!, start: block.start, end: block.end }));
+  const slots = availableSlots(readAvailability(), days, busy);
+  const preferences = readSchedulePreferences()!;
+  const zone = preferences.timeZone;
+  const iso = (day: string, time: string) => toZonedInstant(day, time, zone);
+  const now = process.env.CROSSLINE_FIXED_NOW ? new Date(process.env.CROSSLINE_FIXED_NOW) : new Date();
+  const capacity = latestCapacity(now);
+  const currentEnergy = capacity.basis.includes("self_report") && capacity.level !== "uncalibrated"
+    ? capacity.level : undefined;
+  const currentClock = formatInTimeZone(now, zone, "HH:mm");
+  const currentSlot = slots.findIndex((slot) => slot.day === today && slot.end > currentClock);
+  const clockBlockers: PlanResult["blockers"] = [];
+  const instants = slots.flatMap((slot, index) => {
+    try { return [{ start: iso(slot.day, slot.start), end: iso(slot.day, slot.end),
+      day: slot.day, energy: currentEnergy && index === currentSlot ? currentEnergy : slot.energy }]; }
+    catch (error) {
+      clockBlockers.push({ taskId: "availability", code: error instanceof Error ? error.message : "AVAILABILITY_LOCAL_TIME_INVALID",
+        message: `${slot.day} ${slot.start}–${slot.end} 跨越时钟调整，请修改这段可用时间` });
+      return [];
+    }
+  });
+  const capacityIds = new Set(defaultIdentityPacks().filter((pack) => pack.kind === "capacity").map((pack) => pack.id));
+  const allOrders = getStore().listWorkOrders(WORKSPACE_ID);
+  const orders = allOrders
+    .filter((order) => ACTIONABLE.includes(order.state) && !capacityIds.has(order.identityId));
+  const stateById = new Map(allOrders.map((order) => [order.id, order.state]));
+  const dependencyBlockers = orders.filter((order) => (plannerTaskOf(order).dependsOn ?? [])
+    .some((id) => stateById.get(id) !== "accepted" && !orders.some((item) => item.id === id)))
+    .map((order) => ({ taskId: order.id, code: "DEPENDENCY_NOT_READY",
+      message: `${order.intent}的前置作业尚未验收，暂不排入` }));
+  const eligibleOrders = orders.filter((order) => !dependencyBlockers.some((item) => item.taskId === order.id));
+  const needsLookahead = eligibleOrders.some((order) => {
+    const task = plannerTaskOf(order);
+    return task.deadlineTier === 4 && Boolean(task.deadline);
+  });
+  const lookaheadAvailability = needsLookahead ? availableSlots(readAvailability(), planDays(today, 56), busy)
+    .flatMap((slot) => {
+      try { return [{ start: iso(slot.day, slot.start), end: iso(slot.day, slot.end),
+        day: slot.day, energy: slot.energy }]; }
+      catch { return []; }
+    }) : undefined;
+
+  const result = await planSchedule({
+    now,
+    horizonDays: days.length,
+    mode: preferences.mode,
+    ...(currentEnergy ? { currentEnergy, currentDay: today } : {}),
+    tasks: eligibleOrders.map(plannerTaskOf),
+    availability: instants,
+    ...(lookaheadAvailability ? { lookaheadAvailability } : {}),
+    frozenBlocks: committed.filter((block) => block.day && block.id.startsWith("scheduled:"))
+      .map((block) => ({ taskId: block.id.split(":")[1]!, start: iso(block.day!, block.start),
+        end: iso(block.day!, block.end) }))
+  });
+  const placed = result.plan.blocks.filter((block) => !block.frozen);
+  const titles = new Map(orders.map((order) => [order.id,
+    order.state === "approved" || order.state === "preparing"
+      ? `暂定·准备中 · ${order.intent}` : order.intent]));
+  const energyNeeds = new Map(orders.map((order) => [order.id, humanCoreOf(order)?.energy]));
+  const occurrences = new Map<string, number>();
+  const blocks = placed.map((block) => {
+    const index = (occurrences.get(block.taskId) ?? 0) + 1;
+    occurrences.set(block.taskId, index);
+    const blockDay = formatInTimeZone(new Date(block.start), zone, "yyyy-MM-dd");
+    const needsRestCheck = currentEnergy === "low" && blockDay === today &&
+      energyNeeds.get(block.taskId) === "high" && Date.parse(block.start) > now.getTime();
+    return {
+    id: `scheduled:${block.taskId}${index > 1 ? `:${index}` : ""}`,
+    lane: "human" as const,
+    title: `${block.progressOnly ? "本周进度·未排完 · " : ""}${needsRestCheck ? "休息后待复评 · " : ""}${titles.get(block.taskId) ?? block.taskId}`,
+    day: blockDay,
+    start: formatInTimeZone(new Date(block.start), zone, "HH:mm"),
+    end: formatInTimeZone(new Date(block.end), zone, "HH:mm"),
+    source: "建议·未批准",
+    readOnly: true
+  }; });
+  return { blocks, schedule: { status: clockBlockers.length || dependencyBlockers.length
+    ? blocks.length ? "partial" : "infeasible" : result.status,
+    blockers: [...result.blockers, ...clockBlockers, ...dependencyBlockers],
+    solver: result.solver, ...(result.bufferRelaxed ? { bufferRelaxed: true } : {}) } };
+}
+
+export function loadGoalForecast(): ForecastResult & { inferredRegularBlocks: number } {
+  ensureSeeded();
+  const store = getStore();
+  const preferences = readSchedulePreferences();
+  const empty = { weeks: [], goals: [], inferredRegularBlocks: 0 };
+  if (!preferences) return empty;
+  const days = planDays(planToday(), 56);
+  const committed = ((store.listPlanVersions(WORKSPACE_ID)[0]?.payload as { blocks?: PersistedScheduleBlock[] } | undefined)
+    ?.blocks ?? []).filter((block) => block.day);
+  const signatures = new Map<string, Set<string>>();
+  for (const block of committed.filter((item) => item.id.startsWith("graph_calendar:"))) {
+    const weekday = new Date(`${block.day}T00:00:00Z`).getUTCDay();
+    const key = `${weekday}|${block.start}|${block.end}|${block.title}`;
+    signatures.set(key, (signatures.get(key) ?? new Set()).add(block.day!));
+  }
+  const regular = [...signatures].filter(([, observed]) => observed.size >= 2);
+  const inferred = days.slice(7).flatMap((day) => regular.flatMap(([key]) => {
+    const [weekday, start, end] = key.split("|");
+    if (Number(weekday) !== new Date(`${day}T00:00:00Z`).getUTCDay()) return [];
+    const real = committed.some((block) => block.day === day && block.start < end! && block.end > start!);
+    return real ? [] : [{ day, start: start!, end: end! }];
+  }));
+  const busy = [...committed.map((block) => ({ day: block.day!, start: block.start, end: block.end })), ...inferred];
+  const slots = availableSlots(readAvailability(), days, busy);
+  const capacity = days.map((day) => ({ day, netMinutes: slots.filter((slot) => slot.day === day).reduce((sum, slot) => {
+    try { return sum + (Date.parse(toZonedInstant(day, slot.end, preferences.timeZone))
+      - Date.parse(toZonedInstant(day, slot.start, preferences.timeZone))) / 60_000; }
+    catch { return sum; }
+  }, 0), source: busy.some((block) => block.day === day) ? "calendar_adjusted" as const : "declared" as const }));
+  const goals = store.listMilestones(WORKSPACE_ID).filter((item) => item.status === "approved")
+    .map((item) => ({ id: item.id, title: item.title,
+      importance: readGoalSettings(item.id)?.importance ?? preferences.importance[item.id] ?? "ordinary" as const,
+      confirmedDeadline: readGoalSettings(item.id)?.confirmedDeadline ?? null }));
+  const orders = store.listWorkOrders(WORKSPACE_ID);
+  const tasks = orders.filter((order) => ACTIONABLE.includes(order.state)).map(plannerTaskOf);
+  const completedIds = new Set(orders.filter((order) => order.state === "accepted").map((order) => order.id));
+  return { ...forecastGoals(goals, tasks, capacity, completedIds), inferredRegularBlocks: inferred.length };
+}
+
+export async function loadCurrentPlan(): Promise<PersistedPlan> {
   ensureSeeded();
   const store = getStore();
   const stored = store.listPlanVersions(WORKSPACE_ID)[0];
@@ -271,12 +462,18 @@ export function loadCurrentPlan(): PersistedPlan {
   const payload = stored.payload as { blocks?: PersistedScheduleBlock[] };
   // The calendar's blocks are stored; the scheduled ones are derived on read. Persisting a schedule
   // would mean the plan disagreed with the work orders the moment one of them moved.
-  const calendar = (payload.blocks ?? []).filter((block) => block.id.startsWith("graph_calendar:"));
+  const committed = payload.blocks ?? [];
+  const suggested = readSchedulePreferences() ? await scheduledBlocks(planToday(), committed)
+    : { blocks: [] as PersistedScheduleBlock[], schedule: { status: "infeasible" as const,
+      blockers: [{ taskId: "schedule", code: "ONBOARDING_REQUIRED",
+        message: "请先填写时区、每周可用时间、精力时段、排程模式和目标重要性" }],
+      solver: "fallback" as const } };
   return {
     id: stored.id,
     version: stored.version,
     status: stored.status,
-    blocks: [...calendar, ...scheduledBlocks(planToday(), calendar)],
+    blocks: [...committed, ...suggested.blocks],
+    schedule: suggested.schedule,
     changes: store.listPlanChanges(stored.id).map((change) => {
       const after = change.after as { blockId?: string } | undefined;
       return {
@@ -635,18 +832,27 @@ type ActionableOrder = ReturnType<CrosslineStore["listWorkOrders"]>[number];
 const humanCoreOf = (order: ActionableOrder) =>
   ((order.payload as { humanCore?: Array<{ energy?: string; interruptible?: boolean }> }).humanCore ?? [])[0];
 
-const plannerTaskOf = (order: ActionableOrder) => ({
-  id: order.id,
-  title: order.intent,
-  identityId: order.identityId,
-  estimate: order.estimate,
-  ...(humanCoreOf(order)?.energy ? { energy: humanCoreOf(order)!.energy as "low" | "medium" | "high" } : {}),
-  // Inputs are ready once materials no longer stand between the item and the human.
-  inputsReady: order.state === "ready_for_human" || order.state === "active",
-  // The master clock is a declared policy, not a measurement; there are no real deadlines yet.
-  deadlineTier: (order.state === "approved" ? 3 : order.identityId === PRIMARY_CLOCK_ID ? 1 : 2) as 1 | 2 | 3,
-  interruptible: humanCoreOf(order)?.interruptible ?? true
-});
+const plannerTaskOf = (order: ActionableOrder) => {
+  const preferences = readSchedulePreferences();
+  const goal = readGoalSettings(order.milestoneId);
+  const important = (goal?.importance ?? preferences?.importance[order.milestoneId]) === "important";
+  const tier = preferences ? goal?.confirmedDeadline ? important ? 1 : 2 : important ? 3 : 4
+    : order.state === "approved" ? 3 : order.identityId === PRIMARY_CLOCK_ID ? 1 : 2;
+  const core = humanCoreOf(order);
+  const dependsOn = (order.payload as { dependsOn?: string[] }).dependsOn;
+  return {
+    id: order.id, title: order.intent, identityId: order.identityId, milestoneId: order.milestoneId,
+    estimate: order.estimate,
+    ...(core?.energy ? { energy: core.energy as "low" | "medium" | "high" } : {}),
+    // Materials stand between the proposal and the human until the order reaches ready_for_human.
+    inputsReady: order.state === "ready_for_human" || order.state === "active",
+    deadlineTier: tier as 1 | 2 | 3 | 4,
+    ...(goal?.confirmedDeadline && preferences ? {
+      deadline: toZonedInstant(goal.confirmedDeadline, "23:59", preferences.timeZone) } : {}),
+    ...(dependsOn?.length ? { dependsOn } : {}),
+    interruptible: core?.interruptible ?? true
+  };
+};
 
 export const LOCAL_ACTIVITY_CONSENT = "localActivity.consent";
 
@@ -726,21 +932,36 @@ export function loadDashboard(): DashboardData {
   const active = orders
     .filter((order) => !capacityIdentityIds.has(order.identityId) && ACTIONABLE.includes(order.state))
     .sort((a, b) => ACTIONABLE.indexOf(a.state) - ACTIONABLE.indexOf(b.state) || a.id.localeCompare(b.id));
-  const actions = recommendNextActions(active.map(plannerTaskOf), 40);
+  const now = process.env.CROSSLINE_FIXED_NOW ? new Date(process.env.CROSSLINE_FIXED_NOW) : new Date();
+  const capacity = latestCapacity(now);
+  const outcomes = readTransitionOutcomes(store.listEvents(WORKSPACE_ID, { type: "energy.transition_outcome" }));
+  const forecast = capacity.level === "uncalibrated" ? {} : Object.fromEntries(active.flatMap((order) => {
+    const needed = humanCoreOf(order)?.energy;
+    return needed === "low" || needed === "medium" || needed === "high"
+      ? [[order.id, predictEnergyTransition(capacity.level as "low" | "medium" | "high",
+        needed, outcomes).predicted]] : [];
+  }));
+  const actions = recommendNextActions(active.map(plannerTaskOf), 40,
+    capacity.level === "uncalibrated" ? undefined : capacity.level, now, forecast);
   const milestones = store.listMilestones(WORKSPACE_ID);
   const identityPacks = defaultIdentityPacks().filter((pack) => pack.kind === "identity");
-  const now = process.env.CROSSLINE_FIXED_NOW ? new Date(process.env.CROSSLINE_FIXED_NOW) : new Date();
-  // One declared zone for the whole day head, shared with the calendar sync rather than hardcoded
-  // twice: a board whose dial, clock label and date could disagree is worse than one that is simply in
-  // the wrong city. `CROSSLINE_TIME_ZONE` is the same variable `graph-sync` already reads.
-  const timeZone = process.env.CROSSLINE_TIME_ZONE?.trim() || "America/Chicago";
+  const timeZone = readSchedulePreferences()?.timeZone
+    ?? process.env.CROSSLINE_TIME_ZONE?.trim() ?? "America/Chicago";
   const time = new Intl.DateTimeFormat("zh-CN", {
     weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false, timeZone
   }).format(now);
 
-  // The ordering really used is inputs-ready, then deadline tier, then estimate. There are no real
-  // deadlines and no energy-window matching, so the reason may not claim either.
-  const primary = toAction(active.find((task) => task.id === actions.primary?.id), "输入已就绪，且在主时钟身份中估时最短（无截止数据）");
+  const energySelected = capacity.level !== "uncalibrated";
+  const primaryReason = energySelected
+    ? actions.primary?.deadline && Date.parse(actions.primary.deadline) - now.getTime() <= 24 * 60 * 60_000
+      ? "已确认截止时间临近；即使当前精力不匹配仍优先显示，请考虑先休息 10 分钟"
+      : actions.primary?.energy === capacity.level
+        ? `当前${capacity.level === "low" ? "低" : capacity.level === "high" ? "高" : "中"}精力自评与所需精力匹配，输入已就绪`
+        : "暂无精力完全匹配的就绪作业，展示可执行的最高优先级备选"
+    : "输入已就绪，按目标重要性和估时推荐；尚无新鲜精力自评";
+  const primary = toAction(active.find((task) => task.id === actions.primary?.id), primaryReason);
+  const higherPriority = toAction(active.find((task) => task.id === actions.higherPriority?.id),
+    "优先级更高，但当前精力与任务要求不匹配；仍保留在这里供你决定");
   const lowEnergy = toAction(active.find((task) => task.id === actions.lowEnergy?.id), "标注为低精力任务，启动阻力最小");
   const shortGap = toAction(active.find((task) => task.id === actions.shortGap?.id), "先验 p85 在 40 分钟以内，可放进短空档");
   return {
@@ -750,11 +971,13 @@ export function loadDashboard(): DashboardData {
     clockPinned: Boolean(process.env.CROSSLINE_FIXED_NOW),
     dateLabel: new Intl.DateTimeFormat("en-US", { day: "2-digit", timeZone }).format(now),
     monthLabel: new Intl.DateTimeFormat("en-US", { month: "short", year: "numeric", timeZone }).format(now).toUpperCase(),
-    capacity: latestCapacity(now),
+    capacity,
+    energyLearning: energyCalibration(outcomes),
     // Absent means never asked, so the prompt appears exactly once and the answer is remembered.
     localActivityAsked: store.getSetting(WORKSPACE_ID, LOCAL_ACTIVITY_CONSENT) !== undefined,
     lastNight: lastNight(now),
     ...(primary ? { primary } : {}),
+    ...(higherPriority ? { higherPriority } : {}),
     ...(lowEnergy ? { lowEnergy } : {}),
     ...(shortGap ? { shortGap } : {}),
     care: store.listCapacityCommitments(WORKSPACE_ID).map((item) => ({ title: item.title, minimumMinutes: item.minimumMinutes })),

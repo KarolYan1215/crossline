@@ -500,13 +500,17 @@ export class CrosslineStore {
 
   transitionWorkOrder(workspaceId: string, id: string, event: WorkOrderEvent, idempotencyKey: string,
     update: { proposal?: unknown; context?: unknown; audit?: StoredCapture["audit"]; attempt?: number;
-      evidence?: EvidenceClaimInput[]; durationObserved?: boolean } = {}): { changed: boolean; state: WorkOrderState } {
+      evidence?: EvidenceClaimInput[]; durationObserved?: boolean;
+      expectedWorkOrder?: StoredWorkOrder } = {}): { changed: boolean; state: WorkOrderState } {
     return this.#db.transaction(() => {
       const current = this.listWorkOrders(workspaceId).find((item) => item.id === id)
         ?? this.listCaptures(workspaceId).find((item) => item.id === id);
       if (!current) throw new Error("WORK_ORDER_NOT_FOUND");
       const state = current.state as WorkOrderState;
       const isCapture = !("intent" in current);
+      if (update.expectedWorkOrder && (isCapture
+        || JSON.stringify(current) !== JSON.stringify(update.expectedWorkOrder)))
+        throw new Error("PROPOSAL_VERSION_CHANGED");
       if (isCapture && !["analysis.proposed", "analysis.accepted", "blocked"].includes(event.type)) throw new Error("INVALID_WORK_ORDER_TRANSITION");
       if (this.#db.prepare("SELECT 1 FROM events WHERE workspace_id = ? AND idempotency_key = ?").get(workspaceId, idempotencyKey)) {
         return { changed: false, state };
@@ -1133,6 +1137,21 @@ export class CrosslineStore {
     );
   }
 
+  /** Publish one backplan as a unit so a crash cannot leave half a set of draft steps. */
+  saveBackplanDrafts(workspaceId: string, drafts: StoredWorkOrder[], event: LedgerEventInput): boolean {
+    return this.#db.transaction(() => {
+      if (this.#db.prepare("SELECT 1 FROM events WHERE workspace_id = ? AND idempotency_key = ?")
+        .get(workspaceId, event.idempotencyKey)) return false;
+      const existing = new Set(this.listWorkOrders(workspaceId).map((item) => item.id));
+      if (drafts.some((draft) => draft.workspaceId !== workspaceId || draft.state !== "awaiting_plan_approval"
+        || existing.has(draft.id)))
+        throw new Error("BACKPLAN_DRAFT_COLLISION");
+      for (const draft of drafts) this.saveWorkOrder(draft);
+      this.appendEvent(event);
+      return true;
+    })["immediate"]();
+  }
+
   savePlanVersion(plan: StoredPlanVersion): void {
     this.#db.prepare(`
       INSERT INTO plan_versions (id, owner_id, workspace_id, version, status, payload_json, created_at)
@@ -1253,13 +1272,21 @@ export class CrosslineStore {
    * decision the person makes and the ledger records; it does not delete the change.
    */
   resolvePlanChange(workspaceId: string, changeId: string, status: "approved" | "excluded",
-    idempotencyKey: string): { changed: boolean } {
+    idempotencyKey: string, expected?: { plan: StoredPlanVersion; change: StoredPlanChange }): { changed: boolean } {
     // Check-then-act: two callers could both read `pending` and both append a resolution event.
     return this.#db.transaction(() => {
       const row = this.#db.prepare(
         "SELECT plan_version_id, status FROM plan_changes WHERE workspace_id = ? AND id = ?"
       ).get(workspaceId, changeId) as { plan_version_id?: string; status?: string } | undefined;
       if (!row || row.status !== "pending") return { changed: false };
+      if (expected) {
+        const currentPlan = this.listPlanVersions(workspaceId)[0];
+        const currentChange = this.listPlanChanges(row.plan_version_id!).find((item) => item.id === changeId);
+        if (!currentPlan || currentPlan.id !== row.plan_version_id || currentPlan.status !== "draft"
+          || JSON.stringify(currentPlan) !== JSON.stringify(expected.plan)
+          || JSON.stringify(currentChange) !== JSON.stringify(expected.change))
+          throw new Error("PROPOSAL_VERSION_CHANGED");
+      }
       this.#db.prepare("UPDATE plan_changes SET status = ? WHERE workspace_id = ? AND id = ?")
         .run(status, workspaceId, changeId);
       this.appendEvent({

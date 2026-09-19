@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { EnergyProbe } from "../energy-probe";
 
 const codes: Record<string, string> = {
   MATERIALS_PREPARING: "已转入材料准备。准备完成后即可开始人工执行。",
@@ -50,7 +51,8 @@ export function ExecutionActions({ workOrderId, state, paused }: { workOrderId: 
       <button type="button" disabled={busy} onClick={() => void send({ action: "materials_ready" })}>材料我已备好</button>
     </>}
     {(state === "approved" || state === "ready_for_human") &&
-      <button className="primary-button" type="button" disabled={busy} onClick={() => void send({ action: "start" })}>开始执行</button>}
+      <><span className="micro">开始前精力</span><EnergyProbe context="before_task" workOrderId={workOrderId} />
+        <button className="primary-button" type="button" disabled={busy} onClick={() => void send({ action: "start" })}>开始执行</button></>}
     {state === "active" && !paused && <>
       <label><span className="sr-only">中断原因</span>
         <input value={reason} maxLength={200} placeholder="中断原因（必填）" onChange={(event) => setReason(event.target.value)} /></label>
@@ -67,6 +69,10 @@ export function ExecutionActions({ workOrderId, state, paused }: { workOrderId: 
         action: "complete",
         evidence: uri.trim() && description.trim() ? [{ kind: "record", uri: uri.trim(), description: description.trim() }] : []
       })}>{uri.trim() && description.trim() ? "提交完成与证据" : "完成（记为无证据）"}</button>
+    </>}
+    {(state === "evidence_review" || state === "accepted") && <>
+      <span className="micro">完成后精力与实际负荷</span>
+      <EnergyProbe context="after_task" workOrderId={workOrderId} />
     </>}
     {/* A proposal the analysis got wrong had no exit: approve it or look at it forever. The reason is
         required because a board that quietly loses items is worse than one that keeps bad ones. */}

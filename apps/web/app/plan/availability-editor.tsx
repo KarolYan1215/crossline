@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import type { SchedulePreferences } from "../../lib/crossline";
 
 export type Window = { days: number[]; start: string; end: string; energy: "low" | "medium" | "high" };
 
@@ -17,8 +18,11 @@ const codes: Record<string, string> = {
  * example blocks instead. Editing it here rewrites the plan on the next load — the schedule is derived
  * on read, never stored, so it cannot drift from the work orders it came from.
  */
-export function AvailabilityEditor({ windows }: { windows: Window[] }) {
+export function AvailabilityEditor({ windows, preferences, milestones }: { windows: Window[];
+  preferences: SchedulePreferences; milestones: Array<{ id: string; title: string }> }) {
   const [draft, setDraft] = useState<Window[]>(windows);
+  const [mode, setMode] = useState(preferences.mode);
+  const [importance, setImportance] = useState(preferences.importance);
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -32,8 +36,10 @@ export function AvailabilityEditor({ windows }: { windows: Window[] }) {
   const save = async () => {
     setBusy(true);
     setStatus("");
-    const response = await fetch("/api/settings/availability", {
-      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ windows: draft })
+    const response = await fetch("/api/settings/schedule", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ windows: draft, mode, timeZone: preferences.timeZone,
+        importance })
     }).catch(() => undefined);
     if (response?.ok) { location.reload(); return; }
     const failure = await response?.json().catch(() => ({})) as { code?: string } | undefined;
@@ -44,6 +50,17 @@ export function AvailabilityEditor({ windows }: { windows: Window[] }) {
   return <details className="availability-editor">
     <summary>可用时间 · {draft.length} 段</summary>
     <p className="review-note">排程只会把作业放进这些时间段里，并且会先扣掉日历上已经占掉的部分。</p>
+    <label>排程模式 <select value={mode} onChange={(event) => setMode(event.target.value as typeof mode)}>
+      <option value="buffered">留缓冲：10 分钟间隔，每天最多 85%</option>
+      <option value="asap">尽早完成</option>
+    </select></label>
+    <div className="availability-importance">目标重要性：{milestones.map((milestone) =>
+      <label key={milestone.id}>{milestone.title} <select value={importance[milestone.id] ?? ""}
+        onChange={(event) => setImportance({ ...importance,
+          [milestone.id]: event.target.value as "important" | "ordinary" })}>
+        <option value="">请选择</option><option value="important">重要</option>
+        <option value="ordinary">普通</option>
+      </select></label>)}</div>
     {draft.map((window, index) => <div className="availability-row" key={index}>
       <span className="availability-days">{DAY_LABELS.map((label, day) =>
         <button type="button" key={day} aria-pressed={window.days.includes(day)}

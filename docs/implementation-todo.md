@@ -25,7 +25,7 @@ v1 的 `docs/crossline-mvp-implementation-plan.md` 中与 v2 冲突的部分已�
 - [x] **R4 Skill 交付层** —— 仓库内本地 plugin marketplace，`plugin/install` 到隔离
       CODEX_HOME，`skills/config/write` 按任务开关。三层：通用编排核心 / 身份包 / 用户覆盖层。
       plugin skills 使用运行时命名空间；配置写入串行化并在任务后恢复；真实 app-server
-      smoke 已验证 9 个 skills 可发现。**不 fork codex。**
+      smoke 已验证 9 个 skills 可发现。运行时已按后续要求改为[自有 fork 构建](codex-fork-runtime.md)，含一处 Windows 状态库迁移兼容补丁。
 - [x] **R5 里程碑闸门** —— `crossline-milestone-gate` Skill + 确定性层自洽校验
       （`GATE_VERDICT_INCONSISTENT`）+ 自动验收的四条补偿控制。里程碑绑定条目不能再
       走人工快捷验收；自动验收可撤销，关系反证会回标相关验收供周复盘置顶。

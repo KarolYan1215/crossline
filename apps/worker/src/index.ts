@@ -10,6 +10,7 @@ import { createFlywheelExpander } from "./flywheel";
 import { createMaterialPreparer, pendingMaterialWorkOrders } from "./material-runner";
 import { createMilestoneGate, pendingMilestoneGates } from "./milestone-gate-runner";
 import { createMilestoneProposer } from "./milestone-proposer";
+import { createGoalBackplanner } from "./goal-backplanner";
 import { createGraphSync, type SyncOutcome } from "./graph-sync";
 import {
   buildSources, calendarLabel, listCatalogue, readSelection, saveSelection, seedNewAccounts, sourceKey
@@ -169,7 +170,7 @@ const calendar = await (async () => {
       return undefined;
     }
     const reader = (bound: GraphCredentialProvider, calendarId?: string) =>
-      new GraphReadSource({ credential: bound, ...(calendarId ? { calendarId } : {}) });
+      new GraphReadSource({ credential: bound, futureDays: 63, ...(calendarId ? { calendarId } : {}) });
 
     // One catalogue read at startup, so a newly signed-in account arrives with its default calendar
     // already ticked instead of appearing to do nothing.
@@ -184,7 +185,19 @@ const calendar = await (async () => {
       sync: createGraphSync(analysisStore, WORKSPACE_ID, {
         // Resolved per tick, so unticking a calendar takes effect on the next sync with no restart.
         sources: () => buildSources(analysisStore, WORKSPACE_ID, credential, reader),
-        ...(process.env.CROSSLINE_TIME_ZONE ? { timeZone: process.env.CROSSLINE_TIME_ZONE } : {})
+        timeZone: () => {
+          const raw = analysisStore.getSetting(WORKSPACE_ID, "schedule.preferences");
+          if (raw) {
+            try {
+              const zone = (JSON.parse(raw) as { timeZone?: unknown }).timeZone;
+              if (typeof zone === "string") {
+                new Intl.DateTimeFormat("en", { timeZone: zone });
+                return zone;
+              }
+            } catch { /* An unreadable setting must not stop calendar sync. */ }
+          }
+          return process.env.CROSSLINE_TIME_ZONE;
+        }
       }),
       listSources: async () => {
         const fresh = await listCatalogue(credential, analysisStore, WORKSPACE_ID, reader);
@@ -225,12 +238,15 @@ try {
       requiredSkills: [
         "crossline:crossline", "crossline:crossline-automation-stripper", "crossline:crossline-milestone-gate",
         "crossline:crossline-flywheel-scout", "crossline:crossline-material-preparer", "crossline:crossline-milestone-architect",
+        "crossline:crossline-goal-backplanner",
         "crossline:crossline-onboarding", "crossline:crossline-plan-explainer", "crossline:crossline-weekly-insight"
       ]
     },
     analyzeCapture: createCaptureAnalyzer(analysisStore, repoRoot),
     proposeMilestones: (_client, request, signal) =>
       createMilestoneProposer(analysisStore, "personal-crossline", repoRoot, () => codexSupervisor?.client)(request, signal),
+    backplanGoal: (_client, milestoneId, signal) =>
+      createGoalBackplanner(analysisStore, "personal-crossline", repoRoot, () => codexSupervisor?.client)(milestoneId, signal),
     // The same preparer the tick loop uses, exposed so a person's retry gets an answer now rather than
     // at the next tick. `pendingMaterialWorkOrders` still governs which orders the loop picks up.
     prepareMaterials: (workOrderId) => prepareMaterials(workOrderId),

@@ -91,3 +91,14 @@ test("a pre-scheduler database is cleared of its example blocks and unblocked di
   // And the example diff no longer holds the plan hostage: approval refuses while anything is pending.
   expect(store.listPlanChanges("personal-plan-v1")[0]?.status).toBe("excluded");
 });
+
+test("migration keeps real user-authored plan blocks", () => {
+  const store = getStore();
+  store.savePlanVersion({ id: "personal-plan-v1", ownerId: "local-owner", workspaceId: WORKSPACE_ID,
+    version: 1, status: "approved", payload: { blocks: [{ id: "user-focus", lane: "human",
+      title: "已确认的工作段", day: "2026-09-18", start: "09:00", end: "10:00",
+      source: "用户确认", readOnly: true }] } });
+  ensureSeeded();
+  const blocks = (store.listPlanVersions(WORKSPACE_ID)[0]?.payload as { blocks: Array<{ id: string }> }).blocks;
+  expect(blocks.map((block) => block.id)).toEqual(["user-focus"]);
+});

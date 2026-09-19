@@ -28,9 +28,9 @@ test("seeding repairs starter milestones that an earlier version stored without 
   expect(approved.length).toBeGreaterThan(1);
 });
 
-test("the seeded plan never claims a connector imported it", () => {
+test("the seeded plan never claims a connector imported it", async () => {
   globalThis.crosslineStore = new CrosslineStore(":memory:");
-  const plan = loadCurrentPlan();
+  const plan = await loadCurrentPlan();
   // No connector is authorised, so a block that says "UW Outlook" or "Codex" is claiming an import
   // and an AI run that never happened.
   for (const block of plan.blocks) {

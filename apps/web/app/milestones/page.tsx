@@ -2,7 +2,7 @@ import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { SubpageShell } from "../subpage-shell";
 import { MilestoneMap } from "./milestone-map";
 import { MilestoneAdmin, type AdminMilestone } from "./milestone-admin";
-import { ensureSeeded, getStore, WORKSPACE_ID } from "../../lib/crossline";
+import { ensureSeeded, getStore, readGoalSettings, readSchedulePreferences, WORKSPACE_ID } from "../../lib/crossline";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +15,8 @@ export default function MilestonesPage() {
   // reasoning is the same problem as approving a relation with no stated claim.
   const rationales = new Map(store.listEvents(WORKSPACE_ID, { type: "milestone.proposed" })
     .map((event) => [event.entityId, String((event.payload as { rationale?: string }).rationale ?? "")]));
+  const dates = new Map(store.listEvents(WORKSPACE_ID, { type: "goal.backplan_proposed" })
+    .map((event) => [event.entityId, (event.payload as { dateCandidates?: Array<{ date: string; quote: string }> }).dateCandidates ?? []]));
 
   // Every gate judgement leaves a per-criterion reading. The best one seen for a criterion is the
   // milestone's progress on it: a later work order that did not touch a criterion must not un-meet it.
@@ -36,6 +38,9 @@ export default function MilestonesPage() {
     id: milestone.id, identityId: milestone.identityId, projectId: milestone.projectId ?? "",
     title: milestone.title, version: milestone.version, status: milestone.status,
     verifiability: milestone.verifiability, successCriteria: milestone.successCriteria,
+    goalSettings: readGoalSettings(milestone.id),
+    fallbackImportance: readSchedulePreferences()?.importance[milestone.id] ?? "ordinary",
+    dateCandidates: dates.get(milestone.id) ?? [],
     ...(rationales.get(milestone.id) ? { rationale: rationales.get(milestone.id)! } : {}),
     ...(progress.get(milestone.id) ? { progress: progress.get(milestone.id)! } : {})
   }));

@@ -1,25 +1,44 @@
 {
-  "repository": "https://github.com/openai/codex.git",
-  "commit": "5b1d6560181680f95cde95c14ed042acc02248ed",
+  "repository": "https://github.com/KarolYan1215/codex.git",
+  "upstream": "https://github.com/openai/codex.git",
+  "tag": "rust-v0.155.0",
+  "commit": "f0a1b8f0849d90960bc406b848f32e5a129b0457",
   "integration": "app-server-stdio",
-  "patches": [],
-  "runtimeVersion": "codex-cli 0.133.0",
-  "runtimeUserAgent": "Codex Desktop/0.133.0 (Windows 10.0.26200; x86_64) dumb (crossline; 0.1.0)",
+  "patches": [
+    {
+      "path": "patches/codex-windows-migrations.patch",
+      "sha256": "2b09d557c285be1593b2874e41471f0da7403fa86bfa662d8e624fdcc9c2f887",
+      "purpose": "Safely repair verified CRLF migration checksums used by existing Windows Codex homes."
+    }
+  ],
+  "build": {
+    "command": "cargo build --locked -p codex-cli --bin codex",
+    "lockfileSha256": "cc4f57de668d3ebfe59b05ae538161c042f031684b3ac71401b09cc04a1bd30a",
+    "lockfileNote": "The release tag recorded 152 workspace packages as 0.0.0; Cargo synchronized only those entries to 0.155.0 before the locked rebuild.",
+    "binary": ".vendor/codex-fork/codex-rs/target/debug/codex.exe",
+    "binarySha256": "ad13bb69310fd20019c5552d158dfaa5489a213c09246d5a5f6715761c7270f7"
+  },
+  "runtimeVersion": "codex-cli 0.155.0",
+  "runtimeUserAgent": "crossline/0.155.0 (Windows 10.0.26200; x86_64) dumb (crossline; 0.1.0)",
   "generatedProtocol": {
     "command": "codex app-server generate-ts --experimental --out <temporary-directory>",
-    "sha256": "7a3db76bc09206252e8e74a6d579edfb9bc0fb8a14f2ed64785f81f45468b4c1",
-    "fileCount": 847,
-    "observedAgainstRuntime": "codex-cli 0.154.0-alpha.6.2",
-    "note": "Generated against a Codex Desktop runtime that is no longer the runtime this repository spawns; the hash is retained as a historical observation and does not describe codex-cli 0.133.0."
+    "sha256": "cff5bf0f8f52d3d4fd2d00145462c5a3e21df86ec3b3b652668884831eb5c6a3",
+    "fileCount": 861,
+    "observedAgainstRuntime": "codex-cli 0.155.0"
   },
   "contractTest": {
     "command": "pnpm exec tsx scripts/codex-smoke.ts",
     "result": "passed",
-    "observedOn": "2026-09-15",
-    "observedRuntime": "Codex Desktop/0.133.0",
-    "verified": ["plugin/install", "skills/list", "9 namespaced Crossline skills discovered"]
+    "observedOn": "2026-09-18",
+    "observedRuntime": "crossline/0.155.0",
+    "verified": [
+      "pinned binary SHA-256",
+      "plugin/install",
+      "skills/list",
+      "10 namespaced Crossline skills discovered",
+      "read-only untrusted thread/start"
+    ]
   },
-  "relationStatus": "unverified",
-  "relationNote": "The installed runtime and generated protocol were observed together; no evidence proves that runtime was built from the recorded source commit.",
-  "environmentNote": "Under the packaged Claude desktop app, writes to %LOCALAPPDATA%/Crossline are redirected by Windows to the package LocalCache (Packages/Claude_pzs8sxrjxfjjc/LocalCache/Local). A codex-home created from such a session is therefore not the codex-home a normally started Windows worker reads, so isolated-home login must be verified from a non-packaged shell."
+  "relationStatus": "verified",
+  "relationNote": "The worker resolves only the fork build path, verifies its SHA-256 before spawning it, and reports verified only for that path. Protocol generation and contract tests used the same binary."
 }

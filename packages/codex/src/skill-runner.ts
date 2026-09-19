@@ -152,7 +152,7 @@ async function runSkillTurn<T>(client: CodexRpcBoundary, input: unknown, options
     };
     const threadParams = {
       environments: [], dynamicTools: [], runtimeWorkspaceRoots: [], sandbox: "read-only", approvalPolicy: "untrusted", approvalsReviewer: "user",
-      ephemeral: false, experimentalRawEvents: false, persistExtendedHistory: false,
+      ephemeral: false, experimentalRawEvents: false,
       developerInstructions: options.developerInstructions
     };
     // The flag list is written against the newest runtime, but `--strict-config` rejects the whole call
