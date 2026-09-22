@@ -2,6 +2,8 @@ use codex_utils_absolute_path::test_support::PathExt;
 use pretty_assertions::assert_eq;
 use sqlx::Connection;
 use sqlx::Row;
+#[cfg(windows)]
+use sqlx::SqlSafeStr;
 use sqlx::migrate::Migration;
 use sqlx::migrate::Migrator;
 use std::borrow::Cow;
@@ -13,6 +15,57 @@ use crate::PINNED_THREAD_SECTION_ID;
 use crate::PINNED_THREAD_SECTION_NAME;
 
 const CUSTOM_THREAD_SECTION_ID: &str = "01984de2-8f74-7c91-a3b2-5c5e937cf317";
+
+#[cfg(windows)]
+#[tokio::test]
+async fn runtime_migrator_accepts_existing_windows_checksums() {
+    let sqlite_home = crate::runtime::test_support::unique_temp_dir();
+    tokio::fs::create_dir_all(&sqlite_home)
+        .await
+        .expect("sqlite home should be created");
+    let _cleanup = scopeguard::guard(sqlite_home.clone(), |sqlite_home| {
+        let _ = std::fs::remove_dir_all(sqlite_home);
+    });
+    let sqlite = crate::SqliteConfig::new_for_testing(sqlite_home.as_path().abs());
+    let pool = sqlite
+        .open_read_write_pool(&sqlite.state_db_path())
+        .await
+        .expect("sqlite database should open");
+    let first = STATE_MIGRATOR.migrations.first().expect("state migration");
+    let legacy = Migrator {
+        migrations: Cow::Owned(vec![Migration::new(
+            first.version,
+            first.description.clone(),
+            first.migration_type,
+            sqlx::AssertSqlSafe(
+                first
+                    .sql
+                    .as_str()
+                    .replace("\r\n", "\n")
+                    .replace('\n', "\r\n"),
+            )
+            .into_sql_str(),
+            first.no_tx,
+        )]),
+        ignore_missing: false,
+        locking: STATE_MIGRATOR.locking,
+        table_name: STATE_MIGRATOR.table_name.clone(),
+        create_schemas: STATE_MIGRATOR.create_schemas.clone(),
+        no_tx: STATE_MIGRATOR.no_tx,
+    };
+    legacy
+        .run(&pool)
+        .await
+        .expect("legacy migration should run");
+    let runtime = super::runtime_state_migrator();
+    super::repair_windows_migration_checksums(&pool, &runtime)
+        .await
+        .expect("legacy checksum should be repaired");
+    runtime
+        .run(&pool)
+        .await
+        .expect("runtime should accept legacy Windows checksums");
+}
 
 fn migrator_through(version: i64) -> Migrator {
     Migrator {

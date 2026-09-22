@@ -1,5 +1,9 @@
 use std::borrow::Cow;
 
+#[cfg(windows)]
+use sqlx::Row;
+#[cfg(windows)]
+use sqlx::SqlSafeStr;
 use sqlx::SqlitePool;
 use sqlx::migrate::Migrator;
 
@@ -25,6 +29,80 @@ fn runtime_migrator(base: &'static Migrator) -> Migrator {
         table_name: base.table_name.clone(),
         create_schemas: base.create_schemas.clone(),
     }
+}
+
+/// Windows release builds historically embedded CRLF migration text, while a source checkout may
+/// contain LF. Repair only checksums that exactly match the same embedded SQL with CRLF line endings;
+/// every other mismatch remains untouched for SQLx to reject.
+#[cfg(windows)]
+pub(crate) async fn repair_windows_migration_checksums(
+    pool: &SqlitePool,
+    migrator: &Migrator,
+) -> anyhow::Result<()> {
+    let table_exists = sqlx::query_scalar::<_, i64>(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_sqlx_migrations'",
+    )
+    .fetch_optional(pool)
+    .await?
+    .is_some();
+    if !table_exists {
+        return Ok(());
+    }
+
+    let applied = sqlx::query("SELECT version, checksum FROM _sqlx_migrations")
+        .fetch_all(pool)
+        .await?;
+    let mut repairs = Vec::new();
+    for row in applied {
+        let version = row.try_get::<i64, _>("version")?;
+        let stored = row.try_get::<Vec<u8>, _>("checksum")?;
+        let Some(migration) = migrator
+            .migrations
+            .iter()
+            .find(|migration| migration.version == version)
+        else {
+            continue;
+        };
+        if stored == migration.checksum.as_ref() {
+            continue;
+        }
+        let windows_sql = migration
+            .sql
+            .as_str()
+            .replace("\r\n", "\n")
+            .replace('\n', "\r\n");
+        let windows_migration = sqlx::migrate::Migration::new(
+            migration.version,
+            migration.description.clone(),
+            migration.migration_type,
+            sqlx::AssertSqlSafe(windows_sql).into_sql_str(),
+            migration.no_tx,
+        );
+        if stored != windows_migration.checksum.as_ref() {
+            return Ok(());
+        }
+        repairs.push((version, stored, migration.checksum.clone()));
+    }
+
+    let mut transaction = pool.begin().await?;
+    for (version, old_checksum, new_checksum) in repairs {
+        sqlx::query("UPDATE _sqlx_migrations SET checksum = ? WHERE version = ? AND checksum = ?")
+            .bind(new_checksum.as_ref())
+            .bind(version)
+            .bind(old_checksum)
+            .execute(&mut *transaction)
+            .await?;
+    }
+    transaction.commit().await?;
+    Ok(())
+}
+
+#[cfg(not(windows))]
+pub(crate) async fn repair_windows_migration_checksums(
+    _pool: &SqlitePool,
+    _migrator: &Migrator,
+) -> anyhow::Result<()> {
+    Ok(())
 }
 
 pub(crate) fn runtime_state_migrator() -> Migrator {
