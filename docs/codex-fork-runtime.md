@@ -30,10 +30,13 @@ pnpm verify
 
 ## 更新到上游新版本
 
+`codex-fork` 这个 remote 和 `codex-fork-src` 这个 tag 都是本地引用，不会随 `git clone`/`git push` 传播，每台要做更新的机器第一次都要自己建：
+
 ```powershell
+git remote add codex-fork https://github.com/KarolYan1215/codex.git   # 已存在则跳过
 git fetch --depth=1 codex-fork <new-tag-or-commit>
 git tag -f codex-fork-src FETCH_HEAD
 git subtree pull --prefix=vendor/codex codex-fork-src --squash
 ```
 
-拉取后重新走一遍上面的构建、校验和与 `scripts/verify-codex-fork.ts` 流程，再更新 `codex-baseline.json`。`codex-fork` 这个 remote 名字和 `codex-fork-src` 这个本地 tag 是为了让 `git subtree pull` 找到同一个引用；不要用 `git subtree add`，那是仅一次性导入用的命令。
+用 `--depth=1` 的浅 fetch 加一个只包含单个 commit 的本地 tag，是为了不把上游几十万行历史（`git subtree pull` 默认会整个 fetch）拉进本仓库的对象库；`git subtree pull` 只需要 `codex-fork-src` 这一个 commit 的树内容来做三方合并，不需要它的祖先历史。拉取后重新走一遍上面的构建、校验和与 `scripts/verify-codex-fork.ts` 流程，再更新 `codex-baseline.json`。不要用 `git subtree add`，那是仅一次性导入用的命令，现在 `vendor/codex` 已经存在，会直接报 `prefix already exists`。
