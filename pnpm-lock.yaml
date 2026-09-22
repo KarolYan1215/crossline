@@ -24,6 +24,9 @@ importers:
       '@vitejs/plugin-react':
         specifier: 6.1.1
         version: 6.1.1(vite@8.3.0(@types/node@26.6.1)(esbuild@0.28.2)(tsx@4.23.13))
+      tsx:
+        specifier: 4.23.13
+        version: 4.23.13
       typescript:
         specifier: latest
         version: 7.0.2

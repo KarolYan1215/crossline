@@ -74,7 +74,7 @@ test("an all-output milestone still saves — the warning is the user's to judge
 });
 
 test("a pre-scheduler database is cleared of its example blocks and unblocked diffs", () => {
-  const store = getStore();
+  const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
   store.savePlanVersion({ id: "personal-plan-v1", ownerId: "local-owner", workspaceId: WORKSPACE_ID,
     version: 1, status: "draft", payload: { blocks: [
       { id: "class", lane: "human", title: "课程", start: "09:00", end: "10:15", source: "示例数据", readOnly: true },
@@ -93,7 +93,7 @@ test("a pre-scheduler database is cleared of its example blocks and unblocked di
 });
 
 test("migration keeps real user-authored plan blocks", () => {
-  const store = getStore();
+  const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
   store.savePlanVersion({ id: "personal-plan-v1", ownerId: "local-owner", workspaceId: WORKSPACE_ID,
     version: 1, status: "approved", payload: { blocks: [{ id: "user-focus", lane: "human",
       title: "已确认的工作段", day: "2026-09-18", start: "09:00", end: "10:00",

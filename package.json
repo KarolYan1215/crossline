@@ -15,10 +15,11 @@
     "restore": "pnpm --filter @crossline/worker restore",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test",
+    "test:e2e": "tsx scripts/run-e2e.ts",
     "typecheck": "pnpm -r typecheck",
     "build": "pnpm --filter @crossline/web build",
     "doctor:ledger": "tsx scripts/doctor.ts",
+    "test:codex-corpus": "tsx scripts/codex-workflow-corpus.ts --live",
     "verify": "pnpm typecheck && pnpm test && pnpm build && pnpm test:e2e"
   },
   "devDependencies": {
@@ -26,6 +27,7 @@
     "@types/better-sqlite3": "latest",
     "@types/node": "latest",
     "@vitejs/plugin-react": "6.1.1",
+    "tsx": "4.23.13",
     "typescript": "latest",
     "vitest": "latest"
   },

@@ -1,5 +1,10 @@
 import withSerwistInit from "@serwist/next";
 
+const deploymentMode = process.env.CROSSLINE_DEPLOYMENT_MODE ?? "local";
+if (deploymentMode !== "local") {
+  throw new Error("CROSSLINE_EXTERNAL_DEPLOYMENT_BLOCKED: external exposure requires per-user OIDC, workspace authorization, and a private network boundary.");
+}
+
 const withSerwist = withSerwistInit({
   swSrc: "app/sw.ts",
   swDest: "public/sw.js",

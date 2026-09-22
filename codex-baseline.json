@@ -7,7 +7,7 @@
   "patches": [
     {
       "path": "patches/codex-windows-migrations.patch",
-      "sha256": "2b09d557c285be1593b2874e41471f0da7403fa86bfa662d8e624fdcc9c2f887",
+      "sha256": "ed1f1df3da82293fcb4495287090edda9c43e5629d1050f413c8c6eb2f72651c",
       "purpose": "Safely repair verified CRLF migration checksums used by existing Windows Codex homes."
     }
   ],

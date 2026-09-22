@@ -1,0 +1,53 @@
+name: Verify Crossline
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  crossline:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.19.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm verify
+
+  codex-fork:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.19.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - run: pnpm install --frozen-lockfile
+      - name: Checkout pinned Crossline Codex fork
+        shell: pwsh
+        run: |
+          git config --global core.longpaths true
+          git clone https://github.com/KarolYan1215/codex.git "$env:RUNNER_TEMP\codex-fork"
+          git -C "$env:RUNNER_TEMP\codex-fork" checkout --detach f0a1b8f0849d90960bc406b848f32e5a129b0457
+      - name: Rebuild and verify fork provenance
+        shell: pwsh
+        run: |
+          pnpm exec tsx scripts\verify-codex-fork.ts --fork "$env:RUNNER_TEMP\codex-fork" | Tee-Object -FilePath codex-fork-verification.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: codex-fork-verification
+          path: codex-fork-verification.json

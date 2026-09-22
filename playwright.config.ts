@@ -25,7 +25,7 @@ export default defineConfig({
   // whole offline story — the app's headline claim — had no service worker to test against and could
   // not have been verified here no matter what a test asserted. Building costs a few seconds and buys
   // an environment that matches what actually runs.
-  webServer: {
+  webServer: process.env.CROSSLINE_E2E_EXTERNAL_SERVER ? undefined : {
     command: "pnpm --filter @crossline/web exec next build --webpack"
       + " && pnpm --filter @crossline/web exec next start --hostname 127.0.0.1 --port 3310",
     url: "http://127.0.0.1:3310/api/health",
