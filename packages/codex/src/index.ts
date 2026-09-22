@@ -108,7 +108,7 @@ export class JsonLineRpcClient {
 
 export const CODEX_BASELINE_COMMIT = "f0a1b8f0849d90960bc406b848f32e5a129b0457";
 export const CODEX_GENERATED_PROTOCOL_SHA256 = "cff5bf0f8f52d3d4fd2d00145462c5a3e21df86ec3b3b652668884831eb5c6a3";
-export const CODEX_FORK_BINARY_SHA256 = "ad13bb69310fd20019c5552d158dfaa5489a213c09246d5a5f6715761c7270f7";
+export const CODEX_FORK_BINARY_SHA256 = "89c66ec50028fcd4225b094c6338c6dec60c6fb7db97321584048f0dfb009762";
 
 export async function readCodexAccount(client: JsonLineRpcClient): Promise<unknown> {
   return client.request("account/read", { refreshToken: false });
@@ -157,7 +157,7 @@ export function resolveCodexCommand(
   platform: string = process.platform,
   sha256: (file: string) => string = fileSha256
 ): { command: string; args: string[] } {
-  const fork = path.resolve(import.meta.dirname, "../../../.vendor/codex-fork/codex-rs/target/debug",
+  const fork = path.resolve(import.meta.dirname, "../../../vendor/codex/codex-rs/target/debug",
     platform === "win32" ? "codex.exe" : "codex");
   const executable = env.CROSSLINE_CODEX_PATH ?? fork;
   if (!path.isAbsolute(executable) || !exists(executable)) throw new Error("CODEX_FORK_BINARY_NOT_FOUND");

@@ -15,8 +15,9 @@
     "command": "cargo build --locked -p codex-cli --bin codex",
     "lockfileSha256": "cc4f57de668d3ebfe59b05ae538161c042f031684b3ac71401b09cc04a1bd30a",
     "lockfileNote": "The release tag recorded 152 workspace packages as 0.0.0; Cargo synchronized only those entries to 0.155.0 before the locked rebuild.",
-    "binary": ".vendor/codex-fork/codex-rs/target/debug/codex.exe",
-    "binarySha256": "ad13bb69310fd20019c5552d158dfaa5489a213c09246d5a5f6715761c7270f7"
+    "binary": "vendor/codex/codex-rs/target/debug/codex.exe",
+    "binarySha256": "89c66ec50028fcd4225b094c6338c6dec60c6fb7db97321584048f0dfb009762",
+    "binaryNote": "The fork source moved from an untracked local clone at .vendor/codex-fork to a squashed Git subtree tracked in-repo at vendor/codex, same pinned commit and patch. The binary hash changed because Rust debug builds embed the absolute source path; lockfileSha256 above is unchanged and reproduced byte-for-byte from the new location, which is the actual provenance proof."
   },
   "runtimeVersion": "codex-cli 0.155.0",
   "runtimeUserAgent": "crossline/0.155.0 (Windows 10.0.26200; x86_64) dumb (crossline; 0.1.0)",
@@ -29,7 +30,7 @@
   "contractTest": {
     "command": "pnpm exec tsx scripts/codex-smoke.ts",
     "result": "passed",
-    "observedOn": "2026-09-18",
+    "observedOn": "2026-09-22",
     "observedRuntime": "crossline/0.155.0",
     "verified": [
       "pinned binary SHA-256",

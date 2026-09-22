@@ -336,7 +336,7 @@ describe("Codex app-server boundary", () => {
 });
 
 describe("codex executable resolution", () => {
-  const fork = path.resolve(import.meta.dirname, "../../../.vendor/codex-fork/codex-rs/target/debug/codex.exe");
+  const fork = path.resolve(import.meta.dirname, "../../../vendor/codex/codex-rs/target/debug/codex.exe");
   const desktop = "C:\\Users\\k\\AppData\\Local\\OpenAI\\Codex\\bin\\codex.exe";
 
   test("the pinned fork build is selected even when Desktop is on PATH", () => {

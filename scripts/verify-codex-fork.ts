@@ -61,7 +61,7 @@ if (sha256(lockPath) !== baseline.build.lockfileSha256) fail("post-bootstrap Car
 
 run("cargo", ["build", "--locked", "-p", "codex-cli", "--bin", "codex"], cargoRoot);
 run("cargo", ["test", "-p", "codex-state", "runtime_migrator_accepts_existing_windows_checksums", "--lib"], cargoRoot);
-const binary = path.join(fork, baseline.build.binary.replace(/^\.vendor[\\/]codex-fork[\\/]/, ""));
+const binary = path.join(fork, baseline.build.binary.replace(/^vendor[\\/]codex[\\/]/, ""));
 if (!existsSync(binary)) fail(`missing built binary ${binary}`);
 const runtimeVersion = run(binary, ["--version"]);
 if (!runtimeVersion.includes(baseline.runtimeVersion)) fail(`unexpected runtime version ${runtimeVersion}`);
