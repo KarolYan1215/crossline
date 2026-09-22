@@ -7,6 +7,6 @@ onlyBuiltDependencies:
   - esbuild
 allowBuilds:
   '@azure/msal-node-extensions': true
-  better-sqlite3: set this to true or false
+  better-sqlite3: true
   esbuild: true
   keytar: true
