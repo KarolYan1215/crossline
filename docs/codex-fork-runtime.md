@@ -4,6 +4,8 @@ Crossline 的源码 fork 是 [KarolYan1215/codex](https://github.com/KarolYan121
 
 fork 源码以 squashed Git subtree 的形式直接纳入本仓库，位于 `vendor/codex`（不是外部 submodule，也不是被忽略的本机 clone）。`patches/codex-windows-migrations.patch` 描述的 Windows 迁移校验和修复已经作为普通 commit 合并进 `vendor/codex/codex-rs/state/src/{migrations.rs,migrations_tests.rs,sqlite.rs}`，本机构建不需要再单独 clone 或 apply 补丁——直接编译 `vendor/codex` 即可。这份补丁文件本身仍然保留：`.github/workflows/verify.yml` 的 `codex-fork` job 和 `scripts/verify-codex-fork.ts` 用它对一个**独立的新鲜 clone**做供应链校验（同一 commit + 同一补丁能否独立复现同一份 `Cargo.lock`），这是刻意与"信任仓库里已经 vendor 的副本"分开的检查，不会因为源码已经在本仓库而失去意义。`codex-baseline.json` 记录构建与协议证据。
 
+`vendor/codex` 携带它自己的 `LICENSE`（Apache-2.0）和 `NOTICE`（含一段派生自 MIT 许可的 Ratatui 的声明）；两者随 subtree 原样导入，没有改动。这份许可证只覆盖 `vendor/codex` 目录本身，与 Crossline 自己代码的许可状态无关——Crossline 是私有个人项目，仓库根目录没有另外的 LICENSE 文件。
+
 首次构建（或 `vendor/codex` 更新后重新构建）：
 
 ```powershell
