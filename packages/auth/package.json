@@ -1,0 +1,16 @@
+{
+  "name": "@crossline/auth",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@crossline/core": "workspace:*",
+    "@crossline/db": "workspace:*",
+    "better-auth": "1.7.5",
+    "better-sqlite3": "13.0.3",
+    "nodemailer": "10.0.10"
+  },
+  "devDependencies": { "@types/better-sqlite3": "9.6.0", "@types/node": "26.5.1", "@types/nodemailer": "8.0.2" },
+  "scripts": { "typecheck": "tsc --noEmit -p tsconfig.json" }
+}
