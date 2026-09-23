@@ -38,7 +38,11 @@ export function resolveCrosslineAuthOptions(): CrosslineAuthOptions | undefined 
     : path.resolve(process.cwd(), "../../data");
   mkdirSync(dataDir, { recursive: true });
 
-  const baseURL = process.env.CROSSLINE_WEB_BASE_URL ?? "http://127.0.0.1:3210";
+  // `||`, not `??`: an unset var and one present-but-blank in `.env` (`CROSSLINE_WEB_BASE_URL=`, exactly
+  // how `.env.example` documents it) both read as `""` from `process.env`, and `??` only falls back on
+  // `null`/`undefined` — a blank line silently produced `baseURL: ""` and Better Auth's own "Base URL is
+  // not set" warning, found by actually starting the server with the example file's blank lines intact.
+  const baseURL = process.env.CROSSLINE_WEB_BASE_URL || "http://127.0.0.1:3210";
   const trustedOrigins = [baseURL];
   if (process.env.CROSSLINE_TAILSCALE_HOSTNAME) trustedOrigins.push(`https://${process.env.CROSSLINE_TAILSCALE_HOSTNAME}`);
 
