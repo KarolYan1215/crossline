@@ -146,6 +146,18 @@ export type StoredEnergyObservation = {
   observedAt: string;
 };
 
+export type StoredPrincipal = { id: string; betterAuthUserId: string; createdAt: string };
+export type StoredWorkspace = { id: string; name: string; createdAt: string };
+export type StoredWorkspaceMember = {
+  principalId: string; workspaceId: string; role: "viewer" | "member" | "owner"; createdAt: string;
+};
+export type StoredAuditEvent = {
+  id: string; principalId: string; workspaceId: string; role: string; authMethod: string;
+  requestId: string; idempotencyKey?: string;
+  codexThreadId?: string; codexTurnId?: string; codexCallId?: string;
+  action: string; payload: unknown; createdAt: string;
+};
+
 /**
  * Tables that once existed and never carried a row.
  *
@@ -260,6 +272,37 @@ export class CrosslineStore {
         title TEXT NOT NULL, minimum_minutes INTEGER NOT NULL,
         source_task_id TEXT, updated_at TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS principals (
+        id TEXT PRIMARY KEY, better_auth_user_id TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS workspaces (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS workspace_members (
+        principal_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
+        role TEXT NOT NULL CHECK(role IN ('viewer','member','owner')),
+        created_at TEXT NOT NULL,
+        PRIMARY KEY(principal_id, workspace_id)
+      );
+      CREATE INDEX IF NOT EXISTS workspace_members_workspace ON workspace_members(workspace_id);
+      CREATE TABLE IF NOT EXISTS tailscale_bindings (
+        id TEXT PRIMARY KEY, principal_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
+        tailscale_login TEXT NOT NULL, node_key TEXT NOT NULL, created_at TEXT NOT NULL,
+        UNIQUE(workspace_id, tailscale_login, node_key)
+      );
+      CREATE TABLE IF NOT EXISTS device_leases (
+        id TEXT PRIMARY KEY, principal_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
+        device_id TEXT NOT NULL, issued_at TEXT NOT NULL, expires_at TEXT NOT NULL, revoked_at TEXT,
+        UNIQUE(workspace_id, device_id)
+      );
+      CREATE INDEX IF NOT EXISTS device_leases_workspace ON device_leases(workspace_id, device_id);
+      CREATE TABLE IF NOT EXISTS audit_events (
+        id TEXT PRIMARY KEY, principal_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
+        role TEXT NOT NULL, auth_method TEXT NOT NULL, request_id TEXT NOT NULL,
+        idempotency_key TEXT, codex_thread_id TEXT, codex_turn_id TEXT, codex_call_id TEXT,
+        action TEXT NOT NULL, payload_json TEXT NOT NULL, created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS audit_events_workspace ON audit_events(workspace_id, created_at);
     `);
     if (hasLegacyTasks) this.#migrateLegacyTasks();
     this.#runMigrations(path);
@@ -1217,14 +1260,27 @@ export class CrosslineStore {
       "energy_observations", "external_bindings",
       "capacity_commitments",
       // Consent state is part of the ledger: a restore that silently re-enables collection is not a restore.
-      "settings"
+      "settings",
+      // `principals`/`workspaces` are not workspace-scoped rows themselves — a principal is scoped by
+      // membership, a workspace by its own id — so they get the two exceptions below instead of the
+      // uniform `WHERE workspace_id = ?` query the rest of this list uses.
+      "principals", "workspaces", "workspace_members", "tailscale_bindings", "device_leases", "audit_events"
     ] as const;
     // `ORDER BY rowid` for the same reason `listEvents` uses it: without it SQLite may return rows in
     // any order, so two exports of an unchanged database would not compare equal.
-    const tables: Record<string, Array<Record<string, string | number | null>>> = Object.fromEntries(tableNames.map((tableName) => [
-      tableName,
-      this.#db.prepare(`SELECT * FROM ${tableName} WHERE workspace_id = ? ORDER BY rowid`).all(workspaceId) as Array<Record<string, string | number | null>>
-    ]));
+    const scopedByWorkspaceId = (tableName: string) =>
+      this.#db.prepare(`SELECT * FROM ${tableName} WHERE workspace_id = ? ORDER BY rowid`)
+        .all(workspaceId) as Array<Record<string, string | number | null>>;
+    const tableQueries: Record<string, () => Array<Record<string, string | number | null>>> = {
+      workspaces: () => this.#db.prepare("SELECT * FROM workspaces WHERE id = ? ORDER BY rowid")
+        .all(workspaceId) as Array<Record<string, string | number | null>>,
+      principals: () => this.#db.prepare(
+        "SELECT * FROM principals WHERE id IN (SELECT principal_id FROM workspace_members WHERE workspace_id = ?) ORDER BY rowid"
+      ).all(workspaceId) as Array<Record<string, string | number | null>>
+    };
+    const tables: Record<string, Array<Record<string, string | number | null>>> = Object.fromEntries(
+      tableNames.map((tableName) => [tableName, (tableQueries[tableName] ?? (() => scopedByWorkspaceId(tableName)))()])
+    );
     return {
       schemaVersion: 2,
       exportedAt: new Date().toISOString(),
@@ -1370,6 +1426,81 @@ export class CrosslineStore {
       }
     })();
     return counts;
+  }
+
+  getPrincipalByBetterAuthId(betterAuthUserId: string): StoredPrincipal | undefined {
+    const row = this.#db.prepare("SELECT * FROM principals WHERE better_auth_user_id = ?")
+      .get(betterAuthUserId) as Record<string, string> | undefined;
+    if (!row) return undefined;
+    return { id: row.id!, betterAuthUserId: row.better_auth_user_id!, createdAt: row.created_at! };
+  }
+
+  getWorkspaceMembership(principalId: string, workspaceId: string): StoredWorkspaceMember | undefined {
+    const row = this.#db.prepare(
+      "SELECT * FROM workspace_members WHERE principal_id = ? AND workspace_id = ?"
+    ).get(principalId, workspaceId) as Record<string, string> | undefined;
+    if (!row) return undefined;
+    return {
+      principalId: row.principal_id!, workspaceId: row.workspace_id!,
+      role: row.role as StoredWorkspaceMember["role"], createdAt: row.created_at!
+    };
+  }
+
+  listWorkspaces(): StoredWorkspace[] {
+    const rows = this.#db.prepare("SELECT * FROM workspaces ORDER BY created_at, id")
+      .all() as Array<Record<string, string>>;
+    return rows.map((row) => ({ id: row.id!, name: row.name!, createdAt: row.created_at! }));
+  }
+
+  /**
+   * The only place a principal or a workspace is ever created. Keyed on the Better Auth user id so a
+   * second call for the same account — a repeated login, a retried request — returns the existing
+   * principal and its existing owner workspace rather than minting a second one. Every login stays a
+   * single-owner personal workspace by design; there is no invite path that adds a second member.
+   */
+  createPrincipalWithWorkspace(betterAuthUserId: string, workspaceName: string):
+    { principal: StoredPrincipal; workspace: StoredWorkspace } {
+    return this.#db.transaction(() => {
+      const existing = this.getPrincipalByBetterAuthId(betterAuthUserId);
+      if (existing) {
+        const membership = this.#db.prepare(
+          "SELECT workspace_id FROM workspace_members WHERE principal_id = ? AND role = 'owner' ORDER BY created_at LIMIT 1"
+        ).get(existing.id) as { workspace_id: string } | undefined;
+        if (!membership) throw new Error("PRINCIPAL_WITHOUT_OWNER_WORKSPACE");
+        const workspaceRow = this.#db.prepare("SELECT * FROM workspaces WHERE id = ?")
+          .get(membership.workspace_id) as Record<string, string>;
+        return {
+          principal: existing,
+          workspace: { id: workspaceRow.id!, name: workspaceRow.name!, createdAt: workspaceRow.created_at! }
+        };
+      }
+      const now = new Date().toISOString();
+      const principal: StoredPrincipal = { id: randomUUID(), betterAuthUserId, createdAt: now };
+      const workspace: StoredWorkspace = { id: randomUUID(), name: workspaceName, createdAt: now };
+      this.#db.prepare("INSERT INTO principals (id, better_auth_user_id, created_at) VALUES (?, ?, ?)")
+        .run(principal.id, principal.betterAuthUserId, principal.createdAt);
+      this.#db.prepare("INSERT INTO workspaces (id, name, created_at) VALUES (?, ?, ?)")
+        .run(workspace.id, workspace.name, workspace.createdAt);
+      this.#db.prepare(
+        "INSERT INTO workspace_members (principal_id, workspace_id, role, created_at) VALUES (?, ?, 'owner', ?)"
+      ).run(principal.id, workspace.id, now);
+      return { principal, workspace };
+    })();
+  }
+
+  appendAuditEvent(event: Omit<StoredAuditEvent, "id" | "createdAt">): StoredAuditEvent {
+    const record: StoredAuditEvent = { ...event, id: randomUUID(), createdAt: new Date().toISOString() };
+    this.#db.prepare(`
+      INSERT INTO audit_events
+        (id, principal_id, workspace_id, role, auth_method, request_id, idempotency_key,
+         codex_thread_id, codex_turn_id, codex_call_id, action, payload_json, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      record.id, record.principalId, record.workspaceId, record.role, record.authMethod, record.requestId,
+      record.idempotencyKey ?? null, record.codexThreadId ?? null, record.codexTurnId ?? null,
+      record.codexCallId ?? null, record.action, JSON.stringify(record.payload), record.createdAt
+    );
+    return record;
   }
 
   close(): void {
