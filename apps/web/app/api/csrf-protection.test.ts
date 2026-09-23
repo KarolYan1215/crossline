@@ -17,8 +17,18 @@ vi.mock("server-only", () => ({}));
  * OAuth `authUrl`, meaning a forged request could kick off a real sign-in against this board's account
  * from another site the person merely had open in another tab.
  */
-const modules = import.meta.glob("./**/route.ts", { eager: true }) as Record<string, Record<string, unknown>>;
+const allModules = import.meta.glob("./**/route.ts", { eager: true }) as Record<string, Record<string, unknown>>;
 const MUTATING = ["POST", "PUT", "PATCH", "DELETE"] as const;
+
+/**
+ * `auth/[...all]` is the one deliberate exemption, not a gap the discovery missed. It is Better Auth's
+ * own catch-all — the Google OAuth callback is Google redirecting back with no `Origin` header a
+ * browser controls the way a form POST does, so `isCrossSiteWrite` would reject a legitimate callback.
+ * Better Auth's own `trustedOrigins` check is the real boundary for this one path; see the comment on
+ * `apps/web/app/api/auth/[...all]/route.ts`.
+ */
+const EXEMPT = ["./auth/[...all]/route.ts"];
+const modules = Object.fromEntries(Object.entries(allModules).filter(([path]) => !EXEMPT.includes(path)));
 
 const forgedRequest = (url: string, method: string) =>
   new Request(url, { method, headers: { origin: "https://evil.example", "content-type": "application/json" } });

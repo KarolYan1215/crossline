@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@crossline/auth": "workspace:*",
     "@crossline/codex": "workspace:*",
     "@crossline/core": "workspace:*",
     "@crossline/db": "workspace:*",
@@ -25,6 +26,7 @@
     "@radix-ui/react-dialog": "^1.1.23",
     "@radix-ui/react-tooltip": "^1.2.16",
     "@serwist/next": "9.5.12",
+    "better-auth": "1.7.5",
     "@xyflow/react": "12.11.6",
     "date-fns": "3.6.0",
     "date-fns-tz": "3.2.0",
