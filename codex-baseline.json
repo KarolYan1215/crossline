@@ -16,8 +16,8 @@
     "lockfileSha256": "cc4f57de668d3ebfe59b05ae538161c042f031684b3ac71401b09cc04a1bd30a",
     "lockfileNote": "The release tag recorded 152 workspace packages as 0.0.0; Cargo synchronized only those entries to 0.155.0 before the locked rebuild.",
     "binary": "vendor/codex/codex-rs/target/debug/codex.exe",
-    "binarySha256": "89c66ec50028fcd4225b094c6338c6dec60c6fb7db97321584048f0dfb009762",
-    "binaryNote": "The fork source moved from an untracked local clone at .vendor/codex-fork to a squashed Git subtree tracked in-repo at vendor/codex, same pinned commit and patch. The binary hash changed because Rust debug builds embed the absolute source path; lockfileSha256 above is unchanged and reproduced byte-for-byte from the new location, which is the actual provenance proof."
+    "binarySha256": "4bcc1d8452c75cd132e010f41ccfaf6afb8699317f9a90d88df0b20be2335497",
+    "binaryNote": "The fork source moved from an untracked local clone at .vendor/codex-fork to a squashed Git subtree tracked in-repo at vendor/codex, same pinned commit and patch. This hash is from the build at the repo root (C:\\Users\\karol\\Documents\\ChatGPT\\Multi-ID\\vendor\\codex), where the worker actually resolves the binary from. Rust debug builds embed the absolute source path, so an identical source tree built under a different checkout path (e.g. a throwaway git-worktree import location) produces a different binary hash; lockfileSha256 above is unchanged and reproduced byte-for-byte from both locations, which is the actual provenance proof."
   },
   "runtimeVersion": "codex-cli 0.155.0",
   "runtimeUserAgent": "crossline/0.155.0 (Windows 10.0.26200; x86_64) dumb (crossline; 0.1.0)",

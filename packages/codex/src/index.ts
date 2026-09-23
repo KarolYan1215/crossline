@@ -108,7 +108,7 @@ export class JsonLineRpcClient {
 
 export const CODEX_BASELINE_COMMIT = "f0a1b8f0849d90960bc406b848f32e5a129b0457";
 export const CODEX_GENERATED_PROTOCOL_SHA256 = "cff5bf0f8f52d3d4fd2d00145462c5a3e21df86ec3b3b652668884831eb5c6a3";
-export const CODEX_FORK_BINARY_SHA256 = "89c66ec50028fcd4225b094c6338c6dec60c6fb7db97321584048f0dfb009762";
+export const CODEX_FORK_BINARY_SHA256 = "4bcc1d8452c75cd132e010f41ccfaf6afb8699317f9a90d88df0b20be2335497";
 
 export async function readCodexAccount(client: JsonLineRpcClient): Promise<unknown> {
   return client.request("account/read", { refreshToken: false });
