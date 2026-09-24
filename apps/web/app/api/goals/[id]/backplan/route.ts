@@ -8,7 +8,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   if ("response" in access) return access.response;
   const { id } = await context.params;
   try {
-    const result = await requestCodexSupervisor<unknown>("/v1/goals/backplan", {
+    const result = await requestCodexSupervisor<unknown>(access.ctx, "/v1/goals/backplan", {
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ milestoneId: id }), signal: AbortSignal.timeout(10 * 60_000)
     });

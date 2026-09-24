@@ -1,16 +1,18 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { closeSync, existsSync, mkdirSync, openSync, readSync } from "node:fs";
 import path from "node:path";
 import { readCostSignal } from "./cost";
+import { verifyCapability } from "./capability";
 import type { CostSignal } from "@crossline/core";
 export * from "./skill-runner";
 export * from "./analysis";
 export * from "./cost";
 export * from "./model-tiers";
+export * from "./capability";
 
 type ContextInput = {
   ownerId: string;
@@ -252,6 +254,9 @@ export type CodexSupervisorStatus = {
     contractTestResult: "passed";
     relationStatus: "verified" | "unverified";
   };
+  /** Regenerated every boot — never itself capability-gated, since a caller needs this to sign a
+   * capability's `supervisorBootId` claim in the first place. See `capability.ts`. */
+  supervisorBootId: string;
 };
 
 export type CodexSupervisor = {
@@ -336,8 +341,18 @@ export async function startCodexSupervisor(options: {
   /** Replaces the ticked set with exactly these `<accountId>:<calendarId>` keys. */
   saveCalendarSources?: (keys: string[]) => Promise<unknown>;
   plugin?: LocalPluginContract;
+  /**
+   * When set, every request must carry a valid `x-crossline-capability` token signed with this secret
+   * (see `capability.ts`) — closes the loopback port off to anything but the web app's own already-
+   * authenticated routes. Left unset in tests that are not exercising this boundary, the same way
+   * `plugin` is optional; the real worker always provides it (`apps/worker/src/index.ts`).
+   */
+  capabilitySecret?: string;
 } = {}): Promise<CodexSupervisor> {
   const host = options.host ?? "127.0.0.1";
+  // Regenerated every boot: a token signed before a crash or restart must not still be honoured after
+  // recovery, and a fresh id is the cheapest way to guarantee that without tracking process lifetimes.
+  const supervisorBootId = randomUUID();
   const sidecar = await (options.sidecarFactory ?? startCodexAppServer)();
   let login: LoginStatus | null = null;
   let accountRevision = 0;
@@ -413,11 +428,26 @@ export async function startCodexSupervisor(options: {
     runtimeBlocker = { code: "CODEX_RUNTIME_EXITED", message: "Codex app-server exited" };
   });
   const status = (): CodexSupervisorStatus => runtimeBlocker
-    ? { state: "blocked", login, accountRevision, blocker: runtimeBlocker, plugin: pluginState, contract }
-    : { state: "ready", login, accountRevision, plugin: pluginState, contract };
+    ? { state: "blocked", login, accountRevision, blocker: runtimeBlocker, plugin: pluginState, contract, supervisorBootId }
+    : { state: "ready", login, accountRevision, plugin: pluginState, contract, supervisorBootId };
   const server = createServer(async (request, response) => {
     const pathname = new URL(request.url ?? "/", `http://${host}`).pathname;
     try {
+      // The one route every other one depends on being reachable without a capability: a caller needs
+      // this to learn `supervisorBootId` before it can sign one at all. Low sensitivity by design (see
+      // `CodexSupervisorStatus`'s own fields) — nothing here is an action or an account secret.
+      if (request.method === "GET" && pathname === "/v1/codex/status") {
+        sendJson(response, 200, status());
+        return;
+      }
+      if (options.capabilitySecret) {
+        const verified = verifyCapability(request.headers["x-crossline-capability"] as string | undefined,
+          options.capabilitySecret, { operation: `${request.method} ${pathname}`, supervisorBootId });
+        if (!verified.ok) {
+          sendJson(response, 401, { blocker: { code: verified.code, message: "Use the local Web API" } });
+          return;
+        }
+      }
       const analysisRoute = /^\/v1\/captures\/([a-zA-Z0-9_-]{1,128})\/analyze$/.exec(pathname);
       if (analysisRoute && options.analyzeCapture) {
         const id = analysisRoute[1]!;
@@ -578,10 +608,6 @@ export async function startCodexSupervisor(options: {
         proposing = controller;
         try { sendJson(response, 200, await options.backplanGoal(sidecar.client, String(body?.milestoneId ?? ""), controller.signal)); }
         finally { if (proposing === controller) proposing = undefined; }
-        return;
-      }
-      if (request.method === "GET" && pathname === "/v1/codex/status") {
-        sendJson(response, 200, status());
         return;
       }
       // Discretionary spending needs a reading it can refuse on, so this stays available even while

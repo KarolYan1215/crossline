@@ -40,7 +40,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       // now is what makes the button feel like a button; if the worker is down the event still stands
       // and the tick picks it up, so a failure here is not a failure of the retry.
       if (result.ok) {
-        await requestCodexSupervisor(`/v1/work-orders/${id}/prepare-materials`, {
+        await requestCodexSupervisor(ctx, `/v1/work-orders/${id}/prepare-materials`, {
           method: "POST", headers: { "content-type": "application/json" },
           signal: AbortSignal.timeout(10_000)
         }).catch(() => undefined);

@@ -14,7 +14,7 @@ async function forward(request: Request, context: Context, method: "POST" | "DEL
     return Response.json({ blocker: { code: "CAPTURE_NOT_FOUND" } }, { status: 404 });
   }
   try {
-    const result = await requestCodexSupervisor<{ state?: unknown; canceled?: unknown }>(`/v1/captures/${id}/analyze`, {
+    const result = await requestCodexSupervisor<{ state?: unknown; canceled?: unknown }>(ctx, `/v1/captures/${id}/analyze`, {
       method, headers: { "content-type": "application/json" }, signal: AbortSignal.timeout(40_000)
     });
     if (method === "DELETE" && typeof result.canceled === "boolean") return Response.json({ canceled: result.canceled });

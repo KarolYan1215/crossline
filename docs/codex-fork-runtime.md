@@ -42,3 +42,17 @@ git subtree pull --prefix=vendor/codex codex-fork-src --squash
 ```
 
 用 `--depth=1` 的浅 fetch 加一个只包含单个 commit 的本地 tag，是为了不把上游几十万行历史（`git subtree pull` 默认会整个 fetch）拉进本仓库的对象库；`git subtree pull` 只需要 `codex-fork-src` 这一个 commit 的树内容来做三方合并，不需要它的祖先历史。拉取后重新走一遍上面的构建、校验和与 `scripts/verify-codex-fork.ts` 流程，再更新 `codex-baseline.json`。不要用 `git subtree add`，那是仅一次性导入用的命令，现在 `vendor/codex` 已经存在，会直接报 `prefix already exists`。
+
+## Supervisor capability token（阶段四）
+
+`apps/worker` 的 HTTP supervisor 只绑定 `127.0.0.1:3211`，但loopback 本身不是边界——同一台机器上任何进程都能直接 curl 这个端口，绕过 `apps/web` 自己的 Better Auth 登录检查，触发真实的 Codex 分析、材料准备、里程碑闸门判定，或是启动一次真实的 OAuth 登录。`packages/codex/src/capability.ts` 补的就是这一个洞：`apps/web/lib/codex-runtime.ts` 的 `requestCodexSupervisor` 在每次请求前，用调用方当前请求的真实 `AccessContext`（而不是任何硬编码值）签发一个 30 秒过期、绑定到 `${method} ${pathname}` 和 supervisor 当前 `supervisorBootId` 的 HMAC token，装进 `x-crossline-capability` 请求头；`packages/codex/src/index.ts` 在路由分发**最前面**统一校验（不是逐个路由处理器各自调用——这个 HTTP handler 是一个大函数里顺序 if 的调度，不是 Next.js 那种每个文件一个处理器的结构，统一在入口校验反而比在十一处各自重复更不容易漏掉）。`/v1/codex/status` 是唯一不校验 capability 的路由：调用方必须先读到 `supervisorBootId` 才能签出一个校验会通过的 token，这条路由因此必须留作校验的起点，它返回的信息本身也只是运行状态，不是账户密钥。
+
+`CROSSLINE_SUPERVISOR_CAPABILITY_SECRET` 独立于 `BETTER_AUTH_SECRET`：登录密钥泄漏不应该连带让 supervisor 也失守。`apps/web/.env` 和 `apps/worker/.env` 必须配成同一个值；worker 缺这个变量时会跳过启动 supervisor 并记录 `CROSSLINE_SUPERVISOR_CAPABILITY_SECRET_MISSING`，而不是无保护地把端口打开。
+
+### 暂不支持（阶段四缩小范围时的明确决定，不是遗漏）
+
+- `dynamicTools` 仍然硬编码为空数组。
+- `skillQueue` 仍然是进程级单锁，不按 workspace 分桶。
+- `preparing`/`judging`/`analyses` 这几个并发追踪结构仍然只按 entity id（work order id / capture id）区分，不按 workspace 二次分桶。
+
+以上三项都是为"真的有第二个 workspace 会调用同一个 worker"这个还不存在的场景准备的基础设施；当前只有一个 owner，提前做这些既测不出价值也验证不了正确性。等 `apps/worker` 真正需要循环处理多个 workspace 时（`packages/db` 的 `listWorkspaces()` 已经在阶段三加好），一并重新评估。

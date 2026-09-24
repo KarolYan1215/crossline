@@ -3,7 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "exports": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./capability": "./src/capability.ts"
+  },
   "dependencies": { "@crossline/core": "workspace:*" },
   "devDependencies": { "@types/node": "26.5.1" },
   "scripts": { "typecheck": "tsc --noEmit -p tsconfig.json" }

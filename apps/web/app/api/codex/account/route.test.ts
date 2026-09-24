@@ -11,10 +11,14 @@ afterEach(() => {
   if (previousSupervisorUrl === undefined) delete process.env.CROSSLINE_CODEX_SUPERVISOR_URL;
   else process.env.CROSSLINE_CODEX_SUPERVISOR_URL = previousSupervisorUrl;
   delete (globalThis as { crosslineCodexSidecar?: unknown }).crosslineCodexSidecar;
+  vi.unstubAllEnvs();
 });
 
 describe("Codex account route", () => {
   test("returns a typed blocker when the durable supervisor is unavailable", async () => {
+    // Exercising the "supervisor unreachable" path specifically, not the separate "capability secret
+    // missing" short-circuit `requestCodexSupervisor` now checks first.
+    vi.stubEnv("CROSSLINE_SUPERVISOR_CAPABILITY_SECRET", "test-secret");
     const unavailable = createServer();
     await new Promise<void>((resolve) => unavailable.listen(0, "127.0.0.1", resolve));
     const address = unavailable.address();

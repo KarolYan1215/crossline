@@ -14,7 +14,7 @@ export async function POST(request: Request) {
   const access = await resolveAccessContext(request);
   if ("response" in access) return access.response;
   try {
-    const result = await requestCodexSupervisor<Record<string, unknown>>("/v1/calendar/sync", {
+    const result = await requestCodexSupervisor<Record<string, unknown>>(access.ctx, "/v1/calendar/sync", {
       method: "POST", headers: { "content-type": "application/json" },
       signal: AbortSignal.timeout(60_000)
     });

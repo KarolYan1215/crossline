@@ -22,8 +22,8 @@ export async function GET(request: Request) {
   if ("response" in access) return access.response;
   try {
     const [account, supervisor] = await Promise.all([
-      requestCodexSupervisor<Record<string, unknown>>("/v1/codex/account"),
-      requestCodexSupervisor<Record<string, unknown>>("/v1/codex/status")
+      requestCodexSupervisor<Record<string, unknown>>(access.ctx, "/v1/codex/account"),
+      requestCodexSupervisor<Record<string, unknown>>(access.ctx, "/v1/codex/status")
     ]);
     return NextResponse.json({ ...account, supervisor });
   } catch (error) {
@@ -39,7 +39,7 @@ export async function POST(request: Request) {
   const access = await resolveAccessContext(request);
   if ("response" in access) return access.response;
   try {
-    return NextResponse.json(await requestCodexSupervisor("/v1/codex/login", { method: "POST" }));
+    return NextResponse.json(await requestCodexSupervisor(access.ctx, "/v1/codex/login", { method: "POST" }));
   } catch (error) {
     return blockerResponse(error);
   }
@@ -50,7 +50,7 @@ export async function DELETE(request: Request) {
   const access = await resolveAccessContext(request);
   if ("response" in access) return access.response;
   try {
-    return NextResponse.json(await requestCodexSupervisor("/v1/codex/login/cancel", { method: "POST" }));
+    return NextResponse.json(await requestCodexSupervisor(access.ctx, "/v1/codex/login/cancel", { method: "POST" }));
   } catch (error) {
     return blockerResponse(error);
   }

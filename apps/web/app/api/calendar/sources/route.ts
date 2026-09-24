@@ -1,3 +1,4 @@
+import type { AccessContext } from "@crossline/core";
 import { requestCodexSupervisor, CodexSupervisorRequestError } from "../../../../lib/codex-runtime";
 import { isCrossSiteWrite } from "../../../../lib/same-origin";
 import { resolveAccessContext } from "../../../../lib/access-guard";
@@ -8,9 +9,9 @@ import { resolveAccessContext } from "../../../../lib/access-guard";
  * Through the worker, like the sync itself, because the worker owns the Graph tokens. Listing is a
  * read; saving only writes one settings row in the ledger and changes what the next tick pulls.
  */
-const relay = async (init: RequestInit) => {
+const relay = async (ctx: AccessContext, init: RequestInit) => {
   try {
-    const result = await requestCodexSupervisor<unknown>("/v1/calendar/sources", {
+    const result = await requestCodexSupervisor<unknown>(ctx, "/v1/calendar/sources", {
       ...init, signal: AbortSignal.timeout(30_000)
     });
     return Response.json({ ok: true, accounts: result });
@@ -25,7 +26,7 @@ const relay = async (init: RequestInit) => {
 export async function GET(request: Request) {
   const access = await resolveAccessContext(request);
   if ("response" in access) return access.response;
-  return relay({ method: "GET" });
+  return relay(access.ctx, { method: "GET" });
 }
 
 export async function POST(request: Request) {
@@ -34,7 +35,7 @@ export async function POST(request: Request) {
   if ("response" in access) return access.response;
   const body = (await request.json().catch(() => ({}))) as { keys?: unknown };
   const keys = Array.isArray(body.keys) ? body.keys.filter((key): key is string => typeof key === "string") : [];
-  return relay({
+  return relay(access.ctx, {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ keys })
   });
 }

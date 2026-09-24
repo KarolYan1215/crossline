@@ -228,9 +228,15 @@ const calendar = await (async () => {
   }
 })();
 
-try {
+// Independent from BETTER_AUTH_SECRET on purpose: the auth secret leaking should not also hand out the
+// ability to trigger real Codex runs on the loopback supervisor port — see `packages/codex/src/capability.ts`.
+const capabilitySecret = process.env.CROSSLINE_SUPERVISOR_CAPABILITY_SECRET?.trim();
+if (!capabilitySecret) {
+  console.warn(JSON.stringify({ type: "worker.blocked", code: "CROSSLINE_SUPERVISOR_CAPABILITY_SECRET_MISSING" }));
+} else try {
   codexSupervisor = await startCodexSupervisor({
     port: supervisorPort,
+    capabilitySecret,
     plugin: {
       name: "crossline",
       marketplacePath: path.join(repoRoot, "skills", "marketplace", ".agents", "plugins", "marketplace.json"),

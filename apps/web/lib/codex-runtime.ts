@@ -1,4 +1,10 @@
 import "server-only";
+import type { AccessContext } from "@crossline/core";
+// The `./capability` subpath, not the package root: the root entry pulls in the Codex sidecar-spawning
+// code, and the web app must never spawn Codex itself — only ask the worker's supervisor over HTTP
+// (`apps/web/app/api/captures/[id]/analyze/route.test.ts` enforces this by mocking the root specifier
+// to throw). `capability.ts` has no such dependency, so it gets its own export.
+import { signCapability } from "@crossline/codex/capability";
 
 export type CodexBlocker = { code: string; message: string };
 
@@ -19,10 +25,41 @@ function supervisorUrl(): URL {
   return url;
 }
 
-export async function requestCodexSupervisor<T>(pathname: string, init?: RequestInit): Promise<T> {
+/**
+ * The supervisor's own boot id, needed to sign a capability the worker will accept (see
+ * `packages/codex/src/capability.ts`). `/v1/codex/status` is the one route left uncapability-gated for
+ * exactly this reason — everything else needs a token stamped with this value first.
+ */
+async function fetchSupervisorBootId(): Promise<string> {
+  const response = await fetch(new URL("/v1/codex/status", supervisorUrl()), {
+    cache: "no-store", signal: AbortSignal.timeout(5_000)
+  }).catch(() => undefined);
+  const body = await response?.json().catch(() => undefined) as { supervisorBootId?: unknown } | undefined;
+  if (!response?.ok || typeof body?.supervisorBootId !== "string") {
+    throw new CodexSupervisorRequestError(503, {
+      code: "CODEX_SUPERVISOR_UNAVAILABLE", message: "Codex supervisor is unavailable"
+    });
+  }
+  return body.supervisorBootId;
+}
+
+export async function requestCodexSupervisor<T>(ctx: AccessContext, pathname: string, init?: RequestInit): Promise<T> {
   try {
+    const secret = process.env.CROSSLINE_SUPERVISOR_CAPABILITY_SECRET;
+    if (!secret) {
+      throw new CodexSupervisorRequestError(503, {
+        code: "CAPABILITY_SECRET_MISSING", message: "CROSSLINE_SUPERVISOR_CAPABILITY_SECRET is not configured"
+      });
+    }
+    const supervisorBootId = await fetchSupervisorBootId();
+    const method = init?.method ?? "GET";
+    const capability = signCapability({
+      principalId: ctx.principalId, workspaceId: ctx.workspaceId, role: ctx.role,
+      operation: `${method} ${pathname}`, requestId: ctx.requestId, supervisorBootId
+    }, secret);
     const response = await fetch(new URL(pathname, supervisorUrl()), {
       ...init,
+      headers: { ...init?.headers, "x-crossline-capability": capability },
       cache: "no-store",
       signal: init?.signal ?? AbortSignal.timeout(5_000)
     });

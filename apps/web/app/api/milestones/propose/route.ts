@@ -17,7 +17,7 @@ export async function POST(request: Request) {
   try { body = await request.json(); } catch { /* an empty request means "look at the whole picture" */ }
   const ask = (body ?? {}) as { request?: unknown };
   try {
-    const result = await requestCodexSupervisor<unknown>("/v1/milestones/propose", {
+    const result = await requestCodexSupervisor<unknown>(access.ctx, "/v1/milestones/propose", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ request: typeof ask.request === "string" ? ask.request.slice(0, 2000) : "" }),

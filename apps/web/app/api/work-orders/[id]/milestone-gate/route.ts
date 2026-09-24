@@ -27,7 +27,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     idempotencyKey: `milestone-gate:retry:${id}:${Date.now()}`,
     type: "milestone_gate.retry_requested", entityId: id, payload: { requestedBy: ctx.principalId }
   });
-  await requestCodexSupervisor(`/v1/work-orders/${id}/milestone-gate`, {
+  await requestCodexSupervisor(ctx, `/v1/work-orders/${id}/milestone-gate`, {
     method: "POST", headers: { "content-type": "application/json" }, signal: AbortSignal.timeout(10_000)
   }).catch(() => undefined);
   return Response.json({ ok: true });

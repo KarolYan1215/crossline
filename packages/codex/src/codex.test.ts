@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import path from "node:path";
 import * as codexModule from "./index";
 import { buildContextBundle, codexProcessEnvironment, JsonLineRpcClient, normalizeCodexEvent } from "./index";
+import { signCapability } from "./capability";
 
 type TestSupervisor = {
   url: string;
@@ -365,5 +366,77 @@ describe("codex executable resolution", () => {
     expect(() => codexModule.resolveCodexCommand({ CROSSLINE_CODEX_PATH: fork },
       (file) => file === fork, "win32", () => "different"))
       .toThrow("CODEX_FORK_BINARY_MISMATCH");
+  });
+});
+
+describe("supervisor capability enforcement", () => {
+  const SECRET = "test-capability-secret";
+  const claims = (operation: string, bootId: string) => ({
+    principalId: "p1", workspaceId: "w1", role: "owner" as const, operation, requestId: "req-1", supervisorBootId: bootId
+  });
+
+  test("/v1/codex/status stays reachable with no token, even when a secret is configured", async () => {
+    const sidecar = fakeSidecar();
+    const supervisor = await codexModule.startCodexSupervisor({
+      port: 0, sidecarFactory: async () => sidecar.handle, capabilitySecret: SECRET
+    });
+    try {
+      const response = await fetch(`${supervisor.url}/v1/codex/status`);
+      expect(response.status).toBe(200);
+      expect(typeof (await response.json() as { supervisorBootId?: unknown }).supervisorBootId).toBe("string");
+    } finally { await supervisor.stop(); }
+  });
+
+  test("a real action route refuses no token, a wrong-operation token, and a token for a different boot", async () => {
+    const sidecar = fakeSidecar();
+    let prepared = 0;
+    const supervisor = await codexModule.startCodexSupervisor({
+      port: 0, sidecarFactory: async () => sidecar.handle, capabilitySecret: SECRET,
+      prepareMaterials: async () => { prepared += 1; return { state: "ready" }; }
+    });
+    try {
+      const status = await (await fetch(`${supervisor.url}/v1/codex/status`)).json() as { supervisorBootId: string };
+      const target = "POST /v1/work-orders/wo-1/prepare-materials";
+      const post = (headers: Record<string, string>) => fetch(`${supervisor.url}/v1/work-orders/wo-1/prepare-materials`, {
+        method: "POST", headers: { "content-type": "application/json", ...headers }
+      });
+
+      const noToken = await post({});
+      expect(noToken.status).toBe(401);
+      expect(await noToken.json()).toMatchObject({ blocker: { code: "CAPABILITY_MISSING" } });
+
+      const wrongOperation = signCapability(claims("GET /v1/codex/account", status.supervisorBootId), SECRET);
+      expect((await post({ "x-crossline-capability": wrongOperation })).status).toBe(401);
+
+      const wrongBoot = signCapability(claims(target, "some-other-boot"), SECRET);
+      expect((await post({ "x-crossline-capability": wrongBoot })).status).toBe(401);
+
+      expect(prepared).toBe(0);
+
+      const valid = signCapability(claims(target, status.supervisorBootId), SECRET);
+      const accepted = await post({ "x-crossline-capability": valid });
+      expect(accepted.status).toBe(202);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(prepared).toBe(1);
+
+      // The same token again is a replay, not a second legitimate call.
+      const replayed = await post({ "x-crossline-capability": valid });
+      expect(replayed.status).toBe(401);
+      expect(await replayed.json()).toMatchObject({ blocker: { code: "CAPABILITY_REPLAYED" } });
+    } finally { await supervisor.stop(); }
+  });
+
+  test("no capabilitySecret configured means no enforcement — the pre-stage-four behaviour every other test in this file relies on", async () => {
+    const sidecar = fakeSidecar();
+    const supervisor = await codexModule.startCodexSupervisor({
+      port: 0, sidecarFactory: async () => sidecar.handle,
+      prepareMaterials: async () => ({ state: "ready" })
+    });
+    try {
+      const response = await fetch(`${supervisor.url}/v1/work-orders/wo-1/prepare-materials`, {
+        method: "POST", headers: { "content-type": "application/json" }
+      });
+      expect(response.status).toBe(202);
+    } finally { await supervisor.stop(); }
   });
 });
