@@ -3,6 +3,7 @@ import { OfflineCaptureForm, OfflineReplay } from "./offline-command-forms";
 import { AnalogClock } from "./analog-clock";
 import { EnergyProbe } from "./energy-probe";
 import { LocalActivityConsent } from "./local-activity-consent";
+import { SignOutButton } from "./sign-out-button";
 
 export type DashboardAction = {
   id: string;
@@ -79,11 +80,11 @@ export function DashboardView({ data }: { data: DashboardData }) {
     {item ? <><h3>{item.title}</h3><p>{item.reason}</p><small>{identityLabel(item.identityId)} · {estimateLabel(item.estimate)}</small></> : <p>暂无可执行项</p>}
   </article>;
 
-  return <main className="page"><OfflineReplay />
+  return <main className="page"><OfflineReplay workspaceId={data.workspaceId} />
     <header className="running-head">
       <a className="wordmark" href="/">CROSSLINE<sup>01</sup></a>
       <nav aria-label="主导航">{nav.map(([label, href]) => <a className={label === "Today" ? "active" : ""} href={href} key={label}>{label}</a>)}</nav>
-      <div className="system-state"><CircleDot size={11} aria-hidden="true" /><span>LOCAL</span></div>
+      <div className="system-state"><CircleDot size={11} aria-hidden="true" /><span>LOCAL</span><SignOutButton /></div>
     </header>
 
     <section className="day-head">

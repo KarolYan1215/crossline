@@ -274,8 +274,13 @@ test("the app opens with the network down, and the offline capture queues", asyn
   await expect(page.getByRole("status")).toContainText("已离线保存，联网后自动同步");
 
   const queued = await page.evaluate(async () => {
+    // Workspace-scoped, not a fixed name (`crossline-offline-${workspaceId}`) — switching accounts on
+    // the same browser must not read the previous account's queue. `OfflineReplay` remembers the id in
+    // localStorage precisely so a check like this one, with no server round trip, can find it.
+    const workspaceId = localStorage.getItem("crossline.offline.workspaceId");
+    if (!workspaceId) throw new Error("workspace id was never remembered");
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open("crossline-offline", 1);
+      const request = indexedDB.open(`crossline-offline-${workspaceId}`);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
@@ -288,4 +293,90 @@ test("the app opens with the network down, and the offline capture queues", asyn
   expect(queued).toBe(1);
 
   await context.setOffline(false);
+});
+
+/**
+ * Two devices signed into the same account is the normal shape of "offline workbench", not an edge
+ * case — a phone that lost signal mid-session and a laptop that never did. `transitionWorkOrder`'s own
+ * state preconditions (`startWorkOrderExecution` refuses anything but `approved`/`ready_for_human`) are
+ * what the offline queue's conflict path leans on: replaying a stale command against a work order that
+ * moved on comes back 409, and `classifyReplay` is what turns that into "review this" instead of either
+ * "silently discard" or "corrupt the real state".
+ */
+test("a work order started on one device becomes a conflict when another device's queued command replays", async ({ page, browser }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-chrome");
+  const store = openStore();
+  const workspaceId = realWorkspaceId(store);
+  const id = "e2e-conflict-wo";
+  try {
+    store.saveWorkOrder({
+      id, ownerId: "e2e-tester", workspaceId, identityId: "research", projectId: "p",
+      milestoneId: "m", intent: "两台设备冲突测试", state: "ready_for_human", riskTier: "routine",
+      estimate: { p25Minutes: 10, p50Minutes: 20, p85Minutes: 40, source: "llm_prior", observationCount: 0, confidence: "low" },
+      payload: { materialContract: [], evidenceContract: [] }
+    });
+  } finally { store.close(); }
+
+  // Device B loads the page first, while the order is still `ready_for_human`, then goes offline — its
+  // UI keeps showing that stale state from here on, same as a phone that lost signal mid-session.
+  const deviceB = await browser.newContext({ storageState: testInfo.project.use.storageState as string });
+  const pageB = await deviceB.newPage();
+  await pageB.goto("/workbench");
+  await expect(pageB.locator(`#work-order-${id}`).getByRole("button", { name: "开始执行" })).toBeVisible();
+  await deviceB.setOffline(true);
+
+  // Device A — the default page — moves the same order past `active` entirely: `startWorkOrderExecution`
+  // treats an already-`active` order as an idempotent no-op success (not a conflict — a genuine
+  // double-click online must not error), so the order has to move somewhere `start` can no longer apply
+  // at all for device B's stale `start` to actually collide with anything.
+  await page.goto("/workbench");
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: "load" }),
+    page.locator(`#work-order-${id}`).getByRole("button", { name: "开始执行" }).click()
+  ]);
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: "load" }),
+    page.locator(`#work-order-${id}`).getByRole("button", { name: "完成（记为无证据）" }).click()
+  ]);
+  const afterA = openStore();
+  try { expect(afterA.listWorkOrders(workspaceId).find((item) => item.id === id)?.state).toBe("evidence_review"); }
+  finally { afterA.close(); }
+
+  // Device B, still believing the order is `ready_for_human`, starts it too — offline, so this queues
+  // instead of failing outright.
+  await pageB.locator(`#work-order-${id}`).getByRole("button", { name: "开始执行" }).click();
+  await expect(pageB.getByRole("status")).toContainText("已离线保存，联网后自动同步");
+
+  // Back online: `/` mounts `OfflineReplay`, which replays on load — the queued `start` hits a work
+  // order that can no longer be started (`EXECUTION_NOT_STARTABLE`, a 409) and conflicts, rather than
+  // either silently failing or corrupting the real state. Asserted on `/` itself, not by navigating on to
+  // `/offline`: that second navigation raced against the service worker's own `/offline` fallback routing
+  // (`apps/web/app/sw.ts`) and intermittently aborted — `OfflineReplay`'s banner already renders the same
+  // conflict count and title inline.
+  await deviceB.setOffline(false);
+  await pageB.goto("/");
+  await expect(pageB.getByText("1 条与其他设备冲突")).toBeVisible();
+  await expect(pageB.getByText("两台设备冲突测试")).toBeVisible();
+
+  await deviceB.close();
+});
+
+test("signing out deletes this browser's offline database for the workspace it was using", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-chrome");
+  await page.goto("/");
+  const workspaceId = await page.evaluate(() => localStorage.getItem("crossline.offline.workspaceId"));
+  expect(workspaceId).toBeTruthy();
+  // Prove the database actually exists first, so "it's gone" afterward is not vacuously true.
+  await page.evaluate((id) => new Promise<void>((resolve, reject) => {
+    const request = indexedDB.open(`crossline-offline-${id}`);
+    request.onsuccess = () => { request.result.close(); resolve(); };
+    request.onerror = () => reject(request.error);
+  }), workspaceId);
+
+  await page.getByRole("button", { name: "退出登录" }).click();
+  await expect(page).toHaveURL(/\/login/);
+
+  const databases = await page.evaluate(() => indexedDB.databases());
+  expect(databases.some((db) => db.name?.startsWith("crossline-offline-"))).toBe(false);
+  expect(await page.evaluate(() => localStorage.getItem("crossline.offline.workspaceId"))).toBeNull();
 });

@@ -5,20 +5,89 @@ const TEST_CTX = { principalId: "local-owner", workspaceId: "personal-crossline"
   identity: { provider: "credential" as const, issuer: "test", subject: "local-owner" },
   authMethod: "session" as const, requestId: "test-request" };
 vi.mock("../../../lib/access-guard", () => ({ resolveAccessContext: async () => ({ ctx: TEST_CTX }) }));
+
+const startWorkOrderExecution = vi.fn();
+const pauseWorkOrderExecution = vi.fn();
+const resumeWorkOrderExecution = vi.fn();
+const completeWorkOrderExecution = vi.fn();
 vi.mock("../../../lib/crossline", () => ({
-  addCapturedTaskWithId: vi.fn()
+  addCapturedTaskWithId: vi.fn(),
+  startWorkOrderExecution: (...args: unknown[]) => startWorkOrderExecution(...args),
+  pauseWorkOrderExecution: (...args: unknown[]) => pauseWorkOrderExecution(...args),
+  resumeWorkOrderExecution: (...args: unknown[]) => resumeWorkOrderExecution(...args),
+  completeWorkOrderExecution: (...args: unknown[]) => completeWorkOrderExecution(...args)
 }));
 
-test("the offline boundary rejects the removed completion shortcut", async () => {
+const post = async (body: Record<string, unknown>) => {
   const { POST } = await import("./route");
-  const response = await POST(new Request("http://local/api/commands", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      ownerId: "local-owner", workspaceId: "personal-crossline", clientCommandId: "c1",
-      clientSequence: 1, type: "task.complete", payload: { taskId: "missing" }, createdAt: "2026-09-15T00:00:00.000Z"
-    })
+  return POST(new Request("http://local/api/commands", {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body)
   }));
+};
+
+const envelope = (type: string, payload: Record<string, unknown>) => ({
+  ownerId: "local-owner", workspaceId: "personal-crossline", clientCommandId: "c1",
+  clientSequence: 1, type, payload, createdAt: "2026-09-15T00:00:00.000Z"
+});
+
+test("the offline boundary rejects the removed completion shortcut", async () => {
+  const response = await post(envelope("task.complete", { taskId: "missing" }));
   expect(response.status).toBe(400);
   await expect(response.json()).resolves.toEqual({ code: "COMMAND_TYPE_NOT_ALLOWED" });
+});
+
+test("work_order.start dispatches to the same function the online execution route uses", async () => {
+  startWorkOrderExecution.mockReturnValueOnce({ ok: true });
+  const response = await post(envelope("work_order.start", { workOrderId: "w1" }));
+  expect(response.status).toBe(200);
+  expect(startWorkOrderExecution).toHaveBeenCalledWith(TEST_CTX, "w1");
+});
+
+test("a work order that moved on under this command surfaces as a 409, not a generic failure", async () => {
+  startWorkOrderExecution.mockReturnValueOnce({ ok: false, code: "EXECUTION_NOT_STARTABLE" });
+  const response = await post(envelope("work_order.start", { workOrderId: "w1" }));
+  expect(response.status).toBe(409);
+  await expect(response.json()).resolves.toEqual({ code: "EXECUTION_NOT_STARTABLE" });
+});
+
+test("a missing work order is a 404, not a conflict", async () => {
+  startWorkOrderExecution.mockReturnValueOnce({ ok: false, code: "WORK_ORDER_NOT_FOUND" });
+  const response = await post(envelope("work_order.start", { workOrderId: "w1" }));
+  expect(response.status).toBe(404);
+});
+
+test("an id that could never have been issued here is refused before reaching the store", async () => {
+  const response = await post(envelope("work_order.start", { workOrderId: "../etc/passwd" }));
+  expect(response.status).toBe(404);
+  expect(startWorkOrderExecution).not.toHaveBeenCalled();
+});
+
+test("work_order.pause validates its reason the same way the online route does", async () => {
+  pauseWorkOrderExecution.mockReturnValueOnce({ ok: false, code: "INTERRUPTION_REASON_REQUIRED" });
+  const response = await post(envelope("work_order.pause", { workOrderId: "w1", reason: "" }));
+  expect(response.status).toBe(400);
+  expect(pauseWorkOrderExecution).toHaveBeenCalledWith(TEST_CTX, "w1", "");
+});
+
+test("work_order.resume dispatches with just a work order id", async () => {
+  resumeWorkOrderExecution.mockReturnValueOnce({ ok: true });
+  const response = await post(envelope("work_order.resume", { workOrderId: "w1" }));
+  expect(response.status).toBe(200);
+  expect(resumeWorkOrderExecution).toHaveBeenCalledWith(TEST_CTX, "w1");
+});
+
+test("work_order.complete rejects a malformed evidence claim before it ever reaches the store", async () => {
+  const response = await post(envelope("work_order.complete", { workOrderId: "w1", evidence: [{ kind: "guess", uri: "x", description: "y" }] }));
+  expect(response.status).toBe(400);
+  await expect(response.json()).resolves.toEqual({ code: "INVALID_EVIDENCE_CLAIM" });
+  expect(completeWorkOrderExecution).not.toHaveBeenCalled();
+});
+
+test("work_order.complete forwards well-formed evidence", async () => {
+  completeWorkOrderExecution.mockReturnValueOnce({ ok: true });
+  const response = await post(envelope("work_order.complete", {
+    workOrderId: "w1", evidence: [{ kind: "record", uri: "local://note", description: "结论记录" }]
+  }));
+  expect(response.status).toBe(200);
+  expect(completeWorkOrderExecution).toHaveBeenCalledWith(TEST_CTX, "w1", [{ kind: "record", uri: "local://note", description: "结论记录" }]);
 });

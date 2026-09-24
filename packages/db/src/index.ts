@@ -151,6 +151,17 @@ export type StoredWorkspace = { id: string; name: string; createdAt: string };
 export type StoredWorkspaceMember = {
   principalId: string; workspaceId: string; role: "viewer" | "member" | "owner"; createdAt: string;
 };
+export type StoredDeviceLease = {
+  id: string; principalId: string; workspaceId: string; deviceId: string;
+  issuedAt: string; expiresAt: string; revokedAt?: string;
+};
+
+/** Reads the lease's own timestamps to judge whether it is currently usable — no I/O, so a caller (a
+ * future command-authorization check, an admin "devices" list) can apply it without a fresh store read. */
+export function isDeviceLeaseValid(lease: StoredDeviceLease, now: Date): boolean {
+  if (lease.revokedAt) return false;
+  return now.getTime() < Date.parse(lease.expiresAt);
+}
 export type StoredAuditEvent = {
   id: string; principalId: string; workspaceId: string; role: string; authMethod: string;
   requestId: string; idempotencyKey?: string;
@@ -1444,6 +1455,41 @@ export class CrosslineStore {
       principalId: row.principal_id!, workspaceId: row.workspace_id!,
       role: row.role as StoredWorkspaceMember["role"], createdAt: row.created_at!
     };
+  }
+
+  /**
+   * One lease per `(workspace, device)` — re-issuing (the offline workbench renews on every successful
+   * sync) replaces the existing row rather than accumulating one per login, which is what the table's
+   * own `UNIQUE(workspace_id, device_id)` constraint already enforces at the schema level.
+   */
+  issueDeviceLease(lease: { id: string; principalId: string; workspaceId: string; deviceId: string;
+    issuedAt: string; expiresAt: string }): StoredDeviceLease {
+    this.#db.prepare(`
+      INSERT INTO device_leases (id, principal_id, workspace_id, device_id, issued_at, expires_at, revoked_at)
+      VALUES (?, ?, ?, ?, ?, ?, NULL)
+      ON CONFLICT(workspace_id, device_id) DO UPDATE SET
+        id = excluded.id, principal_id = excluded.principal_id,
+        issued_at = excluded.issued_at, expires_at = excluded.expires_at, revoked_at = NULL
+    `).run(lease.id, lease.principalId, lease.workspaceId, lease.deviceId, lease.issuedAt, lease.expiresAt);
+    return { ...lease };
+  }
+
+  getDeviceLease(workspaceId: string, deviceId: string): StoredDeviceLease | undefined {
+    const row = this.#db.prepare(
+      "SELECT * FROM device_leases WHERE workspace_id = ? AND device_id = ?"
+    ).get(workspaceId, deviceId) as Record<string, string | null> | undefined;
+    if (!row) return undefined;
+    return {
+      id: row.id!, principalId: row.principal_id!, workspaceId: row.workspace_id!, deviceId: row.device_id!,
+      issuedAt: row.issued_at!, expiresAt: row.expires_at!, ...(row.revoked_at ? { revokedAt: row.revoked_at } : {})
+    };
+  }
+
+  revokeDeviceLease(workspaceId: string, deviceId: string): { changed: boolean } {
+    const result = this.#db.prepare(
+      "UPDATE device_leases SET revoked_at = ? WHERE workspace_id = ? AND device_id = ? AND revoked_at IS NULL"
+    ).run(new Date().toISOString(), workspaceId, deviceId);
+    return { changed: result.changes > 0 };
   }
 
   listWorkspaces(): StoredWorkspace[] {

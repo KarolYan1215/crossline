@@ -1,6 +1,13 @@
 "use client";
 import { useState } from "react";
 import { EnergyProbe } from "../energy-probe";
+import { createCommand, enqueue, nextSequence, type OfflineCommandType } from "../offline-queue";
+
+/** The only four actions the offline outbox can carry — everything else (approve, materials retry/ready,
+ * archive) stays online-only, matching the plan's stated scope for the offline workbench. */
+const OFFLINE_ACTION_TYPES: Record<string, OfflineCommandType> = {
+  start: "work_order.start", pause: "work_order.pause", resume: "work_order.resume", complete: "work_order.complete"
+};
 
 const codes: Record<string, string> = {
   MATERIALS_PREPARING: "已转入材料准备。准备完成后即可开始人工执行。",
@@ -14,7 +21,9 @@ const codes: Record<string, string> = {
   WORK_ORDER_ALREADY_ACCEPTED: "已验收的作业不能丢弃；如需退回请到复盘页撤销验收。"
 };
 
-export function ExecutionActions({ workOrderId, state, paused }: { workOrderId: string; state: string; paused: boolean }) {
+export function ExecutionActions({ workOrderId, intent, state, paused, ownerId, workspaceId }: {
+  workOrderId: string; intent: string; state: string; paused: boolean; ownerId: string; workspaceId: string;
+}) {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [reason, setReason] = useState("");
@@ -23,9 +32,34 @@ export function ExecutionActions({ workOrderId, state, paused }: { workOrderId: 
   const [uri, setUri] = useState("");
   const [description, setDescription] = useState("");
 
+  // Offline is queued, not just reported: the person's decision to start, pause, resume or complete
+  // their own work order must survive a dead connection the same way a capture already does, and the
+  // server already accepts these four as `work_order.*` commands (`apps/web/app/api/commands/route.ts`).
+  // Everything else here (approve, materials retry/ready, archive) is deliberately online-only.
+  const queueOffline = async (action: string, body: Record<string, unknown>) => {
+    const type = OFFLINE_ACTION_TYPES[action];
+    if (!type) return false;
+    // `title` matches the field name a capture command already uses for display, so the offline/conflict
+    // list (`apps/web/app/offline/dead-letters.tsx`) shows the work order's own intent instead of a bare
+    // command type string, with no extra display logic needed there.
+    const payload = action === "complete"
+      ? { workOrderId, title: intent, evidence: body.evidence }
+      : action === "pause" ? { workOrderId, title: intent, reason: body.reason } : { workOrderId, title: intent };
+    const command = createCommand(ownerId, workspaceId, await nextSequence(workspaceId), type, payload);
+    try {
+      await enqueue(workspaceId, command);
+      setStatus("已离线保存，联网后自动同步");
+      return true;
+    } catch { return false; }
+  };
+
   const send = async (body: Record<string, unknown>, endpoint = "execution") => {
     setBusy(true);
     setStatus("");
+    const action = String(body.action ?? "");
+    if (endpoint === "execution" && !navigator.onLine) {
+      if (await queueOffline(action, body)) { setBusy(false); return; }
+    }
     try {
       const response = await fetch(`/api/work-orders/${encodeURIComponent(workOrderId)}/${endpoint}`, {
         method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body)
@@ -33,7 +67,10 @@ export function ExecutionActions({ workOrderId, state, paused }: { workOrderId: 
       if (response.ok) { location.reload(); return; }
       const failure = await response.json().catch(() => ({})) as { code?: string };
       setStatus(codes[failure.code ?? ""] ?? "操作未生效，请刷新查看真实状态。");
-    } catch { setStatus("连接中断；请刷新查看真实状态。"); }
+    } catch {
+      if (endpoint === "execution" && await queueOffline(action, body)) { setBusy(false); return; }
+      setStatus("连接中断；请刷新查看真实状态。");
+    }
     setBusy(false);
   };
 
