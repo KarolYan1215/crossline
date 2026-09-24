@@ -1,11 +1,13 @@
 <#
-  Decrypts a Crossline backup and rebuilds a working database from it.
+  Decrypts a Crossline backup and rebuilds working databases from it — the main ledger, and (if the
+  backup carries one — stage six) `auth.db`, Better Auth's own SQLite file.
 
   Decrypting and unzipping only proves the file is readable. The drill this script performs is the
-  one that matters: rebuild a real SQLite ledger from the snapshot and read every table back out.
+  one that matters: rebuild a real SQLite ledger from the snapshot and read every table back out, and
+  separately read `auth.db`'s own tables back out through a fresh connection.
 
-  The live ledger is never touched. The rebuild always lands on a new file under -OutputDirectory,
-  and replacing data\crossline.db with it stays a deliberate manual act.
+  The live ledger and the live `auth.db` are never touched. Every rebuild lands on a new file under
+  -OutputDirectory, and replacing data\crossline.db or data\auth.db with it stays a deliberate manual act.
 #>
 param(
   [Parameter(Mandatory = $true)][string]$BackupPath,
@@ -39,6 +41,10 @@ Remove-Item -LiteralPath $zip -Force
 $json = Get-ChildItem -LiteralPath $OutputDirectory -Filter 'crossline-*.json' |
   Sort-Object LastWriteTime -Descending | Select-Object -First 1
 if ($null -eq $json) { throw 'Backup contained no crossline-*.json snapshot.' }
+# Present only for a backup taken after a real login had completed — `backup-crossline.ps1` skips it
+# entirely on a fresh install with no `auth.db` yet, which is not itself a restore failure.
+$authDb = Get-ChildItem -LiteralPath $OutputDirectory -Filter 'auth-*.db' -ErrorAction SilentlyContinue |
+  Sort-Object LastWriteTime -Descending | Select-Object -First 1
 
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $targetDb = Join-Path $OutputDirectory "crossline-restored-$stamp.db"
@@ -50,6 +56,19 @@ $targetDb = Join-Path $OutputDirectory "crossline-restored-$stamp.db"
 & { $ErrorActionPreference = 'Continue'; & pnpm --dir $repo restore -- $json.FullName $targetDb }
 if ($LASTEXITCODE -ne 0) { throw 'Restore verification failed; the backup did not rebuild a readable ledger.' }
 
+$authDbTarget = $null
+$authDbCounts = $null
+if ($null -ne $authDb) {
+  $authDbTarget = Join-Path $OutputDirectory "auth-restored-$stamp.db"
+  Copy-Item -LiteralPath $authDb.FullName -Destination $authDbTarget
+  # Reading every table back out through better-sqlite3, the same drill the ledger restore does above —
+  # decrypting and unzipping only proves the file is readable, not that a working database comes out of it.
+  $countsOutput = & { $ErrorActionPreference = 'Continue'; & pnpm --dir $repo exec tsx scripts/read-auth-db-counts.ts $authDbTarget }
+  if ($LASTEXITCODE -ne 0) { throw 'auth.db restore read-back failed.' }
+  $authDbCounts = ($countsOutput | Select-Object -Last 1) | ConvertFrom-Json
+  Remove-Item -LiteralPath $authDb.FullName -Force
+}
+
 # The backup script goes to the trouble of shredding its plaintext temp file; leaving the decrypted
 # snapshot behind here would quietly undo that. The rebuilt database is the artifact worth keeping.
 Remove-Item -LiteralPath $json.FullName -Force
@@ -59,4 +78,7 @@ Write-Output ([pscustomobject]@{
   RestoredDatabase    = $targetDb
   Verified            = $true
   LiveLedgerUntouched = $true
+  AuthDbRestored      = $null -ne $authDbTarget
+  AuthDbPath          = $authDbTarget
+  AuthDbCounts        = $authDbCounts
 })

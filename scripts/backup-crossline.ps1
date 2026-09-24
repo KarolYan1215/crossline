@@ -1,13 +1,20 @@
 param(
   [string]$RepoRoot = (Split-Path -Parent $PSScriptRoot),
-  [string]$BackupDirectory = (Join-Path (Split-Path -Parent $PSScriptRoot) 'backups')
+  [string]$BackupDirectory = (Join-Path (Split-Path -Parent $PSScriptRoot) 'backups'),
+  # Matches `apps/web/lib/auth.ts`'s own default (`CROSSLINE_DATA_DIR`, else `<repo>/data`) — both
+  # databases live side by side, so one data directory locates both.
+  [string]$DataDirectory
 )
 
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path -LiteralPath $RepoRoot).Path
+if ([string]::IsNullOrWhiteSpace($DataDirectory)) {
+  $DataDirectory = if ($env:CROSSLINE_DATA_DIR) { $env:CROSSLINE_DATA_DIR } else { Join-Path $repo 'data' }
+}
 New-Item -ItemType Directory -Force -Path $BackupDirectory | Out-Null
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $json = Join-Path $BackupDirectory "crossline-$stamp.json"
+$authDbCopy = Join-Path $BackupDirectory "auth-$stamp.db"
 $zip = Join-Path $BackupDirectory "crossline-$stamp.zip"
 $encrypted = Join-Path $BackupDirectory "crossline-$stamp.crossline"
 
@@ -25,7 +32,22 @@ try {
   # unattended. The exit code is the authority here, so stderr must not be allowed to pre-empt it.
   & { $ErrorActionPreference = 'Continue'; & pnpm --dir $repo export -- $json }
   if ($LASTEXITCODE -ne 0) { throw 'Crossline JSON export failed.' }
-  Compress-Archive -LiteralPath $json -DestinationPath $zip -CompressionLevel Optimal
+
+  # `auth.db` (Better Auth's own SQLite file — user/session/account/verification) has no export/import
+  # concept of its own, unlike the main ledger; a backup that carries only the ledger restores real
+  # workspace data with no way back into any account. Missing entirely on a fresh install that has never
+  # completed a real login, which is not a backup failure.
+  $authDbSource = Join-Path $DataDirectory 'auth.db'
+  $authDbIncluded = $false
+  if (Test-Path -LiteralPath $authDbSource) {
+    & { $ErrorActionPreference = 'Continue'; & pnpm --dir $repo exec tsx scripts/checkpoint-auth-db.ts $authDbSource $authDbCopy }
+    if ($LASTEXITCODE -ne 0) { throw 'auth.db checkpoint failed.' }
+    $authDbIncluded = $true
+  }
+
+  $toArchive = @($json)
+  if ($authDbIncluded) { $toArchive += $authDbCopy }
+  Compress-Archive -LiteralPath $toArchive -DestinationPath $zip -CompressionLevel Optimal
 
   Add-Type -AssemblyName System.Security
   $plainBytes = [System.IO.File]::ReadAllBytes($zip)
@@ -46,4 +68,5 @@ try {
   Write-Output ([pscustomobject]@{ Backup = $encrypted; Sha256 = $sourceHash; Verified = $true })
 } finally {
   Remove-Item -LiteralPath $json, $zip -Force -ErrorAction SilentlyContinue
+  if (Test-Path -LiteralPath $authDbCopy) { Remove-Item -LiteralPath $authDbCopy -Force -ErrorAction SilentlyContinue }
 }

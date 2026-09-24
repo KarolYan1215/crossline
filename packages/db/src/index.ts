@@ -162,6 +162,18 @@ export function isDeviceLeaseValid(lease: StoredDeviceLease, now: Date): boolean
   if (lease.revokedAt) return false;
   return now.getTime() < Date.parse(lease.expiresAt);
 }
+
+/**
+ * Records that the owner, while already signed in through a normal session, confirmed a specific
+ * Tailscale login as really them. `nodeKey` is optional — `tailscale serve` forwards only
+ * `Tailscale-User-Login`/`-Name`/`-Profile-Pic` to a proxied backend, no node identifier, so there is
+ * nothing honest to put there from an HTTP header alone. This binding is a recorded fact, not an
+ * authentication mechanism: nothing here bypasses or shortcuts Better Auth's own session check, by design.
+ */
+export type StoredTailscaleBinding = {
+  id: string; principalId: string; workspaceId: string; tailscaleLogin: string;
+  nodeKey?: string; createdAt: string;
+};
 export type StoredAuditEvent = {
   id: string; principalId: string; workspaceId: string; role: string; authMethod: string;
   requestId: string; idempotencyKey?: string;
@@ -298,8 +310,8 @@ export class CrosslineStore {
       CREATE INDEX IF NOT EXISTS workspace_members_workspace ON workspace_members(workspace_id);
       CREATE TABLE IF NOT EXISTS tailscale_bindings (
         id TEXT PRIMARY KEY, principal_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
-        tailscale_login TEXT NOT NULL, node_key TEXT NOT NULL, created_at TEXT NOT NULL,
-        UNIQUE(workspace_id, tailscale_login, node_key)
+        tailscale_login TEXT NOT NULL, node_key TEXT, created_at TEXT NOT NULL,
+        UNIQUE(workspace_id, tailscale_login)
       );
       CREATE TABLE IF NOT EXISTS device_leases (
         id TEXT PRIMARY KEY, principal_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
@@ -426,6 +438,30 @@ export class CrosslineStore {
           if (rows > 0) throw new Error("MIGRATION_RETIRED_TABLE_NOT_EMPTY");
           this.#db.exec(`DROP TABLE ${table}`);
         }
+      } },
+
+      // `node_key TEXT NOT NULL` was written against a guess about what `tailscale serve` forwards to a
+      // proxied backend. Verified against Tailscale's own docs before wiring up stage six's "trust this
+      // Tailscale identity" binding: Serve forwards exactly three identity headers on tailnet traffic —
+      // `Tailscale-User-Login`, `Tailscale-User-Name`, `Tailscale-User-Profile-Pic` — and no node
+      // identifier at all. A column the app can never honestly populate is worse than one that admits it
+      // does not have the value; this table has never been written to (`tailscale_bindings` is on the
+      // retired-table-emptiness check list precisely because nothing has used it yet), so the rebuild
+      // carries zero rows and the uniqueness constraint narrows to `(workspace_id, tailscale_login)` —
+      // one binding per Tailscale account per workspace, since there is no node id left to distinguish by.
+      { version: 6, up: () => {
+        if (!has("tailscale_bindings", "node_key") || this.#columnIsNotNull("tailscale_bindings", "node_key")) {
+          const rows = (this.#db.prepare("SELECT COUNT(*) AS count FROM tailscale_bindings").get() as { count: number }).count;
+          if (rows > 0) throw new Error("MIGRATION_TAILSCALE_BINDINGS_NOT_EMPTY");
+          this.#db.exec(`
+            DROP TABLE tailscale_bindings;
+            CREATE TABLE tailscale_bindings (
+              id TEXT PRIMARY KEY, principal_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
+              tailscale_login TEXT NOT NULL, node_key TEXT, created_at TEXT NOT NULL,
+              UNIQUE(workspace_id, tailscale_login)
+            );
+          `);
+        }
       } }
     ];
 
@@ -448,6 +484,11 @@ export class CrosslineStore {
 
   #hasTable(name: string): boolean {
     return Boolean(this.#db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name));
+  }
+
+  #columnIsNotNull(table: string, column: string): boolean {
+    const info = this.#db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string; notnull: number }>;
+    return info.some((item) => item.name === column && item.notnull === 1);
   }
 
   #migrateLegacyTasks(): void {
@@ -1489,6 +1530,38 @@ export class CrosslineStore {
     const result = this.#db.prepare(
       "UPDATE device_leases SET revoked_at = ? WHERE workspace_id = ? AND device_id = ? AND revoked_at IS NULL"
     ).run(new Date().toISOString(), workspaceId, deviceId);
+    return { changed: result.changes > 0 };
+  }
+
+  /** One binding per `(workspace, tailscaleLogin)` — clicking "信任这个 Tailscale 身份" again for the same
+   * login updates the existing row (e.g. a later request happened to carry `nodeKey` where an earlier
+   * one could not) rather than accumulating duplicates. */
+  saveTailscaleBinding(binding: { id: string; principalId: string; workspaceId: string; tailscaleLogin: string;
+    nodeKey?: string; createdAt: string }): StoredTailscaleBinding {
+    this.#db.prepare(`
+      INSERT INTO tailscale_bindings (id, principal_id, workspace_id, tailscale_login, node_key, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(workspace_id, tailscale_login) DO UPDATE SET
+        id = excluded.id, principal_id = excluded.principal_id, node_key = excluded.node_key
+    `).run(binding.id, binding.principalId, binding.workspaceId, binding.tailscaleLogin, binding.nodeKey ?? null, binding.createdAt);
+    return { ...binding };
+  }
+
+  listTailscaleBindings(workspaceId: string): StoredTailscaleBinding[] {
+    const rows = this.#db.prepare(
+      "SELECT * FROM tailscale_bindings WHERE workspace_id = ? ORDER BY created_at"
+    ).all(workspaceId) as Array<Record<string, string | null>>;
+    return rows.map((row) => ({
+      id: row.id!, principalId: row.principal_id!, workspaceId: row.workspace_id!,
+      tailscaleLogin: row.tailscale_login!, createdAt: row.created_at!,
+      ...(row.node_key ? { nodeKey: row.node_key } : {})
+    }));
+  }
+
+  revokeTailscaleBinding(workspaceId: string, tailscaleLogin: string): { changed: boolean } {
+    const result = this.#db.prepare(
+      "DELETE FROM tailscale_bindings WHERE workspace_id = ? AND tailscale_login = ?"
+    ).run(workspaceId, tailscaleLogin);
     return { changed: result.changes > 0 };
   }
 
