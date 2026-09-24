@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { saveMilestoneEdit, type MilestoneInput } from "../../../lib/crossline";
+import { resolveAccessContext } from "../../../lib/access-guard";
 import { isCrossSiteWrite } from "../../../lib/same-origin";
 import type { SuccessCriterion } from "@crossline/core";
 
@@ -27,6 +28,8 @@ function readCriteria(value: unknown): SuccessCriterion[] | undefined {
 
 export async function POST(request: Request) {
   if (isCrossSiteWrite(request)) return NextResponse.json({ ok: false, code: "REQUEST_FORBIDDEN" }, { status: 403 });
+  const access = await resolveAccessContext(request);
+  if ("response" in access) return access.response;
   let body: unknown;
   try { body = await request.json(); } catch { return NextResponse.json({ ok: false, code: "INVALID_JSON" }, { status: 400 }); }
   const input = (body ?? {}) as Record<string, unknown>;
@@ -47,7 +50,7 @@ export async function POST(request: Request) {
     status,
     successCriteria: criteria
   };
-  const result = saveMilestoneEdit(payload);
+  const result = saveMilestoneEdit(access.ctx, payload);
   if (!result.ok) return NextResponse.json(result, { status: result.code === "MILESTONE_NOT_FOUND" ? 404 : 400 });
   return NextResponse.json(result);
 }

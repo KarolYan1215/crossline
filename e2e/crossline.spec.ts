@@ -1,8 +1,46 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import path from "node:path";
 // Relative, not @crossline/db: the repo root is not a workspace package and has no such dependency.
 import { CrosslineStore } from "../packages/db/src/index.js";
 import { DEFAULT_AVAILABILITY } from "../packages/core/src/index.js";
+
+function openStore(): CrosslineStore {
+  return new CrosslineStore(path.join(process.env.CROSSLINE_E2E_DATA_DIR!, "crossline.db"));
+}
+
+/**
+ * `global-setup.ts` signs in the one e2e test account once per run, and its first authenticated request
+ * is what creates that account's principal+workspace row (`requireAccessContext`'s
+ * `createPrincipalWithWorkspace`) — there is no hardcoded workspace id to read any more, real accounts
+ * get a real generated one. A fresh per-run database has exactly one, so the first is the right one.
+ */
+function realWorkspaceId(store: CrosslineStore): string {
+  const workspace = store.listWorkspaces()[0];
+  if (!workspace) throw new Error("No workspace exists yet — did global-setup.ts's sign-in run?");
+  return workspace.id;
+}
+
+type BrowserFetchResult = { ok: boolean; status: number; body: string };
+
+/**
+ * Calls the app's own API from inside the page — `page.evaluate`'s `fetch`, not Playwright's
+ * `APIRequestContext` (neither the standalone `request` fixture nor `page.request`). Better Auth's
+ * session cookie is `Secure`, and only a real browser's network stack applies Chrome's loopback
+ * exception that still sends a `Secure` cookie over plain `http://127.0.0.1` — `APIRequestContext` is
+ * Playwright's own separate HTTP client and does not, so every call through it came back 401 regardless
+ * of a valid session existing. `page.goto()` navigations were never affected by this; only fetches
+ * issued from outside the browser were.
+ */
+async function apiFetch(page: Page, method: string, url: string, data?: unknown,
+  headers?: Record<string, string>): Promise<BrowserFetchResult> {
+  return page.evaluate(async ({ method, url, data, headers }) => {
+    const response = await fetch(url, {
+      method, headers: { "content-type": "application/json", ...headers },
+      ...(data !== undefined ? { body: JSON.stringify(data) } : {})
+    });
+    return { ok: response.ok, status: response.status, body: await response.text() };
+  }, { method, url, data, headers });
+}
 
 /**
  * Two pending diffs on the starter plan, written the way a calendar sync writes them.
@@ -13,21 +51,21 @@ import { DEFAULT_AVAILABILITY } from "../packages/core/src/index.js";
  * needs a precondition should create it: this opens the same SQLite file the server has open (WAL,
  * two writers, which is how this app already runs) rather than putting demo rows back in production.
  */
-async function seedPendingChanges(baseURL: string): Promise<void> {
+async function seedPendingChanges(page: Page): Promise<void> {
   // Touch a page first: the plan version is created by the server's own first-run seeding, and a
   // change row cannot reference a plan that does not exist yet.
-  await fetch(`${baseURL}/plan`);
-  const store = new CrosslineStore(path.join(process.env.CROSSLINE_E2E_DATA_DIR!, "crossline.db"));
+  await page.goto("/plan");
+  const store = openStore();
   try {
-    const workspaceId = "personal-crossline";
-    if (store.listPlanChanges("personal-plan-v1").length > 0) return;
+    const workspaceId = realWorkspaceId(store);
+    if (store.listPlanChanges(workspaceId, "personal-plan-v1").length > 0) return;
     const event = store.appendEvent({
-      ownerId: "local-owner", workspaceId, idempotencyKey: "e2e:plan-diff",
+      ownerId: "e2e-tester", workspaceId, idempotencyKey: "e2e:plan-diff",
       type: "calendar.synced", entityId: "personal-plan-v1", payload: { source: "e2e" }
     });
     for (const [index, explanation] of ["把写作挪到上午的高精力段", "为下午的会议让出一小时"].entries()) {
       store.savePlanChange({
-        id: `e2e-change-${index + 1}`, ownerId: "local-owner", workspaceId,
+        id: `e2e-change-${index + 1}`, ownerId: "e2e-tester", workspaceId,
         planVersionId: "personal-plan-v1", kind: "move", triggerEventId: event.eventId,
         explanation, status: "pending"
       });
@@ -35,20 +73,18 @@ async function seedPendingChanges(baseURL: string): Promise<void> {
   } finally { store.close(); }
 }
 
-async function ensureScheduleSetup(baseURL: string): Promise<void> {
-  await fetch(`${baseURL}/plan`);
-  const result = await fetch(`${baseURL}/api/settings/schedule`, { method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ timeZone: "America/Chicago", mode: "buffered",
-      windows: DEFAULT_AVAILABILITY, importance: {
-        "research-starter": "important", "startup-starter": "important",
-        "media-starter": "important", "investment-starter": "ordinary"
-      } }) });
-  expect(result.ok).toBe(true);
+async function ensureScheduleSetup(page: Page): Promise<void> {
+  await page.goto("/plan");
+  const result = await apiFetch(page, "POST", "/api/settings/schedule", { timeZone: "America/Chicago", mode: "buffered",
+    windows: DEFAULT_AVAILABILITY, importance: {
+      "research-starter": "important", "startup-starter": "important",
+      "media-starter": "important", "investment-starter": "ordinary"
+    } });
+  if (!result.ok) throw new Error(`schedule setup failed: ${result.status} ${result.body}`);
 }
 
-test.beforeEach(async ({ baseURL }, testInfo) => {
-  if (testInfo.project.name === "desktop-chrome") await ensureScheduleSetup(baseURL!);
+test.beforeEach(async ({ page }, testInfo) => {
+  if (testInfo.project.name === "desktop-chrome") await ensureScheduleSetup(page);
 });
 
 
@@ -63,9 +99,9 @@ test("Today keeps capture semantic-only and health outside identity navigation",
   if (testInfo.project.name === "desktop-chrome") await expect(page).toHaveScreenshot("today-paper-grid.png", { fullPage: true });
 });
 
-test("Plan exposes B/C/A over one version and workflow redirects", async ({ page, baseURL }, testInfo) => {
+test("Plan exposes B/C/A over one version and workflow redirects", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-chrome");
-  await seedPendingChanges(baseURL!);
+  await seedPendingChanges(page);
   await page.goto("/plan");
   const plan = page.locator("[data-plan-version]");
   await expect(plan).toHaveAttribute("data-plan-version", "personal-plan-v1");
@@ -101,12 +137,12 @@ test("editing availability re-runs the scheduler instead of only storing a prefe
 
   // Put it back: these tests share one ledger, and a crippled week would silently change what every
   // later assertion is looking at.
-  await page.request.post("/api/settings/availability", { data: { windows: DEFAULT_AVAILABILITY } });
+  await apiFetch(page, "POST", "/api/settings/availability", { windows: DEFAULT_AVAILABILITY });
 });
 
-test("Plan approval is confirmed and persisted", async ({ page, baseURL }, testInfo) => {
+test("Plan approval is confirmed and persisted", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-chrome");
-  await seedPendingChanges(baseURL!);
+  await seedPendingChanges(page);
   await page.goto("/plan");
   await page.getByRole("tab", { name: "C · 计划差异" }).click();
   await page.getByRole("button", { name: "批准本批变更" }).click();
@@ -124,34 +160,34 @@ test("Plan approval is confirmed and persisted", async ({ page, baseURL }, testI
   await expect(page.locator(".change-ledger article span").filter({ hasText: "已批准" })).toHaveCount(2);
 });
 
-test("energy check keeps self report only and rejects the removed camera path", async ({ page, request }, testInfo) => {
+test("energy check keeps self report only and rejects the removed camera path", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-chrome");
   await page.goto("/");
   await expect(page.getByRole("button", { name: "运行十二秒本地摄像头代理采样" })).toHaveCount(0);
   const submitted = page.waitForResponse((response) => response.url().endsWith("/api/energy-observations") && response.request().method() === "POST");
   await page.getByRole("button", { name: "记录中精力" }).click();
   expect((await submitted).ok()).toBe(true);
-  const store = new CrosslineStore(path.join(process.env.CROSSLINE_E2E_DATA_DIR!, "crossline.db"));
-  try { expect(store.listEnergyObservations("personal-crossline").some((item) => item.level === "medium")).toBe(true); }
+  // The dashboard reloads itself after a successful submission to reflect the new energy reading —
+  // `apiFetch` below runs `page.evaluate` in that page's JS context, which a reload mid-flight destroys.
+  await page.waitForLoadState("networkidle");
+  const store = openStore();
+  try { expect(store.listEnergyObservations(realWorkspaceId(store)).some((item) => item.level === "medium")).toBe(true); }
   finally { store.close(); }
-  const cameraRejected = await request.post("/api/energy-observations", {
-    data: { source: "camera_proxy", level: "unclassified", confidence: "low", aggregate: {} }
-  });
-  expect(cameraRejected.status()).toBe(400);
-  expect(await cameraRejected.json()).toMatchObject({ code: "CAMERA_ENERGY_PATH_REMOVED" });
-  const rawRejected = await request.post("/api/energy-observations", {
-    data: { source: "self_report", level: "medium", confidence: "high", aggregate: {}, frame: "data:image/jpeg;base64,forbidden" }
-  });
-  expect(rawRejected.status()).toBe(400);
-  expect(await rawRejected.json()).toMatchObject({ code: "RAW_MEDIA_OR_UNKNOWN_FIELD_FORBIDDEN" });
-  const blinkRejected = await request.post("/api/energy-observations", {
-    data: { source: "self_report", level: "medium", confidence: "high", aggregate: { meanBlinkProxy: 0.1 } }
-  });
-  expect(blinkRejected.status()).toBe(400);
-  expect(await blinkRejected.json()).toMatchObject({ code: "AGGREGATE_FEATURES_ONLY" });
+  const cameraRejected = await apiFetch(page, "POST", "/api/energy-observations",
+    { source: "camera_proxy", level: "unclassified", confidence: "low", aggregate: {} });
+  expect(cameraRejected.status).toBe(400);
+  expect(JSON.parse(cameraRejected.body)).toMatchObject({ code: "CAMERA_ENERGY_PATH_REMOVED" });
+  const rawRejected = await apiFetch(page, "POST", "/api/energy-observations",
+    { source: "self_report", level: "medium", confidence: "high", aggregate: {}, frame: "data:image/jpeg;base64,forbidden" });
+  expect(rawRejected.status).toBe(400);
+  expect(JSON.parse(rawRejected.body)).toMatchObject({ code: "RAW_MEDIA_OR_UNKNOWN_FIELD_FORBIDDEN" });
+  const blinkRejected = await apiFetch(page, "POST", "/api/energy-observations",
+    { source: "self_report", level: "medium", confidence: "high", aggregate: { meanBlinkProxy: 0.1 } });
+  expect(blinkRejected.status).toBe(400);
+  expect(JSON.parse(blinkRejected.body)).toMatchObject({ code: "AGGREGATE_FEATURES_ONLY" });
 });
 
-test("goal confirmation and permission-mode rejection persist through the real pages", async ({ page, request }, testInfo) => {
+test("goal confirmation and permission-mode rejection persist through the real pages", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-chrome");
   await page.goto("/milestones");
   const goal = page.locator(".milestone-admin-list > li").filter({ hasText: "稳定推进当前实验与论文" });
@@ -164,8 +200,8 @@ test("goal confirmation and permission-mode rejection persist through the real p
   await page.goto("/plan");
   await expect(page.getByText("已确认硬截止 2026-09-30")).toBeVisible();
 
-  const store = new CrosslineStore(path.join(process.env.CROSSLINE_E2E_DATA_DIR!, "crossline.db"));
-  try { store.appendEvent({ ownerId: "local-owner", workspaceId: "personal-crossline",
+  const store = openStore();
+  try { store.appendEvent({ ownerId: "e2e-tester", workspaceId: realWorkspaceId(store),
     idempotencyKey: "e2e:insight-candidate", type: "flywheel.finding", entityId: "research-starter",
     payload: { milestoneId: "research-starter", summary: "可复用的实验记录模板",
       sourceUrl: "https://example.org/source", sourceTitle: "记录模板", retrievedAt: "2026-09-14T00:00:00Z",
@@ -179,10 +215,15 @@ test("goal confirmation and permission-mode rejection persist through the real p
   await expect(insight).toBeVisible();
   await insight.getByRole("button", { name: "拒绝" }).click();
   await expect(page.locator(".permission-mode-panel li").filter({ hasText: "可复用的实验记录模板" })).toHaveCount(0);
-  const rejected = new CrosslineStore(path.join(process.env.CROSSLINE_E2E_DATA_DIR!, "crossline.db"));
-  try { expect(rejected.listEvents("personal-crossline", { type: "insight.rejected" })).toHaveLength(1); }
+  const rejected = openStore();
+  try { expect(rejected.listEvents(realWorkspaceId(rejected), { type: "insight.rejected" })).toHaveLength(1); }
   finally { rejected.close(); }
-  const forbidden = await request.post("/api/goals/research-starter", {
+  // Deliberately `page.request`, not `apiFetch`: a forged `Origin` header is exactly what this test
+  // needs to send, and the Fetch spec makes `Origin` a forbidden header a page's own `fetch()` can never
+  // override — only Playwright's separate `APIRequestContext` can set it. `isCrossSiteWrite` runs before
+  // the session check, so the missing auth cookie this context still has (see `apiFetch`'s doc comment)
+  // never even matters here: the forged Origin is refused first.
+  const forbidden = await page.request.post("/api/goals/research-starter", {
     headers: { Origin: "https://attacker.example" },
     data: { importance: "ordinary", confirmedDeadline: null }
   });

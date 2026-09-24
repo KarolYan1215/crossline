@@ -9,13 +9,21 @@ const node = process.execPath;
 const next = path.join(webRoot, "node_modules", "next", "dist", "bin", "next");
 const playwright = path.join(repoRoot, "node_modules", "@playwright", "test", "cli.js");
 const dataDir = mkdtempSync(path.join(tmpdir(), "crossline-e2e-"));
+// Mirrors the same `path.join(e2eDataDir, "mailbox")` computation `playwright.config.ts` does from
+// `CROSSLINE_E2E_DATA_DIR` — this script owns the actual `next start` process on Windows (bypassing
+// Playwright's own `webServer`, see below), so it has to set the auth env vars on that process itself
+// rather than through the `webServer.env` block, which never runs here.
+const authMailboxDir = path.join(dataDir, "mailbox");
 const env = {
   ...process.env,
   CROSSLINE_DATA_DIR: dataDir,
   CROSSLINE_E2E_DATA_DIR: dataDir,
   CROSSLINE_E2E_EXTERNAL_SERVER: "1",
   CROSSLINE_NEXT_DIR: ".next-e2e",
-  CROSSLINE_FIXED_NOW: "2026-09-14T16:45:00.000Z"
+  CROSSLINE_FIXED_NOW: "2026-09-14T16:45:00.000Z",
+  BETTER_AUTH_SECRET: "e2e-test-secret-not-for-production-use",
+  CROSSLINE_WEB_BASE_URL: "http://127.0.0.1:3310",
+  CROSSLINE_AUTH_TEST_MAILBOX_DIR: authMailboxDir
 };
 
 function run(command: string, args: string[], cwd: string): void {

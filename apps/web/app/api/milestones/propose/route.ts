@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requestCodexSupervisor, CodexSupervisorRequestError } from "../../../../lib/codex-runtime";
+import { resolveAccessContext } from "../../../../lib/access-guard";
 import { isCrossSiteWrite } from "../../../../lib/same-origin";
 
 /**
@@ -10,6 +11,8 @@ import { isCrossSiteWrite } from "../../../../lib/same-origin";
  */
 export async function POST(request: Request) {
   if (isCrossSiteWrite(request)) return NextResponse.json({ ok: false, blocker: { code: "REQUEST_FORBIDDEN", message: "Use the local Web API" } }, { status: 403 });
+  const access = await resolveAccessContext(request);
+  if ("response" in access) return access.response;
   let body: unknown = {};
   try { body = await request.json(); } catch { /* an empty request means "look at the whole picture" */ }
   const ask = (body ?? {}) as { request?: unknown };

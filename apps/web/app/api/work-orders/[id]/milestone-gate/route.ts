@@ -1,4 +1,4 @@
-import { getStore, WORKSPACE_ID } from "../../../../../lib/crossline";
+import { getStore } from "../../../../../lib/crossline";
 import { requestCodexSupervisor } from "../../../../../lib/codex-runtime";
 import { rejectUnsafeRequest } from "../guard";
 
@@ -12,19 +12,20 @@ import { rejectUnsafeRequest } from "../guard";
  */
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params;
-  const unsafe = rejectUnsafeRequest(request, id);
-  if (unsafe) return unsafe;
+  const guard = await rejectUnsafeRequest(request, id);
+  if ("response" in guard) return guard.response;
+  const { ctx } = guard;
 
   const store = getStore();
-  const order = store.listWorkOrders(WORKSPACE_ID).find((item) => item.id === id);
+  const order = store.listWorkOrders(ctx.workspaceId).find((item) => item.id === id);
   if (!order) return Response.json({ ok: false, code: "WORK_ORDER_NOT_FOUND" }, { status: 404 });
   if (order.state !== "evidence_review") return Response.json({ ok: false, code: "EVIDENCE_REVIEW_NOT_READY" }, { status: 409 });
   if (!order.milestoneId) return Response.json({ ok: false, code: "WORK_ORDER_HAS_NO_MILESTONE" }, { status: 409 });
 
   store.appendEvent({
-    ownerId: "local-owner", workspaceId: WORKSPACE_ID,
+    ownerId: ctx.principalId, workspaceId: ctx.workspaceId,
     idempotencyKey: `milestone-gate:retry:${id}:${Date.now()}`,
-    type: "milestone_gate.retry_requested", entityId: id, payload: { requestedBy: "local-owner" }
+    type: "milestone_gate.retry_requested", entityId: id, payload: { requestedBy: ctx.principalId }
   });
   await requestCodexSupervisor(`/v1/work-orders/${id}/milestone-gate`, {
     method: "POST", headers: { "content-type": "application/json" }, signal: AbortSignal.timeout(10_000)

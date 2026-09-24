@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { CodexSupervisorRequestError, requestCodexSupervisor } from "../../../../lib/codex-runtime";
 import { isCrossSiteWrite } from "../../../../lib/same-origin";
+import { resolveAccessContext } from "../../../../lib/access-guard";
 
 export const runtime = "nodejs";
 
@@ -16,7 +17,9 @@ function blockerResponse(error: unknown) {
   }, { status: supervisorError.status });
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const access = await resolveAccessContext(request);
+  if ("response" in access) return access.response;
   try {
     const [account, supervisor] = await Promise.all([
       requestCodexSupervisor<Record<string, unknown>>("/v1/codex/account"),
@@ -33,6 +36,8 @@ export async function GET() {
 // live authUrl back before either guard existed.
 export async function POST(request: Request) {
   if (isCrossSiteWrite(request)) return NextResponse.json({ code: "REQUEST_FORBIDDEN" }, { status: 403 });
+  const access = await resolveAccessContext(request);
+  if ("response" in access) return access.response;
   try {
     return NextResponse.json(await requestCodexSupervisor("/v1/codex/login", { method: "POST" }));
   } catch (error) {
@@ -42,6 +47,8 @@ export async function POST(request: Request) {
 
 export async function DELETE(request: Request) {
   if (isCrossSiteWrite(request)) return NextResponse.json({ code: "REQUEST_FORBIDDEN" }, { status: 403 });
+  const access = await resolveAccessContext(request);
+  if ("response" in access) return access.response;
   try {
     return NextResponse.json(await requestCodexSupervisor("/v1/codex/login/cancel", { method: "POST" }));
   } catch (error) {

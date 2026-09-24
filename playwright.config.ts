@@ -7,16 +7,29 @@ import path from "node:path";
 // test could not find the ledger the server is using, and one that writes its own precondition must.
 const e2eDataDir = process.env.CROSSLINE_E2E_DATA_DIR ?? path.join(os.tmpdir(), `crossline-e2e-${process.pid}`);
 process.env.CROSSLINE_E2E_DATA_DIR = e2eDataDir;
+// Same sharing rationale as the data dir: `global-setup.ts` (main process) and the spawned server
+// (its own process) both need to agree on where captured verification/reset emails land.
+const authMailboxDir = path.join(e2eDataDir, "mailbox");
+process.env.CROSSLINE_AUTH_TEST_MAILBOX_DIR = authMailboxDir;
+// Read back by `global-setup.ts` and by the `request` fixture (via each project's `storageState`) so
+// the real sign-up → verify → sign-in flow only has to run once per e2e run, not once per test.
+const authStatePath = path.join(e2eDataDir, "auth-state.json");
 
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: false,
   retries: 0,
   reporter: "list",
+  // Runs after the server below is up and healthy (Playwright starts `webServer` before `globalSetup`
+  // for exactly this reason — see https://playwright.dev/docs/auth): it drives a real Better Auth
+  // sign-up, reads the verification link back out of `authMailboxDir` instead of a real mailbox, then
+  // signs in and saves the resulting session cookie to `authStatePath` for every project to reuse.
+  globalSetup: "./e2e/global-setup.ts",
   use: {
     baseURL: "http://127.0.0.1:3310",
     trace: "retain-on-failure",
-    colorScheme: "light"
+    colorScheme: "light",
+    storageState: authStatePath
   },
   // Port 3310, not 3211: the resident worker owns 3211 for the Codex supervisor. Sharing it meant e2e
   // either failed to bind or — worse — answered the web app's own supervisor calls with itself.
@@ -32,7 +45,12 @@ export default defineConfig({
     env: {
       CROSSLINE_DATA_DIR: e2eDataDir,
       CROSSLINE_NEXT_DIR: ".next-e2e",
-      CROSSLINE_FIXED_NOW: "2026-09-14T16:45:00.000Z"
+      CROSSLINE_FIXED_NOW: "2026-09-14T16:45:00.000Z",
+      BETTER_AUTH_SECRET: "e2e-test-secret-not-for-production-use",
+      // Better Auth stamps the verification link with this base URL — without overriding it here, the
+      // captured link points at the dev server's port (3210) instead of the one e2e is actually running.
+      CROSSLINE_WEB_BASE_URL: "http://127.0.0.1:3310",
+      CROSSLINE_AUTH_TEST_MAILBOX_DIR: authMailboxDir
     },
     reuseExistingServer: false,
     timeout: 240_000

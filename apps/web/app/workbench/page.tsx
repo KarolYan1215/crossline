@@ -1,8 +1,9 @@
-import { ensureSeeded, getStore, WORKSPACE_ID } from "../../lib/crossline";
+import { ensureSeeded, getStore } from "../../lib/crossline";
 import { SubpageShell } from "../subpage-shell";
 import { AnalyzeButton } from "./analyze-button";
 import { ExecutionActions } from "./execution-actions";
 import type { MilestoneGateResult } from "@crossline/core";
+import { requireSessionContext } from "../../lib/access-guard";
 
 // The tail, not the head: ids here are sometimes timestamp-prefixed, and two captures made minutes
 // apart shared their first eight characters — the page showed them as the same item twice.
@@ -45,20 +46,21 @@ function materialStatus(events: Array<{ type: string; entityId: string; payload:
 
 export const dynamic = "force-dynamic";
 
-export default function WorkbenchPage() {
-  ensureSeeded();
-  const all = getStore().listWorkOrders(WORKSPACE_ID);
+export default async function WorkbenchPage() {
+  const ctx = await requireSessionContext();
+  ensureSeeded(ctx);
+  const all = getStore().listWorkOrders(ctx.workspaceId);
   // Discarded items leave the board but not the ledger: they move to a closed drawer with the reason
   // the person gave, so "丢弃" never means "silently disappeared".
   const runs = all.filter((run) => run.state !== "archived");
   const discarded = all.filter((run) => run.state === "archived");
-  const captures = getStore().listCaptures(WORKSPACE_ID)
+  const captures = getStore().listCaptures(ctx.workspaceId)
     .filter((capture) => capture.state !== "promoted" && capture.state !== "discarded");
-  const discardedCaptures = getStore().listCaptures(WORKSPACE_ID).filter((capture) => capture.state === "discarded");
-  const executions = getStore().listExecutions(WORKSPACE_ID);
-  const materials = getStore().listMaterials(WORKSPACE_ID);
-  const events = getStore().listEvents(WORKSPACE_ID).filter((event) => event.type.startsWith("materials."));
-  const discardReasons = new Map(getStore().listEvents(WORKSPACE_ID, { type: ["work_order.archived", "capture.discarded"] })
+  const discardedCaptures = getStore().listCaptures(ctx.workspaceId).filter((capture) => capture.state === "discarded");
+  const executions = getStore().listExecutions(ctx.workspaceId);
+  const materials = getStore().listMaterials(ctx.workspaceId);
+  const events = getStore().listEvents(ctx.workspaceId).filter((event) => event.type.startsWith("materials."));
+  const discardReasons = new Map(getStore().listEvents(ctx.workspaceId, { type: ["work_order.archived", "capture.discarded"] })
     .map((event) => [event.entityId, (event.payload as { reason?: string }).reason ?? ""]));
   return <SubpageShell eyebrow="04 / AI WORK ORDERS" title="AI 作业台" description="这里呈现 SQLite 中真实的 WorkOrder、估时、材料和阻塞；不让用户编辑内部 DAG。">
     <section className="work-order-list">{captures.map((capture) => <article key={capture.id}>

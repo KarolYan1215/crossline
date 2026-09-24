@@ -5,7 +5,7 @@ import { DashboardView, type DashboardData } from "./dashboard-view";
 describe("dashboard view", () => {
   test("renders one next action, two alternatives, and all identity lanes", () => {
     const html = renderToStaticMarkup(<DashboardView data={{
-      nowLabel: "周一 · 09:00", nowIso: "2026-09-14T14:00:00.000Z", timeZone: "America/Chicago", clockPinned: true,
+      principalId: "test-owner", workspaceId: "test-workspace", nowLabel: "周一 · 09:00", nowIso: "2026-09-14T14:00:00.000Z", timeZone: "America/Chicago", clockPinned: true,
       dateLabel: "14",
       monthLabel: "SEP · 2026",
       capacity: { level: "high" as const, confidence: "high" as const, observationCount: 4, basis: ["self_report" as const], blockers: [] },
@@ -32,7 +32,7 @@ describe("dashboard view", () => {
 
   test("includes a usable quick capture form", () => {
     const html = renderToStaticMarkup(<DashboardView data={{
-      nowLabel: "周一 · 09:00", nowIso: "2026-09-14T14:00:00.000Z", timeZone: "America/Chicago", clockPinned: true,
+      principalId: "test-owner", workspaceId: "test-workspace", nowLabel: "周一 · 09:00", nowIso: "2026-09-14T14:00:00.000Z", timeZone: "America/Chicago", clockPinned: true,
       dateLabel: "14",
       monthLabel: "SEP · 2026",
       capacity: { level: "uncalibrated" as const, observationCount: 0, basis: [], blockers: [{ code: "LOCAL_ACTIVITY_NOT_AUTHORISED", message: "本机活动采集未开启" }] },
@@ -49,7 +49,7 @@ describe("dashboard view", () => {
 
   test("uses a running head instead of a SaaS sidebar and keeps health in the care band", () => {
     const html = renderToStaticMarkup(<DashboardView data={{
-      nowLabel: "周一 · 09:00", nowIso: "2026-09-14T14:00:00.000Z", timeZone: "America/Chicago", clockPinned: true, dateLabel: "14", monthLabel: "SEP · 2026",
+      principalId: "test-owner", workspaceId: "test-workspace", nowLabel: "周一 · 09:00", nowIso: "2026-09-14T14:00:00.000Z", timeZone: "America/Chicago", clockPinned: true, dateLabel: "14", monthLabel: "SEP · 2026",
       capacity: { level: "uncalibrated" as const, observationCount: 0, basis: [], blockers: [{ code: "LOCAL_ACTIVITY_NOT_AUTHORISED", message: "本机活动采集未开启" }] },
       care: [],
       identities: [], upcoming: [], localActivityAsked: true, lastNight: { state: "none" as const }, milestonePulse: []
@@ -64,7 +64,7 @@ describe("dashboard view", () => {
 
 describe("dashboard view honesty", () => {
   const data = {
-    nowLabel: "周一 · 09:00", nowIso: "2026-09-14T14:00:00.000Z", timeZone: "America/Chicago", clockPinned: true, dateLabel: "14", monthLabel: "SEP · 2026",
+    principalId: "test-owner", workspaceId: "test-workspace", nowLabel: "周一 · 09:00", nowIso: "2026-09-14T14:00:00.000Z", timeZone: "America/Chicago", clockPinned: true, dateLabel: "14", monthLabel: "SEP · 2026",
     capacity: { level: "uncalibrated" as const, observationCount: 0, basis: [], blockers: [{ code: "LOCAL_ACTIVITY_NOT_AUTHORISED", message: "本机活动采集未开启" }] },
     care: [],
     identities: [], upcoming: [], localActivityAsked: true, lastNight: { state: "none" as const }, milestonePulse: []
@@ -85,7 +85,7 @@ describe("dashboard view honesty", () => {
 
 describe("capacity honesty", () => {
   const withCapacity = (capacity: DashboardData["capacity"]) => renderToStaticMarkup(<DashboardView data={{
-    nowLabel: "周一 · 09:00", nowIso: "2026-09-14T14:00:00.000Z", timeZone: "America/Chicago", clockPinned: true, dateLabel: "14", monthLabel: "SEP · 2026",
+    principalId: "test-owner", workspaceId: "test-workspace", nowLabel: "周一 · 09:00", nowIso: "2026-09-14T14:00:00.000Z", timeZone: "America/Chicago", clockPinned: true, dateLabel: "14", monthLabel: "SEP · 2026",
     capacity, care: [], identities: [], upcoming: [], localActivityAsked: true, lastNight: { state: "none" as const }, milestonePulse: []
   }} />);
 
@@ -107,7 +107,7 @@ describe("capacity honesty", () => {
 
 describe("last night's expansion", () => {
   const withLastNight = (lastNight: DashboardData["lastNight"]) => renderToStaticMarkup(<DashboardView data={{
-    nowLabel: "周一 · 09:00", nowIso: "2026-09-14T14:00:00.000Z", timeZone: "America/Chicago", clockPinned: true, dateLabel: "14", monthLabel: "SEP · 2026",
+    principalId: "test-owner", workspaceId: "test-workspace", nowLabel: "周一 · 09:00", nowIso: "2026-09-14T14:00:00.000Z", timeZone: "America/Chicago", clockPinned: true, dateLabel: "14", monthLabel: "SEP · 2026",
     capacity: { level: "uncalibrated", observationCount: 0, basis: [], blockers: [] },
     care: [], identities: [], upcoming: [], localActivityAsked: true, lastNight, milestonePulse: []
   }} />);

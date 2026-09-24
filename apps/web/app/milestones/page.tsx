@@ -2,20 +2,22 @@ import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { SubpageShell } from "../subpage-shell";
 import { MilestoneMap } from "./milestone-map";
 import { MilestoneAdmin, type AdminMilestone } from "./milestone-admin";
-import { ensureSeeded, getStore, readGoalSettings, readSchedulePreferences, WORKSPACE_ID } from "../../lib/crossline";
+import { ensureSeeded, getStore, readGoalSettings, readSchedulePreferences } from "../../lib/crossline";
+import { requireSessionContext } from "../../lib/access-guard";
 
 export const dynamic = "force-dynamic";
 
-export default function MilestonesPage() {
-  ensureSeeded();
+export default async function MilestonesPage() {
+  const ctx = await requireSessionContext();
+  ensureSeeded(ctx);
   const store = getStore();
-  const milestones = store.listMilestones(WORKSPACE_ID);
-  const relations = store.listMilestoneRelations(WORKSPACE_ID);
+  const milestones = store.listMilestones(ctx.workspaceId);
+  const relations = store.listMilestoneRelations(ctx.workspaceId);
   // Why a proposed milestone was suggested is part of reviewing it: approving a goal without the
   // reasoning is the same problem as approving a relation with no stated claim.
-  const rationales = new Map(store.listEvents(WORKSPACE_ID, { type: "milestone.proposed" })
+  const rationales = new Map(store.listEvents(ctx.workspaceId, { type: "milestone.proposed" })
     .map((event) => [event.entityId, String((event.payload as { rationale?: string }).rationale ?? "")]));
-  const dates = new Map(store.listEvents(WORKSPACE_ID, { type: "goal.backplan_proposed" })
+  const dates = new Map(store.listEvents(ctx.workspaceId, { type: "goal.backplan_proposed" })
     .map((event) => [event.entityId, (event.payload as { dateCandidates?: Array<{ date: string; quote: string }> }).dateCandidates ?? []]));
 
   // Every gate judgement leaves a per-criterion reading. The best one seen for a criterion is the
@@ -23,7 +25,7 @@ export default function MilestonesPage() {
   const rank = { unverifiable: 0, unmet: 1, partial: 2, met: 3 } as const;
   type Met = keyof typeof rank;
   const progress = new Map<string, Record<string, Met>>();
-  for (const event of store.listEvents(WORKSPACE_ID, { type: "milestone_gate.judged" })) {
+  for (const event of store.listEvents(ctx.workspaceId, { type: "milestone_gate.judged" })) {
     const payload = event.payload as { milestoneId?: string; criteriaVerdict?: Array<{ criterionId: string; met: Met }> };
     if (!payload.milestoneId) continue;
     const current = progress.get(payload.milestoneId) ?? {};
@@ -38,8 +40,8 @@ export default function MilestonesPage() {
     id: milestone.id, identityId: milestone.identityId, projectId: milestone.projectId ?? "",
     title: milestone.title, version: milestone.version, status: milestone.status,
     verifiability: milestone.verifiability, successCriteria: milestone.successCriteria,
-    goalSettings: readGoalSettings(milestone.id),
-    fallbackImportance: readSchedulePreferences()?.importance[milestone.id] ?? "ordinary",
+    goalSettings: readGoalSettings(ctx, milestone.id),
+    fallbackImportance: readSchedulePreferences(ctx)?.importance[milestone.id] ?? "ordinary",
     dateCandidates: dates.get(milestone.id) ?? [],
     ...(rationales.get(milestone.id) ? { rationale: rationales.get(milestone.id)! } : {}),
     ...(progress.get(milestone.id) ? { progress: progress.get(milestone.id)! } : {})

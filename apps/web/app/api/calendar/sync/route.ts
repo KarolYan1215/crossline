@@ -1,5 +1,6 @@
 import { requestCodexSupervisor, CodexSupervisorRequestError } from "../../../../lib/codex-runtime";
 import { isCrossSiteWrite } from "../../../../lib/same-origin";
+import { resolveAccessContext } from "../../../../lib/access-guard";
 
 /**
  * Pulls the calendar now instead of at the next tick.
@@ -10,6 +11,8 @@ import { isCrossSiteWrite } from "../../../../lib/same-origin";
  */
 export async function POST(request: Request) {
   if (isCrossSiteWrite(request)) return Response.json({ ok: false, code: "REQUEST_FORBIDDEN" }, { status: 403 });
+  const access = await resolveAccessContext(request);
+  if ("response" in access) return access.response;
   try {
     const result = await requestCodexSupervisor<Record<string, unknown>>("/v1/calendar/sync", {
       method: "POST", headers: { "content-type": "application/json" },

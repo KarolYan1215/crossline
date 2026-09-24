@@ -25,16 +25,17 @@ function readEvidence(value: unknown): EvidenceClaimInput[] | null {
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params;
-  const unsafe = rejectUnsafeRequest(request, id);
-  if (unsafe) return unsafe;
+  const guard = await rejectUnsafeRequest(request, id);
+  if ("response" in guard) return guard.response;
+  const { ctx } = guard;
   const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
   const reason = String(body.reason ?? "");
   let result: ExecutionResult;
   try {
-    if (body.action === "start") result = startWorkOrderExecution(id);
-    else if (body.action === "materials_ready") result = markMaterialsReady(id, "human");
+    if (body.action === "start") result = startWorkOrderExecution(ctx, id);
+    else if (body.action === "materials_ready") result = markMaterialsReady(ctx, id, "human");
     else if (body.action === "materials_retry") {
-      result = retryMaterialPreparation(id);
+      result = retryMaterialPreparation(ctx, id);
       // The event alone would only be honoured at the next 15-minute tick. Asking the worker to start
       // now is what makes the button feel like a button; if the worker is down the event still stands
       // and the tick picks it up, so a failure here is not a failure of the retry.
@@ -45,13 +46,13 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         }).catch(() => undefined);
       }
     }
-    else if (body.action === "archive") result = archiveWorkOrder(id, reason);
-    else if (body.action === "pause") result = pauseWorkOrderExecution(id, reason);
-    else if (body.action === "resume") result = resumeWorkOrderExecution(id);
+    else if (body.action === "archive") result = archiveWorkOrder(ctx, id, reason);
+    else if (body.action === "pause") result = pauseWorkOrderExecution(ctx, id, reason);
+    else if (body.action === "resume") result = resumeWorkOrderExecution(ctx, id);
     else if (body.action === "complete") {
       const evidence = readEvidence(body.evidence);
       if (!evidence) return Response.json({ ok: false, code: "INVALID_EVIDENCE_CLAIM" }, { status: 400 });
-      result = completeWorkOrderExecution(id, evidence);
+      result = completeWorkOrderExecution(ctx, id, evidence);
     } else return Response.json({ ok: false, code: "EXECUTION_ACTION_NOT_ALLOWED" }, { status: 400 });
   } catch (error) {
     // A store-level guard is still a known failure, so it stays a typed blocker rather than a 500.

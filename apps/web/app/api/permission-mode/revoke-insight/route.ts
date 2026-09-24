@@ -1,10 +1,13 @@
 import { revokeInsight } from "../../../../lib/permission-mode";
+import { resolveAccessContext } from "../../../../lib/access-guard";
 import { isCrossSiteWrite } from "../../../../lib/same-origin";
 
 export async function POST(request: Request) {
   if (isCrossSiteWrite(request)) return Response.json({ ok: false, code: "REQUEST_FORBIDDEN" }, { status: 403 });
+  const access = await resolveAccessContext(request);
+  if ("response" in access) return access.response;
   const body = ((await request.json().catch(() => ({}))) ?? {}) as { eventId?: unknown };
   if (typeof body.eventId !== "string") return Response.json({ ok: false, code: "INSIGHT_ID_INVALID" }, { status: 400 });
-  const result = revokeInsight(body.eventId);
+  const result = revokeInsight(access.ctx, body.eventId);
   return Response.json(result, { status: result.ok ? 200 : 409 });
 }

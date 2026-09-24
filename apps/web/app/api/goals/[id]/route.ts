@@ -1,10 +1,13 @@
 import { saveGoalSettings } from "../../../../lib/crossline";
+import { resolveAccessContext } from "../../../../lib/access-guard";
 import { isCrossSiteWrite } from "../../../../lib/same-origin";
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   if (isCrossSiteWrite(request)) return Response.json({ ok: false, code: "REQUEST_FORBIDDEN" }, { status: 403 });
+  const access = await resolveAccessContext(request);
+  if ("response" in access) return access.response;
   const { id } = await context.params;
   const body = (await request.json().catch(() => ({}))) ?? {};
-  const result = saveGoalSettings(id, body);
+  const result = saveGoalSettings(access.ctx, id, body);
   return Response.json(result, { status: result.ok ? 200 : result.code === "GOAL_NOT_APPROVED" ? 404 : 400 });
 }

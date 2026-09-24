@@ -1,27 +1,29 @@
-import { ensureSeeded, getStore, loadCurrentPlan, WORKSPACE_ID } from "../../lib/crossline";
+import { ensureSeeded, getStore, loadCurrentPlan } from "../../lib/crossline";
 import { SubpageShell } from "../subpage-shell";
 import { AcceptEvidenceButton, ApproveProposalButton, JudgeMilestoneButton } from "./approval-actions";
 import type { AnalysisProposal } from "@crossline/core";
 import { permissionCandidates, permissionModeEnabled } from "../../lib/permission-mode";
 import { PermissionModePanel } from "./permission-mode-panel";
+import { requireSessionContext } from "../../lib/access-guard";
 
 export const dynamic = "force-dynamic";
 
 export default async function ApprovalsPage() {
-  ensureSeeded();
-  const plan = await loadCurrentPlan();
+  const ctx = await requireSessionContext();
+  ensureSeeded(ctx);
+  const plan = await loadCurrentPlan(ctx);
   const pendingPlanChanges = plan.changes.filter((change) => change.status === "pending").length;
-  const evidenceReviews = getStore().listWorkOrders(WORKSPACE_ID).filter((item) => item.state === "evidence_review");
-  const proposals = getStore().listWorkOrders(WORKSPACE_ID).filter((item) => item.state === "awaiting_plan_approval");
-  const claims = getStore().listEvidenceClaims(WORKSPACE_ID);
+  const evidenceReviews = getStore().listWorkOrders(ctx.workspaceId).filter((item) => item.state === "evidence_review");
+  const proposals = getStore().listWorkOrders(ctx.workspaceId).filter((item) => item.state === "awaiting_plan_approval");
+  const claims = getStore().listEvidenceClaims(ctx.workspaceId);
   // A revoked acceptance puts the order back here with the same evidence, and the gate deliberately
   // will not re-judge it on its own — so without the reason on screen the order looks stuck for no
   // stated cause, and the button that would move it looks like it does nothing.
-  const revocations = new Map(getStore().listEvents(WORKSPACE_ID, { type: "milestone_gate.auto_acceptance_revoked" })
+  const revocations = new Map(getStore().listEvents(ctx.workspaceId, { type: "milestone_gate.auto_acceptance_revoked" })
     .map((event) => [event.entityId, String((event.payload as { reason?: string }).reason ?? "")]));
-  const executions = getStore().listExecutions(WORKSPACE_ID);
+  const executions = getStore().listExecutions(ctx.workspaceId);
   return <SubpageShell eyebrow="05 / APPROVAL CONTROL" title="审批与验收" description="计划差异批量批准；外部动作逐项批准；里程碑证据由 AI 闸门判定并保留人工撤销权。">
-    <PermissionModePanel initialEnabled={permissionModeEnabled()} initialCandidates={permissionCandidates()} />
+    <PermissionModePanel initialEnabled={permissionModeEnabled(ctx)} initialCandidates={permissionCandidates(ctx)} />
     <section className="approval-ledger">
       <header><span>TYPE</span><span>ITEM</span><span>WHY NOW</span><span>ACTION</span></header>
       <article><b>PLAN DIFF</b><strong>Personal Plan v{plan.version} · {pendingPlanChanges} pending</strong><p>{plan.status === "approved" ? "该计划版本已经落入批准账本" : "新增 AI Ahead 准备与人工核心行动块"}</p><a href="/plan">打开 C 视图 →</a></article>

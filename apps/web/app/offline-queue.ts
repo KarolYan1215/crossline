@@ -2,8 +2,8 @@
 import { classifyReplay, type DeadLetter } from "@crossline/core";
 
 export type OfflineCommand = {
-  ownerId: "local-owner";
-  workspaceId: "personal-crossline";
+  ownerId: string;
+  workspaceId: string;
   clientCommandId: string;
   clientSequence: number;
   type: "task.capture";
@@ -57,10 +57,11 @@ export async function nextSequence(): Promise<number> {
   return next;
 }
 
-export function createCommand(sequence: number, type: OfflineCommand["type"], payload: Record<string, unknown>): OfflineCommand {
+export function createCommand(ownerId: string, workspaceId: string, sequence: number,
+  type: OfflineCommand["type"], payload: Record<string, unknown>): OfflineCommand {
   return {
-    ownerId: "local-owner",
-    workspaceId: "personal-crossline",
+    ownerId,
+    workspaceId,
     clientCommandId: crypto.randomUUID(),
     clientSequence: sequence,
     type,

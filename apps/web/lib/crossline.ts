@@ -5,7 +5,7 @@ import path from "node:path";
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 import { CrosslineStore, type EvidenceClaimInput, type StoredMilestone } from "@crossline/db";
 import { availableSlots, deriveCapacity, requiredApproval, validateAvailability, DEFAULT_AVAILABILITY,
-  type AvailabilityWindow, type SuccessCriterion } from "@crossline/core";
+  type AccessContext, type AvailabilityWindow, type SuccessCriterion } from "@crossline/core";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { forecastGoals, planSchedule, recommendNextActions, type ForecastResult, type PlanResult } from "@crossline/planner";
 import { energyCalibration, predictEnergyTransition, readTransitionOutcomes } from "./energy-learning";
@@ -23,9 +23,16 @@ export type PersistedScheduleBlock = {
   readOnly: boolean;
 };
 
-/** The local day the plan is centred on. One definition, so B, A and the sync cannot disagree. */
-export function planToday(now = process.env.CROSSLINE_FIXED_NOW ? new Date(process.env.CROSSLINE_FIXED_NOW) : new Date()): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: readSchedulePreferences()?.timeZone
+/**
+ * The local day the plan is centred on. One definition, so B, A and the sync cannot disagree.
+ *
+ * `ctx` is optional: this stays callable from places that only need a plausible "today" and have no
+ * request context to hand (a pure date-format test, a default parameter). With `ctx`, "today" follows
+ * the caller's own workspace time zone preference; without it, only the process-wide env var default.
+ */
+export function planToday(ctx?: AccessContext,
+  now = process.env.CROSSLINE_FIXED_NOW ? new Date(process.env.CROSSLINE_FIXED_NOW) : new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: (ctx && readSchedulePreferences(ctx)?.timeZone)
     ?? process.env.CROSSLINE_TIME_ZONE ?? "America/Chicago" }).format(now);
 }
 
@@ -39,16 +46,16 @@ export type GoalSettings = { importance: "important" | "ordinary";
   confirmedDeadline: string | null; sourceQuote: string | null };
 const goalKey = (id: string) => `goal.settings:${id}`;
 
-export function readGoalSettings(id: string): GoalSettings | null {
-  const raw = getStore().getSetting(WORKSPACE_ID, goalKey(id));
+export function readGoalSettings(ctx: AccessContext, id: string): GoalSettings | null {
+  const raw = getStore().getSetting(ctx.workspaceId, goalKey(id));
   if (!raw) return null;
   try { return JSON.parse(raw) as GoalSettings; } catch { return null; }
 }
 
-export function saveGoalSettings(id: string, input: { importance: unknown; confirmedDeadline: unknown;
+export function saveGoalSettings(ctx: AccessContext, id: string, input: { importance: unknown; confirmedDeadline: unknown;
   sourceQuote?: unknown }): { ok: true } | { ok: false; code: string } {
-  ensureSeeded();
-  const milestone = getStore().listMilestones(WORKSPACE_ID).find((item) => item.id === id && item.status === "approved");
+  ensureSeeded(ctx);
+  const milestone = getStore().listMilestones(ctx.workspaceId).find((item) => item.id === id && item.status === "approved");
   if (!milestone) return { ok: false, code: "GOAL_NOT_APPROVED" };
   if (input.importance !== "important" && input.importance !== "ordinary")
     return { ok: false, code: "GOAL_IMPORTANCE_INVALID" };
@@ -61,17 +68,17 @@ export function saveGoalSettings(id: string, input: { importance: unknown; confi
   const next: GoalSettings = { importance: input.importance, confirmedDeadline: date as string | null,
     sourceQuote: quote || null };
   const store = getStore();
-  const previous = readGoalSettings(id);
+  const previous = readGoalSettings(ctx, id);
   if (JSON.stringify(previous) === JSON.stringify(next)) return { ok: true };
-  store.setSetting(WORKSPACE_ID, goalKey(id), JSON.stringify(next));
-  store.appendEvent({ ownerId: OWNER_ID, workspaceId: WORKSPACE_ID,
+  store.setSetting(ctx.workspaceId, goalKey(id), JSON.stringify(next));
+  store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId,
     idempotencyKey: `goal:settings:${id}:${randomUUID()}`, type: "goal.settings_confirmed", entityId: id,
     payload: { milestoneVersion: milestone.version, previous, next } });
   return { ok: true };
 }
 
-export function readSchedulePreferences(): SchedulePreferences | null {
-  const raw = getStore().getSetting(WORKSPACE_ID, PREFERENCES_SETTING);
+export function readSchedulePreferences(ctx: AccessContext): SchedulePreferences | null {
+  const raw = getStore().getSetting(ctx.workspaceId, PREFERENCES_SETTING);
   if (!raw) return null;
   try {
     const value = JSON.parse(raw) as SchedulePreferences;
@@ -80,10 +87,10 @@ export function readSchedulePreferences(): SchedulePreferences | null {
   } catch { return null; }
 }
 
-export function saveSchedulePreferences(input: {
+export function saveSchedulePreferences(ctx: AccessContext, input: {
   timeZone: unknown; mode: unknown; windows: unknown; importance: unknown
 }): { ok: true } | { ok: false; code: string } {
-  ensureSeeded();
+  ensureSeeded(ctx);
   const timeZone = typeof input.timeZone === "string" ? input.timeZone.trim() : "";
   try { new Intl.DateTimeFormat("en", { timeZone }); }
   catch { return { ok: false, code: "SCHEDULE_TIME_ZONE_INVALID" }; }
@@ -97,28 +104,28 @@ export function saveSchedulePreferences(input: {
   const importance = input.importance;
   if (!importance || typeof importance !== "object" || Array.isArray(importance))
     return { ok: false, code: "SCHEDULE_IMPORTANCE_REQUIRED" };
-  const approved = getStore().listMilestones(WORKSPACE_ID).filter((milestone) => milestone.status === "approved");
+  const approved = getStore().listMilestones(ctx.workspaceId).filter((milestone) => milestone.status === "approved");
   if (approved.some((milestone) => !["important", "ordinary"].includes(
     (importance as Record<string, string>)[milestone.id] ?? "")))
     return { ok: false, code: "SCHEDULE_IMPORTANCE_REQUIRED" };
   const selected = Object.fromEntries(approved.map((milestone) => [milestone.id,
     (importance as Record<string, "important" | "ordinary">)[milestone.id]!]));
   const store = getStore();
-  store.setSetting(WORKSPACE_ID, AVAILABILITY_SETTING, JSON.stringify(windows));
-  store.setSetting(WORKSPACE_ID, PREFERENCES_SETTING, JSON.stringify({ timeZone, mode: input.mode,
+  store.setSetting(ctx.workspaceId, AVAILABILITY_SETTING, JSON.stringify(windows));
+  store.setSetting(ctx.workspaceId, PREFERENCES_SETTING, JSON.stringify({ timeZone, mode: input.mode,
     importance: selected } satisfies SchedulePreferences));
   for (const [id, importance] of Object.entries(selected)) {
-    const goal = readGoalSettings(id);
+    const goal = readGoalSettings(ctx, id);
     if (!goal || goal.importance === importance) continue;
     const next = { ...goal, importance };
-    store.setSetting(WORKSPACE_ID, goalKey(id), JSON.stringify(next));
-    store.appendEvent({ ownerId: OWNER_ID, workspaceId: WORKSPACE_ID,
+    store.setSetting(ctx.workspaceId, goalKey(id), JSON.stringify(next));
+    store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId,
       idempotencyKey: `goal:importance:${id}:${randomUUID()}`, type: "goal.settings_confirmed",
       entityId: id, payload: { previous: goal, next, source: "schedule_preferences" } });
   }
-  store.appendEvent({ ownerId: OWNER_ID, workspaceId: WORKSPACE_ID,
+  store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId,
     idempotencyKey: `schedule:preferences:${randomUUID()}`, type: "schedule.preferences_saved",
-    entityId: WORKSPACE_ID, payload: { timeZone, mode: input.mode, milestoneCount: approved.length } });
+    entityId: ctx.workspaceId, payload: { timeZone, mode: input.mode, milestoneCount: approved.length } });
   return { ok: true };
 }
 
@@ -130,16 +137,16 @@ export function saveSchedulePreferences(input: {
  * than emptying the plan silently — an unreadable setting is a bug to fix, not a reason to show a
  * blank week as though the person had no time.
  */
-export function readAvailability(): AvailabilityWindow[] {
-  const raw = getStore().getSetting(WORKSPACE_ID, AVAILABILITY_SETTING);
+export function readAvailability(ctx: AccessContext): AvailabilityWindow[] {
+  const raw = getStore().getSetting(ctx.workspaceId, AVAILABILITY_SETTING);
   if (!raw) return DEFAULT_AVAILABILITY;
   try { return validateAvailability(JSON.parse(raw)); } catch { return DEFAULT_AVAILABILITY; }
 }
 
-export function saveAvailability(windows: unknown): { ok: true } | { ok: false; code: string } {
+export function saveAvailability(ctx: AccessContext, windows: unknown): { ok: true } | { ok: false; code: string } {
   try {
     const validated = validateAvailability(windows);
-    getStore().setSetting(WORKSPACE_ID, AVAILABILITY_SETTING, JSON.stringify(validated));
+    getStore().setSetting(ctx.workspaceId, AVAILABILITY_SETTING, JSON.stringify(validated));
     return { ok: true };
   } catch (error) {
     return { ok: false, code: error instanceof Error ? error.message : "AVAILABILITY_INVALID" };
@@ -161,8 +168,6 @@ export type PersistedPlan = {
   }>;
 };
 
-const OWNER_ID = "local-owner";
-export const WORKSPACE_ID = "personal-crossline";
 const PRIMARY_CLOCK_ID = process.env.CROSSLINE_PRIMARY_CLOCK_ID
   ?? defaultIdentityPacks().find((pack) => pack.kind === "identity" && pack.masterClock)?.id ?? "";
 const accents: Record<string, string> = {
@@ -225,22 +230,22 @@ export function getStore(): CrosslineStore {
   return globalThis.crosslineStore;
 }
 
-export function ensureSeeded(): void {
+export function ensureSeeded(ctx: AccessContext): void {
   const store = getStore();
   // Earlier seeds wrote no projectId, and analysis only offers milestones that have one, so an existing
   // database would stay permanently unanalysable. Re-seeding is idempotent and repairs those rows.
-  const seeded = store.listMilestones(WORKSPACE_ID);
+  const seeded = store.listMilestones(ctx.workspaceId);
   if (seeded.length === 0 || seeded.some((milestone) => milestone.id.endsWith("-starter") && !milestone.projectId)) {
     for (const pack of seedIdentities()) {
       store.saveMilestone({
-        id: `${pack.id}-starter`, ownerId: OWNER_ID, workspaceId: WORKSPACE_ID,
+        id: `${pack.id}-starter`, ownerId: ctx.principalId, workspaceId: ctx.workspaceId,
         identityId: pack.id, projectId: `${pack.id}-default`,
         title: starterMilestoneTitles[pack.id] ?? `为「${pack.label}」确定第一个可验收的里程碑`,
         version: 1, status: "approved"
       });
     }
   }
-  if (store.listMilestoneRelations(WORKSPACE_ID).length === 0) {
+  if (store.listMilestoneRelations(ctx.workspaceId).length === 0) {
     const relations = [
       ["research-startup", "research-starter", "startup-starter", "informs", "approved"],
       ["startup-media", "startup-starter", "media-starter", "reuses", "approved"],
@@ -250,21 +255,21 @@ export function ensureSeeded(): void {
     // These example relations describe the four packs this repo ships. Under a different pack set
     // their endpoints do not exist, and a relation pointing at a missing milestone is worse than no
     // relation at all — so it is skipped rather than seeded dangling.
-    const seededMilestoneIds = new Set(store.listMilestones(WORKSPACE_ID).map((milestone) => milestone.id));
+    const seededMilestoneIds = new Set(store.listMilestones(ctx.workspaceId).map((milestone) => milestone.id));
     for (const [id, fromMilestoneId, toMilestoneId, kind, status] of relations) {
       if (!seededMilestoneIds.has(fromMilestoneId) || !seededMilestoneIds.has(toMilestoneId)) continue;
-      store.saveMilestoneRelation({ id, ownerId: OWNER_ID, workspaceId: WORKSPACE_ID, fromMilestoneId, toMilestoneId, kind, status });
+      store.saveMilestoneRelation({ id, ownerId: ctx.principalId, workspaceId: ctx.workspaceId, fromMilestoneId, toMilestoneId, kind, status });
     }
   }
-  if (store.listWorkOrders(WORKSPACE_ID).length === 0) {
+  if (store.listWorkOrders(ctx.workspaceId).length === 0) {
     for (const pack of seedIdentities()) {
       const identityId = pack.id;
       const { title, energy, priorFamily } = starterWorkOrders[identityId]
         ?? { title: `写下「${pack.label}」当前最该推进的一件事`, energy: "medium" as const, priorFamily: "review" };
       const id = `${identityId}-starter-work-order`;
-      const milestoneId = store.listMilestones(WORKSPACE_ID).find((item) => item.identityId === identityId)?.id ?? `${identityId}-unassigned`;
+      const milestoneId = store.listMilestones(ctx.workspaceId).find((item) => item.identityId === identityId)?.id ?? `${identityId}-unassigned`;
       store.saveWorkOrder({
-        id, ownerId: OWNER_ID, workspaceId: WORKSPACE_ID, identityId,
+        id, ownerId: ctx.principalId, workspaceId: ctx.workspaceId, identityId,
         projectId: `${identityId}-default`, milestoneId, intent: title,
         state: "ready_for_human", riskTier: "milestone",
         estimate: identityPrior(identityId, priorFamily),
@@ -273,12 +278,12 @@ export function ensureSeeded(): void {
       });
     }
   }
-  if (store.listPlanVersions(WORKSPACE_ID).length === 0) {
+  if (store.listPlanVersions(ctx.workspaceId).length === 0) {
     // An empty plan, not five example blocks. The lanes fill from two real sources now — the calendar
     // and the scheduler — and seeding a fake day meant the first thing a new database showed was a
     // schedule nobody had made, in a view whose whole job is to say what is really committed.
     store.savePlanVersion({
-      id: "personal-plan-v1", ownerId: OWNER_ID, workspaceId: WORKSPACE_ID,
+      id: "personal-plan-v1", ownerId: ctx.principalId, workspaceId: ctx.workspaceId,
       version: 1, status: "draft", payload: { blocks: [] }
     });
   }
@@ -288,10 +293,10 @@ export function ensureSeeded(): void {
   // `approvePlanVersion` refuses while anything is pending — so leaving them would make the plan
   // permanently unapprovable over demo rows that no longer mean anything.
   for (const changeId of RETIRED_SEED_CHANGES) {
-    const change = store.listPlanChanges("personal-plan-v1").find((item) => item.id === changeId);
+    const change = store.listPlanChanges(ctx.workspaceId, "personal-plan-v1").find((item) => item.id === changeId);
     if (change && change.status === "pending") store.savePlanChange({ ...change, status: "excluded" });
   }
-  for (const plan of store.listPlanVersions(WORKSPACE_ID)) {
+  for (const plan of store.listPlanVersions(ctx.workspaceId)) {
     const blocks = (plan.payload as { blocks?: PersistedScheduleBlock[] }).blocks ?? [];
     const real = blocks.filter((block) => block.source !== "示例数据");
     if (real.length === blocks.length) continue;
@@ -328,18 +333,18 @@ export function toZonedInstant(day: string, time: string, zone: string): string 
   return instant.toISOString();
 }
 
-async function scheduledBlocks(today: string, committed: PersistedScheduleBlock[]): Promise<{
+async function scheduledBlocks(ctx: AccessContext, today: string, committed: PersistedScheduleBlock[]): Promise<{
   blocks: PersistedScheduleBlock[]; schedule: PersistedPlan["schedule"]
 }> {
   const days = planDays(today);
   const busy = committed.filter((block) => block.day)
     .map((block) => ({ day: block.day!, start: block.start, end: block.end }));
-  const slots = availableSlots(readAvailability(), days, busy);
-  const preferences = readSchedulePreferences()!;
+  const slots = availableSlots(readAvailability(ctx), days, busy);
+  const preferences = readSchedulePreferences(ctx)!;
   const zone = preferences.timeZone;
   const iso = (day: string, time: string) => toZonedInstant(day, time, zone);
   const now = process.env.CROSSLINE_FIXED_NOW ? new Date(process.env.CROSSLINE_FIXED_NOW) : new Date();
-  const capacity = latestCapacity(now);
+  const capacity = latestCapacity(ctx, now);
   const currentEnergy = capacity.basis.includes("self_report") && capacity.level !== "uncalibrated"
     ? capacity.level : undefined;
   const currentClock = formatInTimeZone(now, zone, "HH:mm");
@@ -355,20 +360,20 @@ async function scheduledBlocks(today: string, committed: PersistedScheduleBlock[
     }
   });
   const capacityIds = new Set(defaultIdentityPacks().filter((pack) => pack.kind === "capacity").map((pack) => pack.id));
-  const allOrders = getStore().listWorkOrders(WORKSPACE_ID);
+  const allOrders = getStore().listWorkOrders(ctx.workspaceId);
   const orders = allOrders
     .filter((order) => ACTIONABLE.includes(order.state) && !capacityIds.has(order.identityId));
   const stateById = new Map(allOrders.map((order) => [order.id, order.state]));
-  const dependencyBlockers = orders.filter((order) => (plannerTaskOf(order).dependsOn ?? [])
+  const dependencyBlockers = orders.filter((order) => (plannerTaskOf(ctx, order).dependsOn ?? [])
     .some((id) => stateById.get(id) !== "accepted" && !orders.some((item) => item.id === id)))
     .map((order) => ({ taskId: order.id, code: "DEPENDENCY_NOT_READY",
       message: `${order.intent}的前置作业尚未验收，暂不排入` }));
   const eligibleOrders = orders.filter((order) => !dependencyBlockers.some((item) => item.taskId === order.id));
   const needsLookahead = eligibleOrders.some((order) => {
-    const task = plannerTaskOf(order);
+    const task = plannerTaskOf(ctx, order);
     return task.deadlineTier === 4 && Boolean(task.deadline);
   });
-  const lookaheadAvailability = needsLookahead ? availableSlots(readAvailability(), planDays(today, 56), busy)
+  const lookaheadAvailability = needsLookahead ? availableSlots(readAvailability(ctx), planDays(today, 56), busy)
     .flatMap((slot) => {
       try { return [{ start: iso(slot.day, slot.start), end: iso(slot.day, slot.end),
         day: slot.day, energy: slot.energy }]; }
@@ -380,7 +385,7 @@ async function scheduledBlocks(today: string, committed: PersistedScheduleBlock[
     horizonDays: days.length,
     mode: preferences.mode,
     ...(currentEnergy ? { currentEnergy, currentDay: today } : {}),
-    tasks: eligibleOrders.map(plannerTaskOf),
+    tasks: eligibleOrders.map((order) => plannerTaskOf(ctx, order)),
     availability: instants,
     ...(lookaheadAvailability ? { lookaheadAvailability } : {}),
     frozenBlocks: committed.filter((block) => block.day && block.id.startsWith("scheduled:"))
@@ -415,14 +420,14 @@ async function scheduledBlocks(today: string, committed: PersistedScheduleBlock[
     solver: result.solver, ...(result.bufferRelaxed ? { bufferRelaxed: true } : {}) } };
 }
 
-export function loadGoalForecast(): ForecastResult & { inferredRegularBlocks: number } {
-  ensureSeeded();
+export function loadGoalForecast(ctx: AccessContext): ForecastResult & { inferredRegularBlocks: number } {
+  ensureSeeded(ctx);
   const store = getStore();
-  const preferences = readSchedulePreferences();
+  const preferences = readSchedulePreferences(ctx);
   const empty = { weeks: [], goals: [], inferredRegularBlocks: 0 };
   if (!preferences) return empty;
-  const days = planDays(planToday(), 56);
-  const committed = ((store.listPlanVersions(WORKSPACE_ID)[0]?.payload as { blocks?: PersistedScheduleBlock[] } | undefined)
+  const days = planDays(planToday(ctx), 56);
+  const committed = ((store.listPlanVersions(ctx.workspaceId)[0]?.payload as { blocks?: PersistedScheduleBlock[] } | undefined)
     ?.blocks ?? []).filter((block) => block.day);
   const signatures = new Map<string, Set<string>>();
   for (const block of committed.filter((item) => item.id.startsWith("graph_calendar:"))) {
@@ -438,32 +443,32 @@ export function loadGoalForecast(): ForecastResult & { inferredRegularBlocks: nu
     return real ? [] : [{ day, start: start!, end: end! }];
   }));
   const busy = [...committed.map((block) => ({ day: block.day!, start: block.start, end: block.end })), ...inferred];
-  const slots = availableSlots(readAvailability(), days, busy);
+  const slots = availableSlots(readAvailability(ctx), days, busy);
   const capacity = days.map((day) => ({ day, netMinutes: slots.filter((slot) => slot.day === day).reduce((sum, slot) => {
     try { return sum + (Date.parse(toZonedInstant(day, slot.end, preferences.timeZone))
       - Date.parse(toZonedInstant(day, slot.start, preferences.timeZone))) / 60_000; }
     catch { return sum; }
   }, 0), source: busy.some((block) => block.day === day) ? "calendar_adjusted" as const : "declared" as const }));
-  const goals = store.listMilestones(WORKSPACE_ID).filter((item) => item.status === "approved")
+  const goals = store.listMilestones(ctx.workspaceId).filter((item) => item.status === "approved")
     .map((item) => ({ id: item.id, title: item.title,
-      importance: readGoalSettings(item.id)?.importance ?? preferences.importance[item.id] ?? "ordinary" as const,
-      confirmedDeadline: readGoalSettings(item.id)?.confirmedDeadline ?? null }));
-  const orders = store.listWorkOrders(WORKSPACE_ID);
-  const tasks = orders.filter((order) => ACTIONABLE.includes(order.state)).map(plannerTaskOf);
+      importance: readGoalSettings(ctx, item.id)?.importance ?? preferences.importance[item.id] ?? "ordinary" as const,
+      confirmedDeadline: readGoalSettings(ctx, item.id)?.confirmedDeadline ?? null }));
+  const orders = store.listWorkOrders(ctx.workspaceId);
+  const tasks = orders.filter((order) => ACTIONABLE.includes(order.state)).map((order) => plannerTaskOf(ctx, order));
   const completedIds = new Set(orders.filter((order) => order.state === "accepted").map((order) => order.id));
   return { ...forecastGoals(goals, tasks, capacity, completedIds), inferredRegularBlocks: inferred.length };
 }
 
-export async function loadCurrentPlan(): Promise<PersistedPlan> {
-  ensureSeeded();
+export async function loadCurrentPlan(ctx: AccessContext): Promise<PersistedPlan> {
+  ensureSeeded(ctx);
   const store = getStore();
-  const stored = store.listPlanVersions(WORKSPACE_ID)[0];
+  const stored = store.listPlanVersions(ctx.workspaceId)[0];
   if (!stored) throw new Error("PLAN_VERSION_NOT_FOUND");
   const payload = stored.payload as { blocks?: PersistedScheduleBlock[] };
   // The calendar's blocks are stored; the scheduled ones are derived on read. Persisting a schedule
   // would mean the plan disagreed with the work orders the moment one of them moved.
   const committed = payload.blocks ?? [];
-  const suggested = readSchedulePreferences() ? await scheduledBlocks(planToday(), committed)
+  const suggested = readSchedulePreferences(ctx) ? await scheduledBlocks(ctx, planToday(ctx), committed)
     : { blocks: [] as PersistedScheduleBlock[], schedule: { status: "infeasible" as const,
       blockers: [{ taskId: "schedule", code: "ONBOARDING_REQUIRED",
         message: "请先填写时区、每周可用时间、精力时段、排程模式和目标重要性" }],
@@ -474,7 +479,7 @@ export async function loadCurrentPlan(): Promise<PersistedPlan> {
     status: stored.status,
     blocks: [...committed, ...suggested.blocks],
     schedule: suggested.schedule,
-    changes: store.listPlanChanges(stored.id).map((change) => {
+    changes: store.listPlanChanges(ctx.workspaceId, stored.id).map((change) => {
       const after = change.after as { blockId?: string } | undefined;
       return {
         id: change.id,
@@ -502,13 +507,13 @@ export type CalendarConnectorState = {
  * that was working — the page whose whole job is "what is connected" was wrong about the only thing
  * that was. Declared status and observed status are different claims, and only the second is useful.
  */
-export function loadCalendarConnectorState(): CalendarConnectorState {
+export function loadCalendarConnectorState(ctx: AccessContext): CalendarConnectorState {
   const store = getStore();
-  const cursor = store.readSyncCursor(WORKSPACE_ID, "graph_calendar", "calendarView");
-  const plan = store.listPlanVersions(WORKSPACE_ID)[0];
+  const cursor = store.readSyncCursor(ctx.workspaceId, "graph_calendar", "calendarView");
+  const plan = store.listPlanVersions(ctx.workspaceId)[0];
   const blocks = ((plan?.payload as { blocks?: Array<{ id?: string }> } | undefined)?.blocks ?? [])
     .filter((block) => String(block.id).startsWith("graph_calendar:"));
-  const last = store.listEvents(WORKSPACE_ID, { type: "plan.reality_changed" }).at(-1);
+  const last = store.listEvents(ctx.workspaceId, { type: "plan.reality_changed" }).at(-1);
   return {
     synced: Boolean(cursor),
     importedBlocks: blocks.length,
@@ -533,7 +538,7 @@ export type MilestoneInput = {
  * the version a gate already judged against stays readable forever. Without that, re-reading an old
  * acceptance would show it judged against criteria that did not exist at the time.
  */
-export function saveMilestoneEdit(input: MilestoneInput): { ok: true; id: string; version: number } | { ok: false; code: string } {
+export function saveMilestoneEdit(ctx: AccessContext, input: MilestoneInput): { ok: true; id: string; version: number } | { ok: false; code: string } {
   const title = input.title.trim();
   if (!title || title.length > 200) return { ok: false, code: "MILESTONE_TITLE_REQUIRED" };
   if (!defaultIdentityPacks().some((pack) => pack.id === input.identityId && pack.kind === "identity")) {
@@ -541,14 +546,14 @@ export function saveMilestoneEdit(input: MilestoneInput): { ok: true; id: string
   }
   const projectId = input.projectId.trim() || `${input.identityId}-default`;
   const store = getStore();
-  const existing = input.id ? store.listMilestones(WORKSPACE_ID).find((item) => item.id === input.id) : undefined;
+  const existing = input.id ? store.listMilestones(ctx.workspaceId).find((item) => item.id === input.id) : undefined;
   if (input.id && !existing) return { ok: false, code: "MILESTONE_NOT_FOUND" };
 
   const version = existing ? existing.version + 1 : 1;
   const id = existing?.id ?? `milestone-${randomUUID()}`;
   try {
     store.saveMilestone({
-      id, ownerId: OWNER_ID, workspaceId: WORKSPACE_ID,
+      id, ownerId: ctx.principalId, workspaceId: ctx.workspaceId,
       identityId: input.identityId, projectId, title,
       version, status: input.status, successCriteria: input.successCriteria
     });
@@ -558,7 +563,7 @@ export function saveMilestoneEdit(input: MilestoneInput): { ok: true; id: string
     return { ok: false, code: error instanceof Error ? error.message : "MILESTONE_SAVE_FAILED" };
   }
   store.appendEvent({
-    ownerId: OWNER_ID, workspaceId: WORKSPACE_ID,
+    ownerId: ctx.principalId, workspaceId: ctx.workspaceId,
     idempotencyKey: `milestone:saved:${id}:${version}`,
     type: existing ? "milestone.revised" : "milestone.created", entityId: id,
     payload: { version, status: input.status, title, criteria: input.successCriteria.length }
@@ -572,7 +577,7 @@ export function saveMilestoneEdit(input: MilestoneInput): { ok: true; id: string
  * Only candidates move. An id that is already approved, refuted or simply unknown comes back in
  * `skipped` — reporting it as decided would tell the person their click did something it did not.
  */
-export function decideMilestoneRelations(ids: string[], decision: "approved" | "archived"):
+export function decideMilestoneRelations(ctx: AccessContext, ids: string[], decision: "approved" | "archived"):
   | { ok: true; decided: string[]; skipped: string[] }
   | { ok: false; code: string } {
   if (requiredApproval("approve_milestone_relations") !== "batch") return { ok: false, code: "APPROVAL_MODE_UNEXPECTED" };
@@ -582,7 +587,7 @@ export function decideMilestoneRelations(ids: string[], decision: "approved" | "
   // Keyed on the decision and the exact set, so a double-submitted form writes one event, and a
   // genuinely different selection later is still recorded.
   const key = `relations:${decision}:${[...unique].sort().join(",")}`.slice(0, 400);
-  const result = store.decideMilestoneRelations(WORKSPACE_ID, unique, decision, key);
+  const result = store.decideMilestoneRelations(ctx.workspaceId, ctx.principalId, unique, decision, key);
   return { ok: true, ...result };
 }
 
@@ -593,21 +598,21 @@ export function decideMilestoneRelations(ids: string[], decision: "approved" | "
  * could move it out of `pending` — so a single calendar change would have made the plan permanently
  * unapprovable. Excluding a change is a decision, and the ledger records it as one.
  */
-export function resolvePlanChange(changeId: string, status: "approved" | "excluded"):
+export function resolvePlanChange(ctx: AccessContext, changeId: string, status: "approved" | "excluded"):
   | { ok: true; changed: boolean } | { ok: false; code: string } {
   if (!changeId || changeId.length > 200) return { ok: false, code: "PLAN_CHANGE_NOT_FOUND" };
-  const result = getStore().resolvePlanChange(WORKSPACE_ID, changeId, status, `plan-change:${changeId}:${status}`);
+  const result = getStore().resolvePlanChange(ctx.workspaceId, ctx.principalId, changeId, status, `plan-change:${changeId}:${status}`);
   return { ok: true, changed: result.changed };
 }
 
-export function approvePlanVersion(planId: string): { ok: true } | { ok: false; code: string } {
+export function approvePlanVersion(ctx: AccessContext, planId: string): { ok: true } | { ok: false; code: string } {
   const store = getStore();
-  const plan = store.listPlanVersions(WORKSPACE_ID).find((item) => item.id === planId);
+  const plan = store.listPlanVersions(ctx.workspaceId).find((item) => item.id === planId);
   if (!plan) return { ok: false, code: "PLAN_VERSION_NOT_FOUND" };
   if (plan.status === "approved") return { ok: true };
   if (plan.status !== "draft") return { ok: false, code: "PLAN_VERSION_NOT_APPROVABLE" };
 
-  const changes = store.listPlanChanges(planId);
+  const changes = store.listPlanChanges(ctx.workspaceId, planId);
   if (changes.some((change) => change.kind === "conflict" && change.status === "pending")) {
     return { ok: false, code: "PLAN_HAS_UNRESOLVED_CONFLICT" };
   }
@@ -616,23 +621,24 @@ export function approvePlanVersion(planId: string): { ok: true } | { ok: false; 
   }
   store.savePlanVersion({ ...plan, status: "approved" });
   store.appendEvent({
-    ownerId: OWNER_ID, workspaceId: WORKSPACE_ID,
+    ownerId: ctx.principalId, workspaceId: ctx.workspaceId,
     idempotencyKey: `plan-approved:${planId}`, type: "plan.approved", entityId: planId,
     payload: { from: "draft", to: "approved", approvedChangeIds: changes.filter((change) => change.status === "pending").map((change) => change.id) }
   });
   return { ok: true };
 }
 
-export function addCapturedTask(input: { title: string; context?: string }): string {
-  return addCapturedTaskWithId(input, randomUUID(), `capture:${randomUUID()}`);
+export function addCapturedTask(ctx: AccessContext, input: { title: string; context?: string }): string {
+  return addCapturedTaskWithId(ctx, input, randomUUID(), `capture:${randomUUID()}`);
 }
 
 export function addCapturedTaskWithId(
+  ctx: AccessContext,
   input: { title: string; context?: string },
   id: string,
   idempotencyKey: string
 ): string {
-  getStore().capture({ id, ownerId: OWNER_ID, workspaceId: WORKSPACE_ID,
+  getStore().capture({ id, ownerId: ctx.principalId, workspaceId: ctx.workspaceId,
     title: input.title, context: input.context ?? "" }, idempotencyKey);
   return id;
 }
@@ -641,23 +647,23 @@ export type ExecutionResult = { ok: true } | { ok: false; code: string };
 
 // A WorkOrder can be executed more than once (blocked → approved → restarted), so every execution-scoped
 // idempotency key is numbered by how many executions that WorkOrder already has.
-function executionRun(workOrderId: string): number {
-  return getStore().listExecutions(WORKSPACE_ID).filter((item) => item.workOrderId === workOrderId).length;
+function executionRun(workspaceId: string, workOrderId: string): number {
+  return getStore().listExecutions(workspaceId).filter((item) => item.workOrderId === workOrderId).length;
 }
 
-function findWorkOrder(workOrderId: string) {
-  return getStore().listWorkOrders(WORKSPACE_ID).find((item) => item.id === workOrderId);
+function findWorkOrder(workspaceId: string, workOrderId: string) {
+  return getStore().listWorkOrders(workspaceId).find((item) => item.id === workOrderId);
 }
 
-export function approveWorkOrderProposal(workOrderId: string): ExecutionResult {
-  const workOrder = findWorkOrder(workOrderId);
+export function approveWorkOrderProposal(ctx: AccessContext, workOrderId: string): ExecutionResult {
+  const workOrder = findWorkOrder(ctx.workspaceId, workOrderId);
   if (!workOrder) return { ok: false, code: "WORK_ORDER_NOT_FOUND" };
   if (workOrder.state === "approved") return { ok: true };
   // A blocked WorkOrder is recoverable by the same human approval that admitted it; the transition table
   // has always allowed it, and refusing here would strand a real item with no way back.
   if (workOrder.state !== "awaiting_plan_approval" && workOrder.state !== "blocked") return { ok: false, code: "PROPOSAL_NOT_APPROVABLE" };
-  getStore().transitionWorkOrder(WORKSPACE_ID, workOrderId, { type: "plan.approved", approvalId: OWNER_ID },
-    `proposal-approved:${workOrderId}:${executionRun(workOrderId)}`);
+  getStore().transitionWorkOrder(ctx.workspaceId, workOrderId, { type: "plan.approved", approvalId: ctx.principalId },
+    `proposal-approved:${workOrderId}:${executionRun(ctx.workspaceId, workOrderId)}`);
   return { ok: true };
 }
 
@@ -665,13 +671,13 @@ export function approveWorkOrderProposal(workOrderId: string): ExecutionResult {
  * Materials are ready. `source` records who actually prepared them: until AI preparation lands the
  * honest answer is "the human did", and a preparation that never finishes must not strand the item.
  */
-export function markMaterialsReady(workOrderId: string, source: "human" | "ai"): ExecutionResult {
-  const workOrder = findWorkOrder(workOrderId);
+export function markMaterialsReady(ctx: AccessContext, workOrderId: string, source: "human" | "ai"): ExecutionResult {
+  const workOrder = findWorkOrder(ctx.workspaceId, workOrderId);
   if (!workOrder) return { ok: false, code: "WORK_ORDER_NOT_FOUND" };
   if (workOrder.state === "ready_for_human") return { ok: true };
   if (workOrder.state !== "preparing") return { ok: false, code: "MATERIALS_NOT_PREPARING" };
-  getStore().transitionWorkOrder(WORKSPACE_ID, workOrderId, { type: "materials.ready" },
-    `materials-ready:${workOrderId}:${executionRun(workOrderId)}:${source}`);
+  getStore().transitionWorkOrder(ctx.workspaceId, workOrderId, { type: "materials.ready" },
+    `materials-ready:${workOrderId}:${executionRun(ctx.workspaceId, workOrderId)}:${source}`);
   return { ok: true };
 }
 
@@ -682,14 +688,14 @@ export function markMaterialsReady(workOrderId: string, source: "human" | "ai"):
  * transient failure — or by a bug that has since been fixed — stayed blocked forever with only the
  * "I prepared them myself" escape.
  */
-export function retryMaterialPreparation(workOrderId: string): ExecutionResult {
-  const workOrder = findWorkOrder(workOrderId);
+export function retryMaterialPreparation(ctx: AccessContext, workOrderId: string): ExecutionResult {
+  const workOrder = findWorkOrder(ctx.workspaceId, workOrderId);
   if (!workOrder) return { ok: false, code: "WORK_ORDER_NOT_FOUND" };
   if (workOrder.state !== "preparing") return { ok: false, code: "MATERIALS_NOT_PREPARING" };
   getStore().appendEvent({
-    ownerId: OWNER_ID, workspaceId: WORKSPACE_ID,
+    ownerId: ctx.principalId, workspaceId: ctx.workspaceId,
     idempotencyKey: `materials:retry:${workOrderId}:${Date.now()}`,
-    type: "materials.retry_requested", entityId: workOrderId, payload: { requestedBy: OWNER_ID }
+    type: "materials.retry_requested", entityId: workOrderId, payload: { requestedBy: ctx.principalId }
   });
   return { ok: true };
 }
@@ -702,8 +708,8 @@ export function retryMaterialPreparation(workOrderId: string): ExecutionResult {
  * sitting there" as options. An accepted WorkOrder is excluded: discarding finished work would be
  * rewriting history rather than cleaning up an inbox.
  */
-export function archiveWorkOrder(workOrderId: string, reason: string): ExecutionResult {
-  const workOrder = findWorkOrder(workOrderId);
+export function archiveWorkOrder(ctx: AccessContext, workOrderId: string, reason: string): ExecutionResult {
+  const workOrder = findWorkOrder(ctx.workspaceId, workOrderId);
   if (!workOrder) return { ok: false, code: "WORK_ORDER_NOT_FOUND" };
   if (workOrder.state === "archived") return { ok: true };
   if (workOrder.state === "accepted") return { ok: false, code: "WORK_ORDER_ALREADY_ACCEPTED" };
@@ -713,18 +719,18 @@ export function archiveWorkOrder(workOrderId: string, reason: string): Execution
   // The reason rides on its own event rather than the transition: `transitionWorkOrder` carries only
   // the fields the state machine itself validates, and a discard reason is a note, not a state input.
   store.appendEvent({
-    ownerId: OWNER_ID, workspaceId: WORKSPACE_ID, idempotencyKey: `archive-reason:${workOrderId}`,
+    ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `archive-reason:${workOrderId}`,
     type: "work_order.archived", entityId: workOrderId, payload: { reason: trimmed.slice(0, 200) }
   });
-  const result = store.transitionWorkOrder(WORKSPACE_ID, workOrderId, { type: "archived" }, `archive:${workOrderId}`);
+  const result = store.transitionWorkOrder(ctx.workspaceId, workOrderId, { type: "archived" }, `archive:${workOrderId}`);
   if (!result.changed) return { ok: false, code: "WORK_ORDER_NOT_ARCHIVABLE" };
   return { ok: true };
 }
 
 /** Discards a raw capture. The WorkOrder equivalent is `archiveWorkOrder`; captures had no exit. */
-export function discardCapture(captureId: string, reason: string): ExecutionResult {
+export function discardCapture(ctx: AccessContext, captureId: string, reason: string): ExecutionResult {
   try {
-    getStore().discardCapture(WORKSPACE_ID, captureId, reason);
+    getStore().discardCapture(ctx.workspaceId, captureId, reason);
     return { ok: true };
   } catch (error) {
     const code = error instanceof Error && /^[A-Z_]+$/.test(error.message) ? error.message : "CAPTURE_DISCARD_FAILED";
@@ -732,12 +738,12 @@ export function discardCapture(captureId: string, reason: string): ExecutionResu
   }
 }
 
-export function startWorkOrderExecution(workOrderId: string): ExecutionResult {
+export function startWorkOrderExecution(ctx: AccessContext, workOrderId: string): ExecutionResult {
   const store = getStore();
-  const workOrder = findWorkOrder(workOrderId);
+  const workOrder = findWorkOrder(ctx.workspaceId, workOrderId);
   if (!workOrder) return { ok: false, code: "WORK_ORDER_NOT_FOUND" };
   if (workOrder.state === "active") return { ok: true };
-  const run = executionRun(workOrderId);
+  const run = executionRun(ctx.workspaceId, workOrderId);
   if (workOrder.state === "approved") {
     // Needing materials used to be a dead end: nothing emitted `automation.started`, so any WorkOrder
     // whose analysis did its job was stuck forever. Preparation is now a real state you pass through.
@@ -745,55 +751,55 @@ export function startWorkOrderExecution(workOrderId: string): ExecutionResult {
     // Already prepared once. Sending it back to `preparing` would strand it: the worker skips orders
     // that already have materials, so nothing would ever move it on, and the person would be looking at
     // 「材料准备中」 for materials sitting on disk. This is the path a restored-from-blocked order takes.
-    if (materials.length && store.listMaterials(WORKSPACE_ID, workOrderId).length === 0) {
-      store.transitionWorkOrder(WORKSPACE_ID, workOrderId, { type: "automation.started" }, `materials-preparing:${workOrderId}:${run}`);
+    if (materials.length && store.listMaterials(ctx.workspaceId, workOrderId).length === 0) {
+      store.transitionWorkOrder(ctx.workspaceId, workOrderId, { type: "automation.started" }, `materials-preparing:${workOrderId}:${run}`);
       return { ok: false, code: "MATERIALS_PREPARING" };
     }
-    store.transitionWorkOrder(WORKSPACE_ID, workOrderId, { type: "materials.not_required" }, `materials-not-required:${workOrderId}:${run}`);
+    store.transitionWorkOrder(ctx.workspaceId, workOrderId, { type: "materials.not_required" }, `materials-not-required:${workOrderId}:${run}`);
   } else if (workOrder.state !== "ready_for_human") {
     return { ok: false, code: "EXECUTION_NOT_STARTABLE" };
   }
-  store.transitionWorkOrder(WORKSPACE_ID, workOrderId, { type: "human.started" }, `execution:${workOrderId}:${run}:started`,
+  store.transitionWorkOrder(ctx.workspaceId, workOrderId, { type: "human.started" }, `execution:${workOrderId}:${run}:started`,
     { durationObserved: true });
   return { ok: true };
 }
 
-export function pauseWorkOrderExecution(workOrderId: string, reason: string): ExecutionResult {
+export function pauseWorkOrderExecution(ctx: AccessContext, workOrderId: string, reason: string): ExecutionResult {
   if (!reason.trim()) return { ok: false, code: "INTERRUPTION_REASON_REQUIRED" };
-  if (findWorkOrder(workOrderId)?.state !== "active") return { ok: false, code: "NO_ACTIVE_EXECUTION" };
-  getStore().pauseExecution(WORKSPACE_ID, workOrderId, reason.trim());
+  if (findWorkOrder(ctx.workspaceId, workOrderId)?.state !== "active") return { ok: false, code: "NO_ACTIVE_EXECUTION" };
+  getStore().pauseExecution(ctx.workspaceId, workOrderId, reason.trim());
   return { ok: true };
 }
 
-export function resumeWorkOrderExecution(workOrderId: string): ExecutionResult {
-  if (findWorkOrder(workOrderId)?.state !== "active") return { ok: false, code: "NO_ACTIVE_EXECUTION" };
-  getStore().resumeExecution(WORKSPACE_ID, workOrderId);
+export function resumeWorkOrderExecution(ctx: AccessContext, workOrderId: string): ExecutionResult {
+  if (findWorkOrder(ctx.workspaceId, workOrderId)?.state !== "active") return { ok: false, code: "NO_ACTIVE_EXECUTION" };
+  getStore().resumeExecution(ctx.workspaceId, workOrderId);
   return { ok: true };
 }
 
-export function completeWorkOrderExecution(workOrderId: string, evidence: EvidenceClaimInput[]): ExecutionResult {
+export function completeWorkOrderExecution(ctx: AccessContext, workOrderId: string, evidence: EvidenceClaimInput[]): ExecutionResult {
   const store = getStore();
-  const workOrder = findWorkOrder(workOrderId);
+  const workOrder = findWorkOrder(ctx.workspaceId, workOrderId);
   if (!workOrder) return { ok: false, code: "WORK_ORDER_NOT_FOUND" };
   if (workOrder.state === "evidence_review") return { ok: true };
   if (workOrder.state !== "active") return { ok: false, code: "EXECUTION_NOT_ACTIVE" };
-  store.transitionWorkOrder(WORKSPACE_ID, workOrderId, { type: "human.completed" },
-    `execution:${workOrderId}:${executionRun(workOrderId) - 1}:completed`, { evidence });
+  store.transitionWorkOrder(ctx.workspaceId, workOrderId, { type: "human.completed" },
+    `execution:${workOrderId}:${executionRun(ctx.workspaceId, workOrderId) - 1}:completed`, { evidence });
   return { ok: true };
 }
 
-export function acceptWorkOrderEvidence(workOrderId: string): ExecutionResult {
-  const workOrder = findWorkOrder(workOrderId);
+export function acceptWorkOrderEvidence(ctx: AccessContext, workOrderId: string): ExecutionResult {
+  const workOrder = findWorkOrder(ctx.workspaceId, workOrderId);
   if (!workOrder) return { ok: false, code: "WORK_ORDER_NOT_FOUND" };
   if (workOrder.state === "accepted") return { ok: true };
   if (workOrder.state !== "evidence_review") return { ok: false, code: "EVIDENCE_REVIEW_NOT_READY" };
   if (workOrder.milestoneId) return { ok: false, code: "MILESTONE_GATE_REQUIRED" };
-  getStore().transitionWorkOrder(WORKSPACE_ID, workOrderId, { type: "evidence.accepted", approvalId: OWNER_ID },
-    `evidence-accepted:${workOrderId}:${executionRun(workOrderId)}`);
+  getStore().transitionWorkOrder(ctx.workspaceId, workOrderId, { type: "evidence.accepted", approvalId: ctx.principalId },
+    `evidence-accepted:${workOrderId}:${executionRun(ctx.workspaceId, workOrderId)}`);
   return { ok: true };
 }
 
-export function revokeAutoAcceptedWorkOrder(workOrderId: string, reason: string): ExecutionResult {
+export function revokeAutoAcceptedWorkOrder(ctx: AccessContext, workOrderId: string, reason: string): ExecutionResult {
   const store = getStore();
   // Keyed on the attempt, not just the work order — the same reason a gate re-judgement is. A work
   // order can be auto-accepted, revoked, re-judged and auto-accepted again more than once, and a key
@@ -801,9 +807,9 @@ export function revokeAutoAcceptedWorkOrder(workOrderId: string, reason: string)
   // no-ops on a repeated idempotency key, `transitionWorkOrder` returned `changed: false`, and this
   // function returned `{ ok: true }` anyway without checking. The person saw the page reload and
   // believed the revoke worked; the ledger never left `accepted`.
-  const attempt = store.listEvents(WORKSPACE_ID, { type: "milestone_gate.auto_acceptance_revoked", entityId: workOrderId }).length;
+  const attempt = store.listEvents(ctx.workspaceId, { type: "milestone_gate.auto_acceptance_revoked", entityId: workOrderId }).length;
   try {
-    store.revokeAutoAcceptance(WORKSPACE_ID, workOrderId, reason, `auto-acceptance-revoked:${workOrderId}:${attempt}`);
+    store.revokeAutoAcceptance(ctx.workspaceId, workOrderId, reason, `auto-acceptance-revoked:${workOrderId}:${attempt}`);
     return { ok: true };
   } catch (error) {
     const code = error instanceof Error && /^[A-Z_]+$/.test(error.message) ? error.message : "AUTO_ACCEPTANCE_REVOKE_FAILED";
@@ -811,13 +817,13 @@ export function revokeAutoAcceptedWorkOrder(workOrderId: string, reason: string)
   }
 }
 
-export function blockWorkOrderEvidence(workOrderId: string, reason: string): ExecutionResult {
+export function blockWorkOrderEvidence(ctx: AccessContext, workOrderId: string, reason: string): ExecutionResult {
   if (!reason.trim()) return { ok: false, code: "BLOCK_REASON_REQUIRED" };
-  const workOrder = findWorkOrder(workOrderId);
+  const workOrder = findWorkOrder(ctx.workspaceId, workOrderId);
   if (!workOrder) return { ok: false, code: "WORK_ORDER_NOT_FOUND" };
   if (workOrder.state !== "evidence_review") return { ok: false, code: "EVIDENCE_REVIEW_NOT_READY" };
-  getStore().transitionWorkOrder(WORKSPACE_ID, workOrderId, { type: "blocked", reason: reason.trim() },
-    `evidence-blocked:${workOrderId}:${executionRun(workOrderId)}`);
+  getStore().transitionWorkOrder(ctx.workspaceId, workOrderId, { type: "blocked", reason: reason.trim() },
+    `evidence-blocked:${workOrderId}:${executionRun(ctx.workspaceId, workOrderId)}`);
   return { ok: true };
 }
 
@@ -832,9 +838,9 @@ type ActionableOrder = ReturnType<CrosslineStore["listWorkOrders"]>[number];
 const humanCoreOf = (order: ActionableOrder) =>
   ((order.payload as { humanCore?: Array<{ energy?: string; interruptible?: boolean }> }).humanCore ?? [])[0];
 
-const plannerTaskOf = (order: ActionableOrder) => {
-  const preferences = readSchedulePreferences();
-  const goal = readGoalSettings(order.milestoneId);
+const plannerTaskOf = (ctx: AccessContext, order: ActionableOrder) => {
+  const preferences = readSchedulePreferences(ctx);
+  const goal = readGoalSettings(ctx, order.milestoneId);
   const important = (goal?.importance ?? preferences?.importance[order.milestoneId]) === "important";
   const tier = preferences ? goal?.confirmedDeadline ? important ? 1 : 2 : important ? 3 : 4
     : order.state === "approved" ? 3 : order.identityId === PRIMARY_CLOCK_ID ? 1 : 2;
@@ -861,9 +867,9 @@ export const LOCAL_ACTIVITY_CONSENT = "localActivity.consent";
  * alternative is showing an older expansion as if it were this morning's, which is the same class of
  * lie as a fabricated metric.
  */
-function lastNight(now: Date): DashboardData["lastNight"] {
+function lastNight(workspaceId: string, now: Date): DashboardData["lastNight"] {
   const since = new Date(now.getTime() - 36 * 60 * 60_000).toISOString();
-  const event = [...getStore().listEvents(WORKSPACE_ID)]
+  const event = [...getStore().listEvents(workspaceId)]
     .reverse()
     .find((item) => item.type.startsWith("flywheel.nightly.") && item.createdAt >= since);
   if (!event) return { state: "none" };
@@ -875,9 +881,9 @@ function lastNight(now: Date): DashboardData["lastNight"] {
 const dayOf = (iso: string) => iso.slice(0, 10);
 
 /** Interruptions per active hour, per day, from real executions — never from a guess about the day. */
-function interruptionDensity(): Array<{ day: string; perActiveHour: number }> {
+function interruptionDensity(workspaceId: string): Array<{ day: string; perActiveHour: number }> {
   const byDay = new Map<string, { interruptions: number; activeMinutes: number }>();
-  for (const execution of getStore().listExecutions(WORKSPACE_ID)) {
+  for (const execution of getStore().listExecutions(workspaceId)) {
     if (!execution.endedAt || !execution.durationObserved) continue;
     const wall = (Date.parse(execution.endedAt) - Date.parse(execution.startedAt)) / 60_000;
     const activeMinutes = Math.max(0, wall - execution.pauseMinutes);
@@ -892,10 +898,10 @@ function interruptionDensity(): Array<{ day: string; perActiveHour: number }> {
     .map(([day, bucket]) => ({ day, perActiveHour: bucket.interruptions / (bucket.activeMinutes / 60) }));
 }
 
-function latestCapacity(now: Date): DashboardData["capacity"] {
+function latestCapacity(ctx: AccessContext, now: Date): DashboardData["capacity"] {
   const store = getStore();
-  const observations = store.listEnergyObservations(WORKSPACE_ID);
-  const consent = store.getSetting(WORKSPACE_ID, LOCAL_ACTIVITY_CONSENT);
+  const observations = store.listEnergyObservations(ctx.workspaceId);
+  const consent = store.getSetting(ctx.workspaceId, LOCAL_ACTIVITY_CONSENT);
   return deriveCapacity({
     now: now.toISOString(),
     selfReports: observations
@@ -904,26 +910,26 @@ function latestCapacity(now: Date): DashboardData["capacity"] {
     dailyActivity: observations
       .filter((item) => item.source === "local_activity")
       .map((item) => ({ day: dayOf(item.observedAt), activeMinutes: item.aggregate.activeMinutes ?? 0, windowSwitches: item.aggregate.windowSwitches ?? 0 })),
-    interruptionDensity: interruptionDensity(),
+    interruptionDensity: interruptionDensity(ctx.workspaceId),
     localActivityConsent: consent === "granted" ? "granted" : consent === "denied" ? "denied" : "unasked"
   });
 }
 
-const toAction = (order: ActionableOrder | undefined, reason: string): DashboardAction | undefined => order ? ({
+const toAction = (ctx: AccessContext, order: ActionableOrder | undefined, reason: string): DashboardAction | undefined => order ? ({
   id: order.id,
   title: order.intent,
   identityId: order.identityId,
   estimate: order.estimate,
   ...(humanCoreOf(order)?.energy ? { energy: humanCoreOf(order)!.energy as "low" | "medium" | "high" } : {}),
   reason,
-  milestone: getStore().listMilestones(WORKSPACE_ID).find((item) => item.id === order.milestoneId)?.title ?? "等待确认",
+  milestone: getStore().listMilestones(ctx.workspaceId).find((item) => item.id === order.milestoneId)?.title ?? "等待确认",
   inputsReady: order.state === "ready_for_human" || order.state === "active"
 }) : undefined;
 
-export function loadDashboard(): DashboardData {
-  ensureSeeded();
+export function loadDashboard(ctx: AccessContext): DashboardData {
+  ensureSeeded(ctx);
   const store = getStore();
-  const orders = store.listWorkOrders(WORKSPACE_ID);
+  const orders = store.listWorkOrders(ctx.workspaceId);
   // Row order must not leak into the page: `updated_at` ties break on id, so whether the clock
   // ticked mid-seed decided the order and Today reshuffled between loads.
   // Capacity is a constraint, not an identity competing for the same list. Keyed on the pack's `kind`
@@ -933,19 +939,19 @@ export function loadDashboard(): DashboardData {
     .filter((order) => !capacityIdentityIds.has(order.identityId) && ACTIONABLE.includes(order.state))
     .sort((a, b) => ACTIONABLE.indexOf(a.state) - ACTIONABLE.indexOf(b.state) || a.id.localeCompare(b.id));
   const now = process.env.CROSSLINE_FIXED_NOW ? new Date(process.env.CROSSLINE_FIXED_NOW) : new Date();
-  const capacity = latestCapacity(now);
-  const outcomes = readTransitionOutcomes(store.listEvents(WORKSPACE_ID, { type: "energy.transition_outcome" }));
+  const capacity = latestCapacity(ctx, now);
+  const outcomes = readTransitionOutcomes(store.listEvents(ctx.workspaceId, { type: "energy.transition_outcome" }));
   const forecast = capacity.level === "uncalibrated" ? {} : Object.fromEntries(active.flatMap((order) => {
     const needed = humanCoreOf(order)?.energy;
     return needed === "low" || needed === "medium" || needed === "high"
       ? [[order.id, predictEnergyTransition(capacity.level as "low" | "medium" | "high",
         needed, outcomes).predicted]] : [];
   }));
-  const actions = recommendNextActions(active.map(plannerTaskOf), 40,
+  const actions = recommendNextActions(active.map((order) => plannerTaskOf(ctx, order)), 40,
     capacity.level === "uncalibrated" ? undefined : capacity.level, now, forecast);
-  const milestones = store.listMilestones(WORKSPACE_ID);
+  const milestones = store.listMilestones(ctx.workspaceId);
   const identityPacks = defaultIdentityPacks().filter((pack) => pack.kind === "identity");
-  const timeZone = readSchedulePreferences()?.timeZone
+  const timeZone = readSchedulePreferences(ctx)?.timeZone
     ?? process.env.CROSSLINE_TIME_ZONE?.trim() ?? "America/Chicago";
   const time = new Intl.DateTimeFormat("zh-CN", {
     weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false, timeZone
@@ -959,12 +965,14 @@ export function loadDashboard(): DashboardData {
         ? `当前${capacity.level === "low" ? "低" : capacity.level === "high" ? "高" : "中"}精力自评与所需精力匹配，输入已就绪`
         : "暂无精力完全匹配的就绪作业，展示可执行的最高优先级备选"
     : "输入已就绪，按目标重要性和估时推荐；尚无新鲜精力自评";
-  const primary = toAction(active.find((task) => task.id === actions.primary?.id), primaryReason);
-  const higherPriority = toAction(active.find((task) => task.id === actions.higherPriority?.id),
+  const primary = toAction(ctx, active.find((task) => task.id === actions.primary?.id), primaryReason);
+  const higherPriority = toAction(ctx, active.find((task) => task.id === actions.higherPriority?.id),
     "优先级更高，但当前精力与任务要求不匹配；仍保留在这里供你决定");
-  const lowEnergy = toAction(active.find((task) => task.id === actions.lowEnergy?.id), "标注为低精力任务，启动阻力最小");
-  const shortGap = toAction(active.find((task) => task.id === actions.shortGap?.id), "先验 p85 在 40 分钟以内，可放进短空档");
+  const lowEnergy = toAction(ctx, active.find((task) => task.id === actions.lowEnergy?.id), "标注为低精力任务，启动阻力最小");
+  const shortGap = toAction(ctx, active.find((task) => task.id === actions.shortGap?.id), "先验 p85 在 40 分钟以内，可放进短空档");
   return {
+    principalId: ctx.principalId,
+    workspaceId: ctx.workspaceId,
     nowLabel: time,
     nowIso: now.toISOString(),
     timeZone,
@@ -974,13 +982,13 @@ export function loadDashboard(): DashboardData {
     capacity,
     energyLearning: energyCalibration(outcomes),
     // Absent means never asked, so the prompt appears exactly once and the answer is remembered.
-    localActivityAsked: store.getSetting(WORKSPACE_ID, LOCAL_ACTIVITY_CONSENT) !== undefined,
-    lastNight: lastNight(now),
+    localActivityAsked: store.getSetting(ctx.workspaceId, LOCAL_ACTIVITY_CONSENT) !== undefined,
+    lastNight: lastNight(ctx.workspaceId, now),
     ...(primary ? { primary } : {}),
     ...(higherPriority ? { higherPriority } : {}),
     ...(lowEnergy ? { lowEnergy } : {}),
     ...(shortGap ? { shortGap } : {}),
-    care: store.listCapacityCommitments(WORKSPACE_ID).map((item) => ({ title: item.title, minimumMinutes: item.minimumMinutes })),
+    care: store.listCapacityCommitments(ctx.workspaceId).map((item) => ({ title: item.title, minimumMinutes: item.minimumMinutes })),
     identities: identityPacks.map((pack) => {
       const identityOrders = orders.filter((order) => order.identityId === pack.id);
       const completed = identityOrders.filter((order) => order.state === "accepted").length;
@@ -1009,7 +1017,7 @@ export function loadDashboard(): DashboardData {
           : order.state === "active" ? "执行中"
           : `${order.estimate.p50Minutes} 分钟 · 待排程`
       })),
-      ...store.listCaptures(WORKSPACE_ID)
+      ...store.listCaptures(ctx.workspaceId)
         .filter((item) => item.state === "blocked" || item.state === "captured" || item.state === "analyzing")
         .map((item) => ({
           id: item.id, title: item.title, identityId: "unclassified",

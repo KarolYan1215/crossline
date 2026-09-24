@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { mkdirSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import Database from "better-sqlite3";
 import { betterAuth, type Auth, type BetterAuthOptions } from "better-auth";
 import { nextCookies } from "better-auth/next-js";
@@ -17,6 +19,12 @@ export type CrosslineAuthOptions = {
   trustedOrigins: string[];
   smtp?: SmtpConfig;
   google?: GoogleConfig;
+  /**
+   * When set, verification/reset emails are written as one JSON file per message into this directory
+   * instead of going through `smtp` — the e2e harness reads them back to drive the real sign-up →
+   * verify → sign-in flow without a real mailbox. Never set outside the e2e build.
+   */
+  testMailboxDir?: string;
 };
 
 export type CrosslineAuth = Auth;
@@ -32,10 +40,11 @@ function mailer(smtp: SmtpConfig) {
  * A factory, not a singleton: tests build one against a temp `authDbPath`, `apps/web` builds exactly
  * one against `CROSSLINE_DATA_DIR` and caches it the same way `getStore()` caches `CrosslineStore`.
  *
- * Email/password sign-up is enabled only when `smtp` is supplied — the big plan requires this ("SMTP
- * 未配置时禁用邮箱注册，不允许退化为未验证账号"), and Better Auth's own `emailAndPassword.enabled` is a
- * required field, not something that defaults to off on its own — so the whole block is omitted rather
- * than passed with an `enabled: false` that would still register the routes.
+ * Email/password sign-up is enabled only when the config can actually deliver a verification message —
+ * `smtp` in production, `testMailboxDir` in the e2e build — the big plan requires this ("SMTP 未配置时禁用
+ * 邮箱注册，不允许退化为未验证账号"), and Better Auth's own `emailAndPassword.enabled` is a required field,
+ * not something that defaults to off on its own — so the whole block is omitted rather than passed with
+ * an `enabled: false` that would still register the routes.
  */
 /**
  * The pure config, split out from `createCrosslineAuth` so `migrateCrosslineAuth` (below) can build the
@@ -46,10 +55,19 @@ function mailer(smtp: SmtpConfig) {
  */
 function crosslineAuthConfig(options: CrosslineAuthOptions): BetterAuthOptions {
   const transport = options.smtp ? mailer(options.smtp) : undefined;
-  const sendMail = (to: string, subject: string, url: string) => {
+  const sendMail = (to: string, subject: string, url: string): Promise<void> => {
+    // The e2e sink takes priority when both are set (it never is in production — see the `testMailboxDir`
+    // doc comment) so a captured message never silently also tries a real SMTP round trip.
+    if (options.testMailboxDir) {
+      mkdirSync(options.testMailboxDir, { recursive: true });
+      writeFileSync(path.join(options.testMailboxDir, `${Date.now()}-${randomUUID()}.json`),
+        JSON.stringify({ to, subject, url }));
+      return Promise.resolve();
+    }
     if (!transport || !options.smtp) return Promise.resolve();
     return transport.sendMail({ from: options.smtp.from, to, subject, text: url }).then(() => undefined);
   };
+  const emailCapable = Boolean(options.smtp || options.testMailboxDir);
 
   // Widened to the plain `BetterAuthOptions` return type: `betterAuth<Options>` returns `Auth<Options>`,
   // and letting `Options` infer as this specific literal object type makes the returned `Auth<...>`
@@ -75,7 +93,7 @@ function crosslineAuthConfig(options: CrosslineAuthOptions): BetterAuthOptions {
       // is still how a user connects a second provider on purpose.
       accountLinking: { disableImplicitLinking: true }
     },
-    ...(options.smtp ? {
+    ...(emailCapable ? {
       emailAndPassword: {
         enabled: true,
         requireEmailVerification: true,

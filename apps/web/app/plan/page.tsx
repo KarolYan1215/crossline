@@ -3,25 +3,27 @@ import { AvailabilityEditor } from "./availability-editor";
 import { ScheduleSetup } from "./schedule-setup";
 import { ForecastDelta } from "./forecast-delta";
 import { SubpageShell } from "../subpage-shell";
-import { getStore, loadCurrentPlan, loadGoalForecast, planToday, readAvailability, readGoalSettings, readSchedulePreferences,
-  WORKSPACE_ID } from "../../lib/crossline";
+import { getStore, loadCurrentPlan, loadGoalForecast, planToday, readAvailability, readGoalSettings, readSchedulePreferences
+} from "../../lib/crossline";
+import { requireSessionContext } from "../../lib/access-guard";
 
 export const dynamic = "force-dynamic";
 
 export default async function PlanPage() {
-  const plan = await loadCurrentPlan();
-  const preferences = readSchedulePreferences();
-  const forecast = preferences ? loadGoalForecast() : null;
-  const milestones = getStore().listMilestones(WORKSPACE_ID).filter((item) => item.status === "approved")
+  const ctx = await requireSessionContext();
+  const plan = await loadCurrentPlan(ctx);
+  const preferences = readSchedulePreferences(ctx);
+  const forecast = preferences ? loadGoalForecast(ctx) : null;
+  const milestones = getStore().listMilestones(ctx.workspaceId).filter((item) => item.status === "approved")
     .map((item) => ({ id: item.id, title: item.title }));
   const effectivePreferences = preferences && { ...preferences, importance: {
     ...preferences.importance,
     ...Object.fromEntries(milestones.flatMap((milestone) => {
-      const goal = readGoalSettings(milestone.id);
+      const goal = readGoalSettings(ctx, milestone.id);
       return goal ? [[milestone.id, goal.importance]] : [];
     }))
   } };
-  const today = planToday();
+  const today = planToday(ctx);
   const importedBlocks = plan.blocks.filter((block) => block.id.startsWith("graph_calendar:"));
   // Split by day on purpose. The header said 「已从日历导入 3 个真实块」 while the B lens — which only
   // ever shows today — displayed none of them, because all three sat later in the week. A true count
@@ -38,8 +40,8 @@ export default async function PlanPage() {
   // free; it now comes out of `planSchedule` against the availability edited below.
   const description = `B 看今天的现实与 AI 并行，C 批准差异，A 查看整周；三者共用同一计划版本。${importedNote}AI 那条道是排程器按下面的可用时间实时算出来的，不落库，所以不会和作业本身对不上。`;
   return <SubpageShell eyebrow="PLAN / B · C · A" title="共享时间轴" description={description}>
-    {!preferences ? <ScheduleSetup windows={readAvailability()} milestones={milestones} /> : <>
-    <AvailabilityEditor windows={readAvailability()} preferences={effectivePreferences!} milestones={milestones} />
+    {!preferences ? <ScheduleSetup windows={readAvailability(ctx)} milestones={milestones} /> : <>
+    <AvailabilityEditor windows={readAvailability(ctx)} preferences={effectivePreferences!} milestones={milestones} />
     <PlanView plan={plan} today={today} />
     {forecast && <section className="goal-forecast" aria-label="未来八周目标情景">
       <h2>未来 8 周 · 容量与目标情景</h2>

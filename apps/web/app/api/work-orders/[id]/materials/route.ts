@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { getStore, WORKSPACE_ID } from "../../../../../lib/crossline";
+import { getStore } from "../../../../../lib/crossline";
+import { resolveAccessContext } from "../../../../../lib/access-guard";
 
 /**
  * Serves one prepared material back to the person who asked for it.
@@ -19,8 +20,10 @@ const PROJECT_ROOT = path.resolve(process.cwd(), "..", "..");
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params;
   if (!/^[a-zA-Z0-9_-]{1,128}$/.test(id)) return new Response("NOT_FOUND", { status: 404 });
+  const access = await resolveAccessContext(request);
+  if ("response" in access) return access.response;
   const uri = new URL(request.url).searchParams.get("uri") ?? "";
-  const material = getStore().listMaterials(WORKSPACE_ID, id).find((item) => item.uri === uri);
+  const material = getStore().listMaterials(access.ctx.workspaceId, id).find((item) => item.uri === uri);
   if (!material) return new Response("MATERIAL_NOT_FOUND", { status: 404 });
 
   const root = path.resolve(PROJECT_ROOT, ".crossline-materials", id);

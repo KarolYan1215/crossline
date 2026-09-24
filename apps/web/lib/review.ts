@@ -1,6 +1,6 @@
 import "server-only";
-import { rankCandidates, stalledIdentities, type CandidateRelation } from "@crossline/core";
-import { getStore, WORKSPACE_ID } from "./crossline";
+import { rankCandidates, stalledIdentities, type AccessContext, type CandidateRelation } from "@crossline/core";
+import { getStore } from "./crossline";
 
 export type WeeklyReview = {
   /** Compensating control for automatic acceptance: every one is listed, never folded into a count. */
@@ -30,12 +30,12 @@ export type WeeklyReview = {
 const daysBetween = (fromIso: string, to: Date) =>
   Math.floor((to.getTime() - Date.parse(fromIso)) / 86_400_000);
 
-export function loadWeeklyReview(now = new Date()): WeeklyReview {
+export function loadWeeklyReview(ctx: AccessContext, now = new Date()): WeeklyReview {
   const store = getStore();
   const since = new Date(now.getTime() - 7 * 86_400_000).toISOString();
-  const events = store.listEvents(WORKSPACE_ID);
-  const orders = store.listWorkOrders(WORKSPACE_ID);
-  const milestones = store.listMilestones(WORKSPACE_ID);
+  const events = store.listEvents(ctx.workspaceId);
+  const orders = store.listWorkOrders(ctx.workspaceId);
+  const milestones = store.listMilestones(ctx.workspaceId);
 
   // One line per work order, not per event. The audit event is appended by the gate, and a work order
   // judged twice produced two identical lines for one acceptance — a compensating control that
@@ -93,7 +93,7 @@ export function loadWeeklyReview(now = new Date()): WeeklyReview {
     if (order?.milestoneId) lastPassByMilestone.set(order.milestoneId, event.createdAt);
   }
 
-  const relations = store.listMilestoneRelations(WORKSPACE_ID);
+  const relations = store.listMilestoneRelations(ctx.workspaceId);
   const candidateRows: CandidateRelation[] = relations
     .filter((relation) => relation.status === "candidate")
     .map((relation) => {

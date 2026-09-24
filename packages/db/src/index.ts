@@ -937,7 +937,7 @@ export class CrosslineStore {
    * whole review untrustworthy. Ids that are not candidates come back in `skipped` rather than being
    * reported as successes.
    */
-  decideMilestoneRelations(workspaceId: string, ids: string[], decision: "approved" | "archived",
+  decideMilestoneRelations(workspaceId: string, ownerId: string, ids: string[], decision: "approved" | "archived",
     idempotencyKey: string): { decided: string[]; skipped: string[] } {
     const decided: string[] = [];
     const skipped: string[] = [];
@@ -959,7 +959,7 @@ export class CrosslineStore {
       }
       if (decided.length) {
         this.appendEvent({
-          ownerId: "local-owner", workspaceId, idempotencyKey,
+          ownerId, workspaceId, idempotencyKey,
           type: "milestone_relations.decided", entityId: decided[0]!,
           payload: { decision, relationIds: decided, skipped }
         });
@@ -1232,10 +1232,10 @@ export class CrosslineStore {
     );
   }
 
-  listPlanChanges(planVersionId: string): StoredPlanChange[] {
+  listPlanChanges(workspaceId: string, planVersionId: string): StoredPlanChange[] {
     const rows = this.#db.prepare(
-      "SELECT * FROM plan_changes WHERE plan_version_id = ? ORDER BY id"
-    ).all(planVersionId) as Array<Record<string, string | null>>;
+      "SELECT * FROM plan_changes WHERE workspace_id = ? AND plan_version_id = ? ORDER BY id"
+    ).all(workspaceId, planVersionId) as Array<Record<string, string | null>>;
     return rows.map((row) => ({
       id: row.id!, ownerId: row.owner_id!, workspaceId: row.workspace_id!, planVersionId: row.plan_version_id!,
       kind: row.kind as StoredPlanChange["kind"], triggerEventId: row.trigger_event_id!, explanation: row.explanation!,
@@ -1291,7 +1291,7 @@ export class CrosslineStore {
       workOrders: this.listWorkOrders(workspaceId),
       milestoneRelations: this.listMilestoneRelations(workspaceId),
       planVersions,
-      planChanges: planVersions.flatMap((plan) => this.listPlanChanges(plan.id)),
+      planChanges: planVersions.flatMap((plan) => this.listPlanChanges(workspaceId, plan.id)),
       energyObservations: this.listEnergyObservations(workspaceId),
       tables
     };
@@ -1327,7 +1327,7 @@ export class CrosslineStore {
    * one out of `pending` — so a single conflict made the plan permanently unapprovable. Excluding is a
    * decision the person makes and the ledger records; it does not delete the change.
    */
-  resolvePlanChange(workspaceId: string, changeId: string, status: "approved" | "excluded",
+  resolvePlanChange(workspaceId: string, ownerId: string, changeId: string, status: "approved" | "excluded",
     idempotencyKey: string, expected?: { plan: StoredPlanVersion; change: StoredPlanChange }): { changed: boolean } {
     // Check-then-act: two callers could both read `pending` and both append a resolution event.
     return this.#db.transaction(() => {
@@ -1337,7 +1337,7 @@ export class CrosslineStore {
       if (!row || row.status !== "pending") return { changed: false };
       if (expected) {
         const currentPlan = this.listPlanVersions(workspaceId)[0];
-        const currentChange = this.listPlanChanges(row.plan_version_id!).find((item) => item.id === changeId);
+        const currentChange = this.listPlanChanges(workspaceId, row.plan_version_id!).find((item) => item.id === changeId);
         if (!currentPlan || currentPlan.id !== row.plan_version_id || currentPlan.status !== "draft"
           || JSON.stringify(currentPlan) !== JSON.stringify(expected.plan)
           || JSON.stringify(currentChange) !== JSON.stringify(expected.change))
@@ -1346,7 +1346,7 @@ export class CrosslineStore {
       this.#db.prepare("UPDATE plan_changes SET status = ? WHERE workspace_id = ? AND id = ?")
         .run(status, workspaceId, changeId);
       this.appendEvent({
-        ownerId: "local-owner", workspaceId, idempotencyKey,
+        ownerId, workspaceId, idempotencyKey,
         type: "plan_change.resolved", entityId: changeId,
         payload: { status, planVersionId: row.plan_version_id }
       });
@@ -1450,6 +1450,19 @@ export class CrosslineStore {
     const rows = this.#db.prepare("SELECT * FROM workspaces ORDER BY created_at, id")
       .all() as Array<Record<string, string>>;
     return rows.map((row) => ({ id: row.id!, name: row.name!, createdAt: row.created_at! }));
+  }
+
+  /**
+   * The worker runs as a background job with no request/session of its own, so it cannot get an
+   * `AccessContext` from `requireAccessContext` — it loops `listWorkspaces()` and needs the owner
+   * principal for each one to attribute the events it appends. Every workspace has exactly one owner
+   * member (no invite path exists yet), so this is that row's `principal_id`.
+   */
+  getWorkspaceOwnerId(workspaceId: string): string | undefined {
+    const row = this.#db.prepare(
+      "SELECT principal_id FROM workspace_members WHERE workspace_id = ? AND role = 'owner' ORDER BY created_at LIMIT 1"
+    ).get(workspaceId) as { principal_id?: string } | undefined;
+    return row?.principal_id;
   }
 
   /**

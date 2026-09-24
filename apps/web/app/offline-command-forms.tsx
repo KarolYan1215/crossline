@@ -34,13 +34,13 @@ export function OfflineReplay() {
   </aside>;
 }
 
-export function OfflineCaptureForm() {
+export function OfflineCaptureForm({ ownerId, workspaceId }: { ownerId: string; workspaceId: string }) {
   const [status, setStatus] = useState("");
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const form = event.currentTarget;
     const data = new FormData(form);
-    const command = createCommand(await nextSequence(), "task.capture", {
+    const command = createCommand(ownerId, workspaceId, await nextSequence(), "task.capture", {
       title: String(data.get("title") ?? ""),
       context: String(data.get("context") ?? "")
     });

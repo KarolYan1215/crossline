@@ -1,9 +1,10 @@
-import { getStore, WORKSPACE_ID } from "../../lib/crossline";
+import { getStore } from "../../lib/crossline";
 import { loadWeeklyReview } from "../../lib/review";
 import { SubpageShell } from "../subpage-shell";
 import { RevokeAcceptance } from "./revoke-acceptance";
 import { DecideRelations } from "./decide-relations";
 import { RevokeInsight } from "./revoke-insight";
+import { requireSessionContext } from "../../lib/access-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -18,10 +19,11 @@ const criterionKind: Record<string, string> = {
 };
 const metLabel: Record<string, string> = { met: "已达成", partial: "部分达成", unmet: "未达成", unverifiable: "无法核实" };
 
-export default function ReviewPage() {
-  const workOrders = getStore().listWorkOrders(WORKSPACE_ID);
+export default async function ReviewPage() {
+  const ctx = await requireSessionContext();
+  const workOrders = getStore().listWorkOrders(ctx.workspaceId);
   const accepted = workOrders.filter((workOrder) => workOrder.state === "accepted").length;
-  const review = loadWeeklyReview();
+  const review = loadWeeklyReview(ctx);
 
   return <SubpageShell eyebrow="证据驱动" title="周复盘" description="只显示数据库事实；尚无观测的指标一律标记为未标定，不给出编造数字。">
     <section className="review-block">

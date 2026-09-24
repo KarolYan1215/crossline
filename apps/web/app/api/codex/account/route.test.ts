@@ -1,7 +1,9 @@
 import { createServer } from "node:http";
 import { afterEach, describe, expect, test, vi } from "vitest";
+import { TEST_CTX } from "../../../../lib/test-support";
 
 vi.mock("server-only", () => ({}));
+vi.mock("../../../../lib/access-guard", () => ({ resolveAccessContext: async () => ({ ctx: TEST_CTX }) }));
 
 const previousSupervisorUrl = process.env.CROSSLINE_CODEX_SUPERVISOR_URL;
 
@@ -24,7 +26,7 @@ describe("Codex account route", () => {
     (globalThis as { crosslineCodexSidecar?: Promise<never> }).crosslineCodexSidecar = legacySidecar;
 
     const { GET } = await import("./route");
-    const response = await GET();
+    const response = await GET(new Request("http://localhost/api/codex/account"));
 
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({

@@ -1,5 +1,6 @@
 import { requestCodexSupervisor, CodexSupervisorRequestError } from "../../../../lib/codex-runtime";
 import { isCrossSiteWrite } from "../../../../lib/same-origin";
+import { resolveAccessContext } from "../../../../lib/access-guard";
 
 /**
  * Which calendars the reality lane is read from.
@@ -21,12 +22,16 @@ const relay = async (init: RequestInit) => {
   }
 };
 
-export async function GET() {
+export async function GET(request: Request) {
+  const access = await resolveAccessContext(request);
+  if ("response" in access) return access.response;
   return relay({ method: "GET" });
 }
 
 export async function POST(request: Request) {
   if (isCrossSiteWrite(request)) return Response.json({ ok: false, code: "REQUEST_FORBIDDEN" }, { status: 403 });
+  const access = await resolveAccessContext(request);
+  if ("response" in access) return access.response;
   const body = (await request.json().catch(() => ({}))) as { keys?: unknown };
   const keys = Array.isArray(body.keys) ? body.keys.filter((key): key is string => typeof key === "string") : [];
   return relay({

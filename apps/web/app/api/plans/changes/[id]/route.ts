@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server";
 import { resolvePlanChange } from "../../../../../lib/crossline";
+import { resolveAccessContext } from "../../../../../lib/access-guard";
 import { isCrossSiteWrite } from "../../../../../lib/same-origin";
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   if (isCrossSiteWrite(request)) return NextResponse.json({ ok: false, code: "REQUEST_FORBIDDEN" }, { status: 403 });
+  const access = await resolveAccessContext(request);
+  if ("response" in access) return access.response;
   const { id } = await context.params;
   let body: unknown;
   try { body = await request.json(); } catch { return NextResponse.json({ ok: false, code: "INVALID_JSON" }, { status: 400 }); }
@@ -11,7 +14,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   if (status !== "approved" && status !== "excluded") {
     return NextResponse.json({ ok: false, code: "INVALID_STATUS" }, { status: 400 });
   }
-  const result = resolvePlanChange(id, status);
+  const result = resolvePlanChange(access.ctx, id, status);
   if (!result.ok) return NextResponse.json(result, { status: 404 });
   return NextResponse.json(result);
 }

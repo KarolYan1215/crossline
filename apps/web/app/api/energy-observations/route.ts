@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
-import { getStore, WORKSPACE_ID } from "../../../lib/crossline";
+import { getStore } from "../../../lib/crossline";
+import { resolveAccessContext } from "../../../lib/access-guard";
 import { predictEnergyTransition, readTransitionOutcomes, type EnergyLevel } from "../../../lib/energy-learning";
 import { isCrossSiteWrite } from "../../../lib/same-origin";
 
@@ -8,6 +9,9 @@ const numericAggregateKeys = new Set(["responseSeconds"]);
 
 export async function POST(request: Request) {
   if (isCrossSiteWrite(request)) return NextResponse.json({ ok: false, code: "REQUEST_FORBIDDEN" }, { status: 403 });
+  const access = await resolveAccessContext(request);
+  if ("response" in access) return access.response;
+  const { ctx } = access;
   const body = await request.json().catch(() => ({})) as Record<string, unknown>;
   const allowedTopLevel = new Set(["source", "level", "confidence", "aggregate",
     "context", "workOrderId", "actualLoad"]);
@@ -43,24 +47,24 @@ export async function POST(request: Request) {
   const observedAt = new Date();
   const id = randomUUID();
   const store = getStore();
-  const order = workOrderId ? store.listWorkOrders(WORKSPACE_ID).find((item) => item.id === workOrderId) : undefined;
+  const order = workOrderId ? store.listWorkOrders(ctx.workspaceId).find((item) => item.id === workOrderId) : undefined;
   if (workOrderId && !order)
     return NextResponse.json({ ok: false, code: "WORK_ORDER_NOT_FOUND" }, { status: 404 });
-  const execution = context === "after_task" ? store.listExecutions(WORKSPACE_ID)
+  const execution = context === "after_task" ? store.listExecutions(ctx.workspaceId)
     .filter((run) => run.workOrderId === workOrderId).at(-1) : undefined;
   const executionFacts = execution?.endedAt && execution.durationObserved
     ? { durationMinutes: Math.max(0, Math.round((Date.parse(execution.endedAt) -
       Date.parse(execution.startedAt)) / 60_000) - execution.pauseMinutes),
       interruptionCount: execution.interruptions.length } : {};
   store.saveEnergyObservation({
-    id, ownerId: "local-owner", workspaceId: WORKSPACE_ID,
+    id, ownerId: ctx.principalId, workspaceId: ctx.workspaceId,
     source, level: level as "low" | "medium" | "high",
     confidence: confidence as "low" | "medium" | "high",
     aggregate: { ...Object.fromEntries(aggregateEntries) as Record<string, number>, ...executionFacts },
     observedAt: observedAt.toISOString()
   });
   store.appendEvent({
-    ownerId: "local-owner", workspaceId: WORKSPACE_ID,
+    ownerId: ctx.principalId, workspaceId: ctx.workspaceId,
     idempotencyKey: `energy-observed:${id}`, type: "energy.observed", entityId: id,
     payload: { source, level, confidence, context,
       ...(workOrderId ? { workOrderId } : {}), ...(actualLoad ? { actualLoad } : {}),
@@ -69,21 +73,21 @@ export async function POST(request: Request) {
   if (context === "before_task" && order) {
     const taskEnergy = ((order.payload as { humanCore?: Array<{ energy?: string }> }).humanCore ?? [])[0]?.energy;
     if (taskEnergy === "low" || taskEnergy === "medium" || taskEnergy === "high") {
-      const outcomes = readTransitionOutcomes(store.listEvents(WORKSPACE_ID, { type: "energy.transition_outcome" }));
+      const outcomes = readTransitionOutcomes(store.listEvents(ctx.workspaceId, { type: "energy.transition_outcome" }));
       const prediction = predictEnergyTransition(level as EnergyLevel, taskEnergy, outcomes);
-      store.appendEvent({ ownerId: "local-owner", workspaceId: WORKSPACE_ID,
+      store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId,
         idempotencyKey: `energy-predicted:${id}`, type: "energy.transition_predicted", entityId: order.id,
         payload: { observationId: id, before: level, taskEnergy, ...prediction } });
     }
   }
   if (context === "after_task" && order) {
-    const events = store.listEvents(WORKSPACE_ID, { type: ["energy.transition_predicted",
+    const events = store.listEvents(ctx.workspaceId, { type: ["energy.transition_predicted",
       "energy.transition_outcome"], entityId: order.id });
     const used = new Set(events.filter((event) => event.type === "energy.transition_outcome")
       .map((event) => (event.payload as { observationId?: string }).observationId));
     const prediction = [...events].reverse().find((event) => event.type === "energy.transition_predicted" &&
       !used.has((event.payload as { observationId?: string }).observationId));
-    if (prediction) store.appendEvent({ ownerId: "local-owner", workspaceId: WORKSPACE_ID,
+    if (prediction) store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId,
       idempotencyKey: `energy-outcome:${id}`, type: "energy.transition_outcome", entityId: order.id,
       payload: { ...(prediction.payload as Record<string, unknown>), actual: level,
         recordedAt: observedAt } });

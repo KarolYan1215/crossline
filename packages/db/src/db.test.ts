@@ -162,7 +162,7 @@ describe("event ledger", () => {
       kind: "add", triggerEventId: "event-1", explanation: "新增准备块", after: { start: "09:00" }, status: "pending"
     });
     expect(store.listPlanVersions("workspace-1")).toEqual([expect.objectContaining({ id: "plan-1", status: "draft" })]);
-    expect(store.listPlanChanges("plan-1")).toEqual([expect.objectContaining({ id: "change-1", triggerEventId: "event-1" })]);
+    expect(store.listPlanChanges("workspace-1", "plan-1")).toEqual([expect.objectContaining({ id: "change-1", triggerEventId: "event-1" })]);
     store.close();
   });
 

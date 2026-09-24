@@ -16,6 +16,8 @@ export type DashboardAction = {
 };
 
 export type DashboardData = {
+  principalId: string;
+  workspaceId: string;
   nowLabel: string;
   /** The instant every number in the day head is read from, so the dial cannot drift from the label. */
   nowIso: string;
@@ -114,7 +116,7 @@ export function DashboardView({ data }: { data: DashboardData }) {
 
     <section className="capture-line" aria-labelledby="capture-title">
       <div><span className="mono-label">INBOX / 00</span><h2 id="capture-title">快速收集</h2></div>
-      <OfflineCaptureForm />
+      <OfflineCaptureForm ownerId={data.principalId} workspaceId={data.workspaceId} />
     </section>
 
     <section className="today-grid">

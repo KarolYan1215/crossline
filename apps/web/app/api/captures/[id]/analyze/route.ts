@@ -1,4 +1,5 @@
-import { getStore, WORKSPACE_ID } from "../../../../../lib/crossline";
+import { getStore } from "../../../../../lib/crossline";
+import { resolveAccessContext } from "../../../../../lib/access-guard";
 import { CodexSupervisorRequestError, requestCodexSupervisor } from "../../../../../lib/codex-runtime";
 import { isCrossSiteWrite } from "../../../../../lib/same-origin";
 
@@ -6,7 +7,10 @@ type Context = { params: Promise<{ id: string }> };
 async function forward(request: Request, context: Context, method: "POST" | "DELETE") {
   const { id } = await context.params;
   if (isCrossSiteWrite(request)) return Response.json({ blocker: { code: "ANALYSIS_REQUEST_FORBIDDEN" } }, { status: 403 });
-  if (!/^[a-zA-Z0-9_-]{1,128}$/.test(id) || !getStore().listCaptures(WORKSPACE_ID).some((item) => item.id === id && item.ownerId === "local-owner")) {
+  const access = await resolveAccessContext(request);
+  if ("response" in access) return access.response;
+  const { ctx } = access;
+  if (!/^[a-zA-Z0-9_-]{1,128}$/.test(id) || !getStore().listCaptures(ctx.workspaceId).some((item) => item.id === id && item.ownerId === ctx.principalId)) {
     return Response.json({ blocker: { code: "CAPTURE_NOT_FOUND" } }, { status: 404 });
   }
   try {

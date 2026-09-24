@@ -67,7 +67,7 @@ test("a draft plan is updated in place; blocks the user authored are kept", asyn
   const blocks = (plans[0]?.payload as { blocks: Array<Record<string, unknown>> }).blocks;
   expect(blocks.find((block) => block.id === "graph_calendar:a")).toMatchObject({ start: "06:30" });
   expect(blocks.find((block) => block.id === "mine")).toMatchObject({ title: "深度工作" });
-  expect(store.listPlanChanges("plan-1").map((change) => change.kind)).toEqual(["move"]);
+  expect(store.listPlanChanges(WORKSPACE, "plan-1").map((change) => change.kind)).toEqual(["move"]);
 });
 
 test("an approved plan is never rewritten: reality moving becomes a new draft of conflicts", async () => {
@@ -84,7 +84,7 @@ test("an approved plan is never rewritten: reality moving becomes a new draft of
   expect((approved?.payload as { blocks: Array<Record<string, unknown>> }).blocks[0]).toMatchObject({ start: "06:00" });
   const draftId = (outcome as { planVersionId: string }).planVersionId;
   expect(draftId).not.toBe("plan-1");
-  const changes = store.listPlanChanges(draftId);
+  const changes = store.listPlanChanges(WORKSPACE, draftId);
   expect(changes.map((change) => change.kind)).toEqual(["conflict"]);
   expect(changes[0]?.explanation).toContain("06:00");
 });
@@ -97,12 +97,12 @@ test("a conflict can actually be resolved, so a plan is not permanently unapprov
   });
   const outcome = await sync();
   const draftId = (outcome as { planVersionId: string }).planVersionId;
-  const change = store.listPlanChanges(draftId)[0]!;
+  const change = store.listPlanChanges(WORKSPACE, draftId)[0]!;
 
-  expect(store.resolvePlanChange(WORKSPACE, change.id, "excluded", "k1")).toEqual({ changed: true });
-  expect(store.listPlanChanges(draftId)[0]?.status).toBe("excluded");
+  expect(store.resolvePlanChange(WORKSPACE, "local-owner", change.id, "excluded", "k1")).toEqual({ changed: true });
+  expect(store.listPlanChanges(WORKSPACE, draftId)[0]?.status).toBe("excluded");
   // Resolving twice is not a second decision.
-  expect(store.resolvePlanChange(WORKSPACE, change.id, "approved", "k2")).toEqual({ changed: false });
+  expect(store.resolvePlanChange(WORKSPACE, "local-owner", change.id, "approved", "k2")).toEqual({ changed: false });
   expect(store.listEvents("personal-crossline").filter((e) => e.type === "plan_change.resolved")).toHaveLength(1);
 });
 
@@ -118,7 +118,7 @@ test("a deleted event is removed even when its tombstone arrives after its creat
   await sync();
   const blocks = (store.listPlanVersions(WORKSPACE)[0]?.payload as { blocks: unknown[] }).blocks;
   expect(blocks).toEqual([]);
-  expect(store.listPlanChanges("plan-1").map((change) => change.kind)).toEqual(["remove"]);
+  expect(store.listPlanChanges(WORKSPACE, "plan-1").map((change) => change.kind)).toEqual(["remove"]);
 });
 
 test("a resync drops what the gap deleted, even though no tombstone ever arrives for it", async () => {
@@ -205,7 +205,7 @@ test("a day change on an approved plan is described with the date, not just the 
     now: NOW, timeZone: "UTC"
   });
   const outcome = await sync();
-  const change = store.listPlanChanges((outcome as { planVersionId: string }).planVersionId)[0];
+  const change = store.listPlanChanges(WORKSPACE, (outcome as { planVersionId: string }).planVersionId)[0];
   expect(change?.kind).toBe("conflict");
   // "moved to 9/18" is the fact that matters; two identical clock times would read as no change at all.
   expect(change?.explanation).toContain("9/18");
@@ -231,9 +231,9 @@ test("a long calendar id keeps add and move as separate changes", async () => {
   await sync();
   await sync();
 
-  const kinds = store.listPlanChanges("plan-1").map((change) => change.kind).sort();
+  const kinds = store.listPlanChanges(WORKSPACE, "plan-1").map((change) => change.kind).sort();
   expect(kinds).toEqual(["add", "move"]);
-  const ids = store.listPlanChanges("plan-1").map((change) => change.id);
+  const ids = store.listPlanChanges(WORKSPACE, "plan-1").map((change) => change.id);
   expect(new Set(ids).size).toBe(2);
   expect(ids.every((id) => id.length < 120)).toBe(true);
 });
@@ -249,7 +249,7 @@ test("a block that aged out of the window is not reported as deleted", async () 
   });
   const outcome = await sync();
 
-  expect(store.listPlanChanges("plan-1").map((change) => change.kind)).toEqual(["add"]);
+  expect(store.listPlanChanges(WORKSPACE, "plan-1").map((change) => change.kind)).toEqual(["add"]);
   expect(outcome).toMatchObject({ changes: 1 });
 });
 
@@ -260,7 +260,7 @@ test("a block inside the window that really disappeared is still reported", asyn
     sources: only([{ items: [], cursor: "c" }]).sources, now: NOW, timeZone: "UTC"
   });
   await sync();
-  const changes = store.listPlanChanges("plan-1");
+  const changes = store.listPlanChanges(WORKSPACE, "plan-1");
   expect(changes.map((change) => change.kind)).toEqual(["remove"]);
   expect(changes[0]?.explanation).toContain("9/18");
 });

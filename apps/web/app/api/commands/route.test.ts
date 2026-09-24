@@ -1,8 +1,11 @@
 import { expect, test, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
+const TEST_CTX = { principalId: "local-owner", workspaceId: "personal-crossline", role: "owner" as const,
+  identity: { provider: "credential" as const, issuer: "test", subject: "local-owner" },
+  authMethod: "session" as const, requestId: "test-request" };
+vi.mock("../../../lib/access-guard", () => ({ resolveAccessContext: async () => ({ ctx: TEST_CTX }) }));
 vi.mock("../../../lib/crossline", () => ({
-  WORKSPACE_ID: "personal-crossline",
   addCapturedTaskWithId: vi.fn()
 }));
 

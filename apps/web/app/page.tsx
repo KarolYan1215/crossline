@@ -1,9 +1,11 @@
 import { DashboardView } from "./dashboard-view";
 import { loadDashboard } from "../lib/crossline";
+import { requireSessionContext } from "../lib/access-guard";
 
 export const dynamic = "force-dynamic";
 
-export default function HomePage() {
-  return <DashboardView data={loadDashboard()} />;
+export default async function HomePage() {
+  const ctx = await requireSessionContext();
+  return <DashboardView data={loadDashboard(ctx)} />;
 }
 

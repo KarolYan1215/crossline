@@ -2,6 +2,7 @@ import { SubpageShell } from "../subpage-shell";
 import { CodexAccountControl } from "./codex-account-control";
 import { CalendarSources } from "./calendar-sources";
 import { loadCalendarConnectorState } from "../../lib/crossline";
+import { requireSessionContext } from "../../lib/access-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -18,8 +19,9 @@ const declared = [
   ["Longbridge", "只读 allowlist", "美股与 ETF 研究"]
 ] as const;
 
-export default function ConnectorsPage() {
-  const calendar = loadCalendarConnectorState();
+export default async function ConnectorsPage() {
+  const ctx = await requireSessionContext();
+  const calendar = loadCalendarConnectorState(ctx);
   return <SubpageShell eyebrow="写后验证" title="连接目标"
     description="工作日历一行是观测到的真实状态；其余各行是声明的目标，尚未配置凭据，也没有跑过任何探测。">
     <section className="status-grid">

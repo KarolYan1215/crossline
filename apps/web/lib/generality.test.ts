@@ -21,29 +21,30 @@ const swappedPacks = [
 ];
 vi.mock("@crossline/identity-packs", () => ({ defaultIdentityPacks: () => swappedPacks }));
 
-const { ensureSeeded, loadDashboard, WORKSPACE_ID } = await import("./crossline");
+const { ensureSeeded, loadDashboard } = await import("./crossline");
+const { TEST_CTX } = await import("./test-support");
 
 afterEach(() => { globalThis.crosslineStore?.close(); globalThis.crosslineStore = undefined; });
 
 test("an entirely different pack set seeds its own identities and none of this repo's", () => {
   globalThis.crosslineStore = new CrosslineStore(":memory:");
-  ensureSeeded();
+  ensureSeeded(TEST_CTX);
   const store = globalThis.crosslineStore;
-  const identities = [...new Set(store.listMilestones(WORKSPACE_ID).map((milestone) => milestone.identityId))].sort();
+  const identities = [...new Set(store.listMilestones(TEST_CTX.workspaceId).map((milestone) => milestone.identityId))].sort();
   expect(identities).toEqual(["band", "teaching", "woodwork"]);
   // The starter titles fall back to the pack's own label rather than being skipped or left blank.
-  expect(store.listMilestones(WORKSPACE_ID).map((milestone) => milestone.title))
+  expect(store.listMilestones(TEST_CTX.workspaceId).map((milestone) => milestone.title))
     .toEqual(expect.arrayContaining([expect.stringContaining("教学")]));
-  expect(store.listWorkOrders(WORKSPACE_ID).map((order) => order.identityId).sort())
+  expect(store.listWorkOrders(TEST_CTX.workspaceId).map((order) => order.identityId).sort())
     .toEqual(["band", "teaching", "woodwork"]);
 });
 
 test("no relation is seeded pointing at a milestone the new packs never created", () => {
   globalThis.crosslineStore = new CrosslineStore(":memory:");
-  ensureSeeded();
+  ensureSeeded(TEST_CTX);
   const store = globalThis.crosslineStore;
-  const milestoneIds = new Set(store.listMilestones(WORKSPACE_ID).map((milestone) => milestone.id));
-  for (const relation of store.listMilestoneRelations(WORKSPACE_ID)) {
+  const milestoneIds = new Set(store.listMilestones(TEST_CTX.workspaceId).map((milestone) => milestone.id));
+  for (const relation of store.listMilestoneRelations(TEST_CTX.workspaceId)) {
     expect(milestoneIds.has(relation.fromMilestoneId)).toBe(true);
     expect(milestoneIds.has(relation.toMilestoneId)).toBe(true);
   }
@@ -51,14 +52,14 @@ test("no relation is seeded pointing at a milestone the new packs never created"
 
 test("the seeded ledger still passes the analysis trust check under the new packs", () => {
   globalThis.crosslineStore = new CrosslineStore(":memory:");
-  ensureSeeded();
+  ensureSeeded(TEST_CTX);
   const store = globalThis.crosslineStore;
   // This is the failure the hardcoded seed caused: milestones for identities with no backing pack made
   // validateAnalysisContext throw ANALYSIS_CONTEXT_INVALID, so every analysis was refused before it ran.
   const context = {
     version: "crossline.analysis.v1" as const,
     capture: { title: "为下周的课准备一页讲义", context: "" },
-    approvedMilestones: store.listMilestones(WORKSPACE_ID)
+    approvedMilestones: store.listMilestones(TEST_CTX.workspaceId)
       .filter((milestone) => milestone.status === "approved" && milestone.projectId)
       .map((milestone) => ({ id: milestone.id, projectId: milestone.projectId!, identityId: milestone.identityId, title: milestone.title, version: milestone.version })),
     identityPacks: swappedPacks.filter((pack) => pack.kind === "identity").map((pack) => ({ id: pack.id, version: 1, summary: pack.label })),
@@ -70,7 +71,7 @@ test("the seeded ledger still passes the analysis trust check under the new pack
 
 test("Today renders under the new packs, and the capacity pack stays out of the identity list", () => {
   globalThis.crosslineStore = new CrosslineStore(":memory:");
-  const dashboard = loadDashboard();
+  const dashboard = loadDashboard(TEST_CTX);
   // Keyed on kind, not on the literal id "health": a differently named capacity pack must still be
   // treated as a constraint rather than a fourth identity competing for the same list.
   expect(dashboard.identities.map((identity) => identity.id).sort()).toEqual(["band", "teaching", "woodwork"]);

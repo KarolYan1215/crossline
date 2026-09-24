@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { decideMilestoneRelations } from "../../../../lib/crossline";
+import { resolveAccessContext } from "../../../../lib/access-guard";
 import { isCrossSiteWrite } from "../../../../lib/same-origin";
 
 /**
@@ -11,6 +12,8 @@ import { isCrossSiteWrite } from "../../../../lib/same-origin";
  */
 export async function POST(request: Request) {
   if (isCrossSiteWrite(request)) return NextResponse.json({ ok: false, code: "REQUEST_FORBIDDEN" }, { status: 403 });
+  const access = await resolveAccessContext(request);
+  if ("response" in access) return access.response;
   let body: unknown;
   try { body = await request.json(); } catch { return NextResponse.json({ ok: false, code: "INVALID_JSON" }, { status: 400 }); }
   const { ids, decision } = (body ?? {}) as { ids?: unknown; decision?: unknown };
@@ -20,7 +23,7 @@ export async function POST(request: Request) {
   if (decision !== "approved" && decision !== "archived") {
     return NextResponse.json({ ok: false, code: "INVALID_DECISION" }, { status: 400 });
   }
-  const result = decideMilestoneRelations(ids as string[], decision);
+  const result = decideMilestoneRelations(access.ctx, ids as string[], decision);
   if (!result.ok) return NextResponse.json(result, { status: 400 });
   return NextResponse.json(result);
 }

@@ -48,13 +48,17 @@ export function resolveCrosslineAuthOptions(): CrosslineAuthOptions | undefined 
 
   const smtp = smtpFromEnv();
   const google = googleFromEnv();
+  const testMailboxDir = process.env.CROSSLINE_AUTH_TEST_MAILBOX_DIR?.trim();
   return {
     authDbPath: path.join(dataDir, "auth.db"),
     secret, baseURL, trustedOrigins,
     // `exactOptionalPropertyTypes` refuses `smtp: undefined` — the key must be absent, not present with
     // an undefined value, which is also the distinction `createCrosslineAuth` uses to decide whether
     // email/password sign-up exists as a capability at all.
-    ...(smtp ? { smtp } : {}), ...(google ? { google } : {})
+    ...(smtp ? { smtp } : {}), ...(google ? { google } : {}),
+    // Set only by the e2e build (`playwright.config.ts`) — never present in a real deployment, so this
+    // never competes with `smtp` there.
+    ...(testMailboxDir ? { testMailboxDir } : {})
   };
 }
 

@@ -2,11 +2,15 @@ import { describe, expect, test, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
+const TEST_CTX = { principalId: "test-owner", workspaceId: "test-workspace", role: "owner" as const,
+  identity: { provider: "credential" as const, issuer: "test", subject: "test-owner" },
+  authMethod: "session" as const, requestId: "test-request" };
+vi.mock("../../../lib/access-guard", () => ({ resolveAccessContext: async () => ({ ctx: TEST_CTX }) }));
+
 const saved: Array<Record<string, unknown>> = [];
 const events: Array<Record<string, unknown>> = [];
 
 vi.mock("../../../lib/crossline", () => ({
-  WORKSPACE_ID: "test-workspace",
   getStore: () => ({
     saveEnergyObservation: (observation: Record<string, unknown>) => { saved.push(observation); },
     appendEvent: (event: Record<string, unknown>) => { events.push(event); },

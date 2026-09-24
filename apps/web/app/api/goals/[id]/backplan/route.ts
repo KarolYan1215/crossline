@@ -1,8 +1,11 @@
 import { requestCodexSupervisor, CodexSupervisorRequestError } from "../../../../../lib/codex-runtime";
+import { resolveAccessContext } from "../../../../../lib/access-guard";
 import { isCrossSiteWrite } from "../../../../../lib/same-origin";
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   if (isCrossSiteWrite(request)) return Response.json({ ok: false, code: "REQUEST_FORBIDDEN" }, { status: 403 });
+  const access = await resolveAccessContext(request);
+  if ("response" in access) return access.response;
   const { id } = await context.params;
   try {
     const result = await requestCodexSupervisor<unknown>("/v1/goals/backplan", {
