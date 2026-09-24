@@ -270,6 +270,24 @@ v1 的 `docs/crossline-mvp-implementation-plan.md` 中与 v2 冲突的部分已�
 - [x] **里程碑标准归属** —— 默认 `acceptedBy` 改为 `local-owner`；已有四条追加
       `milestone.criteria_adopted` 事件记录归属转移（账本 append-only，原提议事件保留可读）。
 
+## 身份与私有部署（阶段二–七，独立于 v2 设计文档，依据本地实施计划）
+
+- [x] **真实登录、workspace 隔离、离线多设备、Tailscale 私网访问** —— Better Auth
+      （邮箱密码 + Google，`session.cookieCache` 关闭使撤销立即生效）；`requireAccessContext`
+      补上此前完全不存在的 workspace 归属校验（`isolation.test.ts` 文档注释点名的那个缺口）；
+      `apps/web`/`apps/worker` 全量消除 `local-owner`/`personal-crossline` 硬编码
+      （`no-hardcoded-identity.test.ts` discovery 测试兜底）；web→worker 之间补 HMAC capability
+      token（此前任何本机进程都能直接打 3211 端口）；离线队列改造成真实 Dexie，
+      按 workspace 分库加密，冲突（`PROPOSAL_VERSION_CHANGED`）与永久拒绝分开展示；
+      `CROSSLINE_DEPLOYMENT_MODE` 三态化，`private` 模式经 `tailscale serve` 反代到 tailnet
+      并打开安全响应头。证据：`scripts/gate-identity-check.ts`（两账号互相看不到对方数据、
+      撤销 session 立即失效、无入站防火墙规则、含 `auth.db` 的备份恢复回路，全部真实跑通）、
+      `docs/user-guide.md`、`docs/private-network-deployment.md`、`CLAUDE.md` "Identity, sessions,
+      and private deployment" 一节。顺带修了两个真实缺陷：`listPlanChanges` 此前不按 workspace
+      过滤（真实跨租户读取漏洞）、`apps/worker/src/export.ts` 默认 workspace id 硬编码成阶段三后
+      已不存在的字符串；以及补上一个此前完全没有前端入口的功能：`revokeDeviceLease` 早就存在
+      于存储层且有测试，但没有路由和界面能调用到它。
+
 ## 已知未修（明确记账，不算在任何 [x] 里）
 
 - **Graph 连接器生产零调用**：设备码、DPAPI 缓存、只读 scope 都写好了，也用

@@ -50,7 +50,12 @@ export default defineConfig({
       // Better Auth stamps the verification link with this base URL — without overriding it here, the
       // captured link points at the dev server's port (3210) instead of the one e2e is actually running.
       CROSSLINE_WEB_BASE_URL: "http://127.0.0.1:3310",
-      CROSSLINE_AUTH_TEST_MAILBOX_DIR: authMailboxDir
+      CROSSLINE_AUTH_TEST_MAILBOX_DIR: authMailboxDir,
+      // Same reasoning as `scripts/run-e2e.ts`'s identical override: Next.js loads `apps/web/.env` on its
+      // own inside the spawned process, and a developer's real `private`-mode config would otherwise leak
+      // into this run and turn on CSP/security headers e2e never accounts for.
+      CROSSLINE_DEPLOYMENT_MODE: "local",
+      CROSSLINE_TAILSCALE_HOSTNAME: ""
     },
     reuseExistingServer: false,
     timeout: 240_000

@@ -30,3 +30,23 @@ export async function POST(request: Request) {
   });
   return Response.json({ ok: true, deviceId: lease.deviceId, expiresAt: lease.expiresAt });
 }
+
+/** Lists every device this workspace has ever leased — `issueDeviceLease` had no reader until now, so a
+ * lost/stolen device could never be shown to the owner to revoke in the first place. */
+export async function GET(request: Request) {
+  const access = await resolveAccessContext(request);
+  if ("response" in access) return access.response;
+  const leases = getStore().listDeviceLeases(access.ctx.workspaceId);
+  return Response.json({ ok: true, leases });
+}
+
+export async function DELETE(request: Request) {
+  if (isCrossSiteWrite(request)) return Response.json({ ok: false, code: "REQUEST_FORBIDDEN" }, { status: 403 });
+  const access = await resolveAccessContext(request);
+  if ("response" in access) return access.response;
+  const body = (await request.json().catch(() => ({}))) as { deviceId?: unknown };
+  const deviceId = typeof body.deviceId === "string" ? body.deviceId : "";
+  if (!deviceId) return Response.json({ ok: false, code: "DEVICE_ID_REQUIRED" }, { status: 400 });
+  const result = getStore().revokeDeviceLease(access.ctx.workspaceId, deviceId);
+  return Response.json({ ok: true, changed: result.changed });
+}

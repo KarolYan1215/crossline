@@ -2,6 +2,7 @@ import { SubpageShell } from "../subpage-shell";
 import { CodexAccountControl } from "./codex-account-control";
 import { CalendarSources } from "./calendar-sources";
 import { TailscaleTrust } from "./tailscale-trust";
+import { DeviceLeases } from "./device-leases";
 import { loadCalendarConnectorState } from "../../lib/crossline";
 import { requireSessionContext } from "../../lib/access-guard";
 
@@ -29,6 +30,7 @@ export default async function ConnectorsPage() {
       <CodexAccountControl />
       <CalendarSources />
       <TailscaleTrust />
+      <DeviceLeases />
       <article className="status-card">
         <span className="status-badge">{calendar.synced ? "只读同步中" : "尚未连接"}</span>
         <h2>工作日历（Microsoft Graph）</h2>

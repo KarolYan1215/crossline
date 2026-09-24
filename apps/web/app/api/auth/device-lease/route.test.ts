@@ -7,7 +7,15 @@ const TEST_CTX = { principalId: "p1", workspaceId: "w1", role: "owner" as const,
 vi.mock("../../../../lib/access-guard", () => ({ resolveAccessContext: async () => ({ ctx: TEST_CTX }) }));
 
 const issueDeviceLease = vi.fn();
-vi.mock("../../../../lib/crossline", () => ({ getStore: () => ({ issueDeviceLease: (...args: unknown[]) => issueDeviceLease(...args) }) }));
+const listDeviceLeases = vi.fn((..._args: unknown[]) => [] as unknown[]);
+const revokeDeviceLease = vi.fn();
+vi.mock("../../../../lib/crossline", () => ({
+  getStore: () => ({
+    issueDeviceLease: (...args: unknown[]) => issueDeviceLease(...args),
+    listDeviceLeases: (...args: unknown[]) => listDeviceLeases(...args),
+    revokeDeviceLease: (...args: unknown[]) => revokeDeviceLease(...args)
+  })
+}));
 
 const post = async (body: unknown) => {
   const { POST } = await import("./route");
@@ -44,4 +52,43 @@ test("a forged cross-site Origin is refused before touching the store", async ()
   }));
   expect(response.status).toBe(403);
   expect(issueDeviceLease).not.toHaveBeenCalled();
+});
+
+test("GET lists this workspace's own leases", async () => {
+  listDeviceLeases.mockReturnValueOnce([{ id: "l1", deviceId: "device-1", workspaceId: "w1" }]);
+  const { GET } = await import("./route");
+  const response = await GET(new Request("http://local/api/auth/device-lease"));
+  expect(response.status).toBe(200);
+  await expect(response.json()).resolves.toMatchObject({ ok: true, leases: [{ deviceId: "device-1" }] });
+  expect(listDeviceLeases).toHaveBeenCalledWith("w1");
+});
+
+test("DELETE revokes the named device within the caller's own workspace", async () => {
+  revokeDeviceLease.mockReturnValueOnce({ changed: true });
+  const { DELETE } = await import("./route");
+  const response = await DELETE(new Request("http://local/api/auth/device-lease", {
+    method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ deviceId: "device-1" })
+  }));
+  expect(response.status).toBe(200);
+  await expect(response.json()).resolves.toEqual({ ok: true, changed: true });
+  expect(revokeDeviceLease).toHaveBeenCalledWith("w1", "device-1");
+});
+
+test("DELETE requires a deviceId", async () => {
+  const { DELETE } = await import("./route");
+  const response = await DELETE(new Request("http://local/api/auth/device-lease", {
+    method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({})
+  }));
+  expect(response.status).toBe(400);
+  expect(revokeDeviceLease).not.toHaveBeenCalled();
+});
+
+test("DELETE is refused for a forged cross-site Origin before touching the store", async () => {
+  const { DELETE } = await import("./route");
+  const response = await DELETE(new Request("http://local/api/auth/device-lease", {
+    method: "DELETE", headers: { "content-type": "application/json", origin: "https://evil.example" },
+    body: JSON.stringify({ deviceId: "device-1" })
+  }));
+  expect(response.status).toBe(403);
+  expect(revokeDeviceLease).not.toHaveBeenCalled();
 });

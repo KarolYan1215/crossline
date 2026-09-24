@@ -189,6 +189,11 @@ pnpm exec tsx scripts\codex-smoke.ts
 - **Gate 4 Codex 材料准备与闸门**：**完成**（2026-09-16 真实运行）。
 - **Gate 5 content-ops / 投资**：部分。只读状态端点通过检查，但未配置真实 endpoint/token；投资侧只有调用前 allowlist。
 - **Gate 6–7 长期验证**：部分。加密恢复演练已真实完成；14 天比较与 4 周试用仍需真实运行数据。
+- **身份与私有部署**（不占用 Gate 编号——这六项是身份/部署基建，不是功能验收门）：**完成**。
+  真实登录（Better Auth，邮箱密码 + Google）、workspace 隔离、离线多设备、Tailscale 私网跨设备访问
+  全部真实跑通，证据脚本 `scripts/gate-identity-check.ts`（两账号互相看不到对方数据、撤销 session
+  立即失效、无入站防火墙规则、含 `auth.db` 的备份恢复回路）。详见 `CLAUDE.md`"Identity, sessions,
+  and private deployment"一节、`docs/user-guide.md`、`docs/private-network-deployment.md`。
 
 ---
 

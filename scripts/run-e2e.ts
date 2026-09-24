@@ -23,7 +23,15 @@ const env = {
   CROSSLINE_FIXED_NOW: "2026-09-14T16:45:00.000Z",
   BETTER_AUTH_SECRET: "e2e-test-secret-not-for-production-use",
   CROSSLINE_WEB_BASE_URL: "http://127.0.0.1:3310",
-  CROSSLINE_AUTH_TEST_MAILBOX_DIR: authMailboxDir
+  CROSSLINE_AUTH_TEST_MAILBOX_DIR: authMailboxDir,
+  // Pinned explicitly, not left to whatever `apps/web/.env` happens to say: Next.js loads that file on
+  // its own inside the spawned `next build`/`next start` process regardless of what this script's own
+  // `env` object sets, and a developer's real `.env` (stage six's `private` mode, a real
+  // `CROSSLINE_TAILSCALE_HOSTNAME`) would otherwise leak into this "hermetic" e2e run and turn on the
+  // CSP/security headers `private` adds — found by e2e breaking wholesale (8 of 11 desktop tests, mostly
+  // timeouts) right after standing up a real `private`-mode server for stage six's own verification.
+  CROSSLINE_DEPLOYMENT_MODE: "local",
+  CROSSLINE_TAILSCALE_HOSTNAME: ""
 };
 
 function run(command: string, args: string[], cwd: string): void {

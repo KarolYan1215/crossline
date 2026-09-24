@@ -9,6 +9,10 @@ const TEST_CTX = { principalId: "test-owner", workspaceId: "test-workspace", rol
 vi.mock("../../lib/access-guard", () => ({ requireSessionContext: async () => TEST_CTX }));
 
 describe("connectors page", () => {
+  // A generous timeout, not a flaky-test workaround: this is the first test in the suite whose module
+  // graph pulls in `dexie` (via the new `DeviceLeases` card's import of `offline-queue.ts`), and a cold
+  // transform of that dependency under full-suite load can run past the 5s default — isolated, this test
+  // finishes in under 2s.
   test("does not claim measured connector health", async () => {
     globalThis.crosslineStore = new CrosslineStore(":memory:");
     const { default: ConnectorsPage } = await import("./page");
@@ -18,5 +22,5 @@ describe("connectors page", () => {
     expect(html).toContain("CONNECTOR_NOT_CONFIGURED");
     globalThis.crosslineStore.close();
     globalThis.crosslineStore = undefined;
-  });
+  }, 20000);
 });

@@ -1515,6 +1515,19 @@ export class CrosslineStore {
     return { ...lease };
   }
 
+  /** Every device this workspace has ever leased, newest first — what a "撤销设备" list is built from;
+   * a revoked lease stays in this list (with `revokedAt` set) rather than disappearing, so the owner can
+   * see it was actually revoked instead of just no longer appearing. */
+  listDeviceLeases(workspaceId: string): StoredDeviceLease[] {
+    const rows = this.#db.prepare(
+      "SELECT * FROM device_leases WHERE workspace_id = ? ORDER BY issued_at DESC"
+    ).all(workspaceId) as Array<Record<string, string | null>>;
+    return rows.map((row) => ({
+      id: row.id!, principalId: row.principal_id!, workspaceId: row.workspace_id!, deviceId: row.device_id!,
+      issuedAt: row.issued_at!, expiresAt: row.expires_at!, ...(row.revoked_at ? { revokedAt: row.revoked_at } : {})
+    }));
+  }
+
   getDeviceLease(workspaceId: string, deviceId: string): StoredDeviceLease | undefined {
     const row = this.#db.prepare(
       "SELECT * FROM device_leases WHERE workspace_id = ? AND device_id = ?"

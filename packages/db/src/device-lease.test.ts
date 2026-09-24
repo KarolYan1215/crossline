@@ -46,6 +46,19 @@ test("re-issuing a revoked device's lease clears the revocation", () => {
   expect(store.getDeviceLease("w1", "device-1")?.revokedAt).toBeUndefined();
 });
 
+test("listDeviceLeases returns every device this workspace has leased, newest first, revoked ones included", () => {
+  store.issueDeviceLease({ id: "lease-1", principalId: "p1", workspaceId: "w1", deviceId: "device-1",
+    issuedAt: "2026-01-01T00:00:00.000Z", expiresAt: "2026-01-02T00:00:00.000Z" });
+  store.issueDeviceLease({ id: "lease-2", principalId: "p1", workspaceId: "w1", deviceId: "device-2",
+    issuedAt: "2026-01-02T00:00:00.000Z", expiresAt: "2026-01-03T00:00:00.000Z" });
+  store.revokeDeviceLease("w1", "device-1");
+  store.issueDeviceLease({ id: "lease-3", principalId: "p1", workspaceId: "w2", deviceId: "device-3",
+    issuedAt: "2026-01-01T00:00:00.000Z", expiresAt: "2026-01-02T00:00:00.000Z" });
+  const leases = store.listDeviceLeases("w1");
+  expect(leases.map((item) => item.deviceId)).toEqual(["device-2", "device-1"]);
+  expect(leases.find((item) => item.deviceId === "device-1")?.revokedAt).toBeDefined();
+});
+
 test("isDeviceLeaseValid judges strictly from its own timestamps, not the store", () => {
   const base: StoredDeviceLease = { id: "lease-1", principalId: "p1", workspaceId: "w1", deviceId: "device-1",
     issuedAt: "2026-01-01T00:00:00.000Z", expiresAt: "2026-01-02T00:00:00.000Z" };
