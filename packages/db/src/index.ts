@@ -79,7 +79,8 @@ export type StoredWorkOrder = {
   estimate: {
     p25Minutes: number; p50Minutes: number; p85Minutes: number;
     // `legacy_task` marks a number carried over from a v1 row: real, but never a prior anyone authored.
-  source: "identity_prior" | "llm_prior" | "personal_history" | "legacy_task";
+    // `manual` marks one a person typed in directly, bypassing analysis entirely.
+  source: "identity_prior" | "llm_prior" | "personal_history" | "legacy_task" | "manual";
     observationCount: number; confidence: "low" | "medium" | "high";
   };
   payload: unknown;
@@ -648,8 +649,12 @@ export class CrosslineStore {
       if (event.type === "analysis.accepted") {
         const context = validateAnalysisContext(update.context);
         const proposal = validateAnalysisProposal(update.proposal, context);
-        const approved = context.approvedMilestones.find((m) => m.id === proposal.milestoneId)!;
-        if (!this.listMilestones(workspaceId).some((m) => m.ownerId === current.ownerId && m.id === approved.id && m.version === approved.version && m.projectId === approved.projectId && m.identityId === approved.identityId && m.status === "approved")) throw new Error("ANALYSIS_MILESTONE_CHANGED");
+        // Empty `milestoneId` means the proposal chose not to bind to any offered milestone — there is
+        // no approved-milestone freshness to re-check for that.
+        if (proposal.milestoneId) {
+          const approved = context.approvedMilestones.find((m) => m.id === proposal.milestoneId)!;
+          if (!this.listMilestones(workspaceId).some((m) => m.ownerId === current.ownerId && m.id === approved.id && m.version === approved.version && m.projectId === approved.projectId && m.identityId === approved.identityId && m.status === "approved")) throw new Error("ANALYSIS_MILESTONE_CHANGED");
+        }
         if (!update.audit?.threadId || !update.audit?.turnId) throw new Error("ANALYSIS_AUDIT_REQUIRED");
         this.saveWorkOrder({ id, ownerId: current.ownerId, workspaceId, ...proposal, state: next.to,
           payload: { ...proposal, audit: update.audit, contextVersion: context.version } });
@@ -738,6 +743,56 @@ export class CrosslineStore {
     if (!row) return;
     this.#db.prepare("UPDATE work_orders SET payload_json = ? WHERE workspace_id = ? AND id = ?")
       .run(JSON.stringify({ ...JSON.parse(row.payload_json), ...patch }), workspaceId, id);
+  }
+
+  /**
+   * Tags a WorkOrder's `(identityId, family)` bucket after the fact — the one field seeded and
+   * pre-`family` WorkOrders never got, which leaves calibration permanently blind to them (see
+   * `#recordDurationObservationIfCalibratable`: no `family`, no observation, ever). This only helps a
+   * still-open order's *own future* completion; an order already `accepted` had its one write chance at
+   * acceptance time and does not get a missed observation back retroactively.
+   *
+   * Unlike `#mergeWorkOrderPayload`, this is audited: it goes through `appendEvent`'s own idempotency
+   * check first, so a repeated call is a safe no-op rather than a second silent overwrite.
+   */
+  backfillWorkOrderFamily(workspaceId: string, ownerId: string, workOrderId: string, family: string,
+    idempotencyKey: string): { changed: boolean } {
+    return this.#db.transaction(() => {
+      const order = this.listWorkOrders(workspaceId).find((item) => item.id === workOrderId);
+      if (!order) throw new Error("WORK_ORDER_NOT_FOUND");
+      const previousFamily = (order.payload as { family?: string } | undefined)?.family ?? null;
+      const { inserted } = this.appendEvent({ ownerId, workspaceId, idempotencyKey,
+        type: "work_order.family_backfilled", entityId: workOrderId, payload: { previousFamily, family } });
+      if (!inserted) return { changed: false };
+      this.#mergeWorkOrderPayload(workspaceId, workOrderId, { family });
+      return { changed: true };
+    }).immediate();
+  }
+
+  /**
+   * Publishes a manually-created WorkOrder for a capture, atomically: the WorkOrder must not appear
+   * without the capture leaving `captures`, and vice versa, the same "publish as a unit" guarantee
+   * `saveBackplanDrafts` gives the backplanner. Skips Codex entirely — `payload.manualPromotion` marks
+   * the result so nothing downstream mistakes it for an analysed proposal.
+   */
+  promoteCaptureManually(workspaceId: string, captureId: string, workOrder: StoredWorkOrder,
+    idempotencyKey: string): { ok: true } | { ok: false; code: string } {
+    return this.#db.transaction((): { ok: true } | { ok: false; code: string } => {
+      if (this.#db.prepare("SELECT 1 FROM events WHERE workspace_id = ? AND idempotency_key = ?")
+        .get(workspaceId, idempotencyKey)) return { ok: true };
+      const capture = this.listCaptures(workspaceId).find((item) => item.id === captureId);
+      if (!capture) return { ok: false, code: "CAPTURE_NOT_FOUND" };
+      if (capture.state === "discarded") return { ok: false, code: "CAPTURE_DISCARDED" };
+      if (capture.state === "promoted") return { ok: false, code: "CAPTURE_ALREADY_PROMOTED" };
+      if (capture.state === "analyzing") return { ok: false, code: "CAPTURE_IS_ANALYZING" };
+      if (this.listWorkOrders(workspaceId).some((item) => item.id === workOrder.id))
+        return { ok: false, code: "WORK_ORDER_ID_COLLISION" };
+      this.saveWorkOrder(workOrder);
+      this.#db.prepare("UPDATE captures SET state = 'promoted' WHERE workspace_id = ? AND id = ?").run(workspaceId, captureId);
+      this.appendEvent({ ownerId: workOrder.ownerId, workspaceId, idempotencyKey,
+        type: "capture.promoted_manually", entityId: captureId, payload: { workOrderId: workOrder.id } });
+      return { ok: true };
+    }).immediate();
   }
 
   #openExecution(workspaceId: string, workOrderId: string):

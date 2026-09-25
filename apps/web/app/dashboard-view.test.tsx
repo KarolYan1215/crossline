@@ -12,6 +12,7 @@ describe("dashboard view", () => {
       primary: { id: "paper", title: "完成论文结果段", identityId: "research", estimate: { p25Minutes: 45, p50Minutes: 60, p85Minutes: 90, confidence: "low", source: "identity_prior", observationCount: 0 }, energy: "high", reason: "推进本周科研里程碑", milestone: "完成当前实验与论文结果段", inputsReady: true },
       lowEnergy: { id: "meal", title: "准备晚饭", identityId: "capacity", estimate: { p25Minutes: 15, p50Minutes: 25, p85Minutes: 35, confidence: "high", source: "personal_history", observationCount: 6 }, energy: "low", reason: "保护晚间容量", milestone: "健康红线", inputsReady: true },
       shortGap: { id: "reply", title: "确认会议", identityId: "startup", estimate: { p25Minutes: 5, p50Minutes: 10, p85Minutes: 15, confidence: "high", source: "personal_history", observationCount: 6 }, energy: "low", reason: "适合短空档", milestone: "验证首个客户问题", inputsReady: true },
+      progress: { streakDays: 3, weekCount: 5 },
       care: [{ title: "睡眠", minimumMinutes: 420 }],
       identities: [
         { id: "research", label: "科研", accent: "#6D5EF5", completedCount: 1, activeMilestone: "完成当前实验与论文结果段", taskCount: 3 },
@@ -36,6 +37,7 @@ describe("dashboard view", () => {
       dateLabel: "14",
       monthLabel: "SEP · 2026",
       capacity: { level: "uncalibrated" as const, observationCount: 0, basis: [], blockers: [{ code: "LOCAL_ACTIVITY_NOT_AUTHORISED", message: "本机活动采集未开启" }] },
+      progress: { streakDays: 0, weekCount: 0 },
       care: [],
       identities: [],
       upcoming: [],
@@ -51,6 +53,7 @@ describe("dashboard view", () => {
     const html = renderToStaticMarkup(<DashboardView data={{
       principalId: "test-owner", workspaceId: "test-workspace", nowLabel: "周一 · 09:00", nowIso: "2026-09-14T14:00:00.000Z", timeZone: "America/Chicago", clockPinned: true, dateLabel: "14", monthLabel: "SEP · 2026",
       capacity: { level: "uncalibrated" as const, observationCount: 0, basis: [], blockers: [{ code: "LOCAL_ACTIVITY_NOT_AUTHORISED", message: "本机活动采集未开启" }] },
+      progress: { streakDays: 0, weekCount: 0 },
       care: [],
       identities: [], upcoming: [], localActivityAsked: true, lastNight: { state: "none" as const }, milestonePulse: []
     }} />);
@@ -66,6 +69,7 @@ describe("dashboard view honesty", () => {
   const data = {
     principalId: "test-owner", workspaceId: "test-workspace", nowLabel: "周一 · 09:00", nowIso: "2026-09-14T14:00:00.000Z", timeZone: "America/Chicago", clockPinned: true, dateLabel: "14", monthLabel: "SEP · 2026",
     capacity: { level: "uncalibrated" as const, observationCount: 0, basis: [], blockers: [{ code: "LOCAL_ACTIVITY_NOT_AUTHORISED", message: "本机活动采集未开启" }] },
+    progress: { streakDays: 0, weekCount: 0 },
     care: [],
     identities: [], upcoming: [], localActivityAsked: true, lastNight: { state: "none" as const }, milestonePulse: []
   };
@@ -86,7 +90,7 @@ describe("dashboard view honesty", () => {
 describe("capacity honesty", () => {
   const withCapacity = (capacity: DashboardData["capacity"]) => renderToStaticMarkup(<DashboardView data={{
     principalId: "test-owner", workspaceId: "test-workspace", nowLabel: "周一 · 09:00", nowIso: "2026-09-14T14:00:00.000Z", timeZone: "America/Chicago", clockPinned: true, dateLabel: "14", monthLabel: "SEP · 2026",
-    capacity, care: [], identities: [], upcoming: [], localActivityAsked: true, lastNight: { state: "none" as const }, milestonePulse: []
+    capacity, progress: { streakDays: 0, weekCount: 0 }, care: [], identities: [], upcoming: [], localActivityAsked: true, lastNight: { state: "none" as const }, milestonePulse: []
   }} />);
 
   test("names what the reading was derived from instead of calling everything a self-report", () => {
@@ -109,7 +113,7 @@ describe("last night's expansion", () => {
   const withLastNight = (lastNight: DashboardData["lastNight"]) => renderToStaticMarkup(<DashboardView data={{
     principalId: "test-owner", workspaceId: "test-workspace", nowLabel: "周一 · 09:00", nowIso: "2026-09-14T14:00:00.000Z", timeZone: "America/Chicago", clockPinned: true, dateLabel: "14", monthLabel: "SEP · 2026",
     capacity: { level: "uncalibrated", observationCount: 0, basis: [], blockers: [] },
-    care: [], identities: [], upcoming: [], localActivityAsked: true, lastNight, milestonePulse: []
+    progress: { streakDays: 0, weekCount: 0 }, care: [], identities: [], upcoming: [], localActivityAsked: true, lastNight, milestonePulse: []
   }} />);
 
   test("a night that did not run says so with its reason, instead of showing older output as new", () => {

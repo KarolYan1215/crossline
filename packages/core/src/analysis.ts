@@ -45,8 +45,13 @@ const CONTRACT_LINE_LIMIT = 300;
 const line: Schema = { type: "string", minLength: 1, maxLength: CONTRACT_LINE_LIMIT };
 const why: Schema = { type: "string", minLength: 1, maxLength: 300 };
 const family = choice("preparation", "review", "deep_work");
+// Empty means "not bound to any of the offered milestones" — the same sentinel the store layer already
+// treats as legitimate (`acceptWorkOrderEvidence` skips the milestone gate on a falsy `milestoneId`).
+// Day-to-day work that GTD calls a "next action with no project" used to have no way to say so here:
+// the model had to force-fit it onto an approved milestone or the whole capture stopped with a blocker.
+const optionalMilestoneId: Schema = { type: "string", minLength: 0, maxLength: 4000 };
 export const ANALYSIS_OUTPUT_SCHEMA = object({
-  identityId: str, projectId: str, milestoneId: str, intent: str, family,
+  identityId: str, projectId: str, milestoneId: optionalMilestoneId, intent: str, family,
   automationParts: array(object({ id: str, intent: str, reversibility: choice("local"), quote: str, rationale: str })),
   humanCore: array(object({ id: str, intent: str, energy: choice("low", "medium", "high"), interruptible: bool, quote: str, rationale: str }), 1),
   // Eight, not thirty-two: no real contract has thirty-two lines, and a large allowance is room the
@@ -92,7 +97,7 @@ export function validateAnalysisProposal(value: unknown, input: AnalysisContext)
   const context = validateAnalysisContext(input);
   if (!matches(value, ANALYSIS_OUTPUT_SCHEMA)) throw new Error("ANALYSIS_SCHEMA_INVALID");
   const proposal = value as AnalysisProposal;
-  if (!context.approvedMilestones.some((m) => m.id === proposal.milestoneId && m.projectId === proposal.projectId && m.identityId === proposal.identityId)) throw new Error("ANALYSIS_MILESTONE_MISMATCH");
+  if (proposal.milestoneId && !context.approvedMilestones.some((m) => m.id === proposal.milestoneId && m.projectId === proposal.projectId && m.identityId === proposal.identityId)) throw new Error("ANALYSIS_MILESTONE_MISMATCH");
   const e = proposal.estimate;
   if (e.p25Minutes < 1 || e.p25Minutes > e.p50Minutes || e.p50Minutes > e.p85Minutes || e.p85Minutes > 10080 || e.observationCount !== 0) throw new Error("ANALYSIS_ESTIMATE_INVALID");
   // Only text the user actually supplied counts. Identity-pack summaries and milestone titles are

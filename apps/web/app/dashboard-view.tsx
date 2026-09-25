@@ -4,6 +4,8 @@ import { AnalogClock } from "./analog-clock";
 import { EnergyProbe } from "./energy-probe";
 import { LocalActivityConsent } from "./local-activity-consent";
 import { SignOutButton } from "./sign-out-button";
+import { NAV_ITEMS } from "./nav-items";
+import { BottomNav } from "./bottom-nav";
 
 export type DashboardAction = {
   id: string;
@@ -41,6 +43,8 @@ export type DashboardData = {
   lowEnergy?: DashboardAction;
   shortGap?: DashboardAction;
   care: Array<{ title: string; minimumMinutes: number }>;
+  /** Read straight off real acceptances, no grace period: today with nothing accepted yet is a real 0. */
+  progress: { streakDays: number; weekCount: number };
   identities: Array<{ id: string; label: string; accent: string; completedCount: number; activeMilestone: string; taskCount: number }>;
   upcoming: Array<{ id: string; title: string; startsAt: string; identityId: string }>;
   localActivityAsked: boolean;
@@ -53,7 +57,7 @@ export type DashboardData = {
 
 // Never a bare number: an estimate without its provenance is indistinguishable from a measurement.
 const estimateSourceLabel: Record<string, string> = {
-  llm_prior: "先验", identity_prior: "先验", legacy_task: "遗留任务", personal_history: "个人历史"
+  llm_prior: "先验", identity_prior: "先验", legacy_task: "遗留任务", personal_history: "个人历史", manual: "人工填写"
 };
 const estimateConfidenceLabel = { low: "低", medium: "中", high: "高" } as const;
 const estimateLabel = (estimate: DashboardAction["estimate"]) =>
@@ -73,11 +77,6 @@ const capacityLabel = (capacity: DashboardData["capacity"]) =>
     ? "精力未标定"
     : `精力 ${capacityLevelLabel[capacity.level]} · 依据 ${capacity.basis.map((item) => basisLabel[item]).join(" + ")} · ${capacity.observationCount} 次观测`;
 
-const nav = [
-  ["Today", "/"], ["Plan", "/plan"], ["Milestones", "/milestones"], ["Workbench", "/workbench"],
-  ["Approvals", "/approvals"], ["Review", "/review"], ["Connections", "/connectors"]
-] as const;
-
 export function DashboardView({ data }: { data: DashboardData }) {
   const identityLabel = (id: string) => data.identities.find((item) => item.id === id)?.label ?? (id === "capacity" ? "容量策略" : id);
   const action = (item: DashboardAction | undefined, label: string) => <article className="alt-action">
@@ -88,9 +87,10 @@ export function DashboardView({ data }: { data: DashboardData }) {
   return <main className="page"><OfflineReplay workspaceId={data.workspaceId} />
     <header className="running-head">
       <a className="wordmark" href="/">CROSSLINE<sup>01</sup></a>
-      <nav aria-label="主导航">{nav.map(([label, href]) => <a className={label === "Today" ? "active" : ""} href={href} key={label}>{label}</a>)}</nav>
+      <nav aria-label="主导航">{NAV_ITEMS.map((item) => <a className={item.label === "Today" ? "active" : ""} href={item.href} key={item.label}>{item.label}</a>)}</nav>
       <div className="system-state"><CircleDot size={11} aria-hidden="true" /><span>LOCAL</span><SignOutButton /></div>
     </header>
+    <BottomNav active="Today" />
 
     <section className="day-head">
       <AnalogClock nowIso={data.nowIso} timeZone={data.timeZone} fixed={data.clockPinned} />
@@ -118,6 +118,17 @@ export function DashboardView({ data }: { data: DashboardData }) {
           ? `昨夜扩展 · 产出 ${data.lastNight.proposals} 条候选`
           : `昨夜未运行 · ${data.lastNight.reason}`}
       </p>}
+    </section>
+
+    {/* Two weeks of real work used to leave zero trace on this page — the count lived only on Review.
+        Plain counts, no streak-protection nudge: a day with nothing accepted reads as a real 0. */}
+    <section className="care-band" aria-label="完成节奏">
+      <strong>PROGRESS</strong>
+      <dl>
+        <div><dt>本周完成</dt><dd>{data.progress.weekCount} 件</dd></div>
+        <div><dt>连续天数</dt><dd>{data.progress.streakDays} 天</dd></div>
+        {data.identities.map((item) => <div key={item.id}><dt>{item.label}</dt><dd>累计 {item.completedCount} 件</dd></div>)}
+      </dl>
     </section>
 
     <section className="capture-line" aria-labelledby="capture-title">

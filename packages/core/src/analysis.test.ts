@@ -27,6 +27,13 @@ test("accepts a strict proposal tied to supplied fragments and an approved miles
   ]) expect(() => core.validateAnalysisProposal(invalid, analysisContext)).toThrow();
 });
 
+test("an empty milestoneId is accepted as \"not bound to any offered milestone\", not rejected as missing", () => {
+  // GTD's "next action with no project" needs a legitimate way to say so; forcing a fit onto an
+  // approved milestone every time was the actual constraint, not a schema requirement.
+  const unbound = { ...validProposal, milestoneId: "" };
+  expect(core.validateAnalysisProposal(unbound, analysisContext)).toMatchObject({ milestoneId: "" });
+});
+
 test("rejects fabricated splits whose quote is too short or quotes app-generated text", () => {
   const fabricate = (quote: string) => ({ ...validProposal, humanCore: [{ ...validProposal.humanCore[0], intent: "Send an outreach email", quote }] });
   // Against a 24-character title the bar is four characters, so these fragments prove nothing.

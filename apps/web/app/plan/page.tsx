@@ -12,17 +12,20 @@ export const dynamic = "force-dynamic";
 export default async function PlanPage() {
   const ctx = await requireSessionContext();
   const plan = await loadCurrentPlan(ctx);
-  const preferences = readSchedulePreferences(ctx);
-  const forecast = preferences ? loadGoalForecast(ctx) : null;
+  const forecast = loadGoalForecast(ctx);
   const milestones = getStore().listMilestones(ctx.workspaceId).filter((item) => item.status === "approved")
     .map((item) => ({ id: item.id, title: item.title }));
-  const effectivePreferences = preferences && { ...preferences, importance: {
-    ...preferences.importance,
-    ...Object.fromEntries(milestones.flatMap((milestone) => {
-      const goal = readGoalSettings(ctx, milestone.id);
-      return goal ? [[milestone.id, goal.importance]] : [];
-    }))
-  } };
+  // Real saved preferences if there are any, otherwise the same sane defaults `loadCurrentPlan` already
+  // previewed against — the editor's initial values must agree with what produced the preview on screen.
+  const preferences = readSchedulePreferences(ctx);
+  const effectivePreferences = { ...(preferences ?? { timeZone: "America/Chicago", mode: "buffered" as const, importance: {} }),
+    importance: {
+      ...preferences?.importance,
+      ...Object.fromEntries(milestones.flatMap((milestone) => {
+        const goal = readGoalSettings(ctx, milestone.id);
+        return goal ? [[milestone.id, goal.importance]] : [];
+      }))
+    } };
   const today = planToday(ctx);
   const importedBlocks = plan.blocks.filter((block) => block.id.startsWith("graph_calendar:"));
   // Split by day on purpose. The header said 「已从日历导入 3 个真实块」 while the B lens — which only
@@ -40,10 +43,15 @@ export default async function PlanPage() {
   // free; it now comes out of `planSchedule` against the availability edited below.
   const description = `B 看今天的现实与 AI 并行，C 批准差异，A 查看整周；三者共用同一计划版本。${importedNote}AI 那条道是排程器按下面的可用时间实时算出来的，不落库，所以不会和作业本身对不上。`;
   return <SubpageShell eyebrow="PLAN / B · C · A" title="共享时间轴" description={description}>
-    {!preferences ? <ScheduleSetup windows={readAvailability(ctx)} milestones={milestones} /> : <>
-    <AvailabilityEditor windows={readAvailability(ctx)} preferences={effectivePreferences!} milestones={milestones} />
+    {/* A real preview beats an empty page: below is already computed against sane defaults even before
+        real settings are saved. The setup form is an invitation to get an accurate one, not a gate. */}
+    {plan.usingDefaultPreferences && <details className="schedule-setup-prompt">
+      <summary>以下是按默认时区/时段生成的预览，还不是你的真实设置 —— 填一下可以更准 →</summary>
+      <ScheduleSetup windows={readAvailability(ctx)} milestones={milestones} />
+    </details>}
+    <AvailabilityEditor windows={readAvailability(ctx)} preferences={effectivePreferences} milestones={milestones} />
     <PlanView plan={plan} today={today} />
-    {forecast && <section className="goal-forecast" aria-label="未来八周目标情景">
+    <section className="goal-forecast" aria-label="未来八周目标情景">
       <h2>未来 8 周 · 容量与目标情景</h2>
       <ForecastDelta forecast={forecast} />
       <p>近 7 天按净可用时间留 15% 缓冲，第 2–8 周预留 20%。日期是按目前作业估时和容量推算的情景，不是完成承诺。</p>
@@ -55,7 +63,6 @@ export default async function PlanPage() {
         {goal.confirmedDeadline ? ` · 已确认硬截止 ${goal.confirmedDeadline}` : goal.suggestedTargetDay ? ` · 建议软目标日 ${goal.suggestedTargetDay}` : ""}
         {goal.bottleneck && <span> · 瓶颈：{goal.bottleneck}</span>}
       </li>)}</ul>
-    </section>}
-    </>}
+    </section>
   </SubpageShell>;
 }

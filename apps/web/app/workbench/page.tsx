@@ -2,7 +2,10 @@ import { ensureSeeded, getStore, resolvedEstimate } from "../../lib/crossline";
 import { SubpageShell } from "../subpage-shell";
 import { AnalyzeButton } from "./analyze-button";
 import { ExecutionActions } from "./execution-actions";
+import { PromoteForm } from "./promote-form";
+import { FamilyBackfill } from "./family-backfill";
 import type { MilestoneGateResult } from "@crossline/core";
+import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { requireSessionContext } from "../../lib/access-guard";
 
 // The tail, not the head: ids here are sometimes timestamp-prefixed, and two captures made minutes
@@ -62,6 +65,11 @@ export default async function WorkbenchPage() {
   const events = getStore().listEvents(ctx.workspaceId).filter((event) => event.type.startsWith("materials."));
   const discardReasons = new Map(getStore().listEvents(ctx.workspaceId, { type: ["work_order.archived", "capture.discarded"] })
     .map((event) => [event.entityId, (event.payload as { reason?: string }).reason ?? ""]));
+  const identityOptions = defaultIdentityPacks().filter((pack) => pack.kind === "identity")
+    .map((pack) => ({ id: pack.id, label: pack.label }));
+  const milestoneOptions = getStore().listMilestones(ctx.workspaceId)
+    .filter((milestone) => milestone.status === "approved")
+    .map((milestone) => ({ id: milestone.id, title: milestone.title, identityId: milestone.identityId }));
   return <SubpageShell eyebrow="04 / AI WORK ORDERS" title="AI 作业台" description="这里呈现 SQLite 中真实的 WorkOrder、估时、材料和阻塞；不让用户编辑内部 DAG。">
     <section className="work-order-list">{captures.map((capture) => <article key={capture.id}>
       <header><span>CAPTURE / {shortId(capture.id)}</span><b>{stateLabel[capture.state]}</b></header>
@@ -69,6 +77,7 @@ export default async function WorkbenchPage() {
       <p>未分类 · 未估时 · 原文已保存，可人工处理</p>
       {capture.audit.blocker && <p role="status">{capture.audit.blocker.code} · {capture.audit.blocker.message}</p>}
       <AnalyzeButton captureId={capture.id} analyzing={capture.state === "analyzing"} retry={capture.state === "blocked"} />
+      <PromoteForm captureId={capture.id} identities={identityOptions} milestones={milestoneOptions} />
     </article>)}{runs.map((run) => {
       const own = executions.filter((execution) => execution.workOrderId === run.id);
       const open = own.find((execution) => !execution.endedAt);
@@ -82,7 +91,12 @@ export default async function WorkbenchPage() {
       return <article id={`work-order-${run.id}`} key={run.id}>
         <header><span>{run.identityId.toUpperCase()} / {shortId(run.id)}</span><b><i className="gly" data-s={run.state} aria-hidden="true" />{stateLabel[run.state] ?? "未知状态"}</b></header>
         <h2>{run.intent}</h2>
+        {(run.payload as { manualPromotion?: boolean }).manualPromotion
+          && <p role="status">人工创建 · 未经 AI 分析</p>}
         <p>{estimate.p25Minutes}–{estimate.p85Minutes} 分钟 · {confidenceLabel[estimate.confidence]} · {riskLabel[run.riskTier]}</p>
+        {!(run.payload as { family?: string }).family
+          && ["preparing", "ready_for_human", "active", "evidence_review"].includes(run.state)
+          && <FamilyBackfill workOrderId={run.id} />}
         {/* The action that advances this work order sits on the card, not inside the disclosure. Behind a
             closed drawer the next step was invisible, and every action reloads the page and closes the
             drawer again — so doing two things in a row meant re-opening it every time. */}

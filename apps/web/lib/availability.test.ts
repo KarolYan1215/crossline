@@ -13,16 +13,19 @@ const setup = (windows = ALWAYS) => saveSchedulePreferences(TEST_CTX, { timeZone
   mode: "buffered", windows, importance: { "research-starter": "important",
     "startup-starter": "important", "media-starter": "ordinary", "investment-starter": "ordinary" } });
 
-test("first schedule waits for the required questionnaire and rejects an invalid zone atomically", async () => {
+test("a real preview appears before setup off defaults, and an invalid zone is still rejected atomically", async () => {
   const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
-  expect((await loadCurrentPlan(TEST_CTX)).blocks.filter((block) => block.id.startsWith("scheduled:"))).toEqual([]);
+  // No empty page waiting on a questionnaire: the preview is computed off defaults from the first load.
+  expect((await loadCurrentPlan(TEST_CTX)).usingDefaultPreferences).toBe(true);
   expect(saveSchedulePreferences(TEST_CTX, { timeZone: "Invalid/Zone", mode: "buffered", windows: ALWAYS,
     importance: {} })).toEqual({ ok: false, code: "SCHEDULE_TIME_ZONE_INVALID" });
   expect(readSchedulePreferences(TEST_CTX)).toBeNull();
   expect(store.getSetting(TEST_CTX.workspaceId, "schedule.availability")).toBeUndefined();
   expect(setup()).toEqual({ ok: true });
   expect(readSchedulePreferences(TEST_CTX)?.mode).toBe("buffered");
-  expect((await loadCurrentPlan(TEST_CTX)).blocks.some((block) => block.id.startsWith("scheduled:"))).toBe(true);
+  const after = await loadCurrentPlan(TEST_CTX);
+  expect(after.usingDefaultPreferences).toBe(false);
+  expect(after.blocks.some((block) => block.id.startsWith("scheduled:"))).toBe(true);
 });
 
 test("wall clock availability converts across daylight saving time", () => {

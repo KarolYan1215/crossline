@@ -47,7 +47,9 @@ export default async function ReviewPage() {
       {review.milestoneProgress.map((milestone) => <article key={milestone.id} className="review-milestone">
         <b>{milestone.title}</b>
         {milestone.criteria.length === 0
-          ? <em className="review-flag">未声明达成标准 —— 闸门会拒绝它，直到你写下什么算达成。</em>
+          ? <em className="review-flag">未声明达成标准 —— 闸门会拒绝它，直到你写下什么算达成。
+              <a href={`/milestones?edit=${encodeURIComponent(milestone.id)}`}>立即补充 →</a>
+            </em>
           : <ul>{milestone.criteria.map((criterion, index) =>
             <li key={index}>[{criterionKind[criterion.kind] ?? criterion.kind}] {criterion.statement}
               {criterion.met

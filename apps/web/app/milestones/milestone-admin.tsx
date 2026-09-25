@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { SuccessCriterion } from "@crossline/core";
 import type { GoalSettings } from "../../lib/crossline";
 import { GoalControls } from "./goal-controls";
@@ -73,14 +73,24 @@ const errorText: Record<string, string> = {
  * moved. And an edit writes a new version rather than overwriting, so the criteria a past acceptance
  * was judged against stay readable.
  */
-export function MilestoneAdmin({ milestones, identities }: {
+export function MilestoneAdmin({ milestones, identities, initialEditId }: {
   milestones: AdminMilestone[];
   identities: Array<{ id: string; label: string }>;
+  /** From `/milestones?edit=<id>` — a warning shown on another page (Review) links straight into the
+   * edit form for that milestone instead of leaving the person to find it themselves. */
+  initialEditId?: string;
 }) {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
   const [ask, setAsk] = useState("");
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once, off the id the page loaded with
+  useEffect(() => {
+    if (!initialEditId) return;
+    const target = milestones.find((item) => item.id === initialEditId);
+    if (target) startEdit(target);
+  }, []);
 
   const startNew = () => setDraft({
     identityId: identities[0]?.id ?? "", projectId: "", title: "", status: "draft",
@@ -238,7 +248,9 @@ export function MilestoneAdmin({ milestones, identities }: {
         </div>
         {milestone.rationale && <p className="milestone-rationale">提议理由：{milestone.rationale}</p>}
         {milestone.successCriteria.length === 0
-          ? <em className="review-flag">未声明达成标准 —— 闸门会拒绝它，直到你写下什么算达成。</em>
+          ? <em className="review-flag">未声明达成标准 —— 闸门会拒绝它，直到你写下什么算达成。
+              <button type="button" onClick={() => startEdit(milestone)} disabled={busy}>立即补充 →</button>
+            </em>
           : <ul className="criterion-view">{milestone.successCriteria.map((criterion) => <li key={criterion.id}>
             <span className="criterion-tag" data-evidence={criterion.evidenceOf ?? "unlabelled"}>
               {criterion.evidenceOf === "outcome" ? "结果" : criterion.evidenceOf === "output" ? "产出物" : "未标注"}

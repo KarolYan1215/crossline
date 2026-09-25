@@ -88,6 +88,21 @@ export function readSchedulePreferences(ctx: AccessContext): SchedulePreferences
   } catch { return null; }
 }
 
+/**
+ * The plan page used to show nothing at all — no availability editor, no AI lane, no forecast — until
+ * this form was filled in, which stacked a mandatory setup screen onto a brand-new person's first
+ * visit. The schedule the planner actually needs (a time zone, a mode, per-milestone importance) has a
+ * sane default for every field; there is no reason a real preview has to wait on the person supplying
+ * one by hand. `isDefault` says which case this is, so the page can offer the real setup form as an
+ * unobtrusive invitation instead of a locked gate.
+ */
+export function effectiveSchedulePreferences(ctx: AccessContext): { preferences: SchedulePreferences; isDefault: boolean } {
+  const saved = readSchedulePreferences(ctx);
+  if (saved) return { preferences: saved, isDefault: false };
+  return { preferences: { timeZone: process.env.CROSSLINE_TIME_ZONE?.trim() || "America/Chicago",
+    mode: "buffered", importance: {} }, isDefault: true };
+}
+
 export function saveSchedulePreferences(ctx: AccessContext, input: {
   timeZone: unknown; mode: unknown; windows: unknown; importance: unknown
 }): { ok: true } | { ok: false; code: string } {
@@ -160,6 +175,9 @@ export type PersistedPlan = {
   status: "draft" | "approved" | "superseded";
   blocks: PersistedScheduleBlock[];
   schedule: Pick<PlanResult, "status" | "blockers" | "solver" | "bufferRelaxed">;
+  /** True when nobody has saved a real time zone/availability/mode yet and this is computed off
+   * defaults — a real, honestly-labelled preview rather than an empty page. */
+  usingDefaultPreferences: boolean;
   changes: Array<{
     id: string;
     kind: "add" | "move" | "remove" | "conflict";
@@ -251,7 +269,10 @@ export function ensureSeeded(ctx: AccessContext): void {
       ["research-startup", "research-starter", "startup-starter", "informs", "approved"],
       ["startup-media", "startup-starter", "media-starter", "reuses", "approved"],
       ["media-research", "media-starter", "research-starter", "recurring_feedback", "approved"],
-      ["research-investment", "research-starter", "investment-starter", "informs", "candidate"]
+      // Seeded id "research-investment" can never match the flywheel's own id scheme
+      // (`flywheel:<from>-><to>:<kind>`), so a candidate here would be a permanent, un-fillable orphan
+      // the review page could only ever show as unreviewable. Seeded approved, like the other three.
+      ["research-investment", "research-starter", "investment-starter", "informs", "approved"]
     ] as const;
     // These example relations describe the four packs this repo ships. Under a different pack set
     // their endpoints do not exist, and a relation pointing at a missing milestone is worse than no
@@ -305,6 +326,79 @@ export function ensureSeeded(ctx: AccessContext): void {
   }
 }
 
+const FAMILIES = ["preparation", "review", "deep_work"] as const;
+type Family = typeof FAMILIES[number];
+
+/**
+ * Tags a still-open WorkOrder's `(identityId, family)` bucket after the fact. Seeded and pre-`family`
+ * WorkOrders never got this field, which leaves personal-history calibration permanently blind to them
+ * (see `packages/db`'s `#recordDurationObservationIfCalibratable`). Only helps this order's own *future*
+ * completion — an order already `accepted` had its one write chance at acceptance time.
+ */
+export function backfillWorkOrderFamily(ctx: AccessContext, workOrderId: string, family: unknown):
+  { ok: true } | { ok: false; code: string } {
+  if (typeof family !== "string" || !FAMILIES.includes(family as Family)) return { ok: false, code: "FAMILY_INVALID" };
+  if (!getStore().listWorkOrders(ctx.workspaceId).some((item) => item.id === workOrderId))
+    return { ok: false, code: "WORK_ORDER_NOT_FOUND" };
+  getStore().backfillWorkOrderFamily(ctx.workspaceId, ctx.principalId, workOrderId, family,
+    `family-backfill:${workOrderId}:${family}`);
+  return { ok: true };
+}
+
+export type ManualPromotionInput = {
+  identityId: unknown; intent: unknown; milestoneId: unknown; family: unknown;
+  estimate: unknown; evidenceContract: unknown;
+};
+
+/**
+ * The manual fallback `docs/crossline-plan-critical-review.md` §4 asked for and this app never built:
+ * when Codex is unavailable, a capture can be promoted to a WorkOrder by hand instead of dying at
+ * "分析服务不可用" with no other exit. Skips `awaiting_plan_approval` and lands directly on `approved` —
+ * promoting it by hand already is the approval, so approving it again would be asking the same person
+ * to confirm their own decision. `payload.manualPromotion` marks the result so nothing downstream
+ * (Workbench, Approvals) mistakes it for an analysed proposal.
+ */
+export function promoteCaptureManually(ctx: AccessContext, captureId: string, input: ManualPromotionInput):
+  { ok: true } | { ok: false; code: string } {
+  ensureSeeded(ctx);
+  const identityId = typeof input.identityId === "string" ? input.identityId : "";
+  if (!seedIdentities().some((pack) => pack.id === identityId)) return { ok: false, code: "IDENTITY_UNKNOWN" };
+  const intent = typeof input.intent === "string" ? input.intent.trim() : "";
+  if (!intent || intent.length > 400) return { ok: false, code: "INTENT_INVALID" };
+  // Empty is a legitimate answer, the same sentinel `acceptWorkOrderEvidence` already treats as
+  // "not milestone-bound" — this is not a lesser WorkOrder, just one with no gate to pass.
+  const milestoneId = typeof input.milestoneId === "string" ? input.milestoneId : "";
+  if (milestoneId && !getStore().listMilestones(ctx.workspaceId).some((item) =>
+    item.id === milestoneId && item.status === "approved" && item.identityId === identityId))
+    return { ok: false, code: "MILESTONE_NOT_APPROVED" };
+  const estimateInput = input.estimate as { p25Minutes?: unknown; p50Minutes?: unknown; p85Minutes?: unknown } | null;
+  const p25 = Number(estimateInput?.p25Minutes), p50 = Number(estimateInput?.p50Minutes), p85 = Number(estimateInput?.p85Minutes);
+  if (![p25, p50, p85].every(Number.isFinite) || p25 < 1 || p25 > p50 || p50 > p85 || p85 > 10080)
+    return { ok: false, code: "ESTIMATE_INVALID" };
+  const evidenceContract = (Array.isArray(input.evidenceContract) ? input.evidenceContract : [])
+    .filter((item): item is { kind?: unknown; description?: unknown } => Boolean(item) && typeof item === "object")
+    .map((item) => ({
+      kind: (["file", "link", "telemetry"] as const).includes(item.kind as never) ? item.kind as "file" | "link" | "telemetry" : "record" as const,
+      description: typeof item.description === "string" ? item.description.trim().slice(0, 300) : "",
+      required: true
+    }))
+    .filter((item) => item.description.length > 0);
+  if (!evidenceContract.length) return { ok: false, code: "EVIDENCE_CONTRACT_REQUIRED" };
+  const family = typeof input.family === "string" && FAMILIES.includes(input.family as Family) ? input.family : undefined;
+  const workOrderId = `manual-${randomUUID()}`;
+  return getStore().promoteCaptureManually(ctx.workspaceId, captureId, {
+    id: workOrderId, ownerId: ctx.principalId, workspaceId: ctx.workspaceId, identityId,
+    projectId: `${identityId}-default`, milestoneId, intent, state: "approved", riskTier: "routine",
+    estimate: { p25Minutes: p25, p50Minutes: p50, p85Minutes: p85, source: "manual", observationCount: 0, confidence: "low" },
+    payload: { manualPromotion: true, promotedBy: ctx.principalId, promotedAt: new Date().toISOString(),
+      materialContract: [], evidenceContract, ...(family ? { family } : {}) }
+  // A fresh key per call, not one fixed per capture: a form resubmission can legitimately carry
+  // different content (the person fixing a typo after a rejection), and that must reach the store's own
+  // `CAPTURE_ALREADY_PROMOTED` check rather than being silently swallowed as an idempotent no-op that
+  // reports success while keeping whichever content happened to land first.
+  }, `manual-promotion:${captureId}:${randomUUID()}`);
+}
+
 /** Days the plan covers: today plus the sync window, so the A lens and the scheduler agree. */
 function planDays(today: string, days = Number(process.env.CROSSLINE_PLAN_WINDOW_DAYS ?? 7)): string[] {
   return Array.from({ length: days }, (_, offset) => {
@@ -341,7 +435,7 @@ async function scheduledBlocks(ctx: AccessContext, today: string, committed: Per
   const busy = committed.filter((block) => block.day)
     .map((block) => ({ day: block.day!, start: block.start, end: block.end }));
   const slots = availableSlots(readAvailability(ctx), days, busy);
-  const preferences = readSchedulePreferences(ctx)!;
+  const preferences = effectiveSchedulePreferences(ctx).preferences;
   const zone = preferences.timeZone;
   const iso = (day: string, time: string) => toZonedInstant(day, time, zone);
   const now = process.env.CROSSLINE_FIXED_NOW ? new Date(process.env.CROSSLINE_FIXED_NOW) : new Date();
@@ -424,9 +518,7 @@ async function scheduledBlocks(ctx: AccessContext, today: string, committed: Per
 export function loadGoalForecast(ctx: AccessContext): ForecastResult & { inferredRegularBlocks: number } {
   ensureSeeded(ctx);
   const store = getStore();
-  const preferences = readSchedulePreferences(ctx);
-  const empty = { weeks: [], goals: [], inferredRegularBlocks: 0 };
-  if (!preferences) return empty;
+  const preferences = effectiveSchedulePreferences(ctx).preferences;
   const days = planDays(planToday(ctx), 56);
   const committed = ((store.listPlanVersions(ctx.workspaceId)[0]?.payload as { blocks?: PersistedScheduleBlock[] } | undefined)
     ?.blocks ?? []).filter((block) => block.day);
@@ -469,17 +561,17 @@ export async function loadCurrentPlan(ctx: AccessContext): Promise<PersistedPlan
   // The calendar's blocks are stored; the scheduled ones are derived on read. Persisting a schedule
   // would mean the plan disagreed with the work orders the moment one of them moved.
   const committed = payload.blocks ?? [];
-  const suggested = readSchedulePreferences(ctx) ? await scheduledBlocks(ctx, planToday(ctx), committed)
-    : { blocks: [] as PersistedScheduleBlock[], schedule: { status: "infeasible" as const,
-      blockers: [{ taskId: "schedule", code: "ONBOARDING_REQUIRED",
-        message: "请先填写时区、每周可用时间、精力时段、排程模式和目标重要性" }],
-      solver: "fallback" as const } };
+  // A real, computed preview beats an empty page: the scheduler runs against sane defaults even before
+  // the person has saved their own time zone, availability and mode. `usingDefaultPreferences` is what
+  // lets the page say so, instead of either lying about it or blocking on it.
+  const suggested = await scheduledBlocks(ctx, planToday(ctx), committed);
   return {
     id: stored.id,
     version: stored.version,
     status: stored.status,
     blocks: [...committed, ...suggested.blocks],
     schedule: suggested.schedule,
+    usingDefaultPreferences: effectiveSchedulePreferences(ctx).isDefault,
     changes: store.listPlanChanges(ctx.workspaceId, stored.id).map((change) => {
       const after = change.after as { blockId?: string } | undefined;
       return {
@@ -893,6 +985,34 @@ function lastNight(workspaceId: string, now: Date): DashboardData["lastNight"] {
 
 const dayOf = (iso: string) => iso.slice(0, 10);
 
+/** Every WorkOrder's first arrival at `accepted`, deduped by entity — a revoke-then-reaccept cycle must
+ * not count as two completions of the same thing. */
+function firstAcceptedAt(workspaceId: string): Map<string, string> {
+  const earliest = new Map<string, string>();
+  for (const event of getStore().listEvents(workspaceId, { type: "work_order.transitioned" })) {
+    if ((event.payload as { to?: string }).to !== "accepted") continue;
+    const seen = earliest.get(event.entityId);
+    if (!seen || event.createdAt < seen) earliest.set(event.entityId, event.createdAt);
+  }
+  return earliest;
+}
+
+/**
+ * Streak and weekly count, read straight off real acceptance timestamps. No protected streak and no
+ * grace period: a day with nothing accepted yet reads as a real 0, the same "reflect the database's
+ * literal current state" rule every other honest-state widget in this app already follows — there is no
+ * "keep your streak" nudge and no un-breaking it after the fact. Pure, like `effectiveEstimate` — the
+ * hydration (`firstAcceptedAt`'s ledger read) happens in `loadDashboard`.
+ */
+export function acceptanceProgress(timestamps: string[], timeZone: string, now: Date): { streakDays: number; weekCount: number } {
+  const localDay = (t: number) => new Intl.DateTimeFormat("en-CA", { timeZone }).format(new Date(t));
+  const weekCount = timestamps.filter((iso) => Date.parse(iso) >= now.getTime() - 7 * 86_400_000).length;
+  const days = new Set(timestamps.map((iso) => localDay(Date.parse(iso))));
+  let streakDays = 0;
+  for (let cursor = now.getTime(); days.has(localDay(cursor)); cursor -= 86_400_000) streakDays += 1;
+  return { streakDays, weekCount };
+}
+
 /** Interruptions per active hour, per day, from real executions — never from a guess about the day. */
 function interruptionDensity(workspaceId: string): Array<{ day: string; perActiveHour: number }> {
   const byDay = new Map<string, { interruptions: number; activeMinutes: number }>();
@@ -969,6 +1089,8 @@ export function loadDashboard(ctx: AccessContext): DashboardData {
   const time = new Intl.DateTimeFormat("zh-CN", {
     weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false, timeZone
   }).format(now);
+  const acceptedAt = firstAcceptedAt(ctx.workspaceId);
+  const progress = acceptanceProgress([...acceptedAt.values()], timeZone, now);
 
   const energySelected = capacity.level !== "uncalibrated";
   const primaryReason = energySelected
@@ -1002,6 +1124,7 @@ export function loadDashboard(ctx: AccessContext): DashboardData {
     ...(lowEnergy ? { lowEnergy } : {}),
     ...(shortGap ? { shortGap } : {}),
     care: store.listCapacityCommitments(ctx.workspaceId).map((item) => ({ title: item.title, minimumMinutes: item.minimumMinutes })),
+    progress,
     identities: identityPacks.map((pack) => {
       const identityOrders = orders.filter((order) => order.identityId === pack.id);
       const completed = identityOrders.filter((order) => order.state === "accepted").length;
@@ -1038,11 +1161,20 @@ export function loadDashboard(ctx: AccessContext): DashboardData {
             : item.state === "blocked" ? "分析阻塞 · 可人工处理" : "正在分析"
         }))
     ].slice(0, 6),
-    milestonePulse: milestones.slice(0, 4).map((milestone) => ({
-      id: milestone.id,
-      identity: identityPacks.find((pack) => pack.id === milestone.identityId)?.label ?? milestone.identityId,
-      title: milestone.title,
-      evidence: milestone.status === "approved" ? "已批准 · 等待新证据" : "等待批准"
-    }))
+    // Real activity, not a proxy read off `milestone.status` alone — that used to call every
+    // milestone-bound WorkOrder still in flight "零进展" the moment it had not yet reached
+    // `accepted`, which is the everyday case, not the exception.
+    milestonePulse: milestones.slice(0, 4).map((milestone) => {
+      const acceptedCount = [...acceptedAt.keys()]
+        .filter((id) => orders.find((order) => order.id === id)?.milestoneId === milestone.id).length;
+      return {
+        id: milestone.id,
+        identity: identityPacks.find((pack) => pack.id === milestone.identityId)?.label ?? milestone.identityId,
+        title: milestone.title,
+        evidence: acceptedCount
+          ? `${milestone.status === "approved" ? "已批准" : "等待批准"} · 已验收 ${acceptedCount} 次`
+          : milestone.status === "approved" ? "已批准 · 等待新证据" : "等待批准"
+      };
+    })
   };
 }

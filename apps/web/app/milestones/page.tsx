@@ -7,8 +7,12 @@ import { requireSessionContext } from "../../lib/access-guard";
 
 export const dynamic = "force-dynamic";
 
-export default async function MilestonesPage() {
+export default async function MilestonesPage({ searchParams }: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
   const ctx = await requireSessionContext();
+  const params = await searchParams;
+  const editId = typeof params.edit === "string" ? params.edit : undefined;
   ensureSeeded(ctx);
   const store = getStore();
   const milestones = store.listMilestones(ctx.workspaceId);
@@ -63,6 +67,7 @@ export default async function MilestonesPage() {
         milestones={admin}
         identities={defaultIdentityPacks().filter((pack) => pack.kind === "identity")
           .map((pack) => ({ id: pack.id, label: pack.label }))}
+        {...(editId ? { initialEditId: editId } : {})}
       />
     </section>
   </SubpageShell>;

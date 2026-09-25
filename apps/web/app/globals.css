@@ -82,6 +82,14 @@ input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-vis
 .running-head::after{content:"";flex:1;height:1px;background:var(--mist);min-width:10px;order:2}
 .running-head nav{order:1}
 .system-state{order:3;display:flex;align-items:center;gap:10px;white-space:nowrap;font-family:var(--f-mono);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--graphite)}
+/* Hidden above phone width; `@media (max-width:680px)` below turns it into the fixed bottom tab bar
+   that replaces the plain-text top nav, which used to wrap onto two or three lines at that width. */
+.bottom-nav{display:none}
+.bottom-nav-more{position:relative}
+.bottom-nav-more>summary{list-style:none}
+.bottom-nav-more>summary::-webkit-details-marker{display:none}
+.bottom-nav-more-panel{position:absolute;bottom:100%;left:0;right:0;background:var(--paper);border:1px solid var(--ink);display:grid}
+.bottom-nav-more-panel a{display:block;padding:10px 14px;font-family:var(--f-mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--graphite)}
 .system-state b,.system-state strong{border:1px solid var(--mist);padding:2px 6px;font-weight:400}
 .status-badge{font-family:var(--f-mono);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;border:1px solid var(--mist);padding:2px 6px;color:var(--graphite)}
 
@@ -363,8 +371,16 @@ button:disabled{opacity:.4;cursor:not-allowed}
   .page{padding-inline:14px}
   .running-head{flex-wrap:wrap;gap:8px}
   .running-head::after{display:none}
+  /* The top `nav` is still in the DOM for anything that still reads it, but the person navigates from
+     the bottom bar at this width, so the wrapping text-link row is hidden rather than fixed in place. */
+  .running-head nav{display:none}
   .timeline-list article{grid-template-columns:1fr;gap:4px}
   .relation-actions button,.milestone-admin-buttons button{flex:1 1 auto}
+  .page,.subpage{padding-bottom:76px}
+  .bottom-nav{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:50;background:var(--paper);border-top:1.5px solid var(--ink)}
+  .bottom-nav>a,.bottom-nav-more>summary{flex:1;text-align:center;padding:10px 4px;font-family:var(--f-mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--graphite)}
+  .bottom-nav>a.active{color:var(--ink)}
+  .bottom-nav-more{flex:1}
 }
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{animation-duration:.001ms!important;transition-duration:.001ms!important;scroll-behavior:auto!important}
@@ -426,6 +442,9 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .schedule-setup>label{display:grid;gap:5px;max-width:640px;font-size:13px}
 .schedule-setup>label input,.schedule-setup>label select,.availability-editor>label select{padding:6px;border:1px solid var(--rule);background:var(--paper);color:var(--ink)}
 .schedule-setup>.primary-button{justify-self:start}
+.schedule-setup-prompt{margin:0 0 20px;border:1px solid var(--rule)}
+.schedule-setup-prompt>summary{padding:12px 14px;cursor:pointer;font-size:13px}
+.schedule-setup-prompt .schedule-setup{margin:0;border:none;border-top:1px solid var(--rule)}
 
 .calendar-sources .calendar-account{margin:10px 0 0}
 .calendar-sources h3{margin:0 0 4px;font-family:var(--f-mono);font-size:10px;letter-spacing:.12em;text-transform:none;color:var(--graphite)}

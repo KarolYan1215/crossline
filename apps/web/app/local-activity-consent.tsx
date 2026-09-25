@@ -23,6 +23,9 @@ export function LocalActivityConsent({ asked }: { asked: boolean }) {
     <div>
       <button type="button" className="primary-button" onClick={() => void answer("granted")}>开启</button>
       <button type="button" onClick={() => void answer("denied")}>不开启</button>
+      {/* Hides for this visit only — nothing is written, so the question comes back next time rather
+          than being silently decided as "denied" on the person's behalf. */}
+      <button type="button" onClick={() => setDone(true)}>稍后再说</button>
     </div>
     {error && <p role="alert">{error}</p>}
   </aside>;

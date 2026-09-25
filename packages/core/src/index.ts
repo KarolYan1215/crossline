@@ -17,7 +17,8 @@ export type Estimate = {
   p50Minutes: number;
   p85Minutes: number;
   // `legacy_task` marks a number carried over from a v1 row: real, but never a prior anyone authored.
-  source: "identity_prior" | "llm_prior" | "personal_history" | "legacy_task";
+  // `manual` marks one a person typed in directly, bypassing analysis entirely (see `promoteCaptureManually`).
+  source: "identity_prior" | "llm_prior" | "personal_history" | "legacy_task" | "manual";
   observationCount: number;
   confidence: "low" | "medium" | "high";
 };
