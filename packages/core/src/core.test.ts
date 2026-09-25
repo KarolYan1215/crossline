@@ -63,6 +63,7 @@ const workOrder = (): WorkOrder => ({
     observationCount: 0,
     confidence: "low"
   },
+  family: "deep_work",
   riskTier: "milestone",
   state: "captured"
 });

@@ -5,10 +5,10 @@ const analysisContext = {
   version: "crossline.analysis.v1", capture: { title: "Compare notes and decide", context: "Use only supplied notes" },
   approvedMilestones: [{ id: "m", projectId: "p", identityId: "research", title: "Compare notes", version: 1 }],
   availableInputs: [], identityPacks: [{ id: "research", version: 1, summary: "Keep research judgment with the human" }],
-  policy: { tools: [], externalSideEffects: false, humanApprovalRequired: true }
+  historicalStats: [], policy: { tools: [], externalSideEffects: false, humanApprovalRequired: true }
 };
 const validProposal = {
-  identityId: "research", projectId: "p", milestoneId: "m", intent: "Compare notes and decide",
+  identityId: "research", projectId: "p", milestoneId: "m", intent: "Compare notes and decide", family: "deep_work",
   automationParts: [{ id: "a", intent: "Organize supplied notes", reversibility: "local", quote: "Compare notes", rationale: "Prepare a comparison for review" }],
   humanCore: [{ id: "h", intent: "Decide", energy: "medium", interruptible: true, quote: "decide", rationale: "Judgment remains human" }],
   materialContract: [{ required: true, kind: "record", description: "A comparison draft", why: "The split needs the two papers side by side" }],

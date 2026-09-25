@@ -3,6 +3,7 @@
   "projectId": "p",
   "milestoneId": "m",
   "intent": "Decide",
+  "family": "deep_work",
   "automationParts": [],
   "humanCore": [
     {

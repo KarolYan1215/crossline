@@ -182,6 +182,20 @@ export type StoredAuditEvent = {
 };
 
 /**
+ * One real completion's active minutes, recorded the moment a WorkOrder reaches `accepted`, plus the
+ * identity-pack's static prior frozen at that same instant. The frozen baseline is what lets a later
+ * backtest ask "did calibration actually beat a zero-personal-data guess?" without the comparison being
+ * circular — reading it back off a WorkOrder's own `estimate` would already be calibrated by then.
+ */
+export type StoredDurationObservation = {
+  id: string; ownerId: string; workspaceId: string; workOrderId: string; executionId: string;
+  identityId: string; family: string;
+  observedMinutes: number; wallClockMinutes: number; pauseMinutes: number; interruptionDominant: boolean;
+  baselineP25Minutes: number; baselineP50Minutes: number; baselineP85Minutes: number;
+  observedAt: string; createdAt: string;
+};
+
+/**
  * Tables that once existed and never carried a row.
  *
  * Dropped at migration 4. Named here because a snapshot taken before that still lists them, and a
@@ -326,6 +340,17 @@ export class CrosslineStore {
         action TEXT NOT NULL, payload_json TEXT NOT NULL, created_at TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS audit_events_workspace ON audit_events(workspace_id, created_at);
+      CREATE TABLE IF NOT EXISTS duration_observations (
+        id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
+        work_order_id TEXT NOT NULL, execution_id TEXT NOT NULL,
+        identity_id TEXT NOT NULL, family TEXT NOT NULL,
+        observed_minutes INTEGER NOT NULL, wall_clock_minutes INTEGER NOT NULL, pause_minutes INTEGER NOT NULL,
+        interruption_dominant INTEGER NOT NULL DEFAULT 0,
+        baseline_p25_minutes INTEGER NOT NULL, baseline_p50_minutes INTEGER NOT NULL, baseline_p85_minutes INTEGER NOT NULL,
+        observed_at TEXT NOT NULL, created_at TEXT NOT NULL,
+        UNIQUE(workspace_id, execution_id)
+      );
+      CREATE INDEX IF NOT EXISTS duration_observations_bucket ON duration_observations(workspace_id, identity_id, family, observed_at);
     `);
     if (hasLegacyTasks) this.#migrateLegacyTasks();
     this.#runMigrations(path);
@@ -596,6 +621,11 @@ export class CrosslineStore {
   transitionWorkOrder(workspaceId: string, id: string, event: WorkOrderEvent, idempotencyKey: string,
     update: { proposal?: unknown; context?: unknown; audit?: StoredCapture["audit"]; attempt?: number;
       evidence?: EvidenceClaimInput[]; durationObserved?: boolean;
+      // The identity pack's static prior, frozen by the caller at call time — not looked up here, so
+      // `packages/db` never needs to know what an "identity pack" is. Present only on `evidence.accepted`;
+      // absent (e.g. a pre-`family` WorkOrder, or a caller that can't resolve one) simply skips recording
+      // a duration observation for this acceptance.
+      durationCalibrationBaseline?: { p25Minutes: number; p50Minutes: number; p85Minutes: number };
       expectedWorkOrder?: StoredWorkOrder } = {}): { changed: boolean; state: WorkOrderState } {
     return this.#db.transaction(() => {
       const current = this.listWorkOrders(workspaceId).find((item) => item.id === id)
@@ -644,7 +674,8 @@ export class CrosslineStore {
   // Runs inside transitionWorkOrder's transaction, so an execution or evidence row can never outlive a
   // rolled-back state change. WorkOrders only — a capture has neither executions nor evidence.
   #recordExecutionEffects(workspaceId: string, id: string, ownerId: string, event: WorkOrderEvent,
-    update: { evidence?: EvidenceClaimInput[]; durationObserved?: boolean }): void {
+    update: { evidence?: EvidenceClaimInput[]; durationObserved?: boolean;
+      durationCalibrationBaseline?: { p25Minutes: number; p50Minutes: number; p85Minutes: number } }): void {
     const now = new Date().toISOString();
     const open = this.#openExecution(workspaceId, id);
     if (event.type === "human.started") {
@@ -683,6 +714,7 @@ export class CrosslineStore {
       if (order?.milestoneId && !submitted.length) throw new Error("EVIDENCE_REQUIRED");
       this.#db.prepare("UPDATE evidence_claims SET review_status = 'accepted' WHERE workspace_id = ? AND work_order_id = ? AND review_status = 'submitted'")
         .run(workspaceId, id);
+      this.#recordDurationObservationIfCalibratable(workspaceId, id, ownerId, order, update.durationCalibrationBaseline);
       return;
     }
     if (event.type === "acceptance.revoked") {
@@ -716,6 +748,36 @@ export class CrosslineStore {
     if (!row) return undefined;
     const payload = JSON.parse(row.payload_json) as { durationObserved: boolean; interruptions: StoredExecution["interruptions"] };
     return { id: row.id, ownerId: row.owner_id, durationObserved: payload.durationObserved, interruptions: payload.interruptions };
+  }
+
+  /**
+   * Real active minutes are the honest signal only when a live timer actually ran the whole way
+   * (`durationObserved`) — a backfilled completion has no clock to trust. Silently does nothing when
+   * that's not the case, when the caller couldn't resolve a baseline (no `family` yet, or a pre-`family`
+   * WorkOrder), or when no execution ever closed for this order — none of those are errors, they're just
+   * "nothing to learn from here yet." `ON CONFLICT DO NOTHING` inside `recordDurationObservation` makes a
+   * revoke-then-reaccept cycle (same closed execution, evidence.accepted fired twice) a safe no-op.
+   */
+  #recordDurationObservationIfCalibratable(workspaceId: string, workOrderId: string, ownerId: string,
+    order: StoredWorkOrder | undefined, baseline: { p25Minutes: number; p50Minutes: number; p85Minutes: number } | undefined): void {
+    if (!order || !baseline) return;
+    const family = (order.payload as { family?: string } | undefined)?.family;
+    if (!family) return;
+    const row = this.#db.prepare(
+      "SELECT id, started_at, ended_at, pause_minutes, payload_json FROM executions WHERE workspace_id = ? AND work_order_id = ? AND ended_at IS NOT NULL ORDER BY started_at DESC LIMIT 1"
+    ).get(workspaceId, workOrderId) as { id: string; started_at: string; ended_at: string; pause_minutes: number; payload_json: string } | undefined;
+    if (!row) return;
+    const payload = JSON.parse(row.payload_json) as { durationObserved: boolean };
+    if (!payload.durationObserved) return;
+    const wallClockMinutes = Math.round((Date.parse(row.ended_at) - Date.parse(row.started_at)) / 60_000);
+    const observedMinutes = wallClockMinutes - row.pause_minutes;
+    if (observedMinutes < 1) return;
+    this.recordDurationObservation({
+      ownerId, workspaceId, workOrderId, executionId: row.id, identityId: order.identityId, family,
+      observedMinutes, wallClockMinutes, pauseMinutes: row.pause_minutes,
+      interruptionDominant: row.pause_minutes >= wallClockMinutes * 0.5,
+      baseline, observedAt: row.ended_at
+    });
   }
 
   #writeInterruptions(executionId: string, interruptions: StoredExecution["interruptions"], durationObserved: boolean): void {
@@ -1021,7 +1083,9 @@ export class CrosslineStore {
   }
 
   applyMilestoneGate(workspaceId: string, workOrderId: string, result: MilestoneGateResult,
-    evidenceTexts: string[], idempotencyKey: string): { changed: boolean; state: WorkOrderState } {
+    evidenceTexts: string[], idempotencyKey: string,
+    durationCalibrationBaseline?: { p25Minutes: number; p50Minutes: number; p85Minutes: number }
+  ): { changed: boolean; state: WorkOrderState } {
     // One transaction, not the dozen this used to be. The audit event, the transition, the payload
     // merge and any relation refutation each committed on their own, so a crash or a concurrent writer
     // between any two left the ledger and the row disagreeing — which is exactly the shape of the
@@ -1062,7 +1126,8 @@ export class CrosslineStore {
     }
     const relationIds = result.flywheelAssessment.filter((item) => item.supports === "advances").map((item) => item.relationId);
     const transitioned = this.transitionWorkOrder(workspaceId, workOrderId,
-      { type: "evidence.accepted", approvalId: "crossline-milestone-gate" }, idempotencyKey);
+      { type: "evidence.accepted", approvalId: "crossline-milestone-gate" }, idempotencyKey,
+      { ...(durationCalibrationBaseline ? { durationCalibrationBaseline } : {}) });
     // A reused idempotency key makes the transition a no-op, and writing the acceptance audit anyway
     // produced a ledger that said `milestone_gate.auto_accepted` about an order still sitting in
     // `evidence_review`. A key that has already been spent is a caller bug, and it says so.
@@ -1310,7 +1375,7 @@ export class CrosslineStore {
       "work_orders", "executions", "evidence_claims", "plan_versions", "plan_changes",
       "materials",
       "energy_observations", "external_bindings",
-      "capacity_commitments",
+      "capacity_commitments", "duration_observations",
       // Consent state is part of the ledger: a restore that silently re-enables collection is not a restore.
       "settings",
       // `principals`/`workspaces` are not workspace-scoped rows themselves — a principal is scoped by
@@ -1576,6 +1641,46 @@ export class CrosslineStore {
       "DELETE FROM tailscale_bindings WHERE workspace_id = ? AND tailscale_login = ?"
     ).run(workspaceId, tailscaleLogin);
     return { changed: result.changes > 0 };
+  }
+
+  /** Keyed on `(workspace, execution)`, not `work_order_id`: a revoked-then-re-judged WorkOrder reuses
+   * the same closed execution, so a repeat call from `evidence.accepted` is a safe no-op instead of a
+   * second, double-counted observation. */
+  recordDurationObservation(input: {
+    ownerId: string; workspaceId: string; workOrderId: string; executionId: string;
+    identityId: string; family: string;
+    observedMinutes: number; wallClockMinutes: number; pauseMinutes: number; interruptionDominant: boolean;
+    baseline: { p25Minutes: number; p50Minutes: number; p85Minutes: number };
+    observedAt: string;
+  }): { changed: boolean } {
+    const result = this.#db.prepare(`
+      INSERT INTO duration_observations (
+        id, owner_id, workspace_id, work_order_id, execution_id, identity_id, family,
+        observed_minutes, wall_clock_minutes, pause_minutes, interruption_dominant,
+        baseline_p25_minutes, baseline_p50_minutes, baseline_p85_minutes, observed_at, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(workspace_id, execution_id) DO NOTHING
+    `).run(randomUUID(), input.ownerId, input.workspaceId, input.workOrderId, input.executionId,
+      input.identityId, input.family, input.observedMinutes, input.wallClockMinutes, input.pauseMinutes,
+      input.interruptionDominant ? 1 : 0, input.baseline.p25Minutes, input.baseline.p50Minutes,
+      input.baseline.p85Minutes, input.observedAt, new Date().toISOString());
+    return { changed: result.changes > 0 };
+  }
+
+  listDurationObservations(workspaceId: string, identityId: string, family: string): StoredDurationObservation[] {
+    const rows = this.#db.prepare(
+      "SELECT * FROM duration_observations WHERE workspace_id = ? AND identity_id = ? AND family = ? ORDER BY observed_at, id"
+    ).all(workspaceId, identityId, family) as Array<Record<string, string | number>>;
+    return rows.map((row) => ({
+      id: String(row.id), ownerId: String(row.owner_id), workspaceId: String(row.workspace_id),
+      workOrderId: String(row.work_order_id), executionId: String(row.execution_id),
+      identityId: String(row.identity_id), family: String(row.family),
+      observedMinutes: Number(row.observed_minutes), wallClockMinutes: Number(row.wall_clock_minutes),
+      pauseMinutes: Number(row.pause_minutes), interruptionDominant: Number(row.interruption_dominant) === 1,
+      baselineP25Minutes: Number(row.baseline_p25_minutes), baselineP50Minutes: Number(row.baseline_p50_minutes),
+      baselineP85Minutes: Number(row.baseline_p85_minutes),
+      observedAt: String(row.observed_at), createdAt: String(row.created_at)
+    }));
   }
 
   listWorkspaces(): StoredWorkspace[] {

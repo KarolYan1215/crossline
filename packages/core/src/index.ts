@@ -3,6 +3,7 @@ export * from "./availability";
 export * from "./analysis";
 export * from "./capacity";
 export * from "./cost";
+export * from "./estimate";
 export * from "./flywheel";
 export * from "./flywheel-schema";
 export * from "./materials-schema";
@@ -191,6 +192,11 @@ export type WorkOrder = {
   materialContract: Array<{ kind: Evidence["kind"]; description: string; why: string; required: boolean }>;
   evidenceContract: Array<{ kind: Evidence["kind"]; description: string; why: string; required: boolean }>;
   estimate: Estimate;
+  // Groups this proposal into a reference class for duration calibration, independent of `identityId` —
+  // "research paper reading" and "research deep writing" take wildly different real time, and lumping
+  // them under one identity-wide statistic would blur exactly the distinction personal history exists
+  // to capture. Reuses `packages/identity-packs`' own `durationPriors` vocabulary rather than a second one.
+  family: "preparation" | "review" | "deep_work";
   riskTier: "routine" | "milestone" | "high_risk";
   state: WorkOrderState;
   // A recurring commitment can be honoured at its minimum size; skipping it needs a written reason.

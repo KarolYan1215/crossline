@@ -52,10 +52,15 @@ export type DashboardData = {
 };
 
 // Never a bare number: an estimate without its provenance is indistinguishable from a measurement.
+const estimateSourceLabel: Record<string, string> = {
+  llm_prior: "先验", identity_prior: "先验", legacy_task: "遗留任务", personal_history: "个人历史"
+};
+const estimateConfidenceLabel = { low: "低", medium: "中", high: "高" } as const;
 const estimateLabel = (estimate: DashboardAction["estimate"]) =>
   estimate.observationCount === 0
     ? `${estimate.p25Minutes}–${estimate.p85Minutes}m · 先验（0 次观测）`
-    : `${estimate.p25Minutes}–${estimate.p85Minutes}m · ${estimate.observationCount} 次观测`;
+    : `${estimate.p25Minutes}–${estimate.p85Minutes}m · ${estimateSourceLabel[estimate.source] ?? estimate.source}`
+      + ` · ${estimate.observationCount} 次观测 · 置信${estimateConfidenceLabel[estimate.confidence]}`;
 
 const basisLabel = { self_report: "自评", execution_history: "执行记录", local_activity: "本机活动" } as const;
 const capacityLevelLabel = { low: "低", medium: "中", high: "高" } as const;

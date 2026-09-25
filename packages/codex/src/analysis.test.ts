@@ -5,10 +5,10 @@ const context = {
   version: "crossline.analysis.v1", capture: { title: "Compare notes and decide", context: "" },
   approvedMilestones: [{ id: "m", projectId: "p", identityId: "research", title: "Compare notes", version: 1 }],
   availableInputs: [], identityPacks: [{ id: "research", version: 1, summary: "Human judgment" }],
-  policy: { tools: [], externalSideEffects: false, humanApprovalRequired: true }
+  historicalStats: [], policy: { tools: [], externalSideEffects: false, humanApprovalRequired: true }
 };
 const proposal = {
-  identityId: "research", projectId: "p", milestoneId: "m", intent: "Compare notes and decide",
+  identityId: "research", projectId: "p", milestoneId: "m", intent: "Compare notes and decide", family: "deep_work",
   automationParts: [], humanCore: [{ id: "h", intent: "Compare and decide", energy: "medium", interruptible: true, quote: "decide", rationale: "Human judgment" }],
   materialContract: [], evidenceContract: [{ kind: "record", description: "Decision", why: "The decision is the deliverable", required: true }],
   estimate: { p25Minutes: 10, p50Minutes: 20, p85Minutes: 40, source: "llm_prior", observationCount: 0, confidence: "low" }, riskTier: "routine", blockers: []

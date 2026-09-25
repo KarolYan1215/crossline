@@ -5,10 +5,11 @@ import path from "node:path";
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 import { CrosslineStore, type EvidenceClaimInput, type StoredMilestone } from "@crossline/db";
 import { availableSlots, deriveCapacity, requiredApproval, validateAvailability, DEFAULT_AVAILABILITY,
-  type AccessContext, type AvailabilityWindow, type SuccessCriterion } from "@crossline/core";
+  type AccessContext, type AvailabilityWindow, type Estimate, type SuccessCriterion } from "@crossline/core";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { forecastGoals, planSchedule, recommendNextActions, type ForecastResult, type PlanResult } from "@crossline/planner";
 import { energyCalibration, predictEnergyTransition, readTransitionOutcomes } from "./energy-learning";
+import { durationPriorFor, effectiveEstimate } from "./estimate-calibration";
 import type { DashboardAction, DashboardData } from "../app/dashboard-view";
 
 export type PersistedScheduleBlock = {
@@ -794,8 +795,10 @@ export function acceptWorkOrderEvidence(ctx: AccessContext, workOrderId: string)
   if (workOrder.state === "accepted") return { ok: true };
   if (workOrder.state !== "evidence_review") return { ok: false, code: "EVIDENCE_REVIEW_NOT_READY" };
   if (workOrder.milestoneId) return { ok: false, code: "MILESTONE_GATE_REQUIRED" };
+  const baseline = durationPriorFor(workOrder.identityId, workOrder.payload);
   getStore().transitionWorkOrder(ctx.workspaceId, workOrderId, { type: "evidence.accepted", approvalId: ctx.principalId },
-    `evidence-accepted:${workOrderId}:${executionRun(ctx.workspaceId, workOrderId)}`);
+    `evidence-accepted:${workOrderId}:${executionRun(ctx.workspaceId, workOrderId)}`,
+    { ...(baseline ? { durationCalibrationBaseline: baseline } : {}) });
   return { ok: true };
 }
 
@@ -838,6 +841,16 @@ type ActionableOrder = ReturnType<CrosslineStore["listWorkOrders"]>[number];
 const humanCoreOf = (order: ActionableOrder) =>
   ((order.payload as { humanCore?: Array<{ energy?: string; interruptible?: boolean }> }).humanCore ?? [])[0];
 
+/** The estimate actually used for scheduling and display — see `effectiveEstimate`'s own doc comment
+ * for why this reads `duration_observations` fresh on every call instead of ever rewriting the
+ * WorkOrder's own stored `estimate`. */
+const resolvedEstimate = (ctx: AccessContext, order: ActionableOrder): Estimate => {
+  const prior = durationPriorFor(order.identityId, order.payload);
+  const family = (order.payload as { family?: string } | undefined)?.family;
+  const rows = prior && family ? getStore().listDurationObservations(ctx.workspaceId, order.identityId, family) : [];
+  return effectiveEstimate(order.estimate, prior, rows);
+};
+
 const plannerTaskOf = (ctx: AccessContext, order: ActionableOrder) => {
   const preferences = readSchedulePreferences(ctx);
   const goal = readGoalSettings(ctx, order.milestoneId);
@@ -848,7 +861,7 @@ const plannerTaskOf = (ctx: AccessContext, order: ActionableOrder) => {
   const dependsOn = (order.payload as { dependsOn?: string[] }).dependsOn;
   return {
     id: order.id, title: order.intent, identityId: order.identityId, milestoneId: order.milestoneId,
-    estimate: order.estimate,
+    estimate: resolvedEstimate(ctx, order),
     ...(core?.energy ? { energy: core.energy as "low" | "medium" | "high" } : {}),
     // Materials stand between the proposal and the human until the order reaches ready_for_human.
     inputsReady: order.state === "ready_for_human" || order.state === "active",
@@ -919,7 +932,7 @@ const toAction = (ctx: AccessContext, order: ActionableOrder | undefined, reason
   id: order.id,
   title: order.intent,
   identityId: order.identityId,
-  estimate: order.estimate,
+  estimate: resolvedEstimate(ctx, order),
   ...(humanCoreOf(order)?.energy ? { energy: humanCoreOf(order)!.energy as "low" | "medium" | "high" } : {}),
   reason,
   milestone: getStore().listMilestones(ctx.workspaceId).find((item) => item.id === order.milestoneId)?.title ?? "等待确认",
@@ -1015,7 +1028,7 @@ export function loadDashboard(ctx: AccessContext): DashboardData {
         startsAt: order.state === "approved" ? "已批准 · 等待材料"
           : order.state === "preparing" ? "材料准备中"
           : order.state === "active" ? "执行中"
-          : `${order.estimate.p50Minutes} 分钟 · 待排程`
+          : `${resolvedEstimate(ctx, order).p50Minutes} 分钟 · 待排程`
       })),
       ...store.listCaptures(ctx.workspaceId)
         .filter((item) => item.state === "blocked" || item.state === "captured" || item.state === "analyzing")

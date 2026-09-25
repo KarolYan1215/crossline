@@ -64,6 +64,7 @@ test("the seeded ledger still passes the analysis trust check under the new pack
       .map((milestone) => ({ id: milestone.id, projectId: milestone.projectId!, identityId: milestone.identityId, title: milestone.title, version: milestone.version })),
     identityPacks: swappedPacks.filter((pack) => pack.kind === "identity").map((pack) => ({ id: pack.id, version: 1, summary: pack.label })),
     availableInputs: [],
+    historicalStats: [],
     policy: { tools: [], externalSideEffects: false, humanApprovalRequired: true }
   };
   expect(validateAnalysisContext(context).approvedMilestones.length).toBeGreaterThan(0);

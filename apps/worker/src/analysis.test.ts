@@ -13,7 +13,7 @@ beforeEach(() => {
 });
 afterEach(() => store.close());
 
-const proposal = { identityId: "research", projectId: "p", milestoneId: "m", intent: "Decide", automationParts: [], humanCore: [{ id: "h", intent: "Decide", energy: "medium", interruptible: true, quote: "Decide", rationale: "Judgment" }], materialContract: [], evidenceContract: [{ kind: "record", description: "Decision", why: "The decision is the deliverable", required: true }], estimate: { p25Minutes: 10, p50Minutes: 20, p85Minutes: 40, source: "llm_prior", observationCount: 0, confidence: "low" }, riskTier: "routine", blockers: [] };
+const proposal = { identityId: "research", projectId: "p", milestoneId: "m", intent: "Decide", family: "deep_work", automationParts: [], humanCore: [{ id: "h", intent: "Decide", energy: "medium", interruptible: true, quote: "Decide", rationale: "Judgment" }], materialContract: [], evidenceContract: [{ kind: "record", description: "Decision", why: "The decision is the deliverable", required: true }], estimate: { p25Minutes: 10, p50Minutes: 20, p85Minutes: 40, source: "llm_prior", observationCount: 0, confidence: "low" }, riskTier: "routine", blockers: [] };
 
 test("duplicate Analyze requests share one durable run and publish only a proposal", async () => {
   const { rpc, turns } = fakeRuntime([JSON.stringify(proposal)]);

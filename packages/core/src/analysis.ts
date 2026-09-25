@@ -6,6 +6,11 @@ export type AnalysisContext = {
   approvedMilestones: Array<{ id: string; projectId: string; identityId: string; title: string; version: number }>;
   availableInputs: Array<{ id: string; text: string }>;
   identityPacks: Array<{ id: string; version: number; summary: string }>;
+  // How this workspace's own past captures actually turned out, per (identityId, family) — not a
+  // suggestion to copy, evidence the model can weigh against its own read of the current capture.
+  // `medianActualMinutes: 0` means no real completions exist yet for that pair, same convention
+  // `Estimate.observationCount` already uses for "no observations".
+  historicalStats: Array<{ identityId: string; family: "preparation" | "review" | "deep_work"; chosenCount: number; medianActualMinutes: number }>;
   policy: { tools: never[]; externalSideEffects: boolean; humanApprovalRequired: boolean };
 };
 type SplitEvidence = { quote: string; rationale: string };
@@ -39,8 +44,9 @@ const kind = choice("file", "link", "record", "telemetry");
 const CONTRACT_LINE_LIMIT = 300;
 const line: Schema = { type: "string", minLength: 1, maxLength: CONTRACT_LINE_LIMIT };
 const why: Schema = { type: "string", minLength: 1, maxLength: 300 };
+const family = choice("preparation", "review", "deep_work");
 export const ANALYSIS_OUTPUT_SCHEMA = object({
-  identityId: str, projectId: str, milestoneId: str, intent: str,
+  identityId: str, projectId: str, milestoneId: str, intent: str, family,
   automationParts: array(object({ id: str, intent: str, reversibility: choice("local"), quote: str, rationale: str })),
   humanCore: array(object({ id: str, intent: str, energy: choice("low", "medium", "high"), interruptible: bool, quote: str, rationale: str }), 1),
   // Eight, not thirty-two: no real contract has thirty-two lines, and a large allowance is room the
@@ -73,6 +79,7 @@ export function validateAnalysisContext(value: unknown): AnalysisContext {
   const schema = object({ version: choice("crossline.analysis.v1"), capture: object({ title: str, context: { type: "string", maxLength: 4000 } }),
     approvedMilestones: array(object({ id: str, projectId: str, identityId: str, title: str, version: { type: "integer", minimum: 1 } }), 1),
     availableInputs: array(object({ id: str, text: str })), identityPacks: array(object({ id: str, version: { type: "integer", minimum: 1 }, summary: str }), 1),
+    historicalStats: array(object({ identityId: str, family, chosenCount: { type: "integer", minimum: 0 }, medianActualMinutes: number }), 0, 32),
     policy: object({ tools: { type: "array", items: str, maxItems: 0 }, externalSideEffects: { type: "boolean", enum: [false] }, humanApprovalRequired: { type: "boolean", enum: [true] } }) });
   if (!matches(value, schema)) throw new Error("ANALYSIS_CONTEXT_INVALID");
   const context = value as AnalysisContext;

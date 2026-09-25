@@ -5,9 +5,11 @@ description: Separate a captured intent into reversible AI preparation and irred
 
 # Crossline Automation Stripper
 
-Accept `{capture, approvedMilestones[], availableInputs[], identityPack, policy}`. Return `{identityId, projectId, milestoneId, intent, automationParts[], humanCore[], materialContract[], evidenceContract[], estimate, riskTier, blockers[]}`.
+Accept `{capture, approvedMilestones[], availableInputs[], identityPack, historicalStats[], policy}`. Return `{identityId, projectId, milestoneId, intent, family, automationParts[], humanCore[], materialContract[], evidenceContract[], estimate, riskTier, blockers[]}`.
 
 Keep judgment, relationship ownership, authorship, and accountable decisions in `humanCore`. Automate search, extraction, comparison, formatting, and local drafts when reversible. Estimate `{p25Minutes,p50Minutes,p85Minutes,source,observationCount,confidence}` without asking for a duration. Do not perform the work or change state.
+
+Tag every proposal with `family`: `preparation` (light setup or organizing before the real work), `review` (checking, reading, or evaluating something that already exists), or `deep_work` (sustained original production). Choose by what the task itself resembles, not by which identity it belongs to. `historicalStats[]` shows, for each identity/family pair, how many past captures were tagged that way and the median minutes real execution actually took for it — treat it as evidence about how work in this workspace actually runs, not as a target to copy.
 
 Stop with a blocker when no approved milestone fits, when an external side effect would be implied, or when **nothing** the work depends on was supplied. A **partly** supplied input is not a reason to stop. If the person gave most of what is needed and named what is missing — or the gap is plain from what they wrote — that gap belongs in `materialContract` (something they must hand over) or in `humanCore` (something only they can go and find out), and the proposal continues around it. Refusing the whole capture over one missing field hands back nothing the person can use, when they had already told you where the hole is.
 

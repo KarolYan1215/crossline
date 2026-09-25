@@ -66,6 +66,12 @@ function populate(store: CrosslineStore): void {
     aggregate: { activeMinutes: 412 }, observedAt: "2026-09-15T23:00:00.000Z"
   });
   store.setSetting(WORKSPACE, "localActivity.consent", "granted");
+  store.recordDurationObservation({
+    ownerId: OWNER, workspaceId: WORKSPACE, workOrderId: "work-order-1", executionId: "execution-1",
+    identityId: "research", family: "deep_work",
+    observedMinutes: 42, wallClockMinutes: 50, pauseMinutes: 8, interruptionDominant: false,
+    baseline: { p25Minutes: 15, p50Minutes: 30, p85Minutes: 50 }, observedAt: "2026-09-15T10:30:00.000Z"
+  });
 }
 
 test("the export carries every table in the schema, so a new table cannot escape the backup", () => {

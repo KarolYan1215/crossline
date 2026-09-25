@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import type { CrosslineStore } from "@crossline/db";
+import { defaultIdentityPacks } from "@crossline/identity-packs";
 
 const OWNER_ID = "local-owner";
 export const MILESTONE_GATE_SKILL = "crossline:crossline-milestone-gate";
@@ -146,8 +147,17 @@ export function createMilestoneGate(store: CrosslineStore, workspaceId: string, 
     // transition became a no-op, and the order stayed in `evidence_review` while the ledger recorded
     // an acceptance that never happened.
     const attempt = store.listEvents(workspaceId, { type: "milestone_gate.judged", entityId: workOrderId }).length;
+    // The identity pack's static prior for this order's `(identityId, family)` — the "zero-personal-
+    // data" baseline `applyMilestoneGate` freezes onto the duration observation it records on a pass.
+    // `undefined` for a pre-`family` order or an order whose identity has no matching pack; either way
+    // `applyMilestoneGate` simply records no observation for this acceptance.
+    const order = store.listWorkOrders(workspaceId).find((item) => item.id === workOrderId);
+    const family = (order?.payload as { family?: string } | undefined)?.family;
+    const durationCalibrationBaseline = order && family
+      ? defaultIdentityPacks().find((pack) => pack.id === order.identityId)?.durationPriors[family]
+      : undefined;
     const applied = store.applyMilestoneGate(workspaceId, workOrderId, result.output, evidenceTexts,
-      `milestone-gate:${workOrderId}:${context.milestone.version}:${attempt}`);
+      `milestone-gate:${workOrderId}:${context.milestone.version}:${attempt}`, durationCalibrationBaseline);
     return {
       state: applied.state === "accepted" ? "accepted" : "held",
       workOrderId,

@@ -63,6 +63,24 @@ describe("energy-aware planning", () => {
     expect(result.plan.blocks.map((block) => block.taskId)).toEqual(["prepare", "submit"]);
   });
 
+  test("a calibrated (non-low) confidence reserves p50, not the conservative p85 low confidence reserves", async () => {
+    // Same p25/p50/p85 spread, same everything else — only `confidence` differs. This is the direct
+    // proof that `durationOf`'s `confidence === "low" ? p85 : p50` branch is not dead code: nothing in
+    // this codebase ever emitted anything but "low" until real personal-history calibration existed.
+    const estimate = { p25Minutes: 30, p50Minutes: 50, p85Minutes: 90 };
+    const uncalibrated = await planSchedule({ now: start, horizonDays: 1, mode: "asap", tasks: [
+      { id: "task", title: "作业", estimate: { ...estimate, confidence: "low" as const }, inputsReady: true, deadlineTier: 2 }
+    ], availability: [{ start: "2026-09-14T14:00:00.000Z", end: "2026-09-14T18:00:00.000Z", energy: "high" }], frozenBlocks: [] });
+    const calibrated = await planSchedule({ now: start, horizonDays: 1, mode: "asap", tasks: [
+      { id: "task", title: "作业", estimate: { ...estimate, confidence: "medium" as const }, inputsReady: true, deadlineTier: 2 }
+    ], availability: [{ start: "2026-09-14T14:00:00.000Z", end: "2026-09-14T18:00:00.000Z", energy: "high" }], frozenBlocks: [] });
+
+    const minutesOf = (result: typeof uncalibrated) =>
+      result.plan.blocks.reduce((sum, block) => sum + (Date.parse(block.end) - Date.parse(block.start)) / 60_000, 0);
+    expect(minutesOf(uncalibrated)).toBe(estimate.p85Minutes);
+    expect(minutesOf(calibrated)).toBe(estimate.p50Minutes);
+  });
+
   test("relaxes daily buffer before missing a confirmed deadline", async () => {
     const result = await planSchedule({ now: start, horizonDays: 1, tasks: [{
       id: "due", title: "截止作业", estimate: { p25Minutes: 60, p50Minutes: 60, p85Minutes: 60,

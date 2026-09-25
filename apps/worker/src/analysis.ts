@@ -1,5 +1,5 @@
 import { runCodexAnalysis, type CodexRpcBoundary } from "@crossline/codex";
-import { validateAnalysisContext } from "@crossline/core";
+import { validateAnalysisContext, type AnalysisContext } from "@crossline/core";
 import { CrosslineStore, type StoredCapture } from "@crossline/db";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 
@@ -7,6 +7,23 @@ export type AnalysisOutcome = { id: string; state: string; attempt: number; audi
 
 const workspaceId = "personal-crossline";
 const ownerId = "local-owner";
+const FAMILIES = ["preparation", "review", "deep_work"] as const;
+
+/** How this workspace's own past captures actually turned out, per (identity, family) — evidence the
+ * analysis Skill can weigh against its own read of the current capture, not history it must copy.
+ * `medianActualMinutes: 0` means no real completions exist yet, the same convention `Estimate.
+ * observationCount` already uses for "unobserved". */
+function buildHistoricalStats(store: CrosslineStore, identityIds: string[]): AnalysisContext["historicalStats"] {
+  const promoted = store.listWorkOrders(workspaceId).filter((order) => order.ownerId === ownerId);
+  return identityIds.flatMap((identityId) => FAMILIES.map((family) => {
+    const chosenCount = promoted.filter((order) => order.identityId === identityId
+      && (order.payload as { family?: string } | undefined)?.family === family).length;
+    const durations = store.listDurationObservations(workspaceId, identityId, family)
+      .map((row) => row.observedMinutes).sort((a, b) => a - b);
+    return { identityId, family, chosenCount,
+      medianActualMinutes: durations.length ? durations[Math.floor(durations.length / 2)]! : 0 };
+  }));
+}
 export function createCaptureAnalyzer(store: CrosslineStore, cwd: string) {
   // A new worker cannot safely replay an interrupted turn. Retain its IDs for audit.
   for (const capture of store.listCaptures(workspaceId).filter((item) => item.state === "analyzing")) {
@@ -55,6 +72,7 @@ export function createCaptureAnalyzer(store: CrosslineStore, cwd: string) {
           ? [{ id: "capture-context", text: capture.context.trim() }]
           : [],
         identityPacks: packs.map((p) => ({ id: p.id, version: 1, summary: `${p.label}; workflows: ${p.workflowTemplates.join(", ")}; evidence: ${p.evidencePolicy}` })),
+        historicalStats: buildHistoricalStats(store, [...identities]),
         policy: { tools: [], externalSideEffects: false, humanApprovalRequired: true }
       });
       store.updateAnalysisAudit(workspaceId, id, { contextVersion: context.version });
