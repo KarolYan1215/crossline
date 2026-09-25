@@ -1,4 +1,4 @@
-import { ensureSeeded, getStore } from "../../lib/crossline";
+import { ensureSeeded, getStore, resolvedEstimate } from "../../lib/crossline";
 import { SubpageShell } from "../subpage-shell";
 import { AnalyzeButton } from "./analyze-button";
 import { ExecutionActions } from "./execution-actions";
@@ -75,10 +75,14 @@ export default async function WorkbenchPage() {
       const paused = Boolean(open?.interruptions.at(-1) && !open.interruptions.at(-1)!.resumedAt);
       const prepared = materials.filter((material) => material.workOrderId === run.id);
       const material = materialStatus(events, run.id);
+      // Personal-history calibration (packages/core/src/estimate.ts) overrides the raw analysis-time
+      // guess once this (identityId, family) bucket has real completions — this is the one page where
+      // that number actually informs a decision the person is about to make.
+      const estimate = resolvedEstimate(ctx, run);
       return <article id={`work-order-${run.id}`} key={run.id}>
         <header><span>{run.identityId.toUpperCase()} / {shortId(run.id)}</span><b><i className="gly" data-s={run.state} aria-hidden="true" />{stateLabel[run.state] ?? "未知状态"}</b></header>
         <h2>{run.intent}</h2>
-        <p>{run.estimate.p25Minutes}–{run.estimate.p85Minutes} 分钟 · {confidenceLabel[run.estimate.confidence]} · {riskLabel[run.riskTier]}</p>
+        <p>{estimate.p25Minutes}–{estimate.p85Minutes} 分钟 · {confidenceLabel[estimate.confidence]} · {riskLabel[run.riskTier]}</p>
         {/* The action that advances this work order sits on the card, not inside the disclosure. Behind a
             closed drawer the next step was invisible, and every action reloads the page and closes the
             drawer again — so doing two things in a row meant re-opening it every time. */}

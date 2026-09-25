@@ -844,7 +844,7 @@ const humanCoreOf = (order: ActionableOrder) =>
 /** The estimate actually used for scheduling and display — see `effectiveEstimate`'s own doc comment
  * for why this reads `duration_observations` fresh on every call instead of ever rewriting the
  * WorkOrder's own stored `estimate`. */
-const resolvedEstimate = (ctx: AccessContext, order: ActionableOrder): Estimate => {
+export const resolvedEstimate = (ctx: AccessContext, order: ActionableOrder): Estimate => {
   const prior = durationPriorFor(order.identityId, order.payload);
   const family = (order.payload as { family?: string } | undefined)?.family;
   const rows = prior && family ? getStore().listDurationObservations(ctx.workspaceId, order.identityId, family) : [];
