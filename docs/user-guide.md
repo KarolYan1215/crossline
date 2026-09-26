@@ -1,5 +1,10 @@
 # 使用手册
 
+第一次接触这个仓库、想知道"从零开始该按什么顺序做"，先看
+[docs/getting-started.md](./getting-started.md)——那份文档是完整的首次走查，
+会在需要的地方链回本文这里。本文覆盖的是账号、离线、Tailscale、备份这类基础设施细节，
+不是产品功能的操作顺序。
+
 这份手册按真实场景组织，每一节除了操作步骤，还说明这一步背后动的是哪个真实机制——
 session、`AccessContext`、workspace 过滤、Codex capability token、离线 outbox、审计事件——
 不是空泛的点哪里点哪里。涉及的代码位置见各节标题旁的引用。

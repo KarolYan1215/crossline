@@ -8,6 +8,9 @@
 
 ## 快速开始
 
+想要一份从 `git clone` 到验收第一件事的完整走查（含注册、首次收集、手工创建路径、接 Codex），
+见 [docs/getting-started.md](docs/getting-started.md)。下面是最短版本：
+
 ```powershell
 pnpm install
 pnpm build
