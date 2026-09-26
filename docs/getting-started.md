@@ -23,19 +23,31 @@ pnpm install
 
 ## 1. 最小配置：让登录这件事能发生
 
-Next.js 只读它自己项目目录下的 `.env`，根目录放一份会被静默忽略——所以是**复制两份**：
+web 和 worker 读环境变量的地方不一样，**复制方式也不一样**，混了会看起来"配了但不生效"：
 
 ```powershell
 copy .env.example apps\web\.env
-copy .env.example apps\worker\.env
+copy .env.example .env.local
 ```
 
-打开这两份文件，必填这两项（两份文件里必须填**同一个值**）：
+- `apps/web/.env`：Next.js 只读它自己项目目录下的 `.env`，根目录放一份会被静默忽略。
+- 根目录的 `.env.local`（会被 `.gitignore` 忽略）：`pnpm worker` 的进程反过来**只读仓库根目录**的
+  `.env.local`/`.env`，完全不看 `apps/worker/.env`——这是 `apps/worker/src/index.ts` 里的既有行为，
+  不是这份指南自创的约定。
+
+打开 `apps/web/.env`，必填：
 
 ```
 BETTER_AUTH_SECRET=<随机 32+ 字节字符串>
 CROSSLINE_SUPERVISOR_CAPABILITY_SECRET=<另一个随机 32+ 字节字符串，跟上面不同>
 ```
+
+再打开根目录的 `.env.local`，把**同一个** `CROSSLINE_SUPERVISOR_CAPABILITY_SECRET` 值也填进去——
+两边必须完全一致，这是 web 签发、worker 校验同一个 capability token 用的共享密钥。漏了这一步，
+worker 会打印 `worker.blocked: CROSSLINE_SUPERVISOR_CAPABILITY_SECRET_MISSING` 然后**静默地**
+不启动 Codex supervisor（3211 端口），日历同步、`worker.tick` 之类其他后台任务照常跑，
+只有 Analyze / 材料准备 / 里程碑闸门 / 第 11 步的 Codex 登录看起来永远连不上——很容易被误判成
+"Codex 本身有问题"，其实只是这一个环境变量放错了文件。
 
 然后**至少**打开下面两条登录路径中的一条——不打开任何一条，任何人都注册不了账号：
 
