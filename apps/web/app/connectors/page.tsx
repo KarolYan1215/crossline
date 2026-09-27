@@ -27,7 +27,23 @@ export default async function ConnectorsPage() {
   return <SubpageShell eyebrow="写后验证" title="连接目标"
     description="工作日历一行是观测到的真实状态；其余各行是声明的目标，尚未配置凭据，也没有跑过任何探测。">
     <section className="status-grid">
+      <article className="status-card">
+        <span className="status-badge">一次性流程</span>
+        <h2>入职访谈</h2>
+        <p>几个问题，AI 提出可能的里程碑草案，供你批准。</p>
+        <a href="/onboarding">前往访谈 →</a>
+      </article>
       <CodexAccountControl />
+      <article className="status-card">
+        <span className="status-badge">已开启</span>
+        <h2>Codex 跨运行 memory</h2>
+        <p>
+          每次技能调用不再是全新上下文；模型自己积累的记忆会影响之后的回答，同样的输入不再保证同样的输出。<br />
+          记忆数据存在 Codex 自己的 CODEX_HOME 里，不在这个 App 的 SQLite 账本中，
+          `pnpm export`/`backup-crossline.ps1` 都不会备份它。
+        </p>
+        <details><summary>诊断代码</summary><code>CODEX_MEMORIES_ENABLED</code></details>
+      </article>
       <CalendarSources />
       <TailscaleTrust />
       <DeviceLeases />

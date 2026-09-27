@@ -1,5 +1,7 @@
+import type { CSSProperties } from "react";
 import { ArrowUpRight, CircleDot, Clock3 } from "lucide-react";
 import { OfflineCaptureForm, OfflineReplay } from "./offline-command-forms";
+import { BatchCaptureForm } from "./batch-capture-form";
 import { AnalogClock } from "./analog-clock";
 import { EnergyProbe } from "./energy-probe";
 import { LocalActivityConsent } from "./local-activity-consent";
@@ -45,6 +47,8 @@ export type DashboardData = {
   care: Array<{ title: string; minimumMinutes: number }>;
   /** Read straight off real acceptances, no grace period: today with nothing accepted yet is a real 0. */
   progress: { streakDays: number; weekCount: number };
+  todayCapacity: { availableMinutes: number; committedMinutes: number };
+  flywheel: Array<{ id: string; fromTitle: string; toTitle: string; kindLabel: string; explanation: string | null; pending: boolean }>;
   identities: Array<{ id: string; label: string; accent: string; completedCount: number; activeMilestone: string; taskCount: number }>;
   upcoming: Array<{ id: string; title: string; startsAt: string; identityId: string }>;
   localActivityAsked: boolean;
@@ -103,6 +107,63 @@ export function DashboardView({ data }: { data: DashboardData }) {
       </div>
     </section>
 
+    {/* Task list first: the day-head is orientation, this is the thing the person came here to do —
+        it used to sit after two care-bands and a capture form, four sections of reading before it. */}
+    <section className="today-grid">
+      <article className="hero-action">
+        <header><span>01 / NEXT ACTION · 下一行动</span><span>INPUTS {data.primary?.inputsReady ? "READY" : "CHECK"}</span></header>
+        {data.primary ? <>
+          <div className={`identity-glyph ${data.primary.identityId}`} aria-hidden="true" />
+          <h1>{data.primary.title}</h1>
+          <p>{data.primary.reason}</p>
+          <dl>
+            <div><dt>WINDOW</dt><dd>{estimateLabel(data.primary.estimate)}</dd></div>
+            {/* This is the energy the work itself asks for, not the reading in the header — two different
+                things both labelled ENERGY read as the app contradicting itself. */}
+            <div><dt>NEEDS · 所需精力</dt><dd>{energyLabel[data.primary.energy ?? ""] ?? "未声明"}</dd></div>
+            <div><dt>MILESTONE</dt><dd>{data.primary.milestone}</dd></div>
+          </dl>
+          <a className="primary-button" href={`/workbench#work-order-${data.primary.id}`}>前往作业台执行并提交证据</a>
+        </> : <p>先收集一项真实工作，系统会拆解并等待计划批准。</p>}
+      </article>
+
+      <aside className="action-margin">
+        {data.higherPriority && action(data.higherPriority, "HIGHER PRIORITY · 更高优先级")}
+        {action(data.lowEnergy, "LOW ENERGY · 低精力备选")}
+        {action(data.shortGap, "SHORT GAP · 短空档备选")}
+      </aside>
+    </section>
+
+    {/* Today's own weekly-pattern capacity read against what is already on the books — not the
+        calendar-adjusted multi-week forecast Plan owns, just a same-day gut check next to the task
+        that just asked for a window. */}
+    <section className="care-band" aria-label="今天的执行时间安排">
+      <strong>TODAY LOAD</strong>
+      <dl>
+        <div><dt>今天可用（周模式）</dt><dd>{data.todayCapacity.availableMinutes} 分钟</dd></div>
+        <div><dt>待办合计（p50 先验）</dt><dd>{data.todayCapacity.committedMinutes} 分钟</dd></div>
+        <div>
+          <dt>占用比例</dt>
+          <dd><div className="time-bar"><div className="time-bar-fill" style={{
+            "--pct": `${data.todayCapacity.availableMinutes > 0
+              ? Math.min(100, Math.round(data.todayCapacity.committedMinutes / data.todayCapacity.availableMinutes * 100))
+              : data.todayCapacity.committedMinutes > 0 ? 100 : 0}%`
+          } as CSSProperties} /></div></dd>
+        </div>
+      </dl>
+    </section>
+
+    {/* What the star map only ever shows as an edge and a one-word kind label — the plain-English
+        "doing A moves B forward" for whatever milestones today's actionable work already sits under. */}
+    {data.flywheel.length > 0 && <section className="milestone-pulse" aria-label="跨主线关系">
+      <header><span>FLYWHEEL · 跨主线支持</span><a href="/milestones">OPEN MAP →</a></header>
+      {data.flywheel.map((item) => <article key={item.id}>
+        <span>{item.kindLabel}</span>
+        <strong>{item.fromTitle} → {item.toTitle}</strong>
+        <small>{item.explanation ?? "尚未写明关系依据"}{item.pending ? " · 待周复盘确认" : ""}</small>
+      </article>)}
+    </section>}
+
     <section className="care-band" aria-label="健康容量策略">
       <strong>CARE / CAPACITY</strong>
       <dl>{data.care.length ? data.care.map((item) => <div key={item.title}><dt>{item.title}</dt><dd>最低 {item.minimumMinutes} 分钟</dd></div>)
@@ -134,31 +195,7 @@ export function DashboardView({ data }: { data: DashboardData }) {
     <section className="capture-line" aria-labelledby="capture-title">
       <div><span className="mono-label">INBOX / 00</span><h2 id="capture-title">快速收集</h2></div>
       <OfflineCaptureForm ownerId={data.principalId} workspaceId={data.workspaceId} />
-    </section>
-
-    <section className="today-grid">
-      <article className="hero-action">
-        <header><span>01 / NEXT ACTION · 下一行动</span><span>INPUTS {data.primary?.inputsReady ? "READY" : "CHECK"}</span></header>
-        {data.primary ? <>
-          <div className={`identity-glyph ${data.primary.identityId}`} aria-hidden="true" />
-          <h1>{data.primary.title}</h1>
-          <p>{data.primary.reason}</p>
-          <dl>
-            <div><dt>WINDOW</dt><dd>{estimateLabel(data.primary.estimate)}</dd></div>
-            {/* This is the energy the work itself asks for, not the reading in the header — two different
-                things both labelled ENERGY read as the app contradicting itself. */}
-            <div><dt>NEEDS · 所需精力</dt><dd>{energyLabel[data.primary.energy ?? ""] ?? "未声明"}</dd></div>
-            <div><dt>MILESTONE</dt><dd>{data.primary.milestone}</dd></div>
-          </dl>
-          <a className="primary-button" href={`/workbench#work-order-${data.primary.id}`}>前往作业台执行并提交证据</a>
-        </> : <p>先收集一项真实工作，系统会拆解并等待计划批准。</p>}
-      </article>
-
-      <aside className="action-margin">
-        {data.higherPriority && action(data.higherPriority, "HIGHER PRIORITY · 更高优先级")}
-        {action(data.lowEnergy, "LOW ENERGY · 低精力备选")}
-        {action(data.shortGap, "SHORT GAP · 短空档备选")}
-      </aside>
+      <BatchCaptureForm ownerId={data.principalId} workspaceId={data.workspaceId} />
     </section>
 
     <section className="lower-grid">

@@ -84,6 +84,11 @@ export function MilestoneAdmin({ milestones, identities, initialEditId }: {
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
   const [ask, setAsk] = useState("");
+  // The conversational follow-up path: once the first call returns a threadId, every later message
+  // continues the same thread instead of starting a fresh one-shot proposal.
+  const [threadId, setThreadId] = useState("");
+  const [messages, setMessages] = useState<Array<{ from: "you" | "ai"; text: string }>>([]);
+  const [reply, setReply] = useState("");
 
   // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once, off the id the page loaded with
   useEffect(() => {
@@ -143,31 +148,61 @@ export function MilestoneAdmin({ milestones, identities, initialEditId }: {
     title: milestone.title, status: next, successCriteria: milestone.successCriteria
   });
 
+  type ProposeReply = {
+    state?: string; drafts?: Array<{ id: string; identityId: string; title: string }>;
+    assumptions?: string[]; threadId?: string; blocker?: { message?: string }; message?: string;
+  };
+  const summarize = (result: ProposeReply) => !result.drafts?.length
+    // Returning nothing is a valid answer for this Skill; saying "done" would imply otherwise.
+    ? "这次没有提出新的里程碑。现有的可能已经覆盖了。"
+    : `提出了 ${result.drafts.length} 个草稿：${result.drafts.map((item) => item.title).join("、")}`
+      + (result.assumptions?.length ? `（假设：${result.assumptions.join("；")}）` : "");
+
   const propose = async () => {
     setBusy(true);
     setStatus("正在让 AI 提议里程碑，这一步会联网且用掉配额，可能要几分钟…");
+    const prompt = ask.trim() || "（未填写方向，看整体情况）";
     try {
       const response = await fetch("/api/milestones/propose", {
         method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ request: ask })
       });
-      const result = await response.json().catch(() => ({})) as {
-        state?: string; drafts?: unknown[]; blocker?: { message?: string }; message?: string;
-      };
+      const result = await response.json().catch(() => ({})) as ProposeReply;
+      setBusy(false);
       if (!response.ok || result.state === "blocked") {
         setStatus(result.blocker?.message ?? result.message ?? "提议未完成。");
-        setBusy(false);
         return;
       }
-      if (!result.drafts?.length) {
-        // Returning nothing is a valid answer for this Skill; saying "done" would imply otherwise.
-        setStatus("这次没有提出新的里程碑。现有的可能已经覆盖了。");
-        setBusy(false);
-        return;
-      }
-      location.reload();
+      setStatus("");
+      setMessages([{ from: "you", text: prompt }, { from: "ai", text: summarize(result) }]);
+      // Only a real thread lets the conversation continue; without one the panel still shows what
+      // happened, but the next message would have to start a fresh proposal instead of a reply.
+      if (result.threadId) setThreadId(result.threadId);
     } catch {
-      setStatus("提议未完成。");
       setBusy(false);
+      setStatus("提议未完成。");
+    }
+  };
+
+  const continueConversation = async () => {
+    const prompt = reply.trim();
+    if (!prompt || !threadId) return;
+    setBusy(true);
+    setReply("");
+    setMessages((current) => [...current, { from: "you", text: prompt }]);
+    try {
+      const response = await fetch("/api/milestones/propose/continue", {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ threadId, message: prompt })
+      });
+      const result = await response.json().catch(() => ({})) as ProposeReply;
+      setBusy(false);
+      if (!response.ok || result.state === "blocked") {
+        setMessages((current) => [...current, { from: "ai", text: result.blocker?.message ?? result.message ?? "这条消息没有处理成功。" }]);
+        return;
+      }
+      setMessages((current) => [...current, { from: "ai", text: summarize(result) }]);
+    } catch {
+      setBusy(false);
+      setMessages((current) => [...current, { from: "ai", text: "网络不可用，这条消息没有发送成功。" }]);
     }
   };
 
@@ -183,6 +218,22 @@ export function MilestoneAdmin({ milestones, identities, initialEditId }: {
       <button type="button" className="secondary-button" onClick={() => void propose()} disabled={busy}>让 AI 提议 ↗</button>
       {status && <em role="alert">{status}</em>}
     </div>
+
+    {messages.length > 0 && <div className="milestone-conversation">
+      <ul>{messages.map((message, index) => <li key={index} data-from={message.from}>
+        <b>{message.from === "you" ? "你" : "AI"}</b><span>{message.text}</span>
+      </li>)}</ul>
+      {threadId ? <div className="milestone-conversation-reply">
+        <label><span className="sr-only">继续对话</span>
+          <input value={reply} maxLength={2000} disabled={busy}
+            placeholder="继续说明你想要什么，AI 会在同一个对话里回应"
+            onChange={(event) => setReply(event.target.value)}
+            onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void continueConversation(); } }} />
+        </label>
+        <button type="button" onClick={() => void continueConversation()} disabled={busy || !reply.trim()}>发送</button>
+      </div> : <p className="milestone-hint">这次没有返回可继续的对话线程；再问一次会开始新的一轮。</p>}
+      <button type="button" className="text-button" onClick={() => location.reload()}>刷新查看完整草稿列表 →</button>
+    </div>}
 
     {draft && <form className="milestone-form" onSubmit={(event) => { event.preventDefault(); void send(draft); }}>
       <h3>{draft.id ? "修改里程碑（会写入新版本，旧版本保留）" : "新建里程碑"}</h3>

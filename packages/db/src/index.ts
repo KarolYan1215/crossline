@@ -98,6 +98,11 @@ export type StoredMaterial = {
   uri: string; mediaType: string; sourceRefs: string[]; createdAt: string;
 };
 
+export type StoredCaptureAttachment = {
+  id: string; ownerId: string; workspaceId: string; captureId: string;
+  uri: string; mediaType: string; fileName: string; createdAt: string;
+};
+
 export type StoredExecution = {
   id: string; ownerId: string; workspaceId: string; workOrderId: string;
   startedAt: string; endedAt?: string;
@@ -234,6 +239,12 @@ export class CrosslineStore {
       CREATE TABLE IF NOT EXISTS captures (
         id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
         title TEXT NOT NULL, context TEXT NOT NULL, state TEXT NOT NULL, audit_json TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS capture_attachments (
+        id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
+        capture_id TEXT NOT NULL, uri TEXT NOT NULL, media_type TEXT NOT NULL,
+        file_name TEXT NOT NULL, created_at TEXT NOT NULL,
+        UNIQUE(workspace_id, capture_id, uri)
       );
       CREATE TABLE IF NOT EXISTS events (
         event_id TEXT PRIMARY KEY,
@@ -488,6 +499,107 @@ export class CrosslineStore {
             );
           `);
         }
+      } },
+
+      // `ensureSeeded()` (apps/web/lib/crossline.ts) seeds these four tables with fixed literal ids
+      // ("personal-plan-v1", "research-starter", "research-startup", "research-starter-work-order") —
+      // the same id for every workspace, on purpose, so re-seeding an already-seeded workspace is a
+      // no-op. That only works if the id is scoped to the workspace: none of these four primary/unique
+      // keys included `workspace_id`, so the ledger's *first* workspace to ever use one of these ids
+      // owns it forever, and `ON CONFLICT DO UPDATE` (deliberately, elsewhere, to stop a write from
+      // reassigning ownership) never reassigns `workspace_id` either — every other workspace's seed
+      // attempt silently rewrites the first workspace's row and still finds nothing under its own id.
+      // Confirmed on the real ledger: a second real account's `milestones`/`milestone_relations`/
+      // `plan_versions` all read back empty, and `/plan`/`/approvals` threw `PLAN_VERSION_NOT_FOUND`.
+      // Real rows exist here, so — unlike v6's tailscale_bindings, which this otherwise mirrors — this
+      // must copy forward rather than refuse on non-empty.
+      { version: 7, up: () => {
+        // Each table's extra columns arrived together in migration 3's ALTERs, so one representative
+        // column's presence stands for all of them. A database can reach this migration without ever
+        // having actually run migration 3's ALTERs — a hand-built fixture pinned straight to a later
+        // `user_version` to test a *different* migration in isolation, same as `tailscale-binding.test.ts`
+        // already does for migration 6 — so this cannot assume the columns are always there.
+        const milestonesHasExtra = has("milestones", "project_id");
+        this.#db.exec(`
+          CREATE TABLE milestones_v2 (
+            id TEXT NOT NULL, owner_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
+            identity_id TEXT NOT NULL, title TEXT NOT NULL, version INTEGER NOT NULL,
+            status TEXT NOT NULL CHECK (status IN ('draft', 'approved', 'archived')),
+            updated_at TEXT NOT NULL, project_id TEXT,
+            success_criteria_json TEXT NOT NULL DEFAULT '[]', verifiability TEXT NOT NULL DEFAULT 'unstated',
+            PRIMARY KEY(workspace_id, id, version)
+          );
+        `);
+        this.#db.exec(milestonesHasExtra
+          ? `INSERT INTO milestones_v2 (id, owner_id, workspace_id, identity_id, title, version, status,
+               updated_at, project_id, success_criteria_json, verifiability)
+             SELECT id, owner_id, workspace_id, identity_id, title, version, status,
+               updated_at, project_id, success_criteria_json, verifiability FROM milestones;`
+          : `INSERT INTO milestones_v2 (id, owner_id, workspace_id, identity_id, title, version, status, updated_at)
+             SELECT id, owner_id, workspace_id, identity_id, title, version, status, updated_at FROM milestones;`);
+        this.#db.exec("DROP TABLE milestones; ALTER TABLE milestones_v2 RENAME TO milestones;");
+
+        this.#db.exec(`
+          CREATE TABLE plan_versions_v2 (
+            id TEXT NOT NULL, owner_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
+            version INTEGER NOT NULL, status TEXT NOT NULL, payload_json TEXT NOT NULL, created_at TEXT NOT NULL,
+            PRIMARY KEY(workspace_id, id)
+          );
+          INSERT INTO plan_versions_v2 (id, owner_id, workspace_id, version, status, payload_json, created_at)
+            SELECT id, owner_id, workspace_id, version, status, payload_json, created_at FROM plan_versions;
+          DROP TABLE plan_versions;
+          ALTER TABLE plan_versions_v2 RENAME TO plan_versions;
+        `);
+
+        const relationsHasExtra = has("milestone_relations", "evidence_json");
+        const relationsHasExplanation = has("milestone_relations", "explanation");
+        this.#db.exec(`
+          CREATE TABLE milestone_relations_v3 (
+            id TEXT NOT NULL, owner_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
+            from_milestone_id TEXT NOT NULL, to_milestone_id TEXT NOT NULL,
+            kind TEXT NOT NULL CHECK(kind IN ('enables','reuses','informs','constrains','recurring_feedback')),
+            status TEXT NOT NULL CHECK(status IN ('candidate','approved','archived','refuted')),
+            evidence_json TEXT NOT NULL DEFAULT '[]', counterexample_json TEXT NOT NULL DEFAULT '[]',
+            cost_minutes REAL, last_validated_at TEXT, updated_at TEXT NOT NULL,
+            explanation TEXT, refuted_when TEXT,
+            PRIMARY KEY(workspace_id, id)
+          );
+        `);
+        this.#db.exec(relationsHasExtra
+          ? `INSERT INTO milestone_relations_v3 (id, owner_id, workspace_id, from_milestone_id, to_milestone_id,
+               kind, status, evidence_json, counterexample_json, cost_minutes, last_validated_at, updated_at
+               ${relationsHasExplanation ? ", explanation, refuted_when" : ""})
+             SELECT id, owner_id, workspace_id, from_milestone_id, to_milestone_id, kind, status,
+               evidence_json, counterexample_json, cost_minutes, last_validated_at, updated_at
+               ${relationsHasExplanation ? ", explanation, refuted_when" : ""} FROM milestone_relations;`
+          : `INSERT INTO milestone_relations_v3 (id, owner_id, workspace_id, from_milestone_id, to_milestone_id,
+               kind, status, updated_at)
+             SELECT id, owner_id, workspace_id, from_milestone_id, to_milestone_id, kind, status, updated_at
+               FROM milestone_relations;`);
+        this.#db.exec("DROP TABLE milestone_relations; ALTER TABLE milestone_relations_v3 RENAME TO milestone_relations;");
+
+        const workOrdersHasExtra = has("work_orders", "recurrence_json");
+        this.#db.exec(`
+          CREATE TABLE work_orders_v2 (
+            id TEXT NOT NULL, owner_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
+            identity_id TEXT NOT NULL, project_id TEXT NOT NULL, milestone_id TEXT NOT NULL,
+            intent TEXT NOT NULL, state TEXT NOT NULL, risk_tier TEXT NOT NULL,
+            estimate_json TEXT NOT NULL, payload_json TEXT NOT NULL, updated_at TEXT NOT NULL,
+            recurrence_json TEXT, tombstone_json TEXT,
+            PRIMARY KEY(workspace_id, id)
+          );
+        `);
+        this.#db.exec(workOrdersHasExtra
+          ? `INSERT INTO work_orders_v2 (id, owner_id, workspace_id, identity_id, project_id, milestone_id,
+               intent, state, risk_tier, estimate_json, payload_json, updated_at, recurrence_json, tombstone_json)
+             SELECT id, owner_id, workspace_id, identity_id, project_id, milestone_id,
+               intent, state, risk_tier, estimate_json, payload_json, updated_at, recurrence_json, tombstone_json
+               FROM work_orders;`
+          : `INSERT INTO work_orders_v2 (id, owner_id, workspace_id, identity_id, project_id, milestone_id,
+               intent, state, risk_tier, estimate_json, payload_json, updated_at)
+             SELECT id, owner_id, workspace_id, identity_id, project_id, milestone_id,
+               intent, state, risk_tier, estimate_json, payload_json, updated_at FROM work_orders;`);
+        this.#db.exec("DROP TABLE work_orders; ALTER TABLE work_orders_v2 RENAME TO work_orders;");
       } }
     ];
 
@@ -916,6 +1028,24 @@ export class CrosslineStore {
       sourceRefs: JSON.parse(row.source_refs_json!) as string[], createdAt: row.created_at! }));
   }
 
+  saveCaptureAttachment(attachment: StoredCaptureAttachment): void {
+    this.#db.prepare(`
+      INSERT INTO capture_attachments (id, owner_id, workspace_id, capture_id, uri, media_type, file_name, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(workspace_id, capture_id, uri) DO NOTHING
+    `).run(attachment.id, attachment.ownerId, attachment.workspaceId, attachment.captureId, attachment.uri,
+      attachment.mediaType, attachment.fileName, attachment.createdAt);
+  }
+
+  listCaptureAttachments(workspaceId: string, captureId?: string): StoredCaptureAttachment[] {
+    const rows = (captureId
+      ? this.#db.prepare("SELECT * FROM capture_attachments WHERE workspace_id = ? AND capture_id = ? ORDER BY created_at, id").all(workspaceId, captureId)
+      : this.#db.prepare("SELECT * FROM capture_attachments WHERE workspace_id = ? ORDER BY created_at, id").all(workspaceId)) as Array<Record<string, string>>;
+    return rows.map((row) => ({ id: row.id!, ownerId: row.owner_id!, workspaceId: row.workspace_id!,
+      captureId: row.capture_id!, uri: row.uri!, mediaType: row.media_type!,
+      fileName: row.file_name!, createdAt: row.created_at! }));
+  }
+
   updateAnalysisAudit(workspaceId: string, id: string, audit: StoredCapture["audit"]): void {
     this.#db.transaction(() => {
       const capture = this.listCaptures(workspaceId).find((item) => item.id === id);
@@ -1004,7 +1134,7 @@ export class CrosslineStore {
         id, owner_id, workspace_id, identity_id, title, version, status, updated_at, project_id,
         success_criteria_json, verifiability
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id, version) DO UPDATE SET
+      ON CONFLICT(workspace_id, id, version) DO UPDATE SET
         title = excluded.title,
         status = excluded.status,
         updated_at = excluded.updated_at,
@@ -1027,14 +1157,20 @@ export class CrosslineStore {
   }
 
   listMilestones(workspaceId: string): StoredMilestone[] {
+    // The outer join used to match on `(id, version)` alone — harmless while two workspaces could never
+    // both hold a row with the same id (the very bug migration 7 fixes), invisible until fixing that made
+    // it possible for A and B to each have their own `(id, version)` pair land on the same literal
+    // values, at which point this returned both rows to whichever workspace asked. `m.workspace_id = ?`
+    // on the join, not just the subquery, is what keeps the two from being able to leak into each other.
     const rows = this.#db.prepare(`
       SELECT m.* FROM milestones m
       JOIN (
         SELECT id, MAX(version) AS version FROM milestones
         WHERE workspace_id = ? GROUP BY id
       ) latest ON latest.id = m.id AND latest.version = m.version
+      WHERE m.workspace_id = ?
       ORDER BY m.identity_id, m.id
-    `).all(workspaceId) as Array<Record<string, string | number>>;
+    `).all(workspaceId, workspaceId) as Array<Record<string, string | number>>;
     return rows.map((row) => ({
       id: String(row.id),
       ownerId: String(row.owner_id),
@@ -1059,7 +1195,7 @@ export class CrosslineStore {
         id, owner_id, workspace_id, from_milestone_id, to_milestone_id, kind, status,
         evidence_json, counterexample_json, cost_minutes, last_validated_at, explanation, refuted_when, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
+      ON CONFLICT(workspace_id, id) DO UPDATE SET
         from_milestone_id = excluded.from_milestone_id,
         to_milestone_id = excluded.to_milestone_id,
         kind = excluded.kind,
@@ -1334,7 +1470,7 @@ export class CrosslineStore {
         id, owner_id, workspace_id, identity_id, project_id, milestone_id,
         intent, state, risk_tier, estimate_json, payload_json, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
+      ON CONFLICT(workspace_id, id) DO UPDATE SET
         identity_id = excluded.identity_id,
         project_id = excluded.project_id,
         milestone_id = excluded.milestone_id,
@@ -1371,7 +1507,7 @@ export class CrosslineStore {
     this.#db.prepare(`
       INSERT INTO plan_versions (id, owner_id, workspace_id, version, status, payload_json, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET status = excluded.status, payload_json = excluded.payload_json
+      ON CONFLICT(workspace_id, id) DO UPDATE SET status = excluded.status, payload_json = excluded.payload_json
     `).run(plan.id, plan.ownerId, plan.workspaceId, plan.version, plan.status, JSON.stringify(plan.payload), new Date().toISOString());
   }
 
@@ -1425,7 +1561,7 @@ export class CrosslineStore {
     // know a single column name. `exportCoversEveryTable` keeps this list honest.
     const tableNames = [
       "events", "milestones",
-      "captures",
+      "captures", "capture_attachments",
       "milestone_relations",
       "work_orders", "executions", "evidence_claims", "plan_versions", "plan_changes",
       "materials",
@@ -1490,6 +1626,14 @@ export class CrosslineStore {
       "SELECT sync_cursor FROM external_bindings WHERE workspace_id = ? AND provider = ? AND external_id = ?"
     ).get(workspaceId, provider, collection) as { sync_cursor?: string | null } | undefined;
     return row?.sync_cursor ?? null;
+  }
+
+  /** Whether any of this workspace's per-source cursors for a provider has ever recorded a real sync. */
+  hasAnySyncCursor(workspaceId: string, provider: string): boolean {
+    const row = this.#db.prepare(
+      "SELECT 1 FROM external_bindings WHERE workspace_id = ? AND provider = ? AND sync_cursor IS NOT NULL LIMIT 1"
+    ).get(workspaceId, provider);
+    return Boolean(row);
   }
 
   /**

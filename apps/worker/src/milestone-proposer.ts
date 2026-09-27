@@ -3,7 +3,7 @@ import {
   MILESTONE_PROPOSAL_SCHEMA, validateMilestoneProposal,
   type MilestoneProposal, type MilestoneProposalContext
 } from "@crossline/core";
-import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
+import { continueSkillTurn, runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import type { CrosslineStore } from "@crossline/db";
 
@@ -20,7 +20,7 @@ const INSTRUCTIONS = "Propose milestones for the supplied identities. Return onl
   + "vague to produce a checkable criterion, return a blocker naming what is missing.";
 
 export type ProposalOutcome =
-  | { state: "proposed"; drafts: Array<{ id: string; identityId: string; title: string }>; assumptions: string[] }
+  | { state: "proposed"; drafts: Array<{ id: string; identityId: string; title: string }>; assumptions: string[]; threadId?: string }
   | { state: "blocked"; code: string; message: string };
 
 export function buildProposalContext(store: CrosslineStore, workspaceId: string, request: string): MilestoneProposalContext {
@@ -60,6 +60,7 @@ export function createMilestoneProposer(store: CrosslineStore, workspaceId: stri
       return { state: "blocked", code: "NO_IDENTITIES", message: "没有身份包，无法提议里程碑。" };
     }
 
+    let threadId: string | undefined;
     const result = await runCodexSkill<MilestoneProposal>(client, context, {
       skillName: MILESTONE_ARCHITECT_SKILL,
       cwd,
@@ -67,7 +68,7 @@ export function createMilestoneProposer(store: CrosslineStore, workspaceId: stri
       outputSchema: MILESTONE_PROPOSAL_SCHEMA,
       prepareInput: () => context,
       validateOutput: (output) => validateMilestoneProposal(output, context),
-      onAudit: () => {},
+      onAudit: (audit) => { threadId = audit.threadId; },
       ...(signal ? { signal } : {}),
       timeoutMs: 10 * 60_000
     });
@@ -88,6 +89,58 @@ export function createMilestoneProposer(store: CrosslineStore, workspaceId: stri
         type: "milestone.proposed", entityId: id,
         // The rationale is kept with the proposal: judging a milestone without knowing why it was
         // suggested is the same problem as approving a relation with no stated claim.
+        payload: { rationale: proposal.rationale, request: context.request }
+      });
+      drafts.push({ id, identityId: proposal.identityId, title: proposal.title });
+    }
+    return { state: "proposed", drafts, assumptions: result.output.assumptions, ...(threadId ? { threadId } : {}) };
+  };
+}
+
+export type ConversationOutcome =
+  | { state: "proposed"; drafts: Array<{ id: string; identityId: string; title: string }>; assumptions: string[] }
+  | { state: "blocked"; code: string; message: string };
+
+/**
+ * A follow-up message on a thread a previous `propose` call already opened — the conversational path
+ * item 8 asked for, so the person can steer the architect ("再窄一点"/"这个方向我不想要") instead of
+ * getting one shot per click. Still proposal-only: the reply is validated against the exact same schema
+ * and lands as `draft` milestones through the same save path, so approval never moves off the existing
+ * batch-approval button.
+ */
+export function createMilestoneConversation(store: CrosslineStore, workspaceId: string, cwd: string,
+  getClient: () => CodexRpcBoundary | undefined) {
+  return async function continueConversation(threadId: string, message: string, signal?: AbortSignal): Promise<ConversationOutcome> {
+    const client = getClient();
+    if (!client) return { state: "blocked", code: "CODEX_SUPERVISOR_UNAVAILABLE", message: "Codex 运行时不可用。" };
+    // The existing milestones list is re-read fresh so a reply cannot duplicate a draft the first turn
+    // already produced — `validateMilestoneProposal` checks titles against whatever context it is given.
+    const context = buildProposalContext(store, workspaceId, message);
+
+    const result = await continueSkillTurn<MilestoneProposal>(client, threadId, message.slice(0, 2000), {
+      skillName: MILESTONE_ARCHITECT_SKILL,
+      cwd,
+      outputSchema: MILESTONE_PROPOSAL_SCHEMA,
+      validateOutput: (output) => validateMilestoneProposal(output, context),
+      onAudit: () => {},
+      ...(signal ? { signal } : {}),
+      timeoutMs: 10 * 60_000
+    });
+    if (!result.ok) return { state: "blocked", code: result.blocker.code, message: result.blocker.message };
+
+    const drafts: Array<{ id: string; identityId: string; title: string }> = [];
+    for (const proposal of result.output.milestones) {
+      const id = `proposed-${randomUUID()}`;
+      store.saveMilestone({
+        id, ownerId: OWNER_ID, workspaceId,
+        identityId: proposal.identityId, projectId: proposal.projectId,
+        title: proposal.title, version: 1, status: "draft",
+        successCriteria: proposal.successCriteria
+      });
+      store.appendEvent({
+        ownerId: OWNER_ID, workspaceId,
+        idempotencyKey: `milestone:proposed:${id}`,
+        type: "milestone.proposed", entityId: id,
         payload: { rationale: proposal.rationale, request: context.request }
       });
       drafts.push({ id, identityId: proposal.identityId, title: proposal.title });

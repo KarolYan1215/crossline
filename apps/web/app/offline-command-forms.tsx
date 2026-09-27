@@ -60,6 +60,7 @@ export function OfflineCaptureForm({ ownerId, workspaceId }: { ownerId: string; 
     event.preventDefault();
     const form = event.currentTarget;
     const data = new FormData(form);
+    const files = (data.getAll("attachments") as File[]).filter((file) => file.size > 0);
     const command = createCommand(ownerId, workspaceId, await nextSequence(workspaceId), "task.capture", {
       title: String(data.get("title") ?? ""),
       context: String(data.get("context") ?? "")
@@ -68,7 +69,10 @@ export function OfflineCaptureForm({ ownerId, workspaceId }: { ownerId: string; 
       try {
         await enqueue(workspaceId, command);
         form.reset();
-        setStatus(message);
+        // The offline queue only carries the JSON command — a queued capture has no server-side row
+        // yet for an attachment to belong to, so files picked while offline are dropped rather than
+        // silently claimed as saved.
+        setStatus(files.length ? `${message}（离线时选择的 ${files.length} 个附件未保存，请联网后重新上传）` : message);
       } catch {
         // Saying "saved" when the store refused would lose the capture without telling anyone.
         setStatus("无法离线保存（浏览器存储不可用），请先复制内容再重试。");
@@ -80,6 +84,17 @@ export function OfflineCaptureForm({ ownerId, workspaceId }: { ownerId: string; 
         method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(command)
       });
       if (!response.ok) { setStatus("任务输入无效，请检查后重试"); return; }
+      if (files.length) {
+        // The command's `clientCommandId` is generated client-side and used verbatim as the capture's
+        // real id (see `POST /api/commands`), so it is already known here — no need to round-trip a
+        // created-id back from the response before attaching files to it.
+        const upload = new FormData();
+        for (const file of files) upload.append("file", file);
+        const uploaded = await fetch(`/api/captures/${encodeURIComponent(command.clientCommandId)}/attachments`, {
+          method: "POST", body: upload
+        }).catch(() => null);
+        if (!uploaded?.ok) { setStatus("任务已保存，但附件上传失败，可在作业台重试"); return; }
+      }
       location.reload();
     } catch {
       await save("网络不可用，已保存并等待同步");
@@ -88,6 +103,8 @@ export function OfflineCaptureForm({ ownerId, workspaceId }: { ownerId: string; 
   return <form onSubmit={submit} className="capture-form">
     <label><span className="sr-only">任务或想法</span><input name="title" required maxLength={240} placeholder="写下一项任务、想法，或粘贴一个链接…" /></label>
     <label><span className="sr-only">补充上下文</span><input name="context" maxLength={500} placeholder="可选：把需要的材料直接粘进来（只写材料在哪，AI 是拿不到的）" /></label>
+    <label><span className="sr-only">附件</span><input name="attachments" type="file" multiple
+      accept="image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain" /></label>
     <button className="secondary-button" type="submit">CAPTURE ↗</button>
     {status && <small className="muted" role="status">{status}</small>}
   </form>;

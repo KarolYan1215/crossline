@@ -57,7 +57,7 @@ const supervisor = await startCodexSupervisor({
 
 try {
   console.info(JSON.stringify({ status: "cost_signal", signal: await supervisor.readCostSignal() }));
-  const analyze = createCaptureAnalyzer(store, repoRoot);
+  const analyze = createCaptureAnalyzer(store, workspaceId, repoRoot);
   const result = await analyze(supervisor.client, captureId) as {
     state: string; audit?: { threadId?: string; turnId?: string; blocker?: { code: string; message: string } };
   };

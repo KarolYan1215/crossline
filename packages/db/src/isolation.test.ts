@@ -100,3 +100,45 @@ test("resolving a plan change is scoped the same way: A's workspaceId cannot tou
   expect(result).toEqual({ changed: false });
   expect(store.listPlanChanges(B, "plan-b")[0]?.status).toBe("pending");
 });
+
+/**
+ * `ensureSeeded()` (apps/web/lib/crossline.ts) seeds every workspace's starter data with the exact same
+ * literal ids ("personal-plan-v1", "research-starter", etc.) on purpose, so re-seeding an
+ * already-seeded workspace is a no-op. Every test above uses per-workspace-suffixed ids (`m-a`/`m-b`),
+ * which never collide and so never exercised this. Confirmed on the real ledger: before `workspace_id`
+ * was added to these four tables' keys, the second workspace to ever seed a given literal id got
+ * `PLAN_VERSION_NOT_FOUND` forever (its `ON CONFLICT` rewrote the first workspace's row's content
+ * without reassigning its `workspace_id`) — this is the regression test for that fix.
+ */
+test("two workspaces seeding the identical literal id each get their own row, not one stolen from the other", () => {
+  const milestone = (workspaceId: string) => ({ id: "shared-milestone", ownerId: "owner", workspaceId,
+    identityId: "research", projectId: "p", title: "共享 id 里程碑", version: 1, status: "approved" as const });
+  store.saveMilestone(milestone(A));
+  store.saveMilestone(milestone(B));
+  // Two rows each now — `seed()` already put one milestone in each workspace under its own suffixed id.
+  expect(store.listMilestones(A).map((row) => row.workspaceId)).toEqual([A, A]);
+  expect(store.listMilestones(B).map((row) => row.workspaceId)).toEqual([B, B]);
+
+  const plan = (workspaceId: string) => ({ id: "shared-plan", ownerId: "owner", workspaceId,
+    version: 1, status: "draft" as const, payload: { blocks: [] } });
+  store.savePlanVersion(plan(A));
+  store.savePlanVersion(plan(B));
+  expect(store.listPlanVersions(A).map((row) => row.workspaceId)).toEqual([A, A]);
+  expect(store.listPlanVersions(B).map((row) => row.workspaceId)).toEqual([B, B]);
+
+  const relation = (workspaceId: string) => ({ id: "shared-relation", ownerId: "owner", workspaceId,
+    fromMilestoneId: "shared-milestone", toMilestoneId: "shared-milestone", kind: "informs" as const, status: "approved" as const });
+  store.saveMilestoneRelation(relation(A));
+  store.saveMilestoneRelation(relation(B));
+  expect(store.listMilestoneRelations(A).map((row) => row.workspaceId)).toEqual([A]);
+  expect(store.listMilestoneRelations(B).map((row) => row.workspaceId)).toEqual([B]);
+
+  const order = (workspaceId: string) => ({ id: "shared-work-order", ownerId: "owner", workspaceId,
+    identityId: "research", projectId: "p", milestoneId: "", intent: "共享 id 作业",
+    state: "ready_for_human", riskTier: "routine" as const, payload: {},
+    estimate: { p25Minutes: 10, p50Minutes: 20, p85Minutes: 40, source: "llm_prior" as const, observationCount: 0, confidence: "low" as const } });
+  store.saveWorkOrder(order(A));
+  store.saveWorkOrder(order(B));
+  expect(store.listWorkOrders(A).map((row) => row.workspaceId)).toEqual([A, A]); // plus the seeded w-a
+  expect(store.listWorkOrders(B).map((row) => row.workspaceId)).toEqual([B, B]); // plus the seeded w-b
+});

@@ -585,6 +585,18 @@ export async function loadCurrentPlan(ctx: AccessContext): Promise<PersistedPlan
   };
 }
 
+/** The most recent `plan.explained` event for today, if the explainer has ever run for it. Read from
+ * the ledger like `lastNight` — there is no separate "current explanation" row, just the event trail. */
+export function loadPlanExplanation(ctx: AccessContext, today: string): {
+  summary: string; nextActionReason: string; alternatives: Array<{ id: string; reason: string }>;
+} | null {
+  const event = [...getStore().listEvents(ctx.workspaceId, { type: "plan.explained", entityId: today })].at(-1);
+  if (!event) return null;
+  const payload = event.payload as { summary?: string; nextActionReason?: string; alternatives?: Array<{ id: string; reason: string }> };
+  if (!payload.summary || !payload.nextActionReason) return null;
+  return { summary: payload.summary, nextActionReason: payload.nextActionReason, alternatives: payload.alternatives ?? [] };
+}
+
 export type CalendarConnectorState = {
   /** A stored delta cursor is proof a sync really completed; nothing else writes one. */
   synced: boolean;
@@ -602,13 +614,12 @@ export type CalendarConnectorState = {
  */
 export function loadCalendarConnectorState(ctx: AccessContext): CalendarConnectorState {
   const store = getStore();
-  const cursor = store.readSyncCursor(ctx.workspaceId, "graph_calendar", "calendarView");
   const plan = store.listPlanVersions(ctx.workspaceId)[0];
   const blocks = ((plan?.payload as { blocks?: Array<{ id?: string }> } | undefined)?.blocks ?? [])
     .filter((block) => String(block.id).startsWith("graph_calendar:"));
   const last = store.listEvents(ctx.workspaceId, { type: "plan.reality_changed" }).at(-1);
   return {
-    synced: Boolean(cursor),
+    synced: store.hasAnySyncCursor(ctx.workspaceId, "graph_calendar"),
     importedBlocks: blocks.length,
     lastChangeAt: last?.createdAt ?? null,
     lastChangeCount: ((last?.payload as { changes?: unknown[] } | undefined)?.changes ?? []).length
@@ -1092,6 +1103,35 @@ export function loadDashboard(ctx: AccessContext): DashboardData {
   const acceptedAt = firstAcceptedAt(ctx.workspaceId);
   const progress = acceptanceProgress([...acceptedAt.values()], timeZone, now);
 
+  // Today's own capacity read: the weekly pattern for today only, not the calendar-adjusted multi-week
+  // forecast Plan already owns — that one is async (`scheduledBlocks`) and this page stays sync.
+  const today = planToday(ctx, now);
+  const clockMinutes = (clock: string) => { const [h, m] = clock.split(":"); return Number(h) * 60 + Number(m); };
+  const availableMinutes = availableSlots(readAvailability(ctx), [today], [])
+    .reduce((sum, slot) => sum + (clockMinutes(slot.end) - clockMinutes(slot.start)), 0);
+  const committedMinutes = active.reduce((sum, order) => sum + resolvedEstimate(ctx, order).p50Minutes, 0);
+
+  // Cross-identity relations touching a milestone behind today's actionable work — the plain-English
+  // "doing A moves B forward" that the star map only ever shows as an edge and a one-word kind label.
+  const todayMilestoneIds = new Set(active.map((order) => order.milestoneId));
+  const relationKindLabel: Record<string, string> = {
+    enables: "使之可能", reuses: "复用", informs: "提供输入", constrains: "约束", recurring_feedback: "循环反馈"
+  };
+  const flywheel = store.listMilestoneRelations(ctx.workspaceId)
+    // Approved and candidate both show — same distinction the star map already draws with a dashed
+    // line ("虚线为待周复盘确认"), just spelled out in words instead of a line style.
+    .filter((relation) => (relation.status === "approved" || relation.status === "candidate")
+      && (todayMilestoneIds.has(relation.fromMilestoneId) || todayMilestoneIds.has(relation.toMilestoneId)))
+    .slice(0, 3)
+    .map((relation) => ({
+      id: relation.id,
+      fromTitle: milestones.find((item) => item.id === relation.fromMilestoneId)?.title ?? relation.fromMilestoneId,
+      toTitle: milestones.find((item) => item.id === relation.toMilestoneId)?.title ?? relation.toMilestoneId,
+      kindLabel: relationKindLabel[relation.kind] ?? relation.kind,
+      explanation: relation.explanation,
+      pending: relation.status === "candidate"
+    }));
+
   const energySelected = capacity.level !== "uncalibrated";
   const primaryReason = energySelected
     ? actions.primary?.deadline && Date.parse(actions.primary.deadline) - now.getTime() <= 24 * 60 * 60_000
@@ -1125,6 +1165,8 @@ export function loadDashboard(ctx: AccessContext): DashboardData {
     ...(shortGap ? { shortGap } : {}),
     care: store.listCapacityCommitments(ctx.workspaceId).map((item) => ({ title: item.title, minimumMinutes: item.minimumMinutes })),
     progress,
+    todayCapacity: { availableMinutes, committedMinutes },
+    flywheel,
     identities: identityPacks.map((pack) => {
       const identityOrders = orders.filter((order) => order.identityId === pack.id);
       const completed = identityOrders.filter((order) => order.state === "accepted").length;

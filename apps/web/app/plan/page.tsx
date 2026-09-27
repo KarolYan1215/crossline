@@ -2,8 +2,9 @@ import { PlanView } from "./plan-view";
 import { AvailabilityEditor } from "./availability-editor";
 import { ScheduleSetup } from "./schedule-setup";
 import { ForecastDelta } from "./forecast-delta";
+import { PlanExplainButton } from "./plan-explain-button";
 import { SubpageShell } from "../subpage-shell";
-import { getStore, loadCurrentPlan, loadGoalForecast, planToday, readAvailability, readGoalSettings, readSchedulePreferences
+import { getStore, loadCurrentPlan, loadGoalForecast, loadPlanExplanation, planToday, readAvailability, readGoalSettings, readSchedulePreferences
 } from "../../lib/crossline";
 import { requireSessionContext } from "../../lib/access-guard";
 
@@ -27,6 +28,7 @@ export default async function PlanPage() {
       }))
     } };
   const today = planToday(ctx);
+  const explanation = loadPlanExplanation(ctx, today);
   const importedBlocks = plan.blocks.filter((block) => block.id.startsWith("graph_calendar:"));
   // Split by day on purpose. The header said 「已从日历导入 3 个真实块」 while the B lens — which only
   // ever shows today — displayed none of them, because all three sat later in the week. A true count
@@ -50,6 +52,17 @@ export default async function PlanPage() {
       <ScheduleSetup windows={readAvailability(ctx)} milestones={milestones} />
     </details>}
     <AvailabilityEditor windows={readAvailability(ctx)} preferences={effectivePreferences} milestones={milestones} />
+    <section className="plan-explanation" aria-label="AI 排序解释">
+      <PlanExplainButton />
+      {explanation ? <>
+        <p>{explanation.summary}</p>
+        <p><strong>为什么是这一条：</strong>{explanation.nextActionReason}</p>
+        {explanation.alternatives.length > 0 && <ul>{explanation.alternatives.map((item) => {
+          const order = getStore().listWorkOrders(ctx.workspaceId).find((w) => w.id === item.id);
+          return <li key={item.id}>{order?.intent ?? item.id}：{item.reason}</li>;
+        })}</ul>}
+      </> : <p className="plan-sync-note">还没有 AI 解释；点击上面的按钮生成一次。</p>}
+    </section>
     <PlanView plan={plan} today={today} />
     <section className="goal-forecast" aria-label="未来八周目标情景">
       <h2>未来 8 周 · 容量与目标情景</h2>

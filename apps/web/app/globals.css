@@ -131,6 +131,8 @@ input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-vis
 .consent-ask p{margin:0;color:var(--graphite);font-size:12px;line-height:1.7;max-width:76ch}
 .consent-ask div{display:flex;gap:8px;flex-wrap:wrap}
 .last-night{font-family:var(--f-mono);font-size:9.5px;letter-spacing:.1em;color:var(--shade)}
+.time-bar{height:6px;background:var(--mist);position:relative;min-width:80px}
+.time-bar-fill{position:absolute;inset:0;width:var(--pct,0%);background:var(--ink)}
 
 /* ── capture ───────────────────────────────── */
 .capture-line{display:grid;grid-template-columns:minmax(140px,auto) 1fr;gap:clamp(14px,2vw,24px);align-items:end;padding:18px 0;border-bottom:1px solid var(--ink)}
@@ -139,6 +141,13 @@ input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-vis
 .capture-form label{flex:1 1 220px;min-width:0}
 .capture-form input{width:100%;min-height:38px;border-right-width:0}
 .capture-form>small{flex-basis:100%;margin-top:6px}
+.onboarding-form{display:grid;gap:16px;max-width:640px}
+.onboarding-form label{display:grid;gap:6px}
+.onboarding-form label>span{font-family:var(--f-mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--graphite)}
+.onboarding-form textarea{width:100%;padding:9px 10px;border:1px solid var(--mist);background:var(--paper);color:var(--ink);font:inherit;resize:vertical}
+.batch-capture-form{display:grid;gap:8px;margin-top:8px}
+.batch-capture-form textarea{width:100%;min-height:84px;padding:9px 10px;border:1px solid var(--mist);background:var(--paper);color:var(--ink);font:inherit;resize:vertical}
+.batch-capture-actions{display:flex;gap:8px;align-items:center}
 .primary-button,.secondary-button,.text-button{
   min-height:38px;padding:7px 16px;border:1px solid var(--ink);border-radius:0;
   font-family:var(--f-mono);font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;cursor:pointer;
@@ -332,10 +341,35 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .criterion-tag[data-evidence="unlabelled"]{font-style:italic;color:var(--shade)}
 .criterion-progress{font-family:var(--f-mono);font-size:9px;letter-spacing:.06em;color:var(--graphite);border-bottom:1px solid var(--mist)}
 .milestone-admin-buttons{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
+.milestone-conversation{display:grid;gap:8px;padding:12px;border:1px solid var(--mist)}
+.milestone-conversation ul{margin:0;padding:0;list-style:none;display:grid;gap:6px}
+.milestone-conversation li{display:grid;grid-template-columns:36px 1fr;gap:8px;font-size:12.5px;line-height:1.6}
+.milestone-conversation li b{font-family:var(--f-mono);font-size:9px;letter-spacing:.08em;color:var(--graphite)}
+.milestone-conversation li[data-from="ai"] span{color:var(--graphite)}
+.milestone-conversation-reply{display:flex;gap:8px}
+.milestone-conversation-reply input{flex:1;min-height:30px;font-family:var(--f-mono);font-size:11px}
+.milestone-conversation-reply button{min-height:30px;padding:6px 14px;border:1px solid var(--ink);font-family:var(--f-mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase}
 
 /* ── offline ───────────────────────────────── */
 .offline-page{min-height:100vh;display:grid;place-items:center;padding:42px 16px}
 .offline-page h1{margin:12px 0 6px;font-family:var(--f-display);font-size:clamp(24px,4vw,38px);letter-spacing:-.02em}
+
+/* ── auth (login / signup / reset password) ───────────────── */
+/* Previously unstyled: labels, inputs and buttons fell back to bare element defaults with no border,
+   spacing or card — functional, but nothing like the rest of the app's paper-and-ink language. */
+.auth-form{display:grid;gap:14px;width:min(360px,100%);padding:22px;border:1px solid var(--mist)}
+.auth-form form{display:grid;gap:12px}
+.auth-form label{display:grid;gap:5px;font-size:13px}
+.auth-form label>span{font-family:var(--f-mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--graphite)}
+.auth-form input{padding:9px 10px;border:1px solid var(--mist);background:var(--paper);color:var(--ink)}
+.auth-form button[disabled]{opacity:.5;cursor:default}
+.auth-form>button{width:100%}
+/* Errors and a completed step both use the same ink-on-paper language as `.review-flag` elsewhere —
+   this app never reaches for a second colour to mean "wrong", only a stronger left border. */
+.auth-form small[role="alert"]{display:block;font-family:var(--f-mono);font-size:11px;letter-spacing:.02em;
+  color:var(--ink);border-left:3px solid var(--ink);padding:4px 0 4px 8px}
+.auth-form small[role="status"]{display:block;font-size:12px;color:var(--graphite)}
+.auth-form p{margin:0;font-size:12px;color:var(--graphite)}
 .dead-letters{display:grid;gap:6px;margin-top:10px;padding:10px 12px;border:1px solid var(--ink);border-left-width:4px}
 .dead-letters ul,.dead-letter-list{margin:0;padding:0;list-style:none;display:grid;gap:6px}
 .dead-letters li,.dead-letter-list li{display:grid;gap:2px;font-size:12px}
@@ -345,6 +379,9 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .plan-sync:hover:not(:disabled){border-color:var(--ink)}
 .plan-sync:disabled{color:var(--shade)}
 .plan-sync-note{font-family:var(--f-mono);font-size:9.5px;letter-spacing:.06em;color:var(--graphite)}
+.plan-explanation{padding:14px 0;border-bottom:1px solid var(--mist);display:grid;gap:8px}
+.plan-explanation p{margin:0;font-size:12.5px;line-height:1.7;color:var(--graphite)}
+.plan-explanation ul{margin:0;padding-left:18px;display:grid;gap:4px;font-size:12px;color:var(--graphite)}
 
 /* ── dialogs ───────────────────────────────── */
 .dialog-overlay{position:fixed;inset:0;background:color-mix(in srgb,var(--ink) 42%,transparent);z-index:50}
@@ -358,7 +395,11 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .codex-account-card{border:1px solid var(--mist);padding:12px 14px;display:grid;gap:6px}
 
 /* ── responsive ────────────────────────────── */
-@media (max-width:900px){
+/* Was 900px: a half-screen desktop window or a portrait tablet (900–1024px) still hit the base
+   `.today-grid`/`.lower-grid` two-column ratio below this, which squeezed the narrower column under
+   its own `minmax` floor. Raising the threshold gives that width band the same single-column layout
+   as the range below it, rather than a cramped two-column one distinct from both phone and desktop. */
+@media (max-width:1024px){
   .today-grid,.lower-grid{grid-template-columns:1fr}
   .day-head,.care-band,.capture-line{grid-template-columns:1fr}
   .now-state{justify-self:start;justify-items:start}
@@ -366,6 +407,11 @@ button:disabled{opacity:.4;cursor:not-allowed}
   .change-ledger article{grid-template-columns:1fr;gap:4px}
   .milestone-form-row{grid-template-columns:1fr}
   .measure-fields{flex:1 1 100%}
+}
+@media (min-width:1440px){
+  .page{width:min(1680px,100%)}
+  .today-grid{grid-template-columns:minmax(0,1.7fr) minmax(300px,1fr)}
+  .lower-grid{grid-template-columns:minmax(0,1.4fr) minmax(0,1fr)}
 }
 @media (max-width:680px){
   .page{padding-inline:14px}
@@ -381,6 +427,10 @@ button:disabled{opacity:.4;cursor:not-allowed}
   .bottom-nav>a,.bottom-nav-more>summary{flex:1;text-align:center;padding:10px 4px;font-family:var(--f-mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--graphite)}
   .bottom-nav>a.active{color:var(--ink)}
   .bottom-nav-more{flex:1}
+  /* Base rule is a fixed horizontal-scroll row of stat blocks — fine at desktop width, but at phone
+     width it hid entries off the right edge with no visible scroll affordance. Wrapping into a grid
+     makes every block visible without scrolling. */
+  .care-band dl{grid-auto-flow:row;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));overflow-x:visible}
 }
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{animation-duration:.001ms!important;transition-duration:.001ms!important;scroll-behavior:auto!important}

@@ -25,6 +25,9 @@ export type WeeklyReview = {
   stalled: Array<{ identityId: string; daysSinceLastPass: number }>;
   /** Questions the weekly Skill raised. Absent until it has run — an empty list is not a fabricated one. */
   questions: Array<{ id: string; question: string }>;
+  /** Report-only proposals from `crossline-weekly-insight` — read here, never applied automatically;
+   * there is no generic "apply an overlay patch" mechanism in this app to wire an apply button to. */
+  insightProposals: Array<{ id: string; claim: string; observationCount: number; period: string; proposedOverlayPatch: string }>;
 };
 
 const daysBetween = (fromIso: string, to: Date) =>
@@ -154,6 +157,13 @@ export function loadWeeklyReview(ctx: AccessContext, now = new Date()): WeeklyRe
     stalled,
     questions: events
       .filter((event) => event.type === "weekly_review.question" && event.createdAt >= since)
-      .map((event) => ({ id: event.eventId, question: String((event.payload as { question?: string }).question ?? "") }))
+      .map((event) => ({ id: event.eventId, question: String((event.payload as { question?: string }).question ?? "") })),
+    insightProposals: events
+      .filter((event) => event.type === "weekly_review.insight_proposal" && event.createdAt >= since)
+      .map((event) => {
+        const payload = event.payload as { id?: string; claim?: string; observationCount?: number; period?: string; proposedOverlayPatch?: string };
+        return { id: payload.id ?? event.eventId, claim: payload.claim ?? "", observationCount: payload.observationCount ?? 0,
+          period: payload.period ?? "", proposedOverlayPatch: payload.proposedOverlayPatch ?? "" };
+      })
   };
 }

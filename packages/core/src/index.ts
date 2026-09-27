@@ -8,8 +8,11 @@ export * from "./flywheel";
 export * from "./flywheel-schema";
 export * from "./materials-schema";
 export * from "./milestone-gate-schema";
+export * from "./onboarding-schema";
+export * from "./plan-explainer-schema";
 export * from "./reality";
 export * from "./replay";
+export * from "./weekly-insight-schema";
 export type EnergyLevel = "low" | "medium" | "high";
 
 export type Estimate = {

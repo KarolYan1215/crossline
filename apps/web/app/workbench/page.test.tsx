@@ -33,7 +33,7 @@ describe("workbench page", () => {
     });
 
     const { default: WorkbenchPage } = await import("./page");
-    const html = renderToStaticMarkup(await WorkbenchPage());
+    const html = renderToStaticMarkup(await WorkbenchPage({ searchParams: Promise.resolve({}) }));
     // The raw prior's p50/p85 (70/105) must not appear as this order's displayed window — it should
     // have moved toward the real 180-minute history instead.
     expect(html).not.toContain("45–105 分钟");

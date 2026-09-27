@@ -9,8 +9,11 @@ import { createNightlyFlywheel } from "./nightly";
 import { createFlywheelExpander } from "./flywheel";
 import { createMaterialPreparer, pendingMaterialWorkOrders } from "./material-runner";
 import { createMilestoneGate, pendingMilestoneGates } from "./milestone-gate-runner";
-import { createMilestoneProposer } from "./milestone-proposer";
+import { createMilestoneConversation, createMilestoneProposer } from "./milestone-proposer";
 import { createGoalBackplanner } from "./goal-backplanner";
+import { createPlanExplainer } from "./plan-explainer-runner";
+import { createWeeklyInsight } from "./weekly-insight-runner";
+import { createOnboardingProposer } from "./onboarding-runner";
 import { createGraphSync, type SyncOutcome } from "./graph-sync";
 import {
   buildSources, calendarLabel, listCatalogue, readSelection, saveSelection, seedNewAccounts, sourceKey
@@ -70,31 +73,36 @@ async function tick(): Promise<void> {
   beat();
   // Consent is re-read every tick, so turning collection off takes effect without a restart.
   if (recordActivity) await recordActivity().catch(() => undefined);
+  // Every real workspace, not one hardcoded id — a real account's own work orders and calendar state
+  // used to be structurally invisible to all three of these jobs no matter how long the worker ran.
+  const workspaces = analysisStore.listWorkspaces();
   // Material preparation is the one background job that writes into the project directory, so it only
   // ever runs for work orders the human already approved into `preparing`.
-  if (prepareMaterials) {
-    for (const workOrderId of pendingMaterialWorkOrders(analysisStore, "personal-crossline")) {
-      const outcome = await prepareMaterials(workOrderId).catch(() => undefined);
-      if (outcome) console.info(JSON.stringify({ type: `materials.${outcome.state}`, checkedAt, ...outcome }));
+  for (const workspace of workspaces) {
+    for (const workOrderId of pendingMaterialWorkOrders(analysisStore, workspace.id)) {
+      const outcome = await getMaterialPreparer(workspace.id)(workOrderId).catch(() => undefined);
+      if (outcome) console.info(JSON.stringify({ type: `materials.${outcome.state}`, checkedAt, workspaceId: workspace.id, ...outcome }));
     }
   }
   // The milestone gate. Without this it existed only inside `scripts/gate-loop-check.ts`, so on the
   // real ledger a milestone-bound work order reached `evidence_review`, the approvals page said
   // 「等待里程碑闸门」 — and nothing was ever going to judge it. A verdict other than `pass` holds the
   // order for a person, so a held order is skipped rather than re-judged every fifteen minutes.
-  if (judgeMilestone) {
-    for (const workOrderId of pendingMilestoneGates(analysisStore, "personal-crossline")) {
-      const outcome = await judgeMilestone(workOrderId).catch(() => undefined);
-      if (outcome) console.info(JSON.stringify({ type: `milestone_gate.${outcome.state}`, checkedAt, ...outcome }));
+  for (const workspace of workspaces) {
+    for (const workOrderId of pendingMilestoneGates(analysisStore, workspace.id)) {
+      const outcome = await getMilestoneGate(workspace.id)(workOrderId).catch(() => undefined);
+      if (outcome) console.info(JSON.stringify({ type: `milestone_gate.${outcome.state}`, checkedAt, workspaceId: workspace.id, ...outcome }));
     }
   }
   // Calendar reality is pulled every tick. It never rewrites an approved plan — a change there becomes
   // a new draft whose diffs are conflicts for the person to look at.
   if (calendar) {
-    const outcome = await calendar.sync().catch((error): SyncOutcome =>
-      ({ state: "blocked", code: "GRAPH_SYNC_FAILED", message: error instanceof Error ? error.message : "" }));
-    if (outcome.state === "blocked" || outcome.changes > 0 || outcome.resynced) {
-      console.info(JSON.stringify({ type: `graph.${outcome.state}`, checkedAt, ...outcome }));
+    for (const workspace of workspaces) {
+      const outcome = await calendar.sync(workspace.id).catch((error): SyncOutcome =>
+        ({ state: "blocked", code: "GRAPH_SYNC_FAILED", message: error instanceof Error ? error.message : "" }));
+      if (outcome.state === "blocked" || outcome.changes > 0 || outcome.resynced) {
+        console.info(JSON.stringify({ type: `graph.${outcome.state}`, checkedAt, workspaceId: workspace.id, ...outcome }));
+      }
     }
   }
   // The nightly expansion decides for itself whether this tick is its moment; most ticks are not.
@@ -145,13 +153,71 @@ const runNightly = createNightlyFlywheel({
   readCost,
   expand: expandFlywheel
 });
-const prepareMaterials = createMaterialPreparer(analysisStore, "personal-crossline", repoRoot,
-  () => codexSupervisor?.client, readCost);
-const judgeMilestone = createMilestoneGate(analysisStore, "personal-crossline", repoRoot,
-  () => codexSupervisor?.client);
+// Material preparation and the milestone gate used to be created once, bound to a single hardcoded
+// workspace — every real account's own `preparing`/`evidence_review` work orders were invisible to
+// both the automatic tick and the manual "重新准备材料"/"现在判定" buttons, since neither ever operated
+// on any workspace but that one. `createMaterialPreparer`/`createMilestoneGate`'s other arguments (the
+// store, repoRoot, the Codex client getter, the cost reader) are not workspace-specific, so a per-real-
+// workspace closure is cheap to build and safe to cache.
+const materialPreparers = new Map<string, ReturnType<typeof createMaterialPreparer>>();
+const getMaterialPreparer = (workspaceId: string) => {
+  let preparer = materialPreparers.get(workspaceId);
+  if (!preparer) {
+    preparer = createMaterialPreparer(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client, readCost);
+    materialPreparers.set(workspaceId, preparer);
+  }
+  return preparer;
+};
+const milestoneGates = new Map<string, ReturnType<typeof createMilestoneGate>>();
+const getMilestoneGate = (workspaceId: string) => {
+  let gate = milestoneGates.get(workspaceId);
+  if (!gate) {
+    gate = createMilestoneGate(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client);
+    milestoneGates.set(workspaceId, gate);
+  }
+  return gate;
+};
+// Same fix, same reason: `createCaptureAnalyzer` used to close over a hardcoded workspace id (and an
+// `ownerId === "local-owner"` read filter on top of it), so a real account's own captures and approved
+// milestones were invisible to it — analysis threw `CAPTURE_NOT_FOUND` or
+// `ANALYSIS_APPROVED_MILESTONE_REQUIRED` regardless of what was actually on the ledger.
+const captureAnalyzers = new Map<string, ReturnType<typeof createCaptureAnalyzer>>();
+const getCaptureAnalyzer = (workspaceId: string) => {
+  let analyzer = captureAnalyzers.get(workspaceId);
+  if (!analyzer) {
+    analyzer = createCaptureAnalyzer(analysisStore, workspaceId, repoRoot);
+    captureAnalyzers.set(workspaceId, analyzer);
+  }
+  return analyzer;
+};
+const planExplainers = new Map<string, ReturnType<typeof createPlanExplainer>>();
+const getPlanExplainer = (workspaceId: string) => {
+  let explainer = planExplainers.get(workspaceId);
+  if (!explainer) {
+    explainer = createPlanExplainer(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client);
+    planExplainers.set(workspaceId, explainer);
+  }
+  return explainer;
+};
+const weeklyInsights = new Map<string, ReturnType<typeof createWeeklyInsight>>();
+const getWeeklyInsight = (workspaceId: string) => {
+  let insight = weeklyInsights.get(workspaceId);
+  if (!insight) {
+    insight = createWeeklyInsight(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client);
+    weeklyInsights.set(workspaceId, insight);
+  }
+  return insight;
+};
 /**
  * Calendar sync only exists when a client id is configured. Without one there is nothing to read, and
  * inventing a connector that always fails would put a permanent blocker on every tick.
+ *
+ * The Graph login itself is one credential session for the whole worker process — signing in is a real
+ * interactive device-code flow done once (`scripts/graph-add-account.ts`), not a per-workspace thing.
+ * What was wrong was never the credential; it was that every function built from it closed over one
+ * hardcoded `workspaceId`, so the real ledger rows (selection, sync cursor, imported blocks) it read and
+ * wrote always landed on that one legacy workspace regardless of which real account actually asked.
+ * `sync`/`listSources`/`saveSources` below all take the real caller's `workspaceId` as a parameter now.
  */
 const calendar = await (async () => {
   const clientId = process.env.CROSSLINE_MS_CLIENT_ID?.trim();
@@ -172,43 +238,60 @@ const calendar = await (async () => {
     const reader = (bound: GraphCredentialProvider, calendarId?: string) =>
       new GraphReadSource({ credential: bound, futureDays: 63, ...(calendarId ? { calendarId } : {}) });
 
-    // One catalogue read at startup, so a newly signed-in account arrives with its default calendar
-    // already ticked instead of appearing to do nothing.
-    const catalogue = await listCatalogue(credential, analysisStore, WORKSPACE_ID, reader);
-    seedNewAccounts(analysisStore, WORKSPACE_ID, catalogue);
-    console.info(JSON.stringify({
-      type: "graph.calendars", accounts: catalogue.length,
-      selected: readSelection(analysisStore, WORKSPACE_ID).length
-    }));
+    // A newly signed-in account arrives with its default calendar already ticked instead of appearing
+    // to do nothing — done once per real workspace (not once globally), the first time any of the three
+    // functions below is actually asked about that workspace.
+    const catalogueSeeded = new Set<string>();
+    const ensureCatalogueSeeded = async (workspaceId: string) => {
+      if (catalogueSeeded.has(workspaceId)) return;
+      catalogueSeeded.add(workspaceId);
+      const catalogue = await listCatalogue(credential, analysisStore, workspaceId, reader);
+      seedNewAccounts(analysisStore, workspaceId, catalogue);
+      console.info(JSON.stringify({
+        type: "graph.calendars", workspaceId, accounts: catalogue.length,
+        selected: readSelection(analysisStore, workspaceId).length
+      }));
+    };
+    const syncers = new Map<string, ReturnType<typeof createGraphSync>>();
+    const getSyncer = (workspaceId: string) => {
+      let syncer = syncers.get(workspaceId);
+      if (!syncer) {
+        syncer = createGraphSync(analysisStore, workspaceId, {
+          // Resolved per tick, so unticking a calendar takes effect on the next sync with no restart.
+          sources: () => buildSources(analysisStore, workspaceId, credential, reader),
+          timeZone: () => {
+            const raw = analysisStore.getSetting(workspaceId, "schedule.preferences");
+            if (raw) {
+              try {
+                const zone = (JSON.parse(raw) as { timeZone?: unknown }).timeZone;
+                if (typeof zone === "string") {
+                  new Intl.DateTimeFormat("en", { timeZone: zone });
+                  return zone;
+                }
+              } catch { /* An unreadable setting must not stop calendar sync. */ }
+            }
+            return process.env.CROSSLINE_TIME_ZONE;
+          }
+        });
+        syncers.set(workspaceId, syncer);
+      }
+      return syncer;
+    };
 
     return {
-      sync: createGraphSync(analysisStore, WORKSPACE_ID, {
-        // Resolved per tick, so unticking a calendar takes effect on the next sync with no restart.
-        sources: () => buildSources(analysisStore, WORKSPACE_ID, credential, reader),
-        timeZone: () => {
-          const raw = analysisStore.getSetting(WORKSPACE_ID, "schedule.preferences");
-          if (raw) {
-            try {
-              const zone = (JSON.parse(raw) as { timeZone?: unknown }).timeZone;
-              if (typeof zone === "string") {
-                new Intl.DateTimeFormat("en", { timeZone: zone });
-                return zone;
-              }
-            } catch { /* An unreadable setting must not stop calendar sync. */ }
-          }
-          return process.env.CROSSLINE_TIME_ZONE;
-        }
-      }),
-      listSources: async () => {
-        const fresh = await listCatalogue(credential, analysisStore, WORKSPACE_ID, reader);
-        seedNewAccounts(analysisStore, WORKSPACE_ID, fresh);
+      sync: async (workspaceId: string) => { await ensureCatalogueSeeded(workspaceId); return getSyncer(workspaceId)(); },
+      listSources: async (workspaceId: string) => {
+        await ensureCatalogueSeeded(workspaceId);
+        const fresh = await listCatalogue(credential, analysisStore, workspaceId, reader);
+        seedNewAccounts(analysisStore, workspaceId, fresh);
         // Re-read rather than reuse: seeding may have ticked a calendar that the first pass showed
         // unticked, and showing the person a list that is already one step stale is how a checkbox
         // ends up disagreeing with what the next sync actually reads.
-        return listCatalogue(credential, analysisStore, WORKSPACE_ID, reader);
+        return listCatalogue(credential, analysisStore, workspaceId, reader);
       },
-      saveSources: async (keys: string[]) => {
-        const fresh = await listCatalogue(credential, analysisStore, WORKSPACE_ID, reader);
+      saveSources: async (workspaceId: string, keys: string[]) => {
+        await ensureCatalogueSeeded(workspaceId);
+        const fresh = await listCatalogue(credential, analysisStore, workspaceId, reader);
         const wanted = new Set(keys);
         const selection = fresh.flatMap((account) => account.calendars
           .filter((calendar) => wanted.has(sourceKey(account.accountId, calendar.id)))
@@ -218,8 +301,8 @@ const calendar = await (async () => {
           })));
         // A key naming a calendar this account cannot see is dropped rather than stored: the stored
         // selection is what the next tick reads, and a source nobody can read is a permanent failure.
-        saveSelection(analysisStore, WORKSPACE_ID, selection);
-        return listCatalogue(credential, analysisStore, WORKSPACE_ID, reader);
+        saveSelection(analysisStore, workspaceId, selection);
+        return listCatalogue(credential, analysisStore, workspaceId, reader);
       }
     };
   } catch {
@@ -248,21 +331,32 @@ if (!capabilitySecret) {
         "crossline:crossline-onboarding", "crossline:crossline-plan-explainer", "crossline:crossline-weekly-insight"
       ]
     },
-    analyzeCapture: createCaptureAnalyzer(analysisStore, repoRoot),
-    proposeMilestones: (_client, request, signal) =>
-      createMilestoneProposer(analysisStore, "personal-crossline", repoRoot, () => codexSupervisor?.client)(request, signal),
-    backplanGoal: (_client, milestoneId, signal) =>
-      createGoalBackplanner(analysisStore, "personal-crossline", repoRoot, () => codexSupervisor?.client)(milestoneId, signal),
-    // The same preparer the tick loop uses, exposed so a person's retry gets an answer now rather than
-    // at the next tick. `pendingMaterialWorkOrders` still governs which orders the loop picks up.
-    prepareMaterials: (workOrderId) => prepareMaterials(workOrderId),
-    judgeMilestone: (workOrderId) => judgeMilestone(workOrderId),
+    analyzeCapture: (client, id, signal, workspaceId) => getCaptureAnalyzer(workspaceId)(client, id, signal),
+    // `workspaceId` is the real caller's, from its own verified capability token — not a hardcoded
+    // constant, which is what left milestone proposal and goal backplanning invisible to any real
+    // account the same way material prep/the milestone gate/calendar sync were (see `getMaterialPreparer`
+    // above for the fuller explanation; this is the same bug, same fix, in the same file).
+    proposeMilestones: (_client, request, signal, workspaceId) =>
+      createMilestoneProposer(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client)(request, signal),
+    continueMilestoneConversation: (_client, threadId, message, signal, workspaceId) =>
+      createMilestoneConversation(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client)(threadId, message, signal),
+    proposeOnboarding: (_client, answers, signal, workspaceId) =>
+      createOnboardingProposer(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client)(answers, signal),
+    backplanGoal: (_client, milestoneId, signal, workspaceId) =>
+      createGoalBackplanner(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client)(milestoneId, signal),
+    // The same preparer/gate the tick loop uses, exposed so a person's retry gets an answer now rather
+    // than at the next tick. `pendingMaterialWorkOrders`/`pendingMilestoneGates` still govern which
+    // orders the loop itself picks up.
+    prepareMaterials: (workOrderId, workspaceId) => getMaterialPreparer(workspaceId)(workOrderId),
+    judgeMilestone: (workOrderId, workspaceId) => getMilestoneGate(workspaceId)(workOrderId),
+    explainPlan: (today, workspaceId) => getPlanExplainer(workspaceId)(today),
+    runWeeklyInsight: (workspaceId) => getWeeklyInsight(workspaceId)(),
     // Undefined when no client id is configured or nobody has signed in, in which case the route is
     // simply not mounted and the button says the connector is unavailable rather than lying.
     ...(calendar ? {
-      syncCalendar: () => calendar.sync(),
-      listCalendarSources: () => calendar.listSources(),
-      saveCalendarSources: (keys: string[]) => calendar.saveSources(keys)
+      syncCalendar: (workspaceId: string) => calendar.sync(workspaceId),
+      listCalendarSources: (workspaceId: string) => calendar.listSources(workspaceId),
+      saveCalendarSources: (workspaceId: string, keys: string[]) => calendar.saveSources(workspaceId, keys)
     } : {})
   });
   console.info(JSON.stringify({ type: "codex.supervisor.ready", url: codexSupervisor.url }));

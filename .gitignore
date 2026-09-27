@@ -22,10 +22,12 @@ test-results/
 apps/web/public/sw.js
 apps/web/public/sw.js.map
 
-# Materials the preparer writes for a work order. The ledger rows that point at them live in
-# `data/`, which is ignored — committing the files without the rows that give them meaning would
-# put personal work product in version control and still not restore to anything usable.
+# Materials the preparer writes for a work order, and files the user uploads as capture attachments.
+# The ledger rows that point at them live in `data/`, which is ignored — committing the files without
+# the rows that give them meaning would put personal work product in version control and still not
+# restore to anything usable.
 .crossline-materials/
+.crossline-attachments/
 
 # The migration runner's forced pre-migration backup. Named after the database it copied, so it slips
 # past the `*.db` patterns above — thirteen of them reached a commit before this line existed.

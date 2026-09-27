@@ -1,9 +1,11 @@
-import { ensureSeeded, getStore, resolvedEstimate } from "../../lib/crossline";
+import { ensureSeeded, getStore, loadCurrentPlan, planToday, resolvedEstimate } from "../../lib/crossline";
 import { SubpageShell } from "../subpage-shell";
 import { AnalyzeButton } from "./analyze-button";
 import { ExecutionActions } from "./execution-actions";
 import { PromoteForm } from "./promote-form";
 import { FamilyBackfill } from "./family-backfill";
+import { WorkbenchViewSwitch } from "./view-switch";
+import { CalendarDetail } from "../plan/calendar-detail";
 import type { MilestoneGateResult } from "@crossline/core";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { requireSessionContext } from "../../lib/access-guard";
@@ -49,16 +51,27 @@ function materialStatus(events: Array<{ type: string; entityId: string; payload:
 
 export const dynamic = "force-dynamic";
 
-export default async function WorkbenchPage() {
+const sortLabel = { default: "默认", identity: "按身份", state: "按状态" } as const;
+type SortKey = keyof typeof sortLabel;
+
+export default async function WorkbenchPage({ searchParams }: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
   const ctx = await requireSessionContext();
+  const params = await searchParams;
+  const sort: SortKey = params.sort === "identity" || params.sort === "state" ? params.sort : "default";
   ensureSeeded(ctx);
   const all = getStore().listWorkOrders(ctx.workspaceId);
   // Discarded items leave the board but not the ledger: they move to a closed drawer with the reason
   // the person gave, so "丢弃" never means "silently disappeared".
-  const runs = all.filter((run) => run.state !== "archived");
+  const active = all.filter((run) => run.state !== "archived");
+  const runs = sort === "identity" ? [...active].sort((a, b) => a.identityId.localeCompare(b.identityId) || a.id.localeCompare(b.id))
+    : sort === "state" ? [...active].sort((a, b) => a.state.localeCompare(b.state) || a.id.localeCompare(b.id))
+    : active;
   const discarded = all.filter((run) => run.state === "archived");
   const captures = getStore().listCaptures(ctx.workspaceId)
     .filter((capture) => capture.state !== "promoted" && capture.state !== "discarded");
+  const attachments = getStore().listCaptureAttachments(ctx.workspaceId);
   const discardedCaptures = getStore().listCaptures(ctx.workspaceId).filter((capture) => capture.state === "discarded");
   const executions = getStore().listExecutions(ctx.workspaceId);
   const materials = getStore().listMaterials(ctx.workspaceId);
@@ -70,15 +83,33 @@ export default async function WorkbenchPage() {
   const milestoneOptions = getStore().listMilestones(ctx.workspaceId)
     .filter((milestone) => milestone.status === "approved")
     .map((milestone) => ({ id: milestone.id, title: milestone.title, identityId: milestone.identityId }));
+  // The timeline view reuses the Plan page's own scheduling read verbatim (`loadCurrentPlan` /
+  // `CalendarDetail`) rather than a second, Workbench-owned notion of "when" — one real schedule, shown
+  // from two places, is what keeps this from ever disagreeing with the Plan page.
+  const today = planToday(ctx);
+  const plan = await loadCurrentPlan(ctx);
   return <SubpageShell eyebrow="04 / AI WORK ORDERS" title="AI 作业台" description="这里呈现 SQLite 中真实的 WorkOrder、估时、材料和阻塞；不让用户编辑内部 DAG。">
     <section className="work-order-list">{captures.map((capture) => <article key={capture.id}>
       <header><span>CAPTURE / {shortId(capture.id)}</span><b>{stateLabel[capture.state]}</b></header>
       <h2>{capture.title}</h2><p>{capture.context}</p>
       <p>未分类 · 未估时 · 原文已保存，可人工处理</p>
+      {(() => { const own = attachments.filter((item) => item.captureId === capture.id);
+        return own.length > 0 && <p>附件 {own.length} 份：{own.map((item, index) => <span key={item.id}>
+          {index > 0 ? "、" : ""}
+          <a href={`/api/captures/${encodeURIComponent(capture.id)}/attachments?uri=${encodeURIComponent(item.uri)}`}
+            target="_blank" rel="noreferrer">{item.fileName}</a>
+        </span>)}</p>; })()}
       {capture.audit.blocker && <p role="status">{capture.audit.blocker.code} · {capture.audit.blocker.message}</p>}
       <AnalyzeButton captureId={capture.id} analyzing={capture.state === "analyzing"} retry={capture.state === "blocked"} />
       <PromoteForm captureId={capture.id} identities={identityOptions} milestones={milestoneOptions} />
-    </article>)}{runs.map((run) => {
+    </article>)}</section>
+    <WorkbenchViewSwitch
+      list={<>
+        <div className="plan-tabs" role="tablist" aria-label="作业排序">
+          {(Object.keys(sortLabel) as SortKey[]).map((key) => <a key={key} role="tab" aria-selected={sort === key}
+            href={key === "default" ? "/workbench" : `/workbench?sort=${key}`}>{sortLabel[key]}</a>)}
+        </div>
+        <section className="work-order-list">{runs.map((run) => {
       const own = executions.filter((execution) => execution.workOrderId === run.id);
       const open = own.find((execution) => !execution.endedAt);
       const paused = Boolean(open?.interruptions.at(-1) && !open.interruptions.at(-1)!.resumedAt);
@@ -133,6 +164,9 @@ export default async function WorkbenchPage() {
         <a href="/approvals">查看状态与证据 →</a></details>
       </article>;
     })}</section>
+      </>}
+      timeline={<CalendarDetail blocks={plan.blocks} today={today} />}
+    />
     {(discarded.length + discardedCaptures.length) > 0
       && <details className="work-order-drawer"><summary>已丢弃 {discarded.length + discardedCaptures.length} 条</summary>
         {discarded.map((run) => <p key={run.id}>{run.intent}

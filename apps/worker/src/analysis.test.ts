@@ -17,7 +17,7 @@ const proposal = { identityId: "research", projectId: "p", milestoneId: "m", int
 
 test("duplicate Analyze requests share one durable run and publish only a proposal", async () => {
   const { rpc, turns } = fakeRuntime([JSON.stringify(proposal)]);
-  const analyze = analysis.createCaptureAnalyzer(store, "C:\\repo");
+  const analyze = analysis.createCaptureAnalyzer(store, "personal-crossline", "C:\\repo");
   const [first, duplicate] = await Promise.all([analyze(rpc, "c"), analyze(rpc, "c")]);
   expect(first).toMatchObject({ state: "awaiting_plan_approval", audit: { threadId: "thread-1", turnId: "turn-1" } });
   // The duplicate observes the claimed run rather than starting a second turn.
@@ -30,7 +30,7 @@ test("duplicate Analyze requests share one durable run and publish only a propos
 
 test("a blocked analysis can be retried instead of stranding the capture forever", async () => {
   const { rpc, turns } = fakeRuntime(["this is not the agreed JSON", JSON.stringify(proposal)]);
-  const analyze = analysis.createCaptureAnalyzer(store, "C:\\repo");
+  const analyze = analysis.createCaptureAnalyzer(store, "personal-crossline", "C:\\repo");
   const blocked = await analyze(rpc, "c");
   expect(blocked.state).toBe("blocked");
   expect(blocked.audit.blocker?.code).toMatch(/^ANALYSIS_[A-Z_]+$/);
@@ -49,7 +49,7 @@ test("approved milestones spanning several identities reach the Skill instead of
       identityId, projectId: `${identityId}-default`, title: `${identityId} milestone`, version: 1, status: "approved" });
   }
   const { rpc, turns } = fakeRuntime([JSON.stringify(proposal)]);
-  const analyze = analysis.createCaptureAnalyzer(store, "C:\\repo");
+  const analyze = analysis.createCaptureAnalyzer(store, "personal-crossline", "C:\\repo");
   const result = await analyze(rpc, "c");
   expect(turns()).toBe(1);
   expect(result).toMatchObject({ state: "awaiting_plan_approval" });
@@ -75,7 +75,7 @@ const degenerate = [
 
 test.each(degenerate)("a $fixture answer is $outcome all the way through to the ledger", async ({ fixture, outcome, code, why: expectedWhy }) => {
   const { rpc, turns } = fakeRuntime([recordedAnswer(fixture)]);
-  const result = await analysis.createCaptureAnalyzer(store, "C:\repo")(rpc, "c");
+  const result = await analysis.createCaptureAnalyzer(store, "personal-crossline", "C:\repo")(rpc, "c");
 
   if (outcome === "refused") {
     expect(result.state).toBe("blocked");
@@ -102,7 +102,7 @@ test("a rejected answer is sent back with the reason, and the corrected one is a
     recordedAnswer("analysis-degenerate-truncated-description"),
     recordedAnswer("analysis-clean")
   ]);
-  const result = await analysis.createCaptureAnalyzer(store, "C:\repo")(rpc, "c");
+  const result = await analysis.createCaptureAnalyzer(store, "personal-crossline", "C:\repo")(rpc, "c");
 
   expect(result).toMatchObject({ state: "awaiting_plan_approval" });
   expect(turns()).toBe(2);

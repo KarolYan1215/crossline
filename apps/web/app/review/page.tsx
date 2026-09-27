@@ -4,6 +4,7 @@ import { SubpageShell } from "../subpage-shell";
 import { RevokeAcceptance } from "./revoke-acceptance";
 import { DecideRelations } from "./decide-relations";
 import { RevokeInsight } from "./revoke-insight";
+import { WeeklyInsightButton } from "./weekly-insight-button";
 import { requireSessionContext } from "../../lib/access-guard";
 
 export const dynamic = "force-dynamic";
@@ -108,6 +109,21 @@ export default async function ReviewPage() {
         <b>{item.identityId} 线已有 {item.daysSinceLastPass} 天没有里程碑通过</b>
       </li>)}</ul>
     </section>}
+
+    <section className="review-block">
+      <h2>本周洞察提案</h2>
+      <p className="review-note">
+        只读提案，不会自动改写任何设置；少于 3 次可比较的观测不会生成洞察。
+      </p>
+      <WeeklyInsightButton />
+      {review.insightProposals.length === 0
+        ? <p className="review-empty">还没有洞察记录，点击上面的按钮生成一次。</p>
+        : <ul className="review-list">{review.insightProposals.map((item) => <li key={item.id}>
+          <b>{item.claim}</b>
+          <small>{item.period} · {item.observationCount} 次观测</small>
+          <small>建议：{item.proposedOverlayPatch}</small>
+        </li>)}</ul>}
+    </section>
 
     <section className="review-block">
       <h2>需要你判断的问题</h2>

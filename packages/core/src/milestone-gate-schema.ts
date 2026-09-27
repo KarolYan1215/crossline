@@ -85,7 +85,7 @@ export type CriteriaProposal = {
 // Structured output runs in strict mode: every object needs additionalProperties:false and must
 // list all of its properties as required. That rules out one object with optional fields, so the four
 // measure shapes are a real union instead — which is also closer to what they are.
-const measure = {
+export const measure = {
   anyOf: [
     object({ kind: { type: "string", enum: ["count"] }, unit: str, atLeast: { type: "number" } }),
     object({ kind: { type: "string", enum: ["threshold"] }, unit: str,
@@ -98,7 +98,7 @@ const measure = {
 // `evidenceOf` is required of the model even though the stored type allows it to be absent: criteria
 // written before the field existed are legitimately unlabelled, but a model proposing a new one always
 // knows which side it is on, and letting it skip the question is how every criterion becomes an output.
-const criterion = object({
+export const criterion = object({
   id: str, statement: str, required: { type: "boolean" },
   evidenceOf: { type: "string", enum: ["output", "outcome"] },
   measure

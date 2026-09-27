@@ -61,7 +61,7 @@ const supervisor = await startCodexSupervisor({
 const failures: string[] = [];
 try {
   console.info(JSON.stringify({ status: "cost_signal", signal: await supervisor.readCostSignal() }));
-  const analyze = createCaptureAnalyzer(store, repoRoot);
+  const analyze = createCaptureAnalyzer(store, workspaceId, repoRoot);
   for (const item of cases) {
     const outcome = await analyze(supervisor.client, item.id);
     const hasAudit = Boolean(outcome.audit?.threadId && outcome.audit?.turnId);

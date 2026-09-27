@@ -330,16 +330,23 @@ export async function startCodexSupervisor(options: {
   host?: "127.0.0.1";
   port?: number;
   sidecarFactory?: () => Promise<CodexSidecar>;
-  analyzeCapture?: (client: CodexRpcBoundary, id: string, signal: AbortSignal) => Promise<unknown>;
-  proposeMilestones?: (client: CodexRpcBoundary, request: string, signal: AbortSignal) => Promise<unknown>;
-  backplanGoal?: (client: CodexRpcBoundary, milestoneId: string, signal: AbortSignal) => Promise<unknown>;
-  prepareMaterials?: (workOrderId: string) => Promise<unknown>;
-  judgeMilestone?: (workOrderId: string) => Promise<unknown>;
-  syncCalendar?: () => Promise<unknown>;
+  analyzeCapture?: (client: CodexRpcBoundary, id: string, signal: AbortSignal, workspaceId: string) => Promise<unknown>;
+  proposeMilestones?: (client: CodexRpcBoundary, request: string, signal: AbortSignal, workspaceId: string) => Promise<unknown>;
+  continueMilestoneConversation?: (client: CodexRpcBoundary, threadId: string, message: string, signal: AbortSignal, workspaceId: string) => Promise<unknown>;
+  proposeOnboarding?: (client: CodexRpcBoundary, answers: Array<{ question: string; answer: string }>, signal: AbortSignal, workspaceId: string) => Promise<unknown>;
+  backplanGoal?: (client: CodexRpcBoundary, milestoneId: string, signal: AbortSignal, workspaceId: string) => Promise<unknown>;
+  // `workspaceId` is the real caller's, taken from its own verified capability token — never the
+  // worker's own idea of "the" workspace, which is what let every one of these silently operate on a
+  // single hardcoded legacy workspace regardless of who actually asked.
+  prepareMaterials?: (workOrderId: string, workspaceId: string) => Promise<unknown>;
+  judgeMilestone?: (workOrderId: string, workspaceId: string) => Promise<unknown>;
+  explainPlan?: (today: string, workspaceId: string) => Promise<unknown>;
+  runWeeklyInsight?: (workspaceId: string) => Promise<unknown>;
+  syncCalendar?: (workspaceId: string) => Promise<unknown>;
   /** The accounts and calendars available, with what is currently ticked. A read. */
-  listCalendarSources?: () => Promise<unknown>;
+  listCalendarSources?: (workspaceId: string) => Promise<unknown>;
   /** Replaces the ticked set with exactly these `<accountId>:<calendarId>` keys. */
-  saveCalendarSources?: (keys: string[]) => Promise<unknown>;
+  saveCalendarSources?: (workspaceId: string, keys: string[]) => Promise<unknown>;
   plugin?: LocalPluginContract;
   /**
    * When set, every request must carry a valid `x-crossline-capability` token signed with this secret
@@ -375,10 +382,14 @@ export async function startCodexSupervisor(options: {
   }
   const analyses = new Map<string, AbortController>();
   let proposing: AbortController | undefined;
+  let conversing: AbortController | undefined;
+  let onboarding: AbortController | undefined;
   // Material preparation also runs on the tick loop; this set is what stops a person's retry click and
   // the tick that lands two seconds later from preparing the same order twice.
   const preparing = new Set<string>();
   const judging = new Set<string>();
+  const explaining = new Set<string>();
+  const insighting = new Set<string>();
   let syncing = false;
   /**
    * Starts a job whose answer the caller is not waiting for, and swallows its failure on purpose.
@@ -440,6 +451,11 @@ export async function startCodexSupervisor(options: {
         sendJson(response, 200, status());
         return;
       }
+      // Empty when no `capabilitySecret` is configured at all — the pre-stage-four "no enforcement"
+      // mode a chunk of this file's own tests still exercise on purpose. Every route below that needs to
+      // know *which* workspace asked (prepare-materials, milestone-gate, calendar) uses this rather than
+      // any workspace id the worker itself might otherwise have hardcoded — that hardcoding was the bug.
+      let callerWorkspaceId = "";
       if (options.capabilitySecret) {
         const verified = verifyCapability(request.headers["x-crossline-capability"] as string | undefined,
           options.capabilitySecret, { operation: `${request.method} ${pathname}`, supervisorBootId });
@@ -447,6 +463,7 @@ export async function startCodexSupervisor(options: {
           sendJson(response, 401, { blocker: { code: verified.code, message: "Use the local Web API" } });
           return;
         }
+        callerWorkspaceId = verified.capability.workspaceId;
       }
       const analysisRoute = /^\/v1\/captures\/([a-zA-Z0-9_-]{1,128})\/analyze$/.exec(pathname);
       if (analysisRoute && options.analyzeCapture) {
@@ -472,7 +489,7 @@ export async function startCodexSupervisor(options: {
           // holding a browser request open for the whole five-minute Skill budget would time out in the
           // browser long before the Skill did, which is what made a slow-but-fine analysis look broken.
           // The run is never cancelled here: it keeps going and writes its own outcome to the ledger.
-          const run = options.analyzeCapture(sidecar.client, id, controller.signal)
+          const run = options.analyzeCapture(sidecar.client, id, controller.signal, callerWorkspaceId)
             .finally(() => { if (!running && analyses.get(id) === controller) analyses.delete(id); });
           run.catch(() => {});
           const settled = await Promise.race([
@@ -502,7 +519,7 @@ export async function startCodexSupervisor(options: {
         // is written to the ledger either way, so making the browser hold a request open for it would
         // buy nothing and time out. The UI reads the result from the ledger like everything else.
         preparing.add(id);
-        runDetached(() => options.prepareMaterials!(id), () => preparing.delete(id));
+        runDetached(() => options.prepareMaterials!(id, callerWorkspaceId), () => preparing.delete(id));
         sendJson(response, 202, { started: true });
         return;
       }
@@ -521,14 +538,48 @@ export async function startCodexSupervisor(options: {
           return;
         }
         judging.add(id);
-        runDetached(() => options.judgeMilestone!(id), () => judging.delete(id));
+        runDetached(() => options.judgeMilestone!(id, callerWorkspaceId), () => judging.delete(id));
+        sendJson(response, 202, { started: true });
+        return;
+      }
+      // Explains the schedule the deterministic scheduler already produced — one run per workspace, not
+      // per work order, so the dedup key is the caller's own workspace rather than a path segment.
+      const explainRoute = /^\/v1\/plan\/([0-9]{4}-[0-9]{2}-[0-9]{2})\/explain$/.exec(pathname);
+      if (request.method === "POST" && explainRoute && options.explainPlan) {
+        if (request.headers.origin || !request.headers["content-type"]?.startsWith("application/json")) {
+          sendJson(response, 403, { blocker: { code: "PLAN_EXPLAIN_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
+          return;
+        }
+        if (runtimeBlocker) { sendJson(response, 503, { blocker: runtimeBlocker }); return; }
+        const today = explainRoute[1]!;
+        if (explaining.has(callerWorkspaceId)) {
+          sendJson(response, 409, { blocker: { code: "PLAN_EXPLAIN_ALREADY_RUNNING", message: "计划解释已在运行" } });
+          return;
+        }
+        explaining.add(callerWorkspaceId);
+        runDetached(() => options.explainPlan!(today, callerWorkspaceId), () => explaining.delete(callerWorkspaceId));
+        sendJson(response, 202, { started: true });
+        return;
+      }
+      if (request.method === "POST" && pathname === "/v1/review/weekly-insight" && options.runWeeklyInsight) {
+        if (request.headers.origin || !request.headers["content-type"]?.startsWith("application/json")) {
+          sendJson(response, 403, { blocker: { code: "WEEKLY_INSIGHT_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
+          return;
+        }
+        if (runtimeBlocker) { sendJson(response, 503, { blocker: runtimeBlocker }); return; }
+        if (insighting.has(callerWorkspaceId)) {
+          sendJson(response, 409, { blocker: { code: "WEEKLY_INSIGHT_ALREADY_RUNNING", message: "周复盘洞察已在运行" } });
+          return;
+        }
+        insighting.add(callerWorkspaceId);
+        runDetached(() => options.runWeeklyInsight!(callerWorkspaceId), () => insighting.delete(callerWorkspaceId));
         sendJson(response, 202, { started: true });
         return;
       }
       // Which calendars exist and which are read. Separate from the sync because listing is cheap and
       // safe to do while looking at a settings page, whereas a sync rewrites the plan's reality lane.
       if (request.method === "GET" && pathname === "/v1/calendar/sources" && options.listCalendarSources) {
-        try { sendJson(response, 200, await options.listCalendarSources()); }
+        try { sendJson(response, 200, await options.listCalendarSources(callerWorkspaceId)); }
         catch (error) {
           sendJson(response, 502, { blocker: { code: "GRAPH_CALENDARS_UNAVAILABLE",
             message: error instanceof Error ? error.message : "读取日历列表失败" } });
@@ -546,7 +597,7 @@ export async function startCodexSupervisor(options: {
           sendJson(response, 400, { blocker: { code: "CALENDAR_KEYS_REQUIRED", message: "需要 keys 数组" } });
           return;
         }
-        try { sendJson(response, 200, await options.saveCalendarSources(keys)); }
+        try { sendJson(response, 200, await options.saveCalendarSources(callerWorkspaceId, keys)); }
         catch (error) {
           sendJson(response, 502, { blocker: { code: "GRAPH_CALENDARS_UNAVAILABLE",
             message: error instanceof Error ? error.message : "保存日历选择失败" } });
@@ -568,7 +619,7 @@ export async function startCodexSupervisor(options: {
         syncing = true;
         // Awaited, unlike the two Skill routes: a calendar read takes a second or two, and the person
         // clicked it to find out what changed, so the answer is worth waiting for.
-        try { sendJson(response, 200, await options.syncCalendar()); }
+        try { sendJson(response, 200, await options.syncCalendar(callerWorkspaceId)); }
         catch (error) {
           sendJson(response, 502, { blocker: { code: "GRAPH_SYNC_FAILED",
             message: error instanceof Error ? error.message : "日历同步失败" } });
@@ -592,8 +643,51 @@ export async function startCodexSupervisor(options: {
         const body = await readJsonBody(request);
         const controller = new AbortController();
         proposing = controller;
-        try { sendJson(response, 200, await options.proposeMilestones(sidecar.client, String(body?.request ?? ""), controller.signal)); }
+        try { sendJson(response, 200, await options.proposeMilestones(sidecar.client, String(body?.request ?? ""), controller.signal, callerWorkspaceId)); }
         finally { if (proposing === controller) proposing = undefined; }
+        return;
+      }
+      if (request.method === "POST" && pathname === "/v1/milestones/propose/continue" && options.continueMilestoneConversation) {
+        if (request.headers.origin || !request.headers["content-type"]?.startsWith("application/json")) {
+          sendJson(response, 403, { blocker: { code: "PROPOSAL_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
+          return;
+        }
+        if (runtimeBlocker) { sendJson(response, 503, { blocker: runtimeBlocker }); return; }
+        if (conversing) {
+          sendJson(response, 409, { blocker: { code: "PROPOSAL_ALREADY_RUNNING", message: "已有一次对话在运行" } });
+          return;
+        }
+        const body = await readJsonBody(request);
+        const threadId = String(body?.threadId ?? "");
+        const message = String(body?.message ?? "");
+        if (!/^[a-zA-Z0-9_-]{1,128}$/.test(threadId) || !message.trim()) {
+          sendJson(response, 400, { blocker: { code: "PROPOSAL_CONVERSATION_INVALID", message: "缺少 threadId 或消息内容" } });
+          return;
+        }
+        const controller = new AbortController();
+        conversing = controller;
+        try { sendJson(response, 200, await options.continueMilestoneConversation(sidecar.client, threadId, message, controller.signal, callerWorkspaceId)); }
+        finally { if (conversing === controller) conversing = undefined; }
+        return;
+      }
+      if (request.method === "POST" && pathname === "/v1/onboarding/propose" && options.proposeOnboarding) {
+        if (request.headers.origin || !request.headers["content-type"]?.startsWith("application/json")) {
+          sendJson(response, 403, { blocker: { code: "ONBOARDING_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
+          return;
+        }
+        if (runtimeBlocker) { sendJson(response, 503, { blocker: runtimeBlocker }); return; }
+        if (onboarding) {
+          sendJson(response, 409, { blocker: { code: "ONBOARDING_ALREADY_RUNNING", message: "已有一次入职提议在运行" } });
+          return;
+        }
+        const body = await readJsonBody(request);
+        const answers = Array.isArray(body?.answers) ? body.answers
+          .filter((item: unknown): item is { question: unknown; answer: unknown } => typeof item === "object" && item !== null)
+          .map((item: { question: unknown; answer: unknown }) => ({ question: String(item.question ?? ""), answer: String(item.answer ?? "") })) : [];
+        const controller = new AbortController();
+        onboarding = controller;
+        try { sendJson(response, 200, await options.proposeOnboarding(sidecar.client, answers, controller.signal, callerWorkspaceId)); }
+        finally { if (onboarding === controller) onboarding = undefined; }
         return;
       }
       if (request.method === "POST" && pathname === "/v1/goals/backplan" && options.backplanGoal) {
@@ -606,7 +700,7 @@ export async function startCodexSupervisor(options: {
         const body = await readJsonBody(request);
         const controller = new AbortController();
         proposing = controller;
-        try { sendJson(response, 200, await options.backplanGoal(sidecar.client, String(body?.milestoneId ?? ""), controller.signal)); }
+        try { sendJson(response, 200, await options.backplanGoal(sidecar.client, String(body?.milestoneId ?? ""), controller.signal, callerWorkspaceId)); }
         finally { if (proposing === controller) proposing = undefined; }
         return;
       }
