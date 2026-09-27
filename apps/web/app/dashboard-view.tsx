@@ -5,6 +5,7 @@ import { BatchCaptureForm } from "./batch-capture-form";
 import { AnalogClock } from "./analog-clock";
 import { EnergyProbe } from "./energy-probe";
 import { LocalActivityConsent } from "./local-activity-consent";
+import { IdentityFlywheel } from "./identity-flywheel";
 import { SignOutButton } from "./sign-out-button";
 import { NAV_ITEMS } from "./nav-items";
 import { BottomNav } from "./bottom-nav";
@@ -49,7 +50,10 @@ export type DashboardData = {
   progress: { streakDays: number; weekCount: number };
   todayCapacity: { availableMinutes: number; committedMinutes: number };
   flywheel: Array<{ id: string; fromTitle: string; toTitle: string; kindLabel: string; explanation: string | null; pending: boolean }>;
-  identities: Array<{ id: string; label: string; accent: string; completedCount: number; activeMilestone: string; taskCount: number }>;
+  identities: Array<{ id: string; label: string; accent: string; completedCount: number; activeMilestone: string; taskCount: number; totalCount: number; pct: number }>;
+  /** Every real, LLM-judged milestone relation crossing two identities, aggregated pairwise — the
+   * cross-identity edges behind the homepage's flywheel diagram, not limited to today's active work. */
+  identityFlows: Array<{ from: string; to: string; count: number; pending: boolean; kindLabel: string }>;
   upcoming: Array<{ id: string; title: string; startsAt: string; identityId: string }>;
   localActivityAsked: boolean;
   lastNight:
@@ -188,8 +192,16 @@ export function DashboardView({ data }: { data: DashboardData }) {
       <dl>
         <div><dt>本周完成</dt><dd>{data.progress.weekCount} 件</dd></div>
         <div><dt>连续天数</dt><dd>{data.progress.streakDays} 天</dd></div>
-        {data.identities.map((item) => <div key={item.id}><dt>{item.label}</dt><dd>累计 {item.completedCount} 件</dd></div>)}
       </dl>
+    </section>
+
+    {/* Each identity's own real progress (accepted/active work orders), plus the actual milestone
+        relations crossing identities — the flywheel effect — drawn as weighted arcs between them.
+        Grounded in the same LLM-judged `milestone_relations` the star map and the FLYWHEEL section
+        already read, just aggregated across all of them instead of only today's active work. */}
+    <section className="identity-pulse" aria-label="主线进度与跨主线飞轮">
+      <header><span>04 / IDENTITY PULSE · 主线进度与飞轮</span><a href="/milestones">OPEN MAP →</a></header>
+      <IdentityFlywheel identities={data.identities} flows={data.identityFlows} />
     </section>
 
     <section className="capture-line" aria-labelledby="capture-title">

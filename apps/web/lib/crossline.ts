@@ -1132,6 +1132,31 @@ export function loadDashboard(ctx: AccessContext): DashboardData {
       pending: relation.status === "candidate"
     }));
 
+  // Cross-identity progress overview for the homepage: every approved/candidate relation between
+  // milestones owned by two *different* identities, aggregated into one flow per identity pair — the
+  // same real, LLM-judged relations the flywheel section reads, just not limited to today's active work.
+  const identityFlows = (() => {
+    const buckets = new Map<string, { from: string; to: string; kinds: Record<string, number>; pending: boolean; count: number }>();
+    for (const relation of store.listMilestoneRelations(ctx.workspaceId)) {
+      if (relation.status !== "approved" && relation.status !== "candidate") continue;
+      const from = milestones.find((item) => item.id === relation.fromMilestoneId)?.identityId;
+      const to = milestones.find((item) => item.id === relation.toMilestoneId)?.identityId;
+      if (!from || !to || from === to) continue;
+      if (!identityPacks.some((pack) => pack.id === from) || !identityPacks.some((pack) => pack.id === to)) continue;
+      const key = `${from}->${to}`;
+      const bucket = buckets.get(key) ?? { from, to, kinds: {}, pending: false, count: 0 };
+      bucket.kinds[relation.kind] = (bucket.kinds[relation.kind] ?? 0) + 1;
+      bucket.count += 1;
+      if (relation.status === "candidate") bucket.pending = true;
+      buckets.set(key, bucket);
+    }
+    return [...buckets.values()].map((bucket) => {
+      const topKind = Object.entries(bucket.kinds).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "";
+      return { from: bucket.from, to: bucket.to, count: bucket.count, pending: bucket.pending,
+        kindLabel: relationKindLabel[topKind] ?? topKind };
+    });
+  })();
+
   const energySelected = capacity.level !== "uncalibrated";
   const primaryReason = energySelected
     ? actions.primary?.deadline && Date.parse(actions.primary.deadline) - now.getTime() <= 24 * 60 * 60_000
@@ -1167,16 +1192,20 @@ export function loadDashboard(ctx: AccessContext): DashboardData {
     progress,
     todayCapacity: { availableMinutes, committedMinutes },
     flywheel,
+    identityFlows,
     identities: identityPacks.map((pack) => {
       const identityOrders = orders.filter((order) => order.identityId === pack.id);
       const completed = identityOrders.filter((order) => order.state === "accepted").length;
+      const total = identityOrders.length;
       return {
         id: pack.id,
         label: pack.label,
         accent: accents[pack.id] ?? "#6D5EF5",
         completedCount: completed,
         activeMilestone: milestones.find((milestone) => milestone.identityId === pack.id)?.title ?? "等待批准里程碑",
-        taskCount: identityOrders.length - completed
+        taskCount: total - completed,
+        totalCount: total,
+        pct: total > 0 ? Math.round((completed / total) * 100) : 0
       };
     }),
     // Ordered by what needs the person next, then capped — not captures first, then whatever fits.

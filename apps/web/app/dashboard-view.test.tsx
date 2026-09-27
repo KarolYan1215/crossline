@@ -15,13 +15,13 @@ describe("dashboard view", () => {
       progress: { streakDays: 3, weekCount: 5 },
       care: [{ title: "睡眠", minimumMinutes: 420 }],
       identities: [
-        { id: "research", label: "科研", accent: "#6D5EF5", completedCount: 1, activeMilestone: "完成当前实验与论文结果段", taskCount: 3 },
-        { id: "startup", label: "创业", accent: "#FF8A5B", completedCount: 0, activeMilestone: "验证首个客户问题", taskCount: 2 },
-        { id: "media", label: "自媒体", accent: "#E85D9E", completedCount: 0, activeMilestone: "发布首个复用内容", taskCount: 1 },
-        { id: "investment", label: "投资", accent: "#23A989", completedCount: 2, activeMilestone: "完成本周研究备忘录", taskCount: 2 }
+        { id: "research", label: "科研", accent: "#6D5EF5", completedCount: 1, activeMilestone: "完成当前实验与论文结果段", taskCount: 3, totalCount: 4, pct: 25 },
+        { id: "startup", label: "创业", accent: "#FF8A5B", completedCount: 0, activeMilestone: "验证首个客户问题", taskCount: 2, totalCount: 2, pct: 0 },
+        { id: "media", label: "自媒体", accent: "#E85D9E", completedCount: 0, activeMilestone: "发布首个复用内容", taskCount: 1, totalCount: 1, pct: 0 },
+        { id: "investment", label: "投资", accent: "#23A989", completedCount: 2, activeMilestone: "完成本周研究备忘录", taskCount: 2, totalCount: 4, pct: 50 }
       ],
       upcoming: [],
-      localActivityAsked: true, lastNight: { state: "none" as const }, milestonePulse: [], todayCapacity: { availableMinutes: 0, committedMinutes: 0 }, flywheel: []
+      localActivityAsked: true, lastNight: { state: "none" as const }, milestonePulse: [], todayCapacity: { availableMinutes: 0, committedMinutes: 0 }, flywheel: [], identityFlows: []
     }} />);
 
     expect(html).toContain("下一行动");
@@ -41,7 +41,7 @@ describe("dashboard view", () => {
       care: [],
       identities: [],
       upcoming: [],
-      localActivityAsked: true, lastNight: { state: "none" as const }, milestonePulse: [], todayCapacity: { availableMinutes: 0, committedMinutes: 0 }, flywheel: []
+      localActivityAsked: true, lastNight: { state: "none" as const }, milestonePulse: [], todayCapacity: { availableMinutes: 0, committedMinutes: 0 }, flywheel: [], identityFlows: []
     }} />);
     expect(html).toContain("快速收集");
     expect(html).toContain('name="title"');
@@ -55,7 +55,7 @@ describe("dashboard view", () => {
       capacity: { level: "uncalibrated" as const, observationCount: 0, basis: [], blockers: [{ code: "LOCAL_ACTIVITY_NOT_AUTHORISED", message: "本机活动采集未开启" }] },
       progress: { streakDays: 0, weekCount: 0 },
       care: [],
-      identities: [], upcoming: [], localActivityAsked: true, lastNight: { state: "none" as const }, milestonePulse: [], todayCapacity: { availableMinutes: 0, committedMinutes: 0 }, flywheel: []
+      identities: [], upcoming: [], localActivityAsked: true, lastNight: { state: "none" as const }, milestonePulse: [], todayCapacity: { availableMinutes: 0, committedMinutes: 0 }, flywheel: [], identityFlows: []
     }} />);
     expect(html).toContain("running-head");
     expect(html).not.toContain("sidebar");
@@ -71,7 +71,7 @@ describe("dashboard view honesty", () => {
     capacity: { level: "uncalibrated" as const, observationCount: 0, basis: [], blockers: [{ code: "LOCAL_ACTIVITY_NOT_AUTHORISED", message: "本机活动采集未开启" }] },
     progress: { streakDays: 0, weekCount: 0 },
     care: [],
-    identities: [], upcoming: [], localActivityAsked: true, lastNight: { state: "none" as const }, milestonePulse: [], todayCapacity: { availableMinutes: 0, committedMinutes: 0 }, flywheel: []
+    identities: [], upcoming: [], localActivityAsked: true, lastNight: { state: "none" as const }, milestonePulse: [], todayCapacity: { availableMinutes: 0, committedMinutes: 0 }, flywheel: [], identityFlows: []
   };
 
   test("does not render a hardcoded year progress bar", () => {
@@ -90,7 +90,7 @@ describe("dashboard view honesty", () => {
 describe("capacity honesty", () => {
   const withCapacity = (capacity: DashboardData["capacity"]) => renderToStaticMarkup(<DashboardView data={{
     principalId: "test-owner", workspaceId: "test-workspace", nowLabel: "周一 · 09:00", nowIso: "2026-09-14T14:00:00.000Z", timeZone: "America/Chicago", clockPinned: true, dateLabel: "14", monthLabel: "SEP · 2026",
-    capacity, progress: { streakDays: 0, weekCount: 0 }, care: [], identities: [], upcoming: [], localActivityAsked: true, lastNight: { state: "none" as const }, milestonePulse: [], todayCapacity: { availableMinutes: 0, committedMinutes: 0 }, flywheel: []
+    capacity, progress: { streakDays: 0, weekCount: 0 }, care: [], identities: [], upcoming: [], localActivityAsked: true, lastNight: { state: "none" as const }, milestonePulse: [], todayCapacity: { availableMinutes: 0, committedMinutes: 0 }, flywheel: [], identityFlows: []
   }} />);
 
   test("names what the reading was derived from instead of calling everything a self-report", () => {
@@ -113,7 +113,7 @@ describe("last night's expansion", () => {
   const withLastNight = (lastNight: DashboardData["lastNight"]) => renderToStaticMarkup(<DashboardView data={{
     principalId: "test-owner", workspaceId: "test-workspace", nowLabel: "周一 · 09:00", nowIso: "2026-09-14T14:00:00.000Z", timeZone: "America/Chicago", clockPinned: true, dateLabel: "14", monthLabel: "SEP · 2026",
     capacity: { level: "uncalibrated", observationCount: 0, basis: [], blockers: [] },
-    progress: { streakDays: 0, weekCount: 0 }, care: [], identities: [], upcoming: [], localActivityAsked: true, lastNight, milestonePulse: [], todayCapacity: { availableMinutes: 0, committedMinutes: 0 }, flywheel: []
+    progress: { streakDays: 0, weekCount: 0 }, care: [], identities: [], upcoming: [], localActivityAsked: true, lastNight, milestonePulse: [], todayCapacity: { availableMinutes: 0, committedMinutes: 0 }, flywheel: [], identityFlows: []
   }} />);
 
   test("a night that did not run says so with its reason, instead of showing older output as new", () => {
