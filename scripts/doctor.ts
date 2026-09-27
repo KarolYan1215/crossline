@@ -28,9 +28,14 @@ const orphans = (label: string, sql: string): void => {
   for (const row of rows) findings.push(`${label}: ${row.id} → 找不到 ${row.target}`);
 };
 
+// An empty milestone_id is a deliberate, valid state — manual creation lets a routine work order skip
+// binding to any milestone at all (`evidenceRequiredFor` treats it the same way: `Boolean("")` is
+// false). Flagging it here read as "找不到 " with a blank target, a false positive this walkthrough's
+// first-ever unbound manual work order actually tripped.
 orphans("work_order 指向不存在的里程碑",
   `SELECT w.id AS id, w.milestone_id AS target FROM work_orders w
-   WHERE NOT EXISTS (SELECT 1 FROM milestones m WHERE m.id = w.milestone_id AND m.workspace_id = w.workspace_id)`);
+   WHERE w.milestone_id != ''
+     AND NOT EXISTS (SELECT 1 FROM milestones m WHERE m.id = w.milestone_id AND m.workspace_id = w.workspace_id)`);
 orphans("execution 指向不存在的作业",
   `SELECT e.id AS id, e.work_order_id AS target FROM executions e
    WHERE NOT EXISTS (SELECT 1 FROM work_orders w WHERE w.id = e.work_order_id AND w.workspace_id = e.workspace_id)`);
