@@ -36,13 +36,32 @@ export default withSerwist({
   // exactly the boundary these headers exist to harden.
   async headers() {
     if (deploymentMode === "local") return [];
+    // `default-src 'self'` alone also blocks the inline bootstrap scripts/styles Next.js itself injects
+    // into every page for hydration — found by actually logging in under `private` mode rather than only
+    // checking the header was present: React never hydrated (`Minified React error #412`), so the login
+    // form's `onSubmit` handler never attached and the browser fell back to a native GET submission,
+    // putting the password in the URL's query string in plain text. A per-request nonce is the strict
+    // fix, but it requires every route to render dynamically (`docs: Content Security Policy` guide),
+    // which would break `/offline`'s whole reason for existing — that page is precached by the service
+    // worker specifically so it works with no live request to render it. This app has no user-generated
+    // HTML and embeds no third-party script or style origin, so the actual protection this CSP buys is
+    // `'self'` blocking any injected content from ever loading off-origin; explicitly allowing inline
+    // execution for the app's own first-party scripts/styles does not give that up.
     return [{
       source: "/:path*",
       headers: [
         { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains" },
-        // `'self'` covers the tailnet origin itself; nothing here embeds third-party scripts/styles, so
-        // there is no allowlist to maintain as the app grows.
-        { key: "Content-Security-Policy", value: "default-src 'self'; frame-ancestors 'none'" },
+        { key: "Content-Security-Policy", value: [
+          "default-src 'self'",
+          "script-src 'self' 'unsafe-inline'",
+          "style-src 'self' 'unsafe-inline'",
+          "img-src 'self' blob: data:",
+          "worker-src 'self'",
+          "object-src 'none'",
+          "base-uri 'self'",
+          "form-action 'self'",
+          "frame-ancestors 'none'"
+        ].join("; ") },
         { key: "X-Content-Type-Options", value: "nosniff" },
         { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
         { key: "X-Frame-Options", value: "DENY" }

@@ -23,6 +23,15 @@ function googleFromEnv(): GoogleConfig | undefined {
 }
 
 /**
+ * What `.env.example` already promises ("leaving them blank simply hides the 使用 Google 登录 button")
+ * but `login-form.tsx` never actually checked — the button rendered unconditionally and clicking it with
+ * no provider configured on the server just failed with no useful message.
+ */
+export function isGoogleAuthConfigured(): boolean {
+  return Boolean(googleFromEnv());
+}
+
+/**
  * Shared by `getAuth()` (the request path) and `instrumentation.ts` (the one-time schema migration at
  * server start) so the two never resolve a different `authDbPath` or plugin set from the same env.
  * Returns `undefined` rather than throwing when `BETTER_AUTH_SECRET` is unset — `next build` imports
