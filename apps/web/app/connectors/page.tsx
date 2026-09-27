@@ -28,6 +28,12 @@ export default async function ConnectorsPage() {
     description="工作日历一行是观测到的真实状态；其余各行是声明的目标，尚未配置凭据，也没有跑过任何探测。">
     <section className="status-grid">
       <article className="status-card">
+        <span className="status-badge">设置</span>
+        <h2>作息与本机活动</h2>
+        <p>时区、可用时间、精力时段、本机活动采集授权都在设置页统一管理。</p>
+        <a href="/settings">前往设置 →</a>
+      </article>
+      <article className="status-card">
         <span className="status-badge">一次性流程</span>
         <h2>入职访谈</h2>
         <p>几个问题，AI 提出可能的里程碑草案，供你批准。</p>

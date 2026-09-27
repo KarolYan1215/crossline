@@ -141,6 +141,8 @@ input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-vis
 .capture-form label{flex:1 1 220px;min-width:0}
 .capture-form input{width:100%;min-height:38px;border-right-width:0}
 .capture-form>small{flex-basis:100%;margin-top:6px}
+.settings-row{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:10px 0;border-bottom:1px solid var(--mist)}
+.settings-row-actions{display:flex;gap:8px}
 .onboarding-form{display:grid;gap:16px;max-width:640px}
 .onboarding-form label{display:grid;gap:6px}
 .onboarding-form label>span{font-family:var(--f-mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--graphite)}
