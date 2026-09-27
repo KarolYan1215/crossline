@@ -56,6 +56,11 @@ export default withSerwist({
           "script-src 'self' 'unsafe-inline'",
           "style-src 'self' 'unsafe-inline'",
           "img-src 'self' blob: data:",
+          // FullCalendar (the Plan A-lens and the Workbench timeline view) ships its own icon font as a
+          // `data:` URI. With no `font-src` at all it fell back to `default-src 'self'`, which blocks
+          // `data:` — found live, walking the Workbench timeline view on a phone-width viewport: the
+          // prev/next toolbar buttons rendered as empty glyph boxes instead of arrows.
+          "font-src 'self' data:",
           "worker-src 'self'",
           "object-src 'none'",
           "base-uri 'self'",
