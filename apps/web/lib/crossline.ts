@@ -1070,7 +1070,7 @@ const toAction = (ctx: AccessContext, order: ActionableOrder | undefined, reason
   inputsReady: order.state === "ready_for_human" || order.state === "active"
 }) : undefined;
 
-export function loadDashboard(ctx: AccessContext): DashboardData {
+export async function loadDashboard(ctx: AccessContext): Promise<DashboardData> {
   ensureSeeded(ctx);
   const store = getStore();
   const orders = store.listWorkOrders(ctx.workspaceId);
@@ -1104,12 +1104,21 @@ export function loadDashboard(ctx: AccessContext): DashboardData {
   const progress = acceptanceProgress([...acceptedAt.values()], timeZone, now);
 
   // Today's own capacity read: the weekly pattern for today only, not the calendar-adjusted multi-week
-  // forecast Plan already owns — that one is async (`scheduledBlocks`) and this page stays sync.
+  // forecast Plan already owns.
   const today = planToday(ctx, now);
   const clockMinutes = (clock: string) => { const [h, m] = clock.split(":"); return Number(h) * 60 + Number(m); };
   const availableMinutes = availableSlots(readAvailability(ctx), [today], [])
     .reduce((sum, slot) => sum + (clockMinutes(slot.end) - clockMinutes(slot.start)), 0);
   const committedMinutes = active.reduce((sum, order) => sum + resolvedEstimate(ctx, order).p50Minutes, 0);
+
+  // Reuses the same Plan-page scheduling read (`loadCurrentPlan` → `scheduledBlocks`) so Today's line and
+  // the B lens agree on what "14:00–14:40" means instead of Today inventing a second notion of "when".
+  // This is what makes `loadDashboard` async now — it used to stay sync specifically to avoid this call.
+  const plan = await loadCurrentPlan(ctx);
+  const blockByWorkOrderToday = new Map(plan.blocks
+    .filter((block) => (block.day ?? today) === today && block.id.startsWith("scheduled:"))
+    .map((block) => [block.id.split(":")[1]!, block]));
+  const milestoneTitleById = new Map(milestones.map((milestone) => [milestone.id, milestone.title]));
 
   // Cross-identity relations touching a milestone behind today's actionable work — the plain-English
   // "doing A moves B forward" that the star map only ever shows as an edge and a one-word kind label.
@@ -1215,20 +1224,32 @@ export function loadDashboard(ctx: AccessContext): DashboardData {
     // come back as though the system were still working on something the person had thrown away.
     upcoming: [
       ...orders.filter((order) => order.state === "awaiting_plan_approval").map((order) => ({
-        id: order.id, title: order.intent, identityId: order.identityId, startsAt: "待你批准 · Approvals"
+        id: order.id, title: order.intent, identityId: order.identityId, status: "待你批准 · Approvals",
+        ...(order.milestoneId && milestoneTitleById.has(order.milestoneId)
+          ? { milestoneTitle: milestoneTitleById.get(order.milestoneId)! } : {})
       })),
-      ...active.map((order) => ({
-        id: order.id, title: order.intent, identityId: order.identityId,
-        startsAt: order.state === "approved" ? "已批准 · 等待材料"
+      // A scheduled block's real `HH:mm–HH:mm` beats a duration guess whenever the planner actually
+      // placed this order today; when it did not (dependency blocker, no capacity left, pushed to a
+      // later day), `time` stays unset and the status text says so explicitly instead of a vague "待排程".
+      ...active.map((order) => {
+        const block = blockByWorkOrderToday.get(order.id);
+        const status = order.state === "approved" ? "已批准 · 等待材料"
           : order.state === "preparing" ? "材料准备中"
           : order.state === "active" ? "执行中"
-          : `${resolvedEstimate(ctx, order).p50Minutes} 分钟 · 待排程`
-      })),
+          : block ? `预计 ${resolvedEstimate(ctx, order).p50Minutes} 分钟`
+          : `预计 ${resolvedEstimate(ctx, order).p50Minutes} 分钟 · 规划器未排入今天`;
+        return {
+          id: order.id, title: order.intent, identityId: order.identityId, status,
+          ...(block ? { time: `${block.start}–${block.end}` } : {}),
+          ...(order.milestoneId && milestoneTitleById.has(order.milestoneId)
+            ? { milestoneTitle: milestoneTitleById.get(order.milestoneId)! } : {})
+        };
+      }),
       ...store.listCaptures(ctx.workspaceId)
         .filter((item) => item.state === "blocked" || item.state === "captured" || item.state === "analyzing")
         .map((item) => ({
           id: item.id, title: item.title, identityId: "unclassified",
-          startsAt: item.state === "captured" ? "已保存 · 未分类 / 未估时 · Workbench 分析"
+          status: item.state === "captured" ? "已保存 · 未分类 / 未估时 · Workbench 分析"
             : item.state === "blocked" ? "分析阻塞 · 可人工处理" : "正在分析"
         }))
     ].slice(0, 6),

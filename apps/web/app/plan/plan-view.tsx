@@ -35,7 +35,12 @@ const tabs = [["B", "双轨时间轴"], ["C", "计划差异"], ["A", "日 / 周"
 const statusLabel = { draft: "草案", approved: "已批准", superseded: "已被替代", pending: "待处理", excluded: "已排除" } as const;
 const changeLabel = { add: "新增", move: "移动", remove: "移除", conflict: "冲突" } as const;
 
-export function PlanView({ plan, today }: { plan: PlanVersionData; today: string }) {
+export function PlanView({ plan, today, workOrderMilestones = {} }: { plan: PlanVersionData; today: string; workOrderMilestones?: Record<string, string> }) {
+  // Only a `scheduled:<workOrderId>` (optionally `:<index>` for a repeated occurrence) block traces back
+  // to one work order; a real calendar import or a seeded example carries no such id, so it gets no
+  // milestone tag rather than a wrong one.
+  const milestoneOf = (block: ScheduleBlockData) => block.id.startsWith("scheduled:")
+    ? workOrderMilestones[block.id.split(":")[1]!] : undefined;
   const [view, setView] = useState<"B" | "C" | "A">("B");
   const [approvalState, setApprovalState] = useState<"idle" | "saving" | "error">("idle");
   const [syncState, setSyncState] = useState<"idle" | "syncing" | "done" | "error">("idle");
@@ -90,6 +95,7 @@ export function PlanView({ plan, today }: { plan: PlanVersionData; today: string
       <time>{block.start}—{block.end}</time><strong>{block.title}</strong>{/* Not 「待写回」: calendar write-back is switched off by design (Gate 3), so nothing is queued to
           be written anywhere. A label promising a pending external write would be describing a feature
           this build deliberately does not have. */}
+      {milestoneOf(block) && <span className="card-milestone">→ {milestoneOf(block)}</span>}
       <small>{block.source} {block.id.startsWith("scheduled:") ? "· 仅本地" : block.readOnly ? "· 只读"
         : plan.status === "approved" ? "· 已批准 · 仅本地" : "· 草案 · 仅本地"}</small>
     </article>)}</div>
@@ -151,6 +157,6 @@ export function PlanView({ plan, today }: { plan: PlanVersionData; today: string
         <small>批准后才允许写入个人 Crossline 日历 · <a href="/approvals">打开全系统审批入口</a></small>
       </footer>
     </section>}
-    {view === "A" && <div id="plan-panel-A" role="tabpanel" aria-labelledby="plan-tab-A"><CalendarDetail blocks={plan.blocks} today={today} /></div>}
+    {view === "A" && <div id="plan-panel-A" role="tabpanel" aria-labelledby="plan-tab-A"><CalendarDetail blocks={plan.blocks} today={today} workOrderMilestones={workOrderMilestones} /></div>}
   </div>;
 }

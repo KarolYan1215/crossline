@@ -49,9 +49,13 @@
 
 *{box-sizing:border-box}
 html{scroll-behavior:smooth}
+/* Fluid scale, not a handful of breakpoint jumps: tuned so a 1920×1080 window (this app's actual daily
+   driver) lands close to the old fixed 15.5px/16px, a narrower laptop window settles at the floor, and a
+   wide/ultrawide monitor keeps growing instead of hitting a wall at some arbitrary cutoff. `vw` alone
+   would keep growing forever on a big enough panel, so every fluid size here is clamp()ed top and bottom. */
 body{
   margin:0;background:var(--paper);color:var(--ink);
-  font-family:var(--f-sans);font-size:15.5px;line-height:1.42;
+  font-family:var(--f-sans);font-size:clamp(15px,0.5vw + 6.4px,18px);line-height:1.44;
   -webkit-font-smoothing:antialiased;
   background-image:
     repeating-linear-gradient(to right,var(--grid) 0 1px,transparent 1px 28px),
@@ -62,12 +66,15 @@ button{font:inherit;color:inherit;background:none;border:none;cursor:pointer;pad
 input,select,textarea{font:inherit;color:inherit;background:var(--paper);border:1px solid var(--mist);border-radius:0;padding:6px 8px}
 input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-visible,a:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--ink);outline-offset:1px}
 .mono{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
-.micro,.mono-label,.eyebrow{font-family:var(--f-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--graphite)}
+.micro,.mono-label,.eyebrow{font-family:var(--f-mono);font-size:clamp(10px,0.12vw + 9.7px,12px);letter-spacing:.12em;text-transform:uppercase;color:var(--graphite)}
 .muted{color:var(--graphite)}
 .sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+/* The one place that names what the milestone tag under a task title looks like everywhere it appears —
+   Today's cards, Workbench, and both Plan lenses all reuse this one class instead of four near-duplicates. */
+.card-milestone{margin:2px 0 0;font-size:.85em;color:var(--graphite);line-height:1.4}
 
 /* ── shell ─────────────────────────────────── */
-.page{width:min(1440px,100%);min-height:100vh;margin:0 auto;padding-inline:16px;padding-block:0 28px}
+.page{width:min(94vw,1900px);min-height:100vh;margin:0 auto;padding-inline:16px;padding-block:0 28px}
 .running-head{
   position:sticky;top:0;z-index:40;display:flex;align-items:center;gap:12px;
   padding:5px 0 4px;background:var(--paper);border-bottom:1.5px solid var(--ink);
@@ -141,6 +148,12 @@ input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-vis
 .capture-form label{flex:1 1 220px;min-width:0}
 .capture-form input{width:100%;min-height:34px;border-right-width:0}
 .capture-form>small{flex-basis:100%;margin-top:5px}
+/* The drop target and the file input share one label so a click anywhere in the dashed box still opens
+   the native file picker — dropping or pasting just gives it a second way to fill the same input. */
+.attachment-drop{flex-basis:100%;margin-top:6px;padding:8px 10px;border:1px dashed var(--mist);cursor:pointer;display:grid;gap:4px}
+.attachment-drop.dragging{border-color:var(--ink);background:var(--chalk)}
+.attachment-drop input{border:none;padding:0;min-height:auto;font-size:11px;color:var(--graphite)}
+.attachment-drop small{font-size:10.5px;color:var(--graphite);word-break:break-word}
 .settings-row{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:8px 0;border-bottom:1px solid var(--mist)}
 .settings-row-actions{display:flex;gap:8px}
 .onboarding-form{display:grid;gap:12px;max-width:640px}
@@ -181,7 +194,11 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .lower-grid{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:1px;background:var(--mist)}
 .timeline-list,.milestone-pulse{background:var(--paper)}
 .timeline-list>header,.milestone-pulse>header{padding:10px 14px;border-bottom:1px solid var(--ink)}
-.timeline-list article{display:grid;grid-template-columns:118px 14px 1fr;gap:9px;align-items:center;padding:8px 14px;border-bottom:1px solid var(--mist)}
+.timeline-list article{display:grid;grid-template-columns:88px 14px 1fr;gap:9px;align-items:center;padding:8px 14px;border-bottom:1px solid var(--mist)}
+/* A scheduler-placed clock time reads as a fact (ink, tabular); a status string standing in for one
+   (「已批准 · 等待材料」, or the em dash when nothing was placed today) reads as provisional. */
+.timeline-list time.time-precise{font-family:var(--f-mono);font-variant-numeric:tabular-nums;font-size:12px;font-weight:700;color:var(--ink);letter-spacing:.02em}
+.timeline-list time.time-vague{font-family:var(--f-mono);font-size:11px;color:var(--shade)}
 .timeline-list time{font-family:var(--f-mono);font-size:10px;letter-spacing:.05em;color:var(--graphite)}
 /* Shape-coded identity marker on the Today timeline: a diamond, a circle, a bar — colour is only ever
    secondary, so the row stays readable in monochrome and for anyone who cannot separate the hues. */
@@ -244,6 +261,7 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .lane-track article.readonly{border-left:3px solid var(--ink)}
 .lane-track time{font-family:var(--f-mono);font-size:10px;letter-spacing:.05em;color:var(--graphite)}
 .lane-track strong{font-size:13.5px;line-height:1.4;font-weight:400;word-break:break-word}
+.lane-track .card-milestone{grid-column:2;font-size:11px;margin:0}
 .lane-track small{grid-column:2;font-family:var(--f-mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--shade)}
 .change-ledger{display:grid;border-top:1.5px solid var(--ink)}
 .change-ledger header{display:grid;grid-template-columns:96px 1fr 200px;gap:10px;padding:7px 0;border-bottom:1px solid var(--ink);font-family:var(--f-mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--graphite)}
@@ -422,9 +440,15 @@ button:disabled{opacity:.4;cursor:not-allowed}
   .measure-fields{flex:1 1 100%}
 }
 @media (min-width:1440px){
-  .page{width:min(1680px,100%)}
   .today-grid{grid-template-columns:minmax(0,1.7fr) minmax(300px,1fr)}
   .lower-grid{grid-template-columns:minmax(0,1.4fr) minmax(0,1fr)}
+}
+/* Ultrawide/4K: `.page`'s own clamp keeps growing past 1900px, but a single centred column of already-
+   generous line lengths starts feeling empty rather than dense, so the grids pick up one more ratio step
+   instead of just stretching their existing columns wider. */
+@media (min-width:2200px){
+  .today-grid{grid-template-columns:minmax(0,1.9fr) minmax(320px,1fr)}
+  .lower-grid{grid-template-columns:minmax(0,1.6fr) minmax(0,1fr)}
 }
 @media (max-width:680px){
   .page{padding-inline:14px}
@@ -479,6 +503,7 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .calendar-detail .fc-event{border-radius:0;border:1px solid var(--ink);background:var(--ink);color:var(--paper);box-shadow:none;padding:1px 2px}
 .calendar-detail .fc-event .fc-event-time{font-family:var(--f-mono);font-size:9px;letter-spacing:.04em}
 .calendar-detail .fc-event .fc-event-title{font-size:11px;line-height:1.35}
+.calendar-detail .fc-event .fc-event-milestone{font-size:9px;line-height:1.3;opacity:.8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .calendar-detail .fc-event.calendar-example{background:var(--paper);color:var(--ink);border-style:dashed;border-color:var(--shade)}
 .calendar-detail .fc-event.calendar-suggestion{background:var(--paper);color:var(--ink);border-style:dashed;border-color:var(--shade)}
 .calendar-detail .fc-event.calendar-ai{background:var(--paper);color:var(--ink);border-left-width:4px}

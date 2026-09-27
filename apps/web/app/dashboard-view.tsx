@@ -54,7 +54,10 @@ export type DashboardData = {
   /** Every real, LLM-judged milestone relation crossing two identities, aggregated pairwise — the
    * cross-identity edges behind the homepage's flywheel diagram, not limited to today's active work. */
   identityFlows: Array<{ from: string; to: string; count: number; pending: boolean; kindLabel: string }>;
-  upcoming: Array<{ id: string; title: string; startsAt: string; identityId: string }>;
+  /** `time` is the scheduler's real `HH:mm–HH:mm` for today, present only when it actually placed this
+   * order; absent means genuinely not yet scheduled, which `status` then says in words rather than
+   * leaving a blank clock reading that looks like a bug. */
+  upcoming: Array<{ id: string; title: string; status: string; identityId: string; time?: string; milestoneTitle?: string }>;
   localActivityAsked: boolean;
   lastNight:
     | { state: "none" }
@@ -89,7 +92,12 @@ export function DashboardView({ data }: { data: DashboardData }) {
   const identityLabel = (id: string) => data.identities.find((item) => item.id === id)?.label ?? (id === "capacity" ? "容量策略" : id);
   const action = (item: DashboardAction | undefined, label: string) => <article className="alt-action">
     <header><span>{label}</span><ArrowUpRight size={13} aria-hidden="true" /></header>
-    {item ? <><h3>{item.title}</h3><p>{item.reason}</p><small>{identityLabel(item.identityId)} · {estimateLabel(item.estimate)}</small></> : <p>暂无可执行项</p>}
+    {item ? <><h3>{item.title}</h3>
+      {/* The milestone this card feeds sits on the card itself — a separate MILESTONE PULSE list further
+          down used to be the only place that answered "what is this for", which meant leaving the card
+          to find out. */}
+      <p className="card-milestone">→ {item.milestone}</p>
+      <p>{item.reason}</p><small>{identityLabel(item.identityId)} · {estimateLabel(item.estimate)}</small></> : <p>暂无可执行项</p>}
   </article>;
 
   return <main className="page"><OfflineReplay workspaceId={data.workspaceId} />
@@ -213,7 +221,15 @@ export function DashboardView({ data }: { data: DashboardData }) {
     <section className="lower-grid">
       <div className="timeline-list">
         <header><span>02 / TODAY'S LINE</span><a href="/plan">OPEN PLAN →</a></header>
-        {data.upcoming.map((item) => <article key={item.id}><time>{item.startsAt}</time><span className={`line-symbol ${item.identityId}`} /><div><strong>{item.title}</strong><small>{identityLabel(item.identityId)}</small></div></article>)}
+        {data.upcoming.map((item) => <article key={item.id}>
+          <time className={item.time ? "time-precise" : "time-vague"}>{item.time ?? "—"}</time>
+          <span className={`line-symbol ${item.identityId}`} />
+          <div>
+            <strong>{item.title}</strong>
+            {item.milestoneTitle && <span className="card-milestone">→ {item.milestoneTitle}</span>}
+            <small>{identityLabel(item.identityId)} · {item.status}</small>
+          </div>
+        </article>)}
       </div>
       <div className="milestone-pulse">
         <header><span>03 / MILESTONE PULSE</span><a href="/milestones">OPEN MAP →</a></header>

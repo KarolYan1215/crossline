@@ -70,9 +70,9 @@ test("the seeded ledger still passes the analysis trust check under the new pack
   expect(validateAnalysisContext(context).approvedMilestones.length).toBeGreaterThan(0);
 });
 
-test("Today renders under the new packs, and the capacity pack stays out of the identity list", () => {
+test("Today renders under the new packs, and the capacity pack stays out of the identity list", async () => {
   globalThis.crosslineStore = new CrosslineStore(":memory:");
-  const dashboard = loadDashboard(TEST_CTX);
+  const dashboard = await loadDashboard(TEST_CTX);
   // Keyed on kind, not on the literal id "health": a differently named capacity pack must still be
   // treated as a constraint rather than a fourth identity competing for the same list.
   expect(dashboard.identities.map((identity) => identity.id).sort()).toEqual(["band", "teaching", "woodwork"]);

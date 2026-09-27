@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent } from "react";
 import {
   createCommand, deviceId, enqueue, listConflicts, listDeadLetters, nextSequence, rememberWorkspace,
   replayQueue, type OfflineCommand
@@ -54,8 +54,48 @@ export function OfflineReplay({ workspaceId }: { workspaceId: string }) {
   </aside>;
 }
 
+const ACCEPTED_ATTACHMENT_TYPES = "image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain";
+
 export function OfflineCaptureForm({ ownerId, workspaceId }: { ownerId: string; workspaceId: string }) {
   const [status, setStatus] = useState("");
+  const [fileNames, setFileNames] = useState<string[]>([]);
+  const [dragOver, setDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // The native input stays the single source of truth for what actually uploads (submit() reads it via
+  // `new FormData(form)` unchanged) — drag and paste just add to its FileList through a DataTransfer
+  // instead of duplicating file state next to it, which is what browsers support assigning to
+  // `input.files` with.
+  const addFiles = (incoming: FileList | File[]) => {
+    const input = fileInputRef.current;
+    if (!input) return;
+    const accepted = ACCEPTED_ATTACHMENT_TYPES.split(",");
+    const existing = [...(input.files ?? [])];
+    const merged = new DataTransfer();
+    const seen = new Set(existing.map((file) => `${file.name}:${file.size}:${file.lastModified}`));
+    for (const file of [...existing, ...incoming]) {
+      if (!accepted.includes(file.type)) continue;
+      const key = `${file.name}:${file.size}:${file.lastModified}`;
+      if (seen.has(key) && !existing.includes(file)) continue;
+      seen.add(key);
+      merged.items.add(file);
+    }
+    input.files = merged.files;
+    setFileNames([...merged.files].map((file) => file.name));
+  };
+  const onDrop = (event: DragEvent<HTMLLabelElement>) => {
+    event.preventDefault();
+    setDragOver(false);
+    if (event.dataTransfer.files.length) addFiles(event.dataTransfer.files);
+  };
+  const onPaste = (event: ClipboardEvent<HTMLFormElement>) => {
+    // A pasted screenshot arrives as a clipboard item, not `clipboardData.files` (that only carries an
+    // actual copied file) — both paths are checked so Ctrl+V works for either source.
+    const pasted = [...event.clipboardData.files,
+      ...[...event.clipboardData.items].flatMap((item) => { const file = item.kind === "file" ? item.getAsFile() : null; return file ? [file] : []; })];
+    if (pasted.length) addFiles(pasted);
+  };
+
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const form = event.currentTarget;
@@ -69,6 +109,7 @@ export function OfflineCaptureForm({ ownerId, workspaceId }: { ownerId: string; 
       try {
         await enqueue(workspaceId, command);
         form.reset();
+        setFileNames([]);
         // The offline queue only carries the JSON command — a queued capture has no server-side row
         // yet for an attachment to belong to, so files picked while offline are dropped rather than
         // silently claimed as saved.
@@ -100,11 +141,17 @@ export function OfflineCaptureForm({ ownerId, workspaceId }: { ownerId: string; 
       await save("网络不可用，已保存并等待同步");
     }
   };
-  return <form onSubmit={submit} className="capture-form">
+  return <form onSubmit={submit} onPaste={onPaste} className="capture-form">
     <label><span className="sr-only">任务或想法</span><input name="title" required maxLength={240} placeholder="写下一项任务、想法，或粘贴一个链接…" /></label>
     <label><span className="sr-only">补充上下文</span><input name="context" maxLength={500} placeholder="可选：把需要的材料直接粘进来（只写材料在哪，AI 是拿不到的）" /></label>
-    <label><span className="sr-only">附件</span><input name="attachments" type="file" multiple
-      accept="image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain" /></label>
+    <label className={`attachment-drop${dragOver ? " dragging" : ""}`}
+      onDragOver={(event) => { event.preventDefault(); setDragOver(true); }}
+      onDragLeave={() => setDragOver(false)} onDrop={onDrop}>
+      <span className="sr-only">附件</span>
+      <input ref={fileInputRef} name="attachments" type="file" multiple accept={ACCEPTED_ATTACHMENT_TYPES}
+        onChange={(event) => setFileNames([...(event.currentTarget.files ?? [])].map((file) => file.name))} />
+      <small>{fileNames.length ? `已选 ${fileNames.length} 个：${fileNames.join("、")}` : "拖文件到这里，或 Ctrl+V 粘贴截图/文件"}</small>
+    </label>
     <button className="secondary-button" type="submit">CAPTURE ↗</button>
     {status && <small className="muted" role="status">{status}</small>}
   </form>;

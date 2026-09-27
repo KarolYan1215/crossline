@@ -333,7 +333,15 @@ export async function startCodexSupervisor(options: {
   analyzeCapture?: (client: CodexRpcBoundary, id: string, signal: AbortSignal, workspaceId: string) => Promise<unknown>;
   proposeMilestones?: (client: CodexRpcBoundary, request: string, signal: AbortSignal, workspaceId: string) => Promise<unknown>;
   continueMilestoneConversation?: (client: CodexRpcBoundary, threadId: string, message: string, signal: AbortSignal, workspaceId: string) => Promise<unknown>;
-  proposeOnboarding?: (client: CodexRpcBoundary, answers: Array<{ question: string; answer: string }>, signal: AbortSignal, workspaceId: string) => Promise<unknown>;
+  proposeOnboarding?: (client: CodexRpcBoundary, answers: Array<{ question: string; answer: string }>,
+    sources: Array<{ label: string; excerpt: string }>, signal: AbortSignal, workspaceId: string) => Promise<unknown>;
+  continueOnboardingConversation?: (client: CodexRpcBoundary, threadId: string, message: string,
+    focusIdentityId: string | null, signal: AbortSignal, workspaceId: string) => Promise<unknown>;
+  /** A plain local filesystem read (the person's own Codex CLI session history) — no Codex app-server
+   * call, so it takes no `client`/`signal`; still routed through this same capability-checked surface
+   * rather than a new one, and still opt-in per call (the person clicks it each time onboarding wants it,
+   * see `codex-history-consent.tsx` — there is no standing "always allow" setting for this). */
+  scanCodexHistory?: () => Promise<unknown>;
   backplanGoal?: (client: CodexRpcBoundary, milestoneId: string, signal: AbortSignal, workspaceId: string) => Promise<unknown>;
   // `workspaceId` is the real caller's, taken from its own verified capability token — never the
   // worker's own idea of "the" workspace, which is what let every one of these silently operate on a
@@ -384,6 +392,7 @@ export async function startCodexSupervisor(options: {
   let proposing: AbortController | undefined;
   let conversing: AbortController | undefined;
   let onboarding: AbortController | undefined;
+  let onboardingConversing: AbortController | undefined;
   // Material preparation also runs on the tick loop; this set is what stops a person's retry click and
   // the tick that lands two seconds later from preparing the same order twice.
   const preparing = new Set<string>();
@@ -684,10 +693,47 @@ export async function startCodexSupervisor(options: {
         const answers = Array.isArray(body?.answers) ? body.answers
           .filter((item: unknown): item is { question: unknown; answer: unknown } => typeof item === "object" && item !== null)
           .map((item: { question: unknown; answer: unknown }) => ({ question: String(item.question ?? ""), answer: String(item.answer ?? "") })) : [];
+        const sources = Array.isArray(body?.sources) ? body.sources
+          .filter((item: unknown): item is { label: unknown; excerpt: unknown } => typeof item === "object" && item !== null)
+          .map((item: { label: unknown; excerpt: unknown }) => ({ label: String(item.label ?? ""), excerpt: String(item.excerpt ?? "") })) : [];
         const controller = new AbortController();
         onboarding = controller;
-        try { sendJson(response, 200, await options.proposeOnboarding(sidecar.client, answers, controller.signal, callerWorkspaceId)); }
+        try { sendJson(response, 200, await options.proposeOnboarding(sidecar.client, answers, sources, controller.signal, callerWorkspaceId)); }
         finally { if (onboarding === controller) onboarding = undefined; }
+        return;
+      }
+      if (request.method === "POST" && pathname === "/v1/onboarding/propose/continue" && options.continueOnboardingConversation) {
+        if (request.headers.origin || !request.headers["content-type"]?.startsWith("application/json")) {
+          sendJson(response, 403, { blocker: { code: "ONBOARDING_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
+          return;
+        }
+        if (runtimeBlocker) { sendJson(response, 503, { blocker: runtimeBlocker }); return; }
+        if (onboardingConversing) {
+          sendJson(response, 409, { blocker: { code: "ONBOARDING_ALREADY_RUNNING", message: "已有一次入职对话在运行" } });
+          return;
+        }
+        const body = await readJsonBody(request);
+        const threadId = String(body?.threadId ?? "");
+        const message = String(body?.message ?? "");
+        const focusIdentityId = typeof body?.focusIdentityId === "string" ? body.focusIdentityId : null;
+        if (!/^[a-zA-Z0-9_-]{1,128}$/.test(threadId) || !message.trim()) {
+          sendJson(response, 400, { blocker: { code: "ONBOARDING_CONVERSATION_INVALID", message: "缺少 threadId 或消息内容" } });
+          return;
+        }
+        const controller = new AbortController();
+        onboardingConversing = controller;
+        try {
+          sendJson(response, 200, await options.continueOnboardingConversation(sidecar.client, threadId, message, focusIdentityId, controller.signal, callerWorkspaceId));
+        } finally { if (onboardingConversing === controller) onboardingConversing = undefined; }
+        return;
+      }
+      if (request.method === "POST" && pathname === "/v1/onboarding/codex-history/scan" && options.scanCodexHistory) {
+        if (request.headers.origin) {
+          sendJson(response, 403, { blocker: { code: "ONBOARDING_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
+          return;
+        }
+        try { sendJson(response, 200, await options.scanCodexHistory()); }
+        catch { sendJson(response, 500, { blocker: { code: "CODEX_HISTORY_SCAN_FAILED", message: "无法读取本地 Codex CLI 历史记录" } }); }
         return;
       }
       if (request.method === "POST" && pathname === "/v1/goals/backplan" && options.backplanGoal) {

@@ -40,7 +40,7 @@ test("the seeded plan never claims a connector imported it", async () => {
   expect(JSON.stringify(plan.changes)).not.toContain("由 AI 准备完成");
 });
 
-test("an analysed work order appears on Today instead of vanishing from it", () => {
+test("an analysed work order appears on Today instead of vanishing from it", async () => {
   const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
   ensureSeeded(TEST_CTX);
   store.saveWorkOrder({
@@ -52,13 +52,13 @@ test("an analysed work order appears on Today instead of vanishing from it", () 
   });
   // Today used to read `tasks`, which analysis never writes — so a successful analysis removed the
   // item from the home page entirely.
-  const data = loadDashboard(TEST_CTX);
+  const data = await loadDashboard(TEST_CTX);
   const shown = [data.primary, data.lowEnergy, data.shortGap].filter(Boolean);
   expect(shown.some((action) => action!.id === "analysed")).toBe(true);
   expect(data.upcoming.some((item) => item.id === "analysed")).toBe(true);
 });
 
-test("an item whose human core was never described shows unknown energy, not a default", () => {
+test("an item whose human core was never described shows unknown energy, not a default", async () => {
   const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
   ensureSeeded(TEST_CTX);
   store.saveWorkOrder({
@@ -68,7 +68,7 @@ test("an item whose human core was never described shows unknown energy, not a d
     estimate: { p25Minutes: 5, p50Minutes: 6, p85Minutes: 7, source: "llm_prior", observationCount: 0, confidence: "low" },
     payload: { materialContract: [] }
   });
-  const primary = loadDashboard(TEST_CTX).primary!;
+  const primary = (await loadDashboard(TEST_CTX)).primary!;
   expect(primary.id).toBe("aaa-no-core");
   // "medium" would be a guess wearing the clothes of an observation.
   expect(primary.energy).toBeUndefined();

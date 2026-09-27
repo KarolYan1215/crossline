@@ -5,7 +5,9 @@ import interactionPlugin from "@fullcalendar/interaction";
 import timeGridPlugin from "@fullcalendar/timegrid";
 import type { ScheduleBlockData } from "./plan-view";
 
-export function CalendarDetail({ blocks, today }: { blocks: ScheduleBlockData[]; today: string }) {
+export function CalendarDetail({ blocks, today, workOrderMilestones = {} }: {
+  blocks: ScheduleBlockData[]; today: string; workOrderMilestones?: Record<string, string>;
+}) {
   return <div className="calendar-detail">
     <FullCalendar
       plugins={[timeGridPlugin, interactionPlugin]}
@@ -19,6 +21,9 @@ export function CalendarDetail({ blocks, today }: { blocks: ScheduleBlockData[];
       events={blocks.map((block) => ({
         id: block.id,
         title: block.title,
+        // Only a `scheduled:<workOrderId>` block traces back to one work order.
+        extendedProps: { milestoneTitle: block.id.startsWith("scheduled:")
+          ? workOrderMilestones[block.id.split(":")[1]!] : undefined },
         // Each block sits on its own day; an example block with no day follows the day being viewed.
         start: `${block.day ?? today}T${block.start}:00`,
         end: `${block.day ?? today}T${block.end}:00`,
@@ -31,6 +36,14 @@ export function CalendarDetail({ blocks, today }: { blocks: ScheduleBlockData[];
             : block.id.startsWith("scheduled:") ? "calendar-suggestion" : "calendar-example"
         ]
       }))}
+      eventContent={(arg) => {
+        const milestoneTitle = (arg.event.extendedProps as { milestoneTitle?: string }).milestoneTitle;
+        return <div className="fc-event-body">
+          <div className="fc-event-time">{arg.timeText}</div>
+          <div className="fc-event-title">{arg.event.title}</div>
+          {milestoneTitle && <div className="fc-event-milestone">→ {milestoneTitle}</div>}
+        </div>;
+      }}
     />
   </div>;
 }

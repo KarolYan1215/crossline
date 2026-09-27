@@ -13,7 +13,8 @@ import { createMilestoneConversation, createMilestoneProposer } from "./mileston
 import { createGoalBackplanner } from "./goal-backplanner";
 import { createPlanExplainer } from "./plan-explainer-runner";
 import { createWeeklyInsight } from "./weekly-insight-runner";
-import { createOnboardingProposer } from "./onboarding-runner";
+import { createOnboardingProposer, createOnboardingConversation } from "./onboarding-runner";
+import { scanPersonalCodexHistory } from "./codex-history";
 import { createGraphSync, type SyncOutcome } from "./graph-sync";
 import {
   buildSources, calendarLabel, listCatalogue, readSelection, saveSelection, seedNewAccounts, sourceKey
@@ -340,8 +341,11 @@ if (!capabilitySecret) {
       createMilestoneProposer(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client)(request, signal),
     continueMilestoneConversation: (_client, threadId, message, signal, workspaceId) =>
       createMilestoneConversation(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client)(threadId, message, signal),
-    proposeOnboarding: (_client, answers, signal, workspaceId) =>
-      createOnboardingProposer(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client)(answers, signal),
+    proposeOnboarding: (_client, answers, sources, signal, workspaceId) =>
+      createOnboardingProposer(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client)(answers, sources, signal),
+    continueOnboardingConversation: (_client, threadId, message, focusIdentityId, signal, workspaceId) =>
+      createOnboardingConversation(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client)(threadId, message, focusIdentityId, signal),
+    scanCodexHistory: () => scanPersonalCodexHistory(),
     backplanGoal: (_client, milestoneId, signal, workspaceId) =>
       createGoalBackplanner(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client)(milestoneId, signal),
     // The same preparer/gate the tick loop uses, exposed so a person's retry gets an answer now rather

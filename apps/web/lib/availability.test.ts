@@ -111,7 +111,7 @@ test("real calendar occupancy is excluded from suggested time", async () => {
   expect(blocks.every((block) => block.start >= "18:00")).toBe(true);
 });
 
-test("fresh L and H self-reports change Today while preserving the skipped priority", () => {
+test("fresh L and H self-reports change Today while preserving the skipped priority", async () => {
   vi.stubEnv("CROSSLINE_FIXED_NOW", "2026-09-18T15:00:00.000Z");
   const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
   saveSchedulePreferences(TEST_CTX, { timeZone: "America/Chicago", mode: "buffered", windows: ALWAYS,
@@ -121,10 +121,10 @@ test("fresh L and H self-reports change Today while preserving the skipped prior
     store.saveEnergyObservation({ id, ownerId: TEST_CTX.principalId, workspaceId: TEST_CTX.workspaceId,
       source: "self_report", level, confidence: "high", aggregate: {}, observedAt });
   report("low-now", "low", "2026-09-18T14:59:00.000Z");
-  const low = loadDashboard(TEST_CTX);
+  const low = await loadDashboard(TEST_CTX);
   expect(low.primary?.energy).toBe("low");
   report("high-now", "high", "2026-09-18T15:00:00.000Z");
-  expect(loadDashboard(TEST_CTX).primary?.energy).toBe("high");
+  expect((await loadDashboard(TEST_CTX)).primary?.energy).toBe("high");
 });
 
 test("fresh L and H self-reports reorder today's suggestion blocks", async () => {

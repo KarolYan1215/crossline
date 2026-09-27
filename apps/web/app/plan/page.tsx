@@ -16,6 +16,12 @@ export default async function PlanPage() {
   const forecast = loadGoalForecast(ctx);
   const milestones = getStore().listMilestones(ctx.workspaceId).filter((item) => item.status === "approved")
     .map((item) => ({ id: item.id, title: item.title }));
+  // B/A lens blocks carry a workOrderId (`scheduled:<id>`), not a milestoneId directly — this is the
+  // lookup that turns one into the milestone title shown on the block.
+  const milestoneTitleById = new Map(getStore().listMilestones(ctx.workspaceId).map((item) => [item.id, item.title]));
+  const workOrderMilestones = Object.fromEntries(getStore().listWorkOrders(ctx.workspaceId)
+    .filter((order) => order.milestoneId && milestoneTitleById.has(order.milestoneId))
+    .map((order) => [order.id, milestoneTitleById.get(order.milestoneId)!]));
   // Real saved preferences if there are any, otherwise the same sane defaults `loadCurrentPlan` already
   // previewed against — the editor's initial values must agree with what produced the preview on screen.
   const preferences = readSchedulePreferences(ctx);
@@ -63,7 +69,7 @@ export default async function PlanPage() {
         })}</ul>}
       </> : <p className="plan-sync-note">还没有 AI 解释；点击上面的按钮生成一次。</p>}
     </section>
-    <PlanView plan={plan} today={today} />
+    <PlanView plan={plan} today={today} workOrderMilestones={workOrderMilestones} />
     <section className="goal-forecast" aria-label="未来八周目标情景">
       <h2>未来 8 周 · 容量与目标情景</h2>
       <ForecastDelta forecast={forecast} />

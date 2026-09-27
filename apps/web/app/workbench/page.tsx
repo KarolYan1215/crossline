@@ -83,6 +83,11 @@ export default async function WorkbenchPage({ searchParams }: {
   const milestoneOptions = getStore().listMilestones(ctx.workspaceId)
     .filter((milestone) => milestone.status === "approved")
     .map((milestone) => ({ id: milestone.id, title: milestone.title, identityId: milestone.identityId }));
+  const milestoneTitleById = new Map(getStore().listMilestones(ctx.workspaceId)
+    .map((milestone) => [milestone.id, milestone.title]));
+  const workOrderMilestones = Object.fromEntries(all
+    .filter((order) => order.milestoneId && milestoneTitleById.has(order.milestoneId))
+    .map((order) => [order.id, milestoneTitleById.get(order.milestoneId)!]));
   // The timeline view reuses the Plan page's own scheduling read verbatim (`loadCurrentPlan` /
   // `CalendarDetail`) rather than a second, Workbench-owned notion of "when" — one real schedule, shown
   // from two places, is what keeps this from ever disagreeing with the Plan page.
@@ -122,6 +127,10 @@ export default async function WorkbenchPage({ searchParams }: {
       return <article id={`work-order-${run.id}`} key={run.id}>
         <header><span>{run.identityId.toUpperCase()} / {shortId(run.id)}</span><b><i className="gly" data-s={run.state} aria-hidden="true" />{stateLabel[run.state] ?? "未知状态"}</b></header>
         <h2>{run.intent}</h2>
+        {/* The milestone this work order serves, on the card itself — previously only visible by
+            cross-referencing Milestones or the PromoteForm's own dropdown. */}
+        {run.milestoneId && milestoneTitleById.has(run.milestoneId)
+          && <p className="card-milestone">→ {milestoneTitleById.get(run.milestoneId)}</p>}
         {(run.payload as { manualPromotion?: boolean }).manualPromotion
           && <p role="status">人工创建 · 未经 AI 分析</p>}
         <p>{estimate.p25Minutes}–{estimate.p85Minutes} 分钟 · {confidenceLabel[estimate.confidence]} · {riskLabel[run.riskTier]}</p>
@@ -165,7 +174,7 @@ export default async function WorkbenchPage({ searchParams }: {
       </article>;
     })}</section>
       </>}
-      timeline={<CalendarDetail blocks={plan.blocks} today={today} />}
+      timeline={<CalendarDetail blocks={plan.blocks} today={today} workOrderMilestones={workOrderMilestones} />}
     />
     {(discarded.length + discardedCaptures.length) > 0
       && <details className="work-order-drawer"><summary>已丢弃 {discarded.length + discardedCaptures.length} 条</summary>
