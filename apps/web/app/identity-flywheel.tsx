@@ -1,97 +1,75 @@
 import type { DashboardData } from "./dashboard-view";
 
 type Identity = DashboardData["identities"][number];
-type Flow = DashboardData["identityFlows"][number];
+type Node = DashboardData["flywheelStrip"]["nodes"][number];
+type Edge = DashboardData["flywheelStrip"]["edges"][number];
 
-const ROW_H = 46;
-const TOP_PAD = 10;
-const LABEL_W = 150;
-const BAR_W = 190;
-const BAR_X = LABEL_W;
-const ARC_X = BAR_X + BAR_W + 34;
-const WIDTH = ARC_X + 180;
+const CHIP_W = 200;
+const CHIP_H = 52;
+const GAP = 36;
+const ARC_BAND = 60;
+const TOP_PAD = 8;
 
 const truncate = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
 
-// Cubic bezier that starts and ends at the same x (the right edge of the bar lane) and bulges further
-// right the more relations share that pair — the same "feedback loop" shape a sankey uses for a cycle
-// it cannot lay out left-to-right, since these four identities form a real cycle (media -> research ->
-// media), not a DAG a classic sankey column order could ever represent.
-function arcPath(y1: number, y2: number, depth: number): { d: string; midX: number; midY: number } {
-  const cx = ARC_X + depth;
-  return {
-    d: `M${ARC_X},${y1} C${cx},${y1} ${cx},${y2} ${ARC_X},${y2}`,
-    midX: 0.25 * ARC_X + 0.75 * cx,
-    midY: (y1 + y2) / 2
-  };
-}
-
 /**
- * Each identity as a progress bar (real completed/total work orders), and the real, LLM-judged
- * milestone relations crossing identities drawn as weighted arcs between them — the flywheel effect
- * the star map only ever shows as an edge and a one-word kind label, made visible next to the progress
- * it actually feeds.
+ * A horizontally-scrolling strip, not a tall diagram: nodes are milestones (not identity percentages),
+ * already ordered by recency from `loadDashboard` so newly active ones sit at the right edge. Flow arrows
+ * stay ink-outlined chips with a thin identity-coloured accent — the same restrained language `.line-symbol`
+ * and `work-order-list article`'s left border already use elsewhere — and the connecting arcs are the
+ * identity accent heavily diluted with `--mist` rather than the earlier saturated gradient fill, so this
+ * is the one place colour stays secondary instead of becoming the whole drawing.
  */
-export function IdentityFlywheel({ identities, flows }: { identities: Identity[]; flows: Flow[] }) {
-  const indexOf = new Map(identities.map((item, index) => [item.id, index]));
-  const centerY = (index: number) => TOP_PAD + index * ROW_H + ROW_H / 2;
-  const height = TOP_PAD * 2 + identities.length * ROW_H;
+export function FlywheelStrip({ identities, nodes, edges }: { identities: Identity[]; nodes: Node[]; edges: Edge[] }) {
+  if (nodes.length === 0) {
+    return <p className="identity-flywheel-empty">尚无跨主线的已批准或候选里程碑关系 · 周复盘或 onboarding 对话产出候选后会显示在这里</p>;
+  }
+  const accentOf = (identityId: string) => identities.find((item) => item.id === identityId)?.accent ?? "#5A5B54";
+  const indexOf = new Map(nodes.map((node, index) => [node.id, index]));
+  const xOf = (index: number) => TOP_PAD + index * (CHIP_W + GAP);
+  const chipTop = TOP_PAD + ARC_BAND;
+  const width = TOP_PAD * 2 + nodes.length * CHIP_W + (nodes.length - 1) * GAP;
+  const height = chipTop + CHIP_H + TOP_PAD;
 
-  // Multiple relations between the same unordered pair (either direction) must not draw on top of one
-  // another, so each gets its own bulge depth, deepest first for the pair with the most relations.
-  const pairCounts = new Map<string, number>();
-  const arcs = flows.flatMap((flow) => {
-    const fromIndex = indexOf.get(flow.from);
-    const toIndex = indexOf.get(flow.to);
-    if (fromIndex === undefined || toIndex === undefined) return [];
-    const pairKey = [flow.from, flow.to].sort().join("~");
-    const order = pairCounts.get(pairKey) ?? 0;
-    pairCounts.set(pairKey, order + 1);
-    const depth = 34 + Math.min(flow.count, 6) * 9 + order * 20;
-    const { d, midX, midY } = arcPath(centerY(fromIndex), centerY(toIndex), depth);
-    return [{ ...flow, d, midX, midY, strokeWidth: Math.min(1.5 + flow.count * 1.4, 9) }];
+  const arcs = edges.flatMap((edge) => {
+    const from = indexOf.get(edge.from);
+    const to = indexOf.get(edge.to);
+    if (from === undefined || to === undefined || from === to) return [];
+    const x1 = xOf(from) + CHIP_W / 2;
+    const x2 = xOf(to) + CHIP_W / 2;
+    const distance = Math.abs(to - from);
+    const depth = Math.min(ARC_BAND - 10, 18 + distance * 10);
+    const midY = chipTop - depth;
+    return [{
+      ...edge, toIndex: to,
+      d: `M${x1},${chipTop} Q${(x1 + x2) / 2},${midY} ${x2},${chipTop}`,
+      strokeWidth: Math.min(1.4 + edge.count * 1.1, 6)
+    }];
   });
 
-  return <div className="identity-flywheel">
-    <svg viewBox={`0 0 ${WIDTH} ${height}`} role="img" aria-label="各主线进度与跨主线飞轮关系">
+  return <div className="flywheel-strip-scroll">
+    <svg width={width} height={height} role="img" aria-label="跨主线飞轮长条，按最新动态从左到右排列">
       <defs>
-        {identities.map((from) => identities.map((to) => from.id === to.id ? null : <linearGradient
-          key={`${from.id}->${to.id}`} id={`flow-grad-${from.id}-${to.id}`}
-          gradientUnits="userSpaceOnUse" x1={ARC_X} y1={centerY(indexOf.get(from.id)!)} x2={ARC_X} y2={centerY(indexOf.get(to.id)!)}>
-          <stop offset="0%" stopColor={from.accent} />
-          <stop offset="100%" stopColor={to.accent} />
-        </linearGradient>))}
-        {identities.map((item) => <marker key={item.id} id={`flow-arrow-${item.id}`} viewBox="0 0 10 10"
-          refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-          <path d="M0,0L10,5L0,10z" fill={item.accent} />
+        {nodes.map((node) => <marker key={node.id} id={`fw-arrow-${node.id}`} viewBox="0 0 10 10" refX="7" refY="5"
+          markerWidth="5" markerHeight="5" orient="auto">
+          <path d="M0,0L10,5L0,10z" style={{ fill: `color-mix(in srgb, ${accentOf(node.identityId)} 55%, var(--graphite) 45%)` }} />
         </marker>)}
       </defs>
-
-      {arcs.map((arc) => <g key={`${arc.from}->${arc.to}`}>
-        <path d={arc.d} fill="none" stroke={`url(#flow-grad-${arc.from}-${arc.to})`}
-          strokeWidth={arc.strokeWidth} strokeDasharray={arc.pending ? "2 4" : undefined}
-          markerEnd={`url(#flow-arrow-${arc.to})`} opacity={0.85}>
-          <title>{`${arc.kindLabel} · ${identities.find((i) => i.id === arc.from)?.label} → ${identities.find((i) => i.id === arc.to)?.label}（${arc.count} 条关系${arc.pending ? " · 待周复盘确认" : ""}）`}</title>
-        </path>
-        <text x={arc.midX + 5} y={arc.midY - 4} className="flow-label">{arc.kindLabel}</text>
-      </g>)}
-
-      {identities.map((item, index) => {
-        const y = centerY(index);
-        const barWFill = (BAR_W * item.pct) / 100;
-        return <g key={item.id}>
-          <rect x={0} y={y - 4} width={8} height={8} fill={item.accent} />
-          <text x={14} y={y} className="identity-label">{item.label}</text>
-          <text x={14} y={y + 14} className="identity-sub">
-            {`累计 ${item.completedCount} · 进行中 ${item.taskCount}`}
-          </text>
-          <rect x={BAR_X} y={y - 6} width={BAR_W} height={12} fill="var(--mist)" />
-          <rect x={BAR_X} y={y - 6} width={barWFill} height={12} fill={item.accent} />
-          <text x={BAR_X + BAR_W + 8} y={y + 4} className="identity-pct">{`${item.pct}%`}</text>
-          <text x={BAR_X} y={y + 20} className="identity-milestone">{truncate(item.activeMilestone, 30)}</text>
+      {arcs.map((arc) => <path key={`${arc.from}->${arc.to}`} d={arc.d} fill="none"
+        style={{ stroke: `color-mix(in srgb, ${accentOf(nodes[arc.toIndex]!.identityId)} 38%, var(--mist) 62%)` }}
+        strokeWidth={arc.strokeWidth} strokeDasharray={arc.pending ? "2 5" : undefined}
+        markerEnd={`url(#fw-arrow-${arc.to})`}>
+        <title>{`${arc.kindLabel}（${arc.count} 条关系${arc.pending ? " · 待周复盘确认" : ""}）`}</title>
+      </path>)}
+      {nodes.map((node, index) => {
+        const x = xOf(index);
+        return <g key={node.id}>
+          <rect x={x} y={chipTop} width={CHIP_W} height={CHIP_H} fill="var(--paper)" stroke="var(--mist)" />
+          <rect x={x} y={chipTop} width={4} height={CHIP_H} fill={accentOf(node.identityId)} />
+          <text x={x + 14} y={chipTop + 20} className="flywheel-chip-title">{truncate(node.title, 15)}</text>
+          <text x={x + 14} y={chipTop + 38} className="flywheel-chip-signal">{node.latestSignal}</text>
         </g>;
       })}
     </svg>
-    {flows.length === 0 && <p className="identity-flywheel-empty">尚无跨主线的已批准或候选关系 · 周复盘产出候选后会显示在这里</p>}
   </div>;
 }

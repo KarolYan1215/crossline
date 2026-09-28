@@ -95,8 +95,34 @@ test("Today keeps capture semantic-only and health outside identity navigation",
   await expect(page.locator(".capture-form select")).toHaveCount(0);
   await expect(page.locator('.capture-form input[name="title"]')).toBeVisible();
   await expect(page.getByRole("button", { name: "提交完成证据" })).toHaveCount(0);
-  await expect(page.getByRole("link", { name: "前往作业台执行并提交证据" })).toHaveAttribute("href", /\/workbench#work-order-/);
+  await expect(page.getByRole("link", { name: "前往任务详情执行并提交证据" })).toHaveAttribute("href", /\/workbench\//);
   if (testInfo.project.name === "desktop-chrome") await expect(page).toHaveScreenshot("today-paper-grid.png", { fullPage: true });
+});
+
+test("a task card's preview drawer opens in place, and its standalone-page link shows the same task", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-chrome");
+  await page.goto("/");
+  const hero = page.locator(".hero-action");
+  const title = (await hero.locator("h1").textContent())!.trim();
+
+  // The corner preview button opens the drawer without navigating away from Today.
+  await hero.locator(".card-preview-button").click();
+  const drawer = page.getByRole("dialog");
+  await expect(drawer).toBeVisible();
+  await expect(drawer.locator(".task-detail-view h2")).toHaveText(title);
+  await expect(page).toHaveURL(/\/$/);
+
+  // Its own "独立页面查看" link is the same destination the hero card's own visible CTA points to
+  // (the hero is the one card that uses a real labelled button instead of an invisible stretched link,
+  // since it already carries a prominent "前往任务详情执行并提交证据" action), and the standalone page
+  // renders the identical task.
+  const detailLink = drawer.getByRole("link", { name: "⤢ 独立页面查看" });
+  const href = await detailLink.getAttribute("href");
+  expect(href).toMatch(/^\/workbench\//);
+  await expect(hero.locator("a.primary-button")).toHaveAttribute("href", href!);
+  await detailLink.click();
+  await expect(page).toHaveURL(new RegExp(href!.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "$"));
+  await expect(page.locator(".task-detail-view h2")).toHaveText(title);
 });
 
 test("Plan exposes B/C/A over one version and workflow redirects", async ({ page }, testInfo) => {

@@ -3,6 +3,8 @@
 import FullCalendar from "@fullcalendar/react";
 import interactionPlugin from "@fullcalendar/interaction";
 import timeGridPlugin from "@fullcalendar/timegrid";
+import dayGridPlugin from "@fullcalendar/daygrid";
+import listPlugin from "@fullcalendar/list";
 import type { ScheduleBlockData } from "./plan-view";
 
 export function CalendarDetail({ blocks, today, workOrderMilestones = {} }: {
@@ -10,9 +12,11 @@ export function CalendarDetail({ blocks, today, workOrderMilestones = {} }: {
 }) {
   return <div className="calendar-detail">
     <FullCalendar
-      plugins={[timeGridPlugin, interactionPlugin]}
+      plugins={[timeGridPlugin, dayGridPlugin, listPlugin, interactionPlugin]}
       initialView="timeGridWeek"
-      headerToolbar={{ left: "prev,next today", center: "title", right: "timeGridDay,timeGridWeek" }}
+      // Day/week already existed as FullCalendar's own toolbar buttons — just easy to miss. Month
+      // (dayGridMonth) and a Notion-style flat to-do list (listWeek) were genuinely absent.
+      headerToolbar={{ left: "prev,next today", center: "title", right: "timeGridDay,timeGridWeek,dayGridMonth,listWeek" }}
       allDaySlot={false}
       nowIndicator
       height="auto"

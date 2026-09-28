@@ -189,7 +189,12 @@ export type PersistedPlan = {
 
 const PRIMARY_CLOCK_ID = process.env.CROSSLINE_PRIMARY_CLOCK_ID
   ?? defaultIdentityPacks().find((pack) => pack.kind === "identity" && pack.masterClock)?.id ?? "";
-const accents: Record<string, string> = {
+// Shared with apps/web/lib/task-detail.ts, so a task/milestone detail view's relation labels and identity
+// swatches never drift from what the homepage flywheel strip and star map already say.
+export const relationKindLabel: Record<string, string> = {
+  enables: "使之可能", reuses: "复用", informs: "提供输入", constrains: "约束", recurring_feedback: "循环反馈"
+};
+export const accents: Record<string, string> = {
   research: "#6D5EF5",
   startup: "#FF8A5B",
   media: "#E85D9E",
@@ -1123,9 +1128,6 @@ export async function loadDashboard(ctx: AccessContext): Promise<DashboardData> 
   // Cross-identity relations touching a milestone behind today's actionable work — the plain-English
   // "doing A moves B forward" that the star map only ever shows as an edge and a one-word kind label.
   const todayMilestoneIds = new Set(active.map((order) => order.milestoneId));
-  const relationKindLabel: Record<string, string> = {
-    enables: "使之可能", reuses: "复用", informs: "提供输入", constrains: "约束", recurring_feedback: "循环反馈"
-  };
   const flywheel = store.listMilestoneRelations(ctx.workspaceId)
     // Approved and candidate both show — same distinction the star map already draws with a dashed
     // line ("虚线为待周复盘确认"), just spelled out in words instead of a line style.
@@ -1141,29 +1143,70 @@ export async function loadDashboard(ctx: AccessContext): Promise<DashboardData> 
       pending: relation.status === "candidate"
     }));
 
-  // Cross-identity progress overview for the homepage: every approved/candidate relation between
-  // milestones owned by two *different* identities, aggregated into one flow per identity pair — the
-  // same real, LLM-judged relations the flywheel section reads, just not limited to today's active work.
-  const identityFlows = (() => {
-    const buckets = new Map<string, { from: string; to: string; kinds: Record<string, number>; pending: boolean; count: number }>();
-    for (const relation of store.listMilestoneRelations(ctx.workspaceId)) {
-      if (relation.status !== "approved" && relation.status !== "candidate") continue;
-      const from = milestones.find((item) => item.id === relation.fromMilestoneId)?.identityId;
-      const to = milestones.find((item) => item.id === relation.toMilestoneId)?.identityId;
-      if (!from || !to || from === to) continue;
-      if (!identityPacks.some((pack) => pack.id === from) || !identityPacks.some((pack) => pack.id === to)) continue;
-      const key = `${from}->${to}`;
-      const bucket = buckets.get(key) ?? { from, to, kinds: {}, pending: false, count: 0 };
+  // Milestone-centric flywheel strip: nodes are milestones touched by any approved/candidate relation,
+  // ordered left-to-right by their most recent real signal (a gate judgement or an acceptance recorded
+  // against them) so newly active milestones surface at the right edge. Resolved fresh on every page
+  // load — not a live push — so "grows to the right" means "next time this loads", which is what an
+  // SSR app can promise; a milestone with a relation but no activity yet just sorts toward the left.
+  const flywheelStrip = (() => {
+    const relations = store.listMilestoneRelations(ctx.workspaceId)
+      .filter((relation) => relation.status === "approved" || relation.status === "candidate");
+    if (!relations.length) return { nodes: [], edges: [] };
+
+    const milestoneById = new Map(milestones.map((item) => [item.id, item]));
+    const nodeIds = new Set<string>();
+    for (const relation of relations) {
+      if (milestoneById.has(relation.fromMilestoneId)) nodeIds.add(relation.fromMilestoneId);
+      if (milestoneById.has(relation.toMilestoneId)) nodeIds.add(relation.toMilestoneId);
+    }
+
+    const gateEvents = store.listEvents(ctx.workspaceId, { type: "milestone_gate.judged" });
+    const latestGateAt = new Map<string, string>();
+    for (const event of gateEvents) {
+      const milestoneId = (event.payload as { milestoneId?: string }).milestoneId;
+      if (!milestoneId) continue;
+      const seen = latestGateAt.get(milestoneId);
+      if (!seen || event.createdAt > seen) latestGateAt.set(milestoneId, event.createdAt);
+    }
+    const latestAcceptedAtByMilestone = new Map<string, string>();
+    for (const order of orders) {
+      const when = acceptedAt.get(order.id);
+      if (!when || !order.milestoneId) continue;
+      const seen = latestAcceptedAtByMilestone.get(order.milestoneId);
+      if (!seen || when > seen) latestAcceptedAtByMilestone.set(order.milestoneId, when);
+    }
+    const recencyOf = (milestoneId: string) => {
+      const a = latestGateAt.get(milestoneId) ?? "";
+      const b = latestAcceptedAtByMilestone.get(milestoneId) ?? "";
+      return a > b ? a : b;
+    };
+
+    const nodes = [...nodeIds].map((id) => {
+      const milestone = milestoneById.get(id)!;
+      const acceptedCount = orders.filter((order) => order.milestoneId === id && order.state === "accepted").length;
+      const gateCount = gateEvents.filter((event) => (event.payload as { milestoneId?: string }).milestoneId === id).length;
+      const latestSignal = acceptedCount > 0 ? `已验收 ${acceptedCount} 次`
+        : gateCount > 0 ? `已判定 ${gateCount} 次` : "等待进展";
+      return { id, identityId: milestone.identityId, title: milestone.title, latestSignal, recency: recencyOf(id) };
+    }).sort((a, b) => a.recency < b.recency ? -1 : a.recency > b.recency ? 1 : 0);
+
+    const nodeIndex = new Set(nodes.map((node) => node.id));
+    const edgeBuckets = new Map<string, { from: string; to: string; kinds: Record<string, number>; pending: boolean; count: number }>();
+    for (const relation of relations) {
+      if (!nodeIndex.has(relation.fromMilestoneId) || !nodeIndex.has(relation.toMilestoneId)) continue;
+      const key = `${relation.fromMilestoneId}->${relation.toMilestoneId}`;
+      const bucket = edgeBuckets.get(key) ?? { from: relation.fromMilestoneId, to: relation.toMilestoneId, kinds: {}, pending: false, count: 0 };
       bucket.kinds[relation.kind] = (bucket.kinds[relation.kind] ?? 0) + 1;
       bucket.count += 1;
       if (relation.status === "candidate") bucket.pending = true;
-      buckets.set(key, bucket);
+      edgeBuckets.set(key, bucket);
     }
-    return [...buckets.values()].map((bucket) => {
+    const edges = [...edgeBuckets.values()].map((bucket) => {
       const topKind = Object.entries(bucket.kinds).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "";
-      return { from: bucket.from, to: bucket.to, count: bucket.count, pending: bucket.pending,
-        kindLabel: relationKindLabel[topKind] ?? topKind };
+      return { from: bucket.from, to: bucket.to, count: bucket.count, pending: bucket.pending, kindLabel: relationKindLabel[topKind] ?? topKind };
     });
+
+    return { nodes: nodes.map(({ id, identityId, title, latestSignal }) => ({ id, identityId, title, latestSignal })), edges };
   })();
 
   const energySelected = capacity.level !== "uncalibrated";
@@ -1201,7 +1244,7 @@ export async function loadDashboard(ctx: AccessContext): Promise<DashboardData> 
     progress,
     todayCapacity: { availableMinutes, committedMinutes },
     flywheel,
-    identityFlows,
+    flywheelStrip,
     identities: identityPacks.map((pack) => {
       const identityOrders = orders.filter((order) => order.identityId === pack.id);
       const completed = identityOrders.filter((order) => order.state === "accepted").length;

@@ -4,6 +4,7 @@ import { MilestoneMap } from "./milestone-map";
 import { MilestoneAdmin, type AdminMilestone } from "./milestone-admin";
 import { ensureSeeded, getStore, readGoalSettings, readSchedulePreferences } from "../../lib/crossline";
 import { requireSessionContext } from "../../lib/access-guard";
+import { MilestonePreview } from "../task-preview";
 
 export const dynamic = "force-dynamic";
 
@@ -67,6 +68,10 @@ export default async function MilestonesPage({ searchParams }: {
         milestones={admin}
         identities={defaultIdentityPacks().filter((pack) => pack.kind === "identity")
           .map((pack) => ({ id: pack.id, label: pack.label }))}
+        // Pre-rendered server output handed to a client component as data — MilestoneAdmin itself stays
+        // "use client" for its form state, but the preview drawer's content still needs `loadMilestoneDetail`,
+        // which only runs on the server.
+        previews={Object.fromEntries(admin.map((milestone) => [milestone.id, <MilestonePreview key={milestone.id} ctx={ctx} milestoneId={milestone.id} />]))}
         {...(editId ? { initialEditId: editId } : {})}
       />
     </section>

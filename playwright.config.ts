@@ -60,7 +60,14 @@ export default defineConfig({
     reuseExistingServer: false,
     timeout: 240_000
   },
-  projects: [
+  // The real Windows dev machine this app targets always has a branded Chrome install, so `channel:
+  // "chrome"` (below) is the default path and what actually runs there. A sandbox with only the
+  // Playwright-bundled Chromium (no "chrome" channel available) sets CROSSLINE_E2E_CHROME_PATH to fall
+  // back to it instead; unset, behavior is unchanged.
+  projects: process.env.CROSSLINE_E2E_CHROME_PATH ? [
+    { name: "desktop-chrome", use: { ...devices["Desktop Chrome"], launchOptions: { executablePath: process.env.CROSSLINE_E2E_CHROME_PATH }, viewport: { width: 1440, height: 1100 } } },
+    { name: "mobile-chrome", use: { ...devices["Pixel 7"], launchOptions: { executablePath: process.env.CROSSLINE_E2E_CHROME_PATH } } }
+  ] : [
     { name: "desktop-chrome", use: { ...devices["Desktop Chrome"], channel: "chrome", viewport: { width: 1440, height: 1100 } } },
     { name: "mobile-chrome", use: { ...devices["Pixel 7"], channel: "chrome" } }
   ]

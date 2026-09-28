@@ -15,7 +15,10 @@
   --paper:#FBF9F3;
   --ink:#010904;
   --graphite:#5A5B54;
-  --shade:#9C9B8D;
+  /* Was #9C9B8D — 2.66:1 against --paper, well under WCAG AA's 4.5:1 floor for normal text, and this
+     token is used as text (dt labels, secondary captions, the flywheel milestone label), not just
+     decoration. Recomputed in the same hue via the relative-luminance formula to land at 4.62:1. */
+  --shade:#737264;
   --mist:#DCD7C9;
   --chalk:#F2EFE4;
   --grid:rgba(1,9,4,.022);
@@ -35,14 +38,15 @@
 @media (prefers-color-scheme:dark){
   :root:not([data-theme="light"]){
     color-scheme:dark;
-    --paper:#010904; --ink:#EDE9DC; --graphite:#948F80; --shade:#6A6659;
+    /* --shade was #6A6659 — 3.51:1 against dark --paper, also under AA. Recomputed to 4.62:1. */
+    --paper:#010904; --ink:#EDE9DC; --graphite:#948F80; --shade:#7D7969;
     --mist:#2B3230; --chalk:#07110E; --grid:rgba(237,233,220,.028);
     --block:#E7E2D3; --now:#5FE3AE; --now-ink:#5FE3AE;
   }
 }
 :root[data-theme="dark"]{
   color-scheme:dark;
-  --paper:#010904; --ink:#EDE9DC; --graphite:#948F80; --shade:#6A6659;
+  --paper:#010904; --ink:#EDE9DC; --graphite:#948F80; --shade:#7D7969;
   --mist:#2B3230; --chalk:#07110E; --grid:rgba(237,233,220,.028);
   --block:#E7E2D3; --now:#5FE3AE; --now-ink:#5FE3AE;
 }
@@ -176,6 +180,22 @@ button:disabled{opacity:.4;cursor:not-allowed}
 /* ── today grid ────────────────────────────── */
 .today-grid{display:grid;grid-template-columns:minmax(0,2fr) minmax(260px,.8fr);gap:1px;background:var(--mist);border-bottom:1px solid var(--ink)}
 .hero-action,.action-margin{background:var(--paper)}
+/* The "stretched link" pattern: an absolutely-positioned, invisible `<a>` sized to the card makes the
+   whole card clickable without nesting a real `<button>` (the preview trigger) inside a real `<a>`,
+   which HTML forbids. The two sit as siblings; the cover link is behind everything else via z-index. */
+.card-cover-link{position:absolute;inset:0;z-index:0}
+.hero-action,.alt-action,.work-order-list article,.timeline-list article,.milestone-pulse article,
+.milestone-admin-list li,.review-list li,.approval-ledger article,.review-milestone{position:relative}
+/* Any real interactive element inside a card with a cover link must out-rank it, or the cover link
+   silently swallows clicks meant for it — not just buttons and links but every bare form control these
+   particular lists embed directly (ExecutionActions' inputs, GoalControls' selects, a disclosure's own
+   <summary>), since an absolutely-positioned z-index:0 sibling paints over non-positioned content. */
+.work-order-list a,.work-order-list button,.work-order-list input,.work-order-list select,.work-order-list label,.work-order-list summary,
+.milestone-admin-list a,.milestone-admin-list button,.milestone-admin-list input,.milestone-admin-list select,.milestone-admin-list label,
+.review-list a,.review-list button,.review-list input,.review-list label,
+.approval-ledger a,.approval-ledger button,.approval-ledger summary,
+.review-milestone a,
+.timeline-list a,.milestone-pulse a{position:relative;z-index:1}
 .hero-action{padding:14px 0 18px;padding-right:clamp(12px,2vw,28px)}
 .hero-action>header,.timeline-list>header,.milestone-pulse>header,.alt-action>header{display:flex;justify-content:space-between;gap:12px;font-family:var(--f-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--graphite)}
 .hero-action h1{max-width:780px;margin:10px 0;font-family:var(--f-display);font-size:clamp(24px,3.2vw,42px);line-height:1.04;letter-spacing:-.02em}
@@ -216,12 +236,12 @@ button:disabled{opacity:.4;cursor:not-allowed}
 /* ── identity flywheel ─────────────────────── */
 .identity-pulse{padding:8px 0;border-bottom:1px solid var(--ink)}
 .identity-pulse>header{display:flex;justify-content:space-between;gap:12px;padding-bottom:6px;font-family:var(--f-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--graphite)}
-.identity-flywheel svg{width:100%;height:auto;display:block;font-family:var(--f-sans)}
-.identity-flywheel .identity-label{font-family:var(--f-sans);font-size:12px;font-weight:700;fill:var(--ink)}
-.identity-flywheel .identity-sub{font-family:var(--f-mono);font-size:8.5px;letter-spacing:.04em;fill:var(--graphite)}
-.identity-flywheel .identity-pct{font-family:var(--f-mono);font-size:10px;font-weight:700;fill:var(--ink)}
-.identity-flywheel .identity-milestone{font-family:var(--f-mono);font-size:8.5px;letter-spacing:.02em;fill:var(--shade)}
-.identity-flywheel .flow-label{font-family:var(--f-mono);font-size:8px;letter-spacing:.06em;text-transform:uppercase;fill:var(--graphite)}
+/* A fixed-height horizontal scroller, not a diagram that grows with its own content — the previous
+   version had no height ceiling and could end up taller than the hero action card on a wide screen. */
+.flywheel-strip-scroll{overflow-x:auto;overflow-y:hidden;scroll-snap-type:x proximity;padding-bottom:2px}
+.flywheel-strip-scroll svg{display:block;font-family:var(--f-sans);scroll-snap-align:start}
+.flywheel-chip-title{font-family:var(--f-sans);font-size:11.5px;font-weight:700;fill:var(--ink)}
+.flywheel-chip-signal{font-family:var(--f-mono);font-size:9px;letter-spacing:.04em;fill:var(--graphite)}
 .identity-flywheel-empty{margin:6px 0 0;color:var(--shade);font-size:12px}
 
 /* Shape, not colour, carries state — the reference uses the same glyph vocabulary. */
@@ -276,7 +296,6 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .change-resolve button{min-height:22px;padding:1px 7px;border:1px solid var(--mist);font-family:var(--f-mono);font-size:8.5px;letter-spacing:.1em;text-transform:uppercase}
 .change-resolve button:hover{border-color:var(--ink)}
 .approved-mark{font-family:var(--f-mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--now-ink)}
-.calendar-detail{border-top:1.5px solid var(--ink);padding-top:12px}
 
 /* ── work orders ───────────────────────────── */
 .work-order-list{display:grid;gap:8px}
@@ -289,6 +308,32 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .execution-actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:3px}
 .execution-actions button,.execution-actions a{min-height:28px;padding:5px 11px;border:1px solid var(--mist);font-family:var(--f-mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase}
 .execution-actions button:hover,.execution-actions a:hover{border-color:var(--ink)}
+
+/* ── task/milestone detail (drawer + standalone page share this) ──────── */
+.task-detail-view{display:grid;gap:10px}
+.task-detail-header{display:flex;justify-content:space-between;gap:12px;font-family:var(--f-mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--graphite)}
+.task-detail-view h2{margin:0;font-size:19px;line-height:1.3;font-weight:700}
+.task-detail-view h3{margin:14px 0 6px;font-family:var(--f-mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--graphite)}
+.task-detail-view>section{padding-top:8px;border-top:1px solid var(--mist)}
+.task-detail-facts{margin:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:1px;background:var(--mist);border:1px solid var(--mist)}
+.task-detail-facts div{background:var(--paper);padding:7px 9px}
+.task-detail-facts dt{font-family:var(--f-mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--shade)}
+.task-detail-facts dd{margin:3px 0 0;font-size:12.5px}
+.task-detail-background-empty{margin:0;color:var(--shade);font-size:12px;font-style:italic}
+.task-detail-contract{margin:0;padding:0;list-style:none;display:grid;gap:6px}
+.task-detail-contract li{display:grid;gap:3px;padding:7px 9px;border:1px solid var(--mist)}
+.task-detail-contract small{font-family:var(--f-mono);font-size:10px;color:var(--graphite);line-height:1.5}
+.task-detail-materials,.task-detail-related-orders{margin:0;padding:0;list-style:none;display:grid;gap:5px}
+.task-detail-related-orders li{display:flex;justify-content:space-between;gap:10px;align-items:baseline}
+.task-detail-flywheel{margin-top:8px;padding-top:8px;border-top:1px solid var(--mist)}
+.task-detail-flywheel h3{margin:0 0 6px;font-family:var(--f-mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--graphite)}
+.task-detail-flywheel p{margin:0 0 5px;font-size:12.5px;line-height:1.55}
+.task-detail-flywheel span{font-family:var(--f-mono);font-size:9.5px;letter-spacing:.06em;color:var(--graphite);margin-right:4px}
+.task-detail-flywheel small{display:block;color:var(--graphite);font-size:11px}
+.task-detail-drawer-open{border:1px solid var(--mist);background:transparent;padding:2px 6px;font-family:var(--f-mono);font-size:14px;line-height:1;cursor:pointer}
+.task-detail-drawer-open:hover{border-color:var(--ink)}
+.card-preview-button{position:absolute;top:6px;right:6px;border:1px solid var(--mist);background:var(--paper);padding:2px 5px;font-size:11px;line-height:1;cursor:pointer;z-index:1}
+.card-preview-button:hover{border-color:var(--ink)}
 
 /* ── review / approvals ────────────────────── */
 .review-block{padding:10px 0;border-bottom:1px solid var(--mist)}
@@ -420,9 +465,12 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .dialog-sheet h2{margin:0;font-family:var(--f-display);font-size:20px;letter-spacing:-.01em}
 .dialog-sheet p{margin:0;color:var(--graphite);font-size:12.5px;line-height:1.7}
 .dialog-actions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:6px}
-.dialog-actions button{min-height:34px;padding:7px 16px;border:1px solid var(--ink);background:var(--ink);color:var(--paper);font-family:var(--f-mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase}
+.dialog-actions button,.dialog-actions a{display:inline-flex;align-items:center;min-height:34px;padding:7px 16px;border:1px solid var(--ink);background:var(--ink);color:var(--paper);font-family:var(--f-mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase}
 .dialog-actions .secondary{background:transparent;color:var(--ink);border-color:var(--mist)}
 .dialog-actions .secondary:hover{border-color:var(--ink)}
+/* Wider and scrollable — the approval confirm dialog this reuses is a couple lines of text, a task
+   detail is materials/contracts/execution history, and 520px with no scroll would clip most of it. */
+.dialog-sheet.detail-drawer{width:min(640px,calc(100vw - 32px));max-height:min(80vh,760px);overflow-y:auto}
 .codex-account-card{border:1px solid var(--mist);padding:12px 14px;display:grid;gap:6px}
 
 /* ── responsive ────────────────────────────── */
@@ -488,7 +536,9 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .calendar-detail .fc a{color:inherit}
 .calendar-detail .fc-toolbar{gap:10px;flex-wrap:wrap}
 .calendar-detail .fc-toolbar-title{font-family:var(--f-display);font-size:18px!important;letter-spacing:-.01em}
-.calendar-detail .fc .fc-button{border-radius:0;border:1px solid var(--mist);background:transparent;color:var(--ink);box-shadow:none;font-family:var(--f-mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;padding:5px 11px}
+/* The day/week/month/list switch used to read as one more small, easy-to-miss FullCalendar button row —
+   bumped to the same weight as `.plan-tabs` so the view switch reads as a real navigation control. */
+.calendar-detail .fc .fc-button{border-radius:0;border:1px solid var(--mist);background:transparent;color:var(--ink);box-shadow:none;font-family:var(--f-mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;padding:6px 13px}
 .calendar-detail .fc .fc-button:hover{background:transparent;border-color:var(--ink)}
 .calendar-detail .fc .fc-button-primary:not(:disabled).fc-button-active,
 .calendar-detail .fc .fc-button-primary:not(:disabled):active{background:var(--ink);border-color:var(--ink);color:var(--paper)}

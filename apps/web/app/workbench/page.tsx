@@ -9,6 +9,7 @@ import { CalendarDetail } from "../plan/calendar-detail";
 import type { MilestoneGateResult } from "@crossline/core";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { requireSessionContext } from "../../lib/access-guard";
+import { TaskPreview } from "../task-preview";
 
 // The tail, not the head: ids here are sometimes timestamp-prefixed, and two captures made minutes
 // apart shared their first eight characters — the page showed them as the same item twice.
@@ -125,6 +126,10 @@ export default async function WorkbenchPage({ searchParams }: {
       // that number actually informs a decision the person is about to make.
       const estimate = resolvedEstimate(ctx, run);
       return <article id={`work-order-${run.id}`} key={run.id}>
+        {/* The card's own actions (below) stay directly usable — the extended z-index rule in
+            globals.css keeps every bare input/select/summary they use above this invisible link. */}
+        <a className="card-cover-link" href={`/workbench/${encodeURIComponent(run.id)}`} aria-label={run.intent} />
+        <TaskPreview ctx={ctx} workOrderId={run.id} />
         <header><span>{run.identityId.toUpperCase()} / {shortId(run.id)}</span><b><i className="gly" data-s={run.state} aria-hidden="true" />{stateLabel[run.state] ?? "未知状态"}</b></header>
         <h2>{run.intent}</h2>
         {/* The milestone this work order serves, on the card itself — previously only visible by

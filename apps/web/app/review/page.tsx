@@ -6,6 +6,7 @@ import { DecideRelations } from "./decide-relations";
 import { RevokeInsight } from "./revoke-insight";
 import { WeeklyInsightButton } from "./weekly-insight-button";
 import { requireSessionContext } from "../../lib/access-guard";
+import { TaskPreview, MilestonePreview } from "../task-preview";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +37,8 @@ export default async function ReviewPage() {
       {review.autoAccepted.length === 0
         ? <p className="review-empty">本周没有自动验收记录。</p>
         : <ul className="review-list">{review.autoAccepted.map((item) => <li key={item.workOrderId}>
+          <a className="card-cover-link" href={`/workbench/${encodeURIComponent(item.workOrderId)}`} aria-label={item.intent} />
+          <TaskPreview ctx={ctx} workOrderId={item.workOrderId} />
           <b>{item.intent}</b>
           <small>里程碑 {item.milestoneId} · {item.acceptedAt.slice(0, 16).replace("T", " ")}</small>
           {item.questioned && <em className="review-flag">关系已被反证，需复核</em>}
@@ -46,6 +49,8 @@ export default async function ReviewPage() {
     <section className="review-block">
       <h2>里程碑达成标准</h2>
       {review.milestoneProgress.map((milestone) => <article key={milestone.id} className="review-milestone">
+        <a className="card-cover-link" href={`/milestones/${encodeURIComponent(milestone.id)}`} aria-label={milestone.title} />
+        <MilestonePreview ctx={ctx} milestoneId={milestone.id} />
         <b>{milestone.title}</b>
         {milestone.criteria.length === 0
           ? <em className="review-flag">未声明达成标准 —— 闸门会拒绝它，直到你写下什么算达成。

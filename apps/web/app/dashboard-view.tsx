@@ -1,11 +1,13 @@
 import type { CSSProperties } from "react";
+import type { AccessContext } from "@crossline/core";
 import { ArrowUpRight, CircleDot, Clock3 } from "lucide-react";
 import { OfflineCaptureForm, OfflineReplay } from "./offline-command-forms";
 import { BatchCaptureForm } from "./batch-capture-form";
 import { AnalogClock } from "./analog-clock";
 import { EnergyProbe } from "./energy-probe";
 import { LocalActivityConsent } from "./local-activity-consent";
-import { IdentityFlywheel } from "./identity-flywheel";
+import { FlywheelStrip } from "./identity-flywheel";
+import { TaskPreview, MilestonePreview } from "./task-preview";
 import { SignOutButton } from "./sign-out-button";
 import { NAV_ITEMS } from "./nav-items";
 import { BottomNav } from "./bottom-nav";
@@ -51,9 +53,13 @@ export type DashboardData = {
   todayCapacity: { availableMinutes: number; committedMinutes: number };
   flywheel: Array<{ id: string; fromTitle: string; toTitle: string; kindLabel: string; explanation: string | null; pending: boolean }>;
   identities: Array<{ id: string; label: string; accent: string; completedCount: number; activeMilestone: string; taskCount: number; totalCount: number; pct: number }>;
-  /** Every real, LLM-judged milestone relation crossing two identities, aggregated pairwise — the
-   * cross-identity edges behind the homepage's flywheel diagram, not limited to today's active work. */
-  identityFlows: Array<{ from: string; to: string; count: number; pending: boolean; kindLabel: string }>;
+  /** Milestone-centric nodes + edges behind the homepage's flywheel strip — every milestone touched by a
+   * real, LLM-judged relation (approved or still-candidate), ordered by recency, connected by the actual
+   * relations between them. Not limited to today's active work. */
+  flywheelStrip: {
+    nodes: Array<{ id: string; identityId: string; title: string; latestSignal: string }>;
+    edges: Array<{ from: string; to: string; count: number; pending: boolean; kindLabel: string }>;
+  };
   /** `time` is the scheduler's real `HH:mm–HH:mm` for today, present only when it actually placed this
    * order; absent means genuinely not yet scheduled, which `status` then says in words rather than
    * leaving a blank clock reading that looks like a bug. */
@@ -88,11 +94,16 @@ const capacityLabel = (capacity: DashboardData["capacity"]) =>
     ? "精力未标定"
     : `精力 ${capacityLevelLabel[capacity.level]} · 依据 ${capacity.basis.map((item) => basisLabel[item]).join(" + ")} · ${capacity.observationCount} 次观测`;
 
-export function DashboardView({ data }: { data: DashboardData }) {
+export function DashboardView({ ctx, data }: { ctx: AccessContext; data: DashboardData }) {
   const identityLabel = (id: string) => data.identities.find((item) => item.id === id)?.label ?? (id === "capacity" ? "容量策略" : id);
+  // The whole card is a real `<a>` to its detail page — bookmarkable, works with no JS — and a small
+  // corner button opens the same detail as a quick-peek drawer without leaving Today. Two separate
+  // triggers instead of one click trying to decide between "navigate" and "preview".
   const action = (item: DashboardAction | undefined, label: string) => <article className="alt-action">
     <header><span>{label}</span><ArrowUpRight size={13} aria-hidden="true" /></header>
-    {item ? <><h3>{item.title}</h3>
+    {item ? <><a className="card-cover-link" href={`/workbench/${encodeURIComponent(item.id)}`} aria-label={item.title} />
+      <TaskPreview ctx={ctx} workOrderId={item.id} />
+      <h3>{item.title}</h3>
       {/* The milestone this card feeds sits on the card itself — a separate MILESTONE PULSE list further
           down used to be the only place that answered "what is this for", which meant leaving the card
           to find out. */}
@@ -125,6 +136,7 @@ export function DashboardView({ data }: { data: DashboardData }) {
       <article className="hero-action">
         <header><span>01 / NEXT ACTION · 下一行动</span><span>INPUTS {data.primary?.inputsReady ? "READY" : "CHECK"}</span></header>
         {data.primary ? <>
+          <TaskPreview ctx={ctx} workOrderId={data.primary.id} />
           <div className={`identity-glyph ${data.primary.identityId}`} aria-hidden="true" />
           <h1>{data.primary.title}</h1>
           <p>{data.primary.reason}</p>
@@ -135,7 +147,9 @@ export function DashboardView({ data }: { data: DashboardData }) {
             <div><dt>NEEDS · 所需精力</dt><dd>{energyLabel[data.primary.energy ?? ""] ?? "未声明"}</dd></div>
             <div><dt>MILESTONE</dt><dd>{data.primary.milestone}</dd></div>
           </dl>
-          <a className="primary-button" href={`/workbench#work-order-${data.primary.id}`}>前往作业台执行并提交证据</a>
+          {/* The real task detail page now embeds the same start/pause/complete controls Workbench's own
+              card has, so this goes straight there instead of an anchor-jump into the Workbench list. */}
+          <a className="primary-button" href={`/workbench/${encodeURIComponent(data.primary.id)}`}>前往任务详情执行并提交证据</a>
         </> : <p>先收集一项真实工作，系统会拆解并等待计划批准。</p>}
       </article>
 
@@ -203,13 +217,13 @@ export function DashboardView({ data }: { data: DashboardData }) {
       </dl>
     </section>
 
-    {/* Each identity's own real progress (accepted/active work orders), plus the actual milestone
-        relations crossing identities — the flywheel effect — drawn as weighted arcs between them.
-        Grounded in the same LLM-judged `milestone_relations` the star map and the FLYWHEEL section
-        already read, just aggregated across all of them instead of only today's active work. */}
-    <section className="identity-pulse" aria-label="主线进度与跨主线飞轮">
-      <header><span>04 / IDENTITY PULSE · 主线进度与飞轮</span><a href="/milestones">OPEN MAP →</a></header>
-      <IdentityFlywheel identities={data.identities} flows={data.identityFlows} />
+    {/* A horizontally-scrolling strip of milestones touched by a real, LLM-judged relation — not
+        per-identity percentages, per the redesign: nodes are milestones, ordered by recency so newly
+        active ones sit at the right edge, connected by desaturated flow arrows instead of the earlier
+        saturated-fill diagram. Grounded in the same `milestone_relations` the star map already reads. */}
+    <section className="identity-pulse" aria-label="跨主线飞轮长条">
+      <header><span>04 / FLYWHEEL STRIP · 跨主线流向</span><a href="/milestones">OPEN MAP →</a></header>
+      <FlywheelStrip identities={data.identities} nodes={data.flywheelStrip.nodes} edges={data.flywheelStrip.edges} />
     </section>
 
     <section className="capture-line" aria-labelledby="capture-title">
@@ -221,7 +235,14 @@ export function DashboardView({ data }: { data: DashboardData }) {
     <section className="lower-grid">
       <div className="timeline-list">
         <header><span>02 / TODAY'S LINE</span><a href="/plan">OPEN PLAN →</a></header>
+        {/* Only a real work order has a detail page to link to — an unclassified capture (identityId
+            "unclassified") has no milestone, materials or execution yet, so it stays plain text here
+            rather than linking to a detail page that would just say "not found". */}
         {data.upcoming.map((item) => <article key={item.id}>
+          {item.identityId !== "unclassified" && <>
+            <a className="card-cover-link" href={`/workbench/${encodeURIComponent(item.id)}`} aria-label={item.title} />
+            <TaskPreview ctx={ctx} workOrderId={item.id} />
+          </>}
           <time className={item.time ? "time-precise" : "time-vague"}>{item.time ?? "—"}</time>
           <span className={`line-symbol ${item.identityId}`} />
           <div>
@@ -233,7 +254,19 @@ export function DashboardView({ data }: { data: DashboardData }) {
       </div>
       <div className="milestone-pulse">
         <header><span>03 / MILESTONE PULSE</span><a href="/milestones">OPEN MAP →</a></header>
-        {(data.milestonePulse.length ? data.milestonePulse : data.identities.slice(0, 4).map((item) => ({ id: item.id, identity: item.label, title: item.activeMilestone, evidence: `${item.taskCount} active` }))).map((item) => <article key={item.id}><span>{item.identity}</span><strong>{item.title}</strong><small>{item.evidence}</small></article>)}
+        {/* Real `milestonePulse` rows carry a real milestone id; the identity-based fallback (shown only
+            when nothing has any pulse yet) has nothing to link to — `activeMilestone` there is a title
+            string, not an id — so it stays plain text. */}
+        {(data.milestonePulse.length
+          ? data.milestonePulse.map((item) => ({ ...item, linkable: true }))
+          : data.identities.slice(0, 4).map((item) => ({ id: item.id, identity: item.label, title: item.activeMilestone, evidence: `${item.taskCount} active`, linkable: false }))
+        ).map((item) => <article key={item.id}>
+          {item.linkable && <>
+            <a className="card-cover-link" href={`/milestones/${encodeURIComponent(item.id)}`} aria-label={item.title} />
+            <MilestonePreview ctx={ctx} milestoneId={item.id} />
+          </>}
+          <span>{item.identity}</span><strong>{item.title}</strong><small>{item.evidence}</small>
+        </article>)}
       </div>
     </section>
   </main>;

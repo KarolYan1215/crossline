@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { SuccessCriterion } from "@crossline/core";
 import type { GoalSettings } from "../../lib/crossline";
 import { GoalControls } from "./goal-controls";
@@ -73,9 +73,13 @@ const errorText: Record<string, string> = {
  * moved. And an edit writes a new version rather than overwriting, so the criteria a past acceptance
  * was judged against stay readable.
  */
-export function MilestoneAdmin({ milestones, identities, initialEditId }: {
+export function MilestoneAdmin({ milestones, identities, previews, initialEditId }: {
   milestones: AdminMilestone[];
   identities: Array<{ id: string; label: string }>;
+  /** Server-rendered preview drawers, keyed by milestone id — `loadMilestoneDetail` only runs server-side,
+   * so the page renders each one and hands the finished JSX down rather than this client component
+   * fetching it itself. */
+  previews?: Record<string, ReactNode>;
   /** From `/milestones?edit=<id>` — a warning shown on another page (Review) links straight into the
    * edit form for that milestone instead of leaving the person to find it themselves. */
   initialEditId?: string;
@@ -293,6 +297,8 @@ export function MilestoneAdmin({ milestones, identities, initialEditId }: {
       const outcomes = milestone.successCriteria.filter((criterion) => criterion.evidenceOf === "outcome").length;
       const unlabelled = milestone.successCriteria.filter((criterion) => !criterion.evidenceOf).length;
       return <li key={milestone.id} data-status={milestone.status}>
+        <a className="card-cover-link" href={`/milestones/${encodeURIComponent(milestone.id)}`} aria-label={milestone.title} />
+        {previews?.[milestone.id]}
         <div className="milestone-admin-head">
           <b>{milestone.title}</b>
           <small>{milestone.identityId} · {statusLabel[milestone.status]} · v{milestone.version}</small>

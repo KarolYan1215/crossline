@@ -5,6 +5,7 @@ import type { AnalysisProposal } from "@crossline/core";
 import { permissionCandidates, permissionModeEnabled } from "../../lib/permission-mode";
 import { PermissionModePanel } from "./permission-mode-panel";
 import { requireSessionContext } from "../../lib/access-guard";
+import { TaskPreview } from "../task-preview";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +31,10 @@ export default async function ApprovalsPage() {
       {evidenceReviews.map((item) => {
         const own = claims.filter((claim) => claim.workOrderId === item.id && claim.reviewStatus === "submitted");
         const execution = executions.filter((entry) => entry.workOrderId === item.id).at(-1);
-        return <article key={item.id}><b>EVIDENCE</b><strong>{item.intent}</strong>
+        return <article key={item.id}>
+          <a className="card-cover-link" href={`/workbench/${encodeURIComponent(item.id)}`} aria-label={item.intent} />
+          <TaskPreview ctx={ctx} workOrderId={item.id} />
+          <b>EVIDENCE</b><strong>{item.intent}</strong>
           <p>
             {own.length ? own.map((claim) => `${claim.kind} · ${claim.description} · ${claim.uri}`).join("；") : "本次提交没有证据声明"}
             {execution?.durationObserved
@@ -52,6 +56,8 @@ export default async function ApprovalsPage() {
     <section className="work-order-list">{proposals.map((item) => {
       const proposal = item.payload as AnalysisProposal & { audit: { threadId: string; turnId: string }; contextVersion: string };
       return <article key={item.id}>
+        <a className="card-cover-link" href={`/workbench/${encodeURIComponent(item.id)}`} aria-label={item.intent} />
+        <TaskPreview ctx={ctx} workOrderId={item.id} />
         <header><span>AI PROPOSAL · 待计划审批</span><b>{item.riskTier}</b></header>
         <h2>{item.intent}</h2>
         <p>结构和输入引用已校验；语义仍需人工判断。尚未批准、排程或执行。</p>

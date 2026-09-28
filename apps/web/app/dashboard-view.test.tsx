@@ -1,10 +1,19 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
+import { CrosslineStore } from "@crossline/db";
+vi.mock("server-only", () => ({}));
 import { DashboardView, type DashboardData } from "./dashboard-view";
+import { TEST_CTX as testCtx } from "../lib/test-support";
+
+// DashboardView now embeds TaskPreview/MilestonePreview (server-rendered preview drawers) directly in
+// its list items — those call `loadTaskDetail`/`loadMilestoneDetail`, which resolve `getStore()`. None of
+// the ids below name anything real, so every preview quietly renders null; an in-memory store just keeps
+// that lookup off the real on-disk ledger (`getStore()` would otherwise resolve a path outside the repo).
+globalThis.crosslineStore = new CrosslineStore(":memory:");
 
 describe("dashboard view", () => {
   test("renders one next action, two alternatives, and all identity lanes", () => {
-    const html = renderToStaticMarkup(<DashboardView data={{
+    const html = renderToStaticMarkup(<DashboardView ctx={testCtx} data={{
       principalId: "test-owner", workspaceId: "test-workspace", nowLabel: "周一 · 09:00", nowIso: "2026-09-14T14:00:00.000Z", timeZone: "America/Chicago", clockPinned: true,
       dateLabel: "14",
       monthLabel: "SEP · 2026",
@@ -21,7 +30,7 @@ describe("dashboard view", () => {
         { id: "investment", label: "投资", accent: "#23A989", completedCount: 2, activeMilestone: "完成本周研究备忘录", taskCount: 2, totalCount: 4, pct: 50 }
       ],
       upcoming: [],
-      localActivityAsked: true, lastNight: { state: "none" as const }, milestonePulse: [], todayCapacity: { availableMinutes: 0, committedMinutes: 0 }, flywheel: [], identityFlows: []
+      localActivityAsked: true, lastNight: { state: "none" as const }, milestonePulse: [], todayCapacity: { availableMinutes: 0, committedMinutes: 0 }, flywheel: [], flywheelStrip: { nodes: [], edges: [] }
     }} />);
 
     expect(html).toContain("下一行动");
@@ -32,7 +41,7 @@ describe("dashboard view", () => {
   });
 
   test("includes a usable quick capture form", () => {
-    const html = renderToStaticMarkup(<DashboardView data={{
+    const html = renderToStaticMarkup(<DashboardView ctx={testCtx} data={{
       principalId: "test-owner", workspaceId: "test-workspace", nowLabel: "周一 · 09:00", nowIso: "2026-09-14T14:00:00.000Z", timeZone: "America/Chicago", clockPinned: true,
       dateLabel: "14",
       monthLabel: "SEP · 2026",
@@ -41,7 +50,7 @@ describe("dashboard view", () => {
       care: [],
       identities: [],
       upcoming: [],
-      localActivityAsked: true, lastNight: { state: "none" as const }, milestonePulse: [], todayCapacity: { availableMinutes: 0, committedMinutes: 0 }, flywheel: [], identityFlows: []
+      localActivityAsked: true, lastNight: { state: "none" as const }, milestonePulse: [], todayCapacity: { availableMinutes: 0, committedMinutes: 0 }, flywheel: [], flywheelStrip: { nodes: [], edges: [] }
     }} />);
     expect(html).toContain("快速收集");
     expect(html).toContain('name="title"');
@@ -50,12 +59,12 @@ describe("dashboard view", () => {
   });
 
   test("uses a running head instead of a SaaS sidebar and keeps health in the care band", () => {
-    const html = renderToStaticMarkup(<DashboardView data={{
+    const html = renderToStaticMarkup(<DashboardView ctx={testCtx} data={{
       principalId: "test-owner", workspaceId: "test-workspace", nowLabel: "周一 · 09:00", nowIso: "2026-09-14T14:00:00.000Z", timeZone: "America/Chicago", clockPinned: true, dateLabel: "14", monthLabel: "SEP · 2026",
       capacity: { level: "uncalibrated" as const, observationCount: 0, basis: [], blockers: [{ code: "LOCAL_ACTIVITY_NOT_AUTHORISED", message: "本机活动采集未开启" }] },
       progress: { streakDays: 0, weekCount: 0 },
       care: [],
-      identities: [], upcoming: [], localActivityAsked: true, lastNight: { state: "none" as const }, milestonePulse: [], todayCapacity: { availableMinutes: 0, committedMinutes: 0 }, flywheel: [], identityFlows: []
+      identities: [], upcoming: [], localActivityAsked: true, lastNight: { state: "none" as const }, milestonePulse: [], todayCapacity: { availableMinutes: 0, committedMinutes: 0 }, flywheel: [], flywheelStrip: { nodes: [], edges: [] }
     }} />);
     expect(html).toContain("running-head");
     expect(html).not.toContain("sidebar");
@@ -71,26 +80,26 @@ describe("dashboard view honesty", () => {
     capacity: { level: "uncalibrated" as const, observationCount: 0, basis: [], blockers: [{ code: "LOCAL_ACTIVITY_NOT_AUTHORISED", message: "本机活动采集未开启" }] },
     progress: { streakDays: 0, weekCount: 0 },
     care: [],
-    identities: [], upcoming: [], localActivityAsked: true, lastNight: { state: "none" as const }, milestonePulse: [], todayCapacity: { availableMinutes: 0, committedMinutes: 0 }, flywheel: [], identityFlows: []
+    identities: [], upcoming: [], localActivityAsked: true, lastNight: { state: "none" as const }, milestonePulse: [], todayCapacity: { availableMinutes: 0, committedMinutes: 0 }, flywheel: [], flywheelStrip: { nodes: [], edges: [] }
   };
 
   test("does not render a hardcoded year progress bar", () => {
-    const html = renderToStaticMarkup(<DashboardView data={data} />);
+    const html = renderToStaticMarkup(<DashboardView ctx={testCtx} data={data} />);
     expect(html).not.toContain("YEAR PROGRESS");
     expect(html).not.toContain("70%");
     expect(html).not.toContain("year-track");
   });
 
   test("does not claim a live system state it never measured", () => {
-    const html = renderToStaticMarkup(<DashboardView data={data} />);
+    const html = renderToStaticMarkup(<DashboardView ctx={testCtx} data={data} />);
     expect(html).not.toContain("LIVE");
   });
 });
 
 describe("capacity honesty", () => {
-  const withCapacity = (capacity: DashboardData["capacity"]) => renderToStaticMarkup(<DashboardView data={{
+  const withCapacity = (capacity: DashboardData["capacity"]) => renderToStaticMarkup(<DashboardView ctx={testCtx} data={{
     principalId: "test-owner", workspaceId: "test-workspace", nowLabel: "周一 · 09:00", nowIso: "2026-09-14T14:00:00.000Z", timeZone: "America/Chicago", clockPinned: true, dateLabel: "14", monthLabel: "SEP · 2026",
-    capacity, progress: { streakDays: 0, weekCount: 0 }, care: [], identities: [], upcoming: [], localActivityAsked: true, lastNight: { state: "none" as const }, milestonePulse: [], todayCapacity: { availableMinutes: 0, committedMinutes: 0 }, flywheel: [], identityFlows: []
+    capacity, progress: { streakDays: 0, weekCount: 0 }, care: [], identities: [], upcoming: [], localActivityAsked: true, lastNight: { state: "none" as const }, milestonePulse: [], todayCapacity: { availableMinutes: 0, committedMinutes: 0 }, flywheel: [], flywheelStrip: { nodes: [], edges: [] }
   }} />);
 
   test("names what the reading was derived from instead of calling everything a self-report", () => {
@@ -110,10 +119,10 @@ describe("capacity honesty", () => {
 });
 
 describe("last night's expansion", () => {
-  const withLastNight = (lastNight: DashboardData["lastNight"]) => renderToStaticMarkup(<DashboardView data={{
+  const withLastNight = (lastNight: DashboardData["lastNight"]) => renderToStaticMarkup(<DashboardView ctx={testCtx} data={{
     principalId: "test-owner", workspaceId: "test-workspace", nowLabel: "周一 · 09:00", nowIso: "2026-09-14T14:00:00.000Z", timeZone: "America/Chicago", clockPinned: true, dateLabel: "14", monthLabel: "SEP · 2026",
     capacity: { level: "uncalibrated", observationCount: 0, basis: [], blockers: [] },
-    progress: { streakDays: 0, weekCount: 0 }, care: [], identities: [], upcoming: [], localActivityAsked: true, lastNight, milestonePulse: [], todayCapacity: { availableMinutes: 0, committedMinutes: 0 }, flywheel: [], identityFlows: []
+    progress: { streakDays: 0, weekCount: 0 }, care: [], identities: [], upcoming: [], localActivityAsked: true, lastNight, milestonePulse: [], todayCapacity: { availableMinutes: 0, committedMinutes: 0 }, flywheel: [], flywheelStrip: { nodes: [], edges: [] }
   }} />);
 
   test("a night that did not run says so with its reason, instead of showing older output as new", () => {
