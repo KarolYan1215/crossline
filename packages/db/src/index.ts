@@ -981,10 +981,10 @@ export class CrosslineStore {
     }).immediate();
   }
 
-  listExecutions(workspaceId: string): StoredExecution[] {
-    const rows = this.#db.prepare(
-      "SELECT * FROM executions WHERE workspace_id = ? ORDER BY started_at, id"
-    ).all(workspaceId) as Array<Record<string, string | number | null>>;
+  listExecutions(workspaceId: string, workOrderId?: string): StoredExecution[] {
+    const rows = (workOrderId
+      ? this.#db.prepare("SELECT * FROM executions WHERE workspace_id = ? AND work_order_id = ? ORDER BY started_at, id").all(workspaceId, workOrderId)
+      : this.#db.prepare("SELECT * FROM executions WHERE workspace_id = ? ORDER BY started_at, id").all(workspaceId)) as Array<Record<string, string | number | null>>;
     return rows.map((row) => {
       const payload = JSON.parse(String(row.payload_json)) as { durationObserved?: boolean; interruptions?: StoredExecution["interruptions"] };
       return {
@@ -1156,6 +1156,21 @@ export class CrosslineStore {
     );
   }
 
+  #mapMilestoneRow(row: Record<string, string | number>): StoredMilestone {
+    return {
+      id: String(row.id),
+      ownerId: String(row.owner_id),
+      workspaceId: String(row.workspace_id),
+      identityId: String(row.identity_id),
+      title: String(row.title),
+      version: Number(row.version),
+      ...(row.project_id ? { projectId: String(row.project_id) } : {}),
+      status: String(row.status) as StoredMilestone["status"],
+      successCriteria: JSON.parse(String(row.success_criteria_json ?? "[]")) as SuccessCriterion[],
+      verifiability: String(row.verifiability ?? "unstated") as StoredMilestone["verifiability"]
+    };
+  }
+
   listMilestones(workspaceId: string): StoredMilestone[] {
     // The outer join used to match on `(id, version)` alone — harmless while two workspaces could never
     // both hold a row with the same id (the very bug migration 7 fixes), invisible until fixing that made
@@ -1171,18 +1186,22 @@ export class CrosslineStore {
       WHERE m.workspace_id = ?
       ORDER BY m.identity_id, m.id
     `).all(workspaceId, workspaceId) as Array<Record<string, string | number>>;
-    return rows.map((row) => ({
-      id: String(row.id),
-      ownerId: String(row.owner_id),
-      workspaceId: String(row.workspace_id),
-      identityId: String(row.identity_id),
-      title: String(row.title),
-      version: Number(row.version),
-      ...(row.project_id ? { projectId: String(row.project_id) } : {}),
-      status: String(row.status) as StoredMilestone["status"],
-      successCriteria: JSON.parse(String(row.success_criteria_json ?? "[]")) as SuccessCriterion[],
-      verifiability: String(row.verifiability ?? "unstated") as StoredMilestone["verifiability"]
-    }));
+    return rows.map((row) => this.#mapMilestoneRow(row));
+  }
+
+  /** Same latest-version join as `listMilestones`, narrowed to one id — index-covered
+   * (`milestones_workspace(workspace_id, id)`) rather than the full-workspace scan `listMilestones`
+   * does, for callers (like `task-detail.ts`'s single-id tier) that only need one milestone. */
+  getMilestone(workspaceId: string, id: string): StoredMilestone | undefined {
+    const row = this.#db.prepare(`
+      SELECT m.* FROM milestones m
+      JOIN (
+        SELECT id, MAX(version) AS version FROM milestones
+        WHERE workspace_id = ? AND id = ? GROUP BY id
+      ) latest ON latest.id = m.id AND latest.version = m.version
+      WHERE m.workspace_id = ? AND m.id = ?
+    `).get(workspaceId, id, workspaceId, id) as Record<string, string | number> | undefined;
+    return row ? this.#mapMilestoneRow(row) : undefined;
   }
 
   saveMilestoneRelation(relation:
@@ -1451,17 +1470,31 @@ export class CrosslineStore {
     }));
   }
 
-  listWorkOrders(workspaceId: string): StoredWorkOrder[] {
-    const rows = this.#db.prepare(
-      "SELECT * FROM work_orders WHERE workspace_id = ? ORDER BY updated_at, id"
-    ).all(workspaceId) as Array<Record<string, string>>;
-    return rows.map((row) => ({
+  #mapWorkOrderRow(row: Record<string, string>): StoredWorkOrder {
+    return {
       id: row.id!, ownerId: row.owner_id!, workspaceId: row.workspace_id!, identityId: row.identity_id!,
       projectId: row.project_id!, milestoneId: row.milestone_id!, intent: row.intent!, state: row.state!,
       riskTier: row.risk_tier as StoredWorkOrder["riskTier"],
       estimate: JSON.parse(row.estimate_json!) as StoredWorkOrder["estimate"],
       payload: JSON.parse(row.payload_json!)
-    }));
+    };
+  }
+
+  listWorkOrders(workspaceId: string): StoredWorkOrder[] {
+    const rows = this.#db.prepare(
+      "SELECT * FROM work_orders WHERE workspace_id = ? ORDER BY updated_at, id"
+    ).all(workspaceId) as Array<Record<string, string>>;
+    return rows.map((row) => this.#mapWorkOrderRow(row));
+  }
+
+  /** Index-covered point lookup (`(workspace_id, id)` is the table's own primary key) for callers that
+   * only need one work order — `task-detail.ts`'s single-id tier — instead of `listWorkOrders`'s full
+   * per-workspace scan. */
+  getWorkOrder(workspaceId: string, id: string): StoredWorkOrder | undefined {
+    const row = this.#db.prepare(
+      "SELECT * FROM work_orders WHERE workspace_id = ? AND id = ?"
+    ).get(workspaceId, id) as Record<string, string> | undefined;
+    return row ? this.#mapWorkOrderRow(row) : undefined;
   }
 
   saveWorkOrder(workOrder: StoredWorkOrder): void {
@@ -1935,6 +1968,39 @@ export class CrosslineStore {
       ).run(principal.id, workspace.id, now);
       return { principal, workspace };
     })();
+  }
+
+  /**
+   * What `requireAccessContext` calls on every request. The steady-state path (every request after an
+   * account's first-ever login) used to cost 4 separate SQL statements — `createPrincipalWithWorkspace`'s
+   * own 3-statement "principal already exists" branch, plus a redundant `getWorkspaceMembership` call
+   * re-querying the exact same `workspace_members` row `createPrincipalWithWorkspace` had just read —
+   * because every workspace has exactly one owner member and no invite path adds a second, that row is
+   * always the same one. One indexed JOIN replaces all 4. First-ever login (the one-time path) still goes
+   * through `createPrincipalWithWorkspace`'s existing transactional creation unchanged, since that path
+   * runs once per account ever, not on the per-request path this method exists to speed up.
+   */
+  resolvePrincipalWorkspace(betterAuthUserId: string, workspaceName: string):
+    { principal: StoredPrincipal; workspace: StoredWorkspace; role: StoredWorkspaceMember["role"] } {
+    const fast = this.#db.prepare(`
+      SELECT p.id AS principal_id, p.created_at AS principal_created_at, wm.role AS role,
+             w.id AS workspace_id, w.name AS workspace_name, w.created_at AS workspace_created_at
+      FROM principals p
+      JOIN workspace_members wm ON wm.principal_id = p.id AND wm.role = 'owner'
+      JOIN workspaces w ON w.id = wm.workspace_id
+      WHERE p.better_auth_user_id = ?
+    `).get(betterAuthUserId) as Record<string, string> | undefined;
+    if (fast) {
+      return {
+        principal: { id: fast.principal_id!, betterAuthUserId, createdAt: fast.principal_created_at! },
+        workspace: { id: fast.workspace_id!, name: fast.workspace_name!, createdAt: fast.workspace_created_at! },
+        role: fast.role as StoredWorkspaceMember["role"]
+      };
+    }
+    const { principal, workspace } = this.createPrincipalWithWorkspace(betterAuthUserId, workspaceName);
+    const membership = this.getWorkspaceMembership(principal.id, workspace.id);
+    if (!membership) throw new Error("PRINCIPAL_WITHOUT_OWNER_WORKSPACE");
+    return { principal, workspace, role: membership.role };
   }
 
   appendAuditEvent(event: Omit<StoredAuditEvent, "id" | "createdAt">): StoredAuditEvent {

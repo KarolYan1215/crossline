@@ -5,6 +5,7 @@ import { MilestoneAdmin, type AdminMilestone } from "./milestone-admin";
 import { ensureSeeded, getStore, readGoalSettings, readSchedulePreferences } from "../../lib/crossline";
 import { requireSessionContext } from "../../lib/access-guard";
 import { MilestonePreview } from "../task-preview";
+import { loadMilestoneDetailsBatch } from "../../lib/task-detail";
 
 export const dynamic = "force-dynamic";
 
@@ -52,6 +53,8 @@ export default async function MilestonesPage({ searchParams }: {
     ...(progress.get(milestone.id) ? { progress: progress.get(milestone.id)! } : {})
   }));
 
+  const milestoneDetails = loadMilestoneDetailsBatch(ctx, admin.map((milestone) => milestone.id));
+
   return <SubpageShell eyebrow="03 / MILESTONE RELATIONS" title="里程碑星图" description="关系允许循环；实线为已批准，虚线为待周复盘确认。没有 LLM 总分。">
     {/* The map only shows approved and candidate relations, so drafts would be invisible here. */}
     <MilestoneMap
@@ -71,7 +74,7 @@ export default async function MilestonesPage({ searchParams }: {
         // Pre-rendered server output handed to a client component as data — MilestoneAdmin itself stays
         // "use client" for its form state, but the preview drawer's content still needs `loadMilestoneDetail`,
         // which only runs on the server.
-        previews={Object.fromEntries(admin.map((milestone) => [milestone.id, <MilestonePreview key={milestone.id} ctx={ctx} milestoneId={milestone.id} />]))}
+        previews={Object.fromEntries(admin.map((milestone) => [milestone.id, <MilestonePreview key={milestone.id} detail={milestoneDetails.get(milestone.id)} />]))}
         {...(editId ? { initialEditId: editId } : {})}
       />
     </section>

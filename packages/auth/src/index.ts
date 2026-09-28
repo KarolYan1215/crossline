@@ -142,27 +142,31 @@ export type ResolvedAccessContext = { ctx: AccessContext } | { error: "UNAUTHENT
 export async function requireAccessContext(
   auth: CrosslineAuth, store: CrosslineStore, request: Request
 ): Promise<ResolvedAccessContext> {
+  // Untouchable: this must stay a live, uncached call on every single request — `cookieCache.enabled:
+  // false` is what makes a revoked session or a demoted role take effect on the very next request,
+  // proven end to end by `scripts/gate-identity-check.ts`. Nothing below this line may weaken that.
   const session = await auth.api.getSession({ headers: request.headers });
   if (!session) return { error: "UNAUTHENTICATED" };
 
-  const { principal, workspace } = store.createPrincipalWithWorkspace(session.user.id, "个人 workspace");
-  const membership = store.getWorkspaceMembership(principal.id, workspace.id);
-  if (!membership) return { error: "NOT_A_MEMBER" };
+  // One indexed query on the steady-state path instead of the 4 separate statements
+  // `createPrincipalWithWorkspace` + a redundant `getWorkspaceMembership` used to cost per request — see
+  // `resolvePrincipalWorkspace`'s own doc comment. Still re-derives role fresh from `workspace_members`
+  // on every call, so a revoked/demoted membership is reflected exactly as immediately as before.
+  const { principal, workspace, role } = store.resolvePrincipalWorkspace(session.user.id, "个人 workspace");
 
-  // Which provider authenticated this user, for the audit trail — not itself a security boundary, so a
-  // best-effort read of linked accounts is enough; the membership check above is what actually gates.
-  let provider: AccessContext["identity"]["provider"] = "credential";
-  try {
-    const accounts = await auth.api.listUserAccounts({ headers: request.headers });
-    const social = accounts.find((account) => account.providerId !== "credential");
-    if (social?.providerId === "google") provider = "google";
-  } catch { /* best-effort only */ }
+  // `identity.provider` has no real consumer today (nothing in this codebase reads it) — the
+  // `auth.api.listUserAccounts` call this used to make was a 5th per-request round trip, against a
+  // second SQLite file, purely to label a field nothing looks at. Defaulted here instead; real
+  // provider resolution belongs at the point something actually writes an audit event
+  // (`appendAuditEvent`, currently only exercised by tests), resolved lazily there, not eagerly on every
+  // read this function serves.
+  const provider: AccessContext["identity"]["provider"] = "credential";
 
   return {
     ctx: {
       principalId: principal.id,
       workspaceId: workspace.id,
-      role: membership.role,
+      role,
       identity: { provider, issuer: "crossline", subject: session.user.id },
       authMethod: "session",
       requestId: randomUUID()

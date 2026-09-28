@@ -1,5 +1,4 @@
 import type { CSSProperties } from "react";
-import type { AccessContext } from "@crossline/core";
 import { ArrowUpRight, CircleDot, Clock3 } from "lucide-react";
 import { OfflineCaptureForm, OfflineReplay } from "./offline-command-forms";
 import { BatchCaptureForm } from "./batch-capture-form";
@@ -8,6 +7,7 @@ import { EnergyProbe } from "./energy-probe";
 import { LocalActivityConsent } from "./local-activity-consent";
 import { FlywheelStrip } from "./identity-flywheel";
 import { TaskPreview, MilestonePreview } from "./task-preview";
+import type { TaskDetail, MilestoneDetail } from "../lib/task-detail";
 import { SignOutButton } from "./sign-out-button";
 import { NAV_ITEMS } from "./nav-items";
 import { BottomNav } from "./bottom-nav";
@@ -70,6 +70,11 @@ export type DashboardData = {
     | { state: "ran"; proposals: number }
     | { state: "skipped"; reason: string };
   milestonePulse: Array<{ id: string; identity: string; title: string; evidence: string }>;
+  /** One batched read behind every preview drawer on this page — computed once in `page.tsx` (not
+   * `loadDashboard` itself, to avoid a circular import with `lib/task-detail.ts`) and handed down here
+   * so no card's preview independently re-reads the whole workspace. */
+  taskDetailById: Map<string, TaskDetail>;
+  milestoneDetailById: Map<string, MilestoneDetail>;
 };
 
 // Never a bare number: an estimate without its provenance is indistinguishable from a measurement.
@@ -94,7 +99,7 @@ const capacityLabel = (capacity: DashboardData["capacity"]) =>
     ? "精力未标定"
     : `精力 ${capacityLevelLabel[capacity.level]} · 依据 ${capacity.basis.map((item) => basisLabel[item]).join(" + ")} · ${capacity.observationCount} 次观测`;
 
-export function DashboardView({ ctx, data }: { ctx: AccessContext; data: DashboardData }) {
+export function DashboardView({ data }: { data: DashboardData }) {
   const identityLabel = (id: string) => data.identities.find((item) => item.id === id)?.label ?? (id === "capacity" ? "容量策略" : id);
   // The whole card is a real `<a>` to its detail page — bookmarkable, works with no JS — and a small
   // corner button opens the same detail as a quick-peek drawer without leaving Today. Two separate
@@ -102,7 +107,7 @@ export function DashboardView({ ctx, data }: { ctx: AccessContext; data: Dashboa
   const action = (item: DashboardAction | undefined, label: string) => <article className="alt-action">
     <header><span>{label}</span><ArrowUpRight size={13} aria-hidden="true" /></header>
     {item ? <><a className="card-cover-link" href={`/workbench/${encodeURIComponent(item.id)}`} aria-label={item.title} />
-      <TaskPreview ctx={ctx} workOrderId={item.id} />
+      <TaskPreview detail={data.taskDetailById.get(item.id)} />
       <h3>{item.title}</h3>
       {/* The milestone this card feeds sits on the card itself — a separate MILESTONE PULSE list further
           down used to be the only place that answered "what is this for", which meant leaving the card
@@ -136,7 +141,7 @@ export function DashboardView({ ctx, data }: { ctx: AccessContext; data: Dashboa
       <article className="hero-action">
         <header><span>01 / NEXT ACTION · 下一行动</span><span>INPUTS {data.primary?.inputsReady ? "READY" : "CHECK"}</span></header>
         {data.primary ? <>
-          <TaskPreview ctx={ctx} workOrderId={data.primary.id} />
+          <TaskPreview detail={data.taskDetailById.get(data.primary.id)} />
           <div className={`identity-glyph ${data.primary.identityId}`} aria-hidden="true" />
           <h1>{data.primary.title}</h1>
           <p>{data.primary.reason}</p>
@@ -241,7 +246,7 @@ export function DashboardView({ ctx, data }: { ctx: AccessContext; data: Dashboa
         {data.upcoming.map((item) => <article key={item.id}>
           {item.identityId !== "unclassified" && <>
             <a className="card-cover-link" href={`/workbench/${encodeURIComponent(item.id)}`} aria-label={item.title} />
-            <TaskPreview ctx={ctx} workOrderId={item.id} />
+            <TaskPreview detail={data.taskDetailById.get(item.id)} />
           </>}
           <time className={item.time ? "time-precise" : "time-vague"}>{item.time ?? "—"}</time>
           <span className={`line-symbol ${item.identityId}`} />
@@ -263,7 +268,7 @@ export function DashboardView({ ctx, data }: { ctx: AccessContext; data: Dashboa
         ).map((item) => <article key={item.id}>
           {item.linkable && <>
             <a className="card-cover-link" href={`/milestones/${encodeURIComponent(item.id)}`} aria-label={item.title} />
-            <MilestonePreview ctx={ctx} milestoneId={item.id} />
+            <MilestonePreview detail={data.milestoneDetailById.get(item.id)} />
           </>}
           <span>{item.identity}</span><strong>{item.title}</strong><small>{item.evidence}</small>
         </article>)}

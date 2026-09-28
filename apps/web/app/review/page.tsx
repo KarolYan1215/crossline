@@ -7,6 +7,7 @@ import { RevokeInsight } from "./revoke-insight";
 import { WeeklyInsightButton } from "./weekly-insight-button";
 import { requireSessionContext } from "../../lib/access-guard";
 import { TaskPreview, MilestonePreview } from "../task-preview";
+import { loadTaskDetailsBatch, loadMilestoneDetailsBatch } from "../../lib/task-detail";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +27,8 @@ export default async function ReviewPage() {
   const workOrders = getStore().listWorkOrders(ctx.workspaceId);
   const accepted = workOrders.filter((workOrder) => workOrder.state === "accepted").length;
   const review = loadWeeklyReview(ctx);
+  const taskDetails = loadTaskDetailsBatch(ctx, review.autoAccepted.map((item) => item.workOrderId));
+  const milestoneDetails = loadMilestoneDetailsBatch(ctx, review.milestoneProgress.map((item) => item.id));
 
   return <SubpageShell eyebrow="证据驱动" title="周复盘" description="只显示数据库事实；尚无观测的指标一律标记为未标定，不给出编造数字。">
     <section className="review-block">
@@ -38,7 +41,7 @@ export default async function ReviewPage() {
         ? <p className="review-empty">本周没有自动验收记录。</p>
         : <ul className="review-list">{review.autoAccepted.map((item) => <li key={item.workOrderId}>
           <a className="card-cover-link" href={`/workbench/${encodeURIComponent(item.workOrderId)}`} aria-label={item.intent} />
-          <TaskPreview ctx={ctx} workOrderId={item.workOrderId} />
+          <TaskPreview detail={taskDetails.get(item.workOrderId)} />
           <b>{item.intent}</b>
           <small>里程碑 {item.milestoneId} · {item.acceptedAt.slice(0, 16).replace("T", " ")}</small>
           {item.questioned && <em className="review-flag">关系已被反证，需复核</em>}
@@ -50,7 +53,7 @@ export default async function ReviewPage() {
       <h2>里程碑达成标准</h2>
       {review.milestoneProgress.map((milestone) => <article key={milestone.id} className="review-milestone">
         <a className="card-cover-link" href={`/milestones/${encodeURIComponent(milestone.id)}`} aria-label={milestone.title} />
-        <MilestonePreview ctx={ctx} milestoneId={milestone.id} />
+        <MilestonePreview detail={milestoneDetails.get(milestone.id)} />
         <b>{milestone.title}</b>
         {milestone.criteria.length === 0
           ? <em className="review-flag">未声明达成标准 —— 闸门会拒绝它，直到你写下什么算达成。

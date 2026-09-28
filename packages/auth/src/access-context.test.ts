@@ -8,11 +8,12 @@ import { requireAccessContext, type CrosslineAuth } from "./index";
  * function actually calls; the real HTTP/cookie round trip is exercised manually (see the stage-two
  * verification steps in the plan) against a running dev server with a real browser session.
  */
-function fakeAuth(session: { userId: string } | null, accounts: Array<{ providerId: string }> = []): CrosslineAuth {
+function fakeAuth(session: { userId: string } | null, accounts: Array<{ providerId: string }> = [],
+  onListUserAccounts?: () => void): CrosslineAuth {
   return {
     api: {
       getSession: async () => session ? { session: { userId: session.userId }, user: { id: session.userId, email: "x@example.com" } } : null,
-      listUserAccounts: async () => accounts
+      listUserAccounts: async () => { onListUserAccounts?.(); return accounts; }
     }
   } as unknown as CrosslineAuth;
 }
@@ -50,11 +51,13 @@ describe("requireAccessContext", () => {
     expect(second.ctx.principalId).toBe(first.ctx.principalId);
   });
 
-  test("a linked Google account is reflected in identity.provider", async () => {
-    const auth = fakeAuth({ userId: "auth-user-3" }, [{ providerId: "credential" }, { providerId: "google" }]);
+  test("identity.provider defaults to credential and never calls listUserAccounts — nothing in this codebase reads the field, so the per-request round trip it used to cost is gone", async () => {
+    let calls = 0;
+    const auth = fakeAuth({ userId: "auth-user-3" }, [{ providerId: "credential" }, { providerId: "google" }], () => { calls++; });
     const result = await requireAccessContext(auth, store, new Request("http://x/"));
     if ("error" in result) throw new Error(`expected ctx, got ${result.error}`);
-    expect(result.ctx.identity.provider).toBe("google");
+    expect(result.ctx.identity.provider).toBe("credential");
+    expect(calls).toBe(0);
   });
 
   test("every request gets its own requestId for audit correlation", async () => {

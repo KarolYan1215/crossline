@@ -1075,7 +1075,11 @@ const toAction = (ctx: AccessContext, order: ActionableOrder | undefined, reason
   inputsReady: order.state === "ready_for_human" || order.state === "active"
 }) : undefined;
 
-export async function loadDashboard(ctx: AccessContext): Promise<DashboardData> {
+// `taskDetailById`/`milestoneDetailById` are deliberately not part of this return type: they're batched
+// in `page.tsx` instead, to avoid a circular import between this file and `lib/task-detail.ts` (which
+// already imports from here). `page.tsx` spreads them into what this returns before handing it to
+// `DashboardView`.
+export async function loadDashboard(ctx: AccessContext): Promise<Omit<DashboardData, "taskDetailById" | "milestoneDetailById">> {
   ensureSeeded(ctx);
   const store = getStore();
   const orders = store.listWorkOrders(ctx.workspaceId);
@@ -1125,14 +1129,18 @@ export async function loadDashboard(ctx: AccessContext): Promise<DashboardData> 
     .map((block) => [block.id.split(":")[1]!, block]));
   const milestoneTitleById = new Map(milestones.map((milestone) => [milestone.id, milestone.title]));
 
+  // Read once, shared by both `flywheel` and `flywheelStrip` below — they used to each run this same
+  // query independently.
+  const approvedOrCandidateRelations = store.listMilestoneRelations(ctx.workspaceId)
+    // Approved and candidate both show — same distinction the star map already draws with a dashed
+    // line ("虚线为待周复盘确认"), just spelled out in words instead of a line style.
+    .filter((relation) => relation.status === "approved" || relation.status === "candidate");
+
   // Cross-identity relations touching a milestone behind today's actionable work — the plain-English
   // "doing A moves B forward" that the star map only ever shows as an edge and a one-word kind label.
   const todayMilestoneIds = new Set(active.map((order) => order.milestoneId));
-  const flywheel = store.listMilestoneRelations(ctx.workspaceId)
-    // Approved and candidate both show — same distinction the star map already draws with a dashed
-    // line ("虚线为待周复盘确认"), just spelled out in words instead of a line style.
-    .filter((relation) => (relation.status === "approved" || relation.status === "candidate")
-      && (todayMilestoneIds.has(relation.fromMilestoneId) || todayMilestoneIds.has(relation.toMilestoneId)))
+  const flywheel = approvedOrCandidateRelations
+    .filter((relation) => todayMilestoneIds.has(relation.fromMilestoneId) || todayMilestoneIds.has(relation.toMilestoneId))
     .slice(0, 3)
     .map((relation) => ({
       id: relation.id,
@@ -1149,8 +1157,7 @@ export async function loadDashboard(ctx: AccessContext): Promise<DashboardData> 
   // load — not a live push — so "grows to the right" means "next time this loads", which is what an
   // SSR app can promise; a milestone with a relation but no activity yet just sorts toward the left.
   const flywheelStrip = (() => {
-    const relations = store.listMilestoneRelations(ctx.workspaceId)
-      .filter((relation) => relation.status === "approved" || relation.status === "candidate");
+    const relations = approvedOrCandidateRelations;
     if (!relations.length) return { nodes: [], edges: [] };
 
     const milestoneById = new Map(milestones.map((item) => [item.id, item]));

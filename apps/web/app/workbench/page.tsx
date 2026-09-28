@@ -10,6 +10,7 @@ import type { MilestoneGateResult } from "@crossline/core";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { requireSessionContext } from "../../lib/access-guard";
 import { TaskPreview } from "../task-preview";
+import { loadTaskDetailsBatch } from "../../lib/task-detail";
 
 // The tail, not the head: ids here are sometimes timestamp-prefixed, and two captures made minutes
 // apart shared their first eight characters — the page showed them as the same item twice.
@@ -94,6 +95,9 @@ export default async function WorkbenchPage({ searchParams }: {
   // from two places, is what keeps this from ever disagreeing with the Plan page.
   const today = planToday(ctx);
   const plan = await loadCurrentPlan(ctx);
+  // One batched read for every card's preview drawer instead of each `TaskPreview` re-reading the whole
+  // workspace — see `loadTaskDetailsBatch`'s own doc comment.
+  const taskDetails = loadTaskDetailsBatch(ctx, runs.map((run) => run.id));
   return <SubpageShell eyebrow="04 / AI WORK ORDERS" title="AI 作业台" description="这里呈现 SQLite 中真实的 WorkOrder、估时、材料和阻塞；不让用户编辑内部 DAG。">
     <section className="work-order-list">{captures.map((capture) => <article key={capture.id}>
       <header><span>CAPTURE / {shortId(capture.id)}</span><b>{stateLabel[capture.state]}</b></header>
@@ -129,7 +133,7 @@ export default async function WorkbenchPage({ searchParams }: {
         {/* The card's own actions (below) stay directly usable — the extended z-index rule in
             globals.css keeps every bare input/select/summary they use above this invisible link. */}
         <a className="card-cover-link" href={`/workbench/${encodeURIComponent(run.id)}`} aria-label={run.intent} />
-        <TaskPreview ctx={ctx} workOrderId={run.id} />
+        <TaskPreview detail={taskDetails.get(run.id)} />
         <header><span>{run.identityId.toUpperCase()} / {shortId(run.id)}</span><b><i className="gly" data-s={run.state} aria-hidden="true" />{stateLabel[run.state] ?? "未知状态"}</b></header>
         <h2>{run.intent}</h2>
         {/* The milestone this work order serves, on the card itself — previously only visible by

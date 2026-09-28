@@ -1,7 +1,7 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { CrosslineStore } from "@crossline/db";
 vi.mock("server-only", () => ({}));
-import { loadTaskDetail, loadMilestoneDetail } from "./task-detail";
+import { loadTaskDetail, loadMilestoneDetail, loadTaskDetailsBatch, loadMilestoneDetailsBatch } from "./task-detail";
 import { TEST_CTX } from "./test-support";
 
 afterEach(() => { globalThis.crosslineStore?.close(); globalThis.crosslineStore = undefined; });
@@ -75,4 +75,58 @@ test("a relation touching this milestone shows up as relatedFlywheel on both the
   }]);
   const milestoneDetail = loadMilestoneDetail(TEST_CTX, "m-paper");
   expect(milestoneDetail?.relatedFlywheel).toHaveLength(1);
+});
+
+function seedSecondOrderAcrossMilestones(store: CrosslineStore) {
+  store.saveMilestone({ id: "m-other", ownerId: TEST_CTX.principalId, workspaceId: TEST_CTX.workspaceId,
+    identityId: "startup", title: "验证客户假设", version: 1, status: "approved",
+    successCriteria: [{ id: "c1", statement: "x", required: true, measure: { kind: "artifact", mustExist: "x.md" } }] });
+  store.saveWorkOrder({
+    id: "wo-2", ownerId: TEST_CTX.principalId, workspaceId: TEST_CTX.workspaceId, identityId: "startup",
+    projectId: "startup-default", milestoneId: "m-other", intent: "约谈第一个客户",
+    state: "active", riskTier: "routine",
+    estimate: { p25Minutes: 20, p50Minutes: 30, p85Minutes: 45, source: "llm_prior", observationCount: 0, confidence: "low" },
+    payload: {}
+  });
+  store.saveMilestoneRelation({ id: "rel-1", ownerId: TEST_CTX.principalId, workspaceId: TEST_CTX.workspaceId,
+    fromMilestoneId: "m-paper", toMilestoneId: "m-other", kind: "informs", status: "approved",
+    evidence: [{ uri: "internal://analysis", source: "test", observedAt: new Date().toISOString() }],
+    explanation: "论文方法可用于验证客户假设", refutedWhen: "如果完全无关" });
+}
+
+test("loadTaskDetailsBatch matches loadTaskDetail value-for-value across multiple orders and milestones", () => {
+  const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
+  seedOrderWithMilestone(store);
+  seedSecondOrderAcrossMilestones(store);
+  const ids = ["wo-1", "wo-2"];
+  const batch = loadTaskDetailsBatch(TEST_CTX, ids);
+  for (const id of ids) expect(batch.get(id)).toEqual(loadTaskDetail(TEST_CTX, id));
+});
+
+test("loadTaskDetailsBatch returns an empty map for an empty id list", () => {
+  globalThis.crosslineStore = new CrosslineStore(":memory:");
+  expect(loadTaskDetailsBatch(TEST_CTX, [])).toEqual(new Map());
+});
+
+test("loadTaskDetailsBatch skips ids that don't exist rather than throwing or padding with undefined", () => {
+  const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
+  seedOrderWithMilestone(store);
+  const batch = loadTaskDetailsBatch(TEST_CTX, ["wo-1", "no-such-order"]);
+  expect(batch.has("wo-1")).toBe(true);
+  expect(batch.has("no-such-order")).toBe(false);
+  expect(batch.size).toBe(1);
+});
+
+test("loadMilestoneDetailsBatch matches loadMilestoneDetail value-for-value across multiple milestones", () => {
+  const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
+  seedOrderWithMilestone(store);
+  seedSecondOrderAcrossMilestones(store);
+  const ids = ["m-paper", "m-other"];
+  const batch = loadMilestoneDetailsBatch(TEST_CTX, ids);
+  for (const id of ids) expect(batch.get(id)).toEqual(loadMilestoneDetail(TEST_CTX, id));
+});
+
+test("loadMilestoneDetailsBatch returns an empty map for an empty id list", () => {
+  globalThis.crosslineStore = new CrosslineStore(":memory:");
+  expect(loadMilestoneDetailsBatch(TEST_CTX, [])).toEqual(new Map());
 });

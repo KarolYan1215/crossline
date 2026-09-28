@@ -36,6 +36,23 @@ test("an unknown Better Auth user id has no principal", () => {
   expect(store.getPrincipalByBetterAuthId("never-logged-in")).toBeUndefined();
 });
 
+test("resolvePrincipalWorkspace creates a principal+workspace on first login, identically to createPrincipalWithWorkspace", () => {
+  const resolved = store.resolvePrincipalWorkspace("auth-user-5", "个人 workspace");
+  expect(resolved.role).toBe("owner");
+  const principal = store.getPrincipalByBetterAuthId("auth-user-5");
+  expect(principal?.id).toBe(resolved.principal.id);
+  const membership = store.getWorkspaceMembership(resolved.principal.id, resolved.workspace.id);
+  expect(membership?.role).toBe("owner");
+});
+
+test("resolvePrincipalWorkspace's fast path (existing principal) returns the same principal/workspace/role as the slow path would", () => {
+  const created = store.createPrincipalWithWorkspace("auth-user-6", "个人 workspace");
+  const resolved = store.resolvePrincipalWorkspace("auth-user-6", "个人 workspace");
+  expect(resolved.principal).toEqual(created.principal);
+  expect(resolved.workspace).toEqual(created.workspace);
+  expect(resolved.role).toBe("owner");
+});
+
 test("appendAuditEvent records who, where, and why, and round-trips the payload", () => {
   const { principal, workspace } = store.createPrincipalWithWorkspace("auth-user-3", "个人 workspace");
   const event = store.appendAuditEvent({

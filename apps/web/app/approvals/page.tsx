@@ -6,6 +6,7 @@ import { permissionCandidates, permissionModeEnabled } from "../../lib/permissio
 import { PermissionModePanel } from "./permission-mode-panel";
 import { requireSessionContext } from "../../lib/access-guard";
 import { TaskPreview } from "../task-preview";
+import { loadTaskDetailsBatch } from "../../lib/task-detail";
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +24,7 @@ export default async function ApprovalsPage() {
   const revocations = new Map(getStore().listEvents(ctx.workspaceId, { type: "milestone_gate.auto_acceptance_revoked" })
     .map((event) => [event.entityId, String((event.payload as { reason?: string }).reason ?? "")]));
   const executions = getStore().listExecutions(ctx.workspaceId);
+  const taskDetails = loadTaskDetailsBatch(ctx, [...evidenceReviews, ...proposals].map((item) => item.id));
   return <SubpageShell eyebrow="05 / APPROVAL CONTROL" title="审批与验收" description="计划差异批量批准；外部动作逐项批准；里程碑证据由 AI 闸门判定并保留人工撤销权。">
     <PermissionModePanel initialEnabled={permissionModeEnabled(ctx)} initialCandidates={permissionCandidates(ctx)} />
     <section className="approval-ledger">
@@ -33,7 +35,7 @@ export default async function ApprovalsPage() {
         const execution = executions.filter((entry) => entry.workOrderId === item.id).at(-1);
         return <article key={item.id}>
           <a className="card-cover-link" href={`/workbench/${encodeURIComponent(item.id)}`} aria-label={item.intent} />
-          <TaskPreview ctx={ctx} workOrderId={item.id} />
+          <TaskPreview detail={taskDetails.get(item.id)} />
           <b>EVIDENCE</b><strong>{item.intent}</strong>
           <p>
             {own.length ? own.map((claim) => `${claim.kind} · ${claim.description} · ${claim.uri}`).join("；") : "本次提交没有证据声明"}
@@ -57,7 +59,7 @@ export default async function ApprovalsPage() {
       const proposal = item.payload as AnalysisProposal & { audit: { threadId: string; turnId: string }; contextVersion: string };
       return <article key={item.id}>
         <a className="card-cover-link" href={`/workbench/${encodeURIComponent(item.id)}`} aria-label={item.intent} />
-        <TaskPreview ctx={ctx} workOrderId={item.id} />
+        <TaskPreview detail={taskDetails.get(item.id)} />
         <header><span>AI PROPOSAL · 待计划审批</span><b>{item.riskTier}</b></header>
         <h2>{item.intent}</h2>
         <p>结构和输入引用已校验；语义仍需人工判断。尚未批准、排程或执行。</p>
