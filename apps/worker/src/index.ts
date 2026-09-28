@@ -14,6 +14,7 @@ import { createGoalBackplanner } from "./goal-backplanner";
 import { createPlanExplainer } from "./plan-explainer-runner";
 import { createWeeklyInsight } from "./weekly-insight-runner";
 import { createOnboardingProposer, createOnboardingConversation } from "./onboarding-runner";
+import { createBackgroundFactsExtractor } from "./background-facts-runner";
 import { scanPersonalCodexHistory } from "./codex-history";
 import { createGraphSync, type SyncOutcome } from "./graph-sync";
 import {
@@ -328,7 +329,7 @@ if (!capabilitySecret) {
       requiredSkills: [
         "crossline:crossline", "crossline:crossline-automation-stripper", "crossline:crossline-milestone-gate",
         "crossline:crossline-flywheel-scout", "crossline:crossline-material-preparer", "crossline:crossline-milestone-architect",
-        "crossline:crossline-goal-backplanner",
+        "crossline:crossline-goal-backplanner", "crossline:crossline-background-facts",
         "crossline:crossline-onboarding", "crossline:crossline-plan-explainer", "crossline:crossline-weekly-insight"
       ]
     },
@@ -345,6 +346,8 @@ if (!capabilitySecret) {
       createOnboardingProposer(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client)(answers, sources, signal),
     continueOnboardingConversation: (_client, threadId, message, focusIdentityId, signal, workspaceId) =>
       createOnboardingConversation(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client)(threadId, message, focusIdentityId, signal),
+    extractBackgroundFacts: (_client, captureTitle, captureContext, signal, workspaceId) =>
+      createBackgroundFactsExtractor(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client)(captureTitle, captureContext, signal),
     scanCodexHistory: () => scanPersonalCodexHistory(),
     backplanGoal: (_client, milestoneId, signal, workspaceId) =>
       createGoalBackplanner(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client)(milestoneId, signal),

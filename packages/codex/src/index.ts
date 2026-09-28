@@ -337,6 +337,11 @@ export async function startCodexSupervisor(options: {
     sources: Array<{ label: string; excerpt: string }>, signal: AbortSignal, workspaceId: string) => Promise<unknown>;
   continueOnboardingConversation?: (client: CodexRpcBoundary, threadId: string, message: string,
     focusIdentityId: string | null, signal: AbortSignal, workspaceId: string) => Promise<unknown>;
+  /** Fire-and-forget from the web app's own capture route (`POST /api/commands`) right after a capture
+   * is written — never surfaced to the capturing person, so this has no "already running" guard the way
+   * onboarding does; concurrent captures compacting at once is the normal case, not a conflict. */
+  extractBackgroundFacts?: (client: CodexRpcBoundary, captureTitle: string, captureContext: string,
+    signal: AbortSignal, workspaceId: string) => Promise<unknown>;
   /** A plain local filesystem read (the person's own Codex CLI session history) — no Codex app-server
    * call, so it takes no `client`/`signal`; still routed through this same capability-checked surface
    * rather than a new one, and still opt-in per call (the person clicks it each time onboarding wants it,
@@ -725,6 +730,19 @@ export async function startCodexSupervisor(options: {
         try {
           sendJson(response, 200, await options.continueOnboardingConversation(sidecar.client, threadId, message, focusIdentityId, controller.signal, callerWorkspaceId));
         } finally { if (onboardingConversing === controller) onboardingConversing = undefined; }
+        return;
+      }
+      if (request.method === "POST" && pathname === "/v1/background-facts/extract" && options.extractBackgroundFacts) {
+        if (request.headers.origin || !request.headers["content-type"]?.startsWith("application/json")) {
+          sendJson(response, 403, { blocker: { code: "BACKGROUND_FACTS_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
+          return;
+        }
+        if (runtimeBlocker) { sendJson(response, 503, { blocker: runtimeBlocker }); return; }
+        const body = await readJsonBody(request);
+        const captureTitle = String(body?.captureTitle ?? "");
+        const captureContext = String(body?.captureContext ?? "");
+        const controller = new AbortController();
+        sendJson(response, 200, await options.extractBackgroundFacts(sidecar.client, captureTitle, captureContext, controller.signal, callerWorkspaceId));
         return;
       }
       if (request.method === "POST" && pathname === "/v1/onboarding/codex-history/scan" && options.scanCodexHistory) {

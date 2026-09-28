@@ -201,6 +201,8 @@ export type StoredDurationObservation = {
   observedAt: string; createdAt: string;
 };
 
+export type StoredBackgroundFact = { key: string; value: string; why: string; sourceQuote: string; updatedAt: string };
+
 /**
  * Tables that once existed and never carried a row.
  *
@@ -1439,6 +1441,35 @@ export class CrosslineStore {
       INSERT INTO settings (workspace_id, key, value, updated_at) VALUES (?, ?, ?, ?)
       ON CONFLICT(workspace_id, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
     `).run(workspaceId, key, value, new Date().toISOString());
+  }
+
+  /**
+   * Structured background facts per identity — current experiment/paper title, key file paths, the kind
+   * of thing onboarding digs up and a capture's own compaction step keeps in sync. Lives under
+   * `background.<identityId>` in the existing generic `settings` table (no migration needed, same
+   * substrate `schedule.availability`/`calendar.sources` already use), as typed wrappers here rather than
+   * in `apps/web/lib/crossline.ts` (where the other settings wrappers live) because both the web app
+   * (reads, via `task-detail.ts`) and the worker (writes, via `background-facts-runner.ts`) need this —
+   * two separate packages that can't import each other's `lib/`, but both already depend on this one.
+   */
+  getBackgroundFacts(workspaceId: string, identityId: string): StoredBackgroundFact[] {
+    const raw = this.getSetting(workspaceId, `background.${identityId}`);
+    if (!raw) return [];
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      return Array.isArray(parsed) ? parsed as StoredBackgroundFact[] : [];
+    } catch { return []; }
+  }
+
+  /** Merges by `key` — last-write-wins per key, not a wholesale replace, so a compaction step run against
+   * one capture never erases facts an earlier capture or onboarding turn already established. */
+  mergeBackgroundFacts(workspaceId: string, identityId: string,
+    incoming: Array<{ key: string; value: string; why: string; sourceQuote: string }>): void {
+    if (!incoming.length) return;
+    const byKey = new Map(this.getBackgroundFacts(workspaceId, identityId).map((fact) => [fact.key, fact]));
+    const now = new Date().toISOString();
+    for (const fact of incoming) byKey.set(fact.key, { ...fact, updatedAt: now });
+    this.setSetting(workspaceId, `background.${identityId}`, JSON.stringify([...byKey.values()]));
   }
 
   listEnergyObservations(workspaceId: string): StoredEnergyObservation[] {

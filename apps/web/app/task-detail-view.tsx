@@ -16,10 +16,16 @@ const criterionKindLabel: Record<string, string> = { count: "计数", artifact: 
 
 const minutesBetween = (from: string, to: string) => Math.round((Date.parse(to) - Date.parse(from)) / 60_000);
 
-/** A placeholder, not an empty section — the project-context pipeline (onboarding + per-capture
- * compaction) is a separately-planned phase; this keeps the layout stable for when it lands. */
-function BackgroundPlaceholder() {
-  return <p className="task-detail-background-empty">未设置背景资料 · 在 onboarding 对话中补充后会显示在这里</p>;
+/** Real background facts once the compaction pipeline (onboarding + per-capture extraction) has found
+ * some for this identity; a placeholder otherwise, so the layout does not shift between the two states. */
+function BackgroundFactsSection({ background }: { background: TaskDetail["background"] }) {
+  if (!background || !background.length) {
+    return <p className="task-detail-background-empty">未设置背景资料 · 在 onboarding 对话或后续捕获中补充后会显示在这里</p>;
+  }
+  return <ul className="task-detail-background-facts">{background.map((fact) => <li key={fact.key}>
+    <strong>{fact.value}</strong>
+    <small>{fact.why}</small>
+  </li>)}</ul>;
 }
 
 function FlywheelList({ items }: { items: TaskDetail["relatedFlywheel"] }) {
@@ -59,7 +65,7 @@ export function TaskDetailView({ detail }: { detail: TaskDetail }) {
 
     <section className="task-detail-background">
       <h3>背景资料</h3>
-      <BackgroundPlaceholder />
+      <BackgroundFactsSection background={detail.background} />
     </section>
 
     {detail.materialContract.length > 0 && <section>
@@ -129,7 +135,7 @@ export function MilestoneDetailView({ detail }: { detail: MilestoneDetail }) {
 
     <section className="task-detail-background">
       <h3>背景资料</h3>
-      <BackgroundPlaceholder />
+      <BackgroundFactsSection background={detail.background} />
     </section>
 
     {detail.successCriteria.length > 0 && <section>

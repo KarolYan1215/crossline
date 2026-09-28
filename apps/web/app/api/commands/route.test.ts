@@ -10,12 +10,18 @@ const startWorkOrderExecution = vi.fn();
 const pauseWorkOrderExecution = vi.fn();
 const resumeWorkOrderExecution = vi.fn();
 const completeWorkOrderExecution = vi.fn();
+const addCapturedTaskWithId = vi.fn();
 vi.mock("../../../lib/crossline", () => ({
-  addCapturedTaskWithId: vi.fn(),
+  addCapturedTaskWithId: (...args: unknown[]) => addCapturedTaskWithId(...args),
   startWorkOrderExecution: (...args: unknown[]) => startWorkOrderExecution(...args),
   pauseWorkOrderExecution: (...args: unknown[]) => pauseWorkOrderExecution(...args),
   resumeWorkOrderExecution: (...args: unknown[]) => resumeWorkOrderExecution(...args),
   completeWorkOrderExecution: (...args: unknown[]) => completeWorkOrderExecution(...args)
+}));
+
+const requestCodexSupervisor = vi.fn();
+vi.mock("../../../lib/codex-runtime", () => ({
+  requestCodexSupervisor: (...args: unknown[]) => requestCodexSupervisor(...args)
 }));
 
 const post = async (body: Record<string, unknown>) => {
@@ -28,6 +34,25 @@ const post = async (body: Record<string, unknown>) => {
 const envelope = (type: string, payload: Record<string, unknown>) => ({
   ownerId: "local-owner", workspaceId: "personal-crossline", clientCommandId: "c1",
   clientSequence: 1, type, payload, createdAt: "2026-09-15T00:00:00.000Z"
+});
+
+test("task.capture triggers a fire-and-forget background-facts extraction call, keyed on the capture's own text", async () => {
+  requestCodexSupervisor.mockResolvedValueOnce({ state: "extracted", factCount: 1 });
+  const response = await post(envelope("task.capture", { title: "整理实验结果", context: "论文相关" }));
+  expect(response.status).toBe(200);
+  await expect(response.json()).resolves.toEqual({ accepted: true, clientCommandId: "c1" });
+  expect(addCapturedTaskWithId).toHaveBeenCalledWith(TEST_CTX, { title: "整理实验结果", context: "论文相关" }, "c1", "c1");
+  expect(requestCodexSupervisor).toHaveBeenCalledWith(TEST_CTX, "/v1/background-facts/extract", expect.objectContaining({
+    method: "POST",
+    body: JSON.stringify({ captureTitle: "整理实验结果", captureContext: "论文相关" })
+  }));
+});
+
+test("a background-facts extraction failure never surfaces as a capture failure", async () => {
+  requestCodexSupervisor.mockRejectedValueOnce(new Error("supervisor unavailable"));
+  const response = await post(envelope("task.capture", { title: "整理实验结果", context: "" }));
+  expect(response.status).toBe(200);
+  await expect(response.json()).resolves.toEqual({ accepted: true, clientCommandId: "c1" });
 });
 
 test("the offline boundary rejects the removed completion shortcut", async () => {

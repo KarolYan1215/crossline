@@ -1,6 +1,6 @@
 import "server-only";
 import type { AccessContext, SuccessCriterion } from "@crossline/core";
-import type { CrosslineStore, StoredMilestone, StoredWorkOrder, StoredMaterial, StoredExecution, StoredMilestoneRelation } from "@crossline/db";
+import type { CrosslineStore, StoredMilestone, StoredWorkOrder, StoredMaterial, StoredExecution, StoredMilestoneRelation, StoredBackgroundFact } from "@crossline/db";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { getStore, resolvedEstimate, relationKindLabel, accents } from "./crossline";
 
@@ -41,10 +41,10 @@ export type TaskDetail = {
   };
   discardReason?: string;
   relatedFlywheel: Array<{ id: string; fromTitle: string; toTitle: string; kindLabel: string; explanation: string | null; pending: boolean }>;
-  /** Placeholder for the project-context pipeline (onboarding + per-capture compaction) — a later,
-   * separately-planned phase. Until then the detail view shows "未设置背景资料" rather than the section
-   * simply not existing, so wiring the real data in later needs no layout change. */
-  background: null;
+  /** This work order's identity's background facts (onboarding + per-capture compaction), `null` when
+   * none have been extracted yet — the detail view shows "未设置背景资料" for that case rather than the
+   * section simply not existing. */
+  background: StoredBackgroundFact[] | null;
 };
 
 export type MilestoneDetail = {
@@ -58,7 +58,7 @@ export type MilestoneDetail = {
   successCriteria: SuccessCriterion[];
   relatedWorkOrders: Array<{ id: string; intent: string; state: string }>;
   relatedFlywheel: Array<{ id: string; fromTitle: string; toTitle: string; kindLabel: string; explanation: string | null; pending: boolean }>;
-  background: null;
+  background: StoredBackgroundFact[] | null;
 };
 
 function identityInfo(identityId: string): { label: string; accent: string } {
@@ -119,6 +119,7 @@ function pausedFrom(executions: TaskDetail["executions"]): boolean {
 function assembleTaskDetail(ctx: AccessContext, order: StoredWorkOrder, deps: {
   milestone: StoredMilestone | undefined; materials: StoredMaterial[]; executions: StoredExecution[];
   materialEvents: StoredEvent[]; archivedEvents: StoredEvent[]; relatedFlywheel: TaskDetail["relatedFlywheel"];
+  background: StoredBackgroundFact[];
 }): TaskDetail {
   const payload = order.payload as {
     manualPromotion?: boolean; materialContract?: TaskDetail["materialContract"]; evidenceContract?: TaskDetail["evidenceContract"];
@@ -145,17 +146,19 @@ function assembleTaskDetail(ctx: AccessContext, order: StoredWorkOrder, deps: {
     ...(materialBlocker ? { materialBlocker } : {}),
     ...(payload.gateReview ? { gateReview: payload.gateReview } : {}),
     ...(discardReason ? { discardReason } : {}),
-    relatedFlywheel: deps.relatedFlywheel, background: null
+    relatedFlywheel: deps.relatedFlywheel, background: deps.background.length ? deps.background : null
   };
 }
 
 function assembleMilestoneDetail(milestone: StoredMilestone, rationale: string | undefined,
-  relatedWorkOrders: MilestoneDetail["relatedWorkOrders"], relatedFlywheel: TaskDetail["relatedFlywheel"]): MilestoneDetail {
+  relatedWorkOrders: MilestoneDetail["relatedWorkOrders"], relatedFlywheel: TaskDetail["relatedFlywheel"],
+  background: StoredBackgroundFact[]): MilestoneDetail {
   const { label: identityLabel, accent } = identityInfo(milestone.identityId);
   return {
     id: milestone.id, identityId: milestone.identityId, identityLabel, accent, title: milestone.title,
     status: milestone.status, ...(rationale ? { rationale } : {}),
-    successCriteria: milestone.successCriteria, relatedWorkOrders, relatedFlywheel, background: null
+    successCriteria: milestone.successCriteria, relatedWorkOrders, relatedFlywheel,
+    background: background.length ? background : null
   };
 }
 
@@ -189,7 +192,8 @@ export function loadTaskDetail(ctx: AccessContext, workOrderId: string): TaskDet
     materialEvents: store.listEvents(ctx.workspaceId, { type: ["materials.blocked", "materials.retry_requested"], entityId: workOrderId }),
     archivedEvents: order.state === "archived"
       ? store.listEvents(ctx.workspaceId, { type: "work_order.archived", entityId: workOrderId }) : [],
-    relatedFlywheel: flywheelTouching(relations, order.milestoneId, titleOf)
+    relatedFlywheel: flywheelTouching(relations, order.milestoneId, titleOf),
+    background: store.getBackgroundFacts(ctx.workspaceId, order.identityId)
   });
 }
 
@@ -211,7 +215,7 @@ export function loadMilestoneDetail(ctx: AccessContext, milestoneId: string): Mi
     return title;
   };
   return assembleMilestoneDetail(milestone, rationale?.rationale, relatedWorkOrders,
-    flywheelTouching(relations, milestoneId, titleOf));
+    flywheelTouching(relations, milestoneId, titleOf), store.getBackgroundFacts(ctx.workspaceId, milestone.identityId));
 }
 
 /**
@@ -238,13 +242,24 @@ export function loadTaskDetailsBatch(ctx: AccessContext, workOrderIds: string[])
     store.listEvents(ctx.workspaceId, { type: "work_order.archived" }), (event) => event.entityId);
   const relations = store.listMilestoneRelations(ctx.workspaceId);
   const titleOf = (id: string) => milestoneById.get(id)?.title ?? id;
+  // Facts are per-identity, not per-order — a handful of distinct identities across however many orders
+  // are in this batch, so one cached read per identity rather than one per order.
+  const backgroundByIdentity = new Map<string, StoredBackgroundFact[]>();
+  const backgroundOf = (identityId: string) => {
+    const cached = backgroundByIdentity.get(identityId);
+    if (cached) return cached;
+    const facts = store.getBackgroundFacts(ctx.workspaceId, identityId);
+    backgroundByIdentity.set(identityId, facts);
+    return facts;
+  };
 
   for (const order of orders) {
     const milestone = order.milestoneId ? milestoneById.get(order.milestoneId) : undefined;
     result.set(order.id, assembleTaskDetail(ctx, order, {
       milestone, materials: materialsByOrder.get(order.id) ?? [], executions: executionsByOrder.get(order.id) ?? [],
       materialEvents: materialEventsByOrder.get(order.id) ?? [], archivedEvents: archivedEventsByOrder.get(order.id) ?? [],
-      relatedFlywheel: flywheelTouching(relations, order.milestoneId, titleOf)
+      relatedFlywheel: flywheelTouching(relations, order.milestoneId, titleOf),
+      background: backgroundOf(order.identityId)
     }));
   }
   return result;
@@ -265,13 +280,21 @@ export function loadMilestoneDetailsBatch(ctx: AccessContext, milestoneIds: stri
     (order) => order.milestoneId);
   const relations = store.listMilestoneRelations(ctx.workspaceId);
   const titleOf = (id: string) => milestoneById.get(id)?.title ?? id;
+  const backgroundByIdentity = new Map<string, StoredBackgroundFact[]>();
+  const backgroundOf = (identityId: string) => {
+    const cached = backgroundByIdentity.get(identityId);
+    if (cached) return cached;
+    const facts = store.getBackgroundFacts(ctx.workspaceId, identityId);
+    backgroundByIdentity.set(identityId, facts);
+    return facts;
+  };
 
   for (const milestone of milestones) {
     const rationale = (rationaleByMilestone.get(milestone.id) ?? []).at(-1)?.payload as { rationale?: string } | undefined;
     const relatedWorkOrders = (workOrdersByMilestone.get(milestone.id) ?? [])
       .map((order) => ({ id: order.id, intent: order.intent, state: order.state }));
     result.set(milestone.id, assembleMilestoneDetail(milestone, rationale?.rationale, relatedWorkOrders,
-      flywheelTouching(relations, milestone.id, titleOf)));
+      flywheelTouching(relations, milestone.id, titleOf), backgroundOf(milestone.identityId)));
   }
   return result;
 }

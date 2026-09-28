@@ -1,4 +1,4 @@
-import { validateCommandEnvelope } from "@crossline/core";
+import { validateCommandEnvelope, type AccessContext } from "@crossline/core";
 import type { EvidenceClaimInput } from "@crossline/db";
 import {
   addCapturedTaskWithId, completeWorkOrderExecution, pauseWorkOrderExecution,
@@ -6,6 +6,19 @@ import {
 } from "../../../lib/crossline";
 import { resolveAccessContext } from "../../../lib/access-guard";
 import { isCrossSiteWrite } from "../../../lib/same-origin";
+import { requestCodexSupervisor } from "../../../lib/codex-runtime";
+
+// Fire-and-forget, never awaited by the response: a capture is already fully written (its own row, its
+// own event) by the time this runs, and a compaction failure must never look like the capture itself
+// failed. Additive to this route handler, not to `addCapturedTaskWithId` itself — that function's own
+// "captures a row, nothing else, zero classification" invariant stays true; this is a separate step.
+function extractBackgroundFactsInBackground(ctx: AccessContext, captureTitle: string, captureContext: string): void {
+  requestCodexSupervisor(ctx, "/v1/background-facts/extract", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ captureTitle, captureContext }),
+    signal: AbortSignal.timeout(60_000)
+  }).catch(() => {});
+}
 
 const EVIDENCE_KINDS = ["file", "link", "record", "telemetry"];
 
@@ -63,6 +76,7 @@ export async function POST(request: Request) {
       return Response.json({ code: "INVALID_TASK_INPUT" }, { status: 400 });
     }
     addCapturedTaskWithId(ctx, { title, context }, command.clientCommandId, command.clientCommandId);
+    extractBackgroundFactsInBackground(ctx, title, context);
   } else if (command.type in workOrderCommands) {
     if (!/^[a-zA-Z0-9_-]{1,128}$/.test(String(payload.workOrderId ?? ""))) {
       return Response.json({ code: "WORK_ORDER_NOT_FOUND" }, { status: 404 });

@@ -130,3 +130,23 @@ test("loadMilestoneDetailsBatch returns an empty map for an empty id list", () =
   globalThis.crosslineStore = new CrosslineStore(":memory:");
   expect(loadMilestoneDetailsBatch(TEST_CTX, [])).toEqual(new Map());
 });
+
+test("background facts set for an identity show up on both the task and milestone detail for that identity, and stay null until then", () => {
+  const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
+  seedOrderWithMilestone(store);
+  expect(loadTaskDetail(TEST_CTX, "wo-1")?.background).toBeNull();
+  expect(loadMilestoneDetail(TEST_CTX, "m-paper")?.background).toBeNull();
+
+  store.mergeBackgroundFacts(TEST_CTX.workspaceId, "research", [
+    { key: "paper_title", value: "XX 方法在 YY 场景下的应用", why: "捕获文本给出的暂定标题", sourceQuote: "论文标题暂定" }
+  ]);
+
+  const taskDetail = loadTaskDetail(TEST_CTX, "wo-1");
+  expect(taskDetail?.background).toEqual([{ key: "paper_title", value: "XX 方法在 YY 场景下的应用",
+    why: "捕获文本给出的暂定标题", sourceQuote: "论文标题暂定", updatedAt: expect.any(String) }]);
+  const milestoneDetail = loadMilestoneDetail(TEST_CTX, "m-paper");
+  expect(milestoneDetail?.background).toEqual(taskDetail?.background);
+
+  const batchDetail = loadTaskDetailsBatch(TEST_CTX, ["wo-1"]).get("wo-1");
+  expect(batchDetail?.background).toEqual(taskDetail?.background);
+});

@@ -320,6 +320,9 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .task-detail-facts dt{font-family:var(--f-mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--shade)}
 .task-detail-facts dd{margin:3px 0 0;font-size:12.5px}
 .task-detail-background-empty{margin:0;color:var(--shade);font-size:12px;font-style:italic}
+.task-detail-background-facts{margin:0;padding:0;list-style:none;display:grid;gap:6px}
+.task-detail-background-facts li{display:grid;gap:3px;padding:7px 9px;border:1px solid var(--mist)}
+.task-detail-background-facts small{font-family:var(--f-mono);font-size:10px;color:var(--graphite);line-height:1.5}
 .task-detail-contract{margin:0;padding:0;list-style:none;display:grid;gap:6px}
 .task-detail-contract li{display:grid;gap:3px;padding:7px 9px;border:1px solid var(--mist)}
 .task-detail-contract small{font-family:var(--f-mono);font-size:10px;color:var(--graphite);line-height:1.5}
