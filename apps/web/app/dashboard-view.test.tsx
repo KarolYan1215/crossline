@@ -40,6 +40,32 @@ describe("dashboard view", () => {
     for (const label of ["科研", "创业", "自媒体", "投资"]) expect(html).toContain(label);
   });
 
+  test("工作块 F: a card with a loaded TaskDetail gets inline start/complete controls, not a link to Workbench", () => {
+    const taskDetailById = new Map([["paper", {
+      id: "paper", ownerId: "test-owner", workspaceId: "test-workspace", paused: false,
+      identityId: "research", identityLabel: "科研", accent: "#6D5EF5", intent: "完成论文结果段",
+      state: "ready_for_human", riskTier: "milestone" as const,
+      estimate: { p25Minutes: 45, p50Minutes: 60, p85Minutes: 90, confidence: "low" as const, source: "identity_prior" as const, observationCount: 0 },
+      manualPromotion: false, materialContract: [], evidenceContract: [], evidenceChecklist: [],
+      preparedMaterials: [], executions: [], relatedFlywheel: [], background: null
+    }]]);
+    const html = renderToStaticMarkup(<DashboardView data={{
+      principalId: "test-owner", workspaceId: "test-workspace", nowLabel: "周一 · 09:00", nowIso: "2026-09-14T14:00:00.000Z", timeZone: "America/Chicago", clockPinned: true,
+      dateLabel: "14",
+      monthLabel: "SEP · 2026",
+      capacity: { level: "high" as const, confidence: "high" as const, observationCount: 4, basis: ["self_report" as const], blockers: [] },
+      primary: { id: "paper", title: "完成论文结果段", identityId: "research", estimate: { p25Minutes: 45, p50Minutes: 60, p85Minutes: 90, confidence: "low", source: "identity_prior", observationCount: 0 }, energy: "high", reason: "推进本周科研里程碑", milestone: "完成当前实验与论文结果段", inputsReady: true },
+      progress: { streakDays: 3, weekCount: 5 },
+      care: [],
+      identities: [],
+      upcoming: [],
+      localActivityAsked: true, lastNight: { state: "none" as const }, milestonePulse: [], todayCapacity: { availableMinutes: 0, committedMinutes: 0 }, flywheel: [], flywheelStrip: { nodes: [], edges: [] },
+      taskDetailById, milestoneDetailById: new Map()
+    }} />);
+    expect(html).toContain("开始执行");
+    expect(html).not.toContain("前往任务详情执行并提交证据");
+  });
+
   test("includes a usable quick capture form", () => {
     const html = renderToStaticMarkup(<DashboardView data={{
       principalId: "test-owner", workspaceId: "test-workspace", nowLabel: "周一 · 09:00", nowIso: "2026-09-14T14:00:00.000Z", timeZone: "America/Chicago", clockPinned: true,

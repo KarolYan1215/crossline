@@ -12,6 +12,7 @@ import { SignOutButton } from "./sign-out-button";
 import { NAV_ITEMS } from "./nav-items";
 import { BottomNav } from "./bottom-nav";
 import { AssistantWidget } from "./assistant-widget";
+import { ExecutionActions } from "./execution-actions";
 
 export type DashboardAction = {
   id: string;
@@ -105,6 +106,18 @@ export function DashboardView({ data }: { data: DashboardData }) {
   // The whole card is a real `<a>` to its detail page — bookmarkable, works with no JS — and a small
   // corner button opens the same detail as a quick-peek drawer without leaving Today. Two separate
   // triggers instead of one click trying to decide between "navigate" and "preview".
+  // Full start/pause/complete+evidence controls, directly on the card — the same `ExecutionActions`
+  // Workbench and the task detail page already embed, keyed off the same batch-loaded `TaskDetail` this
+  // page already reads for `TaskPreview`, so this costs no extra query. Falls back to the old "go to the
+  // detail page" link only in the (today theoretical) case a card's own detail failed to load.
+  const inlineActions = (item: DashboardAction) => {
+    const detail = data.taskDetailById.get(item.id);
+    return detail
+      ? <ExecutionActions workOrderId={detail.id} intent={detail.intent} state={detail.state} paused={detail.paused}
+          ownerId={detail.ownerId} workspaceId={detail.workspaceId} evidenceChecklist={detail.evidenceChecklist} />
+      : <a className="primary-button" href={`/workbench/${encodeURIComponent(item.id)}`}>前往任务详情执行并提交证据</a>;
+  };
+
   const action = (item: DashboardAction | undefined, label: string) => <article className="alt-action">
     <header><span>{label}</span><ArrowUpRight size={13} aria-hidden="true" /></header>
     {item ? <><a className="card-cover-link" href={`/workbench/${encodeURIComponent(item.id)}`} aria-label={item.title} />
@@ -114,7 +127,8 @@ export function DashboardView({ data }: { data: DashboardData }) {
           down used to be the only place that answered "what is this for", which meant leaving the card
           to find out. */}
       <p className="card-milestone">→ {item.milestone}</p>
-      <p>{item.reason}</p><small>{identityLabel(item.identityId)} · {estimateLabel(item.estimate)}</small></> : <p>暂无可执行项</p>}
+      <p>{item.reason}</p><small>{identityLabel(item.identityId)} · {estimateLabel(item.estimate)}</small>
+      {inlineActions(item)}</> : <p>暂无可执行项</p>}
   </article>;
 
   return <main className="page"><OfflineReplay workspaceId={data.workspaceId} />
@@ -154,9 +168,10 @@ export function DashboardView({ data }: { data: DashboardData }) {
             <div><dt>NEEDS · 所需精力</dt><dd>{energyLabel[data.primary.energy ?? ""] ?? "未声明"}</dd></div>
             <div><dt>MILESTONE</dt><dd>{data.primary.milestone}</dd></div>
           </dl>
-          {/* The real task detail page now embeds the same start/pause/complete controls Workbench's own
-              card has, so this goes straight there instead of an anchor-jump into the Workbench list. */}
-          <a className="primary-button" href={`/workbench/${encodeURIComponent(data.primary.id)}`}>前往任务详情执行并提交证据</a>
+          {/* Fully inlined — start/pause/complete+evidence (and any pre-generated checklist questions)
+              happen right here, so the card itself is a quick-submit window and never requires the
+              Workbench detour it used to force on every completion. */}
+          {inlineActions(data.primary)}
         </> : <p>先收集一项真实工作，系统会拆解并等待计划批准。</p>}
       </article>
 

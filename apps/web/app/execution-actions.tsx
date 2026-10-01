@@ -1,8 +1,8 @@
 "use client";
 import { useState } from "react";
 import type { EvidenceQuestionTemplate } from "@crossline/core";
-import { EnergyProbe } from "../energy-probe";
-import { createCommand, enqueue, nextSequence, type OfflineCommandType } from "../offline-queue";
+import { EnergyProbe } from "./energy-probe";
+import { createCommand, enqueue, nextSequence, type OfflineCommandType } from "./offline-queue";
 
 /** The only four actions the offline outbox can carry — everything else (approve, materials retry/ready,
  * archive) stays online-only, matching the plan's stated scope for the offline workbench. */

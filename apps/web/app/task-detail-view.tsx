@@ -1,5 +1,5 @@
 import type { TaskDetail, MilestoneDetail } from "../lib/task-detail";
-import { ExecutionActions } from "./workbench/execution-actions";
+import { ExecutionActions } from "./execution-actions";
 
 const stateLabel: Record<string, string> = {
   captured: "已收集", analyzing: "分析中", awaiting_plan_approval: "等待计划批准",

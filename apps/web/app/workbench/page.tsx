@@ -1,7 +1,7 @@
 import { ensureSeeded, getStore, loadCurrentPlan, planToday, resolvedEstimate } from "../../lib/crossline";
 import { SubpageShell } from "../subpage-shell";
 import { AnalyzeButton } from "./analyze-button";
-import { ExecutionActions } from "./execution-actions";
+import { ExecutionActions } from "../execution-actions";
 import { PromoteForm } from "./promote-form";
 import { FamilyBackfill } from "./family-backfill";
 import { WorkbenchViewSwitch } from "./view-switch";
