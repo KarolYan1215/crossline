@@ -1,4 +1,5 @@
 import { validateSuccessCriteria, type SuccessCriterion } from "./index";
+import { EVIDENCE_QUESTION_SCHEMA, validateEvidenceQuestionBank, type EvidenceQuestionTemplate } from "./milestone-templates";
 
 /**
  * The wire contract for the milestone gate Skill.
@@ -126,6 +127,12 @@ export type MilestoneProposal = {
      * receiving layer (`computeMilestoneConfidence`) uses this — not a model self-rating — to decide
      * how much confidence a template-backed proposal earns. */
     templateId: string | null;
+    /** Pre-generated evidence questions for this milestone, Codex-`ask` style — see 工作块 E. Always
+     * present in the model's own output, but `persistProposals` (`apps/worker/src/milestone-
+     * proposer.ts`) only actually uses it when `templateId` is null: a template-backed milestone takes
+     * its bank from the template itself (deterministic), the same way its confidence does, rather than
+     * trusting the model to reproduce it. */
+    evidenceQuestionBank: EvidenceQuestionTemplate[];
   }>;
   assumptions: string[];
   blockers: Array<{ code: string; message: string }>;
@@ -136,7 +143,8 @@ export const MILESTONE_PROPOSAL_SCHEMA = object({
     identityId: str, projectId: str, title: str,
     successCriteria: list(criterion, 10),
     rationale: str,
-    templateId: { anyOf: [{ type: "string", minLength: 1, maxLength: 200 }, { type: "null" }] }
+    templateId: { anyOf: [{ type: "string", minLength: 1, maxLength: 200 }, { type: "null" }] },
+    evidenceQuestionBank: list(EVIDENCE_QUESTION_SCHEMA, 6)
   }), 10),
   assumptions: strList,
   blockers: list(object({ code: str, message: str }), 10)
@@ -182,6 +190,7 @@ export function validateMilestoneProposal(value: unknown, context: MilestoneProp
     // opaque write failure later.
     const checked = validateSuccessCriteria(proposal.successCriteria);
     if (!checked.ok) throw new Error(checked.blocker.code);
+    if (!validateEvidenceQuestionBank(proposal.evidenceQuestionBank)) throw new Error("PROPOSAL_EVIDENCE_QUESTION_BANK_INVALID");
   }
   return { milestones: raw.milestones, assumptions: raw.assumptions, blockers: [] };
 }

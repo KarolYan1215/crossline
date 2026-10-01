@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import type { EvidenceQuestionTemplate } from "@crossline/core";
 import { EnergyProbe } from "../energy-probe";
 import { createCommand, enqueue, nextSequence, type OfflineCommandType } from "../offline-queue";
 
@@ -21,8 +22,12 @@ const codes: Record<string, string> = {
   WORK_ORDER_ALREADY_ACCEPTED: "已验收的作业不能丢弃；如需退回请到复盘页撤销验收。"
 };
 
-export function ExecutionActions({ workOrderId, intent, state, paused, ownerId, workspaceId }: {
+export function ExecutionActions({ workOrderId, intent, state, paused, ownerId, workspaceId, evidenceChecklist = [] }: {
   workOrderId: string; intent: string; state: string; paused: boolean; ownerId: string; workspaceId: string;
+  /** Pre-generated completion-time questions copied from the bound milestone — see 工作块 E. Empty is
+   * normal (no template behind the milestone, or no milestone at all); the free-text/file fields below
+   * stay available regardless. */
+  evidenceChecklist?: EvidenceQuestionTemplate[];
 }) {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
@@ -31,6 +36,10 @@ export function ExecutionActions({ workOrderId, intent, state, paused, ownerId, 
   const [discardReason, setDiscardReason] = useState("");
   const [uri, setUri] = useState("");
   const [description, setDescription] = useState("");
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [uploading, setUploading] = useState(false);
+  const [uploadedFile, setUploadedFile] = useState<{ uri: string; fileName: string } | null>(null);
+  const [uploadStatus, setUploadStatus] = useState("");
 
   // Offline is queued, not just reported: the person's decision to start, pause, resume or complete
   // their own work order must survive a dead connection the same way a capture already does, and the
@@ -74,6 +83,32 @@ export function ExecutionActions({ workOrderId, intent, state, paused, ownerId, 
     setBusy(false);
   };
 
+  const uploadEvidenceFile = async (file: File) => {
+    setUploading(true);
+    setUploadStatus("");
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const response = await fetch(`/api/work-orders/${encodeURIComponent(workOrderId)}/evidence-attachments`, { method: "POST", body: form });
+      const body = await response.json().catch(() => null) as { saved?: Array<{ uri: string; fileName: string }>; message?: string } | null;
+      if (!response.ok || !body?.saved?.[0]) { setUploadStatus(body?.message ?? "文件上传失败，请重试"); return; }
+      setUploadedFile(body.saved[0]);
+    } catch { setUploadStatus("网络不可用，文件未上传"); }
+    finally { setUploading(false); }
+  };
+
+  const completeEvidence = () => {
+    const evidence = [
+      ...(uri.trim() && description.trim() ? [{ kind: "record", uri: uri.trim(), description: description.trim() }] : []),
+      ...(uploadedFile ? [{ kind: "file", uri: uploadedFile.uri, description: uploadedFile.fileName }] : [])
+    ];
+    const checklistAnswers = Object.entries(answers)
+      .filter(([, answer]) => answer.trim())
+      .map(([questionId, answer]) => ({ questionId, answer: answer.trim() }));
+    return { action: "complete", evidence, checklistAnswers };
+  };
+  const hasEvidence = Boolean((uri.trim() && description.trim()) || uploadedFile);
+
   return <div className="execution-actions">
     {/* Without this the loop stopped dead here: a freshly analysed capture landed in
         `awaiting_plan_approval` and the Workbench offered no way to advance it, even though the API has
@@ -98,14 +133,39 @@ export function ExecutionActions({ workOrderId, intent, state, paused, ownerId, 
     {state === "active" && paused &&
       <button type="button" disabled={busy} onClick={() => void send({ action: "resume" })}>继续</button>}
     {state === "active" && <>
+      {/* Pre-generated at milestone approval time (see 工作块 E) — the person just clicks a checkbox
+          option or types the specifics, AI records the exact answer rather than asking them to write
+          free-form evidence prose from scratch. */}
+      {evidenceChecklist.length > 0 && <fieldset className="evidence-checklist">
+        <legend className="micro">完成情况（可选，AI 会据此记录）</legend>
+        {evidenceChecklist.map((question) => <div key={question.id} className="evidence-question">
+          <span>{question.prompt}</span>
+          {question.kind === "checkbox"
+            ? <div className="evidence-question-options">{question.options.map((option) => <label key={option}>
+                <input type="radio" name={`checklist-${question.id}`} checked={answers[question.id] === option}
+                  onChange={() => setAnswers((current) => ({ ...current, [question.id]: option }))} />
+                <span>{option}</span>
+              </label>)}</div>
+            : <input value={answers[question.id] ?? ""} maxLength={2000} placeholder="输入具体情况"
+                onChange={(event) => setAnswers((current) => ({ ...current, [question.id]: event.target.value }))} />}
+        </div>)}
+      </fieldset>}
       <label><span className="sr-only">证据位置</span>
         <input value={uri} maxLength={500} placeholder="证据位置（可留空）" onChange={(event) => setUri(event.target.value)} /></label>
       <label><span className="sr-only">证据说明</span>
         <input value={description} maxLength={500} placeholder="证据说明" onChange={(event) => setDescription(event.target.value)} /></label>
-      <button className="primary-button" type="button" disabled={busy} onClick={() => void send({
-        action: "complete",
-        evidence: uri.trim() && description.trim() ? [{ kind: "record", uri: uri.trim(), description: description.trim() }] : []
-      })}>{uri.trim() && description.trim() ? "提交完成与证据" : "完成（记为无证据）"}</button>
+      <label className="evidence-file-upload">
+        <span className="sr-only">上传证据文件，由 AI 审阅</span>
+        <input type="file" disabled={uploading || busy}
+          onChange={(event) => { const file = event.currentTarget.files?.[0]; if (file) void uploadEvidenceFile(file); }} />
+        <small>
+          {uploading ? "上传中…" : uploadedFile ? `已上传：${uploadedFile.fileName}` : "可选：上传文件由 AI 审阅"}
+        </small>
+      </label>
+      {uploadStatus && <small className="muted" role="status">{uploadStatus}</small>}
+      <button className="primary-button" type="button" disabled={busy} onClick={() => void send(completeEvidence())}>
+        {hasEvidence ? "提交完成与证据" : "完成（记为无证据）"}
+      </button>
     </>}
     {(state === "evidence_review" || state === "accepted") && <>
       <span className="micro">完成后精力与实际负荷</span>

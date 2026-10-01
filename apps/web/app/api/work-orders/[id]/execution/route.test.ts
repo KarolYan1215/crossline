@@ -33,6 +33,28 @@ test("a malformed evidence claim is rejected instead of being written to the led
   expect(store.listWorkOrders(TEST_CTX.workspaceId)[0]?.state).toBe("active");
 });
 
+test("a malformed checklist answer is rejected instead of being written to the ledger", async () => {
+  const store = seed();
+  await post({ action: "start" });
+  const response = await post({ action: "complete", evidence: [], checklistAnswers: [{ questionId: "", answer: "是" }] });
+  expect(response.status).toBe(400);
+  expect(await response.json()).toEqual({ ok: false, code: "INVALID_CHECKLIST_ANSWER" });
+  expect(store.listWorkOrders(TEST_CTX.workspaceId)[0]?.state).toBe("active");
+});
+
+test("checklist answers submitted with completion land on the closing execution", async () => {
+  const store = seed();
+  await post({ action: "start" });
+  const response = await post({
+    action: "complete", evidence: [],
+    checklistAnswers: [{ questionId: "q1", answer: "是" }, { questionId: "q2", answer: "写完了综述" }]
+  });
+  expect(response.status).toBe(200);
+  expect(store.listExecutions(TEST_CTX.workspaceId)[0]?.checklistAnswers).toEqual([
+    { questionId: "q1", answer: "是" }, { questionId: "q2", answer: "写完了综述" }
+  ]);
+});
+
 test("pausing without a reason is refused, and unknown actions cannot reach the state machine", async () => {
   const store = seed();
   await post({ action: "start" });

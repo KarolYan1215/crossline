@@ -14,7 +14,8 @@ afterEach(() => store.close());
 const proposal = (title: string, templateId: string | null = null) => JSON.stringify({
   milestones: [{ identityId: "research", projectId: "p", title,
     successCriteria: [{ id: "c", statement: "写完初稿", required: true, measure: { kind: "artifact", mustExist: "draft.md" } }],
-    rationale: "推进论文进度", templateId }],
+    rationale: "推进论文进度", templateId,
+    evidenceQuestionBank: [{ id: "q1", prompt: "初稿是否存在？", kind: "checkbox", options: ["是", "否"], required: true }] }],
   assumptions: [], blockers: []
 });
 
@@ -57,7 +58,8 @@ test("a proposal built from a seeded template's own criteria is saved with high 
   const template = store.listMilestoneTemplates(WORKSPACE, "research")[0]!;
   const templated = JSON.stringify({
     milestones: [{ identityId: "research", projectId: "p", title: "套用模板的里程碑",
-      successCriteria: template.successCriteriaDefaults, rationale: "r", templateId: template.id }],
+      successCriteria: template.successCriteriaDefaults, rationale: "r", templateId: template.id,
+      evidenceQuestionBank: template.evidenceQuestionDefaults }],
     assumptions: [], blockers: []
   });
   const { rpc } = fakeRuntime([templated]);

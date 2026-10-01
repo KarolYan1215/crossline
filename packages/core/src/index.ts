@@ -16,6 +16,7 @@ export * from "./plan-explainer-schema";
 export * from "./reality";
 export * from "./replay";
 export * from "./weekly-insight-schema";
+import type { EvidenceQuestionTemplate } from "./milestone-templates";
 export type EnergyLevel = "low" | "medium" | "high";
 
 export type Estimate = {
@@ -34,6 +35,12 @@ export type Evidence = {
   kind: "file" | "link" | "record" | "telemetry";
   uri: string;
 };
+
+/** One answer to a pre-generated `EvidenceQuestionTemplate` — `answer` is the option label for a
+ * checkbox question, or the typed text for a text one; the Skill-facing shape is flattened to
+ * `"Q: <prompt> A: <answer>"` text at gate time (`milestone-gate-runner.ts`), not kept structured there,
+ * because the gate's quoting rule only ever operates on plain evidence text. */
+export type ChecklistAnswer = { questionId: string; answer: string };
 
 // A milestone states up front what would count as reaching it. `judgement` is the honest exit for
 // things that genuinely cannot be counted, but it must say what evidence would FAIL it — otherwise a
@@ -198,6 +205,11 @@ export type WorkOrder = {
   // packed the reason into the description until it hit the length cap and was cut off.
   materialContract: Array<{ kind: Evidence["kind"]; description: string; why: string; required: boolean }>;
   evidenceContract: Array<{ kind: Evidence["kind"]; description: string; why: string; required: boolean }>;
+  // Instantiated once, at `plan.approved`, from the bound milestone's own `evidenceQuestionBank` — see
+  // `packages/db/src/index.ts`'s `transitionWorkOrder`. Absent or empty is normal: a milestone with no
+  // template behind it, or no template-derived question bank, simply has nothing to pre-generate here,
+  // and free-text/file evidence stays available regardless.
+  evidenceChecklist?: EvidenceQuestionTemplate[];
   estimate: Estimate;
   // Groups this proposal into a reference class for duration calibration, independent of `identityId` —
   // "research paper reading" and "research deep writing" take wildly different real time, and lumping

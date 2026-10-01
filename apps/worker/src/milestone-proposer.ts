@@ -20,7 +20,10 @@ const INSTRUCTIONS = "Propose milestones for the supplied identities. Return onl
   + "vague to produce a checkable criterion, return a blocker naming what is missing. When one of the "
   + "supplied templates genuinely fits, set templateId to its id and build criteria that actually match "
   + "its shape, not just its title — otherwise set templateId to null; never invent a templateId that was "
-  + "not in the input.";
+  + "not in the input. Always fill evidenceQuestionBank with 1-6 concrete completion-time questions "
+  + "(checkbox or text, Codex-ask style) that actually check whether the milestone was reached; it is used "
+  + "verbatim when templateId is null, and only ignored (replaced by the template's own bank) when a "
+  + "template was chosen, so fill it in properly either way.";
 
 export type ProposalOutcome =
   | { state: "proposed"; drafts: Array<{ id: string; identityId: string; title: string }>; assumptions: string[]; threadId?: string }
@@ -136,12 +139,16 @@ function persistProposals(store: CrosslineStore, workspaceId: string,
     const id = `proposed-${randomUUID()}`;
     const template = proposal.templateId ? templates.find((item) => item.id === proposal.templateId) : undefined;
     const confidence = computeMilestoneConfidence(proposal.successCriteria, template);
+    // A template-backed proposal's bank comes from the template itself, the same deterministic-over-
+    // self-reported reasoning `confidence` already uses — a free-form proposal's bank is the model's own.
+    const evidenceQuestionBank = template?.evidenceQuestionDefaults ?? proposal.evidenceQuestionBank;
     store.saveMilestone({
       id, ownerId: OWNER_ID, workspaceId,
       identityId: proposal.identityId, projectId: proposal.projectId,
       title: proposal.title, version: 1, status: "draft",
       successCriteria: proposal.successCriteria,
-      ...(proposal.templateId ? { templateId: proposal.templateId } : {}), confidence
+      ...(proposal.templateId ? { templateId: proposal.templateId } : {}), confidence,
+      ...(evidenceQuestionBank.length ? { evidenceQuestionBank } : {})
     });
     store.appendEvent({
       ownerId: OWNER_ID, workspaceId,

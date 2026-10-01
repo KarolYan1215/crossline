@@ -28,6 +28,14 @@ export function assistantAttachmentsRoot(threadId: string): string {
   return path.resolve(PROJECT_ROOT, ".crossline-assistant-attachments", threadId);
 }
 
+/** Mirrors `attachmentsRoot` again, for a submitted-evidence file — see 工作块 E. Kept in its own
+ * directory for the same reason the other two are: different owner, different lifetime, and (unlike
+ * captures/assistant threads) read back server-side by `milestone-gate-runner.ts` for quoting, not just
+ * served to a browser. */
+export function evidenceAttachmentsRoot(workOrderId: string): string {
+  return path.resolve(PROJECT_ROOT, ".crossline-evidence", workOrderId);
+}
+
 export type AttachmentSaveResult =
   | { ok: true; saved: Array<{ id: string; uri: string; mediaType: string; fileName: string }> }
   | { ok: false; code: string; message: string };
@@ -98,4 +106,24 @@ export function saveAssistantAttachments(store: CrosslineStore, input: {
       threadId: input.threadId, uri: file.uri, mediaType: file.mediaType, fileName: file.fileName.slice(0, 200), createdAt });
   }
   return result;
+}
+
+/**
+ * Writes one submitted-evidence file to disk and hands back its `uri` — no ledger row here, unlike the
+ * three functions above. The real ledger row is the `evidence_claims` insert `transitionWorkOrder`
+ * already makes for a `kind:"file"` claim (`human.completed`); this only has to get the file safely onto
+ * disk first so that claim's `uri` points at something real. The caller (the completion form) builds the
+ * `EvidenceClaimInput` itself from the returned `uri`/`fileName`.
+ */
+export function saveEvidenceFile(input: {
+  workOrderId: string; fileName: string; mediaType: string; buffer: Buffer;
+}): { ok: true; uri: string; mediaType: string; fileName: string } | { ok: false; code: string; message: string } {
+  if (!/^[a-zA-Z0-9_-]{1,128}$/.test(input.workOrderId)) {
+    return { ok: false, code: "ATTACHMENT_WORK_ORDER_ID_INVALID", message: "无效的作业 id；没有保存文件。" };
+  }
+  const result = writeAttachmentFiles(evidenceAttachmentsRoot(input.workOrderId),
+    [{ fileName: input.fileName, mediaType: input.mediaType, buffer: input.buffer }]);
+  if (!result.ok) return result;
+  const saved = result.saved[0]!;
+  return { ok: true, uri: saved.uri, mediaType: saved.mediaType, fileName: saved.fileName };
 }

@@ -1,4 +1,5 @@
 import type { EvidenceClaimInput } from "@crossline/db";
+import type { ChecklistAnswer } from "@crossline/core";
 import {
   archiveWorkOrder, completeWorkOrderExecution, markMaterialsReady, pauseWorkOrderExecution,
   resumeWorkOrderExecution, retryMaterialPreparation, startWorkOrderExecution,
@@ -8,6 +9,23 @@ import { rejectUnsafeRequest } from "../guard";
 import { requestCodexSupervisor } from "../../../../../lib/codex-runtime";
 
 const EVIDENCE_KINDS = ["file", "link", "record", "telemetry"];
+
+/** Shape-checks the pre-generated checklist answers submitted alongside evidence — see 工作块 E. Unlike
+ * `evidence`, these are optional and have no kind to validate, just an id (matched against the order's
+ * own `evidenceChecklist` later, at gate time) and a bounded answer string. */
+function readChecklistAnswers(value: unknown): ChecklistAnswer[] | null {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 20) return null;
+  const answers: ChecklistAnswer[] = [];
+  for (const entry of value) {
+    const answer = entry as Record<string, unknown>;
+    const questionId = String(answer?.questionId ?? "").trim();
+    const text = String(answer?.answer ?? "").trim();
+    if (!questionId || questionId.length > 200 || !text || text.length > 2000) return null;
+    answers.push({ questionId, answer: text });
+  }
+  return answers;
+}
 
 function readEvidence(value: unknown): EvidenceClaimInput[] | null {
   if (value === undefined) return [];
@@ -52,7 +70,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     else if (body.action === "complete") {
       const evidence = readEvidence(body.evidence);
       if (!evidence) return Response.json({ ok: false, code: "INVALID_EVIDENCE_CLAIM" }, { status: 400 });
-      result = completeWorkOrderExecution(ctx, id, evidence);
+      const checklistAnswers = readChecklistAnswers(body.checklistAnswers);
+      if (!checklistAnswers) return Response.json({ ok: false, code: "INVALID_CHECKLIST_ANSWER" }, { status: 400 });
+      result = completeWorkOrderExecution(ctx, id, evidence, checklistAnswers);
     } else return Response.json({ ok: false, code: "EXECUTION_ACTION_NOT_ALLOWED" }, { status: 400 });
   } catch (error) {
     // A store-level guard is still a known failure, so it stays a typed blocker rather than a 500.

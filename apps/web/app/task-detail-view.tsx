@@ -61,7 +61,7 @@ export function TaskDetailView({ detail }: { detail: TaskDetail }) {
     {/* The same live start/pause/resume/complete controls Workbench's own card has — the detail page is
         where "下一行动" now actually sends you to act, not only to read. */}
     <ExecutionActions workOrderId={detail.id} intent={detail.intent} state={detail.state} paused={detail.paused}
-      ownerId={detail.ownerId} workspaceId={detail.workspaceId} />
+      ownerId={detail.ownerId} workspaceId={detail.workspaceId} evidenceChecklist={detail.evidenceChecklist} />
 
     <section className="task-detail-background">
       <h3>背景资料</h3>

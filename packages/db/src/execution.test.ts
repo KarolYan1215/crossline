@@ -148,6 +148,54 @@ test("a replayed idempotency key writes nothing and reports the current state, s
   } finally { store.close(); }
 });
 
+test("checklist answers submitted at completion land on the closing execution, not on any evidence claim", () => {
+  const store = new CrosslineStore(":memory:");
+  try {
+    seed(store, "ready_for_human");
+    store.transitionWorkOrder("w", "w1", { type: "human.started" }, "start:w1", { durationObserved: true });
+    store.transitionWorkOrder("w", "w1", { type: "human.completed" }, "done:w1", {
+      evidence: [{ kind: "record", uri: "local://note-3", description: "结论记录" }],
+      checklistAnswers: [{ questionId: "q1", answer: "是" }, { questionId: "q2", answer: "已完成综述" }]
+    });
+    const execution = store.listExecutions("w")[0]!;
+    expect(execution.checklistAnswers).toEqual([
+      { questionId: "q1", answer: "是" }, { questionId: "q2", answer: "已完成综述" }
+    ]);
+    // Not leaked onto the evidence claim's own payload.
+    expect(store.listEvidenceClaims("w")[0]).not.toHaveProperty("checklistAnswers");
+  } finally { store.close(); }
+});
+
+test("completing with no checklist answers leaves the field absent rather than an empty array", () => {
+  const store = new CrosslineStore(":memory:");
+  try {
+    seed(store, "ready_for_human");
+    store.transitionWorkOrder("w", "w1", { type: "human.started" }, "start:w1", { durationObserved: true });
+    store.transitionWorkOrder("w", "w1", { type: "human.completed" }, "done:w1");
+    expect(store.listExecutions("w")[0]?.checklistAnswers).toBeUndefined();
+  } finally { store.close(); }
+});
+
+test("checklist answers survive a pause-then-complete cycle alongside the closed interruption", () => {
+  const store = new CrosslineStore(":memory:");
+  vi.useFakeTimers();
+  try {
+    seed(store, "ready_for_human");
+    vi.setSystemTime(new Date("2026-09-14T09:00:00.000Z"));
+    store.transitionWorkOrder("w", "w1", { type: "human.started" }, "start:w1", { durationObserved: true });
+    vi.setSystemTime(new Date("2026-09-14T09:10:00.000Z"));
+    store.pauseExecution("w", "w1", "临时会议");
+    vi.setSystemTime(new Date("2026-09-14T09:40:00.000Z"));
+    store.transitionWorkOrder("w", "w1", { type: "human.completed" }, "done:w1",
+      { checklistAnswers: [{ questionId: "q1", answer: "是" }] });
+    const execution = store.listExecutions("w")[0]!;
+    expect(execution.checklistAnswers).toEqual([{ questionId: "q1", answer: "是" }]);
+    expect(execution.interruptions).toEqual([
+      { pausedAt: "2026-09-14T09:10:00.000Z", resumedAt: "2026-09-14T09:40:00.000Z", reason: "临时会议" }
+    ]);
+  } finally { store.close(); }
+});
+
 test("blocking mid-pause closes the interruption so the record never reads as work", () => {
   const store = new CrosslineStore(":memory:");
   try {

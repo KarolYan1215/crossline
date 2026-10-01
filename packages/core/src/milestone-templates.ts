@@ -21,6 +21,49 @@ export type EvidenceQuestionTemplate =
   | { id: string; prompt: string; kind: "checkbox"; options: string[]; required: boolean }
   | { id: string; prompt: string; kind: "text"; required: boolean };
 
+/** Strict-mode JSON schema for one `EvidenceQuestionTemplate` — shared by `crossline-milestone-
+ * architect`'s proposal output (`milestone-gate-schema.ts`) and `crossline-assistant`'s
+ * `templateProposal` would use it too if it ever grew evidence questions of its own. A `anyOf` union,
+ * not an optional `options`, for the same reason `materials-schema.ts`'s contract items need one in
+ * strict mode: "required but only for one branch" cannot be expressed any other way. */
+export const EVIDENCE_QUESTION_SCHEMA = {
+  anyOf: [
+    {
+      type: "object", additionalProperties: false,
+      required: ["id", "prompt", "kind", "options", "required"],
+      properties: {
+        id: { type: "string", minLength: 1, maxLength: 200 },
+        prompt: { type: "string", minLength: 1, maxLength: 400 },
+        kind: { type: "string", enum: ["checkbox"] },
+        options: { type: "array", minItems: 1, maxItems: 6, items: { type: "string", minLength: 1, maxLength: 100 } },
+        required: { type: "boolean" }
+      }
+    },
+    {
+      type: "object", additionalProperties: false,
+      required: ["id", "prompt", "kind", "required"],
+      properties: {
+        id: { type: "string", minLength: 1, maxLength: 200 },
+        prompt: { type: "string", minLength: 1, maxLength: 400 },
+        kind: { type: "string", enum: ["text"] },
+        required: { type: "boolean" }
+      }
+    }
+  ]
+};
+
+/** Checks the same `anyOf` the schema enforces structurally — options present exactly for checkbox,
+ * absent otherwise — plus id uniqueness within one bank, since the JSON schema alone cannot express a
+ * cross-item constraint. */
+export function validateEvidenceQuestionBank(questions: EvidenceQuestionTemplate[]): boolean {
+  const ids = questions.map((question) => question.id);
+  if (new Set(ids).size !== ids.length) return false;
+  for (const question of questions) {
+    if (question.kind === "checkbox" && question.options.length === 0) return false;
+  }
+  return true;
+}
+
 export type MilestoneTemplateSource = "builtin" | "user" | "assistant";
 
 export type MilestoneTemplate = {

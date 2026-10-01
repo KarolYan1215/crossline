@@ -1,5 +1,5 @@
 import "server-only";
-import type { AccessContext, SuccessCriterion } from "@crossline/core";
+import type { AccessContext, SuccessCriterion, EvidenceQuestionTemplate } from "@crossline/core";
 import type { CrosslineStore, StoredMilestone, StoredWorkOrder, StoredMaterial, StoredExecution, StoredMilestoneRelation, StoredBackgroundFact } from "@crossline/db";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { getStore, resolvedEstimate, relationKindLabel, accents } from "./crossline";
@@ -27,6 +27,9 @@ export type TaskDetail = {
   milestone?: { id: string; title: string };
   materialContract: Array<{ kind: string; description: string; why: string; required: boolean }>;
   evidenceContract: Array<{ kind: string; description: string; why: string; required: boolean }>;
+  /** Pre-generated completion-time questions copied from the bound milestone at `plan.approved` — see
+   * 工作块 E. Empty for an order whose milestone has no question bank; file/free-text evidence still works. */
+  evidenceChecklist: EvidenceQuestionTemplate[];
   preparedMaterials: Array<{ id: string; uri: string; fileName: string; mediaType: string }>;
   executions: Array<{
     id: string; startedAt: string; endedAt?: string; pauseMinutes: number; durationObserved: boolean;
@@ -123,6 +126,7 @@ function assembleTaskDetail(ctx: AccessContext, order: StoredWorkOrder, deps: {
 }): TaskDetail {
   const payload = order.payload as {
     manualPromotion?: boolean; materialContract?: TaskDetail["materialContract"]; evidenceContract?: TaskDetail["evidenceContract"];
+    evidenceChecklist?: TaskDetail["evidenceChecklist"];
     blocker?: { reason: string }; gateReview?: TaskDetail["gateReview"];
   };
   const { label: identityLabel, accent } = identityInfo(order.identityId);
@@ -140,6 +144,7 @@ function assembleTaskDetail(ctx: AccessContext, order: StoredWorkOrder, deps: {
     riskTier: order.riskTier, estimate: resolvedEstimate(ctx, order), manualPromotion: Boolean(payload.manualPromotion),
     ...(deps.milestone ? { milestone: { id: deps.milestone.id, title: deps.milestone.title } } : {}),
     materialContract: payload.materialContract ?? [], evidenceContract: payload.evidenceContract ?? [],
+    evidenceChecklist: payload.evidenceChecklist ?? [],
     preparedMaterials: deps.materials.map((item) => ({ id: item.id, uri: item.uri, fileName: item.uri.split("/").pop() ?? item.uri, mediaType: item.mediaType })),
     executions,
     ...(payload.blocker ? { blocker: payload.blocker } : {}),

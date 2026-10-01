@@ -3,7 +3,8 @@ import { randomUUID } from "node:crypto";
 import { copyFileSync, existsSync } from "node:fs";
 import { advanceWorkOrder, validateAnalysisProposal, validateAnalysisContext, validateMilestoneGateResult, validateSuccessCriteria,
   type MilestoneGateResult, type SuccessCriterion, type WorkOrderEvent, type WorkOrderState,
-  type MilestoneTemplateKind, type EvidenceQuestionTemplate, type MilestoneTemplateSource } from "@crossline/core";
+  type MilestoneTemplateKind, type EvidenceQuestionTemplate, type MilestoneTemplateSource,
+  type ChecklistAnswer } from "@crossline/core";
 
 type LedgerEventInput = {
   ownerId: string;
@@ -45,6 +46,12 @@ export type StoredMilestone = {
   /** Deterministic, computed by `computeMilestoneConfidence` at save time — not a model self-rating.
    * Absent for a pre-template milestone, same reason `templateId` is absent rather than defaulted. */
   confidence?: "low" | "medium" | "high";
+  /** Pre-generated completion-time questions, Codex-`ask` style — see 工作块 E. Copied from the chosen
+   * template's `evidenceQuestionDefaults` when `templateId` is set, or from the architect Skill's own
+   * output for a free-form proposal; empty for a manually-authored milestone with no template. A
+   * WorkOrder bound to this milestone copies this bank onto its own `evidenceChecklist` once, at
+   * `plan.approved` (`transitionWorkOrder`). */
+  evidenceQuestionBank?: EvidenceQuestionTemplate[];
 };
 
 export type StoredMilestoneTemplate = {
@@ -139,6 +146,11 @@ export type StoredExecution = {
   durationObserved: boolean;
   outcome?: "completed" | "completed_without_evidence" | "blocked";
   interruptions: Array<{ pausedAt: string; resumedAt?: string; reason: string }>;
+  /** Answers to the WorkOrder's own `evidenceChecklist`, submitted alongside `evidence` at
+   * `human.completed` — see 工作块 E. Belongs to this completion, not to any one evidence claim, so it
+   * lives here rather than as a column on `evidence_claims`. Absent when the order had no checklist or
+   * the person answered none of it. */
+  checklistAnswers?: ChecklistAnswer[];
 };
 
 export type StoredPlanVersion = {
@@ -661,6 +673,17 @@ export class CrosslineStore {
       { version: 8, up: () => {
         if (!has("milestones", "template_id")) this.#db.exec("ALTER TABLE milestones ADD COLUMN template_id TEXT");
         if (!has("milestones", "confidence")) this.#db.exec("ALTER TABLE milestones ADD COLUMN confidence TEXT");
+      } },
+
+      // Another plain nullable column, same reasoning as migration 8. `checklistAnswers` (work block E's
+      // completion-time questions) deliberately does NOT get a column of its own on `evidence_claims` —
+      // it belongs to the submission as a whole, not to any one evidence item, so it lives in the
+      // execution row's own `payload_json` next to `interruptions`/`durationObserved`, which already
+      // holds per-completion data with no schema of its own.
+      { version: 9, up: () => {
+        if (!has("milestones", "evidence_question_bank_json")) {
+          this.#db.exec("ALTER TABLE milestones ADD COLUMN evidence_question_bank_json TEXT");
+        }
       } }
     ];
 
@@ -795,6 +818,9 @@ export class CrosslineStore {
   transitionWorkOrder(workspaceId: string, id: string, event: WorkOrderEvent, idempotencyKey: string,
     update: { proposal?: unknown; context?: unknown; audit?: StoredCapture["audit"]; attempt?: number;
       evidence?: EvidenceClaimInput[]; durationObserved?: boolean;
+      /** Answers to the order's own `evidenceChecklist`, submitted alongside `evidence` on
+       * `human.completed` — see 工作块 E. Stored on the closing execution row, not on any evidence claim. */
+      checklistAnswers?: ChecklistAnswer[];
       // The identity pack's static prior, frozen by the caller at call time — not looked up here, so
       // `packages/db` never needs to know what an "identity pack" is. Present only on `evidence.accepted`;
       // absent (e.g. a pre-`family` WorkOrder, or a caller that can't resolve one) simply skips recording
@@ -832,6 +858,18 @@ export class CrosslineStore {
         this.saveWorkOrder({ id, ownerId: current.ownerId, workspaceId, ...proposal, state: next.to,
           payload: { ...proposal, audit: update.audit, contextVersion: context.version } });
       }
+      // Copied once, verbatim, from the bound milestone's own `evidenceQuestionBank` — not filtered or
+      // matched against the order's `intent`/`evidenceContract`. A milestone's bank today comes from
+      // exactly one template (or one Skill call), so it is already small and already specific to that
+      // milestone; a relevance filter would add real complexity for no signal it can actually act on
+      // with today's data shape. Revisit if a bank ever grows from multiple merged sources.
+      if (!isCapture && event.type === "plan.approved") {
+        const milestoneId = (current as StoredWorkOrder).milestoneId;
+        const milestone = milestoneId ? this.getMilestone(workspaceId, milestoneId) : undefined;
+        if (milestone?.evidenceQuestionBank?.length) {
+          this.#mergeWorkOrderPayload(workspaceId, id, { evidenceChecklist: milestone.evidenceQuestionBank });
+        }
+      }
       const table = isCapture ? "captures" : "work_orders";
       // A promoted capture keeps its raw text and audit but stops being a capture: without this marker
       // the same id would sit in both tables at the same state and could resurface as analysable.
@@ -852,7 +890,7 @@ export class CrosslineStore {
   // Runs inside transitionWorkOrder's transaction, so an execution or evidence row can never outlive a
   // rolled-back state change. WorkOrders only — a capture has neither executions nor evidence.
   #recordExecutionEffects(workspaceId: string, id: string, ownerId: string, event: WorkOrderEvent,
-    update: { evidence?: EvidenceClaimInput[]; durationObserved?: boolean;
+    update: { evidence?: EvidenceClaimInput[]; durationObserved?: boolean; checklistAnswers?: ChecklistAnswer[];
       durationCalibrationBaseline?: { p25Minutes: number; p50Minutes: number; p85Minutes: number } }): void {
     const now = new Date().toISOString();
     const open = this.#openExecution(workspaceId, id);
@@ -865,11 +903,15 @@ export class CrosslineStore {
       return;
     }
     // Ending while paused would otherwise leave the last interruption open and uncounted, so the
-    // recorded wall clock would silently read as work. Both endings close it the same way.
+    // recorded wall clock would silently read as work. Both endings close it the same way. Tracked in
+    // this local rather than re-read from `open`, which is a snapshot taken before this closes anything —
+    // the final payload write below has to see the closed interruption, not the stale open one.
+    let interruptions = open?.interruptions ?? [];
     if (event.type === "human.completed" || event.type === "blocked") {
-      const last = open?.interruptions.at(-1);
+      const last = interruptions.at(-1);
       if (open && last && !last.resumedAt) {
-        this.#writeInterruptions(open.id, [...open.interruptions.slice(0, -1), { ...last, resumedAt: now }], open.durationObserved);
+        interruptions = [...interruptions.slice(0, -1), { ...last, resumedAt: now }];
+        this.#writeInterruptions(open.id, interruptions, open.durationObserved);
       }
     }
     if (event.type === "human.completed") {
@@ -881,8 +923,13 @@ export class CrosslineStore {
         `).run(randomUUID(), ownerId, workspaceId, id, claim.kind, claim.uri, JSON.stringify({ description: claim.description }), now);
       }
       // No evidence is recorded as an explicit outcome rather than as an invented claim.
-      if (open) this.#db.prepare("UPDATE executions SET ended_at = ?, outcome = ? WHERE id = ?")
-        .run(now, evidence.length ? "completed" : "completed_without_evidence", open.id);
+      if (open) {
+        const checklistAnswers = update.checklistAnswers ?? [];
+        this.#db.prepare("UPDATE executions SET ended_at = ?, outcome = ?, payload_json = ? WHERE id = ?")
+          .run(now, evidence.length ? "completed" : "completed_without_evidence",
+            JSON.stringify({ durationObserved: open.durationObserved, interruptions,
+              ...(checklistAnswers.length ? { checklistAnswers } : {}) }), open.id);
+      }
       return;
     }
     if (event.type === "evidence.accepted") {
@@ -1047,14 +1094,17 @@ export class CrosslineStore {
       ? this.#db.prepare("SELECT * FROM executions WHERE workspace_id = ? AND work_order_id = ? ORDER BY started_at, id").all(workspaceId, workOrderId)
       : this.#db.prepare("SELECT * FROM executions WHERE workspace_id = ? ORDER BY started_at, id").all(workspaceId)) as Array<Record<string, string | number | null>>;
     return rows.map((row) => {
-      const payload = JSON.parse(String(row.payload_json)) as { durationObserved?: boolean; interruptions?: StoredExecution["interruptions"] };
+      const payload = JSON.parse(String(row.payload_json)) as {
+        durationObserved?: boolean; interruptions?: StoredExecution["interruptions"]; checklistAnswers?: ChecklistAnswer[];
+      };
       return {
         id: String(row.id), ownerId: String(row.owner_id), workspaceId: String(row.workspace_id),
         workOrderId: String(row.work_order_id), startedAt: String(row.started_at),
         ...(row.ended_at ? { endedAt: String(row.ended_at) } : {}),
         pauseMinutes: Number(row.pause_minutes), durationObserved: payload.durationObserved === true,
         ...(row.outcome ? { outcome: String(row.outcome) as NonNullable<StoredExecution["outcome"]> } : {}),
-        interruptions: payload.interruptions ?? []
+        interruptions: payload.interruptions ?? [],
+        ...(payload.checklistAnswers?.length ? { checklistAnswers: payload.checklistAnswers } : {})
       };
     });
   }
@@ -1232,8 +1282,8 @@ export class CrosslineStore {
     this.#db.prepare(`
       INSERT INTO milestones (
         id, owner_id, workspace_id, identity_id, title, version, status, updated_at, project_id,
-        success_criteria_json, verifiability, template_id, confidence
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        success_criteria_json, verifiability, template_id, confidence, evidence_question_bank_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(workspace_id, id, version) DO UPDATE SET
         title = excluded.title,
         status = excluded.status,
@@ -1242,7 +1292,8 @@ export class CrosslineStore {
         success_criteria_json = excluded.success_criteria_json,
         verifiability = excluded.verifiability,
         template_id = excluded.template_id,
-        confidence = excluded.confidence
+        confidence = excluded.confidence,
+        evidence_question_bank_json = excluded.evidence_question_bank_json
     `).run(
       milestone.id,
       milestone.ownerId,
@@ -1256,7 +1307,8 @@ export class CrosslineStore {
       JSON.stringify(criteria),
       verifiability,
       milestone.templateId ?? null,
-      milestone.confidence ?? null
+      milestone.confidence ?? null,
+      milestone.evidenceQuestionBank ? JSON.stringify(milestone.evidenceQuestionBank) : null
     );
   }
 
@@ -1273,7 +1325,9 @@ export class CrosslineStore {
       successCriteria: JSON.parse(String(row.success_criteria_json ?? "[]")) as SuccessCriterion[],
       verifiability: String(row.verifiability ?? "unstated") as StoredMilestone["verifiability"],
       ...(row.template_id ? { templateId: String(row.template_id) } : {}),
-      ...(row.confidence ? { confidence: String(row.confidence) as "low" | "medium" | "high" } : {})
+      ...(row.confidence ? { confidence: String(row.confidence) as "low" | "medium" | "high" } : {}),
+      ...(row.evidence_question_bank_json
+        ? { evidenceQuestionBank: JSON.parse(String(row.evidence_question_bank_json)) as EvidenceQuestionTemplate[] } : {})
     };
   }
 

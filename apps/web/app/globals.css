@@ -308,6 +308,13 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .execution-actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:3px}
 .execution-actions button,.execution-actions a{min-height:28px;padding:5px 11px;border:1px solid var(--mist);font-family:var(--f-mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase}
 .execution-actions button:hover,.execution-actions a:hover{border-color:var(--ink)}
+.evidence-checklist{flex-basis:100%;margin:4px 0;padding:8px 10px;border:1px solid var(--mist);display:grid;gap:6px}
+.evidence-checklist legend{padding:0}
+.evidence-question{display:grid;gap:4px;font-size:12.5px}
+.evidence-question-options{display:flex;gap:10px;flex-wrap:wrap}
+.evidence-question-options label{display:flex;align-items:center;gap:4px;font-size:12px}
+.evidence-file-upload{flex-basis:100%;display:grid;gap:3px}
+.evidence-file-upload small{font-size:10.5px;color:var(--graphite)}
 
 /* ── task/milestone detail (drawer + standalone page share this) ──────── */
 .task-detail-view{display:grid;gap:10px}

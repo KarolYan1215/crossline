@@ -6,7 +6,7 @@ import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 import { CrosslineStore, type EvidenceClaimInput, type StoredMilestone } from "@crossline/db";
 import { availableSlots, deriveCapacity, requiredApproval, validateAvailability, DEFAULT_AVAILABILITY,
   defaultMilestoneTemplates, computeMilestoneConfidence, validateSuccessCriteria,
-  type AccessContext, type AvailabilityWindow, type Estimate, type SuccessCriterion } from "@crossline/core";
+  type AccessContext, type AvailabilityWindow, type Estimate, type SuccessCriterion, type ChecklistAnswer } from "@crossline/core";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { forecastGoals, planSchedule, recommendNextActions, type ForecastResult, type PlanResult } from "@crossline/planner";
 import { energyCalibration, predictEnergyTransition, readTransitionOutcomes } from "./energy-learning";
@@ -677,7 +677,11 @@ export function saveMilestoneEdit(ctx: AccessContext, input: MilestoneInput): { 
       id, ownerId: ctx.principalId, workspaceId: ctx.workspaceId,
       identityId: input.identityId, projectId, title,
       version, status: input.status, successCriteria: input.successCriteria,
-      ...(input.templateId ? { templateId: input.templateId } : {}), confidence
+      ...(input.templateId ? { templateId: input.templateId } : {}), confidence,
+      // Follows templateId the same way confidence does: present only when a template is actually
+      // chosen (on this save, not merely at some point in the past), so re-picking "不套用" on an edit
+      // correctly drops it rather than leaving a stale bank from a template no longer in effect.
+      ...(template?.evidenceQuestionDefaults.length ? { evidenceQuestionBank: template.evidenceQuestionDefaults } : {})
     });
   } catch (error) {
     // `saveMilestone` throws the criterion blocker code, which is the specific thing the person needs
@@ -929,14 +933,16 @@ export function resumeWorkOrderExecution(ctx: AccessContext, workOrderId: string
   return { ok: true };
 }
 
-export function completeWorkOrderExecution(ctx: AccessContext, workOrderId: string, evidence: EvidenceClaimInput[]): ExecutionResult {
+export function completeWorkOrderExecution(ctx: AccessContext, workOrderId: string, evidence: EvidenceClaimInput[],
+  checklistAnswers: ChecklistAnswer[] = []): ExecutionResult {
   const store = getStore();
   const workOrder = findWorkOrder(ctx.workspaceId, workOrderId);
   if (!workOrder) return { ok: false, code: "WORK_ORDER_NOT_FOUND" };
   if (workOrder.state === "evidence_review") return { ok: true };
   if (workOrder.state !== "active") return { ok: false, code: "EXECUTION_NOT_ACTIVE" };
   store.transitionWorkOrder(ctx.workspaceId, workOrderId, { type: "human.completed" },
-    `execution:${workOrderId}:${executionRun(ctx.workspaceId, workOrderId) - 1}:completed`, { evidence });
+    `execution:${workOrderId}:${executionRun(ctx.workspaceId, workOrderId) - 1}:completed`,
+    { evidence, ...(checklistAnswers.length ? { checklistAnswers } : {}) });
   return { ok: true };
 }
 

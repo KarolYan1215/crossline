@@ -160,7 +160,8 @@ export default async function WorkbenchPage({ searchParams }: {
             target="_blank" rel="noreferrer">{item.uri.split("/").pop()}</a>
         </span>)}</p>}
         <ExecutionActions workOrderId={run.id} intent={run.intent} state={run.state} paused={paused}
-          ownerId={ctx.principalId} workspaceId={ctx.workspaceId} />
+          ownerId={ctx.principalId} workspaceId={ctx.workspaceId}
+          evidenceChecklist={taskDetails.get(run.id)?.evidenceChecklist ?? []} />
         {blockerOf(run) && <p role="status">已退回 · {blockerOf(run)!.reason}</p>}
         {/* A held order used to show only the code. The gate's own per-criterion reading is what says
             which standard was not met and what would satisfy it, so it is shown rather than stored. */}

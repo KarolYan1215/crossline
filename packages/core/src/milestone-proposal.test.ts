@@ -16,7 +16,8 @@ const criterion = (over: Partial<SuccessCriterion> = {}): SuccessCriterion => ({
 });
 const proposal = (over: Record<string, unknown> = {}) => ({
   milestones: [{ identityId: "research", projectId: "p", title: "新的里程碑",
-    successCriteria: [criterion()], rationale: "因为…", templateId: null }],
+    successCriteria: [criterion()], rationale: "因为…", templateId: null,
+    evidenceQuestionBank: [{ id: "q1", prompt: "是否有人回信？", kind: "checkbox", options: ["是", "否"], required: true }] }],
   assumptions: [], blockers: [], ...over
 });
 
@@ -50,8 +51,25 @@ test("a templateId naming a template that was never offered is refused as fabric
 
 test("a templateId naming a template that was actually offered passes through", () => {
   const templated = proposal({ milestones: [{ identityId: "research", projectId: "p", title: "新的里程碑",
-    successCriteria: [criterion()], rationale: "r", templateId: "research-literature-review-done" }] });
+    successCriteria: [criterion()], rationale: "r", templateId: "research-literature-review-done", evidenceQuestionBank: [] }] });
   expect(validateMilestoneProposal(templated, context).milestones[0]?.templateId).toBe("research-literature-review-done");
+});
+
+test("a checkbox evidence question with no options is refused", () => {
+  const invalid = proposal({ milestones: [{ identityId: "research", projectId: "p", title: "新的里程碑",
+    successCriteria: [criterion()], rationale: "r", templateId: null,
+    evidenceQuestionBank: [{ id: "q1", prompt: "x", kind: "checkbox", options: [], required: true }] }] });
+  expect(() => validateMilestoneProposal(invalid, context)).toThrow("PROPOSAL_EVIDENCE_QUESTION_BANK_INVALID");
+});
+
+test("duplicate ids within one evidence question bank are refused", () => {
+  const invalid = proposal({ milestones: [{ identityId: "research", projectId: "p", title: "新的里程碑",
+    successCriteria: [criterion()], rationale: "r", templateId: null,
+    evidenceQuestionBank: [
+      { id: "q1", prompt: "a", kind: "text", required: true },
+      { id: "q1", prompt: "b", kind: "text", required: true }
+    ] }] });
+  expect(() => validateMilestoneProposal(invalid, context)).toThrow("PROPOSAL_EVIDENCE_QUESTION_BANK_INVALID");
 });
 
 test("a Skill that stopped keeps its reason", () => {

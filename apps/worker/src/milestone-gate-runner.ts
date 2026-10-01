@@ -47,7 +47,10 @@ export function buildMilestoneGateContext(store: CrosslineStore, workspaceId: st
   const relations = store.listMilestoneRelations(workspaceId)
     .filter((relation) => relation.fromMilestoneId === milestone.id && relation.status !== "archived");
   const milestonesById = new Map(store.listMilestones(workspaceId).map((item) => [item.id, item]));
-  const payload = order.payload as { evidenceContract?: Array<{ description?: string; kind?: string }> };
+  const payload = order.payload as {
+    evidenceContract?: Array<{ description?: string; kind?: string }>;
+    evidenceChecklist?: Array<{ id: string; prompt: string }>;
+  };
 
   // Readable artifact text, as the Skill contract expects. Only materials this app wrote itself are
   // read: their paths come from the `materials` table, never from anything the model supplied.
@@ -60,9 +63,32 @@ export function buildMilestoneGateContext(store: CrosslineStore, workspaceId: st
     } catch { /* a material removed from disk simply cannot be quoted */ }
   }
 
+  // A `kind:"file"` evidence claim's own `description` is just the label the person typed, not its
+  // content — this reads the file itself so the gate can quote what is actually inside it. Only plain
+  // `.txt` evidence is attempted: the upload route (`saveEvidenceFile`) also allows images and PDFs, and
+  // neither can be turned into quotable text without OCR, which stays out of scope here (see 工作块 E) —
+  // they still count as "a file was submitted", just not as something the gate can quote from.
+  const fileEvidence: Array<{ id: string; kind: string; text: string }> = [];
+  for (const claim of claims) {
+    if (claim.kind !== "file" || !claim.uri.startsWith("file://") || !claim.uri.endsWith(".txt")) continue;
+    try {
+      fileEvidence.push({ id: `${claim.id}:content`, kind: "file",
+        text: readFileSync(fileURLToPath(claim.uri), "utf8").slice(0, ARTIFACT_TEXT_LIMIT) });
+    } catch { /* a file removed from disk simply cannot be quoted */ }
+  }
+
+  // Pre-generated completion-time answers, flattened to quotable "Q: … A: …" text — see 工作块 E. The
+  // question's own prompt comes from the order's own `evidenceChecklist`, not from the answer itself,
+  // since `checklistAnswers` only ever carries `{questionId, answer}`.
+  const checklistPrompts = new Map((payload.evidenceChecklist ?? []).map((question) => [question.id, question.prompt]));
+  const checklistEvidence = (execution?.checklistAnswers ?? []).map((item) => ({
+    id: `checklist:${item.questionId}`, kind: "record",
+    text: `Q: ${checklistPrompts.get(item.questionId) ?? item.questionId} A: ${item.answer}`
+  }));
+
   const evidenceClaims = [
     ...claims.map((claim) => ({ id: claim.id, kind: claim.kind, text: claim.description })),
-    ...artifacts
+    ...artifacts, ...fileEvidence, ...checklistEvidence
   ];
   // Exactly the strings the gate may quote. This same array goes to the Skill and to the validator: a
   // quote check against different text would prove nothing.
