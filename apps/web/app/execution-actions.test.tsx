@@ -33,3 +33,23 @@ describe("execution actions — evidence checklist (工作块 E)", () => {
     expect(html).toContain("由 AI 审阅");
   });
 });
+
+describe("execution actions — showEnergyProbe (工作块 F)", () => {
+  test("renders the before-task energy probe by default on an approved order", () => {
+    const html = renderToStaticMarkup(<ExecutionActions {...base} state="approved" />);
+    expect(html).toContain("开始前精力");
+    expect(html).toContain("记录中精力");
+  });
+
+  test("showEnergyProbe=false suppresses the probe without hiding the start button — the homepage has its own energy section", () => {
+    const html = renderToStaticMarkup(<ExecutionActions {...base} state="approved" showEnergyProbe={false} />);
+    expect(html).not.toContain("开始前精力");
+    expect(html).not.toContain("记录中精力");
+    expect(html).toContain("开始执行");
+  });
+
+  test("showEnergyProbe=false also suppresses the after-task probe on an evidence_review order", () => {
+    const html = renderToStaticMarkup(<ExecutionActions {...base} state="evidence_review" showEnergyProbe={false} />);
+    expect(html).not.toContain("完成后精力与实际负荷");
+  });
+});

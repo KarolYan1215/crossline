@@ -204,6 +204,8 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .hero-action dl div{background:var(--paper);padding:7px 9px}
 .hero-action dt{font-family:var(--f-mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--shade)}
 .hero-action dd{margin:3px 0 0;font-size:11.5px}
+.hero-detail-link{display:inline-block;margin-top:10px;font-family:var(--f-mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--graphite)}
+.hero-detail-link:hover{color:var(--ink)}
 .action-margin{display:grid;grid-template-rows:1fr 1fr;gap:1px;background:var(--mist)}
 .alt-action{background:var(--paper);padding:12px clamp(10px,1.4vw,16px)}
 .alt-action h3{margin:14px 0 6px;font-family:var(--f-display);font-size:17px;letter-spacing:-.01em;line-height:1.1}

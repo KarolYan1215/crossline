@@ -95,7 +95,10 @@ test("Today keeps capture semantic-only and health outside identity navigation",
   await expect(page.locator(".capture-form select")).toHaveCount(0);
   await expect(page.locator('.capture-form input[name="title"]')).toBeVisible();
   await expect(page.getByRole("button", { name: "提交完成证据" })).toHaveCount(0);
-  await expect(page.getByRole("link", { name: "前往任务详情执行并提交证据" })).toHaveAttribute("href", /\/workbench\//);
+  // 工作块F: 下一行动卡片直接内嵌开始/暂停/完成+证据操作（ExecutionActions），不再只是一个跳转链接；
+  // 独立详情页的入口被保留为一个单独的小链接。
+  await expect(page.locator(".hero-action .execution-actions")).toBeVisible();
+  await expect(page.locator(".hero-action a.hero-detail-link")).toHaveAttribute("href", /\/workbench\//);
   if (testInfo.project.name === "desktop-chrome") await expect(page).toHaveScreenshot("today-paper-grid.png", { fullPage: true });
 });
 
@@ -112,14 +115,13 @@ test("a task card's preview drawer opens in place, and its standalone-page link 
   await expect(drawer.locator(".task-detail-view h2")).toHaveText(title);
   await expect(page).toHaveURL(/\/$/);
 
-  // Its own "独立页面查看" link is the same destination the hero card's own visible CTA points to
-  // (the hero is the one card that uses a real labelled button instead of an invisible stretched link,
-  // since it already carries a prominent "前往任务详情执行并提交证据" action), and the standalone page
-  // renders the identical task.
+  // Its own "独立页面查看" link is the same destination the hero card's own "查看完整详情" link points to
+  // (工作块F内嵌了开始/暂停/完成+证据操作，但独立详情页承载的背景资料、材料清单、执行记录等仍只在那里
+  // 展示，所以 hero 卡片单独保留了一个指向它的小链接), and the standalone page renders the identical task.
   const detailLink = drawer.getByRole("link", { name: "⤢ 独立页面查看" });
   const href = await detailLink.getAttribute("href");
   expect(href).toMatch(/^\/workbench\//);
-  await expect(hero.locator("a.primary-button")).toHaveAttribute("href", href!);
+  await expect(hero.locator("a.hero-detail-link")).toHaveAttribute("href", href!);
   await detailLink.click();
   await expect(page).toHaveURL(new RegExp(href!.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "$"));
   await expect(page.locator(".task-detail-view h2")).toHaveText(title);

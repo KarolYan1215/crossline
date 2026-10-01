@@ -22,12 +22,16 @@ const codes: Record<string, string> = {
   WORK_ORDER_ALREADY_ACCEPTED: "已验收的作业不能丢弃；如需退回请到复盘页撤销验收。"
 };
 
-export function ExecutionActions({ workOrderId, intent, state, paused, ownerId, workspaceId, evidenceChecklist = [] }: {
+export function ExecutionActions({ workOrderId, intent, state, paused, ownerId, workspaceId, evidenceChecklist = [], showEnergyProbe = true }: {
   workOrderId: string; intent: string; state: string; paused: boolean; ownerId: string; workspaceId: string;
   /** Pre-generated completion-time questions copied from the bound milestone — see 工作块 E. Empty is
    * normal (no template behind the milestone, or no milestone at all); the free-text/file fields below
    * stay available regardless. */
   evidenceChecklist?: EvidenceQuestionTemplate[];
+  /** Today's homepage already has its own dedicated energy probe in the CARE/CAPACITY section — embedding
+   * this component's own before/after-task probe there too would put two identically-labelled "记录中精力"
+   * controls on one page. Workbench and the task detail page have no such section, so they keep it on. */
+  showEnergyProbe?: boolean;
 }) {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
@@ -122,9 +126,10 @@ export function ExecutionActions({ workOrderId, intent, state, paused, ownerId, 
       <button type="button" disabled={busy} onClick={() => void send({ action: "materials_retry" })}>重新准备材料</button>
       <button type="button" disabled={busy} onClick={() => void send({ action: "materials_ready" })}>材料我已备好</button>
     </>}
-    {(state === "approved" || state === "ready_for_human") &&
-      <><span className="micro">开始前精力</span><EnergyProbe context="before_task" workOrderId={workOrderId} />
-        <button className="primary-button" type="button" disabled={busy} onClick={() => void send({ action: "start" })}>开始执行</button></>}
+    {(state === "approved" || state === "ready_for_human") && <>
+      {showEnergyProbe && <><span className="micro">开始前精力</span><EnergyProbe context="before_task" workOrderId={workOrderId} /></>}
+      <button className="primary-button" type="button" disabled={busy} onClick={() => void send({ action: "start" })}>开始执行</button>
+    </>}
     {state === "active" && !paused && <>
       <label><span className="sr-only">中断原因</span>
         <input value={reason} maxLength={200} placeholder="中断原因（必填）" onChange={(event) => setReason(event.target.value)} /></label>
@@ -167,7 +172,7 @@ export function ExecutionActions({ workOrderId, intent, state, paused, ownerId, 
         {hasEvidence ? "提交完成与证据" : "完成（记为无证据）"}
       </button>
     </>}
-    {(state === "evidence_review" || state === "accepted") && <>
+    {(state === "evidence_review" || state === "accepted") && showEnergyProbe && <>
       <span className="micro">完成后精力与实际负荷</span>
       <EnergyProbe context="after_task" workOrderId={workOrderId} />
     </>}

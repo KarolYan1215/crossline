@@ -64,6 +64,13 @@ describe("dashboard view", () => {
     }} />);
     expect(html).toContain("开始执行");
     expect(html).not.toContain("前往任务详情执行并提交证据");
+    // The homepage's own CARE/CAPACITY section already has an energy probe — the embedded
+    // ExecutionActions must not add a second "记录中精力" control next to it.
+    expect(html).not.toContain("开始前精力");
+    // The inline controls replace the old CTA, but the hero card still needs a way to reach the
+    // full detail page (background facts, material/evidence contracts, execution history).
+    expect(html).toContain('href="/workbench/paper"');
+    expect(html).toContain("查看完整详情");
   });
 
   test("includes a usable quick capture form", () => {

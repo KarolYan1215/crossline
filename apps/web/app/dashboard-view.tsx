@@ -114,7 +114,8 @@ export function DashboardView({ data }: { data: DashboardData }) {
     const detail = data.taskDetailById.get(item.id);
     return detail
       ? <ExecutionActions workOrderId={detail.id} intent={detail.intent} state={detail.state} paused={detail.paused}
-          ownerId={detail.ownerId} workspaceId={detail.workspaceId} evidenceChecklist={detail.evidenceChecklist} />
+          ownerId={detail.ownerId} workspaceId={detail.workspaceId} evidenceChecklist={detail.evidenceChecklist}
+          showEnergyProbe={false} />
       : <a className="primary-button" href={`/workbench/${encodeURIComponent(item.id)}`}>前往任务详情执行并提交证据</a>;
   };
 
@@ -161,6 +162,10 @@ export function DashboardView({ data }: { data: DashboardData }) {
           <div className={`identity-glyph ${data.primary.identityId}`} aria-hidden="true" />
           <h1>{data.primary.title}</h1>
           <p>{data.primary.reason}</p>
+          {/* Quick actions below cover start/pause/complete — background资料、材料清单、执行记录等完整上下文
+              仍只在独立详情页展示，这里补一个明显的跳转入口，不然 hero 卡片会丢失此前"CTA 即跳转"时附带的
+              导航能力。 */}
+          <a className="hero-detail-link" href={`/workbench/${encodeURIComponent(data.primary.id)}`}>查看完整详情 →</a>
           <dl>
             <div><dt>WINDOW</dt><dd>{estimateLabel(data.primary.estimate)}</dd></div>
             {/* This is the energy the work itself asks for, not the reading in the header — two different
