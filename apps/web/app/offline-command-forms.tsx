@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import {
   createCommand, deviceId, enqueue, listConflicts, listDeadLetters, nextSequence, rememberWorkspace,
   replayQueue, type OfflineCommand
 } from "./offline-queue";
+import { useAttachmentDrop } from "./attachment-drop";
 import type { DeadLetter } from "@crossline/core";
 
 /** Renews (or first-issues) this browser's 24-hour device lease. Best-effort: a lease that fails to
@@ -58,43 +59,8 @@ const ACCEPTED_ATTACHMENT_TYPES = "image/png,image/jpeg,image/gif,image/webp,app
 
 export function OfflineCaptureForm({ ownerId, workspaceId }: { ownerId: string; workspaceId: string }) {
   const [status, setStatus] = useState("");
-  const [fileNames, setFileNames] = useState<string[]>([]);
-  const [dragOver, setDragOver] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // The native input stays the single source of truth for what actually uploads (submit() reads it via
-  // `new FormData(form)` unchanged) — drag and paste just add to its FileList through a DataTransfer
-  // instead of duplicating file state next to it, which is what browsers support assigning to
-  // `input.files` with.
-  const addFiles = (incoming: FileList | File[]) => {
-    const input = fileInputRef.current;
-    if (!input) return;
-    const accepted = ACCEPTED_ATTACHMENT_TYPES.split(",");
-    const existing = [...(input.files ?? [])];
-    const merged = new DataTransfer();
-    const seen = new Set(existing.map((file) => `${file.name}:${file.size}:${file.lastModified}`));
-    for (const file of [...existing, ...incoming]) {
-      if (!accepted.includes(file.type)) continue;
-      const key = `${file.name}:${file.size}:${file.lastModified}`;
-      if (seen.has(key) && !existing.includes(file)) continue;
-      seen.add(key);
-      merged.items.add(file);
-    }
-    input.files = merged.files;
-    setFileNames([...merged.files].map((file) => file.name));
-  };
-  const onDrop = (event: DragEvent<HTMLLabelElement>) => {
-    event.preventDefault();
-    setDragOver(false);
-    if (event.dataTransfer.files.length) addFiles(event.dataTransfer.files);
-  };
-  const onPaste = (event: ClipboardEvent<HTMLFormElement>) => {
-    // A pasted screenshot arrives as a clipboard item, not `clipboardData.files` (that only carries an
-    // actual copied file) — both paths are checked so Ctrl+V works for either source.
-    const pasted = [...event.clipboardData.files,
-      ...[...event.clipboardData.items].flatMap((item) => { const file = item.kind === "file" ? item.getAsFile() : null; return file ? [file] : []; })];
-    if (pasted.length) addFiles(pasted);
-  };
+  const { fileInputRef, fileNames, dragOver, setDragOver, onDrop, onPaste, onInputChange, reset } =
+    useAttachmentDrop(ACCEPTED_ATTACHMENT_TYPES.split(","));
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -109,7 +75,7 @@ export function OfflineCaptureForm({ ownerId, workspaceId }: { ownerId: string; 
       try {
         await enqueue(workspaceId, command);
         form.reset();
-        setFileNames([]);
+        reset();
         // The offline queue only carries the JSON command — a queued capture has no server-side row
         // yet for an attachment to belong to, so files picked while offline are dropped rather than
         // silently claimed as saved.
@@ -149,7 +115,7 @@ export function OfflineCaptureForm({ ownerId, workspaceId }: { ownerId: string; 
       onDragLeave={() => setDragOver(false)} onDrop={onDrop}>
       <span className="sr-only">附件</span>
       <input ref={fileInputRef} name="attachments" type="file" multiple accept={ACCEPTED_ATTACHMENT_TYPES}
-        onChange={(event) => setFileNames([...(event.currentTarget.files ?? [])].map((file) => file.name))} />
+        onChange={onInputChange} />
       <small>{fileNames.length ? `已选 ${fileNames.length} 个：${fileNames.join("、")}` : "拖文件到这里，或 Ctrl+V 粘贴截图/文件"}</small>
     </label>
     <button className="secondary-button" type="submit">CAPTURE ↗</button>

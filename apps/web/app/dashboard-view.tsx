@@ -11,6 +11,7 @@ import type { TaskDetail, MilestoneDetail } from "../lib/task-detail";
 import { SignOutButton } from "./sign-out-button";
 import { NAV_ITEMS } from "./nav-items";
 import { BottomNav } from "./bottom-nav";
+import { AssistantWidget } from "./assistant-widget";
 
 export type DashboardAction = {
   id: string;
@@ -123,6 +124,7 @@ export function DashboardView({ data }: { data: DashboardData }) {
       <div className="system-state"><CircleDot size={11} aria-hidden="true" /><span>LOCAL</span><SignOutButton /></div>
     </header>
     <BottomNav active="Today" />
+    <AssistantWidget />
 
     <section className="day-head">
       <AnalogClock nowIso={data.nowIso} timeZone={data.timeZone} fixed={data.clockPinned} />

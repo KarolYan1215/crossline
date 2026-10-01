@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { SignOutButton } from "./sign-out-button";
 import { NAV_ITEMS } from "./nav-items";
 import { BottomNav } from "./bottom-nav";
+import { AssistantWidget } from "./assistant-widget";
 
 export function SubpageShell({ eyebrow, title, description, children }: {
   eyebrow: string;
@@ -15,6 +16,7 @@ export function SubpageShell({ eyebrow, title, description, children }: {
     <div className="system-state"><span>LOCAL · LIVE</span><SignOutButton /></div>
   </header>
   <BottomNav />
+  <AssistantWidget />
   <main className="subpage"><div className="subpage-inner">
     <header className="subpage-header">
       <div><span className="eyebrow">{eyebrow}</span><h1>{title}</h1><p className="muted">{description}</p></div>
