@@ -103,6 +103,16 @@ export type StoredCaptureAttachment = {
   uri: string; mediaType: string; fileName: string; createdAt: string;
 };
 
+export type StoredAssistantThread = {
+  id: string; ownerId: string; workspaceId: string;
+  codexThreadId?: string; workOrderId?: string; createdAt: string; updatedAt: string;
+};
+
+export type StoredAssistantAttachment = {
+  id: string; ownerId: string; workspaceId: string; threadId: string;
+  uri: string; mediaType: string; fileName: string; createdAt: string;
+};
+
 export type StoredExecution = {
   id: string; ownerId: string; workspaceId: string; workOrderId: string;
   startedAt: string; endedAt?: string;
@@ -365,6 +375,18 @@ export class CrosslineStore {
         UNIQUE(workspace_id, execution_id)
       );
       CREATE INDEX IF NOT EXISTS duration_observations_bucket ON duration_observations(workspace_id, identity_id, family, observed_at);
+      CREATE TABLE IF NOT EXISTS assistant_threads (
+        id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
+        codex_thread_id TEXT, work_order_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS assistant_threads_workspace ON assistant_threads(workspace_id, updated_at);
+      CREATE TABLE IF NOT EXISTS assistant_attachments (
+        id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
+        thread_id TEXT NOT NULL, uri TEXT NOT NULL, media_type TEXT NOT NULL,
+        file_name TEXT NOT NULL, created_at TEXT NOT NULL,
+        UNIQUE(workspace_id, thread_id, uri)
+      );
+      CREATE INDEX IF NOT EXISTS assistant_attachments_thread ON assistant_attachments(workspace_id, thread_id);
     `);
     if (hasLegacyTasks) this.#migrateLegacyTasks();
     this.#runMigrations(path);
@@ -1048,6 +1070,45 @@ export class CrosslineStore {
       fileName: row.file_name!, createdAt: row.created_at! }));
   }
 
+  saveAssistantThread(thread: StoredAssistantThread): void {
+    this.#db.prepare(`
+      INSERT INTO assistant_threads (id, owner_id, workspace_id, codex_thread_id, work_order_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET codex_thread_id = excluded.codex_thread_id, updated_at = excluded.updated_at
+    `).run(thread.id, thread.ownerId, thread.workspaceId, thread.codexThreadId ?? null,
+      thread.workOrderId ?? null, thread.createdAt, thread.updatedAt);
+  }
+
+  getAssistantThread(workspaceId: string, id: string): StoredAssistantThread | undefined {
+    const row = this.#db.prepare("SELECT * FROM assistant_threads WHERE workspace_id = ? AND id = ?")
+      .get(workspaceId, id) as Record<string, string> | undefined;
+    if (!row) return undefined;
+    return {
+      id: row.id!, ownerId: row.owner_id!, workspaceId: row.workspace_id!,
+      ...(row.codex_thread_id ? { codexThreadId: row.codex_thread_id } : {}),
+      ...(row.work_order_id ? { workOrderId: row.work_order_id } : {}),
+      createdAt: row.created_at!, updatedAt: row.updated_at!
+    };
+  }
+
+  saveAssistantAttachment(attachment: StoredAssistantAttachment): void {
+    this.#db.prepare(`
+      INSERT INTO assistant_attachments (id, owner_id, workspace_id, thread_id, uri, media_type, file_name, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(workspace_id, thread_id, uri) DO NOTHING
+    `).run(attachment.id, attachment.ownerId, attachment.workspaceId, attachment.threadId, attachment.uri,
+      attachment.mediaType, attachment.fileName, attachment.createdAt);
+  }
+
+  listAssistantAttachments(workspaceId: string, threadId?: string): StoredAssistantAttachment[] {
+    const rows = (threadId
+      ? this.#db.prepare("SELECT * FROM assistant_attachments WHERE workspace_id = ? AND thread_id = ? ORDER BY created_at, id").all(workspaceId, threadId)
+      : this.#db.prepare("SELECT * FROM assistant_attachments WHERE workspace_id = ? ORDER BY created_at, id").all(workspaceId)) as Array<Record<string, string>>;
+    return rows.map((row) => ({ id: row.id!, ownerId: row.owner_id!, workspaceId: row.workspace_id!,
+      threadId: row.thread_id!, uri: row.uri!, mediaType: row.media_type!,
+      fileName: row.file_name!, createdAt: row.created_at! }));
+  }
+
   updateAnalysisAudit(workspaceId: string, id: string, audit: StoredCapture["audit"]): void {
     this.#db.transaction(() => {
       const capture = this.listCaptures(workspaceId).find((item) => item.id === id);
@@ -1631,6 +1692,7 @@ export class CrosslineStore {
       "materials",
       "energy_observations", "external_bindings",
       "capacity_commitments", "duration_observations",
+      "assistant_threads", "assistant_attachments",
       // Consent state is part of the ledger: a restore that silently re-enables collection is not a restore.
       "settings",
       // `principals`/`workspaces` are not workspace-scoped rows themselves — a principal is scoped by

@@ -1,6 +1,7 @@
 export * from "./access-context";
 export * from "./availability";
 export * from "./analysis";
+export * from "./assistant-schema";
 export * from "./background-facts-schema";
 export * from "./capacity";
 export * from "./cost";
