@@ -48,7 +48,8 @@ export async function POST(request: Request) {
     projectId: typeof input.projectId === "string" ? input.projectId : "",
     title: input.title,
     status,
-    successCriteria: criteria
+    successCriteria: criteria,
+    ...(typeof input.templateId === "string" ? { templateId: input.templateId } : {})
   };
   const result = saveMilestoneEdit(access.ctx, payload);
   if (!result.ok) return NextResponse.json(result, { status: result.code === "MILESTONE_NOT_FOUND" ? 404 : 400 });

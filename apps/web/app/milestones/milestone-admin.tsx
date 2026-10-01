@@ -25,6 +25,20 @@ export type AdminMilestone = {
   goalSettings?: GoalSettings | null;
   fallbackImportance?: "important" | "ordinary";
   dateCandidates?: Array<{ date: string; quote: string }>;
+  /** Which template the criteria were built from, and the confidence computed from that — see
+   * `computeMilestoneConfidence` (`packages/core/src/milestone-templates.ts`). Both absent for a
+   * milestone written before templates existed or deliberately free-formed. */
+  templateId?: string;
+  confidence?: "low" | "medium" | "high";
+};
+
+export type MilestoneTemplateOption = {
+  id: string;
+  identityId: string;
+  kind: "deliverable" | "threshold" | "validation" | "recurring_cadence" | "decision";
+  titleHint: string;
+  successCriteriaDefaults: SuccessCriterion[];
+  source: "builtin" | "user" | "assistant";
 };
 
 type Draft = {
@@ -34,6 +48,7 @@ type Draft = {
   title: string;
   status: AdminMilestone["status"];
   successCriteria: SuccessCriterion[];
+  templateId?: string;
 };
 
 const MEASURE_KINDS = ["count", "threshold", "artifact", "judgement"] as const;
@@ -42,6 +57,11 @@ const kindLabel: Record<string, string> = {
 };
 const statusLabel: Record<string, string> = { draft: "草稿", approved: "已批准", archived: "已归档" };
 const progressLabel: Record<string, string> = { met: "已达成", partial: "部分达成", unmet: "未达成", unverifiable: "无法核实" };
+const TEMPLATE_KINDS = ["deliverable", "threshold", "validation", "recurring_cadence", "decision"] as const;
+const templateKindLabel: Record<string, string> = {
+  deliverable: "产出物", threshold: "数值门槛", validation: "外部验证", recurring_cadence: "持续节奏", decision: "关键决策"
+};
+const confidenceLabel: Record<string, string> = { low: "低", medium: "中", high: "高" };
 
 const emptyMeasure = (kind: typeof MEASURE_KINDS[number]): SuccessCriterion["measure"] =>
   kind === "count" ? { kind, unit: "", atLeast: 1 }
@@ -61,7 +81,11 @@ const errorText: Record<string, string> = {
   CRITERION_EMPTY: "有一条标准的描述是空的。",
   CRITERION_NOT_FALSIFIABLE: "判断型标准必须写明什么情况下判不过。",
   INVALID_CRITERIA: "标准的格式不对。",
-  MILESTONE_NOT_FOUND: "这条里程碑已经不存在了。"
+  MILESTONE_NOT_FOUND: "这条里程碑已经不存在了。",
+  MILESTONE_TEMPLATE_UNKNOWN: "选中的模板不存在，请重新选择。",
+  TEMPLATE_TITLE_REQUIRED: "模板名称不能为空。",
+  TEMPLATE_IDENTITY_UNKNOWN: "身份不在已安装的身份包里。",
+  INVALID_TEMPLATE: "模板格式不对。"
 };
 
 /**
@@ -73,9 +97,13 @@ const errorText: Record<string, string> = {
  * moved. And an edit writes a new version rather than overwriting, so the criteria a past acceptance
  * was judged against stay readable.
  */
-export function MilestoneAdmin({ milestones, identities, previews, initialEditId }: {
+export function MilestoneAdmin({ milestones, identities, templates, previews, initialEditId }: {
   milestones: AdminMilestone[];
   identities: Array<{ id: string; label: string }>;
+  /** The template library (built-in + user + assistant-added) a new or edited milestone may be built
+   * from — see 工作块 D in the plan this shipped under. Empty is a legitimate state (no templates seeded
+   * yet), not an error. */
+  templates: MilestoneTemplateOption[];
   /** Server-rendered preview drawers, keyed by milestone id — `loadMilestoneDetail` only runs server-side,
    * so the page renders each one and hands the finished JSX down rather than this client component
    * fetching it itself. */
@@ -88,6 +116,10 @@ export function MilestoneAdmin({ milestones, identities, previews, initialEditId
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
   const [ask, setAsk] = useState("");
+  const [newTemplate, setNewTemplate] = useState<{
+    identityId: string; kind: typeof TEMPLATE_KINDS[number]; titleHint: string; successCriteriaDefaults: SuccessCriterion[];
+  } | null>(null);
+  const [templateStatus, setTemplateStatus] = useState("");
   // The conversational follow-up path: once the first call returns a threadId, every later message
   // continues the same thread instead of starting a fresh one-shot proposal.
   const [threadId, setThreadId] = useState("");
@@ -108,7 +140,20 @@ export function MilestoneAdmin({ milestones, identities, previews, initialEditId
   const startEdit = (milestone: AdminMilestone) => setDraft({
     id: milestone.id, identityId: milestone.identityId, projectId: milestone.projectId,
     title: milestone.title, status: milestone.status,
-    successCriteria: milestone.successCriteria.length ? milestone.successCriteria : [blankCriterion()]
+    successCriteria: milestone.successCriteria.length ? milestone.successCriteria : [blankCriterion()],
+    ...(milestone.templateId ? { templateId: milestone.templateId } : {})
+  });
+
+  // Applying a template only replaces the current criteria when asked — picking one from the dropdown
+  // just remembers the choice (and therefore the confidence `saveMilestoneEdit` will compute), since a
+  // person editing an existing milestone usually wants to keep their own criteria intact.
+  const applyTemplateDefaults = (templateId: string) => setDraft((current) => {
+    if (!current) return current;
+    const { templateId: _previous, ...rest } = current;
+    if (!templateId) return rest;
+    const chosen = templates.find((item) => item.id === templateId);
+    if (!chosen) return rest;
+    return { ...rest, templateId, successCriteria: chosen.successCriteriaDefaults.map((item) => ({ ...item })) };
   });
 
   const patchCriterion = (index: number, patch: Partial<SuccessCriterion>) => setDraft((current) => current && {
@@ -149,8 +194,30 @@ export function MilestoneAdmin({ milestones, identities, previews, initialEditId
 
   const setMilestoneStatus = (milestone: AdminMilestone, next: AdminMilestone["status"]) => void send({
     id: milestone.id, identityId: milestone.identityId, projectId: milestone.projectId,
-    title: milestone.title, status: next, successCriteria: milestone.successCriteria
+    title: milestone.title, status: next, successCriteria: milestone.successCriteria,
+    ...(milestone.templateId ? { templateId: milestone.templateId } : {})
   });
+
+  const sendTemplate = async () => {
+    if (!newTemplate) return;
+    setBusy(true);
+    setTemplateStatus("");
+    try {
+      const response = await fetch("/api/milestones/templates", {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(newTemplate)
+      });
+      const result = await response.json().catch(() => ({})) as { ok?: boolean; code?: string };
+      if (!response.ok || !result.ok) {
+        setTemplateStatus(errorText[result.code ?? ""] ?? "没有保存，请检查后重试。");
+        setBusy(false);
+        return;
+      }
+      location.reload();
+    } catch {
+      setTemplateStatus("网络不可用，没有保存。");
+      setBusy(false);
+    }
+  };
 
   type ProposeReply = {
     state?: string; drafts?: Array<{ id: string; identityId: string; title: string }>;
@@ -223,6 +290,55 @@ export function MilestoneAdmin({ milestones, identities, previews, initialEditId
       {status && <em role="alert">{status}</em>}
     </div>
 
+    <details className="milestone-template-manager">
+      <summary>模板管理（{templates.length} 个，新建里程碑时可套用）</summary>
+      <p className="milestone-hint">
+        模板决定一条里程碑的类型标注和默认达成标准，是 AI 生成里程碑时置信度的来源——套用了模板、且标准与模板一致才算「高置信」。
+        你可以在这里直接新增模板，也可以在浮窗助手里要求 AI 帮你新增。
+      </p>
+      {!newTemplate
+        ? <button type="button" className="secondary-button" onClick={() => setNewTemplate({
+            identityId: identities[0]?.id ?? "", kind: "deliverable", titleHint: "", successCriteriaDefaults: [blankCriterion()]
+          })} disabled={busy}>新增模板</button>
+        : <form className="milestone-form" onSubmit={(event) => { event.preventDefault(); void sendTemplate(); }}>
+            <div className="milestone-form-row">
+              <label><span>模板名称</span>
+                <input value={newTemplate.titleHint} required maxLength={200}
+                  onChange={(event) => setNewTemplate({ ...newTemplate, titleHint: event.target.value })} /></label>
+              <label><span>主线</span>
+                <select value={newTemplate.identityId}
+                  onChange={(event) => setNewTemplate({ ...newTemplate, identityId: event.target.value })}>
+                  {identities.map((identity) => <option key={identity.id} value={identity.id}>{identity.label}</option>)}
+                </select></label>
+              <label><span>类型</span>
+                <select value={newTemplate.kind}
+                  onChange={(event) => setNewTemplate({ ...newTemplate, kind: event.target.value as typeof TEMPLATE_KINDS[number] })}>
+                  {TEMPLATE_KINDS.map((kind) => <option key={kind} value={kind}>{templateKindLabel[kind]}</option>)}
+                </select></label>
+            </div>
+            {newTemplate.successCriteriaDefaults.map((criterion, index) => <fieldset key={criterion.id} className="criterion-row">
+              <label className="criterion-statement"><span className="sr-only">默认标准描述</span>
+                <input value={criterion.statement} maxLength={400} placeholder="套用这个模板时的默认达成标准"
+                  onChange={(event) => setNewTemplate({ ...newTemplate, successCriteriaDefaults:
+                    newTemplate.successCriteriaDefaults.map((item, i) => i === index ? { ...item, statement: event.target.value } : item) })} /></label>
+              <label><span className="sr-only">衡量方式</span>
+                <select value={criterion.measure.kind}
+                  onChange={(event) => setNewTemplate({ ...newTemplate, successCriteriaDefaults:
+                    newTemplate.successCriteriaDefaults.map((item, i) => i === index
+                      ? { ...item, measure: emptyMeasure(event.target.value as typeof MEASURE_KINDS[number]) } : item) })}>
+                  {MEASURE_KINDS.map((kind) => <option key={kind} value={kind}>{kindLabel[kind]}</option>)}
+                </select></label>
+              <MeasureFields measure={criterion.measure} onChange={(measure) => setNewTemplate({ ...newTemplate, successCriteriaDefaults:
+                newTemplate.successCriteriaDefaults.map((item, i) => i === index ? { ...item, measure } : item) })} />
+            </fieldset>)}
+            <div className="milestone-form-actions">
+              <button type="submit" disabled={busy}>保存模板</button>
+              <button type="button" className="secondary-button" onClick={() => setNewTemplate(null)} disabled={busy}>取消</button>
+            </div>
+            {templateStatus && <em role="alert">{templateStatus}</em>}
+          </form>}
+    </details>
+
     {messages.length > 0 && <div className="milestone-conversation">
       <ul>{messages.map((message, index) => <li key={index} data-from={message.from}>
         <b>{message.from === "you" ? "你" : "AI"}</b><span>{message.text}</span>
@@ -254,7 +370,14 @@ export function MilestoneAdmin({ milestones, identities, previews, initialEditId
             {(["draft", "approved", "archived"] as const).map((value) =>
               <option key={value} value={value}>{statusLabel[value]}</option>)}
           </select></label>
+        <label><span>套用模板</span>
+          <select value={draft.templateId ?? ""} onChange={(event) => applyTemplateDefaults(event.target.value)}>
+            <option value="">不套用（自由填写）</option>
+            {templates.filter((template) => template.identityId === draft.identityId).map((template) =>
+              <option key={template.id} value={template.id}>{templateKindLabel[template.kind]} · {template.titleHint}</option>)}
+          </select></label>
       </div>
+      {draft.templateId && <p className="milestone-hint">已套用模板的默认达成标准——继续编辑不会清掉模板关联，除非你在上面重新选择「不套用」。</p>}
 
       <h4>达成标准</h4>
       <p className="milestone-hint">
@@ -302,6 +425,13 @@ export function MilestoneAdmin({ milestones, identities, previews, initialEditId
         <div className="milestone-admin-head">
           <b>{milestone.title}</b>
           <small>{milestone.identityId} · {statusLabel[milestone.status]} · v{milestone.version}</small>
+          {milestone.templateId && (() => {
+            const template = templates.find((item) => item.id === milestone.templateId);
+            return template ? <span className="criterion-tag" data-evidence="output">{templateKindLabel[template.kind]}</span> : null;
+          })()}
+          {milestone.confidence && <span className="criterion-tag" data-evidence={milestone.confidence === "high" ? "outcome" : "unlabelled"}>
+            置信度：{confidenceLabel[milestone.confidence]}
+          </span>}
         </div>
         {milestone.rationale && <p className="milestone-rationale">提议理由：{milestone.rationale}</p>}
         {milestone.successCriteria.length === 0

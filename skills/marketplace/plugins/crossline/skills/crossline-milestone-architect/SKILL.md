@@ -38,9 +38,11 @@ Input `{version, milestones[], recentWork[]}`. Return `{milestones[], assumption
 
 ## Proposal mode — `crossline.milestone-proposal.v1`
 
-Input `{version, identities[], existingMilestones[], recentWork[], request}`. Return `{milestones[], assumptions[], blockers[]}`, each entry `{identityId, projectId, title, successCriteria[], rationale}`.
+Input `{version, identities[], existingMilestones[], recentWork[], templates[], request}`. Return `{milestones[], assumptions[], blockers[]}`, each entry `{identityId, projectId, title, successCriteria[], rationale, templateId}`.
 
 `identityId` must be one of the supplied identities. Do not duplicate an existing milestone: if what you would propose is already there, say so in `assumptions` instead. Proposals are drafts and stay drafts — the user approves them.
+
+**`templates[]`** is `{id, identityId, kind, titleHint}[]` — the milestone-type library already approved for this workspace, `kind` being one of `deliverable`/`threshold`/`validation`/`recurring_cadence`/`decision`. When one of the offered templates genuinely fits what you are proposing, set `templateId` to its id and build the criteria to actually match that template's shape (not just borrow its title) — this is what the receiving layer reads as a confident, template-backed proposal rather than a free-form guess, and it is computed deterministically from whether your criteria actually match, not from anything you say about your own confidence. Set `templateId` to `null` when nothing offered fits; inventing an id that was not in the input is refused outright, so never guess one.
 
 ## Criterion shape (both modes)
 

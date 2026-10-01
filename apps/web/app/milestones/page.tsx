@@ -42,6 +42,8 @@ export default async function MilestonesPage({ searchParams }: {
     progress.set(payload.milestoneId, current);
   }
 
+  const templates = store.listMilestoneTemplates(ctx.workspaceId);
+
   const admin: AdminMilestone[] = milestones.map((milestone) => ({
     id: milestone.id, identityId: milestone.identityId, projectId: milestone.projectId ?? "",
     title: milestone.title, version: milestone.version, status: milestone.status,
@@ -50,7 +52,9 @@ export default async function MilestonesPage({ searchParams }: {
     fallbackImportance: readSchedulePreferences(ctx)?.importance[milestone.id] ?? "ordinary",
     dateCandidates: dates.get(milestone.id) ?? [],
     ...(rationales.get(milestone.id) ? { rationale: rationales.get(milestone.id)! } : {}),
-    ...(progress.get(milestone.id) ? { progress: progress.get(milestone.id)! } : {})
+    ...(progress.get(milestone.id) ? { progress: progress.get(milestone.id)! } : {}),
+    ...(milestone.templateId ? { templateId: milestone.templateId } : {}),
+    ...(milestone.confidence ? { confidence: milestone.confidence } : {})
   }));
 
   const milestoneDetails = loadMilestoneDetailsBatch(ctx, admin.map((milestone) => milestone.id));
@@ -71,6 +75,11 @@ export default async function MilestonesPage({ searchParams }: {
         milestones={admin}
         identities={defaultIdentityPacks().filter((pack) => pack.kind === "identity")
           .map((pack) => ({ id: pack.id, label: pack.label }))}
+        templates={templates.map((template) => ({
+          id: template.id, identityId: template.identityId, kind: template.kind,
+          titleHint: template.titleHint, successCriteriaDefaults: template.successCriteriaDefaults,
+          source: template.source
+        }))}
         // Pre-rendered server output handed to a client component as data — MilestoneAdmin itself stays
         // "use client" for its form state, but the preview drawer's content still needs `loadMilestoneDetail`,
         // which only runs on the server.

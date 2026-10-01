@@ -6,17 +6,20 @@ const context: AssistantTurnContext = {
   history: [],
   message: "帮我写个统计单词频率的小脚本",
   attachments: [],
-  workOrderId: "wo-1"
+  workOrderId: "wo-1",
+  identities: ["research", "startup"]
 };
 
 const output = (overrides: Partial<{
   reply: string; quickReplies: string[];
   materialDraft: { relativePath: string; content: string; mediaType: string; sourceRefs: string[] } | null;
+  templateProposal: { identityId: string; kind: string; titleHint: string; successCriteriaDefaults: unknown[] } | null;
   blockers: Array<{ code: string; message: string }>;
 }> = {}) => ({
   reply: "写好了，已经存成一个脚本，你可以直接跑。",
   quickReplies: [],
   materialDraft: null,
+  templateProposal: null,
   blockers: [],
   ...overrides
 });
@@ -71,4 +74,26 @@ test("a blocker stops the turn and carries its own message as detail", () => {
 test("malformed shape is refused before any business check runs", () => {
   expect(() => validateAssistantTurnProposal({ reply: 123, quickReplies: [], materialDraft: null, blockers: [] }, context))
     .toThrow("ASSISTANT_SCHEMA_INVALID");
+});
+
+const templateCriterion = { id: "c1", statement: "产出物存在", required: true, evidenceOf: "output",
+  measure: { kind: "artifact", mustExist: "x" } };
+
+test("a well-formed template proposal on a known identity passes through", () => {
+  const result = validateAssistantTurnProposal(output({
+    templateProposal: { identityId: "research", kind: "deliverable", titleHint: "新模板", successCriteriaDefaults: [templateCriterion] }
+  }), context);
+  expect(result.templateProposal).toMatchObject({ identityId: "research", titleHint: "新模板" });
+});
+
+test("a template proposal naming an identity the person does not have is refused", () => {
+  expect(() => validateAssistantTurnProposal(output({
+    templateProposal: { identityId: "woodwork", kind: "deliverable", titleHint: "新模板", successCriteriaDefaults: [templateCriterion] }
+  }), context)).toThrow("ASSISTANT_TEMPLATE_IDENTITY_UNKNOWN");
+});
+
+test("a template proposal whose criteria fail the usual success-criteria rules is refused", () => {
+  expect(() => validateAssistantTurnProposal(output({
+    templateProposal: { identityId: "research", kind: "deliverable", titleHint: "新模板", successCriteriaDefaults: [] }
+  }), context)).toThrow("MILESTONE_NEEDS_CRITERIA");
 });

@@ -6,6 +6,7 @@ const context: MilestoneProposalContext = {
   identities: [{ id: "research", label: "科研", summary: "" }, { id: "media", label: "自媒体", summary: "" }],
   existingMilestones: [{ id: "m1", identityId: "research", title: "稳定推进当前实验与论文", status: "approved" }],
   recentWork: [],
+  templates: [{ id: "research-literature-review-done", identityId: "research", kind: "deliverable", titleHint: "文献综述完成" }],
   request: ""
 };
 
@@ -15,7 +16,7 @@ const criterion = (over: Partial<SuccessCriterion> = {}): SuccessCriterion => ({
 });
 const proposal = (over: Record<string, unknown> = {}) => ({
   milestones: [{ identityId: "research", projectId: "p", title: "新的里程碑",
-    successCriteria: [criterion()], rationale: "因为…" }],
+    successCriteria: [criterion()], rationale: "因为…", templateId: null }],
   assumptions: [], blockers: [], ...over
 });
 
@@ -37,8 +38,20 @@ test("re-proposing something that already exists is refused rather than duplicat
 
 test("the criterion rules apply to proposals, surfaced as a proposal problem not a later write failure", () => {
   const vague = proposal({ milestones: [{ identityId: "media", projectId: "p", title: "含糊",
-    successCriteria: [criterion({ measure: { kind: "judgement", rubric: "做得好", failsWhen: "" } })], rationale: "r" }] });
+    successCriteria: [criterion({ measure: { kind: "judgement", rubric: "做得好", failsWhen: "" } })], rationale: "r", templateId: null }] });
   expect(() => validateMilestoneProposal(vague, context)).toThrow("CRITERION_NOT_FALSIFIABLE");
+});
+
+test("a templateId naming a template that was never offered is refused as fabrication", () => {
+  const fabricated = proposal({ milestones: [{ identityId: "research", projectId: "p", title: "新的里程碑",
+    successCriteria: [criterion()], rationale: "r", templateId: "not-a-real-template" }] });
+  expect(() => validateMilestoneProposal(fabricated, context)).toThrow("PROPOSAL_TEMPLATE_UNKNOWN");
+});
+
+test("a templateId naming a template that was actually offered passes through", () => {
+  const templated = proposal({ milestones: [{ identityId: "research", projectId: "p", title: "新的里程碑",
+    successCriteria: [criterion()], rationale: "r", templateId: "research-literature-review-done" }] });
+  expect(validateMilestoneProposal(templated, context).milestones[0]?.templateId).toBe("research-literature-review-done");
 });
 
 test("a Skill that stopped keeps its reason", () => {

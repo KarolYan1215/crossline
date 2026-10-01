@@ -2,7 +2,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import { CrosslineStore } from "@crossline/db";
 import type { SuccessCriterion } from "@crossline/core";
 vi.mock("server-only", () => ({}));
-import { ensureSeeded, getStore, saveMilestoneEdit } from "./crossline";
+import { ensureSeeded, getStore, saveMilestoneEdit, saveMilestoneTemplate } from "./crossline";
 import { TEST_CTX } from "./test-support";
 
 afterEach(() => { globalThis.crosslineStore?.close(); globalThis.crosslineStore = undefined; });
@@ -91,6 +91,66 @@ test("a pre-scheduler database is cleared of its example blocks and unblocked di
   expect(blocks.map((block) => block.id)).toEqual(["graph_calendar:real"]);
   // And the example diff no longer holds the plan hostage: approval refuses while anything is pending.
   expect(store.listPlanChanges(TEST_CTX.workspaceId, "personal-plan-v1")[0]?.status).toBe("excluded");
+});
+
+test("ensureSeeded seeds the built-in milestone template library once per workspace", () => {
+  const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
+  ensureSeeded(TEST_CTX);
+  const templates = store.listMilestoneTemplates(TEST_CTX.workspaceId);
+  expect(templates.length).toBeGreaterThan(0);
+  expect(templates.every((template) => template.source === "builtin")).toBe(true);
+  // Idempotent: calling it again must not duplicate the library.
+  ensureSeeded(TEST_CTX);
+  expect(store.listMilestoneTemplates(TEST_CTX.workspaceId)).toHaveLength(templates.length);
+});
+
+test("a milestone saved without a template gets a low confidence, not an absent or guessed one", () => {
+  const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
+  saveMilestoneEdit(TEST_CTX, {
+    identityId: "research", projectId: "p", title: "自由生成", status: "draft", successCriteria: [criterion()]
+  });
+  expect(store.listMilestones(TEST_CTX.workspaceId)[0]?.confidence).toBe("low");
+});
+
+test("a milestone saved with a template id whose criteria match the defaults gets high confidence", () => {
+  const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
+  ensureSeeded(TEST_CTX);
+  const template = store.listMilestoneTemplates(TEST_CTX.workspaceId, "research")[0]!;
+  const result = saveMilestoneEdit(TEST_CTX, {
+    identityId: "research", projectId: "p", title: "套用模板",
+    status: "draft", successCriteria: template.successCriteriaDefaults, templateId: template.id
+  });
+  expect(result).toMatchObject({ ok: true });
+  const stored = store.listMilestones(TEST_CTX.workspaceId).find((item) => item.title === "套用模板");
+  expect(stored).toMatchObject({ templateId: template.id, confidence: "high" });
+});
+
+test("an unknown templateId is refused rather than silently saved without one", () => {
+  const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
+  const result = saveMilestoneEdit(TEST_CTX, {
+    identityId: "research", projectId: "p", title: "x", status: "draft",
+    successCriteria: [criterion()], templateId: "does-not-exist"
+  });
+  expect(result).toEqual({ ok: false, code: "MILESTONE_TEMPLATE_UNKNOWN" });
+  expect(store.listMilestones(TEST_CTX.workspaceId)).toEqual([]);
+});
+
+test("saveMilestoneTemplate lets a user add a new template directly, with no draft/approve step", () => {
+  const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
+  const result = saveMilestoneTemplate(TEST_CTX, {
+    identityId: "research", kind: "deliverable", titleHint: "自定义模板",
+    successCriteriaDefaults: [criterion()]
+  });
+  expect(result).toMatchObject({ ok: true });
+  const saved = store.listMilestoneTemplates(TEST_CTX.workspaceId, "research").find((t) => t.titleHint === "自定义模板");
+  expect(saved).toMatchObject({ source: "user" });
+});
+
+test("saveMilestoneTemplate refuses an identity with no installed pack", () => {
+  globalThis.crosslineStore = new CrosslineStore(":memory:");
+  expect(saveMilestoneTemplate(TEST_CTX, {
+    identityId: "not-a-pack", kind: "deliverable", titleHint: "x", successCriteriaDefaults: [criterion()]
+  })).toEqual({ ok: false, code: "TEMPLATE_IDENTITY_UNKNOWN" });
 });
 
 test("migration keeps real user-authored plan blocks", () => {

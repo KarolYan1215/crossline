@@ -122,6 +122,10 @@ export type MilestoneProposal = {
   milestones: Array<{
     identityId: string; projectId: string; title: string;
     successCriteria: SuccessCriterion[]; rationale: string;
+    /** Which supplied template this proposal was built from, or null for a free-form one. The
+     * receiving layer (`computeMilestoneConfidence`) uses this — not a model self-rating — to decide
+     * how much confidence a template-backed proposal earns. */
+    templateId: string | null;
   }>;
   assumptions: string[];
   blockers: Array<{ code: string; message: string }>;
@@ -131,7 +135,8 @@ export const MILESTONE_PROPOSAL_SCHEMA = object({
   milestones: list(object({
     identityId: str, projectId: str, title: str,
     successCriteria: list(criterion, 10),
-    rationale: str
+    rationale: str,
+    templateId: { anyOf: [{ type: "string", minLength: 1, maxLength: 200 }, { type: "null" }] }
   }), 10),
   assumptions: strList,
   blockers: list(object({ code: str, message: str }), 10)
@@ -142,6 +147,10 @@ export type MilestoneProposalContext = {
   identities: Array<{ id: string; label: string; summary: string }>;
   existingMilestones: Array<{ id: string; identityId: string; title: string; status: string }>;
   recentWork: Array<{ milestoneId: string; intent: string; state: string }>;
+  /** The template library available for this identity, offered so the model can build a proposal on
+   * top of one instead of free-forming — see 工作块 D. A template chosen and followed verbatim is what
+   * `computeMilestoneConfidence` reads as `"high"`. */
+  templates: Array<{ id: string; identityId: string; kind: string; titleHint: string }>;
   /** What the user asked for, in their own words. Empty means "look at the whole picture". */
   request: string;
 };
@@ -159,11 +168,16 @@ export function validateMilestoneProposal(value: unknown, context: MilestoneProp
   }
   const known = new Set(context.identities.map((identity) => identity.id));
   const titles = new Set(context.existingMilestones.map((milestone) => milestone.title.trim()));
+  const templateIds = new Set(context.templates.map((template) => template.id));
   for (const proposal of raw.milestones) {
     // A milestone on an identity the user does not have is not a proposal, it is a new life.
     if (!known.has(proposal.identityId)) throw new Error("PROPOSAL_IDENTITY_UNKNOWN");
     if (!proposal.title.trim()) throw new Error("PROPOSAL_TITLE_REQUIRED");
     if (titles.has(proposal.title.trim())) throw new Error("PROPOSAL_DUPLICATE_TITLE");
+    // A templateId has to name a template that was actually offered — the model copying a plausible-
+    // looking id that was never in its own context is the same fabrication risk `evidenceQuote` guards
+    // against elsewhere, just for an id instead of a quote.
+    if (proposal.templateId !== null && !templateIds.has(proposal.templateId)) throw new Error("PROPOSAL_TEMPLATE_UNKNOWN");
     // The same check `saveMilestone` will run, surfaced here as a proposal problem rather than as an
     // opaque write failure later.
     const checked = validateSuccessCriteria(proposal.successCriteria);

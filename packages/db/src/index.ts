@@ -2,7 +2,8 @@ import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import { copyFileSync, existsSync } from "node:fs";
 import { advanceWorkOrder, validateAnalysisProposal, validateAnalysisContext, validateMilestoneGateResult, validateSuccessCriteria,
-  type MilestoneGateResult, type SuccessCriterion, type WorkOrderEvent, type WorkOrderState } from "@crossline/core";
+  type MilestoneGateResult, type SuccessCriterion, type WorkOrderEvent, type WorkOrderState,
+  type MilestoneTemplateKind, type EvidenceQuestionTemplate, type MilestoneTemplateSource } from "@crossline/core";
 
 type LedgerEventInput = {
   ownerId: string;
@@ -38,6 +39,23 @@ export type StoredMilestone = {
   // What would count as reaching it. Without this the gate can only say "looks good".
   successCriteria: SuccessCriterion[];
   verifiability: "measurable" | "judgement_only" | "unstated";
+  /** Which `MilestoneTemplate` (if any) this milestone's criteria were built from — absent for a
+   * milestone written before templates existed, or one deliberately free-formed. */
+  templateId?: string;
+  /** Deterministic, computed by `computeMilestoneConfidence` at save time — not a model self-rating.
+   * Absent for a pre-template milestone, same reason `templateId` is absent rather than defaulted. */
+  confidence?: "low" | "medium" | "high";
+};
+
+export type StoredMilestoneTemplate = {
+  id: string;
+  kind: MilestoneTemplateKind;
+  identityId: string;
+  titleHint: string;
+  successCriteriaDefaults: SuccessCriterion[];
+  evidenceQuestionDefaults: EvidenceQuestionTemplate[];
+  source: MilestoneTemplateSource;
+  createdAt: string;
 };
 
 export type CrosslineSnapshot = {
@@ -387,6 +405,15 @@ export class CrosslineStore {
         UNIQUE(workspace_id, thread_id, uri)
       );
       CREATE INDEX IF NOT EXISTS assistant_attachments_thread ON assistant_attachments(workspace_id, thread_id);
+      CREATE TABLE IF NOT EXISTS milestone_templates (
+        id TEXT NOT NULL, workspace_id TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK(kind IN ('deliverable','threshold','validation','recurring_cadence','decision')),
+        identity_id TEXT NOT NULL, title_hint TEXT NOT NULL,
+        success_criteria_defaults_json TEXT NOT NULL, evidence_question_defaults_json TEXT NOT NULL,
+        source TEXT NOT NULL CHECK(source IN ('builtin','user','assistant')), created_at TEXT NOT NULL,
+        PRIMARY KEY(workspace_id, id)
+      );
+      CREATE INDEX IF NOT EXISTS milestone_templates_identity ON milestone_templates(workspace_id, identity_id);
     `);
     if (hasLegacyTasks) this.#migrateLegacyTasks();
     this.#runMigrations(path);
@@ -624,6 +651,16 @@ export class CrosslineStore {
              SELECT id, owner_id, workspace_id, identity_id, project_id, milestone_id,
                intent, state, risk_tier, estimate_json, payload_json, updated_at FROM work_orders;`);
         this.#db.exec("DROP TABLE work_orders; ALTER TABLE work_orders_v2 RENAME TO work_orders;");
+      } },
+
+      // Plain nullable columns, not a rebuild: neither changes a CHECK constraint or the primary key,
+      // so an in-place ALTER is enough (unlike migration 7's milestones_v2, which had to widen the key
+      // itself). Both are absent, not defaulted, for every milestone written before templates existed —
+      // `computeMilestoneConfidence` reads that absence as `"low"`, the same number that codebase today
+      // reports for every milestone with no template to compare against.
+      { version: 8, up: () => {
+        if (!has("milestones", "template_id")) this.#db.exec("ALTER TABLE milestones ADD COLUMN template_id TEXT");
+        if (!has("milestones", "confidence")) this.#db.exec("ALTER TABLE milestones ADD COLUMN confidence TEXT");
       } }
     ];
 
@@ -1195,15 +1232,17 @@ export class CrosslineStore {
     this.#db.prepare(`
       INSERT INTO milestones (
         id, owner_id, workspace_id, identity_id, title, version, status, updated_at, project_id,
-        success_criteria_json, verifiability
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        success_criteria_json, verifiability, template_id, confidence
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(workspace_id, id, version) DO UPDATE SET
         title = excluded.title,
         status = excluded.status,
         updated_at = excluded.updated_at,
         project_id = COALESCE(excluded.project_id, milestones.project_id),
         success_criteria_json = excluded.success_criteria_json,
-        verifiability = excluded.verifiability
+        verifiability = excluded.verifiability,
+        template_id = excluded.template_id,
+        confidence = excluded.confidence
     `).run(
       milestone.id,
       milestone.ownerId,
@@ -1215,7 +1254,9 @@ export class CrosslineStore {
       new Date().toISOString(),
       milestone.projectId ?? null,
       JSON.stringify(criteria),
-      verifiability
+      verifiability,
+      milestone.templateId ?? null,
+      milestone.confidence ?? null
     );
   }
 
@@ -1230,7 +1271,9 @@ export class CrosslineStore {
       ...(row.project_id ? { projectId: String(row.project_id) } : {}),
       status: String(row.status) as StoredMilestone["status"],
       successCriteria: JSON.parse(String(row.success_criteria_json ?? "[]")) as SuccessCriterion[],
-      verifiability: String(row.verifiability ?? "unstated") as StoredMilestone["verifiability"]
+      verifiability: String(row.verifiability ?? "unstated") as StoredMilestone["verifiability"],
+      ...(row.template_id ? { templateId: String(row.template_id) } : {}),
+      ...(row.confidence ? { confidence: String(row.confidence) as "low" | "medium" | "high" } : {})
     };
   }
 
@@ -1265,6 +1308,66 @@ export class CrosslineStore {
       WHERE m.workspace_id = ? AND m.id = ?
     `).get(workspaceId, id, workspaceId, id) as Record<string, string | number> | undefined;
     return row ? this.#mapMilestoneRow(row) : undefined;
+  }
+
+  #mapMilestoneTemplateRow(row: Record<string, string>): StoredMilestoneTemplate {
+    return {
+      id: row.id!, kind: row.kind as MilestoneTemplateKind, identityId: row.identity_id!,
+      titleHint: row.title_hint!,
+      successCriteriaDefaults: JSON.parse(row.success_criteria_defaults_json!) as SuccessCriterion[],
+      evidenceQuestionDefaults: JSON.parse(row.evidence_question_defaults_json!) as EvidenceQuestionTemplate[],
+      source: row.source as MilestoneTemplateSource, createdAt: row.created_at!
+    };
+  }
+
+  listMilestoneTemplates(workspaceId: string, identityId?: string): StoredMilestoneTemplate[] {
+    const rows = (identityId
+      ? this.#db.prepare("SELECT * FROM milestone_templates WHERE workspace_id = ? AND identity_id = ? ORDER BY id")
+        .all(workspaceId, identityId)
+      : this.#db.prepare("SELECT * FROM milestone_templates WHERE workspace_id = ? ORDER BY identity_id, id")
+        .all(workspaceId)) as Array<Record<string, string>>;
+    return rows.map((row) => this.#mapMilestoneTemplateRow(row));
+  }
+
+  /** Upsert by `(workspaceId, id)` — a template's own identity rarely changes, so this is a plain
+   * replace rather than the versioned history `milestones` keeps for criteria a gate may already have
+   * judged against. */
+  saveMilestoneTemplate(template: Omit<StoredMilestoneTemplate, "createdAt"> & { workspaceId: string }): void {
+    this.#db.prepare(`
+      INSERT INTO milestone_templates (
+        id, workspace_id, kind, identity_id, title_hint,
+        success_criteria_defaults_json, evidence_question_defaults_json, source, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(workspace_id, id) DO UPDATE SET
+        kind = excluded.kind, identity_id = excluded.identity_id, title_hint = excluded.title_hint,
+        success_criteria_defaults_json = excluded.success_criteria_defaults_json,
+        evidence_question_defaults_json = excluded.evidence_question_defaults_json,
+        source = excluded.source
+    `).run(
+      template.id, template.workspaceId, template.kind, template.identityId, template.titleHint,
+      JSON.stringify(template.successCriteriaDefaults), JSON.stringify(template.evidenceQuestionDefaults),
+      template.source, new Date().toISOString()
+    );
+  }
+
+  /** Seeds the built-in template library into a workspace exactly once — `INSERT OR IGNORE` on the same
+   * `(workspace_id, id)` primary key `saveMilestoneTemplate` upserts on, so a second call (a second
+   * request racing the first, or a workspace that already has its builtins) is a no-op rather than
+   * stomping a user's own edit to a builtin row id. */
+  seedMilestoneTemplates(workspaceId: string, templates: Array<Omit<StoredMilestoneTemplate, "createdAt" | "source">>): void {
+    const insert = this.#db.prepare(`
+      INSERT OR IGNORE INTO milestone_templates (
+        id, workspace_id, kind, identity_id, title_hint,
+        success_criteria_defaults_json, evidence_question_defaults_json, source, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'builtin', ?)
+    `);
+    const now = new Date().toISOString();
+    this.#db.transaction(() => {
+      for (const template of templates) {
+        insert.run(template.id, workspaceId, template.kind, template.identityId, template.titleHint,
+          JSON.stringify(template.successCriteriaDefaults), JSON.stringify(template.evidenceQuestionDefaults), now);
+      }
+    })();
   }
 
   saveMilestoneRelation(relation:
@@ -1692,7 +1795,7 @@ export class CrosslineStore {
       "materials",
       "energy_observations", "external_bindings",
       "capacity_commitments", "duration_observations",
-      "assistant_threads", "assistant_attachments",
+      "assistant_threads", "assistant_attachments", "milestone_templates",
       // Consent state is part of the ledger: a restore that silently re-enables collection is not a restore.
       "settings",
       // `principals`/`workspaces` are not workspace-scoped rows themselves — a principal is scoped by

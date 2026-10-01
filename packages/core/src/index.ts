@@ -10,6 +10,7 @@ export * from "./flywheel";
 export * from "./flywheel-schema";
 export * from "./materials-schema";
 export * from "./milestone-gate-schema";
+export * from "./milestone-templates";
 export * from "./onboarding-schema";
 export * from "./plan-explainer-schema";
 export * from "./reality";

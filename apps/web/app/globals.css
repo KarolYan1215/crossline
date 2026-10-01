@@ -428,6 +428,9 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .milestone-conversation-reply{display:flex;gap:8px}
 .milestone-conversation-reply input{flex:1;min-height:30px;font-family:var(--f-mono);font-size:11px}
 .milestone-conversation-reply button{min-height:30px;padding:6px 14px;border:1px solid var(--ink);font-family:var(--f-mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase}
+.milestone-template-manager{margin:12px 0;padding:10px 12px;border:1px solid var(--mist)}
+.milestone-template-manager>summary{cursor:pointer;font-family:var(--f-mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--graphite)}
+.milestone-template-manager .milestone-hint{margin:8px 0}
 
 /* ── offline ───────────────────────────────── */
 .offline-page{min-height:100vh;display:grid;place-items:center;padding:42px 16px}

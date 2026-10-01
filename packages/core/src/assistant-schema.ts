@@ -1,4 +1,7 @@
 import { pathIsContained, TEXT_MEDIA_TYPES, PREFIX_THE_APP_OWNS, TOTAL_CONTENT_LIMIT } from "./materials-schema";
+import { validateSuccessCriteria, type SuccessCriterion } from "./index";
+import { criterion as criterionSchema } from "./milestone-gate-schema";
+import type { MilestoneTemplateKind } from "./milestone-templates";
 
 /**
  * What the site-wide floating assistant is allowed to return for one turn. Reused plumbing throughout
@@ -23,6 +26,9 @@ export type AssistantTurnContext = {
   /** Present only when this conversation is scoped to one task — `materialDraft` may only be filled
    * when this is non-null, since a saved artifact has to belong to some work order's materials folder. */
   workOrderId: string | null;
+  /** The identities `templateProposal.identityId` may name — same list `crossline-milestone-architect`
+   * is offered, so a template the assistant adds on the user's request lands on a real identity. */
+  identities: string[];
 };
 
 export type AssistantTurnProposal = {
@@ -31,6 +37,13 @@ export type AssistantTurnProposal = {
    * that is just answering something, not asking a follow-up. */
   quickReplies: string[];
   materialDraft: { relativePath: string; content: string; mediaType: string; sourceRefs: string[] } | null;
+  /** Filled only when the person explicitly asked, in this conversation, for a new milestone template —
+   * see 工作块 D. Unlike a milestone or relation proposal this is not a draft needing a second approval
+   * step: the person asked for it directly, the same as if they had filled in the template-management
+   * form themselves, so `assistant-runner.ts` saves it immediately with `source:"assistant"`. */
+  templateProposal: {
+    identityId: string; kind: MilestoneTemplateKind; titleHint: string; successCriteriaDefaults: SuccessCriterion[];
+  } | null;
   blockers: Array<{ code: string; message: string }>;
 };
 
@@ -52,6 +65,17 @@ export const ASSISTANT_OUTPUT_SCHEMA = object({
         // no research citations to demand — it is the direct product of this conversation, not an
         // externally-sourced claim, so an empty list is legitimate rather than a red flag.
         sourceRefs: { type: "array", maxItems: 20, items: shortStr }
+      })
+    ]
+  },
+  templateProposal: {
+    anyOf: [
+      { type: "null" },
+      object({
+        identityId: shortStr,
+        kind: { type: "string", enum: ["deliverable", "threshold", "validation", "recurring_cadence", "decision"] },
+        titleHint: shortStr,
+        successCriteriaDefaults: { type: "array", minItems: 1, maxItems: 10, items: criterionSchema }
       })
     ]
   },
@@ -77,5 +101,15 @@ export function validateAssistantTurnProposal(value: unknown, context: Assistant
     if (!TEXT_MEDIA_TYPES.has(draft.mediaType)) throw new Error("ASSISTANT_MATERIAL_MEDIA_TYPE_UNSUPPORTED");
     if (draft.content.length > TOTAL_CONTENT_LIMIT) throw new Error("ASSISTANT_MATERIAL_TOO_LARGE");
   }
-  return { reply: raw.reply, quickReplies: raw.quickReplies, materialDraft: raw.materialDraft ?? null, blockers: [] };
+  if (raw.templateProposal) {
+    const proposal = raw.templateProposal;
+    if (!context.identities.includes(proposal.identityId)) throw new Error("ASSISTANT_TEMPLATE_IDENTITY_UNKNOWN");
+    if (!proposal.titleHint.trim()) throw new Error("ASSISTANT_TEMPLATE_TITLE_REQUIRED");
+    const checked = validateSuccessCriteria(proposal.successCriteriaDefaults);
+    if (!checked.ok) throw new Error(checked.blocker.code);
+  }
+  return {
+    reply: raw.reply, quickReplies: raw.quickReplies, materialDraft: raw.materialDraft ?? null,
+    templateProposal: raw.templateProposal ?? null, blockers: []
+  };
 }

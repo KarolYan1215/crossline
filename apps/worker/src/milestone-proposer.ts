@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
-  MILESTONE_PROPOSAL_SCHEMA, validateMilestoneProposal,
+  MILESTONE_PROPOSAL_SCHEMA, validateMilestoneProposal, computeMilestoneConfidence,
   type MilestoneProposal, type MilestoneProposalContext
 } from "@crossline/core";
 import { continueSkillTurn, runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
@@ -17,7 +17,10 @@ const INSTRUCTIONS = "Propose milestones for the supplied identities. Return onl
   + "on a productive afternoon of writing documents while the goal stands still. Do not invent numbers "
   + "the user never gave you: when the honest measure is a judgement, use a judgement measure and say in "
   + "failsWhen what would make it not met. Do not duplicate an existing milestone. If the input is too "
-  + "vague to produce a checkable criterion, return a blocker naming what is missing.";
+  + "vague to produce a checkable criterion, return a blocker naming what is missing. When one of the "
+  + "supplied templates genuinely fits, set templateId to its id and build criteria that actually match "
+  + "its shape, not just its title — otherwise set templateId to null; never invent a templateId that was "
+  + "not in the input.";
 
 export type ProposalOutcome =
   | { state: "proposed"; drafts: Array<{ id: string; identityId: string; title: string }>; assumptions: string[]; threadId?: string }
@@ -36,6 +39,9 @@ export function buildProposalContext(store: CrosslineStore, workspaceId: string,
     })),
     recentWork: store.listWorkOrders(workspaceId).slice(-20).map((order) => ({
       milestoneId: order.milestoneId ?? "", intent: order.intent, state: order.state
+    })),
+    templates: store.listMilestoneTemplates(workspaceId).map((template) => ({
+      id: template.id, identityId: template.identityId, kind: template.kind, titleHint: template.titleHint
     })),
     request: request.slice(0, 2000)
   };
@@ -74,25 +80,7 @@ export function createMilestoneProposer(store: CrosslineStore, workspaceId: stri
     });
     if (!result.ok) return { state: "blocked", code: result.blocker.code, message: result.blocker.message };
 
-    const drafts: Array<{ id: string; identityId: string; title: string }> = [];
-    for (const proposal of result.output.milestones) {
-      const id = `proposed-${randomUUID()}`;
-      store.saveMilestone({
-        id, ownerId: OWNER_ID, workspaceId,
-        identityId: proposal.identityId, projectId: proposal.projectId,
-        title: proposal.title, version: 1, status: "draft",
-        successCriteria: proposal.successCriteria
-      });
-      store.appendEvent({
-        ownerId: OWNER_ID, workspaceId,
-        idempotencyKey: `milestone:proposed:${id}`,
-        type: "milestone.proposed", entityId: id,
-        // The rationale is kept with the proposal: judging a milestone without knowing why it was
-        // suggested is the same problem as approving a relation with no stated claim.
-        payload: { rationale: proposal.rationale, request: context.request }
-      });
-      drafts.push({ id, identityId: proposal.identityId, title: proposal.title });
-    }
+    const drafts = persistProposals(store, workspaceId, result.output.milestones, context.request);
     return { state: "proposed", drafts, assumptions: result.output.assumptions, ...(threadId ? { threadId } : {}) };
   };
 }
@@ -128,23 +116,42 @@ export function createMilestoneConversation(store: CrosslineStore, workspaceId: 
     });
     if (!result.ok) return { state: "blocked", code: result.blocker.code, message: result.blocker.message };
 
-    const drafts: Array<{ id: string; identityId: string; title: string }> = [];
-    for (const proposal of result.output.milestones) {
-      const id = `proposed-${randomUUID()}`;
-      store.saveMilestone({
-        id, ownerId: OWNER_ID, workspaceId,
-        identityId: proposal.identityId, projectId: proposal.projectId,
-        title: proposal.title, version: 1, status: "draft",
-        successCriteria: proposal.successCriteria
-      });
-      store.appendEvent({
-        ownerId: OWNER_ID, workspaceId,
-        idempotencyKey: `milestone:proposed:${id}`,
-        type: "milestone.proposed", entityId: id,
-        payload: { rationale: proposal.rationale, request: context.request }
-      });
-      drafts.push({ id, identityId: proposal.identityId, title: proposal.title });
-    }
+    const drafts = persistProposals(store, workspaceId, result.output.milestones, context.request);
     return { state: "proposed", drafts, assumptions: result.output.assumptions };
   };
+}
+
+/**
+ * Shared by `propose` and `continueConversation`: writes each proposed milestone as a `draft`, with its
+ * confidence computed deterministically from whichever template (if any) it was built from —
+ * `computeMilestoneConfidence` reads the shape match, not a model self-rating (`crossline-milestone-
+ * architect/SKILL.md` already forbids the Skill from emitting a numeric score; the same reasoning applies
+ * to confidence).
+ */
+function persistProposals(store: CrosslineStore, workspaceId: string,
+  milestones: MilestoneProposal["milestones"], request: string): Array<{ id: string; identityId: string; title: string }> {
+  const templates = store.listMilestoneTemplates(workspaceId);
+  const drafts: Array<{ id: string; identityId: string; title: string }> = [];
+  for (const proposal of milestones) {
+    const id = `proposed-${randomUUID()}`;
+    const template = proposal.templateId ? templates.find((item) => item.id === proposal.templateId) : undefined;
+    const confidence = computeMilestoneConfidence(proposal.successCriteria, template);
+    store.saveMilestone({
+      id, ownerId: OWNER_ID, workspaceId,
+      identityId: proposal.identityId, projectId: proposal.projectId,
+      title: proposal.title, version: 1, status: "draft",
+      successCriteria: proposal.successCriteria,
+      ...(proposal.templateId ? { templateId: proposal.templateId } : {}), confidence
+    });
+    store.appendEvent({
+      ownerId: OWNER_ID, workspaceId,
+      idempotencyKey: `milestone:proposed:${id}`,
+      type: "milestone.proposed", entityId: id,
+      // The rationale is kept with the proposal: judging a milestone without knowing why it was
+      // suggested is the same problem as approving a relation with no stated claim.
+      payload: { rationale: proposal.rationale, request }
+    });
+    drafts.push({ id, identityId: proposal.identityId, title: proposal.title });
+  }
+  return drafts;
 }

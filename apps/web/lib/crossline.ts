@@ -5,6 +5,7 @@ import path from "node:path";
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 import { CrosslineStore, type EvidenceClaimInput, type StoredMilestone } from "@crossline/db";
 import { availableSlots, deriveCapacity, requiredApproval, validateAvailability, DEFAULT_AVAILABILITY,
+  defaultMilestoneTemplates, computeMilestoneConfidence, validateSuccessCriteria,
   type AccessContext, type AvailabilityWindow, type Estimate, type SuccessCriterion } from "@crossline/core";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { forecastGoals, planSchedule, recommendNextActions, type ForecastResult, type PlanResult } from "@crossline/planner";
@@ -304,6 +305,9 @@ export function ensureSeeded(ctx: AccessContext): void {
           humanCore: [{ id: `${id}-core`, intent: title, energy, interruptible: true }] }
       });
     }
+  }
+  if (store.listMilestoneTemplates(ctx.workspaceId).length === 0) {
+    store.seedMilestoneTemplates(ctx.workspaceId, defaultMilestoneTemplates());
   }
   if (store.listPlanVersions(ctx.workspaceId).length === 0) {
     // An empty plan, not five example blocks. The lanes fill from two real sources now — the calendar
@@ -638,6 +642,9 @@ export type MilestoneInput = {
   title: string;
   status: StoredMilestone["status"];
   successCriteria: SuccessCriterion[];
+  /** Which `StoredMilestoneTemplate` these criteria were built from, if any — drives the deterministic
+   * confidence computed below. Left undefined for a deliberately free-formed milestone. */
+  templateId?: string;
 };
 
 /**
@@ -660,11 +667,17 @@ export function saveMilestoneEdit(ctx: AccessContext, input: MilestoneInput): { 
 
   const version = existing ? existing.version + 1 : 1;
   const id = existing?.id ?? `milestone-${randomUUID()}`;
+  const template = input.templateId
+    ? store.listMilestoneTemplates(ctx.workspaceId, input.identityId).find((item) => item.id === input.templateId)
+    : undefined;
+  if (input.templateId && !template) return { ok: false, code: "MILESTONE_TEMPLATE_UNKNOWN" };
+  const confidence = computeMilestoneConfidence(input.successCriteria, template);
   try {
     store.saveMilestone({
       id, ownerId: ctx.principalId, workspaceId: ctx.workspaceId,
       identityId: input.identityId, projectId, title,
-      version, status: input.status, successCriteria: input.successCriteria
+      version, status: input.status, successCriteria: input.successCriteria,
+      ...(input.templateId ? { templateId: input.templateId } : {}), confidence
     });
   } catch (error) {
     // `saveMilestone` throws the criterion blocker code, which is the specific thing the person needs
@@ -678,6 +691,36 @@ export function saveMilestoneEdit(ctx: AccessContext, input: MilestoneInput): { 
     payload: { version, status: input.status, title, criteria: input.successCriteria.length }
   });
   return { ok: true, id, version };
+}
+
+export type MilestoneTemplateInput = {
+  identityId: string;
+  kind: "deliverable" | "threshold" | "validation" | "recurring_cadence" | "decision";
+  titleHint: string;
+  successCriteriaDefaults: SuccessCriterion[];
+};
+
+/**
+ * A user (or, via the assistant widget's `templateProposal`, the assistant on the user's explicit
+ * request) adding a new milestone template directly — not a draft needing a second approval step, the
+ * same way editing a milestone's own fields is not. `crossline-milestone-architect` only ever reads
+ * `approved`-equivalent templates when proposing, and every template saved here is immediately usable.
+ */
+export function saveMilestoneTemplate(ctx: AccessContext, input: MilestoneTemplateInput):
+  { ok: true; id: string } | { ok: false; code: string } {
+  const titleHint = input.titleHint.trim();
+  if (!titleHint || titleHint.length > 200) return { ok: false, code: "TEMPLATE_TITLE_REQUIRED" };
+  if (!defaultIdentityPacks().some((pack) => pack.id === input.identityId && pack.kind === "identity")) {
+    return { ok: false, code: "TEMPLATE_IDENTITY_UNKNOWN" };
+  }
+  const checked = validateSuccessCriteria(input.successCriteriaDefaults);
+  if (!checked.ok) return { ok: false, code: checked.blocker.code };
+  const id = `template-${randomUUID()}`;
+  getStore().saveMilestoneTemplate({
+    id, workspaceId: ctx.workspaceId, kind: input.kind, identityId: input.identityId, titleHint,
+    successCriteriaDefaults: input.successCriteriaDefaults, evidenceQuestionDefaults: [], source: "user"
+  });
+  return { ok: true, id };
 }
 
 /**

@@ -88,6 +88,37 @@ test("an empty message is refused before any Codex call runs", async () => {
   expect(turns()).toBe(0);
 });
 
+test("a templateProposal is saved immediately as an assistant-sourced template, with no draft step", async () => {
+  const withTemplate = { reply: "好的，已经加了一个新模板。", quickReplies: [], materialDraft: null,
+    templateProposal: { identityId: "research", kind: "deliverable", titleHint: "新模板",
+      successCriteriaDefaults: [{ id: "c1", statement: "产出物存在", required: true, evidenceOf: "output",
+        measure: { kind: "artifact", mustExist: "x" } }] },
+    blockers: [] };
+  const { rpc } = fakeRuntime([JSON.stringify(withTemplate)]);
+  const turn = createAssistantTurn(store, WORKSPACE, projectRoot, () => rpc);
+  const outcome = await turn("t1", "帮我加一个新的里程碑模板", [], [], null);
+
+  expect(outcome).toMatchObject({ state: "replied" });
+  const savedTemplate = (outcome as { savedTemplate?: { id: string; titleHint: string } }).savedTemplate;
+  expect(savedTemplate?.titleHint).toBe("新模板");
+  const rows = store.listMilestoneTemplates(WORKSPACE, "research");
+  expect(rows).toHaveLength(1);
+  expect(rows[0]).toMatchObject({ id: savedTemplate!.id, titleHint: "新模板", source: "assistant" });
+});
+
+test("a templateProposal naming an identity the workspace does not have is blocked, not silently dropped", async () => {
+  const withTemplate = { reply: "x", quickReplies: [], materialDraft: null,
+    templateProposal: { identityId: "woodwork", kind: "deliverable", titleHint: "新模板",
+      successCriteriaDefaults: [{ id: "c1", statement: "x", required: true, evidenceOf: "output",
+        measure: { kind: "artifact", mustExist: "x" } }] },
+    blockers: [] };
+  const { rpc } = fakeRuntime([JSON.stringify(withTemplate)]);
+  const turn = createAssistantTurn(store, WORKSPACE, projectRoot, () => rpc);
+  const outcome = await turn("t1", "帮我加一个模板", [], [], null);
+  expect(outcome).toMatchObject({ state: "blocked" });
+  expect(store.listMilestoneTemplates(WORKSPACE)).toEqual([]);
+});
+
 test("no Codex client available is a typed blocker, not a throw", async () => {
   const turn = createAssistantTurn(store, WORKSPACE, projectRoot, () => undefined);
   const outcome = await turn("t1", "你好", [], [], null);

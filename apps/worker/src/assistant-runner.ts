@@ -1,8 +1,10 @@
+import { randomUUID } from "node:crypto";
 import {
   ASSISTANT_OUTPUT_SCHEMA, validateAssistantTurnProposal,
   type AssistantTurnContext, type AssistantTurnProposal
 } from "@crossline/core";
 import { runCodexSkill, continueSkillTurn, type CodexRpcBoundary } from "@crossline/codex";
+import { defaultIdentityPacks } from "@crossline/identity-packs";
 import type { CrosslineStore } from "@crossline/db";
 import { persistAssistantMaterial } from "./materials";
 
@@ -16,20 +18,27 @@ const INSTRUCTIONS = "You are the site-wide Crossline assistant — a general-pu
   + "when a multiple-choice follow-up would genuinely help; leave it empty for a plain answer. You may "
   + "fill `materialDraft` with a small script or text file ONLY when this conversation is scoped to a "
   + "specific task (you will be told so) and the person's request clearly calls for a saved artifact, "
-  + "not just an inline code block in your reply — most turns should leave it null. Never claim to have "
+  + "not just an inline code block in your reply — most turns should leave it null. Fill `templateProposal` "
+  + "ONLY when the person explicitly asks you to add a new milestone template, naming one of the supplied "
+  + "`identities`; never when they are just asking what templates exist or using one. Never claim to have "
   + "read or modified this application's own source code, and never suggest you can — you cannot; "
-  + "everything you produce is either conversation text or one file offered as a task material. If a "
-  + "request is unsafe or outside what you can actually do, return a blocker explaining why rather than "
-  + "pretending to comply.";
+  + "everything you produce is either conversation text or one file offered as a task material or one "
+  + "milestone template. If a request is unsafe or outside what you can actually do, return a blocker "
+  + "explaining why rather than pretending to comply.";
 
 export type AssistantTurnOutcome =
-  | { state: "replied"; reply: string; quickReplies: string[]; savedMaterial?: { uri: string; fileName: string } }
+  | {
+      state: "replied"; reply: string; quickReplies: string[];
+      savedMaterial?: { uri: string; fileName: string };
+      savedTemplate?: { id: string; titleHint: string };
+    }
   | { state: "blocked"; code: string; message: string };
 
 export function buildAssistantContext(history: Array<{ from: "user" | "assistant"; text: string }>,
   message: string, attachments: Array<{ id: string; fileName: string; mediaType: string }>,
   workOrderId: string | null): AssistantTurnContext {
-  return { version: "crossline.assistant.v1", history, message, attachments, workOrderId };
+  const identities = defaultIdentityPacks().filter((pack) => pack.kind === "identity").map((pack) => pack.id);
+  return { version: "crossline.assistant.v1", history, message, attachments, workOrderId, identities };
 }
 
 /**
@@ -86,9 +95,22 @@ export function createAssistantTurn(store: CrosslineStore, workspaceId: string, 
       });
       if (persisted.ok) savedMaterial = { uri: persisted.artifact.uri, fileName: draft.relativePath };
     }
+    let savedTemplate: { id: string; titleHint: string } | undefined;
+    // No draft/approve step here, unlike a milestone or relation proposal: the person asked for this
+    // template directly, in the conversation — the same act as filling in the template-management form
+    // themselves, so it lands immediately with `source:"assistant"`.
+    if (result.output.templateProposal) {
+      const proposal = result.output.templateProposal;
+      const id = `template-${randomUUID()}`;
+      store.saveMilestoneTemplate({
+        id, workspaceId, kind: proposal.kind, identityId: proposal.identityId, titleHint: proposal.titleHint,
+        successCriteriaDefaults: proposal.successCriteriaDefaults, evidenceQuestionDefaults: [], source: "assistant"
+      });
+      savedTemplate = { id, titleHint: proposal.titleHint };
+    }
     return {
       state: "replied", reply: result.output.reply, quickReplies: result.output.quickReplies,
-      ...(savedMaterial ? { savedMaterial } : {})
+      ...(savedMaterial ? { savedMaterial } : {}), ...(savedTemplate ? { savedTemplate } : {})
     };
   };
 }
