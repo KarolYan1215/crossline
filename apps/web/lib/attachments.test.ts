@@ -3,6 +3,7 @@ vi.mock("server-only", () => ({}));
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { CrosslineStore } from "@crossline/db";
 
 // `PROJECT_ROOT` in attachments.ts is `path.resolve(process.cwd(), "..", "..")`, computed once at module
@@ -67,7 +68,7 @@ test("saveCaptureAttachments writes the file under attachmentsRoot and records a
   if (!result.ok) return;
   expect(result.saved).toHaveLength(1);
   const saved = result.saved[0]!;
-  expect(saved.uri.startsWith(`file://${attachmentsRoot("c1")}`)).toBe(true);
+  expect(saved.uri.startsWith(pathToFileURL(attachmentsRoot("c1")).href)).toBe(true);
   expect(readFileSync(new URL(saved.uri), "utf8")).toBe("hello");
   const rows = store.listCaptureAttachments("w", "c1");
   expect(rows).toHaveLength(1);
@@ -96,7 +97,7 @@ test("saveAssistantAttachments writes under its own root (not the capture one) a
   expect(result.ok).toBe(true);
   if (!result.ok) return;
   const saved = result.saved[0]!;
-  expect(saved.uri.startsWith(`file://${assistantAttachmentsRoot("t1")}`)).toBe(true);
+  expect(saved.uri.startsWith(pathToFileURL(assistantAttachmentsRoot("t1")).href)).toBe(true);
   expect(assistantAttachmentsRoot("t1")).not.toBe(attachmentsRoot("t1"));
   const rows = store.listAssistantAttachments("w", "t1");
   expect(rows).toHaveLength(1);
