@@ -52,7 +52,12 @@ export function TaskDetailView({ detail }: { detail: TaskDetail }) {
     </header>
     <h2>{detail.intent}</h2>
     {detail.milestone && <p className="card-milestone">→ {detail.milestone.title}</p>}
+    {detail.seeded && <p role="note" className="seed-notice">示例作业 · 系统首次启动时预置，用来演示流程；不需要可直接丢弃。</p>}
     {detail.manualPromotion && <p role="status">人工创建 · 未经 AI 分析</p>}
+    {detail.state === "evidence_review" && <p role="status" className="seed-notice">
+      证据已提交，等待验收：{detail.milestone ? "AI 闸门会判定，你也可以在 Approvals 页人工验收或退回。" : "没有绑定里程碑，请到 Approvals 页人工验收或退回。"}
+      <a href="/approvals"> 前往 Approvals →</a>
+    </p>}
     <dl className="task-detail-facts">
       <div><dt>估时</dt><dd>{detail.estimate.p25Minutes}–{detail.estimate.p85Minutes} 分钟 · {confidenceLabel[detail.estimate.confidence]}</dd></div>
       <div><dt>风险等级</dt><dd>{riskLabel[detail.riskTier]}</dd></div>
@@ -72,7 +77,7 @@ export function TaskDetailView({ detail }: { detail: TaskDetail }) {
       <h3>材料清单</h3>
       <ul className="task-detail-contract">{detail.materialContract.map((item, index) => <li key={index}>
         <span className="criterion-tag">{contractKindLabel[item.kind] ?? item.kind}</span>
-        <span>{item.description}{item.required ? "" : "（可选）"}</span>
+        <span>{item.description}{item.required === false ? "（可选）" : ""}</span>
         <small>{item.why}</small>
       </li>)}</ul>
     </section>}
@@ -81,7 +86,7 @@ export function TaskDetailView({ detail }: { detail: TaskDetail }) {
       <h3>验收证据要求</h3>
       <ul className="task-detail-contract">{detail.evidenceContract.map((item, index) => <li key={index}>
         <span className="criterion-tag">{contractKindLabel[item.kind] ?? item.kind}</span>
-        <span>{item.description}{item.required ? "" : "（可选）"}</span>
+        <span>{item.description}{item.required === false ? "（可选）" : ""}</span>
         <small>{item.why}</small>
       </li>)}</ul>
     </section>}

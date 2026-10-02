@@ -24,6 +24,8 @@ export type TaskDetail = {
   riskTier: "routine" | "milestone" | "high_risk";
   estimate: ReturnType<typeof resolvedEstimate>;
   manualPromotion: boolean;
+  /** A starter work order the app wrote on first run, not something the person created. */
+  seeded: boolean;
   milestone?: { id: string; title: string };
   materialContract: Array<{ kind: string; description: string; why: string; required: boolean }>;
   evidenceContract: Array<{ kind: string; description: string; why: string; required: boolean }>;
@@ -125,7 +127,7 @@ function assembleTaskDetail(ctx: AccessContext, order: StoredWorkOrder, deps: {
   background: StoredBackgroundFact[];
 }): TaskDetail {
   const payload = order.payload as {
-    manualPromotion?: boolean; materialContract?: TaskDetail["materialContract"]; evidenceContract?: TaskDetail["evidenceContract"];
+    manualPromotion?: boolean; seeded?: boolean; materialContract?: TaskDetail["materialContract"]; evidenceContract?: TaskDetail["evidenceContract"];
     evidenceChecklist?: TaskDetail["evidenceChecklist"];
     blocker?: { reason: string }; gateReview?: TaskDetail["gateReview"];
   };
@@ -141,7 +143,7 @@ function assembleTaskDetail(ctx: AccessContext, order: StoredWorkOrder, deps: {
   return {
     id: order.id, ownerId: order.ownerId, workspaceId: order.workspaceId, paused: pausedFrom(executions),
     identityId: order.identityId, identityLabel, accent, intent: order.intent, state: order.state,
-    riskTier: order.riskTier, estimate: resolvedEstimate(ctx, order), manualPromotion: Boolean(payload.manualPromotion),
+    riskTier: order.riskTier, estimate: resolvedEstimate(ctx, order), manualPromotion: Boolean(payload.manualPromotion), seeded: Boolean(payload.seeded),
     ...(deps.milestone ? { milestone: { id: deps.milestone.id, title: deps.milestone.title } } : {}),
     materialContract: payload.materialContract ?? [], evidenceContract: payload.evidenceContract ?? [],
     evidenceChecklist: payload.evidenceChecklist ?? [],

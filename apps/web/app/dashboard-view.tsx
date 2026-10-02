@@ -154,6 +154,8 @@ export function DashboardView({ data }: { data: DashboardData }) {
 
     {/* Task list first: the day-head is orientation, this is the thing the person came here to do —
         it used to sit after two care-bands and a capture form, four sections of reading before it. */}
+    {[data.primary, ...data.upcoming].some((item) => item && data.taskDetailById.get(item.id)?.seeded)
+      && <p role="note" className="seed-notice">下面有系统首次启动时预置的示例作业（用来演示流程）。不需要的可以直接丢弃；收集你自己的第一项任务后，它们就不再重要。</p>}
     <section className="today-grid">
       <article className="hero-action">
         <header><span>01 / NEXT ACTION · 下一行动</span><span>INPUTS {data.primary?.inputsReady ? "READY" : "CHECK"}</span></header>

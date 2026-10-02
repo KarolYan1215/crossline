@@ -56,7 +56,7 @@ export default async function ReviewPage() {
         <MilestonePreview detail={milestoneDetails.get(milestone.id)} />
         <b>{milestone.title}</b>
         {milestone.criteria.length === 0
-          ? <em className="review-flag">未声明达成标准 —— 闸门会拒绝它，直到你写下什么算达成。
+          ? <em className="review-flag">未声明达成标准 —— 绑定它的作业仍按各自的证据要求验收，但里程碑本身的进度记不下来，直到你写下什么算达成。
               <a href={`/milestones?edit=${encodeURIComponent(milestone.id)}`}>立即补充 →</a>
             </em>
           : <ul>{milestone.criteria.map((criterion, index) =>

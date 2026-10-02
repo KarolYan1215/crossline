@@ -96,12 +96,27 @@ export type MilestoneGateResult = {
   blockers: Array<{ code: string; message: string }>;
 };
 
+/**
+ * The requirements `pass` is measured against: an item counts unless it says `required: false`. Items the
+ * analysis marked optional are still shown and still judged, but cannot hold back the verdict — the gate
+ * used to demand every listed item while the page labelled most of them 「（可选）」, so the label and the
+ * bar disagreed. A contract written before the flag existed (or by hand) has no `required`, and fails
+ * closed: it is required.
+ */
+export function requiredContractRequirements(
+  contract: Array<{ description?: string; kind?: string; required?: boolean }> | undefined
+): string[] {
+  return (contract ?? []).filter((item) => item.required !== false)
+    .map((item) => (item.description ?? item.kind ?? "").trim()).filter(Boolean);
+}
+
 export function validateMilestoneGateResult(
   result: MilestoneGateResult,
   criteria: SuccessCriterion[],
   evidenceTexts: string[],
   /**
-   * The work order's own `evidenceContract`, verbatim. This is what `pass` is measured against, so it
+   * The work order's own `evidenceContract` requirements (the required ones — see
+   * `requiredContractRequirements`), verbatim. This is what `pass` is measured against, so it
    * has to be supplied: without it the check degenerated into `contractCoverage.every(...)`, which an
    * empty array satisfies — a gate that accepted anything simply by reporting nothing.
    */

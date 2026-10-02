@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import { copyFileSync, existsSync } from "node:fs";
-import { advanceWorkOrder, validateAnalysisProposal, validateAnalysisContext, validateMilestoneGateResult, validateSuccessCriteria,
+import { advanceWorkOrder, validateAnalysisProposal, validateAnalysisContext, validateMilestoneGateResult, requiredContractRequirements, validateSuccessCriteria,
   type MilestoneGateResult, type SuccessCriterion, type WorkOrderEvent, type WorkOrderState,
   type MilestoneTemplateKind, type EvidenceQuestionTemplate, type MilestoneTemplateSource,
   type ChecklistAnswer } from "@crossline/core";
@@ -1524,11 +1524,13 @@ export class CrosslineStore {
     const order = this.listWorkOrders(workspaceId).find((item) => item.id === workOrderId);
     if (!order || order.state !== "evidence_review") throw new Error("EVIDENCE_REVIEW_NOT_READY");
     const milestone = this.listMilestones(workspaceId).find((item) => item.id === order.milestoneId && item.status === "approved");
-    if (!milestone || milestone.verifiability === "unstated") throw new Error("MILESTONE_NEEDS_CRITERIA");
+    // No `verifiability` check: a milestone without criteria is judged on the order's own contract (see
+    // `buildMilestoneGateContext`); it just has no progress to record.
+    if (!milestone) throw new Error("MILESTONE_NOT_FOUND");
     // The same requirement strings the gate was handed. This is the write, so the bar `pass` claims to
     // have cleared is re-checked here rather than trusted from the caller.
-    const contractRequirements = ((order.payload as { evidenceContract?: Array<{ description?: string; kind?: string }> })
-      .evidenceContract ?? []).map((item) => item.description ?? item.kind ?? "").filter(Boolean);
+    const contractRequirements = requiredContractRequirements(
+      (order.payload as { evidenceContract?: Array<{ description?: string; kind?: string; required?: boolean }> }).evidenceContract);
     validateMilestoneGateResult(result, milestone.successCriteria, evidenceTexts, contractRequirements);
     // Milestone progress is recorded on every judgement, pass or not. The verdict says whether this one
     // work order delivered; this says how far the milestone itself has moved, which is the question the

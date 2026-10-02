@@ -20,7 +20,8 @@ export type MilestoneGateContext = {
   evidencePolicy: "tiered" | "telemetry";
   /** Exactly the text the gate may quote. A quote from anywhere else is rejected by the receiving layer. */
   evidenceClaims: Array<{ id: string; kind: string; text: string }>;
-  evidenceContract: Array<{ requirement: string }>;
+  /** `required: false` items are judged and reported but cannot hold back `pass`. */
+  evidenceContract: Array<{ requirement: string; required: boolean }>;
   execution: {
     startedAt: string | null;
     endedAt: string | null;

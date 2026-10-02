@@ -3,7 +3,7 @@ import * as core from "./index";
 
 const analysisContext = {
   version: "crossline.analysis.v1", capture: { title: "Compare notes and decide", context: "Use only supplied notes" },
-  approvedMilestones: [{ id: "m", projectId: "p", identityId: "research", title: "Compare notes", version: 1 }],
+  approvedMilestones: [{ id: "m", projectId: "p", identityId: "research", title: "Compare notes", version: 1, hasSuccessCriteria: true }],
   availableInputs: [], identityPacks: [{ id: "research", version: 1, summary: "Keep research judgment with the human" }],
   historicalStats: [], policy: { tools: [], externalSideEffects: false, humanApprovalRequired: true }
 };
@@ -70,7 +70,7 @@ test("milestone titles are app-authored constants, not usable as captured eviden
 
 test("context may offer several identities, but every milestone needs a backing pack", () => {
   const multi = { ...analysisContext,
-    approvedMilestones: [...analysisContext.approvedMilestones, { id: "m2", projectId: "p2", identityId: "startup", title: "Validate a paying problem", version: 1 }],
+    approvedMilestones: [...analysisContext.approvedMilestones, { id: "m2", projectId: "p2", identityId: "startup", title: "Validate a paying problem", version: 1, hasSuccessCriteria: true }],
     identityPacks: [...analysisContext.identityPacks, { id: "startup", version: 1, summary: "Startup pack" }] };
   expect(core.validateAnalysisContext(multi).identityPacks).toHaveLength(2);
   // Choosing between identities is the Skill's job; offering a milestone with no pack is an app bug.
@@ -163,4 +163,21 @@ test("a reason that loops on its own tail keeps the sentence and drops the echoe
   };
   expect(core.validateAnalysisProposal(distinct, analysisContext).materialContract[0]?.why)
     .toBe("需要原文对齐。原文在学校系统里，现在拿不到。");
+});
+
+test("an evidence contract with nothing required is refused, so the core deliverable can always fail the gate", () => {
+  const allOptional = { ...validProposal, evidenceContract: validProposal.evidenceContract.map((item) => ({ ...item, required: false })) };
+  expect(() => core.validateAnalysisProposal(allOptional, analysisContext)).toThrow("ANALYSIS_EVIDENCE_REQUIRED_MISSING");
+  // Optional supporting items beside a required deliverable are fine.
+  const mixed = { ...validProposal, evidenceContract: [...validProposal.evidenceContract,
+    { kind: "record", description: "Supporting log", why: "Makes the call easier to trust", required: false }] };
+  expect(core.validateAnalysisProposal(mixed, analysisContext).evidenceContract).toHaveLength(2);
+});
+
+test("only required items are the bar for pass; a contract without the flag fails closed", () => {
+  expect(core.requiredContractRequirements([
+    { description: "核心交付物", required: true }, { description: "佐证", required: false },
+    { description: "旧契约，没有 required 字段" }, { kind: "file" }
+  ])).toEqual(["核心交付物", "旧契约，没有 required 字段", "file"]);
+  expect(core.requiredContractRequirements(undefined)).toEqual([]);
 });

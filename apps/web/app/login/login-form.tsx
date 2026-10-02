@@ -4,8 +4,8 @@ import { useState, type FormEvent } from "react";
 import { authClient } from "../auth-client";
 import { authErrorMessage } from "../auth-errors";
 
-export function LoginForm({ googleEnabled }: { googleEnabled: boolean }) {
-  const [status, setStatus] = useState("");
+export function LoginForm({ googleEnabled, verified = false }: { googleEnabled: boolean; verified?: boolean }) {
+  const [status, setStatus] = useState(verified ? "邮箱已验证，请登录。" : "");
   const [error, setError] = useState(false);
   const [busy, setBusy] = useState(false);
 

@@ -175,7 +175,7 @@ export type PersistedPlan = {
   version: number;
   status: "draft" | "approved" | "superseded";
   blocks: PersistedScheduleBlock[];
-  schedule: Pick<PlanResult, "status" | "blockers" | "solver" | "bufferRelaxed">;
+  schedule: Pick<PlanResult, "status" | "blockers" | "solver" | "bufferRelaxed" | "notes">;
   /** True when nobody has saved a real time zone/availability/mode yet and this is computed off
    * defaults — a real, honestly-labelled preview rather than an empty page. */
   usingDefaultPreferences: boolean;
@@ -521,7 +521,8 @@ async function scheduledBlocks(ctx: AccessContext, today: string, committed: Per
   return { blocks, schedule: { status: clockBlockers.length || dependencyBlockers.length
     ? blocks.length ? "partial" : "infeasible" : result.status,
     blockers: [...result.blockers, ...clockBlockers, ...dependencyBlockers],
-    solver: result.solver, ...(result.bufferRelaxed ? { bufferRelaxed: true } : {}) } };
+    solver: result.solver, ...(result.bufferRelaxed ? { bufferRelaxed: true } : {}),
+    ...(result.notes?.length ? { notes: result.notes } : {}) } };
 }
 
 export function loadGoalForecast(ctx: AccessContext): ForecastResult & { inferredRegularBlocks: number } {

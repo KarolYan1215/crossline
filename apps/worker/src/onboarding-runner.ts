@@ -25,7 +25,9 @@ const INSTRUCTIONS = "You are interviewing a brand-new Crossline user, one ident
   + "at least one criterion per milestone must have evidenceOf=\"outcome\". Set `allIdentitiesCovered` "
   + "true only once every identity has at least one grounded milestone or the user has said to skip it. "
   + "If the answers are too thin to ground even one checkable milestone for the very first identity, "
-  + "return a blocker naming what is missing instead of guessing.";
+  + "return a blocker naming what is missing instead of guessing. `reply` is read by the person, never by "
+  + "a program: do not mention validation, rejection, source ids, schemas or any intake mechanics in it — "
+  + "if something you proposed was not accepted, just continue the interview in plain language.";
 
 export type OnboardingTurn =
   | {
@@ -150,7 +152,8 @@ export function createOnboardingConversation(store: CrosslineStore, workspaceId:
       skillName: ONBOARDING_SKILL,
       cwd,
       outputSchema: ONBOARDING_OUTPUT_SCHEMA,
-      validateOutput: (output) => validateOnboardingProposal(output, context),
+      // The opening turn's answers are in the thread, not in `context` — see `inheritedSourceRefs`.
+      validateOutput: (output) => validateOnboardingProposal(output, context, { inheritedSourceRefs: true }),
       onAudit: () => {},
       ...(signal ? { signal } : {}),
       timeoutMs: 10 * 60_000

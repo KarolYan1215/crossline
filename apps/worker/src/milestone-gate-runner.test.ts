@@ -103,3 +103,71 @@ test("a failed gate run is recorded so the timer stops re-spending on it", async
   await judge("w1");
   expect(pendingMilestoneGates(store, WORKSPACE)).toEqual([]);
 });
+
+test("a refusal before the model runs is recorded too, and repeats after a retry are not swallowed", async () => {
+  // An archived milestone is refused without ever calling the model. That used to be returned to the
+  // caller and nowhere else, so the approvals page said 「等待里程碑闸门」 about a verdict already given.
+  store.saveMilestone({ id: "m", ownerId: "local-owner", workspaceId: WORKSPACE, identityId: "research",
+    projectId: "p", title: "里程碑", version: 2, status: "archived" });
+  const { judge } = judgeWith([]);
+  expect(await judge("w1")).toMatchObject({ state: "blocked", code: "MILESTONE_NOT_FOUND" });
+  const blocks = () => store.listEvents(WORKSPACE, { type: "milestone_gate.blocked", entityId: "w1" });
+  expect(blocks()).toHaveLength(1);
+  expect(blocks()[0]?.payload).toMatchObject({ code: "MILESTONE_NOT_FOUND" });
+  append("milestone_gate.retry_requested");
+  await judge("w1");
+  expect(blocks()).toHaveLength(2);
+});
+
+test("a milestone with no criteria is still judged on the order's own contract, and records no progress", async () => {
+  // This is the first thing every new account hits: its starter milestones state no criteria, and the
+  // gate used to stop every bound order at the very last step. `pass` is about the order's own contract.
+  store.saveMilestone({ id: "m", ownerId: "local-owner", workspaceId: WORKSPACE, identityId: "research",
+    projectId: "p", title: "里程碑", version: 2, status: "approved" });
+  readyToJudge();
+  const answer = JSON.parse(recordedAnswer("gate-pass-with-unmet-criterion")) as { criteriaVerdict: unknown[] };
+  answer.criteriaVerdict = [];
+  const { judge } = judgeWith([JSON.stringify(answer)]);
+
+  expect(await judge("w1")).toMatchObject({ state: "accepted", verdict: "pass" });
+  expect(store.listWorkOrders(WORKSPACE)[0]?.state).toBe("accepted");
+});
+
+test("an optional requirement left unsatisfied does not hold pass back", async () => {
+  const contract = (secondRequired: boolean) => [
+    { kind: "record", description: "结论记录", why: "本作业的交付物", required: true },
+    { kind: "record", description: "补充的原始日志", why: "佐证", required: secondRequired }
+  ];
+  const answerFor = (missingSecond: boolean) => {
+    const answer = JSON.parse(recordedAnswer("gate-pass-with-unmet-criterion")) as { contractCoverage: unknown[] };
+    answer.contractCoverage = [
+      ...answer.contractCoverage,
+      { requirement: "补充的原始日志", satisfiedBy: missingSecond ? null : "claim-1", reasoning: missingSecond ? "没有提交" : "已提交",
+        quote: missingSecond ? "" : "我写完了结论记录" }
+    ];
+    return JSON.stringify(answer);
+  };
+  const setContract = (secondRequired: boolean) => {
+    readyToJudge();
+    const order = store.listWorkOrders(WORKSPACE)[0]!;
+    store.saveWorkOrder({ ...order, payload: { ...(order.payload as object), evidenceContract: contract(secondRequired) } });
+  };
+
+  setContract(false);
+  expect(await judgeWith([answerFor(true)]).judge("w1")).toMatchObject({ state: "accepted", verdict: "pass" });
+});
+
+test("a required requirement left unsatisfied cannot be passed", async () => {
+  readyToJudge();
+  const order = store.listWorkOrders(WORKSPACE)[0]!;
+  store.saveWorkOrder({ ...order, payload: { ...(order.payload as object), evidenceContract: [
+    { kind: "record", description: "结论记录", why: "本作业的交付物", required: true },
+    { kind: "record", description: "补充的原始日志", why: "也是交付物", required: true }
+  ] } });
+  const answer = JSON.parse(recordedAnswer("gate-pass-with-unmet-criterion")) as { contractCoverage: unknown[] };
+  answer.contractCoverage = [...answer.contractCoverage,
+    { requirement: "补充的原始日志", satisfiedBy: null, reasoning: "没有提交", quote: "" }];
+  const { judge } = judgeWith([JSON.stringify(answer), JSON.stringify(answer), JSON.stringify(answer)]);
+  expect(await judge("w1")).toMatchObject({ state: "blocked", code: "GATE_VERDICT_INCONSISTENT" });
+  expect(store.listWorkOrders(WORKSPACE)[0]?.state).toBe("evidence_review");
+});

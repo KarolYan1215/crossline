@@ -18,11 +18,20 @@ export default async function ApprovalsPage() {
   const evidenceReviews = getStore().listWorkOrders(ctx.workspaceId).filter((item) => item.state === "evidence_review");
   const proposals = getStore().listWorkOrders(ctx.workspaceId).filter((item) => item.state === "awaiting_plan_approval");
   const claims = getStore().listEvidenceClaims(ctx.workspaceId);
+  const milestoneById = new Map(getStore().listMilestones(ctx.workspaceId).map((milestone) => [milestone.id, milestone]));
   // A revoked acceptance puts the order back here with the same evidence, and the gate deliberately
   // will not re-judge it on its own — so without the reason on screen the order looks stuck for no
   // stated cause, and the button that would move it looks like it does nothing.
   const revocations = new Map(getStore().listEvents(ctx.workspaceId, { type: "milestone_gate.auto_acceptance_revoked" })
     .map((event) => [event.entityId, String((event.payload as { reason?: string }).reason ?? "")]));
+  // The gate's own refusal, last word wins against a later 「现在判定」 retry request. It used to be written
+  // to the ledger and the worker log only, so the page said 「等待里程碑闸门」 indefinitely for a verdict
+  // that had already come back — with the one thing the person could do about it (write criteria) nowhere.
+  const gateBlocks = new Map<string, { code: string; message: string }>();
+  for (const event of getStore().listEvents(ctx.workspaceId, { type: ["milestone_gate.blocked", "milestone_gate.retry_requested"] })) {
+    if (event.type === "milestone_gate.blocked") gateBlocks.set(event.entityId, event.payload as { code: string; message: string });
+    else gateBlocks.delete(event.entityId);
+  }
   const executions = getStore().listExecutions(ctx.workspaceId);
   const taskDetails = loadTaskDetailsBatch(ctx, [...evidenceReviews, ...proposals].map((item) => item.id));
   return <SubpageShell eyebrow="05 / APPROVAL CONTROL" title="审批与验收" description="计划差异批量批准；外部动作逐项批准；里程碑证据由 AI 闸门判定并保留人工撤销权。">
@@ -45,7 +54,10 @@ export default async function ApprovalsPage() {
           </p>
           {item.milestoneId
             ? <>
-                <p><strong>等待里程碑闸门</strong> · 闸门判这份证据是否兑现了本作业的交付承诺；里程碑整体是否达成另行记录。</p>
+                {gateBlocks.has(item.id)
+                  ? <p role="alert"><strong>闸门没有判定这份证据</strong> · {gateBlocks.get(item.id)!.message}
+                  </p>
+                  : <p><strong>等待里程碑闸门</strong> · 闸门判这份证据是否兑现了本作业的交付承诺；里程碑整体是否达成另行记录。</p>}
                 {revocations.has(item.id) && <p role="status">
                   你撤销过这条的验收，原因：{revocations.get(item.id)}。闸门不会自动重判同一份证据；补完后点「现在判定」。
                 </p>}
@@ -64,6 +76,8 @@ export default async function ApprovalsPage() {
         <h2>{item.intent}</h2>
         <p>结构和输入引用已校验；语义仍需人工判断。尚未批准、排程或执行。</p>
         <p>{item.identityId} / {item.projectId} / {item.milestoneId}</p>
+        {milestoneById.get(item.milestoneId)?.verifiability === "unstated"
+          && <p role="note" className="seed-notice">这条作业绑定的里程碑还没有达成标准：验收只按下面的「必需」证据要求判定，里程碑自身的进度不会被记录。<a href="/milestones"> 去补充达成标准 →</a></p>}
         <p>估时 p25 / p50 / p85：{item.estimate.p25Minutes} / {item.estimate.p50Minutes} / {item.estimate.p85Minutes} 分钟 · {item.estimate.source} · {item.estimate.observationCount} 次观测 · {item.estimate.confidence}</p>
         <h3>AI 准备提案</h3>{proposal.automationParts.map((part) => <p key={part.id}>{part.intent} — 依据「{part.quote}」：{part.rationale}</p>)}
         <h3>人工核心</h3>{proposal.humanCore.map((part) => <p key={part.id}>{part.intent} — 依据「{part.quote}」：{part.rationale}</p>)}

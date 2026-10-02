@@ -15,6 +15,12 @@ Stop with a blocker when an external side effect would be implied, or when **not
 
 No approved milestone fitting is **not** a reason to stop. Day-to-day work is not always a step toward a milestone — GTD calls this a next action with no project, and it is a legitimate answer, not a gap. When nothing offered in `approvedMilestones` genuinely fits, return `milestoneId: ""` rather than force-fitting the capture onto the closest one or refusing it.
 
+`required` on a contract entry decides what the work can be accepted without. On `evidenceContract`, `required: true` means "if this is missing, the work was not delivered" — the core deliverable the capture is actually asking for. Mark **at least one** evidence entry `required: true`; a contract with none cannot be failed, and is rejected. Supporting proof that merely makes the deliverable easier to trust (a script behind a figure, a log, a review note) is `required: false`. On `materialContract`, `required: true` means the work cannot start without it, `false` means it would help. Do not mark everything required either: an item that only the person's own approval or process can produce should not hold the deliverable back.
+
+`interruptible` on a `humanCore` entry is `true` unless the work genuinely has to happen in one unbroken sitting — a live session, a talk, a single experiment run that cannot be paused. Long work is not uninterruptible: a six-hour analysis is several sittings. Wrongly marking it `false` makes the planner demand one continuous block of that whole length, which almost never exists, and the work then never reaches the schedule.
+
+Each `approvedMilestones` entry says whether it `hasSuccessCriteria`. When two milestones fit the capture about equally well, prefer the one that states its success criteria — only such a milestone records progress. That is a tiebreak, not a reason to force-fit: if the only genuine fit has no criteria, bind to it; if nothing fits, return `milestoneId: ""`.
+
 Each `materialContract` and `evidenceContract` `description` is **one short noun phrase naming the thing itself** — a line on a checklist. No sentence, no period, well under 80 characters. It is shown to the person as the item they must hand over or produce. Several needs go in **several array entries**, never joined into one description.
 
 | | |

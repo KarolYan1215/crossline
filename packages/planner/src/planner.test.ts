@@ -268,8 +268,51 @@ describe("energy-aware planning", () => {
       blockers: [{
         code: "NO_CONTINUOUS_SLOT",
         taskId: "experiment",
-        message: "连续实验需要连续 90 分钟"
+        message: "连续实验需要连续 90 分钟，但最长的连续空档只有 45 分钟；可以补充更长的可用时间，或确认它其实可以分几次做"
       }]
+    });
+  });
+
+  describe("long estimates", () => {
+    const day = (n: number) => `2026-09-${14 + n}`;
+    const slot = (n: number, from: string, to: string) => ({ start: `${day(n)}T${from}:00.000Z`, end: `${day(n)}T${to}:00.000Z`, energy: "high" as const });
+    const task = (extra: object) => ({ id: "long", title: "长作业", inputsReady: true, deadlineTier: 2 as const,
+      estimate: { p25Minutes: 90, p50Minutes: 180, p85Minutes: 360, confidence: "low" as const }, ...extra });
+
+    test("an uninterruptible low-confidence job is reserved at what one slot can hold, not at an unreachable p85", async () => {
+      // p85 is 360 but the longest free stretch is 240: asking for 360 in one piece could never succeed.
+      const result = await planSchedule({ now: start, horizonDays: 3, mode: "asap", tasks: [task({ interruptible: false })],
+        availability: [slot(0, "14:00", "18:00"), slot(1, "14:00", "16:00")], frozenBlocks: [] });
+      expect(result.status).toBe("feasible");
+      const [block] = result.plan.blocks;
+      expect((Date.parse(block!.end) - Date.parse(block!.start)) / 60_000).toBe(240);
+      expect(result.notes).toEqual([expect.objectContaining({ taskId: "long", code: "BUFFER_CLAMPED" })]);
+      expect(result.notes![0]!.message).toContain("240");
+    });
+
+    test("when even the expected time will not fit one slot, the blocker names the longest slot", async () => {
+      const result = await planSchedule({ now: start, horizonDays: 3, mode: "asap", tasks: [task({ interruptible: false })],
+        availability: [slot(0, "14:00", "16:00"), slot(1, "14:00", "16:30")], frozenBlocks: [] });
+      expect(result.status).toBe("infeasible");
+      expect(result.notes).toBeUndefined();
+      expect(result.blockers[0]).toMatchObject({ code: "NO_CONTINUOUS_SLOT", taskId: "long" });
+      expect(result.blockers[0]!.message).toContain("150");
+    });
+
+    test("an interruptible 360-minute job is simply split across days", async () => {
+      const result = await planSchedule({ now: start, horizonDays: 3, mode: "asap", tasks: [task({})],
+        availability: [slot(0, "14:00", "17:00"), slot(1, "14:00", "17:00"), slot(2, "14:00", "17:00")], frozenBlocks: [] });
+      expect(result.status).toBe("feasible");
+      const minutes = result.plan.blocks.reduce((sum, block) => sum + (Date.parse(block.end) - Date.parse(block.start)) / 60_000, 0);
+      expect(minutes).toBe(360);
+      expect(result.notes).toBeUndefined();
+    });
+
+    test("slots too low-energy for the job do not count toward the longest stretch", async () => {
+      const result = await planSchedule({ now: start, horizonDays: 2, mode: "asap",
+        tasks: [task({ interruptible: false, energy: "high" })],
+        availability: [{ ...slot(0, "14:00", "20:00"), energy: "low" }, slot(1, "14:00", "16:30")], frozenBlocks: [] });
+      expect(result.blockers[0]!.message).toContain("150");
     });
   });
 

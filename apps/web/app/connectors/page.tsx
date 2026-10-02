@@ -72,11 +72,18 @@ export default async function ConnectorsPage() {
           <code>{calendar.synced ? "GRAPH_READ_ONLY_SYNCED" : "GRAPH_NOT_SIGNED_IN"}</code>
         </details>
       </article>
-      {declared.map(([name, channel, scope]) => <article className="status-card" key={name}>
-        <span className="status-badge">尚未连接</span><h2>{name}</h2>
-        <p>{channel}<br />{scope}<br />未配置凭据，未执行探测。</p>
-        <details><summary>诊断代码</summary><code>CONNECTOR_NOT_CONFIGURED</code></details>
-      </article>)}
     </section>
+    {/* Targets with no credentials and no probe ever run: collapsed so the cards a person can actually
+        act on today (Codex sign-in, calendar sources, devices) are not buried under five "not connected". */}
+    <details className="declared-connectors">
+      <summary>尚未配置的外部连接 · {declared.length} 个</summary>
+      <section className="status-grid">
+        {declared.map(([name, channel, scope]) => <article className="status-card" key={name}>
+          <span className="status-badge">尚未连接</span><h2>{name}</h2>
+          <p>{channel}<br />{scope}<br />未配置凭据，未执行探测。</p>
+          <details><summary>诊断代码</summary><code>CONNECTOR_NOT_CONFIGURED</code></details>
+        </article>)}
+      </section>
+    </details>
   </SubpageShell>;
 }

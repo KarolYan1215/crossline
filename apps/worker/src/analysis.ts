@@ -68,7 +68,8 @@ export function createCaptureAnalyzer(store: CrosslineStore, workspaceId: string
       if (packs.length !== identities.size) throw new Error("ANALYSIS_IDENTITY_CONTEXT_REQUIRED");
       const context = validateAnalysisContext({
         version: "crossline.analysis.v1", capture: { title: capture.title, context: capture.context },
-        approvedMilestones: milestones.map((m) => ({ id: m.id, identityId: m.identityId, projectId: m.projectId!, title: m.title, version: m.version })),
+        approvedMilestones: milestones.map((m) => ({ id: m.id, identityId: m.identityId, projectId: m.projectId!, title: m.title, version: m.version,
+          hasSuccessCriteria: m.verifiability !== "unstated" })),
         // The note the person attached to the capture, handed over as what it is. It was hardcoded
         // empty, so the Skill could never see any material the user supplied and correctly refused
         // every capture that depended on some. Passing it does not assert it IS the material: a note

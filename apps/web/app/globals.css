@@ -76,6 +76,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-vis
 /* The one place that names what the milestone tag under a task title looks like everywhere it appears —
    Today's cards, Workbench, and both Plan lenses all reuse this one class instead of four near-duplicates. */
 .card-milestone{margin:2px 0 0;font-size:.85em;color:var(--graphite);line-height:1.4}
+.seed-notice{margin:6px 0;padding:6px 10px;border-left:3px solid var(--graphite);background:var(--mist);font-size:.85em;color:var(--graphite);line-height:1.5}
 
 /* ── shell ─────────────────────────────────── */
 .page{width:min(94vw,1900px);min-height:100vh;margin:0 auto;padding-inline:16px;padding-block:0 28px}
@@ -195,7 +196,7 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .review-list a,.review-list button,.review-list input,.review-list label,
 .approval-ledger a,.approval-ledger button,.approval-ledger summary,
 .review-milestone a,
-.timeline-list a,.milestone-pulse a{position:relative;z-index:1}
+.timeline-list a:not(.card-cover-link),.milestone-pulse a:not(.card-cover-link){position:relative;z-index:1}
 .hero-action{padding:14px 0 18px;padding-right:clamp(12px,2vw,28px)}
 .hero-action>header,.timeline-list>header,.milestone-pulse>header,.alt-action>header{display:flex;justify-content:space-between;gap:12px;font-family:var(--f-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--graphite)}
 .hero-action h1{max-width:780px;margin:10px 0;font-family:var(--f-display);font-size:clamp(24px,3.2vw,42px);line-height:1.04;letter-spacing:-.02em}
@@ -643,3 +644,11 @@ button:disabled{opacity:.4;cursor:not-allowed}
   .assistant-panel{right:8px;left:8px;width:auto;bottom:64px}
   .assistant-bubble{right:8px;bottom:64px}
 }
+.declared-connectors{margin-top:12px}
+.declared-connectors>summary{cursor:pointer;font-family:var(--f-mono);font-size:11px;letter-spacing:.08em;color:var(--graphite);padding:8px 0}
+.promote-form{display:grid;gap:10px;padding:12px 0;max-width:560px}
+.promote-form label{display:grid;gap:4px}
+.promote-form label>span{font-family:var(--f-mono);font-size:10.5px;letter-spacing:.06em;color:var(--graphite)}
+.promote-form input,.promote-form select,.promote-form textarea{width:100%;box-sizing:border-box;padding:6px 8px;border:1px solid var(--ink);background:var(--paper);font:inherit}
+.promote-form-estimate{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.promote-form-actions{display:flex;gap:8px}

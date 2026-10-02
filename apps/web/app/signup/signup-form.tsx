@@ -18,7 +18,7 @@ export function SignupForm() {
     setBusy(true);
     setStatus("正在创建账号…");
     setError(false);
-    const { error: signUpError } = await authClient.signUp.email({ email, password, name });
+    const { error: signUpError } = await authClient.signUp.email({ email, password, name, callbackURL: "/login?verified=1" });
     if (signUpError) { setStatus(authErrorMessage(signUpError, "注册失败，请重试。")); setError(true); setBusy(false); return; }
     setStatus("已发送验证邮件，请查收（包括垃圾邮件夹）并点击链接完成验证后再登录。");
     setBusy(false);

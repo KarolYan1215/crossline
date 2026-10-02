@@ -74,10 +74,10 @@ export function DecideRelations({ candidates }: { candidates: CandidateDetail[] 
       </small>
       {candidate.explanation
         ? <p className="relation-claim">{candidate.explanation}</p>
-        : <p className="relation-claim relation-claim-missing">这条关系没有记录主张，无法审阅。</p>}
+        : <p className="relation-claim relation-claim-missing">这条关系没有记录主张，无法审阅。下一次周复盘会补上依据；在此之前它只是占位，可以先搁置。</p>}
       {candidate.refutedWhen && <p className="relation-falsifier">反证条件：{candidate.refutedWhen}</p>}
       {candidate.evidence.length === 0
-        ? <small className="relation-evidence-missing">没有来源，不能批准。</small>
+        ? <small className="relation-evidence-missing">没有来源，不能批准（先勾选并“搁置”，或等周复盘补来源）。</small>
         : <ul className="relation-evidence">{candidate.evidence.map((item) => <li key={item.uri}>
           <a href={item.uri} target="_blank" rel="noreferrer noopener">{item.source || item.uri}</a>
           <span> · 读取于 {item.observedAt}</span>

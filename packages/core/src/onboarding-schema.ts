@@ -80,7 +80,17 @@ export const ONBOARDING_OUTPUT_SCHEMA = object({
   blockers: { type: "array", maxItems: 10, items: object({ code: shortStr, message: shortStr }) }
 });
 
-export function validateOnboardingProposal(value: unknown, context: OnboardingContext): OnboardingProposal {
+/**
+ * `inheritedSourceRefs` is for a follow-up turn on a thread the opening turn already grounded: that
+ * turn's answers/sources live in the thread, not in `context` (which is rebuilt empty), so every
+ * `sourceRefs` entry used to fail `ONBOARDING_UNKNOWN_SOURCE_REF` and no draft could ever be saved after
+ * the first question. Ids of the shape the opening turn hands out (`answer-N` / `source-N`) are accepted
+ * there; the pattern is deliberately as narrow as the ids themselves.
+ */
+const INHERITED_SOURCE_REF = /^(answer|source)-\d+$/;
+
+export function validateOnboardingProposal(value: unknown, context: OnboardingContext,
+  options: { inheritedSourceRefs?: boolean } = {}): OnboardingProposal {
   const raw = value as OnboardingProposal | undefined;
   if (!raw || typeof raw.reply !== "string" || typeof raw.allIdentitiesCovered !== "boolean"
     || !Array.isArray(raw.milestoneProposals) || !Array.isArray(raw.blockers)) {
@@ -96,7 +106,10 @@ export function validateOnboardingProposal(value: unknown, context: OnboardingCo
   if (raw.focusIdentityId !== null && !knownIdentities.has(raw.focusIdentityId)) {
     throw new Error("ONBOARDING_IDENTITY_UNKNOWN");
   }
-  const knownSourceIds = new Set([...context.answers.map((answer) => answer.id), ...context.sources.map((source) => source.id)]);
+  const knownSourceIds = {
+    has: (ref: string) => context.answers.some((answer) => answer.id === ref) || context.sources.some((source) => source.id === ref)
+      || (options.inheritedSourceRefs === true && INHERITED_SOURCE_REF.test(ref))
+  };
   const titles = new Set(context.existingMilestones.map((milestone) => milestone.title.trim()));
   for (const proposal of raw.milestoneProposals) {
     if (!knownIdentities.has(proposal.identityId)) throw new Error("ONBOARDING_IDENTITY_UNKNOWN");

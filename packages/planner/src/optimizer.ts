@@ -1,4 +1,4 @@
-import { compareTasks, type PlanResult, type PlannerTask, type PlanningInput, type ScheduleBlock } from "./index";
+import { compareTasks, type PlanBlocker, type PlanResult, type PlannerTask, type PlanningInput, type ScheduleBlock } from "./index";
 import { createRequire } from "node:module";
 
 // Keep HiGHS outside the Next server bundle so its loader finds highs.wasm beside itself.
@@ -74,6 +74,36 @@ function validBlocks(blocks: ScheduleBlock[], slots: Slot[], input: PlanningInpu
   return true;
 }
 
+/** The longest unbroken stretch this task could use: slots too low-energy for it do not count. */
+function longestSlotMinutes(slots: Slot[], task: PlannerTask): number {
+  return Math.max(0, ...slots
+    .filter((slot) => !task.energy || energyRank[slot.energy] >= energyRank[task.energy])
+    .map((slot) => Math.floor((slot.end - slot.start) / 60_000)));
+}
+
+/**
+ * A low-confidence estimate is reserved at p85, which is the right instinct for work that can be split
+ * across days and the wrong one for work that has to sit in one slot: a 90–360 minute job marked
+ * uninterruptible asked for a single 360-minute block, which almost no availability pattern contains, so
+ * it never reached the schedule at all. When p85 will not fit the longest slot but the expected time (p50)
+ * will, reserve as much of the buffer as one slot allows — never less than p50 — and say so. Work whose
+ * p50 does not fit stays unscheduled, but with a message that names the real obstacle.
+ */
+function clampContinuousBuffers(input: PlanningInput): { input: PlanningInput; notes: PlanBlocker[] } {
+  const slots = freeSlots(input);
+  const notes: PlanBlocker[] = [];
+  const tasks = input.tasks.map((task) => {
+    if (task.interruptible !== false || task.estimate.confidence !== "low") return task;
+    const longest = longestSlotMinutes(slots, task);
+    const { p50Minutes, p85Minutes } = task.estimate;
+    if (p85Minutes <= longest || p50Minutes > longest) return task;
+    notes.push({ taskId: task.id, code: "BUFFER_CLAMPED",
+      message: `${task.title}要一口气做完，按保守估计需要 ${p85Minutes} 分钟，但最长的连续空档只有 ${longest} 分钟；已按 ${longest} 分钟预留（预期用时 ${p50Minutes} 分钟）` });
+    return { ...task, estimate: { ...task.estimate, p85Minutes: longest } };
+  });
+  return { input: { ...input, tasks }, notes };
+}
+
 function makeResult(input: PlanningInput, tasks: PlannerTask[], slots: Slot[], blocks: ScheduleBlock[],
   solver: PlanResult["solver"]): PlanResult {
   const scheduled = new Set(blocks.filter((block) => !block.progressOnly).map((block) => block.taskId));
@@ -83,7 +113,10 @@ function makeResult(input: PlanningInput, tasks: PlannerTask[], slots: Slot[], b
       : task.interruptible === false ? "NO_CONTINUOUS_SLOT" : task.deadline ? "DEADLINE_CAPACITY" : "NO_CAPACITY",
     message: blocks.some((block) => block.taskId === task.id && block.progressOnly)
       ? `${task.title}本周已留 45 分钟进度，完整作业仍待排入`
-      : task.interruptible === false ? `${task.title}需要连续 ${durationOf(task)} 分钟`
+      : task.interruptible === false
+        ? longestSlotMinutes(slots, task) < durationOf(task)
+          ? `${task.title}需要连续 ${durationOf(task)} 分钟，但最长的连续空档只有 ${longestSlotMinutes(slots, task)} 分钟；可以补充更长的可用时间，或确认它其实可以分几次做`
+          : `${task.title}需要连续 ${durationOf(task)} 分钟`
       : task.deadline ? `${task.title}无法在已确认截止时间前排入` : `${task.title}在排程窗口内没有可用容量`
   }));
   return { status: statusFor(blocks, blockers, input.frozenBlocks.length),
@@ -290,7 +323,13 @@ async function optimize(input: PlanningInput, emergency = false): Promise<PlanRe
   }
 }
 
-export async function planSchedule(input: PlanningInput): Promise<PlanResult> {
+export async function planSchedule(original: PlanningInput): Promise<PlanResult> {
+  const { input, notes } = clampContinuousBuffers(original);
+  const result = await schedule(input);
+  return notes.length ? { ...result, notes } : result;
+}
+
+async function schedule(input: PlanningInput): Promise<PlanResult> {
   const slots = freeSlots(input);
   const lookaheadSlots = input.lookaheadAvailability
     ? freeSlots({ ...input, availability: input.lookaheadAvailability }) : slots;

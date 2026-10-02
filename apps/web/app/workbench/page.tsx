@@ -140,6 +140,8 @@ export default async function WorkbenchPage({ searchParams }: {
             cross-referencing Milestones or the PromoteForm's own dropdown. */}
         {run.milestoneId && milestoneTitleById.has(run.milestoneId)
           && <p className="card-milestone">→ {milestoneTitleById.get(run.milestoneId)}</p>}
+        {(run.payload as { seeded?: boolean }).seeded
+          && <p role="note" className="seed-notice">示例作业 · 系统预置，不需要可直接丢弃。</p>}
         {(run.payload as { manualPromotion?: boolean }).manualPromotion
           && <p role="status">人工创建 · 未经 AI 分析</p>}
         <p>{estimate.p25Minutes}–{estimate.p85Minutes} 分钟 · {confidenceLabel[estimate.confidence]} · {riskLabel[run.riskTier]}</p>

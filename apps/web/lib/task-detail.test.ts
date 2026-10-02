@@ -17,7 +17,7 @@ function seedOrderWithMilestone(store: CrosslineStore) {
     state: "preparing", riskTier: "milestone",
     estimate: { p25Minutes: 45, p50Minutes: 60, p85Minutes: 90, source: "llm_prior", observationCount: 0, confidence: "low" },
     payload: {
-      manualPromotion: false,
+      manualPromotion: false, seeded: false,
       materialContract: [{ kind: "file", description: "三次实验的原始数据", why: "用来写方法与结果部分", required: true }],
       evidenceContract: [{ kind: "file", description: "导师签字确认的初稿", why: "证明已进入评审阶段", required: true }],
       blocker: { reason: "缺少上周实验的原始数据" }

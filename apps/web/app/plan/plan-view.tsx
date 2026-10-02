@@ -27,7 +27,8 @@ export type PlanVersionData = {
   blocks: ScheduleBlockData[];
   schedule?: { status: "feasible" | "partial" | "infeasible";
     blockers: Array<{ taskId: string; code: string; message: string }>;
-    solver: "optimal" | "feasible_time_limit" | "fallback"; bufferRelaxed?: boolean };
+    solver: "optimal" | "feasible_time_limit" | "fallback"; bufferRelaxed?: boolean;
+    notes?: Array<{ taskId: string; code: string; message: string }> };
   changes: Array<{ id: string; kind: "add" | "move" | "remove" | "conflict"; explanation: string; afterBlockId?: string; status: "pending" | "approved" | "excluded" }>;
 };
 
@@ -121,6 +122,7 @@ export function PlanView({ plan, today, workOrderMilestones = {} }: { plan: Plan
         {plan.schedule.solver === "fallback" && <p>优化器未给出可用解；已显示验证过的保底安排。</p>}
         {plan.schedule.bufferRelaxed && <p>为守住已确认截止时间，已放宽当天的缓冲规则。</p>}
         {plan.schedule.blockers.map((blocker) => <p key={blocker.taskId}>{blocker.message}</p>)}
+        {plan.schedule.notes?.map((note) => <p key={`note-${note.taskId}`}>{note.message}</p>)}
       </section>}{lane("human", "USER REALITY")}{lane("ai", "AI AHEAD")}</div>}
     {view === "C" && <section id="plan-panel-C" role="tabpanel" aria-labelledby="plan-tab-C" className="change-ledger">
       <header><span>KIND</span><span>CHANGE</span><span>STATUS</span></header>

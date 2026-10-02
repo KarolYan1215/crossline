@@ -16,8 +16,9 @@ const ARTIFACT_TEXT_LIMIT = 40_000;
 const INSTRUCTIONS = "Judge the submitted evidence. Return only the requested JSON. Every quote must be "
   + "copied verbatim from the supplied evidence text — never paraphrased, never invented. `verdict` "
   + "answers one question only: did this work order deliver what its evidenceContract promised? `pass` "
-  + "is allowed exactly when every supplied evidenceContract requirement appears in contractCoverage "
-  + "with a non-null satisfiedBy, nothing incomplete blocks passing, and there are no blockers. Copy "
+  + "is allowed exactly when every supplied evidenceContract requirement with required=true appears in "
+  + "contractCoverage with a non-null satisfiedBy, nothing incomplete blocks passing, and there are no "
+  + "blockers; requirements with required=false are still reported but never hold back pass. Copy "
   + "each requirement string back verbatim; a paraphrased or omitted requirement counts as uncovered. "
   + "Separately, judge every milestone criterion exactly once and report it honestly; a milestone spans "
   + "many work orders, so an unmet criterion is normal and is not a reason to withhold pass, and a "
@@ -36,11 +37,12 @@ export function buildMilestoneGateContext(store: CrosslineStore, workspaceId: st
   if (order.state !== "evidence_review") return { blocker: { code: "EVIDENCE_REVIEW_NOT_READY", message: "该作业不在证据审阅阶段。" } };
   const milestone = store.listMilestones(workspaceId).find((item) => item.id === order.milestoneId && item.status === "approved");
   if (!milestone) return { blocker: { code: "MILESTONE_NOT_FOUND", message: "找不到已批准的里程碑。" } };
-  // The gate is not allowed to invent a standard. A milestone with no stated criteria is refused here
-  // rather than being judged against whatever the model imagines the bar was.
-  if (milestone.verifiability === "unstated") {
-    return { blocker: { code: "MILESTONE_NEEDS_CRITERIA", message: "该里程碑还没有达成标准；先补指标再提交验收。" } };
-  }
+  // A milestone with no stated criteria is judged all the same. `pass` has meant "this work order
+  // delivered what its own evidenceContract promised" since the gate stopped requiring the whole
+  // milestone to be met by one submission, so the refusal that used to sit here was a leftover of the old
+  // meaning: it stopped every order bound to a starter milestone at the last step. The gate still invents
+  // no standard — with no criteria there is simply no milestone progress to record, and the bar is the
+  // order's own contract, which the person approved with the plan.
 
   const claims = store.listEvidenceClaims(workspaceId).filter((claim) => claim.workOrderId === workOrderId);
   const execution = store.listExecutions(workspaceId).find((item) => item.workOrderId === workOrderId);
@@ -48,7 +50,7 @@ export function buildMilestoneGateContext(store: CrosslineStore, workspaceId: st
     .filter((relation) => relation.fromMilestoneId === milestone.id && relation.status !== "archived");
   const milestonesById = new Map(store.listMilestones(workspaceId).map((item) => [item.id, item]));
   const payload = order.payload as {
-    evidenceContract?: Array<{ description?: string; kind?: string }>;
+    evidenceContract?: Array<{ description?: string; kind?: string; required?: boolean }>;
     evidenceChecklist?: Array<{ id: string; prompt: string }>;
   };
 
@@ -105,7 +107,7 @@ export function buildMilestoneGateContext(store: CrosslineStore, workspaceId: st
       evidencePolicy: "tiered",
       evidenceClaims,
       evidenceContract: (payload.evidenceContract ?? [])
-        .map((item) => ({ requirement: item.description ?? item.kind ?? "" }))
+        .map((item) => ({ requirement: item.description ?? item.kind ?? "", required: item.required !== false }))
         .filter((item) => item.requirement),
       execution: {
         startedAt: execution?.startedAt ?? null,
@@ -132,6 +134,19 @@ export function buildMilestoneGateContext(store: CrosslineStore, workspaceId: st
  * the submitted evidence, the acceptance is revocable, and a relation the evidence contradicts is
  * refuted rather than quietly left standing. All of that lives in `applyMilestoneGate`.
  */
+/** Keyed on how many refusals this order already has: a code-only key made the second identical refusal
+ * (after a 「现在判定」 retry) a silent no-op, leaving the retry request as the last word and the page
+ * saying 「等待」 again with no reason. */
+function recordGateBlock(store: CrosslineStore, workspaceId: string, workOrderId: string,
+  blocker: { code: string; message: string }): void {
+  const attempt = store.listEvents(workspaceId, { type: "milestone_gate.blocked", entityId: workOrderId }).length;
+  store.appendEvent({
+    ownerId: OWNER_ID, workspaceId,
+    idempotencyKey: `milestone-gate:blocked:${workOrderId}:${attempt}`,
+    type: "milestone_gate.blocked", entityId: workOrderId, payload: blocker
+  });
+}
+
 export function createMilestoneGate(store: CrosslineStore, workspaceId: string, cwd: string,
   getClient: () => CodexRpcBoundary | undefined) {
   return async function judge(workOrderId: string): Promise<GateOutcome> {
@@ -139,7 +154,12 @@ export function createMilestoneGate(store: CrosslineStore, workspaceId: string, 
     if (!client) return { state: "blocked", workOrderId, code: "CODEX_SUPERVISOR_UNAVAILABLE", message: "Codex 运行时不可用。" };
 
     const built = buildMilestoneGateContext(store, workspaceId, workOrderId);
-    if ("blocker" in built) return { state: "blocked", workOrderId, ...built.blocker };
+    if ("blocker" in built) {
+      // Recorded like a failed run: this refusal (no criteria yet, no evidence) used to be returned to the
+      // caller only, so the approvals page kept saying 「等待里程碑闸门」 for a verdict already given.
+      recordGateBlock(store, workspaceId, workOrderId, built.blocker);
+      return { state: "blocked", workOrderId, ...built.blocker };
+    }
     const { context, evidenceTexts } = built;
 
     const result = await runCodexSkill<MilestoneGateResult>(client, context, {
@@ -152,7 +172,7 @@ export function createMilestoneGate(store: CrosslineStore, workspaceId: string, 
       // anything, so a fluent judgement built on invented text cannot accept the work.
       validateOutput: (output) => validateMilestoneGateResult(output as MilestoneGateResult,
         context.milestone.successCriteria, evidenceTexts,
-        context.evidenceContract.map((item) => item.requirement)),
+        context.evidenceContract.filter((item) => item.required).map((item) => item.requirement)),
       onAudit: () => {},
       timeoutMs: 10 * 60_000
     });
@@ -160,11 +180,7 @@ export function createMilestoneGate(store: CrosslineStore, workspaceId: string, 
       // A gate that could not run (timeout, quota, runtime gone) leaves the order in `evidence_review`.
       // Recorded so the tick stops re-running it: judging is premium spend, and fifteen minutes later
       // with the same inputs would fail the same way. `pendingMilestoneGates` reopens it on request.
-      store.appendEvent({
-        ownerId: OWNER_ID, workspaceId,
-        idempotencyKey: `milestone-gate:blocked:${workOrderId}:${result.blocker.code}`,
-        type: "milestone_gate.blocked", entityId: workOrderId, payload: result.blocker
-      });
+      recordGateBlock(store, workspaceId, workOrderId, result.blocker);
       return { state: "blocked", workOrderId, code: result.blocker.code, message: result.blocker.message };
     }
 

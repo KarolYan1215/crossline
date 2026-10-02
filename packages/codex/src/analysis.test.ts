@@ -3,7 +3,7 @@ import * as codex from "./index";
 
 const context = {
   version: "crossline.analysis.v1", capture: { title: "Compare notes and decide", context: "" },
-  approvedMilestones: [{ id: "m", projectId: "p", identityId: "research", title: "Compare notes", version: 1 }],
+  approvedMilestones: [{ id: "m", projectId: "p", identityId: "research", title: "Compare notes", version: 1, hasSuccessCriteria: true }],
   availableInputs: [], identityPacks: [{ id: "research", version: 1, summary: "Human judgment" }],
   historicalStats: [], policy: { tools: [], externalSideEffects: false, humanApprovalRequired: true }
 };

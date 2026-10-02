@@ -435,7 +435,7 @@ export function MilestoneAdmin({ milestones, identities, templates, previews, in
         </div>
         {milestone.rationale && <p className="milestone-rationale">提议理由：{milestone.rationale}</p>}
         {milestone.successCriteria.length === 0
-          ? <em className="review-flag">未声明达成标准 —— 闸门会拒绝它，直到你写下什么算达成。
+          ? <em className="review-flag">未声明达成标准 —— 绑定它的作业仍按各自的证据要求验收，但里程碑本身的进度记不下来，直到你写下什么算达成。
               <button type="button" onClick={() => startEdit(milestone)} disabled={busy}>立即补充 →</button>
             </em>
           : <ul className="criterion-view">{milestone.successCriteria.map((criterion) => <li key={criterion.id}>

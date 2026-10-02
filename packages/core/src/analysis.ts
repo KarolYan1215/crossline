@@ -3,7 +3,8 @@ import type { WorkOrder } from "./index";
 export type AnalysisContext = {
   version: string;
   capture: { title: string; context: string };
-  approvedMilestones: Array<{ id: string; projectId: string; identityId: string; title: string; version: number }>;
+  /** `hasSuccessCriteria: false` is a milestone that cannot record progress yet (a starter, a bare draft that was approved). */
+  approvedMilestones: Array<{ id: string; projectId: string; identityId: string; title: string; version: number; hasSuccessCriteria: boolean }>;
   availableInputs: Array<{ id: string; text: string }>;
   identityPacks: Array<{ id: string; version: number; summary: string }>;
   // How this workspace's own past captures actually turned out, per (identityId, family) — not a
@@ -82,7 +83,7 @@ function matches(value: unknown, schema: Schema): boolean {
 
 export function validateAnalysisContext(value: unknown): AnalysisContext {
   const schema = object({ version: choice("crossline.analysis.v1"), capture: object({ title: str, context: { type: "string", maxLength: 4000 } }),
-    approvedMilestones: array(object({ id: str, projectId: str, identityId: str, title: str, version: { type: "integer", minimum: 1 } }), 1),
+    approvedMilestones: array(object({ id: str, projectId: str, identityId: str, title: str, version: { type: "integer", minimum: 1 }, hasSuccessCriteria: bool }), 1),
     availableInputs: array(object({ id: str, text: str })), identityPacks: array(object({ id: str, version: { type: "integer", minimum: 1 }, summary: str }), 1),
     historicalStats: array(object({ identityId: str, family, chosenCount: { type: "integer", minimum: 0 }, medianActualMinutes: number }), 0, 32),
     policy: object({ tools: { type: "array", items: str, maxItems: 0 }, externalSideEffects: { type: "boolean", enum: [false] }, humanApprovalRequired: { type: "boolean", enum: [true] } }) });
@@ -143,6 +144,15 @@ export function validateAnalysisProposal(value: unknown, input: AnalysisContext)
     item.why = dropEchoes(trimFiller(item.why));
   }
   const contracts = [...proposal.materialContract, ...proposal.evidenceContract];
+  // The core deliverable has to be required. `pass` is measured against the required evidence only, so an
+  // all-optional contract is one nothing can fail: the acceptance bar would be whatever the person
+  // chose to hand in. The Skill was never told what `required` means and marked every item false.
+  if (!proposal.evidenceContract.some((item) => item.required)) {
+    const error = new Error("ANALYSIS_EVIDENCE_REQUIRED_MISSING");
+    (error as Error & { detail?: string }).detail =
+      "分析被拒绝：证据要求里没有一条标为必需。至少要把“交付了这件事”的那条核心交付物设为 required=true（次要的佐证才设为 false）。可重新分析。";
+    throw error;
+  }
   // Brackets in the **label** mean the JSON leaked into it — one real run left `'}],` there followed by
   // the model's own scratch reasoning, short enough to pass the length bound and shown to the person as
   // the thing to produce. The label is a checklist line; it has no structure in it.

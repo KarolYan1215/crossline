@@ -61,7 +61,7 @@ test("the seeded ledger still passes the analysis trust check under the new pack
     capture: { title: "为下周的课准备一页讲义", context: "" },
     approvedMilestones: store.listMilestones(TEST_CTX.workspaceId)
       .filter((milestone) => milestone.status === "approved" && milestone.projectId)
-      .map((milestone) => ({ id: milestone.id, projectId: milestone.projectId!, identityId: milestone.identityId, title: milestone.title, version: milestone.version })),
+      .map((milestone) => ({ id: milestone.id, projectId: milestone.projectId!, identityId: milestone.identityId, title: milestone.title, version: milestone.version, hasSuccessCriteria: milestone.verifiability !== "unstated" })),
     identityPacks: swappedPacks.filter((pack) => pack.kind === "identity").map((pack) => ({ id: pack.id, version: 1, summary: pack.label })),
     availableInputs: [],
     historicalStats: [],

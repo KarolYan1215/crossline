@@ -60,6 +60,14 @@ test("citing an answer id never supplied is refused", () => {
   }), context)).toThrow("ONBOARDING_UNKNOWN_SOURCE_REF");
 });
 
+test("a follow-up turn may cite the opening turn's answer ids, but not made-up ones", () => {
+  const proposal = (sourceRefs: string[]) => output({ milestoneProposals: [{ ...output().milestoneProposals[0]!, sourceRefs }] });
+  const empty = { ...context, answers: [], sources: [] };
+  expect(() => validateOnboardingProposal(proposal(["answer-0", "source-1"]), empty)).toThrow("ONBOARDING_UNKNOWN_SOURCE_REF");
+  expect(validateOnboardingProposal(proposal(["answer-0", "source-1"]), empty, { inheritedSourceRefs: true }).milestoneProposals).toHaveLength(1);
+  expect(() => validateOnboardingProposal(proposal(["made-up"]), empty, { inheritedSourceRefs: true })).toThrow("ONBOARDING_UNKNOWN_SOURCE_REF");
+});
+
 test("a reported blocker surfaces its message", () => {
   expect(() => validateOnboardingProposal(output({ blockers: [{ code: "ONBOARDING_NO_INPUT", message: "没有可用的访谈回答" }] }), context))
     .toThrow("ONBOARDING_BLOCKED");
