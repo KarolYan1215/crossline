@@ -171,3 +171,16 @@ test("a required requirement left unsatisfied cannot be passed", async () => {
   expect(await judge("w1")).toMatchObject({ state: "blocked", code: "GATE_VERDICT_INCONSISTENT" });
   expect(store.listWorkOrders(WORKSPACE)[0]?.state).toBe("evidence_review");
 });
+
+test("a legacy contract whose items are all optional is still held to all of them", async () => {
+  // Older analyses marked every item `required: false`. Reading that literally left the gate no bar, so
+  // reporting nothing would have passed; the contract is treated as it always was instead.
+  readyToJudge();
+  const order = store.listWorkOrders(WORKSPACE)[0]!;
+  store.saveWorkOrder({ ...order, payload: { ...(order.payload as object), evidenceContract: [
+    { kind: "record", description: "结论记录", why: "本作业的交付物", required: false }
+  ] } });
+  const { judge } = judgeWith([recordedAnswer("gate-pass-reporting-nothing"), recordedAnswer("gate-pass-reporting-nothing"), recordedAnswer("gate-pass-reporting-nothing")]);
+  expect(await judge("w1")).toMatchObject({ state: "blocked", code: "GATE_VERDICT_INCONSISTENT" });
+  expect(store.listWorkOrders(WORKSPACE)[0]?.state).toBe("evidence_review");
+});

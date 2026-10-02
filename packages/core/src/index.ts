@@ -102,12 +102,19 @@ export type MilestoneGateResult = {
  * used to demand every listed item while the page labelled most of them 「（可选）」, so the label and the
  * bar disagreed. A contract written before the flag existed (or by hand) has no `required`, and fails
  * closed: it is required.
+ *
+ * A contract in which **every** item is explicitly optional is the shape older analyses produced (the
+ * Skill was never told what `required` meant). Taken literally it would leave the gate nothing to check
+ * and let an empty report pass, so such a contract is held to all of its items, as it always was. New
+ * analyses cannot produce it: `validateAnalysisProposal` refuses an evidence contract with no required item.
  */
 export function requiredContractRequirements(
   contract: Array<{ description?: string; kind?: string; required?: boolean }> | undefined
 ): string[] {
-  return (contract ?? []).filter((item) => item.required !== false)
-    .map((item) => (item.description ?? item.kind ?? "").trim()).filter(Boolean);
+  const label = (item: { description?: string; kind?: string }) => (item.description ?? item.kind ?? "").trim();
+  const items = contract ?? [];
+  const required = items.filter((item) => item.required !== false);
+  return (required.length ? required : items).map(label).filter(Boolean);
 }
 
 export function validateMilestoneGateResult(

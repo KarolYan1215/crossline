@@ -1,5 +1,5 @@
 import {
-  MILESTONE_GATE_OUTPUT_SCHEMA, validateMilestoneGateResult,
+  MILESTONE_GATE_OUTPUT_SCHEMA, requiredContractRequirements, validateMilestoneGateResult,
   type MilestoneGateContext, type MilestoneGateResult
 } from "@crossline/core";
 import { readFileSync } from "node:fs";
@@ -49,6 +49,8 @@ export function buildMilestoneGateContext(store: CrosslineStore, workspaceId: st
   const relations = store.listMilestoneRelations(workspaceId)
     .filter((relation) => relation.fromMilestoneId === milestone.id && relation.status !== "archived");
   const milestonesById = new Map(store.listMilestones(workspaceId).map((item) => [item.id, item]));
+  const requiredSet = new Set(requiredContractRequirements(
+    (order.payload as { evidenceContract?: Array<{ description?: string; kind?: string; required?: boolean }> }).evidenceContract));
   const payload = order.payload as {
     evidenceContract?: Array<{ description?: string; kind?: string; required?: boolean }>;
     evidenceChecklist?: Array<{ id: string; prompt: string }>;
@@ -106,9 +108,12 @@ export function buildMilestoneGateContext(store: CrosslineStore, workspaceId: st
       },
       evidencePolicy: "tiered",
       evidenceClaims,
+      // The same helper the write path uses, so the Skill is told exactly the bar `applyMilestoneGate` will
+      // enforce — computing it twice let the two disagree on a legacy all-optional contract.
       evidenceContract: (payload.evidenceContract ?? [])
-        .map((item) => ({ requirement: item.description ?? item.kind ?? "", required: item.required !== false }))
-        .filter((item) => item.requirement),
+        .map((item) => (item.description ?? item.kind ?? "").trim())
+        .filter(Boolean)
+        .map((requirement) => ({ requirement, required: requiredSet.has(requirement) })),
       execution: {
         startedAt: execution?.startedAt ?? null,
         endedAt: execution?.endedAt ?? null,

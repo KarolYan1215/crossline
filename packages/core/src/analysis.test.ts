@@ -180,4 +180,8 @@ test("only required items are the bar for pass; a contract without the flag fail
     { description: "旧契约，没有 required 字段" }, { kind: "file" }
   ])).toEqual(["核心交付物", "旧契约，没有 required 字段", "file"]);
   expect(core.requiredContractRequirements(undefined)).toEqual([]);
+  // The shape older analyses wrote: everything explicitly optional. That must not shrink the bar to nothing.
+  expect(core.requiredContractRequirements([
+    { description: "旧契约一", required: false }, { description: "旧契约二", required: false }
+  ])).toEqual(["旧契约一", "旧契约二"]);
 });
