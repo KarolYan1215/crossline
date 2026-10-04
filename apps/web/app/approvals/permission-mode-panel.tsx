@@ -42,7 +42,6 @@ export function PermissionModePanel({ initialEnabled, initialCandidates }: {
   }, [enabled, eligibleKeys]);
 
   return <section ref={panelRef} className="permission-mode-panel" aria-label="默认批准">
-    <h2>Permission mode · 默认批准</h2>
     <p>默认关闭。开启后，下面符合条件的提案在本摘要持续前台可见累计 5 分钟、期间未拒绝，才由服务端批准。离线或后台暂停；高风险、目标约束和现实冲突仍须你明确决定。</p>
     <button type="button" onClick={async () => {
       const response = await fetch("/api/permission-mode", { method: "POST",

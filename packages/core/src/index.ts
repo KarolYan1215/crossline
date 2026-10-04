@@ -11,11 +11,21 @@ export * from "./flywheel-schema";
 export * from "./materials-schema";
 export * from "./milestone-gate-schema";
 export * from "./milestone-templates";
-export * from "./onboarding-schema";
+export * from "./milestone-plan";
+export * from "./onboarding-turn-schema";
+export * from "./profile-gaps";
+export * from "./source-kinds";
+export * from "./date-schema";
+export * from "./diligence-schema";
+export * from "./manualbook-schema";
+export * from "./activity-state";
 export * from "./plan-explainer-schema";
 export * from "./reality";
 export * from "./replay";
 export * from "./weekly-insight-schema";
+export * from "./structured-output";
+export * from "./text-hygiene";
+export * from "./rhythm";
 import type { EvidenceQuestionTemplate } from "./milestone-templates";
 export type EnergyLevel = "low" | "medium" | "high";
 
@@ -28,6 +38,8 @@ export type Estimate = {
   source: "identity_prior" | "llm_prior" | "personal_history" | "legacy_task" | "manual";
   observationCount: number;
   confidence: "low" | "medium" | "high";
+  /** Present when a model's guess was scaled by how this person's finished tasks compared with their estimates (see `calibrateEstimate`). */
+  calibration?: { factor: number; basedOn: number };
 };
 
 export type Evidence = {
@@ -65,7 +77,11 @@ export type SuccessCriterion = {
   measure:
     | { kind: "count"; unit: string; atLeast: number }
     | { kind: "artifact"; mustExist: string }
-    | { kind: "threshold"; unit: string; comparator: "gte" | "lte"; value: number }
+    /**
+     * `bareLine` is the value that only just reaches the outcome the person wants, worked out backwards from that outcome; `value` is the
+     * line actually set, with a margin beyond it. Absent on criteria written before this existed, and on the hand-edited ones.
+     */
+    | { kind: "threshold"; unit: string; comparator: "gte" | "lte"; value: number; bareLine?: number }
     | { kind: "judgement"; rubric: string; failsWhen: string };
 };
 
@@ -299,19 +315,6 @@ export function evidenceRequiredFor(workOrder: Pick<WorkOrder, "milestoneId">): 
   return Boolean(workOrder.milestoneId);
 }
 
-export function skipRecurringWorkOrder<T extends Pick<WorkOrder, "recurrence">>(workOrder: T, reason: string):
-  | BlockedResult
-  | { ok: true; workOrder: T & { state: WorkOrderState }; reason: string } {
-  if (!workOrder.recurrence) return { ok: false, blocker: { code: "NOT_RECURRING", message: "条目不是重复条目" } };
-  if (!reason.trim()) return { ok: false, blocker: { code: "SKIP_REASON_REQUIRED", message: "跳过重复条目必须填写原因" } };
-  return { ok: true, workOrder: { ...workOrder, state: "archived" as const }, reason: reason.trim() };
-}
-
-export function tombstoneWorkOrder<T extends object>(workOrder: T, reason: string):
-  T & { state: WorkOrderState; tombstone: { reason: string; createdAt: string } } {
-  return { ...workOrder, state: "archived", tombstone: { reason: reason.trim(), createdAt: new Date().toISOString() } };
-}
-
 /**
  * Every action this policy knows about, and the tier it gets.
  *
@@ -337,6 +340,13 @@ const APPROVAL_TIERS = {
   approve_milestone_relations: "batch",
   approve_plan_changes: "batch",
   write_focus_block: "batch",
+  // Dates read out of the person's own files, confirmed as one batch. Never automatic: a wrong date on a
+  // calendar is worse than a missing one, so the person sees every item with its quote first.
+  import_dated_items: "batch",
+  // Saving the full text of a page the model found: only from an open-access host on the short list in
+  // `openAccessVerdict`; any other page keeps its link and summary, and keeping its text is never permitted.
+  download_open_access: "automatic",
+  download_other: "never",
 
   // Reads. Listed rather than left to a default, because being a read is the reason, and a reason that
   // lives in a fall-through is a reason nobody can check.
@@ -348,27 +358,6 @@ export type ApprovalAction = keyof typeof APPROVAL_TIERS;
 export function requiredApproval(action: ApprovalAction): "automatic" | "batch" | "per_item" | "never" {
   // Fail closed. An action that is not in the table is not known to be safe.
   return APPROVAL_TIERS[action] ?? "per_item";
-}
-
-export function notificationForTransition(_from: string, _to: string, _entityId: string): {
-  entityId: string;
-  from: string;
-  to: string;
-  title: string;
-} | null {
-  if (_from === _to) return null;
-  const titles: Record<string, string> = {
-    blocked: "任务已阻塞",
-    completed: "任务已完成",
-    awaiting_approval: "任务等待审批",
-    failed: "任务执行失败"
-  };
-  return {
-    entityId: _entityId,
-    from: _from,
-    to: _to,
-    title: titles[_to] ?? "任务状态已更新"
-  };
 }
 
 export function budgetPolicy(_usedPercent: number): {

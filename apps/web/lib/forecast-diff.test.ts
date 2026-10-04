@@ -4,7 +4,7 @@ import { forecastDiff } from "./forecast-diff";
 
 const baseline: ForecastResult = { weeks: [{ week: 1, netMinutes: 700, reservedMinutes: 105, usableMinutes: 595 }],
   goals: [{ milestoneId: "a", title: "原目标", p50Day: "2026-09-20", p85Day: "2026-09-25",
-    suggestedTargetDay: "2026-09-25", confirmedDeadline: null, bottleneck: null,
+    suggestedTargetDay: "2026-09-25", confirmedDeadline: null, bottleneck: null, slackDays: null,
     p50Minutes: 100, p85Minutes: 200 }] };
 
 test("a new goal and changed real capacity show differences against the last viewed forecast", () => {

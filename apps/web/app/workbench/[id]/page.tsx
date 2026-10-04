@@ -3,6 +3,7 @@ import { SubpageShell } from "../../subpage-shell";
 import { TaskDetailView } from "../../task-detail-view";
 import { loadTaskDetail } from "../../../lib/task-detail";
 import { requireSessionContext } from "../../../lib/access-guard";
+import { ManualbookView } from "../../manualbook-view";
 
 export const dynamic = "force-dynamic";
 
@@ -16,8 +17,9 @@ export default async function WorkOrderDetailPage({ params }: { params: Promise<
   const { id } = await params;
   const detail = loadTaskDetail(ctx, id);
   if (!detail) notFound();
-  return <SubpageShell eyebrow="WORKBENCH / TASK" title={detail.intent}
+  return <SubpageShell active="任务" eyebrow="WORKBENCH / TASK" title={detail.intent}
     description={`${detail.identityLabel}${detail.milestone ? ` · 所属里程碑：${detail.milestone.title}` : ""}`}>
+    <ManualbookView workOrderId={detail.id} building={detail.state === "preparing"} />
     <TaskDetailView detail={detail} />
   </SubpageShell>;
 }

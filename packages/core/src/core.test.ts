@@ -4,10 +4,7 @@ import {
   advanceWorkOrder,
   budgetPolicy,
   evidenceRequiredFor,
-  notificationForTransition,
   requiredApproval,
-  skipRecurringWorkOrder,
-  tombstoneWorkOrder,
   validateCommandEnvelope,
   type WorkOrder
 } from "./index";
@@ -74,19 +71,6 @@ describe("work order domain rules", () => {
     expect(evidenceRequiredFor({ ...workOrder(), milestoneId: "" })).toBe(false);
   });
 
-  test("skipping a recurring commitment requires a written reason", () => {
-    const recurring = { ...workOrder(), recurrence: { fullMinutes: 60, minimumMinutes: 20 } };
-    expect(skipRecurringWorkOrder(recurring, "")).toMatchObject({ ok: false, blocker: { code: "SKIP_REASON_REQUIRED" } });
-    expect(skipRecurringWorkOrder(workOrder(), "any")).toMatchObject({ ok: false, blocker: { code: "NOT_RECURRING" } });
-    expect(skipRecurringWorkOrder(recurring, " 今天只做最低档 ")).toMatchObject({ ok: true, reason: "今天只做最低档" });
-  });
-
-  test("delete first creates a recoverable tombstone", () => {
-    const result = tombstoneWorkOrder(workOrder(), "duplicate");
-    expect(result.state).toBe("archived");
-    expect(result.tombstone.reason).toBe("duplicate");
-  });
-
   test("external communication always needs per-item approval", () => {
     expect(requiredApproval("send_outreach_email")).toBe("per_item");
     expect(requiredApproval("publish_content")).toBe("per_item");
@@ -96,16 +80,6 @@ describe("work order domain rules", () => {
     // site quietly became the weakest tier in the function everything else is told to defer to.
     expect(requiredApproval("publish_contents" as never)).toBe("per_item");
     expect(requiredApproval("" as never)).toBe("per_item");
-  });
-
-  test("notification is emitted only for a real state transition", () => {
-    expect(notificationForTransition("running", "running", "task-1")).toBeNull();
-    expect(notificationForTransition("running", "blocked", "task-1")).toEqual({
-      entityId: "task-1",
-      from: "running",
-      to: "blocked",
-      title: "任务已阻塞"
-    });
   });
 
   test("budget policy pauses low-value work at 85 percent and gates core work at 100 percent", () => {

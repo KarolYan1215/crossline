@@ -1,8 +1,13 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { cleanAnswerStrings } from "@crossline/core";
 import type { CodexRpcBoundary } from "./index";
+import { routeForSkill, tierForSkill, type ModelRoute, type SpendMode } from "./model-policy";
+import { createUsageCollector, currentSpendMode, reportUsage, type UsageCollector } from "./usage";
 
 export type AnalysisAudit = { threadId?: string; turnId?: string;
+  /** How many times a turn went silent for so long it was interrupted and sent again. Absent means none did. */
+  stalls?: number;
   /** How many times the validator sent the answer back to be fixed. Absent means it passed first try. */
   repairs?: number };
 export type SkillRunResult<T> = { ok: true; output: T; audit: AnalysisAudit }
@@ -27,6 +32,8 @@ export type SkillRunOptions<T> = {
   onAudit: (audit: AnalysisAudit) => void;
   signal?: AbortSignal;
   timeoutMs?: number;
+  /** Silence, in ms, after which a turn is treated as hung and sent again. Defaults to 20 minutes (`CROSSLINE_SKILL_IDLE_MINUTES`). */
+  idleMs?: number;
 };
 const record = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
@@ -52,14 +59,76 @@ const identifier = (value: unknown): value is string => typeof value === "string
 function fail(code: string): never { throw new Error(code); }
 
 type NativeSkill = { path: string; enabled: boolean };
-let skillQueue: Promise<void> = Promise.resolve();
-
-// ponytail: one process-wide lock is enough while Crossline owns one CODEX_HOME; key by home if that changes.
-function serializeSkillRun<T>(run: () => Promise<T>): Promise<T> {
-  const previous = skillQueue;
+/**
+ * Runs wait in a lane per model tier, not in one line for everything. A ten-minute interview turn used to hold
+ * a one-second plan explanation behind it; now the cheap lane moves while the heavy one works. Two runs of the
+ * same Skill still never overlap, because a Skill belongs to exactly one tier.
+ */
+const skillLanes = new Map<string, Promise<void>>();
+function serializeSkillRun<T>(skillName: string, run: () => Promise<T>): Promise<T> {
+  const lane = tierForSkill(skillName) ?? "default";
+  const previous = skillLanes.get(lane) ?? Promise.resolve();
   let release = () => {};
-  skillQueue = new Promise<void>((resolve) => { release = resolve; });
+  skillLanes.set(lane, new Promise<void>((resolve) => { release = resolve; }));
   return previous.then(run).finally(release);
+}
+
+/**
+ * Switching a Skill on or off rewrites the runtime's one config file, so two lanes doing it at once could write
+ * over each other. The switch is brief; only it is held in a single line, never the run in between.
+ */
+let configChain: Promise<void> = Promise.resolve();
+function underConfigLock<T>(work: () => Promise<T>): Promise<T> {
+  const previous = configChain;
+  let release = () => {};
+  configChain = new Promise<void>((resolve) => { release = resolve; });
+  return previous.then(work).finally(release);
+}
+
+/** What one run carries through its turns: the route it was given, and the meter. */
+type RunContext = { route: ModelRoute | undefined; spendMode: SpendMode; usage: UsageCollector };
+const DEFAULT_MAX_REPAIRS = 2;
+/** No event of any kind for this long means a hung turn. Generous: slow work still produces events, silence does not. */
+const DEFAULT_IDLE_MS = 20 * 60_000;
+const MAX_STALL_RETRIES = 2;
+
+/**
+ * Everything the two entry points share: waiting in the right lane, switching the Skill on, running, switching
+ * it back off, and reporting what the run used.
+ */
+async function executeSkill<T>(client: CodexRpcBoundary, options: { skillName: string; cwd: string },
+  body: (context: RunContext) => Promise<SkillRunResult<T>>): Promise<SkillRunResult<T>> {
+  return serializeSkillRun(options.skillName, async () => {
+    const startedAt = Date.now();
+    const spendMode = await currentSpendMode();
+    const context: RunContext = { route: routeForSkill(options.skillName, process.env, spendMode), spendMode, usage: createUsageCollector() };
+    let skill: NativeSkill | undefined;
+    let result: SkillRunResult<T>;
+    try {
+      skill = await underConfigLock(async () => {
+        const found = await findNativeSkill(client, options.skillName, options.cwd);
+        if (!found.enabled) await setNativeSkill(client, found.path, true);
+        return found;
+      });
+      result = await body(context);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "";
+      result = skillBlocker<T>(/^SKILL_(LIST_FAILED|MISSING|CONFIG_FAILED)$/.test(errorMessage) ? errorMessage : "SKILL_CONFIG_FAILED");
+    }
+    if (skill && !skill.enabled) {
+      const path = skill.path;
+      try { await underConfigLock(() => setNativeSkill(client, path, false)); }
+      catch { result = skillBlocker<T>("SKILL_CONFIG_FAILED", result.audit); }
+    }
+    reportUsage({
+      skillName: options.skillName, ...(tierForSkill(options.skillName) ? { tier: tierForSkill(options.skillName)! } : {}),
+      ...(context.route ? { model: context.route.model, ...(context.route.effort ? { effort: context.route.effort } : {}) } : {}),
+      spendMode, ...(result.audit.threadId ? { threadId: result.audit.threadId } : {}), ok: result.ok,
+      ...(result.ok ? {} : { errorCode: result.blocker.code }), repairs: result.audit.repairs ?? 0, turns: context.usage.turns(),
+      durationMs: Date.now() - startedAt, at: new Date(startedAt).toISOString(), turnSeconds: context.usage.turnSeconds(), ...context.usage.total()
+    });
+    return result;
+  });
 }
 
 async function findNativeSkill(client: CodexRpcBoundary, name: string, cwd: string): Promise<NativeSkill> {
@@ -106,358 +175,338 @@ export type ContinueTurnOptions<T> = {
   onAudit: (audit: AnalysisAudit) => void;
   signal?: AbortSignal;
   timeoutMs?: number;
+  idleMs?: number;
 };
 
 /**
- * One more turn on a thread a previous `runCodexSkill` call already started — the conversational
- * follow-up path. Deliberately a separate function rather than a flag on `runSkillTurn`: that function's
- * thread/start block, its retry-on-unknown-config-field loop and its notification handler are all
- * threaded through one closure over a `threadId` it derives itself, and splicing an external one through
- * the same path risked the four Skills already proven against it. This duplicates the turn-running half
- * (auth check, the tool guard, the repair loop, the same error vocabulary) rather than touch that.
+ * The runtime keeps a conversation only while it runs. After a restart, a stored thread id answers
+ * `thread not found`, which is a JSON-RPC error object rather than an Error, so it never matched the code
+ * pattern and surfaced as a generic failure the person could not act on.
+ */
+function isThreadLost(error: unknown): boolean {
+  const text = error && typeof error === "object" && "message" in error ? String((error as { message?: unknown }).message) : "";
+  return /thread not found/i.test(text);
+}
+
+type Detailed = Error & { detail?: string };
+const withDetail = (error: Error, detail: string | undefined): Error => {
+  if (detail) (error as Detailed).detail = detail;
+  return error;
+};
+
+/**
+ * The caller's cancellation, plus a time limit that restarts for every step instead of running once for the whole run.
+ *
+ * It used to be one deadline from the first call to the last. A turn that wrote a long answer used up most of it, so the repair
+ * that the validator then asked for had a few seconds left and a run that was nearly right timed out with nothing to show. Each RPC
+ * and each turn now gets the full `timeoutMs` of its own; what bounds the whole run is the number of repairs, which is small.
+ */
+function openScope(client: CodexRpcBoundary, options: { timeoutMs?: number; signal?: AbortSignal }) {
+  const timeoutMs = options.timeoutMs ?? 120_000;
+  let stopWaiting = () => {};
+  const canceled = new Promise<never>((_, reject) => {
+    const abort = () => reject(new Error("SKILL_CANCELED"));
+    const signal = options.signal;
+    if (!signal) return;
+    if (signal.aborted) abort(); else signal.addEventListener("abort", abort, { once: true });
+    stopWaiting = () => signal.removeEventListener("abort", abort);
+  });
+  // Never an unhandled rejection if nothing is racing it at the moment it fires.
+  canceled.catch(() => {});
+  /** A fresh window: rejects with `SKILL_TIMEOUT` after `timeoutMs` unless cleared. */
+  const window = () => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const promise = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("SKILL_TIMEOUT")), timeoutMs); });
+    promise.catch(() => {});
+    return { promise, clear: () => { if (timer) clearTimeout(timer); } };
+  };
+  return {
+    canceled,
+    window,
+    rpc: async (method: string, params: unknown): Promise<unknown> => {
+      const limit = window();
+      try { return await Promise.race([client.request(method, params), canceled, limit.promise]); }
+      finally { limit.clear(); }
+    },
+    dispose: () => stopWaiting()
+  };
+}
+type Scope = ReturnType<typeof openScope>;
+
+async function requireLogin(scope: Scope): Promise<void> {
+  const account = record(await scope.rpc("account/read", { refreshToken: false }));
+  if (!record(account?.account)) fail("SKILL_UNAUTHENTICATED");
+}
+
+/**
+ * Starts the one thread a fresh run uses, with everything that makes it safe to run unattended: read-only sandbox, the
+ * `untrusted` approval policy, no tools but the one granted, no instruction files, no MCP servers. Returns its id.
+ */
+async function startIsolatedThread<T>(scope: Scope, options: SkillRunOptions<T>, context: RunContext): Promise<string> {
+  const runtimeConfig = record(record(await scope.rpc("config/read", { includeLayers: false }))?.config);
+  if (!runtimeConfig) fail("SKILL_PROTOCOL_INVALID");
+  const mcp = record(runtimeConfig.mcp_servers) ?? {};
+  const config: Record<string, unknown> = {
+    // "live", not "enabled": this runtime's `web_search` takes `disabled | cached | live`, and the
+    // wrong variant made the whole thread/start fail — so the one Skill granted the web could never
+    // start at all. A scout that must cite what it read needs `live` rather than `cached`.
+    web_search: options.allowWebSearch ? "live" : "disabled", project_doc_max_bytes: 0, include_environment_context: false,
+    // Cross-run memory, on by explicit user decision: every call used to be a clean-slate context for
+    // reproducibility and audit, which is why this pair was `false`. Turning it on means the model's
+    // own accumulated memory can now influence an answer — the same input is no longer guaranteed to
+    // produce the same output — and that memory itself lives in Codex's own CODEX_HOME, not this app's
+    // SQLite ledger, so it is outside `pnpm export`/`backup-crossline.ps1`. See the Connectors page for
+    // the same disclosure surfaced where a person would actually see it.
+    "memories.use_memories": true, "memories.generate_memories": true,
+    "tools.update_plan.enabled": false, "tools.experimental_request_user_input.enabled": false,
+    "features.plugins": true, "features.memories": true,
+    ...Object.fromEntries(["shell_tool", "multi_agent", "multi_agent_v2", "apps", "hooks", "codex_hooks", "plugin_hooks", "web_search", "standalone_web_search", "image_generation", "view_image", "request_permissions_tool", "tool_suggest", "token_budget", "current_time_reminder", "sleep_tool", "send_message_to_user_async", "js_repl", "code_mode", "deferred_executor"]
+      .map((key) => [`features.${key}`, Boolean(options.allowWebSearch) && (key === "web_search" || key === "standalone_web_search")])),
+    ...Object.fromEntries(Object.keys(mcp).map((key) => [`mcp_servers.${key}.enabled`, false]))
+  };
+  const threadParams = {
+    environments: [], dynamicTools: [], runtimeWorkspaceRoots: [], sandbox: "read-only", approvalPolicy: "untrusted", approvalsReviewer: "user",
+    ephemeral: false, experimentalRawEvents: false,
+    developerInstructions: options.developerInstructions,
+    // Left unset for a Skill with no route, so an unlisted job still runs on the runtime's default.
+    ...(context.route ? { model: context.route.model } : {})
+  };
+  // The flag list is written against the newest runtime, but `--strict-config` rejects the whole call
+  // over one field an older runtime never defined. A field this runtime does not know names a feature
+  // this runtime does not have, so dropping it removes no protection; the real guarantees are the
+  // read-only sandbox, the untrusted approval policy and the tool-call guard. Any other error
+  // still fails the analysis.
+  let started: Record<string, unknown> | undefined;
+  for (;;) {
+    try { started = record(await scope.rpc("thread/start", { ...threadParams, config })); break; }
+    catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      const field = /unknown configuration field `([^`]+)`/.exec(message)?.[1];
+      const dropped = field ? Object.keys(config).filter((key) => key === field || key.startsWith(`${field}.`)) : [];
+      if (!dropped.length) {
+        // A field this runtime does not know can be dropped; a value it rejects cannot, because
+        // dropping it would silently turn off the thing that was asked for. This used to surface as
+        // a bare SKILL_RUNTIME_FAILED, which hid a one-word config mismatch behind a generic failure
+        // for as long as nobody instrumented the call. The runtime's own text is config diagnostics,
+        // not model output, so it is safe to carry.
+        if (/configuration|unknown variant/i.test(message)) throw withDetail(new Error("SKILL_CONFIG_REJECTED"), message.slice(0, 400));
+        throw error;
+      }
+      for (const key of dropped) delete config[key];
+    }
+  }
+  const threadId = record(started?.thread)?.id;
+  if (!identifier(threadId)) fail("SKILL_PROTOCOL_INVALID");
+  if (started?.approvalPolicy !== "untrusted" || record(started.sandbox)?.type !== "readOnly" || !Array.isArray(started.instructionSources) || started.instructionSources.length) fail("SKILL_PERMISSION_DENIED");
+  return threadId;
+}
+
+/**
+ * The structured-output half of a run, shared by a fresh run and a continued conversation: send a prompt, take the model's
+ * final message, parse it, hand it to the caller's validator — and when anything in that chain says no, send the rejection back
+ * on the same thread and ask again, at most twice.
+ *
+ * What counts as a rejection is deliberately wide. The validator throwing is the obvious case, but an answer that is not
+ * JSON at all (cut off, or repeating itself until the limit — the degeneration this repair loop exists for) is one too, and used
+ * to end the run at once with no second chance. A timeout, a spent quota, a refusal or a forbidden tool call still ends it,
+ * because asking again cannot fix any of them. `audit.repairs` records how often it happened: a schema that needs repair every
+ * time is a schema problem, not a cost of doing business.
+ */
+async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, context: RunContext, audit: AnalysisAudit, run: {
+  skillName: string; threadId: string; outputSchema: unknown; allowedItemTypes: string[]; firstPrompt: string;
+  validate: (output: unknown) => T; onAudit: (audit: AnalysisAudit) => void; idleMs?: number;
+}): Promise<T> {
+  audit.threadId = run.threadId;
+  let finalText: string | undefined;
+  // The last time the runtime said anything at all about this thread. A turn with no event for a long while is not slow, it is hung:
+  // a real run sat for over an hour with the runtime logging nothing, and only the wall-clock limit ended it.
+  let lastEventAt = Date.now();
+  const envIdle = Number(process.env.CROSSLINE_SKILL_IDLE_MINUTES);
+  const idleMs = run.idleMs ?? (envIdle > 0 ? envIdle * 60_000 : DEFAULT_IDLE_MS);
+  // One subscription, re-armed per turn: a repair is another turn on the same thread, so the handler stays put and each turn
+  // hands it a fresh pair of callbacks to settle.
+  let settle: { resolve: (text: string | undefined) => void; reject: (error: Error) => void } | undefined;
+  const unsubscribe = client.onNotification((message) => {
+    if (message.method === "crossline/runtimeDisconnected") return settle?.reject(new Error("SKILL_RUNTIME_EXITED"));
+    const params = record(message.params);
+    if (!params || params.threadId !== audit.threadId) return;
+    lastEventAt = Date.now();
+    const turn = record(params.turn);
+    const turnId = params.turnId ?? turn?.id;
+    // Events can precede the turn/start response; capture only this isolated thread.
+    if (audit.turnId && turnId !== audit.turnId) return;
+    if (message.method === "thread/tokenUsage/updated") { context.usage.note(params); return; }
+    if (message.method === "item/completed" || message.method === "item/started") {
+      const item = record(params.item);
+      if (item?.type === "agentMessage" && message.method === "item/completed" && (item.phase === "final_answer" || item.phase === null)) {
+        if (typeof item.text !== "string" || item.text.length > 100_000) settle?.reject(new Error("SKILL_SCHEMA_INVALID"));
+        else finalText = item.text;
+      } else if (item && !run.allowedItemTypes.includes(String(item.type))) settle?.reject(new Error("SKILL_TOOL_FORBIDDEN"));
+    }
+    if (message.method === "turn/completed") {
+      if (!identifier(turn?.id)) return settle?.reject(new Error("SKILL_PROTOCOL_INVALID"));
+      if (turn.status === "completed") return settle?.resolve(finalText);
+      const error = record(turn.error);
+      const info = error?.codexErrorInfo;
+      // A spent quota is neither a refusal nor a bug, and calling it one would misreport the only thing the user can act on:
+      // waiting, or buying more credits. A turn the runtime rejected outright is not a refusal either — calling it one hid a
+      // malformed request behind a word that means the model declined to answer.
+      settle?.reject(withDetail(new Error(turn.status === "interrupted" ? "SKILL_CANCELED"
+        : info === "unauthorized" ? "SKILL_UNAUTHENTICATED"
+        : info === "sandboxError" ? "SKILL_PERMISSION_DENIED"
+        : info === "usageLimitExceeded" ? "SKILL_USAGE_LIMIT"
+        : "SKILL_TURN_FAILED"), typeof error?.message === "string" ? error.message.slice(0, 400) : undefined));
+    }
+  });
+
+  /** One turn on the thread, from prompt to the model's final text. */
+  const runTurn = async (text: string): Promise<string> => {
+    finalText = undefined;
+    lastEventAt = Date.now();
+    // Cleared so the handler's "events can precede the turn/start response" guard arms again.
+    delete audit.turnId;
+    const completed = new Promise<string | undefined>((resolve, reject) => { settle = { resolve, reject }; });
+    // Attach a rejection handler immediately, including events that beat the RPC response.
+    void completed.catch(() => {});
+    const route = context.route;
+    const turn = record(record(await scope.rpc("turn/start", {
+      threadId: run.threadId, environments: [], input: [{ type: "text", text, text_elements: [] }], outputSchema: run.outputSchema,
+      // Re-stated every turn: a continued turn inherits the thread's model unless told otherwise.
+      ...(route ? { model: route.model, ...(route.effort ? { effort: route.effort } : {}) } : {})
+    }))?.turn);
+    if (!identifier(turn?.id)) fail("SKILL_PROTOCOL_INVALID");
+    audit.turnId = turn.id;
+    run.onAudit({ ...audit });
+    // This turn's own window: the time the previous one took is not held against it.
+    const turnStarted = Date.now();
+    const limit = scope.window();
+    // Silence watchdog, polled often relative to the limit and cleared with the turn.
+    let watch: ReturnType<typeof setInterval> | undefined;
+    const silent = new Promise<never>((_, reject) => {
+      watch = setInterval(() => { if (Date.now() - lastEventAt > idleMs) reject(new Error("SKILL_STALLED")); },
+        Math.max(20, Math.min(30_000, Math.floor(idleMs / 4))));
+    });
+    silent.catch(() => {});
+    let answer: string | undefined;
+    try { answer = await Promise.race([completed, scope.canceled, limit.promise, silent]); }
+    finally { limit.clear(); if (watch) clearInterval(watch); context.usage.noteTurnSeconds((Date.now() - turnStarted) / 1000); }
+    recordAnswer(run.skillName, answer);
+    if (!answer) return fail("SKILL_REFUSED");
+    return answer;
+  };
+
+  /** Models routinely wrap JSON in a ```json fence even when told to return JSON only: a transport habit, not invented content. */
+  const parse = (answer: string): unknown => {
+    try { return cleanAnswerStrings(JSON.parse(answer.trim().replace(/^```(?:json)?\s*\n?/, "").replace(/\n?```$/, ""))); }
+    catch { throw withDetail(new Error("SKILL_SCHEMA_INVALID"), "the answer was not valid JSON (cut off, or it repeated itself); return the complete JSON object once"); }
+  };
+
+  /** A silent turn is interrupted and the same prompt sent again, a couple of times; every other failure ends the run as before. */
+  const runTurnOrRetryStall = async (prompt: string): Promise<string> => {
+    for (let stalls = 0; ; stalls += 1) {
+      try { return await runTurn(prompt); }
+      catch (error) {
+        if (!(error instanceof Error) || error.message !== "SKILL_STALLED" || stalls >= MAX_STALL_RETRIES) throw error;
+        if (audit.threadId && audit.turnId) void client.request("turn/interrupt", { threadId: audit.threadId, turnId: audit.turnId }).catch(() => {});
+        audit.stalls = (audit.stalls ?? 0) + 1;
+        run.onAudit({ ...audit });
+      }
+    }
+  };
+
+  const maxRepairs = context.route?.maxRepairs ?? DEFAULT_MAX_REPAIRS;
+  let rejection: Error | undefined;
+  try {
+    for (let attempt = 0; ; attempt += 1) {
+      const answer = await runTurnOrRetryStall(attempt === 0 ? run.firstPrompt
+        : `Your previous answer was rejected by the receiving layer: ${rejection?.message}`
+          + `${(rejection as Detailed | undefined)?.detail ? ` — ${(rejection as Detailed).detail}` : ""}\n\n`
+          + "Return the corrected JSON object in full. Change only what the rejection names; do not "
+          + "explain, apologise, or add commentary outside the JSON.");
+      try {
+        return run.validate(parse(answer));
+      } catch (error) {
+        rejection = error instanceof Error ? error : new Error(String(error));
+        // A Skill that stopped and said why (`*_BLOCKED`: it was missing an input it was told not to guess) has not made a
+        // mistake to fix. Sending that back as a "rejection" coaxes it into dropping the blocker and inventing what was
+        // missing — which a real run showed it doing, twice out of two, for the capture 「整理一下」.
+        if (attempt >= maxRepairs || /_BLOCKED$/.test(rejection.message)) throw rejection;
+        audit.repairs = attempt + 1;
+        run.onAudit({ ...audit });
+      }
+    }
+  } finally { unsubscribe(); }
+}
+
+/** Turns whatever ended a run into the blocker the person sees, and stops the turn if one is still going. */
+function failureResult<T>(client: CodexRpcBoundary, error: unknown, audit: AnalysisAudit): SkillRunResult<T> {
+  if (audit.threadId && audit.turnId) void client.request("turn/interrupt", { threadId: audit.threadId, turnId: audit.turnId }).catch(() => {});
+  const message = error instanceof Error ? error.message : "";
+  const code = /^[A-Z][A-Z_]{2,}$/.test(message) ? message
+    : message === "CODEX_APP_SERVER_EXITED" || message === "CODEX_APP_SERVER_STOPPED" ? "SKILL_RUNTIME_EXITED"
+    : isThreadLost(error) ? "SKILL_THREAD_LOST" : "SKILL_RUNTIME_FAILED";
+  // Each message says what the person can actually do; no raw model or auth text ever reaches it.
+  const advice: Record<string, string> = {
+    SKILL_USAGE_LIMIT: "Codex 用量额度已用完；额度恢复后可重试。",
+    SKILL_UNAUTHENTICATED: "Codex 未登录或登录已失效；在连接页重新登录后可重试。",
+    SKILL_CANCELED: "已取消。",
+    SKILL_TIMEOUT: "运行超时，可重试。",
+    SKILL_STALLED: "Codex 长时间没有任何输出，已中断重发仍无响应；稍后重试。",
+    SKILL_RUNTIME_EXITED: "Codex 运行时已退出；恢复后可重试。",
+    SKILL_THREAD_LOST: "Codex 里这段对话已经不存在（运行时重启过）；需要开一段新的。"
+  };
+  // A caller's validator may attach `detail` when the Skill itself explained the refusal; that text is the only thing the
+  // person can act on, so it beats the generic fallback.
+  const detail = (error as Detailed | undefined)?.detail;
+  return { ok: false, blocker: { code, message: advice[code] ?? detail ?? "运行未完成；请检查阻塞原因。" }, audit };
+}
+
+/**
+ * One more turn on a thread a previous `runCodexSkill` call already started — the conversational follow-up path. There is no
+ * thread to start, so no instructions, web grant or input preparation: those only ever apply at `thread/start`.
  */
 export function continueSkillTurn<T>(client: CodexRpcBoundary, threadId: string, message: string,
   options: ContinueTurnOptions<T>): Promise<SkillRunResult<T>> {
   if (options.signal?.aborted) return Promise.resolve({ ok: false, blocker: { code: "SKILL_CANCELED", message: "已取消；未开始运行。" }, audit: {} });
-  return serializeSkillRun(async () => {
-    let skill: NativeSkill | undefined;
-    let result: SkillRunResult<T>;
+  return executeSkill(client, options, async (context): Promise<SkillRunResult<T>> => {
+    const audit: AnalysisAudit = { threadId };
+    const scope = openScope(client, options);
     try {
-      skill = await findNativeSkill(client, options.skillName, options.cwd);
-      if (!skill.enabled) await setNativeSkill(client, skill.path, true);
-      result = await runContinuedTurn(client, threadId, message, options);
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "";
-      result = skillBlocker<T>(/^SKILL_(LIST_FAILED|MISSING|CONFIG_FAILED)$/.test(errorMessage) ? errorMessage : "SKILL_CONFIG_FAILED");
-    }
-    if (skill && !skill.enabled) {
-      try { await setNativeSkill(client, skill.path, false); }
-      catch { return skillBlocker<T>("SKILL_CONFIG_FAILED", result.audit); }
-    }
-    return result;
+      await requireLogin(scope);
+      const output = await runTurnsUntilValid(client, scope, context, audit, {
+        skillName: options.skillName, threadId, outputSchema: options.outputSchema, allowedItemTypes: ["agentMessage", "reasoning", "userMessage"],
+        firstPrompt: message, validate: options.validateOutput, onAudit: options.onAudit, ...(options.idleMs ? { idleMs: options.idleMs } : {})
+      });
+      return { ok: true, output, audit };
+    } catch (error) { return failureResult<T>(client, error, audit); }
+    finally { scope.dispose(); }
   });
-}
-
-async function runContinuedTurn<T>(client: CodexRpcBoundary, threadId: string, message: string,
-  options: ContinueTurnOptions<T>): Promise<SkillRunResult<T>> {
-  const audit: AnalysisAudit = { threadId };
-  const allowedItemTypes = ["agentMessage", "reasoning", "userMessage"];
-  const signal = AbortSignal.any([AbortSignal.timeout(options.timeoutMs ?? 120_000), ...(options.signal ? [options.signal] : [])]);
-  let unsubscribe = () => {};
-  let stopWaiting = () => {};
-  let finalText: string | undefined;
-  try {
-    const canceled = new Promise<never>((_, reject) => {
-      const abort = () => reject(new Error(options.signal?.aborted ? "SKILL_CANCELED" : "SKILL_TIMEOUT"));
-      if (signal.aborted) abort(); else signal.addEventListener("abort", abort, { once: true });
-      stopWaiting = () => signal.removeEventListener("abort", abort);
-    });
-    const rpc = (method: string, params: unknown) => Promise.race([client.request(method, params), canceled]);
-    const account = record(await rpc("account/read", { refreshToken: false }));
-    if (!record(account?.account)) fail("SKILL_UNAUTHENTICATED");
-
-    let settle: { resolve: (text: string | undefined) => void; reject: (error: Error) => void } | undefined;
-    unsubscribe = client.onNotification((notification) => {
-      if (notification.method === "crossline/runtimeDisconnected") return settle?.reject(new Error("SKILL_RUNTIME_EXITED"));
-      const params = record(notification.params);
-      if (!params || params.threadId !== audit.threadId) return;
-      const turn = record(params.turn);
-      const turnId = params.turnId ?? turn?.id;
-      if (audit.turnId && turnId !== audit.turnId) return;
-      if (notification.method === "item/completed" || notification.method === "item/started") {
-        const item = record(params.item);
-        if (item?.type === "agentMessage" && notification.method === "item/completed" && (item.phase === "final_answer" || item.phase === null)) {
-          if (typeof item.text !== "string" || item.text.length > 100_000) settle?.reject(new Error("SKILL_SCHEMA_INVALID"));
-          else finalText = item.text;
-        } else if (item && !allowedItemTypes.includes(String(item.type))) settle?.reject(new Error("SKILL_TOOL_FORBIDDEN"));
-      }
-      if (notification.method === "turn/completed") {
-        if (!identifier(turn?.id)) return settle?.reject(new Error("SKILL_PROTOCOL_INVALID"));
-        if (turn.status === "completed") settle?.resolve(finalText);
-        else {
-          const error = record(turn.error);
-          const info = error?.codexErrorInfo;
-          const failure = new Error(turn.status === "interrupted" ? "SKILL_CANCELED"
-            : info === "unauthorized" ? "SKILL_UNAUTHENTICATED"
-            : info === "sandboxError" ? "SKILL_PERMISSION_DENIED"
-            : info === "usageLimitExceeded" ? "SKILL_USAGE_LIMIT"
-            : "SKILL_TURN_FAILED");
-          if (typeof error?.message === "string") (failure as Error & { detail?: string }).detail = error.message.slice(0, 400);
-          settle?.reject(failure);
-        }
-      }
-    });
-
-    const runTurn = async (text: string): Promise<unknown> => {
-      finalText = undefined;
-      delete audit.turnId;
-      const completed = new Promise<string | undefined>((resolve, reject) => { settle = { resolve, reject }; });
-      void completed.catch(() => {});
-      const turn = record(record(await rpc("turn/start", {
-        threadId, environments: [], input: [{ type: "text", text, text_elements: [] }], outputSchema: options.outputSchema
-      }))?.turn);
-      if (!identifier(turn?.id)) fail("SKILL_PROTOCOL_INVALID");
-      audit.turnId = turn.id;
-      options.onAudit({ ...audit });
-      const answer = await Promise.race([completed, canceled]);
-      recordAnswer(options.skillName, answer);
-      if (!answer) return fail("SKILL_REFUSED");
-      const unfenced = answer.trim().replace(/^```(?:json)?\s*\n?/, "").replace(/\n?```$/, "");
-      try { return JSON.parse(unfenced); } catch { return fail("SKILL_SCHEMA_INVALID"); }
-    };
-
-    const MAX_REPAIRS = 2;
-    let rejection: Error | undefined;
-    for (let attempt = 0; ; attempt += 1) {
-      const output = await runTurn(attempt === 0 ? message
-        : `Your previous answer was rejected by the receiving layer: ${rejection?.message}`
-          + `${(rejection as Error & { detail?: string } | undefined)?.detail ? ` — ${(rejection as Error & { detail?: string }).detail}` : ""}\n\n`
-          + "Return the corrected JSON object in full. Change only what the rejection names; do not "
-          + "explain, apologise, or add commentary outside the JSON.");
-      try {
-        return { ok: true, output: options.validateOutput(output), audit };
-      } catch (error) {
-        rejection = error instanceof Error ? error : new Error(String(error));
-        if (attempt >= MAX_REPAIRS) throw rejection;
-        audit.repairs = (audit.repairs ?? 0) + 1;
-        options.onAudit({ ...audit });
-      }
-    }
-  } catch (error) {
-    if (audit.threadId && audit.turnId) void client.request("turn/interrupt", { threadId: audit.threadId, turnId: audit.turnId }).catch(() => {});
-    const message2 = error instanceof Error ? error.message : "";
-    const code = /^[A-Z][A-Z_]{2,}$/.test(message2) ? message2
-      : message2 === "CODEX_APP_SERVER_EXITED" || message2 === "CODEX_APP_SERVER_STOPPED" ? "SKILL_RUNTIME_EXITED" : "SKILL_RUNTIME_FAILED";
-    const advice: Record<string, string> = {
-      SKILL_USAGE_LIMIT: "Codex 用量额度已用完；额度恢复后可重试。",
-      SKILL_UNAUTHENTICATED: "Codex 未登录或登录已失效；在连接页重新登录后可重试。",
-      SKILL_CANCELED: "已取消。",
-      SKILL_TIMEOUT: "运行超时，可重试。",
-      SKILL_RUNTIME_EXITED: "Codex 运行时已退出；恢复后可重试。"
-    };
-    const detail = (error as Error & { detail?: string } | undefined)?.detail;
-    return { ok: false, blocker: { code, message: advice[code] ?? detail ?? "运行未完成；请检查阻塞原因。" }, audit };
-  } finally { unsubscribe(); stopWaiting(); }
 }
 
 export function runCodexSkill<T>(client: CodexRpcBoundary, input: unknown, options: SkillRunOptions<T>): Promise<SkillRunResult<T>> {
   if (options.signal?.aborted) return Promise.resolve({ ok: false, blocker: { code: "SKILL_CANCELED", message: "已取消；未开始运行。" }, audit: {} });
-  return serializeSkillRun(async () => {
-    let skill: NativeSkill | undefined;
-    let result: SkillRunResult<T>;
-    try {
-      skill = await findNativeSkill(client, options.skillName, options.cwd);
-      if (!skill.enabled) await setNativeSkill(client, skill.path, true);
-      result = await runSkillTurn(client, input, options);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "";
-      result = skillBlocker<T>(/^SKILL_(LIST_FAILED|MISSING|CONFIG_FAILED)$/.test(message) ? message : "SKILL_CONFIG_FAILED");
-    }
-    if (skill && !skill.enabled) {
-      try { await setNativeSkill(client, skill.path, false); }
-      catch { return skillBlocker<T>("SKILL_CONFIG_FAILED", result.audit); }
-    }
-    return result;
-  });
+  return executeSkill(client, options, (context) => runSkillTurn(client, input, options, context));
 }
 
-async function runSkillTurn<T>(client: CodexRpcBoundary, input: unknown, options: SkillRunOptions<T>): Promise<SkillRunResult<T>> {
+async function runSkillTurn<T>(client: CodexRpcBoundary, input: unknown, options: SkillRunOptions<T>, context: RunContext): Promise<SkillRunResult<T>> {
   const audit: AnalysisAudit = {};
   // Web search is the only tool any Skill may use, and only when that Skill was granted it.
   const allowedItemTypes = ["agentMessage", "reasoning", "userMessage",
     ...(options.allowWebSearch ? ["webSearch", "webSearchCall"] : [])];
-  const signal = AbortSignal.any([AbortSignal.timeout(options.timeoutMs ?? 120_000), ...(options.signal ? [options.signal] : [])]);
-  let unsubscribe = () => {};
-  let stopWaiting = () => {};
-  let finalText: string | undefined;
+  let scope: Scope | undefined;
   try {
     const prepared = options.prepareInput(input);
-    const canceled = new Promise<never>((_, reject) => {
-      const abort = () => reject(new Error(options.signal?.aborted ? "SKILL_CANCELED" : "SKILL_TIMEOUT"));
-      if (signal.aborted) abort(); else signal.addEventListener("abort", abort, { once: true });
-      stopWaiting = () => signal.removeEventListener("abort", abort);
-    });
-    const rpc = (method: string, params: unknown) => Promise.race([client.request(method, params), canceled]);
-    const account = record(await rpc("account/read", { refreshToken: false }));
-    if (!record(account?.account)) fail("SKILL_UNAUTHENTICATED");
-    const runtimeConfig = record(record(await rpc("config/read", { includeLayers: false }))?.config);
-    if (!runtimeConfig) fail("SKILL_PROTOCOL_INVALID");
-    const mcp = record(runtimeConfig.mcp_servers) ?? {};
-    const config: Record<string, unknown> = {
-      // "live", not "enabled": this runtime's `web_search` takes `disabled | cached | live`, and the
-      // wrong variant made the whole thread/start fail — so the one Skill granted the web could never
-      // start at all. A scout that must cite what it read needs `live` rather than `cached`.
-      web_search: options.allowWebSearch ? "live" : "disabled", project_doc_max_bytes: 0, include_environment_context: false,
-      // Cross-run memory, on by explicit user decision: every call used to be a clean-slate context for
-      // reproducibility and audit, which is why this pair was `false`. Turning it on means the model's
-      // own accumulated memory can now influence an answer — the same input is no longer guaranteed to
-      // produce the same output — and that memory itself lives in Codex's own CODEX_HOME, not this app's
-      // SQLite ledger, so it is outside `pnpm export`/`backup-crossline.ps1`. See the Connectors page for
-      // the same disclosure surfaced where a person would actually see it.
-      "memories.use_memories": true, "memories.generate_memories": true,
-      "tools.update_plan.enabled": false, "tools.experimental_request_user_input.enabled": false,
-      "features.plugins": true, "features.memories": true,
-      ...Object.fromEntries(["shell_tool", "multi_agent", "multi_agent_v2", "apps", "hooks", "codex_hooks", "plugin_hooks", "web_search", "standalone_web_search", "image_generation", "view_image", "request_permissions_tool", "tool_suggest", "token_budget", "current_time_reminder", "sleep_tool", "send_message_to_user_async", "js_repl", "code_mode", "deferred_executor"]
-        .map((key) => [`features.${key}`, Boolean(options.allowWebSearch) && (key === "web_search" || key === "standalone_web_search")])),
-      ...Object.fromEntries(Object.keys(mcp).map((key) => [`mcp_servers.${key}.enabled`, false]))
-    };
-    const threadParams = {
-      environments: [], dynamicTools: [], runtimeWorkspaceRoots: [], sandbox: "read-only", approvalPolicy: "untrusted", approvalsReviewer: "user",
-      ephemeral: false, experimentalRawEvents: false,
-      developerInstructions: options.developerInstructions
-    };
-    // The flag list is written against the newest runtime, but `--strict-config` rejects the whole call
-    // over one field an older runtime never defined. A field this runtime does not know names a feature
-    // this runtime does not have, so dropping it removes no protection; the real guarantees are the
-    // read-only sandbox, the untrusted approval policy and the tool-call guard below. Any other error
-    // still fails the analysis.
-    let started: Record<string, unknown> | undefined;
-    for (;;) {
-      try { started = record(await rpc("thread/start", { ...threadParams, config })); break; }
-      catch (error) {
-        const message = error instanceof Error ? error.message : "";
-        const field = /unknown configuration field `([^`]+)`/.exec(message)?.[1];
-        const dropped = field ? Object.keys(config).filter((key) => key === field || key.startsWith(`${field}.`)) : [];
-        if (!dropped.length) {
-          // A field this runtime does not know can be dropped; a value it rejects cannot, because
-          // dropping it would silently turn off the thing that was asked for. This used to surface as
-          // a bare SKILL_RUNTIME_FAILED, which hid a one-word config mismatch behind a generic failure
-          // for as long as nobody instrumented the call. The runtime's own text is config diagnostics,
-          // not model output, so it is safe to carry.
-          if (/configuration|unknown variant/i.test(message)) {
-            const rejected = new Error("SKILL_CONFIG_REJECTED");
-            (rejected as Error & { detail?: string }).detail = message.slice(0, 400);
-            throw rejected;
-          }
-          throw error;
-        }
-        for (const key of dropped) delete config[key];
-      }
-    }
-    const threadId = record(started?.thread)?.id;
-    if (!identifier(threadId)) fail("SKILL_PROTOCOL_INVALID");
+    scope = openScope(client, options);
+    await requireLogin(scope);
+    const threadId = await startIsolatedThread(scope, options, context);
     audit.threadId = threadId;
     options.onAudit({ ...audit });
-    if (started?.approvalPolicy !== "untrusted" || record(started.sandbox)?.type !== "readOnly" || !Array.isArray(started.instructionSources) || started.instructionSources.length) fail("SKILL_PERMISSION_DENIED");
-    // One subscription, re-armed per turn. A repair attempt is another turn on the same thread, so
-    // the handler stays put and each turn hands it a fresh pair of callbacks to settle.
-    let settle: { resolve: (text: string | undefined) => void; reject: (error: Error) => void } | undefined;
-    {
-      const resolve = () => settle?.resolve(finalText);
-      const reject = (error: Error) => settle?.reject(error);
-      unsubscribe = client.onNotification((message) => {
-        if (message.method === "crossline/runtimeDisconnected") return reject(new Error("SKILL_RUNTIME_EXITED"));
-        const params = record(message.params);
-        if (!params || params.threadId !== audit.threadId) return;
-        const turn = record(params.turn);
-        const turnId = params.turnId ?? turn?.id;
-        // Events can precede the turn/start response; capture only this isolated thread.
-        if (audit.turnId && turnId !== audit.turnId) return;
-        if (message.method === "item/completed" || message.method === "item/started") {
-          const item = record(params.item);
-          if (item?.type === "agentMessage" && message.method === "item/completed" && (item.phase === "final_answer" || item.phase === null)) {
-            if (typeof item.text !== "string" || item.text.length > 100_000) reject(new Error("SKILL_SCHEMA_INVALID"));
-            else finalText = item.text;
-          } else if (item && !allowedItemTypes.includes(String(item.type))) reject(new Error("SKILL_TOOL_FORBIDDEN"));
-        }
-        if (message.method === "turn/completed") {
-          if (!identifier(turn?.id)) return reject(new Error("SKILL_PROTOCOL_INVALID"));
-          if (turn.status === "completed") resolve();
-          else {
-            const error = record(turn.error);
-            const info = error?.codexErrorInfo;
-            // A spent quota is neither a refusal nor a bug, and calling it one would misreport the
-            // only thing the user can act on: waiting, or buying more credits. A turn the runtime
-            // rejected outright is not a refusal either — calling it one hid a malformed request
-            // behind a word that means the model declined to answer.
-            const failure = new Error(turn.status === "interrupted" ? "SKILL_CANCELED"
-              : info === "unauthorized" ? "SKILL_UNAUTHENTICATED"
-              : info === "sandboxError" ? "SKILL_PERMISSION_DENIED"
-              : info === "usageLimitExceeded" ? "SKILL_USAGE_LIMIT"
-              : "SKILL_TURN_FAILED");
-            if (typeof error?.message === "string") {
-              (failure as Error & { detail?: string }).detail = error.message.slice(0, 400);
-            }
-            reject(failure);
-          }
-        }
-      });
-    }
-
-    /** One turn on the already-started thread, from prompt to parsed JSON. */
-    const runTurn = async (text: string): Promise<unknown> => {
-      finalText = undefined;
-      // Cleared so the handler's "events can precede the turn/start response" guard arms again.
-      delete audit.turnId;
-      const completed = new Promise<string | undefined>((resolve, reject) => { settle = { resolve, reject }; });
-      // Attach a rejection handler immediately, including events that beat the RPC response.
-      void completed.catch(() => {});
-      const turn = record(record(await rpc("turn/start", {
-        threadId, environments: [], input: [{ type: "text", text, text_elements: [] }], outputSchema: options.outputSchema
-      }))?.turn);
-      if (!identifier(turn?.id)) fail("SKILL_PROTOCOL_INVALID");
-      audit.turnId = turn.id;
-      options.onAudit({ ...audit });
-      // The turn carries its own answer out rather than the caller reading the handler's scratch
-      // variable: that read was narrowed to `undefined` by the reset above, because the only writer
-      // TypeScript can see is this function.
-      const answer = await Promise.race([completed, canceled]);
-      recordAnswer(options.skillName, answer);
-      if (!answer) return fail("SKILL_REFUSED");
-      // Models routinely wrap JSON in a ```json fence even when told to return JSON only. That is a
-      // transport habit, not invented content, so it is unwrapped rather than treated as a refusal —
-      // every trust check still runs on whatever is inside.
-      const unfenced = answer.trim().replace(/^```(?:json)?\s*\n?/, "").replace(/\n?```$/, "");
-      try { return JSON.parse(unfenced); } catch { return fail("SKILL_SCHEMA_INVALID"); }
-    };
-
-    /**
-     * Ask the model to fix what the validator rejected, rather than quietly repairing it here.
-     *
-     * The validator's own words are the whole point: it already says which field is wrong and why, and
-     * the model cannot know any of that unless it is told. This is the standard structured-output
-     * repair loop, and it needs no library — the throw from `validateOutput` is the signal, and the
-     * thread already carries the original request, so a repair turn costs one short message.
-     *
-     * Only a validation rejection is repairable. A timeout, a spent quota or a forbidden tool call
-     * throws out of `runTurn` and past this loop, because re-asking cannot fix any of them.
-     */
-    const MAX_REPAIRS = 2;
-    let rejection: Error | undefined;
-    for (let attempt = 0; ; attempt += 1) {
-      const output = await runTurn(attempt === 0
-        ? `$${options.skillName}\n\n${JSON.stringify(prepared)}`
-        : `Your previous answer was rejected by the receiving layer: ${rejection?.message}`
-          + `${(rejection as Error & { detail?: string } | undefined)?.detail ? ` — ${(rejection as Error & { detail?: string }).detail}` : ""}\n\n`
-          + "Return the corrected JSON object in full. Change only what the rejection names; do not "
-          + "explain, apologise, or add commentary outside the JSON.");
-      try {
-        return { ok: true, output: options.validateOutput(output, prepared), audit };
-      } catch (error) {
-        rejection = error instanceof Error ? error : new Error(String(error));
-        if (attempt >= MAX_REPAIRS) throw rejection;
-        // Recorded so a schema that needs repairing every time is visible as a schema problem rather
-        // than absorbed as a cost of doing business.
-        audit.repairs = attempt + 1;
-        options.onAudit({ ...audit });
-      }
-    }
-  } catch (error) {
-    if (audit.threadId && audit.turnId) void client.request("turn/interrupt", { threadId: audit.threadId, turnId: audit.turnId }).catch(() => {});
-    const message = error instanceof Error ? error.message : "";
-    const code = /^[A-Z][A-Z_]{2,}$/.test(message) ? message
-      : message === "CODEX_APP_SERVER_EXITED" || message === "CODEX_APP_SERVER_STOPPED" ? "SKILL_RUNTIME_EXITED" : "SKILL_RUNTIME_FAILED";
-    // Each message says what the person can actually do; no raw model or auth text ever reaches it.
-    const advice: Record<string, string> = {
-      SKILL_USAGE_LIMIT: "Codex 用量额度已用完；额度恢复后可重试。",
-      SKILL_UNAUTHENTICATED: "Codex 未登录或登录已失效；在连接页重新登录后可重试。",
-      SKILL_CANCELED: "已取消。",
-      SKILL_TIMEOUT: "运行超时，可重试。",
-      SKILL_RUNTIME_EXITED: "Codex 运行时已退出；恢复后可重试。"
-    };
-    // A caller's validator may attach `detail` when the Skill itself explained the refusal; that text
-    // is the only thing the person can act on, so it beats the generic fallback.
-    const detail = (error as Error & { detail?: string } | undefined)?.detail;
-    return { ok: false, blocker: { code, message: advice[code] ?? detail ?? "运行未完成；请检查阻塞原因。" }, audit };
-  } finally { unsubscribe(); stopWaiting(); }
+    const output = await runTurnsUntilValid(client, scope, context, audit, {
+      skillName: options.skillName, threadId, outputSchema: options.outputSchema, allowedItemTypes,
+      firstPrompt: `$${options.skillName}\n\n${JSON.stringify(prepared)}`,
+      validate: (answer) => options.validateOutput(answer, prepared), onAudit: options.onAudit, ...(options.idleMs ? { idleMs: options.idleMs } : {})
+    });
+    return { ok: true, output, audit };
+  } catch (error) { return failureResult<T>(client, error, audit); }
+  finally { scope?.dispose(); }
 }

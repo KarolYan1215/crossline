@@ -1,48 +1,87 @@
-import { expect, test, vi } from "vitest";
+import { expect, test } from "vitest";
 import { CrosslineStore } from "@crossline/db";
-import { createActivityRecorder, LOCAL_ACTIVITY_CONSENT } from "./activity-recorder";
+import type { ActivityReading } from "@crossline/core";
+import { ACTIVITY_BLACKLIST, ACTIVITY_DETAIL_CONSENT, ACTIVITY_PAUSED_UNTIL, createActivityTracker, LOCAL_ACTIVITY_CONSENT } from "./activity-recorder";
+import { parseReadingLine } from "./activity-source";
 
-vi.mock("./activity", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("./activity")>()),
-  sampleLocalActivity: async () => ({ idleMs: 1_000, fgHandle: 42 })
-}));
-
-test("nothing is sampled until consent is granted, and revoking it stops collection immediately", async () => {
+const reading = (minute: number, app = "Code.exe", title = "x.ts - Crossline", idleMs = 1_000): ActivityReading =>
+  ({ at: `2026-09-20T10:${String(minute).padStart(2, "0")}:00.000Z`, idleMs, app, title });
+const setup = () => {
   const store = new CrosslineStore(":memory:");
+  const w = store.createPrincipalWithWorkspace("user-1", "个人").workspace.id;
+  return { store, w, tracker: createActivityTracker(store, () => [w], 60) };
+};
+
+test("nothing is stored until consent is granted, and revoking it stops collection immediately", () => {
+  const { store, tracker, w } = setup();
   try {
-    const record = createActivityRecorder(store, "w", 1);
-    expect(await record(new Date("2026-09-20T10:00:00.000Z"))).toBe("skipped");
-    expect(store.listEnergyObservations("w")).toEqual([]);
+    tracker.handle(reading(0));
+    expect(store.listEnergyObservations(w)).toEqual([]);
+    store.setSetting(w, LOCAL_ACTIVITY_CONSENT, "denied");
+    tracker.handle(reading(1));
+    expect(store.listEnergyObservations(w)).toEqual([]);
 
-    store.setSetting("w", LOCAL_ACTIVITY_CONSENT, "denied");
-    expect(await record(new Date("2026-09-20T10:01:00.000Z"))).toBe("skipped");
-    expect(store.listEnergyObservations("w")).toEqual([]);
-
-    store.setSetting("w", LOCAL_ACTIVITY_CONSENT, "granted");
-    expect(await record(new Date("2026-09-20T10:02:00.000Z"))).toBe("recorded");
-    const observation = store.listEnergyObservations("w")[0]!;
+    store.setSetting(w, LOCAL_ACTIVITY_CONSENT, "granted");
+    tracker.handle(reading(2));
+    const observation = store.listEnergyObservations(w)[0]!;
     expect(observation.source).toBe("local_activity");
-    // Only aggregates are persisted; no raw sample sequence and no handle identity.
     expect(Object.keys(observation.aggregate).sort()).toEqual(["activeMinutes", "idleMinutes", "sampleCount", "windowSwitches"]);
-    expect(JSON.stringify(observation)).not.toContain("42");
-
-    // The row records what was measured, never a judgement about it.
+    // Aggregate consent alone never stores an app or a title.
+    expect(store.listActivitySegments(w, "2000-01-01T00:00:00.000Z")).toEqual([]);
     expect(observation.level).toBe("uncalibrated");
 
-    store.setSetting("w", LOCAL_ACTIVITY_CONSENT, "denied");
-    expect(await record(new Date("2026-09-20T10:03:00.000Z"))).toBe("skipped");
+    store.setSetting(w, LOCAL_ACTIVITY_CONSENT, "denied");
+    tracker.handle(reading(3));
+    expect(store.listEnergyObservations(w)[0]?.aggregate.sampleCount).toBe(1);
   } finally { store.close(); }
 });
 
-test("one aggregate row per day, updated in place rather than appended per sample", async () => {
-  const store = new CrosslineStore(":memory:");
+test("one aggregate row per day, updated in place; segments are stored only with the second consent", () => {
+  const { store, tracker, w } = setup();
   try {
-    store.setSetting("w", LOCAL_ACTIVITY_CONSENT, "granted");
-    const record = createActivityRecorder(store, "w", 1);
-    for (let minute = 0; minute < 5; minute++) {
-      await record(new Date(`2026-09-20T10:0${minute}:00.000Z`));
-    }
-    expect(store.listEnergyObservations("w")).toHaveLength(1);
-    expect(store.listEnergyObservations("w")[0]?.aggregate.activeMinutes).toBe(5);
+    store.setSetting(w, ACTIVITY_DETAIL_CONSENT, "granted");
+    for (let minute = 0; minute < 5; minute++) tracker.handle(reading(minute));
+    expect(store.listEnergyObservations(w)).toHaveLength(1);
+    expect(store.listEnergyObservations(w)[0]?.aggregate.activeMinutes).toBe(5);
+    const segments = store.listActivitySegments(w, "2000-01-01T00:00:00.000Z");
+    expect(segments).toHaveLength(1);
+    expect(segments[0]).toMatchObject({ app: "Code.exe", category: "coding", idle: false });
+    expect(store.recentActivityEntries(w, 5)[0]?.title).toBe("x.ts - Crossline");
   } finally { store.close(); }
+});
+
+test("private windows are not recorded at all, not even their app name; the minute still counts as active", () => {
+  const { store, tracker, w } = setup();
+  try {
+    store.setSetting(w, ACTIVITY_DETAIL_CONSENT, "granted");
+    store.setSetting(w, ACTIVITY_BLACKLIST, JSON.stringify(["心理咨询"]));
+    tracker.handle(reading(0, "chrome.exe", "Bank of America - Account Summary"));
+    tracker.handle(reading(1, "1Password.exe", "Vault"));
+    tracker.handle(reading(2, "chrome.exe", "我的心理咨询预约"));
+    expect(store.listActivitySegments(w, "2000-01-01T00:00:00.000Z")).toEqual([]);
+    expect(JSON.stringify(store.recentActivityEntries(w, 10))).not.toMatch(/Bank|Vault|心理/);
+    expect(store.listEnergyObservations(w)[0]?.aggregate.activeMinutes).toBe(3);
+  } finally { store.close(); }
+});
+
+test("pausing stops recording until the stated time, and idle readings carry no title", () => {
+  const { store, tracker, w } = setup();
+  try {
+    store.setSetting(w, ACTIVITY_DETAIL_CONSENT, "granted");
+    store.setSetting(w, ACTIVITY_PAUSED_UNTIL, "2026-09-20T10:03:00.000Z");
+    tracker.handle(reading(1));
+    tracker.handle(reading(2));
+    expect(store.listActivitySegments(w, "2000-01-01T00:00:00.000Z")).toEqual([]);
+    tracker.handle(reading(3, "Code.exe", "secret idle doc.ts", 300_000));
+    const [entry] = store.recentActivityEntries(w, 1);
+    expect(entry).toMatchObject({ idle: true, title: "" });
+  } finally { store.close(); }
+});
+
+test("a reading line from the source is validated and truncated", () => {
+  const at = new Date("2026-09-20T10:00:00.000Z");
+  expect(parseReadingLine(JSON.stringify({ idleMs: 5, app: "a", title: "b" }), at)).toMatchObject({ idleMs: 5, app: "a", title: "b" });
+  expect(parseReadingLine("not json", at)).toBeUndefined();
+  expect(parseReadingLine(JSON.stringify({ idleMs: "x", app: "a", title: "b" }), at)).toBeUndefined();
+  expect(parseReadingLine(JSON.stringify({ idleMs: 1, app: "a", title: "t".repeat(1000) }), at)?.title).toHaveLength(300);
 });

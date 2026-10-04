@@ -83,6 +83,14 @@ async function ensureScheduleSetup(page: Page): Promise<void> {
   if (!result.ok) throw new Error(`schedule setup failed: ${result.status} ${result.body}`);
 }
 
+/**
+ * What a visual baseline may not depend on. The header count depends on what other tests have written by now, and
+ * where the scheduler put a block (and for how many minutes) depends on a time-limited solve that gives a
+ * different feasible answer when the machine is busy. Both are hidden, not masked, so they keep their place and
+ * the layout around them is what is compared; the schedule itself is tested where it is computed.
+ */
+const STABLE_FOR_SCREENSHOT = ".pending-badge,.dt-block,.dt-label-col small,.wk-block,.mo-chip[data-kind=\"scheduled\"]{visibility:hidden}";
+
 test.beforeEach(async ({ page }, testInfo) => {
   if (testInfo.project.name === "desktop-chrome") await ensureScheduleSetup(page);
 });
@@ -91,7 +99,7 @@ test.beforeEach(async ({ page }, testInfo) => {
 test("Today keeps capture semantic-only and health outside identity navigation", async ({ page }, testInfo) => {
   await page.goto("/");
   await expect(page.getByRole("navigation", { name: "主导航" })).toBeVisible();
-  await expect(page.getByText("CARE / CAPACITY")).toBeVisible();
+  await expect(page.getByText("精力自评", { exact: true })).toBeVisible();
   await expect(page.locator(".capture-form select")).toHaveCount(0);
   await expect(page.locator('.capture-form input[name="title"]')).toBeVisible();
   await expect(page.getByRole("button", { name: "提交完成证据" })).toHaveCount(0);
@@ -99,6 +107,8 @@ test("Today keeps capture semantic-only and health outside identity navigation",
   // 独立详情页的入口被保留为一个单独的小链接。
   await expect(page.locator(".hero-action .execution-actions")).toBeVisible();
   await expect(page.locator(".hero-action a.hero-detail-link")).toHaveAttribute("href", /\/workbench\//);
+  // The pending count depends on what other tests have written by now, so it is hidden (not masked: hidden keeps its place).
+  await page.addStyleTag({ content: STABLE_FOR_SCREENSHOT });
   if (testInfo.project.name === "desktop-chrome") await expect(page).toHaveScreenshot("today-paper-grid.png", { fullPage: true });
 });
 
@@ -106,7 +116,7 @@ test("a task card's preview drawer opens in place, and its standalone-page link 
   test.skip(testInfo.project.name !== "desktop-chrome");
   await page.goto("/");
   const hero = page.locator(".hero-action");
-  const title = (await hero.locator("h1").textContent())!.trim();
+  const title = (await hero.locator(".hero-title").textContent())!.trim();
 
   // The corner preview button opens the drawer without navigating away from Today.
   await hero.locator(".card-preview-button").click();
@@ -127,17 +137,24 @@ test("a task card's preview drawer opens in place, and its standalone-page link 
   await expect(page.locator(".task-detail-view h2")).toHaveText(title);
 });
 
-test("Plan exposes B/C/A over one version and workflow redirects", async ({ page }, testInfo) => {
+test("Plan is one calendar with day, week and month over one version, and workflow redirects", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-chrome");
   await seedPendingChanges(page);
   await page.goto("/plan");
   const plan = page.locator("[data-plan-version]");
   await expect(plan).toHaveAttribute("data-plan-version", "personal-plan-v1");
-  await expect(page.getByRole("tab", { name: "B · 双轨时间轴" })).toBeVisible();
-  await page.getByRole("tab", { name: "C · 计划差异" }).click();
+  for (const view of ["日", "周", "月"]) await expect(page.getByRole("tab", { name: view, exact: true })).toBeVisible();
+  // The three views are one list of blocks at three scales: the month shows the same plan's days.
+  await page.getByRole("tab", { name: "月", exact: true }).click();
+  await expect(page.locator(".mo-cell")).toHaveCount(42);
+  await page.getByRole("tab", { name: "周", exact: true }).click();
+  await expect(page.locator(".wk-col")).toHaveCount(7);
+  // Pending differences announce themselves and open their fold, so the decision is one look away.
+  await expect(page.getByRole("link", { name: /项差异待处理/ })).toBeVisible();
   await expect(page.getByText("批准本批变更")).toBeVisible();
   if (testInfo.project.name === "desktop-chrome") {
     await page.waitForTimeout(800);
+    await page.addStyleTag({ content: STABLE_FOR_SCREENSHOT });
     await expect(page.locator(".subpage")).toHaveScreenshot("plan-diff.png");
   }
   await page.goto("/workflow");
@@ -148,10 +165,12 @@ test("editing availability re-runs the scheduler instead of only storing a prefe
   test.skip(testInfo.project.name !== "desktop-chrome");
   await page.goto("/plan");
   // Suggestions are explicitly unapproved; real calendar blocks remain read-only.
-  const scheduled = page.locator(".lane-track article").filter({ hasText: "建议·未批准" });
+  await page.getByRole("tab", { name: "周", exact: true }).click();
+  const scheduled = page.locator('.wk-block[data-kind="scheduled"]');
   const before = await scheduled.count();
   expect(before).toBeGreaterThan(0);
 
+  await page.getByText("可用时间与排程偏好").click();
   await page.getByText(/^可用时间 · /).click();
   // Close every declared window down to five minutes — below the minimum usable slot, so the honest
   // result is an empty lane. A preference that stored cleanly and changed nothing on screen would mean
@@ -172,17 +191,14 @@ test("Plan approval is confirmed and persisted", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-chrome");
   await seedPendingChanges(page);
   await page.goto("/plan");
-  await page.getByRole("tab", { name: "C · 计划差异" }).click();
   await page.getByRole("button", { name: "批准本批变更" }).click();
-  await expect(page.getByRole("dialog")).toContainText("批准 Plan v1");
+  await expect(page.getByRole("dialog")).toContainText("批准计划 v1");
   await page.getByRole("button", { name: "确认批准" }).click();
   // R7 localised the status chip; the assertion must follow the text the page actually renders.
   await expect(page.locator("[data-plan-version]")).toContainText("已批准");
-  const changeTab = page.getByRole("tab", { name: "C · 计划差异" });
-  await expect(changeTab).toBeEnabled();
   await page.waitForLoadState("networkidle");
-  await changeTab.click();
-  await expect(changeTab).toHaveAttribute("aria-selected", "true");
+  // Nothing is pending any more, so the differences fold closes; open it to read what was decided.
+  await page.getByText(/^计划差异（/).click();
   await expect(page.getByText("本版本已批准")).toBeVisible();
   // Scoped to the change ledger: "已批准" also labels the plan version and the blocks.
   await expect(page.locator(".change-ledger article span").filter({ hasText: "已批准" })).toHaveCount(2);
@@ -218,6 +234,7 @@ test("energy check keeps self report only and rejects the removed camera path", 
 test("goal confirmation and permission-mode rejection persist through the real pages", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-chrome");
   await page.goto("/milestones");
+  await page.getByText(/^里程碑列表与编辑/).click();
   const goal = page.locator(".milestone-admin-list > li").filter({ hasText: "稳定推进当前实验与论文" });
   await goal.locator('input[type="date"]').fill("2026-09-30");
   await Promise.all([
@@ -226,6 +243,7 @@ test("goal confirmation and permission-mode rejection persist through the real p
   ]);
   await expect(goal.locator('input[type="date"]')).toHaveValue("2026-09-30");
   await page.goto("/plan");
+  await page.getByText(/^未来 8 周/).click();
   await expect(page.getByText("已确认硬截止 2026-09-30")).toBeVisible();
 
   const store = openStore();
@@ -236,6 +254,8 @@ test("goal confirmation and permission-mode rejection persist through the real p
       staleWhen: "方法变更" } }); }
   finally { store.close(); }
   await page.goto("/approvals");
+  // Folded until it is switched on: an optional feature should not be the first thing on the page people come to to decide things.
+  await page.getByText(/^默认批准（可选）/).click();
   await expect(page.getByRole("button", { name: "开启默认批准" })).toBeVisible();
   await page.getByRole("button", { name: "开启默认批准" }).click();
   await expect(page.getByRole("button", { name: "关闭默认批准" })).toBeVisible();
@@ -262,8 +282,9 @@ test("mobile navigation and reduced motion remain usable", async ({ page }, test
   test.skip(testInfo.project.name !== "mobile-chrome");
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/");
-  await expect(page.getByRole("link", { name: "Today" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Approvals" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "今日" })).toBeVisible();
+  // What is waiting and the settings sit behind the fifth tab.
+  await expect(page.getByText("更多")).toBeVisible();
   await expect(page.locator(".hero-action")).toBeVisible();
 });
 
@@ -293,7 +314,7 @@ test("the app opens with the network down, and the offline capture queues", asyn
 
   await page.reload();
   // The headline claim: the shell came from the cache, not the server.
-  await expect(page.getByRole("link", { name: "Workbench" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "任务" })).toBeVisible();
   await expect(page.locator(".analog-clock")).toBeVisible();
 
   // And a capture taken while down is kept rather than lost.

@@ -1,5 +1,5 @@
-import { expect, test } from "vitest";
-import { availableSlots, validateAvailability, DEFAULT_AVAILABILITY } from "./availability";
+import { describe, expect, test } from "vitest";
+import { availableSlots, validateAvailability, suggestAvailability, DEFAULT_AVAILABILITY } from "./availability";
 
 // 2026-09-14 is a Monday, 2026-09-19 a Saturday.
 const weekday = [{ days: [1], start: "09:00", end: "17:00", energy: "high" as const }];
@@ -49,4 +49,30 @@ test("a window that cannot mean anything is refused rather than silently emptyin
   expect(() => validateAvailability([{ days: [1], start: "9am", end: "17:00", energy: "high" }]))
     .toThrow("AVAILABILITY_INVALID");
   expect(validateAvailability(DEFAULT_AVAILABILITY)).toEqual(DEFAULT_AVAILABILITY);
+});
+
+describe("suggestAvailability", () => {
+  const day = (date: string, from: string, to: string) => ({ start: `${date}T${from}:00.000Z`, end: `${date}T${to}:00.000Z`, idle: false });
+  // Chicago is UTC-5 in September, so 14:00Z is 09:00 local.
+  const week = ["2026-09-07", "2026-09-08", "2026-09-09", "2026-09-10", "2026-09-11", "2026-09-14", "2026-09-15", "2026-09-16", "2026-09-17", "2026-09-18"];
+
+  test("weekdays with the same hours share one window, and the hours are local, not UTC", () => {
+    const segments = week.map((date) => day(date, "14:00", "17:00"));
+    expect(suggestAvailability({ segments, timeZone: "America/Chicago" })).toEqual([
+      { days: [1, 2, 3, 4, 5], start: "09:00", end: "12:00", energy: "medium" }
+    ]);
+  });
+
+  test("idle time, one-off activity and a short burst do not become availability", () => {
+    const segments = [...week.map((date) => day(date, "14:00", "17:00")),
+      { ...day("2026-09-07", "20:00", "23:00"), idle: true },
+      day("2026-09-12", "20:00", "20:40")];
+    const [only] = suggestAvailability({ segments, timeZone: "America/Chicago" });
+    expect(only?.start).toBe("09:00");
+    expect(suggestAvailability({ segments, timeZone: "America/Chicago" })).toHaveLength(1);
+  });
+
+  test("less than a week of observed days suggests nothing rather than a pattern from an accident", () => {
+    expect(suggestAvailability({ segments: week.slice(0, 5).map((date) => day(date, "14:00", "17:00")), timeZone: "America/Chicago" })).toEqual([]);
+  });
 });

@@ -87,7 +87,7 @@ export function createPlanExplainer(store: CrosslineStore, workspaceId: string, 
       prepareInput: () => context,
       validateOutput: (output) => validatePlanExplanation(output, context),
       onAudit: () => {},
-      timeoutMs: 10 * 60_000
+      timeoutMs: 60 * 60_000
     });
     if (!result.ok) return { state: "blocked", code: result.blocker.code, message: result.blocker.message };
     store.appendEvent({

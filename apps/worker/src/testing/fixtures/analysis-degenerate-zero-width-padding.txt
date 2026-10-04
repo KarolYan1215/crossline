@@ -1,0 +1,44 @@
+{
+  "identityId": "research",
+  "projectId": "p",
+  "milestoneId": "m",
+  "intent": "Decide",
+  "family": "deep_work",
+  "automationParts": [],
+  "humanCore": [
+    {
+      "id": "h",
+      "intent": "Decide",
+      "energy": "medium",
+      "interruptible": true,
+      "quote": "Decide",
+      "rationale": "Judgment"
+    }
+  ],
+  "materialContract": [
+    {
+      "kind": "record",
+      "description": "三次反馈摘录",
+      "why": "需要提供文件、链接、笔记或其位置，以确定整理对象。  ​​‌‍​‌‍​‌‍​‌‍​‌‍​‌‍​‌‍​‌‍​‌‍​‌‍​‌‍​‌‍​‌‍​‌‍​‌‍​‌‍​‌‍​‌‍​‌‍​‌‍​‌‍​‌‍​‌‍​‌‍​‌‍​‌‍​‌‍​‌‍​‌‍​‌‍​‌‍​‌‍​‌‍​‌‍​‌‍​‌‍​‌‍​‌‍​‌‍​‌‍​‌‍​‌‍​‌‍​‌‍​‌‍​‌‍ജ‌‍​‌‍​‌‍​‌‍​‌‍​‌‍​‌‍​‌‍​‌‍​‌‍​‌‍​‌numerusform】【。",
+      "required": true
+    }
+  ],
+  "evidenceContract": [
+    {
+      "kind": "record",
+      "description": "Decision",
+      "why": "The decision is the deliverable",
+      "required": true
+    }
+  ],
+  "estimate": {
+    "p25Minutes": 10,
+    "p50Minutes": 20,
+    "p85Minutes": 40,
+    "source": "llm_prior",
+    "observationCount": 0,
+    "confidence": "low"
+  },
+  "riskTier": "routine",
+  "blockers": []
+}

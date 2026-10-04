@@ -18,8 +18,10 @@ const codes: Record<string, string> = {
  * example blocks instead. Editing it here rewrites the plan on the next load — the schedule is derived
  * on read, never stored, so it cannot drift from the work orders it came from.
  */
-export function AvailabilityEditor({ windows, preferences, milestones }: { windows: Window[];
-  preferences: SchedulePreferences; milestones: Array<{ id: string; title: string }> }) {
+export function AvailabilityEditor({ windows, preferences, milestones, suggested = [] }: { windows: Window[];
+  preferences: SchedulePreferences; milestones: Array<{ id: string; title: string }>;
+  /** A pattern read off the last weeks of screen activity: offered, never applied until the person saves it. */
+  suggested?: Window[] }) {
   const [draft, setDraft] = useState<Window[]>(windows);
   const [mode, setMode] = useState(preferences.mode);
   const [importance, setImportance] = useState(preferences.importance);
@@ -50,6 +52,11 @@ export function AvailabilityEditor({ windows, preferences, milestones }: { windo
   return <details className="availability-editor">
     <summary>可用时间 · {draft.length} 段</summary>
     <p className="review-note">排程只会把作业放进这些时间段里，并且会先扣掉日历上已经占掉的部分。</p>
+    {suggested.length > 0 && <p className="review-note availability-suggestion">
+      按最近两周你实际在电脑前的时间，建议：{suggested.map((window) => `${window.days.map((day) => `周${DAY_LABELS[day]}`).join("")} ${window.start}–${window.end}`).join("；")}。
+      只知道你什么时候在，不知道精力好不好，所以精力档都先填「中」，请自己改。
+      <button type="button" className="secondary-button" onClick={() => { setDraft(suggested); setStatus("已填入，还没有保存。"); }}>填入下面（不会自动保存）</button>
+    </p>}
     <label>排程模式 <select value={mode} onChange={(event) => setMode(event.target.value as typeof mode)}>
       <option value="buffered">留缓冲：10 分钟间隔，每天最多 85%</option>
       <option value="asap">尽早完成</option>

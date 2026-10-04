@@ -11,6 +11,7 @@ This Skill decides **what counts as having got somewhere**. It runs in one of th
 |---|---|---|
 | `crossline.milestone-proposal.v1` | propose new milestones | `{milestones[], assumptions[], blockers[]}` |
 | `crossline.milestone-criteria.v1` | add criteria to milestones that exist | `{milestones[], assumptions[], blockers[]}` |
+| `crossline.milestone-relations.v1` | links between milestones in different lines | `{relations[], assumptions[], blockers[]}` |
 | `crossline.flywheel.v1` | relations between milestones | handled by `crossline-flywheel-scout`, not here |
 
 ## How to set a milestone
@@ -44,14 +45,60 @@ Input `{version, identities[], existingMilestones[], recentWork[], templates[], 
 
 **`templates[]`** is `{id, identityId, kind, titleHint}[]` — the milestone-type library already approved for this workspace, `kind` being one of `deliverable`/`threshold`/`validation`/`recurring_cadence`/`decision`. When one of the offered templates genuinely fits what you are proposing, set `templateId` to its id and build the criteria to actually match that template's shape (not just borrow its title) — this is what the receiving layer reads as a confident, template-backed proposal rather than a free-form guess, and it is computed deterministically from whether your criteria actually match, not from anything you say about your own confidence. Set `templateId` to `null` when nothing offered fits; inventing an id that was not in the input is refused outright, so never guess one.
 
-**`evidenceQuestionBank`** is always required in your output, 1–6 items, each `{id, prompt, kind, required}` plus `options[]` when `kind` is `"checkbox"` (never present when `kind` is `"text"`). These become the pre-generated completion-time questions a person answers by clicking an option or typing free text (Codex-`ask` style) — write them as concrete checks of whether the milestone was actually reached, not generic busywork. When `templateId` is set, the receiving layer uses the template's own bank instead of yours (so still fill this in reasonably, but do not worry about matching it exactly); when `templateId` is `null`, yours is what gets used, so make it count.
+**`evidenceQuestionBank`** is always required in your output, 1–3 items, each `{id, prompt, kind, required}` plus `options[]` when `kind` is `"checkbox"` (never present when `kind` is `"text"`). These become the pre-generated completion-time questions a person answers by clicking an option or typing free text (Codex-`ask` style) — write them as concrete checks of whether the milestone was actually reached, not generic busywork. When `templateId` is set, the receiving layer uses the template's own bank instead of yours (so still fill this in reasonably, but do not worry about matching it exactly); when `templateId` is `null`, yours is what gets used, so make it count.
+
+## Profile mode — the input has a `profile`
+
+Once the person has been interviewed, milestones are designed from what they said, not proposed in the abstract. `profile` is `{today, requiredIdentities[], requiredProjects[], projects[], dates[], facts[]}`; `dates[]` are dates read from the person's own files, `{project, kind, date, title}` with `kind` one of quiz / homework_out / homework_due / exam / project_due …, whether or not the person has confirmed that batch yet — a course's milestones are made from them; each fact is `{id, identityId, projectId, slot, value, status}` where `status` is `confirmed` (the person said it, or a file did) or `inferred` (a guess nobody confirmed).
+
+**Work backwards from dates.** Find the hard dates in the facts — a submission deadline, an exam, a launch window — and place each milestone so the last one lands on that date and every earlier one is the thing that has to be true for the next to be possible. A milestone with no date is a wish. Never invent a date the facts do not support; when the facts give none for a line, say so in `assumptions` and choose a date that follows from the stage before it. Requirements that come from other people (an advisor's task, a course deadline) are fixed; the person's own vague aims are yours to make concrete, and a milestone may ask the app to research something first.
+
+**A milestone is checkable on its deadline.** At least one criterion is not a `judgement` (a `count`, `threshold` or `artifact`), and anything that is graded — an exam, a quiz, homework, a project mark — has a `threshold` with the actual score line. "Completed" and "recorded by the course" are events, not targets.
+
+**Every number is worked backwards from the outcome, and leaves room.** Never pick a score line or a quantity because it sounds reasonable; start from the result the person wants and solve back to what *this* milestone must deliver. For a course: target grade (fact slot `target_grade`) → the weights in the syllabus (fact slot `grading`; use them, do not fall back to "every part ≥ the target" when they are there) → what the other parts are realistically expected to give (their own earlier results if known, otherwise the class's honest level, never a perfect score) → the least this part has to reach for the total to land on the target. That least value is `bareLine`: the line at which the outcome only just holds. Then set `value` **beyond** `bareLine` on the safe side (above it for `gte`, below it for `lte`) by at least 3% of `bareLine` — more for graded work, where one bad exam day is normal. `derivation` writes the sum out: 「总评 A 要 90；期末占 40%、作业和小测预计 94 → 期末至少 85（bareLine）；留 3 分余量，设 88」. A threshold with no `bareLine`, or a `value` equal to it, or one that only matches it by rounding, is refused. The same holds outside courses: a posting cadence is worked back from the follower or revenue target and the time it has, a drawdown limit from the loss the person can bear, a deadline from the date the next stage needs it minus the time the work takes and some slack. A number that cannot be derived from an outcome the person would recognise is not set: use a `judgement` with `failsWhen`, and say why in `assumptions`.
+
+**You are asked about one line at a time** (`requiredIdentities` has one entry; `projects` and `facts` are that line's own). That line gets at least three milestones, and every project in `requiredProjects` gets its own chain. A line often holds several projects (a paper, a study, two courses); `projects[]` lists them with their ids, and a project the person was specific about must not be dropped just because another project in the same line is more urgent. Set `projectId` to the project's id (copy it exactly; leave it empty only for a line with no projects). One project's chain is one to five milestones, a line at most twelve in all. Stages, deadlines and `dependsOn` belong to one project's chain: two courses' dates say nothing about each other. Every milestone carries a `plan`:
+
+- `key` — short, local to this answer, so `dependsOn` can point at a sibling.
+- `stage` — 1 for the first, counting up; a later stage is never due before an earlier one.
+- `deadline` — `YYYY-MM-DD`, after `today`.
+- `baseline` — where the person is now, in their terms ("尚未开始" is an honest baseline).
+- `target` — what done means in the person's words: a number, a named deliverable, a decision someone makes.
+- `stakeholders` — the people or groups involved, as the facts name them.
+- `outcome` — the result the person actually wants, which the numbers in this milestone are for (「ECE 555 总评 A，≥ 90」, 「MoS2 论文 10/31 前投出」). It comes from the person's goals: for a course the `target_grade` fact, otherwise their `goal`, and you cite that fact in `sourceFactIds`. A course with no `target_grade` on record gets one **from you**, in `targetProposals`: `{projectId, value, why}` — a concrete target such as 「总评 A−（≥ 90）」 chosen from their long-term goals (what the course is for in their research and career, how much time the other lines need, what they said about priorities), with the reason in `why`. It is shown to them as a proposal they can change in one click, and the score lines are recomputed from whatever they pick, so propose the target you would actually recommend rather than hedging. Cite it as `<identityId>/<projectId>/target_grade` in `sourceFactIds`. A `target_grade` already on record (theirs, or an earlier proposal) is used as it is and is not proposed again.
+- `derivation` — the back-calculation, in numbers, from `outcome` to the line you set (see below). Required whenever the milestone has a `threshold`.
+- `sourceFactIds` — fact ids copied exactly from `profile.facts`, at least one of them `confirmed`. A milestone built only on guesses is refused.
+- `dependsOn` — keys of the earlier milestones it builds on; empty only for stage 1.
+
+**A milestone is an event that either happened by its deadline or did not, never a state.** 「课程学习保持可完成状态」, 「稳定推进实验」, 「做好准备」 are refused: nobody can check them on the day. Name the thing: 「ECE 555 期中考试（10/27）」, 「提交 CAD 项目」, 「师兄确认第 3、4 张图可用」. For a course, work from the syllabus dates in the facts — the next quiz, assignment, midterm, project submission or final — and make the nearest one the first milestone; if the facts give no date for it, say so in `assumptions` instead of writing a mood.
+
+**Titles are the person's own work**, not a template: "西湖论文 10/31 投出" is a title; "完成第一阶段" and "为科研确定第一个里程碑" are refused. **A course is a chain of its graded parts, each with a score line.** Read the grading breakdown and the schedule in the facts and make one milestone per graded component that has its own date — the quizzes (one milestone, due at the last quiz, target = the average over all of them), the homework, the midterm(s), the project, the final — in date order, so the chain is the semester. Never a single 「课程完成」 or 「期末完成」 milestone: finishing is not a result. Each one has a `threshold` criterion with a number: 「5 次小测平均 ≥ 80%」, 「期中 ≥ 85/100」, 「项目提交且得分 ≥ 90%」. The lines are derived from the course's `target_grade` (on record or proposed in this answer) and the `grading` weights, and the target's fact id must be in `sourceFactIds`; the other parts' expected scores are your stated, modest assumptions and go in `derivation` (and `assumptions`). A graded part the file marks TBD (`profile.undated`) still gets its milestone — it is part of the grade — with a **provisional** deadline: no later than the final exam, and the last week of classes when the exam is the only fixed date; say 「日期待定，暂按……」 in `target` and in `assumptions`, so the person can correct it when the date is announced.
+
+**`diligence[]`, when present, is research the person accepted** — `{identityId, title, why, kind, dueDate, claims[], sources[]}`. Treat an accepted deadline as a fixed date and the claims as established facts about the world (each came from a page the app opened); build milestones that follow from them and do not propose what one already covers. Never turn a rejected idea back into a milestone: rejected proposals are not in this list.
+
+**Gaps are assumptions, not blockers.** A line whose profile is thin (no confirmed audience, no baseline, no cadence) still gets its chain: choose reasonable dates and targets that follow from what *is* known and write what you assumed in `assumptions`, so the person sees exactly what to correct. `blockers` is only for the case where **nothing at all** can be proposed for **any** line. A blocker stops the whole answer — including the lines you could do well — and the person is left with nothing to approve or edit.
+
+**Every milestone needs an `outcome` criterion**, exactly as above — in profile mode a milestone without one is refused rather than warned about.
+
+## Relations mode — `crossline.milestone-relations.v1`
+
+Input `{version, milestones[], facts[]}`: milestones that already exist, each `{id, identityId, projectId, title, stage, deadline, target}`, and profile facts `{id, identityId, projectId, slot, value, status}`. How a milestone in one line feeds a milestone in another is the point of having several lines. The person's own words about it are the facts whose slot starts with `flywheel_` (most are `inferred`, which is fine here: a relation is only ever a candidate the person approves or throws out).
+
+Return `{relations[], assumptions[], blockers[]}`, each relation `{fromId, toId, kind, explanation, refutedWhen, sourceFactIds}`:
+
+- `fromId` / `toId` — milestone ids copied from the input, in **different** lines. Order within a line is already `dependsOn`.
+- `kind` — `enables` (the first makes the second possible), `reuses` (the second reuses what the first produced), `informs`, `constrains` (the first competes with it for time or attention) or `recurring_feedback`. Loops are allowed: media feeding back into research is meant.
+- `explanation` — what it claims, concretely, in the person's terms. `refutedWhen` — what you would see if it did not hold; a relation with no stated way to be wrong is refused.
+- `sourceFactIds` — the facts it rests on, copied exactly.
+
+At most twelve, the few that carry weight rather than every pair.
 
 ## Criterion shape (both modes)
 
 `{id, statement, required, evidenceOf, measure}` where `evidenceOf` is `"output"` or `"outcome"` and `measure` is exactly one of:
 
 - `{kind: "count", unit, atLeast}`
-- `{kind: "threshold", unit, comparator: "gte"|"lte", value}`
+- `{kind: "threshold", unit, comparator: "gte"|"lte", value, bareLine}` — `bareLine` is the value that just reaches the outcome; `value` is the line actually set, with margin beyond it
 - `{kind: "artifact", mustExist}`
 - `{kind: "judgement", rubric, failsWhen}`
 

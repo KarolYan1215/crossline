@@ -5,7 +5,8 @@ export type IdentityPack = {
   masterClock: boolean;
   workflowTemplates: string[];
   evidencePolicy: "tiered" | "telemetry";
-  interviewQuestions: string[];
+  /** What the weekly web research on this line is about. Absent means "external opportunities". */
+  diligenceTopic?: "opportunities" | "positioning" | "literature" | "tracking_framework";
   durationPriors: Record<string, { p25Minutes: number; p50Minutes: number; p85Minutes: number }>;
 };
 
@@ -24,7 +25,7 @@ export function defaultIdentityPacks(): IdentityPack[] {
       masterClock: true,
       workflowTemplates: ["paper-reading", "experiment-prep", "meeting-prep", "research-writing"],
       evidencePolicy: "tiered",
-      interviewQuestions: ["哪些课程、会议或实验构成不可移动的现实约束？", "当前成果以什么证据验收？"],
+      diligenceTopic: "literature",
       durationPriors: commonPriors
     },
     {
@@ -34,7 +35,7 @@ export function defaultIdentityPacks(): IdentityPack[] {
       masterClock: false,
       workflowTemplates: ["public-prospect-research", "outreach-draft", "milestone-review"],
       evidencePolicy: "tiered",
-      interviewQuestions: ["当前要验证的用户问题是什么？", "哪些外联必须逐项批准？"],
+      diligenceTopic: "opportunities",
       durationPriors: commonPriors
     },
     {
@@ -44,7 +45,7 @@ export function defaultIdentityPacks(): IdentityPack[] {
       masterClock: false,
       workflowTemplates: ["evidence-to-topic", "script-package", "content-ops-job"],
       evidencePolicy: "tiered",
-      interviewQuestions: ["已有素材位于哪些授权目录？", "公开发布前需要哪些检查？"],
+      diligenceTopic: "positioning",
       durationPriors: commonPriors
     },
     {
@@ -54,7 +55,7 @@ export function defaultIdentityPacks(): IdentityPack[] {
       masterClock: false,
       workflowTemplates: ["pre-market-brief", "midday-check", "close-review"],
       evidencePolicy: "tiered",
-      interviewQuestions: ["主动提供的美股或 ETF 关注列表是什么？", "三个研究视角的失效条件是什么？"],
+      diligenceTopic: "tracking_framework",
       durationPriors: commonPriors
     },
     {
@@ -64,7 +65,6 @@ export function defaultIdentityPacks(): IdentityPack[] {
       masterClock: false,
       workflowTemplates: ["training-window", "meal-prep", "minimum-recovery"],
       evidencePolicy: "telemetry",
-      interviewQuestions: ["睡眠、进食和活动的最低红线是什么？"],
       durationPriors: {
         preparation: { p25Minutes: 10, p50Minutes: 20, p85Minutes: 35 },
         review: { p25Minutes: 5, p50Minutes: 10, p85Minutes: 15 }

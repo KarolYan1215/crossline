@@ -1,19 +1,21 @@
 import { SubpageShell } from "../subpage-shell";
 import { AvailabilityEditor } from "../plan/availability-editor";
 import { LocalActivityToggle } from "./local-activity-toggle";
+import { UsageCard } from "./usage-card";
+import { ConnectionsSection } from "../connectors/connections";
 import {
-  getStore, LOCAL_ACTIVITY_CONSENT, readAvailability, readGoalSettings, readSchedulePreferences
+  ACTIVITY_BLACKLIST, ACTIVITY_DETAIL_CONSENT, ACTIVITY_PAUSED_UNTIL, getStore, LOCAL_ACTIVITY_CONSENT, readAvailability, readGoalSettings, readSchedulePreferences
 } from "../../lib/crossline";
 import { requireSessionContext } from "../../lib/access-guard";
+import { suggestedAvailabilityFor } from "../../lib/timeline";
 
 export const dynamic = "force-dynamic";
+const USAGE_DAYS = 7;
 
 /**
- * A hub, not a third copy: the schedule editor is the same component Plan already renders (editing it
- * here changes the same settings row, read back wherever it is shown), and calendar sources / Tailscale
- * / device leases / the Codex account stay on Connectors rather than being duplicated here — this page
- * only reads their real state and links out, the same "read real state, don't just link blind" rule the
- * rest of this app already follows.
+ * Everything that is configured rather than done, in one place: the hours the scheduler may use, the activity
+ * consent, what the app is connected to, and what its model calls have cost. The schedule editor is the same
+ * component the plan page folds in; editing it in either place changes the same settings row.
  */
 export default async function SettingsPage() {
   const ctx = await requireSessionContext();
@@ -31,30 +33,26 @@ export default async function SettingsPage() {
     } };
   const consentRaw = store.getSetting(ctx.workspaceId, LOCAL_ACTIVITY_CONSENT);
   const consent = consentRaw === "granted" || consentRaw === "denied" ? consentRaw : "unasked";
+  const detailRaw = store.getSetting(ctx.workspaceId, ACTIVITY_DETAIL_CONSENT);
+  const detail = detailRaw === "granted" || detailRaw === "denied" ? detailRaw : "unasked";
+  let blacklist: string[] = [];
+  try { const parsed = JSON.parse(store.getSetting(ctx.workspaceId, ACTIVITY_BLACKLIST) ?? "[]") as unknown; if (Array.isArray(parsed)) blacklist = parsed.filter((word): word is string => typeof word === "string"); } catch { /* unreadable counts as empty */ }
+  const since = new Date(Date.now() - USAGE_DAYS * 86_400_000).toISOString();
+  const summary = store.summarizeModelUsage(ctx.workspaceId, since);
 
-  return <SubpageShell eyebrow="设置" title="设置"
-    description="作息时间在这里改；日历来源、Tailscale、离线设备和 Codex 账号仍在 Connections 页，这里只显示真实状态并链接过去。">
-    <section className="review-block">
-      <h2>作息与可用时间</h2>
-      <AvailabilityEditor windows={readAvailability(ctx)} preferences={effectivePreferences} milestones={milestones} />
-    </section>
-
-    <section className="review-block">
-      <h2>本机活动采集</h2>
-      <p className="review-note">只读取距上次输入的毫秒数和一个不透明的窗口句柄数字，不读取窗口标题、不记录按键、不上传内容。</p>
-      <LocalActivityToggle consent={consent} />
-    </section>
-
-    <section className="review-block">
-      <h2>连接与账号</h2>
-      <p className="review-note">日历来源、Tailscale 身份、离线设备授权、Codex 账号与跨运行 memory 披露都在这里管理。</p>
-      <a href="/connectors">前往 Connections →</a>
-    </section>
-
-    <section className="review-block">
-      <h2>首次设置</h2>
-      <p className="review-note">回答几个问题，AI 提出可能的里程碑草案，供你批准。</p>
-      <a href="/onboarding">前往入职访谈 →</a>
-    </section>
+  return <SubpageShell active="设置" title="设置">
+    <details className="fold" open><summary>作息与可用时间</summary>
+      <AvailabilityEditor windows={readAvailability(ctx)} preferences={effectivePreferences} milestones={milestones} suggested={suggestedAvailabilityFor(ctx)} />
+    </details>
+    <details className="fold"><summary>屏幕活动与隐私</summary>
+      <LocalActivityToggle consent={consent} detail={detail} pausedUntil={store.getSetting(ctx.workspaceId, ACTIVITY_PAUSED_UNTIL) || null} blacklist={blacklist} />
+    </details>
+    <details className="fold" id="connections" open><summary>连接与账号</summary>
+      <ConnectionsSection ctx={ctx} />
+    </details>
+    <details className="fold"><summary>模型用量（近 {USAGE_DAYS} 天）</summary>
+      <UsageCard summary={summary} days={USAGE_DAYS} />
+    </details>
+    <p className="muted"><a href="/onboarding">重新做「先了解你」→</a></p>
   </SubpageShell>;
 }

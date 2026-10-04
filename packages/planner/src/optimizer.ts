@@ -306,7 +306,10 @@ async function optimize(input: PlanningInput, emergency = false): Promise<PlanRe
             : compareTasks(tasks[a.task]!, tasks[b.task]!));
       let cursor = slot.start;
       for (const choice of picked) {
-        const minutes = choice.minutes ? Math.round(valueOf(columns, choice.minutes)) : choice.duration;
+        // The solver's continuous answer is often exactly a half minute, and its last digits are numerical noise
+        // (25.4999999 on one run, 25.5000001 on the next). Rounding that directly made the same plan 25 minutes
+        // long on one run and 26 on the next; a half is rounded up, noise or not.
+        const minutes = choice.minutes ? Math.round(valueOf(columns, choice.minutes) + 1e-6) : choice.duration;
         if (minutes <= 0) continue;
         const end = cursor + minutes * 60_000;
         blocks.push({ taskId: tasks[choice.task]!.id, start: new Date(cursor).toISOString(),

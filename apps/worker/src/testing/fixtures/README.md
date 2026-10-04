@@ -28,3 +28,5 @@ $env:CROSSLINE_RECORD_DIR='C:\path\to\recordings'; pnpm worker:start
 
 四份退化夹具的**退化文本是真的**，外层 JSON 信封是按测试所用的那条捕获重建的（真实运行
 里那些回答对应的是别的捕获内容）。信封是脚手架，退化文本才是被测的东西。
+
+2026-10-03 起另有 `analysis-degenerate-zero-width-padding`：理由字段在一句完整的话后面挂着交替的零宽字符（U+200B/200C/200D），夹一个马拉雅拉姆字母和一个泄漏的 `numerusform】【。` —— 退化文本逐字来自 `scripts/structured-output-check.ts` 对一条含糊捕获（「整理一下」）的真实运行，两次运行两次都出现。旧的「同一字符重复八次」裁剪认不出交替模式，所以它曾一路存进账本。

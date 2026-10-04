@@ -59,7 +59,7 @@ export function createBackgroundFactsExtractor(store: CrosslineStore, workspaceI
       validateOutput: (output) => validateBackgroundFactsProposal(output, context),
       onAudit: () => {},
       ...(signal ? { signal } : {}),
-      timeoutMs: 10 * 60_000
+      timeoutMs: 60 * 60_000
     });
     if (!result.ok) return { state: "blocked", code: result.blocker.code, message: result.blocker.message };
 

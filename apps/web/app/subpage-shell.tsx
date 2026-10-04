@@ -1,27 +1,20 @@
 import type { ReactNode } from "react";
-import { SignOutButton } from "./sign-out-button";
-import { NAV_ITEMS } from "./nav-items";
-import { BottomNav } from "./bottom-nav";
-import { AssistantWidget } from "./assistant-widget";
+import { AppShell } from "./app-shell";
 
-export function SubpageShell({ eyebrow, title, description, children }: {
-  eyebrow: string;
+/** A page inside the shared frame, with its own title line. `active` names the view it belongs to. */
+export function SubpageShell({ title, description, active, eyebrow, children }: {
   title: string;
-  description: string;
+  description?: string;
+  active?: string | undefined;
+  /** Kept for callers that still pass one; the new design has no eyebrow line. */
+  eyebrow?: string;
   children: ReactNode;
 }) {
-  return <><header className="running-head">
-    <a className="wordmark" href="/">CROSSLINE<sup>01</sup></a>
-    <nav aria-label="主导航">{NAV_ITEMS.map((item) => <a href={item.href} key={item.label}>{item.label}</a>)}</nav>
-    <div className="system-state"><span>LOCAL · LIVE</span><SignOutButton /></div>
-  </header>
-  <BottomNav />
-  <AssistantWidget />
-  <main className="subpage"><div className="subpage-inner">
+  void eyebrow;
+  return <AppShell active={active} className="subpage"><div className="subpage-inner">
     <header className="subpage-header">
-      <div><span className="eyebrow">{eyebrow}</span><h1>{title}</h1><p className="muted">{description}</p></div>
-      <a href="/">← 返回下一行动</a>
+      <div><h1>{title}</h1>{description && <p className="muted">{description}</p>}</div>
     </header>
     {children}
-  </div></main></>;
+  </div></AppShell>;
 }

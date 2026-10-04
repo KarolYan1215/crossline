@@ -1,18 +1,15 @@
 import type { CSSProperties } from "react";
-import { ArrowUpRight, CircleDot, Clock3 } from "lucide-react";
 import { OfflineCaptureForm, OfflineReplay } from "./offline-command-forms";
 import { BatchCaptureForm } from "./batch-capture-form";
 import { AnalogClock } from "./analog-clock";
 import { EnergyProbe } from "./energy-probe";
 import { LocalActivityConsent } from "./local-activity-consent";
-import { FlywheelStrip } from "./identity-flywheel";
-import { TaskPreview, MilestonePreview } from "./task-preview";
+import { TaskPreview } from "./task-preview";
 import type { TaskDetail, MilestoneDetail } from "../lib/task-detail";
-import { SignOutButton } from "./sign-out-button";
-import { NAV_ITEMS } from "./nav-items";
-import { BottomNav } from "./bottom-nav";
-import { AssistantWidget } from "./assistant-widget";
+import { AppShell } from "./app-shell";
 import { ExecutionActions } from "./execution-actions";
+import { CalendarPanel } from "./timeline/calendar-panel";
+import type { CalendarData } from "./plan/plan-view";
 
 export type DashboardAction = {
   id: string;
@@ -55,28 +52,27 @@ export type DashboardData = {
   todayCapacity: { availableMinutes: number; committedMinutes: number };
   flywheel: Array<{ id: string; fromTitle: string; toTitle: string; kindLabel: string; explanation: string | null; pending: boolean }>;
   identities: Array<{ id: string; label: string; accent: string; completedCount: number; activeMilestone: string; taskCount: number; totalCount: number; pct: number }>;
-  /** Milestone-centric nodes + edges behind the homepage's flywheel strip — every milestone touched by a
-   * real, LLM-judged relation (approved or still-candidate), ordered by recency, connected by the actual
-   * relations between them. Not limited to today's active work. */
   flywheelStrip: {
     nodes: Array<{ id: string; identityId: string; title: string; latestSignal: string }>;
     edges: Array<{ from: string; to: string; count: number; pending: boolean; kindLabel: string }>;
   };
-  /** `time` is the scheduler's real `HH:mm–HH:mm` for today, present only when it actually placed this
-   * order; absent means genuinely not yet scheduled, which `status` then says in words rather than
-   * leaving a blank clock reading that looks like a bug. */
+  /** `time` is the scheduler's real `HH:mm–HH:mm` for today, present only when it actually placed this order. */
   upcoming: Array<{ id: string; title: string; status: string; identityId: string; time?: string; milestoneTitle?: string }>;
   localActivityAsked: boolean;
+  /** True when minutes-only collection was agreed to but the detailed level never asked about. */
+  activityDetailUpgrade?: boolean;
   lastNight:
     | { state: "none" }
     | { state: "ran"; proposals: number }
     | { state: "skipped"; reason: string };
   milestonePulse: Array<{ id: string; identity: string; title: string; evidence: string }>;
-  /** One batched read behind every preview drawer on this page — computed once in `page.tsx` (not
-   * `loadDashboard` itself, to avoid a circular import with `lib/task-detail.ts`) and handed down here
-   * so no card's preview independently re-reads the whole workspace. */
+  /** One batched read behind every preview drawer on this page, computed once in `page.tsx`. */
   taskDetailById: Map<string, TaskDetail>;
   milestoneDetailById: Map<string, MilestoneDetail>;
+  /** What the day timeline draws. Absent in tests that only care about the cards. */
+  calendar?: CalendarData;
+  /** Present only when the person agreed to the detailed screen record; a reading, with its reasons, never a verdict. */
+  workState?: { state: string; label: string; confidence: "low" | "medium" | "high"; reasons: string[] };
 };
 
 // Never a bare number: an estimate without its provenance is indistinguishable from a measurement.
@@ -103,13 +99,8 @@ const capacityLabel = (capacity: DashboardData["capacity"]) =>
 
 export function DashboardView({ data }: { data: DashboardData }) {
   const identityLabel = (id: string) => data.identities.find((item) => item.id === id)?.label ?? (id === "capacity" ? "容量策略" : id);
-  // The whole card is a real `<a>` to its detail page — bookmarkable, works with no JS — and a small
-  // corner button opens the same detail as a quick-peek drawer without leaving Today. Two separate
-  // triggers instead of one click trying to decide between "navigate" and "preview".
-  // Full start/pause/complete+evidence controls, directly on the card — the same `ExecutionActions`
-  // Workbench and the task detail page already embed, keyed off the same batch-loaded `TaskDetail` this
-  // page already reads for `TaskPreview`, so this costs no extra query. Falls back to the old "go to the
-  // detail page" link only in the (today theoretical) case a card's own detail failed to load.
+  // The whole card is a real `<a>` to its detail page, and a small corner button opens the same detail as a
+  // quick peek without leaving Today: two separate triggers instead of one click trying to be both.
   const inlineActions = (item: DashboardAction) => {
     const detail = data.taskDetailById.get(item.id);
     return detail
@@ -119,184 +110,97 @@ export function DashboardView({ data }: { data: DashboardData }) {
       : <a className="primary-button" href={`/workbench/${encodeURIComponent(item.id)}`}>前往任务详情执行并提交证据</a>;
   };
 
-  const action = (item: DashboardAction | undefined, label: string) => <article className="alt-action">
-    <header><span>{label}</span><ArrowUpRight size={13} aria-hidden="true" /></header>
-    {item ? <><a className="card-cover-link" href={`/workbench/${encodeURIComponent(item.id)}`} aria-label={item.title} />
+  const load = data.todayCapacity.availableMinutes > 0
+    ? Math.min(100, Math.round(data.todayCapacity.committedMinutes / data.todayCapacity.availableMinutes * 100))
+    : data.todayCapacity.committedMinutes > 0 ? 100 : 0;
+
+  const alt = (item: DashboardAction | undefined, label: string) => <article className="panel alt-action" data-line={item?.identityId}>
+    <header><h3>{label}</h3>{item && <span className="tag">{identityLabel(item.identityId)}</span>}</header>
+    {item ? <>
+      <a className="card-cover-link" href={`/workbench/${encodeURIComponent(item.id)}`} aria-label={item.title} />
       <TaskPreview detail={data.taskDetailById.get(item.id)} />
-      <h3>{item.title}</h3>
-      {/* The milestone this card feeds sits on the card itself — a separate MILESTONE PULSE list further
-          down used to be the only place that answered "what is this for", which meant leaving the card
-          to find out. */}
+      <h4>{item.title}</h4>
       <p className="card-milestone">→ {item.milestone}</p>
-      <p>{item.reason}</p><small>{identityLabel(item.identityId)} · {estimateLabel(item.estimate)}</small>
-      {inlineActions(item)}</> : <p>暂无可执行项</p>}
+      <small>{estimateLabel(item.estimate)}</small>
+      {inlineActions(item)}</> : <p className="muted">暂无可执行项</p>}
   </article>;
 
-  return <main className="page"><OfflineReplay workspaceId={data.workspaceId} />
-    <header className="running-head">
-      <a className="wordmark" href="/">CROSSLINE<sup>01</sup></a>
-      <nav aria-label="主导航">{NAV_ITEMS.map((item) => <a className={item.label === "Today" ? "active" : ""} href={item.href} key={item.label}>{item.label}</a>)}</nav>
-      <div className="system-state"><CircleDot size={11} aria-hidden="true" /><span>LOCAL</span><SignOutButton /></div>
-    </header>
-    <BottomNav active="Today" />
-    <AssistantWidget />
+  const hasSeed = [data.primary, ...data.upcoming].some((item) => item && data.taskDetailById.get(item.id)?.seeded);
 
-    <section className="day-head">
-      <AnalogClock nowIso={data.nowIso} timeZone={data.timeZone} fixed={data.clockPinned} />
-      <div><span className="mono-label">TODAY / {data.monthLabel}</span><div className="day-number">{data.dateLabel}</div></div>
-      <div className="now-state"><Clock3 size={14} aria-hidden="true" /><span>{data.nowLabel}</span><strong>{capacityLabel(data.capacity)}</strong>
-        {data.capacity.blockers.map((blocker) => <em key={blocker.code} className="capacity-blocker">{blocker.message}</em>)}
-        {data.energyLearning && <em className="capacity-blocker">{data.energyLearning.status === "personal_calibrated"
-          ? `个人已校准 · ${data.energyLearning.count} 次前瞻记录`
-          : `精力转移采用可解释规则 · ${data.energyLearning.count} 次前瞻记录，尚未证明优于静态基线`}</em>}
-      </div>
-    </section>
-
-    {/* Task list first: the day-head is orientation, this is the thing the person came here to do —
-        it used to sit after two care-bands and a capture form, four sections of reading before it. */}
-    {[data.primary, ...data.upcoming].some((item) => item && data.taskDetailById.get(item.id)?.seeded)
-      && <p role="note" className="seed-notice">下面有系统首次启动时预置的示例作业（用来演示流程）。不需要的可以直接丢弃；收集你自己的第一项任务后，它们就不再重要。</p>}
-    <section className="today-grid">
-      <article className="hero-action">
-        <header><span>01 / NEXT ACTION · 下一行动</span><span>INPUTS {data.primary?.inputsReady ? "READY" : "CHECK"}</span></header>
-        {data.primary ? <>
-          <TaskPreview detail={data.taskDetailById.get(data.primary.id)} />
-          <div className={`identity-glyph ${data.primary.identityId}`} aria-hidden="true" />
-          <h1>{data.primary.title}</h1>
-          <p>{data.primary.reason}</p>
-          {/* Quick actions below cover start/pause/complete — background资料、材料清单、执行记录等完整上下文
-              仍只在独立详情页展示，这里补一个明显的跳转入口，不然 hero 卡片会丢失此前"CTA 即跳转"时附带的
-              导航能力。 */}
-          <a className="hero-detail-link" href={`/workbench/${encodeURIComponent(data.primary.id)}`}>查看完整详情 →</a>
-          <dl>
-            <div><dt>WINDOW</dt><dd>{estimateLabel(data.primary.estimate)}</dd></div>
-            {/* This is the energy the work itself asks for, not the reading in the header — two different
-                things both labelled ENERGY read as the app contradicting itself. */}
-            <div><dt>NEEDS · 所需精力</dt><dd>{energyLabel[data.primary.energy ?? ""] ?? "未声明"}</dd></div>
-            <div><dt>MILESTONE</dt><dd>{data.primary.milestone}</dd></div>
-          </dl>
-          {/* Fully inlined — start/pause/complete+evidence (and any pre-generated checklist questions)
-              happen right here, so the card itself is a quick-submit window and never requires the
-              Workbench detour it used to force on every completion. */}
-          {inlineActions(data.primary)}
-        </> : <p>先收集一项真实工作，系统会拆解并等待计划批准。</p>}
-      </article>
-
-      <aside className="action-margin">
-        {data.higherPriority && action(data.higherPriority, "HIGHER PRIORITY · 更高优先级")}
-        {action(data.lowEnergy, "LOW ENERGY · 低精力备选")}
-        {action(data.shortGap, "SHORT GAP · 短空档备选")}
-      </aside>
-    </section>
-
-    {/* Today's own weekly-pattern capacity read against what is already on the books — not the
-        calendar-adjusted multi-week forecast Plan owns, just a same-day gut check next to the task
-        that just asked for a window. */}
-    <section className="care-band" aria-label="今天的执行时间安排">
-      <strong>TODAY LOAD</strong>
-      <dl>
-        <div><dt>今天可用（周模式）</dt><dd>{data.todayCapacity.availableMinutes} 分钟</dd></div>
-        <div><dt>待办合计（p50 先验）</dt><dd>{data.todayCapacity.committedMinutes} 分钟</dd></div>
-        <div>
-          <dt>占用比例</dt>
-          <dd><div className="time-bar"><div className="time-bar-fill" style={{
-            "--pct": `${data.todayCapacity.availableMinutes > 0
-              ? Math.min(100, Math.round(data.todayCapacity.committedMinutes / data.todayCapacity.availableMinutes * 100))
-              : data.todayCapacity.committedMinutes > 0 ? 100 : 0}%`
-          } as CSSProperties} /></div></dd>
-        </div>
-      </dl>
-    </section>
-
-    {/* What the star map only ever shows as an edge and a one-word kind label — the plain-English
-        "doing A moves B forward" for whatever milestones today's actionable work already sits under. */}
-    {data.flywheel.length > 0 && <section className="milestone-pulse" aria-label="跨主线关系">
-      <header><span>FLYWHEEL · 跨主线支持</span><a href="/milestones">OPEN MAP →</a></header>
-      {data.flywheel.map((item) => <article key={item.id}>
-        <span>{item.kindLabel}</span>
-        <strong>{item.fromTitle} → {item.toTitle}</strong>
-        <small>{item.explanation ?? "尚未写明关系依据"}{item.pending ? " · 待周复盘确认" : ""}</small>
-      </article>)}
-    </section>}
-
-    <section className="care-band" aria-label="健康容量策略">
-      <strong>CARE / CAPACITY</strong>
-      <dl>{data.care.length ? data.care.map((item) => <div key={item.title}><dt>{item.title}</dt><dd>最低 {item.minimumMinutes} 分钟</dd></div>)
-        : <div><dt>容量承诺</dt><dd>未设置 · 在 Workbench 记录后显示</dd></div>}
-        <div><dt>ENERGY CHECK</dt><dd><EnergyProbe /></dd></div></dl>
-      <LocalActivityConsent asked={data.localActivityAsked} />
+  return <>
+    <OfflineReplay workspaceId={data.workspaceId} />
+    <AppShell active="今日">
+      <section className="day-head" aria-label="今天">
+        <AnalogClock nowIso={data.nowIso} timeZone={data.timeZone} fixed={data.clockPinned} />
+        <div className="day-title"><h1>{data.dateLabel} 日 <small>{data.monthLabel}</small></h1><span>{data.nowLabel}</span></div>
+        <dl className="day-stats">
+          <div><dt>精力</dt><dd>{capacityLabel(data.capacity)}</dd></div>
+          <div><dt>今天可用 / 待办</dt><dd>{data.todayCapacity.availableMinutes} / {data.todayCapacity.committedMinutes} 分钟
+            <span className="time-bar" aria-hidden="true"><span className="time-bar-fill" style={{ "--pct": `${load}%` } as CSSProperties} /></span></dd></div>
+          {data.workState && <div data-testid="work-state"><dt>此刻状态</dt><dd title={data.workState.reasons.join(" ")}>{data.workState.label}
+            <small> · {{ low: "把握低", medium: "把握中", high: "把握高" }[data.workState.confidence]}</small></dd></div>}
+          <div><dt>本周完成</dt><dd>{data.progress.weekCount} 件 · 连续 {data.progress.streakDays} 天</dd></div>
+        </dl>
+        <div className="day-energy"><span>精力自评</span><EnergyProbe /></div>
+      </section>
+      {data.capacity.blockers.map((blocker) => <p key={blocker.code} className="capacity-blocker">{blocker.message}</p>)}
+      {hasSeed && <p role="note" className="seed-notice">下面有系统预置的示例作业（用来演示流程），不需要的可以直接丢弃。</p>}
       {data.capacity.level === "low" && <div className="rest-prompt">
         <p>当前精力低：建议留 10 分钟休息。休息后重新自评，系统会重排今天的建议；高负荷任务暂不视为已准备好。</p>
         <EnergyProbe context="after_rest" />
       </div>}
-      {data.lastNight.state !== "none" && <p className="last-night">
-        {data.lastNight.state === "ran"
-          ? `昨夜扩展 · 产出 ${data.lastNight.proposals} 条候选`
-          : `昨夜未运行 · ${data.lastNight.reason}`}
-      </p>}
-    </section>
 
-    {/* Two weeks of real work used to leave zero trace on this page — the count lived only on Review.
-        Plain counts, no streak-protection nudge: a day with nothing accepted reads as a real 0. */}
-    <section className="care-band" aria-label="完成节奏">
-      <strong>PROGRESS</strong>
-      <dl>
-        <div><dt>本周完成</dt><dd>{data.progress.weekCount} 件</dd></div>
-        <div><dt>连续天数</dt><dd>{data.progress.streakDays} 天</dd></div>
-      </dl>
-    </section>
+      <section className="today-grid" aria-label="下一步">
+        <article className="hero-action panel" data-line={data.primary?.identityId}>
+          <header><h2>下一步</h2>{data.primary && <span className="tag">{identityLabel(data.primary.identityId)}</span>}
+            <small>输入{data.primary?.inputsReady ? "就绪" : "待检查"}</small></header>
+          {data.primary ? <>
+            <TaskPreview detail={data.taskDetailById.get(data.primary.id)} />
+            <h3 className="hero-title">{data.primary.title}</h3>
+            <p>{data.primary.reason}</p>
+            <p className="hero-meta">
+              <span>窗口 {estimateLabel(data.primary.estimate)}</span>
+              <span>所需精力 {energyLabel[data.primary.energy ?? ""] ?? "未声明"}</span>
+              <span>里程碑 {data.primary.milestone}</span>
+              <a className="hero-detail-link" href={`/workbench/${encodeURIComponent(data.primary.id)}`}>完整详情 →</a>
+            </p>
+            {inlineActions(data.primary)}
+          </> : <p>先收集一项真实工作，系统会拆解并等待计划批准。</p>}
+        </article>
+        <div className="grid-auto alt-grid">
+          {data.higherPriority && alt(data.higherPriority, "更高优先级")}
+          {alt(data.lowEnergy, "低精力备选")}
+          {alt(data.shortGap, "短空档备选")}
+        </div>
+      </section>
 
-    {/* A horizontally-scrolling strip of milestones touched by a real, LLM-judged relation — not
-        per-identity percentages, per the redesign: nodes are milestones, ordered by recency so newly
-        active ones sit at the right edge, connected by desaturated flow arrows instead of the earlier
-        saturated-fill diagram. Grounded in the same `milestone_relations` the star map already reads. */}
-    <section className="identity-pulse" aria-label="跨主线飞轮长条">
-      <header><span>04 / FLYWHEEL STRIP · 跨主线流向</span><a href="/milestones">OPEN MAP →</a></header>
-      <FlywheelStrip identities={data.identities} nodes={data.flywheelStrip.nodes} edges={data.flywheelStrip.edges} />
-    </section>
+      {data.calendar && <section className="panel" aria-label="今天的时间轴">
+        <header><h2>今天的时间轴</h2><a href="/plan">打开计划 →</a></header>
+        <CalendarPanel items={data.calendar.items} deadlines={data.calendar.deadlines} today={data.calendar.today} nowIso={data.calendar.nowIso}
+          timeZone={data.calendar.timeZone} labels={data.calendar.labels} quietByWeekday={data.calendar.quietByWeekday} />
+      </section>}
 
-    <section className="capture-line" aria-labelledby="capture-title">
-      <div><span className="mono-label">INBOX / 00</span><h2 id="capture-title">快速收集</h2></div>
-      <OfflineCaptureForm ownerId={data.principalId} workspaceId={data.workspaceId} />
-      <BatchCaptureForm ownerId={data.principalId} workspaceId={data.workspaceId} />
-    </section>
+      <section className="lines-strip" aria-label="各主线现在在哪">
+        {data.identities.map((line) => <a key={line.id} className="panel line-card" data-line={line.id} href="/milestones">
+          <header><h3>{line.label}</h3><small>{line.taskCount} 项进行中</small></header>
+          <p>{line.activeMilestone}</p>
+          <span className="flow-progress" aria-hidden="true"><i style={{ width: `${line.pct}%` }} /></span>
+        </a>)}
+      </section>
 
-    <section className="lower-grid">
-      <div className="timeline-list">
-        <header><span>02 / TODAY'S LINE</span><a href="/plan">OPEN PLAN →</a></header>
-        {/* Only a real work order has a detail page to link to — an unclassified capture (identityId
-            "unclassified") has no milestone, materials or execution yet, so it stays plain text here
-            rather than linking to a detail page that would just say "not found". */}
-        {data.upcoming.map((item) => <article key={item.id}>
-          {item.identityId !== "unclassified" && <>
-            <a className="card-cover-link" href={`/workbench/${encodeURIComponent(item.id)}`} aria-label={item.title} />
-            <TaskPreview detail={data.taskDetailById.get(item.id)} />
-          </>}
-          <time className={item.time ? "time-precise" : "time-vague"}>{item.time ?? "—"}</time>
-          <span className={`line-symbol ${item.identityId}`} />
-          <div>
-            <strong>{item.title}</strong>
-            {item.milestoneTitle && <span className="card-milestone">→ {item.milestoneTitle}</span>}
-            <small>{identityLabel(item.identityId)} · {item.status}</small>
-          </div>
-        </article>)}
-      </div>
-      <div className="milestone-pulse">
-        <header><span>03 / MILESTONE PULSE</span><a href="/milestones">OPEN MAP →</a></header>
-        {/* Real `milestonePulse` rows carry a real milestone id; the identity-based fallback (shown only
-            when nothing has any pulse yet) has nothing to link to — `activeMilestone` there is a title
-            string, not an id — so it stays plain text. */}
-        {(data.milestonePulse.length
-          ? data.milestonePulse.map((item) => ({ ...item, linkable: true }))
-          : data.identities.slice(0, 4).map((item) => ({ id: item.id, identity: item.label, title: item.activeMilestone, evidence: `${item.taskCount} active`, linkable: false }))
-        ).map((item) => <article key={item.id}>
-          {item.linkable && <>
-            <a className="card-cover-link" href={`/milestones/${encodeURIComponent(item.id)}`} aria-label={item.title} />
-            <MilestonePreview detail={data.milestoneDetailById.get(item.id)} />
-          </>}
-          <span>{item.identity}</span><strong>{item.title}</strong><small>{item.evidence}</small>
-        </article>)}
-      </div>
-    </section>
-  </main>;
+      <section className="panel capture-line" aria-labelledby="capture-title">
+        <header><h2 id="capture-title">快速收集</h2><small>写下来就行，系统会自己分类、估时</small></header>
+        <OfflineCaptureForm ownerId={data.principalId} workspaceId={data.workspaceId} />
+        <BatchCaptureForm ownerId={data.principalId} workspaceId={data.workspaceId} />
+      </section>
+
+      <section className="care-band" aria-label="健康容量策略">
+        {data.care.length > 0 && <dl>{data.care.map((item) => <div key={item.title}><dt>{item.title}</dt><dd>最低 {item.minimumMinutes} 分钟</dd></div>)}</dl>}
+        <LocalActivityConsent asked={data.localActivityAsked} upgrade={Boolean(data.activityDetailUpgrade)} />
+        {data.lastNight.state !== "none" && <p className="last-night">
+          {data.lastNight.state === "ran" ? `昨夜扩展 · 产出 ${data.lastNight.proposals} 条候选` : `昨夜未运行 · ${data.lastNight.reason}`}
+        </p>}
+      </section>
+    </AppShell>
+  </>;
 }

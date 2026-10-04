@@ -78,7 +78,7 @@ export function createWeeklyInsight(store: CrosslineStore, workspaceId: string, 
       prepareInput: () => context,
       validateOutput: (output) => validateWeeklyInsight(output, context),
       onAudit: () => {},
-      timeoutMs: 10 * 60_000
+      timeoutMs: 60 * 60_000
     });
     if (!result.ok) return { state: "blocked", code: result.blocker.code, message: result.blocker.message };
     const runId = `${now.toISOString().slice(0, 10)}:${Date.now()}`;

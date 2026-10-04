@@ -1,5 +1,5 @@
 /**
- * Read-only ledger inspector used by the acceptance protocol (`docs/acceptance-protocol.md`).
+ * Read-only ledger inspector used by the acceptance protocol (`docs/archive/acceptance-protocol.md`).
  *
  * Every protocol step is required to leave evidence that can be re-read afterwards, which means the
  * evidence has to be readable without the web app running and without opening SQLite by hand. This

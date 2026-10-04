@@ -51,3 +51,16 @@ test("dependency is completed before its dependent even when the dependent goal 
   expect(blocked.goals.find((goal) => goal.milestoneId === "urgent")?.bottleneck)
     .toBe("八周内容量或步骤依赖不足");
 });
+
+test("finishing at p85 with no days to spare is flagged: a deadline is met with room left, not on the last day", () => {
+  const goal = (confirmedDeadline: string) => [{ id: "g", title: "G", importance: "important" as const, confirmedDeadline }];
+  const work = [task("w", "g", 100)];
+  const finish = forecastGoals(goal("2026-12-31"), work, days).goals[0]!;
+  expect(finish.p85Day).toBeTruthy();
+  const wide = forecastGoals(goal("2026-12-31"), work, days).goals[0]!;
+  expect(wide.slackDays).toBeGreaterThan(2);
+  expect(wide.bottleneck).toBeNull();
+  const tight = forecastGoals(goal(finish.p85Day!), work, days).goals[0]!;
+  expect(tight.slackDays).toBe(0);
+  expect(tight.bottleneck).toContain("没有留出 2 天的余量");
+});

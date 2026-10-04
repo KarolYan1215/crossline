@@ -12,25 +12,24 @@
  */
 
 :root{
-  --paper:#FBF9F3;
-  --ink:#010904;
-  --graphite:#5A5B54;
-  /* Was #9C9B8D — 2.66:1 against --paper, well under WCAG AA's 4.5:1 floor for normal text, and this
-     token is used as text (dt labels, secondary captions, the flywheel milestone label), not just
-     decoration. Recomputed in the same hue via the relative-luminance formula to land at 4.62:1. */
-  --shade:#737264;
-  --mist:#DCD7C9;
-  --chalk:#F2EFE4;
-  --grid:rgba(1,9,4,.022);
-  --block:#010904;
-  --now:#2FBF89;
-  --now-ink:#0A6544;
-  --f-display:"Archivo Black","Noto Sans SC",system-ui,sans-serif;
-  --f-sans:"Noto Sans SC",-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",system-ui,sans-serif;
-  --f-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --paper:#FFFFFF;
+  --ink:#0A0A0A;
+  /* Secondary text. 8.9:1 on white; the old pair (6.5 and 4.6) was under the 7:1 this system now holds itself to. */
+  --graphite:#454545;
+  --shade:#595959;
+  --mist:#CFCFCF;
+  --chalk:#F3F3F3;
+  --grid:transparent;
+  --block:#0A0A0A;
+  --now:#085E3A;
+  --now-ink:#0B7A4B;
+  /* One typeface everywhere: Arial, with the system's CJK sans behind it. */
+  --f-display:Arial,"Microsoft YaHei","PingFang SC","Noto Sans SC",Helvetica,sans-serif;
+  --f-sans:Arial,"Microsoft YaHei","PingFang SC","Noto Sans SC",Helvetica,sans-serif;
+  --f-mono:Arial,"Microsoft YaHei","PingFang SC","Noto Sans SC",Helvetica,sans-serif;
+  /* The five line colours: distinguishable by hue and by lightness, each at least 4.5:1 on white as text. */
+  --c-research:#0A5198; --c-startup:#8C3709; --c-media:#792E9C; --c-investment:#085E3A; --c-health:#664E00;
   color-scheme:light;
-  /* Kept as aliases so any stylesheet or component still reaching for the old names lands on a real
-     colour instead of an unset variable. */
   --line:var(--mist);
   --muted:var(--graphite);
   --signal:var(--ink);
@@ -38,20 +37,24 @@
 @media (prefers-color-scheme:dark){
   :root:not([data-theme="light"]){
     color-scheme:dark;
-    /* --shade was #6A6659 — 3.51:1 against dark --paper, also under AA. Recomputed to 4.62:1. */
-    --paper:#010904; --ink:#EDE9DC; --graphite:#948F80; --shade:#7D7969;
-    --mist:#2B3230; --chalk:#07110E; --grid:rgba(237,233,220,.028);
-    --block:#E7E2D3; --now:#5FE3AE; --now-ink:#5FE3AE;
+    --paper:#0B0B0B; --ink:#F2F2F2; --graphite:#C4C4C4; --shade:#ABABAB;
+    --mist:#3A3A3A; --chalk:#171717; --grid:transparent;
+    --block:#F2F2F2; --now:#5FE3AE; --now-ink:#5FE3AE;
+    --c-research:#6CB2FF; --c-startup:#FF9B5C; --c-media:#D79BFF; --c-investment:#5FE3AE; --c-health:#E8C547;
   }
 }
 :root[data-theme="dark"]{
   color-scheme:dark;
-  --paper:#010904; --ink:#EDE9DC; --graphite:#948F80; --shade:#7D7969;
-  --mist:#2B3230; --chalk:#07110E; --grid:rgba(237,233,220,.028);
-  --block:#E7E2D3; --now:#5FE3AE; --now-ink:#5FE3AE;
+  --paper:#0B0B0B; --ink:#F2F2F2; --graphite:#C4C4C4; --shade:#ABABAB;
+  --mist:#3A3A3A; --chalk:#171717; --grid:transparent;
+  --block:#F2F2F2; --now:#5FE3AE; --now-ink:#5FE3AE;
+  --c-research:#6CB2FF; --c-startup:#FF9B5C; --c-media:#D79BFF; --c-investment:#5FE3AE; --c-health:#E8C547;
 }
 
 *{box-sizing:border-box}
+/* The browser's default `small` is 0.83em of the body, which is under the 12px floor; `code` would otherwise fall back to monospace. */
+small{font-size:12px}
+code,kbd,pre,samp{font-family:inherit}
 html{scroll-behavior:smooth}
 /* Fluid scale, not a handful of breakpoint jumps: tuned so a 1920×1080 window (this app's actual daily
    driver) lands close to the old fixed 15.5px/16px, a narrower laptop window settles at the floor, and a
@@ -59,24 +62,21 @@ html{scroll-behavior:smooth}
    would keep growing forever on a big enough panel, so every fluid size here is clamp()ed top and bottom. */
 body{
   margin:0;background:var(--paper);color:var(--ink);
-  font-family:var(--f-sans);font-size:clamp(15px,0.5vw + 6.4px,18px);line-height:1.44;
+  font-family:var(--f-sans);font-size:14px;line-height:1.35;
   -webkit-font-smoothing:antialiased;
-  background-image:
-    repeating-linear-gradient(to right,var(--grid) 0 1px,transparent 1px 28px),
-    repeating-linear-gradient(to bottom,var(--grid) 0 1px,transparent 1px 28px);
 }
 a{color:inherit;text-decoration:none}
 button{font:inherit;color:inherit;background:none;border:none;cursor:pointer;padding:0}
 input,select,textarea{font:inherit;color:inherit;background:var(--paper);border:1px solid var(--mist);border-radius:0;padding:6px 8px}
 input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-visible,a:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--ink);outline-offset:1px}
 .mono{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
-.micro,.mono-label,.eyebrow{font-family:var(--f-mono);font-size:clamp(10px,0.12vw + 9.7px,12px);letter-spacing:.12em;text-transform:uppercase;color:var(--graphite)}
+.micro,.mono-label,.eyebrow{font-family:var(--f-mono);font-size:12px;color:var(--graphite)}
 .muted{color:var(--graphite)}
 .sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 /* The one place that names what the milestone tag under a task title looks like everywhere it appears —
    Today's cards, Workbench, and both Plan lenses all reuse this one class instead of four near-duplicates. */
 .card-milestone{margin:2px 0 0;font-size:.85em;color:var(--graphite);line-height:1.4}
-.seed-notice{margin:6px 0;padding:6px 10px;border-left:3px solid var(--graphite);background:var(--mist);font-size:.85em;color:var(--graphite);line-height:1.5}
+.seed-notice{margin:6px 0;padding:6px 10px;border-left:3px solid var(--graphite);background:var(--chalk);font-size:13px;color:var(--graphite);line-height:1.5}
 
 /* ── shell ─────────────────────────────────── */
 .page{width:min(94vw,1900px);min-height:100vh;margin:0 auto;padding-inline:16px;padding-block:0 28px}
@@ -84,16 +84,16 @@ input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-vis
   position:sticky;top:0;z-index:40;display:flex;align-items:center;gap:12px;
   padding:5px 0 4px;background:var(--paper);border-bottom:1.5px solid var(--ink);
 }
-.wordmark,.brand-mark{font-family:var(--f-display);font-size:16px;letter-spacing:.01em;white-space:nowrap}
-.wordmark sup{margin-left:8px;font-family:var(--f-mono);font-weight:500;font-size:10px;letter-spacing:.16em;color:var(--graphite);text-transform:uppercase;vertical-align:baseline}
+.wordmark,.brand-mark{font-family:var(--f-display);font-size:16px;white-space:nowrap}
+.wordmark sup{margin-left:8px;font-family:var(--f-mono);font-weight:500;font-size:12px;color:var(--graphite);vertical-align:baseline}
 .running-head nav{display:flex;gap:2px;flex-wrap:wrap}
-.running-head nav a{font-family:var(--f-mono);font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;padding:5px 11px;color:var(--graphite);border:1px solid transparent}
+.running-head nav a{font-family:var(--f-mono);font-size:12px;padding:5px 11px;color:var(--graphite);border:1px solid transparent}
 .running-head nav a:hover{color:var(--ink)}
 .running-head nav a.active{background:var(--ink);color:var(--paper)}
 /* The hairline that pushes the status stamp to the far edge — the reference's one structural flourish. */
 .running-head::after{content:"";flex:1;height:1px;background:var(--mist);min-width:10px;order:2}
 .running-head nav{order:1}
-.system-state{order:3;display:flex;align-items:center;gap:10px;white-space:nowrap;font-family:var(--f-mono);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--graphite)}
+.system-state{order:3;display:flex;align-items:center;gap:10px;white-space:nowrap;font-family:var(--f-mono);font-size:12px;color:var(--graphite)}
 /* Hidden above phone width; `@media (max-width:680px)` below turns it into the fixed bottom tab bar
    that replaces the plain-text top nav, which used to wrap onto two or three lines at that width. */
 .bottom-nav{display:none}
@@ -101,9 +101,9 @@ input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-vis
 .bottom-nav-more>summary{list-style:none}
 .bottom-nav-more>summary::-webkit-details-marker{display:none}
 .bottom-nav-more-panel{position:absolute;bottom:100%;left:0;right:0;background:var(--paper);border:1px solid var(--ink);display:grid}
-.bottom-nav-more-panel a{display:block;padding:10px 14px;font-family:var(--f-mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--graphite)}
+.bottom-nav-more-panel a{display:block;padding:10px 14px;font-family:var(--f-mono);font-size:12px;color:var(--graphite)}
 .system-state b,.system-state strong{border:1px solid var(--mist);padding:2px 6px;font-weight:400}
-.status-badge{font-family:var(--f-mono);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;border:1px solid var(--mist);padding:2px 6px;color:var(--graphite)}
+.status-badge{font-family:var(--f-mono);font-size:12px;border:1px solid var(--mist);padding:2px 6px;color:var(--graphite)}
 
 /* ── day head ──────────────────────────────── */
 .day-head{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:clamp(10px,1.6vw,18px);align-items:center;padding:14px 0 10px;border-bottom:1.5px solid var(--ink)}
@@ -111,7 +111,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-vis
 .analog-clock .ac-ring{fill:none;stroke:var(--ink);stroke-width:1.5}
 .analog-clock .ac-tick{stroke:var(--mist);stroke-width:1}
 .analog-clock .ac-tick.major{stroke:var(--ink);stroke-width:2.6}
-.analog-clock .ac-nums text{fill:var(--graphite);font-family:var(--f-mono);font-size:9.5px;letter-spacing:.08em}
+.analog-clock .ac-nums text{fill:var(--graphite);font-family:var(--f-mono);font-size:12px}
 .analog-clock .ac-hand{stroke-linecap:butt}
 .analog-clock .ac-hand.hour{stroke:var(--ink);stroke-width:5.5}
 .analog-clock .ac-hand.minute{stroke:var(--ink);stroke-width:3}
@@ -120,35 +120,31 @@ input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-vis
 .analog-clock .ac-second-dot{fill:var(--now)}
 .analog-clock .ac-pin{fill:var(--ink)}
 .analog-clock .ac-pin-core{fill:var(--paper)}
-.day-number{font-family:var(--f-display);font-size:clamp(34px,4.6vw,60px);line-height:.86;letter-spacing:-.02em}
-.now-state{justify-self:end;display:grid;gap:3px;justify-items:end;font-family:var(--f-mono);font-size:10.5px;letter-spacing:.08em;color:var(--graphite)}
 /* Ink, not green. The single green is reserved for "now" — the clock hand and the current-time mark —
    and spending it on a capacity reading would make the one live signal stop meaning anything. */
-.now-state strong{color:var(--ink);font-weight:600}
-.now-state span{color:var(--now-ink);font-weight:600}
 
 /* ── care band ─────────────────────────────── */
 .care-band{display:grid;grid-template-columns:minmax(120px,auto) 1fr;gap:clamp(8px,1vw,14px);align-items:center;padding:8px 0;border-bottom:1px solid var(--ink)}
-.care-band>strong{font-family:var(--f-mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;font-weight:500}
+.care-band>strong{font-family:var(--f-mono);font-size:12px;font-weight:500}
 .care-band dl{margin:0;display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:1px;background:var(--mist);border:1px solid var(--mist);overflow-x:auto}
 .care-band dl div{background:var(--paper);padding:7px 9px;min-width:100px}
-.care-band dt{font-family:var(--f-mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--shade)}
+.care-band dt{font-family:var(--f-mono);font-size:12px;color:var(--shade)}
 .care-band dd{margin:3px 0 0;font-size:12.5px}
 .energy-probe{display:flex;gap:4px;align-items:center;flex-wrap:wrap}
-.energy-probe button{border:1px solid var(--mist);font-family:var(--f-mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;padding:6px 9px;line-height:1}
+.energy-probe button{border:1px solid var(--mist);font-family:var(--f-mono);font-size:12px;padding:6px 9px;line-height:1}
 .energy-probe button:hover{border-color:var(--ink)}
-.energy-probe em,.energy-probe-state{font-family:var(--f-mono);font-size:9.5px;font-style:normal;letter-spacing:.08em;color:var(--now-ink)}
+.energy-probe em,.energy-probe-state{font-family:var(--f-mono);font-size:12px;font-style:normal;color:var(--now-ink)}
 .consent-ask{padding:8px 0;border-bottom:1px solid var(--mist);display:grid;gap:6px}
-.consent-ask h2{margin:0;font-size:13.5px;font-weight:700;letter-spacing:.06em}
+.consent-ask h2{margin:0;font-size:13.5px;font-weight:700}
 .consent-ask p{margin:0;color:var(--graphite);font-size:12.5px;line-height:1.6;max-width:76ch}
 .consent-ask div{display:flex;gap:8px;flex-wrap:wrap}
-.last-night{font-family:var(--f-mono);font-size:10px;letter-spacing:.08em;color:var(--shade)}
+.last-night{font-family:var(--f-mono);font-size:12px;color:var(--shade)}
 .time-bar{height:6px;background:var(--mist);position:relative;min-width:80px}
 .time-bar-fill{position:absolute;inset:0;width:var(--pct,0%);background:var(--ink)}
 
 /* ── capture ───────────────────────────────── */
 .capture-line{display:grid;grid-template-columns:minmax(120px,auto) 1fr;gap:clamp(8px,1vw,14px);align-items:end;padding:10px 0;border-bottom:1px solid var(--ink)}
-.capture-line h2{margin:3px 0 0;font-size:14.5px;font-weight:700;letter-spacing:.06em}
+.capture-line h2{margin:3px 0 0;font-size:14.5px;font-weight:700}
 .capture-form{display:flex;gap:0;flex-wrap:wrap}
 .capture-form label{flex:1 1 220px;min-width:0}
 .capture-form input{width:100%;min-height:34px;border-right-width:0}
@@ -157,20 +153,16 @@ input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-vis
    the native file picker — dropping or pasting just gives it a second way to fill the same input. */
 .attachment-drop{flex-basis:100%;margin-top:6px;padding:8px 10px;border:1px dashed var(--mist);cursor:pointer;display:grid;gap:4px}
 .attachment-drop.dragging{border-color:var(--ink);background:var(--chalk)}
-.attachment-drop input{border:none;padding:0;min-height:auto;font-size:11px;color:var(--graphite)}
-.attachment-drop small{font-size:10.5px;color:var(--graphite);word-break:break-word}
+.attachment-drop input{border:none;padding:0;min-height:auto;font-size:12px;color:var(--graphite)}
+.attachment-drop small{font-size:12px;color:var(--graphite);word-break:break-word}
 .settings-row{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:8px 0;border-bottom:1px solid var(--mist)}
 .settings-row-actions{display:flex;gap:8px}
-.onboarding-form{display:grid;gap:12px;max-width:640px}
-.onboarding-form label{display:grid;gap:5px}
-.onboarding-form label>span{font-family:var(--f-mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--graphite)}
-.onboarding-form textarea{width:100%;padding:8px 9px;border:1px solid var(--mist);background:var(--paper);color:var(--ink);font:inherit;resize:vertical}
 .batch-capture-form{display:grid;gap:6px;margin-top:6px}
 .batch-capture-form textarea{width:100%;min-height:72px;padding:8px 9px;border:1px solid var(--mist);background:var(--paper);color:var(--ink);font:inherit;resize:vertical}
 .batch-capture-actions{display:flex;gap:8px;align-items:center}
 .primary-button,.secondary-button,.text-button{
   min-height:33px;padding:6px 14px;border:1px solid var(--ink);border-radius:0;
-  font-family:var(--f-mono);font-size:11.5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;cursor:pointer;
+  font-family:var(--f-mono);font-size:12px;font-weight:700;cursor:pointer;
 }
 .primary-button,.capture-form .secondary-button{background:var(--ink);color:var(--paper)}
 .primary-button:hover,.capture-form .secondary-button:hover{background:var(--paper);color:var(--ink)}
@@ -180,12 +172,12 @@ button:disabled{opacity:.4;cursor:not-allowed}
 
 /* ── today grid ────────────────────────────── */
 .today-grid{display:grid;grid-template-columns:minmax(0,2fr) minmax(260px,.8fr);gap:1px;background:var(--mist);border-bottom:1px solid var(--ink)}
-.hero-action,.action-margin{background:var(--paper)}
+.hero-action{background:var(--paper)}
 /* The "stretched link" pattern: an absolutely-positioned, invisible `<a>` sized to the card makes the
    whole card clickable without nesting a real `<button>` (the preview trigger) inside a real `<a>`,
    which HTML forbids. The two sit as siblings; the cover link is behind everything else via z-index. */
 .card-cover-link{position:absolute;inset:0;z-index:0}
-.hero-action,.alt-action,.work-order-list article,.timeline-list article,.milestone-pulse article,
+.hero-action,.alt-action,.work-order-list article,
 .milestone-admin-list li,.review-list li,.approval-ledger article,.review-milestone{position:relative}
 /* Any real interactive element inside a card with a cover link must out-rank it, or the cover link
    silently swallows clicks meant for it — not just buttons and links but every bare form control these
@@ -195,56 +187,40 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .milestone-admin-list a,.milestone-admin-list button,.milestone-admin-list input,.milestone-admin-list select,.milestone-admin-list label,
 .review-list a,.review-list button,.review-list input,.review-list label,
 .approval-ledger a,.approval-ledger button,.approval-ledger summary,
-.review-milestone a,
-.timeline-list a:not(.card-cover-link),.milestone-pulse a:not(.card-cover-link){position:relative;z-index:1}
+.review-milestone a{position:relative;z-index:1}
 .hero-action{padding:14px 0 18px;padding-right:clamp(12px,2vw,28px)}
-.hero-action>header,.timeline-list>header,.milestone-pulse>header,.alt-action>header{display:flex;justify-content:space-between;gap:12px;font-family:var(--f-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--graphite)}
-.hero-action h1{max-width:780px;margin:10px 0;font-family:var(--f-display);font-size:clamp(24px,3.2vw,42px);line-height:1.04;letter-spacing:-.02em}
+.hero-action>header,.alt-action>header{display:flex;justify-content:space-between;gap:12px;font-family:var(--f-mono);font-size:12px;color:var(--graphite)}
+.hero-action h1{max-width:780px;margin:10px 0;font-family:var(--f-display);font-size:clamp(24px,3.2vw,42px);line-height:1.04}
 .hero-action>p{max-width:700px;color:var(--graphite);line-height:1.6;font-size:13.5px}
 .hero-action dl{margin:14px 0 0;display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:1px;background:var(--mist);border:1px solid var(--mist)}
 .hero-action dl div{background:var(--paper);padding:7px 9px}
-.hero-action dt{font-family:var(--f-mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--shade)}
-.hero-action dd{margin:3px 0 0;font-size:11.5px}
-.hero-detail-link{display:inline-block;margin-top:10px;font-family:var(--f-mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--graphite)}
+.hero-action dt{font-family:var(--f-mono);font-size:12px;color:var(--shade)}
+.hero-action dd{margin:3px 0 0;font-size:12px}
+.hero-detail-link{display:inline-block;margin-top:10px;font-family:var(--f-mono);font-size:12px;color:var(--graphite)}
 .hero-detail-link:hover{color:var(--ink)}
-.action-margin{display:grid;grid-template-rows:1fr 1fr;gap:1px;background:var(--mist)}
 .alt-action{background:var(--paper);padding:12px clamp(10px,1.4vw,16px)}
-.alt-action h3{margin:14px 0 6px;font-family:var(--f-display);font-size:17px;letter-spacing:-.01em;line-height:1.1}
+.alt-action h3{margin:14px 0 6px;font-family:var(--f-display);font-size:17px;line-height:1.1}
 .alt-action p{color:var(--graphite);font-size:12px;line-height:1.55}
-.alt-action small{font-family:var(--f-mono);font-size:9px;letter-spacing:.1em;color:var(--shade)}
+.alt-action small{font-family:var(--f-mono);font-size:12px;color:var(--shade)}
 
 /* ── lists ─────────────────────────────────── */
-.lower-grid{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:1px;background:var(--mist)}
-.timeline-list,.milestone-pulse{background:var(--paper)}
-.timeline-list>header,.milestone-pulse>header{padding:10px 14px;border-bottom:1px solid var(--ink)}
-.timeline-list article{display:grid;grid-template-columns:88px 14px 1fr;gap:9px;align-items:center;padding:8px 14px;border-bottom:1px solid var(--mist)}
 /* A scheduler-placed clock time reads as a fact (ink, tabular); a status string standing in for one
    (「已批准 · 等待材料」, or the em dash when nothing was placed today) reads as provisional. */
-.timeline-list time.time-precise{font-family:var(--f-mono);font-variant-numeric:tabular-nums;font-size:12px;font-weight:700;color:var(--ink);letter-spacing:.02em}
-.timeline-list time.time-vague{font-family:var(--f-mono);font-size:11px;color:var(--shade)}
-.timeline-list time{font-family:var(--f-mono);font-size:10px;letter-spacing:.05em;color:var(--graphite)}
 /* Shape-coded identity marker on the Today timeline: a diamond, a circle, a bar — colour is only ever
    secondary, so the row stays readable in monochrome and for anyone who cannot separate the hues. */
 .line-symbol{width:9px;height:9px;border:1px solid var(--ink);rotate:45deg}
 .line-symbol.startup{border-style:dashed;border-radius:50%;rotate:none}
 .line-symbol.media{width:12px;height:0;border-width:0 0 2px;rotate:none;box-shadow:0 4px 0 -1px var(--ink)}
 .line-symbol.investment{border-radius:50%;rotate:none}
-.timeline-list article div,.milestone-pulse article{display:grid;gap:3px}
-.timeline-list strong,.milestone-pulse strong{font-size:13px;font-weight:700}
-.timeline-list small,.milestone-pulse small{font-family:var(--f-mono);font-size:9px;letter-spacing:.05em;color:var(--graphite)}
-.milestone-pulse article{grid-template-columns:78px 1fr;align-items:center;padding:9px 14px;border-bottom:1px solid var(--mist)}
-.milestone-pulse article span{grid-row:1/3;font-family:var(--f-mono);font-size:9.5px;letter-spacing:.1em;color:var(--shade);text-transform:uppercase}
-.capacity-blocker{font-family:var(--f-mono);font-size:9.5px;letter-spacing:.06em;color:var(--ink)}
+.capacity-blocker{font-family:var(--f-mono);font-size:12px;color:var(--ink)}
 
 /* ── identity flywheel ─────────────────────── */
-.identity-pulse{padding:8px 0;border-bottom:1px solid var(--ink)}
-.identity-pulse>header{display:flex;justify-content:space-between;gap:12px;padding-bottom:6px;font-family:var(--f-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--graphite)}
 /* A fixed-height horizontal scroller, not a diagram that grows with its own content — the previous
    version had no height ceiling and could end up taller than the hero action card on a wide screen. */
 .flywheel-strip-scroll{overflow-x:auto;overflow-y:hidden;scroll-snap-type:x proximity;padding-bottom:2px}
 .flywheel-strip-scroll svg{display:block;font-family:var(--f-sans);scroll-snap-align:start}
-.flywheel-chip-title{font-family:var(--f-sans);font-size:11.5px;font-weight:700;fill:var(--ink)}
-.flywheel-chip-signal{font-family:var(--f-mono);font-size:9px;letter-spacing:.04em;fill:var(--graphite)}
+.flywheel-chip-title{font-family:var(--f-sans);font-size:12px;font-weight:700;fill:var(--ink)}
+.flywheel-chip-signal{font-family:var(--f-mono);font-size:12px;fill:var(--graphite)}
 .identity-flywheel-empty{margin:6px 0 0;color:var(--shade);font-size:12px}
 
 /* Shape, not colour, carries state — the reference uses the same glyph vocabulary. */
@@ -257,7 +233,7 @@ button:disabled{opacity:.4;cursor:not-allowed}
 /* ── subpages ──────────────────────────────── */
 .subpage{display:block}
 .subpage-header{display:flex;align-items:flex-end;justify-content:space-between;gap:14px;padding:14px 0 8px;flex-wrap:wrap;border-bottom:1.5px solid var(--ink)}
-.subpage-header h1{margin:0;font-family:var(--f-display);font-size:clamp(19px,2.2vw,25px);letter-spacing:-.005em;line-height:1}
+.subpage-header h1{margin:0;font-family:var(--f-display);font-size:clamp(19px,2.2vw,25px);line-height:1}
 /* The 26×10 ink block that opens every section title in the reference. */
 .subpage-header h1::before{content:"";display:inline-block;width:22px;height:9px;background:var(--block);margin-right:10px;vertical-align:middle}
 .subpage-header p{margin:4px 0 0;max-width:80ch;color:var(--graphite);font-size:12.5px;line-height:1.55}
@@ -266,50 +242,36 @@ button:disabled{opacity:.4;cursor:not-allowed}
 /* ── plan ──────────────────────────────────── */
 .plan-view{display:grid;gap:0}
 .plan-tabs{display:flex;align-items:center;gap:2px;flex-wrap:wrap;border-top:1px solid var(--mist);border-bottom:1.5px solid var(--ink);padding:6px 0;position:sticky;top:33px;background:var(--paper);z-index:30}
-.plan-tabs button{font-family:var(--f-mono);font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;padding:5px 11px;color:var(--graphite);border:1px solid transparent}
+.plan-tabs button{font-family:var(--f-mono);font-size:12px;padding:5px 11px;color:var(--graphite);border:1px solid transparent}
 .plan-tabs button[aria-selected="true"]{background:var(--ink);color:var(--paper)}
-.dual-timeline{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:1px;background:var(--mist);border-bottom:1px solid var(--mist)}
 .schedule-status{grid-column:1/-1;background:var(--paper);padding:8px 14px;font-size:12.5px}
 .schedule-status p{margin:3px 0 0;color:var(--graphite)}
-.plan-lane{background:var(--paper);padding:10px 12px;display:grid;gap:8px;align-content:start}
-.plan-lane>header{display:grid;gap:2px}
-.plan-lane>header span{font-family:var(--f-mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--graphite)}
-.plan-lane>header small{font-size:11.5px;color:var(--shade)}
-.lane-track{display:grid;gap:6px}
 /* A row, not a flex column: `time` is a fixed rail and the title takes the rest. Without the explicit
    grid the title collapsed to one character per line. */
-.lane-track article{display:grid;grid-template-columns:92px minmax(0,1fr);gap:9px;align-items:baseline;border:1px solid var(--mist);padding:7px 9px}
-.lane-track article:hover{border-color:var(--ink)}
-.lane-track article.draft{border-left:3px solid var(--mist)}
-.lane-track article.readonly{border-left:3px solid var(--ink)}
-.lane-track time{font-family:var(--f-mono);font-size:10px;letter-spacing:.05em;color:var(--graphite)}
-.lane-track strong{font-size:13.5px;line-height:1.4;font-weight:400;word-break:break-word}
-.lane-track .card-milestone{grid-column:2;font-size:11px;margin:0}
-.lane-track small{grid-column:2;font-family:var(--f-mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--shade)}
 .change-ledger{display:grid;border-top:1.5px solid var(--ink)}
-.change-ledger header{display:grid;grid-template-columns:96px 1fr 200px;gap:10px;padding:7px 0;border-bottom:1px solid var(--ink);font-family:var(--f-mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--graphite)}
+.change-ledger header{display:grid;grid-template-columns:96px 1fr 200px;gap:10px;padding:7px 0;border-bottom:1px solid var(--ink);font-family:var(--f-mono);font-size:12px;color:var(--graphite)}
 .change-ledger article{display:grid;grid-template-columns:96px 1fr 200px;gap:10px;padding:8px 0;border-bottom:1px solid var(--mist);align-items:start}
-.change-ledger b{font-size:11.5px;font-weight:700;letter-spacing:.1em}
+.change-ledger b{font-size:12px;font-weight:700}
 .change-ledger p{margin:0;font-size:13px;line-height:1.5}
-.change-ledger span{font-family:var(--f-mono);font-size:10px;letter-spacing:.06em;color:var(--graphite)}
+.change-ledger span{font-family:var(--f-mono);font-size:12px;color:var(--graphite)}
 .change-ledger footer{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:10px 0}
-.change-ledger footer button{min-height:34px;padding:7px 16px;border:1px solid var(--ink);background:var(--ink);color:var(--paper);font-family:var(--f-mono);font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase}
+.change-ledger footer button{min-height:34px;padding:7px 16px;border:1px solid var(--ink);background:var(--ink);color:var(--paper);font-family:var(--f-mono);font-size:12px;font-weight:700}
 .change-ledger footer button:hover{background:var(--paper);color:var(--ink)}
 .change-resolve{display:inline-flex;gap:4px;margin-left:8px}
-.change-resolve button{min-height:22px;padding:1px 7px;border:1px solid var(--mist);font-family:var(--f-mono);font-size:8.5px;letter-spacing:.1em;text-transform:uppercase}
+.change-resolve button{min-height:22px;padding:1px 7px;border:1px solid var(--mist);font-family:var(--f-mono);font-size:12px}
 .change-resolve button:hover{border-color:var(--ink)}
-.approved-mark{font-family:var(--f-mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--now-ink)}
+.approved-mark{font-family:var(--f-mono);font-size:12px;color:var(--now-ink)}
 
 /* ── work orders ───────────────────────────── */
 .work-order-list{display:grid;gap:8px}
 .work-order-list article,.work-order-drawer{border:1px solid var(--mist);border-left:4px solid var(--ink);padding:9px 11px;display:grid;gap:5px}
 .work-order-list article:hover{border-color:var(--ink);border-left-color:var(--ink)}
-.work-order-list header{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;font-family:var(--f-mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--graphite)}
+.work-order-list header{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;font-family:var(--f-mono);font-size:12px;color:var(--graphite)}
 .work-order-list h3{margin:0;font-size:14.5px;font-weight:700;line-height:1.35}
 .work-order-list p{margin:0;color:var(--graphite);font-size:12.5px;line-height:1.55}
-.work-order-list small,.work-order-drawer small{font-family:var(--f-mono);font-size:9.5px;letter-spacing:.06em;color:var(--graphite)}
+.work-order-list small,.work-order-drawer small{font-family:var(--f-mono);font-size:12px;color:var(--graphite)}
 .execution-actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:3px}
-.execution-actions button,.execution-actions a{min-height:28px;padding:5px 11px;border:1px solid var(--mist);font-family:var(--f-mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase}
+.execution-actions button,.execution-actions a{min-height:28px;padding:5px 11px;border:1px solid var(--mist);font-family:var(--f-mono);font-size:12px}
 .execution-actions button:hover,.execution-actions a:hover{border-color:var(--ink)}
 .evidence-checklist{flex-basis:100%;margin:4px 0;padding:8px 10px;border:1px solid var(--mist);display:grid;gap:6px}
 .evidence-checklist legend{padding:0}
@@ -317,98 +279,95 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .evidence-question-options{display:flex;gap:10px;flex-wrap:wrap}
 .evidence-question-options label{display:flex;align-items:center;gap:4px;font-size:12px}
 .evidence-file-upload{flex-basis:100%;display:grid;gap:3px}
-.evidence-file-upload small{font-size:10.5px;color:var(--graphite)}
+.evidence-file-upload small{font-size:12px;color:var(--graphite)}
 
 /* ── task/milestone detail (drawer + standalone page share this) ──────── */
 .task-detail-view{display:grid;gap:10px}
-.task-detail-header{display:flex;justify-content:space-between;gap:12px;font-family:var(--f-mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--graphite)}
+.task-detail-header{display:flex;justify-content:space-between;gap:12px;font-family:var(--f-mono);font-size:12px;color:var(--graphite)}
 .task-detail-view h2{margin:0;font-size:19px;line-height:1.3;font-weight:700}
-.task-detail-view h3{margin:14px 0 6px;font-family:var(--f-mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--graphite)}
+.task-detail-view h3{margin:14px 0 6px;font-family:var(--f-mono);font-size:12px;color:var(--graphite)}
 .task-detail-view>section{padding-top:8px;border-top:1px solid var(--mist)}
 .task-detail-facts{margin:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:1px;background:var(--mist);border:1px solid var(--mist)}
 .task-detail-facts div{background:var(--paper);padding:7px 9px}
-.task-detail-facts dt{font-family:var(--f-mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--shade)}
+.task-detail-facts dt{font-family:var(--f-mono);font-size:12px;color:var(--shade)}
 .task-detail-facts dd{margin:3px 0 0;font-size:12.5px}
 .task-detail-background-empty{margin:0;color:var(--shade);font-size:12px;font-style:italic}
 .task-detail-background-facts{margin:0;padding:0;list-style:none;display:grid;gap:6px}
 .task-detail-background-facts li{display:grid;gap:3px;padding:7px 9px;border:1px solid var(--mist)}
-.task-detail-background-facts small{font-family:var(--f-mono);font-size:10px;color:var(--graphite);line-height:1.5}
+.task-detail-background-facts small{font-family:var(--f-mono);font-size:12px;color:var(--graphite);line-height:1.5}
 .task-detail-contract{margin:0;padding:0;list-style:none;display:grid;gap:6px}
 .task-detail-contract li{display:grid;gap:3px;padding:7px 9px;border:1px solid var(--mist)}
-.task-detail-contract small{font-family:var(--f-mono);font-size:10px;color:var(--graphite);line-height:1.5}
+.task-detail-contract small{font-family:var(--f-mono);font-size:12px;color:var(--graphite);line-height:1.5}
 .task-detail-materials,.task-detail-related-orders{margin:0;padding:0;list-style:none;display:grid;gap:5px}
 .task-detail-related-orders li{display:flex;justify-content:space-between;gap:10px;align-items:baseline}
 .task-detail-flywheel{margin-top:8px;padding-top:8px;border-top:1px solid var(--mist)}
-.task-detail-flywheel h3{margin:0 0 6px;font-family:var(--f-mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--graphite)}
+.task-detail-flywheel h3{margin:0 0 6px;font-family:var(--f-mono);font-size:12px;color:var(--graphite)}
 .task-detail-flywheel p{margin:0 0 5px;font-size:12.5px;line-height:1.55}
-.task-detail-flywheel span{font-family:var(--f-mono);font-size:9.5px;letter-spacing:.06em;color:var(--graphite);margin-right:4px}
-.task-detail-flywheel small{display:block;color:var(--graphite);font-size:11px}
-.task-detail-drawer-open{border:1px solid var(--mist);background:transparent;padding:2px 6px;font-family:var(--f-mono);font-size:14px;line-height:1;cursor:pointer}
-.task-detail-drawer-open:hover{border-color:var(--ink)}
-.card-preview-button{position:absolute;top:6px;right:6px;border:1px solid var(--mist);background:var(--paper);padding:2px 5px;font-size:11px;line-height:1;cursor:pointer;z-index:1}
+.task-detail-flywheel span{font-family:var(--f-mono);font-size:12px;color:var(--graphite);margin-right:4px}
+.task-detail-flywheel small{display:block;color:var(--graphite);font-size:12px}
+.card-preview-button{position:absolute;top:6px;right:6px;border:1px solid var(--mist);background:var(--paper);padding:2px 5px;font-size:12px;line-height:1;cursor:pointer;z-index:1}
 .card-preview-button:hover{border-color:var(--ink)}
 
 /* ── review / approvals ────────────────────── */
 .review-block{padding:10px 0;border-bottom:1px solid var(--mist)}
-.review-block h2{margin:0 0 6px;font-family:var(--f-display);font-size:17px;letter-spacing:-.005em}
+.review-block h2{margin:0 0 6px;font-family:var(--f-display);font-size:17px}
 .review-note{margin:0 0 8px;color:var(--graphite);font-size:12.5px;line-height:1.55;max-width:84ch}
 .review-empty{margin:0;color:var(--shade);font-size:12.5px}
 .review-list{margin:0;padding:0;list-style:none;display:grid;gap:7px}
 .review-list li{display:grid;gap:3px;padding:8px 10px;border:1px solid var(--mist)}
 .review-list li[data-highlighted="1"]{border-color:var(--ink);border-left-width:4px}
 .review-list b{font-size:13.5px;font-weight:700}
-.review-list small{font-family:var(--f-mono);font-size:9.5px;letter-spacing:.05em;color:var(--graphite)}
-.review-list a{font-family:var(--f-mono);font-size:9.5px;letter-spacing:.08em;border-bottom:1px solid var(--mist)}
+.review-list small{font-family:var(--f-mono);font-size:12px;color:var(--graphite)}
+.review-list a{font-family:var(--f-mono);font-size:12px;border-bottom:1px solid var(--mist)}
 .review-list a:hover{border-color:var(--ink)}
-.review-flag{font-family:var(--f-mono);font-size:10px;font-style:normal;letter-spacing:.05em;color:var(--ink);border-left:3px solid var(--ink);padding-left:7px}
+.review-flag{font-family:var(--f-mono);font-size:12px;font-style:normal;color:var(--ink);border-left:3px solid var(--ink);padding-left:7px}
 .review-milestone{padding:8px 0;border-top:1px solid var(--mist)}
 .review-milestone ul{margin:4px 0 0;padding-left:16px;color:var(--graphite);font-size:12px;line-height:1.55}
 .revoke-acceptance{display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin-top:5px}
-.revoke-acceptance input{min-height:26px;padding:4px 7px;font-family:var(--f-mono);font-size:10.5px}
-.revoke-acceptance button{min-height:26px;padding:4px 11px;border:1px solid var(--mist);font-family:var(--f-mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase}
+.revoke-acceptance input{min-height:26px;padding:4px 7px;font-family:var(--f-mono);font-size:12px}
+.revoke-acceptance button{min-height:26px;padding:4px 11px;border:1px solid var(--mist);font-family:var(--f-mono);font-size:12px}
 .revoke-acceptance button:hover{border-color:var(--ink)}
-.revoke-acceptance em{font-style:normal;font-family:var(--f-mono);font-size:10.5px;color:var(--ink)}
-.approval-ledger,.approval-policies{display:grid;gap:7px}
-.approval-ledger article,.approval-policies article{border:1px solid var(--mist);padding:8px 10px;display:grid;gap:3px}
+.revoke-acceptance em{font-style:normal;font-family:var(--f-mono);font-size:12px;color:var(--ink)}
+.approval-ledger{display:grid;gap:7px}
+.approval-ledger article{border:1px solid var(--mist);padding:8px 10px;display:grid;gap:3px}
 .status-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:1px;background:var(--mist);border:1px solid var(--mist)}
 .status-card{background:var(--paper);padding:10px;display:grid;gap:5px;align-content:start}
-.status-card h2{margin:0;font-family:var(--f-display);font-size:22px;letter-spacing:-.01em}
+.status-card h2{margin:0;font-family:var(--f-display);font-size:22px}
 .status-card p{margin:0;color:var(--graphite);font-size:12px;line-height:1.55}
 
 /* ── candidate relations ───────────────────── */
 .decide-relations{display:grid;gap:10px}
 .relation-pick{display:flex;gap:8px;align-items:flex-start;cursor:pointer}
 .relation-pick input{margin-top:3px;accent-color:var(--ink)}
-.relation-kind{font-family:var(--f-mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--graphite)}
+.relation-kind{font-family:var(--f-mono);font-size:12px;color:var(--graphite)}
 .relation-claim{margin:4px 0 0;font-size:12.5px;line-height:1.65}
 .relation-claim-missing{color:var(--shade);font-style:italic}
-.relation-falsifier{margin:2px 0 0;color:var(--graphite);font-size:11.5px;line-height:1.65}
+.relation-falsifier{margin:2px 0 0;color:var(--graphite);font-size:12px;line-height:1.65}
 .relation-evidence{margin:4px 0 0;padding-left:16px;display:grid;gap:2px}
-.relation-evidence li{display:block;padding:0;border:0;font-family:var(--f-mono);font-size:9px;letter-spacing:.05em}
-.relation-evidence-missing,.relation-facts{font-family:var(--f-mono);font-size:9px;letter-spacing:.05em;color:var(--graphite)}
+.relation-evidence li{display:block;padding:0;border:0;font-family:var(--f-mono);font-size:12px}
+.relation-evidence-missing,.relation-facts{font-family:var(--f-mono);font-size:12px;color:var(--graphite)}
 .relation-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.relation-actions button{min-height:32px;padding:6px 14px;border:1px solid var(--ink);font-family:var(--f-mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase}
-.relation-actions em{font-style:normal;font-family:var(--f-mono);font-size:10px;color:var(--ink)}
+.relation-actions button{min-height:32px;padding:6px 14px;border:1px solid var(--ink);font-family:var(--f-mono);font-size:12px}
+.relation-actions em{font-style:normal;font-family:var(--f-mono);font-size:12px;color:var(--ink)}
 
 /* ── milestones ────────────────────────────── */
-.milestone-map{border:1px solid var(--mist);height:min(60vh,520px)}
 .milestone-admin{display:grid;gap:12px;margin-top:8px}
 .milestone-admin-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .milestone-admin-actions button,.milestone-admin-buttons button,.milestone-form-actions button{
-  min-height:32px;padding:6px 14px;border:1px solid var(--ink);font-family:var(--f-mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+  min-height:32px;padding:6px 14px;border:1px solid var(--ink);font-family:var(--f-mono);font-size:12px;
 }
-.milestone-admin-actions em{font-style:normal;font-family:var(--f-mono);font-size:10px;color:var(--ink)}
+.milestone-admin-actions em{font-style:normal;font-family:var(--f-mono);font-size:12px;color:var(--ink)}
 .milestone-ask{flex:1 1 240px}
-.milestone-ask input,.milestone-form input,.milestone-form select{width:100%;min-height:30px;font-family:var(--f-mono);font-size:11px}
+.milestone-ask input,.milestone-form input,.milestone-form select{width:100%;min-height:30px;font-family:var(--f-mono);font-size:12px}
 .milestone-form{display:grid;gap:8px;padding:10px;border:1px solid var(--ink)}
 .milestone-form h3{margin:0;font-size:13.5px;font-weight:700}
 .milestone-form h4{margin:4px 0 0;font-size:12.5px;font-weight:700}
 .milestone-form-row{display:grid;gap:7px;grid-template-columns:2fr 1fr 1fr}
-.milestone-form label span:not(.sr-only){display:block;margin-bottom:2px;font-family:var(--f-mono);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--graphite)}
+.milestone-form label span:not(.sr-only){display:block;margin-bottom:2px;font-family:var(--f-mono);font-size:12px;color:var(--graphite)}
 .milestone-hint{margin:0;color:var(--graphite);font-size:12px;line-height:1.55}
 .criterion-row{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:0;padding:6px;border:1px solid var(--mist)}
 .criterion-statement{flex:1 1 220px}
-.criterion-required{display:flex;gap:4px;align-items:center;white-space:nowrap;font-family:var(--f-mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--graphite)}
+.criterion-required{display:flex;gap:4px;align-items:center;white-space:nowrap;font-family:var(--f-mono);font-size:12px;color:var(--graphite)}
 .criterion-required input{width:auto;min-height:auto;accent-color:var(--ink)}
 .criterion-remove{min-height:26px;padding:2px 9px;border:1px solid var(--mist);font-family:var(--f-mono)}
 .criterion-remove:hover{border-color:var(--ink)}
@@ -420,31 +379,31 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .milestone-admin-list li[data-status="draft"]{border-style:dashed}
 .milestone-admin-head{display:flex;gap:10px;align-items:baseline;justify-content:space-between;flex-wrap:wrap}
 .milestone-admin-head b{font-size:13.5px;font-weight:700}
-.milestone-admin-head small{font-family:var(--f-mono);font-size:9px;letter-spacing:.06em;color:var(--graphite)}
-.milestone-rationale{margin:0;color:var(--graphite);font-size:11.5px;line-height:1.7}
+.milestone-admin-head small{font-family:var(--f-mono);font-size:12px;color:var(--graphite)}
+.milestone-rationale{margin:0;color:var(--graphite);font-size:12px;line-height:1.7}
 .criterion-view{margin:0;padding:0;list-style:none;display:grid;gap:4px}
-.criterion-view li{display:flex;gap:6px;align-items:baseline;flex-wrap:wrap;font-size:11.5px;line-height:1.65}
-.criterion-view small{font-family:var(--f-mono);font-size:9px;letter-spacing:.06em;color:var(--graphite)}
-.criterion-tag{padding:1px 6px;border:1px solid var(--mist);font-family:var(--f-mono);font-size:8px;letter-spacing:.1em;text-transform:uppercase;white-space:nowrap;color:var(--graphite)}
+.criterion-view li{display:flex;gap:6px;align-items:baseline;flex-wrap:wrap;font-size:12px;line-height:1.65}
+.criterion-view small{font-family:var(--f-mono);font-size:12px;color:var(--graphite)}
+.criterion-tag{padding:1px 6px;border:1px solid var(--mist);font-family:var(--f-mono);font-size:12px;white-space:nowrap;color:var(--graphite)}
 .criterion-tag[data-evidence="outcome"]{border-color:var(--ink);background:var(--ink);color:var(--paper)}
 .criterion-tag[data-evidence="unlabelled"]{font-style:italic;color:var(--shade)}
-.criterion-progress{font-family:var(--f-mono);font-size:9px;letter-spacing:.06em;color:var(--graphite);border-bottom:1px solid var(--mist)}
+.criterion-progress{font-family:var(--f-mono);font-size:12px;color:var(--graphite);border-bottom:1px solid var(--mist)}
 .milestone-admin-buttons{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
 .milestone-conversation{display:grid;gap:8px;padding:12px;border:1px solid var(--mist)}
 .milestone-conversation ul{margin:0;padding:0;list-style:none;display:grid;gap:6px}
 .milestone-conversation li{display:grid;grid-template-columns:36px 1fr;gap:8px;font-size:12.5px;line-height:1.6}
-.milestone-conversation li b{font-family:var(--f-mono);font-size:9px;letter-spacing:.08em;color:var(--graphite)}
+.milestone-conversation li b{font-family:var(--f-mono);font-size:12px;color:var(--graphite)}
 .milestone-conversation li[data-from="ai"] span{color:var(--graphite)}
 .milestone-conversation-reply{display:flex;gap:8px}
-.milestone-conversation-reply input{flex:1;min-height:30px;font-family:var(--f-mono);font-size:11px}
-.milestone-conversation-reply button{min-height:30px;padding:6px 14px;border:1px solid var(--ink);font-family:var(--f-mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase}
+.milestone-conversation-reply input{flex:1;min-height:30px;font-family:var(--f-mono);font-size:12px}
+.milestone-conversation-reply button{min-height:30px;padding:6px 14px;border:1px solid var(--ink);font-family:var(--f-mono);font-size:12px}
 .milestone-template-manager{margin:12px 0;padding:10px 12px;border:1px solid var(--mist)}
-.milestone-template-manager>summary{cursor:pointer;font-family:var(--f-mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--graphite)}
+.milestone-template-manager>summary{cursor:pointer;font-family:var(--f-mono);font-size:12px;color:var(--graphite)}
 .milestone-template-manager .milestone-hint{margin:8px 0}
 
 /* ── offline ───────────────────────────────── */
 .offline-page{min-height:100vh;display:grid;place-items:center;padding:42px 16px}
-.offline-page h1{margin:12px 0 6px;font-family:var(--f-display);font-size:clamp(24px,4vw,38px);letter-spacing:-.02em}
+.offline-page h1{margin:12px 0 6px;font-family:var(--f-display);font-size:clamp(24px,4vw,38px)}
 
 /* ── auth (login / signup / reset password) ───────────────── */
 /* Previously unstyled: labels, inputs and buttons fell back to bare element defaults with no border,
@@ -452,25 +411,25 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .auth-form{display:grid;gap:10px;width:min(360px,100%);padding:16px;border:1px solid var(--mist)}
 .auth-form form{display:grid;gap:9px}
 .auth-form label{display:grid;gap:5px;font-size:13px}
-.auth-form label>span{font-family:var(--f-mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--graphite)}
+.auth-form label>span{font-family:var(--f-mono);font-size:12px;color:var(--graphite)}
 .auth-form input{padding:9px 10px;border:1px solid var(--mist);background:var(--paper);color:var(--ink)}
 .auth-form button[disabled]{opacity:.5;cursor:default}
 .auth-form>button{width:100%}
 /* Errors and a completed step both use the same ink-on-paper language as `.review-flag` elsewhere —
    this app never reaches for a second colour to mean "wrong", only a stronger left border. */
-.auth-form small[role="alert"]{display:block;font-family:var(--f-mono);font-size:11px;letter-spacing:.02em;
+.auth-form small[role="alert"]{display:block;font-family:var(--f-mono);font-size:12px;
   color:var(--ink);border-left:3px solid var(--ink);padding:4px 0 4px 8px}
 .auth-form small[role="status"]{display:block;font-size:12px;color:var(--graphite)}
 .auth-form p{margin:0;font-size:12px;color:var(--graphite)}
 .dead-letters{display:grid;gap:6px;margin-top:10px;padding:10px 12px;border:1px solid var(--ink);border-left-width:4px}
 .dead-letters ul,.dead-letter-list{margin:0;padding:0;list-style:none;display:grid;gap:6px}
 .dead-letters li,.dead-letter-list li{display:grid;gap:2px;font-size:12px}
-.dead-letters small,.dead-letter-list small{font-family:var(--f-mono);font-size:9px;letter-spacing:.06em;color:var(--graphite)}
+.dead-letters small,.dead-letter-list small{font-family:var(--f-mono);font-size:12px;color:var(--graphite)}
 
-.plan-sync{margin-left:auto;padding:5px 12px;border:1px solid var(--mist);background:transparent;color:var(--ink);font-family:var(--f-mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase}
+.plan-sync{margin-left:auto;padding:5px 12px;border:1px solid var(--mist);background:transparent;color:var(--ink);font-family:var(--f-mono);font-size:12px}
 .plan-sync:hover:not(:disabled){border-color:var(--ink)}
 .plan-sync:disabled{color:var(--shade)}
-.plan-sync-note{font-family:var(--f-mono);font-size:9.5px;letter-spacing:.06em;color:var(--graphite)}
+.plan-sync-note{font-family:var(--f-mono);font-size:12px;color:var(--graphite)}
 .plan-explanation{padding:14px 0;border-bottom:1px solid var(--mist);display:grid;gap:8px}
 .plan-explanation p{margin:0;font-size:12.5px;line-height:1.7;color:var(--graphite)}
 .plan-explanation ul{margin:0;padding-left:18px;display:grid;gap:4px;font-size:12px;color:var(--graphite)}
@@ -478,10 +437,10 @@ button:disabled{opacity:.4;cursor:not-allowed}
 /* ── dialogs ───────────────────────────────── */
 .dialog-overlay{position:fixed;inset:0;background:color-mix(in srgb,var(--ink) 42%,transparent);z-index:50}
 .dialog-sheet{position:fixed;z-index:51;top:50%;left:50%;translate:-50% -50%;width:min(520px,calc(100vw - 32px));background:var(--paper);border:1.5px solid var(--ink);padding:16px;display:grid;gap:8px}
-.dialog-sheet h2{margin:0;font-family:var(--f-display);font-size:20px;letter-spacing:-.01em}
+.dialog-sheet h2{margin:0;font-family:var(--f-display);font-size:20px}
 .dialog-sheet p{margin:0;color:var(--graphite);font-size:12.5px;line-height:1.7}
 .dialog-actions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:6px}
-.dialog-actions button,.dialog-actions a{display:inline-flex;align-items:center;min-height:34px;padding:7px 16px;border:1px solid var(--ink);background:var(--ink);color:var(--paper);font-family:var(--f-mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase}
+.dialog-actions button,.dialog-actions a{display:inline-flex;align-items:center;min-height:34px;padding:7px 16px;border:1px solid var(--ink);background:var(--ink);color:var(--paper);font-family:var(--f-mono);font-size:12px}
 .dialog-actions .secondary{background:transparent;color:var(--ink);border-color:var(--mist)}
 .dialog-actions .secondary:hover{border-color:var(--ink)}
 /* Wider and scrollable — the approval confirm dialog this reuses is a couple lines of text, a task
@@ -495,9 +454,8 @@ button:disabled{opacity:.4;cursor:not-allowed}
    its own `minmax` floor. Raising the threshold gives that width band the same single-column layout
    as the range below it, rather than a cramped two-column one distinct from both phone and desktop. */
 @media (max-width:1024px){
-  .today-grid,.lower-grid{grid-template-columns:1fr}
+  .today-grid{grid-template-columns:1fr}
   .day-head,.care-band,.capture-line{grid-template-columns:1fr}
-  .now-state{justify-self:start;justify-items:start}
   .change-ledger header{display:none}
   .change-ledger article{grid-template-columns:1fr;gap:4px}
   .milestone-form-row{grid-template-columns:1fr}
@@ -505,14 +463,12 @@ button:disabled{opacity:.4;cursor:not-allowed}
 }
 @media (min-width:1440px){
   .today-grid{grid-template-columns:minmax(0,1.7fr) minmax(300px,1fr)}
-  .lower-grid{grid-template-columns:minmax(0,1.4fr) minmax(0,1fr)}
 }
 /* Ultrawide/4K: `.page`'s own clamp keeps growing past 1900px, but a single centred column of already-
    generous line lengths starts feeling empty rather than dense, so the grids pick up one more ratio step
    instead of just stretching their existing columns wider. */
 @media (min-width:2200px){
   .today-grid{grid-template-columns:minmax(0,1.9fr) minmax(320px,1fr)}
-  .lower-grid{grid-template-columns:minmax(0,1.6fr) minmax(0,1fr)}
 }
 @media (max-width:680px){
   .page{padding-inline:14px}
@@ -521,11 +477,10 @@ button:disabled{opacity:.4;cursor:not-allowed}
   /* The top `nav` is still in the DOM for anything that still reads it, but the person navigates from
      the bottom bar at this width, so the wrapping text-link row is hidden rather than fixed in place. */
   .running-head nav{display:none}
-  .timeline-list article{grid-template-columns:1fr;gap:4px}
   .relation-actions button,.milestone-admin-buttons button{flex:1 1 auto}
   .page,.subpage{padding-bottom:76px}
   .bottom-nav{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:50;background:var(--paper);border-top:1.5px solid var(--ink)}
-  .bottom-nav>a,.bottom-nav-more>summary{flex:1;text-align:center;padding:10px 4px;font-family:var(--f-mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--graphite)}
+  .bottom-nav>a,.bottom-nav-more>summary{flex:1;text-align:center;padding:10px 4px;font-family:var(--f-mono);font-size:12px;color:var(--graphite)}
   .bottom-nav>a.active{color:var(--ink)}
   .bottom-nav-more{flex:1}
   /* Base rule is a fixed horizontal-scroll row of stat blocks — fine at desktop width, but at phone
@@ -538,52 +493,24 @@ button:disabled{opacity:.4;cursor:not-allowed}
 }
 
 /* React Flow ships its own light palette; these follow the theme tokens instead of a second one. */
-.milestone-map .react-flow__edge-text{fill:var(--graphite);font-family:var(--f-mono);font-size:9px}
-.milestone-map .react-flow__edge-textbg{fill:var(--paper)}
-.milestone-map .react-flow__controls-button{background:var(--paper);border-bottom:1px solid var(--mist);fill:var(--ink)}
-.milestone-map .react-flow__controls-button:hover{background:var(--chalk)}
-.milestone-map .react-flow__attribution{background:transparent;color:var(--shade)}
 
 /* ── A lens ────────────────────────────────── */
 /* FullCalendar ships a rounded blue theme. These map it onto the same ink-on-paper system as every
    other surface, so switching to the week view does not look like switching applications. */
-.calendar-detail{border-top:1.5px solid var(--ink);padding-top:14px}
-.calendar-detail .fc{--fc-border-color:var(--mist);--fc-page-bg-color:var(--paper);--fc-neutral-bg-color:var(--chalk);--fc-today-bg-color:var(--chalk);--fc-now-indicator-color:var(--now);font-family:var(--f-sans)}
-.calendar-detail .fc a{color:inherit}
-.calendar-detail .fc-toolbar{gap:10px;flex-wrap:wrap}
-.calendar-detail .fc-toolbar-title{font-family:var(--f-display);font-size:18px!important;letter-spacing:-.01em}
 /* The day/week/month/list switch used to read as one more small, easy-to-miss FullCalendar button row —
    bumped to the same weight as `.plan-tabs` so the view switch reads as a real navigation control. */
-.calendar-detail .fc .fc-button{border-radius:0;border:1px solid var(--mist);background:transparent;color:var(--ink);box-shadow:none;font-family:var(--f-mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;padding:6px 13px}
-.calendar-detail .fc .fc-button:hover{background:transparent;border-color:var(--ink)}
-.calendar-detail .fc .fc-button-primary:not(:disabled).fc-button-active,
-.calendar-detail .fc .fc-button-primary:not(:disabled):active{background:var(--ink);border-color:var(--ink);color:var(--paper)}
-.calendar-detail .fc .fc-button:focus-visible{outline:2px solid var(--ink);outline-offset:1px;box-shadow:none}
-.calendar-detail .fc .fc-button:disabled{opacity:.4}
-.calendar-detail .fc-col-header-cell-cushion,.calendar-detail .fc-timegrid-axis-cushion,.calendar-detail .fc-timegrid-slot-label-cushion{font-family:var(--f-mono);font-size:9.5px;letter-spacing:.08em;color:var(--graphite);text-transform:uppercase}
-.calendar-detail .fc-day-today .fc-col-header-cell-cushion{color:var(--ink);font-weight:600}
-.calendar-detail .fc-timegrid-now-indicator-line{border-color:var(--now);border-top-width:1.5px}
-.calendar-detail .fc-timegrid-now-indicator-arrow{border-color:var(--now);color:var(--now)}
 /* Reality is solid ink; an example is outlined — the same distinction the B lens draws with its
    left border, so neither view can quietly present demo data as a real commitment. */
-.calendar-detail .fc-event{border-radius:0;border:1px solid var(--ink);background:var(--ink);color:var(--paper);box-shadow:none;padding:1px 2px}
-.calendar-detail .fc-event .fc-event-time{font-family:var(--f-mono);font-size:9px;letter-spacing:.04em}
-.calendar-detail .fc-event .fc-event-title{font-size:11px;line-height:1.35}
-.calendar-detail .fc-event .fc-event-milestone{font-size:9px;line-height:1.3;opacity:.8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.calendar-detail .fc-event.calendar-example{background:var(--paper);color:var(--ink);border-style:dashed;border-color:var(--shade)}
-.calendar-detail .fc-event.calendar-suggestion{background:var(--paper);color:var(--ink);border-style:dashed;border-color:var(--shade)}
-.calendar-detail .fc-event.calendar-ai{background:var(--paper);color:var(--ink);border-left-width:4px}
-.calendar-detail .fc-event.calendar-ai.calendar-example{border-left-style:solid;border-left-color:var(--mist)}
 
 .availability-editor{margin:0 0 20px;border:1px solid var(--rule);padding:12px 14px}
-.availability-editor summary{cursor:pointer;font-family:var(--f-mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--graphite)}
+.availability-editor summary{cursor:pointer;font-family:var(--f-mono);font-size:12px;color:var(--graphite)}
 .availability-editor[open] summary{margin-bottom:12px}
 .availability-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px}
 .availability-days{display:inline-flex;gap:2px}
-.availability-days button{width:24px;height:24px;border:1px solid var(--rule);background:var(--paper);color:var(--graphite);font-size:11px;cursor:pointer}
+.availability-days button{width:24px;height:24px;border:1px solid var(--rule);background:var(--paper);color:var(--graphite);font-size:12px;cursor:pointer}
 .availability-days button[aria-pressed="true"]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
 .availability-row input,.availability-row select{border:1px solid var(--rule);background:var(--paper);color:var(--ink);padding:3px 5px;font:inherit;font-size:12px}
-.availability-row>button:last-child{border:1px solid var(--rule);background:var(--paper);color:var(--graphite);padding:3px 8px;font-size:11px;cursor:pointer}
+.availability-row>button:last-child{border:1px solid var(--rule);background:var(--paper);color:var(--graphite);padding:3px 8px;font-size:12px;cursor:pointer}
 .availability-actions{display:flex;gap:8px;margin-top:10px}
 .availability-actions button{padding:5px 12px;font-size:12px}
 .availability-importance{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0;font-size:12px}
@@ -601,7 +528,7 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .schedule-setup-prompt .schedule-setup{margin:0;border:none;border-top:1px solid var(--rule)}
 
 .calendar-sources .calendar-account{margin:10px 0 0}
-.calendar-sources h3{margin:0 0 4px;font-family:var(--f-mono);font-size:10px;letter-spacing:.12em;text-transform:none;color:var(--graphite)}
+.calendar-sources h3{margin:0 0 4px;font-family:var(--f-mono);font-size:12px;text-transform:none;color:var(--graphite)}
 .calendar-sources label{display:flex;gap:6px;align-items:center;font-size:13px;line-height:1.9}
 .calendar-sources-actions{margin-top:12px}
 .calendar-sources-actions button{padding:5px 12px;font-size:12px}
@@ -622,19 +549,19 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .forecast-delta ul { margin: .3rem 0 0; }
 
 .assistant-bubble{position:fixed;right:16px;bottom:76px;z-index:60;padding:10px 16px;border:1px solid var(--ink);
-  background:var(--paper);color:var(--ink);font-family:var(--f-mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase}
+  background:var(--paper);color:var(--ink);font-family:var(--f-mono);font-size:12px}
 .assistant-bubble:hover{background:var(--ink);color:var(--paper)}
 .assistant-panel{position:fixed;right:16px;bottom:76px;z-index:60;width:min(360px,calc(100vw - 32px));max-height:min(520px,70vh);
   display:grid;grid-template-rows:auto 1fr auto;background:var(--paper);border:1px solid var(--ink);box-shadow:0 8px 24px rgba(0,0,0,.18)}
 .assistant-panel>header{display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-bottom:1px solid var(--rule);
-  font-family:var(--f-mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--graphite)}
+  font-family:var(--f-mono);font-size:12px;color:var(--graphite)}
 .assistant-messages{overflow:auto;padding:8px 10px;display:grid;gap:6px;align-content:start}
 .assistant-empty{margin:0;font-size:12px}
 .assistant-message{margin:0;padding:6px 8px;font-size:12.5px;line-height:1.5;border:1px solid var(--rule);max-width:90%}
 .assistant-message-user{justify-self:end;background:var(--chalk)}
 .assistant-message-assistant{justify-self:start}
 .assistant-quick-replies{display:flex;flex-wrap:wrap;gap:6px;padding:0 10px 8px}
-.assistant-quick-replies button{font-size:11px;padding:4px 9px}
+.assistant-quick-replies button{font-size:12px;padding:4px 9px}
 .assistant-form{display:grid;gap:6px;padding:8px 10px;border-top:1px solid var(--rule)}
 .assistant-form .attachment-drop{margin-top:0;padding:6px 8px}
 .assistant-input-row{display:flex;gap:6px}
@@ -644,11 +571,124 @@ button:disabled{opacity:.4;cursor:not-allowed}
   .assistant-panel{right:8px;left:8px;width:auto;bottom:64px}
   .assistant-bubble{right:8px;bottom:64px}
 }
-.declared-connectors{margin-top:12px}
-.declared-connectors>summary{cursor:pointer;font-family:var(--f-mono);font-size:11px;letter-spacing:.08em;color:var(--graphite);padding:8px 0}
 .promote-form{display:grid;gap:10px;padding:12px 0;max-width:560px}
 .promote-form label{display:grid;gap:4px}
-.promote-form label>span{font-family:var(--f-mono);font-size:10.5px;letter-spacing:.06em;color:var(--graphite)}
+.promote-form label>span{font-family:var(--f-mono);font-size:12px;color:var(--graphite)}
 .promote-form input,.promote-form select,.promote-form textarea{width:100%;box-sizing:border-box;padding:6px 8px;border:1px solid var(--ink);background:var(--paper);font:inherit}
 .promote-form-estimate{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
 .promote-form-actions{display:flex;gap:8px}
+
+/* Onboarding (profile interview). Arial, dense, high contrast: this screen is the first piece of the
+   redesign — conversation and live profile side by side, with no empty bands. */
+.ob{font-family:Arial,"Microsoft YaHei","PingFang SC",sans-serif;font-size:15px;line-height:1.4;color:#0b0b0b;display:grid;grid-template-columns:minmax(0,2fr) minmax(300px,1fr);gap:12px;align-items:start}
+.ob[data-dragging="true"]{outline:2px dashed #1d4ed8;outline-offset:4px}
+.ob h2,.ob h3{font-family:inherit;margin:0;letter-spacing:0;text-transform:none}
+.ob h2{font-size:16px;font-weight:700}
+.ob h3{font-size:14px;font-weight:700;display:flex;justify-content:space-between;align-items:center;gap:8px}
+.ob p{margin:0}
+.ob-muted{color:#3d3d3d;font-size:13px}
+.ob-chat{display:grid;grid-template-rows:minmax(240px,auto) auto;gap:8px;border:1px solid #0b0b0b;background:#fff}
+.ob-thread{display:grid;gap:8px;padding:10px;max-height:calc(100vh - 330px);min-height:260px;overflow:auto;align-content:start}
+.ob-turn{padding:8px 10px;border:1px solid #bdbdbd;max-width:92%}
+.ob-assistant{background:#f4f4f2;justify-self:start;display:grid;gap:8px}
+.ob-user{background:#0b0b0b;color:#fff;border-color:#0b0b0b;justify-self:end;white-space:pre-wrap}
+.ob-done{font-weight:700;border-left:3px solid #047857;padding-left:8px}
+.ob-question{border:1px solid #8a8a8a;background:#fff;padding:8px;margin:0;display:grid;gap:6px;min-width:0}
+.ob-question legend{font-weight:700;padding:0 4px;font-size:14px}
+.ob-about{display:inline-block;margin-right:6px;font-size:12px;font-weight:700;background:#0b0b0b;color:#fff;padding:1px 6px}
+.ob-chips{display:flex;flex-wrap:wrap;gap:6px}
+.ob-chips button{font:inherit;font-size:13px;border:1px solid #0b0b0b;background:#fff;color:#0b0b0b;padding:4px 8px;cursor:pointer;text-align:left;display:grid;gap:1px;max-width:100%}
+.ob-chips button small{font-size:12px;color:#3d3d3d}
+.ob-chips button[data-picked="true"]{background:#1d4ed8;color:#fff;border-color:#1d4ed8}
+.ob-chips button[data-picked="true"] small{color:#e6eeff}
+.ob-other,.ob-add input,.ob-facts input{font:inherit;font-size:14px;border:1px solid #0b0b0b;padding:5px 7px;background:#fff;color:#0b0b0b;width:100%;box-sizing:border-box}
+.ob-composer{display:grid;gap:6px;padding:8px 10px;border-top:1px solid #0b0b0b}
+.ob-composer textarea{font:inherit;font-size:14px;border:1px solid #0b0b0b;padding:6px 8px;resize:vertical;width:100%;box-sizing:border-box}
+.ob-composer-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.ob-composer-row .ob-btn{margin-left:auto}
+.ob-btn,.ob-file-button{font:inherit;font-size:13px;font-weight:700;border:1px solid #0b0b0b;background:#0b0b0b;color:#fff;padding:5px 12px;cursor:pointer}
+.ob-btn:disabled{opacity:.45;cursor:not-allowed}
+.ob-file-button{background:#fff;color:#0b0b0b}
+.ob-quiet{background:#fff !important;color:#0b0b0b !important}
+.ob-error{color:#b00020;font-weight:700;padding:0 10px 4px;display:flex;gap:10px;align-items:center}
+.ob-panel{display:grid;gap:8px;align-content:start}
+.ob-block{border:1px solid #0b0b0b;background:#fff;padding:8px 10px;display:grid;gap:6px}
+.ob-count{font-size:12px;font-weight:700;background:#0b0b0b;color:#fff;padding:0 6px}
+.ob-project{border:1px solid #bdbdbd;padding:6px 8px;display:grid;gap:4px;background:#f9f9f7}
+.ob-project header{display:flex;justify-content:space-between;gap:6px;align-items:center}
+.ob-project header .ob-btn{padding:0 6px}
+.ob-facts{margin:0;display:grid;gap:3px}
+.ob-facts>div{display:grid;grid-template-columns:76px minmax(0,1fr);gap:6px;align-items:start;font-size:13px}
+.ob-facts dt{font-weight:700;color:#3d3d3d}
+.ob-facts dd{margin:0;display:flex;gap:6px;flex-wrap:wrap;align-items:center;min-width:0}
+.ob-facts [data-status="inferred"] .ob-text{font-style:italic}
+.ob-text{all:unset;cursor:text;overflow-wrap:anywhere}
+.ob-text:hover{text-decoration:underline}
+.ob-actions{display:inline-flex;gap:4px;align-items:center}
+.ob-actions .ob-btn{padding:0 6px;font-size:12px}
+.ob-tag{font-size:12px;font-weight:700;border:1px solid #0b0b0b;padding:0 5px;background:#fff}
+.ob-tag[data-kind="inferred"],.ob-tag[data-kind="pending"]{background:#fff3c4}
+.ob-tag[data-kind="confirmed"],.ob-tag[data-kind="done"]{background:#d6f5e3}
+.ob-tag[data-kind="failed"],.ob-tag[data-kind="unsupported"]{background:#ffd9d9}
+.ob-add{display:flex;gap:6px}
+.ob-file{font-size:12px;border:1px solid #8a8a8a;padding:0 5px;justify-self:start}
+.ob-docs,.ob-links{list-style:none;margin:0;padding:0;display:grid;gap:4px;font-size:13px}
+.ob-docs li{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.ob-docs small{flex-basis:100%;color:#3d3d3d}
+.ob-links li{border-top:1px solid #d0d0d0;padding-top:4px}
+.ob-flywheel{width:100%;height:auto;max-height:230px}
+@media (max-width:900px){.ob{grid-template-columns:1fr}.ob-thread{max-height:none}}
+.ob-dates{border:1px solid #0b0b0b;background:#fff;padding:8px 10px;display:grid;gap:6px;max-width:100%}
+.ob-dates header{display:grid;gap:2px}
+.ob-dates ul{list-style:none;margin:0;padding:0;display:grid;gap:2px;max-height:300px;overflow:auto}
+.ob-dates li{display:flex;flex-wrap:wrap;gap:6px;align-items:baseline;border-top:1px solid #e0e0e0;padding:3px 0}
+.ob-dates label{display:flex;gap:8px;align-items:baseline;flex:1;min-width:0;flex-wrap:wrap;font-size:13px}
+.ob-date-title{font-weight:700}
+.ob-date-when{color:#3d3d3d}
+.ob-dates blockquote{flex-basis:100%;margin:0;padding:4px 8px;border-left:3px solid #8a8a8a;background:#f4f4f2;font-size:12px;display:grid;gap:2px}
+.ob-quote-toggle{font-size:12px;text-decoration:underline}
+.ob-dates footer{display:flex;gap:8px;flex-wrap:wrap}
+.ob-date-questions{font-size:13px;border:1px solid #bdbdbd;background:#fff3c4;padding:6px 8px}
+.ob-date-questions ul{max-height:none}
+
+.milestone-anchor { display: grid; gap: 2px; margin: 6px 0; font: 13px/1.4 Arial, Helvetica, sans-serif; }
+.milestone-anchor > div { display: grid; grid-template-columns: 64px 1fr; gap: 8px; }
+.milestone-anchor dt { font-weight: 700; }
+.milestone-anchor dd { margin: 0; }
+
+.ob-design { display: grid; gap: 6px; padding: 12px; border: 1px solid #111; background: #fff; font: 14px/1.45 Arial, Helvetica, sans-serif; }
+.ob-design > b { font-size: 15px; }
+
+.ob-diligence { display: grid; gap: 8px; padding: 12px; border: 1px solid #111; background: #fff; font: 14px/1.45 Arial, Helvetica, sans-serif; }
+.ob-diligence > header { display: grid; gap: 2px; }
+.ob-dd-line { display: grid; gap: 4px; padding-top: 8px; border-top: 1px solid #ccc; }
+.ob-dd-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.ob-dd-head .ob-btn { margin-left: auto; }
+.ob-dd-proposals { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.ob-dd-proposals > li { padding: 6px 8px; border: 1px solid #ccc; }
+.ob-dd-proposals > li[data-status="accepted"] { border-color: #111; background: #f2f2f2; }
+.ob-dd-proposals > li[data-status="rejected"] { opacity: 0.55; }
+.ob-dd-proposals p { margin: 2px 0; }
+.ob-dd-title { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.ob-dd-actions { display: flex; gap: 8px; align-items: center; }
+.ob-dd-evidence { margin: 4px 0 0; padding-left: 18px; font-size: 13px; }
+.ob-dd-evidence a { display: block; color: #111; text-decoration: underline; }
+
+.ob-design progress { width: 100%; height: 10px; accent-color: #111; }
+
+/* ── Phase 4 shell ─────────────────────────── */
+.running-head{padding:6px 0;border-bottom:1px solid var(--ink)}
+.wordmark{font-weight:700;font-size:16px}
+.running-head nav a{font-size:14px;padding:5px 12px;font-weight:600}
+.running-head nav a.active,.system-state a.active{background:var(--ink);color:var(--paper)}
+.system-state{gap:6px;font-size:13px}
+.system-state a{padding:4px 10px;border:1px solid transparent;font-weight:600;color:var(--graphite)}
+.system-state a:hover{color:var(--ink);border-color:var(--mist)}
+.sign-out-button{font-size:13px;color:var(--graphite);padding:4px 8px}
+.pending-badge{display:inline-block;min-width:18px;margin-left:6px;padding:0 5px;background:var(--ink);color:var(--paper);font-size:12px;line-height:18px;text-align:center;border-radius:9px}
+.system-state a.active .pending-badge{background:var(--paper);color:var(--ink)}
+.subpage-header{padding:10px 0 6px;border-bottom:1px solid var(--ink)}
+.subpage-header h1{font-size:20px;font-weight:700}
+.subpage-header h1::before{display:none}
+.activity-card .settings-row input{flex:1;min-width:180px;padding:6px 8px;border:1px solid var(--mist);border-radius:6px;font:inherit}
+.activity-entries{margin:8px 0 0;padding-left:18px;max-height:260px;overflow:auto;font-size:13px}

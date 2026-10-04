@@ -1,11 +1,10 @@
-import { ensureSeeded, getStore, loadCurrentPlan, planToday, resolvedEstimate } from "../../lib/crossline";
+import { ensureSeeded, getStore, resolvedEstimate } from "../../lib/crossline";
+import { estimateBasis } from "../../lib/estimate-label";
 import { SubpageShell } from "../subpage-shell";
 import { AnalyzeButton } from "./analyze-button";
 import { ExecutionActions } from "../execution-actions";
 import { PromoteForm } from "./promote-form";
 import { FamilyBackfill } from "./family-backfill";
-import { WorkbenchViewSwitch } from "./view-switch";
-import { CalendarDetail } from "../plan/calendar-detail";
 import type { MilestoneGateResult } from "@crossline/core";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { requireSessionContext } from "../../lib/access-guard";
@@ -80,6 +79,7 @@ export default async function WorkbenchPage({ searchParams }: {
   const events = getStore().listEvents(ctx.workspaceId).filter((event) => event.type.startsWith("materials."));
   const discardReasons = new Map(getStore().listEvents(ctx.workspaceId, { type: ["work_order.archived", "capture.discarded"] })
     .map((event) => [event.entityId, (event.payload as { reason?: string }).reason ?? ""]));
+  const identityLabel = new Map(defaultIdentityPacks().map((pack) => [pack.id, pack.label]));
   const identityOptions = defaultIdentityPacks().filter((pack) => pack.kind === "identity")
     .map((pack) => ({ id: pack.id, label: pack.label }));
   const milestoneOptions = getStore().listMilestones(ctx.workspaceId)
@@ -87,20 +87,12 @@ export default async function WorkbenchPage({ searchParams }: {
     .map((milestone) => ({ id: milestone.id, title: milestone.title, identityId: milestone.identityId }));
   const milestoneTitleById = new Map(getStore().listMilestones(ctx.workspaceId)
     .map((milestone) => [milestone.id, milestone.title]));
-  const workOrderMilestones = Object.fromEntries(all
-    .filter((order) => order.milestoneId && milestoneTitleById.has(order.milestoneId))
-    .map((order) => [order.id, milestoneTitleById.get(order.milestoneId)!]));
-  // The timeline view reuses the Plan page's own scheduling read verbatim (`loadCurrentPlan` /
-  // `CalendarDetail`) rather than a second, Workbench-owned notion of "when" — one real schedule, shown
-  // from two places, is what keeps this from ever disagreeing with the Plan page.
-  const today = planToday(ctx);
-  const plan = await loadCurrentPlan(ctx);
   // One batched read for every card's preview drawer instead of each `TaskPreview` re-reading the whole
   // workspace — see `loadTaskDetailsBatch`'s own doc comment.
   const taskDetails = loadTaskDetailsBatch(ctx, runs.map((run) => run.id));
-  return <SubpageShell eyebrow="04 / AI WORK ORDERS" title="AI 作业台" description="这里呈现 SQLite 中真实的 WorkOrder、估时、材料和阻塞；不让用户编辑内部 DAG。">
+  return <SubpageShell active="任务" title="任务">
     <section className="work-order-list">{captures.map((capture) => <article key={capture.id}>
-      <header><span>CAPTURE / {shortId(capture.id)}</span><b>{stateLabel[capture.state]}</b></header>
+      <header><span>收集</span><b>{stateLabel[capture.state]}</b></header>
       <h2>{capture.title}</h2><p>{capture.context}</p>
       <p>未分类 · 未估时 · 原文已保存，可人工处理</p>
       {(() => { const own = attachments.filter((item) => item.captureId === capture.id);
@@ -109,12 +101,11 @@ export default async function WorkbenchPage({ searchParams }: {
           <a href={`/api/captures/${encodeURIComponent(capture.id)}/attachments?uri=${encodeURIComponent(item.uri)}`}
             target="_blank" rel="noreferrer">{item.fileName}</a>
         </span>)}</p>; })()}
-      {capture.audit.blocker && <p role="status">{capture.audit.blocker.code} · {capture.audit.blocker.message}</p>}
+      {capture.audit.blocker && <p role="status" title={capture.audit.blocker.code}>{capture.audit.blocker.message}</p>}
       <AnalyzeButton captureId={capture.id} analyzing={capture.state === "analyzing"} retry={capture.state === "blocked"} />
       <PromoteForm captureId={capture.id} identities={identityOptions} milestones={milestoneOptions} />
     </article>)}</section>
-    <WorkbenchViewSwitch
-      list={<>
+    <>
         <div className="plan-tabs" role="tablist" aria-label="作业排序">
           {(Object.keys(sortLabel) as SortKey[]).map((key) => <a key={key} role="tab" aria-selected={sort === key}
             href={key === "default" ? "/workbench" : `/workbench?sort=${key}`}>{sortLabel[key]}</a>)}
@@ -134,7 +125,7 @@ export default async function WorkbenchPage({ searchParams }: {
             globals.css keeps every bare input/select/summary they use above this invisible link. */}
         <a className="card-cover-link" href={`/workbench/${encodeURIComponent(run.id)}`} aria-label={run.intent} />
         <TaskPreview detail={taskDetails.get(run.id)} />
-        <header><span>{run.identityId.toUpperCase()} / {shortId(run.id)}</span><b><i className="gly" data-s={run.state} aria-hidden="true" />{stateLabel[run.state] ?? "未知状态"}</b></header>
+        <header><span>{identityLabel.get(run.identityId) ?? "未归入主线"}</span><b><i className="gly" data-s={run.state} aria-hidden="true" />{stateLabel[run.state] ?? "未知状态"}</b></header>
         <h2>{run.intent}</h2>
         {/* The milestone this work order serves, on the card itself — previously only visible by
             cross-referencing Milestones or the PromoteForm's own dropdown. */}
@@ -144,7 +135,7 @@ export default async function WorkbenchPage({ searchParams }: {
           && <p role="note" className="seed-notice">示例作业 · 系统预置，不需要可直接丢弃。</p>}
         {(run.payload as { manualPromotion?: boolean }).manualPromotion
           && <p role="status">人工创建 · 未经 AI 分析</p>}
-        <p>{estimate.p25Minutes}–{estimate.p85Minutes} 分钟 · {confidenceLabel[estimate.confidence]} · {riskLabel[run.riskTier]}</p>
+        <p title={estimateBasis(estimate)}>{estimate.p25Minutes}–{estimate.p85Minutes} 分钟 · {confidenceLabel[estimate.confidence]} · {riskLabel[run.riskTier]}{estimate.calibration ? ` · 已按你的实际用时校正 ×${estimate.calibration.factor}` : ""}</p>
         {!(run.payload as { family?: string }).family
           && ["preparing", "ready_for_human", "active", "evidence_review"].includes(run.state)
           && <FamilyBackfill workOrderId={run.id} />}
@@ -185,9 +176,7 @@ export default async function WorkbenchPage({ searchParams }: {
         <a href="/approvals">查看状态与证据 →</a></details>
       </article>;
     })}</section>
-      </>}
-      timeline={<CalendarDetail blocks={plan.blocks} today={today} workOrderMilestones={workOrderMilestones} />}
-    />
+    </>
     {(discarded.length + discardedCaptures.length) > 0
       && <details className="work-order-drawer"><summary>已丢弃 {discarded.length + discardedCaptures.length} 条</summary>
         {discarded.map((run) => <p key={run.id}>{run.intent}

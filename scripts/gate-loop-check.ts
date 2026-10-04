@@ -16,7 +16,7 @@ import path from "node:path";
 import type { SuccessCriterion } from "../packages/core/src/index";
 import { startCodexSupervisor } from "../packages/codex/src/index";
 import { CrosslineStore } from "../packages/db/src/index";
-import { createMaterialPreparer } from "../apps/worker/src/material-runner";
+import { createManualbookBuilder } from "../apps/worker/src/manualbook";
 import { createMilestoneGate } from "../apps/worker/src/milestone-gate-runner";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
@@ -61,7 +61,7 @@ const supervisor = await startCodexSupervisor({
     name: "crossline",
     marketplacePath: path.join(repoRoot, "skills", "marketplace", ".agents", "plugins", "marketplace.json"),
     cwd: repoRoot,
-    requiredSkills: ["crossline:crossline-material-preparer", "crossline:crossline-milestone-gate"]
+    requiredSkills: ["crossline:crossline-manualbook-designer", "crossline:crossline-material-researcher", "crossline:crossline-material-writer", "crossline:crossline-milestone-gate"]
   }
 });
 
@@ -70,13 +70,14 @@ try {
   store.transitionWorkOrder(WORKSPACE, ORDER_ID, { type: "automation.started" }, `materials-preparing:${ORDER_ID}`);
   check("enters_preparing", store.listWorkOrders(WORKSPACE)[0]?.state === "preparing");
 
-  const prepare = createMaterialPreparer(store, WORKSPACE, projectRoot, () => supervisor.client,
-    () => supervisor.readCostSignal());
+  const materialsDir = path.join(projectRoot, "materials");
+  const prepare = createManualbookBuilder(store, WORKSPACE, materialsDir, repoRoot, () => supervisor.client,
+    { readCost: () => supervisor.readCostSignal() });
   const prepared = await prepare(ORDER_ID);
   check("materials_prepared", prepared.state === "ready", prepared);
   const materials = store.listMaterials(WORKSPACE, ORDER_ID);
   check("material_reference_stored", materials.length > 0, materials.map((item) => item.uri));
-  const written = readdirSync(path.join(projectRoot, ".crossline-materials", ORDER_ID), { recursive: true }) as string[];
+  const written = readdirSync(path.join(materialsDir, ORDER_ID), { recursive: true }) as string[];
   check("files_on_disk", written.length > 0, written);
   check("ready_for_human", store.listWorkOrders(WORKSPACE)[0]?.state === "ready_for_human");
 

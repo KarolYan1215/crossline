@@ -52,7 +52,7 @@ git subtree pull --prefix=vendor/codex codex-fork-src --squash
 ### 暂不支持（阶段四缩小范围时的明确决定，不是遗漏）
 
 - `dynamicTools` 仍然硬编码为空数组。
-- `skillQueue` 仍然是进程级单锁，不按 workspace 分桶。
+- Skill 运行排队按**模型档位**分道（`packages/codex/src/skill-runner.ts` 的 `serializeSkillRun`），不按 workspace 分桶；切换 Skill 启停改的是运行时唯一的配置文件，所以只有这一小步串行（`underConfigLock`）。
 - `preparing`/`judging`/`analyses` 这几个并发追踪结构仍然只按 entity id（work order id / capture id）区分，不按 workspace 二次分桶。
 
 以上三项都是为"真的有第二个 workspace 会调用同一个 worker"这个还不存在的场景准备的基础设施；当前只有一个 owner，提前做这些既测不出价值也验证不了正确性。等 `apps/worker` 真正需要循环处理多个 workspace 时（`packages/db` 的 `listWorkspaces()` 已经在阶段三加好），一并重新评估。

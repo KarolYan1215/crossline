@@ -12,7 +12,8 @@
  */
 // Relative imports, not @crossline/*: the repo root is not a workspace package, so it has no such deps.
 import path from "node:path";
-import { budgetPolicy, deriveCapacity, modelForTier, tierUnderMode } from "../packages/core/src/index";
+import { budgetPolicy, deriveCapacity } from "../packages/core/src/index";
+import { routeForSkill } from "../packages/codex/src/model-policy";
 import { CrosslineStore } from "../packages/db/src/index";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
@@ -55,11 +56,12 @@ try {
     if (decision.mode !== row.mode || decision.warning !== row.warning) {
       failures.push(`budget gate at ${row.usedPercent}% gave ${decision.mode}/${decision.warning}`);
     }
-    // The degradation that matters downstream: which model tier a capable task is allowed to use.
-    const tier = tierUnderMode("capable", decision.mode);
-    return { ...row, actual: decision, capableTierBecomes: tier, model: modelForTier(tier, {}) ?? "(runtime default)" };
+    // The degradation that matters downstream: which model a top-tier Skill is allowed to use at this level.
+    const route = routeForSkill("crossline-onboarding", {}, decision.mode);
+    return { ...row, actual: decision, topTierSkillRunsOn: route?.model ?? "(runtime default)" };
   });
-  if (tierUnderMode("capable", "economy") !== "routine") failures.push("economy did not downgrade the capable tier");
+  if (routeForSkill("crossline-onboarding", {}, "economy")?.model === routeForSkill("crossline-onboarding", {}, "normal")?.model) failures.push("economy did not downgrade the top tier");
+  if (routeForSkill("crossline-milestone-gate", {}, "economy")?.model !== routeForSkill("crossline-milestone-gate", {}, "normal")?.model) failures.push("economy downgraded the milestone gate");
   console.info(JSON.stringify({ status: "gate_7_budget", budget }, null, 1));
 } finally {
   store.close();

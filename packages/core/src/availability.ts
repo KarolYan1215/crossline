@@ -84,3 +84,55 @@ export function validateAvailability(value: unknown): AvailabilityWindow[] {
     return { days: [...window.days], start: window.start, end: window.end, energy: window.energy };
   });
 }
+
+/**
+ * A proposed weekly pattern, read off when the person was actually at the machine over the last weeks.
+ *
+ * It is a suggestion to be edited, never a setting: it only knows when someone was active, not how good their energy was,
+ * so every window comes back as `medium` and says nothing about it. A half hour counts as "usually active" on a weekday
+ * when, on at least half of that weekday's observed days, at least ten of its minutes had input. Runs of such half hours
+ * become windows when they last an hour or more; weekdays with the same window share one entry. Too little data (under
+ * seven distinct days observed) returns nothing rather than a pattern built from a week's accident.
+ */
+export function suggestAvailability(input: {
+  segments: Array<{ start: string; end: string; idle: boolean }>;
+  timeZone: string;
+}): AvailabilityWindow[] {
+  const zone = new Intl.DateTimeFormat("en-GB", { timeZone: input.timeZone, weekday: "short", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+  const WEEKDAYS: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  // Active minutes per (local day, half hour slot), counted minute by minute so a long segment spreads over the slots it covers.
+  const perDay = new Map<string, { weekday: number; slots: Map<number, number> }>();
+  for (const segment of input.segments) {
+    if (segment.idle) continue;
+    for (let at = Date.parse(segment.start); at < Date.parse(segment.end); at += 60_000) {
+      const parts = Object.fromEntries(zone.formatToParts(new Date(at)).map((part) => [part.type, part.value]));
+      const day = `${parts.year}-${parts.month}-${parts.day}`;
+      const slot = Math.floor((Number(parts.hour) * 60 + Number(parts.minute)) / 30);
+      const entry = perDay.get(day) ?? { weekday: WEEKDAYS[parts.weekday!] ?? 0, slots: new Map<number, number>() };
+      entry.slots.set(slot, (entry.slots.get(slot) ?? 0) + 1);
+      perDay.set(day, entry);
+    }
+  }
+  if (perDay.size < 7) return [];
+
+  const windows = new Map<string, AvailabilityWindow>();
+  for (let weekday = 0; weekday < 7; weekday += 1) {
+    const days = [...perDay.values()].filter((entry) => entry.weekday === weekday);
+    // A weekday seen once says nothing about a habit.
+    if (days.length < 2) continue;
+    const usual = Array.from({ length: 48 }, (_, slot) => days.filter((entry) => (entry.slots.get(slot) ?? 0) >= 10).length * 2 >= days.length);
+    for (let slot = 0; slot < 48;) {
+      if (!usual[slot]) { slot += 1; continue; }
+      let end = slot;
+      while (end < 48 && usual[end]) end += 1;
+      if ((end - slot) * 30 >= 60) {
+        const start = clock(slot * 30), stop = clock(Math.min(end * 30, 1439));
+        const key = `${start}-${stop}`;
+        const existing = windows.get(key);
+        if (existing) existing.days.push(weekday); else windows.set(key, { days: [weekday], start, end: stop, energy: "medium" });
+      }
+      slot = end;
+    }
+  }
+  return [...windows.values()].sort((a, b) => a.start.localeCompare(b.start));
+}

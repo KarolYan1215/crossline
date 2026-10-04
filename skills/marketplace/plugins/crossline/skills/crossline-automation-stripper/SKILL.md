@@ -5,7 +5,7 @@ description: Separate a captured intent into reversible AI preparation and irred
 
 # Crossline Automation Stripper
 
-Accept `{capture, approvedMilestones[], availableInputs[], identityPack, historicalStats[], policy}`. Return `{identityId, projectId, milestoneId, intent, family, automationParts[], humanCore[], materialContract[], evidenceContract[], estimate, riskTier, blockers[]}`.
+Accept `{capture, approvedMilestones[], availableInputs[], identityPack, historicalStats[], rhythm, policy}`. Return `{identityId, projectId, milestoneId, intent, family, automationParts[], humanCore[], materialContract[], evidenceContract[], estimate, estimateBreakdown[], riskTier, blockers[]}`.
 
 Keep judgment, relationship ownership, authorship, and accountable decisions in `humanCore`. Automate search, extraction, comparison, formatting, and local drafts when reversible. Estimate `{p25Minutes,p50Minutes,p85Minutes,source,observationCount,confidence}` without asking for a duration. Do not perform the work or change state.
 
@@ -35,3 +35,12 @@ A description that restates policy or constraints, explains your reasoning, cont
 Every entry in `automationParts` and `humanCore` carries a `quote`. That quote must be copied **verbatim** from `capture.title`, `capture.context`, or one of `availableInputs[].text` — an exact substring, character for character. A paraphrase, a translation, a summary, or a tidied-up version is rejected, and so is quoting a milestone title or identity-pack text: those are app-authored, so quoting them proves nothing about what the user captured. If no literal fragment supports a split, do not invent one — leave the split out or stop with a blocker.
 
 Allowed tools: none beyond supplied context. Budget: standard. Risk: routine to high_risk.
+
+
+## Estimating
+
+`estimate` is **focused minutes of actual work** — the time the person is really on the task — not elapsed time, not calendar days, and with no padding for breaks, review rounds or waiting on others (the app schedules those separately). Do not round the steps up out of caution — the margin has one place to live, `p85Minutes`; an estimate that is too long is as wrong as one that is too short, and a person who always finishes in half of it learns to ignore the number.
+
+**Work backwards from the end.** Start at what `evidenceContract` says must exist when the task is done, ask what has to be true just before that, and keep going back until you reach something the person can start on now; those are the steps. Write them in `estimateBreakdown` (`{step, minutes}`, one to eight) in the order they are done, and let **`p50Minutes` be their sum** — unpadded, within a quarter, or the answer is sent back. **The margin is stated, in `p85Minutes`**: the case where the likeliest step overruns once, between 1.2 and 3 times `p50Minutes` (outside that it is refused), sized by which step is most uncertain — an unfamiliar tool, a result you cannot know in advance — and not by adding a little to every step. `p25Minutes` is the quick case. If a step is longer than about `rhythm.focusRunMinutes` (the stretch this person really stays on work before drifting; `0` means not measured yet), it is several sittings: say so in the step's name rather than hiding it in a bigger number.
+
+`rhythm.planActualRatio` is how finished tasks compared with their estimates (`0` = not measured). **Do not apply it yourself**; the app scales a model's estimate by it afterwards, and doing both counts the correction twice. `historicalStats[].medianActualMinutes` is the person's real median for this kind of work when it is non-zero: stay close to it unless this task is clearly bigger or smaller, and say why in the step names.

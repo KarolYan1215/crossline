@@ -179,7 +179,7 @@ export function createMilestoneGate(store: CrosslineStore, workspaceId: string, 
         context.milestone.successCriteria, evidenceTexts,
         context.evidenceContract.filter((item) => item.required).map((item) => item.requirement)),
       onAudit: () => {},
-      timeoutMs: 10 * 60_000
+      timeoutMs: 60 * 60_000
     });
     if (!result.ok) {
       // A gate that could not run (timeout, quota, runtime gone) leaves the order in `evidence_review`.

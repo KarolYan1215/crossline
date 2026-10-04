@@ -2,7 +2,6 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { expect, test } from "vitest";
 import { readCostSignal } from "./cost";
-import { modelTierMapping } from "./model-tiers";
 
 const client = (result: unknown) => ({
   request: async () => result,
@@ -60,12 +59,4 @@ test("core's cost module names no currency and no vendor", () => {
   for (const forbidden of ["USD", "dollar", "美元", "openai", "gpt-", "claude", "anthropic", "codex"]) {
     expect(source.toLowerCase()).not.toContain(forbidden.toLowerCase());
   }
-});
-
-test("model tiers come from the environment, and an unset tier is not given an invented default", () => {
-  expect(modelTierMapping({ CROSSLINE_MODEL_ROUTINE: " small ", CROSSLINE_MODEL_CAPABLE: "large" }))
-    .toEqual({ routine: "small", capable: "large" });
-  // Naming a default here would pin work to a model nobody chose.
-  expect(modelTierMapping({})).toEqual({});
-  expect(modelTierMapping({ CROSSLINE_MODEL_ROUTINE: "  " })).toEqual({});
 });

@@ -5,9 +5,14 @@ export type ForecastGoal = { id: string; title: string; importance: "important" 
 export type ForecastDay = { day: string; netMinutes: number; source: "declared" | "calendar_adjusted" };
 export type GoalForecast = { milestoneId: string; title: string; p50Day: string | null; p85Day: string | null;
   suggestedTargetDay: string | null; confirmedDeadline: string | null; bottleneck: string | null;
+  /** Whole days between the p85 finish and the deadline; null without both. The room the plan leaves for a bad week. */
+  slackDays: number | null;
   p50Minutes: number; p85Minutes: number };
 export type ForecastResult = { weeks: Array<{ week: number; netMinutes: number; reservedMinutes: number;
   usableMinutes: number }>; goals: GoalForecast[] };
+
+/** A goal that only just finishes at p85 has no room for the week that goes wrong; this much has to be left. */
+export const DEADLINE_MARGIN_DAYS = 2;
 
 /** Daily capacity simulation, shared by p50 and p85 so the two dates have the same assumptions. */
 export function forecastGoals(goals: ForecastGoal[], tasks: PlannerTask[], days: ForecastDay[],
@@ -70,13 +75,16 @@ export function forecastGoals(goals: ForecastGoal[], tasks: PlannerTask[], days:
     };
     const p50Day = finalDay(p50);
     const p85Day = finalDay(p85);
+    const slackDays = goal.confirmedDeadline && p85Day
+      ? Math.round((Date.parse(`${goal.confirmedDeadline}T00:00:00Z`) - Date.parse(`${p85Day}T00:00:00Z`)) / 86_400_000) : null;
     const bottleneck = !own.length ? "尚无绑定作业；需先反推步骤"
       : goal.importance === "ordinary" && !goal.confirmedDeadline ? "第四象限暂缓；请确认日期或提升重要性"
         : !p85Day ? "八周内容量或步骤依赖不足"
-          : goal.confirmedDeadline && p85Day > goal.confirmedDeadline ? "p85 情景晚于已确认截止时间" : null;
+          : goal.confirmedDeadline && p85Day > goal.confirmedDeadline ? "p85 情景晚于已确认截止时间"
+            : slackDays !== null && slackDays < DEADLINE_MARGIN_DAYS ? `p85 情景只比截止早 ${slackDays} 天，没有留出 ${DEADLINE_MARGIN_DAYS} 天的余量` : null;
     return { milestoneId: goal.id, title: goal.title, p50Day, p85Day,
       suggestedTargetDay: goal.confirmedDeadline ? null : p85Day,
-      confirmedDeadline: goal.confirmedDeadline, bottleneck,
+      confirmedDeadline: goal.confirmedDeadline, bottleneck, slackDays,
       p50Minutes: own.reduce((sum, task) => sum + task.estimate.p50Minutes, 0),
       p85Minutes: own.reduce((sum, task) => sum + task.estimate.p85Minutes, 0) };
   }) };

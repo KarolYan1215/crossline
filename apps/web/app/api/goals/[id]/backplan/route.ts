@@ -10,7 +10,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   try {
     const result = await requestCodexSupervisor<unknown>(access.ctx, "/v1/goals/backplan", {
       method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ milestoneId: id }), signal: AbortSignal.timeout(10 * 60_000)
+      body: JSON.stringify({ milestoneId: id }), signal: AbortSignal.timeout(3 * 60 * 60_000)
     });
     return Response.json(result);
   } catch (error) {

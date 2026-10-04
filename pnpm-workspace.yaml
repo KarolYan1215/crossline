@@ -10,3 +10,5 @@ allowBuilds:
   better-sqlite3: true
   esbuild: true
   keytar: true
+  onnxruntime-node: set this to true or false
+  protobufjs: set this to true or false

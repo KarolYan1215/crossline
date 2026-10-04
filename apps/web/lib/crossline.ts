@@ -5,7 +5,7 @@ import path from "node:path";
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 import { CrosslineStore, type EvidenceClaimInput, type StoredMilestone } from "@crossline/db";
 import { availableSlots, deriveCapacity, requiredApproval, validateAvailability, DEFAULT_AVAILABILITY,
-  defaultMilestoneTemplates, computeMilestoneConfidence, validateSuccessCriteria,
+  defaultMilestoneTemplates, computeMilestoneConfidence, validateSuccessCriteria, calibrateEstimate,
   type AccessContext, type AvailabilityWindow, type Estimate, type SuccessCriterion, type ChecklistAnswer } from "@crossline/core";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { forecastGoals, planSchedule, recommendNextActions, type ForecastResult, type PlanResult } from "@crossline/planner";
@@ -245,65 +245,89 @@ declare global {
   var crosslineStore: CrosslineStore | undefined;
 }
 
-export function getStore(): CrosslineStore {
-  if (globalThis.crosslineStore) return globalThis.crosslineStore;
-  const dataDir = process.env.CROSSLINE_DATA_DIR
+/** Where this installation keeps everything it owns: the ledger, and now the files people give it. */
+export function dataDirectory(): string {
+  return process.env.CROSSLINE_DATA_DIR
     ? path.resolve(process.env.CROSSLINE_DATA_DIR)
     : path.resolve(process.cwd(), "../../data");
+}
+
+export function getStore(): CrosslineStore {
+  if (globalThis.crosslineStore) return globalThis.crosslineStore;
+  const dataDir = dataDirectory();
   mkdirSync(dataDir, { recursive: true });
   globalThis.crosslineStore = new CrosslineStore(path.join(dataDir, "crossline.db"));
   return globalThis.crosslineStore;
 }
 
+/**
+ * True for a workspace nobody has set up yet: no profile, no interview, no goals, no work. Such a person is
+ * sent to the interview instead of an empty board that tells them nothing.
+ */
+export function needsOnboarding(ctx: AccessContext): boolean {
+  // Seeding first: with example data switched on, a brand-new account has its board only after this runs.
+  ensureSeeded(ctx);
+  const store = getStore();
+  return !store.listProfileFacts(ctx.workspaceId).length
+    && !store.getLatestOnboardingSession(ctx.workspaceId)
+    && !store.listMilestones(ctx.workspaceId).some((milestone) => milestone.status !== "archived")
+    && !store.listWorkOrders(ctx.workspaceId).length;
+}
+
 export function ensureSeeded(ctx: AccessContext): void {
   const store = getStore();
-  // Earlier seeds wrote no projectId, and analysis only offers milestones that have one, so an existing
-  // database would stay permanently unanalysable. Re-seeding is idempotent and repairs those rows.
-  const seeded = store.listMilestones(ctx.workspaceId);
-  if (seeded.length === 0 || seeded.some((milestone) => milestone.id.endsWith("-starter") && !milestone.projectId)) {
-    for (const pack of seedIdentities()) {
-      store.saveMilestone({
-        id: `${pack.id}-starter`, ownerId: ctx.principalId, workspaceId: ctx.workspaceId,
-        identityId: pack.id, projectId: `${pack.id}-default`,
-        title: starterMilestoneTitles[pack.id] ?? `为「${pack.label}」确定第一个可验收的里程碑`,
-        version: 1, status: "approved"
-      });
+  // Example milestones, relations and work orders exist only so the e2e suite and the unit tests have a board
+  // to drive. A real account starts empty: its goals come from the interview, not from four placeholders that
+  // every user shared and none of them chose.
+  if (process.env.CROSSLINE_SEED_EXAMPLES === "1") {
+    // Earlier seeds wrote no projectId, and analysis only offers milestones that have one, so an existing
+    // database would stay permanently unanalysable. Re-seeding is idempotent and repairs those rows.
+    const seeded = store.listMilestones(ctx.workspaceId);
+    if (seeded.length === 0 || seeded.some((milestone) => milestone.id.endsWith("-starter") && !milestone.projectId)) {
+      for (const pack of seedIdentities()) {
+        store.saveMilestone({
+          id: `${pack.id}-starter`, ownerId: ctx.principalId, workspaceId: ctx.workspaceId,
+          identityId: pack.id, projectId: `${pack.id}-default`,
+          title: starterMilestoneTitles[pack.id] ?? `为「${pack.label}」确定第一个可验收的里程碑`,
+          version: 1, status: "approved"
+        });
+      }
     }
-  }
-  if (store.listMilestoneRelations(ctx.workspaceId).length === 0) {
-    const relations = [
-      ["research-startup", "research-starter", "startup-starter", "informs", "approved"],
-      ["startup-media", "startup-starter", "media-starter", "reuses", "approved"],
-      ["media-research", "media-starter", "research-starter", "recurring_feedback", "approved"],
-      // Seeded id "research-investment" can never match the flywheel's own id scheme
-      // (`flywheel:<from>-><to>:<kind>`), so a candidate here would be a permanent, un-fillable orphan
-      // the review page could only ever show as unreviewable. Seeded approved, like the other three.
-      ["research-investment", "research-starter", "investment-starter", "informs", "approved"]
-    ] as const;
-    // These example relations describe the four packs this repo ships. Under a different pack set
-    // their endpoints do not exist, and a relation pointing at a missing milestone is worse than no
-    // relation at all — so it is skipped rather than seeded dangling.
-    const seededMilestoneIds = new Set(store.listMilestones(ctx.workspaceId).map((milestone) => milestone.id));
-    for (const [id, fromMilestoneId, toMilestoneId, kind, status] of relations) {
-      if (!seededMilestoneIds.has(fromMilestoneId) || !seededMilestoneIds.has(toMilestoneId)) continue;
-      store.saveMilestoneRelation({ id, ownerId: ctx.principalId, workspaceId: ctx.workspaceId, fromMilestoneId, toMilestoneId, kind, status });
+    if (store.listMilestoneRelations(ctx.workspaceId).length === 0) {
+      const relations = [
+        ["research-startup", "research-starter", "startup-starter", "informs", "approved"],
+        ["startup-media", "startup-starter", "media-starter", "reuses", "approved"],
+        ["media-research", "media-starter", "research-starter", "recurring_feedback", "approved"],
+        // Seeded id "research-investment" can never match the flywheel's own id scheme
+        // (`flywheel:<from>-><to>:<kind>`), so a candidate here would be a permanent, un-fillable orphan
+        // the review page could only ever show as unreviewable. Seeded approved, like the other three.
+        ["research-investment", "research-starter", "investment-starter", "informs", "approved"]
+      ] as const;
+      // These example relations describe the four packs this repo ships. Under a different pack set
+      // their endpoints do not exist, and a relation pointing at a missing milestone is worse than no
+      // relation at all — so it is skipped rather than seeded dangling.
+      const seededMilestoneIds = new Set(store.listMilestones(ctx.workspaceId).map((milestone) => milestone.id));
+      for (const [id, fromMilestoneId, toMilestoneId, kind, status] of relations) {
+        if (!seededMilestoneIds.has(fromMilestoneId) || !seededMilestoneIds.has(toMilestoneId)) continue;
+        store.saveMilestoneRelation({ id, ownerId: ctx.principalId, workspaceId: ctx.workspaceId, fromMilestoneId, toMilestoneId, kind, status });
+      }
     }
-  }
-  if (store.listWorkOrders(ctx.workspaceId).length === 0) {
-    for (const pack of seedIdentities()) {
-      const identityId = pack.id;
-      const { title, energy, priorFamily } = starterWorkOrders[identityId]
-        ?? { title: `写下「${pack.label}」当前最该推进的一件事`, energy: "medium" as const, priorFamily: "review" };
-      const id = `${identityId}-starter-work-order`;
-      const milestoneId = store.listMilestones(ctx.workspaceId).find((item) => item.identityId === identityId)?.id ?? `${identityId}-unassigned`;
-      store.saveWorkOrder({
-        id, ownerId: ctx.principalId, workspaceId: ctx.workspaceId, identityId,
-        projectId: `${identityId}-default`, milestoneId, intent: title,
-        state: "ready_for_human", riskTier: "milestone",
-        estimate: identityPrior(identityId, priorFamily),
-        payload: { seeded: true, materialContract: [], evidenceContract: [{ kind: "record", required: true }],
-          humanCore: [{ id: `${id}-core`, intent: title, energy, interruptible: true }] }
-      });
+    if (store.listWorkOrders(ctx.workspaceId).length === 0) {
+      for (const pack of seedIdentities()) {
+        const identityId = pack.id;
+        const { title, energy, priorFamily } = starterWorkOrders[identityId]
+          ?? { title: `写下「${pack.label}」当前最该推进的一件事`, energy: "medium" as const, priorFamily: "review" };
+        const id = `${identityId}-starter-work-order`;
+        const milestoneId = store.listMilestones(ctx.workspaceId).find((item) => item.identityId === identityId)?.id ?? `${identityId}-unassigned`;
+        store.saveWorkOrder({
+          id, ownerId: ctx.principalId, workspaceId: ctx.workspaceId, identityId,
+          projectId: `${identityId}-default`, milestoneId, intent: title,
+          state: "ready_for_human", riskTier: "milestone",
+          estimate: identityPrior(identityId, priorFamily),
+          payload: { seeded: true, materialContract: [], evidenceContract: [{ kind: "record", required: true }],
+            humanCore: [{ id: `${id}-core`, intent: title, energy, interruptible: true }] }
+        });
+      }
     }
   }
   if (store.listMilestoneTemplates(ctx.workspaceId).length === 0) {
@@ -360,7 +384,7 @@ export type ManualPromotionInput = {
 };
 
 /**
- * The manual fallback `docs/crossline-plan-critical-review.md` §4 asked for and this app never built:
+ * The manual fallback `docs/archive/crossline-plan-critical-review.md` §4 asked for and this app never built:
  * when Codex is unavailable, a capture can be promoted to a WorkOrder by hand instead of dying at
  * "分析服务不可用" with no other exit. Skips `awaiting_plan_approval` and lands directly on `approved` —
  * promoting it by hand already is the approval, so approving it again would be asking the same person
@@ -785,10 +809,6 @@ export function approvePlanVersion(ctx: AccessContext, planId: string): { ok: tr
   return { ok: true };
 }
 
-export function addCapturedTask(ctx: AccessContext, input: { title: string; context?: string }): string {
-  return addCapturedTaskWithId(ctx, input, randomUUID(), `capture:${randomUUID()}`);
-}
-
 export function addCapturedTaskWithId(
   ctx: AccessContext,
   input: { title: string; context?: string },
@@ -1006,7 +1026,9 @@ export const resolvedEstimate = (ctx: AccessContext, order: ActionableOrder): Es
   const prior = durationPriorFor(order.identityId, order.payload);
   const family = (order.payload as { family?: string } | undefined)?.family;
   const rows = prior && family ? getStore().listDurationObservations(ctx.workspaceId, order.identityId, family) : [];
-  return effectiveEstimate(order.estimate, prior, rows);
+  const estimate = effectiveEstimate(order.estimate, prior, rows);
+  // A model's guess is scaled by how this person's finished tasks compared with their estimates; their own numbers are left alone.
+  return calibrateEstimate(estimate, getStore().workRhythm(ctx.workspaceId, new Date(Date.now() - 28 * 86_400_000).toISOString()));
 };
 
 const plannerTaskOf = (ctx: AccessContext, order: ActionableOrder) => {
@@ -1031,7 +1053,26 @@ const plannerTaskOf = (ctx: AccessContext, order: ActionableOrder) => {
   };
 };
 
+/**
+ * The milestone a line's card names. Only an approved one is "current": the card used to take the first milestone of the line
+ * in any state, so a line with nothing but unapproved drafts (or an archived starter) announced one of them as where it stood.
+ * The earliest-due approved milestone wins; with only drafts, the card says so instead.
+ */
+export function currentMilestoneLabel(milestones: Array<{ id: string; identityId: string; status: string; title: string }>,
+  deadlines: Map<string, string | null | undefined>, identityId: string): string {
+  const mine = milestones.filter((milestone) => milestone.identityId === identityId);
+  const approved = mine.filter((milestone) => milestone.status === "approved")
+    .sort((a, b) => (deadlines.get(a.id) ?? "9999").localeCompare(deadlines.get(b.id) ?? "9999"));
+  if (approved[0]) return approved[0].title;
+  const drafts = mine.filter((milestone) => milestone.status === "draft").length;
+  return drafts ? `${drafts} 个里程碑草稿等你批准` : "等待批准里程碑";
+}
+
 export const LOCAL_ACTIVITY_CONSENT = "localActivity.consent";
+/** The second, separate consent: which app and window were in front. Mirrors the worker's names (it cannot be imported here). */
+export const ACTIVITY_DETAIL_CONSENT = "localActivity.consentV2";
+export const ACTIVITY_PAUSED_UNTIL = "localActivity.pausedUntil";
+export const ACTIVITY_BLACKLIST = "activity.blacklist";
 
 /**
  * What last night's expansion actually did. A night that did not run says so with its reason — the
@@ -1292,6 +1333,10 @@ export async function loadDashboard(ctx: AccessContext): Promise<Omit<DashboardD
     energyLearning: energyCalibration(outcomes),
     // Absent means never asked, so the prompt appears exactly once and the answer is remembered.
     localActivityAsked: store.getSetting(ctx.workspaceId, LOCAL_ACTIVITY_CONSENT) !== undefined,
+    // Someone who agreed to the original minutes-only collection is asked once more about the detailed level: the promise
+    // changed (it now reads app and window), so the old yes does not carry over.
+    activityDetailUpgrade: store.getSetting(ctx.workspaceId, LOCAL_ACTIVITY_CONSENT) === "granted"
+      && store.getSetting(ctx.workspaceId, ACTIVITY_DETAIL_CONSENT) === undefined,
     lastNight: lastNight(ctx.workspaceId, now),
     ...(primary ? { primary } : {}),
     ...(higherPriority ? { higherPriority } : {}),
@@ -1303,6 +1348,7 @@ export async function loadDashboard(ctx: AccessContext): Promise<Omit<DashboardD
     flywheel,
     flywheelStrip,
     identities: identityPacks.map((pack) => {
+      const anchorsByMilestone = new Map(store.listMilestoneAnchors(ctx.workspaceId).map((anchor) => [anchor.milestoneId, anchor.deadline]));
       const identityOrders = orders.filter((order) => order.identityId === pack.id);
       const completed = identityOrders.filter((order) => order.state === "accepted").length;
       const total = identityOrders.length;
@@ -1311,7 +1357,7 @@ export async function loadDashboard(ctx: AccessContext): Promise<Omit<DashboardD
         label: pack.label,
         accent: accents[pack.id] ?? "#6D5EF5",
         completedCount: completed,
-        activeMilestone: milestones.find((milestone) => milestone.identityId === pack.id)?.title ?? "等待批准里程碑",
+        activeMilestone: currentMilestoneLabel(milestones, anchorsByMilestone, pack.id),
         taskCount: total - completed,
         totalCount: total,
         pct: total > 0 ? Math.round((completed / total) * 100) : 0

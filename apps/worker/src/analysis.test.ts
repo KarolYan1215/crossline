@@ -28,15 +28,24 @@ test("duplicate Analyze requests share one durable run and publish only a propos
   expect(store.listEvents("personal-crossline").map((e) => (e.payload as { to?: string }).to).filter(Boolean)).toEqual(["analyzing", "awaiting_plan_approval"]);
 });
 
-test("a blocked analysis can be retried instead of stranding the capture forever", async () => {
+test("an answer that is not JSON is sent back on the same thread, and fixed there", async () => {
   const { rpc, turns } = fakeRuntime(["this is not the agreed JSON", JSON.stringify(proposal)]);
+  const analyze = analysis.createCaptureAnalyzer(store, "personal-crossline", "C:\repo");
+  const result = await analyze(rpc, "c");
+  expect(result).toMatchObject({ state: "awaiting_plan_approval", audit: { threadId: "thread-1", repairs: 1 } });
+  expect(turns()).toBe(2);
+});
+
+test("a blocked analysis can be retried instead of stranding the capture forever", async () => {
+  // Three bad answers: the first try and both repairs. The retry is a new attempt and gets the good one.
+  const { rpc, turns } = fakeRuntime(["this is not the agreed JSON", "still not JSON", "nor this", JSON.stringify(proposal)]);
   const analyze = analysis.createCaptureAnalyzer(store, "personal-crossline", "C:\\repo");
   const blocked = await analyze(rpc, "c");
   expect(blocked.state).toBe("blocked");
   expect(blocked.audit.blocker?.code).toMatch(/^ANALYSIS_[A-Z_]+$/);
   expect(store.listWorkOrders("personal-crossline")).toEqual([]);
   const recovered = await analyze(rpc, "c");
-  expect(turns()).toBe(2);
+  expect(turns()).toBe(4);
   expect(recovered).toMatchObject({ state: "awaiting_plan_approval", attempt: 1 });
   expect(store.listWorkOrders("personal-crossline")).toHaveLength(1);
 });
@@ -69,6 +78,9 @@ const degenerate = [
   { fixture: "analysis-degenerate-truncated-description", outcome: "refused", code: "ANALYSIS_CONTRACT_TRUNCATED", why: "" },
   { fixture: "analysis-degenerate-combining-mark-padding", outcome: "normalised", code: "",
     why: "这是本次清单的主要输入，已由用户提供。" },
+  // Alternating zero-width characters, a stray Malayalam letter and a leaked token: real, from the 2026-10-03 structured-output run.
+  { fixture: "analysis-degenerate-zero-width-padding", outcome: "normalised", code: "",
+    why: "需要提供文件、链接、笔记或其位置，以确定整理对象。" },
   { fixture: "analysis-degenerate-phrase-echo", outcome: "normalised", code: "",
     why: "工作应围绕这些摘录推进，不因缺少原文而停止。" }
 ] as const;
@@ -111,4 +123,58 @@ test("a rejected answer is sent back with the reason, and the corrected one is a
   expect(prompts()[1]).toContain("契约条目被截断");
   // Recorded so a schema that needs repairing every time reads as a schema problem, not a cost.
   expect(result.audit.repairs).toBe(1);
+});
+
+test("a Skill that stops and says why is not coaxed into guessing: its blocker is final, not a rejection to repair", async () => {
+  // Real run: for the capture 「整理一下」 the Skill reported a missing input; when that was sent back as a rejection it dropped the
+  // blocker and invented the input, twice out of two. A stop is an answer.
+  const blocked = { ...proposal, blockers: [{ code: "missing_material", message: "未提供待整理的材料或范围。" }] };
+  const { rpc, turns } = fakeRuntime([JSON.stringify(blocked), JSON.stringify(proposal)]);
+  const result = await analysis.createCaptureAnalyzer(store, "personal-crossline", "C:\repo")(rpc, "c");
+  expect(result.state).toBe("blocked");
+  expect(result.audit.blocker?.code).toBe("ANALYSIS_POLICY_BLOCKED");
+  expect(result.audit.blocker?.message).toContain("未提供待整理的材料或范围");
+  expect(turns()).toBe(1);
+  expect(store.listWorkOrders("personal-crossline")).toEqual([]);
+});
+
+test("the tick analyses a fresh capture on its own, but only with an approved milestone and never one already attempted", async () => {
+  // beforeEach seeds capture "c" and an approved milestone "m".
+  expect(analysis.capturesAwaitingAutoAnalysis(store, "personal-crossline")).toEqual(["c"]);
+  store.capture({ id: "d", ownerId: "local-owner", workspaceId: "personal-crossline", title: "Other", context: "" }, "capture:d");
+  expect(analysis.capturesAwaitingAutoAnalysis(store, "personal-crossline", 1)).toEqual(["c"]);
+
+  // Once analysed (and blocked) it waits for the person instead of being retried on a timer.
+  const { rpc } = fakeRuntime(["not json", "not json", "not json"]);
+  await analysis.createCaptureAnalyzer(store, "personal-crossline", "C:\repo")(rpc, "c");
+  expect(analysis.capturesAwaitingAutoAnalysis(store, "personal-crossline")).toEqual(["d"]);
+
+  // No approved milestone, nothing to analyse against: no attempt, so no blocker the person cannot act on.
+  store.saveMilestone({ id: "m", ownerId: "local-owner", workspaceId: "personal-crossline", identityId: "research", projectId: "p", title: "Decide", version: 2, status: "archived" });
+  expect(analysis.capturesAwaitingAutoAnalysis(store, "personal-crossline")).toEqual([]);
+});
+
+test("an identity that is not one of the lines is sent back with the valid ones, not stored (a real capture was filed under 「\」)", async () => {
+  const stray = { ...proposal, identityId: "\\", milestoneId: "" };
+  const { rpc, turns, prompts } = fakeRuntime([JSON.stringify(stray), JSON.stringify(proposal)]);
+  const result = await analysis.createCaptureAnalyzer(store, "personal-crossline", "C:\repo")(rpc, "c");
+  expect(result).toMatchObject({ state: "awaiting_plan_approval", audit: { repairs: 1 } });
+  expect(turns()).toBe(2);
+  expect(prompts()[1]).toContain("ANALYSIS_IDENTITY_UNKNOWN");
+  expect(prompts()[1]).toContain("research");
+  expect(store.listWorkOrders("personal-crossline")[0]).toMatchObject({ identityId: "research" });
+});
+
+test("a capture blocked only for want of an approved milestone is picked up again once one exists, and the message says what to do", async () => {
+  store.saveMilestone({ id: "m", ownerId: "local-owner", workspaceId: "personal-crossline", identityId: "research", projectId: "p", title: "Decide", version: 2, status: "draft" });
+  const { rpc } = fakeRuntime([JSON.stringify(proposal)]);
+  const blocked = await analysis.createCaptureAnalyzer(store, "personal-crossline", "C:\repo")(rpc, "c");
+  expect(blocked.audit.blocker).toMatchObject({ code: "ANALYSIS_APPROVED_MILESTONE_REQUIRED" });
+  expect(blocked.audit.blocker?.message).toContain("主线");
+  expect(blocked.audit.blocker?.message).not.toContain("分析被阻塞");
+  // Nothing to bind to yet, so the tick leaves it alone …
+  expect(analysis.capturesAwaitingAutoAnalysis(store, "personal-crossline")).toEqual([]);
+  // … and once the milestone is approved it is on the list again without anyone pressing anything.
+  store.saveMilestone({ id: "m", ownerId: "local-owner", workspaceId: "personal-crossline", identityId: "research", projectId: "p", title: "Decide", version: 3, status: "approved" });
+  expect(analysis.capturesAwaitingAutoAnalysis(store, "personal-crossline")).toEqual(["c"]);
 });

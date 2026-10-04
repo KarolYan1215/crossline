@@ -1,4 +1,6 @@
 import { validateSuccessCriteria, type SuccessCriterion } from "./index";
+import { RELATION_KINDS } from "./flywheel-schema";
+import { MILESTONE_PLAN_SCHEMA, validateMilestonePlans, type MilestonePlan, type ProfileForMilestones, type TargetProposal } from "./milestone-plan";
 import { EVIDENCE_QUESTION_SCHEMA, validateEvidenceQuestionBank, type EvidenceQuestionTemplate } from "./milestone-templates";
 
 /**
@@ -91,7 +93,7 @@ export const measure = {
   anyOf: [
     object({ kind: { type: "string", enum: ["count"] }, unit: str, atLeast: { type: "number" } }),
     object({ kind: { type: "string", enum: ["threshold"] }, unit: str,
-      comparator: { type: "string", enum: ["gte", "lte"] }, value: { type: "number" } }),
+      comparator: { type: "string", enum: ["gte", "lte"] }, value: { type: "number" }, bareLine: { type: "number" } }),
     object({ kind: { type: "string", enum: ["artifact"] }, mustExist: str }),
     object({ kind: { type: "string", enum: ["judgement"] }, rubric: str, failsWhen: str })
   ]
@@ -134,19 +136,29 @@ export type MilestoneProposal = {
      * its bank from the template itself (deterministic), the same way its confidence does, rather than
      * trusting the model to reproduce it. */
     evidenceQuestionBank: EvidenceQuestionTemplate[];
+    /** The person-specific anchors. Required whenever the context carries a profile; see `validateMilestonePlans`. */
+    plan?: MilestonePlan;
   }>;
+  /**
+   * A target for each course that has none on record, proposed from the person's long-term goals with the reason. Written as an
+   * unconfirmed fact the person can change in one click; the milestones' score lines are worked back from it.
+   */
+  targetProposals?: TargetProposal[];
   assumptions: string[];
   blockers: Array<{ code: string; message: string }>;
 };
-
 export const MILESTONE_PROPOSAL_SCHEMA = object({
   milestones: list(object({
     identityId: str, projectId: str, title: str,
     successCriteria: list(criterion, 10),
     rationale: str,
     templateId: { anyOf: [{ type: "string", minLength: 1, maxLength: 200 }, { type: "null" }] },
-    evidenceQuestionBank: list(EVIDENCE_QUESTION_SCHEMA, 6)
-  }), 10),
+    // Three, not six: with one chain per project a profile like this one asks for fifteen milestones, and the answer grew until the
+    // model ran out of room and reported it as a blocker.
+    evidenceQuestionBank: list(EVIDENCE_QUESTION_SCHEMA, 3),
+    plan: MILESTONE_PLAN_SCHEMA
+  }), 20),
+  targetProposals: list(object({ projectId: str, value: str, why: str }), 8),
   assumptions: strList,
   blockers: list(object({ code: str, message: str }), 10)
 });
@@ -162,6 +174,10 @@ export type MilestoneProposalContext = {
   templates: Array<{ id: string; identityId: string; kind: string; titleHint: string }>;
   /** What the user asked for, in their own words. Empty means "look at the whole picture". */
   request: string;
+  /** The person's profile. When present the answer must be anchored to it, dated and chained. */
+  profile?: ProfileForMilestones;
+  /** Web research the person has accepted: what was found, with where, so a milestone can build on it instead of guessing. */
+  diligence?: Array<{ identityId: string; title: string; why: string; kind: string; dueDate: string; claims: string[]; sources: string[] }>;
 };
 
 export function validateMilestoneProposal(value: unknown, context: MilestoneProposalContext): MilestoneProposal {
@@ -169,7 +185,10 @@ export function validateMilestoneProposal(value: unknown, context: MilestoneProp
   if (!raw || !Array.isArray(raw.milestones) || !Array.isArray(raw.blockers) || !Array.isArray(raw.assumptions)) {
     throw new Error("PROPOSAL_SCHEMA_INVALID");
   }
-  if (raw.blockers.length) {
+  // A blocker next to real milestones is the model hedging about a thin line, not the whole answer being unusable: refusing it
+  // threw away the lines it had done well (a real run, blocked on 「自媒体线缺少已确认的受众」 with milestones in hand). It travels
+  // as an assumption instead, so the person sees what to correct. Only an answer with nothing in it is a stop.
+  if (raw.blockers.length && !raw.milestones.length) {
     const error = new Error("PROPOSAL_BLOCKED");
     (error as Error & { detail?: string }).detail =
       raw.blockers.map((blocker) => blocker.message.trim()).filter(Boolean).join("；").slice(0, 400);
@@ -193,7 +212,81 @@ export function validateMilestoneProposal(value: unknown, context: MilestoneProp
     if (!checked.ok) throw new Error(checked.blocker.code);
     if (!validateEvidenceQuestionBank(proposal.evidenceQuestionBank)) throw new Error("PROPOSAL_EVIDENCE_QUESTION_BANK_INVALID");
   }
-  return { milestones: raw.milestones, assumptions: raw.assumptions, blockers: [] };
+  if (context.profile) {
+    const proposals = raw.targetProposals ?? [];
+    for (const proposal of proposals) {
+      if (!context.profile.projects.some((project) => project.id === proposal.projectId)) {
+        const error = new Error("PROPOSAL_TARGET_PROJECT_UNKNOWN");
+        (error as Error & { detail?: string }).detail = `targetProposals 里的 projectId「${proposal.projectId}」不是这个人的项目。`;
+        throw error;
+      }
+      if (proposal.value.trim().length < 2 || proposal.why.trim().length < 10) {
+        const error = new Error("PROPOSAL_TARGET_UNREASONED");
+        (error as Error & { detail?: string }).detail = `「${proposal.projectId}」的目标要写清楚是什么，并用一两句话说明为什么按这个人的长期目标它合适。`;
+        throw error;
+      }
+    }
+    validateMilestonePlans(raw.milestones, context.profile, new Set(context.existingMilestones.map((milestone) => milestone.id)), proposals);
+  }
+  const hedges = raw.blockers.map((blocker) => blocker.message.trim()).filter(Boolean);
+  return { milestones: raw.milestones, targetProposals: raw.targetProposals ?? [], assumptions: [...raw.assumptions, ...hedges], blockers: [] };
+}
+
+function refuseRelation(code: string, detail: string): never {
+  const error = new Error(code);
+  (error as Error & { detail?: string }).detail = detail.slice(0, 400);
+  throw error;
+}
+
+/**
+ * How milestones in different lines feed each other — the thing this app exists to show — asked for in its own, small run after the
+ * lines have their milestones. Folded into the milestone answer it made that answer longer than a turn could be repaired in.
+ */
+export type ProposedRelation = {
+  fromId: string; toId: string; kind: (typeof RELATION_KINDS)[number];
+  explanation: string; refutedWhen: string; sourceFactIds: string[];
+};
+export const MAX_PROPOSED_RELATIONS = 12;
+export type RelationsProposal = { relations: ProposedRelation[]; assumptions: string[]; blockers: Array<{ code: string; message: string }> };
+export type RelationsContext = {
+  version: "crossline.milestone-relations.v1";
+  milestones: Array<{ id: string; identityId: string; projectId: string; title: string; stage: number; deadline: string; target: string }>;
+  /** The profile facts a relation may rest on, addressed as the profile addresses them. The interview's own `flywheel_*` guesses are in here. */
+  facts: Array<{ id: string; identityId: string; projectId: string; slot: string; value: string; status: "confirmed" | "inferred" }>;
+};
+
+export const MILESTONE_RELATIONS_SCHEMA = object({
+  relations: list(object({
+    fromId: str, toId: str, kind: { type: "string", enum: [...RELATION_KINDS] },
+    explanation: str, refutedWhen: str, sourceFactIds: strList
+  }), MAX_PROPOSED_RELATIONS),
+  assumptions: strList,
+  blockers: list(object({ code: str, message: str }), 10)
+});
+
+/** What can be checked about a cross-line claim: two different lines, real milestones, a stated claim, a stated way to be wrong, a real source. */
+export function validateRelationsProposal(value: unknown, context: RelationsContext): RelationsProposal {
+  const raw = value as RelationsProposal | undefined;
+  if (!raw || !Array.isArray(raw.relations) || !Array.isArray(raw.assumptions) || !Array.isArray(raw.blockers)) throw new Error("RELATION_SCHEMA_INVALID");
+  if (raw.relations.length > MAX_PROPOSED_RELATIONS) refuseRelation("RELATION_TOO_MANY", `最多 ${MAX_PROPOSED_RELATIONS} 条联系。`);
+  const byId = new Map(context.milestones.map((milestone) => [milestone.id, milestone]));
+  const facts = new Set(context.facts.map((fact) => fact.id));
+  const seen = new Set<string>();
+  for (const relation of raw.relations) {
+    const from = byId.get(relation.fromId), to = byId.get(relation.toId);
+    const label = `联系「${relation.fromId} → ${relation.toId}」`;
+    if (!from || !to) refuseRelation("RELATION_MILESTONE_UNKNOWN", `${label} 两端必须是输入里某个里程碑的 id。`);
+    if (from.identityId === to.identityId) refuseRelation("RELATION_SAME_LINE", `${label} 两端在同一条主线；这里只提不同主线之间的联系。`);
+    if (!RELATION_KINDS.includes(relation.kind)) refuseRelation("RELATION_KIND_INVALID", `${label} 的 kind 不是已知的几种。`);
+    if (relation.explanation.trim().length < 12) refuseRelation("RELATION_EXPLANATION_REQUIRED", `${label} 要写清楚它声称什么。`);
+    if (relation.refutedWhen.trim().length < 8) refuseRelation("RELATION_REFUTATION_REQUIRED", `${label} 要写出什么情况说明它不成立。`);
+    if (!relation.sourceFactIds.length) refuseRelation("RELATION_SOURCE_REQUIRED", `${label} 要引用至少一条画像事实（采访里的 flywheel_* 推断也算）。`);
+    for (const id of relation.sourceFactIds) if (!facts.has(id)) refuseRelation("RELATION_SOURCE_UNKNOWN", `${label} 引用了画像里不存在的事实「${id}」。`);
+    const key = `${relation.fromId}>${relation.toId}:${relation.kind}`;
+    if (seen.has(key)) refuseRelation("RELATION_DUPLICATE", `${label} 重复了。`);
+    seen.add(key);
+  }
+  return { relations: raw.relations, assumptions: raw.assumptions, blockers: [] };
 }
 
 export type CriteriaContext = {

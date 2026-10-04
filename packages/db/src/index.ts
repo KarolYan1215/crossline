@@ -1,10 +1,10 @@
 import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import { copyFileSync, existsSync } from "node:fs";
-import { advanceWorkOrder, validateAnalysisProposal, validateAnalysisContext, validateMilestoneGateResult, requiredContractRequirements, validateSuccessCriteria,
+import { advanceWorkOrder, validateAnalysisProposal, validateAnalysisContext, validateMilestoneGateResult, requiredContractRequirements, validateSuccessCriteria, summarizeRhythm,
   type MilestoneGateResult, type SuccessCriterion, type WorkOrderEvent, type WorkOrderState,
   type MilestoneTemplateKind, type EvidenceQuestionTemplate, type MilestoneTemplateSource,
-  type ChecklistAnswer } from "@crossline/core";
+  type ChecklistAnswer, type WorkRhythm } from "@crossline/core";
 
 type LedgerEventInput = {
   ownerId: string;
@@ -136,6 +136,80 @@ export type StoredAssistantThread = {
 export type StoredAssistantAttachment = {
   id: string; ownerId: string; workspaceId: string; threadId: string;
   uri: string; mediaType: string; fileName: string; createdAt: string;
+};
+
+/**
+ * A project is one thing the person is actually working on inside an identity (a paper, a product, a
+ * channel). Until now a project was a bare string on a milestone, `${identity}-default` for nearly all
+ * of them, so a person with two research projects had no way to say so. Named `workspace_projects`
+ * because a table called `projects` was retired in migration 4 and the restore path refuses that name.
+ */
+export type StoredProject = {
+  id: string; ownerId: string; workspaceId: string; identityId: string; name: string;
+  status: "active" | "paused" | "done" | "archived"; summary: string; createdAt: string; updatedAt: string;
+};
+
+/** A file the person gave us, with the text pulled out of it: the only form in which a model ever sees it. */
+export type StoredSourceDocument = {
+  id: string; ownerId: string; workspaceId: string; projectId?: string;
+  kind: "pdf" | "docx" | "image" | "audio" | "text";
+  fileName: string; mediaType: string; sha256: string; uri: string;
+  extractedText: string; extractionStatus: "pending" | "done" | "failed" | "unsupported";
+  extractionNote?: string; createdAt: string;
+};
+
+export type StoredOnboardingSession = {
+  id: string; ownerId: string; workspaceId: string; codexThreadId?: string;
+  state: "active" | "complete"; coverage: Record<string, unknown>; createdAt: string; updatedAt: string;
+};
+export type StoredOnboardingMessage = {
+  sessionId: string; workspaceId: string; seq: number; role: "assistant" | "user";
+  content: unknown; createdAt: string;
+};
+
+/** One thing known about the person, with where it came from. `inferred` means nobody has confirmed it. */
+export type StoredProfileFact = {
+  workspaceId: string; identityId: string; projectId: string; slot: string; value: string;
+  status: "confirmed" | "inferred"; sourceRef: string; sourceQuote: string; updatedAt: string;
+};
+
+/**
+ * What makes a milestone this person's own: where they start, what "done" is in their words, the date it has
+ * to land by, who else is involved, and which things the profile said that justify it. Kept beside the
+ * milestone, keyed by its id, so a revision of the milestone does not lose it.
+ */
+export type StoredMilestoneAnchor = {
+  workspaceId: string; milestoneId: string; stage: number; deadline: string; baseline: string; target: string;
+  stakeholders: string[]; sourceFactIds: string[]; dependsOn: string[]; updatedAt: string;
+};
+
+/**
+ * One stretch of the same window in the foreground. The title is the person's own and stays on this machine: it is not
+ * returned by `listActivitySegments`, not exported, and blanked after the retention period. `recentActivityEntries` is the
+ * only way to read it, and it exists so the person can see exactly what is kept.
+ */
+export type StoredActivitySegment = {
+  workspaceId: string; start: string; end: string; app: string; category: string; idle: boolean;
+};
+export type RecentActivityEntry = StoredActivitySegment & { title: string };
+
+/** What one Skill run cost, as the runtime reported it. Kept so "what does this cost me" has an answer. */
+export type StoredModelUsage = {
+  workspaceId: string; skill: string; tier: string; model: string; effort: string; spendMode: string; threadId: string;
+  ok: boolean; errorCode: string; repairs: number; turns: number; inputTokens: number; cachedInputTokens: number;
+  outputTokens: number; reasoningTokens: number; totalTokens: number; durationMs: number; at: string;
+};
+export type ModelUsageSummary = {
+  skill: string; model: string; runs: number; failed: number; repairs: number;
+  inputTokens: number; outputTokens: number; reasoningTokens: number; totalTokens: number; averageSeconds: number;
+  /** The slowest single run in the window — what a time limit has to clear, which an average hides. */
+  longestSeconds: number;
+};
+
+export type StoredDiligenceReport = {
+  id: string; ownerId: string; workspaceId: string; scope: string; question: string;
+  findings: unknown; proposals: unknown; sources: unknown;
+  status: "queued" | "running" | "done" | "failed"; note?: string; runAt: string;
 };
 
 export type StoredExecution = {
@@ -426,6 +500,65 @@ export class CrosslineStore {
         PRIMARY KEY(workspace_id, id)
       );
       CREATE INDEX IF NOT EXISTS milestone_templates_identity ON milestone_templates(workspace_id, identity_id);
+      CREATE TABLE IF NOT EXISTS workspace_projects (
+        id TEXT NOT NULL, owner_id TEXT NOT NULL, workspace_id TEXT NOT NULL, identity_id TEXT NOT NULL,
+        name TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('active','paused','done','archived')),
+        summary TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+        PRIMARY KEY(workspace_id, id)
+      );
+      CREATE INDEX IF NOT EXISTS workspace_projects_identity ON workspace_projects(workspace_id, identity_id);
+      CREATE TABLE IF NOT EXISTS source_documents (
+        id TEXT NOT NULL, owner_id TEXT NOT NULL, workspace_id TEXT NOT NULL, project_id TEXT,
+        kind TEXT NOT NULL CHECK(kind IN ('pdf','docx','image','audio','text')),
+        file_name TEXT NOT NULL, media_type TEXT NOT NULL, sha256 TEXT NOT NULL, uri TEXT NOT NULL,
+        extracted_text TEXT NOT NULL DEFAULT '',
+        extraction_status TEXT NOT NULL CHECK(extraction_status IN ('pending','done','failed','unsupported')),
+        extraction_note TEXT, created_at TEXT NOT NULL,
+        PRIMARY KEY(workspace_id, id), UNIQUE(workspace_id, sha256)
+      );
+      CREATE TABLE IF NOT EXISTS onboarding_sessions (
+        id TEXT NOT NULL, owner_id TEXT NOT NULL, workspace_id TEXT NOT NULL, codex_thread_id TEXT,
+        state TEXT NOT NULL CHECK(state IN ('active','complete')), coverage_json TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(workspace_id, id)
+      );
+      CREATE TABLE IF NOT EXISTS onboarding_messages (
+        session_id TEXT NOT NULL, workspace_id TEXT NOT NULL, seq INTEGER NOT NULL,
+        role TEXT NOT NULL CHECK(role IN ('assistant','user')), content_json TEXT NOT NULL, created_at TEXT NOT NULL,
+        PRIMARY KEY(workspace_id, session_id, seq)
+      );
+      CREATE TABLE IF NOT EXISTS profile_facts (
+        workspace_id TEXT NOT NULL, identity_id TEXT NOT NULL, project_id TEXT NOT NULL DEFAULT '',
+        slot TEXT NOT NULL, value TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('confirmed','inferred')),
+        source_ref TEXT NOT NULL, source_quote TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL,
+        PRIMARY KEY(workspace_id, identity_id, project_id, slot)
+      );
+      CREATE TABLE IF NOT EXISTS activity_segments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, workspace_id TEXT NOT NULL, start_at TEXT NOT NULL, end_at TEXT NOT NULL,
+        app TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', category TEXT NOT NULL, idle INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE INDEX IF NOT EXISTS activity_segments_by_time ON activity_segments (workspace_id, end_at);
+      CREATE TABLE IF NOT EXISTS model_usage (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, workspace_id TEXT NOT NULL, skill TEXT NOT NULL, tier TEXT NOT NULL DEFAULT '',
+        model TEXT NOT NULL DEFAULT '', effort TEXT NOT NULL DEFAULT '', spend_mode TEXT NOT NULL DEFAULT 'normal',
+        thread_id TEXT NOT NULL DEFAULT '', ok INTEGER NOT NULL, error_code TEXT NOT NULL DEFAULT '', repairs INTEGER NOT NULL DEFAULT 0,
+        turns INTEGER NOT NULL DEFAULT 0, input_tokens INTEGER NOT NULL DEFAULT 0, cached_input_tokens INTEGER NOT NULL DEFAULT 0,
+        output_tokens INTEGER NOT NULL DEFAULT 0, reasoning_tokens INTEGER NOT NULL DEFAULT 0, total_tokens INTEGER NOT NULL DEFAULT 0,
+        duration_ms INTEGER NOT NULL DEFAULT 0, at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS model_usage_by_time ON model_usage (workspace_id, at);
+      CREATE TABLE IF NOT EXISTS milestone_anchors (
+        workspace_id TEXT NOT NULL, milestone_id TEXT NOT NULL, stage INTEGER NOT NULL, deadline TEXT NOT NULL,
+        baseline TEXT NOT NULL, target TEXT NOT NULL, stakeholders_json TEXT NOT NULL DEFAULT '[]',
+        source_fact_ids_json TEXT NOT NULL DEFAULT '[]', depends_on_json TEXT NOT NULL DEFAULT '[]', updated_at TEXT NOT NULL,
+        PRIMARY KEY(workspace_id, milestone_id)
+      );
+      CREATE TABLE IF NOT EXISTS diligence_reports (
+        id TEXT NOT NULL, owner_id TEXT NOT NULL, workspace_id TEXT NOT NULL, scope TEXT NOT NULL,
+        question TEXT NOT NULL, findings_json TEXT NOT NULL DEFAULT '[]', proposals_json TEXT NOT NULL DEFAULT '[]',
+        sources_json TEXT NOT NULL DEFAULT '[]',
+        status TEXT NOT NULL CHECK(status IN ('queued','running','done','failed')), note TEXT, run_at TEXT NOT NULL,
+        PRIMARY KEY(workspace_id, id)
+      );
     `);
     if (hasLegacyTasks) this.#migrateLegacyTasks();
     this.#runMigrations(path);
@@ -1178,6 +1311,278 @@ export class CrosslineStore {
     };
   }
 
+  // --- Projects, source documents, onboarding sessions, profile facts, diligence reports -------------
+  // One block because they are one feature: what we know about the person and where it came from.
+
+  saveProject(project: StoredProject): void {
+    this.#db.prepare(`
+      INSERT INTO workspace_projects (id, owner_id, workspace_id, identity_id, name, status, summary, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(workspace_id, id) DO UPDATE SET identity_id = excluded.identity_id, name = excluded.name,
+        status = excluded.status, summary = excluded.summary, updated_at = excluded.updated_at
+    `).run(project.id, project.ownerId, project.workspaceId, project.identityId, project.name, project.status,
+      project.summary, project.createdAt, project.updatedAt);
+  }
+
+  listProjects(workspaceId: string, options: { identityId?: string; includeArchived?: boolean } = {}): StoredProject[] {
+    const rows = this.#db.prepare(
+      "SELECT * FROM workspace_projects WHERE workspace_id = ? ORDER BY created_at, rowid"
+    ).all(workspaceId) as Array<Record<string, string>>;
+    return rows
+      .filter((row) => (options.includeArchived || row.status !== "archived")
+        && (!options.identityId || row.identity_id === options.identityId))
+      .map((row) => ({ id: row.id!, ownerId: row.owner_id!, workspaceId: row.workspace_id!, identityId: row.identity_id!,
+        name: row.name!, status: row.status as StoredProject["status"], summary: row.summary ?? "",
+        createdAt: row.created_at!, updatedAt: row.updated_at! }));
+  }
+
+  /**
+   * Stores a source document once per file content: the same syllabus dropped twice is one row. Returns
+   * the row that now exists, which is the existing one on a repeat.
+   */
+  saveSourceDocument(doc: StoredSourceDocument): StoredSourceDocument {
+    this.#db.prepare(`
+      INSERT INTO source_documents (id, owner_id, workspace_id, project_id, kind, file_name, media_type, sha256, uri,
+        extracted_text, extraction_status, extraction_note, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(workspace_id, sha256) DO NOTHING
+    `).run(doc.id, doc.ownerId, doc.workspaceId, doc.projectId ?? null, doc.kind, doc.fileName, doc.mediaType,
+      doc.sha256, doc.uri, doc.extractedText, doc.extractionStatus, doc.extractionNote ?? null, doc.createdAt);
+    return this.listSourceDocuments(doc.workspaceId).find((item) => item.sha256 === doc.sha256)!;
+  }
+
+  listSourceDocuments(workspaceId: string, options: { projectId?: string } = {}): StoredSourceDocument[] {
+    const rows = this.#db.prepare("SELECT * FROM source_documents WHERE workspace_id = ? ORDER BY created_at, rowid")
+      .all(workspaceId) as Array<Record<string, string | null>>;
+    return rows.filter((row) => !options.projectId || row.project_id === options.projectId).map((row) => ({
+      id: row.id!, ownerId: row.owner_id!, workspaceId: row.workspace_id!,
+      ...(row.project_id ? { projectId: row.project_id } : {}),
+      kind: row.kind as StoredSourceDocument["kind"], fileName: row.file_name!, mediaType: row.media_type!,
+      sha256: row.sha256!, uri: row.uri!, extractedText: row.extracted_text ?? "",
+      extractionStatus: row.extraction_status as StoredSourceDocument["extractionStatus"],
+      ...(row.extraction_note ? { extractionNote: row.extraction_note } : {}), createdAt: row.created_at!
+    }));
+  }
+
+  /** Text extraction runs after upload, in the worker, so it is recorded separately from the file itself. */
+  setSourceDocumentExtraction(workspaceId: string, id: string,
+    result: { status: StoredSourceDocument["extractionStatus"]; text?: string; note?: string }): void {
+    this.#db.prepare(
+      "UPDATE source_documents SET extraction_status = ?, extracted_text = ?, extraction_note = ? WHERE workspace_id = ? AND id = ?"
+    ).run(result.status, result.text ?? "", result.note ?? null, workspaceId, id);
+  }
+
+  assignSourceDocumentProject(workspaceId: string, id: string, projectId: string | null): void {
+    this.#db.prepare("UPDATE source_documents SET project_id = ? WHERE workspace_id = ? AND id = ?")
+      .run(projectId, workspaceId, id);
+  }
+
+  saveOnboardingSession(session: StoredOnboardingSession): void {
+    this.#db.prepare(`
+      INSERT INTO onboarding_sessions (id, owner_id, workspace_id, codex_thread_id, state, coverage_json, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(workspace_id, id) DO UPDATE SET codex_thread_id = excluded.codex_thread_id, state = excluded.state,
+        coverage_json = excluded.coverage_json, updated_at = excluded.updated_at
+    `).run(session.id, session.ownerId, session.workspaceId, session.codexThreadId ?? null, session.state,
+      JSON.stringify(session.coverage), session.createdAt, session.updatedAt);
+  }
+
+  #onboardingSessionFrom(row: Record<string, string>): StoredOnboardingSession {
+    return { id: row.id!, ownerId: row.owner_id!, workspaceId: row.workspace_id!,
+      ...(row.codex_thread_id ? { codexThreadId: row.codex_thread_id } : {}),
+      state: row.state as StoredOnboardingSession["state"], coverage: JSON.parse(row.coverage_json ?? "{}"),
+      createdAt: row.created_at!, updatedAt: row.updated_at! };
+  }
+
+  /** The workspace's current onboarding conversation: the most recently touched one. */
+  getLatestOnboardingSession(workspaceId: string): StoredOnboardingSession | undefined {
+    const row = this.#db.prepare(
+      "SELECT * FROM onboarding_sessions WHERE workspace_id = ? ORDER BY updated_at DESC, rowid DESC LIMIT 1"
+    ).get(workspaceId) as Record<string, string> | undefined;
+    return row ? this.#onboardingSessionFrom(row) : undefined;
+  }
+
+  getOnboardingSession(workspaceId: string, id: string): StoredOnboardingSession | undefined {
+    const row = this.#db.prepare("SELECT * FROM onboarding_sessions WHERE workspace_id = ? AND id = ?")
+      .get(workspaceId, id) as Record<string, string> | undefined;
+    return row ? this.#onboardingSessionFrom(row) : undefined;
+  }
+
+  /** Appends at the next sequence number, atomically, and returns it. */
+  appendOnboardingMessage(message: Omit<StoredOnboardingMessage, "seq">): number {
+    return this.#db.transaction(() => {
+      const next = (this.#db.prepare(
+        "SELECT COALESCE(MAX(seq), 0) + 1 AS n FROM onboarding_messages WHERE workspace_id = ? AND session_id = ?"
+      ).get(message.workspaceId, message.sessionId) as { n: number }).n;
+      this.#db.prepare(
+        "INSERT INTO onboarding_messages (session_id, workspace_id, seq, role, content_json, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+      ).run(message.sessionId, message.workspaceId, next, message.role, JSON.stringify(message.content), message.createdAt);
+      return next;
+    })();
+  }
+
+  listOnboardingMessages(workspaceId: string, sessionId: string): StoredOnboardingMessage[] {
+    const rows = this.#db.prepare(
+      "SELECT * FROM onboarding_messages WHERE workspace_id = ? AND session_id = ? ORDER BY seq"
+    ).all(workspaceId, sessionId) as Array<Record<string, string | number>>;
+    return rows.map((row) => ({ sessionId: String(row.session_id), workspaceId: String(row.workspace_id),
+      seq: Number(row.seq), role: row.role as StoredOnboardingMessage["role"],
+      content: JSON.parse(String(row.content_json)), createdAt: String(row.created_at) }));
+  }
+
+  /**
+   * One value per (identity, project, slot), last write wins. A fact the person confirmed is never
+   * downgraded back to `inferred` by a later guess: confirming is a human act and inferring is not.
+   */
+  upsertProfileFact(fact: StoredProfileFact): void {
+    this.#db.prepare(`
+      INSERT INTO profile_facts (workspace_id, identity_id, project_id, slot, value, status, source_ref, source_quote, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(workspace_id, identity_id, project_id, slot) DO UPDATE SET
+        value = CASE WHEN profile_facts.status = 'confirmed' AND excluded.status = 'inferred'
+          THEN profile_facts.value ELSE excluded.value END,
+        status = CASE WHEN profile_facts.status = 'confirmed' THEN 'confirmed' ELSE excluded.status END,
+        source_ref = CASE WHEN profile_facts.status = 'confirmed' AND excluded.status = 'inferred'
+          THEN profile_facts.source_ref ELSE excluded.source_ref END,
+        source_quote = CASE WHEN profile_facts.status = 'confirmed' AND excluded.status = 'inferred'
+          THEN profile_facts.source_quote ELSE excluded.source_quote END,
+        updated_at = excluded.updated_at
+    `).run(fact.workspaceId, fact.identityId, fact.projectId, fact.slot, fact.value, fact.status,
+      fact.sourceRef, fact.sourceQuote, fact.updatedAt);
+  }
+
+  listProfileFacts(workspaceId: string, options: { identityId?: string; projectId?: string } = {}): StoredProfileFact[] {
+    const rows = this.#db.prepare(
+      "SELECT * FROM profile_facts WHERE workspace_id = ? ORDER BY identity_id, project_id, slot"
+    ).all(workspaceId) as Array<Record<string, string>>;
+    return rows.filter((row) => (!options.identityId || row.identity_id === options.identityId)
+      && (options.projectId === undefined || row.project_id === options.projectId))
+      .map((row) => ({ workspaceId: row.workspace_id!, identityId: row.identity_id!, projectId: row.project_id ?? "",
+        slot: row.slot!, value: row.value!, status: row.status as StoredProfileFact["status"],
+        sourceRef: row.source_ref!, sourceQuote: row.source_quote ?? "", updatedAt: row.updated_at! }));
+  }
+
+  /** The person rejecting a fact the interview inferred (or correcting one it got wrong). */
+  deleteProfileFact(workspaceId: string, identityId: string, projectId: string, slot: string): boolean {
+    return this.#db.prepare(
+      "DELETE FROM profile_facts WHERE workspace_id = ? AND identity_id = ? AND project_id = ? AND slot = ?"
+    ).run(workspaceId, identityId, projectId, slot).changes > 0;
+  }
+
+  /**
+   * Adds one reading to the screen-activity record: it extends the last segment when it is the same window (and not
+   * long after it), and starts a new one otherwise. `intervalSeconds` is how much time one reading stands for.
+   */
+  recordActivityReading(input: { workspaceId: string; at: string; intervalSeconds: number; app: string; title: string; category: string; idle: boolean }): void {
+    const end = new Date(Date.parse(input.at) + input.intervalSeconds * 1000).toISOString();
+    const last = this.#db.prepare("SELECT id, end_at, app, title, category, idle FROM activity_segments WHERE workspace_id = ? ORDER BY id DESC LIMIT 1")
+      .get(input.workspaceId) as { id: number; end_at: string; app: string; title: string; category: string; idle: number } | undefined;
+    const sameWindow = last && last.app === input.app && last.title === input.title && last.category === input.category && Boolean(last.idle) === input.idle;
+    // A reading that arrives more than two intervals after the last one is a gap (asleep, worker off), not a continuation.
+    const close = last && Date.parse(input.at) - Date.parse(last.end_at) <= input.intervalSeconds * 2000;
+    if (sameWindow && close && Date.parse(end) > Date.parse(last.end_at)) {
+      this.#db.prepare("UPDATE activity_segments SET end_at = ? WHERE id = ?").run(end, last.id);
+      return;
+    }
+    this.#db.prepare("INSERT INTO activity_segments (workspace_id, start_at, end_at, app, title, category, idle) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run(input.workspaceId, input.at, end, input.app, input.title, input.category, input.idle ? 1 : 0);
+  }
+
+  /** Segments that ended after `sinceIso`, without their titles. */
+  listActivitySegments(workspaceId: string, sinceIso: string): StoredActivitySegment[] {
+    const rows = this.#db.prepare("SELECT start_at, end_at, app, category, idle FROM activity_segments WHERE workspace_id = ? AND end_at >= ? ORDER BY start_at")
+      .all(workspaceId, sinceIso) as Array<{ start_at: string; end_at: string; app: string; category: string; idle: number }>;
+    return rows.map((row) => ({ workspaceId, start: row.start_at, end: row.end_at, app: row.app, category: row.category, idle: Boolean(row.idle) }));
+  }
+
+  /** The newest entries with their titles, for the one screen that shows the person what is kept. */
+  recentActivityEntries(workspaceId: string, limit: number): RecentActivityEntry[] {
+    const rows = this.#db.prepare("SELECT start_at, end_at, app, title, category, idle FROM activity_segments WHERE workspace_id = ? ORDER BY id DESC LIMIT ?")
+      .all(workspaceId, limit) as Array<{ start_at: string; end_at: string; app: string; title: string; category: string; idle: number }>;
+    return rows.map((row) => ({ workspaceId, start: row.start_at, end: row.end_at, app: row.app, title: row.title, category: row.category, idle: Boolean(row.idle) }));
+  }
+
+  /**
+   * Retention: titles older than `titlesBefore` are blanked (the minutes, app and category stay), and rows older than
+   * `rowsBefore` are deleted. Returns how many titles were blanked and rows deleted.
+   */
+  pruneActivity(workspaceId: string, titlesBefore: string, rowsBefore: string): { blanked: number; deleted: number } {
+    const blanked = this.#db.prepare("UPDATE activity_segments SET title = '' WHERE workspace_id = ? AND end_at < ? AND title <> ''").run(workspaceId, titlesBefore).changes;
+    const deleted = this.#db.prepare("DELETE FROM activity_segments WHERE workspace_id = ? AND end_at < ?").run(workspaceId, rowsBefore).changes;
+    return { blanked: Number(blanked), deleted: Number(deleted) };
+  }
+
+  /** Blanks every stored title, whatever its age. */
+  clearActivityTitles(workspaceId: string): number {
+    return Number(this.#db.prepare("UPDATE activity_segments SET title = '' WHERE workspace_id = ? AND title <> ''").run(workspaceId).changes);
+  }
+
+  saveModelUsage(usage: StoredModelUsage): void {
+    this.#db.prepare(`
+      INSERT INTO model_usage (workspace_id, skill, tier, model, effort, spend_mode, thread_id, ok, error_code, repairs, turns,
+        input_tokens, cached_input_tokens, output_tokens, reasoning_tokens, total_tokens, duration_ms, at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(usage.workspaceId, usage.skill, usage.tier, usage.model, usage.effort, usage.spendMode, usage.threadId, usage.ok ? 1 : 0,
+      usage.errorCode, usage.repairs, usage.turns, usage.inputTokens, usage.cachedInputTokens, usage.outputTokens, usage.reasoningTokens,
+      usage.totalTokens, usage.durationMs, usage.at);
+  }
+
+  /** Per Skill and model since `sinceIso`, biggest spender first. */
+  summarizeModelUsage(workspaceId: string, sinceIso: string): ModelUsageSummary[] {
+    const rows = this.#db.prepare(`
+      SELECT skill, model, COUNT(*) AS runs, SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS failed, SUM(repairs) AS repairs,
+        SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens, SUM(reasoning_tokens) AS reasoning_tokens,
+        SUM(total_tokens) AS total_tokens, AVG(duration_ms) AS avg_ms, MAX(duration_ms) AS max_ms
+      FROM model_usage WHERE workspace_id = ? AND at >= ? GROUP BY skill, model ORDER BY total_tokens DESC, runs DESC
+    `).all(workspaceId, sinceIso) as Array<Record<string, number | string>>;
+    return rows.map((row) => ({ skill: String(row.skill), model: String(row.model), runs: Number(row.runs), failed: Number(row.failed),
+      repairs: Number(row.repairs), inputTokens: Number(row.input_tokens), outputTokens: Number(row.output_tokens),
+      reasoningTokens: Number(row.reasoning_tokens), totalTokens: Number(row.total_tokens), averageSeconds: Math.round(Number(row.avg_ms) / 100) / 10, longestSeconds: Math.round(Number(row.max_ms) / 100) / 10 }));
+  }
+
+  saveMilestoneAnchor(anchor: StoredMilestoneAnchor): void {
+    this.#db.prepare(`
+      INSERT INTO milestone_anchors (workspace_id, milestone_id, stage, deadline, baseline, target, stakeholders_json,
+        source_fact_ids_json, depends_on_json, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(workspace_id, milestone_id) DO UPDATE SET stage = excluded.stage, deadline = excluded.deadline,
+        baseline = excluded.baseline, target = excluded.target, stakeholders_json = excluded.stakeholders_json,
+        source_fact_ids_json = excluded.source_fact_ids_json, depends_on_json = excluded.depends_on_json, updated_at = excluded.updated_at
+    `).run(anchor.workspaceId, anchor.milestoneId, anchor.stage, anchor.deadline, anchor.baseline, anchor.target,
+      JSON.stringify(anchor.stakeholders), JSON.stringify(anchor.sourceFactIds), JSON.stringify(anchor.dependsOn), anchor.updatedAt);
+  }
+
+  listMilestoneAnchors(workspaceId: string): StoredMilestoneAnchor[] {
+    const rows = this.#db.prepare("SELECT * FROM milestone_anchors WHERE workspace_id = ? ORDER BY stage, milestone_id")
+      .all(workspaceId) as Array<Record<string, string | number>>;
+    return rows.map((row) => ({ workspaceId: String(row.workspace_id), milestoneId: String(row.milestone_id), stage: Number(row.stage),
+      deadline: String(row.deadline), baseline: String(row.baseline), target: String(row.target),
+      stakeholders: JSON.parse(String(row.stakeholders_json)), sourceFactIds: JSON.parse(String(row.source_fact_ids_json)),
+      dependsOn: JSON.parse(String(row.depends_on_json)), updatedAt: String(row.updated_at) }));
+  }
+
+  saveDiligenceReport(report: StoredDiligenceReport): void {
+    this.#db.prepare(`
+      INSERT INTO diligence_reports (id, owner_id, workspace_id, scope, question, findings_json, proposals_json,
+        sources_json, status, note, run_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(workspace_id, id) DO UPDATE SET findings_json = excluded.findings_json,
+        proposals_json = excluded.proposals_json, sources_json = excluded.sources_json,
+        status = excluded.status, note = excluded.note, run_at = excluded.run_at
+    `).run(report.id, report.ownerId, report.workspaceId, report.scope, report.question,
+      JSON.stringify(report.findings ?? []), JSON.stringify(report.proposals ?? []),
+      JSON.stringify(report.sources ?? []), report.status, report.note ?? null, report.runAt);
+  }
+
+  listDiligenceReports(workspaceId: string): StoredDiligenceReport[] {
+    const rows = this.#db.prepare("SELECT * FROM diligence_reports WHERE workspace_id = ? ORDER BY run_at DESC, rowid DESC")
+      .all(workspaceId) as Array<Record<string, string | null>>;
+    return rows.map((row) => ({ id: row.id!, ownerId: row.owner_id!, workspaceId: row.workspace_id!, scope: row.scope!,
+      question: row.question!, findings: JSON.parse(row.findings_json ?? "[]"),
+      proposals: JSON.parse(row.proposals_json ?? "[]"), sources: JSON.parse(row.sources_json ?? "[]"),
+      status: row.status as StoredDiligenceReport["status"], ...(row.note ? { note: row.note } : {}), runAt: row.run_at! }));
+  }
+
   saveAssistantAttachment(attachment: StoredAssistantAttachment): void {
     this.#db.prepare(`
       INSERT INTO assistant_attachments (id, owner_id, workspace_id, thread_id, uri, media_type, file_name, created_at)
@@ -1852,6 +2257,8 @@ export class CrosslineStore {
       "energy_observations", "external_bindings",
       "capacity_commitments", "duration_observations",
       "assistant_threads", "assistant_attachments", "milestone_templates",
+      "workspace_projects", "source_documents", "onboarding_sessions", "onboarding_messages", "profile_facts",
+      "diligence_reports", "milestone_anchors", "model_usage", "activity_segments",
       // Consent state is part of the ledger: a restore that silently re-enables collection is not a restore.
       "settings",
       // `principals`/`workspaces` are not workspace-scoped rows themselves — a principal is scoped by
@@ -1874,6 +2281,8 @@ export class CrosslineStore {
     const tables: Record<string, Array<Record<string, string | number | null>>> = Object.fromEntries(
       tableNames.map((tableName) => [tableName, (tableQueries[tableName] ?? (() => scopedByWorkspaceId(tableName)))()])
     );
+    // A window title is the person's own, local, and not part of any backup: what was open stays on the machine.
+    tables.activity_segments = tables.activity_segments!.map((row) => ({ ...row, title: "" }));
     return {
       schemaVersion: 2,
       exportedAt: new Date().toISOString(),
@@ -2167,6 +2576,22 @@ export class CrosslineStore {
     }));
   }
 
+  /**
+   * How this workspace's person actually works: stretches of work-like activity from the screen record (when they agreed to it)
+   * and how finished tasks compared with what was estimated for them. Measurements only; see `summarizeRhythm`.
+   */
+  workRhythm(workspaceId: string, sinceIso: string): WorkRhythm {
+    const orders = new Map(this.listWorkOrders(workspaceId).map((order) => [order.id, order]));
+    const finished = this.listExecutions(workspaceId).flatMap((execution) => {
+      const order = orders.get(execution.workOrderId);
+      if (!order || !execution.endedAt || !execution.durationObserved || execution.outcome === "blocked") return [];
+      const actualMinutes = (Date.parse(execution.endedAt) - Date.parse(execution.startedAt)) / 60_000 - execution.pauseMinutes;
+      // What was estimated *for this order when it was written*: its own stored estimate, never a later recalibration.
+      return [{ actualMinutes, estimatedMinutes: order.estimate.p50Minutes }];
+    });
+    return summarizeRhythm({ segments: this.listActivitySegments(workspaceId, sinceIso).map((segment) => ({ start: segment.start, end: segment.end, category: segment.category, idle: segment.idle })), finished });
+  }
+
   listWorkspaces(): StoredWorkspace[] {
     const rows = this.#db.prepare("SELECT * FROM workspaces ORDER BY created_at, id")
       .all() as Array<Record<string, string>>;
@@ -2273,4 +2698,32 @@ export class CrosslineStore {
   close(): void {
     this.#db.close();
   }
+}
+
+/**
+ * What the person's own files said about dates, from the newest batch whether or not it has been confirmed yet (a milestone chain should
+ * not wait on the calendar import), with each item tied to a project id. `dates` carry a day; `undated` are things a file lists but marks
+ * TBD, kept so the part they belong to is not lost. An item with no project cannot belong to any project's chain and is left out.
+ */
+export function latestFileDates(store: CrosslineStore, workspaceId: string): {
+  dates: Array<{ project: string; kind: string; date: string; title: string }>;
+  undated: Array<{ project: string; kind: string; title: string }>;
+} {
+  const batch = [...store.listEvents(workspaceId, { type: "dates.extracted" })].reverse()
+    .find((event) => !store.listEvents(workspaceId, { type: "dates.decided", entityId: event.entityId }).some((decision) => (decision.payload as { superseded?: boolean }).superseded));
+  const payload = batch?.payload as { dates?: Array<{ project?: string; kind?: string; date?: string; title?: string }>; undated?: Array<{ project?: string; kind?: string; title?: string }> } | undefined;
+  // The model names a project by id when it can and by its name when it cannot; both are resolved to the id the milestones use.
+  const projects = store.listProjects(workspaceId);
+  const resolve = (name: string) => (projects.find((project) => project.id === name)
+    ?? projects.find((project) => project.name.toLowerCase() === name.toLowerCase())
+    ?? projects.find((project) => name.toLowerCase().includes(project.name.toLowerCase()) || project.name.toLowerCase().includes(name.toLowerCase()) || name.toLowerCase().includes(project.id.toLowerCase())))?.id;
+  const dates = (payload?.dates ?? []).flatMap((entry) => {
+    const project = entry.project ? resolve(entry.project) : undefined;
+    return project && entry.kind && entry.date && entry.title ? [{ project, kind: entry.kind, date: entry.date, title: entry.title }] : [];
+  }).slice(0, 80);
+  const undated = (payload?.undated ?? []).flatMap((entry) => {
+    const project = entry.project ? resolve(entry.project) : undefined;
+    return project && entry.kind && entry.title ? [{ project, kind: entry.kind, title: entry.title }] : [];
+  }).slice(0, 20);
+  return { dates, undated };
 }

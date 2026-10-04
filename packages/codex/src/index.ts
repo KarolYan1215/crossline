@@ -7,56 +7,17 @@ import { closeSync, existsSync, mkdirSync, openSync, readSync } from "node:fs";
 import path from "node:path";
 import { readCostSignal } from "./cost";
 import { verifyCapability } from "./capability";
+import { enterUsageWorkspace } from "./usage";
 import type { CostSignal } from "@crossline/core";
 export * from "./skill-runner";
+export * from "./usage";
 export * from "./analysis";
 export * from "./cost";
-export * from "./model-tiers";
+export * from "./model-policy";
 export * from "./capability";
-
-type ContextInput = {
-  ownerId: string;
-  workspaceId: string;
-  identityId: string;
-  taskId: string;
-  globalContextVersion: number;
-  identityPackVersion: number;
-  allowedRoots: string[];
-};
 
 const record = (value: unknown): Record<string, unknown> | undefined =>
   typeof value === "object" && value !== null ? value as Record<string, unknown> : undefined;
-
-export function normalizeCodexEvent(event: unknown): unknown {
-  const envelope = record(event);
-  const params = record(envelope?.params);
-  const item = record(params?.item);
-  if (envelope?.method === "item/completed" && item?.status === "failed") {
-    return {
-      type: "blocked",
-      itemId: String(item.id ?? "unknown"),
-      blocker: {
-        code: "CODEX_TOOL_FAILED",
-        message: String(item.error ?? "Codex tool failed")
-      }
-    };
-  }
-  if (envelope?.method === "turn/completed") {
-    return { type: "completed", turnId: String(params?.turnId ?? "unknown") };
-  }
-  return { type: "progress", raw: event };
-}
-
-export function buildContextBundle(input: ContextInput) {
-  return {
-    version: `${input.globalContextVersion}:${input.identityId}:${input.identityPackVersion}:${input.taskId}`,
-    ownerId: input.ownerId,
-    workspaceId: input.workspaceId,
-    identityId: input.identityId,
-    taskId: input.taskId,
-    allowedRoots: [...new Set(input.allowedRoots)]
-  };
-}
 
 export class JsonLineRpcClient {
   #nextId = 1;
@@ -112,19 +73,6 @@ export const CODEX_BASELINE_COMMIT = "f0a1b8f0849d90960bc406b848f32e5a129b0457";
 export const CODEX_GENERATED_PROTOCOL_SHA256 = "cff5bf0f8f52d3d4fd2d00145462c5a3e21df86ec3b3b652668884831eb5c6a3";
 export const CODEX_FORK_BINARY_SHA256 = "4bcc1d8452c75cd132e010f41ccfaf6afb8699317f9a90d88df0b20be2335497";
 
-export async function readCodexAccount(client: JsonLineRpcClient): Promise<unknown> {
-  return client.request("account/read", { refreshToken: false });
-}
-
-export async function startCodexChatGptLogin(client: JsonLineRpcClient): Promise<unknown> {
-  return client.request("account/login/start", {
-    type: "chatgpt",
-    appBrand: "codex",
-    codexStreamlinedLogin: true,
-    useHostedLoginSuccessPage: true
-  });
-}
-
 export function codexProcessEnvironment(
   base: NodeJS.ProcessEnv = process.env,
   localAppData = base.LOCALAPPDATA
@@ -165,6 +113,25 @@ export function resolveCodexCommand(
   if (!path.isAbsolute(executable) || !exists(executable)) throw new Error("CODEX_FORK_BINARY_NOT_FOUND");
   if (sha256(executable) !== CODEX_FORK_BINARY_SHA256) throw new Error("CODEX_FORK_BINARY_MISMATCH");
   return { command: executable, args: [] };
+}
+
+/**
+ * Web research runs through the runtime's code-mode host, a second program it starts from beside its own
+ * executable. A fork built without it answers every search with "failed to spawn code-mode host", which a model
+ * then reports as "the research tool is unavailable" and returns an empty report, so the cause never reached
+ * the person. Checked up front, the answer names the file and where it goes.
+ */
+export function webResearchBlocker(
+  env: NodeJS.ProcessEnv = process.env,
+  exists: (file: string) => boolean = existsSync,
+  platform: string = process.platform
+): { code: string; message: string } | undefined {
+  const executable = env.CROSSLINE_CODEX_PATH ?? path.resolve(import.meta.dirname, "../../../vendor/codex/codex-rs/target/debug",
+    platform === "win32" ? "codex.exe" : "codex");
+  const host = path.join(path.dirname(executable), platform === "win32" ? "codex-code-mode-host.exe" : "codex-code-mode-host");
+  if (exists(host)) return undefined;
+  return { code: "WEB_RESEARCH_HOST_MISSING",
+    message: `联网查证需要 ${host}，但它不在那里，网页搜索无法启动。把已安装 Codex 应用 bin 目录里的 codex-code-mode-host.exe 复制到这个位置，或在 vendor/codex 里构建 codex-code-mode-host。` };
 }
 
 export async function startCodexAppServer(): Promise<{
@@ -313,6 +280,21 @@ function sendJson(response: ServerResponse, statusCode: number, value: unknown):
   response.end(JSON.stringify(value));
 }
 
+/**
+ * For a run that can take minutes. The caller's fetch gives up when nothing has arrived for five minutes, and a
+ * Skill is allowed ten, so the status line goes out at once and a space follows every twenty seconds to keep the
+ * body alive; JSON ignores leading whitespace. Every outcome this route can have is already a typed result in the
+ * body (`blocked` carries its code), so the status is 200 either way, and a throw becomes one more blocked result
+ * instead of a second set of headers.
+ */
+async function sendJsonWhenReady(response: ServerResponse, work: () => Promise<unknown>): Promise<void> {
+  response.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
+  const beat = setInterval(() => { if (!response.writableEnded) response.write(" "); }, 20_000);
+  try { response.end(JSON.stringify(await work())); }
+  catch { response.end(JSON.stringify({ state: "blocked", code: "SUPERVISOR_RUN_FAILED", message: "这次运行没有完成，可以重试。" })); }
+  finally { clearInterval(beat); }
+}
+
 function runtimeVersion(initializeResult: unknown): string {
   const result = record(initializeResult);
   return typeof result?.userAgent === "string" ? result.userAgent : "unknown";
@@ -331,12 +313,21 @@ export async function startCodexSupervisor(options: {
   port?: number;
   sidecarFactory?: () => Promise<CodexSidecar>;
   analyzeCapture?: (client: CodexRpcBoundary, id: string, signal: AbortSignal, workspaceId: string) => Promise<unknown>;
-  proposeMilestones?: (client: CodexRpcBoundary, request: string, signal: AbortSignal, workspaceId: string) => Promise<unknown>;
+  proposeMilestones?: (client: CodexRpcBoundary, request: string, signal: AbortSignal, workspaceId: string, only?: string[]) => Promise<unknown>;
   continueMilestoneConversation?: (client: CodexRpcBoundary, threadId: string, message: string, signal: AbortSignal, workspaceId: string) => Promise<unknown>;
-  proposeOnboarding?: (client: CodexRpcBoundary, answers: Array<{ question: string; answer: string }>,
-    sources: Array<{ label: string; excerpt: string }>, signal: AbortSignal, workspaceId: string) => Promise<unknown>;
-  continueOnboardingConversation?: (client: CodexRpcBoundary, threadId: string, message: string,
-    focusIdentityId: string | null, signal: AbortSignal, workspaceId: string) => Promise<unknown>;
+  /** One turn of the profile interview: the person's message in, the saved turn out. The conversation and
+   * everything it learned live in the ledger, so the browser holds only a session id. */
+  onboardingTurn?: (client: CodexRpcBoundary, sessionId: string, text: string, signal: AbortSignal,
+    workspaceId: string, reread: boolean) => Promise<unknown>;
+  /** Researches one line on the web and stores a report of sourced findings. One run at a time per workspace. */
+  runDiligence?: (client: CodexRpcBoundary, identityId: string, force: boolean, workspaceId: string) => Promise<unknown>;
+  /** Pulls the text out of an uploaded file the web app has already stored and recorded. No model involved,
+   * so it needs no Codex runtime and is not subject to the runtime blocker. */
+  extractSource?: (documentId: string, workspaceId: string) => Promise<unknown>;
+  /** Whether recordings can be turned into text on this machine yet, and if not what is missing. */
+  transcriptionStatus?: () => Promise<unknown>;
+  /** Starts the one-time model download and answers at once; progress shows in `transcriptionStatus`. */
+  startTranscriptionDownload?: () => Promise<unknown>;
   /** Fire-and-forget from the web app's own capture route (`POST /api/commands`) right after a capture
    * is written — never surfaced to the capturing person, so this has no "already running" guard the way
    * onboarding does; concurrent captures compacting at once is the normal case, not a conflict. */
@@ -348,11 +339,6 @@ export async function startCodexSupervisor(options: {
     history: Array<{ from: "user" | "assistant"; text: string }>,
     attachments: Array<{ id: string; fileName: string; mediaType: string }>, workOrderId: string | null,
     signal: AbortSignal, workspaceId: string) => Promise<unknown>;
-  /** A plain local filesystem read (the person's own Codex CLI session history) — no Codex app-server
-   * call, so it takes no `client`/`signal`; still routed through this same capability-checked surface
-   * rather than a new one, and still opt-in per call (the person clicks it each time onboarding wants it,
-   * see `codex-history-consent.tsx` — there is no standing "always allow" setting for this). */
-  scanCodexHistory?: () => Promise<unknown>;
   backplanGoal?: (client: CodexRpcBoundary, milestoneId: string, signal: AbortSignal, workspaceId: string) => Promise<unknown>;
   // `workspaceId` is the real caller's, taken from its own verified capability token — never the
   // worker's own idea of "the" workspace, which is what let every one of these silently operate on a
@@ -402,8 +388,10 @@ export async function startCodexSupervisor(options: {
   const analyses = new Map<string, AbortController>();
   let proposing: AbortController | undefined;
   let conversing: AbortController | undefined;
-  let onboarding: AbortController | undefined;
-  let onboardingConversing: AbortController | undefined;
+  // One profile-interview turn at a time per workspace: a second click while one is running would race on the
+  // same Codex thread and the same message sequence.
+  const profileTurns = new Set<string>();
+  const diligenceRuns = new Set<string>();
   // Material preparation also runs on the tick loop; this set is what stops a person's retry click and
   // the tick that lands two seconds later from preparing the same order twice.
   const preparing = new Set<string>();
@@ -485,6 +473,8 @@ export async function startCodexSupervisor(options: {
         }
         callerWorkspaceId = verified.capability.workspaceId;
       }
+      // Every Skill run this request starts is attributed to the workspace that asked for it.
+      if (callerWorkspaceId) enterUsageWorkspace(callerWorkspaceId);
       const analysisRoute = /^\/v1\/captures\/([a-zA-Z0-9_-]{1,128})\/analyze$/.exec(pathname);
       if (analysisRoute && options.analyzeCapture) {
         const id = analysisRoute[1]!;
@@ -663,7 +653,8 @@ export async function startCodexSupervisor(options: {
         const body = await readJsonBody(request);
         const controller = new AbortController();
         proposing = controller;
-        try { sendJson(response, 200, await options.proposeMilestones(sidecar.client, String(body?.request ?? ""), controller.signal, callerWorkspaceId)); }
+        try { await sendJsonWhenReady(response, () => options.proposeMilestones!(sidecar.client, String(body?.request ?? ""), controller.signal, callerWorkspaceId,
+          Array.isArray(body?.only) ? (body!.only as unknown[]).filter((item): item is string => typeof item === "string").slice(0, 8) : undefined)); }
         finally { if (proposing === controller) proposing = undefined; }
         return;
       }
@@ -686,56 +677,65 @@ export async function startCodexSupervisor(options: {
         }
         const controller = new AbortController();
         conversing = controller;
-        try { sendJson(response, 200, await options.continueMilestoneConversation(sidecar.client, threadId, message, controller.signal, callerWorkspaceId)); }
+        try { await sendJsonWhenReady(response, () => options.continueMilestoneConversation!(sidecar.client, threadId, message, controller.signal, callerWorkspaceId)); }
         finally { if (conversing === controller) conversing = undefined; }
         return;
       }
-      if (request.method === "POST" && pathname === "/v1/onboarding/propose" && options.proposeOnboarding) {
+      if (request.method === "POST" && pathname === "/v1/onboarding/turn" && options.onboardingTurn) {
         if (request.headers.origin || !request.headers["content-type"]?.startsWith("application/json")) {
           sendJson(response, 403, { blocker: { code: "ONBOARDING_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
           return;
         }
         if (runtimeBlocker) { sendJson(response, 503, { blocker: runtimeBlocker }); return; }
-        if (onboarding) {
-          sendJson(response, 409, { blocker: { code: "ONBOARDING_ALREADY_RUNNING", message: "已有一次入职提议在运行" } });
+        const body = await readJsonBody(request);
+        const sessionId = String(body?.sessionId ?? "");
+        if (!/^[a-zA-Z0-9_-]{1,128}$/.test(sessionId)) {
+          sendJson(response, 400, { blocker: { code: "ONBOARDING_TURN_INVALID", message: "缺少会话 id" } });
           return;
         }
-        const body = await readJsonBody(request);
-        const answers = Array.isArray(body?.answers) ? body.answers
-          .filter((item: unknown): item is { question: unknown; answer: unknown } => typeof item === "object" && item !== null)
-          .map((item: { question: unknown; answer: unknown }) => ({ question: String(item.question ?? ""), answer: String(item.answer ?? "") })) : [];
-        const sources = Array.isArray(body?.sources) ? body.sources
-          .filter((item: unknown): item is { label: unknown; excerpt: unknown } => typeof item === "object" && item !== null)
-          .map((item: { label: unknown; excerpt: unknown }) => ({ label: String(item.label ?? ""), excerpt: String(item.excerpt ?? "") })) : [];
+        if (profileTurns.has(callerWorkspaceId)) {
+          sendJson(response, 409, { blocker: { code: "ONBOARDING_ALREADY_RUNNING", message: "上一轮还在处理，请稍等。" } });
+          return;
+        }
+        profileTurns.add(callerWorkspaceId);
         const controller = new AbortController();
-        onboarding = controller;
-        try { sendJson(response, 200, await options.proposeOnboarding(sidecar.client, answers, sources, controller.signal, callerWorkspaceId)); }
-        finally { if (onboarding === controller) onboarding = undefined; }
+        try { await sendJsonWhenReady(response, () => options.onboardingTurn!(sidecar.client, sessionId, String(body?.text ?? "").slice(0, 4000), controller.signal, callerWorkspaceId, body?.reread === true)); }
+        finally { profileTurns.delete(callerWorkspaceId); }
         return;
       }
-      if (request.method === "POST" && pathname === "/v1/onboarding/propose/continue" && options.continueOnboardingConversation) {
+      if (request.method === "POST" && pathname === "/v1/diligence/run" && options.runDiligence) {
         if (request.headers.origin || !request.headers["content-type"]?.startsWith("application/json")) {
-          sendJson(response, 403, { blocker: { code: "ONBOARDING_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
+          sendJson(response, 403, { blocker: { code: "DILIGENCE_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
           return;
         }
         if (runtimeBlocker) { sendJson(response, 503, { blocker: runtimeBlocker }); return; }
-        if (onboardingConversing) {
-          sendJson(response, 409, { blocker: { code: "ONBOARDING_ALREADY_RUNNING", message: "已有一次入职对话在运行" } });
+        const body = await readJsonBody(request).catch(() => undefined);
+        const identityId = String(body?.identityId ?? "");
+        if (!/^[a-zA-Z0-9_-]{1,64}$/.test(identityId)) {
+          sendJson(response, 400, { blocker: { code: "DILIGENCE_REQUEST_INVALID", message: "缺少主线 id" } });
+          return;
+        }
+        if (diligenceRuns.has(callerWorkspaceId)) {
+          sendJson(response, 409, { blocker: { code: "DILIGENCE_ALREADY_RUNNING", message: "正在做尽调，请稍等。" } });
+          return;
+        }
+        diligenceRuns.add(callerWorkspaceId);
+        try { await sendJsonWhenReady(response, () => options.runDiligence!(sidecar.client, identityId, body?.force === true, callerWorkspaceId)); }
+        finally { diligenceRuns.delete(callerWorkspaceId); }
+        return;
+      }
+      if (request.method === "POST" && pathname === "/v1/sources/extract" && options.extractSource) {
+        if (request.headers.origin || !request.headers["content-type"]?.startsWith("application/json")) {
+          sendJson(response, 403, { blocker: { code: "SOURCE_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
           return;
         }
         const body = await readJsonBody(request);
-        const threadId = String(body?.threadId ?? "");
-        const message = String(body?.message ?? "");
-        const focusIdentityId = typeof body?.focusIdentityId === "string" ? body.focusIdentityId : null;
-        if (!/^[a-zA-Z0-9_-]{1,128}$/.test(threadId) || !message.trim()) {
-          sendJson(response, 400, { blocker: { code: "ONBOARDING_CONVERSATION_INVALID", message: "缺少 threadId 或消息内容" } });
+        const documentId = String(body?.documentId ?? "");
+        if (!/^[a-zA-Z0-9_-]{1,128}$/.test(documentId)) {
+          sendJson(response, 400, { blocker: { code: "SOURCE_EXTRACT_INVALID", message: "缺少文档 id" } });
           return;
         }
-        const controller = new AbortController();
-        onboardingConversing = controller;
-        try {
-          sendJson(response, 200, await options.continueOnboardingConversation(sidecar.client, threadId, message, focusIdentityId, controller.signal, callerWorkspaceId));
-        } finally { if (onboardingConversing === controller) onboardingConversing = undefined; }
+        sendJson(response, 200, await options.extractSource(documentId, callerWorkspaceId));
         return;
       }
       if (request.method === "POST" && pathname === "/v1/background-facts/extract" && options.extractBackgroundFacts) {
@@ -773,15 +773,6 @@ export async function startCodexSupervisor(options: {
         const workOrderId = typeof body?.workOrderId === "string" ? body.workOrderId : null;
         const controller = new AbortController();
         sendJson(response, 200, await options.assistantTurn(sidecar.client, threadId, message, history, attachments, workOrderId, controller.signal, callerWorkspaceId));
-        return;
-      }
-      if (request.method === "POST" && pathname === "/v1/onboarding/codex-history/scan" && options.scanCodexHistory) {
-        if (request.headers.origin) {
-          sendJson(response, 403, { blocker: { code: "ONBOARDING_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
-          return;
-        }
-        try { sendJson(response, 200, await options.scanCodexHistory()); }
-        catch { sendJson(response, 500, { blocker: { code: "CODEX_HISTORY_SCAN_FAILED", message: "无法读取本地 Codex CLI 历史记录" } }); }
         return;
       }
       if (request.method === "POST" && pathname === "/v1/goals/backplan" && options.backplanGoal) {

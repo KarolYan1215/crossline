@@ -1,43 +1,86 @@
+import { classifyWindow, isPrivateWindow, type ActivityReading, type ActivityRule } from "@crossline/core";
 import type { CrosslineStore } from "@crossline/db";
-import { aggregateSamples, sampleLocalActivity, type ActivitySample } from "./activity";
 
+/** Consent v1: idle time and window changes, as daily aggregates only. Never a window title, never an app name. */
 export const LOCAL_ACTIVITY_CONSENT = "localActivity.consent";
-const OWNER_ID = "local-owner";
+/** Consent v2: which app and window were in front, so work can be told from drifting. Asked separately and in words. */
+export const ACTIVITY_DETAIL_CONSENT = "localActivity.consentV2";
+/** ISO instant until which nothing is recorded, for "pause for an hour". */
+export const ACTIVITY_PAUSED_UNTIL = "localActivity.pausedUntil";
+export const ACTIVITY_BLACKLIST = "activity.blacklist";
+export const ACTIVITY_RULES = "activity.rules";
+
+/** Titles are kept this long; after it the minutes, app and category stay and the title is blanked. */
+export const TITLE_RETENTION_DAYS = 14;
+const ROW_RETENTION_DAYS = 90;
+const IDLE_AFTER_MS = 120_000;
+
+const parseList = <T>(raw: string | null | undefined, ok: (item: unknown) => item is T): T[] => {
+  try { const value = raw ? JSON.parse(raw) as unknown : []; return Array.isArray(value) ? value.filter(ok) : []; } catch { return []; }
+};
+const isString = (item: unknown): item is string => typeof item === "string";
+const isRule = (item: unknown): item is ActivityRule => typeof item === "object" && item !== null
+  && typeof (item as ActivityRule).match === "string" && typeof (item as ActivityRule).category === "string";
+
+type DayCounters = { day: string; active: number; idle: number; switches: number; samples: number; last?: string };
 
 /**
- * Samples local activity on a timer and folds each day into one aggregate row.
+ * Turns readings from a source into what is stored, for every workspace that has agreed to it.
  *
- * Nothing is sampled until consent is `granted`, and consent is re-read on every tick so revoking it
- * takes effect without restarting the worker. Raw samples never leave this object.
+ * Two levels, decided per workspace and re-read on every reading so a change takes effect at once: the daily aggregate
+ * (consent v1) and the segment record with app and title (consent v2). A window that matches the private rules is not
+ * recorded as a segment at all — not its title, not its app, not that it was open — though the minute still counts as
+ * active in the aggregate, which comes from input idle time alone. Nothing is recorded while paused. Raw readings never
+ * leave this object.
  */
-export function createActivityRecorder(store: CrosslineStore, workspaceId: string, sampleIntervalMinutes = 1) {
-  let day: string | undefined;
-  let samples: ActivitySample[] = [];
+export function createActivityTracker(store: CrosslineStore, listWorkspaceIds: () => string[], intervalSeconds = 60) {
+  const counters = new Map<string, DayCounters>();
 
-  const flush = (observedAt: string) => {
-    if (!day || !samples.length) return;
-    const aggregate = aggregateSamples(samples, sampleIntervalMinutes);
-    // The row records what was measured, not a judgement about it; levels come from `deriveCapacity`.
-    store.upsertDailyActivity({
-      ownerId: OWNER_ID, workspaceId, day,
-      aggregate: { ...aggregate, sampleCount: samples.length },
-      observedAt
-    });
-  };
+  function handleFor(workspaceId: string, reading: ActivityReading): "skipped" | "recorded" {
+    const detail = store.getSetting(workspaceId, ACTIVITY_DETAIL_CONSENT) === "granted";
+    const aggregate = store.getSetting(workspaceId, LOCAL_ACTIVITY_CONSENT) === "granted";
+    if (!detail && !aggregate) { counters.delete(workspaceId); return "skipped"; }
+    const pausedUntil = store.getSetting(workspaceId, ACTIVITY_PAUSED_UNTIL);
+    if (pausedUntil && Date.parse(pausedUntil) > Date.parse(reading.at)) return "skipped";
 
-  return async function record(now = new Date()): Promise<"skipped" | "recorded"> {
-    if (store.getSetting(workspaceId, LOCAL_ACTIVITY_CONSENT) !== "granted") {
-      samples = [];
-      day = undefined;
-      return "skipped";
-    }
-    const sample = await sampleLocalActivity();
-    if (!sample) return "skipped";
-    const today = now.toISOString().slice(0, 10);
-    if (day && day !== today) { flush(`${day}T23:59:59.000Z`); samples = []; }
-    day = today;
-    samples.push(sample);
-    flush(now.toISOString());
+    const idle = reading.idleMs >= IDLE_AFTER_MS;
+    const blacklist = parseList(store.getSetting(workspaceId, ACTIVITY_BLACKLIST), isString);
+    const hidden = isPrivateWindow(reading.app, reading.title, blacklist);
+    // What the aggregate may remember of a window is only whether it changed: a private one is just "private".
+    const signature = hidden ? "private" : reading.app;
+
+    const day = reading.at.slice(0, 10);
+    let current = counters.get(workspaceId);
+    if (!current || current.day !== day) current = { day, active: 0, idle: 0, switches: 0, samples: 0 };
+    const minutes = intervalSeconds / 60;
+    if (idle) current.idle += minutes; else current.active += minutes;
+    if (current.last !== undefined && current.last !== signature && !idle) current.switches += 1;
+    if (!idle) current.last = signature;
+    current.samples += 1;
+    counters.set(workspaceId, current);
+    // A workspace with no owner row is not a real account; there is nobody to attribute the reading to.
+    const ownerId = store.getWorkspaceOwnerId(workspaceId);
+    if (!ownerId) return "skipped";
+    store.upsertDailyActivity({ ownerId, workspaceId, day,
+      aggregate: { activeMinutes: current.active, idleMinutes: current.idle, windowSwitches: current.switches, sampleCount: current.samples }, observedAt: reading.at });
+
+    if (!detail || hidden) return "recorded";
+    const rules = parseList(store.getSetting(workspaceId, ACTIVITY_RULES), isRule);
+    store.recordActivityReading({ workspaceId, at: reading.at, intervalSeconds, app: reading.app, title: idle ? "" : reading.title,
+      category: idle ? "other" : classifyWindow(reading.app, reading.title, rules), idle });
     return "recorded";
+  }
+
+  return {
+    /** One reading, offered to every workspace on this machine; each decides for itself. */
+    handle(reading: ActivityReading): void {
+      for (const workspaceId of listWorkspaceIds()) { try { handleFor(workspaceId, reading); } catch { /* one workspace's trouble never stops the others */ } }
+    },
+    /** Retention: old titles blanked, very old rows dropped. Cheap enough to run every tick. */
+    prune(now: Date = new Date()): void {
+      for (const workspaceId of listWorkspaceIds()) {
+        store.pruneActivity(workspaceId, new Date(now.getTime() - TITLE_RETENTION_DAYS * 86_400_000).toISOString(), new Date(now.getTime() - ROW_RETENTION_DAYS * 86_400_000).toISOString());
+      }
+    }
   };
 }

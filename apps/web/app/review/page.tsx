@@ -11,11 +11,6 @@ import { loadTaskDetailsBatch, loadMilestoneDetailsBatch } from "../../lib/task-
 
 export const dynamic = "force-dynamic";
 
-const uncalibrated = [
-  ["净节省时间", "需要真实执行区间与审批/纠错成本观测后才能计算。"],
-  ["模型使用成本", "需要真实 Codex 调用的用量与费用记录后才能计算。"],
-  ["越权次数", "需要真实外部动作与审批事件后才能统计。"]
-] as const;
 
 const criterionKind: Record<string, string> = {
   count: "计数", artifact: "产物", threshold: "阈值", judgement: "判断"
@@ -30,7 +25,7 @@ export default async function ReviewPage() {
   const taskDetails = loadTaskDetailsBatch(ctx, review.autoAccepted.map((item) => item.workOrderId));
   const milestoneDetails = loadMilestoneDetailsBatch(ctx, review.milestoneProgress.map((item) => item.id));
 
-  return <SubpageShell eyebrow="证据驱动" title="周复盘" description="只显示数据库事实；尚无观测的指标一律标记为未标定，不给出编造数字。">
+  return <SubpageShell active="主线" eyebrow="证据驱动" title="周复盘" description="只显示数据库事实；尚无观测的指标一律标记为未标定，不给出编造数字。">
     <section className="review-block">
       <h2>本周自动验收</h2>
       <p className="review-note">
@@ -140,11 +135,6 @@ export default async function ReviewPage() {
         : <ul className="review-list">{review.questions.map((item) => <li key={item.id}><b>{item.question}</b></li>)}</ul>}
     </section>
 
-    <section className="status-grid">
-      <article className="status-card"><h2>{accepted} / {workOrders.length}</h2><p>当前已验收作业。验收率只来自 SQLite 真实状态。</p></article>
-      {uncalibrated.map(([name, reason]) => <article className="status-card" key={name}>
-        <span className="status-badge">未标定 · 需要执行观测</span><h2>{name}</h2><p>{reason}</p>
-      </article>)}
-    </section>
+    <p className="muted">已验收作业 {accepted} / {workOrders.length}（只来自账本里的真实状态）。</p>
   </SubpageShell>;
 }

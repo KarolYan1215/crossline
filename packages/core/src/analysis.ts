@@ -1,4 +1,5 @@
 import type { WorkOrder } from "./index";
+import { trimLeakedTail } from "./text-hygiene";
 
 export type AnalysisContext = {
   version: string;
@@ -12,6 +13,11 @@ export type AnalysisContext = {
   // `medianActualMinutes: 0` means no real completions exist yet for that pair, same convention
   // `Estimate.observationCount` already uses for "no observations".
   historicalStats: Array<{ identityId: string; family: "preparation" | "review" | "deep_work"; chosenCount: number; medianActualMinutes: number }>;
+  /**
+   * How this person actually works, measured (see `WorkRhythm`). 0 in any field means "not enough data to say", never a default. The ratio is
+   * applied to the estimate in code afterwards, so the Skill is told not to apply it itself.
+   */
+  rhythm?: { focusRunMinutes: number; productiveMinutesPerDay: number; planActualRatio: number; observedDays: number; completed: number };
   policy: { tools: never[]; externalSideEffects: boolean; humanApprovalRequired: boolean };
 };
 type SplitEvidence = { quote: string; rationale: string };
@@ -19,6 +25,8 @@ export type AnalysisProposal = Omit<WorkOrder, "id" | "ownerId" | "workspaceId" 
   automationParts: Array<WorkOrder["automationParts"][number] & SplitEvidence>;
   humanCore: Array<WorkOrder["humanCore"][number] & SplitEvidence>;
   blockers: Array<{ code: string; message: string }>;
+  /** Focused minutes by step, whose sum is the estimate's median: the number is auditable, and a padded one shows as padding. */
+  estimateBreakdown: Array<{ step: string; minutes: number }>;
 };
 
 type Schema = { type: string; properties?: Record<string, Schema>; required?: string[]; additionalProperties?: false;
@@ -61,7 +69,8 @@ export const ANALYSIS_OUTPUT_SCHEMA = object({
   evidenceContract: array(object({ kind, description: line, why, required: bool }), 1, 8),
   estimate: object({ p25Minutes: number, p50Minutes: number, p85Minutes: number, source: choice("llm_prior"),
     observationCount: { type: "integer", minimum: 0 }, confidence: choice("low") }),
-  riskTier: choice("routine", "milestone", "high_risk"), blockers: array(object({ code: str, message: str }))
+  riskTier: choice("routine", "milestone", "high_risk"), blockers: array(object({ code: str, message: str })),
+  estimateBreakdown: array(object({ step: line, minutes: number }), 1, 8)
 });
 
 // Only the JSON Schema subset used above is accepted; unknown keys fail closed.
@@ -86,9 +95,13 @@ export function validateAnalysisContext(value: unknown): AnalysisContext {
     approvedMilestones: array(object({ id: str, projectId: str, identityId: str, title: str, version: { type: "integer", minimum: 1 }, hasSuccessCriteria: bool }), 1),
     availableInputs: array(object({ id: str, text: str })), identityPacks: array(object({ id: str, version: { type: "integer", minimum: 1 }, summary: str }), 1),
     historicalStats: array(object({ identityId: str, family, chosenCount: { type: "integer", minimum: 0 }, medianActualMinutes: number }), 0, 32),
+    rhythm: object({ focusRunMinutes: number, productiveMinutesPerDay: number, planActualRatio: number, observedDays: number, completed: number }),
     policy: object({ tools: { type: "array", items: str, maxItems: 0 }, externalSideEffects: { type: "boolean", enum: [false] }, humanApprovalRequired: { type: "boolean", enum: [true] } }) });
-  if (!matches(value, schema)) throw new Error("ANALYSIS_CONTEXT_INVALID");
-  const context = value as AnalysisContext;
+  // A context stored before the rhythm existed has none; it reads as "nothing measured".
+  const full = value && typeof value === "object" && !("rhythm" in value)
+    ? { ...(value as object), rhythm: { focusRunMinutes: 0, productiveMinutesPerDay: 0, planActualRatio: 0, observedDays: 0, completed: 0 } } : value;
+  if (!matches(full, schema)) throw new Error("ANALYSIS_CONTEXT_INVALID");
+  const context = full as AnalysisContext;
   // Every milestone offered must be backed by a pack; the Skill picks the identity, the app never guesses it.
   if (context.approvedMilestones.some((milestone) => !context.identityPacks.some((pack) => pack.id === milestone.identityId))) throw new Error("ANALYSIS_CONTEXT_INVALID");
   return context;
@@ -96,11 +109,37 @@ export function validateAnalysisContext(value: unknown): AnalysisContext {
 
 export function validateAnalysisProposal(value: unknown, input: AnalysisContext): AnalysisProposal {
   const context = validateAnalysisContext(input);
-  if (!matches(value, ANALYSIS_OUTPUT_SCHEMA)) throw new Error("ANALYSIS_SCHEMA_INVALID");
-  const proposal = value as AnalysisProposal;
+  // An answer written before the breakdown existed (a recorded one) has none; the runtime's schema makes every live answer carry it.
+  const candidate = value && typeof value === "object" && !("estimateBreakdown" in value) ? { ...(value as object), estimateBreakdown: [{ step: "legacy", minutes: (value as { estimate?: { p50Minutes?: number } }).estimate?.p50Minutes ?? 1 }] } : value;
+  if (!matches(candidate, ANALYSIS_OUTPUT_SCHEMA)) throw new Error("ANALYSIS_SCHEMA_INVALID");
+  const injected = candidate !== value;
+  const proposal = candidate as AnalysisProposal;
+  // The identity is a free string in the schema (the set of lines is not known until the context is built), so the check that it
+  // names a real one has to live here. Without it a task that fit no line came back with the identity `\`, was accepted, and sat
+  // on the real board under a line called 「\」 that no page can open.
+  if (!context.identityPacks.some((pack) => pack.id === proposal.identityId)) {
+    const error = new Error("ANALYSIS_IDENTITY_UNKNOWN");
+    (error as Error & { detail?: string }).detail =
+      `identityId 「${proposal.identityId.slice(0, 40)}」不是已有的主线。可选：${context.identityPacks.map((pack) => pack.id).join("、")}；挑最贴近的一条（关于 Crossline 本身的事归创业线）。`;
+    throw error;
+  }
   if (proposal.milestoneId && !context.approvedMilestones.some((m) => m.id === proposal.milestoneId && m.projectId === proposal.projectId && m.identityId === proposal.identityId)) throw new Error("ANALYSIS_MILESTONE_MISMATCH");
   const e = proposal.estimate;
   if (e.p25Minutes < 1 || e.p25Minutes > e.p50Minutes || e.p50Minutes > e.p85Minutes || e.p85Minutes > 10080 || e.observationCount !== 0) throw new Error("ANALYSIS_ESTIMATE_INVALID");
+  // The safety margin is stated, in p85, not hidden in the steps: p85 is "something goes wrong once", and an estimate with no room above its
+  // typical value is one overrun from a missed deadline. It is also bounded above, because a margin of three times is a guess wearing a margin's name.
+  if (e.p85Minutes < Math.ceil(e.p50Minutes * 1.2) || e.p85Minutes > Math.max(e.p50Minutes * 3, e.p50Minutes + 30)) {
+    const error = new Error("ANALYSIS_ESTIMATE_MARGIN_INVALID");
+    (error as Error & { detail?: string }).detail = `p85Minutes 是 ${e.p85Minutes}，p50Minutes 是 ${e.p50Minutes}：p85 是留的余量，要在 p50 的 1.2 倍到 3 倍之间（至少 ${Math.ceil(e.p50Minutes * 1.2)}），按最可能超时的那一步来定，不要把每一步都加长。`;
+    throw error;
+  }
+  // The estimate is the sum of its steps, within a quarter: a number that cannot be reconciled with its own parts is padding or a guess.
+  const stepTotal = proposal.estimateBreakdown.reduce((sum, item) => sum + item.minutes, 0);
+  if (!(proposal.estimateBreakdown.length === 1 && proposal.estimateBreakdown[0]!.step === "legacy") && Math.abs(stepTotal - e.p50Minutes) > Math.max(10, e.p50Minutes * 0.25)) {
+    const error = new Error("ANALYSIS_ESTIMATE_BREAKDOWN_MISMATCH");
+    (error as Error & { detail?: string }).detail = `estimateBreakdown 各步分钟数加起来是 ${Math.round(stepTotal)}，但 p50Minutes 是 ${e.p50Minutes}：两者要对得上（p50 就是各步之和，误差不超过四分之一）。`;
+    throw error;
+  }
   // Only text the user actually supplied counts. Identity-pack summaries and milestone titles are
   // app-authored constants, so quoting them proves nothing about the captured intent.
   const fragments = [context.capture.title, context.capture.context, ...context.availableInputs.map((i) => i.text)].map((text) => text.trim()).filter(Boolean);
@@ -115,7 +154,7 @@ export function validateAnalysisProposal(value: unknown, input: AnalysisContext)
   // characters. Trimming beats rejecting here, because the sentence in front of the padding is whole,
   // and it beats storing it, because the person would be reading the padding.
   const REPEATED_TAIL = new RegExp("(.)\\1{7,}$", "u");
-  const trimFiller = (text: string): string => text.replace(REPEATED_TAIL, "").trimEnd() || text;
+  const trimFiller = (text: string): string => trimLeakedTail(text.replace(REPEATED_TAIL, "").trimEnd()) || text;
 
   /**
    * Drops a sentence that just re-says the end of one already written.
@@ -200,5 +239,7 @@ export function validateAnalysisProposal(value: unknown, input: AnalysisContext)
       proposal.blockers.map((blocker) => blocker.message.trim()).filter(Boolean).join("；").slice(0, 400);
     throw error;
   }
+  // What was never in the answer is not stored as if it had been.
+  if (injected) delete (proposal as Partial<AnalysisProposal>).estimateBreakdown;
   return proposal;
 }

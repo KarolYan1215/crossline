@@ -11,7 +11,7 @@ export default async function MilestoneDetailPage({ params }: { params: Promise<
   const { id } = await params;
   const detail = loadMilestoneDetail(ctx, id);
   if (!detail) notFound();
-  return <SubpageShell eyebrow="MILESTONES / DETAIL" title={detail.title}
+  return <SubpageShell active="主线" eyebrow="MILESTONES / DETAIL" title={detail.title}
     description={`${detail.identityLabel} · ${detail.relatedWorkOrders.length} 个相关任务`}>
     <MilestoneDetailView detail={detail} />
   </SubpageShell>;

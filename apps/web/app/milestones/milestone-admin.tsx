@@ -15,6 +15,11 @@ export type AdminMilestone = {
   successCriteria: SuccessCriterion[];
   /** Why the Skill suggested it, when it was a Skill. Approving a goal with no stated reason is guessing. */
   rationale?: string;
+  /** The person-specific plan behind it: the stage in its line, the date it lands by, start, finish, and what it builds on. */
+  anchor?: {
+    stage: number; deadline: string; baseline: string; target: string; stakeholders: string[];
+    dependsOnTitles: string[]; facts: string[];
+  };
   /**
    * How far each criterion has moved, taken from every gate judgement so far.
    *
@@ -433,6 +438,14 @@ export function MilestoneAdmin({ milestones, identities, templates, previews, in
             置信度：{confidenceLabel[milestone.confidence]}
           </span>}
         </div>
+        {milestone.anchor && <dl className="milestone-anchor">
+          <div><dt>阶段 {milestone.anchor.stage}</dt><dd>最晚 {milestone.anchor.deadline}</dd></div>
+          <div><dt>现在</dt><dd>{milestone.anchor.baseline}</dd></div>
+          <div><dt>做到</dt><dd>{milestone.anchor.target}</dd></div>
+          {milestone.anchor.stakeholders.length > 0 && <div><dt>涉及</dt><dd>{milestone.anchor.stakeholders.join("、")}</dd></div>}
+          {milestone.anchor.dependsOnTitles.length > 0 && <div><dt>接在</dt><dd>{milestone.anchor.dependsOnTitles.join("、")} 之后</dd></div>}
+          {milestone.anchor.facts.length > 0 && <div><dt>依据</dt><dd>{milestone.anchor.facts.join("；")}</dd></div>}
+        </dl>}
         {milestone.rationale && <p className="milestone-rationale">提议理由：{milestone.rationale}</p>}
         {milestone.successCriteria.length === 0
           ? <em className="review-flag">未声明达成标准 —— 绑定它的作业仍按各自的证据要求验收，但里程碑本身的进度记不下来，直到你写下什么算达成。

@@ -1,22 +1,27 @@
 import { get } from "node:http";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { startCodexSupervisor, type CodexSupervisor } from "@crossline/codex";
+import { enterUsageWorkspace, setSpendModeProvider, setUsageSink, startCodexSupervisor, type CodexSupervisor } from "@crossline/codex";
 import { CrosslineStore } from "@crossline/db";
-import { createCaptureAnalyzer } from "./analysis";
-import { createActivityRecorder } from "./activity-recorder";
+import { capturesAwaitingAutoAnalysis, createCaptureAnalyzer } from "./analysis";
+import { createActivityTracker } from "./activity-recorder";
+import { createWindowsActivitySource } from "./activity-source";
 import { createNightlyFlywheel } from "./nightly";
+import { createDiligenceRunner, linesDueForDiligence } from "./diligence";
+import { budgetPolicy } from "@crossline/core";
 import { createFlywheelExpander } from "./flywheel";
-import { createMaterialPreparer, pendingMaterialWorkOrders } from "./material-runner";
+import { createManualbookBuilder, pendingMaterialWorkOrders } from "./manualbook";
 import { createMilestoneGate, pendingMilestoneGates } from "./milestone-gate-runner";
 import { createMilestoneConversation, createMilestoneProposer } from "./milestone-proposer";
 import { createGoalBackplanner } from "./goal-backplanner";
 import { createPlanExplainer } from "./plan-explainer-runner";
 import { createWeeklyInsight } from "./weekly-insight-runner";
-import { createOnboardingProposer, createOnboardingConversation } from "./onboarding-runner";
+import { createOnboardingSessionRunner } from "./onboarding-session";
+import { extractText, reextractForLayout } from "./extract";
+import { createTranscriber, createWhisperEngine, modelsDirectory } from "./transcribe";
 import { createBackgroundFactsExtractor } from "./background-facts-runner";
 import { createAssistantTurn } from "./assistant-runner";
-import { scanPersonalCodexHistory } from "./codex-history";
 import { createGraphSync, type SyncOutcome } from "./graph-sync";
 import {
   buildSources, calendarLabel, listCatalogue, readSelection, saveSelection, seedNewAccounts, sourceKey
@@ -74,17 +79,34 @@ async function tick(): Promise<void> {
   const checkedAt = new Date().toISOString();
   mkdirSync(dataDir, { recursive: true });
   beat();
-  // Consent is re-read every tick, so turning collection off takes effect without a restart.
-  if (recordActivity) await recordActivity().catch(() => undefined);
+  // Readings arrive from the source on their own clock; the tick only does the retention sweep.
+  try { activityTracker.prune(); } catch { /* retention is housekeeping, never worth a failed tick */ }
   // Every real workspace, not one hardcoded id — a real account's own work orders and calendar state
   // used to be structurally invisible to all three of these jobs no matter how long the worker ran.
   const workspaces = analysisStore.listWorkspaces();
   // Material preparation is the one background job that writes into the project directory, so it only
   // ever runs for work orders the human already approved into `preparing`.
   for (const workspace of workspaces) {
+    enterUsageWorkspace(workspace.id);
     for (const workOrderId of pendingMaterialWorkOrders(analysisStore, workspace.id)) {
       const outcome = await getMaterialPreparer(workspace.id)(workOrderId).catch(() => undefined);
       if (outcome) console.info(JSON.stringify({ type: `materials.${outcome.state}`, checkedAt, workspaceId: workspace.id, ...outcome }));
+    }
+  }
+  // A new capture is classified, estimated and split without anyone pressing 分析: the person's job is to write it down, the
+  // system's is to turn it into a proposal waiting in 待确认. Quota-gated (nothing runs unless the budget is normal) and capped
+  // per tick; a capture that came back blocked is left for the person rather than retried on a timer.
+  if (codexSupervisor) {
+    for (const workspace of workspaces) {
+      const ids = capturesAwaitingAutoAnalysis(analysisStore, workspace.id);
+      if (!ids.length) continue;
+      const signal = await readCost();
+      if (!signal.available || budgetPolicy(Math.max(signal.short?.usedPercent ?? 0, signal.long?.usedPercent ?? 0)).mode !== "normal") continue;
+      enterUsageWorkspace(workspace.id);
+      for (const id of ids) {
+        const outcome = await getCaptureAnalyzer(workspace.id)(codexSupervisor.client, id).catch(() => undefined);
+        if (outcome) console.info(JSON.stringify({ type: `analysis.auto.${outcome.state}`, checkedAt, workspaceId: workspace.id, captureId: id }));
+      }
     }
   }
   // The milestone gate. Without this it existed only inside `scripts/gate-loop-check.ts`, so on the
@@ -92,6 +114,7 @@ async function tick(): Promise<void> {
   // 「等待里程碑闸门」 — and nothing was ever going to judge it. A verdict other than `pass` holds the
   // order for a person, so a held order is skipped rather than re-judged every fifteen minutes.
   for (const workspace of workspaces) {
+    enterUsageWorkspace(workspace.id);
     for (const workOrderId of pendingMilestoneGates(analysisStore, workspace.id)) {
       const outcome = await getMilestoneGate(workspace.id)(workOrderId).catch(() => undefined);
       if (outcome) console.info(JSON.stringify({ type: `milestone_gate.${outcome.state}`, checkedAt, workspaceId: workspace.id, ...outcome }));
@@ -109,11 +132,13 @@ async function tick(): Promise<void> {
     }
   }
   // The nightly expansion decides for itself whether this tick is its moment; most ticks are not.
-  if (runNightly) {
-    const decision = await runNightly().catch(() => undefined);
+  for (const workspace of workspaces) {
+    enterUsageWorkspace(workspace.id);
+    const decision = await getNightly(workspace.id)().catch(() => undefined);
     if (decision && !decision.run && decision.code !== "BEFORE_PLANNED_TIME" && decision.code !== "ALREADY_RAN_TODAY") {
-      console.info(JSON.stringify({ type: "flywheel.nightly.skipped", checkedAt, code: decision.code }));
+      console.info(JSON.stringify({ type: "flywheel.nightly.skipped", checkedAt, workspaceId: workspace.id, code: decision.code }));
     }
+    startDiligencePass(workspace.id, checkedAt);
   }
   // Bounded, and never able to wedge the tick: a health probe that neither errors nor fires its socket
   // timeout — which is what a web server killed mid-response looks like — would otherwise hold the
@@ -144,29 +169,143 @@ if (!claimWorkerLock()) {
   process.exit(0);
 }
 const analysisStore = new CrosslineStore(path.join(dataDir, "crossline.db"));
-const recordActivity = createActivityRecorder(analysisStore, "personal-crossline", intervalMinutes);
-const expandFlywheel = createFlywheelExpander(analysisStore, "personal-crossline", repoRoot,
-  () => codexSupervisor?.client);
+// Screen activity: a foreground-window reader feeding a tracker that asks every workspace for its own consent on every
+// reading. Without consent nothing is stored; the source itself reads only the window's app, title and idle time.
+const activityIntervalSeconds = Math.max(5, Number(process.env.CROSSLINE_ACTIVITY_INTERVAL_SECONDS) || 60);
+const activityTracker = createActivityTracker(analysisStore, () => analysisStore.listWorkspaces().map((workspace) => workspace.id), activityIntervalSeconds);
+const activitySource = createWindowsActivitySource({ intervalSeconds: activityIntervalSeconds });
+if (process.env.CROSSLINE_RUN_ONCE !== "1") activitySource.start((reading) => activityTracker.handle(reading));
+process.on("exit", () => activitySource.stop());
 const readCost = async () => codexSupervisor
   ? await codexSupervisor.readCostSignal()
   : { available: false as const, reason: "CODEX_SUPERVISOR_UNAVAILABLE" };
-const runNightly = createNightlyFlywheel({
-  store: analysisStore,
-  workspaceId: "personal-crossline",
-  readCost,
-  expand: expandFlywheel
+// One nightly decision per real workspace. This used to be a single instance bound to the pre-accounts
+// workspace id, so no account created since ever had its flywheel expanded, whatever the hour or the budget.
+// What every Skill run cost goes into the ledger, and how tight the quota is decides which model a run may use.
+// The quota reading is cached for a minute inside the runner; an unreadable quota counts as normal, so a broken
+// probe never quietly moves everything onto a cheaper model.
+setUsageSink((usage) => {
+  if (!usage.workspaceId) return;
+  analysisStore.saveModelUsage({
+    workspaceId: usage.workspaceId, skill: usage.skillName, tier: usage.tier ?? "", model: usage.model ?? "", effort: usage.effort ?? "",
+    spendMode: usage.spendMode, threadId: usage.threadId ?? "", ok: usage.ok, errorCode: usage.errorCode ?? "", repairs: usage.repairs, turns: usage.turns,
+    inputTokens: usage.inputTokens, cachedInputTokens: usage.cachedInputTokens, outputTokens: usage.outputTokens,
+    reasoningTokens: usage.reasoningOutputTokens, totalTokens: usage.totalTokens, durationMs: usage.durationMs, at: usage.at
+  });
 });
+setSpendModeProvider(async () => {
+  const signal = await readCost();
+  return signal.available ? budgetPolicy(Math.max(signal.short?.usedPercent ?? 0, signal.long?.usedPercent ?? 0)).mode : "normal";
+});
+const nightlies = new Map<string, ReturnType<typeof createNightlyFlywheel>>();
+const getNightly = (workspaceId: string) => {
+  let nightly = nightlies.get(workspaceId);
+  if (!nightly) {
+    nightly = createNightlyFlywheel({
+      store: analysisStore, workspaceId, readCost,
+      expand: createFlywheelExpander(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client)
+    });
+    nightlies.set(workspaceId, nightly);
+  }
+  return nightly;
+};
+// Recordings are turned into text on this machine. The recogniser may only reach the network inside the
+// one-time model download the person agreed to; see `transcribe.ts`.
+const transcriber = createTranscriber({ ...createWhisperEngine(modelsDirectory(dataDir)), modelsDir: modelsDirectory(dataDir) });
+// One recording at a time: transcription is CPU-bound and a second would only slow the first.
+let transcribeQueue: Promise<void> = Promise.resolve();
+async function transcribeDocument(workspaceId: string, documentId: string): Promise<{ state: string; documentId: string }> {
+  const doc = analysisStore.listSourceDocuments(workspaceId).find((item) => item.id === documentId);
+  if (!doc) return { state: "blocked", documentId };
+  const status = await transcriber.status();
+  if (status.state !== "ready") {
+    const note = status.state === "unavailable" ? status.message
+      : status.state === "downloading" ? "正在下载语音识别模型，下载完会自动开始转写。"
+      : `转写录音需要先下载语音识别模型（约 ${status.approxMegabytes} MB，一次性，之后完全离线）。`;
+    analysisStore.setSourceDocumentExtraction(workspaceId, doc.id, { status: "pending", text: "", note });
+    return { state: "waiting_for_model", documentId };
+  }
+  analysisStore.setSourceDocumentExtraction(workspaceId, doc.id, { status: "pending", text: "", note: "正在转写…" });
+  transcribeQueue = transcribeQueue.then(async () => {
+    try {
+      const bytes = new Uint8Array(readFileSync(fileURLToPath(doc.uri)));
+      const result = await transcriber.transcribe(bytes, doc.fileName, process.env.CROSSLINE_TRANSCRIBE_LANGUAGE?.trim() || undefined);
+      if (result.state === "transcribed") {
+        analysisStore.setSourceDocumentExtraction(workspaceId, doc.id, { status: "done", text: result.text, note: `本机转写，约 ${Math.round(result.seconds / 60)} 分钟的录音。` });
+      } else {
+        analysisStore.setSourceDocumentExtraction(workspaceId, doc.id, { status: "failed", text: "",
+          note: result.state === "failed" ? result.message : "语音识别模型还没有准备好。" });
+      }
+    } catch {
+      analysisStore.setSourceDocumentExtraction(workspaceId, doc.id, { status: "failed", text: "", note: "读不到已保存的录音。" });
+    }
+  }).catch(() => undefined);
+  return { state: "transcribing", documentId };
+}
+/** After the model arrives, every recording that was waiting for it starts. */
+// Files read before columns were kept (a schedule table came out as a list nobody could tell the columns of) are read once more.
+void (async () => {
+  for (const workspace of analysisStore.listWorkspaces()) {
+    const changed = await reextractForLayout(analysisStore, workspace.id, (uri) => new Uint8Array(readFileSync(fileURLToPath(uri)))).catch(() => 0);
+    if (changed) console.info(JSON.stringify({ type: "extract.layout_reread", workspaceId: workspace.id, files: changed }));
+  }
+})();
+
+async function resumeWaitingRecordings(): Promise<void> {
+  for (const workspace of analysisStore.listWorkspaces()) {
+    for (const doc of analysisStore.listSourceDocuments(workspace.id)) {
+      if (doc.kind === "audio" && doc.extractionStatus === "pending") await transcribeDocument(workspace.id, doc.id);
+    }
+  }
+}
+const diligenceRunners = new Map<string, ReturnType<typeof createDiligenceRunner>>();
+const getDiligence = (workspaceId: string) => {
+  let runner = diligenceRunners.get(workspaceId);
+  if (!runner) {
+    runner = createDiligenceRunner(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client, { readCost });
+    diligenceRunners.set(workspaceId, runner);
+  }
+  return runner;
+};
+const diligencePasses = new Set<string>();
+/**
+ * The automatic research pass: once the interview is complete (or a report already exists, which makes this
+ * the weekly refresh), each line whose last report is a week old is researched, one after another, in the
+ * background. It never holds the tick, because a line can take ten minutes and the calendar should not wait.
+ */
+function startDiligencePass(workspaceId: string, checkedAt: string): void {
+  if (diligencePasses.has(workspaceId)) return;
+  const interviewDone = analysisStore.getLatestOnboardingSession(workspaceId)?.state === "complete";
+  const hasReport = analysisStore.listDiligenceReports(workspaceId).some((report) => report.status === "done");
+  if (!interviewDone && !hasReport) return;
+  const due = linesDueForDiligence(analysisStore, workspaceId, new Date());
+  if (!due.length) return;
+  diligencePasses.add(workspaceId);
+  void (async () => {
+    enterUsageWorkspace(workspaceId);
+    for (const identityId of due) {
+      const outcome = await getDiligence(workspaceId)(identityId).catch((error): { state: "blocked"; code: string; message: string } =>
+        ({ state: "blocked", code: "DILIGENCE_FAILED", message: error instanceof Error ? error.message : "" }));
+      console.info(JSON.stringify({ type: `diligence.${outcome.state}`, checkedAt, workspaceId, identityId, ...outcome }));
+      // A tight budget applies to every line alike: stop rather than ask the next one and be told the same.
+      if (outcome.state === "blocked" && /BUDGET|COST_SIGNAL/.test(outcome.code)) break;
+    }
+  })().finally(() => diligencePasses.delete(workspaceId));
+}
+// Where every task's manualbook (and anything the assistant saves for a task) lives: inside the data directory, so a
+// backup carries it and it is never written into the repository.
+const materialsDir = path.join(dataDir, "materials");
 // Material preparation and the milestone gate used to be created once, bound to a single hardcoded
 // workspace — every real account's own `preparing`/`evidence_review` work orders were invisible to
 // both the automatic tick and the manual "重新准备材料"/"现在判定" buttons, since neither ever operated
 // on any workspace but that one. `createMaterialPreparer`/`createMilestoneGate`'s other arguments (the
 // store, repoRoot, the Codex client getter, the cost reader) are not workspace-specific, so a per-real-
 // workspace closure is cheap to build and safe to cache.
-const materialPreparers = new Map<string, ReturnType<typeof createMaterialPreparer>>();
+const materialPreparers = new Map<string, ReturnType<typeof createManualbookBuilder>>();
 const getMaterialPreparer = (workspaceId: string) => {
   let preparer = materialPreparers.get(workspaceId);
   if (!preparer) {
-    preparer = createMaterialPreparer(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client, readCost);
+    preparer = createManualbookBuilder(analysisStore, workspaceId, materialsDir, repoRoot, () => codexSupervisor?.client, { readCost });
     materialPreparers.set(workspaceId, preparer);
   }
   return preparer;
@@ -328,10 +467,10 @@ if (!capabilitySecret) {
       marketplacePath: path.join(repoRoot, "skills", "marketplace", ".agents", "plugins", "marketplace.json"),
       cwd: repoRoot,
       requiredSkills: [
-        "crossline:crossline", "crossline:crossline-automation-stripper", "crossline:crossline-milestone-gate",
-        "crossline:crossline-flywheel-scout", "crossline:crossline-material-preparer", "crossline:crossline-milestone-architect",
+        "crossline:crossline-automation-stripper", "crossline:crossline-milestone-gate",
+        "crossline:crossline-flywheel-scout", "crossline:crossline-manualbook-designer", "crossline:crossline-material-researcher", "crossline:crossline-material-writer", "crossline:crossline-milestone-architect",
         "crossline:crossline-goal-backplanner", "crossline:crossline-background-facts", "crossline:crossline-assistant",
-        "crossline:crossline-onboarding", "crossline:crossline-plan-explainer", "crossline:crossline-weekly-insight"
+        "crossline:crossline-onboarding", "crossline:crossline-due-diligence", "crossline:crossline-plan-explainer", "crossline:crossline-weekly-insight"
       ]
     },
     analyzeCapture: (client, id, signal, workspaceId) => getCaptureAnalyzer(workspaceId)(client, id, signal),
@@ -339,19 +478,36 @@ if (!capabilitySecret) {
     // constant, which is what left milestone proposal and goal backplanning invisible to any real
     // account the same way material prep/the milestone gate/calendar sync were (see `getMaterialPreparer`
     // above for the fuller explanation; this is the same bug, same fix, in the same file).
-    proposeMilestones: (_client, request, signal, workspaceId) =>
-      createMilestoneProposer(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client)(request, signal),
+    proposeMilestones: (_client, request, signal, workspaceId, only) =>
+      createMilestoneProposer(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client)(request, signal, only),
     continueMilestoneConversation: (_client, threadId, message, signal, workspaceId) =>
       createMilestoneConversation(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client)(threadId, message, signal),
-    proposeOnboarding: (_client, answers, sources, signal, workspaceId) =>
-      createOnboardingProposer(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client)(answers, sources, signal),
-    continueOnboardingConversation: (_client, threadId, message, focusIdentityId, signal, workspaceId) =>
-      createOnboardingConversation(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client)(threadId, message, focusIdentityId, signal),
+    onboardingTurn: (_client, sessionId, text, _signal, workspaceId, reread) =>
+      createOnboardingSessionRunner(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client)({ sessionId, text, ...(reread ? { reread: true } : {}) }),
+    transcriptionStatus: () => transcriber.status(),
+    startTranscriptionDownload: async () => {
+      const current = await transcriber.status();
+      if (current.state === "ready" || current.state === "downloading") return current;
+      // Answered at once: the download is long, and the screen polls the status for its progress.
+      void transcriber.download().then(() => resumeWaitingRecordings()).catch(() => undefined);
+      return { state: "downloading", progress: 0 };
+    },
+    runDiligence: (_client, identityId, force, workspaceId) => getDiligence(workspaceId)(identityId, { force }),
+    extractSource: async (documentId, workspaceId) => {
+      const doc = analysisStore.listSourceDocuments(workspaceId).find((item) => item.id === documentId);
+      if (!doc) return { state: "blocked", code: "SOURCE_NOT_FOUND", message: "找不到这个文件。" };
+      if (doc.kind === "audio") return transcribeDocument(workspaceId, doc.id);
+      // Only files this app wrote itself, by the path it recorded: the model and the browser never supply one.
+      let result;
+      try { result = await extractText(new Uint8Array(readFileSync(fileURLToPath(doc.uri))), doc.kind); }
+      catch { result = { status: "failed" as const, text: "", note: "读不到已保存的文件。" }; }
+      analysisStore.setSourceDocumentExtraction(workspaceId, doc.id, { status: result.status, text: result.text, ...(result.note ? { note: result.note } : {}) });
+      return { state: "extracted", documentId: doc.id, status: result.status, characters: result.text.length };
+    },
     extractBackgroundFacts: (_client, captureTitle, captureContext, signal, workspaceId) =>
       createBackgroundFactsExtractor(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client)(captureTitle, captureContext, signal),
     assistantTurn: (_client, threadId, message, history, attachments, workOrderId, signal, workspaceId) =>
-      createAssistantTurn(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client)(threadId, message, history, attachments, workOrderId, signal),
-    scanCodexHistory: () => scanPersonalCodexHistory(),
+      createAssistantTurn(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client, materialsDir)(threadId, message, history, attachments, workOrderId, signal),
     backplanGoal: (_client, milestoneId, signal, workspaceId) =>
       createGoalBackplanner(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client)(milestoneId, signal),
     // The same preparer/gate the tick loop uses, exposed so a person's retry gets an answer now rather

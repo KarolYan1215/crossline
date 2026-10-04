@@ -1,5 +1,6 @@
 import type { TaskDetail, MilestoneDetail } from "../lib/task-detail";
 import { ExecutionActions } from "./execution-actions";
+import { estimateBasis } from "../lib/estimate-label";
 
 const stateLabel: Record<string, string> = {
   captured: "已收集", analyzing: "分析中", awaiting_plan_approval: "等待计划批准",
@@ -59,7 +60,7 @@ export function TaskDetailView({ detail }: { detail: TaskDetail }) {
       <a href="/approvals"> 前往 Approvals →</a>
     </p>}
     <dl className="task-detail-facts">
-      <div><dt>估时</dt><dd>{detail.estimate.p25Minutes}–{detail.estimate.p85Minutes} 分钟 · {confidenceLabel[detail.estimate.confidence]}</dd></div>
+      <div><dt>估时</dt><dd>{detail.estimate.p25Minutes}–{detail.estimate.p85Minutes} 分钟 · {confidenceLabel[detail.estimate.confidence]}<br /><small>{estimateBasis(detail.estimate)}</small></dd></div>
       <div><dt>风险等级</dt><dd>{riskLabel[detail.riskTier]}</dd></div>
     </dl>
 
@@ -151,6 +152,8 @@ export function MilestoneDetailView({ detail }: { detail: MilestoneDetail }) {
         </span>
         <span>[{criterionKindLabel[criterion.measure.kind]}] {criterion.statement}</span>
         {criterion.measure.kind === "judgement" && <small>判不过的条件：{criterion.measure.failsWhen}</small>}
+        {criterion.measure.kind === "threshold" && criterion.measure.bareLine !== undefined
+          && <small>从结果倒推，刚好够的最低线是 {criterion.measure.bareLine}{criterion.measure.unit}；定在 {criterion.measure.value}{criterion.measure.unit}，中间是留的余量</small>}
       </li>)}</ul>
     </section>}
 

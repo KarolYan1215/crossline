@@ -17,7 +17,7 @@ describe("plan page", () => {
     globalThis.crosslineStore = store;
     const { default: PlanPage } = await import("./page");
     const html = renderToStaticMarkup(await PlanPage());
-    expect(html).toContain("共享时间轴");
+    expect(html).toContain("计划");
     // The invitation to set real preferences is present, but as a disclosure, not the only content.
     expect(html).toContain("还不是你的真实设置");
     expect(html).toContain("schedule-setup-prompt");

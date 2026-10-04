@@ -1,4 +1,5 @@
-import { ensureSeeded, getStore, loadCurrentPlan } from "../../lib/crossline";
+import { ensureSeeded, getStore, loadCurrentPlan, resolvedEstimate } from "../../lib/crossline";
+import { estimateBasis } from "../../lib/estimate-label";
 import { SubpageShell } from "../subpage-shell";
 import { AcceptEvidenceButton, ApproveProposalButton, JudgeMilestoneButton } from "./approval-actions";
 import type { AnalysisProposal } from "@crossline/core";
@@ -7,6 +8,8 @@ import { PermissionModePanel } from "./permission-mode-panel";
 import { requireSessionContext } from "../../lib/access-guard";
 import { TaskPreview } from "../task-preview";
 import { loadTaskDetailsBatch } from "../../lib/task-detail";
+import { countPending } from "../../lib/pending";
+import { defaultIdentityPacks } from "@crossline/identity-packs";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +17,6 @@ export default async function ApprovalsPage() {
   const ctx = await requireSessionContext();
   ensureSeeded(ctx);
   const plan = await loadCurrentPlan(ctx);
-  const pendingPlanChanges = plan.changes.filter((change) => change.status === "pending").length;
   const evidenceReviews = getStore().listWorkOrders(ctx.workspaceId).filter((item) => item.state === "evidence_review");
   const proposals = getStore().listWorkOrders(ctx.workspaceId).filter((item) => item.state === "awaiting_plan_approval");
   const claims = getStore().listEvidenceClaims(ctx.workspaceId);
@@ -32,20 +34,70 @@ export default async function ApprovalsPage() {
     if (event.type === "milestone_gate.blocked") gateBlocks.set(event.entityId, event.payload as { code: string; message: string });
     else gateBlocks.delete(event.entityId);
   }
+  const pending = countPending(ctx);
+  const anchors = new Map(getStore().listMilestoneAnchors(ctx.workspaceId).map((anchor) => [anchor.milestoneId, anchor]));
+  const lineOrder = defaultIdentityPacks().map((pack) => pack.id);
+  // By line, then by when it is due, so a line's drafts read as the sequence they are.
+  const draftMilestones = getStore().listMilestones(ctx.workspaceId).filter((milestone) => milestone.status === "draft")
+    .sort((a, b) => lineOrder.indexOf(a.identityId) - lineOrder.indexOf(b.identityId)
+      || (anchors.get(a.id)?.deadline ?? "9999").localeCompare(anchors.get(b.id)?.deadline ?? "9999"));
+  const lineLabels: Record<string, string> = Object.fromEntries(defaultIdentityPacks().map((pack) => [pack.id, pack.label]));
   const executions = getStore().listExecutions(ctx.workspaceId);
   const taskDetails = loadTaskDetailsBatch(ctx, [...evidenceReviews, ...proposals].map((item) => item.id));
-  return <SubpageShell eyebrow="05 / APPROVAL CONTROL" title="审批与验收" description="计划差异批量批准；外部动作逐项批准；里程碑证据由 AI 闸门判定并保留人工撤销权。">
-    <PermissionModePanel initialEnabled={permissionModeEnabled(ctx)} initialCandidates={permissionCandidates(ctx)} />
+  return <SubpageShell active="待确认" title="待确认"
+    description={pending.total ? `${pending.total} 件事在等你决定。每一项都不会自己生效。` : "没有等你决定的事。"}>
+    <section className="pending-list" aria-label="待确认汇总">
+      {([
+        ["作业方案", pending.workOrders, "#proposals"], ["计划差异", pending.planChanges, "/plan#plan-changes"],
+        ["里程碑草稿", pending.milestoneDrafts, "/milestones"], ["主线联系（待复盘）", pending.relations, "/review"],
+        ["调研建议", pending.research, "/onboarding"], ["文件里的日期", pending.dates, "/onboarding"], ["待你回答的问题", pending.questions, "/onboarding"], ["暂定目标待你过目", pending.targets, "/milestones"]
+      ] as const).filter(([, count]) => count > 0).map(([label, count, href]) =>
+        <a key={label} className="panel" href={href}><b>{count}</b><span>{label}</span></a>)}
+    </section>
+    <details className="fold" open={permissionModeEnabled(ctx)}>
+      <summary>默认批准（可选）：低风险的变化在前台停留 5 分钟后自动采纳</summary>
+      <PermissionModePanel initialEnabled={permissionModeEnabled(ctx)} initialCandidates={permissionCandidates(ctx)} />
+    </details>
+    {/* What is waiting, spelled out here instead of only counted: three of these used to be a number linking elsewhere, so the
+        page that says 「29 件事在等你」 listed two of them. */}
+    {draftMilestones.length > 0 && <section className="pending-block" aria-label="里程碑草稿">
+      <h2>里程碑草稿 · {draftMilestones.length}</h2>
+      <p className="review-note">分析和闸门只认已批准的里程碑，所以不批准，新收集的任务就没有地方挂。草稿是 AI 按你的画像提的，改标题、日期、标准都可以。</p>
+      <ul>{draftMilestones.map((milestone) => <li key={milestone.id} data-line={milestone.identityId}>
+        <b>{lineLabels[milestone.identityId] ?? milestone.identityId}</b> · {milestone.title}
+        <small> · {anchors.get(milestone.id)?.deadline ? `最晚 ${anchors.get(milestone.id)!.deadline}` : "无截止"}</small>
+      </li>)}</ul>
+      <a className="secondary-button" href="/milestones">去「主线」批准或修改 →</a>
+    </section>}
+    {pending.planChanges > 0 && <section className="pending-block" aria-label="计划差异">
+      <h2>计划差异 · {pending.planChanges}</h2>
+      <ul>{plan.changes.filter((change) => change.status === "pending").slice(0, 5).map((change) =>
+        <li key={change.id}>{change.explanation}</li>)}</ul>
+      <a className="secondary-button" href="/plan#plan-changes">去「计划」逐条采纳或整批批准 →</a>
+    </section>}
+    {pending.targets > 0 && <section className="pending-block" aria-label="暂定目标">
+      <h2>暂定目标待你过目 · {pending.targets}</h2>
+      <p>分数线都是从目标倒推的。目标是系统按你的长期目标先提的（比如一门课的总评），带着理由；合适就点“就按这个”，不合适一键改，所在主线的草稿会按新目标重算。</p>
+      <a className="secondary-button" href="/milestones">去看目标 →</a>
+    </section>}
+    {pending.questions > 0 && <section className="pending-block" aria-label="待你回答的问题">
+      <h2>待你回答的问题 · {pending.questions}</h2>
+      <p>有的主线目前只有系统的猜测，没有你确认过的事实：说说你实际在做什么，或者这条线先不规划。</p>
+      <a className="secondary-button" href="/onboarding">去回答 →</a>
+    </section>}
+    {(pending.research > 0 || pending.dates > 0) && <section className="pending-block" aria-label="来自采访的待决定">
+      <h2>采访带来的 · {pending.research + pending.dates}</h2>
+      <p>{pending.research > 0 ? `${pending.research} 条调研建议（每条带已核对的来源）` : ""}{pending.research > 0 && pending.dates > 0 ? "，" : ""}{pending.dates > 0 ? "一批从文件里读出的日期" : ""}。逐条采纳或不要都在「先了解你」那一页。</p>
+      <a className="secondary-button" href="/onboarding">去处理 →</a>
+    </section>}
     <section className="approval-ledger">
-      <header><span>TYPE</span><span>ITEM</span><span>WHY NOW</span><span>ACTION</span></header>
-      <article><b>PLAN DIFF</b><strong>Personal Plan v{plan.version} · {pendingPlanChanges} pending</strong><p>{plan.status === "approved" ? "该计划版本已经落入批准账本" : "新增 AI Ahead 准备与人工核心行动块"}</p><a href="/plan">打开 C 视图 →</a></article>
       {evidenceReviews.map((item) => {
         const own = claims.filter((claim) => claim.workOrderId === item.id && claim.reviewStatus === "submitted");
         const execution = executions.filter((entry) => entry.workOrderId === item.id).at(-1);
         return <article key={item.id}>
           <a className="card-cover-link" href={`/workbench/${encodeURIComponent(item.id)}`} aria-label={item.intent} />
           <TaskPreview detail={taskDetails.get(item.id)} />
-          <b>EVIDENCE</b><strong>{item.intent}</strong>
+          <b>待验收</b><strong>{item.intent}</strong>
           <p>
             {own.length ? own.map((claim) => `${claim.kind} · ${claim.description} · ${claim.uri}`).join("；") : "本次提交没有证据声明"}
             {execution?.durationObserved
@@ -65,20 +117,24 @@ export default async function ApprovalsPage() {
               </>
             : <AcceptEvidenceButton workOrderId={item.id} />}</article>;
       })}
-      {!evidenceReviews.length && <article><b>EVIDENCE</b><strong>当前没有待验收结果</strong><p>人工提交完成证据后会出现在这里</p><span>—</span></article>}
     </section>
-    <section className="work-order-list">{proposals.map((item) => {
+    <section className="work-order-list" id="proposals">{proposals.map((item) => {
       const proposal = item.payload as AnalysisProposal & { audit: { threadId: string; turnId: string }; contextVersion: string };
       return <article key={item.id}>
         <a className="card-cover-link" href={`/workbench/${encodeURIComponent(item.id)}`} aria-label={item.intent} />
         <TaskPreview detail={taskDetails.get(item.id)} />
-        <header><span>AI PROPOSAL · 待计划审批</span><b>{item.riskTier}</b></header>
+        <header><span>AI 方案 · 待批准</span><b>{item.riskTier}</b></header>
         <h2>{item.intent}</h2>
         <p>结构和输入引用已校验；语义仍需人工判断。尚未批准、排程或执行。</p>
         <p>{item.identityId} / {item.projectId} / {item.milestoneId}</p>
         {milestoneById.get(item.milestoneId)?.verifiability === "unstated"
           && <p role="note" className="seed-notice">这条作业绑定的里程碑还没有达成标准：验收只按下面的「必需」证据要求判定，里程碑自身的进度不会被记录。<a href="/milestones"> 去补充达成标准 →</a></p>}
-        <p>估时 p25 / p50 / p85：{item.estimate.p25Minutes} / {item.estimate.p50Minutes} / {item.estimate.p85Minutes} 分钟 · {item.estimate.source} · {item.estimate.observationCount} 次观测 · {item.estimate.confidence}</p>
+        {(() => {
+          const estimate = resolvedEstimate(ctx, item);
+          const steps = proposal.estimateBreakdown ?? [];
+          return <p>估时：通常 {estimate.p50Minutes} 分钟，宽一点 {estimate.p25Minutes}–{estimate.p85Minutes} 分钟 · {estimateBasis(estimate)}
+            {steps.length > 0 && <><br /><small>分步：{steps.map((step) => `${step.step} ${step.minutes} 分钟`).join("；")}</small></>}</p>;
+        })()}
         <h3>AI 准备提案</h3>{proposal.automationParts.map((part) => <p key={part.id}>{part.intent} — 依据「{part.quote}」：{part.rationale}</p>)}
         <h3>人工核心</h3>{proposal.humanCore.map((part) => <p key={part.id}>{part.intent} — 依据「{part.quote}」：{part.rationale}</p>)}
         {/* The reason travels with the item. Approving 「数据增强的具体参数记录」 without knowing why this
@@ -91,11 +147,5 @@ export default async function ApprovalsPage() {
         <ApproveProposalButton workOrderId={item.id} />
       </article>;
     })}</section>
-    <section className="status-grid approval-policies">
-      <article className="status-card"><span className="status-badge">PER ITEM</span><h2>外部动作</h2><p>邮件、发布、科研提交和高风险外部使用。</p></article>
-      <article className="status-card"><span className="status-badge">BATCH</span><h2>计划变化</h2><p>Added / Moved / Removed / Conflict 可整批批准或逐项排除。</p></article>
-      <article className="status-card"><span className="status-badge">AUTOMATIC</span><h2>本地准备</h2><p>只读研究、本地草稿和可撤销材料准备。</p></article>
-      <article className="status-card"><span className="status-badge">NEVER</span><h2>硬禁区</h2><p>券商订单与静默修改源日历。</p></article>
-    </section>
   </SubpageShell>;
 }

@@ -33,7 +33,7 @@ describe("dashboard view", () => {
       ...noPreviews
     }} />);
 
-    expect(html).toContain("下一行动");
+    expect(html).toContain("下一步");
     expect(html).toContain("完成论文结果段");
     expect(html).toContain("低精力备选");
     expect(html).toContain("短空档备选");
@@ -64,13 +64,13 @@ describe("dashboard view", () => {
     }} />);
     expect(html).toContain("开始执行");
     expect(html).not.toContain("前往任务详情执行并提交证据");
-    // The homepage's own CARE/CAPACITY section already has an energy probe — the embedded
+    // The day head already has an energy probe — the embedded
     // ExecutionActions must not add a second "记录中精力" control next to it.
     expect(html).not.toContain("开始前精力");
     // The inline controls replace the old CTA, but the hero card still needs a way to reach the
     // full detail page (background facts, material/evidence contracts, execution history).
     expect(html).toContain('href="/workbench/paper"');
-    expect(html).toContain("查看完整详情");
+    expect(html).toContain("完整详情");
   });
 
   test("includes a usable quick capture form", () => {
@@ -92,7 +92,7 @@ describe("dashboard view", () => {
     expect(html).not.toContain('name="expectedMinutes"');
   });
 
-  test("uses a running head instead of a SaaS sidebar and keeps health in the care band", () => {
+  test("uses a running head with the four working views, not a SaaS sidebar", () => {
     const html = renderToStaticMarkup(<DashboardView data={{
       principalId: "test-owner", workspaceId: "test-workspace", nowLabel: "周一 · 09:00", nowIso: "2026-09-14T14:00:00.000Z", timeZone: "America/Chicago", clockPinned: true, dateLabel: "14", monthLabel: "SEP · 2026",
       capacity: { level: "uncalibrated" as const, observationCount: 0, basis: [], blockers: [{ code: "LOCAL_ACTIVITY_NOT_AUTHORISED", message: "本机活动采集未开启" }] },
@@ -103,9 +103,8 @@ describe("dashboard view", () => {
     }} />);
     expect(html).toContain("running-head");
     expect(html).not.toContain("sidebar");
-    expect(html).toContain("CARE / CAPACITY");
-    expect(html).toContain("Milestones");
-    expect(html).toContain("Workbench");
+    for (const label of ["今日", "主线", "计划", "任务", "待确认", "设置"]) expect(html).toContain(label);
+    expect(html).not.toContain("CARE / CAPACITY");
   });
 });
 

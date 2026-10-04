@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { getStore } from "../../../../../lib/crossline";
+import { dataDirectory, getStore } from "../../../../../lib/crossline";
 import { resolveAccessContext } from "../../../../../lib/access-guard";
 
 /**
@@ -26,19 +26,24 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const material = getStore().listMaterials(access.ctx.workspaceId, id).find((item) => item.uri === uri);
   if (!material) return new Response("MATERIAL_NOT_FOUND", { status: 404 });
 
-  const root = path.resolve(PROJECT_ROOT, ".crossline-materials", id);
+  // The data directory is where manualbooks live now; the repository folder is where earlier ones were written, and
+  // stays readable so nothing prepared before the move disappears.
+  const roots = [path.resolve(dataDirectory(), "materials", id), path.resolve(PROJECT_ROOT, ".crossline-materials", id)];
   let file: string;
   try { file = fileURLToPath(material.uri); } catch { return new Response("MATERIAL_NOT_FOUND", { status: 404 }); }
-  const relative = path.relative(root, file);
-  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+  if (!roots.some((root) => { const relative = path.relative(root, file); return relative && !relative.startsWith("..") && !path.isAbsolute(relative); })) {
     return new Response("MATERIAL_PATH_OUTSIDE_ROOT", { status: 403 });
   }
   try {
-    return new Response(readFileSync(file, "utf8"), {
+    const bytes = readFileSync(file);
+    // A downloaded paper is a PDF and is shown as one; everything else is shown as text and never executed, whatever
+    // media type it claims.
+    const pdf = file.toLowerCase().endsWith(".pdf");
+    return new Response(bytes, {
       headers: {
-        // Always text/plain: the material is displayed, never executed, whatever media type it claims.
-        "content-type": "text/plain; charset=utf-8",
-        "content-disposition": `inline; filename="${path.basename(file)}"`
+        "content-type": pdf ? "application/pdf" : "text/plain; charset=utf-8",
+        "content-disposition": `inline; filename="${path.basename(file)}"`,
+        "x-content-type-options": "nosniff"
       }
     });
   } catch { return new Response("MATERIAL_UNREADABLE", { status: 404 }); }

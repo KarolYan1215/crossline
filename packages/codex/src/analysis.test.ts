@@ -44,8 +44,8 @@ test("real RPC boundary isolates one analysis thread and collects a strict final
   const result = await codex.runCodexAnalysis(fake.client, context, { skillName: "crossline-automation-stripper", cwd: "C:\\repo", onAudit: (audit) => audits.push(audit) });
   expect(result).toMatchObject({ ok: true, proposal, audit: { threadId: "thread-1", turnId: "turn-1" } });
   expect(audits).toEqual([{ threadId: "thread-1" }, { threadId: "thread-1", turnId: "turn-1" }]);
-  expect(fake.requests.find((r) => r.method === "thread/start")?.params).toMatchObject({ environments: [], dynamicTools: [], approvalPolicy: "untrusted", sandbox: "read-only" });
-  expect(fake.requests.find((r) => r.method === "turn/start")?.params).toMatchObject({ environments: [], outputSchema: { additionalProperties: false } });
+  expect(fake.requests.find((r) => r.method === "thread/start")?.params).toMatchObject({ environments: [], dynamicTools: [], approvalPolicy: "untrusted", sandbox: "read-only", model: "gpt-5.6-terra" });
+  expect(fake.requests.find((r) => r.method === "turn/start")?.params).toMatchObject({ environments: [], outputSchema: { additionalProperties: false }, model: "gpt-5.6-terra", effort: "high" });
   expect(fake.requests.find((r) => r.method === "thread/start")?.params).not.toHaveProperty("baseInstructions");
   expect(fake.requests.find((r) => r.method === "turn/start")?.params.input).toMatchObject([{ text: expect.stringMatching(/^\$crossline-automation-stripper\n\n/) }]);
   expect(fake.requests.filter((r) => r.method === "skills/config/write").map((r) => r.params)).toEqual([

@@ -55,6 +55,8 @@ export default defineConfig({
       // own inside the spawned process, and a developer's real `private`-mode config would otherwise leak
       // into this run and turn on CSP/security headers e2e never accounts for.
       CROSSLINE_DEPLOYMENT_MODE: "local",
+      // The visual baselines and flows were recorded against a board with example goals on it.
+      CROSSLINE_SEED_EXAMPLES: "1",
       CROSSLINE_TAILSCALE_HOSTNAME: ""
     },
     reuseExistingServer: false,

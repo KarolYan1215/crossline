@@ -15,15 +15,16 @@ export async function POST(request: Request) {
   if ("response" in access) return access.response;
   let body: unknown = {};
   try { body = await request.json(); } catch { /* an empty request means "look at the whole picture" */ }
-  const ask = (body ?? {}) as { request?: unknown };
+  const ask = (body ?? {}) as { request?: unknown; only?: unknown };
   try {
     const result = await requestCodexSupervisor<unknown>(access.ctx, "/v1/milestones/propose", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ request: typeof ask.request === "string" ? ask.request.slice(0, 2000) : "" }),
+      body: JSON.stringify({ request: typeof ask.request === "string" ? ask.request.slice(0, 2000) : "",
+        ...(Array.isArray(ask.only) ? { only: ask.only.filter((item): item is string => typeof item === "string").slice(0, 8) } : {}) }),
       // The Skill is premium-budget and reaches the web; the supervisor default of 5s would give up
       // long before it answers.
-      signal: AbortSignal.timeout(10 * 60_000)
+      signal: AbortSignal.timeout(6 * 60 * 60_000)
     });
     return NextResponse.json(result);
   } catch (error) {

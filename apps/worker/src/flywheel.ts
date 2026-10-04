@@ -1,6 +1,6 @@
 import { FLYWHEEL_OUTPUT_SCHEMA, validateFlywheelExpansion, type FlywheelContext, type FlywheelExpansion }
   from "@crossline/core";
-import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
+import { runCodexSkill, webResearchBlocker, type CodexRpcBoundary } from "@crossline/codex";
 import type { CrosslineStore } from "@crossline/db";
 
 const OWNER_ID = "local-owner";
@@ -42,6 +42,8 @@ export function createFlywheelExpander(store: CrosslineStore, workspaceId: strin
   return async function expand(): Promise<number> {
     const client = getClient();
     if (!client) throw new Error("CODEX_SUPERVISOR_UNAVAILABLE");
+    const missing = webResearchBlocker();
+    if (missing) throw new Error(missing.code);
     const context = buildFlywheelContext(store, workspaceId);
     if (!context.openMilestones.length) return 0;
 
@@ -55,7 +57,7 @@ export function createFlywheelExpander(store: CrosslineStore, workspaceId: strin
       prepareInput: () => context,
       validateOutput: (output) => validateFlywheelExpansion(output, context),
       onAudit: () => {},
-      timeoutMs: 15 * 60_000
+      timeoutMs: 60 * 60_000
     });
     if (!result.ok) throw new Error(result.blocker.code);
 

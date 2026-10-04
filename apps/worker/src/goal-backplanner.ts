@@ -14,7 +14,7 @@ type Answer = { steps: Step[]; dateCandidates: Array<{ date: string; quote: stri
 const str = { type: "string" };
 const object = (properties: Record<string, unknown>) => ({ type: "object", properties,
   required: Object.keys(properties), additionalProperties: false });
-const schema = object({ steps: { type: "array", items: object({
+export const BACKPLAN_SCHEMA = object({ steps: { type: "array", items: object({
   id: str, intent: str, sourceQuote: str, rationale: str,
   dependsOn: { type: "array", items: str },
   estimate: object({ p25Minutes: { type: "number" }, p50Minutes: { type: "number" }, p85Minutes: { type: "number" } }),
@@ -98,9 +98,9 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
       .filter((order) => order.milestoneId === milestone.id).map((order) => ({ id: order.id, intent: order.intent, state: order.state })) };
     const result = await runCodexSkill<Answer>(client, context, { skillName: SKILL, cwd,
       developerInstructions: "Work backwards from the approved milestone. Return only sourced step drafts; never set a goal or deadline. Block if the supplied source cannot justify a step.",
-      outputSchema: schema, prepareInput: () => context,
+      outputSchema: BACKPLAN_SCHEMA, prepareInput: () => context,
       validateOutput: (output) => validateBackplan(output, sources, dateSources), onAudit: () => {},
-      ...(signal ? { signal } : {}), timeoutMs: 10 * 60_000 });
+      ...(signal ? { signal } : {}), timeoutMs: 60 * 60_000 });
     if (!result.ok) return { state: "blocked", code: result.blocker.code, message: result.blocker.message };
     const ids = new Map(result.output.steps.map((step) => [step.id, `backplan-${randomUUID()}`]));
     const drafts: StoredWorkOrder[] = result.output.steps.map((step) => {

@@ -1,3 +1,4 @@
+import path from "node:path";
 import { randomUUID } from "node:crypto";
 import {
   ASSISTANT_OUTPUT_SCHEMA, validateAssistantTurnProposal,
@@ -50,7 +51,7 @@ export function buildAssistantContext(history: Array<{ from: "user" | "assistant
  * has a `codexThreadId` for this `threadId`.
  */
 export function createAssistantTurn(store: CrosslineStore, workspaceId: string, cwd: string,
-  getClient: () => CodexRpcBoundary | undefined) {
+  getClient: () => CodexRpcBoundary | undefined, materialsDir: string = path.join(cwd, ".crossline-materials")) {
   return async function turn(threadId: string, message: string,
     history: Array<{ from: "user" | "assistant"; text: string }>,
     attachments: Array<{ id: string; fileName: string; mediaType: string }>,
@@ -67,14 +68,14 @@ export function createAssistantTurn(store: CrosslineStore, workspaceId: string, 
       ? await continueSkillTurn<AssistantTurnProposal>(client, codexThreadId, message.slice(0, 4000), {
           skillName: ASSISTANT_SKILL, cwd, outputSchema: ASSISTANT_OUTPUT_SCHEMA,
           validateOutput: (output) => validateAssistantTurnProposal(output, context), onAudit: () => {},
-          ...(signal ? { signal } : {}), timeoutMs: 10 * 60_000
+          ...(signal ? { signal } : {}), timeoutMs: 60 * 60_000
         })
       : await runCodexSkill<AssistantTurnProposal>(client, context, {
           skillName: ASSISTANT_SKILL, cwd, developerInstructions: INSTRUCTIONS,
           outputSchema: ASSISTANT_OUTPUT_SCHEMA, prepareInput: () => context,
           validateOutput: (output) => validateAssistantTurnProposal(output, context),
           onAudit: (audit) => { codexThreadId = audit.threadId; },
-          ...(signal ? { signal } : {}), timeoutMs: 10 * 60_000
+          ...(signal ? { signal } : {}), timeoutMs: 60 * 60_000
         });
 
     const now = new Date().toISOString();
@@ -90,7 +91,7 @@ export function createAssistantTurn(store: CrosslineStore, workspaceId: string, 
     if (result.output.materialDraft && context.workOrderId) {
       const draft = result.output.materialDraft;
       const persisted = persistAssistantMaterial(store, {
-        workspaceId, ownerId: OWNER_ID, workOrderId: context.workOrderId, projectRoot: cwd,
+        workspaceId, ownerId: OWNER_ID, workOrderId: context.workOrderId, materialsDir,
         file: { relativePath: draft.relativePath, content: draft.content, mediaType: draft.mediaType, sourceRefs: draft.sourceRefs }
       });
       if (persisted.ok) savedMaterial = { uri: persisted.artifact.uri, fileName: draft.relativePath };

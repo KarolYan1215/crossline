@@ -156,7 +156,7 @@ export function backtestCalibration(observations: DurationObservation[], prior: 
 
 /**
  * Confidence graduates only from measured prediction error against a real baseline, never from a bare
- * observation count — `docs/crossline-plan-critical-review.md` explicitly rules out a hardcoded
+ * observation count — `docs/archive/crossline-plan-critical-review.md` explicitly rules out a hardcoded
  * "N observations is trustworthy" threshold, and this is what replaces it. Sample-size floors still
  * apply on top of the error margin, because a strong-looking margin from very few evaluated points is
  * exactly the kind of sampling luck the margin check alone cannot rule out.

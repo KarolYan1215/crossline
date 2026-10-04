@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { allowDiscretionarySpend, modelForTier, tierUnderMode, type CostSignal } from "./cost";
+import { allowDiscretionarySpend, type CostSignal } from "./cost";
 
 const policy = { windowSharePercent: 80, longWindowCeilingPercent: 90 };
 const signal = (over: Partial<Extract<CostSignal, { available: true }>> = {}): CostSignal => ({
@@ -33,18 +33,9 @@ test("a reached rate limit is refused outright", () => {
     .toMatchObject({ allowed: false, code: "RATE_LIMIT_REACHED" });
 });
 
-test("degradation tiers read a measured percentage, and economy downgrades capable work", () => {
+test("degradation modes read a measured percentage", () => {
   const normal = allowDiscretionarySpend(signal(), policy);
   const economy = allowDiscretionarySpend(signal({ long: { usedPercent: 86, windowDurationMins: 10_080, resetsAt: null } }), policy);
   expect(normal).toMatchObject({ allowed: true, mode: "normal" });
   expect(economy).toMatchObject({ allowed: true, mode: "economy" });
-  expect(tierUnderMode("capable", "normal")).toBe("capable");
-  expect(tierUnderMode("capable", "economy")).toBe("routine");
-});
-
-test("model tiers are capability names, so changing the backing model is one mapping change", () => {
-  const mapping = { routine: "some-small-model", capable: "some-large-model" };
-  expect(modelForTier("routine", mapping)).toBe("some-small-model");
-  // An unmapped tier is undefined rather than a silently substituted default.
-  expect(modelForTier("capable", { routine: "only-this-one" })).toBeUndefined();
 });

@@ -11,7 +11,7 @@ const errorText: Record<string, string> = {
 };
 
 /**
- * The manual exit `docs/crossline-plan-critical-review.md` §4 asked for: when Codex is unavailable (or
+ * The manual exit `docs/archive/crossline-plan-critical-review.md` §4 asked for: when Codex is unavailable (or
  * just not wanted for this one item), a capture becomes a WorkOrder by hand instead of staying stuck
  * behind "分析服务不可用" with nothing else to do. Skips AI classification entirely — the result carries
  * `payload.manualPromotion` so every other screen can say so rather than implying it was analysed.

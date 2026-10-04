@@ -86,6 +86,8 @@ export function createCaptureAnalyzer(store: CrosslineStore, workspaceId: string
         ],
         identityPacks: packs.map((p) => ({ id: p.id, version: 1, summary: `${p.label}; workflows: ${p.workflowTemplates.join(", ")}; evidence: ${p.evidencePolicy}` })),
         historicalStats: buildHistoricalStats(store, workspaceId, [...identities]),
+        // Measured, from the screen record (if the person agreed to it) and from how finished tasks compared with their estimates.
+        rhythm: store.workRhythm(workspaceId, new Date(Date.now() - 28 * 86_400_000).toISOString()),
         policy: { tools: [], externalSideEffects: false, humanApprovalRequired: true }
       });
       store.updateAnalysisAudit(workspaceId, id, { contextVersion: context.version });
@@ -102,9 +104,36 @@ export function createCaptureAnalyzer(store: CrosslineStore, workspaceId: string
       const message = error instanceof Error ? error.message : "";
       const code = /^ANALYSIS_[A-Z_]+$/.test(message) ? message : "ANALYSIS_RUNTIME_FAILED";
       store.transitionWorkOrder(workspaceId, id, { type: "blocked", reason: code }, `analysis:${id}:${attempt}:finish`, {
-        audit: { blocker: { code, message: "分析被阻塞；原始 Capture 已保留，可继续人工处理。" } }
+        audit: { blocker: { code, message: BLOCKER_ADVICE[code] ?? "分析被阻塞；原始 Capture 已保留，可继续人工处理。" } }
       });
     }
     return outcome(id);
   };
+}
+
+/**
+ * What the person is told, in words that say what to do. A bare code and 「分析被阻塞」 left someone holding a blocked task they had
+ * captured on purpose with no idea that approving a milestone was the whole fix.
+ */
+const BLOCKER_ADVICE: Record<string, string> = {
+  ANALYSIS_APPROVED_MILESTONE_REQUIRED: "还没有已批准的里程碑。先到「主线」批准至少一个里程碑草稿，分析才有地方挂这件事；批准之后系统会自动重新分析这条。",
+  ANALYSIS_IDENTITY_CONTEXT_REQUIRED: "已批准的里程碑所属的主线没有对应的身份包，分析无法进行；请检查主线设置。"
+};
+
+/**
+ * Captures the background tick should analyse on its own: never analysed (`attempt` 0, still `captured`), and only while
+ * the workspace has an approved milestone for the analysis to bind to — without one the Skill would be refused anyway, and
+ * a blocker written on every fresh capture would say nothing the person can act on yet.
+ *
+ * A capture that was analysed and blocked is deliberately NOT here: that one waits for the person (add context, press
+ * re-analyse). Retrying it on a timer would spend quota to fail the same way every fifteen minutes.
+ */
+export function capturesAwaitingAutoAnalysis(store: CrosslineStore, workspaceId: string, limit = 3): string[] {
+  if (!store.listMilestones(workspaceId).some((milestone) => milestone.status === "approved")) return [];
+  return store.listCaptures(workspaceId)
+    // Also a capture that was blocked only for want of an approved milestone: the cause is gone, so waiting for a click would be
+    // making the person do what the system already knows how to do.
+    .filter((capture) => (capture.state === "captured" && capture.attempt === 0)
+      || (capture.state === "blocked" && capture.audit.blocker?.code === "ANALYSIS_APPROVED_MILESTONE_REQUIRED"))
+    .slice(0, limit).map((capture) => capture.id);
 }

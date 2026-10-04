@@ -19,7 +19,6 @@ describe("default identity packs", () => {
 
   test("identity packs provide inference contracts without personal details", () => {
     const research = defaultIdentityPacks().find((pack) => pack.id === "research");
-    expect(research?.interviewQuestions.length).toBeGreaterThan(0);
     expect(research?.durationPriors).toEqual(expect.objectContaining({
       preparation: expect.objectContaining({ p25Minutes: expect.any(Number), p85Minutes: expect.any(Number) })
     }));

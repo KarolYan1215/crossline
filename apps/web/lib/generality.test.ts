@@ -14,10 +14,10 @@ vi.mock("server-only", () => ({}));
  */
 const priors = { review: { p25Minutes: 10, p50Minutes: 20, p85Minutes: 35 } };
 const swappedPacks = [
-  { id: "teaching", label: "教学", kind: "identity", masterClock: true, workflowTemplates: ["lesson-prep"], evidencePolicy: "tiered", interviewQuestions: [], durationPriors: priors },
-  { id: "woodwork", label: "木工", kind: "identity", masterClock: false, workflowTemplates: ["build-log"], evidencePolicy: "tiered", interviewQuestions: [], durationPriors: priors },
-  { id: "band", label: "乐队", kind: "identity", masterClock: false, workflowTemplates: ["setlist"], evidencePolicy: "tiered", interviewQuestions: [], durationPriors: priors },
-  { id: "recovery", label: "恢复", kind: "capacity", masterClock: false, workflowTemplates: [], evidencePolicy: "telemetry", interviewQuestions: [], durationPriors: priors }
+  { id: "teaching", label: "教学", kind: "identity", masterClock: true, workflowTemplates: ["lesson-prep"], evidencePolicy: "tiered", durationPriors: priors },
+  { id: "woodwork", label: "木工", kind: "identity", masterClock: false, workflowTemplates: ["build-log"], evidencePolicy: "tiered", durationPriors: priors },
+  { id: "band", label: "乐队", kind: "identity", masterClock: false, workflowTemplates: ["setlist"], evidencePolicy: "tiered", durationPriors: priors },
+  { id: "recovery", label: "恢复", kind: "capacity", masterClock: false, workflowTemplates: [], evidencePolicy: "telemetry", durationPriors: priors }
 ];
 vi.mock("@crossline/identity-packs", () => ({ defaultIdentityPacks: () => swappedPacks }));
 

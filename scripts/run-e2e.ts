@@ -31,7 +31,9 @@ const env = {
   // CSP/security headers `private` adds — found by e2e breaking wholesale (8 of 11 desktop tests, mostly
   // timeouts) right after standing up a real `private`-mode server for stage six's own verification.
   CROSSLINE_DEPLOYMENT_MODE: "local",
-  CROSSLINE_TAILSCALE_HOSTNAME: ""
+  CROSSLINE_TAILSCALE_HOSTNAME: "",
+  // The visual baselines and flows were recorded against a board with example goals on it.
+  CROSSLINE_SEED_EXAMPLES: "1"
 };
 
 function run(command: string, args: string[], cwd: string): void {

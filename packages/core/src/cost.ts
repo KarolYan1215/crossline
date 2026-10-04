@@ -63,15 +63,3 @@ export function allowDiscretionarySpend(signal: CostSignal, policy: SpendPolicy)
   // The three-tier degradation is real here because it reads a measured percentage, not an estimate.
   return { allowed: true, headroomPercent, mode: budgetPolicy(signal.long?.usedPercent ?? used).mode };
 }
-
-/** Capability names, so switching the backing model is one mapping change and no business-logic change. */
-export type ModelTier = "routine" | "capable";
-
-export function modelForTier(tier: ModelTier, mapping: Partial<Record<ModelTier, string>>): string | undefined {
-  // Economy mode downgrades capable work to the routine model rather than inventing a third tier.
-  return mapping[tier];
-}
-
-export function tierUnderMode(tier: ModelTier, mode: SpendMode): ModelTier {
-  return mode === "normal" ? tier : "routine";
-}

@@ -185,3 +185,33 @@ test("only required items are the bar for pass; a contract without the flag fail
     { description: "旧契约一", required: false }, { description: "旧契约二", required: false }
   ])).toEqual(["旧契约一", "旧契约二"]);
 });
+
+test("an estimate has to add up: the steps' minutes are the median, within a quarter, and a padded total is sent back with the sum", () => {
+  const withSteps = (steps: Array<[string, number]>, p50 = 20) => ({ ...validProposal, estimate: { ...validProposal.estimate, p25Minutes: Math.round(p50 * 0.6), p50Minutes: p50, p85Minutes: Math.round(p50 * 1.9) },
+    estimateBreakdown: steps.map(([step, minutes]) => ({ step, minutes })) });
+  expect(core.validateAnalysisProposal(withSteps([["读两篇笔记", 8], ["比较并写结论", 12]]), analysisContext)).toMatchObject({ estimateBreakdown: [{ step: "读两篇笔记", minutes: 8 }, { step: "比较并写结论", minutes: 12 }] });
+  // 360 against steps that sum to 120: padding.
+  try { core.validateAnalysisProposal(withSteps([["读", 60], ["写", 60]], 360), analysisContext); throw new Error("accepted"); } catch (error) {
+    expect((error as Error).message).toBe("ANALYSIS_ESTIMATE_BREAKDOWN_MISMATCH");
+    expect((error as Error & { detail?: string }).detail).toContain("120");
+    expect((error as Error & { detail?: string }).detail).toContain("360");
+  }
+});
+
+test("a context carries the person's measured rhythm, and one written before it existed reads as nothing measured", () => {
+  const measured = { ...analysisContext, rhythm: { focusRunMinutes: 52, productiveMinutesPerDay: 310, planActualRatio: 0.7, observedDays: 12, completed: 6 } };
+  expect(core.validateAnalysisContext(measured).rhythm).toEqual(measured.rhythm);
+  expect(core.validateAnalysisContext(analysisContext).rhythm).toEqual({ focusRunMinutes: 0, productiveMinutesPerDay: 0, planActualRatio: 0, observedDays: 0, completed: 0 });
+});
+
+test("the margin is stated in p85: no room above the typical value is refused, and so is a margin that is a guess", () => {
+  const withP85 = (p85Minutes: number) => ({ ...validProposal, estimate: { ...validProposal.estimate, p25Minutes: 12, p50Minutes: 20, p85Minutes },
+    estimateBreakdown: [{ step: "读", minutes: 8 }, { step: "写", minutes: 12 }] });
+  expect(core.validateAnalysisProposal(withP85(26), analysisContext)).toBeTruthy();
+  for (const p85 of [20, 23, 91]) {
+    try { core.validateAnalysisProposal(withP85(p85), analysisContext); throw new Error("accepted"); } catch (error) {
+      expect((error as Error).message).toBe("ANALYSIS_ESTIMATE_MARGIN_INVALID");
+      expect((error as Error & { detail?: string }).detail).toContain("至少 24");
+    }
+  }
+});

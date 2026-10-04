@@ -4,6 +4,8 @@ import { createFlywheelExpander } from "./flywheel";
 
 const skillCalls: Array<Record<string, unknown>> = [];
 vi.mock("@crossline/codex", () => ({
+  // This machine's runtime files are not what these tests are about.
+  webResearchBlocker: () => undefined,
   runCodexSkill: async (_client: unknown, _input: unknown, options: Record<string, unknown>) => {
     skillCalls.push(options);
     const prepare = options.prepareInput as (input: unknown) => unknown;

@@ -1,6 +1,9 @@
+import { profileFactId } from "@crossline/core";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { SubpageShell } from "../subpage-shell";
-import { MilestoneMap } from "./milestone-map";
+import { FlowChart } from "./flow-chart";
+import { TargetsPanel } from "./targets-panel";
+import { listCourseTargets } from "../../lib/targets";
 import { MilestoneAdmin, type AdminMilestone } from "./milestone-admin";
 import { ensureSeeded, getStore, readGoalSettings, readSchedulePreferences } from "../../lib/crossline";
 import { requireSessionContext } from "../../lib/access-guard";
@@ -43,6 +46,9 @@ export default async function MilestonesPage({ searchParams }: {
   }
 
   const templates = store.listMilestoneTemplates(ctx.workspaceId);
+  const anchors = new Map(store.listMilestoneAnchors(ctx.workspaceId).map((anchor) => [anchor.milestoneId, anchor]));
+  const titles = new Map(milestones.map((milestone) => [milestone.id, milestone.title]));
+  const factText = new Map(store.listProfileFacts(ctx.workspaceId).map((fact) => [profileFactId(fact), fact.value]));
 
   const admin: AdminMilestone[] = milestones.map((milestone) => ({
     id: milestone.id, identityId: milestone.identityId, projectId: milestone.projectId ?? "",
@@ -52,6 +58,11 @@ export default async function MilestonesPage({ searchParams }: {
     fallbackImportance: readSchedulePreferences(ctx)?.importance[milestone.id] ?? "ordinary",
     dateCandidates: dates.get(milestone.id) ?? [],
     ...(rationales.get(milestone.id) ? { rationale: rationales.get(milestone.id)! } : {}),
+    ...(anchors.get(milestone.id) ? { anchor: (({ stage, deadline, baseline, target, stakeholders, dependsOn, sourceFactIds }) => ({
+      stage, deadline, baseline, target, stakeholders,
+      dependsOnTitles: dependsOn.map((id) => titles.get(id) ?? id),
+      facts: sourceFactIds.map((id) => factText.get(id) ?? id)
+    }))(anchors.get(milestone.id)!) } : {}),
     ...(progress.get(milestone.id) ? { progress: progress.get(milestone.id)! } : {}),
     ...(milestone.templateId ? { templateId: milestone.templateId } : {}),
     ...(milestone.confidence ? { confidence: milestone.confidence } : {})
@@ -59,18 +70,27 @@ export default async function MilestonesPage({ searchParams }: {
 
   const milestoneDetails = loadMilestoneDetailsBatch(ctx, admin.map((milestone) => milestone.id));
 
-  return <SubpageShell eyebrow="03 / MILESTONE RELATIONS" title="里程碑星图" description="关系允许循环；实线为已批准，虚线为待周复盘确认。没有 LLM 总分。">
-    {/* The map only shows approved and candidate relations, so drafts would be invisible here. */}
-    <MilestoneMap
-      milestones={milestones.filter((milestone) => milestone.status !== "archived")
-        .map((milestone) => ({ id: milestone.id, identityId: milestone.identityId, title: milestone.title }))}
-      relations={relations.map((relation) => ({ id: relation.id, source: relation.fromMilestoneId, target: relation.toMilestoneId, kind: relation.kind, status: relation.status }))}
-    />
+  const identities = defaultIdentityPacks().filter((pack) => pack.kind === "identity");
+  const flowNodes = milestones.filter((milestone) => milestone.status !== "archived").map((milestone) => {
+    const anchor = anchors.get(milestone.id);
+    const reading = progress.get(milestone.id) ?? {};
+    return { id: milestone.id, identityId: milestone.identityId, title: milestone.title, status: milestone.status,
+      stage: anchor?.stage, deadline: anchor?.deadline, dependsOn: anchor?.dependsOn,
+      met: Object.values(reading).filter((value) => value === "met").length, total: milestone.successCriteria.length };
+  });
+  const drafts = milestones.filter((milestone) => milestone.status === "draft").length;
+  return <SubpageShell active="主线" title="主线"
+    description={drafts ? `${drafts} 个里程碑草稿等你批准（点任一节点，或在下面的列表里批准）。` : "每条主线在往哪走，按先后从左到右。"}>
+    <FlowChart milestones={flowNodes} labels={Object.fromEntries(identities.map((pack) => [pack.id, pack.label]))}
+      lineOrder={identities.map((pack) => pack.id)}
+      relations={relations.map((relation) => ({ id: relation.id, source: relation.fromMilestoneId, target: relation.toMilestoneId, kind: relation.kind, status: relation.status }))} />
+    <TargetsPanel courses={listCourseTargets(ctx)}
+      milestones={milestones.filter((milestone) => milestone.status !== "archived" && milestone.successCriteria.some((criterion) => criterion.measure.kind === "threshold"))
+        .map((milestone) => ({ id: milestone.id, identityId: milestone.identityId, projectId: milestone.projectId ?? "", title: milestone.title, status: milestone.status as "draft" | "approved",
+          successCriteria: milestone.successCriteria, ...(milestone.templateId ? { templateId: milestone.templateId } : {}) }))} />
+    <p className="muted"><a href="/review">本周复盘 →</a>　<a href="/onboarding">补充你的情况，重新设计里程碑 →</a></p>
+    <details className="fold" open={drafts > 0 || Boolean(editId)}><summary>里程碑列表与编辑（修改写入新版本，旧版本保留）</summary>
     <section className="review-block">
-      <h2>里程碑</h2>
-      <p className="review-note">
-        修改会写入新版本，旧版本保留 —— 闸门判过的那一版永远可追溯。AI 只能提出草稿，批准是你的动作。
-      </p>
       <MilestoneAdmin
         milestones={admin}
         identities={defaultIdentityPacks().filter((pack) => pack.kind === "identity")
@@ -87,5 +107,6 @@ export default async function MilestonesPage({ searchParams }: {
         {...(editId ? { initialEditId: editId } : {})}
       />
     </section>
+    </details>
   </SubpageShell>;
 }

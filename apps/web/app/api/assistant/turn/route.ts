@@ -37,7 +37,7 @@ export async function POST(request: Request) {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ threadId, message, history, attachments, workOrderId }),
-      signal: AbortSignal.timeout(10 * 60_000)
+      signal: AbortSignal.timeout(3 * 60 * 60_000)
     });
     return NextResponse.json(result);
   } catch (error) {

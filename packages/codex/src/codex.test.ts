@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import path from "node:path";
 import * as codexModule from "./index";
-import { buildContextBundle, codexProcessEnvironment, JsonLineRpcClient, normalizeCodexEvent } from "./index";
+import { codexProcessEnvironment, JsonLineRpcClient } from "./index";
 import { signCapability } from "./capability";
 
 type TestSupervisor = {
@@ -77,6 +77,34 @@ describe("Codex app-server boundary", () => {
     } finally { await supervisor.stop(); }
   });
 
+  test("a long run answers with its status line at once and still delivers its result as JSON", async () => {
+    // A client's fetch gives up after five minutes without a byte; a Skill may run for ten. The route sends the
+    // headers first and keeps the body alive, so the body arrives with a run's own outcome in it.
+    const sidecar = fakeSidecar();
+    const supervisor = await codexModule.startCodexSupervisor({
+      port: 0, sidecarFactory: async () => sidecar.handle,
+      proposeMilestones: async () => { await new Promise((resolve) => setTimeout(resolve, 20)); return { state: "proposed", drafts: [] }; }
+    });
+    try {
+      const response = await fetch(`${supervisor.url}/v1/milestones/propose`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ state: "proposed", drafts: [] });
+    } finally { await supervisor.stop(); }
+  });
+
+  test("a long run that throws is reported as a blocked result, not a second set of headers", async () => {
+    const sidecar = fakeSidecar();
+    const supervisor = await codexModule.startCodexSupervisor({
+      port: 0, sidecarFactory: async () => sidecar.handle,
+      proposeMilestones: async () => { throw new Error("boom"); }
+    });
+    try {
+      const response = await fetch(`${supervisor.url}/v1/milestones/propose`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ state: "blocked", code: "SUPERVISOR_RUN_FAILED" });
+    } finally { await supervisor.stop(); }
+  });
+
   test("a detached job that throws is contained, not fatal to the worker", async () => {
     // `void job().finally(...)` reads as "detached" but still propagates the rejection, and since Node
     // 15 an unhandled rejection terminates the process by default. The two run-it-now routes answer 202
@@ -130,35 +158,6 @@ describe("Codex app-server boundary", () => {
         { method: "skills/list", params: { cwds: ["C:\\repo"], forceReload: true } }
       ]);
     } finally { await supervisor.stop(); }
-  });
-  test("normalizes a failed tool item to a typed blocker", () => {
-    expect(normalizeCodexEvent({
-      method: "item/completed",
-      params: { item: { id: "item-1", type: "commandExecution", status: "failed", error: "permission denied" } }
-    })).toEqual({
-      type: "blocked",
-      itemId: "item-1",
-      blocker: { code: "CODEX_TOOL_FAILED", message: "permission denied" }
-    });
-  });
-
-  test("context bundle keeps global, identity, and task scope explicit", () => {
-    expect(buildContextBundle({
-      ownerId: "owner-1",
-      workspaceId: "workspace-1",
-      identityId: "research",
-      taskId: "task-1",
-      globalContextVersion: 3,
-      identityPackVersion: 2,
-      allowedRoots: ["C:\\Research", "C:\\Papers"]
-    })).toEqual({
-      version: "3:research:2:task-1",
-      ownerId: "owner-1",
-      workspaceId: "workspace-1",
-      identityId: "research",
-      taskId: "task-1",
-      allowedRoots: ["C:\\Research", "C:\\Papers"]
-    });
   });
 
   test("JSON line RPC correlates app-server responses", async () => {
