@@ -12,12 +12,19 @@
   },
   "dependencies": {
     "@crossline/codex": "workspace:*",
-    "@crossline/core": "workspace:*",
-    "@crossline/identity-packs": "workspace:*",
     "@crossline/connectors": "workspace:*",
+    "@crossline/core": "workspace:*",
     "@crossline/db": "workspace:*",
+    "@crossline/identity-packs": "workspace:*",
     "@crossline/planner": "workspace:*",
-    "tsx": "4.23.13"
+    "@huggingface/transformers": "^4.3.0",
+    "audio-decode": "^3.12.0",
+    "mammoth": "^1.13.0",
+    "opencc-js": "^1.4.2",
+    "tsx": "4.23.13",
+    "unpdf": "^1.8.1"
   },
-  "devDependencies": { "@types/node": "26.5.1" }
+  "devDependencies": {
+    "@types/node": "26.5.1"
+  }
 }

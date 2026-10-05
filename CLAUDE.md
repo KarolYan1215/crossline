@@ -10,7 +10,7 @@ Current closed loop (per README): natural-language capture → system infers ide
 
 ## Commands
 
-Run from the repo root (pnpm workspace, Node >=22, pnpm 11.19.0):
+Run from the repo root (pnpm workspace, Node >=22, pnpm 12.6.0):
 
 ```powershell
 pnpm install
