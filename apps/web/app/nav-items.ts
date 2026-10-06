@@ -14,5 +14,6 @@ export const NAV_ITEMS = [
 
 export const SIDE_ITEMS = [
   { label: "待确认", href: "/approvals", badge: true },
+  { label: "助手", href: "/assistant", badge: false },
   { label: "设置", href: "/settings", badge: false }
 ] as const;

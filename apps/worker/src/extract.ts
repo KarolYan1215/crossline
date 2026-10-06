@@ -51,7 +51,9 @@ export function layoutPage(items: PlacedText[]): string {
     if (line) line.push(item); else lines.push([item]);
   }
   const left = Math.min(...pieces.map((item) => item.x));
-  return lines.sort((a, b) => b[0]!.y - a[0]!.y).map((line) => {
+  lines.sort((a, b) => b[0]!.y - a[0]!.y);
+  const labelled = columnLabels(lines, unit);
+  return lines.map((line) => {
     let out = "";
     let end = left;
     for (const item of line.sort((a, b) => a.x - b.x)) {
@@ -62,8 +64,43 @@ export function layoutPage(items: PlacedText[]): string {
       out += item.str.trim() === item.str ? item.str : item.str.replace(/^\s+|\s+$/g, "");
       end = item.x + item.width;
     }
-    return out.trimEnd();
+    const columns = labelled.get(line);
+    return columns ? `${out.trimEnd()}  [列 ${columns}]` : out.trimEnd();
   }).filter(Boolean).join("\n");
+}
+
+const TABLE_ROW_LABEL = /^(\d{1,2}\/\d{1,2}|TBD|TBA)$/i;
+
+/**
+ * For a table whose rows start with a date, says in words which column each small marker sits under. Spacing alone leaves a model
+ * counting characters to tell a 「#2」 under 「Quiz」 from one under 「Homework Out」, and a real course schedule came back with every
+ * quiz and homework date at low confidence because it could not. The header lines above the first row name the columns (two levels
+ * there: 「Homework」 over 「Out」/「Due」); a short piece in a row is labelled with the nearest heading at each level. Added to the line,
+ * never replacing it, and only when at least three rows start with a date, so prose and ordinary pages are untouched.
+ */
+function columnLabels(lines: PlacedText[][], unit: number): Map<PlacedText[], string> {
+  const result = new Map<PlacedText[], string>();
+  const byX = (line: PlacedText[]) => [...line].sort((a, b) => a.x - b.x);
+  const rows = lines.map((line, index) => ({ line, index })).filter(({ line }) => TABLE_ROW_LABEL.test(byX(line)[0]!.str.trim()));
+  if (rows.length < 3) return result;
+  const first = rows[0]!.index;
+  const header = lines.slice(Math.max(0, first - 3), first).filter((line) => line.length >= 2);
+  if (!header.length) return result;
+  const centre = (piece: PlacedText) => piece.x + piece.width / 2;
+  const nearest = (line: PlacedText[], cx: number) => {
+    const best = [...line].sort((a, b) => Math.abs(centre(a) - cx) - Math.abs(centre(b) - cx))[0];
+    return best && Math.abs(centre(best) - cx) <= Math.max(best.width, 10 * unit) ? best.str.trim() : undefined;
+  };
+  for (const { line } of rows) {
+    // The piece after the date is the row's description, however short (「SRAM」), not a marker in a column.
+    const marks = byX(line).slice(line.length >= 3 ? 2 : 1).filter((piece) => piece.str.trim().length > 0 && piece.str.trim().length <= 8).flatMap((piece) => {
+      const labels = header.map((level) => nearest(level, centre(piece))).filter((label): label is string => Boolean(label));
+      const unique = labels.filter((label, i) => labels.indexOf(label) === i);
+      return unique.length ? [`${unique.join(" ")}=${piece.str.trim()}`] : [];
+    });
+    if (marks.length) result.set(line, marks.join(" | "));
+  }
+  return result;
 }
 
 /** A Word table as rows of cells separated by 「 | 」, so a row stays a row instead of its cells becoming separate paragraphs. */
@@ -115,7 +152,7 @@ function finish(raw: string, emptyNote = "文件里没有可提取的文字。")
 }
 
 /** Bumped when extraction changes what text a file yields, so files read the old way are read again once. */
-export const EXTRACTION_LAYOUT_VERSION = "2";
+export const EXTRACTION_LAYOUT_VERSION = "3";
 
 /**
  * Reads again, once per workspace, every PDF and Word file that was extracted before columns were kept. Only files whose original

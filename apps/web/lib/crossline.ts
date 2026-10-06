@@ -489,7 +489,7 @@ async function scheduledBlocks(ctx: AccessContext, today: string, committed: Per
   });
   const capacityIds = new Set(defaultIdentityPacks().filter((pack) => pack.kind === "capacity").map((pack) => pack.id));
   const allOrders = getStore().listWorkOrders(ctx.workspaceId);
-  const orders = allOrders
+  const orders = withoutShadowingDemos(allOrders, capacityIds)
     .filter((order) => ACTIONABLE.includes(order.state) && !capacityIds.has(order.identityId));
   const stateById = new Map(allOrders.map((order) => [order.id, order.state]));
   const dependencyBlockers = orders.filter((order) => (plannerTaskOf(ctx, order).dependsOn ?? [])
@@ -1014,6 +1014,17 @@ export function blockWorkOrderEvidence(ctx: AccessContext, workOrderId: string, 
 // vanished from the home page, because analysis only ever writes a WorkOrder.
 const ACTIONABLE = ["approved", "preparing", "ready_for_human", "active"];
 
+/**
+ * The demo work orders every account is seeded with exist to show the flow. Once the person has any work of their own (in any state
+ * short of discarded) they stop being recommended or scheduled: Today's 「下一步」 and the plan must never hold a made-up task next to a
+ * real midterm. They stay on the Workbench, where they can be discarded.
+ */
+export function withoutShadowingDemos<T extends { state: string; identityId: string; payload: unknown }>(orders: T[], capacityIds: Set<string>): T[] {
+  const demo = (order: T) => Boolean((order.payload as { seeded?: boolean }).seeded);
+  const hasOwnWork = orders.some((order) => !demo(order) && order.state !== "archived" && !capacityIds.has(order.identityId));
+  return hasOwnWork ? orders.filter((order) => !demo(order)) : orders;
+}
+
 type ActionableOrder = ReturnType<CrosslineStore["listWorkOrders"]>[number];
 
 const humanCoreOf = (order: ActionableOrder) =>
@@ -1179,7 +1190,7 @@ export async function loadDashboard(ctx: AccessContext): Promise<Omit<DashboardD
   // Capacity is a constraint, not an identity competing for the same list. Keyed on the pack's `kind`
   // rather than the literal id "health", so a different pack set keeps the same distinction.
   const capacityIdentityIds = new Set(defaultIdentityPacks().filter((pack) => pack.kind === "capacity").map((pack) => pack.id));
-  const active = orders
+  const active = withoutShadowingDemos(orders, capacityIdentityIds)
     .filter((order) => !capacityIdentityIds.has(order.identityId) && ACTIONABLE.includes(order.state))
     .sort((a, b) => ACTIONABLE.indexOf(a.state) - ACTIONABLE.indexOf(b.state) || a.id.localeCompare(b.id));
   const now = process.env.CROSSLINE_FIXED_NOW ? new Date(process.env.CROSSLINE_FIXED_NOW) : new Date();
@@ -1338,6 +1349,7 @@ export async function loadDashboard(ctx: AccessContext): Promise<Omit<DashboardD
     activityDetailUpgrade: store.getSetting(ctx.workspaceId, LOCAL_ACTIVITY_CONSENT) === "granted"
       && store.getSetting(ctx.workspaceId, ACTIVITY_DETAIL_CONSENT) === undefined,
     lastNight: lastNight(ctx.workspaceId, now),
+    awaitingApproval: orders.filter((order) => order.state === "awaiting_plan_approval").length,
     ...(primary ? { primary } : {}),
     ...(higherPriority ? { higherPriority } : {}),
     ...(lowEnergy ? { lowEnergy } : {}),

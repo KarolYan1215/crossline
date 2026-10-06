@@ -102,7 +102,11 @@ export function OfflineCaptureForm({ ownerId, workspaceId }: { ownerId: string; 
         }).catch(() => null);
         if (!uploaded?.ok) { setStatus("任务已保存，但附件上传失败，可在作业台重试"); return; }
       }
-      location.reload();
+      // No reload: nothing on this page lists captures, so a reload would only wipe the sign that it landed. The worker analyses it
+      // in about a minute and the proposal shows up in 待确认 (the badge there refreshes by itself).
+      form.reset();
+      reset();
+      setStatus("已收到。系统正在分类、估时，约 1 分钟后出现在「待确认」。");
     } catch {
       await save("网络不可用，已保存并等待同步");
     }
@@ -118,7 +122,7 @@ export function OfflineCaptureForm({ ownerId, workspaceId }: { ownerId: string; 
         onChange={onInputChange} />
       <small>{fileNames.length ? `已选 ${fileNames.length} 个：${fileNames.join("、")}` : "拖文件到这里，或 Ctrl+V 粘贴截图/文件"}</small>
     </label>
-    <button className="secondary-button" type="submit">CAPTURE ↗</button>
+    <button className="secondary-button" type="submit">收集</button>
     {status && <small className="muted" role="status">{status}</small>}
   </form>;
 }

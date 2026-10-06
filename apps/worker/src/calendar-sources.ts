@@ -101,7 +101,9 @@ export async function listCatalogue(
     }
     catalogue.push({
       accountId: account.id, username: account.username, signedIn: true,
-      calendars: calendars.map((calendar) => ({
+      // Crossline's own calendar is never a source of the person's commitments: read back, the plan's blocks would look like meetings
+      // the person made, and the scheduler would plan around its own output.
+      calendars: calendars.filter((calendar) => calendar.name !== "Crossline").map((calendar) => ({
         id: calendar.id, name: calendar.name, isDefault: calendar.isDefault,
         selected: chosen.has(sourceKey(account.id, calendar.id))
       }))
@@ -151,7 +153,7 @@ export function buildSources(
   session: GraphSession,
   makeReader: (credential: GraphCredentialProvider, calendarId: string) => { pullCalendar(cursor?: string): Promise<never> } | unknown
 ): CalendarSource[] {
-  return readSelection(store, workspaceId).map((entry) => ({
+  return readSelection(store, workspaceId).filter((entry) => !entry.label.startsWith("Crossline · ")).map((entry) => ({
     key: sourceKey(entry.accountId, entry.calendarId),
     label: entry.label,
     reader: makeReader(session.credentialFor(entry.accountId), entry.calendarId) as CalendarSource["reader"]

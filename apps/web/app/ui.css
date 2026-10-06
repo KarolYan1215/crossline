@@ -221,3 +221,14 @@ button.dt-row:hover,.dt-row[aria-pressed="true"]{background:var(--chalk)}
 .target-milestone{display:grid;gap:4px;padding:6px 0;border-bottom:1px solid var(--mist)}
 .target-threshold{display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:14px}
 .target-threshold input{width:7em}
+.assistant-actions{display:inline-flex;flex-wrap:wrap;gap:8px;align-items:center}
+.assistant-actions input,.assistant-actions select{font:inherit;font-size:14px;max-width:100%;min-width:0}
+.assistant-ask{display:grid;gap:4px;padding:6px 0;border-bottom:1px solid var(--mist)}
+.assistant-task{display:grid;gap:6px;padding:10px 12px;border:1px solid var(--mist);border-left:4px solid var(--ink);margin:8px 0}
+.assistant-task h3{margin:0;font-size:16px}
+.assistant-detail{display:grid;gap:6px;font-size:14px}
+.assistant-detail h4{margin:4px 0 2px;font-size:14px}
+.assistant-detail ul,.assistant-categories{margin:0;padding-left:18px;display:grid;gap:3px}
+.assistant-detail code,.assistant-ask code{font-size:13px;word-break:break-all}
+.assistant-categories{list-style:none;padding-left:0;gap:10px}
+.assistant-section{display:grid;gap:6px}

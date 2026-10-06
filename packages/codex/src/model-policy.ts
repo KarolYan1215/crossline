@@ -40,7 +40,9 @@ export const SKILL_TIERS: Record<string, RouteTier> = {
   "crossline-due-diligence": "mid",
   "crossline-background-facts": "low",
   "crossline-plan-explainer": "low",
-  "crossline-assistant": "low"
+  "crossline-assistant": "low",
+  // The assistant that works on the person's machine: coding and multi-step work, so the strongest tier, and never stepped down.
+  "crossline-agent": "top"
 };
 
 /**
@@ -53,7 +55,7 @@ export const SKILL_OVERRIDES: Record<string, Partial<ModelRoute>> = {};
  * Skills that never step down a tier when the budget is tight. The gate decides whether work counts as done and
  * the analysis decides what a capture is: a weaker reading of either is a wrong answer, not a cheaper one.
  */
-export const NEVER_DOWNGRADED = new Set(["crossline-milestone-gate", "crossline-automation-stripper"]);
+export const NEVER_DOWNGRADED = new Set(["crossline-milestone-gate", "crossline-automation-stripper", "crossline-agent"]);
 
 const TIERS: RouteTier[] = ["top", "mid", "low"];
 const skillKey = (skillName: string) => skillName.replace(/^crossline:/, "");

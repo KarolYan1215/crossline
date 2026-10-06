@@ -105,15 +105,15 @@ export function AssistantWidget() {
   };
 
   if (!open) {
-    return <button type="button" className="assistant-bubble" onClick={() => setOpen(true)} aria-label="打开智能助手">
-      助手
+    return <button type="button" className="assistant-bubble" onClick={() => setOpen(true)} aria-label="打开问答">
+      问答
     </button>;
   }
 
-  return <section className="assistant-panel" aria-label="智能助手">
+  return <section className="assistant-panel" aria-label="问答">
     <header>
-      <span>小助手</span>
-      <button type="button" className="text-button" onClick={() => setOpen(false)} aria-label="收起智能助手">收起</button>
+      <span>问答</span>
+      <button type="button" className="text-button" onClick={() => setOpen(false)} aria-label="收起问答">收起</button>
     </header>
     <div className="assistant-messages">
       {!messages.length && <p className="muted assistant-empty">问点什么，或贴一段代码需求——不会读写这个仓库本身，只回答问题、生成的脚本会存成任务材料。</p>}

@@ -99,3 +99,13 @@ test("a settings row that no longer parses reads as empty rather than as a guess
   // the person may have deliberately unticked.
   expect(readSelection(store, WORKSPACE)).toEqual([]);
 });
+
+test("Crossline's own calendar can never be chosen as a source, so the plan is not planned around its own output", async () => {
+  const catalogue = await listCatalogue(session([UW]), store, WORKSPACE, catalogueReader({
+    [UW.id]: [{ id: "main", name: "Calendar", isDefault: true }, { id: "xl", name: "Crossline", isDefault: false }]
+  }));
+  expect(catalogue[0]!.calendars.map((calendar) => calendar.name)).toEqual(["Calendar"]);
+  // Even a selection that somehow names it (an older version of the app, a hand-edited setting) builds no reader.
+  saveSelection(store, WORKSPACE, [{ accountId: UW.id, calendarId: "xl", label: calendarLabel("Crossline", UW.username) }, { accountId: UW.id, calendarId: "main", label: calendarLabel("Calendar", UW.username) }]);
+  expect(buildSources(store, WORKSPACE, session([UW]), () => ({})).map((source) => source.key)).toEqual([sourceKey(UW.id, "main")]);
+});

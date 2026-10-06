@@ -319,7 +319,7 @@ test("the app opens with the network down, and the offline capture queues", asyn
 
   // And a capture taken while down is kept rather than lost.
   await page.getByPlaceholder("写下一项任务、想法，或粘贴一个链接…").fill("断网时记下的一条");
-  await page.getByRole("button", { name: "CAPTURE ↗" }).click();
+  await page.getByRole("button", { name: "收集" }).click();
   await expect(page.getByRole("status")).toContainText("已离线保存，联网后自动同步");
 
   const queued = await page.evaluate(async () => {

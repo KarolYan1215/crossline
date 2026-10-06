@@ -421,7 +421,9 @@ export function MilestoneAdmin({ milestones, identities, templates, previews, in
       </div>
     </form>}
 
-    <ul className="milestone-admin-list">{milestones.map((milestone) => {
+    {(() => {
+      const labelOf = (id: string) => identities.find((identity) => identity.id === id)?.label ?? id;
+      const renderMilestone = (milestone: AdminMilestone) => {
       const outcomes = milestone.successCriteria.filter((criterion) => criterion.evidenceOf === "outcome").length;
       const unlabelled = milestone.successCriteria.filter((criterion) => !criterion.evidenceOf).length;
       return <li key={milestone.id} data-status={milestone.status}>
@@ -429,7 +431,7 @@ export function MilestoneAdmin({ milestones, identities, templates, previews, in
         {previews?.[milestone.id]}
         <div className="milestone-admin-head">
           <b>{milestone.title}</b>
-          <small>{milestone.identityId} · {statusLabel[milestone.status]} · v{milestone.version}</small>
+          <small>{labelOf(milestone.identityId)} · {statusLabel[milestone.status]} · v{milestone.version}</small>
           {milestone.templateId && (() => {
             const template = templates.find((item) => item.id === milestone.templateId);
             return template ? <span className="criterion-tag" data-evidence="output">{templateKindLabel[template.kind]}</span> : null;
@@ -438,6 +440,7 @@ export function MilestoneAdmin({ milestones, identities, templates, previews, in
             置信度：{confidenceLabel[milestone.confidence]}
           </span>}
         </div>
+        {(milestone.anchor || milestone.rationale) && <details className="milestone-why"><summary>依据与推导</summary>
         {milestone.anchor && <dl className="milestone-anchor">
           <div><dt>阶段 {milestone.anchor.stage}</dt><dd>最晚 {milestone.anchor.deadline}</dd></div>
           <div><dt>现在</dt><dd>{milestone.anchor.baseline}</dd></div>
@@ -447,6 +450,7 @@ export function MilestoneAdmin({ milestones, identities, templates, previews, in
           {milestone.anchor.facts.length > 0 && <div><dt>依据</dt><dd>{milestone.anchor.facts.join("；")}</dd></div>}
         </dl>}
         {milestone.rationale && <p className="milestone-rationale">提议理由：{milestone.rationale}</p>}
+        </details>}
         {milestone.successCriteria.length === 0
           ? <em className="review-flag">未声明达成标准 —— 绑定它的作业仍按各自的证据要求验收，但里程碑本身的进度记不下来，直到你写下什么算达成。
               <button type="button" onClick={() => startEdit(milestone)} disabled={busy}>立即补充 →</button>
@@ -479,7 +483,15 @@ export function MilestoneAdmin({ milestones, identities, templates, previews, in
             && <button type="button" className="secondary-button" onClick={() => setMilestoneStatus(milestone, "archived")} disabled={busy}>归档</button>}
         </div>
       </li>;
-    })}</ul>
+      };
+      const live = milestones.filter((milestone) => milestone.status !== "archived");
+      const archived = milestones.filter((milestone) => milestone.status === "archived");
+      return <>
+        <ul className="milestone-admin-list">{live.map(renderMilestone)}</ul>
+        {archived.length > 0 && <details className="fold"><summary>已归档（{archived.length}）</summary>
+          <ul className="milestone-admin-list">{archived.map(renderMilestone)}</ul></details>}
+      </>;
+    })()}
   </div>;
 }
 

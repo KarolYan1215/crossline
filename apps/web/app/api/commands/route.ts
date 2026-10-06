@@ -20,6 +20,20 @@ function extractBackgroundFactsInBackground(ctx: AccessContext, captureTitle: st
   }).catch(() => {});
 }
 
+// Also fire-and-forget: the worker classifies new captures on its own tick, but that is up to fifteen minutes away, and the person who
+// just wrote something down is looking at it now. The worker applies the same rules as its tick (an approved milestone, quota in
+// the normal range), so asking early changes when it happens, never whether it is allowed.
+// A few seconds late on purpose: the form uploads attachments in a second request after this one, and the analysis names them.
+const ATTACHMENT_GRACE_MS = 5_000;
+function analyzeNewCapturesInBackground(ctx: AccessContext): void {
+  setTimeout(() => {
+    requestCodexSupervisor(ctx, "/v1/captures/auto-analyze", {
+      method: "POST", headers: { "content-type": "application/json" }, body: "{}",
+      signal: AbortSignal.timeout(10_000)
+    }).catch(() => {});
+  }, ATTACHMENT_GRACE_MS);
+}
+
 const EVIDENCE_KINDS = ["file", "link", "record", "telemetry"];
 
 function readEvidence(value: unknown): EvidenceClaimInput[] | null {
@@ -77,6 +91,7 @@ export async function POST(request: Request) {
     }
     addCapturedTaskWithId(ctx, { title, context }, command.clientCommandId, command.clientCommandId);
     extractBackgroundFactsInBackground(ctx, title, context);
+    analyzeNewCapturesInBackground(ctx);
   } else if (command.type in workOrderCommands) {
     if (!/^[a-zA-Z0-9_-]{1,128}$/.test(String(payload.workOrderId ?? ""))) {
       return Response.json({ code: "WORK_ORDER_NOT_FOUND" }, { status: 404 });

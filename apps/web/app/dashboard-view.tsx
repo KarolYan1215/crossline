@@ -33,6 +33,8 @@ export type DashboardData = {
   clockPinned: boolean;
   dateLabel: string;
   monthLabel: string;
+  /** Proposals the system has made that wait for the person; with nothing recommendable yet, Today says so instead of asking for more input. */
+  awaitingApproval?: number;
   capacity: {
     level: "low" | "medium" | "high" | "uncalibrated";
     confidence?: "low" | "medium" | "high";
@@ -150,6 +152,12 @@ export function DashboardView({ data }: { data: DashboardData }) {
         <EnergyProbe context="after_rest" />
       </div>}
 
+      <section className="panel capture-line" aria-labelledby="capture-title">
+        <header><h2 id="capture-title">快速收集</h2><small>写下来就行，系统会自己分类、估时</small></header>
+        <OfflineCaptureForm ownerId={data.principalId} workspaceId={data.workspaceId} />
+        <BatchCaptureForm ownerId={data.principalId} workspaceId={data.workspaceId} />
+      </section>
+
       <section className="today-grid" aria-label="下一步">
         <article className="hero-action panel" data-line={data.primary?.identityId}>
           <header><h2>下一步</h2>{data.primary && <span className="tag">{identityLabel(data.primary.identityId)}</span>}
@@ -165,7 +173,9 @@ export function DashboardView({ data }: { data: DashboardData }) {
               <a className="hero-detail-link" href={`/workbench/${encodeURIComponent(data.primary.id)}`}>完整详情 →</a>
             </p>
             {inlineActions(data.primary)}
-          </> : <p>先收集一项真实工作，系统会拆解并等待计划批准。</p>}
+          </> : data.awaitingApproval
+            ? <p>有 {data.awaitingApproval} 个方案在等你批准，批准后这里会推荐下一步。<a href="/approvals#proposals">去批准 →</a></p>
+            : <p>先收集一项真实工作，系统会拆解并等待计划批准。</p>}
         </article>
         <div className="grid-auto alt-grid">
           {data.higherPriority && alt(data.higherPriority, "更高优先级")}
@@ -186,12 +196,6 @@ export function DashboardView({ data }: { data: DashboardData }) {
           <p>{line.activeMilestone}</p>
           <span className="flow-progress" aria-hidden="true"><i style={{ width: `${line.pct}%` }} /></span>
         </a>)}
-      </section>
-
-      <section className="panel capture-line" aria-labelledby="capture-title">
-        <header><h2 id="capture-title">快速收集</h2><small>写下来就行，系统会自己分类、估时</small></header>
-        <OfflineCaptureForm ownerId={data.principalId} workspaceId={data.workspaceId} />
-        <BatchCaptureForm ownerId={data.principalId} workspaceId={data.workspaceId} />
       </section>
 
       <section className="care-band" aria-label="健康容量策略">

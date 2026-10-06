@@ -4,6 +4,7 @@ import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { latestFileDates } from "@crossline/db";
 import { getStore } from "./crossline";
 import { countProposedTargets } from "./targets";
+import { countAssistantPending } from "./agent";
 import { loadDiligence } from "./diligence";
 import { loadPendingDateBatch } from "./imported-dates";
 
@@ -29,10 +30,17 @@ export type PendingCounts = {
   questions: number;
   /** Targets the architect proposed (a course's grade) that the person has not yet accepted or changed. */
   targets: number;
+  /** Kinds of work the assistant would like to start but has not been allowed to. */
+  assistantKinds: number;
+  /** Questions the guard put to the person in the middle of a run. */
+  assistantQuestions: number;
+  /** Finished tasks waiting for the person to look at what the assistant made. */
+  assistantReviews: number;
 };
 
 export function countPending(ctx: AccessContext): PendingCounts {
   const store = getStore();
+  const assistant = countAssistantPending(ctx);
   const latestPlan = store.listPlanVersions(ctx.workspaceId)[0];
   const counts = {
     workOrders: store.listWorkOrders(ctx.workspaceId).filter((order) => order.state === "awaiting_plan_approval").length,
@@ -43,6 +51,9 @@ export function countPending(ctx: AccessContext): PendingCounts {
       .reduce((sum, report) => sum + report.proposals.filter((proposal) => proposal.status === "pending").length, 0),
     dates: loadPendingDateBatch(ctx) ? 1 : 0,
     targets: countProposedTargets(ctx),
+    assistantKinds: assistant.categories,
+    assistantQuestions: assistant.approvals,
+    assistantReviews: assistant.reviews,
     questions: profileGaps({
       identities: defaultIdentityPacks().filter((pack) => pack.kind === "identity").map((pack) => ({ id: pack.id, label: pack.label })),
       projects: store.listProjects(ctx.workspaceId).map(({ id, identityId, name }) => ({ id, identityId, name })),

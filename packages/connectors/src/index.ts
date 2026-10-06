@@ -142,6 +142,8 @@ export function graphAuthority(tenantId?: string, override?: string): string {
   return `https://login.microsoftonline.com/${tenant && tenant !== "common" ? tenant : "common"}`;
 }
 const GRAPH_WRITE_SCOPES = ["User.Read", "Calendars.ReadWrite", "Tasks.ReadWrite"];
+/** What the Crossline calendar needs and nothing more: no tasks, no shared calendars, no mail. */
+const GRAPH_CALENDAR_WRITE_SCOPES = ["User.Read", "Calendars.ReadWrite"];
 
 export async function createGraphAuthSession(config: {
   clientId: string;
@@ -149,7 +151,7 @@ export async function createGraphAuthSession(config: {
   tenantId?: string;
   localAppData?: string;
   authority?: string;
-  access?: "read" | "write";
+  access?: "read" | "write" | "calendar-write";
 }): Promise<GraphCredentialProvider & {
   loginWithDeviceCode(onCode: (info: { userCode: string; verificationUri: string; message: string }) => void): Promise<{ username: string }>;
   /** Every account the persisted cache holds, in the order MSAL returns them. */
@@ -168,7 +170,7 @@ export async function createGraphAuthSession(config: {
     },
     cache: { cachePlugin: new PersistenceCachePlugin(persistence) }
   });
-  const scopes = config.access === "write" ? GRAPH_WRITE_SCOPES : GRAPH_READ_SCOPES;
+  const scopes = config.access === "calendar-write" ? GRAPH_CALENDAR_WRITE_SCOPES : config.access === "write" ? GRAPH_WRITE_SCOPES : GRAPH_READ_SCOPES;
   const accountById = async (accountId: string) =>
     (await client.getTokenCache().getAllAccounts()).find((account) => account.homeAccountId === accountId);
   return {
@@ -649,3 +651,4 @@ export class GraphReadSource {
     }))).page;
   }
 }
+export * from "./crossline-calendar";

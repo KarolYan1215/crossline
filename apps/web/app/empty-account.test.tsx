@@ -24,7 +24,8 @@ test.each([
   ["plan", () => import("./plan/page"), {}],
   ["milestones", () => import("./milestones/page"), noParams],
   ["workbench", () => import("./workbench/page"), noParams],
-  ["approvals", () => import("./approvals/page"), noParams]
+  ["approvals", () => import("./approvals/page"), noParams],
+  ["assistant", () => import("./assistant/page"), noParams]
 ] as const)("the %s page renders on an account with nothing on it", async (_name, load, props) => {
   const { default: Page } = await load();
   const html = renderToStaticMarkup(await (Page as (props: unknown) => Promise<React.ReactElement>)(props));

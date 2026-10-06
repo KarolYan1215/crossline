@@ -50,7 +50,8 @@ export default async function ApprovalsPage() {
       {([
         ["作业方案", pending.workOrders, "#proposals"], ["计划差异", pending.planChanges, "/plan#plan-changes"],
         ["里程碑草稿", pending.milestoneDrafts, "/milestones"], ["主线联系（待复盘）", pending.relations, "/review"],
-        ["调研建议", pending.research, "/onboarding"], ["文件里的日期", pending.dates, "/onboarding"], ["待你回答的问题", pending.questions, "/onboarding"], ["暂定目标待你过目", pending.targets, "/milestones"]
+        ["调研建议", pending.research, "/onboarding"], ["文件里的日期", pending.dates, "/onboarding"], ["待你回答的问题", pending.questions, "/onboarding"], ["暂定目标待你过目", pending.targets, "/milestones"],
+        ["助手想做的新类别", pending.assistantKinds, "/assistant"], ["助手中途的提问", pending.assistantQuestions, "/assistant"], ["助手的产出待审", pending.assistantReviews, "/assistant"]
       ] as const).filter(([, count]) => count > 0).map(([label, count, href]) =>
         <a key={label} className="panel" href={href}><b>{count}</b><span>{label}</span></a>)}
     </section>
@@ -74,6 +75,11 @@ export default async function ApprovalsPage() {
       <ul>{plan.changes.filter((change) => change.status === "pending").slice(0, 5).map((change) =>
         <li key={change.id}>{change.explanation}</li>)}</ul>
       <a className="secondary-button" href="/plan#plan-changes">去「计划」逐条采纳或整批批准 →</a>
+    </section>}
+    {(pending.assistantKinds + pending.assistantQuestions + pending.assistantReviews) > 0 && <section className="pending-block" aria-label="助手">
+      <h2>助手 · {pending.assistantKinds + pending.assistantQuestions + pending.assistantReviews}</h2>
+      <p>{[pending.assistantKinds ? `${pending.assistantKinds} 类新的工作等你同意它去做` : "", pending.assistantQuestions ? `${pending.assistantQuestions} 个它在做事中途问你的问题（没人答就当作不同意）` : "", pending.assistantReviews ? `${pending.assistantReviews} 份做完的产出等你过目` : ""].filter(Boolean).join("；")}。</p>
+      <a className="secondary-button" href="/assistant">去助手页处理 →</a>
     </section>}
     {pending.targets > 0 && <section className="pending-block" aria-label="暂定目标">
       <h2>暂定目标待你过目 · {pending.targets}</h2>
@@ -99,7 +105,7 @@ export default async function ApprovalsPage() {
           <TaskPreview detail={taskDetails.get(item.id)} />
           <b>待验收</b><strong>{item.intent}</strong>
           <p>
-            {own.length ? own.map((claim) => `${claim.kind} · ${claim.description} · ${claim.uri}`).join("；") : "本次提交没有证据声明"}
+            {own.length ? own.map((claim) => `${({ file: "文件", link: "链接", record: "记录", telemetry: "遥测" } as Record<string, string>)[claim.kind] ?? claim.kind} · ${claim.description} · ${claim.uri}`).join("；") : "本次提交没有证据声明"}
             {execution?.durationObserved
               ? ` · 实际执行记录：被中断 ${execution.pauseMinutes} 分钟`
               : " · 时长未观测"}
@@ -123,10 +129,10 @@ export default async function ApprovalsPage() {
       return <article key={item.id}>
         <a className="card-cover-link" href={`/workbench/${encodeURIComponent(item.id)}`} aria-label={item.intent} />
         <TaskPreview detail={taskDetails.get(item.id)} />
-        <header><span>AI 方案 · 待批准</span><b>{item.riskTier}</b></header>
+        <header><span>AI 方案 · 待批准</span><b>{({ routine: "常规", milestone: "里程碑", high_risk: "高风险" } as Record<string, string>)[item.riskTier] ?? item.riskTier}</b></header>
         <h2>{item.intent}</h2>
         <p>结构和输入引用已校验；语义仍需人工判断。尚未批准、排程或执行。</p>
-        <p>{item.identityId} / {item.projectId} / {item.milestoneId}</p>
+        <p>{defaultIdentityPacks().find((pack) => pack.id === item.identityId)?.label ?? item.identityId}{milestoneById.get(item.milestoneId) ? ` · 服务于「${milestoneById.get(item.milestoneId)!.title}」` : ""}</p>
         {milestoneById.get(item.milestoneId)?.verifiability === "unstated"
           && <p role="note" className="seed-notice">这条作业绑定的里程碑还没有达成标准：验收只按下面的「必需」证据要求判定，里程碑自身的进度不会被记录。<a href="/milestones"> 去补充达成标准 →</a></p>}
         {(() => {
@@ -135,14 +141,17 @@ export default async function ApprovalsPage() {
           return <p>估时：通常 {estimate.p50Minutes} 分钟，宽一点 {estimate.p25Minutes}–{estimate.p85Minutes} 分钟 · {estimateBasis(estimate)}
             {steps.length > 0 && <><br /><small>分步：{steps.map((step) => `${step.step} ${step.minutes} 分钟`).join("；")}</small></>}</p>;
         })()}
-        <h3>AI 准备提案</h3>{proposal.automationParts.map((part) => <p key={part.id}>{part.intent} — 依据「{part.quote}」：{part.rationale}</p>)}
         <h3>人工核心</h3>{proposal.humanCore.map((part) => <p key={part.id}>{part.intent} — 依据「{part.quote}」：{part.rationale}</p>)}
+        {/* A proposal is judged on what falls to the person; the rest is one click away rather than a wall of text under every card. */}
+        <details className="fold"><summary>AI 做什么、要哪些材料（{[...proposal.materialContract, ...proposal.evidenceContract].filter((contract) => "required" in contract && contract.required).length} 项必需）</summary>
+        <h3>AI 准备提案</h3>{proposal.automationParts.map((part) => <p key={part.id}>{part.intent} — 依据「{part.quote}」：{part.rationale}</p>)}
         {/* The reason travels with the item. Approving 「数据增强的具体参数记录」 without knowing why this
             work order needs it is the same guess as approving a relation with no stated claim. */}
         <h3>材料与证据要求</h3>{[...proposal.materialContract, ...proposal.evidenceContract].map((contract, index) => <p key={index}>
-          {contract.kind} · {contract.description}{"required" in contract && contract.required ? " · 必需" : ""}
+          {({ file: "文件", link: "链接", record: "记录", telemetry: "遥测" } as Record<string, string>)[contract.kind] ?? contract.kind} · {contract.description}{"required" in contract && contract.required ? " · 必需" : ""}
           {contract.why ? <><br /><small>为什么需要：{contract.why}</small></> : ""}
         </p>)}
+        </details>
         <details><summary>分析审计</summary><p>{proposal.contextVersion} · thread {proposal.audit.threadId} · turn {proposal.audit.turnId}</p></details>
         <ApproveProposalButton workOrderId={item.id} />
       </article>;

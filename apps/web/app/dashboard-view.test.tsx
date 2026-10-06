@@ -177,3 +177,31 @@ describe("last night's expansion", () => {
     expect(html).not.toContain("昨夜");
   });
 });
+
+describe("dashboard view with nothing to recommend yet", () => {
+  const empty = (extra: Partial<DashboardData>) => renderToStaticMarkup(<DashboardView data={{
+    principalId: "o", workspaceId: "w", nowLabel: "周一 · 09:00", nowIso: "2026-09-14T14:00:00.000Z", timeZone: "America/Chicago", clockPinned: true,
+    dateLabel: "14", monthLabel: "SEP · 2026",
+    capacity: { level: "uncalibrated" as const, observationCount: 0, basis: [], blockers: [] },
+    progress: { streakDays: 0, weekCount: 0 }, care: [], identities: [], upcoming: [],
+    localActivityAsked: true, lastNight: { state: "none" as const }, milestonePulse: [], todayCapacity: { availableMinutes: 0, committedMinutes: 0 }, flywheel: [], flywheelStrip: { nodes: [], edges: [] },
+    ...noPreviews, ...extra
+  } as DashboardData} />);
+
+  test("with proposals waiting it says so and links to them, instead of asking for more input", () => {
+    const html = empty({ awaitingApproval: 2 });
+    expect(html).toContain("有 2 个方案在等你批准");
+    expect(html).toContain("/approvals#proposals");
+    expect(html).not.toContain("先收集一项真实工作");
+  });
+
+  test("with nothing at all it asks for a first piece of real work", () => {
+    expect(empty({})).toContain("先收集一项真实工作");
+  });
+
+  test("quick capture comes before the next action, and its button says what it does", () => {
+    const html = empty({});
+    expect(html.indexOf("快速收集")).toBeLessThan(html.indexOf("下一步"));
+    expect(html).toContain(">收集</button>");
+  });
+});

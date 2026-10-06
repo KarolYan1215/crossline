@@ -237,7 +237,7 @@ button:disabled{opacity:.4;cursor:not-allowed}
 /* The 26×10 ink block that opens every section title in the reference. */
 .subpage-header h1::before{content:"";display:inline-block;width:22px;height:9px;background:var(--block);margin-right:10px;vertical-align:middle}
 .subpage-header p{margin:4px 0 0;max-width:80ch;color:var(--graphite);font-size:12.5px;line-height:1.55}
-.subpage-inner{padding:12px 0 0;display:grid;gap:14px}
+.subpage-inner{padding:12px 0 0;display:grid;grid-template-columns:minmax(0,1fr);gap:14px}
 
 /* ── plan ──────────────────────────────────── */
 .plan-view{display:grid;gap:0}

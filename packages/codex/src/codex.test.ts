@@ -143,6 +143,25 @@ describe("Codex app-server boundary", () => {
     }
   });
 
+  test("classifying new captures now answers at once, runs in the background, and refuses a browser origin", async () => {
+    const sidecar = fakeSidecar();
+    let runs = 0;
+    const supervisor = await codexModule.startCodexSupervisor({
+      port: 0, sidecarFactory: async () => sidecar.handle,
+      autoAnalyzeCaptures: async () => { runs += 1; throw new Error("the pass failing must not take the supervisor down"); }
+    });
+    try {
+      const response = await fetch(`${supervisor.url}/v1/captures/auto-analyze`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+      expect(response.status).toBe(202);
+      expect(await response.json()).toEqual({ started: true });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(runs).toBe(1);
+      const forged = await fetch(`${supervisor.url}/v1/captures/auto-analyze`, { method: "POST", headers: { "content-type": "application/json", origin: "https://evil.example" }, body: "{}" });
+      expect(forged.status).toBe(403);
+      expect(runs).toBe(1);
+    } finally { await supervisor.stop(); }
+  });
+
   test("startup installs the local plugin and verifies every required skill", async () => {
     const sidecar = fakeSidecar();
     const supervisor = await codexModule.startCodexSupervisor({
@@ -437,5 +456,36 @@ describe("supervisor capability enforcement", () => {
       });
       expect(response.status).toBe(202);
     } finally { await supervisor.stop(); }
+  });
+});
+
+describe("requests from the runtime", () => {
+  test("an approval request is answered by the handler, with the id it came with, and cannot be mistaken for a response to ours", async () => {
+    const written: Array<Record<string, unknown>> = [];
+    const client = new JsonLineRpcClient((line) => written.push(JSON.parse(line)));
+    client.onServerRequest(async (method, params) => ({ decision: method === "item/commandExecution/requestApproval" && (params as { command: string }).command === "ls" ? "accept" : "decline" }));
+    const ours = client.request("thread/start", {});
+    // The runtime's request happens to carry the same numeric id as our pending one.
+    client.receiveLine(JSON.stringify({ id: 1, method: "item/commandExecution/requestApproval", params: { command: "ls" } }));
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(written.at(-1)).toEqual({ id: 1, result: { decision: "accept" } });
+    let settled = false;
+    void ours.then(() => { settled = true; });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(settled).toBe(false);
+    client.receiveLine(JSON.stringify({ id: 1, result: { ok: true } }));
+    await expect(ours).resolves.toEqual({ ok: true });
+  });
+
+  test("with no handler, or a handler that throws, the runtime gets an error back instead of silence", async () => {
+    const written: Array<Record<string, unknown>> = [];
+    const client = new JsonLineRpcClient((line) => written.push(JSON.parse(line)));
+    client.receiveLine(JSON.stringify({ id: "a", method: "item/fileChange/requestApproval", params: {} }));
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(written.at(-1)).toMatchObject({ id: "a", error: { message: expect.stringContaining("no handler") } });
+    client.onServerRequest(() => { throw new Error("nope"); });
+    client.receiveLine(JSON.stringify({ id: "b", method: "item/fileChange/requestApproval", params: {} }));
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(written.at(-1)).toMatchObject({ id: "b", error: { message: "nope" } });
   });
 });

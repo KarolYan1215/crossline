@@ -29,7 +29,7 @@ const INSTRUCTIONS = "You are building a profile of a new Crossline user. Do not
   + "`fileDates` — class meetings as weekly patterns (with holidays as exceptions), quizzes, homework release and due "
   + "dates, exams, project and report deadlines, never every lecture or table row. Each needs a quote copied "
   + "verbatim from one contiguous span of the file that contains the day itself; never add a date or a time the file "
-  + "does not give, never turn TBD into a date (list a due/exam/quiz the file marks TBD or to-be-announced in `undated` with its verbatim quote, so it is not lost), and when a PDF table's columns were flattened return the row with "
+  + "does not give, never turn TBD into a date (list a due/exam/quiz the file marks TBD or to-be-announced in `undated` with its verbatim quote, so it is not lost), A table row may end with a note like `[列 Quiz=#2 | Project=Out]`: the app worked out which column each marker sits under from the page's layout, so read the marker by that note (a `#2` under Quiz is quiz 2, under Homework Out is homework 2 handed out) and give such a row high confidence. Only when a PDF table's columns were flattened and there is no such note return the row with "
   + "confidence low and say what the two readings are. Leave `fileDates` empty when no file arrived. When `history` is present this is a conversation being resumed in a new thread: continue it, do not "
   + "greet again and do not re-ask what the profile or the history already answers. Write all human-readable "
   + "fields in Chinese.";

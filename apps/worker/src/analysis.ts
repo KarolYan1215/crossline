@@ -29,6 +29,21 @@ function buildHistoricalStats(store: CrosslineStore, workspaceId: string, identi
 // `CAPTURE_NOT_FOUND` and the milestones filter threw `ANALYSIS_APPROVED_MILESTONE_REQUIRED` even with
 // approved milestones on the books, because workspace-scoping already makes the ownerId check redundant
 // and wrong for any account that is not that one literal owner.
+/**
+ * The files the person already gave the system (syllabi, schedules, notes from the first interview), as inputs the analysis may rely
+ * on. Without them a capture about 「ECE 548 前几章」 asked the person for course materials the system was already holding.
+ * Names and a short opening only — the contract says model input is supplied text, and a whole syllabus on every capture is waste.
+ */
+export function uploadedMaterialInputs(store: CrosslineStore, workspaceId: string, limit = 8): Array<{ id: string; text: string }> {
+  return store.listSourceDocuments(workspaceId)
+    .filter((doc) => doc.extractionStatus === "done" && doc.extractedText.trim())
+    .slice(0, limit)
+    .map((doc) => ({
+      id: `uploaded-${doc.id}`,
+      text: `用户此前已交给系统的资料《${doc.fileName}》（已读取，共 ${doc.extractedText.length} 字，不必再向用户要）。开头：${doc.extractedText.trim().replace(/\s+/g, " ").slice(0, 300)}`
+    }));
+}
+
 export function createCaptureAnalyzer(store: CrosslineStore, workspaceId: string, cwd: string) {
   // A new worker cannot safely replay an interrupted turn. Retain its IDs for audit.
   for (const capture of store.listCaptures(workspaceId).filter((item) => item.state === "analyzing")) {
@@ -78,6 +93,7 @@ export function createCaptureAnalyzer(store: CrosslineStore, workspaceId: string
         // supplied text, and attachment content is not decoded or sent to the model at all. This just
         // lets it know material was actually supplied somewhere, instead of always reading as none.
         availableInputs: [
+          ...uploadedMaterialInputs(store, workspaceId),
           ...(capture.context.trim() ? [{ id: "capture-context", text: capture.context.trim() }] : []),
           ...(store.listCaptureAttachments(workspaceId, id).length
             ? [{ id: "capture-attachments", text: `用户上传了 ${store.listCaptureAttachments(workspaceId, id).length} 份附件，文件名：${

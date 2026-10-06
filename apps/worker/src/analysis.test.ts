@@ -178,3 +178,17 @@ test("a capture blocked only for want of an approved milestone is picked up agai
   store.saveMilestone({ id: "m", ownerId: "local-owner", workspaceId: "personal-crossline", identityId: "research", projectId: "p", title: "Decide", version: 3, status: "approved" });
   expect(analysis.capturesAwaitingAutoAnalysis(store, "personal-crossline")).toEqual(["c"]);
 });
+
+test("files the person already uploaded reach the analysis as supplied material, so it does not ask for them again", () => {
+  const ws = "personal-crossline";
+  store.saveSourceDocument({ id: "d1", ownerId: "o", workspaceId: ws, kind: "pdf", fileName: "ECE 548 syllabus.pdf", mediaType: "application/pdf", sha256: "1", uri: "file:///1",
+    extractedText: "Midterm 1  Oct 27\nChapters 1-4", extractionStatus: "done", createdAt: "2026-10-05T00:00:00.000Z" });
+  store.saveSourceDocument({ id: "d2", ownerId: "o", workspaceId: ws, kind: "pdf", fileName: "scan.pdf", mediaType: "application/pdf", sha256: "2", uri: "file:///2",
+    extractedText: "", extractionStatus: "failed", createdAt: "2026-10-05T00:00:00.000Z" });
+  const inputs = analysis.uploadedMaterialInputs(store, ws);
+  expect(inputs).toHaveLength(1);
+  expect(inputs[0]!.id).toBe("uploaded-d1");
+  expect(inputs[0]!.text).toContain("ECE 548 syllabus.pdf");
+  expect(inputs[0]!.text).toContain("Midterm 1 Oct 27 Chapters 1-4");
+  expect(inputs[0]!.text).toContain("不必再向用户要");
+});

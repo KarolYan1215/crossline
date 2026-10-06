@@ -7,8 +7,9 @@ const { loadPendingDateBatch, decideDateBatch } = await import("./imported-dates
 const { TEST_CTX } = await import("./test-support");
 
 let store: CrosslineStore;
-beforeEach(() => { store = new CrosslineStore(":memory:"); globalThis.crosslineStore = store; ensureSeeded(TEST_CTX); });
-afterEach(() => { store.close(); globalThis.crosslineStore = undefined; });
+// These fixtures describe a class that starts 2026-10-05; "only today and later" must be judged from that day, not the machine's.
+beforeEach(() => { vi.stubEnv("CROSSLINE_FIXED_NOW", "2026-10-05T12:00:00Z"); store = new CrosslineStore(":memory:"); globalThis.crosslineStore = store; ensureSeeded(TEST_CTX); });
+afterEach(() => { vi.unstubAllEnvs(); store.close(); globalThis.crosslineStore = undefined; });
 
 const extract = (batchId = "b1") => store.appendEvent({
   ownerId: TEST_CTX.principalId, workspaceId: TEST_CTX.workspaceId, idempotencyKey: `dates:extracted:${batchId}`, type: "dates.extracted", entityId: batchId,

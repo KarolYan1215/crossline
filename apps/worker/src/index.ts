@@ -9,6 +9,8 @@ import { createActivityTracker } from "./activity-recorder";
 import { createWindowsActivitySource } from "./activity-source";
 import { createNightlyFlywheel } from "./nightly";
 import { createDiligenceRunner, linesDueForDiligence } from "./diligence";
+import { createAgentService } from "./agent-service";
+import { createCalendarPublisher } from "./calendar-publish";
 import { budgetPolicy } from "@crossline/core";
 import { createFlywheelExpander } from "./flywheel";
 import { createManualbookBuilder, pendingMaterialWorkOrders } from "./manualbook";
@@ -75,6 +77,27 @@ const beat = (): void => {
   } catch { /* a missed heartbeat only costs a takeover after staleAfterMs; never worth crashing for */ }
 };
 
+/**
+ * Classifies the workspace's new captures. Run by the tick and, right after a capture is written, by the web app — so the person
+ * does not wait up to a tick (fifteen minutes) for something the system already knows how to do. One pass per workspace at a time.
+ */
+const autoAnalyzing = new Set<string>();
+async function autoAnalyzePass(workspaceId: string, checkedAt = new Date().toISOString()): Promise<void> {
+  if (!codexSupervisor || autoAnalyzing.has(workspaceId)) return;
+  autoAnalyzing.add(workspaceId);
+  try {
+    const ids = capturesAwaitingAutoAnalysis(analysisStore, workspaceId);
+    if (!ids.length) return;
+    const signal = await readCost();
+    if (!signal.available || budgetPolicy(Math.max(signal.short?.usedPercent ?? 0, signal.long?.usedPercent ?? 0)).mode !== "normal") return;
+    enterUsageWorkspace(workspaceId);
+    for (const id of ids) {
+      const outcome = await getCaptureAnalyzer(workspaceId)(codexSupervisor.client, id).catch(() => undefined);
+      if (outcome) console.info(JSON.stringify({ type: `analysis.auto.${outcome.state}`, checkedAt, workspaceId, captureId: id }));
+    }
+  } finally { autoAnalyzing.delete(workspaceId); }
+}
+
 async function tick(): Promise<void> {
   const checkedAt = new Date().toISOString();
   mkdirSync(dataDir, { recursive: true });
@@ -97,17 +120,7 @@ async function tick(): Promise<void> {
   // system's is to turn it into a proposal waiting in 待确认. Quota-gated (nothing runs unless the budget is normal) and capped
   // per tick; a capture that came back blocked is left for the person rather than retried on a timer.
   if (codexSupervisor) {
-    for (const workspace of workspaces) {
-      const ids = capturesAwaitingAutoAnalysis(analysisStore, workspace.id);
-      if (!ids.length) continue;
-      const signal = await readCost();
-      if (!signal.available || budgetPolicy(Math.max(signal.short?.usedPercent ?? 0, signal.long?.usedPercent ?? 0)).mode !== "normal") continue;
-      enterUsageWorkspace(workspace.id);
-      for (const id of ids) {
-        const outcome = await getCaptureAnalyzer(workspace.id)(codexSupervisor.client, id).catch(() => undefined);
-        if (outcome) console.info(JSON.stringify({ type: `analysis.auto.${outcome.state}`, checkedAt, workspaceId: workspace.id, captureId: id }));
-      }
-    }
+    for (const workspace of workspaces) await autoAnalyzePass(workspace.id, checkedAt);
   }
   // The milestone gate. Without this it existed only inside `scripts/gate-loop-check.ts`, so on the
   // real ledger a milestone-bound work order reached `evidence_review`, the approvals page said
@@ -139,6 +152,8 @@ async function tick(): Promise<void> {
       console.info(JSON.stringify({ type: "flywheel.nightly.skipped", checkedAt, workspaceId: workspace.id, code: decision.code }));
     }
     startDiligencePass(workspace.id, checkedAt);
+    // The assistant starts approved kinds of work by itself; it never holds the tick (its runs are detached).
+    if (codexSupervisor) await agentService.pass(workspace.id).catch(() => undefined);
   }
   // Bounded, and never able to wedge the tick: a health probe that neither errors nor fires its socket
   // timeout — which is what a web server killed mid-response looks like — would otherwise hold the
@@ -267,6 +282,18 @@ const getDiligence = (workspaceId: string) => {
   }
   return runner;
 };
+// The token session for writing to the Crossline calendar: the same cache as reading, asked for the calendar-write scopes only.
+// Made on first use so a machine that never enables writing never builds it.
+let calendarWriteSession: Promise<Awaited<ReturnType<typeof createGraphAuthSession>> | undefined> | undefined;
+const getCalendarWriteSession = () => calendarWriteSession ??= (async () => {
+  const clientId = process.env.CROSSLINE_MS_CLIENT_ID?.trim();
+  if (!clientId) return undefined;
+  return createGraphAuthSession({ clientId, ...(process.env.CROSSLINE_MS_TENANT_ID?.trim() ? { tenantId: process.env.CROSSLINE_MS_TENANT_ID.trim() } : {}), access: "calendar-write" });
+})().catch(() => undefined);
+const agentService = createAgentService({
+  store: analysisStore, repoRoot, getClient: () => codexSupervisor?.client, readCost: () => readCost(),
+  log: (event) => console.info(JSON.stringify({ ...event, checkedAt: new Date().toISOString() }))
+});
 const diligencePasses = new Set<string>();
 /**
  * The automatic research pass: once the interview is complete (or a report already exists, which makes this
@@ -470,9 +497,11 @@ if (!capabilitySecret) {
         "crossline:crossline-automation-stripper", "crossline:crossline-milestone-gate",
         "crossline:crossline-flywheel-scout", "crossline:crossline-manualbook-designer", "crossline:crossline-material-researcher", "crossline:crossline-material-writer", "crossline:crossline-milestone-architect",
         "crossline:crossline-goal-backplanner", "crossline:crossline-background-facts", "crossline:crossline-assistant",
-        "crossline:crossline-onboarding", "crossline:crossline-due-diligence", "crossline:crossline-plan-explainer", "crossline:crossline-weekly-insight"
+        "crossline:crossline-onboarding", "crossline:crossline-due-diligence", "crossline:crossline-plan-explainer", "crossline:crossline-weekly-insight",
+        "crossline:crossline-agent"
       ]
     },
+    autoAnalyzeCaptures: (workspaceId) => autoAnalyzePass(workspaceId),
     analyzeCapture: (client, id, signal, workspaceId) => getCaptureAnalyzer(workspaceId)(client, id, signal),
     // `workspaceId` is the real caller's, from its own verified capability token — not a hardcoded
     // constant, which is what left milestone proposal and goal backplanning invisible to any real
@@ -515,6 +544,12 @@ if (!capabilitySecret) {
     // orders the loop itself picks up.
     prepareMaterials: (workOrderId, workspaceId) => getMaterialPreparer(workspaceId)(workOrderId),
     judgeMilestone: (workOrderId, workspaceId) => getMilestoneGate(workspaceId)(workOrderId),
+    dispatchAgentTask: (workspaceId, workOrderId, category) => agentService.dispatch(workspaceId, workOrderId, category),
+    publishCalendar: async (workspaceId, blocks) => {
+      const session = await getCalendarWriteSession();
+      if (!session) return { state: "blocked", code: "GRAPH_NOT_CONFIGURED", message: "没有配置 Microsoft 日历（CROSSLINE_MS_CLIENT_ID）。" };
+      return createCalendarPublisher(analysisStore, workspaceId, { credentialFor: (accountId) => session.credentialFor(accountId) })(blocks);
+    },
     explainPlan: (today, workspaceId) => getPlanExplainer(workspaceId)(today),
     runWeeklyInsight: (workspaceId) => getWeeklyInsight(workspaceId)(),
     // Undefined when no client id is configured or nobody has signed in, in which case the route is

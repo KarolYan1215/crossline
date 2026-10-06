@@ -15,6 +15,7 @@ export * from "./analysis";
 export * from "./cost";
 export * from "./model-policy";
 export * from "./capability";
+export * from "./agent-mode";
 
 const record = (value: unknown): Record<string, unknown> | undefined =>
   typeof value === "object" && value !== null ? value as Record<string, unknown> : undefined;
@@ -25,6 +26,7 @@ export class JsonLineRpcClient {
   readonly #pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
   readonly #notificationHandlers = new Set<(message: Record<string, unknown>) => void>();
   #disconnectError: Error | undefined;
+  #serverRequestHandler: ((method: string, params: unknown) => unknown | Promise<unknown>) | undefined;
 
   constructor(writeLine: (line: string) => void) {
     this.#writeLine = writeLine;
@@ -42,6 +44,28 @@ export class JsonLineRpcClient {
     this.#writeLine(`${JSON.stringify(params === undefined ? { method } : { method, params })}\n`);
   }
 
+  /**
+   * Answers the runtime's own requests (approvals, permission asks, elicitations). They carry an `id` and a `method`, which is what tells
+   * them from a response to ours. Until a handler is set, or if it throws, the runtime gets an error back rather than silence: a run
+   * waiting on an approval nobody answers would otherwise sit there until its timeout.
+   */
+  onServerRequest(handler: (method: string, params: unknown) => unknown | Promise<unknown>): () => void {
+    this.#serverRequestHandler = handler;
+    return () => { if (this.#serverRequestHandler === handler) this.#serverRequestHandler = undefined; };
+  }
+
+  async #answerServerRequest(id: unknown, method: string, params: unknown): Promise<void> {
+    try {
+      if (!this.#serverRequestHandler) throw new Error("no handler for server requests");
+      const result = await this.#serverRequestHandler(method, params);
+      this.#writeLine(`${JSON.stringify({ id, result: result ?? {} })}
+`);
+    } catch (error) {
+      this.#writeLine(`${JSON.stringify({ id, error: { code: -32601, message: error instanceof Error ? error.message : "request refused" } })}
+`);
+    }
+  }
+
   onNotification(handler: (message: Record<string, unknown>) => void): () => void {
     this.#notificationHandlers.add(handler);
     return () => this.#notificationHandlers.delete(handler);
@@ -57,6 +81,8 @@ export class JsonLineRpcClient {
 
   receiveLine(line: string): void {
     const message = JSON.parse(line) as Record<string, unknown>;
+    // The method check comes first: a request from the runtime has an id of its own, which can equal one of ours still in flight.
+    if (message.id !== undefined && typeof message.method === "string") { void this.#answerServerRequest(message.id, message.method, message.params); return; }
     if (typeof message.id === "number") {
       const pending = this.#pending.get(message.id);
       if (!pending) return;
@@ -188,7 +214,7 @@ export async function startCodexAppServer(): Promise<{
   };
 }
 
-export type CodexRpcBoundary = Pick<JsonLineRpcClient, "request" | "onNotification">;
+export type CodexRpcBoundary = Pick<JsonLineRpcClient, "request" | "onNotification"> & Partial<Pick<JsonLineRpcClient, "onServerRequest">>;
 
 type CodexSidecar = {
   client: CodexRpcBoundary;
@@ -313,6 +339,12 @@ export async function startCodexSupervisor(options: {
   port?: number;
   sidecarFactory?: () => Promise<CodexSidecar>;
   analyzeCapture?: (client: CodexRpcBoundary, id: string, signal: AbortSignal, workspaceId: string) => Promise<unknown>;
+  /** The tick's classification of new captures, run now. The web app calls it right after a capture is written. */
+  autoAnalyzeCaptures?: (workspaceId: string) => Promise<unknown>;
+  /** Hands a work order to the assistant. Answers at once: the task runs on, and writes its own outcome to the ledger. */
+  dispatchAgentTask?: (workspaceId: string, workOrderId: string, category?: string) => unknown;
+  /** Writes plan blocks to the person's Crossline calendar. Only blocks; never touches any other calendar or event. */
+  publishCalendar?: (workspaceId: string, blocks: Array<{ id: string; title: string; start: string; end: string; note?: string }>) => Promise<unknown>;
   proposeMilestones?: (client: CodexRpcBoundary, request: string, signal: AbortSignal, workspaceId: string, only?: string[]) => Promise<unknown>;
   continueMilestoneConversation?: (client: CodexRpcBoundary, threadId: string, message: string, signal: AbortSignal, workspaceId: string) => Promise<unknown>;
   /** One turn of the profile interview: the person's message in, the saved turn out. The conversation and
@@ -475,6 +507,16 @@ export async function startCodexSupervisor(options: {
       }
       // Every Skill run this request starts is attributed to the workspace that asked for it.
       if (callerWorkspaceId) enterUsageWorkspace(callerWorkspaceId);
+      if (request.method === "POST" && pathname === "/v1/captures/auto-analyze" && options.autoAnalyzeCaptures) {
+        if (request.headers.origin || !request.headers["content-type"]?.startsWith("application/json")) {
+          sendJson(response, 403, { blocker: { code: "ANALYSIS_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
+          return;
+        }
+        if (runtimeBlocker) { sendJson(response, 503, { blocker: runtimeBlocker }); return; }
+        runDetached(() => options.autoAnalyzeCaptures!(callerWorkspaceId), () => {});
+        sendJson(response, 202, { started: true });
+        return;
+      }
       const analysisRoute = /^\/v1\/captures\/([a-zA-Z0-9_-]{1,128})\/analyze$/.exec(pathname);
       if (analysisRoute && options.analyzeCapture) {
         const id = analysisRoute[1]!;
@@ -634,6 +676,34 @@ export async function startCodexSupervisor(options: {
           sendJson(response, 502, { blocker: { code: "GRAPH_SYNC_FAILED",
             message: error instanceof Error ? error.message : "日历同步失败" } });
         } finally { syncing = false; }
+        return;
+      }
+      if (request.method === "POST" && pathname === "/v1/calendar/publish" && options.publishCalendar) {
+        if (request.headers.origin || !request.headers["content-type"]?.startsWith("application/json")) {
+          sendJson(response, 403, { blocker: { code: "CALENDAR_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
+          return;
+        }
+        const body = await readJsonBody(request);
+        const raw = Array.isArray(body?.blocks) ? body!.blocks as unknown[] : [];
+        const iso = (value: unknown) => typeof value === "string" && Number.isFinite(Date.parse(value));
+        const blocks = raw.flatMap((entry) => {
+          const row = (typeof entry === "object" && entry !== null ? entry : {}) as Record<string, unknown>;
+          return typeof row.id === "string" && row.id.length <= 200 && typeof row.title === "string" && row.title.length > 0 && iso(row.start) && iso(row.end) && Date.parse(row.end as string) > Date.parse(row.start as string)
+            ? [{ id: row.id, title: row.title.slice(0, 200), start: row.start as string, end: row.end as string, ...(typeof row.note === "string" ? { note: row.note.slice(0, 500) } : {}) }] : [];
+        }).slice(0, 300);
+        sendJson(response, 200, await options.publishCalendar(callerWorkspaceId, blocks));
+        return;
+      }
+      if (request.method === "POST" && pathname === "/v1/agent/dispatch" && options.dispatchAgentTask) {
+        if (request.headers.origin || !request.headers["content-type"]?.startsWith("application/json")) {
+          sendJson(response, 403, { blocker: { code: "AGENT_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
+          return;
+        }
+        if (runtimeBlocker) { sendJson(response, 503, { blocker: runtimeBlocker }); return; }
+        const body = await readJsonBody(request);
+        const workOrderId = typeof body?.workOrderId === "string" ? body.workOrderId : "";
+        if (!/^[a-zA-Z0-9_-]{1,128}$/.test(workOrderId)) { sendJson(response, 400, { blocker: { code: "AGENT_ORDER_INVALID", message: "缺少任务编号。" } }); return; }
+        sendJson(response, 200, options.dispatchAgentTask(callerWorkspaceId, workOrderId, typeof body?.category === "string" ? body.category : undefined));
         return;
       }
       if (request.method === "POST" && pathname === "/v1/milestones/propose" && options.proposeMilestones) {

@@ -5,6 +5,8 @@ import type { CodexRpcBoundary } from "./index";
 import { routeForSkill, tierForSkill, type ModelRoute, type SpendMode } from "./model-policy";
 import { createUsageCollector, currentSpendMode, reportUsage, type UsageCollector } from "./usage";
 
+import { registerAgentThread, type AgentMode } from "./agent-mode";
+
 export type AnalysisAudit = { threadId?: string; turnId?: string;
   /** How many times a turn went silent for so long it was interrupted and sent again. Absent means none did. */
   stalls?: number;
@@ -34,6 +36,8 @@ export type SkillRunOptions<T> = {
   timeoutMs?: number;
   /** Silence, in ms, after which a turn is treated as hung and sent again. Defaults to 20 minutes (`CROSSLINE_SKILL_IDLE_MINUTES`). */
   idleMs?: number;
+  /** Set for the assistant: a thread with a shell and file access, working in `agent.cwd`, whose requests the guard answers. */
+  agent?: AgentMode;
 };
 const record = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
@@ -66,7 +70,8 @@ type NativeSkill = { path: string; enabled: boolean };
  */
 const skillLanes = new Map<string, Promise<void>>();
 function serializeSkillRun<T>(skillName: string, run: () => Promise<T>): Promise<T> {
-  const lane = tierForSkill(skillName) ?? "default";
+  // The assistant gets a lane of its own: a task that runs for an hour must not hold the capture analysis or the gate behind it.
+  const lane = /crossline-agent$/.test(skillName) ? "agent" : tierForSkill(skillName) ?? "default";
   const previous = skillLanes.get(lane) ?? Promise.resolve();
   let release = () => {};
   skillLanes.set(lane, new Promise<void>((resolve) => { release = resolve; }));
@@ -239,6 +244,46 @@ async function requireLogin(scope: Scope): Promise<void> {
 }
 
 /**
+ * The assistant's thread: full access to the person's account, in the task's own directory, with every tool the runtime has. The
+ * approval policy is still `untrusted`, so each command that is not on the runtime's own short list of harmless ones comes to
+ * `agent.answer` first — that is the hook the guard rails hang on — and `web_search` is live. Nothing here is a sandbox; see
+ * `agent-guard.ts` for what the guard is and is not.
+ */
+async function startAgentThread<T>(scope: Scope, options: SkillRunOptions<T>, context: RunContext): Promise<string> {
+  const agent = options.agent!;
+  const config: Record<string, unknown> = {
+    web_search: "live", include_environment_context: true,
+    "memories.use_memories": false, "memories.generate_memories": false,
+    "features.shell_tool": true, "features.web_search": true, "features.standalone_web_search": true, "features.plugins": true,
+    "features.view_image": true, "features.apply_patch_freeform": true
+  };
+  const threadParams = {
+    cwd: agent.cwd, sandbox: "danger-full-access", approvalPolicy: "untrusted", approvalsReviewer: "user",
+    ephemeral: false, experimentalRawEvents: false, developerInstructions: options.developerInstructions,
+    ...(context.route ? { model: context.route.model } : {})
+  };
+  let started: Record<string, unknown> | undefined;
+  for (;;) {
+    try { started = record(await scope.rpc("thread/start", { ...threadParams, config })); break; }
+    catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      const field = /unknown configuration field `([^`]+)`/.exec(message)?.[1];
+      const dropped = field ? Object.keys(config).filter((key) => key === field || key.startsWith(`${field}.`)) : [];
+      if (!dropped.length) {
+        if (/configuration|unknown variant/i.test(message)) throw withDetail(new Error("SKILL_CONFIG_REJECTED"), message.slice(0, 400));
+        throw error;
+      }
+      for (const key of dropped) delete config[key];
+    }
+  }
+  const threadId = record(started?.thread)?.id;
+  if (!identifier(threadId)) fail("SKILL_PROTOCOL_INVALID");
+  // The thread must really be running with the approval policy the guard hangs on; with `never` nothing would ever ask.
+  if (started?.approvalPolicy !== "untrusted") fail("SKILL_PERMISSION_DENIED");
+  return threadId;
+}
+
+/**
  * Starts the one thread a fresh run uses, with everything that makes it safe to run unattended: read-only sandbox, the
  * `untrusted` approval policy, no tools but the one granted, no instruction files, no MCP servers. Returns its id.
  */
@@ -246,6 +291,7 @@ async function startIsolatedThread<T>(scope: Scope, options: SkillRunOptions<T>,
   const runtimeConfig = record(record(await scope.rpc("config/read", { includeLayers: false }))?.config);
   if (!runtimeConfig) fail("SKILL_PROTOCOL_INVALID");
   const mcp = record(runtimeConfig.mcp_servers) ?? {};
+  if (options.agent) return startAgentThread(scope, options, context);
   const config: Record<string, unknown> = {
     // "live", not "enabled": this runtime's `web_search` takes `disabled | cached | live`, and the
     // wrong variant made the whole thread/start fail — so the one Skill granted the web could never
@@ -314,7 +360,7 @@ async function startIsolatedThread<T>(scope: Scope, options: SkillRunOptions<T>,
  */
 async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, context: RunContext, audit: AnalysisAudit, run: {
   skillName: string; threadId: string; outputSchema: unknown; allowedItemTypes: string[]; firstPrompt: string;
-  validate: (output: unknown) => T; onAudit: (audit: AnalysisAudit) => void; idleMs?: number;
+  validate: (output: unknown) => T; onAudit: (audit: AnalysisAudit) => void; idleMs?: number; agent?: AgentMode;
 }): Promise<T> {
   audit.threadId = run.threadId;
   let finalText: string | undefined;
@@ -341,6 +387,9 @@ async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, con
       if (item?.type === "agentMessage" && message.method === "item/completed" && (item.phase === "final_answer" || item.phase === null)) {
         if (typeof item.text !== "string" || item.text.length > 100_000) settle?.reject(new Error("SKILL_SCHEMA_INVALID"));
         else finalText = item.text;
+      } else if (run.agent) {
+        // The assistant is meant to use tools; what it did is recorded, not refused here (the guard answers each request).
+        if (item) { try { run.agent.onItem(item, message.method === "item/started" ? "started" : "completed"); } catch { /* the audit must never fail the work */ } }
       } else if (item && !run.allowedItemTypes.includes(String(item.type))) settle?.reject(new Error("SKILL_TOOL_FORBIDDEN"));
     }
     if (message.method === "turn/completed") {
@@ -370,7 +419,7 @@ async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, con
     void completed.catch(() => {});
     const route = context.route;
     const turn = record(record(await scope.rpc("turn/start", {
-      threadId: run.threadId, environments: [], input: [{ type: "text", text, text_elements: [] }], outputSchema: run.outputSchema,
+      threadId: run.threadId, ...(run.agent ? {} : { environments: [] }), input: [{ type: "text", text, text_elements: [] }], outputSchema: run.outputSchema,
       // Re-stated every turn: a continued turn inherits the thread's model unless told otherwise.
       ...(route ? { model: route.model, ...(route.effort ? { effort: route.effort } : {}) } : {})
     }))?.turn);
@@ -494,6 +543,7 @@ async function runSkillTurn<T>(client: CodexRpcBoundary, input: unknown, options
   const allowedItemTypes = ["agentMessage", "reasoning", "userMessage",
     ...(options.allowWebSearch ? ["webSearch", "webSearchCall"] : [])];
   let scope: Scope | undefined;
+  let unregister: (() => void) | undefined;
   try {
     const prepared = options.prepareInput(input);
     scope = openScope(client, options);
@@ -501,12 +551,14 @@ async function runSkillTurn<T>(client: CodexRpcBoundary, input: unknown, options
     const threadId = await startIsolatedThread(scope, options, context);
     audit.threadId = threadId;
     options.onAudit({ ...audit });
+    if (options.agent) unregister = registerAgentThread(client, threadId, options.agent.answer);
     const output = await runTurnsUntilValid(client, scope, context, audit, {
       skillName: options.skillName, threadId, outputSchema: options.outputSchema, allowedItemTypes,
+      ...(options.agent ? { agent: options.agent } : {}),
       firstPrompt: `$${options.skillName}\n\n${JSON.stringify(prepared)}`,
       validate: (answer) => options.validateOutput(answer, prepared), onAudit: options.onAudit, ...(options.idleMs ? { idleMs: options.idleMs } : {})
     });
     return { ok: true, output, audit };
   } catch (error) { return failureResult<T>(client, error, audit); }
-  finally { scope?.dispose(); }
+  finally { unregister?.(); scope?.dispose(); }
 }

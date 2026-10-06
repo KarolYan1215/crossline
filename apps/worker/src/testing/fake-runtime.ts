@@ -21,21 +21,41 @@ import { JsonLineRpcClient } from "@crossline/codex";
  * returning the same broken thing" passes one answer, and a test that wants "broken, then fixed on the
  * repair turn" passes two.
  */
-export function fakeRuntime(answers: Array<string | ((prompts: string[]) => string)>, skillName: string, options: { lostThreads?: string[]; delayMs?: number; stallTurns?: number[]; usage?: { input: number; cached?: number; output: number; reasoning?: number } } = {}): {
+export type AgentScript = (tools: {
+  threadId: string; turnId: string;
+  /** A notification, as the runtime sends them (`item/started`, `item/completed`). */
+  emit: (message: object) => void;
+  /** A request from the runtime to the client, resolved with the client's answer. */
+  ask: (method: string, params: Record<string, unknown>) => Promise<Record<string, unknown>>;
+}) => Promise<void>;
+
+export function fakeRuntime(answers: Array<string | ((prompts: string[]) => string)>, skillName: string, options: { lostThreads?: string[]; delayMs?: number; stallTurns?: number[]; usage?: { input: number; cached?: number; output: number; reasoning?: number };
+  /** What the runtime does during a turn before it answers: tool items, and requests the client has to answer. */
+  script?: AgentScript; threadResponse?: Record<string, unknown> } = {}): {
   rpc: JsonLineRpcClient;
   turns: () => number;
   prompts: () => string[];
   interrupts: () => number;
+  /** The thread/start parameters the runner sent. */
+  threadStarts: () => Array<Record<string, unknown>>;
 } {
   let turns = 0;
   let interrupts = 0;
   let threads = 0;
   let threadId = "";
   const prompts: string[] = [];
+  const starts: Array<Record<string, unknown>> = [];
+  const pendingAsks = new Map<string, (value: Record<string, unknown>) => void>();
+  let askId = 0;
   const rpc = new JsonLineRpcClient((line) => {
-    const request = JSON.parse(line) as { id?: number; method: string; params?: Record<string, unknown> };
+    const request = JSON.parse(line) as { id?: number | string; method: string; params?: Record<string, unknown>; result?: Record<string, unknown>; error?: unknown };
+    // The client answering one of the runtime's requests.
+    if (request.method === undefined && request.id !== undefined) {
+      pendingAsks.get(String(request.id))?.((request.result ?? { error: request.error }) as Record<string, unknown>);
+      return;
+    }
     // Counted per thread, not per turn — that conflation is the bug this helper exists to fix.
-    if (request.method === "thread/start") threadId = `thread-${(threads += 1)}`;
+    if (request.method === "thread/start") { threadId = `thread-${(threads += 1)}`; starts.push(request.params ?? {}); }
     if (request.method === "turn/start" && options.lostThreads?.includes(String(request.params?.threadId))) {
       queueMicrotask(() => rpc.receiveLine(JSON.stringify({ id: request.id, error: { code: -32600, message: `thread not found: ${String(request.params?.threadId)}` } })));
       return;
@@ -46,7 +66,7 @@ export function fakeRuntime(answers: Array<string | ((prompts: string[]) => stri
       : request.method === "account/read" ? { account: { type: "chatgpt" } }
       : request.method === "config/read" ? { config: {} }
       : request.method === "thread/start"
-        ? { thread: { id: threadId }, approvalPolicy: "untrusted", sandbox: { type: "readOnly" }, instructionSources: [] }
+        ? { thread: { id: threadId }, approvalPolicy: "untrusted", sandbox: { type: "readOnly" }, instructionSources: [], ...(options.threadResponse ?? {}) }
         : { turn: { id: `turn-${turns + 1}`, status: "inProgress" } };
     queueMicrotask(() => rpc.receiveLine(JSON.stringify({ id: request.id, result })));
     if (request.method === "turn/start") {
@@ -60,7 +80,18 @@ export function fakeRuntime(answers: Array<string | ((prompts: string[]) => stri
       const entry = answers[turns - 1] ?? answers[answers.length - 1]!;
       // A function sees every prompt so far, for an answer that has to quote something only the run itself produced (a generated id).
       const text = typeof entry === "function" ? entry([...prompts]) : entry;
-      setTimeout(() => {
+      setTimeout(async () => {
+        if (options.script) {
+          await options.script({
+            threadId, turnId,
+            emit: (message) => rpc.receiveLine(JSON.stringify(message)),
+            ask: (method, params) => new Promise((resolve) => {
+              const id = `ask-${(askId += 1)}`;
+              pendingAsks.set(id, resolve);
+              rpc.receiveLine(JSON.stringify({ id, method, params: { threadId, turnId, ...params } }));
+            })
+          });
+        }
         if (options.usage) {
           const u = options.usage;
           const breakdown = { totalTokens: u.input + u.output, inputTokens: u.input, cachedInputTokens: u.cached ?? 0, cacheWriteInputTokens: 0, outputTokens: u.output, reasoningOutputTokens: u.reasoning ?? 0 };
@@ -73,7 +104,7 @@ export function fakeRuntime(answers: Array<string | ((prompts: string[]) => stri
       }, options.delayMs ?? 1);
     }
   });
-  return { rpc, turns: () => turns, prompts: () => prompts, interrupts: () => interrupts };
+  return { rpc, turns: () => turns, prompts: () => prompts, interrupts: () => interrupts, threadStarts: () => starts };
 }
 
 const FIXTURES = path.join(import.meta.dirname, "fixtures");

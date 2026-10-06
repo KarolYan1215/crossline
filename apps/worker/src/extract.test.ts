@@ -69,3 +69,28 @@ test("a Word table keeps each row on one line with its cells separated", () => {
   expect(text).toContain("Date | Topic");
   expect(text).toContain("9/4 | Intro & VLSI");
 });
+
+test("a dated table says which column each marker is under, so a quiz is not read as a homework", () => {
+  const cell = (str: string, x: number, y: number, width = str.length * 5) => ({ str, x, y, width });
+  // The ECE 555 schedule's shape: 「Quiz」 / 「Homework(Out, Due)」 / 「Project」 headings, rows led by a date.
+  const page = layoutPage([
+    cell("Tentative Agenda", 150, 640), cell("Quiz", 460, 640), cell("Homework", 570, 640), cell("Project", 745, 640),
+    cell("Date", 85, 620), cell("Topic", 200, 620), cell("Out", 555, 620), cell("Due", 630, 620),
+    cell("9/21", 85, 590), cell("CMOS Fabrication / Layout", 150, 590), cell("#1", 482, 590),
+    cell("9/28", 85, 570), cell("DC Inverter", 150, 570), cell("#2", 558, 570), cell("#1", 633, 570),
+    cell("10/9", 85, 550), cell("Review/Slack", 150, 550), cell("#2", 482, 550), cell("Out", 722, 550),
+    cell("12/7", 85, 530), cell("Final Exam (in class)", 150, 530)
+  ]);
+  const row = (date: string) => page.split("\n").find((line) => line.trim().startsWith(date))!;
+  expect(row("9/21")).toContain("[列 Quiz=#1]");
+  expect(row("9/28")).toContain("Homework Out=#2");
+  expect(row("9/28")).toContain("Homework Due=#1");
+  expect(row("10/9")).toContain("Quiz=#2");
+  expect(row("10/9")).toContain("Project=Out");
+  expect(row("12/7")).not.toContain("[列");
+});
+
+test("prose and pages without a dated table get no column notes", () => {
+  const cell = (str: string, x: number, y: number) => ({ str, x, y, width: str.length * 5 });
+  expect(layoutPage([cell("GRADING", 10, 100), cell("Homework: 20%", 10, 80), cell("Quizzes: 30%", 10, 60)])).not.toContain("[列");
+});

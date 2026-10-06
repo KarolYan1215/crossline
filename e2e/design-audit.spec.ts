@@ -8,7 +8,7 @@ import { expect, test, type Page } from "@playwright/test";
  * Disabled controls and text that is hidden on purpose (visibility, opacity 0) are exempt from contrast: WCAG exempts inactive
  * controls, and a hidden element is not read.
  */
-const PAGES = ["/", "/milestones", "/plan", "/workbench", "/approvals", "/settings", "/onboarding"];
+const PAGES = ["/", "/milestones", "/plan", "/workbench", "/approvals", "/settings", "/onboarding", "/assistant"];
 
 type Finding = { selector: string; text: string; detail: string };
 
@@ -92,5 +92,18 @@ for (const path of PAGES) {
     expect.soft(found.contrast, "text under 7:1 contrast").toEqual([]);
     // The page itself must not scroll sideways (a deliberately scrollable inner region is fine).
     expect.soft(found.overflow, `horizontal overflow on ${testInfo.project.name}: ${found.wide.join("; ")}`).toBeLessThanOrEqual(1);
+  });
+}
+
+// A 1280px window hid this once: a page whose content has a fixed minimum width (the milestone flow chart is ~1130px) scrolled the
+// whole page sideways on an ordinary laptop window, and neither the desktop nor the phone width noticed. Only the inner region may scroll.
+for (const path of PAGES) {
+  test(`${path} does not scroll sideways in a 1000px laptop window`, async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name.includes("mobile"), "the phone width is covered above");
+    await page.setViewportSize({ width: 1000, height: 800 });
+    await page.goto(path);
+    await page.waitForLoadState("networkidle");
+    const found = await audit(page);
+    expect(found.overflow, `horizontal overflow at 1000px: ${found.wide.join("; ")}`).toBeLessThanOrEqual(1);
   });
 }

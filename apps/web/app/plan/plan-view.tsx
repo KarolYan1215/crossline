@@ -46,6 +46,8 @@ export function PlanView({ plan, calendar }: { plan: PlanVersionData; calendar: 
   const [approvalState, setApprovalState] = useState<"idle" | "saving" | "error">("idle");
   const [syncState, setSyncState] = useState<"idle" | "syncing" | "done" | "error">("idle");
   const [syncNote, setSyncNote] = useState("");
+  const [publishState, setPublishState] = useState<"idle" | "publishing" | "done" | "error">("idle");
+  const [publishNote, setPublishNote] = useState("");
   const pending = plan.changes.filter((change) => change.status === "pending");
 
   const syncNow = async () => {
@@ -61,6 +63,21 @@ export function PlanView({ plan, calendar }: { plan: PlanVersionData; calendar: 
     if (body.changes && body.changes > 0) { window.location.reload(); return; }
     setSyncNote("日历没有变化");
     setSyncState("done");
+  };
+  // Writes only the blocks the scheduler placed, and only to the calendar named Crossline. Only an approved plan is written; the route enforces it.
+  const publish = async () => {
+    setPublishState("publishing");
+    const response = await fetch("/api/calendar/publish", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }).catch(() => undefined);
+    const body = await response?.json().catch(() => undefined) as { state?: string; message?: string; code?: string;
+      result?: { created: number; updated: number; deleted: number; unchanged: number; keptAsEdited: string[] } } | undefined;
+    if (!response?.ok || (body?.state && body.state !== "published")) {
+      setPublishNote(body?.message ?? (body?.code === "CALENDAR_PUBLISH_UNAVAILABLE" || !response ? "worker 不可用" : body?.code ?? "写入失败"));
+      setPublishState("error");
+      return;
+    }
+    const r = body?.result;
+    setPublishNote(r ? `Crossline 日历：新增 ${r.created}、调整 ${r.updated}、移除 ${r.deleted}、不变 ${r.unchanged}${r.keptAsEdited.length ? `；${r.keptAsEdited.length} 条被你手动改过，保持原样` : ""}。` : "已写入。");
+    setPublishState("done");
   };
   const resolve = async (changeId: string, status: "approved" | "excluded") => {
     const response = await fetch(`/api/plans/changes/${encodeURIComponent(changeId)}`, {
@@ -85,6 +102,12 @@ export function PlanView({ plan, calendar }: { plan: PlanVersionData; calendar: 
         {syncState === "syncing" ? "读取日历中…" : syncState === "error" ? "同步失败，重试" : "立即同步日历"}
       </button>
       {syncState === "done" && <span role="status" className="plan-sync-note">{syncNote}</span>}
+      {/* The one place the app writes to a calendar: a separate calendar named Crossline, events it made itself. */}
+      <button type="button" className="plan-sync" disabled={publishState === "publishing" || plan.status !== "approved"} onClick={publish}
+        title={plan.status === "approved" ? "只写入名为 Crossline 的单独日历；你自己的日历不会被改动" : "计划批准后才能写入"}>
+        {publishState === "publishing" ? "写入中…" : publishState === "error" ? "写入失败，重试" : "同步到 Crossline 日历"}
+      </button>
+      {(publishState === "done" || publishState === "error") && <span role="status" className="plan-sync-note">{publishNote}</span>}
     </div>
 
     {plan.schedule && <section className="schedule-status" role="status">

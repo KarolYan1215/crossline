@@ -93,7 +93,10 @@ export function buildProposalContext(store: CrosslineStore, workspaceId: string,
   options: { requireChains?: boolean; replaceUntouchedDrafts?: boolean; now?: () => Date } = {}): MilestoneProposalContext {
   // Drafts nobody has touched are about to be replaced, so they are not precedent to avoid duplicating: left in, the model could
   // not reuse a title it had just been asked to improve on.
-  const milestones = store.listMilestones(workspaceId).filter((milestone) => !(options.replaceUntouchedDrafts && isUntouchedDraft(milestone)));
+  // An archived milestone is retired, not precedent: a real run read 「已有归档里程碑覆盖最终投稿」 and left the paper's 10/31 submission
+  // out, because the archived copies of exactly those milestones (retired by the previous design) were still in its list of what exists.
+  const milestones = store.listMilestones(workspaceId).filter((milestone) => milestone.status !== "archived"
+    && !(options.replaceUntouchedDrafts && isUntouchedDraft(milestone)));
   const facts = store.listProfileFacts(workspaceId);
   const identities = defaultIdentityPacks().filter((pack) => pack.kind === "identity");
   const now = options.now?.() ?? (process.env.CROSSLINE_FIXED_NOW ? new Date(process.env.CROSSLINE_FIXED_NOW) : new Date());
@@ -273,7 +276,7 @@ export function createMilestoneProposer(store: CrosslineStore, workspaceId: stri
     // Only the lines that got new drafts lose their old untouched ones: a line that failed keeps what the person already had.
     supersedeUntouchedDrafts(store, workspaceId, new Set(drafts.map((draft) => draft.id)), new Set(drafts.map((draft) => draft.identityId)));
     for (const item of skipped) assumptions.push(`「${labelOf(context, item.identityId)}」这条线这次没有生成：${item.message}`);
-    for (const identityId of thinLines(context, lines)) assumptions.push(`「${labelOf(context, identityId)}」这条线目前说得太少，或只有推断、没有你确认过的事实，先没有排里程碑；在「先了解你」里补充或确认后再设计。`);
+    for (const identityId of thinLines(context, allLines).filter((id) => !only?.length || only.includes(id))) assumptions.push(`「${labelOf(context, identityId)}」这条线目前说得太少，或只有推断、没有你确认过的事实，先没有排里程碑；在「先了解你」里补充或确认后再设计。`);
 
     try { await proposeRelations(client, context, drafts, signal); } catch { /* a failed link run never takes the milestones with it */ }
     return { state: "proposed", drafts, assumptions, ...(skipped.length ? { skipped } : {}), ...(lastThread ? { threadId: lastThread } : {}) };

@@ -340,3 +340,12 @@ test("changing one course's target redoes only its line", async () => {
   expect(await propose("", undefined, ["research"])).toMatchObject({ state: "proposed" });
   expect(turns()).toBe(1);
 });
+
+test("a milestone that was archived is not offered to the architect as something that already exists", () => {
+  seedProfile();
+  const base = { ownerId: "o", workspaceId: WORKSPACE, identityId: "research", projectId: "westlake", version: 1 };
+  store.saveMilestone({ ...base, id: "kept", title: "西湖论文投出", status: "approved" });
+  store.saveMilestone({ ...base, id: "retired", title: "西湖论文完成投稿", status: "archived" });
+  const titles = buildProposalContext(store, WORKSPACE, "", { requireChains: true, replaceUntouchedDrafts: true, now: NOW }).existingMilestones.map((milestone) => milestone.title);
+  expect(titles).toEqual(["西湖论文投出"]);
+});
