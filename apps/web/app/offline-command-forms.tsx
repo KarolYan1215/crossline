@@ -120,7 +120,7 @@ export function OfflineCaptureForm({ ownerId, workspaceId }: { ownerId: string; 
       <span className="sr-only">附件</span>
       <input ref={fileInputRef} name="attachments" type="file" multiple accept={ACCEPTED_ATTACHMENT_TYPES}
         onChange={onInputChange} />
-      <small>{fileNames.length ? `已选 ${fileNames.length} 个：${fileNames.join("、")}` : "拖文件到这里，或 Ctrl+V 粘贴截图/文件"}</small>
+      <small>{fileNames.length ? `已选 ${fileNames.length} 个：${fileNames.join("、")}` : "也可以拖文件进来，或粘贴截图"}</small>
     </label>
     <button className="secondary-button" type="submit">收集</button>
     {status && <small className="muted" role="status">{status}</small>}

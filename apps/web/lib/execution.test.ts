@@ -138,3 +138,14 @@ test("revoking auto-acceptance twice on the same work order works both times", (
   expect(store.listWorkOrders(TEST_CTX.workspaceId)[0]?.state).toBe("evidence_review");
   expect(store.listEvidenceClaims(TEST_CTX.workspaceId)[0]?.reviewStatus).toBe("submitted");
 });
+
+// Every backplanned step has an empty material contract; counting an approved one as "not ready" left 「下一步」 empty with five
+// approved orders on the real board.
+test("an approved order that needs no materials is ready to start; one that needs them is not until they are prepared", async () => {
+  const { inputsReady } = await import("./crossline");
+  expect(inputsReady({ state: "approved", payload: { materialContract: [] } })).toBe(true);
+  expect(inputsReady({ state: "approved", payload: {} })).toBe(true);
+  expect(inputsReady({ state: "approved", payload: { materialContract: [{ kind: "file" }] } })).toBe(false);
+  expect(inputsReady({ state: "preparing", payload: {} })).toBe(false);
+  expect(inputsReady({ state: "ready_for_human", payload: { materialContract: [{ kind: "file" }] } })).toBe(true);
+});

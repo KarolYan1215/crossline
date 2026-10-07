@@ -57,7 +57,9 @@ export function countAssistantPending(ctx: AccessContext): { categories: number;
 /** What the Workbench says about handing one order over: whether it can go, as which kind, and what it would be told. */
 export type AssistantOffer =
   | { available: false; reason: string }
-  | { available: true; category: AgentCategory | undefined; categoryLabel: string; categoryAllowed: boolean; why: string; graded: boolean; humanPart: string };
+  | { available: true; category: AgentCategory | undefined; categoryLabel: string; categoryAllowed: boolean; why: string; graded: boolean; humanPart: string;
+      /** The whole order is handed over (whole-task delegation), not just the analysis's AI part. */
+      delegated: boolean };
 
 export function assistantOffer(ctx: AccessContext, workOrderId: string): AssistantOffer {
   const store = getStore();
@@ -66,7 +68,8 @@ export function assistantOffer(ctx: AccessContext, workOrderId: string): Assista
   const { plan } = planned;
   return {
     available: true, category: plan.category, categoryLabel: plan.category ? AGENT_CATEGORIES[plan.category] : "", why: plan.why,
-    categoryAllowed: plan.category ? Boolean(readCategories(store, ctx.workspaceId)[plan.category]) : false, graded: plan.graded, humanPart: plan.humanPart
+    categoryAllowed: plan.category ? Boolean(readCategories(store, ctx.workspaceId)[plan.category]) : false, graded: plan.graded, humanPart: plan.humanPart,
+    delegated: plan.delegated
   };
 }
 

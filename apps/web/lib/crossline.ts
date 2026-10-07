@@ -972,6 +972,12 @@ export function discardCapture(ctx: AccessContext, captureId: string, reason: st
   }
 }
 
+/** Whether the person could start this order now without waiting for materials (see `plannerTaskOf`). */
+export function inputsReady(order: { state: string; payload: unknown }): boolean {
+  if (order.state === "ready_for_human" || order.state === "active") return true;
+  return order.state === "approved" && !((order.payload as { materialContract?: unknown[] } | undefined)?.materialContract ?? []).length;
+}
+
 export function startWorkOrderExecution(ctx: AccessContext, workOrderId: string, at?: string): ExecutionResult {
   const store = getStore();
   const workOrder = findWorkOrder(ctx.workspaceId, workOrderId);
@@ -1140,8 +1146,10 @@ const plannerTaskOf = (ctx: AccessContext, order: ActionableOrder) => {
     id: order.id, title: order.intent, identityId: order.identityId, milestoneId: order.milestoneId,
     estimate: resolvedEstimate(ctx, order),
     ...(core?.energy ? { energy: core.energy as "low" | "medium" | "high" } : {}),
-    // Materials stand between the proposal and the human until the order reaches ready_for_human.
-    inputsReady: order.state === "ready_for_human" || order.state === "active",
+    // Materials stand between the proposal and the human until the order reaches ready_for_human — when it needs any. An approved
+    // order with no material contract can be started as it is (`startWorkOrderExecution` passes straight through), and every
+    // backplanned step is one: counting them as not ready left 「下一步」 empty with five approved orders on the board.
+    inputsReady: inputsReady(order),
     // A byproduct's landing never outranks real work: lowest tier, with its own T+2 window once the main order is done.
     deadlineTier: (landing ? 4 : tier) as 1 | 2 | 3 | 4,
     ...(goal?.confirmedDeadline && preferences ? {
@@ -1345,7 +1353,7 @@ const toAction = (ctx: AccessContext, order: ActionableOrder | undefined, reason
   ...(humanCoreOf(order)?.energy ? { energy: humanCoreOf(order)!.energy as "low" | "medium" | "high" } : {}),
   reason,
   milestone: getStore().listMilestones(ctx.workspaceId).find((item) => item.id === order.milestoneId)?.title ?? "等待确认",
-  inputsReady: order.state === "ready_for_human" || order.state === "active"
+  inputsReady: inputsReady(order)
 }) : undefined;
 
 // `taskDetailById`/`milestoneDetailById` are deliberately not part of this return type: they're batched
