@@ -68,6 +68,10 @@ export default async function ApprovalsPage() {
         <b>{riskLabel[item.riskTier] ?? item.riskTier}</b></header>
       <h2>{item.intent}</h2>
       <p>{lineLabels[item.identityId] ?? item.identityId}{milestone ? ` · 为「${milestone.title}」` : ""} · 通常 {estimate.p50Minutes} 分，宽一点 {estimate.p85Minutes} 分{deadline ? ` · 最晚 ${deadline}` : ""}{slotOf.get(item.id) ? ` · 建议 ${slotOf.get(item.id)}` : ""}</p>
+      {(proposal.byproducts ?? []).map((byproduct) => <p key={byproduct.lineId} className="byproduct-line">
+        顺带 → {lineLabels[byproduct.lineId] ?? byproduct.lineId} · {byproduct.artifact}
+        <small>（过程中多记 {byproduct.captureSteps.reduce((sum, step) => sum + step.minutes, 0)} 分，做完后落地 {byproduct.landing.minutes} 分；批准后自动排上，不要可在「最近自动生效」撤销）</small>
+      </p>)}
       {milestone?.verifiability === "unstated"
         && <p role="note" className="seed-notice">绑定的里程碑还没有达成标准：验收只按下面的「必需」证据判定。<a href="/milestones"> 去补充 →</a></p>}
       <details className="fold"><summary>你要做的、分步与依据</summary>

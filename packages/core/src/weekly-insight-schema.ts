@@ -16,6 +16,11 @@ export type WeeklyInsightContext = {
   notificationEvents: Array<{ id: string; type: string; entityId: string; createdAt: string }>;
   planChanges: Array<{ id: string; kind: string; status: string }>;
   approvedMilestones: Array<{ id: string; identityId: string; title: string }>;
+  /**
+   * Byproducts — what one line's work also produced for another — planned, landed (accepted) and missed (still
+   * open more than two days after their main work was done) this week. The flywheel, counted.
+   */
+  byproducts?: { planned: number; landed: number; missed: number; items: Array<{ id: string; lineId: string; artifact: string; status: "planned" | "landed" | "missed" }> };
 };
 
 export type InsightProposal = {

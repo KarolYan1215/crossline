@@ -36,6 +36,9 @@ export type TaskDetail = {
   automationParts: Array<{ id: string; intent: string; quote?: string; rationale?: string }>;
   /** Focused minutes by step; their sum is the analysis's median. Empty for an order with no breakdown. */
   estimateBreakdown: Array<{ step: string; minutes: number }>;
+  /** What this work also produces for other lines, and — on a landing order — the main order it came from. */
+  byproducts: Array<{ lineId: string; artifact: string; landingMinutes: number }>;
+  byproductOf?: string;
   materialContract: Array<{ kind: string; description: string; why: string; required: boolean }>;
   evidenceContract: Array<{ kind: string; description: string; why: string; required: boolean }>;
   /** Pre-generated completion-time questions copied from the bound milestone at `plan.approved` — see
@@ -140,6 +143,7 @@ function assembleTaskDetail(ctx: AccessContext, order: StoredWorkOrder, deps: {
     evidenceChecklist?: TaskDetail["evidenceChecklist"];
     humanCore?: TaskDetail["humanCore"]; automationParts?: TaskDetail["automationParts"];
     estimateBreakdown?: TaskDetail["estimateBreakdown"];
+    byproducts?: Array<{ lineId: string; artifact: string; landing: { minutes: number } }>; byproductOf?: string;
     blocker?: { reason: string }; gateReview?: TaskDetail["gateReview"];
   };
   const { label: identityLabel, accent } = identityInfo(order.identityId);
@@ -159,6 +163,8 @@ function assembleTaskDetail(ctx: AccessContext, order: StoredWorkOrder, deps: {
     ...(deps.milestone ? { milestone: { id: deps.milestone.id, title: deps.milestone.title } } : {}),
     humanCore: payload.humanCore ?? [], automationParts: payload.automationParts ?? [],
     estimateBreakdown: payload.estimateBreakdown ?? [],
+    byproducts: (payload.byproducts ?? []).map((item) => ({ lineId: item.lineId, artifact: item.artifact, landingMinutes: item.landing.minutes })),
+    ...(payload.byproductOf ? { byproductOf: payload.byproductOf } : {}),
     materialContract: payload.materialContract ?? [], evidenceContract: payload.evidenceContract ?? [],
     evidenceChecklist: payload.evidenceChecklist ?? [],
     preparedMaterials: deps.materials.map((item) => ({ id: item.id, uri: item.uri, fileName: item.uri.split("/").pop() ?? item.uri, mediaType: item.mediaType })),

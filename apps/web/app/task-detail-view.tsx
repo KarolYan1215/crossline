@@ -73,6 +73,14 @@ export function TaskDetailView({ detail }: { detail: TaskDetail }) {
       {detail.estimateBreakdown.length > 0 && <p><small>分步：{detail.estimateBreakdown.map((step) => `${step.step} ${step.minutes} 分钟`).join("；")}</small></p>}
     </section>}
 
+    {(detail.byproducts.length > 0 || detail.byproductOf) && <section>
+      <h3>顺带产出</h3>
+      {detail.byproductOf && <p>这是 <a href={`/workbench/${encodeURIComponent(detail.byproductOf)}`}>主任务</a> 的顺带产出：主任务做完后两天内落地，用它的材料和过程记录。</p>}
+      <ul className="task-detail-contract">{detail.byproducts.map((item) => <li key={item.lineId}>
+        <span>{item.lineId} · {item.artifact}</span><small>做完后落地约 {item.landingMinutes} 分钟</small>
+      </li>)}</ul>
+    </section>}
+
     {detail.automationParts.length > 0 && <section>
       <h3>AI 准备的</h3>
       <ul className="task-detail-contract">{detail.automationParts.map((part) => <li key={part.id}>

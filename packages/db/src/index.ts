@@ -1064,6 +1064,7 @@ export class CrosslineStore {
       // exactly one template (or one Skill call), so it is already small and already specific to that
       // milestone; a relevance filter would add real complexity for no signal it can actually act on
       // with today's data shape. Revisit if a bank ever grows from multiple merged sources.
+      if (!isCapture && event.type === "plan.approved") this.#materializeByproducts(workspaceId, current as StoredWorkOrder);
       if (!isCapture && event.type === "plan.approved") {
         const milestoneId = (current as StoredWorkOrder).milestoneId;
         const milestone = milestoneId ? this.getMilestone(workspaceId, milestoneId) : undefined;
@@ -1218,6 +1219,41 @@ export class CrosslineStore {
         type: "capture.promoted_manually", entityId: captureId, payload: { workOrderId: workOrder.id } });
       return { ok: true };
     }).immediate();
+  }
+
+  /**
+   * When a work order with byproducts is approved, each byproduct becomes its own small landing order on the
+   * other line: it depends on the main order (it is scheduled after it, never in its way), carries its own
+   * evidence for its own milestone (the gate judges each separately, so nothing is counted twice), and takes
+   * effect by itself — inside the machine, reversible, recorded as `work_order.auto_approved` with the one-day
+   * undo every default-effective order has. Created once per (main order, line); re-approving changes nothing.
+   */
+  #materializeByproducts(workspaceId: string, primary: StoredWorkOrder): void {
+    const byproducts = ((primary.payload as { byproducts?: Array<{ lineId: string; milestoneId: string; artifact: string;
+      landing: { minutes: number; description: string }; why: string }> } | undefined)?.byproducts) ?? [];
+    if (!byproducts.length) return;
+    const existing = new Set(this.listWorkOrders(workspaceId).map((order) => order.id));
+    const milestones = new Map(this.listMilestones(workspaceId).map((milestone) => [milestone.id, milestone]));
+    for (const byproduct of byproducts) {
+      const id = `landing-${primary.id}-${byproduct.lineId}`.slice(0, 128);
+      if (existing.has(id)) continue;
+      const minutes = Math.max(5, Math.round(byproduct.landing.minutes));
+      const milestone = byproduct.milestoneId ? milestones.get(byproduct.milestoneId) : undefined;
+      this.saveWorkOrder({ id, ownerId: primary.ownerId, workspaceId, identityId: byproduct.lineId,
+        projectId: milestone?.projectId ?? `${byproduct.lineId}-default`, milestoneId: milestone ? milestone.id : "",
+        intent: `落地：${byproduct.artifact}`.slice(0, 200), state: "approved", riskTier: "routine",
+        estimate: { p25Minutes: Math.max(1, Math.round(minutes * 0.7)), p50Minutes: minutes, p85Minutes: Math.round(minutes * 1.6),
+          source: "llm_prior", observationCount: 0, confidence: "low" },
+        payload: { family: "preparation", byproductOf: primary.id, inheritsFrom: primary.id, dependsOn: [primary.id],
+          contextVersion: (primary.payload as { contextVersion?: string } | undefined)?.contextVersion ?? "",
+          humanCore: [{ id: `${id}-core`, intent: byproduct.landing.description, energy: "medium", interruptible: true }],
+          automationParts: [], materialContract: [],
+          evidenceContract: [{ kind: "record", description: byproduct.artifact.slice(0, 280), why: byproduct.why.slice(0, 280), required: true }] } });
+      this.appendEvent({ ownerId: primary.ownerId, workspaceId, idempotencyKey: `work_order.auto_approved:${id}`, type: "work_order.auto_approved",
+        entityId: id, payload: { reason: `「${primary.intent.slice(0, 40)}」的顺带产出，排在它之后` } });
+      this.appendEvent({ ownerId: primary.ownerId, workspaceId, idempotencyKey: `byproduct.planned:${id}`, type: "byproduct.planned",
+        entityId: id, payload: { primaryId: primary.id, lineId: byproduct.lineId, milestoneId: milestone?.id ?? "", artifact: byproduct.artifact } });
+    }
   }
 
   #openExecution(workspaceId: string, workOrderId: string):

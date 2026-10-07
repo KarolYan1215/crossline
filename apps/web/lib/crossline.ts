@@ -1105,17 +1105,19 @@ const plannerTaskOf = (ctx: AccessContext, order: ActionableOrder) => {
   const tier = preferences ? goal?.confirmedDeadline ? important ? 1 : 2 : important ? 3 : 4
     : order.state === "approved" ? 3 : order.identityId === PRIMARY_CLOCK_ID ? 1 : 2;
   const core = humanCoreOf(order);
-  const dependsOn = (order.payload as { dependsOn?: string[] }).dependsOn;
-  const release = releaseDayOf(ctx, order);
   const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
-  const dueDate = (order.payload as { dueDate?: string }).dueDate;
+  const landing = byproductLanding(ctx, order);
+  const dependsOn = landing ? landing.dependsOn : (order.payload as { dependsOn?: string[] }).dependsOn;
+  const release = releaseDayOf(ctx, order);
+  const dueDate = landing?.dueDate ?? (order.payload as { dueDate?: string }).dueDate;
   return {
     id: order.id, title: order.intent, identityId: order.identityId, milestoneId: order.milestoneId,
     estimate: resolvedEstimate(ctx, order),
     ...(core?.energy ? { energy: core.energy as "low" | "medium" | "high" } : {}),
     // Materials stand between the proposal and the human until the order reaches ready_for_human.
     inputsReady: order.state === "ready_for_human" || order.state === "active",
-    deadlineTier: tier as 1 | 2 | 3 | 4,
+    // A byproduct's landing never outranks real work: lowest tier, with its own T+2 window once the main order is done.
+    deadlineTier: (landing ? 4 : tier) as 1 | 2 | 3 | 4,
     ...(goal?.confirmedDeadline && preferences ? {
       deadline: toZonedInstant(goal.confirmedDeadline, "23:59", preferences.timeZone) }
       // The capture's own 「10月21号前」, when the milestone has no confirmed deadline of its own.
@@ -1158,6 +1160,22 @@ export function suggestedSessionMinutes(ctx: AccessContext, workOrderId: string,
     .filter((segment) => !segment.idle && PRODUCTIVE.has(segment.category as ActivityCategory))
     .reduce((sum, segment) => sum + Math.max(0, Math.min(Date.parse(segment.end), now.getTime()) - Math.max(Date.parse(segment.start), from)) / 60_000, 0);
   return minutes >= 5 ? Math.round(minutes) : undefined;
+}
+
+/**
+ * A byproduct's landing order (see `#materializeByproducts`): it waits for its main order to be *done* — handed in,
+ * not necessarily judged — and then has the same day to two days after to land, while the material is fresh.
+ */
+export function byproductLanding(ctx: AccessContext, order: { payload: unknown }): { dependsOn: string[]; dueDate?: string } | undefined {
+  const primaryId = (order.payload as { byproductOf?: string } | undefined)?.byproductOf;
+  if (!primaryId) return undefined;
+  const store = getStore();
+  const primary = store.listWorkOrders(ctx.workspaceId).find((item) => item.id === primaryId);
+  if (!primary || !["evidence_review", "accepted"].includes(primary.state)) return { dependsOn: [primaryId] };
+  const doneAt = store.listExecutions(ctx.workspaceId, primaryId).map((execution) => execution.endedAt).filter((at): at is string => Boolean(at)).sort().at(-1);
+  const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
+  const doneDay = doneAt ? formatInTimeZone(new Date(doneAt), zone, "yyyy-MM-dd") : planToday(ctx);
+  return { dependsOn: [], dueDate: new Date(Date.parse(`${doneDay}T00:00:00Z`) + 2 * 86_400_000).toISOString().slice(0, 10) };
 }
 
 export function releaseDayOf(ctx: AccessContext, order: { id: string; payload: unknown }): string | undefined {
