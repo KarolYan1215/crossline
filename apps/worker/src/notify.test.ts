@@ -22,6 +22,9 @@ test("nothing before the day starts, nothing twice, a daily cap, and nothing at 
   expect(planNotifications({ ...base, level: "less" }).map((item) => item.kind)).toEqual(["brief"]);
   expect(planNotifications({ ...base, urgentSentToday: 2, sent: new Set(["brief:2026-10-08"]) })).toEqual([]);
   expect(planNotifications({ ...base, level: "off" })).toEqual([]);
+  // The brief is a morning thing: not sent for the first time at 20:12.
+  expect(planNotifications({ ...base, clock: "20:12", weekday: 4, windows: [...windows, { days: [4], start: "19:30", end: "23:00", energy: "high" }] })
+    .filter((item) => item.kind === "brief")).toEqual([]);
   // Outside working hours, only the brief (if not yet sent) — no single messages at 21:00.
   expect(planNotifications({ ...base, clock: "21:00", sent: new Set(["brief:2026-10-08"]) })).toEqual([]);
 });

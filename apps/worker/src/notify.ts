@@ -41,7 +41,11 @@ export function planNotifications(input: NotifyInput): PlannedNotification[] {
   const out: PlannedNotification[] = [];
   const start = firstStart(input);
   const briefKey = `brief:${input.today}`;
-  if (start && input.clock >= start && !input.sent.has(briefKey)) {
+  // A morning brief belongs to the morning: from the first available hour for four hours. Turned on at 20:00 for the
+  // first time (the day this was deployed), it used to send "today's" brief in the evening.
+  const [h, m] = (start ?? "00:00").split(":").map(Number);
+  const briefEnd = `${String(Math.min(23, h! + 4)).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+  if (start && input.clock >= start && input.clock < briefEnd && !input.sent.has(briefKey)) {
     const lines = [
       ...input.waitingDue.map((item) => `今天该到：${item.who ? `${item.who}的` : ""}${item.title}`),
       ...input.dueSoon.map((item) => `${item.daysLeft === 0 ? "今天" : `${item.daysLeft} 天后`}到期：${item.title}`)
