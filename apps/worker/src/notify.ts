@@ -112,9 +112,13 @@ const localParts = (now: Date, zone: string) => {
     weekday: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(String(parts.weekday)) };
 };
 
-/** One pass for one workspace: reads what it needs, plans, delivers, and records each sent message once. */
+/**
+ * One pass for one workspace. Each message goes to the desktop (`deliver`) and, when `push` is given, to the person's subscribed
+ * phones; it is recorded as sent if either reached them, so a laptop that is closed does not make the phone ask again later.
+ */
 export async function notifyPass(store: CrosslineStore, workspaceId: string, now: Date,
-  deliver: (title: string, body: string, url: string) => Promise<boolean> = showToast, baseUrl = "http://127.0.0.1:3210"): Promise<string[]> {
+  deliver: (title: string, body: string, url: string) => Promise<boolean> = showToast, baseUrl = "http://127.0.0.1:3210",
+  push?: (workspaceId: string, message: { title: string; body: string; path: string; tag: string }) => Promise<boolean>): Promise<string[]> {
   const level = (store.getSetting(workspaceId, NOTIFY_LEVEL_SETTING) as NotifyLevel | undefined) ?? "normal";
   let zone = process.env.CROSSLINE_TIME_ZONE?.trim() || "America/Chicago";
   try { zone = (JSON.parse(store.getSetting(workspaceId, "schedule.preferences") ?? "null") as { timeZone?: string } | null)?.timeZone || zone; } catch { /* default */ }
@@ -148,7 +152,9 @@ export async function notifyPass(store: CrosslineStore, workspaceId: string, now
   });
   const delivered: string[] = [];
   for (const item of planned) {
-    if (!(await deliver(item.title, item.body, `${baseUrl}${item.path}`))) continue;
+    const [desktop, phone] = await Promise.all([deliver(item.title, item.body, `${baseUrl}${item.path}`),
+      push ? push(workspaceId, { title: item.title, body: item.body, path: item.path, tag: item.key }).catch(() => false) : Promise.resolve(false)]);
+    if (!desktop && !phone) continue;
     store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `notify:${item.key}`, type: "notification.sent", entityId: workspaceId,
       payload: { key: item.key, kind: item.kind, day: today, title: item.title } });
     delivered.push(item.key);

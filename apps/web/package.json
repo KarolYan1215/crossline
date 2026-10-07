@@ -12,6 +12,7 @@
   "dependencies": {
     "@crossline/auth": "workspace:*",
     "@crossline/codex": "workspace:*",
+    "@crossline/connectors": "workspace:*",
     "@crossline/core": "workspace:*",
     "@crossline/db": "workspace:*",
     "@crossline/identity-packs": "workspace:*",

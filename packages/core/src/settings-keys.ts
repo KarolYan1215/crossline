@@ -14,3 +14,5 @@ export const CALENDAR_PUBLISH_FAILURE = "calendar.publish.failure";
  * worker's notifications read this so the brief, the badge and the urgent messages count the same things.
  */
 export const ATTENTION_SNAPSHOT = "attention.snapshot";
+/** The person's devices that receive push notifications (`PushSubscriptionRecord[]`, see packages/connectors/src/web-push.ts). */
+export const PUSH_SUBSCRIPTIONS = "push.subscriptions";

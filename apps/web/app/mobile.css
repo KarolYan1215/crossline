@@ -22,3 +22,5 @@
   /* The 问答 bubble floated over the page's own links; on a phone it sits just above the tab bar, small, at the edge. */
   .assistant-bubble{bottom:calc(60px + env(safe-area-inset-bottom));right:8px;padding:6px 10px;min-height:44px}
 }
+.phone-push{border-top:1px solid var(--mist);margin-top:10px;padding-top:8px;display:grid;gap:6px}
+.phone-push ul{margin:0;padding-left:18px}

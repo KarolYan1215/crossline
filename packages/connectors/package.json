@@ -3,12 +3,19 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "exports": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./web-push": "./src/web-push.ts"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "@azure/msal-node": "^6.0.0",
-    "@azure/msal-node-extensions": "^5.5.0"
+    "@azure/msal-node-extensions": "^5.5.0",
+    "web-push": "^3.6.7"
+  },
+  "devDependencies": {
+    "@types/web-push": "^3.6.4"
   }
 }

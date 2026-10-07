@@ -3,6 +3,7 @@ import { AvailabilityEditor } from "../plan/availability-editor";
 import { LocalActivityToggle } from "./local-activity-toggle";
 import { UsageCard } from "./usage-card";
 import { NotifyLevel } from "./notify-level";
+import { PhonePush } from "./phone-push";
 import { EffectivenessCard } from "./effectiveness-card";
 import { loadEffectiveness } from "../../lib/effectiveness";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
@@ -68,9 +69,11 @@ export default async function SettingsPage() {
             <li>手机上打开 Tailscale App，确认已连接（和这台电脑同一个账号）。</li>
             <li>用 Safari 打开上面的地址并登录。</li>
             <li>点分享按钮 →「添加到主屏幕」：之后它像一个独立 App 一样全屏打开。</li>
+            <li>从主屏幕的图标打开，到这里点「在这台设备上开启推送」。</li>
           </ol>
+          <PhonePush />
           <p className="muted">这台电脑需要开着、Crossline 在运行（已设为开机自启，每 15 分钟自检一次）。离线时收集的内容会先存在手机上，联网后自动同步。
-            手机上的提醒来自名为 Crossline 的日历：在 iPhone 的 Outlook 或系统日历里登录同一个 Outlook 账号即可收到工作块和截止提醒。</p>
+            工作块开始前和截止前的提醒另外来自名为 Crossline 的日历：在 iPhone 的 Outlook 里登录同一个账号即可收到。</p>
         </div>
         : <p className="muted">还没开启手机访问：需要在这台电脑上把 <code>CROSSLINE_DEPLOYMENT_MODE</code> 设为 <code>private</code>、填上 <code>CROSSLINE_TAILSCALE_HOSTNAME</code>，并运行 <code>tailscale serve</code>。步骤见 docs/private-network-deployment.md。</p>}
     </details>

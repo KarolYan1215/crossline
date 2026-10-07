@@ -67,3 +67,15 @@ test("a pass reads the web's snapshot while it is fresh and its own reading once
   expect(shown[0]![1]).toContain("7 件等你决定");
   expect(shown.map(([title]) => title)).toContain("「MoS₂」可能赶不上 10/9");
 });
+
+test("each message also goes to the phone, and counts as sent if only the phone got it", async () => {
+  const store = new CrosslineStore(":memory:");
+  store.setSetting("w", "schedule.availability", JSON.stringify(windows));
+  const pushed: string[] = [];
+  const now = new Date("2026-10-08T14:10:00Z");
+  const sent = await notifyPass(store, "w", now, async () => false, "http://127.0.0.1:3210",
+    async (_ws, message) => { pushed.push(`${message.title}|${message.path}`); return true; });
+  expect(pushed[0]).toBe("今天的 Crossline|/");
+  expect(sent).toEqual(["brief:2026-10-08"]);
+  expect(store.listEvents("w", { type: "notification.sent" })).toHaveLength(1);
+});

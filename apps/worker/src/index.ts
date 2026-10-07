@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { enterUsageWorkspace, setSpendModeProvider, setUsageSink, startCodexSupervisor, type CodexSupervisor } from "@crossline/codex";
-import { CrosslineStore } from "@crossline/db";
+import { CrosslineStore, listPushSubscriptions, removePushSubscriptions } from "@crossline/db";
 import { capturesAwaitingAutoAnalysis, createCaptureAnalyzer } from "./analysis";
 import { autoApproveEligible } from "./auto-approval";
 import { retireShadowedDemos } from "./demo-cleanup";
@@ -31,7 +31,7 @@ import { createGraphSync, type SyncOutcome } from "./graph-sync";
 import {
   buildSources, calendarLabel, listCatalogue, readSelection, saveSelection, seedNewAccounts, sourceKey
 } from "./calendar-sources";
-import { createGraphAuthSession, GraphReadSource, type GraphCredentialProvider } from "@crossline/connectors";
+import { createGraphAuthSession, GraphReadSource, loadVapidKeys, sendWebPush, type GraphCredentialProvider } from "@crossline/connectors";
 
 const repoRoot = path.resolve(import.meta.dirname, "../../..");
 // The worker runs with its own package as cwd, and nothing else here reads .env files — so without
@@ -626,6 +626,16 @@ if (process.env.CROSSLINE_RUN_ONCE === "1") {
   // an overlapping one costs duplicated Codex spend and a corrupted cursor.
   // Notifications run on their own short clock, not inside the tick: a tick can spend an hour preparing
   // materials, and a morning brief that arrives at noon is not a morning brief. Reads only; never overlaps.
+  // The person's phones (Web Push through the platform's push service, encrypted for the device; see packages/connectors/src/web-push.ts).
+  // Devices the service reports gone are dropped, so a removed home-screen app is not retried every two minutes.
+  const pushToPhones = async (workspaceId: string, message: { title: string; body: string; path: string; tag: string }): Promise<boolean> => {
+    const devices = listPushSubscriptions(analysisStore, workspaceId);
+    if (!devices.length) return false;
+    const keys = loadVapidKeys(dataDir);
+    const results = await Promise.all(devices.map((device) => sendWebPush(device, message, keys)));
+    removePushSubscriptions(analysisStore, workspaceId, devices.filter((_, index) => results[index] === "gone").map((device) => device.endpoint));
+    return results.includes("sent");
+  };
   let notifying = false;
   if (process.env.CROSSLINE_NOTIFY !== "off") setInterval(() => {
     if (notifying) return;
@@ -633,7 +643,7 @@ if (process.env.CROSSLINE_RUN_ONCE === "1") {
     void (async () => {
       for (const workspace of analysisStore.listWorkspaces()) {
         try {
-          const sent = await notifyPass(analysisStore, workspace.id, new Date());
+          const sent = await notifyPass(analysisStore, workspace.id, new Date(), undefined, undefined, pushToPhones);
           if (sent.length) console.info(JSON.stringify({ type: "notification.sent", workspaceId: workspace.id, sent }));
         } catch { /* a notification is never worth a crash */ }
       }
