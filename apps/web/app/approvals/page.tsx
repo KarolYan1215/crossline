@@ -2,7 +2,8 @@ import { ensureSeeded, getStore, loadCurrentPlan, resolvedEstimate } from "../..
 import { estimateBasis } from "../../lib/estimate-label";
 import { riskLabel } from "../../lib/labels";
 import { SubpageShell } from "../subpage-shell";
-import { AcceptEvidenceButton, ApproveProposalButton, JudgeMilestoneButton } from "./approval-actions";
+import { AcceptEvidenceButton, ApproveLineDraftsButton, ApproveProposalButton, JudgeMilestoneButton, ProposalBatchForm, RevokeAutoApprovalButton } from "./approval-actions";
+import { recentAutoApprovals } from "../../lib/approvals";
 import type { AnalysisProposal } from "@crossline/core";
 import { permissionCandidates, permissionModeEnabled } from "../../lib/permission-mode";
 import { PermissionModePanel } from "./permission-mode-panel";
@@ -13,6 +14,8 @@ import { countPending } from "../../lib/pending";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 
 export const dynamic = "force-dynamic";
+
+const FIRST_PROPOSALS = 5;
 
 export default async function ApprovalsPage() {
   const ctx = await requireSessionContext();
@@ -45,8 +48,44 @@ export default async function ApprovalsPage() {
   const lineLabels: Record<string, string> = Object.fromEntries(defaultIdentityPacks().map((pack) => [pack.id, pack.label]));
   const executions = getStore().listExecutions(ctx.workspaceId);
   const taskDetails = loadTaskDetailsBatch(ctx, [...evidenceReviews, ...proposals].map((item) => item.id));
+  const autoApproved = recentAutoApprovals(ctx);
+  // Soonest milestone deadline first: the queue is read top-down, and five is about what a person decides
+  // well in one sitting — the rest wait folded instead of lengthening the page.
+  const deadlineOf = (milestoneId: string) => anchors.get(milestoneId)?.deadline ?? "9999-12-31";
+  const sortedProposals = [...proposals].sort((a, b) => deadlineOf(a.milestoneId).localeCompare(deadlineOf(b.milestoneId)));
+  const slotOf = new Map(plan.blocks.filter((block) => block.id.startsWith("proposed:"))
+    .map((block) => [block.id.split(":")[1]!, `${block.day?.slice(5) ?? ""} ${block.start}`]));
+  const renderProposal = (item: (typeof proposals)[number]) => {
+    const proposal = item.payload as AnalysisProposal & { audit: { threadId: string; turnId: string }; contextVersion: string };
+    const estimate = resolvedEstimate(ctx, item);
+    const steps = proposal.estimateBreakdown ?? [];
+    const milestone = milestoneById.get(item.milestoneId);
+    const deadline = anchors.get(item.milestoneId)?.deadline;
+    return <article key={item.id} className="proposal-card">
+      <a className="card-cover-link" href={`/workbench/${encodeURIComponent(item.id)}`} aria-label={item.intent} />
+      <TaskPreview detail={taskDetails.get(item.id)} />
+      <header><label className="proposal-check"><input type="checkbox" name="proposal" value={item.id} defaultChecked /> 勾选</label>
+        <b>{riskLabel[item.riskTier] ?? item.riskTier}</b></header>
+      <h2>{item.intent}</h2>
+      <p>{lineLabels[item.identityId] ?? item.identityId}{milestone ? ` · 为「${milestone.title}」` : ""} · 通常 {estimate.p50Minutes} 分，宽一点 {estimate.p85Minutes} 分{deadline ? ` · 最晚 ${deadline}` : ""}{slotOf.get(item.id) ? ` · 建议 ${slotOf.get(item.id)}` : ""}</p>
+      {milestone?.verifiability === "unstated"
+        && <p role="note" className="seed-notice">绑定的里程碑还没有达成标准：验收只按下面的「必需」证据判定。<a href="/milestones"> 去补充 →</a></p>}
+      <details className="fold"><summary>你要做的、分步与依据</summary>
+        <p><small>{estimateBasis(estimate)}</small></p>
+        {steps.length > 0 && <p><small>分步：{steps.map((step) => `${step.step} ${step.minutes} 分钟`).join("；")}</small></p>}
+        <h3>你要做的</h3>{proposal.humanCore.map((part) => <p key={part.id}>{part.intent} — 依据「{part.quote}」：{part.rationale}</p>)}
+        {proposal.automationParts.length > 0 && <><h3>AI 准备的</h3>{proposal.automationParts.map((part) => <p key={part.id}>{part.intent} — 依据「{part.quote}」：{part.rationale}</p>)}</>}
+        <h3>材料与证据要求</h3>{[...proposal.materialContract, ...proposal.evidenceContract].map((contract, index) => <p key={index}>
+          {({ file: "文件", link: "链接", record: "记录", telemetry: "遥测" } as Record<string, string>)[contract.kind] ?? contract.kind} · {contract.description}{"required" in contract && contract.required ? " · 必需" : ""}
+          {contract.why ? <><br /><small>为什么需要：{contract.why}</small></> : ""}
+        </p>)}
+        <p><small>AI 草拟，等你确认 · {proposal.contextVersion} · thread {proposal.audit.threadId}</small></p>
+      </details>
+      <ApproveProposalButton workOrderId={item.id} />
+    </article>;
+  };
   return <SubpageShell active="待确认" title="待确认"
-    description={pending.total ? `${pending.total} 件事在等你决定。每一项都不会自己生效。` : "没有等你决定的事。"}>
+    description={pending.total ? `${pending.total} 件事在等你决定。内部、可撤销的准备工作会自己生效（一天内可撤销），其余都等你点头。` : "没有等你决定的事。"}>
     <section className="pending-list" aria-label="待确认汇总">
       {([
         ["作业方案", pending.workOrders, "#proposals"], ["计划差异", pending.planChanges, "/plan#plan-changes"],
@@ -56,6 +95,14 @@ export default async function ApprovalsPage() {
       ] as const).filter(([, count]) => count > 0).map(([label, count, href]) =>
         <a key={label} className="panel" href={href}><b>{count}</b><span>{label}</span></a>)}
     </section>
+    {autoApproved.length > 0 && <section className="pending-block" aria-label="最近自动生效">
+      <h2>最近自动生效 · {autoApproved.length}</h2>
+      <p className="review-note">这些是内部、可撤销的准备工作，系统替你批准了；一天内不想要就撤销，它会回到这里等你决定，且不会再自动生效。</p>
+      <ul>{autoApproved.map((item) => <li key={item.id}>
+        <a href={`/workbench/${encodeURIComponent(item.id)}`}>{item.intent}</a>
+        {item.undoable ? <RevokeAutoApprovalButton workOrderId={item.id} /> : <small> · 已开始做</small>}
+      </li>)}</ul>
+    </section>}
     <details className="fold" open={permissionModeEnabled(ctx)}>
       <summary>默认批准（可选）：低风险的变化在前台停留 5 分钟后自动采纳</summary>
       <PermissionModePanel initialEnabled={permissionModeEnabled(ctx)} initialCandidates={permissionCandidates(ctx)} />
@@ -64,11 +111,18 @@ export default async function ApprovalsPage() {
         page that says 「29 件事在等你」 listed two of them. */}
     {draftMilestones.length > 0 && <section className="pending-block" aria-label="里程碑草稿">
       <h2>里程碑草稿 · {draftMilestones.length}</h2>
-      <p className="review-note">分析和闸门只认已批准的里程碑，所以不批准，新收集的任务就没有地方挂。草稿是 AI 按你的画像提的，改标题、日期、标准都可以。</p>
-      <ul>{draftMilestones.map((milestone) => <li key={milestone.id} data-line={milestone.identityId}>
-        <b>{lineLabels[milestone.identityId] ?? milestone.identityId}</b> · {milestone.title}
-        <small> · {anchors.get(milestone.id)?.deadline ? `最晚 ${anchors.get(milestone.id)!.deadline}` : "无截止"}</small>
-      </li>)}</ul>
+      <p className="review-note">里程碑是对你自己的承诺，所以要你点头。整条线一次接受后，系统会自动倒推三周内到期的那几个的前几步，排进本周；想改标题、日期或标准，去「主线」逐个改。</p>
+      {[...new Set(draftMilestones.map((milestone) => milestone.identityId))].map((line) => {
+        const own = draftMilestones.filter((milestone) => milestone.identityId === line);
+        return <div key={line} className="line-drafts" data-line={line}>
+          <ul>{own.map((milestone) => <li key={milestone.id}>
+            <b>{lineLabels[milestone.identityId] ?? milestone.identityId}</b> · {milestone.title}
+            <small> · {anchors.get(milestone.id)?.deadline ? `最晚 ${anchors.get(milestone.id)!.deadline}` : "无截止"}</small>
+          </li>)}</ul>
+          <ApproveLineDraftsButton ids={own.map((milestone) => milestone.id)}
+            label={`接受${lineLabels[line] ?? line}的 ${own.length} 个草稿`} />
+        </div>;
+      })}
       <a className="secondary-button" href="/milestones">去「主线」批准或修改 →</a>
     </section>}
     {pending.planChanges > 0 && <section className="pending-block" aria-label="计划差异">
@@ -125,37 +179,12 @@ export default async function ApprovalsPage() {
             : <AcceptEvidenceButton workOrderId={item.id} />}</article>;
       })}
     </section>
-    <section className="work-order-list" id="proposals">{proposals.map((item) => {
-      const proposal = item.payload as AnalysisProposal & { audit: { threadId: string; turnId: string }; contextVersion: string };
-      return <article key={item.id}>
-        <a className="card-cover-link" href={`/workbench/${encodeURIComponent(item.id)}`} aria-label={item.intent} />
-        <TaskPreview detail={taskDetails.get(item.id)} />
-        <header><span>AI 方案 · 待批准</span><b>{riskLabel[item.riskTier] ?? item.riskTier}</b></header>
-        <h2>{item.intent}</h2>
-        <p>结构和输入引用已校验；语义仍需人工判断。尚未批准、排程或执行。</p>
-        <p>{defaultIdentityPacks().find((pack) => pack.id === item.identityId)?.label ?? item.identityId}{milestoneById.get(item.milestoneId) ? ` · 服务于「${milestoneById.get(item.milestoneId)!.title}」` : ""}</p>
-        {milestoneById.get(item.milestoneId)?.verifiability === "unstated"
-          && <p role="note" className="seed-notice">这条作业绑定的里程碑还没有达成标准：验收只按下面的「必需」证据要求判定，里程碑自身的进度不会被记录。<a href="/milestones"> 去补充达成标准 →</a></p>}
-        {(() => {
-          const estimate = resolvedEstimate(ctx, item);
-          const steps = proposal.estimateBreakdown ?? [];
-          return <p>估时：通常 {estimate.p50Minutes} 分钟，宽一点 {estimate.p25Minutes}–{estimate.p85Minutes} 分钟 · {estimateBasis(estimate)}
-            {steps.length > 0 && <><br /><small>分步：{steps.map((step) => `${step.step} ${step.minutes} 分钟`).join("；")}</small></>}</p>;
-        })()}
-        <h3>人工核心</h3>{proposal.humanCore.map((part) => <p key={part.id}>{part.intent} — 依据「{part.quote}」：{part.rationale}</p>)}
-        {/* A proposal is judged on what falls to the person; the rest is one click away rather than a wall of text under every card. */}
-        <details className="fold"><summary>AI 做什么、要哪些材料（{[...proposal.materialContract, ...proposal.evidenceContract].filter((contract) => "required" in contract && contract.required).length} 项必需）</summary>
-        <h3>AI 准备提案</h3>{proposal.automationParts.map((part) => <p key={part.id}>{part.intent} — 依据「{part.quote}」：{part.rationale}</p>)}
-        {/* The reason travels with the item. Approving 「数据增强的具体参数记录」 without knowing why this
-            work order needs it is the same guess as approving a relation with no stated claim. */}
-        <h3>材料与证据要求</h3>{[...proposal.materialContract, ...proposal.evidenceContract].map((contract, index) => <p key={index}>
-          {({ file: "文件", link: "链接", record: "记录", telemetry: "遥测" } as Record<string, string>)[contract.kind] ?? contract.kind} · {contract.description}{"required" in contract && contract.required ? " · 必需" : ""}
-          {contract.why ? <><br /><small>为什么需要：{contract.why}</small></> : ""}
-        </p>)}
-        </details>
-        <details><summary>分析审计</summary><p>{proposal.contextVersion} · thread {proposal.audit.threadId} · turn {proposal.audit.turnId}</p></details>
-        <ApproveProposalButton workOrderId={item.id} />
-      </article>;
-    })}</section>
+    {proposals.length > 0 && <ProposalBatchForm count={proposals.length}>
+      <section className="work-order-list" id="proposals">{sortedProposals.slice(0, FIRST_PROPOSALS).map(renderProposal)}</section>
+      {sortedProposals.length > FIRST_PROPOSALS && <details className="fold">
+        <summary>以后再说 · 还有 {sortedProposals.length - FIRST_PROPOSALS} 个（截止更远或没有截止）</summary>
+        <section className="work-order-list">{sortedProposals.slice(FIRST_PROPOSALS).map(renderProposal)}</section>
+      </details>}
+    </ProposalBatchForm>}
   </SubpageShell>;
 }

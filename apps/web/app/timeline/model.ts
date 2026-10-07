@@ -11,7 +11,7 @@ export type TimelineItem = {
   day: string;
   /** `HH:MM`, 24 hour. */
   start: string; end: string;
-  kind: "calendar" | "scheduled" | "import" | "activity";
+  kind: "calendar" | "scheduled" | "proposed" | "import" | "activity";
   /** The line this belongs to, when it belongs to one. Calendar events from outside do not. */
   identityId?: string;
   milestone?: string;
@@ -111,12 +111,14 @@ export function conflictingIds(items: Array<{ id: string; start: string; end: st
 type PlanBlock = { id: string; lane: "human" | "ai"; title: string; day?: string; start: string; end: string; source: string; readOnly: boolean };
 export type WorkOrderMeta = { identityId: string; milestone?: string };
 
-/** Turns the plan's blocks into timeline items. `scheduled:<workOrderId>[:n]` blocks pick up their line and milestone. */
+/** Turns the plan's blocks into timeline items. `scheduled:<workOrderId>[:n]` blocks pick up their line and milestone; a
+ * `proposed:` block is where a proposal still waiting for approval would go, drawn as a preview. */
 export function itemsFromPlan(blocks: PlanBlock[], today: string, meta: Record<string, WorkOrderMeta>): TimelineItem[] {
   return blocks.map((block) => {
-    const workOrderId = block.id.startsWith("scheduled:") ? block.id.split(":")[1] : undefined;
+    const proposed = block.id.startsWith("proposed:");
+    const workOrderId = block.id.startsWith("scheduled:") || proposed ? block.id.split(":")[1] : undefined;
     const known = workOrderId ? meta[workOrderId] : undefined;
-    const kind: TimelineItem["kind"] = workOrderId ? "scheduled" : block.id.startsWith("import:") ? "import" : "calendar";
+    const kind: TimelineItem["kind"] = proposed ? "proposed" : workOrderId ? "scheduled" : block.id.startsWith("import:") ? "import" : "calendar";
     return {
       id: block.id, title: block.title, day: block.day ?? today, start: block.start, end: block.end, kind,
       ...(known ? { identityId: known.identityId } : {}), ...(known?.milestone ? { milestone: known.milestone } : {}),

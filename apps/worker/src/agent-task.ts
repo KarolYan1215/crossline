@@ -171,7 +171,9 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
     const pendingChanges = new Map<string, string[]>();
     const startedAt = Date.now();
     store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:requested:${taskId}`, type: "agent.task.requested", entityId: taskId,
-      payload: { taskId, title: input.title, category: input.category, workOrderId: input.workOrderId ?? "", inputs, humanPart: input.humanPart, ...(worktree ? { worktree } : {}) } });
+      payload: { taskId, title: input.title, category: input.category, workOrderId: input.workOrderId ?? "", inputs, humanPart: input.humanPart, ...(worktree ? { worktree } : {}),
+        // Taken up because the order took effect by itself (nobody clicked approve): the review card says so.
+        ...(input.workOrderId && store.listEvents(workspaceId, { type: "work_order.auto_approved", entityId: input.workOrderId }).length ? { autoApproved: true } : {}) } });
 
     const task = { taskId, title: input.title, what: input.what, category: input.category, directory, inputs, humanPart: input.humanPart,
       ...(worktree ? { worktree: { path: worktree, branch: `ai/${taskId}` } } : {}), ...(input.deadline ? { deadline: input.deadline } : {}), ...(input.notes ? { notes: input.notes } : {}) };

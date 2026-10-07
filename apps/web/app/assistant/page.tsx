@@ -64,6 +64,7 @@ export default async function AssistantPage() {
       {review.map((task) => <article key={task.taskId} className="assistant-task" data-status={task.status}>
         <h3>{task.title}</h3>
         <p className="muted">{AGENT_CATEGORIES[task.category]} · 用时 {minutes(task.durationMs)}{task.workOrderId && <> · <a href={`/workbench/${encodeURIComponent(task.workOrderId)}`}>对应任务</a></>}{!task.checksPassed && " · 它自己的检查没有全过"}</p>
+        {task.autoApproved && <p role="note" className="seed-notice">这项作业是自动生效的（你没有点批准），助手随后接手做了。不合适就退回：这一类会回到每次都要你过目。</p>}
         <TaskBody ctx={ctx} task={task} />
         <ReviewButtons taskId={task.taskId} />
       </article>)}

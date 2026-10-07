@@ -55,7 +55,7 @@ export function CalendarPanel({ items, deadlines, today, nowIso, timeZone, label
     {selected && <aside className="cal-detail" data-line={selected.identityId ?? "none"} aria-live="polite">
       <b>{selected.title}</b>
       <span>{selected.day} {selected.start}–{selected.end}</span>
-      <span>{selected.kind === "scheduled" ? "排程器安排" : selected.kind === "import" ? "来自导入的文件" : "来自日历"} · {selected.source}</span>
+      <span>{selected.kind === "scheduled" ? "排程器安排" : selected.kind === "proposed" ? "预览：批准后会排在这里" : selected.kind === "import" ? "来自导入的文件" : "来自日历"} · {selected.source}</span>
       {selected.identityId && <span>{labels[selected.identityId] ?? selected.identityId}{selected.milestone ? ` → ${selected.milestone}` : ""}</span>}
       {selected.workOrderId && <a href={`/workbench/${encodeURIComponent(selected.workOrderId)}`}>打开任务 →</a>}
       <button type="button" onClick={() => setSelected(undefined)}>关闭</button>

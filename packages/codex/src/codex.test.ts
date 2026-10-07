@@ -162,6 +162,24 @@ describe("Codex app-server boundary", () => {
     } finally { await supervisor.stop(); }
   });
 
+  test("working back from newly approved milestones answers at once, runs in the background, and refuses a browser origin", async () => {
+    const sidecar = fakeSidecar();
+    let runs = 0;
+    const supervisor = await codexModule.startCodexSupervisor({
+      port: 0, sidecarFactory: async () => sidecar.handle,
+      autoBackplanGoals: async () => { runs += 1; throw new Error("the pass failing must not take the supervisor down"); }
+    });
+    try {
+      const response = await fetch(`${supervisor.url}/v1/goals/auto-backplan`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+      expect(response.status).toBe(202);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(runs).toBe(1);
+      const forged = await fetch(`${supervisor.url}/v1/goals/auto-backplan`, { method: "POST", headers: { "content-type": "application/json", origin: "https://evil.example" }, body: "{}" });
+      expect(forged.status).toBe(403);
+      expect(runs).toBe(1);
+    } finally { await supervisor.stop(); }
+  });
+
   test("startup installs the local plugin and verifies every required skill", async () => {
     const sidecar = fakeSidecar();
     const supervisor = await codexModule.startCodexSupervisor({

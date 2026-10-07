@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 
 const post = async (path: string, body?: Record<string, unknown>) => fetch(path, {
   method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body ?? {})
@@ -48,4 +48,54 @@ export function JudgeMilestoneButton({ workOrderId }: { workOrderId: string }) {
       setState(response.ok ? "已开始判定；判完后刷新本页" : "现在无法判定，请刷新");
     }}>{state}</button>
   </div>;
+}
+
+/**
+ * 「全部批准」 over the proposal cards below it. Each card carries a checkbox (ticked by default); the
+ * button approves the ticked ones in one request and reports any that changed underneath instead of
+ * failing all of them.
+ */
+export function ProposalBatchForm({ children, count }: { children: ReactNode; count: number }) {
+  const [state, setState] = useState<string>(`批准勾选的方案`);
+  return <form className="proposal-batch" onSubmit={async (event) => {
+    event.preventDefault();
+    const ids = new FormData(event.currentTarget).getAll("proposal").map(String);
+    if (!ids.length) { setState("先勾选要批准的方案"); return; }
+    setState("批准中…");
+    const response = await post("/api/work-orders/approve-batch", { ids });
+    const result = await response.json().catch(() => null) as { approved?: string[]; skipped?: unknown[] } | null;
+    if (!response.ok || !result) { setState("没有批准成功，请刷新"); return; }
+    if (result.skipped?.length) { setState(`已批准 ${result.approved?.length ?? 0} 个；${result.skipped.length} 个已变化，刷新后再看`); return; }
+    location.reload();
+  }}>
+    <div className="proposal-batch-bar">
+      <span>{count} 个方案等你批准</span>
+      <button className="primary-button" type="submit">{state}</button>
+    </div>
+    {children}
+  </form>;
+}
+
+/** Accepts every draft listed for one line in a single step; the week's first steps are then worked out from them. */
+export function ApproveLineDraftsButton({ ids, label }: { ids: string[]; label: string }) {
+  const [state, setState] = useState(label);
+  return <button type="button" className="secondary-button" onClick={async () => {
+    setState("接受中…");
+    const response = await post("/api/milestones/approve-batch", { ids });
+    const result = await response.json().catch(() => null) as { skipped?: unknown[] } | null;
+    if (!response.ok || !result) { setState("没有成功，请刷新"); return; }
+    if (result.skipped?.length) { setState(`${result.skipped.length} 个已变化，请刷新`); return; }
+    location.reload();
+  }}>{state}</button>;
+}
+
+/** One-click undo for something that took effect without a click. */
+export function RevokeAutoApprovalButton({ workOrderId }: { workOrderId: string }) {
+  const [state, setState] = useState("撤销");
+  return <button type="button" onClick={async () => {
+    setState("撤销中…");
+    const response = await post(`/api/work-orders/${encodeURIComponent(workOrderId)}/revoke-auto-approval`);
+    if (!response.ok) { setState("已开始做，不能撤销"); return; }
+    location.reload();
+  }}>{state}</button>;
 }

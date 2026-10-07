@@ -51,6 +51,8 @@ export type AgentTaskRow = {
   taskId: string; title: string; category: AgentCategory; workOrderId: string; requestedAt: string; status: AgentTaskStatus;
   directory: string; durationMs: number; commands: number; denied: number; artifacts: Array<{ path: string; sha256: string; bytes: number }>;
   needsHuman: number; checksPassed: boolean; inputsModified: string[]; blockerCode: string; reviewNote: string;
+  /** The order took effect by itself (no one clicked approve) before the assistant picked it up. */
+  autoApproved: boolean;
 };
 /** A run with no outcome after this long was lost with the process that held it, not still going. */
 const STALE_AFTER_MS = 8 * 3_600_000;
@@ -63,7 +65,7 @@ export function listAgentTasks(store: CrosslineStore, workspaceId: string, now =
     const taskId = event.entityId;
     if (event.type === "agent.task.requested") {
       rows.set(taskId, { taskId, title: String(p.title ?? ""), category: isAgentCategory(p.category) ? p.category : "read_research_organize", workOrderId: String(p.workOrderId ?? ""),
-        requestedAt: event.createdAt, status: "running", directory: "", durationMs: 0, commands: 0, denied: 0, artifacts: [], needsHuman: 0, checksPassed: false, inputsModified: [], blockerCode: "", reviewNote: "" });
+        requestedAt: event.createdAt, status: "running", directory: "", durationMs: 0, commands: 0, denied: 0, artifacts: [], needsHuman: 0, checksPassed: false, inputsModified: [], blockerCode: "", reviewNote: "", autoApproved: p.autoApproved === true });
       continue;
     }
     const row = rows.get(taskId);

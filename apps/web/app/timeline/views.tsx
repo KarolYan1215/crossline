@@ -6,7 +6,7 @@ import {
 
 export type LineLabels = Record<string, string>;
 const WEEKDAY = ["一", "二", "三", "四", "五", "六", "日"];
-const KIND_LABEL: Record<TimelineItem["kind"], string> = { calendar: "日历", scheduled: "排程", import: "文件", activity: "实际" };
+const KIND_LABEL: Record<TimelineItem["kind"], string> = { calendar: "日历", scheduled: "排程", proposed: "预览", import: "文件", activity: "实际" };
 
 const lineOf = (identityId?: string) => identityId ?? "none";
 const timeText = (item: { start: string; end: string }) => `${item.start}–${item.end}`;

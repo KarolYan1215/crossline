@@ -1,6 +1,6 @@
 import "server-only";
 import { createHash, randomUUID } from "node:crypto";
-import type { AccessContext } from "@crossline/core";
+import { autoApprovalEligible, type AccessContext } from "@crossline/core";
 import { ensureSeeded, getStore } from "./crossline";
 
 const MODE_KEY = "permission.mode";
@@ -12,7 +12,6 @@ type Timer = { elapsedMs: number; lastSeenMs: number | null };
 const timerKey = (key: string) => `permission.timer:${key}`;
 const keyOf = (kind: string, id: string, version: unknown) =>
   createHash("sha256").update(JSON.stringify([kind, id, version])).digest("hex").slice(0, 32);
-const explicitRisk = /\b(email|message|publish|post|submit|purchase|sell|buy|sign|legal|transfer|delete|trade|order|file)\b|邮件|发送|发布|投稿|提交|购买|出售|签署|法律|转账|删除|交易|订单|券商|产权|财产/i;
 
 export function permissionModeEnabled(ctx: AccessContext): boolean {
   return getStore().getSetting(ctx.workspaceId, MODE_KEY) === "on";
@@ -46,8 +45,9 @@ export function permissionCandidates(ctx: AccessContext): PermissionCandidate[] 
   const store = getStore();
   const orders = store.listWorkOrders(ctx.workspaceId).filter((order) => order.state === "awaiting_plan_approval")
     .map((order) => {
-      const content = `${order.intent} ${JSON.stringify(order.payload)}`;
-      const eligible = order.riskTier === "routine" && !explicitRisk.test(content);
+      // The same rule the worker applies the moment a proposal is written (`autoApprovalEligible`): two
+      // rules for "may this go ahead without a click" would disagree about the same card.
+      const eligible = autoApprovalEligible(order).eligible;
       const key = keyOf("work_order", order.id, order);
       return { key, kind: "work_order" as const, id: order.id, title: order.intent, eligible,
         reason: eligible ? "普通本地作业，可在前台满 5 分钟后默认批准" : "风险或外部动作需要明确批准",

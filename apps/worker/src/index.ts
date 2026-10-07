@@ -17,7 +17,7 @@ import { createFlywheelExpander } from "./flywheel";
 import { createManualbookBuilder, pendingMaterialWorkOrders } from "./manualbook";
 import { createMilestoneGate, pendingMilestoneGates } from "./milestone-gate-runner";
 import { createMilestoneConversation, createMilestoneProposer } from "./milestone-proposer";
-import { createGoalBackplanner } from "./goal-backplanner";
+import { createGoalBackplanner, milestonesAwaitingBackplan } from "./goal-backplanner";
 import { createPlanExplainer } from "./plan-explainer-runner";
 import { createWeeklyInsight } from "./weekly-insight-runner";
 import { createOnboardingSessionRunner } from "./onboarding-session";
@@ -98,6 +98,28 @@ async function autoAnalyzePass(workspaceId: string, checkedAt = new Date().toISO
   } finally { autoAnalyzing.delete(workspaceId); }
 }
 
+/**
+ * Works backwards from approved milestones due within three weeks that nothing serves yet. Run by the tick
+ * and, right after the person approves a line's drafts, by the web app — so the week fills in at once.
+ */
+const autoBackplanning = new Set<string>();
+async function autoBackplanPass(workspaceId: string, checkedAt = new Date().toISOString()): Promise<void> {
+  if (!codexSupervisor || autoBackplanning.has(workspaceId)) return;
+  autoBackplanning.add(workspaceId);
+  try {
+    const ids = milestonesAwaitingBackplan(analysisStore, workspaceId);
+    if (!ids.length) return;
+    const signal = await readCost();
+    if (!signal.available || budgetPolicy(Math.max(signal.short?.usedPercent ?? 0, signal.long?.usedPercent ?? 0)).mode !== "normal") return;
+    enterUsageWorkspace(workspaceId);
+    const backplan = createGoalBackplanner(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client);
+    for (const id of ids) {
+      const outcome = await backplan(id).catch(() => undefined);
+      if (outcome) console.info(JSON.stringify({ type: `backplan.auto.${outcome.state}`, checkedAt, workspaceId, milestoneId: id }));
+    }
+  } finally { autoBackplanning.delete(workspaceId); }
+}
+
 async function tick(): Promise<void> {
   const checkedAt = new Date().toISOString();
   mkdirSync(dataDir, { recursive: true });
@@ -127,6 +149,7 @@ async function tick(): Promise<void> {
   // per tick; a capture that came back blocked is left for the person rather than retried on a timer.
   if (codexSupervisor) {
     for (const workspace of workspaces) await autoAnalyzePass(workspace.id, checkedAt);
+    for (const workspace of workspaces) await autoBackplanPass(workspace.id, checkedAt);
   }
   // The milestone gate. Without this it existed only inside `scripts/gate-loop-check.ts`, so on the
   // real ledger a milestone-bound work order reached `evidence_review`, the approvals page said
@@ -508,6 +531,7 @@ if (!capabilitySecret) {
       ]
     },
     autoAnalyzeCaptures: (workspaceId) => autoAnalyzePass(workspaceId),
+    autoBackplanGoals: (workspaceId) => autoBackplanPass(workspaceId),
     analyzeCapture: (client, id, signal, workspaceId) => getCaptureAnalyzer(workspaceId)(client, id, signal),
     // `workspaceId` is the real caller's, from its own verified capability token — not a hardcoded
     // constant, which is what left milestone proposal and goal backplanning invisible to any real

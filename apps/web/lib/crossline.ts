@@ -542,6 +542,35 @@ async function scheduledBlocks(ctx: AccessContext, today: string, committed: Per
     source: "建议·未批准",
     readOnly: true
   }; });
+  // Second pass, the preview: where proposals still waiting for approval would go, placed only into the
+  // time the approved work left free (the approved blocks are frozen for it), so a preview can never move
+  // committed work. `proposed:` blocks are drawn dashed and are never published to any calendar.
+  const proposals = withoutShadowingDemos(allOrders, capacityIds)
+    .filter((order) => order.state === "awaiting_plan_approval" && !capacityIds.has(order.identityId)
+      && !((plannerTaskOf(ctx, order).dependsOn ?? []).some((id) => stateById.get(id) !== "accepted" && !orders.some((item) => item.id === id))));
+  const preview = proposals.length ? await planSchedule({
+    now, horizonDays: days.length, mode: preferences.mode,
+    tasks: proposals.map((order) => plannerTaskOf(ctx, order)),
+    availability: instants,
+    frozenBlocks: [...committed.filter((block) => block.day && block.id.startsWith("scheduled:"))
+      .map((block) => ({ taskId: block.id.split(":")[1]!, start: iso(block.day!, block.start), end: iso(block.day!, block.end) })),
+      ...result.plan.blocks.map((block) => ({ taskId: block.taskId, start: block.start, end: block.end }))]
+  }).catch(() => undefined) : undefined;
+  const proposalTitles = new Map(proposals.map((order) => [order.id, order.intent]));
+  const previewSeen = new Map<string, number>();
+  const previewBlocks = (preview?.plan.blocks ?? []).filter((block) => !block.frozen && proposalTitles.has(block.taskId)).map((block) => {
+    const index = (previewSeen.get(block.taskId) ?? 0) + 1;
+    previewSeen.set(block.taskId, index);
+    return {
+      id: `proposed:${block.taskId}${index > 1 ? `:${index}` : ""}`, lane: "human" as const,
+      title: `预览·待批准 · ${proposalTitles.get(block.taskId)}`,
+      day: formatInTimeZone(new Date(block.start), zone, "yyyy-MM-dd"),
+      start: formatInTimeZone(new Date(block.start), zone, "HH:mm"),
+      end: formatInTimeZone(new Date(block.end), zone, "HH:mm"),
+      source: "预览·待你批准", readOnly: true
+    };
+  });
+  blocks.push(...previewBlocks);
   return { blocks, schedule: { status: clockBlockers.length || dependencyBlockers.length
     ? blocks.length ? "partial" : "infeasible" : result.status,
     blockers: [...result.blockers, ...clockBlockers, ...dependencyBlockers],

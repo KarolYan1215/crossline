@@ -58,6 +58,8 @@ button.dt-row:hover,.dt-row[aria-pressed="true"]{background:var(--chalk)}
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .dt-block{color:#0B0B0B}}
 .dt-row[data-kind="calendar"] .dt-block{background:var(--paper);color:var(--lc,var(--ink));border:2px solid var(--lc,var(--graphite));line-height:16px}
 .dt-row[data-kind="import"] .dt-block{background:repeating-linear-gradient(135deg,var(--paper) 0 4px,var(--chalk) 4px 8px);color:var(--ink);border:2px dashed var(--lc,var(--graphite));line-height:16px}
+/* A proposal still waiting for approval: a dashed outline in the line's colour on paper, ink text (7:1). */
+.dt-row[data-kind="proposed"] .dt-block{background:var(--paper);color:var(--ink);border:2px dashed var(--lc,var(--graphite));line-height:16px}
 .dt-row[data-clash] .dt-block{outline:2px solid #C00000;outline-offset:1px}
 .dt-flag{background:var(--chalk)}
 .dt-flag b{color:var(--lc)}
@@ -86,6 +88,7 @@ button.dt-row:hover,.dt-row[aria-pressed="true"]{background:var(--chalk)}
 .wk-block small{font-size:12px;opacity:.9}
 .wk-block[data-kind="calendar"]{background:var(--paper);color:var(--lc,var(--ink));border:2px solid var(--lc,var(--graphite))}
 .wk-block[data-kind="import"]{background:repeating-linear-gradient(135deg,var(--paper) 0 4px,var(--chalk) 4px 8px);color:var(--ink);border:2px dashed var(--lc,var(--graphite))}
+.wk-block[data-kind="proposed"]{background:var(--paper);color:var(--ink);border:2px dashed var(--lc,var(--graphite))}
 .wk-block[aria-pressed="true"]{outline:2px solid var(--ink)}
 
 /* month: a block calendar with tags */
@@ -101,6 +104,7 @@ button.dt-row:hover,.dt-row[aria-pressed="true"]{background:var(--chalk)}
 .mo-chip[data-kind="scheduled"]{background:var(--lc);color:#fff}
 [data-theme="dark"] .mo-chip[data-kind="scheduled"],:root:not([data-theme="light"]) .mo-chip[data-kind="scheduled"]{color:#0B0B0B}
 .mo-chip[data-kind="import"]{border-left-style:dashed}
+.mo-chip[data-kind="proposed"]{background:var(--paper);color:var(--ink);border:1px dashed var(--lc,var(--graphite));border-left-width:3px}
 .mo-chip[data-kind="deadline"]{font-weight:700;color:var(--lc);background:transparent;border:1px solid var(--lc)}
 .mo-more{align-self:flex-start;font-size:12px;color:var(--graphite);text-decoration:underline}
 

@@ -1,3 +1,4 @@
+import { autoApproveEligible } from "./auto-approval";
 import { runCodexAnalysis, type CodexRpcBoundary } from "@crossline/codex";
 import { validateAnalysisContext, type AnalysisContext } from "@crossline/core";
 import { CrosslineStore, type StoredCapture } from "@crossline/db";
@@ -115,6 +116,7 @@ export function createCaptureAnalyzer(store: CrosslineStore, workspaceId: string
         store.transitionWorkOrder(workspaceId, id, { type: "analysis.accepted", approvalId: "schema-validation-only" }, `analysis:${id}:${attempt}:finish`, {
           proposal: result.proposal, context, audit: { ...result.audit, contextVersion: context.version }
         });
+        autoApproveEligible(store, workspaceId, [id]);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "";

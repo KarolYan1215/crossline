@@ -46,3 +46,10 @@ test("what is waiting is counted by kind, and the total is their sum", () => {
   expect(counts).toMatchObject({ milestoneDrafts: 2, research: 1, dates: 0 });
   expect(counts.total).toBe(counts.workOrders + counts.planChanges + counts.milestoneDrafts + counts.relations + counts.research + counts.dates);
 });
+
+test("a proposal's preview block is its own kind and still links to its task", async () => {
+  const { itemsFromPlan } = await import("../app/timeline/model");
+  const [item] = itemsFromPlan([{ id: "proposed:wo-1", lane: "human", title: "预览·待批准 · 画图", day: "2026-10-07", start: "09:00", end: "10:00",
+    source: "预览·待你批准", readOnly: true }], "2026-10-06", { "wo-1": { identityId: "research" } });
+  expect(item).toMatchObject({ kind: "proposed", workOrderId: "wo-1", identityId: "research" });
+});

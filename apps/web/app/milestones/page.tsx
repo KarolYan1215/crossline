@@ -8,6 +8,7 @@ import { MilestoneAdmin, type AdminMilestone } from "./milestone-admin";
 import { ensureSeeded, getStore, readGoalSettings, readSchedulePreferences } from "../../lib/crossline";
 import { requireSessionContext } from "../../lib/access-guard";
 import { MilestonePreview } from "../task-preview";
+import { ApproveLineDraftsButton } from "../approvals/approval-actions";
 import { loadMilestoneDetailsBatch } from "../../lib/task-detail";
 
 export const dynamic = "force-dynamic";
@@ -78,9 +79,15 @@ export default async function MilestonesPage({ searchParams }: {
       stage: anchor?.stage, deadline: anchor?.deadline, dependsOn: anchor?.dependsOn,
       met: Object.values(reading).filter((value) => value === "met").length, total: milestone.successCriteria.length };
   });
-  const drafts = milestones.filter((milestone) => milestone.status === "draft").length;
+  const draftList = milestones.filter((milestone) => milestone.status === "draft");
+  const drafts = draftList.length;
+  const labelOf = Object.fromEntries(identities.map((pack) => [pack.id, pack.label]));
   return <SubpageShell active="主线" title="主线"
-    description={drafts ? `${drafts} 个里程碑草稿等你批准（点任一节点，或在下面的列表里批准）。` : "每条主线在往哪走，按先后从左到右。"}>
+    description={drafts ? `${drafts} 个里程碑草稿等你批准：整条线一次接受，或点节点逐个改。接受后，三周内到期的会自动倒推出本周的第一步。` : "每条主线在往哪走，按先后从左到右。"}>
+    {drafts > 0 && <div className="line-drafts-bar">{[...new Set(draftList.map((milestone) => milestone.identityId))].map((line) => {
+      const ids = draftList.filter((milestone) => milestone.identityId === line).map((milestone) => milestone.id);
+      return <ApproveLineDraftsButton key={line} ids={ids} label={`接受${labelOf[line] ?? line}的 ${ids.length} 个草稿`} />;
+    })}</div>}
     <FlowChart milestones={flowNodes} labels={Object.fromEntries(identities.map((pack) => [pack.id, pack.label]))}
       lineOrder={identities.map((pack) => pack.id)}
       relations={relations.map((relation) => ({ id: relation.id, source: relation.fromMilestoneId, target: relation.toMilestoneId, kind: relation.kind, status: relation.status }))} />

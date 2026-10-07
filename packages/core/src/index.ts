@@ -32,6 +32,7 @@ export * from "./rhythm";
 export * from "./backplan-schema";
 export * from "./external-action";
 export * from "./settings-keys";
+export * from "./auto-approval";
 import type { EvidenceQuestionTemplate } from "./milestone-templates";
 export type EnergyLevel = "low" | "medium" | "high";
 
@@ -272,6 +273,8 @@ export type WorkOrderEvent =
   | { type: "analysis.proposed"; proposalId: string }
   | { type: "analysis.accepted"; approvalId: string }
   | { type: "plan.approved"; approvalId: string }
+  // Takes back an approval that nobody clicked (a default-effective one), before any work began.
+  | { type: "approval.revoked"; reason: string }
   | { type: "automation.started" }
   | { type: "materials.ready" }
   | { type: "materials.not_required" }
@@ -289,9 +292,9 @@ const WORK_ORDER_TRANSITIONS: Partial<Record<WorkOrderState, Partial<Record<Work
   // `materials.not_required` records that nothing had to be prepared instead of pretending an AI
   // preparation run happened. The empty-material-contract precondition is enforced by the caller
   // (`startWorkOrderExecution`), not here — this table only knows about states.
-  approved: { "automation.started": "preparing", "materials.not_required": "ready_for_human", blocked: "blocked", archived: "archived" },
-  preparing: { "materials.ready": "ready_for_human", blocked: "blocked", archived: "archived" },
-  ready_for_human: { "human.started": "active", blocked: "blocked", archived: "archived" },
+  approved: { "automation.started": "preparing", "materials.not_required": "ready_for_human", "approval.revoked": "awaiting_plan_approval", blocked: "blocked", archived: "archived" },
+  preparing: { "materials.ready": "ready_for_human", "approval.revoked": "awaiting_plan_approval", blocked: "blocked", archived: "archived" },
+  ready_for_human: { "human.started": "active", "approval.revoked": "awaiting_plan_approval", blocked: "blocked", archived: "archived" },
   active: { "human.completed": "evidence_review", blocked: "blocked", archived: "archived" },
   evidence_review: { "evidence.accepted": "accepted", blocked: "blocked", archived: "archived" },
   blocked: { "plan.approved": "approved", archived: "archived" },
@@ -343,6 +346,11 @@ const APPROVAL_TIERS = {
   // Candidate relations are reviewed together in the weekly pass, so batch is the honest mode: they
   // are cheap individually and only mean anything compared against each other.
   approve_milestones: "batch",
+  // Work-order proposals can be approved together (「全部批准」); a routine, internal preparation one takes
+  // effect by itself with a 24-hour undo (see `autoApprovalEligible`). Never a milestone, target or
+  // anything that leaves the machine — those stay a click each.
+  approve_work_orders: "batch",
+  auto_approve_internal_order: "automatic",
   approve_milestone_relations: "batch",
   approve_plan_changes: "batch",
   write_focus_block: "batch",

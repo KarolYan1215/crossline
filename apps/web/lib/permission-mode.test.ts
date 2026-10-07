@@ -16,7 +16,7 @@ function setup() {
     milestoneId: "research-starter", intent, state: "awaiting_plan_approval", riskTier,
     estimate: { p25Minutes: 10, p50Minutes: 20, p85Minutes: 40,
       source: "llm_prior", observationCount: 0, confidence: "low" },
-    payload: { localDraft: true }
+    payload: { localDraft: true, family: "preparation" }
   });
   return { store, add };
 }
@@ -59,7 +59,7 @@ test("the store refuses an auto approval after its proposal snapshot changes", (
   const { store, add } = setup();
   add("racy", "整理本地笔记", "routine");
   const proposal = store.listWorkOrders(TEST_CTX.workspaceId).find((item) => item.id === "racy")!;
-  store.saveWorkOrder({ ...proposal, payload: { localDraft: true, revised: true } });
+  store.saveWorkOrder({ ...proposal, payload: { localDraft: true, family: "preparation", revised: true } });
   expect(() => store.transitionWorkOrder(TEST_CTX.workspaceId, "racy",
     { type: "plan.approved", approvalId: ownerId }, "auto:racy",
     { expectedWorkOrder: proposal })).toThrow("PROPOSAL_VERSION_CHANGED");

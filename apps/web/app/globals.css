@@ -692,3 +692,9 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .subpage-header h1::before{display:none}
 .activity-card .settings-row input{flex:1;min-width:180px;padding:6px 8px;border:1px solid var(--mist);border-radius:6px;font:inherit}
 .activity-entries{margin:8px 0 0;padding-left:18px;max-height:260px;overflow:auto;font-size:13px}
+/* 待确认: the batch bar sits above the proposal cards; a line's drafts are accepted together. */
+.proposal-batch-bar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;margin:12px 0}
+.proposal-check{display:inline-flex;align-items:center;gap:6px;font-size:13px}
+.line-drafts{display:grid;gap:8px;margin:8px 0 14px}
+.line-drafts ul{margin:0}
+.line-drafts-bar{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 12px}

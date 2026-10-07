@@ -341,6 +341,8 @@ export async function startCodexSupervisor(options: {
   analyzeCapture?: (client: CodexRpcBoundary, id: string, signal: AbortSignal, workspaceId: string) => Promise<unknown>;
   /** The tick's classification of new captures, run now. The web app calls it right after a capture is written. */
   autoAnalyzeCaptures?: (workspaceId: string) => Promise<unknown>;
+  /** Works backwards from approved milestones due soon (see `milestonesAwaitingBackplan`); answered at once. */
+  autoBackplanGoals?: (workspaceId: string) => Promise<unknown>;
   /** Hands a work order to the assistant. Answers at once: the task runs on, and writes its own outcome to the ledger. */
   dispatchAgentTask?: (workspaceId: string, workOrderId: string, category?: string) => unknown;
   /** Writes plan blocks to the person's Crossline calendar. Only blocks; never touches any other calendar or event. */
@@ -514,6 +516,16 @@ export async function startCodexSupervisor(options: {
         }
         if (runtimeBlocker) { sendJson(response, 503, { blocker: runtimeBlocker }); return; }
         runDetached(() => options.autoAnalyzeCaptures!(callerWorkspaceId), () => {});
+        sendJson(response, 202, { started: true });
+        return;
+      }
+      if (request.method === "POST" && pathname === "/v1/goals/auto-backplan" && options.autoBackplanGoals) {
+        if (request.headers.origin || !request.headers["content-type"]?.startsWith("application/json")) {
+          sendJson(response, 403, { blocker: { code: "BACKPLAN_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
+          return;
+        }
+        if (runtimeBlocker) { sendJson(response, 503, { blocker: runtimeBlocker }); return; }
+        runDetached(() => options.autoBackplanGoals!(callerWorkspaceId), () => {});
         sendJson(response, 202, { started: true });
         return;
       }

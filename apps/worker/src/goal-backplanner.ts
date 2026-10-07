@@ -5,6 +5,7 @@ import type { CrosslineStore, StoredWorkOrder } from "@crossline/db";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 
 import { ownerOf } from "./owner";
+import { autoApproveEligible } from "./auto-approval";
 const SKILL = "crossline:crossline-goal-backplanner";
 /** A proposal version is expanded once; repeating the request returns its existing draft IDs. */
 export function createGoalBackplanner(store: CrosslineStore, workspaceId: string, cwd: string,
@@ -72,10 +73,38 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
       type: "goal.backplan_proposed", entityId: milestone.id,
       payload: { milestoneVersion: milestone.version, workOrderIds,
         dateCandidates: result.output.dateCandidates, source: SKILL } });
-    if (inserted) return { state: "proposed", workOrderIds, dateCandidates: result.output.dateCandidates };
+    if (inserted) {
+      autoApproveEligible(store, workspaceId, workOrderIds);
+      return { state: "proposed", workOrderIds, dateCandidates: result.output.dateCandidates };
+    }
     const saved = store.listEvents(workspaceId, { type: "goal.backplan_proposed", entityId: milestone.id })
       .find((event) => event.idempotencyKey === key);
     return { state: "proposed", workOrderIds: (saved?.payload as { workOrderIds?: string[] })?.workOrderIds ?? [],
       dateCandidates: (saved?.payload as { dateCandidates?: Answer["dateCandidates"] })?.dateCandidates ?? [] };
   };
+}
+
+/** How far ahead a milestone's deadline may be for the system to work backwards from it on its own. */
+export const AUTO_BACKPLAN_HORIZON_DAYS = 21;
+
+/**
+ * Approved milestones the system should work backwards from without being asked: due within three weeks,
+ * nothing open serving them yet, and not already backplanned at this version. This is what turns 「按线批准
+ * 里程碑」 into a week with real steps on it — before, the only route from a milestone to work was a button
+ * per milestone (which never worked on a real account) or the person typing every step themselves.
+ */
+export function milestonesAwaitingBackplan(store: CrosslineStore, workspaceId: string, now = new Date(), limit = 3): string[] {
+  const today = now.toISOString().slice(0, 10);
+  const horizon = new Date(now.getTime() + AUTO_BACKPLAN_HORIZON_DAYS * 86_400_000).toISOString().slice(0, 10);
+  const deadlines = new Map(store.listMilestoneAnchors(workspaceId).map((anchor) => [anchor.milestoneId, anchor.deadline]));
+  const open = new Set(store.listWorkOrders(workspaceId).filter((order) => !["archived", "accepted"].includes(order.state))
+    .map((order) => order.milestoneId));
+  const done = new Set(store.listEvents(workspaceId, { type: "goal.backplan_proposed" }).map((event) => event.idempotencyKey));
+  const identities = new Set(defaultIdentityPacks().filter((pack) => pack.kind === "identity").map((pack) => pack.id));
+  return store.listMilestones(workspaceId)
+    .filter((milestone) => milestone.status === "approved" && milestone.projectId && identities.has(milestone.identityId))
+    .filter((milestone) => { const deadline = deadlines.get(milestone.id); return Boolean(deadline && deadline >= today && deadline <= horizon); })
+    .filter((milestone) => !open.has(milestone.id) && !done.has(`goal:backplan:${milestone.id}:${milestone.version}`))
+    .sort((a, b) => deadlines.get(a.id)!.localeCompare(deadlines.get(b.id)!))
+    .slice(0, limit).map((milestone) => milestone.id);
 }
