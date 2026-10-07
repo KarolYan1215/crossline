@@ -388,9 +388,13 @@ test("a work order started on one device becomes a conflict when another device'
     page.waitForNavigation({ waitUntil: "load" }),
     page.locator(`#work-order-${id}`).getByRole("button", { name: "完成（记为无证据）" }).click()
   ]);
-  const afterA = openStore();
-  try { expect(afterA.listWorkOrders(workspaceId).find((item) => item.id === id)?.state).toBe("evidence_review"); }
-  finally { afterA.close(); }
+  // Polled: `waitForNavigation` can resolve on the reload of the previous click before this completion's POST has
+  // landed, and a single read then raced it (the page itself showed 「证据审查中」 a moment later).
+  await expect.poll(() => {
+    const afterA = openStore();
+    try { return afterA.listWorkOrders(workspaceId).find((item) => item.id === id)?.state; }
+    finally { afterA.close(); }
+  }, { timeout: 10_000 }).toBe("evidence_review");
 
   // Device B, still believing the order is `ready_for_human`, starts it too — offline, so this queues
   // instead of failing outright.
@@ -409,6 +413,47 @@ test("a work order started on one device becomes a conflict when another device'
   await expect(pageB.getByText("两台设备冲突测试")).toBeVisible();
 
   await deviceB.close();
+});
+
+/**
+ * The system's questions on Today: a backplan that found a missing input and something awaited that was due, each
+ * answered in place from options already written out — one with a follow-up form prefilled from what the system knew —
+ * and the next coming up without a page reload.
+ */
+test("Today asks what only the person knows, with options and follow-ups, and moves to the next on answering", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-chrome");
+  await page.goto("/");
+  const store = openStore();
+  try {
+    const workspaceId = realWorkspaceId(store);
+    const milestone = store.listMilestones(workspaceId).filter((item) => item.status === "approved").at(-1)!;
+    store.appendEvent({ ownerId: "e2e-tester", workspaceId, idempotencyKey: "e2e:backplan-blocked", type: "goal.backplan_blocked", entityId: milestone.id,
+      payload: { milestoneVersion: milestone.version, code: "BACKPLAN_INPUT_BLOCKED", message: "缺组会录音",
+        missing: [{ id: "m1", what: "组会录音", whoHas: "导师", message: "没有组会录音，无法列出要回应的质疑。" }] } });
+    store.saveWaitingItem({ id: "wait-e2e", ownerId: "e2e-tester", workspaceId, title: "实测数据", who: "师兄", expectedAt: "2026-09-14",
+      approximate: true, followUpAt: "2026-09-14", state: "open", blocks: [], source: "manual" });
+  } finally { store.close(); }
+  await page.goto("/");
+  const list = page.getByRole("region", { name: "需要你回答" });
+  await expect(list.getByRole("heading", { name: /^需要你一句话/ })).toBeVisible();
+  const missing = list.locator(".ask-card").filter({ hasText: "还缺：组会录音" });
+  await expect(missing).toContainText("没有组会录音，无法列出要回应的质疑。");
+  await missing.getByRole("button", { name: /已经要了，在等/ }).click();
+  await expect(missing.getByLabel(/谁给/)).toHaveValue("导师");
+  await missing.getByLabel("大约哪天到").fill("2026-09-16");
+  await missing.getByRole("button", { name: "确定：已经要了，在等" }).click();
+  await expect(list.locator(".ask-card").filter({ hasText: "还缺：组会录音" })).toHaveCount(0);
+  const waiting = list.locator(".ask-card").filter({ hasText: "师兄的「实测数据」到了吗？" });
+  await expect(waiting).toBeVisible();
+  await waiting.getByRole("button", { name: /^不等了/ }).click();
+  await expect(list.locator(".ask-card").filter({ hasText: "实测数据」到了吗" })).toHaveCount(0);
+  const after = openStore();
+  try {
+    const workspaceId = realWorkspaceId(after);
+    expect(after.listWaitingItems(workspaceId).find((item) => item.title === "组会录音")).toMatchObject({ who: "导师", expectedAt: "2026-09-16", source: "backplan" });
+    expect(after.listWaitingItems(workspaceId).find((item) => item.id === "wait-e2e")!.state).toBe("cancelled");
+    expect(after.listEvents(workspaceId, { type: "ask.answered" })).toHaveLength(2);
+  } finally { after.close(); }
 });
 
 test("signing out deletes this browser's offline database for the workspace it was using", async ({ page }, testInfo) => {
@@ -430,3 +475,4 @@ test("signing out deletes this browser's offline database for the workspace it w
   expect(databases.some((db) => db.name?.startsWith("crossline-offline-"))).toBe(false);
   expect(await page.evaluate(() => localStorage.getItem("crossline.offline.workspaceId"))).toBeNull();
 });
+

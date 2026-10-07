@@ -606,10 +606,13 @@ export function loadGoalForecast(ctx: AccessContext): ForecastResult & { inferre
       - Date.parse(toZonedInstant(day, slot.start, preferences.timeZone))) / 60_000; }
     catch { return sum; }
   }, 0), source: busy.some((block) => block.day === day) ? "calendar_adjusted" as const : "declared" as const }));
+  // An approved milestone's own deadline is one the person confirmed by approving it; the goal setting only overrides it.
+  // Without the fallback no milestone had a deadline here unless it was typed a second time, so nothing was ever at risk.
+  const anchors = new Map(store.listMilestoneAnchors(ctx.workspaceId).map((anchor) => [anchor.milestoneId, anchor.deadline]));
   const goals = store.listMilestones(ctx.workspaceId).filter((item) => item.status === "approved")
     .map((item) => ({ id: item.id, title: item.title,
       importance: readGoalSettings(ctx, item.id)?.importance ?? preferences.importance[item.id] ?? "ordinary" as const,
-      confirmedDeadline: readGoalSettings(ctx, item.id)?.confirmedDeadline ?? null }));
+      confirmedDeadline: readGoalSettings(ctx, item.id)?.confirmedDeadline ?? anchors.get(item.id) ?? null }));
   const orders = store.listWorkOrders(ctx.workspaceId);
   const tasks = orders.filter((order) => ACTIONABLE.includes(order.state)).map((order) => plannerTaskOf(ctx, order));
   const completedIds = new Set(orders.filter((order) => order.state === "accepted").map((order) => order.id));
@@ -1505,8 +1508,6 @@ export async function loadDashboard(ctx: AccessContext): Promise<Omit<DashboardD
     care: store.listCapacityCommitments(ctx.workspaceId).map((item) => ({ title: item.title, minimumMinutes: item.minimumMinutes })),
     progress,
     todayCapacity: { availableMinutes, committedMinutes },
-    waitingDue: store.listWaitingItems(ctx.workspaceId, { state: "open" }).filter((item) => item.followUpAt <= today)
-      .map((item) => ({ id: item.id, title: item.title, who: item.who, expectedAt: item.expectedAt, approximate: item.approximate, blocks: item.blocks })),
     flywheel,
     flywheelStrip,
     identities: identityPacks.map((pack) => {

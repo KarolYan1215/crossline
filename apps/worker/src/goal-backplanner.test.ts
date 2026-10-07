@@ -9,7 +9,7 @@ const ownerId = "local-owner";
 const step = (over: Record<string, unknown> = {}) => ({ id: "s1", intent: "整理实验方案", sourceQuote: "稳定推进实验",
   rationale: "先列可执行步骤", dependsOn: [],
   estimate: { p25Minutes: 30, p50Minutes: 45, p85Minutes: 75 },
-  energy: "high", interruptible: false, family: "preparation", riskTier: "routine", evidence: "实验方案记录", ...over });
+  energy: "high", interruptible: false, family: "preparation", riskTier: "routine", evidence: "实验方案记录", acquires: "", ...over });
 
 test("backplanner refuses invented quotes, unknown dependencies and implausible estimates", () => {
   expect(() => validateBackplan({ steps: [step({ sourceQuote: "虚构原话" })], dateCandidates: [], blockers: [] }, ["稳定推进实验"]))
@@ -112,20 +112,74 @@ test("milestones due within three weeks with nothing open are picked for backpla
   store.close();
 });
 
-test("a refused backplan is recorded and that milestone version is not retried on a timer", async () => {
+const missingData = { code: "DATA_MISSING", message: "实测数据还没有到", what: "MoS₂ 实测数据", whoHas: "师兄" };
+
+// The real refusal (「未提供实测 MoS₂ 参数数据…」) left the milestone with no work and told nobody. Now the missing input is
+// recorded with who has it, and the milestone is split anyway with getting it as the first step.
+test("a missing input is recorded with who has it, and the milestone is split anyway with obtaining it first", async () => {
   const { milestonesAwaitingBackplan } = await import("./goal-backplanner");
   const store = new CrosslineStore(":memory:");
   store.saveMilestone({ id: "m", ownerId, workspaceId, identityId: "research", projectId: "p", title: "稳定推进实验", status: "approved", version: 1 });
   store.saveMilestoneAnchor({ workspaceId, milestoneId: "m", stage: 1, deadline: "2026-10-12", baseline: "", target: "", stakeholders: [],
     sourceFactIds: [], dependsOn: [], updatedAt: "2026-10-01T00:00:00Z" });
   expect(milestonesAwaitingBackplan(store, workspaceId, new Date("2026-10-06T12:00:00Z"))).toEqual(["m"]);
-  const runtime = fakeRuntime([JSON.stringify({ steps: [], dateCandidates: [], blockers: [{ code: "DATA_MISSING", message: "实测数据还没有到" }] })],
-    "crossline:crossline-goal-backplanner");
-  const result = await createGoalBackplanner(store, workspaceId, "C:\repo", () => runtime.rpc)("m");
-  expect(result.state).toBe("blocked");
-  expect(store.listEvents(workspaceId, { type: "goal.backplan_blocked" })).toHaveLength(1);
+  const runtime = fakeRuntime([
+    JSON.stringify({ steps: [], dateCandidates: [], blockers: [missingData] }),
+    JSON.stringify({ steps: [step({ id: "get", intent: "向师兄确认实测数据的位置和字段", sourceQuote: "实测数据还没有到", acquires: "m1", family: "deep_work" }),
+      step({ id: "map", dependsOn: ["get"], family: "deep_work" })], dateCandidates: [], blockers: [] })
+  ], "crossline:crossline-goal-backplanner");
+  const result = await createGoalBackplanner(store, workspaceId, "C:\\repo", () => runtime.rpc, { rolling: true })("m");
+  expect(result.state).toBe("proposed");
+  expect(runtime.prompts()[1]).toContain("missingInputs");
+  expect(runtime.prompts()[1]).toContain("MoS₂ 实测数据");
+  const blocked = store.listEvents(workspaceId, { type: "goal.backplan_blocked" });
+  expect(blocked).toHaveLength(1);
+  expect((blocked[0]!.payload as { missing: unknown[] }).missing).toEqual([{ id: "m1", what: "MoS₂ 实测数据", whoHas: "师兄", message: "实测数据还没有到" }]);
+  const drafts = store.listWorkOrders(workspaceId);
+  expect(drafts.map((order) => (order.payload as { backplan: { acquires?: string } }).backplan.acquires).sort()).toEqual(["m1", undefined]);
+  // Open work now serves it, so the timer leaves it alone.
   expect(milestonesAwaitingBackplan(store, workspaceId, new Date("2026-10-06T12:00:00Z"))).toEqual([]);
   store.close();
+});
+
+test("a step may only claim to acquire an input it was told is missing", () => {
+  expect(() => validateBackplan({ steps: [step({ acquires: "m9" })], dateCandidates: [], blockers: [] }, ["稳定推进实验"], undefined, ["m1"]))
+    .toThrow("BACKPLAN_ACQUIRES_INVALID");
+  expect(() => validateBackplan({ steps: [step({ acquires: "m1" })], dateCandidates: [], blockers: [] }, ["稳定推进实验"]))
+    .toThrow("BACKPLAN_ACQUIRES_INVALID");
+  expect(() => validateBackplan({ steps: [], dateCandidates: [], blockers: [{ code: "X", message: "缺", what: "", whoHas: "" }] }, []))
+    .toThrow("BACKPLAN_BLOCKER_INVALID");
+});
+
+test("a refusal with nothing to split is recorded and not retried on a timer; a runtime failure is not recorded", async () => {
+  const { milestonesAwaitingBackplan } = await import("./goal-backplanner");
+  const store = new CrosslineStore(":memory:");
+  store.saveMilestone({ id: "m", ownerId, workspaceId, identityId: "research", projectId: "p", title: "稳定推进实验", status: "approved", version: 1 });
+  store.saveMilestoneAnchor({ workspaceId, milestoneId: "m", stage: 1, deadline: "2026-10-12", baseline: "", target: "", stakeholders: [],
+    sourceFactIds: [], dependsOn: [], updatedAt: "2026-10-01T00:00:00Z" });
+  const now = new Date("2026-10-06T12:00:00Z");
+  // No runtime at all: says nothing about the milestone, so nothing is recorded and the next tick tries again.
+  expect(await createGoalBackplanner(store, workspaceId, "C:\\repo", () => undefined)("m")).toMatchObject({ state: "blocked", code: "CODEX_SUPERVISOR_UNAVAILABLE" });
+  expect(milestonesAwaitingBackplan(store, workspaceId, now)).toEqual(["m"]);
+  const runtime = fakeRuntime([JSON.stringify({ steps: [], dateCandidates: [], blockers: [missingData] }),
+    JSON.stringify({ steps: [], dateCandidates: [], blockers: [missingData] })], "crossline:crossline-goal-backplanner");
+  const result = await createGoalBackplanner(store, workspaceId, "C:\\repo", () => runtime.rpc)("m");
+  expect(result.state).toBe("blocked");
+  expect(store.listEvents(workspaceId, { type: "goal.backplan_blocked" })).toHaveLength(1);
+  expect(milestonesAwaitingBackplan(store, workspaceId, now)).toEqual([]);
+  // The person's answer asks for it again, past the closed timer.
+  store.appendEvent({ ownerId, workspaceId, idempotencyKey: "rerun-1", type: "goal.backplan_rerun_requested", entityId: "m", payload: {} });
+  expect(milestonesAwaitingBackplan(store, workspaceId, now)).toEqual(["m"]);
+  // Saying 「先不拆」 closes it for this version.
+  store.appendEvent({ ownerId, workspaceId, idempotencyKey: "declined-1", type: "goal.backplan_declined", entityId: "m", payload: { milestoneVersion: 1 } });
+  expect(milestonesAwaitingBackplan(store, workspaceId, now)).toEqual([]);
+  store.close();
+});
+
+test("an older refusal that carries only the joined message becomes one missing input per sentence", async () => {
+  const { missingInputsOf } = await import("@crossline/core");
+  expect(missingInputsOf({ code: "BACKPLAN_INPUT_BLOCKED", message: "未提供实测数据。；未提供 NeuroSim 输入规范。" }).map((item) => item.what))
+    .toEqual(["未提供实测数据。", "未提供 NeuroSim 输入规范。"]);
 });
 
 // The first real automatic run turned one milestone into a ten-step chain at once (pending went from 11 to 20).
@@ -151,5 +205,20 @@ test("rolling mode keeps the next two steps, proposes the next round once they a
   // The person discards the whole second round: no third round on a timer.
   for (const order of store.listWorkOrders(workspaceId).filter((item) => item.state !== "accepted")) store.saveWorkOrder({ ...order, state: "archived" });
   expect(milestonesAwaitingBackplan(store, workspaceId, now)).toEqual([]);
+  store.close();
+});
+
+test("a refusal recorded before missing inputs were itemised gets one more automatic try", async () => {
+  const { milestonesAwaitingBackplan } = await import("./goal-backplanner");
+  const store = new CrosslineStore(":memory:");
+  store.saveMilestone({ id: "m", ownerId, workspaceId, identityId: "research", projectId: "p", title: "稳定推进实验", status: "approved", version: 1 });
+  store.saveMilestoneAnchor({ workspaceId, milestoneId: "m", stage: 1, deadline: "2026-10-12", baseline: "", target: "", stakeholders: [],
+    sourceFactIds: [], dependsOn: [], updatedAt: "2026-10-01T00:00:00Z" });
+  store.appendEvent({ ownerId, workspaceId, idempotencyKey: "legacy", type: "goal.backplan_blocked", entityId: "m",
+    payload: { milestoneVersion: 1, code: "BACKPLAN_INPUT_BLOCKED", message: "未提供实测数据。" } });
+  expect(milestonesAwaitingBackplan(store, workspaceId, new Date("2026-10-06T12:00:00Z"))).toEqual(["m"]);
+  store.appendEvent({ ownerId, workspaceId, idempotencyKey: "itemised", type: "goal.backplan_blocked", entityId: "m",
+    payload: { milestoneVersion: 1, code: "BACKPLAN_INPUT_BLOCKED", message: "未提供实测数据。", missing: [] } });
+  expect(milestonesAwaitingBackplan(store, workspaceId, new Date("2026-10-06T12:00:00Z"))).toEqual([]);
   store.close();
 });

@@ -4,3 +4,13 @@
  * goal marked important or a confirmed deadline. One builder, imported by both sides.
  */
 export const goalSettingKey = (milestoneId: string) => `goal.settings:${milestoneId}`;
+
+/** The last calendar read that failed (`{code, message, sources, at}`), written by the worker, cleared by a clean read. */
+export const CALENDAR_SYNC_FAILURE = "calendar.sync.failure";
+/** The last automatic publish to the Crossline calendar that failed, written by the web's timer, cleared by a success. */
+export const CALENDAR_PUBLISH_FAILURE = "calendar.publish.failure";
+/**
+ * What is waiting for the person, as the web last saw it (`{at, pending, asks:[{id,title,urgency,dueDay,path}]}`): the
+ * worker's notifications read this so the brief, the badge and the urgent messages count the same things.
+ */
+export const ATTENTION_SNAPSHOT = "attention.snapshot";

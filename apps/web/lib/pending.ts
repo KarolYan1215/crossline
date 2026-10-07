@@ -7,6 +7,7 @@ import { countProposedTargets } from "./targets";
 import { countAssistantPending } from "./agent";
 import { loadDiligence } from "./diligence";
 import { loadPendingDateBatch } from "./imported-dates";
+import { openAsks } from "./asks";
 
 /**
  * Everything waiting for the person to say yes or no, in one number per kind. The badge in the header and the
@@ -36,6 +37,11 @@ export type PendingCounts = {
   assistantQuestions: number;
   /** Finished tasks waiting for the person to look at what the assistant made. */
   assistantReviews: number;
+  /**
+   * Questions the system put because it stopped and only the person can say how to go on (see `lib/asks.ts`): a missing
+   * input, something awaited that was due, a refused capture, a failed gate, a milestone at risk. Snoozed ones are not counted.
+   */
+  asks: number;
 };
 
 export function countPending(ctx: AccessContext): PendingCounts {
@@ -54,6 +60,7 @@ export function countPending(ctx: AccessContext): PendingCounts {
     assistantKinds: assistant.categories,
     assistantQuestions: assistant.approvals,
     assistantReviews: assistant.reviews,
+    asks: openAsks(ctx).length,
     questions: profileGaps({
       identities: defaultIdentityPacks().filter((pack) => pack.kind === "identity").map((pack) => ({ id: pack.id, label: pack.label })),
       projects: store.listProjects(ctx.workspaceId).map(({ id, identityId, name }) => ({ id, identityId, name })),

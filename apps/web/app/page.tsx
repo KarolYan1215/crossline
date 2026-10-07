@@ -5,6 +5,7 @@ import { requireSessionContext } from "../lib/access-guard";
 import { currentWorkState, loadTimeline } from "../lib/timeline";
 import { loadCurrentPlan } from "../lib/crossline";
 import { loadTaskDetailsBatch, loadMilestoneDetailsBatch } from "../lib/task-detail";
+import { loadAsks } from "../lib/asks";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +26,8 @@ export default async function HomePage() {
     ...data,
     taskDetailById: loadTaskDetailsBatch(ctx, taskWorkOrderIds),
     milestoneDetailById: loadMilestoneDetailsBatch(ctx, milestoneIds),
+    // Kept out of `loadDashboard` for the same reason: `lib/asks.ts` imports from `lib/crossline.ts`.
+    asks: await loadAsks(ctx),
     ...await (async () => {
       const plan = await loadCurrentPlan(ctx);
       const workState = currentWorkState(ctx, plan);

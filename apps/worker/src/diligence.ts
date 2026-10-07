@@ -244,6 +244,10 @@ export function linesDueForDiligence(store: CrosslineStore, workspaceId: string,
   return defaultIdentityPacks().filter((pack) => pack.kind === "identity").map((pack) => pack.id).filter((id) => {
     if (store.listProfileFacts(workspaceId).filter((fact) => fact.identityId === id).length < 2) return false;
     const latest = reports.find((report) => report.scope === id && (report.status === "done" || report.status === "running"));
-    return !latest || now.getTime() - Date.parse(latest.runAt) >= DILIGENCE_REFRESH_DAYS * 86_400_000;
+    if (latest && now.getTime() - Date.parse(latest.runAt) < DILIGENCE_REFRESH_DAYS * 86_400_000) return false;
+    // A failed report used to be invisible here, so a line whose sources would not verify was researched again on every
+    // tick — a web-search run every fifteen minutes for the same answer. It now waits a day.
+    const failed = reports.find((report) => report.scope === id && report.status === "failed");
+    return !failed || now.getTime() - Date.parse(failed.runAt) >= 86_400_000;
   });
 }

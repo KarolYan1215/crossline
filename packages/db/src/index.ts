@@ -195,7 +195,7 @@ export type StoredWaitingItem = {
   state: "open" | "arrived" | "cancelled";
   /** Work orders that cannot start until it arrives. */
   blocks: string[];
-  source: "analysis" | "manual" | "assistant";
+  source: "analysis" | "manual" | "assistant" | "backplan";
   createdAt: string; updatedAt: string;
 };
 
@@ -1000,6 +1000,25 @@ export class CrosslineStore {
         type: "capture.discarded", entityId: id, payload: { reason: reason.trim().slice(0, 200) }
       });
       this.#db.prepare("UPDATE captures SET state = 'discarded' WHERE workspace_id = ? AND id = ?").run(workspaceId, id);
+      return { changed: true };
+    })();
+  }
+
+  /**
+   * The person's answer to a refused analysis: what they add is appended to the capture's own context, so the next
+   * attempt reads it the way it read the original. Only a blocked capture takes it — any other state is past asking.
+   */
+  addCaptureContext(workspaceId: string, id: string, note: string): { changed: boolean } {
+    return this.#db.transaction(() => {
+      const capture = this.listCaptures(workspaceId).find((item) => item.id === id);
+      if (!capture) throw new Error("CAPTURE_NOT_FOUND");
+      if (capture.state !== "blocked") return { changed: false };
+      const text = note.trim().slice(0, 2000);
+      if (!text) throw new Error("CAPTURE_NOTE_REQUIRED");
+      const context = capture.context ? `${capture.context}\n补充（${new Date().toISOString().slice(0, 10)}）：${text}` : text;
+      this.appendEvent({ ownerId: capture.ownerId, workspaceId, idempotencyKey: `capture-context:${id}:${capture.attempt}`,
+        type: "capture.context_added", entityId: id, payload: { note: text } });
+      this.#db.prepare("UPDATE captures SET context = ? WHERE workspace_id = ? AND id = ?").run(context, workspaceId, id);
       return { changed: true };
     })();
   }

@@ -50,7 +50,9 @@ export type AgentTaskStatus = "running" | "stale" | "blocked" | "needs_review" |
 export type AgentTaskRow = {
   taskId: string; title: string; category: AgentCategory; workOrderId: string; requestedAt: string; status: AgentTaskStatus;
   directory: string; durationMs: number; commands: number; denied: number; artifacts: Array<{ path: string; sha256: string; bytes: number }>;
-  needsHuman: number; checksPassed: boolean; inputsModified: string[]; blockerCode: string; reviewNote: string;
+  needsHuman: number; checksPassed: boolean; inputsModified: string[]; blockerCode: string;
+  /** Why it stopped, in the runner's words (rows from before this was stored have only the code). */
+  blockerMessage: string; reviewNote: string;
   /** The order took effect by itself (no one clicked approve) before the assistant picked it up. */
   autoApproved: boolean;
 };
@@ -65,7 +67,7 @@ export function listAgentTasks(store: CrosslineStore, workspaceId: string, now =
     const taskId = event.entityId;
     if (event.type === "agent.task.requested") {
       rows.set(taskId, { taskId, title: String(p.title ?? ""), category: isAgentCategory(p.category) ? p.category : "read_research_organize", workOrderId: String(p.workOrderId ?? ""),
-        requestedAt: event.createdAt, status: "running", directory: "", durationMs: 0, commands: 0, denied: 0, artifacts: [], needsHuman: 0, checksPassed: false, inputsModified: [], blockerCode: "", reviewNote: "", autoApproved: p.autoApproved === true });
+        requestedAt: event.createdAt, status: "running", directory: "", durationMs: 0, commands: 0, denied: 0, artifacts: [], needsHuman: 0, checksPassed: false, inputsModified: [], blockerCode: "", blockerMessage: "", reviewNote: "", autoApproved: p.autoApproved === true });
       continue;
     }
     const row = rows.get(taskId);
@@ -75,7 +77,7 @@ export function listAgentTasks(store: CrosslineStore, workspaceId: string, now =
         commands: Number(p.commands ?? 0), denied: Number(p.denied ?? 0), artifacts: Array.isArray(p.artifacts) ? p.artifacts as AgentTaskRow["artifacts"] : [],
         needsHuman: Number(p.needsHuman ?? 0), checksPassed: p.checksPassed === true, inputsModified: Array.isArray(p.inputsModified) ? p.inputsModified.map(String) : [] });
     } else if (event.type === "agent.task.blocked") {
-      Object.assign(row, { status: "blocked", blockerCode: String(p.code ?? ""), durationMs: Number(p.durationMs ?? 0), commands: Number(p.commands ?? 0), denied: Number(p.decisions ?? 0) });
+      Object.assign(row, { status: "blocked", blockerCode: String(p.code ?? ""), blockerMessage: String(p.message ?? ""), durationMs: Number(p.durationMs ?? 0), commands: Number(p.commands ?? 0), denied: Number(p.decisions ?? 0) });
     } else if (event.type === "agent.task.reviewed") {
       row.status = p.decision === "accepted" ? "accepted" : "rejected";
       row.reviewNote = String(p.note ?? "");

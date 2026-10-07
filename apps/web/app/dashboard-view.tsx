@@ -1,6 +1,7 @@
 import type { CSSProperties } from "react";
 import { OfflineCaptureForm, OfflineReplay } from "./offline-command-forms";
-import { WaitingCard } from "./waiting-card";
+import { AskList } from "./ask-list";
+import type { Ask } from "@crossline/core";
 import { BatchCaptureForm } from "./batch-capture-form";
 import { AnalogClock } from "./analog-clock";
 import { EnergyProbe } from "./energy-probe";
@@ -54,7 +55,8 @@ export type DashboardData = {
   progress: { streakDays: number; weekCount: number };
   todayCapacity: { availableMinutes: number; committedMinutes: number };
   /** Things the person is waiting for whose expected day has come: each asks 「到了吗？」. Absent on old data. */
-  waitingDue?: Array<{ id: string; title: string; who: string; expectedAt: string; approximate: boolean; blocks: string[] }>;
+  /** The system's open questions, most urgent first (`lib/asks.ts`); 「…到了吗？」 is one of them. */
+  asks?: Ask[];
   flywheel: Array<{ id: string; fromTitle: string; toTitle: string; kindLabel: string; explanation: string | null; pending: boolean }>;
   identities: Array<{ id: string; label: string; accent: string; completedCount: number; activeMilestone: string; taskCount: number; totalCount: number; pct: number }>;
   flywheelStrip: {
@@ -157,7 +159,7 @@ export function DashboardView({ data }: { data: DashboardData }) {
         <EnergyProbe context="after_rest" />
       </div>}
 
-      {(data.waitingDue ?? []).map((item) => <WaitingCard key={item.id} item={item} />)}
+      <AskList initial={data.asks ?? []} visible={3} moreHref="/approvals#asks" />
 
       <section className="panel capture-line" aria-labelledby="capture-title">
         <header><h2 id="capture-title">快速收集</h2><small>写下来就行，系统会自己分类、估时</small></header>

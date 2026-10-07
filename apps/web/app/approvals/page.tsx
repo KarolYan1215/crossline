@@ -12,6 +12,8 @@ import { TaskPreview } from "../task-preview";
 import { loadTaskDetailsBatch } from "../../lib/task-detail";
 import { countPending } from "../../lib/pending";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
+import { loadAsks } from "../../lib/asks";
+import { AskList } from "../ask-list";
 
 export const dynamic = "force-dynamic";
 
@@ -39,6 +41,7 @@ export default async function ApprovalsPage() {
     else gateBlocks.delete(event.entityId);
   }
   const pending = countPending(ctx);
+  const asks = await loadAsks(ctx);
   const anchors = new Map(getStore().listMilestoneAnchors(ctx.workspaceId).map((anchor) => [anchor.milestoneId, anchor]));
   const lineOrder = defaultIdentityPacks().map((pack) => pack.id);
   // By line, then by when it is due, so a line's drafts read as the sequence they are.
@@ -97,13 +100,14 @@ export default async function ApprovalsPage() {
     description={pending.total ? `${pending.total} 件事在等你决定。内部、可撤销的准备工作会自己生效（一天内可撤销），其余都等你点头。` : "没有等你决定的事。"}>
     <section className="pending-list" aria-label="待确认汇总">
       {([
-        ["作业方案", pending.workOrders, "#proposals"], ["计划差异", pending.planChanges, "/plan#plan-changes"],
+        ["要你回答的", asks.length, "#asks"], ["作业方案", pending.workOrders, "#proposals"], ["计划差异", pending.planChanges, "/plan#plan-changes"],
         ["里程碑草稿", pending.milestoneDrafts, "/milestones"], ["主线联系（待复盘）", pending.relations, "/review"],
         ["调研建议", pending.research, "/onboarding"], ["文件里的日期", pending.dates, "/onboarding"], ["待你回答的问题", pending.questions, "/onboarding"], ["暂定目标待你过目", pending.targets, "/milestones"],
         ["助手想做的新类别", pending.assistantKinds, "/assistant"], ["助手中途的提问", pending.assistantQuestions, "/assistant"], ["助手的产出待审", pending.assistantReviews, "/assistant"]
       ] as const).filter(([, count]) => count > 0).map(([label, count, href]) =>
         <a key={label} className="panel" href={href}><b>{count}</b><span>{label}</span></a>)}
     </section>
+    <AskList initial={asks} visible={50} />
     {autoApproved.length > 0 && <section className="pending-block" aria-label="最近自动生效">
       <h2>最近自动生效 · {autoApproved.length}</h2>
       <p className="review-note">这些是内部、可撤销的准备工作，系统替你批准了；一天内不想要就撤销，它会回到这里等你决定，且不会再自动生效。</p>

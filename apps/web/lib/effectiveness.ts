@@ -59,7 +59,7 @@ export async function loadEffectiveness(ctx: AccessContext, now = new Date()): P
 
   // Decisions the person made this week: approvals, accepted drafts, answered follow-ups and relation decisions.
   const decisionEvents = store.listEvents(ctx.workspaceId, { type: ["work_order.transitioned", "milestone.revised", "waiting.arrived", "waiting.deferred",
-    "waiting.cancelled", "milestone_relation.decided", "work_order.auto_approval_revoked"] })
+    "waiting.cancelled", "milestone_relation.decided", "work_order.auto_approval_revoked", "ask.answered"] })
     .filter((event) => event.createdAt >= weekAgo && (event.type !== "work_order.transitioned"
       || (event.payload as { event?: { type?: string; approvalId?: string } }).event?.approvalId === ctx.principalId));
 

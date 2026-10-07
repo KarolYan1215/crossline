@@ -699,6 +699,26 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .line-drafts ul{margin:0}
 .line-drafts-bar{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 12px}
 .assistant-card{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;padding:8px;border:1px dashed var(--graphite);margin:6px 0}
-.waiting-card{border-left:4px solid var(--ink);margin:12px 0}
+.ask-list{margin:12px 0;display:grid;gap:6px}
+.ask-list>header{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.ask-list>header h2{margin:0;font-size:14px;font-weight:700}
+.ask-list>header a{font-size:13px;color:var(--graphite)}
+.ask-list ol{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.ask-card{border:1px solid var(--mist);border-left:4px solid var(--lc,var(--ink));padding:8px 10px;background:var(--paper);min-width:0}
+.ask-card[data-urgency="now"]{border-color:var(--ink)}
+.ask-card h3{margin:2px 0 4px;font-size:14px}
+.ask-meta{display:flex;gap:8px;align-items:baseline;margin:0;font-size:13px;color:var(--graphite)}
+.ask-why{margin:0 0 6px;font-size:13px;color:var(--graphite);overflow-wrap:anywhere}
+.ask-options{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:6px}
+.ask-option{display:grid;gap:2px;text-align:left;padding:6px 9px;border:1px solid var(--mist);background:transparent;color:var(--ink);font-size:13px;min-width:0}
+.ask-option small{font-size:12px;color:var(--graphite)}
+.ask-option:hover,.ask-option[aria-pressed="true"]{border-color:var(--ink)}
+.ask-option[aria-pressed="true"]{outline:2px solid var(--ink);outline-offset:-2px}
+.ask-recommended{font-weight:400}
+.ask-follow-up{display:grid;gap:6px;margin-top:8px}
+.ask-follow-up label{display:grid;gap:3px;font-size:13px}
+.ask-follow-up textarea,.ask-follow-up input{font:inherit;font-size:14px;padding:4px 6px;border:1px solid var(--mist);background:var(--paper);color:var(--ink);max-width:100%}
+.ask-later{display:flex;gap:8px;align-items:center;margin:6px 0 0;flex-wrap:wrap}
+.ask-later .text-button{font-size:12px;padding:2px 8px}
 .byproduct-line{border-left:3px dashed var(--graphite);padding-left:8px}
 .effectiveness-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}

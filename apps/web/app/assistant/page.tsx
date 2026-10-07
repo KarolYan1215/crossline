@@ -14,7 +14,7 @@ const minutes = (ms: number) => ms >= 60_000 ? `${Math.round(ms / 60_000)} 分�
 /** What one finished task did and made, read from the record written beside its files. Everything here is the app's own record except the assistant's own account, which is labelled as such. */
 function TaskBody({ ctx, task }: { ctx: Awaited<ReturnType<typeof requireSessionContext>>; task: AssistantView["tasks"][number] }) {
   const detail = loadTaskAudit(ctx, task.taskId);
-  if (!detail) return <p className="muted">{task.status === "running" ? "还在做，做完会出现在这里。" : task.blockerCode ? `没做成：${task.blockerCode}` : "找不到这次的记录文件。"}</p>;
+  if (!detail) return <p className="muted">{task.status === "running" ? "还在做，做完会出现在这里。" : task.blockerCode ? `没做成：${task.blockerMessage || task.blockerCode}` : "找不到这次的记录文件。"}</p>;
   const file = (relative: string) => `/api/agent/tasks/${encodeURIComponent(task.taskId)}/file?path=${encodeURIComponent(relative)}`;
   return <div className="assistant-detail">
     <p>{detail.summary} <small className="muted">（这是助手自己的说明）</small></p>

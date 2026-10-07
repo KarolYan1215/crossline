@@ -42,3 +42,28 @@ test("a pass delivers and records each message once", async () => {
   expect(shown).toEqual(["今天的 Crossline", "师兄的真实测量数据到了吗？"]);
   store.close();
 });
+
+// One definition of "needs you": when the web's snapshot is fresh, its asks are what interrupt, and only the ones that
+// would cost a deadline within two days. A gate whose run failed is not announced as a verdict on the work.
+test("with the web's asks, only those two days from a deadline interrupt, and they share the daily cap", () => {
+  const asks = [{ id: "bp:e:m1", title: "「MoS₂」还缺：实测数据", urgency: "now" as const, path: "/" },
+    { id: "cap:c:0", title: "「整理意见」没能自动拆解", urgency: "later" as const, path: "/approvals#asks" }];
+  const planned = planNotifications({ ...base, asks });
+  expect(planned[0]!.body).toContain("要你答：「MoS₂」还缺：实测数据");
+  expect(planned.filter((item) => item.kind === "urgent").map((item) => item.title))
+    .toEqual(["「MoS₂」还缺：实测数据", "明天到期：实测 MoS₂ 参数可驱动 NeuroSim"]);
+  expect(planNotifications({ ...base, waitingDue: [], dueSoon: [], gateRefusals: [{ id: "g", title: "仿真", message: "SKILL_UNAUTHENTICATED" }] })
+    .filter((item) => item.kind === "urgent").map((item) => item.title)).toEqual(["验收没跑成：仿真"]);
+});
+
+test("a pass reads the web's snapshot while it is fresh and its own reading once it is stale", async () => {
+  const store = new CrosslineStore(":memory:");
+  store.setSetting("w", "schedule.availability", JSON.stringify(windows));
+  const now = new Date("2026-10-08T14:10:00Z");
+  store.setSetting("w", "attention.snapshot", JSON.stringify({ at: new Date(now.getTime() - 5 * 60_000).toISOString(), pending: 7,
+    asks: [{ id: "risk:m", title: "「MoS₂」可能赶不上 10/9", urgency: "now", path: "/" }] }));
+  const shown: Array<[string, string]> = [];
+  await notifyPass(store, "w", now, async (title, body) => { shown.push([title, body]); return true; });
+  expect(shown[0]![1]).toContain("7 件等你决定");
+  expect(shown.map(([title]) => title)).toContain("「MoS₂」可能赶不上 10/9");
+});

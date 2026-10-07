@@ -197,7 +197,7 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
     const inputsModified = changedFiles(before, after);
     if (!result.ok) {
       store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:blocked:${taskId}`, type: "agent.task.blocked", entityId: taskId,
-        payload: { taskId, code: result.blocker.code, durationMs: Date.now() - startedAt, commands: audit.commands.length, decisions: audit.decisions.length, inputsModified } });
+        payload: { taskId, code: result.blocker.code, message: result.blocker.message.slice(0, 400), durationMs: Date.now() - startedAt, commands: audit.commands.length, decisions: audit.decisions.length, inputsModified } });
       return blocked(result.blocker.code, result.blocker.message);
     }
 

@@ -13,7 +13,7 @@ import { createNightlyFlywheel } from "./nightly";
 import { createDiligenceRunner, linesDueForDiligence } from "./diligence";
 import { createAgentService } from "./agent-service";
 import { createCalendarPublisher } from "./calendar-publish";
-import { budgetPolicy } from "@crossline/core";
+import { budgetPolicy, CALENDAR_SYNC_FAILURE } from "@crossline/core";
 import { createFlywheelExpander } from "./flywheel";
 import { createManualbookBuilder, pendingMaterialWorkOrders } from "./manualbook";
 import { createMilestoneGate, pendingMilestoneGates } from "./milestone-gate-runner";
@@ -169,6 +169,11 @@ async function tick(): Promise<void> {
     for (const workspace of workspaces) {
       const outcome = await calendar.sync(workspace.id).catch((error): SyncOutcome =>
         ({ state: "blocked", code: "GRAPH_SYNC_FAILED", message: error instanceof Error ? error.message : "" }));
+      // What failed is kept where the web reads it (an ask: 「日历读不到了」), and cleared by the next clean read. It used to be a
+      // log line only, so a signed-out account looked exactly like a quiet calendar.
+      const failure = outcome.state === "blocked" ? { code: outcome.code, message: outcome.message ?? "", sources: [] as string[] }
+        : outcome.failed?.length ? { code: outcome.failed[0]!.code, message: "", sources: outcome.failed.map((item) => item.label) } : undefined;
+      try { analysisStore.setSetting(workspace.id, CALENDAR_SYNC_FAILURE, failure ? JSON.stringify({ ...failure, at: checkedAt }) : ""); } catch { /* housekeeping */ }
       if (outcome.state === "blocked" || outcome.changes > 0 || outcome.resynced) {
         console.info(JSON.stringify({ type: `graph.${outcome.state}`, checkedAt, workspaceId: workspace.id, ...outcome }));
       }

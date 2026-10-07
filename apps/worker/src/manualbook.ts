@@ -131,7 +131,10 @@ export function createManualbookBuilder(store: CrosslineStore, workspaceId: stri
       ownerId, workspaceId, idempotencyKey: `manualbook:progress:${workOrderId}:${stage}:${done}:${randomUUID()}`, type: "manualbook.progress",
       entityId: workOrderId, payload: { stage, done, total } satisfies ManualProgress });
     const fail = (code: string, message: string): ManualOutcome => {
-      store.appendEvent({ ownerId, workspaceId, idempotencyKey: `materials:blocked:${workOrderId}:${code}`, type: "materials.blocked", entityId: workOrderId, payload: { code, message } });
+      // Keyed per retry: a retry that failed with the same code as before used to collide with the first block, so the retry
+      // request stayed the last word and the order was prepared again on every tick.
+      const attempt = store.listEvents(workspaceId, { type: "materials.retry_requested", entityId: workOrderId }).length;
+      store.appendEvent({ ownerId, workspaceId, idempotencyKey: `materials:blocked:${workOrderId}:${code}:${attempt}`, type: "materials.blocked", entityId: workOrderId, payload: { code, message } });
       return blocked(code, message);
     };
 
