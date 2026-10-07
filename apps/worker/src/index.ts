@@ -6,6 +6,7 @@ import { enterUsageWorkspace, setSpendModeProvider, setUsageSink, startCodexSupe
 import { CrosslineStore } from "@crossline/db";
 import { capturesAwaitingAutoAnalysis, createCaptureAnalyzer } from "./analysis";
 import { retireShadowedDemos } from "./demo-cleanup";
+import { notifyPass } from "./notify";
 import { createActivityTracker } from "./activity-recorder";
 import { createWindowsActivitySource } from "./activity-source";
 import { createNightlyFlywheel } from "./nightly";
@@ -611,6 +612,21 @@ if (process.env.CROSSLINE_RUN_ONCE === "1") {
   // before either writes, so the same order gets prepared or judged twice, two calendar syncs race on
   // one delta cursor, and the nightly window is evaluated twice. A skipped tick costs fifteen minutes;
   // an overlapping one costs duplicated Codex spend and a corrupted cursor.
+  // Notifications run on their own short clock, not inside the tick: a tick can spend an hour preparing
+  // materials, and a morning brief that arrives at noon is not a morning brief. Reads only; never overlaps.
+  let notifying = false;
+  if (process.env.CROSSLINE_NOTIFY !== "off") setInterval(() => {
+    if (notifying) return;
+    notifying = true;
+    void (async () => {
+      for (const workspace of analysisStore.listWorkspaces()) {
+        try {
+          const sent = await notifyPass(analysisStore, workspace.id, new Date());
+          if (sent.length) console.info(JSON.stringify({ type: "notification.sent", workspaceId: workspace.id, sent }));
+        } catch { /* a notification is never worth a crash */ }
+      }
+    })().finally(() => { notifying = false; });
+  }, 2 * 60_000);
   let ticking = false;
   setInterval(() => {
     if (ticking) {

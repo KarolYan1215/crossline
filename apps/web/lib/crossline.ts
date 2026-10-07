@@ -862,6 +862,7 @@ function findWorkOrder(workspaceId: string, workOrderId: string) {
 }
 
 export function approveWorkOrderProposal(ctx: AccessContext, workOrderId: string): ExecutionResult {
+  if (requiredApproval("approve_work_orders") === "never") return { ok: false, code: "APPROVAL_NOT_PERMITTED" };
   const workOrder = findWorkOrder(ctx.workspaceId, workOrderId);
   if (!workOrder) return { ok: false, code: "WORK_ORDER_NOT_FOUND" };
   if (workOrder.state === "approved") return { ok: true };

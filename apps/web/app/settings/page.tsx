@@ -2,6 +2,7 @@ import { SubpageShell } from "../subpage-shell";
 import { AvailabilityEditor } from "../plan/availability-editor";
 import { LocalActivityToggle } from "./local-activity-toggle";
 import { UsageCard } from "./usage-card";
+import { NotifyLevel } from "./notify-level";
 import { ConnectionsSection } from "../connectors/connections";
 import {
   ACTIVITY_BLACKLIST, ACTIVITY_DETAIL_CONSENT, ACTIVITY_PAUSED_UNTIL, getStore, lastNight, LOCAL_ACTIVITY_CONSENT, readAvailability, readGoalSettings, readSchedulePreferences
@@ -44,6 +45,10 @@ export default async function SettingsPage() {
   return <SubpageShell active="设置" title="设置">
     <details className="fold" open><summary>作息与可用时间</summary>
       <AvailabilityEditor windows={readAvailability(ctx)} preferences={effectivePreferences} milestones={milestones} suggested={suggestedAvailabilityFor(ctx)} />
+    </details>
+    <details className="fold" open><summary>提醒</summary>
+      <NotifyLevel level={store.getSetting(ctx.workspaceId, "notify.level") ?? "normal"} />
+      <p className="muted">每个工作块开始前 10 分钟的提醒、等待项到期日和截止前 2 天的提醒，写在名为 Crossline 的日历上，由 Outlook 和手机推送。</p>
     </details>
     <details className="fold"><summary>屏幕活动与隐私</summary>
       <LocalActivityToggle consent={consent} detail={detail} pausedUntil={store.getSetting(ctx.workspaceId, ACTIVITY_PAUSED_UNTIL) || null} blacklist={blacklist} />

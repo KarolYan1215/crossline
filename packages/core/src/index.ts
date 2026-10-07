@@ -353,7 +353,10 @@ const APPROVAL_TIERS = {
   auto_approve_internal_order: "automatic",
   approve_milestone_relations: "batch",
   approve_plan_changes: "batch",
-  write_focus_block: "batch",
+  // The approved plan's own blocks follow it onto the calendar named Crossline without a click — the person's
+  // choice (2026-10-06). What may be written did not move: only that calendar, only events this app made and
+  // the person has not changed, deletes only in the future, previews never. See CLAUDE.md, Safety boundaries.
+  write_focus_block: "automatic",
   // Dates read out of the person's own files, confirmed as one batch. Never automatic: a wrong date on a
   // calendar is worse than a missing one, so the person sees every item with its quote first.
   import_dated_items: "batch",

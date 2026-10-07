@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { CROSSLINE_CALENDAR_NAME, CrosslineCalendarWriter, eventHash, OWNER_PROPERTY_ID, type PublishBlock, type PublishLedger } from "./crossline-calendar";
 
-type Event = { id: string; subject: string; start: { dateTime: string }; end: { dateTime: string }; singleValueExtendedProperties?: Array<{ id: string; value: string }> };
+type Event = { id: string; subject: string; start: { dateTime: string }; end: { dateTime: string }; isReminderOn?: boolean; reminderMinutesBeforeStart?: number; singleValueExtendedProperties?: Array<{ id: string; value: string }> };
 type Calendar = { id: string; name: string; isDefaultCalendar: boolean; events: Event[] };
 
 /** The way Graph writes a time back: seven fractional digits, no zone. */
@@ -30,13 +30,17 @@ function fakeGraph(seed: Calendar[], options: { forbid?: number } = {}) {
       return json({ value: calendar.events.map((event) => ({ ...event, singleValueExtendedProperties: event.singleValueExtendedProperties?.filter((p) => p.id === OWNER_PROPERTY_ID) })) });
     }
     if (method === "POST") {
-      const made: Event = { id: `ev-${(ids += 1)}`, subject: body.subject, start: { dateTime: spell(body.start.dateTime) }, end: { dateTime: spell(body.end.dateTime) }, singleValueExtendedProperties: body.singleValueExtendedProperties };
+      const made: Event = { id: `ev-${(ids += 1)}`, subject: body.subject, start: { dateTime: spell(body.start.dateTime) }, end: { dateTime: spell(body.end.dateTime) },
+        isReminderOn: body.isReminderOn, ...(body.reminderMinutesBeforeStart !== undefined ? { reminderMinutesBeforeStart: body.reminderMinutesBeforeStart } : {}),
+        singleValueExtendedProperties: body.singleValueExtendedProperties };
       calendar.events.push(made);
       return json({ id: made.id }, 201);
     }
     const event = calendar.events.find((item) => item.id === match[2]);
     if (!event) return json({}, 404);
-    if (method === "PATCH") { if (body.subject) event.subject = body.subject; if (body.start) event.start = { dateTime: spell(body.start.dateTime) }; if (body.end) event.end = { dateTime: spell(body.end.dateTime) }; return json({ id: event.id }); }
+    if (method === "PATCH") { if (body.subject) event.subject = body.subject; if (body.start) event.start = { dateTime: spell(body.start.dateTime) }; if (body.end) event.end = { dateTime: spell(body.end.dateTime) };
+      if (body.isReminderOn !== undefined) event.isReminderOn = body.isReminderOn; if (body.reminderMinutesBeforeStart !== undefined) event.reminderMinutesBeforeStart = body.reminderMinutesBeforeStart;
+      return json({ id: event.id }); }
     if (method === "DELETE") { calendar.events.splice(calendar.events.indexOf(event), 1); return new Response(null, { status: 204 }); }
     return json({}, 405);
   }) as typeof fetch;
@@ -155,5 +159,34 @@ describe("failure", () => {
 
   test("the content hash is stable across the way Graph spells a time", () => {
     expect(eventHash("x", "2026-10-13T14:00:00Z", "2026-10-13T15:00:00Z")).toBe(eventHash("x", "2026-10-13T14:00:00.0000000", "2026-10-13T15:00:00.0000000"));
+  });
+});
+
+describe("reminders", () => {
+  const remind = (minutes: number | null): PublishBlock => ({ ...block("scheduled:a:1", "整理 SRAM 笔记", "2026-10-13T14:00:00Z", "2026-10-13T15:00:00Z"), reminderMinutes: minutes });
+
+  test("a new event carries its reminder; the ledger remembers it", async () => {
+    const graph = fakeGraph(human());
+    const { ledger } = await writer(graph).publish([remind(10)], {});
+    expect(crossline(graph).events[0]).toMatchObject({ isReminderOn: true, reminderMinutesBeforeStart: 10 });
+    expect(ledger["scheduled:a:1"]!.reminder).toBe(10);
+  });
+
+  test("an event written before reminders existed is given its reminder, and nothing else changes", async () => {
+    const graph = fakeGraph(human());
+    const first = await writer(graph).publish([remind(null)], {});
+    const legacy: PublishLedger = { "scheduled:a:1": { eventId: first.ledger["scheduled:a:1"]!.eventId, hash: first.ledger["scheduled:a:1"]!.hash } };
+    const { result } = await writer(graph).publish([remind(10)], legacy);
+    expect(result).toMatchObject({ updated: 1, keptAsEdited: [] });
+    expect(crossline(graph).events[0]).toMatchObject({ subject: "整理 SRAM 笔记", isReminderOn: true, reminderMinutesBeforeStart: 10 });
+  });
+
+  test("a reminder the person changed by hand is theirs: the content still follows the plan, the reminder does not", async () => {
+    const graph = fakeGraph(human());
+    const first = await writer(graph).publish([remind(10)], {});
+    crossline(graph).events[0]!.reminderMinutesBeforeStart = 30;
+    const { result } = await writer(graph).publish([{ ...remind(10), title: "整理 SRAM 笔记（改）" }], first.ledger);
+    expect(result.updated).toBe(1);
+    expect(crossline(graph).events[0]).toMatchObject({ subject: "整理 SRAM 笔记（改）", reminderMinutesBeforeStart: 30 });
   });
 });

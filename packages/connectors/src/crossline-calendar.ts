@@ -20,9 +20,15 @@ export type PublishBlock = {
   /** ISO instants. */
   start: string; end: string;
   note?: string;
+  /** Minutes before the start to remind; absent or null means no reminder. Outlook and the phone deliver it. */
+  reminderMinutes?: number | null;
 };
-/** What was last written for each block, kept by the caller between runs: the event, and a hash of its content as written. */
-export type PublishLedger = Record<string, { eventId: string; hash: string }>;
+/**
+ * What was last written for each block, kept by the caller between runs: the event, a hash of its content as written,
+ * and the reminder it was given. `reminder` absent means an entry from before reminders existed, when every event was
+ * written with none — so an event still without one is untouched and may be given its reminder.
+ */
+export type PublishLedger = Record<string, { eventId: string; hash: string; reminder?: number | null }>;
 export type PublishResult = {
   calendarId: string; created: number; updated: number; deleted: number; unchanged: number;
   /** Blocks whose event the person has changed since; left exactly as they made it. */
@@ -32,6 +38,7 @@ export type PublishResult = {
 type Credential = { getAccessToken(): Promise<string | undefined> };
 type GraphEvent = {
   id?: string; subject?: string; start?: { dateTime?: string }; end?: { dateTime?: string };
+  isReminderOn?: boolean; reminderMinutesBeforeStart?: number;
   singleValueExtendedProperties?: Array<{ id?: string; value?: string }>;
 };
 
@@ -106,7 +113,7 @@ export class CrosslineCalendarWriter {
   async #ownedEvents(calendarId: string): Promise<Map<string, GraphEvent & { id: string }>> {
     const owned = new Map<string, GraphEvent & { id: string }>();
     const filter = encodeURIComponent(`id eq '${OWNER_PROPERTY_ID}'`);
-    let url: string | undefined = `/me/calendars/${encodeURIComponent(calendarId)}/events?$top=100&$select=id,subject,start,end&$expand=singleValueExtendedProperties($filter=${filter})`;
+    let url: string | undefined = `/me/calendars/${encodeURIComponent(calendarId)}/events?$top=100&$select=id,subject,start,end,isReminderOn,reminderMinutesBeforeStart&$expand=singleValueExtendedProperties($filter=${filter})`;
     for (let pages = 0; url && pages < 30; pages += 1) {
       const response = await this.#call("GET", url);
       if (!response.ok) throw new Error(`CALENDAR_EVENTS_FAILED:${response.status}`);
@@ -138,17 +145,19 @@ export class CrosslineCalendarWriter {
       wanted.add(block.id);
       const subject = block.title;
       const hash = eventHash(subject, block.start, block.end);
+      const reminder = block.reminderMinutes ?? null;
+      const reminderFields = reminder === null ? { isReminderOn: false } : { isReminderOn: true, reminderMinutesBeforeStart: reminder };
       const existing = owned.get(block.id);
       if (!existing) {
         const response = await this.#call("POST", events, {
-          subject, start: asGraphTime(block.start), end: asGraphTime(block.end), categories: [CROSSLINE_CALENDAR_NAME], showAs: "free", isReminderOn: false,
+          subject, start: asGraphTime(block.start), end: asGraphTime(block.end), categories: [CROSSLINE_CALENDAR_NAME], showAs: "free", ...reminderFields,
           body: { contentType: "text", content: block.note ?? "由 Crossline 排入。在 Crossline 里改计划，这里会跟着变；在这里手动改过的，Crossline 之后不会再动它。" },
           singleValueExtendedProperties: [{ id: OWNER_PROPERTY_ID, value: block.id }]
         });
         const made = response.ok ? await response.json() as { id?: string } : undefined;
         if (!made?.id) throw new Error(`CALENDAR_EVENT_CREATE_FAILED:${response.status}`);
         this.#owned.add(made.id);
-        next[block.id] = { eventId: made.id, hash };
+        next[block.id] = { eventId: made.id, hash, reminder };
         result.created += 1;
         continue;
       }
@@ -159,10 +168,21 @@ export class CrosslineCalendarWriter {
         result.keptAsEdited.push(block.id);
         continue;
       }
-      if (current === hash) { result.unchanged += 1; continue; }
-      const response = await this.#call("PATCH", `${events}/${encodeURIComponent(existing.id)}`, { subject, start: asGraphTime(block.start), end: asGraphTime(block.end) });
+      // The reminder is the person's too once they change it: compared with what was last written (none, for an
+      // entry from before reminders), and left alone when it differs — only the content keeps following the plan.
+      const currentReminder = existing.isReminderOn ? existing.reminderMinutesBeforeStart ?? 0 : null;
+      const reminderTheirs = currentReminder !== (lastWritten.reminder ?? null);
+      const reminderChange = !reminderTheirs && currentReminder !== reminder;
+      if (current === hash && !reminderChange) {
+        result.unchanged += 1;
+        if (!reminderTheirs) next[block.id] = { eventId: existing.id, hash, reminder };
+        continue;
+      }
+      const response = await this.#call("PATCH", `${events}/${encodeURIComponent(existing.id)}`, {
+        ...(current !== hash ? { subject, start: asGraphTime(block.start), end: asGraphTime(block.end) } : {}),
+        ...(reminderChange ? reminderFields : {}) });
       if (!response.ok) throw new Error(`CALENDAR_EVENT_UPDATE_FAILED:${response.status}`);
-      next[block.id] = { eventId: existing.id, hash };
+      next[block.id] = { eventId: existing.id, hash, reminder: reminderChange ? reminder : lastWritten.reminder ?? null };
       result.updated += 1;
     }
 

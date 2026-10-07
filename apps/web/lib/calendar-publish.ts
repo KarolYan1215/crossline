@@ -1,8 +1,13 @@
 import "server-only";
 import type { AccessContext } from "@crossline/core";
-import { effectiveSchedulePreferences, loadCurrentPlan, toZonedInstant } from "./crossline";
+import { effectiveSchedulePreferences, getStore, loadCurrentPlan, planToday, toZonedInstant } from "./crossline";
 
-export type PublishBlockInput = { id: string; title: string; start: string; end: string };
+export type PublishBlockInput = { id: string; title: string; start: string; end: string; reminderMinutes?: number | null };
+
+/** Work blocks remind ten minutes ahead (the person asked for every block); follow-ups and deadline warnings at their start. */
+export const BLOCK_REMINDER_MINUTES = 10;
+/** A deadline is announced this many days ahead on the Crossline calendar. */
+export const DEADLINE_NOTICE_DAYS = 2;
 
 /**
  * The blocks the scheduler placed for work orders, as instants. Only these go to the Crossline calendar: real calendar events,
@@ -19,8 +24,36 @@ export async function blocksToPublish(ctx: AccessContext, now = new Date()): Pro
     try {
       const start = toZonedInstant(block.day, block.start, zone);
       const end = toZonedInstant(block.day, block.end === "24:00" ? "23:59" : block.end, zone);
-      return Date.parse(end) > now.getTime() && Date.parse(end) > Date.parse(start) ? [{ id: block.id, title: block.title, start, end }] : [];
+      return Date.parse(end) > now.getTime() && Date.parse(end) > Date.parse(start) ? [{ id: block.id, title: block.title, start, end, reminderMinutes: BLOCK_REMINDER_MINUTES }] : [];
     } catch { return []; }
   });
-  return { approved: plan.status === "approved", blocks };
+  return { approved: plan.status === "approved", blocks: [...blocks, ...noticeBlocks(ctx, now)] };
+}
+
+/**
+ * Two kinds of short marker events beside the work blocks, each reminding at its start so Outlook and the phone
+ * deliver it: the day something the person waits for is due (「跟进：师兄的数据到了吗？」), and two days before an
+ * approved milestone's deadline. Fifteen minutes at the start of the day, shown as free like everything written here.
+ */
+export function noticeBlocks(ctx: AccessContext, now = new Date()): PublishBlockInput[] {
+  const store = getStore();
+  const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
+  const today = planToday(ctx, now);
+  const marker = (id: string, title: string, day: string): PublishBlockInput[] => {
+    try {
+      const start = toZonedInstant(day, "09:00", zone);
+      const end = toZonedInstant(day, "09:15", zone);
+      return Date.parse(end) > now.getTime() ? [{ id, title, start, end, reminderMinutes: 0 }] : [];
+    } catch { return []; }
+  };
+  const followUps = store.listWaitingItems(ctx.workspaceId, { state: "open" }).filter((item) => item.followUpAt >= today)
+    .flatMap((item) => marker(`followup:${item.id}`, `跟进：${item.who ? `${item.who}的` : ""}${item.title}到了吗？`, item.followUpAt));
+  const approved = new Map(store.listMilestones(ctx.workspaceId).filter((milestone) => milestone.status === "approved").map((milestone) => [milestone.id, milestone]));
+  const deadlines = store.listMilestoneAnchors(ctx.workspaceId).flatMap((anchor) => {
+    const milestone = approved.get(anchor.milestoneId);
+    if (!milestone || !anchor.deadline) return [];
+    const day = new Date(Date.parse(`${anchor.deadline}T00:00:00Z`) - DEADLINE_NOTICE_DAYS * 86_400_000).toISOString().slice(0, 10);
+    return day >= today ? marker(`deadline:${milestone.id}`, `${DEADLINE_NOTICE_DAYS} 天后到期：${milestone.title}`, day) : [];
+  });
+  return [...followUps, ...deadlines];
 }

@@ -16,6 +16,13 @@ export async function register(): Promise<void> {
   // imports still pulled `better-sqlite3` (a native module, unavailable on edge) into that bundle and
   // failed the whole dev server on `Module not found: Can't resolve 'fs'`, found by actually starting it.
   if (process.env.NEXT_RUNTIME === "nodejs") {
+    // The Crossline calendar follows the approved plan on its own (the person chose this). Off in tests and
+    // e2e, and with CROSSLINE_AUTO_PUBLISH=off; a failing pass is logged by nobody and retried next interval.
+    if (process.env.CROSSLINE_AUTO_PUBLISH !== "off" && !process.env.VITEST && !process.env.CROSSLINE_E2E_DATA_DIR) {
+      const { autoPublishPass, AUTO_PUBLISH_INTERVAL_MS } = await import("./lib/auto-publish");
+      const timer = setInterval(() => { void autoPublishPass().catch(() => {}); }, AUTO_PUBLISH_INTERVAL_MS);
+      timer.unref?.();
+    }
     const { resolveCrosslineAuthOptions } = await import("./lib/auth");
     const options = resolveCrosslineAuthOptions();
     if (!options) return;

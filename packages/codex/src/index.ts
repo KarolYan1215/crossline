@@ -346,7 +346,7 @@ export async function startCodexSupervisor(options: {
   /** Hands a work order to the assistant. Answers at once: the task runs on, and writes its own outcome to the ledger. */
   dispatchAgentTask?: (workspaceId: string, workOrderId: string, category?: string) => unknown;
   /** Writes plan blocks to the person's Crossline calendar. Only blocks; never touches any other calendar or event. */
-  publishCalendar?: (workspaceId: string, blocks: Array<{ id: string; title: string; start: string; end: string; note?: string }>) => Promise<unknown>;
+  publishCalendar?: (workspaceId: string, blocks: Array<{ id: string; title: string; start: string; end: string; note?: string; reminderMinutes?: number | null }>) => Promise<unknown>;
   proposeMilestones?: (client: CodexRpcBoundary, request: string, signal: AbortSignal, workspaceId: string, only?: string[]) => Promise<unknown>;
   continueMilestoneConversation?: (client: CodexRpcBoundary, threadId: string, message: string, signal: AbortSignal, workspaceId: string) => Promise<unknown>;
   /** One turn of the profile interview: the person's message in, the saved turn out. The conversation and
@@ -701,7 +701,8 @@ export async function startCodexSupervisor(options: {
         const blocks = raw.flatMap((entry) => {
           const row = (typeof entry === "object" && entry !== null ? entry : {}) as Record<string, unknown>;
           return typeof row.id === "string" && row.id.length <= 200 && typeof row.title === "string" && row.title.length > 0 && iso(row.start) && iso(row.end) && Date.parse(row.end as string) > Date.parse(row.start as string)
-            ? [{ id: row.id, title: row.title.slice(0, 200), start: row.start as string, end: row.end as string, ...(typeof row.note === "string" ? { note: row.note.slice(0, 500) } : {}) }] : [];
+            ? [{ id: row.id, title: row.title.slice(0, 200), start: row.start as string, end: row.end as string, ...(typeof row.note === "string" ? { note: row.note.slice(0, 500) } : {}),
+              ...(typeof row.reminderMinutes === "number" && Number.isInteger(row.reminderMinutes) && row.reminderMinutes >= 0 && row.reminderMinutes <= 1440 ? { reminderMinutes: row.reminderMinutes } : {}) }] : [];
         }).slice(0, 300);
         sendJson(response, 200, await options.publishCalendar(callerWorkspaceId, blocks));
         return;

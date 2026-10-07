@@ -74,7 +74,10 @@ describe("work order domain rules", () => {
   test("external communication always needs per-item approval", () => {
     expect(requiredApproval("send_outreach_email")).toBe("per_item");
     expect(requiredApproval("publish_content")).toBe("per_item");
-    expect(requiredApproval("write_focus_block")).toBe("batch");
+    // Writing the approved plan's blocks to the calendar named Crossline became automatic by the person's choice;
+    // outreach and publishing stay per item.
+    expect(requiredApproval("write_focus_block")).toBe("automatic");
+    expect(requiredApproval("approve_milestones")).toBe("batch");
     expect(requiredApproval("read_sync")).toBe("automatic");
     // Fail closed. The old shape ended in `return "automatic"`, so one mistyped action name at a call
     // site quietly became the weakest tier in the function everything else is told to defer to.
