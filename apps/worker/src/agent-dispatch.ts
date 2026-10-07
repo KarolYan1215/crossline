@@ -22,14 +22,24 @@ export function taskFromWorkOrder(store: CrosslineStore, workspaceId: string, or
   const { plan, title, projectId } = planned;
   const order = { projectId, intent: title };
   const category = categoryOverride ?? plan.category;
-  // The files the person gave for this project, where they are on disk. Read, never changed.
+  // The files the person gave for this project, where they are on disk — and the ones uploaded during the interview, which belong
+  // to no project (the real ECE 548 lecture plan was one; the assistant was handed nothing and wrote an empty template). Read, never
+  // changed; the assistant picks what is relevant.
   const inputs = store.listSourceDocuments(workspaceId)
-    .filter((doc) => doc.projectId === order.projectId && doc.uri.startsWith("file:"))
+    .filter((doc) => (doc.projectId === order.projectId || !doc.projectId) && doc.uri.startsWith("file:"))
     .flatMap((doc) => { try { return [fileURLToPath(doc.uri)]; } catch { return []; } });
+  // What the person has confirmed about this line, so the work is about them rather than a generic version of the task (the first
+  // content list had to leave every personal angle blank). Confirmed facts only, never the interviewer's guesses.
+  const workOrder = store.listWorkOrders(workspaceId).find((item) => item.id === orderId);
+  const facts = store.listProfileFacts(workspaceId)
+    .filter((fact) => fact.status === "confirmed" && workOrder && fact.identityId === workOrder.identityId
+      && (!fact.projectId || fact.projectId === workOrder.projectId || fact.projectId === `${workOrder.identityId}-default`))
+    .slice(0, 20).map((fact) => `- ${fact.slot}：${fact.value.slice(0, 200)}`);
+  const what = facts.length ? `${plan.what}\n本人确认过的相关事实（可以直接用）：\n${facts.join("\n")}` : plan.what;
   const attempt = listAgentTasks(store, workspaceId).filter((task) => task.workOrderId === orderId).length + 1;
   return {
     ok: true, category, why: plan.why, graded: plan.graded,
-    input: { taskId: `agent-${orderId.replace(/[^a-zA-Z0-9]/g, "").slice(-8)}-${attempt}`, workOrderId: orderId, title: order.intent, what: plan.what,
+    input: { taskId: `agent-${orderId.replace(/[^a-zA-Z0-9]/g, "").slice(-8)}-${attempt}`, workOrderId: orderId, title: order.intent, what,
       category: category ?? "read_research_organize", humanPart: plan.humanPart, inputs, ...(plan.notes ? { notes: plan.notes } : {}),
       ...(plan.delegated ? { delegated: true } : {}) }
   };

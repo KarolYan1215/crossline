@@ -28,6 +28,9 @@ describe("what the assistant is handed", () => {
     expect(plan(step("写完仿真并出图", "deep_work"))).toMatchObject({ fit: false });
     expect(plan(step("整理 ECE 548 期中考试复习提纲", "preparation"), true)).toMatchObject({ fit: false });
     expect(plan(order({ ai: ["整理文献"] }))).toMatchObject({ fit: true, delegated: false });
+    // Choosing is the person's: a real run chose 「真实事项」 for them (and chose the app itself).
+    expect(plan(step("选定一项创始人正在处理的真实事项，记录使用前状态", "preparation"))).toMatchObject({ fit: false });
+    expect(plan(step("从素材库选出四个首轮选题", "review"))).toMatchObject({ fit: false });
   });
 
   test("the AI parts become the task and the human core stays the person's", () => {

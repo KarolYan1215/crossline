@@ -39,6 +39,7 @@ const KEYWORDS: Array<[AgentCategory, RegExp]> = [
   ["files_calendar_prep", /归档|重命名|文件夹|整理文件|日程|会前|备齐|备料|准备材料|检查表|模板/]
 ];
 
+const PERSONS_CALL = /选定|选出|挑选|决定|拍板|亲自|本人确认|和.{0,8}(谈|聊|面谈)/;
 const GRADED = /作业|小测|测验|考试|期中|期末|课程项目|大作业|实验报告|homework|\bhw\s?\d|quiz|exam|midterm|final project|\blab\b|assignment|take-?home/i;
 
 export type DispatchableOrder = {
@@ -97,6 +98,9 @@ function delegateWhole(order: DispatchableOrder, human: Part[], context: { proje
   const text = `${order.intent} ${human.map((part) => part.intent).join(" ")} ${context.milestoneTitle ?? ""}`;
   if (mentionsExternalAction(order.intent, ...human.map((part) => part.intent))) return { fit: false, reason: "这件事要对外（发送、提交、发布等），不整件交给助手。" };
   if (context.projectIsCourse && GRADED.test(text)) return { fit: false, reason: "这是带评分的课程工作，不整件交给助手。" };
+  // Choosing, deciding, doing it in person: the step *is* the person's judgement. One real run was handed 「选定一项创始人正在处理的
+  // 真实事项」 and chose for them — and chose the app itself.
+  if (PERSONS_CALL.test(order.intent)) return { fit: false, reason: "这一步是要你自己选或决定的，不整件交给助手。" };
   const evidence = Array.isArray(payload.evidenceContract)
     ? (payload.evidenceContract as Array<{ description?: string }>).map((item) => item.description).filter(Boolean) : [];
   const category = categoryOf(order.intent) ?? "read_research_organize";

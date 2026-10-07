@@ -73,3 +73,26 @@ test("a question for the person is answered from the ledger, and declined if nob
   const expired = store.listEvents(ws, { type: "agent.approval.requested" }).at(-1)!;
   expect(agentApprovalDecision(store, ws, expired.entityId)).toBe("declined");
 });
+
+// The real ECE 548 outline came back an empty template: the lecture plan was uploaded during the interview, under no project, and the
+// assistant was handed nothing. Unassigned uploads now go with every task, and the line's confirmed facts with them.
+test("files uploaded under no project and the line's confirmed facts reach the task; another project's files and guesses do not", () => {
+  order("wo-bbbb2222", "整理期中复习提纲", ["整理前几章的概念清单"], { projectId: "ece548" });
+  const doc = (id: string, projectId: string | undefined, file: string) => store.saveSourceDocument({ id, ownerId: "o", workspaceId: ws,
+    ...(projectId ? { projectId } : {}), kind: "docx", fileName: file, mediaType: "x", sha256: id, uri: `file:///C:/data/${file}`,
+    extractedText: "", extractionStatus: "done", createdAt: "2026-10-05T00:00:00.000Z" });
+  doc("u1", undefined, "Lecture-Plan.docx");
+  doc("o1", "ece555", "ECE555.pdf");
+  const fact = (slot: string, status: "confirmed" | "inferred", identityId = "research") => store.upsertProfileFact({ workspaceId: ws, identityId,
+    projectId: "ece548", slot, value: `${slot} 的值`, status, sourceRef: "reply-1", sourceQuote: status === "confirmed" ? "原话" : "", updatedAt: "2026-10-05T00:00:00.000Z" });
+  fact("target_grade", "confirmed");
+  fact("guess", "inferred");
+  fact("media_only", "confirmed", "media");
+  const result = taskFromWorkOrder(store, ws, "wo-bbbb2222");
+  if (!result.ok) throw new Error(result.message);
+  expect(result.input.inputs).toHaveLength(1);
+  expect(result.input.inputs![0]).toMatch(/Lecture-Plan\.docx$/);
+  expect(result.input.what).toContain("target_grade：target_grade 的值");
+  expect(result.input.what).not.toContain("guess");
+  expect(result.input.what).not.toContain("media_only");
+});
