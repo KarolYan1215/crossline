@@ -215,3 +215,50 @@ test("the margin is stated in p85: no room above the typical value is refused, a
     }
   }
 });
+
+// v2: dates and waiting are read from the capture itself; a byproduct serves another line.
+const v2Context = {
+  version: "crossline.analysis.v2", today: "2026-10-06",
+  capture: { title: "10月8号左右师兄会给我西湖MoS2的真实测量数据，拿到后跑仿真并画图，10月21号前把图表交给师兄", context: "" },
+  approvedMilestones: [
+    { id: "m", projectId: "p", identityId: "research", title: "图表获师兄接收", version: 1, hasSuccessCriteria: true, deadline: "2026-10-21" },
+    { id: "media-m", projectId: "x", identityId: "media", title: "首轮内容获真实反馈", version: 1, hasSuccessCriteria: true, deadline: "2026-10-19" }],
+  availableInputs: [], identityPacks: [{ id: "research", version: 1, summary: "r" }, { id: "media", version: 1, summary: "m" }],
+  referenceClass: [], relations: [], policy: { tools: [], externalSideEffects: false, humanApprovalRequired: true }
+};
+const v2Proposal = {
+  ...validProposal, milestoneId: "m", intent: "处理实测数据并交付图表",
+  automationParts: [], humanCore: [{ id: "h", intent: "判断数据质量", energy: "high", interruptible: false, quote: "拿到后跑仿真并画图", rationale: "研究判断" }],
+  estimateBreakdown: [{ step: "仿真", minutes: 20 }],
+  dates: [{ kind: "release", date: "2026-10-08", quote: "10月8号左右", approximate: true },
+    { kind: "due", date: "2026-10-21", quote: "10月21号前把图表交给师兄", approximate: false },
+    { kind: "due", date: "2026-10-25", quote: "10月21号前把图表交给师兄", approximate: false }],
+  waitingOn: { who: "师兄", what: "西湖MoS2的真实测量数据", expectedDate: "2026-10-08", quote: "10月8号左右师兄会给我" },
+  byproducts: [{ lineId: "media", milestoneId: "media-m", artifact: "一篇“科研如何发生”的研究日记笔记",
+    captureSteps: [{ step: "仿真时记下每次调参的想法", minutes: 10 }], landing: { minutes: 40, description: "把笔记改成一条小红书草稿" }, why: "自媒体主线需要真实科研素材" }]
+};
+
+test("v2: verifiable dates and the waiting-for are kept; a date the quote does not name is dropped", () => {
+  const result = core.validateAnalysisProposal(v2Proposal, v2Context);
+  expect(result.dates.map((item) => item.date)).toEqual(["2026-10-08", "2026-10-21"]);
+  expect(result.waitingOn).toMatchObject({ who: "师兄", expectedDate: "2026-10-08" });
+  const unverifiable = core.validateAnalysisProposal({ ...v2Proposal, waitingOn: { ...v2Proposal.waitingOn, expectedDate: "2026-10-09" } }, v2Context);
+  expect(unverifiable.waitingOn.who).toBe("");
+});
+
+test("v2: a byproduct must serve another existing line, once, with a concrete artifact", () => {
+  expect(core.validateAnalysisProposal(v2Proposal, v2Context).byproducts).toHaveLength(1);
+  const bad = (byproduct: Record<string, unknown>) => ({ ...v2Proposal, byproducts: [{ ...v2Proposal.byproducts[0], ...byproduct }] });
+  expect(() => core.validateAnalysisProposal(bad({ lineId: "research" }), v2Context)).toThrow("ANALYSIS_BYPRODUCT_INVALID");
+  expect(() => core.validateAnalysisProposal(bad({ lineId: "woodwork" }), v2Context)).toThrow("ANALYSIS_BYPRODUCT_INVALID");
+  expect(() => core.validateAnalysisProposal(bad({ artifact: "保持创作状态" }), v2Context)).toThrow("ANALYSIS_BYPRODUCT_INVALID");
+  expect(() => core.validateAnalysisProposal(bad({ milestoneId: "m" }), v2Context)).toThrow("ANALYSIS_BYPRODUCT_INVALID");
+  expect(() => core.validateAnalysisProposal({ ...v2Proposal, byproducts: [v2Proposal.byproducts[0], v2Proposal.byproducts[0]] }, v2Context))
+    .toThrow("ANALYSIS_BYPRODUCT_INVALID");
+});
+
+test("v2 context no longer carries correction factors to the model", () => {
+  expect(() => core.validateAnalysisContext({ ...v2Context, rhythm: { focusRunMinutes: 0, productiveMinutesPerDay: 0, planActualRatio: 1.4, observedDays: 0, completed: 3 } }))
+    .toThrow("ANALYSIS_CONTEXT_INVALID");
+  expect(core.validateAnalysisContext(v2Context).version).toBe("crossline.analysis.v2");
+});

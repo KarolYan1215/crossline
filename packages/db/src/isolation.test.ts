@@ -33,6 +33,8 @@ const seed = (workspaceId: string, suffix: string) => {
     planVersionId: `plan-${suffix}`, kind: "add", triggerEventId: `trigger-${suffix}`,
     explanation: `变化 ${suffix}`, status: "pending" });
   store.setSetting(workspaceId, "localActivity.consent", suffix === "a" ? "granted" : "denied");
+  store.saveWaitingItem({ id: `wait-${suffix}`, ownerId: `owner-${suffix}`, workspaceId, title: `等 ${suffix}`, who: "师兄",
+    expectedAt: "2026-10-08", approximate: true, followUpAt: "2026-10-08", state: "open", blocks: [`w-${suffix}`], source: "manual" });
 };
 
 beforeEach(() => {
@@ -53,6 +55,7 @@ test("every list is scoped: neither workspace can see the other's rows", () => {
   onlyA(store.listMaterials(A).map((row) => row.id));
   onlyA(store.listEnergyObservations(A).map((row) => row.id));
   onlyA(store.listPlanVersions(A).map((row) => row.id));
+  onlyA(store.listWaitingItems(A).map((row) => row.id));
   // The one that took no workspace at all, and the reason this file exists.
   onlyA(store.listEvents(A).map((row) => row.entityId));
   expect(store.getSetting(A, "localActivity.consent")).toBe("granted");

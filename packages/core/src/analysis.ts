@@ -1,24 +1,52 @@
 import type { WorkOrder } from "./index";
 import { trimLeakedTail } from "./text-hygiene";
+import { quoteSupportsDate } from "./date-schema";
 
 export type AnalysisContext = {
   version: string;
   capture: { title: string; context: string };
   /** `hasSuccessCriteria: false` is a milestone that cannot record progress yet (a starter, a bare draft that was approved). */
-  approvedMilestones: Array<{ id: string; projectId: string; identityId: string; title: string; version: number; hasSuccessCriteria: boolean }>;
+  approvedMilestones: Array<{ id: string; projectId: string; identityId: string; title: string; version: number; hasSuccessCriteria: boolean; deadline?: string }>;
   availableInputs: Array<{ id: string; text: string }>;
   identityPacks: Array<{ id: string; version: number; summary: string }>;
   // How this workspace's own past captures actually turned out, per (identityId, family) — not a
   // suggestion to copy, evidence the model can weigh against its own read of the current capture.
   // `medianActualMinutes: 0` means no real completions exist yet for that pair, same convention
   // `Estimate.observationCount` already uses for "no observations".
-  historicalStats: Array<{ identityId: string; family: "preparation" | "review" | "deep_work"; chosenCount: number; medianActualMinutes: number }>;
+  /** v1 only (dropped in v2: a correction handed to the model and then applied again afterwards). */
+  historicalStats?: Array<{ identityId: string; family: "preparation" | "review" | "deep_work"; chosenCount: number; medianActualMinutes: number }>;
   /**
    * How this person actually works, measured (see `WorkRhythm`). 0 in any field means "not enough data to say", never a default. The ratio is
    * applied to the estimate in code afterwards, so the Skill is told not to apply it itself.
    */
   rhythm?: { focusRunMinutes: number; productiveMinutesPerDay: number; planActualRatio: number; observedDays: number; completed: number };
+  /** v2: the person's local date, so 「周末前」「10月8号左右」 can be grounded to a day. */
+  today?: string;
+  /**
+   * v2: the outside view — up to five finished tasks of the same line and kind, closest in size, with what the
+   * analysis estimated and what they really took. Raw numbers only: no correction factor, which would anchor
+   * the estimate and then be applied a second time by the calibration that runs afterwards.
+   */
+  referenceClass?: Array<{ identityId: string; family: "preparation" | "review" | "deep_work"; title: string; llmP50Minutes: number; actualMinutes: number }>;
+  /** v2: approved links between lines, so a byproduct can name where it helps. */
+  relations?: Array<{ fromMilestoneId: string; toMilestoneId: string; kind: string; explanation: string }>;
   policy: { tools: never[]; externalSideEffects: boolean; humanApprovalRequired: boolean };
+};
+
+/** A dated fact read from the capture itself: when work can start (`release`) or must be done (`due`). */
+export type AnalysisDate = { kind: "release" | "due"; date: string; quote: string; approximate: boolean };
+/** Who the work is waiting for. All empty strings mean it waits for nobody. */
+export type AnalysisWaitingOn = { who: string; what: string; expectedDate: string; quote: string };
+/**
+ * A byproduct for another line: something the same work can also produce. `captureSteps` are done during the
+ * main task (noting ideas while simulating); `landing` is the short follow-up that turns them into the artifact,
+ * scheduled after the main task is done. `milestoneId` is empty when it serves the line but no approved milestone.
+ */
+export type AnalysisByproduct = {
+  lineId: string; milestoneId: string; artifact: string;
+  captureSteps: Array<{ step: string; minutes: number }>;
+  landing: { minutes: number; description: string };
+  why: string;
 };
 type SplitEvidence = { quote: string; rationale: string };
 export type AnalysisProposal = Omit<WorkOrder, "id" | "ownerId" | "workspaceId" | "state" | "automationParts" | "humanCore"> & {
@@ -27,6 +55,9 @@ export type AnalysisProposal = Omit<WorkOrder, "id" | "ownerId" | "workspaceId" 
   blockers: Array<{ code: string; message: string }>;
   /** Focused minutes by step, whose sum is the estimate's median: the number is auditable, and a padded one shows as padding. */
   estimateBreakdown: Array<{ step: string; minutes: number }>;
+  dates: AnalysisDate[];
+  waitingOn: AnalysisWaitingOn;
+  byproducts: AnalysisByproduct[];
 };
 
 type Schema = { type: string; properties?: Record<string, Schema>; required?: string[]; additionalProperties?: false;
@@ -59,6 +90,8 @@ const family = choice("preparation", "review", "deep_work");
 // Day-to-day work that GTD calls a "next action with no project" used to have no way to say so here:
 // the model had to force-fit it onto an approved milestone or the whole capture stopped with a blocker.
 const optionalMilestoneId: Schema = { type: "string", minLength: 0, maxLength: 4000 };
+/** Empty string means "none" — the same sentinel convention as `milestoneId`; `matches()` has no null. */
+const optionalText: Schema = { type: "string", minLength: 0, maxLength: 300 };
 export const ANALYSIS_OUTPUT_SCHEMA = object({
   identityId: str, projectId: str, milestoneId: optionalMilestoneId, intent: str, family,
   automationParts: array(object({ id: str, intent: str, reversibility: choice("local"), quote: str, rationale: str })),
@@ -70,7 +103,11 @@ export const ANALYSIS_OUTPUT_SCHEMA = object({
   estimate: object({ p25Minutes: number, p50Minutes: number, p85Minutes: number, source: choice("llm_prior"),
     observationCount: { type: "integer", minimum: 0 }, confidence: choice("low") }),
   riskTier: choice("routine", "milestone", "high_risk"), blockers: array(object({ code: str, message: str })),
-  estimateBreakdown: array(object({ step: line, minutes: number }), 1, 8)
+  estimateBreakdown: array(object({ step: line, minutes: number }), 1, 8),
+  dates: array(object({ kind: choice("release", "due"), date: str, quote: str, approximate: bool }), 0, 4),
+  waitingOn: object({ who: optionalText, what: optionalText, expectedDate: optionalText, quote: optionalText }),
+  byproducts: array(object({ lineId: str, milestoneId: optionalMilestoneId, artifact: line,
+    captureSteps: array(object({ step: line, minutes: number }), 0, 4), landing: object({ minutes: number, description: line }), why }), 0, 3)
 });
 
 // Only the JSON Schema subset used above is accepted; unknown keys fail closed.
@@ -90,17 +127,34 @@ function matches(value: unknown, schema: Schema): boolean {
   }
 }
 
+const sharedContext = {
+  capture: object({ title: str, context: { type: "string", maxLength: 4000 } }),
+  availableInputs: array(object({ id: str, text: str })), identityPacks: array(object({ id: str, version: { type: "integer", minimum: 1 }, summary: str }), 1),
+  policy: object({ tools: { type: "array", items: str, maxItems: 0 }, externalSideEffects: { type: "boolean", enum: [false] }, humanApprovalRequired: { type: "boolean", enum: [true] } })
+};
+const V1_CONTEXT = object({ version: choice("crossline.analysis.v1"), ...sharedContext,
+  approvedMilestones: array(object({ id: str, projectId: str, identityId: str, title: str, version: { type: "integer", minimum: 1 }, hasSuccessCriteria: bool }), 1),
+  historicalStats: array(object({ identityId: str, family, chosenCount: { type: "integer", minimum: 0 }, medianActualMinutes: number }), 0, 32),
+  rhythm: object({ focusRunMinutes: number, productiveMinutesPerDay: number, planActualRatio: number, observedDays: number, completed: number }) });
+/**
+ * v2 drops `historicalStats` and `rhythm` — both were corrections handed to the model (a median and a ratio)
+ * while a calibration applied afterwards corrected the same bias again — and adds the outside view as raw
+ * examples, today's date, each milestone's deadline, and the approved links between lines.
+ */
+const V2_CONTEXT = object({ version: choice("crossline.analysis.v2"), ...sharedContext,
+  today: str,
+  approvedMilestones: array(object({ id: str, projectId: str, identityId: str, title: str, version: { type: "integer", minimum: 1 }, hasSuccessCriteria: bool,
+    deadline: { type: "string", minLength: 0, maxLength: 20 } }), 1),
+  referenceClass: array(object({ identityId: str, family, title: str, llmP50Minutes: number, actualMinutes: number }), 0, 5),
+  relations: array(object({ fromMilestoneId: str, toMilestoneId: str, kind: str, explanation: { type: "string", minLength: 0, maxLength: 4000 } }), 0, 40) });
+export const ANALYSIS_CONTEXT_VERSION = "crossline.analysis.v2";
+
 export function validateAnalysisContext(value: unknown): AnalysisContext {
-  const schema = object({ version: choice("crossline.analysis.v1"), capture: object({ title: str, context: { type: "string", maxLength: 4000 } }),
-    approvedMilestones: array(object({ id: str, projectId: str, identityId: str, title: str, version: { type: "integer", minimum: 1 }, hasSuccessCriteria: bool }), 1),
-    availableInputs: array(object({ id: str, text: str })), identityPacks: array(object({ id: str, version: { type: "integer", minimum: 1 }, summary: str }), 1),
-    historicalStats: array(object({ identityId: str, family, chosenCount: { type: "integer", minimum: 0 }, medianActualMinutes: number }), 0, 32),
-    rhythm: object({ focusRunMinutes: number, productiveMinutesPerDay: number, planActualRatio: number, observedDays: number, completed: number }),
-    policy: object({ tools: { type: "array", items: str, maxItems: 0 }, externalSideEffects: { type: "boolean", enum: [false] }, humanApprovalRequired: { type: "boolean", enum: [true] } }) });
-  // A context stored before the rhythm existed has none; it reads as "nothing measured".
-  const full = value && typeof value === "object" && !("rhythm" in value)
+  const version = (value as { version?: unknown } | undefined)?.version;
+  // A v1 context stored before the rhythm existed has none; it reads as "nothing measured".
+  const full = version === "crossline.analysis.v1" && value && typeof value === "object" && !("rhythm" in value)
     ? { ...(value as object), rhythm: { focusRunMinutes: 0, productiveMinutesPerDay: 0, planActualRatio: 0, observedDays: 0, completed: 0 } } : value;
-  if (!matches(full, schema)) throw new Error("ANALYSIS_CONTEXT_INVALID");
+  if (!matches(full, version === "crossline.analysis.v2" ? V2_CONTEXT : V1_CONTEXT)) throw new Error("ANALYSIS_CONTEXT_INVALID");
   const context = full as AnalysisContext;
   // Every milestone offered must be backed by a pack; the Skill picks the identity, the app never guesses it.
   if (context.approvedMilestones.some((milestone) => !context.identityPacks.some((pack) => pack.id === milestone.identityId))) throw new Error("ANALYSIS_CONTEXT_INVALID");
@@ -110,9 +164,16 @@ export function validateAnalysisContext(value: unknown): AnalysisContext {
 export function validateAnalysisProposal(value: unknown, input: AnalysisContext): AnalysisProposal {
   const context = validateAnalysisContext(input);
   // An answer written before the breakdown existed (a recorded one) has none; the runtime's schema makes every live answer carry it.
-  const candidate = value && typeof value === "object" && !("estimateBreakdown" in value) ? { ...(value as object), estimateBreakdown: [{ step: "legacy", minutes: (value as { estimate?: { p50Minutes?: number } }).estimate?.p50Minutes ?? 1 }] } : value;
+  const withBreakdown = value && typeof value === "object" && !("estimateBreakdown" in value) ? { ...(value as object), estimateBreakdown: [{ step: "legacy", minutes: (value as { estimate?: { p50Minutes?: number } }).estimate?.p50Minutes ?? 1 }] } : value;
+  // Answers recorded before dates, waiting and byproducts existed carry none of them; a live answer always has all three.
+  const legacyExtras: Record<string, unknown> = withBreakdown && typeof withBreakdown === "object" ? {
+    ...(!("dates" in withBreakdown) ? { dates: [] } : {}),
+    ...(!("waitingOn" in withBreakdown) ? { waitingOn: { who: "", what: "", expectedDate: "", quote: "" } } : {}),
+    ...(!("byproducts" in withBreakdown) ? { byproducts: [] } : {})
+  } : {};
+  const candidate = Object.keys(legacyExtras).length ? { ...(withBreakdown as object), ...legacyExtras } : withBreakdown;
   if (!matches(candidate, ANALYSIS_OUTPUT_SCHEMA)) throw new Error("ANALYSIS_SCHEMA_INVALID");
-  const injected = candidate !== value;
+  const injected = withBreakdown !== value;
   const proposal = candidate as AnalysisProposal;
   // The identity is a free string in the schema (the set of lines is not known until the context is built), so the check that it
   // names a real one has to live here. Without it a task that fit no line came back with the identity `\`, was accepted, and sat
@@ -239,7 +300,49 @@ export function validateAnalysisProposal(value: unknown, input: AnalysisContext)
       proposal.blockers.map((blocker) => blocker.message.trim()).filter(Boolean).join("；").slice(0, 400);
     throw error;
   }
-  // What was never in the answer is not stored as if it had been.
+  // Dates and waiting are kept only when they can be checked against the person's own words: the quote must be
+  // in the capture and must name the day. An unverifiable one is dropped, not fatal — the rest of the analysis is
+  // good, and a guessed date on a schedule is worse than none (the same rule the file-date reader follows).
+  const isDay = (date: string) => /^\d{4}-\d{2}-\d{2}$/.test(date) && Number.isFinite(Date.parse(`${date}T00:00:00Z`))
+    && new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) === date;
+  proposal.dates = proposal.dates.filter((item) => isDay(item.date) && evidenced(item.quote) && quoteSupportsDate(item.date, item.quote));
+  const waiting = proposal.waitingOn;
+  if (waiting.who.trim() || waiting.what.trim()) {
+    if (!isDay(waiting.expectedDate) || !evidenced(waiting.quote) || !quoteSupportsDate(waiting.expectedDate, waiting.quote)) {
+      proposal.waitingOn = { who: "", what: "", expectedDate: "", quote: "" };
+    }
+  }
+  // At most one byproduct per other line; a line the person has not got, or the task's own line, is refused so the turn is repaired.
+  const lines = new Set(context.identityPacks.map((pack) => pack.id));
+  const seenLines = new Set<string>();
+  for (const byproduct of proposal.byproducts) {
+    const problem = byproduct.lineId === proposal.identityId ? `顺带产出的主线「${byproduct.lineId}」就是这项任务自己的主线；顺带产出必须服务另一条主线。`
+      : !lines.has(byproduct.lineId) ? `顺带产出的主线「${byproduct.lineId.slice(0, 40)}」不存在。可选：${[...lines].join("、")}。`
+      : seenLines.has(byproduct.lineId) ? `主线「${byproduct.lineId}」有两个顺带产出；每条其他主线最多一个。`
+      : byproduct.milestoneId && !context.approvedMilestones.some((m) => m.id === byproduct.milestoneId && m.identityId === byproduct.lineId)
+        ? `顺带产出指向的里程碑「${byproduct.milestoneId.slice(0, 60)}」不是「${byproduct.lineId}」的已批准里程碑；没有合适的就留空。`
+      : !concreteArtifact(byproduct.artifact) ? `顺带产出「${byproduct.artifact.slice(0, 40)}」不是一个具体产物（要能交出来的东西，如一篇笔记、一条帖子草稿、一张图）。`
+      : byproduct.landing.minutes <= 0 || byproduct.landing.minutes > 240 ? `顺带产出的落地用时 ${byproduct.landing.minutes} 分钟不合理（应在 1–240 分钟之间）。`
+      : "";
+    if (problem) {
+      const error = new Error("ANALYSIS_BYPRODUCT_INVALID");
+      (error as Error & { detail?: string }).detail = problem;
+      throw error;
+    }
+    seenLines.add(byproduct.lineId);
+  }
+  // What was never in the answer is not stored as if it had been; readers treat the absent fields as empty.
   if (injected) delete (proposal as Partial<AnalysisProposal>).estimateBreakdown;
+  for (const key of Object.keys(legacyExtras)) delete (proposal as Partial<AnalysisProposal> & Record<string, unknown>)[key];
   return proposal;
+}
+
+/**
+ * An artifact is something that can be handed over, not a state of mind. The same distinction milestone titles
+ * are held to: 「保持」「推进」「做好准备」 describe effort, not a thing that exists afterwards.
+ */
+export function concreteArtifact(text: string): boolean {
+  const trimmed = text.trim();
+  if (trimmed.length < 4) return false;
+  return !/^(保持|持续|稳定|推进|做好|准备好|提升|加强|关注)/.test(trimmed) && !/(状态|意识|习惯|感觉)$/.test(trimmed);
 }

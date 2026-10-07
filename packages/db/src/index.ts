@@ -178,6 +178,27 @@ export type StoredProfileFact = {
  * to land by, who else is involved, and which things the profile said that justify it. Kept beside the
  * milestone, keyed by its id, so a revision of the milestone does not lose it.
  */
+/**
+ * Something the person is waiting for from someone else — 「师兄 10/8 左右给真实测量数据」. The work it holds
+ * up (`blocks`) is not scheduled before `expectedAt`; at `followUpAt` the person is asked whether it came.
+ * It is never inferred to have arrived: only the person's answer moves it.
+ */
+export type StoredWaitingItem = {
+  id: string; ownerId: string; workspaceId: string;
+  title: string; who: string;
+  /** `YYYY-MM-DD`: when it is expected. */
+  expectedAt: string;
+  /** The source said 「左右」/「大概」: the date is a guess, not a promise. */
+  approximate: boolean;
+  /** `YYYY-MM-DD`: when to ask. Starts as `expectedAt`; moved by 「还没，推迟到…」. */
+  followUpAt: string;
+  state: "open" | "arrived" | "cancelled";
+  /** Work orders that cannot start until it arrives. */
+  blocks: string[];
+  source: "analysis" | "manual" | "assistant";
+  createdAt: string; updatedAt: string;
+};
+
 export type StoredMilestoneAnchor = {
   workspaceId: string; milestoneId: string; stage: number; deadline: string; baseline: string; target: string;
   stakeholders: string[]; sourceFactIds: string[]; dependsOn: string[]; updatedAt: string;
@@ -537,6 +558,13 @@ export class CrosslineStore {
         source_ref TEXT NOT NULL, source_quote TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL,
         PRIMARY KEY(workspace_id, identity_id, project_id, slot)
       );
+      CREATE TABLE IF NOT EXISTS waiting_items (
+        id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
+        title TEXT NOT NULL, who TEXT NOT NULL DEFAULT '', expected_at TEXT NOT NULL, approximate INTEGER NOT NULL DEFAULT 0,
+        follow_up_at TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('open','arrived','cancelled')),
+        blocks_json TEXT NOT NULL DEFAULT '[]', source TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS waiting_items_open ON waiting_items (workspace_id, state, follow_up_at);
       CREATE TABLE IF NOT EXISTS activity_segments (
         id INTEGER PRIMARY KEY AUTOINCREMENT, workspace_id TEXT NOT NULL, start_at TEXT NOT NULL, end_at TEXT NOT NULL,
         app TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', category TEXT NOT NULL, idle INTEGER NOT NULL DEFAULT 0
@@ -1573,6 +1601,51 @@ export class CrosslineStore {
       JSON.stringify(anchor.stakeholders), JSON.stringify(anchor.sourceFactIds), JSON.stringify(anchor.dependsOn), anchor.updatedAt);
   }
 
+  saveWaitingItem(item: Omit<StoredWaitingItem, "createdAt" | "updatedAt"> & { createdAt?: string }): { inserted: boolean } {
+    const now = new Date().toISOString();
+    const result = this.#db.prepare(`
+      INSERT INTO waiting_items (id, owner_id, workspace_id, title, who, expected_at, approximate, follow_up_at, state, blocks_json, source, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING
+    `).run(item.id, item.ownerId, item.workspaceId, item.title, item.who, item.expectedAt, item.approximate ? 1 : 0,
+      item.followUpAt, item.state, JSON.stringify(item.blocks), item.source, item.createdAt ?? now, now);
+    if (result.changes) this.appendEvent({ ownerId: item.ownerId, workspaceId: item.workspaceId, idempotencyKey: `waiting.created:${item.id}`,
+      type: "waiting.created", entityId: item.id, payload: { title: item.title, who: item.who, expectedAt: item.expectedAt, blocks: item.blocks } });
+    return { inserted: result.changes > 0 };
+  }
+
+  listWaitingItems(workspaceId: string, options: { state?: StoredWaitingItem["state"] } = {}): StoredWaitingItem[] {
+    const rows = this.#db.prepare(`SELECT * FROM waiting_items WHERE workspace_id = ?${options.state ? " AND state = ?" : ""} ORDER BY follow_up_at, id`)
+      .all(...(options.state ? [workspaceId, options.state] : [workspaceId])) as Array<Record<string, string | number>>;
+    return rows.map((row) => ({ id: String(row.id), ownerId: String(row.owner_id), workspaceId: String(row.workspace_id),
+      title: String(row.title), who: String(row.who), expectedAt: String(row.expected_at), approximate: Number(row.approximate) === 1,
+      followUpAt: String(row.follow_up_at), state: row.state as StoredWaitingItem["state"], blocks: JSON.parse(String(row.blocks_json)) as string[],
+      source: row.source as StoredWaitingItem["source"], createdAt: String(row.created_at), updatedAt: String(row.updated_at) }));
+  }
+
+  /**
+   * The person's answer to 「…到了吗？」: it arrived (the work it held up may now be scheduled), it was
+   * dropped, or not yet — ask again on `followUpAt`. Each answer is its own event; answering a closed item is refused.
+   */
+  answerWaitingItem(workspaceId: string, id: string, answer: { kind: "arrived" } | { kind: "cancelled" } | { kind: "deferred"; followUpAt: string },
+    ownerId: string): { changed: boolean } {
+    return this.#db.transaction(() => {
+      const item = this.listWaitingItems(workspaceId).find((row) => row.id === id);
+      if (!item) throw new Error("WAITING_ITEM_NOT_FOUND");
+      if (item.state !== "open") return { changed: false };
+      const now = new Date().toISOString();
+      if (answer.kind === "deferred") {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(answer.followUpAt)) throw new Error("WAITING_FOLLOW_UP_INVALID");
+        this.#db.prepare("UPDATE waiting_items SET follow_up_at = ?, updated_at = ? WHERE workspace_id = ? AND id = ?").run(answer.followUpAt, now, workspaceId, id);
+      } else {
+        this.#db.prepare("UPDATE waiting_items SET state = ?, updated_at = ? WHERE workspace_id = ? AND id = ?").run(answer.kind, now, workspaceId, id);
+      }
+      const attempt = this.listEvents(workspaceId, { type: ["waiting.arrived", "waiting.cancelled", "waiting.deferred"], entityId: id }).length;
+      this.appendEvent({ ownerId, workspaceId, idempotencyKey: `waiting.${answer.kind}:${id}:${attempt}`, type: `waiting.${answer.kind}`, entityId: id,
+        payload: answer.kind === "deferred" ? { followUpAt: answer.followUpAt } : {} });
+      return { changed: true };
+    }).immediate();
+  }
+
   listMilestoneAnchors(workspaceId: string): StoredMilestoneAnchor[] {
     const rows = this.#db.prepare("SELECT * FROM milestone_anchors WHERE workspace_id = ? ORDER BY stage, milestone_id")
       .all(workspaceId) as Array<Record<string, string | number>>;
@@ -2279,7 +2352,7 @@ export class CrosslineStore {
       "capacity_commitments", "duration_observations",
       "assistant_threads", "assistant_attachments", "milestone_templates",
       "workspace_projects", "source_documents", "onboarding_sessions", "onboarding_messages", "profile_facts",
-      "diligence_reports", "milestone_anchors", "model_usage", "activity_segments",
+      "diligence_reports", "milestone_anchors", "model_usage", "activity_segments", "waiting_items",
       // Consent state is part of the ledger: a restore that silently re-enables collection is not a restore.
       "settings",
       // `principals`/`workspaces` are not workspace-scoped rows themselves — a principal is scoped by
@@ -2582,9 +2655,18 @@ export class CrosslineStore {
   }
 
   listDurationObservations(workspaceId: string, identityId: string, family: string): StoredDurationObservation[] {
-    const rows = this.#db.prepare(
+    return this.#durationRows(this.#db.prepare(
       "SELECT * FROM duration_observations WHERE workspace_id = ? AND identity_id = ? AND family = ? ORDER BY observed_at, id"
-    ).all(workspaceId, identityId, family) as Array<Record<string, string | number>>;
+    ).all(workspaceId, identityId, family) as Array<Record<string, string | number>>);
+  }
+
+  /** Every observation in the workspace, oldest first — what a person-level calibration is fitted on. */
+  listAllDurationObservations(workspaceId: string): StoredDurationObservation[] {
+    return this.#durationRows(this.#db.prepare("SELECT * FROM duration_observations WHERE workspace_id = ? ORDER BY observed_at, id")
+      .all(workspaceId) as Array<Record<string, string | number>>);
+  }
+
+  #durationRows(rows: Array<Record<string, string | number>>): StoredDurationObservation[] {
     return rows.map((row) => ({
       id: String(row.id), ownerId: String(row.owner_id), workspaceId: String(row.workspace_id),
       workOrderId: String(row.work_order_id), executionId: String(row.execution_id),

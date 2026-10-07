@@ -16,6 +16,8 @@ export type PlannerTask = {
   interruptible?: boolean;
   deadline?: string;
   dependsOn?: string[];
+  /** ISO instant before which no block may start: the work waits for something to arrive (a release date). */
+  notBefore?: string;
 };
 
 export type PlanningInput = {

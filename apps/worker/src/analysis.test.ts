@@ -192,3 +192,18 @@ test("files the person already uploaded reach the analysis as supplied material,
   expect(inputs[0]!.text).toContain("Midterm 1 Oct 27 Chapters 1-4");
   expect(inputs[0]!.text).toContain("不必再向用户要");
 });
+
+// 「10月8号左右师兄会给我数据…10月21号前交」: the waiting item, the release date and the due date land where the
+// scheduler and the Today card read them.
+test("a promoted order's own dates become a release date, a due date and a waiting item", async () => {
+  const { recordWaitingAndDates } = await import("./analysis");
+  const store = new CrosslineStore(":memory:");
+  store.saveWorkOrder({ id: "wo", ownerId: "o", workspaceId: "w", identityId: "research", projectId: "p", milestoneId: "", intent: "跑真实数据仿真",
+    state: "awaiting_plan_approval", riskTier: "milestone", estimate: { p25Minutes: 1, p50Minutes: 2, p85Minutes: 3, source: "llm_prior", observationCount: 0, confidence: "low" },
+    payload: { dates: [{ kind: "release", date: "2026-10-08", quote: "10月8号左右", approximate: true }, { kind: "due", date: "2026-10-21", quote: "10月21号前", approximate: false }],
+      waitingOn: { who: "师兄", what: "西湖MoS2的真实测量数据", expectedDate: "2026-10-08", quote: "10月8号左右师兄会给我" } } });
+  recordWaitingAndDates(store, "w", "wo");
+  expect(store.listWorkOrders("w")[0]!.payload).toMatchObject({ notBefore: "2026-10-08", dueDate: "2026-10-21" });
+  expect(store.listWaitingItems("w")).toMatchObject([{ id: "wait-wo", who: "师兄", expectedAt: "2026-10-08", approximate: true, blocks: ["wo"], state: "open" }]);
+  store.close();
+});

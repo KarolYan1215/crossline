@@ -42,6 +42,9 @@ orphans("execution 指向不存在的作业",
 orphans("evidence 指向不存在的作业",
   `SELECT c.id AS id, c.work_order_id AS target FROM evidence_claims c
    WHERE NOT EXISTS (SELECT 1 FROM work_orders w WHERE w.id = c.work_order_id AND w.workspace_id = c.workspace_id)`);
+orphans("等待项指向不存在的作业",
+  `SELECT COUNT(*) AS n FROM waiting_items i, json_each(i.blocks_json) b
+   WHERE NOT EXISTS (SELECT 1 FROM work_orders w WHERE w.id = b.value AND w.workspace_id = i.workspace_id)`);
 orphans("material 指向不存在的作业",
   `SELECT m.id AS id, m.work_order_id AS target FROM materials m
    WHERE NOT EXISTS (SELECT 1 FROM work_orders w WHERE w.id = m.work_order_id AND w.workspace_id = m.workspace_id)`);

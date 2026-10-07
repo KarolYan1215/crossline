@@ -1086,6 +1086,9 @@ const plannerTaskOf = (ctx: AccessContext, order: ActionableOrder) => {
     : order.state === "approved" ? 3 : order.identityId === PRIMARY_CLOCK_ID ? 1 : 2;
   const core = humanCoreOf(order);
   const dependsOn = (order.payload as { dependsOn?: string[] }).dependsOn;
+  const release = releaseDayOf(ctx, order);
+  const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
+  const dueDate = (order.payload as { dueDate?: string }).dueDate;
   return {
     id: order.id, title: order.intent, identityId: order.identityId, milestoneId: order.milestoneId,
     estimate: resolvedEstimate(ctx, order),
@@ -1094,11 +1097,45 @@ const plannerTaskOf = (ctx: AccessContext, order: ActionableOrder) => {
     inputsReady: order.state === "ready_for_human" || order.state === "active",
     deadlineTier: tier as 1 | 2 | 3 | 4,
     ...(goal?.confirmedDeadline && preferences ? {
-      deadline: toZonedInstant(goal.confirmedDeadline, "23:59", preferences.timeZone) } : {}),
+      deadline: toZonedInstant(goal.confirmedDeadline, "23:59", preferences.timeZone) }
+      // The capture's own 「10月21号前」, when the milestone has no confirmed deadline of its own.
+      : dueDate && /^\d{4}-\d{2}-\d{2}$/.test(dueDate) ? { deadline: toZonedInstant(dueDate, "23:59", zone) } : {}),
+    ...(release ? { notBefore: toZonedInstant(release, "00:00", zone) } : {}),
     ...(dependsOn?.length ? { dependsOn } : {}),
     interruptible: core?.interruptible ?? true
   };
 };
+
+/**
+ * The first day this order may be worked on. Waiting for someone: the expected day while it is still ahead;
+ * once that day has passed without the person saying it came, not before tomorrow — the Today card asks, and
+ * scheduling work on data that may not exist is the thing the waiting item is there to stop. Arrived or
+ * dropped: no constraint. Without a waiting item, the release date the capture itself named.
+ */
+/** The person's answer to a waiting item's 「到了吗？」. 「到了」 frees the work it held up for scheduling now. */
+export function answerWaiting(ctx: AccessContext, id: string, answer: { kind: "arrived" } | { kind: "cancelled" } | { kind: "deferred"; followUpAt: string }):
+  { ok: true } | { ok: false; code: string } {
+  try {
+    if (answer.kind === "deferred" && answer.followUpAt <= planToday(ctx)) return { ok: false, code: "WAITING_FOLLOW_UP_NOT_FUTURE" };
+    return getStore().answerWaitingItem(ctx.workspaceId, id, answer, ctx.principalId).changed ? { ok: true } : { ok: false, code: "WAITING_ITEM_CLOSED" };
+  } catch (error) {
+    return { ok: false, code: error instanceof Error ? error.message : "WAITING_ANSWER_FAILED" };
+  }
+}
+
+export function releaseDayOf(ctx: AccessContext, order: { id: string; payload: unknown }): string | undefined {
+  const waiting = getStore().listWaitingItems(ctx.workspaceId).filter((item) => item.blocks.includes(order.id));
+  const today = planToday(ctx);
+  const open = waiting.filter((item) => item.state === "open");
+  if (open.length) {
+    const latest = open.map((item) => item.expectedAt > today ? item.expectedAt : item.followUpAt > today ? item.followUpAt
+      : new Date(Date.parse(`${today}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10)).sort().at(-1);
+    return latest;
+  }
+  if (waiting.length) return undefined;
+  const release = (order.payload as { notBefore?: string }).notBefore;
+  return release && /^\d{4}-\d{2}-\d{2}$/.test(release) && release > today ? release : undefined;
+}
 
 /**
  * The milestone a line's card names. Only an approved one is "current": the card used to take the first milestone of the line
@@ -1396,6 +1433,8 @@ export async function loadDashboard(ctx: AccessContext): Promise<Omit<DashboardD
     care: store.listCapacityCommitments(ctx.workspaceId).map((item) => ({ title: item.title, minimumMinutes: item.minimumMinutes })),
     progress,
     todayCapacity: { availableMinutes, committedMinutes },
+    waitingDue: store.listWaitingItems(ctx.workspaceId, { state: "open" }).filter((item) => item.followUpAt <= today)
+      .map((item) => ({ id: item.id, title: item.title, who: item.who, expectedAt: item.expectedAt, approximate: item.approximate, blocks: item.blocks })),
     flywheel,
     flywheelStrip,
     identities: identityPacks.map((pack) => {

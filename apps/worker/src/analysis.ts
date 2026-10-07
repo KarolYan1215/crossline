@@ -1,28 +1,38 @@
 import { autoApproveEligible } from "./auto-approval";
+import { ownerOf } from "./owner";
+import type { AnalysisDate, AnalysisWaitingOn } from "@crossline/core";
 import { runCodexAnalysis, type CodexRpcBoundary } from "@crossline/codex";
-import { validateAnalysisContext, type AnalysisContext } from "@crossline/core";
+import { ANALYSIS_CONTEXT_VERSION, validateAnalysisContext, type AnalysisContext } from "@crossline/core";
 import { CrosslineStore, type StoredCapture } from "@crossline/db";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 
 export type AnalysisOutcome = { id: string; state: string; attempt: number; audit: StoredCapture["audit"] };
 
-const FAMILIES = ["preparation", "review", "deep_work"] as const;
-
-/** How this workspace's own past captures actually turned out, per (identity, family) — evidence the
- * analysis Skill can weigh against its own read of the current capture, not history it must copy.
- * `medianActualMinutes: 0` means no real completions exist yet, the same convention `Estimate.
- * observationCount` already uses for "unobserved". */
-function buildHistoricalStats(store: CrosslineStore, workspaceId: string, identityIds: string[]): AnalysisContext["historicalStats"] {
-  const promoted = store.listWorkOrders(workspaceId);
-  return identityIds.flatMap((identityId) => FAMILIES.map((family) => {
-    const chosenCount = promoted.filter((order) => order.identityId === identityId
-      && (order.payload as { family?: string } | undefined)?.family === family).length;
-    const durations = store.listDurationObservations(workspaceId, identityId, family)
-      .map((row) => row.observedMinutes).sort((a, b) => a - b);
-    return { identityId, family, chosenCount,
-      medianActualMinutes: durations.length ? durations[Math.floor(durations.length / 2)]! : 0 };
-  }));
+/**
+ * The outside view, as raw examples: the most recently finished tasks with what the analysis estimated for them
+ * and what they really took. No ratio and no median — a correction factor shown to the model anchors its
+ * estimate and is then applied a second time by the calibration that runs on its output.
+ */
+export function buildReferenceClass(store: CrosslineStore, workspaceId: string, limit = 5): NonNullable<AnalysisContext["referenceClass"]> {
+  const orders = new Map(store.listWorkOrders(workspaceId).map((order) => [order.id, order]));
+  return store.listAllDurationObservations(workspaceId)
+    .filter((row) => !row.interruptionDominant && orders.get(row.workOrderId)?.estimate.source === "llm_prior")
+    .sort((a, b) => b.observedAt.localeCompare(a.observedAt))
+    .slice(0, limit)
+    .map((row) => {
+      const order = orders.get(row.workOrderId)!;
+      return { identityId: row.identityId, family: row.family as "preparation" | "review" | "deep_work",
+        title: order.intent.slice(0, 40), llmP50Minutes: order.estimate.p50Minutes, actualMinutes: row.observedMinutes };
+    });
 }
+
+/** The person's local date: what 「周末前」「10月8号左右」 is read against. */
+export function localToday(store: CrosslineStore, workspaceId: string, now = new Date()): string {
+  let zone = process.env.CROSSLINE_TIME_ZONE?.trim() || "America/Chicago";
+  try { zone = (JSON.parse(store.getSetting(workspaceId, "schedule.preferences") ?? "null") as { timeZone?: string } | null)?.timeZone || zone; } catch { /* default */ }
+  return new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
+}
+
 // `workspaceId` is the real caller's, fixed at creation — one analyzer per real workspace, the same
 // pattern `createMaterialPreparer`/`createMilestoneGate` already use. This used to be a hardcoded
 // module-level single-user workspace constant plus an owner-constant filter on every read, so a
@@ -82,10 +92,11 @@ export function createCaptureAnalyzer(store: CrosslineStore, workspaceId: string
       const identities = new Set(milestones.map((m) => m.identityId));
       const packs = defaultIdentityPacks().filter((p) => p.kind === "identity" && identities.has(p.id));
       if (packs.length !== identities.size) throw new Error("ANALYSIS_IDENTITY_CONTEXT_REQUIRED");
+      const deadlines = new Map(store.listMilestoneAnchors(workspaceId).map((anchor) => [anchor.milestoneId, anchor.deadline]));
       const context = validateAnalysisContext({
-        version: "crossline.analysis.v1", capture: { title: capture.title, context: capture.context },
+        version: ANALYSIS_CONTEXT_VERSION, today: localToday(store, workspaceId), capture: { title: capture.title, context: capture.context },
         approvedMilestones: milestones.map((m) => ({ id: m.id, identityId: m.identityId, projectId: m.projectId!, title: m.title, version: m.version,
-          hasSuccessCriteria: m.verifiability !== "unstated" })),
+          hasSuccessCriteria: m.verifiability !== "unstated", deadline: deadlines.get(m.id) ?? "" })),
         // The note the person attached to the capture, handed over as what it is. It was hardcoded
         // empty, so the Skill could never see any material the user supplied and correctly refused
         // every capture that depended on some. Passing it does not assert it IS the material: a note
@@ -102,9 +113,10 @@ export function createCaptureAnalyzer(store: CrosslineStore, workspaceId: string
             : [])
         ],
         identityPacks: packs.map((p) => ({ id: p.id, version: 1, summary: `${p.label}; workflows: ${p.workflowTemplates.join(", ")}; evidence: ${p.evidencePolicy}` })),
-        historicalStats: buildHistoricalStats(store, workspaceId, [...identities]),
-        // Measured, from the screen record (if the person agreed to it) and from how finished tasks compared with their estimates.
-        rhythm: store.workRhythm(workspaceId, new Date(Date.now() - 28 * 86_400_000).toISOString()),
+        referenceClass: buildReferenceClass(store, workspaceId),
+        relations: store.listMilestoneRelations(workspaceId).filter((relation) => relation.status === "approved").slice(0, 40)
+          .map((relation) => ({ fromMilestoneId: relation.fromMilestoneId, toMilestoneId: relation.toMilestoneId, kind: relation.kind,
+            explanation: relation.explanation ?? "" })),
         policy: { tools: [], externalSideEffects: false, humanApprovalRequired: true }
       });
       store.updateAnalysisAudit(workspaceId, id, { contextVersion: context.version });
@@ -116,6 +128,7 @@ export function createCaptureAnalyzer(store: CrosslineStore, workspaceId: string
         store.transitionWorkOrder(workspaceId, id, { type: "analysis.accepted", approvalId: "schema-validation-only" }, `analysis:${id}:${attempt}:finish`, {
           proposal: result.proposal, context, audit: { ...result.audit, contextVersion: context.version }
         });
+        recordWaitingAndDates(store, workspaceId, id);
         autoApproveEligible(store, workspaceId, [id]);
       }
     } catch (error) {
@@ -154,4 +167,28 @@ export function capturesAwaitingAutoAnalysis(store: CrosslineStore, workspaceId:
     .filter((capture) => (capture.state === "captured" && capture.attempt === 0)
       || (capture.state === "blocked" && capture.audit.blocker?.code === "ANALYSIS_APPROVED_MILESTONE_REQUIRED"))
     .slice(0, limit).map((capture) => capture.id);
+}
+
+/**
+ * What the analysis read off the capture's own dates, turned into things the scheduler and the person act on:
+ * a release date (`notBefore`) the work is not placed before, a due date, and — when the work waits for
+ * someone — a waiting item that asks the person on the expected day whether it came. Only verified dates
+ * reach here (`validateAnalysisProposal` drops a date its quote does not name).
+ */
+export function recordWaitingAndDates(store: CrosslineStore, workspaceId: string, workOrderId: string): void {
+  const order = store.listWorkOrders(workspaceId).find((item) => item.id === workOrderId);
+  if (!order) return;
+  const payload = order.payload as { dates?: AnalysisDate[]; waitingOn?: AnalysisWaitingOn };
+  const release = (payload.dates ?? []).filter((item) => item.kind === "release").map((item) => item.date).sort().at(-1);
+  const due = (payload.dates ?? []).filter((item) => item.kind === "due").map((item) => item.date).sort()[0];
+  const waiting = payload.waitingOn;
+  const waitingDate = waiting && (waiting.who.trim() || waiting.what.trim()) && waiting.expectedDate ? waiting.expectedDate : undefined;
+  const notBefore = [release, waitingDate].filter((date): date is string => Boolean(date)).sort().at(-1);
+  if (notBefore || due) store.saveWorkOrder({ ...order, payload: { ...(order.payload as object), ...(notBefore ? { notBefore } : {}), ...(due ? { dueDate: due } : {}) } });
+  if (waitingDate && waiting) {
+    store.saveWaitingItem({ id: `wait-${workOrderId}`, ownerId: ownerOf(store, workspaceId), workspaceId,
+      title: waiting.what.trim() || order.intent, who: waiting.who.trim(), expectedAt: waitingDate,
+      approximate: (payload.dates ?? []).some((item) => item.approximate && item.date === waitingDate) || /左右|大概|大约|前后/.test(waiting.quote),
+      followUpAt: waitingDate, state: "open", blocks: [workOrderId], source: "analysis" });
+  }
 }

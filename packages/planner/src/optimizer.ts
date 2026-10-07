@@ -65,6 +65,7 @@ function validBlocks(blocks: ScheduleBlock[], slots: Slot[], input: PlanningInpu
     if (own.reduce((sum, block) => sum + (Date.parse(block.end) - Date.parse(block.start)) / 60_000, 0)
       !== expected) return false;
     if (task.interruptible === false && own.length !== 1) return false;
+    if (task.notBefore && Date.parse(own[0]!.start) < Date.parse(task.notBefore)) return false;
     for (const dependency of task.dependsOn ?? []) {
       const prerequisite = sorted.filter((block) => block.taskId === dependency);
       if (input.tasks.some((item) => item.id === dependency) && !prerequisite.length) return false;
@@ -150,7 +151,7 @@ function greedyFallback(input: PlanningInput, tasks: PlannerTask[], slots: Slot[
       const prior = [...blocks, ...staged].at(-1);
       const dependencyEnd = Math.max(0, ...(task.dependsOn ?? []).flatMap((id) =>
         blocks.filter((block) => block.taskId === id).map((block) => Date.parse(block.end))));
-      const start = Math.max(candidate[s]!, dependencyEnd,
+      const start = Math.max(candidate[s]!, dependencyEnd, task.notBefore ? Date.parse(task.notBefore) : 0,
         prior ? Date.parse(prior.end) + gap * 60_000 : slot.start);
       const until = Math.min(slot.end, task.deadline ? Date.parse(task.deadline) : Infinity);
       const remainingCap = input.mode === "asap" || emergency ? Infinity
@@ -199,6 +200,8 @@ async function optimize(input: PlanningInput, emergency = false): Promise<PlanRe
       const frozenDependencyEnd = Math.max(0, ...(task.dependsOn ?? []).flatMap((id) =>
         input.frozenBlocks.filter((block) => block.taskId === id).map((block) => Date.parse(block.end))));
       if (slot.start < frozenDependencyEnd) continue;
+      // Waiting for something to arrive: a slot that opens before the release date is not offered at all.
+      if (task.notBefore && slot.start < Date.parse(task.notBefore)) continue;
       if (task.energy && energyRank[slot.energy] < energyRank[task.energy]) continue;
       const end = Math.min(slot.end, task.deadline ? Date.parse(task.deadline) : Infinity);
       const maximum = Math.floor((end - slot.start) / 60_000);

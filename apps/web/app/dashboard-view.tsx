@@ -1,5 +1,6 @@
 import type { CSSProperties } from "react";
 import { OfflineCaptureForm, OfflineReplay } from "./offline-command-forms";
+import { WaitingCard } from "./waiting-card";
 import { BatchCaptureForm } from "./batch-capture-form";
 import { AnalogClock } from "./analog-clock";
 import { EnergyProbe } from "./energy-probe";
@@ -52,6 +53,8 @@ export type DashboardData = {
   /** Read straight off real acceptances, no grace period: today with nothing accepted yet is a real 0. */
   progress: { streakDays: number; weekCount: number };
   todayCapacity: { availableMinutes: number; committedMinutes: number };
+  /** Things the person is waiting for whose expected day has come: each asks 「到了吗？」. Absent on old data. */
+  waitingDue?: Array<{ id: string; title: string; who: string; expectedAt: string; approximate: boolean; blocks: string[] }>;
   flywheel: Array<{ id: string; fromTitle: string; toTitle: string; kindLabel: string; explanation: string | null; pending: boolean }>;
   identities: Array<{ id: string; label: string; accent: string; completedCount: number; activeMilestone: string; taskCount: number; totalCount: number; pct: number }>;
   flywheelStrip: {
@@ -153,6 +156,8 @@ export function DashboardView({ data }: { data: DashboardData }) {
         <p>当前精力低：建议留 10 分钟休息。休息后重新自评，系统会重排今天的建议；高负荷任务暂不视为已准备好。</p>
         <EnergyProbe context="after_rest" />
       </div>}
+
+      {(data.waitingDue ?? []).map((item) => <WaitingCard key={item.id} item={item} />)}
 
       <section className="panel capture-line" aria-labelledby="capture-title">
         <header><h2 id="capture-title">快速收集</h2><small>写下来就行，系统会自己分类、估时</small></header>

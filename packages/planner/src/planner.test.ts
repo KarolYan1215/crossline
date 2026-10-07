@@ -396,3 +396,16 @@ test("an empty week is reported as empty, not as a solver failure; tasks with no
       inputsReady: true, deadlineTier: 2, interruptible: true }] });
   expect(full.solver).toBe("no_capacity");
 });
+
+// 「师兄 10/8 左右给数据」: the work is not placed before the data can have arrived.
+test("a task waiting for something is never placed before its release date", async () => {
+  const now = new Date("2026-10-06T14:00:00.000Z");
+  const day = (d: string) => ({ start: `${d}T14:00:00.000Z`, end: `${d}T17:00:00.000Z`, day: d, energy: "high" as const });
+  const result = await planSchedule({ now, horizonDays: 7, frozenBlocks: [],
+    availability: [day("2026-10-06"), day("2026-10-07"), day("2026-10-08"), day("2026-10-09")],
+    tasks: [{ id: "sim", title: "跑真实数据仿真", estimate: { p25Minutes: 60, p50Minutes: 90, p85Minutes: 120, confidence: "high" as const },
+      inputsReady: true, deadlineTier: 1, interruptible: true, notBefore: "2026-10-08T05:00:00.000Z" }] });
+  const blocks = result.plan.blocks.filter((block) => block.taskId === "sim");
+  expect(blocks.length).toBeGreaterThan(0);
+  expect(blocks.every((block) => block.start >= "2026-10-08")).toBe(true);
+});

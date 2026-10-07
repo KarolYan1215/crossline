@@ -54,7 +54,11 @@ export function forecastGoals(goals: ForecastGoal[], tasks: PlannerTask[], days:
       if ((task.dependsOn ?? []).some((id) => !completedIds.has(id) && !finished.has(id))) {
         blocked.add(task.milestoneId!); continue;
       }
-      const first = dependencyDays.length ? days.findIndex((day) => day.day >= dependencyDays.sort().at(-1)!) : 0;
+      // Neither before its prerequisites finish nor before what it waits for is due to arrive.
+      const release = task.notBefore ? task.notBefore.slice(0, 10) : "";
+      const startDay = [...dependencyDays.sort().slice(-1), release].filter(Boolean).sort().at(-1);
+      const first = startDay ? days.findIndex((day) => day.day >= startDay) : 0;
+      if (first < 0) { blocked.add(task.milestoneId!); continue; }
       for (let i = Math.max(0, first); i < days.length && amount > 0; i++) {
         const used = Math.min(amount, capacity[i]!);
         amount -= used;
