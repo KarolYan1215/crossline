@@ -720,5 +720,8 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .ask-follow-up textarea,.ask-follow-up input{font:inherit;font-size:14px;padding:4px 6px;border:1px solid var(--mist);background:var(--paper);color:var(--ink);max-width:100%}
 .ask-later{display:flex;gap:8px;align-items:center;margin:6px 0 0;flex-wrap:wrap}
 .ask-later .text-button{font-size:12px;padding:2px 8px}
+.ask-group>ol{margin-top:4px}
+.ask-input{border-top:1px solid var(--mist);padding-top:8px;min-width:0}
+.ask-input h4{margin:0 0 4px;font-size:14px;overflow-wrap:anywhere}
 .byproduct-line{border-left:3px dashed var(--graphite);padding-left:8px}
 .effectiveness-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}

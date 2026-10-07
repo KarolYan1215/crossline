@@ -416,9 +416,9 @@ test("a work order started on one device becomes a conflict when another device'
 });
 
 /**
- * The system's questions on Today: a backplan that found a missing input and something awaited that was due, each
- * answered in place from options already written out — one with a follow-up form prefilled from what the system knew —
- * and the next coming up without a page reload.
+ * The system's questions on Today: a backplan that found two missing inputs (shown under the milestone's name once) and
+ * something awaited that was due, each answered in place from options already written out — one with a follow-up form
+ * prefilled from what the system knew — and the next coming up, and the 待确认 count going down, without a page reload.
  */
 test("Today asks what only the person knows, with options and follow-ups, and moves to the next on answering", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-chrome");
@@ -429,20 +429,32 @@ test("Today asks what only the person knows, with options and follow-ups, and mo
     const milestone = store.listMilestones(workspaceId).filter((item) => item.status === "approved").at(-1)!;
     store.appendEvent({ ownerId: "e2e-tester", workspaceId, idempotencyKey: "e2e:backplan-blocked", type: "goal.backplan_blocked", entityId: milestone.id,
       payload: { milestoneVersion: milestone.version, code: "BACKPLAN_INPUT_BLOCKED", message: "缺组会录音",
-        missing: [{ id: "m1", what: "组会录音", whoHas: "导师", message: "没有组会录音，无法列出要回应的质疑。" }] } });
+        missing: [{ id: "m1", what: "组会录音", whoHas: "导师", message: "没有组会录音，无法列出要回应的质疑。" },
+          { id: "m2", what: "导师批注", whoHas: "", message: "没有导师对初稿的批注。" }] } });
     store.saveWaitingItem({ id: "wait-e2e", ownerId: "e2e-tester", workspaceId, title: "实测数据", who: "师兄", expectedAt: "2026-09-14",
       approximate: true, followUpAt: "2026-09-14", state: "open", blocks: [], source: "manual" });
   } finally { store.close(); }
   await page.goto("/");
   const list = page.getByRole("region", { name: "需要你回答" });
   await expect(list.getByRole("heading", { name: /^需要你一句话/ })).toBeVisible();
-  const missing = list.locator(".ask-card").filter({ hasText: "还缺：组会录音" });
+  const group = list.locator(".ask-group");
+  await expect(group.getByRole("heading", { level: 3 })).toContainText("还缺 2 样东西");
+  await expect(group.locator("h4")).toHaveText(["组会录音", "导师批注"]);
+  const missing = group.locator(".ask-input").filter({ hasText: "组会录音" });
   await expect(missing).toContainText("没有组会录音，无法列出要回应的质疑。");
+  const badge = page.locator(".running-head .pending-badge");
+  const badgeMinusTotal = async () => (await badge.count() ? Number(await badge.textContent()) : 0)
+    - await page.evaluate(async () => ((await (await fetch("/api/pending", { cache: "no-store" })).json()) as { total: number }).total);
   await missing.getByRole("button", { name: /已经要了，在等/ }).click();
   await expect(missing.getByLabel(/谁给/)).toHaveValue("导师");
   await missing.getByLabel("大约哪天到").fill("2026-09-16");
   await missing.getByRole("button", { name: "确定：已经要了，在等" }).click();
-  await expect(list.locator(".ask-card").filter({ hasText: "还缺：组会录音" })).toHaveCount(0);
+  await expect(list.getByText("组会录音", { exact: true })).toHaveCount(0);
+  // The header's count follows the answer without a reload (it used to stay at the old number for up to a minute).
+  await expect.poll(badgeMinusTotal).toBe(0);
+  const second = list.locator(".ask-card").filter({ hasText: "还缺：导师批注" });
+  await second.getByRole("button", { name: /^我自己去弄/ }).click();
+  await expect(second).toHaveCount(0);
   const waiting = list.locator(".ask-card").filter({ hasText: "师兄的「实测数据」到了吗？" });
   await expect(waiting).toBeVisible();
   await waiting.getByRole("button", { name: /^不等了/ }).click();
@@ -452,7 +464,7 @@ test("Today asks what only the person knows, with options and follow-ups, and mo
     const workspaceId = realWorkspaceId(after);
     expect(after.listWaitingItems(workspaceId).find((item) => item.title === "组会录音")).toMatchObject({ who: "导师", expectedAt: "2026-09-16", source: "backplan" });
     expect(after.listWaitingItems(workspaceId).find((item) => item.id === "wait-e2e")!.state).toBe("cancelled");
-    expect(after.listEvents(workspaceId, { type: "ask.answered" })).toHaveLength(2);
+    expect(after.listEvents(workspaceId, { type: "ask.answered" })).toHaveLength(3);
   } finally { after.close(); }
 });
 

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { Ask, AskOption } from "@crossline/core";
+import { PENDING_CHANGED } from "./pending-badge";
 
 const URGENCY: Record<Ask["urgency"], string> = { now: "今天要答", soon: "这周", later: "不急" };
 
@@ -19,15 +20,51 @@ export function AskList({ initial, visible, moreHref }: { initial: Ask[]; visibl
     if (body?.asks) setAsks(body.asks);
   };
   if (!asks.length) return null;
-  const shown = asks.slice(0, visible);
+  const onDone = (id: string) => {
+    setAsks((list) => list.filter((item) => item.id !== id));
+    window.dispatchEvent(new Event(PENDING_CHANGED));
+    void reload();
+  };
   return <section className="ask-list" id="asks" aria-label="需要你回答">
     <header><h2>需要你一句话 · {asks.length}</h2>
       {asks.length > visible && moreHref && <a href={moreHref}>其余 {asks.length - visible} 条 →</a>}</header>
-    <ol>{shown.map((ask) => <AskCard key={ask.id} ask={ask} onDone={(id) => { setAsks((list) => list.filter((item) => item.id !== id)); void reload(); }} />)}</ol>
+    <ol>{groupByMilestone(asks.slice(0, visible)).map((group) => group.inputs
+      ? <li key={group.asks[0]!.id} className="ask-card ask-group" data-line={group.asks[0]!.line} data-urgency={group.asks[0]!.urgency}>
+        <AskMeta ask={group.asks[0]!} />
+        <h3>{group.subject}还缺 {group.asks.length} 样东西</h3>
+        <ol>{group.asks.map((ask, index) => <AskCard key={ask.id} ask={ask} heading={group.inputs![index]!} onDone={onDone} />)}</ol>
+      </li>
+      : <AskCard key={group.asks[0]!.id} ask={group.asks[0]!} onDone={onDone} />)}</ol>
   </section>;
 }
 
-function AskCard({ ask, onDone }: { ask: Ask; onDone: (id: string) => void }) {
+const MISSING = "」还缺：";
+
+/**
+ * A backplan that names several missing inputs asks about each one, and every title used to repeat the milestone's long
+ * name. Consecutive asks about one milestone's inputs are shown under one heading — the name once, each input a row with
+ * its own options — while each is still answered (and snoozed) on its own.
+ */
+function groupByMilestone(asks: Ask[]): Array<{ asks: Ask[]; subject?: string; inputs?: string[] }> {
+  const groups: Array<{ asks: Ask[] }> = [];
+  for (const ask of asks) {
+    const last = groups.at(-1)?.asks.at(-1);
+    if (last && ask.kind === "backplan_input" && last.kind === "backplan_input" && last.entityId === ask.entityId
+      && ask.title.includes(MISSING) && last.title.includes(MISSING)) groups.at(-1)!.asks.push(ask);
+    else groups.push({ asks: [ask] });
+  }
+  return groups.map((group) => group.asks.length < 2 ? group : {
+    asks: group.asks,
+    subject: group.asks[0]!.title.slice(0, group.asks[0]!.title.indexOf(MISSING) + 1),
+    inputs: group.asks.map((ask) => ask.title.slice(ask.title.indexOf(MISSING) + MISSING.length))
+  });
+}
+
+function AskMeta({ ask }: { ask: Ask }) {
+  return <p className="ask-meta"><span className="tag">{URGENCY[ask.urgency]}</span>{ask.dueDay && <small>关系到 {ask.dueDay.slice(5)} 的截止</small>}</p>;
+}
+
+function AskCard({ ask, heading, onDone }: { ask: Ask; heading?: string; onDone: (id: string) => void }) {
   const [chosen, setChosen] = useState<AskOption | undefined>();
   const [values, setValues] = useState<Record<string, string>>({});
   const [status, setStatus] = useState("");
@@ -46,9 +83,8 @@ function AskCard({ ask, onDone }: { ask: Ask; onDone: (id: string) => void }) {
     }
     void post("/api/asks/answer", { askId: ask.id, optionId: option.id, values: {} });
   };
-  return <li className="ask-card" data-line={ask.line} data-urgency={ask.urgency}>
-    <p className="ask-meta"><span className="tag">{URGENCY[ask.urgency]}</span>{ask.dueDay && <small>关系到 {ask.dueDay.slice(5)} 的截止</small>}</p>
-    <h3>{ask.title}</h3>
+  return <li className={heading ? "ask-input" : "ask-card"} data-line={ask.line} data-urgency={ask.urgency}>
+    {heading ? <h4>{heading}</h4> : <><AskMeta ask={ask} /><h3>{ask.title}</h3></>}
     <p className="ask-why">{ask.why}</p>
     <div className="ask-options" role="group" aria-label="选一个">
       {ask.options.map((option) => option.href

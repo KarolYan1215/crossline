@@ -91,18 +91,58 @@ function backplanAsks({ store, ctx, today }: Source): Ask[] {
   return asks;
 }
 
-const waitingMilestone = (itemId: string, milestoneIds: string[]) => milestoneIds.find((id) => itemId.startsWith(`wait-bp-${id}-`));
+type WaitingItem = ReturnType<Source["store"]["listWaitingItems"]>[number];
+
+/**
+ * Who is waiting on what, for the backplan: which milestones an open waiting item hands a missing input to (a
+ * `wait-bp-<milestone>-…` id, or an answer that linked an item the person already had), and which items are the same
+ * wait — the same person giving it on the same day for the same project. A 「在等」 answer reuses such an item instead
+ * of opening a second one, and 「到了」 on either of a pair that already exists answers both and re-splits every
+ * milestone either was holding (a real account had 「西湖 MoS2 真实测量数据」 and 「实测 MoS₂ 参数数据及元数据」, both
+ * 师兄 · 10/8, asked about twice on the same morning).
+ */
+function waitingIndex(store: Source["store"], workspaceId: string) {
+  const milestones = new Map(store.listMilestones(workspaceId).map((item) => [item.id, item]));
+  const orders = new Map(store.listWorkOrders(workspaceId).map((order) => [order.id, order]));
+  // waiting item → milestone → the input's name as that milestone asked for it.
+  const linked = new Map<string, Map<string, string>>();
+  for (const event of store.listEvents(workspaceId, { type: "goal.backplan_input_waiting" })) {
+    const { waitingId, what } = event.payload as { waitingId?: string; what?: string };
+    if (waitingId) linked.set(waitingId, (linked.get(waitingId) ?? new Map()).set(event.entityId, what ?? ""));
+  }
+  /** The missing inputs this item stands for: `[milestoneId, what]`. */
+  const inputsOf = (item: WaitingItem): Array<[string, string]> => {
+    const own = [...milestones.keys()].find((id) => item.id.startsWith(`wait-bp-${id}-`));
+    const inputs = new Map(linked.get(item.id));
+    if (own) inputs.set(own, item.title);
+    return [...inputs].map(([id, what]) => [id, what || item.title]);
+  };
+  const milestonesOf = (item: WaitingItem) => inputsOf(item).map(([id]) => id);
+  const projectsOf = (item: WaitingItem) => new Set([...item.blocks.map((id) => orders.get(id)), ...milestonesOf(item).map((id) => milestones.get(id))]
+    .filter((row): row is NonNullable<typeof row> => Boolean(row)).map((row) => `${row.identityId}/${row.projectId ?? ""}`));
+  const sameWait = (item: WaitingItem, who: string, expectedAt: string, project: string) =>
+    item.state === "open" && Boolean(who.trim()) && item.who.trim() === who.trim() && item.expectedAt === expectedAt && projectsOf(item).has(project);
+  const open = store.listWaitingItems(workspaceId, { state: "open" });
+  /** The item itself and every other open item that is the same wait. */
+  const withTwins = (item: WaitingItem) => [item, ...open.filter((other) => other.id !== item.id
+    && [...projectsOf(item)].some((project) => sameWait(other, item.who, item.expectedAt, project)))];
+  return { open, inputsOf, milestonesOf, sameWait, withTwins };
+}
 
 /** 「…到了吗？」 on the day something the person waits for was due — the waiting card, now one ask among the others. */
 function waitingAsks({ store, ctx, today }: Source): Ask[] {
-  const milestoneIds = store.listMilestones(ctx.workspaceId).map((item) => item.id);
-  return store.listWaitingItems(ctx.workspaceId, { state: "open" }).filter((item) => item.followUpAt <= today).map((item) => {
-    const forMilestone = waitingMilestone(item.id, milestoneIds);
+  const index = waitingIndex(store, ctx.workspaceId);
+  const due = index.open.filter((item) => item.followUpAt <= today);
+  // One card for one wait: an item whose twin is already asked about is answered with it.
+  return due.filter((item, position) => !due.slice(0, position).some((earlier) => index.withTwins(earlier).includes(item))).map((item) => {
+    const twins = index.withTwins(item);
+    const forMilestone = twins.some((twin) => index.milestonesOf(twin).length);
+    const blocks = new Set(twins.flatMap((twin) => twin.blocks)).size;
     return { id: `wait:${item.id}`, kind: "waiting_due" as const, entityId: item.id, urgency: "now" as const, dueDay: item.followUpAt,
       raisedAt: item.updatedAt, fingerprint: item.followUpAt,
       title: `${item.who ? `${item.who}的` : ""}「${short(item.title, 50)}」到了吗？`,
       why: `原定${item.approximate ? "大约" : ""} ${item.expectedAt.slice(5)} 到。${forMilestone ? "到了以后系统会带着它重新拆这个里程碑的步骤。"
-        : `在它到之前，依赖它的 ${item.blocks.length} 项工作不会排进日历。`}`,
+        : `在它到之前，依赖它的 ${blocks} 项工作不会排进日历。`}`,
       options: [
         { id: "arrived", label: "到了", recommended: true, ...(forMilestone ? { detail: "写一句放在哪、有什么，重拆更准",
           fields: [{ id: "note", label: "放在哪 / 要点（可选）", kind: "longtext" as const, required: false }] } : { detail: "依赖它的工作排上日历" }) },
@@ -410,9 +450,14 @@ function answerBackplan(ctx: AccessContext, ask: Ask, optionId: string, values: 
   }
   if (optionId === "waiting") {
     const dependents = releaseAcquisition(ctx, milestoneId, eventId, inputId, "你已经在等这项输入");
-    store.saveWaitingItem({ id: `wait-bp-${milestoneId}-${eventId.slice(0, 8)}-${inputId}`, ownerId: ctx.principalId, workspaceId: ctx.workspaceId,
+    const index = waitingIndex(store, ctx.workspaceId);
+    const existing = index.open.find((item) => index.sameWait(item, values.who ?? "", values.date!, `${milestone.identityId}/${milestone.projectId ?? ""}`));
+    const waitingId = existing?.id ?? `wait-bp-${milestoneId}-${eventId.slice(0, 8)}-${inputId}`;
+    if (existing) store.addWaitingBlocks(ctx.workspaceId, existing.id, dependents, ctx.principalId);
+    else store.saveWaitingItem({ id: waitingId, ownerId: ctx.principalId, workspaceId: ctx.workspaceId,
       title: input.what, who: values.who ?? "", expectedAt: values.date!, approximate: true, followUpAt: values.date!, state: "open",
       blocks: dependents, source: "backplan" });
+    record(ctx, "goal.backplan_input_waiting", milestoneId, `goal:backplan:waiting:${ask.id}`, { waitingId, askId: ask.id, what: input.what });
     resolve("waiting");
     return { ok: true };
   }
@@ -424,15 +469,25 @@ async function answerOne(ctx: AccessContext, ask: Ask, optionId: string, values:
   switch (ask.kind) {
     case "backplan_input": return answerBackplan(ctx, ask, optionId, values);
     case "waiting_due": {
-      const item = store.listWaitingItems(ctx.workspaceId).find((row) => row.id === ask.entityId);
+      const index = waitingIndex(store, ctx.workspaceId);
+      const item = index.open.find((row) => row.id === ask.entityId);
       if (!item) return { ok: false, code: "WAITING_ITEM_NOT_FOUND" };
-      const result = answerWaiting(ctx, item.id, optionId === "deferred" ? { kind: "deferred", followUpAt: values.date! }
-        : optionId === "cancelled" ? { kind: "cancelled" } : { kind: "arrived" });
-      const milestoneId = waitingMilestone(item.id, store.listMilestones(ctx.workspaceId).map((row) => row.id));
-      if (result.ok && optionId === "arrived" && milestoneId) {
-        record(ctx, "goal.backplan_input_supplied", milestoneId, `goal:backplan:supplied:${ask.id}`,
-          { what: item.title, text: values.note || `已从${item.who || "对方"}那里收到`, askId: ask.id });
-        rerunBackplan(ctx, milestoneId);
+      const answer = optionId === "deferred" ? { kind: "deferred" as const, followUpAt: values.date! }
+        : optionId === "cancelled" ? { kind: "cancelled" as const } : { kind: "arrived" as const };
+      // The same wait recorded twice is answered once: its twins follow, or the second would be asked about again.
+      const twins = index.withTwins(item);
+      const result = answerWaiting(ctx, item.id, answer);
+      if (!result.ok) return result;
+      for (const twin of twins.slice(1)) answerWaiting(ctx, twin.id, answer);
+      // Each milestone is handed the input under the name it asked for it by.
+      const handOver = new Map(twins.flatMap((twin) => index.inputsOf(twin)));
+      if (optionId === "arrived" && handOver.size) {
+        for (const [milestoneId, what] of handOver) {
+          record(ctx, "goal.backplan_input_supplied", milestoneId, `goal:backplan:supplied:${ask.id}:${milestoneId}`,
+            { what, text: values.note || `已从${item.who || "对方"}那里收到`, askId: ask.id });
+          record(ctx, "goal.backplan_rerun_requested", milestoneId, `goal:backplan:rerun:${milestoneId}:${Date.now()}`, {});
+        }
+        requestAutoBackplan(ctx);
       }
       return result;
     }

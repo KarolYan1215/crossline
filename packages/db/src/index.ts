@@ -1723,6 +1723,22 @@ export class CrosslineStore {
       source: row.source as StoredWaitingItem["source"], createdAt: String(row.created_at), updatedAt: String(row.updated_at) }));
   }
 
+  /** More work held up by the same open item (a second ask turned out to be waiting for the same thing). */
+  addWaitingBlocks(workspaceId: string, id: string, blocks: string[], ownerId: string): { changed: boolean } {
+    return this.#db.transaction(() => {
+      const item = this.listWaitingItems(workspaceId, { state: "open" }).find((row) => row.id === id);
+      if (!item) throw new Error("WAITING_ITEM_NOT_OPEN");
+      const added = blocks.filter((block) => !item.blocks.includes(block));
+      if (!added.length) return { changed: false };
+      const next = [...item.blocks, ...added];
+      this.#db.prepare("UPDATE waiting_items SET blocks_json = ?, updated_at = ? WHERE workspace_id = ? AND id = ?")
+        .run(JSON.stringify(next), new Date().toISOString(), workspaceId, id);
+      this.appendEvent({ ownerId, workspaceId, idempotencyKey: `waiting.blocks_added:${id}:${next.join(",")}`, type: "waiting.blocks_added",
+        entityId: id, payload: { added } });
+      return { changed: true };
+    }).immediate();
+  }
+
   /**
    * The person's answer to 「…到了吗？」: it arrived (the work it held up may now be scheduled), it was
    * dropped, or not yet — ask again on `followUpAt`. Each answer is its own event; answering a closed item is refused.

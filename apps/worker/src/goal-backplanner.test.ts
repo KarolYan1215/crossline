@@ -222,3 +222,33 @@ test("a refusal recorded before missing inputs were itemised gets one more autom
   expect(milestonesAwaitingBackplan(store, workspaceId, new Date("2026-10-06T12:00:00Z"))).toEqual([]);
   store.close();
 });
+
+// A real step, 「从素材库选出四个首轮选题…」, came out high-risk because its evidence said 「首轮发布清单草稿」: only what the
+// step *is* says whether it reaches outside the machine, not its reason or what it leaves behind.
+test("a step is high-risk for what it does, not for a publishing word in its rationale or evidence", async () => {
+  const store = new CrosslineStore(":memory:");
+  store.saveMilestone({ id: "m", ownerId, workspaceId, identityId: "media", projectId: "p", title: "稳定推进实验", status: "approved", version: 1 });
+  const runtime = fakeRuntime([JSON.stringify({ steps: [
+    step({ id: "pick", intent: "从素材库选出四个首轮选题", rationale: "为首轮发布做准备", evidence: "首轮发布清单草稿" }),
+    step({ id: "post", intent: "发布第一条视频", dependsOn: ["pick"], evidence: "视频链接" })], dateCandidates: [], blockers: [] })],
+  "crossline:crossline-goal-backplanner");
+  expect((await createGoalBackplanner(store, workspaceId, "C:\repo", () => runtime.rpc)("m")).state).toBe("proposed");
+  const tiers = Object.fromEntries(store.listWorkOrders(workspaceId).map((order) => [order.intent, order.riskTier]));
+  expect(tiers).toEqual({ "从素材库选出四个首轮选题": "routine", "发布第一条视频": "high_risk" });
+  store.close();
+});
+
+// 「在等」 for something the person was already waiting for links that item instead of opening a `wait-bp-` copy, so the
+// re-split has to find it through the link, under the name the milestone asked for it by.
+test("an existing waiting item linked to a milestone's missing input is passed on as on its way", async () => {
+  const store = new CrosslineStore(":memory:");
+  store.saveMilestone({ id: "m", ownerId, workspaceId, identityId: "research", projectId: "p", title: "稳定推进实验", status: "approved", version: 1 });
+  store.saveWaitingItem({ id: "wait-sim-0", ownerId, workspaceId, title: "西湖 MoS2 真实测量数据", who: "师兄", expectedAt: "2026-10-08",
+    approximate: true, followUpAt: "2026-10-08", state: "open", blocks: [], source: "manual" });
+  store.appendEvent({ ownerId, workspaceId, idempotencyKey: "link", type: "goal.backplan_input_waiting", entityId: "m",
+    payload: { waitingId: "wait-sim-0", askId: "bp:e:m1", what: "实测 MoS₂ 参数数据" } });
+  const runtime = fakeRuntime([JSON.stringify({ steps: [step()], dateCandidates: [], blockers: [] })], "crossline:crossline-goal-backplanner");
+  await createGoalBackplanner(store, workspaceId, "C:\repo", () => runtime.rpc)("m");
+  expect(runtime.prompts()[0]).toContain('"waitingInputs":[{"what":"实测 MoS₂ 参数数据","who":"师兄","expectedAt":"2026-10-08"}]');
+  store.close();
+});

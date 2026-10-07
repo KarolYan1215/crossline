@@ -14,8 +14,12 @@ export const ROLLING_STEPS = 2;
 function personInputs(store: CrosslineStore, workspaceId: string, milestoneId: string) {
   const supplied = store.listEvents(workspaceId, { type: "goal.backplan_input_supplied", entityId: milestoneId })
     .map((event) => event.payload as { what: string; text: string });
-  const waiting = store.listWaitingItems(workspaceId, { state: "open" }).filter((item) => item.id.startsWith(`wait-bp-${milestoneId}-`))
-    .map((item) => ({ what: item.title, who: item.who, expectedAt: item.expectedAt }));
+  // An item the person already had for the same thing is linked rather than duplicated (see `waitingIndex` in the web's asks).
+  const linked = new Map(store.listEvents(workspaceId, { type: "goal.backplan_input_waiting", entityId: milestoneId })
+    .map((event) => event.payload as { waitingId: string; what: string }).map((link) => [link.waitingId, link.what]));
+  const waiting = store.listWaitingItems(workspaceId, { state: "open" })
+    .filter((item) => item.id.startsWith(`wait-bp-${milestoneId}-`) || linked.has(item.id))
+    .map((item) => ({ what: linked.get(item.id) ?? item.title, who: item.who, expectedAt: item.expectedAt }));
   return { supplied, waiting };
 }
 
@@ -114,7 +118,8 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
     const ids = new Map(steps.map((step) => [step.id, `backplan-${randomUUID()}`]));
     const drafts: StoredWorkOrder[] = steps.map((step) => {
       const id = ids.get(step.id)!;
-      const external = mentionsExternalAction(step.intent, step.rationale, step.evidence);
+      // What the step *is*, not why or what it leaves behind: 「首轮发布清单草稿」 as evidence made picking topics high-risk.
+      const external = mentionsExternalAction(step.intent);
       const riskTier = external ? "high_risk" : step.riskTier;
       return { id, ownerId: ownerOf(store, workspaceId), workspaceId,
         identityId: milestone.identityId, projectId: milestone.projectId!, milestoneId: milestone.id,

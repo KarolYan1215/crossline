@@ -93,6 +93,54 @@ test("「在等」 becomes a waiting item that holds the next step; on its day �
   expect(store.listEvents(ws, { type: "goal.backplan_rerun_requested" })).toHaveLength(1);
 });
 
+/**
+ * The real account: 师兄's data was already a waiting item (recorded by hand on the next milestone's task, 「西湖 MoS2 真实
+ *测量数据」), and answering the backplan's 「在等」 opened a second one for the same thing on the same day.
+ */
+function alreadyWaiting(store: CrosslineStore) {
+  store.saveMilestone({ id: "chart", ownerId: owner, workspaceId: ws, identityId: "research", projectId: "p", title: "真实数据仿真图表已获合作师兄接收",
+    status: "approved", version: 2 });
+  store.saveWorkOrder({ id: "sim", ownerId: owner, workspaceId: ws, identityId: "research", projectId: "p", milestoneId: "chart",
+    intent: "处理西湖 MoS₂ 实测数据", state: "awaiting_plan_approval", riskTier: "routine", estimate, payload: {} });
+  store.saveWaitingItem({ id: "wait-sim-0", ownerId: owner, workspaceId: ws, title: "西湖 MoS2 真实测量数据", who: "师兄", expectedAt: "2026-10-08",
+    approximate: true, followUpAt: "2026-10-08", state: "open", blocks: ["sim"], source: "manual" });
+}
+
+test("「在等」 for something already waited on (same person, same day, same project) reuses that item; 「到了」 on it re-splits", async () => {
+  const store = setup();
+  alreadyWaiting(store);
+  const eventId = refusedWithMissing(store);
+  expect(await answerAsk(TEST_CTX, `bp:${eventId}:m1`, "waiting", { who: " 师兄", date: "2026-10-08" }, NOW)).toEqual({ ok: true });
+  expect(store.listWaitingItems(ws)).toEqual([expect.objectContaining({ id: "wait-sim-0", blocks: ["sim", "map"] })]);
+  const dayOf = new Date("2026-10-08T15:00:00.000Z");
+  const waiting = collectAsks(TEST_CTX, dayOf).filter((ask) => ask.kind === "waiting_due");
+  expect(waiting.map((ask) => ask.id)).toEqual(["wait:wait-sim-0"]);
+  expect(waiting[0]!.why).toContain("重新拆");
+  vi.stubEnv("CROSSLINE_FIXED_NOW", dayOf.toISOString());
+  expect(await answerAsk(TEST_CTX, waiting[0]!.id, "arrived", {}, dayOf)).toEqual({ ok: true });
+  expect(store.listEvents(ws, { type: "goal.backplan_input_supplied" }).map((event) => event.entityId)).toEqual(["mos2"]);
+  expect(store.listEvents(ws, { type: "goal.backplan_rerun_requested" }).map((event) => event.entityId)).toEqual(["mos2"]);
+  // A different person, or a different day, is a different wait.
+  expect(await answerAsk(TEST_CTX, `bp:${eventId}:m2`, "waiting", { who: "导师", date: "2026-10-09" }, dayOf)).toEqual({ ok: true });
+  expect(store.listWaitingItems(ws, { state: "open" }).map((item) => item.id)).toEqual([`wait-bp-mos2-${eventId.slice(0, 8)}-m2`]);
+});
+
+test("a pair recorded before this fix is one card, and 「到了」 on it closes both and re-splits the milestone", async () => {
+  const store = setup();
+  alreadyWaiting(store);
+  store.saveWaitingItem({ id: "wait-bp-mos2-abcdef12-m1", ownerId: owner, workspaceId: ws, title: "实测 MoS₂ 参数数据及元数据", who: "师兄",
+    expectedAt: "2026-10-08", approximate: true, followUpAt: "2026-10-08", state: "open", blocks: [], source: "backplan" });
+  const dayOf = new Date("2026-10-08T15:00:00.000Z");
+  vi.stubEnv("CROSSLINE_FIXED_NOW", dayOf.toISOString());
+  const waiting = collectAsks(TEST_CTX, dayOf).filter((ask) => ask.kind === "waiting_due");
+  expect(waiting).toHaveLength(1);
+  expect(await answerAsk(TEST_CTX, waiting[0]!.id, "arrived", { note: "在组里网盘 /mos2" }, dayOf)).toEqual({ ok: true });
+  expect(store.listWaitingItems(ws).map((item) => item.state)).toEqual(["arrived", "arrived"]);
+  expect(store.listEvents(ws, { type: "goal.backplan_input_supplied" })[0]).toMatchObject({ entityId: "mos2", payload: { text: "在组里网盘 /mos2" } });
+  expect(store.listEvents(ws, { type: "goal.backplan_rerun_requested" })).toHaveLength(1);
+  expect(collectAsks(TEST_CTX, dayOf).some((ask) => ask.kind === "waiting_due")).toBe(false);
+});
+
 test("「先不拆」 withdraws the milestone's unstarted steps and closes this version to the timer", async () => {
   const store = setup();
   const eventId = refusedWithMissing(store);
