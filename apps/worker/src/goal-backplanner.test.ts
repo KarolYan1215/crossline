@@ -127,3 +127,29 @@ test("a refused backplan is recorded and that milestone version is not retried o
   expect(milestonesAwaitingBackplan(store, workspaceId, new Date("2026-10-06T12:00:00Z"))).toEqual([]);
   store.close();
 });
+
+// The first real automatic run turned one milestone into a ten-step chain at once (pending went from 11 to 20).
+test("rolling mode keeps the next two steps, proposes the next round once they are done, and stops when a round is discarded", async () => {
+  const { milestonesAwaitingBackplan } = await import("./goal-backplanner");
+  const store = new CrosslineStore(":memory:");
+  store.saveMilestone({ id: "m", ownerId, workspaceId, identityId: "research", projectId: "p", title: "稳定推进实验", status: "approved", version: 1 });
+  store.saveMilestoneAnchor({ workspaceId, milestoneId: "m", stage: 1, deadline: "2026-10-12", baseline: "", target: "", stakeholders: [],
+    sourceFactIds: [], dependsOn: [], updatedAt: "2026-10-01T00:00:00Z" });
+  const chain = [step({ id: "s1", family: "deep_work" }), step({ id: "s2", dependsOn: ["s1"], family: "deep_work" }), step({ id: "s3", dependsOn: ["s2"], family: "deep_work" })];
+  const runtime = fakeRuntime([JSON.stringify({ steps: chain, dateCandidates: [], blockers: [] })], "crossline:crossline-goal-backplanner");
+  const backplan = createGoalBackplanner(store, workspaceId, "C:\repo", () => runtime.rpc, { rolling: true });
+  const first = await backplan("m");
+  expect(first.state).toBe("proposed");
+  expect(store.listWorkOrders(workspaceId)).toHaveLength(2);
+  const now = new Date("2026-10-06T12:00:00Z");
+  expect(milestonesAwaitingBackplan(store, workspaceId, now)).toEqual([]);
+  // Both done: the next round may be proposed.
+  for (const order of store.listWorkOrders(workspaceId)) store.saveWorkOrder({ ...order, state: "accepted" });
+  expect(milestonesAwaitingBackplan(store, workspaceId, now)).toEqual(["m"]);
+  await backplan("m");
+  expect(store.listWorkOrders(workspaceId)).toHaveLength(4);
+  // The person discards the whole second round: no third round on a timer.
+  for (const order of store.listWorkOrders(workspaceId).filter((item) => item.state !== "accepted")) store.saveWorkOrder({ ...order, state: "archived" });
+  expect(milestonesAwaitingBackplan(store, workspaceId, now)).toEqual([]);
+  store.close();
+});

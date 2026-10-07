@@ -113,7 +113,7 @@ async function autoBackplanPass(workspaceId: string, checkedAt = new Date().toIS
     const signal = await readCost();
     if (!signal.available || budgetPolicy(Math.max(signal.short?.usedPercent ?? 0, signal.long?.usedPercent ?? 0)).mode !== "normal") return;
     enterUsageWorkspace(workspaceId);
-    const backplan = createGoalBackplanner(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client);
+    const backplan = createGoalBackplanner(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client, { rolling: true });
     for (const id of ids) {
       const outcome = await backplan(id).catch(() => undefined);
       if (outcome) console.info(JSON.stringify({ type: `backplan.auto.${outcome.state}`, checkedAt, workspaceId, milestoneId: id }));

@@ -8,14 +8,25 @@ import { ownerOf } from "./owner";
 import { autoApproveEligible } from "./auto-approval";
 const SKILL = "crossline:crossline-goal-backplanner";
 /** A proposal version is expanded once; repeating the request returns its existing draft IDs. */
+/** How many next steps an automatic (rolling) backplan keeps. */
+export const ROLLING_STEPS = 2;
+
+/**
+ * `rolling`: the automatic mode the worker uses after a line's milestones are approved. It keeps only the next
+ * `ROLLING_STEPS` steps (the answer is in dependency order, so the first ones are what can start now) and is keyed
+ * by round, so when those are done and nothing serves the milestone any more the next round proposes what follows.
+ * The first real run without it turned one milestone into a ten-step chain at once and the queue grew from 11 to 20.
+ */
 export function createGoalBackplanner(store: CrosslineStore, workspaceId: string, cwd: string,
-  getClient: () => CodexRpcBoundary | undefined) {
+  getClient: () => CodexRpcBoundary | undefined, options: { rolling?: boolean } = {}) {
   return async function backplan(milestoneId: string, signal?: AbortSignal) {
     const milestone = store.listMilestones(workspaceId).find((item) => item.id === milestoneId &&
       item.status === "approved" && item.projectId);
     if (!milestone || !defaultIdentityPacks().some((pack) => pack.id === milestone.identityId && pack.kind === "identity"))
       return { state: "blocked", code: "BACKPLAN_GOAL_NOT_APPROVED", message: "需要已批准且绑定真实身份、项目的里程碑。" };
-    const key = `goal:backplan:${milestone.id}:${milestone.version}`;
+    const rounds = store.listEvents(workspaceId, { type: "goal.backplan_proposed", entityId: milestone.id })
+      .filter((event) => (event.payload as { rolling?: boolean }).rolling).length;
+    const key = options.rolling ? `goal:backplan:${milestone.id}:${milestone.version}:round:${rounds}` : `goal:backplan:${milestone.id}:${milestone.version}`;
     const existing = store.listEvents(workspaceId, { type: "goal.backplan_proposed", entityId: milestone.id })
       .find((event) => event.idempotencyKey === key);
     if (existing) {
@@ -44,7 +55,8 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
       existingWork: store.listWorkOrders(workspaceId)
       .filter((order) => order.milestoneId === milestone.id).map((order) => ({ id: order.id, intent: order.intent, state: order.state })) };
     const result = await runCodexSkill<Answer>(client, context, { skillName: SKILL, cwd,
-      developerInstructions: "Work backwards from the approved milestone. Return only sourced step drafts; never set a goal or deadline. Block if the supplied source cannot justify a step.",
+      developerInstructions: "Work backwards from the approved milestone. Return only sourced step drafts; never set a goal or deadline. Block if the supplied source cannot justify a step."
+        + (options.rolling ? ` Return only the next ${ROLLING_STEPS} steps that can start now (existingWork shows what is already done or open); the rest is proposed after these are done.` : ""),
       outputSchema: BACKPLAN_SCHEMA, prepareInput: () => context,
       validateOutput: (output) => validateBackplan(output, sources, dateSources), onAudit: () => {},
       ...(signal ? { signal } : {}), timeoutMs: 60 * 60_000 });
@@ -54,8 +66,10 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
         payload: { milestoneVersion: milestone.version, code: result.blocker.code, message: result.blocker.message.slice(0, 400) } });
       return { state: "blocked", code: result.blocker.code, message: result.blocker.message };
     }
-    const ids = new Map(result.output.steps.map((step) => [step.id, `backplan-${randomUUID()}`]));
-    const drafts: StoredWorkOrder[] = result.output.steps.map((step) => {
+    // Steps come in dependency order (each depends only on earlier ones), so the first ones are the ones that can start.
+    const steps = options.rolling ? result.output.steps.slice(0, ROLLING_STEPS) : result.output.steps;
+    const ids = new Map(steps.map((step) => [step.id, `backplan-${randomUUID()}`]));
+    const drafts: StoredWorkOrder[] = steps.map((step) => {
       const id = ids.get(step.id)!;
       const external = /\b(email|publish|submit|purchase|sell|buy|sign|legal|transfer|delete)\b|发送|发布|提交|购买|出售|签署|法律|转账|删除/i
         .test(`${step.intent} ${step.rationale} ${step.evidence}`);
@@ -65,7 +79,7 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
         intent: step.intent, state: "awaiting_plan_approval", riskTier,
         estimate: { ...step.estimate, source: "llm_prior", observationCount: 0, confidence: "low" },
         payload: { family: step.family, backplan: { milestoneVersion: milestone.version, sourceQuote: step.sourceQuote,
-          rationale: step.rationale, stepId: step.id }, dependsOn: step.dependsOn.map((dep) => ids.get(dep)!),
+          rationale: step.rationale, stepId: step.id }, dependsOn: step.dependsOn.map((dep) => ids.get(dep)).filter((dep): dep is string => Boolean(dep)),
           automationParts: [], humanCore: [{ id: `${id}-core`, intent: step.intent, quote: step.sourceQuote,
             rationale: step.rationale, energy: step.energy, interruptible: step.interruptible }],
           materialContract: [], evidenceContract: [{ kind: "record", description: step.evidence,
@@ -76,7 +90,7 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
     const workOrderIds = drafts.map((draft) => draft.id);
     const inserted = store.saveBackplanDrafts(workspaceId, drafts, { ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: key,
       type: "goal.backplan_proposed", entityId: milestone.id,
-      payload: { milestoneVersion: milestone.version, workOrderIds,
+      payload: { milestoneVersion: milestone.version, workOrderIds, ...(options.rolling ? { rolling: true, round: rounds } : {}),
         dateCandidates: result.output.dateCandidates, source: SKILL } });
     if (inserted) {
       autoApproveEligible(store, workspaceId, workOrderIds);
@@ -106,13 +120,19 @@ export function milestonesAwaitingBackplan(store: CrosslineStore, workspaceId: s
     .map((order) => order.milestoneId));
   // Proposed, or tried and refused (the model said the milestone's own text cannot justify a step): either way this
   // version is not tried again on a timer — a refusal repeated every fifteen minutes is quota spent on the same answer.
-  const done = new Set(store.listEvents(workspaceId, { type: ["goal.backplan_proposed", "goal.backplan_blocked"] }).map((event) =>
-    event.type === "goal.backplan_blocked" ? `goal:backplan:${event.entityId}:${(event.payload as { milestoneVersion?: number }).milestoneVersion}` : event.idempotencyKey));
+  const blocked = new Set(store.listEvents(workspaceId, { type: "goal.backplan_blocked" }).map((event) =>
+    `${event.entityId}:${(event.payload as { milestoneVersion?: number }).milestoneVersion}`));
+  const states = new Map(store.listWorkOrders(workspaceId).map((order) => [order.id, order.state]));
+  // A round the person discarded entirely is a "no" to this version: it is not proposed again on a timer.
+  const declined = new Set(store.listEvents(workspaceId, { type: "goal.backplan_proposed" }).filter((event) => {
+    const ids = (event.payload as { workOrderIds?: string[] }).workOrderIds ?? [];
+    return ids.length > 0 && ids.every((id) => states.get(id) === "archived");
+  }).map((event) => `${event.entityId}:${(event.payload as { milestoneVersion?: number }).milestoneVersion}`));
   const identities = new Set(defaultIdentityPacks().filter((pack) => pack.kind === "identity").map((pack) => pack.id));
   return store.listMilestones(workspaceId)
     .filter((milestone) => milestone.status === "approved" && milestone.projectId && identities.has(milestone.identityId))
     .filter((milestone) => { const deadline = deadlines.get(milestone.id); return Boolean(deadline && deadline >= today && deadline <= horizon); })
-    .filter((milestone) => !open.has(milestone.id) && !done.has(`goal:backplan:${milestone.id}:${milestone.version}`))
+    .filter((milestone) => !open.has(milestone.id) && !blocked.has(`${milestone.id}:${milestone.version}`) && !declined.has(`${milestone.id}:${milestone.version}`))
     .sort((a, b) => deadlines.get(a.id)!.localeCompare(deadlines.get(b.id)!))
     .slice(0, limit).map((milestone) => milestone.id);
 }
