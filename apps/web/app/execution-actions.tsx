@@ -22,8 +22,13 @@ const codes: Record<string, string> = {
   WORK_ORDER_ALREADY_ACCEPTED: "已验收的作业不能丢弃；如需退回请到复盘页撤销验收。"
 };
 
-export function ExecutionActions({ workOrderId, intent, state, paused, ownerId, workspaceId, evidenceChecklist = [], showEnergyProbe = true }: {
+export function ExecutionActions({ workOrderId, intent, state, paused, ownerId, workspaceId, evidenceChecklist = [], showEnergyProbe = true,
+  estimateP50, suggestedMinutes }: {
   workOrderId: string; intent: string; state: string; paused: boolean; ownerId: string; workspaceId: string;
+  /** The estimate's typical value, for the one-tap 「实际花了多久」 choices. */
+  estimateP50?: number;
+  /** What the screen record says this session took (work-like apps since it started); only with the detail consent. */
+  suggestedMinutes?: number;
   /** Pre-generated completion-time questions copied from the bound milestone — see 工作块 E. Empty is
    * normal (no template behind the milestone, or no milestone at all); the free-text/file fields below
    * stay available regardless. */
@@ -44,6 +49,11 @@ export function ExecutionActions({ workOrderId, intent, state, paused, ownerId, 
   const [uploading, setUploading] = useState(false);
   const [uploadedFile, setUploadedFile] = useState<{ uri: string; fileName: string } | null>(null);
   const [uploadStatus, setUploadStatus] = useState("");
+  // 「实际花了多久」: chosen at completion in one tap (or confirmed from the screen record) — the only number there is
+  // for work done away from the timer, and what the estimate calibration learns from.
+  const [reported, setReported] = useState<{ minutes: number; source: "one_tap" | "activity" } | null>(
+    suggestedMinutes ? { minutes: suggestedMinutes, source: "activity" } : null);
+  const [ownMinutes, setOwnMinutes] = useState("");
 
   // Offline is queued, not just reported: the person's decision to start, pause, resume or complete
   // their own work order must survive a dead connection the same way a capture already does, and the
@@ -109,7 +119,7 @@ export function ExecutionActions({ workOrderId, intent, state, paused, ownerId, 
     const checklistAnswers = Object.entries(answers)
       .filter(([, answer]) => answer.trim())
       .map(([questionId, answer]) => ({ questionId, answer: answer.trim() }));
-    return { action: "complete", evidence, checklistAnswers };
+    return { action: "complete", evidence, checklistAnswers, ...(reported ? { reportedMinutes: reported.minutes, reportedSource: reported.source } : {}) };
   };
   const hasEvidence = Boolean((uri.trim() && description.trim()) || uploadedFile);
 
@@ -168,6 +178,22 @@ export function ExecutionActions({ workOrderId, intent, state, paused, ownerId, 
         </small>
       </label>
       {uploadStatus && <small className="muted" role="status">{uploadStatus}</small>}
+      {estimateP50 ? <fieldset className="reported-minutes">
+        <legend className="micro">实际花了多久？（选一个就行，用来让估时越来越准）</legend>
+        {suggestedMinutes ? <button type="button" aria-pressed={reported?.source === "activity"} onClick={() => setReported({ minutes: suggestedMinutes, source: "activity" })}>
+          屏幕记录约 {suggestedMinutes} 分</button> : null}
+        {([["≈估时", 1], ["一半", 0.5], ["多一半", 1.5], ["两倍", 2]] as const).map(([label, factor]) => {
+          const minutes = Math.max(5, Math.round(estimateP50 * factor / 5) * 5);
+          return <button key={label} type="button" aria-pressed={reported?.source === "one_tap" && reported.minutes === minutes}
+            onClick={() => setReported({ minutes, source: "one_tap" })}>{label} {minutes} 分</button>;
+        })}
+        <label><span className="sr-only">自己填分钟数</span>
+          <input inputMode="numeric" value={ownMinutes} placeholder="自填分钟" maxLength={4} onChange={(event) => {
+            setOwnMinutes(event.target.value);
+            const minutes = Number(event.target.value);
+            setReported(Number.isInteger(minutes) && minutes > 0 && minutes <= 1440 ? { minutes, source: "one_tap" } : null);
+          }} /></label>
+      </fieldset> : null}
       <button className="primary-button" type="button" disabled={busy} onClick={() => void send(completeEvidence())}>
         {hasEvidence ? "提交完成与证据" : "完成（记为无证据）"}
       </button>

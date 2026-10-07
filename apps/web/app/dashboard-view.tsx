@@ -110,7 +110,7 @@ export function DashboardView({ data }: { data: DashboardData }) {
     const detail = data.taskDetailById.get(item.id);
     return detail
       ? <ExecutionActions workOrderId={detail.id} intent={detail.intent} state={detail.state} paused={detail.paused}
-          ownerId={detail.ownerId} workspaceId={detail.workspaceId} evidenceChecklist={detail.evidenceChecklist}
+          ownerId={detail.ownerId} workspaceId={detail.workspaceId} evidenceChecklist={detail.evidenceChecklist} estimateP50={detail.estimate.p50Minutes} {...(detail.suggestedMinutes ? { suggestedMinutes: detail.suggestedMinutes } : {})}
           showEnergyProbe={false} />
       : <a className="primary-button" href={`/workbench/${encodeURIComponent(item.id)}`}>前往任务详情执行并提交证据</a>;
   };

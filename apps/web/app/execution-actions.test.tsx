@@ -53,3 +53,13 @@ describe("execution actions — showEnergyProbe (工作块 F)", () => {
     expect(html).not.toContain("完成后精力与实际负荷");
   });
 });
+
+// 「实际花了多久」 in one tap: the choices come from the estimate, and the screen record's suggestion is offered first.
+test("an active order offers one-tap durations from its estimate, with the screen record's suggestion when there is one", () => {
+  const html = renderToStaticMarkup(<ExecutionActions workOrderId="w1" intent="写一段分析" state="active" paused={false}
+    ownerId="o" workspaceId="w" estimateP50={60} suggestedMinutes={47} />);
+  expect(html).toContain("实际花了多久");
+  expect(html).toContain("屏幕记录约 47 分");
+  expect(html).toContain("≈估时 60 分");
+  expect(html).toContain("两倍 120 分");
+});

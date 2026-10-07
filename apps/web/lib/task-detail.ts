@@ -2,7 +2,7 @@ import "server-only";
 import type { AccessContext, SuccessCriterion, EvidenceQuestionTemplate } from "@crossline/core";
 import type { CrosslineStore, StoredMilestone, StoredWorkOrder, StoredMaterial, StoredExecution, StoredMilestoneRelation, StoredBackgroundFact } from "@crossline/db";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
-import { getStore, resolvedEstimate, relationKindLabel, accents } from "./crossline";
+import { getStore, resolvedEstimate, relationKindLabel, accents, suggestedSessionMinutes } from "./crossline";
 
 type StoredEvent = ReturnType<CrosslineStore["listEvents"]>[number];
 
@@ -23,6 +23,8 @@ export type TaskDetail = {
   state: string;
   riskTier: "routine" | "milestone" | "high_risk";
   estimate: ReturnType<typeof resolvedEstimate>;
+  /** For an order being worked on: what the screen record says this session took (a suggestion, detail consent only). */
+  suggestedMinutes?: number;
   manualPromotion: boolean;
   /** A starter work order the app wrote on first run, not something the person created. */
   seeded: boolean;
@@ -152,7 +154,8 @@ function assembleTaskDetail(ctx: AccessContext, order: StoredWorkOrder, deps: {
   return {
     id: order.id, ownerId: order.ownerId, workspaceId: order.workspaceId, paused: pausedFrom(executions),
     identityId: order.identityId, identityLabel, accent, intent: order.intent, state: order.state,
-    riskTier: order.riskTier, estimate: resolvedEstimate(ctx, order), manualPromotion: Boolean(payload.manualPromotion), seeded: Boolean(payload.seeded),
+    riskTier: order.riskTier, estimate: resolvedEstimate(ctx, order),
+    ...(() => { const minutes = order.state === "active" ? suggestedSessionMinutes(ctx, order.id) : undefined; return minutes ? { suggestedMinutes: minutes } : {}; })(), manualPromotion: Boolean(payload.manualPromotion), seeded: Boolean(payload.seeded),
     ...(deps.milestone ? { milestone: { id: deps.milestone.id, title: deps.milestone.title } } : {}),
     humanCore: payload.humanCore ?? [], automationParts: payload.automationParts ?? [],
     estimateBreakdown: payload.estimateBreakdown ?? [],

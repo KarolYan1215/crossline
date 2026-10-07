@@ -5,12 +5,13 @@ import path from "node:path";
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 import { CrosslineStore, type EvidenceClaimInput, type StoredMilestone } from "@crossline/db";
 import { availableSlots, deriveCapacity, requiredApproval, validateAvailability, DEFAULT_AVAILABILITY,
-  defaultMilestoneTemplates, computeMilestoneConfidence, validateSuccessCriteria, calibrateEstimate, goalSettingKey,
+  defaultMilestoneTemplates, computeMilestoneConfidence, PRODUCTIVE, type ActivityCategory, validateSuccessCriteria, goalSettingKey, ANALYSIS_CONTEXT_VERSION, calibrationReport, calibratedEstimate,
+  type CalibrationReport,
   type AccessContext, type AvailabilityWindow, type Estimate, type SuccessCriterion, type ChecklistAnswer } from "@crossline/core";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { forecastGoals, planSchedule, recommendNextActions, type ForecastResult, type PlanResult } from "@crossline/planner";
 import { energyCalibration, predictEnergyTransition, readTransitionOutcomes } from "./energy-learning";
-import { durationPriorFor, effectiveEstimate } from "./estimate-calibration";
+import { durationPriorFor } from "./estimate-calibration";
 import type { DashboardAction, DashboardData } from "../app/dashboard-view";
 
 export type PersistedScheduleBlock = {
@@ -985,7 +986,7 @@ export function resumeWorkOrderExecution(ctx: AccessContext, workOrderId: string
 }
 
 export function completeWorkOrderExecution(ctx: AccessContext, workOrderId: string, evidence: EvidenceClaimInput[],
-  checklistAnswers: ChecklistAnswer[] = [], at?: string): ExecutionResult {
+  checklistAnswers: ChecklistAnswer[] = [], at?: string, report?: { minutes: number; source: "one_tap" | "activity" }): ExecutionResult {
   const store = getStore();
   const workOrder = findWorkOrder(ctx.workspaceId, workOrderId);
   if (!workOrder) return { ok: false, code: "WORK_ORDER_NOT_FOUND" };
@@ -993,7 +994,8 @@ export function completeWorkOrderExecution(ctx: AccessContext, workOrderId: stri
   if (workOrder.state !== "active") return { ok: false, code: "EXECUTION_NOT_ACTIVE" };
   store.transitionWorkOrder(ctx.workspaceId, workOrderId, { type: "human.completed" },
     `execution:${workOrderId}:${executionRun(ctx.workspaceId, workOrderId) - 1}:completed`,
-    { evidence, ...(checklistAnswers.length ? { checklistAnswers } : {}), ...(at ? { occurredAt: at } : {}) });
+    { evidence, ...(checklistAnswers.length ? { checklistAnswers } : {}), ...(at ? { occurredAt: at } : {}),
+      ...(report ? { reportedMinutes: report.minutes, reportedSource: report.source } : {}) });
   return { ok: true };
 }
 
@@ -1067,17 +1069,34 @@ type ActionableOrder = ReturnType<CrosslineStore["listWorkOrders"]>[number];
 const humanCoreOf = (order: ActionableOrder) =>
   ((order.payload as { humanCore?: Array<{ energy?: string; interruptible?: boolean }> }).humanCore ?? [])[0];
 
-/** The estimate actually used for scheduling and display — see `effectiveEstimate`'s own doc comment
- * for why this reads `duration_observations` fresh on every call instead of ever rewriting the
- * WorkOrder's own stored `estimate`. */
-export const resolvedEstimate = (ctx: AccessContext, order: ActionableOrder): Estimate => {
-  const prior = durationPriorFor(order.identityId, order.payload);
-  const family = (order.payload as { family?: string } | undefined)?.family;
-  const rows = prior && family ? getStore().listDurationObservations(ctx.workspaceId, order.identityId, family) : [];
-  const estimate = effectiveEstimate(order.estimate, prior, rows);
-  // A model's guess is scaled by how this person's finished tasks compared with their estimates; their own numbers are left alone.
-  return calibrateEstimate(estimate, getStore().workRhythm(ctx.workspaceId, new Date(Date.now() - 28 * 86_400_000).toISOString()));
-};
+/**
+ * This person's calibration, fitted on every finished task whose estimate came from the analysis: how far the
+ * model's p50 tends to be off, overall and per (line × kind), and whether correcting it actually beat the raw
+ * number in a backtest (`packages/core/src/calibration.ts`). Cached until a new observation lands — the backtest
+ * refits once per point and is read on every page.
+ */
+const calibrationCache = new Map<string, { key: string; report: CalibrationReport }>();
+export function workspaceCalibration(ctx: AccessContext, now = new Date()): CalibrationReport {
+  const rows = getStore().listAllDurationObservations(ctx.workspaceId).filter((row) => row.llmP50Minutes !== null && row.llmP85Minutes !== null);
+  const key = `${rows.length}:${rows.at(-1)?.createdAt ?? ""}:${now.toISOString().slice(0, 10)}`;
+  const cached = calibrationCache.get(ctx.workspaceId);
+  if (cached?.key === key) return cached.report;
+  const report = calibrationReport(rows.map((row) => ({ identityId: row.identityId, family: row.family, llmP50: row.llmP50Minutes!, llmP85: row.llmP85Minutes!,
+    actualMinutes: row.interruptionDominant ? 0 : row.observedMinutes, observedAt: row.observedAt, contextVersion: row.contextVersion, censored: row.censored })),
+    now, ANALYSIS_CONTEXT_VERSION);
+  calibrationCache.set(ctx.workspaceId, { key, report });
+  return report;
+}
+
+/**
+ * The estimate actually used for scheduling and display: the analysis's own number, corrected by this person's
+ * record once the correction has proved itself (otherwise unchanged, marked as still learning). Read fresh, never
+ * written back, so the stored estimate stays what the analysis said and every observation keeps improving it.
+ * It replaces two stacked corrections — a per-kind average that discarded the task's own estimate, and a global
+ * ratio with no shrinkage applied after three completions.
+ */
+export const resolvedEstimate = (ctx: AccessContext, order: ActionableOrder): Estimate =>
+  calibratedEstimate(order.estimate, workspaceCalibration(ctx), order.identityId, (order.payload as { family?: string } | undefined)?.family);
 
 const plannerTaskOf = (ctx: AccessContext, order: ActionableOrder) => {
   const preferences = readSchedulePreferences(ctx);
@@ -1122,6 +1141,23 @@ export function answerWaiting(ctx: AccessContext, id: string, answer: { kind: "a
   } catch (error) {
     return { ok: false, code: error instanceof Error ? error.message : "WAITING_ANSWER_FAILED" };
   }
+}
+
+/**
+ * What the screen record says the open session of this order took: minutes in work-like apps since it started.
+ * Only with the detail consent, and only ever a suggestion the person confirms at completion — offline work
+ * (paper, a lab, a meeting) is invisible to it.
+ */
+export function suggestedSessionMinutes(ctx: AccessContext, workOrderId: string, now = new Date()): number | undefined {
+  const store = getStore();
+  if (store.getSetting(ctx.workspaceId, ACTIVITY_DETAIL_CONSENT) !== "granted") return undefined;
+  const open = store.listExecutions(ctx.workspaceId, workOrderId).find((execution) => !execution.endedAt);
+  if (!open) return undefined;
+  const from = Date.parse(open.startedAt);
+  const minutes = store.listActivitySegments(ctx.workspaceId, open.startedAt)
+    .filter((segment) => !segment.idle && PRODUCTIVE.has(segment.category as ActivityCategory))
+    .reduce((sum, segment) => sum + Math.max(0, Math.min(Date.parse(segment.end), now.getTime()) - Math.max(Date.parse(segment.start), from)) / 60_000, 0);
+  return minutes >= 5 ? Math.round(minutes) : undefined;
 }
 
 export function releaseDayOf(ctx: AccessContext, order: { id: string; payload: unknown }): string | undefined {

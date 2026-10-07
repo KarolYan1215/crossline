@@ -130,7 +130,8 @@ export default async function WorkbenchPage({ searchParams }: {
           && <p role="note" className="seed-notice">示例作业 · 系统预置，不需要可直接丢弃。</p>}
         {(run.payload as { manualPromotion?: boolean }).manualPromotion
           && <p role="status">人工创建 · 未经 AI 分析</p>}
-        <p title={estimateBasis(estimate)}>{estimate.p25Minutes}–{estimate.p85Minutes} 分钟 · {confidenceLabel[estimate.confidence]} · {riskLabel[run.riskTier]}{estimate.calibration ? ` · 已按你的实际用时校正 ×${estimate.calibration.factor}` : ""}</p>
+        <p title={estimateBasis(estimate)}>{estimate.p25Minutes}–{estimate.p85Minutes} 分钟 · {confidenceLabel[estimate.confidence]} · {riskLabel[run.riskTier]}</p>
+        {estimate.calibration?.state === "applied" && <p className="muted">{estimateBasis(estimate, (run.payload as { family?: string }).family)}</p>}
         {!(run.payload as { family?: string }).family
           && ["preparing", "ready_for_human", "active", "evidence_review"].includes(run.state)
           && <FamilyBackfill workOrderId={run.id} />}
@@ -149,7 +150,8 @@ export default async function WorkbenchPage({ searchParams }: {
         </span>)}</p>}
         <ExecutionActions workOrderId={run.id} intent={run.intent} state={run.state} paused={paused}
           ownerId={ctx.principalId} workspaceId={ctx.workspaceId}
-          evidenceChecklist={taskDetails.get(run.id)?.evidenceChecklist ?? []} />
+          evidenceChecklist={taskDetails.get(run.id)?.evidenceChecklist ?? []} estimateP50={estimate.p50Minutes}
+          {...(taskDetails.get(run.id)?.suggestedMinutes ? { suggestedMinutes: taskDetails.get(run.id)!.suggestedMinutes! } : {})} />
         {blockerOf(run) && <p role="status">已退回 · {blockerOf(run)!.reason}</p>}
         {/* A held order used to show only the code. The gate's own per-criterion reading is what says
             which standard was not met and what would satisfy it, so it is shown rather than stored. */}

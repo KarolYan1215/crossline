@@ -1,6 +1,5 @@
 import { expect, test } from "vitest";
-import { calibrateEstimate, NO_RHYTHM, summarizeRhythm } from "./rhythm";
-import type { Estimate } from "./index";
+import { NO_RHYTHM, summarizeRhythm } from "./rhythm";
 
 const at = (day: number, hour: number, minute = 0) => new Date(Date.UTC(2026, 9, day, hour, minute)).toISOString();
 const seg = (from: string, to: string, category = "coding", idle = false) => ({ start: from, end: to, category, idle });
@@ -33,16 +32,4 @@ test("the ratio is the median of actual over estimated, held between 0.4 and 2",
   expect(summarizeRhythm({ segments: [], finished: finished([[30, 60], [36, 60], [42, 60]]) }).planActualRatio).toBe(0.6);
   expect(summarizeRhythm({ segments: [], finished: finished([[5, 60], [6, 60], [7, 60]]) }).planActualRatio).toBe(0.4);
   expect(summarizeRhythm({ segments: [], finished: finished([[300, 60], [200, 60], [400, 60]]) }).planActualRatio).toBe(2);
-});
-
-const guess: Estimate = { p25Minutes: 240, p50Minutes: 420, p85Minutes: 720, source: "llm_prior", observationCount: 0, confidence: "low" };
-
-test("a model's guess is scaled by the person's own ratio and says so; their own numbers are left alone", () => {
-  const rhythm = { ...NO_RHYTHM, planActualRatio: 0.6, completed: 5 };
-  expect(calibrateEstimate(guess, rhythm)).toMatchObject({ p25Minutes: 145, p50Minutes: 250, p85Minutes: 430, source: "llm_prior", calibration: { factor: 0.6, basedOn: 5 } });
-  expect(calibrateEstimate({ ...guess, source: "personal_history" }, rhythm)).toEqual({ ...guess, source: "personal_history" });
-  expect(calibrateEstimate({ ...guess, source: "manual" }, rhythm).p50Minutes).toBe(420);
-  // No ratio yet, or one that is nearly 1: nothing to say.
-  expect(calibrateEstimate(guess, NO_RHYTHM)).toBe(guess);
-  expect(calibrateEstimate(guess, { ...NO_RHYTHM, planActualRatio: 1.02, completed: 4 })).toBe(guess);
 });

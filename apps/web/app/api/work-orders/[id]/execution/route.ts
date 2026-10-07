@@ -72,7 +72,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       if (!evidence) return Response.json({ ok: false, code: "INVALID_EVIDENCE_CLAIM" }, { status: 400 });
       const checklistAnswers = readChecklistAnswers(body.checklistAnswers);
       if (!checklistAnswers) return Response.json({ ok: false, code: "INVALID_CHECKLIST_ANSWER" }, { status: 400 });
-      result = completeWorkOrderExecution(ctx, id, evidence, checklistAnswers);
+      const minutes = Number(body.reportedMinutes);
+      const report = Number.isInteger(minutes) && minutes > 0 && minutes <= 1440
+        ? { minutes, source: body.reportedSource === "activity" ? "activity" as const : "one_tap" as const } : undefined;
+      result = completeWorkOrderExecution(ctx, id, evidence, checklistAnswers, undefined, report);
     } else return Response.json({ ok: false, code: "EXECUTION_ACTION_NOT_ALLOWED" }, { status: 400 });
   } catch (error) {
     // A store-level guard is still a known failure, so it stays a typed blocker rather than a 500.

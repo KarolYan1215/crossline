@@ -333,6 +333,13 @@ export type StoredDurationObservation = {
   identityId: string; family: string;
   observedMinutes: number; wallClockMinutes: number; pauseMinutes: number; interruptionDominant: boolean;
   baselineP25Minutes: number; baselineP50Minutes: number; baselineP85Minutes: number;
+  /** What the analysis estimated for this order; null when the estimate was not a model's (typed by hand, a seed). */
+  llmP50Minutes: number | null; llmP85Minutes: number | null;
+  /** `timer` (start/stop), `one_tap` (chosen at completion), `activity` (the screen record's suggestion, confirmed). */
+  actualSource: "timer" | "one_tap" | "activity";
+  contextVersion: string;
+  /** Not a real duration (abandoned, sent back): counted, never fitted. */
+  censored: boolean;
   observedAt: string; createdAt: string;
 };
 
@@ -850,6 +857,29 @@ export class CrosslineStore {
         if (!has("milestones", "evidence_question_bank_json")) {
           this.#db.exec("ALTER TABLE milestones ADD COLUMN evidence_question_bank_json TEXT");
         }
+      } },
+
+      // What the calibration learns from is the model's own error, so each observation keeps the estimate the
+      // analysis wrote (not only the identity pack's prior), where the minutes came from, and under which
+      // analysis context version it was estimated. Old rows are backfilled from their work order, which still
+      // holds the original estimate — they are not thrown away.
+      { version: 10, up: () => {
+        if (!has("duration_observations", "llm_p50_minutes")) this.#db.exec("ALTER TABLE duration_observations ADD COLUMN llm_p50_minutes INTEGER");
+        if (!has("duration_observations", "llm_p85_minutes")) this.#db.exec("ALTER TABLE duration_observations ADD COLUMN llm_p85_minutes INTEGER");
+        if (!has("duration_observations", "actual_source")) this.#db.exec("ALTER TABLE duration_observations ADD COLUMN actual_source TEXT NOT NULL DEFAULT 'timer'");
+        if (!has("duration_observations", "context_version")) this.#db.exec("ALTER TABLE duration_observations ADD COLUMN context_version TEXT NOT NULL DEFAULT ''");
+        if (!has("duration_observations", "censored")) this.#db.exec("ALTER TABLE duration_observations ADD COLUMN censored INTEGER NOT NULL DEFAULT 0");
+        this.#db.exec(`
+          UPDATE duration_observations SET
+            llm_p50_minutes = (SELECT CAST(json_extract(w.estimate_json, '$.p50Minutes') AS INTEGER) FROM work_orders w
+              WHERE w.id = duration_observations.work_order_id AND w.workspace_id = duration_observations.workspace_id
+                AND json_extract(w.estimate_json, '$.source') = 'llm_prior'),
+            llm_p85_minutes = (SELECT CAST(json_extract(w.estimate_json, '$.p85Minutes') AS INTEGER) FROM work_orders w
+              WHERE w.id = duration_observations.work_order_id AND w.workspace_id = duration_observations.workspace_id
+                AND json_extract(w.estimate_json, '$.source') = 'llm_prior'),
+            context_version = COALESCE((SELECT json_extract(w.payload_json, '$.contextVersion') FROM work_orders w
+              WHERE w.id = duration_observations.work_order_id AND w.workspace_id = duration_observations.workspace_id), '')
+          WHERE llm_p50_minutes IS NULL`);
       } }
     ];
 
@@ -987,6 +1017,8 @@ export class CrosslineStore {
       /** When the act happened, if not now — an offline command replayed later carries the time it was
        * done on the device; stamping it with the replay time made offline work look shorter or longer. */
       occurredAt?: string;
+      /** The duration the person chose at completion (one tap, or the screen record's suggestion they confirmed). */
+      reportedMinutes?: number; reportedSource?: "one_tap" | "activity";
       /** Answers to the order's own `evidenceChecklist`, submitted alongside `evidence` on
        * `human.completed` — see 工作块 E. Stored on the closing execution row, not on any evidence claim. */
       checklistAnswers?: ChecklistAnswer[];
@@ -1060,6 +1092,7 @@ export class CrosslineStore {
   // rolled-back state change. WorkOrders only — a capture has neither executions nor evidence.
   #recordExecutionEffects(workspaceId: string, id: string, ownerId: string, event: WorkOrderEvent,
     update: { evidence?: EvidenceClaimInput[]; durationObserved?: boolean; checklistAnswers?: ChecklistAnswer[]; occurredAt?: string;
+      reportedMinutes?: number; reportedSource?: "one_tap" | "activity";
       durationCalibrationBaseline?: { p25Minutes: number; p50Minutes: number; p85Minutes: number } }): void {
     const open = this.#openExecution(workspaceId, id);
     const now = notBefore(update.occurredAt ?? new Date().toISOString(), open?.interruptions.at(-1)?.resumedAt
@@ -1095,10 +1128,12 @@ export class CrosslineStore {
       // No evidence is recorded as an explicit outcome rather than as an invented claim.
       if (open) {
         const checklistAnswers = update.checklistAnswers ?? [];
+        const reported = update.reportedMinutes && update.reportedMinutes > 0 && update.reportedMinutes <= 24 * 60 ? update.reportedMinutes : undefined;
         this.#db.prepare("UPDATE executions SET ended_at = ?, outcome = ?, payload_json = ? WHERE id = ?")
           .run(now, evidence.length ? "completed" : "completed_without_evidence",
             JSON.stringify({ durationObserved: open.durationObserved, interruptions,
-              ...(checklistAnswers.length ? { checklistAnswers } : {}) }), open.id);
+              ...(checklistAnswers.length ? { checklistAnswers } : {}),
+              ...(reported ? { reportedMinutes: Math.round(reported), reportedSource: update.reportedSource ?? "one_tap" } : {}) }), open.id);
       }
       return;
     }
@@ -1210,15 +1245,23 @@ export class CrosslineStore {
     if (!family) return;
     // Every closed, timed session of this order, not only the last one: work split across two sittings
     // used to be recorded as just the second sitting, so the person looked faster than they are.
+    // A session is counted by what the person reported for it at completion (one tap, or the screen record's
+    // suggestion they confirmed) when they did — that is the only number available for work done away from the
+    // timer — and otherwise by its own timer.
+    type Session = { id: string; started_at: string; ended_at: string; pause_minutes: number; payload_json: string };
     const rows = (this.#db.prepare(
       "SELECT id, started_at, ended_at, pause_minutes, payload_json FROM executions WHERE workspace_id = ? AND work_order_id = ? AND ended_at IS NOT NULL ORDER BY started_at"
-    ).all(workspaceId, workOrderId) as Array<{ id: string; started_at: string; ended_at: string; pause_minutes: number; payload_json: string }>)
-      .filter((row) => (JSON.parse(row.payload_json) as { durationObserved: boolean }).durationObserved);
-    const last = rows.at(-1);
+    ).all(workspaceId, workOrderId) as Session[])
+      .map((row) => ({ row, payload: JSON.parse(row.payload_json) as { durationObserved: boolean; reportedMinutes?: number; reportedSource?: "one_tap" | "activity" } }))
+      .filter(({ payload }) => payload.durationObserved || (payload.reportedMinutes ?? 0) > 0);
+    const last = rows.at(-1)?.row;
     if (!last) return;
-    const wallClockMinutes = rows.reduce((sum, row) => sum + Math.round((Date.parse(row.ended_at) - Date.parse(row.started_at)) / 60_000), 0);
-    const pauseMinutes = rows.reduce((sum, row) => sum + row.pause_minutes, 0);
-    const observedMinutes = wallClockMinutes - pauseMinutes;
+    const wallClockMinutes = rows.reduce((sum, { row }) => sum + Math.round((Date.parse(row.ended_at) - Date.parse(row.started_at)) / 60_000), 0);
+    const pauseMinutes = rows.reduce((sum, { row }) => sum + row.pause_minutes, 0);
+    const observedMinutes = rows.reduce((sum, { row, payload }) => sum + ((payload.reportedMinutes ?? 0) > 0 ? payload.reportedMinutes!
+      : Math.round((Date.parse(row.ended_at) - Date.parse(row.started_at)) / 60_000) - row.pause_minutes), 0);
+    const reported = rows.map(({ payload }) => payload.reportedSource).filter(Boolean);
+    const actualSource = reported.includes("one_tap") ? "one_tap" as const : reported.includes("activity") ? "activity" as const : "timer" as const;
     if (observedMinutes < 1) return;
     // One observation per work order. A revoke-then-reaccept with no new session is a no-op; one with a new
     // session replaces the earlier row, whose minutes the new sum already contains — inserting beside it
@@ -1230,8 +1273,11 @@ export class CrosslineStore {
     this.recordDurationObservation({
       ownerId, workspaceId, workOrderId, executionId: last.id, identityId: order.identityId, family,
       observedMinutes, wallClockMinutes, pauseMinutes,
-      interruptionDominant: pauseMinutes >= wallClockMinutes * 0.5,
-      baseline, observedAt: last.ended_at
+      // A reported duration already excludes the interruptions the person lived through; only a timer can be dominated by them.
+      interruptionDominant: actualSource === "timer" && pauseMinutes >= wallClockMinutes * 0.5,
+      baseline, observedAt: last.ended_at,
+      llm: order.estimate.source === "llm_prior" ? { p50Minutes: order.estimate.p50Minutes, p85Minutes: order.estimate.p85Minutes } : null,
+      actualSource, contextVersion: String((order.payload as { contextVersion?: string } | undefined)?.contextVersion ?? "")
     });
   }
 
@@ -2639,18 +2685,22 @@ export class CrosslineStore {
     observedMinutes: number; wallClockMinutes: number; pauseMinutes: number; interruptionDominant: boolean;
     baseline: { p25Minutes: number; p50Minutes: number; p85Minutes: number };
     observedAt: string;
+    llm?: { p50Minutes: number; p85Minutes: number } | null; actualSource?: StoredDurationObservation["actualSource"];
+    contextVersion?: string; censored?: boolean;
   }): { changed: boolean } {
     const result = this.#db.prepare(`
       INSERT INTO duration_observations (
         id, owner_id, workspace_id, work_order_id, execution_id, identity_id, family,
         observed_minutes, wall_clock_minutes, pause_minutes, interruption_dominant,
-        baseline_p25_minutes, baseline_p50_minutes, baseline_p85_minutes, observed_at, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        baseline_p25_minutes, baseline_p50_minutes, baseline_p85_minutes, observed_at, created_at,
+        llm_p50_minutes, llm_p85_minutes, actual_source, context_version, censored
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(workspace_id, execution_id) DO NOTHING
     `).run(randomUUID(), input.ownerId, input.workspaceId, input.workOrderId, input.executionId,
       input.identityId, input.family, input.observedMinutes, input.wallClockMinutes, input.pauseMinutes,
       input.interruptionDominant ? 1 : 0, input.baseline.p25Minutes, input.baseline.p50Minutes,
-      input.baseline.p85Minutes, input.observedAt, new Date().toISOString());
+      input.baseline.p85Minutes, input.observedAt, new Date().toISOString(),
+      input.llm?.p50Minutes ?? null, input.llm?.p85Minutes ?? null, input.actualSource ?? "timer", input.contextVersion ?? "", input.censored ? 1 : 0);
     return { changed: result.changes > 0 };
   }
 
@@ -2675,6 +2725,10 @@ export class CrosslineStore {
       pauseMinutes: Number(row.pause_minutes), interruptionDominant: Number(row.interruption_dominant) === 1,
       baselineP25Minutes: Number(row.baseline_p25_minutes), baselineP50Minutes: Number(row.baseline_p50_minutes),
       baselineP85Minutes: Number(row.baseline_p85_minutes),
+      llmP50Minutes: row.llm_p50_minutes === null || row.llm_p50_minutes === undefined ? null : Number(row.llm_p50_minutes),
+      llmP85Minutes: row.llm_p85_minutes === null || row.llm_p85_minutes === undefined ? null : Number(row.llm_p85_minutes),
+      actualSource: (row.actual_source ?? "timer") as StoredDurationObservation["actualSource"],
+      contextVersion: String(row.context_version ?? ""), censored: Number(row.censored ?? 0) === 1,
       observedAt: String(row.observed_at), createdAt: String(row.created_at)
     }));
   }

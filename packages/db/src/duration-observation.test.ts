@@ -177,3 +177,22 @@ test("replayed execution times are kept, and clamped so an end never precedes it
     expect(execution.interruptions[0]).toMatchObject({ pausedAt: "2026-09-14T14:30:00.000Z", resumedAt: "2026-09-14T14:30:00.000Z" });
   } finally { store.close(); }
 });
+
+// The calibration learns the model's own error, so the observation keeps the estimate the analysis wrote.
+test("an observation keeps the analysis's own estimate and where the minutes came from; a one-tap report counts", () => {
+  const store = new CrosslineStore(":memory:");
+  vi.useFakeTimers();
+  try {
+    seed(store);
+    vi.setSystemTime(new Date("2026-09-14T09:00:00.000Z"));
+    store.transitionWorkOrder("w", "w1", { type: "human.started" }, "start:w1", { durationObserved: true });
+    vi.setSystemTime(new Date("2026-09-14T09:05:00.000Z"));
+    // The person worked away from the timer and says it took about an hour.
+    store.transitionWorkOrder("w", "w1", { type: "human.completed" }, "done:w1",
+      { evidence: [{ kind: "record", uri: "local://note-1", description: "结论记录" }], reportedMinutes: 60, reportedSource: "one_tap" });
+    store.transitionWorkOrder("w", "w1", { type: "evidence.accepted", approvalId: "human" }, "accept:w1",
+      { durationCalibrationBaseline: BASELINE });
+    expect(store.listDurationObservations("w", "research", "deep_work")[0]).toMatchObject({
+      observedMinutes: 60, actualSource: "one_tap", llmP50Minutes: 20, llmP85Minutes: 40, interruptionDominant: false });
+  } finally { store.close(); }
+});

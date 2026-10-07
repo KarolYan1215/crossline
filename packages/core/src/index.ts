@@ -33,6 +33,7 @@ export * from "./backplan-schema";
 export * from "./external-action";
 export * from "./settings-keys";
 export * from "./auto-approval";
+export * from "./calibration";
 import type { EvidenceQuestionTemplate } from "./milestone-templates";
 export type EnergyLevel = "low" | "medium" | "high";
 
@@ -45,8 +46,13 @@ export type Estimate = {
   source: "identity_prior" | "llm_prior" | "personal_history" | "legacy_task" | "manual";
   observationCount: number;
   confidence: "low" | "medium" | "high";
-  /** Present when a model's guess was scaled by how this person's finished tasks compared with their estimates (see `calibrateEstimate`). */
-  calibration?: { factor: number; basedOn: number };
+  /**
+   * How a model's guess relates to this person's record (`calibratedEstimate`): `applied` — the numbers above are
+   * the corrected ones and `raw` is what the analysis wrote; `learning` — the raw numbers are used because the
+   * correction has not yet beaten them in a backtest, and `needed` more finished tasks are required before it can.
+   */
+  calibration?: { factor: number; basedOn: number; state?: "applied" | "learning"; needed?: number;
+    raw?: { p50Minutes: number; p85Minutes: number } };
 };
 
 export type Evidence = {

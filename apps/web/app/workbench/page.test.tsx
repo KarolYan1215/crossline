@@ -22,7 +22,9 @@ describe("workbench page", () => {
         ownerId: TEST_CTX.principalId, workspaceId: TEST_CTX.workspaceId, workOrderId: `history-${i}`,
         executionId: `exec-${i}`, identityId: "research", family: "deep_work",
         observedMinutes: 180, wallClockMinutes: 180, pauseMinutes: 0, interruptionDominant: false,
-        baseline: prior, observedAt: `2026-09-${String(i + 1).padStart(2, "0")}T00:00:00.000Z`
+        baseline: prior, observedAt: `2026-09-${String(i + 1).padStart(2, "0")}T00:00:00.000Z`,
+        // The analysis kept estimating 70 minutes for work that took 180: the correction has something real to learn.
+        llm: { p50Minutes: 70, p85Minutes: 105 }, actualSource: "timer", contextVersion: "crossline.analysis.v2"
       });
     }
     store.saveWorkOrder({
@@ -37,8 +39,8 @@ describe("workbench page", () => {
     // The raw prior's p50/p85 (70/105) must not appear as this order's displayed window — it should
     // have moved toward the real 180-minute history instead.
     expect(html).not.toContain("45–105 分钟");
-    expect(html).not.toContain("低置信");
-    expect(html).toContain("中置信");
+    // Both numbers, and why they differ.
+    expect(html).toContain("AI 估 70 分 · 按你的记录约");
 
     store.close();
     globalThis.crosslineStore = undefined;

@@ -1,5 +1,4 @@
 import { PRODUCTIVE, type ActivityCategory } from "./activity-state";
-import type { Estimate } from "./index";
 
 /**
  * How this person actually works, read from what they actually did — not from what a model guesses a task takes.
@@ -71,20 +70,5 @@ export function summarizeRhythm(input: {
     planActualRatio: ratios.length >= MIN_COMPLETED_FOR_RATIO ? Math.round(Math.min(RATIO_CEILING, Math.max(RATIO_FLOOR, median(ratios))) * 100) / 100 : 0,
     observedDays: perDay.size,
     completed: ratios.length
-  };
-}
-
-/**
- * A model's guess, corrected by how this person's finished tasks compared with their guesses. Only a model's guess is touched:
- * a `personal_history` estimate already is the person's own numbers, and a number the person typed is theirs. The correction is
- * recorded on the estimate so the screen can say why it differs from what the analysis first wrote.
- */
-export function calibrateEstimate(estimate: Estimate, rhythm: WorkRhythm): Estimate {
-  if (estimate.source !== "llm_prior" || !rhythm.planActualRatio || Math.abs(rhythm.planActualRatio - 1) < 0.05) return estimate;
-  const scale = (minutes: number) => Math.max(5, Math.round(minutes * rhythm.planActualRatio / 5) * 5);
-  const p50Minutes = scale(estimate.p50Minutes);
-  return {
-    ...estimate, p25Minutes: Math.min(p50Minutes, scale(estimate.p25Minutes)), p50Minutes, p85Minutes: Math.max(p50Minutes, scale(estimate.p85Minutes)),
-    calibration: { factor: rhythm.planActualRatio, basedOn: rhythm.completed }
   };
 }
