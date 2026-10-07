@@ -34,6 +34,7 @@ export * from "./external-action";
 export * from "./settings-keys";
 export * from "./auto-approval";
 export * from "./calibration";
+export * from "./effectiveness";
 import type { EvidenceQuestionTemplate } from "./milestone-templates";
 export type EnergyLevel = "low" | "medium" | "high";
 

@@ -701,3 +701,4 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .assistant-card{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;padding:8px;border:1px dashed var(--graphite);margin:6px 0}
 .waiting-card{border-left:4px solid var(--ink);margin:12px 0}
 .byproduct-line{border-left:3px dashed var(--graphite);padding-left:8px}
+.effectiveness-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}

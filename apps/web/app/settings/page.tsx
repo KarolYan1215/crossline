@@ -3,6 +3,9 @@ import { AvailabilityEditor } from "../plan/availability-editor";
 import { LocalActivityToggle } from "./local-activity-toggle";
 import { UsageCard } from "./usage-card";
 import { NotifyLevel } from "./notify-level";
+import { EffectivenessCard } from "./effectiveness-card";
+import { loadEffectiveness } from "../../lib/effectiveness";
+import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { ConnectionsSection } from "../connectors/connections";
 import {
   ACTIVITY_BLACKLIST, ACTIVITY_DETAIL_CONSENT, ACTIVITY_PAUSED_UNTIL, getStore, lastNight, LOCAL_ACTIVITY_CONSENT, readAvailability, readGoalSettings, readSchedulePreferences
@@ -45,6 +48,9 @@ export default async function SettingsPage() {
   return <SubpageShell active="设置" title="设置">
     <details className="fold" open><summary>作息与可用时间</summary>
       <AvailabilityEditor windows={readAvailability(ctx)} preferences={effectivePreferences} milestones={milestones} suggested={suggestedAvailabilityFor(ctx)} />
+    </details>
+    <details className="fold" open><summary>系统体检</summary>
+      <EffectivenessCard data={await loadEffectiveness(ctx)} labels={Object.fromEntries(defaultIdentityPacks().map((pack) => [pack.id, pack.label]))} />
     </details>
     <details className="fold" open><summary>提醒</summary>
       <NotifyLevel level={store.getSetting(ctx.workspaceId, "notify.level") ?? "normal"} />

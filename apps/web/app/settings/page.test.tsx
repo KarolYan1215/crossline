@@ -24,6 +24,9 @@ describe("settings page", () => {
     expect(html).toContain("连接与账号");
     expect(html).toContain("模型用量");
     expect(html).toContain("还没有模型调用记录");
+    // The 系统体检 card renders from an empty ledger without inventing numbers.
+    expect(html).toContain("系统体检");
+    expect(html).toContain("还没有完成并记了用时的任务");
     globalThis.crosslineStore.close();
     globalThis.crosslineStore = undefined;
   }, 20000);
