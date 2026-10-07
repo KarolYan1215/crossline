@@ -111,3 +111,19 @@ test("milestones due within three weeks with nothing open are picked for backpla
   expect(milestonesAwaitingBackplan(store, workspaceId, new Date("2026-10-06T12:00:00Z"))).toEqual(["sooner", "soon"]);
   store.close();
 });
+
+test("a refused backplan is recorded and that milestone version is not retried on a timer", async () => {
+  const { milestonesAwaitingBackplan } = await import("./goal-backplanner");
+  const store = new CrosslineStore(":memory:");
+  store.saveMilestone({ id: "m", ownerId, workspaceId, identityId: "research", projectId: "p", title: "稳定推进实验", status: "approved", version: 1 });
+  store.saveMilestoneAnchor({ workspaceId, milestoneId: "m", stage: 1, deadline: "2026-10-12", baseline: "", target: "", stakeholders: [],
+    sourceFactIds: [], dependsOn: [], updatedAt: "2026-10-01T00:00:00Z" });
+  expect(milestonesAwaitingBackplan(store, workspaceId, new Date("2026-10-06T12:00:00Z"))).toEqual(["m"]);
+  const runtime = fakeRuntime([JSON.stringify({ steps: [], dateCandidates: [], blockers: [{ code: "DATA_MISSING", message: "实测数据还没有到" }] })],
+    "crossline:crossline-goal-backplanner");
+  const result = await createGoalBackplanner(store, workspaceId, "C:\repo", () => runtime.rpc)("m");
+  expect(result.state).toBe("blocked");
+  expect(store.listEvents(workspaceId, { type: "goal.backplan_blocked" })).toHaveLength(1);
+  expect(milestonesAwaitingBackplan(store, workspaceId, new Date("2026-10-06T12:00:00Z"))).toEqual([]);
+  store.close();
+});

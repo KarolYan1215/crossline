@@ -48,7 +48,12 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
       outputSchema: BACKPLAN_SCHEMA, prepareInput: () => context,
       validateOutput: (output) => validateBackplan(output, sources, dateSources), onAudit: () => {},
       ...(signal ? { signal } : {}), timeoutMs: 60 * 60_000 });
-    if (!result.ok) return { state: "blocked", code: result.blocker.code, message: result.blocker.message };
+    if (!result.ok) {
+      store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `goal:backplan:blocked:${milestone.id}:${milestone.version}`,
+        type: "goal.backplan_blocked", entityId: milestone.id,
+        payload: { milestoneVersion: milestone.version, code: result.blocker.code, message: result.blocker.message.slice(0, 400) } });
+      return { state: "blocked", code: result.blocker.code, message: result.blocker.message };
+    }
     const ids = new Map(result.output.steps.map((step) => [step.id, `backplan-${randomUUID()}`]));
     const drafts: StoredWorkOrder[] = result.output.steps.map((step) => {
       const id = ids.get(step.id)!;
@@ -99,7 +104,10 @@ export function milestonesAwaitingBackplan(store: CrosslineStore, workspaceId: s
   const deadlines = new Map(store.listMilestoneAnchors(workspaceId).map((anchor) => [anchor.milestoneId, anchor.deadline]));
   const open = new Set(store.listWorkOrders(workspaceId).filter((order) => !["archived", "accepted"].includes(order.state))
     .map((order) => order.milestoneId));
-  const done = new Set(store.listEvents(workspaceId, { type: "goal.backplan_proposed" }).map((event) => event.idempotencyKey));
+  // Proposed, or tried and refused (the model said the milestone's own text cannot justify a step): either way this
+  // version is not tried again on a timer — a refusal repeated every fifteen minutes is quota spent on the same answer.
+  const done = new Set(store.listEvents(workspaceId, { type: ["goal.backplan_proposed", "goal.backplan_blocked"] }).map((event) =>
+    event.type === "goal.backplan_blocked" ? `goal:backplan:${event.entityId}:${(event.payload as { milestoneVersion?: number }).milestoneVersion}` : event.idempotencyKey));
   const identities = new Set(defaultIdentityPacks().filter((pack) => pack.kind === "identity").map((pack) => pack.id));
   return store.listMilestones(workspaceId)
     .filter((milestone) => milestone.status === "approved" && milestone.projectId && identities.has(milestone.identityId))
