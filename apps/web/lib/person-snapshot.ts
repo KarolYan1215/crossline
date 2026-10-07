@@ -75,6 +75,12 @@ export async function personSnapshot(ctx: AccessContext, now = new Date()): Prom
     }
   }
 
+  const waiting = store.listWaitingItems(ctx.workspaceId, { state: "open" });
+  if (waiting.length) {
+    lines.push("", "## 在等别人的（到之前，依赖它的工作不排）");
+    for (const item of waiting.slice(0, 10)) lines.push(`- ${item.who ? `${item.who}：` : ""}${item.title} · 预计${item.approximate ? "大约" : ""} ${item.expectedAt}${item.followUpAt > item.expectedAt ? `（已推迟到 ${item.followUpAt} 再问）` : ""}`);
+  }
+
   const pending = countPending(ctx);
   if (pending.total) {
     const parts = [["作业方案", pending.workOrders], ["里程碑草稿", pending.milestoneDrafts], ["主线联系", pending.relations],
