@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import path from "node:path";
 import { enterUsageWorkspace, type CodexRpcBoundary } from "@crossline/codex";
-import { readCategories, requestCategory, type CrosslineStore } from "@crossline/db";
+import { deliverAgentResult, readCategories, requestCategory, type CrosslineStore } from "@crossline/db";
 import { AGENT_CATEGORIES, budgetPolicy, isAgentCategory, type AgentCategory, type CostSignal } from "@crossline/core";
 import { createAgentRunner, type AgentOutcome } from "./agent-task";
 import { dispatchCandidates, ledgerAsk, taskFromWorkOrder } from "./agent-dispatch";
@@ -47,7 +47,9 @@ export function createAgentService(deps: {
       enterUsageWorkspace(workspaceId);
       const outcome: AgentOutcome | { state: "failed"; message: string } = await run({ ...planned.input, category: chosen })
         .catch((error): { state: "failed"; message: string } => ({ state: "failed", message: error instanceof Error ? error.message : "" }));
-      log({ type: `agent.${outcome.state}`, workspaceId, taskId, ...(outcome.state === "blocked" ? { code: outcome.code } : {}) });
+      // A delegated result the kind's earned trust lets through goes straight to the gate; one that needs review waits for the person.
+      const delivered = outcome.state === "done" && !outcome.reviewRequired ? deliverAgentResult(deps.store, workspaceId, taskId) : undefined;
+      log({ type: `agent.${outcome.state}`, workspaceId, taskId, ...(outcome.state === "blocked" ? { code: outcome.code } : {}), ...(delivered ? { delivered } : {}) });
     })().finally(() => mark(workspaceId).delete(taskId));
     return { state: "started", taskId };
   }

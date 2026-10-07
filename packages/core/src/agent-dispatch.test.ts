@@ -16,6 +16,20 @@ describe("what the assistant is handed", () => {
     expect(plan(order({ ai: [] }))).toMatchObject({ fit: false, reason: expect.stringContaining("都需要你自己做") });
   });
 
+  // A step worked back from a milestone has no AI/human split, so on the real account nothing was ever handed over.
+  test("a small internal errand with no split is handed over whole; sending, deep work and graded coursework are not", () => {
+    const step = (intent: string, family: string) => ({ ...order({ ai: [], human: [intent], intent }),
+      payload: { automationParts: [], humanCore: [{ id: "h", intent }], family, evidenceContract: [{ description: "版本与输入规范的摘录和链接" }] } });
+    const whole = plan(step("确认目标 NeuroSim 版本，并取得对应的输入规范", "preparation"));
+    expect(whole).toMatchObject({ fit: true, delegated: true, category: "data_code_sim", humanPart: "审阅产出，决定用不用" });
+    expect(whole.fit && whole.what).toContain("版本与输入规范的摘录和链接");
+    expect(whole.fit && whole.what).toContain("needsHuman");
+    expect(plan(step("给师兄发邮件要数据", "preparation"))).toMatchObject({ fit: false });
+    expect(plan(step("写完仿真并出图", "deep_work"))).toMatchObject({ fit: false });
+    expect(plan(step("整理 ECE 548 期中考试复习提纲", "preparation"), true)).toMatchObject({ fit: false });
+    expect(plan(order({ ai: ["整理文献"] }))).toMatchObject({ fit: true, delegated: false });
+  });
+
   test("the AI parts become the task and the human core stays the person's", () => {
     const result = plan(order({ ai: ["整理 6T SRAM 拓扑和 Cadence 操作检查表"], human: ["在 Virtuoso 中画原理图", "审批交付物"], intent: "熟悉 Cadence" }));
     if (!result.fit) throw new Error("expected fit");

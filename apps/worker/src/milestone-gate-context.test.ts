@@ -37,6 +37,23 @@ test("a .txt file evidence claim's own content becomes quotable text, separate f
   expect(built.evidenceTexts).toContain("note.txt");
 });
 
+// What the assistant hands in for a delegated order is Markdown; it is delivered without anyone starting the order.
+test("an assistant's delivered Markdown file is quotable evidence", () => {
+  const filePath = path.join(evidenceRoot, "notes.md");
+  writeFileSync(filePath, "NeuroSim 2.1 的输入为器件 Ron/Roff 与非线性参数");
+  store.saveWorkOrder({
+    id: "w2", ownerId: "local-owner", workspaceId: WORKSPACE, identityId: "research", projectId: "p",
+    milestoneId: "m", intent: "整理输入规范", state: "approved", riskTier: "routine", payload: {},
+    estimate: { p25Minutes: 10, p50Minutes: 20, p85Minutes: 40, source: "llm_prior", observationCount: 0, confidence: "low" }
+  });
+  store.transitionWorkOrder(WORKSPACE, "w2", { type: "agent.delivered", taskId: "t" }, "delivered:w2", {
+    evidence: [{ kind: "file", uri: pathToFileURL(filePath).href, description: "助手产出：notes.md" }]
+  });
+  const built = buildMilestoneGateContext(store, WORKSPACE, "w2");
+  if ("blocker" in built) throw new Error(`unexpected blocker: ${built.blocker.code}`);
+  expect(built.evidenceTexts).toContain("NeuroSim 2.1 的输入为器件 Ron/Roff 与非线性参数");
+});
+
 test("a non-.txt file evidence claim is kept as a submitted record but its binary content is never read", () => {
   const filePath = path.join(evidenceRoot, "photo.png");
   writeFileSync(filePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));

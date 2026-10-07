@@ -26,8 +26,8 @@ export async function register(): Promise<void> {
     // What is waiting for the person, written where the worker's notifications read it (one definition of "needs you").
     if (!process.env.VITEST && !process.env.CROSSLINE_E2E_DATA_DIR) {
       const { attentionPass, ATTENTION_INTERVAL_MS } = await import("./lib/attention");
-      setTimeout(() => { try { attentionPass(); } catch { /* next interval */ } }, 15_000).unref?.();
-      const timer = setInterval(() => { try { attentionPass(); } catch { /* next interval */ } }, ATTENTION_INTERVAL_MS);
+      setTimeout(() => { void attentionPass().catch(() => {}); }, 15_000).unref?.();
+      const timer = setInterval(() => { void attentionPass().catch(() => {}); }, ATTENTION_INTERVAL_MS);
       timer.unref?.();
     }
     const { resolveCrosslineAuthOptions } = await import("./lib/auth");

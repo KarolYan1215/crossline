@@ -23,6 +23,8 @@ export type AgentTaskInput = {
   deadline?: string; notes?: string;
   /** A git project to work on: a worktree of it is made inside the task directory, on its own branch. */
   projectRepo?: string;
+  /** The whole order is the assistant's (whole-task delegation): an accepted result is delivered as its evidence. */
+  delegated?: boolean;
 };
 
 export type AuditCommand = { command: string; cwd: string; status: string; exitCode: number | null; reads: string[] };
@@ -172,6 +174,7 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
     const startedAt = Date.now();
     store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:requested:${taskId}`, type: "agent.task.requested", entityId: taskId,
       payload: { taskId, title: input.title, category: input.category, workOrderId: input.workOrderId ?? "", inputs, humanPart: input.humanPart, ...(worktree ? { worktree } : {}),
+        ...(input.delegated ? { delegated: true } : {}),
         // Taken up because the order took effect by itself (nobody clicked approve): the review card says so.
         ...(input.workOrderId && store.listEvents(workspaceId, { type: "work_order.auto_approved", entityId: input.workOrderId }).length ? { autoApproved: true } : {}) } });
 

@@ -5,6 +5,7 @@ import path from "node:path";
 import { enterUsageWorkspace, setSpendModeProvider, setUsageSink, startCodexSupervisor, type CodexSupervisor } from "@crossline/codex";
 import { CrosslineStore } from "@crossline/db";
 import { capturesAwaitingAutoAnalysis, createCaptureAnalyzer } from "./analysis";
+import { autoApproveEligible } from "./auto-approval";
 import { retireShadowedDemos } from "./demo-cleanup";
 import { notifyPass } from "./notify";
 import { createActivityTracker } from "./activity-recorder";
@@ -135,6 +136,12 @@ async function tick(): Promise<void> {
       const retired = retireShadowedDemos(analysisStore, workspace.id);
       if (retired.length) console.info(JSON.stringify({ type: "demo_orders.retired", checkedAt, workspaceId: workspace.id, retired }));
     } catch { /* housekeeping: never worth a failed tick */ }
+    // Proposals written before the default-effect rule covered them (or while it was narrower) get the same rule on the tick;
+    // an approval the person took back is never re-applied.
+    try {
+      const approved = autoApproveEligible(analysisStore, workspace.id);
+      if (approved.length) console.info(JSON.stringify({ type: "work_orders.auto_approved", checkedAt, workspaceId: workspace.id, approved }));
+    } catch { /* next tick */ }
   }
   // Material preparation is the one background job that writes into the project directory, so it only
   // ever runs for work orders the human already approved into `preparing`.

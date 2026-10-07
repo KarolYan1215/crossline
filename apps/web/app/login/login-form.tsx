@@ -28,7 +28,7 @@ export function LoginForm({ googleEnabled, verified = false }: { googleEnabled: 
   };
 
   return <div className="auth-form">
-    <form onSubmit={submitPassword}>
+    <form method="post" onSubmit={submitPassword}>
       <label><span>邮箱</span><input name="email" type="email" required autoComplete="email" autoFocus /></label>
       <label><span>密码</span><input name="password" type="password" required autoComplete="current-password" /></label>
       <button className="secondary-button" type="submit" disabled={busy}>{busy ? "处理中…" : "登录"}</button>

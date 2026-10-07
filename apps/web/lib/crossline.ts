@@ -919,7 +919,30 @@ export function retryMaterialPreparation(ctx: AccessContext, workOrderId: string
  * sitting there" as options. An accepted WorkOrder is excluded: discarding finished work would be
  * rewriting history rather than cleaning up an inbox.
  */
-export function archiveWorkOrder(ctx: AccessContext, workOrderId: string, reason: string): ExecutionResult {
+/**
+ * Reasons the system itself gave when it withdrew work (demo cleanup, a re-split, an input the person handed over). Those withdrawals are
+ * the system's own drafts being replaced, not decisions the person made, and the 已丢弃 drawer does not show them — the person sees
+ * the plan as it now stands, not every version it went through. Newer withdrawals carry `bySystem` on the event instead of relying on
+ * this list; it covers the ones written before that flag existed.
+ */
+const SYSTEM_ARCHIVE_REASONS = ["示例作业自动清理", "自动反推旧版", "你已经在等这项输入", "你已经提供了这项输入", "你说这个里程碑先不拆"];
+export function archivedBySystem(payload: unknown): boolean {
+  const value = payload as { bySystem?: boolean; reason?: string } | undefined;
+  return value?.bySystem === true || SYSTEM_ARCHIVE_REASONS.some((reason) => (value?.reason ?? "").startsWith(reason));
+}
+
+/**
+ * A milestone the architect replaced on its own: archived without the person ever editing it (every edit, archiving included, writes
+ * `milestone.revised`). The 主线 page leaves these out; what the person archived stays in its fold.
+ */
+export function milestonesRetiredBySystem(ctx: AccessContext): Set<string> {
+  const store = getStore();
+  const touched = new Set(store.listEvents(ctx.workspaceId, { type: "milestone.revised" }).map((event) => event.entityId));
+  return new Set(store.listMilestones(ctx.workspaceId).filter((milestone) => milestone.status === "archived" && !touched.has(milestone.id))
+    .map((milestone) => milestone.id));
+}
+
+export function archiveWorkOrder(ctx: AccessContext, workOrderId: string, reason: string, options: { bySystem?: boolean } = {}): ExecutionResult {
   const workOrder = findWorkOrder(ctx.workspaceId, workOrderId);
   if (!workOrder) return { ok: false, code: "WORK_ORDER_NOT_FOUND" };
   if (workOrder.state === "archived") return { ok: true };
@@ -931,7 +954,7 @@ export function archiveWorkOrder(ctx: AccessContext, workOrderId: string, reason
   // the fields the state machine itself validates, and a discard reason is a note, not a state input.
   store.appendEvent({
     ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `archive-reason:${workOrderId}`,
-    type: "work_order.archived", entityId: workOrderId, payload: { reason: trimmed.slice(0, 200) }
+    type: "work_order.archived", entityId: workOrderId, payload: { reason: trimmed.slice(0, 200), ...(options.bySystem ? { bySystem: true } : {}) }
   });
   const result = store.transitionWorkOrder(ctx.workspaceId, workOrderId, { type: "archived" }, `archive:${workOrderId}`);
   if (!result.changed) return { ok: false, code: "WORK_ORDER_NOT_ARCHIVABLE" };

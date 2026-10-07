@@ -10,6 +10,7 @@ import {
   markMaterialsReady, planToday, readGoalSettings, retryMaterialPreparation, saveGoalSettings
 } from "./crossline";
 import { requestAutoBackplan } from "./approvals";
+import { readScheduledDay } from "./schedule-memory";
 import { requestCodexSupervisor } from "./codex-runtime";
 import { autoPublishPass, forgetPublishedHash } from "./auto-publish";
 
@@ -307,6 +308,40 @@ function riskAsks({ store, ctx, today }: Source): Ask[] {
   });
 }
 
+/**
+ * 「昨天排的没做」: work the plan gave a time yesterday that nobody started. The scheduler has already moved it to the next free time —
+ * that part needs no one — so this asks only when it matters: when the work bears on a deadline within a week, where silently rolling
+ * it forward can quietly eat the margin. Morgen asks the same thing the morning after; Motion just moves it, and its users complain
+ * that they cannot tell what slipped. Everything else rolls forward without a question.
+ */
+const MISSED_ASK_HORIZON_DAYS = 7;
+function missedAsks({ store, ctx, today }: Source): Ask[] {
+  const yesterday = new Date(Date.parse(`${today}T00:00:00Z`) - DAY).toISOString().slice(0, 10);
+  const placed = readScheduledDay(ctx, yesterday);
+  if (!Object.keys(placed).length) return [];
+  const anchors = deadlines(store, ctx.workspaceId);
+  const handled = new Set(store.listEvents(ctx.workspaceId, { type: "missed.handled" }).map((event) => (event.payload as { askId?: string }).askId));
+  const orders = new Map(store.listWorkOrders(ctx.workspaceId).map((order) => [order.id, order]));
+  return Object.entries(placed).flatMap(([orderId, start]) => {
+    const order = orders.get(orderId);
+    const id = `missed:${orderId}:${yesterday}`;
+    // Still not begun: approved, preparing or ready. Started (or done, or discarded) is not missed.
+    if (!order || !["approved", "preparing", "ready_for_human"].includes(order.state) || handled.has(id)) return [];
+    const dueDay = dueOf(order, anchors);
+    if (!dueDay || daysBetween(today, dueDay) > MISSED_ASK_HORIZON_DAYS) return [];
+    return [{ id, kind: "missed_block" as const, entityId: orderId, line: order.identityId, urgency: urgencyFor(dueDay, today), dueDay,
+      raisedAt: `${yesterday}T${start}`, fingerprint: yesterday,
+      title: `昨天 ${start} 排的「${short(order.intent)}」没开始`,
+      why: `它已经被顺延到后面的空档，关系到 ${format(dueDay)} 的截止（还剩 ${daysBetween(today, dueDay)} 天）。顺延没问题就点一下；要是其实做了，去补记；要是已经不需要，就不做了。`,
+      options: [
+        { id: "roll", label: "顺延就好", detail: "按重新排的时间做", recommended: true },
+        { id: "later", label: "推到某天再做", fields: [{ id: "date", label: "从哪天起再排", kind: "date" as const, required: true }] },
+        { id: "done", label: "其实做了，去补记", href: `/workbench/${encodeURIComponent(orderId)}` },
+        { id: "drop", label: "不做了", fields: [{ id: "reason", label: "为什么不做", kind: "text" as const, required: true }] }
+      ] }];
+  });
+}
+
 function agentAsks({ store, ctx }: Source): Ask[] {
   const acknowledged = new Set(store.listEvents(ctx.workspaceId, { type: "agent.blocked_acknowledged" }).map((event) => event.entityId));
   const titles = new Map(store.listWorkOrders(ctx.workspaceId).map((order) => [order.id, order.intent]));
@@ -344,7 +379,7 @@ function calendarAsks({ store, ctx }: Source): Ask[] {
 /** Everything the ledger alone can tell, unranked. Synchronous, so the badge can count it on every page. */
 export function collectAsks(ctx: AccessContext, now = new Date()): Ask[] {
   const source = { store: getStore(), ctx, today: planToday(ctx, now) };
-  return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskAsks, agentAsks, calendarAsks]
+  return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskAsks, missedAsks, agentAsks, calendarAsks]
     .flatMap((collect) => { try { return collect(source); } catch { return []; } });
 }
 
@@ -517,6 +552,18 @@ async function answerOne(ctx: AccessContext, ask: Ask, optionId: string, values:
       }
       const goal = loadGoalForecast(ctx).goals.find((item) => item.milestoneId === ask.entityId);
       record(ctx, "risk.accepted", ask.entityId, `risk:accepted:${ask.entityId}:${Date.now()}`, { slackDays: goal?.slackDays ?? -999, p85Day: goal?.p85Day ?? null });
+      return { ok: true };
+    }
+    case "missed_block": {
+      const handled = () => record(ctx, "missed.handled", ask.entityId, `missed:handled:${ask.id}`, { askId: ask.id, how: optionId });
+      if (optionId === "drop") { const result = archiveWorkOrder(ctx, ask.entityId, values.reason!); if (result.ok) handled(); return result; }
+      if (optionId === "later") {
+        const order = store.listWorkOrders(ctx.workspaceId).find((item) => item.id === ask.entityId);
+        if (!order) return { ok: false, code: "WORK_ORDER_NOT_FOUND" };
+        // The planner already honours `notBefore` (a release date): nothing is placed before it.
+        store.saveWorkOrder({ ...order, payload: { ...(order.payload as object), notBefore: values.date } });
+      }
+      handled();
       return { ok: true };
     }
     case "agent_blocked":

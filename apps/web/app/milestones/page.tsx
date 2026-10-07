@@ -5,7 +5,7 @@ import { FlowChart } from "./flow-chart";
 import { TargetsPanel } from "./targets-panel";
 import { listCourseTargets } from "../../lib/targets";
 import { MilestoneAdmin, type AdminMilestone } from "./milestone-admin";
-import { ensureSeeded, getStore, readGoalSettings, readSchedulePreferences } from "../../lib/crossline";
+import { ensureSeeded, getStore, milestonesRetiredBySystem, readGoalSettings, readSchedulePreferences } from "../../lib/crossline";
 import { requireSessionContext } from "../../lib/access-guard";
 import { MilestonePreview } from "../task-preview";
 import { ApproveLineDraftsButton } from "../approvals/approval-actions";
@@ -21,7 +21,10 @@ export default async function MilestonesPage({ searchParams }: {
   const editId = typeof params.edit === "string" ? params.edit : undefined;
   ensureSeeded(ctx);
   const store = getStore();
-  const milestones = store.listMilestones(ctx.workspaceId);
+  // Drafts the architect replaced on its own are not shown: the page is the plan as it stands, with each milestone's reasoning in
+  // 「依据与推导」, not every version the planning went through. What the person archived themselves stays.
+  const retired = milestonesRetiredBySystem(ctx);
+  const milestones = store.listMilestones(ctx.workspaceId).filter((milestone) => !retired.has(milestone.id));
   const relations = store.listMilestoneRelations(ctx.workspaceId);
   // Why a proposed milestone was suggested is part of reviewing it: approving a goal without the
   // reasoning is the same problem as approving a relation with no stated claim.

@@ -3,7 +3,9 @@ param(
   [string]$BackupDirectory = (Join-Path (Split-Path -Parent $PSScriptRoot) 'backups'),
   # Matches `apps/web/lib/auth.ts`'s own default (`CROSSLINE_DATA_DIR`, else `<repo>/data`) — both
   # databases live side by side, so one data directory locates both.
-  [string]$DataDirectory
+  [string]$DataDirectory,
+  # How many encrypted backups to keep; older ones are deleted after a new one verifies. 0 keeps everything.
+  [int]$Keep = 0
 )
 
 $ErrorActionPreference = 'Stop'
@@ -17,6 +19,7 @@ $json = Join-Path $BackupDirectory "crossline-$stamp.json"
 $authDbCopy = Join-Path $BackupDirectory "auth-$stamp.db"
 $zip = Join-Path $BackupDirectory "crossline-$stamp.zip"
 $encrypted = Join-Path $BackupDirectory "crossline-$stamp.crossline"
+$codexMemory = Join-Path $BackupDirectory "codex-memory-$stamp"
 
 function Get-Sha256Hex([byte[]]$Bytes) {
   $sha = [System.Security.Cryptography.SHA256]::Create()
@@ -45,8 +48,14 @@ try {
     $authDbIncluded = $true
   }
 
+  # What Codex remembers across runs lives in its own CODEX_HOME, outside the ledger (see scripts/copy-codex-memory.ts). Not its
+  # login token. A machine where the assistant has never run has none, which is not a backup failure.
+  & { $ErrorActionPreference = 'Continue'; & pnpm --dir $repo exec tsx scripts/copy-codex-memory.ts $codexMemory }
+  if ($LASTEXITCODE -ne 0) { throw 'Codex memory copy failed.' }
+
   $toArchive = @($json)
   if ($authDbIncluded) { $toArchive += $authDbCopy }
+  if (Test-Path -LiteralPath $codexMemory) { $toArchive += $codexMemory }
   Compress-Archive -LiteralPath $toArchive -DestinationPath $zip -CompressionLevel Optimal
 
   Add-Type -AssemblyName System.Security
@@ -65,8 +74,13 @@ try {
   $sourceHash = Get-Sha256Hex $plainBytes
   $verifyHash = Get-Sha256Hex $verifiedBytes
   if ($sourceHash -ne $verifyHash) { throw 'Encrypted backup verification failed.' }
+  if ($Keep -gt 0) {
+    Get-ChildItem -LiteralPath $BackupDirectory -Filter 'crossline-*.crossline' | Sort-Object Name -Descending |
+      Select-Object -Skip $Keep | Remove-Item -Force -ErrorAction SilentlyContinue
+  }
   Write-Output ([pscustomobject]@{ Backup = $encrypted; Sha256 = $sourceHash; Verified = $true })
 } finally {
   Remove-Item -LiteralPath $json, $zip -Force -ErrorAction SilentlyContinue
   if (Test-Path -LiteralPath $authDbCopy) { Remove-Item -LiteralPath $authDbCopy -Force -ErrorAction SilentlyContinue }
+  if (Test-Path -LiteralPath $codexMemory) { Remove-Item -LiteralPath $codexMemory -Recurse -Force -ErrorAction SilentlyContinue }
 }

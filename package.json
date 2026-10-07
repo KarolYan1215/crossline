@@ -18,6 +18,7 @@
     "test:e2e": "tsx scripts/run-e2e.ts",
     "typecheck": "pnpm -r typecheck",
     "build": "pnpm --filter @crossline/web build",
+    "build:prod": "tsx scripts/build-prod.ts",
     "doctor:ledger": "tsx scripts/doctor.ts",
     "test:codex-corpus": "tsx scripts/codex-workflow-corpus.ts --live",
     "verify": "pnpm typecheck && pnpm test && pnpm build && pnpm test:e2e"

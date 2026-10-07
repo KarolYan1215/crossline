@@ -1,4 +1,6 @@
 import { AGENT_CATEGORIES, DISPATCH_STATES, isAgentCategory, isCourse, planAssistantTask, type AgentCategory, type AssistantPlan } from "@crossline/core";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { latestFileDates, type CrosslineStore } from "./index";
 
 /**
@@ -55,6 +57,8 @@ export type AgentTaskRow = {
   blockerMessage: string; reviewNote: string;
   /** The order took effect by itself (no one clicked approve) before the assistant picked it up. */
   autoApproved: boolean;
+  /** The whole order was handed over: an accepted result is delivered as the order's evidence (`deliverAgentResult`). */
+  delegated: boolean;
 };
 /** A run with no outcome after this long was lost with the process that held it, not still going. */
 const STALE_AFTER_MS = 8 * 3_600_000;
@@ -67,7 +71,8 @@ export function listAgentTasks(store: CrosslineStore, workspaceId: string, now =
     const taskId = event.entityId;
     if (event.type === "agent.task.requested") {
       rows.set(taskId, { taskId, title: String(p.title ?? ""), category: isAgentCategory(p.category) ? p.category : "read_research_organize", workOrderId: String(p.workOrderId ?? ""),
-        requestedAt: event.createdAt, status: "running", directory: "", durationMs: 0, commands: 0, denied: 0, artifacts: [], needsHuman: 0, checksPassed: false, inputsModified: [], blockerCode: "", blockerMessage: "", reviewNote: "", autoApproved: p.autoApproved === true });
+        requestedAt: event.createdAt, status: "running", directory: "", durationMs: 0, commands: 0, denied: 0, artifacts: [], needsHuman: 0, checksPassed: false, inputsModified: [], blockerCode: "", blockerMessage: "", reviewNote: "", autoApproved: p.autoApproved === true,
+        delegated: p.delegated === true });
       continue;
     }
     const row = rows.get(taskId);
@@ -101,7 +106,28 @@ export function reviewAgentTask(store: CrosslineStore, workspaceId: string, task
     payload: { taskId, decision, note: note.slice(0, 500), category: task.category } });
   // A result that failed its own checks, or left originals changed, does not count towards trust even if the person is kind.
   const clean = decision === "accepted" && task.checksPassed && task.inputsModified.length === 0;
-  return { ok: true, trust: recordReview(store, workspaceId, task.category, clean) };
+  const trust = recordReview(store, workspaceId, task.category, clean);
+  // Accepting a delegated task's result is accepting it as the work: it goes to the gate as the order's evidence.
+  if (decision === "accepted") deliverAgentResult(store, workspaceId, taskId);
+  return { ok: true, trust };
+}
+
+/**
+ * Hands a delegated task's files in as its work order's evidence (`agent.delivered`), which puts the order in front of the milestone
+ * gate like any other submission. Only an accepted result (reviewed by the person, or one the kind's earned trust let through on its own
+ * checks) and only while the person has not started the order themselves. Delivered once per task.
+ */
+export function deliverAgentResult(store: CrosslineStore, workspaceId: string, taskId: string): { delivered: boolean; code?: string } {
+  const task = listAgentTasks(store, workspaceId).find((row) => row.taskId === taskId);
+  if (!task?.delegated || !task.workOrderId) return { delivered: false, code: "NOT_DELEGATED" };
+  if (task.status !== "accepted") return { delivered: false, code: "NOT_ACCEPTED" };
+  if (!task.artifacts.length || !task.directory) return { delivered: false, code: "NO_ARTIFACTS" };
+  const order = store.listWorkOrders(workspaceId).find((item) => item.id === task.workOrderId);
+  if (!order || !DISPATCH_STATES.has(order.state)) return { delivered: false, code: "ORDER_NOT_DELIVERABLE" };
+  const evidence = task.artifacts.map((artifact) => ({ kind: "file" as const, uri: pathToFileURL(path.join(task.directory, artifact.path)).href,
+    description: `助手产出：${artifact.path}` }));
+  const result = store.transitionWorkOrder(workspaceId, order.id, { type: "agent.delivered", taskId }, `agent-delivered:${taskId}`, { evidence });
+  return { delivered: result.changed };
 }
 
 /** A kind of work the assistant would like to start but has not been allowed to, waiting for the person. */

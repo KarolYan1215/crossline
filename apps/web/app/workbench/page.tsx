@@ -1,5 +1,5 @@
 import { riskLabel, stateLabel, stateLabelFor } from "../../lib/labels";
-import { ensureSeeded, getStore, resolvedEstimate } from "../../lib/crossline";
+import { archivedBySystem, ensureSeeded, getStore, resolvedEstimate } from "../../lib/crossline";
 import { estimateBasis } from "../../lib/estimate-label";
 import { SubpageShell } from "../subpage-shell";
 import { AnalyzeButton } from "./analyze-button";
@@ -64,7 +64,10 @@ export default async function WorkbenchPage({ searchParams }: {
   const runs = sort === "identity" ? [...active].sort((a, b) => a.identityId.localeCompare(b.identityId) || a.id.localeCompare(b.id))
     : sort === "state" ? [...active].sort((a, b) => a.state.localeCompare(b.state) || a.id.localeCompare(b.id))
     : active;
-  const discarded = all.filter((run) => run.state === "archived");
+  // What the system withdrew on its own (its replaced drafts, demo orders) is not shown: only what the person discarded.
+  const systemArchived = new Set(getStore().listEvents(ctx.workspaceId, { type: "work_order.archived" })
+    .filter((event) => archivedBySystem(event.payload)).map((event) => event.entityId));
+  const discarded = all.filter((run) => run.state === "archived" && !systemArchived.has(run.id));
   const captures = getStore().listCaptures(ctx.workspaceId)
     .filter((capture) => capture.state !== "promoted" && capture.state !== "discarded");
   const attachments = getStore().listCaptureAttachments(ctx.workspaceId);

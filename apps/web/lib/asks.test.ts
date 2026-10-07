@@ -203,3 +203,19 @@ test("a milestone whose known work cannot finish by its deadline is asked about;
   expect(await answerAsk(TEST_CTX, risk.id, "accept", {}, NOW)).toEqual({ ok: true });
   expect(collectAsks(TEST_CTX, NOW).some((ask) => ask.kind === "milestone_risk")).toBe(false);
 });
+
+test("work given a time yesterday and never started is asked about when it bears on a deadline this week; the rest just rolls", async () => {
+  const store = setup();
+  const save = (id: string, dueDate: string) => store.saveWorkOrder({ id, ownerId: owner, workspaceId: ws, identityId: "research", projectId: "p",
+    milestoneId: "", intent: `任务 ${id}`, state: "approved", riskTier: "routine", estimate, payload: { dueDate } });
+  save("soon", "2026-10-10");
+  save("far", "2026-11-20");
+  store.setSetting(ws, "schedule.day:2026-10-06", JSON.stringify({ soon: "09:00", far: "14:00" }));
+  const missed = collectAsks(TEST_CTX, NOW).filter((ask) => ask.kind === "missed_block");
+  expect(missed.map((ask) => ask.entityId)).toEqual(["soon"]);
+  expect(missed[0]!.title).toBe("昨天 09:00 排的「任务 soon」没开始");
+  expect(missed[0]!.options.map((option) => option.id)).toEqual(["roll", "later", "done", "drop"]);
+  expect(await answerAsk(TEST_CTX, missed[0]!.id, "later", { date: "2026-10-09" }, NOW)).toEqual({ ok: true });
+  expect((store.listWorkOrders(ws).find((order) => order.id === "soon")!.payload as { notBefore?: string }).notBefore).toBe("2026-10-09");
+  expect(collectAsks(TEST_CTX, NOW).some((ask) => ask.kind === "missed_block")).toBe(false);
+});

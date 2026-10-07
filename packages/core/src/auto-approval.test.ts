@@ -19,3 +19,12 @@ test("anything that commits the person or leaves the machine waits for a click",
 test("a byproduct's landing work counts as internal even when it is not preparation", () => {
   expect(autoApprovalEligible({ ...base, payload: { family: "deep_work", byproductOf: "wo-1", humanCore: [] } }).eligible).toBe(true);
 });
+
+test("a step worked back from an approved milestone takes effect unless it reaches outside or is high risk", () => {
+  const step = { state: "awaiting_plan_approval", riskTier: "milestone", intent: "确认目标 NeuroSim 版本并取得输入规范",
+    payload: { family: "preparation", backplan: { milestoneVersion: 2 }, humanCore: [{ intent: "确认目标 NeuroSim 版本并取得输入规范" }] } };
+  expect(autoApprovalEligible(step).eligible).toBe(true);
+  expect(autoApprovalEligible({ ...step, payload: { ...step.payload, family: "deep_work" } }).eligible).toBe(true);
+  expect(autoApprovalEligible({ ...step, riskTier: "high_risk" }).eligible).toBe(false);
+  expect(autoApprovalEligible({ ...step, intent: "给师兄发邮件要数据" }).eligible).toBe(false);
+});

@@ -20,7 +20,7 @@ export function retireShadowedDemos(store: CrosslineStore, workspaceId: string):
   const retired: string[] = [];
   for (const order of orders.filter((item) => demo(item.payload) && item.state !== "archived" && item.state !== "accepted")) {
     store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `archive-reason:${order.id}`,
-      type: "work_order.archived", entityId: order.id, payload: { reason: DEMO_RETIRED_REASON } });
+      type: "work_order.archived", entityId: order.id, payload: { reason: DEMO_RETIRED_REASON, bySystem: true } });
     if (store.transitionWorkOrder(workspaceId, order.id, { type: "archived" }, `archive:${order.id}`).changed) retired.push(order.id);
   }
   return retired;

@@ -101,7 +101,7 @@ export default async function ApprovalsPage() {
     <section className="pending-list" aria-label="待确认汇总">
       {([
         ["要你回答的", asks.length, "#asks"], ["作业方案", pending.workOrders, "#proposals"], ["计划差异", pending.planChanges, "/plan#plan-changes"],
-        ["里程碑草稿", pending.milestoneDrafts, "/milestones"], ["主线联系（待复盘）", pending.relations, "/review"],
+        ["里程碑草稿", pending.milestoneDrafts, "/milestones"],
         ["调研建议", pending.research, "/onboarding"], ["文件里的日期", pending.dates, "/onboarding"], ["待你回答的问题", pending.questions, "/onboarding"], ["暂定目标待你过目", pending.targets, "/milestones"],
         ["助手想做的新类别", pending.assistantKinds, "/assistant"], ["助手中途的提问", pending.assistantQuestions, "/assistant"], ["助手的产出待审", pending.assistantReviews, "/assistant"]
       ] as const).filter(([, count]) => count > 0).map(([label, count, href]) =>

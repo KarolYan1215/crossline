@@ -20,19 +20,19 @@ test("backplanner refuses invented quotes, unknown dependencies and implausible 
     dateCandidates: [], blockers: [] }, ["稳定推进实验"])).toThrow("BACKPLAN_ESTIMATE_INVALID");
 });
 
-test("approved goal expands into sourced, bound drafts once and remains awaiting approval", async () => {
+test("approved goal expands into sourced, bound drafts once; a high-risk step stays a proposal", async () => {
   const store = new CrosslineStore(":memory:");
   store.saveMilestone({ id: "m", ownerId, workspaceId, identityId: "research", projectId: "p",
     title: "稳定推进实验", status: "approved", version: 1 });
-  // Deep work: not something that takes effect by itself, so it stays a proposal.
-  const runtime = fakeRuntime([JSON.stringify({ steps: [step({ family: "deep_work" })], dateCandidates: [], blockers: [] })],
+  // Steps of an approved milestone take effect by themselves now, unless they are high-risk or reach outside: this one is.
+  const runtime = fakeRuntime([JSON.stringify({ steps: [step({ family: "deep_work", riskTier: "high_risk" })], dateCandidates: [], blockers: [] })],
     "crossline:crossline-goal-backplanner");
   const backplan = createGoalBackplanner(store, workspaceId, "C:\\repo", () => runtime.rpc);
   const first = await backplan("m");
   expect(first.state).toBe("proposed");
   const draft = store.listWorkOrders(workspaceId)[0];
   expect(draft).toMatchObject({ identityId: "research", projectId: "p", milestoneId: "m",
-    state: "awaiting_plan_approval", riskTier: "routine",
+    state: "awaiting_plan_approval", riskTier: "high_risk",
     payload: { backplan: { sourceQuote: "稳定推进实验" } } });
   expect(await backplan("m")).toEqual(first);
   expect(runtime.turns()).toBe(1);

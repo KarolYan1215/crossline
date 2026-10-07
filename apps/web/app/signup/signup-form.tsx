@@ -25,7 +25,7 @@ export function SignupForm() {
   };
 
   return <div className="auth-form">
-    <form onSubmit={submit}>
+    <form method="post" onSubmit={submit}>
       <label><span>名字</span><input name="name" required autoComplete="name" autoFocus /></label>
       <label><span>邮箱</span><input name="email" type="email" required autoComplete="email" /></label>
       <label><span>密码</span><input name="password" type="password" required minLength={8} autoComplete="new-password" /></label>

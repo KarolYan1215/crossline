@@ -12,8 +12,11 @@ $ErrorActionPreference = 'Stop'
 # $PSScriptRoot is not reliably populated while param defaults are evaluated in Windows PowerShell.
 if ([string]::IsNullOrWhiteSpace($RepoRoot)) { $RepoRoot = Split-Path -Parent $PSScriptRoot }
 $repo = (Resolve-Path -LiteralPath $RepoRoot).Path
-$buildId = Join-Path $repo 'apps\web\.next\BUILD_ID'
-if (-not (Test-Path -LiteralPath $buildId)) { throw 'Production build missing. Run pnpm build first.' }
+# The resident app is served from its own build directory, so `pnpm build`/`pnpm verify` (which write `.next`) can run while it is up
+# without replacing the files it is serving. `pnpm build:prod` writes this one.
+$env:CROSSLINE_NEXT_DIR = '.next-prod'
+$buildId = Join-Path $repo 'apps\web\.next-prod\BUILD_ID'
+if (-not (Test-Path -LiteralPath $buildId)) { throw 'Production build missing. Run pnpm build:prod first.' }
 $logDir = Join-Path $repo 'data\logs'
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 $pnpm = (Get-Command pnpm.cmd -ErrorAction Stop).Source

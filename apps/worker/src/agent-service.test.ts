@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import type { CostSignal } from "@crossline/core";
-import { approveCategory, CrosslineStore, listAgentTasks, pendingCategoryRequests } from "@crossline/db";
+import { approveCategory, CrosslineStore, listAgentTasks, pendingCategoryRequests, reviewAgentTask } from "@crossline/db";
 import { createAgentService } from "./agent-service";
 import { AGENT_SKILL } from "./agent-task";
 import { fakeRuntime } from "./testing/fake-runtime";
@@ -71,4 +71,27 @@ test("the tick starts one approved order by itself, but not when the quota is ne
   await svc.pass(ws);
   await settled(svc);
   expect(listAgentTasks(store, ws).map((task) => task.workOrderId)).toEqual(["wo-1"]);
+});
+
+
+// Whole-task delegation: the assistant does the errand, the person accepts the result, and the files go in as the order's evidence —
+// which puts the order in front of the milestone gate.
+test("a delegated errand's accepted result is handed in as the order's evidence", async () => {
+  store.saveWorkOrder({ id: "wo-d", ownerId: "o", workspaceId: ws, identityId: "research", projectId: "p", milestoneId: "m", intent: "整理 NeuroSim 输入规范笔记",
+    state: "approved", riskTier: "routine", estimate,
+    payload: { automationParts: [], humanCore: [{ id: "h", intent: "整理 NeuroSim 输入规范笔记" }], family: "preparation", materialContract: [],
+      evidenceContract: [{ kind: "file", description: "一份输入规范笔记", required: true }] } });
+  approveCategory(store, ws, "read_research_organize");
+  const { svc } = service();
+  expect(svc.dispatch(ws, "wo-d")).toMatchObject({ state: "started" });
+  await settled(svc);
+  const task = listAgentTasks(store, ws)[0]!;
+  expect(task).toMatchObject({ delegated: true, status: "needs_review" });
+  // Needs review while the kind is new: nothing is handed in until the person accepts.
+  expect(store.listWorkOrders(ws).find((o) => o.id === "wo-d")!.state).toBe("approved");
+  expect(reviewAgentTask(store, ws, task.taskId, "accepted")).toMatchObject({ ok: true });
+  expect(store.listWorkOrders(ws).find((o) => o.id === "wo-d")!.state).toBe("evidence_review");
+  const claims = store.listEvidenceClaims(ws).filter((claim) => claim.workOrderId === "wo-d");
+  expect(claims).toHaveLength(1);
+  expect(claims[0]!.uri).toMatch(/^file:.*n\.md$/);
 });

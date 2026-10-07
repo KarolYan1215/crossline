@@ -30,7 +30,8 @@ export function taskFromWorkOrder(store: CrosslineStore, workspaceId: string, or
   return {
     ok: true, category, why: plan.why, graded: plan.graded,
     input: { taskId: `agent-${orderId.replace(/[^a-zA-Z0-9]/g, "").slice(-8)}-${attempt}`, workOrderId: orderId, title: order.intent, what: plan.what,
-      category: category ?? "read_research_organize", humanPart: plan.humanPart, inputs, ...(plan.notes ? { notes: plan.notes } : {}) }
+      category: category ?? "read_research_organize", humanPart: plan.humanPart, inputs, ...(plan.notes ? { notes: plan.notes } : {}),
+      ...(plan.delegated ? { delegated: true } : {}) }
   };
 }
 

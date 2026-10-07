@@ -287,6 +287,8 @@ export type WorkOrderEvent =
   | { type: "materials.not_required" }
   | { type: "human.started" }
   | { type: "human.completed" }
+  // The assistant did the whole order (whole-task delegation) and hands in its files as the evidence.
+  | { type: "agent.delivered"; taskId: string }
   | { type: "evidence.accepted"; approvalId?: string }
   | { type: "acceptance.revoked"; reason: string }
   | { type: "blocked"; reason: string }
@@ -299,9 +301,9 @@ const WORK_ORDER_TRANSITIONS: Partial<Record<WorkOrderState, Partial<Record<Work
   // `materials.not_required` records that nothing had to be prepared instead of pretending an AI
   // preparation run happened. The empty-material-contract precondition is enforced by the caller
   // (`startWorkOrderExecution`), not here — this table only knows about states.
-  approved: { "automation.started": "preparing", "materials.not_required": "ready_for_human", "approval.revoked": "awaiting_plan_approval", blocked: "blocked", archived: "archived" },
-  preparing: { "materials.ready": "ready_for_human", "approval.revoked": "awaiting_plan_approval", blocked: "blocked", archived: "archived" },
-  ready_for_human: { "human.started": "active", "approval.revoked": "awaiting_plan_approval", blocked: "blocked", archived: "archived" },
+  approved: { "automation.started": "preparing", "materials.not_required": "ready_for_human", "approval.revoked": "awaiting_plan_approval", "agent.delivered": "evidence_review", blocked: "blocked", archived: "archived" },
+  preparing: { "materials.ready": "ready_for_human", "approval.revoked": "awaiting_plan_approval", "agent.delivered": "evidence_review", blocked: "blocked", archived: "archived" },
+  ready_for_human: { "human.started": "active", "approval.revoked": "awaiting_plan_approval", "agent.delivered": "evidence_review", blocked: "blocked", archived: "archived" },
   active: { "human.completed": "evidence_review", blocked: "blocked", archived: "archived" },
   evidence_review: { "evidence.accepted": "accepted", blocked: "blocked", archived: "archived" },
   blocked: { "plan.approved": "approved", archived: "archived" },

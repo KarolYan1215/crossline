@@ -18,7 +18,7 @@ function RequestResetForm() {
     setStatus("如果这个邮箱已注册，重置链接已经发出，请查收邮件。");
     setBusy(false);
   };
-  return <form onSubmit={submit}>
+  return <form method="post" onSubmit={submit}>
     <label><span>邮箱</span><input name="email" type="email" required autoComplete="email" autoFocus /></label>
     <button className="secondary-button" type="submit" disabled={busy}>{busy ? "发送中…" : "发送重置链接"}</button>
     {status && <small role="status">{status}</small>}
@@ -39,7 +39,7 @@ function SetNewPasswordForm({ token }: { token: string }) {
     if (resetError) { setStatus(authErrorMessage(resetError, "重置失败，链接可能已过期。")); setError(true); setBusy(false); return; }
     location.href = "/login";
   };
-  return <form onSubmit={submit}>
+  return <form method="post" onSubmit={submit}>
     <label><span>新密码</span><input name="password" type="password" required minLength={8} autoComplete="new-password" autoFocus /></label>
     <button className="secondary-button" type="submit" disabled={busy}>{busy ? "处理中…" : "设置新密码"}</button>
     {status && <small role={error ? "alert" : "status"}>{status}</small>}

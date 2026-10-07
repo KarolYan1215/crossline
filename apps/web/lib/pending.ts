@@ -21,7 +21,7 @@ export type PendingCounts = {
   planChanges: number;
   /** Milestones the architect drafted. */
   milestoneDrafts: number;
-  /** Cross-line relations proposed but not yet confirmed. */
+  /** Cross-line relations proposed but not yet confirmed. Decided in the weekly review, so not in `total`. */
   relations: number;
   /** Proposals from web research. */
   research: number;
@@ -68,5 +68,8 @@ export function countPending(ctx: AccessContext): PendingCounts {
       undated: latestFileDates(store, ctx.workspaceId).undated
     }).filter((gap) => gap.blocking).length
   };
-  return { ...counts, total: Object.values(counts).reduce((sum, value) => sum + value, 0) };
+  // Candidate relations are judged against each other in the weekly review (`/review`), not one by one as they arrive: they stay
+  // listed there and are left out of the number that asks for today's decisions.
+  const { relations: _weekly, ...today } = counts;
+  return { ...counts, total: Object.values(today).reduce((sum, value) => sum + value, 0) };
 }

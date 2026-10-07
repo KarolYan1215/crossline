@@ -1137,7 +1137,7 @@ export class CrosslineStore {
         this.#writeInterruptions(open.id, interruptions, open.durationObserved);
       }
     }
-    if (event.type === "human.completed") {
+    if (event.type === "human.completed" || event.type === "agent.delivered") {
       const evidence = update.evidence ?? [];
       for (const claim of evidence) {
         this.#db.prepare(`

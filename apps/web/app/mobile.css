@@ -1,0 +1,20 @@
+/*
+ * Phone-only adjustments (≤680px, where the bottom tab bar takes over). Kept apart from the layout rules so the phone pass is one place.
+ */
+@media (max-width:680px){
+  /* iOS Safari zooms the whole page into any field under 16px on focus and leaves it zoomed: every capture, every ask
+     follow-up and the login form did this. 16px is the size at which it does not. */
+  input,select,textarea{font-size:16px}
+  /* The tab bar sits on the home indicator otherwise (viewport-fit=cover in layout.tsx makes the inset available). */
+  .bottom-nav{padding-bottom:env(safe-area-inset-bottom)}
+  .page,.subpage{padding-bottom:calc(76px + env(safe-area-inset-bottom))}
+  .bottom-nav>a,.bottom-nav-more>summary{min-height:48px;display:flex;align-items:center;justify-content:center}
+  /* Touch targets: 44px is Apple's minimum for something tapped with a thumb. */
+  .ask-option,.primary-button,.secondary-button,.execution-actions button,.execution-actions a,.ask-later .text-button{min-height:44px}
+  .ask-options{grid-template-columns:minmax(0,1fr)}
+  .ask-follow-up .execution-actions button{flex:1 1 auto}
+  .ask-card{padding:10px 12px}
+}
+
+.phone-setup ol{margin:6px 0 8px;padding-left:20px}
+.phone-setup li{margin:2px 0}

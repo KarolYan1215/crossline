@@ -1,3 +1,5 @@
+import { mentionsExternalAction } from "./external-action";
+
 /**
  * Which work the assistant may take, and what to hand it.
  *
@@ -5,6 +7,12 @@
  * the person can do (`humanCore`). Dispatch reads that split and does not second-guess it: the assistant is given the first as its task
  * and the second as the thing it must leave alone. What this adds is the kind of work (each kind is approved once, and earns trust on
  * its own) and one rule the split cannot know: graded coursework is learning aid only, whatever the analysis called automatable.
+ *
+ * **Whole-task delegation.** A step worked backwards from a milestone carries no split at all (`automationParts: []`), so on the real
+ * account the assistant never took a single task. A small, internal piece of work — preparing, gathering, checking; nothing sent,
+ * published, submitted or paid; not graded coursework — is now handed over whole, the way Muse or OpenClaw take an errand: the
+ * assistant does it, its files become the order's evidence, and the milestone gate judges them (`delegated: true`). What only the
+ * person knows is reported back (`needsHuman`), never invented, and such a result waits for the person instead of being delivered.
  */
 export const AGENT_CATEGORIES = {
   data_code_sim: "数据、代码、仿真",
@@ -39,7 +47,9 @@ export type DispatchableOrder = {
 };
 export type AssistantPlan =
   | { fit: false; reason: string }
-  | { fit: true; category: AgentCategory | undefined; why: string; what: string; humanPart: string; graded: boolean; notes: string };
+  | { fit: true; category: AgentCategory | undefined; why: string; what: string; humanPart: string; graded: boolean; notes: string;
+      /** The whole order is the assistant's: its result is delivered as the order's evidence (see above). */
+      delegated: boolean };
 
 type Part = { intent?: string; rationale?: string };
 const parts = (value: unknown): Part[] => Array.isArray(value) ? value as Part[] : [];
@@ -49,10 +59,11 @@ const parts = (value: unknown): Part[] => Array.isArray(value) ? value as Part[]
  * wording does not point at one kind: the person chooses at dispatch, and nothing starts by itself.
  */
 export function planAssistantTask(order: DispatchableOrder, context: { projectIsCourse: boolean; milestoneTitle?: string }): AssistantPlan {
-  const payload = (order.payload ?? {}) as { automationParts?: unknown; humanCore?: unknown; materialContract?: unknown };
+  const payload = (order.payload ?? {}) as { automationParts?: unknown; humanCore?: unknown; materialContract?: unknown; evidenceContract?: unknown;
+    family?: string; riskTier?: string };
   const ai = parts(payload.automationParts).filter((part) => part.intent?.trim());
   const human = parts(payload.humanCore).filter((part) => part.intent?.trim());
-  if (!ai.length) return { fit: false, reason: "分析认为这件事里没有可以交给助手的部分，都需要你自己做。" };
+  if (!ai.length) return delegateWhole(order, human, context);
 
   const wording = ai.map((part) => part.intent!).join("；");
   const scored = KEYWORDS.map(([category, pattern]) => ({ category, hits: (wording.match(new RegExp(pattern.source, `${pattern.flags.replace("g", "")}g`)) ?? []).length }));
@@ -69,7 +80,34 @@ export function planAssistantTask(order: DispatchableOrder, context: { projectIs
       contract.length ? `需要的材料或证据：${contract.join("；")}` : ""].filter(Boolean).join("\n"),
     humanPart: human.length ? human.map((part) => part.intent).join("；") : "审阅并决定如何使用产出",
     graded,
-    notes: graded ? "这是带评分的课程工作：只做学习辅助（讲解、你自己设计的练习、检查你写的、整理资料），不要生成可提交的答案、代码、报告或图表。" : ""
+    notes: graded ? "这是带评分的课程工作：只做学习辅助（讲解、你自己设计的练习、检查你写的、整理资料），不要生成可提交的答案、代码、报告或图表。" : "",
+    delegated: false
+  };
+}
+
+const categoryOf = (text: string): AgentCategory | undefined => KEYWORDS
+  .map(([category, pattern]) => ({ category, hits: (text.match(new RegExp(pattern.source, `${pattern.flags.replace("g", "")}g`)) ?? []).length }))
+  .filter((entry) => entry.hits > 0).sort((a, b) => b.hits - a.hits)[0]?.category;
+
+/** An errand small and internal enough to hand over whole (see the file comment); anything else stays the person's. */
+function delegateWhole(order: DispatchableOrder, human: Part[], context: { projectIsCourse: boolean; milestoneTitle?: string }): AssistantPlan {
+  const nothing = { fit: false as const, reason: "分析认为这件事里没有可以交给助手的部分，都需要你自己做。" };
+  const payload = (order.payload ?? {}) as { family?: string; evidenceContract?: unknown };
+  if (payload.family !== "preparation" && payload.family !== "review") return nothing;
+  const text = `${order.intent} ${human.map((part) => part.intent).join(" ")} ${context.milestoneTitle ?? ""}`;
+  if (mentionsExternalAction(order.intent, ...human.map((part) => part.intent))) return { fit: false, reason: "这件事要对外（发送、提交、发布等），不整件交给助手。" };
+  if (context.projectIsCourse && GRADED.test(text)) return { fit: false, reason: "这是带评分的课程工作，不整件交给助手。" };
+  const evidence = Array.isArray(payload.evidenceContract)
+    ? (payload.evidenceContract as Array<{ description?: string }>).map((item) => item.description).filter(Boolean) : [];
+  const category = categoryOf(order.intent) ?? "read_research_organize";
+  return {
+    fit: true, category, delegated: true, graded: false, notes: "",
+    why: `这是一件内部的${payload.family === "review" ? "检查" : "准备"}工作，整件交给助手做，做完的文件直接作为证据交验收。`,
+    what: [`这件事整件交给你做：${order.intent}`,
+      evidence.length ? `交付物必须满足：${evidence.join("；")}` : "交付物：一份能直接用的文件",
+      "只用你查得到、读得到的内容；需要本人才知道的事实（他的经历、别人的回复、私有数据），写进 needsHuman 说明缺什么，绝不编造。",
+      "交付物写成 Markdown 或纯文本文件，放在工作目录里，并在 artifacts 里列出。"].join("\n"),
+    humanPart: "审阅产出，决定用不用"
   };
 }
 

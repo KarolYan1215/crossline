@@ -44,6 +44,9 @@ export default async function SettingsPage() {
   const since = new Date(Date.now() - USAGE_DAYS * 86_400_000).toISOString();
   const summary = store.summarizeModelUsage(ctx.workspaceId, since);
   const night = lastNight(ctx.workspaceId, new Date());
+  // The tailnet address the phone uses (stage six, `private` mode behind `tailscale serve`), when it is set up.
+  const host = process.env.CROSSLINE_TAILSCALE_HOSTNAME?.trim();
+  const phoneUrl = process.env.CROSSLINE_DEPLOYMENT_MODE === "private" && host ? `https://${host}` : undefined;
 
   return <SubpageShell active="设置" title="设置">
     <details className="fold" open><summary>作息与可用时间</summary>
@@ -55,6 +58,21 @@ export default async function SettingsPage() {
     <details className="fold" open><summary>提醒</summary>
       <NotifyLevel level={store.getSetting(ctx.workspaceId, "notify.level") ?? "normal"} />
       <p className="muted">每个工作块开始前 10 分钟的提醒、等待项到期日和截止前 2 天的提醒，写在名为 Crossline 的日历上，由 Outlook 和手机推送。</p>
+    </details>
+    <details className="fold" id="phone"><summary>在手机上用</summary>
+      {phoneUrl
+        ? <div className="phone-setup">
+          <p>手机和这台电脑在同一个 Tailscale 网络里时，用这个地址打开，和电脑上是同一个账本、同一份数据：</p>
+          <p><a href={phoneUrl}><b>{phoneUrl}</b></a></p>
+          <ol>
+            <li>手机上打开 Tailscale App，确认已连接（和这台电脑同一个账号）。</li>
+            <li>用 Safari 打开上面的地址并登录。</li>
+            <li>点分享按钮 →「添加到主屏幕」：之后它像一个独立 App 一样全屏打开。</li>
+          </ol>
+          <p className="muted">这台电脑需要开着、Crossline 在运行（已设为开机自启，每 15 分钟自检一次）。离线时收集的内容会先存在手机上，联网后自动同步。
+            手机上的提醒来自名为 Crossline 的日历：在 iPhone 的 Outlook 或系统日历里登录同一个 Outlook 账号即可收到工作块和截止提醒。</p>
+        </div>
+        : <p className="muted">还没开启手机访问：需要在这台电脑上把 <code>CROSSLINE_DEPLOYMENT_MODE</code> 设为 <code>private</code>、填上 <code>CROSSLINE_TAILSCALE_HOSTNAME</code>，并运行 <code>tailscale serve</code>。步骤见 docs/private-network-deployment.md。</p>}
     </details>
     <details className="fold"><summary>屏幕活动与隐私</summary>
       <LocalActivityToggle consent={consent} detail={detail} pausedUntil={store.getSetting(ctx.workspaceId, ACTIVITY_PAUSED_UNTIL) || null} blacklist={blacklist} />

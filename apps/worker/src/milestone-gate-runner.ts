@@ -68,13 +68,13 @@ export function buildMilestoneGateContext(store: CrosslineStore, workspaceId: st
   }
 
   // A `kind:"file"` evidence claim's own `description` is just the label the person typed, not its
-  // content — this reads the file itself so the gate can quote what is actually inside it. Only plain
-  // `.txt` evidence is attempted: the upload route (`saveEvidenceFile`) also allows images and PDFs, and
+  // content — this reads the file itself so the gate can quote what is actually inside it. Only plain text
+  // (`.txt`, and the Markdown/CSV/JSON an assistant hands in) is attempted: the upload route (`saveEvidenceFile`) also allows images and PDFs, and
   // neither can be turned into quotable text without OCR, which stays out of scope here (see 工作块 E) —
   // they still count as "a file was submitted", just not as something the gate can quote from.
   const fileEvidence: Array<{ id: string; kind: string; text: string }> = [];
   for (const claim of claims) {
-    if (claim.kind !== "file" || !claim.uri.startsWith("file://") || !claim.uri.endsWith(".txt")) continue;
+    if (claim.kind !== "file" || !claim.uri.startsWith("file://") || !/\.(txt|md|markdown|csv|tsv|json)$/i.test(claim.uri)) continue;
     try {
       fileEvidence.push({ id: `${claim.id}:content`, kind: "file",
         text: readFileSync(fileURLToPath(claim.uri), "utf8").slice(0, ARTIFACT_TEXT_LIMIT) });
