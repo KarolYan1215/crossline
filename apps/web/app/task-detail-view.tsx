@@ -1,5 +1,6 @@
 import type { TaskDetail, MilestoneDetail } from "../lib/task-detail";
 import { ExecutionActions } from "./execution-actions";
+import { WaitingForm } from "./waiting-form";
 import { estimateBasis } from "../lib/estimate-label";
 import { riskLabel, stateLabel, stateLabelFor } from "../lib/labels";
 
@@ -88,6 +89,8 @@ export function TaskDetailView({ detail }: { detail: TaskDetail }) {
         {part.rationale && <small>{part.rationale}</small>}
       </li>)}</ul>
     </section>}
+
+    {!["accepted", "archived"].includes(detail.state) && <WaitingForm workOrderId={detail.id} />}
 
     <section className="task-detail-background">
       <h3>背景资料</h3>

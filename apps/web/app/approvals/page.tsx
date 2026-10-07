@@ -53,8 +53,13 @@ export default async function ApprovalsPage() {
   // well in one sitting — the rest wait folded instead of lengthening the page.
   const deadlineOf = (milestoneId: string) => anchors.get(milestoneId)?.deadline ?? "9999-12-31";
   const sortedProposals = [...proposals].sort((a, b) => deadlineOf(a.milestoneId).localeCompare(deadlineOf(b.milestoneId)));
-  const slotOf = new Map(plan.blocks.filter((block) => block.id.startsWith("proposed:"))
-    .map((block) => [block.id.split(":")[1]!, `${block.day?.slice(5) ?? ""} ${block.start}`]));
+  // The earliest suggested block per proposal (a split task has several; the first is when it would start).
+  const slotOf = new Map<string, string>();
+  for (const block of [...plan.blocks].filter((item) => item.id.startsWith("proposed:"))
+    .sort((a, b) => `${a.day} ${a.start}`.localeCompare(`${b.day} ${b.start}`))) {
+    const id = block.id.split(":")[1]!;
+    if (!slotOf.has(id)) slotOf.set(id, `${block.day?.slice(5) ?? ""} ${block.start}`);
+  }
   const renderProposal = (item: (typeof proposals)[number]) => {
     const proposal = item.payload as AnalysisProposal & { audit: { threadId: string; turnId: string }; contextVersion: string };
     const estimate = resolvedEstimate(ctx, item);

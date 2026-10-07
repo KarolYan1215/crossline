@@ -43,3 +43,15 @@ test("a landing order depends on its main order until that is done, then gets a 
   expect(byproductLanding(TEST_CTX, landing)).toEqual({ dependsOn: [], dueDate: "2026-10-08" });
   expect(byproductLanding(TEST_CTX, { payload: {} })).toBeUndefined();
 });
+
+test("a waiting item can be added to an existing task by hand, and holds it until its day", async () => {
+  const { addWaitingForOrder } = await import("./crossline");
+  vi.stubEnv("CROSSLINE_FIXED_NOW", "2026-10-06T15:00:00.000Z");
+  const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
+  store.saveWorkOrder({ id: "sim", ownerId: TEST_CTX.principalId, workspaceId: TEST_CTX.workspaceId, identityId: "research", projectId: "p", milestoneId: "",
+    intent: "仿真", state: "awaiting_plan_approval", riskTier: "routine",
+    estimate: { p25Minutes: 1, p50Minutes: 2, p85Minutes: 3, source: "llm_prior", observationCount: 0, confidence: "low" }, payload: {} });
+  expect(addWaitingForOrder(TEST_CTX, "sim", { who: "师兄", what: "真实测量数据", expectedAt: "2026-10-08", approximate: true })).toMatchObject({ ok: true });
+  expect(releaseDayOf(TEST_CTX, { id: "sim", payload: {} })).toBe("2026-10-08");
+  expect(addWaitingForOrder(TEST_CTX, "sim", { who: "", what: "", expectedAt: "x", approximate: false })).toEqual({ ok: false, code: "INVALID_WAITING_INPUT" });
+});

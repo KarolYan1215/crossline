@@ -1134,6 +1134,23 @@ const plannerTaskOf = (ctx: AccessContext, order: ActionableOrder) => {
  * scheduling work on data that may not exist is the thing the waiting item is there to stop. Arrived or
  * dropped: no constraint. Without a waiting item, the release date the capture itself named.
  */
+/**
+ * The person saying a task waits for someone: 「师兄 10/8 左右给数据」. The same waiting item analysis would have
+ * written, made by hand — for a task analysed before the analysis read such dates, or one it missed.
+ */
+export function addWaitingForOrder(ctx: AccessContext, workOrderId: string, input: { who: string; what: string; expectedAt: string; approximate: boolean }):
+  { ok: true; id: string } | { ok: false; code: string } {
+  const order = findWorkOrder(ctx.workspaceId, workOrderId);
+  if (!order) return { ok: false, code: "WORK_ORDER_NOT_FOUND" };
+  if (["accepted", "archived"].includes(order.state)) return { ok: false, code: "WORK_ORDER_CLOSED" };
+  const what = input.what.trim();
+  if (!what || what.length > 200 || input.who.length > 60 || !/^\d{4}-\d{2}-\d{2}$/.test(input.expectedAt)) return { ok: false, code: "INVALID_WAITING_INPUT" };
+  const id = `wait-${workOrderId}-${getStore().listWaitingItems(ctx.workspaceId).filter((item) => item.blocks.includes(workOrderId)).length}`;
+  getStore().saveWaitingItem({ id, ownerId: ctx.principalId, workspaceId: ctx.workspaceId, title: what, who: input.who.trim(),
+    expectedAt: input.expectedAt, approximate: input.approximate, followUpAt: input.expectedAt, state: "open", blocks: [workOrderId], source: "manual" });
+  return { ok: true, id };
+}
+
 /** The person's answer to a waiting item's 「到了吗？」. 「到了」 frees the work it held up for scheduling now. */
 export function answerWaiting(ctx: AccessContext, id: string, answer: { kind: "arrived" } | { kind: "cancelled" } | { kind: "deferred"; followUpAt: string }):
   { ok: true } | { ok: false; code: string } {
