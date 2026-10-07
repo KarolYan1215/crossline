@@ -24,7 +24,7 @@ function buildHistoricalStats(store: CrosslineStore, workspaceId: string, identi
 }
 // `workspaceId` is the real caller's, fixed at creation — one analyzer per real workspace, the same
 // pattern `createMaterialPreparer`/`createMilestoneGate` already use. This used to be a hardcoded
-// module-level `"personal-crossline"` plus an `ownerId === "local-owner"` filter on every read, so a
+// module-level single-user workspace constant plus an owner-constant filter on every read, so a
 // real account's own captures and milestones were invisible to it: `getCapture` threw
 // `CAPTURE_NOT_FOUND` and the milestones filter threw `ANALYSIS_APPROVED_MILESTONE_REQUIRED` even with
 // approved milestones on the books, because workspace-scoping already makes the ownerId check redundant

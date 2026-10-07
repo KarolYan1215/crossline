@@ -65,7 +65,7 @@ test("work_order.start dispatches to the same function the online execution rout
   startWorkOrderExecution.mockReturnValueOnce({ ok: true });
   const response = await post(envelope("work_order.start", { workOrderId: "w1" }));
   expect(response.status).toBe(200);
-  expect(startWorkOrderExecution).toHaveBeenCalledWith(TEST_CTX, "w1");
+  expect(startWorkOrderExecution).toHaveBeenCalledWith(TEST_CTX, "w1", undefined);
 });
 
 test("a work order that moved on under this command surfaces as a 409, not a generic failure", async () => {
@@ -91,14 +91,14 @@ test("work_order.pause validates its reason the same way the online route does",
   pauseWorkOrderExecution.mockReturnValueOnce({ ok: false, code: "INTERRUPTION_REASON_REQUIRED" });
   const response = await post(envelope("work_order.pause", { workOrderId: "w1", reason: "" }));
   expect(response.status).toBe(400);
-  expect(pauseWorkOrderExecution).toHaveBeenCalledWith(TEST_CTX, "w1", "");
+  expect(pauseWorkOrderExecution).toHaveBeenCalledWith(TEST_CTX, "w1", "", undefined);
 });
 
 test("work_order.resume dispatches with just a work order id", async () => {
   resumeWorkOrderExecution.mockReturnValueOnce({ ok: true });
   const response = await post(envelope("work_order.resume", { workOrderId: "w1" }));
   expect(response.status).toBe(200);
-  expect(resumeWorkOrderExecution).toHaveBeenCalledWith(TEST_CTX, "w1");
+  expect(resumeWorkOrderExecution).toHaveBeenCalledWith(TEST_CTX, "w1", undefined);
 });
 
 test("work_order.complete rejects a malformed evidence claim before it ever reaches the store", async () => {
@@ -114,5 +114,5 @@ test("work_order.complete forwards well-formed evidence", async () => {
     workOrderId: "w1", evidence: [{ kind: "record", uri: "local://note", description: "结论记录" }]
   }));
   expect(response.status).toBe(200);
-  expect(completeWorkOrderExecution).toHaveBeenCalledWith(TEST_CTX, "w1", [{ kind: "record", uri: "local://note", description: "结论记录" }]);
+  expect(completeWorkOrderExecution).toHaveBeenCalledWith(TEST_CTX, "w1", [{ kind: "record", uri: "local://note", description: "结论记录" }], [], undefined);
 });

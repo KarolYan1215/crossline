@@ -3,7 +3,7 @@ import { FLYWHEEL_OUTPUT_SCHEMA, validateFlywheelExpansion, type FlywheelContext
 import { runCodexSkill, webResearchBlocker, type CodexRpcBoundary } from "@crossline/codex";
 import type { CrosslineStore } from "@crossline/db";
 
-const OWNER_ID = "local-owner";
+import { ownerOf } from "./owner";
 export const FLYWHEEL_SKILL = "crossline:crossline-flywheel-scout";
 
 const INSTRUCTIONS = "Search the public web for information that would help finish the supplied "
@@ -64,7 +64,7 @@ export function createFlywheelExpander(store: CrosslineStore, workspaceId: strin
     const day = new Date().toISOString().slice(0, 10);
     for (const [index, finding] of result.output.findings.entries()) {
       store.appendEvent({
-        ownerId: OWNER_ID, workspaceId,
+        ownerId: ownerOf(store, workspaceId), workspaceId,
         idempotencyKey: `flywheel:finding:${day}:${index}`,
         type: "flywheel.finding", entityId: finding.milestoneId,
         payload: finding
@@ -85,7 +85,7 @@ export function createFlywheelExpander(store: CrosslineStore, workspaceId: strin
       // refuted. A nightly job that quietly un-approves relations would make the review meaningless.
       if (current && current.status !== "candidate") continue;
       store.saveMilestoneRelation({
-        id, ownerId: OWNER_ID, workspaceId,
+        id, ownerId: ownerOf(store, workspaceId), workspaceId,
         fromMilestoneId: relation.fromMilestoneId, toMilestoneId: relation.toMilestoneId,
         kind: relation.kind, status: "candidate",
         evidence: [{ uri: relation.sourceUrl, source: relation.sourceTitle, observedAt: relation.retrievedAt }],
@@ -97,7 +97,7 @@ export function createFlywheelExpander(store: CrosslineStore, workspaceId: strin
         refutedWhen: relation.refutedWhen
       });
       store.appendEvent({
-        ownerId: OWNER_ID, workspaceId,
+        ownerId: ownerOf(store, workspaceId), workspaceId,
         idempotencyKey: `flywheel:relation:${day}:${id}`,
         type: "flywheel.relation_proposed", entityId: id, payload: relation
       });

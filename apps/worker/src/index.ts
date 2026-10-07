@@ -5,6 +5,7 @@ import path from "node:path";
 import { enterUsageWorkspace, setSpendModeProvider, setUsageSink, startCodexSupervisor, type CodexSupervisor } from "@crossline/codex";
 import { CrosslineStore } from "@crossline/db";
 import { capturesAwaitingAutoAnalysis, createCaptureAnalyzer } from "./analysis";
+import { retireShadowedDemos } from "./demo-cleanup";
 import { createActivityTracker } from "./activity-recorder";
 import { createWindowsActivitySource } from "./activity-source";
 import { createNightlyFlywheel } from "./nightly";
@@ -30,7 +31,6 @@ import {
 } from "./calendar-sources";
 import { createGraphAuthSession, GraphReadSource, type GraphCredentialProvider } from "@crossline/connectors";
 
-const WORKSPACE_ID = "personal-crossline";
 const repoRoot = path.resolve(import.meta.dirname, "../../..");
 // The worker runs with its own package as cwd, and nothing else here reads .env files — so without
 // this the calendar client id was simply never present and the sync could never switch on, silently.
@@ -107,6 +107,12 @@ async function tick(): Promise<void> {
   // Every real workspace, not one hardcoded id — a real account's own work orders and calendar state
   // used to be structurally invisible to all three of these jobs no matter how long the worker ran.
   const workspaces = analysisStore.listWorkspaces();
+  for (const workspace of workspaces) {
+    try {
+      const retired = retireShadowedDemos(analysisStore, workspace.id);
+      if (retired.length) console.info(JSON.stringify({ type: "demo_orders.retired", checkedAt, workspaceId: workspace.id, retired }));
+    } catch { /* housekeeping: never worth a failed tick */ }
+  }
   // Material preparation is the one background job that writes into the project directory, so it only
   // ever runs for work orders the human already approved into `preparing`.
   for (const workspace of workspaces) {
@@ -347,7 +353,7 @@ const getMilestoneGate = (workspaceId: string) => {
   return gate;
 };
 // Same fix, same reason: `createCaptureAnalyzer` used to close over a hardcoded workspace id (and an
-// `ownerId === "local-owner"` read filter on top of it), so a real account's own captures and approved
+// `ownerId === <the old constant>` read filter on top of it), so a real account's own captures and approved
 // milestones were invisible to it — analysis threw `CAPTURE_NOT_FOUND` or
 // `ANALYSIS_APPROVED_MILESTONE_REQUIRED` regardless of what was actually on the ledger.
 const captureAnalyzers = new Map<string, ReturnType<typeof createCaptureAnalyzer>>();

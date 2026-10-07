@@ -42,7 +42,7 @@ export type PlanResult = {
   /** Things the person should know about a plan that did get made — a buffer that had to be cut down to
    * fit the longest free stretch, say. Not blockers: the work was scheduled. */
   notes?: PlanBlocker[];
-  solver: "optimal" | "feasible_time_limit" | "fallback";
+  solver: "optimal" | "feasible_time_limit" | "fallback" | "empty" | "no_capacity";
   bufferRelaxed?: boolean;
 };
 

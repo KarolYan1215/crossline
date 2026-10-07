@@ -20,7 +20,10 @@ function seedOrderWithMilestone(store: CrosslineStore) {
       manualPromotion: false, seeded: false,
       materialContract: [{ kind: "file", description: "三次实验的原始数据", why: "用来写方法与结果部分", required: true }],
       evidenceContract: [{ kind: "file", description: "导师签字确认的初稿", why: "证明已进入评审阶段", required: true }],
-      blocker: { reason: "缺少上周实验的原始数据" }
+      blocker: { reason: "缺少上周实验的原始数据" },
+      humanCore: [{ id: "h1", intent: "判断实验结论", quote: "把实验结果写成论文初稿", rationale: "结论要本人负责" }],
+      automationParts: [{ id: "a1", intent: "整理图表草稿", reversibility: "local", quote: "实验结果", rationale: "可机械完成" }],
+      estimateBreakdown: [{ step: "整理数据", minutes: 20 }, { step: "写初稿", minutes: 40 }]
     }
   });
   store.saveMaterial({ id: "mat-1", ownerId: TEST_CTX.principalId, workspaceId: TEST_CTX.workspaceId,
@@ -38,6 +41,10 @@ test("loadTaskDetail assembles milestone link, contract items, prepared material
   expect(detail?.preparedMaterials).toEqual([{ id: "mat-1", uri: "file:///data/materials/wo-1/outline.md", fileName: "outline.md", mediaType: "text/markdown" }]);
   expect(detail?.blocker).toEqual({ reason: "缺少上周实验的原始数据" });
   expect(detail?.identityLabel).toBe("科研");
+  // The page a card links to used to know less than the card: the person's part and the step breakdown were left out.
+  expect(detail?.humanCore.map((part) => part.intent)).toEqual(["判断实验结论"]);
+  expect(detail?.automationParts.map((part) => part.intent)).toEqual(["整理图表草稿"]);
+  expect(detail?.estimateBreakdown).toEqual([{ step: "整理数据", minutes: 20 }, { step: "写初稿", minutes: 40 }]);
 });
 
 test("loadTaskDetail returns undefined for an id that does not exist, rather than throwing", () => {

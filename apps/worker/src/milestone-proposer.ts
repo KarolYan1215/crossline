@@ -8,7 +8,7 @@ import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { latestFileDates, type CrosslineStore } from "@crossline/db";
 
 /** Only for a ledger that has no workspace owner on record, which a real account never is. */
-const FALLBACK_OWNER_ID = "local-owner";
+import { ownerOf } from "./owner";
 export const MILESTONE_ARCHITECT_SKILL = "crossline:crossline-milestone-architect";
 
 const INSTRUCTIONS = "Propose milestones for the supplied identities. Return only the requested JSON. "
@@ -209,7 +209,7 @@ export function createMilestoneProposer(store: CrosslineStore, workspaceId: stri
       onAudit: () => {}, ...(signal ? { signal } : {}), timeoutMs: 60 * 60_000
     });
     if (!result.ok) return;
-    const ownerId = store.getWorkspaceOwnerId(workspaceId) ?? FALLBACK_OWNER_ID;
+    const ownerId = ownerOf(store, workspaceId);
     const when = new Date().toISOString();
     for (const relation of result.output.relations) {
       // The relation's evidence is the profile facts it rests on, so the 主线 page can show it dotted and the person can approve or
@@ -377,7 +377,7 @@ export function persistTargetProposals(store: CrosslineStore, workspaceId: strin
 function persistProposals(store: CrosslineStore, workspaceId: string,
   milestones: MilestoneProposal["milestones"], request: string): Array<{ id: string; identityId: string; title: string }> {
   const templates = store.listMilestoneTemplates(workspaceId);
-  const ownerId = store.getWorkspaceOwnerId(workspaceId) ?? FALLBACK_OWNER_ID;
+  const ownerId = ownerOf(store, workspaceId);
   const drafts: Array<{ id: string; identityId: string; title: string }> = [];
   // Real ids are assigned first so a `dependsOn` written in the answer's own keys can be turned into them.
   const idByKey = new Map(milestones.flatMap((proposal) => proposal.plan ? [[proposal.plan.key, `proposed-${randomUUID()}`] as const] : []));

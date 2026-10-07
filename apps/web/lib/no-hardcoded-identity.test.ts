@@ -9,16 +9,15 @@ import { expect, test } from "vitest";
  * of `csrf-protection.test.ts`: it walks every source file under the covered roots and fails the moment
  * either literal reappears, so a reintroduced hardcode is caught on the commit that added it.
  *
- * `apps/worker` is deliberately NOT covered yet. Its 8 background-job files still each define
- * `const OWNER_ID = "local-owner"` closed over a single hardcoded workspace — converting that to a real
- * `listWorkspaces()` loop is a separate, riskier change (it touches the live, verified Graph calendar
- * sync and Codex material/milestone-gate jobs) that was deferred pending an explicit decision rather than
- * folded into this mechanical pass. Once that migration lands, add "apps/worker" back to `ROOTS`.
+ * `apps/worker` is covered too. It was left out while its background jobs each closed over the old
+ * owner constant; those now resolve the workspace's real owner through `apps/worker/src/owner.ts`, and the
+ * one place that still *filtered* on the constant (the goal backplanner) is exactly the bug that made
+ * 「从此目标反推步骤」 fail on every real account.
  *
  * Test files and fixtures are exempt on purpose: a test's own `TEST_CTX`/`seed()` helper needs some
  * concrete workspace id to write rows under, and that id is not a production identity leak.
  */
-const ROOTS = ["apps/web"];
+const ROOTS = ["apps/web", "apps/worker"];
 const SKIP_DIRS = new Set(["node_modules", ".next", ".next-e2e", "dist", "testing"]);
 const FORBIDDEN = ["local-owner", "personal-crossline"];
 

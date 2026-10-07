@@ -329,6 +329,11 @@ const RETIRED_TABLES = ["outbox", "identities", "projects", "milestone_versions"
 /** Columns a migration dropped, by table. Same reason as `RETIRED_TABLES`: old snapshots still list them. */
 const RETIRED_COLUMNS: Record<string, readonly string[]> = { energy_observations: ["expires_at"] };
 
+/** A replayed time can never precede what it follows: a resume before its pause, an end before its start. */
+function notBefore(at: string, floor: string | undefined): string {
+  return floor && Date.parse(at) < Date.parse(floor) ? floor : at;
+}
+
 export class CrosslineStore {
   readonly #db: Database.Database;
 
@@ -951,6 +956,9 @@ export class CrosslineStore {
   transitionWorkOrder(workspaceId: string, id: string, event: WorkOrderEvent, idempotencyKey: string,
     update: { proposal?: unknown; context?: unknown; audit?: StoredCapture["audit"]; attempt?: number;
       evidence?: EvidenceClaimInput[]; durationObserved?: boolean;
+      /** When the act happened, if not now — an offline command replayed later carries the time it was
+       * done on the device; stamping it with the replay time made offline work look shorter or longer. */
+      occurredAt?: string;
       /** Answers to the order's own `evidenceChecklist`, submitted alongside `evidence` on
        * `human.completed` — see 工作块 E. Stored on the closing execution row, not on any evidence claim. */
       checklistAnswers?: ChecklistAnswer[];
@@ -1023,10 +1031,11 @@ export class CrosslineStore {
   // Runs inside transitionWorkOrder's transaction, so an execution or evidence row can never outlive a
   // rolled-back state change. WorkOrders only — a capture has neither executions nor evidence.
   #recordExecutionEffects(workspaceId: string, id: string, ownerId: string, event: WorkOrderEvent,
-    update: { evidence?: EvidenceClaimInput[]; durationObserved?: boolean; checklistAnswers?: ChecklistAnswer[];
+    update: { evidence?: EvidenceClaimInput[]; durationObserved?: boolean; checklistAnswers?: ChecklistAnswer[]; occurredAt?: string;
       durationCalibrationBaseline?: { p25Minutes: number; p50Minutes: number; p85Minutes: number } }): void {
-    const now = new Date().toISOString();
     const open = this.#openExecution(workspaceId, id);
+    const now = notBefore(update.occurredAt ?? new Date().toISOString(), open?.interruptions.at(-1)?.resumedAt
+      ?? open?.interruptions.at(-1)?.pausedAt ?? open?.startedAt);
     if (event.type === "human.started") {
       this.#db.prepare(`
         INSERT INTO executions (id, owner_id, workspace_id, work_order_id, started_at, ended_at, pause_minutes, outcome, payload_json)
@@ -1149,13 +1158,13 @@ export class CrosslineStore {
   }
 
   #openExecution(workspaceId: string, workOrderId: string):
-    { id: string; ownerId: string; durationObserved: boolean; interruptions: StoredExecution["interruptions"] } | undefined {
+    { id: string; ownerId: string; startedAt: string; durationObserved: boolean; interruptions: StoredExecution["interruptions"] } | undefined {
     const row = this.#db.prepare(
-      "SELECT id, owner_id, payload_json FROM executions WHERE workspace_id = ? AND work_order_id = ? AND ended_at IS NULL ORDER BY started_at DESC"
-    ).get(workspaceId, workOrderId) as { id: string; owner_id: string; payload_json: string } | undefined;
+      "SELECT id, owner_id, started_at, payload_json FROM executions WHERE workspace_id = ? AND work_order_id = ? AND ended_at IS NULL ORDER BY started_at DESC"
+    ).get(workspaceId, workOrderId) as { id: string; owner_id: string; started_at: string; payload_json: string } | undefined;
     if (!row) return undefined;
     const payload = JSON.parse(row.payload_json) as { durationObserved: boolean; interruptions: StoredExecution["interruptions"] };
-    return { id: row.id, ownerId: row.owner_id, durationObserved: payload.durationObserved, interruptions: payload.interruptions };
+    return { id: row.id, ownerId: row.owner_id, startedAt: row.started_at, durationObserved: payload.durationObserved, interruptions: payload.interruptions };
   }
 
   /**
@@ -1171,20 +1180,30 @@ export class CrosslineStore {
     if (!order || !baseline) return;
     const family = (order.payload as { family?: string } | undefined)?.family;
     if (!family) return;
-    const row = this.#db.prepare(
-      "SELECT id, started_at, ended_at, pause_minutes, payload_json FROM executions WHERE workspace_id = ? AND work_order_id = ? AND ended_at IS NOT NULL ORDER BY started_at DESC LIMIT 1"
-    ).get(workspaceId, workOrderId) as { id: string; started_at: string; ended_at: string; pause_minutes: number; payload_json: string } | undefined;
-    if (!row) return;
-    const payload = JSON.parse(row.payload_json) as { durationObserved: boolean };
-    if (!payload.durationObserved) return;
-    const wallClockMinutes = Math.round((Date.parse(row.ended_at) - Date.parse(row.started_at)) / 60_000);
-    const observedMinutes = wallClockMinutes - row.pause_minutes;
+    // Every closed, timed session of this order, not only the last one: work split across two sittings
+    // used to be recorded as just the second sitting, so the person looked faster than they are.
+    const rows = (this.#db.prepare(
+      "SELECT id, started_at, ended_at, pause_minutes, payload_json FROM executions WHERE workspace_id = ? AND work_order_id = ? AND ended_at IS NOT NULL ORDER BY started_at"
+    ).all(workspaceId, workOrderId) as Array<{ id: string; started_at: string; ended_at: string; pause_minutes: number; payload_json: string }>)
+      .filter((row) => (JSON.parse(row.payload_json) as { durationObserved: boolean }).durationObserved);
+    const last = rows.at(-1);
+    if (!last) return;
+    const wallClockMinutes = rows.reduce((sum, row) => sum + Math.round((Date.parse(row.ended_at) - Date.parse(row.started_at)) / 60_000), 0);
+    const pauseMinutes = rows.reduce((sum, row) => sum + row.pause_minutes, 0);
+    const observedMinutes = wallClockMinutes - pauseMinutes;
     if (observedMinutes < 1) return;
+    // One observation per work order. A revoke-then-reaccept with no new session is a no-op; one with a new
+    // session replaces the earlier row, whose minutes the new sum already contains — inserting beside it
+    // counted them twice.
+    const existing = this.#db.prepare("SELECT execution_id, observed_minutes FROM duration_observations WHERE workspace_id = ? AND work_order_id = ?")
+      .get(workspaceId, workOrderId) as { execution_id: string; observed_minutes: number } | undefined;
+    if (existing?.execution_id === last.id && existing.observed_minutes === observedMinutes) return;
+    this.#db.prepare("DELETE FROM duration_observations WHERE workspace_id = ? AND work_order_id = ?").run(workspaceId, workOrderId);
     this.recordDurationObservation({
-      ownerId, workspaceId, workOrderId, executionId: row.id, identityId: order.identityId, family,
-      observedMinutes, wallClockMinutes, pauseMinutes: row.pause_minutes,
-      interruptionDominant: row.pause_minutes >= wallClockMinutes * 0.5,
-      baseline, observedAt: row.ended_at
+      ownerId, workspaceId, workOrderId, executionId: last.id, identityId: order.identityId, family,
+      observedMinutes, wallClockMinutes, pauseMinutes,
+      interruptionDominant: pauseMinutes >= wallClockMinutes * 0.5,
+      baseline, observedAt: last.ended_at
     });
   }
 
@@ -1197,25 +1216,27 @@ export class CrosslineStore {
 
   // Pause and resume are execution facts, not formal WorkOrder states: the order stays `active`
   // throughout and only the interruption record changes.
-  pauseExecution(workspaceId: string, workOrderId: string, reason: string): { changed: boolean } {
+  pauseExecution(workspaceId: string, workOrderId: string, reason: string, at?: string): { changed: boolean } {
     return this.#db.transaction(() => {
       const open = this.#openExecution(workspaceId, workOrderId);
       if (!open) throw new Error("NO_ACTIVE_EXECUTION");
       if (open.interruptions.at(-1) && !open.interruptions.at(-1)!.resumedAt) return { changed: false };
-      this.#writeInterruptions(open.id, [...open.interruptions, { pausedAt: new Date().toISOString(), reason }], open.durationObserved);
+      const pausedAt = notBefore(at ?? new Date().toISOString(), open.interruptions.at(-1)?.resumedAt ?? open.startedAt);
+      this.#writeInterruptions(open.id, [...open.interruptions, { pausedAt, reason }], open.durationObserved);
       this.appendEvent({ ownerId: open.ownerId, workspaceId, idempotencyKey: `execution:${open.id}:pause:${open.interruptions.length}`,
         type: "execution.paused", entityId: workOrderId, payload: { executionId: open.id, reason } });
       return { changed: true };
     }).immediate();
   }
 
-  resumeExecution(workspaceId: string, workOrderId: string): { changed: boolean } {
+  resumeExecution(workspaceId: string, workOrderId: string, at?: string): { changed: boolean } {
     return this.#db.transaction(() => {
       const open = this.#openExecution(workspaceId, workOrderId);
       if (!open) throw new Error("NO_ACTIVE_EXECUTION");
       const last = open.interruptions.at(-1);
       if (!last || last.resumedAt) return { changed: false };
-      this.#writeInterruptions(open.id, [...open.interruptions.slice(0, -1), { ...last, resumedAt: new Date().toISOString() }], open.durationObserved);
+      const resumedAt = notBefore(at ?? new Date().toISOString(), last.pausedAt);
+      this.#writeInterruptions(open.id, [...open.interruptions.slice(0, -1), { ...last, resumedAt }], open.durationObserved);
       this.appendEvent({ ownerId: open.ownerId, workspaceId, idempotencyKey: `execution:${open.id}:resume:${open.interruptions.length - 1}`,
         type: "execution.resumed", entityId: workOrderId, payload: { executionId: open.id, reason: last.reason } });
       return { changed: true };

@@ -8,7 +8,7 @@ import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import type { CrosslineStore } from "@crossline/db";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 
-const OWNER_ID = "local-owner";
+import { ownerOf } from "./owner";
 export const MILESTONE_GATE_SKILL = "crossline:crossline-milestone-gate";
 // Enough of an artifact to judge, bounded so one large file cannot crowd out the rest of the evidence.
 const ARTIFACT_TEXT_LIMIT = 40_000;
@@ -146,7 +146,7 @@ function recordGateBlock(store: CrosslineStore, workspaceId: string, workOrderId
   blocker: { code: string; message: string }): void {
   const attempt = store.listEvents(workspaceId, { type: "milestone_gate.blocked", entityId: workOrderId }).length;
   store.appendEvent({
-    ownerId: OWNER_ID, workspaceId,
+    ownerId: ownerOf(store, workspaceId), workspaceId,
     idempotencyKey: `milestone-gate:blocked:${workOrderId}:${attempt}`,
     type: "milestone_gate.blocked", entityId: workOrderId, payload: blocker
   });

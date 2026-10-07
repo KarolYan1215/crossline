@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 import { CrosslineStore } from "@crossline/db";
-import { createGoalBackplanner, validateBackplan } from "./goal-backplanner";
+import { validateBackplan } from "@crossline/core";
+import { createGoalBackplanner } from "./goal-backplanner";
 import { fakeRuntime } from "./testing/fake-runtime";
 
 const workspaceId = "personal-crossline";
@@ -8,7 +9,7 @@ const ownerId = "local-owner";
 const step = (over: Record<string, unknown> = {}) => ({ id: "s1", intent: "整理实验方案", sourceQuote: "稳定推进实验",
   rationale: "先列可执行步骤", dependsOn: [],
   estimate: { p25Minutes: 30, p50Minutes: 45, p85Minutes: 75 },
-  energy: "high", interruptible: false, riskTier: "routine", evidence: "实验方案记录", ...over });
+  energy: "high", interruptible: false, family: "preparation", riskTier: "routine", evidence: "实验方案记录", ...over });
 
 test("backplanner refuses invented quotes, unknown dependencies and implausible estimates", () => {
   expect(() => validateBackplan({ steps: [step({ sourceQuote: "虚构原话" })], dateCandidates: [], blockers: [] }, ["稳定推进实验"]))
@@ -36,6 +37,24 @@ test("approved goal expands into sourced, bound drafts once and remains awaiting
   expect(runtime.turns()).toBe(1);
   expect(store.listWorkOrders(workspaceId)).toHaveLength(1);
   expect(store.listEvents(workspaceId, { type: "goal.backplan_proposed" })).toHaveLength(1);
+  store.close();
+});
+
+// A real account's milestones are owned by a principal UUID. The backplanner used to filter on the
+// pre-accounts owner constant, so on every real account the button answered BACKPLAN_GOAL_NOT_APPROVED.
+test("a real account's approved milestone (UUID owner) is backplanned, drafts owned by that principal and tagged with a family", async () => {
+  const store = new CrosslineStore(":memory:");
+  const { principal, workspace } = store.createPrincipalWithWorkspace("auth-user-1", "个人 workspace");
+  const ctx = { principalId: principal.id, workspaceId: workspace.id };
+  store.saveMilestone({ id: "m", ownerId: ctx.principalId, workspaceId: ctx.workspaceId, identityId: "research", projectId: "p",
+    title: "稳定推进实验", status: "approved", version: 1 });
+  const runtime = fakeRuntime([JSON.stringify({ steps: [step()], dateCandidates: [], blockers: [] })],
+    "crossline:crossline-goal-backplanner");
+  const result = await createGoalBackplanner(store, ctx.workspaceId, "C:\repo", () => runtime.rpc)("m");
+  expect(result.state).toBe("proposed");
+  const draft = store.listWorkOrders(ctx.workspaceId)[0]!;
+  expect(draft.ownerId).toBe(ctx.principalId);
+  expect((draft.payload as { family?: string }).family).toBe("preparation");
   store.close();
 });
 

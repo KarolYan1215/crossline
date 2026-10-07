@@ -123,3 +123,57 @@ test("a backfilled completion with no observed timer never produces an observati
     expect(store.listDurationObservations("w", "research", "deep_work")).toEqual([]);
   } finally { store.close(); }
 });
+
+// Work done in two sittings (sent back after the first, finished in a second) used to be recorded as the
+// second sitting alone — and a re-accept after new work inserted a second row, counting minutes twice.
+test("two sittings of one order are summed into one observation, replaced rather than duplicated", () => {
+  const store = new CrosslineStore(":memory:");
+  vi.useFakeTimers();
+  try {
+    seed(store);
+    vi.setSystemTime(new Date("2026-09-14T09:00:00.000Z"));
+    store.transitionWorkOrder("w", "w1", { type: "human.started" }, "start:1", { durationObserved: true });
+    vi.setSystemTime(new Date("2026-09-14T09:40:00.000Z"));
+    store.transitionWorkOrder("w", "w1", { type: "human.completed" }, "done:1",
+      { evidence: [{ kind: "record", uri: "local://note-1", description: "结论记录" }] });
+    store.transitionWorkOrder("w", "w1", { type: "evidence.accepted", approvalId: "human" }, "accept:1",
+      { durationCalibrationBaseline: BASELINE });
+    expect(store.listDurationObservations("w", "research", "deep_work").map((row) => row.observedMinutes)).toEqual([40]);
+
+    store.transitionWorkOrder("w", "w1", { type: "acceptance.revoked", reason: "还差一张图" }, "revoke:1");
+    store.transitionWorkOrder("w", "w1", { type: "blocked", reason: "补图" }, "block:1");
+    store.transitionWorkOrder("w", "w1", { type: "plan.approved", approvalId: "human" }, "approve:2");
+    store.transitionWorkOrder("w", "w1", { type: "materials.not_required" }, "nomat:2");
+    vi.setSystemTime(new Date("2026-09-15T09:00:00.000Z"));
+    store.transitionWorkOrder("w", "w1", { type: "human.started" }, "start:2", { durationObserved: true });
+    vi.setSystemTime(new Date("2026-09-15T09:25:00.000Z"));
+    store.transitionWorkOrder("w", "w1", { type: "human.completed" }, "done:2",
+      { evidence: [{ kind: "record", uri: "local://note-2", description: "结论记录" }] });
+    store.transitionWorkOrder("w", "w1", { type: "evidence.accepted", approvalId: "human" }, "accept:2",
+      { durationCalibrationBaseline: BASELINE });
+
+    const rows = store.listDurationObservations("w", "research", "deep_work");
+    expect(rows.map((row) => row.observedMinutes)).toEqual([65]);
+    expect(rows[0]!.observedAt).toBe("2026-09-15T09:25:00.000Z");
+  } finally { store.close(); }
+});
+
+// An offline session synced hours later keeps the device's times; a replayed time can never run backwards.
+test("replayed execution times are kept, and clamped so an end never precedes its start", () => {
+  const store = new CrosslineStore(":memory:");
+  vi.useFakeTimers();
+  try {
+    seed(store);
+    vi.setSystemTime(new Date("2026-09-14T18:00:00.000Z"));
+    store.transitionWorkOrder("w", "w1", { type: "human.started" }, "start:w1",
+      { durationObserved: true, occurredAt: "2026-09-14T14:00:00.000Z" });
+    store.pauseExecution("w", "w1", "吃饭", "2026-09-14T14:30:00.000Z");
+    store.resumeExecution("w", "w1", "2026-09-14T14:10:00.000Z");
+    store.transitionWorkOrder("w", "w1", { type: "human.completed" }, "done:w1",
+      { evidence: [{ kind: "record", uri: "local://note-1", description: "结论记录" }], occurredAt: "2026-09-14T15:00:00.000Z" });
+    const execution = store.listExecutions("w", "w1")[0]!;
+    expect(execution.startedAt).toBe("2026-09-14T14:00:00.000Z");
+    expect(execution.endedAt).toBe("2026-09-14T15:00:00.000Z");
+    expect(execution.interruptions[0]).toMatchObject({ pausedAt: "2026-09-14T14:30:00.000Z", resumedAt: "2026-09-14T14:30:00.000Z" });
+  } finally { store.close(); }
+});

@@ -1,3 +1,4 @@
+import { riskLabel, stateLabel, stateLabelFor } from "../../lib/labels";
 import { ensureSeeded, getStore, resolvedEstimate } from "../../lib/crossline";
 import { estimateBasis } from "../../lib/estimate-label";
 import { SubpageShell } from "../subpage-shell";
@@ -15,12 +16,6 @@ import { loadTaskDetailsBatch } from "../../lib/task-detail";
 // apart shared their first eight characters — the page showed them as the same item twice.
 const shortId = (id: string) => id.slice(-8);
 
-const stateLabel: Record<string, string> = {
-  captured: "已收集", analyzing: "分析中", awaiting_plan_approval: "等待计划批准",
-  approved: "已批准", preparing: "材料准备中", ready_for_human: "可开始",
-  active: "执行中", evidence_review: "证据审查中", accepted: "已验收", blocked: "已阻塞", archived: "已归档"
-};
-const riskLabel: Record<string, string> = { routine: "常规", milestone: "里程碑", high_risk: "高风险" };
 const confidenceLabel: Record<string, string> = { low: "低置信", medium: "中置信", high: "高置信" };
 
 const minutesBetween = (from: string, to: string) => Math.round((Date.parse(to) - Date.parse(from)) / 60_000);
@@ -125,7 +120,7 @@ export default async function WorkbenchPage({ searchParams }: {
             globals.css keeps every bare input/select/summary they use above this invisible link. */}
         <a className="card-cover-link" href={`/workbench/${encodeURIComponent(run.id)}`} aria-label={run.intent} />
         <TaskPreview detail={taskDetails.get(run.id)} />
-        <header><span>{identityLabel.get(run.identityId) ?? "未归入主线"}</span><b><i className="gly" data-s={run.state} aria-hidden="true" />{stateLabel[run.state] ?? "未知状态"}</b></header>
+        <header><span>{identityLabel.get(run.identityId) ?? "未归入主线"}</span><b><i className="gly" data-s={run.state} aria-hidden="true" />{stateLabelFor(run.state, paused)}</b></header>
         <h2>{run.intent}</h2>
         {/* The milestone this work order serves, on the card itself — previously only visible by
             cross-referencing Milestones or the PromoteForm's own dropdown. */}

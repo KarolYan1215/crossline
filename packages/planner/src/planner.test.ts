@@ -383,3 +383,16 @@ describe("energy-aware planning", () => {
     expect(result.status).toBe("infeasible");
   });
 });
+
+test("an empty week is reported as empty, not as a solver failure; tasks with no free time say so", async () => {
+  const now = new Date("2026-10-05T14:00:00.000Z");
+  const empty = await planSchedule({ now, horizonDays: 7, tasks: [], frozenBlocks: [],
+    availability: [{ start: "2026-10-06T14:00:00.000Z", end: "2026-10-06T17:00:00.000Z", day: "2026-10-06", energy: "high" }] });
+  expect(empty.solver).toBe("empty");
+  expect(empty.plan.blocks).toEqual([]);
+  const full = await planSchedule({ now, horizonDays: 7, frozenBlocks: [], availability: [],
+    tasks: [{ id: "t", title: "画图", identityId: "research",
+      estimate: { p25Minutes: 30, p50Minutes: 60, p85Minutes: 90, confidence: "low" as const },
+      inputsReady: true, deadlineTier: 2, interruptible: true }] });
+  expect(full.solver).toBe("no_capacity");
+});

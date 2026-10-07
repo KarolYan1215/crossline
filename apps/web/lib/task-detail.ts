@@ -27,6 +27,13 @@ export type TaskDetail = {
   /** A starter work order the app wrote on first run, not something the person created. */
   seeded: boolean;
   milestone?: { id: string; title: string };
+  /** What falls to the person and what the AI prepares, with the source each was read from — the same
+   * analysis the approval card shows. The detail page used to leave these out, so the page a card links
+   * to knew less about the task than the card did. */
+  humanCore: Array<{ id: string; intent: string; quote?: string; rationale?: string }>;
+  automationParts: Array<{ id: string; intent: string; quote?: string; rationale?: string }>;
+  /** Focused minutes by step; their sum is the analysis's median. Empty for an order with no breakdown. */
+  estimateBreakdown: Array<{ step: string; minutes: number }>;
   materialContract: Array<{ kind: string; description: string; why: string; required: boolean }>;
   evidenceContract: Array<{ kind: string; description: string; why: string; required: boolean }>;
   /** Pre-generated completion-time questions copied from the bound milestone at `plan.approved` — see
@@ -129,6 +136,8 @@ function assembleTaskDetail(ctx: AccessContext, order: StoredWorkOrder, deps: {
   const payload = order.payload as {
     manualPromotion?: boolean; seeded?: boolean; materialContract?: TaskDetail["materialContract"]; evidenceContract?: TaskDetail["evidenceContract"];
     evidenceChecklist?: TaskDetail["evidenceChecklist"];
+    humanCore?: TaskDetail["humanCore"]; automationParts?: TaskDetail["automationParts"];
+    estimateBreakdown?: TaskDetail["estimateBreakdown"];
     blocker?: { reason: string }; gateReview?: TaskDetail["gateReview"];
   };
   const { label: identityLabel, accent } = identityInfo(order.identityId);
@@ -145,6 +154,8 @@ function assembleTaskDetail(ctx: AccessContext, order: StoredWorkOrder, deps: {
     identityId: order.identityId, identityLabel, accent, intent: order.intent, state: order.state,
     riskTier: order.riskTier, estimate: resolvedEstimate(ctx, order), manualPromotion: Boolean(payload.manualPromotion), seeded: Boolean(payload.seeded),
     ...(deps.milestone ? { milestone: { id: deps.milestone.id, title: deps.milestone.title } } : {}),
+    humanCore: payload.humanCore ?? [], automationParts: payload.automationParts ?? [],
+    estimateBreakdown: payload.estimateBreakdown ?? [],
     materialContract: payload.materialContract ?? [], evidenceContract: payload.evidenceContract ?? [],
     evidenceChecklist: payload.evidenceChecklist ?? [],
     preparedMaterials: deps.materials.map((item) => ({ id: item.id, uri: item.uri, fileName: item.uri.split("/").pop() ?? item.uri, mediaType: item.mediaType })),

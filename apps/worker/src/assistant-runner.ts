@@ -9,7 +9,7 @@ import { defaultIdentityPacks } from "@crossline/identity-packs";
 import type { CrosslineStore } from "@crossline/db";
 import { persistAssistantMaterial } from "./materials";
 
-const OWNER_ID = "local-owner";
+import { ownerOf } from "./owner";
 export const ASSISTANT_SKILL = "crossline:crossline-assistant";
 
 const INSTRUCTIONS = "You are the site-wide Crossline assistant — a general-purpose conversational "
@@ -80,7 +80,7 @@ export function createAssistantTurn(store: CrosslineStore, workspaceId: string, 
 
     const now = new Date().toISOString();
     store.saveAssistantThread({
-      id: threadId, ownerId: OWNER_ID, workspaceId,
+      id: threadId, ownerId: ownerOf(store, workspaceId), workspaceId,
       ...(codexThreadId ? { codexThreadId } : {}),
       ...(context.workOrderId ? { workOrderId: context.workOrderId } : {}),
       createdAt: existing?.createdAt ?? now, updatedAt: now
@@ -91,7 +91,7 @@ export function createAssistantTurn(store: CrosslineStore, workspaceId: string, 
     if (result.output.materialDraft && context.workOrderId) {
       const draft = result.output.materialDraft;
       const persisted = persistAssistantMaterial(store, {
-        workspaceId, ownerId: OWNER_ID, workOrderId: context.workOrderId, materialsDir,
+        workspaceId, ownerId: ownerOf(store, workspaceId), workOrderId: context.workOrderId, materialsDir,
         file: { relativePath: draft.relativePath, content: draft.content, mediaType: draft.mediaType, sourceRefs: draft.sourceRefs }
       });
       if (persisted.ok) savedMaterial = { uri: persisted.artifact.uri, fileName: draft.relativePath };

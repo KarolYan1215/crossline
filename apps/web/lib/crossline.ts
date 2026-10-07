@@ -5,7 +5,7 @@ import path from "node:path";
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 import { CrosslineStore, type EvidenceClaimInput, type StoredMilestone } from "@crossline/db";
 import { availableSlots, deriveCapacity, requiredApproval, validateAvailability, DEFAULT_AVAILABILITY,
-  defaultMilestoneTemplates, computeMilestoneConfidence, validateSuccessCriteria, calibrateEstimate,
+  defaultMilestoneTemplates, computeMilestoneConfidence, validateSuccessCriteria, calibrateEstimate, goalSettingKey,
   type AccessContext, type AvailabilityWindow, type Estimate, type SuccessCriterion, type ChecklistAnswer } from "@crossline/core";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { forecastGoals, planSchedule, recommendNextActions, type ForecastResult, type PlanResult } from "@crossline/planner";
@@ -46,7 +46,7 @@ export type SchedulePreferences = { timeZone: string; mode: "buffered" | "asap";
 
 export type GoalSettings = { importance: "important" | "ordinary";
   confirmedDeadline: string | null; sourceQuote: string | null };
-const goalKey = (id: string) => `goal.settings:${id}`;
+const goalKey = goalSettingKey;
 
 export function readGoalSettings(ctx: AccessContext, id: string): GoalSettings | null {
   const raw = getStore().getSetting(ctx.workspaceId, goalKey(id));
@@ -915,7 +915,7 @@ export function discardCapture(ctx: AccessContext, captureId: string, reason: st
   }
 }
 
-export function startWorkOrderExecution(ctx: AccessContext, workOrderId: string): ExecutionResult {
+export function startWorkOrderExecution(ctx: AccessContext, workOrderId: string, at?: string): ExecutionResult {
   const store = getStore();
   const workOrder = findWorkOrder(ctx.workspaceId, workOrderId);
   if (!workOrder) return { ok: false, code: "WORK_ORDER_NOT_FOUND" };
@@ -937,25 +937,25 @@ export function startWorkOrderExecution(ctx: AccessContext, workOrderId: string)
     return { ok: false, code: "EXECUTION_NOT_STARTABLE" };
   }
   store.transitionWorkOrder(ctx.workspaceId, workOrderId, { type: "human.started" }, `execution:${workOrderId}:${run}:started`,
-    { durationObserved: true });
+    { durationObserved: true, ...(at ? { occurredAt: at } : {}) });
   return { ok: true };
 }
 
-export function pauseWorkOrderExecution(ctx: AccessContext, workOrderId: string, reason: string): ExecutionResult {
+export function pauseWorkOrderExecution(ctx: AccessContext, workOrderId: string, reason: string, at?: string): ExecutionResult {
   if (!reason.trim()) return { ok: false, code: "INTERRUPTION_REASON_REQUIRED" };
   if (findWorkOrder(ctx.workspaceId, workOrderId)?.state !== "active") return { ok: false, code: "NO_ACTIVE_EXECUTION" };
-  getStore().pauseExecution(ctx.workspaceId, workOrderId, reason.trim());
+  getStore().pauseExecution(ctx.workspaceId, workOrderId, reason.trim(), at);
   return { ok: true };
 }
 
-export function resumeWorkOrderExecution(ctx: AccessContext, workOrderId: string): ExecutionResult {
+export function resumeWorkOrderExecution(ctx: AccessContext, workOrderId: string, at?: string): ExecutionResult {
   if (findWorkOrder(ctx.workspaceId, workOrderId)?.state !== "active") return { ok: false, code: "NO_ACTIVE_EXECUTION" };
-  getStore().resumeExecution(ctx.workspaceId, workOrderId);
+  getStore().resumeExecution(ctx.workspaceId, workOrderId, at);
   return { ok: true };
 }
 
 export function completeWorkOrderExecution(ctx: AccessContext, workOrderId: string, evidence: EvidenceClaimInput[],
-  checklistAnswers: ChecklistAnswer[] = []): ExecutionResult {
+  checklistAnswers: ChecklistAnswer[] = [], at?: string): ExecutionResult {
   const store = getStore();
   const workOrder = findWorkOrder(ctx.workspaceId, workOrderId);
   if (!workOrder) return { ok: false, code: "WORK_ORDER_NOT_FOUND" };
@@ -963,7 +963,7 @@ export function completeWorkOrderExecution(ctx: AccessContext, workOrderId: stri
   if (workOrder.state !== "active") return { ok: false, code: "EXECUTION_NOT_ACTIVE" };
   store.transitionWorkOrder(ctx.workspaceId, workOrderId, { type: "human.completed" },
     `execution:${workOrderId}:${executionRun(ctx.workspaceId, workOrderId) - 1}:completed`,
-    { evidence, ...(checklistAnswers.length ? { checklistAnswers } : {}) });
+    { evidence, ...(checklistAnswers.length ? { checklistAnswers } : {}), ...(at ? { occurredAt: at } : {}) });
   return { ok: true };
 }
 
@@ -1023,6 +1023,13 @@ export function withoutShadowingDemos<T extends { state: string; identityId: str
   const demo = (order: T) => Boolean((order.payload as { seeded?: boolean }).seeded);
   const hasOwnWork = orders.some((order) => !demo(order) && order.state !== "archived" && !capacityIds.has(order.identityId));
   return hasOwnWork ? orders.filter((order) => !demo(order)) : orders;
+}
+
+/** Minutes left in these same-day slots from `nowClock` (HH:mm) on: a slot already over counts nothing, one under way counts its rest. */
+export function remainingMinutes(slots: Array<{ start: string; end: string }>, nowClock: string): number {
+  const clockMinutes = (clock: string) => { const [h, m] = clock.split(":"); return Number(h) * 60 + Number(m); };
+  const nowMinutes = clockMinutes(nowClock);
+  return slots.reduce((sum, slot) => sum + Math.max(0, clockMinutes(slot.end) - Math.max(clockMinutes(slot.start), nowMinutes)), 0);
 }
 
 type ActionableOrder = ReturnType<CrosslineStore["listWorkOrders"]>[number];
@@ -1217,15 +1224,18 @@ export async function loadDashboard(ctx: AccessContext): Promise<Omit<DashboardD
   // Today's own capacity read: the weekly pattern for today only, not the calendar-adjusted multi-week
   // forecast Plan already owns.
   const today = planToday(ctx, now);
-  const clockMinutes = (clock: string) => { const [h, m] = clock.split(":"); return Number(h) * 60 + Number(m); };
-  const availableMinutes = availableSlots(readAvailability(ctx), [today], [])
-    .reduce((sum, slot) => sum + (clockMinutes(slot.end) - clockMinutes(slot.start)), 0);
   const committedMinutes = active.reduce((sum, order) => sum + resolvedEstimate(ctx, order).p50Minutes, 0);
 
   // Reuses the same Plan-page scheduling read (`loadCurrentPlan` → `scheduledBlocks`) so Today's line and
   // the B lens agree on what "14:00–14:40" means instead of Today inventing a second notion of "when".
   // This is what makes `loadDashboard` async now — it used to stay sync specifically to avoid this call.
   const plan = await loadCurrentPlan(ctx);
+  // What is still usable today: the weekly pattern minus today's calendar commitments, from now on. It
+  // used to count the whole day's pattern, so at 21:10 the header still said 420 minutes were free.
+  const busyToday = plan.blocks.filter((block) => (block.day ?? today) === today && !block.id.startsWith("scheduled:"))
+    .map((block) => ({ day: today, start: block.start, end: block.end }));
+  const availableMinutes = remainingMinutes(availableSlots(readAvailability(ctx), [today], busyToday),
+    formatInTimeZone(now, timeZone, "HH:mm"));
   const blockByWorkOrderToday = new Map(plan.blocks
     .filter((block) => (block.day ?? today) === today && block.id.startsWith("scheduled:"))
     .map((block) => [block.id.split(":")[1]!, block]));

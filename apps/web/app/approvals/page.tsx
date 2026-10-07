@@ -1,5 +1,6 @@
 import { ensureSeeded, getStore, loadCurrentPlan, resolvedEstimate } from "../../lib/crossline";
 import { estimateBasis } from "../../lib/estimate-label";
+import { riskLabel } from "../../lib/labels";
 import { SubpageShell } from "../subpage-shell";
 import { AcceptEvidenceButton, ApproveProposalButton, JudgeMilestoneButton } from "./approval-actions";
 import type { AnalysisProposal } from "@crossline/core";
@@ -129,7 +130,7 @@ export default async function ApprovalsPage() {
       return <article key={item.id}>
         <a className="card-cover-link" href={`/workbench/${encodeURIComponent(item.id)}`} aria-label={item.intent} />
         <TaskPreview detail={taskDetails.get(item.id)} />
-        <header><span>AI 方案 · 待批准</span><b>{({ routine: "常规", milestone: "里程碑", high_risk: "高风险" } as Record<string, string>)[item.riskTier] ?? item.riskTier}</b></header>
+        <header><span>AI 方案 · 待批准</span><b>{riskLabel[item.riskTier] ?? item.riskTier}</b></header>
         <h2>{item.intent}</h2>
         <p>结构和输入引用已校验；语义仍需人工判断。尚未批准、排程或执行。</p>
         <p>{defaultIdentityPacks().find((pack) => pack.id === item.identityId)?.label ?? item.identityId}{milestoneById.get(item.milestoneId) ? ` · 服务于「${milestoneById.get(item.milestoneId)!.title}」` : ""}</p>

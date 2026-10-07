@@ -46,7 +46,7 @@ describe("dashboard view", () => {
       identityId: "research", identityLabel: "科研", accent: "#6D5EF5", intent: "完成论文结果段",
       state: "ready_for_human", riskTier: "milestone" as const,
       estimate: { p25Minutes: 45, p50Minutes: 60, p85Minutes: 90, confidence: "low" as const, source: "identity_prior" as const, observationCount: 0 },
-      manualPromotion: false, seeded: false, materialContract: [], evidenceContract: [], evidenceChecklist: [],
+      manualPromotion: false, seeded: false, humanCore: [], automationParts: [], estimateBreakdown: [], materialContract: [], evidenceContract: [], evidenceChecklist: [],
       preparedMaterials: [], executions: [], relatedFlywheel: [], background: null
     }]]);
     const html = renderToStaticMarkup(<DashboardView data={{

@@ -4,7 +4,7 @@ import { sampleLocalActivity } from "./activity";
 import { LOCAL_ACTIVITY_CONSENT } from "./activity-recorder";
 
 export const NIGHTLY_LAST_RUN = "flywheel.nightly.lastRunDay";
-const OWNER_ID = "local-owner";
+import { ownerOf } from "./owner";
 
 export type NightlyDeps = {
   store: CrosslineStore;
@@ -58,7 +58,7 @@ export function createNightlyFlywheel(deps: NightlyDeps, options: {
       // A skipped night is a fact worth keeping: without it the morning cannot tell stale from fresh.
       if (decision.code !== "BEFORE_PLANNED_TIME" && decision.code !== "ALREADY_RAN_TODAY") {
         deps.store.appendEvent({
-          ownerId: OWNER_ID, workspaceId: deps.workspaceId,
+          ownerId: ownerOf(deps.store, deps.workspaceId), workspaceId: deps.workspaceId,
           idempotencyKey: `flywheel:nightly:${now.toISOString().slice(0, 10)}:skipped`,
           type: "flywheel.nightly.skipped", entityId: "flywheel",
           payload: { code: decision.code, message: decision.message }
@@ -73,14 +73,14 @@ export function createNightlyFlywheel(deps: NightlyDeps, options: {
     try {
       const proposals = await deps.expand({ headroomPercent: decision.headroomPercent, mode: decision.mode });
       deps.store.appendEvent({
-        ownerId: OWNER_ID, workspaceId: deps.workspaceId,
+        ownerId: ownerOf(deps.store, deps.workspaceId), workspaceId: deps.workspaceId,
         idempotencyKey: `flywheel:nightly:${localDay}:ran`,
         type: "flywheel.nightly.ran", entityId: "flywheel",
         payload: { proposals, headroomPercent: decision.headroomPercent, mode: decision.mode }
       });
     } catch (error) {
       deps.store.appendEvent({
-        ownerId: OWNER_ID, workspaceId: deps.workspaceId,
+        ownerId: ownerOf(deps.store, deps.workspaceId), workspaceId: deps.workspaceId,
         idempotencyKey: `flywheel:nightly:${localDay}:failed`,
         type: "flywheel.nightly.failed", entityId: "flywheel",
         payload: { code: "FLYWHEEL_RUN_FAILED", message: error instanceof Error ? error.message.slice(0, 200) : "unknown" }

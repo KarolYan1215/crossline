@@ -10,7 +10,7 @@ import type { CrosslineStore, StoredDiligenceReport } from "@crossline/db";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 
 export const DILIGENCE_SKILL = "crossline:crossline-due-diligence";
-const FALLBACK_OWNER_ID = "local-owner";
+import { ownerOf } from "./owner";
 /** A weekly refresh, not a loop: a line is researched again only once its last report is this old. */
 export const DILIGENCE_REFRESH_DAYS = 7;
 
@@ -170,7 +170,7 @@ export function createDiligenceRunner(store: CrosslineStore, workspaceId: string
     }
 
     const topic = topicFor(identityId);
-    const ownerId = store.getWorkspaceOwnerId(workspaceId) ?? FALLBACK_OWNER_ID;
+    const ownerId = ownerOf(store, workspaceId);
     const preferences = store.getSetting(workspaceId, "schedule.preferences");
     let timeZone = "America/Chicago";
     try { const zone = preferences ? (JSON.parse(preferences) as { timeZone?: unknown }).timeZone : undefined; if (typeof zone === "string" && zone) timeZone = zone; }

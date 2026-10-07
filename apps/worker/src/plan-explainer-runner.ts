@@ -1,5 +1,5 @@
 import {
-  PLAN_EXPLAINER_OUTPUT_SCHEMA, validatePlanExplanation,
+  PLAN_EXPLAINER_OUTPUT_SCHEMA, validatePlanExplanation, goalSettingKey,
   type PlanExplainerContext, type PlanExplanation
 } from "@crossline/core";
 import { recommendNextActions } from "@crossline/planner";
@@ -7,7 +7,7 @@ import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import type { CrosslineStore } from "@crossline/db";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 
-const OWNER_ID = "local-owner";
+import { ownerOf } from "./owner";
 export const PLAN_EXPLAINER_SKILL = "crossline:crossline-plan-explainer";
 const ACTIONABLE = ["approved", "preparing", "ready_for_human", "active"];
 
@@ -33,7 +33,7 @@ export function buildPlanExplainerContext(store: CrosslineStore, workspaceId: st
     .filter((order) => !capacityIds.has(order.identityId) && ACTIONABLE.includes(order.state));
   const milestones = store.listMilestones(workspaceId);
   const goalOf = (milestoneId: string) => {
-    const raw = store.getSetting(workspaceId, `goal.${milestoneId}`);
+    const raw = store.getSetting(workspaceId, goalSettingKey(milestoneId));
     if (!raw) return null;
     try { return JSON.parse(raw) as { importance?: string; confirmedDeadline?: string }; } catch { return null; }
   };
@@ -91,7 +91,7 @@ export function createPlanExplainer(store: CrosslineStore, workspaceId: string, 
     });
     if (!result.ok) return { state: "blocked", code: result.blocker.code, message: result.blocker.message };
     store.appendEvent({
-      ownerId: OWNER_ID, workspaceId, idempotencyKey: `plan-explainer:${today}:${Date.now()}`,
+      ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `plan-explainer:${today}:${Date.now()}`,
       type: "plan.explained", entityId: today, payload: result.output
     });
     return { state: "ready", explanation: result.output };

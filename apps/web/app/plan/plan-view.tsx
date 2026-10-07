@@ -24,7 +24,7 @@ export type PlanVersionData = {
   blocks: ScheduleBlockData[];
   schedule?: { status: "feasible" | "partial" | "infeasible";
     blockers: Array<{ taskId: string; code: string; message: string }>;
-    solver: "optimal" | "feasible_time_limit" | "fallback"; bufferRelaxed?: boolean;
+    solver: "optimal" | "feasible_time_limit" | "fallback" | "empty" | "no_capacity"; bufferRelaxed?: boolean;
     notes?: Array<{ taskId: string; code: string; message: string }> };
   changes: Array<{ id: string; kind: "add" | "move" | "remove" | "conflict"; explanation: string; afterBlockId?: string; status: "pending" | "approved" | "excluded" }>;
 };
@@ -110,11 +110,12 @@ export function PlanView({ plan, calendar }: { plan: PlanVersionData; calendar: 
       {(publishState === "done" || publishState === "error") && <span role="status" className="plan-sync-note">{publishNote}</span>}
     </div>
 
-    {plan.schedule && <section className="schedule-status" role="status">
+    {plan.schedule && (plan.schedule.solver !== "empty" || plan.schedule.blockers.length > 0) && <section className="schedule-status" role="status">
       <strong>{plan.schedule.status === "feasible" ? "建议时段已排入"
         : plan.schedule.status === "partial" ? "部分作业尚未排入" : "当前没有可行的建议时段"}</strong>
       {plan.schedule.solver === "feasible_time_limit" && <p>已显示验证过的可行安排；未证明最优。</p>}
-      {plan.schedule.solver === "fallback" && <p>优化器未给出可用解；已显示验证过的保底安排。</p>}
+      {plan.schedule.solver === "fallback" && <p>这次没算出最优排法，先用一份简单排法，每块都核对过不冲突。</p>}
+      {plan.schedule.solver === "no_capacity" && <p>可用时间里已经没有空档，下面这些暂时排不进去。</p>}
       {plan.schedule.bufferRelaxed && <p>为守住已确认截止时间，已放宽当天的缓冲规则。</p>}
       {plan.schedule.blockers.map((blocker) => <p key={blocker.taskId}>{blocker.message}</p>)}
       {plan.schedule.notes?.map((note) => <p key={`note-${note.taskId}`}>{note.message}</p>)}

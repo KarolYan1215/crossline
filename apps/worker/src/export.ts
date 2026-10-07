@@ -12,7 +12,7 @@ const outputPath = path.resolve(args[0] ?? path.join(repoRoot, "backups", `cross
 mkdirSync(path.dirname(outputPath), { recursive: true });
 const store = new CrosslineStore(path.join(dataDir, "crossline.db"));
 try {
-  // `"personal-crossline"` used to be the only workspace this ledger could ever have, so it was a safe
+  // The single-user workspace constant used to be the only workspace this ledger could ever have, so it was a safe
   // default. Stage three gave every real account its own generated workspace id instead — a stale
   // hardcoded fallback here would silently export an empty snapshot of a workspace that no longer holds
   // the real data. Explicit when there is any ambiguity; auto-selected only when there is exactly one

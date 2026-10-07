@@ -7,6 +7,7 @@ import {
 import { resolveAccessContext } from "../../../lib/access-guard";
 import { isCrossSiteWrite } from "../../../lib/same-origin";
 import { requestCodexSupervisor } from "../../../lib/codex-runtime";
+import { replayTime } from "../../../lib/replay-time";
 
 // Fire-and-forget, never awaited by the response: a capture is already fully written (its own row, its
 // own event) by the time this runs, and a compaction failure must never look like the capture itself
@@ -57,14 +58,14 @@ function readEvidence(value: unknown): EvidenceClaimInput[] | null {
 // mapping below is what turns that typed refusal into the same 409 the online execution route already
 // uses, so the offline queue can tell "the object changed underneath this command" (→ conflicts store)
 // apart from "the input itself was invalid" (→ dead letter).
-const workOrderCommands: Record<string, (ctx: Parameters<typeof startWorkOrderExecution>[0], payload: Record<string, unknown>) => ExecutionResult | { ok: false; code: "INVALID_EVIDENCE_CLAIM" }> = {
-  "work_order.start": (ctx, payload) => startWorkOrderExecution(ctx, String(payload.workOrderId ?? "")),
-  "work_order.pause": (ctx, payload) => pauseWorkOrderExecution(ctx, String(payload.workOrderId ?? ""), String(payload.reason ?? "")),
-  "work_order.resume": (ctx, payload) => resumeWorkOrderExecution(ctx, String(payload.workOrderId ?? "")),
-  "work_order.complete": (ctx, payload) => {
+const workOrderCommands: Record<string, (ctx: Parameters<typeof startWorkOrderExecution>[0], payload: Record<string, unknown>, at: string | undefined) => ExecutionResult | { ok: false; code: "INVALID_EVIDENCE_CLAIM" }> = {
+  "work_order.start": (ctx, payload, at) => startWorkOrderExecution(ctx, String(payload.workOrderId ?? ""), at),
+  "work_order.pause": (ctx, payload, at) => pauseWorkOrderExecution(ctx, String(payload.workOrderId ?? ""), String(payload.reason ?? ""), at),
+  "work_order.resume": (ctx, payload, at) => resumeWorkOrderExecution(ctx, String(payload.workOrderId ?? ""), at),
+  "work_order.complete": (ctx, payload, at) => {
     const evidence = readEvidence(payload.evidence);
     if (!evidence) return { ok: false, code: "INVALID_EVIDENCE_CLAIM" };
-    return completeWorkOrderExecution(ctx, String(payload.workOrderId ?? ""), evidence);
+    return completeWorkOrderExecution(ctx, String(payload.workOrderId ?? ""), evidence, [], at);
   }
 };
 
@@ -96,7 +97,7 @@ export async function POST(request: Request) {
     if (!/^[a-zA-Z0-9_-]{1,128}$/.test(String(payload.workOrderId ?? ""))) {
       return Response.json({ code: "WORK_ORDER_NOT_FOUND" }, { status: 404 });
     }
-    const result = workOrderCommands[command.type]!(ctx, payload);
+    const result = workOrderCommands[command.type]!(ctx, payload, replayTime(command.createdAt));
     if (!result.ok) {
       const status = result.code === "WORK_ORDER_NOT_FOUND" ? 404
         : result.code === "INTERRUPTION_REASON_REQUIRED" || result.code === "INVALID_EVIDENCE_CLAIM" ? 400 : 409;

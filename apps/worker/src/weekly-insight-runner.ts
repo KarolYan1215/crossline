@@ -5,7 +5,7 @@ import {
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import type { CrosslineStore } from "@crossline/db";
 
-const OWNER_ID = "local-owner";
+import { ownerOf } from "./owner";
 export const WEEKLY_INSIGHT_SKILL = "crossline:crossline-weekly-insight";
 
 const INSTRUCTIONS = "Turn the supplied week of execution history into reviewable proposals. Never "
@@ -83,14 +83,14 @@ export function createWeeklyInsight(store: CrosslineStore, workspaceId: string, 
     if (!result.ok) return { state: "blocked", code: result.blocker.code, message: result.blocker.message };
     const runId = `${now.toISOString().slice(0, 10)}:${Date.now()}`;
     store.appendEvent({
-      ownerId: OWNER_ID, workspaceId, idempotencyKey: `weekly-insight:${runId}`,
+      ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `weekly-insight:${runId}`,
       type: "weekly_review.insight_run", entityId: runId, payload: result.output
     });
     // Each proposal also lands as its own event, so the Review page can list them the same way it
     // already lists flywheel findings and milestone-relation candidates — one row per reviewable claim.
     for (const proposal of result.output.insightProposals) {
       store.appendEvent({
-        ownerId: OWNER_ID, workspaceId, idempotencyKey: `weekly-insight:proposal:${proposal.id}`,
+        ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `weekly-insight:proposal:${proposal.id}`,
         type: "weekly_review.insight_proposal", entityId: proposal.id, payload: proposal
       });
     }

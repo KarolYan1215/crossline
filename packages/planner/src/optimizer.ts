@@ -175,7 +175,10 @@ async function optimize(input: PlanningInput, emergency = false): Promise<PlanRe
   const tasks = input.tasks.filter((task) => !frozenIds.has(task.id));
   const slots = freeSlots(input);
   const currentSlot = slots.findIndex((slot) => slot.day === input.currentDay);
-  if (!tasks.length || !slots.length) return greedyFallback(input, tasks, slots, emergency);
+  // Nothing to place is not a solver failure, and saying 「优化器未给出可用解」 over an empty week made a
+  // correct plan read as broken. Tasks with no free time at all is a third, different situation.
+  if (!tasks.length) return { ...greedyFallback(input, tasks, slots, emergency), solver: "empty" };
+  if (!slots.length) return { ...greedyFallback(input, tasks, slots, emergency), solver: "no_capacity" };
 
   const gap = input.mode === "asap" || emergency ? 0 : 10;
   const choices: Choice[] = [];

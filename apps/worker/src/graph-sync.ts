@@ -3,7 +3,7 @@ import { realityChanges, syncWindowDays, toRealityBlock, type RealityBlock, type
 import { reconcileExternalItems, type ExternalItem, type GraphDeltaPage } from "@crossline/connectors";
 import type { CrosslineStore } from "@crossline/db";
 
-const OWNER_ID = "local-owner";
+import { ownerOf } from "./owner";
 const PROVIDER = "graph_calendar";
 /** A delta stream can page; this caps one tick so a first sync cannot spin forever. */
 const MAX_PAGES = 20;
@@ -159,7 +159,7 @@ export function createGraphSync(store: CrosslineStore, workspaceId: string, opti
         ok: true, source, blocks, removed, skipped, resynced: page.resynced,
         authoritative: page.resynced || !storedCursor
       });
-      store.saveSyncCursor({ ownerId: OWNER_ID, workspaceId, provider: PROVIDER, collection: source.key, cursor: page.cursor });
+      store.saveSyncCursor({ ownerId: ownerOf(store, workspaceId), workspaceId, provider: PROVIDER, collection: source.key, cursor: page.cursor });
       store.setSetting(workspaceId, zoneKey, scope);
     }
 
@@ -247,7 +247,7 @@ export function createGraphSync(store: CrosslineStore, workspaceId: string, opti
       ? { id: current.id, version: current.version }
       : { id: `plan-${randomUUID()}`, version: current.version + 1 };
     store.savePlanVersion({
-      id: target.id, ownerId: OWNER_ID, workspaceId,
+      id: target.id, ownerId: ownerOf(store, workspaceId), workspaceId,
       version: target.version, status: "draft", payload: { blocks: merged }
     });
     for (const change of changes) {
@@ -257,7 +257,7 @@ export function createGraphSync(store: CrosslineStore, workspaceId: string, opti
         // upsert onto the earlier add row — the C lens then showed "新增" next to text describing a move.
         // A long enough shared prefix would have collapsed two different events onto one row entirely.
         id: `${target.id}:${createHash("sha1").update(change.blockId).digest("hex").slice(0, 16)}:${change.kind}`,
-        ownerId: OWNER_ID, workspaceId, planVersionId: target.id,
+        ownerId: ownerOf(store, workspaceId), workspaceId, planVersionId: target.id,
         // Against an approved plan every reality change is a conflict, because it contradicts something
         // already agreed. On a draft it keeps its own shape — nothing was agreed to contradict.
         kind: current.status === "draft" ? change.kind : "conflict",
@@ -267,7 +267,7 @@ export function createGraphSync(store: CrosslineStore, workspaceId: string, opti
       });
     }
     store.appendEvent({
-      ownerId: OWNER_ID, workspaceId,
+      ownerId: ownerOf(store, workspaceId), workspaceId,
       idempotencyKey: `graph-sync:${today}:${target.id}:${changes.length}`,
       type: "plan.reality_changed", entityId: target.id,
       payload: { changes, resynced, skipped, against: current.status, ...(failed.length ? { failed } : {}) }

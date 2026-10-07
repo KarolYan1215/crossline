@@ -18,7 +18,7 @@ import { extractText } from "./extract";
 export const MANUAL_DESIGNER_SKILL = "crossline:crossline-manualbook-designer";
 export const MATERIAL_RESEARCHER_SKILL = "crossline:crossline-material-researcher";
 export const MATERIAL_WRITER_SKILL = "crossline:crossline-material-writer";
-const FALLBACK_OWNER_ID = "local-owner";
+import { ownerOf } from "./owner";
 
 const DESIGN_INSTRUCTIONS = "Design how this one task gets done, as a short flow of steps a person can follow from left to "
   + "right. Return only the requested JSON. Every step is concrete (what to do, in what order, how you know it is done), "
@@ -114,7 +114,7 @@ export function createManualbookBuilder(store: CrosslineStore, workspaceId: stri
     const order = store.getWorkOrder(workspaceId, workOrderId);
     if (!order) return blocked("WORK_ORDER_NOT_FOUND", "找不到该作业。");
     if (order.state !== "preparing") return blocked("MATERIALS_NOT_PREPARING", "作业当前不在材料准备阶段。");
-    const ownerId = store.getWorkspaceOwnerId(workspaceId) ?? FALLBACK_OWNER_ID;
+    const ownerId = ownerOf(store, workspaceId);
     const today = (process.env.CROSSLINE_FIXED_NOW ? new Date(process.env.CROSSLINE_FIXED_NOW) : all.now()).toISOString().slice(0, 10);
     const context = buildManualContext(store, workspaceId, workOrderId, today)!;
     if (!context.contract.length) return blocked("MATERIALS_NOT_REQUIRED", "该作业没有材料或证据要求，不需要手册。");

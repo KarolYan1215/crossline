@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { CrosslineStore } from "@crossline/db";
+import { goalSettingKey } from "@crossline/core";
 import { createPlanExplainer, PLAN_EXPLAINER_SKILL, buildPlanExplainerContext } from "./plan-explainer-runner";
 import { fakeRuntime as sharedRuntime } from "./testing/fake-runtime";
 
@@ -41,4 +42,20 @@ test("nothing to explain is a blocker, not an empty success", async () => {
   const outcome = await explain("2026-09-27");
   expect(outcome).toMatchObject({ state: "blocked", code: "PLAN_EXPLAINER_NOTHING_TO_EXPLAIN" });
   empty.close();
+});
+
+// The explainer used to read `goal.<id>` while the web app writes `goal.settings:<id>`, so an important
+// goal reached the model as an ordinary one.
+test("a goal the person marked important reaches the explainer's context", async () => {
+  const store = new CrosslineStore(":memory:");
+  store.saveMilestone({ id: "m", ownerId: "o", workspaceId: "w", identityId: "research", projectId: "p",
+    title: "投稿", status: "approved", version: 1 });
+  store.saveWorkOrder({ id: "wo", ownerId: "o", workspaceId: "w", identityId: "research", projectId: "p", milestoneId: "m",
+    intent: "画图", state: "approved", riskTier: "routine",
+    estimate: { p25Minutes: 30, p50Minutes: 60, p85Minutes: 90, source: "llm_prior", observationCount: 0, confidence: "low" },
+    payload: { humanCore: [] } });
+  store.setSetting("w", goalSettingKey("m"), JSON.stringify({ importance: "important", confirmedDeadline: "2026-10-31" }));
+  const context = buildPlanExplainerContext(store, "w", "2026-10-06");
+  expect(context.activeWorkOrders[0]).toMatchObject({ important: true, confirmedDeadline: "2026-10-31" });
+  store.close();
 });

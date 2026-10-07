@@ -1,13 +1,8 @@
 import type { TaskDetail, MilestoneDetail } from "../lib/task-detail";
 import { ExecutionActions } from "./execution-actions";
 import { estimateBasis } from "../lib/estimate-label";
+import { riskLabel, stateLabel, stateLabelFor } from "../lib/labels";
 
-const stateLabel: Record<string, string> = {
-  captured: "已收集", analyzing: "分析中", awaiting_plan_approval: "等待计划批准",
-  approved: "已批准", preparing: "材料准备中", ready_for_human: "可开始",
-  active: "执行中", evidence_review: "证据审查中", accepted: "已验收", blocked: "已阻塞", archived: "已归档"
-};
-const riskLabel: Record<string, string> = { routine: "常规", milestone: "里程碑", high_risk: "高风险" };
 const confidenceLabel: Record<string, string> = { low: "低置信", medium: "中置信", high: "高置信" };
 const metLabel: Record<string, string> = { met: "达成", partial: "部分达成", unmet: "未达成", unverifiable: "无法核实" };
 const gateVerdictLabel: Record<string, string> = { pass: "通过", insufficient: "证据不足", refuted: "被证据否定" };
@@ -49,7 +44,7 @@ export function TaskDetailView({ detail }: { detail: TaskDetail }) {
   return <div className="task-detail-view">
     <header className="task-detail-header">
       <span className="mono-label">{detail.identityLabel.toUpperCase()} · {detail.id.slice(-8)}</span>
-      <b>{stateLabel[detail.state] ?? detail.state}</b>
+      <b>{stateLabelFor(detail.state, detail.paused)}</b>
     </header>
     <h2>{detail.intent}</h2>
     {detail.milestone && <p className="card-milestone">→ {detail.milestone.title}</p>}
@@ -68,6 +63,23 @@ export function TaskDetailView({ detail }: { detail: TaskDetail }) {
         where "下一行动" now actually sends you to act, not only to read. */}
     <ExecutionActions workOrderId={detail.id} intent={detail.intent} state={detail.state} paused={detail.paused}
       ownerId={detail.ownerId} workspaceId={detail.workspaceId} evidenceChecklist={detail.evidenceChecklist} />
+
+    {(detail.humanCore.length > 0 || detail.estimateBreakdown.length > 0) && <section>
+      <h3>你要做的</h3>
+      <ul className="task-detail-contract">{detail.humanCore.map((part) => <li key={part.id}>
+        <span>{part.intent}</span>
+        {part.rationale && <small>{part.quote ? `依据「${part.quote}」：` : ""}{part.rationale}</small>}
+      </li>)}</ul>
+      {detail.estimateBreakdown.length > 0 && <p><small>分步：{detail.estimateBreakdown.map((step) => `${step.step} ${step.minutes} 分钟`).join("；")}</small></p>}
+    </section>}
+
+    {detail.automationParts.length > 0 && <section>
+      <h3>AI 准备的</h3>
+      <ul className="task-detail-contract">{detail.automationParts.map((part) => <li key={part.id}>
+        <span>{part.intent}</span>
+        {part.rationale && <small>{part.rationale}</small>}
+      </li>)}</ul>
+    </section>}
 
     <section className="task-detail-background">
       <h3>背景资料</h3>
