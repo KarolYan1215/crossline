@@ -698,3 +698,4 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .line-drafts{display:grid;gap:8px;margin:8px 0 14px}
 .line-drafts ul{margin:0}
 .line-drafts-bar{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 12px}
+.assistant-card{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;padding:8px;border:1px dashed var(--graphite);margin:6px 0}

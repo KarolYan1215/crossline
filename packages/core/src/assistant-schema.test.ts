@@ -7,7 +7,8 @@ const context: AssistantTurnContext = {
   message: "帮我写个统计单词频率的小脚本",
   attachments: [],
   workOrderId: "wo-1",
-  identities: ["research", "startup"]
+  identities: ["research", "startup"],
+  snapshot: "现在：2026-10-06"
 };
 
 const output = (overrides: Partial<{
@@ -96,4 +97,14 @@ test("a template proposal whose criteria fail the usual success-criteria rules i
   expect(() => validateAssistantTurnProposal(output({
     templateProposal: { identityId: "research", kind: "deliverable", titleHint: "新模板", successCriteriaDefaults: [] }
   }), context)).toThrow("MILESTONE_NEEDS_CRITERIA");
+});
+
+test("a capture card is passed through; a malformed one is refused so the turn is repaired", () => {
+  const base = { reply: "可以先记下来", quickReplies: [], materialDraft: null, templateProposal: null, blockers: [] };
+  expect(validateAssistantTurnProposal({ ...base, proposals: [{ kind: "capture", title: "10/8 拿到数据后跑仿真", context: "" }] }, context).proposals)
+    .toEqual([{ kind: "capture", title: "10/8 拿到数据后跑仿真", context: "" }]);
+  expect(() => validateAssistantTurnProposal({ ...base, proposals: [{ kind: "capture", title: "", context: "" }] }, context))
+    .toThrow("ASSISTANT_PROPOSAL_INVALID");
+  // An answer recorded before cards existed still reads.
+  expect(validateAssistantTurnProposal(base, context).proposals).toEqual([]);
 });

@@ -9,6 +9,7 @@ vi.mock("../../../../lib/codex-runtime", () => ({
     constructor(readonly status: number, readonly blocker: { code: string; message: string }) { super(blocker.message); }
   }
 }));
+vi.mock("../../../../lib/person-snapshot", () => ({ personSnapshot: async () => "已批准：西湖合作论文 · 最晚 2026-10-31" }));
 import * as route from "./route";
 
 afterEach(() => { vi.clearAllMocks(); });
@@ -39,7 +40,8 @@ test("forwards a valid turn to the worker supervisor and returns its reply verba
   expect(response.status).toBe(200);
   expect(await response.json()).toEqual({ state: "replied", reply: "你好", quickReplies: ["继续"] });
   expect(requestCodexSupervisor).toHaveBeenCalledWith(TEST_CTX, "/v1/assistant/turn", expect.objectContaining({
-    method: "POST", body: JSON.stringify({ threadId: "t1", message: "帮我写个脚本", history: [], attachments: [], workOrderId: null })
+    method: "POST", body: JSON.stringify({ threadId: "t1", message: "帮我写个脚本", history: [], attachments: [], workOrderId: null,
+      snapshot: "已批准：西湖合作论文 · 最晚 2026-10-31" })
   }));
 });
 

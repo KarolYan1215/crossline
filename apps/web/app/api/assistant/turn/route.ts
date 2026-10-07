@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requestCodexSupervisor, CodexSupervisorRequestError } from "../../../../lib/codex-runtime";
 import { resolveAccessContext } from "../../../../lib/access-guard";
 import { isCrossSiteWrite } from "../../../../lib/same-origin";
+import { personSnapshot } from "../../../../lib/person-snapshot";
 
 /**
  * The one route for every turn of the site-wide floating assistant, first or follow-up — see
@@ -32,11 +33,13 @@ export async function POST(request: Request) {
     .filter((item): item is { id: unknown; fileName: unknown; mediaType: unknown } => typeof item === "object" && item !== null)
     .map((item) => ({ id: String(item.id ?? ""), fileName: String(item.fileName ?? "").slice(0, 200), mediaType: String(item.mediaType ?? "") })) : [];
   const workOrderId = typeof input.workOrderId === "string" ? input.workOrderId : null;
+  // Built here, not in the worker: the week's plan and forecast are computed by the web app.
+  const snapshot = await personSnapshot(access.ctx).catch(() => "");
   try {
     const result = await requestCodexSupervisor<unknown>(access.ctx, "/v1/assistant/turn", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ threadId, message, history, attachments, workOrderId }),
+      body: JSON.stringify({ threadId, message, history, attachments, workOrderId, snapshot }),
       signal: AbortSignal.timeout(3 * 60 * 60_000)
     });
     return NextResponse.json(result);

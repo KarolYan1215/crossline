@@ -4,13 +4,18 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useAttachmentDrop } from "./attachment-drop";
 
 const ACCEPTED_ATTACHMENT_TYPES = "image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain";
-const OPEN_STORAGE_KEY = "crossline-assistant-open";
+// The conversation survives moving between pages (they are full page loads); the panel being open does not —
+// it used to reopen itself on every page and cover the content underneath.
+const SESSION_KEY = "crossline-assistant-session";
 
 type Message = { from: "user" | "assistant"; text: string };
 type AttachmentMeta = { id: string; fileName: string; mediaType: string };
 
+type CaptureCard = { kind: "capture"; title: string; context: string };
+type TemplateCard = { identityId: string; kind: string; titleHint: string; successCriteriaDefaults: unknown[] };
 type TurnResponse =
-  | { state: "replied"; reply: string; quickReplies: string[]; savedMaterial?: { uri: string; fileName: string } }
+  | { state: "replied"; reply: string; quickReplies: string[]; savedMaterial?: { uri: string; fileName: string };
+      proposals?: CaptureCard[]; templateProposal?: TemplateCard }
   | { state: "blocked"; code: string; message: string }
   | { ok: false; blocker: { code: string; message: string } };
 
@@ -29,8 +34,10 @@ function newThreadId(): string {
  */
 export function AssistantWidget() {
   const [open, setOpen] = useState(false);
-  const [threadId] = useState(newThreadId);
+  const [threadId, setThreadId] = useState(newThreadId);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [cards, setCards] = useState<Array<CaptureCard & { id: string; state: "new" | "saving" | "saved" | "failed" }>>([]);
+  const [template, setTemplate] = useState<(TemplateCard & { state: "new" | "saving" | "saved" | "failed" }) | null>(null);
   const [quickReplies, setQuickReplies] = useState<string[]>([]);
   const [pendingAttachments, setPendingAttachments] = useState<AttachmentMeta[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -41,11 +48,15 @@ export function AssistantWidget() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    try { setOpen(localStorage.getItem(OPEN_STORAGE_KEY) === "1"); } catch { /* private browsing, etc. */ }
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(SESSION_KEY) ?? "null") as { threadId?: string; messages?: Message[] } | null;
+      if (saved?.threadId && /^[a-zA-Z0-9_-]{1,128}$/.test(saved.threadId)) setThreadId(saved.threadId);
+      if (Array.isArray(saved?.messages)) setMessages(saved!.messages.slice(-40));
+    } catch { /* private browsing, etc. */ }
   }, []);
   useEffect(() => {
-    try { localStorage.setItem(OPEN_STORAGE_KEY, open ? "1" : "0"); } catch { /* best-effort only */ }
-  }, [open]);
+    try { sessionStorage.setItem(SESSION_KEY, JSON.stringify({ threadId, messages: messages.slice(-40) })); } catch { /* best-effort only */ }
+  }, [threadId, messages]);
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ block: "nearest" }); }, [messages, status]);
 
   const uploadAttachments = async (files: File[]) => {
@@ -88,10 +99,31 @@ export function AssistantWidget() {
       }
       setMessages((current) => [...current, { from: "assistant", text: body.reply }]);
       setQuickReplies(body.quickReplies ?? []);
+      setCards((body.proposals ?? []).map((card) => ({ ...card, id: crypto.randomUUID(), state: "new" as const })));
+      setTemplate(body.templateProposal ? { ...body.templateProposal, state: "new" } : null);
       if (body.savedMaterial) setStatus(`已保存为任务材料：${body.savedMaterial.fileName}`);
     } catch {
       setMessages((current) => [...current, { from: "assistant", text: "（网络不可用，消息未发送）" }]);
     } finally { setSending(false); }
+  };
+
+  // A card writes nothing until the person clicks it — the assistant only proposes.
+  const captureCard = async (id: string) => {
+    const card = cards.find((item) => item.id === id);
+    if (!card || card.state === "saving" || card.state === "saved") return;
+    setCards((current) => current.map((item) => item.id === id ? { ...item, state: "saving" } : item));
+    const response = await fetch("/api/assistant/capture", { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ cardId: id, title: card.title, context: card.context }) }).catch(() => null);
+    setCards((current) => current.map((item) => item.id === id ? { ...item, state: response?.ok ? "saved" : "failed" } : item));
+  };
+  const addTemplate = async () => {
+    if (!template || template.state === "saving" || template.state === "saved") return;
+    setTemplate({ ...template, state: "saving" });
+    const { state: _state, ...input } = template;
+    void _state;
+    const response = await fetch("/api/milestones/templates", { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...input, source: "assistant" }) }).catch(() => null);
+    setTemplate({ ...template, state: response?.ok ? "saved" : "failed" });
   };
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
@@ -116,8 +148,18 @@ export function AssistantWidget() {
       <button type="button" className="text-button" onClick={() => setOpen(false)} aria-label="收起问答">收起</button>
     </header>
     <div className="assistant-messages">
-      {!messages.length && <p className="muted assistant-empty">问点什么，或贴一段代码需求——不会读写这个仓库本身，只回答问题、生成的脚本会存成任务材料。</p>}
+      {!messages.length && <p className="muted assistant-empty">问你的这周、截止日、下一步做什么都行——它看得到你的里程碑、计划和待决事项，但不会替你改任何东西；需要动手时会给你一张卡片，你点了才算。</p>}
       {messages.map((item, index) => <p key={index} className={`assistant-message assistant-message-${item.from}`}>{item.text}</p>)}
+      {cards.map((card) => <div key={card.id} className="assistant-card" role="group" aria-label="建议收集">
+        <span>{card.title}</span>
+        <button type="button" className="secondary-button" disabled={card.state === "saving" || card.state === "saved"} onClick={() => void captureCard(card.id)}>
+          {card.state === "saved" ? "已收集" : card.state === "saving" ? "收集中…" : card.state === "failed" ? "没收集上，重试" : "收集"}</button>
+      </div>)}
+      {template && <div className="assistant-card" role="group" aria-label="建议的里程碑模板">
+        <span>里程碑模板：{template.titleHint}</span>
+        <button type="button" className="secondary-button" disabled={template.state === "saving" || template.state === "saved"} onClick={() => void addTemplate()}>
+          {template.state === "saved" ? "已添加" : template.state === "saving" ? "添加中…" : template.state === "failed" ? "没添加上，重试" : "添加这个模板"}</button>
+      </div>}
       <div ref={messagesEndRef} />
     </div>
     {quickReplies.length > 0 && <div className="assistant-quick-replies">

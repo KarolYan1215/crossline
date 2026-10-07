@@ -88,22 +88,32 @@ test("an empty message is refused before any Codex call runs", async () => {
   expect(turns()).toBe(0);
 });
 
-test("a templateProposal is saved immediately as an assistant-sourced template, with no draft step", async () => {
-  const withTemplate = { reply: "好的，已经加了一个新模板。", quickReplies: [], materialDraft: null,
+// The person chose 「只读快照 + 提议卡」: a template the assistant drafts is a card they confirm, never a row it writes.
+test("a templateProposal comes back as a card to confirm, and nothing is saved by the assistant", async () => {
+  const withTemplate = { reply: "这是一个模板草稿，确认后添加。", quickReplies: [], materialDraft: null,
     templateProposal: { identityId: "research", kind: "deliverable", titleHint: "新模板",
       successCriteriaDefaults: [{ id: "c1", statement: "产出物存在", required: true, evidenceOf: "output",
         measure: { kind: "artifact", mustExist: "x" } }] },
-    blockers: [] };
+    proposals: [], blockers: [] };
   const { rpc } = fakeRuntime([JSON.stringify(withTemplate)]);
   const turn = createAssistantTurn(store, WORKSPACE, projectRoot, () => rpc);
   const outcome = await turn("t1", "帮我加一个新的里程碑模板", [], [], null);
 
-  expect(outcome).toMatchObject({ state: "replied" });
-  const savedTemplate = (outcome as { savedTemplate?: { id: string; titleHint: string } }).savedTemplate;
-  expect(savedTemplate?.titleHint).toBe("新模板");
-  const rows = store.listMilestoneTemplates(WORKSPACE, "research");
-  expect(rows).toHaveLength(1);
-  expect(rows[0]).toMatchObject({ id: savedTemplate!.id, titleHint: "新模板", source: "assistant" });
+  expect(outcome).toMatchObject({ state: "replied", templateProposal: { titleHint: "新模板" } });
+  expect(store.listMilestoneTemplates(WORKSPACE, "research")).toHaveLength(0);
+});
+
+// Asked 「我这周最该做什么？」 the widget used to answer generically: it was never told anything about the person.
+test("every turn — first and follow-up — carries the person's snapshot, and capture cards come back", async () => {
+  const withCard = { ...plainReply, reply: "先做 10/12 到期的参数映射。", proposals: [{ kind: "capture", title: "10/8 拿到数据后跑仿真", context: "" }] };
+  const { rpc, prompts } = fakeRuntime([JSON.stringify(withCard), JSON.stringify({ ...plainReply, proposals: [] })]);
+  const turn = createAssistantTurn(store, WORKSPACE, projectRoot, () => rpc);
+  const first = await turn("t1", "我这周最该做什么？", [], [], null, undefined, "已批准：实测 MoS₂ 参数已可直接驱动 NeuroSim · 最晚 2026-10-12");
+  expect(first).toMatchObject({ state: "replied", proposals: [{ kind: "capture", title: "10/8 拿到数据后跑仿真" }] });
+  await turn("t1", "那周末呢？", [{ from: "user", text: "我这周最该做什么？" }], [], null, undefined, "已批准：西湖合作论文已在截止日前投出 · 最晚 2026-10-31");
+  const sent = prompts().join(" ");
+  expect(sent).toContain("最晚 2026-10-12");
+  expect(sent).toContain("最晚 2026-10-31");
 });
 
 test("a templateProposal naming an identity the workspace does not have is blocked, not silently dropped", async () => {
@@ -123,4 +133,18 @@ test("no Codex client available is a typed blocker, not a throw", async () => {
   const turn = createAssistantTurn(store, WORKSPACE, projectRoot, () => undefined);
   const outcome = await turn("t1", "你好", [], [], null);
   expect(outcome).toMatchObject({ state: "blocked", code: "CODEX_SUPERVISOR_UNAVAILABLE" });
+});
+
+// The runtime forgets threads when it restarts. A stored thread id then answers 「thread not found」; the
+// widget used to stay broken on it. Now the conversation is reopened from its history.
+test("a lost thread is reopened from the conversation history instead of failing the turn", async () => {
+  const lost: string[] = [];
+  const runtime = sharedRuntime([JSON.stringify(plainReply), JSON.stringify({ ...plainReply, reply: "重新接上了" })], ASSISTANT_SKILL, { lostThreads: lost });
+  const turn = createAssistantTurn(store, WORKSPACE, projectRoot, () => runtime.rpc);
+  await turn("t1", "第一条", [], [], null);
+  const first = store.getAssistantThread(WORKSPACE, "t1")!.codexThreadId!;
+  lost.push(first);
+  const outcome = await turn("t1", "第二条", [{ from: "user", text: "第一条" }], [], null, undefined, "快照");
+  expect(outcome).toMatchObject({ state: "replied", reply: "重新接上了" });
+  expect(store.getAssistantThread(WORKSPACE, "t1")?.codexThreadId).not.toBe(first);
 });

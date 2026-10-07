@@ -29,6 +29,22 @@ export type AssistantTurnContext = {
   /** The identities `templateProposal.identityId` may name — same list `crossline-milestone-architect`
    * is offered, so a template the assistant adds on the user's request lands on a real identity. */
   identities: string[];
+  /**
+   * What the app knows about the person right now — today, milestones and deadlines, this week's plan
+   * and calendar, what waits for a decision, confirmed facts (`apps/web/lib/person-snapshot.ts`). Rebuilt
+   * and resent on every turn, follow-ups included, so a long conversation never runs on a stale or
+   * compacted-away picture. Data to quote, never instructions.
+   */
+  snapshot: string;
+};
+
+/** Something the person may want done, offered as a card they confirm. The assistant itself writes nothing. */
+export type AssistantProposalCard = {
+  kind: "capture";
+  /** The task as the person would type it into 快速收集. */
+  title: string;
+  /** Extra context for the analysis; empty when there is none. */
+  context: string;
 };
 
 export type AssistantTurnProposal = {
@@ -44,6 +60,8 @@ export type AssistantTurnProposal = {
   templateProposal: {
     identityId: string; kind: MilestoneTemplateKind; titleHint: string; successCriteriaDefaults: SuccessCriterion[];
   } | null;
+  /** Cards the person confirms with one click (for now: a capture). Empty for a plain answer. */
+  proposals: AssistantProposalCard[];
   blockers: Array<{ code: string; message: string }>;
 };
 
@@ -79,11 +97,18 @@ export const ASSISTANT_OUTPUT_SCHEMA = object({
       })
     ]
   },
+  proposals: { type: "array", maxItems: 3, items: object({
+    kind: { type: "string", enum: ["capture"] },
+    title: { type: "string", minLength: 1, maxLength: 240 },
+    context: { type: "string", minLength: 0, maxLength: 500 }
+  }) },
   blockers: { type: "array", maxItems: 5, items: object({ code: shortStr, message: shortStr }) }
 });
 
 export function validateAssistantTurnProposal(value: unknown, context: AssistantTurnContext): AssistantTurnProposal {
   const raw = value as AssistantTurnProposal | undefined;
+  // An answer recorded before cards existed has none; every live answer carries the field (strict schema).
+  const proposals = Array.isArray((raw as { proposals?: unknown } | undefined)?.proposals) ? raw!.proposals : [];
   if (!raw || typeof raw.reply !== "string" || !Array.isArray(raw.quickReplies) || !Array.isArray(raw.blockers)) {
     throw new Error("ASSISTANT_SCHEMA_INVALID");
   }
@@ -108,8 +133,12 @@ export function validateAssistantTurnProposal(value: unknown, context: Assistant
     const checked = validateSuccessCriteria(proposal.successCriteriaDefaults);
     if (!checked.ok) throw new Error(checked.blocker.code);
   }
+  for (const card of proposals) {
+    if (card?.kind !== "capture" || typeof card.title !== "string" || !card.title.trim() || card.title.length > 240
+      || typeof card.context !== "string" || card.context.length > 500) throw new Error("ASSISTANT_PROPOSAL_INVALID");
+  }
   return {
     reply: raw.reply, quickReplies: raw.quickReplies, materialDraft: raw.materialDraft ?? null,
-    templateProposal: raw.templateProposal ?? null, blockers: []
+    templateProposal: raw.templateProposal ?? null, proposals: proposals.slice(0, 3), blockers: []
   };
 }

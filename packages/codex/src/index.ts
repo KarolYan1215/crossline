@@ -372,7 +372,7 @@ export async function startCodexSupervisor(options: {
   assistantTurn?: (client: CodexRpcBoundary, threadId: string, message: string,
     history: Array<{ from: "user" | "assistant"; text: string }>,
     attachments: Array<{ id: string; fileName: string; mediaType: string }>, workOrderId: string | null,
-    signal: AbortSignal, workspaceId: string) => Promise<unknown>;
+    signal: AbortSignal, workspaceId: string, snapshot: string) => Promise<unknown>;
   backplanGoal?: (client: CodexRpcBoundary, milestoneId: string, signal: AbortSignal, workspaceId: string) => Promise<unknown>;
   // `workspaceId` is the real caller's, taken from its own verified capability token — never the
   // worker's own idea of "the" workspace, which is what let every one of these silently operate on a
@@ -853,8 +853,9 @@ export async function startCodexSupervisor(options: {
           .filter((item: unknown): item is { id: unknown; fileName: unknown; mediaType: unknown } => typeof item === "object" && item !== null)
           .map((item: { id: unknown; fileName: unknown; mediaType: unknown }) => ({ id: String(item.id ?? ""), fileName: String(item.fileName ?? ""), mediaType: String(item.mediaType ?? "") })) : [];
         const workOrderId = typeof body?.workOrderId === "string" ? body.workOrderId : null;
+        const snapshot = typeof body?.snapshot === "string" ? body.snapshot.slice(0, 12_000) : "";
         const controller = new AbortController();
-        sendJson(response, 200, await options.assistantTurn(sidecar.client, threadId, message, history, attachments, workOrderId, controller.signal, callerWorkspaceId));
+        sendJson(response, 200, await options.assistantTurn(sidecar.client, threadId, message, history, attachments, workOrderId, controller.signal, callerWorkspaceId, snapshot));
         return;
       }
       if (request.method === "POST" && pathname === "/v1/goals/backplan" && options.backplanGoal) {

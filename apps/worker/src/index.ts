@@ -565,8 +565,8 @@ if (!capabilitySecret) {
     },
     extractBackgroundFacts: (_client, captureTitle, captureContext, signal, workspaceId) =>
       createBackgroundFactsExtractor(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client)(captureTitle, captureContext, signal),
-    assistantTurn: (_client, threadId, message, history, attachments, workOrderId, signal, workspaceId) =>
-      createAssistantTurn(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client, materialsDir)(threadId, message, history, attachments, workOrderId, signal),
+    assistantTurn: (_client, threadId, message, history, attachments, workOrderId, signal, workspaceId, snapshot) =>
+      createAssistantTurn(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client, materialsDir)(threadId, message, history, attachments, workOrderId, signal, snapshot),
     backplanGoal: (_client, milestoneId, signal, workspaceId) =>
       createGoalBackplanner(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client)(milestoneId, signal),
     // The same preparer/gate the tick loop uses, exposed so a person's retry gets an answer now rather
