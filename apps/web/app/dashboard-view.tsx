@@ -145,7 +145,9 @@ export function DashboardView({ data }: { data: DashboardData }) {
         </dl>
         <div className="day-energy"><span>精力自评</span><EnergyProbe /></div>
       </section>
-      {data.capacity.blockers.map((blocker) => <p key={blocker.code} className="capacity-blocker">{blocker.message}</p>)}
+      {/* 「需要至少 14 天本机活动观测…」 is a note about the system's own calibration, not something to act on today. */}
+      {data.capacity.blockers.filter((blocker) => blocker.code !== "BASELINE_INSUFFICIENT")
+        .map((blocker) => <p key={blocker.code} className="capacity-blocker">{blocker.message}</p>)}
       {hasSeed && <p role="note" className="seed-notice">下面有系统预置的示例作业（用来演示流程），不需要的可以直接丢弃。</p>}
       {data.capacity.level === "low" && <div className="rest-prompt">
         <p>当前精力低：建议留 10 分钟休息。休息后重新自评，系统会重排今天的建议；高负荷任务暂不视为已准备好。</p>
@@ -200,10 +202,8 @@ export function DashboardView({ data }: { data: DashboardData }) {
 
       <section className="care-band" aria-label="健康容量策略">
         {data.care.length > 0 && <dl>{data.care.map((item) => <div key={item.title}><dt>{item.title}</dt><dd>最低 {item.minimumMinutes} 分钟</dd></div>)}</dl>}
-        <LocalActivityConsent asked={data.localActivityAsked} upgrade={Boolean(data.activityDetailUpgrade)} />
-        {data.lastNight.state !== "none" && <p className="last-night">
-          {data.lastNight.state === "ran" ? `昨夜扩展 · 产出 ${data.lastNight.proposals} 条候选` : `昨夜未运行 · ${data.lastNight.reason}`}
-        </p>}
+        {/* Asked once here; the later upgrade offer and the nightly run's status live in 设置, not on the page you plan your day on. */}
+        <LocalActivityConsent asked={data.localActivityAsked} upgrade={false} />
       </section>
     </AppShell>
   </>;

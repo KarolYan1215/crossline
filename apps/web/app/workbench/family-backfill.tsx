@@ -20,7 +20,7 @@ export function FamilyBackfill({ workOrderId }: { workOrderId: string }) {
     setBusy(false);
   };
   return <p className="family-backfill">
-    <span>未标注类型 · 校准对它永远不生效，除非补上</span>
+    <span>补一个类型，这类任务的估时才能按你的实际用时越来越准</span>
     <select disabled={busy} defaultValue="" onChange={(event) => void submit(event.target.value)}>
       <option value="" disabled>补上类型</option>
       <option value="preparation">准备</option>

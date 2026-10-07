@@ -13,7 +13,9 @@ export function GoalControls({ id, settings, fallbackImportance, dateCandidates 
   const [message, setMessage] = useState("");
   const [backplanMessage, setBackplanMessage] = useState("");
   const [candidateDates, setCandidateDates] = useState(dateCandidates);
-  return <><form className="goal-controls" onSubmit={async (event) => {
+  // Folded: the same five controls under every one of ~20 milestone cards read as a wall of forms. The deadline
+  // and importance matter, but they are an adjustment, not something to look at every time.
+  return <details className="fold goal-controls-fold"><summary>调整重要性与截止日 · 反推步骤</summary><form className="goal-controls" onSubmit={async (event) => {
     event.preventDefault();
     setMessage("保存中…");
     const response = await fetch(`/api/goals/${encodeURIComponent(id)}`, {
@@ -48,5 +50,5 @@ export function GoalControls({ id, settings, fallbackImportance, dateCandidates 
       } else setBackplanMessage(result?.message ?? result?.blocker?.message ?? "反推未完成。");
     }}>从此目标反推步骤</button>
     {backplanMessage && <span role="status">{backplanMessage}</span>}
-  </div></>;
+  </div></details>;
 }

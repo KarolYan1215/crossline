@@ -146,36 +146,25 @@ describe("capacity honesty", () => {
     expect(html).not.toContain("次自评");
   });
 
-  test("an uncalibrated reading shows why, not a level", () => {
+  // The calibration note is about the system, not something to act on today: it is not printed on Today any more.
+  test("an uncalibrated reading says so without a note about the system's own baseline", () => {
     const html = withCapacity({ level: "uncalibrated", observationCount: 3, basis: [],
       blockers: [{ code: "BASELINE_INSUFFICIENT", message: "需要至少 14 天本机活动观测" }] });
     expect(html).toContain("精力未标定");
-    expect(html).toContain("需要至少 14 天本机活动观测");
+    expect(html).not.toContain("需要至少 14 天本机活动观测");
   });
 });
 
-describe("last night's expansion", () => {
-  const withLastNight = (lastNight: DashboardData["lastNight"]) => renderToStaticMarkup(<DashboardView data={{
+// The nightly expansion's status moved to 设置 (it is about the system, not about the day).
+test("Today no longer prints the nightly expansion's status", () => {
+  const html = renderToStaticMarkup(<DashboardView data={{
     principalId: "test-owner", workspaceId: "test-workspace", nowLabel: "周一 · 09:00", nowIso: "2026-09-14T14:00:00.000Z", timeZone: "America/Chicago", clockPinned: true, dateLabel: "14", monthLabel: "SEP · 2026",
     capacity: { level: "uncalibrated", observationCount: 0, basis: [], blockers: [] },
-    progress: { streakDays: 0, weekCount: 0 }, care: [], identities: [], upcoming: [], localActivityAsked: true, lastNight, milestonePulse: [], todayCapacity: { availableMinutes: 0, committedMinutes: 0 }, flywheel: [], flywheelStrip: { nodes: [], edges: [] },
+    progress: { streakDays: 0, weekCount: 0 }, care: [], identities: [], upcoming: [], localActivityAsked: true,
+    lastNight: { state: "skipped", reason: "读不到成本信号" }, milestonePulse: [], todayCapacity: { availableMinutes: 0, committedMinutes: 0 }, flywheel: [], flywheelStrip: { nodes: [], edges: [] },
     ...noPreviews
   }} />);
-
-  test("a night that did not run says so with its reason, instead of showing older output as new", () => {
-    const html = withLastNight({ state: "skipped", reason: "读不到成本信号，今晚不运行：supervisor down" });
-    expect(html).toContain("昨夜未运行");
-    expect(html).toContain("supervisor down");
-  });
-
-  test("a night that ran reports how many candidates it produced", () => {
-    expect(withLastNight({ state: "ran", proposals: 4 })).toContain("昨夜扩展 · 产出 4 条候选");
-  });
-
-  test("no record at all shows nothing rather than an invented status", () => {
-    const html = withLastNight({ state: "none" });
-    expect(html).not.toContain("昨夜");
-  });
+  expect(html).not.toContain("昨夜");
 });
 
 describe("dashboard view with nothing to recommend yet", () => {

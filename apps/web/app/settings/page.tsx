@@ -4,7 +4,7 @@ import { LocalActivityToggle } from "./local-activity-toggle";
 import { UsageCard } from "./usage-card";
 import { ConnectionsSection } from "../connectors/connections";
 import {
-  ACTIVITY_BLACKLIST, ACTIVITY_DETAIL_CONSENT, ACTIVITY_PAUSED_UNTIL, getStore, LOCAL_ACTIVITY_CONSENT, readAvailability, readGoalSettings, readSchedulePreferences
+  ACTIVITY_BLACKLIST, ACTIVITY_DETAIL_CONSENT, ACTIVITY_PAUSED_UNTIL, getStore, lastNight, LOCAL_ACTIVITY_CONSENT, readAvailability, readGoalSettings, readSchedulePreferences
 } from "../../lib/crossline";
 import { requireSessionContext } from "../../lib/access-guard";
 import { suggestedAvailabilityFor } from "../../lib/timeline";
@@ -39,6 +39,7 @@ export default async function SettingsPage() {
   try { const parsed = JSON.parse(store.getSetting(ctx.workspaceId, ACTIVITY_BLACKLIST) ?? "[]") as unknown; if (Array.isArray(parsed)) blacklist = parsed.filter((word): word is string => typeof word === "string"); } catch { /* unreadable counts as empty */ }
   const since = new Date(Date.now() - USAGE_DAYS * 86_400_000).toISOString();
   const summary = store.summarizeModelUsage(ctx.workspaceId, since);
+  const night = lastNight(ctx.workspaceId, new Date());
 
   return <SubpageShell active="设置" title="设置">
     <details className="fold" open><summary>作息与可用时间</summary>
@@ -52,6 +53,10 @@ export default async function SettingsPage() {
     </details>
     <details className="fold"><summary>模型用量（近 {USAGE_DAYS} 天）</summary>
       <UsageCard summary={summary} days={USAGE_DAYS} />
+      {/* The nightly expansion's status, moved here from Today: it is about the system, not about the day. */}
+      {night.state !== "none" && <p className="last-night">
+        {night.state === "ran" ? `昨夜扩展 · 产出 ${night.proposals} 条候选` : `昨夜扩展没有运行 · ${night.reason}`}
+      </p>}
     </details>
     <p className="muted"><a href="/onboarding">重新做「先了解你」→</a></p>
   </SubpageShell>;

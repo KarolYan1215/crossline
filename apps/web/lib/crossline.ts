@@ -1126,7 +1126,7 @@ export const ACTIVITY_BLACKLIST = "activity.blacklist";
  * alternative is showing an older expansion as if it were this morning's, which is the same class of
  * lie as a fabricated metric.
  */
-function lastNight(workspaceId: string, now: Date): DashboardData["lastNight"] {
+export function lastNight(workspaceId: string, now: Date): DashboardData["lastNight"] {
   const since = new Date(now.getTime() - 36 * 60 * 60_000).toISOString();
   const event = [...getStore().listEvents(workspaceId)]
     .reverse()

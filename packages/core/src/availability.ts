@@ -136,3 +136,21 @@ export function suggestAvailability(input: {
   }
   return [...windows.values()].sort((a, b) => a.start.localeCompare(b.start));
 }
+
+/** Hours a week the pattern offers (each window counted once per listed weekday). */
+export function weeklyAvailableHours(windows: AvailabilityWindow[]): number {
+  const minutes = (clock: string) => { const [h, m] = clock.split(":"); return Number(h) * 60 + Number(m); };
+  return Math.round(windows.reduce((sum, window) => sum + window.days.length * Math.max(0, minutes(window.end) - minutes(window.start)), 0) / 60);
+}
+
+/**
+ * The largest weekly total the person confirmed for all their work ("所有事情合计每周约 72 小时"), read from
+ * their own `weekly_hours` facts — or undefined when they gave none. Used to say plainly when the configured
+ * pattern holds half the time they said they have, instead of only "this is a default".
+ */
+export function statedWeeklyHours(facts: Array<{ slot: string; status: string; value: string }>): number | undefined {
+  const totals = facts.filter((fact) => fact.slot === "weekly_hours" && fact.status === "confirmed" && /合计|所有|总共|一共/.test(fact.value))
+    .flatMap((fact) => [...fact.value.matchAll(/(\d{1,3})\s*(?:个)?小时/g)].map((match) => Number(match[1])))
+    .filter((hours) => hours > 0 && hours <= 112);
+  return totals.length ? Math.max(...totals) : undefined;
+}

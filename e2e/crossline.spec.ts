@@ -236,6 +236,7 @@ test("goal confirmation and permission-mode rejection persist through the real p
   await page.goto("/milestones");
   await page.getByText(/^里程碑列表与编辑/).click();
   const goal = page.locator(".milestone-admin-list > li").filter({ hasText: "稳定推进当前实验与论文" });
+  await goal.getByText("调整重要性与截止日").click();
   await goal.locator('input[type="date"]').fill("2026-09-30");
   await Promise.all([
     page.waitForNavigation({ waitUntil: "load" }),

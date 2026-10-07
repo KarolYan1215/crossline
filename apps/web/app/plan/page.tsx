@@ -7,6 +7,7 @@ import { SubpageShell } from "../subpage-shell";
 import { getStore, loadCurrentPlan, loadGoalForecast, loadPlanExplanation, planToday, readAvailability, readGoalSettings, readSchedulePreferences
 } from "../../lib/crossline";
 import { loadTimeline, suggestedAvailabilityFor } from "../../lib/timeline";
+import { statedWeeklyHours, weeklyAvailableHours } from "@crossline/core";
 import { requireSessionContext } from "../../lib/access-guard";
 
 export const dynamic = "force-dynamic";
@@ -31,11 +32,16 @@ export default async function PlanPage() {
       }))
     } };
   const explanation = loadPlanExplanation(ctx, planToday(ctx));
+  const stated = statedWeeklyHours(getStore().listProfileFacts(ctx.workspaceId));
+  const configured = weeklyAvailableHours(readAvailability(ctx));
+  const capacityGap = Boolean(stated && stated > configured * 1.25);
   const imported = plan.blocks.filter((block) => block.id.startsWith("graph_calendar:") || block.id.startsWith("import:")).length;
   return <SubpageShell active="计划" title="计划"
     description={imported ? `日历与文件里的 ${imported} 个真实块，加上排程器按你的可用时间排出的任务。` : "还没有日历或文件里的真实日程；排程器按你的可用时间排任务。"}>
-    {plan.usingDefaultPreferences && <details className="schedule-setup-prompt">
-      <summary>以下是按默认时区/时段生成的预览，还不是你的真实设置 —— 填一下可以更准 →</summary>
+    {plan.usingDefaultPreferences && <details className="schedule-setup-prompt" open={capacityGap}>
+      <summary>{stated && capacityGap
+        ? `你说过所有事情合计每周约 ${stated} 小时，但现在的可用时间每周只有 ${configured} 小时（还是默认时段）——排程只能往这 ${configured} 小时里排。花一分钟填上你的真实作息 →`
+        : "可用时间还是默认时段（工作日 9–12、14–18），不是你的作息——填一下，排程才排得对 →"}</summary>
       <ScheduleSetup windows={readAvailability(ctx)} milestones={milestones} />
     </details>}
     <PlanView plan={plan} calendar={calendar} />

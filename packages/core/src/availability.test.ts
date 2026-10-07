@@ -76,3 +76,15 @@ describe("suggestAvailability", () => {
     expect(suggestAvailability({ segments: week.slice(0, 5).map((date) => day(date, "14:00", "17:00")), timeZone: "America/Chicago" })).toEqual([]);
   });
 });
+
+test("the stated weekly total is read from the person's own facts, and compared with the pattern's hours", async () => {
+  const { statedWeeklyHours, weeklyAvailableHours } = await import("./availability");
+  expect(statedWeeklyHours([
+    { slot: "weekly_hours", status: "confirmed", value: "ECE 555 与 ECE 548 合计每周约 15 小时。" },
+    { slot: "weekly_hours", status: "confirmed", value: "无法按项目拆分；所有事情合计每周约 72 小时。" },
+    { slot: "weekly_hours", status: "confirmed", value: "每周投入 10–20 小时。" }
+  ])).toBe(72);
+  expect(statedWeeklyHours([{ slot: "weekly_hours", status: "inferred", value: "所有事情合计每周约 72 小时" }])).toBeUndefined();
+  expect(weeklyAvailableHours([{ days: [1, 2, 3, 4, 5], start: "09:00", end: "12:00", energy: "high" },
+    { days: [1, 2, 3, 4, 5], start: "14:00", end: "18:00", energy: "medium" }, { days: [0, 6], start: "10:00", end: "12:00", energy: "low" }])).toBe(39);
+});
