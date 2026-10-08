@@ -239,20 +239,22 @@ test("the ledger reads back in the order things happened, even within one millis
   } finally { store.close(); }
 });
 
-test("a raw capture can be thrown away with a reason, and a promoted one cannot", () => {
+test("a raw capture can be thrown away (reason optional), restored, and discarded again; a promoted one cannot", () => {
   const store = new CrosslineStore(":memory:");
   try {
     store.capture({ id: "c1", ownerId: "o", workspaceId: "w", title: "重复的一条", context: "" }, "cap:c1");
-    // A board that silently loses items is worse than one that keeps bad ones, so the reason is required.
-    expect(() => store.discardCapture("w", "c1", "   ")).toThrow("DISCARD_REASON_REQUIRED");
-    expect(store.listCaptures("w")[0]?.state).toBe("captured");
     expect(store.discardCapture("w", "c1", "和上一条重了")).toEqual({ changed: true });
     expect(store.listCaptures("w")[0]?.state).toBe("discarded");
     expect(store.listEvents("w").find((event) => event.type === "capture.discarded")?.payload)
-      .toEqual({ reason: "和上一条重了" });
+      .toEqual({ reason: "和上一条重了", from: "captured" });
     // Idempotent: the second click after a slow reload must not append a second reason.
     expect(store.discardCapture("w", "c1", "再来一次")).toEqual({ changed: false });
     expect(store.listEvents("w").filter((event) => event.type === "capture.discarded")).toHaveLength(1);
+    // Restored to where it was, and a second discard (with no reason) really happens rather than hitting the first key.
+    expect(store.restoreCapture("w", "c1")).toEqual({ changed: true });
+    expect(store.listCaptures("w")[0]?.state).toBe("captured");
+    expect(store.discardCapture("w", "c1", "  ")).toEqual({ changed: true });
+    expect(store.listEvents("w").filter((event) => event.type === "capture.discarded")).toHaveLength(2);
 
     // Once promoted the WorkOrder is the live thing; discarding the archived raw text would hide it.
     store.capture({ id: "c2", ownerId: "o", workspaceId: "w", title: "已上板", context: "" }, "cap:c2");

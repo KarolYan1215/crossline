@@ -20,6 +20,9 @@ const slotLabel = (slot: TaskSlot) => { const date = new Date(`${slot.day}T12:00
 export function TaskCard({ detail, slot, reason, variant = "compact" }: { detail: TaskDetail; slot?: TaskSlot | undefined; reason?: string; variant?: "hero" | "compact" }) {
   const [open, setOpen] = useState(false);
   const current = detail.stepPlan?.steps.find((step) => step.status === "planned");
+  // A waiting step (an assignment not yet released, an input someone owes) has no minutes and cannot be timed: the card says what is
+  // awaited, and the duration it edits is the next step that is actual work.
+  const work = detail.stepPlan?.steps.find((step) => step.status === "planned" && step.schedulable);
   const progress = detail.stepPlan ? Math.round(detail.stepPlan.progress * 100) : undefined;
   const openFrom = (event: MouseEvent | KeyboardEvent) => {
     if ((event.target as HTMLElement).closest("button, a, input, select, textarea, [role=dialog], [popover]")) return;
@@ -38,11 +41,11 @@ export function TaskCard({ detail, slot, reason, variant = "compact" }: { detail
     {reason && <p className="task-card-reason">{reason}</p>}
     {progress !== undefined && <div className="task-card-progress">
       <span className="task-progress-bar" aria-hidden="true"><i style={{ width: `${progress}%` }} /></span>
-      <small><b className="mono">{progress}%</b>{current ? ` · 当前：${current.title}` : " · 步骤已完成"}</small>
+      <small><b className="mono">{progress}%</b>{!current ? " · 步骤已完成" : current.schedulable ? ` · 当前：${current.title}` : ` · 等待：${current.title.replace(/^等待\s*/u, "")}`}</small>
     </div>}
     <TaskQuickEdit workOrderId={detail.id} dueBy={detail.window.dueBy} samples={detail.estimate.observationCount} line={detail.identityId}
-      estimate={current?.estimate ?? detail.estimate} stepId={current?.id} editable={!["accepted", "archived"].includes(detail.state)}
-      durationLabel={current ? "本步时长" : "时长"} />
+      estimate={work?.estimate ?? detail.estimate} stepId={work?.id} editable={!["accepted", "archived"].includes(detail.state)}
+      durationLabel={!work ? "时长" : work === current ? "本步时长" : "下一步时长"} />
     {slot && <p className="task-card-slot"><small>下一次</small> <a href={`/plan?day=${slot.day}`} className="mono">{slotLabel(slot)}</a></p>}
     {detail.supports.length > 0 && <p className="task-card-supports">{detail.supports.map((item) =>
       <SupportsTag key={`${item.line}:${item.target}`} line={item.line} lineLabel={item.lineLabel} target={item.target} {...(item.artifact ? { artifact: item.artifact } : {})} />)}</p>}

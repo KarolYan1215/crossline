@@ -85,6 +85,6 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
   if (result.ok) return Response.json(result);
   const status = result.code === "WORK_ORDER_NOT_FOUND" ? 404
-    : result.code === "INTERRUPTION_REASON_REQUIRED" || result.code === "ARCHIVE_REASON_REQUIRED" ? 400 : 409;
+    : result.code === "INTERRUPTION_REASON_REQUIRED" ? 400 : 409;
   return Response.json(result, { status });
 }

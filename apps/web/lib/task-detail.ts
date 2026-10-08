@@ -66,7 +66,7 @@ function taskExtras(store: CrosslineStore, workspaceId: string, orders: StoredWo
       sources: documents.filter((doc) => !doc.projectId || doc.projectId === order.projectId).map((doc) => ({ id: doc.id, fileName: doc.fileName })),
       agentOutputs: agentTasks.filter((task) => task.workOrderId === order.id).map((task) => ({ taskId: task.taskId, title: task.title, status: task.status,
         files: task.artifacts.map((artifact) => ({ path: artifact.path, name: artifact.path.split(/[\\/]/).at(-1) ?? artifact.path })) })),
-      agentSteps: (plan?.steps ?? []).filter((step) => step.status === "planned" && step.executor !== "human").map((step) => ({ id: step.id, title: step.title }))
+      agentSteps: (plan?.steps ?? []).filter((step) => step.status === "planned" && step.schedulable && step.executor !== "human").map((step) => ({ id: step.id, title: step.title }))
     });
   }
   return result;
@@ -171,7 +171,7 @@ export type MilestoneDetail = {
 
 function identityInfo(identityId: string): { label: string; accent: string } {
   const pack = defaultIdentityPacks().find((item) => item.id === identityId);
-  return { label: pack?.label ?? identityId, accent: accents[identityId] ?? "#5A5B54" };
+  return { label: pack?.label ?? "未分类", accent: accents[identityId] ?? "#5A5B54" };
 }
 
 /**

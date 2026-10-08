@@ -10,7 +10,6 @@ const FAILURE: Record<string, string> = {
   MATERIALS_PREPARING: "已转入材料准备，准备完成后即可开始。",
   EXECUTION_NOT_STARTABLE: "当前状态不能开始计时，请刷新。",
   NO_ACTIVE_EXECUTION: "没有进行中的计时，请刷新。",
-  ARCHIVE_REASON_REQUIRED: "归档需要一句原因。",
   WORK_ORDER_ALREADY_ACCEPTED: "已验收的任务不能归档。"
 };
 const PAUSE_REASONS = ["被打断", "切换任务", "休息", "等待他人"];
@@ -87,10 +86,10 @@ export function TaskActions({ workOrderId, state, paused, agentReady, agentStepI
     </span>}
     {agentReady && !["accepted", "archived", "evidence_review"].includes(state) && <button type="button" disabled={busy} onClick={delegate}>交给 Agent</button>}
     {onOpen && <button type="button" onClick={onOpen}>打开</button>}
-    {!["accepted", "archived"].includes(state) && <MenuButton label="更多操作" icon="⋯" items={[{ label: "归档", hint: "需要一句原因", onSelect: () => setArchiving(true) }]} />}
+    {!["accepted", "archived"].includes(state) && <MenuButton label="更多操作" icon="⋯" items={[{ label: "归档", hint: "可在已归档中恢复", onSelect: () => setArchiving(true) }]} />}
     {archiving && <span className="task-actions-choices">
-      <input value={reason} maxLength={200} placeholder="归档原因" aria-label="归档原因" onChange={(event) => setReason(event.target.value)} />
-      <button type="button" disabled={busy || !reason.trim()} onClick={() => void run(() => execution({ action: "archive", reason }))}>归档</button>
+      <input value={reason} maxLength={200} placeholder="归档原因（选填）" aria-label="归档原因（选填）" onChange={(event) => setReason(event.target.value)} />
+      <button type="button" disabled={busy} onClick={() => void run(() => execution({ action: "archive", reason }))}>归档</button>
       <button type="button" onClick={() => setArchiving(false)} aria-label="取消归档">×</button>
     </span>}
     {status && <small role="status" className="task-actions-status">{status}</small>}

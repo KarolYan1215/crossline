@@ -1,6 +1,6 @@
 "use client";
 
-import { DateChip, DurationBar } from "../ui/controls";
+import { DateChip, DurationBar, STEP_MINUTES, TASK_MINUTES } from "../ui/controls";
 import { ImpactCard, useImpact } from "./impact";
 
 /**
@@ -19,6 +19,7 @@ export function TaskQuickEdit({ workOrderId, dueBy, estimate, samples, stepId, l
         : <span className="mono">{dueBy ?? "未定"}</span>}</span>
     <span className="task-quick-duration"><small>{durationLabel}</small>
       <DurationBar p25={estimate.p25Minutes} p50={estimate.p50Minutes} p85={estimate.p85Minutes} samples={samples} label={durationLabel}
+        bounds={stepId ? STEP_MINUTES : TASK_MINUTES}
         {...(durationEditable ? { onCommit: (p50Minutes: number) => void impact.propose({ kind: "estimate", workOrderId, p50Minutes, ...(stepId ? { stepId } : {}) }) } : {})} /></span>
     {impact.busy && !impact.pending && <small role="status">计算影响…</small>}
     {impact.error && <small role="status">{impact.error}</small>}
@@ -30,7 +31,7 @@ export function TaskQuickEdit({ workOrderId, dueBy, estimate, samples, stepId, l
 export function StepDuration({ workOrderId, stepId, estimate }: { workOrderId: string; stepId: string; estimate: { p25Minutes: number; p50Minutes: number; p85Minutes: number } }) {
   const impact = useImpact();
   return <span className="step-duration">
-    <DurationBar p25={estimate.p25Minutes} p50={estimate.p50Minutes} p85={estimate.p85Minutes} label="步骤时长"
+    <DurationBar p25={estimate.p25Minutes} p50={estimate.p50Minutes} p85={estimate.p85Minutes} label="步骤时长" bounds={STEP_MINUTES}
       onCommit={(p50Minutes) => void impact.propose({ kind: "estimate", workOrderId, stepId, p50Minutes })} />
     {impact.pending && <ImpactCard impact={impact.pending.impact} busy={impact.busy} onApply={() => void impact.apply()} onCancel={impact.cancel} />}
   </span>;

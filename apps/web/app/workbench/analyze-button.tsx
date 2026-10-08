@@ -36,9 +36,7 @@ export function AnalyzeButton({ captureId, analyzing, retry }: { captureId: stri
     }).catch(() => undefined);
     if (response?.ok) { location.reload(); return; }
     const failure = await response?.json().catch(() => ({})) as { code?: string } | undefined;
-    setStatus(failure?.code === "DISCARD_REASON_REQUIRED"
-      ? "请写一句为什么丢弃；这条会留在账本里。"
-      : "现在不能丢弃这条，请刷新查看真实状态。");
+    setStatus(failure?.code === "CAPTURE_IS_ANALYZING" ? "正在分析中，结束后才能丢弃。" : "现在不能丢弃这条，请刷新查看真实状态。");
     setPending(false);
   };
 
@@ -50,7 +48,7 @@ export function AnalyzeButton({ captureId, analyzing, retry }: { captureId: stri
     {!pending && (discarding
       ? <>
           <label><span className="sr-only">丢弃原因</span>
-            <input value={reason} maxLength={200} placeholder="为什么丢弃（必填）"
+            <input value={reason} maxLength={200} placeholder="丢弃原因（选填）"
               onChange={(event) => setReason(event.target.value)} /></label>
           <button type="button" onClick={() => void discard()}>确认丢弃</button>
           <button type="button" onClick={() => setDiscarding(false)}>取消</button>

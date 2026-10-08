@@ -2,7 +2,7 @@ import { discardCapture } from "../../../../../lib/crossline";
 import { resolveAccessContext } from "../../../../../lib/access-guard";
 import { isCrossSiteWrite } from "../../../../../lib/same-origin";
 
-/** Throws away a raw capture, with the reason on the record. */
+/** Throws away a raw capture, with the reason (optional) on the record. */
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params;
   if (isCrossSiteWrite(request)) return Response.json({ ok: false, code: "REQUEST_FORBIDDEN" }, { status: 403 });
@@ -13,6 +13,6 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const result = discardCapture(access.ctx, id, String(body.reason ?? ""));
   if (result.ok) return Response.json(result);
   const status = result.code === "CAPTURE_NOT_FOUND" ? 404
-    : result.code === "DISCARD_REASON_REQUIRED" ? 400 : 409;
+    : 409;
   return Response.json(result, { status });
 }

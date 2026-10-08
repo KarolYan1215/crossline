@@ -108,7 +108,7 @@ export function DashboardView({ data }: { data: DashboardData }) {
             <span className="time-bar" aria-hidden="true"><span className="time-bar-fill" style={{ "--pct": `${load}%` } as CSSProperties} /></span></dd></div>
           {data.workState && <div data-testid="work-state"><dt>此刻状态</dt><dd title={data.workState.reasons.join(" ")}>{data.workState.label}
             <small> · {{ low: "把握低", medium: "把握中", high: "把握高" }[data.workState.confidence]}</small></dd></div>}
-          <div><dt>本周完成</dt><dd>{data.progress.weekCount} 件 · 连续 {data.progress.streakDays} 天</dd></div>
+          <div><dt>本周完成</dt><dd>{data.progress.weekCount} 件</dd></div>
         </dl>
         <div className="day-energy"><span>精力自评</span><EnergyProbe /></div>
       </section>

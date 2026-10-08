@@ -18,7 +18,6 @@ const codes: Record<string, string> = {
   NO_ACTIVE_EXECUTION: "没有正在进行的执行，请刷新。",
   INTERRUPTION_REASON_REQUIRED: "需要中断原因；中断时间与工作时间分开记录。",
   INVALID_EVIDENCE_CLAIM: "证据声明不完整：类型、位置和说明均为必填。",
-  ARCHIVE_REASON_REQUIRED: "归档需要一句原因，原因保留在账本中。",
   WORK_ORDER_ALREADY_ACCEPTED: "已验收的任务不能归档；撤销验收后可归档。"
 };
 
@@ -202,12 +201,12 @@ export function ExecutionActions({ workOrderId, intent, state, paused, ownerId, 
       <span className="micro">完成后精力与实际负荷</span>
       <EnergyProbe context="after_task" workOrderId={workOrderId} />
     </>}
-    {/* A proposal the analysis got wrong had no exit: approve it or look at it forever. The reason is
-        required because a board that quietly loses items is worse than one that keeps bad ones. */}
+    {/* A proposal the analysis got wrong had no exit: approve it or look at it forever. The reason is optional;
+        an archived order stays in the drawer and can be restored. */}
     {state !== "accepted" && state !== "archived" && (discarding
       ? <>
           <label><span className="sr-only">归档原因</span>
-            <input value={discardReason} maxLength={200} placeholder="为什么归档（必填）"
+            <input value={discardReason} maxLength={200} placeholder="归档原因（选填）"
               onChange={(event) => setDiscardReason(event.target.value)} /></label>
           <button type="button" disabled={busy} onClick={() => void send({ action: "archive", reason: discardReason })}>确认归档</button>
           <button type="button" disabled={busy} onClick={() => setDiscarding(false)}>取消</button>

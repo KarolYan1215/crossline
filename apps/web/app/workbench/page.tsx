@@ -1,4 +1,5 @@
 import { stateLabel } from "../../lib/labels";
+import { RestoreButton } from "./restore-button";
 import { archivedBySystem, ensureSeeded, getStore, loadCurrentPlan, planToday } from "../../lib/crossline";
 import { SubpageShell } from "../subpage-shell";
 import { AnalyzeButton } from "./analyze-button";
@@ -102,10 +103,14 @@ export default async function WorkbenchPage({ searchParams }: {
     </>
     {(discarded.length + discardedCaptures.length) > 0
       && <details className="work-order-drawer advanced"><summary>已归档 {discarded.length + discardedCaptures.length} 项</summary>
-        {discarded.map((run) => <p key={run.id}>{run.intent}
-          {discardReasons.get(run.id) ? ` · 原因：${discardReasons.get(run.id)}` : ""}</p>)}
-        {discardedCaptures.map((capture) => <p key={capture.id}>{capture.title}
-          {discardReasons.get(capture.id) ? ` · 原因：${discardReasons.get(capture.id)}` : ""}</p>)}
+        <ul className="archive-list">
+          {discarded.map((run) => <li key={run.id}><span>{run.intent}
+            {discardReasons.get(run.id) ? <small> · {discardReasons.get(run.id)}</small> : null}</span>
+            <RestoreButton kind="work_order" id={run.id} /></li>)}
+          {discardedCaptures.map((capture) => <li key={capture.id}><span>{capture.title}
+            {discardReasons.get(capture.id) ? <small> · {discardReasons.get(capture.id)}</small> : null}</span>
+            <RestoreButton kind="capture" id={capture.id} /></li>)}
+        </ul>
       </details>}
   </SubpageShell>;
 }

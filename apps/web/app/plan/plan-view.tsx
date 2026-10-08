@@ -42,6 +42,18 @@ const changeLabel = { add: "新增", move: "移动", remove: "移除", conflict:
  * differences waiting for a decision. Reading the calendar is the default; the decisions are folded under it
  * and announced by a count, so they are never the first thing on the page unless there is something to decide.
  */
+/**
+ * The planner reports one blocker per unplaced *step*, while 「为什么这样排」 lists tasks — counting blockers said 「13 项未排入」 over a list
+ * with one. Counted per task here: wholly unplaced, and placed in part (some steps have a block, some do not).
+ */
+function unplacedNote(plan: PlanVersionData): string {
+  const blocked = new Set((plan.schedule?.blockers ?? []).map((blocker) => blocker.taskId.split("#")[0]!));
+  if (!blocked.size) return "";
+  const placed = new Set(plan.blocks.filter((block) => block.id.startsWith("scheduled:")).map((block) => block.id.split(":")[1]));
+  const partial = [...blocked].filter((id) => placed.has(id)).length, none = blocked.size - partial;
+  return [none ? `${none} 个任务未排入` : "", partial ? `${partial} 个任务部分步骤未排入` : ""].filter(Boolean).join("，");
+}
+
 export function PlanView({ plan, calendar }: { plan: PlanVersionData; calendar: CalendarData }) {
   const [approvalState, setApprovalState] = useState<"idle" | "saving" | "error">("idle");
   const [syncState, setSyncState] = useState<"idle" | "syncing" | "done" | "error">("idle");
@@ -138,7 +150,7 @@ export function PlanView({ plan, calendar }: { plan: PlanVersionData; calendar: 
       {plan.schedule.solver === "fallback" && <p>这次没算出最优排法，先用一份简单排法，每块都核对过不冲突。</p>}
       {plan.schedule.solver === "no_capacity" && <p>可用时间里已经没有空档，下面这些暂时排不进去。</p>}
       {plan.schedule.bufferRelaxed && <p>为守住已确认截止时间，已放宽当天的缓冲规则。</p>}
-      {plan.schedule.blockers.length > 0 && <p><a href="#why">{plan.schedule.blockers.length} 项未排入，原因见「为什么这样排」</a></p>}
+      {unplacedNote(plan) && <p><a href="#why">{unplacedNote(plan)}，原因见「为什么这样排」</a></p>}
       {plan.schedule.notes?.map((note) => <p key={`note-${note.taskId}`}>{note.message}</p>)}
     </section>}
 

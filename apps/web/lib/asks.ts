@@ -14,6 +14,9 @@ import { readScheduledDay } from "./schedule-memory";
 import { requestCodexSupervisor } from "./codex-runtime";
 import { autoPublishPass, forgetPublishedHash } from "./auto-publish";
 
+/** A message used as a clause before 「。」: its own closing punctuation dropped, so the sentence does not end 「。。」. */
+const clause = (text: string | undefined) => String(text ?? "").trim().replace(/[。．.；;，,\s]+$/u, "");
+
 /**
  * Every place the system needs the person, as asks (see `packages/core/src/asks.ts`). Built from the ledger on read,
  * never stored, so an ask disappears by itself the moment what it was about is resolved — by its own answer, by a
@@ -64,7 +67,7 @@ function backplanAsks({ store, ctx, today }: Source): Ask[] {
       const id = `bp:${event.eventId}:all`;
       if (resolved.has(id)) continue;
       asks.push({ ...base, id, kind: "backplan_input", title: `「${short(milestone.title)}」未能自动拆分`,
-        why: `自动倒推中止：${payload.message || payload.code}。可重试，或手动填写第一步。`,
+        why: `自动倒推中止：${clause(payload.message || payload.code)}。可重试，或手动填写第一步。`,
         options: [{ id: "retry", label: "再试一次", recommended: true }, { id: "own", label: "手动填写第一步", href: "/#capture-title" }, skip] });
       continue;
     }
@@ -160,7 +163,7 @@ function captureAsks({ store, ctx }: Source): Ask[] {
     id: `cap:${capture.id}:${capture.attempt}`, kind: "capture_blocked" as const, entityId: capture.id, urgency: "later" as const,
     raisedAt: store.listEvents(ctx.workspaceId, { entityId: capture.id }).at(-1)?.createdAt ?? "", fingerprint: String(capture.attempt),
     title: `「${short(capture.title)}」未能自动分析`,
-    why: `${capture.audit.blocker?.message || capture.audit.blocker?.code || "分析中止"}。补充说明后重新分析。`,
+    why: `${clause(capture.audit.blocker?.message || capture.audit.blocker?.code || "分析中止")}。补充说明后重新分析。`,
     options: [
       { id: "context", label: "补充说明，重新分析", recommended: true,
         fields: [{ id: "note", label: "补充什么（要交付什么、为谁、哪天前、手上有什么材料）", kind: "longtext" as const, required: true }] },
@@ -187,7 +190,7 @@ function materialsAsks({ store, ctx, today }: Source): Ask[] {
     return [{ id: `mat:${block.eventId}`, kind: "materials_blocked" as const, entityId: order.id, line: order.identityId,
       urgency: urgencyFor(dueDay, today), ...(dueDay ? { dueDay } : {}), raisedAt: block.createdAt, fingerprint: block.eventId,
       title: `「${short(order.intent)}」材料未准备完成`,
-      why: `${detail.message || detail.code || "准备中止"}。可重试，或不等材料直接开始。`,
+      why: `${clause(detail.message || detail.code || "准备中止")}。可重试，或不等材料直接开始。`,
       options: [
         { id: "retry", label: "再试一次", recommended: /^(SKILL_|CODEX_)/.test(detail.code ?? "") },
         { id: "self", label: "不需要材料，直接开始", recommended: !/^(SKILL_|CODEX_)/.test(detail.code ?? "") },
@@ -219,7 +222,7 @@ function gateAsks({ store, ctx, today }: Source): Ask[] {
       asks.push({ id: `gate:${transition?.eventId ?? order.id}`, kind: "gate_insufficient", entityId: order.id, ...timing,
         raisedAt: transition?.createdAt ?? "", fingerprint: transition?.eventId ?? "",
         title: `「${short(order.intent)}」未通过验收`,
-        why: needs.length ? `验收尚缺：${needs.join("；")}。补充后重新提交即重新判定。` : "验收证据不足。补充后重新提交即重新判定。",
+        why: needs.length ? `验收尚缺：${clause(needs.join("；"))}。补充后重新提交即重新判定。` : "验收证据不足。补充后重新提交即重新判定。",
         options: [
           { id: "redo", label: "重新排上，补做缺的", recommended: true },
           { id: "look", label: "去看判定细节", href: `/workbench/${encodeURIComponent(order.id)}` },
@@ -232,7 +235,7 @@ function gateAsks({ store, ctx, today }: Source): Ask[] {
         const detail = failure.payload as { code?: string; message?: string };
         asks.push({ id: `gaterun:${failure.eventId}`, kind: "gate_failed", entityId: order.id, ...timing, raisedAt: failure.createdAt,
           fingerprint: failure.eventId, title: `「${short(order.intent)}」验收判定未完成`,
-          why: `判定过程中断，并非未通过：${detail.message || detail.code}。处理后重新判定。`,
+          why: `判定过程中断，并非未通过：${clause(detail.message || detail.code)}。处理后重新判定。`,
           options: [{ id: "rejudge", label: "现在重新判定", recommended: true },
             { id: "look", label: "去看看", href: `/workbench/${encodeURIComponent(order.id)}` }] });
       } else if (!order.milestoneId) {
@@ -348,7 +351,7 @@ function agentAsks({ store, ctx }: Source): Ask[] {
   return listAgentTasks(store, ctx.workspaceId).filter((task) => task.status === "blocked" && !acknowledged.has(task.taskId)).map((task) => ({
     id: `agent:${task.taskId}`, kind: "agent_blocked" as const, entityId: task.taskId, urgency: "later" as const, raisedAt: task.requestedAt,
     fingerprint: task.blockerCode, title: `助手没做成「${short(titles.get(task.workOrderId) ?? task.title)}」`,
-    why: `${task.blockerMessage || task.blockerCode}。助手不会自动重试，该任务转为本人处理。`,
+    why: `${clause(task.blockerMessage || task.blockerCode)}。助手不会自动重试，该任务转为本人处理。`,
     options: [{ id: "self", label: "本人处理", recommended: true }, { id: "look", label: "查看助手任务", href: "/settings#automation" }] }));
 }
 
@@ -365,13 +368,13 @@ function calendarAsks({ store, ctx }: Source): Ask[] {
     entityId: "calendar", urgency: "soon", raisedAt: publish.at, fingerprint: publish.code, title: "Crossline 日历没同步上",
     why: publish.code === "CALENDAR_WRITE_NOT_AUTHORIZED"
       ? "写入 Crossline 日历的账号登录已过期，重新登录后重试；其他日历不受影响。"
-      : `${publish.message || publish.code}。其他日历未受影响。`,
+      : `${clause(publish.message || publish.code)}。其他日历未受影响。`,
     options: [{ id: "retry", label: "处理好了，现在重试", recommended: true }] });
   const sync = readFailure(store, ctx.workspaceId, CALENDAR_SYNC_FAILURE);
   if (sync) asks.push({ id: `sync:${sync.code}:${(sync.sources ?? []).join(",")}`, kind: "calendar_sync_failed", entityId: "calendar",
     urgency: "soon", raisedAt: sync.at, fingerprint: sync.code,
     title: sync.sources?.length ? `读不到日历：${sync.sources.join("、")}` : "日历无法读取",
-    why: `${sync.message || sync.code}。在恢复之前，排程照常用最后一次读到的日程；账号登出需要重新登录。`,
+    why: `${clause(sync.message || sync.code)}。在恢复之前，排程照常用最后一次读到的日程；账号登出需要重新登录。`,
     options: [{ id: "settings", label: "去设置看连接", href: "/settings" }] });
   return asks;
 }

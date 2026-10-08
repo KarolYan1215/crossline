@@ -1,5 +1,5 @@
 import "server-only";
-import type { AccessContext, AvailabilityWindow } from "@crossline/core";
+import { STEP_MINUTES, TASK_MINUTES, type AccessContext, type AvailabilityWindow } from "@crossline/core";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { DEADLINE_MARGIN_DAYS, type ScheduleParams } from "@crossline/planner";
 import { effectiveSchedulePreferences, getStore, loadCurrentPlan, loadGoalForecast, planToday, resolvedEstimate, saveAvailability, saveGoalSettings,
@@ -33,7 +33,7 @@ function resolveChange(ctx: AccessContext, change: Change): Exclude<Change, { ki
   if (!order) throw new Error("WORK_ORDER_NOT_FOUND");
   const step = change.stepId ? store.getStepPlan(ctx.workspaceId, order.id)?.steps.find((item) => item.id === change.stepId) : undefined;
   const current = step?.estimate.p50Minutes ?? order.estimate.p50Minutes;
-  return { kind: "estimate", workOrderId: change.workOrderId, ...(step ? { stepId: step.id } : {}), p50Minutes: Math.max(5, current + change.deltaMinutes) };
+  return { kind: "estimate", workOrderId: change.workOrderId, ...(step ? { stepId: step.id } : {}), p50Minutes: Math.min((step ? STEP_MINUTES : TASK_MINUTES).max, Math.max((step ? STEP_MINUTES : TASK_MINUTES).min, current + change.deltaMinutes)) };
 }
 
 export type Impact = {
@@ -153,7 +153,8 @@ export function applyChange(ctx: AccessContext, requested: Change): { ok: true }
     return { ok: true };
   }
   const minutes = Math.round(change.p50Minutes);
-  if (!Number.isFinite(minutes) || minutes < 5 || minutes > 10_080) return { ok: false, code: "ESTIMATE_INVALID" };
+  const bounds = change.stepId ? STEP_MINUTES : TASK_MINUTES;
+  if (!Number.isFinite(minutes) || minutes < bounds.min || minutes > bounds.max) return { ok: false, code: "ESTIMATE_INVALID" };
   if (change.stepId) {
     const step = store.getStepPlan(ctx.workspaceId, order.id)?.steps.find((item) => item.id === change.stepId);
     if (!step) return { ok: false, code: "STEP_NOT_FOUND" };

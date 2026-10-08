@@ -11,6 +11,7 @@
  * can ask the person about each missing thing, and re-run in the mode where a missing input becomes the first step
  * (`acquires` names which missing input a step obtains; "" for an ordinary step).
  */
+import { TASK_MINUTES } from "./steps";
 export type BackplanStep = { id: string; intent: string; sourceQuote: string; rationale: string; dependsOn: string[];
   estimate: { p25Minutes: number; p50Minutes: number; p85Minutes: number };
   energy: "low" | "medium" | "high"; interruptible: boolean;
@@ -81,6 +82,9 @@ export function validateBackplan(value: unknown, sources: string[], dateSources 
     const { p25Minutes, p50Minutes, p85Minutes } = step.estimate ?? {};
     if (![p25Minutes, p50Minutes, p85Minutes].every((minutes) => Number.isFinite(minutes) && minutes > 0 && minutes <= 10080)
       || p25Minutes > p50Minutes || p50Minutes > p85Minutes) throw new Error("BACKPLAN_ESTIMATE_INVALID");
+    // A task is 30 minutes to 8 hours of usual work. The detail names the task, so a repair can split or merge exactly that one.
+    if (p50Minutes < TASK_MINUTES.min || p50Minutes > TASK_MINUTES.max)
+      throw new Error(`BACKPLAN_TASK_SIZE: ${step.id} 的 p50 为 ${p50Minutes} 分钟；任务的通常时长须在 ${TASK_MINUTES.min}–${TASK_MINUTES.max} 分钟之间，超过的拆成多个任务，不足的并入相邻任务`);
     if (!["low", "medium", "high"].includes(step.energy)
       || !["routine", "milestone", "high_risk"].includes(step.riskTier)
       || !["preparation", "review", "deep_work"].includes(step.family)

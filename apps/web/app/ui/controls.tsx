@@ -1,6 +1,7 @@
 "use client";
 
 import { useId, useRef, useState, type ReactNode } from "react";
+import { STEP_MINUTES, TASK_MINUTES } from "@crossline/core";
 
 /** A row of mutually exclusive choices that take effect at once — the standard settings control, in place of a select or a fold. */
 export function SegmentedControl<T extends string>({ value, options, onChange, label, disabled }: {
@@ -52,19 +53,24 @@ export function DateChip({ value, onChange, label, empty = "未定" }: { value: 
  * handle moves the usual value and the range follows in proportion; the number shows above the bar while dragging. `samples` is how
  * many measured runs the range rests on — a narrow range with samples behind it is what used to be called 「高置信」.
  */
-export function DurationBar({ p25, p50, p85, samples = 0, scaleMax, onCommit, label = "时长" }: {
-  p25: number; p50: number; p85: number; samples?: number; scaleMax?: number; onCommit?: (p50: number) => void; label?: string;
+export { STEP_MINUTES, TASK_MINUTES };
+
+export function DurationBar({ p25, p50, p85, samples = 0, bounds = TASK_MINUTES, onCommit, label = "时长" }: {
+  p25: number; p50: number; p85: number; samples?: number; bounds?: { min: number; max: number }; onCommit?: (p50: number) => void; label?: string;
 }) {
   const track = useRef<HTMLDivElement>(null);
   const [draft, setDraft] = useState<number | null>(null);
   const usual = draft ?? p50;
   const ratio = usual / Math.max(1, p50);
   const low = Math.round(p25 * ratio), high = Math.round(p85 * ratio);
-  const max = Math.max(scaleMax ?? 0, high * 1.25, 30);
+  // The axis is fixed to the allowed range, never derived from the value being dragged: deriving it from the cautious end made the
+  // axis grow under the pointer, so a drag to the right ran away to an arbitrarily large value.
+  const max = bounds.max;
+  const clamp = (minutes: number) => Math.min(bounds.max, Math.max(bounds.min, minutes));
   const at = (minutes: number) => `${Math.min(100, (minutes / max) * 100)}%`;
   const minutesAt = (clientX: number) => {
     const box = track.current!.getBoundingClientRect();
-    return Math.max(5, Math.round((((clientX - box.left) / box.width) * max) / 5) * 5);
+    return clamp(Math.round((((clientX - box.left) / box.width) * max) / 5) * 5);
   };
   const editable = Boolean(onCommit);
   const commit = (minutes: number) => { setDraft(null); if (minutes !== p50) onCommit?.(minutes); };
@@ -73,14 +79,14 @@ export function DurationBar({ p25, p50, p85, samples = 0, scaleMax, onCommit, la
     <div ref={track} className="ui-duration-track" title={`乐观 ${formatMinutes(low)} · 通常 ${formatMinutes(usual)} · 保守 ${formatMinutes(high)}${samples ? ` · ${samples} 次实测` : " · 尚无实测"}`}>
       <i className="ui-duration-range" style={{ left: at(low), width: `calc(${at(high)} - ${at(low)})` }} />
       <button type="button" className="ui-duration-handle" style={{ left: at(usual) }} disabled={!editable}
-        aria-label={`${label}：通常 ${formatMinutes(usual)}`} role="slider" aria-valuenow={usual} aria-valuemin={5} aria-valuemax={Math.round(max)}
+        aria-label={`${label}：通常 ${formatMinutes(usual)}`} role="slider" aria-valuenow={usual} aria-valuemin={bounds.min} aria-valuemax={bounds.max}
         onPointerDown={(event) => { if (!editable) return; event.currentTarget.setPointerCapture(event.pointerId); setDraft(minutesAt(event.clientX)); }}
         onPointerMove={(event) => { if (draft !== null) setDraft(minutesAt(event.clientX)); }}
         onPointerUp={() => draft !== null && commit(draft)}
         onKeyDown={(event) => {
           if (!editable) return;
           const step = event.key === "ArrowRight" ? 5 : event.key === "ArrowLeft" ? -5 : 0;
-          if (step) { event.preventDefault(); commit(Math.max(5, p50 + step)); }
+          if (step) { event.preventDefault(); commit(clamp(p50 + step)); }
         }} />
     </div>
     <span className="ui-duration-text mono">{formatMinutes(usual)}<small>{formatMinutes(low)}–{formatMinutes(high)}</small></span>

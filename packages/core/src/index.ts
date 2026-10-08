@@ -293,7 +293,18 @@ export type WorkOrderEvent =
   | { type: "evidence.accepted"; approvalId?: string }
   | { type: "acceptance.revoked"; reason: string }
   | { type: "blocked"; reason: string }
-  | { type: "archived" };
+  | { type: "archived" }
+  // Takes an archived order back to where it was when it was archived (an undo, or 恢复 in the archive drawer).
+  | { type: "archive.restored"; to: WorkOrderState };
+
+/** States an archived order may be restored to: anything but the transient ones. A session that was running when the order was
+ * archived ended with it, so `active` comes back as `ready_for_human`; `preparing` and `analyzing` were runs, not resting places. */
+export const RESTORABLE_STATES: readonly WorkOrderState[] = ["awaiting_plan_approval", "approved", "ready_for_human", "evidence_review", "accepted", "blocked"];
+export function restoreTargetOf(from: string | undefined): WorkOrderState {
+  if (from === "active") return "ready_for_human";
+  if (from === "preparing") return "approved";
+  return RESTORABLE_STATES.includes(from as WorkOrderState) ? from as WorkOrderState : "awaiting_plan_approval";
+}
 
 const WORK_ORDER_TRANSITIONS: Partial<Record<WorkOrderState, Partial<Record<WorkOrderEvent["type"], WorkOrderState>>>> = {
   captured: { "analysis.proposed": "analyzing", archived: "archived" },
@@ -314,7 +325,9 @@ const WORK_ORDER_TRANSITIONS: Partial<Record<WorkOrderState, Partial<Record<Work
 export function advanceWorkOrder<T extends { state: WorkOrderState }>(workOrder: T, event: WorkOrderEvent):
   | { ok: true; workOrder: T; from: WorkOrderState; to: WorkOrderState }
   | { ok: false; blocker: { code: "INVALID_WORK_ORDER_TRANSITION"; message: string } } {
-  const next = WORK_ORDER_TRANSITIONS[workOrder.state]?.[event.type];
+  const next = event.type === "archive.restored"
+    ? (workOrder.state === "archived" && RESTORABLE_STATES.includes(event.to) ? event.to : undefined)
+    : WORK_ORDER_TRANSITIONS[workOrder.state]?.[event.type];
   if (!next) {
     return {
       ok: false,

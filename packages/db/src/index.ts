@@ -1050,12 +1050,30 @@ export class CrosslineStore {
       if (capture.state === "discarded") return { changed: false };
       if (capture.state === "promoted") throw new Error("CAPTURE_ALREADY_PROMOTED");
       if (capture.state === "analyzing") throw new Error("CAPTURE_IS_ANALYZING");
-      if (!reason.trim()) throw new Error("DISCARD_REASON_REQUIRED");
+      // The reason is optional: a duplicate or a slip needs no explanation, and asking for one made discarding cost more than keeping.
+      // Keyed per attempt, because a restored capture can be discarded again and a fixed key would silently no-op the second time.
+      const attempt = this.listEvents(workspaceId, { type: "capture.discarded", entityId: id }).length;
       this.appendEvent({
-        ownerId: capture.ownerId, workspaceId, idempotencyKey: `capture-discarded:${id}`,
-        type: "capture.discarded", entityId: id, payload: { reason: reason.trim().slice(0, 200) }
+        ownerId: capture.ownerId, workspaceId, idempotencyKey: attempt ? `capture-discarded:${id}:${attempt}` : `capture-discarded:${id}`,
+        type: "capture.discarded", entityId: id, payload: { reason: reason.trim().slice(0, 200), from: capture.state }
       });
       this.#db.prepare("UPDATE captures SET state = 'discarded' WHERE workspace_id = ? AND id = ?").run(workspaceId, id);
+      return { changed: true };
+    })();
+  }
+
+  /** Takes a discarded capture back to the state it was discarded from (an undo, or 恢复 in the archive drawer). */
+  restoreCapture(workspaceId: string, id: string): { changed: boolean } {
+    return this.#db.transaction(() => {
+      const capture = this.listCaptures(workspaceId).find((item) => item.id === id);
+      if (!capture) throw new Error("CAPTURE_NOT_FOUND");
+      if (capture.state !== "discarded") return { changed: false };
+      const discards = this.listEvents(workspaceId, { type: "capture.discarded", entityId: id });
+      const from = (discards.at(-1)?.payload as { from?: string } | undefined)?.from;
+      const to = from === "captured" ? "captured" : "blocked";
+      this.appendEvent({ ownerId: capture.ownerId, workspaceId, idempotencyKey: `capture-restored:${id}:${discards.length}`,
+        type: "capture.restored", entityId: id, payload: { to } });
+      this.#db.prepare("UPDATE captures SET state = ? WHERE workspace_id = ? AND id = ?").run(to, workspaceId, id);
       return { changed: true };
     })();
   }

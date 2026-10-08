@@ -47,7 +47,7 @@ describe("PlanView", () => {
       schedule: { status: "partial", blockers: [{ taskId: "w2", code: "NO_CAPACITY", message: "复核数据没有可用容量" }], solver: "feasible_time_limit" }
     }} calendar={calendar} />);
     expect(html).toContain("部分任务未排入");
-    expect(html).toContain("1 项未排入，原因见「为什么这样排」");
+    expect(html).toContain("1 个任务未排入，原因见「为什么这样排」");
     expect(html).toContain("未证明最优");
   });
 });

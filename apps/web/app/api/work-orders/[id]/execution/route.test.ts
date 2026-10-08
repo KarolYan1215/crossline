@@ -4,6 +4,7 @@ vi.mock("server-only", () => ({}));
 import { TEST_CTX } from "../../../../../lib/test-support";
 vi.mock("../../../../../lib/access-guard", () => ({ resolveAccessContext: async () => ({ ctx: TEST_CTX }) }));
 import * as route from "./route";
+import { restoreWorkOrder } from "../../../../../lib/crossline";
 
 afterEach(() => { globalThis.crosslineStore?.close(); globalThis.crosslineStore = undefined; });
 
@@ -63,12 +64,15 @@ test("pausing without a reason is refused, and unknown actions cannot reach the 
   expect(store.listExecutions(TEST_CTX.workspaceId)[0]?.interruptions).toEqual([]);
 });
 
-test("discarding a work order needs a reason, and the reason is kept on the ledger", async () => {
+test("archiving takes an optional reason, keeps it on the ledger, and an archived order can be restored and archived again", async () => {
   const store = seed();
-  expect((await post({ action: "archive", reason: "  " })).status).toBe(400);
-  expect(store.listWorkOrders(TEST_CTX.workspaceId)[0]?.state).not.toBe("archived");
+  const before = store.listWorkOrders(TEST_CTX.workspaceId)[0]!.state;
   expect((await post({ action: "archive", reason: "提案读不通，重收一次" })).status).toBe(200);
   expect(store.listWorkOrders(TEST_CTX.workspaceId)[0]?.state).toBe("archived");
   expect(store.listEvents(TEST_CTX.workspaceId).find((event) => event.type === "work_order.archived")?.payload)
-    .toEqual({ reason: "提案读不通，重收一次" });
+    .toEqual({ reason: "提案读不通，重收一次", from: before });
+  expect(restoreWorkOrder(TEST_CTX, "w1")).toEqual({ ok: true });
+  expect(store.listWorkOrders(TEST_CTX.workspaceId)[0]?.state).toBe(before);
+  expect((await post({ action: "archive", reason: "  " })).status).toBe(200);
+  expect(store.listWorkOrders(TEST_CTX.workspaceId)[0]?.state).toBe("archived");
 });

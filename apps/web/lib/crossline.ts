@@ -7,7 +7,7 @@ import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 import { CrosslineStore, type EvidenceClaimInput, type StoredMilestone } from "@crossline/db";
 import { availableSlots, deriveCapacity, requiredApproval, validateAvailability, DEFAULT_AVAILABILITY,
   defaultMilestoneTemplates, computeMilestoneConfidence, PRODUCTIVE, type ActivityCategory, validateSuccessCriteria, goalSettingKey, ANALYSIS_CONTEXT_VERSION, calibrationReport, calibratedEstimate,
-  type CalibrationReport, presetImportance, hoursFromText, type ImportancePreset,
+  type CalibrationReport, presetImportance, hoursFromText, type ImportancePreset, restoreTargetOf,
   type AccessContext, type AvailabilityWindow, type Estimate, type SuccessCriterion, type ChecklistAnswer } from "@crossline/core";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { forecastGoals, normalizeParams, paramsFor, planSchedule, recommendNextActions, type ForecastResult, type PlanResult,
@@ -1102,18 +1102,45 @@ export function archiveWorkOrder(ctx: AccessContext, workOrderId: string, reason
   if (!workOrder) return { ok: false, code: "WORK_ORDER_NOT_FOUND" };
   if (workOrder.state === "archived") return { ok: true };
   if (workOrder.state === "accepted") return { ok: false, code: "WORK_ORDER_ALREADY_ACCEPTED" };
-  const trimmed = reason.trim();
-  if (!trimmed) return { ok: false, code: "ARCHIVE_REASON_REQUIRED" };
   const store = getStore();
+  // Keyed per attempt: a restored order can be archived again, and a fixed key would make that second archive a silent no-op.
+  const attempt = store.listEvents(ctx.workspaceId, { type: "work_order.archived", entityId: workOrderId }).length;
+  const suffix = attempt ? `:${attempt}` : "";
   // The reason rides on its own event rather than the transition: `transitionWorkOrder` carries only
   // the fields the state machine itself validates, and a discard reason is a note, not a state input.
+  // It is optional — a slip or a duplicate needs no explanation. `from` is what a restore goes back to.
   store.appendEvent({
-    ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `archive-reason:${workOrderId}`,
-    type: "work_order.archived", entityId: workOrderId, payload: { reason: trimmed.slice(0, 200), ...(options.bySystem ? { bySystem: true } : {}) }
+    ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `archive-reason:${workOrderId}${suffix}`,
+    type: "work_order.archived", entityId: workOrderId,
+    payload: { reason: reason.trim().slice(0, 200), from: workOrder.state, ...(options.bySystem ? { bySystem: true } : {}) }
   });
-  const result = store.transitionWorkOrder(ctx.workspaceId, workOrderId, { type: "archived" }, `archive:${workOrderId}`);
+  const result = store.transitionWorkOrder(ctx.workspaceId, workOrderId, { type: "archived" }, `archive:${workOrderId}${suffix}`);
   if (!result.changed) return { ok: false, code: "WORK_ORDER_NOT_ARCHIVABLE" };
   return { ok: true };
+}
+
+/** Takes an archived order back to the state it was archived from (恢复 in the archive drawer, or an undo). */
+export function restoreWorkOrder(ctx: AccessContext, workOrderId: string): ExecutionResult {
+  const workOrder = findWorkOrder(ctx.workspaceId, workOrderId);
+  if (!workOrder) return { ok: false, code: "WORK_ORDER_NOT_FOUND" };
+  if (workOrder.state !== "archived") return { ok: true };
+  const store = getStore();
+  const archives = store.listEvents(ctx.workspaceId, { type: "work_order.archived", entityId: workOrderId });
+  const to = restoreTargetOf((archives.at(-1)?.payload as { from?: string } | undefined)?.from);
+  const result = store.transitionWorkOrder(ctx.workspaceId, workOrderId, { type: "archive.restored", to },
+    `archive-restored:${workOrderId}:${archives.length}`);
+  return result.changed ? { ok: true } : { ok: false, code: "WORK_ORDER_NOT_RESTORABLE" };
+}
+
+/** Takes a discarded capture back to where it was. */
+export function restoreCapture(ctx: AccessContext, captureId: string): ExecutionResult {
+  try {
+    getStore().restoreCapture(ctx.workspaceId, captureId);
+    return { ok: true };
+  } catch (error) {
+    const code = error instanceof Error && /^[A-Z_]+$/.test(error.message) ? error.message : "CAPTURE_RESTORE_FAILED";
+    return { ok: false, code };
+  }
 }
 
 /** Discards a raw capture. The WorkOrder equivalent is `archiveWorkOrder`; captures had no exit. */
