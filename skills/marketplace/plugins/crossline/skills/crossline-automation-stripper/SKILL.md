@@ -5,7 +5,7 @@ description: Separate a captured intent into reversible AI preparation and irred
 
 # Crossline Automation Stripper
 
-Accept `crossline.analysis.v2`: `{today, capture, approvedMilestones[] (each with its deadline, empty when none), availableInputs[], identityPacks[], referenceClass[], relations[], policy}`. Return `{identityId, projectId, milestoneId, intent, family, automationParts[], humanCore[], materialContract[], evidenceContract[], estimate, estimateBreakdown[], riskTier, dates[], waitingOn, byproducts[], blockers[]}`.
+Accept `crossline.analysis.v2`: `{today, capture, approvedMilestones[] (each with its deadline, empty when none), availableInputs[], identityPacks[], referenceClass[], relations[], policy}`. `title` is the task's name: a short action starting with its verb (「完成 ECE 555 作业 2」, at most 24 characters, no closing punctuation); `intent` is the description of exactly what is to be done, written freely. Return `{identityId, projectId, milestoneId, title, intent, family, automationParts[], humanCore[], materialContract[], evidenceContract[], estimate, estimateBreakdown[], riskTier, dates[], waitingOn, byproducts[], blockers[]}`.
 
 Keep judgment, relationship ownership, authorship, and accountable decisions in `humanCore`. Automate search, extraction, comparison, formatting, and local drafts when reversible. Estimate `{p25Minutes,p50Minutes,p85Minutes,source,observationCount,confidence}` without asking for a duration. Do not perform the work or change state.
 

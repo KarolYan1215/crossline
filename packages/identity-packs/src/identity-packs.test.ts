@@ -31,13 +31,15 @@ test("an account from before keeps the built-in lines; a stored list replaces th
   const { identityPacksFor, newLineId, freeLineColor, LINE_SETTING } = await import("./index");
   expect(identityPacksFor(() => undefined).filter((pack) => pack.kind === "identity").map((pack) => pack.id)).toEqual(["research", "startup", "media", "investment"]);
   const stored = JSON.stringify([
-    { id: "research", label: "博士研究", color: "research", goal: "成为神经形态计算方向能独立立项的研究者", createdAt: "" },
+    { id: "research", label: "研究者", color: "research", goal: "成为神经形态计算方向能独立立项的研究者", createdAt: "", hard: true },
     { id: "line-music", label: "音乐", color: "teal", goal: "", createdAt: "" },
     { id: "line-old", label: "旧线", color: "olive", goal: "", createdAt: "", archived: true }
   ]);
   const packs = identityPacksFor((key) => key === LINE_SETTING ? stored : undefined);
-  expect(packs.map((pack) => [pack.id, pack.label, pack.kind])).toEqual([["research", "博士研究", "identity"], ["line-music", "音乐", "identity"], ["health", "健康容量", "capacity"]]);
-  expect(packs[0]).toMatchObject({ masterClock: true, goal: "成为神经形态计算方向能独立立项的研究者" });
+  expect(packs.map((pack) => [pack.id, pack.label, pack.kind])).toEqual([["research", "研究者", "identity"], ["line-music", "音乐", "identity"], ["health", "健康容量", "capacity"]]);
+  // The hard-constraint line carries the deadline clock; a line nobody ranked or constrained runs in parallel.
+  expect(packs[0]).toMatchObject({ masterClock: true, hard: true, goals: ["成为神经形态计算方向能独立立项的研究者"] });
+  expect(packs[1]).toMatchObject({ masterClock: false });
   // A new account with no lines yet has only the capacity pack.
   expect(identityPacksFor(() => "[]").map((pack) => pack.id)).toEqual(["health"]);
   expect(newLineId("Music 创作", ["line-music"])).toBe("line-music-2");

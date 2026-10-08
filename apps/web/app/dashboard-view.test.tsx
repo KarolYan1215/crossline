@@ -11,7 +11,7 @@ import { DashboardView, type DashboardData } from "./dashboard-view";
 const noPreviews = { taskDetailById: new Map(), milestoneDetailById: new Map() };
 /** A loaded task, as `loadTaskDetailsBatch` hands the page one. */
 const detailFor = (id: string, intent: string, identityId: string, state = "ready_for_human") => ({
-  id, ownerId: "test-owner", viewerId: "test-owner", workspaceId: "test-workspace", paused: false, identityId, identityLabel: identityId, accent: "#000", intent, state,
+  id, ownerId: "test-owner", viewerId: "test-owner", workspaceId: "test-workspace", paused: false, identityId, identityLabel: identityId, accent: "#000", title: intent, intent, state,
   riskTier: "routine" as const, estimate: { p25Minutes: 45, p50Minutes: 60, p85Minutes: 90, confidence: "low" as const, source: "identity_prior" as const, observationCount: 0 },
   manualPromotion: false, seeded: false, humanCore: [], automationParts: [], estimateBreakdown: [], byproducts: [], materialContract: [], evidenceContract: [], evidenceChecklist: [],
   preparedMaterials: [], executions: [], relatedFlywheel: [], background: null,
@@ -50,7 +50,7 @@ describe("dashboard view", () => {
   test("工作块 F: a card with a loaded TaskDetail gets inline start/complete controls, not a link to Workbench", () => {
     const taskDetailById = new Map([["paper", {
       id: "paper", ownerId: "test-owner", viewerId: "test-owner", workspaceId: "test-workspace", paused: false,
-      identityId: "research", identityLabel: "科研", accent: "#6D5EF5", intent: "完成论文结果段",
+      identityId: "research", identityLabel: "科研", accent: "#6D5EF5", title: "完成论文结果段", intent: "完成论文结果段",
       state: "ready_for_human", riskTier: "milestone" as const,
       estimate: { p25Minutes: 45, p50Minutes: 60, p85Minutes: 90, confidence: "low" as const, source: "identity_prior" as const, observationCount: 0 },
       manualPromotion: false, seeded: false, humanCore: [], automationParts: [], estimateBreakdown: [], byproducts: [], materialContract: [], evidenceContract: [], evidenceChecklist: [],

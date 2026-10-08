@@ -1,6 +1,6 @@
 import "server-only";
 import type { AccessContext } from "@crossline/core";
-import { LINE_PALETTE, LINE_SETTING, defaultIdentityPacks, freeLineColor, identityPacksFor, newLineId, readLineSpecs, type IdentityPack, type LineSpec } from "@crossline/identity-packs";
+import { LINE_PALETTE, LINE_SETTING, MAX_HARD_LINES, defaultIdentityPacks, freeLineColor, identityPacksFor, newLineId, readLineSpecs, type IdentityPack, type LineSpec } from "@crossline/identity-packs";
 import { getStore } from "./crossline";
 
 /** Every pack this workspace works with: its lines (built-in or its own) and the capacity pack. */
@@ -17,7 +17,9 @@ export const lineLabels = (ctx: AccessContext): Record<string, string> =>
 function currentSpecs(ctx: AccessContext): LineSpec[] {
   const stored = readLineSpecs((key) => getStore().getSetting(ctx.workspaceId, key));
   if (stored) return stored;
-  return defaultIdentityPacks().filter((pack) => pack.kind === "identity").map((pack) => ({ id: pack.id, label: pack.label, color: pack.id, goal: "", createdAt: "" }));
+  // Written out with the clock the account had: the built-in lines kept research first.
+  return defaultIdentityPacks().filter((pack) => pack.kind === "identity").map((pack) => ({ id: pack.id, label: pack.label, color: pack.id, goal: "", createdAt: "",
+    ...(pack.masterClock ? { rank: 1 } : {}) }));
 }
 function saveSpecs(ctx: AccessContext, specs: LineSpec[], event: { type: string; entityId: string; payload: Record<string, unknown> }): void {
   const store = getStore();
@@ -26,28 +28,51 @@ function saveSpecs(ctx: AccessContext, specs: LineSpec[], event: { type: string;
 }
 
 /** A new line: its name, its long-term goal and a free colour. Its interview (`/onboarding?line=<id>`) comes next. */
-export function addLine(ctx: AccessContext, input: { label: string; goal: string; color?: string }): { ok: true; id: string } | { ok: false; code: string } {
+export function addLine(ctx: AccessContext, input: { label: string; goal: string; color?: string; goals?: string[]; hard?: boolean; rank?: number }): { ok: true; id: string } | { ok: false; code: string } {
   const label = input.label.trim().slice(0, 20);
   if (!label) return { ok: false, code: "LINE_LABEL_REQUIRED" };
   const specs = currentSpecs(ctx);
   if (specs.some((line) => !line.archived && line.label === label)) return { ok: false, code: "LINE_LABEL_TAKEN" };
   const id = newLineId(label, specs.map((line) => line.id));
   const color = input.color && LINE_PALETTE[input.color] ? input.color : freeLineColor(specs);
-  saveSpecs(ctx, [...specs, { id, label, color, goal: input.goal.trim().slice(0, 300), createdAt: new Date().toISOString() }],
+  if (input.hard && specs.filter((line) => line.hard && !line.archived).length >= MAX_HARD_LINES) return { ok: false, code: "LINE_HARD_LIMIT" };
+  const goals = cleanGoals(input.goals ?? (input.goal ? [input.goal] : []));
+  saveSpecs(ctx, [...specs, { id, label, color, goal: goals[0] ?? "", goals, createdAt: new Date().toISOString(),
+    ...(input.hard ? { hard: true } : {}), ...(input.rank ? { rank: input.rank } : {}) }],
     { type: "line.created", entityId: id, payload: { label, color } });
   return { ok: true, id };
 }
 
 /** Renames a line, sets its goal or colour, or archives it (its work stays, filed under it). */
-export function updateLine(ctx: AccessContext, id: string, change: { label?: string; goal?: string; color?: string; archived?: boolean }): { ok: true } | { ok: false; code: string } {
+export function updateLine(ctx: AccessContext, id: string, change: { label?: string; goal?: string; goals?: string[]; color?: string; archived?: boolean; hard?: boolean; rank?: number | null }): { ok: true } | { ok: false; code: string } {
   const specs = currentSpecs(ctx);
   const line = specs.find((item) => item.id === id);
   if (!line) return { ok: false, code: "LINE_NOT_FOUND" };
+  if (change.hard && !line.hard && specs.filter((item) => item.hard && !item.archived).length >= MAX_HARD_LINES) return { ok: false, code: "LINE_HARD_LIMIT" };
+  const goals = change.goals !== undefined ? cleanGoals(change.goals) : change.goal !== undefined ? cleanGoals([change.goal, ...(line.goals ?? []).slice(1)]) : undefined;
   const next: LineSpec = { ...line,
     ...(change.label !== undefined && change.label.trim() ? { label: change.label.trim().slice(0, 20) } : {}),
-    ...(change.goal !== undefined ? { goal: change.goal.trim().slice(0, 300) } : {}),
+    ...(goals ? { goals, goal: goals[0] ?? "" } : {}),
     ...(change.color && LINE_PALETTE[change.color] ? { color: change.color } : {}),
     ...(change.archived !== undefined ? { archived: change.archived } : {}) };
+  if (change.hard === true) next.hard = true;
+  if (change.hard === false) delete next.hard;
+  if (change.rank === null) delete next.rank;
+  if (typeof change.rank === "number" && change.rank >= 1) next.rank = Math.round(change.rank);
   saveSpecs(ctx, specs.map((item) => item.id === id ? next : item), { type: "line.updated", entityId: id, payload: change });
+  return { ok: true };
+}
+
+/** Long-term goals as kept: trimmed, de-duplicated, at most eight of at most 120 characters. */
+function cleanGoals(goals: string[]): string[] {
+  return [...new Set(goals.map((goal) => goal.trim().slice(0, 120)).filter(Boolean))].slice(0, 8);
+}
+
+/** Sets the 12–24 month order: the listed lines ranked 1, 2, …; every other line runs in parallel (no rank). */
+export function rankLines(ctx: AccessContext, order: string[]): { ok: true } | { ok: false; code: string } {
+  const specs = currentSpecs(ctx);
+  const ranked = order.filter((id) => specs.some((line) => line.id === id));
+  saveSpecs(ctx, specs.map((line) => { const index = ranked.indexOf(line.id); const { rank: _rank, ...rest } = line; return index >= 0 ? { ...rest, rank: index + 1 } : rest; }),
+    { type: "line.ranked", entityId: ctx.workspaceId, payload: { order: ranked } });
   return { ok: true };
 }

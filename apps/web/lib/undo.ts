@@ -1,5 +1,5 @@
 import "server-only";
-import type { AccessContext, WorkOrderState } from "@crossline/core";
+import { taskTitleOf, type AccessContext, type WorkOrderState } from "@crossline/core";
 import { archiveWorkOrder, getStore, restoreCapture, restoreWorkOrder, saveMilestoneEdit } from "./crossline";
 
 /**
@@ -243,7 +243,7 @@ export async function withUndo<T extends { ok: boolean }>(ctx: AccessContext, la
 /** A task's or capture's own words for an undo label, shortened. */
 export function titleOf(ctx: AccessContext, id: string): string {
   const store = getStore();
-  const text = store.listWorkOrders(ctx.workspaceId).find((order) => order.id === id)?.intent
-    ?? store.listCaptures(ctx.workspaceId).find((capture) => capture.id === id)?.title ?? "";
+  const order = store.listWorkOrders(ctx.workspaceId).find((item) => item.id === id);
+  const text = (order ? taskTitleOf(order) : undefined) ?? store.listCaptures(ctx.workspaceId).find((capture) => capture.id === id)?.title ?? "";
   return text.length > 24 ? `${text.slice(0, 24)}…` : text;
 }

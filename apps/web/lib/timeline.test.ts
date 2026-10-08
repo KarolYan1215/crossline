@@ -30,7 +30,7 @@ test("the calendar carries milestone deadlines and confirmed dated facts as flag
     status: "confirmed", sourceRef: "src-1", sourceQuote: "12/7 Final Exam", updatedAt: "2026-10-02T00:00:00.000Z" });
   const timeline = await loadTimeline(TEST_CTX);
   expect(timeline.deadlines.map((deadline) => [deadline.day, deadline.title]).sort()).toEqual([["2026-10-31", "西湖论文投出"], ["2026-12-07", "ECE 555 期末考试"]]);
-  expect(timeline.labels.research).toBe("科研");
+  expect(timeline.labels.research).toBe("研究者");
   expect(Object.keys(timeline.quietByWeekday)).toHaveLength(7);
 });
 

@@ -29,14 +29,15 @@ export function TaskCard({ detail, slot, reason, variant = "compact" }: { detail
     setOpen(true);
   };
   return <article className="task-card" data-variant={variant} data-line={detail.identityId} data-state={detail.state}
-    tabIndex={0} aria-label={`${detail.intent}，打开详情`} onClick={openFrom} onKeyDown={(event) => { if (event.key === "Enter") openFrom(event); }}>
+    tabIndex={0} aria-label={`${detail.title}，打开详情`} onClick={openFrom} onKeyDown={(event) => { if (event.key === "Enter") openFrom(event); }}>
     <header className="task-card-tags">
       <LineTag line={detail.identityId}>{detail.identityLabel}</LineTag>
       {detail.projectName && <Tag tone="info">{detail.projectName}</Tag>}
       <Tag>{stateLabelFor(detail.state, detail.paused)}</Tag>
       {detail.riskTier !== "routine" && <Tag tone={riskTone[detail.riskTier] ?? "neutral"}>{riskLabel[detail.riskTier]}</Tag>}
     </header>
-    <h3 className="task-card-title">{detail.intent}</h3>
+    <h3 className="task-card-title">{detail.title}</h3>
+    {detail.intent !== detail.title && <p className="task-card-description gen">{detail.intent}</p>}
     {detail.milestone && <p className="task-card-milestone">→ {detail.milestone.title}</p>}
     {reason && <p className="task-card-reason">{reason}</p>}
     {progress !== undefined && <div className="task-card-progress">

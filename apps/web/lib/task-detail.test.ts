@@ -40,7 +40,7 @@ test("loadTaskDetail assembles milestone link, contract items, prepared material
   expect(detail?.evidenceContract).toHaveLength(1);
   expect(detail?.preparedMaterials).toEqual([{ id: "mat-1", uri: "file:///data/materials/wo-1/outline.md", fileName: "outline.md", mediaType: "text/markdown" }]);
   expect(detail?.blocker).toEqual({ reason: "缺少上周实验的原始数据" });
-  expect(detail?.identityLabel).toBe("科研");
+  expect(detail?.identityLabel).toBe("研究者");
   // The page a card links to used to know less than the card: the person's part and the step breakdown were left out.
   expect(detail?.humanCore.map((part) => part.intent)).toEqual(["判断实验结论"]);
   expect(detail?.automationParts.map((part) => part.intent)).toEqual(["整理图表草稿"]);

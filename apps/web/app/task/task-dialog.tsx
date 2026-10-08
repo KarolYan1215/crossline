@@ -166,7 +166,7 @@ type Tab = "steps" | "standards" | "materials" | "tutorial" | "record";
  * tutorial, the materials, the standards and the record (notes, sessions, completion and evidence).
  */
 export function TaskDialog({ detail, open, onOpenChange, initialTab = "steps" }: { detail: TaskDetail; open: boolean; onOpenChange: (open: boolean) => void; initialTab?: Tab }) {
-  return <Sheet title={detail.intent} open={open} onOpenChange={onOpenChange}
+  return <Sheet title={detail.title} open={open} onOpenChange={onOpenChange}
     footer={<a className="secondary" href={`/workbench/${encodeURIComponent(detail.id)}`}>完整页面</a>}>
     <TaskPanels detail={detail} initialTab={initialTab} />
   </Sheet>;
@@ -193,6 +193,7 @@ export function TaskPanels({ detail, initialTab = "steps" }: { detail: TaskDetai
         {detail.riskTier !== "routine" && <Tag tone={riskTone[detail.riskTier] ?? "neutral"}>{riskLabel[detail.riskTier]}</Tag>}
         {detail.supports.map((item) => <SupportsTag key={`${item.line}:${item.target}`} line={item.line} lineLabel={item.lineLabel} target={item.target} {...(item.artifact ? { artifact: item.artifact } : {})} />)}
       </div>
+      {detail.intent !== detail.title && <p className="task-dialog-description gen">{detail.intent}</p>}
       {detail.milestone && <p className="task-dialog-milestone">→ <a href={`/milestones/${encodeURIComponent(detail.milestone.id)}`}>{detail.milestone.title}</a></p>}
       <TaskQuickEdit workOrderId={detail.id} dueBy={detail.window.dueBy} samples={detail.estimate.observationCount} line={detail.identityId}
         editable={!["accepted", "archived"].includes(detail.state)} {...remaining} />

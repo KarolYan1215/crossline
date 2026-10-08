@@ -1,6 +1,7 @@
 import type { WorkOrder } from "./index";
 import { trimLeakedTail } from "./text-hygiene";
 import { quoteSupportsDate } from "./date-schema";
+import { cleanTaskTitle } from "./task-title";
 
 export type AnalysisContext = {
   version: string;
@@ -52,6 +53,8 @@ export type AnalysisByproduct = {
 };
 type SplitEvidence = { quote: string; rationale: string };
 export type AnalysisProposal = Omit<WorkOrder, "id" | "ownerId" | "workspaceId" | "state" | "automationParts" | "humanCore"> & {
+  /** The task's name: a short action starting with its verb (`cleanTaskTitle`); `intent` is the description. */
+  title: string;
   automationParts: Array<WorkOrder["automationParts"][number] & SplitEvidence>;
   humanCore: Array<WorkOrder["humanCore"][number] & SplitEvidence>;
   blockers: Array<{ code: string; message: string }>;
@@ -95,7 +98,7 @@ const optionalMilestoneId: Schema = { type: "string", minLength: 0, maxLength: 4
 /** Empty string means "none" — the same sentinel convention as `milestoneId`; `matches()` has no null. */
 const optionalText: Schema = { type: "string", minLength: 0, maxLength: 300 };
 export const ANALYSIS_OUTPUT_SCHEMA = object({
-  identityId: str, projectId: str, milestoneId: optionalMilestoneId, intent: str, family,
+  identityId: str, projectId: str, milestoneId: optionalMilestoneId, title: str, intent: str, family,
   automationParts: array(object({ id: str, intent: str, reversibility: choice("local"), quote: str, rationale: str })),
   humanCore: array(object({ id: str, intent: str, energy: choice("low", "medium", "high"), interruptible: bool, quote: str, rationale: str }), 1),
   // Eight, not thirty-two: no real contract has thirty-two lines, and a large allowance is room the
@@ -175,12 +178,14 @@ export function validateAnalysisProposal(value: unknown, input: AnalysisContext)
   const legacyExtras: Record<string, unknown> = withBreakdown && typeof withBreakdown === "object" ? {
     ...(!("dates" in withBreakdown) ? { dates: [] } : {}),
     ...(!("waitingOn" in withBreakdown) ? { waitingOn: { who: "", what: "", expectedDate: "", quote: "" } } : {}),
-    ...(!("byproducts" in withBreakdown) ? { byproducts: [] } : {})
+    ...(!("byproducts" in withBreakdown) ? { byproducts: [] } : {}),
+    ...(!("title" in withBreakdown) ? { title: cleanTaskTitle(String((withBreakdown as { intent?: unknown }).intent ?? "")) || "未命名任务" } : {})
   } : {};
   const candidate = Object.keys(legacyExtras).length ? { ...(withBreakdown as object), ...legacyExtras } : withBreakdown;
   if (!matches(candidate, ANALYSIS_OUTPUT_SCHEMA)) throw new Error("ANALYSIS_SCHEMA_INVALID");
   const injected = withBreakdown !== value;
   const proposal = candidate as AnalysisProposal;
+  proposal.title = cleanTaskTitle(proposal.title) || cleanTaskTitle(proposal.intent);
   // The identity is a free string in the schema (the set of lines is not known until the context is built), so the check that it
   // names a real one has to live here. Without it a task that fit no line came back with the identity `\`, was accepted, and sat
   // on the real board under a line called 「\」 that no page can open.

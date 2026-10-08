@@ -1,5 +1,5 @@
 import "server-only";
-import { archetypeById, goalSettingKey, relevantDocuments, taskProgress, type AccessContext, type SuccessCriterion, type EvidenceQuestionTemplate } from "@crossline/core";
+import { archetypeById, goalSettingKey, relevantDocuments, taskProgress, taskTitleOf, type AccessContext, type SuccessCriterion, type EvidenceQuestionTemplate } from "@crossline/core";
 import { listAgentTasks, type CrosslineStore, type StoredMilestone, type StoredWorkOrder, type StoredMaterial, type StoredExecution, type StoredMilestoneRelation,
   type StoredBackgroundFact, type StoredTaskStep } from "@crossline/db";
 import { defaultIdentityPacks, identityPacksFor } from "@crossline/identity-packs";
@@ -93,6 +93,8 @@ export type TaskDetail = {
   identityId: string;
   identityLabel: string;
   accent: string;
+  /** The task's name: a short action from its verb. `intent` is the description. */
+  title: string;
   intent: string;
   state: string;
   riskTier: "routine" | "milestone" | "high_risk";
@@ -254,7 +256,7 @@ function assembleTaskDetail(ctx: AccessContext, order: StoredWorkOrder, deps: {
 
   return {
     id: order.id, ownerId: order.ownerId, viewerId: ctx.principalId, workspaceId: order.workspaceId, paused: pausedFrom(executions),
-    identityId: order.identityId, identityLabel, accent, intent: order.intent, state: order.state,
+    identityId: order.identityId, identityLabel, accent, title: taskTitleOf(order), intent: order.intent, state: order.state,
     riskTier: order.riskTier, estimate: resolvedEstimate(ctx, order),
     ...(() => { const minutes = order.state === "active" ? suggestedSessionMinutes(ctx, order.id) : undefined; return minutes ? { suggestedMinutes: minutes } : {}; })(), manualPromotion: Boolean(payload.manualPromotion), seeded: Boolean(payload.seeded),
     ...(deps.milestone ? { milestone: { id: deps.milestone.id, title: deps.milestone.title } } : {}),

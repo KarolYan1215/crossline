@@ -34,6 +34,32 @@ export type FlywheelCandidate = {
   explanation: string; evidenceRefs: string[]; status: "inferred";
 };
 export type TurnCoverage = { identityId: string; filled: string[]; missing: string[] };
+
+/**
+ * Where the interview is (decided 2026-10-08): it starts from nothing and goes, one question at a time, through how the app works, where
+ * the person stands, their compass, their energy, their lines, three five-year versions, each line's specifics, and ends in a portrait.
+ * A line's own interview (`focusLine`) runs only `details` for that line.
+ */
+export const ONBOARDING_STAGES = ["orientation", "situation", "compass", "energy", "lines", "odyssey", "details", "blueprint"] as const;
+export type OnboardingStage = (typeof ONBOARDING_STAGES)[number];
+/** The facts that are about the person rather than one line (their compass, their energy) are filed under this id. */
+export const PERSON_LINE = "person";
+
+/**
+ * The working portrait, rewritten in full every turn from everything said so far: the problem as the person states it and as it really is
+ * (what is gravity — a fact to accept — and what can be designed), their view of work and of life, what gives and drains energy and where
+ * they reach flow, the anchor holding them in place, the rule that allocates their attention across lines, and three five-year versions.
+ * It is the interviewer's synthesis, shown as such; facts with quotes stay in `slotUpdates`.
+ */
+export type ProfileModel = {
+  problem: string; gravity: string[]; designable: string[]; workView: string; lifeView: string;
+  energizing: string[]; draining: string[]; flow: string[]; anchor: string; allocation: string;
+  odyssey: Array<{ title: string; summary: string }>;
+};
+export const EMPTY_PROFILE_MODEL: ProfileModel = { problem: "", gravity: [], designable: [], workView: "", lifeView: "", energizing: [], draining: [],
+  flow: [], anchor: "", allocation: "", odyssey: [] };
+/** A line the interviewer proposes from what it heard; the person confirms it (and its long-term goal) before it exists. */
+export type ProposedLine = { label: string; goal: string; why: string };
 export type OnboardingTurn = {
   reply: string;
   questions: TurnQuestion[];
@@ -48,6 +74,11 @@ export type OnboardingTurn = {
    */
   fileDates?: DateExtraction;
   nextAction: "ask" | "ready_for_milestones";
+  stage?: OnboardingStage;
+  linesProposed?: ProposedLine[];
+  profile?: ProfileModel;
+  /** The portrait as a report, written at the end (`stage: "blueprint"`); "" before. */
+  blueprint?: string;
 };
 
 /** What the Skill is shown at the start of the interview (later turns only carry the new reply). */
@@ -59,6 +90,10 @@ export type OnboardingTurnContext = {
   projects: Array<{ id: string; identityId: string; name: string; summary: string }>;
   facts: Array<{ identityId: string; projectId: string; slot: string; value: string; status: string }>;
   sources: Array<{ id: string; fileName: string; kind: string; projectId: string; text: string }>;
+  /** A line's own interview: only this line is asked about. Absent for the full interview. */
+  focusLine?: { id: string; label: string; goal: string } | null;
+  /** The portrait so far and the stage reached, so a rebuilt thread carries on rather than starting over. */
+  profile?: ProfileModel; stage?: OnboardingStage;
   /** Only when the conversation had to be rebuilt in a fresh thread: what was said before, oldest first. User lines carry their `reply-N` id. */
   history?: Array<{ id: string; role: "user" | "assistant"; text: string }>;
   reply: { id: string; text: string };
@@ -82,7 +117,9 @@ const object = (properties: Record<string, unknown>) =>
 export const ONBOARDING_TURN_SCHEMA = object({
   reply: text(1500),
   questions: {
-    type: "array", maxItems: 6,
+    // A batch of questions that do not depend on each other (decided 2026-10-08): answered one by one on screen and sent together. A question
+    // whose answer depends on another's waits for the next turn.
+    type: "array", maxItems: 5,
     items: object({
       id: slug, text: text(400), kind: { type: "string", enum: ["single", "multi", "free"] },
       options: {
@@ -123,7 +160,17 @@ export const ONBOARDING_TURN_SCHEMA = object({
     })
   },
   fileDates: DATE_EXTRACTION_SCHEMA,
-  nextAction: { type: "string", enum: ["ask", "ready_for_milestones"] }
+  nextAction: { type: "string", enum: ["ask", "ready_for_milestones"] },
+  stage: { type: "string", enum: [...ONBOARDING_STAGES] },
+  linesProposed: { type: "array", maxItems: 8, items: object({ label: text(20), goal: { type: "string", maxLength: 300 }, why: { type: "string", maxLength: 300 } }) },
+  profile: object({
+    problem: { type: "string", maxLength: 600 }, gravity: { type: "array", maxItems: 8, items: text(200) }, designable: { type: "array", maxItems: 8, items: text(200) },
+    workView: { type: "string", maxLength: 600 }, lifeView: { type: "string", maxLength: 600 },
+    energizing: { type: "array", maxItems: 8, items: text(200) }, draining: { type: "array", maxItems: 8, items: text(200) }, flow: { type: "array", maxItems: 8, items: text(200) },
+    anchor: { type: "string", maxLength: 600 }, allocation: { type: "string", maxLength: 600 },
+    odyssey: { type: "array", maxItems: 3, items: object({ title: text(20), summary: text(800) }) }
+  }),
+  blueprint: { type: "string", maxLength: 20_000 }
 });
 
 const SLOT = /^[a-z][a-z0-9_]{1,39}$/;
@@ -146,7 +193,7 @@ export function validateOnboardingTurn(value: unknown, known: KnownSources): Onb
     || (turn.nextAction !== "ask" && turn.nextAction !== "ready_for_milestones")) {
     reject("ONBOARDING_TURN_SCHEMA_INVALID", "输出结构不符合要求。");
   }
-  const identities = new Set(known.identities);
+  const identities = new Set([...known.identities, PERSON_LINE]);
   const projectIds = new Set(known.projectIds);
   for (const project of turn.projectsDetected) {
     if (!ID.test(project.id)) reject("ONBOARDING_PROJECT_ID_INVALID", `项目 id「${project.id}」只能含字母、数字、下划线和连字符。`);
@@ -196,5 +243,7 @@ export function validateOnboardingTurn(value: unknown, known: KnownSources): Onb
     }
   }
   if (turn.nextAction === "ask" && !turn.questions.length) reject("ONBOARDING_QUESTION_REQUIRED", "还没问完，这一轮必须至少提出一个问题。");
-  return turn;
+  for (const line of turn.linesProposed ?? []) if (!line.label.trim()) reject("ONBOARDING_LINE_LABEL_REQUIRED", "提议的主线需要名称。");
+  // A turn recorded before the portrait existed has none of it; every live answer carries all of it (strict schema).
+  return { ...turn, stage: turn.stage ?? "details", linesProposed: turn.linesProposed ?? [], profile: { ...EMPTY_PROFILE_MODEL, ...(turn.profile ?? {}) }, blueprint: turn.blueprint ?? "" };
 }

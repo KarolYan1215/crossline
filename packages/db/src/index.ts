@@ -1618,10 +1618,10 @@ export class CrosslineStore {
       createdAt: row.created_at!, updatedAt: row.updated_at! };
   }
 
-  /** The workspace's current onboarding conversation: the most recently touched one. */
+  /** The workspace's current onboarding conversation: the most recently touched one. A line's own interview (`line-<id>`) is not it. */
   getLatestOnboardingSession(workspaceId: string): StoredOnboardingSession | undefined {
     const row = this.#db.prepare(
-      "SELECT * FROM onboarding_sessions WHERE workspace_id = ? ORDER BY updated_at DESC, rowid DESC LIMIT 1"
+      "SELECT * FROM onboarding_sessions WHERE workspace_id = ? AND id NOT LIKE 'line-%' ORDER BY updated_at DESC, rowid DESC LIMIT 1"
     ).get(workspaceId) as Record<string, string> | undefined;
     return row ? this.#onboardingSessionFrom(row) : undefined;
   }

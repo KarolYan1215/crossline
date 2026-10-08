@@ -7,7 +7,7 @@ import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 import { CrosslineStore, type EvidenceClaimInput, type StoredMilestone } from "@crossline/db";
 import { availableSlots, deriveCapacity, requiredApproval, validateAvailability, DEFAULT_AVAILABILITY,
   defaultMilestoneTemplates, computeMilestoneConfidence, PRODUCTIVE, type ActivityCategory, validateSuccessCriteria, goalSettingKey, ANALYSIS_CONTEXT_VERSION, calibrationReport, calibratedEstimate,
-  type CalibrationReport, presetImportance, hoursFromText, type ImportancePreset, restoreTargetOf,
+  type CalibrationReport, presetImportance, taskTitleOf, type ImportancePreset, restoreTargetOf,
   type AccessContext, type AvailabilityWindow, type Estimate, type SuccessCriterion, type ChecklistAnswer } from "@crossline/core";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { forecastGoals, normalizeParams, paramsFor, planSchedule, recommendNextActions, type ForecastResult, type PlanResult,
@@ -106,17 +106,13 @@ export function saveGoalSettings(ctx: AccessContext, id: string, input: { import
 export const IMPORTANT_WEIGHT = 60;
 
 /**
- * The system's suggested importance for every live milestone (`presetImportance`): the line's share of the person's stated weekly
- * hours, the relations through it, what is at stake, and how the person has moved this line's sliders before. Derived on read.
+ * The system's suggested importance for every live milestone (`presetImportance`): its line's place in the person's order (hard
+ * constraint, rank, or parallel), the relations through it, what is at stake, and how the person has moved this line's sliders before. Derived on read.
  */
 export function importancePresets(ctx: AccessContext, options: { withHistory?: boolean } = {}): Map<string, ImportancePreset> {
   const store = getStore();
   const facts = store.listProfileFacts(ctx.workspaceId);
-  const weeklyHoursByLine: Record<string, number> = {};
-  for (const fact of facts.filter((item) => item.slot === "weekly_hours" && !/所有|全部|合计.*所有/.test(item.value))) {
-    const hours = hoursFromText(fact.value);
-    if (hours !== null) weeklyHoursByLine[fact.identityId] = Math.max(weeklyHoursByLine[fact.identityId] ?? 0, hours);
-  }
+  const standing = new Map(linePacks(ctx).map((pack) => [pack.id, { rank: pack.rank ?? null, hard: Boolean(pack.hard) }]));
   const milestones = store.listMilestones(ctx.workspaceId).filter((item) => item.status !== "archived");
   const relations = store.listMilestoneRelations(ctx.workspaceId).filter((item) => item.status === "approved" || item.status === "candidate");
   const degree = (id: string) => relations.filter((item) => item.fromMilestoneId === id || item.toMilestoneId === id).length;
@@ -138,7 +134,7 @@ export function importancePresets(ctx: AccessContext, options: { withHistory?: b
   }
   return new Map(milestones.map((item) => {
     const deadline = readGoalSettings(ctx, item.id)?.confirmedDeadline ?? anchors.get(item.id) ?? null;
-    return [item.id, presetImportance({ weeklyHoursByLine, line: item.identityId, relations: degree(item.id), maxRelations,
+    return [item.id, presetImportance({ standing: standing.get(item.identityId) ?? { rank: null, hard: false }, line: item.identityId, relations: degree(item.id), maxRelations,
       graded: Boolean(item.projectId && graded.has(item.projectId)),
       daysToDeadline: deadline ? Math.round((Date.parse(`${deadline}T12:00:00Z`) - Date.parse(`${today}T12:00:00Z`)) / 86_400_000) : null,
       pastAdjustments: [...(adjustments.get(item.identityId)?.values() ?? [])] })];
@@ -713,7 +709,7 @@ async function scheduledBlocks(ctx: AccessContext, today: string, committed: Per
   const placed = result.plan.blocks.filter((block) => !block.frozen);
   const orderStates = new Map(orders.map((order) => [order.id, order.state]));
   const itemById = new Map(expanded.map((item) => [item.task.id, item]));
-  const intents = new Map(orders.map((order) => [order.id, order.intent]));
+  const intents = new Map(orders.map((order) => [order.id, taskTitleOf(order)]));
   const tentative = (taskId: string) => ["approved", "preparing"].includes(orderStates.get(taskId.split("#")[0]!) ?? "");
   const named = (taskId: string) => { const item = itemById.get(taskId); return { title: item?.title ?? taskId, task: intents.get(item?.orderId ?? "") ?? item?.title ?? taskId,
     ...(item?.step ? { step: item.step } : {}) }; };
@@ -750,7 +746,7 @@ async function scheduledBlocks(ctx: AccessContext, today: string, committed: Per
       .map((block) => ({ taskId: plannerIdOfBlock(block.id), start: iso(block.day!, block.start), end: iso(block.day!, block.end) })),
       ...result.plan.blocks.map((block) => ({ taskId: block.taskId, start: block.start, end: block.end }))]
   }).catch(() => undefined) : undefined;
-  const proposalTitles = new Map(proposals.map((order) => [order.id, order.intent]));
+  const proposalTitles = new Map(proposals.map((order) => [order.id, taskTitleOf(order)]));
   const previewSeen = new Map<string, number>();
   const previewBlocks = (preview?.plan.blocks ?? []).filter((block) => !block.frozen && proposalTitles.has(block.taskId)).map((block) => {
     const index = (previewSeen.get(block.taskId) ?? 0) + 1;
@@ -1378,7 +1374,7 @@ export function planRanking(ctx: AccessContext, plan: PersistedPlan): RankedTask
       .sort((a, b) => `${a.day} ${a.start}`.localeCompare(`${b.day} ${b.start}`));
     const blocker = plan.schedule.blockers.find((item) => item.taskId === order.id || item.taskId.startsWith(`${order.id}#`));
     const local = (instant: string | undefined) => instant ? formatInTimeZone(new Date(instant), zone, "yyyy-MM-dd") : null;
-    return { id: order.id, title: order.intent, line: order.identityId, milestoneId: order.milestoneId, tier: task.deadlineTier,
+    return { id: order.id, title: taskTitleOf(order), line: order.identityId, milestoneId: order.milestoneId, tier: task.deadlineTier,
       weight: task.weight, deadline: local(task.deadline), notBefore: local(task.notBefore),
       firstDay: blocks[0]?.day ?? null, firstStart: blocks[0]?.start ?? null,
       weekMinutes: blocks.filter((block) => block.day! >= today && block.day! < weekEnd).reduce((sum, block) => sum + minutesOf(block), 0),

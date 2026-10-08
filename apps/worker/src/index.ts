@@ -19,6 +19,7 @@ import { createFlywheelExpander } from "./flywheel";
 import { createManualbookBuilder, pendingMaterialWorkOrders, pendingTutorials } from "./manualbook";
 import { createProgressJudge, createStepPlanner, createWarningReviewer, reportsAwaitingJudgement, tasksAwaitingStepPlan, warningsAwaitingReview } from "./step-planner";
 import { createArchetypeCurator, curationDue } from "./archetype-curator";
+import { createTaskTitler, untitledTasks } from "./task-titler";
 import { materializeDatePairs } from "./date-pairs";
 import { createInputRouter } from "./input-router";
 import { createMilestoneGate, pendingMilestoneGates } from "./milestone-gate-runner";
@@ -147,6 +148,20 @@ async function curatorPass(workspaceId: string, checkedAt: string): Promise<void
   } finally { curating.delete(workspaceId); }
 }
 
+/** Names tasks written before short names existed, a batch a tick, while the quota is normal. */
+const titling = new Set<string>();
+async function titlePass(workspaceId: string, checkedAt: string): Promise<void> {
+  if (titling.has(workspaceId) || !codexSupervisor || !untitledTasks(analysisStore, workspaceId).length) return;
+  const signal = await readCost();
+  if (!signal.available || budgetPolicy(Math.max(signal.short?.usedPercent ?? 0, signal.long?.usedPercent ?? 0)).mode !== "normal") return;
+  titling.add(workspaceId);
+  try {
+    enterUsageWorkspace(workspaceId);
+    const outcome = await createTaskTitler(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client)().catch(() => undefined);
+    if (outcome) console.info(JSON.stringify({ type: "tasks.titled", checkedAt, workspaceId, ...outcome }));
+  } finally { titling.delete(workspaceId); }
+}
+
 const stepPlanning = new Set<string>();
 async function stepPlanPass(workspaceId: string, checkedAt = new Date().toISOString()): Promise<void> {
   if (stepPlanning.has(workspaceId)) return;
@@ -234,6 +249,7 @@ async function tick(): Promise<void> {
   }
   for (const workspace of workspaces) await stepPlanPass(workspace.id, checkedAt);
   for (const workspace of workspaces) await curatorPass(workspace.id, checkedAt);
+  for (const workspace of workspaces) await titlePass(workspace.id, checkedAt);
   // The milestone gate. Without this it existed only inside `scripts/gate-loop-check.ts`, so on the
   // real ledger a milestone-bound work order reached `evidence_review`, the approvals page said
   // 「等待里程碑闸门」 — and nothing was ever going to judge it. A verdict other than `pass` holds the
@@ -623,7 +639,7 @@ if (!capabilitySecret) {
         "crossline:crossline-flywheel-scout", "crossline:crossline-manualbook-designer", "crossline:crossline-material-researcher", "crossline:crossline-material-writer", "crossline:crossline-milestone-architect",
         "crossline:crossline-goal-backplanner", "crossline:crossline-background-facts", "crossline:crossline-assistant",
         "crossline:crossline-onboarding", "crossline:crossline-due-diligence", "crossline:crossline-plan-explainer", "crossline:crossline-weekly-insight",
-        "crossline:crossline-agent", "crossline:crossline-step-planner", "crossline:crossline-validation-reviewer", "crossline:crossline-progress-judge", "crossline:crossline-input-router", "crossline:crossline-archetype-curator"
+        "crossline:crossline-agent", "crossline:crossline-step-planner", "crossline:crossline-validation-reviewer", "crossline:crossline-progress-judge", "crossline:crossline-input-router", "crossline:crossline-archetype-curator", "crossline:crossline-task-titler"
       ]
     },
     autoAnalyzeCaptures: (workspaceId) => autoAnalyzePass(workspaceId),

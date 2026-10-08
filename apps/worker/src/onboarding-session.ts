@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
-  ONBOARDING_TURN_SCHEMA, answeredGapFacts, mergeFacts, profileGaps, sanitizeDateExtraction, validateOnboardingTurn,
-  type ProfileGap,
+  EMPTY_PROFILE_MODEL, ONBOARDING_TURN_SCHEMA, answeredGapFacts, mergeFacts, profileGaps, sanitizeDateExtraction, validateOnboardingTurn,
+  type ProfileGap, type ProfileModel, type OnboardingStage,
   type KnownSources, type OnboardingTurn, type OnboardingTurnContext
 } from "@crossline/core";
 import { continueSkillTurn, runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
@@ -15,24 +15,24 @@ export const ONBOARDING_SKILL = "crossline:crossline-onboarding";
 const SOURCE_TEXT_PER_DOCUMENT = 14_000;
 const SOURCE_TEXT_TOTAL = 60_000;
 
-const INSTRUCTIONS = "You are building a profile of a new Crossline user. Do not propose milestones. Ask several "
-  + "related questions per turn, each with 8-14 concrete candidate options when the answer space is large "
-  + "(especially for what is stuck and for connections between lines), and always allow the person to write their "
-  + "own. Learn, for every line AND every separate project inside it: what, for_whom, stage, goal, deadline, "
-  + "blockers, collaborators, evidence, local_assets, weekly_hours, tools. Read the supplied sources. Every "
-  + "confirmed slotUpdate must cite a reply-N or src-N and carry a verbatim sourceQuote copied character for "
-  + "character from it; anything you worked out yourself is sourceRef 'inference' with status 'inferred' and an "
-  + "empty quote. Never invent dates, numbers or names. Requirements that the person says came from other people "
-  + "are fixed; the person's own vague requirements are for the app to research, so record them rather than asking "
-  + "the person to specify them. `reply` is read by a person: no mention of validation, ids, schemas or this app's "
-  + "internals. Files that arrive (`sources`, `newSources`) are for you to read: put every date they state into "
-  + "`fileDates` — class meetings as weekly patterns (with holidays as exceptions), quizzes, homework release and due "
-  + "dates, exams, project and report deadlines, never every lecture or table row. Each needs a quote copied "
-  + "verbatim from one contiguous span of the file that contains the day itself; never add a date or a time the file "
-  + "does not give, never turn TBD into a date (list a due/exam/quiz the file marks TBD or to-be-announced in `undated` with its verbatim quote, so it is not lost), A table row may end with a note like `[列 Quiz=#2 | Project=Out]`: the app worked out which column each marker sits under from the page's layout, so read the marker by that note (a `#2` under Quiz is quiz 2, under Homework Out is homework 2 handed out) and give such a row high confidence. Only when a PDF table's columns were flattened and there is no such note return the row with "
-  + "confidence low and say what the two readings are. Leave `fileDates` empty when no file arrived. When `history` is present this is a conversation being resumed in a new thread: continue it, do not "
-  + "greet again and do not re-ask what the profile or the history already answers. Write all human-readable "
-  + "fields in Chinese.";
+const INSTRUCTIONS = "You interview a Crossline user from nothing, as the Skill describes: a life designer's interview in stages "
+  + "(orientation, situation, compass, energy, lines, odyssey, details, blueprint), never proposing milestones. Each turn: a short, "
+  + "sharp reflection on what was just said (name a contradiction, a self-imposed limit, or gravity mistaken for a problem; never judge "
+  + "a choice or decide for the person), then a batch of up to five questions that do not depend on each other — a question whose answer "
+  + "depends on another's waits for the next turn; follow a thread that carries a clue (when, which thing exactly, what it felt like) "
+  + "before returning to the stage. Every single/multi question has concrete candidate options (8-14 when the space is large) and "
+  + "allows the person's own answer. Rewrite `profile` in full every turn from everything said so far (it is your synthesis, shown as "
+  + "such); propose lines in `linesProposed` (name, long-term goal as who they are becoming, why) once you have heard them — the person "
+  + "confirms them; treat lines as one flywheel, not competing identities, and work out with them which line is the base for the next "
+  + "12-24 months and how the others feed it. Facts about the person in general use identityId \"person\"; facts about a line use its "
+  + "id once it exists. When `focusLine` is set, interview only that line (stage `details`): what it is, where it stands, its "
+  + "long-term goal, its projects, deadlines, files, weekly hours, and how it feeds the other lines. Every confirmed slotUpdate cites a "
+  + "reply-N or src-N with a verbatim sourceQuote; your own conclusions are sourceRef 'inference', status 'inferred', empty quote. "
+  + "Never invent dates, numbers or names. Files that arrive are for you to read: put every date they state into `fileDates` "
+  + "(class meetings as weekly patterns, quizzes, homework release and due dates, exams, deadlines), each with a verbatim quote that "
+  + "contains the day; never turn TBD into a date (list it in `undated`). Leave `fileDates` empty when no file arrived. When "
+  + "`history` is present the conversation is being resumed: continue it, do not greet again or re-ask what is answered. Write "
+  + "`blueprint` only at the end (stage blueprint), as the full portrait report. All human-readable fields in Chinese.";
 
 export type OnboardingTurnOutcome =
   | { state: "asked" | "ready"; sessionId: string }
@@ -74,9 +74,18 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     });
   };
 
+  /** The portrait so far (`profile.model`) and the report (`profile.blueprint`), kept in settings so every page and a rebuilt thread read the same. */
+  const readProfile = (): ProfileModel => {
+    try { return { ...EMPTY_PROFILE_MODEL, ...(JSON.parse(store.getSetting(workspaceId, "profile.model") ?? "{}") as Partial<ProfileModel>) }; }
+    catch { return EMPTY_PROFILE_MODEL; }
+  };
+
   /** Writes what a validated turn learned. Facts the person already confirmed are protected by the store. */
   function persistTurn(turn: OnboardingTurn, sessionId: string, ownerId: string): void {
     const now = new Date().toISOString();
+    // A line's own interview adds to the facts but does not rewrite the person's whole portrait.
+    if (!sessionId.startsWith("line-") && turn.profile) store.setSetting(workspaceId, "profile.model", JSON.stringify(turn.profile));
+    if (!sessionId.startsWith("line-") && turn.blueprint?.trim()) store.setSetting(workspaceId, "profile.blueprint", turn.blueprint);
     for (const project of turn.projectsDetected) {
       const existing = store.listProjects(workspaceId, { includeArchived: true }).find((item) => item.id === project.id);
       store.saveProject({ id: project.id, ownerId, workspaceId, identityId: project.identityId, name: project.name,
@@ -170,6 +179,9 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     const announced = input.reread ? new Set<string>() : new Set((session.coverage as Announced).announcedSources ?? []);
     const fresh = [...docs].filter(([id, doc]) => doc.extractionStatus === "done" && !announced.has(id));
 
+    // `line-<id>`: the interview of one line, added after the first one.
+    const focus = sessionId.startsWith("line-") ? identityLines(store, workspaceId).find((line) => line.id === sessionId.slice(5)) : undefined;
+    const focusLine = focus ? { id: focus.id, label: focus.label, goal: focus.goal ?? "" } : null;
     let threadId = session.codexThreadId;
     let announcedNow = announced;
     let sent = fresh;
@@ -182,7 +194,8 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         identities: identities(),
         projects: store.listProjects(workspaceId).map(({ id, identityId, name, summary }) => ({ id, identityId, name, summary })),
         facts: store.listProfileFacts(workspaceId).map(({ identityId, projectId, slot, value, status }) => ({ identityId, projectId, slot, value, status })),
-        today, timeZone, sources: clipDocuments(documents), ...(history ? { history } : {}), reply: { id: replyId, text: replyText }
+        today, timeZone, sources: clipDocuments(documents), ...(history ? { history } : {}), reply: { id: replyId, text: replyText },
+        focusLine, profile: readProfile(), stage: ((session!.coverage as { stage?: OnboardingStage }).stage ?? (focusLine ? "details" : "orientation"))
       };
       return runCodexSkill<OnboardingTurn>(client, context, {
         skillName: ONBOARDING_SKILL, cwd, developerInstructions: INSTRUCTIONS, outputSchema: ONBOARDING_TURN_SCHEMA,
@@ -221,7 +234,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     store.saveOnboardingSession({
       ...session, ...(threadId ? { codexThreadId: threadId } : {}),
       state: output.nextAction === "ready_for_milestones" ? "complete" : "active",
-      coverage: { ...session.coverage, coverage: output.coverage,
+      coverage: { ...session.coverage, coverage: output.coverage, ...(output.stage ? { stage: output.stage } : {}),
         announcedSources: [...announcedNow, ...sent.map(([id]) => id)] },
       updatedAt: new Date().toISOString()
     });

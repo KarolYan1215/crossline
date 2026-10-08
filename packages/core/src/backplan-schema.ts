@@ -12,7 +12,8 @@
  * (`acquires` names which missing input a step obtains; "" for an ordinary step).
  */
 import { TASK_MINUTES } from "./steps";
-export type BackplanStep = { id: string; intent: string; sourceQuote: string; rationale: string; dependsOn: string[];
+import { cleanTaskTitle } from "./task-title";
+export type BackplanStep = { id: string; title: string; intent: string; sourceQuote: string; rationale: string; dependsOn: string[];
   estimate: { p25Minutes: number; p50Minutes: number; p85Minutes: number };
   energy: "low" | "medium" | "high"; interruptible: boolean;
   family: "preparation" | "review" | "deep_work";
@@ -40,7 +41,7 @@ const str = { type: "string" };
 const object = (properties: Record<string, unknown>) => ({ type: "object", properties,
   required: Object.keys(properties), additionalProperties: false });
 export const BACKPLAN_SCHEMA = object({ steps: { type: "array", items: object({
-  id: str, intent: str, sourceQuote: str, rationale: str,
+  id: str, title: str, intent: str, sourceQuote: str, rationale: str,
   dependsOn: { type: "array", items: str },
   estimate: object({ p25Minutes: { type: "number" }, p50Minutes: { type: "number" }, p85Minutes: { type: "number" } }),
   energy: { type: "string", enum: ["low", "medium", "high"] }, interruptible: { type: "boolean" },
@@ -79,6 +80,8 @@ export function validateBackplan(value: unknown, sources: string[], dateSources 
       || !sources.some((source) => source.includes(step.sourceQuote))) throw new Error("BACKPLAN_SOURCE_INVALID");
     if (!Array.isArray(step.dependsOn) || step.dependsOn.some((id) => !seen.has(id)))
       throw new Error("BACKPLAN_DEPENDENCY_INVALID");
+    // The task's name (a short action from its verb); an answer recorded before names existed gets the first clause of its intent.
+    step.title = cleanTaskTitle(typeof step.title === "string" ? step.title : "") || cleanTaskTitle(step.intent);
     const { p25Minutes, p50Minutes, p85Minutes } = step.estimate ?? {};
     if (![p25Minutes, p50Minutes, p85Minutes].every((minutes) => Number.isFinite(minutes) && minutes > 0 && minutes <= 10080)
       || p25Minutes > p50Minutes || p50Minutes > p85Minutes) throw new Error("BACKPLAN_ESTIMATE_INVALID");

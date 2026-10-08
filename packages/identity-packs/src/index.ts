@@ -12,6 +12,16 @@ export type IdentityPack = {
   color?: string;
   /** The line's long-term goal: an abstract description of who the person is becoming on this line (not a dated outcome). */
   goal?: string;
+  /**
+   * Long-term goals, each 「成为 ___ 的 <身份>」 — a line can have several; `goal` is the first. Descriptive identity goals that are
+   * never "done" (Gollwitzer's identity goals; the top of Carver & Scheier's hierarchy), above milestones (an achieved state) and tasks
+   * (an action).
+   */
+  goals?: string[];
+  /** A hard constraint (at most two lines): its fixed schedule is the immovable frame, its deadlines come first, and it shapes the hours. */
+  hard?: boolean;
+  /** Priority for the next 12–24 months (1 = the base line); absent = parallel with the other unranked lines. */
+  rank?: number;
 };
 
 const commonPriors = {
@@ -24,7 +34,7 @@ export function defaultIdentityPacks(): IdentityPack[] {
   return [
     {
       id: "research",
-      label: "科研",
+      label: "研究者",
       kind: "identity",
       masterClock: true,
       workflowTemplates: ["paper-reading", "experiment-prep", "meeting-prep", "research-writing"],
@@ -34,7 +44,7 @@ export function defaultIdentityPacks(): IdentityPack[] {
     },
     {
       id: "startup",
-      label: "创业",
+      label: "创业者",
       kind: "identity",
       masterClock: false,
       workflowTemplates: ["public-prospect-research", "outreach-draft", "milestone-review"],
@@ -44,7 +54,7 @@ export function defaultIdentityPacks(): IdentityPack[] {
     },
     {
       id: "media",
-      label: "自媒体",
+      label: "创作者",
       kind: "identity",
       masterClock: false,
       workflowTemplates: ["evidence-to-topic", "script-package", "content-ops-job"],
@@ -54,7 +64,7 @@ export function defaultIdentityPacks(): IdentityPack[] {
     },
     {
       id: "investment",
-      label: "投资",
+      label: "投资者",
       kind: "identity",
       masterClock: false,
       workflowTemplates: ["pre-market-brief", "midday-check", "close-review"],
@@ -83,7 +93,10 @@ export function defaultIdentityPacks(): IdentityPack[] {
  * gets its lines from onboarding. The capacity pack (health) is not a line and is always there.
  */
 export const LINE_SETTING = "lines.v1";
-export type LineSpec = { id: string; label: string; color: string; goal: string; createdAt: string; archived?: boolean };
+export type LineSpec = { id: string; label: string; color: string; goal: string; createdAt: string; archived?: boolean;
+  goals?: string[]; hard?: boolean; rank?: number };
+/** At most this many lines may be hard constraints. */
+export const MAX_HARD_LINES = 2;
 
 /**
  * Line colours, each readable as text at 7:1 on white (light) and on the dark background (dark). The built-in four keep the colours
@@ -116,10 +129,15 @@ export function identityPacksFor(read: (key: string) => string | undefined, opti
   const lines = specs.filter((line) => options.includeArchived || !line.archived).map((line): IdentityPack => {
     const builtIn = defaults.find((pack) => pack.id === line.id && pack.kind === "identity");
     return { ...(builtIn ?? { id: line.id, kind: "identity" as const, masterClock: false, workflowTemplates: [], evidencePolicy: "tiered" as const,
-      diligenceTopic: "opportunities" as const, durationPriors: commonPriors }), label: line.label, color: line.color, goal: line.goal };
+      diligenceTopic: "opportunities" as const, durationPriors: commonPriors }), label: line.label, color: line.color,
+      goals: line.goals?.length ? line.goals : line.goal ? [line.goal] : [], goal: line.goals?.[0] ?? line.goal,
+      ...(line.hard ? { hard: true } : {}), ...(line.rank ? { rank: line.rank } : {}) };
   });
-  // The master clock (deadline-tier priority) goes to the first line when none of the built-in ones carries it.
-  if (lines.length && !lines.some((line) => line.masterClock)) lines[0] = { ...lines[0]!, masterClock: true };
+  // Deadline-tier priority (the master clock) goes to the hard-constraint lines; with none, to the base line; with neither, to nobody in
+  // particular — lines nobody ranked run in parallel. An account that never edited its lines keeps the built-in clock (research).
+  const clocked = lines.some((line) => line.hard) ? (line: IdentityPack) => Boolean(line.hard)
+    : lines.some((line) => line.rank === 1) ? (line: IdentityPack) => line.rank === 1 : () => false;
+  for (const [index, line] of lines.entries()) lines[index] = { ...line, masterClock: clocked(line) };
   return [...lines, ...capacity];
 }
 
