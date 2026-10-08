@@ -18,6 +18,11 @@ test("backplanner refuses invented quotes, unknown dependencies and implausible 
     .toThrow("BACKPLAN_DEPENDENCY_INVALID");
   expect(() => validateBackplan({ steps: [step({ estimate: { p25Minutes: 90, p50Minutes: 45, p85Minutes: 75 } })],
     dateCandidates: [], blockers: [] }, ["稳定推进实验"])).toThrow("BACKPLAN_ESTIMATE_INVALID");
+  // A task is 30 minutes to 8 hours of usual work; the refusal names the task so a repair splits or merges exactly that one.
+  expect(() => validateBackplan({ steps: [step({ estimate: { p25Minutes: 400, p50Minutes: 600, p85Minutes: 900 } })],
+    dateCandidates: [], blockers: [] }, ["稳定推进实验"])).toThrow("BACKPLAN_TASK_SIZE");
+  expect(() => validateBackplan({ steps: [step({ estimate: { p25Minutes: 5, p50Minutes: 10, p85Minutes: 20 } })],
+    dateCandidates: [], blockers: [] }, ["稳定推进实验"])).toThrow("BACKPLAN_TASK_SIZE");
 });
 
 test("approved goal expands into sourced, bound drafts once; a high-risk step stays a proposal", async () => {
