@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { minuteInZone, monthOf, shiftDay, shiftMonth, weekDays, weekdayOf, type TimelineDeadline, type TimelineItem } from "./model";
 import { DayTimeline, MonthView, WeekView, type LineLabels } from "./views";
+import { ImpactCard, useImpact } from "../task/impact";
 
 export type CalendarView = "day" | "week" | "month";
 const VIEWS: Array<[CalendarView, string]> = [["day", "日"], ["week", "周"], ["month", "月"]];
@@ -19,6 +20,7 @@ export function CalendarPanel({ items, deadlines, today, nowIso, timeZone, label
   const [view, setView] = useState<CalendarView>(initialView);
   const [anchor, setAnchor] = useState(today);
   const [selected, setSelected] = useState<TimelineItem | undefined>();
+  const impact = useImpact();
   const nowMinute = minuteInZone(nowIso, timeZone);
 
   // The week opens at the start of the working day rather than at midnight.
@@ -49,7 +51,15 @@ export function CalendarPanel({ items, deadlines, today, nowIso, timeZone, label
       </div>
     </header>
     {view === "day" && <DayTimeline day={anchor} items={items} deadlines={deadlines} labels={labels} selectedId={selected?.id} onSelect={setSelected}
-      nowMinute={anchor === today ? nowMinute : undefined} quiet={quietByWeekday?.[weekdayOf(anchor)]} />}
+      nowMinute={anchor === today ? nowMinute : undefined} quiet={quietByWeekday?.[weekdayOf(anchor)]}
+      onResize={(item, deltaMinutes) => {
+        // `scheduled:<task>[:<step>][:<n>]` — a step id is `v<version>s<n>`, which tells it from a block index.
+        const [, workOrderId, segment] = item.id.split(":");
+        if (!workOrderId) return;
+        void impact.propose({ kind: "estimate_delta", workOrderId, deltaMinutes, ...(segment && /^v\d+s\d+$/.test(segment) ? { stepId: segment } : {}) });
+      }} />}
+    {impact.pending && <ImpactCard impact={impact.pending.impact} busy={impact.busy} onApply={() => void impact.apply()} onCancel={impact.cancel} />}
+    {impact.error && <small role="status">{impact.error}</small>}
     {view === "week" && <WeekView anchor={anchor} today={today} items={items} deadlines={deadlines} labels={labels} selectedId={selected?.id} onSelect={setSelected} onOpenDay={openDay} />}
     {view === "month" && <MonthView anchor={anchor} today={today} items={items} deadlines={deadlines} labels={labels} onOpenDay={openDay} />}
     {selected && <aside className="cal-detail" data-line={selected.identityId ?? "none"} aria-live="polite">

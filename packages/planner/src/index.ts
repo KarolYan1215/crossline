@@ -51,7 +51,7 @@ export type PlanResult = {
 const energyValue = { low: 1, medium: 2, high: 3 } as const;
 
 export { planSchedule } from "./optimizer";
-export { forecastGoals, type ForecastGoal, type ForecastDay, type ForecastResult } from "./forecast";
+export { forecastGoals, DEADLINE_MARGIN_DAYS, type ForecastGoal, type ForecastDay, type ForecastResult } from "./forecast";
 
 export function recommendNextActions(_tasks: PlannerTask[], _gapMinutes: number,
   currentEnergy?: "low" | "medium" | "high", now = new Date(),

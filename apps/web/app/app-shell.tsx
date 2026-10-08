@@ -4,6 +4,7 @@ import { NAV_ITEMS, SIDE_ITEMS } from "./nav-items";
 import { BottomNav } from "./bottom-nav";
 import { AssistantWidget } from "./assistant-widget";
 import { PendingBadge } from "./pending-badge";
+import { TimerFloat } from "./task/timer-float";
 
 /**
  * The frame every signed-in page shares: the name, the four working views, the decisions waiting for you, the
@@ -23,6 +24,7 @@ export function AppShell({ active, children, className = "page" }: { active?: st
     </header>
     <BottomNav active={active} />
     <AssistantWidget />
+    <TimerFloat />
     <main className={className}>{children}</main>
   </>;
 }

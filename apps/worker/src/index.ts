@@ -17,7 +17,7 @@ import { createCalendarPublisher } from "./calendar-publish";
 import { budgetPolicy, CALENDAR_SYNC_FAILURE } from "@crossline/core";
 import { createFlywheelExpander } from "./flywheel";
 import { createManualbookBuilder, pendingMaterialWorkOrders } from "./manualbook";
-import { createStepPlanner, createWarningReviewer, tasksAwaitingStepPlan, warningsAwaitingReview } from "./step-planner";
+import { createProgressJudge, createStepPlanner, createWarningReviewer, reportsAwaitingJudgement, tasksAwaitingStepPlan, warningsAwaitingReview } from "./step-planner";
 import { materializeDatePairs } from "./date-pairs";
 import { createMilestoneGate, pendingMilestoneGates } from "./milestone-gate-runner";
 import { createMilestoneConversation, createMilestoneProposer } from "./milestone-proposer";
@@ -140,10 +140,17 @@ async function stepPlanPass(workspaceId: string, checkedAt = new Date().toISOStr
     if (!codexSupervisor) return;
     const ids = tasksAwaitingStepPlan(analysisStore, workspaceId);
     const reviews = warningsAwaitingReview(analysisStore, workspaceId);
-    if (!ids.length && !reviews.length) return;
+    const reports = reportsAwaitingJudgement(analysisStore, workspaceId);
+    if (!ids.length && !reviews.length && !reports.length) return;
     const signal = await readCost();
     if (!signal.available || budgetPolicy(Math.max(signal.short?.usedPercent ?? 0, signal.long?.usedPercent ?? 0)).mode !== "normal") return;
     enterUsageWorkspace(workspaceId);
+    // A report the person just wrote comes first: they are waiting to see the rings move.
+    const judge = createProgressJudge(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client);
+    for (const report of reports) {
+      const assessment = await judge(report).catch(() => undefined);
+      if (assessment) console.info(JSON.stringify({ type: "progress.judged", checkedAt, workspaceId, workOrderId: report.workOrderId }));
+    }
     const planner = createStepPlanner(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client);
     for (const id of ids) {
       // A replan the person (or the assistant) asked for carries what to change.
@@ -579,11 +586,12 @@ if (!capabilitySecret) {
         "crossline:crossline-flywheel-scout", "crossline:crossline-manualbook-designer", "crossline:crossline-material-researcher", "crossline:crossline-material-writer", "crossline:crossline-milestone-architect",
         "crossline:crossline-goal-backplanner", "crossline:crossline-background-facts", "crossline:crossline-assistant",
         "crossline:crossline-onboarding", "crossline:crossline-due-diligence", "crossline:crossline-plan-explainer", "crossline:crossline-weekly-insight",
-        "crossline:crossline-agent", "crossline:crossline-step-planner", "crossline:crossline-validation-reviewer"
+        "crossline:crossline-agent", "crossline:crossline-step-planner", "crossline:crossline-validation-reviewer", "crossline:crossline-progress-judge"
       ]
     },
     autoAnalyzeCaptures: (workspaceId) => autoAnalyzePass(workspaceId),
     autoBackplanGoals: (workspaceId) => autoBackplanPass(workspaceId),
+    runTaskPass: (workspaceId) => stepPlanPass(workspaceId),
     analyzeCapture: (client, id, signal, workspaceId) => getCaptureAnalyzer(workspaceId)(client, id, signal),
     // `workspaceId` is the real caller's, from its own verified capability token — not a hardcoded
     // constant, which is what left milestone proposal and goal backplanning invisible to any real
@@ -626,7 +634,7 @@ if (!capabilitySecret) {
     // orders the loop itself picks up.
     prepareMaterials: (workOrderId, workspaceId) => getMaterialPreparer(workspaceId)(workOrderId),
     judgeMilestone: (workOrderId, workspaceId) => getMilestoneGate(workspaceId)(workOrderId),
-    dispatchAgentTask: (workspaceId, workOrderId, category) => agentService.dispatch(workspaceId, workOrderId, category),
+    dispatchAgentTask: (workspaceId, workOrderId, category, stepId) => agentService.dispatch(workspaceId, workOrderId, category, stepId),
     publishCalendar: async (workspaceId, blocks) => {
       const session = await getCalendarWriteSession();
       if (!session) return { state: "blocked", code: "GRAPH_NOT_CONFIGURED", message: "没有配置 Microsoft 日历（CROSSLINE_MS_CLIENT_ID）。" };

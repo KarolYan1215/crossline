@@ -16,7 +16,38 @@ import type { AgentTaskInput } from "./agent-task";
 export type TaskFromOrder = { ok: true; input: AgentTaskInput; category: AgentCategory | undefined; why: string; graded: boolean }
   | { ok: false; code: "ORDER_NOT_FOUND" | "ORDER_NOT_DISPATCHABLE" | "NOTHING_FOR_ASSISTANT"; message: string };
 
-export function taskFromWorkOrder(store: CrosslineStore, workspaceId: string, orderId: string, categoryOverride?: AgentCategory): TaskFromOrder {
+/** The kind of work a step is, read from its role, for handing one step over (「交给 Agent」 on a step). */
+const STEP_CATEGORY: Record<string, AgentCategory> = {
+  gather: "read_research_organize", read: "read_research_organize", compare: "read_research_organize", analyze: "read_research_organize",
+  summarize: "read_research_organize", record: "read_research_organize", learn: "read_research_organize",
+  outline: "draft_text", draft: "draft_text", revise: "draft_text", check: "draft_text",
+  build: "data_code_sim", test: "data_code_sim", prepare: "files_calendar_prep", book: "files_calendar_prep", handle: "files_calendar_prep"
+};
+
+/**
+ * One step of a task, as a task for the assistant: the step's title, what it produces and how it is judged done. Only a step the step
+ * planner judged the system can do (`executor` agent or mixed); the rest of the task stays the person's. Its result, once accepted,
+ * marks the step done.
+ */
+function taskFromStep(store: CrosslineStore, workspaceId: string, orderId: string, stepId: string, categoryOverride?: AgentCategory): TaskFromOrder {
+  const order = store.listWorkOrders(workspaceId).find((item) => item.id === orderId);
+  if (!order) return { ok: false, code: "ORDER_NOT_FOUND", message: "任务不存在" };
+  const step = store.getStepPlan(workspaceId, orderId)?.steps.find((item) => item.id === stepId);
+  if (!step || step.status !== "planned" || step.executor === "human")
+    return { ok: false, code: "ORDER_NOT_DISPATCHABLE", message: "该步骤需要本人完成" };
+  const inputs = store.listSourceDocuments(workspaceId).filter((doc) => (doc.projectId === order.projectId || !doc.projectId) && doc.uri.startsWith("file:"))
+    .flatMap((doc) => { try { return [fileURLToPath(doc.uri)]; } catch { return []; } });
+  const category = categoryOverride ?? STEP_CATEGORY[step.role];
+  const attempt = listAgentTasks(store, workspaceId).filter((task) => task.workOrderId === orderId).length + 1;
+  return { ok: true, category, why: `步骤「${step.title}」可由系统完成`, graded: false,
+    input: { taskId: `agent-${orderId.replace(/[^a-zA-Z0-9]/g, "").slice(-8)}-${stepId}-${attempt}`, workOrderId: orderId, stepId,
+      title: `${order.intent} · ${step.title}`,
+      what: `完成任务「${order.intent}」中的一个步骤：${step.title}\n产出：${step.deliverable || "（未写明）"}\n完成标准：${step.doneCriterion || "（未写明）"}`,
+      category: category ?? "read_research_organize", humanPart: "该任务的其余步骤由本人完成；需要本人判断或选择的内容列入待本人处理。", inputs } };
+}
+
+export function taskFromWorkOrder(store: CrosslineStore, workspaceId: string, orderId: string, categoryOverride?: AgentCategory, stepId?: string): TaskFromOrder {
+  if (stepId) return taskFromStep(store, workspaceId, orderId, stepId, categoryOverride);
   const planned = assistantPlanFor(store, workspaceId, orderId);
   if (!planned.ok) return planned;
   const { plan, title, projectId } = planned;

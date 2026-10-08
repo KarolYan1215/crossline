@@ -59,6 +59,32 @@ export function validateValidationReview(value: unknown): ValidationReview {
   return { verdict: review.verdict, notes: review.notes.trim().slice(0, 1200) };
 }
 
+/**
+ * A progress report read against the task's steps and standards (Skill `crossline-progress-judge`): the person says in their own words
+ * how far they are, and each step and standard gets a reading in quarters. Only what the report or its files support moves.
+ */
+export type ProgressAssessment = {
+  steps: Array<{ stepId: string; quarters: number }>;
+  criteria: Array<{ criterionId: string; quarters: number; note: string }>;
+  summary: string;
+};
+export const PROGRESS_ASSESSMENT_SCHEMA = object({
+  steps: { type: "array", items: object({ stepId: str, quarters: num }) },
+  criteria: { type: "array", items: object({ criterionId: str, quarters: num, note: str }) },
+  summary: str
+});
+export function validateProgressAssessment(value: unknown, stepIds: string[], criterionIds: string[]): ProgressAssessment {
+  const answer = value as ProgressAssessment | undefined;
+  if (!answer || !Array.isArray(answer.steps) || !Array.isArray(answer.criteria) || typeof answer.summary !== "string") throw new Error("PROGRESS_ASSESSMENT_INVALID");
+  const quarters = (value: number) => Math.max(0, Math.min(4, Math.round(Number(value) || 0)));
+  return {
+    steps: answer.steps.filter((item) => stepIds.includes(item.stepId)).map((item) => ({ stepId: item.stepId, quarters: quarters(item.quarters) })),
+    criteria: answer.criteria.filter((item) => criterionIds.includes(item.criterionId))
+      .map((item) => ({ criterionId: item.criterionId, quarters: quarters(item.quarters), note: String(item.note ?? "").trim().slice(0, 300) })),
+    summary: answer.summary.trim().slice(0, 600)
+  };
+}
+
 export const MAX_STEPS = 40;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 

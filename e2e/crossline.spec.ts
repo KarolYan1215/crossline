@@ -103,40 +103,32 @@ test("Today keeps capture semantic-only and health outside identity navigation",
   await expect(page.locator(".capture-form select")).toHaveCount(0);
   await expect(page.locator('.capture-form input[name="title"]')).toBeVisible();
   await expect(page.getByRole("button", { name: "提交完成证据" })).toHaveCount(0);
-  // 工作块F: 下一行动卡片直接内嵌开始/暂停/完成+证据操作（ExecutionActions），不再只是一个跳转链接；
-  // 独立详情页的入口被保留为一个单独的小链接。
-  await expect(page.locator(".hero-action .execution-actions")).toBeVisible();
-  await expect(page.locator(".hero-action a.hero-detail-link")).toHaveAttribute("href", /\/workbench\//);
+  // The next-step card carries its own primary action; the whole card opens the task dialog.
+  await expect(page.locator('.task-card[data-variant="hero"] .task-actions')).toBeVisible();
   // The pending count depends on what other tests have written by now, so it is hidden (not masked: hidden keeps its place).
   await page.addStyleTag({ content: STABLE_FOR_SCREENSHOT });
   if (testInfo.project.name === "desktop-chrome") await expect(page).toHaveScreenshot("today-paper-grid.png", { fullPage: true });
 });
 
-test("a task card's preview drawer opens in place, and its standalone-page link shows the same task", async ({ page }, testInfo) => {
+test("a task card opens its dialog in place, and the dialog's full-page link shows the same task", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-chrome");
   await page.goto("/");
-  const hero = page.locator(".hero-action");
-  const title = (await hero.locator(".hero-title").textContent())!.trim();
-
-  // The corner preview button opens the drawer without navigating away from Today.
-  await hero.locator(".card-preview-button").click();
-  const drawer = page.getByRole("dialog");
-  await expect(drawer).toBeVisible();
-  await expect(drawer.locator(".task-detail-view h2")).toHaveText(title);
+  const hero = page.locator('.task-card[data-variant="hero"]');
+  const title = (await hero.locator(".task-card-title").textContent())!.trim();
+  // Clicking the card (not one of its controls) opens the dialog without leaving Today.
+  await hero.locator(".task-card-title").click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("heading", { name: title })).toBeVisible();
   await expect(page).toHaveURL(/\/$/);
-
-  // Its own "独立页面查看" link is the same destination the hero card's own "查看完整详情" link points to
-  // (工作块F内嵌了开始/暂停/完成+证据操作，但独立详情页承载的背景资料、材料清单、执行记录等仍只在那里
-  // 展示，所以 hero 卡片单独保留了一个指向它的小链接), and the standalone page renders the identical task.
-  const detailLink = drawer.getByRole("link", { name: "⤢ 独立页面查看" });
-  const href = await detailLink.getAttribute("href");
+  for (const tab of ["步骤", "标准", "材料", "对话", "记录"]) await expect(dialog.getByRole("tab", { name: tab })).toBeVisible();
+  const full = dialog.getByRole("link", { name: "完整页面" });
+  const href = await full.getAttribute("href");
   expect(href).toMatch(/^\/workbench\//);
-  await expect(hero.locator("a.hero-detail-link")).toHaveAttribute("href", href!);
-  await detailLink.click();
+  await full.click();
   await expect(page).toHaveURL(new RegExp(href!.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "$"));
-  await expect(page.locator(".task-detail-view h2")).toHaveText(title);
+  await expect(page.locator(".subpage-header h1")).toHaveText(title);
 });
-
 test("Plan is one calendar with day, week and month over one version", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-chrome");
   await seedPendingChanges(page);
@@ -284,7 +276,7 @@ test("mobile navigation and reduced motion remain usable", async ({ page }, test
   await expect(page.getByRole("link", { name: "今日" })).toBeVisible();
   // What is waiting and the settings sit behind the fifth tab.
   await expect(page.getByText("更多")).toBeVisible();
-  await expect(page.locator(".hero-action")).toBeVisible();
+  await expect(page.locator('.task-card[data-variant="hero"]')).toBeVisible();
 });
 
 /**
@@ -370,7 +362,7 @@ test("a work order started on one device becomes a conflict when another device'
   const deviceB = await browser.newContext({ storageState: testInfo.project.use.storageState as string });
   const pageB = await deviceB.newPage();
   await pageB.goto("/workbench");
-  await expect(pageB.locator(`#work-order-${id}`).getByRole("button", { name: "开始执行" })).toBeVisible();
+  await expect(pageB.locator(`#work-order-${id}`).getByRole("button", { name: "开始计时" })).toBeVisible();
   await deviceB.setOffline(true);
 
   // Device A — the default page — moves the same order past `active` entirely: `startWorkOrderExecution`
@@ -378,13 +370,15 @@ test("a work order started on one device becomes a conflict when another device'
   // double-click online must not error), so the order has to move somewhere `start` can no longer apply
   // at all for device B's stale `start` to actually collide with anything.
   await page.goto("/workbench");
+  // 开始计时 starts the session and opens the task's own page; completion is in its 记录 tab.
   await Promise.all([
-    page.waitForNavigation({ waitUntil: "load" }),
-    page.locator(`#work-order-${id}`).getByRole("button", { name: "开始执行" }).click()
+    page.waitForURL(new RegExp(`/workbench/${id}$`)),
+    page.locator(`#work-order-${id}`).getByRole("button", { name: "开始计时" }).click()
   ]);
+  await page.getByRole("tab", { name: "记录" }).click();
   await Promise.all([
     page.waitForNavigation({ waitUntil: "load" }),
-    page.locator(`#work-order-${id}`).getByRole("button", { name: "完成（记为无证据）" }).click()
+    page.getByRole("button", { name: "完成（记为无证据）" }).click()
   ]);
   // Polled: `waitForNavigation` can resolve on the reload of the previous click before this completion's POST has
   // landed, and a single read then raced it (the page itself showed 「证据审查中」 a moment later).
@@ -396,8 +390,8 @@ test("a work order started on one device becomes a conflict when another device'
 
   // Device B, still believing the order is `ready_for_human`, starts it too — offline, so this queues
   // instead of failing outright.
-  await pageB.locator(`#work-order-${id}`).getByRole("button", { name: "开始执行" }).click();
-  await expect(pageB.getByRole("status")).toContainText("已离线保存，联网后自动同步");
+  await pageB.locator(`#work-order-${id}`).getByRole("button", { name: "开始计时" }).click();
+  await expect(pageB.locator(`#work-order-${id}`).getByRole("status")).toContainText("已离线保存，联网后自动同步");
 
   // Back online: `/` mounts `OfflineReplay`, which replays on load — the queued `start` hits a work
   // order that can no longer be started (`EXECUTION_NOT_STARTABLE`, a 409) and conflicts, rather than

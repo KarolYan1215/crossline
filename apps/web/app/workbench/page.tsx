@@ -1,29 +1,15 @@
-import { riskLabel, stateLabel, stateLabelFor } from "../../lib/labels";
-import { archivedBySystem, ensureSeeded, getStore, resolvedEstimate } from "../../lib/crossline";
-import { estimateBasis } from "../../lib/estimate-label";
+import { stateLabel } from "../../lib/labels";
+import { archivedBySystem, ensureSeeded, getStore, loadCurrentPlan, planToday } from "../../lib/crossline";
 import { SubpageShell } from "../subpage-shell";
 import { AnalyzeButton } from "./analyze-button";
-import { ExecutionActions } from "../execution-actions";
 import { PromoteForm } from "./promote-form";
-import { FamilyBackfill } from "./family-backfill";
-import type { MilestoneGateResult } from "@crossline/core";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { requireSessionContext } from "../../lib/access-guard";
-import { TaskPreview } from "../task-preview";
 import { loadTaskDetailsBatch } from "../../lib/task-detail";
+import { nextSlots } from "../../lib/steps";
+import { TaskCard } from "../task/task-card";
 
-// The tail, not the head: ids here are sometimes timestamp-prefixed, and two captures made minutes
-// apart shared their first eight characters — the page showed them as the same item twice.
-const shortId = (id: string) => id.slice(-8);
-
-const confidenceLabel: Record<string, string> = { low: "低置信", medium: "中置信", high: "高置信" };
-
-const minutesBetween = (from: string, to: string) => Math.round((Date.parse(to) - Date.parse(from)) / 60_000);
 const blockerOf = (run: { payload: unknown }) => (run.payload as { blocker?: { reason: string } }).blocker;
-const gateReviewOf = (run: { payload: unknown }) =>
-  (run.payload as { gateReview?: MilestoneGateResult | undefined }).gateReview;
-const metLabel: Record<string, string> = { met: "达成", partial: "部分达成", unmet: "未达成", unverifiable: "无法核实" };
-const gateVerdictLabel: Record<string, string> = { pass: "通过", insufficient: "证据不足", refuted: "被证据否定" };
 
 /**
  * What material preparation is currently doing for one work order, in the order the person needs it:
@@ -47,7 +33,7 @@ function materialStatus(events: Array<{ type: string; entityId: string; payload:
 
 export const dynamic = "force-dynamic";
 
-const sortLabel = { default: "默认", identity: "按身份", state: "按状态" } as const;
+const sortLabel = { default: "默认", identity: "按主线", state: "按状态" } as const;
 type SortKey = keyof typeof sortLabel;
 
 export default async function WorkbenchPage({ searchParams }: {
@@ -72,22 +58,17 @@ export default async function WorkbenchPage({ searchParams }: {
     .filter((capture) => capture.state !== "promoted" && capture.state !== "discarded");
   const attachments = getStore().listCaptureAttachments(ctx.workspaceId);
   const discardedCaptures = getStore().listCaptures(ctx.workspaceId).filter((capture) => capture.state === "discarded");
-  const executions = getStore().listExecutions(ctx.workspaceId);
-  const materials = getStore().listMaterials(ctx.workspaceId);
-  const events = getStore().listEvents(ctx.workspaceId).filter((event) => event.type.startsWith("materials."));
+  const events = getStore().listEvents(ctx.workspaceId, { type: ["materials.blocked", "materials.retry_requested"] });
   const discardReasons = new Map(getStore().listEvents(ctx.workspaceId, { type: ["work_order.archived", "capture.discarded"] })
     .map((event) => [event.entityId, (event.payload as { reason?: string }).reason ?? ""]));
-  const identityLabel = new Map(defaultIdentityPacks().map((pack) => [pack.id, pack.label]));
   const identityOptions = defaultIdentityPacks().filter((pack) => pack.kind === "identity")
     .map((pack) => ({ id: pack.id, label: pack.label }));
   const milestoneOptions = getStore().listMilestones(ctx.workspaceId)
     .filter((milestone) => milestone.status === "approved")
     .map((milestone) => ({ id: milestone.id, title: milestone.title, identityId: milestone.identityId }));
-  const milestoneTitleById = new Map(getStore().listMilestones(ctx.workspaceId)
-    .map((milestone) => [milestone.id, milestone.title]));
-  // One batched read for every card's preview drawer instead of each `TaskPreview` re-reading the whole
-  // workspace — see `loadTaskDetailsBatch`'s own doc comment.
+  // One batched read for every card instead of one per card — see `loadTaskDetailsBatch`'s own doc comment.
   const taskDetails = loadTaskDetailsBatch(ctx, runs.map((run) => run.id));
+  const slots = nextSlots((await loadCurrentPlan(ctx)).blocks, planToday(ctx));
   return <SubpageShell active="任务" title="任务">
     <section className="work-order-list">{captures.map((capture) => <article key={capture.id}>
       <header><span>收集</span><b>{stateLabel[capture.state]}</b></header>
@@ -104,81 +85,23 @@ export default async function WorkbenchPage({ searchParams }: {
       <PromoteForm captureId={capture.id} identities={identityOptions} milestones={milestoneOptions} />
     </article>)}</section>
     <>
-        <div className="plan-tabs" role="tablist" aria-label="作业排序">
+        <div className="plan-tabs" role="tablist" aria-label="任务排序">
           {(Object.keys(sortLabel) as SortKey[]).map((key) => <a key={key} role="tab" aria-selected={sort === key}
             href={key === "default" ? "/workbench" : `/workbench?sort=${key}`}>{sortLabel[key]}</a>)}
         </div>
-        <section className="work-order-list">{runs.map((run) => {
-      const own = executions.filter((execution) => execution.workOrderId === run.id);
-      const open = own.find((execution) => !execution.endedAt);
-      const paused = Boolean(open?.interruptions.at(-1) && !open.interruptions.at(-1)!.resumedAt);
-      const prepared = materials.filter((material) => material.workOrderId === run.id);
-      const material = materialStatus(events, run.id);
-      // Personal-history calibration (packages/core/src/estimate.ts) overrides the raw analysis-time
-      // guess once this (identityId, family) bucket has real completions — this is the one page where
-      // that number actually informs a decision the person is about to make.
-      const estimate = resolvedEstimate(ctx, run);
-      return <article id={`work-order-${run.id}`} key={run.id}>
-        {/* The card's own actions (below) stay directly usable — the extended z-index rule in
-            globals.css keeps every bare input/select/summary they use above this invisible link. */}
-        <a className="card-cover-link" href={`/workbench/${encodeURIComponent(run.id)}`} aria-label={run.intent} />
-        <TaskPreview detail={taskDetails.get(run.id)} />
-        <header><span>{identityLabel.get(run.identityId) ?? "未归入主线"}</span><b><i className="gly" data-s={run.state} aria-hidden="true" />{stateLabelFor(run.state, paused)}</b></header>
-        <h2>{run.intent}</h2>
-        {/* The milestone this work order serves, on the card itself — previously only visible by
-            cross-referencing Milestones or the PromoteForm's own dropdown. */}
-        {run.milestoneId && milestoneTitleById.has(run.milestoneId)
-          && <p className="card-milestone">→ {milestoneTitleById.get(run.milestoneId)}</p>}
-        {(run.payload as { seeded?: boolean }).seeded
-          && <p role="note" className="seed-notice">示例作业 · 系统预置，不需要可直接丢弃。</p>}
-        {(run.payload as { manualPromotion?: boolean }).manualPromotion
-          && <p role="status">人工创建 · 未经 AI 分析</p>}
-        <p title={estimateBasis(estimate)}>{estimate.p25Minutes}–{estimate.p85Minutes} 分钟 · {confidenceLabel[estimate.confidence]} · {riskLabel[run.riskTier]}</p>
-        {estimate.calibration?.state === "applied" && <p className="muted">{estimateBasis(estimate, (run.payload as { family?: string }).family)}</p>}
-        {!(run.payload as { family?: string }).family
-          && ["preparing", "ready_for_human", "active", "evidence_review"].includes(run.state)
-          && <FamilyBackfill workOrderId={run.id} />}
-        {/* The action that advances this work order sits on the card, not inside the disclosure. Behind a
-            closed drawer the next step was invisible, and every action reloads the page and closes the
-            drawer again — so doing two things in a row meant re-opening it every time. */}
-        {run.state === "preparing" && (material?.kind === "blocked"
-          ? <p role="status">材料准备已停下 · {material.message}</p>
-          : <p role="status">{material?.kind === "requested" ? "已请求重新准备，正在运行。" : "材料准备进行中。"}</p>)}
-        {/* A `file:///` URI printed as text is not something a browser can open, so the材料 the app had
-            just prepared were effectively unreachable from the app. These open in place. */}
-        {prepared.length > 0 && <p>已备材料 {prepared.length} 份：{prepared.map((item, index) => <span key={item.id}>
-          {index > 0 ? "、" : ""}
-          <a href={`/api/work-orders/${encodeURIComponent(run.id)}/materials?uri=${encodeURIComponent(item.uri)}`}
-            target="_blank" rel="noreferrer">{item.uri.split("/").pop()}</a>
-        </span>)}</p>}
-        <ExecutionActions workOrderId={run.id} intent={run.intent} state={run.state} paused={paused}
-          ownerId={ctx.principalId} workspaceId={ctx.workspaceId}
-          evidenceChecklist={taskDetails.get(run.id)?.evidenceChecklist ?? []} estimateP50={estimate.p50Minutes}
-          {...(taskDetails.get(run.id)?.suggestedMinutes ? { suggestedMinutes: taskDetails.get(run.id)!.suggestedMinutes! } : {})} />
-        {blockerOf(run) && <p role="status">已退回 · {blockerOf(run)!.reason}</p>}
-        {/* A held order used to show only the code. The gate's own per-criterion reading is what says
-            which standard was not met and what would satisfy it, so it is shown rather than stored. */}
-        {gateReviewOf(run) && <details className="work-order-drawer">
-          <summary>里程碑闸门判定 · {gateVerdictLabel[gateReviewOf(run)!.verdict] ?? gateReviewOf(run)!.verdict}</summary>
-          {gateReviewOf(run)!.criteriaVerdict.map((item) => <p key={item.criterionId}>
-            {metLabel[item.met] ?? item.met} · {item.observed}{item.shortfall ? ` · 还差：${item.shortfall}` : ""}
-          </p>)}
-          {gateReviewOf(run)!.gaps.map((gap) => <p key={gap.code}>缺口 {gap.code} · 需要：{gap.whatWouldSatisfyIt}</p>)}
-        </details>}
-        {paused && <p role="status">已暂停；暂停期间不计入真实工作时间。</p>}
-        <details className="work-order-drawer"><summary>执行记录</summary>{own.map((execution) => <p key={execution.id}>
-          {!execution.durationObserved ? "时长未观测（一次性补记完成）"
-            : execution.endedAt ? `实际执行 ${minutesBetween(execution.startedAt, execution.endedAt) - execution.pauseMinutes} 分钟 · 被中断 ${execution.pauseMinutes} 分钟`
-            : `执行中 · 已记录中断 ${execution.pauseMinutes} 分钟`}
-          {execution.interruptions.length ? ` · 中断原因：${execution.interruptions.map((item) => item.reason).join("、")}` : ""}
-          {execution.outcome === "completed_without_evidence" ? " · 无证据声明" : ""}
-        </p>)}
-        <a href="/approvals">查看状态与证据 →</a></details>
-      </article>;
+        <section className="task-grid">{runs.map((run) => {
+      const detail = taskDetails.get(run.id);
+      if (!detail) return null;
+      const material = run.state === "preparing" ? materialStatus(events, run.id) : undefined;
+      return <div key={run.id} id={`work-order-${run.id}`} className="task-grid-item">
+        <TaskCard detail={detail} slot={slots.get(run.id)} />
+        {material?.kind === "blocked" && <p role="status" className="task-card-note">材料准备已停止 · {material.message}</p>}
+        {blockerOf(run) && <p role="status" className="task-card-note">已退回 · {blockerOf(run)!.reason}</p>}
+      </div>;
     })}</section>
     </>
     {(discarded.length + discardedCaptures.length) > 0
-      && <details className="work-order-drawer"><summary>已丢弃 {discarded.length + discardedCaptures.length} 条</summary>
+      && <details className="work-order-drawer advanced"><summary>已归档 {discarded.length + discardedCaptures.length} 项</summary>
         {discarded.map((run) => <p key={run.id}>{run.intent}
           {discardReasons.get(run.id) ? ` · 原因：${discardReasons.get(run.id)}` : ""}</p>)}
         {discardedCaptures.map((capture) => <p key={capture.id}>{capture.title}

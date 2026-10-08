@@ -1,8 +1,76 @@
 import "server-only";
-import type { AccessContext, SuccessCriterion, EvidenceQuestionTemplate } from "@crossline/core";
-import type { CrosslineStore, StoredMilestone, StoredWorkOrder, StoredMaterial, StoredExecution, StoredMilestoneRelation, StoredBackgroundFact } from "@crossline/db";
+import { archetypeById, goalSettingKey, taskProgress, type AccessContext, type SuccessCriterion, type EvidenceQuestionTemplate } from "@crossline/core";
+import { listAgentTasks, type CrosslineStore, type StoredMilestone, type StoredWorkOrder, type StoredMaterial, type StoredExecution, type StoredMilestoneRelation,
+  type StoredBackgroundFact, type StoredTaskStep } from "@crossline/db";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { getStore, resolvedEstimate, relationKindLabel, accents, suggestedSessionMinutes } from "./crossline";
+
+const quartersOfVerdict: Record<string, number> = { met: 4, partial: 2, unmet: 0, unverifiable: 0 };
+
+/**
+ * One read per table for a set of orders, then per-order extras. Both the single and the batch tier use it, so a card and the page it
+ * opens always agree.
+ */
+function taskExtras(store: CrosslineStore, workspaceId: string, orders: StoredWorkOrder[]): Map<string, TaskExtras> {
+  const ids = new Set(orders.map((order) => order.id));
+  const projects = new Map(store.listProjects(workspaceId, { includeArchived: true }).map((project) => [project.id, project.name]));
+  const plans = new Map(store.listStepPlans(workspaceId).filter((plan) => ids.has(plan.workOrderId)).map((plan) => [plan.workOrderId, plan]));
+  const milestones = new Map(store.listMilestones(workspaceId).map((milestone) => [milestone.id, milestone]));
+  const anchors = new Map(store.listMilestoneAnchors(workspaceId).map((anchor) => [anchor.milestoneId, anchor.deadline]));
+  const relations = store.listMilestoneRelations(workspaceId).filter((relation) => relation.status === "approved" || relation.status === "candidate");
+  const labels = new Map(defaultIdentityPacks().map((pack) => [pack.id, pack.label]));
+  const executions = store.listExecutions(workspaceId);
+  const documents = store.listSourceDocuments(workspaceId);
+  const agentTasks = listAgentTasks(store, workspaceId).filter((task) => ids.has(task.workOrderId));
+  const confirmed = store.listEvents(workspaceId, { type: "criterion.confirmed" });
+  const assessed = store.listEvents(workspaceId, { type: "criteria.assessed" });
+  const result = new Map<string, TaskExtras>();
+  for (const order of orders) {
+    const payload = (order.payload ?? {}) as { notBefore?: string; dueDate?: string; byproducts?: Array<{ lineId: string; artifact: string }>;
+      gateReview?: { criteriaVerdict?: Array<{ criterionId: string; met: string; observed: string }> } };
+    let goalDeadline: string | undefined;
+    try { goalDeadline = (JSON.parse(store.getSetting(workspaceId, goalSettingKey(order.milestoneId)) ?? "{}") as { confirmedDeadline?: string }).confirmedDeadline; } catch { /* none */ }
+    const dueBy = [payload.dueDate, goalDeadline, anchors.get(order.milestoneId)].filter((value): value is string => Boolean(value && /^\d{4}-\d{2}-\d{2}$/.test(value))).sort()[0];
+    const plan = plans.get(order.id);
+    const milestone = milestones.get(order.milestoneId);
+    const supports = [
+      ...relations.filter((relation) => relation.fromMilestoneId === order.milestoneId).flatMap((relation) => {
+        const target = milestones.get(relation.toMilestoneId);
+        return target && target.identityId !== order.identityId ? [{ line: target.identityId, lineLabel: labels.get(target.identityId) ?? target.identityId,
+          target: target.title, ...(relation.explanation ? { artifact: relation.explanation } : {}), pending: relation.status === "candidate" }] : [];
+      }),
+      ...(payload.byproducts ?? []).map((item) => ({ line: item.lineId, lineLabel: labels.get(item.lineId) ?? item.lineId, target: item.artifact, artifact: item.artifact, pending: false }))
+    ];
+    const worked = executions.filter((execution) => execution.workOrderId === order.id && execution.durationObserved).reduce((sum, execution) =>
+      sum + Math.max(0, Math.round(((execution.endedAt ? Date.parse(execution.endedAt) : Date.now()) - Date.parse(execution.startedAt)) / 60_000) - execution.pauseMinutes), 0);
+    const verdicts = new Map((payload.gateReview?.criteriaVerdict ?? []).map((item) => [item.criterionId, item]));
+    const latestAssessment = new Map<string, { quarters: number; note: string }>();
+    for (const event of assessed.filter((item) => item.entityId === order.id))
+      for (const item of (event.payload as { criteria?: Array<{ criterionId: string; quarters: number; note?: string }> }).criteria ?? [])
+        latestAssessment.set(item.criterionId, { quarters: item.quarters, note: item.note ?? "" });
+    const personConfirmed = new Set(confirmed.filter((event) => event.entityId === order.id).map((event) => (event.payload as { criterionId: string }).criterionId));
+    result.set(order.id, {
+      ...(projects.get(order.projectId) ? { projectName: projects.get(order.projectId)! } : {}),
+      window: { ...(payload.notBefore ? { notBefore: payload.notBefore } : {}), ...(dueBy ? { dueBy } : {}) },
+      ...(plan ? { stepPlan: { archetypeLabel: archetypeById(plan.archetypeId)?.label ?? plan.archetypeId, quantity: plan.quantity, rationale: plan.rationale,
+        progress: taskProgress(plan.steps), steps: plan.steps } } : {}),
+      supports, workedMinutes: worked,
+      criteria: (milestone?.successCriteria ?? []).map((criterion) => {
+        if (personConfirmed.has(criterion.id)) return { id: criterion.id, statement: criterion.statement, quarters: 4, by: "person" as const };
+        const assessment = latestAssessment.get(criterion.id);
+        if (assessment) return { id: criterion.id, statement: criterion.statement, quarters: assessment.quarters, by: "assessment" as const, ...(assessment.note ? { note: assessment.note } : {}) };
+        const verdict = verdicts.get(criterion.id);
+        return verdict ? { id: criterion.id, statement: criterion.statement, quarters: quartersOfVerdict[verdict.met] ?? 0, by: "gate" as const, note: verdict.observed }
+          : { id: criterion.id, statement: criterion.statement, quarters: 0, by: "none" as const };
+      }),
+      sources: documents.filter((doc) => !doc.projectId || doc.projectId === order.projectId).map((doc) => ({ id: doc.id, fileName: doc.fileName })),
+      agentOutputs: agentTasks.filter((task) => task.workOrderId === order.id).map((task) => ({ taskId: task.taskId, title: task.title, status: task.status,
+        files: task.artifacts.map((artifact) => ({ path: artifact.path, name: artifact.path.split(/[\\/]/).at(-1) ?? artifact.path })) })),
+      agentSteps: (plan?.steps ?? []).filter((step) => step.status === "planned" && step.executor !== "human").map((step) => ({ id: step.id, title: step.title }))
+    });
+  }
+  return result;
+}
 
 type StoredEvent = ReturnType<CrosslineStore["listEvents"]>[number];
 
@@ -14,6 +82,8 @@ type StoredEvent = ReturnType<CrosslineStore["listEvents"]>[number];
 export type TaskDetail = {
   id: string;
   ownerId: string;
+  /** Who is looking: what a command queued offline from this card is signed as. */
+  viewerId: string;
   workspaceId: string;
   paused: boolean;
   identityId: string;
@@ -62,6 +132,27 @@ export type TaskDetail = {
    * none have been extracted yet — the detail view shows "未设置背景资料" for that case rather than the
    * section simply not existing. */
   background: StoredBackgroundFact[] | null;
+} & TaskExtras;
+
+/** What the card and the task dialog show beyond the analysis: where the task sits, its steps, and what it is judged against. */
+export type TaskExtras = {
+  /** The course or project by name (「ECE 555」), not its id. */
+  projectName?: string;
+  /** Earliest start and latest finish, as the scheduler uses them. */
+  window: { notBefore?: string; dueBy?: string };
+  stepPlan?: { archetypeLabel: string; quantity: { basis: string; amount: number; unit: string }; rationale: string; progress: number;
+    steps: StoredTaskStep[] };
+  /** Other lines this work feeds: the milestone relations from this task's milestone, and its byproducts. */
+  supports: Array<{ line: string; lineLabel: string; target: string; artifact?: string; pending: boolean }>;
+  workedMinutes: number;
+  /** Each standard the task is judged against, in quarters (0–4) and who said so. */
+  criteria: Array<{ id: string; statement: string; quarters: number; by: "person" | "assessment" | "gate" | "none"; note?: string }>;
+  /** The person's own files relevant to it (this project's and unassigned uploads). */
+  sources: Array<{ id: string; fileName: string }>;
+  /** What the assistant produced for it. */
+  agentOutputs: Array<{ taskId: string; title: string; status: string; files: Array<{ path: string; name: string }> }>;
+  /** Open steps the system could do; 「交给 Agent」 appears when there is one. */
+  agentSteps: Array<{ id: string; title: string }>;
 };
 
 export type MilestoneDetail = {
@@ -136,7 +227,7 @@ function pausedFrom(executions: TaskDetail["executions"]): boolean {
 function assembleTaskDetail(ctx: AccessContext, order: StoredWorkOrder, deps: {
   milestone: StoredMilestone | undefined; materials: StoredMaterial[]; executions: StoredExecution[];
   materialEvents: StoredEvent[]; archivedEvents: StoredEvent[]; relatedFlywheel: TaskDetail["relatedFlywheel"];
-  background: StoredBackgroundFact[];
+  background: StoredBackgroundFact[]; extras: TaskExtras;
 }): TaskDetail {
   const payload = order.payload as {
     manualPromotion?: boolean; seeded?: boolean; materialContract?: TaskDetail["materialContract"]; evidenceContract?: TaskDetail["evidenceContract"];
@@ -156,7 +247,7 @@ function assembleTaskDetail(ctx: AccessContext, order: StoredWorkOrder, deps: {
   const discardReason = discardReasonFrom(order.state, deps.archivedEvents);
 
   return {
-    id: order.id, ownerId: order.ownerId, workspaceId: order.workspaceId, paused: pausedFrom(executions),
+    id: order.id, ownerId: order.ownerId, viewerId: ctx.principalId, workspaceId: order.workspaceId, paused: pausedFrom(executions),
     identityId: order.identityId, identityLabel, accent, intent: order.intent, state: order.state,
     riskTier: order.riskTier, estimate: resolvedEstimate(ctx, order),
     ...(() => { const minutes = order.state === "active" ? suggestedSessionMinutes(ctx, order.id) : undefined; return minutes ? { suggestedMinutes: minutes } : {}; })(), manualPromotion: Boolean(payload.manualPromotion), seeded: Boolean(payload.seeded),
@@ -173,7 +264,8 @@ function assembleTaskDetail(ctx: AccessContext, order: StoredWorkOrder, deps: {
     ...(materialBlocker ? { materialBlocker } : {}),
     ...(payload.gateReview ? { gateReview: payload.gateReview } : {}),
     ...(discardReason ? { discardReason } : {}),
-    relatedFlywheel: deps.relatedFlywheel, background: deps.background.length ? deps.background : null
+    relatedFlywheel: deps.relatedFlywheel, background: deps.background.length ? deps.background : null,
+    ...deps.extras
   };
 }
 
@@ -220,7 +312,8 @@ export function loadTaskDetail(ctx: AccessContext, workOrderId: string): TaskDet
     archivedEvents: order.state === "archived"
       ? store.listEvents(ctx.workspaceId, { type: "work_order.archived", entityId: workOrderId }) : [],
     relatedFlywheel: flywheelTouching(relations, order.milestoneId, titleOf),
-    background: store.getBackgroundFacts(ctx.workspaceId, order.identityId)
+    background: store.getBackgroundFacts(ctx.workspaceId, order.identityId),
+    extras: taskExtras(store, ctx.workspaceId, [order]).get(order.id)!
   });
 }
 
@@ -280,9 +373,10 @@ export function loadTaskDetailsBatch(ctx: AccessContext, workOrderIds: string[])
     return facts;
   };
 
+  const extras = taskExtras(store, ctx.workspaceId, orders);
   for (const order of orders) {
     const milestone = order.milestoneId ? milestoneById.get(order.milestoneId) : undefined;
-    result.set(order.id, assembleTaskDetail(ctx, order, {
+    result.set(order.id, assembleTaskDetail(ctx, order, { extras: extras.get(order.id)!,
       milestone, materials: materialsByOrder.get(order.id) ?? [], executions: executionsByOrder.get(order.id) ?? [],
       materialEvents: materialEventsByOrder.get(order.id) ?? [], archivedEvents: archivedEventsByOrder.get(order.id) ?? [],
       relatedFlywheel: flywheelTouching(relations, order.milestoneId, titleOf),

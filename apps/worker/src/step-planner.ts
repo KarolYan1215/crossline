@@ -1,7 +1,7 @@
 import {
   ARCHETYPES, AVAILABILITY_SETTING, DEFAULT_AVAILABILITY, STEP_PLAN_SCHEMA, VALIDATION_REVIEW_SCHEMA, archetypeBrief, goalSettingKey,
   normalizeStepPlan, stepPlanWarnings, validateAvailability, validateStepPlanShape, validateValidationReview, weeklyAvailableHours,
-  type StepPlan, type StepWarning, type ValidationReview
+  PROGRESS_ASSESSMENT_SCHEMA, validateProgressAssessment, type ProgressAssessment, type StepPlan, type StepWarning, type ValidationReview
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import { listAgentTasks, type CrosslineStore, type StoredWorkOrder } from "@crossline/db";
@@ -10,6 +10,7 @@ import { ownerOf } from "./owner";
 
 const PLANNER = "crossline:crossline-step-planner";
 const REVIEWER = "crossline:crossline-validation-reviewer";
+const JUDGE = "crossline:crossline-progress-judge";
 /** States in which a task is committed and its steps get time on the calendar. */
 const PLANNABLE = ["approved", "preparing", "ready_for_human", "active"];
 const day = (iso: string) => iso.slice(0, 10);
@@ -103,6 +104,53 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
       idempotencyKey: `validation.warned:task_steps:${workOrderId}:${saved.version}`, type: "validation.warned", entityId: workOrderId,
       payload: { subject: "task_steps", version: saved.version, warnings, revised: Boolean(feedback) } });
     return { state: "planned", version: saved.version, warnings };
+  };
+}
+
+/** Progress reports nobody has read yet (`task.progress_reported` without a `task.progress_judged` for the same report). */
+export function reportsAwaitingJudgement(store: CrosslineStore, workspaceId: string, limit = 2) {
+  const judged = new Set(store.listEvents(workspaceId, { type: "task.progress_judged" }).map((event) => (event.payload as { reportId: string }).reportId));
+  return store.listEvents(workspaceId, { type: "task.progress_reported" })
+    .map((event) => ({ workOrderId: event.entityId, ...(event.payload as { reportId: string; text: string }) }))
+    .filter((report) => !judged.has(report.reportId)).slice(0, limit);
+}
+
+/**
+ * Reads one progress report against the task's steps and the standards it is judged against, and records the readings: steps move by
+ * quarters (4 = done), standards get a `criteria.assessed` reading the card's rings show.
+ */
+export function createProgressJudge(store: CrosslineStore, workspaceId: string, cwd: string, getClient: () => CodexRpcBoundary | undefined) {
+  return async function judge(report: ReturnType<typeof reportsAwaitingJudgement>[number]): Promise<ProgressAssessment | undefined> {
+    const client = getClient();
+    if (!client) return undefined;
+    const order = store.listWorkOrders(workspaceId).find((item) => item.id === report.workOrderId);
+    const done = (assessment: ProgressAssessment | null, code = "") => store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId,
+      idempotencyKey: `task.progress_judged:${report.reportId}`, type: "task.progress_judged", entityId: report.workOrderId,
+      payload: { reportId: report.reportId, ...(assessment ? { summary: assessment.summary } : { code }) } });
+    if (!order) { done(null, "WORK_ORDER_NOT_FOUND"); return undefined; }
+    const steps = store.getStepPlan(workspaceId, order.id)?.steps ?? [];
+    const milestone = store.listMilestones(workspaceId).filter((item) => item.id === order.milestoneId).at(-1);
+    const criteria = milestone?.successCriteria ?? [];
+    const input = { version: "crossline.progress-judge.v1", task: order.intent, report: { text: report.text },
+      steps: steps.map((step) => ({ id: step.id, title: step.title, doneCriterion: step.doneCriterion, quarters: step.progressQuarter, status: step.status })),
+      criteria: criteria.map((criterion) => ({ id: criterion.id, statement: criterion.statement })) };
+    const result = await runCodexSkill<ProgressAssessment>(client, input, { skillName: JUDGE, cwd,
+      developerInstructions: "Read the progress report against the steps and standards as the Skill describes. Return raw JSON only.",
+      outputSchema: PROGRESS_ASSESSMENT_SCHEMA, prepareInput: () => input,
+      validateOutput: (output) => validateProgressAssessment(output, steps.map((step) => step.id), criteria.map((criterion) => criterion.id)),
+      onAudit: () => {}, timeoutMs: 30 * 60_000 });
+    if (!result.ok) { if (!/^(SKILL_|CODEX_)/.test(result.blocker.code)) done(null, result.blocker.code); return undefined; }
+    for (const item of result.output.steps) {
+      const step = steps.find((row) => row.id === item.stepId);
+      // A report only ever moves a step forward; a lower reading than what is recorded is left alone.
+      if (step && step.status === "planned" && item.quarters > step.progressQuarter)
+        store.updateStepProgress(workspaceId, order.id, step.id, item.quarters >= 4 ? { status: "done" } : { progressQuarter: item.quarters }, ownerOf(store, workspaceId), "assessment");
+    }
+    if (result.output.criteria.length) store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId,
+      idempotencyKey: `criteria.assessed:${report.reportId}`, type: "criteria.assessed", entityId: order.id,
+      payload: { reportId: report.reportId, criteria: result.output.criteria } });
+    done(result.output);
+    return result.output;
   };
 }
 

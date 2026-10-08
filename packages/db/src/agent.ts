@@ -59,6 +59,8 @@ export type AgentTaskRow = {
   autoApproved: boolean;
   /** The whole order was handed over: an accepted result is delivered as the order's evidence (`deliverAgentResult`). */
   delegated: boolean;
+  /** One step of the order was handed over: an accepted result marks that step done. */
+  stepId: string;
 };
 /** A run with no outcome after this long was lost with the process that held it, not still going. */
 const STALE_AFTER_MS = 8 * 3_600_000;
@@ -72,7 +74,7 @@ export function listAgentTasks(store: CrosslineStore, workspaceId: string, now =
     if (event.type === "agent.task.requested") {
       rows.set(taskId, { taskId, title: String(p.title ?? ""), category: isAgentCategory(p.category) ? p.category : "read_research_organize", workOrderId: String(p.workOrderId ?? ""),
         requestedAt: event.createdAt, status: "running", directory: "", durationMs: 0, commands: 0, denied: 0, artifacts: [], needsHuman: 0, checksPassed: false, inputsModified: [], blockerCode: "", blockerMessage: "", reviewNote: "", autoApproved: p.autoApproved === true,
-        delegated: p.delegated === true });
+        delegated: p.delegated === true, stepId: typeof p.stepId === "string" ? p.stepId : "" });
       continue;
     }
     const row = rows.get(taskId);
@@ -109,6 +111,10 @@ export function reviewAgentTask(store: CrosslineStore, workspaceId: string, task
   const trust = recordReview(store, workspaceId, task.category, clean);
   // Accepting a delegated task's result is accepting it as the work: it goes to the gate as the order's evidence.
   if (decision === "accepted") deliverAgentResult(store, workspaceId, taskId);
+  // A step it did is that step done.
+  if (decision === "accepted" && task.stepId && task.workOrderId) {
+    try { store.updateStepProgress(workspaceId, task.workOrderId, task.stepId, { status: "done" }, ownerId, "agent"); } catch { /* the step was replanned away */ }
+  }
   return { ok: true, trust };
 }
 

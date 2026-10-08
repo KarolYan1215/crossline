@@ -11,15 +11,15 @@ const OFFLINE_ACTION_TYPES: Record<string, OfflineCommandType> = {
 };
 
 const codes: Record<string, string> = {
-  MATERIALS_PREPARING: "已转入材料准备。准备完成后即可开始人工执行。",
-  MATERIALS_NOT_PREPARING: "该作业当前不在材料准备阶段，请刷新。",
-  EXECUTION_NOT_STARTABLE: "当前状态不能开始执行，请刷新查看真实状态。",
+  MATERIALS_PREPARING: "已转入材料准备，完成后即可开始。",
+  MATERIALS_NOT_PREPARING: "该任务不在材料准备阶段，请刷新。",
+  EXECUTION_NOT_STARTABLE: "当前状态不能开始计时，请刷新。",
   EXECUTION_NOT_ACTIVE: "没有正在进行的执行，请刷新。",
   NO_ACTIVE_EXECUTION: "没有正在进行的执行，请刷新。",
-  INTERRUPTION_REASON_REQUIRED: "请填写中断原因；中断时间会与真实工作时间分开记录。",
-  INVALID_EVIDENCE_CLAIM: "证据声明不完整：类型、位置和说明都需要填写。",
-  ARCHIVE_REASON_REQUIRED: "请写一句为什么丢弃；这条会留在账本里。",
-  WORK_ORDER_ALREADY_ACCEPTED: "已验收的作业不能丢弃；如需退回请到复盘页撤销验收。"
+  INTERRUPTION_REASON_REQUIRED: "需要中断原因；中断时间与工作时间分开记录。",
+  INVALID_EVIDENCE_CLAIM: "证据声明不完整：类型、位置和说明均为必填。",
+  ARCHIVE_REASON_REQUIRED: "归档需要一句原因，原因保留在账本中。",
+  WORK_ORDER_ALREADY_ACCEPTED: "已验收的任务不能归档；撤销验收后可归档。"
 };
 
 export function ExecutionActions({ workOrderId, intent, state, paused, ownerId, workspaceId, evidenceChecklist = [], showEnergyProbe = true,
@@ -128,9 +128,9 @@ export function ExecutionActions({ workOrderId, intent, state, paused, ownerId, 
         `awaiting_plan_approval` and the Workbench offered no way to advance it, even though the API has
         always accepted the transition. Every successful analysis was a dead end. */}
     {state === "awaiting_plan_approval" &&
-      <button className="primary-button" type="button" disabled={busy} onClick={() => void send({}, "approve")}>批准这份提案</button>}
+      <button className="primary-button" type="button" disabled={busy} onClick={() => void send({}, "approve")}>批准</button>}
     {state === "blocked" &&
-      <button className="primary-button" type="button" disabled={busy} onClick={() => void send({}, "approve")}>重新批准并恢复</button>}
+      <button className="primary-button" type="button" disabled={busy} onClick={() => void send({}, "approve")}>恢复</button>}
     {state === "preparing" && <>
       <span className="micro">材料准备中</span>
       <button type="button" disabled={busy} onClick={() => void send({ action: "materials_retry" })}>重新准备材料</button>
@@ -138,7 +138,7 @@ export function ExecutionActions({ workOrderId, intent, state, paused, ownerId, 
     </>}
     {(state === "approved" || state === "ready_for_human") && <>
       {showEnergyProbe && <><span className="micro">开始前精力</span><EnergyProbe context="before_task" workOrderId={workOrderId} /></>}
-      <button className="primary-button" type="button" disabled={busy} onClick={() => void send({ action: "start" })}>开始执行</button>
+      <button className="primary-button" type="button" disabled={busy} onClick={() => void send({ action: "start" })}>开始计时</button>
     </>}
     {state === "active" && !paused && <>
       <label><span className="sr-only">中断原因</span>
@@ -152,7 +152,7 @@ export function ExecutionActions({ workOrderId, intent, state, paused, ownerId, 
           option or types the specifics, AI records the exact answer rather than asking them to write
           free-form evidence prose from scratch. */}
       {evidenceChecklist.length > 0 && <fieldset className="evidence-checklist">
-        <legend className="micro">完成情况（可选，AI 会据此记录）</legend>
+        <legend className="micro">完成情况（可选）</legend>
         {evidenceChecklist.map((question) => <div key={question.id} className="evidence-question">
           <span>{question.prompt}</span>
           {question.kind === "checkbox"
@@ -174,12 +174,12 @@ export function ExecutionActions({ workOrderId, intent, state, paused, ownerId, 
         <input type="file" disabled={uploading || busy}
           onChange={(event) => { const file = event.currentTarget.files?.[0]; if (file) void uploadEvidenceFile(file); }} />
         <small>
-          {uploading ? "上传中…" : uploadedFile ? `已上传：${uploadedFile.fileName}` : "可选：上传文件由 AI 审阅"}
+          {uploading ? "上传中…" : uploadedFile ? `已上传：${uploadedFile.fileName}` : "可选：上传证据文件"}
         </small>
       </label>
       {uploadStatus && <small className="muted" role="status">{uploadStatus}</small>}
       {estimateP50 ? <fieldset className="reported-minutes">
-        <legend className="micro">实际花了多久？（选一个就行，用来让估时越来越准）</legend>
+        <legend className="micro">实际用时（用于校准估时）</legend>
         {suggestedMinutes ? <button type="button" aria-pressed={reported?.source === "activity"} onClick={() => setReported({ minutes: suggestedMinutes, source: "activity" })}>
           屏幕记录约 {suggestedMinutes} 分</button> : null}
         {([["≈估时", 1], ["一半", 0.5], ["多一半", 1.5], ["两倍", 2]] as const).map(([label, factor]) => {
@@ -188,7 +188,7 @@ export function ExecutionActions({ workOrderId, intent, state, paused, ownerId, 
             onClick={() => setReported({ minutes, source: "one_tap" })}>{label} {minutes} 分</button>;
         })}
         <label><span className="sr-only">自己填分钟数</span>
-          <input inputMode="numeric" value={ownMinutes} placeholder="自填分钟" maxLength={4} onChange={(event) => {
+          <input inputMode="numeric" value={ownMinutes} placeholder="分钟数" maxLength={4} onChange={(event) => {
             setOwnMinutes(event.target.value);
             const minutes = Number(event.target.value);
             setReported(Number.isInteger(minutes) && minutes > 0 && minutes <= 1440 ? { minutes, source: "one_tap" } : null);
@@ -206,13 +206,13 @@ export function ExecutionActions({ workOrderId, intent, state, paused, ownerId, 
         required because a board that quietly loses items is worse than one that keeps bad ones. */}
     {state !== "accepted" && state !== "archived" && (discarding
       ? <>
-          <label><span className="sr-only">丢弃原因</span>
-            <input value={discardReason} maxLength={200} placeholder="为什么丢弃（必填）"
+          <label><span className="sr-only">归档原因</span>
+            <input value={discardReason} maxLength={200} placeholder="为什么归档（必填）"
               onChange={(event) => setDiscardReason(event.target.value)} /></label>
-          <button type="button" disabled={busy} onClick={() => void send({ action: "archive", reason: discardReason })}>确认丢弃</button>
+          <button type="button" disabled={busy} onClick={() => void send({ action: "archive", reason: discardReason })}>确认归档</button>
           <button type="button" disabled={busy} onClick={() => setDiscarding(false)}>取消</button>
         </>
-      : <button type="button" disabled={busy} onClick={() => setDiscarding(true)}>丢弃</button>)}
+      : <button type="button" disabled={busy} onClick={() => setDiscarding(true)}>归档</button>)}
     {status && <p role="status">{status}</p>}
   </div>;
 }

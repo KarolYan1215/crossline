@@ -45,7 +45,7 @@ describe("execution actions — showEnergyProbe (工作块 F)", () => {
     const html = renderToStaticMarkup(<ExecutionActions {...base} state="approved" showEnergyProbe={false} />);
     expect(html).not.toContain("开始前精力");
     expect(html).not.toContain("记录中精力");
-    expect(html).toContain("开始执行");
+    expect(html).toContain("开始计时");
   });
 
   test("showEnergyProbe=false also suppresses the after-task probe on an evidence_review order", () => {
@@ -58,7 +58,7 @@ describe("execution actions — showEnergyProbe (工作块 F)", () => {
 test("an active order offers one-tap durations from its estimate, with the screen record's suggestion when there is one", () => {
   const html = renderToStaticMarkup(<ExecutionActions workOrderId="w1" intent="写一段分析" state="active" paused={false}
     ownerId="o" workspaceId="w" estimateP50={60} suggestedMinutes={47} />);
-  expect(html).toContain("实际花了多久");
+  expect(html).toContain("实际用时");
   expect(html).toContain("屏幕记录约 47 分");
   expect(html).toContain("≈估时 60 分");
   expect(html).toContain("两倍 120 分");

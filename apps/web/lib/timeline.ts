@@ -82,6 +82,9 @@ export function currentWorkState(ctx: AccessContext, plan: Awaited<ReturnType<ty
   return { ...state, label };
 }
 
+const DATE_KIND_LABEL: Record<string, string> = { class: "上课", quiz: "小测", homework_out: "作业发布", homework_due: "作业截止", exam: "考试",
+  project_due: "项目截止", deadline: "截止", meeting: "会议", other: "其他" };
+
 /** Everything the three calendar views draw, read once: the plan's blocks, what is due, and the person's own hours. */
 export async function loadTimeline(ctx: AccessContext, loaded?: Awaited<ReturnType<typeof loadCurrentPlan>>): Promise<TimelineData> {
   const store = getStore();
@@ -96,11 +99,20 @@ export async function loadTimeline(ctx: AccessContext, loaded?: Awaited<ReturnTy
 
   // What is due: each live milestone's deadline, and every confirmed dated fact the person's files gave us.
   const anchors = new Map(store.listMilestoneAnchors(ctx.workspaceId).map((anchor) => [anchor.milestoneId, anchor]));
+  const projects = store.listProjects(ctx.workspaceId, { includeArchived: true });
   const deadlines: TimelineDeadline[] = [
     ...milestones.filter((milestone) => milestone.status !== "archived" && anchors.get(milestone.id)?.deadline).map((milestone) => ({
-      id: `milestone:${milestone.id}`, day: anchors.get(milestone.id)!.deadline, title: milestone.title, identityId: milestone.identityId })),
+      id: `milestone:${milestone.id}`, day: anchors.get(milestone.id)!.deadline, title: milestone.title, identityId: milestone.identityId,
+      detail: milestone.status === "draft" ? "里程碑截止 · 草稿" : "里程碑截止" })),
     ...store.listProfileFacts(ctx.workspaceId).filter((fact) => fact.slot.startsWith("date_") && fact.status === "confirmed" && /^\d{4}-\d{2}-\d{2} /.test(fact.value))
-      .map((fact) => ({ id: `fact:${fact.identityId}:${fact.projectId}:${fact.slot}`, day: fact.value.slice(0, 10), title: fact.value.slice(11), identityId: fact.identityId }))
+      .map((fact) => {
+        // The course by name in front of the item (「ECE 555 · 作业 2 截止」), and what kind of date it is with the file's own words on hover.
+        const project = projects.find((item) => item.id === fact.projectId || item.name === fact.projectId);
+        const kind = DATE_KIND_LABEL[/^date_\d{8}_(\w+)$/.exec(fact.slot)?.[1] ?? ""] ?? "日期";
+        return { id: `fact:${fact.identityId}:${fact.projectId}:${fact.slot}`, day: fact.value.slice(0, 10),
+          title: project ? `${project.name} · ${fact.value.slice(11)}` : fact.value.slice(11), identityId: fact.identityId,
+          detail: `${kind}${fact.sourceQuote ? ` · 原文「${fact.sourceQuote.slice(0, 80)}」` : ""}` };
+      })
   ];
 
   const windows = readAvailability(ctx);

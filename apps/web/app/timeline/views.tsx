@@ -1,4 +1,6 @@
-import type { CSSProperties } from "react";
+"use client";
+
+import { useRef, useState, type CSSProperties } from "react";
 import {
   MINUTES_PER_DAY, axisSpan, conflictingIds, itemsOn, monthGrid, packColumns, toMinutes, weekDays,
   type TimelineDeadline, type TimelineItem
@@ -12,11 +14,15 @@ const lineOf = (identityId?: string) => identityId ?? "none";
 const timeText = (item: { start: string; end: string }) => `${item.start}–${item.end}`;
 
 /** One row per item along a 24 hour axis. The time axis is the point: where in the day each thing sits. */
-export function DayTimeline({ day, items, deadlines, nowMinute, labels, quiet, selectedId, onSelect }: {
+export function DayTimeline({ day, items, deadlines, nowMinute, labels, quiet, selectedId, onSelect, onResize }: {
   day: string; items: TimelineItem[]; deadlines: TimelineDeadline[]; nowMinute: number | undefined; labels: LineLabels;
   /** Stretches of the day that are not available (sleep, meals), drawn pale. */
   quiet?: Array<[string, string]> | undefined; selectedId?: string | undefined; onSelect?: ((item: TimelineItem) => void) | undefined;
+  /** A scheduled block's right edge dragged: how many minutes longer (or shorter, negative) it should be. */
+  onResize?: ((item: TimelineItem, deltaMinutes: number) => void) | undefined;
 }) {
+  const [resizing, setResizing] = useState<{ id: string; end: string } | null>(null);
+  const trackRef = useRef<{ left: number; width: number } | null>(null);
   const rows = itemsOn(items, day);
   const clashes = conflictingIds(rows);
   const flags = deadlines.filter((deadline) => deadline.day === day);
@@ -34,14 +40,37 @@ export function DayTimeline({ day, items, deadlines, nowMinute, labels, quiet, s
           <span className="dt-track">{hours.map((hour) => <i key={hour} style={{ left: `${(hour / 24) * 100}%` }}>{hour % 2 === 0 ? String(hour).padStart(2, "0") : ""}</i>)}</span>
         </div>
         {flags.map((flag) => <div className="dt-row dt-flag" key={flag.id} data-line={lineOf(flag.identityId)}>
-          <span className="dt-label-col"><b>◆ {flag.title}</b><small>截止</small></span><span className="dt-track" />
+          <span className="dt-label-col" title={flag.detail ? `${flag.title} · ${flag.detail}` : flag.title}><b>◆ {flag.title}</b><small>{flag.detail ?? "截止"}</small></span><span className="dt-track" />
         </div>)}
         {rows.map((item) => {
-          const span = axisSpan(item.start, item.end);
+          const end = resizing?.id === item.id ? resizing.end : item.end;
+          const span = axisSpan(item.start, end);
+          const resizable = Boolean(onResize && item.kind === "scheduled");
           return <button type="button" className="dt-row" key={item.id} data-line={lineOf(item.identityId)} data-kind={item.kind}
             data-clash={clashes.has(item.id) || undefined} aria-pressed={selectedId === item.id} onClick={() => onSelect?.(item)}>
-            <span className="dt-label-col"><b>{item.title}</b><small>{timeText(item)}{item.identityId ? ` · ${labels[item.identityId] ?? item.identityId}` : ""}</small></span>
-            <span className="dt-track"><em className="dt-block" style={{ left: `${span.left}%`, width: `${span.width}%` }}>{timeText(item)}</em></span>
+            <span className="dt-label-col"><b>{item.title}</b><small>{timeText({ start: item.start, end })}{item.identityId ? ` · ${labels[item.identityId] ?? item.identityId}` : ""}</small></span>
+            <span className="dt-track"><em className="dt-block" style={{ left: `${span.left}%`, width: `${span.width}%` }}>{timeText({ start: item.start, end })}
+              {resizable && <i className="dt-resize" aria-hidden="true" title="拖动调整时长"
+                onClick={(event) => event.stopPropagation()}
+                onPointerDown={(event) => {
+                  event.stopPropagation();
+                  event.currentTarget.setPointerCapture(event.pointerId);
+                  const track = (event.currentTarget.closest(".dt-track") as HTMLElement).getBoundingClientRect();
+                  trackRef.current = { left: track.left, width: track.width };
+                  setResizing({ id: item.id, end: item.end });
+                }}
+                onPointerMove={(event) => {
+                  if (resizing?.id !== item.id || !trackRef.current) return;
+                  const minute = Math.round((((event.clientX - trackRef.current.left) / trackRef.current.width) * MINUTES_PER_DAY) / 5) * 5;
+                  const next = Math.max(toMinutes(item.start) + 15, Math.min(MINUTES_PER_DAY - 5, minute));
+                  setResizing({ id: item.id, end: `${String(Math.floor(next / 60)).padStart(2, "0")}:${String(next % 60).padStart(2, "0")}` });
+                }}
+                onPointerUp={(event) => {
+                  event.stopPropagation();
+                  if (resizing?.id === item.id) { const delta = toMinutes(resizing.end) - toMinutes(item.end); if (delta) onResize?.(item, delta); }
+                  setResizing(null);
+                }} />}
+              {resizing?.id === item.id && <b className="dt-resize-live mono">{toMinutes(resizing.end) - toMinutes(item.start)} 分钟</b>}</em></span>
           </button>;
         })}
         {rows.length === 0 && flags.length === 0 && <p className="dt-empty">这一天没有安排。灰色是你标为不可用的时段，其余时间可以排任务。</p>}
@@ -65,7 +94,7 @@ export function WeekView({ anchor, today, items, deadlines, labels, selectedId, 
         <span className="wk-gutter" />
         {days.map((day, index) => <div key={day} className="wk-day" data-today={day === today || undefined}>
           <button type="button" onClick={() => onOpenDay?.(day)}>周{WEEKDAY[index]} <b>{Number(day.slice(8))}</b></button>
-          {deadlines.filter((deadline) => deadline.day === day).map((deadline) => <span key={deadline.id} className="wk-flag" data-line={lineOf(deadline.identityId)} title={deadline.title}>◆ {deadline.title}</span>)}
+          {deadlines.filter((deadline) => deadline.day === day).map((deadline) => <span key={deadline.id} className="wk-flag" data-line={lineOf(deadline.identityId)} title={deadline.detail ? `${deadline.title} · ${deadline.detail}` : deadline.title}>◆ {deadline.title}</span>)}
         </div>)}
       </div>
       <div className="wk-body" data-scroll-to-morning style={{ "--hour": `${HOUR_PX}px` } as CSSProperties}>
@@ -102,7 +131,7 @@ export function MonthView({ anchor, today, items, deadlines, labels, onOpenDay }
       {week.map(({ day, inMonth }) => {
         const flags = deadlines.filter((deadline) => deadline.day === day);
         const things = itemsOn(items, day);
-        const shown = [...flags.map((flag) => ({ key: flag.id, text: `◆ ${flag.title}`, line: lineOf(flag.identityId), kind: "deadline", title: `截止：${flag.title}` })),
+        const shown = [...flags.map((flag) => ({ key: flag.id, text: `◆ ${flag.title}`, line: lineOf(flag.identityId), kind: "deadline", title: flag.detail ? `${flag.title} · ${flag.detail}` : flag.title })),
           ...things.map((item) => ({ key: item.id, text: `${item.start} ${item.title}`, line: lineOf(item.identityId), kind: item.kind,
             title: `${item.title} ${timeText(item)}${item.identityId ? ` · ${labels[item.identityId] ?? item.identityId}` : ""} · ${KIND_LABEL[item.kind]}` }))];
         return <div className="mo-cell" role="gridcell" key={day} data-out={!inMonth || undefined} data-today={day === today || undefined}>

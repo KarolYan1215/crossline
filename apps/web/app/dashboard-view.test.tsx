@@ -9,6 +9,13 @@ vi.mock("server-only", () => ({}));
 import { DashboardView, type DashboardData } from "./dashboard-view";
 
 const noPreviews = { taskDetailById: new Map(), milestoneDetailById: new Map() };
+/** A loaded task, as `loadTaskDetailsBatch` hands the page one. */
+const detailFor = (id: string, intent: string, identityId: string, state = "ready_for_human") => ({
+  id, ownerId: "test-owner", viewerId: "test-owner", workspaceId: "test-workspace", paused: false, identityId, identityLabel: identityId, accent: "#000", intent, state,
+  riskTier: "routine" as const, estimate: { p25Minutes: 45, p50Minutes: 60, p85Minutes: 90, confidence: "low" as const, source: "identity_prior" as const, observationCount: 0 },
+  manualPromotion: false, seeded: false, humanCore: [], automationParts: [], estimateBreakdown: [], byproducts: [], materialContract: [], evidenceContract: [], evidenceChecklist: [],
+  preparedMaterials: [], executions: [], relatedFlywheel: [], background: null,
+  window: {}, supports: [], workedMinutes: 0, criteria: [], sources: [], agentOutputs: [], agentSteps: [] });
 
 describe("dashboard view", () => {
   test("renders one next action, two alternatives, and all identity lanes", () => {
@@ -30,7 +37,8 @@ describe("dashboard view", () => {
       ],
       upcoming: [],
       localActivityAsked: true, lastNight: { state: "none" as const }, milestonePulse: [], todayCapacity: { availableMinutes: 0, committedMinutes: 0 }, flywheel: [], flywheelStrip: { nodes: [], edges: [] },
-      ...noPreviews
+      taskDetailById: new Map([["paper", detailFor("paper", "完成论文结果段", "research")], ["meal", detailFor("meal", "准备晚饭", "capacity")],
+        ["reply", detailFor("reply", "确认会议", "startup")]]), milestoneDetailById: new Map()
     }} />);
 
     expect(html).toContain("下一步");
@@ -42,12 +50,13 @@ describe("dashboard view", () => {
 
   test("工作块 F: a card with a loaded TaskDetail gets inline start/complete controls, not a link to Workbench", () => {
     const taskDetailById = new Map([["paper", {
-      id: "paper", ownerId: "test-owner", workspaceId: "test-workspace", paused: false,
+      id: "paper", ownerId: "test-owner", viewerId: "test-owner", workspaceId: "test-workspace", paused: false,
       identityId: "research", identityLabel: "科研", accent: "#6D5EF5", intent: "完成论文结果段",
       state: "ready_for_human", riskTier: "milestone" as const,
       estimate: { p25Minutes: 45, p50Minutes: 60, p85Minutes: 90, confidence: "low" as const, source: "identity_prior" as const, observationCount: 0 },
       manualPromotion: false, seeded: false, humanCore: [], automationParts: [], estimateBreakdown: [], byproducts: [], materialContract: [], evidenceContract: [], evidenceChecklist: [],
-      preparedMaterials: [], executions: [], relatedFlywheel: [], background: null
+      preparedMaterials: [], executions: [], relatedFlywheel: [], background: null,
+        window: {}, supports: [], workedMinutes: 0, criteria: [], sources: [], agentOutputs: [], agentSteps: []
     }]]);
     const html = renderToStaticMarkup(<DashboardView data={{
       principalId: "test-owner", workspaceId: "test-workspace", nowLabel: "周一 · 09:00", nowIso: "2026-09-14T14:00:00.000Z", timeZone: "America/Chicago", clockPinned: true,
@@ -62,15 +71,12 @@ describe("dashboard view", () => {
       localActivityAsked: true, lastNight: { state: "none" as const }, milestonePulse: [], todayCapacity: { availableMinutes: 0, committedMinutes: 0 }, flywheel: [], flywheelStrip: { nodes: [], edges: [] },
       taskDetailById, milestoneDetailById: new Map()
     }} />);
-    expect(html).toContain("开始执行");
+    // One primary action on the card: start the timer. Completion and evidence live in the task dialog.
+    expect(html).toContain("开始计时");
     expect(html).not.toContain("前往任务详情执行并提交证据");
-    // The day head already has an energy probe — the embedded
-    // ExecutionActions must not add a second "记录中精力" control next to it.
     expect(html).not.toContain("开始前精力");
-    // The inline controls replace the old CTA, but the hero card still needs a way to reach the
-    // full detail page (background facts, material/evidence contracts, execution history).
-    expect(html).toContain('href="/workbench/paper"');
-    expect(html).toContain("完整详情");
+    // The whole card opens the task dialog.
+    expect(html).toContain('aria-label="完成论文结果段，打开详情"');
   });
 
   test("includes a usable quick capture form", () => {
@@ -179,13 +185,13 @@ describe("dashboard view with nothing to recommend yet", () => {
 
   test("with proposals waiting it says so and links to them, instead of asking for more input", () => {
     const html = empty({ awaitingApproval: 2 });
-    expect(html).toContain("有 2 个方案在等你批准");
+    expect(html).toContain("项提案待批准");
     expect(html).toContain("/approvals#proposals");
-    expect(html).not.toContain("先收集一项真实工作");
+    expect(html).not.toContain("暂无可执行任务");
   });
 
   test("with nothing at all it asks for a first piece of real work", () => {
-    expect(empty({})).toContain("先收集一项真实工作");
+    expect(empty({})).toContain("暂无可执行任务");
   });
 
   test("quick capture comes before the next action, and its button says what it does", () => {

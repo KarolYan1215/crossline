@@ -6,10 +6,9 @@ import { BatchCaptureForm } from "./batch-capture-form";
 import { AnalogClock } from "./analog-clock";
 import { EnergyProbe } from "./energy-probe";
 import { LocalActivityConsent } from "./local-activity-consent";
-import { TaskPreview } from "./task-preview";
 import type { TaskDetail, MilestoneDetail } from "../lib/task-detail";
 import { AppShell } from "./app-shell";
-import { ExecutionActions } from "./execution-actions";
+import { TaskCard, type TaskSlot } from "./task/task-card";
 import { CalendarPanel } from "./timeline/calendar-panel";
 import type { CalendarData } from "./plan/plan-view";
 
@@ -76,26 +75,16 @@ export type DashboardData = {
   /** One batched read behind every preview drawer on this page, computed once in `page.tsx`. */
   taskDetailById: Map<string, TaskDetail>;
   milestoneDetailById: Map<string, MilestoneDetail>;
+  /** Each task's next block on the calendar. */
+  slotById?: Map<string, TaskSlot>;
   /** What the day timeline draws. Absent in tests that only care about the cards. */
   calendar?: CalendarData;
   /** Present only when the person agreed to the detailed screen record; a reading, with its reasons, never a verdict. */
   workState?: { state: string; label: string; confidence: "low" | "medium" | "high"; reasons: string[] };
 };
 
-// Never a bare number: an estimate without its provenance is indistinguishable from a measurement.
-const estimateSourceLabel: Record<string, string> = {
-  llm_prior: "先验", identity_prior: "先验", legacy_task: "遗留任务", personal_history: "个人历史", manual: "人工填写"
-};
-const estimateConfidenceLabel = { low: "低", medium: "中", high: "高" } as const;
-const estimateLabel = (estimate: DashboardAction["estimate"]) =>
-  estimate.observationCount === 0
-    ? `${estimate.p25Minutes}–${estimate.p85Minutes}m · 先验（0 次观测）`
-    : `${estimate.p25Minutes}–${estimate.p85Minutes}m · ${estimateSourceLabel[estimate.source] ?? estimate.source}`
-      + ` · ${estimate.observationCount} 次观测 · 置信${estimateConfidenceLabel[estimate.confidence]}`;
-
 const basisLabel = { self_report: "自评", execution_history: "执行记录", local_activity: "本机活动" } as const;
 const capacityLevelLabel = { low: "低", medium: "中", high: "高" } as const;
-const energyLabel: Record<string, string> = { low: "低", medium: "中", high: "高" };
 
 // The label must name what the reading came from. Calling every observation a self-report was wrong
 // as soon as activity days started counting towards the same total.
@@ -105,32 +94,14 @@ const capacityLabel = (capacity: DashboardData["capacity"]) =>
     : `精力 ${capacityLevelLabel[capacity.level]} · 依据 ${capacity.basis.map((item) => basisLabel[item]).join(" + ")} · ${capacity.observationCount} 次观测`;
 
 export function DashboardView({ data }: { data: DashboardData }) {
-  const identityLabel = (id: string) => data.identities.find((item) => item.id === id)?.label ?? (id === "capacity" ? "容量策略" : id);
-  // The whole card is a real `<a>` to its detail page, and a small corner button opens the same detail as a
-  // quick peek without leaving Today: two separate triggers instead of one click trying to be both.
-  const inlineActions = (item: DashboardAction) => {
-    const detail = data.taskDetailById.get(item.id);
-    return detail
-      ? <ExecutionActions workOrderId={detail.id} intent={detail.intent} state={detail.state} paused={detail.paused}
-          ownerId={detail.ownerId} workspaceId={detail.workspaceId} evidenceChecklist={detail.evidenceChecklist} estimateP50={detail.estimate.p50Minutes} {...(detail.suggestedMinutes ? { suggestedMinutes: detail.suggestedMinutes } : {})}
-          showEnergyProbe={false} />
-      : <a className="primary-button" href={`/workbench/${encodeURIComponent(item.id)}`}>前往任务详情执行并提交证据</a>;
-  };
+  const primaryDetail = data.primary ? data.taskDetailById.get(data.primary.id) : undefined;
+  const alternatives = ([[data.higherPriority, "更高优先级"], [data.lowEnergy, "低精力备选"], [data.shortGap, "短空档备选"]] as const)
+    .flatMap(([item, label]) => { const detail = item && item.id !== data.primary?.id ? data.taskDetailById.get(item.id) : undefined; return detail ? [[label, detail] as const] : []; })
+    .filter(([, detail], index, list) => list.findIndex(([, other]) => other.id === detail.id) === index);
 
   const load = data.todayCapacity.availableMinutes > 0
     ? Math.min(100, Math.round(data.todayCapacity.committedMinutes / data.todayCapacity.availableMinutes * 100))
     : data.todayCapacity.committedMinutes > 0 ? 100 : 0;
-
-  const alt = (item: DashboardAction | undefined, label: string) => <article className="panel alt-action" data-line={item?.identityId}>
-    <header><h3>{label}</h3>{item && <span className="tag">{identityLabel(item.identityId)}</span>}</header>
-    {item ? <>
-      <a className="card-cover-link" href={`/workbench/${encodeURIComponent(item.id)}`} aria-label={item.title} />
-      <TaskPreview detail={data.taskDetailById.get(item.id)} />
-      <h4>{item.title}</h4>
-      <p className="card-milestone">→ {item.milestone}</p>
-      <small>{estimateLabel(item.estimate)}</small>
-      {inlineActions(item)}</> : <p className="muted">暂无可执行项</p>}
-  </article>;
 
   const hasSeed = [data.primary, ...data.upcoming].some((item) => item && data.taskDetailById.get(item.id)?.seeded);
 
@@ -167,30 +138,18 @@ export function DashboardView({ data }: { data: DashboardData }) {
         <BatchCaptureForm ownerId={data.principalId} workspaceId={data.workspaceId} />
       </section>
 
-      <section className="today-grid" aria-label="下一步">
-        <article className="hero-action panel" data-line={data.primary?.identityId}>
-          <header><h2>下一步</h2>{data.primary && <span className="tag">{identityLabel(data.primary.identityId)}</span>}
-            <small>输入{data.primary?.inputsReady ? "就绪" : "待检查"}</small></header>
-          {data.primary ? <>
-            <TaskPreview detail={data.taskDetailById.get(data.primary.id)} />
-            <h3 className="hero-title">{data.primary.title}</h3>
-            <p>{data.primary.reason}</p>
-            <p className="hero-meta">
-              <span>窗口 {estimateLabel(data.primary.estimate)}</span>
-              <span>所需精力 {energyLabel[data.primary.energy ?? ""] ?? "未声明"}</span>
-              <span>里程碑 {data.primary.milestone}</span>
-              <a className="hero-detail-link" href={`/workbench/${encodeURIComponent(data.primary.id)}`}>完整详情 →</a>
-            </p>
-            {inlineActions(data.primary)}
-          </> : data.awaitingApproval
-            ? <p>有 {data.awaitingApproval} 个方案在等你批准，批准后这里会推荐下一步。<a href="/approvals#proposals">去批准 →</a></p>
-            : <p>先收集一项真实工作，系统会拆解并等待计划批准。</p>}
-        </article>
-        <div className="grid-auto alt-grid">
-          {data.higherPriority && alt(data.higherPriority, "更高优先级")}
-          {alt(data.lowEnergy, "低精力备选")}
-          {alt(data.shortGap, "短空档备选")}
+      <section className={`today-grid${alternatives.length ? "" : " today-grid-single"}`} aria-label="下一步">
+        <div className="today-next">
+          <h2 className="section-label">下一步</h2>
+          {primaryDetail ? <TaskCard variant="hero" detail={primaryDetail} reason={data.primary!.reason} slot={data.slotById?.get(primaryDetail.id)} />
+            : <p className="panel today-empty">{data.awaitingApproval
+              ? <><b className="mono">{data.awaitingApproval}</b> 项提案待批准，批准后在此推荐下一步。 <a href="/approvals#proposals">前往批准</a></>
+              : "暂无可执行任务。收集一项工作后，系统完成拆解与排程。"}</p>}
         </div>
+        {alternatives.length > 0 && <div className="today-alts">{alternatives.map(([label, detail]) => <div key={detail.id}>
+          <h3 className="section-label">{label}</h3>
+          <TaskCard detail={detail} slot={data.slotById?.get(detail.id)} />
+        </div>)}</div>}
       </section>
 
       {data.calendar && <section className="panel" aria-label="今天的时间轴">

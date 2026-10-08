@@ -1856,6 +1856,22 @@ export class CrosslineStore {
       plannedAt: String(row.planned_at), steps: byOrder.get(String(row.work_order_id)) ?? [] }));
   }
 
+  /** The person's own estimate for one step (dragged on the card or the calendar). */
+  updateStepEstimate(workspaceId: string, workOrderId: string, stepId: string,
+    estimate: { p25Minutes: number; p50Minutes: number; p85Minutes: number }, ownerId: string): { changed: boolean } {
+    return this.#db.transaction(() => {
+      const step = this.getStepPlan(workspaceId, workOrderId)?.steps.find((item) => item.id === stepId);
+      if (!step) throw new Error("STEP_NOT_FOUND");
+      if (step.estimate.p50Minutes === estimate.p50Minutes) return { changed: false };
+      this.#db.prepare("UPDATE task_steps SET p25_minutes = ?, p50_minutes = ?, p85_minutes = ?, updated_at = ? WHERE workspace_id = ? AND work_order_id = ? AND id = ?")
+        .run(estimate.p25Minutes, estimate.p50Minutes, estimate.p85Minutes, new Date().toISOString(), workspaceId, workOrderId, stepId);
+      const attempt = this.listEvents(workspaceId, { type: "task.step_estimated", entityId: workOrderId }).length;
+      this.appendEvent({ ownerId, workspaceId, idempotencyKey: `task.step_estimated:${workOrderId}:${stepId}:${attempt}`, type: "task.step_estimated",
+        entityId: workOrderId, payload: { stepId, before: step.estimate, after: estimate } });
+      return { changed: true };
+    }).immediate();
+  }
+
   /** Progress on one step: quarters (0–4), done, or skipped. Each change is its own event. */
   updateStepProgress(workspaceId: string, workOrderId: string, stepId: string,
     change: { progressQuarter?: number; status?: StoredTaskStep["status"] }, ownerId: string, source: string): { changed: boolean } {

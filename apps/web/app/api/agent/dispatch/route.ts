@@ -8,12 +8,12 @@ import { validId, writeGuard } from "../guard";
 export async function POST(request: Request) {
   const guard = await writeGuard(request);
   if ("response" in guard) return guard.response;
-  const { workOrderId, category } = guard.body;
+  const { workOrderId, category, stepId } = guard.body;
   if (typeof workOrderId !== "string" || !validId(workOrderId)) return Response.json({ ok: false, code: "INVALID_REQUEST" }, { status: 400 });
   try {
     const result = await requestCodexSupervisor<unknown>(guard.ctx, "/v1/agent/dispatch", {
       method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ workOrderId, ...(typeof category === "string" ? { category } : {}) }), signal: AbortSignal.timeout(15_000)
+      body: JSON.stringify({ workOrderId, ...(typeof category === "string" ? { category } : {}), ...(typeof stepId === "string" && validId(stepId) ? { stepId } : {}) }), signal: AbortSignal.timeout(15_000)
     });
     return Response.json({ ok: true, ...(result as object) });
   } catch (error) {

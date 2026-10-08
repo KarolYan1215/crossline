@@ -1,0 +1,136 @@
+/* The task card, the task dialog, the impact preview and the floating timer (apps/web/app/task/*). */
+
+.section-label{margin:0 0 4px;font-size:12px;font-weight:700;color:var(--graphite);letter-spacing:.02em}
+
+/* ── card ── */
+.task-card{position:relative;display:grid;gap:6px;padding:10px 12px;border:1px solid var(--mist);border-left:4px solid var(--lc,var(--graphite));
+  background:var(--paper);cursor:pointer;min-width:0}
+.task-card:hover{border-color:var(--ink);border-left-color:var(--lc,var(--ink))}
+.task-card:focus-visible{outline:2px solid var(--ink);outline-offset:1px}
+.task-card[data-state="active"]{box-shadow:inset 0 0 0 1px var(--lc,var(--ink))}
+.task-card-tags{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+.task-card-title{margin:0;font-size:15px;line-height:1.3}
+.task-card[data-variant="hero"] .task-card-title{font-size:clamp(18px,2vw,24px)}
+.task-card-milestone{margin:0;font-size:13px;color:var(--graphite)}
+.task-card-reason{margin:0;font-size:13px;color:var(--graphite)}
+.task-card-progress{display:grid;gap:3px}
+.task-progress-bar{display:block;height:6px;background:var(--chalk);overflow:hidden}
+.task-progress-bar i{display:block;height:100%;background:var(--lc,var(--ink))}
+.task-card-progress small{font-size:12px;color:var(--graphite)}
+.task-card-slot{margin:0;font-size:13px}
+.task-card-slot small{color:var(--graphite);margin-right:4px}
+.task-card-slot a{text-decoration:underline}
+.task-card-supports{display:flex;flex-wrap:wrap;gap:4px;margin:0}
+.task-card-note{margin:4px 0 0;font-size:12px;color:var(--graphite)}
+.task-quick-edit{position:relative;display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px 12px;align-items:center}
+.task-quick-due{display:inline-flex;align-items:center;gap:6px;font-size:13px}
+.task-quick-due small{color:var(--graphite)}
+.task-actions{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.task-actions>button,.task-actions-choices button{min-height:32px;padding:4px 12px;border:1px solid var(--mist);font-size:13px}
+.task-actions>button:hover{border-color:var(--ink)}
+.task-actions .primary-button{background:var(--ink);color:var(--paper);border-color:var(--ink);font-weight:700}
+.task-actions-choices{display:inline-flex;flex-wrap:wrap;gap:4px;align-items:center}
+.task-actions-choices input{min-height:32px;font-size:13px}
+.task-actions-status{flex-basis:100%;font-size:12px;color:var(--graphite)}
+
+/* ── grids ── */
+.task-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:10px;margin:10px 0}
+.task-grid-item{min-width:0}
+.today-grid{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:12px;align-items:start}
+.today-alts{display:grid;gap:10px}
+.today-empty{margin:0;padding:14px;font-size:14px}
+.today-empty a{text-decoration:underline;font-weight:700}
+@media (max-width:900px){.today-grid{grid-template-columns:minmax(0,1fr)}}
+.proposal-item{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px;align-items:start}
+.proposal-check{padding-top:12px}
+.proposal-check input{width:18px;height:18px}
+#proposals.work-order-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:10px}
+
+/* ── impact preview ── */
+.impact-card{grid-column:1/-1;display:grid;gap:4px;padding:8px 10px;border:1px solid var(--ink);background:var(--paper);font-size:13px;cursor:default}
+.impact-card header{display:flex;justify-content:space-between;align-items:baseline}
+.impact-card header small{color:var(--graphite)}
+.impact-row{display:flex;justify-content:space-between;gap:12px;margin:0}
+.impact-row [data-tone="worse"]{color:#8A1F24;font-weight:700}
+.impact-row [data-tone="better"]{color:var(--now);font-weight:700}
+.impact-card footer{display:flex;gap:6px;margin-top:4px}
+.impact-card footer button{min-height:30px;padding:4px 12px;border:1px solid var(--mist)}
+.impact-card footer .primary-button{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+
+/* ── dialog ── */
+.task-dialog{display:grid;gap:10px}
+.task-dialog-tags{display:flex;flex-wrap:wrap;gap:4px}
+.task-dialog-milestone{margin:0;font-size:13px;color:var(--graphite)}
+.task-dialog-milestone a{text-decoration:underline}
+.task-dialog-tabs{display:flex;flex-wrap:wrap;border-bottom:1px solid var(--mist)}
+.task-dialog-tabs button{padding:6px 14px;font-size:13px;border-bottom:2px solid transparent;margin-bottom:-1px}
+.task-dialog-tabs button[aria-selected="true"]{border-bottom-color:var(--lc,var(--ink));font-weight:700}
+.task-page{display:grid;gap:12px}
+
+.steps-panel,.standards-panel,.materials-panel,.record-panel{display:grid;gap:10px}
+.steps-head{display:flex;align-items:center;gap:10px}
+.steps-head small{color:var(--graphite)}
+.steps-rationale{margin:0;font-size:13px;color:var(--graphite)}
+.steps-list{display:grid;gap:4px;margin:0;padding:0;list-style:none}
+.steps-list li{display:grid;grid-template-columns:auto auto minmax(0,1fr) auto;gap:8px;align-items:start;padding:6px 8px;border:1px solid var(--mist);background:var(--paper)}
+.steps-list li[data-status]{grid-template-columns:auto minmax(0,1fr) auto;opacity:.75}
+.step-grip{cursor:grab;color:var(--graphite);user-select:none;padding-top:3px}
+.step-body{display:grid;gap:3px;min-width:0}
+.step-body input{width:100%;border-color:transparent;padding:2px 4px;font-weight:700}
+.step-body input:hover,.step-body input:focus{border-color:var(--mist)}
+.step-body small{font-size:12px;color:var(--graphite)}
+.step-tick{color:var(--lc,var(--ink));font-weight:700}
+.step-tools{display:flex;gap:2px}
+.step-tools button{width:26px;height:26px;border:1px solid transparent;color:var(--graphite)}
+.step-tools button:hover{border-color:var(--mist);color:var(--ink)}
+.steps-actions{display:flex;gap:6px}
+.steps-actions button,.steps-fix button,.progress-report button{min-height:32px;padding:4px 12px;border:1px solid var(--mist);font-size:13px}
+.steps-actions .primary-button{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.steps-fix,.progress-report{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px}
+.steps-division{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px;margin:0}
+.steps-division dt{font-size:12px;font-weight:700;color:var(--graphite)}
+.steps-division dd{margin:2px 0 0;font-size:13px}
+.standards-list,.standards-contract{display:grid;gap:4px;margin:0;padding:0;list-style:none}
+.standards-list li,.standards-contract li{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:8px;align-items:start;padding:4px 0;border-bottom:1px solid var(--chalk)}
+.standards-contract li{grid-template-columns:auto minmax(0,1fr)}
+.standards-list small{display:block;font-size:12px;color:var(--graphite)}
+.materials-panel h4{margin:0 0 4px;font-size:12px;color:var(--graphite)}
+.materials-panel ul{display:grid;gap:4px;margin:0;padding:0;list-style:none}
+.materials-panel li{display:flex;flex-wrap:wrap;gap:8px;align-items:baseline;font-size:13px}
+.materials-panel a{text-decoration:underline}
+.record-figures{display:flex;gap:20px;margin:0}
+
+/* ── chat inside the dialog ── */
+.task-dialog .assistant-chat{display:grid;gap:6px;max-height:50vh}
+.task-dialog .assistant-messages{overflow:auto;max-height:36vh;display:grid;gap:6px}
+.assistant-panel .assistant-chat{display:contents}
+
+/* ── floating timer ── */
+.timer-float{position:fixed;right:16px;bottom:128px;z-index:55;display:grid;gap:6px;max-width:min(320px,calc(100vw - 32px))}
+.timer-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:8px;align-items:center;padding:6px 8px;background:var(--paper);border:1px solid var(--ink)}
+.timer-row[data-over] .timer-text b{color:#8A1F24}
+.timer-bg{fill:none;stroke:var(--chalk);stroke-width:4}
+.timer-fg{fill:none;stroke:var(--now-ink);stroke-width:4}
+.timer-row[data-over] .timer-fg{stroke:#C4302B}
+.timer-text{display:grid;min-width:0}
+.timer-text b{font-size:16px}
+.timer-text small{font-size:12px;color:var(--graphite);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.timer-row button,.timer-alert button{min-height:30px;padding:4px 10px;border:1px solid var(--mist);font-size:13px}
+.timer-alert{display:grid;gap:6px;padding:10px;background:var(--paper);border:2px solid var(--ink)}
+.timer-alert p{margin:0}
+.timer-alert small{color:var(--graphite)}
+.timer-alert span{display:flex;gap:6px}
+.timer-alert .primary-button{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+@media (max-width:760px){.timer-float{bottom:calc(116px + env(safe-area-inset-bottom));right:8px}}
+
+/* ── day view: drag a scheduled block's right edge to change its length ── */
+.dt-resize{position:absolute;top:0;right:0;bottom:0;width:8px;cursor:ew-resize;touch-action:none;border-right:3px solid transparent}
+.dt-block:hover .dt-resize,.dt-resize:active{border-right-color:var(--ink)}
+.dt-resize-live{position:absolute;right:10px;top:0;padding:0 4px;background:var(--ink);color:var(--paper);font-size:12px}
+.task-quick-duration{display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px;align-items:center;min-width:0}
+.task-quick-duration small{font-size:12px;color:var(--graphite);white-space:nowrap}
+.step-duration{display:block;max-width:360px}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .impact-row [data-tone="worse"],:root:not([data-theme="light"]) .timer-row[data-over] .timer-text b{color:#FF8A80}}
+:root[data-theme="dark"] .impact-row [data-tone="worse"],:root[data-theme="dark"] .timer-row[data-over] .timer-text b{color:#FF8A80}
+.step-tools .step-agent{width:auto;padding:0 8px;border:1px solid var(--mist);color:var(--ink);font-size:12px}
+.today-grid.today-grid-single{grid-template-columns:minmax(0,1fr)}

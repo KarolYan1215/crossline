@@ -343,8 +343,10 @@ export async function startCodexSupervisor(options: {
   autoAnalyzeCaptures?: (workspaceId: string) => Promise<unknown>;
   /** Works backwards from approved milestones due soon (see `milestonesAwaitingBackplan`); answered at once. */
   autoBackplanGoals?: (workspaceId: string) => Promise<unknown>;
+  /** Step planning, replans asked for, and progress reports, run now (the person just asked for one); answered at once. */
+  runTaskPass?: (workspaceId: string) => Promise<unknown>;
   /** Hands a work order to the assistant. Answers at once: the task runs on, and writes its own outcome to the ledger. */
-  dispatchAgentTask?: (workspaceId: string, workOrderId: string, category?: string) => unknown;
+  dispatchAgentTask?: (workspaceId: string, workOrderId: string, category?: string, stepId?: string) => unknown;
   /** Writes plan blocks to the person's Crossline calendar. Only blocks; never touches any other calendar or event. */
   publishCalendar?: (workspaceId: string, blocks: Array<{ id: string; title: string; start: string; end: string; note?: string; reminderMinutes?: number | null }>) => Promise<unknown>;
   proposeMilestones?: (client: CodexRpcBoundary, request: string, signal: AbortSignal, workspaceId: string, only?: string[]) => Promise<unknown>;
@@ -516,6 +518,16 @@ export async function startCodexSupervisor(options: {
         }
         if (runtimeBlocker) { sendJson(response, 503, { blocker: runtimeBlocker }); return; }
         runDetached(() => options.autoAnalyzeCaptures!(callerWorkspaceId), () => {});
+        sendJson(response, 202, { started: true });
+        return;
+      }
+      if (request.method === "POST" && pathname === "/v1/tasks/pass" && options.runTaskPass) {
+        if (request.headers.origin || !request.headers["content-type"]?.startsWith("application/json")) {
+          sendJson(response, 403, { blocker: { code: "TASK_PASS_FORBIDDEN", message: "Use the local Web API" } });
+          return;
+        }
+        if (runtimeBlocker) { sendJson(response, 503, { blocker: runtimeBlocker }); return; }
+        runDetached(() => options.runTaskPass!(callerWorkspaceId), () => {});
         sendJson(response, 202, { started: true });
         return;
       }
@@ -716,7 +728,8 @@ export async function startCodexSupervisor(options: {
         const body = await readJsonBody(request);
         const workOrderId = typeof body?.workOrderId === "string" ? body.workOrderId : "";
         if (!/^[a-zA-Z0-9_-]{1,128}$/.test(workOrderId)) { sendJson(response, 400, { blocker: { code: "AGENT_ORDER_INVALID", message: "缺少任务编号。" } }); return; }
-        sendJson(response, 200, options.dispatchAgentTask(callerWorkspaceId, workOrderId, typeof body?.category === "string" ? body.category : undefined));
+        sendJson(response, 200, options.dispatchAgentTask(callerWorkspaceId, workOrderId, typeof body?.category === "string" ? body.category : undefined,
+          typeof body?.stepId === "string" && /^[a-zA-Z0-9_-]{1,64}$/.test(body.stepId) ? body.stepId : undefined));
         return;
       }
       if (request.method === "POST" && pathname === "/v1/milestones/propose" && options.proposeMilestones) {

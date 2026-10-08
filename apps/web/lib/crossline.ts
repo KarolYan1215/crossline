@@ -1,5 +1,6 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
@@ -479,6 +480,51 @@ export function plannerIdOfBlock(blockId: string): string {
   return parts[2] && STEP_ID.test(parts[2]) ? stepTaskId(parts[1]!, parts[2]) : parts[1]!;
 }
 
+/**
+ * What a preview changes without writing anything: a task's (or one step's, keyed `<order>#<step>`) usual minutes and a task's due
+ * date. Read by `plannerTaskOf` and `plannerItemsFor` inside `withPreview`, so the schedule and the forecast are recomputed with the
+ * change and compared with the real ones (`lib/impact.ts`). Async-local, so a preview never leaks into another request.
+ */
+export type PreviewOverrides = { estimates?: Record<string, number>; dueDates?: Record<string, string> };
+const previewScope = new AsyncLocalStorage<PreviewOverrides>();
+export const withPreview = <T>(overrides: PreviewOverrides, run: () => T): T => previewScope.run(overrides, run);
+const scaledEstimate = <E extends { p25Minutes: number; p50Minutes: number; p85Minutes: number }>(estimate: E, p50: number | undefined): E =>
+  p50 === undefined || p50 <= 0 ? estimate : { ...estimate, p50Minutes: Math.round(p50), p25Minutes: Math.max(1, Math.round(estimate.p25Minutes * p50 / Math.max(1, estimate.p50Minutes))),
+    p85Minutes: Math.max(Math.round(p50), Math.round(estimate.p85Minutes * p50 / Math.max(1, estimate.p50Minutes))) };
+
+/**
+ * The planner's input for a set of orders. A task with a step plan is placed step by step: each open, schedulable step is its own
+ * planner task, keeping the task's tier, deadline and release, the step's own window, and its dependencies (on earlier steps, and for
+ * its first steps on the work the task itself waits for). A task without a plan yet is placed whole, as before.
+ */
+function plannerItemsFor(ctx: AccessContext, orders: ActionableOrder[]) {
+  const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
+  const overrides = previewScope.getStore()?.estimates ?? {};
+  const stepPlans = new Map(getStore().listStepPlans(ctx.workspaceId).map((plan) => [plan.workOrderId, plan]));
+  const openSteps = (orderId: string) => stepPlans.get(orderId)?.steps.filter((step) => step.status === "planned" && step.schedulable) ?? [];
+  const plannerIdsOf = (orderId: string) => { const steps = openSteps(orderId); return steps.length ? steps.map((step) => stepTaskId(orderId, step.id)) : [orderId]; };
+  return orders.flatMap((order) => {
+    const base = plannerTaskOf(ctx, order);
+    const steps = openSteps(order.id);
+    if (!steps.length) return [{ task: base, orderId: order.id, title: order.intent }];
+    const open = new Set(steps.map((step) => step.id));
+    const external = (base.dependsOn ?? []).flatMap((id) => plannerIdsOf(id));
+    return steps.map((step) => {
+      const internal = step.dependsOn.filter((dep) => open.has(dep)).map((dep) => stepTaskId(order.id, dep));
+      const stepStart = step.notBefore ? toZonedInstant(step.notBefore, "00:00", zone) : undefined;
+      const stepDue = step.dueBy ? toZonedInstant(step.dueBy, "23:59", zone) : undefined;
+      const notBefore = [base.notBefore, stepStart].filter(Boolean).sort().at(-1);
+      const deadline = [base.deadline, stepDue].filter(Boolean).sort()[0];
+      const { notBefore: _n, deadline: _d, dependsOn: _deps, ...rest } = base;
+      const id = stepTaskId(order.id, step.id);
+      return { orderId: order.id, title: `${order.intent} · ${step.title}`, task: { ...rest, id,
+        title: `${order.intent} · ${step.title}`, estimate: scaledEstimate({ ...base.estimate, ...step.estimate }, overrides[id]),
+        ...(notBefore ? { notBefore } : {}), ...(deadline ? { deadline } : {}),
+        ...(internal.length || external.length ? { dependsOn: internal.length ? internal : external } : {}) } };
+    });
+  });
+}
+
 async function scheduledBlocks(ctx: AccessContext, today: string, committed: PersistedScheduleBlock[]): Promise<{
   blocks: PersistedScheduleBlock[]; schedule: PersistedPlan["schedule"]
 }> {
@@ -526,32 +572,7 @@ async function scheduledBlocks(ctx: AccessContext, today: string, committed: Per
       catch { return []; }
     }) : undefined;
 
-  // A task with a step plan is placed step by step: each open, schedulable step is its own planner task, keeping the task's tier,
-  // deadline and release, the step's own window, and its dependencies (on earlier steps, and for its first steps on the work the
-  // task itself waits for). A task without a plan yet is placed whole, as before.
-  const stepPlans = new Map(getStore().listStepPlans(ctx.workspaceId).map((plan) => [plan.workOrderId, plan]));
-  const openSteps = (orderId: string) => stepPlans.get(orderId)?.steps.filter((step) => step.status === "planned" && step.schedulable) ?? [];
-  const plannerIdsOf = (orderId: string) => { const steps = openSteps(orderId); return steps.length ? steps.map((step) => stepTaskId(orderId, step.id)) : [orderId]; };
-  const plannerTasksOf = (order: ActionableOrder) => {
-    const base = plannerTaskOf(ctx, order);
-    const steps = openSteps(order.id);
-    if (!steps.length) return [{ task: base, orderId: order.id, title: order.intent }];
-    const open = new Set(steps.map((step) => step.id));
-    const external = (base.dependsOn ?? []).flatMap((id) => plannerIdsOf(id));
-    return steps.map((step) => {
-      const internal = step.dependsOn.filter((dep) => open.has(dep)).map((dep) => stepTaskId(order.id, dep));
-      const stepStart = step.notBefore ? toZonedInstant(step.notBefore, "00:00", zone) : undefined;
-      const stepDue = step.dueBy ? toZonedInstant(step.dueBy, "23:59", zone) : undefined;
-      const notBefore = [base.notBefore, stepStart].filter(Boolean).sort().at(-1);
-      const deadline = [base.deadline, stepDue].filter(Boolean).sort()[0];
-      const { notBefore: _n, deadline: _d, dependsOn: _deps, ...rest } = base;
-      return { orderId: order.id, title: `${order.intent} · ${step.title}`, task: { ...rest, id: stepTaskId(order.id, step.id),
-        title: `${order.intent} · ${step.title}`, estimate: { ...base.estimate, ...step.estimate },
-        ...(notBefore ? { notBefore } : {}), ...(deadline ? { deadline } : {}),
-        ...(internal.length || external.length ? { dependsOn: internal.length ? internal : external } : {}) } };
-    });
-  };
-  const expanded = eligibleOrders.flatMap(plannerTasksOf);
+  const expanded = plannerItemsFor(ctx, eligibleOrders);
   const result = await planSchedule({
     now,
     horizonDays: days.length,
@@ -657,7 +678,8 @@ export function loadGoalForecast(ctx: AccessContext): ForecastResult & { inferre
       importance: readGoalSettings(ctx, item.id)?.importance ?? preferences.importance[item.id] ?? "ordinary" as const,
       confirmedDeadline: readGoalSettings(ctx, item.id)?.confirmedDeadline ?? anchors.get(item.id) ?? null }));
   const orders = store.listWorkOrders(ctx.workspaceId);
-  const tasks = orders.filter((order) => ACTIONABLE.includes(order.state)).map((order) => plannerTaskOf(ctx, order));
+  // Step by step where a task has a plan, so the forecast counts only the work that is left.
+  const tasks = plannerItemsFor(ctx, orders.filter((order) => ACTIONABLE.includes(order.state))).map((item) => item.task);
   const completedIds = new Set(orders.filter((order) => order.state === "accepted").map((order) => order.id));
   return { ...forecastGoals(goals, tasks, capacity, completedIds), inferredRegularBlocks: inferred.length };
 }
@@ -1184,10 +1206,11 @@ const plannerTaskOf = (ctx: AccessContext, order: ActionableOrder) => {
   const landing = byproductLanding(ctx, order);
   const dependsOn = landing ? landing.dependsOn : (order.payload as { dependsOn?: string[] }).dependsOn;
   const release = releaseDayOf(ctx, order);
-  const dueDate = landing?.dueDate ?? (order.payload as { dueDate?: string }).dueDate;
+  const preview = previewScope.getStore();
+  const dueDate = preview?.dueDates?.[order.id] ?? landing?.dueDate ?? (order.payload as { dueDate?: string }).dueDate;
   return {
     id: order.id, title: order.intent, identityId: order.identityId, milestoneId: order.milestoneId,
-    estimate: resolvedEstimate(ctx, order),
+    estimate: scaledEstimate(resolvedEstimate(ctx, order), preview?.estimates?.[order.id]),
     ...(core?.energy ? { energy: core.energy as "low" | "medium" | "high" } : {}),
     // Materials stand between the proposal and the human until the order reaches ready_for_human — when it needs any. An approved
     // order with no material contract can be started as it is (`startWorkOrderExecution` passes straight through), and every
@@ -1195,10 +1218,13 @@ const plannerTaskOf = (ctx: AccessContext, order: ActionableOrder) => {
     inputsReady: inputsReady(order),
     // A byproduct's landing never outranks real work: lowest tier, with its own T+2 window once the main order is done.
     deadlineTier: (landing ? 4 : tier) as 1 | 2 | 3 | 4,
-    ...(goal?.confirmedDeadline && preferences ? {
-      deadline: toZonedInstant(goal.confirmedDeadline, "23:59", preferences.timeZone) }
-      // The capture's own 「10月21号前」, when the milestone has no confirmed deadline of its own.
-      : dueDate && /^\d{4}-\d{2}-\d{2}$/.test(dueDate) ? { deadline: toZonedInstant(dueDate, "23:59", zone) } : {}),
+    // The earlier of the goal's confirmed deadline and the task's own due date (the capture's 「10月21号前」, a homework's due day):
+    // a homework due before the exam it counts towards is due on its own day.
+    ...(() => {
+      const day = [goal?.confirmedDeadline && preferences ? goal.confirmedDeadline : undefined,
+        dueDate && /^\d{4}-\d{2}-\d{2}$/.test(dueDate) ? dueDate : undefined].filter((value): value is string => Boolean(value)).sort()[0];
+      return day ? { deadline: toZonedInstant(day, "23:59", zone) } : {};
+    })(),
     ...(release ? { notBefore: toZonedInstant(release, "00:00", zone) } : {}),
     ...(dependsOn?.length ? { dependsOn } : {}),
     interruptible: core?.interruptible ?? true

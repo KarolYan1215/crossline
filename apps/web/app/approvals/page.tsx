@@ -1,14 +1,11 @@
-import { ensureSeeded, getStore, loadCurrentPlan, resolvedEstimate } from "../../lib/crossline";
-import { estimateBasis } from "../../lib/estimate-label";
-import { riskLabel } from "../../lib/labels";
+import { ensureSeeded, getStore, loadCurrentPlan } from "../../lib/crossline";
 import { SubpageShell } from "../subpage-shell";
-import { AcceptEvidenceButton, ApproveLineDraftsButton, ApproveProposalButton, JudgeMilestoneButton, ProposalBatchForm, RevokeAutoApprovalButton } from "./approval-actions";
+import { AcceptEvidenceButton, ApproveLineDraftsButton, JudgeMilestoneButton, ProposalBatchForm, RevokeAutoApprovalButton } from "./approval-actions";
 import { recentAutoApprovals } from "../../lib/approvals";
-import type { AnalysisProposal } from "@crossline/core";
 import { permissionCandidates, permissionModeEnabled } from "../../lib/permission-mode";
 import { PermissionModePanel } from "./permission-mode-panel";
 import { requireSessionContext } from "../../lib/access-guard";
-import { TaskPreview } from "../task-preview";
+import { TaskCard } from "../task/task-card";
 import { loadTaskDetailsBatch } from "../../lib/task-detail";
 import { countPending } from "../../lib/pending";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
@@ -26,7 +23,6 @@ export default async function ApprovalsPage() {
   const evidenceReviews = getStore().listWorkOrders(ctx.workspaceId).filter((item) => item.state === "evidence_review");
   const proposals = getStore().listWorkOrders(ctx.workspaceId).filter((item) => item.state === "awaiting_plan_approval");
   const claims = getStore().listEvidenceClaims(ctx.workspaceId);
-  const milestoneById = new Map(getStore().listMilestones(ctx.workspaceId).map((milestone) => [milestone.id, milestone]));
   // A revoked acceptance puts the order back here with the same evidence, and the gate deliberately
   // will not re-judge it on its own — so without the reason on screen the order looks stuck for no
   // stated cause, and the button that would move it looks like it does nothing.
@@ -57,44 +53,20 @@ export default async function ApprovalsPage() {
   const deadlineOf = (milestoneId: string) => anchors.get(milestoneId)?.deadline ?? "9999-12-31";
   const sortedProposals = [...proposals].sort((a, b) => deadlineOf(a.milestoneId).localeCompare(deadlineOf(b.milestoneId)));
   // The earliest suggested block per proposal (a split task has several; the first is when it would start).
-  const slotOf = new Map<string, string>();
-  for (const block of [...plan.blocks].filter((item) => item.id.startsWith("proposed:"))
+  const slotOf = new Map<string, { day: string; start: string; end: string }>();
+  for (const block of [...plan.blocks].filter((item) => item.id.startsWith("proposed:") && item.day)
     .sort((a, b) => `${a.day} ${a.start}`.localeCompare(`${b.day} ${b.start}`))) {
     const id = block.id.split(":")[1]!;
-    if (!slotOf.has(id)) slotOf.set(id, `${block.day?.slice(5) ?? ""} ${block.start}`);
+    if (!slotOf.has(id)) slotOf.set(id, { day: block.day!, start: block.start, end: block.end });
   }
   const renderProposal = (item: (typeof proposals)[number]) => {
-    const proposal = item.payload as AnalysisProposal & { audit: { threadId: string; turnId: string }; contextVersion: string };
-    const estimate = resolvedEstimate(ctx, item);
-    const steps = proposal.estimateBreakdown ?? [];
-    const milestone = milestoneById.get(item.milestoneId);
-    const deadline = anchors.get(item.milestoneId)?.deadline;
-    return <article key={item.id} className="proposal-card">
-      <a className="card-cover-link" href={`/workbench/${encodeURIComponent(item.id)}`} aria-label={item.intent} />
-      <TaskPreview detail={taskDetails.get(item.id)} />
-      <header><label className="proposal-check"><input type="checkbox" name="proposal" value={item.id} defaultChecked /> 勾选</label>
-        <b>{riskLabel[item.riskTier] ?? item.riskTier}</b></header>
-      <h2>{item.intent}</h2>
-      <p>{lineLabels[item.identityId] ?? item.identityId}{milestone ? ` · 为「${milestone.title}」` : ""} · 通常 {estimate.p50Minutes} 分，宽一点 {estimate.p85Minutes} 分{deadline ? ` · 最晚 ${deadline}` : ""}{slotOf.get(item.id) ? ` · 建议 ${slotOf.get(item.id)}` : ""}</p>
-      {(proposal.byproducts ?? []).map((byproduct) => <p key={byproduct.lineId} className="byproduct-line">
-        顺带 → {lineLabels[byproduct.lineId] ?? byproduct.lineId} · {byproduct.artifact}
-        <small>（过程中多记 {byproduct.captureSteps.reduce((sum, step) => sum + step.minutes, 0)} 分，做完后落地 {byproduct.landing.minutes} 分；批准后自动排上，不要可在「最近自动生效」撤销）</small>
-      </p>)}
-      {milestone?.verifiability === "unstated"
-        && <p role="note" className="seed-notice">绑定的里程碑还没有达成标准：验收只按下面的「必需」证据判定。<a href="/milestones"> 去补充 →</a></p>}
-      <details className="fold"><summary>你要做的、分步与依据</summary>
-        <p><small>{estimateBasis(estimate)}</small></p>
-        {steps.length > 0 && <p><small>分步：{steps.map((step) => `${step.step} ${step.minutes} 分钟`).join("；")}</small></p>}
-        <h3>你要做的</h3>{proposal.humanCore.map((part) => <p key={part.id}>{part.intent} — 依据「{part.quote}」：{part.rationale}</p>)}
-        {proposal.automationParts.length > 0 && <><h3>AI 准备的</h3>{proposal.automationParts.map((part) => <p key={part.id}>{part.intent} — 依据「{part.quote}」：{part.rationale}</p>)}</>}
-        <h3>材料与证据要求</h3>{[...proposal.materialContract, ...proposal.evidenceContract].map((contract, index) => <p key={index}>
-          {({ file: "文件", link: "链接", record: "记录", telemetry: "遥测" } as Record<string, string>)[contract.kind] ?? contract.kind} · {contract.description}{"required" in contract && contract.required ? " · 必需" : ""}
-          {contract.why ? <><br /><small>为什么需要：{contract.why}</small></> : ""}
-        </p>)}
-        <p><small>AI 草拟，等你确认 · {proposal.contextVersion} · thread {proposal.audit.threadId}</small></p>
-      </details>
-      <ApproveProposalButton workOrderId={item.id} />
-    </article>;
+    const detail = taskDetails.get(item.id);
+    if (!detail) return null;
+    const slot = slotOf.get(item.id);
+    return <div key={item.id} className="proposal-item">
+      <label className="proposal-check"><input type="checkbox" name="proposal" value={item.id} defaultChecked /><span className="sr-only">选中「{item.intent}」</span></label>
+      <TaskCard detail={detail} slot={slot} />
+    </div>;
   };
   return <SubpageShell active="待确认" title="待确认"
     description={pending.total ? `${pending.total} 件事在等你决定。内部、可撤销的准备工作会自己生效（一天内可撤销），其余都等你点头。` : "没有等你决定的事。"}>
@@ -169,9 +141,7 @@ export default async function ApprovalsPage() {
         const own = claims.filter((claim) => claim.workOrderId === item.id && claim.reviewStatus === "submitted");
         const execution = executions.filter((entry) => entry.workOrderId === item.id).at(-1);
         return <article key={item.id}>
-          <a className="card-cover-link" href={`/workbench/${encodeURIComponent(item.id)}`} aria-label={item.intent} />
-          <TaskPreview detail={taskDetails.get(item.id)} />
-          <b>待验收</b><strong>{item.intent}</strong>
+          <b>待验收</b><a href={`/workbench/${encodeURIComponent(item.id)}`}><strong>{item.intent}</strong></a>
           <p>
             {own.length ? own.map((claim) => `${({ file: "文件", link: "链接", record: "记录", telemetry: "遥测" } as Record<string, string>)[claim.kind] ?? claim.kind} · ${claim.description} · ${claim.uri}`).join("；") : "本次提交没有证据声明"}
             {execution?.durationObserved

@@ -2,13 +2,14 @@ import { expect, test } from "vitest";
 import { CrosslineStore } from "@crossline/db";
 import { createStepPlanner, createWarningReviewer, tasksAwaitingStepPlan, warningsAwaitingReview } from "./step-planner";
 import { materializeDatePairs } from "./date-pairs";
+import { taskFromWorkOrder } from "./agent-dispatch";
 import { scriptedRuntime } from "./testing/fake-runtime";
 
 const workspaceId = "w";
 const ownerId = "o";
 const step = (id: string, role: string, extra: Record<string, unknown> = {}) => ({ id, role, title: `${role} ${id}`, deliverable: "产出",
   doneCriterion: "完成", share: 0.5, estimate: { p25Minutes: 20, p50Minutes: 30, p85Minutes: 50 }, dependsOn: [], notBefore: "", dueBy: "",
-  schedulable: true, executor: "human", tickOutcome: "", ...extra });
+  schedulable: true, executor: "human" as "human" | "agent" | "mixed", tickOutcome: "", ...extra });
 
 function seed(store: CrosslineStore) {
   store.saveMilestone({ id: "m", ownerId, workspaceId, identityId: "research", projectId: "ece555", title: "ECE 555 期中", status: "approved", version: 1 });
@@ -41,6 +42,17 @@ test("a committed task gets a step plan; warnings are recorded, not refused, and
   expect(plan.version).toBe(2);
   expect(plan.steps.map((s) => s.role)).toEqual(["solve", "check", "submit"]);
   expect(warningsAwaitingReview(store, workspaceId)).toEqual([]);
+  store.close();
+});
+
+test("one step the system can do is handed to the assistant on its own; a person's step is not", () => {
+  const store = new CrosslineStore(":memory:");
+  seed(store);
+  const plan = store.saveStepPlan(workspaceId, "wo", { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 2, unit: "题" }, rationale: "",
+    steps: [step("r", "read", { executor: "agent" }), step("s", "solve")] }, ownerId, "t");
+  const handed = taskFromWorkOrder(store, workspaceId, "wo", undefined, plan.steps[0]!.id);
+  expect(handed.ok && handed.input).toMatchObject({ stepId: plan.steps[0]!.id, title: "完成作业 2 · read r", category: "read_research_organize" });
+  expect(taskFromWorkOrder(store, workspaceId, "wo", undefined, plan.steps[1]!.id)).toMatchObject({ ok: false, code: "ORDER_NOT_DISPATCHABLE" });
   store.close();
 });
 

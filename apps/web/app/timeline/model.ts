@@ -22,7 +22,7 @@ export type TimelineItem = {
 };
 
 /** A date something is due by, shown as a flag on the day rather than a block of time. */
-export type TimelineDeadline = { id: string; day: string; title: string; identityId?: string };
+export type TimelineDeadline = { id: string; day: string; title: string; identityId?: string; detail?: string };
 
 export const MINUTES_PER_DAY = 1440;
 

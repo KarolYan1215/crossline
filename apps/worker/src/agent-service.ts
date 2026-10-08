@@ -28,8 +28,8 @@ export function createAgentService(deps: {
   const log = deps.log ?? (() => {});
   const mark = (workspaceId: string) => running.get(workspaceId) ?? running.set(workspaceId, new Set()).get(workspaceId)!;
 
-  function start(workspaceId: string, orderId: string, category: AgentCategory | undefined): DispatchResult {
-    const planned = taskFromWorkOrder(deps.store, workspaceId, orderId, category);
+  function start(workspaceId: string, orderId: string, category: AgentCategory | undefined, stepId?: string): DispatchResult {
+    const planned = taskFromWorkOrder(deps.store, workspaceId, orderId, category, stepId);
     if (!planned.ok) return { state: "blocked", code: planned.code, message: planned.message };
     if (!planned.category) return { state: "blocked", code: "CATEGORY_REQUIRED", message: "这件事的描述没有明确指向某一类工作，请选一类再交给助手。" };
     const chosen = planned.category;
@@ -56,8 +56,8 @@ export function createAgentService(deps: {
 
   return {
     /** The 交给助手 button: the person chose this order (and maybe the kind). */
-    dispatch: (workspaceId: string, orderId: string, categoryName?: string): DispatchResult =>
-      start(workspaceId, orderId, categoryName === undefined ? undefined : isAgentCategory(categoryName) ? categoryName : undefined),
+    dispatch: (workspaceId: string, orderId: string, categoryName?: string, stepId?: string): DispatchResult =>
+      start(workspaceId, orderId, categoryName === undefined ? undefined : isAgentCategory(categoryName) ? categoryName : undefined, stepId),
 
     /** On the tick: at most one new task per workspace, only of an approved kind, only with quota to spare, only when none is going. */
     async pass(workspaceId: string): Promise<void> {

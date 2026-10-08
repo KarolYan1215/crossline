@@ -16,6 +16,8 @@ export { AGENT_CATEGORIES, approveCategory, CLEAN_RUNS_TO_TRUST, readCategories,
 
 export type AgentTaskInput = {
   taskId?: string; /** The work order this task prepares, when it came from the board. */ workOrderId?: string; title: string; what: string; category: AgentCategory;
+  /** One step of the work order rather than the whole of it; an accepted result marks that step done. */
+  stepId?: string;
   /** Files and folders the task reads, where they are. They are never changed; a hash of each is kept to prove it. */
   inputs?: string[];
   /** The part of this the person does themselves. */
@@ -174,7 +176,7 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
     const startedAt = Date.now();
     store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:requested:${taskId}`, type: "agent.task.requested", entityId: taskId,
       payload: { taskId, title: input.title, category: input.category, workOrderId: input.workOrderId ?? "", inputs, humanPart: input.humanPart, ...(worktree ? { worktree } : {}),
-        ...(input.delegated ? { delegated: true } : {}),
+        ...(input.delegated ? { delegated: true } : {}), ...(input.stepId ? { stepId: input.stepId } : {}),
         // Taken up because the order took effect by itself (nobody clicked approve): the review card says so.
         ...(input.workOrderId && store.listEvents(workspaceId, { type: "work_order.auto_approved", entityId: input.workOrderId }).length ? { autoApproved: true } : {}) } });
 
