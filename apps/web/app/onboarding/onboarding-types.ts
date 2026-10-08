@@ -15,7 +15,7 @@ export type Question = {
   allowOther: boolean; identityId: string; projectId: string;
 };
 export type AssistantTurn = {
-  reply: string; questions: Question[]; nextAction: "ask" | "ready_for_milestones";
+  reply: string; questions: Question[]; nextAction: "ask" | "ready_for_milestones"; stage?: string;
   coverage: Array<{ identityId: string; filled: string[]; missing: string[] }>;
 };
 export type Message = { seq: number; role: "assistant" | "user"; content: unknown; createdAt: string };
@@ -36,7 +36,15 @@ export type OnboardingState = {
   diligence: DiligenceReport[];
   dateBatch: DateBatch | null;
   identities: Identity[];
-  session: { id: string; state: "active" | "complete"; coverage: { coverage?: AssistantTurn["coverage"] } } | null;
+  session: { id: string; state: "active" | "complete"; coverage: { coverage?: AssistantTurn["coverage"]; stage?: string } } | null;
+  /** A new account sets its lines before the conversation starts. */
+  setupLines: boolean;
+  /** A line's own interview, when the page was opened for one. */
+  focusLine: { id: string; label: string } | null;
+  lines: Array<{ id: string; label: string; rank: number | null; hard: boolean; goals: string[] }>;
+  lineProfiles: Record<string, { description: string; goalCandidates: string[] }>;
+  profile: import("./portrait-panel").ProfileModelView | null;
+  availabilityProposed: boolean;
   messages: Message[];
   projects: Project[];
   facts: Fact[];

@@ -36,30 +36,43 @@ export type FlywheelCandidate = {
 export type TurnCoverage = { identityId: string; filled: string[]; missing: string[] };
 
 /**
- * Where the interview is (decided 2026-10-08): it starts from nothing and goes, one question at a time, through how the app works, where
- * the person stands, their compass, their energy, their lines, three five-year versions, each line's specifics, and ends in a portrait.
- * A line's own interview (`focusLine`) runs only `details` for that line.
+ * Where the interview is (decided 2026-10-08): the person sets their lines first on a structured screen (identity nouns, order, hard
+ * constraints); the interview then goes, a batch of independent questions at a time, through how the app works, where they stand, their
+ * compass, their energy, their lines (a personal description and long-term goal candidates for each), and each line's specifics. A line's
+ * own interview (`focusLine`) runs only `details` for that line. The portrait report is written afterwards by its own Skill.
  */
-export const ONBOARDING_STAGES = ["orientation", "situation", "compass", "energy", "lines", "odyssey", "details", "blueprint"] as const;
+export const ONBOARDING_STAGES = ["orientation", "situation", "compass", "energy", "lines", "details"] as const;
 export type OnboardingStage = (typeof ONBOARDING_STAGES)[number];
 /** The facts that are about the person rather than one line (their compass, their energy) are filed under this id. */
 export const PERSON_LINE = "person";
 
 /**
- * The working portrait, rewritten in full every turn from everything said so far: the problem as the person states it and as it really is
- * (what is gravity — a fact to accept — and what can be designed), their view of work and of life, what gives and drains energy and where
- * they reach flow, the anchor holding them in place, the rule that allocates their attention across lines, and three five-year versions.
- * It is the interviewer's synthesis, shown as such; facts with quotes stay in `slotUpdates`.
+ * The working portrait, rewritten in full every turn from everything said so far — the interviewer's synthesis, shown as such; facts with
+ * quotes stay in `slotUpdates`. It is what the portrait report is built from.
  */
 export type ProfileModel = {
-  problem: string; gravity: string[]; designable: string[]; workView: string; lifeView: string;
-  energizing: string[]; draining: string[]; flow: string[]; anchor: string; allocation: string;
-  odyssey: Array<{ title: string; summary: string }>;
+  /** One sentence that sums the person up now, and the contradiction that matters most. */
+  portrait: string; coreConflict: string;
+  problem: string; gravity: string[]; designable: string[];
+  /** A false premise they are stuck on, and the problem reframed. */
+  reframes: Array<{ fallacy: string; reframe: string }>;
+  workView: string; lifeView: string; consistency: string; trueNorth: string;
+  /** Activities placed by skill and liking, and whether they charge or drain. */
+  energyMap: Array<{ activity: string; skill: "high" | "low"; love: "high" | "low"; charge: "charge" | "drain" }>;
+  flow: string[];
+  /** What they say they want, and what their behaviour shows they protect. */
+  says: string; does: string;
+  /** An idea held long after it stopped working, and what they really want behind it. */
+  anchor: string; realWant: string;
+  allocation: string;
 };
-export const EMPTY_PROFILE_MODEL: ProfileModel = { problem: "", gravity: [], designable: [], workView: "", lifeView: "", energizing: [], draining: [],
-  flow: [], anchor: "", allocation: "", odyssey: [] };
-/** A line the interviewer proposes from what it heard; the person confirms it (and its long-term goal) before it exists. */
-export type ProposedLine = { label: string; goal: string; why: string };
+export const EMPTY_PROFILE_MODEL: ProfileModel = { portrait: "", coreConflict: "", problem: "", gravity: [], designable: [], reframes: [], workView: "",
+  lifeView: "", consistency: "", trueNorth: "", energyMap: [], flow: [], says: "", does: "", anchor: "", realWant: "", allocation: "" };
+/** For each line: a personal description from what was said, and long-term goal candidates 「成为 ___ 的 <身份>」 drawn only from it. */
+export type LineProfile = { lineId: string; description: string; goalCandidates: string[] };
+/** A weekly pattern of available hours proposed from a hard-constraint line's rules; the person confirms it on the plan page. */
+export type AvailabilityProposal = { windows: Array<{ days: number[]; start: string; end: string; energy: "low" | "medium" | "high" }>; why: string };
+
 export type OnboardingTurn = {
   reply: string;
   questions: TurnQuestion[];
@@ -75,10 +88,10 @@ export type OnboardingTurn = {
   fileDates?: DateExtraction;
   nextAction: "ask" | "ready_for_milestones";
   stage?: OnboardingStage;
-  linesProposed?: ProposedLine[];
+  lineProfiles?: LineProfile[];
+  /** Filled once a hard-constraint line's rules are known (empty `windows` otherwise). */
+  availability?: AvailabilityProposal;
   profile?: ProfileModel;
-  /** The portrait as a report, written at the end (`stage: "blueprint"`); "" before. */
-  blueprint?: string;
 };
 
 /** What the Skill is shown at the start of the interview (later turns only carry the new reply). */
@@ -92,6 +105,8 @@ export type OnboardingTurnContext = {
   sources: Array<{ id: string; fileName: string; kind: string; projectId: string; text: string }>;
   /** A line's own interview: only this line is asked about. Absent for the full interview. */
   focusLine?: { id: string; label: string; goal: string } | null;
+  /** The person's lines as set on the opening screen: identity noun, order (null = parallel), hard constraint, chosen goals. */
+  lines?: Array<{ id: string; label: string; rank: number | null; hard: boolean; goals: string[] }>;
   /** The portrait so far and the stage reached, so a rebuilt thread carries on rather than starting over. */
   profile?: ProfileModel; stage?: OnboardingStage;
   /** Only when the conversation had to be rebuilt in a fresh thread: what was said before, oldest first. User lines carry their `reply-N` id. */
@@ -162,15 +177,20 @@ export const ONBOARDING_TURN_SCHEMA = object({
   fileDates: DATE_EXTRACTION_SCHEMA,
   nextAction: { type: "string", enum: ["ask", "ready_for_milestones"] },
   stage: { type: "string", enum: [...ONBOARDING_STAGES] },
-  linesProposed: { type: "array", maxItems: 8, items: object({ label: text(20), goal: { type: "string", maxLength: 300 }, why: { type: "string", maxLength: 300 } }) },
+  lineProfiles: { type: "array", maxItems: 8, items: object({ lineId: slug, description: { type: "string", maxLength: 800 },
+    goalCandidates: { type: "array", maxItems: 6, items: text(120) } }) },
+  availability: object({ windows: { type: "array", maxItems: 14, items: object({ days: { type: "array", maxItems: 7, items: { type: "integer", minimum: 0, maximum: 6 } },
+    start: text(5), end: text(5), energy: { type: "string", enum: ["low", "medium", "high"] } }) }, why: { type: "string", maxLength: 400 } }),
   profile: object({
-    problem: { type: "string", maxLength: 600 }, gravity: { type: "array", maxItems: 8, items: text(200) }, designable: { type: "array", maxItems: 8, items: text(200) },
-    workView: { type: "string", maxLength: 600 }, lifeView: { type: "string", maxLength: 600 },
-    energizing: { type: "array", maxItems: 8, items: text(200) }, draining: { type: "array", maxItems: 8, items: text(200) }, flow: { type: "array", maxItems: 8, items: text(200) },
-    anchor: { type: "string", maxLength: 600 }, allocation: { type: "string", maxLength: 600 },
-    odyssey: { type: "array", maxItems: 3, items: object({ title: text(20), summary: text(800) }) }
-  }),
-  blueprint: { type: "string", maxLength: 20_000 }
+    portrait: { type: "string", maxLength: 300 }, coreConflict: { type: "string", maxLength: 400 }, problem: { type: "string", maxLength: 600 },
+    gravity: { type: "array", maxItems: 8, items: text(200) }, designable: { type: "array", maxItems: 8, items: text(200) },
+    reframes: { type: "array", maxItems: 4, items: object({ fallacy: text(200), reframe: text(300) }) },
+    workView: { type: "string", maxLength: 600 }, lifeView: { type: "string", maxLength: 600 }, consistency: { type: "string", maxLength: 600 }, trueNorth: { type: "string", maxLength: 300 },
+    energyMap: { type: "array", maxItems: 12, items: object({ activity: text(80), skill: { type: "string", enum: ["high", "low"] }, love: { type: "string", enum: ["high", "low"] },
+      charge: { type: "string", enum: ["charge", "drain"] } }) },
+    flow: { type: "array", maxItems: 8, items: text(200) }, says: { type: "string", maxLength: 400 }, does: { type: "string", maxLength: 400 },
+    anchor: { type: "string", maxLength: 400 }, realWant: { type: "string", maxLength: 400 }, allocation: { type: "string", maxLength: 600 }
+  })
 });
 
 const SLOT = /^[a-z][a-z0-9_]{1,39}$/;
@@ -243,7 +263,10 @@ export function validateOnboardingTurn(value: unknown, known: KnownSources): Onb
     }
   }
   if (turn.nextAction === "ask" && !turn.questions.length) reject("ONBOARDING_QUESTION_REQUIRED", "还没问完，这一轮必须至少提出一个问题。");
-  for (const line of turn.linesProposed ?? []) if (!line.label.trim()) reject("ONBOARDING_LINE_LABEL_REQUIRED", "提议的主线需要名称。");
+  for (const line of turn.lineProfiles ?? []) if (!identities.has(line.lineId)) reject("ONBOARDING_IDENTITY_UNKNOWN", `主线描述里的主线「${line.lineId}」不存在。`);
+  for (const window of turn.availability?.windows ?? []) if (!/^\d{2}:\d{2}$/.test(window.start) || !/^\d{2}:\d{2}$/.test(window.end) || window.end <= window.start)
+    reject("ONBOARDING_AVAILABILITY_INVALID", `可用时段 ${window.start}–${window.end} 不合法：用 HH:MM，且结束晚于开始。`);
   // A turn recorded before the portrait existed has none of it; every live answer carries all of it (strict schema).
-  return { ...turn, stage: turn.stage ?? "details", linesProposed: turn.linesProposed ?? [], profile: { ...EMPTY_PROFILE_MODEL, ...(turn.profile ?? {}) }, blueprint: turn.blueprint ?? "" };
+  return { ...turn, stage: turn.stage ?? "details", lineProfiles: turn.lineProfiles ?? [], availability: turn.availability ?? { windows: [], why: "" },
+    profile: { ...EMPTY_PROFILE_MODEL, ...(turn.profile ?? {}) } };
 }

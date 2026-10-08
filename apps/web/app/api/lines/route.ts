@@ -1,5 +1,5 @@
 import { resolveAccessContext } from "../../../lib/access-guard";
-import { addLine, linePacks, rankLines, updateLine } from "../../../lib/lines";
+import { addLine, linePacks, rankLines, setupLines, updateLine } from "../../../lib/lines";
 import { isCrossSiteWrite } from "../../../lib/same-origin";
 import { withUndo } from "../../../lib/undo";
 
@@ -23,6 +23,13 @@ export async function POST(request: Request) {
   const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
   const text = (value: unknown) => typeof value === "string" ? value : undefined;
   const goals = Array.isArray(body.goals) ? (body.goals as unknown[]).filter((goal): goal is string => typeof goal === "string") : undefined;
+  // The opening screen: every line at once, in order.
+  if (Array.isArray(body.setup)) {
+    const lines = (body.setup as Array<Record<string, unknown>>).filter((item) => item && typeof item.label === "string")
+      .map((item) => ({ label: String(item.label), ranked: item.ranked === true, hard: item.hard === true })).slice(0, 8);
+    const result = await withUndo(access.ctx, "设定主线", () => setupLines(access.ctx, lines));
+    return Response.json(result, { status: result.ok ? 200 : 400 });
+  }
   if (Array.isArray(body.order)) {
     const order = (body.order as unknown[]).filter((id): id is string => typeof id === "string");
     return Response.json(await withUndo(access.ctx, "调整主线主次", () => rankLines(access.ctx, order)));

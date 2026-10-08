@@ -16,8 +16,8 @@ export type ImportanceRow = { id: string; title: string; line: string; weight: n
  * The three things the person sets for the schedule, in one place (they used to be in three): when they are free, how a day is packed,
  * and how much each milestone matters. Every change is previewed against the real schedule before it is applied.
  */
-export function TimeControls({ windows, suggested, busy, params, presets, importance, labels, plannedHours }: {
-  windows: AvailabilityWindow[]; suggested: AvailabilityWindow[]; busy: number[][]; params: ScheduleParams;
+export function TimeControls({ windows, suggested, proposed, busy, params, presets, importance, labels, plannedHours }: {
+  windows: AvailabilityWindow[]; suggested: AvailabilityWindow[]; proposed?: { windows: AvailabilityWindow[]; why: string } | null; busy: number[][]; params: ScheduleParams;
   presets: { buffered: ScheduleParams; asap: ScheduleParams }; importance: ImportanceRow[]; labels: Record<string, string>; plannedHours: number;
 }) {
   const [tab, setTab] = useState<Tab>("week");
@@ -25,7 +25,7 @@ export function TimeControls({ windows, suggested, busy, params, presets, import
     <header><h2>时间与容量</h2>
       <SegmentedControl label="设置项" value={tab} onChange={setTab} options={[{ value: "week", label: "可用时段" },
         { value: "params", label: "排程参数" }, { value: "importance", label: "重要性" }]} /></header>
-    {tab === "week" && <WeekEditor windows={windows} suggested={suggested} busy={busy} plannedHours={plannedHours} />}
+    {tab === "week" && <WeekEditor windows={windows} suggested={suggested} proposed={proposed ?? null} busy={busy} plannedHours={plannedHours} />}
     {tab === "params" && <ParamsPanel params={params} presets={presets} />}
     {tab === "importance" && <ImportancePanel rows={importance} labels={labels} />}
   </section>;
@@ -38,7 +38,8 @@ const ENERGY_LABEL = ["不可用", "低精力", "中精力", "高精力"];
 const clock = (slot: number) => `${String(Math.floor(slot / 2)).padStart(2, "0")}:${slot % 2 ? "30" : "00"}`;
 
 /** The week painted on a grid: pick an energy, drag over half hours. Calendar commitments of the next two weeks show through as dots. */
-function WeekEditor({ windows, suggested, busy, plannedHours }: { windows: AvailabilityWindow[]; suggested: AvailabilityWindow[]; busy: number[][]; plannedHours: number }) {
+function WeekEditor({ windows, suggested, proposed, busy, plannedHours }: { windows: AvailabilityWindow[]; suggested: AvailabilityWindow[];
+  proposed: { windows: AvailabilityWindow[]; why: string } | null; busy: number[][]; plannedHours: number }) {
   const initial = useRef(JSON.stringify(gridFromWindows(windows)));
   const [grid, setGrid] = useState<WeekGrid>(() => gridFromWindows(windows));
   const [brush, setBrush] = useState<(typeof BRUSH)[number]["value"]>("3");
@@ -62,6 +63,7 @@ function WeekEditor({ windows, suggested, busy, plannedHours }: { windows: Avail
     <div className="pl-toolbar">
       <SegmentedControl label="画笔" value={brush} onChange={setBrush} options={BRUSH.map((item) => ({ value: item.value, label: item.label }))} />
       <span className="pl-hours mono" title="可用时段每周小时数，对比未来 7 天已排入的小时数">每周 {hours} h · 已排 {plannedHours} h</span>
+      {proposed && <button type="button" onClick={() => setGrid(gridFromWindows(proposed.windows))} title={proposed.why || "访谈按硬约束主线的规则提议的可用时段"}>采用访谈提议</button>}
       {suggested.length > 0 && <button type="button" onClick={() => setGrid(gridFromWindows(suggested))} title="按近两周屏幕活动推断的在场时段">采用活动建议</button>}
       {dirty && <button type="button" onClick={() => setGrid(JSON.parse(initial.current) as WeekGrid)}>还原</button>}
       <button type="button" className="primary-button" disabled={!dirty || empty || impact.busy}

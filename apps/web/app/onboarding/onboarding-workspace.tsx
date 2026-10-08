@@ -6,6 +6,9 @@ import { DiligencePanel } from "./diligence-panel";
 import { TranscriptionCard, type TranscriptionStatus } from "./transcription-card";
 import { ProfilePanel } from "./profile-panel";
 import { QuestionCard } from "./question-card";
+import { LineSetup } from "./line-setup";
+import { PortraitPanel, StageBar } from "./portrait-panel";
+import { HierarchyGuide } from "./hierarchy-guide";
 import {
   composeAnswers, type Answer, type AssistantTurn, type DocumentRow, type Message, type OnboardingState
 } from "./onboarding-types";
@@ -24,7 +27,7 @@ const userText = (message: Message) => String((message.content as { text?: strin
  * composed, a turn that is running, an upload — and re-reads everything else. Reloading the page, or opening
  * it on another device, picks the interview up exactly where it stopped.
  */
-export function OnboardingWorkspace() {
+export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
   const [state, setState] = useState<OnboardingState | undefined>();
   const [sessionId, setSessionId] = useState("");
   const [busy, setBusy] = useState<"" | "turn" | "upload" | "dates" | "milestones" | "diligence">("");
@@ -39,14 +42,16 @@ export function OnboardingWorkspace() {
   const bottom = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
-    const response = await fetch("/api/onboarding/state", { cache: "no-store" }).catch(() => undefined);
+    const response = await fetch(`/api/onboarding/state${line ? `?line=${encodeURIComponent(line)}` : ""}`, { cache: "no-store" }).catch(() => undefined);
     if (!response?.ok) { setError("读不到访谈状态，请刷新。"); return undefined; }
     const next = await response.json() as OnboardingState;
     setState(next);
     setSessionId((current) => next.session?.id ?? current ?? "");
     return next;
-  }, []);
+  }, [line]);
   useEffect(() => { void load(); }, [load]);
+  // Within a turn's batch the questions are answered one by one, then sent together.
+  const [current, setCurrent] = useState(0);
   // While a recording is waiting for text, keep looking: the model downloads and the transcription finishes
   // in the background, and the screen should show both without a refresh.
   const waitingForAudio = state?.documents.some((item) => item.kind === "audio" && item.extractionStatus === "pending") ?? false;
@@ -73,15 +78,19 @@ export function OnboardingWorkspace() {
   const runTurn = async (message: string, reread = false) => {
     setBusy("turn"); setError("");
     if (message) { setPendingText(message); setText(""); setAnswers({}); }
-    const id = sessionId || crypto.randomUUID();
+    // A line's own interview lives in its own session; the full interview mints its id once.
+    const id = line ? `line-${line}` : sessionId || crypto.randomUUID();
     setSessionId(id);
     const response = await fetch("/api/onboarding/turn", {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sessionId: id, text: message, reread })
     }).catch(() => undefined);
     const body = await response?.json().catch(() => undefined) as { state?: string; message?: string; blocker?: { message?: string } } | undefined;
     if (!response?.ok || body?.state === "blocked") setError(body?.message ?? body?.blocker?.message ?? "这一轮没有完成，可以重试。");
+    // The full interview just finished: the portrait report is written now, so it is ready when the person opens it.
+    if (body?.state === "ready" && !line) void fetch("/api/portrait", { method: "POST" }).catch(() => {});
     await load();
     setPendingText("");
+    setCurrent(0);
     setBusy("");
   };
 
@@ -153,30 +162,43 @@ export function OnboardingWorkspace() {
   const canSend = busy === "" && (Boolean(composed.trim()) || waiting);
 
   if (!state) return <p className="ob-muted" role="status">正在读取…</p>;
+  if (state.setupLines) return <div className="ob-start"><HierarchyGuide /><LineSetup onDone={() => void load()} /></div>;
+  const batch = [...(open?.questions ?? []), ...extra];
+  const stage = open?.stage ?? state.session?.coverage.stage ?? "orientation";
 
   return <div className="ob" onDragOver={(event) => { event.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={onDrop} data-dragging={over}>
     <section className="ob-chat" aria-label="访谈对话">
+      <StageBar stage={stage} line={state.focusLine?.label} />
       <div className="ob-thread" aria-live="polite">
-        {messages.length === 0 && <div className="ob-turn ob-assistant"><p>{OPENING}</p></div>}
+        {messages.length === 0 && !state.focusLine && <HierarchyGuide />}
+        {messages.length === 0 && <div className="ob-turn ob-assistant"><p>{state.focusLine ? `「${state.focusLine.label}」的访谈：现状、长期目标、项目、截止日与已有文件。` : OPENING}</p></div>}
         {messages.map((message) => {
           const turn = asTurn(message);
           if (!turn) return <div className="ob-turn ob-user" key={message.seq}><p>{userText(message)}</p></div>;
-          const current = message.seq === messages.at(-1)?.seq;
+          const latest = message.seq === messages.at(-1)?.seq;
           return <div className="ob-turn ob-assistant" key={message.seq}>
             <p>{turn.reply}</p>
-            {current && !waiting && turn.questions.map((question) => <QuestionCard key={question.id} question={question}
-              answer={answers[question.id] ?? { picked: [], other: "" }} identities={state.identities} projects={state.projects} disabled={busy !== ""}
-              onChange={(next) => setAnswers((previous) => ({ ...previous, [question.id]: next }))} />)}
-            {current && turn.nextAction === "ready_for_milestones" && <p className="ob-done">信息已基本完整，可在下方设计里程碑。</p>}
+            {latest && turn.nextAction === "ready_for_milestones" && <p className="ob-done">信息已基本完整，可在下方生成画像报告与里程碑。</p>}
           </div>;
         })}
-        {extra.length > 0 && !waiting && <div className="ob-turn ob-assistant" aria-label="待定事项">
-          <p>以下事项尚未确认。里程碑分数线由目标倒推，目标需本人确认。</p>
-          {extra.map((question) => <QuestionCard key={question.id} question={question}
+        {batch.length > 0 && !waiting && <div className="ob-turn ob-assistant ob-batch" aria-label="本轮问题">
+          <nav className="ob-batch-nav" aria-label="问题进度">{batch.map((question, index) => <button key={question.id} type="button" aria-current={index === Math.min(current, batch.length - 1) || undefined}
+            data-answered={Boolean(answers[question.id]?.picked.length || answers[question.id]?.other.trim()) || undefined} onClick={() => setCurrent(index)}>{index + 1}</button>)}</nav>
+          {(() => { const question = batch[Math.min(current, batch.length - 1)]!; return <QuestionCard key={question.id} question={question}
             answer={answers[question.id] ?? { picked: [], other: "" }} identities={state.identities} projects={state.projects} disabled={busy !== ""}
-            onChange={(next) => setAnswers((previous) => ({ ...previous, [question.id]: next }))} />)}
+            onChange={(next) => setAnswers((previous) => ({ ...previous, [question.id]: next }))} />; })()}
+          <div className="ob-batch-actions">
+            {current > 0 && <button type="button" className="ob-btn" onClick={() => setCurrent((index) => index - 1)}>上一题</button>}
+            {current < batch.length - 1 && <button type="button" className="ob-btn" onClick={() => setCurrent((index) => index + 1)}>下一题</button>}
+            <small className="ob-muted">{batch.length} 题互不依赖，答完一并发送；可跳过不答的题。</small>
+          </div>
         </div>}
         {state.dateBatch && <DateBatchCard key={state.dateBatch.id} batch={state.dateBatch} busy={busy !== ""} onDecide={(batchId, ids) => void decideDates(batchId, ids)} onRedo={() => void runTurn("请把我已添加的文件里的日期重新读一遍，只整理日期。", true)} />}
+        {!state.focusLine && state.session?.state === "complete" && <section className="ob-design" aria-label="画像报告">
+          <b>画像报告</b>
+          <span className="ob-muted">个人画像与洞察（可导出分享版），以及现况洞察与可行建议；可下载 PDF 或图片。</span>
+          <a className="ob-btn" href="/portrait">查看画像报告 →</a>
+        </section>}
         {state.facts.some((fact) => fact.status === "confirmed") && <section className="ob-design" aria-label="设计里程碑">
           <b>{state.session?.state === "complete" ? "了解得够了，可以设计里程碑了" : "随时可以先设计里程碑，之后补充再重来"}</b>
           <span className="ob-muted">由已确认的事实与日期倒推，每条主线 3–5 个前后相接的里程碑草稿，批准后生效。</span>
@@ -207,7 +229,11 @@ export function OnboardingWorkspace() {
         </div>
       </form>
     </section>
-    <ProfilePanel state={state} onChanged={() => void load()} />
+    <div className="ob-side">
+      <PortraitPanel profile={state.profile} lines={state.lines} lineProfiles={state.lineProfiles} onChanged={() => void load()} />
+      {state.availabilityProposed && <p className="ob-note">已按硬约束规则提议每周可用时段，可在 <a href="/plan#time">计划页</a> 预览后采用。</p>}
+      <ProfilePanel state={state} onChanged={() => void load()} />
+    </div>
   </div>;
 }
 

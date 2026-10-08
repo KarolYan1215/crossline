@@ -36,7 +36,7 @@ export default async function PlanPage() {
       </>}
       <PlanExplainButton hasExplanation={Boolean(explanation)} />
     </div>} />
-    <TimeControls windows={board.week.windows} suggested={board.week.suggested} busy={board.week.busy} params={board.params} presets={board.presets}
+    <TimeControls windows={board.week.windows} suggested={board.week.suggested} proposed={board.week.proposed} busy={board.week.busy} params={board.params} presets={board.presets}
       importance={board.importance} labels={board.labels} plannedHours={Math.round((board.capacity.plannedThisWeek / 60) * 10) / 10} />
   </SubpageShell>;
 }

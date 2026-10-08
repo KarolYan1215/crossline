@@ -15,24 +15,22 @@ export const ONBOARDING_SKILL = "crossline:crossline-onboarding";
 const SOURCE_TEXT_PER_DOCUMENT = 14_000;
 const SOURCE_TEXT_TOTAL = 60_000;
 
-const INSTRUCTIONS = "You interview a Crossline user from nothing, as the Skill describes: a life designer's interview in stages "
-  + "(orientation, situation, compass, energy, lines, odyssey, details, blueprint), never proposing milestones. Each turn: a short, "
-  + "sharp reflection on what was just said (name a contradiction, a self-imposed limit, or gravity mistaken for a problem; never judge "
-  + "a choice or decide for the person), then a batch of up to five questions that do not depend on each other — a question whose answer "
-  + "depends on another's waits for the next turn; follow a thread that carries a clue (when, which thing exactly, what it felt like) "
-  + "before returning to the stage. Every single/multi question has concrete candidate options (8-14 when the space is large) and "
-  + "allows the person's own answer. Rewrite `profile` in full every turn from everything said so far (it is your synthesis, shown as "
-  + "such); propose lines in `linesProposed` (name, long-term goal as who they are becoming, why) once you have heard them — the person "
-  + "confirms them; treat lines as one flywheel, not competing identities, and work out with them which line is the base for the next "
-  + "12-24 months and how the others feed it. Facts about the person in general use identityId \"person\"; facts about a line use its "
-  + "id once it exists. When `focusLine` is set, interview only that line (stage `details`): what it is, where it stands, its "
-  + "long-term goal, its projects, deadlines, files, weekly hours, and how it feeds the other lines. Every confirmed slotUpdate cites a "
-  + "reply-N or src-N with a verbatim sourceQuote; your own conclusions are sourceRef 'inference', status 'inferred', empty quote. "
-  + "Never invent dates, numbers or names. Files that arrive are for you to read: put every date they state into `fileDates` "
-  + "(class meetings as weekly patterns, quizzes, homework release and due dates, exams, deadlines), each with a verbatim quote that "
-  + "contains the day; never turn TBD into a date (list it in `undated`). Leave `fileDates` empty when no file arrived. When "
-  + "`history` is present the conversation is being resumed: continue it, do not greet again or re-ask what is answered. Write "
-  + "`blueprint` only at the end (stage blueprint), as the full portrait report. All human-readable fields in Chinese.";
+const INSTRUCTIONS = "You interview a Crossline user as the Skill describes: a life designer's interview in stages (orientation, "
+  + "situation, compass, energy, lines, details), never proposing milestones. The person already set their lines (`lines`: identity "
+  + "nouns, their order, which are hard constraints); do not propose new ones. Each turn: a short, sharp reflection on what was just said "
+  + "(name a contradiction, a self-imposed limit, or gravity mistaken for a problem; never judge a choice or decide for the person), then a "
+  + "batch of up to five questions that do not depend on each other — one whose answer depends on another's waits for the next turn; follow "
+  + "a thread that carries a clue before returning to the stage. Ask about the hard-constraint lines' rules first (fixed schedule, terms, "
+  + "deadlines), put every fixed weekly arrangement the person states into `fileDates.recurring` quoting their reply, and once the rules "
+  + "are known propose weekly available hours in `availability`. Every single/multi question has concrete candidate options (8-14 when the "
+  + "space is large) and allows the person's own answer. Rewrite `profile` in full every turn (your synthesis). In the lines stage write "
+  + "each line's personal description and several long-term goal candidates, each 「成为 ___ 的 <身份>」 using only what the person said, in "
+  + "`lineProfiles`; ask more when a line is still thin. Facts about the person in general use identityId \"person\". When `focusLine` is "
+  + "set, interview only that line (stage `details`). Every confirmed slotUpdate cites a reply-N or src-N with a verbatim sourceQuote; your "
+  + "own conclusions are sourceRef 'inference', status 'inferred', empty quote. Never invent dates, numbers or names. Files that arrive "
+  + "are for you to read: every date they state goes into `fileDates`, each with a verbatim quote containing the day; never turn TBD into "
+  + "a date (list it in `undated`). When `history` is present the conversation is being resumed: continue it, do not greet again or re-ask "
+  + "what is answered. All human-readable fields in Chinese.";
 
 export type OnboardingTurnOutcome =
   | { state: "asked" | "ready"; sessionId: string }
@@ -85,7 +83,16 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     const now = new Date().toISOString();
     // A line's own interview adds to the facts but does not rewrite the person's whole portrait.
     if (!sessionId.startsWith("line-") && turn.profile) store.setSetting(workspaceId, "profile.model", JSON.stringify(turn.profile));
-    if (!sessionId.startsWith("line-") && turn.blueprint?.trim()) store.setSetting(workspaceId, "profile.blueprint", turn.blueprint);
+    // Each line's personal description and goal candidates, kept by line so a later turn or a line's own interview refines one line only.
+    if (turn.lineProfiles?.length) {
+      let current: Record<string, unknown> = {};
+      try { current = JSON.parse(store.getSetting(workspaceId, "lines.profiles") ?? "{}") as Record<string, unknown>; } catch { /* rebuilt below */ }
+      for (const line of turn.lineProfiles) current[line.lineId] = { description: line.description, goalCandidates: line.goalCandidates };
+      store.setSetting(workspaceId, "lines.profiles", JSON.stringify(current));
+    }
+    // Available hours worked out from a hard-constraint line's rules: a proposal, confirmed (or not) on the plan page.
+    if (turn.availability?.windows.length) store.setSetting(workspaceId, "schedule.availability.proposed",
+      JSON.stringify({ ...turn.availability, at: now }));
     for (const project of turn.projectsDetected) {
       const existing = store.listProjects(workspaceId, { includeArchived: true }).find((item) => item.id === project.id);
       store.saveProject({ id: project.id, ownerId, workspaceId, identityId: project.identityId, name: project.name,
@@ -195,7 +202,8 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         projects: store.listProjects(workspaceId).map(({ id, identityId, name, summary }) => ({ id, identityId, name, summary })),
         facts: store.listProfileFacts(workspaceId).map(({ identityId, projectId, slot, value, status }) => ({ identityId, projectId, slot, value, status })),
         today, timeZone, sources: clipDocuments(documents), ...(history ? { history } : {}), reply: { id: replyId, text: replyText },
-        focusLine, profile: readProfile(), stage: ((session!.coverage as { stage?: OnboardingStage }).stage ?? (focusLine ? "details" : "orientation"))
+        focusLine, profile: readProfile(), stage: ((session!.coverage as { stage?: OnboardingStage }).stage ?? (focusLine ? "details" : "orientation")),
+        lines: identityLines(store, workspaceId).map((line) => ({ id: line.id, label: line.label, rank: line.rank ?? null, hard: Boolean(line.hard), goals: line.goals ?? [] }))
       };
       return runCodexSkill<OnboardingTurn>(client, context, {
         skillName: ONBOARDING_SKILL, cwd, developerInstructions: INSTRUCTIONS, outputSchema: ONBOARDING_TURN_SCHEMA,
@@ -228,7 +236,8 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     if (!result.ok) return blocked(result.blocker.code, result.blocker.message);
 
     persistTurn(result.output, sessionId, ownerId);
-    persistFileDates(result.output, ownerId, sent.map(([, doc]) => doc.id), known.sources, today);
+    // A fixed weekly arrangement the person said (「每周二四上午组会」) is quoted from their reply, so replies count as sources here too.
+    persistFileDates(result.output, ownerId, sent.map(([, doc]) => doc.id), { ...known.sources, ...known.replies }, today);
     const output = withGapQuestions(result.output, currentGaps(), messages);
     store.appendOnboardingMessage({ sessionId, workspaceId, role: "assistant", content: output, createdAt: new Date().toISOString() });
     store.saveOnboardingSession({

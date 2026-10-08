@@ -9,9 +9,12 @@ export const dynamic = "force-dynamic";
  * candidate answers to pick from) plus the files you already have, and — beside it — a live view of what has
  * been understood so far. Milestones are designed afterwards, from this profile.
  */
-export default async function OnboardingPage() {
+export default async function OnboardingPage({ searchParams }: { searchParams: Promise<{ line?: string }> }) {
   await requireSessionContext();
-  return <SubpageShell active="设置" eyebrow="首次设置" title="访谈" description="回答几轮问题，或直接拖入已有文件；据此整理每条主线与项目。右侧为当前画像，可随时修改。">
-    <OnboardingWorkspace />
+  const { line } = await searchParams;
+  const valid = line && /^[a-z0-9-]{1,40}$/.test(line) ? line : undefined;
+  return <SubpageShell active="设置" eyebrow={valid ? "主线访谈" : "首次设置"} title="访谈"
+    description="先设定主线，再分阶段回答问题，可随时拖入已有文件。右侧为实时画像与各主线的长期目标候选。">
+    <OnboardingWorkspace line={valid} />
   </SubpageShell>;
 }

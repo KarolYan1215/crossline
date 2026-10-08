@@ -386,6 +386,8 @@ export async function startCodexSupervisor(options: {
   prepareMaterials?: (workOrderId: string, workspaceId: string) => Promise<unknown>;
   /** Builds (or rebuilds) a committed task's tutorial without moving its state: the step-by-step guide and the analysis of its materials. */
   buildTutorial?: (workOrderId: string, workspaceId: string) => Promise<unknown>;
+  /** Writes (or rewrites) the portrait report from the interview; answered at once, the page follows the ledger. */
+  writePortrait?: (workspaceId: string) => Promise<unknown>;
   judgeMilestone?: (workOrderId: string, workspaceId: string) => Promise<unknown>;
   explainPlan?: (today: string, workspaceId: string, ranking?: unknown) => Promise<unknown>;
   runWeeklyInsight?: (workspaceId: string) => Promise<unknown>;
@@ -620,6 +622,19 @@ export async function startCodexSupervisor(options: {
         // buy nothing and time out. The UI reads the result from the ledger like everything else.
         preparing.add(id);
         runDetached(() => options.prepareMaterials!(id, callerWorkspaceId), () => preparing.delete(id));
+        sendJson(response, 202, { started: true });
+        return;
+      }
+      if (request.method === "POST" && pathname === "/v1/portrait" && options.writePortrait) {
+        if (request.headers.origin || !request.headers["content-type"]?.startsWith("application/json")) {
+          sendJson(response, 403, { blocker: { code: "PORTRAIT_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
+          return;
+        }
+        if (runtimeBlocker) { sendJson(response, 503, { blocker: runtimeBlocker }); return; }
+        const key = `portrait:${callerWorkspaceId}`;
+        if (preparing.has(key)) { sendJson(response, 409, { blocker: { code: "PORTRAIT_ALREADY_WRITING", message: "画像报告正在生成" } }); return; }
+        preparing.add(key);
+        runDetached(() => options.writePortrait!(callerWorkspaceId), () => preparing.delete(key));
         sendJson(response, 202, { started: true });
         return;
       }

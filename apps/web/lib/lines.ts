@@ -76,3 +76,30 @@ export function rankLines(ctx: AccessContext, order: string[]): { ok: true } | {
     { type: "line.ranked", entityId: ctx.workspaceId, payload: { order: ranked } });
   return { ok: true };
 }
+
+/** Whether this workspace still has to set its lines: a new account (no lines stored, and nothing planned yet). */
+export function needsLineSetup(ctx: AccessContext): boolean {
+  const store = getStore();
+  if (readLineSpecs((key) => store.getSetting(ctx.workspaceId, key)) !== undefined) return false;
+  return !store.listMilestones(ctx.workspaceId).length && !store.listWorkOrders(ctx.workspaceId).length;
+}
+
+/**
+ * The opening screen's answer: the person's lines in their order — each an identity noun, ranked or in parallel, at most two hard
+ * constraints — written as the workspace's lines (replacing the built-in four a new account would otherwise see).
+ */
+export function setupLines(ctx: AccessContext, lines: Array<{ label: string; ranked: boolean; hard: boolean }>): { ok: true; ids: string[] } | { ok: false; code: string } {
+  const clean = lines.map((line) => ({ ...line, label: line.label.trim().slice(0, 20) })).filter((line) => line.label);
+  if (!clean.length) return { ok: false, code: "LINE_LABEL_REQUIRED" };
+  if (new Set(clean.map((line) => line.label)).size !== clean.length) return { ok: false, code: "LINE_LABEL_TAKEN" };
+  if (clean.filter((line) => line.hard).length > MAX_HARD_LINES) return { ok: false, code: "LINE_HARD_LIMIT" };
+  const specs: LineSpec[] = [];
+  let rank = 0;
+  for (const line of clean) {
+    const color = freeLineColor(specs);
+    specs.push({ id: newLineId(line.label, specs.map((item) => item.id)), label: line.label, color, goal: "", goals: [], createdAt: new Date().toISOString(),
+      ...(line.hard ? { hard: true } : {}), ...(line.ranked ? { rank: ++rank } : {}) });
+  }
+  saveSpecs(ctx, specs, { type: "lines.set_up", entityId: ctx.workspaceId, payload: { lines: specs.map((line) => line.label) } });
+  return { ok: true, ids: specs.map((line) => line.id) };
+}

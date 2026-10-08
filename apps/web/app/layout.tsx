@@ -8,6 +8,8 @@ import "./chat/composer.css";
 import "./milestones/milestones.css";
 import "./plan/plan.css";
 import "./settings/settings.css";
+import "./onboarding/onboarding.css";
+import "./portrait/portrait.css";
 import "./mobile.css";
 
 export const metadata: Metadata = {

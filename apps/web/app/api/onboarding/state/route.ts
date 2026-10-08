@@ -5,7 +5,7 @@ import { resolveAccessContext } from "../../../../lib/access-guard";
 import { getStore } from "../../../../lib/crossline";
 import { loadPendingDateBatch } from "../../../../lib/imported-dates";
 import { loadDiligence } from "../../../../lib/diligence";
-import { identityLines } from "../../../../lib/lines";
+import { identityLines, needsLineSetup } from "../../../../lib/lines";
 
 /**
  * Everything the onboarding screen shows, in one read: the conversation so far, the projects and facts the
@@ -17,7 +17,11 @@ export async function GET(request: Request) {
   if ("response" in access) return access.response;
   const { workspaceId } = access.ctx;
   const store = getStore();
-  const session = store.getLatestOnboardingSession(workspaceId);
+  // `?line=<id>`: that line's own interview, kept in its own session (`line-<id>`).
+  const lineId = new URL(request.url).searchParams.get("line");
+  const focus = lineId ? identityLines(access.ctx).find((line) => line.id === lineId) : undefined;
+  const session = focus ? store.getOnboardingSession(workspaceId, `line-${focus.id}`) : store.getLatestOnboardingSession(workspaceId);
+  const json = <T,>(key: string, fallback: T): T => { try { return JSON.parse(store.getSetting(workspaceId, key) ?? "null") ?? fallback; } catch { return fallback; } };
   const messages = session ? store.listOnboardingMessages(workspaceId, session.id) : [];
   const identities = identityLines(access.ctx).map((pack) => ({ id: pack.id, label: pack.label }));
   // What the profile still lacks before numbers can be worked back from the person's goals, as questions with the options to pick from.
@@ -31,6 +35,12 @@ export async function GET(request: Request) {
   return NextResponse.json({
     ok: true,
     identities, gaps,
+    setupLines: !focus && needsLineSetup(access.ctx),
+    focusLine: focus ? { id: focus.id, label: focus.label } : null,
+    lines: identityLines(access.ctx).map((line) => ({ id: line.id, label: line.label, rank: line.rank ?? null, hard: Boolean(line.hard), goals: line.goals ?? [] })),
+    lineProfiles: json<Record<string, { description: string; goalCandidates: string[] }>>("lines.profiles", {}),
+    profile: json<Record<string, unknown> | null>("profile.model", null),
+    availabilityProposed: Boolean(store.getSetting(workspaceId, "schedule.availability.proposed")),
     session: session ? { id: session.id, state: session.state, coverage: session.coverage } : null,
     messages,
     dateBatch: loadPendingDateBatch(access.ctx),

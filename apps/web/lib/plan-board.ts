@@ -24,6 +24,8 @@ export type PlanBoard = {
   params: ScheduleParams; presets: { buffered: ScheduleParams; asap: ScheduleParams };
   importance: Array<{ id: string; title: string; line: string; weight: number; custom: boolean; preset: ImportancePreset }>;
   week: { windows: AvailabilityWindow[]; suggested: AvailabilityWindow[];
+    /** Hours the interview proposed from a hard-constraint line's rules (or the person's working hours), with why; null when none. */
+    proposed: { windows: AvailabilityWindow[]; why: string } | null;
     /** Calendar commitments over the next two weeks, per weekday (0 = Sunday) and half hour: how many of those fall in it. */
     busy: number[][] };
 };
@@ -79,6 +81,15 @@ export async function loadPlanBoard(ctx: AccessContext, plan: PersistedPlan): Pr
       const custom = typeof goal?.weight === "number" || Boolean(goal?.importance ?? preferences?.importance[item.id]);
       return [{ id: item.id, title: item.title, line: item.identityId, weight: effectiveWeight(ctx, item.id), custom, preset }];
     }),
-    week: { windows: readAvailability(ctx), suggested: suggestedAvailabilityFor(ctx), busy }
+    week: { windows: readAvailability(ctx), suggested: suggestedAvailabilityFor(ctx), busy, proposed: interviewAvailability(ctx) }
   };
+}
+
+/** The weekly hours the interview proposed (`schedule.availability.proposed`), valid windows only. */
+function interviewAvailability(ctx: AccessContext): { windows: AvailabilityWindow[]; why: string } | null {
+  try {
+    const raw = JSON.parse(getStore().getSetting(ctx.workspaceId, "schedule.availability.proposed") ?? "null") as { windows?: AvailabilityWindow[]; why?: string } | null;
+    const windows = (raw?.windows ?? []).filter((window) => Array.isArray(window.days) && /^\d{2}:\d{2}$/.test(window.start) && /^\d{2}:\d{2}$/.test(window.end) && window.start < window.end);
+    return windows.length ? { windows, why: raw?.why ?? "" } : null;
+  } catch { return null; }
 }
