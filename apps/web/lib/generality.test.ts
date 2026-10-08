@@ -19,7 +19,9 @@ const swappedPacks = [
   { id: "band", label: "乐队", kind: "identity", masterClock: false, workflowTemplates: ["setlist"], evidencePolicy: "tiered", durationPriors: priors },
   { id: "recovery", label: "恢复", kind: "capacity", masterClock: false, workflowTemplates: [], evidencePolicy: "telemetry", durationPriors: priors }
 ];
-vi.mock("@crossline/identity-packs", () => ({ defaultIdentityPacks: () => swappedPacks }));
+// An account with no lines of its own reads the defaults, so swapping the defaults swaps every line the app works with.
+vi.mock("@crossline/identity-packs", async (actual) => ({ ...(await actual<typeof import("@crossline/identity-packs")>()),
+  defaultIdentityPacks: () => swappedPacks, identityPacksFor: () => swappedPacks }));
 
 const { ensureSeeded, loadDashboard } = await import("./crossline");
 const { TEST_CTX } = await import("./test-support");

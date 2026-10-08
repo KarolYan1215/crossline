@@ -4,11 +4,11 @@ import {
   type CheckedRelations, type MilestoneProposal, type MilestoneProposalContext, type RelationsContext
 } from "@crossline/core";
 import { continueSkillTurn, runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
-import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { latestFileDates, type CrosslineStore } from "@crossline/db";
 
 /** Only for a ledger that has no workspace owner on record, which a real account never is. */
 import { ownerOf } from "./owner";
+import { identityLines } from "./lines";
 export const MILESTONE_ARCHITECT_SKILL = "crossline:crossline-milestone-architect";
 
 const INSTRUCTIONS = "Propose milestones for the supplied identities. Return only the requested JSON. "
@@ -100,13 +100,12 @@ export function buildProposalContext(store: CrosslineStore, workspaceId: string,
   const milestones = store.listMilestones(workspaceId).filter((milestone) => milestone.status !== "archived"
     && !(options.replaceUntouchedDrafts && isUntouchedDraft(milestone)));
   const facts = store.listProfileFacts(workspaceId);
-  const identities = defaultIdentityPacks().filter((pack) => pack.kind === "identity");
+  const identities = identityLines(store, workspaceId);
   const now = options.now?.() ?? (process.env.CROSSLINE_FIXED_NOW ? new Date(process.env.CROSSLINE_FIXED_NOW) : new Date());
   return {
     version: "crossline.milestone-proposal.v1",
-    identities: defaultIdentityPacks()
-      .filter((pack) => pack.kind === "identity")
-      .map((pack) => ({ id: pack.id, label: pack.label, summary: pack.workflowTemplates.join(", ") })),
+    // A line's long-term goal, when the person gave one, is what its milestones are worked toward.
+    identities: identities.map((pack) => ({ id: pack.id, label: pack.label, summary: pack.goal ? `长期目标：${pack.goal}` : pack.workflowTemplates.join(", ") })),
     // Drafts are included so the Skill does not re-propose something already waiting for a decision.
     existingMilestones: milestones.map((milestone) => ({
       id: milestone.id, identityId: milestone.identityId, title: milestone.title, status: milestone.status

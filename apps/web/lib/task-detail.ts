@@ -2,8 +2,9 @@ import "server-only";
 import { archetypeById, goalSettingKey, relevantDocuments, taskProgress, type AccessContext, type SuccessCriterion, type EvidenceQuestionTemplate } from "@crossline/core";
 import { listAgentTasks, type CrosslineStore, type StoredMilestone, type StoredWorkOrder, type StoredMaterial, type StoredExecution, type StoredMilestoneRelation,
   type StoredBackgroundFact, type StoredTaskStep } from "@crossline/db";
-import { defaultIdentityPacks } from "@crossline/identity-packs";
+import { defaultIdentityPacks, identityPacksFor } from "@crossline/identity-packs";
 import { getStore, resolvedEstimate, relationKindLabel, accents, suggestedSessionMinutes } from "./crossline";
+import { linePacks } from "./lines";
 
 const quartersOfVerdict: Record<string, number> = { met: 4, partial: 2, unmet: 0, unverifiable: 0 };
 
@@ -18,7 +19,7 @@ function taskExtras(store: CrosslineStore, workspaceId: string, orders: StoredWo
   const milestones = new Map(store.listMilestones(workspaceId).map((milestone) => [milestone.id, milestone]));
   const anchors = new Map(store.listMilestoneAnchors(workspaceId).map((anchor) => [anchor.milestoneId, anchor.deadline]));
   const relations = store.listMilestoneRelations(workspaceId).filter((relation) => relation.status === "approved" || relation.status === "candidate");
-  const labels = new Map(defaultIdentityPacks().map((pack) => [pack.id, pack.label]));
+  const labels = new Map(identityPacksFor((key) => store.getSetting(workspaceId, key), { includeArchived: true }).map((pack) => [pack.id, pack.label]));
   const executions = store.listExecutions(workspaceId);
   const documents = store.listSourceDocuments(workspaceId);
   const agentTasks = listAgentTasks(store, workspaceId).filter((task) => ids.has(task.workOrderId));
@@ -174,8 +175,8 @@ export type MilestoneDetail = {
   background: StoredBackgroundFact[] | null;
 };
 
-function identityInfo(identityId: string): { label: string; accent: string } {
-  const pack = defaultIdentityPacks().find((item) => item.id === identityId);
+function identityInfo(identityId: string, ctx?: AccessContext): { label: string; accent: string } {
+  const pack = (ctx ? linePacks(ctx, { includeArchived: true }) : defaultIdentityPacks()).find((item) => item.id === identityId);
   return { label: pack?.label ?? "未分类", accent: accents[identityId] ?? "#5A5B54" };
 }
 
@@ -242,7 +243,7 @@ function assembleTaskDetail(ctx: AccessContext, order: StoredWorkOrder, deps: {
     byproducts?: Array<{ lineId: string; artifact: string; landing: { minutes: number } }>; byproductOf?: string;
     blocker?: { reason: string }; gateReview?: TaskDetail["gateReview"];
   };
-  const { label: identityLabel, accent } = identityInfo(order.identityId);
+  const { label: identityLabel, accent } = identityInfo(order.identityId, ctx);
   const executions = deps.executions.map((item) => ({
     id: item.id, startedAt: item.startedAt, ...(item.endedAt ? { endedAt: item.endedAt } : {}),
     pauseMinutes: item.pauseMinutes, durationObserved: item.durationObserved,

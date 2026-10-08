@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
-import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { resolveAccessContext } from "../../../lib/access-guard";
 import { isCrossSiteWrite } from "../../../lib/same-origin";
 import { getStore } from "../../../lib/crossline";
+import { identityLines } from "../../../lib/lines";
 
 /**
  * The person's own edits to their profile: confirm or correct a fact the interview inferred, reject one,
@@ -22,7 +22,7 @@ export async function POST(request: Request) {
   let body: Record<string, unknown> = {};
   try { body = (await request.json()) as Record<string, unknown>; } catch { /* validated below */ }
   const store = getStore();
-  const identities = new Set(defaultIdentityPacks().filter((pack) => pack.kind === "identity").map((pack) => pack.id));
+  const identities = new Set(identityLines(ctx).map((pack) => pack.id));
   const identityId = text(body.identityId, 80);
   const now = new Date().toISOString();
   const invalid = (code: string) => NextResponse.json({ ok: false, code }, { status: 400 });

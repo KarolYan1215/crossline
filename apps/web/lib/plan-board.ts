@@ -1,10 +1,10 @@
 import "server-only";
 import { statedWeeklyHours, weeklyAvailableHours, type AccessContext, type AvailabilityWindow, type ImportancePreset } from "@crossline/core";
-import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { DEADLINE_MARGIN_DAYS, PARAMS_ASAP, PARAMS_BUFFERED, type ScheduleParams } from "@crossline/planner";
 import { effectiveParams, effectiveSchedulePreferences, effectiveWeight, getStore, IMPORTANT_WEIGHT, importancePresets, loadGoalForecast, planRanking, planToday,
   readAvailability, readGoalSettings, readSchedulePreferences, type PersistedPlan, type RankedTask } from "./crossline";
 import { suggestedAvailabilityFor } from "./timeline";
+import { lineLabels } from "./lines";
 
 /**
  * Everything below the calendar on the plan page, read once: the week's capacity against what the person said and what is open, the
@@ -34,7 +34,7 @@ export async function loadPlanBoard(ctx: AccessContext, plan: PersistedPlan): Pr
   const store = getStore();
   const today = planToday(ctx);
   const forecast = loadGoalForecast(ctx);
-  const labels = Object.fromEntries(defaultIdentityPacks().map((pack) => [pack.id, pack.label]));
+  const labels = lineLabels(ctx);
   const milestones = store.listMilestones(ctx.workspaceId);
   const lineOf = new Map(milestones.map((item) => [item.id, item.identityId]));
   const weekEnd = new Date(Date.parse(`${today}T12:00:00Z`) + 7 * 86_400_000).toISOString().slice(0, 10);

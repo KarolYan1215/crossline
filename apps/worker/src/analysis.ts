@@ -4,7 +4,7 @@ import type { AnalysisDate, AnalysisWaitingOn } from "@crossline/core";
 import { runCodexAnalysis, type CodexRpcBoundary } from "@crossline/codex";
 import { ANALYSIS_CONTEXT_VERSION, validateAnalysisContext, type AnalysisContext } from "@crossline/core";
 import { CrosslineStore, type StoredCapture } from "@crossline/db";
-import { defaultIdentityPacks } from "@crossline/identity-packs";
+import { identityLines } from "./lines";
 
 export type AnalysisOutcome = { id: string; state: string; attempt: number; audit: StoredCapture["audit"] };
 
@@ -90,7 +90,7 @@ export function createCaptureAnalyzer(store: CrosslineStore, workspaceId: string
       // Every identity that has an approved milestone is offered; choosing between them is the Skill's
       // job, because an app-side pick would be exactly the silent guess this design removed.
       const identities = new Set(milestones.map((m) => m.identityId));
-      const packs = defaultIdentityPacks().filter((p) => p.kind === "identity" && identities.has(p.id));
+      const packs = identityLines(store, workspaceId).filter((p) => identities.has(p.id));
       if (packs.length !== identities.size) throw new Error("ANALYSIS_IDENTITY_CONTEXT_REQUIRED");
       const deadlines = new Map(store.listMilestoneAnchors(workspaceId).map((anchor) => [anchor.milestoneId, anchor.deadline]));
       const context = validateAnalysisContext({

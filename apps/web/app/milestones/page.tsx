@@ -1,5 +1,4 @@
 import { profileFactId } from "@crossline/core";
-import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { SubpageShell } from "../subpage-shell";
 import { MilestoneAdmin, type AdminMilestone } from "./milestone-admin";
 import { MilestoneStats, MilestoneTimeline } from "./milestone-timeline";
@@ -8,6 +7,9 @@ import { loadMilestoneBoard } from "../../lib/milestone-board";
 import { requireSessionContext } from "../../lib/access-guard";
 import { MilestonePreview } from "../task-preview";
 import { loadMilestoneDetailsBatch } from "../../lib/task-detail";
+import { identityLines } from "../../lib/lines";
+import { LINE_PALETTE } from "@crossline/identity-packs";
+import { LinesBar } from "./lines-bar";
 
 export const dynamic = "force-dynamic";
 
@@ -45,10 +47,13 @@ export default async function MilestonesPage({ searchParams }: {
   }));
   const details = loadMilestoneDetailsBatch(ctx, admin.map((milestone) => milestone.id));
   const drafts = board.milestones.filter((milestone) => milestone.status === "draft").length;
-  const identities = defaultIdentityPacks().filter((pack) => pack.kind === "identity");
+  const identities = identityLines(ctx);
 
   return <SubpageShell active="主线" title="主线"
     description={drafts ? `${drafts} 个里程碑草稿待审阅：草稿以虚线显示，可按主线批准或撤销。批准后，三周内到期的里程碑自动倒推出任务。` : "各主线的里程碑按日期排列；刻度为里程碑之前的阶段结果。"}>
+    <LinesBar lines={identities.map((pack) => ({ id: pack.id, label: pack.label, color: pack.color ?? pack.id, goal: pack.goal ?? "",
+      milestones: board.milestones.filter((milestone) => milestone.identityId === pack.id).length }))}
+      palette={Object.fromEntries(Object.entries(LINE_PALETTE).map(([key, value]) => [key, value.light]))} />
     <MilestoneStats board={board} />
     <MilestoneTimeline board={board} />
     <p className="muted"><a href="/review">本周复盘 →</a></p>

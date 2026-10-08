@@ -2,10 +2,10 @@ import { randomUUID } from "node:crypto";
 import { BACKPLAN_SCHEMA, mentionsExternalAction, validateBackplan, type BackplanAnswer as Answer, type MissingInput } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import type { CrosslineStore, StoredWorkOrder } from "@crossline/db";
-import { defaultIdentityPacks } from "@crossline/identity-packs";
 
 import { ownerOf } from "./owner";
 import { autoApproveEligible } from "./auto-approval";
+import { identityLines } from "./lines";
 const SKILL = "crossline:crossline-goal-backplanner";
 /** How many next steps an automatic (rolling) backplan keeps. */
 export const ROLLING_STEPS = 2;
@@ -38,7 +38,7 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
   return async function backplan(milestoneId: string, signal?: AbortSignal) {
     const milestone = store.listMilestones(workspaceId).find((item) => item.id === milestoneId &&
       item.status === "approved" && item.projectId);
-    if (!milestone || !defaultIdentityPacks().some((pack) => pack.id === milestone.identityId && pack.kind === "identity"))
+    if (!milestone || !identityLines(store, workspaceId).some((pack) => pack.id === milestone.identityId))
       return { state: "blocked", code: "BACKPLAN_GOAL_NOT_APPROVED", message: "需要已批准且绑定真实身份、项目的里程碑。" };
     const rounds = store.listEvents(workspaceId, { type: "goal.backplan_proposed", entityId: milestone.id })
       .filter((event) => (event.payload as { rolling?: boolean }).rolling).length;
@@ -190,7 +190,7 @@ export function milestonesAwaitingBackplan(store: CrosslineStore, workspaceId: s
     if ((lastRun.get(event.entityId) ?? "") < event.createdAt) lastRun.set(event.entityId, event.createdAt);
   const rerun = new Set(store.listEvents(workspaceId, { type: "goal.backplan_rerun_requested" })
     .filter((event) => event.createdAt >= (lastRun.get(event.entityId) ?? "")).map((event) => event.entityId));
-  const identities = new Set(defaultIdentityPacks().filter((pack) => pack.kind === "identity").map((pack) => pack.id));
+  const identities = new Set(identityLines(store, workspaceId).map((pack) => pack.id));
   const approved = store.listMilestones(workspaceId)
     .filter((milestone) => milestone.status === "approved" && milestone.projectId && identities.has(milestone.identityId));
   const requested = approved.filter((milestone) => rerun.has(milestone.id) && !declined.has(`${milestone.id}:${milestone.version}`));

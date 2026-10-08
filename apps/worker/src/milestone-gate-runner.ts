@@ -201,7 +201,7 @@ export function createMilestoneGate(store: CrosslineStore, workspaceId: string, 
     const order = store.listWorkOrders(workspaceId).find((item) => item.id === workOrderId);
     const family = (order?.payload as { family?: string } | undefined)?.family;
     const durationCalibrationBaseline = order && family
-      ? defaultIdentityPacks().find((pack) => pack.id === order.identityId)?.durationPriors[family]
+      ? (defaultIdentityPacks().find((pack) => pack.id === order.identityId) ?? defaultIdentityPacks()[0]!).durationPriors[family]
       : undefined;
     const applied = store.applyMilestoneGate(workspaceId, workOrderId, result.output, evidenceTexts,
       `milestone-gate:${workOrderId}:${context.milestone.version}:${attempt}`, durationCalibrationBaseline);

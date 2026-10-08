@@ -29,7 +29,7 @@ The ids of the sources you actually used. A step that was given sources and cite
 
 - Cite only by id. **Never write a web address yourself**: an address that was not given to you is refused.
 - Do not claim the step is done and do not do the person's decision for them. Use `profile` and `inputs` to fit the tutorial to their tools and level, but never state a fact about them that is not there.
-- If you cannot write something useful from what you were given, return a blocker saying what is missing.
+- Missing material is not a reason to stop. When the problem sheet, a dataset or a page was not supplied, still write the best guide the supplied material allows: the tutorial starts with where and how to get what is missing (named from the sources — the course platform the syllabus names, the person who has it), then the method, the relevant topics and the checks that hold whatever the exact content is; the analysis opens with a line 「需要补充：…」 naming each missing item. Return a blocker only when nothing useful can be written at all.
 
 Write in Chinese.
 

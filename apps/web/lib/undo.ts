@@ -157,7 +157,7 @@ function applyInverse(ctx: AccessContext, inverse: Inverse): { ok: true } | { ok
 }
 
 /** Settings an operation may change and an undo puts back. Device, account and calendar-write state are not operations. */
-const UNDOABLE_SETTINGS = ["schedule.", "goal.settings:", "input.schedule.autoApply"] as const;
+const UNDOABLE_SETTINGS = ["schedule.", "goal.settings:", "input.schedule.autoApply", "lines."] as const;
 /** Ledger markers that hide or close something when written; undoing the operation that wrote them brings it back. */
 const RETRACTABLE_EVENTS = ["risk.accepted", "ask.snoozed", "missed.handled", "agent.blocked_acknowledged"];
 

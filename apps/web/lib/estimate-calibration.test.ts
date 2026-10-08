@@ -8,8 +8,8 @@ test("durationPriorFor resolves the identity pack's static prior from the WorkOr
   expect(durationPriorFor("research", { family: "review" })).toEqual({ p25Minutes: 10, p50Minutes: 20, p85Minutes: 35 });
 });
 
-test("durationPriorFor is undefined for a pre-family WorkOrder or an identity with no pack", () => {
+test("durationPriorFor is undefined for a pre-family WorkOrder; a line the person added takes the common priors", () => {
   expect(durationPriorFor("research", {})).toBeUndefined();
   expect(durationPriorFor("research", undefined)).toBeUndefined();
-  expect(durationPriorFor("no-such-identity", { family: "deep_work" })).toBeUndefined();
+  expect(durationPriorFor("line-music", { family: "deep_work" })).toEqual(durationPriorFor("research", { family: "deep_work" }));
 });

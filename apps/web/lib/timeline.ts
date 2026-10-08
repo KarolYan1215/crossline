@@ -1,11 +1,11 @@
 import "server-only";
 import type { AccessContext, AvailabilityWindow } from "@crossline/core";
-import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { CATEGORY_LABEL, inferWorkState, suggestAvailability, type ActivitySegment, type WorkState } from "@crossline/core";
 import {
   ACTIVITY_DETAIL_CONSENT, effectiveSchedulePreferences, getStore, loadCurrentPlan, planToday, readAvailability, toZonedInstant
 } from "./crossline";
 import { itemsFromPlan, toMinutes, type TimelineDeadline, type TimelineItem } from "../app/timeline/model";
+import { identityLines } from "./lines";
 
 export type TimelineData = {
   today: string; nowIso: string; timeZone: string;
@@ -121,7 +121,7 @@ export async function loadTimeline(ctx: AccessContext, loaded?: Awaited<ReturnTy
   const nowIso = instantNow().toISOString();
   return {
     today, nowIso, timeZone: zone, items, deadlines,
-    labels: Object.fromEntries(defaultIdentityPacks().filter((pack) => pack.kind === "identity").map((pack) => [pack.id, pack.label])),
+    labels: Object.fromEntries(identityLines(ctx).map((pack) => [pack.id, pack.label])),
     quietByWeekday: Object.fromEntries([0, 1, 2, 3, 4, 5, 6].map((weekday) => [weekday, quietRanges(windows, weekday)])),
     proposals: store.listWorkOrders(ctx.workspaceId).filter((order) => order.state === "awaiting_plan_approval" && !(order.payload as { seeded?: boolean }).seeded)
       .map((order) => ({ id: order.id, title: order.intent }))

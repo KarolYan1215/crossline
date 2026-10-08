@@ -9,6 +9,7 @@ import type { CrosslineStore } from "@crossline/db";
 import { persistAssistantMaterial } from "./materials";
 
 import { ownerOf } from "./owner";
+import { identityLines } from "./lines";
 export const ASSISTANT_SKILL = "crossline:crossline-assistant";
 
 const INSTRUCTIONS = "You are the site-wide Crossline assistant — a general-purpose conversational "
@@ -64,8 +65,8 @@ export type AssistantTurnOutcome =
 
 export function buildAssistantContext(history: Array<{ from: "user" | "assistant"; text: string }>,
   message: string, attachments: Array<{ id: string; fileName: string; mediaType: string }>,
-  workOrderId: string | null, snapshot = "", task: AssistantTaskView | null = null, mode: "chat" | "record" = "chat"): AssistantTurnContext {
-  const identities = defaultIdentityPacks().filter((pack) => pack.kind === "identity").map((pack) => pack.id);
+  workOrderId: string | null, snapshot = "", task: AssistantTaskView | null = null, mode: "chat" | "record" = "chat",
+  identities: string[] = defaultIdentityPacks().filter((pack) => pack.kind === "identity").map((pack) => pack.id)): AssistantTurnContext {
   return { version: "crossline.assistant.v1", history, message, attachments, workOrderId, identities, snapshot, task, mode };
 }
 
@@ -101,7 +102,8 @@ export function createAssistantTurn(store: CrosslineStore, workspaceId: string, 
 
     const existing = store.getAssistantThread(workspaceId, threadId);
     const scoped = workOrderId ?? existing?.workOrderId ?? null;
-    const context = buildAssistantContext(history, message, attachments, scoped, snapshot, assistantTaskView(store, workspaceId, scoped), mode);
+    const context = buildAssistantContext(history, message, attachments, scoped, snapshot, assistantTaskView(store, workspaceId, scoped), mode,
+      identityLines(store, workspaceId).map((pack) => pack.id));
     let codexThreadId = existing?.codexThreadId;
 
     const fresh = () => runCodexSkill<AssistantTurnProposal>(client, context, {

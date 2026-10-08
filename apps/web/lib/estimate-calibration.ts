@@ -9,5 +9,6 @@ export type DurationPrior = { p25Minutes: number; p50Minutes: number; p85Minutes
 export function durationPriorFor(identityId: string, payload: unknown): DurationPrior | undefined {
   const family = (payload as { family?: string } | undefined)?.family;
   if (!family) return undefined;
-  return defaultIdentityPacks().find((pack) => pack.id === identityId)?.durationPriors[family];
+  // A line the person added has no pack of its own; it takes the common priors every built-in line shares.
+  return (defaultIdentityPacks().find((pack) => pack.id === identityId) ?? defaultIdentityPacks()[0]!).durationPriors[family];
 }

@@ -1,9 +1,9 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
 import { relationWarnings, taskProgress, type AccessContext, type SuccessCriterion } from "@crossline/core";
-import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { getStore, loadCurrentPlan, milestonesRetiredBySystem, planToday, readGoalSettings, relationKindLabel } from "./crossline";
 import { listCourseTargets } from "./targets";
+import { identityLines } from "./lines";
 
 /**
  * Everything the 主线 page draws, read once: milestones on a date axis, the ticks before each (the near-term results the step planner
@@ -77,7 +77,7 @@ export async function loadMilestoneBoard(ctx: AccessContext): Promise<MilestoneB
       && (event.payload as { verdict?: string }).verdict === "dismiss").map((event) => event.entityId));
   const notes = new Map(store.listEvents(ctx.workspaceId, { type: "milestone.retrospective" })
     .map((event) => [event.entityId, String((event.payload as { note?: string }).note ?? "")]));
-  const labels = Object.fromEntries(defaultIdentityPacks().filter((pack) => pack.kind === "identity").map((pack) => [pack.id, pack.label]));
+  const labels = Object.fromEntries(identityLines(ctx).map((pack) => [pack.id, pack.label]));
 
   const board: BoardMilestone[] = milestones.map((milestone) => {
     const anchor = anchors.get(milestone.id);

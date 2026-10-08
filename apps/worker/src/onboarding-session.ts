@@ -6,8 +6,8 @@ import {
 } from "@crossline/core";
 import { continueSkillTurn, runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import { latestFileDates, type CrosslineStore, type StoredOnboardingMessage, type StoredSourceDocument } from "@crossline/db";
-import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { sourceIds } from "./source-ids";
+import { identityLines } from "./lines";
 
 export const ONBOARDING_SKILL = "crossline:crossline-onboarding";
 
@@ -42,7 +42,7 @@ type Announced = { announcedSources?: string[] };
 
 export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId: string, cwd: string,
   getClient: () => CodexRpcBoundary | undefined) {
-  const identities = () => defaultIdentityPacks().filter((pack) => pack.kind === "identity")
+  const identities = () => identityLines(store, workspaceId)
     .map((pack) => ({ id: pack.id, label: pack.label }));
 
   /** Everything a quote can be checked against, rebuilt from the ledger on every turn. */

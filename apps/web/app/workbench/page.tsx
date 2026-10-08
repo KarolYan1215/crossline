@@ -4,11 +4,11 @@ import { archivedBySystem, ensureSeeded, getStore, loadCurrentPlan, planToday } 
 import { SubpageShell } from "../subpage-shell";
 import { AnalyzeButton } from "./analyze-button";
 import { PromoteForm } from "./promote-form";
-import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { requireSessionContext } from "../../lib/access-guard";
 import { loadTaskDetailsBatch } from "../../lib/task-detail";
 import { nextSlots } from "../../lib/steps";
 import { TaskCard } from "../task/task-card";
+import { identityLines } from "../../lib/lines";
 
 const blockerOf = (run: { payload: unknown }) => (run.payload as { blocker?: { reason: string } }).blocker;
 
@@ -62,7 +62,7 @@ export default async function WorkbenchPage({ searchParams }: {
   const events = getStore().listEvents(ctx.workspaceId, { type: ["materials.blocked", "materials.retry_requested"] });
   const discardReasons = new Map(getStore().listEvents(ctx.workspaceId, { type: ["work_order.archived", "capture.discarded"] })
     .map((event) => [event.entityId, (event.payload as { reason?: string }).reason ?? ""]));
-  const identityOptions = defaultIdentityPacks().filter((pack) => pack.kind === "identity")
+  const identityOptions = identityLines(ctx)
     .map((pack) => ({ id: pack.id, label: pack.label }));
   const milestoneOptions = getStore().listMilestones(ctx.workspaceId)
     .filter((milestone) => milestone.status === "approved")

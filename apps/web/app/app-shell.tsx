@@ -6,6 +6,7 @@ import { AssistantWidget } from "./assistant-widget";
 import { PendingBadge } from "./pending-badge";
 import { TimerFloat } from "./task/timer-float";
 import { UndoCenter } from "./undo-center";
+import { LineColors } from "./line-colors";
 
 /**
  * The frame every signed-in page shares: the name, the four working views, the decisions waiting for you, the
@@ -13,6 +14,7 @@ import { UndoCenter } from "./undo-center";
  */
 export function AppShell({ active, children, className = "page" }: { active?: string | undefined; children: ReactNode; className?: string }) {
   return <>
+    <LineColors />
     <header className="running-head">
       <a className="wordmark" href="/">Crossline</a>
       <nav aria-label="主导航">{NAV_ITEMS.map((item) =>

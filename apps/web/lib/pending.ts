@@ -1,6 +1,5 @@
 import "server-only";
 import { profileGaps, type AccessContext } from "@crossline/core";
-import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { latestFileDates } from "@crossline/db";
 import { getStore } from "./crossline";
 import { countProposedTargets } from "./targets";
@@ -8,6 +7,7 @@ import { countAssistantPending } from "./agent";
 import { loadDiligence } from "./diligence";
 import { loadPendingDateBatch } from "./imported-dates";
 import { openAsks } from "./asks";
+import { identityLines } from "./lines";
 
 /**
  * Everything waiting for the person to say yes or no, in one number per kind. The badge in the header and the
@@ -62,7 +62,7 @@ export function countPending(ctx: AccessContext): PendingCounts {
     assistantReviews: assistant.reviews,
     asks: openAsks(ctx).length,
     questions: profileGaps({
-      identities: defaultIdentityPacks().filter((pack) => pack.kind === "identity").map((pack) => ({ id: pack.id, label: pack.label })),
+      identities: identityLines(ctx).map((pack) => ({ id: pack.id, label: pack.label })),
       projects: store.listProjects(ctx.workspaceId).map(({ id, identityId, name }) => ({ id, identityId, name })),
       facts: store.listProfileFacts(ctx.workspaceId),
       undated: latestFileDates(store, ctx.workspaceId).undated

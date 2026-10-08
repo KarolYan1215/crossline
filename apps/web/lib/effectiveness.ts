@@ -1,8 +1,8 @@
 import "server-only";
 import { computeEffectiveness, type AccessContext, type Effectiveness } from "@crossline/core";
-import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { getStore, loadCurrentPlan, loadGoalForecast, planToday, resolvedEstimate, workspaceCalibration } from "./crossline";
 import { countPending } from "./pending";
+import { identityLines } from "./lines";
 
 const DAY = 86_400_000;
 const ACTIONABLE = new Set(["approved", "preparing", "ready_for_human", "active"]);
@@ -79,7 +79,7 @@ export async function loadEffectiveness(ctx: AccessContext, now = new Date()): P
 
   const result = computeEffectiveness({
     today, milestones, durations, minutesByLine, deadlineMinutes, totalMinutes,
-    priorityOrder: defaultIdentityPacks().filter((pack) => pack.kind === "identity").map((pack) => pack.id),
+    priorityOrder: identityLines(ctx).map((pack) => pack.id),
     decisions: { count: decisionEvents.length, minutes: 0 }, captureToScheduledMinutes: captureToScheduled, pendingNow: countPending(ctx).total,
     committedOrders: committed.length, committedWithBlock: committed.filter((order) => scheduled.has(order.id)).length,
     liveMilestones: approved.length, milestonesWithProgressLast7d: approved.filter((milestone) => progressed.has(milestone.id)).length,

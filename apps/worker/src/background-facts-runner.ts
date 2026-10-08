@@ -3,8 +3,8 @@ import {
   type BackgroundFactsContext, type BackgroundFactsProposal
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
-import { defaultIdentityPacks } from "@crossline/identity-packs";
 import type { CrosslineStore } from "@crossline/db";
+import { identityLines } from "./lines";
 
 export const BACKGROUND_FACTS_SKILL = "crossline:crossline-background-facts";
 
@@ -27,7 +27,7 @@ export type BackgroundFactsOutcome =
 
 export function buildBackgroundFactsContext(store: CrosslineStore, workspaceId: string,
   captureTitle: string, captureContext: string): BackgroundFactsContext {
-  const identities = defaultIdentityPacks().filter((pack) => pack.kind === "identity")
+  const identities = identityLines(store, workspaceId)
     .map((pack) => ({ id: pack.id, label: pack.label }));
   const existingFacts = identities.flatMap((identity) => store.getBackgroundFacts(workspaceId, identity.id)
     .map((fact) => ({ identityId: identity.id, key: fact.key, value: fact.value, updatedAt: fact.updatedAt })));

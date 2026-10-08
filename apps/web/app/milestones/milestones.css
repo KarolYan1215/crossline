@@ -119,3 +119,21 @@
 .review-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(320px,100%),1fr));gap:10px}
 .review-card{display:grid;gap:4px;min-width:0}
 .review-card-meta{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:0;font-size:12px;color:var(--graphite)}
+
+/* ── lines and their long-term goals ── */
+.lines-bar{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(220px,100%),1fr));gap:8px}
+.lines-bar-card{display:grid;gap:3px;align-content:start;padding:8px 10px;text-align:left;font:inherit;cursor:pointer;background:var(--paper);color:var(--ink);
+  border:1px solid var(--mist);border-left:4px solid var(--lc,var(--ink))}
+.lines-bar-card:hover{background:var(--chalk)}
+.lines-bar-card b{color:var(--lc,var(--ink));font-size:14px}
+.lines-bar-card span{font-size:13px;line-height:1.45}
+.lines-bar-card small{font-size:12px;color:var(--graphite)}
+.lines-bar-add{border-style:dashed;border-left-style:dashed;place-content:center;color:var(--graphite)}
+.line-editor{display:grid;gap:10px}
+.line-editor label{display:grid;gap:4px;font-size:13px}
+.line-editor textarea{resize:vertical}
+.line-swatches{display:flex;flex-wrap:wrap;gap:6px;border:0;margin:0;padding:0}
+.line-swatches legend{font-size:13px;margin-bottom:4px}
+.line-swatches button{width:24px;height:24px;border:2px solid var(--paper);outline:1px solid var(--mist);cursor:pointer}
+.line-swatches button[aria-pressed="true"]{outline:2px solid var(--ink)}
+.line-editor-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}

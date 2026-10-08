@@ -1,6 +1,5 @@
 import { CATEGORY_LABEL, type ActivityCategory } from "@crossline/core";
 import { categoryMode, readCategories } from "@crossline/db";
-import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { SubpageShell } from "../subpage-shell";
 import { LocalActivityToggle } from "./local-activity-toggle";
 import { UsageCard } from "./usage-card";
@@ -21,6 +20,7 @@ import {
   ACTIVITY_BLACKLIST, ACTIVITY_DETAIL_CONSENT, ACTIVITY_PAUSED_UNTIL, effectiveSchedulePreferences, getStore, LOCAL_ACTIVITY_CONSENT, planToday, toZonedInstant
 } from "../../lib/crossline";
 import { requireSessionContext } from "../../lib/access-guard";
+import { lineLabels } from "../../lib/lines";
 
 export const dynamic = "force-dynamic";
 const USAGE_DAYS = 7;
@@ -123,7 +123,7 @@ export default async function SettingsPage() {
         <section id="usage" className="st-section" aria-labelledby="st-usage"><h2 id="st-usage">用量与体检</h2>
           <div className="st-modules">
             <section className="st-card" aria-label="系统体检"><header><h3>系统体检</h3><small>每日从账本计算</small></header>
-              <EffectivenessCard data={await loadEffectiveness(ctx)} labels={Object.fromEntries(defaultIdentityPacks().map((pack) => [pack.id, pack.label]))} />
+              <EffectivenessCard data={await loadEffectiveness(ctx)} labels={lineLabels(ctx)} />
             </section>
             <section className="st-card" aria-label="模型用量"><header><h3>模型用量</h3><small>近 {USAGE_DAYS} 天，悬停查看次数与耗时</small></header>
               <UsageCard summary={store.summarizeModelUsage(ctx.workspaceId, since)} daily={store.dailyModelUsage(ctx.workspaceId, since)} days={USAGE_DAYS} />

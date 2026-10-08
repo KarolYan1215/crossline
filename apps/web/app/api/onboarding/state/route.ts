@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
-import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { profileGaps } from "@crossline/core";
 import { latestFileDates } from "@crossline/db";
 import { resolveAccessContext } from "../../../../lib/access-guard";
 import { getStore } from "../../../../lib/crossline";
 import { loadPendingDateBatch } from "../../../../lib/imported-dates";
 import { loadDiligence } from "../../../../lib/diligence";
+import { identityLines } from "../../../../lib/lines";
 
 /**
  * Everything the onboarding screen shows, in one read: the conversation so far, the projects and facts the
@@ -19,7 +19,7 @@ export async function GET(request: Request) {
   const store = getStore();
   const session = store.getLatestOnboardingSession(workspaceId);
   const messages = session ? store.listOnboardingMessages(workspaceId, session.id) : [];
-  const identities = defaultIdentityPacks().filter((pack) => pack.kind === "identity").map((pack) => ({ id: pack.id, label: pack.label }));
+  const identities = identityLines(access.ctx).map((pack) => ({ id: pack.id, label: pack.label }));
   // What the profile still lacks before numbers can be worked back from the person's goals, as questions with the options to pick from.
   // Computed from the ledger on every read, so an interview that was already finished before a gap was understood still shows it.
   const askedBefore = new Set(messages.flatMap((message) => message.role === "assistant"

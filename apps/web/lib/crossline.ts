@@ -49,6 +49,7 @@ export function planToday(ctx?: AccessContext,
 /** The key the weekly availability lives under. One settings row, not a new table. */
 export { AVAILABILITY_SETTING } from "@crossline/core";
 import { AVAILABILITY_SETTING } from "@crossline/core";
+import { identityLines, linePacks } from "./lines";
 const PREFERENCES_SETTING = "schedule.preferences";
 export type SchedulePreferences = { timeZone: string; mode: "buffered" | "asap";
   importance: Record<string, "important" | "ordinary">;
@@ -290,8 +291,6 @@ export type PersistedPlan = {
   }>;
 };
 
-const PRIMARY_CLOCK_ID = process.env.CROSSLINE_PRIMARY_CLOCK_ID
-  ?? defaultIdentityPacks().find((pack) => pack.kind === "identity" && pack.masterClock)?.id ?? "";
 // Shared with apps/web/lib/task-detail.ts, so a task/milestone detail view's relation labels and identity
 // swatches never drift from what the homepage flywheel strip and star map already say.
 export const relationKindLabel: Record<string, string> = {
@@ -935,7 +934,7 @@ export type MilestoneInput = {
 export function saveMilestoneEdit(ctx: AccessContext, input: MilestoneInput): { ok: true; id: string; version: number } | { ok: false; code: string } {
   const title = input.title.trim();
   if (!title || title.length > 200) return { ok: false, code: "MILESTONE_TITLE_REQUIRED" };
-  if (!defaultIdentityPacks().some((pack) => pack.id === input.identityId && pack.kind === "identity")) {
+  if (!identityLines(ctx).some((pack) => pack.id === input.identityId)) {
     return { ok: false, code: "MILESTONE_IDENTITY_UNKNOWN" };
   }
   const projectId = input.projectId.trim() || `${input.identityId}-default`;
@@ -992,7 +991,7 @@ export function saveMilestoneTemplate(ctx: AccessContext, input: MilestoneTempla
   { ok: true; id: string } | { ok: false; code: string } {
   const titleHint = input.titleHint.trim();
   if (!titleHint || titleHint.length > 200) return { ok: false, code: "TEMPLATE_TITLE_REQUIRED" };
-  if (!defaultIdentityPacks().some((pack) => pack.id === input.identityId && pack.kind === "identity")) {
+  if (!identityLines(ctx).some((pack) => pack.id === input.identityId)) {
     return { ok: false, code: "TEMPLATE_IDENTITY_UNKNOWN" };
   }
   const checked = validateSuccessCriteria(input.successCriteriaDefaults);
@@ -1450,7 +1449,7 @@ const plannerTaskOf = (ctx: AccessContext, order: ActionableOrder) => {
   const weight = effectiveWeight(ctx, order.milestoneId);
   const important = weight >= IMPORTANT_WEIGHT;
   const tier = preferences ? goal?.confirmedDeadline ? important ? 1 : 2 : important ? 3 : 4
-    : order.state === "approved" ? 3 : order.identityId === PRIMARY_CLOCK_ID ? 1 : 2;
+    : order.state === "approved" ? 3 : order.identityId === (process.env.CROSSLINE_PRIMARY_CLOCK_ID ?? linePacks(ctx).find((pack) => pack.masterClock)?.id) ? 1 : 2;
   const core = humanCoreOf(order);
   const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
   const landing = byproductLanding(ctx, order);
@@ -1704,7 +1703,7 @@ export async function loadDashboard(ctx: AccessContext): Promise<Omit<DashboardD
   const actions = recommendNextActions(active.map((order) => plannerTaskOf(ctx, order)), 40,
     capacity.level === "uncalibrated" ? undefined : capacity.level, now, forecast);
   const milestones = store.listMilestones(ctx.workspaceId);
-  const identityPacks = defaultIdentityPacks().filter((pack) => pack.kind === "identity");
+  const identityPacks = identityLines(ctx);
   const timeZone = readSchedulePreferences(ctx)?.timeZone
     ?? process.env.CROSSLINE_TIME_ZONE?.trim() ?? "America/Chicago";
   const time = new Intl.DateTimeFormat("zh-CN", {

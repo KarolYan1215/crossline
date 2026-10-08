@@ -11,6 +11,7 @@ import { defaultIdentityPacks } from "@crossline/identity-packs";
 
 export const DILIGENCE_SKILL = "crossline:crossline-due-diligence";
 import { ownerOf } from "./owner";
+import { identityLines } from "./lines";
 /** A weekly refresh, not a loop: a line is researched again only once its last report is this old. */
 export const DILIGENCE_REFRESH_DAYS = 7;
 
@@ -147,7 +148,7 @@ export function createDiligenceRunner(store: CrosslineStore, workspaceId: string
     if (!client) return { state: "blocked", code: "CODEX_SUPERVISOR_UNAVAILABLE", message: "Codex 运行时不可用。" };
     const unavailable = all.webBlocker();
     if (unavailable) return { state: "blocked", ...unavailable };
-    const pack = defaultIdentityPacks().find((item) => item.id === identityId && item.kind === "identity");
+    const pack = identityLines(store, workspaceId).find((item) => item.id === identityId);
     if (!pack) return { state: "blocked", code: "DILIGENCE_IDENTITY_UNKNOWN", message: "没有这条主线。" };
     const facts = store.listProfileFacts(workspaceId).filter((fact) => fact.identityId === identityId);
     if (facts.length < 2) return { state: "skipped", reason: "no_profile" };
@@ -241,7 +242,7 @@ export function createDiligenceRunner(store: CrosslineStore, workspaceId: string
 /** Lines that have enough profile to research and no recent report: what the weekly pass should run. */
 export function linesDueForDiligence(store: CrosslineStore, workspaceId: string, now: Date): string[] {
   const reports = store.listDiligenceReports(workspaceId);
-  return defaultIdentityPacks().filter((pack) => pack.kind === "identity").map((pack) => pack.id).filter((id) => {
+  return identityLines(store, workspaceId).map((pack) => pack.id).filter((id) => {
     if (store.listProfileFacts(workspaceId).filter((fact) => fact.identityId === id).length < 2) return false;
     const latest = reports.find((report) => report.scope === id && (report.status === "done" || report.status === "running"));
     if (latest && now.getTime() - Date.parse(latest.runAt) < DILIGENCE_REFRESH_DAYS * 86_400_000) return false;

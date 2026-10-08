@@ -1,9 +1,9 @@
 import "server-only";
 import { STEP_MINUTES, TASK_MINUTES, type AccessContext, type AvailabilityWindow } from "@crossline/core";
-import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { DEADLINE_MARGIN_DAYS, type ScheduleParams } from "@crossline/planner";
 import { effectiveSchedulePreferences, getStore, loadCurrentPlan, loadGoalForecast, planToday, resolvedEstimate, saveAvailability, saveGoalSettings,
   saveScheduleParams, withPreview, type PreviewOverrides } from "./crossline";
+import { lineLabels } from "./lines";
 
 /**
  * What a change does across the lines before it is made (decided 2026-10-07: every change is previewed, then applied). The schedule and
@@ -87,7 +87,7 @@ export async function previewChange(ctx: AccessContext, requested: Change): Prom
   const before = await snapshot(ctx, order?.id);
   const after = await withPreview(overridesFor(change), () => snapshot(ctx, order?.id));
   const milestones = getStore().listMilestones(ctx.workspaceId);
-  const labels = new Map(defaultIdentityPacks().map((pack) => [pack.id, pack.label]));
+  const labels = new Map(Object.entries(lineLabels(ctx)));
   const risk = (goal: { slackDays: number | null }) => goal.slackDays !== null && goal.slackDays < DEADLINE_MARGIN_DAYS;
   return {
     ...(order ? { task: { title: order.intent, ...(before.first ? { firstBefore: before.first } : {}), ...(after.first ? { firstAfter: after.first } : {}) } } : {}),

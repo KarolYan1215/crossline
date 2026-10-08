@@ -1,9 +1,9 @@
 import "server-only";
 import { formatInTimeZone } from "date-fns-tz";
 import type { AccessContext } from "@crossline/core";
-import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { effectiveSchedulePreferences, getStore, loadCurrentPlan, planToday, resolvedEstimate } from "./crossline";
 import { countPending } from "./pending";
+import { lineLabels } from "./lines";
 
 /** Hard cap on what goes into every turn: enough for a week's picture, small enough to resend each turn. */
 export const SNAPSHOT_LIMIT = 9000;
@@ -25,7 +25,7 @@ export async function personSnapshot(ctx: AccessContext, now = new Date()): Prom
   const store = getStore();
   const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
   const today = planToday(ctx, now);
-  const labels = Object.fromEntries(defaultIdentityPacks().map((pack) => [pack.id, pack.label]));
+  const labels = lineLabels(ctx);
   const label = (id: string) => labels[id] ?? id;
   const anchors = new Map(store.listMilestoneAnchors(ctx.workspaceId).map((anchor) => [anchor.milestoneId, anchor]));
   const milestones = store.listMilestones(ctx.workspaceId).filter((milestone) => milestone.status !== "archived");

@@ -35,6 +35,10 @@ const WRITE_INSTRUCTIONS = "Write up ONE step of a task from the supplied source
   + "matters for this step, what to trust and what to doubt) and a tutorial (the concrete way to do this step, in order, "
   + "with the commands, settings or reasoning someone needs). Cite sources only by their id from the input and never "
   + "write a web address yourself. Where the sources do not support something, say so rather than filling it in. "
+  + "Missing material (the problem sheet itself, a dataset, a page that was not supplied) is not a reason to stop: write the best guide "
+  + "the supplied material allows — start the tutorial with where and how to get what is missing (named from the sources, e.g. the "
+  + "course platform the syllabus names), then the method, the topics and checks that apply whatever the exact content turns out to be — "
+  + "and open the analysis with a 「需要补充」 line naming each missing item. Return a blocker only when nothing useful can be written at all. "
   + "Return only the requested JSON. Write in Chinese.";
 
 export type ManualProgress = { stage: "designing" | "researching" | "writing" | "assembling"; done: number; total: number };
