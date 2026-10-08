@@ -114,7 +114,7 @@ export default async function ApprovalsPage() {
     </section>
     {proposals.length > 0 && <ProposalBatchForm count={proposals.length}>
       <section className="work-order-list" id="proposals">{sortedProposals.slice(0, FIRST_PROPOSALS).map(renderProposal)}</section>
-      {sortedProposals.length > FIRST_PROPOSALS && <details className="fold">
+      {sortedProposals.length > FIRST_PROPOSALS && <details className="fold advanced">
         <summary>以后再说 · 还有 {sortedProposals.length - FIRST_PROPOSALS} 个（截止更远或没有截止）</summary>
         <section className="work-order-list">{sortedProposals.slice(FIRST_PROPOSALS).map(renderProposal)}</section>
       </details>}

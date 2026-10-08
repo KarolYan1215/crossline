@@ -459,22 +459,6 @@ export function ensureSeeded(ctx: AccessContext): void {
 const FAMILIES = ["preparation", "review", "deep_work"] as const;
 type Family = typeof FAMILIES[number];
 
-/**
- * Tags a still-open WorkOrder's `(identityId, family)` bucket after the fact. Seeded and pre-`family`
- * WorkOrders never got this field, which leaves personal-history calibration permanently blind to them
- * (see `packages/db`'s `#recordDurationObservationIfCalibratable`). Only helps this order's own *future*
- * completion — an order already `accepted` had its one write chance at acceptance time.
- */
-export function backfillWorkOrderFamily(ctx: AccessContext, workOrderId: string, family: unknown):
-  { ok: true } | { ok: false; code: string } {
-  if (typeof family !== "string" || !FAMILIES.includes(family as Family)) return { ok: false, code: "FAMILY_INVALID" };
-  if (!getStore().listWorkOrders(ctx.workspaceId).some((item) => item.id === workOrderId))
-    return { ok: false, code: "WORK_ORDER_NOT_FOUND" };
-  getStore().backfillWorkOrderFamily(ctx.workspaceId, ctx.principalId, workOrderId, family,
-    `family-backfill:${workOrderId}:${family}`);
-  return { ok: true };
-}
-
 export type ManualPromotionInput = {
   identityId: unknown; intent: unknown; milestoneId: unknown; family: unknown;
   estimate: unknown; evidenceContract: unknown;

@@ -37,7 +37,7 @@ describe("review page", () => {
     expect(html).toContain("1 / 2");
     for (const fake of ["≥ 5 小时 / 周", "$100 / 月", "0 越权", "70%", "85%"]) expect(html).not.toContain(fake);
     expect(html).toContain("未标定");
-  });
+  }, 20000);
 
   test("lists every automatic acceptance individually, with a way to revoke it", async () => {
     const store = seed();

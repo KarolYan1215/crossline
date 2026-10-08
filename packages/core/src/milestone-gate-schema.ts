@@ -74,18 +74,6 @@ export const MILESTONE_GATE_OUTPUT_SCHEMA = object({
   blockers: list(object({ code: str, message: str }), 10)
 });
 
-/**
- * What a criteria proposal is allowed to return.
- *
- * Criteria are the user's to own, so this Skill only ever proposes: nothing here is written to a
- * milestone without an explicit acceptance step.
- */
-export type CriteriaProposal = {
-  milestones: Array<{ milestoneId: string; successCriteria: SuccessCriterion[]; rationale: string }>;
-  assumptions: string[];
-  blockers: Array<{ code: string; message: string }>;
-};
-
 // Structured output runs in strict mode: every object needs additionalProperties:false and must
 // list all of its properties as required. That rules out one object with optional fields, so the four
 // measure shapes are a real union instead — which is also closer to what they are.
@@ -106,16 +94,6 @@ export const criterion = object({
   id: str, statement: str, required: { type: "boolean" },
   evidenceOf: { type: "string", enum: ["output", "outcome"] },
   measure
-});
-
-export const CRITERIA_OUTPUT_SCHEMA = object({
-  milestones: list(object({
-    milestoneId: str,
-    successCriteria: list(criterion, 10),
-    rationale: str
-  }), 20),
-  assumptions: strList,
-  blockers: list(object({ code: str, message: str }), 10)
 });
 
 /**
@@ -360,40 +338,9 @@ export function validateRelationsProposal(value: unknown, context: RelationsCont
   // Only when nothing at all could be kept is the answer sent back: dropping every link would leave the flywheel empty.
   if (raw.relations.length && !relations.length) {
     const error = new Error("RELATION_NONE_USABLE");
-    (error as Error & { detail?: string }).detail = `没有一条联系可以保存：${dropped.join("；")}`.slice(0, 400);
+    (error as Error & { detail?: string }).detail = `没有一条关系可以保存：${dropped.join("；")}`.slice(0, 400);
     throw error;
   }
   return { relations, assumptions: raw.assumptions, blockers: [], warnings, dropped };
 }
 
-export type CriteriaContext = {
-  version: "crossline.milestone-criteria.v1";
-  milestones: Array<{ id: string; identityId: string; title: string; evidencePolicy: string }>;
-  recentWork: Array<{ milestoneId: string; intent: string; state: string }>;
-};
-
-/**
- * Structural check only. Whether the criteria are *good* is the user's call, which is exactly why this
- * returns proposals rather than writing them.
- */
-export function validateCriteriaProposal(value: unknown, context: CriteriaContext): CriteriaProposal {
-  const raw = value as CriteriaProposal | undefined;
-  if (!raw || !Array.isArray(raw.milestones) || !Array.isArray(raw.blockers) || !Array.isArray(raw.assumptions)) {
-    throw new Error("CRITERIA_SCHEMA_INVALID");
-  }
-  if (raw.blockers.length) {
-    const error = new Error("CRITERIA_BLOCKED");
-    (error as Error & { detail?: string }).detail =
-      raw.blockers.map((blocker) => blocker.message.trim()).filter(Boolean).join("；").slice(0, 400);
-    throw error;
-  }
-  const known = new Set(context.milestones.map((milestone) => milestone.id));
-  for (const proposal of raw.milestones) {
-    // Criteria for a milestone that does not exist cannot be reviewed, let alone accepted.
-    if (!known.has(proposal.milestoneId)) throw new Error("CRITERIA_MILESTONE_UNKNOWN");
-    if (!proposal.successCriteria.length) throw new Error("CRITERIA_EMPTY");
-    const ids = proposal.successCriteria.map((criterion) => criterion.id);
-    if (new Set(ids).size !== ids.length) throw new Error("CRITERIA_DUPLICATE_ID");
-  }
-  return { milestones: raw.milestones, assumptions: raw.assumptions, blockers: [] };
-}

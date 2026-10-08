@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { JsonLineRpcClient } from "@crossline/codex";
 
@@ -119,14 +119,6 @@ const FIXTURES = path.join(import.meta.dirname, "fixtures");
  */
 export function recordedAnswer(name: string): string {
   return readFileSync(path.join(FIXTURES, `${name}.txt`), "utf8");
-}
-
-/** Every recorded answer whose name starts with `prefix`, so a test can sweep a whole failure class. */
-export function recordedAnswers(prefix: string): Array<{ name: string; text: string }> {
-  return readdirSync(FIXTURES)
-    .filter((file) => file.startsWith(prefix) && file.endsWith(".txt"))
-    .sort()
-    .map((file) => ({ name: file.replace(/\.txt$/, ""), text: readFileSync(path.join(FIXTURES, file), "utf8") }));
 }
 
 /**

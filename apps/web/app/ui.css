@@ -9,9 +9,6 @@
 [data-line="investment"]{--lc:var(--c-investment)}
 [data-line="health"],[data-line="capacity"]{--lc:var(--c-health)}
 [data-line="none"],[data-line="unclassified"]{--lc:var(--graphite)}
-
-/* ── panels ────────────────────────────────── */
-.grid-auto{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:8px}
 .panel{border:1px solid var(--mist);padding:8px 10px;background:var(--paper);min-width:0}
 .panel>header{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:4px}
 .panel>header h2,.panel>header h3{margin:0;font-size:14px;font-weight:700}
@@ -141,16 +138,6 @@ button.dt-row:hover,.dt-row[aria-pressed="true"]{background:var(--chalk)}
 .day-stats .time-bar{display:block;margin-top:3px}
 .day-energy{display:flex;align-items:center;gap:8px;font-size:13px}
 .today-grid{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:8px;background:none;border:0}
-.hero-action{padding:10px 12px;border:1px solid var(--ink);border-left:5px solid var(--lc,var(--ink))}
-.hero-action>header{margin-bottom:2px}
-.hero-title{margin:2px 0 4px;font-size:22px;line-height:1.2;font-weight:700}
-.hero-action p{margin:3px 0;max-width:none;font-size:14px;color:var(--ink)}
-.hero-meta{display:flex;flex-wrap:wrap;gap:2px 14px;font-size:13px;color:var(--graphite)}
-.hero-meta .hero-detail-link{margin-left:auto;font-weight:700;color:var(--ink);text-decoration:underline}
-.alt-grid{grid-template-columns:repeat(auto-fill,minmax(210px,1fr));align-content:start}
-.alt-action{position:relative;padding:8px 10px;border-left:4px solid var(--lc,var(--mist))}
-.alt-action h4{margin:2px 0;font-size:14px;line-height:1.25}
-.alt-action small{font-size:12px;color:var(--graphite)}
 .lines-strip{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px}
 .line-card{position:relative;display:block;border-left:4px solid var(--lc)}
 .line-card header h3{color:var(--lc)}
@@ -171,7 +158,6 @@ button.dt-row:hover,.dt-row[aria-pressed="true"]{background:var(--chalk)}
 .pending-list b{font-size:22px}
 .work-order-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:8px;align-items:start}
 .work-order-list>article{margin:0}
-.hero-action>header small,.alt-action>header small{margin-right:30px}
 
 
 /* The badge arrives after the page does, so it must not be able to change the height of the row it sits in. */

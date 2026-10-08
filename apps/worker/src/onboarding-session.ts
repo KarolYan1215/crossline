@@ -274,4 +274,3 @@ function conversationSoFar(messages: StoredOnboardingMessage[]): NonNullable<Onb
 }
 
 /** A session id the browser can mint for itself before the first turn. */
-export const newSessionId = (): string => randomUUID();

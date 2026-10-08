@@ -10,6 +10,7 @@ import { riskLabel, riskTone, stateLabelFor } from "../../lib/labels";
 import { AssistantChat } from "../chat/assistant-chat";
 import { ManualbookView } from "../manualbook-view";
 import { ExecutionActions } from "../execution-actions";
+import { WaitingForm } from "../waiting-form";
 import { StepDuration, TaskQuickEdit } from "./quick-edit";
 
 const post = (path: string, body: unknown) => fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
@@ -178,6 +179,7 @@ export function TaskPanels({ detail, initialTab = "steps" }: { detail: TaskDetai
           <ExecutionActions workOrderId={detail.id} intent={detail.intent} state={detail.state} paused={detail.paused} ownerId={detail.ownerId}
             workspaceId={detail.workspaceId} evidenceChecklist={detail.evidenceChecklist} estimateP50={detail.estimate.p50Minutes}
             {...(detail.suggestedMinutes ? { suggestedMinutes: detail.suggestedMinutes } : {})} />
+          {!["accepted", "archived"].includes(detail.state) && <WaitingForm workOrderId={detail.id} />}
         </div>}
       </div>
     </div>

@@ -19,13 +19,6 @@ import { DATE_EXTRACTION_SCHEMA, type DateExtraction } from "./date-schema";
  *   - `flywheelCandidates`: connections between lines, always `inferred` here — only the person can
  *     confirm one.
  */
-export const PROFILE_IDENTITIES = ["research", "startup", "media", "investment"] as const;
-
-/** What we want to know about every project. The Skill may add its own slots, but must cover these. */
-export const CORE_SLOTS = [
-  "what", "for_whom", "stage", "goal", "deadline", "blockers", "collaborators", "evidence", "local_assets", "weekly_hours", "tools"
-] as const;
-
 export type TurnQuestion = {
   id: string; text: string; kind: "single" | "multi" | "free";
   options: Array<{ id: string; label: string; detail: string }>;

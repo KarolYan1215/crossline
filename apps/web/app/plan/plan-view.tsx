@@ -92,6 +92,25 @@ export function PlanView({ plan, calendar }: { plan: PlanVersionData; calendar: 
     window.location.reload();
   };
 
+  // The version's approval, shown on its own when there are no differences and under the ledger when there are.
+  const approval = <footer>
+    {plan.status === "draft" ? <Dialog.Root>
+      <Dialog.Trigger asChild><button type="button">批准本批变更</button></Dialog.Trigger>
+      <Dialog.Portal>
+        <Dialog.Overlay className="dialog-overlay" />
+        <Dialog.Content className="dialog-sheet">
+          <Dialog.Title>批准计划 v{plan.version}？</Dialog.Title>
+          <Dialog.Description>{pending.length} 项待处理差异一并批准；批准后 Crossline 日历按本版本写入。</Dialog.Description>
+          {approvalState === "error" && <p role="alert">批准未完成：请先处理冲突类差异。</p>}
+          <div className="dialog-actions">
+            <Dialog.Close asChild><button type="button" className="secondary">返回检查</button></Dialog.Close>
+            <button type="button" disabled={approvalState === "saving"} onClick={approve}>{approvalState === "saving" ? "批准中…" : "确认批准"}</button>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root> : <strong className="approved-mark">✓ 本版本已批准</strong>}
+    <small>批准后写入 Crossline 日历</small>
+  </footer>;
   return <div className="plan-view" data-plan-version={plan.id}>
     <div className="plan-bar">
       <span className="tag">计划 v{plan.version} · {statusLabel[plan.status]}</span>
@@ -126,10 +145,13 @@ export function PlanView({ plan, calendar }: { plan: PlanVersionData; calendar: 
     <CalendarPanel items={calendar.items} deadlines={calendar.deadlines} today={calendar.today} nowIso={calendar.nowIso}
       timeZone={calendar.timeZone} labels={calendar.labels} quietByWeekday={calendar.quietByWeekday} />
 
-    <details className="plan-changes" id="plan-changes" open={pending.length > 0}>
+    {/* With no differences there is nothing to fold: only the version's approval is shown. The ledger of differences is a fold
+        (low-frequency history) that opens by itself while something in it waits for a decision. */}
+    {plan.changes.length === 0 ? <section className="plan-changes" id="plan-changes"><div className="change-ledger">
+      {approval}
+    </div></section> : <details className="plan-changes advanced" id="plan-changes" open={pending.length > 0}>
       <summary>计划差异（{pending.length} 项待处理，共 {plan.changes.length} 项）</summary>
       <div className="change-ledger">
-        {plan.changes.length === 0 && <p className="muted">没有差异。</p>}
         {plan.changes.map((change) => <article key={change.id}>
           <b>{changeLabel[change.kind]}</b>
           <p>{change.explanation}</p>
@@ -143,25 +165,8 @@ export function PlanView({ plan, calendar }: { plan: PlanVersionData; calendar: 
             </span>}
           </span>
         </article>)}
-        <footer>
-          {plan.status === "draft" ? <Dialog.Root>
-            <Dialog.Trigger asChild><button type="button">批准本批变更</button></Dialog.Trigger>
-            <Dialog.Portal>
-              <Dialog.Overlay className="dialog-overlay" />
-              <Dialog.Content className="dialog-sheet">
-                <Dialog.Title>批准计划 v{plan.version}？</Dialog.Title>
-                <Dialog.Description>这会把 {pending.length} 项待定差异写入批准账本。外部日历写回仍受连接器权限与写后验证控制。</Dialog.Description>
-                {approvalState === "error" && <p role="alert">批准失败：请先处理冲突中心中的阻塞项。</p>}
-                <div className="dialog-actions">
-                  <Dialog.Close asChild><button type="button" className="secondary">返回检查</button></Dialog.Close>
-                  <button type="button" disabled={approvalState === "saving"} onClick={approve}>{approvalState === "saving" ? "正在落账…" : "确认批准"}</button>
-                </div>
-              </Dialog.Content>
-            </Dialog.Portal>
-          </Dialog.Root> : <strong className="approved-mark">✓ 本版本已批准</strong>}
-          <small>批准后才允许写入个人 Crossline 日历 · <a href="/approvals">打开全部待确认</a></small>
-        </footer>
+        {approval}
       </div>
-    </details>
+    </details>}
   </div>;
 }

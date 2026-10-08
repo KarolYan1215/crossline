@@ -27,7 +27,7 @@ describe("PlanView", () => {
     expect(html).toContain("1 项差异待处理");
     expect(html).toContain("为组会准备材料");
     // A pending difference opens the fold, so what needs a decision is visible without a click.
-    expect(html).toContain('<details class="plan-changes" id="plan-changes" open=""');
+    expect(html).toContain('<details class="plan-changes advanced" id="plan-changes" open=""');
   });
 
   test("with nothing to decide the differences stay folded", () => {

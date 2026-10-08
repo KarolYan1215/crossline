@@ -7,7 +7,9 @@ import { InsightActions } from "./insight-actions";
 import { permissionCandidates } from "../../lib/permission-mode";
 import { WeeklyInsightButton } from "./weekly-insight-button";
 import { requireSessionContext } from "../../lib/access-guard";
-import { TaskPreview, MilestonePreview } from "../task-preview";
+import { MilestonePreview } from "../task-preview";
+import { TaskCard } from "../task/task-card";
+import { Tag } from "../ui/tag";
 import { loadTaskDetailsBatch, loadMilestoneDetailsBatch } from "../../lib/task-detail";
 
 export const dynamic = "force-dynamic";
@@ -37,14 +39,15 @@ export default async function ReviewPage() {
       </p>
       {review.autoAccepted.length === 0
         ? <p className="review-empty">本周没有自动验收记录。</p>
-        : <ul className="review-list">{review.autoAccepted.map((item) => <li key={item.workOrderId}>
-          <a className="card-cover-link" href={`/workbench/${encodeURIComponent(item.workOrderId)}`} aria-label={item.intent} />
-          <TaskPreview detail={taskDetails.get(item.workOrderId)} />
-          <b>{item.intent}</b>
-          <small>里程碑 {item.milestoneId} · {item.acceptedAt.slice(0, 16).replace("T", " ")}</small>
-          {item.questioned && <em className="review-flag">关系已被反证，需复核</em>}
-          <RevokeAcceptance workOrderId={item.workOrderId} />
-        </li>)}</ul>}
+        : <div className="review-cards">{review.autoAccepted.map((item) => {
+          const detail = taskDetails.get(item.workOrderId);
+          return <div key={item.workOrderId} className="review-card">
+            {detail ? <TaskCard detail={detail} /> : <b>{item.intent}</b>}
+            <p className="review-card-meta"><small>自动验收 · {item.acceptedAt.slice(5, 16).replace("T", " ")}</small>
+              {item.questioned && <Tag tone="warn">关系已被反证，需复核</Tag>}
+              <RevokeAcceptance workOrderId={item.workOrderId} /></p>
+          </div>;
+        })}</div>}
     </section>
 
     <section className="review-block">

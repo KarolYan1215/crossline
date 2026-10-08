@@ -3,7 +3,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { AGENT_CATEGORIES, AGENT_CATEGORY_EXPLAINED, isSecretPath, type AccessContext, type AgentCategory } from "@crossline/core";
 import {
-  assistantPlanFor, CLEAN_RUNS_TO_TRUST, declinedCategories, isPaused, listAgentTasks, pendingAgentApprovals, pendingCategoryRequests, readCategories,
+  CLEAN_RUNS_TO_TRUST, declinedCategories, isPaused, listAgentTasks, pendingAgentApprovals, pendingCategoryRequests, readCategories,
   type AgentApprovalRow, type AgentTaskRow
 } from "@crossline/db";
 import { getStore } from "./crossline";
@@ -51,25 +51,6 @@ export function countAssistantPending(ctx: AccessContext): { categories: number;
     categories: pendingCategoryRequests(store, ctx.workspaceId).length,
     approvals: pendingAgentApprovals(store, ctx.workspaceId).length,
     reviews: listAgentTasks(store, ctx.workspaceId).filter((task) => task.status === "needs_review").length
-  };
-}
-
-/** What the Workbench says about handing one order over: whether it can go, as which kind, and what it would be told. */
-export type AssistantOffer =
-  | { available: false; reason: string }
-  | { available: true; category: AgentCategory | undefined; categoryLabel: string; categoryAllowed: boolean; why: string; graded: boolean; humanPart: string;
-      /** The whole order is handed over (whole-task delegation), not just the analysis's AI part. */
-      delegated: boolean };
-
-export function assistantOffer(ctx: AccessContext, workOrderId: string): AssistantOffer {
-  const store = getStore();
-  const planned = assistantPlanFor(store, ctx.workspaceId, workOrderId);
-  if (!planned.ok) return { available: false, reason: planned.message };
-  const { plan } = planned;
-  return {
-    available: true, category: plan.category, categoryLabel: plan.category ? AGENT_CATEGORIES[plan.category] : "", why: plan.why,
-    categoryAllowed: plan.category ? Boolean(readCategories(store, ctx.workspaceId)[plan.category]) : false, graded: plan.graded, humanPart: plan.humanPart,
-    delegated: plan.delegated
   };
 }
 

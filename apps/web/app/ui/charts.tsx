@@ -79,15 +79,6 @@ export function Sparkline({ values, labels, label, width = 120, height = 28, uni
   </svg>;
 }
 
-/** A grid of cells (e.g. hours × weekdays); `level` 0–3 shades the cell. Read-only — the editable week grid builds on the same classes. */
-export function Heatmap({ rows, cols, cell, label }: { rows: string[]; cols: string[]; cell: (row: number, col: number) => { level: number; title: string }; label: string }) {
-  return <table className="ui-heat" aria-label={label}>
-    <thead><tr><th />{cols.map((col) => <th key={col} scope="col">{col}</th>)}</tr></thead>
-    <tbody>{rows.map((row, r) => <tr key={row}><th scope="row">{row}</th>
-      {cols.map((col, c) => { const v = cell(r, c); return <td key={col} data-level={v.level} title={v.title} />; })}</tr>)}</tbody>
-  </table>;
-}
-
 function fmt(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }

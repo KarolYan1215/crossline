@@ -58,4 +58,4 @@
 11. 主线配色全站一致；标签与正文层级可区分。
 12. 手机可用；对比度 ≥7:1、字号 ≥12px。
 
-自动化：`e2e/design-audit.spec.ts`（12、10 的字体部分）与 `e2e/copy-audit.spec.ts`（3 部分、6、7、9；`COPY_AUDIT_STRICT=1` 时失败）。
+自动化：`e2e/design-audit.spec.ts`（12、10 的字体部分）与 `e2e/copy-audit.spec.ts`（3 部分、6、7、9；任何发现即失败，`COPY_AUDIT_REPORT=1` 时只打印）。

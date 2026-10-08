@@ -1,8 +1,9 @@
 import type { CrosslineStore } from "./index";
+import { PUSH_SUBSCRIPTIONS } from "@crossline/core";
 
 /** A device that receives push notifications (stored shape; the sender is `sendWebPush` in packages/connectors). */
 export type StoredPushSubscription = { endpoint: string; keys: { p256dh: string; auth: string }; origin: string; device: string; createdAt: string };
-const KEY = "push.subscriptions";
+const KEY = PUSH_SUBSCRIPTIONS;
 
 export function listPushSubscriptions(store: CrosslineStore, workspaceId: string): StoredPushSubscription[] {
   try { const value = JSON.parse(store.getSetting(workspaceId, KEY) ?? "[]") as unknown; return Array.isArray(value) ? value as StoredPushSubscription[] : []; }

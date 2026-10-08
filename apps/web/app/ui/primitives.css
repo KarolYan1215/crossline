@@ -99,12 +99,6 @@ button.ui-ring:hover .ui-ring-seg:not([data-on]){stroke:#9BD3AE}
 .ui-spark-line{fill:none;stroke:var(--lc,var(--ink));stroke-width:1.5}
 .ui-spark-last{fill:var(--lc,var(--ink))}
 .ui-spark-hit{fill:transparent}
-.ui-heat{border-collapse:collapse;font-size:12px}
-.ui-heat th{padding:0 4px;font-weight:400;color:var(--graphite)}
-.ui-heat td{width:18px;height:14px;border:1px solid var(--paper);background:var(--chalk)}
-.ui-heat td[data-level="1"]{background:color-mix(in srgb,var(--lc,var(--ink)) 25%,var(--paper))}
-.ui-heat td[data-level="2"]{background:color-mix(in srgb,var(--lc,var(--ink)) 55%,var(--paper))}
-.ui-heat td[data-level="3"]{background:var(--lc,var(--ink))}
 
 /* A deterministic figure next to its label: the number big, the label small. */
 .ui-stat{display:grid;gap:2px}

@@ -7,7 +7,7 @@ import { expect, test, type Page } from "@playwright/test";
  * Exempt on purpose: `.gen` (text a model wrote — it quotes the person and their files), `[data-user-text]` (what the person typed or
  * named), `.long-form` (material and tutorial bodies), and `details.advanced` (the one sanctioned use of a fold).
  *
- * Pages are reworked one phase at a time, so findings are reported and only fail once COPY_AUDIT_STRICT=1 (the final phase turns it on).
+ * Strict since the product pass finished (2026-10-08): any finding fails. `COPY_AUDIT_REPORT=1` only prints them, for a page being reworked.
  */
 const PAGES = ["/", "/milestones", "/plan", "/workbench", "/approvals", "/settings"];
 
@@ -33,7 +33,9 @@ async function audit(page: Page): Promise<Findings> {
       if (/[你我]/.test(text)) found.secondPerson.push(text.slice(0, 40));
       if (developer.test(text)) found.developer.push(text.slice(0, 60));
     }
+    // Navigation's 「更多」 is a menu, not folded content; a fold inside an advanced one is advanced too.
     for (const fold of document.querySelectorAll("details:not(.advanced)")) {
+      if (fold.closest("nav, details.advanced")) continue;
       if (visible(fold)) found.folds.push(fold.querySelector("summary")?.textContent?.trim().slice(0, 30) ?? "(no summary)");
     }
     for (const block of document.querySelectorAll("p, li, dd")) {
@@ -51,8 +53,8 @@ for (const path of PAGES) {
     await page.goto(path);
     await page.waitForLoadState("networkidle");
     const found = await audit(page);
-    if (process.env.AUDIT_VERBOSE || !process.env.COPY_AUDIT_STRICT) console.log(`COPY ${path} ${JSON.stringify(found)}`);
-    if (!process.env.COPY_AUDIT_STRICT) return;
+    if (process.env.AUDIT_VERBOSE || process.env.COPY_AUDIT_REPORT) console.log(`COPY ${path} ${JSON.stringify(found)}`);
+    if (process.env.COPY_AUDIT_REPORT) return;
     expect.soft(found.secondPerson, "second person in system text").toEqual([]);
     expect.soft(found.folds, "folds outside advanced content").toEqual([]);
     expect.soft(found.developer, "developer-facing text").toEqual([]);

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 /**
@@ -249,6 +249,3 @@ export function createWhisperEngine(modelsDir: string): { engine: TranscriptionE
 
 /** Where the model lives: inside the data directory, so it is found again after a restart and never in the repository. */
 export const modelsDirectory = (dataDir: string) => path.join(dataDir, "models");
-export const readMarker = (dir: string): { model: string; downloadedAt: string } | undefined => {
-  try { return JSON.parse(readFileSync(markerPath(dir), "utf8")); } catch { return undefined; }
-};

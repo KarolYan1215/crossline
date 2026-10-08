@@ -144,38 +144,29 @@ input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-vis
 /* ── capture ───────────────────────────────── */
 .capture-line{display:grid;grid-template-columns:minmax(120px,auto) 1fr;gap:clamp(8px,1vw,14px);align-items:end;padding:10px 0;border-bottom:1px solid var(--ink)}
 .capture-line h2{margin:3px 0 0;font-size:14.5px;font-weight:700}
-.capture-form{display:flex;gap:0;flex-wrap:wrap}
-.capture-form label{flex:1 1 220px;min-width:0}
-.capture-form input{width:100%;min-height:34px;border-right-width:0}
-.capture-form>small{flex-basis:100%;margin-top:5px}
 /* The drop target and the file input share one label so a click anywhere in the dashed box still opens
    the native file picker — dropping or pasting just gives it a second way to fill the same input. */
 .attachment-drop{flex-basis:100%;margin-top:6px;padding:8px 10px;border:1px dashed var(--mist);cursor:pointer;display:grid;gap:4px}
 .attachment-drop.dragging{border-color:var(--ink);background:var(--chalk)}
 .attachment-drop input{border:none;padding:0;min-height:auto;font-size:12px;color:var(--graphite)}
 .attachment-drop small{font-size:12px;color:var(--graphite);word-break:break-word}
-.batch-capture-form{display:grid;gap:6px;margin-top:6px}
-.batch-capture-form textarea{width:100%;min-height:72px;padding:8px 9px;border:1px solid var(--mist);background:var(--paper);color:var(--ink);font:inherit;resize:vertical}
-.batch-capture-actions{display:flex;gap:8px;align-items:center}
 .primary-button,.secondary-button,.text-button{
   min-height:33px;padding:6px 14px;border:1px solid var(--ink);border-radius:0;
   font-family:var(--f-mono);font-size:12px;font-weight:700;cursor:pointer;
 }
-.primary-button,.capture-form .secondary-button{background:var(--ink);color:var(--paper)}
-.primary-button:hover,.capture-form .secondary-button:hover{background:var(--paper);color:var(--ink)}
+.primary-button{background:var(--ink);color:var(--paper)}
+.primary-button:hover{background:var(--paper);color:var(--ink)}
 .secondary-button,.text-button{background:transparent;color:var(--ink);border-color:var(--mist)}
 .secondary-button:hover,.text-button:hover{border-color:var(--ink)}
 button:disabled{opacity:.4;cursor:not-allowed}
 
 /* ── today grid ────────────────────────────── */
 .today-grid{display:grid;grid-template-columns:minmax(0,2fr) minmax(260px,.8fr);gap:1px;background:var(--mist);border-bottom:1px solid var(--ink)}
-.hero-action{background:var(--paper)}
 /* The "stretched link" pattern: an absolutely-positioned, invisible `<a>` sized to the card makes the
    whole card clickable without nesting a real `<button>` (the preview trigger) inside a real `<a>`,
    which HTML forbids. The two sit as siblings; the cover link is behind everything else via z-index. */
 .card-cover-link{position:absolute;inset:0;z-index:0}
-.hero-action,.alt-action,.work-order-list article,
-.milestone-admin-list li,.review-list li,.approval-ledger article,.review-milestone{position:relative}
+.work-order-list article,.milestone-admin-list li,.review-list li,.approval-ledger article,.review-milestone{position:relative}
 /* Any real interactive element inside a card with a cover link must out-rank it, or the cover link
    silently swallows clicks meant for it — not just buttons and links but every bare form control these
    particular lists embed directly (ExecutionActions' inputs, GoalControls' selects, a disclosure's own
@@ -185,38 +176,7 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .review-list a,.review-list button,.review-list input,.review-list label,
 .approval-ledger a,.approval-ledger button,.approval-ledger summary,
 .review-milestone a{position:relative;z-index:1}
-.hero-action{padding:14px 0 18px;padding-right:clamp(12px,2vw,28px)}
-.hero-action>header,.alt-action>header{display:flex;justify-content:space-between;gap:12px;font-family:var(--f-mono);font-size:12px;color:var(--graphite)}
-.hero-action h1{max-width:780px;margin:10px 0;font-family:var(--f-display);font-size:clamp(24px,3.2vw,42px);line-height:1.04}
-.hero-action>p{max-width:700px;color:var(--graphite);line-height:1.6;font-size:13.5px}
-.hero-action dl{margin:14px 0 0;display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:1px;background:var(--mist);border:1px solid var(--mist)}
-.hero-action dl div{background:var(--paper);padding:7px 9px}
-.hero-action dt{font-family:var(--f-mono);font-size:12px;color:var(--shade)}
-.hero-action dd{margin:3px 0 0;font-size:12px}
-.hero-detail-link{display:inline-block;margin-top:10px;font-family:var(--f-mono);font-size:12px;color:var(--graphite)}
-.hero-detail-link:hover{color:var(--ink)}
-.alt-action{background:var(--paper);padding:12px clamp(10px,1.4vw,16px)}
-.alt-action h3{margin:14px 0 6px;font-family:var(--f-display);font-size:17px;line-height:1.1}
-.alt-action p{color:var(--graphite);font-size:12px;line-height:1.55}
-.alt-action small{font-family:var(--f-mono);font-size:12px;color:var(--shade)}
-
-/* ── lists ─────────────────────────────────── */
-/* A scheduler-placed clock time reads as a fact (ink, tabular); a status string standing in for one
-   (「已批准 · 等待材料」, or the em dash when nothing was placed today) reads as provisional. */
-/* Shape-coded identity marker on the Today timeline: a diamond, a circle, a bar — colour is only ever
-   secondary, so the row stays readable in monochrome and for anyone who cannot separate the hues. */
-.line-symbol{width:9px;height:9px;border:1px solid var(--ink);rotate:45deg}
-.line-symbol.startup{border-style:dashed;border-radius:50%;rotate:none}
-.line-symbol.media{width:12px;height:0;border-width:0 0 2px;rotate:none;box-shadow:0 4px 0 -1px var(--ink)}
-.line-symbol.investment{border-radius:50%;rotate:none}
 .capacity-blocker{font-family:var(--f-mono);font-size:12px;color:var(--ink)}
-
-/* Shape, not colour, carries state — the reference uses the same glyph vocabulary. */
-.gly{display:inline-block;width:9px;height:9px;border:1px solid var(--ink);margin-right:7px;vertical-align:baseline}
-.gly[data-s="active"],.gly[data-s="doing"]{background:linear-gradient(to right,var(--ink) 0 50%,transparent 50% 100%)}
-.gly[data-s="ready_for_human"],.gly[data-s="wait"]{border-radius:50%}
-.gly[data-s="accepted"],.gly[data-s="done"]{background:repeating-linear-gradient(135deg,var(--ink) 0 2px,transparent 2px 4px)}
-.gly[data-s="blocked"]{background:var(--ink);box-shadow:inset 0 0 0 2px var(--paper)}
 
 /* ── subpages ──────────────────────────────── */
 .subpage{display:block}
@@ -643,9 +603,6 @@ button:disabled{opacity:.4;cursor:not-allowed}
 /* 待确认: the batch bar sits above the proposal cards; a line's drafts are accepted together. */
 .proposal-batch-bar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;margin:12px 0}
 .proposal-check{display:inline-flex;align-items:center;gap:6px;font-size:13px}
-.line-drafts{display:grid;gap:8px;margin:8px 0 14px}
-.line-drafts ul{margin:0}
-.line-drafts-bar{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 12px}
 .assistant-card{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;padding:8px;border:1px dashed var(--graphite);margin:6px 0}
 .ask-list{margin:12px 0;display:grid;gap:6px}
 .ask-list>header{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
@@ -671,4 +628,3 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .ask-group>ol{margin-top:4px}
 .ask-input{border-top:1px solid var(--mist);padding-top:8px;min-width:0}
 .ask-input h4{margin:0 0 4px;font-size:14px;overflow-wrap:anywhere}
-.byproduct-line{border-left:3px dashed var(--graphite);padding-left:8px}

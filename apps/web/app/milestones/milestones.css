@@ -114,3 +114,10 @@
 
 @media (prefers-reduced-motion:reduce){.mt-relation,.mt-result{animation:none}.mt-tick:hover{transform:none}}
 @media (max-width:640px){.mt-draft-buttons{margin-left:0}.md-chainline{grid-template-columns:1fr}.md-reading{grid-template-columns:1fr}}
+
+/* ── weekly review: auto-accepted tasks as cards ── */
+.review-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(320px,100%),1fr));gap:10px}
+.review-card{display:grid;gap:4px;min-width:0}
+.review-card-meta{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:0;font-size:12px;color:var(--graphite)}
+.waiting-form{display:grid;gap:6px;padding-top:8px;border-top:1px solid var(--mist)}
+.waiting-form h4{margin:0;font-size:13px}

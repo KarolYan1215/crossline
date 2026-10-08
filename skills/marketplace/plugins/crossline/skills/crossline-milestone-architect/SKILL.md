@@ -5,12 +5,11 @@ description: Propose evidence-verifiable milestones, their success criteria, and
 
 # Crossline Milestone Architect
 
-This Skill decides **what counts as having got somewhere**. It runs in one of three modes, chosen by the `version` field of the input. Return raw JSON in every mode — no code fence, no prose around it.
+This Skill decides **what counts as having got somewhere**. It runs in one of two modes, chosen by the `version` field of the input. Return raw JSON in every mode — no code fence, no prose around it.
 
 | input `version` | mode | returns |
 |---|---|---|
 | `crossline.milestone-proposal.v1` | propose new milestones | `{milestones[], assumptions[], blockers[]}` |
-| `crossline.milestone-criteria.v1` | add criteria to milestones that exist | `{milestones[], assumptions[], blockers[]}` |
 | `crossline.milestone-relations.v1` | links between milestones in different lines | `{relations[], assumptions[], blockers[]}` |
 | `crossline.flywheel.v1` | relations between milestones | handled by `crossline-flywheel-scout`, not here |
 
@@ -34,10 +33,6 @@ A milestone whose criteria are all outputs can be satisfied by a productive afte
 **Watch for the measure becoming the target.** Once a criterion is written, work bends toward satisfying it. Before proposing one, ask what someone would do if they optimised for this criterion alone and did not care about the milestone — if that path is attractive and useless, the criterion is wrong. Where this risk is high, pair it: one criterion that counts the work and one that checks the effect.
 
 **Horizon.** A milestone should be reachable in weeks, not days and not quarters. A milestone reachable today is a task; one reachable next year cannot be steered by anything this system observes.
-
-## Criteria mode — `crossline.milestone-criteria.v1`
-
-Input `{version, milestones[], recentWork[]}`. Return `{milestones[], assumptions[], blockers[]}`, each entry `{milestoneId, successCriteria[], rationale}` with `milestoneId` copied from the input.
 
 ## Proposal mode — `crossline.milestone-proposal.v1`
 
@@ -106,7 +101,7 @@ At most twelve, the few that carry weight rather than every pair.
 
 Every human-readable field in Chinese: concise, standard academic or workplace wording, third person, no second person, no conversational tone. Terms: 主线, 里程碑, 任务, 步骤, 长期目标, 分数线; verbs 批准, 验收, 撤销.
 
-## Criterion shape (both modes)
+## Criterion shape
 
 `{id, statement, required, evidenceOf, measure}` where `evidenceOf` is `"output"` or `"outcome"` and `measure` is exactly one of:
 
