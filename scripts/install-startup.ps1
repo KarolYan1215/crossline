@@ -14,7 +14,12 @@ $ErrorActionPreference = 'Stop'
 if ([string]::IsNullOrWhiteSpace($RepoRoot)) { $RepoRoot = Split-Path -Parent $PSScriptRoot }
 $repo = (Resolve-Path -LiteralPath $RepoRoot).Path
 $launcher = Join-Path $repo 'scripts\start-crossline.ps1'
-$action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$launcher`" -RepoRoot `"$repo`""
+# `conhost --headless` hosts PowerShell with no window at all. Run directly, powershell.exe opened a console every
+# 15 minutes on top of whatever the person was doing (`-WindowStyle Hidden` still flashes one, and a Windows Terminal
+# default host ignores it). The task must stay an interactive-logon one: notifications and the screen-activity reader
+# need the person's desktop session.
+$hidden = "--headless powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass"
+$action = New-ScheduledTaskAction -Execute 'conhost.exe' -Argument "$hidden -File `"$launcher`" -RepoRoot `"$repo`""
 
 $atLogon = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
 # 3650 days rather than TimeSpan::MaxValue: older Task Scheduler builds reject the latter, and ten
@@ -33,7 +38,7 @@ Register-ScheduledTask -TaskName 'Crossline' `
 # A daily encrypted backup (ledger, auth.db, Codex memory), kept for two weeks. A backup that only runs when someone remembers
 # to run it is not a backup; this one runs at 04:00 when nothing else is happening, and catches up after the machine was off.
 $backup = Join-Path $repo 'scripts\backup-crossline.ps1'
-$backupAction = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$backup`" -RepoRoot `"$repo`" -Keep 14"
+$backupAction = New-ScheduledTaskAction -Execute 'conhost.exe' -Argument "$hidden -File `"$backup`" -RepoRoot `"$repo`" -Keep 14"
 $daily = New-ScheduledTaskTrigger -Daily -At '04:00'
 $backupSettings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Hours 1)
 Register-ScheduledTask -TaskName 'Crossline Backup' `
