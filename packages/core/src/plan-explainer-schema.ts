@@ -15,10 +15,16 @@ export type PlanExplainerContext = {
     id: string; intent: string; identityId: string;
     estimateP50Minutes: number; energy: "low" | "medium" | "high" | null;
     important: boolean; confirmedDeadline: string | null;
+    /** From the scheduler's own result when the web app supplied it: urgency tier (1 most urgent), importance 0–100, first block. */
+    tier?: number; weight?: number; firstBlock?: string | null; unplacedReason?: string | null;
   }>;
   currentEnergy: "low" | "medium" | "high" | "uncalibrated";
   approvedMilestones: Array<{ id: string; identityId: string; title: string }>;
 };
+
+/** The scheduler's real ordering, as the plan page shows it, handed to the explainer so it narrates that and nothing else. */
+export type PlanRankingInput = Array<{ id: string; tier: number; weight: number; deadline: string | null; firstDay: string | null;
+  firstStart: string | null; blocker: string | null }>;
 
 export type PlanExplanation = {
   summary: string;

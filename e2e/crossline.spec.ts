@@ -89,7 +89,10 @@ async function ensureScheduleSetup(page: Page): Promise<void> {
  * different feasible answer when the machine is busy. Both are hidden, not masked, so they keep their place and
  * the layout around them is what is compared; the schedule itself is tested where it is computed.
  */
-const STABLE_FOR_SCREENSHOT = ".pending-badge,.dt-block,.dt-label-col small,.wk-block,.mo-chip[data-kind=\"scheduled\"]{visibility:hidden}";
+// The plan page's ranking lists and capacity figures come from the same time-limited solve, so they are left out as well; the ranking
+// is removed rather than hidden because how many tasks it lists as placed changes its height.
+const STABLE_FOR_SCREENSHOT = ".pending-badge,.dt-block,.dt-label-col small,.wk-block,.mo-chip[data-kind=\"scheduled\"],.ui-bar-value,.ui-bar-fill,"
+  + ".task-card-slot a,.pl-hours,.pl-week-bar,.pl-week small,.pl-goal-track,.pl-goal-tags{visibility:hidden}.pl-rank,.pl-unplaced,.pl-explain p{display:none}";
 
 test.beforeEach(async ({ page }, testInfo) => {
   if (testInfo.project.name === "desktop-chrome") await ensureScheduleSetup(page);
@@ -160,21 +163,29 @@ test("editing availability re-runs the scheduler instead of only storing a prefe
   const before = await scheduled.count();
   expect(before).toBeGreaterThan(0);
 
-  await page.getByText("可用时间与排程偏好").click();
-  await page.getByText(/^可用时间 · /).click();
-  // Close every declared window down to five minutes — below the minimum usable slot, so the honest
-  // result is an empty lane. A preference that stored cleanly and changed nothing on screen would mean
-  // the schedule was still example data wearing the setting's clothes.
-  for (const row of await page.locator(".availability-row").all()) {
-    await row.locator("input[type=time]").first().fill("08:00");
-    await row.locator("input[type=time]").nth(1).fill("08:05");
+  // Paint the week down to one half hour on the grid: erase each row with one drag, then paint a single cell. A preference that
+  // stored cleanly and changed nothing on screen would mean the schedule was still example data wearing the setting's clothes.
+  const grid = page.locator(".pl-grid");
+  await page.getByRole("radio", { name: "擦除" }).click();
+  for (const row of await grid.locator("tbody tr").all()) {
+    const first = (await row.locator("td").first().boundingBox())!, last = (await row.locator("td").last().boundingBox())!;
+    await page.mouse.move(first.x + 3, first.y + first.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(last.x + last.width - 3, last.y + last.height / 2, { steps: 60 });
+    await page.mouse.up();
   }
-  await page.getByRole("button", { name: "保存并重排" }).click();
-  await expect(scheduled).toHaveCount(0);
+  await page.getByRole("radio", { name: "高精力" }).click();
+  await grid.locator("tbody tr").last().locator("td").nth(12).click();
+  await page.getByRole("button", { name: "预览影响" }).click();
+  await expect(page.getByRole("dialog", { name: "改动影响" })).toBeVisible();
+  await Promise.all([page.waitForNavigation({ waitUntil: "load" }), page.getByRole("button", { name: "应用", exact: true }).click()]);
+  await page.getByRole("tab", { name: "周", exact: true }).click();
+  expect(await scheduled.count()).toBeLessThan(before);
 
   // Put it back: these tests share one ledger, and a crippled week would silently change what every
   // later assertion is looking at.
-  await apiFetch(page, "POST", "/api/settings/availability", { windows: DEFAULT_AVAILABILITY });
+  const restored = await apiFetch(page, "POST", "/api/plan/impact", { change: { kind: "availability", windows: DEFAULT_AVAILABILITY }, apply: true });
+  expect(restored.status).toBe(200);
 });
 
 test("Plan approval is confirmed and persisted", async ({ page }, testInfo) => {
@@ -234,8 +245,8 @@ test("goal confirmation and permission-mode rejection persist through the real p
   await page.locator(".mt-node").filter({ hasText: "稳定推进当前实验与论文" }).click();
   await expect(page.locator(".ui-sheet").locator('input[type="date"]')).toHaveValue("2026-09-30");
   await page.goto("/plan");
-  await page.getByText(/^未来 8 周/).click();
-  await expect(page.getByText("已确认硬截止 2026-09-30")).toBeVisible();
+  // The confirmed deadline is the red tick on that milestone's row of the eight-week chart.
+  await expect(page.locator('.pl-goal-deadline[title="截止 2026-09-30"]')).toHaveCount(1);
 
   const store = openStore();
   try { store.appendEvent({ ownerId: "e2e-tester", workspaceId: realWorkspaceId(store),

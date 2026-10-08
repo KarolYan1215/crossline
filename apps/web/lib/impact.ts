@@ -1,8 +1,9 @@
 import "server-only";
-import type { AccessContext } from "@crossline/core";
+import type { AccessContext, AvailabilityWindow } from "@crossline/core";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
-import { DEADLINE_MARGIN_DAYS } from "@crossline/planner";
-import { getStore, loadCurrentPlan, loadGoalForecast, planToday, resolvedEstimate, withPreview, type PreviewOverrides } from "./crossline";
+import { DEADLINE_MARGIN_DAYS, type ScheduleParams } from "@crossline/planner";
+import { effectiveSchedulePreferences, getStore, loadCurrentPlan, loadGoalForecast, planToday, resolvedEstimate, saveAvailability, saveGoalSettings,
+  saveScheduleParams, withPreview, type PreviewOverrides } from "./crossline";
 
 /**
  * What a change does across the lines before it is made (decided 2026-10-07: every change is previewed, then applied). The schedule and
@@ -15,7 +16,14 @@ export type Change =
   | { kind: "estimate_delta"; workOrderId: string; stepId?: string; deltaMinutes: number }
   | { kind: "due"; workOrderId: string; date: string }
   /** Not before a day: the work moves later (「推到下周一再做」). */
-  | { kind: "defer"; workOrderId: string; date: string };
+  | { kind: "defer"; workOrderId: string; date: string }
+  /** The plan page's controls: the week repainted on the heatmap, the four packing numbers, one milestone's importance slider. */
+  | { kind: "availability"; windows: AvailabilityWindow[]; timeZone?: string }
+  | { kind: "params"; params: ScheduleParams }
+  | { kind: "weight"; milestoneId: string; weight: number };
+
+type TaskChange = Extract<Change, { workOrderId: string }>;
+const isTaskChange = (change: Change): change is TaskChange => "workOrderId" in change;
 
 /** A relative change made absolute against what is stored now. */
 function resolveChange(ctx: AccessContext, change: Change): Exclude<Change, { kind: "estimate_delta" }> {
@@ -29,7 +37,11 @@ function resolveChange(ctx: AccessContext, change: Change): Exclude<Change, { ki
 }
 
 export type Impact = {
-  task: { title: string; firstBefore?: string; firstAfter?: string };
+  task?: { title: string; firstBefore?: string; firstAfter?: string };
+  /** The next seven days: free minutes, minutes the schedule fills, and how many tasks it could not place. */
+  week: { availableBefore: number; availableAfter: number; plannedBefore: number; plannedAfter: number; unplacedBefore: number; unplacedAfter: number;
+    /** Blocks in the next seven days that are new or moved (a different day, start or length). */
+    blocksChanged: number };
   milestones: Array<{ id: string; title: string; line: string; deadline: string | null; before: string | null; after: string | null;
     shiftDays: number; atRiskBefore: boolean; atRiskAfter: boolean }>;
   lines: Array<{ line: string; label: string; beforeMinutes: number; afterMinutes: number }>;
@@ -39,12 +51,15 @@ const day = 86_400_000;
 const daysBetween = (a: string | null, b: string | null) => a && b ? Math.round((Date.parse(`${b}T12:00:00Z`) - Date.parse(`${a}T12:00:00Z`)) / day) : 0;
 
 export function overridesFor(change: Exclude<Change, { kind: "estimate_delta" }>): PreviewOverrides {
+  if (change.kind === "availability") return { availability: change.windows };
+  if (change.kind === "params") return { params: change.params };
+  if (change.kind === "weight") return { weights: { [change.milestoneId]: change.weight } };
   return change.kind === "estimate"
     ? { estimates: { [change.stepId ? `${change.workOrderId}#${change.stepId}` : change.workOrderId]: change.p50Minutes } }
     : change.kind === "due" ? { dueDates: { [change.workOrderId]: change.date } } : { notBefore: { [change.workOrderId]: change.date } };
 }
 
-async function snapshot(ctx: AccessContext, workOrderId: string) {
+async function snapshot(ctx: AccessContext, workOrderId?: string) {
   const [plan, forecast] = [await loadCurrentPlan(ctx), loadGoalForecast(ctx)];
   const today = planToday(ctx);
   const weekEnd = new Date(Date.parse(`${today}T12:00:00Z`) + 7 * day).toISOString().slice(0, 10);
@@ -56,22 +71,29 @@ async function snapshot(ctx: AccessContext, workOrderId: string) {
     const [sh, sm] = block.start.split(":").map(Number), [eh, em] = block.end.split(":").map(Number);
     minutesByLine.set(line, (minutesByLine.get(line) ?? 0) + (eh! * 60 + em!) - (sh! * 60 + sm!));
   }
-  const first = plan.blocks.filter((block) => block.id.startsWith(`scheduled:${workOrderId}`) && block.day)
-    .map((block) => `${block.day} ${block.start}`).sort()[0];
-  return { goals: forecast.goals, minutesByLine, ...(first ? { first } : {}) };
+  const first = workOrderId ? plan.blocks.filter((block) => block.id.startsWith(`scheduled:${workOrderId}`) && block.day)
+    .map((block) => `${block.day} ${block.start}`).sort()[0] : undefined;
+  return { goals: forecast.goals, minutesByLine, ...(first ? { first } : {}), available: forecast.weeks[0]?.netMinutes ?? 0,
+    planned: [...minutesByLine.values()].reduce((sum, minutes) => sum + minutes, 0),
+    unplaced: plan.schedule.blockers.filter((blocker) => !blocker.code.startsWith("Q4_")).length,
+    blocks: new Set(plan.blocks.filter((block) => block.id.startsWith("scheduled:") && block.day && block.day >= today && block.day < weekEnd)
+      .map((block) => `${block.id.split(":").slice(0, 3).join(":")}|${block.day}|${block.start}|${block.end}`)) };
 }
 
 export async function previewChange(ctx: AccessContext, requested: Change): Promise<Impact> {
   const change = resolveChange(ctx, requested);
-  const order = getStore().listWorkOrders(ctx.workspaceId).find((item) => item.id === change.workOrderId);
-  if (!order) throw new Error("WORK_ORDER_NOT_FOUND");
-  const before = await snapshot(ctx, change.workOrderId);
-  const after = await withPreview(overridesFor(change), () => snapshot(ctx, change.workOrderId));
+  const order = isTaskChange(change) ? getStore().listWorkOrders(ctx.workspaceId).find((item) => item.id === change.workOrderId) : undefined;
+  if (isTaskChange(change) && !order) throw new Error("WORK_ORDER_NOT_FOUND");
+  const before = await snapshot(ctx, order?.id);
+  const after = await withPreview(overridesFor(change), () => snapshot(ctx, order?.id));
   const milestones = getStore().listMilestones(ctx.workspaceId);
   const labels = new Map(defaultIdentityPacks().map((pack) => [pack.id, pack.label]));
   const risk = (goal: { slackDays: number | null }) => goal.slackDays !== null && goal.slackDays < DEADLINE_MARGIN_DAYS;
   return {
-    task: { title: order.intent, ...(before.first ? { firstBefore: before.first } : {}), ...(after.first ? { firstAfter: after.first } : {}) },
+    ...(order ? { task: { title: order.intent, ...(before.first ? { firstBefore: before.first } : {}), ...(after.first ? { firstAfter: after.first } : {}) } } : {}),
+    week: { availableBefore: before.available, availableAfter: after.available, plannedBefore: before.planned, plannedAfter: after.planned,
+      unplacedBefore: before.unplaced, unplacedAfter: after.unplaced,
+      blocksChanged: [...after.blocks].filter((block) => !before.blocks.has(block)).length },
     milestones: before.goals.flatMap((goal) => {
       const next = after.goals.find((item) => item.milestoneId === goal.milestoneId);
       if (!next) return [];
@@ -92,6 +114,20 @@ export function applyChange(ctx: AccessContext, requested: Change): { ok: true }
   const store = getStore();
   let change: Exclude<Change, { kind: "estimate_delta" }>;
   try { change = resolveChange(ctx, requested); } catch { return { ok: false, code: "WORK_ORDER_NOT_FOUND" }; }
+  if (change.kind === "availability") {
+    const saved = saveAvailability(ctx, change.windows);
+    if (!saved.ok) return saved;
+    // The first saved week also fixes the zone it is in (the browser's), as the old setup form did.
+    if (effectiveSchedulePreferences(ctx).isDefault && change.timeZone) {
+      try { new Intl.DateTimeFormat("en", { timeZone: change.timeZone }); } catch { return { ok: true }; }
+      store.setSetting(ctx.workspaceId, "schedule.preferences", JSON.stringify({ ...effectiveSchedulePreferences(ctx).preferences, timeZone: change.timeZone }));
+    }
+    store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `availability.saved:${Date.now()}`,
+      type: "availability.saved", entityId: ctx.workspaceId, payload: { windows: change.windows.length } });
+    return { ok: true };
+  }
+  if (change.kind === "params") return saveScheduleParams(ctx, change.params);
+  if (change.kind === "weight") return saveGoalSettings(ctx, change.milestoneId, { weight: change.weight });
   const order = store.listWorkOrders(ctx.workspaceId).find((item) => item.id === change.workOrderId);
   if (!order) return { ok: false, code: "WORK_ORDER_NOT_FOUND" };
   if (change.kind === "defer") {

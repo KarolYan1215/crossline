@@ -14,8 +14,8 @@ test("a new goal and changed real capacity show differences against the last vie
     { ...baseline.goals[0]!, milestoneId: "b", title: "新目标" }
   ] };
   expect(forecastDiff(baseline, changed)).toEqual([
-    "「原目标」p85 情景 2026-09-25 → 2026-09-27",
-    "新增目标「新目标」",
+    "「原目标」保守完成日 2026-09-25 → 2026-09-27",
+    "新增里程碑「新目标」",
     "第 1 周净可用时间 700 → 600 分钟"
   ]);
 });

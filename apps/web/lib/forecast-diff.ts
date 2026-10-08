@@ -6,9 +6,9 @@ export function forecastDiff(previous: ForecastResult, current: ForecastResult):
   const before = new Map(previous.goals.map((goal) => [goal.milestoneId, goal]));
   for (const goal of current.goals) {
     const old = before.get(goal.milestoneId);
-    if (!old) { changes.push(`新增目标「${goal.title}」`); continue; }
+    if (!old) { changes.push(`新增里程碑「${goal.title}」`); continue; }
     if (old.p85Day !== goal.p85Day)
-      changes.push(`「${goal.title}」p85 情景 ${old.p85Day ?? "无法推算"} → ${goal.p85Day ?? "无法推算"}`);
+      changes.push(`「${goal.title}」保守完成日 ${old.p85Day ?? "无法推算"} → ${goal.p85Day ?? "无法推算"}`);
   }
   for (const week of current.weeks) {
     const old = previous.weeks.find((item) => item.week === week.week);

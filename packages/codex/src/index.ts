@@ -384,7 +384,7 @@ export async function startCodexSupervisor(options: {
   // single hardcoded legacy workspace regardless of who actually asked.
   prepareMaterials?: (workOrderId: string, workspaceId: string) => Promise<unknown>;
   judgeMilestone?: (workOrderId: string, workspaceId: string) => Promise<unknown>;
-  explainPlan?: (today: string, workspaceId: string) => Promise<unknown>;
+  explainPlan?: (today: string, workspaceId: string, ranking?: unknown) => Promise<unknown>;
   runWeeklyInsight?: (workspaceId: string) => Promise<unknown>;
   syncCalendar?: (workspaceId: string) => Promise<unknown>;
   /** The accounts and calendars available, with what is currently ticked. A read. */
@@ -653,8 +653,10 @@ export async function startCodexSupervisor(options: {
           sendJson(response, 409, { blocker: { code: "PLAN_EXPLAIN_ALREADY_RUNNING", message: "计划解释已在运行" } });
           return;
         }
+        const body = await readJsonBody(request).catch(() => undefined) as { ranking?: unknown } | undefined;
         explaining.add(callerWorkspaceId);
-        runDetached(() => options.explainPlan!(today, callerWorkspaceId), () => explaining.delete(callerWorkspaceId));
+        runDetached(() => options.explainPlan!(today, callerWorkspaceId, Array.isArray(body?.ranking) ? body.ranking : undefined),
+          () => explaining.delete(callerWorkspaceId));
         sendJson(response, 202, { started: true });
         return;
       }

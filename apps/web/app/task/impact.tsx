@@ -8,11 +8,21 @@ const hours = (minutes: number) => `${(minutes / 60).toFixed(1)} h`;
 
 /** What a change would do, laid out as figures: the task's next block, each milestone that moves, each line's hours this week. */
 export function ImpactCard({ impact, busy, onApply, onCancel }: { impact: Impact; busy: boolean; onApply: () => void; onCancel: () => void }) {
-  const nothing = !impact.milestones.length && !impact.lines.length && impact.task.firstBefore === impact.task.firstAfter;
+  const task = impact.task;
+  const week = impact.week;
+  const weekMoved = week.availableBefore !== week.availableAfter || week.unplacedBefore !== week.unplacedAfter || week.blocksChanged > 0;
+  const nothing = !impact.milestones.length && !impact.lines.length && task?.firstBefore === task?.firstAfter && !weekMoved;
   return <div className="impact-card" role="dialog" aria-label="改动影响">
     <header><b>改动影响</b><small>应用前预览</small></header>
-    {impact.task.firstBefore !== impact.task.firstAfter && <p className="impact-row">
-      <span>下一次时段</span><span className="mono">{impact.task.firstBefore ?? "未排入"} → {impact.task.firstAfter ?? "未排入"}</span></p>}
+    {task && task.firstBefore !== task.firstAfter && <p className="impact-row">
+      <span>下一次时段</span><span className="mono">{task.firstBefore ?? "未排入"} → {task.firstAfter ?? "未排入"}</span></p>}
+    {week.availableBefore !== week.availableAfter && <p className="impact-row"><span>未来 7 天可用</span>
+      <span className="mono" data-tone={week.availableAfter < week.availableBefore ? "worse" : "better"}>{hours(week.availableBefore)} → {hours(week.availableAfter)}</span></p>}
+    {week.plannedBefore !== week.plannedAfter && <p className="impact-row"><span>未来 7 天排入</span>
+      <span className="mono">{hours(week.plannedBefore)} → {hours(week.plannedAfter)}</span></p>}
+    {week.blocksChanged > 0 && <p className="impact-row"><span>未来 7 天时段调整</span><span className="mono">{week.blocksChanged} 处</span></p>}
+    {week.unplacedBefore !== week.unplacedAfter && <p className="impact-row"><span>未排入的任务</span>
+      <span className="mono" data-tone={week.unplacedAfter > week.unplacedBefore ? "worse" : "better"}>{week.unplacedBefore} → {week.unplacedAfter}</span></p>}
     {impact.milestones.map((item) => <p key={item.id} className="impact-row" data-line={item.line}>
       <span className="hl-line">{item.title}</span>
       <span className="mono" data-tone={item.shiftDays > 0 || item.atRiskAfter ? "worse" : "better"}>

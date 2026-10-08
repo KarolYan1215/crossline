@@ -59,3 +59,16 @@ test("a goal the person marked important reaches the explainer's context", async
   expect(context.activeWorkOrders[0]).toMatchObject({ important: true, confirmedDeadline: "2026-10-31" });
   store.close();
 });
+
+test("with the web app's ranking, the explainer narrates the scheduler's real order and factors", () => {
+  store.saveWorkOrder({ ...store.listWorkOrders(WORKSPACE)[0]!, id: "w2", intent: "整理实验数据" });
+  const context = buildPlanExplainerContext(store, WORKSPACE, "2026-09-27", [
+    { id: "w2", tier: 1, weight: 80, deadline: "2026-10-01", firstDay: "2026-09-28", firstStart: "09:00", blocker: null },
+    { id: "w1", tier: 3, weight: 40, deadline: null, firstDay: null, firstStart: null, blocker: "可用时段内没有空位" }
+  ]);
+  expect(context.nextActionId).toBe("w2");
+  expect(context.alternativeIds).toEqual(["w1"]);
+  expect(context.activeWorkOrders.find((order) => order.id === "w2")).toMatchObject({ tier: 1, weight: 80, important: true,
+    confirmedDeadline: "2026-10-01", firstBlock: "2026-09-28 09:00" });
+  expect(context.activeWorkOrders.find((order) => order.id === "w1")).toMatchObject({ unplacedReason: "可用时段内没有空位", important: false });
+});

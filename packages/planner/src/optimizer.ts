@@ -1,4 +1,4 @@
-import { compareTasks, type PlanBlocker, type PlanResult, type PlannerTask, type PlanningInput, type ScheduleBlock } from "./index";
+import { compareTasks, paramsFor, type PlanBlocker, type PlanResult, type PlannerTask, type PlanningInput, type ScheduleBlock } from "./index";
 import { createRequire } from "node:module";
 
 // Keep HiGHS outside the Next server bundle so its loader finds highs.wasm beside itself.
@@ -130,7 +130,9 @@ function greedyFallback(input: PlanningInput, tasks: PlannerTask[], slots: Slot[
   const dayCapacity = new Map<string, number>();
   const dayUsed = new Map<string, number>();
   for (const slot of slots) dayCapacity.set(slot.day, (dayCapacity.get(slot.day) ?? 0) + (slot.end - slot.start) / 60_000);
-  const gap = input.mode === "asap" || emergency ? 0 : 10;
+  const params = paramsFor(input);
+  const gap = emergency ? 0 : params.gapMinutes;
+  const share = emergency ? 1 : params.maxDailyShare;
   const pending = [...tasks].sort(compareTasks);
   const ordered: PlannerTask[] = [];
   while (pending.length) {
@@ -154,9 +156,10 @@ function greedyFallback(input: PlanningInput, tasks: PlannerTask[], slots: Slot[
       const start = Math.max(candidate[s]!, dependencyEnd, task.notBefore ? Date.parse(task.notBefore) : 0,
         prior ? Date.parse(prior.end) + gap * 60_000 : slot.start);
       const until = Math.min(slot.end, task.deadline ? Date.parse(task.deadline) : Infinity);
-      const remainingCap = input.mode === "asap" || emergency ? Infinity
-        : Math.floor((dayCapacity.get(slot.day) ?? 0) * .85) - (nextUsed.get(slot.day) ?? 0);
-      const minutes = Math.min(left, Math.floor((until - start) / 60_000), remainingCap);
+      const remainingCap = share >= 1 ? Infinity
+        : Math.floor((dayCapacity.get(slot.day) ?? 0) * share) - (nextUsed.get(slot.day) ?? 0);
+      const focusCap = task.interruptible !== false && params.focusCapMinutes ? params.focusCapMinutes : Infinity;
+      const minutes = Math.min(left, Math.floor((until - start) / 60_000), remainingCap, focusCap);
       if (minutes < (task.interruptible === false ? left : Math.min(left, MIN_SEGMENT))) continue;
       staged.push({ taskId: task.id, start: new Date(start).toISOString(),
         end: new Date(start + minutes * 60_000).toISOString() });
@@ -181,7 +184,9 @@ async function optimize(input: PlanningInput, emergency = false): Promise<PlanRe
   if (!tasks.length) return { ...greedyFallback(input, tasks, slots, emergency), solver: "empty" };
   if (!slots.length) return { ...greedyFallback(input, tasks, slots, emergency), solver: "no_capacity" };
 
-  const gap = input.mode === "asap" || emergency ? 0 : 10;
+  const params = paramsFor(input);
+  const gap = emergency ? 0 : params.gapMinutes;
+  const share = emergency ? 1 : params.maxDailyShare;
   const choices: Choice[] = [];
   const rows: string[] = [];
   const binary = tasks.map((_, i) => `a${i}`);
@@ -204,7 +209,8 @@ async function optimize(input: PlanningInput, emergency = false): Promise<PlanRe
       if (task.notBefore && slot.start < Date.parse(task.notBefore)) continue;
       if (task.energy && energyRank[slot.energy] < energyRank[task.energy]) continue;
       const end = Math.min(slot.end, task.deadline ? Date.parse(task.deadline) : Infinity);
-      const maximum = Math.floor((end - slot.start) / 60_000);
+      // The focus cap: one task gets at most this long in a slot, and the rest goes to another slot.
+      const maximum = Math.min(Math.floor((end - slot.start) / 60_000), split && params.focusCapMinutes ? params.focusCapMinutes : Infinity);
       if (maximum < (split ? Math.min(duration, MIN_SEGMENT) : duration)) continue;
       const presence = `x${i}_${s}`;
       binary.push(presence);
@@ -266,28 +272,30 @@ async function optimize(input: PlanningInput, emergency = false): Promise<PlanRe
       }
     }
   }
-  if (input.mode !== "asap" && !emergency) {
+  if (share < 1) {
     bounds.push("0 <= peak <= 1");
     for (const [day, capacity] of dayCapacity) {
       const own = choices.filter((choice) => slots[choice.slot]!.day === day);
       const terms: Array<[number, string]> = own.map((choice) => [choice.minutes ? 1 : choice.duration,
         choice.minutes ?? choice.presence]);
       const key = day.replaceAll("-", "");
-      rows.push(`daily_${key}: ${expression(terms)} <= ${Math.floor(capacity * .85)}`);
+      rows.push(`daily_${key}: ${expression(terms)} <= ${Math.floor(capacity * share)}`);
       rows.push(`peak_${key}: ${expression([...terms, [-capacity, "peak"]])} <= 0`);
     }
   }
 
   const n = tasks.length + 1;
+  // Urgency first (the deadline tier, lexicographic as before), then importance inside a tier: the weight moves a task by less than a
+  // whole tier, so a heavier task never outranks one in a more urgent tier.
   const objective: Array<[number, string]> = tasks.map((task, i) => [
-    (task.deadline ? n ** 4 : 0) + (4 - task.deadlineTier) * n + (task.inputsReady ? 1 : 0), `a${i}`
+    (task.deadline ? n ** 4 : 0) + ((4 - task.deadlineTier) + .9 * (task.weight ?? 50) / 100) * n + (task.inputsReady ? 1 : 0), `a${i}`
   ]);
   for (const name of weeklyNames) objective.push([n * n, name]);
-  if (input.mode !== "asap" && !emergency) objective.push([-.1, "peak"]);
+  if (share < 1) objective.push([-.1, "peak"]);
   for (const choice of choices) objective.push([
     (input.currentEnergy && choice.slot === currentSlot &&
       tasks[choice.task]!.energy === input.currentEnergy ? .01 : 0)
-    - (input.mode === "asap" ? .0001 * choice.slot / slots.length : .00001), choice.presence]);
+    - (params.gapMinutes === 0 && params.maxDailyShare >= 1 ? .0001 * choice.slot / slots.length : .00001), choice.presence]);
   const model = ["Maximize", `score: ${expression(objective)}`, "Subject To", ...rows,
     "Bounds", ...bounds, "Binaries", ...binary, ...(general.length ? ["Generals", ...general] : []), "End"].join("\n");
 
@@ -362,9 +370,18 @@ async function schedule(input: PlanningInput): Promise<PlanResult> {
   const deferred = input.tasks.filter((task) => task.deadlineTier === 4 &&
     (!task.deadline || beyondHorizon(task) || latestStart(task) > input.now.getTime()));
   const eligible = { ...input, tasks: input.tasks.filter((task) => !deferred.includes(task)) };
-  const first = await optimize(eligible);
+  // The deadline buffer: work is aimed to finish this many days early, only where that day is still ahead. The relaxed run below
+  // uses the real deadlines, so a buffer never makes a deadline impossible.
+  const params = paramsFor(input);
+  const buffered = params.deadlineBufferDays ? { ...eligible, tasks: eligible.tasks.map((task) => {
+    if (!task.deadline) return task;
+    const early = Date.parse(task.deadline) - params.deadlineBufferDays * 86_400_000;
+    return early > input.now.getTime() ? { ...task, deadline: new Date(early).toISOString() } : task;
+  }) } : eligible;
+  const first = await optimize(buffered);
   let result = first;
-  if (input.mode !== "asap" && first.blockers.some((blocker) => eligible.tasks.some((task) =>
+  const relaxable = params.gapMinutes > 0 || params.maxDailyShare < 1 || params.deadlineBufferDays > 0;
+  if (relaxable && first.blockers.some((blocker) => eligible.tasks.some((task) =>
     task.id === blocker.taskId && task.deadline))) {
     const relaxed = await optimize(eligible, true);
     const hardPlaced = (value: PlanResult) => eligible.tasks.filter((task) => task.deadline &&

@@ -15,7 +15,7 @@ export function ForecastDelta({ forecast }: { forecast: ForecastResult }) {
     } catch { /* Local comparison is optional; the authoritative forecast is still visible. */ }
   }, [forecast]);
   return changes.length > 0 && <div role="status" className="forecast-delta">
-    <strong>与你上次查看的预测相比</strong>
+    <strong>与上次查看时相比</strong>
     <ul>{changes.map((change) => <li key={change}>{change}</li>)}</ul>
   </div>;
 }

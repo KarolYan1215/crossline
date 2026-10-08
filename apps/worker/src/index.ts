@@ -14,7 +14,7 @@ import { createNightlyFlywheel } from "./nightly";
 import { createDiligenceRunner, linesDueForDiligence } from "./diligence";
 import { createAgentService } from "./agent-service";
 import { createCalendarPublisher } from "./calendar-publish";
-import { budgetPolicy, CALENDAR_SYNC_FAILURE } from "@crossline/core";
+import { budgetPolicy, CALENDAR_SYNC_FAILURE, type PlanRankingInput } from "@crossline/core";
 import { createFlywheelExpander } from "./flywheel";
 import { createManualbookBuilder, pendingMaterialWorkOrders } from "./manualbook";
 import { createProgressJudge, createStepPlanner, createWarningReviewer, reportsAwaitingJudgement, tasksAwaitingStepPlan, warningsAwaitingReview } from "./step-planner";
@@ -449,6 +449,14 @@ const getCaptureAnalyzer = (workspaceId: string) => {
   }
   return analyzer;
 };
+/** The ranking the web app sent, kept only where every field has the shape the explainer expects. */
+const readRanking = (value: unknown): PlanRankingInput | undefined => Array.isArray(value) ? value.slice(0, 60).flatMap((item) => {
+  const row = item as Record<string, unknown>;
+  const text = (key: string) => typeof row[key] === "string" ? (row[key] as string).slice(0, 300) : null;
+  return typeof row.id === "string" && typeof row.tier === "number" && typeof row.weight === "number"
+    ? [{ id: row.id, tier: row.tier, weight: row.weight, deadline: text("deadline"), firstDay: text("firstDay"), firstStart: text("firstStart"), blocker: text("blocker") }]
+    : [];
+}) : undefined;
 const planExplainers = new Map<string, ReturnType<typeof createPlanExplainer>>();
 const getPlanExplainer = (workspaceId: string) => {
   let explainer = planExplainers.get(workspaceId);
@@ -643,7 +651,7 @@ if (!capabilitySecret) {
       if (!session) return { state: "blocked", code: "GRAPH_NOT_CONFIGURED", message: "没有配置 Microsoft 日历（CROSSLINE_MS_CLIENT_ID）。" };
       return createCalendarPublisher(analysisStore, workspaceId, { credentialFor: (accountId) => session.credentialFor(accountId) })(blocks);
     },
-    explainPlan: (today, workspaceId) => getPlanExplainer(workspaceId)(today),
+    explainPlan: (today, workspaceId, ranking) => getPlanExplainer(workspaceId)(today, readRanking(ranking)),
     runWeeklyInsight: (workspaceId) => getWeeklyInsight(workspaceId)(),
     // Undefined when no client id is configured or nobody has signed in, in which case the route is
     // simply not mounted and the button says the connector is unavailable rather than lying.

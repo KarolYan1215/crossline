@@ -1,5 +1,4 @@
 import { SubpageShell } from "../subpage-shell";
-import { AvailabilityEditor } from "../plan/availability-editor";
 import { LocalActivityToggle } from "./local-activity-toggle";
 import { UsageCard } from "./usage-card";
 import { NotifyLevel } from "./notify-level";
@@ -9,33 +8,20 @@ import { loadEffectiveness } from "../../lib/effectiveness";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { ConnectionsSection } from "../connectors/connections";
 import {
-  ACTIVITY_BLACKLIST, ACTIVITY_DETAIL_CONSENT, ACTIVITY_PAUSED_UNTIL, getStore, lastNight, LOCAL_ACTIVITY_CONSENT, readAvailability, readGoalSettings, readSchedulePreferences
+  ACTIVITY_BLACKLIST, ACTIVITY_DETAIL_CONSENT, ACTIVITY_PAUSED_UNTIL, getStore, lastNight, LOCAL_ACTIVITY_CONSENT
 } from "../../lib/crossline";
 import { requireSessionContext } from "../../lib/access-guard";
-import { suggestedAvailabilityFor } from "../../lib/timeline";
 
 export const dynamic = "force-dynamic";
 const USAGE_DAYS = 7;
 
 /**
- * Everything that is configured rather than done, in one place: the hours the scheduler may use, the activity
- * consent, what the app is connected to, and what its model calls have cost. The schedule editor is the same
- * component the plan page folds in; editing it in either place changes the same settings row.
+ * Everything that is configured rather than done: the activity consent, what the app is connected to, and what its model calls
+ * have cost. When the person is free and how the schedule is packed are set on the plan page, next to the schedule they change.
  */
 export default async function SettingsPage() {
   const ctx = await requireSessionContext();
   const store = getStore();
-  const milestones = store.listMilestones(ctx.workspaceId).filter((item) => item.status === "approved")
-    .map((item) => ({ id: item.id, title: item.title }));
-  const preferences = readSchedulePreferences(ctx);
-  const effectivePreferences = { ...(preferences ?? { timeZone: "America/Chicago", mode: "buffered" as const, importance: {} }),
-    importance: {
-      ...preferences?.importance,
-      ...Object.fromEntries(milestones.flatMap((milestone) => {
-        const goal = readGoalSettings(ctx, milestone.id);
-        return goal ? [[milestone.id, goal.importance]] : [];
-      }))
-    } };
   const consentRaw = store.getSetting(ctx.workspaceId, LOCAL_ACTIVITY_CONSENT);
   const consent = consentRaw === "granted" || consentRaw === "denied" ? consentRaw : "unasked";
   const detailRaw = store.getSetting(ctx.workspaceId, ACTIVITY_DETAIL_CONSENT);
@@ -50,9 +36,7 @@ export default async function SettingsPage() {
   const phoneUrl = process.env.CROSSLINE_DEPLOYMENT_MODE === "private" && host ? `https://${host}` : undefined;
 
   return <SubpageShell active="设置" title="设置">
-    <details className="fold" open><summary>作息与可用时间</summary>
-      <AvailabilityEditor windows={readAvailability(ctx)} preferences={effectivePreferences} milestones={milestones} suggested={suggestedAvailabilityFor(ctx)} />
-    </details>
+    <p className="muted"><a href="/plan">可用时段、排程参数与重要性在「计划」页设置 →</a></p>
     <details className="fold" open><summary>系统体检</summary>
       <EffectivenessCard data={await loadEffectiveness(ctx)} labels={Object.fromEntries(defaultIdentityPacks().map((pack) => [pack.id, pack.label]))} />
     </details>

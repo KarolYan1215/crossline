@@ -1,4 +1,4 @@
-import { planToday } from "../../../../lib/crossline";
+import { loadCurrentPlan, planRanking, planToday } from "../../../../lib/crossline";
 import { requestCodexSupervisor } from "../../../../lib/codex-runtime";
 import { isCrossSiteWrite } from "../../../../lib/same-origin";
 import { resolveAccessContext } from "../../../../lib/access-guard";
@@ -14,8 +14,11 @@ export async function POST(request: Request) {
   if ("response" in access) return access.response;
   const { ctx } = access;
   const today = planToday(ctx);
+  // The scheduler's real ordering goes with the request, so the text explains exactly what the plan page shows.
+  const ranking = planRanking(ctx, await loadCurrentPlan(ctx)).map(({ id, tier, weight, deadline, firstDay, firstStart, blocker }) =>
+    ({ id, tier, weight, deadline, firstDay, firstStart, blocker }));
   await requestCodexSupervisor(ctx, `/v1/plan/${today}/explain`, {
-    method: "POST", headers: { "content-type": "application/json" }, signal: AbortSignal.timeout(10_000)
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ranking }), signal: AbortSignal.timeout(10_000)
   }).catch(() => undefined);
   return Response.json({ ok: true });
 }

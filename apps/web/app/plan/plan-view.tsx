@@ -112,12 +112,12 @@ export function PlanView({ plan, calendar }: { plan: PlanVersionData; calendar: 
 
     {plan.schedule && (plan.schedule.solver !== "empty" || plan.schedule.blockers.length > 0) && <section className="schedule-status" role="status">
       <strong>{plan.schedule.status === "feasible" ? "建议时段已排入"
-        : plan.schedule.status === "partial" ? "部分作业尚未排入" : "当前没有可行的建议时段"}</strong>
+        : plan.schedule.status === "partial" ? "部分任务未排入" : "当前没有可行的建议时段"}</strong>
       {plan.schedule.solver === "feasible_time_limit" && <p>已显示验证过的可行安排；未证明最优。</p>}
       {plan.schedule.solver === "fallback" && <p>这次没算出最优排法，先用一份简单排法，每块都核对过不冲突。</p>}
       {plan.schedule.solver === "no_capacity" && <p>可用时间里已经没有空档，下面这些暂时排不进去。</p>}
       {plan.schedule.bufferRelaxed && <p>为守住已确认截止时间，已放宽当天的缓冲规则。</p>}
-      {plan.schedule.blockers.map((blocker) => <p key={blocker.taskId}>{blocker.message}</p>)}
+      {plan.schedule.blockers.length > 0 && <p><a href="#why">{plan.schedule.blockers.length} 项未排入，原因见「为什么这样排」</a></p>}
       {plan.schedule.notes?.map((note) => <p key={`note-${note.taskId}`}>{note.message}</p>)}
     </section>}
 

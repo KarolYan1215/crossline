@@ -7,10 +7,11 @@ import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 import { CrosslineStore, type EvidenceClaimInput, type StoredMilestone } from "@crossline/db";
 import { availableSlots, deriveCapacity, requiredApproval, validateAvailability, DEFAULT_AVAILABILITY,
   defaultMilestoneTemplates, computeMilestoneConfidence, PRODUCTIVE, type ActivityCategory, validateSuccessCriteria, goalSettingKey, ANALYSIS_CONTEXT_VERSION, calibrationReport, calibratedEstimate,
-  type CalibrationReport,
+  type CalibrationReport, presetImportance, hoursFromText, type ImportancePreset,
   type AccessContext, type AvailabilityWindow, type Estimate, type SuccessCriterion, type ChecklistAnswer } from "@crossline/core";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
-import { forecastGoals, planSchedule, recommendNextActions, type ForecastResult, type PlanResult } from "@crossline/planner";
+import { forecastGoals, normalizeParams, paramsFor, planSchedule, recommendNextActions, type ForecastResult, type PlanResult,
+  type ScheduleParams } from "@crossline/planner";
 import { energyCalibration, predictEnergyTransition, readTransitionOutcomes } from "./energy-learning";
 import { durationPriorFor } from "./estimate-calibration";
 import type { DashboardAction, DashboardData } from "../app/dashboard-view";
@@ -45,7 +46,9 @@ export { AVAILABILITY_SETTING } from "@crossline/core";
 import { AVAILABILITY_SETTING } from "@crossline/core";
 const PREFERENCES_SETTING = "schedule.preferences";
 export type SchedulePreferences = { timeZone: string; mode: "buffered" | "asap";
-  importance: Record<string, "important" | "ordinary"> };
+  importance: Record<string, "important" | "ordinary">;
+  /** The four packing numbers set on the plan page; absent, `mode` stands for its preset. */
+  params?: ScheduleParams };
 
 export type GoalSettings = { importance: "important" | "ordinary";
   confirmedDeadline: string | null; sourceQuote: string | null;
@@ -88,7 +91,85 @@ export function saveGoalSettings(ctx: AccessContext, id: string, input: { import
   store.setSetting(ctx.workspaceId, goalKey(id), JSON.stringify(next));
   store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId,
     idempotencyKey: `goal:settings:${id}:${randomUUID()}`, type: "goal.settings_confirmed", entityId: id,
-    payload: { milestoneVersion: milestone.version, previous, next } });
+    payload: { milestoneVersion: milestone.version, previous, next,
+      ...(typeof input.weight === "number" ? { presetWeight: importancePresets(ctx, { withHistory: false }).get(id)?.weight ?? null } : {}) } });
+  return { ok: true };
+}
+
+/** At or above this weight a milestone counts as important (deadline tier 1 or 3). */
+export const IMPORTANT_WEIGHT = 60;
+
+/**
+ * The system's suggested importance for every live milestone (`presetImportance`): the line's share of the person's stated weekly
+ * hours, the relations through it, what is at stake, and how the person has moved this line's sliders before. Derived on read.
+ */
+export function importancePresets(ctx: AccessContext, options: { withHistory?: boolean } = {}): Map<string, ImportancePreset> {
+  const store = getStore();
+  const facts = store.listProfileFacts(ctx.workspaceId);
+  const weeklyHoursByLine: Record<string, number> = {};
+  for (const fact of facts.filter((item) => item.slot === "weekly_hours" && !/所有|全部|合计.*所有/.test(item.value))) {
+    const hours = hoursFromText(fact.value);
+    if (hours !== null) weeklyHoursByLine[fact.identityId] = Math.max(weeklyHoursByLine[fact.identityId] ?? 0, hours);
+  }
+  const milestones = store.listMilestones(ctx.workspaceId).filter((item) => item.status !== "archived");
+  const relations = store.listMilestoneRelations(ctx.workspaceId).filter((item) => item.status === "approved" || item.status === "candidate");
+  const degree = (id: string) => relations.filter((item) => item.fromMilestoneId === id || item.toMilestoneId === id).length;
+  const maxRelations = Math.max(0, ...milestones.map((item) => degree(item.id)));
+  const anchors = new Map(store.listMilestoneAnchors(ctx.workspaceId).map((anchor) => [anchor.milestoneId, anchor.deadline]));
+  const graded = new Set(facts.filter((item) => item.slot === "grading" || item.slot === "target_grade").map((item) => item.projectId));
+  const today = planToday(ctx);
+  const lineOf = new Map(milestones.map((item) => [item.id, item.identityId]));
+  const adjustments = new Map<string, Map<string, number>>();
+  if (options.withHistory !== false) {
+    for (const event of store.listEvents(ctx.workspaceId, { type: "goal.settings_confirmed" })) {
+      const payload = event.payload as { next?: { weight?: number }; presetWeight?: number | null };
+      const line = lineOf.get(event.entityId);
+      if (!line || typeof payload.next?.weight !== "number" || typeof payload.presetWeight !== "number") continue;
+      const own = adjustments.get(line) ?? new Map<string, number>();
+      own.set(event.entityId, payload.next.weight - payload.presetWeight);
+      adjustments.set(line, own);
+    }
+  }
+  return new Map(milestones.map((item) => {
+    const deadline = readGoalSettings(ctx, item.id)?.confirmedDeadline ?? anchors.get(item.id) ?? null;
+    return [item.id, presetImportance({ weeklyHoursByLine, line: item.identityId, relations: degree(item.id), maxRelations,
+      graded: Boolean(item.projectId && graded.has(item.projectId)),
+      daysToDeadline: deadline ? Math.round((Date.parse(`${deadline}T12:00:00Z`) - Date.parse(`${today}T12:00:00Z`)) / 86_400_000) : null,
+      pastAdjustments: [...(adjustments.get(item.identityId)?.values() ?? [])] })];
+  }));
+}
+
+const presetCache = new Map<string, { at: number; value: Map<string, ImportancePreset> }>();
+/**
+ * A milestone's importance as the scheduler uses it: a slider being previewed, else the person's own weight, else their older
+ * important/ordinary choice (75 / 40), else the system preset. Presets are cached for a few seconds: the planner asks once per task.
+ */
+export function effectiveWeight(ctx: AccessContext, milestoneId: string): number {
+  const preview = previewScope.getStore()?.weights?.[milestoneId];
+  if (preview !== undefined) return preview;
+  const goal = readGoalSettings(ctx, milestoneId);
+  if (typeof goal?.weight === "number") return goal.weight;
+  const chosen = goal?.importance ?? readSchedulePreferences(ctx)?.importance[milestoneId];
+  if (chosen) return chosen === "important" ? 75 : 40;
+  const cached = presetCache.get(ctx.workspaceId);
+  const presets = cached && Date.now() - cached.at < 5_000 ? cached.value : importancePresets(ctx);
+  if (!cached || cached.value !== presets) presetCache.set(ctx.workspaceId, { at: Date.now(), value: presets });
+  return presets.get(milestoneId)?.weight ?? 50;
+}
+
+/** The packing numbers in effect: a previewed set, else the saved ones, else what the saved mode stands for. */
+export function effectiveParams(ctx: AccessContext): ScheduleParams {
+  return previewScope.getStore()?.params ?? paramsFor(effectiveSchedulePreferences(ctx).preferences);
+}
+
+export function saveScheduleParams(ctx: AccessContext, value: unknown): { ok: true } {
+  const params = normalizeParams(value);
+  const current = effectiveSchedulePreferences(ctx).preferences;
+  const mode = params.gapMinutes === 0 && params.maxDailyShare >= 1 ? "asap" as const : "buffered" as const;
+  const store = getStore();
+  store.setSetting(ctx.workspaceId, PREFERENCES_SETTING, JSON.stringify({ ...current, mode, params } satisfies SchedulePreferences));
+  store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `schedule:params:${randomUUID()}`,
+    type: "schedule.params_saved", entityId: ctx.workspaceId, payload: { previous: paramsFor(current), next: params } });
   return { ok: true };
 }
 
@@ -142,8 +223,9 @@ export function saveSchedulePreferences(ctx: AccessContext, input: {
     (importance as Record<string, "important" | "ordinary">)[milestone.id]!]));
   const store = getStore();
   store.setSetting(ctx.workspaceId, AVAILABILITY_SETTING, JSON.stringify(windows));
+  const params = readSchedulePreferences(ctx)?.params;
   store.setSetting(ctx.workspaceId, PREFERENCES_SETTING, JSON.stringify({ timeZone, mode: input.mode,
-    importance: selected } satisfies SchedulePreferences));
+    importance: selected, ...(params ? { params } : {}) } satisfies SchedulePreferences));
   for (const [id, importance] of Object.entries(selected)) {
     const goal = readGoalSettings(ctx, id);
     if (!goal || goal.importance === importance) continue;
@@ -168,6 +250,8 @@ export function saveSchedulePreferences(ctx: AccessContext, input: {
  * blank week as though the person had no time.
  */
 export function readAvailability(ctx: AccessContext): AvailabilityWindow[] {
+  const preview = previewScope.getStore()?.availability;
+  if (preview) return preview;
   const raw = getStore().getSetting(ctx.workspaceId, AVAILABILITY_SETTING);
   if (!raw) return DEFAULT_AVAILABILITY;
   try { return validateAvailability(JSON.parse(raw)); } catch { return DEFAULT_AVAILABILITY; }
@@ -495,7 +579,9 @@ export function plannerIdOfBlock(blockId: string): string {
  * date. Read by `plannerTaskOf` and `plannerItemsFor` inside `withPreview`, so the schedule and the forecast are recomputed with the
  * change and compared with the real ones (`lib/impact.ts`). Async-local, so a preview never leaks into another request.
  */
-export type PreviewOverrides = { estimates?: Record<string, number>; dueDates?: Record<string, string>; notBefore?: Record<string, string> };
+export type PreviewOverrides = { estimates?: Record<string, number>; dueDates?: Record<string, string>; notBefore?: Record<string, string>;
+  /** The plan page's own controls: a repainted week, other packing numbers, a moved importance slider (by milestone id). */
+  availability?: AvailabilityWindow[]; params?: ScheduleParams; weights?: Record<string, number> };
 const previewScope = new AsyncLocalStorage<PreviewOverrides>();
 export const withPreview = <T>(overrides: PreviewOverrides, run: () => T): T => previewScope.run(overrides, run);
 const scaledEstimate = <E extends { p25Minutes: number; p50Minutes: number; p85Minutes: number }>(estimate: E, p50: number | undefined): E =>
@@ -586,7 +672,7 @@ async function scheduledBlocks(ctx: AccessContext, today: string, committed: Per
   const result = await planSchedule({
     now,
     horizonDays: days.length,
-    mode: preferences.mode,
+    mode: preferences.mode, params: effectiveParams(ctx),
     ...(currentEnergy ? { currentEnergy, currentDay: today } : {}),
     tasks: expanded.map((item) => item.task),
     availability: instants,
@@ -624,7 +710,7 @@ async function scheduledBlocks(ctx: AccessContext, today: string, committed: Per
     .filter((order) => order.state === "awaiting_plan_approval" && !capacityIds.has(order.identityId)
       && !((plannerTaskOf(ctx, order).dependsOn ?? []).some((id) => stateById.get(id) !== "accepted" && !orders.some((item) => item.id === id))));
   const preview = proposals.length ? await planSchedule({
-    now, horizonDays: days.length, mode: preferences.mode,
+    now, horizonDays: days.length, mode: preferences.mode, params: effectiveParams(ctx),
     tasks: proposals.map((order) => plannerTaskOf(ctx, order)),
     availability: instants,
     frozenBlocks: [...committed.filter((block) => block.day && block.id.startsWith("scheduled:"))
@@ -684,9 +770,9 @@ export function loadGoalForecast(ctx: AccessContext): ForecastResult & { inferre
   // Without the fallback no milestone had a deadline here unless it was typed a second time, so nothing was ever at risk.
   const anchors = new Map(store.listMilestoneAnchors(ctx.workspaceId).map((anchor) => [anchor.milestoneId, anchor.deadline]));
   const goals = store.listMilestones(ctx.workspaceId).filter((item) => item.status === "approved")
-    .map((item) => ({ id: item.id, title: item.title,
-      importance: readGoalSettings(ctx, item.id)?.importance ?? preferences.importance[item.id] ?? "ordinary" as const,
-      confirmedDeadline: readGoalSettings(ctx, item.id)?.confirmedDeadline ?? anchors.get(item.id) ?? null }));
+    .map((item) => { const weight = effectiveWeight(ctx, item.id); return { id: item.id, title: item.title, weight,
+      importance: weight >= IMPORTANT_WEIGHT ? "important" as const : "ordinary" as const,
+      confirmedDeadline: readGoalSettings(ctx, item.id)?.confirmedDeadline ?? anchors.get(item.id) ?? null }; });
   const orders = store.listWorkOrders(ctx.workspaceId);
   // Step by step where a task has a plan, so the forecast counts only the work that is left.
   const tasks = plannerItemsFor(ctx, orders.filter((order) => ACTIONABLE.includes(order.state))).map((item) => item.task);
@@ -1153,6 +1239,63 @@ export function blockWorkOrderEvidence(ctx: AccessContext, workOrderId: string, 
 // vanished from the home page, because analysis only ever writes a WorkOrder.
 const ACTIONABLE = ["approved", "preparing", "ready_for_human", "active"];
 
+/** Why the scheduler left a task out, in the plan page's words; the planner's own messages repeat the title and address the person. */
+const UNPLACED_REASON: Record<string, string> = {
+  Q4_NEEDS_DATE_OR_PROMOTION: "无截止日且重要性低于 60，暂不排入；设定截止日或提高重要性后排入",
+  Q4_BEYOND_FORECAST_HORIZON: "截止日在 8 周之后，暂不排入",
+  Q4_WAITING_LATEST_START: "截止尚远，最迟开工日之前暂不排入",
+  DEADLINE_CAPACITY: "截止日前的可用时段不足",
+  NO_CAPACITY: "可用时段内没有空位",
+  NO_CONTINUOUS_SLOT: "需要一段连续时间，现有最长空档不够",
+  PROGRESS_ONLY: "本周只排入 45 分钟进度",
+  DEPENDENCY_NOT_READY: "前置任务尚未验收"
+};
+
+/** One task as the scheduler saw it, and what it did with it: why it sits where it does on the plan page's 「为什么这样排」. */
+export type RankedTask = { id: string; title: string; line: string; milestoneId: string; tier: 1 | 2 | 3 | 4; weight: number;
+  deadline: string | null; notBefore: string | null; firstDay: string | null; firstStart: string | null; weekMinutes: number; blocker: string | null;
+  /** What is left of it (open steps only, where it has a step plan), usual and cautious. */
+  p50Minutes: number; p85Minutes: number };
+
+/**
+ * The real ordering, read off the same planner input and the same result the calendar shows (no second ranking of its own): each
+ * actionable task's tier, weight, deadline and release, its first block and its minutes in the next seven days, and — for one that was
+ * not placed — the planner's own reason. Listed in the scheduler's own priority: placed before unplaced, then urgency tier, then
+ * importance, then deadline.
+ */
+export function planRanking(ctx: AccessContext, plan: PersistedPlan): RankedTask[] {
+  const store = getStore();
+  const capacityIds = new Set(defaultIdentityPacks().filter((pack) => pack.kind === "capacity").map((pack) => pack.id));
+  const orders = withoutShadowingDemos(store.listWorkOrders(ctx.workspaceId), capacityIds)
+    .filter((order) => ACTIONABLE.includes(order.state) && !capacityIds.has(order.identityId));
+  const today = planToday(ctx);
+  const weekEnd = new Date(Date.parse(`${today}T12:00:00Z`) + 7 * 86_400_000).toISOString().slice(0, 10);
+  const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
+  const minutesOf = (block: PersistedScheduleBlock) => {
+    const [sh, sm] = block.start.split(":").map(Number), [eh, em] = block.end.split(":").map(Number);
+    return (eh! * 60 + em!) - (sh! * 60 + sm!);
+  };
+  const items = plannerItemsFor(ctx, orders);
+  const ranked = orders.map((order): RankedTask => {
+    const task = plannerTaskOf(ctx, order);
+    const own = items.filter((item) => item.orderId === order.id);
+    const blocks = plan.blocks.filter((block) => block.day && block.id.startsWith("scheduled:") && block.id.split(":")[1] === order.id)
+      .sort((a, b) => `${a.day} ${a.start}`.localeCompare(`${b.day} ${b.start}`));
+    const blocker = plan.schedule.blockers.find((item) => item.taskId === order.id || item.taskId.startsWith(`${order.id}#`));
+    const local = (instant: string | undefined) => instant ? formatInTimeZone(new Date(instant), zone, "yyyy-MM-dd") : null;
+    return { id: order.id, title: order.intent, line: order.identityId, milestoneId: order.milestoneId, tier: task.deadlineTier,
+      weight: task.weight, deadline: local(task.deadline), notBefore: local(task.notBefore),
+      firstDay: blocks[0]?.day ?? null, firstStart: blocks[0]?.start ?? null,
+      weekMinutes: blocks.filter((block) => block.day! >= today && block.day! < weekEnd).reduce((sum, block) => sum + minutesOf(block), 0),
+      blocker: blocks.length || !blocker ? null : UNPLACED_REASON[blocker.code] ?? blocker.message,
+      p50Minutes: own.reduce((sum, item) => sum + item.task.estimate.p50Minutes, 0),
+      p85Minutes: own.reduce((sum, item) => sum + item.task.estimate.p85Minutes, 0) };
+  });
+  return ranked.sort((a, b) => (a.firstDay ? 0 : 1) - (b.firstDay ? 0 : 1) || a.tier - b.tier || b.weight - a.weight
+    || (a.deadline ?? "9999").localeCompare(b.deadline ?? "9999")
+    || `${a.firstDay ?? ""} ${a.firstStart ?? ""}`.localeCompare(`${b.firstDay ?? ""} ${b.firstStart ?? ""}`));
+}
+
 /**
  * The demo work orders every account is seeded with exist to show the flow. Once the person has any work of their own (in any state
  * short of discarded) they stop being recommended or scheduled: Today's 「下一步」 and the plan must never hold a made-up task next to a
@@ -1208,7 +1351,8 @@ export const resolvedEstimate = (ctx: AccessContext, order: ActionableOrder): Es
 const plannerTaskOf = (ctx: AccessContext, order: ActionableOrder) => {
   const preferences = readSchedulePreferences(ctx);
   const goal = readGoalSettings(ctx, order.milestoneId);
-  const important = (goal?.importance ?? preferences?.importance[order.milestoneId]) === "important";
+  const weight = effectiveWeight(ctx, order.milestoneId);
+  const important = weight >= IMPORTANT_WEIGHT;
   const tier = preferences ? goal?.confirmedDeadline ? important ? 1 : 2 : important ? 3 : 4
     : order.state === "approved" ? 3 : order.identityId === PRIMARY_CLOCK_ID ? 1 : 2;
   const core = humanCoreOf(order);
@@ -1219,7 +1363,7 @@ const plannerTaskOf = (ctx: AccessContext, order: ActionableOrder) => {
   const release = preview?.notBefore?.[order.id] ?? releaseDayOf(ctx, order);
   const dueDate = preview?.dueDates?.[order.id] ?? landing?.dueDate ?? (order.payload as { dueDate?: string }).dueDate;
   return {
-    id: order.id, title: order.intent, identityId: order.identityId, milestoneId: order.milestoneId,
+    id: order.id, title: order.intent, identityId: order.identityId, milestoneId: order.milestoneId, weight,
     estimate: scaledEstimate(resolvedEstimate(ctx, order), preview?.estimates?.[order.id]),
     ...(core?.energy ? { energy: core.energy as "low" | "medium" | "high" } : {}),
     // Materials stand between the proposal and the human until the order reaches ready_for_human — when it needs any. An approved

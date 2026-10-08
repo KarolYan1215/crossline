@@ -18,12 +18,44 @@ export type PlannerTask = {
   dependsOn?: string[];
   /** ISO instant before which no block may start: the work waits for something to arrive (a release date). */
   notBefore?: string;
+  /** Importance 0-100 (the milestone's weight). Orders work inside a deadline tier; never lifts work across tiers. */
+  weight?: number;
 };
+
+/**
+ * The four numbers the person sets for how a day is packed: the break between blocks, the share of a day's free time that may be
+ * filled, the longest stretch one task gets before it moves to another slot (0 = no cap), and how many days before a deadline work is
+ * aimed to finish. `buffered` and `asap` are the two presets the old mode switch stood for.
+ */
+export type ScheduleParams = { gapMinutes: number; maxDailyShare: number; focusCapMinutes: number; deadlineBufferDays: number };
+export const PARAMS_BUFFERED: ScheduleParams = { gapMinutes: 10, maxDailyShare: 0.85, focusCapMinutes: 0, deadlineBufferDays: 0 };
+export const PARAMS_ASAP: ScheduleParams = { gapMinutes: 0, maxDailyShare: 1, focusCapMinutes: 0, deadlineBufferDays: 0 };
+export const SCHEDULE_PARAM_LIMITS = {
+  gapMinutes: { min: 0, max: 30, step: 5 }, maxDailyShare: { min: 0.5, max: 1, step: 0.05 },
+  focusCapMinutes: { min: 0, max: 180, step: 15 }, deadlineBufferDays: { min: 0, max: 5, step: 1 }
+} as const;
+export function paramsFor(input: { mode?: "buffered" | "asap" | undefined; params?: ScheduleParams | undefined }): ScheduleParams {
+  return input.params ?? (input.mode === "asap" ? PARAMS_ASAP : PARAMS_BUFFERED);
+}
+/** A stored or submitted set clamped into range; anything missing takes the buffered preset's value. */
+export function normalizeParams(value: unknown): ScheduleParams {
+  const raw = (value ?? {}) as Partial<Record<keyof ScheduleParams, unknown>>;
+  const pick = (key: keyof ScheduleParams) => {
+    const limit = SCHEDULE_PARAM_LIMITS[key];
+    const given = raw[key];
+    const number = typeof given === "number" && Number.isFinite(given) ? given : PARAMS_BUFFERED[key];
+    return Math.min(limit.max, Math.max(limit.min, number));
+  };
+  return { gapMinutes: Math.round(pick("gapMinutes")), maxDailyShare: Math.round(pick("maxDailyShare") * 100) / 100,
+    focusCapMinutes: Math.round(pick("focusCapMinutes")), deadlineBufferDays: Math.round(pick("deadlineBufferDays")) };
+}
 
 export type PlanningInput = {
   now: Date;
   horizonDays: number;
   mode?: "buffered" | "asap";
+  /** Overrides what `mode` stands for; see `ScheduleParams`. */
+  params?: ScheduleParams;
   currentEnergy?: "low" | "medium" | "high";
   currentDay?: string;
   tasks: PlannerTask[];
@@ -94,5 +126,6 @@ export function compareTasks(a: PlannerTask, b: PlannerTask): number {
   const deadlineA = a.deadline ? Date.parse(a.deadline) : Number.POSITIVE_INFINITY;
   const deadlineB = b.deadline ? Date.parse(b.deadline) : Number.POSITIVE_INFINITY;
   if (deadlineA !== deadlineB) return deadlineA - deadlineB;
+  if ((a.weight ?? 50) !== (b.weight ?? 50)) return (b.weight ?? 50) - (a.weight ?? 50);
   return a.estimate.p50Minutes - b.estimate.p50Minutes || a.id.localeCompare(b.id);
 }

@@ -426,9 +426,6 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .plan-sync:hover:not(:disabled){border-color:var(--ink)}
 .plan-sync:disabled{color:var(--shade)}
 .plan-sync-note{font-family:var(--f-mono);font-size:12px;color:var(--graphite)}
-.plan-explanation{padding:14px 0;border-bottom:1px solid var(--mist);display:grid;gap:8px}
-.plan-explanation p{margin:0;font-size:12.5px;line-height:1.7;color:var(--graphite)}
-.plan-explanation ul{margin:0;padding-left:18px;display:grid;gap:4px;font-size:12px;color:var(--graphite)}
 
 /* ── dialogs ───────────────────────────────── */
 .dialog-overlay{position:fixed;inset:0;background:color-mix(in srgb,var(--ink) 42%,transparent);z-index:50}
@@ -498,30 +495,9 @@ button:disabled{opacity:.4;cursor:not-allowed}
 /* Reality is solid ink; an example is outlined — the same distinction the B lens draws with its
    left border, so neither view can quietly present demo data as a real commitment. */
 
-.availability-editor{margin:0 0 20px;border:1px solid var(--rule);padding:12px 14px}
-.availability-editor summary{cursor:pointer;font-family:var(--f-mono);font-size:12px;color:var(--graphite)}
-.availability-editor[open] summary{margin-bottom:12px}
-.availability-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px}
-.availability-days{display:inline-flex;gap:2px}
-.availability-days button{width:24px;height:24px;border:1px solid var(--rule);background:var(--paper);color:var(--graphite);font-size:12px;cursor:pointer}
-.availability-days button[aria-pressed="true"]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
-.availability-row input,.availability-row select{border:1px solid var(--rule);background:var(--paper);color:var(--ink);padding:3px 5px;font:inherit;font-size:12px}
-.availability-row>button:last-child{border:1px solid var(--rule);background:var(--paper);color:var(--graphite);padding:3px 8px;font-size:12px;cursor:pointer}
-.availability-actions{display:flex;gap:8px;margin-top:10px}
-.availability-actions button{padding:5px 12px;font-size:12px}
-.availability-importance{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0;font-size:12px}
-.availability-importance label{display:inline-flex;gap:5px;align-items:center}
 .rest-prompt{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:8px 0;font-size:12px}
 .rest-prompt p{margin:0}
 .energy-probe select{border:1px solid var(--rule);background:var(--paper);color:var(--ink);padding:4px}
-.schedule-setup{display:grid;gap:12px;margin:0 0 20px;padding:18px;border:1px solid var(--rule)}
-.schedule-setup h2,.schedule-setup h3,.schedule-setup p{margin:0}
-.schedule-setup>label{display:grid;gap:5px;max-width:640px;font-size:13px}
-.schedule-setup>label input,.schedule-setup>label select,.availability-editor>label select{padding:6px;border:1px solid var(--rule);background:var(--paper);color:var(--ink)}
-.schedule-setup>.primary-button{justify-self:start}
-.schedule-setup-prompt{margin:0 0 20px;border:1px solid var(--rule)}
-.schedule-setup-prompt>summary{padding:12px 14px;cursor:pointer;font-size:13px}
-.schedule-setup-prompt .schedule-setup{margin:0;border:none;border-top:1px solid var(--rule)}
 
 .calendar-sources .calendar-account{margin:10px 0 0}
 .calendar-sources h3{margin:0 0 4px;font-family:var(--f-mono);font-size:12px;text-transform:none;color:var(--graphite)}
@@ -532,16 +508,7 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .permission-mode-panel ul { padding-left: 1.25rem; }
 .permission-mode-panel li { margin: .6rem 0; }
 .permission-mode-panel li small { display: block; }
-.goal-controls { display: flex; flex-wrap: wrap; gap: .7rem; align-items: end; margin: .8rem 0; }
-.goal-controls label { display: grid; gap: .2rem; }
-.goal-backplan { display: flex; gap: .5rem; align-items: center; }
-.goal-forecast { margin: 2rem 0; padding: 1rem; border: 1px solid var(--line, #777); }
-.goal-forecast ol { display: grid; grid-template-columns: repeat(auto-fit,minmax(15rem,1fr));
-  gap: .5rem; padding: 0; list-style: none; }
-.goal-forecast ol li { padding: .6rem; border: 1px solid #d9d2c5; line-height: 1.5; }
-.goal-forecast > ul { padding-left: 1.25rem; line-height: 1.7; }
-.goal-forecast > ul li { margin: .4rem 0; }
-.forecast-delta { margin: .8rem 0; padding: .75rem; background: #f1ede3; }
+.forecast-delta { margin: 0; padding: .6rem .75rem; background: var(--chalk); font-size: 13px; }
 .forecast-delta ul { margin: .3rem 0 0; }
 
 .assistant-bubble{position:fixed;right:16px;bottom:76px;z-index:60;padding:10px 16px;border:1px solid var(--ink);

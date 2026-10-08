@@ -1,7 +1,7 @@
 import type { PlannerTask } from "./index";
 
 export type ForecastGoal = { id: string; title: string; importance: "important" | "ordinary";
-  confirmedDeadline: string | null };
+  confirmedDeadline: string | null; weight?: number };
 export type ForecastDay = { day: string; netMinutes: number; source: "declared" | "calendar_adjusted" };
 export type GoalForecast = { milestoneId: string; title: string; p50Day: string | null; p85Day: string | null;
   suggestedTargetDay: string | null; confirmedDeadline: string | null; bottleneck: string | null;
@@ -30,8 +30,8 @@ export function forecastGoals(goals: ForecastGoal[], tasks: PlannerTask[], days:
     const gb = goalById.get(b.milestoneId!)!;
     const da = ga.confirmedDeadline ?? "9999-12-31";
     const db = gb.confirmedDeadline ?? "9999-12-31";
-    return da.localeCompare(db) || (ga.importance === "important" ? 0 : 1)
-      - (gb.importance === "important" ? 0 : 1) || a.id.localeCompare(b.id);
+    return da.localeCompare(db) || (gb.weight ?? (gb.importance === "important" ? 75 : 40)) - (ga.weight ?? (ga.importance === "important" ? 75 : 40))
+      || a.id.localeCompare(b.id);
   };
   const pending = new Map(work.map((task) => [task.id, task]));
   const ordered: PlannerTask[] = [];

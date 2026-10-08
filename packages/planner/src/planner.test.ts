@@ -409,3 +409,47 @@ test("a task waiting for something is never placed before its release date", asy
   expect(blocks.length).toBeGreaterThan(0);
   expect(blocks.every((block) => block.start >= "2026-10-08")).toBe(true);
 });
+
+describe("schedule parameters and importance", () => {
+  const now = new Date("2026-10-06T14:00:00.000Z");
+  const estimate = (minutes: number) => ({ p25Minutes: minutes, p50Minutes: minutes, p85Minutes: minutes, confidence: "high" as const });
+  const day = (d: string, from = "14:00", to = "18:00") => ({ start: `${d}T${from}:00.000Z`, end: `${d}T${to}:00.000Z`, day: d, energy: "high" as const });
+
+  test("the focus cap splits one long task across slots instead of filling one slot with it", async () => {
+    const task = { id: "essay", title: "写论文", estimate: estimate(180), inputsReady: true, deadlineTier: 2 as const, interruptible: true };
+    const capped = await planSchedule({ now, horizonDays: 3, frozenBlocks: [], tasks: [task],
+      params: { gapMinutes: 0, maxDailyShare: 1, focusCapMinutes: 60, deadlineBufferDays: 0 },
+      availability: [day("2026-10-06"), day("2026-10-07"), day("2026-10-08")] });
+    const blocks = capped.plan.blocks.filter((block) => block.taskId === "essay");
+    expect(blocks.every((block) => (Date.parse(block.end) - Date.parse(block.start)) / 60_000 <= 60)).toBe(true);
+    expect(blocks.reduce((sum, block) => sum + (Date.parse(block.end) - Date.parse(block.start)) / 60_000, 0)).toBe(180);
+  });
+
+  test("the daily share limits how much of a day is filled, and the gap separates blocks", async () => {
+    const tasks = ["a", "b", "c"].map((id) => ({ id, title: id, estimate: estimate(60), inputsReady: true, deadlineTier: 2 as const, interruptible: false }));
+    const result = await planSchedule({ now, horizonDays: 1, frozenBlocks: [], tasks,
+      params: { gapMinutes: 15, maxDailyShare: 0.5, focusCapMinutes: 0, deadlineBufferDays: 0 }, availability: [day("2026-10-06")] });
+    const placed = result.plan.blocks.filter((block) => !block.frozen);
+    expect(placed).toHaveLength(2);
+    expect(Date.parse(placed[1]!.start) - Date.parse(placed[0]!.end)).toBeGreaterThanOrEqual(15 * 60_000);
+  });
+
+  test("a deadline buffer finishes work early when there is room, and never makes a deadline impossible", async () => {
+    const task = { id: "hw", title: "作业", estimate: estimate(60), inputsReady: true, deadlineTier: 2 as const, interruptible: false,
+      deadline: "2026-10-09T23:00:00.000Z" };
+    const params = { gapMinutes: 0, maxDailyShare: 1, focusCapMinutes: 0, deadlineBufferDays: 2 };
+    const early = await planSchedule({ now, horizonDays: 4, frozenBlocks: [], tasks: [task], params,
+      availability: [day("2026-10-09"), day("2026-10-06", "17:00", "18:00")] });
+    expect(early.plan.blocks.find((block) => block.taskId === "hw")?.start.slice(0, 10)).toBe("2026-10-06");
+    const late = await planSchedule({ now, horizonDays: 4, frozenBlocks: [], tasks: [task], params, availability: [day("2026-10-09")] });
+    expect(late.plan.blocks.find((block) => block.taskId === "hw")?.start.slice(0, 10)).toBe("2026-10-09");
+  });
+
+  test("inside one tier the heavier milestone goes first; a lighter one in a more urgent tier still wins", async () => {
+    const task = (id: string, tier: 1 | 2, weight: number) => ({ id, title: id, estimate: estimate(60), inputsReady: true, deadlineTier: tier, interruptible: false, weight });
+    const result = await planSchedule({ now, horizonDays: 1, frozenBlocks: [], availability: [day("2026-10-06", "14:00", "16:00")],
+      params: { gapMinutes: 0, maxDailyShare: 1, focusCapMinutes: 0, deadlineBufferDays: 0 },
+      tasks: [task("light", 2, 20), task("heavy", 2, 90), task("urgent", 1, 10)] });
+    expect(result.plan.blocks.map((block) => block.taskId).sort()).toEqual(["heavy", "urgent"]);
+  });
+});

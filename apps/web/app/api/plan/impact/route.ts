@@ -1,9 +1,18 @@
+import { validateAvailability } from "@crossline/core";
+import { normalizeParams } from "@crossline/planner";
 import { applyChange, previewChange, type Change } from "../../../../lib/impact";
 import { resolveAccessContext } from "../../../../lib/access-guard";
 import { isCrossSiteWrite } from "../../../../lib/same-origin";
 
 const parse = (value: unknown): Change | undefined => {
   const body = value as Partial<Record<string, unknown>> | undefined;
+  if (body?.kind === "availability") {
+    try { return { kind: "availability", windows: validateAvailability(body.windows), ...(typeof body.timeZone === "string" ? { timeZone: body.timeZone } : {}) }; }
+    catch { return undefined; }
+  }
+  if (body?.kind === "params") return { kind: "params", params: normalizeParams(body.params) };
+  if (body?.kind === "weight" && typeof body.milestoneId === "string" && typeof body.weight === "number" && Number.isFinite(body.weight))
+    return { kind: "weight", milestoneId: body.milestoneId, weight: Math.max(0, Math.min(100, Math.round(body.weight))) };
   if (typeof body?.workOrderId !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/.test(body.workOrderId)) return undefined;
   if (body.kind === "estimate" && typeof body.p50Minutes === "number")
     return { kind: "estimate", workOrderId: body.workOrderId, p50Minutes: body.p50Minutes, ...(typeof body.stepId === "string" ? { stepId: body.stepId } : {}) };
