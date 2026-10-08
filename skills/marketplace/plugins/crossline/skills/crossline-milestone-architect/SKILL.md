@@ -27,6 +27,8 @@ A milestone is not a task and not a wish. It is a **state of the world you could
 
 A milestone whose criteria are all outputs can be satisfied by a productive afternoon of writing documents while the actual goal stands still. **Every milestone needs at least one `outcome` criterion.** If you genuinely cannot name one, that is a finding — say so in `assumptions`, do not manufacture an outcome-sounding output.
 
+**Quantify wherever the facts allow.** A criterion is checked by a reader of submitted evidence, so prefer one that a number or an existing artefact settles: `count` (「完成 8 道练习题并核对」), `threshold` worked back from the outcome (「模拟测验 ≥ 85 分」 with its `bareLine`), `artifact` (「提交版 PDF 已上传」). Use `judgement` only when nothing countable captures the result, and then make `failsWhen` concrete.
+
 **Prefer a falsifier to a threshold you invented.** Do not invent a number the user never gave you. If the honest criterion is "the reviewer agreed the method section is reproducible", that is a `judgement` measure — and then `failsWhen` must name the condition under which it is *not* met. "Done well" is not a criterion; "a reader could not reproduce the steps without asking a question" is.
 
 **Watch for the measure becoming the target.** Once a criterion is written, work bends toward satisfying it. Before proposing one, ask what someone would do if they optimised for this criterion alone and did not care about the milestone — if that path is attractive and useless, the criterion is wrong. Where this risk is high, pair it: one criterion that counts the work and one that checks the effect.
@@ -88,10 +90,16 @@ Return `{relations[], assumptions[], blockers[]}`, each relation `{fromId, toId,
 
 - `fromId` / `toId` — milestone ids copied from the input, in **different** lines. Order within a line is already `dependsOn`.
 - `kind` — `enables` (the first makes the second possible), `reuses` (the second reuses what the first produced), `informs`, `constrains` (the first competes with it for time or attention) or `recurring_feedback`. Loops are allowed: media feeding back into research is meant.
-- `explanation` — what it claims, concretely, in the person's terms. `refutedWhen` — what you would see if it did not hold; a relation with no stated way to be wrong is refused.
+- `explanation` — what it claims, concretely: **name the artefact or capability that transfers** (「研究线的图表脚本 → 自媒体线第 2 期配图」), not a general benefit (「互相促进」). `refutedWhen` — what would be observed if it did not hold.
+- A relation whose output lands well after the milestone that needs it, or whose explanation names nothing that transfers, is flagged for review; it is still drawn, but it will usually be redone.
+- When the input carries `feedback`, a reviewer found a problem with an earlier answer about these milestones: fix exactly what it names. Returning no relation is a valid answer when the feedback shows the link does not hold.
 - `sourceFactIds` — the facts it rests on, copied exactly.
 
 At most twelve, the few that carry weight rather than every pair.
+
+## Language
+
+Every human-readable field in Chinese: concise, standard academic or workplace wording, third person, no second person, no conversational tone. Terms: 主线, 里程碑, 任务, 步骤, 长期目标, 分数线; verbs 批准, 验收, 撤销.
 
 ## Criterion shape (both modes)
 

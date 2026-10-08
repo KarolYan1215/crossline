@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   MILESTONE_PROPOSAL_SCHEMA, MILESTONE_RELATIONS_SCHEMA, profileFactId, validateMilestoneProposal, validateRelationsProposal, computeMilestoneConfidence,
-  type MilestoneProposal, type MilestoneProposalContext, type RelationsContext, type RelationsProposal
+  type CheckedRelations, type MilestoneProposal, type MilestoneProposalContext, type RelationsContext
 } from "@crossline/core";
 import { continueSkillTurn, runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
@@ -36,14 +36,16 @@ const INSTRUCTIONS = "Propose milestones for the supplied identities. Return onl
   + "milestone keys it builds on. Give each line in `profile.requiredIdentities` three to five milestones "
   + "chained in stage order, titled for this person's own work and never as a template. When `diligence` is "
   + "present it is web research the person has already accepted: build milestones on its findings and dates "
-  + "(an accepted application deadline is a hard date), and do not re-propose what it already covers. Write "
-  + "every human-readable field in Chinese.";
+  + "(an accepted application deadline is a hard date), and do not re-propose what it already covers. Quantify "
+  + "criteria wherever the facts allow (count, threshold worked back from the outcome, or an artefact that must exist); use judgement only "
+  + "when nothing countable captures the result. Write every human-readable field in Chinese, concise and in the third person.";
 
 const INSTRUCTIONS_RELATIONS = "You are given milestones that already exist, in different lines, and profile facts (including the person's own guesses "
   + "about how the lines feed each other, slots starting with flywheel_). Return only the requested JSON: at most twelve cross-line relations, each between "
-  + "two milestones in DIFFERENT lines, copied by id; kind is enables, reuses, informs, constrains or recurring_feedback; explanation says concretely what "
-  + "it claims; refutedWhen says what would show it does not hold; sourceFactIds are copied exactly from the facts. Prefer the few that carry weight. "
-  + "Write every human-readable field in Chinese.";
+  + "two milestones in DIFFERENT lines, copied by id; kind is enables, reuses, informs, constrains or recurring_feedback; explanation names the artefact "
+  + "or capability that transfers from one to the other; refutedWhen says what would show it does not hold; sourceFactIds are copied exactly from the "
+  + "facts. Prefer the few that carry weight. When `feedback` is present, fix what it names. Write every human-readable field in Chinese, concise and "
+  + "in the third person.";
 
 export type ProposalOutcome =
   | { state: "proposed"; drafts: Array<{ id: string; identityId: string; title: string }>; assumptions: string[]; threadId?: string;
@@ -194,32 +196,7 @@ export function createMilestoneProposer(store: CrosslineStore, workspaceId: stri
   /** The links between lines: a second, small question about milestones that now exist. */
   async function proposeRelations(client: CodexRpcBoundary, context: MilestoneProposalContext, drafts: Array<{ id: string; identityId: string }>, signal?: AbortSignal): Promise<void> {
     if (!context.profile || new Set(drafts.map((draft) => draft.identityId)).size < 2) return;
-    const ids = new Set(drafts.map((draft) => draft.id));
-    const anchors = new Map(store.listMilestoneAnchors(workspaceId).map((anchor) => [anchor.milestoneId, anchor]));
-    const milestones = store.listMilestones(workspaceId).filter((milestone) => ids.has(milestone.id)).map((milestone) => ({
-      id: milestone.id, identityId: milestone.identityId, projectId: milestone.projectId ?? "", title: milestone.title,
-      stage: anchors.get(milestone.id)?.stage ?? 1, deadline: anchors.get(milestone.id)?.deadline ?? "", target: anchors.get(milestone.id)?.target ?? ""
-    }));
-    // The interview's own guesses about how the lines feed each other, plus what each project is for.
-    const facts = context.profile.facts.filter((fact) => fact.slot.startsWith("flywheel_") || fact.slot === "goal" || fact.slot === "what");
-    const relationsContext: RelationsContext = { version: "crossline.milestone-relations.v1", milestones, facts };
-    const result = await runCodexSkill<RelationsProposal>(client, relationsContext, {
-      skillName: MILESTONE_ARCHITECT_SKILL, cwd, developerInstructions: INSTRUCTIONS_RELATIONS, outputSchema: MILESTONE_RELATIONS_SCHEMA,
-      prepareInput: () => relationsContext, validateOutput: (output) => validateRelationsProposal(output, relationsContext),
-      onAudit: () => {}, ...(signal ? { signal } : {}), timeoutMs: 60 * 60_000
-    });
-    if (!result.ok) return;
-    const ownerId = ownerOf(store, workspaceId);
-    const when = new Date().toISOString();
-    for (const relation of result.output.relations) {
-      // The relation's evidence is the profile facts it rests on, so the 主线 page can show it dotted and the person can approve or
-      // reject it; nothing here makes one true.
-      store.saveMilestoneRelation({
-        id: `proposed:${relation.fromId}->${relation.toId}:${relation.kind}`, ownerId, workspaceId, fromMilestoneId: relation.fromId, toMilestoneId: relation.toId,
-        kind: relation.kind, status: "candidate", explanation: relation.explanation, refutedWhen: relation.refutedWhen,
-        evidence: relation.sourceFactIds.map((factId) => ({ uri: "/onboarding", source: `画像事实 ${factId}`, observedAt: when }))
-      });
-    }
+    await runRelations(store, workspaceId, cwd, client, drafts.map((draft) => draft.id), context.profile.facts, { ...(signal ? { signal } : {}) });
   }
 
   /** `only` limits the run to those lines: changing a course's target redoes its line, not the whole board. */
@@ -417,4 +394,68 @@ function persistProposals(store: CrosslineStore, workspaceId: string,
     drafts.push({ id, identityId: proposal.identityId, title: proposal.title });
   }
   return drafts;
+}
+
+type RelationFact = RelationsContext["facts"][number];
+
+/**
+ * One relations run over the given milestones, stored as candidates. What the loose checks flag is written as `validation.warned` per
+ * relation for the reviewer; nothing flagged is held back. With `feedback` (a reviewer's redo) the run is told what to fix.
+ */
+async function runRelations(store: CrosslineStore, workspaceId: string, cwd: string, client: CodexRpcBoundary, milestoneIds: string[],
+  profileFacts: RelationFact[], options: { signal?: AbortSignal; feedback?: string; revised?: boolean }): Promise<CheckedRelations | undefined> {
+  const ids = new Set(milestoneIds);
+  const anchors = new Map(store.listMilestoneAnchors(workspaceId).map((anchor) => [anchor.milestoneId, anchor]));
+  const milestones = store.listMilestones(workspaceId).filter((milestone) => ids.has(milestone.id)).map((milestone) => ({
+    id: milestone.id, identityId: milestone.identityId, projectId: milestone.projectId ?? "", title: milestone.title,
+    stage: anchors.get(milestone.id)?.stage ?? 1, deadline: anchors.get(milestone.id)?.deadline ?? "", target: anchors.get(milestone.id)?.target ?? ""
+  }));
+  // The interview's own guesses about how the lines feed each other, plus what each project is for.
+  const facts = profileFacts.filter((fact) => fact.slot.startsWith("flywheel_") || fact.slot === "goal" || fact.slot === "what");
+  const relationsContext: RelationsContext = { version: "crossline.milestone-relations.v1", milestones, facts,
+    ...(options.feedback ? { feedback: options.feedback } : {}) };
+  const result = await runCodexSkill<CheckedRelations>(client, relationsContext, {
+    skillName: MILESTONE_ARCHITECT_SKILL, cwd, developerInstructions: INSTRUCTIONS_RELATIONS, outputSchema: MILESTONE_RELATIONS_SCHEMA,
+    prepareInput: () => relationsContext, validateOutput: (output) => validateRelationsProposal(output, relationsContext),
+    onAudit: () => {}, ...(options.signal ? { signal: options.signal } : {}), timeoutMs: 60 * 60_000
+  });
+  if (!result.ok) return undefined;
+  const ownerId = ownerOf(store, workspaceId);
+  const when = new Date().toISOString();
+  const relationId = (relation: { fromId: string; toId: string; kind: string }) => `proposed:${relation.fromId}->${relation.toId}:${relation.kind}`;
+  for (const relation of result.output.relations) {
+    // The relation's evidence is the profile facts it rests on, so the 主线 page can show it dotted and the person can approve or
+    // reject it; nothing here makes one true.
+    store.saveMilestoneRelation({
+      id: relationId(relation), ownerId, workspaceId, fromMilestoneId: relation.fromId, toMilestoneId: relation.toId,
+      kind: relation.kind, status: "candidate", explanation: relation.explanation, refutedWhen: relation.refutedWhen,
+      evidence: relation.sourceFactIds.map((factId) => ({ uri: "/onboarding", source: `画像事实 ${factId}`, observedAt: when }))
+    });
+  }
+  for (const flagged of result.output.warnings) {
+    const id = relationId(flagged);
+    const version = store.listEvents(workspaceId, { type: "validation.warned", entityId: id }).length + 1;
+    store.appendEvent({ ownerId, workspaceId, idempotencyKey: `validation.warned:milestone_relation:${id}:${version}`, type: "validation.warned", entityId: id,
+      payload: { subject: "milestone_relation", version, warnings: flagged.warnings, revised: Boolean(options.revised) } });
+  }
+  return result.output;
+}
+
+/**
+ * The reviewer's redo for one candidate relation: the same question asked again about its two milestones, with the reviewer's notes.
+ * An answer that no longer proposes it retires the candidate; one that does replaces it (same id).
+ */
+export function createRelationReviser(store: CrosslineStore, workspaceId: string, cwd: string, getClient: () => CodexRpcBoundary | undefined) {
+  return async function revise(relationId: string, notes: string): Promise<void> {
+    const client = getClient();
+    const relation = store.listMilestoneRelations(workspaceId).find((item) => item.id === relationId);
+    if (!client || !relation || relation.status !== "candidate") return;
+    const facts = store.listProfileFacts(workspaceId).map((fact) => ({ id: profileFactId(fact), identityId: fact.identityId, projectId: fact.projectId,
+      slot: fact.slot, value: fact.value, status: fact.status }));
+    const output = await runRelations(store, workspaceId, cwd, client, [relation.fromMilestoneId, relation.toMilestoneId], facts,
+      { feedback: notes, revised: true });
+    if (!output) return;
+    const kept = output.relations.some((item) => `proposed:${item.fromId}->${item.toId}:${item.kind}` === relationId);
+    if (!kept) store.saveMilestoneRelation({ ...relation, status: "archived" });
+  };
 }

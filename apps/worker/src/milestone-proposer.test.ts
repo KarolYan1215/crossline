@@ -198,8 +198,9 @@ test("each line is asked on its own; the links between lines are a second, small
   expect(runtime.prompts()[1]).not.toContain("research/westlake");
   expect(runtime.prompts()[1]).toContain("startup/-/goal");
 
-  // The first links answer named a milestone that is not there; it was sent back, and the corrected one is what was kept.
-  expect(runtime.prompts()[3]).toContain("RELATION_MILESTONE_UNKNOWN");
+  // The first links answer named a milestone that is not there, so nothing could be kept; it was sent back, and the corrected one is
+  // what was kept.
+  expect(runtime.prompts()[3]).toContain("RELATION_NONE_USABLE");
   const candidates = store.listMilestoneRelations(WORKSPACE);
   expect(candidates).toHaveLength(1);
   expect(candidates[0]).toMatchObject({ kind: "reuses", status: "candidate", refutedWhen: "图表流程换了工具后无法复用" });

@@ -154,35 +154,31 @@ export function createProgressJudge(store: CrosslineStore, workspaceId: string, 
   };
 }
 
-/** Warnings no reviewer has looked at yet, oldest first. */
+/** Warnings no reviewer has looked at yet, oldest first: a task's step plan or a candidate cross-line relation. */
 export function warningsAwaitingReview(store: CrosslineStore, workspaceId: string, limit = 1) {
   const reviewed = new Set(store.listEvents(workspaceId, { type: "validation.reviewed" })
     .map((event) => `${event.entityId}:${(event.payload as { version?: number }).version}`));
   return store.listEvents(workspaceId, { type: "validation.warned" })
     .filter((event) => !reviewed.has(`${event.entityId}:${(event.payload as { version?: number }).version}`))
     .slice(0, limit)
-    .map((event) => ({ workOrderId: event.entityId, ...(event.payload as { subject: string; version: number; warnings: StepWarning[]; revised: boolean }) }));
+    .map((event) => ({ entityId: event.entityId, ...(event.payload as { subject: string; version: number; warnings: StepWarning[]; revised: boolean }) }));
 }
 
 /**
- * The second check: a reviewer model reads the plan and the warnings and either dismisses them or has the plan redone with its notes.
- * A plan that is itself a redo is never redone again by the reviewer — one round, so a disagreement cannot loop.
+ * The second check: a reviewer model reads the flagged output and the warnings and either dismisses them or has the output redone with
+ * its notes — a step plan through `replan`, a candidate relation through `reviseRelation`. Something that is itself a redo is never
+ * redone again by the reviewer — one round, so a disagreement cannot loop.
  */
 export function createWarningReviewer(store: CrosslineStore, workspaceId: string, cwd: string, getClient: () => CodexRpcBoundary | undefined,
-  replan: (workOrderId: string, feedback: string) => Promise<unknown>) {
+  replan: (workOrderId: string, feedback: string) => Promise<unknown>, reviseRelation?: (relationId: string, notes: string) => Promise<unknown>) {
   return async function review(item: ReturnType<typeof warningsAwaitingReview>[number]): Promise<ValidationReview | undefined> {
     const client = getClient();
     if (!client) return undefined;
-    const plan = store.getStepPlan(workspaceId, item.workOrderId);
-    const order = store.listWorkOrders(workspaceId).find((row) => row.id === item.workOrderId);
     const record = (verdict: ValidationReview) => store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId,
-      idempotencyKey: `validation.reviewed:${item.workOrderId}:${item.version}`, type: "validation.reviewed", entityId: item.workOrderId,
+      idempotencyKey: `validation.reviewed:${item.entityId}:${item.version}`, type: "validation.reviewed", entityId: item.entityId,
       payload: { subject: item.subject, version: item.version, ...verdict } });
-    if (!plan || !order || plan.version !== item.version) { record({ verdict: "dismiss", notes: "已被新版本取代" }); return undefined; }
-    const input = { version: "crossline.validation-review.v1", warnings: item.warnings,
-      subject: { kind: "task_steps", task: order.intent, archetype: archetypeBrief(ARCHETYPES.find((a) => a.id === plan.archetypeId) ?? ARCHETYPES[0]!),
-        quantity: plan.quantity, rationale: plan.rationale, steps: plan.steps.map((step) => ({ id: step.id, role: step.role, title: step.title,
-          doneCriterion: step.doneCriterion, share: step.share, p50Minutes: step.estimate.p50Minutes, dependsOn: step.dependsOn, status: step.status })) } };
+    const input = item.subject === "milestone_relation" ? relationSubject(store, workspaceId, item) : stepSubject(store, workspaceId, item);
+    if (!input) { record({ verdict: "dismiss", notes: "已被新版本取代" }); return undefined; }
     const result = await runCodexSkill<ValidationReview>(client, input, { skillName: REVIEWER, cwd,
       developerInstructions: "Decide whether the warnings matter, as the Skill describes. Return raw JSON only.",
       outputSchema: VALIDATION_REVIEW_SCHEMA, prepareInput: () => input, validateOutput: validateValidationReview,
@@ -191,7 +187,39 @@ export function createWarningReviewer(store: CrosslineStore, workspaceId: string
     const verdict: ValidationReview = item.revised && result.output.verdict === "redo"
       ? { verdict: "dismiss", notes: `已重排过一次，保留当前版本。${result.output.notes}`.slice(0, 1200) } : result.output;
     record(verdict);
-    if (verdict.verdict === "redo") await replan(item.workOrderId, verdict.notes);
+    if (verdict.verdict === "redo") {
+      if (item.subject === "milestone_relation") await reviseRelation?.(item.entityId, verdict.notes);
+      else await replan(item.entityId, verdict.notes);
+    }
     return verdict;
   };
+}
+
+type PendingWarning = ReturnType<typeof warningsAwaitingReview>[number];
+
+function stepSubject(store: CrosslineStore, workspaceId: string, item: PendingWarning) {
+  const plan = store.getStepPlan(workspaceId, item.entityId);
+  const order = store.listWorkOrders(workspaceId).find((row) => row.id === item.entityId);
+  if (!plan || !order || plan.version !== item.version) return undefined;
+  return { version: "crossline.validation-review.v1", warnings: item.warnings,
+    subject: { kind: "task_steps", task: order.intent, archetype: archetypeBrief(ARCHETYPES.find((a) => a.id === plan.archetypeId) ?? ARCHETYPES[0]!),
+      quantity: plan.quantity, rationale: plan.rationale, steps: plan.steps.map((step) => ({ id: step.id, role: step.role, title: step.title,
+        doneCriterion: step.doneCriterion, share: step.share, p50Minutes: step.estimate.p50Minutes, dependsOn: step.dependsOn, status: step.status })) } };
+}
+
+/** A candidate relation with both milestones it joins and the facts it cites — enough to judge whether the claimed transfer is real. */
+function relationSubject(store: CrosslineStore, workspaceId: string, item: PendingWarning) {
+  const relation = store.listMilestoneRelations(workspaceId).find((row) => row.id === item.entityId);
+  if (!relation || relation.status !== "candidate") return undefined;
+  const anchors = new Map(store.listMilestoneAnchors(workspaceId).map((anchor) => [anchor.milestoneId, anchor]));
+  const end = (id: string) => {
+    const milestone = store.listMilestones(workspaceId).find((row) => row.id === id);
+    const anchor = anchors.get(id);
+    return milestone ? { line: milestone.identityId, title: milestone.title, deadline: anchor?.deadline ?? "", target: anchor?.target ?? "" } : undefined;
+  };
+  const from = end(relation.fromMilestoneId), to = end(relation.toMilestoneId);
+  if (!from || !to) return undefined;
+  return { version: "crossline.validation-review.v1", warnings: item.warnings,
+    subject: { kind: "milestone_relation", relationKind: relation.kind, from, to, explanation: relation.explanation ?? "", refutedWhen: relation.refutedWhen ?? "",
+      sources: relation.evidence.map((evidence) => evidence.source) } };
 }

@@ -73,3 +73,25 @@ test("confirmed homework dates become one default-effective task between release
     payload: { dueDate: "2026-11-02", notBefore: "2026-10-12" } });
   store.close();
 });
+
+test("a flagged cross-line relation is reviewed: dismissed it stays, redone it is asked again with the reviewer's notes", async () => {
+  const store = new CrosslineStore(":memory:");
+  store.saveMilestone({ id: "r1", ownerId, workspaceId, identityId: "research", projectId: "p", title: "图表脚本", status: "draft", version: 1 });
+  store.saveMilestone({ id: "m1", ownerId, workspaceId, identityId: "media", projectId: "", title: "首期发布", status: "draft", version: 1 });
+  const relationId = "proposed:r1->m1:reuses";
+  store.saveMilestoneRelation({ id: relationId, ownerId, workspaceId, fromMilestoneId: "r1", toMilestoneId: "m1", kind: "reuses", status: "candidate",
+    explanation: "互相促进", refutedWhen: "" });
+  store.appendEvent({ ownerId, workspaceId, idempotencyKey: "w1", type: "validation.warned", entityId: relationId,
+    payload: { subject: "milestone_relation", version: 1, warnings: [{ code: "RELATION_EXPLANATION_THIN", detail: "说明过短" }], revised: false } });
+  const runtime = scriptedRuntime(["crossline:crossline-validation-reviewer"], () => JSON.stringify({ verdict: "redo", notes: "写明迁移的产出物，否则删除" }));
+  const revised: Array<[string, string]> = [];
+  const review = createWarningReviewer(store, workspaceId, "C:\repo", () => runtime.rpc, async () => undefined,
+    async (id, notes) => { revised.push([id, notes]); });
+  const [pending] = warningsAwaitingReview(store, workspaceId);
+  expect(pending).toMatchObject({ entityId: relationId, subject: "milestone_relation" });
+  expect(await review(pending!)).toMatchObject({ verdict: "redo" });
+  expect(runtime.prompts().at(-1)).toContain("milestone_relation");
+  expect(revised).toEqual([[relationId, "写明迁移的产出物，否则删除"]]);
+  expect(warningsAwaitingReview(store, workspaceId)).toEqual([]);
+  store.close();
+});

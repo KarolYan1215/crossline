@@ -224,15 +224,15 @@ test("energy check keeps self report only and rejects the removed camera path", 
 test("goal confirmation and permission-mode rejection persist through the real pages", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-chrome");
   await page.goto("/milestones");
-  await page.getByText(/^里程碑列表与编辑/).click();
-  const goal = page.locator(".milestone-admin-list > li").filter({ hasText: "稳定推进当前实验与论文" });
-  await goal.getByText("调整重要性与截止日").click();
-  await goal.locator('input[type="date"]').fill("2026-09-30");
+  // The deadline is edited where it is shown: the milestone's drawer, opened from its node on the timeline.
+  await page.locator(".mt-node").filter({ hasText: "稳定推进当前实验与论文" }).click();
+  const drawer = page.locator(".ui-sheet");
   await Promise.all([
     page.waitForNavigation({ waitUntil: "load" }),
-    goal.getByRole("button", { name: "确认目标约束" }).click()
+    drawer.locator('input[type="date"]').fill("2026-09-30", { force: true })
   ]);
-  await expect(goal.locator('input[type="date"]')).toHaveValue("2026-09-30");
+  await page.locator(".mt-node").filter({ hasText: "稳定推进当前实验与论文" }).click();
+  await expect(page.locator(".ui-sheet").locator('input[type="date"]')).toHaveValue("2026-09-30");
   await page.goto("/plan");
   await page.getByText(/^未来 8 周/).click();
   await expect(page.getByText("已确认硬截止 2026-09-30")).toBeVisible();

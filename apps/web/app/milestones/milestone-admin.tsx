@@ -1,8 +1,6 @@
 "use client";
 import { useEffect, useState, type ReactNode } from "react";
 import type { SuccessCriterion } from "@crossline/core";
-import type { GoalSettings } from "../../lib/crossline";
-import { GoalControls } from "./goal-controls";
 
 export type AdminMilestone = {
   id: string;
@@ -27,9 +25,6 @@ export type AdminMilestone = {
    * goal", which is the question this page exists for. Keyed by criterion id, best result wins.
    */
   progress?: Record<string, "met" | "partial" | "unmet" | "unverifiable">;
-  goalSettings?: GoalSettings | null;
-  fallbackImportance?: "important" | "ordinary";
-  dateCandidates?: Array<{ date: string; quote: string }>;
   /** Which template the criteria were built from, and the confidence computed from that — see
    * `computeMilestoneConfidence` (`packages/core/src/milestone-templates.ts`). Both absent for a
    * milestone written before templates existed or deliberately free-formed. */
@@ -472,9 +467,6 @@ export function MilestoneAdmin({ milestones, identities, templates, previews, in
           && <em className="review-flag">全部是产出物，没有一条衡量真实结果 —— 写完文档就能判过。</em>}
         {milestone.verifiability === "judgement_only"
           && <em className="review-flag">全部为判断型标准 —— 无法客观判负，值得额外复核。</em>}
-        {milestone.status === "approved" && <GoalControls id={milestone.id}
-          settings={milestone.goalSettings ?? null} fallbackImportance={milestone.fallbackImportance ?? "ordinary"}
-          dateCandidates={milestone.dateCandidates ?? []} />}
         <div className="milestone-admin-buttons">
           <button type="button" onClick={() => startEdit(milestone)} disabled={busy}>修改</button>
           {milestone.status === "draft"

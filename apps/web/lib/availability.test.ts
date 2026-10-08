@@ -197,3 +197,14 @@ test("changing importance on the schedule page keeps confirmed goal metadata in 
   expect(readGoalSettings(TEST_CTX, "research-starter")).toMatchObject({ importance: "ordinary",
     confirmedDeadline: "2026-10-01" });
 });
+
+test("a goal edited one field at a time keeps the rest, and a first partial save needs no importance", () => {
+  globalThis.crosslineStore = new CrosslineStore(":memory:");
+  setup();
+  expect(saveGoalSettings(TEST_CTX, "research-starter", { confirmedDeadline: "2026-10-30" })).toEqual({ ok: true });
+  // The importance the schedule already used for it is kept.
+  expect(readGoalSettings(TEST_CTX, "research-starter")).toMatchObject({ importance: readSchedulePreferences(TEST_CTX)?.importance["research-starter"] ?? "ordinary",
+    confirmedDeadline: "2026-10-30" });
+  expect(saveGoalSettings(TEST_CTX, "research-starter", { weight: 80 })).toEqual({ ok: true });
+  expect(readGoalSettings(TEST_CTX, "research-starter")).toMatchObject({ importance: "important", weight: 80, confirmedDeadline: "2026-10-30" });
+});

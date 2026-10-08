@@ -48,7 +48,9 @@ export type SchedulePreferences = { timeZone: string; mode: "buffered" | "asap";
   importance: Record<string, "important" | "ordinary"> };
 
 export type GoalSettings = { importance: "important" | "ordinary";
-  confirmedDeadline: string | null; sourceQuote: string | null };
+  confirmedDeadline: string | null; sourceQuote: string | null;
+  /** 0–100, set with the slider; `importance` follows it (60 and above is important). */
+  weight?: number };
 const goalKey = goalSettingKey;
 
 export function readGoalSettings(ctx: AccessContext, id: string): GoalSettings | null {
@@ -57,23 +59,31 @@ export function readGoalSettings(ctx: AccessContext, id: string): GoalSettings |
   try { return JSON.parse(raw) as GoalSettings; } catch { return null; }
 }
 
-export function saveGoalSettings(ctx: AccessContext, id: string, input: { importance: unknown; confirmedDeadline: unknown;
-  sourceQuote?: unknown }): { ok: true } | { ok: false; code: string } {
+/**
+ * A goal's importance, confirmed deadline and weight. Any of them may be sent alone (the milestone drawer saves the slider and the
+ * date chip separately); what is not sent keeps its stored value.
+ */
+export function saveGoalSettings(ctx: AccessContext, id: string, input: { importance?: unknown; confirmedDeadline?: unknown;
+  sourceQuote?: unknown; weight?: unknown }): { ok: true } | { ok: false; code: string } {
   ensureSeeded(ctx);
   const milestone = getStore().listMilestones(ctx.workspaceId).find((item) => item.id === id && item.status === "approved");
   if (!milestone) return { ok: false, code: "GOAL_NOT_APPROVED" };
-  if (input.importance !== "important" && input.importance !== "ordinary")
-    return { ok: false, code: "GOAL_IMPORTANCE_INVALID" };
-  const date = input.confirmedDeadline;
+  const previous = readGoalSettings(ctx, id);
+  const weight = typeof input.weight === "number" && Number.isFinite(input.weight) ? Math.max(0, Math.min(100, Math.round(input.weight))) : previous?.weight;
+  const importance = input.importance === "important" || input.importance === "ordinary" ? input.importance
+    : typeof input.weight === "number" && weight !== undefined ? (weight >= 60 ? "important" : "ordinary")
+    // A partial save (only a deadline, say) on a goal with no settings yet keeps the importance the schedule already used for it.
+    : input.importance === undefined ? previous?.importance ?? readSchedulePreferences(ctx)?.importance[id] ?? "ordinary" : undefined;
+  if (importance !== "important" && importance !== "ordinary") return { ok: false, code: "GOAL_IMPORTANCE_INVALID" };
+  const date = input.confirmedDeadline === undefined ? previous?.confirmedDeadline ?? null : input.confirmedDeadline;
   if (date !== null && (typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date)
     || Number.isNaN(Date.parse(`${date}T00:00:00Z`)) || new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) !== date))
     return { ok: false, code: "GOAL_DEADLINE_INVALID" };
-  const quote = typeof input.sourceQuote === "string" ? input.sourceQuote.trim() : "";
+  const quote = typeof input.sourceQuote === "string" ? input.sourceQuote.trim() : previous?.sourceQuote ?? "";
   if (quote.length > 500) return { ok: false, code: "GOAL_QUOTE_TOO_LONG" };
-  const next: GoalSettings = { importance: input.importance, confirmedDeadline: date as string | null,
-    sourceQuote: quote || null };
+  const next: GoalSettings = { importance, confirmedDeadline: date as string | null,
+    sourceQuote: quote || null, ...(weight !== undefined ? { weight } : {}) };
   const store = getStore();
-  const previous = readGoalSettings(ctx, id);
   if (JSON.stringify(previous) === JSON.stringify(next)) return { ok: true };
   store.setSetting(ctx.workspaceId, goalKey(id), JSON.stringify(next));
   store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId,

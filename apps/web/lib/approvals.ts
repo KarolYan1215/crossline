@@ -44,6 +44,23 @@ export function approveMilestoneDrafts(ctx: AccessContext, ids: string[]): Batch
   return result;
 }
 
+/** Rejecting a line's drafts archives them (a new version each, so the person's decision is on record and they leave the board). */
+export function rejectMilestoneDrafts(ctx: AccessContext, ids: string[]): BatchResult {
+  ensureSeeded(ctx);
+  const store = getStore();
+  const drafts = new Map(store.listMilestones(ctx.workspaceId).filter((item) => item.status === "draft").map((item) => [item.id, item]));
+  const result: BatchResult = { approved: [], skipped: [] };
+  for (const id of [...new Set(ids)].slice(0, 50)) {
+    const draft = drafts.get(id);
+    if (!draft) { result.skipped.push({ id, code: "MILESTONE_NOT_DRAFT" }); continue; }
+    const saved = saveMilestoneEdit(ctx, { id, identityId: draft.identityId, projectId: draft.projectId ?? "",
+      title: draft.title, status: "archived", successCriteria: draft.successCriteria ?? [],
+      ...(draft.templateId ? { templateId: draft.templateId } : {}) });
+    if (saved.ok) result.approved.push(id); else result.skipped.push({ id, code: saved.code });
+  }
+  return result;
+}
+
 /** Fire-and-forget: the worker answers at once and works in the background, the same as auto-analysis. */
 export function requestAutoBackplan(ctx: AccessContext): void {
   requestCodexSupervisor(ctx, "/v1/goals/auto-backplan", {

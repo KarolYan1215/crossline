@@ -21,7 +21,7 @@ import { createProgressJudge, createStepPlanner, createWarningReviewer, reportsA
 import { materializeDatePairs } from "./date-pairs";
 import { createInputRouter } from "./input-router";
 import { createMilestoneGate, pendingMilestoneGates } from "./milestone-gate-runner";
-import { createMilestoneConversation, createMilestoneProposer } from "./milestone-proposer";
+import { createMilestoneConversation, createMilestoneProposer, createRelationReviser } from "./milestone-proposer";
 import { createGoalBackplanner, milestonesAwaitingBackplan } from "./goal-backplanner";
 import { createPlanExplainer } from "./plan-explainer-runner";
 import { createWeeklyInsight } from "./weekly-insight-runner";
@@ -160,10 +160,11 @@ async function stepPlanPass(workspaceId: string, checkedAt = new Date().toISOStr
       if (outcome) console.info(JSON.stringify({ type: `steps.${outcome.state}`, checkedAt, workspaceId, workOrderId: id,
         ...(outcome.state === "planned" ? { warnings: outcome.warnings.length } : { code: outcome.code }) }));
     }
-    const reviewer = createWarningReviewer(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client, (id, feedback) => planner(id, feedback));
+    const reviewer = createWarningReviewer(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client, (id, feedback) => planner(id, feedback),
+      createRelationReviser(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client));
     for (const item of reviews) {
       const verdict = await reviewer(item).catch(() => undefined);
-      if (verdict) console.info(JSON.stringify({ type: `validation.${verdict.verdict}`, checkedAt, workspaceId, workOrderId: item.workOrderId }));
+      if (verdict) console.info(JSON.stringify({ type: `validation.${verdict.verdict}`, checkedAt, workspaceId, subject: item.subject, entityId: item.entityId }));
     }
   } finally { stepPlanning.delete(workspaceId); }
 }
