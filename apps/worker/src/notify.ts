@@ -57,10 +57,10 @@ export function planNotifications(input: NotifyInput): PlannedNotification[] {
     const lines = [
       ...input.waitingDue.map((item) => `今天该到：${item.who ? `${item.who}的` : ""}${item.title}`),
       ...input.dueSoon.map((item) => `${item.daysLeft === 0 ? "今天" : `${item.daysLeft} 天后`}到期：${item.title}`),
-      ...(input.asks ?? []).filter((ask) => ask.urgency === "now" && !ask.id.startsWith("wait:")).map((ask) => `要你答：${ask.title}`)
+      ...(input.asks ?? []).filter((ask) => ask.urgency === "now" && !ask.id.startsWith("wait:")).map((ask) => `待决：${ask.title}`)
     ].slice(0, 3);
     out.push({ key: briefKey, kind: "brief", path: "/", title: "今天的 Crossline",
-      body: [...lines, input.pending ? `${input.pending} 件等你决定` : ""].filter(Boolean).join("；") || "今天没有到期的事，按计划来。" });
+      body: [...lines, input.pending ? `${input.pending} 项待决定` : ""].filter(Boolean).join("；") || "今日无到期事项。" });
   }
   if (!inWindow(input)) return out;
   const due = input.dueSoon.filter((item) => item.daysLeft <= 1).map((item) => ({ key: `due:${item.id}:${input.today}`, kind: "urgent" as const, path: "/milestones",

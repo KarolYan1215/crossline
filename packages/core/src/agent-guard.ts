@@ -54,11 +54,11 @@ export const isSecretPath = (value: string): boolean => !EXAMPLE_ENV.test(value)
 
 /** Things that publish, send, spend, or change the machine. A task can ask for none of them; the last step is the person's. */
 const NEVER: Array<{ rule: string; reason: string; pattern: RegExp }> = [
-  { rule: "send.mail", reason: "发送邮件由你来做；助手只起草", pattern: /send-mailmessage|\bsendmail\b|\bsmtp\b|outlook\.application|createitem\s*\(|mailto:/i },
-  { rule: "send.webhook", reason: "向聊天或通知服务发消息由你来做", pattern: /hooks\.slack\.com|discord(app)?\.com\/api\/webhooks|api\.telegram\.org\/bot|api\.twilio\.com|graph\.microsoft\.com\/[^ ]*\/sendmail/i },
-  { rule: "publish.package", reason: "发布软件包或镜像由你来做", pattern: /\b(npm|pnpm|yarn)\s+publish\b|\btwine\s+upload\b|\bdocker\s+push\b|\bcargo\s+publish\b|\bgh\s+release\s+create\b/i },
-  { rule: "publish.social", reason: "发帖和对外发布由你来做", pattern: /xiaohongshu\.com\/.*(publish|post)|api\.twitter\.com\/2\/tweets|api\.x\.com\/2\/tweets|graph\.facebook\.com\/[^ ]*\/feed/i },
-  { rule: "money", reason: "付款、下单和交易只能由你来做", pattern: /\blongbridge\b|\balpaca\b|\binteractivebrokers\b|\bibkr\b|\brobinhood\b|api\.stripe\.com|paypal\.com\/v[0-9]\/payments|\/orders?\b.*\b(buy|sell)\b/i },
+  { rule: "send.mail", reason: "发送邮件由本人完成；助手只起草", pattern: /send-mailmessage|\bsendmail\b|\bsmtp\b|outlook\.application|createitem\s*\(|mailto:/i },
+  { rule: "send.webhook", reason: "向聊天或通知服务发消息由本人完成", pattern: /hooks\.slack\.com|discord(app)?\.com\/api\/webhooks|api\.telegram\.org\/bot|api\.twilio\.com|graph\.microsoft\.com\/[^ ]*\/sendmail/i },
+  { rule: "publish.package", reason: "发布软件包或镜像由本人完成", pattern: /\b(npm|pnpm|yarn)\s+publish\b|\btwine\s+upload\b|\bdocker\s+push\b|\bcargo\s+publish\b|\bgh\s+release\s+create\b/i },
+  { rule: "publish.social", reason: "发帖与对外发布由本人完成", pattern: /xiaohongshu\.com\/.*(publish|post)|api\.twitter\.com\/2\/tweets|api\.x\.com\/2\/tweets|graph\.facebook\.com\/[^ ]*\/feed/i },
+  { rule: "money", reason: "付款、下单与交易只能由本人完成", pattern: /\blongbridge\b|\balpaca\b|\binteractivebrokers\b|\bibkr\b|\brobinhood\b|api\.stripe\.com|paypal\.com\/v[0-9]\/payments|\/orders?\b.*\b(buy|sell)\b/i },
   { rule: "system.registry", reason: "改注册表是改系统设置", pattern: /\breg(\.exe)?\s+(add|delete|import|load|unload)\b|\bregedit\b|set-itemproperty\s+[^|]*hk(lm|cu):/i },
   { rule: "system.tasks", reason: "计划任务、服务、防火墙和启动项属于系统设置", pattern: /\bschtasks(\.exe)?\s+\/(create|change|delete)\b|register-scheduledtask|\bsc(\.exe)?\s+(create|config|delete|stop)\b|\bnetsh\b|new-netfirewallrule|set-netfirewall|\bbcdedit\b/i },
   { rule: "system.policy", reason: "执行策略、杀毒和账户设置属于系统设置", pattern: /set-executionpolicy|set-mppreference|add-mppreference|disable-windowsoptionalfeature|\bnet\s+(user|localgroup)\b|\bdiskpart\b|\bformat(\.com)?\s+[a-z]:|\bcipher\s+\/w|\bmanage-bde\b/i },
@@ -128,7 +128,7 @@ const SENDS = /send|reply|forward|post|publish|share|invite|respond/i;
 
 /** An MCP tool call: reading is allowed, sending is refused, and anything else — including a tool nobody recognises — goes to the person. */
 export function decideMcpTool(server: string, tool: string): GuardDecision {
-  if (SENDS.test(tool)) return { decision: "deny", rule: "mcp.send", reason: `「${server}」的 ${tool} 会对外发送，只能由你来做` };
+  if (SENDS.test(tool)) return { decision: "deny", rule: "mcp.send", reason: `「${server}」的 ${tool} 会对外发送，只能由本人完成` };
   if (READ_ONLY_TOOL.test(tool)) return { decision: "allow", rule: "mcp.read", reason: "" };
-  return { decision: "ask", rule: "mcp.write", reason: `「${server}」的 ${tool} 可能会改动你的账号数据` };
+  return { decision: "ask", rule: "mcp.write", reason: `「${server}」的 ${tool} 可能会改动账号数据` };
 }

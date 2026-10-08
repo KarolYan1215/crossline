@@ -60,6 +60,11 @@ export function confirmCriterion(ctx: AccessContext, workOrderId: string, criter
   if (!store.listWorkOrders(ctx.workspaceId).some((order) => order.id === workOrderId)) return { ok: false, code: "WORK_ORDER_NOT_FOUND" };
   store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `criterion.confirmed:${workOrderId}:${criterionId}`,
     type: "criterion.confirmed", entityId: workOrderId, payload: { criterionId } });
+  const order = store.listWorkOrders(ctx.workspaceId).find((item) => item.id === workOrderId)!;
+  const statement = store.listMilestones(ctx.workspaceId).filter((item) => item.id === order.milestoneId).at(-1)?.successCriteria
+    .find((criterion) => criterion.id === criterionId)?.statement ?? criterionId;
+  store.addPreference({ workspaceId: ctx.workspaceId, source: "standard_confirmed", scope: order.identityId, weight: 0.3, refId: `${workOrderId}:${criterionId}`,
+    text: `任务「${order.intent}」的标准「${statement}」由本人确认达成，未提交成果` });
   return { ok: true };
 }
 

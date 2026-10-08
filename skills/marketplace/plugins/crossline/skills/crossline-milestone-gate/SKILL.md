@@ -18,3 +18,7 @@ Quote exact submitted artifact text for every criterion, satisfied contract item
 **Write every human-readable field in Chinese** — `observed`, `shortfall`, `reasoning`, `finding`, `suggestion`, `what`, `whatWouldSatisfyIt`, `why` and the rest. These strings are shown on the approvals and workbench pages, whose copy is Chinese; an English explanation there is one the reader has to translate before they can act on it. Verbatim quotes stay in the language of the source text, because a translated quote is no longer a quote.
 
 Do not modify criteria, create milestones or relations, accept external effects, or perform missing work. Proposed next milestones remain proposals. A deterministic receiving layer rejects inconsistent verdicts.
+
+## Language
+
+Every human-readable field: Simplified Chinese, concise, standard academic or workplace register, objective third person (no 你/您, no 我, no greetings or filler). Fixed terms: 主线, 里程碑, 任务, 步骤, 长期目标, 分数线; verbs 批准, 验收, 撤销. Text quoted from the person or a source stays verbatim.

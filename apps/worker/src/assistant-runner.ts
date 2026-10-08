@@ -30,7 +30,11 @@ const INSTRUCTIONS = "You are the site-wide Crossline assistant — a general-pu
   + "yourself. Follow-up turns arrive as JSON {snapshot, message} with a fresh snapshot. Never claim to have "
   + "read or modified this application's own source code, and never suggest you can — you cannot; "
   + "everything you produce is either conversation text or one file offered as a task material or one "
-  + "milestone template. If a request is unsafe or outside what you can actually do, return a blocker "
+  + "milestone template. When the person corrects how the system handles their work (a task filed under the wrong kind, "
+  + "steps in the wrong order, an estimate that is always too short, a habit such as reading the notes first), put it in "
+  + "`corrections` as a short third-person statement ({scope: a line id, \"archetype:<id>\" or \"all\"; text; taskId: the task in view "
+  + "when it is about that task, else \"\"}); it is recorded for every later plan and, for the task in view, its steps are redone. "
+  + "If a request is unsafe or outside what you can actually do, return a blocker "
   + "explaining why rather than pretending to comply.";
 
 export type AssistantTurnOutcome =
@@ -40,6 +44,8 @@ export type AssistantTurnOutcome =
       /** A milestone template the person asked for, shown as a card they confirm; nothing is saved here. */
       templateProposal?: NonNullable<AssistantTurnProposal["templateProposal"]>;
       proposals: AssistantTurnProposal["proposals"];
+      /** Corrections recorded as personal preferences this turn, shown under the reply. */
+      learned: string[];
     }
   | { state: "blocked"; code: string; message: string };
 
@@ -113,9 +119,18 @@ export function createAssistantTurn(store: CrosslineStore, workspaceId: string, 
       });
       if (persisted.ok) savedMaterial = { uri: persisted.artifact.uri, fileName: draft.relativePath };
     }
+    const learned: string[] = [];
+    for (const correction of result.output.corrections ?? []) {
+      store.addPreference({ workspaceId, source: "correction", scope: correction.taskId ? `task:${correction.taskId}` : correction.scope,
+        text: correction.text, weight: 1, refId: "" });
+      learned.push(correction.text);
+      if (correction.taskId) store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId,
+        idempotencyKey: `task.steps_replan_requested:${correction.taskId}:${now}`, type: "task.steps_replan_requested", entityId: correction.taskId,
+        payload: { feedback: correction.text } });
+    }
     return {
       state: "replied", reply: result.output.reply, quickReplies: result.output.quickReplies,
-      proposals: result.output.proposals ?? [],
+      proposals: result.output.proposals ?? [], learned,
       ...(savedMaterial ? { savedMaterial } : {}),
       ...(result.output.templateProposal ? { templateProposal: result.output.templateProposal } : {})
     };

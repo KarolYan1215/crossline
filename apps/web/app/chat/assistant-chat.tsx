@@ -9,7 +9,7 @@ type CaptureCard = { kind: "capture"; title: string; context: string };
 type TemplateCard = { identityId: string; kind: string; titleHint: string; successCriteriaDefaults: unknown[] };
 type TurnResponse =
   | { state: "replied"; reply: string; quickReplies: string[]; savedMaterial?: { uri: string; fileName: string };
-      proposals?: CaptureCard[]; templateProposal?: TemplateCard }
+      proposals?: CaptureCard[]; templateProposal?: TemplateCard; learned?: string[] }
   | { state: "blocked"; code: string; message: string }
   | { ok: false; blocker: { code: string; message: string } };
 
@@ -73,6 +73,7 @@ export function AssistantChat({ workOrderId = null, storageKey, emptyText }: { w
       setCards((body.proposals ?? []).map((card) => ({ ...card, id: crypto.randomUUID(), state: "new" as const })));
       setTemplate(body.templateProposal ? { ...body.templateProposal, state: "new" } : null);
       if (body.savedMaterial) setStatus(`已保存为任务材料：${body.savedMaterial.fileName}`);
+      else if (body.learned?.length) setStatus(`已记入个人偏好：${body.learned.join("；")}`);
     } catch { setMessages((current) => [...current, { from: "assistant", text: "网络不可用，消息未发送" }]); }
     finally { setSending(false); }
   };

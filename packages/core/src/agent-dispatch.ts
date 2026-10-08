@@ -27,8 +27,8 @@ export const isAgentCategory = (value: unknown): value is AgentCategory => typeo
 export const AGENT_CATEGORY_EXPLAINED: Record<AgentCategory, string> = {
   data_code_sim: "清洗数据、写和改脚本与代码（在项目分支里）、跑已有的仿真和批处理、画图表。产出是脚本、代码和图。",
   read_research_organize: "读文献和资料做带引文的摘要和对照笔记、查公开信息并核实来源、整理会议和课程材料。产出是笔记和清单。",
-  draft_text: "起草邮件、报告、帖子和申请材料。只放在产出目录里，不会发送；改完由你自己发。",
-  files_calendar_prep: "归档和重命名文件、会前把材料备齐、在 Crossline 日历上排自己的工作块。不动你的原文件。"
+  draft_text: "起草邮件、报告、帖子和申请材料；只存放在产出目录，不发送，由本人修改后发出。",
+  files_calendar_prep: "归档与重命名文件、会前备齐材料、在 Crossline 日历排工作块；不改动原文件。"
 };
 
 /** Ordered: a tie goes to the earlier kind, because code and data are the most specific words. */
@@ -76,7 +76,7 @@ export function planAssistantTask(order: DispatchableOrder, context: { projectIs
   return {
     fit: true,
     category: best?.category,
-    why: best ? `AI 部分的描述指向「${AGENT_CATEGORIES[best.category]}」。` : "AI 部分的描述没有明确指向某一类，需要你选。",
+    why: best ? `AI 部分的描述指向「${AGENT_CATEGORIES[best.category]}」。` : "可自动部分未明确对应某一类工作，需本人选择。",
     what: [`目标：${order.intent}`, `请完成其中可由 AI 准备的部分：${ai.map((part, i) => `${i + 1}) ${part.intent}`).join("；")}`,
       contract.length ? `需要的材料或证据：${contract.join("；")}` : ""].filter(Boolean).join("\n"),
     humanPart: human.length ? human.map((part) => part.intent).join("；") : "审阅并决定如何使用产出",
@@ -92,7 +92,7 @@ const categoryOf = (text: string): AgentCategory | undefined => KEYWORDS
 
 /** An errand small and internal enough to hand over whole (see the file comment); anything else stays the person's. */
 function delegateWhole(order: DispatchableOrder, human: Part[], context: { projectIsCourse: boolean; milestoneTitle?: string }): AssistantPlan {
-  const nothing = { fit: false as const, reason: "分析认为这件事里没有可以交给助手的部分，都需要你自己做。" };
+  const nothing = { fit: false as const, reason: "该任务没有可交给助手的部分，需本人完成。" };
   const payload = (order.payload ?? {}) as { family?: string; evidenceContract?: unknown };
   if (payload.family !== "preparation" && payload.family !== "review") return nothing;
   const text = `${order.intent} ${human.map((part) => part.intent).join(" ")} ${context.milestoneTitle ?? ""}`;
@@ -100,7 +100,7 @@ function delegateWhole(order: DispatchableOrder, human: Part[], context: { proje
   if (context.projectIsCourse && GRADED.test(text)) return { fit: false, reason: "这是带评分的课程工作，不整件交给助手。" };
   // Choosing, deciding, doing it in person: the step *is* the person's judgement. One real run was handed 「选定一项创始人正在处理的
   // 真实事项」 and chose for them — and chose the app itself.
-  if (PERSONS_CALL.test(order.intent)) return { fit: false, reason: "这一步是要你自己选或决定的，不整件交给助手。" };
+  if (PERSONS_CALL.test(order.intent)) return { fit: false, reason: "该步骤需本人选择或决定，不整件交给助手。" };
   const evidence = Array.isArray(payload.evidenceContract)
     ? (payload.evidenceContract as Array<{ description?: string }>).map((item) => item.description).filter(Boolean) : [];
   const category = categoryOf(order.intent) ?? "read_research_organize";

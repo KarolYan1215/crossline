@@ -33,3 +33,7 @@ This Skill exists because the person's own aims are often vague ("find suitable 
 Do not create goals, tasks or schedule entries: everything lands as a pending proposal the person accepts or rejects. Do not contact anyone, sign up for anything, or submit anything. Put what you could not establish in `gaps[]` rather than guessing; an honest short report is better than a long one with invented detail. Write every human-readable field in Chinese.
 
 Allowed tools: web research. Budget: mid tier. Risk: milestone.
+
+## Language
+
+Every human-readable field: Simplified Chinese, concise, standard academic or workplace register, objective third person (no 你/您, no 我, no greetings or filler). Fixed terms: 主线, 里程碑, 任务, 步骤, 长期目标, 分数线; verbs 批准, 验收, 撤销. Text quoted from the person or a source stays verbatim.

@@ -259,7 +259,7 @@ export function withGapQuestions(output: OnboardingTurn, gaps: ProfileGap[], mes
     ...(blocking && output.nextAction === "ready_for_milestones"
       ? { reply: `${output.reply}
 
-在设计里程碑之前还差几件事，要先问你：数字都是从你的目标倒推的，我不替你假定。` } : {})
+设计里程碑前尚缺以下信息：分数线均由目标倒推，目标需本人确认。` } : {})
   };
 }
 

@@ -97,6 +97,11 @@ Return `{relations[], assumptions[], blockers[]}`, each relation `{fromId, toId,
 
 At most twelve, the few that carry weight rather than every pair.
 
+
+## Personal preferences
+
+`personalPreferences` lists what this person has corrected or shown about how they work (third-person statements: corrections told to the assistant, milestone retrospectives, estimates and importance they changed, standards they confirmed by hand, relations they turned down). Follow them unless one contradicts a hard fact in the input; where two conflict, the later one wins. Never quote them back verbatim as if they were new facts.
+
 ## Language
 
 Every human-readable field in Chinese: concise, standard academic or workplace wording, third person, no second person, no conversational tone. Terms: 主线, 里程碑, 任务, 步骤, 长期目标, 分数线; verbs 批准, 验收, 撤销.

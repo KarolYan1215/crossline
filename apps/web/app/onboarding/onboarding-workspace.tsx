@@ -11,7 +11,7 @@ import {
 } from "./onboarding-types";
 
 const ACCEPT = ".pdf,.docx,.txt,.md,.csv,.png,.jpg,.jpeg,.gif,.webp,.m4a,.mp3,.wav,.aac,.ogg,.flac";
-const OPENING = "随便说说你现在在做什么、最想推进什么，也可以直接把课程大纲、项目说明、笔记、录音拖进来。";
+const OPENING = "当前在做的事与最想推进的事；也可直接拖入课程大纲、项目说明、笔记或录音。";
 
 const asTurn = (message: Message): AssistantTurn | undefined =>
   message.role === "assistant" ? message.content as AssistantTurn : undefined;
@@ -167,11 +167,11 @@ export function OnboardingWorkspace() {
             {current && !waiting && turn.questions.map((question) => <QuestionCard key={question.id} question={question}
               answer={answers[question.id] ?? { picked: [], other: "" }} identities={state.identities} projects={state.projects} disabled={busy !== ""}
               onChange={(next) => setAnswers((previous) => ({ ...previous, [question.id]: next }))} />)}
-            {current && turn.nextAction === "ready_for_milestones" && <p className="ob-done">我已经了解得差不多了，可以在下面设计你的里程碑。</p>}
+            {current && turn.nextAction === "ready_for_milestones" && <p className="ob-done">信息已基本完整，可在下方设计里程碑。</p>}
           </div>;
         })}
-        {extra.length > 0 && !waiting && <div className="ob-turn ob-assistant" aria-label="还需要你定的事">
-          <p>下面这几件事还没问过你。里程碑的分数线是从你的目标倒推出来的，所以目标要你来定，我不替你假定。</p>
+        {extra.length > 0 && !waiting && <div className="ob-turn ob-assistant" aria-label="待定事项">
+          <p>以下事项尚未确认。里程碑分数线由目标倒推，目标需本人确认。</p>
           {extra.map((question) => <QuestionCard key={question.id} question={question}
             answer={answers[question.id] ?? { picked: [], other: "" }} identities={state.identities} projects={state.projects} disabled={busy !== ""}
             onChange={(next) => setAnswers((previous) => ({ ...previous, [question.id]: next }))} />)}
@@ -179,7 +179,7 @@ export function OnboardingWorkspace() {
         {state.dateBatch && <DateBatchCard key={state.dateBatch.id} batch={state.dateBatch} busy={busy !== ""} onDecide={(batchId, ids) => void decideDates(batchId, ids)} onRedo={() => void runTurn("请把我已添加的文件里的日期重新读一遍，只整理日期。", true)} />}
         {state.facts.some((fact) => fact.status === "confirmed") && <section className="ob-design" aria-label="设计里程碑">
           <b>{state.session?.state === "complete" ? "了解得够了，可以设计里程碑了" : "随时可以先设计里程碑，之后补充再重来"}</b>
-          <span className="ob-muted">从你确认过的事实和日期倒推，每条主线 3–5 个前后相接的里程碑，只是草稿，由你批准。</span>
+          <span className="ob-muted">由已确认的事实与日期倒推，每条主线 3–5 个前后相接的里程碑草稿，批准后生效。</span>
           {designed
             ? <p className="ob-done">已生成 {designed.length} 个草稿：{designed.map((item) => item.title).join("、")}。<a href="/milestones">去审阅并批准 →</a></p>
             : <button type="button" className="ob-btn" disabled={busy !== ""} onClick={() => void designMilestones()}>
@@ -190,13 +190,13 @@ export function OnboardingWorkspace() {
         {transcription && waitingForAudio && <TranscriptionCard status={transcription} busy={busy !== ""} onDownload={() => void downloadModel()} />}
         {busy === "turn" && pendingText && !(messages.at(-1)?.role === "user" && userText(messages.at(-1)!) === pendingText)
           && <div className="ob-turn ob-user"><p>{pendingText}</p></div>}
-        {busy === "turn" && <div className="ob-turn ob-assistant" role="status"><p className="ob-muted">正在整理你的回答并思考下一步…（通常不到一分钟）</p></div>}
+        {busy === "turn" && <div className="ob-turn ob-assistant" role="status"><p className="ob-muted">正在整理回答并生成下一组问题…（通常不到一分钟）</p></div>}
         <div ref={bottom} />
       </div>
       {error && <p className="ob-error" role="alert">{error}{waiting && busy === "" && <button type="button" className="ob-btn" onClick={() => void runTurn("")}>重试</button>}</p>}
       <form className="ob-composer" onSubmit={(event) => { event.preventDefault(); if (canSend) void runTurn(composed || ""); }}>
         <textarea value={text} rows={open ? 2 : 4} onChange={(event) => setText(event.target.value)} disabled={busy !== ""}
-          placeholder={open ? "还有什么想补充的？（可不填）" : "写下你的情况…"} aria-label="你的回答" />
+          placeholder={open ? "补充说明（可选）" : "当前情况…"} aria-label="回答" />
         <div className="ob-composer-row">
           <label className="ob-file-button">
             <input type="file" multiple accept={ACCEPT} hidden onChange={(event) => { void upload(event.target.files ?? []); event.target.value = ""; }} />

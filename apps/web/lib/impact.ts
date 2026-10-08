@@ -127,7 +127,13 @@ export function applyChange(ctx: AccessContext, requested: Change): { ok: true }
     return { ok: true };
   }
   if (change.kind === "params") return saveScheduleParams(ctx, change.params);
-  if (change.kind === "weight") return saveGoalSettings(ctx, change.milestoneId, { weight: change.weight });
+  if (change.kind === "weight") {
+    const saved = saveGoalSettings(ctx, change.milestoneId, { weight: change.weight });
+    const milestone = store.listMilestones(ctx.workspaceId).filter((item) => item.id === change.milestoneId).at(-1);
+    if (saved.ok && milestone) store.addPreference({ workspaceId: ctx.workspaceId, source: "importance", scope: milestone.identityId, weight: 0.5,
+      refId: milestone.id, text: `里程碑「${milestone.title}」重要性由本人设为 ${change.weight}` });
+    return saved;
+  }
   const order = store.listWorkOrders(ctx.workspaceId).find((item) => item.id === change.workOrderId);
   if (!order) return { ok: false, code: "WORK_ORDER_NOT_FOUND" };
   if (change.kind === "defer") {
@@ -163,5 +169,9 @@ export function applyChange(ctx: AccessContext, requested: Change): { ok: true }
   store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `estimate.adjusted:${order.id}:${change.stepId ?? ""}:${Date.now()}`,
     type: "estimate.adjusted", entityId: order.id, payload: { stepId: change.stepId ?? null, before: before ?? null, after: minutes,
       family: (order.payload as { family?: string } | undefined)?.family ?? null, line: order.identityId } });
+  // A manual edit is a weak signal next to measured time (which calibration learns from), so it is recorded with a low weight.
+  const step = change.stepId ? store.getStepPlan(ctx.workspaceId, order.id)?.steps.find((item) => item.id === change.stepId) : undefined;
+  store.addPreference({ workspaceId: ctx.workspaceId, source: "estimate", scope: order.identityId, weight: 0.3, refId: `${order.id}:${change.stepId ?? ""}`,
+    text: `任务「${order.intent}」${step ? `的步骤「${step.title}」` : ""}估时由本人改为 ${minutes} 分钟` });
   return { ok: true };
 }

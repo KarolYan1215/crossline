@@ -10,6 +10,7 @@ import { verifyCapability } from "./capability";
 import { enterUsageWorkspace } from "./usage";
 import type { CostSignal } from "@crossline/core";
 export * from "./skill-runner";
+export * from "./style";
 export * from "./usage";
 export * from "./analysis";
 export * from "./cost";

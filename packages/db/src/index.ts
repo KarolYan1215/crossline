@@ -242,6 +242,15 @@ export type ModelUsageSummary = {
   longestSeconds: number;
 };
 
+export type StoredPreference = {
+  workspaceId: string; id: string;
+  source: "correction" | "retrospective" | "estimate" | "importance" | "standard_confirmed" | "relation_rejected";
+  /** A line id, `task:<id>`, `archetype:<id>` or `all`. */
+  scope: string; text: string;
+  /** How much it counts: a stated correction 1, a measured pattern more, a single manual edit less. */
+  weight: number; refId: string; createdAt: string; deletedAt: string | null;
+};
+
 export type StoredDiligenceReport = {
   id: string; ownerId: string; workspaceId: string; scope: string; question: string;
   findings: unknown; proposals: unknown; sources: unknown;
@@ -630,6 +639,21 @@ export class CrosslineStore {
         status TEXT NOT NULL DEFAULT 'planned' CHECK(status IN ('planned','done','skipped')), progress_quarter INTEGER NOT NULL DEFAULT 0,
         updated_at TEXT NOT NULL,
         PRIMARY KEY(workspace_id, work_order_id, id)
+      );
+      -- What the system has learned about how this person wants things done (decided 2026-10-07): a correction told to the assistant,
+      -- a milestone retrospective, an estimate or importance the person changed, a standard confirmed by hand, a relation turned down.
+      -- Every later analysis, step plan and milestone design is given the live ones; the person can delete any of them in Settings.
+      CREATE TABLE IF NOT EXISTS preference_entries (
+        workspace_id TEXT NOT NULL, id TEXT NOT NULL, source TEXT NOT NULL, scope TEXT NOT NULL, text TEXT NOT NULL,
+        weight REAL NOT NULL DEFAULT 1, ref_id TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, deleted_at TEXT,
+        PRIMARY KEY(workspace_id, id)
+      );
+      -- Task archetypes the curator drew from this person's tasks and a public standard; offered to the step planner beside the
+      -- built-in eighteen until the person retires one.
+      CREATE TABLE IF NOT EXISTS learned_archetypes (
+        workspace_id TEXT NOT NULL, id TEXT NOT NULL, label TEXT NOT NULL, archetype_json TEXT NOT NULL, basis_json TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL, retired_at TEXT,
+        PRIMARY KEY(workspace_id, id)
       );
     `);
     if (hasLegacyTasks) this.#migrateLegacyTasks();
@@ -1710,6 +1734,62 @@ export class CrosslineStore {
   }
 
   /** Per Skill and model since `sinceIso`, biggest spender first. */
+  /**
+   * Records one thing learned about how the person works. `refId` makes a repeated signal (the same task's estimate changed twice)
+   * replace its earlier entry instead of piling up.
+   */
+  addPreference(entry: Omit<StoredPreference, "id" | "createdAt" | "deletedAt"> & { createdAt?: string }): StoredPreference {
+    const createdAt = entry.createdAt ?? new Date().toISOString();
+    const existing = entry.refId ? this.#db.prepare("SELECT id FROM preference_entries WHERE workspace_id = ? AND source = ? AND ref_id = ? AND deleted_at IS NULL")
+      .get(entry.workspaceId, entry.source, entry.refId) as { id: string } | undefined : undefined;
+    const id = existing?.id ?? `pref-${randomUUID()}`;
+    this.#db.prepare(`INSERT INTO preference_entries (workspace_id, id, source, scope, text, weight, ref_id, created_at, deleted_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL) ON CONFLICT(workspace_id, id) DO UPDATE SET scope = excluded.scope, text = excluded.text,
+      weight = excluded.weight, created_at = excluded.created_at`)
+      .run(entry.workspaceId, id, entry.source, entry.scope, entry.text.slice(0, 500), entry.weight, entry.refId, createdAt);
+    return { ...entry, id, createdAt, deletedAt: null };
+  }
+
+  /**
+   * The live preferences as the lines a model is given: those for one of `scopes` or for everything, the weightiest and newest first,
+   * at most `limit`. Every analysis, step plan and milestone design reads them through here.
+   */
+  preferenceLines(workspaceId: string, scopes: string[], limit = 20): string[] {
+    const wanted = new Set([...scopes, "all"]);
+    return this.listPreferences(workspaceId).filter((entry) => wanted.has(entry.scope) || scopes.some((scope) => entry.scope.startsWith(`${scope}:`)))
+      .sort((a, b) => b.weight - a.weight || b.createdAt.localeCompare(a.createdAt)).slice(0, limit).map((entry) => entry.text);
+  }
+
+  listPreferences(workspaceId: string, options: { includeDeleted?: boolean } = {}): StoredPreference[] {
+    const rows = this.#db.prepare(`SELECT * FROM preference_entries WHERE workspace_id = ?${options.includeDeleted ? "" : " AND deleted_at IS NULL"} ORDER BY created_at DESC`)
+      .all(workspaceId) as Array<Record<string, string | number | null>>;
+    return rows.map((row) => ({ workspaceId, id: String(row.id), source: String(row.source) as StoredPreference["source"], scope: String(row.scope),
+      text: String(row.text), weight: Number(row.weight), refId: String(row.ref_id ?? ""), createdAt: String(row.created_at),
+      deletedAt: row.deleted_at === null ? null : String(row.deleted_at) }));
+  }
+
+  saveLearnedArchetype(workspaceId: string, archetype: { id: string; label: string } & Record<string, unknown>, basis: unknown, at = new Date().toISOString()): void {
+    this.#db.prepare(`INSERT INTO learned_archetypes (workspace_id, id, label, archetype_json, basis_json, created_at, retired_at) VALUES (?, ?, ?, ?, ?, ?, NULL)
+      ON CONFLICT(workspace_id, id) DO UPDATE SET label = excluded.label, archetype_json = excluded.archetype_json, basis_json = excluded.basis_json, retired_at = NULL`)
+      .run(workspaceId, archetype.id, archetype.label, JSON.stringify(archetype), JSON.stringify(basis ?? {}), at);
+  }
+
+  listLearnedArchetypes(workspaceId: string, options: { includeRetired?: boolean } = {}): Array<{ id: string; label: string; archetype: unknown; basis: unknown; createdAt: string; retiredAt: string | null }> {
+    const rows = this.#db.prepare(`SELECT * FROM learned_archetypes WHERE workspace_id = ?${options.includeRetired ? "" : " AND retired_at IS NULL"} ORDER BY created_at`)
+      .all(workspaceId) as Array<Record<string, string | null>>;
+    return rows.map((row) => ({ id: String(row.id), label: String(row.label), archetype: JSON.parse(String(row.archetype_json)),
+      basis: JSON.parse(String(row.basis_json ?? "{}")), createdAt: String(row.created_at), retiredAt: row.retired_at ?? null }));
+  }
+
+  retireLearnedArchetype(workspaceId: string, id: string, at = new Date().toISOString()): boolean {
+    return this.#db.prepare("UPDATE learned_archetypes SET retired_at = ? WHERE workspace_id = ? AND id = ? AND retired_at IS NULL").run(at, workspaceId, id).changes > 0;
+  }
+
+  /** The person removing something the system learned: it stops reaching any model, and stays on record as removed. */
+  deletePreference(workspaceId: string, id: string, at = new Date().toISOString()): boolean {
+    return this.#db.prepare("UPDATE preference_entries SET deleted_at = ? WHERE workspace_id = ? AND id = ? AND deleted_at IS NULL").run(at, workspaceId, id).changes > 0;
+  }
+
   /** Tokens and runs per UTC day since `sinceIso`, oldest first: the settings page's seven-day trend. */
   dailyModelUsage(workspaceId: string, sinceIso: string): Array<{ day: string; runs: number; totalTokens: number }> {
     const rows = this.#db.prepare(`
@@ -2606,7 +2686,7 @@ export class CrosslineStore {
       "assistant_threads", "assistant_attachments", "milestone_templates",
       "workspace_projects", "source_documents", "onboarding_sessions", "onboarding_messages", "profile_facts",
       "diligence_reports", "milestone_anchors", "model_usage", "activity_segments", "waiting_items",
-      "task_step_plans", "task_steps",
+      "task_step_plans", "task_steps", "preference_entries", "learned_archetypes",
       // Consent state is part of the ledger: a restore that silently re-enables collection is not a restore.
       "settings",
       // `principals`/`workspaces` are not workspace-scoped rows themselves — a principal is scoped by

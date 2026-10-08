@@ -13,7 +13,7 @@ const plan = (o: ReturnType<typeof order>, course = false) => planAssistantTask(
 
 describe("what the assistant is handed", () => {
   test("nothing automatable means nothing to dispatch, and the reason says so", () => {
-    expect(plan(order({ ai: [] }))).toMatchObject({ fit: false, reason: expect.stringContaining("都需要你自己做") });
+    expect(plan(order({ ai: [] }))).toMatchObject({ fit: false, reason: expect.stringContaining("需本人完成") });
   });
 
   // A step worked back from a milestone has no AI/human split, so on the real account nothing was ever handed over.

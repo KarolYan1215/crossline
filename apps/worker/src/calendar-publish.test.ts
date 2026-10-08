@@ -24,7 +24,7 @@ const graph = (log: string[]) => (async (input: string | URL | Request, init?: R
 test("with no account chosen for writing, nothing is written and the way to choose one is named", async () => {
   const log: string[] = [];
   const outcome = await createCalendarPublisher(store, ws, { credentialFor, fetchImpl: graph(log) })([block]);
-  expect(outcome).toMatchObject({ state: "blocked", code: "CALENDAR_WRITE_NOT_AUTHORIZED", message: expect.stringContaining("graph-write-login") });
+  expect(outcome).toMatchObject({ state: "blocked", code: "CALENDAR_WRITE_NOT_AUTHORIZED", message: expect.stringContaining("登录") });
   expect(log).toEqual([]);
 });
 

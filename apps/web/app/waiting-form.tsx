@@ -22,7 +22,7 @@ export function WaitingForm({ workOrderId }: { workOrderId: string }) {
         setStatus("没保存上，请检查日期");
       }}>记下来</button>
     </div>
-    <small className="muted">记下后，这项任务在那天之前不会排进日历；到那天会问你「到了吗？」。</small>
+    <small className="muted">记录后，该任务在此日期前不排入日历；到期时确认是否到达。</small>
     {status && <small role="status">{status}</small>}
   </details>;
 }

@@ -105,7 +105,7 @@ export default async function ApprovalsPage() {
                   </p>
                   : <p><strong>等待里程碑闸门</strong> · 闸门判这份证据是否兑现了本作业的交付承诺；里程碑整体是否达成另行记录。</p>}
                 {revocations.has(item.id) && <p role="status">
-                  你撤销过这条的验收，原因：{revocations.get(item.id)}。闸门不会自动重判同一份证据；补完后点「现在判定」。
+                  验收已撤销，原因：{revocations.get(item.id)}。同一份证据不会自动重判；补充后点「现在判定」。
                 </p>}
                 <JudgeMilestoneButton workOrderId={item.id} />
               </>

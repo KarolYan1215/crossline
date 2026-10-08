@@ -20,7 +20,7 @@ export function DateBatchCard({ batch, onDecide, onRedo, busy }: {
   return <section className="ob-dates" aria-label="从文件识别到的日期">
     <header>
       <b>从 {batch.documentCount} 个文件识别到 {batch.items.length} 项</b>
-      <span className="ob-muted">勾选的会加入日历和你的画像；不确定的默认没勾选。</span>
+      <span className="ob-muted">勾选的日期加入日历与画像；不确定的默认不勾选。</span>
     </header>
     <ul>
       {batch.items.map((item) => <li key={item.id} data-confidence={item.confidence}>
@@ -35,7 +35,7 @@ export function DateBatchCard({ batch, onDecide, onRedo, busy }: {
       </li>)}
     </ul>
     {batch.dropped > 0 && <p className="ob-muted">另有 {batch.dropped} 项无法在原文里核实，已丢弃，没有写入。</p>}
-    {batch.questions.length > 0 && <div className="ob-date-questions"><b>需要你确认：</b><ul>{batch.questions.map((question) => <li key={question}>{question}</li>)}</ul></div>}
+    {batch.questions.length > 0 && <div className="ob-date-questions"><b>待确认：</b><ul>{batch.questions.map((question) => <li key={question}>{question}</li>)}</ul></div>}
     <footer>
       <button type="button" className="ob-btn" disabled={busy || chosen.length === 0}
         onClick={() => onDecide(batch.id, chosen.map((item) => item.id))}>加入日历（{chosen.length} 项{blocks ? `，${blocks} 个时间块` : ""}）</button>

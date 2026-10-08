@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
  */
 export default async function OnboardingPage() {
   await requireSessionContext();
-  return <SubpageShell active="设置" eyebrow="首次设置" title="先了解你" description="聊几轮，或直接把你已有的文件拖进来；我会据此理解你的每条主线和项目。右侧是我目前的理解，随时可以改。">
+  return <SubpageShell active="设置" eyebrow="首次设置" title="访谈" description="回答几轮问题，或直接拖入已有文件；据此整理每条主线与项目。右侧为当前画像，可随时修改。">
     <OnboardingWorkspace />
   </SubpageShell>;
 }

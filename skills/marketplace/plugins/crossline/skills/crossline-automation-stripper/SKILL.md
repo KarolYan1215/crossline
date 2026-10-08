@@ -54,3 +54,12 @@ Allowed tools: none beyond supplied context. Budget: standard. Risk: routine to 
 ## Byproducts for other lines
 
 `byproducts[]` (zero to three, at most one per line other than this task's own) name what the same work can also produce for **another** line the person has — a research run can yield notes for a post on how research really happens, or a real use of the person's own product. Each is `{lineId, milestoneId, artifact, captureSteps[], landing, why}`: `lineId` one of `identityPacks[].id` other than this task's `identityId`; `milestoneId` that line's approved milestone it serves, or empty; `artifact` a concrete thing that can be handed over (a note, a draft post, a figure), never a state (「保持状态」); `captureSteps` are small things done **during** the main work so the byproduct is cheap later (「仿真时把每次调参的想法记进研究日记」, with minutes — they are part of this task's own steps and count in `p50Minutes`); `landing` `{minutes, description}` is the short follow-up after the main work is done that turns them into the artifact. Offer one only when the work genuinely produces the material — an invented connection costs the person time. The main deliverable always comes first; a byproduct never changes this task's own contract.
+
+
+## Personal preferences
+
+`personalPreferences` lists what this person has corrected or shown about how they work (third-person statements: corrections told to the assistant, milestone retrospectives, estimates and importance they changed, standards they confirmed by hand, relations they turned down). Follow them unless one contradicts a hard fact in the input; where two conflict, the later one wins. Never quote them back verbatim as if they were new facts.
+
+## Language
+
+Every human-readable field: Simplified Chinese, concise, standard academic or workplace register, objective third person (no 你/您, no 我, no greetings or filler). Fixed terms: 主线, 里程碑, 任务, 步骤, 长期目标, 分数线; verbs 批准, 验收, 撤销. Text quoted from the person or a source stays verbatim.

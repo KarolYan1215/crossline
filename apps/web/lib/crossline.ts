@@ -728,7 +728,7 @@ async function scheduledBlocks(ctx: AccessContext, today: string, committed: Per
       day: formatInTimeZone(new Date(block.start), zone, "yyyy-MM-dd"),
       start: formatInTimeZone(new Date(block.start), zone, "HH:mm"),
       end: formatInTimeZone(new Date(block.end), zone, "HH:mm"),
-      source: "预览·待你批准", readOnly: true
+      source: "预览·待批准", readOnly: true
     };
   });
   blocks.push(...previewBlocks);
@@ -963,6 +963,14 @@ export function decideMilestoneRelations(ctx: AccessContext, ids: string[], deci
   // genuinely different selection later is still recorded.
   const key = `relations:${decision}:${[...unique].sort().join(",")}`.slice(0, 400);
   const result = store.decideMilestoneRelations(ctx.workspaceId, ctx.principalId, unique, decision, key);
+  // A relation the person turned down says which kinds of link they do not believe in; later proposals are given it.
+  if (decision === "archived") {
+    const titles = new Map(store.listMilestones(ctx.workspaceId).map((milestone) => [milestone.id, milestone.title]));
+    for (const relation of store.listMilestoneRelations(ctx.workspaceId).filter((item) => result.decided.includes(item.id))) {
+      store.addPreference({ workspaceId: ctx.workspaceId, source: "relation_rejected", scope: "all", weight: 0.8, refId: relation.id,
+        text: `跨主线关系「${titles.get(relation.fromMilestoneId) ?? relation.fromMilestoneId} → ${titles.get(relation.toMilestoneId) ?? relation.toMilestoneId}」（${relationKindLabel[relation.kind] ?? relation.kind}）被本人驳回` });
+    }
+  }
   return { ok: true, ...result };
 }
 
@@ -1086,7 +1094,9 @@ export function retryMaterialPreparation(ctx: AccessContext, workOrderId: string
  * the plan as it now stands, not every version it went through. Newer withdrawals carry `bySystem` on the event instead of relying on
  * this list; it covers the ones written before that flag existed.
  */
-const SYSTEM_ARCHIVE_REASONS = ["示例作业自动清理", "自动反推旧版", "你已经在等这项输入", "你已经提供了这项输入", "你说这个里程碑先不拆"];
+// Older rows carry the earlier wording, so both forms stay in the list.
+const SYSTEM_ARCHIVE_REASONS = ["示例作业自动清理", "自动反推旧版", "你已经在等这项输入", "你已经提供了这项输入", "你说这个里程碑先不拆",
+  "该输入已在等待中", "该输入已由本人提供", "本人选择暂不拆分该里程碑"];
 export function archivedBySystem(payload: unknown): boolean {
   const value = payload as { bySystem?: boolean; reason?: string } | undefined;
   return value?.bySystem === true || SYSTEM_ARCHIVE_REASONS.some((reason) => (value?.reason ?? "").startsWith(reason));
@@ -1478,7 +1488,7 @@ export function currentMilestoneLabel(milestones: Array<{ id: string; identityId
     .sort((a, b) => (deadlines.get(a.id) ?? "9999").localeCompare(deadlines.get(b.id) ?? "9999"));
   if (approved[0]) return approved[0].title;
   const drafts = mine.filter((milestone) => milestone.status === "draft").length;
-  return drafts ? `${drafts} 个里程碑草稿等你批准` : "等待批准里程碑";
+  return drafts ? `${drafts} 个里程碑草稿待批准` : "等待批准里程碑";
 }
 
 export const LOCAL_ACTIVITY_CONSENT = "localActivity.consent";
@@ -1734,7 +1744,7 @@ export async function loadDashboard(ctx: AccessContext): Promise<Omit<DashboardD
     : "输入已就绪，按目标重要性和估时推荐；尚无新鲜精力自评";
   const primary = toAction(ctx, active.find((task) => task.id === actions.primary?.id), primaryReason);
   const higherPriority = toAction(ctx, active.find((task) => task.id === actions.higherPriority?.id),
-    "优先级更高，但当前精力与任务要求不匹配；仍保留在这里供你决定");
+    "优先级更高，但当前精力与任务要求不匹配；保留供本人决定");
   const lowEnergy = toAction(ctx, active.find((task) => task.id === actions.lowEnergy?.id), "标注为低精力任务，启动阻力最小");
   const shortGap = toAction(ctx, active.find((task) => task.id === actions.shortGap?.id), "先验 p85 在 40 分钟以内，可放进短空档");
   return {
@@ -1781,7 +1791,7 @@ export async function loadDashboard(ctx: AccessContext): Promise<Omit<DashboardD
     // come back as though the system were still working on something the person had thrown away.
     upcoming: [
       ...orders.filter((order) => order.state === "awaiting_plan_approval").map((order) => ({
-        id: order.id, title: order.intent, identityId: order.identityId, status: "待你批准 · Approvals",
+        id: order.id, title: order.intent, identityId: order.identityId, status: "待批准",
         ...(order.milestoneId && milestoneTitleById.has(order.milestoneId)
           ? { milestoneTitle: milestoneTitleById.get(order.milestoneId)! } : {})
       })),

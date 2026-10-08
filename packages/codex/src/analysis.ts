@@ -1,4 +1,4 @@
-import { ANALYSIS_OUTPUT_SCHEMA, validateAnalysisContext, validateAnalysisProposal, type AnalysisContext, type AnalysisProposal } from "@crossline/core";
+import { ANALYSIS_OUTPUT_SCHEMA, keepAnalysisProposal, validateAnalysisContext, validateAnalysisProposal, type AnalysisContext, type AnalysisProposal } from "@crossline/core";
 import type { CodexRpcBoundary } from "./index";
 import { runCodexSkill, type AnalysisAudit } from "./skill-runner";
 
@@ -50,7 +50,8 @@ export async function runCodexAnalysis(client: CodexRpcBoundary, input: unknown,
     developerInstructions: INSTRUCTIONS,
     outputSchema: ANALYSIS_OUTPUT_SCHEMA,
     prepareInput: (value) => validateAnalysisContext(value),
-    validateOutput: (output, prepared) => validateAnalysisProposal(output, prepared as AnalysisContext)
+    validateOutput: (output, prepared) => validateAnalysisProposal(output, prepared as AnalysisContext),
+    softAccept: (rejection, output, prepared) => keepAnalysisProposal(output, prepared as AnalysisContext, rejection.message)
   });
   if (result.ok) return { ok: true, proposal: result.output, audit: result.audit };
   return { ok: false, audit: result.audit, blocker: { code: analysisCode(result.blocker.code), message: result.blocker.message } };

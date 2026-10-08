@@ -9,6 +9,8 @@ export type AnalysisContext = {
   approvedMilestones: Array<{ id: string; projectId: string; identityId: string; title: string; version: number; hasSuccessCriteria: boolean; deadline?: string }>;
   availableInputs: Array<{ id: string; text: string }>;
   identityPacks: Array<{ id: string; version: number; summary: string }>;
+  /** What the person has said or shown about how they work (v2; `preference_entries`). Absent on contexts stored before it. */
+  personalPreferences?: string[];
   // How this workspace's own past captures actually turned out, per (identityId, family) — not a
   // suggestion to copy, evidence the model can weigh against its own read of the current capture.
   // `medianActualMinutes: 0` means no real completions exist yet for that pair, same convention
@@ -146,14 +148,18 @@ const V2_CONTEXT = object({ version: choice("crossline.analysis.v2"), ...sharedC
   approvedMilestones: array(object({ id: str, projectId: str, identityId: str, title: str, version: { type: "integer", minimum: 1 }, hasSuccessCriteria: bool,
     deadline: { type: "string", minLength: 0, maxLength: 20 } }), 1),
   referenceClass: array(object({ identityId: str, family, title: str, llmP50Minutes: number, actualMinutes: number }), 0, 5),
-  relations: array(object({ fromMilestoneId: str, toMilestoneId: str, kind: str, explanation: { type: "string", minLength: 0, maxLength: 4000 } }), 0, 40) });
+  relations: array(object({ fromMilestoneId: str, toMilestoneId: str, kind: str, explanation: { type: "string", minLength: 0, maxLength: 4000 } }), 0, 40),
+  personalPreferences: array(str, 0, 30) });
 export const ANALYSIS_CONTEXT_VERSION = "crossline.analysis.v2";
 
 export function validateAnalysisContext(value: unknown): AnalysisContext {
   const version = (value as { version?: unknown } | undefined)?.version;
   // A v1 context stored before the rhythm existed has none; it reads as "nothing measured".
   const full = version === "crossline.analysis.v1" && value && typeof value === "object" && !("rhythm" in value)
-    ? { ...(value as object), rhythm: { focusRunMinutes: 0, productiveMinutesPerDay: 0, planActualRatio: 0, observedDays: 0, completed: 0 } } : value;
+    ? { ...(value as object), rhythm: { focusRunMinutes: 0, productiveMinutesPerDay: 0, planActualRatio: 0, observedDays: 0, completed: 0 } }
+    // A v2 context stored before personal preferences existed reads as "nothing learned yet".
+    : version === "crossline.analysis.v2" && value && typeof value === "object" && !("personalPreferences" in value)
+      ? { ...(value as object), personalPreferences: [] } : value;
   if (!matches(full, version === "crossline.analysis.v2" ? V2_CONTEXT : V1_CONTEXT)) throw new Error("ANALYSIS_CONTEXT_INVALID");
   const context = full as AnalysisContext;
   // Every milestone offered must be backed by a pack; the Skill picks the identity, the app never guesses it.
@@ -345,4 +351,49 @@ export function concreteArtifact(text: string): boolean {
   const trimmed = text.trim();
   if (trimmed.length < 4) return false;
   return !/^(保持|持续|稳定|推进|做好|准备好|提升|加强|关注)/.test(trimmed) && !/(状态|意识|习惯|感觉)$/.test(trimmed);
+}
+
+/** The analysis refusals that are about quality, each with the smallest fix that makes the answer usable (decided 2026-10-07). */
+const ANALYSIS_SOFT_FIXES: Record<string, (proposal: AnalysisProposal) => void> = {
+  ANALYSIS_ESTIMATE_MARGIN_INVALID: (proposal) => {
+    const e = proposal.estimate;
+    e.p85Minutes = Math.min(Math.max(e.p85Minutes, Math.ceil(e.p50Minutes * 1.2)), Math.max(e.p50Minutes * 3, e.p50Minutes + 30), 10080);
+  },
+  ANALYSIS_ESTIMATE_BREAKDOWN_MISMATCH: (proposal) => {
+    const e = proposal.estimate;
+    const total = Math.max(1, Math.round(proposal.estimateBreakdown.reduce((sum, item) => sum + item.minutes, 0)));
+    const ratio = total / Math.max(1, e.p50Minutes);
+    e.p50Minutes = total;
+    e.p25Minutes = Math.max(1, Math.min(total, Math.round(e.p25Minutes * ratio)));
+    e.p85Minutes = Math.min(Math.max(Math.round(e.p85Minutes * ratio), Math.ceil(total * 1.2)), Math.max(total * 3, total + 30), 10080);
+  },
+  ANALYSIS_CONTRACT_NOT_PROSE: (proposal) => {
+    for (const item of [...proposal.materialContract, ...proposal.evidenceContract]) item.description = item.description.replace(/[{}[\]]/g, "").trim();
+  },
+  ANALYSIS_CONTRACT_TRUNCATED: (proposal) => {
+    for (const item of [...proposal.materialContract, ...proposal.evidenceContract]) {
+      if (item.description.length >= CONTRACT_LINE_LIMIT) item.description = `${item.description.slice(0, CONTRACT_LINE_LIMIT - 2)}…`;
+    }
+  },
+  ANALYSIS_EVIDENCE_REQUIRED_MISSING: (proposal) => { if (proposal.evidenceContract[0]) proposal.evidenceContract[0].required = true; },
+  ANALYSIS_BYPRODUCT_INVALID: (proposal) => { proposal.byproducts = []; }
+};
+
+/**
+ * An analysis answer kept after its repairs ran out on a quality refusal: each soft refusal is fixed in the smallest way that makes
+ * the answer usable (clamp the margin, take the steps' sum, strip brackets, mark the first evidence item required, drop byproducts)
+ * and validated again, so everything the store relies on is still checked. Undefined when a hard refusal remains.
+ */
+export function keepAnalysisProposal(value: unknown, input: AnalysisContext, code: string): AnalysisProposal | undefined {
+  if (!ANALYSIS_SOFT_FIXES[code]) return undefined;
+  const candidate = structuredClone(value) as AnalysisProposal;
+  let current = code;
+  for (let round = 0; round < Object.keys(ANALYSIS_SOFT_FIXES).length + 1; round += 1) {
+    const fix = ANALYSIS_SOFT_FIXES[current];
+    if (!fix) return undefined;
+    try { fix(candidate); } catch { return undefined; }
+    try { return validateAnalysisProposal(candidate, input); }
+    catch (error) { current = error instanceof Error ? error.message : ""; }
+  }
+  return undefined;
 }

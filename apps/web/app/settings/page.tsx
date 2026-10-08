@@ -9,6 +9,8 @@ import { PhonePush } from "./phone-push";
 import { EffectivenessCard } from "./effectiveness-card";
 import { AutomationModule, type RecentTask } from "./automation";
 import { SettingsNav } from "./settings-nav";
+import { PersonalizationModule } from "./personalization";
+import { loadPreferences } from "../../lib/preferences";
 import { CalendarModule, ConnectionsSection } from "../connectors/connections";
 import { loadEffectiveness } from "../../lib/effectiveness";
 import { loadAssistant } from "../../lib/agent";
@@ -22,7 +24,7 @@ import { requireSessionContext } from "../../lib/access-guard";
 
 export const dynamic = "force-dynamic";
 const USAGE_DAYS = 7;
-const SECTIONS = [["general", "通用"], ["notify", "时间与提醒"], ["automation", "自动化与助手"], ["calendar", "日历与连接"],
+const SECTIONS = [["general", "通用"], ["notify", "时间与提醒"], ["automation", "自动化与助手"], ["personal", "个性化"], ["calendar", "日历与连接"],
   ["privacy", "隐私与屏幕活动"], ["usage", "用量与体检"]] as const;
 const TONE: Record<string, RecentTask["tone"]> = { running: "info", needs_review: "warn", accepted: "ok", rejected: "neutral", blocked: "risk", stale: "neutral" };
 
@@ -101,6 +103,10 @@ export default async function SettingsPage() {
             recent={assistant.tasks.slice(0, 8).map((task) => ({ taskId: task.taskId, title: task.title, kind: assistant.categories.find((item) => item.category === task.category)?.label ?? "",
               status: agentTaskStatusLabel[task.status] ?? task.status, tone: TONE[task.status] ?? "neutral", day: task.requestedAt.slice(5, 10).replace("-", "/"),
               workOrderId: task.workOrderId }))} />
+        </section>
+
+        <section id="personal" className="st-section" aria-labelledby="st-personal"><h2 id="st-personal">个性化</h2>
+          <PersonalizationModule {...loadPreferences(ctx)} />
         </section>
 
         <section id="calendar" className="st-section" aria-labelledby="st-calendar"><h2 id="st-calendar">日历与连接</h2>

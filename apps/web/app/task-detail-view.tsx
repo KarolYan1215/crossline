@@ -52,7 +52,7 @@ export function TaskDetailView({ detail }: { detail: TaskDetail }) {
     {detail.seeded && <p role="note" className="seed-notice">示例作业 · 系统首次启动时预置，用来演示流程；不需要可直接丢弃。</p>}
     {detail.manualPromotion && <p role="status">人工创建 · 未经 AI 分析</p>}
     {detail.state === "evidence_review" && <p role="status" className="seed-notice">
-      证据已提交，等待验收：{detail.milestone ? "AI 闸门会判定，你也可以在 Approvals 页人工验收或退回。" : "没有绑定里程碑，请到 Approvals 页人工验收或退回。"}
+      证据已提交，等待验收：{detail.milestone ? "由验收判定自动处理，也可在「待确认」人工验收或退回。" : "未关联里程碑，在「待确认」人工验收或退回。"}
       <a href="/approvals"> 前往 Approvals →</a>
     </p>}
     <dl className="task-detail-facts">
@@ -66,7 +66,7 @@ export function TaskDetailView({ detail }: { detail: TaskDetail }) {
       ownerId={detail.ownerId} workspaceId={detail.workspaceId} evidenceChecklist={detail.evidenceChecklist} estimateP50={detail.estimate.p50Minutes} {...(detail.suggestedMinutes ? { suggestedMinutes: detail.suggestedMinutes } : {})} />
 
     {(detail.humanCore.length > 0 || detail.estimateBreakdown.length > 0) && <section>
-      <h3>你要做的</h3>
+      <h3>本人部分</h3>
       <ul className="task-detail-contract">{detail.humanCore.map((part) => <li key={part.id}>
         <span>{part.intent}</span>
         {part.rationale && <small>{part.quote ? `依据「${part.quote}」：` : ""}{part.rationale}</small>}

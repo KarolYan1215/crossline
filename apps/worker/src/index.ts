@@ -18,6 +18,7 @@ import { budgetPolicy, CALENDAR_SYNC_FAILURE, type PlanRankingInput } from "@cro
 import { createFlywheelExpander } from "./flywheel";
 import { createManualbookBuilder, pendingMaterialWorkOrders } from "./manualbook";
 import { createProgressJudge, createStepPlanner, createWarningReviewer, reportsAwaitingJudgement, tasksAwaitingStepPlan, warningsAwaitingReview } from "./step-planner";
+import { createArchetypeCurator, curationDue } from "./archetype-curator";
 import { materializeDatePairs } from "./date-pairs";
 import { createInputRouter } from "./input-router";
 import { createMilestoneGate, pendingMilestoneGates } from "./milestone-gate-runner";
@@ -129,6 +130,23 @@ async function autoBackplanPass(workspaceId: string, checkedAt = new Date().toIS
  * Turns confirmed course dates into tasks, gives every committed task a step plan (the migration of existing tasks is this same pass,
  * two a tick), and has a reviewer look at plans the mechanical checks flagged. Quota-gated like the other model passes.
  */
+/**
+ * The archetype curator, on the person's period (or after twenty new preferences), only with a normal budget. Its run is long and
+ * web-backed, so it never shares a tick with another curation for the same workspace.
+ */
+const curating = new Set<string>();
+async function curatorPass(workspaceId: string, checkedAt: string): Promise<void> {
+  if (curating.has(workspaceId) || !codexSupervisor || !curationDue(analysisStore, workspaceId)) return;
+  const signal = await readCost();
+  if (!signal.available || budgetPolicy(Math.max(signal.short?.usedPercent ?? 0, signal.long?.usedPercent ?? 0)).mode !== "normal") return;
+  curating.add(workspaceId);
+  try {
+    enterUsageWorkspace(workspaceId);
+    const outcome = await createArchetypeCurator(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client)().catch(() => undefined);
+    if (outcome) console.info(JSON.stringify({ type: "archetypes.curated", checkedAt, workspaceId, added: outcome.added.length, dropped: outcome.dropped.length }));
+  } finally { curating.delete(workspaceId); }
+}
+
 const stepPlanning = new Set<string>();
 async function stepPlanPass(workspaceId: string, checkedAt = new Date().toISOString()): Promise<void> {
   if (stepPlanning.has(workspaceId)) return;
@@ -161,7 +179,8 @@ async function stepPlanPass(workspaceId: string, checkedAt = new Date().toISOStr
         ...(outcome.state === "planned" ? { warnings: outcome.warnings.length } : { code: outcome.code }) }));
     }
     const reviewer = createWarningReviewer(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client, (id, feedback) => planner(id, feedback),
-      createRelationReviser(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client));
+      createRelationReviser(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client),
+      (line, notes) => createMilestoneProposer(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client)(`复核意见：${notes}`, undefined, [line], { revised: true }));
     for (const item of reviews) {
       const verdict = await reviewer(item).catch(() => undefined);
       if (verdict) console.info(JSON.stringify({ type: `validation.${verdict.verdict}`, checkedAt, workspaceId, subject: item.subject, entityId: item.entityId }));
@@ -207,6 +226,7 @@ async function tick(): Promise<void> {
     for (const workspace of workspaces) await autoBackplanPass(workspace.id, checkedAt);
   }
   for (const workspace of workspaces) await stepPlanPass(workspace.id, checkedAt);
+  for (const workspace of workspaces) await curatorPass(workspace.id, checkedAt);
   // The milestone gate. Without this it existed only inside `scripts/gate-loop-check.ts`, so on the
   // real ledger a milestone-bound work order reached `evidence_review`, the approvals page said
   // 「等待里程碑闸门」 — and nothing was ever going to judge it. A verdict other than `pass` holds the
@@ -596,7 +616,7 @@ if (!capabilitySecret) {
         "crossline:crossline-flywheel-scout", "crossline:crossline-manualbook-designer", "crossline:crossline-material-researcher", "crossline:crossline-material-writer", "crossline:crossline-milestone-architect",
         "crossline:crossline-goal-backplanner", "crossline:crossline-background-facts", "crossline:crossline-assistant",
         "crossline:crossline-onboarding", "crossline:crossline-due-diligence", "crossline:crossline-plan-explainer", "crossline:crossline-weekly-insight",
-        "crossline:crossline-agent", "crossline:crossline-step-planner", "crossline:crossline-validation-reviewer", "crossline:crossline-progress-judge", "crossline:crossline-input-router"
+        "crossline:crossline-agent", "crossline:crossline-step-planner", "crossline:crossline-validation-reviewer", "crossline:crossline-progress-judge", "crossline:crossline-input-router", "crossline:crossline-archetype-curator"
       ]
     },
     autoAnalyzeCaptures: (workspaceId) => autoAnalyzePass(workspaceId),

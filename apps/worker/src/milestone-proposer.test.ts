@@ -320,7 +320,7 @@ test("a course with no target gets one proposed from the person's goals, kept as
   expect(outcome).toMatchObject({ state: "proposed" });
   expect(store.listProfileFacts(WORKSPACE, { projectId: "ece555" }).find((fact) => fact.slot === "target_grade"))
     .toMatchObject({ status: "inferred", value: expect.stringContaining("总评 A−（≥ 90）（暂定：") });
-  expect(outcome.state === "proposed" && outcome.assumptions.join("")).toContain("一键修改");
+  expect(outcome.state === "proposed" && outcome.assumptions.join("")).toContain("修改并重算");
 });
 
 test("a target the person already set is never replaced by a new proposal", async () => {

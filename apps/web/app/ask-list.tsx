@@ -25,7 +25,7 @@ export function AskList({ initial, visible, moreHref }: { initial: Ask[]; visibl
     window.dispatchEvent(new Event(PENDING_CHANGED));
     void reload();
   };
-  return <section className="ask-list" id="asks" aria-label="需要你回答">
+  return <section className="ask-list" id="asks" aria-label="待决事项">
     <header><h2>待决事项 · {asks.length}</h2>
       {asks.length > visible && moreHref && <a href={moreHref}>其余 {asks.length - visible} 条 →</a>}</header>
     <ol>{groupByMilestone(asks.slice(0, visible)).map((group) => group.inputs

@@ -171,7 +171,74 @@ export const ARCHETYPES: Archetype[] = [
 ];
 
 export const ARCHETYPE_IDS = ARCHETYPES.map((archetype) => archetype.id);
-export const archetypeById = (id: string): Archetype | undefined => ARCHETYPES.find((archetype) => archetype.id === id);
+/** A built-in archetype, or one learned for this workspace (`extra`, from `learned_archetypes`). */
+export const archetypeById = (id: string, extra: readonly Archetype[] = []): Archetype | undefined =>
+  ARCHETYPES.find((archetype) => archetype.id === id) ?? extra.find((archetype) => archetype.id === id);
+
+const s = { type: "string" };
+const obj = (properties: Record<string, unknown>) => ({ type: "object", properties, required: Object.keys(properties), additionalProperties: false });
+const roleEnum = { type: "string", enum: Object.keys(STEP_ROLES) };
+
+/**
+ * The archetype curator's answer (Skill `crossline-archetype-curator`): at most three new archetypes drawn from tasks this person
+ * keeps doing that no built-in archetype fits well, each built from the same primitives and roles, resting on at least two of the
+ * person's tasks and on a public standard or guide (a source the worker opens before keeping it).
+ */
+export const ARCHETYPE_CURATION_SCHEMA = obj({
+  archetypes: { type: "array", maxItems: 3, items: obj({
+    id: s, label: s, primitives: { type: "array", items: { type: "string", enum: Object.keys(STRUCTURE_PRIMITIVES) } },
+    roles: { type: "array", items: roleEnum }, requires: { type: "array", items: roleEnum },
+    firstBefore: { type: "array", items: { type: "array", items: roleEnum } }, endsWith: { type: "array", items: roleEnum },
+    proportions: { type: "array", items: obj({ role: roleEnum, share: { type: "number" } }) },
+    quantify: obj({ basis: s, unit: s, minutesLow: { type: "number" }, minutesHigh: { type: "number" } }),
+    acceptance: s, tickHint: s, agentRoles: { type: "array", items: roleEnum }, recurring: { type: "boolean" },
+    basedOnTaskIds: { type: "array", items: s }, sources: { type: "array", items: obj({ url: s, title: s }) }, why: s
+  }) },
+  notes: s
+});
+export type CuratedArchetype = Archetype & { basedOnTaskIds: string[]; sources: Array<{ url: string; title: string }>; why: string };
+
+/**
+ * What can be checked about a proposed archetype before it is kept: a new slug id, roles and primitives from the fixed sets, rules
+ * that only name its own roles, a sane size, the person's own tasks behind it. An item that fails is dropped with its reason; the
+ * answer as a whole is never refused for one bad item.
+ */
+export function validateCuratedArchetypes(value: unknown, context: { existingIds: string[]; taskIds: string[] }): { kept: CuratedArchetype[]; dropped: string[] } {
+  const raw = value as { archetypes?: unknown[] } | undefined;
+  if (!raw || !Array.isArray(raw.archetypes)) throw new Error("ARCHETYPE_CURATION_SCHEMA_INVALID");
+  const taken = new Set([...ARCHETYPE_IDS, ...context.existingIds]);
+  const tasks = new Set(context.taskIds);
+  const kept: CuratedArchetype[] = [];
+  const dropped: string[] = [];
+  for (const item of raw.archetypes.slice(0, 3) as Array<Record<string, unknown>>) {
+    const roles = (item.roles as string[] ?? []).filter(isStepRole);
+    const within = (list: unknown) => Array.isArray(list) && list.every((role) => roles.includes(role as StepRole));
+    const id = String(item.id ?? "");
+    const quantify = item.quantify as { basis?: string; unit?: string; minutesLow?: number; minutesHigh?: number } | undefined;
+    const sources = (item.sources as Array<{ url?: string; title?: string }> ?? []).filter((source) => /^https:\/\/[^\s/]+\.[^\s]+$/.test(source.url ?? ""));
+    const problem = !/^[a-z][a-z_]{2,30}$/.test(id) ? "id 不是小写下划线标识" : taken.has(id) ? `id「${id}」已存在`
+      : roles.length < 2 ? "角色少于 2 个" : !within(item.requires) || !within(item.endsWith) || !within(item.agentRoles) ? "规则引用了不在角色中的步骤"
+      : !Array.isArray(item.firstBefore) || !(item.firstBefore as unknown[]).every((pair) => Array.isArray(pair) && pair.length === 2 && within(pair)) ? "先后规则不成对或越界"
+      : !quantify?.basis || !quantify.unit || !(Number(quantify.minutesLow) > 0) || !(Number(quantify.minutesHigh) >= Number(quantify.minutesLow)) ? "规模公式不完整"
+      : !String(item.label ?? "").trim() || !String(item.acceptance ?? "").trim() || !String(item.tickHint ?? "").trim() ? "缺名称、验收标准或刻度写法"
+      : (item.basedOnTaskIds as string[] ?? []).filter((taskId) => tasks.has(taskId)).length < 2 ? "依据的本人任务少于 2 个"
+      : !sources.length ? "没有可核对的公开来源" : "";
+    if (problem) { dropped.push(`${id || "（无 id）"}：${problem}`); continue; }
+    taken.add(id);
+    kept.push({ id, label: String(item.label).trim().slice(0, 40),
+      primitives: (item.primitives as string[] ?? []).filter((key): key is StructurePrimitive => key in STRUCTURE_PRIMITIVES),
+      roles, requires: item.requires as StepRole[], firstBefore: item.firstBefore as Array<[StepRole, StepRole]>,
+      ...(Array.isArray(item.endsWith) && item.endsWith.length ? { endsWith: item.endsWith as StepRole[] } : {}),
+      proportions: Object.fromEntries((item.proportions as Array<{ role: string; share: number }> ?? [])
+        .filter((entry) => roles.includes(entry.role as StepRole) && entry.share > 0).map((entry) => [entry.role, entry.share])),
+      quantify: { basis: quantify!.basis!, unit: quantify!.unit!, minutesPerUnit: [Number(quantify!.minutesLow), Number(quantify!.minutesHigh)] },
+      acceptance: String(item.acceptance).trim().slice(0, 200), tickHint: String(item.tickHint).trim().slice(0, 120), agentRoles: item.agentRoles as StepRole[],
+      ...(item.recurring ? { recurring: true } : {}),
+      basedOnTaskIds: (item.basedOnTaskIds as string[]).filter((taskId) => tasks.has(taskId)),
+      sources: sources.map((source) => ({ url: source.url!, title: String(source.title ?? "").slice(0, 200) })), why: String(item.why ?? "").slice(0, 400) });
+  }
+  return { kept, dropped };
+}
 
 /** What the step planner is shown of each archetype: enough to choose and to follow its rules, nothing it would copy blindly. */
 export function archetypeBrief(archetype: Archetype) {

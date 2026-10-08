@@ -441,7 +441,7 @@ test("Today asks what only the person knows, with options and follow-ups, and mo
       approximate: true, followUpAt: "2026-09-14", state: "open", blocks: [], source: "manual" });
   } finally { store.close(); }
   await page.goto("/");
-  const list = page.getByRole("region", { name: "需要你回答" });
+  const list = page.getByRole("region", { name: "待决事项" });
   await expect(list.getByRole("heading", { name: /^待决事项/ })).toBeVisible();
   const group = list.locator(".ask-group");
   await expect(group.getByRole("heading", { level: 3 })).toContainText("还缺 2 样东西");
@@ -451,15 +451,15 @@ test("Today asks what only the person knows, with options and follow-ups, and mo
   const badge = page.locator(".running-head .pending-badge");
   const badgeMinusTotal = async () => (await badge.count() ? Number(await badge.textContent()) : 0)
     - await page.evaluate(async () => ((await (await fetch("/api/pending", { cache: "no-store" })).json()) as { total: number }).total);
-  await missing.getByRole("button", { name: /已经要了，在等/ }).click();
+  await missing.getByRole("button", { name: /已索取，等待中/ }).click();
   await expect(missing.getByLabel(/谁给/)).toHaveValue("导师");
   await missing.getByLabel("大约哪天到").fill("2026-09-16");
-  await missing.getByRole("button", { name: "确定：已经要了，在等" }).click();
+  await missing.getByRole("button", { name: "确定：已索取，等待中" }).click();
   await expect(list.getByText("组会录音", { exact: true })).toHaveCount(0);
   // The header's count follows the answer without a reload (it used to stay at the old number for up to a minute).
   await expect.poll(badgeMinusTotal).toBe(0);
   const second = list.locator(".ask-card").filter({ hasText: "还缺：导师批注" });
-  await second.getByRole("button", { name: /^我自己去弄/ }).click();
+  await second.getByRole("button", { name: /^自行获取/ }).click();
   await expect(second).toHaveCount(0);
   const waiting = list.locator(".ask-card").filter({ hasText: "师兄的「实测数据」到了吗？" });
   await expect(waiting).toBeVisible();

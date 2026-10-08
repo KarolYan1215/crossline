@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
-  MILESTONE_PROPOSAL_SCHEMA, MILESTONE_RELATIONS_SCHEMA, profileFactId, validateMilestoneProposal, validateRelationsProposal, computeMilestoneConfidence,
+  MILESTONE_PROPOSAL_SCHEMA, MILESTONE_RELATIONS_SCHEMA, profileFactId, validateMilestoneProposal, validateRelationsProposal, keepMilestoneProposal, computeMilestoneConfidence,
   type CheckedRelations, type MilestoneProposal, type MilestoneProposalContext, type RelationsContext
 } from "@crossline/core";
 import { continueSkillTurn, runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
@@ -118,6 +118,7 @@ export function buildProposalContext(store: CrosslineStore, workspaceId: string,
       id: template.id, identityId: template.identityId, kind: template.kind, titleHint: template.titleHint
     })),
     request: request.slice(0, 2000),
+    personalPreferences: store.preferenceLines(workspaceId, identities.map((pack) => pack.id), 20),
     ...(acceptedDiligence(store, workspaceId).length ? { diligence: acceptedDiligence(store, workspaceId) } : {}),
     ...(facts.length ? { profile: {
       today: now.toISOString().slice(0, 10),
@@ -186,6 +187,8 @@ export function createMilestoneProposer(store: CrosslineStore, workspaceId: stri
       outputSchema: MILESTONE_PROPOSAL_SCHEMA,
       prepareInput: () => context,
       validateOutput: (output) => validateMilestoneProposal(output, context),
+      // Quality refusals still standing after the repairs keep the line, with a warning for the reviewer.
+      softAccept: (rejection, output) => keepMilestoneProposal(output, context, rejection.message),
       onAudit: (audit) => { threadId = audit.threadId; },
       ...(signal ? { signal } : {}),
       timeoutMs: 60 * 60_000
@@ -200,7 +203,8 @@ export function createMilestoneProposer(store: CrosslineStore, workspaceId: stri
   }
 
   /** `only` limits the run to those lines: changing a course's target redoes its line, not the whole board. */
-  return async function propose(request: string, signal?: AbortSignal, only?: string[]): Promise<ProposalOutcome> {
+  /** `options.revised` marks a run the reviewer asked for, so its own warnings are not sent back for another redo. */
+  return async function propose(request: string, signal?: AbortSignal, only?: string[], options?: { revised?: boolean }): Promise<ProposalOutcome> {
     const client = getClient();
     if (!client) return { state: "blocked", code: "CODEX_SUPERVISOR_UNAVAILABLE", message: "Codex 运行时不可用。" };
 
@@ -223,7 +227,7 @@ export function createMilestoneProposer(store: CrosslineStore, workspaceId: stri
       return { state: "proposed", drafts, assumptions: result.output.assumptions, ...(threadId ? { threadId } : {}) };
     }
 
-    if (!lines.length) return { state: "blocked", code: "NO_MATCHING_LINE", message: "这条主线现在说得太少，或没有你确认过的事实，所以没有重新设计。" };
+    if (!lines.length) return { state: "blocked", code: "NO_MATCHING_LINE", message: "该主线信息不足或没有已确认的事实，未重新设计。" };
 
     // One run per line. A single answer for every line was eleven to fifteen milestones — about four and a half minutes a turn, so
     // that not even one repair fitted in a deadline — and one line's trouble (a thin profile, a refused date) threw away the lines
@@ -239,11 +243,19 @@ export function createMilestoneProposer(store: CrosslineStore, workspaceId: stri
       if (threadId) lastThread = threadId;
       if (!result.ok) { skipped.push({ identityId, code: result.blocker.code, message: result.blocker.message }); continue; }
       persistTargetProposals(store, workspaceId, result.output.targetProposals ?? []);
-      drafts.push(...persistProposals(store, workspaceId, result.output.milestones, context.request));
+      const saved = persistProposals(store, workspaceId, result.output.milestones, context.request);
+      drafts.push(...saved);
+      if (result.audit.warnings?.length) {
+        const entityId = `line:${identityId}`;
+        const version = store.listEvents(workspaceId, { type: "validation.warned", entityId }).length + 1;
+        store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `validation.warned:milestone_line:${identityId}:${version}`,
+          type: "validation.warned", entityId, payload: { subject: "milestone_line", version, warnings: result.audit.warnings,
+            revised: Boolean(options?.revised), milestoneIds: saved.map((draft) => draft.id) } });
+      }
       assumptions.push(...result.output.assumptions);
       for (const proposal of result.output.targetProposals ?? []) {
         const name = context.profile?.projects.find((project) => project.id === proposal.projectId)?.name ?? proposal.projectId;
-        assumptions.push(`「${name}」的目标我暂定为 ${proposal.value}（${proposal.why}）；分数线都是从它倒推的，想改在「主线」页的“目标”里一键修改，会按新目标重算。`);
+        assumptions.push(`「${name}」分数线暂定为 ${proposal.value}（${proposal.why}）；各里程碑的分数线均由此倒推，可在「主线」页修改并重算。`);
       }
     }
     if (!drafts.length) {
@@ -252,8 +264,8 @@ export function createMilestoneProposer(store: CrosslineStore, workspaceId: stri
     }
     // Only the lines that got new drafts lose their old untouched ones: a line that failed keeps what the person already had.
     supersedeUntouchedDrafts(store, workspaceId, new Set(drafts.map((draft) => draft.id)), new Set(drafts.map((draft) => draft.identityId)));
-    for (const item of skipped) assumptions.push(`「${labelOf(context, item.identityId)}」这条线这次没有生成：${item.message}`);
-    for (const identityId of thinLines(context, allLines).filter((id) => !only?.length || only.includes(id))) assumptions.push(`「${labelOf(context, identityId)}」这条线目前说得太少，或只有推断、没有你确认过的事实，先没有排里程碑；在「先了解你」里补充或确认后再设计。`);
+    for (const item of skipped) assumptions.push(`「${labelOf(context, item.identityId)}」主线本次未生成：${item.message}`);
+    for (const identityId of thinLines(context, allLines).filter((id) => !only?.length || only.includes(id))) assumptions.push(`「${labelOf(context, identityId)}」主线信息不足或仅有推断，暂未设计里程碑；在访谈中补充或确认后重新设计。`);
 
     try { await proposeRelations(client, context, drafts, signal); } catch { /* a failed link run never takes the milestones with it */ }
     return { state: "proposed", drafts, assumptions, ...(skipped.length ? { skipped } : {}), ...(lastThread ? { threadId: lastThread } : {}) };

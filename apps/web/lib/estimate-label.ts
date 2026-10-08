@@ -8,15 +8,15 @@ const familyWords: Record<string, string> = { preparation: "准备类", review: 
  */
 export function estimateBasis(estimate: Pick<Estimate, "source" | "observationCount" | "calibration" | "p50Minutes">, family?: string): string {
   switch (estimate.source) {
-    case "personal_history": return `依据你自己完成过的 ${estimate.observationCount} 次同类任务`;
-    case "manual": return "你自己填的";
+    case "personal_history": return `依据本人完成过的 ${estimate.observationCount} 次同类任务`;
+    case "manual": return "本人填写";
     case "llm_prior": {
       const calibration = estimate.calibration;
       if (calibration?.state === "applied" && calibration.raw) {
-        return `AI 估 ${calibration.raw.p50Minutes} 分 · 按你的记录约 ${estimate.p50Minutes} 分（${family ? `${familyWords[family] ?? ""}` : ""}你通常 ×${calibration.factor}，基于 ${calibration.basedOn} 次）`;
+        return `AI 估 ${calibration.raw.p50Minutes} 分 · 按本人记录约 ${estimate.p50Minutes} 分（${family ? `${familyWords[family] ?? ""}` : ""}通常 ×${calibration.factor}，基于 ${calibration.basedOn} 次）`;
       }
       const learning = calibration?.state === "learning"
-        ? `；按你的实际用时校正还在学（${calibration.needed ? `再完成 ${calibration.needed} 项` : "还没比 AI 原值更准"}）` : "";
+        ? `；按实际用时的校正仍在学习（${calibration.needed ? `再完成 ${calibration.needed} 项` : "还没比 AI 原值更准"}）` : "";
       return `AI 按任务内容估的（专注工作分钟，不含休息和等待）${learning}`;
     }
     default: return "按这条主线的通用经验估的";

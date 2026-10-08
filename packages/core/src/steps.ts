@@ -1,4 +1,4 @@
-import { ARCHETYPE_IDS, STEP_ROLES, archetypeById, isStepRole, type StepRole } from "./archetypes";
+import { ARCHETYPE_IDS, STEP_ROLES, archetypeById, isStepRole, type Archetype, type StepRole } from "./archetypes";
 
 /**
  * A task's step graph: the step planner's wire contract, the normalization that makes any answer usable, the warnings a reviewer
@@ -38,8 +38,9 @@ const str = { type: "string" };
 const num = { type: "number" };
 const object = (properties: Record<string, unknown>) => ({ type: "object", properties, required: Object.keys(properties), additionalProperties: false });
 
-export const STEP_PLAN_SCHEMA = object({
-  archetypeId: { type: "string", enum: ARCHETYPE_IDS },
+/** The step plan schema; `extraIds` adds the archetypes learned for this workspace to the ones the answer may name. */
+export const stepPlanSchema = (extraIds: readonly string[] = []) => object({
+  archetypeId: { type: "string", enum: [...ARCHETYPE_IDS, ...extraIds] },
   quantity: object({ basis: str, amount: num, unit: str }),
   rationale: str,
   steps: { type: "array", items: object({
@@ -49,6 +50,7 @@ export const STEP_PLAN_SCHEMA = object({
     executor: { type: "string", enum: ["human", "agent", "mixed"] }, tickOutcome: str
   }) }
 });
+export const STEP_PLAN_SCHEMA = stepPlanSchema();
 
 /** The reviewer's answer to a set of warnings (Skill `crossline-validation-reviewer`). */
 export type ValidationReview = { verdict: "dismiss" | "redo"; notes: string };
@@ -89,9 +91,9 @@ export const MAX_STEPS = 40;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 /** The hard check: the shape. Throws so the runner sends the problem back on the same thread. */
-export function validateStepPlanShape(value: unknown): StepPlan {
+export function validateStepPlanShape(value: unknown, extra: readonly Archetype[] = []): StepPlan {
   const plan = value as StepPlan | undefined;
-  if (!plan || !archetypeById(plan.archetypeId) || !Array.isArray(plan.steps) || plan.steps.length === 0 || plan.steps.length > MAX_STEPS)
+  if (!plan || !archetypeById(plan.archetypeId, extra) || !Array.isArray(plan.steps) || plan.steps.length === 0 || plan.steps.length > MAX_STEPS)
     throw new Error("STEP_PLAN_SCHEMA_INVALID");
   for (const step of plan.steps) {
     if (!step || typeof step.id !== "string" || !step.id.trim() || !isStepRole(step.role) || typeof step.title !== "string" || !step.title.trim())
@@ -162,8 +164,9 @@ export function normalizeStepPlan(plan: StepPlan): { plan: StepPlan; warnings: S
  * Content checks against the archetype and the task's window. `availableMinutes` is the working time between the window's start and
  * end (omitted when unknown). Warnings only.
  */
-export function stepPlanWarnings(plan: StepPlan, window: { notBefore?: string; dueBy?: string; availableMinutes?: number } = {}): StepWarning[] {
-  const archetype = archetypeById(plan.archetypeId);
+export function stepPlanWarnings(plan: StepPlan, window: { notBefore?: string; dueBy?: string; availableMinutes?: number } = {},
+  extra: readonly Archetype[] = []): StepWarning[] {
+  const archetype = archetypeById(plan.archetypeId, extra);
   if (!archetype) return [{ code: "STEP_ARCHETYPE_UNKNOWN", detail: plan.archetypeId }];
   const warnings: StepWarning[] = [];
   const roles = plan.steps.map((step) => step.role);

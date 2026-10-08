@@ -1,4 +1,4 @@
-import { FLYWHEEL_OUTPUT_SCHEMA, validateFlywheelExpansion, type FlywheelContext, type FlywheelExpansion }
+import { FLYWHEEL_OUTPUT_SCHEMA, keepFlywheelExpansion, validateFlywheelExpansion, type FlywheelContext, type FlywheelExpansion }
   from "@crossline/core";
 import { runCodexSkill, webResearchBlocker, type CodexRpcBoundary } from "@crossline/codex";
 import type { CrosslineStore } from "@crossline/db";
@@ -56,6 +56,7 @@ export function createFlywheelExpander(store: CrosslineStore, workspaceId: strin
       allowWebSearch: true,
       prepareInput: () => context,
       validateOutput: (output) => validateFlywheelExpansion(output, context),
+      softAccept: (rejection, output) => keepFlywheelExpansion(output, context, rejection.message),
       onAudit: () => {},
       timeoutMs: 60 * 60_000
     });

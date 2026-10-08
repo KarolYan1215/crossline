@@ -17,3 +17,7 @@ Return raw JSON `{summary, nextActionReason, alternatives[], blockers[]}`:
 The order is already decided by the scheduler (urgency tier first, importance inside a tier, then deadline). Narrate it; never re-rank, never compute a score of your own, never mention a factor that is not in the input. Chinese, concise, objective, third person.
 
 Allowed tools: supplied state only. Budget: economy. Risk: routine.
+
+## Language
+
+Every human-readable field: Simplified Chinese, concise, standard academic or workplace register, objective third person (no 你/您, no 我, no greetings or filler). Fixed terms: 主线, 里程碑, 任务, 步骤, 长期目标, 分数线; verbs 批准, 验收, 撤销. Text quoted from the person or a source stays verbatim.

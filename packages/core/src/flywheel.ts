@@ -69,7 +69,7 @@ export function nightlyTrigger(input: NightlyInput): NightlyTrigger {
 
   // Collection being off is not a reason to skip; it only means the activity check cannot be made.
   if (input.idleMs !== undefined && input.idleMs < input.idleRequiredMs) {
-    return { run: false, code: "USER_ACTIVE", message: "你还在用电脑，稍后重试，以免占用你现在要用的额度。" };
+    return { run: false, code: "USER_ACTIVE", message: "电脑正在使用中，稍后重试，避免占用当前额度。" };
   }
 
   const decision = allowDiscretionarySpend(input.cost, input.spend);

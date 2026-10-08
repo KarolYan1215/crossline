@@ -109,7 +109,7 @@ export function createManualbookBuilder(store: CrosslineStore, workspaceId: stri
   return async function build(workOrderId: string): Promise<ManualOutcome> {
     const blocked = (code: string, message: string): ManualOutcome => ({ state: "blocked", workOrderId, code, message });
     const client = getClient();
-    if (!client) return blocked("CODEX_SUPERVISOR_UNAVAILABLE", "Codex 运行时不可用；你仍可人工自备材料。");
+    if (!client) return blocked("CODEX_SUPERVISOR_UNAVAILABLE", "模型服务不可用；可手动准备材料。");
     if (!/^[a-zA-Z0-9_-]{1,128}$/.test(workOrderId)) return blocked("MATERIAL_PATH_OUTSIDE_ROOT", "作业 id 不合法。");
     const order = store.getWorkOrder(workspaceId, workOrderId);
     if (!order) return blocked("WORK_ORDER_NOT_FOUND", "找不到该作业。");
@@ -210,7 +210,7 @@ export function createManualbookBuilder(store: CrosslineStore, workspaceId: stri
       renameSync(staging, root);
     } catch {
       rmSync(staging, { recursive: true, force: true });
-      return fail("MATERIAL_PREPARATION_FAILED", "手册写入失败；你仍可人工自备材料。");
+      return fail("MATERIAL_PREPARATION_FAILED", "教程写入失败；可手动准备材料。");
     }
     for (const file of files.filter((item) => item.record)) {
       store.saveMaterial({ id: randomUUID(), ownerId, workspaceId, workOrderId, uri: pathToFileURL(path.join(root, file.path)).href,

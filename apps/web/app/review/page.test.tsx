@@ -56,7 +56,7 @@ describe("review page", () => {
     const { default: ReviewPage } = await import("./page");
     const html = renderToStaticMarkup(await ReviewPage());
     expect(html).toContain("本周没有自动验收记录");
-    expect(html).toContain("本周没有扩展记录");
-    expect(html).toContain("目前没有待回答的问题");
+    expect(html).toContain("本周无扩展记录");
+    expect(html).toContain("暂无待判断的问题");
   });
 });

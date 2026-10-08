@@ -54,7 +54,7 @@ export default async function ReviewPage() {
         <MilestonePreview detail={milestoneDetails.get(milestone.id)} />
         <b>{milestone.title}</b>
         {milestone.criteria.length === 0
-          ? <em className="review-flag">未声明达成标准 —— 绑定它的作业仍按各自的证据要求验收，但里程碑本身的进度记不下来，直到你写下什么算达成。
+          ? <em className="review-flag">未声明达成标准：关联任务仍按各自证据验收，但里程碑进度无法记录。
               <a href={`/milestones?edit=${encodeURIComponent(milestone.id)}`}>立即补充 →</a>
             </em>
           : <ul>{milestone.criteria.map((criterion, index) =>
@@ -72,7 +72,7 @@ export default async function ReviewPage() {
       <h2>本周信息域扩展</h2>
       {night.state !== "none" && <p className="review-note">{night.state === "ran" ? `最近一次夜间扩展：${night.proposals} 条候选` : `最近一次夜间扩展未运行：${night.reason}`}</p>}
       {review.findings.length === 0
-        ? <p className="review-empty">本周没有扩展记录。夜间扩展只在配额刷新且你不在用电脑时运行。</p>
+        ? <p className="review-empty">本周无扩展记录。夜间扩展仅在配额刷新且电脑空闲时运行。</p>
         : <ul className="review-list">{review.findings.map((finding) => <li key={finding.sourceUrl}>
           <b>{finding.summary}</b>
           <small>{finding.sourceTitle} · {finding.retrievedAt.slice(0, 10)} · 里程碑 {finding.milestoneId}</small>
@@ -133,9 +133,9 @@ export default async function ReviewPage() {
     </section>
 
     <section className="review-block">
-      <h2>需要你判断的问题</h2>
+      <h2>待判断的问题</h2>
       {review.questions.length === 0
-        ? <p className="review-empty">目前没有待回答的问题。周复盘 Skill 运行后，需要你判断的点会出现在这里。</p>
+        ? <p className="review-empty">暂无待判断的问题；周复盘运行后在此列出。</p>
         : <ul className="review-list">{review.questions.map((item) => <li key={item.id}><b>{item.question}</b></li>)}</ul>}
     </section>
 

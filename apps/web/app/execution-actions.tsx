@@ -134,7 +134,7 @@ export function ExecutionActions({ workOrderId, intent, state, paused, ownerId, 
     {state === "preparing" && <>
       <span className="micro">材料准备中</span>
       <button type="button" disabled={busy} onClick={() => void send({ action: "materials_retry" })}>重新准备材料</button>
-      <button type="button" disabled={busy} onClick={() => void send({ action: "materials_ready" })}>材料我已备好</button>
+      <button type="button" disabled={busy} onClick={() => void send({ action: "materials_ready" })}>材料已备好</button>
     </>}
     {(state === "approved" || state === "ready_for_human") && <>
       {showEnergyProbe && <><span className="micro">开始前精力</span><EnergyProbe context="before_task" workOrderId={workOrderId} /></>}

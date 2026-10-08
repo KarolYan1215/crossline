@@ -281,9 +281,9 @@ export function MilestoneAdmin({ milestones, identities, templates, previews, in
     <div className="milestone-admin-actions">
       <button type="button" onClick={startNew} disabled={busy}>新建里程碑</button>
       <label className="milestone-ask">
-        <span className="sr-only">告诉 AI 你想往哪个方向走</span>
+        <span className="sr-only">设计方向（可选）</span>
         <input value={ask} maxLength={2000} disabled={busy}
-          placeholder="可选：告诉 AI 你想往哪个方向走"
+          placeholder="设计方向（可选）"
           onChange={(event) => setAsk(event.target.value)} />
       </label>
       <button type="button" className="secondary-button" onClick={() => void propose()} disabled={busy}>让 AI 提议 ↗</button>
@@ -294,7 +294,7 @@ export function MilestoneAdmin({ milestones, identities, templates, previews, in
       <summary>模板管理（{templates.length} 个，新建里程碑时可套用）</summary>
       <p className="milestone-hint">
         模板决定一条里程碑的类型标注和默认达成标准，是 AI 生成里程碑时置信度的来源——套用了模板、且标准与模板一致才算「高置信」。
-        你可以在这里直接新增模板，也可以在浮窗助手里要求 AI 帮你新增。
+        可在此新增模板，或通过小助手新增。
       </p>
       {!newTemplate
         ? <button type="button" className="secondary-button" onClick={() => setNewTemplate({
@@ -341,12 +341,12 @@ export function MilestoneAdmin({ milestones, identities, templates, previews, in
 
     {messages.length > 0 && <div className="milestone-conversation">
       <ul>{messages.map((message, index) => <li key={index} data-from={message.from}>
-        <b>{message.from === "you" ? "你" : "AI"}</b><span>{message.text}</span>
+        <b>{message.from === "you" ? "本人" : "设计"}</b><span>{message.text}</span>
       </li>)}</ul>
       {threadId ? <div className="milestone-conversation-reply">
         <label><span className="sr-only">继续对话</span>
           <input value={reply} maxLength={2000} disabled={busy}
-            placeholder="继续说明你想要什么，AI 会在同一个对话里回应"
+            placeholder="补充说明，在同一对话中继续"
             onChange={(event) => setReply(event.target.value)}
             onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void continueConversation(); } }} />
         </label>
@@ -377,7 +377,7 @@ export function MilestoneAdmin({ milestones, identities, templates, previews, in
               <option key={template.id} value={template.id}>{templateKindLabel[template.kind]} · {template.titleHint}</option>)}
           </select></label>
       </div>
-      {draft.templateId && <p className="milestone-hint">已套用模板的默认达成标准——继续编辑不会清掉模板关联，除非你在上面重新选择「不套用」。</p>}
+      {draft.templateId && <p className="milestone-hint">已套用模板的默认达成标准；继续编辑保留模板关联，选择「不套用」时解除。</p>}
 
       <h4>达成标准</h4>
       <p className="milestone-hint">
@@ -447,7 +447,7 @@ export function MilestoneAdmin({ milestones, identities, templates, previews, in
         {milestone.rationale && <p className="milestone-rationale">提议理由：{milestone.rationale}</p>}
         </details>}
         {milestone.successCriteria.length === 0
-          ? <em className="review-flag">未声明达成标准 —— 绑定它的作业仍按各自的证据要求验收，但里程碑本身的进度记不下来，直到你写下什么算达成。
+          ? <em className="review-flag">未声明达成标准：关联任务仍按各自证据验收，但里程碑进度无法记录。
               <button type="button" onClick={() => startEdit(milestone)} disabled={busy}>立即补充 →</button>
             </em>
           : <ul className="criterion-view">{milestone.successCriteria.map((criterion) => <li key={criterion.id}>

@@ -49,6 +49,11 @@ export type AssistantProposalCard = {
 
 export type AssistantTurnProposal = {
   reply: string;
+  /**
+   * What the person corrected about how the system works for them (「这类作业我一般先看讲义」, 「这个任务分错类了，是写作」),
+   * recorded as personal preferences at once; one about the task in view also replans its steps with the correction as feedback.
+   */
+  corrections?: Array<{ scope: string; text: string; taskId: string }>;
   /** Codex-style quick-reply suggestions shown as buttons under the reply; empty is normal for a turn
    * that is just answering something, not asking a follow-up. */
   quickReplies: string[];
@@ -102,6 +107,11 @@ export const ASSISTANT_OUTPUT_SCHEMA = object({
     title: { type: "string", minLength: 1, maxLength: 240 },
     context: { type: "string", minLength: 0, maxLength: 500 }
   }) },
+  corrections: { type: "array", maxItems: 3, items: object({
+    scope: { type: "string", minLength: 1, maxLength: 80 },
+    text: { type: "string", minLength: 4, maxLength: 300 },
+    taskId: { type: "string", minLength: 0, maxLength: 128 }
+  }) },
   blockers: { type: "array", maxItems: 5, items: object({ code: shortStr, message: shortStr }) }
 });
 
@@ -137,8 +147,14 @@ export function validateAssistantTurnProposal(value: unknown, context: Assistant
     if (card?.kind !== "capture" || typeof card.title !== "string" || !card.title.trim() || card.title.length > 240
       || typeof card.context !== "string" || card.context.length > 500) throw new Error("ASSISTANT_PROPOSAL_INVALID");
   }
+  // A correction is kept, never refused: a scope that is not a line or an archetype becomes `all`, and only the task in view may be
+  // replanned from it.
+  const corrections = (Array.isArray((raw as { corrections?: unknown }).corrections) ? raw.corrections ?? [] : [])
+    .filter((item) => item && typeof item.text === "string" && item.text.trim().length >= 4).slice(0, 3)
+    .map((item) => ({ scope: context.identities.includes(item.scope) || /^archetype:[a-z_]+$/.test(item.scope) ? item.scope : "all",
+      text: item.text.trim().slice(0, 300), taskId: item.taskId && item.taskId === context.workOrderId ? item.taskId : "" }));
   return {
     reply: raw.reply, quickReplies: raw.quickReplies, materialDraft: raw.materialDraft ?? null,
-    templateProposal: raw.templateProposal ?? null, proposals: proposals.slice(0, 3), blockers: []
+    templateProposal: raw.templateProposal ?? null, proposals: proposals.slice(0, 3), corrections, blockers: []
   };
 }

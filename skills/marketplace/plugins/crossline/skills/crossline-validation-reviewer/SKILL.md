@@ -11,6 +11,12 @@ Input is `crossline.validation-review.v1`: a `subject` (what was produced — `k
 - `verdict: "redo"` when a warning points at a real problem the person would notice: missing hand-in, steps in an order that cannot work, a total that cannot fit the window, a step with no way to tell it is done.
 - `notes`: for `redo`, the concrete changes to make, one per line, addressed to the planner (「把检查放在提交之前」, 「按 8 道题重新估算总时长」); for `dismiss`, one line on why the warnings do not matter. Chinese, objective, third person.
 
+For a `milestone_line` (drafts an architect run kept despite a quality warning: titles, deadlines, targets, criteria), `redo` when a milestone is a state rather than an event, a score line has no margin or derivation, or a graded part is missing; the notes become the architect's brief for that line. For an `analysis` (a task whose estimate or contract was corrected in the smallest way after the warning), `redo` when the corrected estimate or the evidence contract still cannot be right for the task; the notes go to the step planner, which re-estimates step by step.
+
 For a `milestone_relation`, judge whether the claimed transfer is real: does the first milestone produce an artefact or capability the second can actually use, at a time it can still use it, and could the stated falsifier ever be observed? `redo` when the link names no transferable artefact, the timing cannot work, or the falsifier is empty; the notes say what the link should claim instead, or that it should be dropped.
 
 Judge the substance, not the wording. Do not redo for cosmetic reasons. Do not invent facts about the person or the task.
+
+## Language
+
+Every human-readable field: Simplified Chinese, concise, standard academic or workplace register, objective third person (no 你/您, no 我, no greetings or filler). Fixed terms: 主线, 里程碑, 任务, 步骤, 长期目标, 分数线; verbs 批准, 验收, 撤销. Text quoted from the person or a source stays verbatim.

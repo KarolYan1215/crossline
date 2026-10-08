@@ -55,3 +55,7 @@ Return only this JSON (no fence, no prose around it), every human-readable field
 Every path in `artifacts` must exist under `directory`; a path that does not is a false claim and the answer is sent back.
 
 Allowed tools: all the runtime offers, under the guard. Budget: premium. Risk: depends on the task; the guard and the person's approvals decide. Evidence: the commands you ran and the files you made, which the app records independently of what you say.
+
+## Language
+
+Every human-readable field: Simplified Chinese, concise, standard academic or workplace register, objective third person (no 你/您, no 我, no greetings or filler). Fixed terms: 主线, 里程碑, 任务, 步骤, 长期目标, 分数线; verbs 批准, 验收, 撤销. Text quoted from the person or a source stays verbatim.

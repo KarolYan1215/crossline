@@ -27,6 +27,6 @@ export function QuestionCard({ question, answer, onChange, identities, projects,
       </button>)}
     </div>}
     {(question.allowOther || question.kind === "free") && <input className="ob-other" value={answer.other} aria-label={`${question.text} — 其他`}
-      placeholder={question.kind === "free" ? "写下你的回答…" : "其他（可不填）…"} onChange={(event) => onChange({ ...answer, other: event.target.value })} />}
+      placeholder={question.kind === "free" ? "回答…" : "其他（可不填）…"} onChange={(event) => onChange({ ...answer, other: event.target.value })} />}
   </fieldset>;
 }

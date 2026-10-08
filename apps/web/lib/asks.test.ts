@@ -44,7 +44,7 @@ test("a refused backplan becomes one ask per missing input, explained, urgent wh
   expect(asks.map((ask) => ask.id)).toEqual([`bp:${eventId}:m1`, `bp:${eventId}:m2`]);
   expect(asks[0]).toMatchObject({ urgency: "now", dueDay: "2026-10-09", line: "research" });
   expect(asks[0]!.title).toContain("MoS₂ 实测参数数据");
-  expect(asks[0]!.why).toContain("排成了第一步");
+  expect(asks[0]!.why).toContain("已排为第一步");
   expect(asks[0]!.options.map((option) => option.id)).toEqual(["have", "waiting", "ask_first", "skip"]);
   // The person's own 「谁给」 is prefilled from what the model said.
   expect(asks[0]!.options[1]!.fields![0]).toMatchObject({ id: "who", initial: "师兄" });
@@ -185,12 +185,12 @@ test("a gate's real 「not enough」 is asked with what would satisfy it; 「重
 test("the risk explanation says when, how much, and by how much it misses — and that it is a forecast", () => {
   const text = explainRisk({ deadline: "2026-10-12", today: "2026-10-07", p50Day: "2026-10-10", p85Day: "2026-10-13", slackDays: -1,
     steps: 2, p50Minutes: 180, p85Minutes: 300, moreToSplit: true });
-  expect(text).toContain("截止 10/12（还剩 5 天）");
+  expect(text).toContain("截止 10/12（剩 5 天）");
   expect(text).toContain("3–5 小时");
-  expect(text).toContain("顺利的话 10/10 做完");
-  expect(text).toContain("要到 10/13，比截止晚 1 天");
-  expect(text).toContain("后面还有没拆的");
-  expect(text).toContain("不是判决");
+  expect(text).toContain("通常 10/10 完成");
+  expect(text).toContain("保守估计 10/13 完成，比截止晚 1 天");
+  expect(text).toContain("尚有未拆分的工作");
+  expect(text).toContain("基于已知工作的预测");
 });
 
 test("a milestone whose known work cannot finish by its deadline is asked about; 「接受这个风险」 quiets it for a week", async () => {

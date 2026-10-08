@@ -72,7 +72,7 @@ export function profileGaps(input: ProfileGapInput): ProfileGap[] {
       detail: `「${label}」线目前没有任何你确认过的事实，只有推断。要问，或者让人明确说这条线先不规划（记为 slot=skipped 的 confirmed 事实）。`,
       question: {
         id: `gap-line-${identity.id}`, kind: "single", allowOther: true, identityId: identity.id, projectId: "",
-        text: `「${label}」这条线，你现在有在推进的具体事情吗？目前我手里只有猜测。`,
+        text: `「${label}」主线当前在推进的具体事项？（目前仅有推断）`,
         options: [
           { id: "doing", label: "有，我来写下具体在做什么", detail: "在下面的“其他”里写项目名、截止日期、卡在哪" },
           { id: "later", label: "有，但现在不想规划", detail: "这条线先跳过，之后随时可以回来补" },
@@ -92,7 +92,7 @@ export function profileGaps(input: ProfileGapInput): ProfileGap[] {
       question: {
         id: `gap-undated-${project.id}-${item.title.replace(/[^\p{L}\p{N}]+/gu, "-").slice(0, 30)}`, kind: "single", allowOther: true,
         identityId: project.identityId, projectId: project.id,
-        text: `「${project.name}」的「${item.title}」，文件里的日期写的是待定。你知道大概什么时候吗？`,
+        text: `「${project.name}」的「${item.title}」在文件中标为待定，大致日期？`,
         options: [
           { id: "known", label: "知道具体日期，我来写", detail: "在“其他”里写日期，里程碑会按它排" },
           { id: "last-week", label: "学期最后一周前后", detail: "里程碑按学期最后一周之前暂定，通知下来再改" },

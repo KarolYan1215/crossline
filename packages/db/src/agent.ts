@@ -206,7 +206,7 @@ export function assistantPlanFor(store: CrosslineStore, workspaceId: string, ord
   const order = store.listWorkOrders(workspaceId).find((item) => item.id === orderId);
   if (!order) return { ok: false, code: "ORDER_NOT_FOUND", message: "找不到这个任务。" };
   if (order.tombstone || !DISPATCH_STATES.has(order.state)) {
-    return { ok: false, code: "ORDER_NOT_DISPATCHABLE", message: "这个任务不在可以交给助手的阶段（需要已批准、你还没开始做）。" };
+    return { ok: false, code: "ORDER_NOT_DISPATCHABLE", message: "该任务不在可交给助手的阶段（需已批准且尚未开始）。" };
   }
   const facts = store.listProfileFacts(workspaceId).filter((fact) => fact.projectId === order.projectId);
   const { dates, undated } = latestFileDates(store, workspaceId);

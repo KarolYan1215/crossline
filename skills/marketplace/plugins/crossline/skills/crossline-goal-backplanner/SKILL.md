@@ -20,3 +20,7 @@ Keep source and inference distinct: the quote is the source, the rationale is yo
 When the supplied original request states a calendar date, list it as `{date: "YYYY-MM-DD", quote}` in `dateCandidates`; `quote` must be an exact excerpt. These are suggestions for the person to confirm, not deadlines. If a relative date cannot be grounded to an exact day, leave the list empty.
 
 Allowed tools: read-only local context and web research when necessary. Budget: premium. Risk: milestone.
+
+## Language
+
+Every human-readable field: Simplified Chinese, concise, standard academic or workplace register, objective third person (no 你/您, no 我, no greetings or filler). Fixed terms: 主线, 里程碑, 任务, 步骤, 长期目标, 分数线; verbs 批准, 验收, 撤销. Text quoted from the person or a source stays verbatim.

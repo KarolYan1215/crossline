@@ -29,8 +29,8 @@ export function ProfilePanel({ state, onChanged }: { state: OnboardingState; onC
   const change = async (body: Record<string, unknown>) => { if (await post(body)) onChanged(); };
   const linkBody = (link: Link) => ({ identityId: link.from, projectId: "", slot: link.slot });
 
-  return <aside className="ob-panel" aria-label="我对你的了解">
-    <h2>我对你的了解</h2>
+  return <aside className="ob-panel" aria-label="当前画像">
+    <h2>当前画像</h2>
     {identities.map((identity) => <IdentityBlock key={identity.id} identity={identity}
       projects={projects.filter((project) => project.identityId === identity.id)}
       facts={facts.filter((fact) => fact.identityId === identity.id && !fact.slot.startsWith("flywheel_"))}

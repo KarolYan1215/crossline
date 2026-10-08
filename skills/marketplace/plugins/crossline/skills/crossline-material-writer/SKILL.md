@@ -30,3 +30,7 @@ The ids of the sources you actually used. A step that was given sources and cite
 Write in Chinese.
 
 Allowed tools: none. Budget: mid tier. Risk: routine.
+
+## Language
+
+Every human-readable field: Simplified Chinese, concise, standard academic or workplace register, objective third person (no 你/您, no 我, no greetings or filler). Fixed terms: 主线, 里程碑, 任务, 步骤, 长期目标, 分数线; verbs 批准, 验收, 撤销. Text quoted from the person or a source stays verbatim.

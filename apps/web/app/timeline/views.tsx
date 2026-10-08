@@ -73,7 +73,7 @@ export function DayTimeline({ day, items, deadlines, nowMinute, labels, quiet, s
               {resizing?.id === item.id && <b className="dt-resize-live mono">{toMinutes(resizing.end) - toMinutes(item.start)} 分钟</b>}</em></span>
           </button>;
         })}
-        {rows.length === 0 && flags.length === 0 && <p className="dt-empty">这一天没有安排。灰色是你标为不可用的时段，其余时间可以排任务。</p>}
+        {rows.length === 0 && flags.length === 0 && <p className="dt-empty">当日无安排。灰色为不可用时段，其余时段可排任务。</p>}
         {nowMinute !== undefined && <span className="dt-now" style={{ "--p": nowMinute / MINUTES_PER_DAY } as CSSProperties}><i>现在</i></span>}
       </div>
     </div>

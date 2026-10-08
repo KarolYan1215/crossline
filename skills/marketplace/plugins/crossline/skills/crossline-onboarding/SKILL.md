@@ -48,3 +48,7 @@ Every `slotUpdates[]` entry names where it came from:
 Output profile facts and candidates only. Nothing here is committed to a plan or calendar; the person reviews everything.
 
 Allowed tools: none (the app has already extracted any file text into `sources[]`). Budget: premium. Risk: routine. Evidence: `sourceRef` and verbatim `sourceQuote` for every confirmed fact.
+
+## Language
+
+Every human-readable field: Simplified Chinese, concise, standard academic or workplace register, objective third person (no 你/您, no 我, no greetings or filler). Fixed terms: 主线, 里程碑, 任务, 步骤, 长期目标, 分数线; verbs 批准, 验收, 撤销. Text quoted from the person or a source stays verbatim.

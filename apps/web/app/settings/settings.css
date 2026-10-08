@@ -49,6 +49,12 @@
 .st-meter{display:grid;grid-template-columns:minmax(0,1fr) 120px 3.5em;gap:8px;align-items:center;font-size:13px}
 .st-meter-bar{height:6px;background:var(--mist)}
 .st-meter-bar i{display:block;height:100%;background:var(--ink)}
+.st-card-wide{grid-column:1/-1}
+.st-prefs{margin:0;padding:0;list-style:none;display:grid;gap:4px;max-height:420px;overflow:auto}
+.st-prefs li{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center;padding:4px 0;border-top:1px solid var(--chalk);font-size:13px}
+.st-pref-text{flex:1 1 260px;min-width:0}
+.st-prefs small{font-size:12px;color:var(--graphite)}
+.st-pref-remove{padding:0 8px;font-size:14px;line-height:22px}
 .plan-sync-icon{margin-left:0;padding:4px 9px;font-size:14px}
 @media (max-width:760px){
   .st-layout{grid-template-columns:minmax(0,1fr)}

@@ -11,7 +11,7 @@ test("one morning brief at the first working hour, then single messages only for
   const planned = planNotifications(base);
   expect(planned[0]).toMatchObject({ kind: "brief", title: "今天的 Crossline" });
   expect(planned[0]!.body).toContain("今天该到：师兄的真实测量数据");
-  expect(planned[0]!.body).toContain("4 件等你决定");
+  expect(planned[0]!.body).toContain("4 项待决定");
   expect(planned.filter((item) => item.kind === "urgent").map((item) => item.title)).toEqual(["师兄的真实测量数据到了吗？", "明天到期：实测 MoS₂ 参数可驱动 NeuroSim"]);
 });
 
@@ -49,7 +49,7 @@ test("with the web's asks, only those two days from a deadline interrupt, and th
   const asks = [{ id: "bp:e:m1", title: "「MoS₂」还缺：实测数据", urgency: "now" as const, path: "/" },
     { id: "cap:c:0", title: "「整理意见」没能自动拆解", urgency: "later" as const, path: "/approvals#asks" }];
   const planned = planNotifications({ ...base, asks });
-  expect(planned[0]!.body).toContain("要你答：「MoS₂」还缺：实测数据");
+  expect(planned[0]!.body).toContain("待决：「MoS₂」还缺：实测数据");
   expect(planned.filter((item) => item.kind === "urgent").map((item) => item.title))
     .toEqual(["「MoS₂」还缺：实测数据", "明天到期：实测 MoS₂ 参数可驱动 NeuroSim"]);
   expect(planNotifications({ ...base, waitingDue: [], dueSoon: [], gateRefusals: [{ id: "g", title: "仿真", message: "SKILL_UNAUTHENTICATED" }] })
@@ -64,7 +64,7 @@ test("a pass reads the web's snapshot while it is fresh and its own reading once
     asks: [{ id: "risk:m", title: "「MoS₂」可能赶不上 10/9", urgency: "now", path: "/" }] }));
   const shown: Array<[string, string]> = [];
   await notifyPass(store, "w", now, async (title, body) => { shown.push([title, body]); return true; });
-  expect(shown[0]![1]).toContain("7 件等你决定");
+  expect(shown[0]![1]).toContain("7 项待决定");
   expect(shown.map(([title]) => title)).toContain("「MoS₂」可能赶不上 10/9");
 });
 

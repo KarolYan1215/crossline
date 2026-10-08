@@ -1,11 +1,12 @@
 import {
-  ARCHETYPES, AVAILABILITY_SETTING, DEFAULT_AVAILABILITY, STEP_PLAN_SCHEMA, VALIDATION_REVIEW_SCHEMA, archetypeBrief, goalSettingKey,
+  ARCHETYPES, AVAILABILITY_SETTING, DEFAULT_AVAILABILITY, VALIDATION_REVIEW_SCHEMA, archetypeBrief, archetypeById, stepPlanSchema, goalSettingKey,
   normalizeStepPlan, stepPlanWarnings, validateAvailability, validateStepPlanShape, validateValidationReview, weeklyAvailableHours,
   PROGRESS_ASSESSMENT_SCHEMA, validateProgressAssessment, type ProgressAssessment, type StepPlan, type StepWarning, type ValidationReview
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import { listAgentTasks, type CrosslineStore, type StoredWorkOrder } from "@crossline/db";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
+import { learnedArchetypes } from "./archetype-curator";
 import { ownerOf } from "./owner";
 
 const PLANNER = "crossline:crossline-step-planner";
@@ -65,6 +66,8 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
     const window = taskWindow(store, workspaceId, order);
     const previous = store.getStepPlan(workspaceId, workOrderId);
     const done = (previous?.steps ?? []).filter((step) => step.status !== "planned");
+    // Archetypes the curator learned for this workspace are offered beside the built-in ones and checked the same way.
+    const learned = learnedArchetypes(store, workspaceId);
     const input = {
       version: "crossline.step-plan.v1",
       task: { intent: order.intent, line: order.identityId, project: project?.name ?? "", riskTier: order.riskTier,
@@ -75,18 +78,19 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
       window,
       materials: store.listSourceDocuments(workspaceId).filter((doc) => !doc.projectId || doc.projectId === order.projectId)
         .map((doc) => ({ name: doc.fileName, opening: doc.extractedText.slice(0, 300) })).slice(0, 12),
-      archetypes: ARCHETYPES.map(archetypeBrief),
+      archetypes: [...ARCHETYPES, ...learned].map(archetypeBrief),
+      // Corrections and patterns the person has given: for this task, its line, or everything.
+      personalPreferences: store.preferenceLines(workspaceId, [order.identityId, `task:${order.id}`], 15),
       doneSteps: done.map((step) => ({ title: step.title, role: step.role, deliverable: step.deliverable })),
       // What the assistant already produced for this task and the person accepted: work that exists, not work to plan again.
       acceptedOutputs: listAgentTasks(store, workspaceId).filter((task) => task.workOrderId === workOrderId && task.status === "accepted")
         .map((task) => ({ title: task.title, files: task.artifacts.map((artifact) => artifact.path.split(/[\\/]/).at(-1)), note: task.reviewNote })),
-      preferences: [] as string[],
       feedback
     };
     const result = await runCodexSkill<StepPlan>(client, input, { skillName: PLANNER, cwd,
       developerInstructions: "Choose the archetype and write the task's step graph as the Skill describes. Return raw JSON only."
         + (feedback ? " Apply the feedback: it is what the reviewer or the person asked to change." : ""),
-      outputSchema: STEP_PLAN_SCHEMA, prepareInput: () => input, validateOutput: (output) => validateStepPlanShape(output),
+      outputSchema: stepPlanSchema(learned.map((archetype) => archetype.id)), prepareInput: () => input, validateOutput: (output) => validateStepPlanShape(output, learned),
       onAudit: () => {}, ...(signal ? { signal } : {}), timeoutMs: 60 * 60_000 });
     if (!result.ok) {
       if (!/^(SKILL_|CODEX_)/.test(result.blocker.code)) store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId,
@@ -98,7 +102,7 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
     // Steps must not start before the window or end after it: clamp, the reviewer sees the warning.
     // What normalization already fixed (rescaled shares, a missing estimate filled in, an unknown dependency dropped) needs no judgement;
     // only the rest goes to the reviewer.
-    const warnings = [...fixed.filter((warning) => !AUTO_FIXED.has(warning.code)), ...stepPlanWarnings(normalized, window)];
+    const warnings = [...fixed.filter((warning) => !AUTO_FIXED.has(warning.code)), ...stepPlanWarnings(normalized, window, learned)];
     const saved = store.saveStepPlan(workspaceId, workOrderId, normalized, ownerOf(store, workspaceId), feedback ? "revised" : "planned");
     if (warnings.length) store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId,
       idempotencyKey: `validation.warned:task_steps:${workOrderId}:${saved.version}`, type: "validation.warned", entityId: workOrderId,
@@ -161,7 +165,7 @@ export function warningsAwaitingReview(store: CrosslineStore, workspaceId: strin
   return store.listEvents(workspaceId, { type: "validation.warned" })
     .filter((event) => !reviewed.has(`${event.entityId}:${(event.payload as { version?: number }).version}`))
     .slice(0, limit)
-    .map((event) => ({ entityId: event.entityId, ...(event.payload as { subject: string; version: number; warnings: StepWarning[]; revised: boolean }) }));
+    .map((event) => ({ entityId: event.entityId, ...(event.payload as { subject: string; version: number; warnings: StepWarning[]; revised: boolean; milestoneIds?: string[] }) }));
 }
 
 /**
@@ -170,14 +174,17 @@ export function warningsAwaitingReview(store: CrosslineStore, workspaceId: strin
  * redone again by the reviewer — one round, so a disagreement cannot loop.
  */
 export function createWarningReviewer(store: CrosslineStore, workspaceId: string, cwd: string, getClient: () => CodexRpcBoundary | undefined,
-  replan: (workOrderId: string, feedback: string) => Promise<unknown>, reviseRelation?: (relationId: string, notes: string) => Promise<unknown>) {
+  replan: (workOrderId: string, feedback: string) => Promise<unknown>, reviseRelation?: (relationId: string, notes: string) => Promise<unknown>,
+  reviseLine?: (identityId: string, notes: string) => Promise<unknown>) {
   return async function review(item: ReturnType<typeof warningsAwaitingReview>[number]): Promise<ValidationReview | undefined> {
     const client = getClient();
     if (!client) return undefined;
     const record = (verdict: ValidationReview) => store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId,
       idempotencyKey: `validation.reviewed:${item.entityId}:${item.version}`, type: "validation.reviewed", entityId: item.entityId,
       payload: { subject: item.subject, version: item.version, ...verdict } });
-    const input = item.subject === "milestone_relation" ? relationSubject(store, workspaceId, item) : stepSubject(store, workspaceId, item);
+    const input = item.subject === "milestone_relation" ? relationSubject(store, workspaceId, item)
+      : item.subject === "milestone_line" ? lineSubject(store, workspaceId, item)
+      : item.subject === "analysis" ? analysisSubject(store, workspaceId, item) : stepSubject(store, workspaceId, item);
     if (!input) { record({ verdict: "dismiss", notes: "已被新版本取代" }); return undefined; }
     const result = await runCodexSkill<ValidationReview>(client, input, { skillName: REVIEWER, cwd,
       developerInstructions: "Decide whether the warnings matter, as the Skill describes. Return raw JSON only.",
@@ -189,6 +196,9 @@ export function createWarningReviewer(store: CrosslineStore, workspaceId: string
     record(verdict);
     if (verdict.verdict === "redo") {
       if (item.subject === "milestone_relation") await reviseRelation?.(item.entityId, verdict.notes);
+      else if (item.subject === "milestone_line") await reviseLine?.(item.entityId.replace(/^line:/, ""), verdict.notes);
+      // An analysis whose numbers or contract were corrected is fixed where its numbers now live: the task's step plan is redone.
+      else if (item.subject === "analysis") await replan(item.entityId.replace(/^analysis:/, ""), verdict.notes);
       else await replan(item.entityId, verdict.notes);
     }
     return verdict;
@@ -202,9 +212,32 @@ function stepSubject(store: CrosslineStore, workspaceId: string, item: PendingWa
   const order = store.listWorkOrders(workspaceId).find((row) => row.id === item.entityId);
   if (!plan || !order || plan.version !== item.version) return undefined;
   return { version: "crossline.validation-review.v1", warnings: item.warnings,
-    subject: { kind: "task_steps", task: order.intent, archetype: archetypeBrief(ARCHETYPES.find((a) => a.id === plan.archetypeId) ?? ARCHETYPES[0]!),
+    subject: { kind: "task_steps", task: order.intent, archetype: archetypeBrief(archetypeById(plan.archetypeId, learnedArchetypes(store, workspaceId)) ?? ARCHETYPES[0]!),
       quantity: plan.quantity, rationale: plan.rationale, steps: plan.steps.map((step) => ({ id: step.id, role: step.role, title: step.title,
         doneCriterion: step.doneCriterion, share: step.share, p50Minutes: step.estimate.p50Minutes, dependsOn: step.dependsOn, status: step.status })) } };
+}
+
+/** The drafts one architect run produced for a line, while they are still untouched drafts. */
+function lineSubject(store: CrosslineStore, workspaceId: string, item: PendingWarning) {
+  const ids = new Set(item.milestoneIds ?? []);
+  const anchors = new Map(store.listMilestoneAnchors(workspaceId).map((anchor) => [anchor.milestoneId, anchor]));
+  const drafts = store.listMilestones(workspaceId).filter((milestone) => ids.has(milestone.id) && milestone.status === "draft");
+  if (!drafts.length) return undefined;
+  return { version: "crossline.validation-review.v1", warnings: item.warnings,
+    subject: { kind: "milestone_line", line: item.entityId.replace(/^line:/, ""), milestones: drafts.map((milestone) => ({ title: milestone.title,
+      deadline: anchors.get(milestone.id)?.deadline ?? "", target: anchors.get(milestone.id)?.target ?? "",
+      criteria: milestone.successCriteria.map((criterion) => criterion.statement) })) } };
+}
+
+/** An analysis kept after a quality correction, while its task has not started. */
+function analysisSubject(store: CrosslineStore, workspaceId: string, item: PendingWarning) {
+  const order = store.listWorkOrders(workspaceId).find((row) => row.id === item.entityId.replace(/^analysis:/, ""));
+  if (!order || !["awaiting_plan_approval", "approved", "preparing", "ready_for_human"].includes(order.state)) return undefined;
+  const payload = (order.payload ?? {}) as { materialContract?: Array<{ description: string }>; evidenceContract?: Array<{ description: string; required: boolean }>;
+    estimateBreakdown?: Array<{ step: string; minutes: number }> };
+  return { version: "crossline.validation-review.v1", warnings: item.warnings,
+    subject: { kind: "analysis", task: order.intent, estimate: order.estimate, breakdown: payload.estimateBreakdown ?? [],
+      evidence: (payload.evidenceContract ?? []).map((entry) => entry.description), materials: (payload.materialContract ?? []).map((entry) => entry.description) } };
 }
 
 /** A candidate relation with both milestones it joins and the facts it cites — enough to judge whether the claimed transfer is real. */

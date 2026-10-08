@@ -76,7 +76,7 @@ export function PlanView({ plan, calendar }: { plan: PlanVersionData; calendar: 
       return;
     }
     const r = body?.result;
-    setPublishNote(r ? `Crossline 日历：新增 ${r.created}、调整 ${r.updated}、移除 ${r.deleted}、不变 ${r.unchanged}${r.keptAsEdited.length ? `；${r.keptAsEdited.length} 条被你手动改过，保持原样` : ""}。` : "已写入。");
+    setPublishNote(r ? `Crossline 日历：新增 ${r.created}、调整 ${r.updated}、移除 ${r.deleted}、不变 ${r.unchanged}${r.keptAsEdited.length ? `；${r.keptAsEdited.length} 条已被手动修改，保持原样` : ""}。` : "已写入。");
     setPublishState("done");
   };
   const resolve = async (changeId: string, status: "approved" | "excluded") => {

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import type { DiligenceReport, Identity } from "./onboarding-types";
 
-const DECISION: Record<string, string> = { pending: "待你决定", accepted: "已采纳", rejected: "已拒绝" };
+const DECISION: Record<string, string> = { pending: "待决定", accepted: "已采纳", rejected: "已拒绝" };
 const KIND: Record<string, string> = { milestone: "里程碑", task: "任务", watch: "待观察" };
 
 /**

@@ -1,4 +1,5 @@
 import { mkdirSync, writeFileSync } from "node:fs";
+import { STYLE_INSTRUCTIONS } from "./style";
 import { join } from "node:path";
 import { cleanAnswerStrings } from "@crossline/core";
 import type { CodexRpcBoundary } from "./index";
@@ -11,7 +12,12 @@ export type AnalysisAudit = { threadId?: string; turnId?: string;
   /** How many times a turn went silent for so long it was interrupted and sent again. Absent means none did. */
   stalls?: number;
   /** How many times the validator sent the answer back to be fixed. Absent means it passed first try. */
-  repairs?: number };
+  repairs?: number;
+  /**
+   * Content-quality problems the answer still had when the repairs ran out and the caller chose to keep it (`softAccept`). The
+   * caller records them for the reviewer; nothing was blocked for them.
+   */
+  warnings?: Array<{ code: string; detail: string }> };
 export type SkillRunResult<T> = { ok: true; output: T; audit: AnalysisAudit }
   | { ok: false; blocker: { code: string; message: string }; audit: AnalysisAudit };
 
@@ -29,6 +35,12 @@ export type SkillRunOptions<T> = {
   prepareInput: (input: unknown) => unknown;
   /** The trust boundary: the runtime proving a shape is not the same as the content being right. */
   validateOutput: (output: unknown, prepared: unknown) => T;
+  /**
+   * Called when the repairs are spent and the last rejection is still standing. A caller whose rejection was about content quality,
+   * not about safety or about a shape it cannot store, returns the answer to keep (the run then succeeds with `audit.warnings`);
+   * returning undefined keeps the refusal (decided 2026-10-07: quality checks warn, safety checks block).
+   */
+  softAccept?: (rejection: Error, output: unknown, prepared: unknown) => T | undefined;
   /** Only a Skill that must reach outside gets this; it is off for every other run. */
   allowWebSearch?: boolean;
   onAudit: (audit: AnalysisAudit) => void;
@@ -313,7 +325,7 @@ async function startIsolatedThread<T>(scope: Scope, options: SkillRunOptions<T>,
   const threadParams = {
     environments: [], dynamicTools: [], runtimeWorkspaceRoots: [], sandbox: "read-only", approvalPolicy: "untrusted", approvalsReviewer: "user",
     ephemeral: false, experimentalRawEvents: false,
-    developerInstructions: options.developerInstructions,
+    developerInstructions: `${options.developerInstructions}\n\n${STYLE_INSTRUCTIONS}`,
     // Left unset for a Skill with no route, so an unlisted job still runs on the runtime's default.
     ...(context.route ? { model: context.route.model } : {})
   };
@@ -361,6 +373,7 @@ async function startIsolatedThread<T>(scope: Scope, options: SkillRunOptions<T>,
 async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, context: RunContext, audit: AnalysisAudit, run: {
   skillName: string; threadId: string; outputSchema: unknown; allowedItemTypes: string[]; firstPrompt: string;
   validate: (output: unknown) => T; onAudit: (audit: AnalysisAudit) => void; idleMs?: number; agent?: AgentMode;
+  soften?: (rejection: Error, output: unknown) => T | undefined;
 }): Promise<T> {
   audit.threadId = run.threadId;
   let finalText: string | undefined;
@@ -472,10 +485,20 @@ async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, con
           + `${(rejection as Detailed | undefined)?.detail ? ` — ${(rejection as Detailed).detail}` : ""}\n\n`
           + "Return the corrected JSON object in full. Change only what the rejection names; do not "
           + "explain, apologise, or add commentary outside the JSON.");
+      let parsed: unknown;
       try {
-        return run.validate(parse(answer));
+        parsed = parse(answer);
+        return run.validate(parsed);
       } catch (error) {
         rejection = error instanceof Error ? error : new Error(String(error));
+        if (attempt >= maxRepairs && parsed !== undefined && run.soften && !/_BLOCKED$/.test(rejection.message)) {
+          const kept = run.soften(rejection, parsed);
+          if (kept !== undefined) {
+            audit.warnings = [{ code: rejection.message, detail: (rejection as Detailed).detail ?? "" }];
+            run.onAudit({ ...audit });
+            return kept;
+          }
+        }
         // A Skill that stopped and said why (`*_BLOCKED`: it was missing an input it was told not to guess) has not made a
         // mistake to fix. Sending that back as a "rejection" coaxes it into dropping the blocker and inventing what was
         // missing — which a real run showed it doing, twice out of two, for the capture 「整理一下」.
@@ -556,7 +579,8 @@ async function runSkillTurn<T>(client: CodexRpcBoundary, input: unknown, options
       skillName: options.skillName, threadId, outputSchema: options.outputSchema, allowedItemTypes,
       ...(options.agent ? { agent: options.agent } : {}),
       firstPrompt: `$${options.skillName}\n\n${JSON.stringify(prepared)}`,
-      validate: (answer) => options.validateOutput(answer, prepared), onAudit: options.onAudit, ...(options.idleMs ? { idleMs: options.idleMs } : {})
+      validate: (answer) => options.validateOutput(answer, prepared), onAudit: options.onAudit, ...(options.idleMs ? { idleMs: options.idleMs } : {}),
+      ...(options.softAccept ? { soften: (rejection: Error, answer: unknown) => options.softAccept!(rejection, answer, prepared) } : {})
     });
     return { ok: true, output, audit };
   } catch (error) { return failureResult<T>(client, error, audit); }

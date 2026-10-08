@@ -59,13 +59,13 @@ function backplanAsks({ store, ctx, today }: Source): Ask[] {
     const base = { entityId: milestoneId, line: milestone.identityId, raisedAt: event.createdAt, fingerprint: event.eventId,
       urgency: urgencyFor(dueDay, today), ...(dueDay ? { dueDay } : {}) };
     const missing = missingInputsOf(event.payload);
-    const skip: AskOption = { id: "skip", label: "这个里程碑先不拆", detail: "撤掉它还没开始的自动步骤，这一版不再自动倒推" };
+    const skip: AskOption = { id: "skip", label: "暂不拆分该里程碑", detail: "撤回尚未开始的自动步骤，本版本不再自动倒推" };
     if (!missing.length) {
       const id = `bp:${event.eventId}:all`;
       if (resolved.has(id)) continue;
-      asks.push({ ...base, id, kind: "backplan_input", title: `「${short(milestone.title)}」没能自动拆出步骤`,
-        why: `自动倒推停在这里：${payload.message || payload.code}。可以让它再试一次，或者你自己写下第一步。`,
-        options: [{ id: "retry", label: "再试一次", recommended: true }, { id: "own", label: "我自己写第一步", href: "/#capture-title" }, skip] });
+      asks.push({ ...base, id, kind: "backplan_input", title: `「${short(milestone.title)}」未能自动拆分`,
+        why: `自动倒推中止：${payload.message || payload.code}。可重试，或手动填写第一步。`,
+        options: [{ id: "retry", label: "再试一次", recommended: true }, { id: "own", label: "手动填写第一步", href: "/#capture-title" }, skip] });
       continue;
     }
     for (const input of missing) {
@@ -76,15 +76,15 @@ function backplanAsks({ store, ctx, today }: Source): Ask[] {
         && (order.payload as { backplan?: { acquires?: string } }).backplan?.acquires === input.id);
       asks.push({ ...base, id, kind: "backplan_input",
         title: `「${short(milestone.title)}」还缺：${short(input.what, 50)}`,
-        why: `自动倒推这个里程碑时发现：${input.message}${acquiring ? " 我先把「拿到它」排成了第一步（等你批准）。" : " 没有它，后面的步骤只能靠猜。"}你现在的情况是？`,
+        why: `倒推该里程碑时缺少输入：${input.message}${acquiring ? "「获取该输入」已排为第一步（待批准）。" : "缺少该输入时后续步骤无法确定。"}`,
         options: [
-          { id: "have", label: "我有，现在给你", detail: "贴内容或写存放位置，系统带着它重新拆",
+          { id: "have", label: "已有，提供内容", detail: "填写内容或存放位置后重新拆分",
             fields: [{ id: "text", label: "内容或存放位置（文件路径、链接、要点）", kind: "longtext", required: true }] },
-          { id: "waiting", label: "已经要了，在等", detail: "到那天问你到了没；在那之前依赖它的步骤不排",
+          { id: "waiting", label: "已索取，等待中", detail: "到期日确认是否到达；此前依赖它的步骤不排入",
             fields: [{ id: "who", label: "谁给", kind: "text", required: false, initial: input.whoHas },
               { id: "date", label: "大约哪天到", kind: "date", required: true }] },
-          acquiring ? { id: "ask_first", label: "还没要，就按第一步去要", detail: "保留「拿到它」这一步", recommended: true }
-            : { id: "ask_first", label: "我自己去弄", detail: "记下了，不再问", recommended: true },
+          acquiring ? { id: "ask_first", label: "尚未索取，按第一步执行", detail: "保留「获取该输入」步骤", recommended: true }
+            : { id: "ask_first", label: "自行获取", detail: "已记录，不再询问", recommended: true },
           skip
         ] });
     }
@@ -159,12 +159,12 @@ function captureAsks({ store, ctx }: Source): Ask[] {
     && capture.audit.blocker?.code !== "ANALYSIS_APPROVED_MILESTONE_REQUIRED").map((capture) => ({
     id: `cap:${capture.id}:${capture.attempt}`, kind: "capture_blocked" as const, entityId: capture.id, urgency: "later" as const,
     raisedAt: store.listEvents(ctx.workspaceId, { entityId: capture.id }).at(-1)?.createdAt ?? "", fingerprint: String(capture.attempt),
-    title: `「${short(capture.title)}」没能自动拆解`,
-    why: `${capture.audit.blocker?.message || capture.audit.blocker?.code || "分析停下了"}。补一句说明，系统会带着它重新分析。`,
+    title: `「${short(capture.title)}」未能自动分析`,
+    why: `${capture.audit.blocker?.message || capture.audit.blocker?.code || "分析中止"}。补充说明后重新分析。`,
     options: [
       { id: "context", label: "补充说明，重新分析", recommended: true,
         fields: [{ id: "note", label: "补充什么（要交付什么、为谁、哪天前、手上有什么材料）", kind: "longtext" as const, required: true }] },
-      { id: "manual", label: "我自己建成任务", href: "/workbench" },
+      { id: "manual", label: "手动建立任务", href: "/workbench" },
       { id: "discard", label: "不要了", fields: [{ id: "reason", label: "为什么不要", kind: "text" as const, required: true }] }
     ] }));
 }
@@ -186,11 +186,11 @@ function materialsAsks({ store, ctx, today }: Source): Ask[] {
     const dueDay = dueOf(order, anchors);
     return [{ id: `mat:${block.eventId}`, kind: "materials_blocked" as const, entityId: order.id, line: order.identityId,
       urgency: urgencyFor(dueDay, today), ...(dueDay ? { dueDay } : {}), raisedAt: block.createdAt, fingerprint: block.eventId,
-      title: `「${short(order.intent)}」的材料没准备成`,
-      why: `${detail.message || detail.code || "准备停下了"}。可以再试一次，或者不等材料直接开始。`,
+      title: `「${short(order.intent)}」材料未准备完成`,
+      why: `${detail.message || detail.code || "准备中止"}。可重试，或不等材料直接开始。`,
       options: [
         { id: "retry", label: "再试一次", recommended: /^(SKILL_|CODEX_)/.test(detail.code ?? "") },
-        { id: "self", label: "不用材料了，我直接做", recommended: !/^(SKILL_|CODEX_)/.test(detail.code ?? "") },
+        { id: "self", label: "不需要材料，直接开始", recommended: !/^(SKILL_|CODEX_)/.test(detail.code ?? "") },
         { id: "look", label: "去看缺什么", href: `/workbench/${encodeURIComponent(order.id)}` }
       ] }];
   });
@@ -218,8 +218,8 @@ function gateAsks({ store, ctx, today }: Source): Ask[] {
         .filter(Boolean).slice(0, 3);
       asks.push({ id: `gate:${transition?.eventId ?? order.id}`, kind: "gate_insufficient", entityId: order.id, ...timing,
         raisedAt: transition?.createdAt ?? "", fingerprint: transition?.eventId ?? "",
-        title: `「${short(order.intent)}」没通过验收`,
-        why: needs.length ? `验收判断还差：${needs.join("；")}。补上后重新提交，会再判一次。` : "验收判断证据不够。补上后重新提交，会再判一次。",
+        title: `「${short(order.intent)}」未通过验收`,
+        why: needs.length ? `验收尚缺：${needs.join("；")}。补充后重新提交即重新判定。` : "验收证据不足。补充后重新提交即重新判定。",
         options: [
           { id: "redo", label: "重新排上，补做缺的", recommended: true },
           { id: "look", label: "去看判定细节", href: `/workbench/${encodeURIComponent(order.id)}` },
@@ -231,13 +231,13 @@ function gateAsks({ store, ctx, today }: Source): Ask[] {
       if (order.milestoneId && failure) {
         const detail = failure.payload as { code?: string; message?: string };
         asks.push({ id: `gaterun:${failure.eventId}`, kind: "gate_failed", entityId: order.id, ...timing, raisedAt: failure.createdAt,
-          fingerprint: failure.eventId, title: `「${short(order.intent)}」的验收没跑成`,
-          why: `这不是判你没通过，是判定本身没完成：${detail.message || detail.code}。处理好之后让它再判一次。`,
+          fingerprint: failure.eventId, title: `「${short(order.intent)}」验收判定未完成`,
+          why: `判定过程中断，并非未通过：${detail.message || detail.code}。处理后重新判定。`,
           options: [{ id: "rejudge", label: "现在重新判定", recommended: true },
             { id: "look", label: "去看看", href: `/workbench/${encodeURIComponent(order.id)}` }] });
       } else if (!order.milestoneId) {
         asks.push({ id: `accept:${order.id}`, kind: "evidence_manual", entityId: order.id, ...timing, raisedAt: "", fingerprint: order.state,
-          title: `「${short(order.intent)}」等你验收`, why: "它没挂在里程碑上，没有自动验收，交付算不算数由你说了算。",
+          title: `「${short(order.intent)}」待验收`, why: "未关联里程碑，不经自动验收，由本人验收。",
           options: [{ id: "accept", label: "算数，验收", recommended: true },
             { id: "look", label: "先看看交付", href: `/workbench/${encodeURIComponent(order.id)}` }] });
       }
@@ -257,15 +257,15 @@ export function explainRisk(input: { deadline: string; today: string; p50Day: st
   steps: number; p50Minutes: number; p85Minutes: number; moreToSplit: boolean }): string {
   const left = daysBetween(input.today, input.deadline);
   const hours = (minutes: number) => Math.max(0.5, Math.round(minutes / 30) / 2);
-  const parts = [`截止 ${format(input.deadline)}（还剩 ${left} 天）。已拆出的 ${input.steps} 步还要约 ${hours(input.p50Minutes)}–${hours(input.p85Minutes)} 小时。`];
-  if (!input.p85Day) parts.push("按你现在的可用时间和排在它前面的工作，八周内排不完它（或者它等的前置步骤还没做完）。");
+  const parts = [`截止 ${format(input.deadline)}（剩 ${left} 天）。已拆分的 ${input.steps} 个步骤剩余约 ${hours(input.p50Minutes)}–${hours(input.p85Minutes)} 小时。`];
+  if (!input.p85Day) parts.push("按当前可用时段与优先于它的工作，八周内无法排完（或前置步骤尚未完成）。");
   else {
     const late = input.slackDays !== null && input.slackDays < 0;
-    parts.push(`按你现在的可用时间和排在它前面的工作，顺利的话 ${input.p50Day ? format(input.p50Day) : "—"} 做完，不顺（按保守估时）要到 ${format(input.p85Day)}`
-      + (late ? `，比截止晚 ${-input.slackDays!} 天。` : input.slackDays === 0 ? "，正好卡在截止那天，没有余地。" : `，只比截止早 ${input.slackDays} 天，留给意外的余地不到 2 天。`));
+    parts.push(`按当前可用时段与优先于它的工作，通常 ${input.p50Day ? format(input.p50Day) : "—"} 完成，保守估计 ${format(input.p85Day)} 完成`
+      + (late ? `，比截止晚 ${-input.slackDays!} 天。` : input.slackDays === 0 ? "，恰在截止当日，没有余量。" : `，仅早于截止 ${input.slackDays} 天，余量不足 2 天。`));
   }
-  if (input.moreToSplit) parts.push("这还只算了已经拆出来的步骤，后面还有没拆的，实际会更紧。");
-  parts.push("这是按已知工作的预测，不是判决；你可以给它加时间、推迟截止、降低标准，或者接受这个风险。");
+  if (input.moreToSplit) parts.push("仅计入已拆分的步骤；尚有未拆分的工作，实际更紧。");
+  parts.push("以上为基于已知工作的预测；可增加时间、推迟截止、降低标准，或接受该风险。");
   return parts.join("");
 }
 
@@ -348,8 +348,8 @@ function agentAsks({ store, ctx }: Source): Ask[] {
   return listAgentTasks(store, ctx.workspaceId).filter((task) => task.status === "blocked" && !acknowledged.has(task.taskId)).map((task) => ({
     id: `agent:${task.taskId}`, kind: "agent_blocked" as const, entityId: task.taskId, urgency: "later" as const, raisedAt: task.requestedAt,
     fingerprint: task.blockerCode, title: `助手没做成「${short(titles.get(task.workOrderId) ?? task.title)}」`,
-    why: `${task.blockerMessage || task.blockerCode}。它不会自己再试；这件事回到你手上。`,
-    options: [{ id: "self", label: "知道了，我自己做", recommended: true }, { id: "look", label: "查看助手任务", href: "/settings#automation" }] }));
+    why: `${task.blockerMessage || task.blockerCode}。助手不会自动重试，该任务转为本人处理。`,
+    options: [{ id: "self", label: "本人处理", recommended: true }, { id: "look", label: "查看助手任务", href: "/settings#automation" }] }));
 }
 
 function readFailure(store: Source["store"], workspaceId: string, key: string) {
@@ -364,13 +364,13 @@ function calendarAsks({ store, ctx }: Source): Ask[] {
   if (publish && publish.code !== "CODEX_SUPERVISOR_UNAVAILABLE") asks.push({ id: `publish:${publish.code}`, kind: "calendar_publish_failed",
     entityId: "calendar", urgency: "soon", raisedAt: publish.at, fingerprint: publish.code, title: "Crossline 日历没同步上",
     why: publish.code === "CALENDAR_WRITE_NOT_AUTHORIZED"
-      ? "写入用的账号登录过期了。在本机运行 pnpm exec tsx scripts/graph-write-login.ts 重新登录（只写名为 Crossline 的日历，你的其他日历不会被动），然后点重试。"
-      : `${publish.message || publish.code}。你的其他日历没有被动。`,
+      ? "写入 Crossline 日历的账号登录已过期，重新登录后重试；其他日历不受影响。"
+      : `${publish.message || publish.code}。其他日历未受影响。`,
     options: [{ id: "retry", label: "处理好了，现在重试", recommended: true }] });
   const sync = readFailure(store, ctx.workspaceId, CALENDAR_SYNC_FAILURE);
   if (sync) asks.push({ id: `sync:${sync.code}:${(sync.sources ?? []).join(",")}`, kind: "calendar_sync_failed", entityId: "calendar",
     urgency: "soon", raisedAt: sync.at, fingerprint: sync.code,
-    title: sync.sources?.length ? `读不到日历：${sync.sources.join("、")}` : "读不到你的日历了",
+    title: sync.sources?.length ? `读不到日历：${sync.sources.join("、")}` : "日历无法读取",
     why: `${sync.message || sync.code}。在恢复之前，排程照常用最后一次读到的日程；账号登出需要重新登录。`,
     options: [{ id: "settings", label: "去设置看连接", href: "/settings" }] });
   return asks;
@@ -406,10 +406,10 @@ async function runtimeAsk(ctx: AccessContext, now: Date): Promise<Ask | null> {
   const base = { entityId: "codex", urgency: "soon" as const, raisedAt: now.toISOString(), options: [{ id: "settings", label: "去设置", href: "/settings" }] };
   const ask: Ask | null = account === "timeout" || !account.ok
     ? { ...base, id: "runtime:worker", kind: "codex_signed_out", fingerprint: "worker", title: "后台没在运行",
-      why: "自动拆解、倒推、准备材料、验收和提醒都由后台进程做，现在连不上它。重新运行 scripts/start-crossline.ps1 即可；你记下的东西都在。" }
+      why: "自动分析、倒推、材料准备、验收与提醒均由后台服务执行，当前无法连接；已收集的内容不受影响。重启本机服务后恢复。" }
     : !account.value.account
-      ? { ...base, id: "runtime:signed-out", kind: "codex_signed_out", fingerprint: "signed-out", title: "AI 未登录，自动的事都停着",
-        why: "Codex 没有登录，所以自动拆解、倒推、准备材料和验收都不会发生。去「设置」里登录一次就好。" }
+      ? { ...base, id: "runtime:signed-out", kind: "codex_signed_out", fingerprint: "signed-out", title: "模型服务未登录，自动功能已暂停",
+        why: "模型服务未登录，自动分析、倒推、材料准备与验收均暂停；在「设置」中登录后恢复。" }
       : null;
   runtimeCheck = { at: now.getTime(), ask };
   return ask;
@@ -469,7 +469,7 @@ function answerBackplan(ctx: AccessContext, ask: Ask, optionId: string, values: 
     const started = new Set(store.listExecutions(ctx.workspaceId).map((execution) => execution.workOrderId));
     for (const order of store.listWorkOrders(ctx.workspaceId).filter((item) => item.milestoneId === milestoneId
       && (item.payload as { backplan?: unknown }).backplan && UNTOUCHED.has(item.state) && !started.has(item.id)))
-      archiveWorkOrder(ctx, order.id, "你说这个里程碑先不拆");
+      archiveWorkOrder(ctx, order.id, "本人选择暂不拆分该里程碑");
     record(ctx, "goal.backplan_declined", milestoneId, `goal:backplan:declined:${milestoneId}:${milestone.version}`, { milestoneVersion: milestone.version });
     return { ok: true };
   }
@@ -477,14 +477,14 @@ function answerBackplan(ctx: AccessContext, ask: Ask, optionId: string, values: 
   if (!input) return { ok: false, code: "ASK_STALE" };
   if (optionId === "ask_first") { resolve("will_obtain"); return { ok: true }; }
   if (optionId === "have") {
-    releaseAcquisition(ctx, milestoneId, eventId, inputId, "你已经提供了这项输入");
+    releaseAcquisition(ctx, milestoneId, eventId, inputId, "该输入已由本人提供");
     record(ctx, "goal.backplan_input_supplied", milestoneId, `goal:backplan:supplied:${ask.id}`, { what: input.what, text: values.text, askId: ask.id });
     resolve("supplied");
     rerunBackplan(ctx, milestoneId);
     return { ok: true };
   }
   if (optionId === "waiting") {
-    const dependents = releaseAcquisition(ctx, milestoneId, eventId, inputId, "你已经在等这项输入");
+    const dependents = releaseAcquisition(ctx, milestoneId, eventId, inputId, "该输入已在等待中");
     const index = waitingIndex(store, ctx.workspaceId);
     const existing = index.open.find((item) => index.sameWait(item, values.who ?? "", values.date!, `${milestone.identityId}/${milestone.projectId ?? ""}`));
     const waitingId = existing?.id ?? `wait-bp-${milestoneId}-${eventId.slice(0, 8)}-${inputId}`;

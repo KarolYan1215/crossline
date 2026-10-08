@@ -117,6 +117,8 @@ export function createCaptureAnalyzer(store: CrosslineStore, workspaceId: string
         relations: store.listMilestoneRelations(workspaceId).filter((relation) => relation.status === "approved").slice(0, 40)
           .map((relation) => ({ fromMilestoneId: relation.fromMilestoneId, toMilestoneId: relation.toMilestoneId, kind: relation.kind,
             explanation: relation.explanation ?? "" })),
+        // What the person has corrected or shown about how they work, across every line (the capture's line is not known yet).
+        personalPreferences: store.preferenceLines(workspaceId, packs.map((pack) => pack.id), 20),
         policy: { tools: [], externalSideEffects: false, humanApprovalRequired: true }
       });
       store.updateAnalysisAudit(workspaceId, id, { contextVersion: context.version });
@@ -130,6 +132,10 @@ export function createCaptureAnalyzer(store: CrosslineStore, workspaceId: string
         });
         recordWaitingAndDates(store, workspaceId, id);
         autoApproveEligible(store, workspaceId, [id]);
+        // A quality problem the repairs did not fix was corrected in the smallest way and kept; the reviewer looks at it next.
+        if (result.audit.warnings?.length) store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId,
+          idempotencyKey: `validation.warned:analysis:${id}:${attempt}`, type: "validation.warned", entityId: `analysis:${id}`,
+          payload: { subject: "analysis", version: attempt, warnings: result.audit.warnings, revised: false } });
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "";

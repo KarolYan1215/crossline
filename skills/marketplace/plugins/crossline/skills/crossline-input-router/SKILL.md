@@ -17,3 +17,7 @@ Input is `crossline.input-route.v1`: `text` (what the person typed), `batch` (tr
 - Never invent tasks, dates or numbers that are not in the text. Unused fields are `""` and `0`, `change.type` `"none"` for a capture.
 
 Chinese, objective, third person.
+
+## Language
+
+Every human-readable field: Simplified Chinese, concise, standard academic or workplace register, objective third person (no 你/您, no 我, no greetings or filler). Fixed terms: 主线, 里程碑, 任务, 步骤, 长期目标, 分数线; verbs 批准, 验收, 撤销. Text quoted from the person or a source stays verbatim.

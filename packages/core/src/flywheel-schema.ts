@@ -110,3 +110,18 @@ export function validateFlywheelExpansion(value: unknown, context: FlywheelConte
   }
   return { findings: raw.findings, relations, blockers: raw.blockers };
 }
+
+/**
+ * A flywheel answer kept after its repairs ran out: the relations that pass every check on their own are kept, the rest dropped, so
+ * one relation with no falsifier no longer costs the night's findings (decided 2026-10-07). Undefined when even the findings fail.
+ */
+export function keepFlywheelExpansion(value: unknown, context: FlywheelContext, code: string): FlywheelExpansion | undefined {
+  if (!code.startsWith("FLYWHEEL_RELATION_") && code !== "FLYWHEEL_SOURCE_REQUIRED" && code !== "FLYWHEEL_MILESTONE_UNKNOWN") return undefined;
+  const raw = value as FlywheelExpansion;
+  if (!raw || !Array.isArray(raw.relations)) return undefined;
+  const kept: FlywheelExpansion["relations"] = [];
+  for (const relation of raw.relations) {
+    try { validateFlywheelExpansion({ ...raw, relations: [...kept, relation] }, context); kept.push(relation); } catch { /* dropped */ }
+  }
+  try { return validateFlywheelExpansion({ ...raw, relations: kept }, context); } catch { return undefined; }
+}

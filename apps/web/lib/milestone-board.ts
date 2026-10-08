@@ -169,5 +169,7 @@ export async function recordRetrospective(ctx: AccessContext, milestoneId: strin
   getStore().appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, type: "milestone.retrospective", entityId: milestoneId,
     idempotencyKey: `milestone:retrospective:${milestoneId}:${randomUUID()}`,
     payload: { milestoneVersion: milestone.version, identityId: milestone.identityId, title: milestone.title, ...figures, note: text } });
+  if (text) getStore().addPreference({ workspaceId: ctx.workspaceId, source: "retrospective", scope: milestone.identityId, weight: 1, refId: milestoneId,
+    text: `里程碑「${milestone.title}」回顾：${text}` });
   return { ok: true };
 }

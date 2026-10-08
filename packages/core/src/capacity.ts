@@ -58,7 +58,7 @@ export function deriveCapacity(input: CapacityInput): CapacityReading {
   if (!today || baseline.length < BASELINE_DAYS) {
     blockers.push({
       code: "BASELINE_INSUFFICIENT",
-      message: `需要至少 ${BASELINE_DAYS} 天本机活动观测才能与你自己的基线比较（当前 ${baseline.length} 天）。`
+      message: `需要至少 ${BASELINE_DAYS} 天本机活动观测才能与本人基线比较（当前 ${baseline.length} 天）。`
     });
     return { level: "uncalibrated", observationCount, basis: [], blockers };
   }

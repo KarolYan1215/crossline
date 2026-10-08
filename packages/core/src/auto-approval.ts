@@ -33,11 +33,11 @@ export function autoApprovalEligible(order: Candidate): { eligible: boolean; rea
   // A step worked back from a milestone the person already approved: the commitment was the milestone, and its next steps follow from
   // it. Asking again for each step is what left fifteen decisions waiting and the week empty (2026-10-07). Undoable for a day.
   if (payload.backplan && order.riskTier !== "high_risk" && !external)
-    return { eligible: true, reason: "从你已批准的里程碑倒推出的内部步骤，默认生效" };
-  if (order.riskTier !== "routine") return { eligible: false, reason: "影响里程碑或高风险，需要你确认" };
+    return { eligible: true, reason: "由已批准里程碑倒推出的内部步骤，默认生效" };
+  if (order.riskTier !== "routine") return { eligible: false, reason: "影响里程碑或高风险，需要批准" };
   const internalKind = payload.family === "preparation" || Boolean(payload.byproductOf);
-  if (!internalKind) return { eligible: false, reason: "不是准备类工作，需要你确认" };
+  if (!internalKind) return { eligible: false, reason: "非准备类工作，需要批准" };
   if (external)
-    return { eligible: false, reason: "涉及对外动作（发送、提交、发布、付款等），需要你确认" };
+    return { eligible: false, reason: "涉及对外动作（发送、提交、发布、付款等），需要批准" };
   return { eligible: true, reason: "内部、可撤销的准备工作，默认生效" };
 }

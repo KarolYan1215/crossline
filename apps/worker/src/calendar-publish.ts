@@ -15,7 +15,7 @@ export type PublishOutcome =
 const ACCOUNT = "calendar.write.account";
 const LEDGER = "calendar.published";
 const NOT_AUTHORIZED = { state: "blocked" as const, code: "CALENDAR_WRITE_NOT_AUTHORIZED",
-  message: "还没授权 Crossline 写入专用日历。在终端运行 pnpm exec tsx scripts/graph-write-login.ts，用设备码登录你想放 Crossline 日历的账号。" };
+  message: "尚未授权写入 Crossline 日历；登录用于存放 Crossline 日历的账号后重试。" };
 
 export function readPublishLedger(store: CrosslineStore, workspaceId: string): PublishLedger {
   try { return JSON.parse(store.getSetting(workspaceId, LEDGER) ?? "{}") as PublishLedger; } catch { return {}; }
@@ -46,7 +46,7 @@ export function createCalendarPublisher(store: CrosslineStore, workspaceId: stri
     } catch (error) {
       const code = error instanceof Error ? error.message.split(":")[0]! : "CALENDAR_PUBLISH_FAILED";
       if (code === "CALENDAR_WRITE_NOT_AUTHORIZED") return NOT_AUTHORIZED;
-      return { state: "blocked", code, message: `没能写入 Crossline 日历（${code}）。你的其他日历没有被动。` };
+      return { state: "blocked", code, message: `Crossline 日历写入未完成；其他日历未受影响。` };
     }
   };
 }

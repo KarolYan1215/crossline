@@ -69,13 +69,13 @@ test("approved milestones spanning several identities reach the Skill instead of
  * Degenerate model answers, recorded from real runs, driven through the whole path.
  *
  * Until these existed, every fake answer in the repo was clean JSON somebody typed, and each of these
- * four shapes had to be found by hand during an acceptance run. Two of them are repaired in place and
- * two are refused, and which is which is the point of the table: a reason with junk on the end still
- * has its sentence, but a label cut off at the cap tells the person nothing.
+ * four shapes had to be found by hand during an acceptance run. Three are cleaned in place; two are sent back for repair twice and,
+ * when the model still returns them, corrected in the smallest way (brackets stripped, a cut-off line marked as cut) and kept with a
+ * warning for the reviewer — a quality problem no longer costs the person the whole task (decided 2026-10-07).
  */
 const degenerate = [
-  { fixture: "analysis-degenerate-scratch-leak", outcome: "refused", code: "ANALYSIS_CONTRACT_NOT_PROSE", why: "" },
-  { fixture: "analysis-degenerate-truncated-description", outcome: "refused", code: "ANALYSIS_CONTRACT_TRUNCATED", why: "" },
+  { fixture: "analysis-degenerate-scratch-leak", outcome: "kept with a warning", code: "ANALYSIS_CONTRACT_NOT_PROSE", why: "" },
+  { fixture: "analysis-degenerate-truncated-description", outcome: "kept with a warning", code: "ANALYSIS_CONTRACT_TRUNCATED", why: "" },
   { fixture: "analysis-degenerate-combining-mark-padding", outcome: "normalised", code: "",
     why: "这是本次清单的主要输入，已由用户提供。" },
   // Alternating zero-width characters, a stray Malayalam letter and a leaked token: real, from the 2026-10-03 structured-output run.
@@ -89,15 +89,17 @@ test.each(degenerate)("a $fixture answer is $outcome all the way through to the 
   const { rpc, turns } = fakeRuntime([recordedAnswer(fixture)]);
   const result = await analysis.createCaptureAnalyzer(store, "personal-crossline", "C:\repo")(rpc, "c");
 
-  if (outcome === "refused") {
-    expect(result.state).toBe("blocked");
-    expect(result.audit.blocker?.code).toBe(code);
-    // The person is shown this. A bare code gives them nothing to act on, so the offending text has
-    // to survive the trip from the validator through the worker's error mapping.
-    expect(result.audit.blocker?.message ?? "").not.toBe("运行未完成；请检查阻塞原因。");
-    expect(store.listWorkOrders("personal-crossline")).toEqual([]);
-    // Asked to fix it twice before giving up, rather than failing on the first rejection.
+  if (outcome === "kept with a warning") {
+    // Asked to fix it twice first, then kept in corrected form and handed to the reviewer.
     expect(turns()).toBe(3);
+    expect(result.state).toBe("awaiting_plan_approval");
+    const kept = store.listWorkOrders("personal-crossline")[0]!.payload as { materialContract: Array<{ description: string }>; evidenceContract: Array<{ description: string }> };
+    for (const item of [...kept.materialContract, ...kept.evidenceContract]) {
+      expect(item.description).not.toMatch(/[{}[\]]/);
+      expect(item.description.length).toBeLessThan(300);
+    }
+    const warned = store.listEvents("personal-crossline", { type: "validation.warned", entityId: "analysis:c" });
+    expect(warned[0]?.payload).toMatchObject({ subject: "analysis", warnings: [{ code }] });
     return;
   }
 

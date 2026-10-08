@@ -174,6 +174,8 @@ export type MilestoneProposalContext = {
   templates: Array<{ id: string; identityId: string; kind: string; titleHint: string }>;
   /** What the user asked for, in their own words. Empty means "look at the whole picture". */
   request: string;
+  /** What the person has corrected or shown about how they work (`preference_entries`), for the lines in this run. */
+  personalPreferences?: string[];
   /** The person's profile. When present the answer must be anchored to it, dated and chained. */
   profile?: ProfileForMilestones;
   /** Web research the person has accepted: what was found, with where, so a milestone can build on it instead of guessing. */
@@ -230,6 +232,42 @@ export function validateMilestoneProposal(value: unknown, context: MilestoneProp
   }
   const hedges = raw.blockers.map((blocker) => blocker.message.trim()).filter(Boolean);
   return { milestones: raw.milestones, targetProposals: raw.targetProposals ?? [], assumptions: [...raw.assumptions, ...hedges], blockers: [] };
+}
+
+/**
+ * The milestone architect's refusals that are about quality — a vague title, a score line without margin or derivation, a missing
+ * outcome, a chain shorter or longer than usual, a course part or project left out, an uncited target — as opposed to what the store
+ * or the timeline cannot take (an unknown id, no plan, no deadline, criteria `saveMilestone` would refuse). After the repairs these
+ * are kept with a warning for the reviewer instead of costing the whole line (decided 2026-10-07).
+ */
+export const MILESTONE_SOFT_CODES = new Set(["MILESTONE_TITLE_GENERIC", "MILESTONE_NOT_CONCRETE", "MILESTONE_NO_MARGIN", "MILESTONE_DERIVATION_MISSING",
+  "MILESTONE_OUTCOME_UNSTATED", "MILESTONE_OUTCOME_REQUIRED", "MILESTONE_TARGET_UNPROPOSED", "MILESTONE_TARGET_NOT_CITED", "MILESTONE_TARGET_REQUIRED",
+  "MILESTONE_COURSE_PARTS_MISSING", "MILESTONE_PROJECT_MISSING", "MILESTONE_CHAIN_TOO_SHORT", "MILESTONE_CHAIN_TOO_LONG", "MILESTONE_SOURCE_UNCONFIRMED",
+  "MILESTONE_SOURCE_REQUIRED", "MILESTONE_BASELINE_REQUIRED", "MILESTONE_ORDER_INCONSISTENT", "MILESTONE_NOT_CHAINED", "MILESTONE_DEPENDENCY_ORDER",
+  "PROPOSAL_TARGET_UNREASONED"]);
+
+/**
+ * What is left of a milestone answer once a soft refusal is set aside: everything `validateMilestoneProposal` checks without the
+ * person-specific plan rules, plus what storing the plans needs (a plan with a key and a real date, dependencies on keys that exist,
+ * projects that exist). Undefined means the answer cannot be stored and the refusal stands.
+ */
+export function keepMilestoneProposal(value: unknown, context: MilestoneProposalContext, code: string): MilestoneProposal | undefined {
+  if (!MILESTONE_SOFT_CODES.has(code)) return undefined;
+  const { profile, ...general } = context;
+  const raw = value as MilestoneProposal;
+  let kept: MilestoneProposal;
+  try { kept = validateMilestoneProposal({ ...raw, targetProposals: [] }, general); } catch { return undefined; }
+  if (!profile) return kept;
+  const projects = new Set(profile.projects.map((project) => project.id));
+  const keys = new Set(kept.milestones.map((milestone) => milestone.plan?.key));
+  for (const milestone of kept.milestones) {
+    const plan = milestone.plan;
+    if (!plan || typeof plan.key !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(plan.deadline ?? "") || !Array.isArray(plan.dependsOn)
+      || !Array.isArray(plan.sourceFactIds) || plan.dependsOn.some((key) => !keys.has(key))) return undefined;
+    if (milestone.projectId && !projects.has(milestone.projectId)) return undefined;
+  }
+  return { ...kept, targetProposals: (raw.targetProposals ?? []).filter((proposal) => projects.has(proposal.projectId)
+    && proposal.value.trim().length >= 2) };
 }
 
 /**

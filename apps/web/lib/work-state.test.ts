@@ -47,7 +47,7 @@ test("a line's card names an approved milestone, the earliest due; with only dra
     { id: "e", identityId: "startup", status: "approved", title: "早的" }
   ];
   const deadlines = new Map([["d", "2026-11-30"], ["e", "2026-10-18"]]);
-  expect(currentMilestoneLabel(milestones, deadlines, "research")).toBe("2 个里程碑草稿等你批准");
+  expect(currentMilestoneLabel(milestones, deadlines, "research")).toBe("2 个里程碑草稿待批准");
   expect(currentMilestoneLabel(milestones, deadlines, "startup")).toBe("早的");
   expect(currentMilestoneLabel(milestones, deadlines, "media")).toBe("等待批准里程碑");
 });
