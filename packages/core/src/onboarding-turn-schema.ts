@@ -270,3 +270,32 @@ export function validateOnboardingTurn(value: unknown, known: KnownSources): Onb
   return { ...turn, stage: turn.stage ?? "details", lineProfiles: turn.lineProfiles ?? [], availability: turn.availability ?? { windows: [], why: "" },
     profile: { ...EMPTY_PROFILE_MODEL, ...(turn.profile ?? {}) } };
 }
+
+/**
+ * When the repairs ran out on a turn whose trouble is one item — a fact with a malformed slot or a quote that is not verbatim, a
+ * candidate or question naming a line that does not exist, a bad availability window — keeps the rest of the turn without those items
+ * (a real run lost a whole turn, profile and line descriptions included, to one fact named 「指南针」). Returns undefined when what is
+ * left still does not validate, so a turn that is wrong as a whole stays refused.
+ */
+export function keepOnboardingTurn(value: unknown, known: KnownSources): OnboardingTurn | undefined {
+  const turn = value as OnboardingTurn | undefined;
+  if (!turn || !Array.isArray(turn.slotUpdates) || !Array.isArray(turn.questions) || !Array.isArray(turn.projectsDetected)) return undefined;
+  const identities = new Set([...known.identities, PERSON_LINE]);
+  const projects = turn.projectsDetected.filter((project) => ID.test(project.id) && identities.has(project.identityId));
+  const projectIds = new Set([...known.projectIds, ...projects.map((project) => project.id)]);
+  const sourceText = (ref: string) => known.replies[ref] ?? known.sources[ref];
+  const factOk = (update: OnboardingTurn["slotUpdates"][number]) => identities.has(update.identityId) && (!update.projectId || projectIds.has(update.projectId))
+    && SLOT.test(update.slot) && (update.sourceRef === "inference" ? update.status === "inferred"
+      : sourceText(update.sourceRef) !== undefined && Boolean(loose(update.sourceQuote)) && loose(sourceText(update.sourceRef)!).includes(loose(update.sourceQuote)));
+  const seen = new Set<string>();
+  const questions = turn.questions.filter((question) => !seen.has(question.id) && Boolean(seen.add(question.id))
+    && (!question.identityId || identities.has(question.identityId)) && (!question.projectId || projectIds.has(question.projectId))
+    && new Set(question.options.map((option) => option.id)).size === question.options.length && (question.kind === "free" || question.options.length >= 2));
+  const pruned: OnboardingTurn = { ...turn, projectsDetected: projects, slotUpdates: turn.slotUpdates.filter(factOk), questions,
+    flywheelCandidates: (turn.flywheelCandidates ?? []).filter((candidate) => identities.has(candidate.fromIdentityId) && identities.has(candidate.toIdentityId)
+      && candidate.fromIdentityId !== candidate.toIdentityId && candidate.evidenceRefs.every((ref) => ref === "inference" || sourceText(ref) !== undefined)),
+    lineProfiles: (turn.lineProfiles ?? []).filter((line) => identities.has(line.lineId)),
+    ...(turn.availability ? { availability: { ...turn.availability, windows: turn.availability.windows.filter((window) => /^\d{2}:\d{2}$/.test(window.start)
+      && /^\d{2}:\d{2}$/.test(window.end) && window.end > window.start) } } : {}) };
+  try { return validateOnboardingTurn(pruned, known); } catch { return undefined; }
+}

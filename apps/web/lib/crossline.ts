@@ -679,7 +679,7 @@ async function scheduledBlocks(ctx: AccessContext, today: string, committed: Per
     .some((id) => stateById.get(id) !== "accepted" && !orders.some((item) => item.id === id)))
     .map((order) => ({ taskId: order.id, code: "DEPENDENCY_NOT_READY",
       message: `${order.intent}的前置作业尚未验收，暂不排入` }));
-  const eligibleOrders = orders.filter((order) => !dependencyBlockers.some((item) => item.taskId === order.id));
+  const eligibleOrders = orders.filter((order) => !dependencyBlockers.some((item) => item.taskId === order.id) && !libraryUntil(ctx, order, today));
   const needsLookahead = eligibleOrders.some((order) => {
     const task = plannerTaskOf(ctx, order);
     return task.deadlineTier === 4 && Boolean(task.deadline);
@@ -829,7 +829,15 @@ export function loadGoalForecast(ctx: AccessContext): ForecastResult & { inferre
       confirmedDeadline: readGoalSettings(ctx, item.id)?.confirmedDeadline ?? anchors.get(item.id) ?? null }; });
   const orders = store.listWorkOrders(ctx.workspaceId);
   // Step by step where a task has a plan, so the forecast counts only the work that is left.
-  const tasks = plannerItemsFor(ctx, orders.filter((order) => ACTIONABLE.includes(order.state))).map((item) => item.task);
+  // A task waiting in the library starts no earlier than the day it enters the schedule, so a window that opens too late for the work
+  // shows up here as a risk instead of a forecast that assumed it had already started.
+  const today = planToday(ctx);
+  const opens = new Map(orders.flatMap((order) => { const day = libraryUntil(ctx, order, today); return day ? [[order.id, day] as const] : []; }));
+  const tasks = plannerItemsFor(ctx, orders.filter((order) => ACTIONABLE.includes(order.state))).map((item) => {
+    const day = opens.get(item.orderId);
+    const start = day ? toZonedInstant(day, "00:00", preferences.timeZone) : undefined;
+    return start && (!item.task.notBefore || item.task.notBefore < start) ? { ...item.task, notBefore: start } : item.task;
+  });
   const completedIds = new Set(orders.filter((order) => order.state === "accepted").map((order) => order.id));
   return { ...forecastGoals(goals, tasks, capacity, completedIds), inferredRegularBlocks: inferred.length };
 }
@@ -1345,6 +1353,8 @@ const UNPLACED_REASON: Record<string, string> = {
 /** One task as the scheduler saw it, and what it did with it: why it sits where it does on the plan page's 「为什么这样排」. */
 export type RankedTask = { id: string; title: string; line: string; milestoneId: string; tier: 1 | 2 | 3 | 4; weight: number;
   deadline: string | null; notBefore: string | null; firstDay: string | null; firstStart: string | null; weekMinutes: number; blocker: string | null;
+  /** In the task library: the day it enters the schedule (`libraryUntil`). */
+  libraryUntil: string | null;
   /** What is left of it (open steps only, where it has a step plan), usual and cautious. */
   p50Minutes: number; p85Minutes: number };
 
@@ -1379,6 +1389,7 @@ export function planRanking(ctx: AccessContext, plan: PersistedPlan): RankedTask
       firstDay: blocks[0]?.day ?? null, firstStart: blocks[0]?.start ?? null,
       weekMinutes: blocks.filter((block) => block.day! >= today && block.day! < weekEnd).reduce((sum, block) => sum + minutesOf(block), 0),
       blocker: blocks.length || !blocker ? null : UNPLACED_REASON[blocker.code] ?? blocker.message,
+      libraryUntil: libraryUntil(ctx, order, today),
       p50Minutes: own.reduce((sum, item) => sum + item.task.estimate.p50Minutes, 0),
       p85Minutes: own.reduce((sum, item) => sum + item.task.estimate.p85Minutes, 0) };
   });
@@ -1438,6 +1449,27 @@ export function workspaceCalibration(ctx: AccessContext, now = new Date()): Cali
  */
 export const resolvedEstimate = (ctx: AccessContext, order: ActionableOrder): Estimate =>
   calibratedEstimate(order.estimate, workspaceCalibration(ctx), order.identityId, (order.payload as { family?: string } | undefined)?.family);
+
+/** How far ahead a task's milestone may be due for its work to be scheduled; the worker backplans every approved milestone (`AUTO_BACKPLAN_HORIZON_DAYS`). */
+export const TASK_LIBRARY_WINDOW_DAYS = 21;
+
+/**
+ * The task library (decided 2026-10-08): a task worked back from a milestone due more than three weeks out waits, unscheduled, until it
+ * comes within the window. Returns the day it enters the schedule, or null when it is scheduled now — a task already started, one with
+ * its own due day inside the window, or one whose milestone is due within it (or has no date).
+ */
+export function libraryUntil(ctx: AccessContext, order: { state: string; milestoneId: string; payload: unknown }, today: string): string | null {
+  if (order.state !== "approved" || !(order.payload as { backplan?: unknown } | undefined)?.backplan) return null;
+  const store = getStore();
+  const deadline = readGoalSettings(ctx, order.milestoneId)?.confirmedDeadline
+    ?? store.listMilestoneAnchors(ctx.workspaceId).find((anchor) => anchor.milestoneId === order.milestoneId)?.deadline;
+  if (!deadline) return null;
+  const opens = new Date(Date.parse(`${deadline}T12:00:00Z`) - TASK_LIBRARY_WINDOW_DAYS * 86_400_000).toISOString().slice(0, 10);
+  const due = (order.payload as { dueDate?: string }).dueDate;
+  if (opens <= today || (due && /^\d{4}-\d{2}-\d{2}$/.test(due) && due <= addDays(today, TASK_LIBRARY_WINDOW_DAYS))) return null;
+  return opens;
+}
+const addDays = (day: string, days: number) => new Date(Date.parse(`${day}T12:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
 
 const plannerTaskOf = (ctx: AccessContext, order: ActionableOrder) => {
   const preferences = readSchedulePreferences(ctx);

@@ -58,7 +58,7 @@ export default async function ReviewPage() {
         <b>{milestone.title}</b>
         {milestone.criteria.length === 0
           ? <em className="review-flag">未声明达成标准：关联任务仍按各自证据验收，但里程碑进度无法记录。
-              <a href={`/milestones?edit=${encodeURIComponent(milestone.id)}`}>立即补充 →</a>
+              <a href={`/milestones?open=${encodeURIComponent(milestone.id)}`}>立即补充 →</a>
             </em>
           : <ul>{milestone.criteria.map((criterion, index) =>
             <li key={index}>[{criterionKind[criterion.kind] ?? criterion.kind}] {criterion.statement}

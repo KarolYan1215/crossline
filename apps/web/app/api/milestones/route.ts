@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { saveMilestoneEdit, type MilestoneInput } from "../../../lib/crossline";
 import { resolveAccessContext } from "../../../lib/access-guard";
 import { isCrossSiteWrite } from "../../../lib/same-origin";
+import { withUndo } from "../../../lib/undo";
 import type { SuccessCriterion } from "@crossline/core";
 
 const MEASURE_KINDS = new Set(["count", "threshold", "artifact", "judgement"]);
@@ -51,7 +52,7 @@ export async function POST(request: Request) {
     successCriteria: criteria,
     ...(typeof input.templateId === "string" ? { templateId: input.templateId } : {})
   };
-  const result = saveMilestoneEdit(access.ctx, payload);
+  const result = await withUndo(access.ctx, `${status === "archived" ? "归档" : "修改"}里程碑：${payload.title.slice(0, 24)}`, () => saveMilestoneEdit(access.ctx, payload));
   if (!result.ok) return NextResponse.json(result, { status: result.code === "MILESTONE_NOT_FOUND" ? 404 : 400 });
   return NextResponse.json(result);
 }

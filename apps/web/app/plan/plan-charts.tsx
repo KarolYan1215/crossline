@@ -1,6 +1,7 @@
 import type { PlanBoard } from "../../lib/plan-board";
 import { BarChart } from "../ui/charts";
 import { Tag } from "../ui/tag";
+import { RankingTable } from "./ranking-table";
 
 const md = (day: string) => `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}`;
 const h = (minutes: number) => Math.round((minutes / 60) * 10) / 10;
@@ -39,6 +40,7 @@ export function ForecastChart({ board }: { board: PlanBoard }) {
   const top = Math.max(1, ...board.weeks.map((week) => week.netMinutes));
   return <section className="pl-card" aria-label="未来 8 周">
     <header><h2>未来 8 周</h2><small>日期为按当前估时与容量推算的情景</small></header>
+    <p className="pl-chart-note">柱：每周可用时段扣除日历后的净时间；深色为再扣除预留后可排入任务的时间，下方数字即这部分小时数。行：每个已批准里程碑，实线到通常完成日，浅色延伸到保守完成日，竖线为截止日。</p>
     <div className="pl-weeks" role="img" aria-label="每周可用时间">
       {board.weeks.map((week) => <div key={week.week} className="pl-week" title={`第 ${week.week} 周（${md(week.start)} 起）：净可用 ${h(week.netMinutes)} h，预留 ${h(week.netMinutes - week.usableMinutes)} h，可排 ${h(week.usableMinutes)} h`}>
         <span className="pl-week-bar" aria-hidden="true">
@@ -74,34 +76,16 @@ export function ForecastChart({ board }: { board: PlanBoard }) {
   </section>;
 }
 
-const TIER: Record<number, string> = { 1: "重要且有截止", 2: "有截止", 3: "重要", 4: "其他" };
-
 /**
- * Why the plan looks the way it does, from the scheduler's own input and result: placed tasks in the order of their first block, each
- * with the factors that ordered it (urgency tier, importance, deadline, release), then what it could not place and its reason.
+ * Why the plan looks the way it does, from the scheduler's own input and result (`RankingTable`), with the optional written explanation
+ * under it.
  */
 export function RankingPanel({ board, explanation }: { board: PlanBoard;
   explanation: React.ReactNode }) {
-  const placed = board.ranking.filter((task) => task.firstDay);
-  const unplaced = board.ranking.filter((task) => !task.firstDay);
   return <section className="pl-card" id="why" aria-label="为什么这样排">
-    <header><h2>为什么这样排</h2><small>按排程优先级：先按紧迫度分档，同档内按重要性，再按截止日；右侧为排入的首个时段</small></header>
-    {!board.ranking.length && <p className="muted">暂无可排程的任务。</p>}
-    <ol className="pl-rank">{placed.map((task) => <li key={task.id} data-line={task.line}>
-      <a href={`/workbench/${encodeURIComponent(task.id)}`} className="pl-rank-title">{task.title}</a>
-      <span className="pl-rank-factors">
-        <Tag tone={task.tier <= 2 ? "info" : "neutral"}>{TIER[task.tier]}</Tag>
-        <span className="pl-weight" title={`重要性 ${task.weight}`}><i style={{ width: `${task.weight}%` }} /></span>
-        {task.deadline && <small className="mono">截止 {md(task.deadline)}</small>}
-        {task.notBefore && task.notBefore > board.today && <small className="mono">{md(task.notBefore)} 起</small>}
-      </span>
-      <span className="pl-rank-slot mono">{md(task.firstDay!)} {task.firstStart}{task.weekMinutes ? ` · 本周 ${h(task.weekMinutes)} h` : ""}</span>
-    </li>)}</ol>
-    {unplaced.length > 0 && <div className="pl-unplaced"><h3>未排入 · {unplaced.length}</h3>
-      <ul>{unplaced.map((task) => <li key={task.id} data-line={task.line}>
-        <a href={`/workbench/${encodeURIComponent(task.id)}`}>{task.title}</a>
-        <small>{task.blocker ?? (task.notBefore && task.notBefore > board.today ? `${md(task.notBefore)} 前不可开始` : "可用时段内没有空位")}</small>
-      </li>)}</ul></div>}
+    <header><h2>为什么这样排</h2><small>先按紧迫度分档，同档内按重要性，再按截止日；拖动重要性或改截止日会先预览影响</small></header>
+    <RankingTable ranking={board.ranking} today={board.today} presets={Object.fromEntries(board.importance.map((row) => [row.id, row.preset.weight]))}
+      weighable={board.importance.map((row) => row.id)} />
     {explanation}
   </section>;
 }

@@ -147,3 +147,13 @@
 .line-swatches button{width:24px;height:24px;border:2px solid var(--paper);outline:1px solid var(--mist);cursor:pointer}
 .line-swatches button[aria-pressed="true"]{outline:2px solid var(--ink)}
 .line-editor-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.md-title input{flex:1;min-width:0;font:inherit;font-weight:700;padding:4px 6px;border:1px solid var(--mist);background:var(--paper);color:var(--ink)}
+.md-add-criterion{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.md-add-criterion input{flex:1 1 180px;min-width:0;font:inherit;padding:4px 6px;border:1px solid var(--mist);background:var(--paper);color:var(--ink)}
+.ms-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.ms-form{display:grid;gap:10px}
+.ms-form label{display:grid;gap:4px}
+.ms-form input,.ms-form select,.ms-form textarea{font:inherit;padding:6px 8px;border:1px solid var(--mist);background:var(--paper);color:var(--ink)}
+.ms-archived{flex-basis:100%}
+.ms-archived ul{margin:6px 0 0;padding:0;list-style:none;display:grid;gap:4px}
+.ms-archived li{display:flex;gap:8px;align-items:baseline;justify-content:space-between}

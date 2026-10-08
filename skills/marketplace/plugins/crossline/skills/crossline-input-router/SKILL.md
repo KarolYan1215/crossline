@@ -1,11 +1,13 @@
 ---
 name: crossline-input-router
-description: Read what was typed into quick capture and split it into new items to capture and instructions about already planned tasks (move a due date, change a duration, start later).
+description: Read what was typed into Crossline's one input box and sort it into new work to capture, changes to planned tasks, taking back a recent operation, long-term goals, milestones, a new line, records and questions.
 ---
 
 # Crossline Input Router
 
-Input is `crossline.input-route.v1`: `text` (what the person typed), `batch` (true when they chose batch input), `today` and `timeZone`, `openTasks` (id, title, line, project, due date, current usual minutes), `mentions` (tasks, milestones or materials they linked with @) and `recentOps` (the person's own operations of the last 24 hours, newest first: `id`, `label` such as 「不等了：西湖 MoS2 真实测量数据」, `at`). Return raw JSON only: `{items}`.
+Input is `crossline.input-route.v2`: `text` (what the person typed), `batch` (true when they chose batch input), `today` and `timeZone`, `lines` (the person's 主线: `id`, `label` — an identity noun such as 研究者 — their `goals`, and `hard` when the line is a hard constraint), `openTasks` (id, title, line, project, due date, current usual minutes), `mentions` (tasks, milestones or materials they linked with @) and `recentOps` (the person's own operations of the last 24 hours, newest first: `id`, `label` such as 「不等了：某项数据」, `at`). Return raw JSON only: `{items}`.
+
+The hierarchy: 主线 is an identity noun; a 长期目标 is 「成为 ___ 的 <身份>」 (a description of who the person becomes on that line); a 里程碑 is a declarative achieved state (「完成…」「达到…」「通过…」, with a date when one is said); a 任务 is something to do. Every item has every field; unused fields are `""`, `0`, `change.type` `"none"`, `energy` `""`.
 
 - An **instruction about an open task** becomes `{kind: "schedule", workOrderId, change, summary}`:
   - `change.type` `due`: a new latest-finish day (`date` = YYYY-MM-DD);
@@ -14,8 +16,13 @@ Input is `crossline.input-route.v1`: `text` (what the person typed), `batch` (tr
   - Resolve relative dates (周五, 下周一, 明天) against `today` in `timeZone`. Pick the task by its title, project or a mention; if no open task clearly matches, make it a capture instead.
   - `summary`: one line saying the change (「ECE 555 作业 2 截止改为 10/16」). Other fields `""`/`0`.
 - **Taking back something just done** (「撤销刚刚的不等了」, 「刚才点错了，恢复那个任务」, 「撤回上一步」) becomes `{kind: "undo", opId, summary}`: `opId` is the `recentOps` entry it refers to — match by what the label says (an answer such as 不等了/到了/明天再问, an action such as 归档/丢弃/批准/修改时长, the task's words), and when it says only 「刚才/上一步」 take the newest. If none matches, `opId` is `""`. `summary` says what is taken back. An undo is never a capture: it is not new work. Other fields `""`/`0`, `change.type` `"none"`.
+- **A long-term goal** (「我想成为能独立带项目的研究者」, 「长期目标：…」) becomes `{kind: "goal", lineId, title}`: `title` written as 「成为 ___ 的<label>」 in the person's words, `lineId` the line it describes. If no line fits, it is a new line (below) or a capture.
+- **A milestone** (「研究者里程碑：12 月前投出第一篇论文」, 「里程碑 期末考到 A」) becomes `{kind: "milestone", lineId, title, date, context}`: `title` the achieved state, `date` its deadline as YYYY-MM-DD if one is said (resolve relative dates against `today`), `context` any target or detail. It is saved as a draft the person approves on the 主线 page.
+- **A new line** (「加一条主线：跑者」, 「我想新增运动这条线」) becomes `{kind: "line", title, context}`: `title` the identity noun (≤ 12 characters, e.g. 跑者, not 运动). The line's own interview follows.
+- **A record** — how the person is doing (「今天很累」, 「状态很好」) or a note about a task (「作业 2 第三题卡住了」) — becomes `{kind: "record", title, energy, workOrderId}`: `title` the note in their words, `energy` `low`/`medium`/`high` only when they describe their energy, `workOrderId` the open task it is about or `""`.
+- **A question** (「这周还有多少空闲时间？」, 「为什么先排作业 2」) becomes `{kind: "question", title}` with the question verbatim; 小助手 answers it.
 - **Anything else** becomes `{kind: "capture", title, context}`: new work, an idea, a note. In batch mode split the text into separate items — one per distinct piece of work, not one per line; keep the person's wording in `title`, put supporting detail in `context`. Without batch, one capture unless the text is clearly several things.
-- Never invent tasks, dates or numbers that are not in the text. Unused fields are `""` and `0`, `change.type` `"none"` for a capture, `opId` `""` for anything but an undo.
+- When unsure between capture and another kind, choose capture. Never invent tasks, goals, milestones, dates or numbers that are not in the text.
 
 Chinese, objective, third person.
 

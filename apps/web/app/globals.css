@@ -166,16 +166,12 @@ button:disabled{opacity:.4;cursor:not-allowed}
    whole card clickable without nesting a real `<button>` (the preview trigger) inside a real `<a>`,
    which HTML forbids. The two sit as siblings; the cover link is behind everything else via z-index. */
 .card-cover-link{position:absolute;inset:0;z-index:0}
-.work-order-list article,.milestone-admin-list li,.review-list li,.approval-ledger article,.review-milestone{position:relative}
+.work-order-list article,.review-list li,.approval-ledger article,.review-milestone{position:relative}
 /* Any real interactive element inside a card with a cover link must out-rank it, or the cover link
    silently swallows clicks meant for it — not just buttons and links but every bare form control these
    particular lists embed directly (ExecutionActions' inputs, GoalControls' selects, a disclosure's own
    <summary>), since an absolutely-positioned z-index:0 sibling paints over non-positioned content. */
-.work-order-list a,.work-order-list button,.work-order-list input,.work-order-list select,.work-order-list label,.work-order-list summary,
-.milestone-admin-list a,.milestone-admin-list button,.milestone-admin-list input,.milestone-admin-list select,.milestone-admin-list label,
-.review-list a,.review-list button,.review-list input,.review-list label,
-.approval-ledger a,.approval-ledger button,.approval-ledger summary,
-.review-milestone a{position:relative;z-index:1}
+.work-order-list a,.work-order-list button,.work-order-list input,.work-order-list select,.work-order-list label,.work-order-list summary,.review-list a,.review-list button,.review-list input,.review-list label,.approval-ledger a,.approval-ledger button,.approval-ledger summary,.review-milestone a{position:relative;z-index:1}
 .capacity-blocker{font-family:var(--f-mono);font-size:12px;color:var(--ink)}
 
 /* ── subpages ──────────────────────────────── */
@@ -298,35 +294,6 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .relation-actions em{font-style:normal;font-family:var(--f-mono);font-size:12px;color:var(--ink)}
 
 /* ── milestones ────────────────────────────── */
-.milestone-admin{display:grid;gap:12px;margin-top:8px}
-.milestone-admin-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.milestone-admin-actions button,.milestone-admin-buttons button,.milestone-form-actions button{
-  min-height:32px;padding:6px 14px;border:1px solid var(--ink);font-family:var(--f-mono);font-size:12px;
-}
-.milestone-admin-actions em{font-style:normal;font-family:var(--f-mono);font-size:12px;color:var(--ink)}
-.milestone-ask{flex:1 1 240px}
-.milestone-ask input,.milestone-form input,.milestone-form select{width:100%;min-height:30px;font-family:var(--f-mono);font-size:12px}
-.milestone-form{display:grid;gap:8px;padding:10px;border:1px solid var(--ink)}
-.milestone-form h3{margin:0;font-size:13.5px;font-weight:700}
-.milestone-form h4{margin:4px 0 0;font-size:12.5px;font-weight:700}
-.milestone-form-row{display:grid;gap:7px;grid-template-columns:2fr 1fr 1fr}
-.milestone-form label span:not(.sr-only){display:block;margin-bottom:2px;font-family:var(--f-mono);font-size:12px;color:var(--graphite)}
-.milestone-hint{margin:0;color:var(--graphite);font-size:12px;line-height:1.55}
-.criterion-row{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:0;padding:6px;border:1px solid var(--mist)}
-.criterion-statement{flex:1 1 220px}
-.criterion-required{display:flex;gap:4px;align-items:center;white-space:nowrap;font-family:var(--f-mono);font-size:12px;color:var(--graphite)}
-.criterion-required input{width:auto;min-height:auto;accent-color:var(--ink)}
-.criterion-remove{min-height:26px;padding:2px 9px;border:1px solid var(--mist);font-family:var(--f-mono)}
-.criterion-remove:hover{border-color:var(--ink)}
-.measure-fields{display:flex;gap:6px;flex:1 1 200px}
-.milestone-form-actions{display:flex;gap:8px;flex-wrap:wrap}
-.milestone-admin-list{margin:0;padding:0;list-style:none;display:grid;gap:8px}
-.milestone-admin-list li{display:grid;gap:4px;padding:9px;border:1px solid var(--mist)}
-.milestone-admin-list li[data-status="archived"]{opacity:.5}
-.milestone-admin-list li[data-status="draft"]{border-style:dashed}
-.milestone-admin-head{display:flex;gap:10px;align-items:baseline;justify-content:space-between;flex-wrap:wrap}
-.milestone-admin-head b{font-size:13.5px;font-weight:700}
-.milestone-admin-head small{font-family:var(--f-mono);font-size:12px;color:var(--graphite)}
 .milestone-rationale{margin:0;color:var(--graphite);font-size:12px;line-height:1.7}
 .criterion-view{margin:0;padding:0;list-style:none;display:grid;gap:4px}
 .criterion-view li{display:flex;gap:6px;align-items:baseline;flex-wrap:wrap;font-size:12px;line-height:1.65}
@@ -334,19 +301,6 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .criterion-tag{padding:1px 6px;border:1px solid var(--mist);font-family:var(--f-mono);font-size:12px;white-space:nowrap;color:var(--graphite)}
 .criterion-tag[data-evidence="outcome"]{border-color:var(--ink);background:var(--ink);color:var(--paper)}
 .criterion-tag[data-evidence="unlabelled"]{font-style:italic;color:var(--shade)}
-.criterion-progress{font-family:var(--f-mono);font-size:12px;color:var(--graphite);border-bottom:1px solid var(--mist)}
-.milestone-admin-buttons{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
-.milestone-conversation{display:grid;gap:8px;padding:12px;border:1px solid var(--mist)}
-.milestone-conversation ul{margin:0;padding:0;list-style:none;display:grid;gap:6px}
-.milestone-conversation li{display:grid;grid-template-columns:36px 1fr;gap:8px;font-size:12.5px;line-height:1.6}
-.milestone-conversation li b{font-family:var(--f-mono);font-size:12px;color:var(--graphite)}
-.milestone-conversation li[data-from="ai"] span{color:var(--graphite)}
-.milestone-conversation-reply{display:flex;gap:8px}
-.milestone-conversation-reply input{flex:1;min-height:30px;font-family:var(--f-mono);font-size:12px}
-.milestone-conversation-reply button{min-height:30px;padding:6px 14px;border:1px solid var(--ink);font-family:var(--f-mono);font-size:12px}
-.milestone-template-manager{margin:12px 0;padding:10px 12px;border:1px solid var(--mist)}
-.milestone-template-manager>summary{cursor:pointer;font-family:var(--f-mono);font-size:12px;color:var(--graphite)}
-.milestone-template-manager .milestone-hint{margin:8px 0}
 
 /* ── offline ───────────────────────────────── */
 .offline-page{min-height:100vh;display:grid;place-items:center;padding:42px 16px}
@@ -401,8 +355,6 @@ button:disabled{opacity:.4;cursor:not-allowed}
   .day-head,.care-band,.capture-line{grid-template-columns:1fr}
   .change-ledger header{display:none}
   .change-ledger article{grid-template-columns:1fr;gap:4px}
-  .milestone-form-row{grid-template-columns:1fr}
-  .measure-fields{flex:1 1 100%}
 }
 @media (min-width:1440px){
   .today-grid{grid-template-columns:minmax(0,1.7fr) minmax(300px,1fr)}
@@ -420,7 +372,7 @@ button:disabled{opacity:.4;cursor:not-allowed}
   /* The top `nav` is still in the DOM for anything that still reads it, but the person navigates from
      the bottom bar at this width, so the wrapping text-link row is hidden rather than fixed in place. */
   .running-head nav{display:none}
-  .relation-actions button,.milestone-admin-buttons button{flex:1 1 auto}
+  .relation-actions button{flex:1 1 auto}
   .page,.subpage{padding-bottom:76px}
   .bottom-nav{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:50;background:var(--paper);border-top:1.5px solid var(--ink)}
   .bottom-nav>a,.bottom-nav-more>summary{flex:1;text-align:center;padding:10px 4px;font-family:var(--f-mono);font-size:12px;color:var(--graphite)}
@@ -564,10 +516,6 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .ob-date-questions{font-size:13px;border:1px solid #bdbdbd;background:#fff3c4;padding:6px 8px}
 .ob-date-questions ul{max-height:none}
 
-.milestone-anchor { display: grid; gap: 2px; margin: 6px 0; font: 13px/1.4 Arial, Helvetica, sans-serif; }
-.milestone-anchor > div { display: grid; grid-template-columns: 64px 1fr; gap: 8px; }
-.milestone-anchor dt { font-weight: 700; }
-.milestone-anchor dd { margin: 0; }
 
 .ob-design { display: grid; gap: 6px; padding: 12px; border: 1px solid #111; background: #fff; font: 14px/1.45 Arial, Helvetica, sans-serif; }
 .ob-design > b { font-size: 15px; }

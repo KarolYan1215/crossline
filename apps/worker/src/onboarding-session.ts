@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
-  EMPTY_PROFILE_MODEL, ONBOARDING_TURN_SCHEMA, answeredGapFacts, mergeFacts, profileGaps, sanitizeDateExtraction, validateOnboardingTurn,
+  EMPTY_PROFILE_MODEL, ONBOARDING_TURN_SCHEMA, answeredGapFacts, keepOnboardingTurn, mergeFacts, profileGaps, sanitizeDateExtraction, validateOnboardingTurn,
   type ProfileGap, type ProfileModel, type OnboardingStage,
   type KnownSources, type OnboardingTurn, type OnboardingTurnContext
 } from "@crossline/core";
@@ -193,6 +193,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     let announcedNow = announced;
     let sent = fresh;
     const validateOutput = (output: unknown) => validateOnboardingTurn(output, known);
+    const softAccept = (_rejection: Error, output: unknown) => keepOnboardingTurn(output, known);
 
     /** A first turn: everything the ledger knows goes in, because the thread starts empty. */
     const startThread = async (documents: typeof fresh, history?: OnboardingTurnContext["history"]) => {
@@ -207,7 +208,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       };
       return runCodexSkill<OnboardingTurn>(client, context, {
         skillName: ONBOARDING_SKILL, cwd, developerInstructions: INSTRUCTIONS, outputSchema: ONBOARDING_TURN_SCHEMA,
-        prepareInput: () => context, validateOutput,
+        prepareInput: () => context, validateOutput, softAccept,
         onAudit: (audit) => { if (audit.threadId) threadId = audit.threadId; },
         timeoutMs: 60 * 60_000
       });
@@ -221,7 +222,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       const newSources = clipDocuments(fresh);
       const message = JSON.stringify({ reply: { id: replyId, text: replyText }, ...(newSources.length ? { newSources } : {}) });
       result = await continueSkillTurn<OnboardingTurn>(client, session.codexThreadId, message, {
-        skillName: ONBOARDING_SKILL, cwd, outputSchema: ONBOARDING_TURN_SCHEMA, validateOutput,
+        skillName: ONBOARDING_SKILL, cwd, outputSchema: ONBOARDING_TURN_SCHEMA, validateOutput, softAccept,
         onAudit: () => {}, timeoutMs: 60 * 60_000
       });
       // The runtime forgets a conversation when it restarts. The interview does not: the profile, the files and

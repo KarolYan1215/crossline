@@ -20,8 +20,10 @@ type TurnResponse =
  * where the assistant sees that task first). The thread and its last 40 messages survive page loads in sessionStorage under
  * `storageKey`. Nothing the assistant proposes is written until the person clicks its card.
  */
-export function AssistantChat({ workOrderId = null, storageKey, emptyText, mode = "chat", inputFirst = false, placeholder = "输入消息，@ 引用任务、里程碑或资料" }: {
+export function AssistantChat({ workOrderId = null, storageKey, emptyText, mode = "chat", inputFirst = false, placeholder = "输入消息，@ 引用任务、里程碑或资料", seed = null }: {
   workOrderId?: string | null; storageKey: string; emptyText: string;
+  /** A message to send as soon as the panel has it (a question handed over from the input box); `nonce` tells two equal questions apart. */
+  seed?: { text: string; nonce: number } | null;
   /** `record`: the text is a note for the task's record, turned into operations rather than answered. */
   mode?: "chat" | "record";
   /** The task's own entry: the input box first, the conversation under it. */
@@ -87,6 +89,13 @@ export function AssistantChat({ workOrderId = null, storageKey, emptyText, mode 
     } catch { setMessages((current) => [...current, { from: "assistant", text: "网络不可用，消息未发送" }]); }
     finally { setSending(false); }
   };
+
+  const sentSeed = useRef(0);
+  useEffect(() => {
+    if (!seed || sentSeed.current === seed.nonce || sending) return;
+    sentSeed.current = seed.nonce;
+    void sendMessage(seed.text, []);
+  }, [seed, sending]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const captureCard = async (id: string) => {
     const card = cards.find((item) => item.id === id);

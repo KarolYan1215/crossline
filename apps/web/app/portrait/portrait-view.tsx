@@ -19,22 +19,29 @@ function Flywheel({ lines, items }: { lines: Line[]; items: PortraitReport["line
     const angle = -Math.PI / 2 + (index / Math.max(1, lines.length)) * Math.PI * 2;
     return [line.id, { x: c + r * Math.cos(angle), y: c + r * Math.sin(angle) }];
   }));
+  const safe = (id: string) => id.replace(/[^a-zA-Z0-9_-]/g, "_");
   return <svg className="pt-flywheel" viewBox={`0 0 ${size} ${size}`} role="img" aria-label="主线飞轮：各主线如何互相供养">
-    <defs><marker id="pt-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="currentColor" /></marker></defs>
+    <defs>{lines.map((line) => <g key={line.id} data-line={line.id}>
+      <marker id={`pt-arrow-${safe(line.id)}`} viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto">
+        <path d="M0,0 L8,4 L0,8 z" style={{ fill: "var(--lc)" }} /></marker></g>)}</defs>
     <circle cx={c} cy={c} r={r} fill="none" stroke="currentColor" strokeOpacity=".12" strokeDasharray="3 5" />
     {items.flatMap((item) => item.feeds.map((feed) => {
       const a = at.get(item.lineId), b = at.get(feed.toLineId);
       if (!a || !b) return null;
-      const mx = (a.x + b.x) / 2 + (c - (a.x + b.x) / 2) * 0.35, my = (a.y + b.y) / 2 + (c - (a.y + b.y) / 2) * 0.35;
-      const shorten = (p: { x: number; y: number }, q: { x: number; y: number }) => { const d = Math.hypot(q.x - p.x, q.y - p.y) || 1; return { x: q.x - ((q.x - p.x) / d) * 34, y: q.y - ((q.y - p.y) / d) * 34 }; };
-      const end = shorten({ x: mx, y: my }, b), start = shorten({ x: mx, y: my }, a);
-      return <path key={`${item.lineId}>${feed.toLineId}`} d={`M${start.x},${start.y} Q${mx},${my} ${end.x},${end.y}`} fill="none" stroke="currentColor" strokeWidth="1.6"
-        markerEnd="url(#pt-arrow)"><title>{feed.how}</title></path>;
+      // Each direction bends to its own side of the chord (the normal flips with the direction), so A→B and B→A never overlap.
+      const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy) || 1;
+      const mx = (a.x + b.x) / 2 - (dy / d) * d * 0.16, my = (a.y + b.y) / 2 + (dx / d) * d * 0.16;
+      const toward = (from: { x: number; y: number }, to: { x: number; y: number }) => { const k = Math.hypot(to.x - from.x, to.y - from.y) || 1; return { x: from.x + ((to.x - from.x) / k) * 33, y: from.y + ((to.y - from.y) / k) * 33 }; };
+      const start = toward(a, { x: mx, y: my }), end = toward(b, { x: mx, y: my });
+      return <g key={`${item.lineId}>${feed.toLineId}`} data-line={item.lineId}>
+        <path d={`M${start.x},${start.y} Q${mx},${my} ${end.x},${end.y}`} fill="none" style={{ stroke: "var(--lc)" }} strokeOpacity=".75" strokeWidth="1.6"
+          markerEnd={`url(#pt-arrow-${safe(item.lineId)})`}><title>{feed.how}</title></path></g>;
     }))}
     {lines.map((line) => { const p = at.get(line.id)!; return <g key={line.id} data-line={line.id}>
       <circle cx={p.x} cy={p.y} r={30} style={{ fill: "var(--paper)", stroke: "var(--lc)" }} strokeWidth={line.rank === 1 || line.hard ? 4 : 2} />
       <text x={p.x} y={p.y + 4} textAnchor="middle" style={{ fill: "var(--lc)" }} fontSize="13" fontWeight="700">{line.label}</text>
-      <text x={p.x} y={p.y + 46} textAnchor="middle" fontSize="11" fill="currentColor" opacity=".7">{roleOf(line)}</text>
+      {/* The role sits outside the ring, away from the arrows: above a node in the upper half, below one in the lower half. */}
+      <text x={p.x} y={p.y < c - 1 ? p.y - 38 : p.y + 46} textAnchor="middle" fontSize="11" fill="currentColor" opacity=".7">{roleOf(line)}</text>
     </g>; })}
   </svg>;
 }

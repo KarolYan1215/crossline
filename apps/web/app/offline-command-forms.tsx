@@ -7,6 +7,7 @@ import {
 } from "./offline-queue";
 import { looksLikeScheduleCommand, type DeadLetter } from "@crossline/core";
 import type { Change } from "../lib/impact";
+import type { RoutedOutcome } from "../lib/input";
 import { Composer, type ComposerInput } from "./chat/composer";
 import { ImpactCard, useImpact } from "./task/impact";
 import { undoOperation } from "./undo-center";
@@ -94,6 +95,18 @@ function UndoSuggestion({ opId, label, summary }: { opId: string; label: string;
   </div>;
 }
 
+/** What the input box wrote besides captures: each line says where it went, and every one of them is in the top bar's 撤销. */
+function WrittenItems({ goals, milestones, lines, records, failed }: Pick<RoutedOutcome, "goals" | "milestones" | "lines" | "records" | "failed">) {
+  if (!goals.length && !milestones.length && !lines.length && !records.length && !failed.length) return null;
+  return <ul className="routed-written">
+    {goals.map((goal) => <li key={`g-${goal.lineId}-${goal.title}`}><b>长期目标</b> · {goal.line}：{goal.title} <a href="/milestones">主线 →</a></li>)}
+    {milestones.map((item) => <li key={item.id}><b>里程碑草稿</b> · {item.line}：{item.title}{item.date ? `（${item.date}）` : ""} <a href="/milestones">在主线页审阅 →</a></li>)}
+    {lines.map((line) => <li key={line.id}><b>新主线</b> · {line.label} <a href={`/onboarding?line=${encodeURIComponent(line.id)}`}>开始这条主线的访谈 →</a></li>)}
+    {records.map((text, index) => <li key={`r-${index}`}><b>已记录</b> · {text}</li>)}
+    {failed.map((text, index) => <li key={`f-${index}`} role="alert">{text}</li>)}
+  </ul>;
+}
+
 /**
  * 快速收集. A plain line is captured at once (and queued offline without a connection); a batch, or a line that reads like an
  * instruction about planned work, goes to the router, which splits it into captures and changes to preview. Linked tasks, milestones and
@@ -104,6 +117,7 @@ export function OfflineCaptureForm({ ownerId, workspaceId }: { ownerId: string; 
   const [busy, setBusy] = useState(false);
   const [changes, setChanges] = useState<Array<{ change: Change; summary: string }>>([]);
   const [undos, setUndos] = useState<Array<{ opId: string; label: string; summary: string }>>([]);
+  const [written, setWritten] = useState<Pick<RoutedOutcome, "goals" | "milestones" | "lines" | "records" | "failed"> | null>(null);
 
   const capture = async ({ text, files, mentions }: ComposerInput): Promise<boolean> => {
     const [title, ...rest] = text.split("\n");
@@ -135,15 +149,14 @@ export function OfflineCaptureForm({ ownerId, workspaceId }: { ownerId: string; 
   };
 
   const submit = async (input: ComposerInput): Promise<boolean> => {
-    setChanges([]); setUndos([]);
+    setChanges([]); setUndos([]); setWritten(null);
     if (!input.batch && !looksLikeScheduleCommand(input.text)) return capture(input);
     if (!navigator.onLine) return capture(input);
     setBusy(true); setStatus(input.batch ? "正在拆分…" : "正在识别指令…");
     try {
       const response = await fetch("/api/input/route", { method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ text: input.text, batch: input.batch, mentions: input.mentions }) });
-      const result = await response.json().catch(() => null) as { ok?: boolean; captured?: Array<{ id: string }>; changes?: Array<{ change: Change; summary: string }>; applied?: string[];
-        undos?: Array<{ opId: string; label: string; summary: string }> } | null;
+      const result = await response.json().catch(() => null) as ({ ok?: boolean } & Partial<RoutedOutcome>) | null;
       if (!response.ok || !result?.ok) { setStatus("未能处理，已按普通收集保存"); return capture(input); }
       if (input.files.length && result.captured?.[0]) {
         const upload = new FormData();
@@ -152,15 +165,22 @@ export function OfflineCaptureForm({ ownerId, workspaceId }: { ownerId: string; 
       }
       setChanges(result.changes ?? []);
       setUndos(result.undos ?? []);
+      setWritten({ goals: result.goals ?? [], milestones: result.milestones ?? [], lines: result.lines ?? [], records: result.records ?? [], failed: result.failed ?? [] });
+      // A question is not stored: it goes to 小助手, which answers it with what it knows about the person.
+      for (const question of result.questions ?? []) window.dispatchEvent(new CustomEvent("crossline:ask-assistant", { detail: question }));
       setStatus([result.captured?.length ? `已收集 ${result.captured.length} 项` : "", result.applied?.length ? `已应用：${result.applied.join("；")}` : "",
-        result.changes?.length ? `${result.changes.length} 项日程调整待确认` : "", result.undos?.length ? "撤销待确认" : ""].filter(Boolean).join(" · ") || "无可处理内容");
+        result.changes?.length ? `${result.changes.length} 项日程调整待确认` : "", result.undos?.length ? "撤销待确认" : "",
+        result.questions?.length ? "问题已转给小助手" : ""].filter(Boolean).join(" · ")
+        || (result.goals?.length || result.milestones?.length || result.lines?.length || result.records?.length ? "" : "无可处理内容"));
+      if (result.goals?.length || result.milestones?.length || result.lines?.length) window.dispatchEvent(new Event("crossline:pending-changed"));
       return true;
     } finally { setBusy(false); }
   };
 
-  return <Composer mode="capture" busy={busy} placeholder="新任务、想法、链接或日程调整（例如：把作业 2 推到周五）" onSubmit={submit}>
+  return <Composer mode="capture" busy={busy} placeholder="任务、日程调整、长期目标、里程碑、记录或问题（例如：把作业 2 推到周五）" onSubmit={submit}>
     {status && <small className="muted composer-status" role="status">{status}</small>}
     {changes.map((item, index) => <ScheduleChange key={index} change={item.change} summary={item.summary} />)}
     {undos.map((item, index) => <UndoSuggestion key={`undo-${index}`} {...item} />)}
+    {written && <WrittenItems {...written} />}
   </Composer>;
 }

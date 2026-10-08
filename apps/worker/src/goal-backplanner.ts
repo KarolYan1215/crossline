@@ -153,18 +153,21 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
   };
 }
 
-/** How far ahead a milestone's deadline may be for the system to work backwards from it on its own. */
+/**
+ * How far ahead a task's milestone may be due for its work to be scheduled. Every approved milestone is worked backwards into tasks
+ * (the task library, decided 2026-10-08); a task whose milestone is due later than this stays in the library, unscheduled, until it
+ * comes within the window (`apps/web/lib/crossline.ts`).
+ */
 export const AUTO_BACKPLAN_HORIZON_DAYS = 21;
 
 /**
- * Approved milestones the system should work backwards from without being asked: due within three weeks,
- * nothing open serving them yet, and not already backplanned at this version. This is what turns 「按线批准
- * 里程碑」 into a week with real steps on it — before, the only route from a milestone to work was a button
- * per milestone (which never worked on a real account) or the person typing every step themselves.
+ * Approved milestones the system should work backwards from without being asked: every one with nothing open serving it yet and not
+ * already backplanned at this version — soonest deadline first, undated ones last. This is what turns 「按线批准里程碑」 into real tasks:
+ * before, the only route from a milestone to work was a button per milestone or the person typing every step themselves. Only those due
+ * within `AUTO_BACKPLAN_HORIZON_DAYS` are scheduled; the rest wait in the task library.
  */
 export function milestonesAwaitingBackplan(store: CrosslineStore, workspaceId: string, now = new Date(), limit = 3): string[] {
   const today = now.toISOString().slice(0, 10);
-  const horizon = new Date(now.getTime() + AUTO_BACKPLAN_HORIZON_DAYS * 86_400_000).toISOString().slice(0, 10);
   const deadlines = new Map(store.listMilestoneAnchors(workspaceId).map((anchor) => [anchor.milestoneId, anchor.deadline]));
   const open = new Set(store.listWorkOrders(workspaceId).filter((order) => !["archived", "accepted"].includes(order.state))
     .map((order) => order.milestoneId));
@@ -194,9 +197,10 @@ export function milestonesAwaitingBackplan(store: CrosslineStore, workspaceId: s
   const approved = store.listMilestones(workspaceId)
     .filter((milestone) => milestone.status === "approved" && milestone.projectId && identities.has(milestone.identityId));
   const requested = approved.filter((milestone) => rerun.has(milestone.id) && !declined.has(`${milestone.id}:${milestone.version}`));
+  // A passed deadline is the person's to move (the risk ask), not something to plan towards; an undated milestone sorts last.
   const due = approved
-    .filter((milestone) => { const deadline = deadlines.get(milestone.id); return Boolean(deadline && deadline >= today && deadline <= horizon); })
+    .filter((milestone) => { const deadline = deadlines.get(milestone.id); return !deadline || deadline >= today; })
     .filter((milestone) => !rerun.has(milestone.id) && !open.has(milestone.id) && !blocked.has(`${milestone.id}:${milestone.version}`) && !declined.has(`${milestone.id}:${milestone.version}`))
-    .sort((a, b) => deadlines.get(a.id)!.localeCompare(deadlines.get(b.id)!));
+    .sort((a, b) => (deadlines.get(a.id) || "9999").localeCompare(deadlines.get(b.id) || "9999"));
   return [...requested, ...due].slice(0, limit).map((milestone) => milestone.id);
 }

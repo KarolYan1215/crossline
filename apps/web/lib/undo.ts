@@ -215,6 +215,8 @@ function inverseOf(before: Snapshot, after: Snapshot): Inverse[] {
   for (const [id, now] of after.milestones) {
     const was = before.milestones.get(id);
     if (was && was !== now) milestoneGroups.set(was, [...(milestoneGroups.get(was) ?? []), id]);
+    // A milestone the operation created is taken back by archiving it.
+    if (!was) milestoneGroups.set("archived", [...(milestoneGroups.get("archived") ?? []), id]);
   }
   for (const [status, ids] of milestoneGroups) items.push({ kind: "milestones.status", ids, status: status as "draft" | "approved" | "archived" });
   const entries = [...new Set([...before.settings.keys(), ...after.settings.keys()])]

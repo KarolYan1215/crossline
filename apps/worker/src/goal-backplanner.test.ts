@@ -99,7 +99,7 @@ test("only approved, unrevoked insight enters the next backplanning context", as
   store.close();
 });
 
-test("milestones due within three weeks with nothing open are picked for backplanning, soonest first", async () => {
+test("every approved milestone with nothing open is picked for backplanning, soonest first and undated last", async () => {
   const { milestonesAwaitingBackplan } = await import("./goal-backplanner");
   const store = new CrosslineStore(":memory:");
   const save = (id: string, status: "approved" | "draft" = "approved") => store.saveMilestone({ id, ownerId, workspaceId,
@@ -109,11 +109,13 @@ test("milestones due within three weeks with nothing open are picked for backpla
   save("soon"); anchor("soon", "2026-10-12");
   save("sooner"); anchor("sooner", "2026-10-09");
   save("far"); anchor("far", "2026-12-17");
+  save("undated");
+  save("past"); anchor("past", "2026-10-01");
   save("draft", "draft"); anchor("draft", "2026-10-10");
   save("served"); anchor("served", "2026-10-11");
   store.saveWorkOrder({ id: "wo", ownerId, workspaceId, identityId: "research", projectId: "p", milestoneId: "served", intent: "x",
     state: "approved", riskTier: "routine", estimate: { p25Minutes: 1, p50Minutes: 2, p85Minutes: 3, source: "llm_prior", observationCount: 0, confidence: "low" }, payload: {} });
-  expect(milestonesAwaitingBackplan(store, workspaceId, new Date("2026-10-06T12:00:00Z"))).toEqual(["sooner", "soon"]);
+  expect(milestonesAwaitingBackplan(store, workspaceId, new Date("2026-10-06T12:00:00Z"), 10)).toEqual(["sooner", "soon", "far", "undated"]);
   store.close();
 });
 

@@ -92,7 +92,7 @@ async function ensureScheduleSetup(page: Page): Promise<void> {
 // The plan page's ranking lists and capacity figures come from the same time-limited solve, so they are left out as well; the ranking
 // is removed rather than hidden because how many tasks it lists as placed changes its height.
 const STABLE_FOR_SCREENSHOT = ".pending-badge,.dv-block,.dv-aside,.undo-trigger,.wk-block,.mo-chip[data-kind=\"scheduled\"],.ui-bar-value,.ui-bar-fill,"
-  + ".task-card-slot a,.pl-hours,.pl-week-bar,.pl-week small,.pl-goal-track,.pl-goal-tags{visibility:hidden}.pl-rank,.pl-unplaced,.pl-explain p{display:none}";
+  + ".task-card-slot a,.pl-hours,.pl-week-bar,.pl-week small,.pl-goal-track,.pl-goal-tags{visibility:hidden}.pl-rank-table,.pl-library,.pl-explain p{display:none}";
 
 test.beforeEach(async ({ page }, testInfo) => {
   if (testInfo.project.name === "desktop-chrome") await ensureScheduleSetup(page);

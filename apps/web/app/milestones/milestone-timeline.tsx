@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { BoardMilestone, BoardTick, MilestoneBoard } from "../../lib/milestone-board";
 import { Bullet } from "../ui/charts";
 import { TL, layoutTimeline } from "./timeline-model";
@@ -17,6 +17,11 @@ const md = (day: string) => `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10
 export function MilestoneTimeline({ board }: { board: MilestoneBoard }) {
   const [selected, setSelected] = useState<{ kind: "milestone"; id: string } | { kind: "course"; id: string } | null>(null);
   const [tick, setTick] = useState<BoardTick | null>(null);
+  // `?open=<id>` (a link from another page, such as the weekly review) opens that milestone's drawer.
+  useEffect(() => {
+    const id = new URLSearchParams(location.search).get("open");
+    if (id && board.milestones.some((item) => item.id === id)) setSelected({ kind: "milestone", id });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const courseNodes = board.courses.map((course) => ({ id: `course:${course.projectId}`, line: course.identityId, title: `${course.name} · ${course.value}`,
     status: "approved" as const, kind: "course" as const, day: course.endDay ? new Date(Date.parse(`${course.endDay}T12:00:00Z`) + 2 * 86_400_000).toISOString().slice(0, 10) : undefined, dependsOn: [] }));
   const layout = layoutTimeline({

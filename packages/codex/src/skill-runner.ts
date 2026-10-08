@@ -193,6 +193,8 @@ export type ContinueTurnOptions<T> = {
   signal?: AbortSignal;
   timeoutMs?: number;
   idleMs?: number;
+  /** As `SkillRunOptions.softAccept`: keep part of an answer the repairs could not fix, when the problem is about content quality. */
+  softAccept?: (rejection: Error, output: unknown) => T | undefined;
 };
 
 /**
@@ -547,7 +549,8 @@ export function continueSkillTurn<T>(client: CodexRpcBoundary, threadId: string,
       await requireLogin(scope);
       const output = await runTurnsUntilValid(client, scope, context, audit, {
         skillName: options.skillName, threadId, outputSchema: options.outputSchema, allowedItemTypes: ["agentMessage", "reasoning", "userMessage"],
-        firstPrompt: message, validate: options.validateOutput, onAudit: options.onAudit, ...(options.idleMs ? { idleMs: options.idleMs } : {})
+        firstPrompt: message, validate: options.validateOutput, onAudit: options.onAudit, ...(options.idleMs ? { idleMs: options.idleMs } : {}),
+        ...(options.softAccept ? { soften: options.softAccept } : {})
       });
       return { ok: true, output, audit };
     } catch (error) { return failureResult<T>(client, error, audit); }

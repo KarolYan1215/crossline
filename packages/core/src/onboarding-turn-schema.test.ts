@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { ONBOARDING_TURN_SCHEMA, validateOnboardingTurn, type OnboardingTurn } from "./onboarding-turn-schema";
+import { ONBOARDING_TURN_SCHEMA, keepOnboardingTurn, validateOnboardingTurn, type OnboardingTurn } from "./onboarding-turn-schema";
 
 const known = {
   identities: ["research", "startup", "media", "investment"],
@@ -100,4 +100,13 @@ test("duplicate question or option ids are refused", () => {
   const q = turn().questions[0]!;
   expectRejected(turn({ questions: [q, q] }), "ONBOARDING_QUESTION_DUPLICATE");
   expectRejected(turn({ questions: [{ ...q, options: [q.options[0]!, q.options[0]!] }] }), "ONBOARDING_OPTION_DUPLICATE");
+});
+
+test("when repairs run out, a turn keeps everything but the facts and questions that are malformed", () => {
+  const kept = keepOnboardingTurn(turn({ slotUpdates: [update({}), update({ slot: "指南针" }), update({ slot: "fake", sourceQuote: "从未说过" })],
+    lineProfiles: [{ lineId: "research", description: "研究描述", goalCandidates: ["成为能独立带项目的研究者"] }, { lineId: "ghost", description: "", goalCandidates: [] }] }), known);
+  expect(kept?.slotUpdates.map((fact) => fact.slot)).toEqual(["deadline"]);
+  expect(kept?.lineProfiles?.map((line) => line.lineId)).toEqual(["research"]);
+  // A turn that is wrong as a whole — an unfinished interview with no usable question — stays refused.
+  expect(keepOnboardingTurn(turn({ questions: [{ ...turn().questions[0]!, identityId: "ghost" }] }), known)).toBeUndefined();
 });

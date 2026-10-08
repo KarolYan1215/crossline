@@ -37,24 +37,36 @@ export function MilestoneDrawer({ milestone, labels, onClose }: { milestone: Boa
   const saveGoal = (body: Record<string, unknown>) => action.run("保存中…", () => post(`/api/goals/${encodeURIComponent(milestone.id)}`, body), "未保存，请重试。");
   const decideDraft = (decision: "approved" | "archived") => action.run(decision === "approved" ? "批准中…" : "撤销中…",
     () => post("/api/milestones/approve-batch", { ids: [milestone.id], decision }), "操作未完成，请刷新后重试。");
-  const saveThreshold = (criterionId: string, value: number) => action.run("保存中…", () => post("/api/milestones", {
-    id: milestone.id, identityId: milestone.identityId, projectId: milestone.projectId, title: milestone.title, status: milestone.status,
+  // Every edit here is a new version of the milestone (`/api/milestones`), so the criteria a past verdict was judged against stay readable.
+  const saveMilestone = (patch: { title?: string; status?: string; successCriteria?: SuccessCriterion[] }, pending = "保存中…", failed = "未保存，请检查后重试。") =>
+    action.run(pending, () => post("/api/milestones", {
+      id: milestone.id, identityId: milestone.identityId, projectId: milestone.projectId, title: milestone.title, status: milestone.status,
+      successCriteria: milestone.successCriteria, ...(milestone.templateId ? { templateId: milestone.templateId } : {}), ...patch }), failed);
+  const saveThreshold = (criterionId: string, value: number) => saveMilestone({
     successCriteria: milestone.successCriteria.map((criterion: SuccessCriterion) => criterion.id === criterionId && criterion.measure.kind === "threshold"
-      ? { ...criterion, measure: { ...criterion.measure, value } } : criterion),
-    ...(milestone.templateId ? { templateId: milestone.templateId } : {}) }), "未保存，请检查数值。");
+      ? { ...criterion, measure: { ...criterion.measure, value } } : criterion) }, "保存中…", "未保存，请检查数值。");
+  const [title, setTitle] = useState(milestone.title);
 
   return <Sheet side="right" title={milestone.title} open onOpenChange={(open) => !open && onClose()}
-    footer={milestone.status === "draft" ? <div className="md-actions">
-      <button type="button" className="primary-button" disabled={action.busy} onClick={() => void decideDraft("approved")}>批准</button>
-      <button type="button" disabled={action.busy} onClick={() => void decideDraft("archived")}>撤销草稿</button>
-      <a href={`?edit=${encodeURIComponent(milestone.id)}#milestone-admin`}>编辑全部字段</a>
-    </div> : <div className="md-actions"><a href={`?edit=${encodeURIComponent(milestone.id)}#milestone-admin`}>编辑全部字段</a></div>}>
+    footer={<div className="md-actions">
+      {milestone.status === "draft" && <>
+        <button type="button" className="primary-button" disabled={action.busy} onClick={() => void decideDraft("approved")}>批准</button>
+        <button type="button" disabled={action.busy} onClick={() => void decideDraft("archived")}>撤销草稿</button>
+      </>}
+      {approved && <button type="button" disabled={action.busy} onClick={() => void saveMilestone({ status: "archived" }, "归档中…")}>归档</button>}
+    </div>}>
     <div className="md" data-line={milestone.identityId}>
       <div className="md-tags">
         <LineTag line={milestone.identityId}>{labels[milestone.identityId] ?? milestone.identityId}</LineTag>
         {milestone.projectName && <Tag>{milestone.projectName}</Tag>}
         <Tag tone={approved ? "ok" : "info"}>{approved ? "已批准" : "草稿"}</Tag>
       </div>
+
+      <form className="md-row md-title" onSubmit={(event) => { event.preventDefault(); if (title.trim() && title.trim() !== milestone.title) void saveMilestone({ title: title.trim() }); }}>
+        <label className="md-key" htmlFor={`md-title-${milestone.id}`}>标题</label>
+        <input id={`md-title-${milestone.id}`} value={title} maxLength={200} onChange={(event) => setTitle(event.target.value)} />
+        {title.trim() && title.trim() !== milestone.title && <button type="submit" disabled={action.busy}>保存</button>}
+      </form>
 
       <section className="md-block" aria-label="日期与重要性">
         <div className="md-row"><span className="md-key">截止</span>
@@ -69,11 +81,14 @@ export function MilestoneDrawer({ milestone, labels, onClose }: { milestone: Boa
         {milestone.ticks.length > 0 && <TickStrip milestone={milestone} />}
       </section>
 
-      {milestone.criteria.length > 0 && <section className="md-block" aria-label="验收标准">
+      <section className="md-block" aria-label="验收标准">
         <h3>验收标准 <span className="mono md-sub">{milestone.criteria.filter((criterion) => criterion.quarters === 4).length}/{milestone.criteria.length}</span></h3>
+        {milestone.criteria.length === 0 && <p className="md-sub">尚无验收标准：关联任务仍按各自证据验收，但里程碑进度无法记录。</p>}
         {milestone.criteria.map((criterion) => <CriterionRow key={criterion.id} criterion={criterion} busy={action.busy}
           onSave={(value) => void saveThreshold(criterion.id, value)} />)}
-      </section>}
+        {milestone.successCriteria.length < 10 && <AddCriterion busy={action.busy}
+          onAdd={(criterion) => void saveMilestone({ successCriteria: [...milestone.successCriteria, criterion] })} />}
+      </section>
 
       {milestone.tasks.length > 0 && <section className="md-block" aria-label="任务与步骤">
         <h3>任务与步骤</h3>
@@ -100,6 +115,32 @@ export function MilestoneDrawer({ milestone, labels, onClose }: { milestone: Boa
       {action.message && <p role="status" className="md-status">{action.message}</p>}
     </div>
   </Sheet>;
+}
+
+/** One more criterion: a thing that must exist (产出物), or a result judged against a stated way it fails (结果). */
+function AddCriterion({ busy, onAdd }: { busy: boolean; onAdd: (criterion: SuccessCriterion) => void }) {
+  const [open, setOpen] = useState(false);
+  const [kind, setKind] = useState<"outcome" | "output">("outcome");
+  const [statement, setStatement] = useState("");
+  const [failsWhen, setFailsWhen] = useState("");
+  if (!open) return <button type="button" className="text-button" onClick={() => setOpen(true)}>加一条标准</button>;
+  const ready = statement.trim() && (kind === "output" || failsWhen.trim());
+  return <form className="md-add-criterion" onSubmit={(event) => {
+    event.preventDefault();
+    if (!ready) return;
+    const id = `c-${Math.random().toString(36).slice(2, 9)}`;
+    onAdd(kind === "output"
+      ? { id, statement: statement.trim(), required: true, evidenceOf: "output", measure: { kind: "artifact", mustExist: statement.trim() } }
+      : { id, statement: statement.trim(), required: true, evidenceOf: "outcome", measure: { kind: "judgement", rubric: statement.trim(), failsWhen: failsWhen.trim() } });
+  }}>
+    <select value={kind} onChange={(event) => setKind(event.target.value as "outcome" | "output")} aria-label="标准类型">
+      <option value="outcome">结果</option><option value="output">产出物</option>
+    </select>
+    <input value={statement} maxLength={400} placeholder={kind === "output" ? "必须存在的产出，例如：投稿确认邮件" : "达成的结果，例如：审稿意见为小修"} onChange={(event) => setStatement(event.target.value)} />
+    {kind === "outcome" && <input value={failsWhen} maxLength={400} placeholder="什么情况算未达成" onChange={(event) => setFailsWhen(event.target.value)} />}
+    <button type="submit" disabled={busy || !ready}>添加</button>
+    <button type="button" className="text-button" onClick={() => setOpen(false)}>取消</button>
+  </form>;
 }
 
 /** The milestone's ticks on a strip from today to its deadline, so the near-term results read as a run-up rather than a list. */

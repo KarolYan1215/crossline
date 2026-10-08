@@ -37,19 +37,19 @@
 .pl-goal-tags{display:flex;justify-content:flex-end;gap:4px}
 
 /* ranking */
-.pl-rank{margin:0;padding:0 0 0 22px;display:grid;gap:4px}
-.pl-rank li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 10px;align-items:center;padding:4px 6px;border-left:3px solid var(--lc,var(--mist))}
+.pl-rank-table{display:grid;gap:2px}
+.pl-rank-row{display:grid;grid-template-columns:minmax(0,2fr) 104px minmax(150px,1.3fr) 116px 160px;gap:4px 10px;align-items:center;padding:4px 6px;border-left:3px solid var(--lc,var(--mist))}
+.pl-rank-row[data-unplaced]{border-left-style:dashed}
+.pl-rank-head{border-left-color:transparent;font-size:12px;color:var(--graphite)}
 .pl-rank-title{font-size:13px;font-weight:700;color:var(--ink);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pl-rank-title:hover{text-decoration:underline}
-.pl-rank-factors{grid-column:1;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
-.pl-rank-factors small{font-size:12px;color:var(--graphite)}
-.pl-rank-slot{grid-column:2;grid-row:1/span 2;font-size:12px;color:var(--graphite);white-space:nowrap}
-.pl-weight{display:inline-block;width:48px;height:6px;background:var(--mist)}
-.pl-weight i{display:block;height:100%;background:var(--lc,var(--ink))}
-.pl-unplaced h3{margin:4px 0;font-size:13px}
-.pl-unplaced ul{margin:0;padding:0;list-style:none;display:grid;gap:4px}
-.pl-unplaced li{display:grid;gap:2px;padding:4px 6px;border-left:3px dashed var(--lc,var(--mist));font-size:13px}
-.pl-unplaced small{font-size:12px;color:var(--graphite)}
+.pl-rank-slot{font-size:12px;color:var(--graphite);white-space:nowrap}
+.pl-rank-slot small{white-space:normal}
+.pl-rank-group{display:grid;gap:4px}
+.pl-library ul{margin:6px 0 0;padding:0;list-style:none;display:grid;gap:4px}
+.pl-library li{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline;padding:4px 6px;border-left:3px dashed var(--lc,var(--mist));font-size:13px}
+.pl-library small{font-size:12px;color:var(--graphite)}
+@media (max-width:760px){.pl-rank-head{display:none}.pl-rank-row{grid-template-columns:minmax(0,1fr) auto}.pl-rank-weight{grid-column:1 / -1}}
 .pl-explain{display:grid;gap:6px;padding-top:8px;border-top:1px solid var(--mist);font-size:13px}
 .pl-explain p{margin:0}
 .pl-explain ul{margin:0;padding-left:18px}
@@ -85,3 +85,4 @@
   .pl-goal{--pl-title-w:40%}
   .pl-card>header .ui-segmented{margin-left:0}
 }
+.pl-chart-note{margin:0 0 6px;font-size:12px;line-height:1.6;color:var(--graphite)}
