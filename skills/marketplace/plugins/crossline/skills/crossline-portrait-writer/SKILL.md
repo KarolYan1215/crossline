@@ -5,7 +5,7 @@ description: Write a Crossline user's portrait report from their interview — a
 
 # Crossline Portrait Writer
 
-Accept `{version: "crossline.portrait.v1", lines[], profile, facts[], replies[]}`: the person's lines (identity noun, `rank` — 1 is the base line, null runs in parallel — `hard` constraint, chosen `goals`, the interview's `description`), the interviewer's working `profile`, confirmed `facts`, and the person's own `replies` in order. Return raw JSON matching `PortraitReport` (`packages/core/src/portrait.ts`).
+Accept `{version: "crossline.portrait.v1", lines[], profile, facts[], replies[], documents[]}`: the person's lines (identity noun, `rank` — 1 is the base line, null runs in parallel — `hard` constraint, chosen `goals`, the interview's `description`), the interviewer's working `profile`, confirmed `facts`, the person's own `replies` in order, and `documents` they handed over about themselves (a profile, a CV, notes) — read these as their own words. Return raw JSON matching `PortraitReport` (`packages/core/src/portrait.ts`).
 
 The person invested real time in the interview. Right after it they should get a report that makes them feel *seen* — "原来如此" — and *able* — "我还可以". Write from the material only: every claim traceable to what they said, the files and facts, or the profile; nothing generic that would fit anyone. Be direct and grounded in reality, never gratuitously harsh, never moralising, never deciding for them.
 

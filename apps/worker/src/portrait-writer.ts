@@ -27,7 +27,12 @@ export function createPortraitWriter(store: CrosslineStore, workspaceId: string,
       .filter((text) => { budget -= text.length; return budget > 0; }).reverse();
     const facts = store.listProfileFacts(workspaceId).filter((fact) => fact.status === "confirmed" || fact.slot.startsWith("flywheel_")).slice(0, 120)
       .map(({ identityId, projectId, slot, value, status }) => ({ identityId, projectId, slot, value, status }));
-    const context = { version: "crossline.portrait.v1", lines, profile: json<Record<string, unknown>>("profile.model", {}), facts, replies };
+    // What the person handed over about themselves (a profile, a CV, notes) — files not filed under any one project — read as well.
+    let room = 24_000;
+    const documents = store.listSourceDocuments(workspaceId).filter((doc) => !doc.projectId && doc.extractionStatus === "done" && doc.extractedText.trim())
+      .map((doc) => { const text = doc.extractedText.slice(0, Math.max(0, Math.min(12_000, room))); room -= text.length; return { fileName: doc.fileName, text }; })
+      .filter((doc) => doc.text);
+    const context = { version: "crossline.portrait.v1", lines, profile: json<Record<string, unknown>>("profile.model", {}), facts, replies, documents };
     const result = await runCodexSkill<PortraitReport>(client, context, { skillName: PORTRAIT_WRITER, cwd,
       developerInstructions: "Write the portrait report as the Skill describes, from the supplied material only. Return raw JSON only.",
       outputSchema: PORTRAIT_SCHEMA, prepareInput: () => context, validateOutput: (output) => validatePortrait(output, lines.map((line) => line.id)),
