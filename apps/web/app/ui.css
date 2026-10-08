@@ -173,10 +173,6 @@ button.dt-row:hover,.dt-row[aria-pressed="true"]{background:var(--chalk)}
 .work-order-list>article{margin:0}
 .hero-action>header small,.alt-action>header small{margin-right:30px}
 
-.usage-table{width:100%;border-collapse:collapse;font-size:13px}
-.usage-table th,.usage-table td{padding:3px 8px;border-bottom:1px solid var(--mist);text-align:left}
-.usage-table th{background:var(--chalk);font-weight:700}
-.usage-table td:nth-child(n+3){font-variant-numeric:tabular-nums}
 
 /* The badge arrives after the page does, so it must not be able to change the height of the row it sits in. */
 .system-state a,.running-head nav a{display:inline-flex;align-items:center;height:30px}
@@ -205,7 +201,6 @@ button.dt-row:hover,.dt-row[aria-pressed="true"]{background:var(--chalk)}
 .assistant-task h3{margin:0;font-size:16px}
 .assistant-detail{display:grid;gap:6px;font-size:14px}
 .assistant-detail h4{margin:4px 0 2px;font-size:14px}
-.assistant-detail ul,.assistant-categories{margin:0;padding-left:18px;display:grid;gap:3px}
+.assistant-detail ul{margin:0;padding-left:18px;display:grid;gap:3px}
 .assistant-detail code,.assistant-ask code{font-size:13px;word-break:break-all}
-.assistant-categories{list-style:none;padding-left:0;gap:10px}
 .assistant-section{display:grid;gap:6px}

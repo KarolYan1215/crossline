@@ -1,6 +1,7 @@
 import { ensureSeeded, getStore, loadCurrentPlan } from "../../lib/crossline";
 import { SubpageShell } from "../subpage-shell";
-import { AcceptEvidenceButton, ApproveLineDraftsButton, JudgeMilestoneButton, ProposalBatchForm, RevokeAutoApprovalButton } from "./approval-actions";
+import { AcceptEvidenceButton, JudgeMilestoneButton, ProposalBatchForm, RevokeAutoApprovalButton } from "./approval-actions";
+import { AssistantReview } from "./assistant-review";
 import { recentAutoApprovals } from "../../lib/approvals";
 import { permissionCandidates, permissionModeEnabled } from "../../lib/permission-mode";
 import { PermissionModePanel } from "./permission-mode-panel";
@@ -8,7 +9,6 @@ import { requireSessionContext } from "../../lib/access-guard";
 import { TaskCard } from "../task/task-card";
 import { loadTaskDetailsBatch } from "../../lib/task-detail";
 import { countPending } from "../../lib/pending";
-import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { loadAsks } from "../../lib/asks";
 import { AskList } from "../ask-list";
 
@@ -39,12 +39,6 @@ export default async function ApprovalsPage() {
   const pending = countPending(ctx);
   const asks = await loadAsks(ctx);
   const anchors = new Map(getStore().listMilestoneAnchors(ctx.workspaceId).map((anchor) => [anchor.milestoneId, anchor]));
-  const lineOrder = defaultIdentityPacks().map((pack) => pack.id);
-  // By line, then by when it is due, so a line's drafts read as the sequence they are.
-  const draftMilestones = getStore().listMilestones(ctx.workspaceId).filter((milestone) => milestone.status === "draft")
-    .sort((a, b) => lineOrder.indexOf(a.identityId) - lineOrder.indexOf(b.identityId)
-      || (anchors.get(a.id)?.deadline ?? "9999").localeCompare(anchors.get(b.id)?.deadline ?? "9999"));
-  const lineLabels: Record<string, string> = Object.fromEntries(defaultIdentityPacks().map((pack) => [pack.id, pack.label]));
   const executions = getStore().listExecutions(ctx.workspaceId);
   const taskDetails = loadTaskDetailsBatch(ctx, [...evidenceReviews, ...proposals].map((item) => item.id));
   const autoApproved = recentAutoApprovals(ctx);
@@ -68,75 +62,31 @@ export default async function ApprovalsPage() {
       <TaskCard detail={detail} slot={slot} />
     </div>;
   };
+  // Drafts, plan differences, targets and interview items are decided where they live (主线, 计划, 访谈); here they are counted and
+  // linked. What is decided here is listed in full below.
   return <SubpageShell active="待确认" title="待确认"
-    description={pending.total ? `${pending.total} 件事在等你决定。内部、可撤销的准备工作会自己生效（一天内可撤销），其余都等你点头。` : "没有等你决定的事。"}>
+    description={pending.total ? `${pending.total} 项待决定。内部、可撤销的准备步骤自动生效，24 小时内可撤销；其余需要批准。` : "暂无待决定事项。"}>
     <section className="pending-list" aria-label="待确认汇总">
       {([
-        ["要你回答的", asks.length, "#asks"], ["作业方案", pending.workOrders, "#proposals"], ["计划差异", pending.planChanges, "/plan#plan-changes"],
-        ["里程碑草稿", pending.milestoneDrafts, "/milestones"],
-        ["调研建议", pending.research, "/onboarding"], ["文件里的日期", pending.dates, "/onboarding"], ["待你回答的问题", pending.questions, "/onboarding"], ["暂定目标待你过目", pending.targets, "/milestones"],
-        ["助手想做的新类别", pending.assistantKinds, "/assistant"], ["助手中途的提问", pending.assistantQuestions, "/assistant"], ["助手的产出待审", pending.assistantReviews, "/assistant"]
+        ["待决事项", asks.length, "#asks"], ["任务提案", pending.workOrders, "#proposals"], ["待验收", evidenceReviews.length, "#evidence"],
+        ["助手", pending.assistantKinds + pending.assistantQuestions + pending.assistantReviews, "#assistant"],
+        ["里程碑草稿", pending.milestoneDrafts, "/milestones"], ["计划差异", pending.planChanges, "/plan#plan-changes"], ["分数线待审阅", pending.targets, "/milestones"],
+        ["调研建议", pending.research, "/onboarding"], ["文件中的日期", pending.dates, "/onboarding"], ["访谈问题", pending.questions, "/onboarding"]
       ] as const).filter(([, count]) => count > 0).map(([label, count, href]) =>
         <a key={label} className="panel" href={href}><b>{count}</b><span>{label}</span></a>)}
     </section>
     <AskList initial={asks} visible={50} />
     {autoApproved.length > 0 && <section className="pending-block" aria-label="最近自动生效">
       <h2>最近自动生效 · {autoApproved.length}</h2>
-      <p className="review-note">这些是内部、可撤销的准备工作，系统替你批准了；一天内不想要就撤销，它会回到这里等你决定，且不会再自动生效。</p>
+      <p className="review-note">内部、可撤销的准备步骤；撤销后回到提案，不再自动生效。</p>
       <ul>{autoApproved.map((item) => <li key={item.id}>
         <a href={`/workbench/${encodeURIComponent(item.id)}`}>{item.intent}</a>
         {item.undoable ? <RevokeAutoApprovalButton workOrderId={item.id} /> : <small> · 已开始做</small>}
       </li>)}</ul>
     </section>}
-    <details className="fold" open={permissionModeEnabled(ctx)}>
-      <summary>默认批准（可选）：低风险的变化在前台停留 5 分钟后自动采纳</summary>
-      <PermissionModePanel initialEnabled={permissionModeEnabled(ctx)} initialCandidates={permissionCandidates(ctx)} />
-    </details>
-    {/* What is waiting, spelled out here instead of only counted: three of these used to be a number linking elsewhere, so the
-        page that says 「29 件事在等你」 listed two of them. */}
-    {draftMilestones.length > 0 && <section className="pending-block" aria-label="里程碑草稿">
-      <h2>里程碑草稿 · {draftMilestones.length}</h2>
-      <p className="review-note">里程碑是对你自己的承诺，所以要你点头。整条线一次接受后，系统会自动倒推三周内到期的那几个的前几步，排进本周；想改标题、日期或标准，去「主线」逐个改。</p>
-      {[...new Set(draftMilestones.map((milestone) => milestone.identityId))].map((line) => {
-        const own = draftMilestones.filter((milestone) => milestone.identityId === line);
-        return <div key={line} className="line-drafts" data-line={line}>
-          <ul>{own.map((milestone) => <li key={milestone.id}>
-            <b>{lineLabels[milestone.identityId] ?? milestone.identityId}</b> · {milestone.title}
-            <small> · {anchors.get(milestone.id)?.deadline ? `最晚 ${anchors.get(milestone.id)!.deadline}` : "无截止"}</small>
-          </li>)}</ul>
-          <ApproveLineDraftsButton ids={own.map((milestone) => milestone.id)}
-            label={`接受${lineLabels[line] ?? line}的 ${own.length} 个草稿`} />
-        </div>;
-      })}
-      <a className="secondary-button" href="/milestones">去「主线」批准或修改 →</a>
-    </section>}
-    {pending.planChanges > 0 && <section className="pending-block" aria-label="计划差异">
-      <h2>计划差异 · {pending.planChanges}</h2>
-      <ul>{plan.changes.filter((change) => change.status === "pending").slice(0, 5).map((change) =>
-        <li key={change.id}>{change.explanation}</li>)}</ul>
-      <a className="secondary-button" href="/plan#plan-changes">去「计划」逐条采纳或整批批准 →</a>
-    </section>}
-    {(pending.assistantKinds + pending.assistantQuestions + pending.assistantReviews) > 0 && <section className="pending-block" aria-label="助手">
-      <h2>助手 · {pending.assistantKinds + pending.assistantQuestions + pending.assistantReviews}</h2>
-      <p>{[pending.assistantKinds ? `${pending.assistantKinds} 类新的工作等你同意它去做` : "", pending.assistantQuestions ? `${pending.assistantQuestions} 个它在做事中途问你的问题（没人答就当作不同意）` : "", pending.assistantReviews ? `${pending.assistantReviews} 份做完的产出等你过目` : ""].filter(Boolean).join("；")}。</p>
-      <a className="secondary-button" href="/assistant">去助手页处理 →</a>
-    </section>}
-    {pending.targets > 0 && <section className="pending-block" aria-label="暂定目标">
-      <h2>暂定目标待你过目 · {pending.targets}</h2>
-      <p>分数线都是从目标倒推的。目标是系统按你的长期目标先提的（比如一门课的总评），带着理由；合适就点“就按这个”，不合适一键改，所在主线的草稿会按新目标重算。</p>
-      <a className="secondary-button" href="/milestones">去看目标 →</a>
-    </section>}
-    {pending.questions > 0 && <section className="pending-block" aria-label="待你回答的问题">
-      <h2>待你回答的问题 · {pending.questions}</h2>
-      <p>有的主线目前只有系统的猜测，没有你确认过的事实：说说你实际在做什么，或者这条线先不规划。</p>
-      <a className="secondary-button" href="/onboarding">去回答 →</a>
-    </section>}
-    {(pending.research > 0 || pending.dates > 0) && <section className="pending-block" aria-label="来自采访的待决定">
-      <h2>采访带来的 · {pending.research + pending.dates}</h2>
-      <p>{pending.research > 0 ? `${pending.research} 条调研建议（每条带已核对的来源）` : ""}{pending.research > 0 && pending.dates > 0 ? "，" : ""}{pending.dates > 0 ? "一批从文件里读出的日期" : ""}。逐条采纳或不要都在「先了解你」那一页。</p>
-      <a className="secondary-button" href="/onboarding">去处理 →</a>
-    </section>}
-    <section className="approval-ledger">
+    {permissionModeEnabled(ctx) && <PermissionModePanel initialCandidates={permissionCandidates(ctx).filter((item) => item.kind !== "insight")} />}
+    <AssistantReview ctx={ctx} />
+    <section className="approval-ledger" id="evidence">
       {evidenceReviews.map((item) => {
         const own = claims.filter((claim) => claim.workOrderId === item.id && claim.reviewStatus === "submitted");
         const execution = executions.filter((entry) => entry.workOrderId === item.id).at(-1);

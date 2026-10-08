@@ -1,79 +1,130 @@
+import { CATEGORY_LABEL, type ActivityCategory } from "@crossline/core";
+import { categoryMode, readCategories } from "@crossline/db";
+import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { SubpageShell } from "../subpage-shell";
 import { LocalActivityToggle } from "./local-activity-toggle";
 import { UsageCard } from "./usage-card";
 import { NotifyLevel } from "./notify-level";
 import { PhonePush } from "./phone-push";
 import { EffectivenessCard } from "./effectiveness-card";
+import { AutomationModule, type RecentTask } from "./automation";
+import { SettingsNav } from "./settings-nav";
+import { CalendarModule, ConnectionsSection } from "../connectors/connections";
 import { loadEffectiveness } from "../../lib/effectiveness";
-import { defaultIdentityPacks } from "@crossline/identity-packs";
-import { ConnectionsSection } from "../connectors/connections";
+import { loadAssistant } from "../../lib/agent";
+import { agentTaskStatusLabel } from "../../lib/labels";
+import { autoApplySchedule } from "../../lib/input";
+import { permissionModeEnabled } from "../../lib/permission-mode";
 import {
-  ACTIVITY_BLACKLIST, ACTIVITY_DETAIL_CONSENT, ACTIVITY_PAUSED_UNTIL, getStore, lastNight, LOCAL_ACTIVITY_CONSENT
+  ACTIVITY_BLACKLIST, ACTIVITY_DETAIL_CONSENT, ACTIVITY_PAUSED_UNTIL, effectiveSchedulePreferences, getStore, LOCAL_ACTIVITY_CONSENT, planToday, toZonedInstant
 } from "../../lib/crossline";
 import { requireSessionContext } from "../../lib/access-guard";
 
 export const dynamic = "force-dynamic";
 const USAGE_DAYS = 7;
+const SECTIONS = [["general", "通用"], ["notify", "时间与提醒"], ["automation", "自动化与助手"], ["calendar", "日历与连接"],
+  ["privacy", "隐私与屏幕活动"], ["usage", "用量与体检"]] as const;
+const TONE: Record<string, RecentTask["tone"]> = { running: "info", needs_review: "warn", accepted: "ok", rejected: "neutral", blocked: "risk", stale: "neutral" };
 
 /**
- * Everything that is configured rather than done: the activity consent, what the app is connected to, and what its model calls
- * have cost. When the person is free and how the schedule is packed are set on the plan page, next to the schedule they change.
+ * Everything configured rather than done, as modules under a left-hand index (a strip of tabs on a phone). When the person is free
+ * and how the schedule is packed are set on the plan page, next to the schedule they change; what waits for a decision is on 待确认.
  */
 export default async function SettingsPage() {
   const ctx = await requireSessionContext();
   const store = getStore();
-  const consentRaw = store.getSetting(ctx.workspaceId, LOCAL_ACTIVITY_CONSENT);
-  const consent = consentRaw === "granted" || consentRaw === "denied" ? consentRaw : "unasked";
-  const detailRaw = store.getSetting(ctx.workspaceId, ACTIVITY_DETAIL_CONSENT);
-  const detail = detailRaw === "granted" || detailRaw === "denied" ? detailRaw : "unasked";
+  const setting = (key: string) => store.getSetting(ctx.workspaceId, key);
+  const level = (value: string | null | undefined) => value === "granted" || value === "denied" ? value : "unasked";
+  const consent = level(setting(LOCAL_ACTIVITY_CONSENT));
+  const detail = level(setting(ACTIVITY_DETAIL_CONSENT));
   let blacklist: string[] = [];
-  try { const parsed = JSON.parse(store.getSetting(ctx.workspaceId, ACTIVITY_BLACKLIST) ?? "[]") as unknown; if (Array.isArray(parsed)) blacklist = parsed.filter((word): word is string => typeof word === "string"); } catch { /* unreadable counts as empty */ }
+  try { const parsed = JSON.parse(setting(ACTIVITY_BLACKLIST) ?? "[]") as unknown; if (Array.isArray(parsed)) blacklist = parsed.filter((word): word is string => typeof word === "string"); } catch { /* unreadable counts as empty */ }
+
+  // Today's activity, drawn only at the detailed level the person chose; segments carry no window titles.
+  const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
+  const hours = Array.from({ length: 24 }, () => 0);
+  const byCategory = new Map<string, number>();
+  if (detail === "granted") {
+    const since = toZonedInstant(planToday(ctx), "00:00", zone);
+    const hourOf = new Intl.DateTimeFormat("en-GB", { timeZone: zone, hour: "2-digit", hourCycle: "h23" });
+    for (const segment of store.listActivitySegments(ctx.workspaceId, since)) {
+      if (segment.idle) continue;
+      for (let at = Math.max(Date.parse(segment.start), Date.parse(since)); at < Date.parse(segment.end); at += 60_000) {
+        hours[Number(hourOf.format(new Date(at))) % 24]! += 1;
+        byCategory.set(segment.category, (byCategory.get(segment.category) ?? 0) + 1);
+      }
+    }
+  }
+
   const since = new Date(Date.now() - USAGE_DAYS * 86_400_000).toISOString();
-  const summary = store.summarizeModelUsage(ctx.workspaceId, since);
-  const night = lastNight(ctx.workspaceId, new Date());
-  // The tailnet address the phone uses (stage six, `private` mode behind `tailscale serve`), when it is set up.
+  const assistant = loadAssistant(ctx);
+  const states = readCategories(store, ctx.workspaceId);
   const host = process.env.CROSSLINE_TAILSCALE_HOSTNAME?.trim();
   const phoneUrl = process.env.CROSSLINE_DEPLOYMENT_MODE === "private" && host ? `https://${host}` : undefined;
 
   return <SubpageShell active="设置" title="设置">
-    <p className="muted"><a href="/plan">可用时段、排程参数与重要性在「计划」页设置 →</a></p>
-    <details className="fold" open><summary>系统体检</summary>
-      <EffectivenessCard data={await loadEffectiveness(ctx)} labels={Object.fromEntries(defaultIdentityPacks().map((pack) => [pack.id, pack.label]))} />
-    </details>
-    <details className="fold" open><summary>提醒</summary>
-      <NotifyLevel level={store.getSetting(ctx.workspaceId, "notify.level") ?? "normal"} />
-      <p className="muted">每个工作块开始前 10 分钟的提醒、等待项到期日和截止前 2 天的提醒，写在名为 Crossline 的日历上，由 Outlook 和手机推送。</p>
-    </details>
-    <details className="fold" id="phone"><summary>在手机上用</summary>
-      {phoneUrl
-        ? <div className="phone-setup">
-          <p>手机和这台电脑在同一个 Tailscale 网络里时，用这个地址打开，和电脑上是同一个账本、同一份数据：</p>
-          <p><a href={phoneUrl}><b>{phoneUrl}</b></a></p>
-          <ol>
-            <li>手机上打开 Tailscale App，确认已连接（和这台电脑同一个账号）。</li>
-            <li>用 Safari 打开上面的地址并登录。</li>
-            <li>点分享按钮 →「添加到主屏幕」：之后它像一个独立 App 一样全屏打开。</li>
-            <li>从主屏幕的图标打开，到这里点「在这台设备上开启推送」。</li>
-          </ol>
-          <PhonePush />
-          <p className="muted">这台电脑需要开着、Crossline 在运行（已设为开机自启，每 15 分钟自检一次）。离线时收集的内容会先存在手机上，联网后自动同步。
-            工作块开始前和截止前的提醒另外来自名为 Crossline 的日历：在 iPhone 的 Outlook 里登录同一个账号即可收到。</p>
-        </div>
-        : <p className="muted">还没开启手机访问：需要在这台电脑上把 <code>CROSSLINE_DEPLOYMENT_MODE</code> 设为 <code>private</code>、填上 <code>CROSSLINE_TAILSCALE_HOSTNAME</code>，并运行 <code>tailscale serve</code>。步骤见 docs/private-network-deployment.md。</p>}
-    </details>
-    <details className="fold"><summary>屏幕活动与隐私</summary>
-      <LocalActivityToggle consent={consent} detail={detail} pausedUntil={store.getSetting(ctx.workspaceId, ACTIVITY_PAUSED_UNTIL) || null} blacklist={blacklist} />
-    </details>
-    <details className="fold" id="connections" open><summary>连接与账号</summary>
-      <ConnectionsSection ctx={ctx} />
-    </details>
-    <details className="fold"><summary>模型用量（近 {USAGE_DAYS} 天）</summary>
-      <UsageCard summary={summary} days={USAGE_DAYS} />
-      {/* The nightly expansion's status, moved here from Today: it is about the system, not about the day. */}
-      {night.state !== "none" && <p className="last-night">
-        {night.state === "ran" ? `昨夜扩展 · 产出 ${night.proposals} 条候选` : `昨夜扩展没有运行 · ${night.reason}`}
-      </p>}
-    </details>
-    <p className="muted"><a href="/onboarding">重新做「先了解你」→</a></p>
+    <div className="st-layout">
+      <SettingsNav sections={SECTIONS.map(([id, label]) => ({ id, label }))} />
+      <div className="st-sections">
+        <section id="general" className="st-section" aria-labelledby="st-general"><h2 id="st-general">通用</h2>
+          <div className="st-modules">
+            <section className="st-card" aria-label="个人情况">
+              <header><h3>个人情况</h3><small>主线、项目、日期与长期目标的来源</small></header>
+              <div className="st-row"><span className="st-row-label">访谈<small>补充或修改后，里程碑草稿按新情况重新设计</small></span>
+                <a className="secondary-button" href="/onboarding">打开访谈</a></div>
+            </section>
+            <section className="st-card" aria-label="手机访问" id="phone">
+              <header><h3>手机访问</h3><small>与电脑同一账本；本机需保持运行</small></header>
+              {phoneUrl ? <>
+                <div className="st-row"><span className="st-row-label">地址<small>手机连接同一私有网络后打开，添加到主屏幕</small></span><a href={phoneUrl}><b>{phoneUrl}</b></a></div>
+                <PhonePush />
+              </> : <p className="muted">手机访问未开启。</p>}
+            </section>
+          </div>
+        </section>
+
+        <section id="notify" className="st-section" aria-labelledby="st-notify"><h2 id="st-notify">时间与提醒</h2>
+          <div className="st-modules">
+            <section className="st-card" aria-label="通知">
+              <header><h3>通知</h3><small>工作块开始前 10 分钟、等待项到期日和截止前 2 天的提醒写在 Crossline 日历上</small></header>
+              <NotifyLevel level={setting("notify.level") ?? "normal"} />
+              <div className="st-row"><span className="st-row-label">可用时段、排程参数与重要性<small>在「计划」页设置，修改前预览影响</small></span>
+                <a className="secondary-button" href="/plan#why">打开计划</a></div>
+            </section>
+          </div>
+        </section>
+
+        <section id="automation" className="st-section" aria-labelledby="st-automation"><h2 id="st-automation">自动化与助手</h2>
+          <AutomationModule paused={assistant.paused} permissionMode={permissionModeEnabled(ctx)} scheduleAutoApply={autoApplySchedule(ctx)}
+            categories={assistant.categories.map((item) => ({ category: item.category, label: item.label, explained: item.explained,
+              mode: categoryMode(states[item.category]), cleanRuns: item.cleanRuns, runsToTrust: item.runsToTrust }))}
+            recent={assistant.tasks.slice(0, 8).map((task) => ({ taskId: task.taskId, title: task.title, kind: assistant.categories.find((item) => item.category === task.category)?.label ?? "",
+              status: agentTaskStatusLabel[task.status] ?? task.status, tone: TONE[task.status] ?? "neutral", day: task.requestedAt.slice(5, 10).replace("-", "/"),
+              workOrderId: task.workOrderId }))} />
+        </section>
+
+        <section id="calendar" className="st-section" aria-labelledby="st-calendar"><h2 id="st-calendar">日历与连接</h2>
+          <CalendarModule ctx={ctx} />
+          <ConnectionsSection />
+        </section>
+
+        <section id="privacy" className="st-section" aria-labelledby="st-privacy"><h2 id="st-privacy">隐私与屏幕活动</h2>
+          <LocalActivityToggle consent={consent} detail={detail} pausedUntil={setting(ACTIVITY_PAUSED_UNTIL) || null} blacklist={blacklist}
+            hours={hours} categories={[...byCategory].sort((a, b) => b[1] - a[1])
+              .map(([category, minutes]) => ({ label: CATEGORY_LABEL[category as ActivityCategory] ?? "其他", minutes }))} />
+        </section>
+
+        <section id="usage" className="st-section" aria-labelledby="st-usage"><h2 id="st-usage">用量与体检</h2>
+          <div className="st-modules">
+            <section className="st-card" aria-label="系统体检"><header><h3>系统体检</h3><small>每日从账本计算</small></header>
+              <EffectivenessCard data={await loadEffectiveness(ctx)} labels={Object.fromEntries(defaultIdentityPacks().map((pack) => [pack.id, pack.label]))} />
+            </section>
+            <section className="st-card" aria-label="模型用量"><header><h3>模型用量</h3><small>近 {USAGE_DAYS} 天，悬停查看次数与耗时</small></header>
+              <UsageCard summary={store.summarizeModelUsage(ctx.workspaceId, since)} daily={store.dailyModelUsage(ctx.workspaceId, since)} days={USAGE_DAYS} />
+            </section>
+          </div>
+        </section>
+      </div>
+    </div>
   </SubpageShell>;
 }

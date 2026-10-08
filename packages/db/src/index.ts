@@ -1710,6 +1710,15 @@ export class CrosslineStore {
   }
 
   /** Per Skill and model since `sinceIso`, biggest spender first. */
+  /** Tokens and runs per UTC day since `sinceIso`, oldest first: the settings page's seven-day trend. */
+  dailyModelUsage(workspaceId: string, sinceIso: string): Array<{ day: string; runs: number; totalTokens: number }> {
+    const rows = this.#db.prepare(`
+      SELECT substr(at, 1, 10) AS day, COUNT(*) AS runs, SUM(total_tokens) AS total_tokens
+      FROM model_usage WHERE workspace_id = ? AND at >= ? GROUP BY day ORDER BY day
+    `).all(workspaceId, sinceIso) as Array<{ day: string; runs: number; total_tokens: number }>;
+    return rows.map((row) => ({ day: row.day, runs: Number(row.runs), totalTokens: Number(row.total_tokens) }));
+  }
+
   summarizeModelUsage(workspaceId: string, sinceIso: string): ModelUsageSummary[] {
     const rows = this.#db.prepare(`
       SELECT skill, model, COUNT(*) AS runs, SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS failed, SUM(repairs) AS repairs,

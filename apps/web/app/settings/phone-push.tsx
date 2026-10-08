@@ -57,7 +57,7 @@ export function PhonePush() {
   };
 
   return <div className="phone-push">
-    <p><b>手机推送</b> · 早报和当天会误事的提醒，会同时出现在电脑和手机上（档位跟「提醒」一致）。内容在这台电脑上加密后经苹果推送服务送达，苹果看不到内容。</p>
+    <p className="st-note">早报与当日到期提醒同时推送到电脑和手机，档位与「通知」一致；内容在本机加密后经推送服务送达。</p>
     {devices.length > 0 && <ul>{devices.map((item) => <li key={item.createdAt}>{item.device} · {item.createdAt.slice(0, 10)} 开启</li>)}</ul>}
     {blocker ? <p className="muted">{blocker}</p>
       : <div className="execution-actions">

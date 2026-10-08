@@ -36,20 +36,18 @@ export function TailscaleTrust() {
     void refresh();
   };
 
-  return <article className="status-card">
-    <span className="status-badge">{current === undefined ? "检查中" : current ? "通过 Tailscale 访问" : "未通过 Tailscale 访问"}</span>
-    <h2>Tailscale 身份</h2>
-    {current === null && <p>当前不是通过 tailscale serve 访问的（本机 127.0.0.1 属于正常情况）。</p>}
+  return <section className="st-card" aria-label="私有网络身份">
+    <header><h3>私有网络身份</h3><small>仅作记录，不替代登录</small></header>
+    {current === null && <p className="muted">当前为本机访问。</p>}
     {current && <>
       <p>本次连接：{current.login}{current.name ? ` (${current.name})` : ""}</p>
       {!bindings.some((item) => item.tailscaleLogin === current.login) &&
-        <button type="button" onClick={() => void trust()}>信任这个 Tailscale 身份</button>}
+        <button type="button" onClick={() => void trust()}>记录为可信身份</button>}
       {status && <small className="muted" role="status">{status}</small>}
     </>}
     {bindings.length > 0 && <ul>{bindings.map((item) => <li key={item.id}>
       {item.tailscaleLogin} · {item.createdAt.slice(0, 10)}
       <button type="button" onClick={() => void revoke(item.tailscaleLogin)}>撤销</button>
     </li>)}</ul>}
-    <details><summary>说明</summary><p>仅作记录，不构成登录旁路——任何页面仍然需要正常的账号登录会话。</p></details>
-  </article>;
+  </section>;
 }

@@ -30,18 +30,13 @@ export function DeviceLeases() {
   };
 
   const active = leases.filter((item) => !item.revokedAt);
-  return <article className="status-card">
-    <span className="status-badge">{active.length > 0 ? `${active.length} 台设备已授权离线` : "尚无离线设备"}</span>
-    <h2>离线设备</h2>
-    {leases.length === 0 && <p>还没有设备申请过离线租约。</p>}
-    {leases.length > 0 && <ul>{leases.map((item) => <li key={item.deviceId}>
-      {item.deviceId === mine ? "本机" : item.deviceId.slice(0, 8)}
-      {item.revokedAt ? " · 已撤销" : ` · 到期 ${item.expiresAt.slice(0, 10)}`}
+  return <section className="st-card" aria-label="离线设备">
+    <header><h3>离线设备</h3><small>撤销后，该设备离线期间的操作不再写入；不影响其登录</small></header>
+    {leases.length === 0 && <p className="muted">尚无设备开启离线同步。</p>}
+    {leases.length > 0 && <ul className="st-list">{leases.map((item, index) => <li key={item.deviceId}>
+      <span>{item.deviceId === mine ? "本机" : `设备 ${index + 1}`}</span>
+      <small>{item.revokedAt ? "已撤销" : `有效至 ${item.expiresAt.slice(0, 10)}`}</small>
       {!item.revokedAt && <button type="button" onClick={() => void revoke(item.deviceId)}>撤销</button>}
     </li>)}</ul>}
-    <details><summary>说明</summary><p>
-      撤销只影响这台设备离线时能否把队列里的命令回放到账本——不会立刻让它的当前登录会话失效（那是账号安全设置的事），
-      也不会清空它本地已缓存的数据。
-    </p></details>
-  </article>;
+  </section>;
 }

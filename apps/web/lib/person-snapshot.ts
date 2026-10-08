@@ -83,7 +83,7 @@ export async function personSnapshot(ctx: AccessContext, now = new Date()): Prom
 
   const pending = countPending(ctx);
   if (pending.total) {
-    const parts = [["作业方案", pending.workOrders], ["里程碑草稿", pending.milestoneDrafts], ["主线联系", pending.relations],
+    const parts = [["作业方案", pending.workOrders], ["里程碑草稿", pending.milestoneDrafts], ["跨主线关系", pending.relations],
       ["暂定目标", pending.targets], ["计划差异", pending.planChanges]].filter(([, count]) => Number(count) > 0)
       .map(([name, count]) => `${name} ${count}`);
     lines.push("", `## 等你决定：共 ${pending.total} 项（${parts.join("、")}）`);

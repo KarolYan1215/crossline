@@ -7,6 +7,7 @@ import "./task/task.css";
 import "./chat/composer.css";
 import "./milestones/milestones.css";
 import "./plan/plan.css";
+import "./settings/settings.css";
 import "./mobile.css";
 
 export const metadata: Metadata = {

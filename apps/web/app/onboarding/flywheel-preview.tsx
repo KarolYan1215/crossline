@@ -28,9 +28,9 @@ export function FlywheelPreview({ identities, facts, onConfirm, onRemove }: {
   const y = (index: number) => 30 + index * 44;
   const indexOf = (id: string) => identities.findIndex((identity) => identity.id === id);
   return <section className="ob-block" aria-label="飞轮预览">
-    <h3>主线之间的联系</h3>
-    {links.length === 0 && <p className="ob-muted">还没有。访谈里勾选的联系会出现在这里。</p>}
-    {links.length > 0 && <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="主线之间的联系图" className="ob-flywheel">
+    <h3>主线之间的关系</h3>
+    {links.length === 0 && <p className="ob-muted">还没有。访谈中选定的关系显示在此。</p>}
+    {links.length > 0 && <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="主线之间的关系图" className="ob-flywheel">
       <defs><marker id="ob-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#111" /></marker></defs>
       {identities.map((identity, index) => <g key={identity.id}>
         <circle cx={26} cy={y(index)} r={7} fill={COLORS[identity.id] ?? "#111"} />

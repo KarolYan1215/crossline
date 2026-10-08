@@ -23,7 +23,7 @@ export function CalendarSources() {
     const body = await response?.json().catch(() => undefined) as { ok?: boolean; accounts?: Account[]; message?: string } | undefined;
     if (body?.ok && body.accounts) { setAccounts(body.accounts); setStatus(""); return; }
     setAccounts([]);
-    setStatus(body?.message ?? "读不到日历列表；worker 可能没在跑，或者还没有账号登录。");
+    setStatus(body?.message ? "日历列表暂时无法读取。" : "日历列表暂时无法读取。");
   };
   useEffect(() => { void load(); }, []);
 
@@ -45,26 +45,22 @@ export function CalendarSources() {
     if (body?.ok && body.accounts) {
       setAccounts(body.accounts);
       // Said plainly: saving changes what the NEXT sync reads; it does not itself pull anything.
-      setStatus("已保存。下次同步日历时生效——现在就要看结果的话，去 Plan 页点「立即同步日历」。");
+      setStatus("已保存，下次同步时生效；「计划」页的同步按钮可立即同步。");
     } else {
-      setStatus(body?.message ?? "没能保存，请刷新后重试。");
+      setStatus("未保存，请重试。");
     }
     setBusy(false);
   };
 
-  if (!accounts) return <article className="status-card"><h2>日历来源</h2><p>正在读取…</p></article>;
+  if (!accounts) return <section className="st-card"><header><h3>读取的日历</h3></header><p className="muted">读取中…</p></section>;
 
-  return <article className="status-card calendar-sources">
-    <h2>日历来源</h2>
-    <p className="review-note">
-      只有勾上的日历会进计划的现实轨。没勾的不读，它的块也不会留在计划上。
-      新登录的账号会自动勾上它的默认日历，别的日历要自己勾。
-    </p>
-    {accounts.length === 0 && <p>还没有任何账号登录。用 <code>pnpm exec tsx scripts/graph-add-account.ts</code> 加一个。</p>}
+  return <section className="st-card calendar-sources" aria-label="读取的日历">
+    <header><h3>读取的日历</h3><small>勾选的日历作为固定日程进入计划；新账号默认勾选其默认日历</small></header>
+    {accounts.length === 0 && <p className="muted">尚无已登录的日历账号。</p>}
     {accounts.map((account) => <div className="calendar-account" key={account.accountId}>
       <h3>{account.username}</h3>
       {account.error
-        ? <p role="status">这个账号读不到日历（{account.error}）；它已有的块保持原样，不会被当成已删除。</p>
+        ? <p role="status">该账号的日历暂时无法读取；已导入的日程保持不变。</p>
         : account.calendars.map((calendar) => <label key={calendar.id}>
           <input type="checkbox" checked={calendar.selected}
             onChange={() => toggle(account.accountId, calendar.id)} />
@@ -77,5 +73,5 @@ export function CalendarSources() {
       </button>
     </div>}
     {status && <p role="status">{status}</p>}
-  </article>;
+  </section>;
 }

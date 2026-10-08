@@ -1,26 +1,43 @@
 import type { Effectiveness } from "@crossline/core";
+import { Bullet, Ring, StackedBar } from "../ui/charts";
+import { Tag } from "../ui/tag";
 
-const pct = (value: number | null) => value === null ? "还没有数据" : `${Math.round(value * 100)}%`;
-const num = (value: number | null, unit = "") => value === null ? "还没有数据" : `${value}${unit}`;
+const pct = (value: number | null) => value === null ? "—" : `${Math.round(value * 100)}%`;
+const h = (minutes: number) => Math.round((minutes / 60) * 10) / 10;
 
 /**
- * 系统体检: the four numbers the person chose as their test of whether this works, plus how much of their work gets
- * the treatment the evidence supports. All read from the ledger daily; none needs an experiment.
+ * 系统体检 as figures: milestones met on time, estimate accuracy against the 85% target, the week's hours by line with the share on
+ * deadline work, the cost of running the system, and how much committed work gets the treatments the evidence supports. All from the
+ * ledger; nothing here is a model's judgement.
  */
 export function EffectivenessCard({ data, labels }: { data: Effectiveness & { decisionMinutesMeasured: false }; labels: Record<string, string> }) {
   const lines = Object.entries(data.priorities.minutesByLine).sort((a, b) => b[1] - a[1]);
-  return <div className="effectiveness">
-    <dl className="effectiveness-grid">
-      <div><dt>里程碑按时达成</dt><dd>{data.onTime.due ? `${data.onTime.met}/${data.onTime.due}（${pct(data.onTime.rate)}）` : "还没有到期的"}
-        {data.onTime.atRisk.length > 0 && <small> · 可能赶不上：{data.onTime.atRisk.join("、")}</small>}</dd></div>
-      <div><dt>估时准确度</dt><dd>{data.estimates.n ? <>AI 原值偏差 {num(data.estimates.maeRaw)} · 校准后 {num(data.estimates.maeCalibrated)}
-        <small>（对数误差，越小越准；实际用时没超过「宽一点」的比例：AI {pct(data.estimates.coverageRaw)} · 校准 {pct(data.estimates.coverageCalibrated)}，目标 85%）</small></> : "还没有完成并记了用时的任务"}</dd></div>
-      <div><dt>时间花在优先级上</dt><dd>{lines.length ? <>近 7 天：{lines.map(([line, minutes]) => `${labels[line] ?? line} ${Math.round(minutes / 60 * 10) / 10} 小时`).join("、")}
-        <small> · 有截止日的工作占 {pct(data.priorities.deadlineShare)}</small></> : "近 7 天还没有记录的工作时间"}</dd></div>
-      <div><dt>管理系统本身的开销</dt><dd>每天约 {data.overhead.decisionsPerDay} 次决定 · 现在 {data.overhead.pendingNow} 件待决
-        <small> · 从收集到排进日历中位 {num(data.overhead.medianCaptureToScheduled, " 分钟")}；花在决定上的分钟数还没开始记录</small></dd></div>
-    </dl>
-    <p className="muted">机制覆盖：已承诺的工作中有具体日期时段的 {pct(data.coverage.datedAndTimed)}（写下「何时何地做」是证据最强的做法之一）；
-      近 7 天有进展记录的里程碑 {pct(data.coverage.progressRecorded)}；等待项按时回答 {pct(data.coverage.followUpsOnTime)}。</p>
+  const coverage = data.estimates.coverageCalibrated ?? data.estimates.coverageRaw;
+  return <div className="st-health">
+    <div className="st-health-cell">
+      {data.onTime.rate === null ? <div className="ui-stat"><b>—</b></div> : <Ring label="里程碑按时达成" value={data.onTime.rate} />}
+      <div><b>按时达成</b><small>{data.onTime.due ? `${data.onTime.met}/${data.onTime.due} 个已到期里程碑` : "尚无到期里程碑"}</small>
+        {data.onTime.atRisk.length > 0 && <Tag tone="risk" title={data.onTime.atRisk.join("、")}>{data.onTime.atRisk.length} 个有截止风险</Tag>}</div>
+    </div>
+    <div className="st-health-cell">
+      {coverage !== null && <div className="st-health-bullet"><Bullet label="估时覆盖率" target={85} max={100} unit="%" actual={Math.round(coverage * 100)} /></div>}
+      <div><b>估时覆盖率 {pct(coverage)}</b><small>{data.estimates.n ? `实际用时不超过保守估时的比例，目标 85%；${data.estimates.n} 个样本` : "尚无计时完成的任务"}</small></div>
+    </div>
+    <div className="st-health-cell st-health-wide">
+      <div><b>近 7 天投入 {h(lines.reduce((sum, [, minutes]) => sum + minutes, 0))} h</b><small>有截止日的工作占 {pct(data.priorities.deadlineShare)}</small></div>
+      {lines.length ? <StackedBar label="近 7 天各主线投入" unit=" h" segments={lines.map(([line, minutes]) => ({ label: labels[line] ?? line, value: h(minutes), line }))} />
+        : <small className="muted">尚无计时记录</small>}
+    </div>
+    <div className="st-health-cell">
+      <div className="ui-stat"><b>{data.overhead.decisionsPerDay}</b><span>每日决定次数</span></div>
+      <div className="ui-stat"><b>{data.overhead.pendingNow}</b><span>当前待决</span></div>
+      <div className="ui-stat"><b>{data.overhead.medianCaptureToScheduled === null ? "—" : `${data.overhead.medianCaptureToScheduled} 分`}</b><span>收集到排入（中位）</span></div>
+    </div>
+    <div className="st-health-cell st-health-wide">
+      <b>机制覆盖</b>
+      {([["有具体时段的承诺任务", data.coverage.datedAndTimed], ["近 7 天有进展记录的里程碑", data.coverage.progressRecorded], ["按时回复的等待项", data.coverage.followUpsOnTime]] as const)
+        .map(([name, value]) => <div key={name} className="st-meter" title={`${name} ${pct(value)}`}><span>{name}</span>
+          <span className="st-meter-bar" aria-hidden="true"><i style={{ width: `${(value ?? 0) * 100}%` }} /></span><small className="mono">{pct(value)}</small></div>)}
+    </div>
   </div>;
 }

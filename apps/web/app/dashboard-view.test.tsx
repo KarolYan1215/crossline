@@ -35,8 +35,7 @@ describe("dashboard view", () => {
         { id: "media", label: "自媒体", accent: "#E85D9E", completedCount: 0, activeMilestone: "发布首个复用内容", taskCount: 1, totalCount: 1, pct: 0 },
         { id: "investment", label: "投资", accent: "#23A989", completedCount: 2, activeMilestone: "完成本周研究备忘录", taskCount: 2, totalCount: 4, pct: 50 }
       ],
-      upcoming: [],
-      localActivityAsked: true, lastNight: { state: "none" as const }, milestonePulse: [], todayCapacity: { availableMinutes: 0, committedMinutes: 0 }, flywheel: [], flywheelStrip: { nodes: [], edges: [] },
+      upcoming: [], milestonePulse: [], todayCapacity: { availableMinutes: 0, committedMinutes: 0 }, flywheel: [], flywheelStrip: { nodes: [], edges: [] },
       taskDetailById: new Map([["paper", detailFor("paper", "完成论文结果段", "research")], ["meal", detailFor("meal", "准备晚饭", "capacity")],
         ["reply", detailFor("reply", "确认会议", "startup")]]), milestoneDetailById: new Map()
     }} />);
@@ -67,8 +66,7 @@ describe("dashboard view", () => {
       progress: { streakDays: 3, weekCount: 5 },
       care: [],
       identities: [],
-      upcoming: [],
-      localActivityAsked: true, lastNight: { state: "none" as const }, milestonePulse: [], todayCapacity: { availableMinutes: 0, committedMinutes: 0 }, flywheel: [], flywheelStrip: { nodes: [], edges: [] },
+      upcoming: [], milestonePulse: [], todayCapacity: { availableMinutes: 0, committedMinutes: 0 }, flywheel: [], flywheelStrip: { nodes: [], edges: [] },
       taskDetailById, milestoneDetailById: new Map()
     }} />);
     // One primary action on the card: start the timer. Completion and evidence live in the task dialog.
@@ -88,8 +86,7 @@ describe("dashboard view", () => {
       progress: { streakDays: 0, weekCount: 0 },
       care: [],
       identities: [],
-      upcoming: [],
-      localActivityAsked: true, lastNight: { state: "none" as const }, milestonePulse: [], todayCapacity: { availableMinutes: 0, committedMinutes: 0 }, flywheel: [], flywheelStrip: { nodes: [], edges: [] },
+      upcoming: [], milestonePulse: [], todayCapacity: { availableMinutes: 0, committedMinutes: 0 }, flywheel: [], flywheelStrip: { nodes: [], edges: [] },
       ...noPreviews
     }} />);
     expect(html).toContain("快速收集");
@@ -104,7 +101,7 @@ describe("dashboard view", () => {
       capacity: { level: "uncalibrated" as const, observationCount: 0, basis: [], blockers: [{ code: "LOCAL_ACTIVITY_NOT_AUTHORISED", message: "本机活动采集未开启" }] },
       progress: { streakDays: 0, weekCount: 0 },
       care: [],
-      identities: [], upcoming: [], localActivityAsked: true, lastNight: { state: "none" as const }, milestonePulse: [], todayCapacity: { availableMinutes: 0, committedMinutes: 0 }, flywheel: [], flywheelStrip: { nodes: [], edges: [] },
+      identities: [], upcoming: [], milestonePulse: [], todayCapacity: { availableMinutes: 0, committedMinutes: 0 }, flywheel: [], flywheelStrip: { nodes: [], edges: [] },
       ...noPreviews
     }} />);
     expect(html).toContain("running-head");
@@ -120,7 +117,7 @@ describe("dashboard view honesty", () => {
     capacity: { level: "uncalibrated" as const, observationCount: 0, basis: [], blockers: [{ code: "LOCAL_ACTIVITY_NOT_AUTHORISED", message: "本机活动采集未开启" }] },
     progress: { streakDays: 0, weekCount: 0 },
     care: [],
-    identities: [], upcoming: [], localActivityAsked: true, lastNight: { state: "none" as const }, milestonePulse: [], todayCapacity: { availableMinutes: 0, committedMinutes: 0 }, flywheel: [], flywheelStrip: { nodes: [], edges: [] },
+    identities: [], upcoming: [], milestonePulse: [], todayCapacity: { availableMinutes: 0, committedMinutes: 0 }, flywheel: [], flywheelStrip: { nodes: [], edges: [] },
     ...noPreviews
   };
 
@@ -140,7 +137,7 @@ describe("dashboard view honesty", () => {
 describe("capacity honesty", () => {
   const withCapacity = (capacity: DashboardData["capacity"]) => renderToStaticMarkup(<DashboardView data={{
     principalId: "test-owner", workspaceId: "test-workspace", nowLabel: "周一 · 09:00", nowIso: "2026-09-14T14:00:00.000Z", timeZone: "America/Chicago", clockPinned: true, dateLabel: "14", monthLabel: "SEP · 2026",
-    capacity, progress: { streakDays: 0, weekCount: 0 }, care: [], identities: [], upcoming: [], localActivityAsked: true, lastNight: { state: "none" as const }, milestonePulse: [], todayCapacity: { availableMinutes: 0, committedMinutes: 0 }, flywheel: [], flywheelStrip: { nodes: [], edges: [] },
+    capacity, progress: { streakDays: 0, weekCount: 0 }, care: [], identities: [], upcoming: [], milestonePulse: [], todayCapacity: { availableMinutes: 0, committedMinutes: 0 }, flywheel: [], flywheelStrip: { nodes: [], edges: [] },
     ...noPreviews
   }} />);
 
@@ -166,8 +163,7 @@ test("Today no longer prints the nightly expansion's status", () => {
   const html = renderToStaticMarkup(<DashboardView data={{
     principalId: "test-owner", workspaceId: "test-workspace", nowLabel: "周一 · 09:00", nowIso: "2026-09-14T14:00:00.000Z", timeZone: "America/Chicago", clockPinned: true, dateLabel: "14", monthLabel: "SEP · 2026",
     capacity: { level: "uncalibrated", observationCount: 0, basis: [], blockers: [] },
-    progress: { streakDays: 0, weekCount: 0 }, care: [], identities: [], upcoming: [], localActivityAsked: true,
-    lastNight: { state: "skipped", reason: "读不到成本信号" }, milestonePulse: [], todayCapacity: { availableMinutes: 0, committedMinutes: 0 }, flywheel: [], flywheelStrip: { nodes: [], edges: [] },
+    progress: { streakDays: 0, weekCount: 0 }, care: [], identities: [], upcoming: [], milestonePulse: [], todayCapacity: { availableMinutes: 0, committedMinutes: 0 }, flywheel: [], flywheelStrip: { nodes: [], edges: [] },
     ...noPreviews
   }} />);
   expect(html).not.toContain("昨夜");
@@ -178,8 +174,7 @@ describe("dashboard view with nothing to recommend yet", () => {
     principalId: "o", workspaceId: "w", nowLabel: "周一 · 09:00", nowIso: "2026-09-14T14:00:00.000Z", timeZone: "America/Chicago", clockPinned: true,
     dateLabel: "14", monthLabel: "SEP · 2026",
     capacity: { level: "uncalibrated" as const, observationCount: 0, basis: [], blockers: [] },
-    progress: { streakDays: 0, weekCount: 0 }, care: [], identities: [], upcoming: [],
-    localActivityAsked: true, lastNight: { state: "none" as const }, milestonePulse: [], todayCapacity: { availableMinutes: 0, committedMinutes: 0 }, flywheel: [], flywheelStrip: { nodes: [], edges: [] },
+    progress: { streakDays: 0, weekCount: 0 }, care: [], identities: [], upcoming: [], milestonePulse: [], todayCapacity: { availableMinutes: 0, committedMinutes: 0 }, flywheel: [], flywheelStrip: { nodes: [], edges: [] },
     ...noPreviews, ...extra
   } as DashboardData} />);
 

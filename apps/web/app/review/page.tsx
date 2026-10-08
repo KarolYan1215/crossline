@@ -1,9 +1,10 @@
-import { getStore } from "../../lib/crossline";
+import { getStore, lastNight } from "../../lib/crossline";
 import { loadWeeklyReview } from "../../lib/review";
 import { SubpageShell } from "../subpage-shell";
 import { RevokeAcceptance } from "./revoke-acceptance";
 import { DecideRelations } from "./decide-relations";
-import { RevokeInsight } from "./revoke-insight";
+import { InsightActions } from "./insight-actions";
+import { permissionCandidates } from "../../lib/permission-mode";
 import { WeeklyInsightButton } from "./weekly-insight-button";
 import { requireSessionContext } from "../../lib/access-guard";
 import { TaskPreview, MilestonePreview } from "../task-preview";
@@ -24,6 +25,8 @@ export default async function ReviewPage() {
   const review = loadWeeklyReview(ctx);
   const taskDetails = loadTaskDetailsBatch(ctx, review.autoAccepted.map((item) => item.workOrderId));
   const milestoneDetails = loadMilestoneDetailsBatch(ctx, review.milestoneProgress.map((item) => item.id));
+  const insightKeys = new Map(permissionCandidates(ctx).filter((item) => item.kind === "insight" && item.eligible).map((item) => [item.id, item.key]));
+  const night = lastNight(ctx.workspaceId, new Date());
 
   return <SubpageShell active="主线" eyebrow="证据驱动" title="周复盘" description="只显示数据库事实；尚无观测的指标一律标记为未标定，不给出编造数字。">
     <section className="review-block">
@@ -67,6 +70,7 @@ export default async function ReviewPage() {
 
     <section className="review-block">
       <h2>本周信息域扩展</h2>
+      {night.state !== "none" && <p className="review-note">{night.state === "ran" ? `最近一次夜间扩展：${night.proposals} 条候选` : `最近一次夜间扩展未运行：${night.reason}`}</p>}
       {review.findings.length === 0
         ? <p className="review-empty">本周没有扩展记录。夜间扩展只在配额刷新且你不在用电脑时运行。</p>
         : <ul className="review-list">{review.findings.map((finding) => <li key={finding.sourceUrl}>
@@ -75,7 +79,7 @@ export default async function ReviewPage() {
           <small>失效条件：{finding.staleWhen}</small>
           <small>洞察状态：{finding.status === "approved" ? "已批准可用于反推" : finding.status === "candidate" ? "候选，尚不用于决策" : finding.status === "revoked" ? "已撤销" : "已拒绝"}</small>
           <a href={finding.sourceUrl} rel="noreferrer noopener" target="_blank">来源 ↗</a>
-          {finding.status === "approved" && <RevokeInsight eventId={finding.eventId} />}
+          <InsightActions eventId={finding.eventId} status={finding.status} candidateKey={insightKeys.get(finding.eventId)} />
         </li>)}</ul>}
     </section>
 

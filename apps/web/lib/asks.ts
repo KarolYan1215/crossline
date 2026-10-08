@@ -349,7 +349,7 @@ function agentAsks({ store, ctx }: Source): Ask[] {
     id: `agent:${task.taskId}`, kind: "agent_blocked" as const, entityId: task.taskId, urgency: "later" as const, raisedAt: task.requestedAt,
     fingerprint: task.blockerCode, title: `助手没做成「${short(titles.get(task.workOrderId) ?? task.title)}」`,
     why: `${task.blockerMessage || task.blockerCode}。它不会自己再试；这件事回到你手上。`,
-    options: [{ id: "self", label: "知道了，我自己做", recommended: true }, { id: "look", label: "去看它做到哪了", href: "/assistant" }] }));
+    options: [{ id: "self", label: "知道了，我自己做", recommended: true }, { id: "look", label: "查看助手任务", href: "/settings#automation" }] }));
 }
 
 function readFailure(store: Source["store"], workspaceId: string, key: string) {

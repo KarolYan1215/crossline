@@ -25,12 +25,17 @@ test.each([
   ["milestones", () => import("./milestones/page"), noParams],
   ["workbench", () => import("./workbench/page"), noParams],
   ["approvals", () => import("./approvals/page"), noParams],
-  ["assistant", () => import("./assistant/page"), noParams]
+  ["settings", () => import("./settings/page"), {}]
 ] as const)("the %s page renders on an account with nothing on it", async (_name, load, props) => {
   const { default: Page } = await load();
   const html = renderToStaticMarkup(await (Page as (props: unknown) => Promise<React.ReactElement>)(props));
   expect(html.length).toBeGreaterThan(200);
 }, 30000);
+
+test("the old assistant address sends an empty account to 设置 → 自动化与助手", async () => {
+  const { default: AssistantPage } = await import("./assistant/page");
+  await expect(AssistantPage()).rejects.toMatchObject({ digest: expect.stringContaining("/settings#automation") });
+});
 
 test("Today renders once the interview has produced a profile but no goal has been approved yet", async () => {
   globalThis.crosslineStore!.upsertProfileFact({ workspaceId: TEST_CTX.workspaceId, identityId: "research", projectId: "", slot: "stage",

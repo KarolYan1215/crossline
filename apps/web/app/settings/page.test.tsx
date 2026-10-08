@@ -20,18 +20,21 @@ describe("settings page", () => {
     expect(html).not.toContain("待授权");
     // Targets nobody has configured are not listed one by one as "not connected": only what can be acted on is shown.
     expect(html).not.toContain("CONNECTOR_NOT_CONFIGURED");
-    // Connections are part of this page, and so is what the model calls cost.
-    expect(html).toContain("连接与账号");
+    // One index, every module under it, nothing developer-facing.
+    for (const section of ["通用", "时间与提醒", "自动化与助手", "日历与连接", "隐私与屏幕活动", "用量与体检"]) expect(html).toContain(section);
     expect(html).toContain("模型用量");
-    expect(html).toContain("还没有模型调用记录");
+    expect(html).toContain("近 7 天没有模型调用");
+    expect(html).not.toMatch(/CROSSLINE_|CODEX_HOME|sidecar|pnpm |scripts\//);
     // The 系统体检 card renders from an empty ledger without inventing numbers.
     expect(html).toContain("系统体检");
-    expect(html).toContain("还没有完成并记了用时的任务");
+    expect(html).toContain("尚无计时完成的任务");
+    // Each assistant capability is a three-way control.
+    expect(html).toContain("逐次审阅");
     globalThis.crosslineStore.close();
     globalThis.crosslineStore = undefined;
   }, 20000);
 
-  test("shows what each Skill spent once there are runs", async () => {
+  test("shows model use by function as a chart, without model names", async () => {
     const store = new CrosslineStore(":memory:");
     globalThis.crosslineStore = store;
     store.saveModelUsage({ workspaceId: TEST_CTX.workspaceId, skill: "crossline:crossline-onboarding", tier: "top", model: "gpt-5.6-sol", effort: "medium",
@@ -40,9 +43,9 @@ describe("settings page", () => {
     const { default: SettingsPage } = await import("./page");
     const html = renderToStaticMarkup(await SettingsPage());
     expect(html).toContain("访谈");
-    expect(html).toContain("gpt-5.6-sol");
-    expect(html).toContain("12.0k");
-    expect(html).toContain("420 秒");
+    expect(html).not.toContain("gpt-5.6-sol");
+    expect(html).toContain("15k tokens");
+    expect(html).toContain("最长 420 秒");
     store.close();
     globalThis.crosslineStore = undefined;
   }, 20000);

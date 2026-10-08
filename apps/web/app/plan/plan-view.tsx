@@ -103,9 +103,11 @@ export function PlanView({ plan, calendar }: { plan: PlanVersionData; calendar: 
       </button>
       {syncState === "done" && <span role="status" className="plan-sync-note">{syncNote}</span>}
       {/* The one place the app writes to a calendar: a separate calendar named Crossline, events it made itself. */}
-      <button type="button" className="plan-sync" disabled={publishState === "publishing" || plan.status !== "approved"} onClick={publish}
-        title={plan.status === "approved" ? "只写入名为 Crossline 的单独日历；你自己的日历不会被改动" : "计划批准后才能写入"}>
-        {publishState === "publishing" ? "写入中…" : publishState === "error" ? "写入失败，重试" : "同步到 Crossline 日历"}
+      {/* Publishing also runs on its own every ten minutes; this is the manual nudge, so it is an icon rather than a labelled button. */}
+      <button type="button" className="plan-sync plan-sync-icon" disabled={publishState === "publishing" || plan.status !== "approved"} onClick={publish}
+        aria-label="立即写入 Crossline 日历"
+        title={plan.status === "approved" ? "立即写入 Crossline 日历（每 10 分钟自动写入；只写名为 Crossline 的日历）" : "计划批准后写入 Crossline 日历"}>
+        {publishState === "publishing" ? "…" : "⇪"}
       </button>
       {(publishState === "done" || publishState === "error") && <span role="status" className="plan-sync-note">{publishNote}</span>}
     </div>

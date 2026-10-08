@@ -1492,7 +1492,8 @@ export const ACTIVITY_BLACKLIST = "activity.blacklist";
  * alternative is showing an older expansion as if it were this morning's, which is the same class of
  * lie as a fabricated metric.
  */
-export function lastNight(workspaceId: string, now: Date): DashboardData["lastNight"] {
+export type LastNight = { state: "none" } | { state: "ran"; proposals: number } | { state: "skipped"; reason: string };
+export function lastNight(workspaceId: string, now: Date): LastNight {
   const since = new Date(now.getTime() - 36 * 60 * 60_000).toISOString();
   const event = [...getStore().listEvents(workspaceId)]
     .reverse()
@@ -1747,13 +1748,6 @@ export async function loadDashboard(ctx: AccessContext): Promise<Omit<DashboardD
     monthLabel: new Intl.DateTimeFormat("en-US", { month: "short", year: "numeric", timeZone }).format(now).toUpperCase(),
     capacity,
     energyLearning: energyCalibration(outcomes),
-    // Absent means never asked, so the prompt appears exactly once and the answer is remembered.
-    localActivityAsked: store.getSetting(ctx.workspaceId, LOCAL_ACTIVITY_CONSENT) !== undefined,
-    // Someone who agreed to the original minutes-only collection is asked once more about the detailed level: the promise
-    // changed (it now reads app and window), so the old yes does not carry over.
-    activityDetailUpgrade: store.getSetting(ctx.workspaceId, LOCAL_ACTIVITY_CONSENT) === "granted"
-      && store.getSetting(ctx.workspaceId, ACTIVITY_DETAIL_CONSENT) === undefined,
-    lastNight: lastNight(ctx.workspaceId, now),
     awaitingApproval: orders.filter((order) => order.state === "awaiting_plan_approval").length,
     ...(primary ? { primary } : {}),
     ...(higherPriority ? { higherPriority } : {}),

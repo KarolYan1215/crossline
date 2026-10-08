@@ -34,6 +34,20 @@ export function declineCategory(store: CrosslineStore, workspaceId: string, cate
   const declined = declinedCategories(store, workspaceId);
   if (!declined.includes(category)) store.setSetting(workspaceId, DECLINED, JSON.stringify([...declined, category]));
 }
+/**
+ * The settings page's three-way choice for a kind of work: off (the assistant never does it), review (it may start, every result is
+ * the person's to accept — earned trust is kept), auto (a result whose own checks all passed counts as done, the person spot-checks).
+ * A rejected or failed result still drops `auto` back to review, as `recordReview` does.
+ */
+export type CategoryMode = "off" | "review" | "auto";
+export function setCategoryMode(store: CrosslineStore, workspaceId: string, category: AgentCategory, mode: CategoryMode, now = new Date()): void {
+  if (mode === "off") { declineCategory(store, workspaceId, category); return; }
+  approveCategory(store, workspaceId, category, now);
+  const all = readCategories(store, workspaceId);
+  const current = all[category]!;
+  store.setSetting(workspaceId, CATEGORIES, JSON.stringify({ ...all, [category]: { ...current, trust: mode === "auto" ? "auto_checked" : "review_all" } }));
+}
+export const categoryMode = (state: CategoryState | undefined): CategoryMode => !state ? "off" : state.trust === "auto_checked" ? "auto" : "review";
 export const isPaused = (store: CrosslineStore, workspaceId: string): boolean => store.getSetting(workspaceId, PAUSED) === "1";
 export const setPaused = (store: CrosslineStore, workspaceId: string, paused: boolean): void => store.setSetting(workspaceId, PAUSED, paused ? "1" : "0");
 

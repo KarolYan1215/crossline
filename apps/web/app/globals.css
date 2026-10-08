@@ -108,7 +108,6 @@ input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-vis
 .bottom-nav-more-panel{position:absolute;bottom:100%;left:0;right:0;background:var(--paper);border:1px solid var(--ink);display:grid}
 .bottom-nav-more-panel a{display:block;padding:10px 14px;font-family:var(--f-mono);font-size:12px;color:var(--graphite)}
 .system-state b,.system-state strong{border:1px solid var(--mist);padding:2px 6px;font-weight:400}
-.status-badge{font-family:var(--f-mono);font-size:12px;border:1px solid var(--mist);padding:2px 6px;color:var(--graphite)}
 
 /* ── day head ──────────────────────────────── */
 .day-head{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:clamp(10px,1.6vw,18px);align-items:center;padding:14px 0 10px;border-bottom:1.5px solid var(--ink)}
@@ -139,11 +138,6 @@ input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-vis
 .energy-probe button{border:1px solid var(--mist);font-family:var(--f-mono);font-size:12px;padding:6px 9px;line-height:1}
 .energy-probe button:hover{border-color:var(--ink)}
 .energy-probe em,.energy-probe-state{font-family:var(--f-mono);font-size:12px;font-style:normal;color:var(--now-ink)}
-.consent-ask{padding:8px 0;border-bottom:1px solid var(--mist);display:grid;gap:6px}
-.consent-ask h2{margin:0;font-size:13.5px;font-weight:700}
-.consent-ask p{margin:0;color:var(--graphite);font-size:12.5px;line-height:1.6;max-width:76ch}
-.consent-ask div{display:flex;gap:8px;flex-wrap:wrap}
-.last-night{font-family:var(--f-mono);font-size:12px;color:var(--shade)}
 .time-bar{height:6px;background:var(--mist);position:relative;min-width:80px}
 .time-bar-fill{position:absolute;inset:0;width:var(--pct,0%);background:var(--ink)}
 
@@ -160,8 +154,6 @@ input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-vis
 .attachment-drop.dragging{border-color:var(--ink);background:var(--chalk)}
 .attachment-drop input{border:none;padding:0;min-height:auto;font-size:12px;color:var(--graphite)}
 .attachment-drop small{font-size:12px;color:var(--graphite);word-break:break-word}
-.settings-row{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:8px 0;border-bottom:1px solid var(--mist)}
-.settings-row-actions{display:flex;gap:8px}
 .batch-capture-form{display:grid;gap:6px;margin-top:6px}
 .batch-capture-form textarea{width:100%;min-height:72px;padding:8px 9px;border:1px solid var(--mist);background:var(--paper);color:var(--ink);font:inherit;resize:vertical}
 .batch-capture-actions{display:flex;gap:8px;align-items:center}
@@ -326,10 +318,6 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .revoke-acceptance em{font-style:normal;font-family:var(--f-mono);font-size:12px;color:var(--ink)}
 .approval-ledger{display:grid;gap:7px}
 .approval-ledger article{border:1px solid var(--mist);padding:8px 10px;display:grid;gap:3px}
-.status-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:1px;background:var(--mist);border:1px solid var(--mist)}
-.status-card{background:var(--paper);padding:10px;display:grid;gap:5px;align-content:start}
-.status-card h2{margin:0;font-family:var(--f-display);font-size:22px}
-.status-card p{margin:0;color:var(--graphite);font-size:12px;line-height:1.55}
 
 /* ── candidate relations ───────────────────── */
 .decide-relations{display:grid;gap:10px}
@@ -439,7 +427,6 @@ button:disabled{opacity:.4;cursor:not-allowed}
 /* Wider and scrollable — the approval confirm dialog this reuses is a couple lines of text, a task
    detail is materials/contracts/execution history, and 520px with no scroll would clip most of it. */
 .dialog-sheet.detail-drawer{width:min(640px,calc(100vw - 32px));max-height:min(80vh,760px);overflow-y:auto}
-.codex-account-card{border:1px solid var(--mist);padding:12px 14px;display:grid;gap:6px}
 
 /* ── responsive ────────────────────────────── */
 /* Was 900px: a half-screen desktop window or a portrait tablet (900–1024px) still hit the base
@@ -653,8 +640,6 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .subpage-header{padding:10px 0 6px;border-bottom:1px solid var(--ink)}
 .subpage-header h1{font-size:20px;font-weight:700}
 .subpage-header h1::before{display:none}
-.activity-card .settings-row input{flex:1;min-width:180px;padding:6px 8px;border:1px solid var(--mist);border-radius:6px;font:inherit}
-.activity-entries{margin:8px 0 0;padding-left:18px;max-height:260px;overflow:auto;font-size:13px}
 /* 待确认: the batch bar sits above the proposal cards; a line's drafts are accepted together. */
 .proposal-batch-bar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;margin:12px 0}
 .proposal-check{display:inline-flex;align-items:center;gap:6px;font-size:13px}
@@ -687,4 +672,3 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .ask-input{border-top:1px solid var(--mist);padding-top:8px;min-width:0}
 .ask-input h4{margin:0 0 4px;font-size:14px;overflow-wrap:anywhere}
 .byproduct-line{border-left:3px dashed var(--graphite);padding-left:8px}
-.effectiveness-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}

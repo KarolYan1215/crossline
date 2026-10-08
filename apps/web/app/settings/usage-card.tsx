@@ -1,40 +1,42 @@
-import { tierRoutes, SKILL_TIERS } from "@crossline/codex";
 import type { ModelUsageSummary } from "@crossline/db";
+import { BarChart, Sparkline } from "../ui/charts";
 
-const TIER_LABEL = { top: "顶档", mid: "中档", low: "低档" } as const;
-const SKILL_LABEL: Record<string, string> = {
-  "crossline-onboarding": "访谈", "crossline-milestone-architect": "里程碑设计", "crossline-goal-backplanner": "目标回推",
-  "crossline-flywheel-scout": "飞轮扩展", "crossline-automation-stripper": "任务分析", "crossline-manualbook-designer": "手册流程设计", "crossline-material-researcher": "查资料", "crossline-material-writer": "手册写作",
-  "crossline-milestone-gate": "里程碑闸门", "crossline-weekly-insight": "周洞察", "crossline-due-diligence": "网上查证",
-  "crossline-background-facts": "背景事实", "crossline-plan-explainer": "排程解释", "crossline-assistant": "助手"
+/** Each Skill by what it does for the person; no model names (decided 2026-10-07). */
+const FUNCTION_LABEL: Record<string, string> = {
+  "crossline-onboarding": "访谈", "crossline-milestone-architect": "里程碑设计", "crossline-goal-backplanner": "任务倒推",
+  "crossline-flywheel-scout": "跨主线扩展", "crossline-automation-stripper": "收集分析", "crossline-manualbook-designer": "教程设计",
+  "crossline-material-researcher": "资料检索", "crossline-material-writer": "教程写作", "crossline-milestone-gate": "验收判定",
+  "crossline-weekly-insight": "每周洞察", "crossline-due-diligence": "网上查证", "crossline-background-facts": "背景整理",
+  "crossline-plan-explainer": "排程说明", "crossline-assistant": "小助手", "crossline-agent": "助手任务", "crossline-step-planner": "步骤拆分",
+  "crossline-validation-reviewer": "复核", "crossline-progress-judge": "进度判断", "crossline-input-router": "输入识别"
 };
-const label = (skill: string) => SKILL_LABEL[skill.replace(/^crossline:/, "")] ?? skill.replace(/^crossline:crossline-/, "");
-const tokens = (n: number) => n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+const label = (skill: string) => FUNCTION_LABEL[skill.replace(/^crossline:/, "")] ?? "其他";
+const k = (n: number) => Math.round(n / 100) / 10;
 
 /**
- * What the app's own model calls cost over the last week, per Skill, and which model each tier maps to. This is
- * the app's own count from what the runtime reported, not the account's quota (that is a different number,
- * read from the account on the connections section).
+ * Model use over the last week by function: tokens as bars (hover for runs, average and longest time, failures and repairs) and the
+ * daily total as a trend. It is the app's own count of what the runtime reported, not the account's quota.
  */
-export function UsageCard({ summary, days }: { summary: ModelUsageSummary[]; days: number }) {
-  const routes = tierRoutes();
-  const total = summary.reduce((sum, row) => sum + row.totalTokens, 0);
-  const runs = summary.reduce((sum, row) => sum + row.runs, 0);
-  return <div className="usage">
-    <p className="muted">
-      {(Object.keys(routes) as Array<keyof typeof routes>).map((tier) => `${TIER_LABEL[tier]}：${routes[tier].model}${routes[tier].effort ? `（${routes[tier].effort}）` : ""}`).join("　")}
-    </p>
-    {summary.length === 0 ? <p className="muted">近 {days} 天还没有模型调用记录。</p> : <>
-      <table className="usage-table">
-        <thead><tr><th>用途</th><th>模型</th><th>次数</th><th>输入</th><th>输出</th><th>思考</th><th>平均 / 最长耗时</th><th>失败 / 重试</th></tr></thead>
-        <tbody>{summary.map((row) => <tr key={`${row.skill}|${row.model}`}>
-          <td>{label(row.skill)}{SKILL_TIERS[row.skill.replace(/^crossline:/, "")] ? "" : "（未分档）"}</td>
-          <td>{row.model || "运行时默认"}</td><td>{row.runs}</td>
-          <td>{tokens(row.inputTokens)}</td><td>{tokens(row.outputTokens)}</td><td>{tokens(row.reasoningTokens)}</td>
-          <td>{row.averageSeconds} / {row.longestSeconds} 秒</td><td>{row.failed} / {row.repairs}</td>
-        </tr>)}</tbody>
-      </table>
-      <p className="muted">近 {days} 天共 {runs} 次调用，{tokens(total)} tokens。</p>
-    </>}
+export function UsageCard({ summary, daily, days }: { summary: ModelUsageSummary[]; daily: Array<{ day: string; runs: number; totalTokens: number }>; days: number }) {
+  const byFunction = new Map<string, { tokens: number; runs: number; failed: number; repairs: number; longest: number; seconds: number }>();
+  for (const row of summary) {
+    const key = label(row.skill);
+    const current = byFunction.get(key) ?? { tokens: 0, runs: 0, failed: 0, repairs: 0, longest: 0, seconds: 0 };
+    byFunction.set(key, { tokens: current.tokens + row.totalTokens, runs: current.runs + row.runs, failed: current.failed + row.failed,
+      repairs: current.repairs + row.repairs, longest: Math.max(current.longest, row.longestSeconds), seconds: current.seconds + row.averageSeconds * row.runs });
+  }
+  const rows = [...byFunction].sort((a, b) => b[1].tokens - a[1].tokens);
+  const total = rows.reduce((sum, [, row]) => sum + row.tokens, 0);
+  const runs = rows.reduce((sum, [, row]) => sum + row.runs, 0);
+  if (!rows.length) return <p className="muted">近 {days} 天没有模型调用。</p>;
+  return <div className="st-usage">
+    <div className="st-usage-head">
+      <div className="ui-stat"><b>{k(total)}k</b><span>近 {days} 天 tokens</span></div>
+      <div className="ui-stat"><b>{runs}</b><span>调用次数</span></div>
+      <Sparkline label="每日 tokens" unit="k" width={160} height={36} values={daily.map((day) => k(day.totalTokens))}
+        labels={daily.map((day) => `${day.day.slice(5)} · ${day.runs} 次`)} />
+    </div>
+    <BarChart label="按功能的 tokens" unit="k" data={rows.map(([name, row]) => ({ label: name, value: k(row.tokens),
+      title: `${name}：${k(row.tokens)}k tokens · ${row.runs} 次 · 平均 ${Math.round(row.seconds / Math.max(1, row.runs))} 秒 · 最长 ${Math.round(row.longest)} 秒${row.failed ? ` · 失败 ${row.failed}` : ""}${row.repairs ? ` · 重试 ${row.repairs}` : ""}` }))} />
   </div>;
 }

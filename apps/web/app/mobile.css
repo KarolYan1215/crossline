@@ -16,8 +16,6 @@
   .ask-card{padding:10px 12px}
 }
 
-.phone-setup ol{margin:6px 0 8px;padding-left:20px}
-.phone-setup li{margin:2px 0}
 @media (max-width:680px){
   /* The 问答 bubble floated over the page's own links; on a phone it sits just above the tab bar, small, at the edge. */
   .assistant-bubble{bottom:calc(60px + env(safe-area-inset-bottom));right:8px;padding:6px 10px;min-height:44px}

@@ -51,7 +51,7 @@ export default async function MilestonesPage({ searchParams }: {
     description={drafts ? `${drafts} 个里程碑草稿待审阅：草稿以虚线显示，可按主线批准或撤销。批准后，三周内到期的里程碑自动倒推出任务。` : "各主线的里程碑按日期排列；刻度为里程碑之前的阶段结果。"}>
     <MilestoneStats board={board} />
     <MilestoneTimeline board={board} />
-    <p className="muted"><a href="/review">本周复盘 →</a>　<a href="/onboarding">补充个人情况并重新设计里程碑 →</a></p>
+    <p className="muted"><a href="/review">本周复盘 →</a></p>
     <details className="fold advanced" id="milestone-admin" open={Boolean(editId)}><summary>新建与完整编辑</summary>
       <section className="review-block">
         <MilestoneAdmin milestones={admin}

@@ -4,7 +4,6 @@ import { AskList } from "./ask-list";
 import type { Ask } from "@crossline/core";
 import { AnalogClock } from "./analog-clock";
 import { EnergyProbe } from "./energy-probe";
-import { LocalActivityConsent } from "./local-activity-consent";
 import type { TaskDetail, MilestoneDetail } from "../lib/task-detail";
 import { AppShell } from "./app-shell";
 import { TaskCard, type TaskSlot } from "./task/task-card";
@@ -63,13 +62,6 @@ export type DashboardData = {
   };
   /** `time` is the scheduler's real `HH:mm–HH:mm` for today, present only when it actually placed this order. */
   upcoming: Array<{ id: string; title: string; status: string; identityId: string; time?: string; milestoneTitle?: string }>;
-  localActivityAsked: boolean;
-  /** True when minutes-only collection was agreed to but the detailed level never asked about. */
-  activityDetailUpgrade?: boolean;
-  lastNight:
-    | { state: "none" }
-    | { state: "ran"; proposals: number }
-    | { state: "skipped"; reason: string };
   milestonePulse: Array<{ id: string; identity: string; title: string; evidence: string }>;
   /** One batched read behind every preview drawer on this page, computed once in `page.tsx`. */
   taskDetailById: Map<string, TaskDetail>;
@@ -164,11 +156,9 @@ export function DashboardView({ data }: { data: DashboardData }) {
         </a>)}
       </section>
 
-      <section className="care-band" aria-label="健康容量策略">
-        {data.care.length > 0 && <dl>{data.care.map((item) => <div key={item.title}><dt>{item.title}</dt><dd>最低 {item.minimumMinutes} 分钟</dd></div>)}</dl>}
-        {/* Asked once here; the later upgrade offer and the nightly run's status live in 设置, not on the page you plan your day on. */}
-        <LocalActivityConsent asked={data.localActivityAsked} upgrade={false} />
-      </section>
+      {data.care.length > 0 && <section className="care-band" aria-label="健康容量策略">
+        <dl>{data.care.map((item) => <div key={item.title}><dt>{item.title}</dt><dd>最低 {item.minimumMinutes} 分钟</dd></div>)}</dl>
+      </section>}
     </AppShell>
   </>;
 }

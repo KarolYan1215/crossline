@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Tag } from "../ui/tag";
 
 type AccountState = {
   account?: { type?: string; email?: string | null; planType?: string } | null;
@@ -63,16 +64,15 @@ export function CodexAccountControl() {
   };
   const account = state?.account;
   const blocker = visibleCodexBlocker(state);
-  return <article className="status-card codex-account-card">
-    <span className="status-badge">{account ? "已登录" : state ? "需授权" : "检查中"}</span>
-    <h2>Codex sidecar</h2>
-    <p>{account ? `${account.email ?? "ChatGPT account"} · ${account.planType ?? account.type ?? "authenticated"}` : "独立 Crossline CODEX_HOME；不读取 Desktop 私有认证状态。"}</p>
-    {blocker && <code>{blocker.code}: {blocker.message}</code>}
-    <div>
-      {!account && !loginUrl && <button type="button" disabled={busy} onClick={beginLogin}>{busy ? "启动中…" : "请求 ChatGPT 授权"}</button>}
-      {loginUrl && <a href={loginUrl} target="_blank" rel="noreferrer">打开官方登录页 →</a>}
-      {loginUrl && <button type="button" className="text-button" disabled={busy} onClick={cancelLogin}>取消授权</button>}
-      <button type="button" className="text-button" onClick={refresh}>刷新状态</button>
-    </div>
-  </article>;
+  return <section className="st-card codex-account-card" aria-label="模型服务账号">
+    <header><h3>模型服务账号</h3><Tag tone={account ? "ok" : "warn"}>{account ? "已登录" : state ? "未登录" : "检查中"}</Tag></header>
+    <div className="st-row"><span className="st-row-label">{account ? account.email ?? "ChatGPT 账号" : "分析、拆分与助手功能需要登录 ChatGPT 账号"}
+      {blocker && <small role="status">{blocker.message}</small>}</span>
+      <span className="st-row-actions">
+        {!account && !loginUrl && <button type="button" className="primary-button" disabled={busy} onClick={beginLogin}>{busy ? "启动中…" : "登录"}</button>}
+        {loginUrl && <a href={loginUrl} target="_blank" rel="noreferrer">打开登录页 →</a>}
+        {loginUrl && <button type="button" disabled={busy} onClick={cancelLogin}>取消</button>}
+        <button type="button" onClick={refresh} aria-label="刷新登录状态" title="刷新">↻</button>
+      </span></div>
+  </section>;
 }

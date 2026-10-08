@@ -69,24 +69,11 @@ export function ProposalBatchForm({ children, count }: { children: ReactNode; co
     location.reload();
   }}>
     <div className="proposal-batch-bar">
-      <span>{count} 个方案等你批准</span>
+      <span>{count} 个任务提案待批准</span>
       <button className="primary-button" type="submit">{state}</button>
     </div>
     {children}
   </form>;
-}
-
-/** Accepts every draft listed for one line in a single step; the week's first steps are then worked out from them. */
-export function ApproveLineDraftsButton({ ids, label }: { ids: string[]; label: string }) {
-  const [state, setState] = useState(label);
-  return <button type="button" className="secondary-button" onClick={async () => {
-    setState("接受中…");
-    const response = await post("/api/milestones/approve-batch", { ids });
-    const result = await response.json().catch(() => null) as { skipped?: unknown[] } | null;
-    if (!response.ok || !result) { setState("没有成功，请刷新"); return; }
-    if (result.skipped?.length) { setState(`${result.skipped.length} 个已变化，请刷新`); return; }
-    location.reload();
-  }}>{state}</button>;
 }
 
 /** One-click undo for something that took effect without a click. */

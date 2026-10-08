@@ -255,16 +255,19 @@ test("goal confirmation and permission-mode rejection persist through the real p
       sourceUrl: "https://example.org/source", sourceTitle: "记录模板", retrievedAt: "2026-09-14T00:00:00Z",
       staleWhen: "方法变更" } }); }
   finally { store.close(); }
-  await page.goto("/approvals");
-  // Folded until it is switched on: an optional feature should not be the first thing on the page people come to to decide things.
-  await page.getByText(/^默认批准（可选）/).click();
-  await expect(page.getByRole("button", { name: "开启默认批准" })).toBeVisible();
-  await page.getByRole("button", { name: "开启默认批准" }).click();
-  await expect(page.getByRole("button", { name: "关闭默认批准" })).toBeVisible();
-  const insight = page.locator(".permission-mode-panel li").filter({ hasText: "可复用的实验记录模板" });
+  // The default-approval switch lives in 设置 → 自动化与助手 now, and every decision on an insight is made in the weekly review.
+  await page.goto("/settings#automation");
+  const lowRisk = page.getByRole("radiogroup", { name: "低风险提案默认批准" });
+  await lowRisk.getByRole("radio", { name: "默认批准" }).click();
+  await expect(page.locator(".st-ok").first()).toBeVisible();
+  await page.goto("/review");
+  const insight = page.locator(".review-list li").filter({ hasText: "可复用的实验记录模板" });
   await expect(insight).toBeVisible();
-  await insight.getByRole("button", { name: "拒绝" }).click();
-  await expect(page.locator(".permission-mode-panel li").filter({ hasText: "可复用的实验记录模板" })).toHaveCount(0);
+  await Promise.all([page.waitForNavigation({ waitUntil: "load" }), insight.getByRole("button", { name: "拒绝" }).click()]);
+  await expect(page.locator(".review-list li").filter({ hasText: "可复用的实验记录模板" })).toContainText("已拒绝");
+  await page.goto("/settings#automation");
+  await page.getByRole("radiogroup", { name: "低风险提案默认批准" }).getByRole("radio", { name: "逐项批准" }).click();
+  await expect(page.locator(".st-ok").first()).toBeVisible();
   const rejected = openStore();
   try { expect(rejected.listEvents(realWorkspaceId(rejected), { type: "insight.rejected" })).toHaveLength(1); }
   finally { rejected.close(); }
