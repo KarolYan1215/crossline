@@ -80,7 +80,9 @@ function crosslineAuthConfig(options: CrosslineAuthOptions): BetterAuthOptions {
     trustedOrigins: options.trustedOrigins,
     // Revalidated from the database on every request, never trusted from a signed cookie payload — a
     // revoked session or a demoted role must take effect immediately, not after a cache window.
-    session: { cookieCache: { enabled: false } },
+    // 90 days, renewed at most daily while in use, so a device the person keeps using never asks again (Better Auth's
+    // default is 7). Revocation is unaffected: signing out or revoking still ends the session on the next request.
+    session: { cookieCache: { enabled: false }, expiresIn: 60 * 60 * 24 * 90, updateAge: 60 * 60 * 24 },
     advanced: {
       // 127.0.0.1/localhost is a browser-trustworthy secure context even over plain HTTP, so `secure`
       // does not need to be relaxed for local dev — only the Tailscale hostname (real HTTPS, stage six)
