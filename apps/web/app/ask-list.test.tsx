@@ -12,7 +12,7 @@ const ask = (id: string, title: string): Ask => ({ id, kind: "backplan_input", e
 // The interaction (follow-up fields, the next one coming up) is driven in e2e; this pins what the list shows at rest.
 test("shows the most urgent few with their reasons and written-out options, and links to the rest", () => {
   const html = renderToStaticMarkup(<AskList initial={[ask("a", "第一条"), ask("b", "第二条"), ask("c", "第三条"), ask("d", "第四条")]} visible={3} moreHref="/approvals#asks" />);
-  expect(html).toContain("需要你一句话 · 4");
+  expect(html).toContain("待决事项 · 4");
   expect(html).toContain("第三条");
   expect(html).not.toContain("第四条");
   expect(html).toContain("其余 1 条 →");

@@ -197,6 +197,6 @@ describe("dashboard view with nothing to recommend yet", () => {
   test("quick capture comes before the next action, and its button says what it does", () => {
     const html = empty({});
     expect(html.indexOf("快速收集")).toBeLessThan(html.indexOf("下一步"));
-    expect(html).toContain(">收集</button>");
+    expect(html).toContain('aria-label="发送"');
   });
 });

@@ -345,6 +345,9 @@ export async function startCodexSupervisor(options: {
   autoBackplanGoals?: (workspaceId: string) => Promise<unknown>;
   /** Step planning, replans asked for, and progress reports, run now (the person just asked for one); answered at once. */
   runTaskPass?: (workspaceId: string) => Promise<unknown>;
+  /** Splits a quick-capture input into captures and instructions about open tasks; answered when read (a few seconds to a minute). */
+  routeInput?: (workspaceId: string, input: { text: string; batch: boolean; mentions: Array<{ kind: string; id: string; title: string }>; timeZone: string },
+    signal: AbortSignal) => Promise<unknown>;
   /** Hands a work order to the assistant. Answers at once: the task runs on, and writes its own outcome to the ledger. */
   dispatchAgentTask?: (workspaceId: string, workOrderId: string, category?: string, stepId?: string) => unknown;
   /** Writes plan blocks to the person's Crossline calendar. Only blocks; never touches any other calendar or event. */
@@ -519,6 +522,24 @@ export async function startCodexSupervisor(options: {
         if (runtimeBlocker) { sendJson(response, 503, { blocker: runtimeBlocker }); return; }
         runDetached(() => options.autoAnalyzeCaptures!(callerWorkspaceId), () => {});
         sendJson(response, 202, { started: true });
+        return;
+      }
+      if (request.method === "POST" && pathname === "/v1/input/route" && options.routeInput) {
+        if (request.headers.origin || !request.headers["content-type"]?.startsWith("application/json")) {
+          sendJson(response, 403, { blocker: { code: "INPUT_ROUTE_FORBIDDEN", message: "Use the local Web API" } });
+          return;
+        }
+        if (runtimeBlocker) { sendJson(response, 503, { blocker: runtimeBlocker }); return; }
+        const body = await readJsonBody(request);
+        const text = typeof body?.text === "string" ? body.text.slice(0, 4000) : "";
+        if (!text.trim()) { sendJson(response, 400, { blocker: { code: "INPUT_EMPTY", message: "输入为空" } }); return; }
+        const mentions = Array.isArray(body?.mentions) ? body.mentions
+          .filter((item: unknown): item is { kind: unknown; id: unknown; title: unknown } => typeof item === "object" && item !== null)
+          .map((item: { kind: unknown; id: unknown; title: unknown }) => ({ kind: String(item.kind ?? ""), id: String(item.id ?? ""), title: String(item.title ?? "").slice(0, 200) })) : [];
+        const controller = new AbortController();
+        const timeZone = typeof body?.timeZone === "string" && body.timeZone ? body.timeZone : "UTC";
+        try { await sendJsonWhenReady(response, () => options.routeInput!(callerWorkspaceId, { text, batch: body?.batch === true, mentions, timeZone }, controller.signal)); }
+        finally { controller.abort(); }
         return;
       }
       if (request.method === "POST" && pathname === "/v1/tasks/pass" && options.runTaskPass) {

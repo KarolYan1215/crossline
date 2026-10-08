@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState } from "react";
 import {
   createCommand, deviceId, enqueue, listConflicts, listDeadLetters, nextSequence, rememberWorkspace,
   replayQueue, type OfflineCommand
 } from "./offline-queue";
-import { useAttachmentDrop } from "./attachment-drop";
-import type { DeadLetter } from "@crossline/core";
+import { looksLikeScheduleCommand, type DeadLetter } from "@crossline/core";
+import type { Change } from "../lib/impact";
+import { Composer, type ComposerInput } from "./chat/composer";
+import { ImpactCard, useImpact } from "./task/impact";
 
 /** Renews (or first-issues) this browser's 24-hour device lease. Best-effort: a lease that fails to
  * renew only matters once it actually expires, which `POST /api/commands` would then start refusing —
@@ -55,74 +57,87 @@ export function OfflineReplay({ workspaceId }: { workspaceId: string }) {
   </aside>;
 }
 
-const ACCEPTED_ATTACHMENT_TYPES = "image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain";
+/** A change to a planned task that the router read out of the input: previewed across the lines, applied on 应用. */
+function ScheduleChange({ change, summary }: { change: Change; summary: string }) {
+  const impact = useImpact();
+  const [autoApply, setAutoApply] = useState(false);
+  useEffect(() => { void impact.propose(change); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  return <div className="schedule-change">
+    <p className="gen"><b>日程指令</b> · {summary}</p>
+    {impact.busy && !impact.pending && <small role="status">计算影响…</small>}
+    {impact.pending && <ImpactCard impact={impact.pending.impact} busy={impact.busy} onCancel={impact.cancel} onApply={() => {
+      if (autoApply) void fetch("/api/input/route", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ autoApply: true }) });
+      void impact.apply();
+    }} />}
+    {impact.pending && <label className="schedule-change-auto"><input type="checkbox" checked={autoApply} onChange={(event) => setAutoApply(event.target.checked)} />
+      此后日程指令直接应用</label>}
+    {impact.error && <small role="status">{impact.error}</small>}
+  </div>;
+}
 
+/**
+ * 快速收集. A plain line is captured at once (and queued offline without a connection); a batch, or a line that reads like an
+ * instruction about planned work, goes to the router, which splits it into captures and changes to preview. Linked tasks, milestones and
+ * materials travel with the capture as its context; files are attached to it.
+ */
 export function OfflineCaptureForm({ ownerId, workspaceId }: { ownerId: string; workspaceId: string }) {
   const [status, setStatus] = useState("");
-  const { fileInputRef, fileNames, dragOver, setDragOver, onDrop, onPaste, onInputChange, reset } =
-    useAttachmentDrop(ACCEPTED_ATTACHMENT_TYPES.split(","));
+  const [busy, setBusy] = useState(false);
+  const [changes, setChanges] = useState<Array<{ change: Change; summary: string }>>([]);
 
-  const submit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const data = new FormData(form);
-    const files = (data.getAll("attachments") as File[]).filter((file) => file.size > 0);
+  const capture = async ({ text, files, mentions }: ComposerInput): Promise<boolean> => {
+    const [title, ...rest] = text.split("\n");
+    const linked = mentions.length ? `关联：${mentions.map((item) => `${{ material: "资料", task: "任务", milestone: "里程碑" }[item.kind]}「${item.title}」`).join("；")}` : "";
     const command = createCommand(ownerId, workspaceId, await nextSequence(workspaceId), "task.capture", {
-      title: String(data.get("title") ?? ""),
-      context: String(data.get("context") ?? "")
-    });
+      title: (title || files[0]?.name || "附件").slice(0, 240), context: [rest.join("\n").trim(), linked].filter(Boolean).join("\n").slice(0, 500) });
     const save = async (message: string) => {
       try {
         await enqueue(workspaceId, command);
-        form.reset();
-        reset();
-        // The offline queue only carries the JSON command — a queued capture has no server-side row
-        // yet for an attachment to belong to, so files picked while offline are dropped rather than
-        // silently claimed as saved.
-        setStatus(files.length ? `${message}（离线时选择的 ${files.length} 个附件未保存，请联网后重新上传）` : message);
-      } catch {
-        // Saying "saved" when the store refused would lose the capture without telling anyone.
-        setStatus("无法离线保存（浏览器存储不可用），请先复制内容再重试。");
-      }
+        // A queued capture has no server row yet for a file to belong to, so files picked offline are not claimed as saved.
+        setStatus(files.length ? `${message}；离线时选择的 ${files.length} 个附件未保存，联网后需重新上传` : message);
+        return true;
+      } catch { setStatus("浏览器存储不可用，未能离线保存；请复制内容后重试。"); return false; }
     };
-    if (!navigator.onLine) { await save("已离线保存，联网后自动同步"); return; }
+    if (!navigator.onLine) return save("已离线保存，联网后自动同步");
     try {
-      const response = await fetch("/api/commands", {
-        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(command)
-      });
-      if (!response.ok) { setStatus("任务输入无效，请检查后重试"); return; }
+      const response = await fetch("/api/commands", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(command) });
+      if (!response.ok) { setStatus("输入无效，请检查后重试"); return false; }
       if (files.length) {
-        // The command's `clientCommandId` is generated client-side and used verbatim as the capture's
-        // real id (see `POST /api/commands`), so it is already known here — no need to round-trip a
-        // created-id back from the response before attaching files to it.
+        // The command's client id is the capture's real id, so files attach to it directly.
         const upload = new FormData();
         for (const file of files) upload.append("file", file);
-        const uploaded = await fetch(`/api/captures/${encodeURIComponent(command.clientCommandId)}/attachments`, {
-          method: "POST", body: upload
-        }).catch(() => null);
-        if (!uploaded?.ok) { setStatus("任务已保存，但附件上传失败，可在作业台重试"); return; }
+        const uploaded = await fetch(`/api/captures/${encodeURIComponent(command.clientCommandId)}/attachments`, { method: "POST", body: upload }).catch(() => null);
+        if (!uploaded?.ok) { setStatus("已收集，附件上传失败，可在任务页重试"); return true; }
       }
-      // No reload: nothing on this page lists captures, so a reload would only wipe the sign that it landed. The worker analyses it
-      // in about a minute and the proposal shows up in 待确认 (the badge there refreshes by itself).
-      form.reset();
-      reset();
-      setStatus("已收到。系统正在分类、估时，约 1 分钟后出现在「待确认」。");
-    } catch {
-      await save("网络不可用，已保存并等待同步");
-    }
+      setStatus("已收集 · 约 1 分钟后完成分类与估时，结果进入「待确认」");
+      return true;
+    } catch { return save("网络不可用，已保存并等待同步"); }
   };
-  return <form onSubmit={submit} onPaste={onPaste} className="capture-form">
-    <label><span className="sr-only">任务或想法</span><input name="title" required maxLength={240} placeholder="写下一项任务、想法，或粘贴一个链接…" /></label>
-    <label><span className="sr-only">补充上下文</span><input name="context" maxLength={500} placeholder="可选：把需要的材料直接粘进来（只写材料在哪，AI 是拿不到的）" /></label>
-    <label className={`attachment-drop${dragOver ? " dragging" : ""}`}
-      onDragOver={(event) => { event.preventDefault(); setDragOver(true); }}
-      onDragLeave={() => setDragOver(false)} onDrop={onDrop}>
-      <span className="sr-only">附件</span>
-      <input ref={fileInputRef} name="attachments" type="file" multiple accept={ACCEPTED_ATTACHMENT_TYPES}
-        onChange={onInputChange} />
-      <small>{fileNames.length ? `已选 ${fileNames.length} 个：${fileNames.join("、")}` : "也可以拖文件进来，或粘贴截图"}</small>
-    </label>
-    <button className="secondary-button" type="submit">收集</button>
-    {status && <small className="muted" role="status">{status}</small>}
-  </form>;
+
+  const submit = async (input: ComposerInput): Promise<boolean> => {
+    setChanges([]);
+    if (!input.batch && !looksLikeScheduleCommand(input.text)) return capture(input);
+    if (!navigator.onLine) return capture(input);
+    setBusy(true); setStatus(input.batch ? "正在拆分…" : "正在识别指令…");
+    try {
+      const response = await fetch("/api/input/route", { method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text: input.text, batch: input.batch, mentions: input.mentions }) });
+      const result = await response.json().catch(() => null) as { ok?: boolean; captured?: Array<{ id: string }>; changes?: Array<{ change: Change; summary: string }>; applied?: string[] } | null;
+      if (!response.ok || !result?.ok) { setStatus("未能处理，已按普通收集保存"); return capture(input); }
+      if (input.files.length && result.captured?.[0]) {
+        const upload = new FormData();
+        for (const file of input.files) upload.append("file", file);
+        await fetch(`/api/captures/${encodeURIComponent(result.captured[0].id)}/attachments`, { method: "POST", body: upload }).catch(() => null);
+      }
+      setChanges(result.changes ?? []);
+      setStatus([result.captured?.length ? `已收集 ${result.captured.length} 项` : "", result.applied?.length ? `已应用：${result.applied.join("；")}` : "",
+        result.changes?.length ? `${result.changes.length} 项日程调整待确认` : ""].filter(Boolean).join(" · ") || "无可处理内容");
+      return true;
+    } finally { setBusy(false); }
+  };
+
+  return <Composer mode="capture" busy={busy} placeholder="新任务、想法、链接或日程调整（例如：把作业 2 推到周五）" onSubmit={submit}>
+    {status && <small className="muted composer-status" role="status">{status}</small>}
+    {changes.map((item, index) => <ScheduleChange key={index} change={item.change} summary={item.summary} />)}
+  </Composer>;
 }

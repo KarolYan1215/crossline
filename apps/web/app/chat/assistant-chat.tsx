@@ -1,9 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent } from "react";
-import { useAttachmentDrop } from "../attachment-drop";
-
-const ACCEPTED_ATTACHMENT_TYPES = "image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain";
+import { useEffect, useRef, useState } from "react";
+import { Composer, type ComposerInput } from "./composer";
 
 type Message = { from: "user" | "assistant"; text: string };
 type AttachmentMeta = { id: string; fileName: string; mediaType: string };
@@ -30,7 +28,6 @@ export function AssistantChat({ workOrderId = null, storageKey, emptyText }: { w
   const [uploading, setUploading] = useState(false);
   const [sending, setSending] = useState(false);
   const [status, setStatus] = useState("");
-  const { fileInputRef, fileNames, dragOver, setDragOver, onDrop, onPaste, onInputChange, reset } = useAttachmentDrop(ACCEPTED_ATTACHMENT_TYPES.split(","));
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -43,21 +40,21 @@ export function AssistantChat({ workOrderId = null, storageKey, emptyText }: { w
   useEffect(() => { try { sessionStorage.setItem(storageKey, JSON.stringify({ threadId, messages: messages.slice(-40) })); } catch { /* best effort */ } }, [storageKey, threadId, messages]);
   useEffect(() => { endRef.current?.scrollIntoView({ block: "nearest" }); }, [messages, status]);
 
-  const uploadAttachments = async (files: File[]) => {
-    if (!files.length) return;
+  const uploadAttachments = async (files: File[]): Promise<AttachmentMeta[]> => {
+    if (!files.length) return [];
     setUploading(true); setStatus("");
     try {
       const form = new FormData();
       for (const file of files) form.append("file", file);
       const response = await fetch(`/api/assistant/${encodeURIComponent(threadId)}/attachments`, { method: "POST", body: form });
       const body = await response.json().catch(() => null) as { saved?: AttachmentMeta[]; message?: string } | null;
-      if (!response.ok || !body?.saved) { setStatus(body?.message ?? "附件上传失败，请重试"); return; }
-      setPendingAttachments((current) => [...current, ...body.saved!]);
-    } catch { setStatus("附件上传失败，请检查网络"); }
-    finally { setUploading(false); reset(); }
+      if (!response.ok || !body?.saved) { setStatus(body?.message ?? "附件上传失败，请重试"); return []; }
+      return body.saved;
+    } catch { setStatus("附件上传失败，请检查网络"); return []; }
+    finally { setUploading(false); }
   };
 
-  const sendMessage = async (text: string) => {
+  const sendMessage = async (text: string, attachments: AttachmentMeta[] = pendingAttachments) => {
     const message = text.trim();
     if (!message || sending) return;
     setSending(true); setStatus("");
@@ -66,7 +63,7 @@ export function AssistantChat({ workOrderId = null, storageKey, emptyText }: { w
     setQuickReplies([]);
     try {
       const response = await fetch("/api/assistant/turn", { method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ threadId, message, history, attachments: pendingAttachments, workOrderId }) });
+        body: JSON.stringify({ threadId, message, history, attachments, workOrderId }) });
       const body = await response.json().catch(() => null) as TurnResponse | null;
       setPendingAttachments([]);
       if (!body || "blocker" in body) { setMessages((current) => [...current, { from: "assistant", text: `暂时无法回复：${body?.blocker.message ?? "小助手不可用"}` }]); return; }
@@ -97,12 +94,14 @@ export function AssistantChat({ workOrderId = null, storageKey, emptyText }: { w
       body: JSON.stringify({ ...input, source: "assistant" }) }).catch(() => null);
     setTemplate({ ...template, state: response?.ok ? "saved" : "failed" });
   };
-  const submit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const input = event.currentTarget.elements.namedItem("message") as HTMLInputElement | null;
-    if (!input?.value.trim()) return;
-    void sendMessage(input.value);
-    event.currentTarget.reset();
+  // Files go up first; a linked task, milestone or material travels as a reference line the assistant reads with the message.
+  const submit = async ({ text, files, mentions }: ComposerInput): Promise<boolean> => {
+    const uploaded = files.length ? await uploadAttachments(files) : [];
+    const references = mentions.length ? `\n引用：${mentions.map((item) => `${{ material: "资料", task: "任务", milestone: "里程碑" }[item.kind]}「${item.title}」(${item.id})`).join("；")}` : "";
+    const message = `${text || (uploaded.length ? "见附件" : "")}${references}`;
+    if (!message.trim()) return false;
+    void sendMessage(message, [...pendingAttachments, ...uploaded]);
+    return true;
   };
 
   return <div className="assistant-chat">
@@ -124,20 +123,8 @@ export function AssistantChat({ workOrderId = null, storageKey, emptyText }: { w
     {quickReplies.length > 0 && <div className="assistant-quick-replies">
       {quickReplies.map((reply) => <button key={reply} type="button" className="secondary-button" onClick={() => void sendMessage(reply)}>{reply}</button>)}
     </div>}
-    <form onSubmit={submit} onPaste={onPaste} className="assistant-form">
-      <label className={`attachment-drop${dragOver ? " dragging" : ""}`}
-        onDragOver={(event) => { event.preventDefault(); setDragOver(true); }} onDragLeave={() => setDragOver(false)}
-        onDrop={(event) => { onDrop(event); void uploadAttachments([...event.dataTransfer.files]); }}>
-        <span className="sr-only">附件</span>
-        <input ref={fileInputRef} type="file" multiple accept={ACCEPTED_ATTACHMENT_TYPES}
-          onChange={(event) => { onInputChange(); void uploadAttachments([...(event.currentTarget.files ?? [])]); }} />
-        <small>{uploading ? "上传中…" : pendingAttachments.length ? `已附加 ${pendingAttachments.length} 个文件` : fileNames.length ? fileNames.join("、") : "拖入或粘贴文件"}</small>
-      </label>
-      <div className="assistant-input-row">
-        <label><span className="sr-only">消息</span><input name="message" maxLength={2000} placeholder="输入消息" disabled={sending} /></label>
-        <button className="primary-button" type="submit" disabled={sending}>{sending ? "发送中" : "发送"}</button>
-      </div>
+    <Composer mode="chat" busy={sending || uploading} name="message" placeholder="输入消息，@ 引用任务、里程碑或资料" onSubmit={submit}>
       {status && <small className="muted" role="status">{status}</small>}
-    </form>
+    </Composer>
   </div>;
 }

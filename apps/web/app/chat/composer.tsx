@@ -1,0 +1,104 @@
+"use client";
+
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
+import { useAttachmentDrop } from "../attachment-drop";
+import { MenuButton } from "../ui/controls";
+
+export type Mention = { kind: "material" | "task" | "milestone"; id: string; title: string };
+export type ComposerInput = { text: string; files: File[]; mentions: Mention[]; batch: boolean };
+const KIND_LABEL: Record<Mention["kind"], string> = { material: "资料", task: "任务", milestone: "里程碑" };
+const ACCEPTED = "image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain";
+
+/**
+ * The one input box, for 快速收集 and 小助手 alike, laid out like the chat products people already know: a ＋ menu on the left (files,
+ * existing materials, batch input, a task or milestone to link), the text in the middle, send on the right. Pasting and dropping files
+ * work anywhere on it; typing `@` searches materials, tasks and milestones and turns the choice into a chip. Enter sends, Shift+Enter
+ * starts a new line.
+ */
+export function Composer({ mode, placeholder, onSubmit, busy = false, children, name = "title" }: {
+  mode: "capture" | "chat"; placeholder: string; busy?: boolean; name?: string;
+  /** Returns true when the input was taken (the box then clears). */
+  onSubmit: (input: ComposerInput) => Promise<boolean>;
+  /** Status and results shown under the box. */
+  children?: ReactNode;
+}) {
+  const [text, setText] = useState("");
+  const [mentions, setMentions] = useState<Mention[]>([]);
+  const [batch, setBatch] = useState(false);
+  const [picker, setPicker] = useState<{ query: string; kind?: Mention["kind"] | "linkable"; fromAt: boolean } | null>(null);
+  const [results, setResults] = useState<Mention[]>([]);
+  const textRef = useRef<HTMLTextAreaElement>(null);
+  const { fileInputRef, fileNames, dragOver, setDragOver, onDrop, onPaste, onInputChange, reset } = useAttachmentDrop(ACCEPTED.split(","));
+
+  useEffect(() => {
+    if (!picker) return;
+    const controller = new AbortController();
+    const kind = picker.kind && picker.kind !== "linkable" ? `&kind=${picker.kind}` : "";
+    const timer = setTimeout(() => {
+      fetch(`/api/mentions?q=${encodeURIComponent(picker.query)}${kind}`, { signal: controller.signal })
+        .then((response) => response.ok ? response.json() : { results: [] })
+        .then((body: { results?: Mention[] }) => setResults((body.results ?? []).filter((item) => picker.kind !== "linkable" || item.kind !== "material")))
+        .catch(() => {});
+    }, 120);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [picker]);
+
+  const choose = (item: Mention) => {
+    setMentions((list) => list.some((m) => m.kind === item.kind && m.id === item.id) ? list : [...list, item]);
+    if (picker?.fromAt) setText((value) => value.replace(/@[^\s@]*$/, ""));
+    setPicker(null);
+    textRef.current?.focus();
+  };
+  const onChange = (value: string) => {
+    setText(value);
+    const at = /(?:^|\s)@([^\s@]*)$/.exec(value);
+    setPicker(at ? { query: at[1]!, fromAt: true } : picker?.fromAt ? null : picker);
+  };
+  const submit = async (event?: FormEvent) => {
+    event?.preventDefault();
+    if (busy || (!text.trim() && !fileNames.length)) return;
+    const files = [...(fileInputRef.current?.files ?? [])];
+    if (await onSubmit({ text: text.trim(), files, mentions, batch })) { setText(""); setMentions([]); setBatch(false); reset(); }
+  };
+  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (picker && event.key === "Escape") { setPicker(null); return; }
+    if (picker && event.key === "Enter" && results[0]) { event.preventDefault(); choose(results[0]); return; }
+    if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void submit(); }
+  };
+  const menu = [
+    { label: "上传文件", hint: "图片、PDF、文本", onSelect: () => fileInputRef.current?.click() },
+    { label: "从已有资料中选", hint: "已上传的文件", onSelect: () => setPicker({ query: "", kind: "material", fromAt: false }) },
+    ...(mode === "capture" ? [{ label: batch ? "取消批量输入" : "批量输入", hint: "多项内容由 AI 拆分", onSelect: () => setBatch((value) => !value) }] : []),
+    { label: "关联任务或里程碑", hint: "也可输入 @", onSelect: () => setPicker({ query: "", kind: "linkable", fromAt: false }) }
+  ];
+
+  return <form className={`composer${dragOver ? " dragging" : ""}`} data-mode={mode} onSubmit={(event) => void submit(event)} onPaste={onPaste}
+    onDragOver={(event) => { event.preventDefault(); setDragOver(true); }} onDragLeave={() => setDragOver(false)} onDrop={onDrop}>
+    <div className="composer-box">
+      <MenuButton label="添加" icon="＋" items={menu} />
+      <div className="composer-main">
+        {(mentions.length > 0 || fileNames.length > 0 || batch) && <div className="composer-chips">
+          {batch && <span className="composer-chip" data-kind="batch">批量 · AI 拆分 <button type="button" aria-label="取消批量" onClick={() => setBatch(false)}>×</button></span>}
+          {mentions.map((item) => <span key={`${item.kind}:${item.id}`} className="composer-chip" data-kind={item.kind}>{KIND_LABEL[item.kind]} · {item.title}
+            <button type="button" aria-label={`移除 ${item.title}`} onClick={() => setMentions((list) => list.filter((m) => m !== item))}>×</button></span>)}
+          {fileNames.map((file) => <span key={file} className="composer-chip" data-kind="file">{file}</span>)}
+          {fileNames.length > 0 && <button type="button" className="composer-clear" onClick={reset}>清除文件</button>}
+        </div>}
+        <textarea ref={textRef} name={name} rows={batch ? 4 : 1} value={text} maxLength={4000} placeholder={placeholder} aria-label={placeholder}
+          onChange={(event) => onChange(event.target.value)} onKeyDown={onKeyDown}
+          onInput={(event) => { const el = event.currentTarget; el.style.height = "auto"; el.style.height = `${Math.min(el.scrollHeight, 220)}px`; }} />
+      </div>
+      <button type="submit" className="composer-send" disabled={busy || (!text.trim() && !fileNames.length)} aria-label="发送">{busy ? "…" : "↑"}</button>
+      <input ref={fileInputRef} type="file" multiple accept={ACCEPTED} hidden onChange={onInputChange} name="attachments" />
+    </div>
+    {picker && <div className="composer-picker" role="listbox" aria-label="引用">
+      {!picker.fromAt && <input autoFocus value={picker.query} placeholder="搜索" aria-label="搜索引用" onChange={(event) => setPicker({ ...picker, query: event.target.value })}
+        onKeyDown={(event) => { if (event.key === "Escape") setPicker(null); if (event.key === "Enter") { event.preventDefault(); if (results[0]) choose(results[0]); } }} />}
+      {results.length ? results.map((item) => <button key={`${item.kind}:${item.id}`} type="button" role="option" aria-selected="false" onClick={() => choose(item)}>
+        <span className="composer-kind" data-kind={item.kind}>{KIND_LABEL[item.kind]}</span>{item.title}</button>)
+        : <small className="muted">无匹配</small>}
+      <button type="button" className="composer-picker-close" onClick={() => setPicker(null)}>关闭</button>
+    </div>}
+    {children}
+  </form>;
+}

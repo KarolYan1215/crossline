@@ -1,0 +1,29 @@
+/* The input box shared by 快速收集 and 小助手 (apps/web/app/chat/composer.tsx). */
+.composer{position:relative;display:grid;gap:6px}
+.composer-box{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:8px;align-items:end;padding:6px;border:1px solid var(--ink);background:var(--paper)}
+.composer.dragging .composer-box{outline:2px dashed var(--ink);outline-offset:2px}
+.composer-box .ui-menu-trigger{width:34px;height:34px;border-radius:50%;border-color:var(--mist)}
+.composer-main{display:grid;gap:4px;min-width:0}
+.composer-main textarea{width:100%;min-height:34px;max-height:220px;padding:7px 4px;border:0;resize:none;line-height:1.4;background:transparent}
+.composer-main textarea:focus-visible{outline:none}
+.composer-send{width:34px;height:34px;border-radius:50%;background:var(--ink);color:var(--paper);font-size:16px;font-weight:700}
+.composer-send:disabled{background:var(--mist);color:var(--paper);cursor:default}
+.composer-chips{display:flex;flex-wrap:wrap;gap:4px}
+.composer-chip{display:inline-flex;align-items:center;gap:4px;padding:1px 6px;border:1px solid var(--mist);font-size:12px;max-width:100%}
+.composer-chip[data-kind="task"]{border-color:var(--ink)}
+.composer-chip[data-kind="milestone"]{border-color:var(--now-ink)}
+.composer-chip[data-kind="batch"]{background:var(--chalk);font-weight:700}
+.composer-chip button{font-size:13px;line-height:1;color:var(--graphite)}
+.composer-clear{font-size:12px;color:var(--graphite);text-decoration:underline}
+.composer-picker{position:absolute;left:44px;top:100%;z-index:20;display:grid;gap:2px;width:min(420px,calc(100% - 44px));max-height:300px;overflow:auto;
+  margin-top:4px;padding:6px;border:1px solid var(--ink);background:var(--paper)}
+.composer-picker input{margin-bottom:4px}
+.composer-picker button[role="option"]{display:flex;gap:8px;align-items:baseline;padding:6px 8px;text-align:left;font-size:13px}
+.composer-picker button[role="option"]:hover,.composer-picker button[role="option"]:focus-visible{background:var(--chalk)}
+.composer-kind{flex:none;padding:0 5px;border:1px solid var(--mist);font-size:12px;color:var(--graphite)}
+.composer-picker-close{justify-self:end;font-size:12px;color:var(--graphite);text-decoration:underline}
+.composer-status{font-size:12px}
+.schedule-change{display:grid;gap:4px;padding:8px;border-left:3px solid var(--ink);background:var(--chalk)}
+.schedule-change p{margin:0;font-size:13px}
+.schedule-change-auto{display:flex;gap:6px;align-items:center;font-size:12px;color:var(--graphite)}
+.assistant-panel .composer-box{border-color:var(--mist)}

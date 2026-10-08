@@ -4,6 +4,7 @@ import "./globals.css";
 import "./ui.css";
 import "./ui/primitives.css";
 import "./task/task.css";
+import "./chat/composer.css";
 import "./mobile.css";
 
 export const metadata: Metadata = {

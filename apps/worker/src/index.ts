@@ -19,6 +19,7 @@ import { createFlywheelExpander } from "./flywheel";
 import { createManualbookBuilder, pendingMaterialWorkOrders } from "./manualbook";
 import { createProgressJudge, createStepPlanner, createWarningReviewer, reportsAwaitingJudgement, tasksAwaitingStepPlan, warningsAwaitingReview } from "./step-planner";
 import { materializeDatePairs } from "./date-pairs";
+import { createInputRouter } from "./input-router";
 import { createMilestoneGate, pendingMilestoneGates } from "./milestone-gate-runner";
 import { createMilestoneConversation, createMilestoneProposer } from "./milestone-proposer";
 import { createGoalBackplanner, milestonesAwaitingBackplan } from "./goal-backplanner";
@@ -586,12 +587,13 @@ if (!capabilitySecret) {
         "crossline:crossline-flywheel-scout", "crossline:crossline-manualbook-designer", "crossline:crossline-material-researcher", "crossline:crossline-material-writer", "crossline:crossline-milestone-architect",
         "crossline:crossline-goal-backplanner", "crossline:crossline-background-facts", "crossline:crossline-assistant",
         "crossline:crossline-onboarding", "crossline:crossline-due-diligence", "crossline:crossline-plan-explainer", "crossline:crossline-weekly-insight",
-        "crossline:crossline-agent", "crossline:crossline-step-planner", "crossline:crossline-validation-reviewer", "crossline:crossline-progress-judge"
+        "crossline:crossline-agent", "crossline:crossline-step-planner", "crossline:crossline-validation-reviewer", "crossline:crossline-progress-judge", "crossline:crossline-input-router"
       ]
     },
     autoAnalyzeCaptures: (workspaceId) => autoAnalyzePass(workspaceId),
     autoBackplanGoals: (workspaceId) => autoBackplanPass(workspaceId),
     runTaskPass: (workspaceId) => stepPlanPass(workspaceId),
+    routeInput: (workspaceId, input, signal) => { enterUsageWorkspace(workspaceId); return createInputRouter(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client)(input, signal); },
     analyzeCapture: (client, id, signal, workspaceId) => getCaptureAnalyzer(workspaceId)(client, id, signal),
     // `workspaceId` is the real caller's, from its own verified capability token — not a hardcoded
     // constant, which is what left milestone proposal and goal backplanning invisible to any real

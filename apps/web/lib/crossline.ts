@@ -485,7 +485,7 @@ export function plannerIdOfBlock(blockId: string): string {
  * date. Read by `plannerTaskOf` and `plannerItemsFor` inside `withPreview`, so the schedule and the forecast are recomputed with the
  * change and compared with the real ones (`lib/impact.ts`). Async-local, so a preview never leaks into another request.
  */
-export type PreviewOverrides = { estimates?: Record<string, number>; dueDates?: Record<string, string> };
+export type PreviewOverrides = { estimates?: Record<string, number>; dueDates?: Record<string, string>; notBefore?: Record<string, string> };
 const previewScope = new AsyncLocalStorage<PreviewOverrides>();
 export const withPreview = <T>(overrides: PreviewOverrides, run: () => T): T => previewScope.run(overrides, run);
 const scaledEstimate = <E extends { p25Minutes: number; p50Minutes: number; p85Minutes: number }>(estimate: E, p50: number | undefined): E =>
@@ -1205,8 +1205,8 @@ const plannerTaskOf = (ctx: AccessContext, order: ActionableOrder) => {
   const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
   const landing = byproductLanding(ctx, order);
   const dependsOn = landing ? landing.dependsOn : (order.payload as { dependsOn?: string[] }).dependsOn;
-  const release = releaseDayOf(ctx, order);
   const preview = previewScope.getStore();
+  const release = preview?.notBefore?.[order.id] ?? releaseDayOf(ctx, order);
   const dueDate = preview?.dueDates?.[order.id] ?? landing?.dueDate ?? (order.payload as { dueDate?: string }).dueDate;
   return {
     id: order.id, title: order.intent, identityId: order.identityId, milestoneId: order.milestoneId,

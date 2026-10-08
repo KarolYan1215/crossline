@@ -13,7 +13,9 @@ export type Change =
   | { kind: "estimate"; workOrderId: string; stepId?: string; p50Minutes: number }
   /** A block on the day view dragged longer or shorter: the step's (or task's) usual minutes move by the same amount. */
   | { kind: "estimate_delta"; workOrderId: string; stepId?: string; deltaMinutes: number }
-  | { kind: "due"; workOrderId: string; date: string };
+  | { kind: "due"; workOrderId: string; date: string }
+  /** Not before a day: the work moves later (「推到下周一再做」). */
+  | { kind: "defer"; workOrderId: string; date: string };
 
 /** A relative change made absolute against what is stored now. */
 function resolveChange(ctx: AccessContext, change: Change): Exclude<Change, { kind: "estimate_delta" }> {
@@ -39,7 +41,7 @@ const daysBetween = (a: string | null, b: string | null) => a && b ? Math.round(
 export function overridesFor(change: Exclude<Change, { kind: "estimate_delta" }>): PreviewOverrides {
   return change.kind === "estimate"
     ? { estimates: { [change.stepId ? `${change.workOrderId}#${change.stepId}` : change.workOrderId]: change.p50Minutes } }
-    : { dueDates: { [change.workOrderId]: change.date } };
+    : change.kind === "due" ? { dueDates: { [change.workOrderId]: change.date } } : { notBefore: { [change.workOrderId]: change.date } };
 }
 
 async function snapshot(ctx: AccessContext, workOrderId: string) {
@@ -92,6 +94,14 @@ export function applyChange(ctx: AccessContext, requested: Change): { ok: true }
   try { change = resolveChange(ctx, requested); } catch { return { ok: false, code: "WORK_ORDER_NOT_FOUND" }; }
   const order = store.listWorkOrders(ctx.workspaceId).find((item) => item.id === change.workOrderId);
   if (!order) return { ok: false, code: "WORK_ORDER_NOT_FOUND" };
+  if (change.kind === "defer") {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(change.date)) return { ok: false, code: "DUE_DATE_INVALID" };
+    const payload = (order.payload ?? {}) as Record<string, unknown>;
+    store.saveWorkOrder({ ...order, payload: { ...payload, notBefore: change.date } });
+    store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `work_order.deferred:${order.id}:${change.date}:${Date.now()}`,
+      type: "work_order.deferred", entityId: order.id, payload: { before: (payload.notBefore as string | undefined) ?? null, after: change.date } });
+    return { ok: true };
+  }
   if (change.kind === "due") {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(change.date)) return { ok: false, code: "DUE_DATE_INVALID" };
     const payload = (order.payload ?? {}) as Record<string, unknown>;

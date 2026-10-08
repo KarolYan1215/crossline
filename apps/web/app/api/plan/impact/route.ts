@@ -10,6 +10,7 @@ const parse = (value: unknown): Change | undefined => {
   if (body.kind === "estimate_delta" && typeof body.deltaMinutes === "number")
     return { kind: "estimate_delta", workOrderId: body.workOrderId, deltaMinutes: body.deltaMinutes, ...(typeof body.stepId === "string" ? { stepId: body.stepId } : {}) };
   if (body.kind === "due" && typeof body.date === "string") return { kind: "due", workOrderId: body.workOrderId, date: body.date };
+  if (body.kind === "defer" && typeof body.date === "string") return { kind: "defer", workOrderId: body.workOrderId, date: body.date };
   return undefined;
 };
 

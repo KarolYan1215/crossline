@@ -100,8 +100,8 @@ test("Today keeps capture semantic-only and health outside identity navigation",
   await page.goto("/");
   await expect(page.getByRole("navigation", { name: "主导航" })).toBeVisible();
   await expect(page.getByText("精力自评", { exact: true })).toBeVisible();
-  await expect(page.locator(".capture-form select")).toHaveCount(0);
-  await expect(page.locator('.capture-form input[name="title"]')).toBeVisible();
+  await expect(page.locator(".composer select")).toHaveCount(0);
+  await expect(page.locator('.composer textarea[name="title"]')).toBeVisible();
   await expect(page.getByRole("button", { name: "提交完成证据" })).toHaveCount(0);
   // The next-step card carries its own primary action; the whole card opens the task dialog.
   await expect(page.locator('.task-card[data-variant="hero"] .task-actions')).toBeVisible();
@@ -309,9 +309,9 @@ test("the app opens with the network down, and the offline capture queues", asyn
   await expect(page.locator(".analog-clock")).toBeVisible();
 
   // And a capture taken while down is kept rather than lost.
-  await page.getByPlaceholder("写下一项任务、想法，或粘贴一个链接…").fill("断网时记下的一条");
-  await page.getByRole("button", { name: "收集" }).click();
-  await expect(page.getByRole("status")).toContainText("已离线保存，联网后自动同步");
+  await page.locator('.composer textarea[name="title"]').fill("断网时记下的一条");
+  await page.getByRole("button", { name: "发送" }).first().click();
+  await expect(page.locator(".composer-status")).toContainText("已离线保存，联网后自动同步");
 
   const queued = await page.evaluate(async () => {
     // Workspace-scoped, not a fixed name (`crossline-offline-${workspaceId}`) — switching accounts on
@@ -428,7 +428,7 @@ test("Today asks what only the person knows, with options and follow-ups, and mo
   } finally { store.close(); }
   await page.goto("/");
   const list = page.getByRole("region", { name: "需要你回答" });
-  await expect(list.getByRole("heading", { name: /^需要你一句话/ })).toBeVisible();
+  await expect(list.getByRole("heading", { name: /^待决事项/ })).toBeVisible();
   const group = list.locator(".ask-group");
   await expect(group.getByRole("heading", { level: 3 })).toContainText("还缺 2 样东西");
   await expect(group.locator("h4")).toHaveText(["组会录音", "导师批注"]);

@@ -21,7 +21,9 @@ const child = spawn(process.execPath, [path.join(webRoot, "node_modules", "next"
   env: { ...process.env, CROSSLINE_DATA_DIR: REVIEW_DATA_DIR, CROSSLINE_NEXT_DIR: ".next-prod", CROSSLINE_SEED_EXAMPLES: "1",
     BETTER_AUTH_SECRET: "review-secret-not-for-production-use", CROSSLINE_WEB_BASE_URL: "http://127.0.0.1:3320",
     CROSSLINE_AUTH_TEST_MAILBOX_DIR: path.join(REVIEW_DATA_DIR, "mailbox"), CROSSLINE_DEPLOYMENT_MODE: "local", CROSSLINE_TAILSCALE_HOSTNAME: "",
-    CROSSLINE_AUTO_PUBLISH: "off" }
+    CROSSLINE_AUTO_PUBLISH: "off",
+    // Never the resident worker: its supervisor serves the real ledger. Nothing listens here, so model features report the worker as down.
+    CROSSLINE_CODEX_SUPERVISOR_URL: "http://127.0.0.1:3399", CROSSLINE_SUPERVISOR_CAPABILITY_SECRET: "review-capability-secret" }
 });
 child.on("exit", (code) => process.exit(code ?? 0));
 for (const signal of ["SIGINT", "SIGTERM"] as const) process.on(signal, () => child.kill(signal));
