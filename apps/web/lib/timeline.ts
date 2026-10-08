@@ -12,6 +12,8 @@ export type TimelineData = {
   items: TimelineItem[]; deadlines: TimelineDeadline[];
   labels: Record<string, string>;
   quietByWeekday: Record<number, Array<[string, string]>>;
+  /** Proposals waiting for approval, for the day's quick actions (「全部批准」). */
+  proposals: Array<{ id: string; title: string }>;
 };
 
 /** The stretches of a day no availability window covers: sleep, meals, whatever the person marked unavailable. */
@@ -120,6 +122,8 @@ export async function loadTimeline(ctx: AccessContext, loaded?: Awaited<ReturnTy
   return {
     today, nowIso, timeZone: zone, items, deadlines,
     labels: Object.fromEntries(defaultIdentityPacks().filter((pack) => pack.kind === "identity").map((pack) => [pack.id, pack.label])),
-    quietByWeekday: Object.fromEntries([0, 1, 2, 3, 4, 5, 6].map((weekday) => [weekday, quietRanges(windows, weekday)]))
+    quietByWeekday: Object.fromEntries([0, 1, 2, 3, 4, 5, 6].map((weekday) => [weekday, quietRanges(windows, weekday)])),
+    proposals: store.listWorkOrders(ctx.workspaceId).filter((order) => order.state === "awaiting_plan_approval" && !(order.payload as { seeded?: boolean }).seeded)
+      .map((order) => ({ id: order.id, title: order.intent }))
   };
 }

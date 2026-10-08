@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { axisSpan, conflictingIds, itemsFromPlan, itemsOn, minuteInZone, monthGrid, packColumns, shiftDay, shiftMonth, toClock, toMinutes, weekDays, weekStart } from "./model";
+import { conflictingIds, dayRange, itemsFromPlan, itemsOn, minuteInZone, monthGrid, packColumns, shiftDay, shiftMonth, toClock, toMinutes, weekDays, weekStart } from "./model";
 
 test("days and weeks move the way a calendar does, with Monday first", () => {
   expect(shiftDay("2026-10-31", 1)).toBe("2026-11-01");
@@ -29,9 +29,9 @@ test("overlapping blocks are packed side by side and separate ones keep full wid
   expect(packColumns([{ start: "09:00", end: "10:00" }, { start: "10:00", end: "11:00" }].map((item) => item)).map((entry) => entry.columns)).toEqual([1, 1]);
 });
 
-test("a block's place on the 24 hour axis, with a floor so a short one stays clickable", () => {
-  expect(axisSpan("06:00", "12:00")).toEqual({ left: 25, width: 25 });
-  expect(axisSpan("23:30", "23:30").width).toBeCloseTo(10 / 14.4, 5);
+test("the vertical day spans 07:00–22:00 at least, widened on whole hours to whatever lies outside", () => {
+  expect(dayRange([])).toEqual({ from: 420, to: 1320 });
+  expect(dayRange([{ start: "06:30", end: "07:00" }, { start: "22:10", end: "23:05" }])).toEqual({ from: 360, to: 1440 });
   expect(toMinutes("14:25")).toBe(865);
   expect(toClock(865)).toBe("14:25");
 });

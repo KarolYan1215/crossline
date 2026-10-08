@@ -108,3 +108,21 @@ test("a capture card is passed through; a malformed one is refused so the turn i
   // An answer recorded before cards existed still reads.
   expect(validateAssistantTurnProposal(base, context).proposals).toEqual([]);
 });
+
+test("task operations are kept only for the task in view, naming its own steps, with well-formed dates and minutes", async () => {
+  const { usableTaskOps } = await import("./assistant-schema");
+  const task = { id: "t", title: "作业 2", state: "approved", dueDate: "", notBefore: "", usualMinutes: 120,
+    steps: [{ id: "v1s1", title: "读题", status: "planned", schedulable: true, minutes: 20 }] };
+  const op = (extra: Record<string, unknown>) => ({ type: "note", date: "", minutes: 0, stepId: "", text: "", who: "", energy: "", summary: "s", ...extra });
+  const kept = usableTaskOps([
+    op({ type: "due", date: "2026-10-16" }), op({ type: "due", date: "周五" }),
+    op({ type: "step_done", stepId: "v1s1" }), op({ type: "step_done", stepId: "v9s9" }),
+    op({ type: "waiting", who: "师兄", text: "数据", date: "2026-10-12" }), op({ type: "energy", energy: "low" })
+  ], task);
+  expect(kept.map((item) => item.type)).toEqual(["due", "step_done", "waiting", "energy"]);
+  // Over 8 hours, an unknown kind, and anything past six in one turn are dropped.
+  expect(usableTaskOps([op({ type: "estimate", minutes: 600 }), op({ type: "launch_rocket" })], task)).toEqual([]);
+  expect(usableTaskOps(Array.from({ length: 8 }, () => op({ text: "记一笔" })), task)).toHaveLength(6);
+  // Outside a task there are none.
+  expect(usableTaskOps([op({ type: "note", text: "x" })], null)).toEqual([]);
+});

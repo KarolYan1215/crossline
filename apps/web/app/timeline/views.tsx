@@ -1,80 +1,102 @@
 "use client";
 
-import { useRef, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import {
-  MINUTES_PER_DAY, axisSpan, conflictingIds, itemsOn, monthGrid, packColumns, toMinutes, weekDays,
+  MINUTES_PER_DAY, conflictingIds, dayRange, itemsOn, monthGrid, packColumns, toMinutes, weekDays,
   type TimelineDeadline, type TimelineItem
 } from "./model";
 
 export type LineLabels = Record<string, string>;
 const WEEKDAY = ["一", "二", "三", "四", "五", "六", "日"];
-const KIND_LABEL: Record<TimelineItem["kind"], string> = { calendar: "日历", scheduled: "排程", proposed: "预览", import: "文件", activity: "实际" };
+const KIND_LABEL: Record<TimelineItem["kind"], string> = { calendar: "日历", scheduled: "排程", proposed: "预览", optional: "预排", import: "文件", activity: "实际" };
 
 const lineOf = (identityId?: string) => identityId ?? "none";
 const timeText = (item: { start: string; end: string }) => `${item.start}–${item.end}`;
 
-/** One row per item along a 24 hour axis. The time axis is the point: where in the day each thing sits. */
-export function DayTimeline({ day, items, deadlines, nowMinute, labels, quiet, selectedId, onSelect, onResize }: {
+const DAY_HOUR_PX = 72;
+const clockOf = (minutes: number) => `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+
+/**
+ * The day, read top to bottom: an hour axis down the left, every block as wide as the day allows and as tall as it is long, so the task's
+ * title reads in full and the step sits under it. Blocks that share time sit side by side. A scheduled block's bottom edge is dragged to
+ * change its duration; `aside` is the column beside it (the quick actions), which used to restate each block's title.
+ */
+export function DayTimeline({ day, items, deadlines, nowMinute, labels, quiet, selectedId, onSelect, onResize, aside }: {
   day: string; items: TimelineItem[]; deadlines: TimelineDeadline[]; nowMinute: number | undefined; labels: LineLabels;
   /** Stretches of the day that are not available (sleep, meals), drawn pale. */
   quiet?: Array<[string, string]> | undefined; selectedId?: string | undefined; onSelect?: ((item: TimelineItem) => void) | undefined;
-  /** A scheduled block's right edge dragged: how many minutes longer (or shorter, negative) it should be. */
+  /** A scheduled block's bottom edge dragged: how many minutes longer (or shorter, negative) it should be. */
   onResize?: ((item: TimelineItem, deltaMinutes: number) => void) | undefined;
+  aside?: ReactNode;
 }) {
   const [resizing, setResizing] = useState<{ id: string; end: string } | null>(null);
-  const trackRef = useRef<{ left: number; width: number } | null>(null);
+  const gridRef = useRef<{ top: number } | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const rows = itemsOn(items, day);
   const clashes = conflictingIds(rows);
   const flags = deadlines.filter((deadline) => deadline.day === day);
-  const hours = Array.from({ length: 24 }, (_, hour) => hour);
-  return <div className="dt" role="group" aria-label={`${day} 的时间轴`}>
-    <div className="dt-scroll">
-      <div className="dt-grid">
-        {/* The hour grid and the unavailable hours sit behind every row and run the full height, so an empty or
-            nearly empty day is still a day you can read, not a thin strip. */}
-        <div className="dt-lines" aria-hidden="true">
-          {quiet?.map(([from, to], index) => { const q = axisSpan(from, to); return <u key={index} className="dt-quiet" style={{ left: `${q.left}%`, width: `${q.width}%` }} />; })}
+  const range = dayRange(rows);
+  const height = ((range.to - range.from) / 60) * DAY_HOUR_PX;
+  const y = (minutes: number) => ((minutes - range.from) / 60) * DAY_HOUR_PX;
+  const hours = Array.from({ length: (range.to - range.from) / 60 + 1 }, (_, index) => range.from / 60 + index);
+  // Opens at the first block (or the current hour today) rather than at the top of the range.
+  useEffect(() => {
+    const first = nowMinute ?? (rows[0] ? toMinutes(rows[0].start) : range.from);
+    if (scrollRef.current) scrollRef.current.scrollTop = Math.max(0, y(first) - DAY_HOUR_PX);
+  }, [day]); // eslint-disable-line react-hooks/exhaustive-deps
+  return <div className="dv" data-has-aside={aside ? true : undefined}>
+    {aside && <aside className="dv-aside" aria-label="快捷操作">{aside}</aside>}
+    <div className="dv-main" role="group" aria-label={`${day} 的时间轴`}>
+      {flags.length > 0 && <div className="dv-flags">{flags.map((flag) => <span key={flag.id} className="dv-flag" data-line={lineOf(flag.identityId)}
+        title={flag.detail ? `${flag.title} · ${flag.detail}` : flag.title}>◆ {flag.title}<small>{flag.detail ?? "截止"}</small></span>)}</div>}
+      <div className="dv-scroll" ref={scrollRef}>
+        <div className="dv-grid" style={{ height }}>
+          {quiet?.map(([from, to], index) => {
+            const top = Math.max(0, y(toMinutes(from))), bottom = Math.min(height, y(toMinutes(to) || MINUTES_PER_DAY));
+            return bottom > top ? <u key={index} className="dv-quiet" style={{ top, height: bottom - top }} aria-hidden="true" /> : null;
+          })}
+          {hours.map((hour) => <i key={hour} className="dv-hour" style={{ top: y(hour * 60) }} aria-hidden="true"><span>{String(hour % 24).padStart(2, "0")}:00</span></i>)}
+          <div className="dv-lane">
+            {packColumns(rows).map(({ item, column, columns }) => {
+              const end = resizing?.id === item.id ? resizing.end : item.end;
+              const top = y(toMinutes(item.start)), blockHeight = Math.max(y(Math.max(toMinutes(end), toMinutes(item.start) + 10)) - top, 22);
+              const resizable = Boolean(onResize && item.kind === "scheduled");
+              const minutes = toMinutes(end) - toMinutes(item.start);
+              return <button type="button" key={item.id} className="dv-block" data-line={lineOf(item.identityId)} data-kind={item.kind}
+                data-short={blockHeight < 40 || undefined} data-clash={clashes.has(item.id) || undefined} aria-pressed={selectedId === item.id}
+                style={{ top, height: blockHeight, left: `${(column / columns) * 100}%`, width: `calc(${100 / columns}% - 4px)` }}
+                title={`${item.title}${item.step ? ` · ${item.step}` : ""} ${timeText({ start: item.start, end })}${item.identityId ? ` · ${labels[item.identityId] ?? item.identityId}` : ""}`}
+                onClick={() => onSelect?.(item)}>
+                <span className="dv-block-head"><b>{item.title}</b>{item.tag && <em className="dv-tag">{item.tag}</em>}</span>
+                <small>{item.step ? `${item.step} · ` : ""}<span className="mono">{timeText({ start: item.start, end })}</span>{minutes >= 60 ? ` · ${Math.round(minutes / 6) / 10} 小时` : ` · ${minutes} 分`}</small>
+                {resizable && <i className="dv-resize" aria-hidden="true" title="拖动调整时长"
+                  onClick={(event) => event.stopPropagation()}
+                  onPointerDown={(event) => {
+                    event.stopPropagation();
+                    event.currentTarget.setPointerCapture(event.pointerId);
+                    const grid = (event.currentTarget.closest(".dv-grid") as HTMLElement).getBoundingClientRect();
+                    gridRef.current = { top: grid.top };
+                    setResizing({ id: item.id, end: item.end });
+                  }}
+                  onPointerMove={(event) => {
+                    if (resizing?.id !== item.id || !gridRef.current) return;
+                    const minute = range.from + Math.round((((event.clientY - gridRef.current.top) / DAY_HOUR_PX) * 60) / 5) * 5;
+                    const next = Math.max(toMinutes(item.start) + 15, Math.min(range.to, minute));
+                    setResizing({ id: item.id, end: clockOf(next) });
+                  }}
+                  onPointerUp={(event) => {
+                    event.stopPropagation();
+                    if (resizing?.id === item.id) { const delta = toMinutes(resizing.end) - toMinutes(item.end); if (delta) onResize?.(item, delta); }
+                    setResizing(null);
+                  }} />}
+                {resizing?.id === item.id && <b className="dv-resize-live mono">{minutes} 分钟</b>}
+              </button>;
+            })}
+          </div>
+          {rows.length === 0 && <p className="dv-empty">当日无安排。灰色为不可用时段，其余时段可排任务。</p>}
+          {nowMinute !== undefined && nowMinute >= range.from && nowMinute <= range.to &&
+            <span className="dv-now" style={{ top: y(nowMinute) }}><i>现在</i></span>}
         </div>
-        <div className="dt-axis" aria-hidden="true">
-          <span className="dt-label-col" />
-          <span className="dt-track">{hours.map((hour) => <i key={hour} style={{ left: `${(hour / 24) * 100}%` }}>{hour % 2 === 0 ? String(hour).padStart(2, "0") : ""}</i>)}</span>
-        </div>
-        {flags.map((flag) => <div className="dt-row dt-flag" key={flag.id} data-line={lineOf(flag.identityId)}>
-          <span className="dt-label-col" title={flag.detail ? `${flag.title} · ${flag.detail}` : flag.title}><b>◆ {flag.title}</b><small>{flag.detail ?? "截止"}</small></span><span className="dt-track" />
-        </div>)}
-        {rows.map((item) => {
-          const end = resizing?.id === item.id ? resizing.end : item.end;
-          const span = axisSpan(item.start, end);
-          const resizable = Boolean(onResize && item.kind === "scheduled");
-          return <button type="button" className="dt-row" key={item.id} data-line={lineOf(item.identityId)} data-kind={item.kind}
-            data-clash={clashes.has(item.id) || undefined} aria-pressed={selectedId === item.id} onClick={() => onSelect?.(item)}>
-            <span className="dt-label-col"><b>{item.title}</b><small>{timeText({ start: item.start, end })}{item.identityId ? ` · ${labels[item.identityId] ?? item.identityId}` : ""}</small></span>
-            <span className="dt-track"><em className="dt-block" style={{ left: `${span.left}%`, width: `${span.width}%` }}>{timeText({ start: item.start, end })}
-              {resizable && <i className="dt-resize" aria-hidden="true" title="拖动调整时长"
-                onClick={(event) => event.stopPropagation()}
-                onPointerDown={(event) => {
-                  event.stopPropagation();
-                  event.currentTarget.setPointerCapture(event.pointerId);
-                  const track = (event.currentTarget.closest(".dt-track") as HTMLElement).getBoundingClientRect();
-                  trackRef.current = { left: track.left, width: track.width };
-                  setResizing({ id: item.id, end: item.end });
-                }}
-                onPointerMove={(event) => {
-                  if (resizing?.id !== item.id || !trackRef.current) return;
-                  const minute = Math.round((((event.clientX - trackRef.current.left) / trackRef.current.width) * MINUTES_PER_DAY) / 5) * 5;
-                  const next = Math.max(toMinutes(item.start) + 15, Math.min(MINUTES_PER_DAY - 5, minute));
-                  setResizing({ id: item.id, end: `${String(Math.floor(next / 60)).padStart(2, "0")}:${String(next % 60).padStart(2, "0")}` });
-                }}
-                onPointerUp={(event) => {
-                  event.stopPropagation();
-                  if (resizing?.id === item.id) { const delta = toMinutes(resizing.end) - toMinutes(item.end); if (delta) onResize?.(item, delta); }
-                  setResizing(null);
-                }} />}
-              {resizing?.id === item.id && <b className="dt-resize-live mono">{toMinutes(resizing.end) - toMinutes(item.start)} 分钟</b>}</em></span>
-          </button>;
-        })}
-        {rows.length === 0 && flags.length === 0 && <p className="dt-empty">当日无安排。灰色为不可用时段，其余时段可排任务。</p>}
-        {nowMinute !== undefined && <span className="dt-now" style={{ "--p": nowMinute / MINUTES_PER_DAY } as CSSProperties}><i>现在</i></span>}
       </div>
     </div>
   </div>;

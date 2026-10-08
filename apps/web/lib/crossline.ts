@@ -20,6 +20,11 @@ export type PersistedScheduleBlock = {
   id: string;
   lane: "human" | "ai";
   title: string;
+  /** A scheduled block's task and step, apart (the calendar draws the task as the title and the step under it). */
+  task?: string;
+  step?: string;
+  /** Its standing in one or two words (暂定, 预排, 本周未排完…), drawn as a tag instead of a prefix in the title. */
+  tag?: string;
   /** Absent on seeded examples: they illustrate a typical day rather than claiming a date. */
   day?: string;
   start: string;
@@ -553,6 +558,45 @@ export function scheduledBlockId(plannerTaskId: string, index: number): string {
   const [orderId, stepId] = plannerTaskId.split("#");
   return `scheduled:${orderId}${stepId ? `:${stepId}` : ""}${index > 1 ? `:${index}` : ""}`;
 }
+/** Blocks the person started from a pencilled-in (off-hours) block: fixed at that time, as real as anything scheduled. */
+export const SCHEDULE_PINS = "schedule.pins";
+type Pin = { taskId: string; day: string; start: string; end: string };
+export function readPins(ctx: AccessContext, today: string): Pin[] {
+  try { return (JSON.parse(getStore().getSetting(ctx.workspaceId, SCHEDULE_PINS) ?? "[]") as Pin[]).filter((pin) => pin.day >= today); }
+  catch { return []; }
+}
+/** Starting a pencilled-in block makes it formal: its time is kept for that task (or step) from now on. */
+export function pinBlock(ctx: AccessContext, blockId: string, at: { day: string; start: string; end: string }): { ok: true } | { ok: false; code: string } {
+  if (!blockId.startsWith("optional:") || !/^\d{4}-\d{2}-\d{2}$/.test(at.day) || !/^\d{2}:\d{2}$/.test(at.start) || !/^\d{2}:\d{2}$/.test(at.end) || at.end <= at.start)
+    return { ok: false, code: "PIN_INVALID" };
+  const taskId = plannerIdOfBlock(blockId);
+  const pins = readPins(ctx, planToday(ctx)).filter((pin) => pin.taskId !== taskId);
+  getStore().setSetting(ctx.workspaceId, SCHEDULE_PINS, JSON.stringify([...pins, { taskId, ...at }]));
+  return { ok: true };
+}
+
+/**
+ * The stretches between 07:00 and 23:00 outside the person's availability: where a task that did not fit may be pencilled in. Marked
+ * high energy so the energy gate does not keep work out of them — whether to work then at all is the person's call, made by starting it.
+ */
+function offHoursWindows(windows: AvailabilityWindow[]): AvailabilityWindow[] {
+  const clock = (minutes: number) => `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+  const minutes = (time: string) => { const [h, m] = time.split(":").map(Number); return (h ?? 0) * 60 + (m ?? 0); };
+  return [0, 1, 2, 3, 4, 5, 6].flatMap((weekday) => {
+    const covered = windows.filter((window) => window.days.includes(weekday))
+      .map((window) => [minutes(window.start), Math.min(minutes(window.end) || 1440, 1440)] as const).sort((a, b) => a[0] - b[0]);
+    const out: AvailabilityWindow[] = [];
+    let cursor = 7 * 60;
+    for (const [from, to] of covered) {
+      if (from > cursor) out.push({ days: [weekday], start: clock(cursor), end: clock(Math.min(from, 23 * 60)), energy: "high" });
+      cursor = Math.max(cursor, to);
+      if (cursor >= 23 * 60) break;
+    }
+    if (cursor < 23 * 60) out.push({ days: [weekday], start: clock(cursor), end: "23:00", energy: "high" });
+    return out.filter((window) => window.start < window.end);
+  });
+}
+
 export function plannerIdOfBlock(blockId: string): string {
   const parts = blockId.split(":");
   return parts[2] && STEP_ID.test(parts[2]) ? stepTaskId(parts[1]!, parts[2]) : parts[1]!;
@@ -586,7 +630,7 @@ function plannerItemsFor(ctx: AccessContext, orders: ActionableOrder[]) {
   return orders.flatMap((order) => {
     const base = plannerTaskOf(ctx, order);
     const steps = openSteps(order.id);
-    if (!steps.length) return [{ task: base, orderId: order.id, title: order.intent }];
+    if (!steps.length) return [{ task: base, orderId: order.id, title: order.intent, step: undefined as string | undefined }];
     const open = new Set(steps.map((step) => step.id));
     const external = (base.dependsOn ?? []).flatMap((id) => plannerIdsOf(id));
     return steps.map((step) => {
@@ -597,7 +641,7 @@ function plannerItemsFor(ctx: AccessContext, orders: ActionableOrder[]) {
       const deadline = [base.deadline, stepDue].filter(Boolean).sort()[0];
       const { notBefore: _n, deadline: _d, dependsOn: _deps, ...rest } = base;
       const id = stepTaskId(order.id, step.id);
-      return { orderId: order.id, title: `${order.intent} · ${step.title}`, task: { ...rest, id,
+      return { orderId: order.id, title: `${order.intent} · ${step.title}`, step: step.title as string | undefined, task: { ...rest, id,
         title: `${order.intent} · ${step.title}`, estimate: scaledEstimate({ ...base.estimate, ...step.estimate }, overrides[id]),
         ...(notBefore ? { notBefore } : {}), ...(deadline ? { deadline } : {}),
         ...(internal.length || external.length ? { dependsOn: internal.length ? internal : external } : {}) } };
@@ -653,6 +697,8 @@ async function scheduledBlocks(ctx: AccessContext, today: string, committed: Per
     }) : undefined;
 
   const expanded = plannerItemsFor(ctx, eligibleOrders);
+  const pins = readPins(ctx, today).filter((pin) => expanded.some((item) => item.task.id === pin.taskId));
+  const pinned = pins.flatMap((pin) => { try { return [{ taskId: pin.taskId, start: iso(pin.day, pin.start), end: iso(pin.day, pin.end) }]; } catch { return []; } });
   const result = await planSchedule({
     now,
     horizonDays: days.length,
@@ -661,14 +707,17 @@ async function scheduledBlocks(ctx: AccessContext, today: string, committed: Per
     tasks: expanded.map((item) => item.task),
     availability: instants,
     ...(lookaheadAvailability ? { lookaheadAvailability } : {}),
-    frozenBlocks: committed.filter((block) => block.day && block.id.startsWith("scheduled:"))
+    frozenBlocks: [...committed.filter((block) => block.day && block.id.startsWith("scheduled:"))
       .map((block) => ({ taskId: plannerIdOfBlock(block.id), start: iso(block.day!, block.start),
-        end: iso(block.day!, block.end) }))
+        end: iso(block.day!, block.end) })), ...pinned]
   });
   const placed = result.plan.blocks.filter((block) => !block.frozen);
   const orderStates = new Map(orders.map((order) => [order.id, order.state]));
-  const titles = new Map(expanded.map((item) => [item.task.id,
-    orderStates.get(item.orderId) === "approved" || orderStates.get(item.orderId) === "preparing" ? `暂定·准备中 · ${item.title}` : item.title]));
+  const itemById = new Map(expanded.map((item) => [item.task.id, item]));
+  const intents = new Map(orders.map((order) => [order.id, order.intent]));
+  const tentative = (taskId: string) => ["approved", "preparing"].includes(orderStates.get(taskId.split("#")[0]!) ?? "");
+  const named = (taskId: string) => { const item = itemById.get(taskId); return { title: item?.title ?? taskId, task: intents.get(item?.orderId ?? "") ?? item?.title ?? taskId,
+    ...(item?.step ? { step: item.step } : {}) }; };
   const energyNeeds = new Map(orders.map((order) => [order.id, humanCoreOf(order)?.energy]));
   const occurrences = new Map<string, number>();
   const blocks = placed.map((block) => {
@@ -677,10 +726,11 @@ async function scheduledBlocks(ctx: AccessContext, today: string, committed: Per
     const blockDay = formatInTimeZone(new Date(block.start), zone, "yyyy-MM-dd");
     const needsRestCheck = currentEnergy === "low" && blockDay === today &&
       energyNeeds.get(block.taskId.split("#")[0]!) === "high" && Date.parse(block.start) > now.getTime();
+    const tag = block.progressOnly ? "本周未排完" : needsRestCheck ? "休息后复评" : tentative(block.taskId) ? "暂定" : undefined;
     return {
     id: scheduledBlockId(block.taskId, index),
     lane: "human" as const,
-    title: `${block.progressOnly ? "本周进度·未排完 · " : ""}${needsRestCheck ? "休息后待复评 · " : ""}${titles.get(block.taskId) ?? block.taskId}`,
+    ...named(block.taskId), ...(tag ? { tag } : {}),
     day: blockDay,
     start: formatInTimeZone(new Date(block.start), zone, "HH:mm"),
     end: formatInTimeZone(new Date(block.end), zone, "HH:mm"),
@@ -708,7 +758,7 @@ async function scheduledBlocks(ctx: AccessContext, today: string, committed: Per
     previewSeen.set(block.taskId, index);
     return {
       id: `proposed:${block.taskId}${index > 1 ? `:${index}` : ""}`, lane: "human" as const,
-      title: `预览·待批准 · ${proposalTitles.get(block.taskId)}`,
+      title: proposalTitles.get(block.taskId) ?? block.taskId, task: proposalTitles.get(block.taskId) ?? block.taskId, tag: "待批准",
       day: formatInTimeZone(new Date(block.start), zone, "yyyy-MM-dd"),
       start: formatInTimeZone(new Date(block.start), zone, "HH:mm"),
       end: formatInTimeZone(new Date(block.end), zone, "HH:mm"),
@@ -716,6 +766,31 @@ async function scheduledBlocks(ctx: AccessContext, today: string, committed: Per
     };
   });
   blocks.push(...previewBlocks);
+  // Started from a pencilled-in block: fixed where the person started it.
+  for (const pin of pins) blocks.push({ id: scheduledBlockId(pin.taskId, 1), lane: "human" as const, ...named(pin.taskId), tag: "已开始",
+    day: pin.day, start: pin.start, end: pin.end, source: "本人开始", readOnly: true });
+  // Third pass, pencilled in: what found no room in the person's hours, placed between 07:00 and 23:00 outside them. Dashed, never
+  // published, never counted as planned; starting one (`pinBlock`) makes it formal.
+  const unplaced = new Set(result.blockers.map((blocker) => blocker.taskId));
+  const leftovers = expanded.filter((item) => unplaced.has(item.task.id) && !pins.some((pin) => pin.taskId === item.task.id));
+  if (leftovers.length) {
+    const offBusy = [...busy, ...blocks.filter((block) => block.day).map((block) => ({ day: block.day!, start: block.start, end: block.end }))];
+    const offInstants = availableSlots(offHoursWindows(readAvailability(ctx)), days, offBusy).flatMap((slot) => {
+      try { return [{ start: iso(slot.day, slot.start), end: iso(slot.day, slot.end), day: slot.day, energy: slot.energy }]; } catch { return []; }
+    });
+    const optional = offInstants.length ? await planSchedule({ now, horizonDays: days.length, mode: preferences.mode, params: effectiveParams(ctx),
+      tasks: leftovers.map((item) => item.task), availability: offInstants,
+      frozenBlocks: [...result.plan.blocks.map((block) => ({ taskId: block.taskId, start: block.start, end: block.end })), ...pinned]
+    }).catch(() => undefined) : undefined;
+    const seen = new Map<string, number>();
+    for (const block of (optional?.plan.blocks ?? []).filter((item) => !item.frozen && itemById.has(item.taskId))) {
+      const index = (seen.get(block.taskId) ?? 0) + 1;
+      seen.set(block.taskId, index);
+      blocks.push({ id: scheduledBlockId(block.taskId, index).replace(/^scheduled:/, "optional:"), lane: "human" as const, ...named(block.taskId), tag: "预排",
+        day: formatInTimeZone(new Date(block.start), zone, "yyyy-MM-dd"), start: formatInTimeZone(new Date(block.start), zone, "HH:mm"),
+        end: formatInTimeZone(new Date(block.end), zone, "HH:mm"), source: "预排·非工作时段", readOnly: true });
+    }
+  }
   return { blocks, schedule: { status: clockBlockers.length || dependencyBlockers.length
     ? blocks.length ? "partial" : "infeasible" : result.status,
     blockers: [...result.blockers, ...clockBlockers, ...dependencyBlockers],

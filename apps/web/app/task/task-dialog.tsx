@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { STEP_ROLES } from "@crossline/core";
 import type { TaskDetail } from "../../lib/task-detail";
 import { Sheet } from "../ui/overlay";
@@ -10,7 +10,7 @@ import { riskLabel, riskTone, stateLabelFor } from "../../lib/labels";
 import { AssistantChat } from "../chat/assistant-chat";
 import { ManualbookView } from "../manualbook-view";
 import { ExecutionActions } from "../execution-actions";
-import { WaitingForm } from "../waiting-form";
+import { PostponePanel } from "./postpone";
 import { StepDuration, TaskQuickEdit } from "./quick-edit";
 
 const post = (path: string, body: unknown) => fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
@@ -106,31 +106,64 @@ function StandardsPanel({ detail }: { detail: TaskDetail }) {
   </div>;
 }
 
-/** Every file that belongs to the task, each one openable: the person's own uploads, prepared materials, and the assistant's outputs. */
+type TutorialMaterial = { index: number; title: string; publisher: string; kept: string; docId?: string; notes: number };
+
+/**
+ * Every material of the task, each opening its own page — the material on one side, the analysis of it for this task on the other —
+ * the person's own files first, then what the tutorial found, the prepared files and the assistant's outputs.
+ */
 function MaterialsPanel({ detail }: { detail: TaskDetail }) {
-  const empty = !detail.sources.length && !detail.preparedMaterials.length && !detail.agentOutputs.length;
+  const [found, setFound] = useState<TutorialMaterial[]>([]);
+  useEffect(() => {
+    void fetch(`/api/work-orders/${encodeURIComponent(detail.id)}/manualbook`, { cache: "no-store" }).then((response) => response.json())
+      .then((body: { materials?: TutorialMaterial[] }) => setFound(body.materials ?? [])).catch(() => setFound([]));
+  }, [detail.id]);
+  const preview = (query: string) => `/workbench/${encodeURIComponent(detail.id)}/material?${query}`;
+  const web = found.filter((item) => !item.docId);
+  const noted = new Map(found.filter((item) => item.docId).map((item) => [item.docId!, item.notes]));
+  const empty = !detail.sources.length && !web.length && !detail.preparedMaterials.length && !detail.agentOutputs.length;
   return <div className="materials-panel">
-    {empty && <p className="muted">暂无材料。上传的课程文件和 Agent 产出会出现在这里。</p>}
+    {empty && <p className="muted">暂无材料。本人上传的课程文件、教程找到的资料和 Agent 产出会出现在这里。</p>}
     {detail.sources.length > 0 && <section><h4>本人上传</h4><ul>{detail.sources.map((doc) => <li key={doc.id}>
-      <a href={`/api/source-documents/${encodeURIComponent(doc.id)}/file`} target="_blank" rel="noreferrer">{doc.fileName}</a>
-      <a className="muted" href={`/api/source-documents/${encodeURIComponent(doc.id)}/file?view=text`} target="_blank" rel="noreferrer">文字版</a>
+      <a href={preview(`doc=${encodeURIComponent(doc.id)}`)}>{doc.fileName}</a>
+      <small className="muted">{noted.get(doc.id) ? `${noted.get(doc.id)} 条解析` : "原文"}</small>
     </li>)}</ul></section>}
-    {detail.preparedMaterials.length > 0 && <section><h4>已备材料</h4><ul>{detail.preparedMaterials.map((item) => <li key={item.id}>
+    {web.length > 0 && <section><h4>教程资料</h4><ul>{web.map((item) => <li key={item.index}>
+      <a href={preview(`m=${item.index}`)}>{item.title}</a>
+      <small className="muted">{item.publisher || "网络"} · {item.kept === "full_text" ? "已存全文" : "链接与摘要"} · {item.notes} 条解析</small>
+    </li>)}</ul></section>}
+    {detail.preparedMaterials.length > 0 && <section><h4>已备文件</h4><ul>{detail.preparedMaterials.filter((item) => !/\/(flow|manifest|materials)\.json$|\/nodes\//.test(item.uri)).map((item) => <li key={item.id}>
       <a href={`/api/work-orders/${encodeURIComponent(detail.id)}/materials?uri=${encodeURIComponent(item.uri)}`} target="_blank" rel="noreferrer">{item.fileName}</a></li>)}</ul></section>}
     {detail.agentOutputs.length > 0 && <section><h4>Agent 产出</h4><ul>{detail.agentOutputs.flatMap((task) => task.files.map((file) => <li key={`${task.taskId}:${file.path}`}>
       <a href={`/api/agent/tasks/${encodeURIComponent(task.taskId)}/file?path=${encodeURIComponent(file.path)}`} target="_blank" rel="noreferrer">{file.name}</a>
       <small className="muted">{task.title}</small></li>))}</ul></section>}
-    {detail.background && detail.background.length > 0 && <section><h4>背景资料</h4><ul>{detail.background.map((fact) => <li key={fact.key}>
+    {detail.background && detail.background.length > 0 && <section><h4>相关背景</h4><ul>{detail.background.map((fact) => <li key={fact.key}>
       <span>{fact.value}</span><small className="gen">{fact.why}</small></li>)}</ul></section>}
   </div>;
 }
 
-type Tab = "steps" | "standards" | "materials" | "chat" | "tutorial" | "record";
+/** The task's record: time spent, the person's own notes and postponements, a box to record anything in words, and the timer. */
+function RecordPanel({ detail }: { detail: TaskDetail }) {
+  return <div className="record-panel">
+    <p className="record-figures"><span className="ui-stat"><b>{formatMinutes(detail.workedMinutes)}</b><span>已投入</span></span>
+      <span className="ui-stat"><b>{detail.executions.length}</b><span>次计时</span></span>
+      <span className="ui-stat"><b>{detail.executions.reduce((sum, item) => sum + item.interruptions.length, 0)}</b><span>次中断</span></span></p>
+    {!["accepted", "archived"].includes(detail.state) && <AssistantChat workOrderId={detail.id} mode="record" inputFirst storageKey={`crossline-task-record-${detail.id}`}
+      emptyText="" placeholder="记录：做了什么、用了多久、卡在哪、在等谁、精力如何" />}
+    {detail.notes.length > 0 && <ol className="record-notes">{detail.notes.map((note, index) => <li key={index} data-kind={note.kind}>
+      <small className="mono">{note.at.slice(5, 16).replace("T", " ")}</small><span>{note.text}</span></li>)}</ol>}
+    <ExecutionActions workOrderId={detail.id} intent={detail.intent} state={detail.state} paused={detail.paused} ownerId={detail.ownerId}
+      workspaceId={detail.workspaceId} evidenceChecklist={detail.evidenceChecklist} estimateP50={detail.estimate.p50Minutes}
+      {...(detail.suggestedMinutes ? { suggestedMinutes: detail.suggestedMinutes } : {})} />
+  </div>;
+}
+
+type Tab = "steps" | "standards" | "materials" | "tutorial" | "record";
 
 /**
  * Everything about one task in one place, opened from any card: the figures at the top (deadline, duration, progress, cross-line
- * support), then tabs for the steps, the standards, the materials, a conversation scoped to the task, the tutorial when one was
- * prepared, and the record (sessions, completion and evidence).
+ * support), the task's own input box (anything about it, in words: questions, changes, progress), then tabs for the steps, the
+ * tutorial, the materials, the standards and the record (notes, sessions, completion and evidence).
  */
 export function TaskDialog({ detail, open, onOpenChange, initialTab = "steps" }: { detail: TaskDetail; open: boolean; onOpenChange: (open: boolean) => void; initialTab?: Tab }) {
   return <Sheet title={detail.intent} open={open} onOpenChange={onOpenChange}
@@ -142,8 +175,9 @@ export function TaskDialog({ detail, open, onOpenChange, initialTab = "steps" }:
 /** The dialog's content, also the whole of the task's own page (`/workbench/[id]`). */
 export function TaskPanels({ detail, initialTab = "steps" }: { detail: TaskDetail; initialTab?: Tab }) {
   const [tab, setTab] = useState<Tab>(initialTab);
-  const tabs: Array<[Tab, string]> = [["steps", "步骤"], ["standards", "标准"], ["materials", "材料"], ["chat", "对话"],
-    ...((detail.materialContract.length || detail.preparedMaterials.length) ? [["tutorial", "教程"] as [Tab, string]] : []), ["record", "记录"]];
+  const tabs: Array<[Tab, string]> = [["steps", "步骤"], ["tutorial", "教程"], ["materials", "材料"], ["standards", "标准"], ["record", "记录"]];
+  const [postponing, setPostponing] = useState(false);
+  const live = !["accepted", "archived", "evidence_review"].includes(detail.state);
   // With steps, the figure at the top is what is left (the open steps added up), edited step by step below; without, the task's own.
   const open = detail.stepPlan?.steps.filter((step) => step.status === "planned" && step.schedulable) ?? [];
   const remaining = open.length
@@ -162,6 +196,13 @@ export function TaskPanels({ detail, initialTab = "steps" }: { detail: TaskDetai
       {detail.milestone && <p className="task-dialog-milestone">→ <a href={`/milestones/${encodeURIComponent(detail.milestone.id)}`}>{detail.milestone.title}</a></p>}
       <TaskQuickEdit workOrderId={detail.id} dueBy={detail.window.dueBy} samples={detail.estimate.observationCount} line={detail.identityId}
         editable={!["accepted", "archived"].includes(detail.state)} {...remaining} />
+      {/* One way in for everything about this task: ask about it, change it, record what happened. Changes come back as a card to apply. */}
+      <div className="task-entry">
+        <AssistantChat workOrderId={detail.id} inputFirst storageKey={`crossline-task-chat-${detail.id}`} emptyText=""
+          placeholder="对该任务的任何指令或问题：改截止、加步骤、记进度、推迟、讲解某一步…" />
+        {live && !postponing && <button type="button" className="secondary-button task-postpone" onClick={() => setPostponing(true)}>推迟</button>}
+        {postponing && <PostponePanel workOrderId={detail.id} onClose={() => setPostponing(false)} />}
+      </div>
       <div className="task-dialog-tabs" role="tablist">
         {tabs.map(([id, label]) => <button key={id} type="button" role="tab" aria-selected={tab === id} onClick={() => setTab(id)}>{label}</button>)}
       </div>
@@ -169,18 +210,8 @@ export function TaskPanels({ detail, initialTab = "steps" }: { detail: TaskDetai
         {tab === "steps" && <StepsPanel detail={detail} />}
         {tab === "standards" && <StandardsPanel detail={detail} />}
         {tab === "materials" && <MaterialsPanel detail={detail} />}
-        {tab === "chat" && <AssistantChat workOrderId={detail.id} storageKey={`crossline-task-chat-${detail.id}`}
-          emptyText="围绕这项任务提问：拆解、资料、卡点、时间安排。" />}
-        {tab === "tutorial" && <ManualbookView workOrderId={detail.id} building={detail.state === "preparing"} />}
-        {tab === "record" && <div className="record-panel">
-          <p className="record-figures"><span className="ui-stat"><b>{formatMinutes(detail.workedMinutes)}</b><span>已投入</span></span>
-            <span className="ui-stat"><b>{detail.executions.length}</b><span>次计时</span></span>
-            <span className="ui-stat"><b>{detail.executions.reduce((sum, item) => sum + item.interruptions.length, 0)}</b><span>次中断</span></span></p>
-          <ExecutionActions workOrderId={detail.id} intent={detail.intent} state={detail.state} paused={detail.paused} ownerId={detail.ownerId}
-            workspaceId={detail.workspaceId} evidenceChecklist={detail.evidenceChecklist} estimateP50={detail.estimate.p50Minutes}
-            {...(detail.suggestedMinutes ? { suggestedMinutes: detail.suggestedMinutes } : {})} />
-          {!["accepted", "archived"].includes(detail.state) && <WaitingForm workOrderId={detail.id} />}
-        </div>}
+        {tab === "tutorial" && <ManualbookView workOrderId={detail.id} building={detail.state === "preparing"} canBuild={live} />}
+        {tab === "record" && <RecordPanel detail={detail} />}
       </div>
     </div>
   </>;

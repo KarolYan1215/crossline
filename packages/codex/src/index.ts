@@ -378,12 +378,14 @@ export async function startCodexSupervisor(options: {
   assistantTurn?: (client: CodexRpcBoundary, threadId: string, message: string,
     history: Array<{ from: "user" | "assistant"; text: string }>,
     attachments: Array<{ id: string; fileName: string; mediaType: string }>, workOrderId: string | null,
-    signal: AbortSignal, workspaceId: string, snapshot: string) => Promise<unknown>;
+    signal: AbortSignal, workspaceId: string, snapshot: string, mode: "chat" | "record") => Promise<unknown>;
   backplanGoal?: (client: CodexRpcBoundary, milestoneId: string, signal: AbortSignal, workspaceId: string) => Promise<unknown>;
   // `workspaceId` is the real caller's, taken from its own verified capability token — never the
   // worker's own idea of "the" workspace, which is what let every one of these silently operate on a
   // single hardcoded legacy workspace regardless of who actually asked.
   prepareMaterials?: (workOrderId: string, workspaceId: string) => Promise<unknown>;
+  /** Builds (or rebuilds) a committed task's tutorial without moving its state: the step-by-step guide and the analysis of its materials. */
+  buildTutorial?: (workOrderId: string, workspaceId: string) => Promise<unknown>;
   judgeMilestone?: (workOrderId: string, workspaceId: string) => Promise<unknown>;
   explainPlan?: (today: string, workspaceId: string, ranking?: unknown) => Promise<unknown>;
   runWeeklyInsight?: (workspaceId: string) => Promise<unknown>;
@@ -618,6 +620,20 @@ export async function startCodexSupervisor(options: {
         // buy nothing and time out. The UI reads the result from the ledger like everything else.
         preparing.add(id);
         runDetached(() => options.prepareMaterials!(id, callerWorkspaceId), () => preparing.delete(id));
+        sendJson(response, 202, { started: true });
+        return;
+      }
+      const tutorialRoute = /^\/v1\/work-orders\/([a-zA-Z0-9_-]{1,128})\/tutorial$/.exec(pathname);
+      if (request.method === "POST" && tutorialRoute && options.buildTutorial) {
+        if (request.headers.origin || !request.headers["content-type"]?.startsWith("application/json")) {
+          sendJson(response, 403, { blocker: { code: "MATERIALS_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
+          return;
+        }
+        if (runtimeBlocker) { sendJson(response, 503, { blocker: runtimeBlocker }); return; }
+        const id = tutorialRoute[1]!;
+        if (preparing.has(id)) { sendJson(response, 409, { blocker: { code: "MATERIALS_ALREADY_PREPARING", message: "该任务的教程已在生成" } }); return; }
+        preparing.add(id);
+        runDetached(() => options.buildTutorial!(id, callerWorkspaceId), () => preparing.delete(id));
         sendJson(response, 202, { started: true });
         return;
       }
@@ -893,7 +909,8 @@ export async function startCodexSupervisor(options: {
         const workOrderId = typeof body?.workOrderId === "string" ? body.workOrderId : null;
         const snapshot = typeof body?.snapshot === "string" ? body.snapshot.slice(0, 12_000) : "";
         const controller = new AbortController();
-        sendJson(response, 200, await options.assistantTurn(sidecar.client, threadId, message, history, attachments, workOrderId, controller.signal, callerWorkspaceId, snapshot));
+        const mode = body?.mode === "record" ? "record" as const : "chat" as const;
+        sendJson(response, 200, await options.assistantTurn(sidecar.client, threadId, message, history, attachments, workOrderId, controller.signal, callerWorkspaceId, snapshot, mode));
         return;
       }
       if (request.method === "POST" && pathname === "/v1/goals/backplan" && options.backplanGoal) {

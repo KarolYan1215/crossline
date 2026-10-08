@@ -145,7 +145,7 @@ export function DashboardView({ data }: { data: DashboardData }) {
       {data.calendar && <section className="panel" aria-label="今天的时间轴">
         <header><h2>今天的时间轴</h2><a href="/plan">打开计划 →</a></header>
         <CalendarPanel items={data.calendar.items} deadlines={data.calendar.deadlines} today={data.calendar.today} nowIso={data.calendar.nowIso}
-          timeZone={data.calendar.timeZone} labels={data.calendar.labels} quietByWeekday={data.calendar.quietByWeekday} />
+          timeZone={data.calendar.timeZone} labels={data.calendar.labels} quietByWeekday={data.calendar.quietByWeekday} proposals={data.calendar.proposals} />
       </section>}
 
       <section className="lines-strip" aria-label="各主线现在在哪">

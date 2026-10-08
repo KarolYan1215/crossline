@@ -36,6 +36,33 @@ export type AssistantTurnContext = {
    * compacted-away picture. Data to quote, never instructions.
    */
   snapshot: string;
+  /**
+   * The task in view, when the conversation is scoped to one: its id, steps and figures, so an operation can name a step by id.
+   * `mode` is `record` when the text came from the task's 记录 box (a note about what happened, to be turned into operations), else `chat`.
+   */
+  task?: AssistantTaskView | null;
+  mode?: "chat" | "record";
+};
+
+export type AssistantTaskView = {
+  id: string; title: string; state: string; dueDate: string; notBefore: string; usualMinutes: number;
+  steps: Array<{ id: string; title: string; status: string; schedulable: boolean; minutes: number }>;
+};
+
+/**
+ * One change to the task in view, read out of what the person said (「截止改到周五」「第 2 步做完了」「今天没精力」「在等师兄的数据，下周二」).
+ * Nothing is applied by the model: each comes back as a card, applied on 应用 and undoable like any other operation.
+ */
+export type TaskOpType = "due" | "defer" | "estimate" | "step_done" | "step_add" | "replan" | "waiting" | "energy" | "note" | "progress" | "archive" | "start" | "tutorial";
+export type TaskOp = {
+  type: TaskOpType;
+  /** due/defer/waiting: YYYY-MM-DD. */ date: string;
+  /** estimate: usual minutes. */ minutes: number;
+  /** estimate (one step), step_done: a step id from `task.steps`; otherwise "". */ stepId: string;
+  /** step_add: the new step; replan: what to change; waiting: what is awaited; note/progress: the record; archive: why. */ text: string;
+  /** waiting: who provides it. */ who: string;
+  /** energy: low | medium | high; otherwise "". */ energy: string;
+  /** One line saying the change, shown on the card. */ summary: string;
 };
 
 /** Something the person may want done, offered as a card they confirm. The assistant itself writes nothing. */
@@ -67,6 +94,8 @@ export type AssistantTurnProposal = {
   } | null;
   /** Cards the person confirms with one click (for now: a capture). Empty for a plain answer. */
   proposals: AssistantProposalCard[];
+  /** Changes to the task in view, each a card applied on 应用. Empty outside a task, and for a plain answer. */
+  taskOps?: TaskOp[];
   blockers: Array<{ code: string; message: string }>;
 };
 
@@ -106,6 +135,12 @@ export const ASSISTANT_OUTPUT_SCHEMA = object({
     kind: { type: "string", enum: ["capture"] },
     title: { type: "string", minLength: 1, maxLength: 240 },
     context: { type: "string", minLength: 0, maxLength: 500 }
+  }) },
+  taskOps: { type: "array", maxItems: 6, items: object({
+    type: { type: "string", enum: ["due", "defer", "estimate", "step_done", "step_add", "replan", "waiting", "energy", "note", "progress", "archive", "start", "tutorial"] },
+    date: { type: "string", minLength: 0, maxLength: 10 }, minutes: { type: "number" }, stepId: { type: "string", minLength: 0, maxLength: 40 },
+    text: { type: "string", minLength: 0, maxLength: 1000 }, who: { type: "string", minLength: 0, maxLength: 60 },
+    energy: { type: "string", enum: ["", "low", "medium", "high"] }, summary: { type: "string", minLength: 1, maxLength: 200 }
   }) },
   corrections: { type: "array", maxItems: 3, items: object({
     scope: { type: "string", minLength: 1, maxLength: 80 },
@@ -155,6 +190,36 @@ export function validateAssistantTurnProposal(value: unknown, context: Assistant
       text: item.text.trim().slice(0, 300), taskId: item.taskId && item.taskId === context.workOrderId ? item.taskId : "" }));
   return {
     reply: raw.reply, quickReplies: raw.quickReplies, materialDraft: raw.materialDraft ?? null,
-    templateProposal: raw.templateProposal ?? null, proposals: proposals.slice(0, 3), corrections, blockers: []
+    templateProposal: raw.templateProposal ?? null, proposals: proposals.slice(0, 3), corrections,
+    taskOps: usableTaskOps((raw as { taskOps?: unknown }).taskOps, context.task ?? null), blockers: []
   };
+}
+
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+/**
+ * Keeps the operations that can be carried out on the task in view and drops the rest (never refuses the turn: the reply still stands).
+ * Without a task in view there are none. A step must be one of the task's own; dates and minutes must be well formed.
+ */
+export function usableTaskOps(value: unknown, task: AssistantTaskView | null): TaskOp[] {
+  if (!task || !Array.isArray(value)) return [];
+  const steps = new Set(task.steps.map((step) => step.id));
+  const out: TaskOp[] = [];
+  for (const raw of value.slice(0, 6) as Array<Partial<TaskOp>>) {
+    const op = { type: raw?.type, date: String(raw?.date ?? ""), minutes: Number(raw?.minutes ?? 0), stepId: String(raw?.stepId ?? ""), text: String(raw?.text ?? "").trim().slice(0, 1000),
+      who: String(raw?.who ?? "").trim().slice(0, 60), energy: String(raw?.energy ?? ""), summary: String(raw?.summary ?? "").trim().slice(0, 200) } as TaskOp;
+    const ok = (() => {
+      switch (op.type) {
+        case "due": case "defer": return DAY.test(op.date);
+        case "estimate": return Number.isFinite(op.minutes) && op.minutes >= 5 && op.minutes <= 480 && (!op.stepId || steps.has(op.stepId));
+        case "step_done": return steps.has(op.stepId);
+        case "step_add": case "replan": case "note": case "progress": return op.text.length > 0;
+        case "waiting": return op.text.length > 0 && DAY.test(op.date);
+        case "energy": return ["low", "medium", "high"].includes(op.energy);
+        case "archive": case "start": case "tutorial": return true;
+        default: return false;
+      }
+    })();
+    if (ok && op.summary) out.push(op);
+  }
+  return out;
 }

@@ -11,7 +11,12 @@ export type TimelineItem = {
   day: string;
   /** `HH:MM`, 24 hour. */
   start: string; end: string;
-  kind: "calendar" | "scheduled" | "proposed" | "import" | "activity";
+  /** `optional`: pencilled in outside the person's hours (dashed, not planned until started). */
+  kind: "calendar" | "scheduled" | "proposed" | "optional" | "import" | "activity";
+  /** A scheduled block's task and step, drawn as title and subtitle; `tag` is its standing (暂定, 预排…). */
+  task?: string;
+  step?: string;
+  tag?: string;
   /** The line this belongs to, when it belongs to one. Calendar events from outside do not. */
   identityId?: string;
   milestone?: string;
@@ -84,12 +89,6 @@ export function packColumns<T extends { start: string; end: string }>(items: T[]
   return out.map(({ item, column, group: g }) => ({ item, column, columns: widest.get(g) ?? 1 }));
 }
 
-/** Position along a 24-hour axis, as percentages. A block is never narrower than ten minutes so it stays clickable. */
-export function axisSpan(start: string, end: string): { left: number; width: number } {
-  const from = toMinutes(start), to = Math.max(toMinutes(end), from + 10);
-  return { left: (from / MINUTES_PER_DAY) * 100, width: (Math.min(to, MINUTES_PER_DAY) - from) / MINUTES_PER_DAY * 100 };
-}
-
 /** The current minute of the day in a time zone. */
 export function minuteInZone(nowIso: string, timeZone: string): number {
   const parts = new Intl.DateTimeFormat("en-GB", { timeZone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date(nowIso));
@@ -108,21 +107,33 @@ export function conflictingIds(items: Array<{ id: string; start: string; end: st
   return out;
 }
 
-type PlanBlock = { id: string; lane: "human" | "ai"; title: string; day?: string; start: string; end: string; source: string; readOnly: boolean };
+type PlanBlock = { id: string; lane: "human" | "ai"; title: string; task?: string; step?: string; tag?: string; day?: string; start: string; end: string; source: string; readOnly: boolean };
 export type WorkOrderMeta = { identityId: string; milestone?: string };
 
 /** Turns the plan's blocks into timeline items. `scheduled:<workOrderId>[:n]` blocks pick up their line and milestone; a
  * `proposed:` block is where a proposal still waiting for approval would go, drawn as a preview. */
 export function itemsFromPlan(blocks: PlanBlock[], today: string, meta: Record<string, WorkOrderMeta>): TimelineItem[] {
   return blocks.map((block) => {
-    const proposed = block.id.startsWith("proposed:");
-    const workOrderId = block.id.startsWith("scheduled:") || proposed ? block.id.split(":")[1] : undefined;
+    const proposed = block.id.startsWith("proposed:"), optional = block.id.startsWith("optional:");
+    const workOrderId = block.id.startsWith("scheduled:") || proposed || optional ? block.id.split(":")[1] : undefined;
     const known = workOrderId ? meta[workOrderId] : undefined;
-    const kind: TimelineItem["kind"] = proposed ? "proposed" : workOrderId ? "scheduled" : block.id.startsWith("import:") ? "import" : "calendar";
+    const kind: TimelineItem["kind"] = proposed ? "proposed" : optional ? "optional" : workOrderId ? "scheduled" : block.id.startsWith("import:") ? "import" : "calendar";
     return {
-      id: block.id, title: block.title, day: block.day ?? today, start: block.start, end: block.end, kind,
+      id: block.id, title: block.task ?? block.title, day: block.day ?? today, start: block.start, end: block.end, kind,
+      ...(block.step ? { step: block.step } : {}), ...(block.tag ? { tag: block.tag } : {}),
       ...(known ? { identityId: known.identityId } : {}), ...(known?.milestone ? { milestone: known.milestone } : {}),
       ...(workOrderId ? { workOrderId } : {}), source: block.source, readOnly: block.readOnly
     };
   });
+}
+
+/**
+ * The hours a vertical day draws: from the earlier of 07:00 and the first thing, to the later of 22:00 and the last, on whole hours. A
+ * day is read top to bottom; drawing midnight to midnight wasted most of the height on sleep.
+ */
+export function dayRange(items: Array<{ start: string; end: string }>): { from: number; to: number } {
+  const starts = items.map((item) => toMinutes(item.start)), ends = items.map((item) => Math.max(toMinutes(item.end), toMinutes(item.start) + 1));
+  const from = Math.floor(Math.min(7 * 60, ...starts) / 60) * 60;
+  const to = Math.ceil(Math.max(22 * 60, ...ends) / 60) * 60;
+  return { from, to: Math.min(MINUTES_PER_DAY, to) };
 }

@@ -31,7 +31,7 @@ export type PlanVersionData = {
 
 export type CalendarData = {
   today: string; nowIso: string; timeZone: string; items: TimelineItem[]; deadlines: TimelineDeadline[];
-  labels: Record<string, string>; quietByWeekday: Record<number, Array<[string, string]>>;
+  labels: Record<string, string>; quietByWeekday: Record<number, Array<[string, string]>>; proposals?: Array<{ id: string; title: string }>;
 };
 
 const statusLabel = { draft: "草案", approved: "已批准", superseded: "已被替代", pending: "待处理", excluded: "已排除" } as const;
@@ -155,7 +155,7 @@ export function PlanView({ plan, calendar }: { plan: PlanVersionData; calendar: 
     </section>}
 
     <CalendarPanel items={calendar.items} deadlines={calendar.deadlines} today={calendar.today} nowIso={calendar.nowIso}
-      timeZone={calendar.timeZone} labels={calendar.labels} quietByWeekday={calendar.quietByWeekday} />
+      timeZone={calendar.timeZone} labels={calendar.labels} quietByWeekday={calendar.quietByWeekday} proposals={calendar.proposals} />
 
     {/* With no differences there is nothing to fold: only the version's approval is shown. The ledger of differences is a fold
         (low-frequency history) that opens by itself while something in it waits for a decision. */}

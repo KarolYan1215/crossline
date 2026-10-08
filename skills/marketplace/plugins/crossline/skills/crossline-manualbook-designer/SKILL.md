@@ -5,7 +5,7 @@ description: Design the flow of steps a single Crossline task takes, so each ste
 
 # Crossline Manualbook Designer
 
-Accept `{version: "crossline.manualbook.design.v1", today, workOrder, contract[], inputs[], localFiles[], profile[], constraints[]}`. Return exactly `{overview, nodes[], edges[], assumptions[], blockers[]}` as raw JSON, with no code fence and no prose around it.
+Accept `{version: "crossline.manualbook.design.v1", today, workOrder, contract[], inputs[], localFiles[], profile[], constraints[], plannedSteps?}`. Return exactly `{overview, nodes[], edges[], assumptions[], blockers[]}` as raw JSON, with no code fence and no prose around it.
 
 A manualbook turns one task into a short chain of steps a person can follow from left to right. Your job is the chain, not the work: say what each step is, in what order, and how someone would know it is done.
 
@@ -23,6 +23,8 @@ A manualbook turns one task into a short chain of steps a person can follow from
 Use `localFiles` and `inputs` when a step can start from something the person already has; say which. Use `profile` for what you know about the person (their tools, their level, their time) so the steps fit them. Respect `constraints`.
 
 Keep it to what the task needs: usually three to seven steps. A task that is one step is one node.
+
+When `plannedSteps` is present the task already has its steps, and the person schedules and tracks those: the manualbook follows them. Make **one node per planned step, in the same order**, with the planned step's title as the node title (a waiting step that is only about something arriving can be left out), and write `steps` as the concrete sub-actions for doing it. Its `acceptance` is the planned step's `doneCriterion`. The contract items named `step-<id>` are these steps' completion criteria.
 
 ## edges[]
 

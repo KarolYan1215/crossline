@@ -244,7 +244,7 @@ export type ModelUsageSummary = {
 
 export type StoredPreference = {
   workspaceId: string; id: string;
-  source: "correction" | "retrospective" | "estimate" | "importance" | "standard_confirmed" | "relation_rejected";
+  source: "correction" | "retrospective" | "estimate" | "importance" | "standard_confirmed" | "relation_rejected" | "postpone";
   /** A line id, `task:<id>`, `archetype:<id>` or `all`. */
   scope: string; text: string;
   /** How much it counts: a stated correction 1, a measured pattern more, a single manual edit less. */

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { minuteInZone, monthOf, shiftDay, shiftMonth, weekDays, weekdayOf, type TimelineDeadline, type TimelineItem } from "./model";
 import { DayTimeline, MonthView, WeekView, type LineLabels } from "./views";
 import { ImpactCard, useImpact } from "../task/impact";
+import { DayQuickActions, type QuickProposal } from "./quick-actions";
 
 export type CalendarView = "day" | "week" | "month";
 const VIEWS: Array<[CalendarView, string]> = [["day", "日"], ["week", "周"], ["month", "月"]];
@@ -12,10 +13,12 @@ const VIEWS: Array<[CalendarView, string]> = [["day", "日"], ["week", "周"], [
  * Day, week and month over one list of items. The three views are the same data at three scales, with one
  * selection: pick a block anywhere and its details sit under the calendar, with a way into the task it is for.
  */
-export function CalendarPanel({ items, deadlines, today, nowIso, timeZone, labels, quietByWeekday, initialView = "day" }: {
+export function CalendarPanel({ items, deadlines, today, nowIso, timeZone, labels, quietByWeekday, proposals, initialView = "day" }: {
   items: TimelineItem[]; deadlines: TimelineDeadline[]; today: string; nowIso: string; timeZone: string; labels: LineLabels;
   /** Unavailable stretches by weekday (0 is Sunday), from the person's availability. */
   quietByWeekday?: Record<number, Array<[string, string]>>; initialView?: CalendarView;
+  /** Waiting proposals, for the day view's quick actions. */
+  proposals?: QuickProposal[] | undefined;
 }) {
   const [view, setView] = useState<CalendarView>(initialView);
   const [anchor, setAnchor] = useState(today);
@@ -52,6 +55,7 @@ export function CalendarPanel({ items, deadlines, today, nowIso, timeZone, label
     </header>
     {view === "day" && <DayTimeline day={anchor} items={items} deadlines={deadlines} labels={labels} selectedId={selected?.id} onSelect={setSelected}
       nowMinute={anchor === today ? nowMinute : undefined} quiet={quietByWeekday?.[weekdayOf(anchor)]}
+      aside={<DayQuickActions day={anchor} today={today} items={items} proposals={proposals ?? []} nowMinute={anchor === today ? nowMinute : undefined} />}
       onResize={(item, deltaMinutes) => {
         // `scheduled:<task>[:<step>][:<n>]` — a step id is `v<version>s<n>`, which tells it from a block index.
         const [, workOrderId, segment] = item.id.split(":");
@@ -65,8 +69,18 @@ export function CalendarPanel({ items, deadlines, today, nowIso, timeZone, label
     {selected && <aside className="cal-detail" data-line={selected.identityId ?? "none"} aria-live="polite">
       <b>{selected.title}</b>
       <span>{selected.day} {selected.start}–{selected.end}</span>
-      <span>{selected.kind === "scheduled" ? "排程器安排" : selected.kind === "proposed" ? "预览：批准后会排在这里" : selected.kind === "import" ? "来自导入的文件" : "来自日历"} · {selected.source}</span>
+      {selected.step && <span>步骤：{selected.step}</span>}
+      <span>{selected.kind === "scheduled" ? "排程器安排" : selected.kind === "proposed" ? "预览：批准后会排在这里"
+        : selected.kind === "optional" ? "预排：可用时段内放不下，排在非工作时段；开始后转为正式排程" : selected.kind === "import" ? "来自导入的文件" : "来自日历"} · {selected.source}</span>
       {selected.identityId && <span>{labels[selected.identityId] ?? selected.identityId}{selected.milestone ? ` → ${selected.milestone}` : ""}</span>}
+      {selected.kind === "optional" && selected.workOrderId && <button type="button" className="primary-button" onClick={async () => {
+        const pin = await fetch("/api/plan/pin", { method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ blockId: selected.id, day: selected.day, start: selected.start, end: selected.end }) }).catch(() => null);
+        if (!pin?.ok) return;
+        await fetch(`/api/work-orders/${encodeURIComponent(selected.workOrderId!)}/execution`, { method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ action: "start" }) }).catch(() => null);
+        location.href = `/workbench/${encodeURIComponent(selected.workOrderId!)}`;
+      }}>开始（转为正式排程）</button>}
       {selected.workOrderId && <a href={`/workbench/${encodeURIComponent(selected.workOrderId)}`}>打开任务 →</a>}
       <button type="button" onClick={() => setSelected(undefined)}>关闭</button>
     </aside>}

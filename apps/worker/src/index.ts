@@ -16,7 +16,7 @@ import { createAgentService } from "./agent-service";
 import { createCalendarPublisher } from "./calendar-publish";
 import { budgetPolicy, CALENDAR_SYNC_FAILURE, type PlanRankingInput } from "@crossline/core";
 import { createFlywheelExpander } from "./flywheel";
-import { createManualbookBuilder, pendingMaterialWorkOrders } from "./manualbook";
+import { createManualbookBuilder, pendingMaterialWorkOrders, pendingTutorials } from "./manualbook";
 import { createProgressJudge, createStepPlanner, createWarningReviewer, reportsAwaitingJudgement, tasksAwaitingStepPlan, warningsAwaitingReview } from "./step-planner";
 import { createArchetypeCurator, curationDue } from "./archetype-curator";
 import { materializeDatePairs } from "./date-pairs";
@@ -216,6 +216,13 @@ async function tick(): Promise<void> {
     for (const workOrderId of pendingMaterialWorkOrders(analysisStore, workspace.id)) {
       const outcome = await getMaterialPreparer(workspace.id)(workOrderId).catch(() => undefined);
       if (outcome) console.info(JSON.stringify({ type: `materials.${outcome.state}`, checkedAt, workspaceId: workspace.id, ...outcome }));
+    }
+    // Tutorials for work coming up in the next seven days (decided 2026-10-08): one per workspace per tick, and only while the quota is normal.
+    const tutorial = pendingTutorials(analysisStore, workspace.id)[0];
+    const cost = tutorial ? await readCost() : undefined;
+    if (tutorial && codexSupervisor && cost?.available && budgetPolicy(Math.max(cost.short?.usedPercent ?? 0, cost.long?.usedPercent ?? 0)).mode === "normal") {
+      const outcome = await getMaterialPreparer(workspace.id)(tutorial, { mode: "tutorial" }).catch(() => undefined);
+      if (outcome) console.info(JSON.stringify({ type: `tutorial.${outcome.state}`, checkedAt, workspaceId: workspace.id, ...outcome }));
     }
   }
   // A new capture is classified, estimated and split without anyone pressing 分析: the person's job is to write it down, the
@@ -656,14 +663,15 @@ if (!capabilitySecret) {
     },
     extractBackgroundFacts: (_client, captureTitle, captureContext, signal, workspaceId) =>
       createBackgroundFactsExtractor(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client)(captureTitle, captureContext, signal),
-    assistantTurn: (_client, threadId, message, history, attachments, workOrderId, signal, workspaceId, snapshot) =>
-      createAssistantTurn(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client, materialsDir)(threadId, message, history, attachments, workOrderId, signal, snapshot),
+    assistantTurn: (_client, threadId, message, history, attachments, workOrderId, signal, workspaceId, snapshot, mode) =>
+      createAssistantTurn(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client, materialsDir)(threadId, message, history, attachments, workOrderId, signal, snapshot, mode),
     backplanGoal: (_client, milestoneId, signal, workspaceId) =>
       createGoalBackplanner(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client)(milestoneId, signal),
     // The same preparer/gate the tick loop uses, exposed so a person's retry gets an answer now rather
     // than at the next tick. `pendingMaterialWorkOrders`/`pendingMilestoneGates` still govern which
     // orders the loop itself picks up.
     prepareMaterials: (workOrderId, workspaceId) => getMaterialPreparer(workspaceId)(workOrderId),
+    buildTutorial: (workOrderId, workspaceId) => { enterUsageWorkspace(workspaceId); return getMaterialPreparer(workspaceId)(workOrderId, { mode: "tutorial" }); },
     judgeMilestone: (workOrderId, workspaceId) => getMilestoneGate(workspaceId)(workOrderId),
     dispatchAgentTask: (workspaceId, workOrderId, category, stepId) => agentService.dispatch(workspaceId, workOrderId, category, stepId),
     publishCalendar: async (workspaceId, blocks) => {

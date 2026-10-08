@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync }
 import { pathToFileURL } from "node:url";
 import path from "node:path";
 import {
-  MANUAL_DESIGN_SCHEMA, MATERIAL_SEARCH_SCHEMA, NODE_WRITEUP_SCHEMA, budgetPolicy, openAccessVerdict, profileFactId, topologicalOrder,
+  MANUAL_DESIGN_SCHEMA, MATERIAL_SEARCH_SCHEMA, NODE_WRITEUP_SCHEMA, budgetPolicy, openAccessVerdict, profileFactId, relevantDocuments, topologicalOrder,
   validateManualDesign, validateMaterialSearch, validateNodeWriteup,
   type CostSignal, type FoundSource, type ManualDesign, type ManualDesignContext, type ManualNode, type MaterialSearch,
   type MaterialSearchContext, type NodeWriteup, type WriteContext
@@ -50,6 +50,8 @@ export type ManualbookDeps = {
 
 type KeptSource = {
   id: string; url: string; title: string; publisher: string; kind: string; summary: string; kept: "full_text" | "summary_only";
+  /** A file the person uploaded (its source-document id): read from the app's own copy, never downloaded. */
+  docId?: string;
   verdict: string; fetchedAt: string; file?: string; sha256?: string; bytes?: number; text: string;
   /** The downloaded file itself, held only until it is written into the manualbook folder. */
   raw?: Uint8Array;
@@ -81,24 +83,30 @@ export function buildManualContext(store: CrosslineStore, workspaceId: string, w
   };
   const milestone = order.milestoneId ? store.getMilestone(workspaceId, order.milestoneId) : undefined;
   const anchor = order.milestoneId ? store.listMilestoneAnchors(workspaceId).find((item) => item.milestoneId === order.milestoneId) : undefined;
+  const steps = store.getStepPlan(workspaceId, order.id)?.steps.filter((step) => step.status === "planned") ?? [];
+  const explicit = [
+    ...(payload.materialContract ?? []).map((item, index) => ({ id: item.id ?? `${order.id}-material-${index}`, kind: "material" as const,
+      description: item.description ?? item.kind ?? "", required: item.required !== false })),
+    ...(payload.evidenceContract ?? []).map((item, index) => ({ id: item.id ?? `${order.id}-evidence-${index}`, kind: "evidence" as const,
+      description: item.description ?? item.requirement ?? item.kind ?? "", required: item.required !== false }))
+  ].filter((item) => item.description);
+  const projectName = store.listProjects(workspaceId, { includeArchived: true }).find((project) => project.id === order.projectId)?.name;
   return {
     version: "crossline.manualbook.design.v1", today,
     workOrder: { id: order.id, intent: order.intent, identityId: order.identityId,
       milestone: milestone ? { title: milestone.title, target: anchor?.target ?? "", deadline: anchor?.deadline ?? "" } : null },
-    contract: [
-      ...(payload.materialContract ?? []).map((item, index) => ({ id: item.id ?? `${order.id}-material-${index}`, kind: "material" as const,
-        description: item.description ?? item.kind ?? "", required: item.required !== false })),
-      ...(payload.evidenceContract ?? []).map((item, index) => ({ id: item.id ?? `${order.id}-evidence-${index}`, kind: "evidence" as const,
-        description: item.description ?? item.requirement ?? item.kind ?? "", required: item.required !== false }))
-    ].filter((item) => item.description),
+    // A task worked back from a milestone has no contract of its own; its steps' completion criteria stand in for one.
+    contract: explicit.length ? explicit : steps.map((step) => ({ id: `step-${step.id}`, kind: "evidence" as const,
+      description: (step.doneCriterion || step.title).slice(0, 300), required: true })),
     inputs: [
       ...(payload.availableInputs ?? []).map((input, index) => ({ id: input.id ?? `${order.id}-input-${index}`, text: input.text ?? "" })),
       ...captureInputs(store, workspaceId, order.id)
     ].filter((input) => input.text),
-    localFiles: store.listSourceDocuments(workspaceId).map((doc) => doc.fileName).slice(0, 30),
+    localFiles: relevantDocuments(store.listSourceDocuments(workspaceId), { projectId: order.projectId, projectName }).map((doc) => doc.fileName).slice(0, 30),
     profile: store.listProfileFacts(workspaceId).filter((fact) => fact.identityId === order.identityId && fact.status === "confirmed").slice(0, 30)
       .map((fact) => ({ id: profileFactId(fact), value: fact.value })),
-    constraints: store.listProfileFacts(workspaceId).filter((fact) => /constraint|限制|约束/.test(fact.slot) || /无法|不能|不要/.test(fact.value)).map((fact) => fact.value).slice(0, 8)
+    constraints: store.listProfileFacts(workspaceId).filter((fact) => /constraint|限制|约束/.test(fact.slot) || /无法|不能|不要/.test(fact.value)).map((fact) => fact.value).slice(0, 8),
+    ...(steps.length ? { plannedSteps: steps.map((step) => ({ id: step.id, title: step.title, role: step.role, doneCriterion: step.doneCriterion ?? "" })) } : {})
   };
 }
 
@@ -106,24 +114,36 @@ export function createManualbookBuilder(store: CrosslineStore, workspaceId: stri
   getClient: () => CodexRpcBoundary | undefined, deps: Partial<ManualbookDeps> & Pick<ManualbookDeps, "readCost">) {
   const all: ManualbookDeps = { safeGet: defaultSafeGetDeps(), now: () => new Date(), webBlocker: webResearchBlocker, ...deps };
 
-  return async function build(workOrderId: string): Promise<ManualOutcome> {
+  /**
+   * `prepare` (the default) is material preparation for an order in `preparing`, which moves it on when done. `tutorial` builds the same
+   * book for committed work in any state short of done — following its step plan, reading the person's own files — and moves nothing.
+   */
+  return async function build(workOrderId: string, options: { mode?: "prepare" | "tutorial" } = {}): Promise<ManualOutcome> {
+    const mode = options.mode ?? "prepare";
     const blocked = (code: string, message: string): ManualOutcome => ({ state: "blocked", workOrderId, code, message });
     const client = getClient();
     if (!client) return blocked("CODEX_SUPERVISOR_UNAVAILABLE", "模型服务不可用；可手动准备材料。");
     if (!/^[a-zA-Z0-9_-]{1,128}$/.test(workOrderId)) return blocked("MATERIAL_PATH_OUTSIDE_ROOT", "作业 id 不合法。");
     const order = store.getWorkOrder(workspaceId, workOrderId);
     if (!order) return blocked("WORK_ORDER_NOT_FOUND", "找不到该作业。");
-    if (order.state !== "preparing") return blocked("MATERIALS_NOT_PREPARING", "作业当前不在材料准备阶段。");
+    if (mode === "prepare" && order.state !== "preparing") return blocked("MATERIALS_NOT_PREPARING", "作业当前不在材料准备阶段。");
+    if (mode === "tutorial" && !["approved", "preparing", "ready_for_human", "active"].includes(order.state)) return blocked("TUTORIAL_NOT_AVAILABLE", "任务当前状态不需要教程。");
     const ownerId = ownerOf(store, workspaceId);
     const today = (process.env.CROSSLINE_FIXED_NOW ? new Date(process.env.CROSSLINE_FIXED_NOW) : all.now()).toISOString().slice(0, 10);
     const context = buildManualContext(store, workspaceId, workOrderId, today)!;
-    if (!context.contract.length) return blocked("MATERIALS_NOT_REQUIRED", "该作业没有材料或证据要求，不需要手册。");
+    if (!context.contract.length) return blocked("MATERIALS_NOT_REQUIRED", "该任务没有步骤、材料或证据要求，无法生成教程。");
+    // The person's own files for this task (a homework sheet, the syllabus), read from the app's copy and given to every step's writer.
+    const projectName = store.listProjects(workspaceId, { includeArchived: true }).find((project) => project.id === order.projectId)?.name;
+    const uploads: KeptSource[] = relevantDocuments(store.listSourceDocuments(workspaceId), { projectId: order.projectId, projectName })
+      .filter((doc) => doc.extractedText.trim()).slice(0, 4).map((doc, index) => ({ id: `upload-${index + 1}`, url: `local:${doc.id}`, title: doc.fileName,
+        publisher: "本人上传", kind: "upload", summary: doc.extractedText.trim().slice(0, 300), kept: "full_text" as const, verdict: "本人上传的文件",
+        fetchedAt: all.now().toISOString(), docId: doc.id, text: doc.extractedText.slice(0, TEXT_PER_SOURCE) }));
 
     // Discretionary spend: when the quota is gone the person prepares it themselves. A tight quota is handled one
     // level down, where the Skills step to a cheaper model instead of refusing.
     const cost = await all.readCost();
-    const mode = cost.available ? budgetPolicy(Math.max(cost.short?.usedPercent ?? 0, cost.long?.usedPercent ?? 0)).mode : "manual_core_only";
-    if (mode === "manual_core_only") {
+    const spend = cost.available ? budgetPolicy(Math.max(cost.short?.usedPercent ?? 0, cost.long?.usedPercent ?? 0)).mode : "manual_core_only";
+    if (spend === "manual_core_only") {
       return blocked(cost.available ? "MATERIAL_BUDGET_EXHAUSTED" : "COST_SIGNAL_UNAVAILABLE", cost.available ? "预算已用尽；材料请人工自备。" : "读不到用量信号；材料请人工自备。");
     }
 
@@ -133,8 +153,10 @@ export function createManualbookBuilder(store: CrosslineStore, workspaceId: stri
     const fail = (code: string, message: string): ManualOutcome => {
       // Keyed per retry: a retry that failed with the same code as before used to collide with the first block, so the retry
       // request stayed the last word and the order was prepared again on every tick.
-      const attempt = store.listEvents(workspaceId, { type: "materials.retry_requested", entityId: workOrderId }).length;
-      store.appendEvent({ ownerId, workspaceId, idempotencyKey: `materials:blocked:${workOrderId}:${code}:${attempt}`, type: "materials.blocked", entityId: workOrderId, payload: { code, message } });
+      // A tutorial's failure is its own event: `materials.blocked` decides whether a `preparing` order is retried on the tick.
+      const kind = mode === "tutorial" ? "tutorial" : "materials";
+      const attempt = store.listEvents(workspaceId, { type: mode === "tutorial" ? "tutorial.requested" : "materials.retry_requested", entityId: workOrderId }).length;
+      store.appendEvent({ ownerId, workspaceId, idempotencyKey: `${kind}:blocked:${workOrderId}:${code}:${attempt}:${mode === "tutorial" ? all.now().getTime() : ""}`, type: `${kind}.blocked`, entityId: workOrderId, payload: { code, message } });
       return blocked(code, message);
     };
 
@@ -183,7 +205,7 @@ export function createManualbookBuilder(store: CrosslineStore, workspaceId: stri
       progress("writing", index, results.length);
       const writeContext: WriteContext = { version: "crossline.manualbook.write.v1", today, task: { intent: context.workOrder.intent },
         node: { id: result.node.id, title: result.node.title, kind: result.node.kind, goal: result.node.goal, steps: result.node.steps, acceptance: result.node.acceptance },
-        sources: result.sources.map((source) => ({ id: source.id, title: source.title, url: source.url, kept: source.kept, text: source.text })),
+        sources: [...uploads, ...result.sources].map((source) => ({ id: source.id, title: source.title, url: source.url, kept: source.kept, text: source.text })),
         inputs: context.inputs, profile: context.profile };
       const written = await runCodexSkill<NodeWriteup>(client, writeContext, {
         skillName: MATERIAL_WRITER_SKILL, cwd, developerInstructions: WRITE_INSTRUCTIONS, outputSchema: NODE_WRITEUP_SCHEMA,
@@ -196,7 +218,7 @@ export function createManualbookBuilder(store: CrosslineStore, workspaceId: stri
 
     // 4. assemble ---------------------------------------------------------------------------------------------
     progress("assembling", 0, 1);
-    const files = assemble({ design, nodes: results, context, builtAt: all.now().toISOString() });
+    const files = assemble({ design, nodes: results, context, uploads, builtAt: all.now().toISOString() });
     const root = path.join(materialsDir, workOrderId);
     const staging = `${root}.building-${randomUUID().slice(0, 8)}`;
     try {
@@ -212,13 +234,17 @@ export function createManualbookBuilder(store: CrosslineStore, workspaceId: stri
       rmSync(staging, { recursive: true, force: true });
       return fail("MATERIAL_PREPARATION_FAILED", "教程写入失败；可手动准备材料。");
     }
-    for (const file of files.filter((item) => item.record)) {
+    // A rebuild writes the same paths again; a row per path is kept, not one per build.
+    const known = new Set(store.listMaterials(workspaceId, workOrderId).map((item) => item.uri));
+    for (const file of files.filter((item) => item.record && !known.has(pathToFileURL(path.join(root, item.path)).href))) {
       store.saveMaterial({ id: randomUUID(), ownerId, workspaceId, workOrderId, uri: pathToFileURL(path.join(root, file.path)).href,
         mediaType: file.mediaType, sourceRefs: file.sourceRefs.length ? file.sourceRefs : ["manualbook"], createdAt: all.now().toISOString() });
     }
-    store.transitionWorkOrder(workspaceId, workOrderId, { type: "materials.ready" }, `materials-ready:${workOrderId}:manualbook`);
+    if (store.getWorkOrder(workspaceId, workOrderId)?.state === "preparing")
+      store.transitionWorkOrder(workspaceId, workOrderId, { type: "materials.ready" }, `materials-ready:${workOrderId}:manualbook`);
     const sources = results.flatMap((result) => result.sources);
-    store.appendEvent({ ownerId, workspaceId, idempotencyKey: `manualbook:built:${workOrderId}`, type: "manualbook.built", entityId: workOrderId,
+    const builds = store.listEvents(workspaceId, { type: "manualbook.built", entityId: workOrderId }).length;
+    store.appendEvent({ ownerId, workspaceId, idempotencyKey: builds ? `manualbook:built:${workOrderId}:${builds}` : `manualbook:built:${workOrderId}`, type: "manualbook.built", entityId: workOrderId,
       payload: { nodes: nodes.length, sources: sources.length, downloaded: sources.filter((source) => source.kept === "full_text").length } });
     return { state: "ready", workOrderId, artifacts: files.filter((item) => item.record).length, nodes: nodes.length, sources: sources.length,
       downloaded: sources.filter((source) => source.kept === "full_text").length };
@@ -272,9 +298,25 @@ async function keepSources(found: FoundSource[], deps: ManualbookDeps, today: st
 
 type OutFile = { path: string; bytes: Uint8Array | string; mediaType: string; record: boolean; sourceRefs: string[] };
 
-function assemble(input: { design: ManualDesign; nodes: NodeResult[]; context: ManualDesignContext; builtAt: string }): Array<OutFile & { bytes: Uint8Array | string }> {
-  const { design, nodes, context } = input;
+function assemble(input: { design: ManualDesign; nodes: NodeResult[]; context: ManualDesignContext; uploads: KeptSource[]; builtAt: string }): Array<OutFile & { bytes: Uint8Array | string }> {
+  const { design, nodes, context, uploads } = input;
   const files: OutFile[] = [];
+  // Every material once, with what each step's writer said about it: the material's own preview page reads this.
+  const materials = new Map<string, { id: string; title: string; publisher: string; url: string; docId?: string; kept: string; verdict: string; file?: string; summary: string;
+    notes: Array<{ node: string; step: string; note: string }> }>();
+  const keyOf = (source: KeptSource) => source.docId ? `doc:${source.docId}` : source.url;
+  for (const source of [...uploads, ...nodes.flatMap((result) => result.sources)]) {
+    if (materials.has(keyOf(source))) continue;
+    const node = nodes.find((result) => result.sources.includes(source));
+    materials.set(keyOf(source), { id: source.id, title: source.title, publisher: source.publisher, url: source.docId ? "" : source.url, ...(source.docId ? { docId: source.docId } : {}),
+      kept: source.kept, verdict: source.verdict, summary: source.summary, ...(source.file && node ? { file: `nodes/${node.node.id}/sources/${source.file}` } : {}), notes: [] });
+  }
+  for (const result of nodes) for (const item of result.writeup?.sourceNotes ?? []) {
+    const source = [...uploads, ...result.sources].find((candidate) => candidate.id === item.sourceId);
+    const entry = source ? materials.get(keyOf(source)) : undefined;
+    if (entry) entry.notes.push({ node: result.node.id, step: result.node.title, note: item.note });
+  }
+  files.push({ path: "materials.json", mediaType: "application/json", record: false, sourceRefs: [], bytes: JSON.stringify([...materials.values()], null, 2) });
   const order = new Map(nodes.map((result, index) => [result.node.id, index]));
   const depth = new Map<string, number>();
   for (const result of nodes) {
@@ -338,4 +380,21 @@ export function pendingMaterialWorkOrders(store: CrosslineStore, workspaceId: st
 export function listManualbookFiles(materialsDir: string, workOrderId: string): string[] {
   const root = path.join(materialsDir, workOrderId);
   return existsSync(root) ? (readdirSync(root, { recursive: true }) as string[]).map((entry) => entry.replaceAll("\\", "/")).sort() : [];
+}
+
+/**
+ * Committed work coming up in the next seven days (the web writes `schedule.upcoming` on its timer) that has no tutorial yet: built on the
+ * tick, one at a time. A failed build waits for the person (「生成教程」) instead of being retried on a timer.
+ */
+export function pendingTutorials(store: CrosslineStore, workspaceId: string): string[] {
+  let upcoming: string[] = [];
+  try { upcoming = JSON.parse(store.getSetting(workspaceId, "schedule.upcoming") ?? "[]") as string[]; } catch { return []; }
+  const built = new Set(store.listEvents(workspaceId, { type: "manualbook.built" }).map((event) => event.entityId));
+  const failed = new Set(store.listEvents(workspaceId, { type: "tutorial.blocked" }).map((event) => event.entityId));
+  const orders = new Map(store.listWorkOrders(workspaceId).map((order) => [order.id, order]));
+  return upcoming.filter((id) => {
+    const order = orders.get(id);
+    return order && ["approved", "ready_for_human", "active"].includes(order.state) && !built.has(id) && !failed.has(id)
+      && Boolean(store.getStepPlan(workspaceId, id));
+  });
 }

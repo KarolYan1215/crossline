@@ -34,6 +34,8 @@ export type ManualDesignContext = {
   /** What is known about the person that bears on how to do this (confirmed facts only). */
   profile: Array<{ id: string; value: string }>;
   constraints: string[];
+  /** The task's own steps, when it has a step plan: the tutorial follows them, one part per step, in this order. */
+  plannedSteps?: Array<{ id: string; title: string; role: string; doneCriterion: string }>;
 };
 
 const text = (max: number, min = 1) => ({ type: "string", minLength: min, maxLength: max }) as const;
@@ -200,10 +202,14 @@ export type WriteContext = {
   inputs: Array<{ id: string; text: string }>;
   profile: Array<{ id: string; value: string }>;
 };
-export type NodeWriteup = { analysis: string; tutorial: string; citations: string[]; blockers: Array<{ code: string; message: string }> };
+export type NodeWriteup = { analysis: string; tutorial: string; citations: string[];
+  /** One note per material used: what in it matters for this step and how to use it (the material's own preview page shows these). */
+  sourceNotes: Array<{ sourceId: string; note: string }>;
+  blockers: Array<{ code: string; message: string }> };
 
 export const NODE_WRITEUP_SCHEMA = object({
   analysis: text(12_000), tutorial: text(12_000), citations: strings(20, 60),
+  sourceNotes: { type: "array", maxItems: 12, items: object({ sourceId: text(60), note: text(1500) }) },
   blockers: { type: "array", maxItems: 4, items: object({ code: text(80), message: text(300) }) }
 });
 
@@ -213,6 +219,8 @@ export function validateNodeWriteup(value: unknown, context: WriteContext): Node
   if (out.blockers.length) refuse("MANUAL_WRITEUP_BLOCKED", out.blockers.map((blocker) => blocker.message).join("；"));
   const known = new Set(context.sources.map((source) => source.id));
   for (const id of out.citations) if (!known.has(id)) refuse("MANUAL_CITATION_UNKNOWN", `引用了不存在的来源「${id}」；只能引用 sources 里给出的 id。`);
+  // A note about a source the step was not given is dropped rather than refused: the write-up itself stands.
+  out.sourceNotes = (Array.isArray(out.sourceNotes) ? out.sourceNotes : []).filter((item) => item && known.has(item.sourceId) && typeof item.note === "string" && item.note.trim());
   // A write-up that cites nothing, for a step that had sources to cite, is opinion with headings on it.
   if (context.sources.length && !out.citations.length) refuse("MANUAL_WRITEUP_UNCITED", "这一步有可引用的来源，但分析和教程没有引用任何一个。");
   // A page the model was not given cannot be quoted by address either.

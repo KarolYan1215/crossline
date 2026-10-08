@@ -8,7 +8,7 @@ export const ARCHETYPE_CURATION_PERIOD = "archetypes.curation.period";
 export type CurationPeriod = "off" | "biweekly" | "monthly";
 
 const SOURCE_LABEL: Record<string, string> = { correction: "纠正", retrospective: "回顾", estimate: "估时修改", importance: "重要性",
-  standard_confirmed: "本人确认", relation_rejected: "驳回关系" };
+  standard_confirmed: "本人确认", relation_rejected: "驳回关系", postpone: "推迟与精力" };
 
 export type PreferenceRow = { id: string; source: string; sourceLabel: string; scopeLabel: string; line?: string; text: string; day: string };
 

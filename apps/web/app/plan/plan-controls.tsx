@@ -21,7 +21,7 @@ export function TimeControls({ windows, suggested, busy, params, presets, import
   presets: { buffered: ScheduleParams; asap: ScheduleParams }; importance: ImportanceRow[]; labels: Record<string, string>; plannedHours: number;
 }) {
   const [tab, setTab] = useState<Tab>("week");
-  return <section className="pl-card pl-controls" aria-label="时间与容量">
+  return <section className="pl-card pl-controls" id="time" aria-label="时间与容量">
     <header><h2>时间与容量</h2>
       <SegmentedControl label="设置项" value={tab} onChange={setTab} options={[{ value: "week", label: "可用时段" },
         { value: "params", label: "排程参数" }, { value: "importance", label: "重要性" }]} /></header>

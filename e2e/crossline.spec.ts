@@ -91,7 +91,7 @@ async function ensureScheduleSetup(page: Page): Promise<void> {
  */
 // The plan page's ranking lists and capacity figures come from the same time-limited solve, so they are left out as well; the ranking
 // is removed rather than hidden because how many tasks it lists as placed changes its height.
-const STABLE_FOR_SCREENSHOT = ".pending-badge,.dt-block,.dt-label-col small,.wk-block,.mo-chip[data-kind=\"scheduled\"],.ui-bar-value,.ui-bar-fill,"
+const STABLE_FOR_SCREENSHOT = ".pending-badge,.dv-block,.dv-aside,.undo-trigger,.wk-block,.mo-chip[data-kind=\"scheduled\"],.ui-bar-value,.ui-bar-fill,"
   + ".task-card-slot a,.pl-hours,.pl-week-bar,.pl-week small,.pl-goal-track,.pl-goal-tags{visibility:hidden}.pl-rank,.pl-unplaced,.pl-explain p{display:none}";
 
 test.beforeEach(async ({ page }, testInfo) => {
@@ -124,7 +124,9 @@ test("a task card opens its dialog in place, and the dialog's full-page link sho
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole("heading", { name: title })).toBeVisible();
   await expect(page).toHaveURL(/\/$/);
-  for (const tab of ["步骤", "标准", "材料", "对话", "记录"]) await expect(dialog.getByRole("tab", { name: tab })).toBeVisible();
+  for (const tab of ["步骤", "教程", "材料", "标准", "记录"]) await expect(dialog.getByRole("tab", { name: tab })).toBeVisible();
+  // The task's own input box sits above the tabs: everything about the task, in words.
+  await expect(dialog.locator(".task-entry textarea, .task-entry [contenteditable], .task-entry input").first()).toBeVisible();
   const full = dialog.getByRole("link", { name: "完整页面" });
   const href = await full.getAttribute("href");
   expect(href).toMatch(/^\/workbench\//);

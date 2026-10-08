@@ -2,93 +2,86 @@
 
 import { useEffect, useState } from "react";
 
-type FlowNode = { id: string; title: string; kind: string; goal: string; stage: number };
 type Source = { id: string; url: string; title: string; publisher: string; kept: "full_text" | "summary_only"; verdict: string; summary: string; file?: string; uri?: string };
-type Book = {
+type FlowNode = { id: string; title: string; kind: string; goal: string; stage: number; order?: number };
+type Status = { building: boolean; progress: { stage: string; done: number; total: number } | null; blocker: string | null };
+type Book = Status & {
   built: true; flow: { nodes: FlowNode[]; edges: Array<{ from: string; to: string }> }; manual: string;
   nodes: Record<string, { task: string; analysis: string; tutorial: string; sources: Source[] }>;
 };
-type Pending = { built: false; progress: { stage: string; done: number; total: number } | null; blocker: string | null };
+type Pending = Status & { built: false };
 
-const KIND: Record<string, string> = { read: "读", do: "做", decide: "决定", verify: "核对", write: "写" };
-const STAGE: Record<string, string> = { designing: "设计流程", researching: "查资料", writing: "写分析和教程", assembling: "整理成手册" };
-const NODE = { w: 200, h: 70, gapX: 56, gapY: 10 };
+const STAGE: Record<string, string> = { designing: "设计步骤", researching: "查找资料", writing: "撰写教程与解析", assembling: "整理" };
+const KIND: Record<string, string> = { read: "阅读", do: "动手", decide: "决定", verify: "核对", write: "撰写" };
+/** A write-up as stored (markdown): its own heading dropped, the rest shown as written. */
+const body = (text: string) => text.replace(/^# .*\n+/, "").trim();
 
 /**
- * A task's manualbook: the steps as a flow from left to right, and under it whatever the chosen step has — what to do,
- * the analysis of the material found for it, the tutorial, and the sources with what was kept of each. Reads the book
- * from the folder it was built in; while it is still being built it shows how far along that is.
+ * The task's tutorial, read top to bottom: the overview, then each step in order with its step-by-step guide; the analysis of the material
+ * and the sources sit one click away on the same step. 生成教程 asks for one when there is none (work coming up this week gets one on its
+ * own); while one is being built its progress shows, and a stopped build says why with a way to try again.
  */
-export function ManualbookView({ workOrderId, building }: { workOrderId: string; building: boolean }) {
+export function ManualbookView({ workOrderId, building: preparing, canBuild = true }: { workOrderId: string; building: boolean; canBuild?: boolean }) {
   const [state, setState] = useState<Book | Pending | undefined>();
-  const [selected, setSelected] = useState<string | undefined>();
-  const [tab, setTab] = useState<"task" | "analysis" | "tutorial" | "sources">("task");
+  const [views, setViews] = useState<Record<string, "tutorial" | "analysis" | "sources">>({});
+  const [asked, setAsked] = useState(false);
 
+  const look = async () => {
+    const response = await fetch(`/api/work-orders/${encodeURIComponent(workOrderId)}/manualbook`, { cache: "no-store" }).catch(() => undefined);
+    const next = await response?.json().catch(() => undefined) as Book | Pending | undefined;
+    if (next) setState(next);
+  };
+  useEffect(() => { void look(); }, [workOrderId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const running = Boolean(state?.building || preparing || asked);
   useEffect(() => {
-    let live = true;
-    const look = async () => {
-      const response = await fetch(`/api/work-orders/${encodeURIComponent(workOrderId)}/manualbook`, { cache: "no-store" }).catch(() => undefined);
-      const body = await response?.json().catch(() => undefined) as Book | Pending | undefined;
-      if (live && body) setState(body);
-    };
+    if (!running) return;
+    const timer = setInterval(() => void look(), 5000);
+    return () => clearInterval(timer);
+  }, [running]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (state && !state.building && asked && (state.built || state.blocker)) setAsked(false); }, [state, asked]);
+
+  const generate = async () => {
+    setAsked(true);
+    const response = await fetch(`/api/work-orders/${encodeURIComponent(workOrderId)}/tutorial`, { method: "POST" }).catch(() => null);
+    if (!response?.ok) setAsked(false);
     void look();
-    // While it is being built, keep looking; once it is built there is nothing to wait for.
-    const timer = building ? setInterval(() => void look(), 5000) : undefined;
-    return () => { live = false; if (timer) clearInterval(timer); };
-  }, [workOrderId, building]);
+  };
+  if (!state) return <p className="muted">读取中…</p>;
+  const status = running
+    ? <p role="status" className="muted">正在生成教程：{state.progress ? `${STAGE[state.progress.stage] ?? state.progress.stage}（${state.progress.done}/${state.progress.total}）` : "排队中"}…</p>
+    : state.blocker ? <p role="status">上次未能生成：{state.blocker}</p> : null;
 
-  if (!state) return null;
-  if (!state.built) {
-    if (state.blocker) return <section className="manualbook"><h3>手册</h3><p role="status">没有生成：{state.blocker}</p></section>;
-    if (!building) return null;
-    return <section className="manualbook"><h3>手册</h3><p role="status" className="muted">正在生成：{state.progress ? `${STAGE[state.progress.stage] ?? state.progress.stage}（${state.progress.done}/${state.progress.total}）` : "排队中"}…</p></section>;
-  }
+  if (!state.built) return <section className="manualbook" aria-label="教程">
+    {status}
+    {!running && <p className="muted">教程按该任务的步骤逐步写出：先读本人上传的课程文件，再联网查找资料，每份材料附针对本任务的解析。7 天内排有时间的任务会自动生成。</p>}
+    {!running && canBuild && <button type="button" className="primary-button" onClick={() => void generate()}>{state.blocker ? "重新生成" : "生成教程"}</button>}
+  </section>;
 
-  const stages = [...new Set(state.flow.nodes.map((node) => node.stage))].sort((a, b) => a - b);
-  const column = new Map(stages.map((stage, index) => [stage, index]));
-  const placed = state.flow.nodes.map((node) => {
-    const rank = state.flow.nodes.filter((other) => other.stage === node.stage).findIndex((other) => other.id === node.id);
-    return { ...node, x: column.get(node.stage)! * (NODE.w + NODE.gapX), y: rank * (NODE.h + NODE.gapY) };
-  });
-  const at = new Map(placed.map((node) => [node.id, node]));
-  const width = stages.length * (NODE.w + NODE.gapX) - NODE.gapX;
-  const height = Math.max(...placed.map((node) => node.y + NODE.h));
-  const current = selected ? state.nodes[selected] : undefined;
-  const sources = current?.sources ?? [];
-
-  return <section className="manualbook" aria-label="任务手册">
-    <h3>手册</h3>
-    <pre className="manual-overview">{state.manual.split("\n## 流程")[0]?.replace(/^# .*\n+/, "")}</pre>
-    <div className="flow-scroll"><div className="flow-canvas" style={{ width, height }}>
-      <svg width={width} height={height} aria-hidden="true">
-        <defs><marker id="mb-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="currentColor" /></marker></defs>
-        {state.flow.edges.map((edge) => {
-          const a = at.get(edge.from), b = at.get(edge.to);
-          if (!a || !b) return null;
-          const x1 = a.x + NODE.w, y1 = a.y + NODE.h / 2, x2 = b.x, y2 = b.y + NODE.h / 2, mid = (x1 + x2) / 2;
-          return <path key={`${edge.from}>${edge.to}`} d={`M${x1},${y1} C${mid},${y1} ${mid},${y2} ${x2},${y2}`} className="flow-edge" markerEnd="url(#mb-arrow)" />;
-        })}
-      </svg>
-      {placed.map((node, index) => <button type="button" key={node.id} className="flow-node mb-node" aria-pressed={selected === node.id}
-        style={{ left: node.x, top: node.y, width: NODE.w, height: NODE.h }} onClick={() => { setSelected(node.id); setTab("task"); }}>
-        <b>{index + 1}. {node.title}</b><small>{KIND[node.kind] ?? node.kind} · {state.nodes[node.id]?.sources.length ?? 0} 个来源</small>
-      </button>)}
-    </div></div>
-    {current && <div className="mb-detail">
-      <div className="cal-tabs" role="tablist" aria-label="步骤内容">
-        {([["task", "做什么"], ["analysis", "分析"], ["tutorial", "教程"], ["sources", `来源（${sources.length}）`]] as const).map(([id, label]) =>
-          <button key={id} type="button" role="tab" aria-selected={tab === id} onClick={() => setTab(id)}>{label}</button>)}
-      </div>
-      {tab === "sources"
-        ? <ul className="mb-sources">{sources.map((source) => <li key={source.id}>
-            <a href={source.url} target="_blank" rel="noreferrer noopener">{source.title}</a> <small>{source.publisher}</small>
-            <span className="tag">{source.kept === "full_text" ? "已下载全文" : "仅链接和摘要"}</span>
-            <p>{source.summary}</p><small>{source.verdict}</small>
-            {source.uri && <small> · <a href={`/api/work-orders/${encodeURIComponent(workOrderId)}/materials?uri=${encodeURIComponent(source.uri)}`} target="_blank" rel="noreferrer">打开本地副本</a></small>}
-          </li>)}{sources.length === 0 && <li className="muted">这一步没有外部来源。</li>}</ul>
-        : <pre className="mb-text">{current[tab] || "（这一步没有这部分内容）"}</pre>}
-    </div>}
-    {!current && <p className="muted">点一个步骤，看它要做什么、查到的资料、分析和教程。</p>}
+  const nodes = [...state.flow.nodes].sort((a, b) => (a.order ?? a.stage) - (b.order ?? b.stage));
+  const overview = state.manual.split("\n## 流程")[0]?.replace(/^# .*\n+/, "").trim();
+  return <section className="manualbook" aria-label="教程">
+    <header className="mb-head">{status ?? <span />}
+      {canBuild && !running && <button type="button" className="secondary-button" onClick={() => void generate()}>重新生成</button>}</header>
+    {overview && <p className="gen mb-overview">{overview}</p>}
+    <ol className="mb-steps">{nodes.map((node, index) => {
+      const content = state.nodes[node.id];
+      const view = views[node.id] ?? "tutorial";
+      const sources = content?.sources ?? [];
+      return <li key={node.id} className="mb-step">
+        <header><h4>{index + 1}. {node.title}</h4><small className="muted">{KIND[node.kind] ?? node.kind}{node.goal ? ` · ${node.goal}` : ""}</small></header>
+        <div className="cal-tabs" role="tablist" aria-label={`${node.title} 的内容`}>
+          {([["tutorial", "教程"], ["analysis", "资料解析"], ["sources", `来源（${sources.length}）`]] as const).map(([id, label]) =>
+            <button key={id} type="button" role="tab" aria-selected={view === id} onClick={() => setViews((current) => ({ ...current, [node.id]: id }))}>{label}</button>)}
+        </div>
+        {view === "sources"
+          ? <ul className="mb-sources">{sources.map((source) => <li key={source.id}>
+              <a href={source.url} target="_blank" rel="noreferrer noopener">{source.title}</a> <small>{source.publisher}</small>
+              <span className="tag">{source.kept === "full_text" ? "已存全文" : "链接与摘要"}</span>
+              <p className="gen">{source.summary}</p>
+              {source.uri && <small><a href={`/api/work-orders/${encodeURIComponent(workOrderId)}/materials?uri=${encodeURIComponent(source.uri)}`} target="_blank" rel="noreferrer">打开本地副本</a></small>}
+            </li>)}{sources.length === 0 && <li className="muted">该步骤只用到本人上传的文件。</li>}</ul>
+          : <div className="mb-text gen">{body(view === "tutorial" ? content?.tutorial || content?.task || "" : content?.analysis || "") || "该步骤没有这部分内容。"}</div>}
+      </li>;
+    })}</ol>
   </section>;
 }
-

@@ -6,7 +6,8 @@ import { createHash } from "node:crypto";
 import { CrosslineStore } from "@crossline/db";
 import type { CostSignal } from "@crossline/core";
 import {
-  MANUAL_DESIGNER_SKILL, MATERIAL_RESEARCHER_SKILL, MATERIAL_WRITER_SKILL, createManualbookBuilder, listManualbookFiles, pendingMaterialWorkOrders, type ManualbookDeps
+  MANUAL_DESIGNER_SKILL, MATERIAL_RESEARCHER_SKILL, MATERIAL_WRITER_SKILL, buildManualContext, createManualbookBuilder, listManualbookFiles, pendingMaterialWorkOrders,
+  pendingTutorials, type ManualbookDeps
 } from "./manualbook";
 import { scriptedRuntime } from "./testing/fake-runtime";
 
@@ -138,4 +139,51 @@ test("a work order that is not being prepared, or a path-shaped id, is refused",
   const build = createManualbookBuilder(store, WS, dir, "C:\\repo", () => rpc, deps());
   expect(await build("../escape")).toMatchObject({ state: "blocked", code: "MATERIAL_PATH_OUTSIDE_ROOT" });
   expect(await build("nope")).toMatchObject({ state: "blocked", code: "WORK_ORDER_NOT_FOUND" });
+});
+
+const plannedStep = (id: string, title: string) => ({ id, role: "solve", title, deliverable: "产出", doneCriterion: `${title}完成`, share: 0.5,
+  estimate: { p25Minutes: 20, p50Minutes: 30, p85Minutes: 50 }, dependsOn: [], notBefore: "", dueBy: "", schedulable: true, executor: "human" as const, tickOutcome: "" });
+
+test("a tutorial is built for committed work without moving it, from its steps and the person's own files, with a note per material", async () => {
+  store.saveWorkOrder({ id: "hw2", ownerId: "o", workspaceId: WS, identityId: "research", projectId: "ece555", milestoneId: "", intent: "完成 ECE 555 作业 2",
+    state: "ready_for_human", riskTier: "milestone", estimate: { p25Minutes: 60, p50Minutes: 120, p85Minutes: 240, source: "llm_prior", observationCount: 0, confidence: "low" }, payload: {} });
+  store.saveProject({ id: "ece555", ownerId: "o", workspaceId: WS, identityId: "research", name: "ECE 555", status: "active", summary: "", createdAt: "2026-10-01T00:00:00Z", updatedAt: "2026-10-01T00:00:00Z" });
+  store.saveSourceDocument({ id: "doc1", ownerId: "o", workspaceId: WS, kind: "pdf", fileName: "F26-ECE555-HW2.pdf", mediaType: "application/pdf", sha256: "x", uri: "file:///x",
+    extractedText: "ECE 555 Homework 2: Problem 1 inverter VTC; Problem 2 noise margin.", extractionStatus: "done", createdAt: "2026-10-01T00:00:00Z" });
+  store.saveStepPlan(WS, "hw2", { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 2, unit: "题" }, rationale: "",
+    steps: [plannedStep("a", "拆解要求"), plannedStep("b", "解题")] }, "o", "t");
+  // No contract of its own: the steps' completion criteria stand in, and the designer is told to follow the steps.
+  const context = buildManualContext(store, WS, "hw2", "2026-10-08")!;
+  expect(context.contract.map((item) => item.description)).toEqual(["拆解要求完成", "解题完成"]);
+  expect(context.plannedSteps?.map((item) => item.title)).toEqual(["拆解要求", "解题"]);
+  expect(context.localFiles).toEqual(["F26-ECE555-HW2.pdf"]);
+  const steps = { overview: "按步骤", nodes: [
+    { id: "split", title: "拆解要求", kind: "read", goal: "读题", steps: ["读作业"], acceptance: "列出题目", serves: [context.contract[0]!.id], needsResearch: false, researchQuestions: [] },
+    { id: "solve", title: "解题", kind: "do", goal: "解题", steps: ["逐题求解"], acceptance: "全部完成", serves: [context.contract[1]!.id], needsResearch: false, researchQuestions: [] }
+  ], edges: [{ from: "split", to: "solve" }], assumptions: [], blockers: [] };
+  const prompts: string[] = [];
+  const { rpc } = scriptedRuntime(SKILLS, (prompt: string) => {
+    prompts.push(prompt);
+    if (prompt.includes("crossline.manualbook.design.v1")) return JSON.stringify(steps);
+    return JSON.stringify({ analysis: "据 [upload-1]…", tutorial: "1. 读第 1 题", citations: ["upload-1"], sourceNotes: [{ sourceId: "upload-1", note: "第 1 题要求反相器 VTC" }], blockers: [] });
+  });
+  const outcome = await createManualbookBuilder(store, WS, dir, "C:\repo", () => rpc, deps())("hw2", { mode: "tutorial" });
+  expect(outcome).toMatchObject({ state: "ready", nodes: 2 });
+  expect(store.getWorkOrder(WS, "hw2")?.state).toBe("ready_for_human");
+  // The writer read the homework itself.
+  expect(prompts.some((prompt) => prompt.includes("Problem 1 inverter VTC"))).toBe(true);
+  const materials = JSON.parse(readFileSync(path.join(dir, "hw2", "materials.json"), "utf8")) as Array<{ docId?: string; notes: Array<{ note: string }> }>;
+  expect(materials).toEqual([expect.objectContaining({ docId: "doc1", notes: [expect.objectContaining({ note: "第 1 题要求反相器 VTC" }), expect.anything()] })]);
+});
+
+test("work coming up this week gets a tutorial on the tick once; a failed one waits for the person", () => {
+  store.saveWorkOrder({ id: "hw3", ownerId: "o", workspaceId: WS, identityId: "research", projectId: "p", milestoneId: "", intent: "作业 3", state: "approved", riskTier: "routine",
+    estimate: { p25Minutes: 60, p50Minutes: 120, p85Minutes: 240, source: "llm_prior", observationCount: 0, confidence: "low" }, payload: {} });
+  store.saveStepPlan(WS, "hw3", { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 1, unit: "题" }, rationale: "", steps: [plannedStep("a", "解题")] }, "o", "t");
+  expect(pendingTutorials(store, WS)).toEqual([]);
+  store.setSetting(WS, "schedule.upcoming", JSON.stringify(["hw3", "w1"]));
+  // w1 is still preparing (material preparation handles it); hw3 is committed with steps.
+  expect(pendingTutorials(store, WS)).toEqual(["hw3"]);
+  store.appendEvent({ ownerId: "o", workspaceId: WS, idempotencyKey: "tb", type: "tutorial.blocked", entityId: "hw3", payload: { code: "X", message: "" } });
+  expect(pendingTutorials(store, WS)).toEqual([]);
 });

@@ -15,7 +15,7 @@ const detailFor = (id: string, intent: string, identityId: string, state = "read
   riskTier: "routine" as const, estimate: { p25Minutes: 45, p50Minutes: 60, p85Minutes: 90, confidence: "low" as const, source: "identity_prior" as const, observationCount: 0 },
   manualPromotion: false, seeded: false, humanCore: [], automationParts: [], estimateBreakdown: [], byproducts: [], materialContract: [], evidenceContract: [], evidenceChecklist: [],
   preparedMaterials: [], executions: [], relatedFlywheel: [], background: null,
-  window: {}, supports: [], workedMinutes: 0, criteria: [], sources: [], agentOutputs: [], agentSteps: [] });
+  window: {}, supports: [], workedMinutes: 0, criteria: [], sources: [], agentOutputs: [], agentSteps: [], notes: [] });
 
 describe("dashboard view", () => {
   test("renders one next action, two alternatives, and all identity lanes", () => {
@@ -55,7 +55,7 @@ describe("dashboard view", () => {
       estimate: { p25Minutes: 45, p50Minutes: 60, p85Minutes: 90, confidence: "low" as const, source: "identity_prior" as const, observationCount: 0 },
       manualPromotion: false, seeded: false, humanCore: [], automationParts: [], estimateBreakdown: [], byproducts: [], materialContract: [], evidenceContract: [], evidenceChecklist: [],
       preparedMaterials: [], executions: [], relatedFlywheel: [], background: null,
-        window: {}, supports: [], workedMinutes: 0, criteria: [], sources: [], agentOutputs: [], agentSteps: []
+        window: {}, supports: [], workedMinutes: 0, criteria: [], sources: [], agentOutputs: [], agentSteps: [], notes: []
     }]]);
     const html = renderToStaticMarkup(<DashboardView data={{
       principalId: "test-owner", workspaceId: "test-workspace", nowLabel: "周一 · 09:00", nowIso: "2026-09-14T14:00:00.000Z", timeZone: "America/Chicago", clockPinned: true,

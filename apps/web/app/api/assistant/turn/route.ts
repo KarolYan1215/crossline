@@ -18,7 +18,7 @@ export async function POST(request: Request) {
   try { body = await request.json(); } catch { /* validated below */ }
   const input = (body ?? {}) as {
     threadId?: unknown; message?: unknown;
-    history?: unknown; attachments?: unknown; workOrderId?: unknown;
+    history?: unknown; attachments?: unknown; workOrderId?: unknown; mode?: unknown;
   };
   const threadId = typeof input.threadId === "string" ? input.threadId : "";
   const message = typeof input.message === "string" ? input.message.slice(0, 4000) : "";
@@ -39,7 +39,7 @@ export async function POST(request: Request) {
     const result = await requestCodexSupervisor<unknown>(access.ctx, "/v1/assistant/turn", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ threadId, message, history, attachments, workOrderId, snapshot }),
+      body: JSON.stringify({ threadId, message, history, attachments, workOrderId, snapshot, mode: input.mode === "record" ? "record" : "chat" }),
       signal: AbortSignal.timeout(3 * 60 * 60_000)
     });
     return NextResponse.json(result);

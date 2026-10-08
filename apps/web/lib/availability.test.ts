@@ -1,7 +1,7 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { CrosslineStore } from "@crossline/db";
 vi.mock("server-only", () => ({}));
-import { loadCurrentPlan, loadDashboard, loadGoalForecast, planToday, readAvailability, readSchedulePreferences,
+import { loadCurrentPlan, loadDashboard, loadGoalForecast, pinBlock, planToday, readAvailability, readSchedulePreferences,
   readGoalSettings, saveAvailability, saveGoalSettings, saveSchedulePreferences, toZonedInstant } from "./crossline";
 import { TEST_CTX } from "./test-support";
 
@@ -92,8 +92,8 @@ test("an approved work order keeps a provisional preparation label on its sugges
   const order = store.listWorkOrders(TEST_CTX.workspaceId).find((item) => item.identityId === "research")!;
   store.saveWorkOrder({ ...order, state: "approved" });
   const plan = await loadCurrentPlan(TEST_CTX);
-  expect(plan.blocks.find((block) => block.id === `scheduled:${order.id}`)?.title)
-    .toContain("暂定·准备中");
+  // The standing is a tag beside the title now, not a prefix in it.
+  expect(plan.blocks.find((block) => block.id === `scheduled:${order.id}`)).toMatchObject({ tag: "暂定", task: order.intent });
 });
 
 test("real calendar occupancy is excluded from suggested time", async () => {
@@ -142,7 +142,7 @@ test("fresh L and H self-reports reorder today's suggestion blocks", async () =>
   const first = (await loadCurrentPlan(TEST_CTX)).blocks.find((block) => block.day === "2026-09-18" &&
     block.id.startsWith("scheduled:"));
   expect(first?.id).toContain("media");
-  expect((await loadCurrentPlan(TEST_CTX)).blocks.some((block) => block.title.includes("休息后待复评"))).toBe(true);
+  expect((await loadCurrentPlan(TEST_CTX)).blocks.some((block) => block.tag === "休息后复评")).toBe(true);
   report("high", "high", "2026-09-18T14:00:00.000Z");
   const second = (await loadCurrentPlan(TEST_CTX)).blocks.find((block) => block.day === "2026-09-18" &&
     block.id.startsWith("scheduled:"));
@@ -207,4 +207,22 @@ test("a goal edited one field at a time keeps the rest, and a first partial save
     confirmedDeadline: "2026-10-30" });
   expect(saveGoalSettings(TEST_CTX, "research-starter", { weight: 80 })).toEqual({ ok: true });
   expect(readGoalSettings(TEST_CTX, "research-starter")).toMatchObject({ importance: "important", weight: 80, confirmedDeadline: "2026-10-30" });
+});
+
+test("what finds no room in the person's hours is pencilled in outside them, and starting one makes it formal", async () => {
+  globalThis.crosslineStore = new CrosslineStore(":memory:");
+  // Half an hour a day: most of the seeded work cannot fit.
+  const half = [{ days: [0, 1, 2, 3, 4, 5, 6], start: "08:00", end: "08:30", energy: "high" as const }];
+  saveSchedulePreferences(TEST_CTX, { timeZone: "America/Chicago", mode: "buffered", windows: half, importance: {} });
+  saveAvailability(TEST_CTX, half);
+  const plan = await loadCurrentPlan(TEST_CTX);
+  const optional = plan.blocks.filter((block) => block.id.startsWith("optional:"));
+  expect(optional.length).toBeGreaterThan(0);
+  // Pencilled in between 07:00 and 23:00, never inside the person's own window, tagged rather than prefixed.
+  expect(optional.every((block) => block.start >= "07:00" && block.end <= "23:00" && !(block.start < "08:30" && block.end > "08:00") && block.tag === "预排")).toBe(true);
+  const first = optional[0]!;
+  expect(pinBlock(TEST_CTX, first.id, { day: first.day!, start: first.start, end: first.end })).toEqual({ ok: true });
+  const after = await loadCurrentPlan(TEST_CTX);
+  expect(after.blocks.find((block) => block.id === first.id.replace(/^optional:/, "scheduled:").replace(/:\d+$/, ""))).toMatchObject({ tag: "已开始", start: first.start, end: first.end });
+  expect(pinBlock(TEST_CTX, "scheduled:x", { day: first.day!, start: first.start, end: first.end })).toEqual({ ok: false, code: "PIN_INVALID" });
 });

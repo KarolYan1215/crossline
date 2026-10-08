@@ -1,5 +1,5 @@
 import "server-only";
-import { archetypeById, goalSettingKey, taskProgress, type AccessContext, type SuccessCriterion, type EvidenceQuestionTemplate } from "@crossline/core";
+import { archetypeById, goalSettingKey, relevantDocuments, taskProgress, type AccessContext, type SuccessCriterion, type EvidenceQuestionTemplate } from "@crossline/core";
 import { listAgentTasks, type CrosslineStore, type StoredMilestone, type StoredWorkOrder, type StoredMaterial, type StoredExecution, type StoredMilestoneRelation,
   type StoredBackgroundFact, type StoredTaskStep } from "@crossline/db";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
@@ -24,6 +24,7 @@ function taskExtras(store: CrosslineStore, workspaceId: string, orders: StoredWo
   const agentTasks = listAgentTasks(store, workspaceId).filter((task) => ids.has(task.workOrderId));
   const confirmed = store.listEvents(workspaceId, { type: "criterion.confirmed" });
   const assessed = store.listEvents(workspaceId, { type: "criteria.assessed" });
+  const notes = store.listEvents(workspaceId, { type: "task.note" }).filter((event) => ids.has(event.entityId));
   const result = new Map<string, TaskExtras>();
   for (const order of orders) {
     const payload = (order.payload ?? {}) as { notBefore?: string; dueDate?: string; byproducts?: Array<{ lineId: string; artifact: string }>;
@@ -63,10 +64,12 @@ function taskExtras(store: CrosslineStore, workspaceId: string, orders: StoredWo
         return verdict ? { id: criterion.id, statement: criterion.statement, quarters: quartersOfVerdict[verdict.met] ?? 0, by: "gate" as const, note: verdict.observed }
           : { id: criterion.id, statement: criterion.statement, quarters: 0, by: "none" as const };
       }),
-      sources: documents.filter((doc) => !doc.projectId || doc.projectId === order.projectId).map((doc) => ({ id: doc.id, fileName: doc.fileName })),
+      sources: relevantDocuments(documents, { projectId: order.projectId, projectName: projects.get(order.projectId) }).map((doc) => ({ id: doc.id, fileName: doc.fileName })),
       agentOutputs: agentTasks.filter((task) => task.workOrderId === order.id).map((task) => ({ taskId: task.taskId, title: task.title, status: task.status,
         files: task.artifacts.map((artifact) => ({ path: artifact.path, name: artifact.path.split(/[\\/]/).at(-1) ?? artifact.path })) })),
-      agentSteps: (plan?.steps ?? []).filter((step) => step.status === "planned" && step.schedulable && step.executor !== "human").map((step) => ({ id: step.id, title: step.title }))
+      agentSteps: (plan?.steps ?? []).filter((step) => step.status === "planned" && step.schedulable && step.executor !== "human").map((step) => ({ id: step.id, title: step.title })),
+      notes: notes.filter((event) => event.entityId === order.id).map((event) => { const payload = event.payload as { text?: string; kind?: string };
+        return { at: event.createdAt, text: payload.text ?? "", kind: payload.kind ?? "note" }; }).reverse().slice(0, 30)
     });
   }
   return result;
@@ -153,6 +156,8 @@ export type TaskExtras = {
   agentOutputs: Array<{ taskId: string; title: string; status: string; files: Array<{ path: string; name: string }> }>;
   /** Open steps the system could do; 「交给 Agent」 appears when there is one. */
   agentSteps: Array<{ id: string; title: string }>;
+  /** The task's record in the person's own words (notes, postponements), newest first. */
+  notes: Array<{ at: string; text: string; kind: string }>;
 };
 
 export type MilestoneDetail = {
@@ -264,9 +269,32 @@ function assembleTaskDetail(ctx: AccessContext, order: StoredWorkOrder, deps: {
     ...(materialBlocker ? { materialBlocker } : {}),
     ...(payload.gateReview ? { gateReview: payload.gateReview } : {}),
     ...(discardReason ? { discardReason } : {}),
-    relatedFlywheel: deps.relatedFlywheel, background: deps.background.length ? deps.background : null,
+    relatedFlywheel: deps.relatedFlywheel,
+    ...(() => { const facts = relevantBackground(deps.background, [deps.extras.projectName ?? "", order.intent, deps.milestone?.title ?? ""]); return { background: facts.length ? facts : null }; })(),
     ...deps.extras
   };
+}
+
+/** Two-character words too common to say two texts are about the same thing. */
+const COMMON_BIGRAMS = new Set(["完成", "任务", "进行", "相关", "已经", "需要", "可以", "一个", "一次", "这是", "方向", "主线", "项目", "持续", "推进", "整理",
+  "确认", "准备", "内容", "当前", "本人", "通过", "支撑", "达到", "已支", "作为", "后续", "具体"]);
+/**
+ * The line's background facts that bear on this task: a fact is kept when it names the course or project, shares a distinctive Latin term
+ * or code of three or more characters (ECE, 555, MoS2, SRAM), or shares a two-character Chinese word that is not a common one (论文,
+ * 作业, 仿真) with the task or its milestone. Every fact of the line used to be listed under every task, so a homework showed the MoS₂
+ * and sleep-replay projects as its background.
+ */
+export function relevantBackground<T extends { value: string; why: string }>(facts: T[], about: string[]): T[] {
+  const squash = (text: string) => text.toLowerCase().replace(/[\s_\-·.]+/g, "");
+  const names = about.slice(0, 1).map(squash).filter((name) => name.length >= 3);
+  const joined = about.join(" ");
+  const terms = new Set(joined.toLowerCase().match(/[a-z0-9₀-₉]{3,}/g) ?? []);
+  const bigrams = new Set((joined.match(/[一-鿿]+/g) ?? []).flatMap((run) => Array.from({ length: Math.max(0, run.length - 1) }, (_, i) => run.slice(i, i + 2)))
+    .filter((pair) => !COMMON_BIGRAMS.has(pair)));
+  return facts.filter((fact) => {
+    const text = squash(`${fact.value} ${fact.why}`);
+    return names.some((name) => text.includes(name)) || [...terms].some((term) => text.includes(term)) || [...bigrams].some((pair) => text.includes(pair));
+  });
 }
 
 function assembleMilestoneDetail(milestone: StoredMilestone, rationale: string | undefined,

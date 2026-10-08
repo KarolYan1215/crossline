@@ -59,7 +59,7 @@ export async function personSnapshot(ctx: AccessContext, now = new Date()): Prom
   lines.push(...(scheduled.length ? scheduled.slice(0, 30).map(describe) : ["（还没有）"]));
   const proposed = thisWeek.filter((block) => block.id.startsWith("proposed:"));
   if (proposed.length) lines.push("", "## 未来 7 天：待批准方案的建议时段（批准后才算数）", ...proposed.slice(0, 20).map(describe));
-  const fixed = thisWeek.filter((block) => !block.id.startsWith("scheduled:") && !block.id.startsWith("proposed:"));
+  const fixed = thisWeek.filter((block) => !block.id.startsWith("scheduled:") && !block.id.startsWith("proposed:") && !block.id.startsWith("optional:"));
   if (fixed.length) lines.push("", "## 未来 7 天：日历与课程里的固定安排", ...fixed.slice(0, 30).map(describe));
 
   const orders = store.listWorkOrders(ctx.workspaceId).filter((order) => !["archived", "accepted"].includes(order.state)

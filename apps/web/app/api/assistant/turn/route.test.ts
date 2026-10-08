@@ -41,7 +41,7 @@ test("forwards a valid turn to the worker supervisor and returns its reply verba
   expect(await response.json()).toEqual({ state: "replied", reply: "你好", quickReplies: ["继续"] });
   expect(requestCodexSupervisor).toHaveBeenCalledWith(TEST_CTX, "/v1/assistant/turn", expect.objectContaining({
     method: "POST", body: JSON.stringify({ threadId: "t1", message: "帮我写个脚本", history: [], attachments: [], workOrderId: null,
-      snapshot: "已批准：西湖合作论文 · 最晚 2026-10-31" })
+      snapshot: "已批准：西湖合作论文 · 最晚 2026-10-31", mode: "chat" })
   }));
 });
 
