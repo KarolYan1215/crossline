@@ -268,11 +268,7 @@ async function tick(): Promise<void> {
     for (const workspace of workspaces) {
       const outcome = await calendar.sync(workspace.id).catch((error): SyncOutcome =>
         ({ state: "blocked", code: "GRAPH_SYNC_FAILED", message: error instanceof Error ? error.message : "" }));
-      // What failed is kept where the web reads it (an ask: 「日历读不到了」), and cleared by the next clean read. It used to be a
-      // log line only, so a signed-out account looked exactly like a quiet calendar.
-      const failure = outcome.state === "blocked" ? { code: outcome.code, message: outcome.message ?? "", sources: [] as string[] }
-        : outcome.failed?.length ? { code: outcome.failed[0]!.code, message: "", sources: outcome.failed.map((item) => item.label) } : undefined;
-      try { analysisStore.setSetting(workspace.id, CALENDAR_SYNC_FAILURE, failure ? JSON.stringify({ ...failure, at: checkedAt }) : ""); } catch { /* housekeeping */ }
+      recordCalendarOutcome(analysisStore, workspace.id, outcome, checkedAt);
       if (outcome.state === "blocked" || outcome.changes > 0 || outcome.resynced) {
         console.info(JSON.stringify({ type: `graph.${outcome.state}`, checkedAt, workspaceId: workspace.id, ...outcome }));
       }
@@ -710,7 +706,12 @@ if (!capabilitySecret) {
     // Undefined when no client id is configured or nobody has signed in, in which case the route is
     // simply not mounted and the button says the connector is unavailable rather than lying.
     ...(calendar ? {
-      syncCalendar: (workspaceId: string) => calendar.sync(workspaceId),
+      // 立即同步日历 records its outcome like a tick does, so a read that works clears 「日历无法读取」 at once.
+      syncCalendar: async (workspaceId: string) => {
+        const outcome = await calendar.sync(workspaceId);
+        recordCalendarOutcome(analysisStore, workspaceId, outcome, new Date().toISOString());
+        return outcome;
+      },
       listCalendarSources: (workspaceId: string) => calendar.listSources(workspaceId),
       saveCalendarSources: (workspaceId: string, keys: string[]) => calendar.saveSources(workspaceId, keys)
     } : {})
@@ -782,3 +783,15 @@ if (process.env.CROSSLINE_RUN_ONCE === "1") {
   process.once("SIGINT", () => { void shutdown(); });
   process.once("SIGTERM", () => { void shutdown(); });
 }
+
+/**
+ * What a calendar read left behind, kept where the web reads it (an ask: 「日历无法读取」) and cleared by the next clean read — from the
+ * tick or from 立即同步日历. It used to be a log line only, so a signed-out account looked exactly like a quiet calendar; and the button
+ * once read the calendar without clearing it, so the ask outlived the fix by a whole tick.
+ */
+function recordCalendarOutcome(store: CrosslineStore, workspaceId: string, outcome: SyncOutcome, at: string): void {
+  const failure = outcome.state === "blocked" ? { code: outcome.code, message: outcome.message ?? "", sources: [] as string[] }
+    : outcome.failed?.length ? { code: outcome.failed[0]!.code, message: "", sources: outcome.failed.map((item) => item.label) } : undefined;
+  try { store.setSetting(workspaceId, CALENDAR_SYNC_FAILURE, failure ? JSON.stringify({ ...failure, at }) : ""); } catch { /* housekeeping */ }
+}
+

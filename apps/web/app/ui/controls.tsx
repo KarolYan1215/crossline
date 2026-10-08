@@ -89,7 +89,7 @@ export function DurationBar({ p25, p50, p85, samples = 0, bounds = TASK_MINUTES,
           if (step) { event.preventDefault(); commit(clamp(p50 + step)); }
         }} />
     </div>
-    <span className="ui-duration-text mono">{formatMinutes(usual)}<small>{formatMinutes(low)}–{formatMinutes(high)}</small></span>
+    <span className="ui-duration-text mono"><span>{formatMinutes(usual)}</span><small>{formatMinutes(low)}–{formatMinutes(high)}</small></span>
   </div>;
 }
 

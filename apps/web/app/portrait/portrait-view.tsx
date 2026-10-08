@@ -41,7 +41,7 @@ function Flywheel({ lines, items }: { lines: Line[]; items: PortraitReport["line
       <circle cx={p.x} cy={p.y} r={30} style={{ fill: "var(--paper)", stroke: "var(--lc)" }} strokeWidth={line.rank === 1 || line.hard ? 4 : 2} />
       <text x={p.x} y={p.y + 4} textAnchor="middle" style={{ fill: "var(--lc)" }} fontSize="13" fontWeight="700">{line.label}</text>
       {/* The role sits outside the ring, away from the arrows: above a node in the upper half, below one in the lower half. */}
-      <text x={p.x} y={p.y < c - 1 ? p.y - 38 : p.y + 46} textAnchor="middle" fontSize="11" fill="currentColor" opacity=".7">{roleOf(line)}</text>
+      <text x={p.x} y={p.y < c - 1 ? p.y - 38 : p.y + 46} textAnchor="middle" fontSize="12" fill="#4a4a4a">{roleOf(line)}</text>
     </g>; })}
   </svg>;
 }

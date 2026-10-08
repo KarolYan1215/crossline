@@ -8,7 +8,7 @@ import { expect, test, type Page } from "@playwright/test";
  * Disabled controls and text that is hidden on purpose (visibility, opacity 0) are exempt from contrast: WCAG exempts inactive
  * controls, and a hidden element is not read.
  */
-const PAGES = ["/", "/milestones", "/plan", "/workbench", "/approvals", "/settings", "/onboarding", "/review"];
+const PAGES = ["/", "/milestones", "/plan", "/workbench", "/approvals", "/settings", "/onboarding", "/review", "/portrait"];
 
 type Finding = { selector: string; text: string; detail: string };
 

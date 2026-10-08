@@ -22,7 +22,12 @@
 .task-card-slot a{text-decoration:underline}
 .task-card-supports{display:flex;flex-wrap:wrap;gap:4px;margin:0}
 .task-card-note{margin:4px 0 0;font-size:12px;color:var(--graphite)}
-.task-quick-edit{position:relative;display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px 12px;align-items:center}
+/* The due date and the duration share a row while the card is wide enough; in a narrow card the duration takes a row of its own
+   instead of pushing the card past its column (found on the real account, where a 「3 时 50 分–7 时 30 分」 range overflowed by 91px). */
+.task-quick-edit{position:relative;display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center}
+.task-quick-edit>.task-quick-due{flex:0 0 auto}
+.task-quick-edit>.task-quick-duration{flex:1 1 260px}
+.task-quick-edit>:not(.task-quick-due):not(.task-quick-duration){flex-basis:100%}
 .task-quick-due{display:inline-flex;align-items:center;gap:6px;font-size:13px}
 .task-quick-due small{color:var(--graphite)}
 .task-actions{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
