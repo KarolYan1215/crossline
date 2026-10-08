@@ -1,4 +1,5 @@
 import "server-only";
+import { recordOp, retractedEventIds, withUndo } from "./undo";
 import {
   ATTENTION_SNAPSHOT, CALENDAR_PUBLISH_FAILURE, CALENDAR_SYNC_FAILURE, daysBetween, missingInputsOf, rankAsks, snoozeUntil, urgencyFor,
   validateAskAnswer, type AccessContext, type Ask, type AskOption, type AskSnooze
@@ -13,6 +14,12 @@ import { requestAutoBackplan } from "./approvals";
 import { readScheduledDay } from "./schedule-memory";
 import { requestCodexSupervisor } from "./codex-runtime";
 import { autoPublishPass, forgetPublishedHash } from "./auto-publish";
+
+/** Markers an undo has taken back are as if never written. */
+const live = <T extends { eventId: string }>(ctx: AccessContext, events: T[]): T[] => {
+  const retracted = retractedEventIds(ctx);
+  return retracted.size ? events.filter((event) => !retracted.has(event.eventId)) : events;
+};
 
 /** A message used as a clause before 「。」: its own closing punctuation dropped, so the sentence does not end 「。。」. */
 const clause = (text: string | undefined) => String(text ?? "").trim().replace(/[。．.；;，,\s]+$/u, "");
@@ -278,7 +285,7 @@ const ACCEPT_RISK_DAYS = 7;
 function riskAsks({ store, ctx, today }: Source): Ask[] {
   const forecast = loadGoalForecast(ctx);
   const orders = store.listWorkOrders(ctx.workspaceId);
-  const accepted = store.listEvents(ctx.workspaceId, { type: "risk.accepted" });
+  const accepted = live(ctx, store.listEvents(ctx.workspaceId, { type: "risk.accepted" }));
   const milestones = new Map(store.listMilestones(ctx.workspaceId).filter((item) => item.status === "approved").map((item) => [item.id, item]));
   const rolling = new Set(store.listEvents(ctx.workspaceId, { type: "goal.backplan_proposed" })
     .filter((event) => (event.payload as { rolling?: boolean }).rolling).map((event) => event.entityId));
@@ -323,7 +330,7 @@ function missedAsks({ store, ctx, today }: Source): Ask[] {
   const placed = readScheduledDay(ctx, yesterday);
   if (!Object.keys(placed).length) return [];
   const anchors = deadlines(store, ctx.workspaceId);
-  const handled = new Set(store.listEvents(ctx.workspaceId, { type: "missed.handled" }).map((event) => (event.payload as { askId?: string }).askId));
+  const handled = new Set(live(ctx, store.listEvents(ctx.workspaceId, { type: "missed.handled" })).map((event) => (event.payload as { askId?: string }).askId));
   const orders = new Map(store.listWorkOrders(ctx.workspaceId).map((order) => [order.id, order]));
   return Object.entries(placed).flatMap(([orderId, start]) => {
     const order = orders.get(orderId);
@@ -346,7 +353,7 @@ function missedAsks({ store, ctx, today }: Source): Ask[] {
 }
 
 function agentAsks({ store, ctx }: Source): Ask[] {
-  const acknowledged = new Set(store.listEvents(ctx.workspaceId, { type: "agent.blocked_acknowledged" }).map((event) => event.entityId));
+  const acknowledged = new Set(live(ctx, store.listEvents(ctx.workspaceId, { type: "agent.blocked_acknowledged" })).map((event) => event.entityId));
   const titles = new Map(store.listWorkOrders(ctx.workspaceId).map((order) => [order.id, order.intent]));
   return listAgentTasks(store, ctx.workspaceId).filter((task) => task.status === "blocked" && !acknowledged.has(task.taskId)).map((task) => ({
     id: `agent:${task.taskId}`, kind: "agent_blocked" as const, entityId: task.taskId, urgency: "later" as const, raisedAt: task.requestedAt,
@@ -387,7 +394,7 @@ export function collectAsks(ctx: AccessContext, now = new Date()): Ask[] {
 }
 
 function snoozes(ctx: AccessContext): AskSnooze[] {
-  return getStore().listEvents(ctx.workspaceId, { type: "ask.snoozed" }).map((event) => event.payload as AskSnooze);
+  return live(ctx, getStore().listEvents(ctx.workspaceId, { type: "ask.snoozed" })).map((event) => event.payload as AskSnooze);
 }
 
 /** The asks to show now: snoozed ones left out, most urgent first. */
@@ -558,7 +565,7 @@ async function answerOne(ctx: AccessContext, ask: Ask, optionId: string, values:
       return { ok: true };
     }
     case "missed_block": {
-      const handled = () => record(ctx, "missed.handled", ask.entityId, `missed:handled:${ask.id}`, { askId: ask.id, how: optionId });
+      const handled = () => record(ctx, "missed.handled", ask.entityId, `missed:handled:${ask.id}:${Date.now()}`, { askId: ask.id, how: optionId });
       if (optionId === "drop") { const result = archiveWorkOrder(ctx, ask.entityId, values.reason!); if (result.ok) handled(); return result; }
       if (optionId === "later") {
         const order = store.listWorkOrders(ctx.workspaceId).find((item) => item.id === ask.entityId);
@@ -570,7 +577,7 @@ async function answerOne(ctx: AccessContext, ask: Ask, optionId: string, values:
       return { ok: true };
     }
     case "agent_blocked":
-      record(ctx, "agent.blocked_acknowledged", ask.entityId, `agent:blocked:ack:${ask.entityId}`, {});
+      record(ctx, "agent.blocked_acknowledged", ask.entityId, `agent:blocked:ack:${ask.entityId}:${Date.now()}`, {});
       return { ok: true };
     case "calendar_publish_failed":
       getStore().setSetting(ctx.workspaceId, CALENDAR_PUBLISH_FAILURE, "");
@@ -587,7 +594,8 @@ export async function answerAsk(ctx: AccessContext, askId: string, optionId: str
   if (!ask) return { ok: false, code: "ASK_NOT_FOUND" };
   const checked = validateAskAnswer(ask, optionId, values);
   if (!checked.ok) return checked;
-  const result = await answerOne(ctx, ask, optionId, checked.values);
+  const option = ask.options.find((item) => item.id === optionId)?.label ?? optionId;
+  const result = await withUndo(ctx, `${option}：${ask.title}`, () => answerOne(ctx, ask, optionId, checked.values));
   if (result.ok) record(ctx, "ask.answered", ask.entityId, `ask:answered:${ask.id}:${optionId}:${now.getTime()}`, { askId: ask.id, kind: ask.kind, optionId });
   return result;
 }
@@ -596,8 +604,13 @@ export async function answerAsk(ctx: AccessContext, askId: string, optionId: str
 export function snoozeAsk(ctx: AccessContext, askId: string, choice: "tomorrow" | "week", now = new Date()): AskResult {
   const ask = collectAsks(ctx, now).find((item) => item.id === askId);
   if (!ask) return { ok: false, code: "ASK_NOT_FOUND" };
+  const until = snoozeUntil(choice, planToday(ctx, now));
+  // Recorded as an operation, so 「明天再问」 pressed by mistake can be undone like any other answer.
+  const before = new Set(getStore().listEvents(ctx.workspaceId, { type: "ask.snoozed" }).map((event) => event.eventId));
   record(ctx, "ask.snoozed", ask.entityId, `ask:snoozed:${ask.id}:${now.getTime()}`,
-    { askId: ask.id, until: snoozeUntil(choice, planToday(ctx, now)), fingerprint: ask.fingerprint } satisfies AskSnooze);
+    { askId: ask.id, until, fingerprint: ask.fingerprint } satisfies AskSnooze);
+  const added = getStore().listEvents(ctx.workspaceId, { type: "ask.snoozed" }).filter((event) => !before.has(event.eventId)).map((event) => event.eventId);
+  if (added.length) recordOp(ctx, `${choice === "tomorrow" ? "明天再问" : "下周再问"}：${ask.title}`, { kind: "event.retract", eventIds: added });
   return { ok: true };
 }
 

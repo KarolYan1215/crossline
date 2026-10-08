@@ -62,7 +62,7 @@ test("an older refusal with only the joined message is still asked about, senten
 test("「我有」 hands the input over: the step that was getting it goes, the next step stands alone, and the milestone is split again", async () => {
   const store = setup();
   const eventId = refusedWithMissing(store);
-  expect(await answerAsk(TEST_CTX, `bp:${eventId}:m1`, "have", { text: "D:/lab/mos2/iv.csv，字段 Vg, Id" }, NOW)).toEqual({ ok: true });
+  expect(await answerAsk(TEST_CTX, `bp:${eventId}:m1`, "have", { text: "D:/lab/mos2/iv.csv，字段 Vg, Id" }, NOW)).toMatchObject({ ok: true });
   const orders = new Map(store.listWorkOrders(ws).map((order) => [order.id, order]));
   expect(orders.get("get-data")!.state).toBe("archived");
   expect((orders.get("map")!.payload as { dependsOn: string[] }).dependsOn).toEqual([]);
@@ -78,7 +78,7 @@ test("「我有」 hands the input over: the step that was getting it goes, the 
 test("「在等」 becomes a waiting item that holds the next step; on its day 「到了」 splits the milestone again with what arrived", async () => {
   const store = setup();
   const eventId = refusedWithMissing(store);
-  expect(await answerAsk(TEST_CTX, `bp:${eventId}:m1`, "waiting", { who: "师兄", date: "2026-10-08" }, NOW)).toEqual({ ok: true });
+  expect(await answerAsk(TEST_CTX, `bp:${eventId}:m1`, "waiting", { who: "师兄", date: "2026-10-08" }, NOW)).toMatchObject({ ok: true });
   const item = store.listWaitingItems(ws)[0]!;
   expect(item).toMatchObject({ who: "师兄", title: "MoS₂ 实测参数数据", expectedAt: "2026-10-08", blocks: ["map"], source: "backplan" });
   expect(collectAsks(TEST_CTX, NOW).some((ask) => ask.kind === "waiting_due")).toBe(false);
@@ -87,7 +87,7 @@ test("「在等」 becomes a waiting item that holds the next step; on its day �
   expect(waiting).toMatchObject({ urgency: "now", title: "师兄的「MoS₂ 实测参数数据」到了吗？" });
   expect(waiting.options[0]!.fields?.[0]?.id).toBe("note");
   vi.stubEnv("CROSSLINE_FIXED_NOW", dayOf.toISOString());
-  expect(await answerAsk(TEST_CTX, waiting.id, "arrived", { note: "在组里网盘 /mos2" }, dayOf)).toEqual({ ok: true });
+  expect(await answerAsk(TEST_CTX, waiting.id, "arrived", { note: "在组里网盘 /mos2" }, dayOf)).toMatchObject({ ok: true });
   expect(store.listWaitingItems(ws)[0]!.state).toBe("arrived");
   expect(store.listEvents(ws, { type: "goal.backplan_input_supplied" })[0]!.payload).toMatchObject({ text: "在组里网盘 /mos2" });
   expect(store.listEvents(ws, { type: "goal.backplan_rerun_requested" })).toHaveLength(1);
@@ -110,18 +110,18 @@ test("「在等」 for something already waited on (same person, same day, same 
   const store = setup();
   alreadyWaiting(store);
   const eventId = refusedWithMissing(store);
-  expect(await answerAsk(TEST_CTX, `bp:${eventId}:m1`, "waiting", { who: " 师兄", date: "2026-10-08" }, NOW)).toEqual({ ok: true });
+  expect(await answerAsk(TEST_CTX, `bp:${eventId}:m1`, "waiting", { who: " 师兄", date: "2026-10-08" }, NOW)).toMatchObject({ ok: true });
   expect(store.listWaitingItems(ws)).toEqual([expect.objectContaining({ id: "wait-sim-0", blocks: ["sim", "map"] })]);
   const dayOf = new Date("2026-10-08T15:00:00.000Z");
   const waiting = collectAsks(TEST_CTX, dayOf).filter((ask) => ask.kind === "waiting_due");
   expect(waiting.map((ask) => ask.id)).toEqual(["wait:wait-sim-0"]);
   expect(waiting[0]!.why).toContain("重新拆");
   vi.stubEnv("CROSSLINE_FIXED_NOW", dayOf.toISOString());
-  expect(await answerAsk(TEST_CTX, waiting[0]!.id, "arrived", {}, dayOf)).toEqual({ ok: true });
+  expect(await answerAsk(TEST_CTX, waiting[0]!.id, "arrived", {}, dayOf)).toMatchObject({ ok: true });
   expect(store.listEvents(ws, { type: "goal.backplan_input_supplied" }).map((event) => event.entityId)).toEqual(["mos2"]);
   expect(store.listEvents(ws, { type: "goal.backplan_rerun_requested" }).map((event) => event.entityId)).toEqual(["mos2"]);
   // A different person, or a different day, is a different wait.
-  expect(await answerAsk(TEST_CTX, `bp:${eventId}:m2`, "waiting", { who: "导师", date: "2026-10-09" }, dayOf)).toEqual({ ok: true });
+  expect(await answerAsk(TEST_CTX, `bp:${eventId}:m2`, "waiting", { who: "导师", date: "2026-10-09" }, dayOf)).toMatchObject({ ok: true });
   expect(store.listWaitingItems(ws, { state: "open" }).map((item) => item.id)).toEqual([`wait-bp-mos2-${eventId.slice(0, 8)}-m2`]);
 });
 
@@ -134,7 +134,7 @@ test("a pair recorded before this fix is one card, and 「到了」 on it closes
   vi.stubEnv("CROSSLINE_FIXED_NOW", dayOf.toISOString());
   const waiting = collectAsks(TEST_CTX, dayOf).filter((ask) => ask.kind === "waiting_due");
   expect(waiting).toHaveLength(1);
-  expect(await answerAsk(TEST_CTX, waiting[0]!.id, "arrived", { note: "在组里网盘 /mos2" }, dayOf)).toEqual({ ok: true });
+  expect(await answerAsk(TEST_CTX, waiting[0]!.id, "arrived", { note: "在组里网盘 /mos2" }, dayOf)).toMatchObject({ ok: true });
   expect(store.listWaitingItems(ws).map((item) => item.state)).toEqual(["arrived", "arrived"]);
   expect(store.listEvents(ws, { type: "goal.backplan_input_supplied" })[0]).toMatchObject({ entityId: "mos2", payload: { text: "在组里网盘 /mos2" } });
   expect(store.listEvents(ws, { type: "goal.backplan_rerun_requested" })).toHaveLength(1);
@@ -144,7 +144,7 @@ test("a pair recorded before this fix is one card, and 「到了」 on it closes
 test("「先不拆」 withdraws the milestone's unstarted steps and closes this version to the timer", async () => {
   const store = setup();
   const eventId = refusedWithMissing(store);
-  expect(await answerAsk(TEST_CTX, `bp:${eventId}:m2`, "skip", {}, NOW)).toEqual({ ok: true });
+  expect(await answerAsk(TEST_CTX, `bp:${eventId}:m2`, "skip", {}, NOW)).toMatchObject({ ok: true });
   expect(store.listWorkOrders(ws).find((order) => order.id === "get-data")!.state).toBe("archived");
   expect(store.listEvents(ws, { type: "goal.backplan_declined" })[0]!.payload).toEqual({ milestoneVersion: 2 });
   expect(collectAsks(TEST_CTX, NOW).filter((ask) => ask.kind === "backplan_input")).toEqual([]);
@@ -153,7 +153,7 @@ test("「先不拆」 withdraws the milestone's unstarted steps and closes this 
 test("a snooze hides an ask until its day and lets it back early when the thing changes", () => {
   const store = setup();
   const eventId = refusedWithMissing(store);
-  expect(snoozeAsk(TEST_CTX, `bp:${eventId}:m1`, "tomorrow", NOW)).toEqual({ ok: true });
+  expect(snoozeAsk(TEST_CTX, `bp:${eventId}:m1`, "tomorrow", NOW)).toMatchObject({ ok: true });
   expect(openAsks(TEST_CTX, NOW).map((ask) => ask.id)).toEqual([`bp:${eventId}:m2`]);
   expect(openAsks(TEST_CTX, new Date("2026-10-08T15:00:00.000Z")).map((ask) => ask.id)).toContain(`bp:${eventId}:m1`);
 });
@@ -166,7 +166,7 @@ test("a refused capture is asked about; the person's note is added to it and the
     { audit: { blocker: { code: "ANALYSIS_POLICY_BLOCKED", message: "不清楚要交付什么" } } });
   const ask = collectAsks(TEST_CTX, NOW).find((item) => item.kind === "capture_blocked")!;
   expect(ask.why).toContain("不清楚要交付什么");
-  expect(await answerAsk(TEST_CTX, ask.id, "context", { note: "交付一页回应清单，周五组会前" }, NOW)).toEqual({ ok: true });
+  expect(await answerAsk(TEST_CTX, ask.id, "context", { note: "交付一页回应清单，周五组会前" }, NOW)).toMatchObject({ ok: true });
   expect(store.listCaptures(ws)[0]!.context).toContain("交付一页回应清单");
   expect(requestCodexSupervisor).toHaveBeenCalledWith(TEST_CTX, "/v1/captures/cap/analyze", expect.objectContaining({ method: "POST" }));
 });
@@ -178,7 +178,7 @@ test("a gate's real 「not enough」 is asked with what would satisfy it; 「重
       criteriaVerdict: [] } } });
   const ask = collectAsks(TEST_CTX, NOW).find((item) => item.kind === "gate_insufficient")!;
   expect(ask.why).toContain("附上仿真输出的图和数据文件");
-  expect(await answerAsk(TEST_CTX, ask.id, "redo", {}, NOW)).toEqual({ ok: true });
+  expect(await answerAsk(TEST_CTX, ask.id, "redo", {}, NOW)).toMatchObject({ ok: true });
   expect(store.listWorkOrders(ws).find((order) => order.id === "wo")!.state).toBe("approved");
 });
 
@@ -200,7 +200,7 @@ test("a milestone whose known work cannot finish by its deadline is asked about;
   const risk = collectAsks(TEST_CTX, NOW).find((ask) => ask.kind === "milestone_risk")!;
   expect(risk.title).toBe("「实测 MoS₂ 参数已可直接驱动 NeuroSim」可能赶不上 10/9");
   expect(risk.options.map((option) => option.id)).toEqual(["time", "extend", "lower", "accept"]);
-  expect(await answerAsk(TEST_CTX, risk.id, "accept", {}, NOW)).toEqual({ ok: true });
+  expect(await answerAsk(TEST_CTX, risk.id, "accept", {}, NOW)).toMatchObject({ ok: true });
   expect(collectAsks(TEST_CTX, NOW).some((ask) => ask.kind === "milestone_risk")).toBe(false);
 });
 
@@ -215,7 +215,7 @@ test("work given a time yesterday and never started is asked about when it bears
   expect(missed.map((ask) => ask.entityId)).toEqual(["soon"]);
   expect(missed[0]!.title).toBe("昨天 09:00 排的「任务 soon」没开始");
   expect(missed[0]!.options.map((option) => option.id)).toEqual(["roll", "later", "done", "drop"]);
-  expect(await answerAsk(TEST_CTX, missed[0]!.id, "later", { date: "2026-10-09" }, NOW)).toEqual({ ok: true });
+  expect(await answerAsk(TEST_CTX, missed[0]!.id, "later", { date: "2026-10-09" }, NOW)).toMatchObject({ ok: true });
   expect((store.listWorkOrders(ws).find((order) => order.id === "soon")!.payload as { notBefore?: string }).notBefore).toBe("2026-10-09");
   expect(collectAsks(TEST_CTX, NOW).some((ask) => ask.kind === "missed_block")).toBe(false);
 });

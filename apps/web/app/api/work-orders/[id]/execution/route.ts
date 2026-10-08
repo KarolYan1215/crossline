@@ -7,6 +7,7 @@ import {
 } from "../../../../../lib/crossline";
 import { rejectUnsafeRequest } from "../guard";
 import { requestCodexSupervisor } from "../../../../../lib/codex-runtime";
+import { titleOf, withUndo } from "../../../../../lib/undo";
 
 const EVIDENCE_KINDS = ["file", "link", "record", "telemetry"];
 
@@ -64,7 +65,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         }).catch(() => undefined);
       }
     }
-    else if (body.action === "archive") result = archiveWorkOrder(ctx, id, reason);
+    else if (body.action === "archive") result = await withUndo(ctx, `归档：${titleOf(ctx, id)}`, () => archiveWorkOrder(ctx, id, reason));
     else if (body.action === "pause") result = pauseWorkOrderExecution(ctx, id, reason);
     else if (body.action === "resume") result = resumeWorkOrderExecution(ctx, id);
     else if (body.action === "complete") {

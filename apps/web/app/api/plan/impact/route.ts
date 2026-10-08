@@ -3,6 +3,10 @@ import { normalizeParams } from "@crossline/planner";
 import { applyChange, previewChange, type Change } from "../../../../lib/impact";
 import { resolveAccessContext } from "../../../../lib/access-guard";
 import { isCrossSiteWrite } from "../../../../lib/same-origin";
+import { withUndo } from "../../../../lib/undo";
+
+const CHANGE_LABEL: Record<string, string> = { estimate: "修改时长", estimate_delta: "修改时长", due: "修改截止日", defer: "推迟开始",
+  availability: "修改可用时段", params: "修改排程参数", weight: "修改重要性" };
 
 const parse = (value: unknown): Change | undefined => {
   const body = value as Partial<Record<string, unknown>> | undefined;
@@ -32,7 +36,7 @@ export async function POST(request: Request) {
   const change = parse(body.change);
   if (!change) return Response.json({ ok: false, code: "CHANGE_INVALID" }, { status: 400 });
   if (body.apply === true) {
-    const result = applyChange(access.ctx, change);
+    const result = await withUndo(access.ctx, CHANGE_LABEL[change.kind] ?? "修改计划", () => applyChange(access.ctx, change));
     return Response.json(result, { status: result.ok ? 200 : 400 });
   }
   try {

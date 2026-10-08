@@ -9,6 +9,7 @@ import { looksLikeScheduleCommand, type DeadLetter } from "@crossline/core";
 import type { Change } from "../lib/impact";
 import { Composer, type ComposerInput } from "./chat/composer";
 import { ImpactCard, useImpact } from "./task/impact";
+import { undoOperation } from "./undo-center";
 
 /** Renews (or first-issues) this browser's 24-hour device lease. Best-effort: a lease that fails to
  * renew only matters once it actually expires, which `POST /api/commands` would then start refusing —
@@ -75,6 +76,24 @@ function ScheduleChange({ change, summary }: { change: Change; summary: string }
   </div>;
 }
 
+/** 「撤销刚才的…」 read by the router: the operation it names, taken back on 撤销 (never applied without the click). */
+function UndoSuggestion({ opId, label, summary }: { opId: string; label: string; summary: string }) {
+  const [status, setStatus] = useState("");
+  if (!opId) return <div className="schedule-change"><p><b>撤销</b> · 最近 24 小时内没有与「{summary || "该描述"}」对应的操作；可在顶栏「撤销」中查看全部操作。</p></div>;
+  return <div className="schedule-change">
+    <p><b>撤销</b> · {label}</p>
+    <div className="schedule-change-actions">
+      <button type="button" className="primary-button" disabled={Boolean(status)} onClick={async () => {
+        setStatus("正在撤销…");
+        const result = await undoOperation(opId);
+        setStatus(result.message);
+        if (result.ok) setTimeout(() => location.reload(), 500);
+      }}>撤销</button>
+      {status && <small role="status">{status}</small>}
+    </div>
+  </div>;
+}
+
 /**
  * 快速收集. A plain line is captured at once (and queued offline without a connection); a batch, or a line that reads like an
  * instruction about planned work, goes to the router, which splits it into captures and changes to preview. Linked tasks, milestones and
@@ -84,6 +103,7 @@ export function OfflineCaptureForm({ ownerId, workspaceId }: { ownerId: string; 
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
   const [changes, setChanges] = useState<Array<{ change: Change; summary: string }>>([]);
+  const [undos, setUndos] = useState<Array<{ opId: string; label: string; summary: string }>>([]);
 
   const capture = async ({ text, files, mentions }: ComposerInput): Promise<boolean> => {
     const [title, ...rest] = text.split("\n");
@@ -115,14 +135,15 @@ export function OfflineCaptureForm({ ownerId, workspaceId }: { ownerId: string; 
   };
 
   const submit = async (input: ComposerInput): Promise<boolean> => {
-    setChanges([]);
+    setChanges([]); setUndos([]);
     if (!input.batch && !looksLikeScheduleCommand(input.text)) return capture(input);
     if (!navigator.onLine) return capture(input);
     setBusy(true); setStatus(input.batch ? "正在拆分…" : "正在识别指令…");
     try {
       const response = await fetch("/api/input/route", { method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ text: input.text, batch: input.batch, mentions: input.mentions }) });
-      const result = await response.json().catch(() => null) as { ok?: boolean; captured?: Array<{ id: string }>; changes?: Array<{ change: Change; summary: string }>; applied?: string[] } | null;
+      const result = await response.json().catch(() => null) as { ok?: boolean; captured?: Array<{ id: string }>; changes?: Array<{ change: Change; summary: string }>; applied?: string[];
+        undos?: Array<{ opId: string; label: string; summary: string }> } | null;
       if (!response.ok || !result?.ok) { setStatus("未能处理，已按普通收集保存"); return capture(input); }
       if (input.files.length && result.captured?.[0]) {
         const upload = new FormData();
@@ -130,8 +151,9 @@ export function OfflineCaptureForm({ ownerId, workspaceId }: { ownerId: string; 
         await fetch(`/api/captures/${encodeURIComponent(result.captured[0].id)}/attachments`, { method: "POST", body: upload }).catch(() => null);
       }
       setChanges(result.changes ?? []);
+      setUndos(result.undos ?? []);
       setStatus([result.captured?.length ? `已收集 ${result.captured.length} 项` : "", result.applied?.length ? `已应用：${result.applied.join("；")}` : "",
-        result.changes?.length ? `${result.changes.length} 项日程调整待确认` : ""].filter(Boolean).join(" · ") || "无可处理内容");
+        result.changes?.length ? `${result.changes.length} 项日程调整待确认` : "", result.undos?.length ? "撤销待确认" : ""].filter(Boolean).join(" · ") || "无可处理内容");
       return true;
     } finally { setBusy(false); }
   };
@@ -139,5 +161,6 @@ export function OfflineCaptureForm({ ownerId, workspaceId }: { ownerId: string; 
   return <Composer mode="capture" busy={busy} placeholder="新任务、想法、链接或日程调整（例如：把作业 2 推到周五）" onSubmit={submit}>
     {status && <small className="muted composer-status" role="status">{status}</small>}
     {changes.map((item, index) => <ScheduleChange key={index} change={item.change} summary={item.summary} />)}
+    {undos.map((item, index) => <UndoSuggestion key={`undo-${index}`} {...item} />)}
   </Composer>;
 }

@@ -5,6 +5,7 @@ import { BottomNav } from "./bottom-nav";
 import { AssistantWidget } from "./assistant-widget";
 import { PendingBadge } from "./pending-badge";
 import { TimerFloat } from "./task/timer-float";
+import { UndoCenter } from "./undo-center";
 
 /**
  * The frame every signed-in page shares: the name, the four working views, the decisions waiting for you, the
@@ -19,6 +20,7 @@ export function AppShell({ active, children, className = "page" }: { active?: st
       <div className="system-state">
         {SIDE_ITEMS.map((item) => <a href={item.href} key={item.label} className={item.label === active ? "active" : ""} aria-current={item.label === active ? "page" : undefined}>
           {item.label}{item.badge && <PendingBadge />}</a>)}
+        <UndoCenter />
         <SignOutButton />
       </div>
     </header>

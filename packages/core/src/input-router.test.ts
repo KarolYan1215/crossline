@@ -20,7 +20,16 @@ test("a change to a task that is not open, or a malformed one, falls back to a c
 
 test("nothing usable keeps the whole text as one capture", () => {
   expect(validateRoutedInput({ items: [] }, [], "把复习挪到周五").items).toEqual([
-    { kind: "capture", title: "把复习挪到周五", context: "", workOrderId: "", change: none, summary: "" }]);
+    { kind: "capture", title: "把复习挪到周五", context: "", workOrderId: "", change: none, summary: "", opId: "" }]);
+});
+
+test("taking something back names a recent operation, or none, and is never filed as new work", () => {
+  const items = validateRoutedInput({ items: [
+    { kind: "undo", title: "", context: "", workOrderId: "", change: none, summary: "撤销不等了", opId: "op-a" },
+    { kind: "undo", title: "", context: "", workOrderId: "", change: none, summary: "撤销不存在的", opId: "op-x" }
+  ] }, [], "撤销刚刚的不等了", ["op-a"]).items;
+  expect(items.map((item) => [item.kind, item.opId])).toEqual([["undo", "op-a"], ["undo", ""]]);
+  expect(looksLikeScheduleCommand("撤销刚刚的不等了")).toBe(true);
 });
 
 test("only instruction-like wording is sent to the router", () => {

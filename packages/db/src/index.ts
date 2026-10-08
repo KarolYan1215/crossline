@@ -1903,6 +1903,24 @@ export class CrosslineStore {
   }
 
   /**
+   * Opens a closed waiting item again (an undo of 「到了」/「不等了」/「推迟」): back to open, with the follow-up day it had before the answer.
+   * Effects the answer already had elsewhere (a re-split it triggered) are not reversed; the item simply waits again.
+   */
+  reopenWaitingItem(workspaceId: string, id: string, followUpAt: string, ownerId: string): { changed: boolean } {
+    return this.#db.transaction(() => {
+      const item = this.listWaitingItems(workspaceId).find((row) => row.id === id);
+      if (!item) throw new Error("WAITING_ITEM_NOT_FOUND");
+      if (item.state === "open" && item.followUpAt === followUpAt) return { changed: false };
+      this.#db.prepare("UPDATE waiting_items SET state = 'open', follow_up_at = ?, updated_at = ? WHERE workspace_id = ? AND id = ?")
+        .run(followUpAt, new Date().toISOString(), workspaceId, id);
+      const attempt = this.listEvents(workspaceId, { type: "waiting.reopened", entityId: id }).length;
+      this.appendEvent({ ownerId, workspaceId, idempotencyKey: `waiting.reopened:${id}:${attempt}`, type: "waiting.reopened", entityId: id,
+        payload: { followUpAt } });
+      return { changed: true };
+    }).immediate();
+  }
+
+  /**
    * Saves a task's step plan. Steps already done or skipped are kept (their ids too); the rest are replaced by the new plan, so a
    * replan after the first steps never undoes recorded progress. One event per version.
    */
@@ -2511,6 +2529,17 @@ export class CrosslineStore {
       INSERT INTO settings (workspace_id, key, value, updated_at) VALUES (?, ?, ?, ?)
       ON CONFLICT(workspace_id, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
     `).run(workspaceId, key, value, new Date().toISOString());
+  }
+
+  /** Every setting whose key starts with one of `prefixes` (what an undo snapshot compares before and after). */
+  listSettings(workspaceId: string, prefixes: readonly string[]): Map<string, string> {
+    const rows = this.#db.prepare("SELECT key, value FROM settings WHERE workspace_id = ?").all(workspaceId) as Array<{ key: string; value: string }>;
+    return new Map(rows.filter((row) => prefixes.some((prefix) => row.key.startsWith(prefix))).map((row) => [row.key, row.value]));
+  }
+
+  /** Back to never set — what undoing the first save of a setting restores. */
+  deleteSetting(workspaceId: string, key: string): void {
+    this.#db.prepare("DELETE FROM settings WHERE workspace_id = ? AND key = ?").run(workspaceId, key);
   }
 
   /**

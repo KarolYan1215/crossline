@@ -5,6 +5,7 @@ import { addCapturedTaskWithId, effectiveSchedulePreferences, getStore } from ".
 import { requestCodexSupervisor } from "./codex-runtime";
 import { analyzeNewCapturesInBackground } from "./capture-followups";
 import { applyChange, type Change } from "./impact";
+import { recentOps, withUndo } from "./undo";
 
 /** The person's choice: an instruction about a planned task is applied at once instead of shown as a preview first. */
 export const INPUT_AUTO_APPLY = "input.schedule.autoApply";
@@ -23,6 +24,8 @@ export const mentionContext = (mentions: Mention[]) => mentions.length
  */
 export async function routeInput(ctx: AccessContext, input: { text: string; batch: boolean; mentions: Mention[] }): Promise<{
   captured: Array<{ id: string; title: string }>; changes: Array<{ change: Change; summary: string }>; applied: string[]; routed: boolean;
+  /** 「撤销刚才的…」: the operation it names (`opId` "" when none of the recent ones matched), shown with an 撤销 button, not applied. */
+  undos: Array<{ opId: string; label: string; summary: string }>;
 }> {
   const timeZone = effectiveSchedulePreferences(ctx).preferences.timeZone;
   let routed: RoutedInput & { routed: boolean };
@@ -30,12 +33,15 @@ export async function routeInput(ctx: AccessContext, input: { text: string; batc
     routed = await requestCodexSupervisor<RoutedInput & { routed: boolean }>(ctx, "/v1/input/route", {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...input, timeZone }), signal: AbortSignal.timeout(10 * 60_000) });
   } catch {
-    routed = { routed: false, items: [{ kind: "capture", title: input.text.slice(0, 240), context: "", workOrderId: "", change: { type: "none", date: "", minutes: 0 }, summary: "" }] };
+    routed = { routed: false, items: [{ kind: "capture", title: input.text.slice(0, 240), context: "", workOrderId: "", change: { type: "none", date: "", minutes: 0 }, summary: "", opId: "" }] };
   }
   const captured: Array<{ id: string; title: string }> = [];
   const changes: Array<{ change: Change; summary: string }> = [];
   const extra = mentionContext(input.mentions);
+  const undos: Array<{ opId: string; label: string; summary: string }> = [];
+  const ops = new Map(recentOps(ctx).map((op) => [op.id, op.label]));
   for (const item of routed.items) {
+    if (item.kind === "undo") { undos.push({ opId: item.opId, label: ops.get(item.opId) ?? "", summary: item.summary }); continue; }
     if (item.kind === "capture") {
       const id = randomUUID();
       addCapturedTaskWithId(ctx, { title: item.title, context: [item.context, extra].filter(Boolean).join("\n").slice(0, 500) }, id, id);
@@ -46,9 +52,9 @@ export async function routeInput(ctx: AccessContext, input: { text: string; batc
   if (captured.length) analyzeNewCapturesInBackground(ctx);
   const applied: string[] = [];
   if (autoApplySchedule(ctx)) {
-    for (const item of changes.splice(0)) if (applyChange(ctx, item.change).ok) applied.push(item.summary);
+    for (const item of changes.splice(0)) if ((await withUndo(ctx, item.summary, () => applyChange(ctx, item.change))).ok) applied.push(item.summary);
   }
-  return { captured, changes, applied, routed: routed.routed };
+  return { captured, changes, applied, routed: routed.routed, undos };
 }
 
 /** What `@` can reference: the person's files, open tasks and live milestones, matching the typed text. */

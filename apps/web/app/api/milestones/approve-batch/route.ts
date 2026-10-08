@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { approveMilestoneDrafts, rejectMilestoneDrafts } from "../../../../lib/approvals";
 import { resolveAccessContext } from "../../../../lib/access-guard";
 import { isCrossSiteWrite } from "../../../../lib/same-origin";
+import { withUndo } from "../../../../lib/undo";
 
 /**
  * Approves (or, with `decision: "archived"`, rejects) the listed milestone drafts; anything not a draft comes back in `skipped`.
@@ -19,5 +20,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, code: "INVALID_DECISION" }, { status: 400 });
   }
   const decide = body?.decision === "archived" ? rejectMilestoneDrafts : approveMilestoneDrafts;
-  return NextResponse.json({ ok: true, ...decide(access.ctx, ids as string[]) });
+  const label = `${body?.decision === "archived" ? "撤销" : "批准"} ${ids.length} 个里程碑草稿`;
+  return NextResponse.json(await withUndo(access.ctx, label, () => ({ ok: true as const, ...decide(access.ctx, ids as string[]) })));
 }

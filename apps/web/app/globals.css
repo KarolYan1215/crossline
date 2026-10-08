@@ -631,3 +631,15 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .ask-group>ol{margin-top:4px}
 .ask-input{border-top:1px solid var(--mist);padding-top:8px;min-width:0}
 .ask-input h4{margin:0 0 4px;font-size:14px;overflow-wrap:anywhere}
+
+/* ── undo: top-bar list and the toast after an operation ── */
+.undo-trigger{padding:4px 10px;border:1px solid var(--mist);background:transparent;color:var(--graphite);font:inherit;font-size:13px;font-weight:600;cursor:pointer}
+.undo-trigger:hover{color:var(--ink);border-color:var(--ink)}
+.undo-menu{min-width:min(360px,calc(100vw - 32px))}
+.undo-menu button{display:flex;justify-content:space-between;gap:12px;text-align:left}
+.undo-menu button span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.undo-toast{position:fixed;z-index:60;left:50%;bottom:24px;transform:translateX(-50%);display:flex;align-items:center;gap:10px;max-width:calc(100vw - 32px);
+  padding:8px 12px;background:var(--ink);color:var(--paper);font-size:13px;box-shadow:0 6px 18px rgb(0 0 0 / .18)}
+.undo-toast span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.undo-toast button{background:transparent;color:var(--paper);border:1px solid currentColor;padding:2px 8px;font:inherit;cursor:pointer}
+@media (max-width:640px){.undo-toast{bottom:84px}}
