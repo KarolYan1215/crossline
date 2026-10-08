@@ -2,9 +2,9 @@ import type { AccessContext } from "@crossline/core";
 import { listAgentTasks } from "@crossline/db";
 import { assistantOffer } from "../lib/agent";
 import { getStore } from "../lib/crossline";
+import { agentTaskStatusLabel } from "../lib/labels";
 import { HandOver } from "./assistant/assistant-controls";
 
-const STATUS: Record<string, string> = { running: "进行中", stale: "没有结果", blocked: "没做成", needs_review: "等你过目", accepted: "已采纳", rejected: "已退回" };
 
 /**
  * On a work order: what the assistant could do for it, with the button to hand it over, and what it already did. The split comes from
@@ -25,6 +25,6 @@ export function AssistantSection({ ctx, workOrderId }: { ctx: AccessContext; wor
           <HandOver workOrderId={workOrderId} category={offer.category ?? ""} categoryLabel={offer.categoryLabel} />
         </>
       : <p className="muted">{offer.reason}</p>}
-    {tasks.length > 0 && <ul>{tasks.map((task) => <li key={task.taskId}>{STATUS[task.status] ?? task.status} · {task.title} <a href="/assistant">在「助手」页查看 →</a></li>)}</ul>}
+    {tasks.length > 0 && <ul>{tasks.map((task) => <li key={task.taskId}>{agentTaskStatusLabel[task.status] ?? task.status} · {task.title} <a href="/assistant">在「助手」页查看 →</a></li>)}</ul>}
   </section>;
 }

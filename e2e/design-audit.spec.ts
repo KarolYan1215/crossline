@@ -51,7 +51,10 @@ async function audit(page: Page): Promise<{ fonts: Finding[]; small: Finding[]; 
       if (seen.has(key)) continue;
       seen.add(key);
       const finding = (detail: string): Finding => ({ selector: describe(element), text: text.slice(0, 40), detail });
-      if (style.fontFamily.split(",")[0]!.replace(/["']/g, "").trim().toLowerCase() !== "arial") fonts.push(finding(style.fontFamily.slice(0, 60)));
+      // Two faces only: Arial (with DengXian) for the system's own text, Microsoft YaHei for text a model wrote (inside `.gen`).
+      const face = style.fontFamily.split(",")[0]!.replace(/["']/g, "").trim().toLowerCase();
+      const expected = element.closest(".gen") ? "microsoft yahei" : "arial";
+      if (face !== expected) fonts.push(finding(style.fontFamily.slice(0, 60)));
       if (parseFloat(style.fontSize) < 12) small.push(finding(style.fontSize));
       if (element.closest(":disabled, [aria-disabled='true']")) continue;
       const fg = parse(style.color);
@@ -87,7 +90,7 @@ for (const path of PAGES) {
     await page.waitForLoadState("networkidle");
     const found = await audit(page);
     if (process.env.AUDIT_VERBOSE) console.log(`AUDIT ${path} ${JSON.stringify(found)}`);
-    expect.soft(found.fonts, "text not in Arial").toEqual([]);
+    expect.soft(found.fonts, "text not in the system face (Arial) or, inside .gen, the generated-text face").toEqual([]);
     expect.soft(found.small, "text under 12px").toEqual([]);
     expect.soft(found.contrast, "text under 7:1 contrast").toEqual([]);
     // The page itself must not scroll sideways (a deliberately scrollable inner region is fine).

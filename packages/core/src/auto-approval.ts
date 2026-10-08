@@ -24,8 +24,12 @@ type Candidate = {
  */
 export function autoApprovalEligible(order: Candidate): { eligible: boolean; reason: string } {
   if (order.state !== "awaiting_plan_approval") return { eligible: false, reason: "不在待批准状态" };
-  const payload = (order.payload ?? {}) as { family?: string; byproductOf?: string; backplan?: unknown; humanCore?: Array<{ intent?: string }> };
+  const payload = (order.payload ?? {}) as { family?: string; byproductOf?: string; backplan?: unknown; datePair?: unknown; humanCore?: Array<{ intent?: string }> };
   const external = mentionsExternalAction(order.intent, ...(payload.humanCore ?? []).map((part) => part.intent));
+  // Work the person's own confirmed course dates already commit them to (a homework between its release and due date): the decision was
+  // confirming the dates. Default-effective, undoable for a day (decided 2026-10-07).
+  if (payload.datePair && order.riskTier !== "high_risk" && !external)
+    return { eligible: true, reason: "来自已确认的课程日期，默认生效" };
   // A step worked back from a milestone the person already approved: the commitment was the milestone, and its next steps follow from
   // it. Asking again for each step is what left fifteen decisions waiting and the week empty (2026-10-07). Undoable for a day.
   if (payload.backplan && order.riskTier !== "high_risk" && !external)

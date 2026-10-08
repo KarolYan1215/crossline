@@ -111,7 +111,22 @@ export type StoredWorkOrder = {
   payload: unknown;
 };
 
-export type EvidenceClaimInput = { kind: "file" | "link" | "record" | "telemetry"; uri: string; description: string };
+/** A normalized step plan as the step planner returns it (packages/core `StepPlan`); kept structural so db does not import core. */
+export type StepPlanInput = {
+  archetypeId: string; quantity: { basis: string; amount: number; unit: string }; rationale: string;
+  steps: Array<{ id: string; role: string; title: string; deliverable: string; doneCriterion: string; share: number;
+    estimate: { p25Minutes: number; p50Minutes: number; p85Minutes: number }; dependsOn: string[]; notBefore: string; dueBy: string;
+    schedulable: boolean; executor: "human" | "agent" | "mixed"; tickOutcome: string }>;
+};
+export type StoredTaskStep = StepPlanInput["steps"][number] & {
+  workOrderId: string; seq: number; status: "planned" | "done" | "skipped"; progressQuarter: number; updatedAt: string;
+};
+export type StoredStepPlan = {
+  workOrderId: string; version: number; archetypeId: string; quantity: StepPlanInput["quantity"]; rationale: string; plannedAt: string;
+  steps: StoredTaskStep[];
+};
+
+export type EvidenceClaimInput ={ kind: "file" | "link" | "record" | "telemetry"; uri: string; description: string };
 
 export type StoredEvidenceClaim = EvidenceClaimInput & {
   id: string; ownerId: string; workspaceId: string; workOrderId: string;
@@ -598,6 +613,23 @@ export class CrosslineStore {
         sources_json TEXT NOT NULL DEFAULT '[]',
         status TEXT NOT NULL CHECK(status IN ('queued','running','done','failed')), note TEXT, run_at TEXT NOT NULL,
         PRIMARY KEY(workspace_id, id)
+      );
+      -- A task's step graph (packages/core/src/steps.ts). The plan row says which archetype and how big; each step is scheduled on
+      -- its own and carries its part of the task's progress. Replanning replaces the steps that are not done yet.
+      CREATE TABLE IF NOT EXISTS task_step_plans (
+        workspace_id TEXT NOT NULL, work_order_id TEXT NOT NULL, version INTEGER NOT NULL, archetype_id TEXT NOT NULL,
+        quantity_json TEXT NOT NULL, rationale TEXT NOT NULL DEFAULT '', planned_at TEXT NOT NULL,
+        PRIMARY KEY(workspace_id, work_order_id)
+      );
+      CREATE TABLE IF NOT EXISTS task_steps (
+        workspace_id TEXT NOT NULL, work_order_id TEXT NOT NULL, id TEXT NOT NULL, seq INTEGER NOT NULL, role TEXT NOT NULL,
+        title TEXT NOT NULL, deliverable TEXT NOT NULL DEFAULT '', done_criterion TEXT NOT NULL DEFAULT '', share REAL NOT NULL,
+        p25_minutes INTEGER NOT NULL, p50_minutes INTEGER NOT NULL, p85_minutes INTEGER NOT NULL, depends_on_json TEXT NOT NULL DEFAULT '[]',
+        not_before TEXT NOT NULL DEFAULT '', due_by TEXT NOT NULL DEFAULT '', schedulable INTEGER NOT NULL DEFAULT 1,
+        executor TEXT NOT NULL DEFAULT 'human', tick_outcome TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'planned' CHECK(status IN ('planned','done','skipped')), progress_quarter INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY(workspace_id, work_order_id, id)
       );
     `);
     if (hasLegacyTasks) this.#migrateLegacyTasks();
@@ -1763,6 +1795,85 @@ export class CrosslineStore {
     }).immediate();
   }
 
+  /**
+   * Saves a task's step plan. Steps already done or skipped are kept (their ids too); the rest are replaced by the new plan, so a
+   * replan after the first steps never undoes recorded progress. One event per version.
+   */
+  saveStepPlan(workspaceId: string, workOrderId: string, plan: StepPlanInput, ownerId: string, reason: string): StoredStepPlan {
+    return this.#db.transaction(() => {
+      const previous = this.getStepPlan(workspaceId, workOrderId);
+      const version = (previous?.version ?? 0) + 1;
+      const now = new Date().toISOString();
+      const kept = (previous?.steps ?? []).filter((step) => step.status !== "planned");
+      const keptIds = new Set(kept.map((step) => step.id));
+      this.#db.prepare("DELETE FROM task_steps WHERE workspace_id = ? AND work_order_id = ? AND status = 'planned'").run(workspaceId, workOrderId);
+      this.#db.prepare(`INSERT INTO task_step_plans (workspace_id, work_order_id, version, archetype_id, quantity_json, rationale, planned_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(workspace_id, work_order_id) DO UPDATE SET version = excluded.version,
+        archetype_id = excluded.archetype_id, quantity_json = excluded.quantity_json, rationale = excluded.rationale, planned_at = excluded.planned_at`)
+        .run(workspaceId, workOrderId, version, plan.archetypeId, JSON.stringify(plan.quantity), plan.rationale, now);
+      // New ids continue after the kept ones so a dependency on a done step still points at it.
+      const offset = kept.length;
+      const insert = this.#db.prepare(`INSERT INTO task_steps (workspace_id, work_order_id, id, seq, role, title, deliverable, done_criterion, share,
+        p25_minutes, p50_minutes, p85_minutes, depends_on_json, not_before, due_by, schedulable, executor, tick_outcome, status, progress_quarter, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'planned', 0, ?)`);
+      const rename = new Map(plan.steps.map((step, index) => [step.id, keptIds.has(step.id) ? step.id : `v${version}s${index + 1}`]));
+      plan.steps.forEach((step, index) => {
+        if (keptIds.has(step.id)) return;
+        insert.run(workspaceId, workOrderId, rename.get(step.id)!, offset + index, step.role, step.title, step.deliverable, step.doneCriterion,
+          step.share, step.estimate.p25Minutes, step.estimate.p50Minutes, step.estimate.p85Minutes,
+          JSON.stringify(step.dependsOn.map((dep) => rename.get(dep) ?? dep)), step.notBefore, step.dueBy, step.schedulable ? 1 : 0,
+          step.executor, step.tickOutcome, now);
+      });
+      this.appendEvent({ ownerId, workspaceId, idempotencyKey: `task.steps_planned:${workOrderId}:${version}`, type: "task.steps_planned",
+        entityId: workOrderId, payload: { version, archetypeId: plan.archetypeId, steps: plan.steps.length, kept: kept.length, reason } });
+      return this.getStepPlan(workspaceId, workOrderId)!;
+    }).immediate();
+  }
+
+  getStepPlan(workspaceId: string, workOrderId: string): StoredStepPlan | undefined {
+    return this.listStepPlans(workspaceId, workOrderId)[0];
+  }
+
+  listStepPlans(workspaceId: string, workOrderId?: string): StoredStepPlan[] {
+    const plans = this.#db.prepare(`SELECT * FROM task_step_plans WHERE workspace_id = ?${workOrderId ? " AND work_order_id = ?" : ""}`)
+      .all(...(workOrderId ? [workspaceId, workOrderId] : [workspaceId])) as Array<Record<string, string | number>>;
+    if (!plans.length) return [];
+    const steps = this.#db.prepare(`SELECT * FROM task_steps WHERE workspace_id = ?${workOrderId ? " AND work_order_id = ?" : ""} ORDER BY work_order_id, seq`)
+      .all(...(workOrderId ? [workspaceId, workOrderId] : [workspaceId])) as Array<Record<string, string | number>>;
+    const byOrder = new Map<string, StoredTaskStep[]>();
+    for (const row of steps) {
+      const list = byOrder.get(String(row.work_order_id)) ?? [];
+      list.push({ id: String(row.id), workOrderId: String(row.work_order_id), seq: Number(row.seq), role: String(row.role), title: String(row.title),
+        deliverable: String(row.deliverable), doneCriterion: String(row.done_criterion), share: Number(row.share),
+        estimate: { p25Minutes: Number(row.p25_minutes), p50Minutes: Number(row.p50_minutes), p85Minutes: Number(row.p85_minutes) },
+        dependsOn: JSON.parse(String(row.depends_on_json)) as string[], notBefore: String(row.not_before), dueBy: String(row.due_by),
+        schedulable: Number(row.schedulable) === 1, executor: row.executor as StoredTaskStep["executor"], tickOutcome: String(row.tick_outcome),
+        status: row.status as StoredTaskStep["status"], progressQuarter: Number(row.progress_quarter), updatedAt: String(row.updated_at) });
+      byOrder.set(String(row.work_order_id), list);
+    }
+    return plans.map((row) => ({ workOrderId: String(row.work_order_id), version: Number(row.version), archetypeId: String(row.archetype_id),
+      quantity: JSON.parse(String(row.quantity_json)) as StoredStepPlan["quantity"], rationale: String(row.rationale),
+      plannedAt: String(row.planned_at), steps: byOrder.get(String(row.work_order_id)) ?? [] }));
+  }
+
+  /** Progress on one step: quarters (0–4), done, or skipped. Each change is its own event. */
+  updateStepProgress(workspaceId: string, workOrderId: string, stepId: string,
+    change: { progressQuarter?: number; status?: StoredTaskStep["status"] }, ownerId: string, source: string): { changed: boolean } {
+    return this.#db.transaction(() => {
+      const step = this.getStepPlan(workspaceId, workOrderId)?.steps.find((item) => item.id === stepId);
+      if (!step) throw new Error("STEP_NOT_FOUND");
+      const quarter = change.status === "done" ? 4 : Math.max(0, Math.min(4, Math.round(change.progressQuarter ?? step.progressQuarter)));
+      const status = change.status ?? (quarter === 4 ? "done" : step.status === "done" ? "planned" : step.status);
+      if (quarter === step.progressQuarter && status === step.status) return { changed: false };
+      this.#db.prepare("UPDATE task_steps SET progress_quarter = ?, status = ?, updated_at = ? WHERE workspace_id = ? AND work_order_id = ? AND id = ?")
+        .run(quarter, status, new Date().toISOString(), workspaceId, workOrderId, stepId);
+      const attempt = this.listEvents(workspaceId, { type: "task.step_progress", entityId: workOrderId }).length;
+      this.appendEvent({ ownerId, workspaceId, idempotencyKey: `task.step_progress:${workOrderId}:${stepId}:${attempt}`, type: "task.step_progress",
+        entityId: workOrderId, payload: { stepId, progressQuarter: quarter, status, source } });
+      return { changed: true };
+    }).immediate();
+  }
+
   listMilestoneAnchors(workspaceId: string): StoredMilestoneAnchor[] {
     const rows = this.#db.prepare("SELECT * FROM milestone_anchors WHERE workspace_id = ? ORDER BY stage, milestone_id")
       .all(workspaceId) as Array<Record<string, string | number>>;
@@ -2470,6 +2581,7 @@ export class CrosslineStore {
       "assistant_threads", "assistant_attachments", "milestone_templates",
       "workspace_projects", "source_documents", "onboarding_sessions", "onboarding_messages", "profile_facts",
       "diligence_reports", "milestone_anchors", "model_usage", "activity_segments", "waiting_items",
+      "task_step_plans", "task_steps",
       // Consent state is part of the ledger: a restore that silently re-enables collection is not a restore.
       "settings",
       // `principals`/`workspaces` are not workspace-scoped rows themselves — a principal is scoped by

@@ -17,6 +17,8 @@ import { createCalendarPublisher } from "./calendar-publish";
 import { budgetPolicy, CALENDAR_SYNC_FAILURE } from "@crossline/core";
 import { createFlywheelExpander } from "./flywheel";
 import { createManualbookBuilder, pendingMaterialWorkOrders } from "./manualbook";
+import { createStepPlanner, createWarningReviewer, tasksAwaitingStepPlan, warningsAwaitingReview } from "./step-planner";
+import { materializeDatePairs } from "./date-pairs";
 import { createMilestoneGate, pendingMilestoneGates } from "./milestone-gate-runner";
 import { createMilestoneConversation, createMilestoneProposer } from "./milestone-proposer";
 import { createGoalBackplanner, milestonesAwaitingBackplan } from "./goal-backplanner";
@@ -122,6 +124,42 @@ async function autoBackplanPass(workspaceId: string, checkedAt = new Date().toIS
   } finally { autoBackplanning.delete(workspaceId); }
 }
 
+/**
+ * Turns confirmed course dates into tasks, gives every committed task a step plan (the migration of existing tasks is this same pass,
+ * two a tick), and has a reviewer look at plans the mechanical checks flagged. Quota-gated like the other model passes.
+ */
+const stepPlanning = new Set<string>();
+async function stepPlanPass(workspaceId: string, checkedAt = new Date().toISOString()): Promise<void> {
+  if (stepPlanning.has(workspaceId)) return;
+  stepPlanning.add(workspaceId);
+  try {
+    try {
+      const created = materializeDatePairs(analysisStore, workspaceId);
+      if (created.length) console.info(JSON.stringify({ type: "datepair.created", checkedAt, workspaceId, created }));
+    } catch (error) { console.info(JSON.stringify({ type: "datepair.failed", checkedAt, workspaceId, message: error instanceof Error ? error.message : "" })); }
+    if (!codexSupervisor) return;
+    const ids = tasksAwaitingStepPlan(analysisStore, workspaceId);
+    const reviews = warningsAwaitingReview(analysisStore, workspaceId);
+    if (!ids.length && !reviews.length) return;
+    const signal = await readCost();
+    if (!signal.available || budgetPolicy(Math.max(signal.short?.usedPercent ?? 0, signal.long?.usedPercent ?? 0)).mode !== "normal") return;
+    enterUsageWorkspace(workspaceId);
+    const planner = createStepPlanner(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client);
+    for (const id of ids) {
+      // A replan the person (or the assistant) asked for carries what to change.
+      const request = analysisStore.listEvents(workspaceId, { type: "task.steps_replan_requested", entityId: id }).at(-1)?.payload as { feedback?: string } | undefined;
+      const outcome = await planner(id, request?.feedback ?? "").catch(() => undefined);
+      if (outcome) console.info(JSON.stringify({ type: `steps.${outcome.state}`, checkedAt, workspaceId, workOrderId: id,
+        ...(outcome.state === "planned" ? { warnings: outcome.warnings.length } : { code: outcome.code }) }));
+    }
+    const reviewer = createWarningReviewer(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client, (id, feedback) => planner(id, feedback));
+    for (const item of reviews) {
+      const verdict = await reviewer(item).catch(() => undefined);
+      if (verdict) console.info(JSON.stringify({ type: `validation.${verdict.verdict}`, checkedAt, workspaceId, workOrderId: item.workOrderId }));
+    }
+  } finally { stepPlanning.delete(workspaceId); }
+}
+
 async function tick(): Promise<void> {
   const checkedAt = new Date().toISOString();
   mkdirSync(dataDir, { recursive: true });
@@ -159,6 +197,7 @@ async function tick(): Promise<void> {
     for (const workspace of workspaces) await autoAnalyzePass(workspace.id, checkedAt);
     for (const workspace of workspaces) await autoBackplanPass(workspace.id, checkedAt);
   }
+  for (const workspace of workspaces) await stepPlanPass(workspace.id, checkedAt);
   // The milestone gate. Without this it existed only inside `scripts/gate-loop-check.ts`, so on the
   // real ledger a milestone-bound work order reached `evidence_review`, the approvals page said
   // 「等待里程碑闸门」 — and nothing was ever going to judge it. A verdict other than `pass` holds the
@@ -540,7 +579,7 @@ if (!capabilitySecret) {
         "crossline:crossline-flywheel-scout", "crossline:crossline-manualbook-designer", "crossline:crossline-material-researcher", "crossline:crossline-material-writer", "crossline:crossline-milestone-architect",
         "crossline:crossline-goal-backplanner", "crossline:crossline-background-facts", "crossline:crossline-assistant",
         "crossline:crossline-onboarding", "crossline:crossline-due-diligence", "crossline:crossline-plan-explainer", "crossline:crossline-weekly-insight",
-        "crossline:crossline-agent"
+        "crossline:crossline-agent", "crossline:crossline-step-planner", "crossline:crossline-validation-reviewer"
       ]
     },
     autoAnalyzeCaptures: (workspaceId) => autoAnalyzePass(workspaceId),

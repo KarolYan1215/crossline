@@ -14,4 +14,10 @@ export const stateLabel: Record<string, string> = {
 export const stateLabelFor = (state: string, paused: boolean): string =>
   state === "active" && paused ? "已暂停" : stateLabel[state] ?? "未知状态";
 
-export const riskLabel: Record<string, string> = { routine: "常规", milestone: "中（影响里程碑）", high_risk: "高风险" };
+export const riskLabel: Record<string, string> = { routine: "常规", milestone: "影响里程碑", high_risk: "高风险" };
+export const riskTone: Record<string, "neutral" | "warn" | "risk"> = { routine: "neutral", milestone: "warn", high_risk: "risk" };
+
+/** An assistant run's status, read by the assistant page and the task's own section. */
+export const agentTaskStatusLabel: Record<string, string> = {
+  running: "进行中", stale: "无结果（中断）", blocked: "未完成", needs_review: "待审阅", accepted: "已批准", rejected: "未批准"
+};

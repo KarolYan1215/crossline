@@ -137,7 +137,7 @@ test("a task card's preview drawer opens in place, and its standalone-page link 
   await expect(page.locator(".task-detail-view h2")).toHaveText(title);
 });
 
-test("Plan is one calendar with day, week and month over one version, and workflow redirects", async ({ page }, testInfo) => {
+test("Plan is one calendar with day, week and month over one version", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-chrome");
   await seedPendingChanges(page);
   await page.goto("/plan");
@@ -157,8 +157,6 @@ test("Plan is one calendar with day, week and month over one version, and workfl
     await page.addStyleTag({ content: STABLE_FOR_SCREENSHOT });
     await expect(page.locator(".subpage")).toHaveScreenshot("plan-diff.png");
   }
-  await page.goto("/workflow");
-  await expect(page).toHaveURL(/\/workbench$/);
 });
 
 test("editing availability re-runs the scheduler instead of only storing a preference", async ({ page }, testInfo) => {

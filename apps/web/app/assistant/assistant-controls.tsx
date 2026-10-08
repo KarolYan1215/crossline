@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { AGENT_CATEGORIES } from "@crossline/core";
 
 const post = (path: string, body: Record<string, unknown>) => fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 
@@ -81,8 +82,7 @@ export function HandOver({ workOrderId, category, categoryLabel }: { workOrderId
   return <span className="assistant-actions">
     {!category && <label>这件事属于<select value={choice} onChange={(event) => setChoice(event.target.value)}>
       <option value="">选一类…</option>
-      <option value="data_code_sim">数据、代码、仿真</option><option value="read_research_organize">阅读、调研、整理</option>
-      <option value="draft_text">起草文字（不发送）</option><option value="files_calendar_prep">文件整理和日程准备</option>
+      {Object.entries(AGENT_CATEGORIES).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
     </select></label>}
     <button type="button" className="primary-button" disabled={busy || !choice} onClick={() => void go()}>交给助手{category ? `（${categoryLabel}）` : ""}</button>
     {message && <small role="status">{message}</small>}

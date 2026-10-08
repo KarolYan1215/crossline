@@ -23,10 +23,13 @@
   --block:#0A0A0A;
   --now:#085E3A;
   --now-ink:#0B7A4B;
-  /* One typeface everywhere: Arial, with the system's CJK sans behind it. */
-  --f-display:Arial,"Microsoft YaHei","PingFang SC","Noto Sans SC",Helvetica,sans-serif;
-  --f-sans:Arial,"Microsoft YaHei","PingFang SC","Noto Sans SC",Helvetica,sans-serif;
-  --f-mono:Arial,"Microsoft YaHei","PingFang SC","Noto Sans SC",Helvetica,sans-serif;
+  /* System text: Arial with DengXian (等线) behind it for CJK. Model-generated text uses --f-gen (Microsoft YaHei), so the two read
+     differently without labelling anything as AI. On Windows Arial's own CJK fallback *is* YaHei, which is why the system face
+     names DengXian explicitly. */
+  --f-display:Arial,"DengXian","等线","PingFang SC","Noto Sans SC",Helvetica,sans-serif;
+  --f-sans:Arial,"DengXian","等线","PingFang SC","Noto Sans SC",Helvetica,sans-serif;
+  --f-mono:Arial,"DengXian","等线","PingFang SC","Noto Sans SC",Helvetica,sans-serif;
+  --f-gen:"Microsoft YaHei","微软雅黑","Noto Sans SC","PingFang SC",sans-serif;
   /* The five line colours: distinguishable by hue and by lightness, each at least 4.5:1 on white as text. */
   --c-research:#0A5198; --c-startup:#8C3709; --c-media:#792E9C; --c-investment:#085E3A; --c-health:#664E00;
   color-scheme:light;
@@ -70,6 +73,8 @@ button{font:inherit;color:inherit;background:none;border:none;cursor:pointer;pad
 input,select,textarea{font:inherit;color:inherit;background:var(--paper);border:1px solid var(--mist);border-radius:0;padding:6px 8px}
 input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-visible,a:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--ink);outline-offset:1px}
 .mono{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+/* Text a model wrote (summaries, reasons, tutorials): a different face, nothing else. */
+.gen,.gen *{font-family:var(--f-gen)}
 .micro,.mono-label,.eyebrow{font-family:var(--f-mono);font-size:12px;color:var(--graphite)}
 .muted{color:var(--graphite)}
 .sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
@@ -213,15 +218,6 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .line-symbol.media{width:12px;height:0;border-width:0 0 2px;rotate:none;box-shadow:0 4px 0 -1px var(--ink)}
 .line-symbol.investment{border-radius:50%;rotate:none}
 .capacity-blocker{font-family:var(--f-mono);font-size:12px;color:var(--ink)}
-
-/* ── identity flywheel ─────────────────────── */
-/* A fixed-height horizontal scroller, not a diagram that grows with its own content — the previous
-   version had no height ceiling and could end up taller than the hero action card on a wide screen. */
-.flywheel-strip-scroll{overflow-x:auto;overflow-y:hidden;scroll-snap-type:x proximity;padding-bottom:2px}
-.flywheel-strip-scroll svg{display:block;font-family:var(--f-sans);scroll-snap-align:start}
-.flywheel-chip-title{font-family:var(--f-sans);font-size:12px;font-weight:700;fill:var(--ink)}
-.flywheel-chip-signal{font-family:var(--f-mono);font-size:12px;fill:var(--graphite)}
-.identity-flywheel-empty{margin:6px 0 0;color:var(--shade);font-size:12px}
 
 /* Shape, not colour, carries state — the reference uses the same glyph vocabulary. */
 .gly{display:inline-block;width:9px;height:9px;border:1px solid var(--ink);margin-right:7px;vertical-align:baseline}
@@ -580,7 +576,7 @@ button:disabled{opacity:.4;cursor:not-allowed}
 
 /* Onboarding (profile interview). Arial, dense, high contrast: this screen is the first piece of the
    redesign — conversation and live profile side by side, with no empty bands. */
-.ob{font-family:Arial,"Microsoft YaHei","PingFang SC",sans-serif;font-size:15px;line-height:1.4;color:#0b0b0b;display:grid;grid-template-columns:minmax(0,2fr) minmax(300px,1fr);gap:12px;align-items:start}
+.ob{font-family:var(--f-sans);font-size:15px;line-height:1.4;color:#0b0b0b;display:grid;grid-template-columns:minmax(0,2fr) minmax(300px,1fr);gap:12px;align-items:start}
 .ob[data-dragging="true"]{outline:2px dashed #1d4ed8;outline-offset:4px}
 .ob h2,.ob h3{font-family:inherit;margin:0;letter-spacing:0;text-transform:none}
 .ob h2{font-size:16px;font-weight:700}

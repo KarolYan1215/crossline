@@ -5,6 +5,9 @@
  */
 export const goalSettingKey = (milestoneId: string) => `goal.settings:${milestoneId}`;
 
+/** The weekly availability pattern (`AvailabilityWindow[]`); the step planner sizes a task's window from it. */
+export const AVAILABILITY_SETTING = "schedule.availability";
+
 /** The last calendar read that failed (`{code, message, sources, at}`), written by the worker, cleared by a clean read. */
 export const CALENDAR_SYNC_FAILURE = "calendar.sync.failure";
 /** The last automatic publish to the Crossline calendar that failed, written by the web's timer, cleared by a success. */

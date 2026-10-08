@@ -3,11 +3,11 @@ import { requireSessionContext } from "../../lib/access-guard";
 import { ensureSeeded } from "../../lib/crossline";
 import { loadAssistant, loadTaskAudit, type AssistantView } from "../../lib/agent";
 import { AGENT_CATEGORIES } from "@crossline/core";
+import { agentTaskStatusLabel } from "../../lib/labels";
 import { ApprovalButtons, CategoryDecision, CategoryRevoke, PauseSwitch, ReviewButtons } from "./assistant-controls";
 
 export const dynamic = "force-dynamic";
 
-const STATUS: Record<string, string> = { running: "进行中", stale: "没有结果（可能被中断）", blocked: "没做成", needs_review: "等你过目", accepted: "已采纳", rejected: "已退回" };
 const RESULT: Record<string, string> = { pass: "通过", fail: "未通过", not_run: "没跑" };
 const minutes = (ms: number) => ms >= 60_000 ? `${Math.round(ms / 60_000)} 分钟` : `${Math.max(1, Math.round(ms / 1000))} 秒`;
 
@@ -91,7 +91,7 @@ export default async function AssistantPage() {
 
     {earlier.length > 0 && <section className="review-block" aria-label="以前的">
       <h2>以前的</h2>
-      {earlier.slice(0, 20).map((task) => <details key={task.taskId} className="fold"><summary>{STATUS[task.status] ?? task.status} · {task.title} · {AGENT_CATEGORIES[task.category]}{task.reviewNote ? ` · 备注：${task.reviewNote}` : ""}</summary>
+      {earlier.slice(0, 20).map((task) => <details key={task.taskId} className="fold"><summary>{agentTaskStatusLabel[task.status] ?? task.status} · {task.title} · {AGENT_CATEGORIES[task.category]}{task.reviewNote ? ` · 备注：${task.reviewNote}` : ""}</summary>
         <TaskBody ctx={ctx} task={task} />
       </details>)}
     </section>}

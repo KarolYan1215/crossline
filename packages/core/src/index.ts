@@ -426,3 +426,5 @@ export function validateCommandEnvelope(value: unknown):
   return { ok: true, command: candidate as CommandEnvelope };
 }
 export * from "./asks";
+export * from "./archetypes";
+export * from "./steps";

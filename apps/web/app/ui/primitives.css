@@ -1,0 +1,114 @@
+/*
+ * Shared primitives (apps/web/app/ui/*): tags, segmented control, slider, date chip, duration bar, progress ring, menu, sheet,
+ * tooltip and the SVG charts. Flat, no radius beyond 2px, line colours only through --lc.
+ */
+
+/* ── tags ── */
+.ui-tag{display:inline-flex;align-items:center;gap:3px;padding:0 6px;border:1px solid var(--mist);color:var(--graphite);font-size:12px;line-height:18px;font-weight:700;white-space:nowrap;vertical-align:1px}
+.ui-tag[data-tone="info"]{border-color:var(--ink);color:var(--ink)}
+.ui-tag[data-tone="warn"]{border-color:#8A5A00;color:#6B4400}
+.ui-tag[data-tone="risk"]{border-color:#A1262B;color:#8A1F24}
+.ui-tag[data-tone="ok"]{border-color:var(--now-ink);color:var(--now)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .ui-tag[data-tone="warn"]{border-color:#E8C547;color:#E8C547}:root:not([data-theme="light"]) .ui-tag[data-tone="risk"]{border-color:#FF8A80;color:#FF8A80}}
+:root[data-theme="dark"] .ui-tag[data-tone="warn"]{border-color:#E8C547;color:#E8C547}
+:root[data-theme="dark"] .ui-tag[data-tone="risk"]{border-color:#FF8A80;color:#FF8A80}
+.ui-line-tag,.ui-supports{border-color:var(--lc,var(--graphite));color:var(--lc,var(--graphite))}
+.ui-supports{font-weight:400}
+.hl-line{color:var(--lc,var(--ink));font-weight:700}
+
+/* ── segmented control ── */
+.ui-segmented{display:inline-flex;border:1px solid var(--ink)}
+.ui-segmented button{min-height:30px;padding:4px 12px;font-size:13px}
+.ui-segmented button+button{border-left:1px solid var(--mist)}
+.ui-segmented button[aria-checked="true"]{background:var(--ink);color:var(--paper);font-weight:700}
+.ui-segmented button:disabled{opacity:.45;cursor:default}
+
+/* ── slider ── */
+.ui-slider{position:relative;display:flex;align-items:center;gap:10px;min-width:160px}
+.ui-slider input{flex:1;appearance:none;-webkit-appearance:none;height:4px;padding:0;border:0;background:linear-gradient(to right,var(--lc,var(--ink)) var(--fill),var(--mist) var(--fill))}
+.ui-slider input::-webkit-slider-thumb{-webkit-appearance:none;width:18px;height:18px;border-radius:50%;background:var(--paper);border:2px solid var(--lc,var(--ink));cursor:grab}
+.ui-slider input::-moz-range-thumb{width:16px;height:16px;border-radius:50%;background:var(--paper);border:2px solid var(--lc,var(--ink));cursor:grab}
+.ui-slider-preset{position:absolute;top:50%;width:2px;height:12px;margin:-6px 0 0 -1px;background:var(--graphite);pointer-events:auto}
+.ui-slider output{min-width:2.5em;text-align:right;font-size:13px}
+
+/* ── date chip ── */
+.ui-date-chip{position:relative;display:inline-flex}
+.ui-date-chip button{min-height:26px;padding:2px 8px;border:1px solid var(--mist);font-size:13px;white-space:nowrap}
+.ui-date-chip button:hover{border-color:var(--ink)}
+.ui-date-chip input{position:absolute;inset:0;opacity:0;pointer-events:none;width:100%}
+
+/* ── duration bar ── */
+.ui-duration{position:relative;display:grid;grid-template-columns:minmax(80px,1fr) auto;align-items:center;gap:8px;min-width:0}
+.ui-duration-track{position:relative;height:8px;background:var(--chalk);border:1px solid var(--mist)}
+.ui-duration-range{position:absolute;top:0;bottom:0;background:var(--lc,var(--graphite));opacity:.35}
+.ui-duration-handle{position:absolute;top:50%;width:14px;height:14px;margin:-7px 0 0 -7px;border-radius:50%;background:var(--paper);border:2px solid var(--lc,var(--ink));touch-action:none}
+.ui-duration[data-editable] .ui-duration-handle{cursor:ew-resize}
+.ui-duration-handle:disabled{cursor:default}
+.ui-duration-text{font-size:13px;white-space:nowrap}
+.ui-duration-text small{margin-left:6px;color:var(--graphite)}
+.ui-duration-live{position:absolute;bottom:100%;transform:translateX(-50%);padding:1px 5px;background:var(--ink);color:var(--paper);font-size:12px;white-space:nowrap}
+
+/* ── progress ring: red at a quarter, green when full ── */
+.ui-ring{display:inline-flex;vertical-align:middle;line-height:0}
+.ui-ring-seg{fill:none;stroke:var(--mist);stroke-width:3.5;stroke-linecap:butt}
+.ui-ring[data-level="1"] .ui-ring-seg[data-on]{stroke:#C4302B}
+.ui-ring[data-level="2"] .ui-ring-seg[data-on]{stroke:#D9822B}
+.ui-ring[data-level="3"] .ui-ring-seg[data-on]{stroke:#9AA82A}
+.ui-ring[data-level="4"] .ui-ring-seg[data-on]{stroke:#1F8A4C}
+button.ui-ring:hover .ui-ring-seg:not([data-on]){stroke:#9BD3AE}
+
+/* ── menu (platform popover) ── */
+.ui-menu-trigger{display:inline-grid;place-items:center;width:32px;height:32px;border:1px solid var(--mist);font-size:18px;line-height:1}
+.ui-menu-trigger:hover{border-color:var(--ink)}
+.ui-menu{margin:0;padding:4px;border:1px solid var(--ink);background:var(--paper);color:var(--ink);min-width:200px;position-area:top span-right;position-try-fallbacks:flip-block}
+.ui-menu button{display:flex;flex-direction:column;align-items:flex-start;width:100%;padding:7px 10px;text-align:left;font-size:13px}
+.ui-menu button:hover,.ui-menu button:focus-visible{background:var(--chalk)}
+.ui-menu small{color:var(--graphite)}
+
+/* ── sheet (dialog / right drawer) ── */
+.ui-sheet{position:fixed;z-index:61;display:grid;grid-template-rows:auto minmax(0,1fr) auto;background:var(--paper);color:var(--ink);border:1px solid var(--ink)}
+.ui-sheet[data-side="center"]{top:50%;left:50%;transform:translate(-50%,-50%);width:min(860px,calc(100vw - 32px));max-height:min(88vh,920px)}
+.ui-sheet[data-side="right"]{top:0;right:0;bottom:0;width:min(520px,100vw);border-width:0 0 0 1px}
+.ui-sheet-head{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid var(--mist)}
+.ui-sheet-head h2{margin:0;font-size:17px}
+.ui-sheet-body{overflow:auto;padding:12px 14px;min-height:0}
+.ui-sheet-foot{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;padding:10px 14px;border-top:1px solid var(--mist)}
+.ui-icon-button{display:inline-grid;place-items:center;width:32px;height:32px;font-size:20px;line-height:1}
+.ui-tip{max-width:260px;padding:5px 8px;background:var(--ink);color:var(--paper);font-size:12px;line-height:1.4;z-index:80}
+.ui-tip-arrow{fill:var(--ink)}
+
+/* ── charts ── */
+.ui-bars{display:grid;gap:4px;margin:0}
+.ui-bar-row{display:grid;grid-template-columns:minmax(64px,auto) minmax(60px,1fr) auto;gap:8px;align-items:center;font-size:13px}
+.ui-bar-track{width:100%;height:10px;background:var(--chalk)}
+.ui-bar-fill{fill:var(--lc,var(--ink))}
+.ui-bar-value{color:var(--graphite);white-space:nowrap}
+.ui-stacked{display:block;width:100%;height:14px}
+.ui-stacked-bg{fill:var(--chalk)}
+.ui-stacked-seg{fill:var(--lc,var(--graphite));stroke:var(--paper);stroke-width:.4}
+.ui-limit{stroke:var(--ink);stroke-width:.8;vector-effect:non-scaling-stroke}
+.ui-bullet{display:block;width:100%;height:16px}
+.ui-bullet-bg{fill:var(--chalk)}
+.ui-bullet-bare{fill:var(--mist)}
+.ui-bullet-value{fill:var(--lc,var(--ink))}
+.ui-bullet-value[data-predicted]{opacity:.5}
+.ui-bullet-target{fill:var(--ink)}
+.ui-donut-bg{fill:none;stroke:var(--chalk);stroke-width:6}
+.ui-donut-fg{fill:none;stroke:var(--lc,var(--ink));stroke-width:6}
+.ui-donut-text{font-size:12px;font-weight:700;fill:var(--ink)}
+.ui-spark-line{fill:none;stroke:var(--lc,var(--ink));stroke-width:1.5}
+.ui-spark-last{fill:var(--lc,var(--ink))}
+.ui-spark-hit{fill:transparent}
+.ui-heat{border-collapse:collapse;font-size:12px}
+.ui-heat th{padding:0 4px;font-weight:400;color:var(--graphite)}
+.ui-heat td{width:18px;height:14px;border:1px solid var(--paper);background:var(--chalk)}
+.ui-heat td[data-level="1"]{background:color-mix(in srgb,var(--lc,var(--ink)) 25%,var(--paper))}
+.ui-heat td[data-level="2"]{background:color-mix(in srgb,var(--lc,var(--ink)) 55%,var(--paper))}
+.ui-heat td[data-level="3"]{background:var(--lc,var(--ink))}
+
+/* A deterministic figure next to its label: the number big, the label small. */
+.ui-stat{display:grid;gap:2px}
+.ui-stat b{font-size:20px;font-variant-numeric:tabular-nums}
+.ui-stat span{font-size:12px;color:var(--graphite)}
+
+@media (prefers-reduced-motion:reduce){.ui-sheet,.ui-menu{transition:none}}

@@ -1,0 +1,177 @@
+import { ARCHETYPE_IDS, STEP_ROLES, archetypeById, isStepRole, type StepRole } from "./archetypes";
+
+/**
+ * A task's step graph: the step planner's wire contract, the normalization that makes any answer usable, the warnings a reviewer
+ * model then looks at, and the task's progress.
+ *
+ * Only the shape is a hard check (a malformed answer is repaired in the same thread). Everything about content — a role outside the
+ * archetype, an ordering rule broken, shares that do not add up, a total that does not fit the window — is normalized where it can be
+ * and reported as a warning, never a refusal: the plan is saved and scheduled, and `crossline-validation-reviewer` decides whether to
+ * dismiss the warning or have the plan redone.
+ */
+
+export type StepExecutor = "human" | "agent" | "mixed";
+export type PlannedStep = {
+  id: string; role: StepRole; title: string; deliverable: string; doneCriterion: string;
+  /** This step's part of the task's progress; all shares sum to 1 after normalization. */
+  share: number;
+  estimate: { p25Minutes: number; p50Minutes: number; p85Minutes: number };
+  dependsOn: string[];
+  /** YYYY-MM-DD or "". */
+  notBefore: string; dueBy: string;
+  /** False for waiting: it takes no time on the calendar. */
+  schedulable: boolean;
+  /** Whether the system could do it. Never shown as a label; it decides whether 「交给 Agent」 appears. */
+  executor: StepExecutor;
+  /** The near-term result this step puts on the milestone axis, "" when it is not a tick. */
+  tickOutcome: string;
+};
+export type StepPlan = {
+  archetypeId: string;
+  quantity: { basis: string; amount: number; unit: string };
+  rationale: string;
+  steps: PlannedStep[];
+};
+export type StepWarning = { code: string; detail: string };
+
+const str = { type: "string" };
+const num = { type: "number" };
+const object = (properties: Record<string, unknown>) => ({ type: "object", properties, required: Object.keys(properties), additionalProperties: false });
+
+export const STEP_PLAN_SCHEMA = object({
+  archetypeId: { type: "string", enum: ARCHETYPE_IDS },
+  quantity: object({ basis: str, amount: num, unit: str }),
+  rationale: str,
+  steps: { type: "array", items: object({
+    id: str, role: { type: "string", enum: Object.keys(STEP_ROLES) }, title: str, deliverable: str, doneCriterion: str, share: num,
+    estimate: object({ p25Minutes: num, p50Minutes: num, p85Minutes: num }),
+    dependsOn: { type: "array", items: str }, notBefore: str, dueBy: str, schedulable: { type: "boolean" },
+    executor: { type: "string", enum: ["human", "agent", "mixed"] }, tickOutcome: str
+  }) }
+});
+
+/** The reviewer's answer to a set of warnings (Skill `crossline-validation-reviewer`). */
+export type ValidationReview = { verdict: "dismiss" | "redo"; notes: string };
+export const VALIDATION_REVIEW_SCHEMA = object({ verdict: { type: "string", enum: ["dismiss", "redo"] }, notes: str });
+export function validateValidationReview(value: unknown): ValidationReview {
+  const review = value as ValidationReview | undefined;
+  if (!review || !["dismiss", "redo"].includes(review.verdict) || typeof review.notes !== "string") throw new Error("VALIDATION_REVIEW_INVALID");
+  return { verdict: review.verdict, notes: review.notes.trim().slice(0, 1200) };
+}
+
+export const MAX_STEPS = 40;
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+/** The hard check: the shape. Throws so the runner sends the problem back on the same thread. */
+export function validateStepPlanShape(value: unknown): StepPlan {
+  const plan = value as StepPlan | undefined;
+  if (!plan || !archetypeById(plan.archetypeId) || !Array.isArray(plan.steps) || plan.steps.length === 0 || plan.steps.length > MAX_STEPS)
+    throw new Error("STEP_PLAN_SCHEMA_INVALID");
+  for (const step of plan.steps) {
+    if (!step || typeof step.id !== "string" || !step.id.trim() || !isStepRole(step.role) || typeof step.title !== "string" || !step.title.trim())
+      throw new Error("STEP_PLAN_STEP_INVALID");
+  }
+  return plan;
+}
+
+/**
+ * Makes any shape-valid plan usable: unique safe ids, ordered estimates, dependencies only on known earlier-or-later steps with cycles
+ * broken, shares normalized, dates kept only when they are dates. Returns what it had to change as warnings.
+ */
+export function normalizeStepPlan(plan: StepPlan): { plan: StepPlan; warnings: StepWarning[] } {
+  const warnings: StepWarning[] = [];
+  const idMap = new Map<string, string>();
+  const steps = plan.steps.map((step, index) => {
+    const id = `s${index + 1}`;
+    idMap.set(step.id, id);
+    const raw = [step.estimate?.p25Minutes, step.estimate?.p50Minutes, step.estimate?.p85Minutes].map((value) =>
+      Number.isFinite(value) && (value as number) > 0 ? Math.min(10_080, Math.round(value as number)) : 0);
+    const p50 = raw[1] || raw[0] || raw[2] || 30;
+    const p25 = Math.min(raw[0] || Math.round(p50 * 0.7), p50), p85 = Math.max(raw[2] || Math.round(p50 * 1.5), p50);
+    if (!raw[1]) warnings.push({ code: "STEP_ESTIMATE_MISSING", detail: `「${step.title}」没有通常耗时，按 ${p50} 分钟计` });
+    return { ...step, id, title: step.title.trim().slice(0, 120), deliverable: (step.deliverable ?? "").trim().slice(0, 300),
+      doneCriterion: (step.doneCriterion ?? "").trim().slice(0, 300), share: Number.isFinite(step.share) && step.share > 0 ? step.share : 0,
+      estimate: { p25Minutes: p25, p50Minutes: p50, p85Minutes: p85 },
+      notBefore: DAY.test(step.notBefore ?? "") ? step.notBefore : "", dueBy: DAY.test(step.dueBy ?? "") ? step.dueBy : "",
+      schedulable: step.role === "wait" ? false : step.schedulable !== false,
+      executor: (["human", "agent", "mixed"] as const).includes(step.executor) ? step.executor : "human",
+      tickOutcome: (step.tickOutcome ?? "").trim().slice(0, 120), dependsOn: step.dependsOn ?? [] };
+  });
+  // Dependencies: known ids only, then any edge that closes a cycle is dropped (the latest-listed edge first).
+  for (const step of steps) {
+    const known = step.dependsOn.map((dep) => idMap.get(dep)).filter((dep): dep is string => Boolean(dep) && dep !== step.id);
+    if (known.length !== step.dependsOn.length) warnings.push({ code: "STEP_DEPENDENCY_UNKNOWN", detail: `「${step.title}」依赖了不存在的步骤，已忽略` });
+    step.dependsOn = [...new Set(known)];
+  }
+  const reaches = (from: string, to: string, seen = new Set<string>()): boolean => {
+    if (from === to) return true;
+    if (seen.has(from)) return false;
+    seen.add(from);
+    return (steps.find((step) => step.id === from)?.dependsOn ?? []).some((dep) => reaches(dep, to, seen));
+  };
+  for (const step of steps) {
+    for (const dep of [...step.dependsOn].reverse()) {
+      if (reaches(dep, step.id)) {
+        step.dependsOn = step.dependsOn.filter((item) => item !== dep);
+        warnings.push({ code: "STEP_CYCLE_BROKEN", detail: `「${step.title}」与前置步骤成环，已断开一条依赖` });
+      }
+    }
+  }
+  const total = steps.reduce((sum, step) => sum + step.share, 0);
+  if (total <= 0) {
+    const minutes = steps.reduce((sum, step) => sum + step.estimate.p50Minutes, 0);
+    for (const step of steps) step.share = step.estimate.p50Minutes / minutes;
+    warnings.push({ code: "STEP_SHARE_MISSING", detail: "步骤没有进度份额，已按耗时分配" });
+  } else {
+    if (Math.abs(total - 1) > 0.05) warnings.push({ code: "STEP_SHARE_NORMALIZED", detail: `进度份额合计 ${total.toFixed(2)}，已归一` });
+    for (const step of steps) step.share = step.share / total;
+  }
+  for (const step of steps) step.share = Math.round(step.share * 1000) / 1000;
+  const amount = Number.isFinite(plan.quantity?.amount) ? Math.max(0, plan.quantity.amount) : 0;
+  return { plan: { archetypeId: plan.archetypeId, rationale: (plan.rationale ?? "").trim().slice(0, 600),
+    quantity: { basis: (plan.quantity?.basis ?? "").slice(0, 60), amount, unit: (plan.quantity?.unit ?? "").slice(0, 12) }, steps }, warnings };
+}
+
+/**
+ * Content checks against the archetype and the task's window. `availableMinutes` is the working time between the window's start and
+ * end (omitted when unknown). Warnings only.
+ */
+export function stepPlanWarnings(plan: StepPlan, window: { notBefore?: string; dueBy?: string; availableMinutes?: number } = {}): StepWarning[] {
+  const archetype = archetypeById(plan.archetypeId);
+  if (!archetype) return [{ code: "STEP_ARCHETYPE_UNKNOWN", detail: plan.archetypeId }];
+  const warnings: StepWarning[] = [];
+  const roles = plan.steps.map((step) => step.role);
+  for (const step of plan.steps) {
+    if (step.schedulable && step.estimate.p50Minutes < 15) warnings.push({ code: "STEP_TOO_SHORT", detail: `「${step.title}」只有 ${step.estimate.p50Minutes} 分钟，不足一个工作时段` });
+    if (!archetype.roles.includes(step.role)) warnings.push({ code: "STEP_ROLE_OUTSIDE_ARCHETYPE", detail: `「${step.title}」的类型「${STEP_ROLES[step.role]}」不在「${archetype.label}」的常见步骤中` });
+    if (!step.doneCriterion) warnings.push({ code: "STEP_DONE_CRITERION_MISSING", detail: `「${step.title}」没有完成标准` });
+  }
+  for (const role of archetype.requires) if (!roles.includes(role)) warnings.push({ code: "STEP_REQUIRED_ROLE_MISSING", detail: `缺少「${STEP_ROLES[role]}」步骤` });
+  for (const [before, after] of archetype.firstBefore) {
+    const a = roles.indexOf(before), b = roles.indexOf(after);
+    if (a >= 0 && b >= 0 && a > b) warnings.push({ code: "STEP_ORDER_RULE", detail: `首个「${STEP_ROLES[before]}」应在首个「${STEP_ROLES[after]}」之前` });
+  }
+  if (archetype.endsWith?.length && !archetype.endsWith.includes(roles.at(-1)!))
+    warnings.push({ code: "STEP_END_RULE", detail: `最后一步通常是${archetype.endsWith.map((role) => `「${STEP_ROLES[role]}」`).join("或")}` });
+  const p50 = plan.steps.filter((step) => step.schedulable).reduce((sum, step) => sum + step.estimate.p50Minutes, 0);
+  if (plan.quantity.amount > 0) {
+    const [low, high] = archetype.quantify.minutesPerUnit;
+    if (p50 < plan.quantity.amount * low * 0.5 || p50 > plan.quantity.amount * high * 1.5)
+      warnings.push({ code: "STEP_TOTAL_OFF_QUANTITY", detail: `合计 ${p50} 分钟，按 ${plan.quantity.amount}${plan.quantity.unit} 估算应在 ${plan.quantity.amount * low}–${plan.quantity.amount * high} 分钟` });
+  }
+  if (window.availableMinutes !== undefined && p50 > window.availableMinutes)
+    warnings.push({ code: "STEP_WINDOW_TOO_SMALL", detail: `合计 ${p50} 分钟，可用时段只有 ${window.availableMinutes} 分钟` });
+  for (const step of plan.steps) {
+    if (window.dueBy && step.dueBy && step.dueBy > window.dueBy) warnings.push({ code: "STEP_AFTER_DUE", detail: `「${step.title}」晚于截止日` });
+    if (window.notBefore && step.notBefore && step.notBefore < window.notBefore) warnings.push({ code: "STEP_BEFORE_RELEASE", detail: `「${step.title}」早于开始日` });
+  }
+  return warnings;
+}
+
+export type StepStatus = "planned" | "done" | "skipped";
+/** Progress of the whole task: done steps' shares, plus a started step's share × its quarters. */
+export function taskProgress(steps: ReadonlyArray<{ share: number; status: StepStatus; progressQuarter: number }>): number {
+  const value = steps.reduce((sum, step) => sum + (step.status === "done" || step.status === "skipped" ? step.share
+    : step.share * Math.max(0, Math.min(4, step.progressQuarter)) / 4), 0);
+  return Math.max(0, Math.min(1, value));
+}

@@ -40,7 +40,8 @@ export function planToday(ctx?: AccessContext,
 }
 
 /** The key the weekly availability lives under. One settings row, not a new table. */
-export const AVAILABILITY_SETTING = "schedule.availability";
+export { AVAILABILITY_SETTING } from "@crossline/core";
+import { AVAILABILITY_SETTING } from "@crossline/core";
 const PREFERENCES_SETTING = "schedule.preferences";
 export type SchedulePreferences = { timeZone: string; mode: "buffered" | "asap";
   importance: Record<string, "important" | "ordinary"> };
@@ -462,6 +463,22 @@ export function toZonedInstant(day: string, time: string, zone: string): string 
   return instant.toISOString();
 }
 
+/**
+ * Block ids: `scheduled:<task>` for a task placed whole, `scheduled:<task>:<step>` for one of its steps, each with `:<n>` for its n-th
+ * block when a piece is split. Everything that only needs the task reads segment 1, so step blocks need no change there. Step ids are
+ * `v<version>s<n>` (packages/db `saveStepPlan`), which is what tells a step segment from a block index.
+ */
+const stepTaskId = (orderId: string, stepId: string) => `${orderId}#${stepId}`;
+const STEP_ID = /^v\d+s\d+$/;
+export function scheduledBlockId(plannerTaskId: string, index: number): string {
+  const [orderId, stepId] = plannerTaskId.split("#");
+  return `scheduled:${orderId}${stepId ? `:${stepId}` : ""}${index > 1 ? `:${index}` : ""}`;
+}
+export function plannerIdOfBlock(blockId: string): string {
+  const parts = blockId.split(":");
+  return parts[2] && STEP_ID.test(parts[2]) ? stepTaskId(parts[1]!, parts[2]) : parts[1]!;
+}
+
 async function scheduledBlocks(ctx: AccessContext, today: string, committed: PersistedScheduleBlock[]): Promise<{
   blocks: PersistedScheduleBlock[]; schedule: PersistedPlan["schedule"]
 }> {
@@ -509,22 +526,48 @@ async function scheduledBlocks(ctx: AccessContext, today: string, committed: Per
       catch { return []; }
     }) : undefined;
 
+  // A task with a step plan is placed step by step: each open, schedulable step is its own planner task, keeping the task's tier,
+  // deadline and release, the step's own window, and its dependencies (on earlier steps, and for its first steps on the work the
+  // task itself waits for). A task without a plan yet is placed whole, as before.
+  const stepPlans = new Map(getStore().listStepPlans(ctx.workspaceId).map((plan) => [plan.workOrderId, plan]));
+  const openSteps = (orderId: string) => stepPlans.get(orderId)?.steps.filter((step) => step.status === "planned" && step.schedulable) ?? [];
+  const plannerIdsOf = (orderId: string) => { const steps = openSteps(orderId); return steps.length ? steps.map((step) => stepTaskId(orderId, step.id)) : [orderId]; };
+  const plannerTasksOf = (order: ActionableOrder) => {
+    const base = plannerTaskOf(ctx, order);
+    const steps = openSteps(order.id);
+    if (!steps.length) return [{ task: base, orderId: order.id, title: order.intent }];
+    const open = new Set(steps.map((step) => step.id));
+    const external = (base.dependsOn ?? []).flatMap((id) => plannerIdsOf(id));
+    return steps.map((step) => {
+      const internal = step.dependsOn.filter((dep) => open.has(dep)).map((dep) => stepTaskId(order.id, dep));
+      const stepStart = step.notBefore ? toZonedInstant(step.notBefore, "00:00", zone) : undefined;
+      const stepDue = step.dueBy ? toZonedInstant(step.dueBy, "23:59", zone) : undefined;
+      const notBefore = [base.notBefore, stepStart].filter(Boolean).sort().at(-1);
+      const deadline = [base.deadline, stepDue].filter(Boolean).sort()[0];
+      const { notBefore: _n, deadline: _d, dependsOn: _deps, ...rest } = base;
+      return { orderId: order.id, title: `${order.intent} · ${step.title}`, task: { ...rest, id: stepTaskId(order.id, step.id),
+        title: `${order.intent} · ${step.title}`, estimate: { ...base.estimate, ...step.estimate },
+        ...(notBefore ? { notBefore } : {}), ...(deadline ? { deadline } : {}),
+        ...(internal.length || external.length ? { dependsOn: internal.length ? internal : external } : {}) } };
+    });
+  };
+  const expanded = eligibleOrders.flatMap(plannerTasksOf);
   const result = await planSchedule({
     now,
     horizonDays: days.length,
     mode: preferences.mode,
     ...(currentEnergy ? { currentEnergy, currentDay: today } : {}),
-    tasks: eligibleOrders.map((order) => plannerTaskOf(ctx, order)),
+    tasks: expanded.map((item) => item.task),
     availability: instants,
     ...(lookaheadAvailability ? { lookaheadAvailability } : {}),
     frozenBlocks: committed.filter((block) => block.day && block.id.startsWith("scheduled:"))
-      .map((block) => ({ taskId: block.id.split(":")[1]!, start: iso(block.day!, block.start),
+      .map((block) => ({ taskId: plannerIdOfBlock(block.id), start: iso(block.day!, block.start),
         end: iso(block.day!, block.end) }))
   });
   const placed = result.plan.blocks.filter((block) => !block.frozen);
-  const titles = new Map(orders.map((order) => [order.id,
-    order.state === "approved" || order.state === "preparing"
-      ? `暂定·准备中 · ${order.intent}` : order.intent]));
+  const orderStates = new Map(orders.map((order) => [order.id, order.state]));
+  const titles = new Map(expanded.map((item) => [item.task.id,
+    orderStates.get(item.orderId) === "approved" || orderStates.get(item.orderId) === "preparing" ? `暂定·准备中 · ${item.title}` : item.title]));
   const energyNeeds = new Map(orders.map((order) => [order.id, humanCoreOf(order)?.energy]));
   const occurrences = new Map<string, number>();
   const blocks = placed.map((block) => {
@@ -532,9 +575,9 @@ async function scheduledBlocks(ctx: AccessContext, today: string, committed: Per
     occurrences.set(block.taskId, index);
     const blockDay = formatInTimeZone(new Date(block.start), zone, "yyyy-MM-dd");
     const needsRestCheck = currentEnergy === "low" && blockDay === today &&
-      energyNeeds.get(block.taskId) === "high" && Date.parse(block.start) > now.getTime();
+      energyNeeds.get(block.taskId.split("#")[0]!) === "high" && Date.parse(block.start) > now.getTime();
     return {
-    id: `scheduled:${block.taskId}${index > 1 ? `:${index}` : ""}`,
+    id: scheduledBlockId(block.taskId, index),
     lane: "human" as const,
     title: `${block.progressOnly ? "本周进度·未排完 · " : ""}${needsRestCheck ? "休息后待复评 · " : ""}${titles.get(block.taskId) ?? block.taskId}`,
     day: blockDay,
@@ -554,7 +597,7 @@ async function scheduledBlocks(ctx: AccessContext, today: string, committed: Per
     tasks: proposals.map((order) => plannerTaskOf(ctx, order)),
     availability: instants,
     frozenBlocks: [...committed.filter((block) => block.day && block.id.startsWith("scheduled:"))
-      .map((block) => ({ taskId: block.id.split(":")[1]!, start: iso(block.day!, block.start), end: iso(block.day!, block.end) })),
+      .map((block) => ({ taskId: plannerIdOfBlock(block.id), start: iso(block.day!, block.start), end: iso(block.day!, block.end) })),
       ...result.plan.blocks.map((block) => ({ taskId: block.taskId, start: block.start, end: block.end }))]
   }).catch(() => undefined) : undefined;
   const proposalTitles = new Map(proposals.map((order) => [order.id, order.intent]));
