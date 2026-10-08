@@ -1350,7 +1350,7 @@ const UNPLACED_REASON: Record<string, string> = {
   DEPENDENCY_NOT_READY: "前置任务尚未验收"
 };
 
-/** One task as the scheduler saw it, and what it did with it: why it sits where it does on the plan page's 「为什么这样排」. */
+/** One task as the scheduler saw it, and what it did with it: why it sits where it does on the plan page's 「排程依据」. */
 export type RankedTask = { id: string; title: string; line: string; milestoneId: string; tier: 1 | 2 | 3 | 4; weight: number;
   deadline: string | null; notBefore: string | null; firstDay: string | null; firstStart: string | null; weekMinutes: number; blocker: string | null;
   /** In the task library: the day it enters the schedule (`libraryUntil`). */
@@ -1716,10 +1716,12 @@ export async function loadDashboard(ctx: AccessContext): Promise<Omit<DashboardD
   // Capacity is a constraint, not an identity competing for the same list. Keyed on the pack's `kind`
   // rather than the literal id "health", so a different pack set keeps the same distinction.
   const capacityIdentityIds = new Set(defaultIdentityPacks().filter((pack) => pack.kind === "capacity").map((pack) => pack.id));
-  const active = withoutShadowingDemos(orders, capacityIdentityIds)
-    .filter((order) => !capacityIdentityIds.has(order.identityId) && ACTIONABLE.includes(order.state))
-    .sort((a, b) => ACTIONABLE.indexOf(a.state) - ACTIONABLE.indexOf(b.state) || a.id.localeCompare(b.id));
   const now = process.env.CROSSLINE_FIXED_NOW ? new Date(process.env.CROSSLINE_FIXED_NOW) : new Date();
+  // Work waiting in the task library is not recommended either: it enters 「下一步」 when it enters the schedule.
+  const libraryDay = planToday(ctx, now);
+  const active = withoutShadowingDemos(orders, capacityIdentityIds)
+    .filter((order) => !capacityIdentityIds.has(order.identityId) && ACTIONABLE.includes(order.state) && !libraryUntil(ctx, order, libraryDay))
+    .sort((a, b) => ACTIONABLE.indexOf(a.state) - ACTIONABLE.indexOf(b.state) || a.id.localeCompare(b.id));
   const capacity = latestCapacity(ctx, now);
   const outcomes = readTransitionOutcomes(store.listEvents(ctx.workspaceId, { type: "energy.transition_outcome" }));
   const forecast = capacity.level === "uncalibrated" ? {} : Object.fromEntries(active.flatMap((order) => {

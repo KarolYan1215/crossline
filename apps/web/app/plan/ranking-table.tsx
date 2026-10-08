@@ -8,10 +8,10 @@ import { ImpactCard, useImpact } from "../task/impact";
 
 const md = (day: string) => `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}`;
 const h = (minutes: number) => Math.round((minutes / 60) * 10) / 10;
-const TIER: Record<number, string> = { 1: "重要且有截止", 2: "有截止", 3: "重要", 4: "其他" };
+const TIER: Record<number, string> = { 1: "重要·有期限", 2: "有期限", 3: "重要·无期限", 4: "常规" };
 
 /**
- * 「为什么这样排」 as one compact table read off the scheduler's own input and result: each task's urgency tier, its milestone's
+ * 「排程依据」 as one compact table read off the scheduler's own input and result: each task's urgency tier, its milestone's
  * importance (a slider, shared by every task of that milestone) and its due day (a date chip), then its first block or why it has none.
  * A slider or a date change is previewed across the schedule before it is applied, like every other change on this page. Tasks waiting in
  * the task library are listed apart, with the day each enters the schedule.
@@ -31,7 +31,7 @@ export function RankingTable({ ranking, today, presets, weighable }: { ranking: 
   return <>
     <div className="pl-rank-table" role="table" aria-label="排程顺序">
       <div className="pl-rank-row pl-rank-head" role="row">
-        <span role="columnheader">任务</span><span role="columnheader">档位</span><span role="columnheader">重要性</span>
+        <span role="columnheader">任务</span><span role="columnheader">优先档</span><span role="columnheader">重要性</span>
         <span role="columnheader">截止</span><span role="columnheader">首个时段</span>
       </div>
       {scheduled.map((task) => <div key={task.id} className="pl-rank-group">

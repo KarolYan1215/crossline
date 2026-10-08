@@ -7,7 +7,7 @@
 export type TimelineNodeInput = { id: string; line: string; title: string; status: "draft" | "approved"; kind: "milestone" | "course";
   day?: string | undefined; dependsOn: string[] };
 export type TimelineTickInput = { id: string; milestoneId: string; line: string; day: string | null; state: "done" | "planned" | "postponed"; plannedDay: string | null };
-export type TimelineRelationInput = { id: string; from: string; to: string; pending: boolean };
+export type TimelineRelationInput = { id: string; from: string; to: string; pending: boolean; label?: string };
 
 export const TL = { labelW: 96, nodeW: 176, laneH: 56, axisTop: 26, rowPad: 12, headH: 30, undatedGap: 48 } as const;
 
@@ -17,7 +17,12 @@ export type TimelineLayout = {
   rows: Array<{ line: string; y: number; height: number; axisY: number }>;
   nodes: Array<TimelineNodeInput & { x: number; axisY: number; labelY: number; undated: boolean }>;
   ticks: Array<TimelineTickInput & { x: number; axisY: number; plannedX: number | null }>;
-  edges: Array<{ id: string; kind: "chain" | "relation"; pending: boolean; path: string; line?: string }>;
+  /**
+   * `from`/`to` are node ids (hover highlights both ends); `line` is the source's line, which colours the edge and its arrowhead;
+   * relations carry their kind as `label` at (`labelX`, `labelY`), the curve's midpoint.
+   */
+  edges: Array<{ id: string; kind: "chain" | "relation"; pending: boolean; path: string; line?: string; from: string; to: string;
+    label?: string; labelX?: number; labelY?: number }>;
 };
 
 const DAY_MS = 86_400_000;
@@ -84,19 +89,46 @@ export function layoutTimeline(input: { nodes: TimelineNodeInput[]; ticks: Timel
   });
 
   const edges: TimelineLayout["edges"] = [];
+  // A step of a chain is an arc over the axis from the earlier marker to the later one, ending in an arrow just short of the marker,
+  // so the order reads at a glance instead of disappearing into the axis line. A dependency that another path in the same line already
+  // implies (A→C beside A→B→C) is not drawn — it only stacked arcs on top of each other — and an arc that passes over more markers
+  // rises higher, so arcs of different lengths do not run along one height.
+  const sameLineParents = (node: TimelineLayout["nodes"][number]) => node.dependsOn.filter((id) => byId.get(id)?.line === node.line);
+  const reaches = (from: string, target: string, skip: string, seen = new Set<string>()): boolean => {
+    const node = byId.get(from);
+    if (!node || seen.has(from)) return false;
+    seen.add(from);
+    return sameLineParents(node).some((parent) => parent !== skip && (parent === target || reaches(parent, target, "", seen)));
+  };
   for (const node of nodes) {
-    for (const parent of node.dependsOn) {
-      const from = byId.get(parent);
-      if (from && from.line === node.line) edges.push({ id: `chain:${parent}>${node.id}`, kind: "chain", pending: false, line: node.line,
-        path: `M${Math.min(from.x, node.x)},${node.axisY} H${Math.max(from.x, node.x)}` });
+    for (const parent of sameLineParents(node)) {
+      const from = byId.get(parent)!;
+      if (reaches(node.id, parent, parent)) continue;
+      const [a, b] = from.x <= node.x ? [from, node] : [node, from];
+      const forward = a === from;
+      const between = nodes.filter((other) => other.line === node.line && other.x > a.x + 1 && other.x < b.x - 1).length;
+      // The arc peaks at y0 - lift, which stays inside the row (the axis sits `TL.axisTop` below its top).
+      const lift = Math.min(TL.axisTop - 8, 7 + between * 4);
+      const startX = forward ? a.x + 6 : b.x - 6, endX = forward ? b.x - 9 : a.x + 9;
+      const y0 = node.axisY - 6;
+      edges.push({ id: `chain:${parent}>${node.id}`, kind: "chain", pending: from.status === "draft" || node.status === "draft", line: node.line,
+        from: parent, to: node.id, path: `M${startX},${y0} Q${(startX + endX) / 2},${y0 - lift * 2} ${endX},${y0}` });
     }
   }
+  // A relation between lines leaves its source marker and enters the target's, bowing sideways when both sit on one date; its kind is
+  // written at the curve's midpoint.
+  const lineOf = new Map(nodes.map((node) => [node.id, node.line]));
   for (const relation of input.relations) {
     const from = byId.get(relation.from), to = byId.get(relation.to);
     if (!from || !to) continue;
-    const midY = (from.axisY + to.axisY) / 2;
-    edges.push({ id: `relation:${relation.id}`, kind: "relation", pending: relation.pending,
-      path: `M${from.x},${from.axisY} C${from.x},${midY} ${to.x},${midY} ${to.x},${to.axisY}` });
+    const down = to.axisY >= from.axisY ? 1 : -1;
+    const y0 = from.axisY + 8 * down, y1 = to.axisY - 9 * down;
+    const bow = Math.abs(to.x - from.x) < 40 ? 60 : 0;
+    const c1x = from.x + bow, c2x = to.x + bow, midY = (y0 + y1) / 2;
+    const labelX = 0.125 * from.x + 0.375 * c1x + 0.375 * c2x + 0.125 * to.x;
+    edges.push({ id: `relation:${relation.id}`, kind: "relation", pending: relation.pending, line: lineOf.get(relation.from)!,
+      from: relation.from, to: relation.to, ...(relation.label ? { label: relation.label } : {}), labelX, labelY: midY,
+      path: `M${from.x},${y0} C${c1x},${midY} ${c2x},${midY} ${to.x},${y1}` });
   }
   const width = Math.max(datedEnd, undatedMax ? datedEnd + TL.undatedGap + undatedMax * (TL.nodeW + 16) : 0) + 24;
   return { width, height: y + 8, start, pxPerDay, datedEnd, axis, todayX: xOf(input.today), rows, nodes, ticks, edges };

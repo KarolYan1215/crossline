@@ -82,8 +82,8 @@ export function ForecastChart({ board }: { board: PlanBoard }) {
  */
 export function RankingPanel({ board, explanation }: { board: PlanBoard;
   explanation: React.ReactNode }) {
-  return <section className="pl-card" id="why" aria-label="为什么这样排">
-    <header><h2>为什么这样排</h2><small>先按紧迫度分档，同档内按重要性，再按截止日；拖动重要性或改截止日会先预览影响</small></header>
+  return <section className="pl-card" id="why" aria-label="排程依据">
+    <header><h2>排程依据</h2><small>排序规则：优先档 → 重要性 → 截止日。调整重要性或截止日时先预览对排程的影响。</small></header>
     <RankingTable ranking={board.ranking} today={board.today} presets={Object.fromEntries(board.importance.map((row) => [row.id, row.preset.weight]))}
       weighable={board.importance.map((row) => row.id)} />
     {explanation}

@@ -9,8 +9,15 @@
 .mt-axis-month{fill:var(--ink);font-size:12px;font-weight:700}
 .mt-axisline{stroke:var(--lc,var(--graphite));stroke-width:2;opacity:.45}
 .mt-rowrule{stroke:var(--mist);stroke-width:1}
-.mt-chain{fill:none;stroke:var(--lc,var(--graphite));stroke-width:3}
-.mt-relation{fill:none;stroke:var(--ink);stroke-width:1.6;stroke-dasharray:1;stroke-dashoffset:0;animation:mt-draw 1.4s ease-out both}
+.mt-chain{fill:none;stroke:var(--lc,var(--graphite));stroke-width:1.8}
+.mt-chain[data-pending]{stroke-dasharray:3 3}
+.mt-arrowhead{fill:var(--lc,var(--ink))}
+.mt-relation-label{font-size:12px;fill:var(--ink);paint-order:stroke;stroke:var(--paper);stroke-width:4px;stroke-linejoin:round}
+.mt-edge{transition:opacity .15s}
+.mt[data-hover] .mt-edge:not([data-hot]),.mt[data-hover] .mt-node:not([data-hot]),.mt[data-hover] .mt-marker:not([data-hot]){opacity:.18}
+.mt[data-hover] .mt-edge[data-hot] path{stroke-width:2.6}
+.mt-node,.mt-marker{transition:opacity .15s}
+.mt-relation{fill:none;stroke:var(--lc,var(--ink));stroke-width:1.6;stroke-dasharray:1;stroke-dashoffset:0;animation:mt-draw 1.4s ease-out both}
 .mt-relation[data-pending]{stroke-dasharray:2 4;animation:none;opacity:.7}
 @keyframes mt-draw{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}
 .mt-today{stroke:#C4302B;stroke-width:1.5}
@@ -40,6 +47,7 @@
 .mt-key[data-k="done"]{background:var(--graphite)}
 .mt-key[data-k="postponed"]{border-style:dashed}
 .mt-key[data-k="relation"]{width:22px;height:0;border-width:2px 0 0;border-radius:0;border-color:var(--ink)}
+.mt-key[data-k="chain"]{width:22px;height:8px;border-width:2px 2px 0;border-radius:12px 12px 0 0;border-color:var(--graphite)}
 
 .mt-result{position:fixed;z-index:40;right:16px;bottom:96px;width:min(320px,calc(100vw - 32px));display:grid;gap:6px;padding:10px 12px;background:var(--paper);border:1px solid var(--ink);box-shadow:0 6px 18px rgb(0 0 0 / .14);animation:mt-pop .25s ease-out}
 .mt-result header{display:flex;justify-content:space-between;align-items:center}

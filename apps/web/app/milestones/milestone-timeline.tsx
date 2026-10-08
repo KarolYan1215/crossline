@@ -17,6 +17,8 @@ const md = (day: string) => `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10
 export function MilestoneTimeline({ board }: { board: MilestoneBoard }) {
   const [selected, setSelected] = useState<{ kind: "milestone"; id: string } | { kind: "course"; id: string } | null>(null);
   const [tick, setTick] = useState<BoardTick | null>(null);
+  // Hovering (or focusing) a milestone lights up its chain steps and relations and the milestones at their other ends; the rest dims.
+  const [hover, setHover] = useState<string | null>(null);
   // `?open=<id>` (a link from another page, such as the weekly review) opens that milestone's drawer.
   useEffect(() => {
     const id = new URLSearchParams(location.search).get("open");
@@ -30,7 +32,7 @@ export function MilestoneTimeline({ board }: { board: MilestoneBoard }) {
     ticks: board.milestones.flatMap((milestone) => milestone.ticks.map((item) => ({ id: item.id, milestoneId: milestone.id, line: milestone.identityId,
       day: item.day, state: item.state, plannedDay: item.plannedDay }))),
     relations: board.milestones.flatMap((milestone) => milestone.relations.filter((relation) => relation.direction === "out")
-      .map((relation) => ({ id: relation.id, from: milestone.id, to: relation.otherId, pending: relation.pending }))),
+      .map((relation) => ({ id: relation.id, from: milestone.id, to: relation.otherId, pending: relation.pending, label: relation.kindLabel }))),
     lineOrder: board.lineOrder, today: board.today
   });
   if (!layout.nodes.length) return <p className="flow-empty">尚无里程碑。完成初始访谈后生成里程碑草稿。</p>;
@@ -40,7 +42,10 @@ export function MilestoneTimeline({ board }: { board: MilestoneBoard }) {
   const ticksById = new Map(board.milestones.flatMap((item) => item.ticks.map((t) => [t.id, t] as const)));
 
   const drafts = board.milestones.filter((item) => item.status === "draft");
-  return <div className="mt" role="group" aria-label="里程碑时间轴">
+  const hot = hover ? new Set(layout.edges.filter((edge) => edge.from === hover || edge.to === hover).flatMap((edge) => [edge.id, edge.from, edge.to]).concat(hover)) : null;
+  const lines = [...new Set(layout.edges.flatMap((edge) => edge.line ? [edge.line] : []))];
+  const focus = (id: string) => ({ onMouseEnter: () => setHover(id), onMouseLeave: () => setHover(null), onFocus: () => setHover(id), onBlur: () => setHover(null) });
+  return <div className="mt" role="group" aria-label="里程碑时间轴" data-hover={hover ? "" : undefined}>
     {drafts.length > 0 && <DraftReview drafts={drafts} labels={board.labels} lineOrder={board.lineOrder} onOpen={(id) => setSelected({ kind: "milestone", id })} />}
     <div className="mt-scroll">
       <div className="mt-canvas" style={{ width: layout.width, height: layout.height }}>
@@ -51,8 +56,15 @@ export function MilestoneTimeline({ board }: { board: MilestoneBoard }) {
           {layout.rows.map((row) => <g key={row.line} data-line={row.line}>
             <line x1={TL.labelW} x2={layout.width - 12} y1={row.axisY} y2={row.axisY} className="mt-axisline" />
             <line x1={0} x2={layout.width} y1={row.y + row.height} y2={row.y + row.height} className="mt-rowrule" /></g>)}
-          {layout.edges.filter((edge) => edge.kind === "chain").map((edge) => <path key={edge.id} d={edge.path} data-line={edge.line} className="mt-chain" />)}
-          {layout.edges.filter((edge) => edge.kind === "relation").map((edge) => <path key={edge.id} d={edge.path} {...(edge.pending ? {} : { pathLength: 1 })} className="mt-relation" data-pending={edge.pending || undefined} />)}
+          {/* One arrowhead per line, inside a group carrying the line, so it takes the line's colour (`--lc`) like the edge it ends. */}
+          <defs>{lines.map((line) => <g key={line} data-line={line}><marker id={`mt-arrow-${line.replace(/[^a-zA-Z0-9_-]/g, "_")}`} viewBox="0 0 8 8" refX="7" refY="4"
+            markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" className="mt-arrowhead" /></marker></g>)}</defs>
+          {layout.edges.map((edge) => <g key={edge.id} data-line={edge.line} data-hot={hot?.has(edge.id) || undefined}
+            className={edge.kind === "chain" ? "mt-edge mt-edge-chain" : "mt-edge mt-edge-relation"}>
+            <path d={edge.path} {...(edge.kind === "relation" && !edge.pending ? { pathLength: 1 } : {})} data-pending={edge.pending || undefined}
+              className={edge.kind === "chain" ? "mt-chain" : "mt-relation"} markerEnd={`url(#mt-arrow-${(edge.line ?? "").replace(/[^a-zA-Z0-9_-]/g, "_")})`} />
+            {edge.label && edge.labelX !== undefined && <text x={edge.labelX} y={edge.labelY! - 4} textAnchor="middle" className="mt-relation-label">{edge.label}</text>}
+          </g>)}
           <line x1={layout.todayX} x2={layout.todayX} y1={TL.headH - 6} y2={layout.height} className="mt-today" />
           <text x={layout.todayX + 3} y={TL.headH - 8} className="mt-today-label">今天</text>
           {layout.ticks.map((item) => <g key={item.id} data-line={item.line}>
@@ -72,8 +84,10 @@ export function MilestoneTimeline({ board }: { board: MilestoneBoard }) {
           const threshold = data?.criteria.find((criterion) => criterion.threshold)?.threshold;
           const met = data ? data.criteria.filter((criterion) => criterion.quarters === 4).length : 0;
           return <div key={item.id}>
-            <span className="mt-marker" data-line={item.line} data-kind={item.kind} data-status={item.status} style={{ left: item.x - 8, top: item.axisY - 8 }} aria-hidden="true" />
-            <button type="button" className="mt-node" data-line={item.line} data-kind={item.kind} data-status={item.status}
+            <span className="mt-marker" data-line={item.line} data-kind={item.kind} data-status={item.status} data-hot={hot?.has(item.id) || undefined}
+              style={{ left: item.x - 8, top: item.axisY - 8 }} aria-hidden="true" />
+            <button type="button" className="mt-node" data-line={item.line} data-kind={item.kind} data-status={item.status} data-hot={hot?.has(item.id) || undefined}
+              {...focus(item.id)}
               style={{ left: item.undated ? item.x : item.x - 10, top: item.labelY, width: TL.nodeW }}
               onClick={() => setSelected(item.kind === "course" ? { kind: "course", id: item.id } : { kind: "milestone", id: item.id })}>
               <b>{item.title}</b>
@@ -91,7 +105,9 @@ export function MilestoneTimeline({ board }: { board: MilestoneBoard }) {
       {layout.ticks.length > 0 && <span><span className="mt-key" data-k="done" />已达成刻度</span>}
       {layout.ticks.length > 0 && <span><span className="mt-key" data-k="planned" />计划刻度</span>}
       {layout.ticks.some((item) => item.state === "postponed") && <span><span className="mt-key" data-k="postponed" />已顺延</span>}
-      {layout.edges.some((edge) => edge.kind === "relation") && <span><span className="mt-key" data-k="relation" />主线间复用</span>}</p>
+      {layout.edges.some((edge) => edge.kind === "chain") && <span><span className="mt-key" data-k="chain" />前后依赖</span>}
+      {layout.edges.some((edge) => edge.kind === "relation") && <span><span className="mt-key" data-k="relation" />跨主线关系（颜色为来源主线，虚线为待批准）</span>}
+      {layout.edges.length > 0 && <span>悬停里程碑可高亮其关联</span>}</p>
     {tick && <div className="mt-result" role="dialog" aria-label="刻度结果">
       <header><b>{tick.state === "done" ? "已达成" : tick.state === "postponed" ? "已顺延" : "计划中"}</b>
         <button type="button" className="ui-icon-button" aria-label="关闭" onClick={() => setTick(null)}>×</button></header>

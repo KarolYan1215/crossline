@@ -1,6 +1,6 @@
 import { stateLabel } from "../../lib/labels";
 import { RestoreButton } from "./restore-button";
-import { archivedBySystem, ensureSeeded, getStore, loadCurrentPlan, planToday } from "../../lib/crossline";
+import { archivedBySystem, ensureSeeded, getStore, libraryUntil, loadCurrentPlan, planToday } from "../../lib/crossline";
 import { SubpageShell } from "../subpage-shell";
 import { AnalyzeButton } from "./analyze-button";
 import { PromoteForm } from "./promote-form";
@@ -47,7 +47,12 @@ export default async function WorkbenchPage({ searchParams }: {
   const all = getStore().listWorkOrders(ctx.workspaceId);
   // Discarded items leave the board but not the ledger: they move to a closed drawer with the reason
   // the person gave, so "丢弃" never means "silently disappeared".
-  const active = all.filter((run) => run.state !== "archived");
+  const today = planToday(ctx);
+  // The task library: work backplanned for a milestone due beyond the scheduling window waits in its own fold until the window opens.
+  const library = new Map(all.flatMap((run) => { const day = run.state === "archived" ? null : libraryUntil(ctx, run, today); return day ? [[run.id, day] as const] : []; }));
+  const active = all.filter((run) => run.state !== "archived" && !library.has(run.id));
+  const libraryRuns = all.filter((run) => library.has(run.id))
+    .sort((a, b) => library.get(a.id)!.localeCompare(library.get(b.id)!) || a.id.localeCompare(b.id));
   const runs = sort === "identity" ? [...active].sort((a, b) => a.identityId.localeCompare(b.identityId) || a.id.localeCompare(b.id))
     : sort === "state" ? [...active].sort((a, b) => a.state.localeCompare(b.state) || a.id.localeCompare(b.id))
     : active;
@@ -68,8 +73,8 @@ export default async function WorkbenchPage({ searchParams }: {
     .filter((milestone) => milestone.status === "approved")
     .map((milestone) => ({ id: milestone.id, title: milestone.title, identityId: milestone.identityId }));
   // One batched read for every card instead of one per card — see `loadTaskDetailsBatch`'s own doc comment.
-  const taskDetails = loadTaskDetailsBatch(ctx, runs.map((run) => run.id));
-  const slots = nextSlots((await loadCurrentPlan(ctx)).blocks, planToday(ctx));
+  const taskDetails = loadTaskDetailsBatch(ctx, [...runs, ...libraryRuns].map((run) => run.id));
+  const slots = nextSlots((await loadCurrentPlan(ctx)).blocks, today);
   return <SubpageShell active="任务" title="任务">
     <section className="work-order-list">{captures.map((capture) => <article key={capture.id}>
       <header><span>收集</span><b>{stateLabel[capture.state]}</b></header>
@@ -101,6 +106,17 @@ export default async function WorkbenchPage({ searchParams }: {
       </div>;
     })}</section>
     </>
+    {libraryRuns.length > 0 && <details className="work-order-drawer"><summary>任务库 {libraryRuns.length} 项 · 所属里程碑进入三周窗口后排入日程</summary>
+      <section className="task-grid">{libraryRuns.map((run) => {
+        const detail = taskDetails.get(run.id);
+        if (!detail) return null;
+        const day = library.get(run.id)!;
+        return <div key={run.id} id={`work-order-${run.id}`} className="task-grid-item">
+          <TaskCard detail={detail} />
+          <p className="task-card-note">{Number(day.slice(5, 7))}/{Number(day.slice(8, 10))} 起排入日程</p>
+        </div>;
+      })}</section>
+    </details>}
     {(discarded.length + discardedCaptures.length) > 0
       && <details className="work-order-drawer advanced"><summary>已归档 {discarded.length + discardedCaptures.length} 项</summary>
         <ul className="archive-list">
