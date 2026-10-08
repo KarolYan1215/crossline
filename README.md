@@ -78,6 +78,7 @@ pnpm worker     # 后台作业：分析、手册、闸门、日历同步、尽�
 | 证据验收 | `crossline-milestone-gate` | 每条引用逐字出现在证据里；必须逐项交回作业自己的证据契约；`pass` 与各条判定自洽 |
 | 飞轮 / 周洞察 | `crossline-flywheel-scout` / `-weekly-insight` | 发现必须带 URL + 读取日期 + 失效条件；关系必须连接两个不同的已存在里程碑，并带主张与反证条件 |
 | 画像报告 | `crossline-portrait-writer` | 只依据访谈、事实与本人上传的文件；主线 id 必须存在；分享版隐去模型列出的全部敏感片段 |
+| 日历归类 | `crossline-calendar-classifier` | 只能归到已有主线或「无」；未知主线一律按「无」；同一标题只问一次，主线改名或新增后整体重新归类 |
 | 输入路由 | `crossline-input-router` | 长期目标与里程碑必须落在已有主线，日程指令必须指向未完成的任务，撤销必须指向 24 小时内的操作；对不上的一律按原话收集，不丢一个字 |
 | 其他 | `-background-facts` `-plan-explainer` `-assistant` `-goal-backplanner` `-task-titler` | 同样先过各自的校验再落库 |
 

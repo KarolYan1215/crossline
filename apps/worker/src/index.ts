@@ -20,6 +20,7 @@ import { createManualbookBuilder, pendingMaterialWorkOrders, pendingTutorials } 
 import { createProgressJudge, createStepPlanner, createWarningReviewer, reportsAwaitingJudgement, tasksAwaitingStepPlan, warningsAwaitingReview } from "./step-planner";
 import { createArchetypeCurator, curationDue } from "./archetype-curator";
 import { createTaskTitler, untitledTasks } from "./task-titler";
+import { createCalendarClassifier, unfiledCalendarEvents } from "./calendar-classifier";
 import { createPortraitWriter } from "./portrait-writer";
 import { materializeDatePairs } from "./date-pairs";
 import { createInputRouter } from "./input-router";
@@ -163,6 +164,20 @@ async function titlePass(workspaceId: string, checkedAt: string): Promise<void> 
   } finally { titling.delete(workspaceId); }
 }
 
+/** Files new calendar events under the person's lines after a sync, a batch a tick; a small model, so it still runs when quota is tight. */
+const filingCalendar = new Set<string>();
+async function calendarLinePass(workspaceId: string, checkedAt: string): Promise<void> {
+  if (filingCalendar.has(workspaceId) || !codexSupervisor || !unfiledCalendarEvents(analysisStore, workspaceId).length) return;
+  const signal = await readCost();
+  if (!signal.available || budgetPolicy(Math.max(signal.short?.usedPercent ?? 0, signal.long?.usedPercent ?? 0)).mode === "manual_core_only") return;
+  filingCalendar.add(workspaceId);
+  try {
+    enterUsageWorkspace(workspaceId);
+    const outcome = await createCalendarClassifier(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client)().catch(() => undefined);
+    if (outcome) console.info(JSON.stringify({ type: "calendar.lines_filed", checkedAt, workspaceId, ...outcome }));
+  } finally { filingCalendar.delete(workspaceId); }
+}
+
 const stepPlanning = new Set<string>();
 async function stepPlanPass(workspaceId: string, checkedAt = new Date().toISOString()): Promise<void> {
   if (stepPlanning.has(workspaceId)) return;
@@ -269,6 +284,7 @@ async function tick(): Promise<void> {
       const outcome = await calendar.sync(workspace.id).catch((error): SyncOutcome =>
         ({ state: "blocked", code: "GRAPH_SYNC_FAILED", message: error instanceof Error ? error.message : "" }));
       recordCalendarOutcome(analysisStore, workspace.id, outcome, checkedAt);
+      await calendarLinePass(workspace.id, checkedAt);
       if (outcome.state === "blocked" || outcome.changes > 0 || outcome.resynced) {
         console.info(JSON.stringify({ type: `graph.${outcome.state}`, checkedAt, workspaceId: workspace.id, ...outcome }));
       }
@@ -636,7 +652,7 @@ if (!capabilitySecret) {
         "crossline:crossline-flywheel-scout", "crossline:crossline-manualbook-designer", "crossline:crossline-material-researcher", "crossline:crossline-material-writer", "crossline:crossline-milestone-architect",
         "crossline:crossline-goal-backplanner", "crossline:crossline-background-facts", "crossline:crossline-assistant",
         "crossline:crossline-onboarding", "crossline:crossline-due-diligence", "crossline:crossline-plan-explainer", "crossline:crossline-weekly-insight",
-        "crossline:crossline-agent", "crossline:crossline-step-planner", "crossline:crossline-validation-reviewer", "crossline:crossline-progress-judge", "crossline:crossline-input-router", "crossline:crossline-archetype-curator", "crossline:crossline-task-titler", "crossline:crossline-portrait-writer"
+        "crossline:crossline-agent", "crossline:crossline-step-planner", "crossline:crossline-validation-reviewer", "crossline:crossline-progress-judge", "crossline:crossline-input-router", "crossline:crossline-archetype-curator", "crossline:crossline-task-titler", "crossline:crossline-portrait-writer", "crossline:crossline-calendar-classifier"
       ]
     },
     autoAnalyzeCaptures: (workspaceId) => autoAnalyzePass(workspaceId),
@@ -710,6 +726,8 @@ if (!capabilitySecret) {
       syncCalendar: async (workspaceId: string) => {
         const outcome = await calendar.sync(workspaceId);
         recordCalendarOutcome(analysisStore, workspaceId, outcome, new Date().toISOString());
+        // New events are filed under their lines in the background; the answer does not wait for the model.
+        void calendarLinePass(workspaceId, new Date().toISOString()).catch(() => undefined);
         return outcome;
       },
       listCalendarSources: (workspaceId: string) => calendar.listSources(workspaceId),

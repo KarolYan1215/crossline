@@ -1,6 +1,6 @@
 import "server-only";
 import type { AccessContext, AvailabilityWindow } from "@crossline/core";
-import { CATEGORY_LABEL, inferWorkState, suggestAvailability, type ActivitySegment, type WorkState } from "@crossline/core";
+import { CALENDAR_LINES, CATEGORY_LABEL, calendarLineOf, calendarLinesBasis, inferWorkState, suggestAvailability, type ActivitySegment, type CalendarLines, type WorkState } from "@crossline/core";
 import {
   ACTIVITY_DETAIL_CONSENT, effectiveSchedulePreferences, getStore, loadCurrentPlan, planToday, readAvailability, toZonedInstant
 } from "./crossline";
@@ -97,7 +97,13 @@ export async function loadTimeline(ctx: AccessContext, loaded?: Awaited<ReturnTy
   const meta = Object.fromEntries(store.listWorkOrders(ctx.workspaceId).map((order) => [order.id,
     { identityId: order.identityId, ...(order.milestoneId && titleOf.has(order.milestoneId) ? { milestone: titleOf.get(order.milestoneId)! } : {}) }]));
   const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
-  const items = [...itemsFromPlan(plan.blocks, today, meta), ...activityItems(ctx, zone, instantNow())];
+  // Calendar events and file dates take the line the classifier filed them under (`calendar.lines`, by title; never filed by hand).
+  const filing = calendarFiling(ctx);
+  const items = [...itemsFromPlan(plan.blocks, today, meta).map((item) => {
+    if (item.identityId || (item.kind !== "calendar" && item.kind !== "import")) return item;
+    const lineId = calendarLineOf(filing, item.title);
+    return lineId ? { ...item, identityId: lineId } : item;
+  }), ...activityItems(ctx, zone, instantNow())];
 
   // What is due: each live milestone's deadline, and every confirmed dated fact the person's files gave us.
   const anchors = new Map(store.listMilestoneAnchors(ctx.workspaceId).map((anchor) => [anchor.milestoneId, anchor]));
@@ -127,3 +133,12 @@ export async function loadTimeline(ctx: AccessContext, loaded?: Awaited<ReturnTy
       .map((order) => ({ id: order.id, title: order.intent }))
   };
 }
+
+/** The calendar filing as stored, or none when it was made against lines that have since changed (the worker refiles them). */
+function calendarFiling(ctx: AccessContext): CalendarLines | null {
+  try {
+    const stored = JSON.parse(getStore().getSetting(ctx.workspaceId, CALENDAR_LINES) ?? "null") as CalendarLines | null;
+    return stored && stored.basis === calendarLinesBasis(identityLines(ctx)) ? stored : null;
+  } catch { return null; }
+}
+

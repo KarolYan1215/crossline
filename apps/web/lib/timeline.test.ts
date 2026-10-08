@@ -53,3 +53,22 @@ test("a proposal's preview block is its own kind and still links to its task", a
     source: "预览·待你批准", readOnly: true }], "2026-10-06", { "wo-1": { identityId: "research" } });
   expect(item).toMatchObject({ kind: "proposed", workOrderId: "wo-1", identityId: "research" });
 });
+
+test("a calendar event takes the line it was filed under, and none once the lines it was filed against have changed", async () => {
+  const store = globalThis.crosslineStore!;
+  const { CALENDAR_LINES, calendarLinesBasis } = await import("@crossline/core");
+  const { identityLines } = await import("./lines");
+  const { planToday } = await import("./crossline");
+  const day = planToday(TEST_CTX);
+  store.savePlanVersion({ id: "plan-1", ownerId: "o", workspaceId: TEST_CTX.workspaceId, version: 1, status: "approved", payload: { blocks: [
+    { id: "graph_calendar:a", lane: "human", title: "ECE 555 Lecture", day, start: "10:00", end: "11:00", source: "日历", readOnly: true },
+    { id: "graph_calendar:b", lane: "human", title: "Dentist", day, start: "15:00", end: "16:00", source: "日历", readOnly: true }] } });
+  const filing = (basis: string) => store.setSetting(TEST_CTX.workspaceId, CALENDAR_LINES, JSON.stringify({ basis,
+    entries: { "ece 555 lecture": { lineId: "research", why: "课程", at: "" }, dentist: { lineId: "", why: "个人", at: "" } } }));
+  filing(calendarLinesBasis(identityLines(TEST_CTX)));
+  const lineOf = async (title: string) => (await loadTimeline(TEST_CTX)).items.find((item) => item.title === title)?.identityId;
+  expect(await lineOf("ECE 555 Lecture")).toBe("research");
+  expect(await lineOf("Dentist")).toBeUndefined();
+  filing("research=旧名");
+  expect(await lineOf("ECE 555 Lecture")).toBeUndefined();
+});

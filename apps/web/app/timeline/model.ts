@@ -17,7 +17,7 @@ export type TimelineItem = {
   task?: string;
   step?: string;
   tag?: string;
-  /** The line this belongs to, when it belongs to one. Calendar events from outside do not. */
+  /** The line this belongs to, when it belongs to one: a task's own line, or the line a calendar event was filed under (`calendar.lines`). */
   identityId?: string;
   milestone?: string;
   /** The work order a scheduled block stands for, so a click can open it. */
