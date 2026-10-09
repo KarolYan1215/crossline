@@ -127,7 +127,11 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
       // What the assistant already produced for this task and the person accepted: work that exists, not work to plan again.
       acceptedOutputs: listAgentTasks(store, workspaceId).filter((task) => task.workOrderId === workOrderId && task.status === "accepted")
         .map((task) => ({ title: task.title, files: task.artifacts.map((artifact) => artifact.path.split(/[\\/]/).at(-1)), note: task.reviewNote })),
-      feedback
+      feedback,
+      // Every earlier instruction about this task's steps still holds unless the latest one says otherwise: a replan used to see only
+      // the last one, and an answer to a plan question undid the person's 「本人只做推导、解题和自测」 a minute after they said it.
+      earlierFeedback: store.listEvents(workspaceId, { type: "task.steps_replan_requested", entityId: workOrderId })
+        .map((event) => String((event.payload as { feedback?: string }).feedback ?? "").trim()).filter((text) => text && text !== feedback).slice(-8)
     };
     const result = await runCodexSkill<StepPlan>(client, input, { skillName: PLANNER, cwd,
       developerInstructions: "Choose the archetype and write the task's step graph as the Skill describes. Return raw JSON only."

@@ -13,7 +13,7 @@ Input is `crossline.step-plan.v1`:
 - `materials[]`: the task's own files **in full text**, each `{id: "doc-N", name, text}` — syllabi, lecture plans, problem sets, briefs, data descriptions.
 - `person`: `facts[]` (what the person confirmed: background and level, the course's grading and their target, what they said about this project; `（假设）` marks an assumption), `strengths[]` (what they are good at), `answers[]` (what they answered to this task's earlier questions — binding).
 - `projectDates[]`: the project's dated items (exams, homework due, releases).
-- `archetypes`, `doneSteps` (when replanning), `acceptedOutputs` (work the assistant already produced and the person accepted), `personalPreferences`, `feedback`.
+- `archetypes`, `doneSteps` (when replanning), `acceptedOutputs` (work the assistant already produced and the person accepted), `personalPreferences`, `feedback` (the latest instruction) and `earlierFeedback` (every earlier one — all still hold unless the latest contradicts them).
 
 Return raw JSON only: `{archetypeId, quantity, rationale, units, questions, steps}`.
 
@@ -41,6 +41,8 @@ The person's attention is for what moves the outcome: understanding, solving, de
 - Neither too easy nor too hard: a step is one focused session (25–120 minutes p50) at the edge of what they can do now — practice problems at exam level, not reading summaries; a derivation they cannot yet do, not one they did last term.
 - Self-testing beats re-reading: for learning work, at least half the person's time goes to retrieval and problems (past exams, end-of-chapter problems, timed practice), not to reading notes.
 - One round of review after a check; no pre-planned loops. Near-term steps specific, later ones coarser (rolling wave). When replanning, keep `doneSteps` and plan the rest.
+
+**A task whose stated deliverable is itself static** (「整理复习提纲」「列出文献清单」「做一张对照表」) is not planned as the person compiling it: the assistant produces that deliverable (section 4), and the person's steps serve the purpose it is for — the exam it prepares, the paper it feeds, the decision it informs — read from the milestone, the task's intent and the facts. A review outline for an exam means the person's steps are the exam preparation itself (problems, derivations, timed self-tests on the units), with the outline as the assistant's product they work from; the person's own part on the outline is at most a short check of what the assistant made.
 
 ## 4. The assistant's steps: everything static, done before the person needs it
 
