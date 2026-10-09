@@ -1,7 +1,7 @@
 import "server-only";
 import { recordOp, retractedEventIds, withUndo } from "./undo";
 import {
-  ATTENTION_SNAPSHOT, CALENDAR_LINES, CALENDAR_PUBLISH_FAILURE, CALENDAR_SYNC_FAILURE, calendarEventKey, daysBetween, missingInputsOf, rankAsks,
+  ATTENTION_SNAPSHOT, CALENDAR_LINES, CALENDAR_PUBLISH_FAILURE, CALENDAR_SYNC_FAILURE, calendarEventKey, daysBetween, describeEvent, missingInputsOf, rankAsks,
   snoozeUntil, urgencyFor, type CalendarLines,
   validateAskAnswer, type AccessContext, type Ask, type AskOption, type AskSnooze
 } from "@crossline/core";
@@ -18,6 +18,7 @@ import { autoPublishPass, forgetPublishedHash } from "./auto-publish";
 import { calendarFiling } from "./timeline";
 import { interviewStatus } from "./interview-status";
 import { unfiledFiles } from "./file-belonging";
+import { decideEvent, eventProposals, publishFixedEvents } from "./fixed-events";
 import { identityLines } from "./lines";
 
 /** Markers an undo has taken back are as if never written. */
@@ -449,18 +450,42 @@ const STAGE_LABEL: Record<string, string> = { orientation: "开场与规则", si
  */
 function interviewAsks({ ctx }: Source): Ask[] {
   const status = interviewStatus(ctx);
-  if (!status.started || status.complete || !status.openQuestions) return [];
-  const missing = status.missing.slice(0, 4);
-  return [{ id: `interview:${status.stage}`, kind: "interview_open", entityId: "interview", urgency: "later", raisedAt: "",
-    fingerprint: `${status.stage}:${status.openQuestions}`, title: `访谈未完成：还有 ${status.openQuestions} 个问题`,
-    why: `访谈停在「${STAGE_LABEL[status.stage] ?? status.stage}」阶段（第 ${status.stageIndex}/${status.stageCount} 阶段）${missing.length ? `，尚缺：${missing.join("、")}${status.missing.length > 4 ? " 等" : ""}` : ""}。`
-      + "期间系统照常使用：已批准的里程碑照常倒推、排程与提醒；补齐后，长期目标候选、里程碑草稿与建议的可用时段按新信息更新。",
-    options: [{ id: "open", label: "继续访谈", href: "/onboarding", recommended: true }] }];
+  if (!status.started || status.complete) return [];
+  const open = status.checklist.filter((item) => !item.done);
+  const done = status.checklist.length - open.length;
+  const named = open.slice(0, 4).map((item) => item.label).join("、");
+  return [{ id: "interview:checklist", kind: "interview_open", entityId: "interview", urgency: "later", raisedAt: "",
+    fingerprint: open.map((item) => item.id).join(","),
+    title: status.awaitingPerson ? `访谈只差本人确认：清单 ${done}/${status.checklist.length}` : `访谈未完成：清单 ${done}/${status.checklist.length}`,
+    why: `${status.stage ? `访谈在「${STAGE_LABEL[status.stage] ?? status.stage}」阶段（第 ${status.stageIndex}/${status.stageCount} 阶段）` : "访谈"}`
+      + `${status.openQuestions ? `，本轮 ${status.openQuestions} 个问题待答` : ""}；未完成：${named}${open.length > 4 ? ` 等 ${open.length} 项` : ""}。`
+      + "期间系统照常使用：已批准的里程碑照常倒推、排程与提醒；补齐后，长期目标、里程碑草稿与建议的可用时段按新信息更新。",
+    options: [{ id: "open", label: status.awaitingPerson ? "去确认" : "继续访谈", href: "/onboarding", recommended: true }] }];
+}
+
+/**
+ * A fixed arrangement the person confirmed (a class, an office hour, an exam with a time) that their own calendar does not hold: offered
+ * for the Crossline calendar once the interview is done or its report exists. A recurring one becomes one repeating series, a one-off one
+ * event. At most four open at a time, soonest first.
+ */
+function eventAsks({ ctx, today }: Source): Ask[] {
+  return eventProposals(ctx).slice(0, 4).map((event) => {
+    const kind = event.repeat ? "周期性" : "一次性";
+    const first = event.repeat ? undefined : event.date;
+    return { id: `event:${event.id}`, kind: "event_propose" as const, entityId: event.id, urgency: first ? urgencyFor(first, today) : "later" as const,
+      ...(first ? { dueDay: first } : {}), ...(event.lineId ? { line: event.lineId } : {}), raisedAt: "", fingerprint: event.id,
+      title: `日历中没有「${short(event.title, 24)}」，要创建吗？`,
+      why: `${kind}日程：${describeEvent(event)}${event.location ? `，${event.location}` : ""}；来自${event.source === "interview" ? "访谈中的口述" : "上传的文件"}，`
+        + "在已同步的日历里没有找到。创建后写入 Crossline 日历——" + (event.repeat ? "作为一个每周重复的系列，" : "作为单个事件，")
+        + "提前 10 分钟提醒；排程本来就会绕开这段时间。",
+      options: [{ id: "create", label: "创建", recommended: true }, { id: "exists", label: "已在别的日历里", detail: "不再提醒" },
+        { id: "skip", label: "不需要", detail: "不写入日历" }] };
+  });
 }
 
 export function collectAsks(ctx: AccessContext, now = new Date()): Ask[] {
   const source = { store: getStore(), ctx, today: planToday(ctx, now) };
-  return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskAsks, missedAsks, agentAsks, calendarAsks, sourceProjectAsks, calendarLineAsks, interviewAsks]
+  return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskAsks, missedAsks, agentAsks, calendarAsks, sourceProjectAsks, calendarLineAsks, interviewAsks, eventAsks]
     .flatMap((collect) => { try { return collect(source); } catch { return []; } });
 }
 
@@ -661,6 +686,12 @@ async function answerOne(ctx: AccessContext, ask: Ask, optionId: string, values:
       if (!store.listProjects(ctx.workspaceId).some((project) => project.id === projectId)) return { ok: false, code: "PROJECT_NOT_FOUND" };
       store.assignSourceDocumentProject(ctx.workspaceId, ask.entityId, projectId);
       record(ctx, "source.project_assigned", ask.entityId, `source:assigned:${ask.entityId}:${projectId}:${Date.now()}`, { projectId, by: "person" });
+      return { ok: true };
+    }
+    case "event_propose": {
+      decideEvent(ctx, ask.entityId, optionId === "create" ? "create" : optionId === "exists" ? "exists" : "skip");
+      // Written now rather than at the next ten-minute pass, so the person sees it on their calendar while they are here.
+      if (optionId === "create") void publishFixedEvents(ctx).catch(() => undefined);
       return { ok: true };
     }
     case "calendar_line_unclear": {

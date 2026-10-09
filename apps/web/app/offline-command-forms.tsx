@@ -96,13 +96,16 @@ function UndoSuggestion({ opId, label, summary }: { opId: string; label: string;
 }
 
 /** What the input box wrote besides captures: each line says where it went, and every one of them is in the top bar's 撤销. */
-function WrittenItems({ goals, milestones, lines, records, failed }: Pick<RoutedOutcome, "goals" | "milestones" | "lines" | "records" | "failed">) {
-  if (!goals.length && !milestones.length && !lines.length && !records.length && !failed.length) return null;
+function WrittenItems({ goals, milestones, lines, records, failed, events, profile }: Pick<RoutedOutcome, "goals" | "milestones" | "lines" | "records" | "failed" | "events" | "profile">) {
+  if (!goals.length && !milestones.length && !lines.length && !records.length && !failed.length && !events.length && !profile.length) return null;
   return <ul className="routed-written">
     {goals.map((goal) => <li key={`g-${goal.lineId}-${goal.title}`}><b>长期目标</b> · {goal.line}：{goal.title} <a href="/milestones">主线 →</a></li>)}
     {milestones.map((item) => <li key={item.id}><b>里程碑草稿</b> · {item.line}：{item.title}{item.date ? `（${item.date}）` : ""} <a href="/milestones">在主线页审阅 →</a></li>)}
     {lines.map((line) => <li key={line.id}><b>新主线</b> · {line.label} <a href={`/onboarding?line=${encodeURIComponent(line.id)}`}>开始这条主线的访谈 →</a></li>)}
     {records.map((text, index) => <li key={`r-${index}`}><b>已记录</b> · {text}</li>)}
+    {events.map((event, index) => <li key={`e-${index}`}><b>已加入日程</b> · {event.title} · {event.when}{event.placedBySystem ? "（系统选定的空档）" : ""}
+      {event.moved ? ` · 重排了 ${event.moved} 个与之冲突的任务块，其余不变` : " · 未影响已排任务"} <a href="/plan">计划 →</a></li>)}
+    {profile.map((text, index) => <li key={`p-${index}`}><b>已交给访谈</b> · {text.slice(0, 40)} <a href="/onboarding">画像 →</a></li>)}
     {failed.map((text, index) => <li key={`f-${index}`} role="alert">{text}</li>)}
   </ul>;
 }
@@ -117,7 +120,7 @@ export function OfflineCaptureForm({ ownerId, workspaceId }: { ownerId: string; 
   const [busy, setBusy] = useState(false);
   const [changes, setChanges] = useState<Array<{ change: Change; summary: string }>>([]);
   const [undos, setUndos] = useState<Array<{ opId: string; label: string; summary: string }>>([]);
-  const [written, setWritten] = useState<Pick<RoutedOutcome, "goals" | "milestones" | "lines" | "records" | "failed"> | null>(null);
+  const [written, setWritten] = useState<Pick<RoutedOutcome, "goals" | "milestones" | "lines" | "records" | "failed" | "events" | "profile"> | null>(null);
 
   const capture = async ({ text, files, mentions }: ComposerInput): Promise<boolean> => {
     const [title, ...rest] = text.split("\n");
@@ -165,13 +168,15 @@ export function OfflineCaptureForm({ ownerId, workspaceId }: { ownerId: string; 
       }
       setChanges(result.changes ?? []);
       setUndos(result.undos ?? []);
-      setWritten({ goals: result.goals ?? [], milestones: result.milestones ?? [], lines: result.lines ?? [], records: result.records ?? [], failed: result.failed ?? [] });
+      setWritten({ goals: result.goals ?? [], milestones: result.milestones ?? [], lines: result.lines ?? [], records: result.records ?? [], failed: result.failed ?? [],
+        events: result.events ?? [], profile: result.profile ?? [] });
       // A question is not stored: it goes to 小助手, which answers it with what it knows about the person.
       for (const question of result.questions ?? []) window.dispatchEvent(new CustomEvent("crossline:ask-assistant", { detail: question }));
       setStatus([result.captured?.length ? `已收集 ${result.captured.length} 项` : "", result.applied?.length ? `已应用：${result.applied.join("；")}` : "",
         result.changes?.length ? `${result.changes.length} 项日程调整待确认` : "", result.undos?.length ? "撤销待确认" : "",
         result.questions?.length ? "问题已转给小助手" : ""].filter(Boolean).join(" · ")
-        || (result.goals?.length || result.milestones?.length || result.lines?.length || result.records?.length ? "" : "无可处理内容"));
+        || (result.goals?.length || result.milestones?.length || result.lines?.length || result.records?.length || result.events?.length || result.profile?.length ? "" : "无可处理内容"));
+      if (result.events?.length) window.dispatchEvent(new Event("crossline:plan-changed"));
       if (result.goals?.length || result.milestones?.length || result.lines?.length) window.dispatchEvent(new Event("crossline:pending-changed"));
       return true;
     } finally { setBusy(false); }

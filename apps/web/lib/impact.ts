@@ -2,7 +2,7 @@ import "server-only";
 import { STEP_MINUTES, TASK_MINUTES, type AccessContext, type AvailabilityWindow } from "@crossline/core";
 import { DEADLINE_MARGIN_DAYS, type ScheduleParams } from "@crossline/planner";
 import { effectiveSchedulePreferences, getStore, loadCurrentPlan, loadGoalForecast, planToday, resolvedEstimate, saveAvailability, saveGoalSettings,
-  saveScheduleParams, withPreview, type PreviewOverrides } from "./crossline";
+  saveScheduleParams, SCHEDULE_KEEP, withPreview, type PreviewOverrides } from "./crossline";
 import { lineLabels } from "./lines";
 
 /**
@@ -114,6 +114,8 @@ export function applyChange(ctx: AccessContext, requested: Change): { ok: true }
   const store = getStore();
   let change: Exclude<Change, { kind: "estimate_delta" }>;
   try { change = resolveChange(ctx, requested); } catch { return { ok: false, code: "WORK_ORDER_NOT_FOUND" }; }
+  // A change to the person's hours, the packing numbers or what matters re-plans everything: blocks kept by a local re-plan are let go.
+  if (change.kind === "availability" || change.kind === "params" || change.kind === "weight") store.deleteSetting(ctx.workspaceId, SCHEDULE_KEEP);
   if (change.kind === "availability") {
     const saved = saveAvailability(ctx, change.windows);
     if (!saved.ok) return saved;

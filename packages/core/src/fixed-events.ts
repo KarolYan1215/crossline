@@ -1,0 +1,84 @@
+/**
+ * Fixed events: the person's own commitments with a time — a class every Monday and Friday, an exam on one day, a meeting they told the
+ * input box about (decided 2026-10-08). Two kinds, kept apart because a calendar treats them differently: a **recurring** event is one
+ * series (weekdays, a first and a last day, skipped days), a **one-off** is one day. Either kind is busy time the scheduler plans around,
+ * and — when the person agrees — an event on their Crossline calendar: a recurring one as a single repeating series, never a pile of
+ * copies.
+ */
+export const FIXED_EVENTS = "schedule.events";
+/** The person's answer per proposed event (`create` | `exists` | `skip`), keyed by `FixedEvent.id`. */
+export const EVENT_DECISIONS = "schedule.events.decisions";
+
+export type FixedEvent = {
+  id: string;
+  title: string;
+  lineId: string;
+  /** Recurring: weekdays (0 = Sunday), first and last day, days skipped. Null for a one-off. */
+  repeat: { weekdays: number[]; from: string; until: string; exceptions: string[] } | null;
+  /** A one-off's day (a recurring event's first day is `repeat.from`). */
+  date: string;
+  start: string; end: string;
+  location: string;
+  /** Where it came from: typed into the input box, said in the interview, or read from a file. */
+  source: "input" | "interview" | "file";
+};
+
+const WEEKDAY = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+const md = (day: string) => `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}`;
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/** The days among `days` on which the event happens. */
+export function occurrences(event: FixedEvent, days: string[]): string[] {
+  if (!event.repeat) return days.includes(event.date) ? [event.date] : [];
+  const { weekdays, from, until, exceptions } = event.repeat;
+  return days.filter((day) => day >= from && day <= until && !exceptions.includes(day) && weekdays.includes(new Date(`${day}T12:00:00Z`).getUTCDay()));
+}
+
+/** 「每周一、五 14:30–15:45（9/4–12/7）」 or 「10/27 周二 14:30–15:45」. */
+export function describeEvent(event: FixedEvent): string {
+  if (!event.repeat) return `${md(event.date)} ${WEEKDAY[new Date(`${event.date}T12:00:00Z`).getUTCDay()]} ${event.start}–${event.end}`;
+  const days = [...event.repeat.weekdays].sort((a, b) => ((a + 6) % 7) - ((b + 6) % 7)).map((day) => WEEKDAY[day]!.slice(1)).join("、");
+  return `每周${days} ${event.start}–${event.end}（${md(event.repeat.from)}–${md(event.repeat.until)}）`;
+}
+
+/** An event that is whole: a title, times in order, and either a valid day or a valid series. */
+export function validFixedEvent(event: FixedEvent): boolean {
+  if (!event.title.trim() || !TIME.test(event.start) || !TIME.test(event.end) || event.end <= event.start) return false;
+  if (!event.repeat) return DAY.test(event.date);
+  return event.repeat.weekdays.length > 0 && event.repeat.weekdays.every((day) => Number.isInteger(day) && day >= 0 && day <= 6)
+    && DAY.test(event.repeat.from) && DAY.test(event.repeat.until) && event.repeat.from <= event.repeat.until;
+}
+
+const squash = (text: string) => text.replace(/[\s·:：,，。（）()\-_]+/g, "").toLowerCase();
+const minutes = (time: string) => { const [h, m] = time.split(":").map(Number); return (h ?? 0) * 60 + (m ?? 0); };
+/** Two titles name the same thing: one contains the other, or they share a course code or four characters in a row. */
+function sameTitle(a: string, b: string): boolean {
+  const x = squash(a), y = squash(b);
+  if (!x || !y) return false;
+  if (x.includes(y) || y.includes(x)) return true;
+  const code = /[a-z]{2,5}\d{3,4}/;
+  const cx = x.match(code)?.[0], cy = y.match(code)?.[0];
+  if (cx && cx === cy) return true;
+  for (let i = 0; i + 4 <= x.length; i += 1) if (y.includes(x.slice(i, i + 4))) return true;
+  return false;
+}
+
+/**
+ * Whether the person's own calendar already has this event: some occurrence in `days` meets a calendar block that starts within fifteen
+ * minutes of it and names the same thing. A calendar that already holds a class is not offered a second copy of it.
+ */
+export function inCalendar(event: FixedEvent, calendar: Array<{ title: string; day: string; start: string; end: string }>, days: string[]): boolean {
+  return occurrences(event, days).some((day) => calendar.some((block) => block.day === day
+    && Math.abs(minutes(block.start) - minutes(event.start)) <= 15 && sameTitle(block.title, event.title)));
+}
+
+const GRAPH_DAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"] as const;
+/** The weekly pattern as Microsoft Graph names it. */
+export const graphWeekdays = (weekdays: number[]) => weekdays.map((day) => GRAPH_DAYS[day]!);
+
+/** The events' occurrences on these days, as busy plan blocks (`event:<id>:<day>`). */
+export function fixedEventBlocks(events: FixedEvent[], days: string[]) {
+  return events.filter(validFixedEvent).flatMap((event) => occurrences(event, days).map((day) => ({ id: `event:${event.id}:${day}`, lane: "human" as const,
+    title: event.title, day, start: event.start, end: event.end, source: event.repeat ? "日程·每周" : "日程", readOnly: true })));
+}

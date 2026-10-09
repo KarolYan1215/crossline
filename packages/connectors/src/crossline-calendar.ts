@@ -22,13 +22,19 @@ export type PublishBlock = {
   note?: string;
   /** Minutes before the start to remind; absent or null means no reminder. Outlook and the phone deliver it. */
   reminderMinutes?: number | null;
+  /**
+   * A repeating series (a class every Monday and Friday) written as **one** event with a weekly recurrence, not one copy per week.
+   * `start`/`end` are then the first occurrence's instants; the series itself is written in the person's local time and zone, so it
+   * keeps its clock time across a daylight-saving change.
+   */
+  recurrence?: { daysOfWeek: string[]; startDate: string; endDate: string; localStart: string; localEnd: string; timeZone: string };
 };
 /**
  * What was last written for each block, kept by the caller between runs: the event, a hash of its content as written,
  * and the reminder it was given. `reminder` absent means an entry from before reminders existed, when every event was
  * written with none — so an event still without one is untouched and may be given its reminder.
  */
-export type PublishLedger = Record<string, { eventId: string; hash: string; reminder?: number | null }>;
+export type PublishLedger = Record<string, { eventId: string; hash: string; reminder?: number | null; recurrence?: string }>;
 export type PublishResult = {
   calendarId: string; created: number; updated: number; deleted: number; unchanged: number;
   /** Blocks whose event the person has changed since; left exactly as they made it. */
@@ -48,6 +54,22 @@ const minute = (instant: string) => new Date(Date.parse(instant.endsWith("Z") ||
 export const eventHash = (title: string, start: string, end: string) =>
   createHash("sha256").update(`${title}\n${minute(start)}\n${minute(end)}`).digest("hex").slice(0, 16);
 const asGraphTime = (instant: string) => ({ dateTime: new Date(instant).toISOString().replace("Z", ""), timeZone: "UTC" });
+/** Graph's own names for the zones people here live in; anything else is passed through as the IANA name. */
+const WINDOWS_ZONE: Record<string, string> = { "America/Chicago": "Central Standard Time", "America/New_York": "Eastern Standard Time",
+  "America/Los_Angeles": "Pacific Standard Time", "America/Denver": "Mountain Standard Time", "Asia/Shanghai": "China Standard Time",
+  "Asia/Hong_Kong": "China Standard Time", "Asia/Taipei": "Taipei Standard Time", "Europe/London": "GMT Standard Time", UTC: "UTC" };
+const recurrenceKey = (recurrence: PublishBlock["recurrence"]) => recurrence
+  ? `${recurrence.daysOfWeek.join(",")}|${recurrence.startDate}|${recurrence.endDate}|${recurrence.localStart}|${recurrence.localEnd}` : "";
+/** A series' start, end and weekly pattern as Graph takes them. */
+function seriesFields(recurrence: NonNullable<PublishBlock["recurrence"]>) {
+  const timeZone = WINDOWS_ZONE[recurrence.timeZone] ?? recurrence.timeZone;
+  return {
+    start: { dateTime: `${recurrence.startDate}T${recurrence.localStart}:00`, timeZone },
+    end: { dateTime: `${recurrence.startDate}T${recurrence.localEnd}:00`, timeZone },
+    recurrence: { pattern: { type: "weekly", interval: 1, daysOfWeek: recurrence.daysOfWeek, firstDayOfWeek: "monday" },
+      range: { type: "endDate", startDate: recurrence.startDate, endDate: recurrence.endDate } }
+  };
+}
 
 export class CrosslineCalendarWriter {
   readonly #credential: Credential;
@@ -131,7 +153,11 @@ export class CrosslineCalendarWriter {
    * Brings the calendar in line with `blocks`: makes the missing, moves the changed, removes the ones the plan dropped — in the
    * future only, and only events it made and the person has not touched.
    */
-  async publish(blocks: PublishBlock[], ledger: PublishLedger): Promise<{ result: PublishResult; ledger: PublishLedger }> {
+  async publish(blocks: PublishBlock[], ledger: PublishLedger, options: {
+    /** Which of this writer's events this call is responsible for (work blocks, or the person's fixed events); others are left as they are. */
+    manages?: (blockId: string) => boolean;
+  } = {}): Promise<{ result: PublishResult; ledger: PublishLedger }> {
+    const manages = options.manages ?? (() => true);
     const calendarId = await this.ensureCalendar();
     const owned = await this.#ownedEvents(calendarId);
     const now = this.#now().getTime();
@@ -141,7 +167,8 @@ export class CrosslineCalendarWriter {
     const wanted = new Set<string>();
 
     for (const block of blocks) {
-      if (Date.parse(block.end) <= now) continue;
+      // A series counts while its last day is ahead; a single event while it has not ended.
+      if (block.recurrence ? block.recurrence.endDate < new Date(now).toISOString().slice(0, 10) : Date.parse(block.end) <= now) continue;
       wanted.add(block.id);
       const subject = block.title;
       const hash = eventHash(subject, block.start, block.end);
@@ -151,13 +178,14 @@ export class CrosslineCalendarWriter {
       if (!existing) {
         const response = await this.#call("POST", events, {
           subject, start: asGraphTime(block.start), end: asGraphTime(block.end), categories: [CROSSLINE_CALENDAR_NAME], showAs: "free", ...reminderFields,
+          ...(block.recurrence ? { ...seriesFields(block.recurrence), showAs: "busy" } : {}),
           body: { contentType: "text", content: block.note ?? "由 Crossline 排入。在 Crossline 里改计划，这里会跟着变；在这里手动改过的，Crossline 之后不会再动它。" },
           singleValueExtendedProperties: [{ id: OWNER_PROPERTY_ID, value: block.id }]
         });
         const made = response.ok ? await response.json() as { id?: string } : undefined;
         if (!made?.id) throw new Error(`CALENDAR_EVENT_CREATE_FAILED:${response.status}`);
         this.#owned.add(made.id);
-        next[block.id] = { eventId: made.id, hash, reminder };
+        next[block.id] = { eventId: made.id, hash, reminder, ...(block.recurrence ? { recurrence: recurrenceKey(block.recurrence) } : {}) };
         result.created += 1;
         continue;
       }
@@ -173,22 +201,24 @@ export class CrosslineCalendarWriter {
       const currentReminder = existing.isReminderOn ? existing.reminderMinutesBeforeStart ?? 0 : null;
       const reminderTheirs = currentReminder !== (lastWritten.reminder ?? null);
       const reminderChange = !reminderTheirs && currentReminder !== reminder;
-      if (current === hash && !reminderChange) {
+      const seriesChange = recurrenceKey(block.recurrence) !== (lastWritten.recurrence ?? "");
+      if (current === hash && !reminderChange && !seriesChange) {
         result.unchanged += 1;
         if (!reminderTheirs) next[block.id] = { eventId: existing.id, hash, reminder };
         continue;
       }
       const response = await this.#call("PATCH", `${events}/${encodeURIComponent(existing.id)}`, {
-        ...(current !== hash ? { subject, start: asGraphTime(block.start), end: asGraphTime(block.end) } : {}),
+        ...(current !== hash || seriesChange ? block.recurrence ? { subject, ...seriesFields(block.recurrence) } : { subject, start: asGraphTime(block.start), end: asGraphTime(block.end) } : {}),
         ...(reminderChange ? reminderFields : {}) });
       if (!response.ok) throw new Error(`CALENDAR_EVENT_UPDATE_FAILED:${response.status}`);
-      next[block.id] = { eventId: existing.id, hash, reminder: reminderChange ? reminder : lastWritten.reminder ?? null };
+      next[block.id] = { eventId: existing.id, hash, reminder: reminderChange ? reminder : lastWritten.reminder ?? null,
+        ...(block.recurrence ? { recurrence: recurrenceKey(block.recurrence) } : {}) };
       result.updated += 1;
     }
 
     // What the plan no longer has: removed only if it is still in the future and still exactly as written.
     for (const [blockId, event] of owned) {
-      if (wanted.has(blockId)) continue;
+      if (wanted.has(blockId) || !manages(blockId)) continue;
       const lastWritten = ledger[blockId];
       const start = Date.parse(event.start?.dateTime ? minute(event.start.dateTime) + ":00Z" : "");
       if (!Number.isFinite(start) || start <= now) continue;

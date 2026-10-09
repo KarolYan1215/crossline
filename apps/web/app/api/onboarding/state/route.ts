@@ -6,7 +6,7 @@ import { getStore } from "../../../../lib/crossline";
 import { loadPendingDateBatch } from "../../../../lib/imported-dates";
 import { loadDiligence } from "../../../../lib/diligence";
 import { identityLines, needsLineSetup } from "../../../../lib/lines";
-import { questionsOwnedElsewhere } from "../../../../lib/interview-status";
+import { interviewStatus, questionsOwnedElsewhere } from "../../../../lib/interview-status";
 
 /**
  * Everything the onboarding screen shows, in one read: the conversation so far, the projects and facts the
@@ -41,7 +41,7 @@ export async function GET(request: Request) {
   }).filter((gap) => gap.blocking || !askedBefore.has(gap.question.id)).map((gap) => gap.question);
   return NextResponse.json({
     ok: true,
-    identities, gaps, movedToAsks: moved.size,
+    identities, gaps, movedToAsks: moved.size, checklist: interviewStatus(access.ctx).checklist,
     setupLines: !focus && needsLineSetup(access.ctx),
     focusLine: focus ? { id: focus.id, label: focus.label } : null,
     lines: identityLines(access.ctx).map((line) => ({ id: line.id, label: line.label, rank: line.rank ?? null, hard: Boolean(line.hard), goals: line.goals ?? [] })),

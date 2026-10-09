@@ -5,7 +5,7 @@ import {
   type KnownSources, type OnboardingTurn, type OnboardingTurnContext
 } from "@crossline/core";
 import { continueSkillTurn, runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
-import { latestFileDates, type CrosslineStore, type StoredOnboardingMessage, type StoredSourceDocument } from "@crossline/db";
+import { interviewChecklistFor, latestFileDates, type CrosslineStore, type StoredOnboardingMessage, type StoredSourceDocument } from "@crossline/db";
 import { sourceIds } from "./source-ids";
 import { identityLines } from "./lines";
 
@@ -39,7 +39,10 @@ export type OnboardingTurnOutcome =
 type Announced = { announcedSources?: string[] };
 
 export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId: string, cwd: string,
-  getClient: () => CodexRpcBoundary | undefined) {
+  getClient: () => CodexRpcBoundary | undefined, options: {
+    /** Hold a premature 「ready」 to the completion list (on in the app; tests of other behaviour turn it off). */
+    checklist?: boolean;
+  } = {}) {
   const identities = () => identityLines(store, workspaceId)
     .map((pack) => ({ id: pack.id, label: pack.label }));
 
@@ -54,6 +57,11 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         .map(([id, doc]) => [id, doc.extractedText]))
     };
   }
+
+  /** The completion list's open items, as of now (files are the web's to count; the worker leaves that item out). */
+  const openChecklist = () => interviewChecklistFor(store, workspaceId, identityLines(store, workspaceId)
+    .map((line) => ({ id: line.id, label: line.label, hard: Boolean(line.hard), goals: line.goals ?? [] })), { unfiledFiles: null })
+    .filter((item) => !item.done).map(({ label, detail, owner }) => ({ label, detail, owner }));
 
   /** What the ledger still lacks, as of now. */
   const currentGaps = (): ProfileGap[] => profileGaps({
@@ -204,6 +212,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         facts: store.listProfileFacts(workspaceId).map(({ identityId, projectId, slot, value, status }) => ({ identityId, projectId, slot, value, status })),
         today, timeZone, sources: clipDocuments(documents), ...(history ? { history } : {}), reply: { id: replyId, text: replyText },
         focusLine, profile: readProfile(), stage: ((session!.coverage as { stage?: OnboardingStage }).stage ?? (focusLine ? "details" : "orientation")),
+        checklist: openChecklist(),
         lines: identityLines(store, workspaceId).map((line) => ({ id: line.id, label: line.label, rank: line.rank ?? null, hard: Boolean(line.hard), goals: line.goals ?? [] }))
       };
       return runCodexSkill<OnboardingTurn>(client, context, {
@@ -220,7 +229,8 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     } else {
       // Later turns carry only what is new: the reply, and any file that arrived since the last turn.
       const newSources = clipDocuments(fresh);
-      const message = JSON.stringify({ reply: { id: replyId, text: replyText }, ...(newSources.length ? { newSources } : {}) });
+      // The completion list goes with every turn, so the model knows what it still owes without being told twice in prose.
+      const message = JSON.stringify({ reply: { id: replyId, text: replyText }, ...(newSources.length ? { newSources } : {}), checklist: openChecklist() });
       result = await continueSkillTurn<OnboardingTurn>(client, session.codexThreadId, message, {
         skillName: ONBOARDING_SKILL, cwd, outputSchema: ONBOARDING_TURN_SCHEMA, validateOutput, softAccept,
         onAudit: () => {}, timeoutMs: 60 * 60_000
@@ -239,7 +249,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     persistTurn(result.output, sessionId, ownerId);
     // A fixed weekly arrangement the person said (「每周二四上午组会」) is quoted from their reply, so replies count as sources here too.
     persistFileDates(result.output, ownerId, sent.map(([, doc]) => doc.id), { ...known.sources, ...known.replies }, today);
-    const output = withGapQuestions(result.output, currentGaps(), messages);
+    const output = withChecklist(withGapQuestions(result.output, currentGaps(), messages), focusLine || options.checklist === false ? [] : openChecklist());
     store.appendOnboardingMessage({ sessionId, workspaceId, role: "assistant", content: output, createdAt: new Date().toISOString() });
     store.saveOnboardingSession({
       ...session, ...(threadId ? { codexThreadId: threadId } : {}),
@@ -250,6 +260,22 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     });
     return { state: output.nextAction === "ready_for_milestones" ? "ready" : "asked", sessionId };
   };
+}
+
+/**
+ * The interview may not call itself finished while an item of the completion list that more questions can settle is open
+ * (`interviewChecklist`): a premature 「ready」 goes back to asking, says what is missing, and — when the model asked nothing — asks for it.
+ * Items only the person can settle (confirming the portrait, adopting a goal) do not hold the interview; they show on the screen.
+ */
+export function withChecklist(output: OnboardingTurn, open: Array<{ label: string; detail: string; owner: "interview" | "person" }>): OnboardingTurn {
+  const owed = open.filter((item) => item.owner === "interview");
+  if (output.nextAction !== "ready_for_milestones" || !owed.length) return output;
+  const missing = owed.slice(0, 6).map((item) => `${item.label}${item.detail ? `（${item.detail}）` : ""}`).join("；");
+  return { ...output, nextAction: "ask", reply: `${output.reply}
+
+完成访谈前还缺：${missing}。`,
+    questions: output.questions.length ? output.questions
+      : [{ id: "checklist-open", text: `完成访谈前还缺：${missing}。请补充。`, kind: "free", allowOther: true, identityId: "", projectId: "", options: [] }] };
 }
 
 /** Words that say a question from the model already asks what a gap is about, so the code-built one is not asked on top of it. */

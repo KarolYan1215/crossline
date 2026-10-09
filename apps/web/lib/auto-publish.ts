@@ -4,6 +4,7 @@ import { CALENDAR_PUBLISH_FAILURE, requiredApproval, type AccessContext } from "
 import { getStore } from "./crossline";
 import { blocksToPublish } from "./calendar-publish";
 import { CodexSupervisorRequestError, requestCodexSupervisor } from "./codex-runtime";
+import { publishFixedEvents } from "./fixed-events";
 
 const LAST_HASH = "calendar.autopublish.hash";
 /** How often the web process looks for a changed schedule to publish. */
@@ -39,6 +40,8 @@ export async function autoPublishPass(now = new Date()): Promise<Array<{ workspa
     const ownerId = store.getWorkspaceOwnerId(workspace.id);
     if (!ownerId || !store.getSetting(workspace.id, "calendar.write.account")) continue;
     const ctx = systemContext(workspace.id, ownerId, now);
+    // The person's fixed events are theirs, not the plan's: written whether or not the current plan version is approved.
+    await publishFixedEvents(ctx, now).catch(() => undefined);
     try {
       const { approved, blocks } = await blocksToPublish(ctx, now);
       if (!approved) { outcomes.push({ workspaceId: workspace.id, state: "plan_not_approved" }); continue; }

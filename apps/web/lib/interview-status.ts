@@ -1,5 +1,7 @@
 import "server-only";
-import { ONBOARDING_STAGES, type AccessContext } from "@crossline/core";
+import { ONBOARDING_STAGES, type AccessContext, type ChecklistItem } from "@crossline/core";
+import { interviewChecklistFor } from "@crossline/db";
+import { identityLines } from "./lines";
 import { getStore, planToday } from "./crossline";
 import { unfiledFiles } from "./file-belonging";
 
@@ -34,33 +36,36 @@ export function questionsOwnedElsewhere(ctx: AccessContext, questions: Question[
 export type InterviewStatus = {
   /** No interview was ever started (an account set up before the interview existed, or a fresh one). */
   started: boolean;
-  /** The interview said it has what it needs (`nextAction: "ready_for_milestones"`) and the session is closed. */
+  /** Every item of the completion list is done (`interviewChecklist`) — not the model's say-so. */
   complete: boolean;
+  /** The interview has nothing more to ask; what is left is the person's to click. */
+  awaitingPerson: boolean;
   stage: string; stageIndex: number; stageCount: number;
   /** Questions of the current batch still waiting for the person, the app's own ones left out. */
   openQuestions: number;
-  /** What the interview itself listed as still missing, per line. */
-  missing: string[];
+  checklist: ChecklistItem[];
 };
 
 /**
- * Whether the main interview is finished, judged from what the interview itself recorded: its last answer's `nextAction` (still `ask`
- * means it has more to ask) and the session's state, plus the coverage it keeps of what is filled and what is missing per line.
+ * Whether the main interview is finished, judged by the completion list built from the ledger — the portrait as much as the work —
+ * plus where the conversation stands: its stage and the questions of the open batch.
  */
 export function interviewStatus(ctx: AccessContext): InterviewStatus {
   const store = getStore();
   const session = store.getLatestOnboardingSession(ctx.workspaceId);
   const stageCount = ONBOARDING_STAGES.length;
-  if (!session) return { started: false, complete: false, stage: "", stageIndex: 0, stageCount, openQuestions: 0, missing: [] };
+  const checklist = interviewChecklistFor(store, ctx.workspaceId, identityLines(ctx).map((line) => ({ id: line.id, label: line.label, hard: Boolean(line.hard), goals: line.goals ?? [] })),
+    { unfiledFiles: unfiledFiles(ctx, planToday(ctx)).length });
+  const open = checklist.filter((item) => !item.done);
+  if (!session) return { started: false, complete: false, awaitingPerson: false, stage: "", stageIndex: 0, stageCount, openQuestions: 0, checklist };
   const messages = store.listOnboardingMessages(ctx.workspaceId, session.id);
   const lastAssistant = [...messages].reverse().find((message) => message.role === "assistant");
   const answered = messages.at(-1)?.role === "user";
   const content = (lastAssistant?.content ?? {}) as AssistantContent;
-  const complete = session.state === "complete" || content.nextAction === "ready_for_milestones";
   const stage = content.stage ?? String((session.coverage as { stage?: string }).stage ?? "");
-  const questions = complete || answered ? [] : content.questions ?? [];
+  const questions = answered || content.nextAction === "ready_for_milestones" ? [] : content.questions ?? [];
   const owned = questionsOwnedElsewhere(ctx, questions);
-  const coverage = ((session.coverage as { coverage?: Array<{ missing?: string[] }> }).coverage ?? []);
-  return { started: true, complete, stage, stageIndex: Math.max(0, ONBOARDING_STAGES.indexOf(stage as (typeof ONBOARDING_STAGES)[number])) + 1, stageCount,
-    openQuestions: questions.filter((question) => !owned.has(question.id)).length, missing: coverage.flatMap((line) => line.missing ?? []) };
+  return { started: true, complete: !open.length, awaitingPerson: open.length > 0 && open.every((item) => item.owner === "person"),
+    stage, stageIndex: Math.max(0, ONBOARDING_STAGES.indexOf(stage as (typeof ONBOARDING_STAGES)[number])) + 1, stageCount,
+    openQuestions: questions.filter((question) => !owned.has(question.id)).length, checklist };
 }

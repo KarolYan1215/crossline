@@ -7,7 +7,7 @@ import { TranscriptionCard, type TranscriptionStatus } from "./transcription-car
 import { ProfilePanel } from "./profile-panel";
 import { QuestionCard } from "./question-card";
 import { LineSetup } from "./line-setup";
-import { PortraitPanel, StageBar } from "./portrait-panel";
+import { ChecklistPanel, PortraitPanel, StageBar } from "./portrait-panel";
 import { HierarchyGuide } from "./hierarchy-guide";
 import {
   composeAnswers, type Answer, type AssistantTurn, type DocumentRow, type Message, type OnboardingState
@@ -231,6 +231,7 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
       </form>
     </section>
     <div className="ob-side">
+      {!state.focusLine && <ChecklistPanel items={state.checklist ?? []} onChanged={() => void load()} />}
       <PortraitPanel profile={state.profile} lines={state.lines} lineProfiles={state.lineProfiles} onChanged={() => void load()} />
       {state.availabilityProposed && <p className="ob-note">已按硬约束规则提议每周可用时段，可在 <a href="/plan#time">计划页</a> 预览后采用。</p>}
       <ProfilePanel state={state} onChanged={() => void load()} />

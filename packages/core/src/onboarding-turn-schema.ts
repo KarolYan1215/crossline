@@ -109,6 +109,8 @@ export type OnboardingTurnContext = {
   lines?: Array<{ id: string; label: string; rank: number | null; hard: boolean; goals: string[] }>;
   /** The portrait so far and the stage reached, so a rebuilt thread carries on rather than starting over. */
   profile?: ProfileModel; stage?: OnboardingStage;
+  /** The completion list's items still open (`interviewChecklist`): what the interview owes before it may say it is ready, and what waits on the person. */
+  checklist?: Array<{ label: string; detail: string; owner: "interview" | "person" }>;
   /** Only when the conversation had to be rebuilt in a fresh thread: what was said before, oldest first. User lines carry their `reply-N` id. */
   history?: Array<{ id: string; role: "user" | "assistant"; text: string }>;
   reply: { id: string; text: string };

@@ -26,7 +26,8 @@ export function createCalendarPublisher(store: CrosslineStore, workspaceId: stri
   credentialFor: (accountId: string) => { getAccessToken(): Promise<string | undefined> };
   fetchImpl?: typeof fetch; now?: () => Date;
 }) {
-  return async function publish(blocks: PublishBlock[]): Promise<PublishOutcome> {
+  /** `fixed`: the person's fixed events (ids `fixed:`); `work`: everything else this writer made. Each call manages only its own. */
+  return async function publish(blocks: PublishBlock[], scope: "work" | "fixed" = "work"): Promise<PublishOutcome> {
     const accountId = store.getSetting(workspaceId, ACCOUNT);
     if (!accountId) return NOT_AUTHORIZED;
     const writer = new CrosslineCalendarWriter({
@@ -34,7 +35,8 @@ export function createCalendarPublisher(store: CrosslineStore, workspaceId: stri
       ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}), ...(deps.now ? { now: deps.now } : {})
     });
     try {
-      const { result, ledger } = await writer.publish(blocks, readPublishLedger(store, workspaceId));
+      const fixed = (id: string) => id.startsWith("fixed:");
+      const { result, ledger } = await writer.publish(blocks, readPublishLedger(store, workspaceId), { manages: (id) => scope === "fixed" ? fixed(id) : !fixed(id) });
       store.setSetting(workspaceId, LEDGER, JSON.stringify(ledger));
       const ownerId = store.getWorkspaceOwnerId(workspaceId);
       if (ownerId) {

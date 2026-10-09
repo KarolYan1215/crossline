@@ -98,7 +98,7 @@ test("retrying after a failure does not save the person's message a second time"
 
 test("a finished interview marks the session complete", async () => {
   const { rpc } = fakeRuntime([turn({ questions: [], nextAction: "ready_for_milestones" })]);
-  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { checklist: false });
   expect(await run({ sessionId: "s", text: "都说完了" })).toEqual({ state: "ready", sessionId: "s" });
   expect(store.getOnboardingSession(workspaceId, "s")?.state).toBe("complete");
 });
@@ -111,7 +111,7 @@ test("with no Codex runtime the turn is a blocker and saves nothing", async () =
 
 test("a thread the runtime has forgotten is replaced, and the new one is told what was said before", async () => {
   const { rpc, prompts } = fakeRuntime([turn()], { lostThreads: ["gone-thread"] });
-  const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc, { checklist: false });
   const now = "2026-10-02T00:00:00.000Z";
   const ownerId = store.getWorkspaceOwnerId(workspaceId)!;
   store.saveOnboardingSession({ id: "s1", ownerId, workspaceId, state: "active", coverage: {}, codexThreadId: "gone-thread", createdAt: now, updatedAt: now });
@@ -142,7 +142,7 @@ test("dates the model read out of a file become one verified batch, and what can
     dates: [dateItem(), dateItem({ id: "d2", title: "编造的考试", date: "2026-11-03", quote: "27th Oct. L15" })],
     recurring: [], questions: ["这些材料是哪门课的？"]
   })]);
-  const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc, { checklist: false });
   expect((await run({ sessionId: "s1", text: "我添加了文件" })).state).toBe("ready");
   const [batch] = store.listEvents(workspaceId, { type: "dates.extracted" });
   const payload = batch!.payload as { documentIds: string[]; dates: Array<{ id: string }>; questions: string[]; dropped: Array<{ id: string }> };
@@ -157,7 +157,7 @@ test("a turn with no dates writes no batch, and a newer batch retires one nobody
     extractedText: "Week-8: 27th Oct.\nL15: Mid-term-1", extractionStatus: "done", createdAt: "2026-10-02T00:00:00.000Z" });
   const empty = { dates: [], recurring: [], questions: [] };
   const { rpc } = fakeRuntime([withDates(empty), withDates({ ...empty, dates: [dateItem()] }), withDates({ ...empty, dates: [dateItem({ id: "d9" })] })]);
-  const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc, { checklist: false });
   await run({ sessionId: "s1", text: "一" });
   expect(store.listEvents(workspaceId, { type: "dates.extracted" })).toHaveLength(0);
   await run({ sessionId: "s1", text: "二" });
@@ -179,7 +179,7 @@ const course = turn({
 
 test("a course's target grade is not asked: the architect proposes one later, so a finished interview stays finished", async () => {
   const { rpc } = fakeRuntime([course]);
-  const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc, { checklist: false });
   expect(await run({ sessionId: "s", text: "ECE 555 评分：作业 20%、小测 30%、项目 25%、期末 25%，我想拿高分" })).toEqual({ state: "ready", sessionId: "s" });
   expect(store.listProfileFacts(workspaceId).some((fact) => fact.slot === "target_grade")).toBe(false);
 });
@@ -191,7 +191,7 @@ const guessOnly = turn({
 
 test("the model saying it is done does not make it so: a line resting only on its own guesses turns it back into a question", async () => {
   const { rpc } = fakeRuntime([guessOnly]);
-  const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc, { checklist: false });
   expect(await run({ sessionId: "s", text: "随便聊聊" })).toEqual({ state: "asked", sessionId: "s" });
   const asked = store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { questions: Array<{ id: string }>; nextAction: string };
   expect(asked.nextAction).toBe("ask");
@@ -200,9 +200,19 @@ test("the model saying it is done does not make it so: a line resting only on it
 
 test("declining the line is recorded by the app itself, and the interview can then finish", async () => {
   const { rpc } = fakeRuntime([guessOnly, turn({ questions: [], nextAction: "ready_for_milestones" })]);
-  const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc, { checklist: false });
   await run({ sessionId: "s", text: "随便聊聊" });
   const question = (store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { questions: Array<{ id: string; text: string }> }).questions.find((item) => item.id === "gap-line-startup")!;
   expect(await run({ sessionId: "s", text: `【${question.text}】选择：目前没有在做的事` })).toEqual({ state: "ready", sessionId: "s" });
   expect(store.listProfileFacts(workspaceId).find((fact) => fact.slot === "skipped")).toMatchObject({ identityId: "startup", status: "confirmed", sourceRef: "reply-3" });
+});
+
+test("with the completion list on, a 「ready」 before the portrait is written and grounded goes back to asking", async () => {
+  const { rpc } = fakeRuntime([turn({ questions: [], nextAction: "ready_for_milestones" })]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc);
+  expect(await run({ sessionId: "s", text: "都说完了" })).toEqual({ state: "asked", sessionId: "s" });
+  expect(store.getOnboardingSession(workspaceId, "s")?.state).toBe("active");
+  const last = store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { reply: string; questions: unknown[] };
+  expect(last.reply).toContain("完成访谈前还缺：画像各部分已写出");
+  expect(last.questions.length).toBeGreaterThan(0);
 });

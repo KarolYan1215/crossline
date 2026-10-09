@@ -1,6 +1,6 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { captureItem, type AccessContext, type RoutedInput } from "@crossline/core";
+import { captureItem, describeEvent, type AccessContext, type RoutedInput } from "@crossline/core";
 import { addCapturedTaskWithId, effectiveSchedulePreferences, getStore, saveMilestoneEdit } from "./crossline";
 import { requestCodexSupervisor } from "./codex-runtime";
 import { analyzeNewCapturesInBackground } from "./capture-followups";
@@ -8,6 +8,7 @@ import { applyChange, type Change } from "./impact";
 import { recentOps, withUndo } from "./undo";
 import { addLine, identityLines, updateLine } from "./lines";
 import { recordEnergy, recordTaskNote } from "./task-ops";
+import { scheduleEvent } from "./event-scheduling";
 
 /** The person's choice: an instruction about a planned task is applied at once instead of shown as a preview first. */
 export const INPUT_AUTO_APPLY = "input.schedule.autoApply";
@@ -31,6 +32,10 @@ export type RoutedOutcome = {
   records: string[];
   /** Questions are not written anywhere: the page hands them to 小助手. */
   questions: string[];
+  /** Fixed events put on the plan and the Crossline calendar, with how many work blocks they moved (the rest stayed put). */
+  events: Array<{ title: string; when: string; moved: number; placedBySystem: boolean }>;
+  /** What the person said about themselves, handed to the interview, which keeps the portrait. */
+  profile: string[];
   /** What could not be written, in words. */
   failed: string[];
 };
@@ -49,7 +54,8 @@ export async function routeInput(ctx: AccessContext, input: { text: string; batc
   } catch {
     routed = { routed: false, items: [captureItem(input.text)] };
   }
-  const outcome: RoutedOutcome = { captured: [], changes: [], applied: [], routed: routed.routed, undos: [], goals: [], milestones: [], lines: [], records: [], questions: [], failed: [] };
+  const outcome: RoutedOutcome = { captured: [], changes: [], applied: [], routed: routed.routed, undos: [], goals: [], milestones: [], lines: [], records: [], questions: [],
+    events: [], profile: [], failed: [] };
   const extra = mentionContext(input.mentions);
   const ops = new Map(recentOps(ctx).map((op) => [op.id, op.label]));
   const labels = new Map(identityLines(ctx).map((line) => [line.id, line.label]));
@@ -96,6 +102,23 @@ export async function routeInput(ctx: AccessContext, input: { text: string; batc
         break;
       }
       case "question": outcome.questions.push(item.title); break;
+      case "event": {
+        // The event is the scheduler's to place: its own handler finds a time when none was given and re-plans only what it lands on.
+        const result = await withUndo(ctx, `加入日程：${item.title}`, () => scheduleEvent(ctx, { title: item.title, lineId: item.lineId, date: item.date,
+          weekdays: item.weekdays, startTime: item.startTime, endTime: item.endTime, until: item.until, minutes: item.minutes, location: item.context }));
+        if (result.ok) outcome.events.push({ title: item.title, when: describeEvent(result.event), moved: result.moved, placedBySystem: result.placedBySystem });
+        else outcome.failed.push(`日程「${item.title}」未加入：${result.message}`);
+        break;
+      }
+      case "profile": {
+        // About the person themselves: the interview takes it as their reply, with its own instructions and everything it knows of them.
+        const session = getStore().getLatestOnboardingSession(ctx.workspaceId);
+        if (!session) { capture(item.title, ""); break; }
+        void requestCodexSupervisor(ctx, "/v1/onboarding/turn", { method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ sessionId: session.id, text: item.title }), signal: AbortSignal.timeout(3 * 60 * 60_000) }).catch(() => undefined);
+        outcome.profile.push(item.title);
+        break;
+      }
     }
   }
   if (outcome.captured.length) analyzeNewCapturesInBackground(ctx);

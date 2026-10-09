@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
-import { INPUT_ROUTE_SCHEMA, looksLikeScheduleCommand, structuredOutputProblems, validateRoutedInput } from "./index";
+import { INPUT_ROUTE_SCHEMA, captureItem, looksLikeScheduleCommand, structuredOutputProblems, validateRoutedInput } from "./index";
+const captureItemFor = () => captureItem("");
 
 const none = { type: "none" as const, date: "", minutes: 0 };
 
@@ -20,7 +21,8 @@ test("a change to a task that is not open, or a malformed one, falls back to a c
 
 test("nothing usable keeps the whole text as one capture", () => {
   expect(validateRoutedInput({ items: [] }, [], "把复习挪到周五").items).toEqual([
-    { kind: "capture", title: "把复习挪到周五", context: "", workOrderId: "", change: none, summary: "", opId: "", lineId: "", date: "", energy: "" }]);
+    { kind: "capture", title: "把复习挪到周五", context: "", workOrderId: "", change: none, summary: "", opId: "", lineId: "", date: "", energy: "",
+      weekdays: [], startTime: "", endTime: "", until: "", minutes: 0 }]);
 });
 
 test("taking something back names a recent operation, or none, and is never filed as new work", () => {
@@ -59,4 +61,20 @@ test("goals and milestones need a known line, a new line a short noun, a record 
   expect(looksLikeScheduleCommand("长期目标：成为能独立带项目的研究者")).toBe(true);
   expect(looksLikeScheduleCommand("这周还有多少空闲？")).toBe(true);
   expect(looksLikeScheduleCommand("今天很累")).toBe(true);
+});
+
+test("an event is recurring with weekdays, a time and an end, or a one-off with its day; one that cannot be placed is kept as a capture", () => {
+  const blank = { ...captureItemFor(), title: "" };
+  const items = validateRoutedInput({ items: [
+    { ...blank, kind: "event", title: "健身", weekdays: [2, 4], startTime: "09:00", endTime: "10:30", until: "2026-12-31", minutes: 90 },
+    { ...blank, kind: "event", title: "和导师开会", date: "2026-10-15", startTime: "15:00", endTime: "16:00", minutes: 60 },
+    { ...blank, kind: "event", title: "和师兄对数据", date: "2026-10-16", minutes: 60 },
+    { ...blank, kind: "event", title: "每周组会", weekdays: [3], startTime: "", endTime: "", until: "2026-12-31", minutes: 60 },
+    { ...blank, kind: "profile", title: "我其实晚上效率更高" }
+  ] }, [], "原文", [], ["research"]).items;
+  expect(items.map((item) => [item.kind, item.title, item.weekdays.join(","), item.date, item.startTime])).toEqual([
+    ["event", "健身", "2,4", "", "09:00"], ["event", "和导师开会", "", "2026-10-15", "15:00"], ["event", "和师兄对数据", "", "2026-10-16", ""],
+    ["capture", "每周组会", "", "", ""], ["profile", "我其实晚上效率更高", "", "", ""]]);
+  expect(looksLikeScheduleCommand("周四下午三点和导师开会")).toBe(true);
+  expect(looksLikeScheduleCommand("我其实晚上效率更高")).toBe(true);
 });

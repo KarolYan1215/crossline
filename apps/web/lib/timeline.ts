@@ -6,6 +6,7 @@ import {
 } from "./crossline";
 import { itemsFromPlan, toMinutes, type TimelineDeadline, type TimelineItem } from "../app/timeline/model";
 import { identityLines } from "./lines";
+import { inputEvents } from "./fixed-events";
 
 export type TimelineData = {
   today: string; nowIso: string; timeZone: string;
@@ -100,6 +101,7 @@ export async function loadTimeline(ctx: AccessContext, loaded?: Awaited<ReturnTy
   // Calendar events and file dates take the line the classifier filed them under (`calendar.lines`, by title; never filed by hand).
   // A file date is shown with its course in front when its title left it out (dates imported before titles had to name it).
   const filing = calendarFiling(ctx);
+  const eventLine = new Map(inputEvents(ctx).map((event) => [event.id, event.lineId]));
   const knownProjects = store.listProjects(ctx.workspaceId).map((project) => ({ id: project.id, name: project.name, identityId: project.identityId }));
   const projectOfItem = itemProjectResolver(knownProjects, store.listSourceDocuments(ctx.workspaceId));
   const imported = importedProjects(store.listEvents(ctx.workspaceId, { type: "dates.extracted" }), projectOfItem);
@@ -107,7 +109,8 @@ export async function loadTimeline(ctx: AccessContext, loaded?: Awaited<ReturnTy
     if (item.kind !== "calendar" && item.kind !== "import") return item;
     const named = item.kind === "import" ? { ...item, title: importedTitle(item.id, item.title, imported) } : item;
     if (named.identityId) return named;
-    const lineId = calendarLineOf(filing, named.title);
+    // An event the person added names its line itself; only when it does not is it filed like any calendar title.
+    const lineId = (item.id.startsWith("event:") ? eventLine.get(item.id.split(":")[1]!) : "") || calendarLineOf(filing, named.title);
     return lineId ? { ...named, identityId: lineId } : named;
   }), ...activityItems(ctx, zone, instantNow())];
 

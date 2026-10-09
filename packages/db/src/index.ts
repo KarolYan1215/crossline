@@ -3220,4 +3220,5 @@ export function latestFileDates(store: CrosslineStore, workspaceId: string): {
   return { dates, undated };
 }
 export * from "./agent";
+export * from "./interview";
 export * from "./push";

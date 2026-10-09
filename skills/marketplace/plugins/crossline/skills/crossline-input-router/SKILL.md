@@ -7,7 +7,9 @@ description: Read what was typed into Crossline's one input box and sort it into
 
 Input is `crossline.input-route.v2`: `text` (what the person typed), `batch` (true when they chose batch input), `today` and `timeZone`, `lines` (the person's 主线: `id`, `label` — an identity noun such as 研究者 — their `goals`, and `hard` when the line is a hard constraint), `openTasks` (id, title, line, project, due date, current usual minutes), `mentions` (tasks, milestones or materials they linked with @) and `recentOps` (the person's own operations of the last 24 hours, newest first: `id`, `label` such as 「不等了：某项数据」, `at`). Return raw JSON only: `{items}`.
 
-The hierarchy: 主线 is an identity noun; a 长期目标 is 「成为 ___ 的 <身份>」 (a description of who the person becomes on that line); a 里程碑 is a declarative achieved state (「完成…」「达到…」「通过…」, with a date when one is said); a 任务 is something to do. Every item has every field; unused fields are `""`, `0`, `change.type` `"none"`, `energy` `""`.
+The hierarchy: 主线 is an identity noun; a 长期目标 is 「成为 ___ 的 <身份>」 (a description of who the person becomes on that line); a 里程碑 is a declarative achieved state (「完成…」「达到…」「通过…」, with a date when one is said); a 任务 is something to do. Every item has every field; unused fields are `""`, `0`, `[]`, `change.type` `"none"`, `energy` `""`.
+
+You only sort. Each kind is carried out by its own part of the app with its own instructions and context (the scheduler for events and changes, the interview for what the person says about themselves, 小助手 for questions), so keep the person's words and do not try to do the work yourself.
 
 - An **instruction about an open task** becomes `{kind: "schedule", workOrderId, change, summary}`:
   - `change.type` `due`: a new latest-finish day (`date` = YYYY-MM-DD);
@@ -21,6 +23,12 @@ The hierarchy: 主线 is an identity noun; a 长期目标 is 「成为 ___ 的 <
 - **A new line** (「加一条主线：跑者」, 「我想新增运动这条线」) becomes `{kind: "line", title, context}`: `title` the identity noun (≤ 12 characters, e.g. 跑者, not 运动). The line's own interview follows.
 - **A record** — how the person is doing (「今天很累」, 「状态很好」) or a note about a task (「作业 2 第三题卡住了」) — becomes `{kind: "record", title, energy, workOrderId}`: `title` the note in their words, `energy` `low`/`medium`/`high` only when they describe their energy, `workOrderId` the open task it is about or `""`.
 - **A question** (「这周还有多少空闲时间？」, 「为什么先排作业 2」) becomes `{kind: "question", title}` with the question verbatim; 小助手 answers it.
+- **An event to put on the calendar** — a fixed commitment with a time, not work to be planned (「周四下午三点和导师开会一小时」「每周二四 9:00–10:30 健身」「下周找一小时和师兄对数据」) — becomes `{kind: "event", title, date, startTime, endTime, weekdays, until, minutes, lineId, context}`:
+  - **recurring** when it repeats on weekdays: `weekdays` (0 = Sunday … 6 = Saturday), `date` the first day (or `""` for from today), `until` the last day (the end of the term or what the person says; if they say nothing, 12 weeks from `today`), and both times — a recurring event without a time cannot be placed;
+  - **one-off** otherwise: `weekdays` `[]`, `date` its day, `until` `""`;
+  - `startTime`/`endTime` as 24-hour HH:MM from what was said (「下午三点」 = 15:00; with only a length, `endTime` = start + length); when no time is said, both `""` and `minutes` the length (default 60) — the scheduler finds a free time;
+  - `lineId` the line it serves, or `""`; `context` the place or other detail. An event is never a task: 「和导师开会」 at a time is an event, 「准备给导师的汇报」 is a capture.
+- **Something about the person themselves** — how they work, what they value, what drains or energises them, a change in their circumstances (「我其实晚上效率更高」「最近更想把重心放在创业上」) — becomes `{kind: "profile", title}` with their words verbatim; the interview takes it into the portrait.
 - **Anything else** becomes `{kind: "capture", title, context}`: new work, an idea, a note. In batch mode split the text into separate items — one per distinct piece of work, not one per line; keep the person's wording in `title`, put supporting detail in `context`. Without batch, one capture unless the text is clearly several things.
 - When unsure between capture and another kind, choose capture. Never invent tasks, goals, milestones, dates or numbers that are not in the text.
 

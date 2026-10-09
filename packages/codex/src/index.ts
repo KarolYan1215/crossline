@@ -352,7 +352,9 @@ export async function startCodexSupervisor(options: {
   /** Hands a work order to the assistant. Answers at once: the task runs on, and writes its own outcome to the ledger. */
   dispatchAgentTask?: (workspaceId: string, workOrderId: string, category?: string, stepId?: string) => unknown;
   /** Writes plan blocks to the person's Crossline calendar. Only blocks; never touches any other calendar or event. */
-  publishCalendar?: (workspaceId: string, blocks: Array<{ id: string; title: string; start: string; end: string; note?: string; reminderMinutes?: number | null }>) => Promise<unknown>;
+  publishCalendar?: (workspaceId: string, blocks: Array<{ id: string; title: string; start: string; end: string; note?: string; reminderMinutes?: number | null;
+    recurrence?: { daysOfWeek: string[]; startDate: string; endDate: string; localStart: string; localEnd: string; timeZone: string } }>,
+    scope: "work" | "fixed") => Promise<unknown>;
   proposeMilestones?: (client: CodexRpcBoundary, request: string, signal: AbortSignal, workspaceId: string, only?: string[]) => Promise<unknown>;
   continueMilestoneConversation?: (client: CodexRpcBoundary, threadId: string, message: string, signal: AbortSignal, workspaceId: string) => Promise<unknown>;
   /** One turn of the profile interview: the person's message in, the saved turn out. The conversation and
@@ -769,9 +771,11 @@ export async function startCodexSupervisor(options: {
           const row = (typeof entry === "object" && entry !== null ? entry : {}) as Record<string, unknown>;
           return typeof row.id === "string" && row.id.length <= 200 && typeof row.title === "string" && row.title.length > 0 && iso(row.start) && iso(row.end) && Date.parse(row.end as string) > Date.parse(row.start as string)
             ? [{ id: row.id, title: row.title.slice(0, 200), start: row.start as string, end: row.end as string, ...(typeof row.note === "string" ? { note: row.note.slice(0, 500) } : {}),
-              ...(typeof row.reminderMinutes === "number" && Number.isInteger(row.reminderMinutes) && row.reminderMinutes >= 0 && row.reminderMinutes <= 1440 ? { reminderMinutes: row.reminderMinutes } : {}) }] : [];
+              ...(typeof row.reminderMinutes === "number" && Number.isInteger(row.reminderMinutes) && row.reminderMinutes >= 0 && row.reminderMinutes <= 1440 ? { reminderMinutes: row.reminderMinutes } : {}),
+              ...(recurrenceOf(row.recurrence) ? { recurrence: recurrenceOf(row.recurrence)! } : {}) }] : [];
         }).slice(0, 300);
-        sendJson(response, 200, await options.publishCalendar(callerWorkspaceId, blocks));
+        // `fixed`: the person's own fixed events, managed apart from the plan's work blocks, so publishing one never removes the other.
+        sendJson(response, 200, await options.publishCalendar(callerWorkspaceId, blocks, body?.scope === "fixed" ? "fixed" : "work"));
         return;
       }
       if (request.method === "POST" && pathname === "/v1/agent/dispatch" && options.dispatchAgentTask) {
@@ -1017,4 +1021,17 @@ export async function startCodexSupervisor(options: {
       sidecar.stop();
     }
   };
+}
+
+/** A weekly series as the web sent it, shape-checked: weekday names, two days and two clock times in order, and a zone name. */
+function recurrenceOf(value: unknown): { daysOfWeek: string[]; startDate: string; endDate: string; localStart: string; localEnd: string; timeZone: string } | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const row = value as Record<string, unknown>;
+  const days = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+  const day = (text: unknown) => typeof text === "string" && /^\d{4}-\d{2}-\d{2}$/.test(text);
+  const time = (text: unknown) => typeof text === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(text);
+  const weekdays = Array.isArray(row.daysOfWeek) ? row.daysOfWeek.filter((item): item is string => typeof item === "string" && days.includes(item)) : [];
+  if (!weekdays.length || !day(row.startDate) || !day(row.endDate) || !time(row.localStart) || !time(row.localEnd) || String(row.localEnd) <= String(row.localStart)
+    || typeof row.timeZone !== "string" || !/^[A-Za-z_/+\- ]{1,64}$/.test(row.timeZone)) return undefined;
+  return { daysOfWeek: weekdays, startDate: row.startDate as string, endDate: row.endDate as string, localStart: row.localStart as string, localEnd: row.localEnd as string, timeZone: row.timeZone };
 }

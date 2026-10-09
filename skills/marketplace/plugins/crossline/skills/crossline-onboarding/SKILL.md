@@ -54,7 +54,7 @@ Files arrive as `sources[]`/`newSources[]` (`src-N`, with extracted text). Put e
 
 ## Finishing
 
-`coverage[]` lists, per line, the slots filled and still missing. `nextAction: "ask"` while anything important is missing (then `questions` is not empty). `ready_for_milestones` once the details stage has what milestones need (full interview), or after the line's details (a line's interview).
+`coverage[]` lists, per line, the slots filled and still missing. Every turn also carries `checklist`: the completion list's items still open, each with `label`, `detail` and `owner`. The person's portrait counts as much as their work: the portrait items ask that every part of `profile` is written **and** that each of 现状与真问题, 工作观与人生观, 能量与心流 rests on at least one fact the person said or a file states (`identityId: "person"`, confirmed, quoted) — a portrait built on your inferences alone is not finished, however well written. Ask for what an open `interview` item names; items owned by the `person` (confirming the portrait, adopting a long-term goal, confirming dates, placing a file) are theirs to click — mention them in `reply` at most once, never as a question. `nextAction: "ask"` while any `interview` item is open (then `questions` is not empty); `ready_for_milestones` only when none is — the app turns a premature one back and says what is missing. A line's own interview (`focusLine`) ends after that line's details.
 
 Allowed tools: none. Budget: premium. Risk: routine. Evidence: `sourceRef` and verbatim `sourceQuote` for every confirmed fact.
 

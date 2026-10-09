@@ -8,7 +8,7 @@ import { CrosslineStore, type EvidenceClaimInput, type StoredMilestone } from "@
 import { availableSlots, deriveCapacity, requiredApproval, validateAvailability, DEFAULT_AVAILABILITY,
   defaultMilestoneTemplates, computeMilestoneConfidence, PRODUCTIVE, type ActivityCategory, validateSuccessCriteria, goalSettingKey, ANALYSIS_CONTEXT_VERSION, calibrationReport, calibratedEstimate,
   type CalibrationReport, presetImportance, taskTitleOf, type ImportancePreset, restoreTargetOf,
-  type AccessContext, type AvailabilityWindow, type Estimate, type SuccessCriterion, type ChecklistAnswer } from "@crossline/core";
+  type AccessContext, type AvailabilityWindow, type Estimate, type SuccessCriterion, type ChecklistAnswer, FIXED_EVENTS, fixedEventBlocks, type FixedEvent } from "@crossline/core";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { forecastGoals, normalizeParams, paramsFor, planSchedule, recommendNextActions, type ForecastResult, type PlanResult,
   type ScheduleParams } from "@crossline/planner";
@@ -560,6 +560,23 @@ export function readPins(ctx: AccessContext, today: string): Pin[] {
   try { return (JSON.parse(getStore().getSetting(ctx.workspaceId, SCHEDULE_PINS) ?? "[]") as Pin[]).filter((pin) => pin.day >= today); }
   catch { return []; }
 }
+/**
+ * Local re-planning (decided 2026-10-08): when an event is added, the work blocks it does not touch stay where they were and only the
+ * ones it lands on move. The blocks to keep are written here with an expiry a week out; the scheduler freezes those still valid — the task
+ * still open, the slot not taken by anything since — and places the rest. A change that should re-plan everything (availability, packing
+ * numbers, importance) clears it.
+ */
+export const SCHEDULE_KEEP = "schedule.keep";
+export function readKeep(ctx: AccessContext, today: string, now: Date): Pin[] {
+  try {
+    const kept = JSON.parse(getStore().getSetting(ctx.workspaceId, SCHEDULE_KEEP) ?? "null") as { until?: string; blocks?: Pin[] } | null;
+    return kept?.until && Date.parse(kept.until) > now.getTime() ? (kept.blocks ?? []).filter((pin) => pin.day >= today) : [];
+  } catch { return []; }
+}
+export function writeKeep(ctx: AccessContext, blocks: Pin[], now: Date): void {
+  getStore().setSetting(ctx.workspaceId, SCHEDULE_KEEP, JSON.stringify({ until: new Date(now.getTime() + 7 * 86_400_000).toISOString(), blocks }));
+}
+
 /** Starting a pencilled-in block makes it formal: its time is kept for that task (or step) from now on. */
 export function pinBlock(ctx: AccessContext, blockId: string, at: { day: string; start: string; end: string }): { ok: true } | { ok: false; code: string } {
   if (!blockId.startsWith("optional:") || !/^\d{4}-\d{2}-\d{2}$/.test(at.day) || !/^\d{2}:\d{2}$/.test(at.start) || !/^\d{2}:\d{2}$/.test(at.end) || at.end <= at.start)
@@ -693,7 +710,9 @@ async function scheduledBlocks(ctx: AccessContext, today: string, committed: Per
 
   const expanded = plannerItemsFor(ctx, eligibleOrders);
   const pins = readPins(ctx, today).filter((pin) => expanded.some((item) => item.task.id === pin.taskId));
-  const pinned = pins.flatMap((pin) => { try { return [{ taskId: pin.taskId, start: iso(pin.day, pin.start), end: iso(pin.day, pin.end) }]; } catch { return []; } });
+  const overlapsBusy = (pin: Pin) => busy.some((block) => block.day === pin.day && block.start < pin.end && block.end > pin.start);
+  const kept = readKeep(ctx, today, now).filter((pin) => expanded.some((item) => item.task.id === pin.taskId) && !pins.some((other) => other.taskId === pin.taskId) && !overlapsBusy(pin));
+  const pinned = [...pins, ...kept].flatMap((pin) => { try { return [{ taskId: pin.taskId, start: iso(pin.day, pin.start), end: iso(pin.day, pin.end) }]; } catch { return []; } });
   const result = await planSchedule({
     now,
     horizonDays: days.length,
@@ -764,6 +783,14 @@ async function scheduledBlocks(ctx: AccessContext, today: string, committed: Per
   // Started from a pencilled-in block: fixed where the person started it.
   for (const pin of pins) blocks.push({ id: scheduledBlockId(pin.taskId, 1), lane: "human" as const, ...named(pin.taskId), tag: "已开始",
     day: pin.day, start: pin.start, end: pin.end, source: "本人开始", readOnly: true });
+  // Kept where they were when an event was added (local re-planning): drawn as ordinary scheduled blocks.
+  for (const pin of kept) {
+    const index = (occurrences.get(pin.taskId) ?? 0) + 1;
+    occurrences.set(pin.taskId, index);
+    const tag = tentative(pin.taskId) ? "暂定" : undefined;
+    blocks.push({ id: scheduledBlockId(pin.taskId, index), lane: "human" as const, ...named(pin.taskId), ...(tag ? { tag } : {}),
+      day: pin.day, start: pin.start, end: pin.end, source: "建议·未批准", readOnly: true });
+  }
   // Third pass, pencilled in: what found no room in the person's hours, placed between 07:00 and 23:00 outside them. Dashed, never
   // published, never counted as planned; starting one (`pinBlock`) makes it formal.
   const unplaced = new Set(result.blockers.map((blocker) => blocker.taskId));
@@ -813,7 +840,8 @@ export function loadGoalForecast(ctx: AccessContext): ForecastResult & { inferre
     const real = committed.some((block) => block.day === day && block.start < end! && block.end > start!);
     return real ? [] : [{ day, start: start!, end: end! }];
   }));
-  const busy = [...committed.map((block) => ({ day: block.day!, start: block.start, end: block.end })), ...inferred];
+  const busy = [...committed.map((block) => ({ day: block.day!, start: block.start, end: block.end })), ...inferred,
+    ...personEventBlocks(ctx, days).map((block) => ({ day: block.day!, start: block.start, end: block.end }))];
   const slots = availableSlots(readAvailability(ctx), days, busy);
   const capacity = days.map((day) => ({ day, netMinutes: slots.filter((slot) => slot.day === day).reduce((sum, slot) => {
     try { return sum + (Date.parse(toZonedInstant(day, slot.end, preferences.timeZone))
@@ -842,6 +870,11 @@ export function loadGoalForecast(ctx: AccessContext): ForecastResult & { inferre
   return { ...forecastGoals(goals, tasks, capacity, completedIds), inferredRegularBlocks: inferred.length };
 }
 
+/** The input-box events (`schedule.events`) on these days, as plan blocks. */
+function personEventBlocks(ctx: AccessContext, days: string[]): PersistedScheduleBlock[] {
+  try { return fixedEventBlocks(JSON.parse(getStore().getSetting(ctx.workspaceId, FIXED_EVENTS) ?? "[]") as FixedEvent[], days); } catch { return []; }
+}
+
 export async function loadCurrentPlan(ctx: AccessContext): Promise<PersistedPlan> {
   ensureSeeded(ctx);
   const store = getStore();
@@ -850,7 +883,8 @@ export async function loadCurrentPlan(ctx: AccessContext): Promise<PersistedPlan
   const payload = stored.payload as { blocks?: PersistedScheduleBlock[] };
   // The calendar's blocks are stored; the scheduled ones are derived on read. Persisting a schedule
   // would mean the plan disagreed with the work orders the moment one of them moved.
-  const committed = payload.blocks ?? [];
+  // The person's own fixed events (typed into the input box) are busy time too, derived on read like the schedule itself.
+  const committed = [...(payload.blocks ?? []), ...personEventBlocks(ctx, planDays(planToday(ctx)))];
   // A real, computed preview beats an empty page: the scheduler runs against sane defaults even before
   // the person has saved their own time zone, availability and mode. `usingDefaultPreferences` is what
   // lets the page say so, instead of either lying about it or blocking on it.

@@ -34,18 +34,21 @@ test("an interview question about which project a file belongs to is left to 待
   expect(collectAsks(TEST_CTX).filter((ask) => ask.kind === "source_project").map((ask) => ask.entityId).sort()).toEqual(["a", "b"]);
 });
 
-test("an interview that still asks is not complete, says where it stopped, and is listed once on 待决事项 with a way back", () => {
+test("an interview is judged by its completion list, says where it stopped, and is listed once on 待决事项 with a way back", () => {
   setup();
-  expect(interviewStatus(TEST_CTX)).toMatchObject({ started: true, complete: false, stage: "lines", stageIndex: 5, stageCount: 6, openQuestions: 1,
-    missing: ["ECE 548 固定课时", "组会时段"] });
+  const status = interviewStatus(TEST_CTX);
+  expect(status).toMatchObject({ started: true, complete: false, awaitingPerson: false, stage: "lines", stageIndex: 5, stageCount: 6, openQuestions: 1 });
+  expect(status.checklist.find((item) => item.id === "portrait_fields")?.done).toBe(false);
   const ask = collectAsks(TEST_CTX).find((item) => item.kind === "interview_open")!;
-  expect(ask.title).toBe("访谈未完成：还有 1 个问题");
+  expect(ask.title).toMatch(/^访谈未完成：清单 \d+\/\d+$/);
   expect(ask.why).toContain("「主线」阶段（第 5/6 阶段）");
+  expect(ask.why).toContain("画像各部分已写出");
   expect(ask.options[0]).toMatchObject({ label: "继续访谈", href: "/onboarding" });
 });
 
-test("a finished interview raises nothing", () => {
+test("the model saying it is ready does not finish the interview while the list is open", () => {
   setup("ready_for_milestones");
-  expect(interviewStatus(TEST_CTX).complete).toBe(true);
-  expect(collectAsks(TEST_CTX).some((item) => item.kind === "interview_open")).toBe(false);
+  expect(interviewStatus(TEST_CTX).complete).toBe(false);
+  expect(interviewStatus(TEST_CTX).openQuestions).toBe(0);
+  expect(collectAsks(TEST_CTX).some((item) => item.kind === "interview_open")).toBe(true);
 });

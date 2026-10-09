@@ -76,7 +76,7 @@ export default async function SettingsPage() {
               <header><h3>个人情况</h3><small>主线、项目、日期与长期目标的来源</small></header>
               <div className="st-row"><span className="st-row-label">访谈<small>{!interview.started ? "尚未开始"
                 : interview.complete ? "已完成；补充或修改后，里程碑草稿按新情况重新设计"
-                  : `进行中 · 第 ${interview.stageIndex}/${interview.stageCount} 阶段 · 待答 ${interview.openQuestions} 题`}</small></span>
+                  : `清单 ${interview.checklist.filter((item) => item.done).length}/${interview.checklist.length}${interview.awaitingPerson ? " · 只差本人确认" : ` · 第 ${interview.stageIndex}/${interview.stageCount} 阶段 · 待答 ${interview.openQuestions} 题`}`}</small></span>
                 <a className="secondary-button" href="/onboarding">{interview.started && !interview.complete ? "继续访谈" : "打开访谈"}</a></div>
             </section>
             <section className="st-card" aria-label="手机访问" id="phone">
