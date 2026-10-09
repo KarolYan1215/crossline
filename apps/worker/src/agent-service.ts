@@ -4,7 +4,7 @@ import { enterUsageWorkspace, type CodexRpcBoundary } from "@crossline/codex";
 import { deliverAgentResult, readCategories, requestCategory, type CrosslineStore } from "@crossline/db";
 import { AGENT_CATEGORIES, budgetPolicy, isAgentCategory, type AgentCategory, type CostSignal } from "@crossline/core";
 import { createAgentRunner, type AgentOutcome } from "./agent-task";
-import { dispatchCandidates, ledgerAsk, taskFromWorkOrder } from "./agent-dispatch";
+import { dispatchCandidates, ledgerAsk, stepDispatchCandidates, taskFromWorkOrder } from "./agent-dispatch";
 
 /**
  * The assistant as the rest of the worker sees it: start a work order's task by hand (the button), and start approved ones by itself
@@ -48,7 +48,12 @@ export function createAgentService(deps: {
       const outcome: AgentOutcome | { state: "failed"; message: string } = await run({ ...planned.input, category: chosen })
         .catch((error): { state: "failed"; message: string } => ({ state: "failed", message: error instanceof Error ? error.message : "" }));
       // A delegated result the kind's earned trust lets through goes straight to the gate; one that needs review waits for the person.
-      const delivered = outcome.state === "done" && !outcome.reviewRequired ? deliverAgentResult(deps.store, workspaceId, taskId) : undefined;
+      // A preparation step is done when its run is: the result is material for the person's own steps, waiting in 材料 and 教程.
+      const prepStep = stepId ? deps.store.getStepPlan(workspaceId, orderId)?.steps.find((step) => step.id === stepId && step.executor === "agent") : undefined;
+      if (outcome.state === "done" && prepStep) {
+        try { deps.store.updateStepProgress(workspaceId, orderId, prepStep.id, { status: "done" }, deps.store.getWorkspaceOwnerId(workspaceId) ?? "", "agent"); } catch { /* replanned away */ }
+      }
+      const delivered = outcome.state === "done" && !outcome.reviewRequired && !prepStep ? deliverAgentResult(deps.store, workspaceId, taskId) : undefined;
       log({ type: `agent.${outcome.state}`, workspaceId, taskId, ...(outcome.state === "blocked" ? { code: outcome.code } : {}), ...(delivered ? { delivered } : {}) });
     })().finally(() => mark(workspaceId).delete(taskId));
     return { state: "started", taskId };
@@ -62,7 +67,9 @@ export function createAgentService(deps: {
     /** On the tick: at most one new task per workspace, only of an approved kind, only with quota to spare, only when none is going. */
     async pass(workspaceId: string): Promise<void> {
       if (mark(workspaceId).size) return;
-      const [orderId] = dispatchCandidates(deps.store, workspaceId);
+      // Preparation steps first: they are what the person's next session is waiting for.
+      const [prep] = stepDispatchCandidates(deps.store, workspaceId);
+      const [orderId] = prep ? [prep.orderId] : dispatchCandidates(deps.store, workspaceId);
       if (!orderId) return;
       const signal = await deps.readCost().catch(() => undefined);
       // An unreadable quota is not a reason to stop: the run reports a spent one itself, as a blocked task.
@@ -70,8 +77,8 @@ export function createAgentService(deps: {
         log({ type: "agent.skipped", workspaceId, code: "QUOTA_LOW", budget: budgetPolicy(Math.max(signal.short?.usedPercent ?? 0, signal.long?.usedPercent ?? 0)).mode });
         return;
       }
-      const result = start(workspaceId, orderId, undefined);
-      log({ type: "agent.dispatched", workspaceId, orderId, state: result.state });
+      const result = start(workspaceId, orderId, undefined, prep?.stepId);
+      log({ type: "agent.dispatched", workspaceId, orderId, ...(prep ? { stepId: prep.stepId } : {}), state: result.state });
     },
 
     runningTasks: (workspaceId: string): string[] => [...mark(workspaceId)]

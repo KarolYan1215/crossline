@@ -39,12 +39,26 @@ function StepsPanel({ detail }: { detail: TaskDetail }) {
       <span><b className="mono">{Math.round(plan.progress * 100)}%</b> <small>{plan.archetypeLabel} · {plan.quantity.amount > 0 ? `${plan.quantity.amount} ${plan.quantity.unit}` : plan.quantity.basis}</small></span>
     </div>
     {plan.rationale && <p className="gen steps-rationale">{plainEstimateWords(plan.rationale)}</p>}
+    {plan.units.length > 0 && <p className="steps-units"><small>依据材料的内容</small>{plan.units.map((unit) => <span key={unit.id} className="tag" title={unit.quote}>{unit.title}</span>)}</p>}
+    {plan.questions.length > 0 && <p className="steps-questions"><small>需要本人回答后才能定下的</small>{plan.questions.map((question) => <a key={question.id} href="/approvals">{question.text}</a>)}</p>}
     <ol className="steps-list">
       {done.map((step) => <li key={step.id} data-status={step.status}>
         <ProgressRing quarters={4} label={step.title} /><span className="step-title">{step.title}</span><Tag tone="ok">{step.status === "done" ? "已完成" : "已跳过"}</Tag>
       </li>)}
       {draft.map((item, index) => {
         const step = item.id ? byId.get(item.id) : undefined;
+        // The assistant's preparation: done by itself before the person needs it; its result is linked here, in 材料 and in 教程.
+        if (step?.executor === "agent") {
+          const run = [...detail.agentOutputs].reverse().find((task) => task.stepId === step.id);
+          const state = !run ? "待开始" : run.status === "running" || run.status === "requested" ? "准备中" : run.status === "blocked" ? "未做成" : "已备好";
+          return <li key={step.id} className="step-prep" data-state={state}>
+            <span className="step-grip" aria-hidden="true" />
+            <span className="step-body"><span><Tag>助手准备</Tag> {step.title} <small className="muted">{state}</small></span>
+              {run?.files.length ? <small>{run.files.map((file) => <a key={file.path} href={`/api/agent/tasks/${encodeURIComponent(run.taskId)}/file?path=${encodeURIComponent(file.path)}`}
+                target="_blank" rel="noreferrer">{file.name}</a>)}</small> : step.deliverable ? <small className="gen muted">{step.deliverable}</small> : null}</span>
+          </li>;
+        }
+        const covered = step ? plan.units.filter((unit) => (step.covers ?? []).includes(unit.id)).map((unit) => unit.title) : [];
         return <li key={item.id ?? `new-${index}`} draggable onDragStart={() => setDragging(index)} onDragOver={(event) => event.preventDefault()}
           onDrop={() => { if (dragging !== null && dragging !== index) move(dragging, index); setDragging(null); }}>
           <span className="step-grip" aria-hidden="true">⋮⋮</span>
@@ -58,6 +72,8 @@ function StepsPanel({ detail }: { detail: TaskDetail }) {
               {step.tickOutcome && <span className="step-tick" title="里程碑刻度"> ◆ {step.tickOutcome}</span>}</small>}
             {step && step.schedulable && <StepDuration workOrderId={detail.id} stepId={step.id} estimate={step.estimate} />}
             {step?.doneCriterion && <small className="gen step-criterion">{step.doneCriterion}</small>}
+            {covered.length > 0 && <small className="step-covers">内容：{covered.join("、")}</small>}
+            {step?.why && <small className="gen step-why">{step.why}</small>}
           </span>
           <span className="step-tools">
             {step && step.executor !== "human" && <button type="button" className="step-agent" title="由 Agent 完成该步骤"

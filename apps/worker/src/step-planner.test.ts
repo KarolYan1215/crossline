@@ -95,3 +95,30 @@ test("a flagged cross-line relation is reviewed: dismissed it stays, redone it i
   expect(warningsAwaitingReview(store, workspaceId)).toEqual([]);
   store.close();
 });
+
+test("a plan rests on the person's own material and facts: units quote the file, an unquoted unit is sent back, and the plan's questions are kept", async () => {
+  const store = new CrosslineStore(":memory:");
+  seed(store);
+  store.saveSourceDocument({ id: "d1", ownerId, workspaceId, projectId: "ece555", kind: "text", fileName: "Lecture Plan.docx", mediaType: "text/plain", sha256: "x",
+    uri: "file:///x", extractedText: "Week 1 L1 Quantum basics\nWeek 3 L5 PN junction electrostatics\nWeek 4 L7 MOS capacitor", extractionStatus: "done", createdAt: "2026-10-01T00:00:00Z" });
+  store.upsertProfileFact({ workspaceId, identityId: "research", projectId: "ece555", slot: "target_grade", value: "A−（≥90）", status: "confirmed", sourceRef: "reply-1", sourceQuote: "A−", updatedAt: "2026-10-01T00:00:00Z" });
+  const plan = (quote: string) => JSON.stringify({ archetypeId: "problem_set", quantity: { basis: "讲", amount: 2, unit: "讲" }, rationale: "",
+    units: [{ id: "u1", title: "PN 结静电", docId: "doc-1", quote }, { id: "u2", title: "MOS 电容", docId: "doc-1", quote: "L7 MOS capacitor" }],
+    questions: [{ id: "q1", text: "期中 1 考到第几讲？", why: "讲授计划没写考试范围", options: ["L1–L5", "L1–L7"] }],
+    steps: [step("a", "solve", { covers: ["u1"], why: "目标 A−，余量小" }), step("b", "check", { dependsOn: ["a"], covers: ["u2"] })] });
+  const prompts: string[] = [];
+  let calls = 0;
+  const runtime = scriptedRuntime(["crossline:crossline-step-planner"], (prompt) => { prompts.push(prompt); calls += 1; return calls === 1 ? plan("L5 PN junction made up") : plan("L5 PN junction electrostatics"); });
+  const outcome = await createStepPlanner(store, workspaceId, "C:\repo", () => runtime.rpc)("wo");
+  expect(outcome.state).toBe("planned");
+  // The planner was given the whole file and the person's target, not a 300-character opening.
+  expect(prompts[0]).toContain("L7 MOS capacitor");
+  expect(prompts[0]).toContain("A−（≥90）");
+  // The first answer quoted a line that is not in the file and was sent back.
+  expect(calls).toBe(2);
+  const saved = store.getStepPlan(workspaceId, "wo")!;
+  expect(saved.units.map((unit) => unit.id)).toEqual(["u1", "u2"]);
+  expect(saved.questions.map((question) => question.text)).toEqual(["期中 1 考到第几讲？"]);
+  expect(saved.steps[0]).toMatchObject({ covers: ["u1"], why: "目标 A−，余量小" });
+  store.close();
+});

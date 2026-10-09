@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import path from "node:path";
 import {
@@ -9,7 +9,7 @@ import {
   type MaterialSearchContext, type NodeWriteup, type WriteContext
 } from "@crossline/core";
 import { runCodexSkill, webResearchBlocker, type CodexRpcBoundary } from "@crossline/codex";
-import type { CrosslineStore } from "@crossline/db";
+import { listAgentTasks, type CrosslineStore } from "@crossline/db";
 import { requiredApproval } from "@crossline/core";
 import { claimedTitleMatches } from "./diligence";
 import { arxivPdfAddress, defaultSafeGetDeps, htmlToText, safeGet, type SafeGetDeps } from "./safe-fetch";
@@ -19,6 +19,7 @@ export const MANUAL_DESIGNER_SKILL = "crossline:crossline-manualbook-designer";
 export const MATERIAL_RESEARCHER_SKILL = "crossline:crossline-material-researcher";
 export const MATERIAL_WRITER_SKILL = "crossline:crossline-material-writer";
 import { ownerOf } from "./owner";
+import { planningContext } from "./step-planner";
 
 const DESIGN_INSTRUCTIONS = "Design how this one task gets done, as a short flow of steps a person can follow from left to "
   + "right. Return only the requested JSON. Every step is concrete (what to do, in what order, how you know it is done), "
@@ -87,7 +88,12 @@ export function buildManualContext(store: CrosslineStore, workspaceId: string, w
   };
   const milestone = order.milestoneId ? store.getMilestone(workspaceId, order.milestoneId) : undefined;
   const anchor = order.milestoneId ? store.listMilestoneAnchors(workspaceId).find((item) => item.milestoneId === order.milestoneId) : undefined;
-  const steps = store.getStepPlan(workspaceId, order.id)?.steps.filter((step) => step.status === "planned") ?? [];
+  // The tutorial is for the person's own steps; the assistant's preparation is done for them and shows up as material.
+  const stepPlan = store.getStepPlan(workspaceId, order.id);
+  const steps = stepPlan?.steps.filter((step) => step.status === "planned" && step.executor !== "agent") ?? [];
+  const unitTitle = new Map((stepPlan?.units ?? []).map((unit) => [unit.id, unit.title]));
+  const prepared = listAgentTasks(store, workspaceId).filter((task) => task.workOrderId === order.id && task.artifacts.length)
+    .map((task) => ({ step: stepPlan?.steps.find((step) => step.id === task.stepId)?.title ?? task.title, files: task.artifacts.map((artifact) => artifact.path.split(/[\\/]/).at(-1) ?? artifact.path) }));
   const explicit = [
     ...(payload.materialContract ?? []).map((item, index) => ({ id: item.id ?? `${order.id}-material-${index}`, kind: "material" as const,
       description: item.description ?? item.kind ?? "", required: item.required !== false })),
@@ -110,7 +116,10 @@ export function buildManualContext(store: CrosslineStore, workspaceId: string, w
     profile: store.listProfileFacts(workspaceId).filter((fact) => fact.identityId === order.identityId && fact.status === "confirmed").slice(0, 30)
       .map((fact) => ({ id: profileFactId(fact), value: fact.value })),
     constraints: store.listProfileFacts(workspaceId).filter((fact) => /constraint|限制|约束/.test(fact.slot) || /无法|不能|不要/.test(fact.value)).map((fact) => fact.value).slice(0, 8),
-    ...(steps.length ? { plannedSteps: steps.map((step) => ({ id: step.id, title: step.title, role: step.role, doneCriterion: step.doneCriterion ?? "" })) } : {})
+    person: planningContext(store, workspaceId, order).person,
+    ...(prepared.length ? { prepared } : {}),
+    ...(steps.length ? { plannedSteps: steps.map((step) => ({ id: step.id, title: step.title, role: step.role, doneCriterion: step.doneCriterion ?? "",
+      covers: (step.covers ?? []).map((id) => unitTitle.get(id) ?? id), why: step.why ?? "" })) } : {})
   };
 }
 
@@ -142,6 +151,17 @@ export function createManualbookBuilder(store: CrosslineStore, workspaceId: stri
       .filter((doc) => doc.extractedText.trim()).slice(0, 4).map((doc, index) => ({ id: `upload-${index + 1}`, url: `local:${doc.id}`, title: doc.fileName,
         publisher: "本人上传", kind: "upload", summary: doc.extractedText.trim().slice(0, 300), kept: "full_text" as const, verdict: "本人上传的文件",
         fetchedAt: all.now().toISOString(), docId: doc.id, text: doc.extractedText.slice(0, TEXT_PER_SOURCE) }));
+    // What the assistant prepared for this task (a formula sheet, a problem list) is material the tutorial builds on and links to.
+    for (const task of listAgentTasks(store, workspaceId).filter((item) => item.workOrderId === workOrderId && item.status !== "blocked")) {
+      for (const artifact of task.artifacts.filter((item) => /\.(md|txt|csv|json)$/i.test(item.path)).slice(0, 3)) {
+        let text = "";
+        try { text = readFileSync(artifact.path, "utf8"); } catch { continue; }
+        if (!text.trim()) continue;
+        uploads.push({ id: `prep-${uploads.length + 1}`, url: `agent:${task.taskId}/${artifact.path}`, title: artifact.path.split(/[\\/]/).at(-1) ?? artifact.path,
+          publisher: "助手准备", kind: "prepared", summary: text.trim().slice(0, 300), kept: "full_text", verdict: "助手为此任务准备的文件",
+          fetchedAt: all.now().toISOString(), text: text.slice(0, TEXT_PER_SOURCE) });
+      }
+    }
 
     // Discretionary spend: when the quota is gone the person prepares it themselves. A tight quota is handled one
     // level down, where the Skills step to a cheaper model instead of refusing.
@@ -209,7 +229,8 @@ export function createManualbookBuilder(store: CrosslineStore, workspaceId: stri
       const writeContext: WriteContext = { version: "crossline.manualbook.write.v1", today, task: { intent: context.workOrder.intent },
         node: { id: result.node.id, title: result.node.title, kind: result.node.kind, goal: result.node.goal, steps: result.node.steps, acceptance: result.node.acceptance },
         sources: [...uploads, ...result.sources].map((source) => ({ id: source.id, title: source.title, url: source.url, kept: source.kept, text: source.text })),
-        inputs: context.inputs, profile: context.profile };
+        inputs: context.inputs, profile: context.profile, person: context.person ?? [],
+        covers: context.plannedSteps?.find((step) => step.title === result.node.title)?.covers ?? [] };
       const written = await runCodexSkill<NodeWriteup>(client, writeContext, {
         skillName: MATERIAL_WRITER_SKILL, cwd, developerInstructions: WRITE_INSTRUCTIONS, outputSchema: NODE_WRITEUP_SCHEMA,
         prepareInput: () => writeContext, validateOutput: (output) => validateNodeWriteup(output, writeContext), onAudit: () => {}, timeoutMs: 60 * 60_000

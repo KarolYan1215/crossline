@@ -35,7 +35,11 @@ export type ManualDesignContext = {
   profile: Array<{ id: string; value: string }>;
   constraints: string[];
   /** The task's own steps, when it has a step plan: the tutorial follows them, one part per step, in this order. */
-  plannedSteps?: Array<{ id: string; title: string; role: string; doneCriterion: string }>;
+  plannedSteps?: Array<{ id: string; title: string; role: string; doneCriterion: string; covers?: string[]; why?: string }>;
+  /** Who the tutorial is for: confirmed facts (background, level, target, what they said), so it is neither too easy nor too hard. */
+  person?: string[];
+  /** What the assistant already prepared for this task (formula sheets, problem lists…), by step, to build on rather than redo. */
+  prepared?: Array<{ step: string; files: string[] }>;
 };
 
 const text = (max: number, min = 1) => ({ type: "string", minLength: min, maxLength: max }) as const;
@@ -203,6 +207,9 @@ export type WriteContext = {
   sources: Array<{ id: string; title: string; url: string; kept: "full_text" | "summary_only" | "unverified"; text: string }>;
   inputs: Array<{ id: string; text: string }>;
   profile: Array<{ id: string; value: string }>;
+  /** Who this is for (see `ManualDesignContext.person`), and the content units this step covers, from the person's own material. */
+  person?: string[];
+  covers?: string[];
 };
 export type NodeWriteup = { analysis: string; tutorial: string; citations: string[];
   /** One note per material used: what in it matters for this step and how to use it (the material's own preview page shows these). */

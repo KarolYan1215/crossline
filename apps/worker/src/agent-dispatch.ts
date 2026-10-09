@@ -37,12 +37,19 @@ function taskFromStep(store: CrosslineStore, workspaceId: string, orderId: strin
     return { ok: false, code: "ORDER_NOT_DISPATCHABLE", message: "该步骤需要本人完成" };
   const inputs = store.listSourceDocuments(workspaceId).filter((doc) => (doc.projectId === order.projectId || !doc.projectId) && doc.uri.startsWith("file:"))
     .flatMap((doc) => { try { return [fileURLToPath(doc.uri)]; } catch { return []; } });
-  const category = categoryOverride ?? STEP_CATEGORY[step.role];
+  const category = categoryOverride ?? STEP_CATEGORY[step.role] ?? (step.executor === "agent" ? "read_research_organize" : undefined);
   const attempt = listAgentTasks(store, workspaceId).filter((task) => task.workOrderId === orderId).length + 1;
+  const plan = store.getStepPlan(workspaceId, orderId);
+  const units = (plan?.units ?? []).filter((unit) => (step.covers ?? []).includes(unit.id)).map((unit) => `- ${unit.title}（${unit.quote}）`);
+  const feeds = (plan?.steps ?? []).filter((other) => other.dependsOn.includes(step.id)).map((other) => other.title);
+  const facts = store.listProfileFacts(workspaceId).filter((fact) => fact.status === "confirmed" && (fact.projectId === order.projectId || fact.identityId === order.identityId))
+    .slice(0, 15).map((fact) => `- ${fact.slot}：${fact.value.slice(0, 160)}`);
+  const context = [units.length ? `涉及的内容：\n${units.join("\n")}` : "", feeds.length ? `产出供本人在这些步骤中直接使用：${feeds.join("；")}` : "",
+    facts.length ? `本人的相关情况（产出要贴合）：\n${facts.join("\n")}` : "", step.why ? `为什么做这一步：${step.why}` : ""].filter(Boolean).join("\n");
   return { ok: true, category, why: `步骤「${step.title}」可由系统完成`, graded: false,
     input: { taskId: `agent-${orderId.replace(/[^a-zA-Z0-9]/g, "").slice(-8)}-${stepId}-${attempt}`, workOrderId: orderId, stepId,
       title: `${order.intent} · ${step.title}`,
-      what: `完成任务「${order.intent}」中的一个步骤：${step.title}\n产出：${step.deliverable || "（未写明）"}\n完成标准：${step.doneCriterion || "（未写明）"}`,
+      what: `完成任务「${order.intent}」中的一个准备步骤：${step.title}\n产出：${step.deliverable || "（未写明）"}\n完成标准：${step.doneCriterion || "（未写明）"}${context ? `\n${context}` : ""}\n产出是直接可用的成品（文件），不是计划或说明；只依据给出的文件与公开来源，找不到的写明。`,
       category: category ?? "read_research_organize", humanPart: "该任务的其余步骤由本人完成；需要本人判断或选择的内容列入待本人处理。", inputs } };
 }
 
@@ -95,6 +102,34 @@ export function dispatchCandidates(store: CrosslineStore, workspaceId: string): 
     out.push(order.id);
   }
   return out;
+}
+
+/**
+ * The preparation steps the assistant takes over by itself (decided 2026-10-09: what is static is done before the person needs it, and
+ * the person's attention goes to the intellectual core). A step the planner gave the assistant (`executor: "agent"`), still planned, of
+ * a committed task, never tried before, of a kind the person allowed; a kind not yet allowed is asked about once and the step waits.
+ * Soonest-due task first, then in the step order.
+ */
+export function stepDispatchCandidates(store: CrosslineStore, workspaceId: string): Array<{ orderId: string; stepId: string }> {
+  if (isPaused(store, workspaceId)) return [];
+  const approved = readCategories(store, workspaceId);
+  const declined = new Set(declinedCategories(store, workspaceId));
+  const tried = new Set(listAgentTasks(store, workspaceId).filter((task) => task.stepId).map((task) => `${task.workOrderId}#${task.stepId}`));
+  const orders = new Map(store.listWorkOrders(workspaceId).filter((order) => !order.tombstone && (DISPATCH_STATES.has(order.state) || order.state === "active"))
+    .map((order) => [order.id, order]));
+  const out: Array<{ orderId: string; stepId: string; due: string; seq: number }> = [];
+  for (const plan of store.listStepPlans(workspaceId)) {
+    if (!orders.has(plan.workOrderId)) continue;
+    const due = (orders.get(plan.workOrderId)!.payload as { dueDate?: string } | undefined)?.dueDate ?? "9999";
+    for (const step of plan.steps) {
+      if (step.executor !== "agent" || step.status !== "planned" || tried.has(`${plan.workOrderId}#${step.id}`)) continue;
+      const category = STEP_CATEGORY[step.role] ?? "read_research_organize";
+      if (declined.has(category)) continue;
+      if (!approved[category]) { requestCategory(store, workspaceId, category, plan.workOrderId, `准备步骤「${step.title}」`); continue; }
+      out.push({ orderId: plan.workOrderId, stepId: step.id, due, seq: step.seq });
+    }
+  }
+  return out.sort((a, b) => a.due.localeCompare(b.due) || a.seq - b.seq).map(({ orderId, stepId }) => ({ orderId, stepId }));
 }
 
 /**

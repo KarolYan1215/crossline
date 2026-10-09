@@ -1,6 +1,6 @@
 import {
   ARCHETYPES, AVAILABILITY_SETTING, DEFAULT_AVAILABILITY, VALIDATION_REVIEW_SCHEMA, archetypeBrief, archetypeById, stepPlanSchema, goalSettingKey,
-  normalizeStepPlan, stepPlanWarnings, validateAvailability, validateStepPlanShape, validateValidationReview, weeklyAvailableHours,
+  normalizeStepPlan, relevantDocuments, STEP_ANSWER_SLOT, stepPlanWarnings, unverifiedUnits, validateAvailability, validateStepPlanShape, validateValidationReview, weeklyAvailableHours,
   PROGRESS_ASSESSMENT_SCHEMA, validateProgressAssessment, type ProgressAssessment, type StepPlan, type StepWarning, type ValidationReview
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
@@ -15,7 +15,44 @@ const JUDGE = "crossline:crossline-progress-judge";
 /** States in which a task is committed and its steps get time on the calendar. */
 const PLANNABLE = ["approved", "preparing", "ready_for_human", "active"];
 const day = (iso: string) => iso.slice(0, 10);
-const AUTO_FIXED = new Set(["STEP_SHARE_NORMALIZED", "STEP_SHARE_MISSING", "STEP_ESTIMATE_MISSING", "STEP_DEPENDENCY_UNKNOWN"]);
+const AUTO_FIXED = new Set(["STEP_SHARE_NORMALIZED", "STEP_SHARE_MISSING", "STEP_ESTIMATE_MISSING", "STEP_DEPENDENCY_UNKNOWN", "STEP_TRIVIAL_TO_AGENT"]);
+const MATERIAL_TEXT_PER_DOC = 16_000, MATERIAL_TEXT_TOTAL = 48_000;
+
+/**
+ * Everything the plan is to rest on, for one task (decided 2026-10-09: plans were written from a file's first 300 characters and the
+ * task's title, so a course with a dozen lectures before the exam was planned as 「3 个知识点」 and half the steps were filing). The
+ * task's own material in full (clipped per file and overall), each with an id a content unit cites; what the person confirmed about
+ * this line and project, and about themselves; the project's dated items; and what they already answered to earlier plans.
+ */
+export function planningContext(store: CrosslineStore, workspaceId: string, order: StoredWorkOrder) {
+  const project = store.listProjects(workspaceId, { includeArchived: true }).find((item) => item.id === order.projectId);
+  let budget = MATERIAL_TEXT_TOTAL;
+  const documents = relevantDocuments(store.listSourceDocuments(workspaceId).filter((doc) => doc.extractionStatus === "done"),
+    { projectId: order.projectId, projectName: project?.name })
+    .map((doc, index) => {
+      const text = doc.extractedText.slice(0, Math.max(0, Math.min(MATERIAL_TEXT_PER_DOC, budget)));
+      budget -= text.length;
+      return { id: `doc-${index + 1}`, name: doc.fileName, text };
+    }).filter((doc) => doc.text.trim());
+  const facts = store.listProfileFacts(workspaceId).filter((fact) => fact.status === "confirmed" || fact.value.startsWith("假设"));
+  const own = (fact: (typeof facts)[number]) => fact.projectId === order.projectId ? 0 : fact.identityId === order.identityId ? 1 : fact.identityId === "person" ? 2 : 3;
+  const person = facts.filter((fact) => own(fact) < 3 && !fact.slot.startsWith(STEP_ANSWER_SLOT)).sort((a, b) => own(a) - own(b)).slice(0, 50)
+    .map((fact) => `${fact.projectId ? `[${fact.projectId}] ` : ""}${fact.slot}：${fact.value.slice(0, 240)}${fact.status === "inferred" ? "（假设）" : ""}`);
+  const answers = facts.filter((fact) => fact.slot.startsWith(STEP_ANSWER_SLOT) && (fact.projectId === order.projectId || fact.projectId === ""))
+    .map((fact) => fact.value.slice(0, 400));
+  const decided = new Map(store.listEvents(workspaceId, { type: "dates.decided" }).map((event) => [event.entityId, event.payload as { superseded?: boolean; included?: string[] }]));
+  const names = new Set([order.projectId, project?.name ?? ""].filter(Boolean));
+  const dated = store.listEvents(workspaceId, { type: "dates.extracted" }).flatMap((event) => {
+    const decision = decided.get(event.entityId);
+    if (decision?.superseded) return [];
+    const payload = event.payload as { dates?: Array<{ id: string; title: string; date: string; startTime?: string; project?: string }> };
+    return (payload.dates ?? []).filter((item) => names.has(item.project ?? "") && (!decision || (decision.included ?? []).includes(item.id)))
+      .map((item) => `${item.date}${item.startTime ? ` ${item.startTime}` : ""} ${item.title}`);
+  });
+  const profile = (() => { try { return JSON.parse(store.getSetting(workspaceId, "profile.model") ?? "{}") as { energyMap?: Array<{ activity: string; skill: string; love: string }> }; } catch { return {}; } })();
+  return { documents, person, answers, dated: [...new Set(dated)].sort().slice(0, 40),
+    strengths: (profile.energyMap ?? []).filter((item) => item.skill === "high").map((item) => item.activity).slice(0, 8) };
+}
 
 /** The task's window: earliest start and latest finish, from its own payload, the confirmed goal deadline, or the milestone's. */
 export function taskWindow(store: CrosslineStore, workspaceId: string, order: StoredWorkOrder, now = new Date()) {
@@ -68,6 +105,7 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
     const done = (previous?.steps ?? []).filter((step) => step.status !== "planned");
     // Archetypes the curator learned for this workspace are offered beside the built-in ones and checked the same way.
     const learned = learnedArchetypes(store, workspaceId);
+    const grounding = planningContext(store, workspaceId, order);
     const input = {
       version: "crossline.step-plan.v1",
       task: { intent: order.intent, line: order.identityId, project: project?.name ?? "", riskTier: order.riskTier,
@@ -76,8 +114,12 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
         currentEstimate: order.estimate },
       milestone: milestone ? { title: milestone.title, criteria: milestone.successCriteria.map((item) => item.statement) } : null,
       window,
-      materials: store.listSourceDocuments(workspaceId).filter((doc) => !doc.projectId || doc.projectId === order.projectId)
-        .map((doc) => ({ name: doc.fileName, opening: doc.extractedText.slice(0, 300) })).slice(0, 12),
+      // The task's own material in full: units are read from it and cite it; a quantity is never assumed when it can be counted here.
+      materials: grounding.documents,
+      // Who this is for: confirmed facts (their background and level, the course's grading and target, what they said about this
+      // project), the activities they are good at, the project's dated items, and what they answered to this plan's earlier questions.
+      person: { facts: grounding.person, strengths: grounding.strengths, answers: grounding.answers },
+      projectDates: grounding.dated,
       archetypes: [...ARCHETYPES, ...learned].map(archetypeBrief),
       // Corrections and patterns the person has given: for this task, its line, or everything.
       personalPreferences: store.preferenceLines(workspaceId, [order.identityId, `task:${order.id}`], 15),
@@ -90,7 +132,21 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
     const result = await runCodexSkill<StepPlan>(client, input, { skillName: PLANNER, cwd,
       developerInstructions: "Choose the archetype and write the task's step graph as the Skill describes. Return raw JSON only."
         + (feedback ? " Apply the feedback: it is what the reviewer or the person asked to change." : ""),
-      outputSchema: stepPlanSchema(learned.map((archetype) => archetype.id)), prepareInput: () => input, validateOutput: (output) => validateStepPlanShape(output, learned),
+      outputSchema: stepPlanSchema(learned.map((archetype) => archetype.id)), prepareInput: () => input,
+      validateOutput: (output) => {
+        const shaped = validateStepPlanShape(output, learned);
+        // Units are the plan's footing: each must quote its own file verbatim, or the plan is sent back to read the file again.
+        const bad = unverifiedUnits(shaped.units ?? [], grounding.documents);
+        if (bad.length) throw Object.assign(new Error("STEP_UNIT_UNVERIFIED"), { detail: `这些内容单元的 quote 在所注明的文件里找不到逐字原文：${bad.slice(0, 5)
+          .map((unit) => `「${unit.title}」(${unit.docId})`).join("、")}。只引用 materials 中逐字出现的行；文件里没有的内容，写进 questions 问本人。` });
+        return shaped;
+      },
+      // After the repairs, a plan whose only fault is a few unverifiable units is kept without them.
+      softAccept: (rejection, output) => {
+        if (rejection.message !== "STEP_UNIT_UNVERIFIED") return undefined;
+        try { const shaped = validateStepPlanShape(output, learned); const bad = new Set(unverifiedUnits(shaped.units ?? [], grounding.documents).map((unit) => unit.id));
+          return { ...shaped, units: (shaped.units ?? []).filter((unit) => !bad.has(unit.id)) }; } catch { return undefined; }
+      },
       onAudit: () => {}, ...(signal ? { signal } : {}), timeoutMs: 60 * 60_000 });
     if (!result.ok) {
       if (!/^(SKILL_|CODEX_)/.test(result.blocker.code)) store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId,

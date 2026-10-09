@@ -96,3 +96,22 @@ test("files uploaded under no project and the line's confirmed facts reach the t
   expect(result.input.what).not.toContain("guess");
   expect(result.input.what).not.toContain("media_only");
 });
+
+test("the assistant's preparation steps are picked up by themselves once the kind is allowed; the person's steps never are", async () => {
+  const { CrosslineStore, setCategoryMode } = await import("@crossline/db");
+  const { stepDispatchCandidates } = await import("./agent-dispatch");
+  const store = new CrosslineStore(":memory:");
+  store.saveWorkOrder({ id: "wo", ownerId: "o", workspaceId: "w", identityId: "research", projectId: "p", milestoneId: "m", intent: "期中复习",
+    state: "approved", riskTier: "milestone", estimate: { p25Minutes: 60, p50Minutes: 120, p85Minutes: 240, source: "llm_prior", observationCount: 0, confidence: "low" }, payload: {} });
+  const base = { deliverable: "公式表.md", doneCriterion: "完成", share: 0.5, estimate: { p25Minutes: 20, p50Minutes: 30, p85Minutes: 50 }, dependsOn: [], notBefore: "", dueBy: "", tickOutcome: "" };
+  store.saveStepPlan("w", "wo", { archetypeId: "exam_prep", quantity: { basis: "讲", amount: 2, unit: "讲" }, rationale: "", steps: [
+    { ...base, id: "a", role: "gather", title: "汇编 L1–L7 公式表", schedulable: false, executor: "agent" },
+    { ...base, id: "b", role: "practice", title: "限时完成去年期中卷", schedulable: true, executor: "human" }] }, "o", "planned");
+  // Not allowed yet: asked about once, nothing starts.
+  expect(stepDispatchCandidates(store, "w")).toEqual([]);
+  setCategoryMode(store, "w", "read_research_organize", "review");
+  const [candidate] = stepDispatchCandidates(store, "w");
+  expect(candidate?.orderId).toBe("wo");
+  expect(store.getStepPlan("w", "wo")!.steps.find((step) => step.id === candidate!.stepId)?.title).toBe("汇编 L1–L7 公式表");
+  store.close();
+});

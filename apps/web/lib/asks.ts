@@ -2,7 +2,7 @@ import "server-only";
 import { recordOp, retractedEventIds, withUndo } from "./undo";
 import {
   ATTENTION_SNAPSHOT, CALENDAR_LINES, CALENDAR_PUBLISH_FAILURE, CALENDAR_SYNC_FAILURE, calendarEventKey, daysBetween, describeEvent, missingInputsOf, rankAsks,
-  snoozeUntil, urgencyFor, type CalendarLines,
+  snoozeUntil, STEP_ANSWER_SLOT, stepAnswerSlot, taskTitleOf, urgencyFor, type CalendarLines,
   validateAskAnswer, type AccessContext, type Ask, type AskField, type AskOption, type AskSnooze
 } from "@crossline/core";
 import { listAgentTasks, type StoredWorkOrder } from "@crossline/db";
@@ -17,6 +17,7 @@ import { requestCodexSupervisor } from "./codex-runtime";
 import { autoPublishPass, forgetPublishedHash } from "./auto-publish";
 import { calendarFiling } from "./timeline";
 import { answerInterviewQuestion, interviewStatus } from "./interview-status";
+import { requestStepReplan } from "./steps";
 import { unfiledFiles } from "./file-belonging";
 import { decideEvent, eventProposals, publishFixedEvents } from "./fixed-events";
 import { identityLines } from "./lines";
@@ -512,8 +513,33 @@ function eventAsks({ ctx, today }: Source): Ask[] {
 
 export function collectAsks(ctx: AccessContext, now = new Date()): Ask[] {
   const source = { store: getStore(), ctx, today: planToday(ctx, now), now };
-  return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskAsks, missedAsks, agentAsks, calendarAsks, sourceProjectAsks, calendarLineAsks, interviewAsks, eventAsks]
+  return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskAsks, missedAsks, agentAsks, calendarAsks, sourceProjectAsks, calendarLineAsks, interviewAsks, eventAsks, stepQuestionAsks]
     .flatMap((collect) => { try { return collect(source); } catch { return []; } });
+}
+
+/**
+ * What a task's step plan could not read from the person's material or facts (decided 2026-10-09): the exam's scope, what they already
+ * master, the format of the deliverable. Asked here with the plan's own options; the answer is a confirmed fact every later plan reads,
+ * and the task is planned again with it.
+ */
+function stepQuestionAsks({ store, ctx, today }: Source): Ask[] {
+  const orders = new Map(store.listWorkOrders(ctx.workspaceId).filter((order) => ["approved", "preparing", "ready_for_human", "active"].includes(order.state))
+    .map((order) => [order.id, order]));
+  const answered = new Set(store.listProfileFacts(ctx.workspaceId).filter((fact) => fact.slot.startsWith(STEP_ANSWER_SLOT)).map((fact) => `${fact.projectId}|${fact.slot}`));
+  return store.listStepPlans(ctx.workspaceId).flatMap((plan) => {
+    const order = orders.get(plan.workOrderId);
+    if (!order) return [];
+    const due = (order.payload as { dueDate?: string } | undefined)?.dueDate;
+    return plan.questions.filter((question) => !answered.has(`${order.projectId}|${stepAnswerSlot(question.text)}`)).map((question): Ask => ({
+      id: `stepq:${order.id}:${stepAnswerSlot(question.text)}`, kind: "step_question", entityId: order.id, line: order.identityId,
+      urgency: urgencyFor(due, today), ...(due ? { dueDay: due } : {}), raisedAt: plan.plannedAt, fingerprint: `${plan.version}:${question.text}`,
+      title: `「${short(taskTitleOf(order), 24)}」：${question.text}`,
+      why: `${question.why ? `${clause(question.why)}。` : ""}回答后，这个任务的步骤会按回答重新安排；材料里已有的信息不会再问。`,
+      options: [...question.options.map((option, index) => ({ id: `o${index}`, label: option,
+        fields: [{ id: "other", label: "补充", kind: "text" as const, required: false, placeholder: "可不填" }] })),
+        { id: "free", label: "都不是，我来写", fields: [{ id: "other", label: "回答", kind: "text" as const, required: true }] }]
+    }));
+  });
 }
 
 function snoozes(ctx: AccessContext): AskSnooze[] {
@@ -707,6 +733,19 @@ async function answerOne(ctx: AccessContext, ask: Ask, optionId: string, values:
       forgetPublishedHash(ctx.workspaceId);
       void autoPublishPass().catch(() => {});
       return { ok: true };
+    case "step_question": {
+      const order = store.listWorkOrders(ctx.workspaceId).find((item) => item.id === ask.entityId);
+      const plan = order ? store.getStepPlan(ctx.workspaceId, order.id) : undefined;
+      const question = plan?.questions.find((item) => ask.id.endsWith(stepAnswerSlot(item.text)));
+      if (!order || !question) return { ok: false, code: "STEP_QUESTION_GONE" };
+      const option = ask.options.find((item) => item.id === optionId);
+      const answer = [option && option.id !== "free" ? option.label : "", (values.other ?? "").trim()].filter(Boolean).join("；");
+      if (!answer) return { ok: false, code: "STEP_ANSWER_EMPTY" };
+      store.upsertProfileFact({ workspaceId: ctx.workspaceId, identityId: order.identityId, projectId: order.projectId, slot: stepAnswerSlot(question.text),
+        value: `【${question.text}】${answer}`, status: "confirmed", sourceRef: "ask", sourceQuote: answer, updatedAt: new Date().toISOString() });
+      requestStepReplan(ctx, order.id, `本人回答了「${question.text}」：${answer}。按此重新安排步骤。`);
+      return { ok: true };
+    }
     case "interview_question": {
       const result = await answerInterviewQuestion(ctx, ask.entityId, optionId === "free" ? "" : optionId, values.other ?? "", async (sessionId, text) => {
         // The round is complete: it goes to the interview as the person's reply; the next round's questions follow when it answers.

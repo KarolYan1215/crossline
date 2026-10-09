@@ -164,3 +164,12 @@
 .today-grid.today-grid-single{grid-template-columns:minmax(0,1fr)}
 .task-card-description,.task-dialog-description{margin:0;font-size:13px;color:var(--graphite);line-height:1.45;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .task-dialog-description{-webkit-line-clamp:4}
+
+/* Grounded plans (2026-10-09): the material's units, the questions waiting for the person, the assistant's preparation. */
+.steps-units,.steps-questions{display:flex;flex-wrap:wrap;gap:4px 6px;align-items:baseline;margin:0;font-size:13px}
+.steps-units small,.steps-questions small{flex-basis:100%;font-size:12px;color:var(--graphite)}
+.steps-questions a{color:var(--ink);text-decoration:underline}
+.step-prep{opacity:1;border-left:3px dashed var(--mist);padding-left:6px}
+.step-prep .step-body small a{margin-right:8px}
+.step-covers{font-size:12px;color:var(--graphite)}
+.step-why{font-size:12px;color:var(--graphite)}

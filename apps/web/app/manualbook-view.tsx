@@ -3,6 +3,11 @@
 import { useEffect, useState } from "react";
 import { Markdown } from "./ui/markdown";
 
+/** Where a source opens: the web page itself, or — for what the assistant prepared (`agent:<taskId>/<path>`) — the app's file route. */
+const sourceHref = (url: string) => {
+  const prepared = /^agent:([^/]+)\/(.+)$/.exec(url);
+  return prepared ? `/api/agent/tasks/${encodeURIComponent(prepared[1]!)}/file?path=${encodeURIComponent(prepared[2]!)}` : url;
+};
 type Source = { id: string; url: string; title: string; publisher: string; kept: "full_text" | "summary_only" | "unverified"; verdict: string; summary: string; file?: string; uri?: string };
 type FlowNode = { id: string; title: string; kind: string; goal: string; stage: number; order?: number };
 type Status = { building: boolean; progress: { stage: string; done: number; total: number } | null; blocker: string | null };
@@ -76,7 +81,7 @@ export function ManualbookView({ workOrderId, building: preparing, canBuild = tr
         </div>
         {view === "sources"
           ? <ul className="mb-sources">{sources.map((source) => <li key={source.id}>
-              <a href={source.url} target="_blank" rel="noreferrer noopener">{source.title}</a> <small>{source.publisher}</small>
+              <a href={sourceHref(source.url)} target="_blank" rel="noreferrer noopener">{source.title}</a> <small>{source.publisher}</small>
               <span className="tag">{({ full_text: "已存全文", summary_only: "链接与摘要", unverified: "未能自动核实" } as Record<string, string>)[source.kept] ?? "链接与摘要"}</span>
               <p className="gen">{source.summary}</p>
               {source.uri && <small><a href={`/api/work-orders/${encodeURIComponent(workOrderId)}/materials?uri=${encodeURIComponent(source.uri)}`} target="_blank" rel="noreferrer">打开本地副本</a></small>}

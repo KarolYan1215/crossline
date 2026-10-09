@@ -25,11 +25,28 @@ export type PlannedStep = {
   executor: StepExecutor;
   /** The near-term result this step puts on the milestone axis, "" when it is not a tick. */
   tickOutcome: string;
+  /** Ids of the content units (`StepPlan.units`) this step works on: what it is about, from the person's own material. */
+  covers: string[];
+  /** Why this step, for this person: the fact or material it rests on (their level, the weight of the part, the exam format). */
+  why: string;
 };
+/**
+ * One unit of the task's actual content, read from the person's material — a lecture, a chapter, a problem set, a section of a brief —
+ * with the document and the verbatim line it was read from. Quantities are counted from these, never assumed (decided 2026-10-09: a
+ * plan that counted 「3 个知识点」 for a course with a dozen lectures before the exam was worse than no plan).
+ */
+export type StepUnit = { id: string; title: string; docId: string; quote: string };
+/** What only the person can tell the planner (which lectures the exam covers, what they already know): asked on 待决事项, then replanned. */
+export type StepQuestion = { id: string; text: string; why: string; options: string[] };
+/** The person's answer to a plan question is a confirmed fact under this slot prefix (plus a hash of the question), read by every later plan. */
+export const STEP_ANSWER_SLOT = "step_answer_";
+export const stepAnswerSlot = (question: string) => `${STEP_ANSWER_SLOT}${[...question].reduce((hash, char) => (hash * 31 + char.codePointAt(0)!) >>> 0, 7).toString(36)}`;
 export type StepPlan = {
   archetypeId: string;
   quantity: { basis: string; amount: number; unit: string };
   rationale: string;
+  units: StepUnit[];
+  questions: StepQuestion[];
   steps: PlannedStep[];
 };
 export type StepWarning = { code: string; detail: string };
@@ -43,11 +60,13 @@ export const stepPlanSchema = (extraIds: readonly string[] = []) => object({
   archetypeId: { type: "string", enum: [...ARCHETYPE_IDS, ...extraIds] },
   quantity: object({ basis: str, amount: num, unit: str }),
   rationale: str,
+  units: { type: "array", items: object({ id: str, title: str, docId: str, quote: str }) },
+  questions: { type: "array", items: object({ id: str, text: str, why: str, options: { type: "array", items: str } }) },
   steps: { type: "array", items: object({
     id: str, role: { type: "string", enum: Object.keys(STEP_ROLES) }, title: str, deliverable: str, doneCriterion: str, share: num,
     estimate: object({ p25Minutes: num, p50Minutes: num, p85Minutes: num }),
     dependsOn: { type: "array", items: str }, notBefore: str, dueBy: str, schedulable: { type: "boolean" },
-    executor: { type: "string", enum: ["human", "agent", "mixed"] }, tickOutcome: str
+    executor: { type: "string", enum: ["human", "agent", "mixed"] }, tickOutcome: str, covers: { type: "array", items: str }, why: str
   }) }
 });
 export const STEP_PLAN_SCHEMA = stepPlanSchema();
@@ -106,6 +125,20 @@ export function validateStepPlanShape(value: unknown, extra: readonly Archetype[
 }
 
 /**
+ * Preparation that is not the person's to do (decided 2026-10-09: the person's attention goes to the intellectual core; the assistant
+ * does the rest and puts the result in front of them). A step of the person's whose title is only collecting, listing, sorting or
+ * filing material is handed to the assistant by normalization, whatever the model said.
+ */
+export const TRIVIAL_STEP = /^(清点|整理(材料|资料|文件|课程材料)|收集|汇总|列出|归档|登记|下载|查找资料|检索|建立(材料|资料)?清单|准备材料|标注课程|核对(文件|材料)归属)/;
+
+/** A unit's quote must be in the document it names (letters and digits in order, ignoring spacing and punctuation). */
+export function unverifiedUnits(units: StepUnit[], documents: Array<{ id: string; text: string }>): StepUnit[] {
+  const squash = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+  const texts = new Map(documents.map((doc) => [doc.id, squash(doc.text)]));
+  return units.filter((unit) => { const text = texts.get(unit.docId); const quote = squash(unit.quote); return !text || quote.length < 2 || !text.includes(quote); });
+}
+
+/**
  * Makes any shape-valid plan usable: unique safe ids, ordered estimates, dependencies only on known earlier-or-later steps with cycles
  * broken, shares normalized, dates kept only when they are dates. Returns what it had to change as warnings.
  */
@@ -126,8 +159,18 @@ export function normalizeStepPlan(plan: StepPlan): { plan: StepPlan; warnings: S
       notBefore: DAY.test(step.notBefore ?? "") ? step.notBefore : "", dueBy: DAY.test(step.dueBy ?? "") ? step.dueBy : "",
       schedulable: step.role === "wait" ? false : step.schedulable !== false,
       executor: (["human", "agent", "mixed"] as const).includes(step.executor) ? step.executor : "human",
-      tickOutcome: (step.tickOutcome ?? "").trim().slice(0, 120), dependsOn: step.dependsOn ?? [] };
+      tickOutcome: (step.tickOutcome ?? "").trim().slice(0, 120), dependsOn: step.dependsOn ?? [],
+      covers: Array.isArray(step.covers) ? step.covers.filter((id) => typeof id === "string") : [], why: (step.why ?? "").trim().slice(0, 300) };
   });
+  // Preparation is the assistant's: a person's step that only gathers or files material moves to it, and the assistant's steps never
+  // take time on the person's calendar.
+  for (const step of steps) {
+    if (step.executor !== "agent" && step.role !== "wait" && TRIVIAL_STEP.test(step.title)) {
+      step.executor = "agent";
+      warnings.push({ code: "STEP_TRIVIAL_TO_AGENT", detail: `「${step.title}」是准备工作，改由助手完成` });
+    }
+    if (step.executor === "agent") step.schedulable = false;
+  }
   // Dependencies: known ids only, then any edge that closes a cycle is dropped (the latest-listed edge first).
   for (const step of steps) {
     const known = step.dependsOn.map((dep) => idMap.get(dep)).filter((dep): dep is string => Boolean(dep) && dep !== step.id);
@@ -159,8 +202,15 @@ export function normalizeStepPlan(plan: StepPlan): { plan: StepPlan; warnings: S
   }
   for (const step of steps) step.share = Math.round(step.share * 1000) / 1000;
   const amount = Number.isFinite(plan.quantity?.amount) ? Math.max(0, plan.quantity.amount) : 0;
+  const units = (Array.isArray(plan.units) ? plan.units : []).filter((unit) => unit && unit.id && unit.title)
+    .map((unit) => ({ id: String(unit.id).slice(0, 40), title: String(unit.title).trim().slice(0, 160), docId: String(unit.docId ?? ""), quote: String(unit.quote ?? "").slice(0, 300) })).slice(0, 60);
+  const unitIds = new Set(units.map((unit) => unit.id));
+  for (const step of steps) step.covers = step.covers.filter((id) => unitIds.has(id));
+  const questions = (Array.isArray(plan.questions) ? plan.questions : []).filter((question) => question && question.text)
+    .map((question, index) => ({ id: String(question.id || `q${index + 1}`).slice(0, 40), text: String(question.text).trim().slice(0, 200),
+      why: String(question.why ?? "").trim().slice(0, 300), options: (question.options ?? []).map((option) => String(option).trim().slice(0, 80)).filter(Boolean).slice(0, 8) })).slice(0, 5);
   return { plan: { archetypeId: plan.archetypeId, rationale: (plan.rationale ?? "").trim().slice(0, 600),
-    quantity: { basis: (plan.quantity?.basis ?? "").slice(0, 60), amount, unit: (plan.quantity?.unit ?? "").slice(0, 12) }, steps }, warnings };
+    quantity: { basis: (plan.quantity?.basis ?? "").slice(0, 60), amount, unit: (plan.quantity?.unit ?? "").slice(0, 12) }, units, questions, steps }, warnings };
 }
 
 /**

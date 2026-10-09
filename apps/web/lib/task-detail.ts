@@ -1,7 +1,7 @@
 import "server-only";
 import { archetypeById, goalSettingKey, relevantDocuments, taskProgress, taskTitleOf, type AccessContext, type SuccessCriterion, type EvidenceQuestionTemplate } from "@crossline/core";
 import { listAgentTasks, type CrosslineStore, type StoredMilestone, type StoredWorkOrder, type StoredMaterial, type StoredExecution, type StoredMilestoneRelation,
-  type StoredBackgroundFact, type StoredTaskStep } from "@crossline/db";
+  type StoredBackgroundFact, type StoredStepPlan, type StoredTaskStep } from "@crossline/db";
 import { defaultIdentityPacks, identityPacksFor } from "@crossline/identity-packs";
 import { getStore, resolvedEstimate, relationKindLabel, accents, suggestedSessionMinutes } from "./crossline";
 import { linePacks } from "./lines";
@@ -55,7 +55,7 @@ function taskExtras(store: CrosslineStore, workspaceId: string, orders: StoredWo
       ...(projects.get(order.projectId) ? { projectName: projects.get(order.projectId)! } : {}),
       window: { ...(payload.notBefore ? { notBefore: payload.notBefore } : {}), ...(dueBy ? { dueBy } : {}) },
       ...(plan ? { stepPlan: { archetypeLabel: archetypeById(plan.archetypeId)?.label ?? plan.archetypeId, quantity: plan.quantity, rationale: plan.rationale,
-        progress: taskProgress(plan.steps), steps: plan.steps } } : {}),
+        progress: taskProgress(plan.steps), steps: plan.steps, units: plan.units, questions: plan.questions } } : {}),
       supports, workedMinutes: worked,
       criteria: (milestone?.successCriteria ?? []).map((criterion) => {
         if (personConfirmed.has(criterion.id)) return { id: criterion.id, statement: criterion.statement, quarters: 4, by: "person" as const };
@@ -66,7 +66,7 @@ function taskExtras(store: CrosslineStore, workspaceId: string, orders: StoredWo
           : { id: criterion.id, statement: criterion.statement, quarters: 0, by: "none" as const };
       }),
       sources: relevantDocuments(documents, { projectId: order.projectId, projectName: projects.get(order.projectId) }).map((doc) => ({ id: doc.id, fileName: doc.fileName })),
-      agentOutputs: agentTasks.filter((task) => task.workOrderId === order.id).map((task) => ({ taskId: task.taskId, title: task.title, status: task.status,
+      agentOutputs: agentTasks.filter((task) => task.workOrderId === order.id).map((task) => ({ taskId: task.taskId, title: task.title, status: task.status, stepId: task.stepId,
         files: task.artifacts.map((artifact) => ({ path: artifact.path, name: artifact.path.split(/[\\/]/).at(-1) ?? artifact.path })) })),
       agentSteps: (plan?.steps ?? []).filter((step) => step.status === "planned" && step.schedulable && step.executor !== "human").map((step) => ({ id: step.id, title: step.title })),
       notes: notes.filter((event) => event.entityId === order.id).map((event) => { const payload = event.payload as { text?: string; kind?: string };
@@ -147,7 +147,7 @@ export type TaskExtras = {
   /** Earliest start and latest finish, as the scheduler uses them. */
   window: { notBefore?: string; dueBy?: string };
   stepPlan?: { archetypeLabel: string; quantity: { basis: string; amount: number; unit: string }; rationale: string; progress: number;
-    steps: StoredTaskStep[] };
+    steps: StoredTaskStep[]; units: StoredStepPlan["units"]; questions: StoredStepPlan["questions"] };
   /** Other lines this work feeds: the milestone relations from this task's milestone, and its byproducts. */
   supports: Array<{ line: string; lineLabel: string; target: string; artifact?: string; pending: boolean }>;
   workedMinutes: number;
@@ -156,7 +156,7 @@ export type TaskExtras = {
   /** The person's own files relevant to it (this project's and unassigned uploads). */
   sources: Array<{ id: string; fileName: string }>;
   /** What the assistant produced for it. */
-  agentOutputs: Array<{ taskId: string; title: string; status: string; files: Array<{ path: string; name: string }> }>;
+  agentOutputs: Array<{ taskId: string; title: string; status: string; stepId: string; files: Array<{ path: string; name: string }> }>;
   /** Open steps the system could do; 「交给 Agent」 appears when there is one. */
   agentSteps: Array<{ id: string; title: string }>;
   /** The task's record in the person's own words (notes, postponements), newest first. */

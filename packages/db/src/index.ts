@@ -116,13 +116,17 @@ export type StepPlanInput = {
   archetypeId: string; quantity: { basis: string; amount: number; unit: string }; rationale: string;
   steps: Array<{ id: string; role: string; title: string; deliverable: string; doneCriterion: string; share: number;
     estimate: { p25Minutes: number; p50Minutes: number; p85Minutes: number }; dependsOn: string[]; notBefore: string; dueBy: string;
-    schedulable: boolean; executor: "human" | "agent" | "mixed"; tickOutcome: string }>;
+    schedulable: boolean; executor: "human" | "agent" | "mixed"; tickOutcome: string; covers?: string[]; why?: string }>;
+  /** The content units read from the person's material, and what only the person can answer (packages/core/src/steps.ts). */
+  units?: Array<{ id: string; title: string; docId: string; quote: string }>;
+  questions?: Array<{ id: string; text: string; why: string; options: string[] }>;
 };
 export type StoredTaskStep = StepPlanInput["steps"][number] & {
   workOrderId: string; seq: number; status: "planned" | "done" | "skipped"; progressQuarter: number; updatedAt: string;
 };
 export type StoredStepPlan = {
   workOrderId: string; version: number; archetypeId: string; quantity: StepPlanInput["quantity"]; rationale: string; plannedAt: string;
+  units: NonNullable<StepPlanInput["units"]>; questions: NonNullable<StepPlanInput["questions"]>;
   steps: StoredTaskStep[];
 };
 
@@ -936,6 +940,12 @@ export class CrosslineStore {
             context_version = COALESCE((SELECT json_extract(w.payload_json, '$.contextVersion') FROM work_orders w
               WHERE w.id = duration_observations.work_order_id AND w.workspace_id = duration_observations.workspace_id), '')
           WHERE llm_p50_minutes IS NULL`);
+      } },
+      // A step plan now carries what it rests on (decided 2026-10-09): the content units read from the person's files, the questions
+      // only the person can answer, and per step what it covers and why. Kept as JSON beside the columns the scheduler reads.
+      { version: 11, up: () => {
+        if (!has("task_step_plans", "detail_json")) this.#db.exec("ALTER TABLE task_step_plans ADD COLUMN detail_json TEXT NOT NULL DEFAULT '{}'");
+        if (!has("task_steps", "detail_json")) this.#db.exec("ALTER TABLE task_steps ADD COLUMN detail_json TEXT NOT NULL DEFAULT '{}'");
       } }
     ];
 
@@ -1932,22 +1942,24 @@ export class CrosslineStore {
       const kept = (previous?.steps ?? []).filter((step) => step.status !== "planned");
       const keptIds = new Set(kept.map((step) => step.id));
       this.#db.prepare("DELETE FROM task_steps WHERE workspace_id = ? AND work_order_id = ? AND status = 'planned'").run(workspaceId, workOrderId);
-      this.#db.prepare(`INSERT INTO task_step_plans (workspace_id, work_order_id, version, archetype_id, quantity_json, rationale, planned_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(workspace_id, work_order_id) DO UPDATE SET version = excluded.version,
-        archetype_id = excluded.archetype_id, quantity_json = excluded.quantity_json, rationale = excluded.rationale, planned_at = excluded.planned_at`)
-        .run(workspaceId, workOrderId, version, plan.archetypeId, JSON.stringify(plan.quantity), plan.rationale, now);
+      this.#db.prepare(`INSERT INTO task_step_plans (workspace_id, work_order_id, version, archetype_id, quantity_json, rationale, planned_at, detail_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(workspace_id, work_order_id) DO UPDATE SET version = excluded.version,
+        archetype_id = excluded.archetype_id, quantity_json = excluded.quantity_json, rationale = excluded.rationale, planned_at = excluded.planned_at,
+        detail_json = excluded.detail_json`)
+        .run(workspaceId, workOrderId, version, plan.archetypeId, JSON.stringify(plan.quantity), plan.rationale, now,
+          JSON.stringify({ units: plan.units ?? [], questions: plan.questions ?? [] }));
       // New ids continue after the kept ones so a dependency on a done step still points at it.
       const offset = kept.length;
       const insert = this.#db.prepare(`INSERT INTO task_steps (workspace_id, work_order_id, id, seq, role, title, deliverable, done_criterion, share,
-        p25_minutes, p50_minutes, p85_minutes, depends_on_json, not_before, due_by, schedulable, executor, tick_outcome, status, progress_quarter, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'planned', 0, ?)`);
+        p25_minutes, p50_minutes, p85_minutes, depends_on_json, not_before, due_by, schedulable, executor, tick_outcome, status, progress_quarter, updated_at, detail_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'planned', 0, ?, ?)`);
       const rename = new Map(plan.steps.map((step, index) => [step.id, keptIds.has(step.id) ? step.id : `v${version}s${index + 1}`]));
       plan.steps.forEach((step, index) => {
         if (keptIds.has(step.id)) return;
         insert.run(workspaceId, workOrderId, rename.get(step.id)!, offset + index, step.role, step.title, step.deliverable, step.doneCriterion,
           step.share, step.estimate.p25Minutes, step.estimate.p50Minutes, step.estimate.p85Minutes,
           JSON.stringify(step.dependsOn.map((dep) => rename.get(dep) ?? dep)), step.notBefore, step.dueBy, step.schedulable ? 1 : 0,
-          step.executor, step.tickOutcome, now);
+          step.executor, step.tickOutcome, now, JSON.stringify({ covers: step.covers ?? [], why: step.why ?? "" }));
       });
       this.appendEvent({ ownerId, workspaceId, idempotencyKey: `task.steps_planned:${workOrderId}:${version}`, type: "task.steps_planned",
         entityId: workOrderId, payload: { version, archetypeId: plan.archetypeId, steps: plan.steps.length, kept: kept.length, reason } });
@@ -1973,12 +1985,16 @@ export class CrosslineStore {
         estimate: { p25Minutes: Number(row.p25_minutes), p50Minutes: Number(row.p50_minutes), p85Minutes: Number(row.p85_minutes) },
         dependsOn: JSON.parse(String(row.depends_on_json)) as string[], notBefore: String(row.not_before), dueBy: String(row.due_by),
         schedulable: Number(row.schedulable) === 1, executor: row.executor as StoredTaskStep["executor"], tickOutcome: String(row.tick_outcome),
-        status: row.status as StoredTaskStep["status"], progressQuarter: Number(row.progress_quarter), updatedAt: String(row.updated_at) });
+        status: row.status as StoredTaskStep["status"], progressQuarter: Number(row.progress_quarter), updatedAt: String(row.updated_at),
+        ...(JSON.parse(String(row.detail_json ?? "{}")) as { covers?: string[]; why?: string }) });
       byOrder.set(String(row.work_order_id), list);
     }
     return plans.map((row) => ({ workOrderId: String(row.work_order_id), version: Number(row.version), archetypeId: String(row.archetype_id),
       quantity: JSON.parse(String(row.quantity_json)) as StoredStepPlan["quantity"], rationale: String(row.rationale),
-      plannedAt: String(row.planned_at), steps: byOrder.get(String(row.work_order_id)) ?? [] }));
+      plannedAt: String(row.planned_at),
+      ...(() => { const detail = JSON.parse(String(row.detail_json ?? "{}")) as Partial<Pick<StoredStepPlan, "units" | "questions">>;
+        return { units: detail.units ?? [], questions: detail.questions ?? [] }; })(),
+      steps: byOrder.get(String(row.work_order_id)) ?? [] }));
   }
 
   /** The person's own estimate for one step (dragged on the card or the calendar). */

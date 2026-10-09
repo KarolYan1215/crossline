@@ -23,7 +23,7 @@
 export type AskKind =
   | "backplan_input" | "waiting_due" | "capture_blocked" | "materials_blocked" | "gate_insufficient" | "gate_failed"
   | "evidence_manual" | "milestone_risk" | "agent_blocked" | "calendar_publish_failed" | "calendar_sync_failed" | "codex_signed_out"
-  | "missed_block" | "source_project" | "calendar_line_unclear" | "interview_open" | "interview_question" | "event_propose";
+  | "missed_block" | "source_project" | "calendar_line_unclear" | "interview_open" | "interview_question" | "event_propose" | "step_question";
 
 export type AskField = { id: string; label: string; kind: "text" | "longtext" | "date"; required: boolean;
   initial?: string; placeholder?: string };

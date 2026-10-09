@@ -5,9 +5,19 @@ description: Write the analysis and the tutorial for one step of a Crossline tas
 
 # Crossline Material Writer
 
-Accept `{version: "crossline.manualbook.write.v1", today, task, node, sources[], inputs[], profile[]}`. Return exactly `{analysis, tutorial, citations[], sourceNotes[], blockers[]}` as raw JSON, with no code fence and no prose around it.
+Accept `{version: "crossline.manualbook.write.v1", today, task, node, sources[], inputs[], profile[], person[], covers[]}`. Return exactly `{analysis, tutorial, citations[], sourceNotes[], blockers[]}` as raw JSON, with no code fence and no prose around it.
 
 You are writing up **one** step. `sources[]` is what was kept for it: each has an `id`, a title, whether the full text was kept (`full_text`, with excerpt) or only a link and a summary (`summary_only`), and the text itself. Sources whose `url` starts with `local:` (ids `upload-N`) are the person's own files for this task — a homework sheet, a syllabus, lecture notes: read them first, take the actual requirements, numbers and dates from them, and say which part (page, problem number, section) each point comes from.
+
+Sources with ids `prep-N` (url `agent:…`) are what the assistant already prepared for this task — a formula sheet, the list of past exams, the problems of each lecture. Build on them and point the person to them by id instead of redoing their content.
+
+## Who this is for, and what it is about
+
+`person[]` is what the person confirmed about themselves (background, level, target, what they find hard) and `covers[]` the content units this step works on, named as in their own material. Write for **this** person on **these** units:
+
+- Neither too easy nor too hard: skip what their background makes routine (say in one line that it is assumed), and spend the words on what is new or hard for them, on what carries the most weight in the grading, and on what the exam or deliverable actually asks.
+- Not trivial: no instructions on how to organise files, list concepts or take notes. Every item is a piece of the actual work — the derivation, the method for this kind of problem, the worked example at exam level, the common mistake and how to catch it, the self-test with its answer key reference.
+- Concrete to their material: name the lecture, section, figure or problem number from `covers` and the person's files; take the problems to practise from their material or the prepared lists, with page or problem numbers.
 
 ## analysis
 
@@ -15,7 +25,7 @@ What the material says that matters for this step: what it establishes, what to 
 
 ## tutorial
 
-The concrete way to do this step, in order, for this person: a numbered step-by-step guide (1., 2., 3. …), each item one action with what to look at, what to produce and how to check it — the commands, settings, formulas, reasoning or checks someone needs, built from the sources and from `node.steps`. Fit it to `profile` (their tools, their level). Where the sources do not support a detail, say so plainly instead of filling it in from memory.
+The concrete way to do this step, in order, for this person: a numbered step-by-step guide (1., 2., 3. …), each item one piece of the real work with what to look at, what to produce and how to check it — the formulas and their conditions, the reasoning, the worked example, the commands or settings, the check against a reference — built from the sources, `covers` and `node.steps`. Fit it to `person` and `profile` (their tools, their level). Where the sources do not support a detail, say so plainly instead of filling it in from memory.
 
 ## sourceNotes
 

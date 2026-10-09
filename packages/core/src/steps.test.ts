@@ -4,10 +4,10 @@ import { ARCHETYPES, STEP_PLAN_SCHEMA, normalizeStepPlan, stepPlanWarnings, stru
 const step = (id: string, role: StepPlan["steps"][number]["role"], extra: Partial<StepPlan["steps"][number]> = {}) => ({
   id, role, title: `${role} ${id}`, deliverable: "产出", doneCriterion: "完成标准", share: 0.25,
   estimate: { p25Minutes: 20, p50Minutes: 30, p85Minutes: 45 }, dependsOn: [], notBefore: "", dueBy: "",
-  schedulable: true, executor: "human" as const, tickOutcome: "", ...extra
+  schedulable: true, executor: "human" as const, tickOutcome: "", covers: [] as string[], why: "", ...extra
 });
 const plan = (steps: StepPlan["steps"], archetypeId = "writing"): StepPlan =>
-  ({ archetypeId, quantity: { basis: "目标字数", amount: 0, unit: "千字" }, rationale: "", steps });
+  ({ archetypeId, quantity: { basis: "目标字数", amount: 0, unit: "千字" }, rationale: "", units: [], questions: [], steps });
 
 describe("archetypes", () => {
   it("every archetype's rules only name its own roles, and proportions roughly sum to one", () => {
@@ -69,5 +69,19 @@ describe("step plans", () => {
 
   it("task progress counts done shares and a started step's quarters", () => {
     expect(taskProgress([{ share: 0.5, status: "done", progressQuarter: 0 }, { share: 0.5, status: "planned", progressQuarter: 2 }])).toBeCloseTo(0.75);
+  });
+});
+
+describe("grounded, non-trivial plans", () => {
+  it("a person's step that only gathers or files material is handed to the assistant and takes no calendar time", () => {
+    const { plan: normalized, warnings } = normalizeStepPlan(plan([step("a", "gather", { title: "清点材料并标注课程信息差异" }), step("b", "draft", { title: "推导 P-N 结耗尽区宽度" })]));
+    expect(normalized.steps.map((item) => [item.executor, item.schedulable])).toEqual([["agent", false], ["human", true]]);
+    expect(warnings.map((warning) => warning.code)).toContain("STEP_TRIVIAL_TO_AGENT");
+  });
+  it("a content unit stands only on a verbatim line of the document it names", async () => {
+    const { unverifiedUnits } = await import("./steps");
+    const docs = [{ id: "doc-1", text: "Week 3: L5 PN Junction electrostatics; L6 Diode I-V" }];
+    expect(unverifiedUnits([{ id: "u1", title: "PN 结静电", docId: "doc-1", quote: "L5 PN Junction electrostatics" },
+      { id: "u2", title: "MOS 电容", docId: "doc-1", quote: "L7 MOS capacitor" }, { id: "u3", title: "x", docId: "doc-9", quote: "Diode" }], docs).map((unit) => unit.id)).toEqual(["u2", "u3"]);
   });
 });
