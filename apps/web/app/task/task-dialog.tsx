@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { STEP_ROLES } from "@crossline/core";
+import { STEP_ROLES, plainEstimateWords } from "@crossline/core";
 import type { TaskDetail } from "../../lib/task-detail";
 import { Sheet } from "../ui/overlay";
 import { ProgressRing, formatMinutes } from "../ui/controls";
@@ -38,7 +38,7 @@ function StepsPanel({ detail }: { detail: TaskDetail }) {
       <ProgressRing quarters={Math.round(plan.progress * 4)} label="任务进度" size={30} />
       <span><b className="mono">{Math.round(plan.progress * 100)}%</b> <small>{plan.archetypeLabel} · {plan.quantity.amount > 0 ? `${plan.quantity.amount} ${plan.quantity.unit}` : plan.quantity.basis}</small></span>
     </div>
-    {plan.rationale && <p className="gen steps-rationale">{plan.rationale}</p>}
+    {plan.rationale && <p className="gen steps-rationale">{plainEstimateWords(plan.rationale)}</p>}
     <ol className="steps-list">
       {done.map((step) => <li key={step.id} data-status={step.status}>
         <ProgressRing quarters={4} label={step.title} /><span className="step-title">{step.title}</span><Tag tone="ok">{step.status === "done" ? "已完成" : "已跳过"}</Tag>

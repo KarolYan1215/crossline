@@ -10,6 +10,8 @@ import { archiveWorkOrder, getStore, restoreCapture, restoreWorkOrder, saveMiles
  */
 export type Inverse =
   | { kind: "waiting.reopen"; items: Array<{ id: string; followUpAt: string }> }
+  /** Waiting items the operation opened (推迟 because someone has to hand something over): closed again. */
+  | { kind: "waiting.cancel"; ids: string[] }
   | { kind: "work_order.restore"; ids: string[] }
   | { kind: "work_order.archive"; ids: string[] }
   | { kind: "capture.restore"; ids: string[] }
@@ -80,6 +82,9 @@ function applyInverse(ctx: AccessContext, inverse: Inverse): { ok: true } | { ok
     switch (inverse.kind) {
       case "waiting.reopen":
         for (const item of inverse.items) store.reopenWaitingItem(ctx.workspaceId, item.id, item.followUpAt, ctx.principalId);
+        return { ok: true };
+      case "waiting.cancel":
+        for (const id of inverse.ids) store.answerWaitingItem(ctx.workspaceId, id, { kind: "cancelled" }, ctx.principalId);
         return { ok: true };
       case "work_order.restore":
         for (const id of inverse.ids) { const result = restoreWorkOrder(ctx, id); if (!result.ok) return result; }
@@ -191,6 +196,8 @@ function inverseOf(before: Snapshot, after: Snapshot): Inverse[] {
     if (was.state === "open" && now && (now.state !== "open" || now.followUpAt !== was.followUpAt)) reopen.push({ id, followUpAt: was.followUpAt });
   }
   if (reopen.length) items.push({ kind: "waiting.reopen", items: reopen });
+  const opened = [...after.waiting].filter(([id, now]) => !before.waiting.has(id) && now.state === "open").map(([id]) => id);
+  if (opened.length) items.push({ kind: "waiting.cancel", ids: opened });
   const restored: string[] = [], archived: string[] = [], revoked: string[] = [];
   for (const [id, now] of after.orders) {
     const was = before.orders.get(id);

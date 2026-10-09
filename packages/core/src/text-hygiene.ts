@@ -50,3 +50,12 @@ export function cleanAnswerStrings<T>(value: T): T {
   };
   return walk(value) as T;
 }
+
+/**
+ * Model text written before the style rule forbade it can still say 「p50 合计 180 分钟」; shown to the person it reads 「通常合计 180 分钟」.
+ * p25 is the optimistic end, p50 the usual, p85 the cautious one.
+ */
+export function plainEstimateWords(text: string): string {
+  return text.replace(/(?<![A-Za-z0-9])p\s?50(?![0-9])\s*/giu, "通常").replace(/(?<![A-Za-z0-9])p\s?85(?![0-9])\s*/giu, "保守")
+    .replace(/(?<![A-Za-z0-9])p\s?25(?![0-9])\s*/giu, "乐观");
+}

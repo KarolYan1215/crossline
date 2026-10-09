@@ -22,3 +22,8 @@ test("quote fields are compared with the person's own text, so they are never re
   const cleaned = cleanAnswerStrings({ why: "a​b", sourceQuote: "x​y", nested: [{ quote: "p​q", intent: "r​s" }] });
   expect(cleaned).toEqual({ why: "ab", sourceQuote: "x​y", nested: [{ quote: "p​q", intent: "rs" }] });
 });
+
+test("estimate jargon in older model text reads as plain words", async () => {
+  const { plainEstimateWords } = await import("./text-hygiene");
+  expect(plainEstimateWords("材料未提供题目数量，p50 合计 180 分钟，p85 为 4 小时。")).toBe("材料未提供题目数量，通常合计 180 分钟，保守为 4 小时。");
+});

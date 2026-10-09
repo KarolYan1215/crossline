@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Markdown } from "./ui/markdown";
 
 type Source = { id: string; url: string; title: string; publisher: string; kept: "full_text" | "summary_only"; verdict: string; summary: string; file?: string; uri?: string };
 type FlowNode = { id: string; title: string; kind: string; goal: string; stage: number; order?: number };
@@ -62,7 +63,7 @@ export function ManualbookView({ workOrderId, building: preparing, canBuild = tr
   return <section className="manualbook" aria-label="教程">
     <header className="mb-head">{status ?? <span />}
       {canBuild && !running && <button type="button" className="secondary-button" onClick={() => void generate()}>重新生成</button>}</header>
-    {overview && <p className="gen mb-overview">{overview}</p>}
+    {overview && <Markdown className="gen mb-overview" text={overview} />}
     <ol className="mb-steps">{nodes.map((node, index) => {
       const content = state.nodes[node.id];
       const view = views[node.id] ?? "tutorial";
@@ -80,7 +81,7 @@ export function ManualbookView({ workOrderId, building: preparing, canBuild = tr
               <p className="gen">{source.summary}</p>
               {source.uri && <small><a href={`/api/work-orders/${encodeURIComponent(workOrderId)}/materials?uri=${encodeURIComponent(source.uri)}`} target="_blank" rel="noreferrer">打开本地副本</a></small>}
             </li>)}{sources.length === 0 && <li className="muted">该步骤只用到本人上传的文件。</li>}</ul>
-          : <div className="mb-text gen">{body(view === "tutorial" ? content?.tutorial || content?.task || "" : content?.analysis || "") || "该步骤没有这部分内容。"}</div>}
+          : <Markdown className="mb-text gen" text={body(view === "tutorial" ? content?.tutorial || content?.task || "" : content?.analysis || "") || "该步骤没有这部分内容。"} />}
       </li>;
     })}</ol>
   </section>;

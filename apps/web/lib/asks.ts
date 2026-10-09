@@ -9,7 +9,7 @@ import { listAgentTasks, type StoredWorkOrder } from "@crossline/db";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import {
   acceptWorkOrderEvidence, answerWaiting, approveWorkOrderProposal, archiveWorkOrder, discardCapture, getStore, loadGoalForecast,
-  markMaterialsReady, planToday, readGoalSettings, retryMaterialPreparation, saveGoalSettings
+  markMaterialsReady, planToday, readGoalSettings, retryMaterialPreparation, saveGoalSettings, TASK_LIBRARY_WINDOW_DAYS
 } from "./crossline";
 import { requestAutoBackplan } from "./approvals";
 import { readScheduledDay } from "./schedule-memory";
@@ -68,7 +68,10 @@ function backplanAsks({ store, ctx, today }: Source): Ask[] {
     const milestone = milestones.get(milestoneId);
     const payload = event.payload as { milestoneVersion?: number; code?: string; message?: string };
     if (!milestone || payload.milestoneVersion !== milestone.version || declined.has(`${milestoneId}:${milestone.version}`)) continue;
-    const dueDay = anchors.get(milestoneId);
+    const dueDay = readGoalSettings(ctx, milestoneId)?.confirmedDeadline ?? anchors.get(milestoneId);
+    // A milestone whose work still waits in the task library is not asked about yet: its missing inputs come up when its window opens,
+    // with the rest of its work (asking about every approved milestone at once put 33 questions on Today).
+    if (dueDay && daysBetween(today, dueDay) > TASK_LIBRARY_WINDOW_DAYS) continue;
     const base = { entityId: milestoneId, line: milestone.identityId, raisedAt: event.createdAt, fingerprint: event.eventId,
       urgency: urgencyFor(dueDay, today), ...(dueDay ? { dueDay } : {}) };
     const missing = missingInputsOf(event.payload);

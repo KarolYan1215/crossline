@@ -62,3 +62,13 @@ test("an operation that failed or changed nothing records nothing to undo", asyn
   await withUndo(TEST_CTX, "无变化", () => ({ ok: true }));
   expect(recentOps(TEST_CTX)).toEqual([]);
 });
+
+test("推迟 because someone has to hand something over opens a waiting item, and undoing it closes that item again", async () => {
+  const store = setup();
+  const { postponeTask } = await import("./task-ops");
+  const result = await withUndo(TEST_CTX, "推迟：整理实验数据", () => postponeTask(TEST_CTX, "w1", { reason: "waiting", date: "2026-10-14", who: "师兄", what: "原始数据", text: "" }));
+  expect(result.op).toBeDefined();
+  expect(store.listWaitingItems(ws, { state: "open" })).toHaveLength(1);
+  expect(undoOp(TEST_CTX, result.op!.id)).toMatchObject({ ok: true });
+  expect(store.listWaitingItems(ws, { state: "open" })).toHaveLength(0);
+});

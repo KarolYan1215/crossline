@@ -165,3 +165,7 @@
 .ms-archived{flex-basis:100%}
 .ms-archived ul{margin:6px 0 0;padding:0;list-style:none;display:grid;gap:4px}
 .ms-archived li{display:flex;gap:8px;align-items:baseline;justify-content:space-between}
+
+.line-goal-candidates{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:6px}
+.line-goal-candidate{padding:4px 8px;border:1px dashed var(--lc,var(--graphite));background:var(--paper);color:var(--ink);font:inherit;font-size:13px;cursor:pointer;text-align:left}
+.line-goal-candidate:hover{background:var(--chalk)}

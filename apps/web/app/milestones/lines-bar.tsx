@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { Sheet } from "../ui/overlay";
 
-export type LineCard = { id: string; label: string; color: string; goals: string[]; hard: boolean; rank: number | null; milestones: number };
+/** `candidates`: the long-term goals the interview proposed for this line and the person has not adopted yet. */
+export type LineCard = { id: string; label: string; color: string; goals: string[]; hard: boolean; rank: number | null; milestones: number; candidates: string[] };
 
 const post = async (body: unknown) => {
   const response = await fetch("/api/lines", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).catch(() => null);
@@ -40,6 +41,12 @@ function LineEditor({ line, palette, onDone }: { line?: LineCard; palette: Recor
         {goals.length > 1 && <button type="button" aria-label="删除该目标" onClick={() => setGoals((list) => list.filter((_, i) => i !== index))}>×</button>}
       </div>)}
       <button type="button" className="text-button" onClick={() => setGoals((list) => [...list, ""])}>＋ 添加长期目标</button>
+      {/* The interview's proposals for this line, adopted with one click (and edited above like any other). */}
+      {line && line.candidates.filter((candidate) => !goals.includes(candidate)).length > 0 && <div className="line-goal-candidates">
+        <small className="muted">访谈提出的候选：</small>
+        {line.candidates.filter((candidate) => !goals.includes(candidate)).map((candidate) => <button key={candidate} type="button" className="line-goal-candidate"
+          onClick={() => setGoals((list) => [...list.filter((item) => item.trim()), candidate])}>＋ {candidate}</button>)}
+      </div>}
     </fieldset>
     <label className="line-hard"><input type="checkbox" checked={hard} onChange={(event) => setHard(event.target.checked)} />
       硬约束：其固定日程是不可移动的骨架、截止日优先，可用时段由它推出（最多两条）</label>
@@ -81,7 +88,9 @@ export function LinesBar({ lines, palette }: { lines: LineCard[]; palette: Recor
       {line.hard && <span className="tag">硬约束</span>}
       <small className="mono">{index !== undefined ? (index === 0 ? "底座" : `第 ${index + 1}`) : "平行"}</small>
     </header>
-    {line.goals.length ? <ul>{line.goals.map((goal) => <li key={goal}>{goal}</li>)}</ul> : <span className="muted">未设长期目标</span>}
+    {line.goals.length ? <ul>{line.goals.map((goal) => <li key={goal}>{goal}</li>)}</ul>
+      : line.candidates.length ? <button type="button" className="text-button lines-bar-candidates" onClick={() => setEditing(line)}>{line.candidates.length} 个候选长期目标待选 →</button>
+        : <span className="muted">未设长期目标</span>}
     <footer><small className="mono">{line.milestones} 个里程碑</small>
       {line.rank ? <button type="button" className="text-button" onClick={() => void order(ranked.filter((item) => item.id !== line.id).map((item) => item.id))}>改为平行</button>
         : <button type="button" className="text-button" onClick={() => void order([...ranked.map((item) => item.id), line.id])}>加入主次</button>}</footer>
