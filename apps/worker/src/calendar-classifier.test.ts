@@ -20,15 +20,17 @@ test("calendar events are filed under lines by title, once per recurring title, 
   expect(events[0]!.when[0]).toBe("2026-10-13 周二 10:00–11:00");
 
   const answer = { items: [
-    { key: "ece 555 lecture", lineId: "research", why: "研究者主线下的课程" },
-    { key: "dentist", lineId: "", why: "个人事务" },
-    { key: "ece 548 midterm", lineId: "nonexistent", why: "" }] };
+    { key: "ece 555 lecture", lineId: "research", why: "研究者主线下的课程", unclear: false },
+    { key: "dentist", lineId: "", why: "个人事务", unclear: false },
+    { key: "ece 548 midterm", lineId: "nonexistent", why: "", unclear: false }] };
   const runtime = fakeRuntime([JSON.stringify(answer)], "crossline:crossline-calendar-classifier");
   expect(await createCalendarClassifier(store, ws, "C:\repo", () => runtime.rpc)()).toEqual({ filed: 3 });
   const filing = readCalendarLines(store, ws);
   expect(calendarLineOf(filing, "ECE 555 Lecture")).toBe("research");
   expect(calendarLineOf(filing, "Dentist")).toBeUndefined();
   expect(calendarLineOf(filing, "ECE 548 Midterm")).toBeUndefined();
+  expect(filing.entries["ece 548 midterm"]).toMatchObject({ unclear: true, by: "model" });
+  expect(filing.entries["dentist"]?.unclear).toBeUndefined();
   // Filed once: nothing is asked again.
   expect(unfiledCalendarEvents(store, ws)).toEqual([]);
   expect(store.getSetting(ws, CALENDAR_LINES)).toBeTruthy();

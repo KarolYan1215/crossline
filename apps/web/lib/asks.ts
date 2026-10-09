@@ -1,7 +1,8 @@
 import "server-only";
 import { recordOp, retractedEventIds, withUndo } from "./undo";
 import {
-  ATTENTION_SNAPSHOT, CALENDAR_PUBLISH_FAILURE, CALENDAR_SYNC_FAILURE, daysBetween, missingInputsOf, rankAsks, snoozeUntil, urgencyFor,
+  ATTENTION_SNAPSHOT, CALENDAR_LINES, CALENDAR_PUBLISH_FAILURE, CALENDAR_SYNC_FAILURE, calendarEventKey, daysBetween, documentProject, documentsByRef,
+  leaningProject, missingInputsOf, plainProject, rankAsks, snoozeUntil, urgencyFor, type CalendarLines,
   validateAskAnswer, type AccessContext, type Ask, type AskOption, type AskSnooze
 } from "@crossline/core";
 import { listAgentTasks, type StoredWorkOrder } from "@crossline/db";
@@ -14,6 +15,8 @@ import { requestAutoBackplan } from "./approvals";
 import { readScheduledDay } from "./schedule-memory";
 import { requestCodexSupervisor } from "./codex-runtime";
 import { autoPublishPass, forgetPublishedHash } from "./auto-publish";
+import { calendarFiling } from "./timeline";
+import { identityLines } from "./lines";
 
 /** Markers an undo has taken back are as if never written. */
 const live = <T extends { eventId: string }>(ctx: AccessContext, events: T[]): T[] => {
@@ -387,9 +390,77 @@ function calendarAsks({ store, ctx }: Source): Ask[] {
 }
 
 /** Everything the ledger alone can tell, unranked. Synchronous, so the badge can count it on every page. */
+/**
+ * A file dates were read from whose project nothing on record decides — not the dates' own project field, not the project the file is
+ * filed under, not its name, not the opening of its text (`packages/core/src/belonging.ts`). One question per file, with the project the
+ * interview leaned towards recommended. Until answered, its dates are shown without a course.
+ */
+const PERSONAL = /^(个人|本人|个人档案|个人信息|person|personal)$/iu;
+function sourceProjectAsks({ store, ctx, today }: Source): Ask[] {
+  const projects = store.listProjects(ctx.workspaceId).map((project) => ({ id: project.id, name: project.name, identityId: project.identityId }));
+  if (!projects.length) return [];
+  const docs = store.listSourceDocuments(ctx.workspaceId);
+  const byRef = documentsByRef(docs);
+  const cleared = new Set(live(ctx, store.listEvents(ctx.workspaceId, { type: "source.project_cleared" })).map((event) => event.entityId));
+  const superseded = new Set(store.listEvents(ctx.workspaceId, { type: "dates.decided" })
+    .filter((event) => (event.payload as { superseded?: boolean }).superseded).map((event) => event.entityId));
+  type Item = { title: string; project?: string; sourceRef?: string; date?: string; from?: string };
+  const lineNames = new Set(identityLines(ctx).flatMap((line) => [line.id, line.label]));
+  const open = new Map<string, { doc: (typeof docs)[number]; titles: string[]; days: string[]; lean: (typeof projects)[number] | undefined; raisedAt: string }>();
+  for (const event of store.listEvents(ctx.workspaceId, { type: "dates.extracted" })) {
+    if (superseded.has(event.entityId)) continue;
+    const payload = event.payload as { dates?: Item[]; recurring?: Item[]; undated?: Item[] };
+    for (const item of [...(payload.dates ?? []), ...(payload.recurring ?? []), ...(payload.undated ?? [])]) {
+      // An item filed under no project, under a line's own name or under the person (a CV's dates: 「个人档案」「研究者」) is not about a
+      // project: nothing to ask.
+      const project = item.project?.trim() ?? "";
+      if (!project || lineNames.has(project) || PERSONAL.test(project) || plainProject(project, projects)) continue;
+      const doc = item.sourceRef ? byRef.get(item.sourceRef) : undefined;
+      if (!doc || doc.projectId || cleared.has(doc.id) || documentProject(doc, projects)) continue;
+      const entry = open.get(doc.id) ?? { doc, titles: [], days: [], lean: undefined, raisedAt: event.createdAt };
+      if (!entry.titles.includes(item.title)) entry.titles.push(item.title);
+      const day = item.date ?? item.from;
+      if (day && day >= today) entry.days.push(day);
+      entry.lean ??= leaningProject(item.project, projects);
+      open.set(doc.id, entry);
+    }
+  }
+  return [...open.values()].map(({ doc, titles, days, lean, raisedAt }) => {
+    const dueDay = days.sort()[0];
+    // The lean first, then the projects on its line, then the rest.
+    const ordered = [...(lean ? [lean] : []), ...projects.filter((project) => project.id !== lean?.id)
+      .sort((a, b) => Number(b.identityId === lean?.identityId) - Number(a.identityId === lean?.identityId))].slice(0, 6);
+    const named = titles.slice(0, 3).map((title) => `「${short(title, 16)}」`).join("、");
+    return { id: `src:${doc.id}`, kind: "source_project" as const, entityId: doc.id, urgency: urgencyFor(dueDay, today), ...(dueDay ? { dueDay } : {}),
+      raisedAt, fingerprint: `${doc.id}:${titles.length}`, title: `《${short(doc.fileName, 32)}》属于哪个项目？`,
+      why: `文件名和正文开头都没有写明所属课程或项目，从中读出的 ${titles.length} 项日程（${named}${titles.length > 3 ? " 等" : ""}）因此无法标明归属`
+        + `${lean ? `；访谈时判断更可能是 ${lean.name}` : ""}。确认后，这些日程与截止都会带上项目名。`,
+      options: [...ordered.map((project) => ({ id: `p:${project.id}`, label: project.name, ...(project.id === lean?.id ? { recommended: true } : {}) })),
+        { id: "none", label: "不属于任何项目", detail: "这份文件的日程保持原名" }] };
+  });
+}
+
+/**
+ * A calendar event the classifier could not place from anything on record (a title such as 「Busy」 with nothing else, or a line it
+ * named that does not exist). At most three open at a time; the answer is the person's and is never refiled by a model.
+ */
+function calendarLineAsks({ store, ctx }: Source): Ask[] {
+  const lines = identityLines(ctx);
+  if (!lines.length) return [];
+  const filing = calendarFiling(ctx);
+  const titles = new Map<string, string>();
+  for (const block of ((store.listPlanVersions(ctx.workspaceId)[0]?.payload as { blocks?: Array<{ id: string; title: string }> } | undefined)?.blocks ?? []))
+    if (block.id.startsWith("graph_calendar:") || block.id.startsWith("import:")) titles.set(calendarEventKey(block.title), block.title);
+  return Object.entries(filing.entries).filter(([key, entry]) => entry.unclear && entry.by !== "person" && titles.has(key)).slice(0, 3)
+    .map(([key, entry]) => ({ id: `calline:${key}`, kind: "calendar_line_unclear" as const, entityId: key, urgency: "later" as const, raisedAt: entry.at,
+      fingerprint: entry.at, title: `日历中的「${short(titles.get(key)!, 30)}」属于哪条主线？`,
+      why: `标题和时间都看不出它服务于哪条主线${entry.why ? `（${clause(entry.why)}）` : ""}。确认后，它在日历上按该主线着色，以后同名的日程也一样。`,
+      options: [...lines.map((line) => ({ id: `l:${line.id}`, label: line.label })), { id: "none", label: "不属于任何主线", detail: "个人事务等，保持无色" }] }));
+}
+
 export function collectAsks(ctx: AccessContext, now = new Date()): Ask[] {
   const source = { store: getStore(), ctx, today: planToday(ctx, now) };
-  return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskAsks, missedAsks, agentAsks, calendarAsks]
+  return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskAsks, missedAsks, agentAsks, calendarAsks, sourceProjectAsks, calendarLineAsks]
     .flatMap((collect) => { try { return collect(source); } catch { return []; } });
 }
 
@@ -584,6 +655,22 @@ async function answerOne(ctx: AccessContext, ask: Ask, optionId: string, values:
       forgetPublishedHash(ctx.workspaceId);
       void autoPublishPass().catch(() => {});
       return { ok: true };
+    case "source_project": {
+      if (optionId === "none") { record(ctx, "source.project_cleared", ask.entityId, `source:cleared:${ask.entityId}:${Date.now()}`, { by: "person" }); return { ok: true }; }
+      const projectId = optionId.slice(2);
+      if (!store.listProjects(ctx.workspaceId).some((project) => project.id === projectId)) return { ok: false, code: "PROJECT_NOT_FOUND" };
+      store.assignSourceDocumentProject(ctx.workspaceId, ask.entityId, projectId);
+      record(ctx, "source.project_assigned", ask.entityId, `source:assigned:${ask.entityId}:${projectId}:${Date.now()}`, { projectId, by: "person" });
+      return { ok: true };
+    }
+    case "calendar_line_unclear": {
+      const lineId = optionId === "none" ? "" : optionId.slice(2);
+      if (lineId && !identityLines(ctx).some((line) => line.id === lineId)) return { ok: false, code: "LINE_NOT_FOUND" };
+      const filing: CalendarLines = calendarFiling(ctx);
+      filing.entries[ask.entityId] = { lineId, why: "本人确认", at: new Date().toISOString(), by: "person" };
+      store.setSetting(ctx.workspaceId, CALENDAR_LINES, JSON.stringify(filing));
+      return { ok: true };
+    }
     default: return { ok: false, code: "ASK_NOT_ANSWERABLE" };
   }
 }

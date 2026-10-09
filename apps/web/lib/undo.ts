@@ -21,6 +21,8 @@ export type Inverse =
   | { kind: "step.status"; workOrderId: string; stepId: string; status: "planned" | "done" | "skipped"; progressQuarter: number }
   | { kind: "milestones.status"; ids: string[]; status: "draft" | "approved" | "archived" }
   | { kind: "event.retract"; eventIds: string[] }
+  /** An uploaded file put back under the project it had (or none). */
+  | { kind: "source.project"; entries: Array<{ id: string; projectId: string | null }> }
   | { kind: "batch"; items: Inverse[] };
 
 export type Op = { id: string; label: string; at: string; inverse: Inverse };
@@ -99,6 +101,9 @@ function applyInverse(ctx: AccessContext, inverse: Inverse): { ok: true } | { ok
         }
         return { ok: true };
       }
+      case "source.project":
+        for (const entry of inverse.entries) store.assignSourceDocumentProject(ctx.workspaceId, entry.id, entry.projectId);
+        return { ok: true };
       case "settings.restore":
         for (const entry of inverse.entries) {
           if (entry.value === null) store.deleteSetting(ctx.workspaceId, entry.key);
@@ -157,9 +162,9 @@ function applyInverse(ctx: AccessContext, inverse: Inverse): { ok: true } | { ok
 }
 
 /** Settings an operation may change and an undo puts back. Device, account and calendar-write state are not operations. */
-const UNDOABLE_SETTINGS = ["schedule.", "goal.settings:", "input.schedule.autoApply", "lines."] as const;
+const UNDOABLE_SETTINGS = ["schedule.", "goal.settings:", "input.schedule.autoApply", "lines.", "calendar.lines"] as const;
 /** Ledger markers that hide or close something when written; undoing the operation that wrote them brings it back. */
-const RETRACTABLE_EVENTS = ["risk.accepted", "ask.snoozed", "missed.handled", "agent.blocked_acknowledged"];
+const RETRACTABLE_EVENTS = ["risk.accepted", "ask.snoozed", "missed.handled", "agent.blocked_acknowledged", "source.project_cleared"];
 
 type Snapshot = ReturnType<typeof snapshot>;
 function snapshot(ctx: AccessContext) {
@@ -172,6 +177,7 @@ function snapshot(ctx: AccessContext) {
       [`${plan.workOrderId}#${step.id}`, { status: step.status, progressQuarter: step.progressQuarter, estimate: { ...step.estimate } }] as const))),
     milestones: new Map(store.listMilestones(ctx.workspaceId).map((item) => [item.id, item.status])),
     settings: store.listSettings(ctx.workspaceId, UNDOABLE_SETTINGS),
+    sources: new Map(store.listSourceDocuments(ctx.workspaceId).map((doc) => [doc.id, doc.projectId ?? null])),
     eventIds: new Set(store.listEvents(ctx.workspaceId, { type: RETRACTABLE_EVENTS }).map((event) => event.eventId))
   };
 }
@@ -219,6 +225,9 @@ function inverseOf(before: Snapshot, after: Snapshot): Inverse[] {
     if (!was) milestoneGroups.set("archived", [...(milestoneGroups.get("archived") ?? []), id]);
   }
   for (const [status, ids] of milestoneGroups) items.push({ kind: "milestones.status", ids, status: status as "draft" | "approved" | "archived" });
+  const moved = [...after.sources].filter(([id, projectId]) => before.sources.has(id) && before.sources.get(id) !== projectId)
+    .map(([id]) => ({ id, projectId: before.sources.get(id) ?? null }));
+  if (moved.length) items.push({ kind: "source.project", entries: moved });
   const entries = [...new Set([...before.settings.keys(), ...after.settings.keys()])]
     .filter((key) => before.settings.get(key) !== after.settings.get(key)).map((key) => ({ key, value: before.settings.get(key) ?? null }));
   if (entries.length) items.push({ kind: "settings.restore", entries });

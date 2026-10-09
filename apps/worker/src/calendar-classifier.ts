@@ -1,4 +1,4 @@
-import { CALENDAR_CLASSIFICATION_SCHEMA, CALENDAR_LINES, calendarEventKey, calendarLinesBasis, importedProjects, importedTitle, validateCalendarClassification,
+import { CALENDAR_CLASSIFICATION_SCHEMA, CALENDAR_LINES, calendarEventKey, calendarLinesBasis, currentFiling, importedProjects, importedTitle, itemProjectResolver, validateCalendarClassification,
   type CalendarClassification, type CalendarLines } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import type { CrosslineStore } from "@crossline/db";
@@ -12,12 +12,9 @@ type Block = { id: string; title: string; day?: string; start: string; end: stri
 
 /** The filing as stored, emptied when the lines it was made against have changed (a renamed or new line refiles every event). */
 export function readCalendarLines(store: CrosslineStore, workspaceId: string): CalendarLines {
-  const basis = calendarLinesBasis(identityLines(store, workspaceId));
-  try {
-    const stored = JSON.parse(store.getSetting(workspaceId, CALENDAR_LINES) ?? "null") as CalendarLines | null;
-    if (stored && stored.basis === basis && stored.entries) return stored;
-  } catch { /* unreadable: refile */ }
-  return { basis, entries: {} };
+  let stored: CalendarLines | null = null;
+  try { stored = JSON.parse(store.getSetting(workspaceId, CALENDAR_LINES) ?? "null") as CalendarLines | null; } catch { /* unreadable: refile */ }
+  return currentFiling(stored, identityLines(store, workspaceId));
 }
 
 /**
@@ -30,7 +27,8 @@ export function unfiledCalendarEvents(store: CrosslineStore, workspaceId: string
     .filter((block) => block.id.startsWith("graph_calendar:") || block.id.startsWith("import:"));
   const byKey = new Map<string, { key: string; title: string; source: "calendar" | "file"; count: number; when: string[] }>();
   // Filed under the name the calendar shows: a file date with its course in front (`importedTitle`).
-  const imported = importedProjects(store.listEvents(workspaceId, { type: "dates.extracted" }));
+  const projects = store.listProjects(workspaceId).map((project) => ({ id: project.id, name: project.name, identityId: project.identityId }));
+  const imported = importedProjects(store.listEvents(workspaceId, { type: "dates.extracted" }), itemProjectResolver(projects, store.listSourceDocuments(workspaceId)));
   for (const raw of blocks) {
     const block = { ...raw, title: importedTitle(raw.id, raw.title, imported) };
     const key = calendarEventKey(block.title);
@@ -59,7 +57,12 @@ export function createCalendarClassifier(store: CrosslineStore, workspaceId: str
       description: profiles[line.id]?.description ?? "" }));
     if (!lines.length) return { filed: 0 };
     const projects = store.listProjects(workspaceId).map((project) => ({ name: project.name, lineId: project.identityId }));
-    const context = { version: "crossline.calendar-lines.v1", lines, projects, events };
+    // Everything on record that can place an event: the files by name and project, and what the person confirmed (「每周二组会」).
+    const projectName = new Map(store.listProjects(workspaceId).map((project) => [project.id, project.name]));
+    const files = store.listSourceDocuments(workspaceId).map((doc) => ({ name: doc.fileName, project: doc.projectId ? projectName.get(doc.projectId) ?? "" : "" }));
+    const facts = store.listProfileFacts(workspaceId).filter((fact) => fact.status === "confirmed").slice(0, 80)
+      .map((fact) => ({ lineId: fact.identityId, project: fact.projectId ? projectName.get(fact.projectId) ?? fact.projectId : "", statement: fact.value.slice(0, 160) }));
+    const context = { version: "crossline.calendar-lines.v2", lines, projects, files, facts, events };
     const result = await runCodexSkill<CalendarClassification>(client, context, { skillName: CALENDAR_CLASSIFIER, cwd,
       developerInstructions: "File each calendar event under a line as the Skill describes. Return raw JSON only.", outputSchema: CALENDAR_CLASSIFICATION_SCHEMA,
       prepareInput: () => context, validateOutput: (output) => validateCalendarClassification(output, events.map((event) => event.key), lines.map((line) => line.id)),
@@ -69,7 +72,11 @@ export function createCalendarClassifier(store: CrosslineStore, workspaceId: str
     const filing = readCalendarLines(store, workspaceId);
     if (filing.basis !== calendarLinesBasis(lines)) return { filed: 0 };
     const at = new Date().toISOString();
-    for (const item of result.output.items) filing.entries[item.key] = { lineId: item.lineId, why: item.why, at };
+    for (const item of result.output.items) {
+      // The person's own answer is never overwritten by a model's.
+      if (filing.entries[item.key]?.by === "person") continue;
+      filing.entries[item.key] = { lineId: item.lineId, why: item.why, at, by: "model", ...(item.unclear ? { unclear: true } : {}) };
+    }
     store.setSetting(workspaceId, CALENDAR_LINES, JSON.stringify(filing));
     return { filed: result.output.items.length };
   };

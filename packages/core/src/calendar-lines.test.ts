@@ -13,11 +13,13 @@ test("every occurrence of a recurring event shares one key, and the filing answe
   expect(calendarLineOf(null, "x")).toBeUndefined();
 });
 
-test("unknown events are dropped and an unknown line is filed under none, never refused", () => {
+test("unknown events are dropped; an unknown line is asked about, not refused; personal events stay plainly uncoloured", () => {
   const result = validateCalendarClassification({ items: [
-    { key: "a", lineId: "research", why: "组会" }, { key: "b", lineId: "ghost", why: "" }, { key: "zzz", lineId: "research", why: "" },
-    { key: "a", lineId: "media", why: "重复" }] }, ["a", "b"], ["research", "media"]);
-  expect(result.items).toEqual([{ key: "a", lineId: "research", why: "组会" }, { key: "b", lineId: "", why: "" }]);
+    { key: "a", lineId: "research", why: "组会", unclear: false }, { key: "b", lineId: "ghost", why: "", unclear: false },
+    { key: "c", lineId: "", why: "个人事务", unclear: false }, { key: "d", lineId: "", why: "标题看不出", unclear: true },
+    { key: "zzz", lineId: "research", why: "", unclear: false }, { key: "a", lineId: "media", why: "重复", unclear: false }] }, ["a", "b", "c", "d"], ["research", "media"]);
+  expect(result.items).toEqual([{ key: "a", lineId: "research", why: "组会", unclear: false }, { key: "b", lineId: "", why: "", unclear: true },
+    { key: "c", lineId: "", why: "个人事务", unclear: false }, { key: "d", lineId: "", why: "标题看不出", unclear: true }]);
   expect(calendarLinesBasis([{ id: "b", label: "创业者" }, { id: "a", label: "研究者" }])).toBe("a=研究者|b=创业者");
 });
 

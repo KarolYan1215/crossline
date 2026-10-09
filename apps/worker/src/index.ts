@@ -21,6 +21,7 @@ import { createProgressJudge, createStepPlanner, createWarningReviewer, reportsA
 import { createArchetypeCurator, curationDue } from "./archetype-curator";
 import { createTaskTitler, untitledTasks } from "./task-titler";
 import { createCalendarClassifier, unfiledCalendarEvents } from "./calendar-classifier";
+import { fileSourceDocuments } from "./source-filing";
 import { createPortraitWriter } from "./portrait-writer";
 import { materializeDatePairs } from "./date-pairs";
 import { createInputRouter } from "./input-router";
@@ -266,6 +267,13 @@ async function tick(): Promise<void> {
   for (const workspace of workspaces) await stepPlanPass(workspace.id, checkedAt);
   for (const workspace of workspaces) await curatorPass(workspace.id, checkedAt);
   for (const workspace of workspaces) await titlePass(workspace.id, checkedAt);
+  // Uploaded files are filed under the project their own name or opening names; what stays unclear is asked about on 待确认.
+  for (const workspace of workspaces) {
+    try {
+      const filed = fileSourceDocuments(analysisStore, workspace.id);
+      if (filed.length) console.info(JSON.stringify({ type: "source.project_inferred", checkedAt, workspaceId: workspace.id, filed }));
+    } catch { /* housekeeping */ }
+  }
   // The milestone gate. Without this it existed only inside `scripts/gate-loop-check.ts`, so on the
   // real ledger a milestone-bound work order reached `evidence_review`, the approvals page said
   // 「等待里程碑闸门」 — and nothing was ever going to judge it. A verdict other than `pass` holds the

@@ -8,7 +8,11 @@ import { withCourse } from "./task-title";
  */
 export const CALENDAR_LINES = "calendar.lines";
 
-export type CalendarLineEntry = { lineId: string; why: string; at: string };
+/**
+ * `unclear`: nothing on record tells which line the event serves (as opposed to an event that plainly serves none, such as a dentist
+ * appointment); the person is asked (`calendar_line_unclear` on 待确认), and their answer replaces it with `by: "person"`.
+ */
+export type CalendarLineEntry = { lineId: string; why: string; at: string; unclear?: boolean; by?: "model" | "person" };
 /** The stored filing: entries by event key, and the lines they were filed against (a renamed or new line refiles everything). */
 export type CalendarLines = { basis: string; entries: Record<string, CalendarLineEntry> };
 
@@ -19,10 +23,11 @@ export const calendarEventKey = (title: string) => title.replace(/\s+/g, " ").tr
 export const calendarLinesBasis = (lines: Array<{ id: string; label: string }>) => lines.map((line) => `${line.id}=${line.label}`).sort().join("|");
 
 /** The classifier's answer (Skill `crossline-calendar-classifier`). */
-export type CalendarClassification = { items: Array<{ key: string; lineId: string; why: string }> };
+export type CalendarClassification = { items: Array<{ key: string; lineId: string; why: string; unclear: boolean }> };
 export const CALENDAR_CLASSIFICATION_SCHEMA = { type: "object", additionalProperties: false, required: ["items"], properties: {
-  items: { type: "array", maxItems: 60, items: { type: "object", additionalProperties: false, required: ["key", "lineId", "why"], properties: {
-    key: { type: "string", minLength: 1, maxLength: 200 }, lineId: { type: "string", maxLength: 80 }, why: { type: "string", maxLength: 200 } } } } } } as const;
+  items: { type: "array", maxItems: 60, items: { type: "object", additionalProperties: false, required: ["key", "lineId", "why", "unclear"], properties: {
+    key: { type: "string", minLength: 1, maxLength: 200 }, lineId: { type: "string", maxLength: 80 }, why: { type: "string", maxLength: 200 },
+    unclear: { type: "boolean" } } } } } } as const;
 
 /**
  * Keeps an answer for each event it was asked about: a line that exists, or "" for none. An unknown key is dropped; a line id that does
@@ -33,7 +38,9 @@ export function validateCalendarClassification(value: unknown, keys: string[], l
   if (!answer || !Array.isArray(answer.items)) throw new Error("CALENDAR_CLASSIFICATION_INVALID");
   const asked = new Set(keys), lines = new Set(lineIds), seen = new Set<string>();
   const items = answer.items.filter((item) => item && asked.has(item.key) && !seen.has(item.key) && Boolean(seen.add(item.key)))
-    .map((item) => ({ key: item.key, lineId: lines.has(item.lineId) ? item.lineId : "", why: String(item.why ?? "").trim().slice(0, 200) }));
+    .map((item) => { const known = lines.has(item.lineId);
+      // A line that does not exist is not a decision: the event is asked about rather than silently left uncoloured.
+      return { key: item.key, lineId: known ? item.lineId : "", why: String(item.why ?? "").trim().slice(0, 200), unclear: !known && (item.unclear === true || Boolean(item.lineId)) }; });
   return { items };
 }
 
@@ -48,11 +55,15 @@ export function calendarLineOf(filing: CalendarLines | null | undefined, title: 
  * named their course (`import:<batch>:<item>[:<day>]`) is shown — and filed — under a name that carries it (`withCourse`), without
  * rewriting a plan the person approved.
  */
-export function importedProjects(events: Array<{ entityId: string; payload: unknown }>): Map<string, string> {
+export function importedProjects(events: Array<{ entityId: string; payload: unknown }>,
+  projectOf: (item: { project?: string; sourceRef?: string }) => string | undefined = (item) => item.project): Map<string, string> {
   const out = new Map<string, string>();
   for (const event of events) {
-    const payload = event.payload as { dates?: Array<{ id: string; project?: string }>; recurring?: Array<{ id: string; project?: string }> } | undefined;
-    for (const item of [...(payload?.dates ?? []), ...(payload?.recurring ?? [])]) if (item.project) out.set(`${event.entityId}:${item.id}`, item.project);
+    const payload = event.payload as { dates?: Array<{ id: string; project?: string; sourceRef?: string }>; recurring?: Array<{ id: string; project?: string; sourceRef?: string }> } | undefined;
+    for (const item of [...(payload?.dates ?? []), ...(payload?.recurring ?? [])]) {
+      const project = projectOf(item);
+      if (project) out.set(`${event.entityId}:${item.id}`, project);
+    }
   }
   return out;
 }
@@ -62,4 +73,16 @@ export function importedTitle(blockId: string, title: string, projects: Map<stri
   if (!blockId.startsWith("import:")) return title;
   const [, batch, item] = blockId.split(":");
   return withCourse(title, projects.get(`${batch}:${item}`));
+}
+
+/**
+ * The filing as it stands against the current lines: as stored when made against them; otherwise only the person's own answers that
+ * still name an existing line (or none) — the model's are refiled.
+ */
+export function currentFiling(stored: CalendarLines | null | undefined, lines: Array<{ id: string; label: string }>): CalendarLines {
+  const basis = calendarLinesBasis(lines);
+  if (!stored?.entries) return { basis, entries: {} };
+  if (stored.basis === basis) return stored;
+  const ids = new Set(lines.map((line) => line.id));
+  return { basis, entries: Object.fromEntries(Object.entries(stored.entries).filter(([, entry]) => entry.by === "person" && (!entry.lineId || ids.has(entry.lineId)))) };
 }

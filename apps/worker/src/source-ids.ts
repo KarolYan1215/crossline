@@ -1,3 +1,4 @@
+import { documentsByRef } from "@crossline/core";
 import type { StoredSourceDocument } from "@crossline/db";
 
 /**
@@ -6,5 +7,5 @@ import type { StoredSourceDocument } from "@crossline/db";
  * onboarding interview and the date extractor must agree on them, which is why this lives in one place.
  */
 export function sourceIds(docs: StoredSourceDocument[]): Map<string, StoredSourceDocument> {
-  return new Map(docs.map((doc, index) => [`src-${index + 1}`, doc]));
+  return documentsByRef(docs);
 }

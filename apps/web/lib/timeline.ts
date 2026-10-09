@@ -1,6 +1,6 @@
 import "server-only";
 import type { AccessContext, AvailabilityWindow } from "@crossline/core";
-import { CALENDAR_LINES, CATEGORY_LABEL, calendarLineOf, calendarLinesBasis, importedProjects, importedTitle, inferWorkState, suggestAvailability, type ActivitySegment, type CalendarLines, type WorkState } from "@crossline/core";
+import { CALENDAR_LINES, CATEGORY_LABEL, calendarLineOf, currentFiling, importedProjects, importedTitle, itemProjectResolver, inferWorkState, suggestAvailability, type ActivitySegment, type CalendarLines, type WorkState } from "@crossline/core";
 import {
   ACTIVITY_DETAIL_CONSENT, effectiveSchedulePreferences, getStore, loadCurrentPlan, planToday, readAvailability, toZonedInstant
 } from "./crossline";
@@ -100,7 +100,9 @@ export async function loadTimeline(ctx: AccessContext, loaded?: Awaited<ReturnTy
   // Calendar events and file dates take the line the classifier filed them under (`calendar.lines`, by title; never filed by hand).
   // A file date is shown with its course in front when its title left it out (dates imported before titles had to name it).
   const filing = calendarFiling(ctx);
-  const imported = importedProjects(store.listEvents(ctx.workspaceId, { type: "dates.extracted" }));
+  const knownProjects = store.listProjects(ctx.workspaceId).map((project) => ({ id: project.id, name: project.name, identityId: project.identityId }));
+  const projectOfItem = itemProjectResolver(knownProjects, store.listSourceDocuments(ctx.workspaceId));
+  const imported = importedProjects(store.listEvents(ctx.workspaceId, { type: "dates.extracted" }), projectOfItem);
   const items = [...itemsFromPlan(plan.blocks, today, meta).map((item) => {
     if (item.kind !== "calendar" && item.kind !== "import") return item;
     const named = item.kind === "import" ? { ...item, title: importedTitle(item.id, item.title, imported) } : item;
@@ -119,7 +121,9 @@ export async function loadTimeline(ctx: AccessContext, loaded?: Awaited<ReturnTy
     ...store.listProfileFacts(ctx.workspaceId).filter((fact) => fact.slot.startsWith("date_") && fact.status === "confirmed" && /^\d{4}-\d{2}-\d{2} /.test(fact.value))
       .map((fact) => {
         // The course by name in front of the item (「ECE 555 · 作业 2 截止」), and what kind of date it is with the file's own words on hover.
-        const project = projects.find((item) => item.id === fact.projectId || item.name === fact.projectId);
+        // The fact's own project, or — when the interview could not tell which course — the project its source file has since been filed under.
+        const resolved = projectOfItem({ project: fact.projectId, sourceRef: fact.sourceRef });
+        const project = projects.find((item) => item.id === fact.projectId || item.name === fact.projectId || item.name === resolved);
         const kind = DATE_KIND_LABEL[/^date_\d{8}_(\w+)$/.exec(fact.slot)?.[1] ?? ""] ?? "日期";
         return { id: `fact:${fact.identityId}:${fact.projectId}:${fact.slot}`, day: fact.value.slice(0, 10),
           title: project ? `${project.name} · ${fact.value.slice(11)}` : fact.value.slice(11), identityId: fact.identityId,
@@ -138,11 +142,10 @@ export async function loadTimeline(ctx: AccessContext, loaded?: Awaited<ReturnTy
   };
 }
 
-/** The calendar filing as stored, or none when it was made against lines that have since changed (the worker refiles them). */
-function calendarFiling(ctx: AccessContext): CalendarLines | null {
-  try {
-    const stored = JSON.parse(getStore().getSetting(ctx.workspaceId, CALENDAR_LINES) ?? "null") as CalendarLines | null;
-    return stored && stored.basis === calendarLinesBasis(identityLines(ctx)) ? stored : null;
-  } catch { return null; }
+/** The calendar filing against the current lines (`currentFiling`: a changed set of lines keeps only the person's own answers). */
+export function calendarFiling(ctx: AccessContext): CalendarLines {
+  let stored: CalendarLines | null = null;
+  try { stored = JSON.parse(getStore().getSetting(ctx.workspaceId, CALENDAR_LINES) ?? "null") as CalendarLines | null; } catch { /* none */ }
+  return currentFiling(stored, identityLines(ctx));
 }
 
