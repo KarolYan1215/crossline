@@ -33,7 +33,7 @@ export function interviewChecklistFor(store: CrosslineStore, workspaceId: string
     lines,
     descriptions: Object.fromEntries(Object.entries(profiles).map(([id, value]) => [id, { description: value.description ?? "", candidates: (value.goalCandidates ?? []).length }])),
     profile,
-    facts: store.listProfileFacts(workspaceId).map(({ identityId, projectId, slot, status, sourceRef }) => ({ identityId, projectId, slot, status, sourceRef })),
+    facts: store.listProfileFacts(workspaceId).map(({ identityId, projectId, slot, status, sourceRef, value }) => ({ identityId, projectId, slot, status, sourceRef, value })),
     projects: store.listProjects(workspaceId).map(({ id, identityId, name }) => ({ id, identityId, name })),
     dates,
     availability: Boolean(store.getSetting(workspaceId, "schedule.availability.proposed") || store.getSetting(workspaceId, "schedule.availability")),

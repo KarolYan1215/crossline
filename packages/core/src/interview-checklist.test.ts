@@ -48,3 +48,12 @@ test("a course needs its grading and its class times, a hard line its fixed sche
   expect(portraitFingerprint({ portrait: "a b", coreConflict: "c" })).toBe(portraitFingerprint({ portrait: "ab", coreConflict: "c" }));
   expect(portraitFingerprint({ portrait: "a" })).not.toBe(portraitFingerprint({ portrait: "b" }));
 });
+
+test("what the person could not say is assumed (「假设：」) and settles the item, saying so; a bare guess does not", () => {
+  const without = { ...full, facts: full.facts.filter((fact) => fact.identityId !== "person" || !/energy|flow/.test(fact.slot)) };
+  expect(interviewChecklist(without).find((item) => item.id === "portrait_grounded")?.done).toBe(false);
+  const guessed = { ...without, facts: [...without.facts, { identityId: "person", projectId: "", slot: "energy_sources", status: "inferred", sourceRef: "", value: "深夜写代码" }] };
+  expect(interviewChecklist(guessed).find((item) => item.id === "portrait_grounded")?.done).toBe(false);
+  const assumed = { ...without, facts: [...without.facts, { identityId: "person", projectId: "", slot: "energy_sources", status: "inferred", sourceRef: "", value: "假设：深夜写代码时充电" }] };
+  expect(interviewChecklist(assumed).find((item) => item.id === "portrait_grounded")).toMatchObject({ done: true, detail: "以假设代替：能量与心流" });
+});

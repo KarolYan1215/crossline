@@ -113,6 +113,13 @@ export type OnboardingTurnContext = {
   checklist?: Array<{ label: string; detail: string; owner: "interview" | "person" }>;
   /** Hours spent in Codex and Claude Code per folder and when in the day (`agentHistoryLines`), when the person allowed it: habits, not a plan. */
   workHistory?: string[];
+  /**
+   * How many rounds the interview has spent in its current stage. From the second round on, `moveOn` says to write what the person
+   * could not answer as an assumption (「假设：…」, inferred) and go to the next stage — an interview that waits for an answer the person
+   * does not have never ends (a simulated user who said 不确定 kept one in 「能量」 for seven rounds).
+   */
+  stageRounds?: number;
+  moveOn?: string;
   /** Only when the conversation had to be rebuilt in a fresh thread: what was said before, oldest first. User lines carry their `reply-N` id. */
   history?: Array<{ id: string; role: "user" | "assistant"; text: string }>;
   reply: { id: string; text: string };

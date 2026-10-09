@@ -26,7 +26,7 @@ export type ChecklistInput = {
   /** The interview's description of each line (`lines.profiles`), and how many goal candidates it proposed. */
   descriptions: Record<string, { description: string; candidates: number }>;
   profile: Partial<ProfileModel>;
-  facts: Array<{ identityId: string; projectId: string; slot: string; status: string; sourceRef: string }>;
+  facts: Array<{ identityId: string; projectId: string; slot: string; status: string; sourceRef: string; value?: string }>;
   projects: Array<{ id: string; identityId: string; name: string }>;
   /** Dated items read from files or replies, with their project and kind, and whether they are still waiting for the person. */
   dates: Array<{ project: string; kind: string; recurring: boolean; pending: boolean; sourceRef: string }>;
@@ -38,6 +38,13 @@ export type ChecklistInput = {
 };
 
 const confirmedFact = (fact: { status: string; sourceRef: string }) => fact.status === "confirmed" && /^(reply|src)-\d+$/.test(fact.sourceRef);
+/**
+ * An assumption the interview wrote for what the person could not say (「假设：…」, inferred; decided 2026-10-09: missing information is
+ * assumed, not asked about forever). It settles an item so the interview moves on, and the item says it rests on an assumption.
+ */
+export const ASSUMPTION_PREFIX = /^假设[：:]/;
+const assumedFact = (fact: { status: string; value?: string }) => fact.status === "inferred" && ASSUMPTION_PREFIX.test(fact.value ?? "");
+const settledFact = (fact: { status: string; sourceRef: string; value?: string }) => confirmedFact(fact) || assumedFact(fact);
 /** The three parts of the portrait the person's own words must stand behind, read from the slots the interview files facts under. */
 const PORTRAIT_PARTS: Array<{ label: string; slots: RegExp }> = [
   { label: "现状与真问题", slots: /problem|situation|status|current|pressure|anxi|worry|constraint|gravity|stage/i },
@@ -58,10 +65,12 @@ export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
   const energy = profile.energyMap ?? [];
   if (energy.length < 3 || !energy.some((item) => item.charge === "charge") || !energy.some((item) => item.charge === "drain")) missingFields.push("能量地图（至少 3 项，含充电与耗电）");
   items.push({ id: "portrait_fields", group: "画像", label: "画像各部分已写出", done: !missingFields.length, detail: missingFields.length ? `缺：${missingFields.join("、")}` : "", owner: "interview" });
-  const personFacts = input.facts.filter((fact) => fact.identityId === "person" && confirmedFact(fact));
+  const personFacts = input.facts.filter((fact) => fact.identityId === "person" && settledFact(fact));
   const unbacked = PORTRAIT_PARTS.filter((part) => !personFacts.some((fact) => part.slots.test(fact.slot))).map((part) => part.label);
+  const assumedParts = PORTRAIT_PARTS.filter((part) => !personFacts.some((fact) => confirmedFact(fact) && part.slots.test(fact.slot))).map((part) => part.label)
+    .filter((label) => !unbacked.includes(label));
   items.push({ id: "portrait_grounded", group: "画像", label: "画像每部分都有本人原话或文件为据", done: !unbacked.length,
-    detail: unbacked.length ? `尚无本人依据：${unbacked.join("、")}` : "", owner: "interview" });
+    detail: unbacked.length ? `尚无本人依据：${unbacked.join("、")}` : assumedParts.length ? `以假设代替：${assumedParts.join("、")}` : "", owner: "interview" });
   items.push({ id: "portrait_confirmed", group: "画像", label: "本人确认画像符合自己", done: input.portraitConfirmed,
     detail: input.portraitConfirmed ? "" : "在访谈页右侧画像下点「画像符合我」，或说明哪里不对", owner: "person" });
 
@@ -80,8 +89,9 @@ export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
   for (const line of hardLines) {
     // A fixed weekly arrangement of this line: from its own projects, or — said in a reply under no project — when it is the only hard line.
     const fixed = input.dates.filter((entry) => entry.recurring && (projectLine(entry.project) === line.id || (!projectLine(entry.project) && hardLines.length === 1)));
-    items.push({ id: `hard_schedule:${line.id}`, group: "日程", label: `硬约束「${line.label}」的固定日程已收集`, done: fixed.length > 0,
-      detail: fixed.length ? "" : "上课、组会、值班等每周固定安排尚未收集", owner: "interview" });
+    const assumed = input.facts.some((fact) => fact.identityId === line.id && assumedFact(fact) && /schedule|meeting|class|fixed/.test(fact.slot));
+    items.push({ id: `hard_schedule:${line.id}`, group: "日程", label: `硬约束「${line.label}」的固定日程已收集`, done: fixed.length > 0 || assumed,
+      detail: fixed.length ? "" : assumed ? "以假设代替" : "上课、组会、值班等每周固定安排尚未收集", owner: "interview" });
   }
   items.push({ id: "availability", group: "日程", label: "已提出建议的可用时段", done: input.availability,
     detail: input.availability ? "" : "固定日程之外，每周哪些时段可以安排工作", owner: "interview" });
@@ -89,7 +99,7 @@ export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
   if (pending) items.push({ id: "dates_confirmed", group: "日程", label: "文件与口述中的日期已确认", done: false, detail: `${pending} 项日期等待确认`, owner: "person" });
 
   for (const project of input.projects.filter((item) => !isDefaultProject(item.id))) {
-    const own = input.facts.filter((fact) => fact.projectId === project.id && fact.status === "confirmed");
+    const own = input.facts.filter((fact) => fact.projectId === project.id && settledFact(fact));
     const dated = input.dates.some((entry) => entry.project === project.id || entry.project === project.name);
     const course = Boolean(courseCodeOf(project.name) ?? courseCodeOf(project.id)) || own.some((fact) => fact.slot === "grading");
     const missing = PROJECT_SLOTS.filter(([slot, label]) => !(own.some((fact) => slot.test(fact.slot)) || (label === "截止日期" && dated))).map(([, label]) => label);

@@ -230,7 +230,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         facts: store.listProfileFacts(workspaceId).map(({ identityId, projectId, slot, value, status }) => ({ identityId, projectId, slot, value, status })),
         today, timeZone, sources: clipDocuments(documents), ...(history ? { history } : {}), reply: { id: replyId, text: replyText },
         focusLine, profile: readProfile(), stage: ((session!.coverage as { stage?: OnboardingStage }).stage ?? (focusLine ? "details" : "orientation")),
-        checklist: openChecklist(),
+        checklist: openChecklist(), ...stagePace(messages),
         ...(workHistory().length ? { workHistory: workHistory() } : {}),
         lines: identityLines(store, workspaceId).map((line) => ({ id: line.id, label: line.label, rank: line.rank ?? null, hard: Boolean(line.hard), goals: line.goals ?? [] }))
       };
@@ -249,7 +249,8 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       // Later turns carry only what is new: the reply, and any file that arrived since the last turn.
       const newSources = clipDocuments(fresh);
       // The completion list goes with every turn, so the model knows what it still owes without being told twice in prose.
-      const message = JSON.stringify({ reply: { id: replyId, text: replyText }, ...(newSources.length ? { newSources } : {}), checklist: openChecklist() });
+      const pace = stagePace(messages);
+      const message = JSON.stringify({ reply: { id: replyId, text: replyText }, ...(newSources.length ? { newSources } : {}), checklist: openChecklist(), ...pace });
       result = await continueSkillTurn<OnboardingTurn>(client, session.codexThreadId, message, {
         skillName: ONBOARDING_SKILL, cwd, outputSchema: ONBOARDING_TURN_SCHEMA, validateOutput, softAccept,
         onAudit: () => {}, timeoutMs: 60 * 60_000
@@ -348,6 +349,17 @@ export function withGapQuestions(output: OnboardingTurn, gaps: ProfileGap[], mes
 
 设计里程碑前尚缺以下信息：分数线均由目标倒推，目标需本人确认。` } : {})
   };
+}
+
+/** Rounds spent in the latest stage, counted back from the newest answer; from the second on, the instruction to assume and move on. */
+export function stagePace(messages: Array<{ role: string; content: unknown }>): { stageRounds: number; moveOn?: string } {
+  const stages = messages.filter((message) => message.role === "assistant").map((message) => (message.content as { stage?: string }).stage ?? "");
+  const current = stages.at(-1) ?? "";
+  let rounds = 0;
+  for (let index = stages.length - 1; index >= 0 && stages[index] === current; index -= 1) rounds += 1;
+  return rounds >= 2 && current
+    ? { stageRounds: rounds, moveOn: `「${current}」阶段已问 ${rounds} 轮：本人答不上来或答「不确定」的，写成以「假设：」开头的 inferred 事实（并在 reply 里说明可随时修改），本轮进入下一阶段。` }
+    : { stageRounds: rounds };
 }
 
 /** The conversation as plain lines, for a thread that has to be rebuilt. Questions are kept; option lists are not. */

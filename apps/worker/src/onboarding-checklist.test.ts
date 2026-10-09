@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { profileGaps, type OnboardingTurn } from "@crossline/core";
-import { withChecklist, withGapQuestions } from "./onboarding-session";
+import { stagePace, withChecklist, withGapQuestions } from "./onboarding-session";
 
 const turn = (over: Partial<OnboardingTurn>): OnboardingTurn => ({ reply: "信息已齐。", questions: [], slotUpdates: [], projectsDetected: [], flywheelCandidates: [],
   coverage: [], nextAction: "ready_for_milestones", ...over } as OnboardingTurn);
@@ -28,4 +28,12 @@ test("each round gets the app's questions about what it is talking about; with n
   expect(ids(withGapQuestions(ask("media", "xhs"), gaps, [], { freshDocuments: ["doc-1"] }))).toEqual(["gap-file-doc-1"]);
   // Nothing relevant: one of the rest joins, so nothing waits forever.
   expect(ids(withGapQuestions(ask("media", "xhs"), gaps, []))).toHaveLength(1);
+});
+
+test("from the second round in one stage, the interview is told to assume what is missing and move on", () => {
+  const round = (stage: string) => ({ role: "assistant", content: { stage } });
+  expect(stagePace([round("compass"), { role: "user", content: {} }, round("energy")])).toEqual({ stageRounds: 1 });
+  const stuck = stagePace([round("compass"), round("energy"), { role: "user", content: {} }, round("energy")]);
+  expect(stuck.stageRounds).toBe(2);
+  expect(stuck.moveOn).toContain("假设：");
 });
