@@ -9,12 +9,13 @@ import { autoApproveEligible } from "./auto-approval";
 import { retireShadowedDemos } from "./demo-cleanup";
 import { notifyPass } from "./notify";
 import { createActivityTracker } from "./activity-recorder";
+import { agentHistoryPass } from "./agent-history";
 import { createWindowsActivitySource } from "./activity-source";
 import { createNightlyFlywheel } from "./nightly";
 import { createDiligenceRunner, linesDueForDiligence } from "./diligence";
 import { createAgentService } from "./agent-service";
 import { createCalendarPublisher } from "./calendar-publish";
-import { budgetPolicy, CALENDAR_SYNC_FAILURE, type PlanRankingInput } from "@crossline/core";
+import { AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, budgetPolicy, CALENDAR_SYNC_FAILURE, type PlanRankingInput } from "@crossline/core";
 import { createFlywheelExpander } from "./flywheel";
 import { createManualbookBuilder, pendingMaterialWorkOrders, pendingTutorials } from "./manualbook";
 import { createProgressJudge, createStepPlanner, createWarningReviewer, reportsAwaitingJudgement, tasksAwaitingStepPlan, warningsAwaitingReview } from "./step-planner";
@@ -23,6 +24,7 @@ import { createTaskTitler, untitledTasks } from "./task-titler";
 import { createCalendarClassifier, unfiledCalendarEvents } from "./calendar-classifier";
 import { fileSourceDocuments } from "./source-filing";
 import { createPortraitWriter } from "./portrait-writer";
+import { createPortraitIllustrator } from "./portrait-illustrator";
 import { materializeDatePairs } from "./date-pairs";
 import { createInputRouter } from "./input-router";
 import { createMilestoneGate, pendingMilestoneGates } from "./milestone-gate-runner";
@@ -660,7 +662,7 @@ if (!capabilitySecret) {
         "crossline:crossline-flywheel-scout", "crossline:crossline-manualbook-designer", "crossline:crossline-material-researcher", "crossline:crossline-material-writer", "crossline:crossline-milestone-architect",
         "crossline:crossline-goal-backplanner", "crossline:crossline-background-facts", "crossline:crossline-assistant",
         "crossline:crossline-onboarding", "crossline:crossline-due-diligence", "crossline:crossline-plan-explainer", "crossline:crossline-weekly-insight",
-        "crossline:crossline-agent", "crossline:crossline-step-planner", "crossline:crossline-validation-reviewer", "crossline:crossline-progress-judge", "crossline:crossline-input-router", "crossline:crossline-archetype-curator", "crossline:crossline-task-titler", "crossline:crossline-portrait-writer", "crossline:crossline-calendar-classifier"
+        "crossline:crossline-agent", "crossline:crossline-step-planner", "crossline:crossline-validation-reviewer", "crossline:crossline-progress-judge", "crossline:crossline-input-router", "crossline:crossline-archetype-curator", "crossline:crossline-task-titler", "crossline:crossline-portrait-writer", "crossline:crossline-portrait-illustrator", "crossline:crossline-calendar-classifier"
       ]
     },
     autoAnalyzeCaptures: (workspaceId) => autoAnalyzePass(workspaceId),
@@ -715,6 +717,10 @@ if (!capabilitySecret) {
       const outcome = await createPortraitWriter(store, workspaceId, repoRoot, () => codexSupervisor?.client)();
       if (outcome.state === "blocked") store.appendEvent({ ownerId: store.getWorkspaceOwnerId(workspaceId) ?? "", workspaceId, idempotencyKey: `portrait.blocked:${Date.now()}`,
         type: "portrait.blocked", entityId: workspaceId, payload: { code: outcome.code, message: outcome.message } });
+      // The pictures follow the words, in the background: the report is readable at once and gains its illustrations as they land.
+      else void createPortraitIllustrator(store, workspaceId, repoRoot, dataDir, () => codexSupervisor?.client)()
+        .then((drawn) => console.info(JSON.stringify({ type: "portrait.illustrated", workspaceId, ...drawn })))
+        .catch(() => undefined);
       return outcome;
     },
     buildTutorial: (workOrderId, workspaceId) => { enterUsageWorkspace(workspaceId); return getMaterialPreparer(workspaceId)(workOrderId, { mode: "tutorial" }); },
@@ -788,6 +794,31 @@ if (process.env.CROSSLINE_RUN_ONCE === "1") {
       }
     })().finally(() => { notifying = false; });
   }, 2 * 60_000);
+  // Coding-agent history, time only, for workspaces that said yes (Settings → 隐私): checked every five minutes, read when a summary is
+  // missing (just switched on) or six hours old.
+  const zoneOf = (workspaceId: string) => {
+    try {
+      const zone = (JSON.parse(analysisStore.getSetting(workspaceId, "schedule.preferences") ?? "{}") as { timeZone?: unknown }).timeZone;
+      if (typeof zone === "string") { new Intl.DateTimeFormat("en", { timeZone: zone }); return zone; }
+    } catch { /* default below */ }
+    return process.env.CROSSLINE_TIME_ZONE ?? "America/Chicago";
+  };
+  let readingHistory = false;
+  const historyPass = () => {
+    if (readingHistory) return;
+    readingHistory = true;
+    void agentHistoryPass(analysisStore, analysisStore.listWorkspaces().map((workspace) => workspace.id), dataDir, zoneOf)
+      .catch((error) => console.warn(JSON.stringify({ type: "agent_history.failed", message: error instanceof Error ? error.message : "" })))
+      .finally(() => { readingHistory = false; });
+  };
+  setInterval(() => {
+    const stale = analysisStore.listWorkspaces().some((workspace) => {
+      if (analysisStore.getSetting(workspace.id, AGENT_HISTORY_CONSENT) !== "on") return false;
+      const updatedAt = (JSON.parse(analysisStore.getSetting(workspace.id, AGENT_HISTORY_SUMMARY) ?? "{}") as { updatedAt?: string }).updatedAt;
+      return !updatedAt || Date.now() - Date.parse(updatedAt) > 6 * 3_600_000;
+    });
+    if (stale) historyPass();
+  }, 5 * 60_000);
   let ticking = false;
   setInterval(() => {
     if (ticking) {

@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { RELATION_KIND_LABEL } from "@crossline/core";
 
 export type CandidateDetail = {
   id: string;
@@ -11,9 +12,7 @@ export type CandidateDetail = {
   costMinutes: number | null;
 };
 
-const kindLabel: Record<string, string> = {
-  enables: "使之可能", reuses: "复用", informs: "提供输入", constrains: "约束", recurring_feedback: "循环反馈"
-};
+const kindLabel: Record<string, string> = RELATION_KIND_LABEL;
 
 /**
  * Batch approval for candidate relations, which is the approval mode the policy asks for: these are

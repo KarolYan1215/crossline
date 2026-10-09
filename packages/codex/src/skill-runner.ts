@@ -43,6 +43,12 @@ export type SkillRunOptions<T> = {
   softAccept?: (rejection: Error, output: unknown, prepared: unknown) => T | undefined;
   /** Only a Skill that must reach outside gets this; it is off for every other run. */
   allowWebSearch?: boolean;
+  /**
+   * Only the portrait illustrator gets this: the runtime's own image tool, on the person's ChatGPT sign-in like every other call. Each
+   * finished image is handed to `onImage` (base64 PNG) as it arrives; nothing is written by the runner itself.
+   */
+  allowImageGeneration?: boolean;
+  onImage?: (image: { base64: string; revisedPrompt: string }) => void;
   onAudit: (audit: AnalysisAudit) => void;
   signal?: AbortSignal;
   timeoutMs?: number;
@@ -321,7 +327,8 @@ async function startIsolatedThread<T>(scope: Scope, options: SkillRunOptions<T>,
     "tools.update_plan.enabled": false, "tools.experimental_request_user_input.enabled": false,
     "features.plugins": true, "features.memories": true,
     ...Object.fromEntries(["shell_tool", "multi_agent", "multi_agent_v2", "apps", "hooks", "codex_hooks", "plugin_hooks", "web_search", "standalone_web_search", "image_generation", "view_image", "request_permissions_tool", "tool_suggest", "token_budget", "current_time_reminder", "sleep_tool", "send_message_to_user_async", "js_repl", "code_mode", "deferred_executor"]
-      .map((key) => [`features.${key}`, Boolean(options.allowWebSearch) && (key === "web_search" || key === "standalone_web_search")])),
+      .map((key) => [`features.${key}`, (Boolean(options.allowWebSearch) && (key === "web_search" || key === "standalone_web_search"))
+        || (Boolean(options.allowImageGeneration) && key === "image_generation")])),
     ...Object.fromEntries(Object.keys(mcp).map((key) => [`mcp_servers.${key}.enabled`, false]))
   };
   const threadParams = {
@@ -376,6 +383,7 @@ async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, con
   skillName: string; threadId: string; outputSchema: unknown; allowedItemTypes: string[]; firstPrompt: string;
   validate: (output: unknown) => T; onAudit: (audit: AnalysisAudit) => void; idleMs?: number; agent?: AgentMode;
   soften?: (rejection: Error, output: unknown) => T | undefined;
+  onImage?: (image: { base64: string; revisedPrompt: string }) => void;
 }): Promise<T> {
   audit.threadId = run.threadId;
   let finalText: string | undefined;
@@ -406,6 +414,9 @@ async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, con
         // The assistant is meant to use tools; what it did is recorded, not refused here (the guard answers each request).
         if (item) { try { run.agent.onItem(item, message.method === "item/started" ? "started" : "completed"); } catch { /* the audit must never fail the work */ } }
       } else if (item && !run.allowedItemTypes.includes(String(item.type))) settle?.reject(new Error("SKILL_TOOL_FORBIDDEN"));
+      else if (item?.type === "imageGeneration" && message.method === "item/completed" && typeof item.result === "string" && item.result && run.onImage) {
+        try { run.onImage({ base64: item.result, revisedPrompt: typeof item.revisedPrompt === "string" ? item.revisedPrompt : "" }); } catch { /* the caller's write failing is the caller's to notice */ }
+      }
     }
     if (message.method === "turn/completed") {
       if (!identifier(turn?.id)) return settle?.reject(new Error("SKILL_PROTOCOL_INVALID"));
@@ -567,7 +578,7 @@ async function runSkillTurn<T>(client: CodexRpcBoundary, input: unknown, options
   const audit: AnalysisAudit = {};
   // Web search is the only tool any Skill may use, and only when that Skill was granted it.
   const allowedItemTypes = ["agentMessage", "reasoning", "userMessage",
-    ...(options.allowWebSearch ? ["webSearch", "webSearchCall"] : [])];
+    ...(options.allowWebSearch ? ["webSearch", "webSearchCall"] : []), ...(options.allowImageGeneration ? ["imageGeneration"] : [])];
   let scope: Scope | undefined;
   let unregister: (() => void) | undefined;
   try {
@@ -579,7 +590,7 @@ async function runSkillTurn<T>(client: CodexRpcBoundary, input: unknown, options
     options.onAudit({ ...audit });
     if (options.agent) unregister = registerAgentThread(client, threadId, options.agent.answer);
     const output = await runTurnsUntilValid(client, scope, context, audit, {
-      skillName: options.skillName, threadId, outputSchema: options.outputSchema, allowedItemTypes,
+      skillName: options.skillName, threadId, outputSchema: options.outputSchema, allowedItemTypes, ...(options.onImage ? { onImage: options.onImage } : {}),
       ...(options.agent ? { agent: options.agent } : {}),
       firstPrompt: `$${options.skillName}\n\n${JSON.stringify(prepared)}`,
       validate: (answer) => options.validateOutput(answer, prepared), onAudit: options.onAudit, ...(options.idleMs ? { idleMs: options.idleMs } : {}),

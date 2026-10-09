@@ -3,7 +3,7 @@ import { answeredGapFacts, isCourse, mergeFacts, profileGaps, type ProfileGapInp
 
 const identities = [{ id: "research", label: "科研" }, { id: "startup", label: "创业" }];
 const base: ProfileGapInput = {
-  identities, projects: [{ id: "ece555", identityId: "research", name: "ECE 555" }],
+  identities, projects: [{ id: "ece555", identityId: "research", name: "ECE 555" }], meetings: ["ECE 555"],
   facts: [
     { identityId: "research", projectId: "ece555", slot: "grading", value: "作业 20%、小测 30%、项目 25%、期末 25%", status: "confirmed" },
     { identityId: "startup", projectId: "", slot: "flywheel_research_informs", value: "猜的", status: "inferred" },
@@ -64,4 +64,22 @@ test("a course is recognised by its grade breakdown, or by quizzes and homework 
   expect(isCourse("ece555", goal, [{ project: "ece555", kind: "quiz" }])).toBe(true);
   expect(isCourse("ece555", goal, [], [{ project: "ece555", kind: "homework_due" }])).toBe(true);
   expect(isCourse("ece555", goal, [{ project: "ece555", kind: "exam" }])).toBe(false);
+});
+
+test("a course nobody said the class times of, a file only the person can file and an unconfirmed portrait are asked, and their answers act", () => {
+  const input: ProfileGapInput = { ...base, projects: [...base.projects, { id: "ece548", identityId: "research", name: "ECE 548" }],
+    unfiled: [{ id: "doc-1", fileName: "Lecture Plan.pdf", lean: { id: "ece548" } }], portrait: { written: true, confirmed: false } };
+  const gaps = profileGaps(input);
+  expect(gaps.filter((gap) => gap.code !== "LINE_UNCONFIRMED").map((gap) => gap.question.text)).toEqual([
+    "「ECE 548」每周什么时候上课、在哪里？", "《Lecture Plan.pdf》属于哪个项目？", "「当前画像」里写的是否符合你？"]);
+  // The project the interview leaned to is offered first.
+  expect(gaps.find((gap) => gap.code === "FILE_UNFILED")!.question.options[0]).toMatchObject({ id: "ece548", detail: "访谈判断更可能是它" });
+  const reply = ["【「ECE 548」每周什么时候上课、在哪里？】选择：我来写上课时间。补充：周二、四 11:00–12:15，EH 2317",
+    "【《Lecture Plan.pdf》属于哪个项目？】选择：ECE 548", "【「当前画像」里写的是否符合你？】选择：符合"].join("\n");
+  expect(answeredGapFacts(reply, gaps)).toEqual([
+    { identityId: "research", projectId: "ece548", slot: "meeting_times", value: "周二、四 11:00–12:15，EH 2317", quote: "周二、四 11:00–12:15，EH 2317" },
+    { identityId: "", projectId: "", slot: "", value: "ECE 548", quote: "ECE 548", file: { documentId: "doc-1", projectId: "ece548" } },
+    { identityId: "", projectId: "", slot: "", value: "符合", quote: "符合", confirmPortrait: true }
+  ]);
+  expect(profileGaps({ ...input, meetings: ["ECE 555", "ece548"] }).some((gap) => gap.code === "COURSE_MEETINGS")).toBe(false);
 });

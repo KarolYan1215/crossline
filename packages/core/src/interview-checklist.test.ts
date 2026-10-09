@@ -41,9 +41,9 @@ test("what only the person can settle is theirs, and does not count as the inter
   expect(interviewOwnedOpen(items)).toEqual([]);
 });
 
-test("a course needs its grading, a hard line its fixed schedule; a confirmation lasts only while the portrait is the same", () => {
+test("a course needs its grading and its class times, a hard line its fixed schedule; a confirmation lasts only while the portrait is the same", () => {
   const items = interviewChecklist({ ...full, facts: full.facts.filter((fact) => fact.slot !== "grading"), dates: full.dates.filter((entry) => !entry.recurring) });
-  expect(items.find((item) => item.id === "project:ece555")?.detail).toBe("缺：评分占比");
+  expect(items.find((item) => item.id === "project:ece555")?.detail).toBe("缺：评分占比、上课时间");
   expect(items.find((item) => item.id === "hard_schedule:research")?.done).toBe(false);
   expect(portraitFingerprint({ portrait: "a b", coreConflict: "c" })).toBe(portraitFingerprint({ portrait: "ab", coreConflict: "c" }));
   expect(portraitFingerprint({ portrait: "a" })).not.toBe(portraitFingerprint({ portrait: "b" }));

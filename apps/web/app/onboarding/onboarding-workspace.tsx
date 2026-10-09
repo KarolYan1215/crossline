@@ -7,7 +7,7 @@ import { TranscriptionCard, type TranscriptionStatus } from "./transcription-car
 import { ProfilePanel } from "./profile-panel";
 import { QuestionCard } from "./question-card";
 import { LineSetup } from "./line-setup";
-import { ChecklistPanel, PortraitPanel, StageBar } from "./portrait-panel";
+import { PortraitPanel, StageBar } from "./portrait-panel";
 import { HierarchyGuide } from "./hierarchy-guide";
 import {
   composeAnswers, type Answer, type AssistantTurn, type DocumentRow, type Message, type OnboardingState
@@ -146,6 +146,12 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
     await load();
   };
 
+  /** Puts the interview aside: its questions move to 待决事项 until the person replies here again. */
+  const park = async () => {
+    const response = await fetch("/api/onboarding/park", { method: "POST" }).catch(() => undefined);
+    if (response?.ok) window.location.href = "/"; else setError("没有记录成功，请重试。");
+  };
+
   /** Only from the button that names the model's source and size. */
   const downloadModel = async () => {
     setError("");
@@ -155,15 +161,16 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
   };
 
   const onDrop = (event: DragEvent) => { event.preventDefault(); setOver(false); void upload(event.dataTransfer.files); };
-  // Questions the app needs answered that the open turn does not already carry: they stay on the screen even when the interview was finished
-  // before they were known, and answering them sends the same kind of message, which the worker turns into facts.
-  const extra = (state?.gaps ?? []).filter((gap) => !(open?.questions ?? []).some((question) => question.id === gap.id));
-  const composed = composeAnswers([...(open?.questions ?? []), ...extra], answers, text);
+  // The app's own questions arrive inside each round (the worker adds the ones about what the round is talking about); questions the person
+  // already answered on 待决事项 are not shown again — those answers go in front of this reply.
+  const answeredElsewhere = new Set(state?.answeredElsewhere ?? []);
+  const roundQuestions = (open?.questions ?? []).filter((question) => !answeredElsewhere.has(question.id));
+  const composed = composeAnswers(roundQuestions, answers, text);
   const canSend = busy === "" && (Boolean(composed.trim()) || waiting);
 
   if (!state) return <p className="ob-muted" role="status">正在读取…</p>;
   if (state.setupLines) return <div className="ob-start"><HierarchyGuide /><LineSetup onDone={() => void load()} /></div>;
-  const batch = [...(open?.questions ?? []), ...extra];
+  const batch = roundQuestions;
   const stage = open?.stage ?? state.session?.coverage.stage ?? "orientation";
 
   return <div className="ob" onDragOver={(event) => { event.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={onDrop} data-dragging={over}>
@@ -181,7 +188,7 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
             {latest && turn.nextAction === "ready_for_milestones" && <p className="ob-done">信息已基本完整，可在下方生成画像报告与里程碑。</p>}
           </div>;
         })}
-        {(state?.movedToAsks ?? 0) > 0 && !waiting && <p className="ob-moved">本轮另有 {state!.movedToAsks} 个关于文件归属的问题已移到 <a href="/approvals">待决事项</a>，在那里回答一次即可。</p>}
+        {answeredElsewhere.size > 0 && !waiting && <p className="ob-moved">本轮有 {answeredElsewhere.size} 题已在待决事项答过，会随这一轮一起发送。</p>}
         {batch.length > 0 && !waiting && <div className="ob-turn ob-assistant ob-batch" aria-label="本轮问题">
           <nav className="ob-batch-nav" aria-label="问题进度">{batch.map((question, index) => <button key={question.id} type="button" aria-current={index === Math.min(current, batch.length - 1) || undefined}
             data-answered={Boolean(answers[question.id]?.picked.length || answers[question.id]?.other.trim()) || undefined} onClick={() => setCurrent(index)}>{index + 1}</button>)}</nav>
@@ -226,12 +233,13 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
             {busy === "upload" ? "上传中…" : "添加文件 / 录音"}
           </label>
           <span className="ob-muted">PDF · Word · 文本 · 图片 · 录音；也可以直接拖进来</span>
+          {!state.focusLine && state.session?.state === "active" && <button type="button" className="ob-btn ob-quiet" disabled={busy !== ""} onClick={() => void park()}
+            title="访谈的问题会转到待决事项，可以在那里逐个回答；回到这里回复即继续">先开始使用</button>}
           <button type="submit" className="ob-btn" disabled={!canSend}>{open ? "发送这一轮" : "发送"}</button>
         </div>
       </form>
     </section>
     <div className="ob-side">
-      {!state.focusLine && <ChecklistPanel items={state.checklist ?? []} onChanged={() => void load()} />}
       <PortraitPanel profile={state.profile} lines={state.lines} lineProfiles={state.lineProfiles} onChanged={() => void load()} />
       {state.availabilityProposed && <p className="ob-note">已按硬约束规则提议每周可用时段，可在 <a href="/plan#time">计划页</a> 预览后采用。</p>}
       <ProfilePanel state={state} onChanged={() => void load()} />

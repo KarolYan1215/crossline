@@ -1,4 +1,5 @@
 import "server-only";
+import { retractedEventIdsIn } from "@crossline/db";
 import { taskTitleOf, type AccessContext, type WorkOrderState } from "@crossline/core";
 import { archiveWorkOrder, getStore, restoreCapture, restoreWorkOrder, saveMilestoneEdit } from "./crossline";
 
@@ -54,16 +55,7 @@ export function recentOps(ctx: AccessContext, now = new Date()): Op[] {
 }
 
 /** Event ids of `type` that an undo has taken back (a risk accepted, a question put off): readers skip them. */
-export function retractedEventIds(ctx: AccessContext): Set<string> {
-  const store = getStore();
-  const undone = new Set(store.listEvents(ctx.workspaceId, { type: "op.undone" }).map((event) => event.entityId));
-  return new Set(store.listEvents(ctx.workspaceId, { type: "op.applied" })
-    .filter((event) => undone.has(event.entityId))
-    .flatMap((event) => {
-      const inverse = (event.payload as { inverse: Inverse }).inverse;
-      return inverse.kind === "event.retract" ? inverse.eventIds : [];
-    }));
-}
+export const retractedEventIds = (ctx: AccessContext): Set<string> => retractedEventIdsIn(getStore(), ctx.workspaceId);
 
 /** Undoes one recorded operation. */
 export function undoOp(ctx: AccessContext, opId: string): { ok: true; label: string } | { ok: false; code: string } {

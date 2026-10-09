@@ -9,6 +9,7 @@ export * from "./cost";
 export * from "./estimate";
 export * from "./flywheel";
 export * from "./flywheel-schema";
+export * from "./agent-history";
 export * from "./materials-schema";
 export * from "./milestone-gate-schema";
 export * from "./milestone-templates";

@@ -67,16 +67,3 @@
 
 .ob-moved{margin:0;font-size:13px;color:var(--graphite)}
 
-.ob-checklist{display:grid;gap:8px;padding:10px 12px;border:1px solid var(--mist);background:var(--paper)}
-.ob-checklist header{display:flex;justify-content:space-between;align-items:baseline}
-.ob-checklist-bar{display:block;height:4px;background:var(--mist)}
-.ob-checklist-bar i{display:block;height:100%;background:var(--ink)}
-.ob-checklist-group>small{font-size:12px;color:var(--graphite)}
-.ob-checklist ul{margin:2px 0 0;padding:0;list-style:none;display:grid;gap:4px}
-.ob-checklist li{display:grid;grid-template-columns:16px minmax(0,1fr) auto;gap:6px;align-items:start;font-size:13px}
-.ob-checklist li>span:nth-child(2){display:grid;gap:2px}
-.ob-checklist li small{font-size:12px;color:var(--graphite)}
-.ob-checklist li[data-done] span:nth-child(2)>span{color:var(--graphite)}
-.ob-check{display:inline-grid;place-items:center;width:14px;height:14px;border:1px solid var(--ink);font-size:12px;line-height:1}
-.ob-check-owner{font-size:12px;color:var(--graphite);border:1px dashed var(--graphite);padding:0 4px}
-.ob-check-actions{display:grid;gap:4px;justify-items:start;margin-top:2px}

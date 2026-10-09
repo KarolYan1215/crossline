@@ -30,14 +30,9 @@ export type DiligenceReport = {
   proposals: Array<{ id: string; title: string; why: string; kind: string; dueDate: string; findingIds: string[]; status: "pending" | "accepted" | "rejected" }>;
   sources: Array<{ id: string; title: string; publisher: string; finalUrl: string; accessedOn: string }>;
 };
-export type ChecklistView = { id: string; group: string; label: string; done: boolean; detail: string; owner: "interview" | "person" };
 export type OnboardingState = {
-  /** The completion list (`interviewChecklist`): what finishes the interview, the portrait as much as the work. */
-  checklist?: ChecklistView[];
-  /** Questions of the open batch left out because 待决事项 asks them (which project a file belongs to). */
-  movedToAsks?: number;
-  /** Questions the app itself still needs answered (a target grade, a line resting on guesses, a TBD date), with options to pick from. */
-  gaps: Question[];
+  /** Questions of the open round the person already answered on 待决事项 (those answers go in front of the next reply). */
+  answeredElsewhere?: string[];
   diligence: DiligenceReport[];
   dateBatch: DateBatch | null;
   identities: Identity[];

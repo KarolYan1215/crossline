@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { redactPortrait, validatePortrait, type PortraitReport } from "./portrait";
+import { PORTRAIT_IMAGE_STYLE, portraitImageBriefs, redactPortrait, validatePortrait, type PortraitReport } from "./portrait";
 
 const report: PortraitReport = {
   cover: { portrait: "在 UW–Madison 读博的研究者，想把研究连到产品。", coreConflict: "并行承诺多于可用注意力", keywords: ["研究者"] },
@@ -23,4 +23,15 @@ test("the shared version hides every sensitive span but keeps line ids", () => {
   expect(shared.cover.portrait).not.toContain("UW–Madison");
   expect(shared.lines.items[0]!.description).toContain("▇");
   expect(shared.lines.items[0]!.lineId).toBe("research");
+});
+
+test("each illustrated section gets one prompt in the house style, written from the shared version, and shares are scaled to a whole", () => {
+  const drawn: PortraitReport = { ...report, imagery: { cover: "a lighthouse at UW–Madison made of notebooks", problem: "", compass: "a compass rose", energy: "", lines: "braided strands" } };
+  const briefs = portraitImageBriefs(drawn, [{ id: "research", label: "研究者" }, { id: "media", label: "创作者" }]);
+  expect(briefs.map((brief) => brief.slot)).toEqual(["cover", "compass", "lines"]);
+  for (const brief of briefs) { expect(brief.prompt).toContain(PORTRAIT_IMAGE_STYLE); expect(brief.prompt).not.toContain("UW–Madison"); }
+  expect(briefs[2]!.prompt).toContain("deep blue, plum");
+  const checked = validatePortrait({ ...report, lines: { allocation: "", items: [
+    { lineId: "research", description: "", goals: [], feeds: [], share: 60, targetShare: 30 }, { lineId: "media", description: "", goals: [], feeds: [], share: 60, targetShare: 30 }] } }, ["research", "media"]);
+  expect(checked.lines.items.map((item) => [item.share, item.targetShare])).toEqual([[50, 50], [50, 50]]);
 });

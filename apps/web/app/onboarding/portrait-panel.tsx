@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import type { ChecklistView } from "./onboarding-types";
 
 export type ProfileModelView = {
   portrait: string; coreConflict: string; problem: string; gravity: string[]; designable: string[]; reframes: Array<{ fallacy: string; reframe: string }>;
@@ -80,37 +79,5 @@ export function PortraitPanel({ profile, lines, lineProfiles, onChanged }: {
         </form>
       </article>;
     })}</div>
-  </section>;
-}
-
-/**
- * The interview's completion list, grouped: what is done, what the interview still asks for, and what only the person can settle — with
- * the one button for the portrait (「画像符合我」) and a pointer to where each other one is decided.
- */
-export function ChecklistPanel({ items, onChanged }: { items: ChecklistView[]; onChanged: () => void }) {
-  const [busy, setBusy] = useState(false);
-  if (!items.length) return null;
-  const done = items.filter((item) => item.done).length;
-  const groups = [...new Set(items.map((item) => item.group))];
-  const confirm = async () => {
-    setBusy(true);
-    const response = await fetch("/api/profile/confirm", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }).catch(() => null);
-    setBusy(false);
-    if (response?.ok) onChanged();
-  };
-  const where: Record<string, string> = { files_filed: "/approvals" };
-  return <section className="ob-checklist" aria-label="访谈完成清单">
-    <header><b>完成清单</b><span className="mono">{done}/{items.length}</span></header>
-    <span className="ob-checklist-bar" aria-hidden="true"><i style={{ width: `${(done / items.length) * 100}%` }} /></span>
-    {groups.map((group) => <div key={group} className="ob-checklist-group"><small>{group}</small>
-      <ul>{items.filter((item) => item.group === group).map((item) => <li key={item.id} data-done={item.done || undefined} data-owner={item.owner}>
-        <span className="ob-check" aria-hidden="true">{item.done ? "✓" : ""}</span>
-        <span><span>{item.label}</span>{!item.done && item.detail && <small>{item.detail}</small>}
-          {!item.done && item.id === "portrait_confirmed" && <span className="ob-check-actions">
-            <button type="button" className="primary-button" disabled={busy} onClick={() => void confirm()}>画像符合我</button>
-            <small>不符合：在左侧输入框写明哪里不对，访谈会据此修改。</small></span>}
-          {!item.done && where[item.id] && <a href={where[item.id]}>去处理 →</a>}</span>
-        {!item.done && item.owner === "person" && <span className="ob-check-owner">需本人</span>}
-      </li>)}</ul></div>)}
   </section>;
 }

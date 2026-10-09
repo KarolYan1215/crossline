@@ -1,7 +1,8 @@
-import { CATEGORY_LABEL, type ActivityCategory } from "@crossline/core";
+import { AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, CATEGORY_LABEL, type ActivityCategory, type AgentHistorySummary } from "@crossline/core";
 import { categoryMode, readCategories } from "@crossline/db";
 import { SubpageShell } from "../subpage-shell";
 import { LocalActivityToggle } from "./local-activity-toggle";
+import { AgentHistoryCard } from "./agent-history-card";
 import { UsageCard } from "./usage-card";
 import { NotifyLevel } from "./notify-level";
 import { PhonePush } from "./phone-push";
@@ -76,7 +77,7 @@ export default async function SettingsPage() {
               <header><h3>个人情况</h3><small>主线、项目、日期与长期目标的来源</small></header>
               <div className="st-row"><span className="st-row-label">访谈<small>{!interview.started ? "尚未开始"
                 : interview.complete ? "已完成；补充或修改后，里程碑草稿按新情况重新设计"
-                  : `清单 ${interview.checklist.filter((item) => item.done).length}/${interview.checklist.length}${interview.awaitingPerson ? " · 只差本人确认" : ` · 第 ${interview.stageIndex}/${interview.stageCount} 阶段 · 待答 ${interview.openQuestions} 题`}`}</small></span>
+                  : `未完成 · 第 ${interview.stageIndex}/${interview.stageCount} 阶段${interview.openQuestions ? ` · 待答 ${interview.openQuestions} 题` : ""}${interview.parked ? " · 问题已列在待决事项" : ""}`}</small></span>
                 <a className="secondary-button" href="/onboarding">{interview.started && !interview.complete ? "继续访谈" : "打开访谈"}</a></div>
             </section>
             <section className="st-card" aria-label="手机访问" id="phone">
@@ -122,6 +123,7 @@ export default async function SettingsPage() {
           <LocalActivityToggle consent={consent} detail={detail} pausedUntil={setting(ACTIVITY_PAUSED_UNTIL) || null} blacklist={blacklist}
             hours={hours} categories={[...byCategory].sort((a, b) => b[1] - a[1])
               .map(([category, minutes]) => ({ label: CATEGORY_LABEL[category as ActivityCategory] ?? "其他", minutes }))} />
+          <AgentHistoryCard on={setting(AGENT_HISTORY_CONSENT) === "on"} summary={(() => { try { return JSON.parse(setting(AGENT_HISTORY_SUMMARY) ?? "null") as AgentHistorySummary | null; } catch { return null; } })()} />
         </section>
 
         <section id="usage" className="st-section" aria-labelledby="st-usage"><h2 id="st-usage">用量与体检</h2>

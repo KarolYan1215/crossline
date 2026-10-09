@@ -3,7 +3,7 @@ import { recordOp, retractedEventIds, withUndo } from "./undo";
 import {
   ATTENTION_SNAPSHOT, CALENDAR_LINES, CALENDAR_PUBLISH_FAILURE, CALENDAR_SYNC_FAILURE, calendarEventKey, daysBetween, describeEvent, missingInputsOf, rankAsks,
   snoozeUntil, urgencyFor, type CalendarLines,
-  validateAskAnswer, type AccessContext, type Ask, type AskOption, type AskSnooze
+  validateAskAnswer, type AccessContext, type Ask, type AskField, type AskOption, type AskSnooze
 } from "@crossline/core";
 import { listAgentTasks, type StoredWorkOrder } from "@crossline/db";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
@@ -16,7 +16,7 @@ import { readScheduledDay } from "./schedule-memory";
 import { requestCodexSupervisor } from "./codex-runtime";
 import { autoPublishPass, forgetPublishedHash } from "./auto-publish";
 import { calendarFiling } from "./timeline";
-import { interviewStatus } from "./interview-status";
+import { answerInterviewQuestion, interviewStatus } from "./interview-status";
 import { unfiledFiles } from "./file-belonging";
 import { decideEvent, eventProposals, publishFixedEvents } from "./fixed-events";
 import { identityLines } from "./lines";
@@ -47,7 +47,7 @@ const UNTOUCHED = new Set(["awaiting_plan_approval", "approved", "preparing"]);
 const lineLabel = (id: string) => defaultIdentityPacks().find((pack) => pack.id === id)?.label ?? id;
 const short = (text: string, length = 40) => text.length > length ? `${text.slice(0, length)}…` : text;
 
-type Source = { store: ReturnType<typeof getStore>; ctx: AccessContext; today: string };
+type Source = { store: ReturnType<typeof getStore>; ctx: AccessContext; today: string; now: Date };
 
 function deadlines(store: Source["store"], workspaceId: string) {
   return new Map(store.listMilestoneAnchors(workspaceId).map((anchor) => [anchor.milestoneId, anchor.deadline]));
@@ -405,7 +405,10 @@ function calendarAsks({ store, ctx }: Source): Ask[] {
  * A file only the person can place (`unfiledFiles`, `lib/file-belonging.ts`): one question per file, the interview's lean recommended.
  * The interview no longer asks the same thing — its question about such a file is left out of its batch (`lib/interview-status.ts`).
  */
-function sourceProjectAsks({ store, ctx, today }: Source): Ask[] {
+function sourceProjectAsks({ store, ctx, today, now }: Source): Ask[] {
+  // While the interview runs, it asks this itself (its own round, with the projects as options); here only once it is done or put aside.
+  const interview = interviewStatus(ctx, now);
+  if (interview.started && !interview.complete && !interview.parked) return [];
   const projects = store.listProjects(ctx.workspaceId).map((project) => ({ id: project.id, name: project.name, identityId: project.identityId }));
   return unfiledFiles(ctx, today).map(({ id, fileName, titles, days, lean, raisedAt }) => {
     const dueDay = days.sort()[0];
@@ -448,19 +451,30 @@ const STAGE_LABEL: Record<string, string> = { orientation: "开场与规则", si
  * The main interview stopped with questions still open. The system works meanwhile — approved milestones are worked back and scheduled —
  * but milestone drafts, long-term goals and the proposed hours are designed from what the interview has, so the gap is named here.
  */
-function interviewAsks({ ctx }: Source): Ask[] {
-  const status = interviewStatus(ctx);
-  if (!status.started || status.complete) return [];
-  const open = status.checklist.filter((item) => !item.done);
-  const done = status.checklist.length - open.length;
-  const named = open.slice(0, 4).map((item) => item.label).join("、");
-  return [{ id: "interview:checklist", kind: "interview_open", entityId: "interview", urgency: "later", raisedAt: "",
-    fingerprint: open.map((item) => item.id).join(","),
-    title: status.awaitingPerson ? `访谈只差本人确认：清单 ${done}/${status.checklist.length}` : `访谈未完成：清单 ${done}/${status.checklist.length}`,
-    why: `${status.stage ? `访谈在「${STAGE_LABEL[status.stage] ?? status.stage}」阶段（第 ${status.stageIndex}/${status.stageCount} 阶段）` : "访谈"}`
-      + `${status.openQuestions ? `，本轮 ${status.openQuestions} 个问题待答` : ""}；未完成：${named}${open.length > 4 ? ` 等 ${open.length} 项` : ""}。`
-      + "期间系统照常使用：已批准的里程碑照常倒推、排程与提醒；补齐后，长期目标、里程碑草稿与建议的可用时段按新信息更新。",
-    options: [{ id: "open", label: status.awaitingPerson ? "去确认" : "继续访谈", href: "/onboarding", recommended: true }] }];
+function interviewAsks({ ctx, now }: Source): Ask[] {
+  const status = interviewStatus(ctx, now);
+  // While the interview runs, its questions are asked in it, round by round; only once the person uses the app without finishing it
+  // are they asked here, each answerable in place (decided 2026-10-08).
+  if (!status.started || status.complete || !status.parked) return [];
+  const where = status.stage ? `访谈在「${STAGE_LABEL[status.stage] ?? status.stage}」阶段（第 ${status.stageIndex}/${status.stageCount} 阶段）` : "访谈";
+  const questions = status.questions.map((question): Ask => {
+    const single = question.kind !== "free" && question.options.length > 0;
+    const other: AskField = { id: "other", label: "补充", kind: "text", required: false, placeholder: "可不填" };
+    return { id: `iq:${question.id}`, kind: "interview_question", entityId: question.id, urgency: "later", raisedAt: "",
+      fingerprint: `${status.sessionId}:${question.id}`, ...(question.identityId ? { line: question.identityId } : {}),
+      title: question.text,
+      why: `${where}的问题。本轮的问题都答完后，会一起交给访谈，接着下一轮。`,
+      options: single
+        ? question.options.slice(0, 8).map((option) => ({ id: option.id, label: option.label, ...(option.detail ? { detail: option.detail } : {}),
+          ...(question.allowOther ? { fields: [other] } : {}) }))
+        : [{ id: "free", label: "回答", fields: [{ id: "other", label: "回答", kind: "longtext" as const, required: true }] }] };
+  });
+  return [{ id: "interview:open", kind: "interview_open", entityId: "interview", urgency: "later", raisedAt: "",
+    fingerprint: `${status.stage}:${status.openQuestions}`,
+    title: "访谈未完成",
+    why: `${where}${status.openQuestions ? `，${status.openQuestions} 个问题列在下面，可以在这里逐个回答` : ""}。期间系统照常使用；`
+      + "补齐后，长期目标、里程碑草稿与建议的可用时段按新信息更新。",
+    options: [{ id: "open", label: "回到访谈", href: "/onboarding", recommended: true }] }, ...questions];
 }
 
 /**
@@ -484,7 +498,7 @@ function eventAsks({ ctx, today }: Source): Ask[] {
 }
 
 export function collectAsks(ctx: AccessContext, now = new Date()): Ask[] {
-  const source = { store: getStore(), ctx, today: planToday(ctx, now) };
+  const source = { store: getStore(), ctx, today: planToday(ctx, now), now };
   return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskAsks, missedAsks, agentAsks, calendarAsks, sourceProjectAsks, calendarLineAsks, interviewAsks, eventAsks]
     .flatMap((collect) => { try { return collect(source); } catch { return []; } });
 }
@@ -680,6 +694,14 @@ async function answerOne(ctx: AccessContext, ask: Ask, optionId: string, values:
       forgetPublishedHash(ctx.workspaceId);
       void autoPublishPass().catch(() => {});
       return { ok: true };
+    case "interview_question": {
+      const result = await answerInterviewQuestion(ctx, ask.entityId, optionId === "free" ? "" : optionId, values.other ?? "", async (sessionId, text) => {
+        // The round is complete: it goes to the interview as the person's reply; the next round's questions follow when it answers.
+        void requestCodexSupervisor(ctx, "/v1/onboarding/turn", { method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ sessionId, text }), signal: AbortSignal.timeout(3 * 60 * 60_000) }).catch(() => undefined);
+      });
+      return result.ok ? { ok: true } : result;
+    }
     case "source_project": {
       if (optionId === "none") { record(ctx, "source.project_cleared", ask.entityId, `source:cleared:${ask.entityId}:${Date.now()}`, { by: "person" }); return { ok: true }; }
       const projectId = optionId.slice(2);

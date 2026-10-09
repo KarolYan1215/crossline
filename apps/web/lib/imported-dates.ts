@@ -32,12 +32,14 @@ export function loadPendingDateBatch(ctx: AccessContext): PendingBatch | null {
     .find((event) => !decided.has(event.entityId));
   if (!batch) return null;
   const payload = batch.payload as ExtractedPayload;
-  const dates = (payload.dates ?? []).map((item): PendingItem => ({
+  // Batches read before past dates were set apart still hold them: what is over is not offered (it is history, not a plan).
+  const today = todayIso();
+  const dates = (payload.dates ?? []).filter((item) => item.date >= today).map((item): PendingItem => ({
     id: item.id, kind: "date", title: item.title, project: item.project, confidence: item.confidence,
     when: `${item.date}${item.startTime ? ` ${item.startTime}${item.endTime ? `–${item.endTime}` : ""}` : ""}`,
     quote: item.quote, sourceRef: item.sourceRef, note: item.note, checked: item.confidence !== "low", blocks: item.startTime ? 1 : 0
   }));
-  const recurring = (payload.recurring ?? []).map((item): PendingItem => {
+  const recurring = (payload.recurring ?? []).filter((item) => item.to >= today).map((item): PendingItem => {
     const days = upcomingDays(item, todayIso());
     return { id: item.id, kind: "recurring", title: item.title, project: item.project, confidence: item.confidence,
       when: `每周${item.weekdays.map((day) => WEEKDAY[day]).join("、")} ${item.startTime}–${item.endTime}，${item.from} 至 ${item.to}（还剩 ${days.length} 次）`,

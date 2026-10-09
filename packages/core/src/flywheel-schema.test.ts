@@ -87,3 +87,12 @@ test("the same relation cannot be proposed twice in one run", () => {
   expect(validateFlywheelExpansion(expansion([relation(), relation({ kind: "informs" })]), pair).relations)
     .toHaveLength(2);
 });
+
+test("loops between lines are the flywheels; a constraint never closes one", async () => {
+  const { flywheelLoops } = await import("./flywheel-schema");
+  expect(flywheelLoops([
+    { from: "research", to: "media", kind: "reuses" }, { from: "media", to: "startup", kind: "informs" },
+    { from: "startup", to: "research", kind: "enables" }, { from: "media", to: "research", kind: "recurring_feedback" },
+    { from: "investment", to: "research", kind: "constrains" }, { from: "research", to: "investment", kind: "informs" }
+  ])).toEqual([["media", "startup", "research"], ["media", "research"]]);
+});

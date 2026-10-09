@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requestCodexSupervisor, CodexSupervisorRequestError } from "../../../../lib/codex-runtime";
 import { resolveAccessContext } from "../../../../lib/access-guard";
+import { takePendingAnswers } from "../../../../lib/interview-status";
 import { isCrossSiteWrite } from "../../../../lib/same-origin";
 
 /**
@@ -15,10 +16,13 @@ export async function POST(request: Request) {
   try { body = await request.json(); } catch { /* validated below */ }
   const input = (body ?? {}) as { sessionId?: unknown; text?: unknown; reread?: unknown };
   const sessionId = typeof input.sessionId === "string" ? input.sessionId : "";
-  const text = typeof input.text === "string" ? input.text.slice(0, 4000) : "";
+  const typed = typeof input.text === "string" ? input.text.slice(0, 4000) : "";
   if (!/^[a-zA-Z0-9_-]{1,128}$/.test(sessionId)) {
     return NextResponse.json({ ok: false, blocker: { code: "ONBOARDING_TURN_INVALID", message: "缺少会话 id" } }, { status: 400 });
   }
+  // Answers given on 待决事项 while the interview was put aside travel with this reply (and replying here takes it up again).
+  const earlier = typed ? takePendingAnswers(access.ctx, sessionId) : "";
+  const text = [earlier, typed].filter(Boolean).join("\n").slice(0, 4000);
   try {
     const result = await requestCodexSupervisor<unknown>(access.ctx, "/v1/onboarding/turn", {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sessionId, text, reread: input.reread === true }),

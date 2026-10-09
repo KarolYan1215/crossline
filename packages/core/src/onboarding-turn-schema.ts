@@ -111,6 +111,8 @@ export type OnboardingTurnContext = {
   profile?: ProfileModel; stage?: OnboardingStage;
   /** The completion list's items still open (`interviewChecklist`): what the interview owes before it may say it is ready, and what waits on the person. */
   checklist?: Array<{ label: string; detail: string; owner: "interview" | "person" }>;
+  /** Hours spent in Codex and Claude Code per folder and when in the day (`agentHistoryLines`), when the person allowed it: habits, not a plan. */
+  workHistory?: string[];
   /** Only when the conversation had to be rebuilt in a fresh thread: what was said before, oldest first. User lines carry their `reply-N` id. */
   history?: Array<{ id: string; role: "user" | "assistant"; text: string }>;
   reply: { id: string; text: string };

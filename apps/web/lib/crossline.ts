@@ -48,7 +48,7 @@ export function planToday(ctx?: AccessContext,
 
 /** The key the weekly availability lives under. One settings row, not a new table. */
 export { AVAILABILITY_SETTING } from "@crossline/core";
-import { AVAILABILITY_SETTING } from "@crossline/core";
+import { AVAILABILITY_SETTING, RELATION_KIND_LABEL } from "@crossline/core";
 import { identityLines, linePacks } from "./lines";
 const PREFERENCES_SETTING = "schedule.preferences";
 export type SchedulePreferences = { timeZone: string; mode: "buffered" | "asap";
@@ -289,9 +289,7 @@ export type PersistedPlan = {
 
 // Shared with apps/web/lib/task-detail.ts, so a task/milestone detail view's relation labels and identity
 // swatches never drift from what the homepage flywheel strip and star map already say.
-export const relationKindLabel: Record<string, string> = {
-  enables: "使之可能", reuses: "复用", informs: "提供输入", constrains: "约束", recurring_feedback: "循环反馈"
-};
+export const relationKindLabel: Record<string, string> = RELATION_KIND_LABEL;
 export const accents: Record<string, string> = {
   research: "#6D5EF5",
   startup: "#FF8A5B",

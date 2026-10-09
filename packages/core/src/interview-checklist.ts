@@ -94,7 +94,11 @@ export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
     const course = Boolean(courseCodeOf(project.name) ?? courseCodeOf(project.id)) || own.some((fact) => fact.slot === "grading");
     const missing = PROJECT_SLOTS.filter(([slot, label]) => !(own.some((fact) => slot.test(fact.slot)) || (label === "截止日期" && dated))).map(([, label]) => label);
     if (course && !own.some((fact) => fact.slot === "grading")) missing.push("评分占比");
-    items.push({ id: `project:${project.id}`, group: "项目", label: `「${project.name}」${course ? "目标、截止、进展证据与评分占比" : "目标、截止与进展证据"}`,
+    // A course meets: its weekly class times are the frame of the person's week (a course whose meetings nobody asked about left a hole).
+    const meets = input.dates.some((entry) => entry.recurring && (entry.project === project.id || entry.project === project.name))
+      || own.some((fact) => /^(meeting|class)_?times?$|^no_meetings$/.test(fact.slot));
+    if (course && !meets) missing.push("上课时间");
+    items.push({ id: `project:${project.id}`, group: "项目", label: `「${project.name}」${course ? "目标、截止、进展证据、评分占比与上课时间" : "目标、截止与进展证据"}`,
       done: !missing.length, detail: missing.length ? `缺：${missing.join("、")}` : "", owner: "interview" });
   }
 

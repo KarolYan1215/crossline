@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
 import {
-  EMPTY_PROFILE_MODEL, ONBOARDING_TURN_SCHEMA, answeredGapFacts, keepOnboardingTurn, mergeFacts, profileGaps, sanitizeDateExtraction, validateOnboardingTurn,
+  AGENT_HISTORY_SUMMARY, agentHistoryLines, type AgentHistorySummary,
+  EMPTY_PROFILE_MODEL, ONBOARDING_TURN_SCHEMA, PROFILE_CONFIRMED, portraitFingerprint, answeredGapFacts, keepOnboardingTurn, mergeFacts, sanitizeDateExtraction, validateOnboardingTurn,
   type ProfileGap, type ProfileModel, type OnboardingStage,
   type KnownSources, type OnboardingTurn, type OnboardingTurnContext
 } from "@crossline/core";
 import { continueSkillTurn, runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
-import { interviewChecklistFor, latestFileDates, type CrosslineStore, type StoredOnboardingMessage, type StoredSourceDocument } from "@crossline/db";
+import { interviewChecklistFor, interviewGapsFor, unfiledFilesIn, type CrosslineStore, type StoredOnboardingMessage, type StoredSourceDocument } from "@crossline/db";
 import { sourceIds } from "./source-ids";
 import { identityLines } from "./lines";
 
@@ -58,18 +59,22 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     };
   }
 
-  /** The completion list's open items, as of now (files are the web's to count; the worker leaves that item out). */
-  const openChecklist = () => interviewChecklistFor(store, workspaceId, identityLines(store, workspaceId)
-    .map((line) => ({ id: line.id, label: line.label, hard: Boolean(line.hard), goals: line.goals ?? [] })), { unfiledFiles: null })
-    .filter((item) => !item.done).map(({ label, detail, owner }) => ({ label, detail, owner }));
+  const todayIso = () => (process.env.CROSSLINE_FIXED_NOW ? new Date(process.env.CROSSLINE_FIXED_NOW) : new Date()).toISOString().slice(0, 10);
+  const unfiled = () => unfiledFilesIn(store, workspaceId, { today: todayIso(),
+    lineNames: identityLines(store, workspaceId).flatMap((line) => [line.id, line.label]) });
+  /** The completion list as of now: the system's own record of what the interview still owes, never shown to the person. */
+  const checklistNow = () => interviewChecklistFor(store, workspaceId, identityLines(store, workspaceId)
+    .map((line) => ({ id: line.id, label: line.label, hard: Boolean(line.hard), goals: line.goals ?? [] })), { unfiledFiles: unfiled().length, today: todayIso() });
+  const openChecklist = () => checklistNow().filter((item) => !item.done).map(({ label, detail, owner }) => ({ label, detail, owner }));
+
+  /** The person's coding-agent hours, time only, when they allowed it (Settings → 隐私). */
+  const workHistory = () => {
+    try { return agentHistoryLines(JSON.parse(store.getSetting(workspaceId, AGENT_HISTORY_SUMMARY) ?? "null") as AgentHistorySummary | null); } catch { return []; }
+  };
 
   /** What the ledger still lacks, as of now. */
-  const currentGaps = (): ProfileGap[] => profileGaps({
-    identities: identities(),
-    projects: store.listProjects(workspaceId).map(({ id, identityId, name }) => ({ id, identityId, name })),
-    facts: store.listProfileFacts(workspaceId),
-    undated: latestFileDates(store, workspaceId).undated
-  });
+  const currentGaps = (): ProfileGap[] => interviewGapsFor(store, workspaceId, identityLines(store, workspaceId)
+    .map((line) => ({ id: line.id, label: line.label, hard: Boolean(line.hard), goals: line.goals ?? [] })), todayIso());
 
   const clipDocuments = (entries: Array<[string, StoredSourceDocument]>) => {
     let budget = SOURCE_TEXT_TOTAL;
@@ -148,7 +153,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         payload: { superseded: true, by: batchId, included: [], excluded: [], blocks: 0 } });
     }
     store.appendEvent({ ownerId, workspaceId, idempotencyKey: `dates:extracted:${batchId}`, type: "dates.extracted", entityId: batchId,
-      payload: { documentIds, dates: checked.extraction.dates, recurring: checked.extraction.recurring, questions: checked.extraction.questions, undated: checked.extraction.undated ?? [], dropped: checked.dropped } });
+      payload: { documentIds, dates: checked.extraction.dates, recurring: checked.extraction.recurring, questions: checked.extraction.questions, undated: checked.extraction.undated ?? [], past: checked.extraction.past ?? [], dropped: checked.dropped } });
   }
 
   return async function turn(input: { sessionId: string; text: string; reread?: boolean }): Promise<OnboardingTurnOutcome> {
@@ -182,8 +187,21 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     // The person's answers to the questions the app itself asked (target grade, an unconfirmed line, a TBD date) are facts the moment they
     // are given, written here and not left for the model to remember: the label they picked is a verbatim span of their reply.
     for (const answer of answeredGapFacts(replyText, currentGaps())) {
-      store.upsertProfileFact({ workspaceId, identityId: answer.identityId, projectId: answer.projectId, slot: answer.slot, value: answer.value,
-        status: "confirmed", sourceRef: replyId, sourceQuote: answer.quote, updatedAt: now });
+      if (answer.file) {
+        // The same record 待决事项 writes, so a file filed here is filed everywhere.
+        const { documentId, projectId } = answer.file;
+        if (projectId) store.assignSourceDocumentProject(workspaceId, documentId, projectId);
+        if (projectId) store.appendEvent({ ownerId, workspaceId, idempotencyKey: `source:assigned:${documentId}:${projectId}:${replyId}`, type: "source.project_assigned",
+          entityId: documentId, payload: { projectId, by: "person" } });
+        else store.appendEvent({ ownerId, workspaceId, idempotencyKey: `source:cleared:${documentId}:${replyId}`, type: "source.project_cleared", entityId: documentId, payload: { by: "person" } });
+      } else if (answer.confirmPortrait) {
+        const profile = readProfile();
+        store.setSetting(workspaceId, PROFILE_CONFIRMED, JSON.stringify({ fingerprint: portraitFingerprint(profile), at: now }));
+        store.appendEvent({ ownerId, workspaceId, idempotencyKey: `profile:confirmed:${replyId}`, type: "profile.confirmed", entityId: workspaceId, payload: { via: "interview" } });
+      } else if (answer.slot) {
+        store.upsertProfileFact({ workspaceId, identityId: answer.identityId, projectId: answer.projectId, slot: answer.slot, value: answer.value,
+          status: "confirmed", sourceRef: replyId, sourceQuote: answer.quote, updatedAt: now });
+      }
     }
 
     const docs = sourceIds(store.listSourceDocuments(workspaceId));
@@ -213,6 +231,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         today, timeZone, sources: clipDocuments(documents), ...(history ? { history } : {}), reply: { id: replyId, text: replyText },
         focusLine, profile: readProfile(), stage: ((session!.coverage as { stage?: OnboardingStage }).stage ?? (focusLine ? "details" : "orientation")),
         checklist: openChecklist(),
+        ...(workHistory().length ? { workHistory: workHistory() } : {}),
         lines: identityLines(store, workspaceId).map((line) => ({ id: line.id, label: line.label, rank: line.rank ?? null, hard: Boolean(line.hard), goals: line.goals ?? [] }))
       };
       return runCodexSkill<OnboardingTurn>(client, context, {
@@ -249,7 +268,8 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     persistTurn(result.output, sessionId, ownerId);
     // A fixed weekly arrangement the person said (「每周二四上午组会」) is quoted from their reply, so replies count as sources here too.
     persistFileDates(result.output, ownerId, sent.map(([, doc]) => doc.id), { ...known.sources, ...known.replies }, today);
-    const output = withChecklist(withGapQuestions(result.output, currentGaps(), messages), focusLine || options.checklist === false ? [] : openChecklist());
+    const output = withChecklist(withGapQuestions(result.output, currentGaps(), messages, { freshDocuments: sent.map(([, doc]) => doc.id) }),
+      focusLine || options.checklist === false ? [] : openChecklist());
     store.appendOnboardingMessage({ sessionId, workspaceId, role: "assistant", content: output, createdAt: new Date().toISOString() });
     store.saveOnboardingSession({
       ...session, ...(threadId ? { codexThreadId: threadId } : {}),
@@ -279,26 +299,44 @@ export function withChecklist(output: OnboardingTurn, open: Array<{ label: strin
 }
 
 /** Words that say a question from the model already asks what a gap is about, so the code-built one is not asked on top of it. */
-const COVERS: Record<Exclude<ProfileGap["code"], "LINE_UNCONFIRMED">, RegExp> = {
-  DATE_UNDATED: /待定|TBD|日期|什么时候/i
+const COVERS: Partial<Record<ProfileGap["code"], RegExp>> = {
+  DATE_UNDATED: /待定|TBD|日期|什么时候/i,
+  COURSE_MEETINGS: /上课|几点|每周.*(时间|时段)/
 };
 
+/** Besides those that block, at most this many of the app's own questions join one round, so a batch stays answerable. */
+export const GAPS_PER_ROUND = 3;
+
 /**
- * The turn as it is stored and shown. The model is not trusted to know what the app still needs: a gap that blocks (a line resting only on guesses) turns 「ready」 back into 「ask」, and the question that closes it is added with its
- * options if the model did not ask it itself. A gap that does not block (a TBD date) is asked once.
+ * Adds the app's own questions (`profileGaps`) to the round, **the ones about this round** first (decided 2026-10-08): a question about a
+ * line or project the model is asking about now, a file that arrived with this reply, the portrait once this round wrote it. With nothing
+ * relevant, one other joins, so nothing waits forever. A gap the model already asked in its own words is not asked twice; one that blocks
+ * is asked every round until answered, and turns a premature 「ready」 back into 「ask」.
  */
-export function withGapQuestions(output: OnboardingTurn, gaps: ProfileGap[], messages: StoredOnboardingMessage[]): OnboardingTurn {
+export function withGapQuestions(output: OnboardingTurn, gaps: ProfileGap[], messages: StoredOnboardingMessage[],
+  round: { freshDocuments?: string[] } = {}): OnboardingTurn {
   const asked = new Set(messages.flatMap((message) => message.role === "assistant"
     ? ((message.content as { questions?: Array<{ id: string }> }).questions ?? []).map((question) => question.id) : []));
-  const added = gaps.filter((gap) => {
+  const open = gaps.filter((gap) => {
     if (output.questions.some((question) => question.id === gap.question.id)) return false;
     // Already asked by the model in its own words: a line it asks anything about, a project question that is about the same thing.
+    const covers = COVERS[gap.code];
     const covered = output.questions.some((question) => gap.code === "LINE_UNCONFIRMED"
       ? question.identityId === gap.identityId
-      : question.projectId === gap.projectId && COVERS[gap.code].test(question.text));
+      : Boolean(covers) && question.projectId === gap.projectId && covers!.test(question.text));
     if (covered) return false;
     return gap.blocking || !asked.has(gap.question.id);
   });
+  const lines = new Set([...output.questions.map((question) => question.identityId), ...output.slotUpdates.map((update) => update.identityId)].filter(Boolean));
+  const projects = new Set([...output.questions.map((question) => question.projectId), ...output.slotUpdates.map((update) => update.projectId)].filter(Boolean));
+  const fresh = new Set(round.freshDocuments ?? []);
+  const relevant = (gap: ProfileGap) => gap.code === "FILE_UNFILED" ? fresh.has(gap.documentId ?? "")
+    : gap.code === "PORTRAIT_UNCONFIRMED" ? Boolean(output.profile?.portrait)
+    : gap.projectId ? projects.has(gap.projectId) || lines.has(gap.identityId) : lines.has(gap.identityId);
+  const blockingGaps = open.filter((gap) => gap.blocking);
+  const near = open.filter((gap) => !gap.blocking && relevant(gap));
+  const rest = open.filter((gap) => !gap.blocking && !relevant(gap));
+  const added = [...blockingGaps, ...(near.length ? near : rest.slice(0, 1)).slice(0, GAPS_PER_ROUND)];
   const blocking = gaps.some((gap) => gap.blocking);
   if (!added.length && !(blocking && output.nextAction === "ready_for_milestones")) return output;
   return {

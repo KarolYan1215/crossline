@@ -28,7 +28,12 @@ export type RecurringMeeting = {
  * it is kept so the part it belongs to still exists (a course project with a due date TBD is still 25% of the grade) and the person is asked.
  */
 export type UndatedItem = { id: string; kind: (typeof DATE_KINDS)[number]; title: string; project: string; sourceRef: string; quote: string; note: string };
-export type DateExtraction = { dates: DateCandidate[]; recurring: RecurringMeeting[]; questions: string[]; undated?: UndatedItem[] };
+export type DateExtraction = { dates: DateCandidate[]; recurring: RecurringMeeting[]; questions: string[]; undated?: UndatedItem[];
+  /**
+   * Verified dates that are already over (a note's 「记录于 7/28」, a quiz last month, a finished course). They are history: kept for
+   * estimating progress and habits, never offered for the calendar or scheduled.
+   */
+  past?: Array<DateCandidate | RecurringMeeting> };
 
 export type DateExtractionContext = {
   version: "crossline.date-extractor.v1";
@@ -211,7 +216,10 @@ export function sanitizeDateExtraction(value: unknown, known: Known):
   }
   // A date names its course (「ECE 555 课堂期末考试」, not 「课堂期末考试」): two courses each have a final, and the calendar shows the title alone.
   const named = <T extends { title: string; project: string }>(item: T): T => ({ ...item, title: withCourse(item.title, item.project) });
-  return { extraction: { dates: dates.map(named), recurring: recurring.map(named), questions: out.questions, undated: undated.map(named) }, dropped };
+  // Only what is still ahead is a plan; the rest is history (decided 2026-10-08: past clues inform habits and progress, not the schedule).
+  const ahead = dates.filter((item) => item.date >= known.today), weekly = recurring.filter((meeting) => meeting.to >= known.today);
+  const past = [...dates.filter((item) => item.date < known.today), ...recurring.filter((meeting) => meeting.to < known.today)].map(named);
+  return { extraction: { dates: ahead.map(named), recurring: weekly.map(named), questions: out.questions, undated: undated.map(named), past }, dropped };
 }
 
 /** Every date a weekly pattern covers, minus its exceptions. Weekday 0 is Sunday. */

@@ -108,3 +108,35 @@ button.ui-ring:hover .ui-ring-seg:not([data-on]){stroke:#9BD3AE}
 .ui-stat span{font-size:12px;color:var(--graphite)}
 
 @media (prefers-reduced-motion:reduce){.ui-sheet,.ui-menu{transition:none}}
+
+/* LineNetwork: the lines as nodes on a ring, the ways they feed each other as directed edges. */
+.ln{display:grid;gap:8px;min-width:0}
+.ln h3{margin:0;font-size:14px}
+.ln-muted{margin:0;font-size:13px;color:var(--graphite)}
+.ln-graph{width:100%;max-width:420px;height:auto;justify-self:center;overflow:visible}
+.ln-edge{fill:none;stroke:var(--lc,var(--ink));stroke-width:2;cursor:default}
+.ln-edge[data-status="candidate"]{stroke-dasharray:6 4}
+.ln-edge[data-on]{stroke-width:3.5}
+.ln-edge[data-dim],.ln-label[data-dim]{opacity:.18}
+.ln-label rect{fill:var(--paper);stroke:var(--lc,var(--ink));stroke-width:1}
+.ln-label text{font-size:12px;fill:var(--ink);font-family:Arial,"DengXian",sans-serif}
+.ln-graph [onclick],.ln-label,.ln-edge{cursor:pointer}
+.ln-node circle{fill:var(--paper);stroke:var(--lc,var(--ink))}
+.ln-node text{font-size:13px;font-weight:700;fill:var(--ink);font-family:Arial,"DengXian",sans-serif}
+.ln-node .ln-role{font-size:12px;font-weight:400;fill:var(--graphite)}
+.ln-legend{display:flex;flex-wrap:wrap;gap:4px 14px;margin:0;font-size:12px}
+.ln-legend div{display:flex;gap:4px}
+.ln-legend dt{font-weight:700}
+.ln-legend dd{margin:0;color:var(--graphite)}
+.ln-loops{display:flex;flex-wrap:wrap;gap:4px 10px;margin:0;font-size:13px}
+.ln-loops span{border:1px solid var(--mist);padding:0 6px}
+.ln-list{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.ln-list li{border-left:3px solid var(--lc,var(--ink));padding:2px 0 2px 8px;font-size:13px}
+.ln-list li[data-status="candidate"]{border-left-style:dashed}
+.ln-list li[data-on]{background:var(--fog,#f2f2f2)}
+.ln-list p{margin:2px 0}
+.ln-pick{all:unset;cursor:pointer;display:flex;flex-wrap:wrap;gap:6px;align-items:baseline}
+.ln-kind{font-size:12px;border:1px solid var(--mist);padding:0 4px}
+.ln-actions{display:flex;gap:6px}
+.ln-actions button{font:inherit;font-size:13px;border:1px solid var(--ink);background:var(--paper);color:var(--ink);padding:2px 10px;min-height:28px;cursor:pointer}
+.ln-actions .ln-quiet{border-color:var(--mist)}

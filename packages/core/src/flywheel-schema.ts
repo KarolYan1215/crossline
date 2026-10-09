@@ -42,6 +42,45 @@ export type FlywheelExpansion = {
 
 export const RELATION_KINDS = ["enables", "reuses", "informs", "constrains", "recurring_feedback"] as const;
 
+/**
+ * What each kind is called on screen, and what it claims, in one place (decided 2026-10-08: 「使能」「使之可能」 read as jargon). The
+ * meaning is "from" → "to": what the source line does for the line the arrow points at.
+ */
+export const RELATION_KIND_LABEL: Record<string, string> = {
+  enables: "促成", reuses: "复用", informs: "提供输入", constrains: "约束", recurring_feedback: "反馈回路"
+};
+export const RELATION_KIND_MEANING: Record<string, string> = {
+  enables: "前者的产出是后者推进的前提",
+  reuses: "前者的产出被后者直接再用",
+  informs: "前者得到的信息帮后者做判断",
+  constrains: "前者占用或限制后者的时间、精力或方向",
+  recurring_feedback: "后者的结果持续回流、强化前者"
+};
+
+/**
+ * The loops in a directed graph of lines — each a flywheel: A feeds B feeds … feeds A. A constraint is not a feed, so it never closes a
+ * loop. Each loop is listed once, starting from its smallest node; small graphs only (the person has a handful of lines).
+ */
+export function flywheelLoops(edges: Array<{ from: string; to: string; kind: string }>): string[][] {
+  const next = new Map<string, Set<string>>();
+  for (const edge of edges) if (edge.kind !== "constrains" && edge.from !== edge.to) {
+    if (!next.has(edge.from)) next.set(edge.from, new Set());
+    next.get(edge.from)!.add(edge.to);
+  }
+  const nodes = [...new Set(edges.flatMap((edge) => [edge.from, edge.to]))].sort();
+  const loops: string[][] = [];
+  for (const start of nodes) {
+    const walk = (node: string, path: string[]) => {
+      for (const to of next.get(node) ?? []) {
+        if (to === start && path.length > 1) loops.push([...path]);
+        else if (to > start && !path.includes(to)) walk(to, [...path, to]);
+      }
+    };
+    walk(start, [start]);
+  }
+  return loops.sort((a, b) => b.length - a.length);
+}
+
 const str = { type: "string", minLength: 1, maxLength: 4000 } as const;
 const object = (properties: Record<string, unknown>) =>
   ({ type: "object", properties, required: Object.keys(properties), additionalProperties: false });

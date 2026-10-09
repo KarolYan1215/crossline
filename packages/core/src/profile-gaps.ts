@@ -1,4 +1,5 @@
 import type { TurnQuestion } from "./onboarding-turn-schema";
+import { courseCodeOf } from "./task-title";
 
 /**
  * What the profile still has to learn from the person before milestones are designed from it.
@@ -17,10 +18,18 @@ export type ProfileGapInput = {
   facts: Array<{ identityId: string; projectId: string; slot: string; value: string; status: string }>;
   /** Things a file lists with no day ('TBD'), from the newest date batch. */
   undated?: Array<{ project: string; kind: string; title: string }>;
+  /** The projects a weekly meeting is on record for (by id or name), from every date batch not turned down. */
+  meetings?: string[];
+  /** Uploaded files only the person can file (`unfiledFilesIn`), with the project the interview leaned to. */
+  unfiled?: Array<{ id: string; fileName: string; lean?: { id: string } | undefined }>;
+  /** The working portrait, once all its fields are written, and whether the person said it fits them (`profile.confirmed`). */
+  portrait?: { written: boolean; confirmed: boolean };
 };
 export type ProfileGap = {
-  code: "LINE_UNCONFIRMED" | "DATE_UNDATED";
+  code: "LINE_UNCONFIRMED" | "DATE_UNDATED" | "COURSE_MEETINGS" | "FILE_UNFILED" | "PORTRAIT_UNCONFIRMED";
   identityId: string; projectId: string;
+  /** The file a `FILE_UNFILED` gap is about. */
+  documentId?: string;
   /** For the model, when it is told why it may not finish yet. */
   detail: string;
   question: TurnQuestion;
@@ -102,8 +111,65 @@ export function profileGaps(input: ProfileGapInput): ProfileGap[] {
       }
     });
   }
+
+  // A course meets: when nobody has said when, ask, with the files as one answer (an interview had two courses and asked about one).
+  const meets = new Set(input.meetings ?? []);
+  for (const project of input.projects) {
+    const own = input.facts.filter((fact) => fact.projectId === project.id && confirmed(fact));
+    const course = Boolean(courseCodeOf(project.name) ?? courseCodeOf(project.id)) || own.some((fact) => fact.slot === "grading");
+    if (!course || meets.has(project.id) || meets.has(project.name) || own.some((fact) => MEETING_SLOT.test(fact.slot))) continue;
+    gaps.push({
+      code: "COURSE_MEETINGS", identityId: project.identityId, projectId: project.id, blocking: false,
+      detail: `「${project.name}」还不知道每周什么时候上课。`,
+      question: {
+        id: `gap-meetings-${project.id}`, kind: "single", allowOther: true, identityId: project.identityId, projectId: project.id,
+        text: `「${project.name}」每周什么时候上课、在哪里？`,
+        options: [
+          { id: "write", label: "我来写上课时间", detail: "在“其他”里写，例如「周二、四 11:00–12:15，EH 2317」" },
+          { id: "file", label: "上传的课程文件里有", detail: "访谈会从文件里读出，读出后请确认" },
+          { id: "none", label: "没有固定上课时间", detail: "线上或自学，不占每周的固定时段" }
+        ]
+      }
+    });
+  }
+
+  // Which project a file belongs to, when nothing on record says: asked inside the interview while it runs.
+  for (const file of input.unfiled ?? []) {
+    const lean = input.projects.find((project) => project.id === file.lean?.id);
+    const ordered = lean ? [lean, ...input.projects.filter((project) => project !== lean)] : input.projects;
+    gaps.push({
+      code: "FILE_UNFILED", identityId: "", projectId: "", documentId: file.id, blocking: false,
+      detail: `《${file.fileName}》的所属项目不确定。`,
+      question: {
+        id: `gap-file-${file.id}`, kind: "single", allowOther: false, identityId: "", projectId: "",
+        text: `《${file.fileName}》属于哪个项目？`,
+        options: [
+          ...ordered.slice(0, 8).map((project) => ({ id: project.id, label: project.name,
+            detail: project === lean ? "访谈判断更可能是它" : lineLabel.get(project.identityId) ?? "" })),
+          { id: "none", label: "不属于任何项目", detail: "作为通用资料保留" }
+        ]
+      }
+    });
+  }
+
+  // The portrait is the person's to recognise: once it is written, they are asked whether it fits.
+  if (input.portrait?.written && !input.portrait.confirmed) gaps.push({
+    code: "PORTRAIT_UNCONFIRMED", identityId: "", projectId: "", blocking: false,
+    detail: "画像已写完，本人尚未确认。",
+    question: {
+      id: "gap-portrait", kind: "single", allowOther: true, identityId: "", projectId: "",
+      text: "「当前画像」里写的是否符合你？",
+      options: [
+        { id: "yes", label: "符合", detail: "画像以此为准；之后改动会再请你确认" },
+        { id: "mostly", label: "大体符合，有几处要改", detail: "在“其他”里写要改哪里" },
+        { id: "no", label: "不符合", detail: "在“其他”里写哪里不对" }
+      ]
+    }
+  });
   return gaps;
 }
+
+const MEETING_SLOT = /^(meeting|class)_?times?$|^no_meetings$/;
 
 /** Facts as they will stand once a turn's updates are written: a confirmed fact is never replaced by a guess. */
 export function mergeFacts<T extends { identityId: string; projectId: string; slot: string; status: string }>(existing: T[], updates: T[]): T[] {
@@ -117,7 +183,9 @@ export function mergeFacts<T extends { identityId: string; projectId: string; sl
   return [...merged.values()];
 }
 
-export type GapAnswer = { identityId: string; projectId: string; slot: string; value: string; quote: string };
+/** A fact to write; or, with an empty `slot`, an action: filing a file (`file`), or the person's 「符合」 for the portrait. */
+export type GapAnswer = { identityId: string; projectId: string; slot: string; value: string; quote: string;
+  file?: { documentId: string; projectId: string }; confirmPortrait?: boolean };
 
 const stable = (text: string) => [...text].reduce((hash, char) => (hash * 31 + char.codePointAt(0)!) >>> 0, 7).toString(36);
 
@@ -145,6 +213,16 @@ export function answeredGapFacts(replyText: string, gaps: ProfileGap[]): GapAnsw
       // 「知道具体日期」 without the date is not an answer.
       const value = other || picked.find((label) => gap.question.options.some((option) => option.label === label && option.id !== "known"));
       if (value) out.push({ ...base, slot: `undated_${stable(gap.question.id)}`, value: `${gap.detail}${value}`, quote: value });
+    } else if (gap.code === "COURSE_MEETINGS") {
+      // The times themselves go to the interview, which turns them into a weekly pattern the person confirms; this only records them.
+      if (other) out.push({ ...base, slot: "meeting_times", value: other, quote: other });
+      else if (picked.includes("没有固定上课时间")) out.push({ ...base, slot: "no_meetings", value: "没有固定上课时间", quote: "没有固定上课时间" });
+    } else if (gap.code === "FILE_UNFILED") {
+      const option = gap.question.options.find((item) => picked.includes(item.label));
+      if (option) out.push({ identityId: "", projectId: "", slot: "", value: option.label, quote: option.label,
+        file: { documentId: gap.documentId ?? "", projectId: option.id === "none" ? "" : option.id } });
+    } else if (gap.code === "PORTRAIT_UNCONFIRMED") {
+      if (picked.includes("符合")) out.push({ identityId: "", projectId: "", slot: "", value: "符合", quote: "符合", confirmPortrait: true });
     }
   }
   return out;

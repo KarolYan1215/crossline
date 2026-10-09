@@ -143,3 +143,10 @@ test("a kept date names its course: a bare 「课堂期末考试」 under ECE 55
     item({ id: "m", title: "期中考试 1", project: "课程待确认（可能为 ECE 548）" })] }), known);
   expect(extraction.dates.map((date) => date.title)).toEqual(["ECE 555 课堂期末考试", "期中考试 1"]);
 });
+
+test("a date already past is history, not a plan: kept apart, never offered for the calendar", () => {
+  const past = item({ id: "d0", date: "2026-09-28", quote: "9/28 DC Inverter #2 #1", sourceRef: "src-1", title: "ECE 555 作业 2 发布", project: "ECE 555" });
+  const { extraction } = sanitizeDateExtraction(out({ dates: [item(), past] }), known);
+  expect(extraction.dates.map((entry) => entry.id)).toEqual(["d1"]);
+  expect(extraction.past?.map((entry) => entry.id)).toEqual(["d0"]);
+});
