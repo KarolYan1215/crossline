@@ -15,6 +15,8 @@ You are finding material for **one** step (`node`), described by its goal, its s
 
 - A source is a **public https page you opened**. `title` is its real title. No IP addresses, no local names, no addresses with a port.
 - Prefer the primary source (the official documentation, the paper itself, a maintained tutorial from the maintainers) to a page that summarises it. Prefer open-access to paywalled. Two to five good sources beat eight mediocre ones.
+- Answer **every** research question: a step's topic-level questions (the concept, the tool, the method, the standard) always have public answers — university lecture notes and open courseware, textbook publishers' open chapters, official documentation, standards bodies, preprint servers. A course-specific question (this term's exam scope, a course announcement) usually lives behind the course platform: say so in `gaps` and still answer the topic questions.
+- Prefer pages a script can open. Rating sites, forum aggregators and login-walled pages often refuse automated readers; such a page is kept only as a link with your summary, marked as not checked, so it should never be the only source for a step.
 - `kind`: `paper`, `docs`, `tutorial`, `dataset`, `tool`, `other`.
 - `openAccess`: your honest reading of whether the full text can be freely read and kept: `yes`, `no`, or `unknown`. **This is only your claim.** The app decides what is downloaded, from a short list of open-access hosts, and never from your word alone; but saying `no` for something paywalled keeps it from being kept.
 - `summary`: what the source gives for this step, in a few sentences. It is the only thing kept of a source that is not downloaded, so make it faithful to what the page says; do not add to it.

@@ -40,7 +40,7 @@ export default async function MaterialPage({ params, searchParams }: { params: P
     <div className="material-view">
       <section className="material-source" aria-label="材料">
         <header><h2>材料</h2>
-          <small className="muted">{document ? "本人上传" : `${entry!.publisher || "网络"} · ${entry!.kept === "full_text" ? "已存全文" : "链接与摘要"}`}</small>
+          <small className="muted">{document ? "本人上传" : `${entry!.publisher || "网络"} · ${({ full_text: "已存全文", summary_only: "链接与摘要", unverified: "未能自动核实" } as Record<string, string>)[entry!.kept] ?? "链接与摘要"}`}</small>
           {frame && <a href={frame} target="_blank" rel="noreferrer">新窗口打开</a>}
           {entry && !document && entry.url && <a href={entry.url} target="_blank" rel="noreferrer noopener">原网页</a>}</header>
         {frame && isPdf ? <iframe className="material-frame" src={frame} title={title} />

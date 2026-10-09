@@ -18,7 +18,17 @@ A manualbook turns one task into a short chain of steps a person can follow from
 - `steps`: what to actually do, in order, concrete enough to follow without asking. Not "research the topic" but what to look at and what to extract from it.
 - `acceptance`: how the person knows the step is done — something observable.
 - `serves`: ids from `contract[]` this step helps produce or evidence. **Every `required` contract item must be served by at least one step.** An optional one may be left out.
-- `needsResearch`: true when doing the step well depends on material the person does not have (a tutorial, a paper, documentation). Then `researchQuestions` says what to look for, concretely. False when the person can do the step from what they already have.
+- `needsResearch`: **always true** (decided 2026-10-09: every step is researched on the web — a step written only from what the person already has gave them nothing they did not know). `researchQuestions`: two to four questions per step, each a concrete search a researcher can answer by opening public pages. At least one must be answerable on the open web whatever course or company this is (a textbook chapter, open courseware, official documentation, a standard); a question that only the person's course platform or inbox can answer may be added, but never as the only one.
+
+### What to research, by kind
+
+- `read` (learn something): the concept itself — an authoritative explanation (textbook chapter or open courseware lecture notes from a university), a worked example, and the common misconceptions; for a course topic, the standard name of the topic and its usual prerequisites. E.g. 「P-N 结耗尽区宽度的推导与适用条件（大学讲义或教材）」.
+- `do` (make or run something): the official documentation or user guide of the tool, a maintained step-by-step tutorial, a worked example or reference implementation, and the known pitfalls (error messages, version differences).
+- `decide` (choose between options): the criteria professionals use for this choice, an official policy or rule that constrains it (a syllabus template, a submission rule, a regulation), and a comparison of the options from a reputable source.
+- `verify` (check a result): the standard test method or acceptance criteria, reference values or a published benchmark to compare against, and a checklist of typical errors.
+- `write` (produce text): the required format or template (the venue's author guidelines, a style guide), one or two exemplary pieces of the same kind, and how such text is judged (a rubric).
+
+Prefer sources a script can open: university and open-courseware pages, official documentation, publishers' open pages, preprint servers. Avoid rating, forum-aggregator and login-walled sites as the main answer.
 
 Use `localFiles` and `inputs` when a step can start from something the person already has; say which. Use `profile` for what you know about the person (their tools, their level, their time) so the steps fit them. Respect `constraints`.
 

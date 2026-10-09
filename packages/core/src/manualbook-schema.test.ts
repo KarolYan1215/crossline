@@ -12,9 +12,9 @@ const context: ManualDesignContext = {
   inputs: [], localFiles: [], profile: [], constraints: []
 };
 const node = (id: string, over: Partial<ManualNode> = {}): ManualNode => ({ id, title: `步骤 ${id}`, kind: "do", goal: "目标", steps: ["做一件事"], acceptance: "做到了",
-  serves: [], needsResearch: false, researchQuestions: [], ...over });
+  serves: [], needsResearch: true, researchQuestions: ["教材怎么讲", "官方文档在哪"], ...over });
 const design = (over: Partial<ManualDesign> = {}): ManualDesign => ({
-  overview: "总览", nodes: [node("learn", { serves: ["c1"], needsResearch: true, researchQuestions: ["Virtuoso 入门看什么"] }), node("draw", { serves: ["c2"] })],
+  overview: "总览", nodes: [node("learn", { serves: ["c1"], needsResearch: true, researchQuestions: ["Virtuoso 入门看什么", "官方教程在哪"] }), node("draw", { serves: ["c2"] })],
   edges: [{ from: "learn", to: "draw" }], assumptions: [], blockers: [], ...over
 });
 const refused = (value: unknown, code: string) => {
@@ -36,14 +36,15 @@ test("ids, edges, loops and loose steps are refused with the step named", () => 
 });
 
 test("every required item needs a step that serves it, and a step cannot serve an item that does not exist", () => {
-  refused(design({ nodes: [node("learn", { serves: ["c1"], needsResearch: true, researchQuestions: ["q"] }), node("draw")] }), "MANUAL_CONTRACT_UNSERVED");
+  refused(design({ nodes: [node("learn", { serves: ["c1"], needsResearch: true, researchQuestions: ["q", "r"] }), node("draw")] }), "MANUAL_CONTRACT_UNSERVED");
   refused(design({ nodes: [node("learn", { serves: ["nope"] }), node("draw", { serves: ["c2"] })] }), "MANUAL_CONTRACT_UNKNOWN");
   // The optional item may go unserved.
   expect(() => validateManualDesign(design(), context)).not.toThrow();
 });
 
 test("a step that needs research must say what to look for", () => {
-  refused(design({ nodes: [node("learn", { serves: ["c1"], needsResearch: true }), node("draw", { serves: ["c2"] })] }), "MANUAL_RESEARCH_QUESTION_MISSING");
+  refused(design({ nodes: [node("learn", { serves: ["c1"], researchQuestions: ["只有一个"] }), node("draw", { serves: ["c2"] })] }), "MANUAL_RESEARCH_QUESTION_MISSING");
+  refused(design({ nodes: [node("learn", { serves: ["c1"], needsResearch: false }), node("draw", { serves: ["c2"] })] }), "MANUAL_RESEARCH_QUESTION_MISSING");
 });
 
 test("topological order puts every step after what it depends on, and is absent for a loop", () => {

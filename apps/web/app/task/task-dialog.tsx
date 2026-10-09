@@ -130,7 +130,7 @@ function MaterialsPanel({ detail }: { detail: TaskDetail }) {
     </li>)}</ul></section>}
     {web.length > 0 && <section><h4>教程资料</h4><ul>{web.map((item) => <li key={item.index}>
       <a href={preview(`m=${item.index}`)}>{item.title}</a>
-      <small className="muted">{item.publisher || "网络"} · {item.kept === "full_text" ? "已存全文" : "链接与摘要"} · {item.notes} 条解析</small>
+      <small className="muted">{item.publisher || "网络"} · {({ full_text: "已存全文", summary_only: "链接与摘要", unverified: "未能自动核实" } as Record<string, string>)[item.kept] ?? "链接与摘要"} · {item.notes} 条解析</small>
     </li>)}</ul></section>}
     {detail.preparedMaterials.length > 0 && <section><h4>已备文件</h4><ul>{detail.preparedMaterials.filter((item) => !/\/(flow|manifest|materials)\.json$|\/nodes\//.test(item.uri)).map((item) => <li key={item.id}>
       <a href={`/api/work-orders/${encodeURIComponent(detail.id)}/materials?uri=${encodeURIComponent(item.uri)}`} target="_blank" rel="noreferrer">{item.fileName}</a></li>)}</ul></section>}

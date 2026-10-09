@@ -53,7 +53,7 @@ export type ManualbookDeps = {
 };
 
 type KeptSource = {
-  id: string; url: string; title: string; publisher: string; kind: string; summary: string; kept: "full_text" | "summary_only";
+  id: string; url: string; title: string; publisher: string; kind: string; summary: string; kept: "full_text" | "summary_only" | "unverified";
   /** A file the person uploaded (its source-document id): read from the app's own copy, never downloaded. */
   docId?: string;
   verdict: string; fetchedAt: string; file?: string; sha256?: string; bytes?: number; text: string;
@@ -178,27 +178,26 @@ export function createManualbookBuilder(store: CrosslineStore, workspaceId: stri
     // 2. material, per step -------------------------------------------------------------------------------------
     const web = all.webBlocker();
     const results: NodeResult[] = [];
-    const researchable = nodes.filter((node) => node.needsResearch);
+    // Every step is researched; a design from before that rule, or a step whose questions are missing, searches by its own title and goal.
     let searched = 0;
     for (const node of nodes) {
       const result: NodeResult = { node, sources: [], gaps: [], writeup: undefined };
-      if (node.needsResearch) {
-        progress("researching", searched, researchable.length);
-        searched += 1;
-        if (web) { result.gaps.push(`没有联网查资料：${web.message}`); }
+      progress("researching", searched, nodes.length);
+      searched += 1;
+      if (web) { result.gaps.push(`没有联网查资料：${web.message}`); }
+      else {
+        const searchContext: MaterialSearchContext = { version: "crossline.manualbook.search.v1", today, task: { intent: context.workOrder.intent },
+          node: { id: node.id, title: node.title, kind: node.kind, goal: node.goal, steps: node.steps,
+            researchQuestions: node.researchQuestions.length ? node.researchQuestions : [`${node.title}：${node.goal}`] },
+          localFiles: context.localFiles, constraints: context.constraints };
+        const found = await runCodexSkill<MaterialSearch>(client, searchContext, {
+          skillName: MATERIAL_RESEARCHER_SKILL, cwd, developerInstructions: SEARCH_INSTRUCTIONS, outputSchema: MATERIAL_SEARCH_SCHEMA, allowWebSearch: true,
+          prepareInput: () => searchContext, validateOutput: (output) => validateMaterialSearch(output), onAudit: () => {}, timeoutMs: 60 * 60_000
+        });
+        if (!found.ok) result.gaps.push(`这一步没有找到可核实的资料：${found.blocker.message}`);
         else {
-          const searchContext: MaterialSearchContext = { version: "crossline.manualbook.search.v1", today, task: { intent: context.workOrder.intent },
-            node: { id: node.id, title: node.title, kind: node.kind, goal: node.goal, steps: node.steps, researchQuestions: node.researchQuestions },
-            localFiles: context.localFiles, constraints: context.constraints };
-          const found = await runCodexSkill<MaterialSearch>(client, searchContext, {
-            skillName: MATERIAL_RESEARCHER_SKILL, cwd, developerInstructions: SEARCH_INSTRUCTIONS, outputSchema: MATERIAL_SEARCH_SCHEMA, allowWebSearch: true,
-            prepareInput: () => searchContext, validateOutput: (output) => validateMaterialSearch(output), onAudit: () => {}, timeoutMs: 60 * 60_000
-          });
-          if (!found.ok) result.gaps.push(`这一步没有找到可核实的资料：${found.blocker.message}`);
-          else {
-            result.gaps.push(...found.output.gaps);
-            result.sources = await keepSources(found.output.sources, all, today, result.gaps);
-          }
+          result.gaps.push(...found.output.gaps);
+          result.sources = await keepSources(found.output.sources, all, today, result.gaps);
         }
       }
       results.push(result);
@@ -294,6 +293,14 @@ async function keepSources(found: FoundSource[], deps: ManualbookDeps, today: st
     }
     // Link and summary only: still opened, so a page that does not exist is not listed.
     const page = await safeGet(source.url, deps.safeGet, { maxBytes: MAX_PAGE_BYTES });
+    // A site that refuses automated readers (401/403) or asks them to slow down (429) answered — the page exists — but could not be read
+    // here: its link and the researcher's summary are kept, marked as not checked by the app, instead of being dropped.
+    if (!page.ok && /返回 (401|403|429)$/.test(page.reason)) {
+      gaps.push(`「${source.title}」拒绝自动访问（${page.reason}），保留链接与摘要，未能自动核实。`);
+      kept.push({ id: source.id, url: source.url, title: source.title, publisher: source.publisher, kind: source.kind, summary: source.summary,
+        kept: "unverified", verdict: `网站拒绝自动访问（${page.reason}），内容未经本应用核实`, fetchedAt, text: source.summary });
+      continue;
+    }
     if (!page.ok) { gaps.push(`「${source.title}」打不开（${page.reason}），已丢弃。`); continue; }
     if (page.contentType.startsWith("text/html") && !claimedTitleMatches(source.title, htmlToText(new TextDecoder().decode(page.bytes)).slice(0, 6000))) {
       gaps.push(`「${source.title}」的页面内容与标题对不上，已丢弃。`); continue;

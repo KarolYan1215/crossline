@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { Markdown } from "./ui/markdown";
 
-type Source = { id: string; url: string; title: string; publisher: string; kept: "full_text" | "summary_only"; verdict: string; summary: string; file?: string; uri?: string };
+type Source = { id: string; url: string; title: string; publisher: string; kept: "full_text" | "summary_only" | "unverified"; verdict: string; summary: string; file?: string; uri?: string };
 type FlowNode = { id: string; title: string; kind: string; goal: string; stage: number; order?: number };
 type Status = { building: boolean; progress: { stage: string; done: number; total: number } | null; blocker: string | null };
 type Book = Status & {
@@ -77,7 +77,7 @@ export function ManualbookView({ workOrderId, building: preparing, canBuild = tr
         {view === "sources"
           ? <ul className="mb-sources">{sources.map((source) => <li key={source.id}>
               <a href={source.url} target="_blank" rel="noreferrer noopener">{source.title}</a> <small>{source.publisher}</small>
-              <span className="tag">{source.kept === "full_text" ? "已存全文" : "链接与摘要"}</span>
+              <span className="tag">{({ full_text: "已存全文", summary_only: "链接与摘要", unverified: "未能自动核实" } as Record<string, string>)[source.kept] ?? "链接与摘要"}</span>
               <p className="gen">{source.summary}</p>
               {source.uri && <small><a href={`/api/work-orders/${encodeURIComponent(workOrderId)}/materials?uri=${encodeURIComponent(source.uri)}`} target="_blank" rel="noreferrer">打开本地副本</a></small>}
             </li>)}{sources.length === 0 && <li className="muted">该步骤只用到本人上传的文件。</li>}</ul>

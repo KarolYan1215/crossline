@@ -93,7 +93,9 @@ export function validateManualDesign(value: unknown, context: ManualDesignContex
     if (!SLUG.test(node.id)) refuse("MANUAL_NODE_ID_INVALID", `步骤 id「${node.id}」只能是小写字母、数字和连字符，字母开头。`);
     if (ids.has(node.id)) refuse("MANUAL_NODE_ID_DUPLICATE", `步骤 id「${node.id}」重复。`);
     ids.add(node.id);
-    if (node.needsResearch && !node.researchQuestions.length) refuse("MANUAL_RESEARCH_QUESTION_MISSING", `步骤「${node.title}」要查资料，但没有写出要查什么。`);
+    // Every step is researched (decided 2026-10-09): one written only from what the person already has told them nothing new.
+    if (!node.needsResearch || node.researchQuestions.length < 2) refuse("MANUAL_RESEARCH_QUESTION_MISSING",
+      `每一步都要联网查资料：步骤「${node.title}」需要 needsResearch=true 和至少两个具体的检索问题，其中至少一个能在公开网页上找到答案（教材、公开课讲义、官方文档或标准）。`);
   }
   for (const edge of out.edges) {
     if (!ids.has(edge.from) || !ids.has(edge.to)) refuse("MANUAL_EDGE_UNKNOWN_NODE", `连线 ${edge.from} → ${edge.to} 指向不存在的步骤。`);
@@ -198,7 +200,7 @@ export type WriteContext = {
   task: { intent: string };
   node: Pick<ManualNode, "id" | "title" | "kind" | "goal" | "steps" | "acceptance">;
   /** What was kept for this step: downloaded text (clipped) or a summary and link. Cite them by `id`. */
-  sources: Array<{ id: string; title: string; url: string; kept: "full_text" | "summary_only"; text: string }>;
+  sources: Array<{ id: string; title: string; url: string; kept: "full_text" | "summary_only" | "unverified"; text: string }>;
   inputs: Array<{ id: string; text: string }>;
   profile: Array<{ id: string; value: string }>;
 };

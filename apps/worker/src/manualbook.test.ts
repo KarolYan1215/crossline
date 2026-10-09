@@ -30,8 +30,8 @@ const SKILLS = [MANUAL_DESIGNER_SKILL, MATERIAL_RESEARCHER_SKILL, MATERIAL_WRITE
 const design = {
   overview: "先学工具，再画图。",
   nodes: [
-    { id: "learn", title: "学 Virtuoso", kind: "read", goal: "会用原理图编辑器", steps: ["看官方教程第一章"], acceptance: "能新建 cell", serves: ["c1"], needsResearch: true, researchQuestions: ["Virtuoso 入门看什么"] },
-    { id: "draw", title: "画 6T 单元", kind: "do", goal: "完成原理图", steps: ["放 6 个晶体管"], acceptance: "有截图", serves: ["w1-evidence-0"], needsResearch: false, researchQuestions: [] }
+    { id: "learn", title: "学 Virtuoso", kind: "read", goal: "会用原理图编辑器", steps: ["看官方教程第一章"], acceptance: "能新建 cell", serves: ["c1"], needsResearch: true, researchQuestions: ["Virtuoso 入门看什么", "官方教程在哪"] },
+    { id: "draw", title: "画 6T 单元", kind: "do", goal: "完成原理图", steps: ["放 6 个晶体管"], acceptance: "有截图", serves: ["w1-evidence-0"], needsResearch: true, researchQuestions: ["教程", "示例"] }
   ],
   edges: [{ from: "learn", to: "draw" }], assumptions: ["已装好 Cadence"], blockers: []
 };
@@ -64,7 +64,8 @@ test("a task becomes a manualbook: a flow, per-step files, downloaded open-acces
   const { rpc } = scriptedRuntime(SKILLS, respond());
   const build = createManualbookBuilder(store, WS, dir, "C:\\repo", () => rpc, deps());
   const outcome = await build("w1");
-  expect(outcome).toMatchObject({ state: "ready", nodes: 2, sources: 2, downloaded: 1 });
+  // Both steps are researched (every step is, since 2026-10-09), and each keeps the two sources that open.
+  expect(outcome).toMatchObject({ state: "ready", nodes: 2, sources: 4, downloaded: 2 });
 
   const files = listManualbookFiles(dir, "w1");
   for (const expected of ["flow.json", "manual.md", "manifest.json", "nodes/learn/task.md", "nodes/learn/analysis.md", "nodes/learn/tutorial.md", "nodes/draw/task.md"]) expect(files).toContain(expected);
@@ -77,7 +78,7 @@ test("a task becomes a manualbook: a flow, per-step files, downloaded open-acces
   const manifest = JSON.parse(readFileSync(path.join(dir, "w1", "manifest.json"), "utf8")) as {
     files: Array<{ path: string; sha256: string }>; sources: Array<{ id: string; kept: string; license: string }>;
   };
-  expect(manifest.sources.map((source) => [source.id, source.kept])).toEqual([["s1", "full_text"], ["s2", "summary_only"]]);
+  expect(manifest.sources.map((source) => [source.id, source.kept])).toEqual([["s1", "full_text"], ["s2", "summary_only"], ["s1", "full_text"], ["s2", "summary_only"]]);
   expect(manifest.sources[0]!.license).toContain("arXiv");
   for (const entry of manifest.files) {
     expect(createHash("sha256").update(readFileSync(path.join(dir, "w1", entry.path))).digest("hex"), entry.path).toBe(entry.sha256);
@@ -107,7 +108,8 @@ test("a write-up that cites a source it was never given is refused for that step
     if (prompt.includes("crossline.manualbook.design.v1")) return JSON.stringify(design);
     if (prompt.includes("crossline.manualbook.search.v1")) return JSON.stringify(search);
     writes += 1;
-    return JSON.stringify(writeup(prompt.includes("放 6 个晶体管") ? [] : ["s9"]));
+    // Every step is researched now, so the good one cites a source it was given.
+    return JSON.stringify(writeup(prompt.includes("放 6 个晶体管") ? ["s1"] : ["s9"]));
   });
   const outcome = await createManualbookBuilder(store, WS, dir, "C:\\repo", () => rpc, deps())("w1");
   expect(outcome).toMatchObject({ state: "ready" });
@@ -158,8 +160,8 @@ test("a tutorial is built for committed work without moving it, from its steps a
   expect(context.plannedSteps?.map((item) => item.title)).toEqual(["拆解要求", "解题"]);
   expect(context.localFiles).toEqual(["F26-ECE555-HW2.pdf"]);
   const steps = { overview: "按步骤", nodes: [
-    { id: "split", title: "拆解要求", kind: "read", goal: "读题", steps: ["读作业"], acceptance: "列出题目", serves: [context.contract[0]!.id], needsResearch: false, researchQuestions: [] },
-    { id: "solve", title: "解题", kind: "do", goal: "解题", steps: ["逐题求解"], acceptance: "全部完成", serves: [context.contract[1]!.id], needsResearch: false, researchQuestions: [] }
+    { id: "split", title: "拆解要求", kind: "read", goal: "读题", steps: ["读作业"], acceptance: "列出题目", serves: [context.contract[0]!.id], needsResearch: true, researchQuestions: ["教程", "示例"] },
+    { id: "solve", title: "解题", kind: "do", goal: "解题", steps: ["逐题求解"], acceptance: "全部完成", serves: [context.contract[1]!.id], needsResearch: true, researchQuestions: ["教程", "示例"] }
   ], edges: [{ from: "split", to: "solve" }], assumptions: [], blockers: [] };
   const prompts: string[] = [];
   const { rpc } = scriptedRuntime(SKILLS, (prompt: string) => {
@@ -186,4 +188,17 @@ test("work coming up this week gets a tutorial on the tick once; a failed one wa
   expect(pendingTutorials(store, WS)).toEqual(["hw3"]);
   store.appendEvent({ ownerId: "o", workspaceId: WS, idempotencyKey: "tb", type: "tutorial.blocked", entityId: "hw3", payload: { code: "X", message: "" } });
   expect(pendingTutorials(store, WS)).toEqual([]);
+});
+
+test("a page that refuses automated readers (403/429) keeps its link and summary, marked as not checked; one that does not exist is dropped", async () => {
+  const blocking = (async (input: string | URL | Request) => {
+    const url = String(input);
+    if (url === "https://ghost.example.org/none") return new Response("forbidden", { status: 403, headers: { "content-type": "text/html" } });
+    return fetchImpl(input);
+  }) as typeof fetch;
+  const { rpc } = scriptedRuntime(SKILLS, respond());
+  const outcome = await createManualbookBuilder(store, WS, dir, "C:\repo", () => rpc, deps({ safeGet: { fetchImpl: blocking, isPublicHost: async () => true } }))("w1");
+  expect(outcome).toMatchObject({ state: "ready", sources: 6 });
+  const task = readFileSync(path.join(dir, "w1", "nodes/learn/task.md"), "utf8");
+  expect(task).toContain("「Ghost Page」拒绝自动访问（返回 403），保留链接与摘要，未能自动核实。");
 });
