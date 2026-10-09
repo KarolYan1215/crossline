@@ -28,7 +28,7 @@ const INSTRUCTIONS = "You interview a Crossline user as the Skill describes: a l
   + "`lineProfiles`; ask more when a line is still thin. Facts about the person in general use identityId \"person\". When `focusLine` is "
   + "set, interview only that line (stage `details`). Every confirmed slotUpdate cites a reply-N or src-N with a verbatim sourceQuote; your "
   + "own conclusions are sourceRef 'inference', status 'inferred', empty quote. Never invent dates, numbers or names. Files that arrive "
-  + "are for you to read: every date they state goes into `fileDates`, each with a verbatim quote containing the day and a title that names its course or project (「ECE 555 期末考试」, never a bare 「期末考试」); never turn TBD into "
+  + "are for you to read: every date they state goes into `fileDates`, each with a verbatim quote containing the day and a title that names its course or project (「ECE 555 期末考试」, never a bare 「期末考试」); never ask which course or project a file belongs to (the app asks that itself; a settled file carries its projectId); never turn TBD into "
   + "a date (list it in `undated`). When `history` is present the conversation is being resumed: continue it, do not greet again or re-ask "
   + "what is answered. All human-readable fields in Chinese.";
 

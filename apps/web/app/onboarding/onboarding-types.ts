@@ -31,6 +31,8 @@ export type DiligenceReport = {
   sources: Array<{ id: string; title: string; publisher: string; finalUrl: string; accessedOn: string }>;
 };
 export type OnboardingState = {
+  /** Questions of the open batch left out because 待决事项 asks them (which project a file belongs to). */
+  movedToAsks?: number;
   /** Questions the app itself still needs answered (a target grade, a line resting on guesses, a TBD date), with options to pick from. */
   gaps: Question[];
   diligence: DiligenceReport[];

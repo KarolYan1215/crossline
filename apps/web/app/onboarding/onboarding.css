@@ -64,3 +64,5 @@
 .ob-guide li small{grid-column:2 / -1;color:var(--graphite)}
 @media (max-width:640px){.ob-setup-lines li{grid-template-columns:auto minmax(0,1fr) auto;}.ob-setup-lines li .ob-rank{display:none}.ob-two{grid-template-columns:1fr}
   .ob-guide li{grid-template-columns:56px minmax(0,1fr)}.ob-guide li .ob-guide-example,.ob-guide li small{grid-column:2}}
+
+.ob-moved{margin:0;font-size:13px;color:var(--graphite)}

@@ -181,6 +181,7 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
             {latest && turn.nextAction === "ready_for_milestones" && <p className="ob-done">信息已基本完整，可在下方生成画像报告与里程碑。</p>}
           </div>;
         })}
+        {(state?.movedToAsks ?? 0) > 0 && !waiting && <p className="ob-moved">本轮另有 {state!.movedToAsks} 个关于文件归属的问题已移到 <a href="/approvals">待决事项</a>，在那里回答一次即可。</p>}
         {batch.length > 0 && !waiting && <div className="ob-turn ob-assistant ob-batch" aria-label="本轮问题">
           <nav className="ob-batch-nav" aria-label="问题进度">{batch.map((question, index) => <button key={question.id} type="button" aria-current={index === Math.min(current, batch.length - 1) || undefined}
             data-answered={Boolean(answers[question.id]?.picked.length || answers[question.id]?.other.trim()) || undefined} onClick={() => setCurrent(index)}>{index + 1}</button>)}</nav>

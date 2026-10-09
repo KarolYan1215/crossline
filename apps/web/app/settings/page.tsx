@@ -21,6 +21,7 @@ import {
 } from "../../lib/crossline";
 import { requireSessionContext } from "../../lib/access-guard";
 import { lineLabels } from "../../lib/lines";
+import { interviewStatus } from "../../lib/interview-status";
 
 export const dynamic = "force-dynamic";
 const USAGE_DAYS = 7;
@@ -34,6 +35,7 @@ const TONE: Record<string, RecentTask["tone"]> = { running: "info", needs_review
  */
 export default async function SettingsPage() {
   const ctx = await requireSessionContext();
+  const interview = interviewStatus(ctx);
   const store = getStore();
   const setting = (key: string) => store.getSetting(ctx.workspaceId, key);
   const level = (value: string | null | undefined) => value === "granted" || value === "denied" ? value : "unasked";
@@ -72,8 +74,10 @@ export default async function SettingsPage() {
           <div className="st-modules">
             <section className="st-card" aria-label="个人情况">
               <header><h3>个人情况</h3><small>主线、项目、日期与长期目标的来源</small></header>
-              <div className="st-row"><span className="st-row-label">访谈<small>补充或修改后，里程碑草稿按新情况重新设计</small></span>
-                <a className="secondary-button" href="/onboarding">打开访谈</a></div>
+              <div className="st-row"><span className="st-row-label">访谈<small>{!interview.started ? "尚未开始"
+                : interview.complete ? "已完成；补充或修改后，里程碑草稿按新情况重新设计"
+                  : `进行中 · 第 ${interview.stageIndex}/${interview.stageCount} 阶段 · 待答 ${interview.openQuestions} 题`}</small></span>
+                <a className="secondary-button" href="/onboarding">{interview.started && !interview.complete ? "继续访谈" : "打开访谈"}</a></div>
             </section>
             <section className="st-card" aria-label="手机访问" id="phone">
               <header><h3>手机访问</h3><small>与电脑同一账本；本机需保持运行</small></header>

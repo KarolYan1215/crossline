@@ -1,8 +1,8 @@
 import "server-only";
 import { recordOp, retractedEventIds, withUndo } from "./undo";
 import {
-  ATTENTION_SNAPSHOT, CALENDAR_LINES, CALENDAR_PUBLISH_FAILURE, CALENDAR_SYNC_FAILURE, calendarEventKey, daysBetween, documentProject, documentsByRef,
-  leaningProject, missingInputsOf, plainProject, rankAsks, snoozeUntil, urgencyFor, type CalendarLines,
+  ATTENTION_SNAPSHOT, CALENDAR_LINES, CALENDAR_PUBLISH_FAILURE, CALENDAR_SYNC_FAILURE, calendarEventKey, daysBetween, missingInputsOf, rankAsks,
+  snoozeUntil, urgencyFor, type CalendarLines,
   validateAskAnswer, type AccessContext, type Ask, type AskOption, type AskSnooze
 } from "@crossline/core";
 import { listAgentTasks, type StoredWorkOrder } from "@crossline/db";
@@ -16,6 +16,8 @@ import { readScheduledDay } from "./schedule-memory";
 import { requestCodexSupervisor } from "./codex-runtime";
 import { autoPublishPass, forgetPublishedHash } from "./auto-publish";
 import { calendarFiling } from "./timeline";
+import { interviewStatus } from "./interview-status";
+import { unfiledFiles } from "./file-belonging";
 import { identityLines } from "./lines";
 
 /** Markers an undo has taken back are as if never written. */
@@ -398,48 +400,26 @@ function calendarAsks({ store, ctx }: Source): Ask[] {
  * filed under, not its name, not the opening of its text (`packages/core/src/belonging.ts`). One question per file, with the project the
  * interview leaned towards recommended. Until answered, its dates are shown without a course.
  */
-const PERSONAL = /^(个人|本人|个人档案|个人信息|person|personal)$/iu;
+/**
+ * A file only the person can place (`unfiledFiles`, `lib/file-belonging.ts`): one question per file, the interview's lean recommended.
+ * The interview no longer asks the same thing — its question about such a file is left out of its batch (`lib/interview-status.ts`).
+ */
 function sourceProjectAsks({ store, ctx, today }: Source): Ask[] {
   const projects = store.listProjects(ctx.workspaceId).map((project) => ({ id: project.id, name: project.name, identityId: project.identityId }));
-  if (!projects.length) return [];
-  const docs = store.listSourceDocuments(ctx.workspaceId);
-  const byRef = documentsByRef(docs);
-  const cleared = new Set(live(ctx, store.listEvents(ctx.workspaceId, { type: "source.project_cleared" })).map((event) => event.entityId));
-  const superseded = new Set(store.listEvents(ctx.workspaceId, { type: "dates.decided" })
-    .filter((event) => (event.payload as { superseded?: boolean }).superseded).map((event) => event.entityId));
-  type Item = { title: string; project?: string; sourceRef?: string; date?: string; from?: string };
-  const lineNames = new Set(identityLines(ctx).flatMap((line) => [line.id, line.label]));
-  const open = new Map<string, { doc: (typeof docs)[number]; titles: string[]; days: string[]; lean: (typeof projects)[number] | undefined; raisedAt: string }>();
-  for (const event of store.listEvents(ctx.workspaceId, { type: "dates.extracted" })) {
-    if (superseded.has(event.entityId)) continue;
-    const payload = event.payload as { dates?: Item[]; recurring?: Item[]; undated?: Item[] };
-    for (const item of [...(payload.dates ?? []), ...(payload.recurring ?? []), ...(payload.undated ?? [])]) {
-      // An item filed under no project, under a line's own name or under the person (a CV's dates: 「个人档案」「研究者」) is not about a
-      // project: nothing to ask.
-      const project = item.project?.trim() ?? "";
-      if (!project || lineNames.has(project) || PERSONAL.test(project) || plainProject(project, projects)) continue;
-      const doc = item.sourceRef ? byRef.get(item.sourceRef) : undefined;
-      if (!doc || doc.projectId || cleared.has(doc.id) || documentProject(doc, projects)) continue;
-      const entry = open.get(doc.id) ?? { doc, titles: [], days: [], lean: undefined, raisedAt: event.createdAt };
-      if (!entry.titles.includes(item.title)) entry.titles.push(item.title);
-      const day = item.date ?? item.from;
-      if (day && day >= today) entry.days.push(day);
-      entry.lean ??= leaningProject(item.project, projects);
-      open.set(doc.id, entry);
-    }
-  }
-  return [...open.values()].map(({ doc, titles, days, lean, raisedAt }) => {
+  return unfiledFiles(ctx, today).map(({ id, fileName, titles, days, lean, raisedAt }) => {
     const dueDay = days.sort()[0];
     // The lean first, then the projects on its line, then the rest.
     const ordered = [...(lean ? [lean] : []), ...projects.filter((project) => project.id !== lean?.id)
       .sort((a, b) => Number(b.identityId === lean?.identityId) - Number(a.identityId === lean?.identityId))].slice(0, 6);
     const named = titles.slice(0, 3).map((title) => `「${short(title, 16)}」`).join("、");
-    return { id: `src:${doc.id}`, kind: "source_project" as const, entityId: doc.id, urgency: urgencyFor(dueDay, today), ...(dueDay ? { dueDay } : {}),
-      raisedAt, fingerprint: `${doc.id}:${titles.length}`, title: `《${short(doc.fileName, 32)}》属于哪个项目？`,
-      why: `文件名和正文开头都没有写明所属课程或项目，从中读出的 ${titles.length} 项日程（${named}${titles.length > 3 ? " 等" : ""}）因此无法标明归属`
-        + `${lean ? `；访谈时判断更可能是 ${lean.name}` : ""}。确认后，这些日程与截止都会带上项目名。`,
+    return { id: `src:${id}`, kind: "source_project" as const, entityId: id, urgency: urgencyFor(dueDay, today), ...(dueDay ? { dueDay } : {}),
+      raisedAt, fingerprint: `${id}:${titles.length}`, title: `《${short(fileName, 32)}》属于哪个项目？`,
+      why: titles.length
+        ? `文件名和正文开头都没有写明所属课程或项目，从中读出的 ${titles.length} 项日程（${named}${titles.length > 3 ? " 等" : ""}）因此无法标明归属`
+          + `${lean ? `；访谈时判断更可能是 ${lean.name}` : ""}。确认后，这些日程与截止都会带上项目名。`
+        : "文件名和正文开头都没有写明所属课程或项目。确认后，这份文件会作为该项目任务的材料与背景使用。",
       options: [...ordered.map((project) => ({ id: `p:${project.id}`, label: project.name, ...(project.id === lean?.id ? { recommended: true } : {}) })),
-        { id: "none", label: "不属于任何项目", detail: "这份文件的日程保持原名" }] };
+        { id: "none", label: "不属于任何项目", detail: titles.length ? "这份文件的日程保持原名" : "作为通用资料保留" }] };
   });
 }
 
@@ -461,9 +441,26 @@ function calendarLineAsks({ store, ctx }: Source): Ask[] {
       options: [...lines.map((line) => ({ id: `l:${line.id}`, label: line.label })), { id: "none", label: "不属于任何主线", detail: "个人事务等，保持无色" }] }));
 }
 
+const STAGE_LABEL: Record<string, string> = { orientation: "开场与规则", situation: "现状", compass: "指南针", energy: "能量", lines: "主线", details: "细节" };
+
+/**
+ * The main interview stopped with questions still open. The system works meanwhile — approved milestones are worked back and scheduled —
+ * but milestone drafts, long-term goals and the proposed hours are designed from what the interview has, so the gap is named here.
+ */
+function interviewAsks({ ctx }: Source): Ask[] {
+  const status = interviewStatus(ctx);
+  if (!status.started || status.complete || !status.openQuestions) return [];
+  const missing = status.missing.slice(0, 4);
+  return [{ id: `interview:${status.stage}`, kind: "interview_open", entityId: "interview", urgency: "later", raisedAt: "",
+    fingerprint: `${status.stage}:${status.openQuestions}`, title: `访谈未完成：还有 ${status.openQuestions} 个问题`,
+    why: `访谈停在「${STAGE_LABEL[status.stage] ?? status.stage}」阶段（第 ${status.stageIndex}/${status.stageCount} 阶段）${missing.length ? `，尚缺：${missing.join("、")}${status.missing.length > 4 ? " 等" : ""}` : ""}。`
+      + "期间系统照常使用：已批准的里程碑照常倒推、排程与提醒；补齐后，长期目标候选、里程碑草稿与建议的可用时段按新信息更新。",
+    options: [{ id: "open", label: "继续访谈", href: "/onboarding", recommended: true }] }];
+}
+
 export function collectAsks(ctx: AccessContext, now = new Date()): Ask[] {
   const source = { store: getStore(), ctx, today: planToday(ctx, now) };
-  return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskAsks, missedAsks, agentAsks, calendarAsks, sourceProjectAsks, calendarLineAsks]
+  return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskAsks, missedAsks, agentAsks, calendarAsks, sourceProjectAsks, calendarLineAsks, interviewAsks]
     .flatMap((collect) => { try { return collect(source); } catch { return []; } });
 }
 

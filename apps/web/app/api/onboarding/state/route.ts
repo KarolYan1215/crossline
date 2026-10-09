@@ -6,6 +6,7 @@ import { getStore } from "../../../../lib/crossline";
 import { loadPendingDateBatch } from "../../../../lib/imported-dates";
 import { loadDiligence } from "../../../../lib/diligence";
 import { identityLines, needsLineSetup } from "../../../../lib/lines";
+import { questionsOwnedElsewhere } from "../../../../lib/interview-status";
 
 /**
  * Everything the onboarding screen shows, in one read: the conversation so far, the projects and facts the
@@ -22,7 +23,13 @@ export async function GET(request: Request) {
   const focus = lineId ? identityLines(access.ctx).find((line) => line.id === lineId) : undefined;
   const session = focus ? store.getOnboardingSession(workspaceId, `line-${focus.id}`) : store.getLatestOnboardingSession(workspaceId);
   const json = <T,>(key: string, fallback: T): T => { try { return JSON.parse(store.getSetting(workspaceId, key) ?? "null") ?? fallback; } catch { return fallback; } };
-  const messages = session ? store.listOnboardingMessages(workspaceId, session.id) : [];
+  const raw = session ? store.listOnboardingMessages(workspaceId, session.id) : [];
+  // The open batch leaves out what 待决事项 asks itself (which project a file belongs to), so nothing is asked twice.
+  const lastIndex = raw.length - 1;
+  const lastQuestions = raw[lastIndex]?.role === "assistant" ? ((raw[lastIndex]!.content as { questions?: Array<{ id: string; text: string }> }).questions ?? []) : [];
+  const moved = questionsOwnedElsewhere(access.ctx, lastQuestions);
+  const messages = moved.size ? raw.map((message, index) => index === lastIndex
+    ? { ...message, content: { ...(message.content as object), questions: lastQuestions.filter((question) => !moved.has(question.id)) } } : message) : raw;
   const identities = identityLines(access.ctx).map((pack) => ({ id: pack.id, label: pack.label }));
   // What the profile still lacks before numbers can be worked back from the person's goals, as questions with the options to pick from.
   // Computed from the ledger on every read, so an interview that was already finished before a gap was understood still shows it.
@@ -34,7 +41,7 @@ export async function GET(request: Request) {
   }).filter((gap) => gap.blocking || !askedBefore.has(gap.question.id)).map((gap) => gap.question);
   return NextResponse.json({
     ok: true,
-    identities, gaps,
+    identities, gaps, movedToAsks: moved.size,
     setupLines: !focus && needsLineSetup(access.ctx),
     focusLine: focus ? { id: focus.id, label: focus.label } : null,
     lines: identityLines(access.ctx).map((line) => ({ id: line.id, label: line.label, rank: line.rank ?? null, hard: Boolean(line.hard), goals: line.goals ?? [] })),
