@@ -4,7 +4,7 @@
  *
  *   pnpm exec tsx scripts/portrait-image-check.ts
  *
- * Draws the cover only. Spends one image of the person's quota; never run as a side effect.
+ * Draws the figure only. Spends one image of the person's quota; never run as a side effect.
  */
 import { existsSync, mkdtempSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -23,7 +23,8 @@ store.setSetting(workspace.id, "portrait.report", JSON.stringify({ version: 1, a
   problem: { statement: "", gravity: [], designable: [], reframes: [] }, compass: { workView: "", lifeView: "", consistency: "", trueNorth: "" },
   energy: { summary: "", map: [], flow: [] }, lines: { allocation: "", items: [] },
   gap: { says: "", does: "", reading: "", anchor: "", realWant: "", reframe: "" }, insights: [], sensitive: [],
-  imagery: { cover: "a lighthouse built from stacked notebooks, four rivers of different colours flowing into its base", problem: "", compass: "", energy: "", lines: "" }
+  type: { scope: 80, basis: 30, output: 40, rhythm: 60, evidence: { scope: "", basis: "", output: "", rhythm: "" } },
+  character: { outfit: "a light lab coat over a hoodie", props: ["a notebook", "a small circuit board"], pose: "holding an object up to look at it", expression: "curious" }
 } }));
 const supervisor = await startCodexSupervisor({
   port: Number(process.env.CROSSLINE_CODEX_SUPERVISOR_PORT ?? 3397),
@@ -34,9 +35,9 @@ try {
   const started = Date.now();
   const outcome = await createPortraitIllustrator(store, workspace.id, repoRoot, dataDir, () => supervisor.client)();
   const saved = JSON.parse(store.getSetting(workspace.id, PORTRAIT_IMAGES) ?? "{}") as { images?: Record<string, { file: string }> };
-  const file = saved.images?.cover ? path.join(dataDir, "portrait", workspace.id.replace(/[^a-zA-Z0-9_-]/g, "_"), saved.images.cover.file) : "";
+  const file = saved.images?.character ? path.join(dataDir, "portrait", workspace.id.replace(/[^a-zA-Z0-9_-]/g, "_"), saved.images.character.file) : "";
   console.info(JSON.stringify({ ...outcome, file, bytes: file && existsSync(file) ? statSync(file).size : 0, seconds: Math.round((Date.now() - started) / 1000) }));
-  process.exitCode = outcome.drawn.includes("cover") ? 0 : 1;
+  process.exitCode = outcome.drawn.includes("character") ? 0 : 1;
 } finally {
   await supervisor.stop();
   store.close();

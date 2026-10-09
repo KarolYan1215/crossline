@@ -1,16 +1,15 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { PORTRAIT_IMAGE_SLOTS } from "@crossline/core";
 import { dataDirectory, getStore } from "../../../../../lib/crossline";
 import { resolveAccessContext } from "../../../../../lib/access-guard";
 
 /**
- * One illustration of the person's portrait report. The file name comes from the ledger (`portrait.images`), never from the request, and
+ * The cartoon figure of the person's portrait report. The file name comes from the ledger (`portrait.images`), never from the request, and
  * must sit in this workspace's own `portrait` folder.
  */
 export async function GET(request: Request, context: { params: Promise<{ slot: string }> }) {
   const { slot } = await context.params;
-  if (!(PORTRAIT_IMAGE_SLOTS as readonly string[]).includes(slot)) return new Response("NOT_FOUND", { status: 404 });
+  if (slot !== "character") return new Response("NOT_FOUND", { status: 404 });
   const access = await resolveAccessContext(request);
   if ("response" in access) return access.response;
   let saved: { images?: Record<string, { file?: string }> } = {};

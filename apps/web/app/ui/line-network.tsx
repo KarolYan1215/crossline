@@ -72,7 +72,8 @@ export function LineNetwork({ lines, edges, onConfirm, onReject, title = "主线
       </svg>
       {kinds.length > 0 && <dl className="ln-legend">{kinds.map((kind) => <div key={kind}><dt>{RELATION_KIND_LABEL[kind]}</dt><dd>{RELATION_KIND_MEANING[kind]}</dd></div>)}
         <div><dt>实线 / 虚线</dt><dd>本人确认成立 / 尚待判断</dd></div></dl>}
-      {loops.length > 0 && <p className="ln-loops"><b>已形成的飞轮</b>{loops.map((loop) => <span key={loop.join()}>{[...loop, loop[0]!].map(name).join(" → ")}</span>)}</p>}
+      {loops.length > 0 && <p className="ln-loops"><b>已形成的飞轮</b>{loops.slice(0, 3).map((loop) => <span key={loop.join()}>{[...loop, loop[0]!].map(name).join(" → ")}</span>)}
+        {loops.length > 3 && <small>等 {loops.length} 个回路</small>}</p>}
       {!loops.length && possible.length > 0 && <p className="ln-loops"><b>可能的飞轮（待确认）</b>{possible.slice(0, 3).map((loop) => <span key={loop.join()}>{[...loop, loop[0]!].map(name).join(" → ")}</span>)}</p>}
       {interactive && <ul className="ln-list">
         {drawn.map((edge) => <li key={edge.id} data-line={edge.from} data-on={selected === edge.id ? "" : undefined} data-status={edge.status}>

@@ -1,3 +1,4 @@
+import { CHARACTER_EXPRESSIONS, CHARACTER_POSES } from "./portrait-type";
 /**
  * The portrait report written when the interview ends (decided 2026-10-08), by Skill `crossline-portrait-writer`, as structured data so the
  * page can draw it: the first half is the person's portrait and insight, meant to be shared (cover, the real problem, compass and energy,
@@ -6,7 +7,7 @@
  * codes, amounts).
  */
 export type PortraitReport = {
-  /** `archetype`: a two-to-six character name for who they are now (「跨界建造者」), `tagline` its one line — the share card's title. */
+  /** `tagline`: who they are now in one line (≤ 40 characters) — under the type name on the share card. `archetype` only on older reports. */
   cover: { portrait: string; coreConflict: string; keywords: string[]; archetype?: string; tagline?: string };
   problem: { statement: string; gravity: string[]; designable: string[]; reframes: Array<{ fallacy: string; reframe: string }> };
   /** `values`: what their work and life serve, each scored 0–100 from the evidence (drawn as a radar), with the evidence in a phrase. */
@@ -20,10 +21,12 @@ export type PortraitReport = {
   /** `impact`/`effort` 1–5 place each piece of advice on the matrix. */
   insights: Array<{ insight: string; advice: string; solves: string; priority: "high" | "medium" | "low"; impact?: number; effort?: number }>;
   /**
-   * One visual metaphor per illustrated section, for the illustrator (`portraitImageBriefs`): objects and scenes only — no names, no
-   * text, no faces — so an image can be shared without saying who it is about.
+   * Where the person stands on each typing axis (`TYPE_AXES`, 0 = left pole, 100 = right pole), with the evidence for each: read into
+   * their four-letter type by `portraitType`; the names are fixed in code, not written here.
    */
-  imagery?: { cover: string; problem: string; compass: string; energy: string; lines: string };
+  type?: { scope: number; basis: number; output: number; rhythm: number; evidence: { scope: string; basis: string; output: string; rhythm: string } };
+  /** What varies in their cartoon figure (`CHARACTER_STANDARD` fixes the rest): outfit, up to three props, a pose and an expression. */
+  character?: { outfit: string; props: string[]; pose: string; expression: string };
   sensitive: string[];
 };
 
@@ -33,7 +36,7 @@ const object = (properties: Record<string, unknown>) => ({ type: "object", prope
 
 const score = (min: number, max: number) => ({ type: "integer", minimum: min, maximum: max }) as const;
 export const PORTRAIT_SCHEMA = object({
-  cover: object({ portrait: text(200), coreConflict: text(300), keywords: list(6, 12), archetype: text(12), tagline: text(40) }),
+  cover: object({ portrait: text(200), coreConflict: text(300), keywords: list(6, 12), tagline: text(40) }),
   problem: object({ statement: text(500), gravity: list(6, 200), designable: list(6, 200),
     reframes: { type: "array", maxItems: 4, items: object({ fallacy: text(200), reframe: text(300) }) } }),
   compass: object({ workView: text(500), lifeView: text(500), consistency: text(500), trueNorth: text(200),
@@ -47,40 +50,11 @@ export const PORTRAIT_SCHEMA = object({
     pairs: { type: "array", maxItems: 5, items: object({ dimension: text(12), says: score(0, 100), does: score(0, 100) }) } }),
   insights: { type: "array", maxItems: 6, items: object({ insight: text(300), advice: text(400), solves: text(200), priority: { type: "string", enum: ["high", "medium", "low"] },
     impact: score(1, 5), effort: score(1, 5) }) },
-  imagery: object({ cover: text(200), problem: text(200), compass: text(200), energy: text(200), lines: text(200) }),
+  type: object({ scope: score(0, 100), basis: score(0, 100), output: score(0, 100), rhythm: score(0, 100),
+    evidence: object({ scope: text(80), basis: text(80), output: text(80), rhythm: text(80) }) }),
+  character: object({ outfit: text(80), props: list(3, 40), pose: { type: "string", enum: [...CHARACTER_POSES] }, expression: { type: "string", enum: [...CHARACTER_EXPRESSIONS] } }),
   sensitive: list(30, 60)
 });
-
-/** The sections that get an illustration, in the order they are drawn. */
-export const PORTRAIT_IMAGE_SLOTS = ["cover", "problem", "compass", "energy", "lines"] as const;
-export type PortraitImageSlot = (typeof PORTRAIT_IMAGE_SLOTS)[number];
-
-/**
- * The house style every portrait illustration shares, so a set reads as one report and a shared card is recognisable: editorial flat
- * illustration in the app's five line colours on warm paper, symbolic objects, much empty space — and never text, letters, faces or
- * logos, which is also what keeps a shared image from saying who it is about.
- */
-export const PORTRAIT_IMAGE_STYLE = [
-  "Editorial conceptual illustration, flat shapes with subtle risograph grain, warm off-white paper background (#FAF7F0).",
-  "Limited palette: deep blue #0A5198, burnt orange #8C3709, plum #792E9C, forest green #085E3A, ochre #664E00, near-black #0A0A0A.",
-  "Symbolic objects and landscapes only, calm composition, generous negative space, one clear focal point.",
-  "Absolutely no text, letters, numbers, signatures, logos, faces or recognisable people."
-].join(" ");
-
-const ASPECT: Record<PortraitImageSlot, string> = { cover: "portrait orientation 4:5", problem: "landscape 3:2", compass: "square 1:1", energy: "landscape 3:2", lines: "square 1:1" };
-
-/**
- * One prompt per illustrated section: the house style, the model's metaphor (redacted like the shared version), and the frame. The
- * colours a line owns are named so the lines' illustration matches the network drawn beside it.
- */
-export function portraitImageBriefs(report: PortraitReport, lines: Array<{ id: string; label: string }>): Array<{ slot: PortraitImageSlot; prompt: string }> {
-  if (!report.imagery) return [];
-  const shared = redactPortrait(report).imagery!;
-  const palette: Record<string, string> = { research: "deep blue", startup: "burnt orange", media: "plum", investment: "forest green", health: "ochre" };
-  const colours = lines.map((line) => palette[line.id]).filter(Boolean).join(", ");
-  return PORTRAIT_IMAGE_SLOTS.filter((slot) => shared[slot].trim()).map((slot) => ({ slot,
-    prompt: `${PORTRAIT_IMAGE_STYLE} Scene: ${shared[slot].trim()}${slot === "lines" && colours ? ` Use one colour per strand: ${colours}.` : ""} Frame: ${ASPECT[slot]}.` }));
-}
 
 /** Keeps what can be drawn: lines and their feeds must be the person's lines; sensitive spans must occur in the text they would hide. */
 export function validatePortrait(value: unknown, lineIds: string[]): PortraitReport {

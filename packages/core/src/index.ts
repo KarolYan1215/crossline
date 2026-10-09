@@ -451,3 +451,4 @@ export * from "./belonging";
 export * from "./interview-checklist";
 export * from "./fixed-events";
 export * from "./portrait";
+export * from "./portrait-type";
