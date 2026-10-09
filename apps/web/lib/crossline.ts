@@ -48,7 +48,7 @@ export function planToday(ctx?: AccessContext,
 
 /** The key the weekly availability lives under. One settings row, not a new table. */
 export { AVAILABILITY_SETTING } from "@crossline/core";
-import { AVAILABILITY_SETTING, RELATION_KIND_LABEL } from "@crossline/core";
+import { AVAILABILITY_SETTING, RELATION_KIND_LABEL, isCancelledEvent } from "@crossline/core";
 import { identityLines, linePacks } from "./lines";
 const PREFERENCES_SETTING = "schedule.preferences";
 export type SchedulePreferences = { timeZone: string; mode: "buffered" | "asap";
@@ -824,7 +824,7 @@ export function loadGoalForecast(ctx: AccessContext): ForecastResult & { inferre
   const preferences = effectiveSchedulePreferences(ctx).preferences;
   const days = planDays(planToday(ctx), 56);
   const committed = ((store.listPlanVersions(ctx.workspaceId)[0]?.payload as { blocks?: PersistedScheduleBlock[] } | undefined)
-    ?.blocks ?? []).filter((block) => block.day);
+    ?.blocks ?? []).filter((block) => block.day && !(block.id.startsWith("graph_calendar:") && isCancelledEvent(block.title)));
   const signatures = new Map<string, Set<string>>();
   for (const block of committed.filter((item) => item.id.startsWith("graph_calendar:"))) {
     const weekday = new Date(`${block.day}T00:00:00Z`).getUTCDay();
@@ -882,7 +882,9 @@ export async function loadCurrentPlan(ctx: AccessContext): Promise<PersistedPlan
   // The calendar's blocks are stored; the scheduled ones are derived on read. Persisting a schedule
   // would mean the plan disagreed with the work orders the moment one of them moved.
   // The person's own fixed events (typed into the input box) are busy time too, derived on read like the schedule itself.
-  const committed = [...(payload.blocks ?? []), ...personEventBlocks(ctx, planDays(planToday(ctx)))];
+  // A cancelled meeting still on the calendar (imported before cancellations were dropped) holds no time.
+  const committed = [...(payload.blocks ?? []).filter((block) => !(block.id.startsWith("graph_calendar:") && isCancelledEvent(block.title))),
+    ...personEventBlocks(ctx, planDays(planToday(ctx)))];
   // A real, computed preview beats an empty page: the scheduler runs against sane defaults even before
   // the person has saved their own time zone, availability and mode. `usingDefaultPreferences` is what
   // lets the page say so, instead of either lying about it or blocking on it.
@@ -1376,7 +1378,7 @@ const UNPLACED_REASON: Record<string, string> = {
   Q4_BEYOND_FORECAST_HORIZON: "截止日在 8 周之后，暂不排入",
   Q4_WAITING_LATEST_START: "截止尚远，最迟开工日之前暂不排入",
   DEADLINE_CAPACITY: "截止日前的可用时段不足",
-  NO_CAPACITY: "可用时段内没有空位",
+  NO_CAPACITY: "本次排程范围内的可用时段已排满，之后的时段再排入",
   NO_CONTINUOUS_SLOT: "需要一段连续时间，现有最长空档不够",
   PROGRESS_ONLY: "本周只排入 45 分钟进度",
   DEPENDENCY_NOT_READY: "前置任务尚未验收"
@@ -1508,7 +1510,11 @@ const plannerTaskOf = (ctx: AccessContext, order: ActionableOrder) => {
   const goal = readGoalSettings(ctx, order.milestoneId);
   const weight = effectiveWeight(ctx, order.milestoneId);
   const important = weight >= IMPORTANT_WEIGHT;
-  const tier = preferences ? goal?.confirmedDeadline ? important ? 1 : 2 : important ? 3 : 4
+  // A task with its own due day (a homework due Monday) has a deadline whether or not its milestone's was confirmed.
+  const ownDue = (order.payload as { dueDate?: string }).dueDate;
+  const hasDeadline = Boolean(goal?.confirmedDeadline) || Boolean(ownDue && /^\d{4}-\d{2}-\d{2}$/.test(ownDue));
+  // Before the person saved any preferences the older rule applies to work without a deadline; a deadline always lifts it.
+  const tier = hasDeadline ? important ? 1 : 2 : preferences ? important ? 3 : 4
     : order.state === "approved" ? 3 : order.identityId === (process.env.CROSSLINE_PRIMARY_CLOCK_ID ?? linePacks(ctx).find((pack) => pack.masterClock)?.id) ? 1 : 2;
   const core = humanCoreOf(order);
   const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;

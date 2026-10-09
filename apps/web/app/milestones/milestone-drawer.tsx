@@ -111,7 +111,7 @@ export function MilestoneDrawer({ milestone, labels, onClose }: { milestone: Boa
 
       {milestone.retrospective && <Retrospective milestone={milestone} />}
 
-      {milestone.rationale && <section className="md-block" aria-label="依据与推导"><h3>依据与推导</h3><p className="gen md-rationale">{milestone.rationale}</p></section>}
+      {milestone.rationale && <section className="md-block" aria-label="依据与推导"><h3>依据与推导</h3><p className="gen md-rationale">{milestone.rationale.replace(/\s*[（(]?\s*bareLine\s*[)）]?/g, "（最低够线）").replace(/（最低够线）（最低够线）/g, "（最低够线）")}</p></section>}
       {action.message && <p role="status" className="md-status">{action.message}</p>}
     </div>
   </Sheet>;

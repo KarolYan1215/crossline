@@ -35,3 +35,9 @@ test("a file date imported without its course is shown and filed with it, from i
   expect(taskTitleOf({ intent: "复习第 3 章", payload: { title: "复习第 3 章" }, projectId: "ece548" })).toBe("ECE 548 复习第 3 章");
   expect(taskTitleOf({ intent: "x", payload: { title: "完成 Crossline 介入" }, projectId: "crossline" })).toBe("完成 Crossline 介入");
 });
+
+test("a meeting the organiser cancelled is recognised by Outlook's title prefix", async () => {
+  const { isCancelledEvent } = await import("./calendar-lines");
+  expect(["Canceled: DEJA-VU Monthly Meeting", "Cancelled: Lab sync", "已取消：组会"].every(isCancelledEvent)).toBe(true);
+  expect(isCancelledEvent("Cancellation policy review")).toBe(false);
+});

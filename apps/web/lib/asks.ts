@@ -361,13 +361,26 @@ function missedAsks({ store, ctx, today }: Source): Ask[] {
   });
 }
 
+/**
+ * Why an assistant result was refused, in the person's words. The refusal itself is written for the model (it is sent back to it to
+ * repair: 「你说做了…从 artifacts 里去掉并写进 notDone」), so it is never shown as it is.
+ */
+const AGENT_REFUSAL: Record<string, string> = {
+  AGENT_ARTIFACT_MISSING: "助手报告的产出文件在任务目录里并不存在，结果未被采纳",
+  AGENT_ARTIFACT_EMPTY: "助手报告的产出文件是空的，结果未被采纳",
+  AGENT_ARTIFACT_PATH: "助手报告的产出不在任务目录内，结果未被采纳",
+  AGENT_EVIDENCE_MISSING: "助手的结果缺少可以核对的证据，未被采纳",
+  AGENT_UNCHECKED: "助手的结果没有通过自检，未被采纳",
+  AGENT_SUMMARY_INVALID: "助手的总结格式不完整，结果未被采纳"
+};
+
 function agentAsks({ store, ctx }: Source): Ask[] {
   const acknowledged = new Set(live(ctx, store.listEvents(ctx.workspaceId, { type: "agent.blocked_acknowledged" })).map((event) => event.entityId));
   const titles = new Map(store.listWorkOrders(ctx.workspaceId).map((order) => [order.id, order.intent]));
   return listAgentTasks(store, ctx.workspaceId).filter((task) => task.status === "blocked" && !acknowledged.has(task.taskId)).map((task) => ({
     id: `agent:${task.taskId}`, kind: "agent_blocked" as const, entityId: task.taskId, urgency: "later" as const, raisedAt: task.requestedAt,
     fingerprint: task.blockerCode, title: `助手没做成「${short(titles.get(task.workOrderId) ?? task.title)}」`,
-    why: `${clause(task.blockerMessage || task.blockerCode)}。助手不会自动重试，该任务转为本人处理。`,
+    why: `${AGENT_REFUSAL[task.blockerCode] ?? clause(task.blockerMessage || task.blockerCode)}。助手不会自动重试，该任务转为本人处理。`,
     options: [{ id: "self", label: "本人处理", recommended: true }, { id: "look", label: "查看助手任务", href: "/settings#automation" }] }));
 }
 

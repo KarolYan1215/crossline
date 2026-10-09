@@ -218,7 +218,12 @@ export function createManualbookBuilder(store: CrosslineStore, workspaceId: stri
       if (written.ok) result.writeup = written.output;
       else result.note = `这一步的分析和教程没有写成：${written.blocker.message}`;
     }
-    if (!results.some((result) => result.writeup)) return fail("MANUALBOOK_NOTHING_WRITTEN", "每一步的分析和教程都没有写成，所以没有生成手册。");
+    // The writer's own reason is what the person can act on (the material it was given was for another course, say): it is kept, not
+    // replaced by a sentence that only says nothing was written.
+    if (!results.some((result) => result.writeup)) {
+      const reason = results.map((result) => result.note).find(Boolean)?.replace(/^这一步的分析和教程没有写成：/, "") ?? "";
+      return fail("MANUALBOOK_NOTHING_WRITTEN", `每一步的分析和教程都没有写成，所以没有生成手册${reason ? `。第一步的原因：${reason}` : "。"}`);
+    }
 
     // 4. assemble ---------------------------------------------------------------------------------------------
     progress("assembling", 0, 1);

@@ -182,7 +182,7 @@ export function OfflineCaptureForm({ ownerId, workspaceId }: { ownerId: string; 
     } finally { setBusy(false); }
   };
 
-  return <Composer mode="capture" busy={busy} placeholder="任务、日程调整、长期目标、里程碑、记录或问题（例如：把作业 2 推到周五）" onSubmit={submit}>
+  return <Composer mode="capture" busy={busy} placeholder="任务、日程（每周二 10 点组会）、改期、长期目标、里程碑、记录或问题" onSubmit={submit}>
     {status && <small className="muted composer-status" role="status">{status}</small>}
     {changes.map((item, index) => <ScheduleChange key={index} change={item.change} summary={item.summary} />)}
     {undos.map((item, index) => <UndoSuggestion key={`undo-${index}`} {...item} />)}

@@ -1,7 +1,7 @@
 import "server-only";
 import { formatInTimeZone } from "date-fns-tz";
-import type { AccessContext } from "@crossline/core";
-import { effectiveSchedulePreferences, getStore, loadCurrentPlan, planToday, resolvedEstimate } from "./crossline";
+import { availableSlots, type AccessContext } from "@crossline/core";
+import { effectiveSchedulePreferences, getStore, loadCurrentPlan, planToday, readAvailability, resolvedEstimate } from "./crossline";
 import { countPending } from "./pending";
 import { lineLabels } from "./lines";
 
@@ -61,6 +61,13 @@ export async function personSnapshot(ctx: AccessContext, now = new Date()): Prom
   if (proposed.length) lines.push("", "## 未来 7 天：待批准方案的建议时段（批准后才算数）", ...proposed.slice(0, 20).map(describe));
   const fixed = thisWeek.filter((block) => !block.id.startsWith("scheduled:") && !block.id.startsWith("proposed:") && !block.id.startsWith("optional:"));
   if (fixed.length) lines.push("", "## 未来 7 天：日历与课程里的固定安排", ...fixed.slice(0, 30).map(describe));
+  // What there is to plan with: the person's available hours, minus the fixed arrangements (the same arithmetic the scheduler does).
+  const days = Array.from({ length: 7 }, (_, index) => new Date(Date.parse(`${today}T12:00:00Z`) + index * 86_400_000).toISOString().slice(0, 10));
+  const minutes = (time: string) => { const [h, m] = time.split(":").map(Number); return (h ?? 0) * 60 + (m ?? 0); };
+  const free = availableSlots(readAvailability(ctx), days, fixed.map((block) => ({ day: block.day!, start: block.start, end: block.end })))
+    .reduce((sum, slot) => sum + minutes(slot.end) - minutes(slot.start), 0);
+  const planned = scheduled.reduce((sum, block) => sum + minutes(block.end) - minutes(block.start), 0);
+  lines.push("", `## 未来 7 天的可用时间：可用时段扣除固定安排后共 ${(free / 60).toFixed(1)} 小时，已排任务 ${(planned / 60).toFixed(1)} 小时，剩余约 ${(Math.max(0, free - planned) / 60).toFixed(1)} 小时`);
 
   const orders = store.listWorkOrders(ctx.workspaceId).filter((order) => !["archived", "accepted"].includes(order.state)
     && !(order.payload as { seeded?: boolean }).seeded);

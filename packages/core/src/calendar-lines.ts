@@ -17,6 +17,11 @@ export type CalendarLineEntry = { lineId: string; why: string; at: string; uncle
 export type CalendarLines = { basis: string; entries: Record<string, CalendarLineEntry> };
 
 /** One title for every occurrence: whitespace collapsed, case folded. */
+/**
+ * A meeting the organiser cancelled: Outlook keeps it on an attendee's calendar with its title prefixed 「Canceled:」 (and Graph may also
+ * say `isCancelled`). It is not a commitment — the plan must not block that time for it.
+ */
+export const isCancelledEvent = (title: string) => /^\s*(canceled|cancelled|已取消|取消)\s*[:：]/i.test(title);
 export const calendarEventKey = (title: string) => title.replace(/\s+/g, " ").trim().toLowerCase().slice(0, 200);
 
 /** What the filing was made against: the lines' ids and names. When it changes, earlier answers are no longer trusted. */

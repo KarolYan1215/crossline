@@ -108,10 +108,12 @@ function clampContinuousBuffers(input: PlanningInput): { input: PlanningInput; n
 function makeResult(input: PlanningInput, tasks: PlannerTask[], slots: Slot[], blocks: ScheduleBlock[],
   solver: PlanResult["solver"]): PlanResult {
   const scheduled = new Set(blocks.filter((block) => !block.progressOnly).map((block) => block.taskId));
+  // 「截止日前不够」 only when the deadline falls inside the days being planned; one beyond them is simply not reached yet.
+  const horizon = Math.max(0, ...slots.map((slot) => slot.end));
   const blockers = tasks.filter((task) => !scheduled.has(task.id)).map((task) => ({
     taskId: task.id,
     code: blocks.some((block) => block.taskId === task.id && block.progressOnly) ? "PROGRESS_ONLY"
-      : task.interruptible === false ? "NO_CONTINUOUS_SLOT" : task.deadline ? "DEADLINE_CAPACITY" : "NO_CAPACITY",
+      : task.interruptible === false ? "NO_CONTINUOUS_SLOT" : task.deadline && Date.parse(task.deadline) <= horizon ? "DEADLINE_CAPACITY" : "NO_CAPACITY",
     message: blocks.some((block) => block.taskId === task.id && block.progressOnly)
       ? `${task.title}本周已留 45 分钟进度，完整作业仍待排入`
       : task.interruptible === false

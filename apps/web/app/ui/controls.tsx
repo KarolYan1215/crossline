@@ -35,6 +35,9 @@ export function Slider({ value, onChange, onCommit, preset, label, min = 0, max 
 const WEEKDAY = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
 
 /** A date that is edited where it is shown: the chip opens the platform's own date picker. */
+/** A day as the app writes it everywhere: 「10/19 周一」. */
+export const dayLabel = (value: string) => { const day = new Date(`${value.slice(0, 10)}T12:00:00`); return `${day.getMonth() + 1}/${day.getDate()} ${WEEKDAY[day.getDay()]}`; };
+
 export function DateChip({ value, onChange, label, empty = "未定" }: { value: string | undefined; onChange: (value: string) => void; label: string; empty?: string }) {
   const input = useRef<HTMLInputElement>(null);
   const day = value ? new Date(`${value}T12:00:00`) : undefined;
@@ -43,7 +46,7 @@ export function DateChip({ value, onChange, label, empty = "未定" }: { value: 
       const element = input.current;
       if (!element) return;
       try { element.showPicker(); } catch { element.focus(); }
-    }}>{day ? `${day.getMonth() + 1}/${day.getDate()} ${WEEKDAY[day.getDay()]}` : empty}</button>
+    }}>{value && day ? dayLabel(value) : empty}</button>
     <input ref={input} type="date" tabIndex={-1} aria-hidden="true" value={value ?? ""} onChange={(event) => event.target.value && onChange(event.target.value)} />
   </span>;
 }

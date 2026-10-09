@@ -1,6 +1,6 @@
 "use client";
 
-import { DateChip, DurationBar, STEP_MINUTES, TASK_MINUTES } from "../ui/controls";
+import { DateChip, DurationBar, STEP_MINUTES, TASK_MINUTES, dayLabel } from "../ui/controls";
 import { ImpactCard, useImpact } from "./impact";
 
 /**
@@ -16,7 +16,7 @@ export function TaskQuickEdit({ workOrderId, dueBy, estimate, samples, stepId, l
   return <div className="task-quick-edit" data-line={line}>
     <span className="task-quick-due"><small>截止</small>
       {editable ? <DateChip label="截止日期" value={dueBy} onChange={(date) => void impact.propose({ kind: "due", workOrderId, date })} />
-        : <span className="mono">{dueBy ?? "未定"}</span>}</span>
+        : <span className="mono">{dueBy ? dayLabel(dueBy) : "未定"}</span>}</span>
     <span className="task-quick-duration"><small>{durationLabel}</small>
       <DurationBar p25={estimate.p25Minutes} p50={estimate.p50Minutes} p85={estimate.p85Minutes} samples={samples} label={durationLabel}
         bounds={stepId ? STEP_MINUTES : TASK_MINUTES}

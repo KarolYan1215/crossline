@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { STEP_ROLES, plainEstimateWords } from "@crossline/core";
 import type { TaskDetail } from "../../lib/task-detail";
 import { Sheet } from "../ui/overlay";
-import { ProgressRing, formatMinutes } from "../ui/controls";
+import { ProgressRing, formatMinutes, dayLabel } from "../ui/controls";
 import { LineTag, SupportsTag, Tag } from "../ui/tag";
 import { riskLabel, riskTone, stateLabelFor } from "../../lib/labels";
 import { AssistantChat } from "../chat/assistant-chat";
@@ -54,7 +54,7 @@ function StepsPanel({ detail }: { detail: TaskDetail }) {
           <span className="step-body">
             <input value={item.title} aria-label="步骤名称" onChange={(event) => { const title = event.target.value; setDraft((list) => list.map((row, i) => i === index ? { ...row, title } : row)); setDirty(true); }} />
             {step && <small><Tag>{STEP_ROLES[step.role as keyof typeof STEP_ROLES] ?? step.role}</Tag>
-              {step.notBefore || step.dueBy ? <span className="mono"> {step.notBefore || "…"} → {step.dueBy || "…"}</span> : null}
+              {step.notBefore || step.dueBy ? <span className="mono"> {step.notBefore ? dayLabel(step.notBefore) : "…"} → {step.dueBy ? dayLabel(step.dueBy) : "…"}</span> : null}
               {step.tickOutcome && <span className="step-tick" title="里程碑刻度"> ◆ {step.tickOutcome}</span>}</small>}
             {step && step.schedulable && <StepDuration workOrderId={detail.id} stepId={step.id} estimate={step.estimate} />}
             {step?.doneCriterion && <small className="gen step-criterion">{step.doneCriterion}</small>}
@@ -134,9 +134,12 @@ function MaterialsPanel({ detail }: { detail: TaskDetail }) {
     </li>)}</ul></section>}
     {detail.preparedMaterials.length > 0 && <section><h4>已备文件</h4><ul>{detail.preparedMaterials.filter((item) => !/\/(flow|manifest|materials)\.json$|\/nodes\//.test(item.uri)).map((item) => <li key={item.id}>
       <a href={`/api/work-orders/${encodeURIComponent(detail.id)}/materials?uri=${encodeURIComponent(item.uri)}`} target="_blank" rel="noreferrer">{item.fileName}</a></li>)}</ul></section>}
-    {detail.agentOutputs.length > 0 && <section><h4>Agent 产出</h4><ul>{detail.agentOutputs.flatMap((task) => task.files.map((file) => <li key={`${task.taskId}:${file.path}`}>
-      <a href={`/api/agent/tasks/${encodeURIComponent(task.taskId)}/file?path=${encodeURIComponent(file.path)}`} target="_blank" rel="noreferrer">{file.name}</a>
-      <small className="muted">{task.title}</small></li>))}</ul></section>}
+    {detail.agentOutputs.some((task) => task.files.length) && <section><h4>Agent 产出</h4>{detail.agentOutputs.filter((task) => task.files.length).map((task) => <div key={task.taskId}>
+      {/* The run's title once (it is the task's own wording when the whole task was handed over), then its files. */}
+      {detail.agentOutputs.length > 1 && <small className="muted">{task.title}</small>}
+      <ul>{task.files.map((file) => <li key={file.path}>
+        <a href={`/api/agent/tasks/${encodeURIComponent(task.taskId)}/file?path=${encodeURIComponent(file.path)}`} target="_blank" rel="noreferrer">{file.name}</a></li>)}</ul>
+    </div>)}</section>}
     {detail.background && detail.background.length > 0 && <section><h4>相关背景</h4><ul>{detail.background.map((fact) => <li key={fact.key}>
       <span>{fact.value}</span><small className="gen">{fact.why}</small></li>)}</ul></section>}
   </div>;
