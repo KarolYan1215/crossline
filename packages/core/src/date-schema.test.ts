@@ -136,3 +136,10 @@ test("an answer from before undated existed still passes", () => {
   const legacy = { dates: [item()], recurring: [], questions: [] } as DateExtraction;
   expect(sanitizeDateExtraction(legacy, known).extraction.undated).toEqual([]);
 });
+
+test("a kept date names its course: a bare 「课堂期末考试」 under ECE 555 becomes 「ECE 555 课堂期末考试」, an uncertain course is not guessed in", () => {
+  const { extraction } = sanitizeDateExtraction(out({ dates: [
+    item({ id: "f", date: "2026-12-07", title: "课堂期末考试", project: "ECE 555", sourceRef: "src-1", quote: "12/7 Final Exam (in class)" }),
+    item({ id: "m", title: "期中考试 1", project: "课程待确认（可能为 ECE 548）" })] }), known);
+  expect(extraction.dates.map((date) => date.title)).toEqual(["ECE 555 课堂期末考试", "期中考试 1"]);
+});

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { BACKPLAN_SCHEMA, mentionsExternalAction, validateBackplan, type BackplanAnswer as Answer, type MissingInput } from "@crossline/core";
+import { BACKPLAN_SCHEMA, mentionsExternalAction, validateBackplan, withCourse, type BackplanAnswer as Answer, type MissingInput } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import type { CrosslineStore, StoredWorkOrder } from "@crossline/db";
 
@@ -126,7 +126,7 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
         identityId: milestone.identityId, projectId: milestone.projectId!, milestoneId: milestone.id,
         intent: step.intent, state: "awaiting_plan_approval", riskTier,
         estimate: { ...step.estimate, source: "llm_prior", observationCount: 0, confidence: "low" },
-        payload: { title: step.title, family: step.family, backplan: { milestoneVersion: milestone.version, sourceQuote: step.sourceQuote,
+        payload: { title: withCourse(step.title, milestone.projectId), family: step.family, backplan: { milestoneVersion: milestone.version, sourceQuote: step.sourceQuote,
           rationale: step.rationale, stepId: step.id, ...(step.acquires ? { acquires: step.acquires, inputsFrom,
             missingInput: missing.find((item) => item.id === step.acquires)?.what ?? "" } : {}) }, dependsOn: step.dependsOn.map((dep) => ids.get(dep)).filter((dep): dep is string => Boolean(dep)),
           automationParts: [], humanCore: [{ id: `${id}-core`, intent: step.intent, quote: step.sourceQuote,

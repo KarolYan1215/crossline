@@ -13,10 +13,35 @@ export function cleanTaskTitle(value: string): string {
   return (clause.length >= 4 && clause.length <= TASK_TITLE_MAX ? clause : line.slice(0, TASK_TITLE_MAX)).trim();
 }
 
-/** The name to show: the stored short title, or — for a task written before titles existed — the first clause of its description. */
-export function taskTitleOf(order: { intent: string; payload?: unknown }): string {
+/**
+ * The course code a project names, normalised (「ECE 555」 from 「ECE 555」, 「ece555」 or 「ECE555 Digital Circuits」), or undefined. A
+ * project the extraction itself marked uncertain (「课程待确认（可能为 ECE 548）」) names no course: guessing it into every title would
+ * spread the guess.
+ */
+export function courseCodeOf(project: string | undefined): string | undefined {
+  if (!project || /待确认|可能|未定|不确定|[?？]/u.test(project)) return undefined;
+  const match = /(?:^|[^A-Za-z])([A-Za-z]{2,5})\s?(\d{3,4}[A-Za-z]?)(?![\dA-Za-z])/u.exec(project);
+  return match ? `${match[1]!.toUpperCase()} ${match[2]!.toUpperCase()}` : undefined;
+}
+
+/**
+ * A name that says which course it is about (decided 2026-10-08: 「课堂期末考试」 on the calendar named no course, and two courses each have
+ * one). When the item belongs to a project with a course code and its name does not already carry it, the code goes in front.
+ */
+export function withCourse(title: string, project: string | undefined): string {
+  const code = courseCodeOf(project);
+  if (!code || !title) return title;
+  const squash = (text: string) => text.replace(/\s+/g, "").toUpperCase();
+  return squash(title).includes(squash(code)) ? title : `${code} ${title}`;
+}
+
+/**
+ * The name to show: the stored short title, or — for a task written before titles existed — the first clause of its description; with
+ * the course code in front when the task belongs to a course and its name leaves it out.
+ */
+export function taskTitleOf(order: { intent: string; payload?: unknown; projectId?: string }): string {
   const stored = (order.payload as { title?: unknown } | undefined)?.title;
-  return typeof stored === "string" && stored.trim() ? stored.trim() : cleanTaskTitle(order.intent);
+  return withCourse(typeof stored === "string" && stored.trim() ? stored.trim() : cleanTaskTitle(order.intent), order.projectId);
 }
 
 /** The titler's answer (Skill `crossline-task-titler`): a short name for each task it was given, by id. */

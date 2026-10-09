@@ -1,4 +1,4 @@
-import { TASK_TITLES_SCHEMA, validateTaskTitles, type TaskTitles } from "@crossline/core";
+import { TASK_TITLES_SCHEMA, validateTaskTitles, withCourse, type TaskTitles } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import type { CrosslineStore } from "@crossline/db";
 import { ownerOf } from "./owner";
@@ -6,10 +6,11 @@ import { ownerOf } from "./owner";
 export const TASK_TITLER = "crossline:crossline-task-titler";
 
 /** Tasks written before short names existed (and still on the board or in its history): what the titler names, oldest first. */
-export function untitledTasks(store: CrosslineStore, workspaceId: string): Array<{ id: string; intent: string }> {
+export function untitledTasks(store: CrosslineStore, workspaceId: string): Array<{ id: string; intent: string; project: string }> {
+  const names = new Map(store.listProjects(workspaceId, { includeArchived: true }).map((project) => [project.id, project.name]));
   return store.listWorkOrders(workspaceId)
     .filter((order) => order.state !== "archived" && !((order.payload as { title?: unknown } | undefined)?.title))
-    .map((order) => ({ id: order.id, intent: order.intent }));
+    .map((order) => ({ id: order.id, intent: order.intent, project: names.get(order.projectId) ?? "" }));
 }
 
 /**
@@ -31,7 +32,9 @@ export function createTaskTitler(store: CrosslineStore, workspaceId: string, cwd
     for (const { id, title } of result.output.titles) {
       const order = orders.get(id);
       if (!order || (order.payload as { title?: unknown } | undefined)?.title) continue;
-      store.saveWorkOrder({ ...order, payload: { ...((order.payload ?? {}) as Record<string, unknown>), title } });
+      // The model is told to keep the course; this makes sure of it (by the project's name, else its id).
+      const project = tasks.find((task) => task.id === id)?.project || order.projectId;
+      store.saveWorkOrder({ ...order, payload: { ...((order.payload ?? {}) as Record<string, unknown>), title: withCourse(title, project) } });
     }
     store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `tasks.titled:${Date.now()}`, type: "tasks.titled", entityId: workspaceId,
       payload: { named: result.output.titles.length } });

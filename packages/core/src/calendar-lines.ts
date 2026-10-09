@@ -1,3 +1,5 @@
+import { withCourse } from "./task-title";
+
 /**
  * Which line a calendar event belongs to (decided 2026-10-08: the person does not sort their synced calendar by hand — the model reads it
  * and files each event). Events are filed by their title, normalised, because a recurring class or meeting repeats one title, and one
@@ -39,4 +41,25 @@ export function validateCalendarClassification(value: unknown, keys: string[], l
 export function calendarLineOf(filing: CalendarLines | null | undefined, title: string): string | undefined {
   const lineId = filing?.entries[calendarEventKey(title)]?.lineId;
   return lineId || undefined;
+}
+
+/**
+ * The project of each confirmed file date, by `<batch>:<item>`, read from the `dates.extracted` events. A block imported before dates
+ * named their course (`import:<batch>:<item>[:<day>]`) is shown — and filed — under a name that carries it (`withCourse`), without
+ * rewriting a plan the person approved.
+ */
+export function importedProjects(events: Array<{ entityId: string; payload: unknown }>): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const event of events) {
+    const payload = event.payload as { dates?: Array<{ id: string; project?: string }>; recurring?: Array<{ id: string; project?: string }> } | undefined;
+    for (const item of [...(payload?.dates ?? []), ...(payload?.recurring ?? [])]) if (item.project) out.set(`${event.entityId}:${item.id}`, item.project);
+  }
+  return out;
+}
+
+/** The name an imported block is shown under: its own, with its course in front when its batch item names one. */
+export function importedTitle(blockId: string, title: string, projects: Map<string, string>): string {
+  if (!blockId.startsWith("import:")) return title;
+  const [, batch, item] = blockId.split(":");
+  return withCourse(title, projects.get(`${batch}:${item}`));
 }

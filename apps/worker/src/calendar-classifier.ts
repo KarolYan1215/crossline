@@ -1,4 +1,4 @@
-import { CALENDAR_CLASSIFICATION_SCHEMA, CALENDAR_LINES, calendarEventKey, calendarLinesBasis, validateCalendarClassification,
+import { CALENDAR_CLASSIFICATION_SCHEMA, CALENDAR_LINES, calendarEventKey, calendarLinesBasis, importedProjects, importedTitle, validateCalendarClassification,
   type CalendarClassification, type CalendarLines } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import type { CrosslineStore } from "@crossline/db";
@@ -29,7 +29,10 @@ export function unfiledCalendarEvents(store: CrosslineStore, workspaceId: string
   const blocks = (((store.listPlanVersions(workspaceId)[0]?.payload as { blocks?: Block[] } | undefined)?.blocks) ?? [])
     .filter((block) => block.id.startsWith("graph_calendar:") || block.id.startsWith("import:"));
   const byKey = new Map<string, { key: string; title: string; source: "calendar" | "file"; count: number; when: string[] }>();
-  for (const block of blocks) {
+  // Filed under the name the calendar shows: a file date with its course in front (`importedTitle`).
+  const imported = importedProjects(store.listEvents(workspaceId, { type: "dates.extracted" }));
+  for (const raw of blocks) {
+    const block = { ...raw, title: importedTitle(raw.id, raw.title, imported) };
     const key = calendarEventKey(block.title);
     if (!key || key in filing.entries) continue;
     const entry = byKey.get(key) ?? { key, title: block.title.slice(0, 200), source: block.id.startsWith("import:") ? "file" as const : "calendar" as const, count: 0, when: [] };

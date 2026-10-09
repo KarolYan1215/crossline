@@ -1,3 +1,5 @@
+import { withCourse } from "./task-title";
+
 /**
  * Dates a person's own documents state — class meetings, quiz and homework dates, exams, deadlines.
  *
@@ -207,7 +209,9 @@ export function sanitizeDateExtraction(value: unknown, known: Known):
   if (out.dates.length + out.recurring.length > 0 && dates.length + recurring.length === 0) {
     reject("DATE_NOTHING_VERIFIABLE", `一条都没能在原文里核实：${dropped.slice(0, 3).map((item) => item.reason).join("；")}`);
   }
-  return { extraction: { dates, recurring, questions: out.questions, undated }, dropped };
+  // A date names its course (「ECE 555 课堂期末考试」, not 「课堂期末考试」): two courses each have a final, and the calendar shows the title alone.
+  const named = <T extends { title: string; project: string }>(item: T): T => ({ ...item, title: withCourse(item.title, item.project) });
+  return { extraction: { dates: dates.map(named), recurring: recurring.map(named), questions: out.questions, undated: undated.map(named) }, dropped };
 }
 
 /** Every date a weekly pattern covers, minus its exceptions. Weekday 0 is Sunday. */

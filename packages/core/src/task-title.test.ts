@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { cleanTaskTitle, taskTitleOf, validateTaskTitles } from "./task-title";
+import { cleanTaskTitle, courseCodeOf, taskTitleOf, validateTaskTitles, withCourse } from "./task-title";
 
 test("a task's name is one short action; a long sentence is cut at its first clause", () => {
   expect(cleanTaskTitle("完成 ECE 555 作业 2。")).toBe("完成 ECE 555 作业 2");
@@ -13,4 +13,17 @@ test("a task's name is one short action; a long sentence is cut at its first cla
 test("the titler's answer keeps names for known tasks only", () => {
   expect(validateTaskTitles({ titles: [{ id: "a", title: "完成作业 2。" }, { id: "zz", title: "x" }, { id: "b", title: "  " }] }, ["a", "b"]))
     .toEqual({ titles: [{ id: "a", title: "完成作业 2" }] });
+});
+
+test("a name about a course carries its code, taken only from a project that is not marked uncertain", () => {
+  expect(courseCodeOf("ECE 555")).toBe("ECE 555");
+  expect(courseCodeOf("ece555")).toBe("ECE 555");
+  expect(courseCodeOf("ECE548 Semiconductor Devices")).toBe("ECE 548");
+  expect(courseCodeOf("课程待确认（可能为 ECE 548）")).toBeUndefined();
+  expect(courseCodeOf("Crossline")).toBeUndefined();
+  expect(courseCodeOf("MoS2 FGFET")).toBeUndefined();
+  expect(withCourse("课堂期末考试", "ECE 555")).toBe("ECE 555 课堂期末考试");
+  expect(withCourse("ECE555 上课", "ECE 555")).toBe("ECE555 上课");
+  expect(withCourse("完成 ECE 555 作业 2", "ece555")).toBe("完成 ECE 555 作业 2");
+  expect(withCourse("期中考试 1", "课程待确认（可能为 ECE 548）")).toBe("期中考试 1");
 });
