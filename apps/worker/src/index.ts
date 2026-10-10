@@ -38,6 +38,7 @@ import { extractText, reextractForLayout } from "./extract";
 import { createTranscriber, createWhisperEngine, modelsDirectory } from "./transcribe";
 import { createBackgroundFactsExtractor } from "./background-facts-runner";
 import { createGraphSync, type SyncOutcome } from "./graph-sync";
+import { ownerOf } from "./owner";
 import {
   buildSources, calendarLabel, listCatalogue, readSelection, saveSelection, seedNewAccounts, sourceKey, mayUseGraphLogin, withdrawForeignCalendar } from "./calendar-sources";
 import { createGraphAuthSession, GraphReadSource, loadVapidKeys, sendWebPush, type GraphCredentialProvider } from "@crossline/connectors";
@@ -637,9 +638,24 @@ const calendar = await (async () => {
     // with no sources (a source with no selection loses its blocks), so the owner's meetings leave its plan too.
     const foreign = async (workspaceId: string): Promise<SyncOutcome | null> => {
       if (mayUseGraphLogin(analysisStore, workspaceId)) return null;
-      if (withdrawForeignCalendar(analysisStore, workspaceId)) {
-        const outcome = await getSyncer(workspaceId)();
-        console.info(JSON.stringify({ type: "graph.foreign_calendar_withdrawn", workspaceId, outcome: outcome.state }));
+      const withdrew = withdrawForeignCalendar(analysisStore, workspaceId);
+      {
+        // A sync with no sources refuses to run, so what came from the owner's calendar is taken out here: its blocks leave the current
+        // plan and its pending differences are excluded (the person never saw those events as theirs to approve).
+        const plan = analysisStore.listPlanVersions(workspaceId)[0];
+        let excluded = 0, removedBlocks = false;
+        if (plan) {
+          const payload = (plan.payload ?? {}) as { blocks?: Array<{ id?: string }> };
+          if (Array.isArray(payload.blocks) && payload.blocks.some((block) => String(block.id ?? "").startsWith("graph_calendar:"))) {
+            removedBlocks = true;
+            analysisStore.savePlanVersion({ ...plan, payload: { ...payload, blocks: payload.blocks.filter((block) => !String(block.id ?? "").startsWith("graph_calendar:")) } });
+          }
+          for (const change of analysisStore.listPlanChanges(workspaceId, plan.id)) {
+            if (change.status !== "pending" || !change.triggerEventId.startsWith("graph-sync")) continue;
+            if (analysisStore.resolvePlanChange(workspaceId, ownerOf(analysisStore, workspaceId), change.id, "excluded", `graph-foreign:${change.id}`).changed) excluded += 1;
+          }
+        }
+        if (withdrew || excluded || removedBlocks) console.info(JSON.stringify({ type: "graph.foreign_calendar_withdrawn", workspaceId, excluded, removedBlocks }));
       }
       return { state: "blocked", code: "GRAPH_LOGIN_OTHER_ACCOUNT", message: "本机的日历登录属于另一个账号；这个账号要读日历需用自己的微软账号登录。" };
     };
