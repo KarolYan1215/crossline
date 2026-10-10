@@ -64,3 +64,12 @@
 .card-fields{flex-basis:100%;display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:6px 10px;padding:6px 0}
 .card-fields label{display:grid;gap:2px;font-size:12px;color:var(--graphite)}
 .card-fields input,.card-fields select{width:100%;min-height:32px;font-size:13px}
+
+.conversation-nudge .conversation-card{border-left-color:var(--now-ink)}
+.conversation-nudge .conversation-clarify p{font-weight:400}
+.assistant-bubble-wrap{position:fixed;right:16px;bottom:76px;z-index:60;display:grid;justify-items:end;gap:6px}
+.assistant-bubble-wrap .assistant-bubble{position:static}
+.assistant-bubble[data-unread]{outline:2px solid var(--now-ink);outline-offset:2px}
+.assistant-nudge-preview{max-width:min(320px,calc(100vw - 32px));padding:8px 10px;border:1px solid var(--ink);background:var(--paper);font-size:13px;text-align:left;
+  box-shadow:0 4px 12px rgba(0,0,0,.12)}
+@media (max-width:520px){.assistant-bubble-wrap{right:8px;bottom:64px}}

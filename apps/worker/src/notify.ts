@@ -159,5 +159,24 @@ export async function notifyPass(store: CrosslineStore, workspaceId: string, now
       payload: { key: item.key, kind: item.kind, day: today, title: item.title } });
     delivered.push(item.key);
   }
+  // The system's own messages (docs/one-input.md §4) go to the desktop and phone only while no page is in front of the person; a page
+  // shows them itself. Each is sent once, within the hour it was said, and its message records that it went out.
+  const visibleAt = store.getSetting(workspaceId, "presence.visibleAt");
+  if (!visibleAt || now.getTime() - Date.parse(visibleAt) > PRESENCE_FRESH_MS) {
+    for (const message of store.listRecentNudges(workspaceId, new Date(now.getTime() - 3_600_000).toISOString())) {
+      const nudge = message.payload.nudge as { delivery?: string; fingerprint?: string } | undefined;
+      const text = (message.payload.card as { clarify?: { question?: string } } | undefined)?.clarify?.question ?? "";
+      if (nudge?.delivery !== "pending" || !text) continue;
+      const body = text.split("\n").slice(0, 3).join(" ").slice(0, 200);
+      const [desktop, phone] = await Promise.all([deliver("Crossline", body, `${baseUrl}/`),
+        push ? push(workspaceId, { title: "Crossline", body, path: "/", tag: nudge.fingerprint ?? message.id }).catch(() => false) : Promise.resolve(false)]);
+      if (!desktop && !phone) continue;
+      store.updateConversationPayload(workspaceId, message.id, { ...message.payload, nudge: { ...nudge, delivery: "pushed" } });
+      delivered.push(`nudge:${nudge.fingerprint ?? message.id}`);
+    }
+  }
   return delivered;
 }
+
+/** A page seen this recently is in front of the person; the web's `PRESENCE_FRESH_MS`, kept equal. */
+const PRESENCE_FRESH_MS = 10 * 60_000;

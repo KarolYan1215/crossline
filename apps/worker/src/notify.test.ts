@@ -79,3 +79,23 @@ test("each message also goes to the phone, and counts as sent if only the phone 
   expect(sent).toEqual(["brief:2026-10-08"]);
   expect(store.listEvents("w", { type: "notification.sent" })).toHaveLength(1);
 });
+
+test("the system's own messages go to the desktop only while no page is in front of the person, each once", async () => {
+  const store = new CrosslineStore(":memory:");
+  store.setSetting("w", "notify.level", "off");
+  const conversation = store.conversationFor("w", "2026-10-12");
+  const now = new Date("2026-10-12T13:52:00.000Z");
+  store.appendConversationMessage({ id: "n1", workspaceId: "w", conversationId: conversation.id, role: "nudge", text: "", createdAt: "2026-10-12T13:50:00.000Z",
+    payload: { nudge: { kind: "block_start", fingerprint: "start:b:2026-10-12", counted: false, urgent: true, delivery: "pending" },
+      card: { clarify: { question: "09:00 做「完成 ECE 555 作业 2」（45 分），关系到 10/14 的截止。", options: [] } } } });
+  const shown: string[] = [];
+  const deliver = async (_title: string, body: string) => { shown.push(body); return true; };
+  store.setSetting("w", "presence.visibleAt", "2026-10-12T13:51:00.000Z");
+  expect(await notifyPass(store, "w", now, deliver)).toEqual([]);
+  store.setSetting("w", "presence.visibleAt", "2026-10-12T13:30:00.000Z");
+  expect(await notifyPass(store, "w", now, deliver)).toEqual(["nudge:start:b:2026-10-12"]);
+  expect(await notifyPass(store, "w", now, deliver)).toEqual([]);
+  expect(shown).toEqual(["09:00 做「完成 ECE 555 作业 2」（45 分），关系到 10/14 的截止。"]);
+  expect(store.getConversationMessage("w", "n1")!.payload.nudge).toMatchObject({ delivery: "pushed" });
+  store.close();
+});

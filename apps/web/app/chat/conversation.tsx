@@ -46,7 +46,7 @@ export function Conversation({ variant, placeholder, page }: {
     try { return JSON.parse(localStorage.getItem(ACCOUNT_KEY) ?? "null") as { ownerId: string; workspaceId: string } | null; } catch { return null; }
   });
 
-  const load = () => fetch("/api/conversation").then((response) => response.ok ? response.json() : null)
+  const load = (withChoices = false) => fetch(`/api/conversation${withChoices ? "?choices" : ""}`).then((response) => response.ok ? response.json() : null)
     .then((body: { messages?: MessageView[]; ownerId?: string; workspaceId?: string; choices?: CardChoices } | null) => {
       if (body?.messages) setMessages(body.messages);
       if (body?.choices) setChoices(body.choices);
@@ -57,11 +57,12 @@ export function Conversation({ variant, placeholder, page }: {
       }
     }).catch(() => {});
   useEffect(() => {
-    void load();
-    // Another page or device may have added to today's conversation.
+    void load(true);
+    // Another page or device may have added to today's conversation, and the system speaks first now and then (docs/one-input.md §4).
     const refresh = () => { if (document.visibilityState === "visible") void load(); };
     document.addEventListener("visibilitychange", refresh);
-    return () => document.removeEventListener("visibilitychange", refresh);
+    const timer = setInterval(refresh, 30_000);
+    return () => { document.removeEventListener("visibilitychange", refresh); clearInterval(timer); };
   }, []);
   useEffect(() => { if (variant === "panel") endRef.current?.scrollIntoView({ block: "nearest" }); }, [messages, variant]);
   // A card the stronger model is looking at again is fetched until it comes back (a few seconds to half a minute).
@@ -155,7 +156,7 @@ function lastExchange(messages: MessageView[]): MessageView[] {
 
 function MessageItem({ message, onUpdate, choices }: { message: MessageView; onUpdate: (message: MessageView) => void; choices: CardChoices | null }) {
   if (message.role === "person") return <li className="conversation-person"><p>{message.text}</p></li>;
-  return <li className="conversation-reply">
+  return <li className={message.role === "nudge" ? "conversation-reply conversation-nudge" : "conversation-reply"}>
     {message.text && <div className="gen"><Markdown text={message.text} /></div>}
     {message.card && <CardView messageId={message.id} card={message.card} onUpdate={onUpdate} choices={choices} />}
   </li>;
@@ -192,13 +193,18 @@ function CardView({ messageId, card, onUpdate, choices }: { messageId: string; c
           onChange={(field, next) => setEdits((all) => ({ ...all, [index]: { ...(all[index] ?? {}), [field]: next } }))} />,
         changed: Boolean(edits[index] && Object.keys(edits[index]!).length) } : {})} />)}</ul>}
     {card.clarify.question && <div className="conversation-clarify">
-      <p>{card.clarify.question}</p>
+      {card.nudgeKind ? <Markdown text={card.clarify.question} /> : <p>{card.clarify.question}</p>}
       {chosen ? <small className="muted">已选：{chosen.label}</small>
         : <div className="conversation-options">{card.clarify.options.map((option, index) =>
-          <button type="button" key={index} disabled={working} onClick={() => option.actions.length
-            ? void decide({ option: index })
-            // Nothing to carry out: the person says more in the box.
-            : document.querySelector<HTMLTextAreaElement>(".conversation textarea")?.focus()}>{option.label}</button>)}</div>}
+          <button type="button" key={index} disabled={working} onClick={async () => {
+            const focusBox = () => document.querySelector<HTMLTextAreaElement>(".conversation textarea")?.focus();
+            // A turn's option with nothing to carry out: the person says more in the box (nothing to record yet).
+            if (!option.kind && !option.actions.length) { focusBox(); return; }
+            // A nudge's button is the answer whatever it does: recorded first, then the page opens or the box takes focus.
+            await decide({ option: index });
+            if (option.kind === "href" && option.href) window.location.assign(option.href);
+            if (option.kind === "say") focusBox();
+          }}>{option.label}</button>)}</div>}
     </div>}
     {pending.length > 0 && <div className="conversation-actions">
       <button type="button" className="primary-button" disabled={working || card.reviewing} onClick={() => void decide({ indexes: pending })}>

@@ -4,7 +4,7 @@ import { formatInTimeZone } from "date-fns-tz";
 import { listAgentTasks, type StoredConversationMessage } from "@crossline/db";
 import {
   ACTIONS, actionProblem, availableSlots, conciergeRefs, needsReview, taskTitleOf,
-  type AccessContext, type ConciergePack, type ConciergeTurn, type ProposedAction
+  type AccessContext, type ClarifyOption, type ConciergePack, type ConciergeTurn, type ProposedAction
 } from "@crossline/core";
 import { effectiveSchedulePreferences, effectiveWeight, getStore, loadCurrentPlan, loadGoalForecast, planToday, readAvailability } from "./crossline";
 import { openAsks } from "./asks";
@@ -12,6 +12,7 @@ import { executeAction } from "./actions";
 import { CodexSupervisorRequestError, requestCodexSupervisor } from "./codex-runtime";
 import { identityLines, lineLabels } from "./lines";
 import { recentOps } from "./undo";
+import { ANSWERED_SETTING, muteNudgeKind } from "./nudges";
 
 /** Where the person typed from: the page and the object open there (a task, a milestone, a plan day). */
 export type PageContext = { kind: string; entityId: string };
@@ -20,9 +21,16 @@ export type Mention = { kind: "material" | "task" | "milestone"; id: string; tit
 /** One action on a card and what became of it. */
 export type CardItem = { state: "pending" | "done" | "failed" | "dismissed"; message?: string; opId?: string; href?: string };
 /** An assistant message's card: what the turn proposed, the question back, and the state of each. */
+/**
+ * An option of a card's question. A turn's options carry candidate actions; a nudge's buttons may instead open a page (`href`),
+ * acknowledge (`ack`), ask about this kind less (`mute`) or invite typing (`say`). Choosing any of them is the answer.
+ */
+export type CardOption = ClarifyOption & { kind?: "action" | "ack" | "mute" | "href" | "say"; href?: string };
 export type Card = {
   actions: ProposedAction[]; items: CardItem[];
-  clarify: ConciergeTurn["clarify"] & { chosen?: number };
+  clarify: { question: string; options: CardOption[]; chosen?: number };
+  /** Set on a nudge's card: which rule raised it (for 「少问这类」). */
+  nudgeKind?: string;
   confidence: ConciergeTurn["confidence"]; error?: string;
   /** The words this card is a reading of (for remembering a correction of it). */
   heard?: string;
@@ -203,6 +211,7 @@ export async function conversationTurn(ctx: AccessContext, input: { text: string
   const docs = (input.files ?? []).map((id) => store.listSourceDocuments(ctx.workspaceId).find((doc) => doc.id === id)).filter((doc) => doc !== undefined);
   const text = [input.text.trim(), input.mentions.length ? `（引用：${input.mentions.map((item) => `${item.kind}:${item.id}「${item.title}」`).join("；")}）` : "",
     docs.length ? `（附件：${docs.map((doc) => `《${doc.fileName}》`).join("")}）` : ""].filter(Boolean).join("\n");
+  store.setSetting(ctx.workspaceId, ANSWERED_SETTING, now.toISOString());
   const person = store.appendConversationMessage({ id: randomUUID(), workspaceId: ctx.workspaceId, conversationId: conversation.id, role: "person", text,
     payload: { page: input.page, ...(docs.length ? { files: docs.map((doc) => doc.id) } : {}) } });
   const pack = await contextPack(ctx, input.page, now);
@@ -296,6 +305,7 @@ export async function decideCard(ctx: AccessContext, messageId: string,
   const card = message?.payload.card as Card | undefined;
   if (!message || !card) return { ok: false, code: "CARD_NOT_FOUND" };
   if (card.reviewing && !decision.dismiss) return { ok: false, code: "CARD_REVIEWING" };
+  store.setSetting(ctx.workspaceId, ANSWERED_SETTING, now.toISOString());
   applyEdits(ctx, message.id, card, decision.edits ?? {});
   const candidates = new Set(card.clarify.options.flatMap((option) => option.actions));
   let chosen: number[];
@@ -303,6 +313,7 @@ export async function decideCard(ctx: AccessContext, messageId: string,
     const option = card.clarify.options[decision.option];
     if (!option || card.clarify.chosen !== undefined) return { ok: false, code: "OPTION_NOT_AVAILABLE" };
     card.clarify.chosen = decision.option;
+    if (option.kind === "mute" && card.nudgeKind) muteNudgeKind(ctx, card.nudgeKind, now);
     chosen = option.actions;
     // The candidates not chosen will never run.
     for (const index of candidates) if (!option.actions.includes(index) && card.items[index]?.state === "pending") card.items[index] = { state: "dismissed" };

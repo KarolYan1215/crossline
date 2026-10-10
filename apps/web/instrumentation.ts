@@ -29,6 +29,10 @@ export async function register(): Promise<void> {
       setTimeout(() => { void attentionPass().catch(() => {}); }, 15_000).unref?.();
       const timer = setInterval(() => { void attentionPass().catch(() => {}); }, ATTENTION_INTERVAL_MS);
       timer.unref?.();
+      // The system speaking first (docs/one-input.md §4): rules over the day's blocks, the timer, deadlines and background work.
+      const { nudgePass, NUDGE_INTERVAL_MS } = await import("./lib/nudges");
+      const nudges = setInterval(() => { void nudgePass().catch(() => {}); }, NUDGE_INTERVAL_MS);
+      nudges.unref?.();
     }
     const { resolveCrosslineAuthOptions } = await import("./lib/auth");
     const options = resolveCrosslineAuthOptions();

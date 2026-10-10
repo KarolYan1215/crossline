@@ -1594,6 +1594,12 @@ export class CrosslineStore {
       .all(workspaceId, conversationId) as Array<Record<string, string>>).map((row) => this.#message(row));
   }
 
+  /** The system's own messages since a moment, newest last (the nudge engine's memory, and what the worker delivers when the person is away). */
+  listRecentNudges(workspaceId: string, sinceIso: string): StoredConversationMessage[] {
+    return (this.#db.prepare("SELECT * FROM conversation_messages WHERE workspace_id = ? AND role = 'nudge' AND created_at >= ? ORDER BY created_at, rowid")
+      .all(workspaceId, sinceIso) as Array<Record<string, string>>).map((row) => this.#message(row));
+  }
+
   /** Every conversation is searchable (a note the person jotted lives only here). */
   searchConversationMessages(workspaceId: string, query: string, limit = 30): StoredConversationMessage[] {
     const q = `%${query.replace(/[!%_]/g, (char) => `!${char}`)}%`;
