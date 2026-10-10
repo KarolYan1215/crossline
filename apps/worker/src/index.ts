@@ -15,7 +15,7 @@ import { createNightlyFlywheel } from "./nightly";
 import { createDiligenceRunner, linesDueForDiligence } from "./diligence";
 import { createAgentService } from "./agent-service";
 import { createCalendarPublisher } from "./calendar-publish";
-import { AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, budgetPolicy, CALENDAR_SYNC_FAILURE, type PlanRankingInput } from "@crossline/core";
+import { AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, backgroundSpend, CALENDAR_SYNC_FAILURE, spendAllows, type PlanRankingInput } from "@crossline/core";
 import { createFlywheelExpander } from "./flywheel";
 import { createManualbookBuilder, pendingMaterialWorkOrders, pendingTutorials } from "./manualbook";
 import { createProgressJudge, createStepPlanner, createWarningReviewer, reportsAwaitingJudgement, tasksAwaitingStepPlan, warningsAwaitingReview } from "./step-planner";
@@ -39,6 +39,7 @@ import { createTranscriber, createWhisperEngine, modelsDirectory } from "./trans
 import { createBackgroundFactsExtractor } from "./background-facts-runner";
 import { createGraphSync, type SyncOutcome } from "./graph-sync";
 import { ownerOf } from "./owner";
+import { createBackgroundSpend } from "./spend";
 import {
   buildSources, calendarLabel, listCatalogue, readSelection, saveSelection, seedNewAccounts, sourceKey, mayUseGraphLogin, withdrawForeignCalendar } from "./calendar-sources";
 import { createGraphAuthSession, GraphReadSource, loadVapidKeys, sendWebPush, type GraphCredentialProvider } from "@crossline/connectors";
@@ -100,8 +101,7 @@ async function autoAnalyzePass(workspaceId: string, checkedAt = new Date().toISO
   try {
     const ids = capturesAwaitingAutoAnalysis(analysisStore, workspaceId);
     if (!ids.length) return;
-    const signal = await readCost();
-    if (!signal.available || budgetPolicy(Math.max(signal.short?.usedPercent ?? 0, signal.long?.usedPercent ?? 0)).mode !== "normal") return;
+    if (!spendAllows(await spendFor(workspaceId), "core")) return;
     enterUsageWorkspace(workspaceId);
     for (const id of ids) {
       const outcome = await getCaptureAnalyzer(workspaceId)(codexSupervisor.client, id).catch(() => undefined);
@@ -121,8 +121,7 @@ async function autoBackplanPass(workspaceId: string, checkedAt = new Date().toIS
   try {
     const ids = milestonesAwaitingBackplan(analysisStore, workspaceId);
     if (!ids.length) return;
-    const signal = await readCost();
-    if (!signal.available || budgetPolicy(Math.max(signal.short?.usedPercent ?? 0, signal.long?.usedPercent ?? 0)).mode !== "normal") return;
+    if (!spendAllows(await spendFor(workspaceId), "core")) return;
     enterUsageWorkspace(workspaceId);
     const backplan = createGoalBackplanner(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client, { rolling: true });
     for (const id of ids) {
@@ -143,8 +142,7 @@ async function autoBackplanPass(workspaceId: string, checkedAt = new Date().toIS
 const curating = new Set<string>();
 async function curatorPass(workspaceId: string, checkedAt: string): Promise<void> {
   if (curating.has(workspaceId) || !codexSupervisor || !curationDue(analysisStore, workspaceId)) return;
-  const signal = await readCost();
-  if (!signal.available || budgetPolicy(Math.max(signal.short?.usedPercent ?? 0, signal.long?.usedPercent ?? 0)).mode !== "normal") return;
+  if (!spendAllows(await spendFor(workspaceId), "discretionary")) return;
   curating.add(workspaceId);
   try {
     enterUsageWorkspace(workspaceId);
@@ -157,8 +155,7 @@ async function curatorPass(workspaceId: string, checkedAt: string): Promise<void
 const titling = new Set<string>();
 async function titlePass(workspaceId: string, checkedAt: string): Promise<void> {
   if (titling.has(workspaceId) || !codexSupervisor || !untitledTasks(analysisStore, workspaceId).length) return;
-  const signal = await readCost();
-  if (!signal.available || budgetPolicy(Math.max(signal.short?.usedPercent ?? 0, signal.long?.usedPercent ?? 0)).mode !== "normal") return;
+  if (!spendAllows(await spendFor(workspaceId), "discretionary")) return;
   titling.add(workspaceId);
   try {
     enterUsageWorkspace(workspaceId);
@@ -171,8 +168,7 @@ async function titlePass(workspaceId: string, checkedAt: string): Promise<void> 
 const filingCalendar = new Set<string>();
 async function calendarLinePass(workspaceId: string, checkedAt: string): Promise<void> {
   if (filingCalendar.has(workspaceId) || !codexSupervisor || !unfiledCalendarEvents(analysisStore, workspaceId).length) return;
-  const signal = await readCost();
-  if (!signal.available || budgetPolicy(Math.max(signal.short?.usedPercent ?? 0, signal.long?.usedPercent ?? 0)).mode === "manual_core_only") return;
+  if (!spendAllows(await spendFor(workspaceId), "core")) return;
   filingCalendar.add(workspaceId);
   try {
     enterUsageWorkspace(workspaceId);
@@ -189,8 +185,7 @@ const splittingGoals = new Set<string>();
 async function goalSplitPass(workspaceId: string, checkedAt = new Date().toISOString()): Promise<void> {
   if (splittingGoals.has(workspaceId) || !codexSupervisor
     || (!linesAwaitingSplit(analysisStore, workspaceId).length && !linesAwaitingCandidateSplit(analysisStore, workspaceId).length)) return;
-  const signal = await readCost();
-  if (!signal.available || budgetPolicy(Math.max(signal.short?.usedPercent ?? 0, signal.long?.usedPercent ?? 0)).mode === "manual_core_only") return;
+  if (!spendAllows(await spendFor(workspaceId), "core")) return;
   splittingGoals.add(workspaceId);
   try {
     enterUsageWorkspace(workspaceId);
@@ -213,8 +208,7 @@ async function stepPlanPass(workspaceId: string, checkedAt = new Date().toISOStr
     const reviews = warningsAwaitingReview(analysisStore, workspaceId);
     const reports = reportsAwaitingJudgement(analysisStore, workspaceId);
     if (!ids.length && !reviews.length && !reports.length) return;
-    const signal = await readCost();
-    if (!signal.available || budgetPolicy(Math.max(signal.short?.usedPercent ?? 0, signal.long?.usedPercent ?? 0)).mode !== "normal") return;
+    if (!spendAllows(await spendFor(workspaceId), "core")) return;
     enterUsageWorkspace(workspaceId);
     // A report the person just wrote comes first: they are waiting to see the rings move.
     const judge = createProgressJudge(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client);
@@ -271,8 +265,7 @@ async function tick(): Promise<void> {
     }
     // Tutorials for work coming up in the next seven days (decided 2026-10-08): one per workspace per tick, and only while the quota is normal.
     const tutorial = pendingTutorials(analysisStore, workspace.id)[0];
-    const cost = tutorial ? await readCost() : undefined;
-    if (tutorial && codexSupervisor && cost?.available && budgetPolicy(Math.max(cost.short?.usedPercent ?? 0, cost.long?.usedPercent ?? 0)).mode === "normal") {
+    if (tutorial && codexSupervisor && spendAllows(await spendFor(workspace.id), "discretionary")) {
       const outcome = await getMaterialPreparer(workspace.id)(tutorial, { mode: "tutorial" }).catch(() => undefined);
       if (outcome) console.info(JSON.stringify({ type: `tutorial.${outcome.state}`, checkedAt, workspaceId: workspace.id, ...outcome }));
     }
@@ -383,10 +376,10 @@ setUsageSink((usage) => {
     reasoningTokens: usage.reasoningOutputTokens, totalTokens: usage.totalTokens, durationMs: usage.durationMs, at: usage.at
   });
 });
-setSpendModeProvider(async () => {
-  const signal = await readCost();
-  return signal.available ? budgetPolicy(Math.max(signal.short?.usedPercent ?? 0, signal.long?.usedPercent ?? 0)).mode : "normal";
-});
+// Unreadable reads as manual_core_only here, which routes like normal: only economy steps a Skill down.
+setSpendModeProvider(async () => backgroundSpend(await readCost()).mode);
+// The one quota gate for every background pass (core: keeps the person's own work moving; discretionary: nobody is waiting on it).
+const spendFor = createBackgroundSpend(analysisStore, () => readCost());
 const nightlies = new Map<string, ReturnType<typeof createNightlyFlywheel>>();
 const getNightly = (workspaceId: string) => {
   let nightly = nightlies.get(workspaceId);

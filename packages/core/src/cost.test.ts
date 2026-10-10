@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { allowDiscretionarySpend, type CostSignal } from "./cost";
+import { allowDiscretionarySpend, backgroundSpend, spendAllows, type CostSignal } from "./cost";
 
 const policy = { windowSharePercent: 80, longWindowCeilingPercent: 90 };
 const signal = (over: Partial<Extract<CostSignal, { available: true }>> = {}): CostSignal => ({
@@ -38,4 +38,34 @@ test("degradation modes read a measured percentage", () => {
   const economy = allowDiscretionarySpend(signal({ long: { usedPercent: 86, windowDurationMins: 10_080, resetsAt: null } }), policy);
   expect(normal).toMatchObject({ allowed: true, mode: "normal" });
   expect(economy).toMatchObject({ allowed: true, mode: "economy" });
+});
+
+test("background work reads one signal one way: core work runs until the quota is gone, discretionary work only while it is roomy", () => {
+  const at = (short: number, long = 0): CostSignal => ({ available: true, limitReached: false,
+    short: { usedPercent: short, windowDurationMins: 300, resetsAt: null }, long: { usedPercent: long, windowDurationMins: 10080, resetsAt: null } });
+  const rows: Array<[CostSignal, boolean, boolean]> = [
+    [at(10), true, true],
+    [at(70), true, true],
+    [at(20, 90), true, false],   // economy: the capture analysis still runs, the curator waits
+    [at(100), false, false]
+  ];
+  for (const [signal, core, discretionary] of rows) {
+    const spend = backgroundSpend(signal);
+    expect([spendAllows(spend, "core"), spendAllows(spend, "discretionary")]).toEqual([core, discretionary]);
+  }
+  expect(backgroundSpend(at(100)).blocker?.code).toBe("BUDGET_EXHAUSTED");
+  expect(backgroundSpend(at(20, 90)).blocker).toBeUndefined();
+});
+
+test("a quota that cannot be read pauses background work and says so, instead of stopping silently or spending blind", () => {
+  const spend = backgroundSpend({ available: false, reason: "chatgpt authentication required" });
+  expect(spendAllows(spend, "core")).toBe(false);
+  expect(spend.blocker).toMatchObject({ code: "COST_SIGNAL_UNAVAILABLE" });
+  expect(spend.blocker?.message).toContain("chatgpt authentication required");
+});
+
+test("a reached limit names when it comes back", () => {
+  const spend = backgroundSpend({ available: true, limitReached: true, short: { usedPercent: 100, windowDurationMins: 300, resetsAt: Date.UTC(2026, 9, 11, 3) / 1000 } });
+  expect(spend.blocker?.code).toBe("RATE_LIMIT_REACHED");
+  expect(spend.blocker?.resetsAt).toBe("2026-10-11T03:00:00.000Z");
 });

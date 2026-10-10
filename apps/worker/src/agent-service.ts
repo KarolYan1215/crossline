@@ -2,7 +2,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { enterUsageWorkspace, type CodexRpcBoundary } from "@crossline/codex";
 import { deliverAgentResult, listAgentTasks, readCategories, requestCategory, type CrosslineStore } from "@crossline/db";
-import { AGENT_CATEGORIES, budgetPolicy, isAgentCategory, type AgentCategory, type CostSignal } from "@crossline/core";
+import { AGENT_CATEGORIES, backgroundSpend, isAgentCategory, spendAllows, type AgentCategory, type CostSignal } from "@crossline/core";
 import { createAgentRunner, type AgentOutcome } from "./agent-task";
 import { autoHandoffCandidates, dispatchCandidates, ledgerAsk, stepDispatchCandidates, taskFromWorkOrder } from "./agent-dispatch";
 import { ownerOf } from "./owner";
@@ -18,8 +18,6 @@ export type DispatchResult =
   | { state: "blocked"; code: string; message: string };
 
 export const defaultOutputRoot = (): string => process.env.CROSSLINE_AI_OUTPUT_DIR ?? path.join(homedir(), "Crossline", "ai-output");
-/** Above this share of either quota window nothing is started by itself; a run already going is left to finish. */
-const QUOTA_CEILING_PERCENT = 95;
 export const AGENT_RUN_LOST = "AGENT_RUN_LOST";
 
 export function createAgentService(deps: {
@@ -80,10 +78,11 @@ export function createAgentService(deps: {
       const next = step ?? (order ? { orderId: order, stepId: undefined } : auto.early[0]);
       if (!next) return;
       const { orderId, stepId } = next;
-      const signal = await deps.readCost().catch(() => undefined);
-      // An unreadable quota is not a reason to stop: the run reports a spent one itself, as a blocked task.
-      if (signal?.available && Math.max(signal.short?.usedPercent ?? 0, signal.long?.usedPercent ?? 0) >= QUOTA_CEILING_PERCENT) {
-        log({ type: "agent.skipped", workspaceId, code: "QUOTA_LOW", budget: budgetPolicy(Math.max(signal.short?.usedPercent ?? 0, signal.long?.usedPercent ?? 0)).mode });
+      // Discretionary: it was a third of a real week's tokens, so it waits while the quota is tight (economy) or unreadable,
+      // and the person's own captures and plans keep the rest. Starting by hand from 待确认 is not gated here.
+      const spend = backgroundSpend(await deps.readCost().catch((error: unknown) => ({ available: false as const, reason: String(error) })));
+      if (!spendAllows(spend, "discretionary")) {
+        log({ type: "agent.skipped", workspaceId, code: spend.blocker?.code ?? "QUOTA_LOW", budget: spend.mode });
         return;
       }
       const result = start(workspaceId, orderId, undefined, stepId);

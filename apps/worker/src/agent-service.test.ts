@@ -58,13 +58,14 @@ test("wording that points at no kind needs the person to choose one; choosing on
   expect(svc.dispatch(ws, "wo-1", "draft_text")).toMatchObject({ state: "needs_category_approval", category: "draft_text" });
 });
 
-test("the tick starts one approved order by itself, but not when the quota is nearly spent or a task is already going", async () => {
+test("the tick starts one approved order by itself, but not when the quota is tight or unreadable, or a task is already going", async () => {
   approveCategory(store, ws, "read_research_organize");
   order("wo-1", ["整理并摘要这三篇文献"]);
   order("wo-2", ["整理并摘要另外三篇文献"]);
-  const spent = service({ cost: { ...healthy, short: { usedPercent: 97, windowDurationMins: 300, resetsAt: null } } });
-  await spent.svc.pass(ws);
-  expect(listAgentTasks(store, ws)).toHaveLength(0);
+  for (const cost of [{ ...healthy, short: { usedPercent: 90, windowDurationMins: 300, resetsAt: null } }, { available: false as const, reason: "apiKey" }]) {
+    await service({ cost }).svc.pass(ws);
+    expect(listAgentTasks(store, ws)).toHaveLength(0);
+  }
   const { svc } = service();
   await svc.pass(ws);
   expect(svc.runningTasks(ws)).toHaveLength(1);

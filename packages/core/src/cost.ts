@@ -63,3 +63,37 @@ export function allowDiscretionarySpend(signal: CostSignal, policy: SpendPolicy)
   // The three-tier degradation is real here because it reads a measured percentage, not an estimate.
   return { allowed: true, headroomPercent, mode: budgetPolicy(signal.long?.usedPercent ?? used).mode };
 }
+
+/**
+ * Background work the tick starts on its own. `core` is what keeps the person's own captures and tasks moving (analysis,
+ * backplanning, step plans); `discretionary` is what nobody is waiting on (curation, titles, tutorials, research, the assistant).
+ */
+export type SpendKind = "core" | "discretionary";
+/** Setting the worker writes when it pauses a workspace's background passes, `{code, message, resetsAt?, at}`; the web asks about it. */
+export const BACKGROUND_BLOCKER = "background.blocker";
+export type BackgroundSpend = { mode: SpendMode; blocker?: { code: string; message: string; resetsAt?: string } };
+
+/**
+ * The one reading of the quota for background work. It replaced eight copies of the same check that disagreed about an
+ * unreadable quota (stop / treat as normal / keep going) and stopped the capture analysis in economy mode, where the
+ * Skill runs at the same tier anyway. A quota that cannot be read pauses background work with a reason the person sees
+ * (an API-key login reports no windows), instead of stopping silently or spending without knowing how much is left.
+ */
+export function backgroundSpend(signal: CostSignal): BackgroundSpend {
+  if (!signal.available) return { mode: "manual_core_only", blocker: { code: "COST_SIGNAL_UNAVAILABLE",
+    message: `读不到模型额度（${signal.reason}），后台自动工作已暂停；本人发起的操作照常运行。` } };
+  const used = Math.max(signal.short?.usedPercent ?? 0, signal.long?.usedPercent ?? 0);
+  if (signal.limitReached) {
+    const reset = [signal.short, signal.long].filter((window) => (window?.usedPercent ?? 0) >= 100).map((window) => window?.resetsAt).find((at) => at);
+    const resetsAt = reset ? new Date(reset * 1000).toISOString() : undefined;
+    return { mode: "manual_core_only", blocker: { code: "RATE_LIMIT_REACHED", message: "模型额度已用尽，后台自动工作暂停到额度恢复。",
+      ...(resetsAt ? { resetsAt } : {}) } };
+  }
+  const { mode } = budgetPolicy(used);
+  return mode === "manual_core_only"
+    ? { mode, blocker: { code: "BUDGET_EXHAUSTED", message: `模型额度已用 ${Math.round(used)}%，后台自动工作暂停到额度恢复。` } }
+    : { mode };
+}
+
+export const spendAllows = (spend: BackgroundSpend, kind: SpendKind): boolean =>
+  kind === "core" ? spend.mode !== "manual_core_only" : spend.mode === "normal";

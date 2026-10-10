@@ -272,3 +272,16 @@ test("only this week's decisions are counted and listed; one whose work starts l
   vi.stubEnv("CROSSLINE_FIXED_NOW", "2026-11-18T15:00:00.000Z");
   expect(countPending(TEST_CTX).later.workOrders).toBe(0);
 });
+
+test("background work the worker paused is told to the person, with where to look; a worker that is down is not asked twice", () => {
+  const store = setup();
+  store.setSetting(ws, "background.blocker", JSON.stringify({ code: "COST_SIGNAL_UNAVAILABLE",
+    message: "读不到模型额度（chatgpt authentication required），后台自动工作已暂停；本人发起的操作照常运行。", at: NOW.toISOString() }));
+  const paused = collectAsks(TEST_CTX, NOW).find((ask) => ask.kind === "background_paused");
+  expect(paused?.why).toContain("chatgpt authentication required");
+  expect(paused?.options[0]?.href).toBe("/settings#usage");
+  store.setSetting(ws, "background.blocker", JSON.stringify({ code: "COST_SIGNAL_UNAVAILABLE", message: "读不到模型额度（CODEX_SUPERVISOR_UNAVAILABLE）", at: NOW.toISOString() }));
+  expect(collectAsks(TEST_CTX, NOW).some((ask) => ask.kind === "background_paused")).toBe(false);
+  store.setSetting(ws, "background.blocker", "");
+  expect(collectAsks(TEST_CTX, NOW).some((ask) => ask.kind === "background_paused")).toBe(false);
+});

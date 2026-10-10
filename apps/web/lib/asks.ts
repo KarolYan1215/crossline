@@ -1,7 +1,7 @@
 import "server-only";
 import { recordOp, retractedEventIds, withUndo } from "./undo";
 import {
-  ATTENTION_SNAPSHOT, CALENDAR_LINES, CALENDAR_PUBLISH_FAILURE, CALENDAR_SYNC_FAILURE, calendarEventKey, daysBetween, describeEvent, missingInputsOf, rankAsks,
+  ATTENTION_SNAPSHOT, BACKGROUND_BLOCKER, CALENDAR_LINES, CALENDAR_PUBLISH_FAILURE, CALENDAR_SYNC_FAILURE, calendarEventKey, daysBetween, describeEvent, missingInputsOf, rankAsks,
   prepStepRetried, snoozeUntil, STEP_ANSWER_SLOT, stepAnswerSlot, taskTitleOf, urgencyFor, type CalendarLines,
   validateAskAnswer, type AccessContext, type Ask, type AskField, type AskOption, type AskSnooze
 } from "@crossline/core";
@@ -521,10 +521,25 @@ function eventAsks({ ctx, today }: Source): Ask[] {
   });
 }
 
+/**
+ * Background work the worker paused for this workspace (`BACKGROUND_BLOCKER`): an unreadable quota (an API-key login reports no
+ * windows) or a spent one. It used to stop with nothing said, so captures sat unanalysed while the page looked normal. A worker that is
+ * down is its own ask (`runtimeAsk`), not this one.
+ */
+function backgroundAsks({ store, ctx }: Source): Ask[] {
+  const paused = readFailure(store, ctx.workspaceId, BACKGROUND_BLOCKER) as ({ resetsAt?: string } & NonNullable<ReturnType<typeof readFailure>>) | null;
+  if (!paused || paused.message.includes("CODEX_SUPERVISOR_UNAVAILABLE")) return [];
+  const until = paused.resetsAt ? `，预计 ${paused.resetsAt.slice(5, 16).replace("T", " ")}（UTC）恢复` : "";
+  return [{ id: `background:${paused.code}`, kind: "background_paused", entityId: "background", urgency: "soon", raisedAt: paused.at,
+    fingerprint: paused.code, title: "后台自动工作已暂停",
+    why: `${clause(paused.message)}${until}。新收集的事项会在恢复后自动分析；需要现在处理的可以在任务页手动点「分析」。`,
+    options: [{ id: "settings", label: "去看额度", href: "/settings#usage", recommended: true }] }];
+}
+
 export function collectAsks(ctx: AccessContext, now = new Date()): Ask[] {
   const source = { store: getStore(), ctx, today: planToday(ctx, now), now };
   return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskAsks, missedAsks, agentAsks, calendarAsks, sourceProjectAsks, calendarLineAsks, interviewAsks, eventAsks, stepQuestionAsks,
-    ({ ctx: context, now: at }: Source) => relationCheckAsks(context, at)]
+    ({ ctx: context, now: at }: Source) => relationCheckAsks(context, at), backgroundAsks]
     .flatMap((collect) => { try { return collect(source); } catch { return []; } });
 }
 

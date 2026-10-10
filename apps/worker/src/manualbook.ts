@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, w
 import { pathToFileURL } from "node:url";
 import path from "node:path";
 import {
-  MANUAL_DESIGN_SCHEMA, MATERIAL_SEARCH_SCHEMA, NODE_WRITEUP_SCHEMA, budgetPolicy, openAccessVerdict, profileFactId, relevantDocuments, topologicalOrder,
+  MANUAL_DESIGN_SCHEMA, MATERIAL_SEARCH_SCHEMA, NODE_WRITEUP_SCHEMA, backgroundSpend, openAccessVerdict, profileFactId, relevantDocuments, topologicalOrder,
   validateManualDesign, validateMaterialSearch, validateNodeWriteup,
   type CostSignal, type FoundSource, type ManualDesign, type ManualDesignContext, type ManualNode, type MaterialSearch,
   type MaterialSearchContext, type NodeWriteup, type WriteContext
@@ -166,7 +166,7 @@ export function createManualbookBuilder(store: CrosslineStore, workspaceId: stri
     // Discretionary spend: when the quota is gone the person prepares it themselves. A tight quota is handled one
     // level down, where the Skills step to a cheaper model instead of refusing.
     const cost = await all.readCost();
-    const spend = cost.available ? budgetPolicy(Math.max(cost.short?.usedPercent ?? 0, cost.long?.usedPercent ?? 0)).mode : "manual_core_only";
+    const spend = backgroundSpend(cost).mode;
     if (spend === "manual_core_only") {
       return blocked(cost.available ? "MATERIAL_BUDGET_EXHAUSTED" : "COST_SIGNAL_UNAVAILABLE", cost.available ? "预算已用尽；材料请人工自备。" : "读不到用量信号；材料请人工自备。");
     }

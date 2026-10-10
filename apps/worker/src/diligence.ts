@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import {
-  DILIGENCE_OUTPUT_SCHEMA, publicHttpsUrl, profileFactId, validateDiligence, budgetPolicy,
+  DILIGENCE_OUTPUT_SCHEMA, publicHttpsUrl, profileFactId, validateDiligence, backgroundSpend,
   type CostSignal, type DiligenceContext, type DiligenceOutput, type DiligenceSource, type DiligenceTopic
 } from "@crossline/core";
 import { runCodexSkill, webResearchBlocker, type CodexRpcBoundary } from "@crossline/codex";
@@ -162,7 +162,7 @@ export function createDiligenceRunner(store: CrosslineStore, workspaceId: string
 
     // Web research is discretionary spend: when the window is nearly used up, the person's own work comes first.
     const cost = await all.readCost();
-    const mode = cost.available ? budgetPolicy(Math.max(cost.short?.usedPercent ?? 0, cost.long?.usedPercent ?? 0)).mode : "manual_core_only";
+    const mode = backgroundSpend(cost).mode;
     // Stricter than material preparation: this is background work nobody is waiting on, so it stops as soon as
     // the window is tight (economy mode) and not only when it is gone.
     if (mode !== "normal") {
