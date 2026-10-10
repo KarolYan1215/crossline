@@ -24,7 +24,7 @@ const DAY = 86_400_000;
 const addDays = (day: string, days: number) => new Date(Date.parse(`${day}T12:00:00Z`) + days * DAY).toISOString().slice(0, 10);
 const minutesOf = (clock: string) => { const [h, m] = clock.split(":").map(Number); return (h ?? 0) * 60 + (m ?? 0); };
 
-export type NudgePayload = { kind: NudgeKind | "opener"; fingerprint: string; counted: boolean; urgent: boolean; delivery: "page" | "pending" | "pushed" };
+export type NudgePayload = { kind: NudgeKind | "opener"; fingerprint: string; covers?: string[]; counted: boolean; urgent: boolean; delivery: "page" | "pending" | "pushed" };
 
 /** Runs the engine for every workspace (the web's timer). A workspace that fails is skipped until the next interval. */
 export async function nudgePass(now = new Date()): Promise<number> {
@@ -97,14 +97,16 @@ export async function nudgesFor(ctx: AccessContext, now = new Date()): Promise<P
   const planned = planNudges({
     now: now.toISOString(), today, clock, tomorrow: addDays(today, 1), level, muted,
     quiet: { timerRunning: Boolean(running), inMeeting: meeting, answeredRecently: Boolean(answeredAt) && now.getTime() - Date.parse(answeredAt!) < ANSWERED_QUIET_MS },
-    sent: new Set(recent.map((message) => payloadOf(message)?.fingerprint ?? "")),
+    night: clock < "08:00" || clock >= "23:00",
+    sent: new Set(recent.flatMap((message) => [payloadOf(message)?.fingerprint ?? "", ...(payloadOf(message)?.covers ?? [])])),
     countedToday: recent.filter((message) => payloadOf(message)?.counted && message.createdAt.slice(0, 10) >= addDays(today, -1)
       && local(message.createdAt).slice(0, 10) === today).length,
     blocks, slack, finished,
     ...(running && timerOrder ? { timer: { orderId: timerOrder.id, title: taskTitleOf(timerOrder), stepId: currentStep?.id ?? "", stepTitle: currentStep?.title ?? "",
       startedAt: running.startedAt, usualMinutes: currentStep?.estimate.p50Minutes ?? timerOrder.estimate.p50Minutes } } : {})
   });
-  for (const nudge of planned) say(ctx, nudge.text, nudge.buttons, { kind: nudge.kind, fingerprint: nudge.fingerprint, counted: nudge.counted, urgent: nudge.urgent }, now);
+  for (const nudge of planned) say(ctx, nudge.text, nudge.buttons, { kind: nudge.kind, fingerprint: nudge.fingerprint, counted: nudge.counted, urgent: nudge.urgent,
+    ...(nudge.covers ? { covers: nudge.covers } : {}) }, now);
   return planned;
 }
 

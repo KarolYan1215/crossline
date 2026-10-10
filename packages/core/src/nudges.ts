@@ -24,6 +24,8 @@ export type PlannedNudge = {
   /** Counted against the day's cap (the notify level); a block's start is not, as the person chose. */
   counted: boolean;
   buttons: NudgeButton[];
+  /** Further fingerprints this one says too (background work finished together is one message), so none is said again. */
+  covers?: string[];
 };
 
 /** A scheduled block of work that bears on a deadline within a week (the only blocks reminded about). */
@@ -38,6 +40,8 @@ export type NudgeSlack = { orderId: string; title: string; dueDay: string; remai
 export type NudgeInput = {
   now: string; today: string; clock: string; tomorrow: string; level: NotifyLevelName;
   quiet: { timerRunning: boolean; inMeeting: boolean; answeredRecently: boolean };
+  /** Before 08:00 or after 23:00 (the person's clock): only what follows their own activity — a block they are about to start, a timer they left running. */
+  night?: boolean;
   muted: Set<NudgeKind>; sent: Set<string>; countedToday: number;
   blocks: NudgeBlock[];
   slack: NudgeSlack[];
@@ -100,22 +104,31 @@ export function nudgeCandidates(input: NudgeInput): PlannedNudge[] {
           { kind: "ack", label: "还差一点" }, { kind: "say", label: "卡住了" }, mute] });
     }
   }
-  for (const item of input.finished) {
-    out.push({ kind: "background_done", fingerprint: `done:${item.key}`, urgent: false, counted: true, text: item.text,
-      buttons: [{ kind: "href", label: item.label, href: item.href }, { kind: "ack", label: "稍后" }, mute] });
+  // Background work that finished together is said together: one message, every item in it, none of them said again.
+  const finished = input.finished.filter((item) => !input.sent.has(`done:${item.key}`));
+  if (finished.length === 1) {
+    const [item] = finished;
+    out.push({ kind: "background_done", fingerprint: `done:${item!.key}`, urgent: false, counted: true, text: item!.text,
+      buttons: [{ kind: "href", label: item!.label, href: item!.href }, { kind: "ack", label: "稍后" }, mute] });
+  } else if (finished.length > 1) {
+    const review = finished.find((item) => item.href.startsWith("/approvals"));
+    out.push({ kind: "background_done", fingerprint: `done:${finished[0]!.key}`, covers: finished.slice(1).map((item) => `done:${item.key}`), urgent: false, counted: true,
+      text: `后台完成了 ${finished.length} 件：\n${finished.map((item) => `- ${item.text}`).join("\n")}`,
+      buttons: [{ kind: "href", label: review ? review.label : finished[0]!.label, href: review ? review.href : finished[0]!.href }, { kind: "ack", label: "稍后" }, mute] });
   }
   return out;
 }
 
 /**
- * What is said now: nothing at the 「关闭」 level; nothing already said; no muted kind; while the person is busy (the timer runs, a
+ * What is said now: nothing at the 「关闭」 level; nothing already said; no muted kind; at night only what follows their own activity; while the person is busy (the timer runs, a
  * meeting is on, they answered something under twenty minutes ago) only the urgent; and no more counted ones than the day's cap has
  * left, urgent first.
  */
 export function planNudges(input: NudgeInput): PlannedNudge[] {
   if (input.level === "off") return [];
   const busy = input.quiet.timerRunning || input.quiet.inMeeting || input.quiet.answeredRecently;
-  const candidates = nudgeCandidates(input).filter((item) => !input.sent.has(item.fingerprint) && !input.muted.has(item.kind) && (item.urgent || !busy))
+  const candidates = nudgeCandidates(input).filter((item) => !input.sent.has(item.fingerprint) && !input.muted.has(item.kind) && (item.urgent || !busy)
+    && (!input.night || item.kind === "block_start" || item.kind === "timer_overrun"))
     .sort((a, b) => Number(b.urgent) - Number(a.urgent));
   let left = DAILY_CAP[input.level] - input.countedToday;
   return candidates.filter((item) => {

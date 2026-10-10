@@ -51,3 +51,14 @@ test("busy, muted, capped: only the urgent get through while busy, a muted kind 
   expect(planNudges(base({ level: "off" }))).toEqual([]);
   expect(nudgeCandidates(base({ level: "off" }))).toHaveLength(1);
 });
+
+test("background work finished together is one message, and at night only what follows the person's own activity is said", () => {
+  const finished = [{ key: "agent:a", text: "助手做完了「索引」", label: "去审阅", href: "/approvals#assistant" },
+    { key: "agent:b", text: "「题单」已备好", label: "打开任务", href: "/workbench/x" }];
+  const [batched] = planNudges(base({ blocks: [], finished }));
+  expect(batched).toMatchObject({ fingerprint: "done:agent:a", covers: ["done:agent:b"] });
+  expect(batched!.text).toContain("后台完成了 2 件");
+  expect(planNudges(base({ blocks: [], finished, sent: new Set(["done:agent:a", "done:agent:b"]) }))).toEqual([]);
+  expect(planNudges(base({ blocks: [], finished, night: true }))).toEqual([]);
+  expect(planNudges(base({ night: true })).map((item) => item.kind)).toEqual(["block_start"]);
+});
