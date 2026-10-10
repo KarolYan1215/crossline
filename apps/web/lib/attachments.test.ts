@@ -76,31 +76,3 @@ test("saveCaptureAttachments writes the file under attachmentsRoot and records a
   store.close();
 });
 
-test("saveAssistantAttachments refuses an invalid thread id before touching disk", async () => {
-  const { saveAssistantAttachments } = await import("./attachments");
-  const store = new CrosslineStore(":memory:");
-  const result = saveAssistantAttachments(store, {
-    workspaceId: "w", ownerId: "o", threadId: "not valid!",
-    files: [{ fileName: "a.txt", mediaType: "text/plain", buffer: Buffer.from("hi") }]
-  });
-  expect(result).toMatchObject({ ok: false, code: "ATTACHMENT_THREAD_ID_INVALID" });
-  store.close();
-});
-
-test("saveAssistantAttachments writes under its own root (not the capture one) and records a ledger row", async () => {
-  const { saveAssistantAttachments, assistantAttachmentsRoot, attachmentsRoot } = await import("./attachments");
-  const store = new CrosslineStore(":memory:");
-  const result = saveAssistantAttachments(store, {
-    workspaceId: "w", ownerId: "o", threadId: "t1",
-    files: [{ fileName: "plan.txt", mediaType: "text/plain", buffer: Buffer.from("draft") }]
-  });
-  expect(result.ok).toBe(true);
-  if (!result.ok) return;
-  const saved = result.saved[0]!;
-  expect(saved.uri.startsWith(pathToFileURL(assistantAttachmentsRoot("t1")).href)).toBe(true);
-  expect(assistantAttachmentsRoot("t1")).not.toBe(attachmentsRoot("t1"));
-  const rows = store.listAssistantAttachments("w", "t1");
-  expect(rows).toHaveLength(1);
-  expect(rows[0]).toMatchObject({ id: saved.id, uri: saved.uri, mediaType: "text/plain", fileName: "plan.txt" });
-  store.close();
-});

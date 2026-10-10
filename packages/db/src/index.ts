@@ -1579,6 +1579,11 @@ export class CrosslineStore {
     this.#db.prepare("UPDATE conversation_messages SET payload_json = ? WHERE workspace_id = ? AND id = ?").run(JSON.stringify(payload), workspaceId, messageId);
   }
 
+  /** Only the second look (先快后准) rewrites an answer's words, and only when it changed what the card proposes. */
+  updateConversationText(workspaceId: string, messageId: string, text: string): void {
+    this.#db.prepare("UPDATE conversation_messages SET text = ? WHERE workspace_id = ? AND id = ? AND role = 'assistant'").run(text, workspaceId, messageId);
+  }
+
   getConversationMessage(workspaceId: string, id: string): StoredConversationMessage | undefined {
     const row = this.#db.prepare("SELECT * FROM conversation_messages WHERE workspace_id = ? AND id = ?").get(workspaceId, id) as Record<string, string> | undefined;
     return row ? this.#message(row) : undefined;

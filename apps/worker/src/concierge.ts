@@ -22,7 +22,17 @@ export type ConciergeRequest = {
   pack: ConciergePack;
   /** Today's conversation so far, oldest first: reopens the thread when the runtime has forgotten it. */
   history: Array<{ role: string; text: string }>;
+  /**
+   * A second look at the turn just answered, on the stronger model and the same thread (先快后准): `text` is ignored and the model is
+   * asked to check its last answer and return it whole, corrected or not.
+   */
+  review?: boolean;
+  /** The person corrected the box earlier today: every turn from then on is read by the stronger model at once. */
+  corrected?: boolean;
 };
+
+const REVIEW = "复核上一个回答（review）：逐项核对动作、对象 id、日期、时长与本人原话是否一致，必要时重新查询；"
+  + "确有把握的才提出，没把握的改为追问。返回完整的最终回答 JSON，不是修改说明。";
 
 export type ConciergeOutcome =
   | { state: "replied"; turn: ConciergeTurn; warnings: string[] }
@@ -58,13 +68,22 @@ export function createConcierge(store: CrosslineStore, workspaceId: string, cwd:
     const refs = conciergeRefs(request.pack);
     const tools = conciergeTools(store, workspaceId, request.pack);
     const message = { snapshot: request.snapshot, text: request.text.slice(0, 4000), mentions: request.mentions.slice(0, 20) };
+    const tier = request.review || request.corrected ? "mid" as const : undefined;
     const shared = {
-      skillName: CONCIERGE_SKILL, cwd, outputSchema: CONCIERGE_SCHEMA, tools, timeoutMs: 10 * 60_000, ...(signal ? { signal } : {}),
+      skillName: CONCIERGE_SKILL, cwd, outputSchema: CONCIERGE_SCHEMA, tools, timeoutMs: 10 * 60_000, ...(signal ? { signal } : {}), ...(tier ? { tier } : {}),
       validateOutput: (output: unknown) => validateConciergeTurn(output, refs),
       // After the repairs, what can be carried out is shown and the rest is named in the reply.
       softAccept: (_rejection: Error, output: unknown) => keepUsable(output, refs)
     };
     let threadId = conversation.codexThreadId;
+    if (request.review) {
+      // Only the thread that gave the first answer can look at it again; without it the first card stands.
+      if (!threadId) return { state: "blocked", code: "CONCIERGE_REVIEW_NO_THREAD", message: "没有可复核的回答。" };
+      const reviewed = await continueSkillTurn<ConciergeTurn>(client, threadId, JSON.stringify({ review: true, snapshot: request.snapshot, text: REVIEW }),
+        { ...shared, onAudit: () => {} });
+      return reviewed.ok ? { state: "replied", turn: reviewed.output, warnings: (reviewed.audit.warnings ?? []).map((warning) => warning.code) }
+        : { state: "blocked", code: reviewed.blocker.code, message: reviewed.blocker.message };
+    }
     const fresh = () => runCodexSkill<ConciergeTurn>(client, null, {
       ...shared, developerInstructions: INSTRUCTIONS, onAudit: (audit) => { threadId = audit.threadId; },
       prepareInput: () => ({ version: "crossline.concierge.v1", today: request.pack.today, timeZone: request.pack.timeZone,

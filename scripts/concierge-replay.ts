@@ -1,5 +1,5 @@
 /**
- * The one input box's acceptance replay (docs/one-input.md §8, P1): thirty sentences written the way the person types, each sent as a
+ * The one input box's acceptance replay (docs/one-input.md §8, P1 and P2): thirty sentences written the way the person types, each sent as a
  * fresh turn of `crossline-concierge` against a **copy** of the real ledger (the live database is only read, through SQLite's online
  * backup), with the real Codex. Each case states what a right reading is — which action, on which object — and the run prints, per
  * case, what came back, how long it took and whether it matches; at the end the pass count and the median time to the first card.
@@ -89,7 +89,8 @@ const cases: Array<[string, Check]> = [
   ["记一下：Cadence 安装要找实验室管理员", either(only("note.add"), only("task.create"), asksOrClarifies)],
   ["下周找时间读 hippocampus replay 的两篇综述", only("task.create")],
   ["我想成为能独立带项目的研究者", both(only("goal.add"), arg("lineId", (value, pack) => pack.lines.find((line) => line.id === value)?.label === "研究者", "研究者"))],
-  ["研究者里程碑：12 月前投出第一篇论文", only("milestone.draft")],
+  // The account already has a paper milestone due 10/31: asking whether this is the same one is the right reading too.
+  ["研究者里程碑：12 月前投出第一篇论文", either(only("milestone.draft"), asksOrClarifies)],
   ["加一条主线：跑者", both(only("line.add"), arg("label", (value) => value === "跑者", "跑者"))],
   ["我其实晚上效率更高", only("profile.tell")],
   ["这周还有多少空闲时间？", only()],
@@ -108,29 +109,61 @@ const cases: Array<[string, Check]> = [
   ["选定首轮选题那个提案不要了，方向变了", both(only("proposal.decide"), arg("decision", (value) => value === "reject", "reject"))]
 ];
 
-const picked = process.argv.slice(2).map(Number).filter((n) => n >= 1 && n <= cases.length);
-const results: Array<{ n: number; ok: boolean; seconds: number }> = [];
-for (const [index, [text, check]] of cases.entries()) {
+// P2: three lines said on a task's page (「这一步」 is its current step), and a correction across two turns.
+const hw2Task = pack0.tasks.find((task) => /作业\s*2/.test(task.title));
+const taskPage = { kind: "task", entityId: hw2Task?.id ?? "" };
+const currentStep = (pack: Pack) => pack.tasks.find((task) => task.id === taskPage.entityId)?.steps.find((step) => step.status === "planned")?.id;
+type Case = { text: string; check: Check; page?: { kind: string; entityId: string }; then?: { text: string; check: Check } };
+const all: Case[] = [...cases.map(([text, check]) => ({ text, check })),
+  { text: "这一步做完了", page: taskPage, check: both(only("task.op"), arg("stepId", (value, pack) => value === currentStep(pack), "本页任务的当前步骤")) },
+  { text: "截止推迟两天", page: taskPage, check: both(only("task.op"), arg("workOrderId", (value) => value === taskPage.entityId, "本页任务")) },
+  { text: "用了 30 分钟，卡在第三题", page: taskPage, check: either(only("task.op"), only("task.op", "task.op")) },
+  { text: "作业2截止改到周四", check: only("task.op"), then: { text: "不对，是周五",
+    check: (turn) => turn.corrects ? both(only("task.op"), arg("date", (value) => new Date(`${String(value)}T12:00:00Z`).getUTCDay() === 5, "周五"))(turn, pack0) : "未标为更正" } }
+];
+
+const picked = process.argv.slice(2).map(Number).filter((n) => n >= 1 && n <= all.length);
+const results: Array<{ n: number; ok: boolean; seconds: number; reviewed: boolean; changed: boolean }> = [];
+const run = createConcierge(store, workspace.id, repoRoot, client);
+const { needsReview } = await import("../packages/core/src/index");
+/** One turn as the web runs it: the quick reading, and when it needs one, the second look on the stronger model. */
+const turnOf = async (conversationId: string, text: string, page: { kind: string; entityId: string }, corrected: boolean) => {
+  const pack = await contextPack(ctx, page);
+  const request = { conversationId, text, mentions: [], snapshot: conciergeSnapshot(pack, new Date(), { lists: true }), pack, history: [], ...(corrected ? { corrected } : {}) };
+  const first = await run(request);
+  if (first.state !== "replied" || corrected || !needsReview(first.turn, first.warnings)) return { pack, outcome: first, reviewed: false, changed: false };
+  const second = await run({ ...request, review: true });
+  if (second.state !== "replied") return { pack, outcome: first, reviewed: true, changed: false };
+  return { pack, outcome: second, reviewed: true, changed: JSON.stringify(second.turn.actions) !== JSON.stringify(first.turn.actions) };
+};
+for (const [index, item] of all.entries()) {
   if (picked.length && !picked.includes(index + 1)) continue;
   const conversation = store.conversationFor(workspace.id, `replay-${String(index + 1).padStart(2, "0")}`);
-  const pack = await contextPack(ctx, { kind: "today", entityId: "" });
   const started = Date.now();
   lastUsage = undefined;
-  const outcome = await createConcierge(store, workspace.id, repoRoot, client)({ conversationId: conversation.id, text, mentions: [], snapshot: conciergeSnapshot(pack, new Date(), { lists: process.env.REPLAY_LISTS !== "0" }), pack, history: [] });
+  let { pack, outcome, reviewed, changed } = await turnOf(conversation.id, item.text, item.page ?? { kind: "today", entityId: "" }, false);
+  let check = item.check;
+  let text = item.text;
+  if (item.then && outcome.state === "replied" && !item.check(outcome.turn, pack)) {
+    // The correction is the next line on the same thread; from then on the stronger model reads at once.
+    ({ pack, outcome, reviewed, changed } = await turnOf(conversation.id, item.then.text, item.page ?? { kind: "today", entityId: "" }, false));
+    check = item.then.check; text = `${item.text} → ${item.then.text}`;
+  }
   const seconds = Math.round((Date.now() - started) / 100) / 10;
   if (outcome.state !== "replied") {
     console.info(JSON.stringify({ n: index + 1, text, ok: false, seconds, blocked: outcome.code, message: outcome.message }));
-    results.push({ n: index + 1, ok: false, seconds });
+    results.push({ n: index + 1, ok: false, seconds, reviewed, changed });
     continue;
   }
   const problem = check(outcome.turn, pack);
-  results.push({ n: index + 1, ok: !problem, seconds });
-  console.info(JSON.stringify({ n: index + 1, text, ok: !problem, seconds, repairs: lastUsage?.repairs ?? null, ...(problem ? { problem } : {}),
-    reply: outcome.turn.reply.slice(0, 160), actions: outcome.turn.actions.map((item) => `${item.action}:${item.summary}`),
+  results.push({ n: index + 1, ok: !problem, seconds, reviewed, changed });
+  console.info(JSON.stringify({ n: index + 1, text, ok: !problem, seconds, reviewed, changed, ...(problem ? { problem } : {}),
+    reply: outcome.turn.reply.slice(0, 160), actions: outcome.turn.actions.map((entry) => `${entry.action}:${entry.summary}`),
     ...(outcome.turn.clarify.question ? { clarify: `${outcome.turn.clarify.question} [${outcome.turn.clarify.options.map((option) => option.label).join(" | ")}]` } : {}) }));
 }
 const times = results.map((item) => item.seconds).sort((a, b) => a - b);
 console.info(JSON.stringify({ passed: results.filter((item) => item.ok).length, of: results.length, medianSeconds: times[Math.floor(times.length / 2)] ?? null,
+  reviewed: results.filter((item) => item.reviewed).map((item) => item.n), changedByReview: results.filter((item) => item.changed).map((item) => item.n),
   failed: results.filter((item) => !item.ok).map((item) => item.n), captures: store.listCaptures(workspace.id).length, dataDir }));
 await supervisor.stop();
 store.close();

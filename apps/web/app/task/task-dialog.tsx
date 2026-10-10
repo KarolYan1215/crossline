@@ -7,7 +7,7 @@ import { Sheet } from "../ui/overlay";
 import { ProgressRing, formatMinutes, dayLabel } from "../ui/controls";
 import { LineTag, SupportsTag, Tag } from "../ui/tag";
 import { riskLabel, riskTone, stateLabelFor } from "../../lib/labels";
-import { AssistantChat } from "../chat/assistant-chat";
+import { Conversation } from "../chat/conversation";
 import { ManualbookView } from "../manualbook-view";
 import { ExecutionActions } from "../execution-actions";
 import { PostponePanel } from "./postpone";
@@ -162,14 +162,12 @@ function MaterialsPanel({ detail }: { detail: TaskDetail }) {
   </div>;
 }
 
-/** The task's record: time spent, the person's own notes and postponements, a box to record anything in words, and the timer. */
+/** The task's record: time spent, the person's own notes and postponements, and the timer (recording in words is the task's input box). */
 function RecordPanel({ detail }: { detail: TaskDetail }) {
   return <div className="record-panel">
     <p className="record-figures"><span className="ui-stat"><b>{formatMinutes(detail.workedMinutes)}</b><span>已投入</span></span>
       <span className="ui-stat"><b>{detail.executions.length}</b><span>次计时</span></span>
       <span className="ui-stat"><b>{detail.executions.reduce((sum, item) => sum + item.interruptions.length, 0)}</b><span>次中断</span></span></p>
-    {!["accepted", "archived"].includes(detail.state) && <AssistantChat workOrderId={detail.id} mode="record" inputFirst storageKey={`crossline-task-record-${detail.id}`}
-      emptyText="" placeholder="记录：做了什么、用了多久、卡在哪、在等谁、精力如何" />}
     {detail.notes.length > 0 && <ol className="record-notes">{detail.notes.map((note, index) => <li key={index} data-kind={note.kind}>
       <small className="mono">{note.at.slice(5, 16).replace("T", " ")}</small><span>{note.text}</span></li>)}</ol>}
     <ExecutionActions workOrderId={detail.id} intent={detail.intent} state={detail.state} paused={detail.paused} ownerId={detail.ownerId}
@@ -219,8 +217,8 @@ export function TaskPanels({ detail, initialTab = "steps" }: { detail: TaskDetai
         editable={!["accepted", "archived"].includes(detail.state)} {...remaining} />
       {/* One way in for everything about this task: ask about it, change it, record what happened. Changes come back as a card to apply. */}
       <div className="task-entry">
-        <AssistantChat workOrderId={detail.id} inputFirst storageKey={`crossline-task-chat-${detail.id}`} emptyText=""
-          placeholder="对该任务的任何指令或问题：改截止、加步骤、记进度、推迟、讲解某一步…" />
+        <Conversation variant="task" page={{ kind: "task", entityId: detail.id }}
+          placeholder="对该任务的指令、记录或问题：改截止、这一步做完了、用了多久、卡在哪、在等谁、讲解某一步…" />
         {live && !postponing && <button type="button" className="secondary-button task-postpone" onClick={() => setPostponing(true)}>推迟</button>}
         {postponing && <PostponePanel workOrderId={detail.id} onClose={() => setPostponing(false)} />}
       </div>

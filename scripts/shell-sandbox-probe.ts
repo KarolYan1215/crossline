@@ -31,7 +31,7 @@ const supervisor = await startCodexSupervisor({
     name: "crossline",
     marketplacePath: path.join(repoRoot, "skills", "marketplace", ".agents", "plugins", "marketplace.json"),
     cwd: repoRoot,
-    requiredSkills: ["crossline:crossline-assistant"]
+    requiredSkills: ["crossline:crossline-concierge"]
   }
 });
 const client = supervisor.client;

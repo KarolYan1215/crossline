@@ -101,3 +101,58 @@ test("the pack says how much time work can use: the available hours minus fixed 
   expect(late.capacity[0]).toMatchObject({ day: "2026-10-08", availableMinutes: 0 });
   expect(conciergeSnapshot(pack, NOW)).toContain("可用时段扣除固定安排");
 });
+
+const dueOn = (date: string, workOrderId = "sim") => ({ action: "task.op", summary: `截止改为 ${date}`, args: { workOrderId, type: "due", date, minutes: 0, stepId: "", text: "", who: "", energy: "" } });
+const replied = (actions: unknown[], extra: Record<string, unknown> = {}) => ({ state: "replied", turn: { reply: "", confidence: "high", actions, clarify: { question: "", options: [] }, corrects: false, ...extra } });
+const settle = async () => { for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setTimeout(resolve, 0)); };
+
+test("先快后准: an unsure reading is shown at once, cannot run while the stronger model looks again, and is replaced by what it returns", async () => {
+  setup();
+  const bodies: Array<Record<string, unknown>> = [];
+  worker.mockImplementation(async (_ctx, _path, init) => {
+    const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    bodies.push(body);
+    return body.review ? replied([dueOn("2026-10-16")], { reply: "核对后改为 10/16" }) : replied([dueOn("2026-10-15")], { confidence: "low" });
+  });
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const original = worker.getMockImplementation()!;
+  worker.mockImplementation(async (...args) => { const body = JSON.parse(String(args[2]?.body)); if (body.review) await gate; return original(...args); });
+  const [, reply] = await conversationTurn(TEST_CTX, { text: "数据处理截止改到下周四还是周五", mentions: [], page: { kind: "today", entityId: "" } }, NOW);
+  expect(reply!.card).toMatchObject({ reviewing: true });
+  expect(await decideCard(TEST_CTX, reply!.id, {}, NOW)).toEqual({ ok: false, code: "CARD_REVIEWING" });
+  release();
+  await settle();
+  const after = loadConversation(TEST_CTX).messages.find((message) => message.id === reply!.id)!;
+  expect(after.card?.reviewing).toBeFalsy();
+  expect(after.card).toMatchObject({ reviewed: true, revised: true, actions: [{ args: { date: "2026-10-16" } }] });
+  expect(after.text).toBe("核对后改为 10/16");
+  expect(bodies.filter((body) => body.review)).toHaveLength(1);
+  // A sure, single-object reading is not looked at twice.
+  worker.mockResolvedValue(replied([dueOn("2026-10-20")]));
+  const [, sure] = await conversationTurn(TEST_CTX, { text: "截止改到 10/20", mentions: [], page: { kind: "today", entityId: "" } }, NOW);
+  expect(sure!.card?.reviewing).toBeUndefined();
+});
+
+test("一句话纠正: the previous card is withdrawn, the misreading remembered, and later turns go straight to the stronger model", async () => {
+  const store = setup();
+  worker.mockResolvedValueOnce(replied([dueOn("2026-10-15")]));
+  const [, first] = await conversationTurn(TEST_CTX, { text: "截止改到周四", mentions: [], page: { kind: "today", entityId: "" } }, NOW);
+  worker.mockResolvedValueOnce(replied([dueOn("2026-10-16")], { corrects: true }));
+  await conversationTurn(TEST_CTX, { text: "不对，是周五", mentions: [], page: { kind: "today", entityId: "" } }, NOW);
+  expect(loadConversation(TEST_CTX).messages.find((message) => message.id === first!.id)!.card!.items).toEqual([{ state: "dismissed", message: "已由后一句更正" }]);
+  expect(store.preferenceLines(ws, ["all"]).join("\n")).toContain("本人更正：「不对，是周五」");
+  worker.mockResolvedValueOnce(replied([]));
+  await conversationTurn(TEST_CTX, { text: "好的", mentions: [], page: { kind: "today", entityId: "" } }, NOW);
+  expect(JSON.parse(String(worker.mock.calls.at(-1)![2]!.body)).corrected).toBe(true);
+});
+
+test("字段点改: a field changed on the card is what runs, and the change is remembered as a correction", async () => {
+  const store = setup();
+  worker.mockResolvedValue(replied([dueOn("2026-10-15")]));
+  const [, reply] = await conversationTurn(TEST_CTX, { text: "截止改到周四", mentions: [], page: { kind: "today", entityId: "" } }, NOW);
+  const decided = await decideCard(TEST_CTX, reply!.id, { edits: { 0: { date: "2026-10-17", notAField: "x" } } }, NOW);
+  expect(decided).toMatchObject({ ok: true, message: { card: { items: [{ state: "done" }], actions: [{ args: { date: "2026-10-17" } }] } } });
+  expect((store.listWorkOrders(ws).find((order) => order.id === "sim")!.payload as { dueDate?: string }).dueDate).toBe("2026-10-17");
+  expect(store.preferenceLines(ws, ["all"]).join("\n")).toContain("date「2026-10-15」改为「2026-10-17」");
+});

@@ -21,16 +21,9 @@ export function attachmentsRoot(captureId: string): string {
   return path.resolve(PROJECT_ROOT, ".crossline-attachments", captureId);
 }
 
-/** Mirrors `attachmentsRoot`, kept in its own directory so an assistant-thread file never reads as a
- * capture's own attachment — the two have different owners (a thread vs. a capture row) and different
- * lifetimes. */
-export function assistantAttachmentsRoot(threadId: string): string {
-  return path.resolve(PROJECT_ROOT, ".crossline-assistant-attachments", threadId);
-}
-
 /** Mirrors `attachmentsRoot` again, for a submitted-evidence file — see 工作块 E. Kept in its own
- * directory for the same reason the other two are: different owner, different lifetime, and (unlike
- * captures/assistant threads) read back server-side by `milestone-gate-runner.ts` for quoting, not just
+ * directory for the same reason the capture one is: different owner, different lifetime, and (unlike
+ * captures) read back server-side by `milestone-gate-runner.ts` for quoting, not just
  * served to a browser. */
 export function evidenceAttachmentsRoot(workOrderId: string): string {
   return path.resolve(PROJECT_ROOT, ".crossline-evidence", workOrderId);
@@ -88,29 +81,9 @@ export function saveCaptureAttachments(store: CrosslineStore, input: {
   return result;
 }
 
-/** Same shape as `saveCaptureAttachments`, for the floating assistant's own threads — kept separate
- * because a thread and a capture are different entities with different tables, not because the file-
- * handling logic itself differs (see `writeAttachmentFiles`). */
-export function saveAssistantAttachments(store: CrosslineStore, input: {
-  workspaceId: string; ownerId: string; threadId: string;
-  files: Array<{ fileName: string; mediaType: string; buffer: Buffer }>;
-}): AttachmentSaveResult {
-  if (!/^[a-zA-Z0-9_-]{1,128}$/.test(input.threadId)) {
-    return { ok: false, code: "ATTACHMENT_THREAD_ID_INVALID", message: "无效的会话 id；没有保存附件。" };
-  }
-  const result = writeAttachmentFiles(assistantAttachmentsRoot(input.threadId), input.files);
-  if (!result.ok) return result;
-  const createdAt = new Date().toISOString();
-  for (const file of result.saved) {
-    store.saveAssistantAttachment({ id: file.id, ownerId: input.ownerId, workspaceId: input.workspaceId,
-      threadId: input.threadId, uri: file.uri, mediaType: file.mediaType, fileName: file.fileName.slice(0, 200), createdAt });
-  }
-  return result;
-}
-
 /**
  * Writes one submitted-evidence file to disk and hands back its `uri` — no ledger row here, unlike the
- * three functions above. The real ledger row is the `evidence_claims` insert `transitionWorkOrder`
+ * capture function above. The real ledger row is the `evidence_claims` insert `transitionWorkOrder`
  * already makes for a `kind:"file"` claim (`human.completed`); this only has to get the file safely onto
  * disk first so that claim's `uri` points at something real. The caller (the completion form) builds the
  * `EvidenceClaimInput` itself from the returned `uri`/`fileName`.

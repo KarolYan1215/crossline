@@ -50,7 +50,6 @@ export const SKILL_TIERS: Record<string, RouteTier> = {
   "crossline-due-diligence": "mid",
   "crossline-background-facts": "low",
   "crossline-plan-explainer": "low",
-  "crossline-assistant": "low",
   // The assistant that works on the person's machine: coding and multi-step work, so the strongest tier, and never stepped down.
   "crossline-agent": "top"
 };

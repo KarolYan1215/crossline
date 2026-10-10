@@ -84,11 +84,14 @@ export type ConciergeTurn = {
   actions: ProposedAction[];
   /** One question back when the input could mean more than one thing; `question` "" when there is none. */
   clarify: { question: string; options: ClarifyOption[] };
+  /** The message corrects the previous card (「不是作业 2，是作业 3」): that card's pending actions are withdrawn and the correction remembered. */
+  corrects: boolean;
 };
 
 export const CONCIERGE_SCHEMA = object({
   reply: str(1500),
   confidence: enumOf(["high", "low"]),
+  corrects: { type: "boolean" },
   actions: { type: "array", maxItems: 8, items: { anyOf: ACTION_IDS.map((id) => object({
     action: enumOf([id]), summary: str(200), args: object(ACTIONS[id].args as Record<string, unknown>) })) } },
   clarify: object({ question: str(300), options: { type: "array", maxItems: 4, items: object({ label: str(60),
@@ -194,7 +197,7 @@ export function keepUsable(raw: unknown, refs: ConciergeRefs): ConciergeTurn | u
   const dropped = turn.actions.length - actions.length;
   const reply = [turn.reply, dropped ? `有 ${dropped} 项无法确定对象，未列出。` : ""].filter(Boolean).join(" ");
   if (!reply && !actions.length && !options.length) return undefined;
-  return { reply, confidence: "low", actions, clarify: options.length ? { question: turn.clarify.question, options } : { question: "", options: [] } };
+  return { reply, confidence: "low", actions, clarify: options.length ? { question: turn.clarify.question, options } : { question: "", options: [] }, corrects: turn.corrects };
 }
 
 function normalizeTurn(raw: unknown): ConciergeTurn {
@@ -209,7 +212,23 @@ function normalizeTurn(raw: unknown): ConciergeTurn {
           actions: (Array.isArray(option?.actions) ? option.actions : []).filter((index) => Number.isInteger(index) && index >= 0 && index < actions.length) }))
         .filter((option) => option.label) }
     : { question: "", options: [] };
-  return { reply: String(value.reply ?? "").trim().slice(0, 1500), confidence: value.confidence === "low" ? "low" : "high", actions, clarify };
+  return { reply: String(value.reply ?? "").trim().slice(0, 1500), confidence: value.confidence === "low" ? "low" : "high", actions, clarify,
+    corrects: value.corrects === true };
+}
+
+/**
+ * Whether the first, quick reading gets a second look on the stronger model (先快后准, docs/one-input.md §3.5): the model said it was
+ * unsure, the repairs had to drop something, or the card changes several things at once — three actions, or two different objects.
+ * A plain answer is never looked at twice.
+ */
+export function needsReview(turn: ConciergeTurn, warnings: string[] = []): boolean {
+  if (!turn.actions.length) return false;
+  if (turn.confidence === "low" || warnings.length) return true;
+  const objects = new Set(turn.actions.map((item) => {
+    const args = item.args as Record<string, unknown>;
+    return String(args.workOrderId ?? args.askId ?? args.opId ?? args.taskId ?? args.milestoneId ?? (Array.isArray(args.milestoneIds) ? args.milestoneIds.join(",") : "") ?? item.action);
+  }).filter(Boolean));
+  return turn.actions.length >= 3 || objects.size >= 2;
 }
 
 /** The candidate actions a clarify option names are not shown as cards of their own: they run only when that option is chosen. */
@@ -243,6 +262,8 @@ export type ConciergePack = {
   agentResults: Array<{ taskId: string; title: string; summary: string }>;
   materials: Array<{ id: string; fileName: string; project: string }>;
   facts: string[];
+  /** The person's standing preferences and their earlier corrections of how the box read them, newest and weightiest first. */
+  preferences: string[];
   energy: { level: string; at: string } | null;
   forecast: Array<{ milestoneId: string; title: string; deadline: string; usualFinish: string; cautiousFinish: string; atRisk: boolean }>;
 };

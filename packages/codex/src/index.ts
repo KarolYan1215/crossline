@@ -377,12 +377,6 @@ export async function startCodexSupervisor(options: {
    * onboarding does; concurrent captures compacting at once is the normal case, not a conflict. */
   extractBackgroundFacts?: (client: CodexRpcBoundary, captureTitle: string, captureContext: string,
     signal: AbortSignal, workspaceId: string) => Promise<unknown>;
-  /** One route for every turn, first or follow-up — see `assistant-runner.ts`'s own doc comment for why
-   * this differs from the two-route onboarding shape. */
-  assistantTurn?: (client: CodexRpcBoundary, threadId: string, message: string,
-    history: Array<{ from: "user" | "assistant"; text: string }>,
-    attachments: Array<{ id: string; fileName: string; mediaType: string }>, workOrderId: string | null,
-    signal: AbortSignal, workspaceId: string, snapshot: string, mode: "chat" | "record") => Promise<unknown>;
   backplanGoal?: (client: CodexRpcBoundary, milestoneId: string, signal: AbortSignal, workspaceId: string) => Promise<unknown>;
   // `workspaceId` is the real caller's, taken from its own verified capability token — never the
   // worker's own idea of "the" workspace, which is what let every one of these silently operate on a
@@ -905,32 +899,6 @@ export async function startCodexSupervisor(options: {
         const captureContext = String(body?.captureContext ?? "");
         const controller = new AbortController();
         sendJson(response, 200, await options.extractBackgroundFacts(sidecar.client, captureTitle, captureContext, controller.signal, callerWorkspaceId));
-        return;
-      }
-      if (request.method === "POST" && pathname === "/v1/assistant/turn" && options.assistantTurn) {
-        if (request.headers.origin || !request.headers["content-type"]?.startsWith("application/json")) {
-          sendJson(response, 403, { blocker: { code: "ASSISTANT_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
-          return;
-        }
-        if (runtimeBlocker) { sendJson(response, 503, { blocker: runtimeBlocker }); return; }
-        const body = await readJsonBody(request);
-        const threadId = String(body?.threadId ?? "");
-        const message = String(body?.message ?? "");
-        if (!/^[a-zA-Z0-9_-]{1,128}$/.test(threadId) || !message.trim()) {
-          sendJson(response, 400, { blocker: { code: "ASSISTANT_TURN_INVALID", message: "缺少 threadId 或消息内容" } });
-          return;
-        }
-        const history = Array.isArray(body?.history) ? body.history
-          .filter((item: unknown): item is { from: unknown; text: unknown } => typeof item === "object" && item !== null)
-          .map((item: { from: unknown; text: unknown }) => ({ from: item.from === "assistant" ? "assistant" as const : "user" as const, text: String(item.text ?? "") })) : [];
-        const attachments = Array.isArray(body?.attachments) ? body.attachments
-          .filter((item: unknown): item is { id: unknown; fileName: unknown; mediaType: unknown } => typeof item === "object" && item !== null)
-          .map((item: { id: unknown; fileName: unknown; mediaType: unknown }) => ({ id: String(item.id ?? ""), fileName: String(item.fileName ?? ""), mediaType: String(item.mediaType ?? "") })) : [];
-        const workOrderId = typeof body?.workOrderId === "string" ? body.workOrderId : null;
-        const snapshot = typeof body?.snapshot === "string" ? body.snapshot.slice(0, 12_000) : "";
-        const controller = new AbortController();
-        const mode = body?.mode === "record" ? "record" as const : "chat" as const;
-        sendJson(response, 200, await options.assistantTurn(sidecar.client, threadId, message, history, attachments, workOrderId, controller.signal, callerWorkspaceId, snapshot, mode));
         return;
       }
       if (request.method === "POST" && pathname === "/v1/goals/backplan" && options.backplanGoal) {

@@ -74,7 +74,7 @@
 
 ### 3.2 一个回合
 
-Skill `crossline-concierge` 取代 `crossline-input-router`（P1 已删除）和全站小助手 `crossline-assistant`：路由和问答合成一次调用。任务对话框里的任务专属小助手仍用 `crossline-assistant`，P2 并入。
+Skill `crossline-concierge` 取代 `crossline-input-router`（P1 删除）和小助手 `crossline-assistant`（P2 删除，任务对话框的入口与记录框都并入同一会话）：路由和问答合成一次调用。
 
 - **快照**（每轮附带，约 1–2k token）：现在时刻与时区；今天已排、预排和固定日程的摘要；待决数量与最紧急的 3 条；最近 24 小时的可撤销操作（id 与标签）；当前页面对象（任务、里程碑、计划日）；本人的主线列表。
 - **只读查询工具**（Codex 动态工具：`thread/start` 时声明，调用以 `item/tool/call` 请求到达，由 `SkillTools` 应答）：`find_tasks`、`get_task`、`find_milestones`、`list_asks`、`get_plan`、`list_recent_ops`、`list_agent_results`、`get_forecast`、`find_materials`、`read_material`、`get_profile_facts`（`CONCIERGE_TOOL_SPECS`）。所有工具只读，不暴露屏幕活动的窗口标题。
@@ -263,6 +263,9 @@ interface EnergySource {
 | P5 | 精力模型 ①②③、询问规则、答后重排 | 起床/入睡推断与本人记录对照误差中位 ≤ 30 分钟；回答后今天剩余的块按精力重排 |
 
 ## 9. 已补充确认（2026-10-09）
+
+- P2 实现：复核在 web 端触发，首读的卡片先显示并标「正在用更强的模型仔细核对」，复核期间不能执行，页面每 3 秒取一次结果；复核改动了提议时卡片标「已核对并修改」。当天一旦有过更正，此后的回合直接用中档模型。
+- 任务对话框只保留一个入口（原来的指令框和记录框合并）；旧小助手的「把脚本存为任务材料」与「提议里程碑模板」两项能力没有迁移，需要时再作为注册表动作加回。
 
 - 追问的选项：选一个即执行它所指的候选动作（选择就是确认，与主动气泡的按钮同理）；没有候选动作的选项（「都不是」）把光标放回输入框。
 - 模型不可用时，原话照样存进会话，卡片提供「作为新任务收集」，点了才收集。

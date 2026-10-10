@@ -3,10 +3,9 @@ import { randomUUID } from "node:crypto";
 import { formatInTimeZone } from "date-fns-tz";
 import { listAgentTasks, type StoredConversationMessage } from "@crossline/db";
 import {
-  actionProblem, conciergeRefs, taskTitleOf,
+  ACTIONS, actionProblem, availableSlots, conciergeRefs, needsReview, taskTitleOf,
   type AccessContext, type ConciergePack, type ConciergeTurn, type ProposedAction
 } from "@crossline/core";
-import { availableSlots } from "@crossline/core";
 import { effectiveSchedulePreferences, effectiveWeight, getStore, loadCurrentPlan, loadGoalForecast, planToday, readAvailability } from "./crossline";
 import { openAsks } from "./asks";
 import { executeAction } from "./actions";
@@ -25,8 +24,19 @@ export type Card = {
   actions: ProposedAction[]; items: CardItem[];
   clarify: ConciergeTurn["clarify"] & { chosen?: number };
   confidence: ConciergeTurn["confidence"]; error?: string;
+  /** The words this card is a reading of (for remembering a correction of it). */
+  heard?: string;
+  /** The stronger model is looking at it again (先快后准); nothing on it can run meanwhile. */
+  reviewing?: boolean;
+  /** It was looked at again; `revised` when that changed what it proposes. */
+  reviewed?: boolean; revised?: boolean;
+  /** This turn corrected the previous card. */
+  corrects?: boolean;
 };
-export type MessageView = { id: string; role: StoredConversationMessage["role"]; text: string; createdAt: string; card?: Card };
+export type MessageView = { id: string; role: StoredConversationMessage["role"]; text: string; createdAt: string; card?: Card; page?: PageContext };
+/** What a card's fields can be changed to, by name: the open tasks (with their steps), the lines and the milestones. */
+export type CardChoices = { tasks: Array<{ id: string; title: string; steps: Array<{ id: string; title: string }> }>; lines: Array<{ id: string; label: string }>;
+  milestones: Array<{ id: string; title: string }> };
 
 const OPEN = ["approved", "preparing", "ready_for_human", "active", "evidence_review", "blocked"];
 const isSeeded = (payload: unknown) => Boolean((payload as { seeded?: boolean } | undefined)?.seeded);
@@ -93,6 +103,7 @@ export async function contextPack(ctx: AccessContext, page: PageContext, now = n
     materials: docs.map((doc) => ({ id: doc.id, fileName: doc.fileName, project: doc.projectId ? projects.get(doc.projectId) ?? "" : "" })),
     facts: store.listProfileFacts(ctx.workspaceId).filter((fact) => fact.status === "confirmed")
       .map((fact) => `[${label(fact.identityId)}${fact.projectId ? `/${projects.get(fact.projectId) ?? fact.projectId}` : ""}] ${fact.slot}：${fact.value.slice(0, 200)}`),
+    preferences: store.preferenceLines(ctx.workspaceId, ["all"], 15),
     energy: latestEnergy ? { level: latestEnergy.level, at: latestEnergy.observedAt } : null,
     forecast: forecast.map((goal) => ({ milestoneId: goal.milestoneId, title: goal.title, deadline: goal.confirmedDeadline ?? "",
       usualFinish: goal.p50Day ?? "", cautiousFinish: goal.p85Day ?? "", atRisk: goal.slackDays !== null && goal.slackDays < 2 }))
@@ -122,12 +133,34 @@ export function conciergeSnapshot(pack: ConciergePack, now = new Date(), options
     `最近一次精力记录：${pack.energy ? `${pack.energy.level}（${formatInTimeZone(new Date(pack.energy.at), pack.timeZone, "MM-dd HH:mm")}）` : "无"}`,
     `当前页面：${pack.page.kind}${pack.page.title ? `「${pack.page.title}」(${pack.page.entityId})` : ""}`,
     `主线（id | 名称）：${pack.lines.map((line) => `${line.id} | ${line.label}${line.hard ? "（硬约束）" : ""}`).join("；") || "无"}`,
+    ...pageTask(pack),
+    ...(pack.preferences.length ? ["本人的偏好与此前的更正（照此理解）：", ...pack.preferences.map((line) => `- ${line}`)] : []),
     ...lists
   ].join("\n");
 }
 
+/**
+ * On a task's page, 「这一步」「做完了」 mean that task: its steps by id, the current one (the first not done) marked, so the turn can name
+ * the step without a lookup.
+ */
+function pageTask(pack: ConciergePack): string[] {
+  if (pack.page.kind !== "task") return [];
+  const task = pack.tasks.find((item) => item.id === pack.page.entityId);
+  if (!task) return [];
+  const current = task.steps.find((step) => step.status === "planned");
+  return [`本页任务：${task.id} | ${task.title} | 截止 ${task.dueDate || "—"}；步骤（id | 标题 | 状态，▶ 为当前步骤）：`,
+    ...task.steps.map((step) => `- ${step === current ? "▶ " : ""}${step.id} | ${step.title} | ${step.status}${step.executor === "agent" ? "（助手做）" : ""}`)];
+}
+
 const view = (message: StoredConversationMessage): MessageView => ({ id: message.id, role: message.role, text: message.text, createdAt: message.createdAt,
-  ...(message.payload.card ? { card: message.payload.card as Card } : {}) });
+  ...(message.payload.card ? { card: message.payload.card as Card } : {}), ...(message.payload.page ? { page: message.payload.page as PageContext } : {}) });
+
+/** The names a card's editable fields take their values from. */
+export async function cardChoices(ctx: AccessContext): Promise<CardChoices> {
+  const pack = await contextPack(ctx, { kind: "", entityId: "" });
+  return { tasks: pack.tasks.map((task) => ({ id: task.id, title: task.title, steps: task.steps.map((step) => ({ id: step.id, title: step.title })) })),
+    lines: pack.lines.map((line) => ({ id: line.id, label: line.label })), milestones: pack.milestones.map((item) => ({ id: item.id, title: item.title })) };
+}
 
 /** Today's conversation (made on first use), oldest first. */
 export function loadConversation(ctx: AccessContext, day = planToday(ctx)): { id: string; day: string; messages: MessageView[] } {
@@ -138,9 +171,19 @@ export function loadConversation(ctx: AccessContext, day = planToday(ctx)): { id
 export const searchConversation = (ctx: AccessContext, query: string) =>
   getStore().searchConversationMessages(ctx.workspaceId, query.trim().slice(0, 100)).map((message) => ({ ...view(message), day: message.conversationId.slice(-10) }));
 
-function cardFrom(turn: ConciergeTurn): Card {
-  return { actions: turn.actions, items: turn.actions.map(() => ({ state: "pending" })), clarify: turn.clarify, confidence: turn.confidence };
+function cardFrom(turn: ConciergeTurn, heard: string): Card {
+  return { actions: turn.actions, items: turn.actions.map(() => ({ state: "pending" })), clarify: turn.clarify, confidence: turn.confidence, heard,
+    ...(turn.corrects ? { corrects: true } : {}) };
 }
+
+type TurnOutcome = { state: "replied"; turn: ConciergeTurn; warnings?: string[] } | { state: "blocked"; code: string; message: string };
+
+/** A correction of how the box read the person, kept for every later reading (Settings → 个性化 lists and deletes it). */
+function rememberCorrection(ctx: AccessContext, refId: string, text: string): void {
+  getStore().addPreference({ workspaceId: ctx.workspaceId, source: "correction", scope: "all", weight: 1, refId: `conv:${refId}`, text: text.slice(0, 300) });
+}
+
+const cardWords = (card: Card) => card.actions.map((item) => `${ACTIONS[item.action].label}：${item.summary}`).join("；");
 
 /**
  * One turn: the person's words are kept first (nothing typed is lost, whatever happens next), then the worker reads them with the
@@ -150,26 +193,73 @@ function cardFrom(turn: ConciergeTurn): Card {
 export async function conversationTurn(ctx: AccessContext, input: { text: string; mentions: Mention[]; page: PageContext }, now = new Date()): Promise<MessageView[]> {
   const store = getStore();
   const conversation = store.conversationFor(ctx.workspaceId, planToday(ctx, now));
-  const history = store.listConversationMessages(ctx.workspaceId, conversation.id).map((message) => ({ role: message.role, text: message.text }));
+  const earlier = store.listConversationMessages(ctx.workspaceId, conversation.id);
+  const history = earlier.map((message) => ({ role: message.role, text: message.text }));
+  // Once the person has corrected the box today, it reads every later line on the stronger model at once.
+  const corrected = earlier.some((message) => (message.payload.card as Card | undefined)?.corrects);
   const text = [input.text.trim(), input.mentions.length ? `（引用：${input.mentions.map((item) => `${item.kind}:${item.id}「${item.title}」`).join("；")}）` : ""].filter(Boolean).join("\n");
   const person = store.appendConversationMessage({ id: randomUUID(), workspaceId: ctx.workspaceId, conversationId: conversation.id, role: "person", text,
     payload: { page: input.page } });
   const pack = await contextPack(ctx, input.page, now);
+  const request = { conversationId: conversation.id, text: input.text, mentions: input.mentions, snapshot: conciergeSnapshot(pack, now, { lists: true }), pack, history,
+    ...(corrected ? { corrected: true } : {}) };
   let reply: { text: string; card: Card };
+  let warnings: string[] = [];
   try {
-    const outcome = await requestCodexSupervisor<{ state: "replied"; turn: ConciergeTurn } | { state: "blocked"; code: string; message: string }>(ctx, "/v1/conversation/turn", {
-      method: "POST", headers: { "content-type": "application/json" }, signal: AbortSignal.timeout(15 * 60_000),
-      body: JSON.stringify({ conversationId: conversation.id, text: input.text, mentions: input.mentions, snapshot: conciergeSnapshot(pack, now, { lists: true }), pack, history })
-    });
-    reply = outcome.state === "replied"
-      ? { text: outcome.turn.reply, card: cardFrom(outcome.turn) }
-      : fallback(input.text, outcome.message, outcome.code);
+    const outcome = await askWorker(ctx, request);
+    if (outcome.state === "replied") { reply = { text: outcome.turn.reply, card: cardFrom(outcome.turn, text) }; warnings = outcome.warnings ?? []; }
+    else reply = fallback(input.text, outcome.message, outcome.code);
   } catch (error) {
     reply = fallback(input.text, "模型服务暂时不可用", error instanceof CodexSupervisorRequestError ? error.blocker.code : "CONVERSATION_TURN_FAILED");
   }
+  if (reply.card.corrects) withdrawPrevious(ctx, earlier, text);
+  // 先快后准: a reading the quick model was unsure of, or one that changes several things, is shown at once and looked at again; it
+  // cannot be carried out until that second look is back. Already on the stronger model (after a correction), once is enough.
+  const review = !corrected && !reply.card.error && needsReview({ actions: reply.card.actions, confidence: reply.card.confidence } as ConciergeTurn, warnings);
+  if (review) reply.card.reviewing = true;
   const assistant = store.appendConversationMessage({ id: randomUUID(), workspaceId: ctx.workspaceId, conversationId: conversation.id, role: "assistant",
     text: reply.text, payload: { card: reply.card } });
+  if (review) void reviewCard(ctx, assistant.id, { ...request, review: true });
   return [view(person), view(assistant)];
+}
+
+const askWorker = (ctx: AccessContext, body: Record<string, unknown>) => requestCodexSupervisor<TurnOutcome>(ctx, "/v1/conversation/turn", {
+  method: "POST", headers: { "content-type": "application/json" }, signal: AbortSignal.timeout(15 * 60_000), body: JSON.stringify(body) });
+
+/**
+ * 「不是作业 2，是作业 3」: the latest card still waiting is withdrawn, and how it was misread is remembered, so the next reading of a
+ * line like it starts from the correction.
+ */
+function withdrawPrevious(ctx: AccessContext, earlier: StoredConversationMessage[], correction: string): void {
+  const store = getStore();
+  const previous = [...earlier].reverse().find((message) => {
+    const card = message.payload.card as Card | undefined;
+    return card?.items.some((item) => item.state === "pending");
+  });
+  const card = previous?.payload.card as Card | undefined;
+  if (!previous || !card) return;
+  card.items = card.items.map((item) => item.state === "pending" ? { state: "dismissed", message: "已由后一句更正" } : item);
+  card.reviewing = false;
+  store.updateConversationPayload(ctx.workspaceId, previous.id, { ...previous.payload, card });
+  rememberCorrection(ctx, previous.id, `输入框曾把「${(card.heard ?? "").slice(0, 80)}」理解为「${cardWords(card).slice(0, 120)}」；本人更正：「${correction.slice(0, 80)}」`);
+}
+
+/** The second look, in the background: the card is replaced by what the stronger model returns, or left as it was if that fails. */
+async function reviewCard(ctx: AccessContext, messageId: string, body: Record<string, unknown>): Promise<void> {
+  let outcome: TurnOutcome | undefined;
+  try { outcome = await askWorker(ctx, body); } catch { outcome = undefined; }
+  const store = getStore();
+  const message = store.getConversationMessage(ctx.workspaceId, messageId);
+  const card = message?.payload.card as Card | undefined;
+  if (!message || !card) return;
+  if (outcome?.state !== "replied") {
+    store.updateConversationPayload(ctx.workspaceId, messageId, { ...message.payload, card: { ...card, reviewing: false } });
+    return;
+  }
+  const next = cardFrom(outcome.turn, card.heard ?? "");
+  const revised = JSON.stringify(next.actions) !== JSON.stringify(card.actions) || JSON.stringify(next.clarify) !== JSON.stringify(card.clarify);
+  getStore().updateConversationPayload(ctx.workspaceId, messageId, { ...message.payload, card: { ...next, ...(card.corrects ? { corrects: true } : {}), reviewed: true, revised } });
+  if (revised && outcome.turn.reply) store.updateConversationText(ctx.workspaceId, messageId, outcome.turn.reply);
 }
 
 function fallback(text: string, why: string, code: string): { text: string; card: Card } {
@@ -183,12 +273,15 @@ function fallback(text: string, why: string, code: string): { text: string; card
  * carries out its candidate actions — choosing is the confirmation), or dismiss what is left. Each action is checked again against the
  * state of this moment before it runs, because the card may have waited a while.
  */
-export async function decideCard(ctx: AccessContext, messageId: string, decision: { indexes?: number[]; option?: number; dismiss?: boolean },
+export async function decideCard(ctx: AccessContext, messageId: string,
+  decision: { indexes?: number[]; option?: number; dismiss?: boolean; edits?: Record<number, Record<string, unknown>> },
   now = new Date()): Promise<{ ok: true; message: MessageView } | { ok: false; code: string }> {
   const store = getStore();
   const message = store.getConversationMessage(ctx.workspaceId, messageId);
   const card = message?.payload.card as Card | undefined;
   if (!message || !card) return { ok: false, code: "CARD_NOT_FOUND" };
+  if (card.reviewing && !decision.dismiss) return { ok: false, code: "CARD_REVIEWING" };
+  applyEdits(ctx, message.id, card, decision.edits ?? {});
   const candidates = new Set(card.clarify.options.flatMap((option) => option.actions));
   let chosen: number[];
   if (decision.option !== undefined) {
@@ -214,6 +307,32 @@ export async function decideCard(ctx: AccessContext, messageId: string, decision
   }
   store.updateConversationPayload(ctx.workspaceId, messageId, { ...message.payload, card });
   return { ok: true, message: view({ ...message, payload: { ...message.payload, card } }) };
+}
+
+/**
+ * Fields the person changed on the card before carrying it out (a date, a task, a duration). Only fields the action has, of the type
+ * it has, and only on actions still waiting; each change is remembered as a correction of how the box read them.
+ */
+function applyEdits(ctx: AccessContext, messageId: string, card: Card, edits: Record<number, Record<string, unknown>>): void {
+  for (const [key, changes] of Object.entries(edits)) {
+    const index = Number(key);
+    const item = card.actions[index];
+    if (!item || card.items[index]?.state !== "pending" || !changes || typeof changes !== "object") continue;
+    const spec = ACTIONS[item.action].args as Record<string, { type?: string }>;
+    const args = { ...(item.args as Record<string, unknown>) };
+    const changed: string[] = [];
+    for (const [field, value] of Object.entries(changes)) {
+      const type = spec[field]?.type;
+      if (!type || JSON.stringify(args[field]) === JSON.stringify(value)) continue;
+      const next = type === "number" ? Number(value) : type === "array" ? (Array.isArray(value) ? value : args[field]) : String(value ?? "").slice(0, 2000);
+      if (type === "number" && !Number.isFinite(next as number)) continue;
+      changed.push(`${field}「${String(args[field] ?? "")}」改为「${String(next)}」`);
+      args[field] = next;
+    }
+    if (!changed.length) continue;
+    card.actions[index] = { ...item, args } as ProposedAction;
+    rememberCorrection(ctx, `${messageId}:${index}`, `输入框把「${(card.heard ?? "").slice(0, 80)}」理解为「${ACTIONS[item.action].label}：${item.summary.slice(0, 60)}」；本人把 ${changed.join("、").slice(0, 160)}`);
+  }
 }
 
 const outcomeItem = (outcome: Awaited<ReturnType<typeof executeAction>>): CardItem => outcome.ok

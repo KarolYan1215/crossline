@@ -58,3 +58,9 @@
 .conversation-search ul{margin:0;padding:0;list-style:none;display:grid;gap:4px;max-height:160px;overflow:auto;font-size:12px}
 .assistant-panel .conversation{grid-row:2 / span 2;overflow:auto;padding:8px 10px;grid-template-rows:auto minmax(0,1fr) auto}
 .assistant-panel .conversation-log{overflow:auto}
+
+.conversation-reviewing{font-size:12px;color:var(--graphite)}
+.conversation-card[aria-busy] .primary-button{opacity:.5}
+.card-fields{flex-basis:100%;display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:6px 10px;padding:6px 0}
+.card-fields label{display:grid;gap:2px;font-size:12px;color:var(--graphite)}
+.card-fields input,.card-fields select{width:100%;min-height:32px;font-size:13px}

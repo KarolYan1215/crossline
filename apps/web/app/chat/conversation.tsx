@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ACTIONS, cardActionIndexes, type ConciergeTurn } from "@crossline/core";
-import type { Card, MessageView, PageContext } from "../../lib/conversation";
+import type { Card, CardChoices, MessageView, PageContext } from "../../lib/conversation";
+import { CardFields, editableFields } from "./card-fields";
 import { Composer, type ComposerInput } from "./composer";
 import { captureLine } from "../offline-command-forms";
 import { undoOperation } from "../undo-center";
@@ -26,11 +27,17 @@ export function pageFromLocation(): PageContext {
  * actions carried out on 执行 (each undoable), or one question back. Today's conversation is shared by every page and device; the
  * floating 小助手 is the same conversation opened larger. Offline, and for attached files, a line is kept as a capture the old way.
  */
-export function Conversation({ variant, placeholder }: {
-  /** `inline`: Today's box with the latest exchange under it; `panel`: the whole day's conversation, with search. */
-  variant: "inline" | "panel"; placeholder?: string;
+export function Conversation({ variant, placeholder, page }: {
+  /**
+   * `inline`: Today's box with the latest exchange under it; `panel`: the whole day's conversation, with search; `task`: a task's own
+   * entry — the box first, then only what was said from this task's page.
+   */
+  variant: "inline" | "panel" | "task"; placeholder?: string;
+  /** Fixed for an entry that belongs to one object (a task dialog); otherwise read from the address. */
+  page?: PageContext;
 }) {
   const [messages, setMessages] = useState<MessageView[]>([]);
+  const [choices, setChoices] = useState<CardChoices | null>(null);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
@@ -40,8 +47,9 @@ export function Conversation({ variant, placeholder }: {
   });
 
   const load = () => fetch("/api/conversation").then((response) => response.ok ? response.json() : null)
-    .then((body: { messages?: MessageView[]; ownerId?: string; workspaceId?: string } | null) => {
+    .then((body: { messages?: MessageView[]; ownerId?: string; workspaceId?: string; choices?: CardChoices } | null) => {
       if (body?.messages) setMessages(body.messages);
+      if (body?.choices) setChoices(body.choices);
       if (body?.ownerId && body.workspaceId) {
         const ids = { ownerId: body.ownerId, workspaceId: body.workspaceId };
         setAccount(ids);
@@ -56,6 +64,13 @@ export function Conversation({ variant, placeholder }: {
     return () => document.removeEventListener("visibilitychange", refresh);
   }, []);
   useEffect(() => { if (variant === "panel") endRef.current?.scrollIntoView({ block: "nearest" }); }, [messages, variant]);
+  // A card the stronger model is looking at again is fetched until it comes back (a few seconds to half a minute).
+  const reviewing = messages.some((message) => message.card?.reviewing);
+  useEffect(() => {
+    if (!reviewing) return;
+    const timer = setInterval(() => { void load(); }, 3000);
+    return () => clearInterval(timer);
+  }, [reviewing]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const keepAsCapture = async (input: ComposerInput, failure: string) => {
     const kept = account ? await captureLine(account.ownerId, account.workspaceId, input) : null;
@@ -68,7 +83,7 @@ export function Conversation({ variant, placeholder }: {
     setBusy(true);
     try {
       const response = await fetch("/api/conversation/turn", { method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ text: input.text, mentions: input.mentions, page: pageFromLocation() }) });
+        body: JSON.stringify({ text: input.text, mentions: input.mentions, page: page ?? pageFromLocation() }) });
       const body = await response.json().catch(() => null) as { messages?: MessageView[] } | null;
       if (!response.ok || !body?.messages) { setStatus("未能发送，请重试"); return false; }
       setMessages((list) => [...list, ...body.messages!]);
@@ -83,12 +98,20 @@ export function Conversation({ variant, placeholder }: {
     for (const name of PENDING_EVENTS) window.dispatchEvent(new Event(name));
   };
 
-  // Today's box shows the latest exchange only; the panel shows the day.
-  const shown = variant === "inline" ? lastExchange(messages) : messages;
+  // Today's box shows the latest exchange only; the panel shows the day; a task's entry shows what was said from its page.
+  const shown = variant === "inline" ? lastExchange(messages) : variant === "task" && page ? fromPage(messages, page) : messages;
+  const item = (message: MessageView) => <MessageItem key={message.id} message={message} onUpdate={update} choices={choices} />;
+  if (variant === "task") return <div className="conversation" data-variant={variant}>
+    <Composer mode="capture" busy={busy} placeholder={placeholder ?? "对该任务的指令或问题：改截止、这一步做完了、记进度、推迟、讲解某一步…"} onSubmit={submit}>
+      {busy && <small className="muted composer-status" role="status">正在理解…</small>}
+      {status && <small className="muted composer-status" role="status">{status}</small>}
+    </Composer>
+    {shown.length > 0 && <ol className="conversation-log" aria-label="关于该任务的对话">{shown.slice(-6).map(item)}</ol>}
+  </div>;
   return <div className="conversation" data-variant={variant}>
     {variant === "panel" && <ConversationSearch />}
     {variant === "panel" && <ol className="conversation-log" aria-label="今天的对话">
-      {shown.map((message) => <MessageItem key={message.id} message={message} onUpdate={update} />)}
+      {shown.map(item)}
       <div ref={endRef} />
     </ol>}
     <Composer mode="capture" busy={busy} placeholder={placeholder ?? "任务、改期、回答待决、撤销、日程、问题……一句话即可"} onSubmit={submit}>
@@ -96,9 +119,20 @@ export function Conversation({ variant, placeholder }: {
       {status && <small className="muted composer-status" role="status">{status}</small>}
     </Composer>
     {variant === "inline" && shown.length > 0 && <ol className="conversation-log" aria-label="最近一次对话">
-      {shown.map((message) => <MessageItem key={message.id} message={message} onUpdate={update} />)}
+      {shown.map(item)}
     </ol>}
   </div>;
+}
+
+/** What was said from one page: each message typed there, with the answers that followed it. */
+function fromPage(messages: MessageView[], page: PageContext): MessageView[] {
+  const out: MessageView[] = [];
+  let keep = false;
+  for (const message of messages) {
+    if (message.role === "person") keep = message.page?.entityId === page.entityId && message.page.kind === page.kind;
+    if (keep) out.push(message);
+  }
+  return out;
 }
 
 /** The person's last message and everything after it. */
@@ -107,33 +141,44 @@ function lastExchange(messages: MessageView[]): MessageView[] {
   return index < 0 ? messages.slice(-1) : messages.slice(index);
 }
 
-function MessageItem({ message, onUpdate }: { message: MessageView; onUpdate: (message: MessageView) => void }) {
+function MessageItem({ message, onUpdate, choices }: { message: MessageView; onUpdate: (message: MessageView) => void; choices: CardChoices | null }) {
   if (message.role === "person") return <li className="conversation-person"><p>{message.text}</p></li>;
   return <li className="conversation-reply">
     {message.text && <div className="gen"><Markdown text={message.text} /></div>}
-    {message.card && <CardView messageId={message.id} card={message.card} onUpdate={onUpdate} />}
+    {message.card && <CardView messageId={message.id} card={message.card} onUpdate={onUpdate} choices={choices} />}
   </li>;
 }
 
 /** A turn's card: the actions proposed (执行 carries out every pending one), and the question back when there is one. */
-function CardView({ messageId, card, onUpdate }: { messageId: string; card: Card; onUpdate: (message: MessageView) => void }) {
+function CardView({ messageId, card, onUpdate, choices }: { messageId: string; card: Card; onUpdate: (message: MessageView) => void; choices: CardChoices | null }) {
   const [working, setWorking] = useState(false);
   const [error, setError] = useState("");
+  // Fields changed on the card, by action index; sent with 执行 and checked again on the server.
+  const [edits, setEdits] = useState<Record<number, Record<string, unknown>>>({});
+  const [editing, setEditing] = useState<number | null>(null);
   const decide = async (decision: { option?: number; dismiss?: boolean; indexes?: number[] }) => {
     setWorking(true); setError("");
     try {
       const response = await fetch("/api/conversation/decide", { method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ messageId, ...decision }) });
-      const body = await response.json().catch(() => null) as { ok?: boolean; message?: MessageView } | null;
-      if (body?.ok && body.message) onUpdate(body.message); else setError("未能执行，请刷新后重试");
+        body: JSON.stringify({ messageId, ...decision, ...(Object.keys(edits).length && !decision.dismiss ? { edits } : {}) }) });
+      const body = await response.json().catch(() => null) as { ok?: boolean; message?: MessageView; code?: string } | null;
+      if (body?.ok && body.message) { onUpdate(body.message); setEdits({}); setEditing(null); }
+      else setError(body?.code === "CARD_REVIEWING" ? "仍在核对，稍候再执行" : "未能执行，请刷新后重试");
     } finally { setWorking(false); }
   };
   const visible = cardActionIndexes({ actions: card.actions, clarify: card.clarify } as ConciergeTurn);
   const chosen = card.clarify.chosen !== undefined ? card.clarify.options[card.clarify.chosen] : undefined;
   const ran = [...visible, ...(chosen?.actions ?? [])];
   const pending = visible.filter((index) => card.items[index]?.state === "pending");
-  return <div className="conversation-card" data-error={card.error ? "" : undefined}>
-    {ran.length > 0 && <ul>{ran.map((index) => <ActionRow key={index} card={card} index={index} />)}</ul>}
+  return <div className="conversation-card" data-error={card.error ? "" : undefined} aria-busy={card.reviewing || undefined}>
+    {card.reviewing && <small className="conversation-reviewing" role="status">正在用更强的模型仔细核对…</small>}
+    {card.reviewed && card.revised && <small className="muted">已核对并修改</small>}
+    {ran.length > 0 && <ul>{ran.map((index) => <ActionRow key={index} card={card} index={index}
+      {...(card.items[index]?.state === "pending" && !card.reviewing && editableFields(card.actions[index]!).length ? {
+        editing: editing === index, onEdit: () => setEditing(editing === index ? null : index),
+        fields: <CardFields item={card.actions[index]!} value={edits[index] ?? {}} choices={choices}
+          onChange={(field, next) => setEdits((all) => ({ ...all, [index]: { ...(all[index] ?? {}), [field]: next } }))} />,
+        changed: Boolean(edits[index] && Object.keys(edits[index]!).length) } : {})} />)}</ul>}
     {card.clarify.question && <div className="conversation-clarify">
       <p>{card.clarify.question}</p>
       {chosen ? <small className="muted">已选：{chosen.label}</small>
@@ -144,7 +189,7 @@ function CardView({ messageId, card, onUpdate }: { messageId: string; card: Card
             : document.querySelector<HTMLTextAreaElement>(".conversation textarea")?.focus()}>{option.label}</button>)}</div>}
     </div>}
     {pending.length > 0 && <div className="conversation-actions">
-      <button type="button" className="primary-button" disabled={working} onClick={() => void decide({ indexes: pending })}>
+      <button type="button" className="primary-button" disabled={working || card.reviewing} onClick={() => void decide({ indexes: pending })}>
         {working ? "执行中…" : pending.length > 1 ? `全部执行（${pending.length}）` : "执行"}</button>
       <button type="button" className="text-button" disabled={working} onClick={() => void decide({ indexes: pending, dismiss: true })}>不用了</button>
     </div>}
@@ -154,13 +199,16 @@ function CardView({ messageId, card, onUpdate }: { messageId: string; card: Card
 
 const STATE_WORD: Record<string, string> = { pending: "待执行", done: "已执行", failed: "未执行", dismissed: "已取消" };
 
-function ActionRow({ card, index }: { card: Card; index: number }) {
+function ActionRow({ card, index, editing, onEdit, fields, changed }: { card: Card; index: number; editing?: boolean; onEdit?: () => void;
+  fields?: ReactNode; changed?: boolean }) {
   const action = card.actions[index]!;
   const item = card.items[index] ?? { state: "pending" };
   const [undone, setUndone] = useState("");
   return <li data-state={item.state} data-risk={ACTIONS[action.action].risk}>
     <b>{ACTIONS[action.action].label}</b><span className="gen">{action.summary}</span>
-    <small className="conversation-state">{undone || STATE_WORD[item.state]}</small>
+    <small className="conversation-state">{undone || (changed && item.state === "pending" ? "已修改，待执行" : STATE_WORD[item.state])}</small>
+    {onEdit && <button type="button" className="text-button" aria-expanded={editing} onClick={onEdit}>{editing ? "收起" : "修改"}</button>}
+    {editing && fields}
     {item.message && <small className="muted">{item.message}</small>}
     {item.state === "done" && <span className="conversation-links">
       {item.href && <a href={item.href}>查看 →</a>}

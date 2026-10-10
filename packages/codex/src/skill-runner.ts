@@ -3,7 +3,7 @@ import { STYLE_INSTRUCTIONS } from "./style";
 import { join } from "node:path";
 import { cleanAnswerStrings } from "@crossline/core";
 import type { CodexRpcBoundary } from "./index";
-import { routeForSkill, tierForSkill, type ModelRoute, type SpendMode } from "./model-policy";
+import { routeForSkill, tierForSkill, tierRoutes, type ModelRoute, type RouteTier, type SpendMode } from "./model-policy";
 import { createUsageCollector, currentSpendMode, reportUsage, type UsageCollector } from "./usage";
 
 import { registerAgentThread, type AgentMode } from "./agent-mode";
@@ -58,6 +58,8 @@ export type SkillRunOptions<T> = {
   agent?: AgentMode;
   /** Read-only tools the model may call during the turn (the one input box's lookups); see `SkillTools`. */
   tools?: SkillTools;
+  /** Run on this tier instead of the Skill's own (the input box's second, stronger look). Ignored when the budget is tight. */
+  tier?: RouteTier;
 };
 
 /**
@@ -146,12 +148,15 @@ const MAX_STALL_RETRIES = 2;
  * Everything the two entry points share: waiting in the right lane, switching the Skill on, running, switching
  * it back off, and reporting what the run used.
  */
-async function executeSkill<T>(client: CodexRpcBoundary, options: { skillName: string; cwd: string },
+async function executeSkill<T>(client: CodexRpcBoundary, options: { skillName: string; cwd: string; tier?: RouteTier },
   body: (context: RunContext) => Promise<SkillRunResult<T>>): Promise<SkillRunResult<T>> {
   return serializeSkillRun(options.skillName, async () => {
     const startedAt = Date.now();
     const spendMode = await currentSpendMode();
-    const context: RunContext = { route: routeForSkill(options.skillName, process.env, spendMode), spendMode, usage: createUsageCollector() };
+    // A stronger look is a cost the person did not ask for: in economy mode the Skill keeps its own route.
+    const route = options.tier && spendMode === "normal" && process.env.CROSSLINE_MODEL_ROUTING?.trim().toLowerCase() !== "off"
+      ? { ...tierRoutes()[options.tier] } : routeForSkill(options.skillName, process.env, spendMode);
+    const context: RunContext = { route, spendMode, usage: createUsageCollector() };
     let skill: NativeSkill | undefined;
     let result: SkillRunResult<T>;
     try {
@@ -230,6 +235,8 @@ export type ContinueTurnOptions<T> = {
   softAccept?: (rejection: Error, output: unknown) => T | undefined;
   /** The tools the thread was started with (they are declared at `thread/start`; this answers their calls on the follow-up turn). */
   tools?: SkillTools;
+  /** As `SkillRunOptions.tier`. */
+  tier?: RouteTier;
 };
 
 /**

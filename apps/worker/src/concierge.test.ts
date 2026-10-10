@@ -10,7 +10,7 @@ const pack = (over: Partial<ConciergePack> = {}): ConciergePack => ({
   tasks: [{ id: "wo-hw2", title: "完成 ECE 555 作业 2", line: "research", project: "ECE 555", state: "approved", dueDate: "2026-10-12", notBefore: "",
     usualMinutes: 120, nextBlock: "", steps: [{ id: "v1s1", title: "拆解题目", status: "planned", minutes: 20, executor: "human" }] }],
   proposals: [], milestones: [], asks: [], plan: [], capacity: [], ops: [{ id: "op-1", label: "不等了：测量数据", at: "2026-10-09T19:59:00Z" }],
-  agentResults: [], materials: [], facts: [], energy: null, forecast: [], ...over
+  agentResults: [], materials: [], facts: [], preferences: [], energy: null, forecast: [], ...over
 });
 const answer = (actions: unknown[], reply = "") => JSON.stringify({ reply, confidence: "high", actions, clarify: { question: "", options: [] } });
 const due = { action: "task.op", summary: "作业 2 截止改为 10/16", args: { workOrderId: "wo-hw2", type: "due", date: "2026-10-16", minutes: 0, stepId: "", text: "", who: "", energy: "" } };
@@ -64,4 +64,19 @@ test("the Skill describes exactly the registry: every action it names exists, an
   const registry = skill.slice(skill.indexOf("## The registry"), skill.indexOf("## Language"));
   const described = [...registry.matchAll(/^- `([a-z_.]+)` —/gm)].map((match) => match[1]!);
   expect(described.sort()).toEqual([...ACTION_IDS].sort());
+});
+
+test("a second look runs on the same thread and the stronger model; a correction keeps every later turn on it", async () => {
+  const { store, conversation } = setup();
+  const fake = fakeRuntime([answer([due]), answer([], "复核后无改动")], CONCIERGE_SKILL);
+  const run = createConcierge(store, "w", "C:\repo", () => fake.rpc);
+  await run({ conversationId: conversation.id, text: "作业2截止改到下周五", mentions: [], snapshot: "", pack: pack(), history: [] });
+  const reviewed = await run({ conversationId: conversation.id, text: "", mentions: [], snapshot: "", pack: pack(), history: [], review: true });
+  expect(reviewed).toMatchObject({ state: "replied", turn: { reply: "复核后无改动" } });
+  expect(fake.prompts()[1]).toContain("review");
+  expect(fake.threadStarts()).toHaveLength(1);
+  const fresh = setup();
+  const none = await createConcierge(fresh.store, "w", "C:\repo", () => fake.rpc)({ conversationId: fresh.conversation.id, text: "", mentions: [], snapshot: "",
+    pack: pack(), history: [], review: true });
+  expect(none).toMatchObject({ state: "blocked", code: "CONCIERGE_REVIEW_NO_THREAD" });
 });
