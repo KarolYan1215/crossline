@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { CrosslineStore } from "@crossline/db";
 import type { ActivityReading } from "@crossline/core";
-import { ACTIVITY_BLACKLIST, ACTIVITY_DETAIL_CONSENT, ACTIVITY_PAUSED_UNTIL, createActivityTracker, LOCAL_ACTIVITY_CONSENT } from "./activity-recorder";
+import { ACTIVITY_BLACKLIST, ACTIVITY_DETAIL_CONSENT, ACTIVITY_LONG_GAPS, ACTIVITY_PAUSED_UNTIL, createActivityTracker, LOCAL_ACTIVITY_CONSENT } from "./activity-recorder";
 import { parseReadingLine } from "./activity-source";
 
 const reading = (minute: number, app = "Code.exe", title = "x.ts - Crossline", idleMs = 1_000): ActivityReading =>
@@ -84,4 +84,21 @@ test("a reading line from the source is validated and truncated", () => {
   expect(parseReadingLine("not json", at)).toBeUndefined();
   expect(parseReadingLine(JSON.stringify({ idleMs: "x", app: "a", title: "b" }), at)).toBeUndefined();
   expect(parseReadingLine(JSON.stringify({ idleMs: 1, app: "a", title: "t".repeat(1000) }), at)?.title).toHaveLength(300);
+});
+
+test("a night away from the computer is kept as its start and end only — with consent, and nothing else about it", () => {
+  const { store, tracker, w } = setup();
+  try {
+    const at = (iso: string, idleMs = 1_000): ActivityReading => ({ at: iso, idleMs, app: "Code.exe", title: "x.ts" });
+    tracker.handle(at("2026-09-20T04:30:00.000Z"));
+    tracker.handle(at("2026-09-20T12:10:00.000Z"));
+    expect(store.getSetting(w, ACTIVITY_LONG_GAPS)).toBeUndefined();
+    store.setSetting(w, LOCAL_ACTIVITY_CONSENT, "granted");
+    tracker.handle(at("2026-09-21T04:40:00.000Z"));
+    // Idle readings during the night are not activity; the computer may also simply be off.
+    tracker.handle(at("2026-09-21T07:00:00.000Z", 3_600_000));
+    tracker.handle(at("2026-09-21T12:05:00.000Z"));
+    tracker.handle(at("2026-09-21T12:06:00.000Z"));
+    expect(JSON.parse(store.getSetting(w, ACTIVITY_LONG_GAPS)!)).toEqual([{ from: "2026-09-21T04:40:00.000Z", to: "2026-09-21T12:05:00.000Z" }]);
+  } finally { store.close(); }
 });

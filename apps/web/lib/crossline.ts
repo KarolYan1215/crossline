@@ -13,6 +13,7 @@ import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { forecastGoals, normalizeParams, paramsFor, planSchedule, recommendNextActions, type ForecastResult, type PlanResult,
   type ScheduleParams } from "@crossline/planner";
 import { energyCalibration, predictEnergyTransition, readTransitionOutcomes } from "./energy-learning";
+import { energyModel, slotEnergy } from "./energy";
 import { durationPriorFor } from "./estimate-calibration";
 import type { DashboardAction, DashboardData } from "../app/dashboard-view";
 
@@ -676,9 +677,12 @@ async function scheduledBlocks(ctx: AccessContext, today: string, committed: Per
   const currentClock = formatInTimeZone(now, zone, "HH:mm");
   const currentSlot = slots.findIndex((slot) => slot.day === today && slot.end > currentClock);
   const clockBlockers: PlanResult["blockers"] = [];
+  // The energy expected in each slot: the person's word for the slot they are in, the model's for the rest when it is sure enough,
+  // the pattern's otherwise (docs/one-input.md §5).
+  const model = energyModel(ctx, readAvailability(ctx));
   const instants = slots.flatMap((slot, index) => {
-    try { return [{ start: iso(slot.day, slot.start), end: iso(slot.day, slot.end),
-      day: slot.day, energy: currentEnergy && index === currentSlot ? currentEnergy : slot.energy }]; }
+    try { const start = iso(slot.day, slot.start); return [{ start, end: iso(slot.day, slot.end),
+      day: slot.day, energy: currentEnergy && index === currentSlot ? currentEnergy : slotEnergy(model, String(start), slot.energy) }]; }
     catch (error) {
       clockBlockers.push({ taskId: "availability", code: error instanceof Error ? error.message : "AVAILABILITY_LOCAL_TIME_INVALID",
         message: `${slot.day} ${slot.start}–${slot.end} 跨越时钟调整，请修改这段可用时间` });

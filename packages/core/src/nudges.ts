@@ -6,7 +6,7 @@
  */
 import type { ProposedAction } from "./concierge";
 
-export type NudgeKind = "block_start" | "block_missed" | "latest_start" | "timer_overrun" | "background_done";
+export type NudgeKind = "block_start" | "block_missed" | "latest_start" | "timer_overrun" | "background_done" | "energy_check";
 export type NotifyLevelName = "off" | "less" | "normal" | "more";
 
 /** A button: an action carried out on click, a page to open, an acknowledgement, 「少问这类」, or a cue to type. */
@@ -47,6 +47,11 @@ export type NudgeInput = {
   slack: NudgeSlack[];
   timer?: { orderId: string; title: string; stepId: string; stepTitle: string; startedAt: string; usualMinutes: number };
   finished: Array<{ key: string; text: string; label: string; href: string }>;
+  /**
+   * Asked when the next hours' work depends on energy, the model is not sure of it, and the person last said how they are over three
+   * hours ago (docs/one-input.md §5.3). Unlimited, as the person chose, but never while they are busy or at night.
+   */
+  energyCheck?: { nextBlock: string; why: string };
 };
 
 export const DAILY_CAP: Record<NotifyLevelName, number> = { off: 0, less: 3, normal: 6, more: 10 };
@@ -103,6 +108,13 @@ export function nudgeCandidates(input: NudgeInput): PlannedNudge[] {
         buttons: [...(timer.stepId ? [{ kind: "action" as const, label: "这步做完了", action: op(timer.orderId, "step_done", `${what}完成`, { stepId: timer.stepId }) }] : []),
           { kind: "ack", label: "还差一点" }, { kind: "say", label: "卡住了" }, mute] });
     }
+  }
+  if (input.energyCheck) {
+    const report = (level: "low" | "medium" | "high", word: string): NudgeButton => ({ kind: "action", label: word,
+      action: { action: "energy.report", summary: `精力${word}`, args: { level, note: "" } } });
+    out.push({ kind: "energy_check", fingerprint: `energy:${input.today}:${Math.floor(now / 180)}`, urgent: false, counted: false,
+      text: `现在精力怎么样？接下来是${input.energyCheck.nextBlock}。${input.energyCheck.why}`,
+      buttons: [report("low", "低"), report("medium", "中"), report("high", "高"), mute] });
   }
   // Background work that finished together is said together: one message, every item in it, none of them said again.
   const finished = input.finished.filter((item) => !input.sent.has(`done:${item.key}`));

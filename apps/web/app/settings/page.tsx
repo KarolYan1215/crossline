@@ -3,6 +3,8 @@ import { categoryMode, readCategories } from "@crossline/db";
 import { SubpageShell } from "../subpage-shell";
 import { LocalActivityToggle } from "./local-activity-toggle";
 import { AgentHistoryCard } from "./agent-history-card";
+import { EnergyCard, type EnergyStatus } from "./energy-card";
+import { HEALTH_TOKEN_SETTING, energyModel } from "../../lib/energy";
 import { UsageCard } from "./usage-card";
 import { NotifyLevel } from "./notify-level";
 import { PhonePush } from "./phone-push";
@@ -17,7 +19,7 @@ import { loadAssistant } from "../../lib/agent";
 import { agentTaskStatusLabel } from "../../lib/labels";
 import { permissionModeEnabled } from "../../lib/permission-mode";
 import {
-  ACTIVITY_BLACKLIST, ACTIVITY_DETAIL_CONSENT, ACTIVITY_PAUSED_UNTIL, effectiveSchedulePreferences, getStore, LOCAL_ACTIVITY_CONSENT, planToday, toZonedInstant
+  ACTIVITY_BLACKLIST, ACTIVITY_DETAIL_CONSENT, ACTIVITY_PAUSED_UNTIL, effectiveSchedulePreferences, getStore, LOCAL_ACTIVITY_CONSENT, planToday, readAvailability, toZonedInstant
 } from "../../lib/crossline";
 import { requireSessionContext } from "../../lib/access-guard";
 import { lineLabels } from "../../lib/lines";
@@ -65,6 +67,13 @@ export default async function SettingsPage() {
   const states = readCategories(store, ctx.workspaceId);
   const host = process.env.CROSSLINE_TAILSCALE_HOSTNAME?.trim();
   const phoneUrl = process.env.CROSSLINE_DEPLOYMENT_MODE === "private" && host ? `https://${host}` : undefined;
+  // 精力: what the model reads now, and from how many nights and reports (docs/one-input.md §5).
+  const energy = energyModel(ctx, readAvailability(ctx));
+  const fortnight = new Date(Date.now() - 14 * 86_400_000).toISOString();
+  const recentNights = energy.episodes.filter((episode) => episode.wakeAt >= fortnight);
+  const energyStatus: EnergyStatus = { now: energy.predict(new Date().toISOString()),
+    nights: { screen: recentNights.filter((episode) => episode.source === "screen").length, phone: recentNights.filter((episode) => episode.source !== "screen").length },
+    reports: energy.calibration.reports, agreement: energy.calibration.agreement, phoneConnected: Boolean(store.getSetting(ctx.workspaceId, HEALTH_TOKEN_SETTING)) };
 
   return <SubpageShell active="设置" title="设置">
     <div className="st-layout">
@@ -122,6 +131,7 @@ export default async function SettingsPage() {
           <LocalActivityToggle consent={consent} detail={detail} pausedUntil={setting(ACTIVITY_PAUSED_UNTIL) || null} blacklist={blacklist}
             hours={hours} categories={[...byCategory].sort((a, b) => b[1] - a[1])
               .map(([category, minutes]) => ({ label: CATEGORY_LABEL[category as ActivityCategory] ?? "其他", minutes }))} />
+          <EnergyCard status={energyStatus} phoneUrl={phoneUrl ?? null} />
           <AgentHistoryCard on={setting(AGENT_HISTORY_CONSENT) === "on"} summary={(() => { try { return JSON.parse(setting(AGENT_HISTORY_SUMMARY) ?? "null") as AgentHistorySummary | null; } catch { return null; } })()} />
         </section>
 

@@ -10,6 +10,13 @@ export const ACTIVITY_PAUSED_UNTIL = "localActivity.pausedUntil";
 export const ACTIVITY_BLACKLIST = "activity.blacklist";
 export const ACTIVITY_RULES = "activity.rules";
 
+/** The last active minute, and the long idle stretches (start and end only) the energy model reads sleep from. */
+export const ACTIVITY_LAST_ACTIVE = "activity.lastActiveAt";
+export const ACTIVITY_LONG_GAPS = "activity.longGaps";
+const LONG_GAP_MS = 4 * 3_600_000;
+const isGap = (value: unknown): value is { from: string; to: string } =>
+  typeof value === "object" && value !== null && typeof (value as { from?: unknown }).from === "string" && typeof (value as { to?: unknown }).to === "string";
+
 /** Titles are kept this long; after it the minutes, app and category stay and the title is blanked. */
 export const TITLE_RETENTION_DAYS = 14;
 const ROW_RETENTION_DAYS = 90;
@@ -36,6 +43,19 @@ type DayCounters = { day: string; active: number; idle: number; switches: number
 export function createActivityTracker(store: CrosslineStore, listWorkspaceIds: () => string[], intervalSeconds = 60) {
   const counters = new Map<string, DayCounters>();
 
+  /**
+   * The start and end of every stretch of four hours or more with no activity — the computer idle or off — and nothing else (no app,
+   * no title, no count). It is what the energy model reads sleep from when no phone record exists (docs/one-input.md §5).
+   */
+  function noteLongGap(workspaceId: string, at: string): void {
+    const previous = store.getSetting(workspaceId, ACTIVITY_LAST_ACTIVE);
+    if (previous && Date.parse(at) - Date.parse(previous) >= LONG_GAP_MS) {
+      const gaps = parseList(store.getSetting(workspaceId, ACTIVITY_LONG_GAPS), isGap);
+      store.setSetting(workspaceId, ACTIVITY_LONG_GAPS, JSON.stringify([...gaps, { from: previous, to: at }].slice(-40)));
+    }
+    store.setSetting(workspaceId, ACTIVITY_LAST_ACTIVE, at);
+  }
+
   function handleFor(workspaceId: string, reading: ActivityReading): "skipped" | "recorded" {
     const detail = store.getSetting(workspaceId, ACTIVITY_DETAIL_CONSENT) === "granted";
     const aggregate = store.getSetting(workspaceId, LOCAL_ACTIVITY_CONSENT) === "granted";
@@ -57,6 +77,7 @@ export function createActivityTracker(store: CrosslineStore, listWorkspaceIds: (
     if (current.last !== undefined && current.last !== signature && !idle) current.switches += 1;
     if (!idle) current.last = signature;
     current.samples += 1;
+    if (!idle) noteLongGap(workspaceId, reading.at);
     counters.set(workspaceId, current);
     // A workspace with no owner row is not a real account; there is nobody to attribute the reading to.
     const ownerId = store.getWorkspaceOwnerId(workspaceId);

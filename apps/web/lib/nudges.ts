@@ -8,6 +8,7 @@ import {
 } from "@crossline/core";
 import { effectiveSchedulePreferences, getStore, loadCurrentPlan, planToday, readAvailability } from "./crossline";
 import { openAsks } from "./asks";
+import { energyModel } from "./energy";
 import { systemContext } from "./auto-publish";
 import type { Card } from "./conversation";
 
@@ -94,6 +95,14 @@ export async function nudgesFor(ctx: AccessContext, now = new Date()): Promise<P
   const meeting = todays.some((block) => block.id.startsWith("graph_calendar:") && !isCancelledEvent(block.title)
     && minutesOf(block.start) <= nowMinute && nowMinute < minutesOf(block.end));
   const answeredAt = store.getSetting(ctx.workspaceId, ANSWERED_SETTING);
+  // The energy question: the next three hours hold work, the model is unsure about now, and the last word on it is over three hours old.
+  const model = energyModel(ctx, windows);
+  const nextWork = todays.filter((block) => block.id.startsWith("scheduled:") && minutesOf(block.start) > nowMinute && minutesOf(block.start) <= nowMinute + 180)
+    .sort((a, b) => a.start.localeCompare(b.start))[0];
+  const stale = !model.lastReportAt || now.getTime() - Date.parse(model.lastReportAt) > 3 * 3_600_000;
+  const prediction = model.predict(now.toISOString());
+  const energyCheck = nextWork && stale && prediction.confidence === "low"
+    ? { nextBlock: `${nextWork.start}「${nextWork.task ?? nextWork.title}」`, why: "回答后，今天剩下和之后的时段会按精力重新安排。" } : undefined;
   const planned = planNudges({
     now: now.toISOString(), today, clock, tomorrow: addDays(today, 1), level, muted,
     quiet: { timerRunning: Boolean(running), inMeeting: meeting, answeredRecently: Boolean(answeredAt) && now.getTime() - Date.parse(answeredAt!) < ANSWERED_QUIET_MS },
@@ -101,7 +110,7 @@ export async function nudgesFor(ctx: AccessContext, now = new Date()): Promise<P
     sent: new Set(recent.flatMap((message) => [payloadOf(message)?.fingerprint ?? "", ...(payloadOf(message)?.covers ?? [])])),
     countedToday: recent.filter((message) => payloadOf(message)?.counted && message.createdAt.slice(0, 10) >= addDays(today, -1)
       && local(message.createdAt).slice(0, 10) === today).length,
-    blocks, slack, finished,
+    blocks, slack, finished, ...(energyCheck ? { energyCheck } : {}),
     ...(running && timerOrder ? { timer: { orderId: timerOrder.id, title: taskTitleOf(timerOrder), stepId: currentStep?.id ?? "", stepTitle: currentStep?.title ?? "",
       startedAt: running.startedAt, usualMinutes: currentStep?.estimate.p50Minutes ?? timerOrder.estimate.p50Minutes } } : {})
   });
@@ -138,7 +147,7 @@ function backgroundDone(ctx: AccessContext, now: Date): Array<{ key: string; tex
  */
 function mutedKinds(ctx: AccessContext, recent: StoredConversationMessage[], today: string, now: Date): Set<NudgeKind> {
   const store = getStore();
-  const kinds: NudgeKind[] = ["block_start", "block_missed", "latest_start", "timer_overrun", "background_done"];
+  const kinds: NudgeKind[] = ["block_start", "block_missed", "latest_start", "timer_overrun", "background_done", "energy_check"];
   const muted = new Set<NudgeKind>();
   for (const kind of kinds) {
     const until = store.getSetting(ctx.workspaceId, muteKey(kind));
