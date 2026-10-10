@@ -16,7 +16,9 @@ export type CostWindow = {
 };
 
 export type CostSignal =
-  | { available: true; short?: CostWindow; long?: CostWindow; limitReached: boolean }
+  | { available: true; short?: CostWindow; long?: CostWindow; limitReached: boolean;
+      /** An API-key runtime has no windows, only money: this month's spend against the person's cap (its `long.usedPercent` is spent/cap). */
+      money?: { spentUsd: number; capUsd: number } }
   | { available: false; reason: string };
 
 export type SpendPolicy = {
@@ -71,7 +73,8 @@ export function allowDiscretionarySpend(signal: CostSignal, policy: SpendPolicy)
 export type SpendKind = "core" | "discretionary";
 /** Setting the worker writes when it pauses a workspace's background passes, `{code, message, resetsAt?, at}`; the web asks about it. */
 export const BACKGROUND_BLOCKER = "background.blocker";
-export type BackgroundSpend = { mode: SpendMode; blocker?: { code: string; message: string; resetsAt?: string } };
+/** `message` is for the person; `reason` is the runtime's own words, kept for logs and for telling a down worker apart. */
+export type BackgroundSpend = { mode: SpendMode; blocker?: { code: string; message: string; resetsAt?: string; reason?: string } };
 
 /**
  * The one reading of the quota for background work. It replaced eight copies of the same check that disagreed about an
@@ -80,8 +83,10 @@ export type BackgroundSpend = { mode: SpendMode; blocker?: { code: string; messa
  * (an API-key login reports no windows), instead of stopping silently or spending without knowing how much is left.
  */
 export function backgroundSpend(signal: CostSignal): BackgroundSpend {
-  if (!signal.available) return { mode: "manual_core_only", blocker: { code: "COST_SIGNAL_UNAVAILABLE",
-    message: `读不到模型额度（${signal.reason}），后台自动工作已暂停；本人发起的操作照常运行。` } };
+  if (!signal.available) return { mode: "manual_core_only", blocker: { code: "COST_SIGNAL_UNAVAILABLE", reason: signal.reason,
+    message: /auth|login|apikey|api key/i.test(signal.reason)
+      ? "读不到模型额度（还没有登录模型账号，或 API key 登录没有额度窗口），后台自动工作已暂停；本人发起的操作照常运行。"
+      : "读不到模型额度，后台自动工作已暂停；本人发起的操作照常运行。" } };
   const used = Math.max(signal.short?.usedPercent ?? 0, signal.long?.usedPercent ?? 0);
   if (signal.limitReached) {
     const reset = [signal.short, signal.long].filter((window) => (window?.usedPercent ?? 0) >= 100).map((window) => window?.resetsAt).find((at) => at);

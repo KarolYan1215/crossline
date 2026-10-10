@@ -276,11 +276,12 @@ test("only this week's decisions are counted and listed; one whose work starts l
 test("background work the worker paused is told to the person, with where to look; a worker that is down is not asked twice", () => {
   const store = setup();
   store.setSetting(ws, "background.blocker", JSON.stringify({ code: "COST_SIGNAL_UNAVAILABLE",
-    message: "读不到模型额度（chatgpt authentication required），后台自动工作已暂停；本人发起的操作照常运行。", at: NOW.toISOString() }));
+    reason: "chatgpt authentication required", message: "读不到模型额度（还没有登录模型账号），后台自动工作已暂停。", at: NOW.toISOString() }));
   const paused = collectAsks(TEST_CTX, NOW).find((ask) => ask.kind === "background_paused");
-  expect(paused?.why).toContain("chatgpt authentication required");
+  expect(paused?.why).toContain("还没有登录模型账号");
+  expect(paused?.why).not.toContain("chatgpt");
   expect(paused?.options[0]?.href).toBe("/settings#usage");
-  store.setSetting(ws, "background.blocker", JSON.stringify({ code: "COST_SIGNAL_UNAVAILABLE", message: "读不到模型额度（CODEX_SUPERVISOR_UNAVAILABLE）", at: NOW.toISOString() }));
+  store.setSetting(ws, "background.blocker", JSON.stringify({ code: "COST_SIGNAL_UNAVAILABLE", reason: "CODEX_SUPERVISOR_UNAVAILABLE", message: "读不到模型额度", at: NOW.toISOString() }));
   expect(collectAsks(TEST_CTX, NOW).some((ask) => ask.kind === "background_paused")).toBe(false);
   store.setSetting(ws, "background.blocker", "");
   expect(collectAsks(TEST_CTX, NOW).some((ask) => ask.kind === "background_paused")).toBe(false);

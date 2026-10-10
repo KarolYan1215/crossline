@@ -67,3 +67,9 @@
 .st-steps{margin:0;padding-left:20px;display:grid;gap:4px;line-height:1.5}
 .st-steps b{font-weight:700;word-break:break-all}
 .st-token{word-break:break-all;font-size:13px}
+
+/* Model quota: one row per window, the meter between its name and what is left. */
+.st-quota { display: grid; gap: 10px; }
+.st-quota-row { display: grid; grid-template-columns: minmax(0, 6em) minmax(0, 1fr) auto; align-items: center; gap: 4px 10px; }
+.st-quota-row meter { width: 100%; }
+.st-quota-row small { grid-column: 1 / -1; }

@@ -6,6 +6,8 @@ import { AgentHistoryCard } from "./agent-history-card";
 import { EnergyCard, type EnergyStatus } from "./energy-card";
 import { HEALTH_TOKEN_SETTING, energyModel } from "../../lib/energy";
 import { UsageCard } from "./usage-card";
+import { QuotaCard } from "./quota-card";
+import { readQuota } from "../../lib/quota";
 import { NotifyLevel } from "./notify-level";
 import { PhonePush } from "./phone-push";
 import { EffectivenessCard } from "./effectiveness-card";
@@ -140,6 +142,9 @@ export default async function SettingsPage() {
           <div className="st-modules">
             <section className="st-card" aria-label="系统体检"><header><h3>系统体检</h3><small>每日从账本计算</small></header>
               <EffectivenessCard data={await loadEffectiveness(ctx)} labels={lineLabels(ctx)} />
+            </section>
+            <section className="st-card" aria-label="模型额度"><header><h3>模型额度</h3><small>账号的剩余额度与重置时间</small></header>
+              <QuotaCard signal={await readQuota(ctx)} now={new Date()} timeZone={zone} />
             </section>
             <section className="st-card" aria-label="模型用量"><header><h3>模型用量</h3><small>近 {USAGE_DAYS} 天，悬停查看次数与耗时</small></header>
               <UsageCard summary={store.summarizeModelUsage(ctx.workspaceId, since)} daily={store.dailyModelUsage(ctx.workspaceId, since)} days={USAGE_DAYS} />

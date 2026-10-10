@@ -527,8 +527,8 @@ function eventAsks({ ctx, today }: Source): Ask[] {
  * down is its own ask (`runtimeAsk`), not this one.
  */
 function backgroundAsks({ store, ctx }: Source): Ask[] {
-  const paused = readFailure(store, ctx.workspaceId, BACKGROUND_BLOCKER) as ({ resetsAt?: string } & NonNullable<ReturnType<typeof readFailure>>) | null;
-  if (!paused || paused.message.includes("CODEX_SUPERVISOR_UNAVAILABLE")) return [];
+  const paused = readFailure(store, ctx.workspaceId, BACKGROUND_BLOCKER) as ({ resetsAt?: string; reason?: string } & NonNullable<ReturnType<typeof readFailure>>) | null;
+  if (!paused || paused.reason === "CODEX_SUPERVISOR_UNAVAILABLE") return [];
   const until = paused.resetsAt ? `，预计 ${paused.resetsAt.slice(5, 16).replace("T", " ")}（UTC）恢复` : "";
   return [{ id: `background:${paused.code}`, kind: "background_paused", entityId: "background", urgency: "soon", raisedAt: paused.at,
     fingerprint: paused.code, title: "后台自动工作已暂停",

@@ -61,7 +61,8 @@ test("a quota that cannot be read pauses background work and says so, instead of
   const spend = backgroundSpend({ available: false, reason: "chatgpt authentication required" });
   expect(spendAllows(spend, "core")).toBe(false);
   expect(spend.blocker).toMatchObject({ code: "COST_SIGNAL_UNAVAILABLE" });
-  expect(spend.blocker?.message).toContain("chatgpt authentication required");
+  expect(spend.blocker?.reason).toBe("chatgpt authentication required");
+  expect(spend.blocker?.message).toContain("还没有登录模型账号");
 });
 
 test("a reached limit names when it comes back", () => {
