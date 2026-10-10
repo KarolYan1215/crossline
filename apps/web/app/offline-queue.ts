@@ -51,6 +51,9 @@ type MetaRow = { key: string; value: unknown };
  * account's queued captures and in-flight work-order actions as if they belonged to the new one, and a
  * fixed database name was exactly that hazard.
  */
+/** Workspaces whose offline data this page has deleted (sign-out): opening one again would recreate the database. */
+const cleared = new Set<string>();
+
 class OfflineDatabase extends Dexie {
   pending!: Table<StoredCommand, string>;
   dead!: Table<ReplayRecord, string>;
@@ -58,6 +61,9 @@ class OfflineDatabase extends Dexie {
   meta!: Table<MetaRow, string>;
 
   constructor(workspaceId: string) {
+    // A replay still in flight when the person signs out (Today's starts with a network call) used to open the database right
+    // after it was deleted and leave it behind for the next person on this browser.
+    if (cleared.has(workspaceId)) throw new Error("OFFLINE_DATA_CLEARED");
     super(`crossline-offline-${workspaceId}`);
     this.version(1).stores({
       pending: "clientCommandId, clientSequence",
@@ -170,6 +176,7 @@ export function createCommand(ownerId: string, workspaceId: string, sequence: nu
 /** Deletes the workspace's whole offline database and forgets the remembered workspace and device id —
  * called on sign-out so the next person to use this browser starts from nothing. */
 export async function clearOfflineData(workspaceId: string): Promise<void> {
+  cleared.add(workspaceId);
   await Dexie.delete(`crossline-offline-${workspaceId}`);
   try { localStorage.removeItem(WORKSPACE_KEY); localStorage.removeItem(DEVICE_KEY); } catch { /* ignore */ }
 }

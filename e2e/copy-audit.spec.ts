@@ -39,7 +39,9 @@ async function audit(page: Page): Promise<Findings> {
       if (visible(fold)) found.folds.push(fold.querySelector("summary")?.textContent?.trim().slice(0, 30) ?? "(no summary)");
     }
     for (const block of document.querySelectorAll("p, li, dd")) {
-      if (exempt(block) || !visible(block)) continue;
+      // A list item holding a whole card (an ask on 待确认: heading, paragraph, options) is a container, not a paragraph; its own
+      // paragraphs are measured one by one.
+      if (exempt(block) || !visible(block) || block.querySelector("p, h1, h2, h3, h4, h5, h6, ul, ol, fieldset, form")) continue;
       const style = getComputedStyle(block);
       const line = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.35;
       if (block.getBoundingClientRect().height > line * 3.5) found.longText.push((block.textContent ?? "").trim().slice(0, 40));

@@ -22,7 +22,7 @@
   --grid:transparent;
   --block:#0A0A0A;
   --now:#085E3A;
-  --now-ink:#0B7A4B;
+  --now-ink:#07633C;
   /* System text: Arial with DengXian (等线) behind it for CJK. Model-generated text uses --f-gen (Microsoft YaHei), so the two read
      differently without labelling anything as AI. On Windows Arial's own CJK fallback *is* YaHei, which is why the system face
      names DengXian explicitly. */

@@ -62,7 +62,8 @@ function stop(processToStop: ChildProcess): void {
     for (const pid of pids) spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore" });
     return;
   }
-  if (processToStop.pid && processToStop.exitCode === null) processToStop.kill("SIGTERM");
+  if (!processToStop.pid || processToStop.exitCode !== null) return;
+  try { process.kill(-processToStop.pid, "SIGTERM"); } catch { processToStop.kill("SIGTERM"); }
 }
 
 async function waitForHealth(server: ChildProcess): Promise<void> {
@@ -81,7 +82,9 @@ async function waitForHealth(server: ChildProcess): Promise<void> {
 if (windowsListenerPid(3310)) throw new Error("E2E_PORT_IN_USE: 127.0.0.1:3310");
 run(node, [next, "build", "--webpack"], webRoot);
 const server = spawn(node, [next, "start", "--hostname", "127.0.0.1", "--port", "3310"], {
-  cwd: webRoot, env, stdio: "inherit"
+  // Its own process group off Windows: `next start` forks a `next-server` child that a SIGTERM to the parent leaves running on 3310,
+  // and every later run then failed to bind.
+  cwd: webRoot, env, stdio: "inherit", detached: process.platform !== "win32"
 });
 process.once("SIGINT", () => { stop(server); process.exit(130); });
 process.once("SIGTERM", () => { stop(server); process.exit(143); });

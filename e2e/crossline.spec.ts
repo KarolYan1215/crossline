@@ -84,6 +84,23 @@ async function ensureScheduleSetup(page: Page): Promise<void> {
 }
 
 /**
+ * A next step of the person's own for the phone's Today. Every desktop test runs before the first phone test, against the same ledger,
+ * and several write work of the person's own and hand it in; once any exists the demo orders stop being recommended
+ * (`withoutShadowingDemos`), so by the time the phone ran there was nothing left to recommend and the hero card was never drawn.
+ */
+function ensureOwnNextStep(): void {
+  const store = openStore();
+  try {
+    const workspaceId = realWorkspaceId(store);
+    if (store.listWorkOrders(workspaceId).some((order) => order.id === "e2e-mobile-next")) return;
+    store.saveWorkOrder({ id: "e2e-mobile-next", ownerId: store.getWorkspaceOwnerId(workspaceId)!, workspaceId, identityId: "research", projectId: "",
+      milestoneId: "", intent: "整理手机端测试笔记", state: "ready_for_human", riskTier: "routine",
+      estimate: { p25Minutes: 20, p50Minutes: 30, p85Minutes: 45, source: "llm_prior", observationCount: 0, confidence: "low" },
+      payload: { dueDate: "2026-09-16", materialContract: [], evidenceContract: [] } });
+  } finally { store.close(); }
+}
+
+/**
  * What a visual baseline may not depend on. The header count depends on what other tests have written by now, and
  * where the scheduler put a block (and for how many minutes) depends on a time-limited solve that gives a
  * different feasible answer when the machine is busy. Both are hidden, not masked, so they keep their place and
@@ -101,6 +118,7 @@ test.beforeEach(async ({ page }, testInfo) => {
 
 
 test("Today keeps capture semantic-only and health outside identity navigation", async ({ page }, testInfo) => {
+  if (testInfo.project.name === "mobile-chrome") ensureOwnNextStep();
   await page.goto("/");
   await expect(page.getByRole("navigation", { name: "主导航" })).toBeVisible();
   await expect(page.getByText("精力自评", { exact: true })).toBeVisible();
@@ -300,6 +318,7 @@ test("goal confirmation and permission-mode rejection persist through the real p
 
 test("mobile navigation and reduced motion remain usable", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "mobile-chrome");
+  ensureOwnNextStep();
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/");
   await expect(page.getByRole("link", { name: "今日" })).toBeVisible();
