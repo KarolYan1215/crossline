@@ -29,7 +29,9 @@ export type AgentScript = (tools: {
   ask: (method: string, params: Record<string, unknown>) => Promise<Record<string, unknown>>;
 }) => Promise<void>;
 
-export function fakeRuntime(answers: Array<string | ((prompts: string[]) => string)>, skillName: string, options: { lostThreads?: string[]; delayMs?: number; stallTurns?: number[]; usage?: { input: number; cached?: number; output: number; reasoning?: number };
+export function fakeRuntime(answers: Array<string | ((prompts: string[]) => string)>, skillName: string, options: { lostThreads?: string[]; delayMs?: number; stallTurns?: number[];
+  /** As the real runtime does: an interrupted turn then reports `turn/completed` with status `interrupted`, right away. */
+  completeOnInterrupt?: boolean; usage?: { input: number; cached?: number; output: number; reasoning?: number };
   /** What the runtime does during a turn before it answers: tool items, and requests the client has to answer. */
   script?: AgentScript; threadResponse?: Record<string, unknown> } = {}): {
   rpc: JsonLineRpcClient;
@@ -60,7 +62,11 @@ export function fakeRuntime(answers: Array<string | ((prompts: string[]) => stri
       queueMicrotask(() => rpc.receiveLine(JSON.stringify({ id: request.id, error: { code: -32600, message: `thread not found: ${String(request.params?.threadId)}` } })));
       return;
     }
-    if (request.method === "turn/interrupt") interrupts += 1;
+    if (request.method === "turn/interrupt") {
+      interrupts += 1;
+      if (options.completeOnInterrupt) queueMicrotask(() => rpc.receiveLine(JSON.stringify({ method: "turn/completed",
+        params: { threadId, turn: { id: String(request.params?.turnId), status: "interrupted" } } })));
+    }
     const result = request.method === "skills/list"
       ? { data: [{ cwd: "C:\\repo", errors: [], skills: [{ name: skillName, path: "C:\\skill\\SKILL.md", enabled: true }] }] }
       : request.method === "account/read" ? { account: { type: "chatgpt" } }

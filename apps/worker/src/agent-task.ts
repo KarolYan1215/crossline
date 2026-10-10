@@ -27,6 +27,11 @@ export type AgentTaskInput = {
   projectRepo?: string;
   /** The whole order is the assistant's (whole-task delegation): an accepted result is delivered as its evidence. */
   delegated?: boolean;
+  /**
+   * A preparation step the planner gave the assistant (decided 2026-10-09): its result is material the person works from, waiting on the
+   * step, in 材料 and in the tutorial — not work handed in, so a run whose checks pass does not wait in the review queue.
+   */
+  prep?: boolean;
 };
 
 export type AuditCommand = { command: string; cwd: string; status: string; exitCode: number | null; reads: string[] };
@@ -214,7 +219,7 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
       && audit.commands.every((command) => command.exitCode === 0 || command.exitCode === null || result.output.verification.length > 0);
     const trust = categories[input.category]!.trust;
     // Reviewed unless the kind has earned trust AND this result passed its own checks, left the originals alone, and asks nothing of the person.
-    const reviewRequired = !(trust === "auto_checked" && checksPassed && !result.output.needsHuman.length);
+    const reviewRequired = input.prep ? !checksPassed : !(trust === "auto_checked" && checksPassed && !result.output.needsHuman.length);
     const record = { taskId, title: input.title, category: input.category, directory, durationMs: Date.now() - startedAt, summary: result.output.summary,
       artifacts, verification: result.output.verification, needsHuman: result.output.needsHuman, notDone: result.output.notDone, assumptions: result.output.assumptions,
       audit, inputsModified, checksPassed, reviewRequired };

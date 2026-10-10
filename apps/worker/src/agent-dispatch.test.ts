@@ -115,3 +115,26 @@ test("the assistant's preparation steps are picked up by themselves once the kin
   expect(store.getStepPlan("w", "wo")!.steps.find((step) => step.id === candidate!.stepId)?.title).toBe("汇编 L1–L7 公式表");
   store.close();
 });
+
+test("a preparation step the runtime lost (a stall, a restart) is tried again, up to three runs; one that failed on its own merits is not", async () => {
+  const { CrosslineStore, setCategoryMode } = await import("@crossline/db");
+  const { stepDispatchCandidates } = await import("./agent-dispatch");
+  const store = new CrosslineStore(":memory:");
+  store.saveWorkOrder({ id: "wo", ownerId: "o", workspaceId: "w", identityId: "research", projectId: "p", milestoneId: "m", intent: "期中复习",
+    state: "approved", riskTier: "milestone", estimate: { p25Minutes: 60, p50Minutes: 120, p85Minutes: 240, source: "llm_prior", observationCount: 0, confidence: "low" }, payload: {} });
+  const base = { deliverable: "公式表.md", doneCriterion: "完成", share: 1, estimate: { p25Minutes: 20, p50Minutes: 30, p85Minutes: 50 }, dependsOn: [], notBefore: "", dueBy: "", tickOutcome: "" };
+  store.saveStepPlan("w", "wo", { archetypeId: "exam_prep", quantity: { basis: "讲", amount: 2, unit: "讲" }, rationale: "", steps: [
+    { ...base, id: "a", role: "gather", title: "汇编公式表", schedulable: false, executor: "agent" }] }, "o", "planned");
+  setCategoryMode(store, "w", "read_research_organize", "review");
+  const stepId = store.getStepPlan("w", "wo")!.steps[0]!.id;
+  const run = (n: number, code: string) => {
+    store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: `r${n}`, type: "agent.task.requested", entityId: `t${n}`, payload: { taskId: `t${n}`, workOrderId: "wo", stepId, title: "x", category: "read_research_organize" } });
+    store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: `b${n}`, type: "agent.task.blocked", entityId: `t${n}`, payload: { taskId: `t${n}`, code, message: "" } });
+  };
+  run(1, "SKILL_CANCELED");
+  expect(stepDispatchCandidates(store, "w")).toHaveLength(1);
+  run(2, "SKILL_STALLED");
+  run(3, "SKILL_CANCELED");
+  expect(stepDispatchCandidates(store, "w")).toEqual([]);
+  store.close();
+});

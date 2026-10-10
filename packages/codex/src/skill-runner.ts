@@ -395,6 +395,10 @@ async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, con
   // One subscription, re-armed per turn: a repair is another turn on the same thread, so the handler stays put and each turn
   // hands it a fresh pair of callbacks to settle.
   let settle: { resolve: (text: string | undefined) => void; reject: (error: Error) => void } | undefined;
+  // Turns this run gave up on (a stall interrupted them). Their late events — above all their own 「interrupted」 completion — belong to
+  // no one: arriving before the resent turn has its id, that completion used to be read as the new turn's and ended a real assistant run
+  // as 「已取消」 after 96 minutes.
+  const abandoned = new Set<string>();
   const unsubscribe = client.onNotification((message) => {
     if (message.method === "crossline/runtimeDisconnected") return settle?.reject(new Error("SKILL_RUNTIME_EXITED"));
     const params = record(message.params);
@@ -402,6 +406,7 @@ async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, con
     lastEventAt = Date.now();
     const turn = record(params.turn);
     const turnId = params.turnId ?? turn?.id;
+    if (typeof turnId === "string" && abandoned.has(turnId)) return;
     // Events can precede the turn/start response; capture only this isolated thread.
     if (audit.turnId && turnId !== audit.turnId) return;
     if (message.method === "thread/tokenUsage/updated") { context.usage.note(params); return; }
@@ -482,6 +487,7 @@ async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, con
       try { return await runTurn(prompt); }
       catch (error) {
         if (!(error instanceof Error) || error.message !== "SKILL_STALLED" || stalls >= MAX_STALL_RETRIES) throw error;
+        if (audit.turnId) abandoned.add(audit.turnId);
         if (audit.threadId && audit.turnId) void client.request("turn/interrupt", { threadId: audit.threadId, turnId: audit.turnId }).catch(() => {});
         audit.stalls = (audit.stalls ?? 0) + 1;
         run.onAudit({ ...audit });

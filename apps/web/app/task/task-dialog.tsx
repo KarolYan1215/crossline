@@ -50,7 +50,8 @@ function StepsPanel({ detail }: { detail: TaskDetail }) {
         // The assistant's preparation: done by itself before the person needs it; its result is linked here, in 材料 and in 教程.
         if (step?.executor === "agent") {
           const run = [...detail.agentOutputs].reverse().find((task) => task.stepId === step.id);
-          const state = !run ? "待开始" : run.status === "running" || run.status === "requested" ? "准备中" : run.status === "blocked" ? "未做成" : "已备好";
+          const state = !run ? "待开始" : run.status === "running" ? "准备中" : run.status === "blocked" || run.status === "stale" ? "未做成"
+            : run.status === "rejected" ? "未采用" : "已备好";
           return <li key={step.id} className="step-prep" data-state={state}>
             <span className="step-grip" aria-hidden="true" />
             <span className="step-body"><span><Tag>助手准备</Tag> {step.title} <small className="muted">{state}</small></span>

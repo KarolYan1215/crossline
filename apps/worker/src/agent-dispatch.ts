@@ -50,7 +50,8 @@ function taskFromStep(store: CrosslineStore, workspaceId: string, orderId: strin
     input: { taskId: `agent-${orderId.replace(/[^a-zA-Z0-9]/g, "").slice(-8)}-${stepId}-${attempt}`, workOrderId: orderId, stepId,
       title: `${order.intent} · ${step.title}`,
       what: `完成任务「${order.intent}」中的一个准备步骤：${step.title}\n产出：${step.deliverable || "（未写明）"}\n完成标准：${step.doneCriterion || "（未写明）"}${context ? `\n${context}` : ""}\n产出是直接可用的成品（文件），不是计划或说明；只依据给出的文件与公开来源，找不到的写明。`,
-      category: category ?? "read_research_organize", humanPart: "该任务的其余步骤由本人完成；需要本人判断或选择的内容列入待本人处理。", inputs } };
+      category: category ?? "read_research_organize", humanPart: "该任务的其余步骤由本人完成；需要本人判断或选择的内容列入待本人处理。", inputs,
+      ...(step.executor === "agent" ? { prep: true } : {}) } };
 }
 
 export function taskFromWorkOrder(store: CrosslineStore, workspaceId: string, orderId: string, categoryOverride?: AgentCategory, stepId?: string): TaskFromOrder {
@@ -114,7 +115,15 @@ export function stepDispatchCandidates(store: CrosslineStore, workspaceId: strin
   if (isPaused(store, workspaceId)) return [];
   const approved = readCategories(store, workspaceId);
   const declined = new Set(declinedCategories(store, workspaceId));
-  const tried = new Set(listAgentTasks(store, workspaceId).filter((task) => task.stepId).map((task) => `${task.workOrderId}#${task.stepId}`));
+  // A step stays tried once a run of it finished, is going, or failed for a reason of its own; a run the runtime lost (a stall, a restart,
+  // a cancelled turn) is tried again, at most three times in all.
+  const runs = new Map<string, Array<{ status: string; code: string }>>();
+  for (const task of listAgentTasks(store, workspaceId).filter((item) => item.stepId)) {
+    const key = `${task.workOrderId}#${task.stepId}`;
+    runs.set(key, [...(runs.get(key) ?? []), { status: task.status, code: task.blockerCode ?? "" }]);
+  }
+  const lostToRuntime = (run: { status: string; code: string }) => run.status === "stale" || (run.status === "blocked" && /^(SKILL_|CODEX_)/.test(run.code));
+  const tried = new Set([...runs].filter(([, list]) => list.length >= 3 || !list.every(lostToRuntime)).map(([key]) => key));
   const orders = new Map(store.listWorkOrders(workspaceId).filter((order) => !order.tombstone && (DISPATCH_STATES.has(order.state) || order.state === "active"))
     .map((order) => [order.id, order]));
   const out: Array<{ orderId: string; stepId: string; due: string; seq: number }> = [];

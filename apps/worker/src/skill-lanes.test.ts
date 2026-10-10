@@ -91,6 +91,15 @@ test("a turn that goes completely silent is interrupted and sent again, and the 
   expect(interrupts()).toBe(1);
 });
 
+test("the interrupted turn's own late completion does not end the resent one as 「已取消」", async () => {
+  // The real runtime answers turn/interrupt with turn/completed(status: interrupted) for the old turn, which can arrive before the resent
+  // turn has its id; a real assistant run was ended as SKILL_CANCELED that way after 96 minutes.
+  const { rpc, turns } = fakeRuntime(["{}"], TOP, { stallTurns: [1], completeOnInterrupt: true });
+  const result = await runCodexSkill(rpc, {}, { ...options(TOP), timeoutMs: 60_000, idleMs: 120 });
+  expect(result).toMatchObject({ ok: true, audit: { stalls: 1 } });
+  expect(turns()).toBe(2);
+});
+
 test("a run that keeps going silent gives up with a name that says so, instead of waiting out the hour", async () => {
   const { rpc, turns } = fakeRuntime(["{}"], TOP, { stallTurns: [1, 2, 3] });
   const result = await runCodexSkill(rpc, {}, { ...options(TOP), timeoutMs: 60_000, idleMs: 100 });
