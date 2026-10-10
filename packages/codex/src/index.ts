@@ -346,6 +346,8 @@ export async function startCodexSupervisor(options: {
   autoBackplanGoals?: (workspaceId: string) => Promise<unknown>;
   /** Step planning, replans asked for, and progress reports, run now (the person just asked for one); answered at once. */
   runTaskPass?: (workspaceId: string) => Promise<unknown>;
+  /** Splits adopted long-term goals that have no attributes yet (once per goal), run now instead of at the next tick; answered at once. */
+  splitGoals?: (workspaceId: string) => Promise<unknown>;
   /**
    * One turn of the one input box (docs/one-input.md): the person's text, the web's snapshot and context pack in; the reply, proposed
    * actions and question back out. Nothing is written but the conversation's thread id.
@@ -551,6 +553,16 @@ export async function startCodexSupervisor(options: {
         }
         if (runtimeBlocker) { sendJson(response, 503, { blocker: runtimeBlocker }); return; }
         runDetached(() => options.runTaskPass!(callerWorkspaceId), () => {});
+        sendJson(response, 202, { started: true });
+        return;
+      }
+      if (request.method === "POST" && pathname === "/v1/lines/split-goals" && options.splitGoals) {
+        if (request.headers.origin || !request.headers["content-type"]?.startsWith("application/json")) {
+          sendJson(response, 403, { blocker: { code: "GOAL_SPLIT_FORBIDDEN", message: "Use the local Web API" } });
+          return;
+        }
+        if (runtimeBlocker) { sendJson(response, 503, { blocker: runtimeBlocker }); return; }
+        runDetached(() => options.splitGoals!(callerWorkspaceId), () => {});
         sendJson(response, 202, { started: true });
         return;
       }

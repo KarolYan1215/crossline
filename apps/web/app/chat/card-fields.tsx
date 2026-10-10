@@ -23,7 +23,8 @@ export function editableFields(item: ProposedAction): string[] {
       if (type === "energy") return ["workOrderId", "energy", "text"];
       return ["workOrderId", "text"];
     }
-    case "note.add": case "profile.tell": return ["text"];
+    case "note.add": return ["text"];
+    case "profile.tell": return ["text", "lineId"];
     case "energy.report": return ["level", "note"];
     case "event.create": return ["title", "date", "startTime", "endTime", "until", "location", "lineId"];
     case "goal.add": return ["lineId", "title"];

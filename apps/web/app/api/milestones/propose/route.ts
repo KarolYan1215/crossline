@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requestCodexSupervisor, CodexSupervisorRequestError } from "../../../../lib/codex-runtime";
 import { resolveAccessContext } from "../../../../lib/access-guard";
 import { isCrossSiteWrite } from "../../../../lib/same-origin";
+import { recordRedraftRequested } from "../../../../lib/line-cards";
 
 /**
  * Asks the architect Skill for new milestones. Everything it returns lands as a `draft`, so this route
@@ -16,6 +17,8 @@ export async function POST(request: Request) {
   let body: unknown = {};
   try { body = await request.json(); } catch { /* an empty request means "look at the whole picture" */ }
   const ask = (body ?? {}) as { request?: unknown; only?: unknown };
+  // A line's drafts redone on request: the 主线 card's 「重算」 offer goes away until its goal or facts move again.
+  if (Array.isArray(ask.only)) recordRedraftRequested(access.ctx, ask.only.filter((item): item is string => typeof item === "string").slice(0, 8));
   try {
     const result = await requestCodexSupervisor<unknown>(access.ctx, "/v1/milestones/propose", {
       method: "POST",

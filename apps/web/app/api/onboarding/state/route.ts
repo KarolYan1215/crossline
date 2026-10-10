@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { StoredLineProfile } from "@crossline/core";
 import { resolveAccessContext } from "../../../../lib/access-guard";
 import { getStore } from "../../../../lib/crossline";
 import { loadPendingDateBatch } from "../../../../lib/imported-dates";
@@ -34,8 +35,8 @@ export async function GET(request: Request) {
     identities, answeredElsewhere: session ? pendingAnswerIds(access.ctx, session.id) : [],
     setupLines: !focus && needsLineSetup(access.ctx),
     focusLine: focus ? { id: focus.id, label: focus.label } : null,
-    lines: identityLines(access.ctx).map((line) => ({ id: line.id, label: line.label, rank: line.rank ?? null, hard: Boolean(line.hard), goals: line.goals ?? [] })),
-    lineProfiles: json<Record<string, { description: string; goalCandidates: string[] }>>("lines.profiles", {}),
+    lines: identityLines(access.ctx).map((line) => ({ id: line.id, label: line.label, rank: line.rank ?? null, hard: Boolean(line.hard), goals: line.goals ?? [], goalParts: line.goalParts ?? [] })),
+    lineProfiles: json<Record<string, StoredLineProfile>>("lines.profiles", {}),
     profile: json<Record<string, unknown> | null>("profile.model", null),
     availabilityProposed: Boolean(store.getSetting(workspaceId, "schedule.availability.proposed")),
     session: session ? { id: session.id, state: session.state, coverage: session.coverage } : null,

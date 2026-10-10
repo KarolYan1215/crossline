@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   AGENT_HISTORY_SUMMARY, agentHistoryLines, type AgentHistorySummary,
-  EMPTY_PROFILE_MODEL, ONBOARDING_TURN_SCHEMA, PROFILE_CONFIRMED, portraitFingerprint, answeredGapFacts, keepOnboardingTurn, mergeFacts, sanitizeDateExtraction, validateOnboardingTurn,
+  EMPTY_PROFILE_MODEL, GOAL_EDITS_SETTING, ONBOARDING_TURN_SCHEMA, duplicateAttributes, type PendingGoalEdit, type StoredLineProfile, PROFILE_CONFIRMED, portraitFingerprint, answeredGapFacts, keepOnboardingTurn, mergeFacts, sanitizeDateExtraction, validateOnboardingTurn,
   type ProfileGap, type ProfileModel, type OnboardingStage,
   type KnownSources, type OnboardingTurn, type OnboardingTurnContext
 } from "@crossline/core";
@@ -26,9 +26,15 @@ const INSTRUCTIONS = "You interview a Crossline user as the Skill describes: a l
   + "person has said when they can work (or a stage has enough to infer it) propose weekly available hours in `availability` — do not wait "
   + "for every fixed arrangement: classes and meetings are subtracted from these hours automatically. Every single/multi question has concrete candidate options (8-14 when the "
   + "space is large) and allows the person's own answer. Rewrite `profile` in full every turn (your synthesis). In the lines stage write "
-  + "each line's personal description and several long-term goal candidates, each 「成为 ___ 的 <身份>」 using only what the person said, in "
-  + "`lineProfiles`; ask more when a line is still thin. Facts about the person in general use identityId \"person\". When `focusLine` is "
-  + "set, interview only that line (stage `details`). Every confirmed slotUpdate cites a reply-N or src-N with a verbatim sourceQuote; your "
+  + "each line's personal description and 6-12 attribute candidates for its long-term goal in `lineProfiles[].attributeCandidates` — never "
+  + "whole sentences: each one independent quality (a field, an ability or a lasting state, labelled `kind` domain/ability/state), a short "
+  + "phrase without 「成为」 or a trailing 「的」, cited by `sourceRef` to the reply-N or src-N it comes from, and no two overlapping (after removing "
+  + "「的」 and punctuation neither may contain the other); the person combines them into 「成为 A 的、B 的<身份>」 themselves. Leave the list empty "
+  + "while a line is still thin and ask more. When the person asks in so many words to change a line's goal (「把目标改成…」), put the new "
+  + "attributes in `goalEdits` citing that reply — it is shown to them to adopt, never applied by you; otherwise `goalEdits` is empty. "
+  + "Facts about the person in general use identityId \"person\". When `focusLine` is "
+  + "set, interview only that line (stage `details`) and refresh its `lineProfiles` entry whenever what was said changes its description "
+  + "or attributes. Every confirmed slotUpdate cites a reply-N or src-N with a verbatim sourceQuote; your "
   + "own conclusions are sourceRef 'inference', status 'inferred', empty quote. Never invent dates, numbers or names. Files that arrive "
   + "are for you to read: every date they state goes into `fileDates`, each with a verbatim quote containing the day and a title that names its course or project (「ECE 555 期末考试」, never a bare 「期末考试」); never ask which course or project a file belongs to (the app asks that itself; a settled file carries its projectId); never turn TBD into "
   + "a date (list it in `undated`). When `history` is present the conversation is being resumed: continue it, do not greet again or re-ask "
@@ -97,12 +103,29 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     const now = new Date().toISOString();
     // A line's own interview adds to the facts but does not rewrite the person's whole portrait.
     if (!sessionId.startsWith("line-") && turn.profile) store.setSetting(workspaceId, "profile.model", JSON.stringify(turn.profile));
-    // Each line's personal description and goal candidates, kept by line so a later turn or a line's own interview refines one line only.
+    // Each line's personal description and attribute candidates, kept by line so a later turn or a line's own interview refines one line
+    // only. An empty candidate list keeps those on record; new ones replace them, except the attributes split from the adopted goal.
     if (turn.lineProfiles?.length) {
-      let current: Record<string, unknown> = {};
-      try { current = JSON.parse(store.getSetting(workspaceId, "lines.profiles") ?? "{}") as Record<string, unknown>; } catch { /* rebuilt below */ }
-      for (const line of turn.lineProfiles) current[line.lineId] = { description: line.description, goalCandidates: line.goalCandidates };
+      let current: Record<string, StoredLineProfile> = {};
+      try { current = JSON.parse(store.getSetting(workspaceId, "lines.profiles") ?? "{}") as Record<string, StoredLineProfile>; } catch { /* rebuilt below */ }
+      for (const line of turn.lineProfiles) {
+        const previous = current[line.lineId] ?? {};
+        const fresh = line.attributeCandidates ?? [];
+        const fromGoal = (previous.attributes ?? []).filter((item) => item.sourceRef === "goal"
+          && !duplicateAttributes([...fresh.map((other) => other.text), item.text]).some((pair) => pair.includes(item.text)));
+        current[line.lineId] = fresh.length
+          ? { description: line.description || previous.description || "", attributes: [...fresh, ...fromGoal] }
+          : { ...previous, description: line.description || previous.description || "" };
+      }
       store.setSetting(workspaceId, "lines.profiles", JSON.stringify(current));
+    }
+    // A goal change the person asked for waits for their click on the line's card; a newer request for the same line replaces it.
+    if (turn.goalEdits?.length) {
+      let edits: Record<string, PendingGoalEdit> = {};
+      try { edits = JSON.parse(store.getSetting(workspaceId, GOAL_EDITS_SETTING) ?? "{}") as Record<string, PendingGoalEdit>; } catch { /* rebuilt below */ }
+      // In the order the person said them: a change they worded themselves is not reordered.
+      for (const edit of turn.goalEdits) edits[edit.lineId] = { parts: edit.parts.map((part) => part.text), sourceRef: edit.sourceRef, at: now };
+      store.setSetting(workspaceId, GOAL_EDITS_SETTING, JSON.stringify(edits));
     }
     // Available hours worked out from a hard-constraint line's rules: a proposal, confirmed (or not) on the plan page.
     if (turn.availability?.windows.length) store.setSetting(workspaceId, "schedule.availability.proposed",
@@ -233,7 +256,8 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         focusLine, profile: readProfile(), stage: ((session!.coverage as { stage?: OnboardingStage }).stage ?? (focusLine ? "details" : "orientation")),
         checklist: openChecklist(), ...stagePace(messages),
         ...(workHistory().length ? { workHistory: workHistory() } : {}),
-        lines: identityLines(store, workspaceId).map((line) => ({ id: line.id, label: line.label, rank: line.rank ?? null, hard: Boolean(line.hard), goals: line.goals ?? [] }))
+        lines: identityLines(store, workspaceId).map((line) => ({ id: line.id, label: line.label, rank: line.rank ?? null, hard: Boolean(line.hard), goals: line.goals ?? [],
+          ...(line.goalParts?.length ? { goalParts: line.goalParts } : {}) }))
       };
       return runCodexSkill<OnboardingTurn>(client, context, {
         skillName: ONBOARDING_SKILL, cwd, developerInstructions: INSTRUCTIONS, outputSchema: ONBOARDING_TURN_SCHEMA,

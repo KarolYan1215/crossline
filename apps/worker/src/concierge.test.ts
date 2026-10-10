@@ -6,7 +6,7 @@ import { fakeRuntime } from "./testing/fake-runtime";
 
 const pack = (over: Partial<ConciergePack> = {}): ConciergePack => ({
   now: "2026-10-09T20:00:00Z", today: "2026-10-09", timeZone: "America/Chicago", page: { kind: "today", entityId: "", title: "" },
-  lines: [{ id: "research", label: "研究者", goals: [], hard: true }],
+  lines: [{ id: "research", label: "研究者", goals: [], hard: true, description: "" }],
   tasks: [{ id: "wo-hw2", title: "完成 ECE 555 作业 2", line: "research", project: "ECE 555", state: "approved", dueDate: "2026-10-12", notBefore: "",
     usualMinutes: 120, nextBlock: "", steps: [{ id: "v1s1", title: "拆解题目", status: "planned", minutes: 20, executor: "human" }] }],
   proposals: [], milestones: [], asks: [], plan: [], capacity: [], ops: [{ id: "op-1", label: "不等了：测量数据", at: "2026-10-09T19:59:00Z" }],

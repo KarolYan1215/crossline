@@ -18,6 +18,11 @@ export type IdentityPack = {
    * (an action).
    */
   goals?: string[];
+  /**
+   * The attributes `goals[0]` was composed from, in the order chosen (「成为 A 的、B 的<身份>」, decided 2026-10-10). Absent for a goal
+   * written as a whole sentence and not split yet; `goals[0]` stays the composed sentence so its readers need not know about parts.
+   */
+  goalParts?: string[];
   /** A hard constraint (at most two lines): its fixed schedule is the immovable frame, its deadlines come first, and it shapes the hours. */
   hard?: boolean;
   /** Priority for the next 12–24 months (1 = the base line); absent = parallel with the other unranked lines. */
@@ -94,7 +99,7 @@ export function defaultIdentityPacks(): IdentityPack[] {
  */
 export const LINE_SETTING = "lines.v1";
 export type LineSpec = { id: string; label: string; color: string; goal: string; createdAt: string; archived?: boolean;
-  goals?: string[]; hard?: boolean; rank?: number };
+  goals?: string[]; goalParts?: string[]; hard?: boolean; rank?: number };
 /** At most this many lines may be hard constraints. */
 export const MAX_HARD_LINES = 2;
 
@@ -131,6 +136,7 @@ export function identityPacksFor(read: (key: string) => string | undefined, opti
     return { ...(builtIn ?? { id: line.id, kind: "identity" as const, masterClock: false, workflowTemplates: [], evidencePolicy: "tiered" as const,
       diligenceTopic: "opportunities" as const, durationPriors: commonPriors }), label: line.label, color: line.color,
       goals: line.goals?.length ? line.goals : line.goal ? [line.goal] : [], goal: line.goals?.[0] ?? line.goal,
+      ...(line.goalParts?.length ? { goalParts: line.goalParts } : {}),
       ...(line.hard ? { hard: true } : {}), ...(line.rank ? { rank: line.rank } : {}) };
   });
   // Deadline-tier priority (the master clock) goes to the hard-constraint lines; with none, to the base line; with neither, to nobody in

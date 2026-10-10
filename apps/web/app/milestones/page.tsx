@@ -7,6 +7,7 @@ import { requireSessionContext } from "../../lib/access-guard";
 import { identityLines } from "../../lib/lines";
 import { LINE_PALETTE } from "@crossline/identity-packs";
 import { LinesBar } from "./lines-bar";
+import { lineCardDetails } from "../../lib/line-cards";
 
 export const dynamic = "force-dynamic";
 
@@ -21,14 +22,16 @@ export default async function MilestonesPage() {
       successCriteria: milestone.successCriteria ?? [], ...(milestone.templateId ? { templateId: milestone.templateId } : {}) }));
   const drafts = board.milestones.filter((milestone) => milestone.status === "draft").length;
   const identities = identityLines(ctx);
-  let profiles: Record<string, { goalCandidates?: string[] }> = {};
-  try { profiles = JSON.parse(getStore().getSetting(ctx.workspaceId, "lines.profiles") ?? "{}") ?? {}; } catch { /* none yet */ }
+  const details = lineCardDetails(ctx);
 
   return <SubpageShell active="主线" title="主线"
     description={drafts ? `${drafts} 个里程碑草稿待审阅：草稿以虚线显示，可按主线批准或撤销。批准后，三周内到期的里程碑自动倒推出任务。` : "各主线的里程碑按日期排列；刻度为里程碑之前的阶段结果。"}>
     <LinesBar lines={identities.map((pack) => ({ id: pack.id, label: pack.label, color: pack.color ?? pack.id, goals: pack.goals ?? [],
       hard: Boolean(pack.hard), rank: pack.rank ?? null,
-      candidates: (profiles[pack.id]?.goalCandidates ?? []).filter((candidate) => !(pack.goals ?? []).includes(candidate)),
+      attributes: (details[pack.id]?.attributes ?? []).map(({ text, kind }) => ({ text, kind })), goalParts: details[pack.id]?.goalParts ?? [],
+      description: details[pack.id]?.description ?? "", pendingEdit: details[pack.id]?.pendingEdit ? { parts: details[pack.id]!.pendingEdit!.parts } : null,
+      redraftDue: details[pack.id]?.redraftDue ?? false,
+      interview: details[pack.id]?.interview ?? { reply: "", questions: [], waiting: false, turns: 0 },
       milestones: board.milestones.filter((milestone) => milestone.identityId === pack.id).length }))}
       palette={Object.fromEntries(Object.entries(LINE_PALETTE).map(([key, value]) => [key, value.light]))} />
     <MilestoneActions lines={identities.map((pack) => ({ id: pack.id, label: pack.label }))} archived={archived} />

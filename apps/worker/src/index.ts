@@ -22,6 +22,7 @@ import { createProgressJudge, createStepPlanner, createWarningReviewer, reportsA
 import { createArchetypeCurator, curationDue } from "./archetype-curator";
 import { createTaskTitler, untitledTasks } from "./task-titler";
 import { createCalendarClassifier, unfiledCalendarEvents } from "./calendar-classifier";
+import { createGoalSplitter, linesAwaitingSplit } from "./goal-splitter";
 import { fileSourceDocuments } from "./source-filing";
 import { createPortraitWriter } from "./portrait-writer";
 import { createPortraitIllustrator } from "./portrait-illustrator";
@@ -180,6 +181,23 @@ async function calendarLinePass(workspaceId: string, checkedAt: string): Promise
   } finally { filingCalendar.delete(workspaceId); }
 }
 
+/**
+ * Splits long-term goals adopted as whole sentences into attributes (§4.1), once per goal; a small model, so it runs unless the quota is
+ * down to core work. Also run on request (`POST /v1/lines/split-goals`).
+ */
+const splittingGoals = new Set<string>();
+async function goalSplitPass(workspaceId: string, checkedAt = new Date().toISOString()): Promise<void> {
+  if (splittingGoals.has(workspaceId) || !codexSupervisor || !linesAwaitingSplit(analysisStore, workspaceId).length) return;
+  const signal = await readCost();
+  if (!signal.available || budgetPolicy(Math.max(signal.short?.usedPercent ?? 0, signal.long?.usedPercent ?? 0)).mode === "manual_core_only") return;
+  splittingGoals.add(workspaceId);
+  try {
+    enterUsageWorkspace(workspaceId);
+    const outcome = await createGoalSplitter(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client)().catch(() => undefined);
+    if (outcome) console.info(JSON.stringify({ type: "lines.goals_split", checkedAt, workspaceId, ...outcome }));
+  } finally { splittingGoals.delete(workspaceId); }
+}
+
 const stepPlanning = new Set<string>();
 async function stepPlanPass(workspaceId: string, checkedAt = new Date().toISOString()): Promise<void> {
   if (stepPlanning.has(workspaceId)) return;
@@ -268,6 +286,7 @@ async function tick(): Promise<void> {
   for (const workspace of workspaces) await stepPlanPass(workspace.id, checkedAt);
   for (const workspace of workspaces) await curatorPass(workspace.id, checkedAt);
   for (const workspace of workspaces) await titlePass(workspace.id, checkedAt);
+  for (const workspace of workspaces) await goalSplitPass(workspace.id, checkedAt);
   // Uploaded files are filed under the project their own name or opening names; what stays unclear is asked about on 待确认.
   for (const workspace of workspaces) {
     try {
@@ -665,12 +684,13 @@ if (!capabilitySecret) {
         "crossline:crossline-flywheel-scout", "crossline:crossline-manualbook-designer", "crossline:crossline-material-researcher", "crossline:crossline-material-writer", "crossline:crossline-milestone-architect",
         "crossline:crossline-goal-backplanner", "crossline:crossline-background-facts", "crossline:crossline-assistant",
         "crossline:crossline-onboarding", "crossline:crossline-due-diligence", "crossline:crossline-plan-explainer", "crossline:crossline-weekly-insight",
-        "crossline:crossline-agent", "crossline:crossline-step-planner", "crossline:crossline-validation-reviewer", "crossline:crossline-progress-judge", "crossline:crossline-concierge", "crossline:crossline-archetype-curator", "crossline:crossline-task-titler", "crossline:crossline-portrait-writer", "crossline:crossline-portrait-illustrator", "crossline:crossline-calendar-classifier"
+        "crossline:crossline-agent", "crossline:crossline-step-planner", "crossline:crossline-validation-reviewer", "crossline:crossline-progress-judge", "crossline:crossline-concierge", "crossline:crossline-archetype-curator", "crossline:crossline-task-titler", "crossline:crossline-portrait-writer", "crossline:crossline-portrait-illustrator", "crossline:crossline-calendar-classifier", "crossline:crossline-goal-splitter"
       ]
     },
     autoAnalyzeCaptures: (workspaceId) => autoAnalyzePass(workspaceId),
     autoBackplanGoals: (workspaceId) => autoBackplanPass(workspaceId),
     runTaskPass: (workspaceId) => stepPlanPass(workspaceId),
+    splitGoals: (workspaceId) => goalSplitPass(workspaceId),
     conciergeTurn: (workspaceId, request, signal) => { enterUsageWorkspace(workspaceId);
       return createConcierge(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client)(request as unknown as ConciergeRequest, signal); },
     analyzeCapture: (client, id, signal, workspaceId) => getCaptureAnalyzer(workspaceId)(client, id, signal),

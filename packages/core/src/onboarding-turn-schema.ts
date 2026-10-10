@@ -1,5 +1,9 @@
 import { RELATION_KINDS } from "./flywheel-schema";
 import { DATE_EXTRACTION_SCHEMA, type DateExtraction } from "./date-schema";
+import {
+  ATTRIBUTE_CANDIDATES_MAX, ATTRIBUTE_CANDIDATES_MIN, ATTRIBUTE_KIND_FIELD, ATTRIBUTE_KINDS, ATTRIBUTE_MAX_LENGTH, cleanAttribute, duplicateAttributes, guessKind,
+  notAtomic, type AttributeCandidate, type AttributeKind
+} from "./line-attributes";
 
 /**
  * One turn of the profile interview.
@@ -38,7 +42,7 @@ export type TurnCoverage = { identityId: string; filled: string[]; missing: stri
 /**
  * Where the interview is (decided 2026-10-08): the person sets their lines first on a structured screen (identity nouns, order, hard
  * constraints); the interview then goes, a batch of independent questions at a time, through how the app works, where they stand, their
- * compass, their energy, their lines (a personal description and long-term goal candidates for each), and each line's specifics. A line's
+ * compass, their energy, their lines (a personal description and 6–12 attribute candidates for the long-term goal of each), and each line's specifics. A line's
  * own interview (`focusLine`) runs only `details` for that line. The portrait report is written afterwards by its own Skill.
  */
 export const ONBOARDING_STAGES = ["orientation", "situation", "compass", "energy", "lines", "details"] as const;
@@ -68,8 +72,18 @@ export type ProfileModel = {
 };
 export const EMPTY_PROFILE_MODEL: ProfileModel = { portrait: "", coreConflict: "", problem: "", gravity: [], designable: [], reframes: [], workView: "",
   lifeView: "", consistency: "", trueNorth: "", energyMap: [], flow: [], says: "", does: "", anchor: "", realWant: "", allocation: "" };
-/** For each line: a personal description from what was said, and long-term goal candidates 「成为 ___ 的 <身份>」 drawn only from it. */
-export type LineProfile = { lineId: string; description: string; goalCandidates: string[] };
+/**
+ * For each line: a personal description from what was said, and 6–12 mutually independent attributes (`attributeCandidates`) the person
+ * builds a long-term goal 「成为 A 的、B 的<身份>」 from — each cited to the reply or file it came from and labelled with its kind
+ * (decided 2026-10-10; it replaced whole-sentence `goalCandidates`, which the model filled by permuting the same few attributes). An empty
+ * list keeps the candidates already on record. `goalCandidates` is only ever on turns stored before.
+ */
+export type LineProfile = { lineId: string; description: string; attributeCandidates: AttributeCandidate[]; goalCandidates?: string[] };
+/**
+ * A change to a line's long-term goal the person asked for in so many words (「把目标改成…」), cited to that reply. Never applied by the
+ * interview: it waits as a card the person adopts or dismisses.
+ */
+export type GoalEdit = { lineId: string; parts: Array<{ text: string; kind: AttributeKind }>; sourceRef: string };
 /** A weekly pattern of available hours proposed from a hard-constraint line's rules; the person confirms it on the plan page. */
 export type AvailabilityProposal = { windows: Array<{ days: number[]; start: string; end: string; energy: "low" | "medium" | "high" }>; why: string };
 
@@ -89,6 +103,7 @@ export type OnboardingTurn = {
   nextAction: "ask" | "ready_for_milestones";
   stage?: OnboardingStage;
   lineProfiles?: LineProfile[];
+  goalEdits?: GoalEdit[];
   /** Filled once a hard-constraint line's rules are known (empty `windows` otherwise). */
   availability?: AvailabilityProposal;
   profile?: ProfileModel;
@@ -106,7 +121,7 @@ export type OnboardingTurnContext = {
   /** A line's own interview: only this line is asked about. Absent for the full interview. */
   focusLine?: { id: string; label: string; goal: string } | null;
   /** The person's lines as set on the opening screen: identity noun, order (null = parallel), hard constraint, chosen goals. */
-  lines?: Array<{ id: string; label: string; rank: number | null; hard: boolean; goals: string[] }>;
+  lines?: Array<{ id: string; label: string; rank: number | null; hard: boolean; goals: string[]; goalParts?: string[] }>;
   /** The portrait so far and the stage reached, so a rebuilt thread carries on rather than starting over. */
   profile?: ProfileModel; stage?: OnboardingStage;
   /** The completion list's items still open (`interviewChecklist`): what the interview owes before it may say it is ready, and what waits on the person. */
@@ -189,7 +204,10 @@ export const ONBOARDING_TURN_SCHEMA = object({
   nextAction: { type: "string", enum: ["ask", "ready_for_milestones"] },
   stage: { type: "string", enum: [...ONBOARDING_STAGES] },
   lineProfiles: { type: "array", maxItems: 8, items: object({ lineId: slug, description: { type: "string", maxLength: 800 },
-    goalCandidates: { type: "array", maxItems: 6, items: text(120) } }) },
+    attributeCandidates: { type: "array", maxItems: ATTRIBUTE_CANDIDATES_MAX,
+      items: object({ text: text(ATTRIBUTE_MAX_LENGTH), kind: ATTRIBUTE_KIND_FIELD, sourceRef: slug }) } }) },
+  goalEdits: { type: "array", maxItems: 8, items: object({ lineId: slug,
+    parts: { type: "array", maxItems: 12, items: object({ text: text(ATTRIBUTE_MAX_LENGTH), kind: ATTRIBUTE_KIND_FIELD }) }, sourceRef: slug }) },
   availability: object({ windows: { type: "array", maxItems: 14, items: object({ days: { type: "array", maxItems: 7, items: { type: "integer", minimum: 0, maximum: 6 } },
     start: text(5), end: text(5), energy: { type: "string", enum: ["low", "medium", "high"] } }) }, why: { type: "string", maxLength: 400 } }),
   profile: object({
@@ -274,12 +292,64 @@ export function validateOnboardingTurn(value: unknown, known: KnownSources): Onb
     }
   }
   if (turn.nextAction === "ask" && !turn.questions.length) reject("ONBOARDING_QUESTION_REQUIRED", "还没问完，这一轮必须至少提出一个问题。");
-  for (const line of turn.lineProfiles ?? []) if (!identities.has(line.lineId)) reject("ONBOARDING_IDENTITY_UNKNOWN", `主线描述里的主线「${line.lineId}」不存在。`);
+  for (const line of turn.lineProfiles ?? []) {
+    if (!identities.has(line.lineId) || line.lineId === PERSON_LINE) reject("ONBOARDING_IDENTITY_UNKNOWN", `主线描述里的主线「${line.lineId}」不存在。`);
+    const problem = attributeProblem(line.attributeCandidates ?? [], citable);
+    if (problem) reject(problem.code, `主线「${line.lineId}」的定语候选：${problem.detail}`);
+  }
+  for (const edit of turn.goalEdits ?? []) {
+    if (!identities.has(edit.lineId) || edit.lineId === PERSON_LINE) reject("ONBOARDING_IDENTITY_UNKNOWN", `长期目标修改里的主线「${edit.lineId}」不存在。`);
+    // Only what the person asked for in so many words: a change the interview thought of itself is not a change they asked for.
+    if (!(edit.sourceRef in known.replies)) reject("ONBOARDING_GOAL_EDIT_UNASKED", `长期目标修改必须引用本人提出修改的那条回复（reply-N），「${edit.sourceRef}」不是。`);
+    const texts = edit.parts.map((part) => cleanAttribute(part.text)).filter(Boolean);
+    if (!texts.length) reject("ONBOARDING_GOAL_EDIT_EMPTY", `主线「${edit.lineId}」的长期目标修改没有任何定语。`);
+    const duplicate = duplicateAttributes(texts)[0];
+    if (duplicate) reject("ONBOARDING_ATTRIBUTE_DUPLICATE", `长期目标修改里「${duplicate[0]}」与「${duplicate[1]}」重复：去掉「的」和标点后一个包含另一个，只保留一个。`);
+  }
   for (const window of turn.availability?.windows ?? []) if (!/^\d{2}:\d{2}$/.test(window.start) || !/^\d{2}:\d{2}$/.test(window.end) || window.end <= window.start)
     reject("ONBOARDING_AVAILABILITY_INVALID", `可用时段 ${window.start}–${window.end} 不合法：用 HH:MM，且结束晚于开始。`);
   // A turn recorded before the portrait existed has none of it; every live answer carries all of it (strict schema).
-  return { ...turn, stage: turn.stage ?? "details", lineProfiles: turn.lineProfiles ?? [], availability: turn.availability ?? { windows: [], why: "" },
+  return { ...turn, stage: turn.stage ?? "details",
+    lineProfiles: (turn.lineProfiles ?? []).map((line) => ({ ...line, attributeCandidates: cleanCandidates(line.attributeCandidates ?? []) })),
+    goalEdits: (turn.goalEdits ?? []).map((edit) => ({ ...edit, parts: edit.parts.map((part) => ({ text: cleanAttribute(part.text), kind: kindOf(part) })).filter((part) => part.text) })),
+    availability: turn.availability ?? { windows: [], why: "" },
     profile: { ...EMPTY_PROFILE_MODEL, ...(turn.profile ?? {}) } };
+}
+
+const kindOf = (part: { text: string; kind?: string }): AttributeKind =>
+  (ATTRIBUTE_KINDS as readonly string[]).includes(part.kind ?? "") ? part.kind as AttributeKind : guessKind(part.text);
+const cleanCandidates = (list: AttributeCandidate[]) => list.map((item) => ({ text: cleanAttribute(item.text), kind: kindOf(item), sourceRef: item.sourceRef }))
+  .filter((item) => item.text);
+
+/**
+ * What is wrong with one line's attribute candidates, if anything: an empty list is allowed (it keeps the ones on record); otherwise
+ * 6–12, each cited to a reply or file, each one thing, and no two saying the same (after removing 「的」 and punctuation, one contains
+ * the other). The detail names the offending attributes so the repair has something to act on.
+ */
+function attributeProblem(list: AttributeCandidate[], citable: (ref: string) => boolean): { code: string; detail: string } | undefined {
+  if (!list.length) return undefined;
+  for (const item of list) {
+    if (!citable(item.sourceRef)) return { code: "ONBOARDING_UNKNOWN_SOURCE_REF", detail: `「${item.text}」引用了不存在的来源「${item.sourceRef}」；每个定语注明来自哪条回复（reply-N）或哪个文件（src-N）。` };
+    if (!cleanAttribute(item.text)) return { code: "ONBOARDING_ATTRIBUTE_EMPTY", detail: "有一个定语是空的。" };
+    if (notAtomic(item.text)) return { code: "ONBOARDING_ATTRIBUTE_NOT_ATOMIC", detail: `「${item.text}」含有并列，一个定语只写一件事，拆成两个。` };
+  }
+  const duplicate = duplicateAttributes(list.map((item) => cleanAttribute(item.text)))[0];
+  if (duplicate) return { code: "ONBOARDING_ATTRIBUTE_DUPLICATE", detail: `「${duplicate[0]}」与「${duplicate[1]}」重复：去掉「的」和标点后一个包含另一个，只保留一个或改成互不重叠的两个。` };
+  if (list.length < ATTRIBUTE_CANDIDATES_MIN || list.length > ATTRIBUTE_CANDIDATES_MAX) {
+    return { code: "ONBOARDING_ATTRIBUTES_COUNT", detail: `写 ${ATTRIBUTE_CANDIDATES_MIN}–${ATTRIBUTE_CANDIDATES_MAX} 个，现在是 ${list.length} 个；信息还不够时留空数组并继续追问。` };
+  }
+  return undefined;
+}
+
+/** The candidates that pass on their own (cited, one thing, not repeating an earlier one); fewer than six left means none (keep those on record). */
+function keepCandidates(list: AttributeCandidate[], citable: (ref: string) => boolean): AttributeCandidate[] {
+  const kept: AttributeCandidate[] = [];
+  for (const item of list) {
+    const text = cleanAttribute(item.text);
+    if (!text || !citable(item.sourceRef) || notAtomic(text) || duplicateAttributes([...kept.map((other) => other.text), text]).length) continue;
+    kept.push({ text, kind: kindOf(item), sourceRef: item.sourceRef });
+  }
+  return kept.length >= ATTRIBUTE_CANDIDATES_MIN ? kept.slice(0, ATTRIBUTE_CANDIDATES_MAX) : [];
 }
 
 /**
@@ -305,7 +375,10 @@ export function keepOnboardingTurn(value: unknown, known: KnownSources): Onboard
   const pruned: OnboardingTurn = { ...turn, projectsDetected: projects, slotUpdates: turn.slotUpdates.filter(factOk), questions,
     flywheelCandidates: (turn.flywheelCandidates ?? []).filter((candidate) => identities.has(candidate.fromIdentityId) && identities.has(candidate.toIdentityId)
       && candidate.fromIdentityId !== candidate.toIdentityId && candidate.evidenceRefs.every((ref) => ref === "inference" || sourceText(ref) !== undefined)),
-    lineProfiles: (turn.lineProfiles ?? []).filter((line) => identities.has(line.lineId)),
+    lineProfiles: (turn.lineProfiles ?? []).filter((line) => identities.has(line.lineId) && line.lineId !== PERSON_LINE)
+      .map((line) => ({ ...line, attributeCandidates: keepCandidates(line.attributeCandidates ?? [], (ref) => sourceText(ref) !== undefined) })),
+    goalEdits: (turn.goalEdits ?? []).filter((edit) => identities.has(edit.lineId) && edit.lineId !== PERSON_LINE && edit.sourceRef in known.replies
+      && edit.parts.some((part) => cleanAttribute(part.text)) && !duplicateAttributes(edit.parts.map((part) => cleanAttribute(part.text)).filter(Boolean)).length),
     ...(turn.availability ? { availability: { ...turn.availability, windows: turn.availability.windows.filter((window) => /^\d{2}:\d{2}$/.test(window.start)
       && /^\d{2}:\d{2}$/.test(window.end) && window.end > window.start) } } : {}) };
   try { return validateOnboardingTurn(pruned, known); } catch { return undefined; }
