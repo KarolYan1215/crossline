@@ -9,6 +9,7 @@ import { loadCurrentPlan, plannerIdOfBlock, saveMilestoneEdit, saveSchedulePrefe
 import { loadEffectiveness } from "./effectiveness";
 import { loadMilestoneBoard } from "./milestone-board";
 import { removeCrossLineArtifact } from "./artifact-relations";
+import { undoOp, withUndo } from "./undo";
 import { TEST_CTX } from "./test-support";
 
 afterEach(() => { globalThis.crosslineStore?.close(); globalThis.crosslineStore = undefined; vi.unstubAllEnvs(); });
@@ -43,6 +44,15 @@ test("approving the downstream draft (batch) approves the relation with it", () 
   const store = setup();
   expect(approveMilestoneDrafts(TEST_CTX, ["down"]).approved).toEqual(["down"]);
   expect(store.getMilestoneRelation(W, RELATION)!.status).toBe("approved");
+});
+
+test("undoing the downstream approval puts the relation back to a candidate", async () => {
+  const store = setup();
+  const result = await withUndo(TEST_CTX, "批准 1 个里程碑草稿", () => ({ ok: true as const, ...approveMilestoneDrafts(TEST_CTX, ["down"]) }));
+  expect(store.getMilestoneRelation(W, RELATION)!.status).toBe("approved");
+  expect(undoOp(TEST_CTX, result.op!.id)).toMatchObject({ ok: true });
+  expect(store.getMilestone(W, "down")!.status).toBe("draft");
+  expect(store.getMilestoneRelation(W, RELATION)!.status).toBe("candidate");
 });
 
 test("approving a single downstream milestone through its edit does the same", () => {

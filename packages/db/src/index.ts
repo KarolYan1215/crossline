@@ -418,8 +418,11 @@ function notBefore(at: string, floor: string | undefined): string {
 
 export class CrosslineStore {
   readonly #db: Database.Database;
+  /** The ledger file (`:memory:` in tests); the data directory is the folder it sits in. */
+  readonly file: string;
 
   constructor(path: string) {
+    this.file = path;
     this.#db = new Database(path);
     this.#db.pragma("journal_mode = WAL");
     this.#db.pragma("foreign_keys = ON");

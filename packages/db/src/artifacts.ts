@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   ARTIFACT_PLAN_SETTING, producedArtifacts, readArtifactPlan, usedArtifacts,
   type DerivedRelation, type RelationCheckOutcome, type StoredArtifactPlan
@@ -84,6 +84,15 @@ export function approveArtifactRelationsFor(store: CrosslineStore, workspaceId: 
   if (!ids.length) return [];
   const round = store.listEvents(workspaceId, { type: "milestone_relations.decided", entityId: ids[0]! }).length;
   return store.decideMilestoneRelations(workspaceId, ownerId, ids, "approved", `milestone_relations:with_milestone:${milestoneId}:${ids.join(",")}:${round}`).decided;
+}
+
+/** Undoing a downstream milestone's approval: the relations approved with it, not yet checked, are candidates again. */
+export function withdrawArtifactRelationsFor(store: CrosslineStore, workspaceId: string, milestoneId: string): string[] {
+  const checked = new Set(store.listEvents(workspaceId, { type: "milestone_relation.checked" }).map((event) => event.entityId));
+  const withdrawn = store.listMilestoneRelations(workspaceId).filter((relation) => relation.status === "approved" && relation.artifactId
+    && relation.toMilestoneId === milestoneId && !checked.has(relation.id));
+  for (const relation of withdrawn) store.saveMilestoneRelation({ ...relation, status: "candidate" });
+  return withdrawn.map((relation) => relation.id);
 }
 
 /**
@@ -235,8 +244,19 @@ function handOffFile(store: CrosslineStore, workspaceId: string, producer: Store
   const text = TEXT_EXTENSIONS.has(extension) ? content.toString("utf8").slice(0, 200_000) : known?.extractedText ?? "";
   // Keyed per receiving task: one file may be filed under the producer's project and under each user's, and one row has one project.
   const sha256 = createHash("sha256").update(`handoff:${user.id}:`).update(content).digest("hex");
+  const kind = kindOf(extension);
+  // Copied into the data directory's `sources` folder under its content hash, as an upload is: the 「材料」 link opens only files there,
+  // and an assistant's task folder is not one.
+  let stored = uri;
+  if (store.file !== ":memory:") {
+    const root = path.resolve(path.dirname(store.file), "sources");
+    const target = path.join(root, `${contentHash}.${{ pdf: "pdf", docx: "docx", image: "img", audio: "audio", text: "txt" }[kind]}`);
+    mkdirSync(root, { recursive: true });
+    if (!existsSync(target)) copyFileSync(file, target);
+    stored = pathToFileURL(target).href;
+  }
   return store.saveSourceDocument({ id: `handoff-${sha256.slice(0, 24)}`, ownerId: user.ownerId, workspaceId, ...(user.projectId ? { projectId: user.projectId } : {}),
-    kind: kindOf(extension), fileName: path.basename(file), mediaType: MEDIA[extension] ?? "application/octet-stream", sha256, uri,
+    kind, fileName: path.basename(file), mediaType: MEDIA[extension] ?? "application/octet-stream", sha256, uri: stored,
     extractedText: text, extractionStatus: text ? "done" : "unsupported",
     ...(text ? {} : { extractionNote: `来自「${titleOf(producer)}」的产出，未提取文本` }), createdAt: new Date().toISOString() });
 }

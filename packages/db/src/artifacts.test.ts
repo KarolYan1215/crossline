@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import Database from "better-sqlite3";
 import { afterEach, expect, test } from "vitest";
 import { byproductArtifactId, deriveArtifactRelations, type StoredArtifactPlan } from "@crossline/core";
@@ -166,6 +166,21 @@ test("delivering the producing task hands its files to the using task: filed und
   expect((store.listEvents(W, { type: "task.note", entityId: "video" })[0]!.payload as { text: string }).text).toContain("figures.md");
   // Once per (artifact, producer, user).
   expect(handOffArtifacts(store, W)).toEqual([]);
+  store.close();
+});
+
+test("a handed-off file is copied into the ledger's sources folder, where the 材料 link can open it", () => {
+  const dir = tempDir();
+  const store = new CrosslineStore(path.join(dir, "crossline.db"));
+  const outside = path.join(tempDir(), "agent-output.csv");
+  writeFileSync(outside, "a,b", "utf8");
+  store.saveWorkOrder(order({ id: "make-figs", identityId: "research", state: "ready_for_human", payload: { produces: "research-figs" } }));
+  store.saveWorkOrder(order({ id: "video", identityId: "media", payload: { uses: ["research-figs"] } }));
+  store.transitionWorkOrder(W, "make-figs", { type: "human.started" }, "start", { durationObserved: true });
+  store.transitionWorkOrder(W, "make-figs", { type: "human.completed" }, "done", { evidence: [{ kind: "file", uri: pathToFileURL(outside).href, description: "表" }] });
+  const doc = store.listSourceDocuments(W, { projectId: "media-project" })[0]!;
+  expect(path.relative(path.join(dir, "sources"), fileURLToPath(doc.uri)).startsWith("..")).toBe(false);
+  expect(doc).toMatchObject({ fileName: "agent-output.csv", extractedText: "a,b" });
   store.close();
 });
 
