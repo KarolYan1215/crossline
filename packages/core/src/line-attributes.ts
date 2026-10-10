@@ -45,12 +45,24 @@ export function cleanAttribute(text: string): string {
 export const attributeKey = (text: string) => text.replace(/的/g, "").replace(PUNCTUATION, "").toLowerCase();
 
 /** Pairs that say the same thing: after removing 「的」 and punctuation one contains the other. */
+/**
+ * The shorter key's characters all appear in order in the longer one, and it is most of it: 「外推知识边界」 inside 「外推人类知识边界」 says the
+ * same thing (a real split offered both on 2026-10-10). Keys of four characters or fewer only count when one plainly contains the other.
+ */
+function nearlyContained(a: string, b: string): boolean {
+  const [short, long] = a.length <= b.length ? [a, b] : [b, a];
+  if (short.length <= 4 || short.length / long.length < 0.6) return false;
+  let at = 0;
+  for (const char of long) if (char === short[at]) at += 1;
+  return at === short.length;
+}
+
 export function duplicateAttributes(texts: string[]): Array<[string, string]> {
   const pairs: Array<[string, string]> = [];
   for (let i = 0; i < texts.length; i += 1) {
     for (let j = i + 1; j < texts.length; j += 1) {
       const a = attributeKey(texts[i]!), b = attributeKey(texts[j]!);
-      if (a && b && (a.includes(b) || b.includes(a))) pairs.push([texts[i]!, texts[j]!]);
+      if (a && b && (a.includes(b) || b.includes(a) || nearlyContained(a, b))) pairs.push([texts[i]!, texts[j]!]);
     }
   }
   return pairs;

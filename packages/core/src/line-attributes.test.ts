@@ -21,6 +21,10 @@ test("cleaning keeps the phrase and drops what composing adds back", () => {
 test("duplicates: after removing 的 and punctuation, one contains the other", () => {
   expect(duplicateAttributes(["神经形态计算", "神经形态计算的", "器件物理"])).toEqual([["神经形态计算", "神经形态计算的"]]);
   expect(duplicateAttributes(["类脑神经形态计算", "神经形态计算"])).toHaveLength(1);
+  // The same words with a few more in between are the same attribute; short or unrelated ones are not.
+  expect(duplicateAttributes(["外推人类知识边界", "外推知识边界"])).toHaveLength(1);
+  expect(duplicateAttributes(["能独立立项", "能立项"])).toHaveLength(0);
+  expect(duplicateAttributes(["把脑机制转化为计算机制与硬件结构", "以真实技术链条和可复现证据工作"])).toHaveLength(0);
   expect(duplicateAttributes(["器件物理", "能独立立项", "持续产出"])).toEqual([]);
 });
 
