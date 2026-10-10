@@ -1,4 +1,4 @@
-import { AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, CATEGORY_LABEL, type ActivityCategory, type AgentHistorySummary } from "@crossline/core";
+import { AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, CATEGORY_LABEL, SLEEP_TRACKING_CONSENT, type ActivityCategory, type AgentHistorySummary } from "@crossline/core";
 import { categoryMode, readCategories } from "@crossline/db";
 import { SubpageShell } from "../subpage-shell";
 import { LocalActivityToggle } from "./local-activity-toggle";
@@ -73,7 +73,8 @@ export default async function SettingsPage() {
   const recentNights = energy.episodes.filter((episode) => episode.wakeAt >= fortnight);
   const energyStatus: EnergyStatus = { now: energy.predict(new Date().toISOString()),
     nights: { screen: recentNights.filter((episode) => episode.source === "screen").length, phone: recentNights.filter((episode) => episode.source !== "screen").length },
-    reports: energy.calibration.reports, agreement: energy.calibration.agreement, phoneConnected: Boolean(store.getSetting(ctx.workspaceId, HEALTH_TOKEN_SETTING)) };
+    reports: energy.calibration.reports, agreement: energy.calibration.agreement, phoneConnected: Boolean(store.getSetting(ctx.workspaceId, HEALTH_TOKEN_SETTING)),
+    sleepTracking: store.getSetting(ctx.workspaceId, SLEEP_TRACKING_CONSENT) === "granted" };
 
   return <SubpageShell active="设置" title="设置">
     <div className="st-layout">

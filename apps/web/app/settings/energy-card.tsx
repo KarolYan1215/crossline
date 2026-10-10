@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { SegmentedControl } from "../ui/controls";
 
 export type EnergyStatus = {
   /** The model's reading of now: its level, how sure, and why. */
@@ -8,6 +9,8 @@ export type EnergyStatus = {
   nights: { screen: number; phone: number };
   reports: number; agreement: number;
   phoneConnected: boolean;
+  /** 作息记录, its own consent: the start and end of long idle stretches, read as sleep. */
+  sleepTracking: boolean;
 };
 
 const LEVEL = { low: "低", medium: "中", high: "高" } as const;
@@ -20,6 +23,13 @@ const SURE = { low: "把握低，需要时询问", medium: "把握中等", high:
  */
 export function EnergyCard({ status, phoneUrl }: { status: EnergyStatus; phoneUrl: string | null }) {
   const [token, setToken] = useState("");
+  const [tracking, setTracking] = useState(status.sleepTracking);
+  const [trackingNote, setTrackingNote] = useState("");
+  const changeTracking = async (on: boolean) => {
+    setTracking(on);
+    const response = await fetch("/api/settings/sleep-tracking", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ on }) }).catch(() => undefined);
+    if (!response?.ok) { setTracking(!on); setTrackingNote("未保存，请重试"); } else setTrackingNote(on ? "已开启：从下一段长时间空闲开始记录" : "已关闭，已删除记录");
+  };
   const [note, setNote] = useState("");
   const issue = async () => {
     const response = await fetch("/api/health/token", { method: "POST" }).catch(() => undefined);
@@ -29,6 +39,10 @@ export function EnergyCard({ status, phoneUrl }: { status: EnergyStatus; phoneUr
   const endpoint = `${phoneUrl ?? "https://<本机的私有网络地址>"}/api/health/sleep`;
   return <section className="st-card" aria-label="精力">
     <header><h3>精力</h3><small>由作息推算，按本人自评校准；把握低时才询问</small></header>
+    <div className="st-row"><span className="st-row-label">作息记录<small>只记电脑 4 小时以上无活动（如夜间）的开始与结束时刻，用于推算睡眠；关闭即删除</small></span>
+      <SegmentedControl label="作息记录" value={tracking ? "on" : "off"} onChange={(next) => void changeTracking(next === "on")}
+        options={[{ value: "off", label: "关闭" }, { value: "on", label: "开启" }]} /></div>
+    {trackingNote && <p role="status" className="st-note">{trackingNote}</p>}
     <div className="st-row"><span className="st-row-label">现在<small>{SURE[status.now.confidence]}</small></span><b>{LEVEL[status.now.level]}</b></div>
     <ul className="st-list">{status.now.basis.map((line) => <li key={line}>{line}</li>)}</ul>
     <div className="st-row"><span className="st-row-label">依据<small>近 14 天</small></span>

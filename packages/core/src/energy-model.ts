@@ -10,6 +10,14 @@ import type { EnergyLevel } from "./index";
 
 export type SleepEpisode = { sleepAt: string; wakeAt: string; source: string };
 
+/**
+ * 作息记录, its own consent (decided 2026-10-10: not folded into the activity aggregate). Off unless the person turns it on; off means
+ * nothing is kept, and what was kept is deleted.
+ */
+export const SLEEP_TRACKING_CONSENT = "activity.sleepTracking";
+export const ACTIVITY_LAST_ACTIVE = "activity.lastActiveAt";
+export const ACTIVITY_LONG_GAPS = "activity.longGaps";
+
 /** Where sleep comes from: the screen's idle gaps, a phone's health record, later a ring or watch. */
 export interface EnergySource {
   id: string;

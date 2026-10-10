@@ -2,7 +2,7 @@ import "server-only";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { formatInTimeZone } from "date-fns-tz";
 import {
-  calibrate, mergeSleep, phaseShiftFromPeak, predictEnergy, sleepFromGaps, lastSleepBefore, alertness,
+  ACTIVITY_LONG_GAPS, SLEEP_TRACKING_CONSENT, calibrate, mergeSleep, phaseShiftFromPeak, predictEnergy, sleepFromGaps, lastSleepBefore, alertness,
   type AccessContext, type AvailabilityWindow, type EnergyCalibration, type EnergyLevel, type EnergyPrediction, type EnergySource, type SleepEpisode
 } from "@crossline/core";
 import { effectiveSchedulePreferences, getStore } from "./crossline";
@@ -11,13 +11,14 @@ import { effectiveSchedulePreferences, getStore } from "./crossline";
 export const HEALTH_SLEEP_SETTING = "health.sleep";
 export const HEALTH_DAILY_SETTING = "health.daily";
 export const HEALTH_TOKEN_SETTING = "health.token.sha256";
-const LONG_GAPS_SETTING = "activity.longGaps";
+const LONG_GAPS_SETTING = ACTIVITY_LONG_GAPS;
 
 const read = <T>(raw: string | undefined | null, fallback: T): T => { try { return raw ? JSON.parse(raw) as T : fallback; } catch { return fallback; } };
 
 /** The screen's long idle stretches, read as sleep (docs/one-input.md §5.1 ①). */
 function screenSource(ctx: AccessContext, hourOf: (iso: string) => number): EnergySource {
-  return { id: "screen-activity", sleep: () => sleepFromGaps(read(getStore().getSetting(ctx.workspaceId, LONG_GAPS_SETTING), [] as Array<{ from: string; to: string }>), hourOf) };
+  const on = getStore().getSetting(ctx.workspaceId, SLEEP_TRACKING_CONSENT) === "granted";
+  return { id: "screen-activity", sleep: () => on ? sleepFromGaps(read(getStore().getSetting(ctx.workspaceId, LONG_GAPS_SETTING), [] as Array<{ from: string; to: string }>), hourOf) : [] };
 }
 /** What the person's phone sent (③): sleep episodes and per-day heart-rate variability. */
 function phoneSource(ctx: AccessContext): EnergySource {

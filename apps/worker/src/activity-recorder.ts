@@ -1,5 +1,6 @@
 import { classifyWindow, isPrivateWindow, type ActivityReading, type ActivityRule } from "@crossline/core";
 import type { CrosslineStore } from "@crossline/db";
+import { ACTIVITY_LAST_ACTIVE, ACTIVITY_LONG_GAPS, SLEEP_TRACKING_CONSENT } from "@crossline/core";
 
 /** Consent v1: idle time and window changes, as daily aggregates only. Never a window title, never an app name. */
 export const LOCAL_ACTIVITY_CONSENT = "localActivity.consent";
@@ -11,8 +12,7 @@ export const ACTIVITY_BLACKLIST = "activity.blacklist";
 export const ACTIVITY_RULES = "activity.rules";
 
 /** The last active minute, and the long idle stretches (start and end only) the energy model reads sleep from. */
-export const ACTIVITY_LAST_ACTIVE = "activity.lastActiveAt";
-export const ACTIVITY_LONG_GAPS = "activity.longGaps";
+export { ACTIVITY_LAST_ACTIVE, ACTIVITY_LONG_GAPS, SLEEP_TRACKING_CONSENT } from "@crossline/core";
 const LONG_GAP_MS = 4 * 3_600_000;
 const isGap = (value: unknown): value is { from: string; to: string } =>
   typeof value === "object" && value !== null && typeof (value as { from?: unknown }).from === "string" && typeof (value as { to?: unknown }).to === "string";
@@ -45,7 +45,7 @@ export function createActivityTracker(store: CrosslineStore, listWorkspaceIds: (
 
   /**
    * The start and end of every stretch of four hours or more with no activity — the computer idle or off — and nothing else (no app,
-   * no title, no count). It is what the energy model reads sleep from when no phone record exists (docs/one-input.md §5).
+   * no title, no count), under its own consent (作息记录). It is what the energy model reads sleep from when no phone record exists.
    */
   function noteLongGap(workspaceId: string, at: string): void {
     const previous = store.getSetting(workspaceId, ACTIVITY_LAST_ACTIVE);
@@ -55,13 +55,21 @@ export function createActivityTracker(store: CrosslineStore, listWorkspaceIds: (
     }
     store.setSetting(workspaceId, ACTIVITY_LAST_ACTIVE, at);
   }
+  function forgetGaps(workspaceId: string): void {
+    if (store.getSetting(workspaceId, ACTIVITY_LAST_ACTIVE) !== undefined) store.deleteSetting(workspaceId, ACTIVITY_LAST_ACTIVE);
+    if (store.getSetting(workspaceId, ACTIVITY_LONG_GAPS) !== undefined) store.deleteSetting(workspaceId, ACTIVITY_LONG_GAPS);
+  }
 
   function handleFor(workspaceId: string, reading: ActivityReading): "skipped" | "recorded" {
+    const pausedUntil = store.getSetting(workspaceId, ACTIVITY_PAUSED_UNTIL);
+    const paused = Boolean(pausedUntil && Date.parse(pausedUntil) > Date.parse(reading.at));
+    // 作息记录 answers to its own consent only; without it nothing of it is kept (and what was is gone).
+    if (store.getSetting(workspaceId, SLEEP_TRACKING_CONSENT) === "granted") { if (!paused && reading.idleMs < IDLE_AFTER_MS) noteLongGap(workspaceId, reading.at); }
+    else forgetGaps(workspaceId);
     const detail = store.getSetting(workspaceId, ACTIVITY_DETAIL_CONSENT) === "granted";
     const aggregate = store.getSetting(workspaceId, LOCAL_ACTIVITY_CONSENT) === "granted";
     if (!detail && !aggregate) { counters.delete(workspaceId); return "skipped"; }
-    const pausedUntil = store.getSetting(workspaceId, ACTIVITY_PAUSED_UNTIL);
-    if (pausedUntil && Date.parse(pausedUntil) > Date.parse(reading.at)) return "skipped";
+    if (paused) return "skipped";
 
     const idle = reading.idleMs >= IDLE_AFTER_MS;
     const blacklist = parseList(store.getSetting(workspaceId, ACTIVITY_BLACKLIST), isString);
@@ -77,7 +85,6 @@ export function createActivityTracker(store: CrosslineStore, listWorkspaceIds: (
     if (current.last !== undefined && current.last !== signature && !idle) current.switches += 1;
     if (!idle) current.last = signature;
     current.samples += 1;
-    if (!idle) noteLongGap(workspaceId, reading.at);
     counters.set(workspaceId, current);
     // A workspace with no owner row is not a real account; there is nobody to attribute the reading to.
     const ownerId = store.getWorkspaceOwnerId(workspaceId);

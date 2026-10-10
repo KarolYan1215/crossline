@@ -72,6 +72,9 @@ test("with nights known and reports that agree, the model is sure enough for the
     return { from: date.toISOString(), to: new Date(date.getTime() + 8 * 3_600_000).toISOString() };
   });
   store.setSetting(ws, "activity.longGaps", JSON.stringify(gaps));
+  // Read only while 作息记录 is on.
+  expect(energyModel(TEST_CTX, DEFAULT_AVAILABILITY).episodes).toEqual([]);
+  store.setSetting(ws, "activity.sleepTracking", "granted");
   gaps.forEach((gap, index) => store.saveEnergyObservation({ id: `r${index}`, ownerId: TEST_CTX.principalId, workspaceId: ws, source: "self_report", level: "high",
     confidence: "medium", aggregate: {}, observedAt: new Date(Date.parse(gap.to) + 3 * 3_600_000).toISOString() }));
   const model = energyModel(TEST_CTX, DEFAULT_AVAILABILITY);

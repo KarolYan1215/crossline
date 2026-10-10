@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { CrosslineStore } from "@crossline/db";
 import type { ActivityReading } from "@crossline/core";
-import { ACTIVITY_BLACKLIST, ACTIVITY_DETAIL_CONSENT, ACTIVITY_LONG_GAPS, ACTIVITY_PAUSED_UNTIL, createActivityTracker, LOCAL_ACTIVITY_CONSENT } from "./activity-recorder";
+import { ACTIVITY_BLACKLIST, ACTIVITY_DETAIL_CONSENT, ACTIVITY_LONG_GAPS, ACTIVITY_PAUSED_UNTIL, createActivityTracker, LOCAL_ACTIVITY_CONSENT, SLEEP_TRACKING_CONSENT } from "./activity-recorder";
 import { parseReadingLine } from "./activity-source";
 
 const reading = (minute: number, app = "Code.exe", title = "x.ts - Crossline", idleMs = 1_000): ActivityReading =>
@@ -86,19 +86,30 @@ test("a reading line from the source is validated and truncated", () => {
   expect(parseReadingLine(JSON.stringify({ idleMs: 1, app: "a", title: "t".repeat(1000) }), at)?.title).toHaveLength(300);
 });
 
-test("a night away from the computer is kept as its start and end only — with consent, and nothing else about it", () => {
+test("作息记录 is its own switch: a night away is kept as its start and end only when it is on, whatever the activity consent; off deletes it", () => {
   const { store, tracker, w } = setup();
   try {
     const at = (iso: string, idleMs = 1_000): ActivityReading => ({ at: iso, idleMs, app: "Code.exe", title: "x.ts" });
+    // The activity consent alone does not record it.
+    store.setSetting(w, LOCAL_ACTIVITY_CONSENT, "granted");
     tracker.handle(at("2026-09-20T04:30:00.000Z"));
     tracker.handle(at("2026-09-20T12:10:00.000Z"));
     expect(store.getSetting(w, ACTIVITY_LONG_GAPS)).toBeUndefined();
-    store.setSetting(w, LOCAL_ACTIVITY_CONSENT, "granted");
+    // Its own consent does, even with the activity consent withdrawn.
+    store.setSetting(w, LOCAL_ACTIVITY_CONSENT, "denied");
+    store.setSetting(w, SLEEP_TRACKING_CONSENT, "granted");
     tracker.handle(at("2026-09-21T04:40:00.000Z"));
     // Idle readings during the night are not activity; the computer may also simply be off.
     tracker.handle(at("2026-09-21T07:00:00.000Z", 3_600_000));
     tracker.handle(at("2026-09-21T12:05:00.000Z"));
     tracker.handle(at("2026-09-21T12:06:00.000Z"));
     expect(JSON.parse(store.getSetting(w, ACTIVITY_LONG_GAPS)!)).toEqual([{ from: "2026-09-21T04:40:00.000Z", to: "2026-09-21T12:05:00.000Z" }]);
+    // Without the activity consent, no minutes are counted for that day.
+    expect(store.listEnergyObservations(w).map((item) => item.id)).not.toContain("local-activity:2026-09-21");
+    // Off: the next reading forgets everything it kept.
+    store.setSetting(w, SLEEP_TRACKING_CONSENT, "denied");
+    tracker.handle(at("2026-09-21T12:07:00.000Z"));
+    expect(store.getSetting(w, ACTIVITY_LONG_GAPS)).toBeUndefined();
+    expect(store.getSetting(w, "activity.lastActiveAt")).toBeUndefined();
   } finally { store.close(); }
 });
