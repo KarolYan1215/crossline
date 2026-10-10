@@ -195,7 +195,7 @@ export async function ensureOpener(ctx: AccessContext, now = new Date()): Promis
   const asks = openAsks(ctx, now);
   const md = (day: string) => `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}`;
   const lines = [
-    `${formatInTimeZone(now, effectiveSchedulePreferences(ctx).preferences.timeZone, "M 月 d 日 EEEE")}。`,
+    `${Number(today.slice(5, 7))} 月 ${Number(today.slice(8, 10))} 日 周${"日一二三四五六"[new Date(`${today}T12:00:00Z`).getUTCDay()]}。`,
     fixed.length ? `固定安排：${fixed.map((block) => `${block.start}–${block.end} ${block.title}`).join("；")}。` : "今天没有固定安排。",
     work.length ? `排给工作的时段 ${work.length} 段：${work.slice(0, 4).map((block) => `${block.start} ${block.task ?? block.title}`).join("；")}${work.length > 4 ? " 等" : ""}。` : "今天没有排给工作的时段。",
     ...(soon.length ? [`三天内截止：${soon.slice(0, 4).map((item) => `${taskTitleOf(item.order)}（${md(item.due)}）`).join("；")}。`] : []),

@@ -28,6 +28,7 @@ test("the day opens with its arrangements, its work and what is due soon, once",
   expect(await ensureOpener(TEST_CTX, NOW)).toBe(false);
   const [opener] = nudges();
   expect(opener!.card!.clarify.question).toContain("三天内截止：完成 ECE 555 作业 2（10/14）");
+  expect(opener!.card!.clarify.question.startsWith("10 月 12 日 周一。")).toBe(true);
   expect(opener!.card!.clarify.options.map((option) => option.label)).toContain("打开计划");
 });
 
