@@ -33,7 +33,7 @@ describe("the artifact plan contract", () => {
   test("a sound plan is kept as it is", () => {
     const checked = validateArtifactPlan(answer(), context());
     expect(checked.artifacts).toHaveLength(3);
-    expect(checked.supplies).toEqual([supply()]);
+    expect(checked.supplies).toEqual([{ ...supply(), toMilestone: "" }]);
     expect(checked.warnings).toEqual([]);
   });
 
@@ -50,15 +50,26 @@ describe("the artifact plan contract", () => {
   });
 
   test("a one-line run may not restate another line's artifacts or kept ids", () => {
-    const only = context({ planLines: ["media"], kept: { artifacts: [{ id: "research-figs", line: "research", kind: "论文图表", title: "MoS2 器件仿真图表", readyBy: "2026-10-25" }], supplies: [] } });
+    const only = context({ planLines: ["media"], kept: { artifacts: [{ id: "research-figs", line: "research", kind: "论文图表", title: "MoS2 器件仿真图表", readyBy: "2026-10-25" }], supplies: [] },
+      milestones: [{ id: "r-paper", line: "research", projectId: "p", title: "论文投出", status: "approved", deadline: "2026-12-01", outputs: [], inputs: [] }] });
     expect(codeOf(() => validateArtifactPlan(answer(), only))).toBe("ARTIFACT_LINE_NOT_PLANNED");
     const media = { artifacts: [{ id: "media-notes", line: "media", kind: "读者反馈", title: "评论区问题汇总", readyBy: "2026-11-05" }],
-      supplies: [supply(), supply({ from: "media-notes", toLine: "research", use: "选下一个仿真问题的依据", hoursSaved: 2 })] };
+      supplies: [supply(), supply({ from: "media-notes", toLine: "research", toMilestone: "r-paper", use: "选下一个仿真问题的依据", hoursSaved: 2 })] };
     // A pair from a kept (other line's) artifact into the redone line is fine; so is one out of it.
     expect(validateArtifactPlan(answer(media), only).supplies).toHaveLength(2);
     const withKept = { ...only, kept: { ...only.kept, artifacts: [...only.kept.artifacts, { id: "media-old", line: "media", kind: "x", title: "已被采用的产物", readyBy: "2026-11-01" }] } };
     expect(codeOf(() => validateArtifactPlan(answer({ ...media, artifacts: [...media.artifacts, { id: "media-old", line: "media", kind: "x", title: "重复的产物", readyBy: "2026-11-01" }] }), withKept)))
       .toBe("ARTIFACT_ID_DUPLICATE");
+  });
+
+  test("a pair into a line not redesigned this run must name the existing milestone that uses it", () => {
+    const only = context({ planLines: ["media"], kept: { artifacts: [], supplies: [] },
+      milestones: [{ id: "r-paper", line: "research", projectId: "p", title: "论文投出", status: "approved", deadline: "2026-12-01", outputs: [], inputs: [] }] });
+    const media = { artifacts: [{ id: "media-notes", line: "media", kind: "读者反馈", title: "评论区问题汇总", readyBy: "2026-11-05" }] };
+    const pair = (over: Partial<SupplyPair>) => answer({ ...media, supplies: [supply({ from: "media-notes", toLine: "research", hoursSaved: 2, ...over })] });
+    expect(codeOf(() => validateArtifactPlan(pair({}), only))).toBe("SUPPLY_TARGET_MISSING");
+    expect(codeOf(() => validateArtifactPlan(pair({ toMilestone: "nope" }), only))).toBe("SUPPLY_TARGET_UNKNOWN");
+    expect(validateArtifactPlan(pair({ toMilestone: "r-paper" }), only).supplies[0]!.toMilestone).toBe("r-paper");
   });
 
   test("at most two outgoing edges per line: the rest are dropped by hours saved, then by expected transfer", () => {
@@ -108,6 +119,18 @@ describe("relations are derived from references", () => {
       artifactId: "research-figs", checkOn: "2026-11-01", counterfactual: supply().counterfactual,
       transfer: { metric: "图表", expected: 3, unit: "张", hoursSaved: 6, lagDays: 3, measured: null } })]);
     expect(relations[0]!.explanation).toContain("科研的「MoS2 器件仿真图表」");
+  });
+
+  test("redoing one line: a pair naming the receiving line's existing (approved) milestone derives the relation without that milestone citing it", () => {
+    const named = { ...plan, supplies: [supply({ toMilestone: "m1" })] };
+    const { relations } = deriveArtifactRelations([milestone("r1", "research", "2026-10-20", { outputs: ["research-figs"] }),
+      milestone("m1", "media", "2026-11-01", {}, "approved"), milestone("m0", "media", "2026-10-30", {}, "approved")], named);
+    expect(relations.map((relation) => relation.id)).toEqual(["artifact:research-figs:r1->m1"]);
+    // And it is kept when the receiving line is redone later, because it points at an approved milestone.
+    const kept = keptArtifactPlan({ ...named, artifacts: plan.artifacts }, [milestone("m1", "media", "2026-11-01", {}, "approved")], ["research"]);
+    expect(kept.supplies).toEqual([]);
+    expect(keptArtifactPlan({ ...named, artifacts: plan.artifacts }, [milestone("m1", "media", "2026-11-01", {}, "approved"),
+      milestone("r1", "research", "2026-10-20", { outputs: ["research-figs"] }, "approved")], ["research"]).supplies).toHaveLength(1);
   });
 
   test("no reference, no relation; a producer too late is refused rather than drawn", () => {

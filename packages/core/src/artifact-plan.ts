@@ -29,9 +29,14 @@ export type ArtifactNeed = { line: string; input: string; why: string };
 export type ArtifactTransfer = { metric: string; expected: number; unit: string };
 /**
  * One artifact handed from its line to another. `hoursSaved` is the counterfactual in hours — what the downstream line would spend
- * without it (0 when what it would lack is not time); `counterfactual` says it in words.
+ * without it (0 when what it would lack is not time); `counterfactual` says it in words. `toMilestone` names the receiving line's existing
+ * milestone that uses it, required when that line is not being redesigned in the same run (redoing one line: the receiving line keeps its
+ * milestones, and an approved one cannot be edited to cite the artifact) — without it a one-line redo derived no relation at all and the
+ * line's cross-line links vanished (replay on the real ledger, 2026-10-10). "" when the receiving line is designed in this run and will
+ * cite it in `inputs`.
  */
-export type SupplyPair = { from: string; toLine: string; use: string; transfer: ArtifactTransfer; lagDays: number; counterfactual: string; hoursSaved: number };
+export type SupplyPair = { from: string; toLine: string; toMilestone?: string; use: string; transfer: ArtifactTransfer; lagDays: number;
+  counterfactual: string; hoursSaved: number };
 export type ArtifactPlanAnswer = { artifacts: Artifact[]; needs: ArtifactNeed[]; supplies: SupplyPair[]; assumptions: string[];
   blockers: Array<{ code: string; message: string }> };
 /** What is kept in the ledger (setting `ARTIFACT_PLAN_SETTING`) between runs. */
@@ -63,7 +68,7 @@ export const ARTIFACT_PLAN_SCHEMA = object({
   artifacts: list(object({ id: str(64), line: str(64), kind: str(40), title: str(120), readyBy: str(10) }), 24),
   needs: list(object({ line: str(64), input: str(160), why: str(300) }), 24),
   supplies: list(object({
-    from: str(64), toLine: str(64), use: str(200),
+    from: str(64), toLine: str(64), toMilestone: { type: "string", maxLength: 80 }, use: str(200),
     transfer: object({ metric: str(40), expected: { type: "number" }, unit: str(20) }),
     lagDays: { type: "integer", minimum: 0, maximum: MAX_LAG_DAYS },
     counterfactual: str(300), hoursSaved: { type: "number", minimum: 0 }
@@ -175,6 +180,15 @@ export function validateArtifactPlan(value: unknown, context: ArtifactPlanContex
     if (!planned.has(artifact.line) && !planned.has(pair.toLine)) {
       refuse("SUPPLY_OUTSIDE_PLAN", `${label} 与这次规划的主线（${context.planLines.join("、")}）无关，保持原样，不要重复列出。`);
     }
+    const target = (pair.toMilestone ?? "").trim();
+    const choices = () => context.milestones.filter((milestone) => milestone.line === pair.toLine).map((milestone) => `${milestone.id}（${milestone.title}）`).join("、") || "（无）";
+    if (target) {
+      const milestone = context.milestones.find((item) => item.id === target);
+      if (!milestone || milestone.line !== pair.toLine) refuse("SUPPLY_TARGET_UNKNOWN", `${label} 的 toMilestone「${target}」不是「${pair.toLine}」进行中的里程碑；可选：${choices()}。`);
+    } else if (!planned.has(pair.toLine)) {
+      refuse("SUPPLY_TARGET_MISSING", `${label}：「${pair.toLine}」这次不重新设计，toMilestone 要写明它的哪个进行中里程碑使用这份产物；可选：${choices()}。`);
+    }
+    pair.toMilestone = target;
     if (typeof pair.transfer?.expected !== "number" || !Number.isFinite(pair.transfer.expected) || pair.transfer.expected <= 0) {
       refuse("SUPPLY_TRANSFER_NOT_NUMERIC", `${label} 的 transfer.expected 要是大于 0 的数字（如复用 3 张图表就写 3），到核对日按它核对。`);
     }
@@ -216,6 +230,7 @@ type MilestoneRefs = { id: string; line: string; status: string; outputs: string
 export function keptArtifactPlan(plan: StoredArtifactPlan, milestones: MilestoneRefs[], planLines: string[]): StoredArtifactPlan {
   const planned = new Set(planLines);
   const approved = milestones.filter((milestone) => milestone.status === "approved");
+  const approvedIds = new Set(approved.map((milestone) => milestone.id));
   const producedByApproved = new Set(approved.flatMap((milestone) => milestone.outputs));
   const usedByApproved = new Set(approved.flatMap((milestone) => milestone.inputs.map((input) => `${input}>${milestone.line}`)));
   const usedAnywhere = new Set(approved.flatMap((milestone) => milestone.inputs));
@@ -227,7 +242,7 @@ export function keptArtifactPlan(plan: StoredArtifactPlan, milestones: Milestone
     if (!from || !keptIds.has(pair.from)) return false;
     if (!planned.has(from) && !planned.has(pair.toLine)) return true;
     // It points at an approved milestone: one that produces its artifact, or one in the receiving line that uses it.
-    return producedByApproved.has(pair.from) || usedByApproved.has(`${pair.from}>${pair.toLine}`);
+    return producedByApproved.has(pair.from) || usedByApproved.has(`${pair.from}>${pair.toLine}`) || approvedIds.has(pair.toMilestone ?? "");
   });
   return { version: 1, updatedAt: plan.updatedAt, artifacts, needs: plan.needs.filter((need) => !planned.has(need.line)), supplies };
 }
@@ -288,7 +303,7 @@ export function deriveArtifactRelations(milestones: ArtifactMilestone[], plan: P
     if (!artifact || artifact.line === pair.toLine) continue;
     const feedback = isFeedbackPair(plan, artifact.line, pair.toLine);
     const producers = milestones.filter((milestone) => milestone.line === artifact.line && milestone.outputs.includes(artifact.id));
-    const consumers = milestones.filter((milestone) => milestone.line === pair.toLine && milestone.inputs.includes(artifact.id));
+    const consumers = milestones.filter((milestone) => milestone.line === pair.toLine && (milestone.inputs.includes(artifact.id) || milestone.id === pair.toMilestone));
     for (const consumer of consumers) {
       const inTime = producers.filter((producer) => producer.line !== consumer.line && !timeOrderProblem(producer.deadline, consumer.deadline, pair.lagDays, feedback))
         .sort((a, b) => (b.deadline ?? "").localeCompare(a.deadline ?? ""));
@@ -359,7 +374,7 @@ export function lineArtifacts(plan: Pick<StoredArtifactPlan, "artifacts" | "supp
     producedBy: milestones.filter((milestone) => milestone.line === line && milestone.status === "approved" && milestone.outputs.includes(artifact.id)).map((milestone) => milestone.id),
     suppliedTo: plan.supplies.filter((pair) => pair.from === artifact.id).map((pair) => ({ line: pair.toLine, lineLabel: label(pair.toLine), use: pair.use,
       transfer: pair.transfer, lagDays: pair.lagDays, feedback: isFeedbackPair(plan, line, pair.toLine),
-      consumers: ends((milestone) => milestone.line === pair.toLine && milestone.inputs.includes(artifact.id)) }))
+      consumers: ends((milestone) => milestone.line === pair.toLine && (milestone.inputs.includes(artifact.id) || milestone.id === pair.toMilestone)) }))
   }));
   const consume = plan.supplies.filter((pair) => pair.toLine === line && artifacts.get(pair.from) && artifacts.get(pair.from)!.line !== line).map((pair) => {
     const artifact = artifacts.get(pair.from)!;
