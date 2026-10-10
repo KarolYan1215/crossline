@@ -27,3 +27,15 @@ test("without the runtime the text is kept as one capture", async () => {
   expect(routed).toMatchObject({ routed: false, items: [{ kind: "capture", title: "把复习挪到周五" }] });
   store.close();
 });
+
+test("every kind the router's instructions ask for can be returned under the schema, and the validator keeps each", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { INPUT_ROUTE_SCHEMA } = await import("@crossline/core");
+  const skill = readFileSync(new URL("../../../skills/marketplace/plugins/crossline/skills/crossline-input-router/SKILL.md", import.meta.url), "utf8");
+  const asked = new Set([...skill.matchAll(/kind: "([a-z]+)"/g)].map((match) => match[1]!));
+  const schema = INPUT_ROUTE_SCHEMA as unknown as { properties: { items: { items: { properties: { kind: { enum: string[] } } } } } };
+  const allowed = schema.properties.items.items.properties.kind.enum;
+  // The instructions named `event` and `profile` while the schema left them out: strict decoding could never return either.
+  expect([...asked].filter((kind) => !allowed.includes(kind))).toEqual([]);
+  expect(asked.has("event") && asked.has("profile")).toBe(true);
+});

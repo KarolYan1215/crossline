@@ -33,7 +33,7 @@ export type RoutedInput = { items: RoutedItem[] };
 const str = { type: "string" };
 const object = (properties: Record<string, unknown>) => ({ type: "object", properties, required: Object.keys(properties), additionalProperties: false });
 export const INPUT_ROUTE_SCHEMA = object({ items: { type: "array", items: object({
-  kind: { type: "string", enum: ["capture", "schedule", "undo", "goal", "milestone", "line", "record", "question"] }, title: str, context: str, workOrderId: str,
+  kind: { type: "string", enum: ["capture", "schedule", "undo", "goal", "milestone", "line", "record", "question", "event", "profile"] satisfies RoutedKind[] }, title: str, context: str, workOrderId: str,
   change: object({ type: { type: "string", enum: ["due", "estimate", "defer", "none"] }, date: str, minutes: { type: "number" } }), summary: str, opId: str,
   lineId: str, date: str, energy: { type: "string", enum: ["low", "medium", "high", ""] },
   weekdays: { type: "array", items: { type: "integer", minimum: 0, maximum: 6 }, maxItems: 7 }, startTime: str, endTime: str, until: str, minutes: { type: "number" }
