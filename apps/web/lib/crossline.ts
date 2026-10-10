@@ -1744,7 +1744,8 @@ const toAction = (ctx: AccessContext, order: ActionableOrder | undefined, reason
   estimate: resolvedEstimate(ctx, order),
   ...(humanCoreOf(order)?.energy ? { energy: humanCoreOf(order)!.energy as "low" | "medium" | "high" } : {}),
   reason,
-  milestone: getStore().listMilestones(ctx.workspaceId).find((item) => item.id === order.milestoneId)?.title ?? "等待确认",
+  // An unbound task (analysed before any milestone existed, or serving none) is not waiting for anything; it says so.
+  milestone: getStore().listMilestones(ctx.workspaceId).find((item) => item.id === order.milestoneId)?.title ?? "未挂里程碑",
   inputsReady: inputsReady(order)
 }) : undefined;
 

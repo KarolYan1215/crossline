@@ -41,11 +41,9 @@ export const ACTION_HANDLERS: { [K in ActionId]: Handler<K> } = {
     const id = randomUUID();
     addCapturedTaskWithId(ctx, { title: args.title.trim().slice(0, 240), context: [args.context.trim(), hints].filter(Boolean).join("\n").slice(0, 500) }, id, id);
     analyzeNewCapturesInBackground(ctx);
-    // Analysis runs only once some milestone is approved (it files the task under one); before that the card used to say it was being
-    // analysed while nothing would happen — a new account's first task sat as 「已收集」 with that promise on it (2026-10-10).
-    const approved = getStore().listMilestones(ctx.workspaceId).some((item) => item.status === "approved");
-    return approved ? { ok: true, message: "已收集，正在分析估时与步骤", href: "/workbench" }
-      : { ok: true, message: "已收集；批准一个里程碑后才会分析估时与步骤并排进日程", href: "/milestones" };
+    // No approved milestone is needed any more: the analysis files the task under its line unbound, so a new account's first task is
+    // analysed and scheduled on its first day.
+    return { ok: true, message: "已收集，正在分析估时与步骤", href: "/workbench" };
   },
   // The note is the conversation's own message, searchable from the box; nothing else is written.
   "note.add": () => ({ ok: true, message: "已记下，可在对话记录中搜索" }),

@@ -140,7 +140,7 @@ test("a Skill that stops and says why is not coaxed into guessing: its blocker i
   expect(store.listWorkOrders("personal-crossline")).toEqual([]);
 });
 
-test("the tick analyses a fresh capture on its own, but only with an approved milestone and never one already attempted", async () => {
+test("the tick analyses a fresh capture on its own, and never one already attempted", async () => {
   // beforeEach seeds capture "c" and an approved milestone "m".
   expect(analysis.capturesAwaitingAutoAnalysis(store, "personal-crossline")).toEqual(["c"]);
   store.capture({ id: "d", ownerId: "local-owner", workspaceId: "personal-crossline", title: "Other", context: "" }, "capture:d");
@@ -151,9 +151,19 @@ test("the tick analyses a fresh capture on its own, but only with an approved mi
   await analysis.createCaptureAnalyzer(store, "personal-crossline", "C:\repo")(rpc, "c");
   expect(analysis.capturesAwaitingAutoAnalysis(store, "personal-crossline")).toEqual(["d"]);
 
-  // No approved milestone, nothing to analyse against: no attempt, so no blocker the person cannot act on.
+  // No approved milestone is no reason to wait: a new account's first capture is analysed on its first day (Motion's 2–4 weeks
+  // before anything useful is what this avoids), filed under its line with no milestone, the way a GTD next action has no project.
   store.saveMilestone({ id: "m", ownerId: "local-owner", workspaceId: "personal-crossline", identityId: "research", projectId: "p", title: "Decide", version: 2, status: "archived" });
-  expect(analysis.capturesAwaitingAutoAnalysis(store, "personal-crossline")).toEqual([]);
+  expect(analysis.capturesAwaitingAutoAnalysis(store, "personal-crossline")).toEqual(["d"]);
+});
+
+test("with no approved milestone at all the capture is still analysed, offered every line, and lands unbound", async () => {
+  store.saveMilestone({ id: "m", ownerId: "local-owner", workspaceId: "personal-crossline", identityId: "research", projectId: "p", title: "Decide", version: 2, status: "draft" });
+  const { rpc, prompts } = fakeRuntime([JSON.stringify({ ...proposal, milestoneId: "" })]);
+  const result = await analysis.createCaptureAnalyzer(store, "personal-crossline", "C:\repo")(rpc, "c");
+  expect(result.state).toBe("awaiting_plan_approval");
+  expect(store.listWorkOrders("personal-crossline")[0]).toMatchObject({ identityId: "research", milestoneId: "" });
+  for (const line of ["research", "startup", "media", "investment"]) expect(prompts()[0]).toContain(line);
 });
 
 test("an identity that is not one of the lines is sent back with the valid ones, not stored (a real capture was filed under 「\」)", async () => {
@@ -167,18 +177,15 @@ test("an identity that is not one of the lines is sent back with the valid ones,
   expect(store.listWorkOrders("personal-crossline")[0]).toMatchObject({ identityId: "research" });
 });
 
-test("a capture blocked only for want of an approved milestone is picked up again once one exists, and the message says what to do", async () => {
-  store.saveMilestone({ id: "m", ownerId: "local-owner", workspaceId: "personal-crossline", identityId: "research", projectId: "p", title: "Decide", version: 2, status: "draft" });
-  const { rpc } = fakeRuntime([JSON.stringify(proposal)]);
-  const blocked = await analysis.createCaptureAnalyzer(store, "personal-crossline", "C:\repo")(rpc, "c");
-  expect(blocked.audit.blocker).toMatchObject({ code: "ANALYSIS_APPROVED_MILESTONE_REQUIRED" });
-  expect(blocked.audit.blocker?.message).toContain("主线");
-  expect(blocked.audit.blocker?.message).not.toContain("分析被阻塞");
-  // Nothing to bind to yet, so the tick leaves it alone …
-  expect(analysis.capturesAwaitingAutoAnalysis(store, "personal-crossline")).toEqual([]);
-  // … and once the milestone is approved it is on the list again without anyone pressing anything.
-  store.saveMilestone({ id: "m", ownerId: "local-owner", workspaceId: "personal-crossline", identityId: "research", projectId: "p", title: "Decide", version: 3, status: "approved" });
-  expect(analysis.capturesAwaitingAutoAnalysis(store, "personal-crossline")).toEqual(["c"]);
+test("a capture an older version blocked for want of an approved milestone is picked up again by itself and analysed", async () => {
+  const ws = "personal-crossline";
+  store.saveMilestone({ id: "m", ownerId: "local-owner", workspaceId: ws, identityId: "research", projectId: "p", title: "Decide", version: 2, status: "draft" });
+  store.transitionWorkOrder(ws, "c", { type: "analysis.proposed", proposalId: "c" }, "analysis:c:0:start", { attempt: 0 });
+  store.transitionWorkOrder(ws, "c", { type: "blocked", reason: "ANALYSIS_APPROVED_MILESTONE_REQUIRED" }, "analysis:c:0:finish",
+    { audit: { blocker: { code: "ANALYSIS_APPROVED_MILESTONE_REQUIRED", message: "旧版本的阻塞" } } });
+  expect(analysis.capturesAwaitingAutoAnalysis(store, ws)).toEqual(["c"]);
+  const { rpc } = fakeRuntime([JSON.stringify({ ...proposal, milestoneId: "" })]);
+  expect((await analysis.createCaptureAnalyzer(store, ws, "C:\\repo")(rpc, "c")).state).toBe("awaiting_plan_approval");
 });
 
 test("files the person already uploaded reach the analysis as supplied material, so it does not ask for them again", () => {

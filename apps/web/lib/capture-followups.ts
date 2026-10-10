@@ -15,8 +15,8 @@ export function extractBackgroundFactsInBackground(ctx: AccessContext, captureTi
 }
 
 // Also fire-and-forget: the worker classifies new captures on its own tick, but that is up to fifteen minutes away, and the person who
-// just wrote something down is looking at it now. The worker applies the same rules as its tick (an approved milestone, quota in
-// the normal range), so asking early changes when it happens, never whether it is allowed.
+// just wrote something down is looking at it now. The worker applies the same rules as its tick (a line to file it under, quota
+// not spent), so asking early changes when it happens, never whether it is allowed.
 // A few seconds late on purpose: the form uploads attachments in a second request after this one, and the analysis names them.
 const ATTACHMENT_GRACE_MS = 5_000;
 export function analyzeNewCapturesInBackground(ctx: AccessContext): void {

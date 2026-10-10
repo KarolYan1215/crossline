@@ -149,7 +149,7 @@ const V1_CONTEXT = object({ version: choice("crossline.analysis.v1"), ...sharedC
 const V2_CONTEXT = object({ version: choice("crossline.analysis.v2"), ...sharedContext,
   today: str,
   approvedMilestones: array(object({ id: str, projectId: str, identityId: str, title: str, version: { type: "integer", minimum: 1 }, hasSuccessCriteria: bool,
-    deadline: { type: "string", minLength: 0, maxLength: 20 } }), 1),
+    deadline: { type: "string", minLength: 0, maxLength: 20 } }), 0),
   referenceClass: array(object({ identityId: str, family, title: str, llmP50Minutes: number, actualMinutes: number }), 0, 5),
   relations: array(object({ fromMilestoneId: str, toMilestoneId: str, kind: str, explanation: { type: "string", minLength: 0, maxLength: 4000 } }), 0, 40),
   personalPreferences: array(str, 0, 30) });

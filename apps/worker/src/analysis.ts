@@ -85,13 +85,13 @@ export function createCaptureAnalyzer(store: CrosslineStore, workspaceId: string
     const claimed = store.transitionWorkOrder(workspaceId, id, { type: "analysis.proposed", proposalId: id }, `analysis:${id}:${attempt}:start`, { attempt });
     if (!claimed.changed) return outcome(id);
     try {
-      const milestones = store.listMilestones(workspaceId).filter((m) => m.status === "approved" && m.projectId);
-      if (!milestones.length) throw new Error("ANALYSIS_APPROVED_MILESTONE_REQUIRED");
-      // Every identity that has an approved milestone is offered; choosing between them is the Skill's
-      // job, because an app-side pick would be exactly the silent guess this design removed.
-      const identities = new Set(milestones.map((m) => m.identityId));
-      const packs = identityLines(store, workspaceId).filter((p) => identities.has(p.id));
-      if (packs.length !== identities.size) throw new Error("ANALYSIS_IDENTITY_CONTEXT_REQUIRED");
+      // Every line is offered, with or without an approved milestone: choosing between them is the Skill's job, and work that
+      // serves no milestone yet is filed under its line unbound (an empty milestoneId), not held until a milestone is approved —
+      // that hold made a new account's first day a dead end. Approved milestones are offered for binding when they exist.
+      const packs = identityLines(store, workspaceId);
+      if (!packs.length) throw new Error("ANALYSIS_IDENTITY_CONTEXT_REQUIRED");
+      const lines = new Set(packs.map((p) => p.id));
+      const milestones = store.listMilestones(workspaceId).filter((m) => m.status === "approved" && m.projectId && lines.has(m.identityId));
       const deadlines = new Map(store.listMilestoneAnchors(workspaceId).map((anchor) => [anchor.milestoneId, anchor.deadline]));
       const context = validateAnalysisContext({
         version: ANALYSIS_CONTEXT_VERSION, today: localToday(store, workspaceId), capture: { title: capture.title, context: capture.context },
@@ -153,23 +153,22 @@ export function createCaptureAnalyzer(store: CrosslineStore, workspaceId: string
  * captured on purpose with no idea that approving a milestone was the whole fix.
  */
 const BLOCKER_ADVICE: Record<string, string> = {
-  ANALYSIS_APPROVED_MILESTONE_REQUIRED: "还没有已批准的里程碑。先到「主线」批准至少一个里程碑草稿，分析才有地方挂这件事；批准之后系统会自动重新分析这条。",
-  ANALYSIS_IDENTITY_CONTEXT_REQUIRED: "已批准的里程碑所属的主线没有对应的身份包，分析无法进行；请检查主线设置。"
+  // No longer raised; kept so a capture an older version blocked this way still reads sensibly until the tick re-picks it.
+  ANALYSIS_APPROVED_MILESTONE_REQUIRED: "还没有已批准的里程碑。系统会自动重新分析这条。",
+  ANALYSIS_IDENTITY_CONTEXT_REQUIRED: "还没有主线：先完成访谈，或在「主线」新增一条。"
 };
 
 /**
- * Captures the background tick should analyse on its own: never analysed (`attempt` 0, still `captured`), and only while
- * the workspace has an approved milestone for the analysis to bind to — without one the Skill would be refused anyway, and
- * a blocker written on every fresh capture would say nothing the person can act on yet.
+ * Captures the background tick should analyse on its own: never analysed (`attempt` 0, still `captured`). An approved milestone
+ * is not required (an unbound analysis files the work under its line), so a new account's captures are analysed on day one.
  *
  * A capture that was analysed and blocked is deliberately NOT here: that one waits for the person (add context, press
  * re-analyse). Retrying it on a timer would spend quota to fail the same way every fifteen minutes.
  */
 export function capturesAwaitingAutoAnalysis(store: CrosslineStore, workspaceId: string, limit = 3): string[] {
-  if (!store.listMilestones(workspaceId).some((milestone) => milestone.status === "approved")) return [];
+  if (!identityLines(store, workspaceId).length) return [];
   return store.listCaptures(workspaceId)
-    // Also a capture that was blocked only for want of an approved milestone: the cause is gone, so waiting for a click would be
-    // making the person do what the system already knows how to do.
+    // Also a capture an older version blocked for want of an approved milestone: that requirement is gone, so it is re-picked.
     .filter((capture) => (capture.state === "captured" && capture.attempt === 0)
       || (capture.state === "blocked" && capture.audit.blocker?.code === "ANALYSIS_APPROVED_MILESTONE_REQUIRED"))
     .slice(0, limit).map((capture) => capture.id);
