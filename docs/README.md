@@ -12,6 +12,7 @@
 | [copy-style.md](copy-style.md) | 界面与 prompt 的固定术语、文案规范和每阶段的审查标准（A 摩擦与可用 · B 阅读负担 · C 语言 · D 视觉） |
 | [one-input.md](one-input.md) | 首页一个输入框：对话、命令、理解卡、动作注册表、主动气泡与精力模型（设计稿，待审） |
 | [flywheel-and-views.md](flywheel-and-views.md) | 跨主线飞轮（产物优先的联合规划）、今日页图谱与左侧面板、计划页统计、原子化身份定语（已审定） |
+| [review-2026-10-10.md](review-2026-10-10.md) | 系统评审：真实账本两周数据、临时账号走查、竞品对标，问题清单（P0/P1/P2）与已修复项、八个重点问题的回答 |
 | [model-providers.md](model-providers.md) | 接入本人自己的 Codex 与其他 API 模型：现有耦合清单、接口设计、分阶段与风险（设计稿，待审） |
 | [assistant-agent.md](assistant-agent.md) | 带 shell 的助手：设计、守卫、信任与审阅流程 |
 | [structured-output.md](structured-output.md) | 模型的结构化输出怎么约束、怎么校验、怎么修正，出问题怎么查，现有的实测数据 |
