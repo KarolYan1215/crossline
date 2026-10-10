@@ -38,7 +38,7 @@ import { extractText, reextractForLayout } from "./extract";
 import { createTranscriber, createWhisperEngine, modelsDirectory } from "./transcribe";
 import { createBackgroundFactsExtractor } from "./background-facts-runner";
 import { createGraphSync, type SyncOutcome } from "./graph-sync";
-import { ownerOf } from "./owner";
+import { monthSpend, ownerOf, runtimeOwner, runtimesDir } from "./owner";
 import { createBackgroundSpend } from "./spend";
 import {
   buildSources, calendarLabel, listCatalogue, readSelection, saveSelection, seedNewAccounts, sourceKey, mayUseGraphLogin, withdrawForeignCalendar } from "./calendar-sources";
@@ -102,9 +102,12 @@ async function autoAnalyzePass(workspaceId: string, checkedAt = new Date().toISO
     const ids = capturesAwaitingAutoAnalysis(analysisStore, workspaceId);
     if (!ids.length) return;
     if (!spendAllows(await spendFor(workspaceId), "core")) return;
+    // Started by the quota read just above when it is the account's own runtime; none means not connected, and that was just recorded.
+    const client = codexSupervisor.clientFor(workspaceId);
+    if (!client) return;
     enterUsageWorkspace(workspaceId);
     for (const id of ids) {
-      const outcome = await getCaptureAnalyzer(workspaceId)(codexSupervisor.client, id).catch(() => undefined);
+      const outcome = await getCaptureAnalyzer(workspaceId)(client, id).catch(() => undefined);
       if (outcome) console.info(JSON.stringify({ type: `analysis.auto.${outcome.state}`, checkedAt, workspaceId, captureId: id }));
     }
   } finally { autoAnalyzing.delete(workspaceId); }
@@ -123,7 +126,7 @@ async function autoBackplanPass(workspaceId: string, checkedAt = new Date().toIS
     if (!ids.length) return;
     if (!spendAllows(await spendFor(workspaceId), "core")) return;
     enterUsageWorkspace(workspaceId);
-    const backplan = createGoalBackplanner(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client, { rolling: true });
+    const backplan = createGoalBackplanner(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId), { rolling: true });
     for (const id of ids) {
       const outcome = await backplan(id).catch(() => undefined);
       if (outcome) console.info(JSON.stringify({ type: `backplan.auto.${outcome.state}`, checkedAt, workspaceId, milestoneId: id }));
@@ -146,7 +149,7 @@ async function curatorPass(workspaceId: string, checkedAt: string): Promise<void
   curating.add(workspaceId);
   try {
     enterUsageWorkspace(workspaceId);
-    const outcome = await createArchetypeCurator(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client)().catch(() => undefined);
+    const outcome = await createArchetypeCurator(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))().catch(() => undefined);
     if (outcome) console.info(JSON.stringify({ type: "archetypes.curated", checkedAt, workspaceId, added: outcome.added.length, dropped: outcome.dropped.length }));
   } finally { curating.delete(workspaceId); }
 }
@@ -159,7 +162,7 @@ async function titlePass(workspaceId: string, checkedAt: string): Promise<void> 
   titling.add(workspaceId);
   try {
     enterUsageWorkspace(workspaceId);
-    const outcome = await createTaskTitler(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client)().catch(() => undefined);
+    const outcome = await createTaskTitler(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))().catch(() => undefined);
     if (outcome) console.info(JSON.stringify({ type: "tasks.titled", checkedAt, workspaceId, ...outcome }));
   } finally { titling.delete(workspaceId); }
 }
@@ -172,7 +175,7 @@ async function calendarLinePass(workspaceId: string, checkedAt: string): Promise
   filingCalendar.add(workspaceId);
   try {
     enterUsageWorkspace(workspaceId);
-    const outcome = await createCalendarClassifier(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client)().catch(() => undefined);
+    const outcome = await createCalendarClassifier(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))().catch(() => undefined);
     if (outcome) console.info(JSON.stringify({ type: "calendar.lines_filed", checkedAt, workspaceId, ...outcome }));
   } finally { filingCalendar.delete(workspaceId); }
 }
@@ -189,7 +192,7 @@ async function goalSplitPass(workspaceId: string, checkedAt = new Date().toISOSt
   splittingGoals.add(workspaceId);
   try {
     enterUsageWorkspace(workspaceId);
-    const outcome = await createGoalSplitter(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client)().catch(() => undefined);
+    const outcome = await createGoalSplitter(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))().catch(() => undefined);
     if (outcome) console.info(JSON.stringify({ type: "lines.goals_split", checkedAt, workspaceId, ...outcome }));
   } finally { splittingGoals.delete(workspaceId); }
 }
@@ -211,12 +214,12 @@ async function stepPlanPass(workspaceId: string, checkedAt = new Date().toISOStr
     if (!spendAllows(await spendFor(workspaceId), "core")) return;
     enterUsageWorkspace(workspaceId);
     // A report the person just wrote comes first: they are waiting to see the rings move.
-    const judge = createProgressJudge(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client);
+    const judge = createProgressJudge(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId));
     for (const report of reports) {
       const assessment = await judge(report).catch(() => undefined);
       if (assessment) console.info(JSON.stringify({ type: "progress.judged", checkedAt, workspaceId, workOrderId: report.workOrderId }));
     }
-    const planner = createStepPlanner(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client);
+    const planner = createStepPlanner(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId));
     for (const id of ids) {
       // A replan the person (or the assistant) asked for carries what to change.
       const request = analysisStore.listEvents(workspaceId, { type: "task.steps_replan_requested", entityId: id }).at(-1)?.payload as { feedback?: string } | undefined;
@@ -224,9 +227,9 @@ async function stepPlanPass(workspaceId: string, checkedAt = new Date().toISOStr
       if (outcome) console.info(JSON.stringify({ type: `steps.${outcome.state}`, checkedAt, workspaceId, workOrderId: id,
         ...(outcome.state === "planned" ? { warnings: outcome.warnings.length } : { code: outcome.code }) }));
     }
-    const reviewer = createWarningReviewer(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client, (id, feedback) => planner(id, feedback),
-      createRelationReviser(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client),
-      (line, notes) => createMilestoneProposer(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client)(`复核意见：${notes}`, undefined, [line], { revised: true }));
+    const reviewer = createWarningReviewer(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId), (id, feedback) => planner(id, feedback),
+      createRelationReviser(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId)),
+      (line, notes) => createMilestoneProposer(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))(`复核意见：${notes}`, undefined, [line], { revised: true }));
     for (const item of reviews) {
       const verdict = await reviewer(item).catch(() => undefined);
       if (verdict) console.info(JSON.stringify({ type: `validation.${verdict.verdict}`, checkedAt, workspaceId, subject: item.subject, entityId: item.entityId }));
@@ -359,8 +362,9 @@ const activityTracker = createActivityTracker(analysisStore, () => analysisStore
 const activitySource = createWindowsActivitySource({ intervalSeconds: activityIntervalSeconds });
 if (process.env.CROSSLINE_RUN_ONCE !== "1") activitySource.start((reading) => activityTracker.handle(reading));
 process.on("exit", () => activitySource.stop());
-const readCost = async () => codexSupervisor
-  ? await codexSupervisor.readCostSignal()
+/** A workspace's own quota: the owner's runtime for the owner, the account's own for anyone else (which starts it when connected). */
+const readCost = async (workspaceId?: string) => codexSupervisor
+  ? await codexSupervisor.readCostSignal(workspaceId)
   : { available: false as const, reason: "CODEX_SUPERVISOR_UNAVAILABLE" };
 // One nightly decision per real workspace. This used to be a single instance bound to the pre-accounts
 // workspace id, so no account created since ever had its flywheel expanded, whatever the hour or the budget.
@@ -377,16 +381,16 @@ setUsageSink((usage) => {
   });
 });
 // Unreadable reads as manual_core_only here, which routes like normal: only economy steps a Skill down.
-setSpendModeProvider(async () => backgroundSpend(await readCost()).mode);
+setSpendModeProvider(async (workspaceId) => backgroundSpend(await readCost(workspaceId)).mode);
 // The one quota gate for every background pass (core: keeps the person's own work moving; discretionary: nobody is waiting on it).
-const spendFor = createBackgroundSpend(analysisStore, () => readCost());
+const spendFor = createBackgroundSpend(analysisStore, (workspaceId) => readCost(workspaceId));
 const nightlies = new Map<string, ReturnType<typeof createNightlyFlywheel>>();
 const getNightly = (workspaceId: string) => {
   let nightly = nightlies.get(workspaceId);
   if (!nightly) {
     nightly = createNightlyFlywheel({
-      store: analysisStore, workspaceId, readCost,
-      expand: createFlywheelExpander(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client)
+      store: analysisStore, workspaceId, readCost: () => readCost(workspaceId),
+      expand: createFlywheelExpander(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))
     });
     nightlies.set(workspaceId, nightly);
   }
@@ -445,7 +449,7 @@ const diligenceRunners = new Map<string, ReturnType<typeof createDiligenceRunner
 const getDiligence = (workspaceId: string) => {
   let runner = diligenceRunners.get(workspaceId);
   if (!runner) {
-    runner = createDiligenceRunner(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client, { readCost });
+    runner = createDiligenceRunner(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId), { readCost: () => readCost(workspaceId) });
     diligenceRunners.set(workspaceId, runner);
   }
   return runner;
@@ -459,7 +463,9 @@ const getCalendarWriteSession = () => calendarWriteSession ??= (async () => {
   return createGraphAuthSession({ clientId, ...(process.env.CROSSLINE_MS_TENANT_ID?.trim() ? { tenantId: process.env.CROSSLINE_MS_TENANT_ID.trim() } : {}), access: "calendar-write" });
 })().catch(() => undefined);
 const agentService = createAgentService({
-  store: analysisStore, repoRoot, getClient: () => codexSupervisor?.client, readCost: () => readCost(),
+  // The shell assistant runs on the machine owner's runtime only: it works with the operating system user's files, and a guard is a
+  // tripwire, not a sandbox, so it is not offered to other accounts on this machine (docs/model-providers.md).
+  store: analysisStore, repoRoot, getClient: () => codexSupervisor?.client, readCost: () => readCost(), isOwner: (workspaceId) => runtimeOwner(analysisStore) === workspaceId,
   log: (event) => console.info(JSON.stringify({ ...event, checkedAt: new Date().toISOString() }))
 });
 for (const workspace of analysisStore.listWorkspaces()) {
@@ -504,7 +510,7 @@ const materialPreparers = new Map<string, ReturnType<typeof createManualbookBuil
 const getMaterialPreparer = (workspaceId: string) => {
   let preparer = materialPreparers.get(workspaceId);
   if (!preparer) {
-    preparer = createManualbookBuilder(analysisStore, workspaceId, materialsDir, repoRoot, () => codexSupervisor?.client, { readCost });
+    preparer = createManualbookBuilder(analysisStore, workspaceId, materialsDir, repoRoot, () => codexSupervisor?.clientFor(workspaceId), { readCost: () => readCost(workspaceId) });
     materialPreparers.set(workspaceId, preparer);
   }
   return preparer;
@@ -513,7 +519,7 @@ const milestoneGates = new Map<string, ReturnType<typeof createMilestoneGate>>()
 const getMilestoneGate = (workspaceId: string) => {
   let gate = milestoneGates.get(workspaceId);
   if (!gate) {
-    gate = createMilestoneGate(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client);
+    gate = createMilestoneGate(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId));
     milestoneGates.set(workspaceId, gate);
   }
   return gate;
@@ -543,7 +549,7 @@ const planExplainers = new Map<string, ReturnType<typeof createPlanExplainer>>()
 const getPlanExplainer = (workspaceId: string) => {
   let explainer = planExplainers.get(workspaceId);
   if (!explainer) {
-    explainer = createPlanExplainer(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client);
+    explainer = createPlanExplainer(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId));
     planExplainers.set(workspaceId, explainer);
   }
   return explainer;
@@ -552,7 +558,7 @@ const weeklyInsights = new Map<string, ReturnType<typeof createWeeklyInsight>>()
 const getWeeklyInsight = (workspaceId: string) => {
   let insight = weeklyInsights.get(workspaceId);
   if (!insight) {
-    insight = createWeeklyInsight(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client);
+    insight = createWeeklyInsight(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId));
     weeklyInsights.set(workspaceId, insight);
   }
   return insight;
@@ -708,23 +714,26 @@ if (!capabilitySecret) {
         "crossline:crossline-agent", "crossline:crossline-step-planner", "crossline:crossline-validation-reviewer", "crossline:crossline-progress-judge", "crossline:crossline-concierge", "crossline:crossline-archetype-curator", "crossline:crossline-task-titler", "crossline:crossline-portrait-writer", "crossline:crossline-portrait-illustrator", "crossline:crossline-calendar-classifier", "crossline:crossline-goal-splitter"
       ]
     },
+    // Every account but the machine owner's runs on its own Codex (runtime-registry.ts), in its own home beside the owner's.
+    runtimes: { baseDir: runtimesDir(), ownerWorkspaceId: () => runtimeOwner(analysisStore) },
+    monthSpend: (workspaceId) => monthSpend(analysisStore, workspaceId),
     autoAnalyzeCaptures: (workspaceId) => autoAnalyzePass(workspaceId),
     autoBackplanGoals: (workspaceId) => autoBackplanPass(workspaceId),
     runTaskPass: (workspaceId) => stepPlanPass(workspaceId),
     splitGoals: (workspaceId) => goalSplitPass(workspaceId),
     conciergeTurn: (workspaceId, request, signal) => { enterUsageWorkspace(workspaceId);
-      return createConcierge(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client)(request as unknown as ConciergeRequest, signal); },
+      return createConcierge(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))(request as unknown as ConciergeRequest, signal); },
     analyzeCapture: (client, id, signal, workspaceId) => getCaptureAnalyzer(workspaceId)(client, id, signal),
     // `workspaceId` is the real caller's, from its own verified capability token — not a hardcoded
     // constant, which is what left milestone proposal and goal backplanning invisible to any real
     // account the same way material prep/the milestone gate/calendar sync were (see `getMaterialPreparer`
     // above for the fuller explanation; this is the same bug, same fix, in the same file).
     proposeMilestones: (_client, request, signal, workspaceId, only) =>
-      createMilestoneProposer(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client)(request, signal, only),
+      createMilestoneProposer(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))(request, signal, only),
     continueMilestoneConversation: (_client, threadId, message, signal, workspaceId) =>
-      createMilestoneConversation(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client)(threadId, message, signal),
+      createMilestoneConversation(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))(threadId, message, signal),
     onboardingTurn: (_client, sessionId, text, _signal, workspaceId, reread) =>
-      createOnboardingSessionRunner(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client)({ sessionId, text, ...(reread ? { reread: true } : {}) }),
+      createOnboardingSessionRunner(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))({ sessionId, text, ...(reread ? { reread: true } : {}) }),
     transcriptionStatus: () => transcriber.status(),
     startTranscriptionDownload: async () => {
       const current = await transcriber.status();
@@ -746,9 +755,9 @@ if (!capabilitySecret) {
       return { state: "extracted", documentId: doc.id, status: result.status, characters: result.text.length };
     },
     extractBackgroundFacts: (_client, captureTitle, captureContext, signal, workspaceId) =>
-      createBackgroundFactsExtractor(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client)(captureTitle, captureContext, signal),
+      createBackgroundFactsExtractor(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))(captureTitle, captureContext, signal),
     backplanGoal: (_client, milestoneId, signal, workspaceId) =>
-      createGoalBackplanner(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client)(milestoneId, signal),
+      createGoalBackplanner(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))(milestoneId, signal),
     // The same preparer/gate the tick loop uses, exposed so a person's retry gets an answer now rather
     // than at the next tick. `pendingMaterialWorkOrders`/`pendingMilestoneGates` still govern which
     // orders the loop itself picks up.
@@ -757,11 +766,11 @@ if (!capabilitySecret) {
       enterUsageWorkspace(workspaceId);
       const store = analysisStore;
       store.appendEvent({ ownerId: store.getWorkspaceOwnerId(workspaceId) ?? "", workspaceId, idempotencyKey: `portrait.requested:${Date.now()}`, type: "portrait.requested", entityId: workspaceId, payload: {} });
-      const outcome = await createPortraitWriter(store, workspaceId, repoRoot, () => codexSupervisor?.client)();
+      const outcome = await createPortraitWriter(store, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))();
       if (outcome.state === "blocked") store.appendEvent({ ownerId: store.getWorkspaceOwnerId(workspaceId) ?? "", workspaceId, idempotencyKey: `portrait.blocked:${Date.now()}`,
         type: "portrait.blocked", entityId: workspaceId, payload: { code: outcome.code, message: outcome.message } });
       // The pictures follow the words, in the background: the report is readable at once and gains its illustrations as they land.
-      else void createPortraitIllustrator(store, workspaceId, repoRoot, dataDir, () => codexSupervisor?.client)()
+      else void createPortraitIllustrator(store, workspaceId, repoRoot, dataDir, () => codexSupervisor?.clientFor(workspaceId))()
         .then((drawn) => console.info(JSON.stringify({ type: "portrait.illustrated", workspaceId, ...drawn })))
         .catch(() => undefined);
       return outcome;
@@ -791,7 +800,9 @@ if (!capabilitySecret) {
       saveCalendarSources: (workspaceId: string, keys: string[]) => calendar.saveSources(workspaceId, keys)
     } : {})
   });
-  console.info(JSON.stringify({ type: "codex.supervisor.ready", url: codexSupervisor.url }));
+  console.info(JSON.stringify({ type: "codex.supervisor.ready", url: codexSupervisor.url, runtimeOwner: runtimeOwner(analysisStore) ?? null }));
+  // Other accounts' runtimes stop after half an hour without an event, so an idle account holds no process.
+  setInterval(() => codexSupervisor?.runtimes?.stopIdle(), 60_000).unref();
 } catch {
   console.warn(JSON.stringify({ type: "worker.blocked", code: "CODEX_SUPERVISOR_START_FAILED" }));
 }

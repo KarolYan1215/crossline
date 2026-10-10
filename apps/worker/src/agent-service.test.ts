@@ -128,3 +128,12 @@ test("at startup a run with no outcome is recorded as lost, not shown as running
   expect(listAgentTasks(store, ws).find((task) => task.taskId === "old")).toMatchObject({ status: "blocked", blockerCode: "AGENT_RUN_LOST" });
   expect(svc.recoverLost(ws)).toEqual([]);
 });
+
+test("on a machine shared by several accounts, the assistant works only for the owner's", async () => {
+  approveCategory(store, ws, "read_research_organize");
+  order("wo-1", ["整理并摘要这三篇文献"]);
+  const svc = createAgentService({ store, repoRoot: "C:\\repo", getClient: () => undefined, readCost: async () => healthy, isOwner: () => false });
+  expect(svc.dispatch(ws, "wo-1")).toMatchObject({ state: "blocked", code: "AGENT_OWNER_ONLY" });
+  await svc.pass(ws);
+  expect(listAgentTasks(store, ws)).toHaveLength(0);
+});

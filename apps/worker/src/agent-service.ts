@@ -23,12 +23,16 @@ export const AGENT_RUN_LOST = "AGENT_RUN_LOST";
 export function createAgentService(deps: {
   store: CrosslineStore; repoRoot: string; getClient: () => CodexRpcBoundary | undefined; readCost: () => Promise<CostSignal>;
   outputRoot?: string; log?: (event: Record<string, unknown>) => void;
+  /** The machine owner's workspace; the assistant (a shell on this machine) works for no one else. Absent: everyone (tests). */
+  isOwner?: (workspaceId: string) => boolean;
 }) {
   const running = new Map<string, Set<string>>();
   const log = deps.log ?? (() => {});
   const mark = (workspaceId: string) => running.get(workspaceId) ?? running.set(workspaceId, new Set()).get(workspaceId)!;
 
   function start(workspaceId: string, orderId: string, category: AgentCategory | undefined, stepId?: string): DispatchResult {
+    if (deps.isOwner && !deps.isOwner(workspaceId))
+      return { state: "blocked", code: "AGENT_OWNER_ONLY", message: "这台电脑上的助手只为电脑主人工作；其他账号的任务请本人完成。" };
     const planned = taskFromWorkOrder(deps.store, workspaceId, orderId, category, stepId);
     if (!planned.ok) return { state: "blocked", code: planned.code, message: planned.message };
     if (!planned.category) return { state: "blocked", code: "CATEGORY_REQUIRED", message: "这件事的描述没有明确指向某一类工作，请选一类再交给助手。" };
@@ -69,7 +73,7 @@ export function createAgentService(deps: {
 
     /** On the tick: at most one new task per workspace, only of an approved kind, only with quota to spare, only when none is going. */
     async pass(workspaceId: string, now = new Date()): Promise<void> {
-      if (mark(workspaceId).size) return;
+      if (mark(workspaceId).size || (deps.isOwner && !deps.isOwner(workspaceId))) return;
       // In order: a step 「自动交给 Agent」 handed over whose block has come up (it is wanted now); preparation steps (what the person's
       // next session is waiting for); whole orders; and, with nothing else waiting, a handed-over step whose block is later this week.
       const auto = autoHandoffCandidates(deps.store, workspaceId, now);

@@ -507,3 +507,50 @@ describe("requests from the runtime", () => {
     expect(written.at(-1)).toMatchObject({ id: "b", error: { message: "nope" } });
   });
 });
+
+describe("each account's own Codex", () => {
+  const SECRET = "test-capability-secret";
+  const sign = (workspaceId: string, operation: string, bootId: string) => signCapability({ principalId: `p-${workspaceId}`, workspaceId, role: "owner",
+    operation, requestId: `r-${Math.random()}`, supervisorBootId: bootId }, SECRET);
+
+  test("a guest that has not connected its own runtime is refused model work, and the owner's runtime is never used for it", async () => {
+    const { mkdtempSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const dir = mkdtempSync(path.join(tmpdir(), "crossline-guest-"));
+    const owner = fakeSidecar();
+    const guest = fakeSidecar();
+    let started = 0;
+    const supervisor = await codexModule.startCodexSupervisor({ port: 0, sidecarFactory: async () => owner.handle, capabilitySecret: SECRET,
+      runtimes: { baseDir: dir, ownerWorkspaceId: () => "ws-owner", start: async () => { started += 1; return guest.handle as never; } },
+      autoAnalyzeCaptures: async () => undefined });
+    try {
+      const { supervisorBootId } = await (await fetch(`${supervisor.url}/v1/codex/status`)).json() as { supervisorBootId: string };
+      const call = (workspaceId: string, method: string, pathname: string, body?: unknown) => fetch(`${supervisor.url}${pathname}`, { method,
+        headers: { "content-type": "application/json", "x-crossline-capability": sign(workspaceId, `${method} ${pathname}`, supervisorBootId) },
+        ...(body ? { body: JSON.stringify(body) } : {}) });
+      const refused = await call("ws-guest", "POST", "/v1/captures/auto-analyze", {});
+      expect(refused.status).toBe(503);
+      expect(await refused.json()).toMatchObject({ blocker: { code: "RUNTIME_UNCONNECTED" } });
+      expect(await (await call("ws-guest", "GET", "/v1/codex/cost")).json()).toEqual({ available: false, reason: "RUNTIME_UNCONNECTED" });
+      expect(await (await call("ws-guest", "GET", "/v1/codex/account")).json()).toMatchObject({ account: null, login: null });
+      expect(owner.requests.filter((item) => item.method === "account/read")).toHaveLength(0);
+      expect(started).toBe(0);
+      // The owner's own work still runs on the owner's runtime.
+      expect((await call("ws-owner", "POST", "/v1/captures/auto-analyze", {})).status).toBe(202);
+      expect(supervisor.clientFor("ws-guest")).toBeUndefined();
+      expect(supervisor.clientFor("ws-owner")).toBe(owner.handle.client);
+    } finally { await supervisor.stop(); rmSync(dir, { recursive: true, force: true }); }
+  });
+});
+
+test("an API-key login has no quota windows; its month's spend against the cap is the reading", async () => {
+  const sidecar = fakeSidecar();
+  const original = sidecar.handle.client.request;
+  (sidecar.handle.client as { request: (method: string, params: unknown) => Promise<unknown> }).request = async (method, params) =>
+    method === "account/read" ? { account: { type: "apiKey" }, requiresOpenaiAuth: true } : original(method, params);
+  const supervisor = await codexModule.startCodexSupervisor({ port: 0, sidecarFactory: async () => sidecar.handle as never,
+    monthSpend: () => ({ spent: 4, cap: 10 }) });
+  try {
+    expect(await supervisor.readCostSignal()).toMatchObject({ available: true, limitReached: false, money: { spent: 4, cap: 10 }, long: { usedPercent: 40 } });
+  } finally { await supervisor.stop(); }
+});

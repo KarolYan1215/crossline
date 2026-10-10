@@ -9,6 +9,7 @@ import { readCostSignal } from "./cost";
 import { verifyCapability } from "./capability";
 import { enterUsageWorkspace } from "./usage";
 import type { CostSignal } from "@crossline/core";
+import { createRuntimeRegistry, type RuntimeRegistry, type RuntimeSidecar } from "./runtime-registry";
 export * from "./skill-runner";
 export * from "./style";
 export * from "./usage";
@@ -18,6 +19,7 @@ export * from "./model-policy";
 export * from "./capability";
 export * from "./agent-mode";
 export * from "./runtime-registry";
+export * from "./prices";
 
 const record = (value: unknown): Record<string, unknown> | undefined =>
   typeof value === "object" && value !== null ? value as Record<string, unknown> : undefined;
@@ -164,7 +166,7 @@ export function webResearchBlocker(
     message: `联网查证需要 ${host}，但它不在那里，网页搜索无法启动。把已安装 Codex 应用 bin 目录里的 codex-code-mode-host.exe 复制到这个位置，或在 vendor/codex 里构建 codex-code-mode-host。` };
 }
 
-export async function startCodexAppServer(): Promise<{
+export async function startCodexAppServer(codexHome?: string): Promise<{
   client: JsonLineRpcClient;
   process: ChildProcessWithoutNullStreams;
   forkVerified: true;
@@ -172,7 +174,8 @@ export async function startCodexAppServer(): Promise<{
   onExit: (handler: () => void) => () => void;
   stop: () => void;
 }> {
-  const env = codexProcessEnvironment();
+  // A guest account's runtime runs in its own home (runtime-registry.ts): its own auth.json and memories, never the owner's.
+  const env = { ...codexProcessEnvironment(), ...(codexHome ? { CODEX_HOME: codexHome, CROSSLINE_CODEX_HOME: codexHome } : {}) };
   mkdirSync(env.CODEX_HOME!, { recursive: true });
   const codex = resolveCodexCommand(env);
   const child = spawn(codex.command, [...codex.args, "app-server", "--listen", "stdio://", "--strict-config"], {
@@ -258,10 +261,13 @@ export type CodexSupervisorStatus = {
 
 export type CodexSupervisor = {
   url: string;
-  /** The current cost reading, or an explicit unavailable — never an assumed zero. */
-  readCostSignal: () => Promise<CostSignal>;
-  /** The owned sidecar, so background work runs on the same isolated runtime as everything else. */
+  /** The current cost reading for a workspace (the owner's when omitted), or an explicit unavailable — never an assumed zero. */
+  readCostSignal: (workspaceId?: string) => Promise<CostSignal>;
+  /** The owner's runtime: the machine's own Codex, which the owner's workspace keeps. */
   client: CodexRpcBoundary;
+  /** The runtime serving a workspace, if it is running; a guest's starts through `runtimes.client`. */
+  clientFor: (workspaceId: string) => CodexRpcBoundary | undefined;
+  runtimes?: RuntimeRegistry;
   stop: () => Promise<void>;
 };
 
@@ -407,6 +413,14 @@ export async function startCodexSupervisor(options: {
    * `plugin` is optional; the real worker always provides it (`apps/worker/src/index.ts`).
    */
   capabilitySecret?: string;
+  /**
+   * Each account's own Codex (`runtime-registry.ts`). Absent, every workspace is served by the one runtime, as before accounts existed
+   * (tests that do not exercise this). The worker always sets it.
+   */
+  runtimes?: { baseDir: string; ownerWorkspaceId: () => string | undefined; start?: (codexHome: string) => Promise<RuntimeSidecar>;
+    maxRunning?: number; idleMs?: number };
+  /** This month's spend and cap for a workspace on a pay-per-use (API key) login, which reports no quota windows of its own. */
+  monthSpend?: (workspaceId: string) => { spent: number; cap: number };
 } = {}): Promise<CodexSupervisor> {
   const host = options.host ?? "127.0.0.1";
   // Regenerated every boot: a token signed before a crash or restart must not still be honoured after
@@ -432,6 +446,48 @@ export async function startCodexSupervisor(options: {
       pluginState = { name: options.plugin.name, requiredSkills: options.plugin.requiredSkills, discoveredSkills, state: "blocked" };
     }
   }
+  const runtimes = options.runtimes ? createRuntimeRegistry({ owner: sidecar, ownerWorkspaceId: options.runtimes.ownerWorkspaceId,
+    baseDir: options.runtimes.baseDir, ...(options.runtimes.maxRunning ? { maxRunning: options.runtimes.maxRunning } : {}),
+    ...(options.runtimes.idleMs ? { idleMs: options.runtimes.idleMs } : {}),
+    // A guest's runtime gets the same Crossline plugin the owner's has.
+    start: options.runtimes.start ?? (async (home) => {
+      const started = await startCodexAppServer(home);
+      if (options.plugin) await installLocalPlugin(started.client, options.plugin);
+      return started;
+    }) }) : undefined;
+  const isOwner = (workspaceId: string) => !runtimes || runtimes.isOwner(workspaceId);
+  /** The runtime that serves this workspace's model work, or a 503 that says why there is none (and undefined). */
+  const modelClient = async (response: ServerResponse, workspaceId: string): Promise<CodexRpcBoundary | undefined> => {
+    if (isOwner(workspaceId)) {
+      if (runtimeBlocker) { sendJson(response, 503, { blocker: runtimeBlocker }); return undefined; }
+      return sidecar.client;
+    }
+    const runtime = await runtimes!.client(workspaceId);
+    if (!runtime.ok) { sendJson(response, 503, { blocker: runtime.blocker }); return undefined; }
+    return runtime.client;
+  };
+  /**
+   * A runtime's quota. A ChatGPT login reports its windows; an API key reports none (the runtime refuses the read), so its month's
+   * spend against the person's cap is the reading instead — before this, an API-key login read as "unavailable" and every background
+   * pass stopped without a word.
+   */
+  const costFor = async (client: CodexRpcBoundary, workspaceId: string): Promise<CostSignal> => {
+    const signal = await readCostSignal(client);
+    if (signal.available || !options.monthSpend) return signal;
+    const account = record(record(await client.request("account/read", { refreshToken: false }).catch(() => undefined))?.account);
+    if (account?.type !== "apiKey") return signal;
+    const { spent, cap } = options.monthSpend(workspaceId);
+    const month = new Date();
+    const resetsAt = Date.UTC(month.getUTCFullYear(), month.getUTCMonth() + 1, 1) / 1000;
+    return { available: true, limitReached: spent >= cap, money: { spent, cap },
+      long: { usedPercent: cap > 0 ? Math.min(100, (spent / cap) * 100) : 100, windowDurationMins: null, resetsAt } };
+  };
+  /** A guest's quota, read from its own runtime; an account that has not connected one has none to read. */
+  const guestCost = async (workspaceId: string): Promise<CostSignal> => {
+    if (!runtimes!.connected(workspaceId)) return { available: false, reason: "RUNTIME_UNCONNECTED" };
+    const runtime = await runtimes!.client(workspaceId);
+    return runtime.ok ? costFor(runtime.client, workspaceId) : { available: false, reason: runtime.blocker.code };
+  };
   const analyses = new Map<string, AbortController>();
   let proposing: AbortController | undefined;
   let conversing: AbortController | undefined;
@@ -527,7 +583,7 @@ export async function startCodexSupervisor(options: {
           sendJson(response, 403, { blocker: { code: "ANALYSIS_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
           return;
         }
-        if (runtimeBlocker) { sendJson(response, 503, { blocker: runtimeBlocker }); return; }
+        const rt = await modelClient(response, callerWorkspaceId); if (!rt) return;
         runDetached(() => options.autoAnalyzeCaptures!(callerWorkspaceId), () => {});
         sendJson(response, 202, { started: true });
         return;
@@ -537,7 +593,7 @@ export async function startCodexSupervisor(options: {
           sendJson(response, 403, { blocker: { code: "CONVERSATION_FORBIDDEN", message: "Use the local Web API" } });
           return;
         }
-        if (runtimeBlocker) { sendJson(response, 503, { blocker: runtimeBlocker }); return; }
+        const rt = await modelClient(response, callerWorkspaceId); if (!rt) return;
         // The context pack is the person's whole open state, so larger than the other bodies; the caller is already verified above.
         const body = await readJsonBody(request, 2_000_000);
         if (!body || typeof body.text !== "string" || !body.text.trim() || typeof body.conversationId !== "string" || typeof body.pack !== "object") {
@@ -554,7 +610,7 @@ export async function startCodexSupervisor(options: {
           sendJson(response, 403, { blocker: { code: "TASK_PASS_FORBIDDEN", message: "Use the local Web API" } });
           return;
         }
-        if (runtimeBlocker) { sendJson(response, 503, { blocker: runtimeBlocker }); return; }
+        const rt = await modelClient(response, callerWorkspaceId); if (!rt) return;
         runDetached(() => options.runTaskPass!(callerWorkspaceId), () => {});
         sendJson(response, 202, { started: true });
         return;
@@ -564,7 +620,7 @@ export async function startCodexSupervisor(options: {
           sendJson(response, 403, { blocker: { code: "GOAL_SPLIT_FORBIDDEN", message: "Use the local Web API" } });
           return;
         }
-        if (runtimeBlocker) { sendJson(response, 503, { blocker: runtimeBlocker }); return; }
+        const rt = await modelClient(response, callerWorkspaceId); if (!rt) return;
         runDetached(() => options.splitGoals!(callerWorkspaceId), () => {});
         sendJson(response, 202, { started: true });
         return;
@@ -574,7 +630,7 @@ export async function startCodexSupervisor(options: {
           sendJson(response, 403, { blocker: { code: "BACKPLAN_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
           return;
         }
-        if (runtimeBlocker) { sendJson(response, 503, { blocker: runtimeBlocker }); return; }
+        const rt = await modelClient(response, callerWorkspaceId); if (!rt) return;
         runDetached(() => options.autoBackplanGoals!(callerWorkspaceId), () => {});
         sendJson(response, 202, { started: true });
         return;
@@ -592,7 +648,7 @@ export async function startCodexSupervisor(options: {
           return;
         }
         if (request.method === "POST") {
-          if (runtimeBlocker) { sendJson(response, 503, { blocker: runtimeBlocker }); return; }
+          const rt = await modelClient(response, callerWorkspaceId); if (!rt) return;
           // Only the request that started the run owns the entry. A duplicate reuses the signal but must
           // not deregister it, or cancelling the still-running first analysis would silently do nothing.
           const running = analyses.get(id);
@@ -603,7 +659,7 @@ export async function startCodexSupervisor(options: {
           // holding a browser request open for the whole five-minute Skill budget would time out in the
           // browser long before the Skill did, which is what made a slow-but-fine analysis look broken.
           // The run is never cancelled here: it keeps going and writes its own outcome to the ledger.
-          const run = options.analyzeCapture(sidecar.client, id, controller.signal, callerWorkspaceId)
+          const run = options.analyzeCapture(rt, id, controller.signal, callerWorkspaceId)
             .finally(() => { if (!running && analyses.get(id) === controller) analyses.delete(id); });
           run.catch(() => {});
           const settled = await Promise.race([
@@ -623,7 +679,7 @@ export async function startCodexSupervisor(options: {
           sendJson(response, 403, { blocker: { code: "MATERIALS_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
           return;
         }
-        if (runtimeBlocker) { sendJson(response, 503, { blocker: runtimeBlocker }); return; }
+        const rt = await modelClient(response, callerWorkspaceId); if (!rt) return;
         const id = prepareRoute[1]!;
         if (preparing.has(id)) {
           sendJson(response, 409, { blocker: { code: "MATERIALS_ALREADY_PREPARING", message: "该作业的材料准备已在运行" } });
@@ -642,7 +698,7 @@ export async function startCodexSupervisor(options: {
           sendJson(response, 403, { blocker: { code: "PORTRAIT_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
           return;
         }
-        if (runtimeBlocker) { sendJson(response, 503, { blocker: runtimeBlocker }); return; }
+        const rt = await modelClient(response, callerWorkspaceId); if (!rt) return;
         const key = `portrait:${callerWorkspaceId}`;
         if (preparing.has(key)) { sendJson(response, 409, { blocker: { code: "PORTRAIT_ALREADY_WRITING", message: "画像报告正在生成" } }); return; }
         preparing.add(key);
@@ -656,7 +712,7 @@ export async function startCodexSupervisor(options: {
           sendJson(response, 403, { blocker: { code: "MATERIALS_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
           return;
         }
-        if (runtimeBlocker) { sendJson(response, 503, { blocker: runtimeBlocker }); return; }
+        const rt = await modelClient(response, callerWorkspaceId); if (!rt) return;
         const id = tutorialRoute[1]!;
         if (preparing.has(id)) { sendJson(response, 409, { blocker: { code: "MATERIALS_ALREADY_PREPARING", message: "该任务的教程已在生成" } }); return; }
         preparing.add(id);
@@ -672,7 +728,7 @@ export async function startCodexSupervisor(options: {
           sendJson(response, 403, { blocker: { code: "GATE_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
           return;
         }
-        if (runtimeBlocker) { sendJson(response, 503, { blocker: runtimeBlocker }); return; }
+        const rt = await modelClient(response, callerWorkspaceId); if (!rt) return;
         const id = gateRoute[1]!;
         if (judging.has(id)) {
           sendJson(response, 409, { blocker: { code: "GATE_ALREADY_RUNNING", message: "该作业的闸门判定已在运行" } });
@@ -691,7 +747,7 @@ export async function startCodexSupervisor(options: {
           sendJson(response, 403, { blocker: { code: "PLAN_EXPLAIN_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
           return;
         }
-        if (runtimeBlocker) { sendJson(response, 503, { blocker: runtimeBlocker }); return; }
+        const rt = await modelClient(response, callerWorkspaceId); if (!rt) return;
         const today = explainRoute[1]!;
         if (explaining.has(callerWorkspaceId)) {
           sendJson(response, 409, { blocker: { code: "PLAN_EXPLAIN_ALREADY_RUNNING", message: "计划解释已在运行" } });
@@ -709,7 +765,7 @@ export async function startCodexSupervisor(options: {
           sendJson(response, 403, { blocker: { code: "WEEKLY_INSIGHT_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
           return;
         }
-        if (runtimeBlocker) { sendJson(response, 503, { blocker: runtimeBlocker }); return; }
+        const rt = await modelClient(response, callerWorkspaceId); if (!rt) return;
         if (insighting.has(callerWorkspaceId)) {
           sendJson(response, 409, { blocker: { code: "WEEKLY_INSIGHT_ALREADY_RUNNING", message: "周复盘洞察已在运行" } });
           return;
@@ -793,7 +849,7 @@ export async function startCodexSupervisor(options: {
           sendJson(response, 403, { blocker: { code: "AGENT_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
           return;
         }
-        if (runtimeBlocker) { sendJson(response, 503, { blocker: runtimeBlocker }); return; }
+        const rt = await modelClient(response, callerWorkspaceId); if (!rt) return;
         const body = await readJsonBody(request);
         const workOrderId = typeof body?.workOrderId === "string" ? body.workOrderId : "";
         if (!/^[a-zA-Z0-9_-]{1,128}$/.test(workOrderId)) { sendJson(response, 400, { blocker: { code: "AGENT_ORDER_INVALID", message: "缺少任务编号。" } }); return; }
@@ -808,7 +864,7 @@ export async function startCodexSupervisor(options: {
           sendJson(response, 403, { blocker: { code: "PROPOSAL_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
           return;
         }
-        if (runtimeBlocker) { sendJson(response, 503, { blocker: runtimeBlocker }); return; }
+        const rt = await modelClient(response, callerWorkspaceId); if (!rt) return;
         // One proposal run at a time: this Skill is premium-budget and a second concurrent run would
         // spend the window twice to answer the same question.
         if (proposing) {
@@ -818,7 +874,7 @@ export async function startCodexSupervisor(options: {
         const body = await readJsonBody(request);
         const controller = new AbortController();
         proposing = controller;
-        try { await sendJsonWhenReady(response, () => options.proposeMilestones!(sidecar.client, String(body?.request ?? ""), controller.signal, callerWorkspaceId,
+        try { await sendJsonWhenReady(response, () => options.proposeMilestones!(rt, String(body?.request ?? ""), controller.signal, callerWorkspaceId,
           Array.isArray(body?.only) ? (body!.only as unknown[]).filter((item): item is string => typeof item === "string").slice(0, 8) : undefined)); }
         finally { if (proposing === controller) proposing = undefined; }
         return;
@@ -828,7 +884,7 @@ export async function startCodexSupervisor(options: {
           sendJson(response, 403, { blocker: { code: "PROPOSAL_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
           return;
         }
-        if (runtimeBlocker) { sendJson(response, 503, { blocker: runtimeBlocker }); return; }
+        const rt = await modelClient(response, callerWorkspaceId); if (!rt) return;
         if (conversing) {
           sendJson(response, 409, { blocker: { code: "PROPOSAL_ALREADY_RUNNING", message: "已有一次对话在运行" } });
           return;
@@ -842,7 +898,7 @@ export async function startCodexSupervisor(options: {
         }
         const controller = new AbortController();
         conversing = controller;
-        try { await sendJsonWhenReady(response, () => options.continueMilestoneConversation!(sidecar.client, threadId, message, controller.signal, callerWorkspaceId)); }
+        try { await sendJsonWhenReady(response, () => options.continueMilestoneConversation!(rt, threadId, message, controller.signal, callerWorkspaceId)); }
         finally { if (conversing === controller) conversing = undefined; }
         return;
       }
@@ -851,7 +907,7 @@ export async function startCodexSupervisor(options: {
           sendJson(response, 403, { blocker: { code: "ONBOARDING_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
           return;
         }
-        if (runtimeBlocker) { sendJson(response, 503, { blocker: runtimeBlocker }); return; }
+        const rt = await modelClient(response, callerWorkspaceId); if (!rt) return;
         const body = await readJsonBody(request);
         const sessionId = String(body?.sessionId ?? "");
         if (!/^[a-zA-Z0-9_-]{1,128}$/.test(sessionId)) {
@@ -864,7 +920,7 @@ export async function startCodexSupervisor(options: {
         }
         profileTurns.add(callerWorkspaceId);
         const controller = new AbortController();
-        try { await sendJsonWhenReady(response, () => options.onboardingTurn!(sidecar.client, sessionId, String(body?.text ?? "").slice(0, 4000), controller.signal, callerWorkspaceId, body?.reread === true)); }
+        try { await sendJsonWhenReady(response, () => options.onboardingTurn!(rt, sessionId, String(body?.text ?? "").slice(0, 4000), controller.signal, callerWorkspaceId, body?.reread === true)); }
         finally { profileTurns.delete(callerWorkspaceId); }
         return;
       }
@@ -873,7 +929,7 @@ export async function startCodexSupervisor(options: {
           sendJson(response, 403, { blocker: { code: "DILIGENCE_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
           return;
         }
-        if (runtimeBlocker) { sendJson(response, 503, { blocker: runtimeBlocker }); return; }
+        const rt = await modelClient(response, callerWorkspaceId); if (!rt) return;
         const body = await readJsonBody(request).catch(() => undefined);
         const identityId = String(body?.identityId ?? "");
         if (!/^[a-zA-Z0-9_-]{1,64}$/.test(identityId)) {
@@ -885,7 +941,7 @@ export async function startCodexSupervisor(options: {
           return;
         }
         diligenceRuns.add(callerWorkspaceId);
-        try { await sendJsonWhenReady(response, () => options.runDiligence!(sidecar.client, identityId, body?.force === true, callerWorkspaceId)); }
+        try { await sendJsonWhenReady(response, () => options.runDiligence!(rt, identityId, body?.force === true, callerWorkspaceId)); }
         finally { diligenceRuns.delete(callerWorkspaceId); }
         return;
       }
@@ -908,12 +964,12 @@ export async function startCodexSupervisor(options: {
           sendJson(response, 403, { blocker: { code: "BACKGROUND_FACTS_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
           return;
         }
-        if (runtimeBlocker) { sendJson(response, 503, { blocker: runtimeBlocker }); return; }
+        const rt = await modelClient(response, callerWorkspaceId); if (!rt) return;
         const body = await readJsonBody(request);
         const captureTitle = String(body?.captureTitle ?? "");
         const captureContext = String(body?.captureContext ?? "");
         const controller = new AbortController();
-        sendJson(response, 200, await options.extractBackgroundFacts(sidecar.client, captureTitle, captureContext, controller.signal, callerWorkspaceId));
+        sendJson(response, 200, await options.extractBackgroundFacts(rt, captureTitle, captureContext, controller.signal, callerWorkspaceId));
         return;
       }
       if (request.method === "POST" && pathname === "/v1/goals/backplan" && options.backplanGoal) {
@@ -921,24 +977,45 @@ export async function startCodexSupervisor(options: {
           sendJson(response, 403, { blocker: { code: "BACKPLAN_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
           return;
         }
-        if (runtimeBlocker) { sendJson(response, 503, { blocker: runtimeBlocker }); return; }
+        const rt = await modelClient(response, callerWorkspaceId); if (!rt) return;
         if (proposing) { sendJson(response, 409, { blocker: { code: "PROPOSAL_ALREADY_RUNNING", message: "已有一次提议在运行" } }); return; }
         const body = await readJsonBody(request);
         const controller = new AbortController();
         proposing = controller;
-        try { sendJson(response, 200, await options.backplanGoal(sidecar.client, String(body?.milestoneId ?? ""), controller.signal, callerWorkspaceId)); }
+        try { sendJson(response, 200, await options.backplanGoal(rt, String(body?.milestoneId ?? ""), controller.signal, callerWorkspaceId)); }
         finally { if (proposing === controller) proposing = undefined; }
         return;
       }
       // Discretionary spending needs a reading it can refuse on, so this stays available even while
       // the runtime is blocked: an unreachable runtime is itself an "unavailable" cost signal.
       if (request.method === "GET" && pathname === "/v1/codex/cost") {
+        if (!isOwner(callerWorkspaceId)) { sendJson(response, 200, await guestCost(callerWorkspaceId)); return; }
         if (runtimeBlocker) {
           sendJson(response, 200, { available: false, reason: runtimeBlocker.code });
           return;
         }
-        sendJson(response, 200, await readCostSignal(sidecar.client));
+        sendJson(response, 200, await costFor(sidecar.client, callerWorkspaceId));
         return;
+      }
+      // A guest's own Codex: connect (ChatGPT in the browser, a device code, or an API key), see it, cancel, sign out.
+      if (!isOwner(callerWorkspaceId) && pathname.startsWith("/v1/codex/")) {
+        const workspace = callerWorkspaceId;
+        if (request.method === "GET" && pathname === "/v1/codex/account") {
+          const running = runtimes!.connected(workspace) ? await runtimes!.client(workspace) : undefined;
+          const account = running?.ok ? await running.client.request("account/read", { refreshToken: false }) : { account: null, requiresOpenaiAuth: true };
+          sendJson(response, 200, { ...(record(account) ?? {}), login: runtimes!.loginStatus(workspace) });
+          return;
+        }
+        if (request.method === "POST" && pathname === "/v1/codex/login") {
+          const body = record(await readJsonBody(request));
+          const method = body?.type === "apiKey" && typeof body.apiKey === "string" && body.apiKey.trim() ? { type: "apiKey" as const, apiKey: body.apiKey.trim() }
+            : body?.type === "chatgpt" ? { type: "chatgpt" as const } : { type: "chatgptDeviceCode" as const };
+          try { sendJson(response, 200, await runtimes!.login(workspace, method)); }
+          catch (error) { sendJson(response, 503, { blocker: { code: error instanceof Error && /^RUNTIME_/.test(error.message) ? error.message : "RUNTIME_LOGIN_FAILED", message: "登录没有开始" } }); }
+          return;
+        }
+        if (request.method === "POST" && pathname === "/v1/codex/login/cancel") { await runtimes!.cancelLogin(workspace); sendJson(response, 200, { ok: true }); return; }
+        if (request.method === "POST" && pathname === "/v1/codex/logout") { await runtimes!.logout(workspace); sendJson(response, 200, { ok: true }); return; }
       }
       if (runtimeBlocker) {
         sendJson(response, 503, { blocker: runtimeBlocker });
@@ -994,14 +1071,17 @@ export async function startCodexSupervisor(options: {
   return {
     url: `http://${host}:${address.port}`,
     client: sidecar.client,
-    readCostSignal: async () => runtimeBlocker
+    ...(runtimes ? { runtimes } : {}),
+    clientFor: (workspaceId: string) => isOwner(workspaceId) ? sidecar.client : runtimes!.current(workspaceId),
+    readCostSignal: async (workspaceId = "") => !isOwner(workspaceId) ? guestCost(workspaceId) : runtimeBlocker
       ? { available: false, reason: runtimeBlocker.code }
-      : readCostSignal(sidecar.client),
+      : costFor(sidecar.client, workspaceId),
     stop: async () => {
       for (const controller of analyses.values()) controller.abort();
       await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
       unsubscribe();
       unsubscribeExit();
+      runtimes?.stopAll();
       sidecar.stop();
     }
   };
