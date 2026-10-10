@@ -2,7 +2,8 @@ import { beforeEach, expect, test } from "vitest";
 import { CrosslineStore } from "@crossline/db";
 import type { GraphCredentialProvider } from "@crossline/connectors";
 import {
-  buildSources, calendarLabel, listCatalogue, readSelection, saveSelection, seedNewAccounts, sourceKey
+  buildSources, calendarLabel, graphLoginOwner, listCatalogue, mayUseGraphLogin, readSelection, saveSelection, seedNewAccounts, sourceKey,
+  withdrawForeignCalendar
 } from "./calendar-sources";
 
 const WORKSPACE = "personal-crossline";
@@ -108,4 +109,33 @@ test("Crossline's own calendar can never be chosen as a source, so the plan is n
   // Even a selection that somehow names it (an older version of the app, a hand-edited setting) builds no reader.
   saveSelection(store, WORKSPACE, [{ accountId: UW.id, calendarId: "xl", label: calendarLabel("Crossline", UW.username) }, { accountId: UW.id, calendarId: "main", label: calendarLabel("Calendar", UW.username) }]);
   expect(buildSources(store, WORKSPACE, session([UW]), () => ({})).map((source) => source.key)).toEqual([sourceKey(UW.id, "main")]);
+});
+
+test("the machine's calendar login belongs to one account: the one already using it, and every other account is cut off and cleaned", () => {
+  const owner = store.createPrincipalWithWorkspace("owner", "个人").workspace.id;
+  const other = store.createPrincipalWithWorkspace("tester", "个人").workspace.id;
+  // Before the rule both were seeded with the owner's calendar.
+  for (const id of [owner, other]) {
+    saveSelection(store, id, [{ accountId: "uw-home", calendarId: "uw-default", label: "日历 · kyan47" }]);
+    store.setSetting(id, "calendar.sources.seeded", JSON.stringify(["uw-home"]));
+  }
+  store.setSetting(other, "calendar.lines", JSON.stringify({ lines: {} }));
+  expect(graphLoginOwner(store)).toBe(owner);
+  expect(mayUseGraphLogin(store, owner)).toBe(true);
+  expect(mayUseGraphLogin(store, other)).toBe(false);
+  expect(withdrawForeignCalendar(store, other)).toBe(true);
+  expect(readSelection(store, other)).toEqual([]);
+  expect(store.getSetting(other, "calendar.lines")).toBe("");
+  expect(withdrawForeignCalendar(store, other)).toBe(false);
+  // The owner keeps its calendar, and a workspace created later never becomes the owner.
+  expect(readSelection(store, owner)).toHaveLength(1);
+  const late = store.createPrincipalWithWorkspace("late", "个人").workspace.id;
+  expect(mayUseGraphLogin(store, late)).toBe(false);
+});
+
+test("on a fresh install the first account that asks claims the calendar login", () => {
+  const first = store.createPrincipalWithWorkspace("a", "个人").workspace.id;
+  const second = store.createPrincipalWithWorkspace("b", "个人").workspace.id;
+  expect(mayUseGraphLogin(store, second)).toBe(true);
+  expect(mayUseGraphLogin(store, first)).toBe(false);
 });

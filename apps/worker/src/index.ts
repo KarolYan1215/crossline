@@ -39,8 +39,7 @@ import { createTranscriber, createWhisperEngine, modelsDirectory } from "./trans
 import { createBackgroundFactsExtractor } from "./background-facts-runner";
 import { createGraphSync, type SyncOutcome } from "./graph-sync";
 import {
-  buildSources, calendarLabel, listCatalogue, readSelection, saveSelection, seedNewAccounts, sourceKey
-} from "./calendar-sources";
+  buildSources, calendarLabel, listCatalogue, readSelection, saveSelection, seedNewAccounts, sourceKey, mayUseGraphLogin, withdrawForeignCalendar } from "./calendar-sources";
 import { createGraphAuthSession, GraphReadSource, loadVapidKeys, sendWebPush, type GraphCredentialProvider } from "@crossline/connectors";
 
 const repoRoot = path.resolve(import.meta.dirname, "../../..");
@@ -634,9 +633,20 @@ const calendar = await (async () => {
       return syncer;
     };
 
+    // Another account on the same install never reads the owner's calendar; what it was given before this rule is withdrawn by one sync
+    // with no sources (a source with no selection loses its blocks), so the owner's meetings leave its plan too.
+    const foreign = async (workspaceId: string): Promise<SyncOutcome | null> => {
+      if (mayUseGraphLogin(analysisStore, workspaceId)) return null;
+      if (withdrawForeignCalendar(analysisStore, workspaceId)) {
+        const outcome = await getSyncer(workspaceId)();
+        console.info(JSON.stringify({ type: "graph.foreign_calendar_withdrawn", workspaceId, outcome: outcome.state }));
+      }
+      return { state: "blocked", code: "GRAPH_LOGIN_OTHER_ACCOUNT", message: "本机的日历登录属于另一个账号；这个账号要读日历需用自己的微软账号登录。" };
+    };
     return {
-      sync: async (workspaceId: string) => { await ensureCatalogueSeeded(workspaceId); return getSyncer(workspaceId)(); },
+      sync: async (workspaceId: string) => (await foreign(workspaceId)) ?? (await ensureCatalogueSeeded(workspaceId), getSyncer(workspaceId)()),
       listSources: async (workspaceId: string) => {
+        if (await foreign(workspaceId)) return [];
         await ensureCatalogueSeeded(workspaceId);
         const fresh = await listCatalogue(credential, analysisStore, workspaceId, reader);
         seedNewAccounts(analysisStore, workspaceId, fresh);
@@ -646,6 +656,7 @@ const calendar = await (async () => {
         return listCatalogue(credential, analysisStore, workspaceId, reader);
       },
       saveSources: async (workspaceId: string, keys: string[]) => {
+        if (await foreign(workspaceId)) return [];
         await ensureCatalogueSeeded(workspaceId);
         const fresh = await listCatalogue(credential, analysisStore, workspaceId, reader);
         const wanted = new Set(keys);
@@ -870,7 +881,9 @@ if (process.env.CROSSLINE_RUN_ONCE === "1") {
  * once read the calendar without clearing it, so the ask outlived the fix by a whole tick.
  */
 function recordCalendarOutcome(store: CrosslineStore, workspaceId: string, outcome: SyncOutcome, at: string): void {
-  const failure = outcome.state === "blocked" ? { code: outcome.code, message: outcome.message ?? "", sources: [] as string[] }
+  // Not reading a calendar that belongs to another account on this install is not a failure to ask anyone about.
+  const failure = outcome.state === "blocked" && outcome.code === "GRAPH_LOGIN_OTHER_ACCOUNT" ? undefined
+    : outcome.state === "blocked" ? { code: outcome.code, message: outcome.message ?? "", sources: [] as string[] }
     : outcome.failed?.length ? { code: outcome.failed[0]!.code, message: "", sources: outcome.failed.map((item) => item.label) } : undefined;
   try { store.setSetting(workspaceId, CALENDAR_SYNC_FAILURE, failure ? JSON.stringify({ ...failure, at }) : ""); } catch { /* housekeeping */ }
 }

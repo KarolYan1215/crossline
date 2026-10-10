@@ -12,6 +12,7 @@
  */
 import { GraphReadSource, type GraphAccount, type GraphCalendar, type GraphCredentialProvider } from "@crossline/connectors";
 import type { CrosslineStore } from "@crossline/db";
+import { CALENDAR_LINES } from "@crossline/core";
 import type { CalendarSource } from "./graph-sync";
 
 const SETTING = "calendar.sources";
@@ -62,6 +63,34 @@ export function readSelection(store: CrosslineStore, workspaceId: string): Selec
         .map((entry) => ({ accountId: entry.accountId, calendarId: entry.calendarId, label: String(entry.label ?? "日历") }))
       : [];
   } catch { return []; }
+}
+
+/**
+ * Whose the machine's Microsoft sign-in is. The read token lives in one DPAPI cache per install, not per account, and every workspace
+ * used to be seeded with its default calendar — so a second account signing up on the same install was shown the owner's meetings, asked
+ * which line they belonged to, and given the owner's calendar as plan differences (found with a test account on 2026-10-10). The login
+ * now belongs to one workspace: the one marked `calendar.graph.owner`, else (upgrading) the oldest workspace that was already seeded,
+ * else — a fresh install — the first workspace that asks. Every other workspace reads no calendar and sees no catalogue.
+ */
+export const GRAPH_OWNER_SETTING = "calendar.graph.owner";
+export function graphLoginOwner(store: CrosslineStore, asking?: string): string | undefined {
+  const workspaces = store.listWorkspaces();
+  const marked = workspaces.find((workspace) => store.getSetting(workspace.id, GRAPH_OWNER_SETTING) === "1");
+  if (marked) return marked.id;
+  const seeded = workspaces.find((workspace) => seededAccounts(store, workspace.id).size > 0);
+  const owner = seeded?.id ?? asking;
+  if (owner) store.setSetting(owner, GRAPH_OWNER_SETTING, "1");
+  return owner;
+}
+export const mayUseGraphLogin = (store: CrosslineStore, workspaceId: string) => graphLoginOwner(store, workspaceId) === workspaceId;
+/** A workspace that is not the login's owner: anything it was given from the owner's calendar is withdrawn, once. */
+export function withdrawForeignCalendar(store: CrosslineStore, workspaceId: string): boolean {
+  if (!readSelection(store, workspaceId).length && !seededAccounts(store, workspaceId).size) return false;
+  saveSelection(store, workspaceId, []);
+  store.setSetting(workspaceId, SEEDED_SETTING, "[]");
+  // The owner's event titles filed under lines (and the questions about the unclear ones) go with them.
+  store.setSetting(workspaceId, CALENDAR_LINES, "");
+  return true;
 }
 
 export function saveSelection(store: CrosslineStore, workspaceId: string, selection: SelectedCalendar[]): void {
