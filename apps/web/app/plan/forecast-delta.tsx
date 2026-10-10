@@ -1,19 +1,20 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { ForecastResult } from "@crossline/planner";
-import { forecastDiff } from "../../lib/forecast-diff";
+import { forecastDiff, type ForecastSummary } from "../../lib/forecast-diff";
 
 const KEY = "crossline.forecast.lastViewed.v1";
-export function ForecastDelta({ forecast }: { forecast: ForecastResult }) {
+/** `storageKey` keeps one remembered forecast per horizon, so switching from four weeks to eight is not reported as a change. */
+export function ForecastDelta({ forecast, storageKey = "" }: { forecast: ForecastSummary; storageKey?: string }) {
   const [changes, setChanges] = useState<string[]>([]);
   useEffect(() => {
+    const key = storageKey ? `${KEY}.${storageKey}` : KEY;
     try {
-      const previous = localStorage.getItem(KEY);
-      if (previous) setChanges(forecastDiff(JSON.parse(previous) as ForecastResult, forecast));
-      localStorage.setItem(KEY, JSON.stringify(forecast));
+      const previous = localStorage.getItem(key);
+      if (previous) setChanges(forecastDiff(JSON.parse(previous) as ForecastSummary, forecast));
+      localStorage.setItem(key, JSON.stringify(forecast));
     } catch { /* Local comparison is optional; the authoritative forecast is still visible. */ }
-  }, [forecast]);
+  }, [forecast, storageKey]);
   return changes.length > 0 && <div role="status" className="forecast-delta">
     <strong>与上次查看时相比</strong>
     <ul>{changes.map((change) => <li key={change}>{change}</li>)}</ul>

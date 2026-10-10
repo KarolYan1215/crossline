@@ -89,10 +89,11 @@ async function ensureScheduleSetup(page: Page): Promise<void> {
  * different feasible answer when the machine is busy. Both are hidden, not masked, so they keep their place and
  * the layout around them is what is compared; the schedule itself is tested where it is computed.
  */
-// The plan page's ranking lists and capacity figures come from the same time-limited solve, so they are left out as well; the ranking
-// is removed rather than hidden because how many tasks it lists as placed changes its height.
+// The plan page's charts, ranking lists and capacity figures come from the same time-limited solve, so they are left out as well; the
+// ranking and the overload list are removed rather than hidden because how many rows they hold changes their height.
 const STABLE_FOR_SCREENSHOT = ".pending-badge,.dv-block,.dv-aside,.undo-trigger,.wk-block,.mo-chip[data-kind=\"scheduled\"],.ui-bar-value,.ui-bar-fill,"
-  + ".task-card-slot a,.pl-hours,.pl-week-bar,.pl-week small,.pl-goal-track,.pl-goal-tags{visibility:hidden}.pl-rank-table,.pl-library,.pl-explain p{display:none}";
+  + ".task-card-slot a,.pl-hours,.pl-svg,.pl-gantt-track,.pl-gantt-end,.pl-inv-share{visibility:hidden}"
+  + ".pl-rank-table,.pl-library,.pl-explain p,.pl-over-list,.pl-stat .pl-chart-foot,.forecast-delta{display:none}";
 
 test.beforeEach(async ({ page }, testInfo) => {
   if (testInfo.project.name === "desktop-chrome") await ensureScheduleSetup(page);
@@ -134,18 +135,28 @@ test("a task card opens its dialog in place, and the dialog's full-page link sho
   await expect(page).toHaveURL(new RegExp(href!.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "$"));
   await expect(page.locator(".subpage-header h1")).toHaveText(title);
 });
-test("Plan is one calendar with day, week and month over one version", async ({ page }, testInfo) => {
+test("Plan is the long view: no calendar, four charts over a chosen horizon, the version and its differences on top", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-chrome");
   await seedPendingChanges(page);
   await page.goto("/plan");
   const plan = page.locator("[data-plan-version]");
   await expect(plan).toHaveAttribute("data-plan-version", "personal-plan-v1");
-  for (const view of ["日", "周", "月"]) await expect(page.getByRole("tab", { name: view, exact: true })).toBeVisible();
-  // The three views are one list of blocks at three scales: the month shows the same plan's days.
-  await page.getByRole("tab", { name: "月", exact: true }).click();
-  await expect(page.locator(".mo-cell")).toHaveCount(42);
-  await page.getByRole("tab", { name: "周", exact: true }).click();
-  await expect(page.locator(".wk-col")).toHaveCount(7);
+  // The calendar is on Today only (decided 2026-10-10).
+  await expect(page.locator(".mo-cell, .wk-col, .dv-block")).toHaveCount(0);
+  for (const chart of ["容量与需求", "里程碑完成预测", "主线投入：计划与实际", "估时准确度与节律"]) await expect(page.getByRole("region", { name: chart })).toBeVisible();
+  await expect(page.getByRole("button", { name: "立即同步日历" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "发布到 Crossline 日历" })).toBeVisible();
+  // Eight weekly bars by default; four once the horizon is switched, kept in the address.
+  await expect(page.locator(".pl-cd-week")).toHaveCount(8);
+  await Promise.all([page.waitForURL(/horizon=4/), page.getByRole("radiogroup", { name: "统计范围" }).getByRole("radio", { name: "4 周" }).click()]);
+  await expect(page.locator(".pl-cd-week")).toHaveCount(4);
+  // Each milestone row opens its drawer on 主线.
+  await expect(page.locator('.pl-gantt-row[href^="/milestones?open="]').first()).toBeVisible();
+  // The settings are three tabs; importance lives only in 「排程依据」.
+  const settings = page.getByRole("radiogroup", { name: "设置项" });
+  for (const tab of ["可用时段", "排程参数", "排程依据"]) await expect(settings.getByRole("radio", { name: tab })).toBeVisible();
+  await expect(settings.getByRole("radio", { name: "重要性" })).toHaveCount(0);
+  await page.goto("/plan");
   // Pending differences announce themselves and open their fold, so the decision is one look away.
   await expect(page.getByRole("link", { name: /项差异待处理/ })).toBeVisible();
   await expect(page.getByText("批准本批变更")).toBeVisible();
@@ -159,10 +170,10 @@ test("Plan is one calendar with day, week and month over one version", async ({ 
 test("editing availability re-runs the scheduler instead of only storing a preference", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-chrome");
   await page.goto("/plan");
-  // Suggestions are explicitly unapproved; real calendar blocks remain read-only.
-  await page.getByRole("tab", { name: "周", exact: true }).click();
-  const scheduled = page.locator('.wk-block[data-kind="scheduled"]');
-  const before = await scheduled.count();
+  // The capacity chart says how many minutes the scheduler placed in the first week.
+  const capacity = page.getByRole("region", { name: "容量与需求" });
+  const scheduledMinutes = async () => Number(await capacity.getAttribute("data-scheduled-minutes"));
+  const before = await scheduledMinutes();
   expect(before).toBeGreaterThan(0);
 
   // Paint the week down to one half hour on the grid: erase each row with one drag, then paint a single cell. A preference that
@@ -180,9 +191,11 @@ test("editing availability re-runs the scheduler instead of only storing a prefe
   await grid.locator("tbody tr").last().locator("td").nth(12).click();
   await page.getByRole("button", { name: "预览影响" }).click();
   await expect(page.getByRole("dialog", { name: "改动影响" })).toBeVisible();
+  // While the preview is open the charts above draw the change, with the current values as ghosts.
+  await expect(capacity.locator(".pl-preview-note")).toBeVisible();
+  await expect(capacity.locator(".pl-usable-ghost")).toHaveCount(1);
   await Promise.all([page.waitForNavigation({ waitUntil: "load" }), page.getByRole("button", { name: "应用", exact: true }).click()]);
-  await page.getByRole("tab", { name: "周", exact: true }).click();
-  expect(await scheduled.count()).toBeLessThan(before);
+  expect(await scheduledMinutes()).toBeLessThan(before);
 
   // Put it back: these tests share one ledger, and a crippled week would silently change what every
   // later assertion is looking at.
@@ -247,8 +260,8 @@ test("goal confirmation and permission-mode rejection persist through the real p
   await page.locator(".mt-node").filter({ hasText: "稳定推进当前实验与论文" }).click();
   await expect(page.locator(".ui-sheet").locator('input[type="date"]')).toHaveValue("2026-09-30");
   await page.goto("/plan");
-  // The confirmed deadline is the red tick on that milestone's row of the eight-week chart.
-  await expect(page.locator('.pl-goal-deadline[title="截止 2026-09-30"]')).toHaveCount(1);
+  // The confirmed deadline is the ◆ on that milestone's row of the finish-range chart.
+  await expect(page.locator('.pl-gantt-deadline[data-deadline="2026-09-30"]')).toHaveCount(1);
 
   const store = openStore();
   try { store.appendEvent({ ownerId: "e2e-tester", workspaceId: realWorkspaceId(store),

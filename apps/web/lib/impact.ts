@@ -4,6 +4,8 @@ import { DEADLINE_MARGIN_DAYS, type ScheduleParams } from "@crossline/planner";
 import { effectiveSchedulePreferences, getStore, loadCurrentPlan, loadGoalForecast, planToday, resolvedEstimate, saveAvailability, saveGoalSettings,
   saveScheduleParams, SCHEDULE_KEEP, withPreview, type PreviewOverrides } from "./crossline";
 import { lineLabels } from "./lines";
+import { loadForecastCharts } from "./plan-board";
+import type { ForecastCharts } from "./plan-stats";
 
 /**
  * What a change does across the lines before it is made (decided 2026-10-07: every change is previewed, then applied). The schedule and
@@ -45,6 +47,8 @@ export type Impact = {
   milestones: Array<{ id: string; title: string; line: string; deadline: string | null; before: string | null; after: string | null;
     shiftDays: number; atRiskBefore: boolean; atRiskAfter: boolean }>;
   lines: Array<{ line: string; label: string; beforeMinutes: number; afterMinutes: number }>;
+  /** The plan page's charts before and after, over the horizon it shows; only when asked for (`chartsHorizonDays`). */
+  charts?: { before: ForecastCharts; after: ForecastCharts };
 };
 
 const day = 86_400_000;
@@ -59,8 +63,9 @@ export function overridesFor(change: Exclude<Change, { kind: "estimate_delta" }>
     : change.kind === "due" ? { dueDates: { [change.workOrderId]: change.date } } : { notBefore: { [change.workOrderId]: change.date } };
 }
 
-async function snapshot(ctx: AccessContext, workOrderId?: string) {
+async function snapshot(ctx: AccessContext, workOrderId?: string, chartsHorizonDays?: number) {
   const [plan, forecast] = [await loadCurrentPlan(ctx), loadGoalForecast(ctx)];
+  const charts = chartsHorizonDays ? (({ inferredRegularBlocks: _, summary: __, ...rest }) => rest)(loadForecastCharts(ctx, plan, chartsHorizonDays)) : undefined;
   const today = planToday(ctx);
   const weekEnd = new Date(Date.parse(`${today}T12:00:00Z`) + 7 * day).toISOString().slice(0, 10);
   const lineOf = new Map(getStore().listWorkOrders(ctx.workspaceId).map((order) => [order.id, order.identityId]));
@@ -73,19 +78,20 @@ async function snapshot(ctx: AccessContext, workOrderId?: string) {
   }
   const first = workOrderId ? plan.blocks.filter((block) => block.id.startsWith(`scheduled:${workOrderId}`) && block.day)
     .map((block) => `${block.day} ${block.start}`).sort()[0] : undefined;
-  return { goals: forecast.goals, minutesByLine, ...(first ? { first } : {}), available: forecast.weeks[0]?.netMinutes ?? 0,
+  return { goals: forecast.goals, minutesByLine, ...(first ? { first } : {}), ...(charts ? { charts } : {}), available: forecast.weeks[0]?.netMinutes ?? 0,
     planned: [...minutesByLine.values()].reduce((sum, minutes) => sum + minutes, 0),
     unplaced: plan.schedule.blockers.filter((blocker) => !blocker.code.startsWith("Q4_")).length,
     blocks: new Set(plan.blocks.filter((block) => block.id.startsWith("scheduled:") && block.day && block.day >= today && block.day < weekEnd)
       .map((block) => `${block.id.split(":").slice(0, 3).join(":")}|${block.day}|${block.start}|${block.end}`)) };
 }
 
-export async function previewChange(ctx: AccessContext, requested: Change): Promise<Impact> {
+/** `chartsHorizonDays`: also return the plan page's charts before and after, over that horizon (the page's charts show both while it waits). */
+export async function previewChange(ctx: AccessContext, requested: Change, options: { chartsHorizonDays?: number } = {}): Promise<Impact> {
   const change = resolveChange(ctx, requested);
   const order = isTaskChange(change) ? getStore().listWorkOrders(ctx.workspaceId).find((item) => item.id === change.workOrderId) : undefined;
   if (isTaskChange(change) && !order) throw new Error("WORK_ORDER_NOT_FOUND");
-  const before = await snapshot(ctx, order?.id);
-  const after = await withPreview(overridesFor(change), () => snapshot(ctx, order?.id));
+  const before = await snapshot(ctx, order?.id, options.chartsHorizonDays);
+  const after = await withPreview(overridesFor(change), () => snapshot(ctx, order?.id, options.chartsHorizonDays));
   const milestones = getStore().listMilestones(ctx.workspaceId);
   const labels = new Map(Object.entries(lineLabels(ctx)));
   const risk = (goal: { slackDays: number | null }) => goal.slackDays !== null && goal.slackDays < DEADLINE_MARGIN_DAYS;
@@ -105,7 +111,8 @@ export async function previewChange(ctx: AccessContext, requested: Change): Prom
     }),
     lines: [...new Set([...before.minutesByLine.keys(), ...after.minutesByLine.keys()])]
       .map((line) => ({ line, label: labels.get(line) ?? line, beforeMinutes: before.minutesByLine.get(line) ?? 0, afterMinutes: after.minutesByLine.get(line) ?? 0 }))
-      .filter((item) => item.beforeMinutes !== item.afterMinutes)
+      .filter((item) => item.beforeMinutes !== item.afterMinutes),
+    ...(before.charts && after.charts ? { charts: { before: before.charts, after: after.charts } } : {})
   };
 }
 

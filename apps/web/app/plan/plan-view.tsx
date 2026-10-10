@@ -1,8 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
-import { CalendarPanel } from "../timeline/calendar-panel";
 import type { TimelineDeadline, TimelineItem } from "../timeline/model";
 
 export type ScheduleBlockData = {
@@ -29,19 +28,15 @@ export type PlanVersionData = {
   changes: Array<{ id: string; kind: "add" | "move" | "remove" | "conflict"; explanation: string; afterBlockId?: string; status: "pending" | "approved" | "excluded" }>;
 };
 
+/** Today's calendar data (the plan page no longer draws a calendar; Today imports this type from here). */
 export type CalendarData = {
   today: string; nowIso: string; timeZone: string; items: TimelineItem[]; deadlines: TimelineDeadline[];
   labels: Record<string, string>; quietByWeekday: Record<number, Array<[string, string]>>; proposals?: Array<{ id: string; title: string }>;
 };
 
-const statusLabel = { draft: "草案", approved: "已批准", superseded: "已被替代", pending: "待处理", excluded: "已排除" } as const;
+const statusLabel = { draft: "草稿", approved: "已批准", superseded: "已被替代", pending: "待处理", excluded: "已排除" } as const;
 const changeLabel = { add: "新增", move: "移动", remove: "移除", conflict: "冲突" } as const;
 
-/**
- * The plan: one calendar (day, week, month over the same blocks), what the scheduler could not place, and the
- * differences waiting for a decision. Reading the calendar is the default; the decisions are folded under it
- * and announced by a count, so they are never the first thing on the page unless there is something to decide.
- */
 /**
  * The planner reports one blocker per unplaced *step*, while 「排程依据」 lists tasks — counting blockers said 「13 项未排入」 over a list
  * with one. Counted per task here: wholly unplaced, and placed in part (some steps have a block, some do not).
@@ -54,7 +49,12 @@ function unplacedNote(plan: PlanVersionData): string {
   return [none ? `${none} 个任务未排入` : "", partial ? `${partial} 个任务部分步骤未排入` : ""].filter(Boolean).join("，");
 }
 
-export function PlanView({ plan, calendar }: { plan: PlanVersionData; calendar: CalendarData }) {
+/**
+ * The plan page's top row (decided 2026-10-10: the calendar is on Today only): the version, its differences (a fold that opens by itself
+ * while something waits for a decision), reading the calendar now, writing to the Crossline calendar, the horizon (`aside`), and the
+ * schedule's status.
+ */
+export function PlanView({ plan, aside }: { plan: PlanVersionData; aside?: ReactNode }) {
   const [approvalState, setApprovalState] = useState<"idle" | "saving" | "error">("idle");
   const [syncState, setSyncState] = useState<"idle" | "syncing" | "done" | "error">("idle");
   const [syncNote, setSyncNote] = useState("");
@@ -67,7 +67,7 @@ export function PlanView({ plan, calendar }: { plan: PlanVersionData; calendar: 
     const response = await fetch("/api/calendar/sync", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }).catch(() => undefined);
     const body = await response?.json().catch(() => undefined) as { ok?: boolean; changes?: number; code?: string } | undefined;
     if (!response?.ok || !body?.ok) {
-      setSyncNote(body?.code === "CALENDAR_SYNC_UNAVAILABLE" ? "worker 不可用或未登录日历" : body?.code ?? "同步失败");
+      setSyncNote(body?.code === "CALENDAR_SYNC_UNAVAILABLE" ? "后台服务未运行或日历未登录，稍后重试" : "同步失败，稍后重试");
       setSyncState("error");
       return;
     }
@@ -83,7 +83,7 @@ export function PlanView({ plan, calendar }: { plan: PlanVersionData; calendar: 
     const body = await response?.json().catch(() => undefined) as { state?: string; message?: string; code?: string;
       result?: { created: number; updated: number; deleted: number; unchanged: number; keptAsEdited: string[] } } | undefined;
     if (!response?.ok || (body?.state && body.state !== "published")) {
-      setPublishNote(body?.message ?? (body?.code === "CALENDAR_PUBLISH_UNAVAILABLE" || !response ? "worker 不可用" : body?.code ?? "写入失败"));
+      setPublishNote(body?.message ?? (body?.code === "CALENDAR_PUBLISH_UNAVAILABLE" || !response ? "后台服务未运行，稍后重试" : "写入失败，稍后重试"));
       setPublishState("error");
       return;
     }
@@ -133,14 +133,14 @@ export function PlanView({ plan, calendar }: { plan: PlanVersionData; calendar: 
         {syncState === "syncing" ? "读取日历中…" : syncState === "error" ? "同步失败，重试" : "立即同步日历"}
       </button>
       {syncState === "done" && <span role="status" className="plan-sync-note">{syncNote}</span>}
-      {/* The one place the app writes to a calendar: a separate calendar named Crossline, events it made itself. */}
-      {/* Publishing also runs on its own every ten minutes; this is the manual nudge, so it is an icon rather than a labelled button. */}
-      <button type="button" className="plan-sync plan-sync-icon" disabled={publishState === "publishing" || plan.status !== "approved"} onClick={publish}
-        aria-label="立即写入 Crossline 日历"
+      {/* The one place the app writes to a calendar: a separate calendar named Crossline, events it made itself. Publishing also runs
+          on its own every ten minutes; this is the manual nudge. */}
+      <button type="button" className="plan-sync" disabled={publishState === "publishing" || plan.status !== "approved"} onClick={publish}
         title={plan.status === "approved" ? "立即写入 Crossline 日历（每 10 分钟自动写入；只写名为 Crossline 的日历）" : "计划批准后写入 Crossline 日历"}>
-        {publishState === "publishing" ? "…" : "⇪"}
+        {publishState === "publishing" ? "写入中…" : "发布到 Crossline 日历"}
       </button>
       {(publishState === "done" || publishState === "error") && <span role="status" className="plan-sync-note">{publishNote}</span>}
+      {aside && <span className="plan-bar-aside">{aside}</span>}
     </div>
 
     {plan.schedule && (plan.schedule.solver !== "empty" || plan.schedule.blockers.length > 0) && <section className="schedule-status" role="status">
@@ -153,9 +153,6 @@ export function PlanView({ plan, calendar }: { plan: PlanVersionData; calendar: 
       {unplacedNote(plan) && <p><a href="#why">{unplacedNote(plan)}，原因见「排程依据」</a></p>}
       {plan.schedule.notes?.map((note) => <p key={`note-${note.taskId}`}>{note.message}</p>)}
     </section>}
-
-    <CalendarPanel items={calendar.items} deadlines={calendar.deadlines} today={calendar.today} nowIso={calendar.nowIso}
-      timeZone={calendar.timeZone} labels={calendar.labels} quietByWeekday={calendar.quietByWeekday} proposals={calendar.proposals} />
 
     {/* With no differences there is nothing to fold: only the version's approval is shown. The ledger of differences is a fold
         (low-frequency history) that opens by itself while something in it waits for a decision. */}
@@ -172,7 +169,7 @@ export function PlanView({ plan, calendar }: { plan: PlanVersionData; calendar: 
             {/* A conflict with no way out would block approval forever, so every pending one is resolvable here.
                 Excluding is a decision the ledger records, not a deletion. */}
             {change.status === "pending" && <span className="change-resolve">
-              <button type="button" onClick={() => void resolve(change.id, "approved")}>采纳</button>
+              <button type="button" onClick={() => void resolve(change.id, "approved")}>批准</button>
               <button type="button" onClick={() => void resolve(change.id, "excluded")}>排除</button>
             </span>}
           </span>

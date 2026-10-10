@@ -68,3 +68,26 @@ test("the plan page's controls preview without writing, then apply: a repainted 
   expect(saved.payload).toMatchObject({ next: { weight: 90, importance: "important" } });
   expect(typeof (saved.payload as { presetWeight?: unknown }).presetWeight).toBe("number");
 });
+
+test("asked from the plan page, a preview also carries that page's charts before and after, over its horizon", async () => {
+  vi.stubEnv("CROSSLINE_FIXED_NOW", "2026-09-18T13:00:00.000Z");
+  const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
+  saveSchedulePreferences(TEST_CTX, { timeZone: "America/Chicago", mode: "buffered",
+    windows: [{ days: [0, 1, 2, 3, 4, 5, 6], start: "08:00", end: "20:00", energy: "high" }], importance: {} });
+  await loadCurrentPlan(TEST_CTX);
+  const narrower = [{ days: [1, 2, 3, 4, 5], start: "09:00", end: "11:00", energy: "medium" as const }];
+  const plain = await previewChange(TEST_CTX, { kind: "availability", windows: narrower });
+  expect(plain.charts).toBeUndefined();
+  const impact = await previewChange(TEST_CTX, { kind: "availability", windows: narrower }, { chartsHorizonDays: 28 });
+  const { before, after } = impact.charts!;
+  expect(before.capacity).toHaveLength(4);
+  expect(after.capacity).toHaveLength(4);
+  const current = readAvailability(TEST_CTX);
+  expect(before.windows).toEqual(current);
+  expect(after.windows).toEqual(narrower);
+  expect(after.capacity[1]!.usableMinutes).toBeLessThan(before.capacity[1]!.usableMinutes);
+  expect(after.goals.map((row) => row.id).sort()).toEqual(before.goals.map((row) => row.id).sort());
+  // Nothing was written by asking.
+  expect(readAvailability(TEST_CTX)).toEqual(current);
+  expect(store.getSetting(TEST_CTX.workspaceId, "schedule.availability")).toBeUndefined();
+});

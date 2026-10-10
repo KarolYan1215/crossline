@@ -32,7 +32,7 @@ export async function POST(request: Request) {
   if (isCrossSiteWrite(request)) return Response.json({ ok: false, code: "REQUEST_FORBIDDEN" }, { status: 403 });
   const access = await resolveAccessContext(request);
   if ("response" in access) return access.response;
-  const body = (await request.json().catch(() => ({}))) as { change?: unknown; apply?: unknown };
+  const body = (await request.json().catch(() => ({}))) as { change?: unknown; apply?: unknown; charts?: unknown };
   const change = parse(body.change);
   if (!change) return Response.json({ ok: false, code: "CHANGE_INVALID" }, { status: 400 });
   if (body.apply === true) {
@@ -40,7 +40,9 @@ export async function POST(request: Request) {
     return Response.json(result, { status: result.ok ? 200 : 400 });
   }
   try {
-    return Response.json({ ok: true, impact: await previewChange(access.ctx, change) });
+    // `charts`: the plan page's horizon in days, so its charts can show the change before it is applied (whole weeks, at most six months).
+    const charts = typeof body.charts === "number" && Number.isInteger(body.charts) && body.charts >= 7 && body.charts <= 182 ? body.charts : undefined;
+    return Response.json({ ok: true, impact: await previewChange(access.ctx, change, charts ? { chartsHorizonDays: charts } : {}) });
   } catch (error) {
     return Response.json({ ok: false, code: error instanceof Error ? error.message : "PREVIEW_FAILED" }, { status: 404 });
   }
