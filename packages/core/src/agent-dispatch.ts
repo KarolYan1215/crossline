@@ -128,3 +128,41 @@ export const lostToRuntime = (run: { status: string; blockerCode?: string | unde
 /** Whether a step whose runs so far are these will be run again by itself. */
 export const prepStepRetried = (runs: Array<{ status: string; blockerCode?: string | undefined }>) =>
   runs.length > 0 && runs.length < PREP_STEP_MAX_RUNS && runs.every(lostToRuntime);
+
+/** The kind of work a step is, read from its role, for handing one step over (「交给 Agent」 on a step, or the worker by itself). */
+export const STEP_CATEGORY: Record<string, AgentCategory> = {
+  gather: "read_research_organize", read: "read_research_organize", compare: "read_research_organize", analyze: "read_research_organize",
+  summarize: "read_research_organize", record: "read_research_organize", learn: "read_research_organize",
+  outline: "draft_text", draft: "draft_text", revise: "draft_text", check: "draft_text",
+  build: "data_code_sim", test: "data_code_sim", prepare: "files_calendar_prep", book: "files_calendar_prep", handle: "files_calendar_prep"
+};
+/** A step's kind: its role's, else — for a step the planner gave the assistant outright — reading and organising. */
+export const stepCategory = (step: { role: string; executor: string }): AgentCategory | undefined =>
+  STEP_CATEGORY[step.role] ?? (step.executor === "agent" ? "read_research_organize" : undefined);
+
+/**
+ * 「自动交给 Agent」 (decided 2026-10-10, default off). The assistant's own preparation steps (`executor: "agent"`) take no calendar time
+ * and are always picked up by themselves (decided 2026-10-09). This switch covers the rest of what the system can do: a step on the
+ * calendar that the step planner judged the system can do (`executor: "mixed"`). With it on, the worker starts such a step without a
+ * click when its block comes up, or earlier when the assistant has nothing else to do; with it off, those steps wait for 「交给 Agent」.
+ */
+export const AUTO_HANDOFF_SETTING = "agent.autoHandoff";
+/**
+ * Where each step's next block starts, as instants: `{ "<orderId>#<stepId>": ISO }`. The schedule is derived on read in the web app and
+ * never stored, so the web's attention timer (every ten minutes) writes this for the coming seven days; the worker reads it.
+ */
+export const STEP_STARTS_SETTING = "schedule.stepStarts";
+/** A block counts as come up this many minutes before it starts: the run gets a head start on the time the plan set aside for it. */
+export const AUTO_HANDOFF_LEAD_MINUTES = 30;
+
+/**
+ * When a step handed over by itself may start, against now. `due`: its next block starts within the lead time, or has already started
+ * (a start that passed is still due — the assistant may have been busy with another run). `early`: it has a block later in the coming
+ * week, started ahead of time only when the assistant has nothing else to do. `unscheduled`: no block (a task-library step), which stays
+ * the person's to hand over, since nothing says when it is wanted.
+ */
+export function autoHandoffTiming(startsAt: string | undefined, now: Date, leadMinutes = AUTO_HANDOFF_LEAD_MINUTES): "due" | "early" | "unscheduled" {
+  const at = startsAt ? Date.parse(startsAt) : NaN;
+  if (!Number.isFinite(at)) return "unscheduled";
+  return at - now.getTime() <= leadMinutes * 60_000 ? "due" : "early";
+}

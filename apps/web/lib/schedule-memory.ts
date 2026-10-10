@@ -1,6 +1,6 @@
 import "server-only";
-import type { AccessContext } from "@crossline/core";
-import { getStore, loadCurrentPlan, planToday } from "./crossline";
+import { STEP_STARTS_SETTING, type AccessContext } from "@crossline/core";
+import { effectiveSchedulePreferences, getStore, loadCurrentPlan, planToday, toZonedInstant } from "./crossline";
 
 /** The setting that remembers which work was given a time on a day: `schedule.day:<YYYY-MM-DD>` → `{ [orderId]: "HH:MM" }`. */
 export const scheduledDayKey = (day: string) => `schedule.day:${day}`;
@@ -32,5 +32,28 @@ export async function recordScheduledToday(ctx: AccessContext, now = new Date())
   const upcoming = [...new Set(plan.blocks.filter((block) => block.id.startsWith("scheduled:") && block.day && block.day >= today && block.day < weekEnd)
     .map((block) => block.id.split(":")[1]!))];
   getStore().setSetting(ctx.workspaceId, UPCOMING_SETTING, JSON.stringify(upcoming));
+  // Where each step's next block starts, as an instant, for 「自动交给 Agent」 (the worker starts a step the system can do when its block
+  // comes up). Rewritten whole each time, so a step the plan moved or dropped stops being due.
+  const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
+  getStore().setSetting(ctx.workspaceId, STEP_STARTS_SETTING, JSON.stringify(stepStartsOf(plan.blocks, today, weekEnd, (day, time) => {
+    try { return toZonedInstant(day, time, zone); } catch { return undefined; }
+  })));
   return seen;
+}
+
+/**
+ * `scheduled:<order>:<step>[:n]` blocks from today to `until` (exclusive) → `{ "<order>#<step>": earliest start as ISO }`. A block
+ * whose third segment is not a step id (`v<version>s<n>`) is a whole-task block and has no step to hand over.
+ */
+export function stepStartsOf(blocks: Array<{ id: string; day?: string; start: string }>, today: string, until: string,
+  toInstant: (day: string, time: string) => string | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const block of blocks) {
+    const [kind, orderId, stepId] = block.id.split(":");
+    if (kind !== "scheduled" || !orderId || !stepId || !/^v\d+s\d+$/.test(stepId) || !block.day || block.day < today || block.day >= until) continue;
+    const at = toInstant(block.day, block.start);
+    const key = `${orderId}#${stepId}`;
+    if (at && (!out[key] || at < out[key]!)) out[key] = at;
+  }
+  return out;
 }

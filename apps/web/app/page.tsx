@@ -7,6 +7,8 @@ import { loadCurrentPlan } from "../lib/crossline";
 import { loadTaskDetailsBatch, loadMilestoneDetailsBatch } from "../lib/task-detail";
 import { loadAsks } from "../lib/asks";
 import { nextSlots } from "../lib/steps";
+import { loadFlywheelGraph } from "../lib/flywheel-graph";
+import { shiftDay } from "./timeline/model";
 
 export const dynamic = "force-dynamic";
 
@@ -23,14 +25,23 @@ export default async function HomePage() {
   const milestoneIds = data.milestonePulse.map((item) => item.id);
   const plan = await loadCurrentPlan(ctx);
   const workState = currentWorkState(ctx, plan);
+  const calendar = await loadTimeline(ctx, plan);
+  // The day panel beside the timeline shows the task behind a picked block: the coming week's tasks are read here in the same batch,
+  // so picking a block costs no request; a block further out is read when it is picked.
+  const weekEnd = shiftDay(calendar.today, 7);
+  const calendarOrderIds = [...new Set(calendar.items.filter((item) => item.workOrderId && item.day >= calendar.today && item.day < weekEnd)
+    .map((item) => item.workOrderId!))];
+  const details = loadTaskDetailsBatch(ctx, [...new Set([...taskWorkOrderIds, ...calendarOrderIds])]);
   return <DashboardView data={{
     ...data,
-    taskDetailById: loadTaskDetailsBatch(ctx, taskWorkOrderIds),
+    taskDetailById: details,
+    calendarDetails: Object.fromEntries(calendarOrderIds.flatMap((id) => details.has(id) ? [[id, details.get(id)!]] : [])),
     milestoneDetailById: loadMilestoneDetailsBatch(ctx, milestoneIds),
     slotById: nextSlots(plan.blocks, planToday(ctx)),
     // Kept out of `loadDashboard` for the same reason: `lib/asks.ts` imports from `lib/crossline.ts`.
     asks: await loadAsks(ctx),
-    calendar: await loadTimeline(ctx, plan),
+    calendar,
+    flywheelGraph: loadFlywheelGraph(ctx),
     ...(workState ? { workState } : {})
   }} />;
 }

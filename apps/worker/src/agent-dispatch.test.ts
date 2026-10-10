@@ -1,6 +1,7 @@
-import { afterEach, beforeEach, expect, test } from "vitest";
-import { agentApprovalDecision, approveCategory, CrosslineStore, declineCategory, decideAgentApproval, pendingAgentApprovals, pendingCategoryRequests, setPaused } from "@crossline/db";
-import { dispatchCandidates, ledgerAsk, taskFromWorkOrder } from "./agent-dispatch";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { agentApprovalDecision, approveCategory, CrosslineStore, declineCategory, decideAgentApproval, pendingAgentApprovals, pendingCategoryRequests, setAutoHandoff,
+  setCategoryMode, setPaused } from "@crossline/db";
+import { autoHandoffCandidates, dispatchCandidates, ledgerAsk, taskFromWorkOrder } from "./agent-dispatch";
 
 let store: CrosslineStore;
 let ws: string;
@@ -137,4 +138,76 @@ test("a preparation step the runtime lost (a stall, a restart) is tried again, u
   run(3, "SKILL_CANCELED");
   expect(stepDispatchCandidates(store, "w")).toEqual([]);
   store.close();
+});
+
+describe("自动交给 Agent", () => {
+  const NOW = new Date("2026-10-12T15:00:00.000Z");
+  const base = { deliverable: "对照表.md", doneCriterion: "完成", share: 0.25, estimate: { p25Minutes: 20, p50Minutes: 30, p85Minutes: 50 }, notBefore: "", dueBy: "", tickOutcome: "" };
+  const setup = () => {
+    store.saveWorkOrder({ id: "wo", ownerId: "o", workspaceId: ws, identityId: "research", projectId: "p", milestoneId: "m", intent: "文献综述",
+      state: "approved", riskTier: "milestone", estimate: { p25Minutes: 60, p50Minutes: 120, p85Minutes: 240, source: "llm_prior", observationCount: 0, confidence: "low" }, payload: {} });
+    store.saveStepPlan(ws, "wo", { archetypeId: "literature_review", quantity: { basis: "篇", amount: 8, unit: "篇" }, rationale: "", steps: [
+      { ...base, id: "a", role: "compare", title: "整理 8 篇文献的方法对照表", schedulable: true, executor: "mixed", dependsOn: [] },
+      { ...base, id: "b", role: "draft", title: "起草综述初稿", schedulable: true, executor: "mixed", dependsOn: ["a"] },
+      { ...base, id: "c", role: "decide", title: "确定综述的论证主线", schedulable: true, executor: "human", dependsOn: [] },
+      { ...base, id: "d", role: "gather", title: "汇编文献清单", schedulable: false, executor: "agent", dependsOn: [] }] }, "o", "planned");
+    const [a, b, c] = store.getStepPlan(ws, "wo")!.steps.map((step) => step.id);
+    setCategoryMode(store, ws, "read_research_organize", "review");
+    setCategoryMode(store, ws, "draft_text", "review");
+    return { a: a!, b: b!, c: c! };
+  };
+  const startsAt = (starts: Record<string, string>) => store.setSetting(ws, "schedule.stepStarts", JSON.stringify(starts));
+
+  test("off by default: a step on the calendar the system could do waits for 「交给 Agent」", () => {
+    const { a } = setup();
+    startsAt({ [`wo#${a}`]: "2026-10-12T15:10:00.000Z" });
+    expect(autoHandoffCandidates(store, ws, NOW)).toEqual({ due: [], early: [] });
+  });
+
+  test("on: a block within the lead time (or already started) is due, one later in the week is early, one with no block is left alone", () => {
+    const { a, c } = setup();
+    setAutoHandoff(store, ws, true);
+    startsAt({ [`wo#${a}`]: "2026-10-12T15:20:00.000Z", [`wo#${c}`]: "2026-10-12T15:00:00.000Z" });
+    // The person's own step never goes, even when its block has come up; the assistant's preparation step is not this switch's.
+    expect(autoHandoffCandidates(store, ws, NOW)).toEqual({ due: [{ orderId: "wo", stepId: a }], early: [] });
+    startsAt({ [`wo#${a}`]: "2026-10-14T15:00:00.000Z" });
+    expect(autoHandoffCandidates(store, ws, NOW)).toEqual({ due: [], early: [{ orderId: "wo", stepId: a }] });
+    startsAt({ [`wo#${a}`]: "2026-10-12T09:00:00.000Z" });
+    expect(autoHandoffCandidates(store, ws, NOW).due).toEqual([{ orderId: "wo", stepId: a }]);
+    startsAt({});
+    expect(autoHandoffCandidates(store, ws, NOW)).toEqual({ due: [], early: [] });
+  });
+
+  test("a step waits for its earlier steps and is handed over once; a paused assistant starts nothing", () => {
+    const { a, b } = setup();
+    setAutoHandoff(store, ws, true);
+    startsAt({ [`wo#${a}`]: "2026-10-12T15:00:00.000Z", [`wo#${b}`]: "2026-10-12T15:05:00.000Z" });
+    expect(autoHandoffCandidates(store, ws, NOW).due).toEqual([{ orderId: "wo", stepId: a }]);
+    store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: "r1", type: "agent.task.requested", entityId: "t1", payload: { taskId: "t1", workOrderId: "wo", stepId: a, title: "x", category: "read_research_organize" } });
+    // The first step is handed over and not done yet: the second still waits for it.
+    expect(autoHandoffCandidates(store, ws, NOW).due).toEqual([]);
+    store.updateStepProgress(ws, "wo", a, { status: "done" }, "o", "agent");
+    expect(autoHandoffCandidates(store, ws, NOW).due).toEqual([{ orderId: "wo", stepId: b }]);
+    setPaused(store, ws, true);
+    expect(autoHandoffCandidates(store, ws, NOW).due).toEqual([]);
+  });
+
+  test("while the person is timing the task, the assistant does not start on it under them", () => {
+    const { a } = setup();
+    setAutoHandoff(store, ws, true);
+    startsAt({ [`wo#${a}`]: "2026-10-12T15:00:00.000Z" });
+    store.transitionWorkOrder(ws, "wo", { type: "materials.not_required" }, "ready-1");
+    store.transitionWorkOrder(ws, "wo", { type: "human.started" }, "start-1");
+    expect(store.listWorkOrders(ws).find((item) => item.id === "wo")?.state).toBe("active");
+    expect(autoHandoffCandidates(store, ws, NOW).due).toEqual([]);
+  });
+
+  test("a kind not yet allowed is asked about once and the step waits", () => {
+    const { a } = setup();
+    setAutoHandoff(store, ws, true);
+    store.setSetting(ws, "agent.categories", "{}");
+    startsAt({ [`wo#${a}`]: "2026-10-12T15:00:00.000Z" });
+    expect(autoHandoffCandidates(store, ws, NOW).due).toEqual([]);
+    expect(pendingCategoryRequests(store, ws).map((item) => item.category)).toContain("read_research_organize");
+  });
 });

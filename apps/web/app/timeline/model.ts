@@ -22,6 +22,10 @@ export type TimelineItem = {
   milestone?: string;
   /** The work order a scheduled block stands for, so a click can open it. */
   workOrderId?: string;
+  /** The step the block is for (`v<version>s<n>`), when the plan placed a step rather than the whole task. */
+  stepId?: string;
+  /** The assistant has this block's step: `planned` = 「自动交给 Agent」 will start it when the block comes up; `running` = it is at work on it. */
+  agent?: "planned" | "running";
   source: string;
   readOnly: boolean;
 };
@@ -116,14 +120,29 @@ export function itemsFromPlan(blocks: PlanBlock[], today: string, meta: Record<s
   return blocks.map((block) => {
     const proposed = block.id.startsWith("proposed:"), optional = block.id.startsWith("optional:");
     const workOrderId = block.id.startsWith("scheduled:") || proposed || optional ? block.id.split(":")[1] : undefined;
+    const segment = workOrderId ? block.id.split(":")[2] : undefined;
+    const stepId = segment && /^v\d+s\d+$/.test(segment) ? segment : undefined;
     const known = workOrderId ? meta[workOrderId] : undefined;
     const kind: TimelineItem["kind"] = proposed ? "proposed" : optional ? "optional" : workOrderId ? "scheduled" : block.id.startsWith("import:") ? "import" : "calendar";
     return {
       id: block.id, title: block.task ?? block.title, day: block.day ?? today, start: block.start, end: block.end, kind,
       ...(block.step ? { step: block.step } : {}), ...(block.tag ? { tag: block.tag } : {}),
       ...(known ? { identityId: known.identityId } : {}), ...(known?.milestone ? { milestone: known.milestone } : {}),
-      ...(workOrderId ? { workOrderId } : {}), source: block.source, readOnly: block.readOnly
+      ...(workOrderId ? { workOrderId } : {}), ...(stepId ? { stepId } : {}), source: block.source, readOnly: block.readOnly
     };
+  });
+}
+
+/**
+ * Marks the blocks whose step the assistant has: `running` for a step it is at work on (`<order>#<step>`, or the whole order when
+ * the block is for the whole task), `planned` for a step 「自动交给 Agent」 will start by itself. Only scheduled and pencilled blocks.
+ */
+export function withAgentMarks(items: TimelineItem[], marks: { running: Set<string>; planned: Set<string> }): TimelineItem[] {
+  return items.map((item) => {
+    if (!item.workOrderId || (item.kind !== "scheduled" && item.kind !== "optional")) return item;
+    const key = item.stepId ? `${item.workOrderId}#${item.stepId}` : item.workOrderId;
+    const agent = marks.running.has(key) || marks.running.has(item.workOrderId) ? "running" as const : marks.planned.has(key) ? "planned" as const : undefined;
+    return agent ? { ...item, agent } : item;
   });
 }
 

@@ -63,11 +63,12 @@ export function DayTimeline({ day, items, deadlines, nowMinute, labels, quiet, s
               const resizable = Boolean(onResize && item.kind === "scheduled");
               const minutes = toMinutes(end) - toMinutes(item.start);
               return <button type="button" key={item.id} className="dv-block" data-line={lineOf(item.identityId)} data-kind={item.kind}
-                data-short={blockHeight < 40 || undefined} data-clash={clashes.has(item.id) || undefined} aria-pressed={selectedId === item.id}
+                data-agent={item.agent} data-work-order={item.workOrderId} data-short={blockHeight < 40 || undefined} data-clash={clashes.has(item.id) || undefined} aria-pressed={selectedId === item.id}
                 style={{ top, height: blockHeight, left: `${(column / columns) * 100}%`, width: `calc(${100 / columns}% - 4px)` }}
                 title={`${item.title}${item.step ? ` · ${item.step}` : ""} ${timeText({ start: item.start, end })}${item.identityId ? ` · ${labels[item.identityId] ?? item.identityId}` : ""}`}
                 onClick={() => onSelect?.(item)}>
-                <span className="dv-block-head"><b>{item.title}</b>{item.tag && <em className="dv-tag">{item.tag}</em>}</span>
+                <span className="dv-block-head"><b>{item.title}</b>{item.tag && <em className="dv-tag">{item.tag}</em>}
+                  {item.agent && <em className="dv-tag" data-agent={item.agent}>{item.agent === "running" ? "Agent 执行中" : "Agent 将执行"}</em>}</span>
                 <small>{item.step ? `${item.step} · ` : ""}<span className="mono">{timeText({ start: item.start, end })}</span>{minutes >= 60 ? ` · ${Math.round(minutes / 6) / 10} 小时` : ` · ${minutes} 分`}</small>
                 {resizable && <i className="dv-resize" aria-hidden="true" title="拖动调整时长"
                   onClick={(event) => event.stopPropagation()}
@@ -127,7 +128,7 @@ export function WeekView({ anchor, today, items, deadlines, labels, selectedId, 
             {packed.map(({ item, column, columns }) => {
               const top = (toMinutes(item.start) / 60) * HOUR_PX;
               const height = Math.max(((toMinutes(item.end) - toMinutes(item.start)) / 60) * HOUR_PX, 14);
-              return <button type="button" key={item.id} className="wk-block" data-line={lineOf(item.identityId)} data-kind={item.kind} aria-pressed={selectedId === item.id}
+              return <button type="button" key={item.id} className="wk-block" data-line={lineOf(item.identityId)} data-kind={item.kind} data-work-order={item.workOrderId} aria-pressed={selectedId === item.id}
                 style={{ top, height, left: `${(column / columns) * 100}%`, width: `${100 / columns}%` }} onClick={() => onSelect?.(item)}
                 title={`${item.title} ${timeText(item)}${item.identityId ? ` · ${labels[item.identityId] ?? item.identityId}` : ""}`}>
                 <b>{item.title}</b><small>{item.start}</small>

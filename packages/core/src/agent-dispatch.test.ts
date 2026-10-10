@@ -1,5 +1,22 @@
 import { describe, expect, test } from "vitest";
-import { AGENT_CATEGORIES, isAgentCategory, planAssistantTask, type DispatchableOrder } from "./agent-dispatch";
+import { AGENT_CATEGORIES, AUTO_HANDOFF_LEAD_MINUTES, autoHandoffTiming, isAgentCategory, planAssistantTask, stepCategory, type DispatchableOrder } from "./agent-dispatch";
+
+describe("自动交给 Agent: when a handed-over step may start", () => {
+  const now = new Date("2026-10-12T15:00:00.000Z");
+  test("due within the lead time or once its block has started, early later in the week, never without a block", () => {
+    expect(AUTO_HANDOFF_LEAD_MINUTES).toBe(30);
+    expect(autoHandoffTiming("2026-10-12T15:30:00.000Z", now)).toBe("due");
+    expect(autoHandoffTiming("2026-10-12T15:31:00.000Z", now)).toBe("early");
+    expect(autoHandoffTiming("2026-10-12T08:00:00.000Z", now)).toBe("due");
+    expect(autoHandoffTiming(undefined, now)).toBe("unscheduled");
+    expect(autoHandoffTiming("not a date", now)).toBe("unscheduled");
+  });
+  test("a step's kind comes from its role; a step the planner gave the assistant outright is reading and organising", () => {
+    expect(stepCategory({ role: "draft", executor: "mixed" })).toBe("draft_text");
+    expect(stepCategory({ role: "decide", executor: "mixed" })).toBeUndefined();
+    expect(stepCategory({ role: "decide", executor: "agent" })).toBe("read_research_organize");
+  });
+});
 
 const order = (over: Partial<DispatchableOrder> & { ai?: string[]; human?: string[] } = {}): DispatchableOrder => ({
   id: "wo-1", intent: over.intent ?? "整理资料", state: "approved", projectId: "p",

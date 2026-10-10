@@ -28,10 +28,6 @@
 .cal-nav b{margin-left:6px;font-size:14px}
 .cal-legend{display:flex;flex-wrap:wrap;gap:4px 10px;margin-left:auto;font-size:13px;min-width:0}
 .cal-legend span::before{content:"";display:inline-block;width:10px;height:10px;margin-right:5px;background:var(--lc);vertical-align:-1px}
-.cal-detail{display:flex;flex-wrap:wrap;gap:4px 14px;align-items:baseline;padding:6px 10px;border:1px solid var(--lc,var(--ink));border-left-width:4px;font-size:13px}
-.cal-detail b{font-size:14px}
-.cal-detail a{text-decoration:underline;font-weight:700}
-.cal-detail button{margin-left:auto;color:var(--graphite);text-decoration:underline}
 
 /* day: read top to bottom; each block as tall as it is long, its title in full; quick actions beside it */
 .dv{display:grid;grid-template-columns:minmax(0,1fr);gap:12px}
@@ -70,14 +66,6 @@
 .dv-empty{position:absolute;left:58px;right:0;top:60px;margin:0;padding:0 16px;text-align:center;color:var(--graphite)}
 .dv-now{position:absolute;left:52px;right:0;height:0;border-top:2px solid var(--now);pointer-events:none;z-index:2}
 .dv-now i{position:absolute;left:-52px;top:-9px;padding:0 4px;background:var(--now);color:#fff;font-size:12px;font-style:normal;line-height:16px}
-.dq{display:grid;gap:8px;padding:10px;border:1px solid var(--mist);background:var(--paper)}
-.dq h3{margin:0;font-size:13px;color:var(--graphite);font-weight:700}
-.dq-row{display:grid;gap:4px}
-.dq-row button,.dq-row a{justify-self:start}
-.dq-list{margin:0;padding:0;list-style:none;display:grid;gap:2px;font-size:13px}
-.dq-list li{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.dq-meter{display:block;height:6px;background:var(--mist)}
-.dq-meter i{display:block;height:100%;background:var(--ink)}
 
 /* week: seven columns sharing one hour axis */
 .wk-scroll{overflow-x:auto;border:1px solid var(--mist)}
@@ -129,9 +117,6 @@
   .cal-legend{margin-left:0}
 }
 
-/* ── milestone progress bar (Today line cards) ── */
-.flow-progress{position:absolute;left:0;right:0;bottom:0;height:4px;background:var(--mist)}
-.flow-progress i{display:block;height:100%;background:var(--lc)}
 .flow-empty{margin:0;padding:14px;border:1px dashed var(--mist);color:var(--graphite)}
 
 .fold{border:1px solid var(--mist)}
@@ -154,11 +139,6 @@
 .day-stats .time-bar{display:block;margin-top:3px}
 .day-energy{display:flex;align-items:center;gap:8px;font-size:13px}
 .today-grid{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:8px;background:none;border:0}
-.lines-strip{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px}
-.line-card{position:relative;display:block;border-left:4px solid var(--lc)}
-.line-card header h3{color:var(--lc)}
-.line-card p{margin:2px 0 8px;font-size:13px;min-height:2.6em}
-.line-card .flow-progress{left:0;right:0}
 .capture-line{display:block}
 .capture-line>*+*{margin-top:6px}
 .care-band{display:block;padding:0;border:0}

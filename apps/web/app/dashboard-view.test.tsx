@@ -37,13 +37,20 @@ describe("dashboard view", () => {
       ],
       upcoming: [], milestonePulse: [], todayCapacity: { availableMinutes: 0, committedMinutes: 0 }, flywheel: [], flywheelStrip: { nodes: [], edges: [] },
       taskDetailById: new Map([["paper", detailFor("paper", "完成论文结果段", "research")], ["meal", detailFor("meal", "准备晚饭", "capacity")],
-        ["reply", detailFor("reply", "确认会议", "startup")]]), milestoneDetailById: new Map()
+        ["reply", detailFor("reply", "确认会议", "startup")]]), milestoneDetailById: new Map(),
+      // The lines are drawn in the flywheel graph that replaced the per-line cards; its legend keeps each line's tasks in progress.
+      flywheelGraph: { lines: [
+        { id: "research", label: "科研", goal: "", openTasks: 3 }, { id: "startup", label: "创业", goal: "", openTasks: 2 },
+        { id: "media", label: "自媒体", goal: "", openTasks: 1 }, { id: "investment", label: "投资", goal: "", openTasks: 2 }],
+        milestones: [{ id: "m1", line: "research", title: "完成当前实验与论文结果段", status: "approved", openTasks: 3, dependsOn: [] }], relations: [] }
     }} />);
 
     expect(html).toContain("下一步");
     expect(html).toContain("完成论文结果段");
     expect(html).toContain("低精力备选");
     expect(html).toContain("短空档备选");
+    expect(html).toContain("飞轮图谱");
+    expect(html).not.toContain("lines-strip");
     for (const label of ["科研", "创业", "自媒体", "投资"]) expect(html).toContain(label);
   });
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { MenuButton } from "../ui/controls";
 import { createCommand, enqueue, nextSequence, type OfflineCommandType } from "../offline-queue";
 
@@ -25,12 +25,19 @@ async function post(path: string, body: unknown): Promise<{ ok: boolean; code?: 
  * countdown), 暂停 with a reason / 继续计时 (a running session), and 交给 Agent when the system can do the work or one of its steps.
  * Archiving sits in the overflow menu. Completion and evidence are in the task dialog, where the person can see what is being handed in.
  */
-export function TaskActions({ workOrderId, state, paused, agentReady, agentStepId, onOpen, offline }: {
-  workOrderId: string; state: string; paused: boolean; agentReady: boolean; onOpen?: () => void;
+export function TaskActions({ workOrderId, state, paused, agentReady, agentStepId, onOpen, offline, beforeStart, children }: {
+  workOrderId: string; state: string; paused: boolean; agentReady: boolean; onOpen?: (() => void) | undefined;
   /** The step 「交给 Agent」 hands over (the first one the system can do); without it, the whole task. */
   agentStepId?: string | undefined;
   /** Who and which workspace a command queued offline belongs to, and the title the offline list shows. */
   offline?: { ownerId: string; workspaceId: string; intent: string };
+  /**
+   * Runs before the timer starts; a message stops the start and is shown. A pencilled-in block on the day view becomes formal here
+   * (`pinIfPencilled`), so starting from a block and starting from a card are the same path.
+   */
+  beforeStart?: (() => Promise<string | null>) | undefined;
+  /** More buttons beside the primary one (the day panel's 完成并提交材料 and 推迟), before the overflow menu. */
+  children?: ReactNode;
 }) {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
@@ -63,7 +70,10 @@ export function TaskActions({ workOrderId, state, paused, agentReady, agentStepI
   const start = () => {
     // The countdown notifies when the usual duration is up; the browser asks once, on the first start.
     try { if ("Notification" in window && Notification.permission === "default") void Notification.requestPermission(); } catch { /* unsupported */ }
-    void run(() => execution({ action: "start" }), () => { location.href = `/workbench/${encodeURIComponent(workOrderId)}`; });
+    void run(async () => {
+      const refused = beforeStart ? await beforeStart() : null;
+      return refused ? { ok: false, message: refused } : execution({ action: "start" });
+    }, () => { location.href = `/workbench/${encodeURIComponent(workOrderId)}`; });
   };
   const delegate = () => void run(async () => {
     const result = await post("/api/agent/dispatch", { workOrderId, ...(agentStepId ? { stepId: agentStepId } : {}) });
@@ -85,6 +95,7 @@ export function TaskActions({ workOrderId, state, paused, agentReady, agentStepI
       <button type="button" onClick={() => setPausing(false)} aria-label="取消暂停">×</button>
     </span>}
     {agentReady && !["accepted", "archived", "evidence_review"].includes(state) && <button type="button" disabled={busy} onClick={delegate}>交给 Agent</button>}
+    {children}
     {onOpen && <button type="button" onClick={onOpen}>打开</button>}
     {!["accepted", "archived"].includes(state) && <MenuButton label="更多操作" icon="⋯" items={[{ label: "归档", hint: "可在已归档中恢复", onSelect: () => setArchiving(true) }]} />}
     {archiving && <span className="task-actions-choices">

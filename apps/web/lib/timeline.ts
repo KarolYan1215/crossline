@@ -1,10 +1,11 @@
 import "server-only";
 import type { AccessContext, AvailabilityWindow } from "@crossline/core";
-import { CALENDAR_LINES, CATEGORY_LABEL, calendarLineOf, currentFiling, importedProjects, importedTitle, itemProjectResolver, inferWorkState, suggestAvailability, type ActivitySegment, type CalendarLines, type WorkState } from "@crossline/core";
+import { CALENDAR_LINES, CATEGORY_LABEL, calendarLineOf, currentFiling, importedProjects, importedTitle, itemProjectResolver, inferWorkState, stepCategory, suggestAvailability, type ActivitySegment, type CalendarLines, type WorkState } from "@crossline/core";
+import { isAutoHandoff, isPaused, listAgentTasks, readCategories } from "@crossline/db";
 import {
   ACTIVITY_DETAIL_CONSENT, effectiveSchedulePreferences, getStore, loadCurrentPlan, planToday, readAvailability, toZonedInstant
 } from "./crossline";
-import { itemsFromPlan, toMinutes, type TimelineDeadline, type TimelineItem } from "../app/timeline/model";
+import { itemsFromPlan, toMinutes, withAgentMarks, type TimelineDeadline, type TimelineItem } from "../app/timeline/model";
 import { identityLines } from "./lines";
 import { inputEvents } from "./fixed-events";
 
@@ -105,7 +106,7 @@ export async function loadTimeline(ctx: AccessContext, loaded?: Awaited<ReturnTy
   const knownProjects = store.listProjects(ctx.workspaceId).map((project) => ({ id: project.id, name: project.name, identityId: project.identityId }));
   const projectOfItem = itemProjectResolver(knownProjects, store.listSourceDocuments(ctx.workspaceId));
   const imported = importedProjects(store.listEvents(ctx.workspaceId, { type: "dates.extracted" }), projectOfItem);
-  const items = [...itemsFromPlan(plan.blocks, today, meta).map((item) => {
+  const items = [...withAgentMarks(itemsFromPlan(plan.blocks, today, meta), agentMarks(ctx)).map((item) => {
     if (item.kind !== "calendar" && item.kind !== "import") return item;
     const named = item.kind === "import" ? { ...item, title: importedTitle(item.id, item.title, imported) } : item;
     if (named.identityId) return named;
@@ -143,6 +144,29 @@ export async function loadTimeline(ctx: AccessContext, loaded?: Awaited<ReturnTy
     proposals: store.listWorkOrders(ctx.workspaceId).filter((order) => order.state === "awaiting_plan_approval" && !(order.payload as { seeded?: boolean }).seeded)
       .map((order) => ({ id: order.id, title: order.intent }))
   };
+}
+
+/**
+ * Which blocks the assistant has (「Agent 执行中」 / 「Agent 将执行」 on the day view). Running: a run with no outcome yet, keyed by step
+ * (or by order for a whole-task run). Planned: with 「自动交给 Agent」 on and the assistant not paused, a planned step the system can do
+ * (`executor: "mixed"`), of a kind the person allowed, not yet handed over — the worker's own rule (`autoHandoffCandidates`), less the
+ * timing, which the block itself shows.
+ */
+function agentMarks(ctx: AccessContext): { running: Set<string>; planned: Set<string> } {
+  const store = getStore();
+  const tasks = listAgentTasks(store, ctx.workspaceId);
+  const running = new Set(tasks.filter((task) => task.status === "running").map((task) => task.stepId ? `${task.workOrderId}#${task.stepId}` : task.workOrderId));
+  const planned = new Set<string>();
+  if (isAutoHandoff(store, ctx.workspaceId) && !isPaused(store, ctx.workspaceId)) {
+    const approved = readCategories(store, ctx.workspaceId);
+    const handed = new Set(tasks.filter((task) => task.stepId).map((task) => `${task.workOrderId}#${task.stepId}`));
+    for (const plan of store.listStepPlans(ctx.workspaceId)) for (const step of plan.steps) {
+      const category = stepCategory(step);
+      if (step.executor === "mixed" && step.status === "planned" && step.schedulable && category && approved[category] && !handed.has(`${plan.workOrderId}#${step.id}`))
+        planned.add(`${plan.workOrderId}#${step.id}`);
+    }
+  }
+  return { running, planned };
 }
 
 /** The calendar filing against the current lines (`currentFiling`: a changed set of lines keeps only the person's own answers). */

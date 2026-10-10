@@ -1,4 +1,4 @@
-import { AGENT_CATEGORIES, DISPATCH_STATES, isAgentCategory, isCourse, planAssistantTask, type AgentCategory, type AssistantPlan } from "@crossline/core";
+import { AGENT_CATEGORIES, AUTO_HANDOFF_SETTING, DISPATCH_STATES, isAgentCategory, isCourse, planAssistantTask, type AgentCategory, type AssistantPlan } from "@crossline/core";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { latestFileDates, type CrosslineStore } from "./index";
@@ -50,6 +50,9 @@ export function setCategoryMode(store: CrosslineStore, workspaceId: string, cate
 export const categoryMode = (state: CategoryState | undefined): CategoryMode => !state ? "off" : state.trust === "auto_checked" ? "auto" : "review";
 export const isPaused = (store: CrosslineStore, workspaceId: string): boolean => store.getSetting(workspaceId, PAUSED) === "1";
 export const setPaused = (store: CrosslineStore, workspaceId: string, paused: boolean): void => store.setSetting(workspaceId, PAUSED, paused ? "1" : "0");
+/** 「自动交给 Agent」 (`AUTO_HANDOFF_SETTING` in core): off unless the person turned it on. */
+export const isAutoHandoff = (store: CrosslineStore, workspaceId: string): boolean => store.getSetting(workspaceId, AUTO_HANDOFF_SETTING) === "1";
+export const setAutoHandoff = (store: CrosslineStore, workspaceId: string, on: boolean): void => store.setSetting(workspaceId, AUTO_HANDOFF_SETTING, on ? "1" : "0");
 
 /** The person's verdict on a result. An accepted one earns trust; a rejected one, or one that failed its own checks, takes it away. */
 export function recordReview(store: CrosslineStore, workspaceId: string, category: AgentCategory, accepted: boolean): CategoryState | undefined {

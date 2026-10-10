@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import type { CostSignal } from "@crossline/core";
-import { approveCategory, CrosslineStore, listAgentTasks, pendingCategoryRequests, reviewAgentTask } from "@crossline/db";
+import { approveCategory, CrosslineStore, listAgentTasks, pendingCategoryRequests, reviewAgentTask, setAutoHandoff, setCategoryMode } from "@crossline/db";
 import { createAgentService } from "./agent-service";
 import { AGENT_SKILL } from "./agent-task";
 import { fakeRuntime } from "./testing/fake-runtime";
@@ -94,6 +94,29 @@ test("a delegated errand's accepted result is handed in as the order's evidence"
   const claims = store.listEvidenceClaims(ws).filter((claim) => claim.workOrderId === "wo-d");
   expect(claims).toHaveLength(1);
   expect(claims[0]!.uri).toMatch(/^file:.*n\.md$/);
+});
+
+// 「自动交给 Agent」: a step the system can do whose block has come up goes before any other work the assistant would pick up, and its
+// result follows the kind's mode — in 自动, a clean run is the step done without a review.
+test("with 自动交给 Agent on, the tick starts a due step first, and a trusted kind's clean run marks it done", async () => {
+  setCategoryMode(store, ws, "read_research_organize", "auto");
+  order("wo-1", ["整理并摘要这三篇文献"]);
+  store.saveWorkOrder({ id: "wo-s", ownerId: "o", workspaceId: ws, identityId: "research", projectId: "p", milestoneId: "m", intent: "文献综述", state: "approved",
+    riskTier: "routine", estimate, payload: {} });
+  store.saveStepPlan(ws, "wo-s", { archetypeId: "literature_review", quantity: { basis: "篇", amount: 3, unit: "篇" }, rationale: "", steps: [
+    { id: "a", role: "compare", title: "整理三篇文献的方法对照表", deliverable: "对照表.md", doneCriterion: "完成", share: 1, estimate: { p25Minutes: 20, p50Minutes: 30, p85Minutes: 50 },
+      dependsOn: [], notBefore: "", dueBy: "", tickOutcome: "", schedulable: true, executor: "mixed" }] }, "o", "planned");
+  const stepId = store.getStepPlan(ws, "wo-s")!.steps[0]!.id;
+  const now = new Date("2026-10-12T15:00:00.000Z");
+  store.setSetting(ws, "schedule.stepStarts", JSON.stringify({ [`wo-s#${stepId}`]: "2026-10-12T15:15:00.000Z" }));
+  setAutoHandoff(store, ws, true);
+  const { svc } = service();
+  // The whole order wo-1 is also waiting; the step whose block comes up in fifteen minutes goes first.
+  await svc.pass(ws, now);
+  await settled(svc);
+  expect(listAgentTasks(store, ws)).toHaveLength(1);
+  expect(listAgentTasks(store, ws)[0]).toMatchObject({ workOrderId: "wo-s", stepId, status: "accepted" });
+  expect(store.getStepPlan(ws, "wo-s")!.steps[0]!.status).toBe("done");
 });
 
 test("at startup a run with no outcome is recorded as lost, not shown as running for eight hours", () => {

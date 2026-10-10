@@ -10,6 +10,8 @@ import { AppShell } from "./app-shell";
 import { TaskCard, type TaskSlot } from "./task/task-card";
 import { CalendarPanel } from "./timeline/calendar-panel";
 import type { CalendarData } from "./plan/plan-view";
+import { FlywheelGraph } from "./flywheel/flywheel-graph";
+import type { FlywheelGraphData } from "./flywheel/graph-model";
 
 export type DashboardAction = {
   id: string;
@@ -71,6 +73,10 @@ export type DashboardData = {
   slotById?: Map<string, TaskSlot>;
   /** What the day timeline draws. Absent in tests that only care about the cards. */
   calendar?: CalendarData;
+  /** The tasks behind the coming week's blocks, for the panel beside the day (a plain object: it crosses to the client). */
+  calendarDetails?: Record<string, TaskDetail>;
+  /** The flywheel graph: lines, live milestones and the relations between them (`lib/flywheel-graph.ts`). */
+  flywheelGraph?: FlywheelGraphData;
   /** Present only when the person agreed to the detailed screen record; a reading, with its reasons, never a verdict. */
   workState?: { state: string; label: string; confidence: "low" | "medium" | "high"; reasons: string[] };
 };
@@ -146,16 +152,14 @@ export function DashboardView({ data }: { data: DashboardData }) {
       {data.calendar && <section className="panel" aria-label="今天的时间轴">
         <header><h2>今天的时间轴</h2><a href="/plan">打开计划 →</a></header>
         <CalendarPanel items={data.calendar.items} deadlines={data.calendar.deadlines} today={data.calendar.today} nowIso={data.calendar.nowIso}
-          timeZone={data.calendar.timeZone} labels={data.calendar.labels} quietByWeekday={data.calendar.quietByWeekday} proposals={data.calendar.proposals} />
+          timeZone={data.calendar.timeZone} labels={data.calendar.labels} quietByWeekday={data.calendar.quietByWeekday} proposals={data.calendar.proposals}
+          taskDetails={data.calendarDetails} />
       </section>}
 
-      <section className="lines-strip" aria-label="各主线现在在哪">
-        {data.identities.map((line) => <a key={line.id} className="panel line-card" data-line={line.id} href="/milestones">
-          <header><h3>{line.label}</h3><small>{line.taskCount} 项进行中</small></header>
-          <p>{line.activeMilestone}</p>
-          <span className="flow-progress" aria-hidden="true"><i style={{ width: `${line.pct}%` }} /></span>
-        </a>)}
-      </section>
+      {data.flywheelGraph && <section className="panel" aria-labelledby="flywheel-title">
+        <header><h2 id="flywheel-title">飞轮图谱</h2><a href="/milestones">打开主线 →</a></header>
+        <FlywheelGraph data={data.flywheelGraph} />
+      </section>}
 
       {data.care.length > 0 && <section className="care-band" aria-label="健康容量策略">
         <dl>{data.care.map((item) => <div key={item.title}><dt>{item.title}</dt><dd>最低 {item.minimumMinutes} 分钟</dd></div>)}</dl>

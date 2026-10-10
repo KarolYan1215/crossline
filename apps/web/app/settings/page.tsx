@@ -1,5 +1,5 @@
 import { AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, CATEGORY_LABEL, SLEEP_TRACKING_CONSENT, type ActivityCategory, type AgentHistorySummary } from "@crossline/core";
-import { categoryMode, readCategories } from "@crossline/db";
+import { categoryMode, isAutoHandoff, readCategories } from "@crossline/db";
 import { SubpageShell } from "../subpage-shell";
 import { LocalActivityToggle } from "./local-activity-toggle";
 import { AgentHistoryCard } from "./agent-history-card";
@@ -111,7 +111,7 @@ export default async function SettingsPage() {
         </section>
 
         <section id="automation" className="st-section" aria-labelledby="st-automation"><h2 id="st-automation">自动化与助手</h2>
-          <AutomationModule paused={assistant.paused} permissionMode={permissionModeEnabled(ctx)}
+          <AutomationModule paused={assistant.paused} permissionMode={permissionModeEnabled(ctx)} autoHandoff={isAutoHandoff(store, ctx.workspaceId)}
             categories={assistant.categories.map((item) => ({ category: item.category, label: item.label, explained: item.explained,
               mode: categoryMode(states[item.category]), cleanRuns: item.cleanRuns, runsToTrust: item.runsToTrust }))}
             recent={assistant.tasks.slice(0, 8).map((task) => ({ taskId: task.taskId, title: task.title, kind: assistant.categories.find((item) => item.category === task.category)?.label ?? "",

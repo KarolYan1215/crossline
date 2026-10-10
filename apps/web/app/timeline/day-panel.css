@@ -1,0 +1,62 @@
+/* The day panel beside the timeline (Today): load on top, the picked block (or the next one) below, a row of ways out at the bottom. */
+.dv[data-has-aside]{grid-template-columns:minmax(250px,320px) minmax(0,1fr)}
+@media (max-width:820px){
+  .dv[data-has-aside]{grid-template-columns:minmax(0,1fr)}
+}
+.dq{display:grid;grid-template-rows:auto 1fr auto;gap:10px;padding:10px;border:1px solid var(--mist);background:var(--paper);min-width:0;align-content:start}
+.dq h3{margin:0;font-size:13px;color:var(--graphite);font-weight:700}
+.dq-load{display:grid;gap:4px}
+.dq-meter{display:flex;height:6px;background:var(--mist)}
+.dq-meter i{display:block;height:100%;background:var(--ink)}
+.dq-meter i[data-kind="optional"]{background:repeating-linear-gradient(135deg,var(--ink) 0 2px,var(--paper) 2px 4px)}
+.dq-meter i[data-kind="fixed"]{background:var(--graphite)}
+.dq-load small{font-size:12px;color:var(--graphite)}
+
+.dq-switch{min-width:0}
+.dq-focus{display:grid;gap:6px;min-width:0;padding-left:8px;border-left:4px solid var(--lc,var(--mist))}
+.dq-focus-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+.dq-close{font:inherit;font-size:12px;color:var(--graphite);text-decoration:underline;background:none;border:0;padding:0;cursor:pointer;min-height:24px}
+.dq-where{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:baseline;margin:0;font-size:13px;min-width:0}
+.dq-milestone{color:var(--ink);min-width:0;overflow-wrap:anywhere}
+.dq-milestone::before{content:"→ ";color:var(--graphite)}
+.dq-title{margin:0;font-size:15px;font-weight:700;line-height:1.35;color:var(--ink);overflow-wrap:anywhere}
+.dq-meta{margin:0;font-size:13px;color:var(--graphite);overflow-wrap:anywhere}
+.dq-meta small{font-size:12px}
+.dq-agent{margin:0}
+.dq-step{display:grid;gap:3px;font-size:13px}
+.dq-step small,.dq-part small{font-size:12px;color:var(--graphite)}
+.dq-step-title{overflow-wrap:anywhere}
+.dq-progress{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;align-items:center}
+.dq-progress b{font-size:12px}
+.dq-part{display:grid;gap:2px}
+.dq-part ul{margin:0;padding-left:16px;font-size:13px}
+.dq-focus .task-quick-edit{flex-wrap:wrap}
+.dq-focus .task-actions{flex-wrap:wrap}
+.dq-defer{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:13px}
+.dq-defer label{display:inline-flex;gap:4px;align-items:center}
+.dq-defer input{font:inherit;font-size:13px;min-width:0}
+.dq-empty{margin:0;font-size:13px;color:var(--graphite)}
+
+.dq-links{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;padding-top:8px;border-top:1px solid var(--mist);font-size:13px}
+.dq-link{display:inline-flex;gap:6px;align-items:center}
+.dq-links a{color:var(--ink);text-decoration:underline}
+
+/* 完成并提交材料 */
+.dq-complete{display:grid;gap:10px;min-width:0}
+.dq-complete-task{margin:0;font-size:14px;overflow-wrap:anywhere}
+.dq-complete-task small{color:var(--graphite);font-size:13px}
+.dq-complete-note{display:grid;gap:4px;font-size:13px}
+.dq-complete-note input{font:inherit;font-size:14px;padding:6px 8px;border:1px solid var(--mist);background:var(--paper);color:var(--ink);min-width:0}
+.dq-drop{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;padding:14px;border:2px dashed var(--mist);font-size:13px}
+.dq-drop[data-over]{border-color:var(--ink);background:var(--chalk)}
+.dq-drop small{flex-basis:100%;font-size:12px;color:var(--graphite)}
+.dq-files{list-style:none;margin:0;padding:0;display:grid;gap:4px;font-size:13px}
+.dq-files li{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:8px;align-items:center}
+.dq-files li span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dq-files li small{font-size:12px;color:var(--graphite)}
+.dq-files button{font:inherit;background:none;border:0;cursor:pointer;color:var(--ink);min-width:28px;min-height:28px}
+.dq-complete-hint{margin:0;font-size:13px;color:var(--graphite)}
+.dq-complete-actions{display:flex;flex-wrap:wrap;gap:8px}
+
+/* A block the assistant has, on the day timeline. */
+.dv-block[data-agent] .dv-tag[data-agent]{border-style:dashed}

@@ -1,8 +1,8 @@
 import { fileURLToPath } from "node:url";
-import { DISPATCH_STATES, isAgentCategory, prepStepRetried, type AgentCategory } from "@crossline/core";
+import { DISPATCH_STATES, STEP_STARTS_SETTING, autoHandoffTiming, isAgentCategory, prepStepRetried, stepCategory, type AgentCategory } from "@crossline/core";
 import {
-  agentApprovalDecision, assistantPlanFor, decideAgentApproval, declinedCategories, isPaused, listAgentTasks, readCategories, requestAgentApproval, requestCategory,
-  type CrosslineStore
+  agentApprovalDecision, assistantPlanFor, decideAgentApproval, declinedCategories, isAutoHandoff, isPaused, listAgentTasks, readCategories, requestAgentApproval,
+  requestCategory, type CrosslineStore
 } from "@crossline/db";
 import type { AgentTaskInput } from "./agent-task";
 
@@ -16,13 +16,6 @@ import type { AgentTaskInput } from "./agent-task";
 export type TaskFromOrder = { ok: true; input: AgentTaskInput; category: AgentCategory | undefined; why: string; graded: boolean }
   | { ok: false; code: "ORDER_NOT_FOUND" | "ORDER_NOT_DISPATCHABLE" | "NOTHING_FOR_ASSISTANT"; message: string };
 
-/** The kind of work a step is, read from its role, for handing one step over (「交给 Agent」 on a step). */
-const STEP_CATEGORY: Record<string, AgentCategory> = {
-  gather: "read_research_organize", read: "read_research_organize", compare: "read_research_organize", analyze: "read_research_organize",
-  summarize: "read_research_organize", record: "read_research_organize", learn: "read_research_organize",
-  outline: "draft_text", draft: "draft_text", revise: "draft_text", check: "draft_text",
-  build: "data_code_sim", test: "data_code_sim", prepare: "files_calendar_prep", book: "files_calendar_prep", handle: "files_calendar_prep"
-};
 
 /**
  * One step of a task, as a task for the assistant: the step's title, what it produces and how it is judged done. Only a step the step
@@ -37,7 +30,7 @@ function taskFromStep(store: CrosslineStore, workspaceId: string, orderId: strin
     return { ok: false, code: "ORDER_NOT_DISPATCHABLE", message: "该步骤需要本人完成" };
   const inputs = store.listSourceDocuments(workspaceId).filter((doc) => (doc.projectId === order.projectId || !doc.projectId) && doc.uri.startsWith("file:"))
     .flatMap((doc) => { try { return [fileURLToPath(doc.uri)]; } catch { return []; } });
-  const category = categoryOverride ?? STEP_CATEGORY[step.role] ?? (step.executor === "agent" ? "read_research_organize" : undefined);
+  const category = categoryOverride ?? stepCategory(step);
   const attempt = listAgentTasks(store, workspaceId).filter((task) => task.workOrderId === orderId).length + 1;
   const plan = store.getStepPlan(workspaceId, orderId);
   const units = (plan?.units ?? []).filter((unit) => (step.covers ?? []).includes(unit.id)).map((unit) => `- ${unit.title}（${unit.quote}）`);
@@ -115,14 +108,7 @@ export function stepDispatchCandidates(store: CrosslineStore, workspaceId: strin
   if (isPaused(store, workspaceId)) return [];
   const approved = readCategories(store, workspaceId);
   const declined = new Set(declinedCategories(store, workspaceId));
-  // A step stays tried once a run of it finished, is going, or failed for a reason of its own; a run the runtime lost (a stall, a restart,
-  // a cancelled turn) is tried again, at most three times in all.
-  const runs = new Map<string, Array<{ status: string; blockerCode?: string | undefined }>>();
-  for (const task of listAgentTasks(store, workspaceId).filter((item) => item.stepId)) {
-    const key = `${task.workOrderId}#${task.stepId}`;
-    runs.set(key, [...(runs.get(key) ?? []), task]);
-  }
-  const tried = new Set([...runs].filter(([, list]) => !prepStepRetried(list)).map(([key]) => key));
+  const tried = triedSteps(store, workspaceId);
   const orders = new Map(store.listWorkOrders(workspaceId).filter((order) => !order.tombstone && (DISPATCH_STATES.has(order.state) || order.state === "active"))
     .map((order) => [order.id, order]));
   const out: Array<{ orderId: string; stepId: string; due: string; seq: number }> = [];
@@ -131,13 +117,76 @@ export function stepDispatchCandidates(store: CrosslineStore, workspaceId: strin
     const due = (orders.get(plan.workOrderId)!.payload as { dueDate?: string } | undefined)?.dueDate ?? "9999";
     for (const step of plan.steps) {
       if (step.executor !== "agent" || step.status !== "planned" || tried.has(`${plan.workOrderId}#${step.id}`)) continue;
-      const category = STEP_CATEGORY[step.role] ?? "read_research_organize";
+      const category = stepCategory(step) ?? "read_research_organize";
       if (declined.has(category)) continue;
       if (!approved[category]) { requestCategory(store, workspaceId, category, plan.workOrderId, `准备步骤「${step.title}」`); continue; }
       out.push({ orderId: plan.workOrderId, stepId: step.id, due, seq: step.seq });
     }
   }
   return out.sort((a, b) => a.due.localeCompare(b.due) || a.seq - b.seq).map(({ orderId, stepId }) => ({ orderId, stepId }));
+}
+
+/**
+ * Steps already handed over: a step stays tried once a run of it finished, is going, or failed for a reason of its own; a run the
+ * runtime lost (a stall, a restart, a cancelled turn) is tried again, at most three times in all.
+ */
+function triedSteps(store: CrosslineStore, workspaceId: string): Set<string> {
+  const runs = new Map<string, Array<{ status: string; blockerCode?: string | undefined }>>();
+  for (const task of listAgentTasks(store, workspaceId).filter((item) => item.stepId)) {
+    const key = `${task.workOrderId}#${task.stepId}`;
+    runs.set(key, [...(runs.get(key) ?? []), task]);
+  }
+  return new Set([...runs].filter(([, list]) => !prepStepRetried(list)).map(([key]) => key));
+}
+
+export function readStepStarts(store: CrosslineStore, workspaceId: string): Record<string, string> {
+  try {
+    const value = JSON.parse(store.getSetting(workspaceId, STEP_STARTS_SETTING) ?? "{}") as unknown;
+    return value && typeof value === "object" && !Array.isArray(value) ? Object.fromEntries(Object.entries(value).filter(([, at]) => typeof at === "string")) as Record<string, string> : {};
+  } catch { return {}; }
+}
+
+/**
+ * The steps 「自动交给 Agent」 starts by itself (`AUTO_HANDOFF_SETTING` in core; off by default): a step on the calendar the step planner
+ * judged the system can do (`executor: "mixed"`), still planned, whose earlier steps are done, of a committed task the person is not
+ * timing at this moment, never tried before, of a kind the person allowed (a kind not yet allowed is asked about once and the step waits).
+ *
+ * "At its scheduled time" means: the next block the plan gave the step (`STEP_STARTS_SETTING`, written by the web every ten minutes for
+ * the coming week) starts within `AUTO_HANDOFF_LEAD_MINUTES`, or has started — those are `due` and go before anything else the assistant
+ * would pick up. A step whose block is later in the week is `early`: started only when nothing else is waiting, so an idle assistant
+ * gets ahead. A step with no block (in the task library, or not placed) is not started by itself. Each list is soonest block first.
+ */
+export function autoHandoffCandidates(store: CrosslineStore, workspaceId: string, now = new Date()):
+  { due: Array<{ orderId: string; stepId: string }>; early: Array<{ orderId: string; stepId: string }> } {
+  if (!isAutoHandoff(store, workspaceId) || isPaused(store, workspaceId)) return { due: [], early: [] };
+  const approved = readCategories(store, workspaceId);
+  const declined = new Set(declinedCategories(store, workspaceId));
+  const tried = triedSteps(store, workspaceId);
+  const starts = readStepStarts(store, workspaceId);
+  // The person is working on it right now: an open, unpaused session. The assistant does not start on the same task under them.
+  const timing = new Set(store.listExecutions(workspaceId).filter((execution) => !execution.endedAt
+    && !(execution.interruptions.at(-1) && !execution.interruptions.at(-1)!.resumedAt)).map((execution) => execution.workOrderId));
+  const orders = new Map(store.listWorkOrders(workspaceId).filter((order) => !order.tombstone && (DISPATCH_STATES.has(order.state) || order.state === "active")
+    && !timing.has(order.id)).map((order) => [order.id, order]));
+  const out: Array<{ orderId: string; stepId: string; at: string; when: "due" | "early" }> = [];
+  for (const plan of store.listStepPlans(workspaceId)) {
+    if (!orders.has(plan.workOrderId)) continue;
+    const finished = new Set(plan.steps.filter((step) => step.status === "done" || step.status === "skipped").map((step) => step.id));
+    for (const step of plan.steps) {
+      if (step.executor !== "mixed" || step.status !== "planned" || !step.schedulable || tried.has(`${plan.workOrderId}#${step.id}`)) continue;
+      if (!step.dependsOn.every((id) => finished.has(id))) continue;
+      const at = starts[`${plan.workOrderId}#${step.id}`];
+      const when = autoHandoffTiming(at, now);
+      if (when === "unscheduled") continue;
+      const category = stepCategory(step);
+      if (!category || declined.has(category)) continue;
+      if (!approved[category]) { requestCategory(store, workspaceId, category, plan.workOrderId, `步骤「${step.title}」可由系统完成`); continue; }
+      out.push({ orderId: plan.workOrderId, stepId: step.id, at: at!, when });
+    }
+  }
+  const sorted = out.sort((a, b) => a.at.localeCompare(b.at));
+  const pick = (when: "due" | "early") => sorted.filter((item) => item.when === when).map(({ orderId, stepId }) => ({ orderId, stepId }));
+  return { due: pick("due"), early: pick("early") };
 }
 
 /**

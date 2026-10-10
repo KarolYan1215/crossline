@@ -32,10 +32,13 @@ const SaveState = ({ state }: { state: string }) => state === "failed" ? <small 
  * the confirmation page's default-approval fold and the composer). Each assistant capability is one three-way control; the other
  * switches are two-way. What waits for the person's decision is on 待确认, not here.
  */
-export function AutomationModule({ categories, paused, permissionMode, recent }: {
+export function AutomationModule({ categories, paused, permissionMode, recent, autoHandoff = false }: {
   categories: CategoryRow[]; paused: boolean; permissionMode: boolean; recent: RecentTask[];
+  /** 「自动交给 Agent」: steps on the calendar the system can do start by themselves when their block comes up. Off by default. */
+  autoHandoff?: boolean;
 }) {
   const pause = useSetting(paused ? "paused" : "running", (value) => post("/api/agent/pause", { paused: value === "paused" }));
+  const handoff = useSetting(autoHandoff ? "on" : "off", (value) => post("/api/agent/auto-handoff", { enabled: value === "on" }));
   const permission = useSetting(permissionMode ? "on" : "off", (value) => post("/api/permission-mode", { enabled: value === "on" }));
   return <div className="st-modules">
     <section className="st-card" aria-label="助手能力">
@@ -44,6 +47,9 @@ export function AutomationModule({ categories, paused, permissionMode, recent }:
       <div className="st-row"><span className="st-row-label">自动开工<small>已批准、尚未开始的任务由助手接手，一次一个</small></span>
         <SegmentedControl label="助手自动开工" value={pause.value} onChange={(value) => void pause.change(value)}
           options={[{ value: "running", label: "运行" }, { value: "paused", label: "暂停" }]} /><SaveState state={pause.state} /></div>
+      <div className="st-row"><span className="st-row-label">自动交给 Agent<small>系统能做的步骤到排定时间（或助手空闲时提前）由后台直接开始；结果按上方各类别处理</small></span>
+        <SegmentedControl label="自动交给 Agent" value={handoff.value} onChange={(value) => void handoff.change(value)}
+          options={[{ value: "off", label: "关闭" }, { value: "on", label: "开启" }]} /><SaveState state={handoff.state} /></div>
       <p className="st-note">对外发送、付款交易、代为承诺始终由本人完成。</p>
     </section>
     <section className="st-card" aria-label="自动生效">

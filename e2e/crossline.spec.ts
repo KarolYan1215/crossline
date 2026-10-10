@@ -492,6 +492,86 @@ test("Today asks what only the person knows, with options and follow-ups, and mo
   } finally { after.close(); }
 });
 
+// F1: the panel beside the day is the one place a block is looked at and acted on. The detail strip under the calendar is gone.
+test("Today's day panel switches to a picked block's task, starts it there, and hands it in with a line and a file", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-chrome");
+  await page.goto("/");
+  const calendar = page.getByRole("region", { name: "今天的时间轴" });
+  const panel = calendar.locator(".dv-aside");
+  await expect(panel.getByRole("heading", { name: "当日负荷" })).toBeVisible();
+  await expect(page.locator(".cal-detail")).toHaveCount(0);
+  const week = calendar.getByRole("tab", { name: "周", exact: true });
+  await week.click();
+  const blocks = calendar.locator('.wk-block[data-kind="scheduled"]');
+  const count = await blocks.count();
+  expect(count).toBeGreaterThan(0);
+
+  // The week has no panel of its own: a block picked there opens its day with the block picked, and its task fills the panel.
+  const title = (await blocks.first().locator("b").textContent())!.trim();
+  await blocks.first().click();
+  await expect(calendar.getByRole("tab", { name: "日", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(panel.getByRole("heading", { name: "选中的日程" })).toBeVisible();
+  await expect(panel.locator(".dq-focus")).toContainText(title);
+  await expect(panel.locator(".dq-focus .task-quick-edit")).toBeVisible();
+  await panel.getByRole("button", { name: "返回下一项" }).click();
+  await expect(panel.getByRole("heading", { name: "选中的日程" })).toHaveCount(0);
+
+  // Start from a block whose task can start: the timer runs and the task page opens.
+  let workOrderId = "";
+  for (let index = 0; index < Math.min(count, 8) && !workOrderId; index += 1) {
+    await week.click();
+    const block = blocks.nth(index);
+    const id = await block.getAttribute("data-work-order");
+    await block.click();
+    const start = panel.locator(".dq-focus").getByRole("button", { name: "开始计时" });
+    if (!id || !(await start.count())) continue;
+    await Promise.all([page.waitForURL(/\/workbench\//), start.click()]);
+    workOrderId = id;
+  }
+  expect(workOrderId).not.toBe("");
+
+  // Back on Today, the same task's block offers 完成并提交材料: one line, one file, 提交.
+  await page.goto("/");
+  await week.click();
+  await calendar.locator(`.wk-block[data-work-order="${workOrderId}"]`).first().click();
+  await panel.getByRole("button", { name: "完成并提交材料" }).click();
+  const dialog = page.getByRole("dialog", { name: "完成并提交材料" });
+  await dialog.getByLabel("完成说明").fill("完成结果段初稿并附上提纲");
+  await dialog.locator('input[type="file"]').setInputFiles({ name: "提纲.txt", mimeType: "text/plain", buffer: Buffer.from("提纲\n- 结果一\n") });
+  await expect(dialog.getByText("提纲.txt")).toBeVisible();
+  await Promise.all([page.waitForNavigation({ waitUntil: "load" }), dialog.getByRole("button", { name: "提交", exact: true }).click()]);
+
+  const store = openStore();
+  try {
+    const workspaceId = realWorkspaceId(store);
+    expect(store.listWorkOrders(workspaceId).find((order) => order.id === workOrderId)?.state).toBe("evidence_review");
+    const claims = store.listEvidenceClaims(workspaceId).filter((claim) => claim.workOrderId === workOrderId);
+    expect(claims.map((claim) => claim.kind).sort()).toEqual(["file", "record"]);
+  } finally { store.close(); }
+});
+
+// F2: the per-line cards at the bottom of Today became one graph of every line's milestones and the relations between them.
+test("Today's flywheel graph draws each line around its goal and opens a milestone on the 主线 page", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-chrome");
+  await page.goto("/");
+  await expect(page.locator(".lines-strip")).toHaveCount(0);
+  const graph = page.getByRole("region", { name: "飞轮图谱" });
+  await expect(graph.locator('.fw-node[data-kind="anchor"]').first()).toBeVisible();
+  await expect(graph.locator(".fw-lines li").first()).toContainText("项进行中");
+  const node = graph.locator('.fw-node[data-kind="milestone"]').first();
+  await expect(node).toBeVisible();
+  // Zooming with the wheel changes the drawing without scrolling the page.
+  const before = await node.getAttribute("transform");
+  const box = (await graph.locator("svg.fw-graph").boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  const scrolled = await page.evaluate(() => window.scrollY);
+  await page.mouse.wheel(0, -400);
+  await expect.poll(() => node.getAttribute("transform")).not.toBe(before);
+  expect(await page.evaluate(() => window.scrollY)).toBe(scrolled);
+  await graph.getByRole("button", { name: "复位" }).click();
+  await Promise.all([page.waitForURL(/\/milestones\?open=/), node.locator("circle").first().click()]);
+});
+
 test("signing out deletes this browser's offline database for the workspace it was using", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-chrome");
   await page.goto("/");
