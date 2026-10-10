@@ -116,9 +116,13 @@ type NativeSkill = { path: string; enabled: boolean };
  * same Skill still never overlap, because a Skill belongs to exactly one tier.
  */
 const skillLanes = new Map<string, Promise<void>>();
-function serializeSkillRun<T>(skillName: string, run: () => Promise<T>): Promise<T> {
+// Lanes and the config lock belong to one runtime: each account's own Codex (runtime-registry.ts) queues only its own runs.
+const runtimeIds = new WeakMap<object, number>();
+let nextRuntimeId = 0;
+const runtimeKey = (client: object) => { if (!runtimeIds.has(client)) runtimeIds.set(client, ++nextRuntimeId); return runtimeIds.get(client)!; };
+function serializeSkillRun<T>(client: object, skillName: string, run: () => Promise<T>): Promise<T> {
   // The assistant gets a lane of its own: a task that runs for an hour must not hold the capture analysis or the gate behind it.
-  const lane = /crossline-agent$/.test(skillName) ? "agent" : tierForSkill(skillName) ?? "default";
+  const lane = `${runtimeKey(client)}:${/crossline-agent$/.test(skillName) ? "agent" : tierForSkill(skillName) ?? "default"}`;
   const previous = skillLanes.get(lane) ?? Promise.resolve();
   let release = () => {};
   skillLanes.set(lane, new Promise<void>((resolve) => { release = resolve; }));
@@ -129,11 +133,11 @@ function serializeSkillRun<T>(skillName: string, run: () => Promise<T>): Promise
  * Switching a Skill on or off rewrites the runtime's one config file, so two lanes doing it at once could write
  * over each other. The switch is brief; only it is held in a single line, never the run in between.
  */
-let configChain: Promise<void> = Promise.resolve();
-function underConfigLock<T>(work: () => Promise<T>): Promise<T> {
-  const previous = configChain;
+const configChains = new WeakMap<object, Promise<void>>();
+function underConfigLock<T>(client: object, work: () => Promise<T>): Promise<T> {
+  const previous = configChains.get(client) ?? Promise.resolve();
   let release = () => {};
-  configChain = new Promise<void>((resolve) => { release = resolve; });
+  configChains.set(client, new Promise<void>((resolve) => { release = resolve; }));
   return previous.then(work).finally(release);
 }
 
@@ -150,7 +154,7 @@ const MAX_STALL_RETRIES = 2;
  */
 async function executeSkill<T>(client: CodexRpcBoundary, options: { skillName: string; cwd: string; tier?: RouteTier },
   body: (context: RunContext) => Promise<SkillRunResult<T>>): Promise<SkillRunResult<T>> {
-  return serializeSkillRun(options.skillName, async () => {
+  return serializeSkillRun(client, options.skillName, async () => {
     const startedAt = Date.now();
     const spendMode = await currentSpendMode();
     // A stronger look is a cost the person did not ask for: in economy mode the Skill keeps its own route.
@@ -160,7 +164,7 @@ async function executeSkill<T>(client: CodexRpcBoundary, options: { skillName: s
     let skill: NativeSkill | undefined;
     let result: SkillRunResult<T>;
     try {
-      skill = await underConfigLock(async () => {
+      skill = await underConfigLock(client, async () => {
         const found = await findNativeSkill(client, options.skillName, options.cwd);
         if (!found.enabled) await setNativeSkill(client, found.path, true);
         return found;
@@ -172,7 +176,7 @@ async function executeSkill<T>(client: CodexRpcBoundary, options: { skillName: s
     }
     if (skill && !skill.enabled) {
       const path = skill.path;
-      try { await underConfigLock(() => setNativeSkill(client, path, false)); }
+      try { await underConfigLock(client, () => setNativeSkill(client, path, false)); }
       catch { result = skillBlocker<T>("SKILL_CONFIG_FAILED", result.audit); }
     }
     reportUsage({

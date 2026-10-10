@@ -25,14 +25,23 @@ test("a quick low-tier run is not held behind a slow top-tier one", async () => 
   expect(finished).toEqual(["low", "top"]);
 });
 
-test("two runs of the same tier still go one after the other", async () => {
-  const first = fakeRuntime(["{}"], TOP, { delayMs: 120 });
-  const second = fakeRuntime(["{}"], "crossline:crossline-milestone-architect");
+test("two runs of the same tier on one runtime still go one after the other", async () => {
+  const runtime = fakeRuntime(["{}", "{}"], TOP, { delayMs: 120 });
   const finished: string[] = [];
-  const a = runCodexSkill(first.rpc, {}, options(TOP)).then(() => finished.push("first"));
-  const b = runCodexSkill(second.rpc, {}, options("crossline:crossline-milestone-architect")).then(() => finished.push("second"));
+  const a = runCodexSkill(runtime.rpc, {}, options(TOP)).then(() => finished.push("first"));
+  const b = runCodexSkill(runtime.rpc, {}, options(TOP)).then(() => finished.push("second"));
   await Promise.all([a, b]);
   expect(finished).toEqual(["first", "second"]);
+});
+
+test("two accounts' own runtimes do not queue behind each other", async () => {
+  const mine = fakeRuntime(["{}"], TOP, { delayMs: 300 });
+  const theirs = fakeRuntime(["{}"], "crossline:crossline-milestone-architect");
+  const finished: string[] = [];
+  const a = runCodexSkill(mine.rpc, {}, options(TOP)).then(() => finished.push("mine"));
+  const b = runCodexSkill(theirs.rpc, {}, options("crossline:crossline-milestone-architect")).then(() => finished.push("theirs"));
+  await Promise.all([a, b]);
+  expect(finished).toEqual(["theirs", "mine"]);
 });
 
 test("a run reports the model it ran on, its tokens, its turns and how long it took", async () => {
@@ -112,4 +121,13 @@ test("slow work that keeps producing events is never mistaken for a hang", async
   const { rpc } = fakeRuntime(["{}"], TOP, { delayMs: 300, usage: { input: 10, output: 10 } });
   const result = await runCodexSkill(rpc, {}, { ...options(TOP), timeoutMs: 60_000, idleMs: 500 });
   expect(result).toMatchObject({ ok: true });
+});
+
+test("one account's tight quota steps only its own runs down", async () => {
+  setSpendModeProvider(async (workspaceId) => workspaceId === "ws-tight" ? "economy" : "normal");
+  enterUsageWorkspace("ws-tight");
+  await runCodexSkill(fakeRuntime(["{}"], TOP).rpc, {}, options(TOP));
+  enterUsageWorkspace("ws-roomy");
+  await runCodexSkill(fakeRuntime(["{}"], TOP).rpc, {}, options(TOP));
+  expect(usage.map((record) => [record.workspaceId, record.spendMode])).toEqual([["ws-tight", "economy"], ["ws-roomy", "normal"]]);
 });

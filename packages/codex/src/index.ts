@@ -17,6 +17,7 @@ export * from "./cost";
 export * from "./model-policy";
 export * from "./capability";
 export * from "./agent-mode";
+export * from "./runtime-registry";
 
 const record = (value: unknown): Record<string, unknown> | undefined =>
   typeof value === "object" && value !== null ? value as Record<string, unknown> : undefined;
