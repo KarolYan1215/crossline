@@ -26,16 +26,18 @@ describe("plan page", () => {
   }, 20000);
 
   // The real account: the interview recorded 「所有事情合计每周约 72 小时」 but the pattern was still the 39-hour default.
-  test("when the person said they have far more hours than the pattern holds, the capacity chart shows both and flags it", async () => {
+  test("with no painted week, the hours the person said they have are used, and the chart says they are inferred", async () => {
     const store = new CrosslineStore(":memory:");
     globalThis.crosslineStore = store;
     store.upsertProfileFact({ workspaceId: "workspace-1", identityId: "research", projectId: "p", slot: "weekly_hours", updatedAt: "2026-10-01T00:00:00Z",
       value: "无法按项目拆分；所有事情合计每周约 72 小时。", status: "confirmed", sourceRef: "reply-1", sourceQuote: "72 小时" });
     const { default: PlanPage } = await import("./page");
     const html = renderToStaticMarkup(await PlanPage({}));
+    // Before 2026-10-10 the plan ran on the 39-hour default and could only flag the gap; now the 72 hours said are the pattern.
     expect(html).toContain("画像所述每周投入 72 小时");
-    expect(html).toContain("可用时段每周 39 小时");
-    expect(html).toContain("可用时段不足");
+    expect(html).toMatch(/可用时段每周 7[0-4] 小时/);
+    expect(html).toContain("推断时段（每周小时）");
+    expect(html).not.toContain("可用时段不足");
     store.close();
     globalThis.crosslineStore = undefined;
   }, 20000);

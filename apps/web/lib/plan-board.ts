@@ -1,8 +1,8 @@
 import "server-only";
-import { hoursFromText, statedWeeklyHours, weeklyAvailableHours, type AccessContext, type AvailabilityWindow, type ImportancePreset, type PortraitReport } from "@crossline/core";
+import { hoursFromText, statedWeeklyHours, weeklyAvailableHours, type AccessContext, type AvailabilitySource, type AvailabilityWindow, type ImportancePreset, type PortraitReport } from "@crossline/core";
 import { DEADLINE_MARGIN_DAYS, PARAMS_ASAP, PARAMS_BUFFERED, type ScheduleParams } from "@crossline/planner";
 import { effectiveParams, effectiveSchedulePreferences, effectiveWeight, getStore, IMPORTANT_WEIGHT, importancePresets, loadGoalForecast, planRanking, planToday,
-  readAvailability, readGoalSettings, readSchedulePreferences, type PersistedPlan, type RankedTask } from "./crossline";
+  LINE_SHARES_SETTING, readAvailability, readGoalSettings, readLineShares, readSchedulePreferences, resolvedAvailability, type PersistedPlan, type RankedTask } from "./crossline";
 import { suggestedAvailabilityFor } from "./timeline";
 import { identityLines, lineLabels } from "./lines";
 import { readScheduledMinutes } from "./schedule-memory";
@@ -18,7 +18,9 @@ import { addDays, availabilityGrid, capacityWeeks, estimatePoints, goalRows, hor
 export type PlanBoard = {
   today: string; timeZone: string; labels: Record<string, string>; lineOrder: string[];
   horizon: Horizon;
-  capacity: { statedWeekly: number | null; configuredWeekly: number; usingDefault: boolean };
+  capacity: { statedWeekly: number | null; configuredWeekly: number; usingDefault: boolean; source: AvailabilitySource };
+  /** Each line's share of the week the scheduler keeps (percent), and whether the person set it or it is what they said. */
+  shares: { effective: Record<string, number>; custom: boolean };
   /** What a previewed change moves (drawn with the current values as ghosts while a preview is open). */
   charts: ForecastCharts;
   inferredRegularBlocks: number;
@@ -132,8 +134,10 @@ export async function loadPlanBoard(ctx: AccessContext, plan: PersistedPlan, req
     capacity: {
       statedWeekly: statedWeeklyHours(facts) ?? null,
       configuredWeekly: weeklyAvailableHours(readAvailability(ctx)),
-      usingDefault: plan.usingDefaultPreferences
+      usingDefault: plan.usingDefaultPreferences,
+      source: resolvedAvailability(ctx).source
     },
+    shares: { effective: readLineShares(ctx) ?? {}, custom: Boolean(getStore().getSetting(ctx.workspaceId, LINE_SHARES_SETTING)) },
     investment: investment({ today, zone: timeZone, now, lineOrder, plannedByDay, orderLine, executions, next7: charts.next7,
       stated: statedShares(portrait?.lines?.items ?? null, facts, hoursFromText) }),
     estimates: estimatePoints(store.listAllDurationObservations(ctx.workspaceId)),

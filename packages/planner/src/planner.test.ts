@@ -453,3 +453,34 @@ describe("schedule parameters and importance", () => {
     expect(result.plan.blocks.map((block) => block.taskId).sort()).toEqual(["heavy", "urgent"]);
   });
 });
+
+describe("line floors (each line's share of the week, from what the person said)", () => {
+  const estimate = (minutes: number) => ({ p25Minutes: minutes, p50Minutes: minutes, p85Minutes: minutes, confidence: "high" as const });
+  // Four hours a day for three days: room for six two-hour tasks, eight are offered.
+  const availability = [14, 15, 16].map((day) => ({ start: `2026-09-${day}T14:00:00.000Z`, end: `2026-09-${day}T18:00:00.000Z`, energy: "high" as const }));
+  const research = Array.from({ length: 6 }, (_, i) => ({ id: `r${i}`, title: `研究 ${i}`, identityId: "research", estimate: estimate(120),
+    inputsReady: true, deadlineTier: 3 as const, weight: 90 }));
+  const startup = [0, 1].map((i) => ({ id: `s${i}`, title: `创业 ${i}`, identityId: "startup", estimate: estimate(120), inputsReady: true,
+    deadlineTier: 3 as const, floorOnly: true }));
+
+  test("work from the task library gets time only to meet its line's floor — the 100% / 0% week of the real account", async () => {
+    const without = await planSchedule({ now: start, horizonDays: 3, mode: "asap", tasks: [...research, ...startup], availability, frozenBlocks: [] });
+    expect(without.plan.blocks.some((block) => block.taskId.startsWith("s"))).toBe(false);
+    // Library work never shows up as 「未排入」: it was not asked for this week.
+    expect(without.blockers.some((blocker) => blocker.taskId.startsWith("s"))).toBe(false);
+    const withFloor = await planSchedule({ now: start, horizonDays: 3, mode: "asap", tasks: [...research, ...startup], availability, frozenBlocks: [],
+      lineShares: { research: 64, startup: 20 } });
+    const startupMinutes = withFloor.plan.blocks.filter((block) => block.taskId.startsWith("s"))
+      .reduce((sum, block) => sum + (Date.parse(block.end) - Date.parse(block.start)) / 60_000, 0);
+    expect(startupMinutes).toBeGreaterThanOrEqual(120);
+    // Only the floor: 20% of 12 hours is 2.4 hours, so one task, not both.
+    expect(startupMinutes).toBeLessThanOrEqual(240);
+  });
+
+  test("a floor never pushes out work with a deadline", async () => {
+    const due = research.map((task) => ({ ...task, deadlineTier: 2 as const, deadline: "2026-09-16T18:00:00.000Z" }));
+    const result = await planSchedule({ now: start, horizonDays: 3, mode: "asap", tasks: [...due, ...startup], availability, frozenBlocks: [],
+      lineShares: { research: 50, startup: 50 } });
+    expect(result.plan.blocks.filter((block) => block.taskId.startsWith("r"))).toHaveLength(6);
+  });
+});

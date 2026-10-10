@@ -49,7 +49,8 @@ export function planToday(ctx?: AccessContext,
 
 /** The key the weekly availability lives under. One settings row, not a new table. */
 export { AVAILABILITY_SETTING } from "@crossline/core";
-import { AVAILABILITY_SETTING, BYPRODUCT_LAG_DAYS, RELATION_KIND_LABEL, isCancelledEvent } from "@crossline/core";
+import { AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, BYPRODUCT_LAG_DAYS, RELATION_KIND_LABEL, isCancelledEvent, resolveAvailability, hoursFromText, type AvailabilitySource, type PortraitReport } from "@crossline/core";
+import { statedShares } from "./plan-stats";
 import { identityLines, linePacks } from "./lines";
 const PREFERENCES_SETTING = "schedule.preferences";
 export type SchedulePreferences = { timeZone: string; mode: "buffered" | "asap";
@@ -255,9 +256,40 @@ export function saveSchedulePreferences(ctx: AccessContext, input: {
 export function readAvailability(ctx: AccessContext): AvailabilityWindow[] {
   const preview = previewScope.getStore()?.availability;
   if (preview) return preview;
-  const raw = getStore().getSetting(ctx.workspaceId, AVAILABILITY_SETTING);
-  if (!raw) return DEFAULT_AVAILABILITY;
-  try { return validateAvailability(JSON.parse(raw)); } catch { return DEFAULT_AVAILABILITY; }
+  return resolvedAvailability(ctx).windows;
+}
+
+/** Setting for each line's share (percent) of the week, set on the plan page; when absent the interview's stated shares are used. */
+export const LINE_SHARES_SETTING = "schedule.lineShares";
+
+/** Each line's share of the week (percent): what the person set on the plan page, else what they said (`statedShares`), else none. */
+export function readLineShares(ctx: AccessContext): Record<string, number> | null {
+  const preview = previewScope.getStore()?.lineShares;
+  if (preview) return preview;
+  const store = getStore();
+  try {
+    const set = JSON.parse(store.getSetting(ctx.workspaceId, LINE_SHARES_SETTING) ?? "null") as Record<string, number> | null;
+    if (set && Object.values(set).some((value) => value > 0)) return set;
+  } catch { /* unreadable: fall back to what was said */ }
+  let portrait: PortraitReport | undefined;
+  try { portrait = (JSON.parse(store.getSetting(ctx.workspaceId, "portrait.report") ?? "{}") as { report?: PortraitReport }).report; } catch { /* none yet */ }
+  return statedShares(portrait?.lines?.items ?? null, store.listProfileFacts(ctx.workspaceId), hoursFromText);
+}
+
+/** Each line's share as the person set it: whole percents for known lines, together at most 100; `{}` goes back to what they said. */
+export function saveLineShares(ctx: AccessContext, value: Record<string, number>): { ok: true } | { ok: false; code: string } {
+  const lines = new Set(linePacks(ctx).filter((pack) => pack.kind === "identity").map((pack) => pack.id));
+  const entries = Object.entries(value).filter(([line]) => lines.has(line)).map(([line, share]) => [line, Math.max(0, Math.min(100, Math.round(share)))] as const);
+  if (entries.reduce((sum, [, share]) => sum + share, 0) > 100) return { ok: false, code: "LINE_SHARES_OVER_100" };
+  getStore().setSetting(ctx.workspaceId, LINE_SHARES_SETTING, entries.length ? JSON.stringify(Object.fromEntries(entries)) : "");
+  return { ok: true };
+}
+
+/** The pattern and where it came from (painted / the interview's proposal / the stated weekly hours / the default); see `resolveAvailability`. */
+export function resolvedAvailability(ctx: AccessContext): { windows: AvailabilityWindow[]; source: AvailabilitySource } {
+  const store = getStore();
+  return resolveAvailability({ saved: store.getSetting(ctx.workspaceId, AVAILABILITY_SETTING),
+    proposed: store.getSetting(ctx.workspaceId, AVAILABILITY_PROPOSED_SETTING), facts: store.listProfileFacts(ctx.workspaceId) });
 }
 
 export function saveAvailability(ctx: AccessContext, windows: unknown): { ok: true } | { ok: false; code: string } {
@@ -620,7 +652,7 @@ export function plannerIdOfBlock(blockId: string): string {
  */
 export type PreviewOverrides = { estimates?: Record<string, number>; dueDates?: Record<string, string>; notBefore?: Record<string, string>;
   /** The plan page's own controls: a repainted week, other packing numbers, a moved importance slider (by milestone id). */
-  availability?: AvailabilityWindow[]; params?: ScheduleParams; weights?: Record<string, number> };
+  availability?: AvailabilityWindow[]; params?: ScheduleParams; weights?: Record<string, number>; lineShares?: Record<string, number> };
 const previewScope = new AsyncLocalStorage<PreviewOverrides>();
 export const withPreview = <T>(overrides: PreviewOverrides, run: () => T): T => previewScope.run(overrides, run);
 const scaledEstimate = <E extends { p25Minutes: number; p50Minutes: number; p85Minutes: number }>(estimate: E, p50: number | undefined): E =>
@@ -698,7 +730,11 @@ async function scheduledBlocks(ctx: AccessContext, today: string, committed: Per
     .some((id) => stateById.get(id) !== "accepted" && !orders.some((item) => item.id === id)))
     .map((order) => ({ taskId: order.id, code: "DEPENDENCY_NOT_READY",
       message: `${order.intent}的前置作业尚未验收，暂不排入` }));
-  const eligibleOrders = orders.filter((order) => !dependencyBlockers.some((item) => item.taskId === order.id) && !libraryUntil(ctx, order, today));
+  // Each line's share of the week: what the person set, else what they said in the interview. A line with a share also offers its
+  // library work (milestone due beyond the window) as floor-only, so a far deadline no longer means no hours at all.
+  const shares = readLineShares(ctx);
+  const library = new Set(orders.filter((order) => libraryUntil(ctx, order, today) && (shares?.[order.identityId] ?? 0) > 0).map((order) => order.id));
+  const eligibleOrders = orders.filter((order) => !dependencyBlockers.some((item) => item.taskId === order.id) && (!libraryUntil(ctx, order, today) || library.has(order.id)));
   const needsLookahead = eligibleOrders.some((order) => {
     const task = plannerTaskOf(ctx, order);
     return task.deadlineTier === 4 && Boolean(task.deadline);
@@ -720,7 +756,9 @@ async function scheduledBlocks(ctx: AccessContext, today: string, committed: Per
     horizonDays: days.length,
     mode: preferences.mode, params: effectiveParams(ctx),
     ...(currentEnergy ? { currentEnergy, currentDay: today } : {}),
-    tasks: expanded.map((item) => item.task),
+    tasks: expanded.map((item) => library.has(item.orderId)
+      ? (({ deadline: _d, ...task }) => ({ ...task, deadlineTier: 3 as const, floorOnly: true }))(item.task) : item.task),
+    ...(shares ? { lineShares: shares } : {}),
     availability: instants,
     ...(lookaheadAvailability ? { lookaheadAvailability } : {}),
     frozenBlocks: [...committed.filter((block) => block.day && block.id.startsWith("scheduled:"))
@@ -742,7 +780,8 @@ async function scheduledBlocks(ctx: AccessContext, today: string, committed: Per
     const blockDay = formatInTimeZone(new Date(block.start), zone, "yyyy-MM-dd");
     const needsRestCheck = currentEnergy === "low" && blockDay === today &&
       energyNeeds.get(block.taskId.split("#")[0]!) === "high" && Date.parse(block.start) > now.getTime();
-    const tag = block.progressOnly ? "本周未排完" : needsRestCheck ? "休息后复评" : tentative(block.taskId) ? "暂定" : undefined;
+    const tag = block.progressOnly ? "本周未排完" : needsRestCheck ? "休息后复评" : library.has(block.taskId.split("#")[0]!) ? "按主线份额"
+      : tentative(block.taskId) ? "暂定" : undefined;
     return {
     id: scheduledBlockId(block.taskId, index),
     lane: "human" as const,

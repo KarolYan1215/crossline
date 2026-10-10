@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { ATTENTION_SNAPSHOT, DEFAULT_AVAILABILITY, type AvailabilityWindow } from "@crossline/core";
+import { ATTENTION_SNAPSHOT, AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, resolveAvailability, type AvailabilityWindow } from "@crossline/core";
 import type { CrosslineStore } from "@crossline/db";
 import { ownerOf } from "./owner";
 
@@ -122,8 +122,8 @@ export async function notifyPass(store: CrosslineStore, workspaceId: string, now
   const level = (store.getSetting(workspaceId, NOTIFY_LEVEL_SETTING) as NotifyLevel | undefined) ?? "normal";
   let zone = process.env.CROSSLINE_TIME_ZONE?.trim() || "America/Chicago";
   try { zone = (JSON.parse(store.getSetting(workspaceId, "schedule.preferences") ?? "null") as { timeZone?: string } | null)?.timeZone || zone; } catch { /* default */ }
-  let windows = DEFAULT_AVAILABILITY;
-  try { windows = (JSON.parse(store.getSetting(workspaceId, "schedule.availability") ?? "null") as AvailabilityWindow[] | null) ?? windows; } catch { /* default */ }
+  const { windows } = resolveAvailability({ saved: store.getSetting(workspaceId, AVAILABILITY_SETTING),
+    proposed: store.getSetting(workspaceId, AVAILABILITY_PROPOSED_SETTING), facts: store.listProfileFacts(workspaceId) });
   const { today, clock, weekday } = localParts(now, zone);
   const sentEvents = store.listEvents(workspaceId, { type: "notification.sent" });
   const sent = new Set(sentEvents.map((event) => String((event.payload as { key?: string }).key ?? "")));

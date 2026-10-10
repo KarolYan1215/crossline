@@ -20,6 +20,11 @@ export type PlannerTask = {
   notBefore?: string;
   /** Importance 0-100 (the milestone's weight). Orders work inside a deadline tier; never lifts work across tiers. */
   weight?: number;
+  /**
+   * Work from the task library (its milestone is due beyond the library window): it earns nothing by being placed and is placed only
+   * to meet its line's weekly floor (`PlanningInput.lineShares`); left out, it is not reported as unplaced.
+   */
+  floorOnly?: boolean;
 };
 
 /**
@@ -63,6 +68,12 @@ export type PlanningInput = {
   /** Capacity evidence for fourth-quadrant wake-up; never used to place the near-term plan. */
   lookaheadAvailability?: PlanningInput["availability"];
   frozenBlocks: Array<{ taskId: string; start: string; end: string }>;
+  /**
+   * Each line's share (percent) of the next seven days' free time, as the person stated it: a soft floor worth less than any deadline,
+   * so a line whose milestones are far off still gets its hours (the real account's plan was 100% research while the person had said
+   * 64 / 20 / 11 / 5).
+   */
+  lineShares?: Record<string, number>;
 };
 
 export type ScheduleBlock = { taskId: string; start: string; end: string;

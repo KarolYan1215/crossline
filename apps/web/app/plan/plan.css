@@ -56,3 +56,7 @@
 @media (max-width:640px){
   .pl-card>header .ui-segmented{margin-left:0}
 }
+
+/* Line shares under the packing numbers: the same rows, a small heading of their own. */
+.pl-shares { margin-top: 16px; border-top: 1px solid var(--line, #E5E5E5); padding-top: 12px; }
+.pl-shares h3 { font-size: 14px; margin: 0 0 4px; }

@@ -110,7 +110,7 @@ function makeResult(input: PlanningInput, tasks: PlannerTask[], slots: Slot[], b
   const scheduled = new Set(blocks.filter((block) => !block.progressOnly).map((block) => block.taskId));
   // 「截止日前不够」 only when the deadline falls inside the days being planned; one beyond them is simply not reached yet.
   const horizon = Math.max(0, ...slots.map((slot) => slot.end));
-  const blockers = tasks.filter((task) => !scheduled.has(task.id)).map((task) => ({
+  const blockers = tasks.filter((task) => !scheduled.has(task.id) && !task.floorOnly).map((task) => ({
     taskId: task.id,
     code: blocks.some((block) => block.taskId === task.id && block.progressOnly) ? "PROGRESS_ONLY"
       : task.interruptible === false ? "NO_CONTINUOUS_SLOT" : task.deadline && Date.parse(task.deadline) <= horizon ? "DEADLINE_CAPACITY" : "NO_CAPACITY",
@@ -135,7 +135,8 @@ function greedyFallback(input: PlanningInput, tasks: PlannerTask[], slots: Slot[
   const params = paramsFor(input);
   const gap = emergency ? 0 : params.gapMinutes;
   const share = emergency ? 1 : params.maxDailyShare;
-  const pending = [...tasks].sort(compareTasks);
+  // Library work goes in only to meet a line's floor, which this simple pass does not weigh; it waits for the solver.
+  const pending = tasks.filter((task) => !task.floorOnly).sort(compareTasks);
   const ordered: PlannerTask[] = [];
   while (pending.length) {
     const index = pending.findIndex((task) => !(task.dependsOn ?? []).some((id) => pending.some((item) => item.id === id)));
@@ -192,7 +193,7 @@ async function optimize(input: PlanningInput, emergency = false): Promise<PlanRe
   const choices: Choice[] = [];
   const rows: string[] = [];
   const binary = tasks.map((_, i) => `a${i}`);
-  const progress = tasks.map((task, i) => task.deadlineTier === 3 && !task.deadline &&
+  const progress = tasks.map((task, i) => task.deadlineTier === 3 && !task.deadline && !task.floorOnly &&
     task.interruptible !== false && durationOf(task) > 45 ? `p${i}` : undefined);
   binary.push(...progress.filter((name): name is string => Boolean(name)));
   const general: string[] = [];
@@ -236,7 +237,7 @@ async function optimize(input: PlanningInput, emergency = false): Promise<PlanRe
 
   const weekly = new Map<string, number[]>();
   for (const [i, task] of tasks.entries()) {
-    if (task.deadlineTier !== 3 || task.deadline) continue;
+    if (task.deadlineTier !== 3 || task.deadline || task.floorOnly) continue;
     const key = task.milestoneId ?? task.id;
     weekly.set(key, [...(weekly.get(key) ?? []), i]);
   }
@@ -288,11 +289,24 @@ async function optimize(input: PlanningInput, emergency = false): Promise<PlanRe
 
   const n = tasks.length + 1;
   // Urgency first (the deadline tier, lexicographic as before), then importance inside a tier: the weight moves a task by less than a
-  // whole tier, so a heavier task never outranks one in a more urgent tier.
-  const objective: Array<[number, string]> = tasks.map((task, i) => [
-    (task.deadline ? n ** 4 : 0) + ((4 - task.deadlineTier) + .9 * (task.weight ?? 50) / 100) * n + (task.inputsReady ? 1 : 0), `a${i}`
+  // whole tier, so a heavier task never outranks one in a more urgent tier. Library work earns nothing of its own.
+  const objective: Array<[number, string]> = tasks.map((task, i) => [task.floorOnly ? 0
+    : (task.deadline ? n ** 4 : 0) + ((4 - task.deadlineTier) + .9 * (task.weight ?? 50) / 100) * n + (task.inputsReady ? 1 : 0), `a${i}`
   ]);
   for (const name of weeklyNames) objective.push([n * n, name]);
+  // Line floors: `f` counts a line's minutes in the next seven days up to its share, and a whole floor is worth n² — as much as keeping
+  // one milestone moving this week, far below any deadline (n⁴).
+  const weekEnd = input.now.getTime() + 7 * 86_400_000;
+  const weekMinutes = slots.filter((slot) => slot.start < weekEnd).reduce((sum, slot) => sum + (Math.min(slot.end, weekEnd) - slot.start) / 60_000, 0);
+  for (const [k, [line, percent]] of Object.entries(input.lineShares ?? {}).entries()) {
+    const floor = Math.round(Math.min(100, Math.max(0, percent)) / 100 * weekMinutes);
+    const terms: Array<[number, string]> = choices.filter((choice) => tasks[choice.task]!.identityId === line && slots[choice.slot]!.start < weekEnd)
+      .map((choice) => [choice.minutes ? 1 : choice.duration, choice.minutes ?? choice.presence]);
+    if (floor < MIN_SEGMENT || !terms.length) continue;
+    bounds.push(`0 <= f${k} <= ${floor}`);
+    rows.push(`floor_${k}: ${expression([[1, `f${k}`], ...terms.map(([value, name]): [number, string] => [-value, name])])} <= 0`);
+    objective.push([n * n / floor, `f${k}`]);
+  }
   if (share < 1) objective.push([-.1, "peak"]);
   for (const choice of choices) objective.push([
     (input.currentEnergy && choice.slot === currentSlot &&

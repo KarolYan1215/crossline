@@ -52,8 +52,10 @@ function tipLeft(centre: number, band: number, width: number): number {
   return Math.max(0, width - TIP_WIDTH);
 }
 
-export function CapacityChart({ weeks, labels, statedWeekly, configuredWeekly, usingDefault }: { weeks: CapacityWeek[]; labels: Record<string, string>;
-  statedWeekly: number | null; configuredWeekly: number; usingDefault: boolean }) {
+export function CapacityChart({ weeks, labels, statedWeekly, configuredWeekly, usingDefault, source = "saved" }: { weeks: CapacityWeek[]; labels: Record<string, string>;
+  statedWeekly: number | null; configuredWeekly: number; usingDefault: boolean;
+  /** Where the hours came from (`resolveAvailability`); anything but `saved` is said on the chart until the person paints their week. */
+  source?: "saved" | "interview" | "stated_hours" | "default" }) {
   const preview = usePlanPreview();
   const shown = preview?.after.capacity ?? weeks;
   const ghost = preview?.before.capacity ?? null;
@@ -74,7 +76,9 @@ export function CapacityChart({ weeks, labels, statedWeekly, configuredWeekly, u
   return <Card title="容量与需求" label="容量与需求" data={{ "scheduled-minutes": scheduledFirst }}
     note={<>{statedWeekly !== null && <span title={`画像所述每周投入 ${statedWeekly} 小时`}>所述每周 {statedWeekly} h · </span>}
       <span title={`可用时段每周 ${configuredWeekly} 小时（未扣除日历）`}>可用时段每周 {configuredWeekly} h</span></>}
-    tags={<>{usingDefault && <Tag tone="warn" title="可用时段仍为默认值，在下方「可用时段」中刷涂实际作息">默认时段</Tag>}
+    tags={<>{source === "interview" ? <Tag tone="warn" title="可用时段来自访谈中所述的作息，尚未确认；在下方「可用时段」中刷涂实际作息">推断时段（访谈）</Tag>
+      : source === "stated_hours" ? <Tag tone="warn" title={`可用时段按所述每周 ${statedWeekly ?? ""} 小时平均分到每天，尚未确认；在下方「可用时段」中刷涂实际作息`}>推断时段（每周小时）</Tag>
+      : (usingDefault || source === "default") && <Tag tone="warn" title="可用时段仍为默认值，在下方「可用时段」中刷涂实际作息">默认时段</Tag>}
       {short && <Tag tone="warn" title="可用时段少于画像所述的每周投入，排程只能使用可用时段">可用时段不足</Tag>}</>}>
     {preview && <PreviewNote />}
     <div ref={box} className="pl-chart-box">

@@ -2,7 +2,7 @@ import "server-only";
 import { EDIT_MINUTES, type AccessContext, type AvailabilityWindow } from "@crossline/core";
 import { DEADLINE_MARGIN_DAYS, type ScheduleParams } from "@crossline/planner";
 import { effectiveSchedulePreferences, getStore, loadCurrentPlan, loadGoalForecast, planToday, resolvedEstimate, saveAvailability, saveGoalSettings,
-  saveScheduleParams, SCHEDULE_KEEP, withPreview, type PreviewOverrides } from "./crossline";
+  saveLineShares, saveScheduleParams, SCHEDULE_KEEP, withPreview, type PreviewOverrides } from "./crossline";
 import { lineLabels } from "./lines";
 import { loadForecastCharts } from "./plan-board";
 import type { ForecastCharts } from "./plan-stats";
@@ -22,7 +22,8 @@ export type Change =
   /** The plan page's controls: the week repainted on the heatmap, the four packing numbers, one milestone's importance slider. */
   | { kind: "availability"; windows: AvailabilityWindow[]; timeZone?: string }
   | { kind: "params"; params: ScheduleParams }
-  | { kind: "weight"; milestoneId: string; weight: number };
+  | { kind: "weight"; milestoneId: string; weight: number }
+  | { kind: "shares"; shares: Record<string, number> };
 
 type TaskChange = Extract<Change, { workOrderId: string }>;
 const isTaskChange = (change: Change): change is TaskChange => "workOrderId" in change;
@@ -58,6 +59,7 @@ export function overridesFor(change: Exclude<Change, { kind: "estimate_delta" }>
   if (change.kind === "availability") return { availability: change.windows };
   if (change.kind === "params") return { params: change.params };
   if (change.kind === "weight") return { weights: { [change.milestoneId]: change.weight } };
+  if (change.kind === "shares") return { lineShares: change.shares };
   return change.kind === "estimate"
     ? { estimates: { [change.stepId ? `${change.workOrderId}#${change.stepId}` : change.workOrderId]: change.p50Minutes } }
     : change.kind === "due" ? { dueDates: { [change.workOrderId]: change.date } } : { notBefore: { [change.workOrderId]: change.date } };
@@ -122,7 +124,8 @@ export function applyChange(ctx: AccessContext, requested: Change): { ok: true }
   let change: Exclude<Change, { kind: "estimate_delta" }>;
   try { change = resolveChange(ctx, requested); } catch { return { ok: false, code: "WORK_ORDER_NOT_FOUND" }; }
   // A change to the person's hours, the packing numbers or what matters re-plans everything: blocks kept by a local re-plan are let go.
-  if (change.kind === "availability" || change.kind === "params" || change.kind === "weight") store.deleteSetting(ctx.workspaceId, SCHEDULE_KEEP);
+  if (change.kind === "availability" || change.kind === "params" || change.kind === "weight" || change.kind === "shares") store.deleteSetting(ctx.workspaceId, SCHEDULE_KEEP);
+  if (change.kind === "shares") return saveLineShares(ctx, change.shares);
   if (change.kind === "availability") {
     const saved = saveAvailability(ctx, change.windows);
     if (!saved.ok) return saved;

@@ -1,6 +1,6 @@
 import {
-  ARCHETYPES, AVAILABILITY_SETTING, DEFAULT_AVAILABILITY, VALIDATION_REVIEW_SCHEMA, archetypeBrief, archetypeById, stepPlanSchema, goalSettingKey,
-  normalizeStepPlan, relevantDocuments, STEP_ANSWER_SLOT, stepPlanWarnings, unverifiedUnits, validateAvailability, validateStepPlanShape, validateValidationReview, weeklyAvailableHours,
+  ARCHETYPES, AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, resolveAvailability, VALIDATION_REVIEW_SCHEMA, archetypeBrief, archetypeById, stepPlanSchema, goalSettingKey,
+  normalizeStepPlan, relevantDocuments, STEP_ANSWER_SLOT, stepPlanWarnings, unverifiedUnits, validateStepPlanShape, validateValidationReview, weeklyAvailableHours,
   PROGRESS_ASSESSMENT_SCHEMA, validateProgressAssessment, type ProgressAssessment, type StepPlan, type StepWarning, type ValidationReview
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
@@ -63,8 +63,8 @@ export function taskWindow(store: CrosslineStore, workspaceId: string, order: St
   const today = day(now.toISOString());
   const notBefore = payload.notBefore && payload.notBefore > today ? payload.notBefore : today;
   const dueBy = [payload.dueDate, goalDeadline, anchor].filter((value): value is string => Boolean(value && /^\d{4}-\d{2}-\d{2}$/.test(value)) && value! >= today).sort()[0] ?? "";
-  let windows = DEFAULT_AVAILABILITY;
-  try { const raw = store.getSetting(workspaceId, AVAILABILITY_SETTING); if (raw) windows = validateAvailability(JSON.parse(raw)); } catch { /* default pattern */ }
+  const { windows } = resolveAvailability({ saved: store.getSetting(workspaceId, AVAILABILITY_SETTING),
+    proposed: store.getSetting(workspaceId, AVAILABILITY_PROPOSED_SETTING), facts: store.listProfileFacts(workspaceId) });
   const days = dueBy ? Math.max(1, Math.round((Date.parse(`${dueBy}T12:00:00Z`) - Date.parse(`${notBefore}T12:00:00Z`)) / 86_400_000) + 1) : undefined;
   // Average working minutes per day of the weekly pattern, over the window; other work shares this time, so it is an upper bound.
   const availableMinutes = days ? Math.round((weeklyAvailableHours(windows) * 60 / 7) * days) : undefined;

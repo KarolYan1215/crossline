@@ -7,6 +7,8 @@ export const goalSettingKey = (milestoneId: string) => `goal.settings:${mileston
 
 /** The weekly availability pattern (`AvailabilityWindow[]`); the step planner sizes a task's window from it. */
 export const AVAILABILITY_SETTING = "schedule.availability";
+/** What the interview proposed from the rhythm the person described (`{windows, why}`); used until a pattern is saved. */
+export const AVAILABILITY_PROPOSED_SETTING = "schedule.availability.proposed";
 
 /** The last calendar read that failed (`{code, message, sources, at}`), written by the worker, cleared by a clean read. */
 export const CALENDAR_SYNC_FAILURE = "calendar.sync.failure";

@@ -34,7 +34,7 @@ export default async function PlanPage(props: { searchParams?: Promise<{ horizon
       <PlanView plan={plan} aside={<HorizonSelect horizon={board.horizon} />} />
       <div className="pl-stats">
         <CapacityChart weeks={board.charts.capacity} labels={board.labels} statedWeekly={board.capacity.statedWeekly}
-          configuredWeekly={board.capacity.configuredWeekly} usingDefault={board.capacity.usingDefault} />
+          configuredWeekly={board.capacity.configuredWeekly} usingDefault={board.capacity.usingDefault} source={board.capacity.source} />
         <MilestoneForecast rows={board.charts.goals} today={board.today} spanDays={board.horizon.days} weeks={board.horizon.weeks} labels={board.labels}
           inferredRegularBlocks={board.inferredRegularBlocks} />
         <ForecastDelta forecast={board.forecastSummary} storageKey={`h${board.horizon.days}`} />
@@ -42,7 +42,7 @@ export default async function PlanPage(props: { searchParams?: Promise<{ horizon
         <EstimateRhythm estimates={board.estimates} rhythm={board.rhythm} labels={board.labels} />
       </div>
       <TimeControls windows={board.week.windows} suggested={board.week.suggested} proposed={board.week.proposed} busy={board.week.busy} params={board.params}
-        presets={board.presets} statedWeekly={board.capacity.statedWeekly}
+        presets={board.presets} statedWeekly={board.capacity.statedWeekly} shares={board.shares} labels={board.labels} lineOrder={board.lineOrder}
         ranking={<>
           <RankingTable ranking={board.ranking} today={board.today} importance={board.importance} />
           <div className="pl-explain">

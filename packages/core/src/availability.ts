@@ -154,3 +154,40 @@ export function statedWeeklyHours(facts: Array<{ slot: string; status: string; v
     .filter((hours) => hours > 0 && hours <= 112);
   return totals.length ? Math.max(...totals) : undefined;
 }
+
+/**
+ * A weekly pattern holding `weeklyHours`, spread evenly over seven days the way a working day usually runs: up to three morning hours
+ * at high energy from 09:00, up to five afternoon hours at medium from 13:00, the rest at low from 19:00 (at most 11.5 a day). Used
+ * only when the person has saved no pattern and the interview proposed none, so the plan holds the time they said they have rather
+ * than the 39-hour default — the real account said 72 and was planned on 39 for two weeks.
+ */
+export function availabilityFromHours(weeklyHours: number): AvailabilityWindow[] {
+  const daily = Math.min(11.5, Math.max(0, weeklyHours) / 7);
+  const quarter = (hours: number) => Math.round(hours * 4) / 4;
+  const clock = (start: number, hours: number) => { const end = start * 60 + quarter(hours) * 60; return `${String(Math.floor(end / 60)).padStart(2, "0")}:${String(end % 60).padStart(2, "0")}`; };
+  const all = [0, 1, 2, 3, 4, 5, 6];
+  const parts: Array<[number, number, AvailabilityWindow["energy"]]> = [[9, Math.min(3, daily), "high"], [13, Math.min(5, daily - 3), "medium"], [19, daily - 8, "low"]];
+  return parts.filter(([, hours]) => quarter(hours) >= 0.25).map(([start, hours, energy]) => ({ days: all, start: `${String(start).padStart(2, "0")}:00`, end: clock(start, hours), energy }));
+}
+
+export type AvailabilitySource = "saved" | "interview" | "stated_hours" | "default";
+
+/**
+ * The pattern the scheduler uses, and where it came from: what the person painted; else what the interview proposed from the rhythm
+ * they described; else their stated weekly hours spread over the week; else the default. Every reader goes through this, so the plan,
+ * the step planner and the notifications agree on the same hours.
+ */
+export function resolveAvailability(input: { saved?: string | null | undefined; proposed?: string | null | undefined;
+  facts: Array<{ slot: string; status: string; value: string }> }): { windows: AvailabilityWindow[]; source: AvailabilitySource } {
+  const parse = (raw: string | null | undefined, pick: (value: unknown) => unknown) => {
+    if (!raw) return undefined;
+    try { const windows = validateAvailability(pick(JSON.parse(raw))); return windows.length ? windows : undefined; } catch { return undefined; }
+  };
+  const saved = parse(input.saved, (value) => value);
+  if (saved) return { windows: saved, source: "saved" };
+  const proposed = parse(input.proposed, (value) => (value as { windows?: unknown } | null)?.windows);
+  if (proposed) return { windows: proposed, source: "interview" };
+  const hours = statedWeeklyHours(input.facts);
+  if (hours) return { windows: availabilityFromHours(hours), source: "stated_hours" };
+  return { windows: DEFAULT_AVAILABILITY, source: "default" };
+}

@@ -15,9 +15,10 @@ type Tab = "week" | "params" | "why";
  * packed, and 「排程依据」 — the scheduler's own ordering, where each milestone's importance slider now lives. Every change is previewed
  * against the real schedule before it is applied, and the charts above show it while the preview is open.
  */
-export function TimeControls({ windows, suggested, proposed, busy, params, presets, statedWeekly, ranking, openWhy }: {
+export function TimeControls({ windows, suggested, proposed, busy, params, presets, statedWeekly, ranking, openWhy, shares, labels, lineOrder }: {
   windows: AvailabilityWindow[]; suggested: AvailabilityWindow[]; proposed?: { windows: AvailabilityWindow[]; why: string } | null; busy: number[][]; params: ScheduleParams;
   presets: { buffered: ScheduleParams; asap: ScheduleParams }; statedWeekly: number | null;
+  shares: { effective: Record<string, number>; custom: boolean }; labels: Record<string, string>; lineOrder: string[];
   /** The 「排程依据」 tab's content (the ranking table and the written explanation). */ ranking: ReactNode;
   /** Opens on 「排程依据」 (the schedule status links there when something was not placed). */ openWhy?: boolean;
 }) {
@@ -35,12 +36,41 @@ export function TimeControls({ windows, suggested, proposed, busy, params, prese
         { value: "params", label: "排程参数" }, { value: "why", label: "排程依据" }]} /></header>
     <span id="why" className="pl-anchor" />
     {tab === "week" && <WeekEditor windows={windows} suggested={suggested} proposed={proposed ?? null} busy={busy} statedWeekly={statedWeekly} />}
-    {tab === "params" && <ParamsPanel params={params} presets={presets} />}
+    {tab === "params" && <><ParamsPanel params={params} presets={presets} /><SharesPanel shares={shares} labels={labels} lineOrder={lineOrder} /></>}
     {tab === "why" && <div className="pl-why">
       <small className="pl-chart-foot">排序规则：优先档 → 重要性 → 截止日。调整重要性或截止日时先预览对排程的影响。</small>
       {ranking}
     </div>}
   </section>;
+}
+
+/**
+ * Each line's share of the week (decided 2026-10-10): a soft floor the scheduler meets before ordering by deadline tier, so a line
+ * whose milestones are far off still gets its hours. Starts from what the person said in the interview; previewed like any change.
+ */
+function SharesPanel({ shares, labels, lineOrder }: { shares: { effective: Record<string, number>; custom: boolean }; labels: Record<string, string>; lineOrder: string[] }) {
+  const [draft, setDraft] = useState(shares.effective);
+  const impact = usePlanImpact();
+  const total = lineOrder.reduce((sum, line) => sum + (draft[line] ?? 0), 0);
+  const changed = lineOrder.some((line) => (draft[line] ?? 0) !== (shares.effective[line] ?? 0));
+  return <div className="pl-params pl-shares">
+    <h3>主线份额</h3>
+    <small className="pl-chart-foot">{shares.custom ? "本人设定。" : "来自访谈中所述的投入比例。"}每条主线一周至少得到这一份可用时间；有截止的工作仍然优先。</small>
+    {lineOrder.map((line) => <div key={line} className="pl-param" data-line={line}>
+      <span>{labels[line] ?? line}</span>
+      <Slider label={`${labels[line] ?? line}的份额`} min={0} max={100} step={5} format={(value) => `${value}%`} value={draft[line] ?? 0}
+        onChange={(value) => setDraft({ ...draft, [line]: value })} />
+    </div>)}
+    {total > 100 && <p role="status">合计 {total}%，超过 100%。</p>}
+    <div className="pl-toolbar">
+      {changed && <button type="button" onClick={() => setDraft(shares.effective)}>还原</button>}
+      <button type="button" className="primary-button" disabled={!changed || total > 100 || impact.busy}
+        onClick={() => void impact.propose({ kind: "shares", shares: draft })}>{impact.busy ? "计算中…" : "预览影响"}</button>
+    </div>
+    {impact.error && <p role="status">{impact.error}</p>}
+    {impact.pending && <ImpactCard impact={impact.pending.impact} busy={impact.busy} onApply={() => void impact.apply()}
+      onCancel={() => { impact.cancel(); setDraft(shares.effective); }} />}
+  </div>;
 }
 
 const ORDER = [1, 2, 3, 4, 5, 6, 0];

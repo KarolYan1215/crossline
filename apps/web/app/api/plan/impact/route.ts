@@ -6,7 +6,7 @@ import { isCrossSiteWrite } from "../../../../lib/same-origin";
 import { withUndo } from "../../../../lib/undo";
 
 const CHANGE_LABEL: Record<string, string> = { estimate: "修改时长", estimate_delta: "修改时长", due: "修改截止日", defer: "推迟开始",
-  availability: "修改可用时段", params: "修改排程参数", weight: "修改重要性" };
+  availability: "修改可用时段", params: "修改排程参数", weight: "修改重要性", shares: "修改主线份额" };
 
 const parse = (value: unknown): Change | undefined => {
   const body = value as Partial<Record<string, unknown>> | undefined;
@@ -17,6 +17,9 @@ const parse = (value: unknown): Change | undefined => {
   if (body?.kind === "params") return { kind: "params", params: normalizeParams(body.params) };
   if (body?.kind === "weight" && typeof body.milestoneId === "string" && typeof body.weight === "number" && Number.isFinite(body.weight))
     return { kind: "weight", milestoneId: body.milestoneId, weight: Math.max(0, Math.min(100, Math.round(body.weight))) };
+  if (body?.kind === "shares" && body.shares && typeof body.shares === "object")
+    return { kind: "shares", shares: Object.fromEntries(Object.entries(body.shares as Record<string, unknown>)
+      .filter((entry): entry is [string, number] => typeof entry[1] === "number" && Number.isFinite(entry[1]))) };
   if (typeof body?.workOrderId !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/.test(body.workOrderId)) return undefined;
   if (body.kind === "estimate" && typeof body.p50Minutes === "number")
     return { kind: "estimate", workOrderId: body.workOrderId, p50Minutes: body.p50Minutes, ...(typeof body.stepId === "string" ? { stepId: body.stepId } : {}) };

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { availableSlots, validateAvailability, suggestAvailability, DEFAULT_AVAILABILITY } from "./availability";
+import { availableSlots, validateAvailability, suggestAvailability, DEFAULT_AVAILABILITY, availabilityFromHours, resolveAvailability, weeklyAvailableHours } from "./availability";
 
 // 2026-09-14 is a Monday, 2026-09-19 a Saturday.
 const weekday = [{ days: [1], start: "09:00", end: "17:00", energy: "high" as const }];
@@ -87,4 +87,24 @@ test("the stated weekly total is read from the person's own facts, and compared 
   expect(statedWeeklyHours([{ slot: "weekly_hours", status: "inferred", value: "所有事情合计每周约 72 小时" }])).toBeUndefined();
   expect(weeklyAvailableHours([{ days: [1, 2, 3, 4, 5], start: "09:00", end: "12:00", energy: "high" },
     { days: [1, 2, 3, 4, 5], start: "14:00", end: "18:00", energy: "medium" }, { days: [0, 6], start: "10:00", end: "12:00", energy: "low" }])).toBe(39);
+});
+
+describe("where the hours come from when the person never painted them", () => {
+  const facts = [{ slot: "weekly_hours", status: "confirmed", value: "所有事情合计每周约 72 小时" }];
+  test("saved beats the interview's proposal, which beats the stated total, which beats the default", () => {
+    const painted = JSON.stringify([{ days: [1], start: "08:00", end: "10:00", energy: "high" }]);
+    const proposed = JSON.stringify({ windows: [{ days: [2], start: "09:00", end: "11:00", energy: "medium" }], why: "访谈" });
+    expect(resolveAvailability({ saved: painted, proposed, facts }).source).toBe("saved");
+    expect(resolveAvailability({ proposed, facts }).source).toBe("interview");
+    expect(resolveAvailability({ facts }).source).toBe("stated_hours");
+    expect(resolveAvailability({ facts: [] })).toEqual({ windows: DEFAULT_AVAILABILITY, source: "default" });
+    // An unreadable saved value falls through instead of emptying the week.
+    expect(resolveAvailability({ saved: "not json", facts }).source).toBe("stated_hours");
+  });
+  test("a stated total becomes a valid week of about that many hours", () => {
+    for (const hours of [20, 39, 72]) {
+      const windows = validateAvailability(availabilityFromHours(hours));
+      expect(Math.abs(weeklyAvailableHours(windows) - hours)).toBeLessThanOrEqual(2);
+    }
+  });
 });
