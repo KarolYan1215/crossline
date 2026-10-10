@@ -49,9 +49,12 @@ export async function contextPack(ctx: AccessContext, page: PageContext, now = n
   const days = Array.from({ length: 7 }, (_, index) => new Date(Date.parse(`${today}T12:00:00Z`) + index * 86_400_000).toISOString().slice(0, 10));
   const isWork = (id: string) => id.startsWith("scheduled:") || id.startsWith("proposed:") || id.startsWith("optional:");
   const free = availableSlots(readAvailability(ctx), days, upcoming.filter((block) => !isWork(block.id)).map((block) => ({ day: block.day!, start: block.start, end: block.end })));
+  // Today counts from now: at 22:15 the day's 09–18 is gone (the first real answer said 「今天还有 5 小时 45 分」).
+  const nowMinute = minutesOf(formatInTimeZone(now, timeZone, "HH:mm"));
+  const span = (day: string, start: string, end: string) => Math.max(0, minutesOf(end) - Math.max(minutesOf(start), day === today ? nowMinute : 0));
   const capacity = days.map((day) => ({ day,
-    availableMinutes: free.filter((slot) => slot.day === day).reduce((sum, slot) => sum + minutesOf(slot.end) - minutesOf(slot.start), 0),
-    scheduledMinutes: upcoming.filter((block) => block.day === day && block.id.startsWith("scheduled:")).reduce((sum, block) => sum + minutesOf(block.end) - minutesOf(block.start), 0) }));
+    availableMinutes: free.filter((slot) => slot.day === day).reduce((sum, slot) => sum + span(day, slot.start, slot.end), 0),
+    scheduledMinutes: upcoming.filter((block) => block.day === day && block.id.startsWith("scheduled:")).reduce((sum, block) => sum + span(day, block.start, block.end), 0) }));
   const nextBlock = new Map<string, string>();
   for (const block of upcoming.filter((item) => item.id.startsWith("scheduled:"))) {
     const id = block.id.split(":")[1]!;

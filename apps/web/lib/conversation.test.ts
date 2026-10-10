@@ -94,6 +94,10 @@ test("the pack says how much time work can use: the available hours minus fixed 
   const { contextPack, conciergeSnapshot } = await import("./conversation");
   const pack = await contextPack(TEST_CTX, { kind: "today", entityId: "" }, NOW);
   // The default pattern: weekdays 09–12 and 14–18 (7 h), weekends 10–12 (2 h); 2026-10-08 is a Thursday.
+  // 12:52Z is 07:52 in Chicago: today's hours are all still ahead.
   expect(pack.capacity.map((day) => day.availableMinutes)).toEqual([420, 420, 120, 120, 420, 420, 420]);
+  // At 22:15 on that Thursday nothing of today is left.
+  const late = await contextPack(TEST_CTX, { kind: "today", entityId: "" }, new Date("2026-10-09T03:15:00.000Z"));
+  expect(late.capacity[0]).toMatchObject({ day: "2026-10-08", availableMinutes: 0 });
   expect(conciergeSnapshot(pack, NOW)).toContain("可用时段扣除固定安排");
 });
