@@ -28,7 +28,7 @@ export function QuotaCard({ signal, now, timeZone }: { signal: CostSignal; now: 
   const windows = [signal.short, signal.long].filter((window): window is CostWindow => Boolean(window));
   return <div className="st-quota">
     {signal.money
-      ? <div className="ui-stat"><b>${signal.money.spentUsd.toFixed(2)} / ${signal.money.capUsd.toFixed(0)}</b><span>本月 API 花费 / 上限</span></div>
+      ? <div className="ui-stat"><b>${signal.money.spent.toFixed(2)} / ${signal.money.cap.toFixed(0)}</b><span>本月 API 花费 / 上限</span></div>
       : windows.map((window) => {
         const left = Math.max(0, Math.round(100 - window.usedPercent));
         return <div key={windowName(window)} className="st-quota-row" data-low={left <= 15 || undefined}>

@@ -17,7 +17,7 @@ test("both windows show what is left and when each resets, in the person's zone"
 });
 
 test("an API key shows money against the cap, and an unreadable quota says why", () => {
-  expect(renderToStaticMarkup(<QuotaCard now={now} timeZone="UTC" signal={{ available: true, limitReached: false, money: { spentUsd: 3.2, capUsd: 10 } }} />))
+  expect(renderToStaticMarkup(<QuotaCard now={now} timeZone="UTC" signal={{ available: true, limitReached: false, money: { spent: 3.2, cap: 10 } }} />))
     .toContain("$3.20 / $10");
   expect(renderToStaticMarkup(<QuotaCard now={now} timeZone="UTC" signal={{ available: false, reason: "chatgpt authentication required" }} />))
     .toContain("还没有登录模型账号");

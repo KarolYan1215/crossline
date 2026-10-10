@@ -17,8 +17,8 @@ export type CostWindow = {
 
 export type CostSignal =
   | { available: true; short?: CostWindow; long?: CostWindow; limitReached: boolean;
-      /** An API-key runtime has no windows, only money: this month's spend against the person's cap (its `long.usedPercent` is spent/cap). */
-      money?: { spentUsd: number; capUsd: number } }
+      /** A pay-per-use runtime has no windows: this month's spend against the person's cap, in the cap's own currency. */
+      money?: { spent: number; cap: number } }
   | { available: false; reason: string };
 
 export type SpendPolicy = {
