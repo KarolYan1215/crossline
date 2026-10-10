@@ -35,7 +35,9 @@ export function reconcileCodexLoginUrl(loginUrl: string | undefined, state: Acco
 }
 
 export function visibleCodexBlocker(state: AccountState | undefined): { code: string; message: string } | undefined {
-  return state?.blocker ?? state?.supervisor?.blocker ?? loginOf(state)?.blocker;
+  const blocker = state?.blocker ?? state?.supervisor?.blocker ?? loginOf(state)?.blocker;
+  // The worker being down or not configured reaches here as the supervisor's own English; the page says it in words (copy-style).
+  return blocker && /SUPERVISOR|CAPABILITY/.test(blocker.code) ? { code: blocker.code, message: "后台服务没有连上，稍后点 ↻ 刷新。" } : blocker;
 }
 
 /**

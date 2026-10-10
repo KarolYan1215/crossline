@@ -45,4 +45,9 @@ describe("Codex account login observation", () => {
       }
     })).toEqual({ code: "CODEX_LOGIN_FAILED", message: "Codex login failed" });
   });
+
+  test("a worker that is down or not configured is said in words, not as the supervisor's own English", () => {
+    expect(helpers.visibleCodexBlocker!({ blocker: { code: "CAPABILITY_SECRET_MISSING", message: "CROSSLINE_SUPERVISOR_CAPABILITY_SECRET is not configured" } } as never))
+      .toEqual({ code: "CAPABILITY_SECRET_MISSING", message: "后台服务没有连上，稍后点 ↻ 刷新。" });
+  });
 });
