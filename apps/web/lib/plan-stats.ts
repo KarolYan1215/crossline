@@ -166,7 +166,10 @@ export function investment(input: { today: string; zone: string; now: string; li
   const sum = (field: "planned" | "actual", line: string) => weeks.reduce((total, week) => total + (week[field][line] ?? 0), 0);
   const present = new Set([...input.lineOrder, ...weeks.flatMap((week) => [...Object.keys(week.planned), ...Object.keys(week.actual)]), ...Object.keys(input.next7)]);
   const rank = (line: string) => { const index = input.lineOrder.indexOf(line); return index < 0 ? input.lineOrder.length : index; };
-  const lineIds = [...present].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+  // Only the person's own lines: an order filed under something else (a real one sat under 「\」 before the analysis refused unknown lines)
+  // used to appear as a line of its own.
+  const known = new Set(input.lineOrder);
+  const lineIds = [...present].filter((line) => !known.size || known.has(line)).sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
   const totalActual = lineIds.reduce((total, line) => total + sum("actual", line), 0);
   const totalPlanned = lineIds.reduce((total, line) => total + sum("planned", line), 0);
   const share = (part: number, whole: number) => whole > 0 ? Math.round((part / whole) * 100) : null;

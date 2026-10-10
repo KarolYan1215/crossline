@@ -70,6 +70,13 @@ describe("milestone rows", () => {
 });
 
 describe("planned against timed hours", () => {
+  test("an order filed under something that is not one of the person's lines does not become a line of its own", () => {
+    const result = investment({ today: "2026-10-10", zone: "America/Chicago", now: "2026-10-10T20:00:00Z", lineOrder: ["research"],
+      orderLine: { w1: "research", bad: "\\" }, plannedByDay: { "2026-10-10": { w1: 60, bad: 30 } },
+      executions: [{ workOrderId: "bad", startedAt: "2026-10-09T14:00:00Z", endedAt: "2026-10-09T15:00:00Z", pauseMinutes: 0 }], next7: {}, stated: null });
+    expect(result.lines.map((line) => line.line)).toEqual(["research"]);
+  });
+
   test("four weeks ending today, planned from the recorded day lengths and actual from the timer, with each line's shares", () => {
     const result = investment({ today: "2026-10-10", zone: "America/Chicago", now: "2026-10-10T20:00:00Z", lineOrder: ["research", "media", "startup"],
       orderLine: { w1: "research", w2: "media" },

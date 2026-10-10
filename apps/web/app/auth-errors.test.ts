@@ -11,6 +11,10 @@ describe("authErrorMessage", () => {
       .toBe("邮箱或密码不正确。");
   });
 
+  test("「Invalid origin」 (sent without a code, e.g. the page opened at localhost instead of 127.0.0.1) is shown in Chinese", () => {
+    expect(authErrorMessage({ message: "Invalid origin" }, "注册失败")).toBe("当前网址不在允许登录的地址之内，请改用设置里给出的地址打开。");
+  });
+
   test("falls back to the library's own message for an unmapped code, not a generic string", () => {
     expect(authErrorMessage({ code: "SOME_FUTURE_CODE", message: "A brand new error" }, "登录失败"))
       .toBe("A brand new error");

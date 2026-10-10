@@ -13,11 +13,16 @@ const AUTH_ERROR_TEXT: Record<string, string> = {
   PASSWORD_TOO_SHORT: "密码至少需要 8 位。",
   PASSWORD_TOO_LONG: "密码太长了。",
   INVALID_TOKEN: "链接无效或已过期，请重新申请。",
-  EXPIRED_TOKEN: "链接已过期，请重新申请。"
+  EXPIRED_TOKEN: "链接已过期，请重新申请。",
+  // The page was opened at an address the server does not accept sign-ins from (another host name or port than the configured one).
+  INVALID_ORIGIN: "当前网址不在允许登录的地址之内，请改用设置里给出的地址打开。",
+  MISSING_OR_NULL_ORIGIN: "当前网址不在允许登录的地址之内，请改用设置里给出的地址打开。"
 };
 
 export function authErrorMessage(error: { code?: string | undefined; message?: string | null | undefined } | null | undefined,
   fallback: string): string {
   if (!error) return fallback;
-  return AUTH_ERROR_TEXT[error.code ?? ""] ?? error.message ?? fallback;
+  // Better Auth sends 「Invalid origin」 without a code: matched on the message so it is not shown in English either.
+  const code = error.code ?? (/invalid origin/i.test(error.message ?? "") ? "INVALID_ORIGIN" : "");
+  return AUTH_ERROR_TEXT[code] ?? error.message ?? fallback;
 }

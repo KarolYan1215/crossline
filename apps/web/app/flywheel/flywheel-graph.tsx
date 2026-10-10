@@ -185,7 +185,10 @@ export function FlywheelGraph({ data }: { data: FlywheelGraphData }) {
   };
 
   const at = (id: string) => { const p = positions.get(id); return p ? toScreen(p) : undefined; };
-  const showNames = view.zoom >= 1.5 || (width >= 600 && view.zoom >= 1);
+  // Milestone names only when they can be read: a dozen dots or fewer, or zoomed in; otherwise on hover or focus (anchors always). With
+  // every name drawn, the real account's 37 milestones piled into an unreadable heap (2026-10-10).
+  const milestoneCount = graph.nodes.filter((node) => node.kind === "milestone").length;
+  const showNames = view.zoom >= 1.6 || (milestoneCount <= 12 && (width >= 600 || view.zoom >= 1.3));
   // Several relations between the same two milestones fan out instead of lying on top of each other.
   const fan = new Map<string, number>();
   const drawn = graph.edges.flatMap((edge) => {
@@ -282,6 +285,7 @@ export function FlywheelGraph({ data }: { data: FlywheelGraphData }) {
       <li>R：已确认关系构成的回路</li>
       <li>健康是容量约束，不画在图中</li>
       <li>拖动节点或空白处，滚轮或双指缩放；点里程碑打开主线页，点关系线查看与确认</li>
+      {!showNames && <li>里程碑名称：悬停或放大后显示</li>}
     </ul>
   </div>;
 }

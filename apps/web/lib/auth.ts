@@ -53,6 +53,10 @@ export function resolveCrosslineAuthOptions(): CrosslineAuthOptions | undefined 
   // not set" warning, found by actually starting the server with the example file's blank lines intact.
   const baseURL = process.env.CROSSLINE_WEB_BASE_URL || "http://127.0.0.1:3210";
   const trustedOrigins = [baseURL];
+  // The same loopback port under its other name: opening the app at localhost (as the review server's note recommends, to keep its
+  // cookies apart from 127.0.0.1's) answered every sign-up and sign-in with Better Auth's bare 「Invalid origin」.
+  const loopback = /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.exec(baseURL);
+  if (loopback) trustedOrigins.push(`http://${loopback[1] === "localhost" ? "127.0.0.1" : "localhost"}${loopback[2] ?? ""}`);
   if (process.env.CROSSLINE_TAILSCALE_HOSTNAME) trustedOrigins.push(`https://${process.env.CROSSLINE_TAILSCALE_HOSTNAME}`);
 
   const smtp = smtpFromEnv();
