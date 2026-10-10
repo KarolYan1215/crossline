@@ -1,6 +1,9 @@
 import { SignupForm } from "./signup-form";
 import { isEmailAuthConfigured } from "../../lib/auth";
 
+// Whether mail is configured is read from the server's environment at request time; prerendered, the build machine's answer would stick.
+export const dynamic = "force-dynamic";
+
 export default function SignupPage() {
   // Without mail the email sign-up routes do not exist; the form used to be shown anyway and failed with a bare 404.
   return <main className="offline-page"><div>
