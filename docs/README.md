@@ -11,6 +11,7 @@
 | [user-guide.md](user-guide.md) | 账号与登录、Tailscale 私网、离线与冲突、Codex 令牌、日历、备份恢复，采访 / 转写 / 屏幕活动 / 用量的机制与隐私承诺，以及主线、计划、设置与个人偏好的用法 |
 | [copy-style.md](copy-style.md) | 界面与 prompt 的固定术语、文案规范和每阶段的审查标准（A 摩擦与可用 · B 阅读负担 · C 语言 · D 视觉） |
 | [one-input.md](one-input.md) | 首页一个输入框：对话、命令、理解卡、动作注册表、主动气泡与精力模型（设计稿，待审） |
+| [flywheel-and-views.md](flywheel-and-views.md) | 跨主线飞轮（产物优先的联合规划）、今日页图谱与左侧面板、计划页统计、原子化身份定语（设计稿，待审） |
 | [assistant-agent.md](assistant-agent.md) | 带 shell 的助手：设计、守卫、信任与审阅流程 |
 | [structured-output.md](structured-output.md) | 模型的结构化输出怎么约束、怎么校验、怎么修正，出问题怎么查，现有的实测数据 |
 | [codex-fork-runtime.md](codex-fork-runtime.md) | 固定在 `vendor/codex` 的 Codex 运行时：来源、补丁、构建、哈希校验、升级方式、supervisor 令牌 |
