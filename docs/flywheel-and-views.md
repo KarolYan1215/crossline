@@ -1,186 +1,166 @@
-# 跨主线飞轮与页面重构（设计稿）
 
-状态：**已审定**（2026-10-10）。按第 7 节分阶段实现，每阶段在真实账号上验证。
 
-## 1. 为什么要做
 
-| # | 现象 | 原因 |
-|---|---|---|
-| 1 | 今日页底部主线卡只有「N 项进行中 + 当前里程碑」，看不出各线的分布和互相促进 | 没有任何可视化 |
-| 2 | 日历块点开后的详情条画在日历下方，和左侧面板的「下一项 / 开始计时」重复；块上只能「开始（转为正式排程）」 | 详情是 `calendar-panel.tsx` 里的内联 JSX，左侧是另一个组件 `DayQuickActions`，两套开始逻辑 |
-| 3 | 计划页把今日页的整个日历（连同左侧面板）又放了一遍；重要性滑条、「本周已排」各出现两次 | 计划页从「日历 + 设置」演变而来，没有自己的定位 |
-| 4 | 访谈给的长期目标候选大量重复，组合也常不合理 | 候选是整句（`goalCandidates: string[]`，每条 ≤120 字），模型把同几个定语排列组合成多句 |
-| 5 | 主线页几乎看不到跨主线的联系 | 见第 5.1 节：关系是逐线设计完里程碑后事后补的，并且会被重做一条线时整批归档 |
+## 附录：实现记录（2026-10-10）
 
-真实账本（2026-10-10）：跨主线关系 9 条全是待确认（虚线、淡色），另有 11 条已被归档；副产品机制 0 个落地任务；已批准的跨线关系 0 条。
+各阶段实现分支的交接说明，合并时并入此处。用户口径的说明在 `docs/user-guide.md` 第 18 节，架构摘要在 `CLAUDE.md`「Flywheel and views」。
 
-## 2. 今日页
+### F1 / F2：今日页面板、日程块操作、自动交给 Agent、飞轮图谱
 
-### 2.1 左侧面板：上固定、下切换
+**The day panel (F1, 2026-10-10; `apps/web/app/timeline/quick-actions.tsx` `DayQuickActions`, `block-overview.tsx`, `complete-dialog.tsx`, `block-start.ts`, pure `panel-model.ts`).** The detail strip under the calendar (`aside.cal-detail` in `calendar-panel.tsx`) is gone; the column beside the day view is the one place a block is looked at and acted on. Top, fixed: 当日负荷 (`dayLoad`: scheduled / pencilled / fixed minutes). Middle, switching: the picked block's task (`BlockOverview` — 主线 · 里程碑, the block's step and the task's progress, the due date and this step's duration through `TaskQuickEdit` with its impact preview, the person's part (`humanCore`, else the person's own open steps), the task's next block (`followingBlock`)), or with nothing picked the next block in compact form (`nextBlock`). Bottom: 待批准任务 · N with 全部批准, 待决事项 · N, 调整可用时段. A pick in the week view opens that day with the block picked (the week has no panel); on a phone the panel sits under the timeline and is scrolled into view on a pick. **One start path**: the old `DayQuickActions.start` and the strip's 「开始（转为正式排程）」 were two copies of pin-then-start; now `TaskActions` takes `beforeStart`, and the panel passes `pinIfPencilled(item)` (a 预排 block becomes formal through `/api/plan/pin` before the timer starts). Actions on a block: TaskActions (approve / start / pause with a reason / resume / 交给 Agent / open the task dialog / archive) plus 完成并提交材料 and 推迟. **完成并提交材料** (`CompleteDialog`) is one line plus dropped or chosen files (images, PDF, plain text — what `ALLOWED_ATTACHMENT_TYPES` keeps), sent through the same two endpoints the task page uses: it starts the timer first when the task is not `active` (both `evidence-attachments` and `complete` require it), uploads, then `complete` with the files as `file` claims and the line as a `record` claim on `note:<id>` (the shape `evidence.submit` already uses); 「完成（记为无证据）」 completes with no claim, and 「只完成本步」 (shown when other open steps remain) marks the block's step done through the steps route instead. **推迟** offers 明天 or a chosen day, previewed as an `impact` `defer` change before it is applied. 交给 Agent appears when the block's own step is one the system can do (`agentStepFor`: executor ≠ human; a whole-task block falls back to the first such step). Task details for the coming week's blocks are read with Today in the same `loadTaskDetailsBatch` call (`calendarDetails`, a plain object because it crosses to the client); any other block's task is read on pick from the new read-only `GET /api/work-orders/[id]/detail`. `CalendarPanel`'s props stay backward compatible (`taskDetails` is optional), so the plan page — until F3 removes its calendar — gets the same panel, reading details on demand.
 
-- **顶部固定**：当日负荷条（已排 / 预排小时）。
-- **下方切换**：选中日程块的**任务概述**——主线 · 里程碑、当前步骤与进度、截止日、本步时长（可拖）、本人负责的部分、下一个时段——和快捷操作（2.2）。未选中时显示「下一项」。
-- **底部一行入口**：待批准任务 · N（全部批准）、待决事项 · N、调整可用时段。
-- 日历下方的详情条删除；`DayQuickActions.start` 与详情条的开始逻辑合并为一处。
-- 计划页不再有日历，左侧面板只在今日页。
+**「自动交给 Agent」 (F1; `AUTO_HANDOFF_SETTING` = `agent.autoHandoff`, default off; `isAutoHandoff`/`setAutoHandoff` in `packages/db/src/agent.ts`; `POST /api/agent/auto-handoff`; Settings → 自动化与助手).** Exactly what it controls: a step **on the calendar** that the step planner judged the system can do (`executor: "mixed"`), still planned, whose `dependsOn` steps are done, of a committed task the person is not timing right now (an open, unpaused execution), never handed over before (`triedSteps`, the same lost-run retry rule as preparation steps), of a kind the person allowed (a kind not yet allowed is asked about once via `requestCategory`). The assistant's own preparation steps (`executor: "agent"`) take no calendar time and are **not** governed by this switch — they keep being picked up by themselves, as decided on 2026-10-09. **"At its scheduled time"**: the schedule is derived on read in the web app and never stored, so the attention timer (`recordScheduledToday`, every ten minutes) now also writes `STEP_STARTS_SETTING` = `schedule.stepStarts`, `{ "<orderId>#<stepId>": ISO instant }` of each step's earliest block in the coming seven days (`stepStartsOf`, converted with `toZonedInstant`; a local time that does not exist is skipped). `autoHandoffTiming` calls a step `due` when its block starts within `AUTO_HANDOFF_LEAD_MINUTES` (30) or has already started, `early` when its block is later in the week, `unscheduled` (never started by itself) with no block. `agentService.pass` picks, one at a time and only under the existing ≥95% quota ceiling and pause: a `due` auto step, then preparation steps, then whole orders, then an `early` auto step ("in advance when idle"). The result still follows the kind's 关闭 / 逐次审阅 / 自动 mode: a step handed over (by the button or by this switch) is now marked done after a clean run when the kind is trusted on its own checks (`!reviewRequired`), and otherwise when the person accepts it on 待确认 (`reviewAgentTask`, unchanged) — before, a mixed step done in 自动 mode was never marked done. `STEP_CATEGORY` and `stepCategory` moved from the worker into `packages/core/src/agent-dispatch.ts` so the web can mark blocks: `withAgentMarks` (`timeline/model.ts`) tags a block 「Agent 执行中」 (a run with no outcome for that step, or for the whole order) or 「Agent 将执行」 (switch on, not paused, a mixed planned step of an allowed kind not yet handed over); `TimelineItem` gained `stepId` and `agent`.
 
-### 2.2 日程块的快捷操作
+**The flywheel graph (F2; `apps/web/app/flywheel/graph-model.ts` pure, `flywheel-graph.tsx`, `flywheel-graph.css`, data from `apps/web/lib/flywheel-graph.ts` `loadFlywheelGraph`).** Replaces Today's per-line cards (`section.lines-strip`; its CSS and `.flow-progress` went with it; `DashboardData.identities` is still computed because `generality.test.ts` reads it). Nodes: one anchor per identity line labelled with `goals[0]` (else the line's name) and one dot per live milestone (approved or draft; never archived, never `milestonesRetiredBySystem`; health is capacity and has no node — the legend says so), coloured by line (`data-line` → `--lc`), radius `6 + 3√(unfinished tasks)` capped at 20. Edges (`buildGraph`/`classifyEdge`): `member` (milestone → its anchor, faint, the pull that clusters a line), `chain` (anchor `dependsOn` within a line, thin, minus dependencies another path already implies, as on the 主线 timeline; a relation inside one line is drawn the same way), `cross` (an approved or candidate `milestone_relations` row between lines: thick, arrowed, in the source line's colour). Approved solid, candidate dashed; clicking any relation opens a popover with its kind and explanation, and a candidate can be approved or turned down there through `/api/milestone-relations/decide` (a relation the store skips for lack of evidence says so). `graphLoops` runs `flywheelLoops` on the line-level graph of **approved** cross relations only and labels each loop R1, R2… at the centre of the milestones its relations join; its lag is the sum of each hop's shortest `lagDays` when every hop states one — relations carry no lag yet (F5 adds artifact transfers), so today the R stands alone. Layout: a hand-written force simulation (`createSimulation`: pairwise repulsion with collision, springs per edge kind, weak centring, each anchor held weakly to its slot on a ring), seeded from FNV-1a hashes of the ids with mulberry32 and settled synchronously (300 ticks) before the first paint, rounded to a tenth — the same ledger draws the same shape on every load, on the server and in the browser. The SVG's coordinate space is the container's measured pixel width (`ResizeObserver`; 720 before it is measured), so text is drawn at 12–13px at any width and nothing scrolls sideways on a phone. Interaction: drag a dot (the rest relax around it — animated, or settled at once under `prefers-reduced-motion`), drag the background to pan, wheel zoom about the pointer (a non-passive listener, so the page does not scroll under it), two-finger pinch, +/−/复位; hover or focus lights a node's neighbours and dims the rest; a click (or Enter) opens `/milestones?open=<id>`. The legend keeps each line's tasks in progress (「研究者 · 17 项进行中」) with its goal.
 
-按任务状态出现，复用 `TaskActions`：
+**Tests.** `packages/core/src/agent-dispatch.test.ts` (timing, step kind), `apps/worker/src/agent-dispatch.test.ts` (「自动交给 Agent」 candidates: off by default, due / early / unscheduled, dependencies, the person timing, a kind not yet allowed), `apps/worker/src/agent-service.test.ts` (a due step goes before a whole order; a trusted kind's clean run marks the step done), `apps/web/lib/schedule-memory.test.ts` (`stepStartsOf`), `apps/web/app/timeline/panel-model.test.ts` and `day-panel.test.tsx` (the panel), `apps/web/app/flywheel/graph-model.test.ts` (graph building, edge classes, loops and lag, stable seeded layout, ring order, fit), `flywheel-graph.test.tsx`, `apps/web/lib/flywheel-graph.test.ts`. e2e (`e2e/crossline.spec.ts`, not yet run on this branch): the panel switches to a picked block, starts it there and hands it in with a line and a file; the graph draws, zooms without scrolling the page, and opens a milestone. The Today visual baseline changes (graph instead of cards).
 
-- 开始 / 暂停（填原因）/ 继续计时；预排块开始时先转为正式排程。
-- **完成并提交材料**：弹窗，一个输入框（写一句说明）+ 拖放或选择文件，提交走 `complete` 与 `evidence-attachments`。没有材料时可「完成（记为无证据）」。
-- 交给 Agent（当前步骤被判定为系统能做时出现）；已由 Agent 接手的块显示「Agent 将执行 / 执行中」。
-- 推迟（明天 / 选一天）与改时长；每项改动先预览影响。
+### F3：计划页
 
-### 2.3 自动交给 Agent
 
-设置 → 自动化与助手新增总开关**「自动交给 Agent」**（默认关闭）：
+**The plan page is the long view, not a calendar** (decided 2026-10-10, docs/flywheel-and-views.md §3). The calendar (`CalendarPanel`) is on
+Today only; `apps/web/app/plan/plan-view.tsx` still exports `CalendarData` because Today imports it from there. The page is: a top row
+(`PlanView`: version, differences fold that opens itself while one is pending, 立即同步日历, 发布到 Crossline 日历, the horizon, schedule
+status), four charts (`plan-stats-charts.tsx`), 「与上次查看时相比」, and the settings as three tabs (`plan-controls.tsx`: 可用时段 /
+排程参数 / 排程依据). The importance slider lives only in the 排程依据 table (`ranking-table.tsx`, with the preset's reasons on hover); the
+separate 重要性 tab, the old `CapacityPanel`/`ForecastChart` (`plan-charts.tsx`, deleted) and the duplicate 「本周已排」 are gone.
 
-- 开启后，步骤被判定为系统能做（`executor` ≠ human）、且类别已允许时，到排定时间（或在空闲时提前）由后台直接启动，不等人点。
-- 结果是否要本人审阅，仍按各类别「关闭 / 逐次审阅 / 自动」三档。
-- 现有的后台派发（每个工作区一次一个、额度 ≥95% 暂停）规则不变。
+- **Horizon** (`?horizon=4|8|far`, `horizonFor` in `lib/plan-stats.ts`): 8 weeks by default, 4, or 「到最远截止」 — the farthest approved
+  milestone deadline, rounded up to whole weeks and capped at 26 weeks (`HORIZON_CAP_DAYS` = 182). `loadGoalForecast(ctx, horizonDays = 56)`
+  takes the horizon; every other caller still gets eight weeks.
+- **`forecastGoals` records per-week demand** (`packages/planner/src/forecast.ts`): `weeks[k].demand[]` = minutes per milestone in the p50 and
+  p85 runs. Work done after the milestone's deadline, or still undone at the horizon's end while the deadline is inside it, is charged to
+  the **deadline's** week (`*OverdueMinutes`, included) — that is what lets a week's demand exceed its usable minutes, which the chart
+  labels 「超载 N 小时」. Undone work whose deadline is past the horizon (or that has none) is only later, not overload. The week count is
+  `ceil(days / 7)`, so 56 days is still eight weeks and the old shape is unchanged apart from `demand`.
+- **`lib/plan-stats.ts`** is pure (no store) and shared by the page loader and the preview: `capacityWeeks` (per week and line: scheduled =
+  the scheduler's blocks, pending = forecast demand above that, extra = p85 − p50; a line is never drawn below its placed blocks),
+  `goalRows`, `investment` (last four weeks ending today, planned vs timed per line, plus the next seven days' planned), `statedShares`
+  (portrait `share`, else each line's own `weekly_hours` facts, never a 合计 total), `estimatePoints` (analysis p50, else the baseline;
+  censored left out), `rhythmGrid` (timer stretches split by quarter hour in the person's zone, pauses cut out), `availabilityGrid`.
+- **Planned history is new data**: `recordScheduledToday` (`lib/schedule-memory.ts`, the attention timer) now also writes
+  `schedule.minutes:<day>` → `{orderId: minutes}`, the most seen per order that day. `schedule.day:<day>` keeps its shape (the missed-block
+  ask reads it). Days before this shipped have a start time and no length and count as 「计划时长未记录」 — on the real account the planned
+  dots will be empty for the first weeks.
+- **Previews move the charts**: `usePlanImpact` (`app/plan/preview-context.tsx`) wraps `useImpact({ charts: horizonDays })`; the route
+  passes `charts` (7–182 days) to `previewChange(ctx, change, { chartsHorizonDays })`, which returns `impact.charts = { before, after }`
+  (`loadForecastCharts` in `lib/plan-board.ts`, run inside `withPreview` for after). While a preview is open the capacity chart draws the
+  after-state with a dashed ghost of the previous demand and usable line, the milestone rows a dashed ghost range, the dumbbell a ghost of
+  the next seven days' plan, and the heatmap the old availability as dashed outlines.
+- Charts are hand-written SVG drawn at their measured width (`useWidth`), text 12px Arial in graphite/ink, line colours only as fills.
+  Geometry is in `app/plan/chart-geometry.ts` (tested). CSS is `app/plan/plan-stats.css` (imported by the page). With nothing timed,
+  the scatter and heatmap say 「尚无实测」 instead of drawing empty axes; the dumbbell draws no actual dots.
+- Copy fixed on the page: 草案 → 草稿, 采纳 → 批准, and the sync/publish errors no longer show `worker` or an error code.
 
-### 2.4 飞轮图谱（替换底部主线卡）
+#### e2e changes (not run here)
 
-参考 Obsidian 的知识图谱：
+`e2e/crossline.spec.ts`: 「Plan is one calendar…」 became 「Plan is the long view…」 (no calendar, four chart regions, 4/8 weeks switch,
+milestone rows link to `/milestones?open=`, three settings tabs, no 重要性); the availability test reads `data-scheduled-minutes` on the
+capacity chart instead of counting week-view blocks and checks the preview ghost; the deadline check uses
+`.pl-gantt-deadline[data-deadline=…]`; `STABLE_FOR_SCREENSHOT` hides the new chart marks. **`plan-diff.png` must be regenerated**
+(`pnpm exec playwright test --update-snapshots`), since the calendar is gone from that page.
 
-- **点**：
-  - 每个进行中的里程碑一个散点，颜色 = 主线，大小 = 未完成任务数；
-  - 每条主线的长期目标一个锚点（略大，标目标文字），同线里程碑被它吸在周围。
-- **边**：
-  - 同线前后依赖用细线；跨线关系用粗线带箭头，颜色取上游主线。
-  - 已确认的画实线，待确认的画虚线；待确认的边可在图上点「成立 / 不成立」。
-  - 闭合的环在环心标 R 和时延，**只有已确认的边构成的环**才标。
-- **交互**：拖动、滚轮缩放；悬停高亮邻居、淡化其余；点击里程碑打开主线页抽屉。
-- **布局**：力导向，手写模拟，不引入图表库。主线锚点初始放在环上并加弱向心力，保证每次打开形状稳定。
-- 健康不是主线，不画点；容量约束在图例里说明。
+### F4：原子化定语与卡片访谈
 
-## 3. 计划页：长期统计与排程设置
+#### 实现要点
 
-日历整块移除（只留今日页）。默认看 8 周，可切 4 周或「到最远截止」（上限 6 个月）。
+##### 1. 定语候选（core + 访谈）
 
-1. **页顶一行**：计划版本、计划差异（有待处理时展开）、立即同步日历、发布到 Crossline 日历、排程状态。
-2. **容量与需求**：每周一根柱，按主线颜色堆叠已排与待排需求，保守估时多出的部分用浅色延伸；一条可用小时折线；超出部分标「超载 N 小时」。悬停显示该周各线小时和占用最多的里程碑。
-   - 需要扩展 `forecastGoals`：在模拟中记录每周每个里程碑消耗的分钟，按主线汇总。
-3. **里程碑完成预测**：
-   - 按主线分组的区间甘特：每个里程碑一行，通常 → 保守完成区间为一条，◆ 为截止，两者间距即余量，不足 2 天标风险。
-   - 虚线标任务库进入日，行尾写剩余小时；点行打开里程碑抽屉。
-4. **主线投入：计划 vs 实际**：
-   - 哑铃图：每条主线一行，近 4 周每周的计划小时点与实际计时小时点相连。
-   - 旁边标访谈里本人说的投入比例。
-5. **估时准确度与节律**：
-   - 估时 vs 实际散点（对数轴，对角线为准）和保守估时覆盖率。
-   - 星期 × 小时的实际工作热力图，叠在可用时段上。
-   - 没有实测数据时写明「尚无实测」，不画空图。
-6. **排程设置**（底部分页区）：
-   - 三个分页：可用时段 / 排程参数 / 排程依据。重要性滑条只留在排程依据表里，「重要性」分页删除。
-   - 任何改动先预览影响，上方四张图同步显示变化前后。
+- `packages/core/src/line-attributes.ts`：类型 `AttributeCandidate {text, kind: domain|ability|state, sourceRef}`、`StoredLineProfile`、`PendingGoalEdit`；纯函数 `cleanAttribute`（去「成为」、去尾「的」、去标点）、`attributeKey` / `duplicateAttributes`（去「的」与标点后一个包含另一个即重复）、`notAtomic`（含「、，；/」等并列）、`guessKind`（无标注时的规则分类）、`orderAttributes`（领域 → 能力 → 状态，同类保持原序）、`insertByKind`（新选的定语插在最后一个同类或更早类之后，不打乱手动排序）、`composeGoal`（「成为A的、B的<身份>」）、`goalCore`、`recomposes`、`lineAttributes`（旧 `goalCandidates` 每句读成一个定语，兼容旧数据，不迁移）、`checkGoalParts`。设置键 `LINE_PROFILES_SETTING = "lines.profiles"`、`GOAL_EDITS_SETTING = "lines.goalEdits"`。
+- 分类采用**模型标注 `kind`**（schema 里的枚举，可测、可校验），`guessKind` 只用于人手写的定语和旧整句候选。
+- `onboarding-turn-schema.ts`：`lineProfiles[].attributeCandidates`（≤12 项，每项 `{text ≤40, kind, sourceRef}`）替换 `goalCandidates`；新增顶层 `goalEdits: [{lineId, parts:[{text,kind}], sourceRef}]`。严格模式规则不变（全部 required、`additionalProperties:false`），`structured-output.test.ts` 的发现式检查覆盖。
+- 校验 `validateOnboardingTurn`：候选为 0（保留已有）或 6–12 个；`sourceRef` 必须是已知的 `reply-N`/`src-N`（与事实同样处理：退回修正 `ONBOARDING_UNKNOWN_SOURCE_REF`）；并列 `ONBOARDING_ATTRIBUTE_NOT_ATOMIC`；重复 `ONBOARDING_ATTRIBUTE_DUPLICATE`，详情点名两个定语；数量 `ONBOARDING_ATTRIBUTES_COUNT`。`goalEdits` 必须引用本人的回复（`ONBOARDING_GOAL_EDIT_UNASKED`），主线必须存在，定语不重复。`keepOnboardingTurn`（修复用尽时）逐个丢弃坏定语，剩不足 6 个就当空列表（保留已有），丢弃不合格的 `goalEdits`。
+- `persistTurn`（`apps/worker/src/onboarding-session.ts`）：`lines.profiles[line] = {description, attributes}`；空候选只更新描述；新候选替换旧候选，但保留由已采用长期目标拆出的定语（`sourceRef: "goal"`，且不与新候选重复）。`goalEdits` 写入 `lines.goalEdits[line] = {parts, sourceRef, at}`，按本人说的顺序，不自动生效。访谈上下文的 `lines[]` 带上 `goalParts`。
+- Skill `crossline-onboarding/SKILL.md` 与 worker 开发者指令同步改写（lines 阶段、`goalEdits`、focusLine/卡片访谈刷新候选）。
+- 读取方：`packages/db/src/interview.ts`（清单的「描述与候选」按 `attributes` 或旧 `goalCandidates` 计数）、`portrait-writer`（只读描述）、`calendar-classifier`（只读描述）、`/api/onboarding/state`、主线页。
 
-所有图沿用 `app/ui/` 的手写 SVG，满足设计审查（Arial、≥12px、7:1、手机无横向滚动）。
+##### 2. 选定语界面与 `goalParts`
 
-## 4. 身份：原子化定语与卡片里的访谈
+- `packages/identity-packs`：`LineSpec.goalParts` / `IdentityPack.goalParts`。
+- `apps/web/lib/lines.ts` `updateLine` 接受 `goalParts`：`checkGoalParts` 校验（空、超过 12、重复 → `LINE_GOAL_PARTS_*`，带中文原因），`goals[0]` = 组合句，其余长期目标保留；整句改写 `goals[0]` 时去掉不再对应的 `goalParts`（之后由拆分任务重新拆）；主线改名时组合句跟着改。长期目标上限放宽到 300 字（多个定语组合会长）。`POST /api/lines {id, goalParts}`，GET 返回 `goalParts`；撤销标签写主线名而非 id。
+- `apps/web/app/ui/attribute-picker.tsx`（+ `attribute-picker.css`）：芯片多选不限个数、`insertByKind` 自动排序、拖动与 ←/→ 调序（手机上拖动不可靠）、点击改字、补充自定义定语、重复提示、实时预览、「采用」。用于主线页 LineEditor（`lines-bar.tsx`）与访谈页 `portrait-panel.tsx`（替换原整句候选与「添加」表单；对应的孤立 CSS 已删）。
 
-### 4.1 定语
+##### 3. 已采用整句的拆分（worker 任务）
 
-- 访谈在 `lines` 阶段为每条线给出 6–12 个**互相独立、不重叠**的定语 `attributeCandidates: [{text, sourceRef}]`，每个注明来自哪句回复或哪个文件（`reply-N` / `src-N`），不再给整句。
-- 卡片上的定语是芯片，**多选，不限个数**。系统按中文定语习惯排序（领域 → 能力 → 状态），可拖动调换顺序，确认前可改字。
-- 实时预览「成为 A 的、B 的<身份>」，点「采用」写入这条线的目标。
-- 校验：两个定语在去掉「的」和标点后一个包含另一个，视为重复，退回修正。
-- **已采用的整句**由模型拆成定语，并保持选中，组合结果与原句一致；之后可以增减。
-- 存储：`lines.profiles[line].attributes`（候选），`identity line.goalParts`（已选及顺序），`goals[0]` 继续保存组合出的整句，读取目标的其他地方不用改。
+- 新 Skill `crossline-goal-splitter`（低档，`model-policy.ts`），schema `GOAL_SPLIT_SCHEMA` / `validateGoalSplit` / `keepGoalSplit`（core）。上下文 `crossline.goal-split.v1`：每条主线的 `goals`。
+- 校验：每条主线、每个长期目标都要返回，`goal` 逐字照抄；定语不重复、不含并列；**按序组合后与原句一致**（`recomposes`：忽略空白、标点、开头「成为」和所有「的」——组合时只会增加「的」与「、」，比较时去掉「的」是有意的，见下方偏差）。不一致退回修正（同一线程，最多两次），修复用尽后 `softAccept` → `keepGoalSplit`：拆得对的保留，拆不对的整句作为一个定语保留（`goalCore`）。
+- `apps/worker/src/goal-splitter.ts`：`linesAwaitingSplit`（有 `goals[0]`、无 `goalParts`、该句未拆过）；写入前重新读取主线设置，人在运行期间改过的长期目标不覆盖；`goals[0]` 的措辞不变，只加 `goalParts`；所有长期目标的定语并入候选（`sourceRef: "goal"`，旧 `goalCandidates` 一并转成定语）；每句记一条 `line.goal_split` 事件（`goalHash`、`parts`、`kinds`、`recomposed`），幂等键 `line:goal-split:<line>:<hash>`。运行时不可用或模型失败时什么都不记，下次再试。
+- 触发：worker 每个 tick 的 `goalSplitPass`（额度为 `manual_core_only` 时不跑）；立即触发：supervisor `POST /v1/lines/split-goals`（202，后台运行）← web `POST /api/lines/split-goals`。
 
-### 4.2 卡片里的访谈
+##### 4. 卡片里的访谈与页面上下文 `line`
 
-- 主线页每张身份卡片内嵌一个输入框，就是这条主线的访谈（与 `/onboarding?line=` 同一会话，`focusLine`）。
-- 说的话成为访谈事实，描述和候选定语当场刷新，每轮约一两分钟，期间显示进度。
-- 「把目标改成…」这类直接修改，先给确认卡再生效。
-- 目标或事实变了以后，卡片上出现「目标已变，重算未动过的草稿」，一键重算这条线的草稿；已批准的里程碑不动。
+- `apps/web/lib/line-cards.ts` `lineCardDetails`：每条主线的描述、定语候选、`goalParts`、待确认的长期目标修改、该主线访谈（会话 `line-<id>`，与 `/onboarding?line=` 相同）的最新回复与问题、是否在等回复、是否该提示重算。
+- `apps/web/app/milestones/line-card-interview.tsx`（+ `line-card.css`）：卡片内输入框，问题选项可点选（`composeAnswers` 组成回复），发送到 `/api/onboarding/turn`；进行中显示已用秒数，输入框可用，新消息排队；409（同账号另一轮访谈在跑）20 秒后自动重发；失败可「重新发送」（服务端已保存消息）；结束后 `router.refresh()` 原地刷新描述与候选；刷新页面时若最后一条消息还没回答，每 20 秒看一次。卡片拖动排序改为只拖标题，避免与输入框冲突。
+- 修改长期目标：`POST /api/lines/goal-edit {lineId, decision: adopt|dismiss}` → `decideGoalEdit`（采用走 `updateLine` 的 `goalParts` 校验；两种决定都清除待办并记 `line.goal_edit_adopted|dismissed`；可撤销）。
+- 页面上下文 `kind: "line"`：`pageFromLocation` 读 `/milestones?line=` 与 `/onboarding?line=`；聚焦卡片输入框时用 `history.replaceState` 写入 `?line=<id>`，全局小助手因此知道当前主线。`contextPack` 的 `page.title` 为主线名，`ConciergePack.lines[]` 增加 `description`；快照新增「本页主线」三行（`pageLine`）。动作 `profile.tell` 新增参数 `lineId`（"" = 整体访谈；否则送到该主线的访谈会话），卡片字段可改；concierge Skill 文本已同步（注册表一致性测试通过）。
 
-## 5. 跨主线飞轮：产物优先的联合规划
+##### 5. 重算提示
 
-### 5.1 现在为什么没有飞轮
+- `redraftDue`：这条主线有里程碑，且长期目标（`line.updated` 中改了 goals/goal/goalParts，或 `line.goal_edit_adopted`）或这条主线的事实（`updatedAt`）晚于最近一次提议（该线里程碑的 `milestone.proposed`，或 `line.redraft_requested`）。
+- 按钮「目标已变，重算未动过的草稿」→ 现有 `POST /api/milestones/propose {only:[line]}`；该路由对 `only` 中的每条主线先记 `line.redraft_requested`，提示随即消失，直到长期目标或事实再变。已批准的里程碑不受影响（架构师本来就只重做未动过的草稿）。
 
-1. 关系一轮（`proposeRelations`）只在**同一次生成的草稿**之间找关系；只重做一条线时，它不到两条线就直接返回。
-2. 重做一条线时，`supersedeUntouchedDrafts` 会把所有碰到旧草稿的待确认关系一起归档，之后没有任何环节重新连上。
-3. 新草稿与其他线**已批准**的里程碑之间从不建关系；夜间飞轮只看已批准的，而且要求网络来源。
-4. 最根本的是：里程碑先逐线设计，关系事后补，所以里程碑本身就不是为互相促进而设计的。
+#### 与设计稿的偏差
 
-文献（Riediger & Freund 2004；Presseau 2010/2012；Kruglanski 的目标系统理论；Zhang、Fishbach & Kruglanski 2007 的稀释效应）只支持一个弱结论：本人感到目标互相促进，会投入更多，效应约为几个百分点。「飞轮会复利」在个人层面没有证据，是本应用要用自己的数据去检验的假设。一个任务挂的目标越多，越显得对每个都不够有效；切换和协调也有成本。所以要**少而实**：关系必须是可核对的产物依赖。
+- 重组校验比较时除空白、标点外还忽略「的」和开头「成为」。原因：组合格式必然在定语之间加「的、」（「成为神经形态计算方向的、能独立立项的研究者」），而原句通常没有（「成为神经形态计算方向能独立立项的研究者」）；只忽略空白标点则任何多定语拆分都不可能通过。拆分时 `goals[0]` 保留原句措辞不变，所以显示给人的仍是原句。
+- 校验拒绝写给 `person` 的 `lineProfiles` 与 `goalEdits`（以前不拒绝 `person`）。
+- 访谈的候选允许 0 个（表示保留已有、继续追问），否则必须 6–12 个。
 
-### 5.2 生成流程
+#### 在真实账号上执行拆分
 
-1. **产物清单**（新的一轮，top tier，`crossline.artifact-plan.v1`）。输入：
-   - 各线的画像事实与长期目标；
-   - **所有进行中的里程碑**，包括其他线已批准的；
-   - `flywheel_*` 事实。
+合并并重启 worker 后，下一个 tick（≤15 分钟）会自动拆分所有「有长期目标、没有 `goalParts`」的主线，每句只拆一次。要立即执行：在已登录的浏览器控制台运行
 
-   输出：
-   - 每条线这一期会产出的产物 `{id, line, kind, title, readyBy}`，kind 如论文图表、数据集、视频、用户访谈记录、代码、读书笔记；
-   - 每条线需要的输入；
-   - 跨线供需对 `{from: artifactId, toLine, use, transfer: {metric, expected, unit}, lagDays, counterfactual}`。
+```js
+await fetch("/api/lines/split-goals", { method: "POST", headers: { "content-type": "application/json" } }).then((r) => r.json())
+```
 
-   `counterfactual` 写明「没有上游时，下游要多花多少小时或缺什么」。
-2. **逐线设计里程碑**（现有的 architect，一次一条线）：
-   - 每次带上产物清单中与这条线有关的供需对。
-   - 上游里程碑必须在 `outputs[]` 里声明对应产物；下游里程碑必须在 `inputs[]` 里按 id 引用，并在推导（`derivation`）中用到它。
-3. **关系由引用自动得出**，不再有单独的关系一轮。每条关系存产物 id、传递量、核对日、反事实。
-4. **只重做一条线时**：
-   - 产物清单只重算这条线的部分，其他线的产物和已批准里程碑保持原样；
-   - 指向已批准里程碑的供需对保留；
-   - 关系随新草稿重新得出，**不再整批归档**。
+返回 `{ok: true, started: true}` 后数秒到一两分钟内完成。核对：`line.goal_split` 事件的 `recomposed` 应为 `true`（`false` 表示该句被整体保留为一个定语）；主线页卡片的长期目标文字不变，「调整定语 →」里对应定语处于选中状态，预览的组合句与原句只差「的、」。
 
-### 5.3 保存前的硬校验（代码执行，不合格退回修正）
+#### 测试
 
-- **产物对得上**：上游里程碑的 `outputs` 含该产物 id，下游里程碑的 `inputs` 引用它；两端属于不同的线。
-- **时间顺序成立**：上游截止 ≤ 下游截止 − `lagDays`。反馈回路允许跨周期，即下游是下一期的里程碑。
-- **可测传递量 + 核对日**：`transfer.expected` 是数字且有单位（如「复用 3 张图表」「带来 5 位访谈对象」）；核对日 = 下游截止日。
-- **每条线最多 2 条出边**：超出的按 `transfer.expected` 与反事实节省的工时只留前两条。
+- `packages/core/src/line-attributes.test.ts`：组合、清理、重复、排序、插入、分类、重组、旧数据兼容、`checkGoalParts`、拆分 schema 与校验、修复用尽后的整句保留。
+- `packages/core/src/onboarding-turn-schema.test.ts`：候选数量/来源/并列/重复（点名）、清理、`goalEdits` 必须引用回复、`keepOnboardingTurn` 逐个丢弃。
+- `apps/worker/src/onboarding-session.test.ts`：卡片访谈（`line-research`）按线刷新候选、保留拆出的定语、修改只记录不生效；空候选只更新描述。
+- `apps/worker/src/goal-splitter.test.ts`（共享 Codex fake）：拆分并保持选中、幂等、重组失败退回修正后整句保留、运行期间人改了长期目标不覆盖、无运行时不记录。
+- `apps/web/lib/line-cards.test.ts`：`goalParts` 采用/改名/整句改写、校验、重算提示、卡片数据、修改卡的采用与放弃、页面上下文 `line` 与 `profile.tell` 的 `lineId` 路由。
+- `apps/web/app/api/lines/route.test.ts`：`goalParts` 保存路由；新路由由 `csrf-protection.test.ts` 自动覆盖。
+- `apps/web/app/milestones/lines-bar.test.tsx`：卡片渲染访谈框、描述、修改卡（组合句、采用/不改）、重算按钮、本轮问题。`empty-account.test.tsx` 增加 `next/navigation` 的 mock（卡片用 `router.refresh()`）。
+- e2e 未改：现有用例不点击长期目标候选；主线页没有截图基线。设计与文案审查（`design-audit`、`copy-audit`）需在合并后运行。
 
-质量问题（如反事实写得空泛）仍按现有规则走警告和复核，不阻塞保存。
+### F5 / F6：产物优先的联合规划与任务层产出 → 使用
 
-### 5.4 批准与核对
+#### 每项规格如何实现
 
-- 关系**随下游里程碑一起批准**。草稿列表里，每个里程碑下列出它用到和供给的跨线产物，可以单独去掉某一条。
-- 到核对日，待决事项问「研究 · X 是否给 自媒体 · Y 提供了 3 张图表？」：兑现 / 部分 / 没有。
-  - 「没有」把关系标为 `refuted`，并计入系统体检的「跨线关系兑现率」。
-  - 兑现率低的产物类型，下次规划时提示模型。
+1. **产物清单一轮**：新 Skill `crossline-artifact-planner`（`skills/marketplace/plugins/crossline/skills/crossline-artifact-planner/SKILL.md`，以共享的「Language」段收尾），模式 `crossline.artifact-plan.v1`，top tier（`packages/codex/src/model-policy.ts`），登记在 worker 的 `requiredSkills`。契约在 `packages/core/src/artifact-plan.ts`：`ARTIFACT_PLAN_SCHEMA`（严格模式，结构化输出发现测试覆盖）+ `validateArtifactPlan`。供需对字段为 `{from, toLine, use, transfer:{metric, expected, unit}, lagDays, counterfactual, hoursSaved}`——在规格字段外加了 `hoursSaved`（反事实的小时数），因为出边上限的排序需要一个可比较的数，「3 张图表」与「5 位访谈对象」不可比。计划存在设置 `flywheel.artifacts`（`ARTIFACT_PLAN_SETTING`），随备份走。输入含各线画像事实与长期目标、所有进行中里程碑（含其他线已批准的）及其 outputs/inputs、`flywheel_*` 事实、保留部分 `kept`、兑现率低的产物类型 `lowFulfilment`。
+2. **逐线设计带上供需对**：`lineArtifacts` 给每条线 `artifacts.produce` / `artifacts.consume`（含已有的生产者、等待它的消费者及其截止日），每条线运行前重算，所以先设计的线的新草稿就是后设计的线的生产者/消费者。`MILESTONE_PLAN_SCHEMA` 增加 `outputs[]`、`inputs[]`；`validateArtifactReferences` 在 `validateMilestoneProposal` 里检查；这些代码都进入 `MILESTONE_SOFT_CODES`（`ARTIFACT_SOFT_CODES`），修复用尽后 `keepMilestoneProposal` 用 `sanitizeArtifactReferences` 去掉不合格的引用再保留整条线，所以存下来的引用只会得出合格的关系。架构师 SKILL.md 删除关系模式、增加 Artifacts 段。
+3. **关系由引用得出**：`deriveArtifactRelations`（纯函数）→ `syncArtifactRelations` / `retireUnderivedRelations`（`packages/db/src/artifacts.ts`），封装为 worker 的 `rederiveArtifactRelations`。关系 id `artifact:<产物>:<上游>-><下游>`。删除：`runRelations`、`MILESTONE_RELATIONS_SCHEMA`、`validateRelationsProposal`、`relationWarnings`、`relation-check.test.ts`、旧的关系模式提示。`createRelationReviser` 保留名字，改为「重新设计下游主线」（复核意见作为产物计划和架构师的 brief）。迁移 13：`milestone_anchors.outputs_json/inputs_json`，`milestone_relations.artifact_id/transfer_json/check_on/counterfactual`；快照导入按列名自省，旧快照可导入（有测试）；`pnpm doctor:ledger` 在 `user_version ≥ 13` 时检查这些列。
+4. **保存前硬校验**（全部在代码里，退回修正）：
+   - 产物对得上：上游 outputs 含 id、下游 inputs 引用、两端不同线（`MILESTONE_OUTPUT_UNKNOWN` / `MILESTONE_INPUT_UNKNOWN` / `MILESTONE_ARTIFACT_UNPRODUCED` / `SUPPLY_SAME_LINE`，推导时再查一遍）；
+   - 时间顺序：`timeOrderProblem`：上游截止 ≤ 下游截止 − lagDays。**反馈回路的精确定义**：两条线互相供给即构成回路，回路上的每条边按至少 1 天滞后计算，因此回流必然落在原上游线的更晚里程碑（下一期），两个里程碑之间不可能互相供给——回路只存在于主线之间，不存在于里程碑之间；这类边的 kind 为 `recurring_feedback`，其余为 `reuses`。代码 `MILESTONE_INPUT_TOO_EARLY` / `MILESTONE_OUTPUT_TOO_LATE`；没有生产者时按产物的 `readyBy` 检查；
+   - 可测传递量：`transfer.expected` 为大于 0 的有限数、有单位和计量对象（`SUPPLY_TRANSFER_NOT_NUMERIC` / `SUPPLY_TRANSFER_UNIT_MISSING`）；核对日 = 下游截止日（有人确认的截止日优先）；
+   - 每条线最多 2 条出边（`MAX_OUTGOING_PER_LINE`）。**排序规则**：保留部分（已批准里程碑所依赖的）先占位；其余按反事实节省小时数降序，再按 `transfer.expected` 降序，再按产物 id；关系层面同样，已批准关系先占位，平局按核对日早者优先。超出的对被裁掉并写进 assumptions，不算拒绝。
+   - 质量问题（反事实空泛、用途太短）走 `supplyWarnings` → `validation.warned`（subject `milestone_relation`）→ 现有复核。
+5. **只重做一条线**：`keptArtifactPlan` 保留其他线的产物与需求，以及计划线中已批准里程碑产出或使用的产物和供需对（「指向已批准里程碑」= 上游已批准里程碑产出该产物，或接收线有已批准里程碑使用它）；模型只重算这条线的部分，不得重复列出保留的 id。`supersedeUntouchedDrafts` 不再批量归档关系；推导后只归档无法再推导出的候选（产物关系未再推导出，或端点已归档/不存在）。被本人去掉或被核对否定的关系永不复活。
+6. **批准**：`approveArtifactRelationsFor`（db）在 `saveMilestoneEdit` 批准时调用（批量 `approve-batch` 与单个批准都走它）。规则：关系随下游里程碑批准；若下游在关系出现前已批准，则在上游批准时批准（两边决定都已做出）。主线页草稿列表每个草稿下列出跨主线产物，`DELETE /api/milestone-relations/[id]`（`isCrossSiteWrite` + `resolveAccessContext`，CSRF 发现测试自动覆盖）单独去掉，并记为一条 `relation_rejected` 偏好。
+7. **核对问答**：新 AskKind `relation_check`（`apps/web/lib/artifact-relations.ts`），在核对日（含之后）对已批准、两端仍在的产物关系提问；兑现 / 部分（填实际数量）/ 没有（否定，写反例）；`milestone_relation.checked` 事件。`relationFulfilment`：兑现记 1、部分记 0.5、没有记 0；系统体检 `relations` + 设置页「跨线关系兑现率」环图与偏低类型标签；至少 2 次核对且兑现率 < 0.5 的产物类型作为 `lowFulfilment` 传给下一次产物计划。`importance` / `entersOn` 由 `decisionHorizon.annotate` 照常处理（该问答 urgency 为 soon，不打断）。
+8. **任务层**：倒推上下文带 `artifacts.produce/use`（`milestoneArtifacts`），`BACKPLAN_SCHEMA` 步骤增加 `produces` / `uses`，校验每个产出恰由一个任务产出、每个使用至少被一个任务用到；任务 payload 记 `produces` / `uses`。`linkArtifactWork` 把生产任务写入使用任务的 `dependsOn`（跨线，排程据此先后，有排程单测）；`handOffArtifacts` 在 `human.completed` / `agent.delivered` 时（`transitionWorkOrder` 内）以及倒推保存后，把生产任务的文件证据作为使用任务的材料（归入下游项目、记一条任务记录、有步骤计划时请求重排），每个（产物、生产者、使用者）只一次。任务卡与对话框显示「产出供 … · …」「使用 … · … 的产出」（`ArtifactTag`）。副产品并入：落地任务 `uses: [byproduct:<主任务>:<线>]`，`producedArtifacts` 把副产品算作主任务的产物，交接同一套；落地期限用 `BYPRODUCT_LAG_DAYS`（2）。
+9. **时间轴显示**：跨线边颜色取上游主线、待批准为虚线、违反时间顺序（如上游截止日后来改了）为红色断线并在图例中说明；边中点的标签为可聚焦按钮，悬停/聚焦显示产物、预期/实测传递量、核对日（与传递天数）、反事实。新样式在 `apps/web/app/milestones/flywheel-edges.css`。未改动 `dashboard-view.tsx`；关系的 status/from/to/kind 与 decide 路由保持不变。
 
-### 5.5 任务层：产出任务 → 使用任务
+#### 与规格的出入
 
-- 倒推时，上游线生成「产出 X」的任务（`payload.produces = artifactId`），下游线用到 X 的任务依赖它（`dependsOn` 跨线），排程自动先后。
-- 任务卡写「产出供 自媒体 · …」或「使用 研究 · … 的产出」。
-- 上游任务交付时，产物文件自动作为下游任务的材料（归入下游项目，下游步骤按需重排）。
-- 现有副产品机制（`byproducts` → `landing-*`）并入这套：一个副产品就是一个 `lagDays` = 2 的小产物。
+- 供需对多了 `hoursSaved`（见上，排序需要）。
+- 产物 id 必须以所属主线 id 开头（如 `research-figures`），用来保证只重做一条线时不会与保留的产物撞 id。
+- 只重做一条线时，指向这条线、但没有已批准里程碑依赖的供需对属于「这条线的部分」，由本次运行重新给出（模型可以用保留的其他线产物作为 `from` 重新声明）。
+- 依赖释放仍按现有排程规则：使用任务在生产任务**验收**后（或与之同在本次排程中时由求解器排序）才排入；交付时文件已先行交接。
 
-### 5.6 显示
+#### 回放与在真实账号上应用
 
-- **主线页时间轴**：
-  - 跨线边从上游里程碑的产物出发，落到下游里程碑，颜色取上游主线；已确认的画实线，待确认的画虚线。
-  - 违反时间顺序的边画成红色断线（例如上游改了截止日之后）。
-  - 悬停显示产物、传递量（预期 / 实测）、核对日和反事实。
-- **今日页图谱**：用同一批边（2.4）。
+回放（不写真实账本，只在临时副本上跑，会消耗真实额度）：
 
-## 6. 数据与接口变动
+```powershell
+pnpm exec tsx scripts\artifact-plan-replay.ts            # 取第一条有已确认事实的主线
+pnpm exec tsx scripts\artifact-plan-replay.ts research   # 指定主线
+```
 
-- `onboarding-turn-schema`：`lineProfiles[].attributeCandidates` 替换 `goalCandidates`。旧数据读取时兼容，不迁移。
-- 身份线：新增 `goalParts: string[]`；`goals[0]` 仍是组合出的整句。
-- 新 Skill 模式 `crossline.artifact-plan.v1`，加 `ARTIFACT_PLAN_SCHEMA` 和 `validateArtifactPlan`（core）。
-- `milestone_anchors` 增加 `outputs`、`inputs`（JSON 列，迁移 13）。
-- `milestone_relations` 增加 `artifact_id`、`transfer_json`、`check_on`、`counterfactual`（迁移 13）。`relationWarnings` 与关系一轮删除。
-- 设置：`agent.autoHandoff`。
-- 计划页：`forecastGoals` 输出每周每里程碑分钟；新增 `lib/plan-stats.ts` 汇总计划与实际、估时散点、节律热力。
-- 页面上下文新增 `kind: "line"`，供卡片访谈和小助手识别。
+输出：重算前后的跨主线关系、产物计划、本次运行的耗时与修复次数、以及「不涉及该主线或已批准的关系中丢失的」条数（应为 0）。
 
-## 7. 分阶段
-
-| 阶段 | 内容 | 验证 |
-|---|---|---|
-| F1 | 今日页左侧面板合并、日程块快捷操作、提交材料弹窗、「自动交给 Agent」开关 | e2e：点块切换概述、在块上开始 / 提交；真实账号走一遍 |
-| F2 | 今日页飞轮图谱 | 单测：布局稳定、边分类；真实账号截图 |
-| F3 | 计划页重构（四张图 + 排程设置），移除日历 | 设计审查、预览联动；真实账号截图 |
-| F4 | 原子化定语、已有目标拆分、卡片访谈、重算提示 | 真实账号：拆分结果与原句一致；一轮卡片访谈 |
-| F5 | 产物优先联合规划、硬校验、关系随里程碑批准、核对问答 | 回放脚本在账本副本上重算一条线，跨线关系不再丢失；四条硬校验各有单测 |
-| F6 | 任务层产出 → 使用依赖、副产品并入、时间轴显示 | 排程先后与材料传递的单测；主线页截图 |
-
-F5 和 F6 会消耗真实额度（重算里程碑），在真实账号上执行前先问本人。
+在真实账号上应用（先问本人，F5/F6 会消耗额度）：重启 worker（新 Skill 需要装进隔离的 CODEX_HOME，`requiredSkills` 已登记），web 打开账本时自动跑迁移 13（会先留 `.v12.bak`）。然后在主线页对某条线「修改并重算草稿」或调用 `POST /api/milestones/propose`（`only: [line]`），即走产物计划 → 逐线设计 → 关系推导。批准草稿后 `approve-batch` 连带批准关系并触发 `/v1/goals/auto-backplan`，倒推出的任务带 `produces` / `uses`，依赖与交接自动生效。

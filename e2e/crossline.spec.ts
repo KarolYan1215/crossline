@@ -508,6 +508,14 @@ test("Today asks what only the person knows, with options and follow-ups, and mo
 // F1: the panel beside the day is the one place a block is looked at and acted on. The detail strip under the calendar is gone.
 test("Today's day panel switches to a picked block's task, starts it there, and hands it in with a line and a file", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-chrome");
+  // Its own task, so the week has a startable block whatever the tests before it started or finished.
+  const seed = openStore();
+  try {
+    const workspaceId = realWorkspaceId(seed);
+    seed.saveWorkOrder({ id: "e2e-panel-task", ownerId: seed.getWorkspaceOwnerId(workspaceId)!, workspaceId, identityId: "research", projectId: "",
+      milestoneId: "", intent: "整理面板测试提纲", state: "approved", riskTier: "routine",
+      estimate: { p25Minutes: 20, p50Minutes: 30, p85Minutes: 45, source: "llm_prior", observationCount: 0, confidence: "low" }, payload: { dueDate: "2026-09-16" } });
+  } finally { seed.close(); }
   await page.goto("/");
   const calendar = page.getByRole("region", { name: "今天的时间轴" });
   const panel = calendar.locator(".dv-aside");
@@ -575,11 +583,19 @@ test("Today's flywheel graph draws each line around its goal and opens a milesto
   await expect(node).toBeVisible();
   // Zooming with the wheel changes the drawing without scrolling the page.
   const before = await node.getAttribute("transform");
+  await graph.locator("svg.fw-graph").scrollIntoViewIfNeeded();
   const box = (await graph.locator("svg.fw-graph").boundingBox())!;
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  // Away from the centre: a dot that sits exactly under the pointer stays put while the drawing scales about it.
+  const at = { x: box.x + box.width * 0.2, y: box.y + box.height * 0.8 };
+  expect(await page.evaluate(({ x, y }) => Boolean(document.elementFromPoint(x, y)?.closest("svg.fw-graph")), at)).toBe(true);
+  // The server-drawn graph shows before its script attaches, so the wheel is repeated until the drawing answers.
+  await page.mouse.move(at.x, at.y);
+  await expect.poll(async () => { await page.mouse.wheel(0, -200); return node.getAttribute("transform"); }).not.toBe(before);
+  // Once it answers, a wheel turn zooms again and the page stays where it is.
+  const zoomed = await node.getAttribute("transform");
   const scrolled = await page.evaluate(() => window.scrollY);
-  await page.mouse.wheel(0, -400);
-  await expect.poll(() => node.getAttribute("transform")).not.toBe(before);
+  await page.mouse.wheel(0, -200);
+  await expect.poll(() => node.getAttribute("transform")).not.toBe(zoomed);
   expect(await page.evaluate(() => window.scrollY)).toBe(scrolled);
   await graph.getByRole("button", { name: "复位" }).click();
   await Promise.all([page.waitForURL(/\/milestones\?open=/), node.locator("circle").first().click()]);
