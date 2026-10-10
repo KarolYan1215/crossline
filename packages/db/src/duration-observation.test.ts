@@ -196,3 +196,22 @@ test("an observation keeps the analysis's own estimate and where the minutes cam
       observedMinutes: 60, actualSource: "one_tap", llmP50Minutes: 20, llmP85Minutes: 40, interruptionDominant: false });
   } finally { store.close(); }
 });
+
+test("finishing the work records how long it took, even before (or without) the evidence being accepted", () => {
+  // Real ledger, 2026-09-26 → 10-10: two timed sessions, zero observations, because only acceptance wrote one and nothing had
+  // passed the gate yet. The time spent is a fact at completion; what the gate later thinks of the evidence does not change it.
+  const store = new CrosslineStore(":memory:");
+  vi.useFakeTimers();
+  try {
+    seed(store);
+    vi.setSystemTime(new Date("2026-09-14T09:00:00.000Z"));
+    store.transitionWorkOrder("w", "w1", { type: "human.started" }, "start:w1", { durationObserved: true });
+    vi.setSystemTime(new Date("2026-09-14T09:40:00.000Z"));
+    store.transitionWorkOrder("w", "w1", { type: "human.completed" }, "done:w1",
+      { evidence: [{ kind: "record", uri: "local://note-1", description: "结论记录" }], durationCalibrationBaseline: BASELINE });
+    expect(store.listDurationObservations("w", "research", "deep_work")).toMatchObject([{ observedMinutes: 40 }]);
+    // Accepting later adds nothing: same session, same minutes.
+    store.transitionWorkOrder("w", "w1", { type: "evidence.accepted", approvalId: "human" }, "accept:w1", { durationCalibrationBaseline: BASELINE });
+    expect(store.listDurationObservations("w", "research", "deep_work")).toHaveLength(1);
+  } finally { store.close(); }
+});

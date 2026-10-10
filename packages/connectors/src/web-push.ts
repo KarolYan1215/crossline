@@ -22,7 +22,8 @@ export type PushSubscriptionRecord = {
   createdAt: string;
 };
 export type VapidKeys = { publicKey: string; privateKey: string };
-export type PushMessage = { title: string; body: string; path: string; tag?: string };
+/** `start`: a work order the notification can start timing with one tap (its 「开始计时」 action), without opening the app first. */
+export type PushMessage = { title: string; body: string; path: string; tag?: string; start?: string };
 
 const PUSH_HOSTS = [/^web\.push\.apple\.com$/, /^fcm\.googleapis\.com$/, /^updates\.push\.services\.mozilla\.com$/, /\.notify\.windows\.com$/];
 
@@ -63,7 +64,7 @@ export async function sendWebPush(subscription: PushSubscriptionRecord, message:
   send: typeof webpush.sendNotification = webpush.sendNotification): Promise<"sent" | "gone" | "failed"> {
   if (!isAllowedPushEndpoint(subscription.endpoint)) return "failed";
   const payload = JSON.stringify({ title: message.title.slice(0, 120), body: message.body.slice(0, 300),
-    url: `${subscription.origin}${message.path}`, ...(message.tag ? { tag: message.tag } : {}) });
+    url: `${subscription.origin}${message.path}`, ...(message.tag ? { tag: message.tag } : {}), ...(message.start ? { start: message.start } : {}) });
   try {
     await send({ endpoint: subscription.endpoint, keys: subscription.keys }, payload, {
       vapidDetails: { subject: subscription.origin.startsWith("https://") ? subscription.origin : "mailto:crossline@localhost", ...keys },

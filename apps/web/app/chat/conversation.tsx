@@ -129,7 +129,8 @@ export function Conversation({ variant, placeholder, page }: {
       {shown.map(item)}
       <div ref={endRef} />
     </ol>}
-    <Composer mode="capture" busy={busy} placeholder={placeholder ?? "任务、改期、回答待决、撤销、日程、问题……一句话即可"} onSubmit={submit}>
+    <Composer mode="capture" busy={busy} placeholder={placeholder ?? "任务、改期、回答待决、撤销、日程、问题……一句话即可"} onSubmit={submit}
+      takeShare={variant === "inline"}>
       {busy && <small className="muted composer-status" role="status">正在理解…</small>}
       {status && <small className="muted composer-status" role="status">{status}</small>}
     </Composer>

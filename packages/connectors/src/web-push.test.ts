@@ -28,6 +28,9 @@ test("a message opens the page on the address the phone subscribed from; a forgo
   expect(ok).toBe("sent");
   expect(JSON.parse(sent[0]!.payload)).toMatchObject({ title: "今天到期：报告", url: "https://karols-laptop.tailb8a366.ts.net/milestones" });
   expect(sent[0]!.subject).toBe("https://karols-laptop.tailb8a366.ts.net");
+  await sendWebPush(device, { title: "t", body: "b", path: "/workbench/wo-7", start: "wo-7" }, keys,
+    (async (sub: { endpoint: string }, payload: string) => { sent.push({ endpoint: sub.endpoint, payload, subject: "" }); return {} as never; }) as never);
+  expect(JSON.parse(sent[1]!.payload)).toMatchObject({ start: "wo-7" });
   const gone = await sendWebPush(device, { title: "t", body: "b", path: "/" }, keys, (async () => { throw Object.assign(new Error("gone"), { statusCode: 410 }); }) as never);
   expect(gone).toBe("gone");
   const failed = await sendWebPush(device, { title: "t", body: "b", path: "/" }, keys, (async () => { throw Object.assign(new Error("x"), { statusCode: 500 }); }) as never);

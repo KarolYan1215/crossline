@@ -13,7 +13,8 @@ const clock = (seconds: number) => {
 /**
  * The floating countdown for a running session, on every page. It counts down from the current step's usual duration; at zero it
  * notifies once and keeps counting (shown as overtime). Closing it ends the session — the minutes are recorded as worked — and then
- * asks whether the step is done. The session itself lives in the ledger, so a reload or another device shows the same timer.
+ * asks whether the step is done, or offers to finish the whole task (evidence and the timed minutes are handed in on the task's page;
+ * without that way out a finished task kept a paused session open and nothing was ever recorded). The session itself lives in the ledger, so a reload or another device shows the same timer.
  */
 export function TimerFloat() {
   const [timers, setTimers] = useState<ActiveTimer[]>([]);
@@ -85,6 +86,7 @@ export function TimerFloat() {
         <span><button type="button" className="primary-button" onClick={() => void answer(true)}>已完成</button>
           <button type="button" onClick={() => void answer(false)}>未完成</button></span></>
         : <button type="button" onClick={() => void answer(false)}>关闭</button>}
+      <a href={`/workbench/${encodeURIComponent(closing.workOrderId)}#complete`}>整个任务已完成，去提交</a>
     </div>}
   </aside>;
 }

@@ -65,7 +65,8 @@ export function ExecutionActions({ workOrderId, intent, state, paused, ownerId, 
     // list (`apps/web/app/offline/dead-letters.tsx`) shows the work order's own intent instead of a bare
     // command type string, with no extra display logic needed there.
     const payload = action === "complete"
-      ? { workOrderId, title: intent, evidence: body.evidence }
+      ? { workOrderId, title: intent, evidence: body.evidence, checklistAnswers: body.checklistAnswers,
+          reportedMinutes: body.reportedMinutes, reportedSource: body.reportedSource }
       : action === "pause" ? { workOrderId, title: intent, reason: body.reason } : { workOrderId, title: intent };
     const command = createCommand(ownerId, workspaceId, await nextSequence(workspaceId), type, payload);
     try {
@@ -122,7 +123,7 @@ export function ExecutionActions({ workOrderId, intent, state, paused, ownerId, 
   };
   const hasEvidence = Boolean((uri.trim() && description.trim()) || uploadedFile);
 
-  return <div className="execution-actions">
+  return <div className="execution-actions" id="complete">
     {/* Without this the loop stopped dead here: a freshly analysed capture landed in
         `awaiting_plan_approval` and the Workbench offered no way to advance it, even though the API has
         always accepted the transition. Every successful analysis was a dead end. */}

@@ -1325,10 +1325,12 @@ export function completeWorkOrderExecution(ctx: AccessContext, workOrderId: stri
   if (!workOrder) return { ok: false, code: "WORK_ORDER_NOT_FOUND" };
   if (workOrder.state === "evidence_review") return { ok: true };
   if (workOrder.state !== "active") return { ok: false, code: "EXECUTION_NOT_ACTIVE" };
+  const baseline = durationPriorFor(workOrder.identityId, workOrder.payload);
   store.transitionWorkOrder(ctx.workspaceId, workOrderId, { type: "human.completed" },
     `execution:${workOrderId}:${executionRun(ctx.workspaceId, workOrderId) - 1}:completed`,
     { evidence, ...(checklistAnswers.length ? { checklistAnswers } : {}), ...(at ? { occurredAt: at } : {}),
-      ...(report ? { reportedMinutes: report.minutes, reportedSource: report.source } : {}) });
+      ...(report ? { reportedMinutes: report.minutes, reportedSource: report.source } : {}),
+      ...(baseline ? { durationCalibrationBaseline: baseline } : {}) });
   return { ok: true };
 }
 

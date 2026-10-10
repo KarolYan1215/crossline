@@ -1293,6 +1293,11 @@ export class CrosslineStore {
               ...(checklistAnswers.length ? { checklistAnswers } : {}),
               ...(reported ? { reportedMinutes: Math.round(reported), reportedSource: update.reportedSource ?? "one_tap" } : {}) }), open.id);
       }
+      // Recorded at completion, not only at acceptance: how long it took is a fact once the work is done, and work waiting for (or
+      // refused by) the gate used to teach the calibration nothing — the real ledger had two timed sessions and zero observations.
+      if (event.type === "human.completed")
+        this.#recordDurationObservationIfCalibratable(workspaceId, id, ownerId, this.listWorkOrders(workspaceId).find((item) => item.id === id),
+          update.durationCalibrationBaseline);
       return;
     }
     if (event.type === "evidence.accepted") {

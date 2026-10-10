@@ -15,8 +15,10 @@ const ACCEPTED = "image/png,image/jpeg,image/gif,image/webp,application/pdf,text
  * work anywhere on it; typing `@` searches materials, tasks and milestones and turns the choice into a chip. Enter sends, Shift+Enter
  * starts a new line.
  */
-export function Composer({ mode, placeholder, onSubmit, busy = false, children, name = "title" }: {
+export function Composer({ mode, placeholder, onSubmit, busy = false, children, name = "title", takeShare = false }: {
   mode: "capture" | "chat"; placeholder: string; busy?: boolean; name?: string;
+  /** Fill the box from a share-sheet arrival (`share_title`/`share_text`/`share_url` on the address, see the manifest). */
+  takeShare?: boolean;
   /** Returns true when the input was taken (the box then clears). */
   onSubmit: (input: ComposerInput) => Promise<boolean>;
   /** Status and results shown under the box. */
@@ -29,6 +31,16 @@ export function Composer({ mode, placeholder, onSubmit, busy = false, children, 
   const [results, setResults] = useState<Mention[]>([]);
   const textRef = useRef<HTMLTextAreaElement>(null);
   const { fileInputRef, fileNames, dragOver, setDragOver, onDrop, onPaste, onInputChange, reset } = useAttachmentDrop(ACCEPTED.split(","));
+
+  useEffect(() => {
+    if (!takeShare) return;
+    const params = new URLSearchParams(location.search);
+    const shared = [params.get("share_title"), params.get("share_text"), params.get("share_url")].map((part) => part?.trim()).filter(Boolean);
+    if (!shared.length) return;
+    setText([...new Set(shared)].join(" "));
+    history.replaceState(null, "", location.pathname);
+    textRef.current?.focus();
+  }, [takeShare]);
 
   useEffect(() => {
     if (!picker) return;

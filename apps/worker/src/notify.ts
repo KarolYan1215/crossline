@@ -118,7 +118,7 @@ const localParts = (now: Date, zone: string) => {
  */
 export async function notifyPass(store: CrosslineStore, workspaceId: string, now: Date,
   deliver: (title: string, body: string, url: string) => Promise<boolean> = showToast, baseUrl = "http://127.0.0.1:3210",
-  push?: (workspaceId: string, message: { title: string; body: string; path: string; tag: string }) => Promise<boolean>): Promise<string[]> {
+  push?: (workspaceId: string, message: { title: string; body: string; path: string; tag: string; start?: string }) => Promise<boolean>): Promise<string[]> {
   const level = (store.getSetting(workspaceId, NOTIFY_LEVEL_SETTING) as NotifyLevel | undefined) ?? "normal";
   let zone = process.env.CROSSLINE_TIME_ZONE?.trim() || "America/Chicago";
   try { zone = (JSON.parse(store.getSetting(workspaceId, "schedule.preferences") ?? "null") as { timeZone?: string } | null)?.timeZone || zone; } catch { /* default */ }
@@ -168,8 +168,13 @@ export async function notifyPass(store: CrosslineStore, workspaceId: string, now
       const text = (message.payload.card as { clarify?: { question?: string } } | undefined)?.clarify?.question ?? "";
       if (nudge?.delivery !== "pending" || !text) continue;
       const body = text.split("\n").slice(0, 3).join(" ").slice(0, 200);
+      // A nudge whose button starts a task (a block coming up, a latest start) carries that task, so the phone's 「开始计时」 starts the
+      // timer in one tap; before, the notification only opened the home page and the button was two screens away.
+      const start = ((message.payload.card as { actions?: Array<{ action?: string; args?: { type?: string; workOrderId?: string } }> } | undefined)?.actions ?? [])
+        .find((action) => action.action === "task.op" && action.args?.type === "start")?.args?.workOrderId;
       const [desktop, phone] = await Promise.all([deliver("Crossline", body, `${baseUrl}/`),
-        push ? push(workspaceId, { title: "Crossline", body, path: "/", tag: nudge.fingerprint ?? message.id }).catch(() => false) : Promise.resolve(false)]);
+        push ? push(workspaceId, { title: "Crossline", body, path: start ? `/workbench/${encodeURIComponent(start)}` : "/", tag: nudge.fingerprint ?? message.id,
+          ...(start ? { start } : {}) }).catch(() => false) : Promise.resolve(false)]);
       if (!desktop && !phone) continue;
       store.updateConversationPayload(workspaceId, message.id, { ...message.payload, nudge: { ...nudge, delivery: "pushed" } });
       delivered.push(`nudge:${nudge.fingerprint ?? message.id}`);

@@ -99,3 +99,17 @@ test("the system's own messages go to the desktop only while no page is in front
   expect(store.getConversationMessage("w", "n1")!.payload.nudge).toMatchObject({ delivery: "pushed" });
   store.close();
 });
+
+test("a nudge whose button starts a task reaches the phone with that task, so 「开始计时」 is one tap there too", async () => {
+  const store = new CrosslineStore(":memory:");
+  store.setSetting("w", "notify.level", "off");
+  const conversation = store.conversationFor("w", "2026-10-12");
+  store.appendConversationMessage({ id: "n1", workspaceId: "w", conversationId: conversation.id, role: "nudge", text: "", createdAt: "2026-10-12T13:50:00.000Z",
+    payload: { nudge: { kind: "block_start", fingerprint: "start:b:2026-10-12", counted: false, urgent: true, delivery: "pending" },
+      card: { actions: [{ action: "task.op", summary: "开始", args: { workOrderId: "wo-7", type: "start" } }],
+        clarify: { question: "09:00 做「作业 2」。", options: [] } } } });
+  const pushed: Array<{ path: string; start?: string }> = [];
+  await notifyPass(store, "w", new Date("2026-10-12T13:52:00.000Z"), async () => false, undefined, async (_ws, message) => { pushed.push(message); return true; });
+  expect(pushed).toMatchObject([{ path: "/workbench/wo-7", start: "wo-7" }]);
+  store.close();
+});

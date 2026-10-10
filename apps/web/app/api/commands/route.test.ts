@@ -114,5 +114,13 @@ test("work_order.complete forwards well-formed evidence", async () => {
     workOrderId: "w1", evidence: [{ kind: "record", uri: "local://note", description: "结论记录" }]
   }));
   expect(response.status).toBe(200);
-  expect(completeWorkOrderExecution).toHaveBeenCalledWith(TEST_CTX, "w1", [{ kind: "record", uri: "local://note", description: "结论记录" }], [], undefined);
+  expect(completeWorkOrderExecution).toHaveBeenCalledWith(TEST_CTX, "w1", [{ kind: "record", uri: "local://note", description: "结论记录" }], [], undefined, undefined);
+});
+
+test("a completion queued offline keeps the minutes the person tapped and the checklist they answered", async () => {
+  completeWorkOrderExecution.mockReturnValueOnce({ ok: true });
+  await post(envelope("work_order.complete", { workOrderId: "w1", evidence: [], reportedMinutes: 45, reportedSource: "one_tap",
+    checklistAnswers: [{ questionId: "q1", answer: "做完了" }] }));
+  expect(completeWorkOrderExecution).toHaveBeenCalledWith(TEST_CTX, "w1", [], [{ questionId: "q1", answer: "做完了" }], undefined,
+    { minutes: 45, source: "one_tap" });
 });

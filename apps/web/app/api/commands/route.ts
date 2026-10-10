@@ -1,5 +1,4 @@
 import { validateCommandEnvelope } from "@crossline/core";
-import type { EvidenceClaimInput } from "@crossline/db";
 import {
   addCapturedTaskWithId, completeWorkOrderExecution, pauseWorkOrderExecution,
   resumeWorkOrderExecution, startWorkOrderExecution, type ExecutionResult
@@ -8,22 +7,7 @@ import { resolveAccessContext } from "../../../lib/access-guard";
 import { isCrossSiteWrite } from "../../../lib/same-origin";
 import { analyzeNewCapturesInBackground, extractBackgroundFactsInBackground } from "../../../lib/capture-followups";
 import { replayTime } from "../../../lib/replay-time";
-
-const EVIDENCE_KINDS = ["file", "link", "record", "telemetry"];
-
-function readEvidence(value: unknown): EvidenceClaimInput[] | null {
-  if (value === undefined) return [];
-  if (!Array.isArray(value) || value.length > 16) return null;
-  const claims: EvidenceClaimInput[] = [];
-  for (const entry of value) {
-    const claim = entry as Record<string, unknown>;
-    const uri = String(claim?.uri ?? "").trim();
-    const description = String(claim?.description ?? "").trim();
-    if (!EVIDENCE_KINDS.includes(String(claim?.kind)) || !uri || uri.length > 500 || !description || description.length > 500) return null;
-    claims.push({ kind: claim.kind as EvidenceClaimInput["kind"], uri, description });
-  }
-  return claims;
-}
+import { readChecklistAnswers, readEvidence, readReport } from "../../../lib/execution-input";
 
 // A queued command can be replayed long after it was written — another device, or the web UI itself,
 // may have already moved the same work order on by the time this one reaches the server. Every one of
@@ -38,8 +22,9 @@ const workOrderCommands: Record<string, (ctx: Parameters<typeof startWorkOrderEx
   "work_order.resume": (ctx, payload, at) => resumeWorkOrderExecution(ctx, String(payload.workOrderId ?? ""), at),
   "work_order.complete": (ctx, payload, at) => {
     const evidence = readEvidence(payload.evidence);
-    if (!evidence) return { ok: false, code: "INVALID_EVIDENCE_CLAIM" };
-    return completeWorkOrderExecution(ctx, String(payload.workOrderId ?? ""), evidence, [], at);
+    const checklistAnswers = readChecklistAnswers(payload.checklistAnswers);
+    if (!evidence || !checklistAnswers) return { ok: false, code: "INVALID_EVIDENCE_CLAIM" };
+    return completeWorkOrderExecution(ctx, String(payload.workOrderId ?? ""), evidence, checklistAnswers, at, readReport(payload));
   }
 };
 
