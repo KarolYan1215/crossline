@@ -1,5 +1,6 @@
 import type { CSSProperties } from "react";
-import { OfflineCaptureForm, OfflineReplay } from "./offline-command-forms";
+import { OfflineReplay } from "./offline-command-forms";
+import { Conversation } from "./chat/conversation";
 import { AskList } from "./ask-list";
 import type { Ask } from "@crossline/core";
 import { AnalogClock } from "./analog-clock";
@@ -124,8 +125,8 @@ export function DashboardView({ data }: { data: DashboardData }) {
       <AskList initial={data.asks ?? []} visible={3} moreHref="/approvals#asks" />
 
       <section className="panel capture-line" aria-labelledby="capture-title">
-        <header><h2 id="capture-title">快速收集</h2><small>自动分类、估时与排程</small></header>
-        <OfflineCaptureForm ownerId={data.principalId} workspaceId={data.workspaceId} />
+        <header><h2 id="capture-title">输入</h2><small>收集、修改、回答、提问，先确认再生效</small></header>
+        <Conversation variant="inline" />
       </section>
 
       <section className={`today-grid${alternatives.length ? "" : " today-grid-single"}`} aria-label="下一步">

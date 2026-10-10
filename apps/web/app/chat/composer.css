@@ -30,3 +30,31 @@
 .routed-written a{margin-left:6px}
 .schedule-change-actions{display:flex;gap:8px;align-items:center}
 .assistant-panel .composer-box{border-color:var(--mist)}
+
+/* The one input box's conversation (apps/web/app/chat/conversation.tsx). */
+.conversation{display:grid;gap:8px;min-height:0}
+.conversation-log{margin:0;padding:0;list-style:none;display:grid;gap:8px;align-content:start}
+.conversation-person p{margin:0;justify-self:end;max-width:90%;padding:6px 10px;background:var(--chalk);font-size:13px;white-space:pre-wrap}
+.conversation-person{display:grid}
+.conversation-reply{display:grid;gap:6px;font-size:13px;line-height:1.5}
+.conversation-reply>.gen p{margin:0}
+.conversation-card{display:grid;gap:6px;padding:8px;border-left:3px solid var(--ink);background:var(--chalk)}
+.conversation-card[data-error]{border-left-color:var(--graphite)}
+.conversation-card ul{margin:0;padding:0;list-style:none;display:grid;gap:6px}
+.conversation-card li{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:baseline;font-size:13px}
+.conversation-card li b{flex:none}
+.conversation-card li[data-risk="commitment"] b{text-decoration:underline}
+.conversation-card li[data-state="dismissed"],.conversation-card li[data-state="failed"]{color:var(--graphite)}
+.conversation-card li[data-state="dismissed"] .gen{text-decoration:line-through}
+.conversation-state{margin-left:auto;font-size:12px;color:var(--graphite)}
+.conversation-links{display:inline-flex;gap:10px;font-size:12px}
+.conversation-actions{display:flex;gap:10px;align-items:center}
+.conversation-clarify{display:grid;gap:6px}
+.conversation-clarify p{margin:0;font-weight:700}
+.conversation-options{display:flex;flex-wrap:wrap;gap:6px}
+.conversation-options button{padding:5px 10px;border:1px solid var(--ink);font-size:13px;background:var(--paper)}
+.conversation-search{display:grid;gap:4px}
+.conversation-search input{width:100%}
+.conversation-search ul{margin:0;padding:0;list-style:none;display:grid;gap:4px;max-height:160px;overflow:auto;font-size:12px}
+.assistant-panel .conversation{grid-row:2 / span 2;overflow:auto;padding:8px 10px;grid-template-rows:auto minmax(0,1fr) auto}
+.assistant-panel .conversation-log{overflow:auto}

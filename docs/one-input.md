@@ -1,6 +1,6 @@
 # 一个输入框：对话、命令与主动助手（设计稿）
 
-状态：**待审**（2026-10-09）。审定后按第 8 节分阶段实现，每阶段在真实账号上验证。
+状态：**已审定**（2026-10-09），按第 8 节分阶段实现，每阶段在真实账号上验证。
 
 ## 1. 为什么要重做：一次失败的完整链路
 
@@ -74,16 +74,17 @@
 
 ### 3.2 一个回合
 
-Skill `crossline-concierge` 取代 `crossline-input-router` 和 `crossline-assistant`：路由和问答合成一次调用。
+Skill `crossline-concierge` 取代 `crossline-input-router`（P1 已删除）和全站小助手 `crossline-assistant`：路由和问答合成一次调用。任务对话框里的任务专属小助手仍用 `crossline-assistant`，P2 并入。
 
 - **快照**（每轮附带，约 1–2k token）：现在时刻与时区；今天已排、预排和固定日程的摘要；待决数量与最紧急的 3 条；最近 24 小时的可撤销操作（id 与标签）；当前页面对象（任务、里程碑、计划日）；本人的主线列表。
-- **只读查询工具**（模型按需调用，由 worker 在 `onServerRequest` 里执行）：`find_tasks`、`get_task`（含步骤、材料、进度）、`find_milestones`、`get_milestone`、`get_plan(day|week)`、`list_asks`、`get_ask`、`find_materials`、`read_material`（摘录）、`get_profile_facts`、`get_energy`、`get_forecast`。所有工具只读，按 workspace 取数，不暴露屏幕活动的窗口标题（遵守 `activity-privacy.test.ts` 的约束）。
+- **只读查询工具**（Codex 动态工具：`thread/start` 时声明，调用以 `item/tool/call` 请求到达，由 `SkillTools` 应答）：`find_tasks`、`get_task`、`find_milestones`、`list_asks`、`get_plan`、`list_recent_ops`、`list_agent_results`、`get_forecast`、`find_materials`、`read_material`、`get_profile_facts`（`CONCIERGE_TOOL_SPECS`）。所有工具只读，不暴露屏幕活动的窗口标题。
+- **数据从哪来（实现时的决定）**：待决、排程、预测这些读取函数都在 web，worker 拿不到。因此 web 每轮在进程内算出一份完整的「上下文包」（`ConciergePack`，`apps/web/lib/conversation.ts` 的 `contextPack`，不调用模型）随请求交给 worker；查询工具从包里取（`answerFromPack`），只有 `read_material` 由 worker 从账本读文件全文。进入提示的只有几行概况（`conciergeSnapshot`）。数据是本人按下发送那一刻的状态，不需要 worker 反向调用 web。
 - **输出**（严格结构化）：
   - `reply`：给本人看的一段话（问答的回答、对理解卡的说明）；
   - `actions[]`：每项是动作注册表里的一个动作 id 加参数，附一句 `summary`；
   - `clarify`：识别不了或有歧义时的一个问题，带 2–4 个选项，选项本身就是候选动作；
   - `confidence`：`high` / `low`，供分档升级使用。
-- **校验**：动作 id 必须在注册表里，参数用注册表生成的 schema 校验，引用的对象必须存在且属于本 workspace。不合格的项改为追问，不再落成收集。
+- **校验**：动作 id 必须在注册表里，参数用注册表生成的 schema 校验，引用的对象必须存在（`actionProblem`）。引用不存在的对象时把问题退回模型修正（它可以查 id），至多两次；之后只保留能执行的项，其余在回答里说明（`keepUsable`）。执行前用当时的状态再检查一次，卡片可能等了一会儿。
 
 ### 3.3 动作注册表（`packages/core/src/actions.ts`）
 
@@ -130,6 +131,9 @@ type ActionSpec = {
 - 目标：理解卡 5–10 秒内出现，重判时卡片显示「正在仔细核对」。用模型用量页记录实际耗时，按观测值调整。
 
 ### 3.6 文件
+
+P1 中带文件的输入仍按原方式收集为一条带附件的任务（离线时同样），P3 再由回合读取文件。
+
 
 文件上传后先抽取文本（已有的抽取管道），交给同一回合，并附上「文件类型猜测」（大纲、作业、成果、个人资料）。模型据此提出动作：`dates.extract`（归入项目后走现有日期确认批次）、`material.attach`（挂到任务）、`evidence.submit`（交到正在做的任务）、`task.create`。
 
@@ -258,8 +262,11 @@ interface EnergySource {
 | P4 | 主动引擎：每日开头、最晚开始时刻、时段提醒与落空补救、后台完成、送达渠道、打扰控制 | 在真实账号上跑 3 天：每条气泡可追溯到触发规则；上限与静默规则生效；同一事件不在两个渠道重复 |
 | P5 | 精力模型 ①②③、询问规则、答后重排 | 起床/入睡推断与本人记录对照误差中位 ≤ 30 分钟；回答后今天剩余的块按精力重排 |
 
-## 9. 还需要本人决定的
+## 9. 已补充确认（2026-10-09）
 
-- 每日开头要点的时间：首次打开页面时，还是固定在第一个可用时段前 15 分钟（届时页面没开就走推送）？
-- `note.add`（只记一笔、不是任务）存在哪里给本人看：任务页单独一栏，还是会话历史里可搜索即可？
-- iPhone 快捷指令方案需要本人在手机上建一次自动化。届时提供分步说明和一键导入的快捷指令文件，可以接受吗？
+- 追问的选项：选一个即执行它所指的候选动作（选择就是确认，与主动气泡的按钮同理）；没有候选动作的选项（「都不是」）把光标放回输入框。
+- 模型不可用时，原话照样存进会话，卡片提供「作为新任务收集」，点了才收集。
+
+- 每日开头要点在当天首次打开页面时出现。
+- `note.add` 的笔记不单独成栏，在会话历史里可搜索即可。
+- iPhone 快捷指令方案可行：P5 时提供分步说明和可一键导入的快捷指令文件。

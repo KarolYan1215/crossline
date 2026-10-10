@@ -8,7 +8,7 @@ const FUNCTION_LABEL: Record<string, string> = {
   "crossline-material-researcher": "资料检索", "crossline-material-writer": "教程写作", "crossline-milestone-gate": "验收判定",
   "crossline-weekly-insight": "每周洞察", "crossline-due-diligence": "网上查证", "crossline-background-facts": "背景整理",
   "crossline-plan-explainer": "排程说明", "crossline-assistant": "小助手", "crossline-agent": "助手任务", "crossline-step-planner": "步骤拆分",
-  "crossline-validation-reviewer": "复核", "crossline-progress-judge": "进度判断", "crossline-input-router": "输入识别"
+  "crossline-validation-reviewer": "复核", "crossline-progress-judge": "进度判断", "crossline-input-router": "输入识别", "crossline-concierge": "输入框"
 };
 const label = (skill: string) => FUNCTION_LABEL[skill.replace(/^crossline:/, "")] ?? "其他";
 const k = (n: number) => Math.round(n / 100) / 10;

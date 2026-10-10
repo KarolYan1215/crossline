@@ -286,12 +286,12 @@ async function installLocalPlugin(client: CodexRpcBoundary, plugin: LocalPluginC
 }
 
 /** Reads a small JSON body. Capped because this listener is reachable by anything on the loopback. */
-async function readJsonBody(request: IncomingMessage): Promise<Record<string, unknown> | undefined> {
+async function readJsonBody(request: IncomingMessage, maxBytes = 64_000): Promise<Record<string, unknown> | undefined> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of request) {
     size += (chunk as Buffer).length;
-    if (size > 64_000) return undefined;
+    if (size > maxBytes) return undefined;
     chunks.push(chunk as Buffer);
   }
   try {
@@ -346,9 +346,11 @@ export async function startCodexSupervisor(options: {
   autoBackplanGoals?: (workspaceId: string) => Promise<unknown>;
   /** Step planning, replans asked for, and progress reports, run now (the person just asked for one); answered at once. */
   runTaskPass?: (workspaceId: string) => Promise<unknown>;
-  /** Splits a quick-capture input into captures and instructions about open tasks; answered when read (a few seconds to a minute). */
-  routeInput?: (workspaceId: string, input: { text: string; batch: boolean; mentions: Array<{ kind: string; id: string; title: string }>; timeZone: string },
-    signal: AbortSignal) => Promise<unknown>;
+  /**
+   * One turn of the one input box (docs/one-input.md): the person's text, the web's snapshot and context pack in; the reply, proposed
+   * actions and question back out. Nothing is written but the conversation's thread id.
+   */
+  conciergeTurn?: (workspaceId: string, request: Record<string, unknown>, signal: AbortSignal) => Promise<unknown>;
   /** Hands a work order to the assistant. Answers at once: the task runs on, and writes its own outcome to the ledger. */
   dispatchAgentTask?: (workspaceId: string, workOrderId: string, category?: string, stepId?: string) => unknown;
   /** Writes plan blocks to the person's Crossline calendar. Only blocks; never touches any other calendar or event. */
@@ -531,21 +533,20 @@ export async function startCodexSupervisor(options: {
         sendJson(response, 202, { started: true });
         return;
       }
-      if (request.method === "POST" && pathname === "/v1/input/route" && options.routeInput) {
+      if (request.method === "POST" && pathname === "/v1/conversation/turn" && options.conciergeTurn) {
         if (request.headers.origin || !request.headers["content-type"]?.startsWith("application/json")) {
-          sendJson(response, 403, { blocker: { code: "INPUT_ROUTE_FORBIDDEN", message: "Use the local Web API" } });
+          sendJson(response, 403, { blocker: { code: "CONVERSATION_FORBIDDEN", message: "Use the local Web API" } });
           return;
         }
         if (runtimeBlocker) { sendJson(response, 503, { blocker: runtimeBlocker }); return; }
-        const body = await readJsonBody(request);
-        const text = typeof body?.text === "string" ? body.text.slice(0, 4000) : "";
-        if (!text.trim()) { sendJson(response, 400, { blocker: { code: "INPUT_EMPTY", message: "输入为空" } }); return; }
-        const mentions = Array.isArray(body?.mentions) ? body.mentions
-          .filter((item: unknown): item is { kind: unknown; id: unknown; title: unknown } => typeof item === "object" && item !== null)
-          .map((item: { kind: unknown; id: unknown; title: unknown }) => ({ kind: String(item.kind ?? ""), id: String(item.id ?? ""), title: String(item.title ?? "").slice(0, 200) })) : [];
+        // The context pack is the person's whole open state, so larger than the other bodies; the caller is already verified above.
+        const body = await readJsonBody(request, 2_000_000);
+        if (!body || typeof body.text !== "string" || !body.text.trim() || typeof body.conversationId !== "string" || typeof body.pack !== "object") {
+          sendJson(response, 400, { blocker: { code: "CONVERSATION_TURN_INVALID", message: "缺少会话、内容或上下文" } });
+          return;
+        }
         const controller = new AbortController();
-        const timeZone = typeof body?.timeZone === "string" && body.timeZone ? body.timeZone : "UTC";
-        try { await sendJsonWhenReady(response, () => options.routeInput!(callerWorkspaceId, { text, batch: body?.batch === true, mentions, timeZone }, controller.signal)); }
+        try { await sendJsonWhenReady(response, () => options.conciergeTurn!(callerWorkspaceId, body, controller.signal)); }
         finally { controller.abort(); }
         return;
       }

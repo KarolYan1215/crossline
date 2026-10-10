@@ -15,7 +15,6 @@ import { CalendarModule, ConnectionsSection } from "../connectors/connections";
 import { loadEffectiveness } from "../../lib/effectiveness";
 import { loadAssistant } from "../../lib/agent";
 import { agentTaskStatusLabel } from "../../lib/labels";
-import { autoApplySchedule } from "../../lib/input";
 import { permissionModeEnabled } from "../../lib/permission-mode";
 import {
   ACTIVITY_BLACKLIST, ACTIVITY_DETAIL_CONSENT, ACTIVITY_PAUSED_UNTIL, effectiveSchedulePreferences, getStore, LOCAL_ACTIVITY_CONSENT, planToday, toZonedInstant
@@ -102,7 +101,7 @@ export default async function SettingsPage() {
         </section>
 
         <section id="automation" className="st-section" aria-labelledby="st-automation"><h2 id="st-automation">自动化与助手</h2>
-          <AutomationModule paused={assistant.paused} permissionMode={permissionModeEnabled(ctx)} scheduleAutoApply={autoApplySchedule(ctx)}
+          <AutomationModule paused={assistant.paused} permissionMode={permissionModeEnabled(ctx)}
             categories={assistant.categories.map((item) => ({ category: item.category, label: item.label, explained: item.explained,
               mode: categoryMode(states[item.category]), cleanRuns: item.cleanRuns, runsToTrust: item.runsToTrust }))}
             recent={assistant.tasks.slice(0, 8).map((task) => ({ taskId: task.taskId, title: task.title, kind: assistant.categories.find((item) => item.category === task.category)?.label ?? "",

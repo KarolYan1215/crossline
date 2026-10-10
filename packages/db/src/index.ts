@@ -281,6 +281,14 @@ export type StoredPlanVersion = {
   status: "draft" | "approved" | "superseded"; payload: unknown;
 };
 
+/** The one input box's conversation of a day (docs/one-input.md). */
+export type StoredConversation = { id: string; workspaceId: string; day: string; codexThreadId?: string; createdAt: string; updatedAt: string };
+/** person = typed by the person; assistant = the turn's answer (its card in `payload`); nudge = a message the system started. */
+export type ConversationRole = "person" | "assistant" | "nudge";
+export type StoredConversationMessage = {
+  id: string; workspaceId: string; conversationId: string; role: ConversationRole; text: string; payload: Record<string, unknown>; createdAt: string;
+};
+
 export type StoredPlanChange = {
   id: string; ownerId: string; workspaceId: string; planVersionId: string;
   kind: "add" | "move" | "remove" | "conflict"; triggerEventId: string;
@@ -946,6 +954,18 @@ export class CrosslineStore {
       { version: 11, up: () => {
         if (!has("task_step_plans", "detail_json")) this.#db.exec("ALTER TABLE task_step_plans ADD COLUMN detail_json TEXT NOT NULL DEFAULT '{}'");
         if (!has("task_steps", "detail_json")) this.#db.exec("ALTER TABLE task_steps ADD COLUMN detail_json TEXT NOT NULL DEFAULT '{}'");
+      } },
+      // The one input box (docs/one-input.md): a conversation per day, kept in the ledger so another device resumes it and a backup
+      // carries it. A message's card (the actions it proposed and what became of each) lives in its payload.
+      { version: 12, up: () => {
+        this.#db.exec(`
+          CREATE TABLE IF NOT EXISTS conversations (
+            id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, day TEXT NOT NULL, codex_thread_id TEXT,
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE (workspace_id, day));
+          CREATE TABLE IF NOT EXISTS conversation_messages (
+            id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, conversation_id TEXT NOT NULL, role TEXT NOT NULL,
+            text TEXT NOT NULL, payload_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL);
+          CREATE INDEX IF NOT EXISTS conversation_messages_by_conversation ON conversation_messages(workspace_id, conversation_id, created_at);`);
       } }
     ];
 
@@ -1522,6 +1542,68 @@ export class CrosslineStore {
     return rows.map((row) => ({ id: row.id!, ownerId: row.owner_id!, workspaceId: row.workspace_id!,
       captureId: row.capture_id!, uri: row.uri!, mediaType: row.media_type!,
       fileName: row.file_name!, createdAt: row.created_at! }));
+  }
+
+  /** The day's conversation of the one input box, made on first use. */
+  conversationFor(workspaceId: string, day: string, now = new Date().toISOString()): StoredConversation {
+    this.#db.prepare(`INSERT INTO conversations (id, workspace_id, day, created_at, updated_at) VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(workspace_id, day) DO NOTHING`).run(`conv-${workspaceId.slice(0, 8)}-${day}`, workspaceId, day, now, now);
+    return this.#conversation(this.#db.prepare("SELECT * FROM conversations WHERE workspace_id = ? AND day = ?").get(workspaceId, day) as Record<string, string>);
+  }
+
+  getConversation(workspaceId: string, id: string): StoredConversation | undefined {
+    const row = this.#db.prepare("SELECT * FROM conversations WHERE workspace_id = ? AND id = ?").get(workspaceId, id) as Record<string, string> | undefined;
+    return row ? this.#conversation(row) : undefined;
+  }
+
+  listConversations(workspaceId: string, limit = 60): StoredConversation[] {
+    return (this.#db.prepare("SELECT * FROM conversations WHERE workspace_id = ? ORDER BY day DESC LIMIT ?").all(workspaceId, limit) as Array<Record<string, string>>)
+      .map((row) => this.#conversation(row));
+  }
+
+  setConversationThread(workspaceId: string, id: string, codexThreadId: string | null): void {
+    this.#db.prepare("UPDATE conversations SET codex_thread_id = ?, updated_at = ? WHERE workspace_id = ? AND id = ?")
+      .run(codexThreadId, new Date().toISOString(), workspaceId, id);
+  }
+
+  appendConversationMessage(message: Omit<StoredConversationMessage, "createdAt"> & { createdAt?: string }): StoredConversationMessage {
+    const createdAt = message.createdAt ?? new Date().toISOString();
+    this.#db.prepare(`INSERT INTO conversation_messages (id, workspace_id, conversation_id, role, text, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+      .run(message.id, message.workspaceId, message.conversationId, message.role, message.text, JSON.stringify(message.payload ?? {}), createdAt);
+    this.#db.prepare("UPDATE conversations SET updated_at = ? WHERE workspace_id = ? AND id = ?").run(createdAt, message.workspaceId, message.conversationId);
+    return { ...message, payload: message.payload ?? {}, createdAt };
+  }
+
+  /** A card's state changes as the person acts on it (executed, edited, dismissed); the message's words never do. */
+  updateConversationPayload(workspaceId: string, messageId: string, payload: Record<string, unknown>): void {
+    this.#db.prepare("UPDATE conversation_messages SET payload_json = ? WHERE workspace_id = ? AND id = ?").run(JSON.stringify(payload), workspaceId, messageId);
+  }
+
+  getConversationMessage(workspaceId: string, id: string): StoredConversationMessage | undefined {
+    const row = this.#db.prepare("SELECT * FROM conversation_messages WHERE workspace_id = ? AND id = ?").get(workspaceId, id) as Record<string, string> | undefined;
+    return row ? this.#message(row) : undefined;
+  }
+
+  listConversationMessages(workspaceId: string, conversationId: string): StoredConversationMessage[] {
+    return (this.#db.prepare("SELECT * FROM conversation_messages WHERE workspace_id = ? AND conversation_id = ? ORDER BY created_at, rowid")
+      .all(workspaceId, conversationId) as Array<Record<string, string>>).map((row) => this.#message(row));
+  }
+
+  /** Every conversation is searchable (a note the person jotted lives only here). */
+  searchConversationMessages(workspaceId: string, query: string, limit = 30): StoredConversationMessage[] {
+    const q = `%${query.replace(/[!%_]/g, (char) => `!${char}`)}%`;
+    return (this.#db.prepare("SELECT * FROM conversation_messages WHERE workspace_id = ? AND text LIKE ? ESCAPE '!' ORDER BY created_at DESC LIMIT ?")
+      .all(workspaceId, q, limit) as Array<Record<string, string>>).map((row) => this.#message(row));
+  }
+
+  #conversation(row: Record<string, string>): StoredConversation {
+    return { id: row.id!, workspaceId: row.workspace_id!, day: row.day!, ...(row.codex_thread_id ? { codexThreadId: row.codex_thread_id } : {}),
+      createdAt: row.created_at!, updatedAt: row.updated_at! };
+  }
+
+  #message(row: Record<string, string>): StoredConversationMessage {
+    return { id: row.id!, workspaceId: row.workspace_id!, conversationId: row.conversation_id!, role: row.role as ConversationRole, text: row.text!,
+      payload: JSON.parse(row.payload_json || "{}") as Record<string, unknown>, createdAt: row.created_at! };
   }
 
   saveAssistantThread(thread: StoredAssistantThread): void {
@@ -2749,7 +2831,7 @@ export class CrosslineStore {
       "assistant_threads", "assistant_attachments", "milestone_templates",
       "workspace_projects", "source_documents", "onboarding_sessions", "onboarding_messages", "profile_facts",
       "diligence_reports", "milestone_anchors", "model_usage", "activity_segments", "waiting_items",
-      "task_step_plans", "task_steps", "preference_entries", "learned_archetypes",
+      "task_step_plans", "task_steps", "preference_entries", "learned_archetypes", "conversations", "conversation_messages",
       // Consent state is part of the ledger: a restore that silently re-enables collection is not a restore.
       "settings",
       // `principals`/`workspaces` are not workspace-scoped rows themselves — a principal is scoped by

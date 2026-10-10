@@ -26,7 +26,7 @@ import { fileSourceDocuments } from "./source-filing";
 import { createPortraitWriter } from "./portrait-writer";
 import { createPortraitIllustrator } from "./portrait-illustrator";
 import { materializeDatePairs } from "./date-pairs";
-import { createInputRouter } from "./input-router";
+import { createConcierge, type ConciergeRequest } from "./concierge";
 import { createMilestoneGate, pendingMilestoneGates } from "./milestone-gate-runner";
 import { createMilestoneConversation, createMilestoneProposer, createRelationReviser } from "./milestone-proposer";
 import { createGoalBackplanner, milestonesAwaitingBackplan } from "./goal-backplanner";
@@ -666,13 +666,14 @@ if (!capabilitySecret) {
         "crossline:crossline-flywheel-scout", "crossline:crossline-manualbook-designer", "crossline:crossline-material-researcher", "crossline:crossline-material-writer", "crossline:crossline-milestone-architect",
         "crossline:crossline-goal-backplanner", "crossline:crossline-background-facts", "crossline:crossline-assistant",
         "crossline:crossline-onboarding", "crossline:crossline-due-diligence", "crossline:crossline-plan-explainer", "crossline:crossline-weekly-insight",
-        "crossline:crossline-agent", "crossline:crossline-step-planner", "crossline:crossline-validation-reviewer", "crossline:crossline-progress-judge", "crossline:crossline-input-router", "crossline:crossline-archetype-curator", "crossline:crossline-task-titler", "crossline:crossline-portrait-writer", "crossline:crossline-portrait-illustrator", "crossline:crossline-calendar-classifier"
+        "crossline:crossline-agent", "crossline:crossline-step-planner", "crossline:crossline-validation-reviewer", "crossline:crossline-progress-judge", "crossline:crossline-concierge", "crossline:crossline-archetype-curator", "crossline:crossline-task-titler", "crossline:crossline-portrait-writer", "crossline:crossline-portrait-illustrator", "crossline:crossline-calendar-classifier"
       ]
     },
     autoAnalyzeCaptures: (workspaceId) => autoAnalyzePass(workspaceId),
     autoBackplanGoals: (workspaceId) => autoBackplanPass(workspaceId),
     runTaskPass: (workspaceId) => stepPlanPass(workspaceId),
-    routeInput: (workspaceId, input, signal) => { enterUsageWorkspace(workspaceId); return createInputRouter(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client)(input, signal); },
+    conciergeTurn: (workspaceId, request, signal) => { enterUsageWorkspace(workspaceId);
+      return createConcierge(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.client)(request as unknown as ConciergeRequest, signal); },
     analyzeCapture: (client, id, signal, workspaceId) => getCaptureAnalyzer(workspaceId)(client, id, signal),
     // `workspaceId` is the real caller's, from its own verified capability token — not a hardcoded
     // constant, which is what left milestone proposal and goal backplanning invisible to any real

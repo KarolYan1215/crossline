@@ -56,7 +56,34 @@ export type SkillRunOptions<T> = {
   idleMs?: number;
   /** Set for the assistant: a thread with a shell and file access, working in `agent.cwd`, whose requests the guard answers. */
   agent?: AgentMode;
+  /** Read-only tools the model may call during the turn (the one input box's lookups); see `SkillTools`. */
+  tools?: SkillTools;
 };
+
+/**
+ * Functions the model may call mid-turn (Codex dynamic tools: declared at `thread/start`, each call arriving as an `item/tool/call`
+ * request about the thread). The caller answers with text; a throw is reported to the model as a failed call, never as a failed run.
+ * Only read-only lookups belong here — anything that writes is an action the person confirms, not a tool.
+ */
+export type SkillTools = {
+  specs: Array<{ name: string; description: string; inputSchema: Record<string, unknown> }>;
+  call: (name: string, args: unknown) => string | Promise<string>;
+};
+
+/** The runtime's request for one tool call, answered from `tools`; any other request about the thread is refused. */
+function toolAnswerer(tools: SkillTools) {
+  return async (method: string, params: Record<string, unknown>) => {
+    if (method !== "item/tool/call") throw new Error("only tool calls are answered for this thread");
+    const name = String(params.tool ?? "");
+    if (!tools.specs.some((spec) => spec.name === name)) return { contentItems: [{ type: "inputText", text: `没有名为 ${name} 的工具` }], success: false };
+    try {
+      const text = await tools.call(name, params.arguments ?? {});
+      return { contentItems: [{ type: "inputText", text: text.slice(0, 60_000) }], success: true };
+    } catch (error) {
+      return { contentItems: [{ type: "inputText", text: error instanceof Error ? error.message : "查询失败" }], success: false };
+    }
+  };
+}
 const record = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 
@@ -201,6 +228,8 @@ export type ContinueTurnOptions<T> = {
   idleMs?: number;
   /** As `SkillRunOptions.softAccept`: keep part of an answer the repairs could not fix, when the problem is about content quality. */
   softAccept?: (rejection: Error, output: unknown) => T | undefined;
+  /** The tools the thread was started with (they are declared at `thread/start`; this answers their calls on the follow-up turn). */
+  tools?: SkillTools;
 };
 
 /**
@@ -332,7 +361,8 @@ async function startIsolatedThread<T>(scope: Scope, options: SkillRunOptions<T>,
     ...Object.fromEntries(Object.keys(mcp).map((key) => [`mcp_servers.${key}.enabled`, false]))
   };
   const threadParams = {
-    environments: [], dynamicTools: [], runtimeWorkspaceRoots: [], sandbox: "read-only", approvalPolicy: "untrusted", approvalsReviewer: "user",
+    environments: [], runtimeWorkspaceRoots: [], sandbox: "read-only", approvalPolicy: "untrusted", approvalsReviewer: "user",
+    dynamicTools: (options.tools?.specs ?? []).map((spec) => ({ type: "function", name: spec.name, description: spec.description, inputSchema: spec.inputSchema })),
     ephemeral: false, experimentalRawEvents: false,
     developerInstructions: `${options.developerInstructions}\n\n${STYLE_INSTRUCTIONS}`,
     // Left unset for a Skill with no route, so an unlisted job still runs on the runtime's default.
@@ -562,16 +592,18 @@ export function continueSkillTurn<T>(client: CodexRpcBoundary, threadId: string,
   return executeSkill(client, options, async (context): Promise<SkillRunResult<T>> => {
     const audit: AnalysisAudit = { threadId };
     const scope = openScope(client, options);
+    const unregister = options.tools ? registerAgentThread(client, threadId, toolAnswerer(options.tools)) : undefined;
     try {
       await requireLogin(scope);
       const output = await runTurnsUntilValid(client, scope, context, audit, {
-        skillName: options.skillName, threadId, outputSchema: options.outputSchema, allowedItemTypes: ["agentMessage", "reasoning", "userMessage"],
+        skillName: options.skillName, threadId, outputSchema: options.outputSchema,
+        allowedItemTypes: ["agentMessage", "reasoning", "userMessage", ...(options.tools ? ["dynamicToolCall"] : [])],
         firstPrompt: message, validate: options.validateOutput, onAudit: options.onAudit, ...(options.idleMs ? { idleMs: options.idleMs } : {}),
         ...(options.softAccept ? { soften: options.softAccept } : {})
       });
       return { ok: true, output, audit };
     } catch (error) { return failureResult<T>(client, error, audit); }
-    finally { scope.dispose(); }
+    finally { unregister?.(); scope.dispose(); }
   });
 }
 
@@ -584,7 +616,8 @@ async function runSkillTurn<T>(client: CodexRpcBoundary, input: unknown, options
   const audit: AnalysisAudit = {};
   // Web search is the only tool any Skill may use, and only when that Skill was granted it.
   const allowedItemTypes = ["agentMessage", "reasoning", "userMessage",
-    ...(options.allowWebSearch ? ["webSearch", "webSearchCall"] : []), ...(options.allowImageGeneration ? ["imageGeneration"] : [])];
+    ...(options.allowWebSearch ? ["webSearch", "webSearchCall"] : []), ...(options.allowImageGeneration ? ["imageGeneration"] : []),
+    ...(options.tools ? ["dynamicToolCall"] : [])];
   let scope: Scope | undefined;
   let unregister: (() => void) | undefined;
   try {
@@ -595,6 +628,7 @@ async function runSkillTurn<T>(client: CodexRpcBoundary, input: unknown, options
     audit.threadId = threadId;
     options.onAudit({ ...audit });
     if (options.agent) unregister = registerAgentThread(client, threadId, options.agent.answer);
+    else if (options.tools) unregister = registerAgentThread(client, threadId, toolAnswerer(options.tools));
     const output = await runTurnsUntilValid(client, scope, context, audit, {
       skillName: options.skillName, threadId, outputSchema: options.outputSchema, allowedItemTypes, ...(options.onImage ? { onImage: options.onImage } : {}),
       ...(options.agent ? { agent: options.agent } : {}),

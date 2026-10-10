@@ -89,7 +89,7 @@ describe("dashboard view", () => {
       upcoming: [], milestonePulse: [], todayCapacity: { availableMinutes: 0, committedMinutes: 0 }, flywheel: [], flywheelStrip: { nodes: [], edges: [] },
       ...noPreviews
     }} />);
-    expect(html).toContain("快速收集");
+    expect(html).toContain("id=\"capture-title\">输入<");
     expect(html).toContain('name="title"');
     expect(html).not.toContain('name="identityId"');
     expect(html).not.toContain('name="expectedMinutes"');
@@ -191,7 +191,7 @@ describe("dashboard view with nothing to recommend yet", () => {
 
   test("quick capture comes before the next action, and its button says what it does", () => {
     const html = empty({});
-    expect(html.indexOf("快速收集")).toBeLessThan(html.indexOf("下一步"));
+    expect(html.indexOf("capture-title")).toBeLessThan(html.indexOf("下一步"));
     expect(html).toContain('aria-label="发送"');
   });
 });

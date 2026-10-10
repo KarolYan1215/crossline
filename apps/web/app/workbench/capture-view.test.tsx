@@ -5,18 +5,18 @@ vi.mock("server-only", () => ({}));
 import { TEST_CTX } from "../../lib/test-support";
 vi.mock("../../lib/access-guard", () => ({ requireSessionContext: async () => TEST_CTX }));
 import WorkbenchPage from "./page";
-import { OfflineCaptureForm } from "../offline-command-forms";
+import { Conversation } from "../chat/conversation";
 import { addCapturedTaskWithId } from "../../lib/crossline";
 
 afterEach(() => { globalThis.crosslineStore?.close(); globalThis.crosslineStore = undefined; });
-test("manual capture is visible with explicit Analyze; Capture form has only text and attachment fields", async () => {
+test("manual capture is visible with explicit Analyze; the input box has only text and attachment fields", async () => {
   globalThis.crosslineStore = new CrosslineStore(":memory:");
   addCapturedTaskWithId(TEST_CTX, { title: "An unclassified thought" }, "capture-1", "capture-1");
   const html = renderToStaticMarkup(await WorkbenchPage({ searchParams: Promise.resolve({}) }));
   expect(html).toContain("An unclassified thought");
   expect(html).toContain("分析");
   expect(html).toContain("未分类 · 未估时");
-  const form = renderToStaticMarkup(<OfflineCaptureForm ownerId={TEST_CTX.principalId} workspaceId={TEST_CTX.workspaceId} />);
+  const form = renderToStaticMarkup(<Conversation variant="inline" />);
   // One text box and the file input: no identity, duration or category fields.
   expect([...form.matchAll(/name="([^"]+)"/g)].map((match) => match[1])).toEqual(["title", "attachments"]);
 });

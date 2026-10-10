@@ -32,12 +32,11 @@ const SaveState = ({ state }: { state: string }) => state === "failed" ? <small 
  * the confirmation page's default-approval fold and the composer). Each assistant capability is one three-way control; the other
  * switches are two-way. What waits for the person's decision is on 待确认, not here.
  */
-export function AutomationModule({ categories, paused, permissionMode, scheduleAutoApply, recent }: {
-  categories: CategoryRow[]; paused: boolean; permissionMode: boolean; scheduleAutoApply: boolean; recent: RecentTask[];
+export function AutomationModule({ categories, paused, permissionMode, recent }: {
+  categories: CategoryRow[]; paused: boolean; permissionMode: boolean; recent: RecentTask[];
 }) {
   const pause = useSetting(paused ? "paused" : "running", (value) => post("/api/agent/pause", { paused: value === "paused" }));
   const permission = useSetting(permissionMode ? "on" : "off", (value) => post("/api/permission-mode", { enabled: value === "on" }));
-  const schedule = useSetting(scheduleAutoApply ? "auto" : "preview", (value) => post("/api/input/route", { autoApply: value === "auto" }));
   return <div className="st-modules">
     <section className="st-card" aria-label="助手能力">
       <header><h3>助手能力</h3><small>关闭：不做 · 逐次审阅：每份产出待审阅 · 自动：自检全过即完成，抽查</small></header>
@@ -49,9 +48,6 @@ export function AutomationModule({ categories, paused, permissionMode, scheduleA
     </section>
     <section className="st-card" aria-label="自动生效">
       <header><h3>自动生效</h3><small>撤销入口在「待确认 · 最近自动生效」</small></header>
-      <div className="st-row"><span className="st-row-label">日程指令<small>输入框识别出的改期、改时长</small></span>
-        <SegmentedControl label="日程指令" value={schedule.value} onChange={(value) => void schedule.change(value)}
-          options={[{ value: "preview", label: "先预览" }, { value: "auto", label: "直接应用" }]} /><SaveState state={schedule.state} /></div>
       <div className="st-row"><span className="st-row-label">低风险提案<small>在「待确认」前台停留 5 分钟且未拒绝即批准</small></span>
         <SegmentedControl label="低风险提案默认批准" value={permission.value} onChange={(value) => void permission.change(value)}
           options={[{ value: "off", label: "逐项批准" }, { value: "on", label: "默认批准" }]} /><SaveState state={permission.state} /></div>
