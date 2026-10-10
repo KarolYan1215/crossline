@@ -822,11 +822,12 @@ async function scheduledBlocks(ctx: AccessContext, today: string, committed: Per
     ...(result.notes?.length ? { notes: result.notes } : {}) } };
 }
 
-export function loadGoalForecast(ctx: AccessContext): ForecastResult & { inferredRegularBlocks: number } {
+/** `horizonDays`: how far the simulation runs — eight weeks unless the plan page asks for four weeks or up to six months. */
+export function loadGoalForecast(ctx: AccessContext, horizonDays = 56): ForecastResult & { inferredRegularBlocks: number } {
   ensureSeeded(ctx);
   const store = getStore();
   const preferences = effectiveSchedulePreferences(ctx).preferences;
-  const days = planDays(planToday(ctx), 56);
+  const days = planDays(planToday(ctx), horizonDays);
   const committed = ((store.listPlanVersions(ctx.workspaceId)[0]?.payload as { blocks?: PersistedScheduleBlock[] } | undefined)
     ?.blocks ?? []).filter((block) => block.day && !(block.id.startsWith("graph_calendar:") && isCancelledEvent(block.title)));
   const signatures = new Map<string, Set<string>>();

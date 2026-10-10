@@ -1,7 +1,10 @@
 import type { ForecastResult } from "@crossline/planner";
 
+/** What the comparison reads: each goal's dates and each week's net minutes (not the per-week demand). */
+export type ForecastSummary = { goals: ForecastResult["goals"]; weeks: Array<{ week: number; netMinutes: number }> };
+
 /** Comparison with the last forecast the person actually viewed, not an invented historical promise. */
-export function forecastDiff(previous: ForecastResult, current: ForecastResult): string[] {
+export function forecastDiff(previous: ForecastSummary, current: ForecastSummary): string[] {
   const changes: string[] = [];
   const before = new Map(previous.goals.map((goal) => [goal.milestoneId, goal]));
   for (const goal of current.goals) {

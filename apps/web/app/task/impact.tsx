@@ -38,9 +38,9 @@ export function ImpactCard({ impact, busy, onApply, onCancel }: { impact: Impact
 
 /**
  * Preview, then apply (decided 2026-10-07): `propose` asks the server what the change does; `apply` makes it and reloads so every view
- * shows the new schedule.
+ * shows the new schedule. `charts` (the plan page's horizon in days) also asks for that page's charts before and after.
  */
-export function useImpact() {
+export function useImpact(options: { charts?: number } = {}) {
   const [pending, setPending] = useState<{ change: Change; impact: Impact } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -48,7 +48,7 @@ export function useImpact() {
     .then((response) => response.json() as Promise<{ ok: boolean; impact?: Impact; code?: string }>);
   const propose = async (change: Change) => {
     setBusy(true); setError("");
-    const result = await post({ change }).catch(() => null);
+    const result = await post({ change, ...(options.charts ? { charts: options.charts } : {}) }).catch(() => null);
     setBusy(false);
     if (result?.ok && result.impact) setPending({ change, impact: result.impact });
     else setError("影响计算失败，请重试");

@@ -1,33 +1,45 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import type { AvailabilityWindow, ImportancePreset } from "@crossline/core";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import type { AvailabilityWindow } from "@crossline/core";
 import type { ScheduleParams } from "@crossline/planner";
 import { SegmentedControl, Slider } from "../ui/controls";
-import { LineTag } from "../ui/tag";
-import { Tip } from "../ui/overlay";
-import { ImpactCard, useImpact } from "../task/impact";
+import { ImpactCard } from "../task/impact";
+import { usePlanImpact } from "./preview-context";
 import { gridFromWindows, gridHours, windowsFromGrid, SLOTS, type WeekGrid } from "./week-grid";
 
-type Tab = "week" | "params" | "importance";
-export type ImportanceRow = { id: string; title: string; line: string; weight: number; custom: boolean; preset: ImportancePreset };
+type Tab = "week" | "params" | "why";
 
 /**
- * The three things the person sets for the schedule, in one place (they used to be in three): when they are free, how a day is packed,
- * and how much each milestone matters. Every change is previewed against the real schedule before it is applied.
+ * The schedule's settings at the foot of the plan page (decided 2026-10-10), as three tabs: when the person is free, how a day is
+ * packed, and 「排程依据」 — the scheduler's own ordering, where each milestone's importance slider now lives. Every change is previewed
+ * against the real schedule before it is applied, and the charts above show it while the preview is open.
  */
-export function TimeControls({ windows, suggested, proposed, busy, params, presets, importance, labels, plannedHours }: {
+export function TimeControls({ windows, suggested, proposed, busy, params, presets, statedWeekly, ranking, openWhy }: {
   windows: AvailabilityWindow[]; suggested: AvailabilityWindow[]; proposed?: { windows: AvailabilityWindow[]; why: string } | null; busy: number[][]; params: ScheduleParams;
-  presets: { buffered: ScheduleParams; asap: ScheduleParams }; importance: ImportanceRow[]; labels: Record<string, string>; plannedHours: number;
+  presets: { buffered: ScheduleParams; asap: ScheduleParams }; statedWeekly: number | null;
+  /** The 「排程依据」 tab's content (the ranking table and the written explanation). */ ranking: ReactNode;
+  /** Opens on 「排程依据」 (the schedule status links there when something was not placed). */ openWhy?: boolean;
 }) {
-  const [tab, setTab] = useState<Tab>("week");
-  return <section className="pl-card pl-controls" id="time" aria-label="时间与容量">
-    <header><h2>时间与容量</h2>
+  const [tab, setTab] = useState<Tab>(openWhy ? "why" : "week");
+  // The schedule status above links to #why: following it opens the tab.
+  useEffect(() => {
+    const follow = () => { if (window.location.hash === "#why") setTab("why"); };
+    follow();
+    window.addEventListener("hashchange", follow);
+    return () => window.removeEventListener("hashchange", follow);
+  }, []);
+  return <section className="pl-card pl-controls" id="time" aria-label="排程设置">
+    <header><h2>排程设置</h2>
       <SegmentedControl label="设置项" value={tab} onChange={setTab} options={[{ value: "week", label: "可用时段" },
-        { value: "params", label: "排程参数" }, { value: "importance", label: "重要性" }]} /></header>
-    {tab === "week" && <WeekEditor windows={windows} suggested={suggested} proposed={proposed ?? null} busy={busy} plannedHours={plannedHours} />}
+        { value: "params", label: "排程参数" }, { value: "why", label: "排程依据" }]} /></header>
+    <span id="why" className="pl-anchor" />
+    {tab === "week" && <WeekEditor windows={windows} suggested={suggested} proposed={proposed ?? null} busy={busy} statedWeekly={statedWeekly} />}
     {tab === "params" && <ParamsPanel params={params} presets={presets} />}
-    {tab === "importance" && <ImportancePanel rows={importance} labels={labels} />}
+    {tab === "why" && <div className="pl-why">
+      <small className="pl-chart-foot">排序规则：优先档 → 重要性 → 截止日。调整重要性或截止日时先预览对排程的影响。</small>
+      {ranking}
+    </div>}
   </section>;
 }
 
@@ -38,13 +50,13 @@ const ENERGY_LABEL = ["不可用", "低精力", "中精力", "高精力"];
 const clock = (slot: number) => `${String(Math.floor(slot / 2)).padStart(2, "0")}:${slot % 2 ? "30" : "00"}`;
 
 /** The week painted on a grid: pick an energy, drag over half hours. Calendar commitments of the next two weeks show through as dots. */
-function WeekEditor({ windows, suggested, proposed, busy, plannedHours }: { windows: AvailabilityWindow[]; suggested: AvailabilityWindow[];
-  proposed: { windows: AvailabilityWindow[]; why: string } | null; busy: number[][]; plannedHours: number }) {
+function WeekEditor({ windows, suggested, proposed, busy, statedWeekly }: { windows: AvailabilityWindow[]; suggested: AvailabilityWindow[];
+  proposed: { windows: AvailabilityWindow[]; why: string } | null; busy: number[][]; statedWeekly: number | null }) {
   const initial = useRef(JSON.stringify(gridFromWindows(windows)));
   const [grid, setGrid] = useState<WeekGrid>(() => gridFromWindows(windows));
   const [brush, setBrush] = useState<(typeof BRUSH)[number]["value"]>("3");
   const painting = useRef(false);
-  const impact = useImpact();
+  const impact = usePlanImpact();
   useEffect(() => {
     const stop = () => { painting.current = false; };
     window.addEventListener("pointerup", stop);
@@ -62,7 +74,7 @@ function WeekEditor({ windows, suggested, proposed, busy, plannedHours }: { wind
   return <div className="pl-week-editor">
     <div className="pl-toolbar">
       <SegmentedControl label="画笔" value={brush} onChange={setBrush} options={BRUSH.map((item) => ({ value: item.value, label: item.label }))} />
-      <span className="pl-hours mono" title="可用时段每周小时数，对比未来 7 天已排入的小时数">每周 {hours} h · 已排 {plannedHours} h</span>
+      <span className="pl-hours mono" title="刷涂的可用时段每周小时数，对比访谈中所述的每周投入">每周 {hours} h{statedWeekly !== null ? ` · 所述 ${statedWeekly} h` : ""}</span>
       {proposed && <button type="button" onClick={() => setGrid(gridFromWindows(proposed.windows))} title={proposed.why || "访谈按硬约束主线的规则提议的可用时段"}>采用访谈提议</button>}
       {suggested.length > 0 && <button type="button" onClick={() => setGrid(gridFromWindows(suggested))} title="按近两周屏幕活动推断的在场时段">采用活动建议</button>}
       {dirty && <button type="button" onClick={() => setGrid(JSON.parse(initial.current) as WeekGrid)}>还原</button>}
@@ -100,7 +112,7 @@ const same = (a: ScheduleParams, b: ScheduleParams) => JSON.stringify(a) === JSO
 /** How a day is packed: two presets and the four numbers behind them. */
 function ParamsPanel({ params, presets }: { params: ScheduleParams; presets: { buffered: ScheduleParams; asap: ScheduleParams } }) {
   const [draft, setDraft] = useState(params);
-  const impact = useImpact();
+  const impact = usePlanImpact();
   const preset = same(draft, presets.buffered) ? "buffered" : same(draft, presets.asap) ? "asap" : "custom";
   return <div className="pl-params">
     <SegmentedControl label="预设" value={preset} onChange={(value) => value !== "custom" && setDraft(presets[value])}
@@ -118,31 +130,5 @@ function ParamsPanel({ params, presets }: { params: ScheduleParams; presets: { b
     {impact.error && <p role="status">{impact.error}</p>}
     {impact.pending && <ImpactCard impact={impact.pending.impact} busy={impact.busy} onApply={() => void impact.apply()}
       onCancel={() => { impact.cancel(); setDraft(params); }} />}
-  </div>;
-}
-
-/** Each approved milestone's importance on a 0–100 slider, the system's preset as a tick, the reasons for the preset on hover. */
-function ImportancePanel({ rows, labels }: { rows: ImportanceRow[]; labels: Record<string, string> }) {
-  const [values, setValues] = useState(() => Object.fromEntries(rows.map((row) => [row.id, row.weight])));
-  const [active, setActive] = useState<string | null>(null);
-  const impact = useImpact();
-  if (!rows.length) return <p className="muted">尚无已批准的里程碑。</p>;
-  const propose = (id: string, weight: number) => { setActive(id); void impact.propose({ kind: "weight", milestoneId: id, weight }); };
-  return <div className="pl-importance">
-    {rows.map((row) => <div key={row.id} className="pl-imp-row" data-line={row.line}>
-      <span className="pl-imp-title"><LineTag line={row.line}>{labels[row.line] ?? row.line}</LineTag><b title={row.title}>{row.title}</b></span>
-      <Slider label={`${row.title} 重要性`} value={values[row.id] ?? row.weight} preset={row.preset.weight}
-        onChange={(value) => setValues({ ...values, [row.id]: value })}
-        onCommit={(value) => value !== row.weight && propose(row.id, value)} />
-      <Tip content={<span className="pl-basis">{row.preset.basis.map((item) => <span key={item.key}><b>{item.label} {item.points >= 0 ? "+" : ""}{item.points}</b>{item.detail}</span>)}
-        <span><b>系统预设 {row.preset.weight}</b></span></span>}>
-        <button type="button" className="pl-imp-basis" aria-label={`${row.title} 预设依据`}>{row.custom ? "已调整" : "预设"}</button>
-      </Tip>
-      {row.custom && row.weight !== row.preset.weight && <button type="button" className="pl-imp-reset" disabled={impact.busy}
-        onClick={() => { setValues({ ...values, [row.id]: row.preset.weight }); propose(row.id, row.preset.weight); }}>恢复预设</button>}
-      {active === row.id && impact.pending && <ImpactCard impact={impact.pending.impact} busy={impact.busy} onApply={() => void impact.apply()}
-        onCancel={() => { impact.cancel(); setActive(null); setValues({ ...values, [row.id]: row.weight }); }} />}
-    </div>)}
-    {impact.error && <p role="status">{impact.error}</p>}
   </div>;
 }

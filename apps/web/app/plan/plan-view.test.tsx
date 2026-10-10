@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
-import { PlanView, type CalendarData, type PlanVersionData } from "./plan-view";
+import { PlanView, type PlanVersionData } from "./plan-view";
 
 const plan: PlanVersionData = {
   id: "plan-7",
@@ -12,32 +12,33 @@ const plan: PlanVersionData = {
   ],
   changes: [{ id: "change-1", kind: "add", explanation: "为组会准备材料", afterBlockId: "ai-1", status: "pending" }]
 };
-const calendar: CalendarData = {
-  today: "2026-09-15", nowIso: "2026-09-15T15:00:00.000Z", timeZone: "America/Chicago", labels: { research: "科研" }, quietByWeekday: {},
-  items: [{ id: "fixed-1", title: "组会", day: "2026-09-15", start: "09:00", end: "10:00", kind: "calendar", source: "UW Outlook", readOnly: true }],
-  deadlines: []
-};
 
 describe("PlanView", () => {
-  test("one plan version, one calendar with day, week and month, and the decisions folded under it", () => {
-    const html = renderToStaticMarkup(<PlanView plan={plan} calendar={calendar} />);
+  test("the top row: one plan version, reading and writing the calendar, the horizon, and the decisions folded under it — no calendar", () => {
+    const html = renderToStaticMarkup(<PlanView plan={plan} aside={<span>统计范围</span>} />);
     expect(html).toContain('data-plan-version="plan-7"');
-    for (const view of [">日<", ">周<", ">月<"]) expect(html).toContain(view);
-    expect(html).toContain("组会");
+    expect(html).toContain("计划 v7 · 草稿");
+    expect(html).toContain("立即同步日历");
+    expect(html).toContain("发布到 Crossline 日历");
+    expect(html).toContain("统计范围");
+    // The calendar lives on Today only (decided 2026-10-10).
+    for (const view of [">日<", ">周<", ">月<"]) expect(html).not.toContain(view);
+    expect(html).not.toContain("组会</");
     expect(html).toContain("1 项差异待处理");
     expect(html).toContain("为组会准备材料");
     // A pending difference opens the fold, so what needs a decision is visible without a click.
     expect(html).toContain('<details class="plan-changes advanced" id="plan-changes" open=""');
+    expect(html).toContain(">批准</button>");
   });
 
   test("with nothing to decide the differences stay folded", () => {
-    const html = renderToStaticMarkup(<PlanView plan={{ ...plan, changes: [] }} calendar={calendar} />);
+    const html = renderToStaticMarkup(<PlanView plan={{ ...plan, changes: [] }} />);
     expect(html).not.toContain("差异待处理");
     expect(html).not.toContain('id="plan-changes" open');
   });
 
   test("an approved plan says so and offers no approve button", () => {
-    const html = renderToStaticMarkup(<PlanView plan={{ ...plan, status: "approved", changes: [] }} calendar={calendar} />);
+    const html = renderToStaticMarkup(<PlanView plan={{ ...plan, status: "approved", changes: [] }} />);
     expect(html).toContain("本版本已批准");
     expect(html).not.toContain("批准本批变更");
   });
@@ -45,7 +46,7 @@ describe("PlanView", () => {
   test("what the scheduler could not place is counted, with a link to the reasons under 「排程依据」", () => {
     const html = renderToStaticMarkup(<PlanView plan={{ ...plan, status: "approved",
       schedule: { status: "partial", blockers: [{ taskId: "w2", code: "NO_CAPACITY", message: "复核数据没有可用容量" }], solver: "feasible_time_limit" }
-    }} calendar={calendar} />);
+    }} />);
     expect(html).toContain("部分任务未排入");
     expect(html).toContain("1 个任务未排入，原因见「排程依据」");
     expect(html).toContain("未证明最优");

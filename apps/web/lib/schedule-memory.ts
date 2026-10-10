@@ -13,6 +13,22 @@ export function readScheduledDay(ctx: AccessContext, day: string): ScheduledDay 
 }
 
 /**
+ * How long each order was planned for on a day: `schedule.minutes:<YYYY-MM-DD>` → `{ [orderId]: minutes }`, the most seen for it that day.
+ * Kept beside `schedule.day` (whose shape the missed-block ask reads) so the plan page can compare planned with timed hours per line;
+ * days before this was recorded have a start time and no length, and count as not recorded.
+ */
+export const scheduledMinutesKey = (day: string) => `schedule.minutes:${day}`;
+export type ScheduledMinutes = Record<string, number>;
+
+export function readScheduledMinutes(ctx: AccessContext, day: string): ScheduledMinutes | null {
+  const raw = getStore().getSetting(ctx.workspaceId, scheduledMinutesKey(day));
+  if (!raw) return null;
+  try { return JSON.parse(raw) as ScheduledMinutes; } catch { return null; }
+}
+
+const clockMinutes = (clock: string) => { const [h, m] = clock.split(":").map(Number); return h! * 60 + m!; };
+
+/**
  * Remembers which work the plan gave a time today. The schedule is derived on read and never stored (so it cannot drift from the
  * work orders), which also meant nothing could say tomorrow what had been meant to happen today — so nothing could ask about it.
  * Kept as a union over the day (work placed this morning and moved this afternoon still counts as placed today), earliest start kept.
@@ -27,6 +43,15 @@ export async function recordScheduledToday(ctx: AccessContext, now = new Date())
     if (!seen[orderId] || block.start < seen[orderId]!) seen[orderId] = block.start;
   }
   getStore().setSetting(ctx.workspaceId, scheduledDayKey(today), JSON.stringify(seen));
+  const minutesNow: ScheduledMinutes = {};
+  for (const block of plan.blocks) {
+    if (!block.id.startsWith("scheduled:") || block.day !== today) continue;
+    const orderId = block.id.split(":")[1]!;
+    minutesNow[orderId] = (minutesNow[orderId] ?? 0) + Math.max(0, clockMinutes(block.end) - clockMinutes(block.start));
+  }
+  const minutes = readScheduledMinutes(ctx, today) ?? {};
+  for (const [orderId, value] of Object.entries(minutesNow)) minutes[orderId] = Math.max(minutes[orderId] ?? 0, value);
+  getStore().setSetting(ctx.workspaceId, scheduledMinutesKey(today), JSON.stringify(minutes));
   // The work with a time in the next seven days: the worker builds tutorials for these (it cannot derive the schedule itself).
   const weekEnd = new Date(Date.parse(`${today}T12:00:00Z`) + 7 * 86_400_000).toISOString().slice(0, 10);
   const upcoming = [...new Set(plan.blocks.filter((block) => block.id.startsWith("scheduled:") && block.day && block.day >= today && block.day < weekEnd)

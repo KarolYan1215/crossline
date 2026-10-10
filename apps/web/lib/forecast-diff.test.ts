@@ -2,14 +2,14 @@ import { expect, test } from "vitest";
 import type { ForecastResult } from "@crossline/planner";
 import { forecastDiff } from "./forecast-diff";
 
-const baseline: ForecastResult = { weeks: [{ week: 1, netMinutes: 700, reservedMinutes: 105, usableMinutes: 595 }],
+const baseline: ForecastResult = { weeks: [{ week: 1, netMinutes: 700, reservedMinutes: 105, usableMinutes: 595, demand: [] }],
   goals: [{ milestoneId: "a", title: "原目标", p50Day: "2026-09-20", p85Day: "2026-09-25",
     suggestedTargetDay: "2026-09-25", confirmedDeadline: null, bottleneck: null, slackDays: null,
     p50Minutes: 100, p85Minutes: 200 }] };
 
 test("a new goal and changed real capacity show differences against the last viewed forecast", () => {
   const changed: ForecastResult = { weeks: [{ week: 1, netMinutes: 600,
-    reservedMinutes: 90, usableMinutes: 510 }], goals: [
+    reservedMinutes: 90, usableMinutes: 510, demand: [] }], goals: [
     { ...baseline.goals[0]!, p85Day: "2026-09-27" },
     { ...baseline.goals[0]!, milestoneId: "b", title: "新目标" }
   ] };

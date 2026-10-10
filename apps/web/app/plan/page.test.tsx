@@ -16,7 +16,7 @@ describe("plan page", () => {
     const store = new CrosslineStore(":memory:");
     globalThis.crosslineStore = store;
     const { default: PlanPage } = await import("./page");
-    const html = renderToStaticMarkup(await PlanPage());
+    const html = renderToStaticMarkup(await PlanPage({}));
     expect(html).toContain("计划");
     // Default hours are flagged on the capacity chart, and the week editor is right there; nothing blocks the preview.
     expect(html).toContain("默认时段");
@@ -32,10 +32,30 @@ describe("plan page", () => {
     store.upsertProfileFact({ workspaceId: "workspace-1", identityId: "research", projectId: "p", slot: "weekly_hours", updatedAt: "2026-10-01T00:00:00Z",
       value: "无法按项目拆分；所有事情合计每周约 72 小时。", status: "confirmed", sourceRef: "reply-1", sourceQuote: "72 小时" });
     const { default: PlanPage } = await import("./page");
-    const html = renderToStaticMarkup(await PlanPage());
+    const html = renderToStaticMarkup(await PlanPage({}));
     expect(html).toContain("画像所述每周投入 72 小时");
     expect(html).toContain("可用时段每周 39 小时");
     expect(html).toContain("可用时段不足");
+    store.close();
+    globalThis.crosslineStore = undefined;
+  }, 20000);
+
+  // Decided 2026-10-10: the calendar is on Today only; the plan page is the long view over a horizon, then the schedule's settings.
+  test("no calendar: four charts over the chosen horizon, then the settings as three tabs without a separate importance tab", async () => {
+    const store = new CrosslineStore(":memory:");
+    globalThis.crosslineStore = store;
+    const { default: PlanPage } = await import("./page");
+    const html = renderToStaticMarkup(await PlanPage({ searchParams: Promise.resolve({ horizon: "4" }) }));
+    for (const title of ["容量与需求", "里程碑完成预测", "主线投入：计划 vs 实际", "估时准确度与节律", "排程设置"]) expect(html).toContain(title);
+    expect(html).toMatch(/aria-checked="true"[^>]*>4 周</);
+    for (const tab of [">可用时段<", ">排程参数<", ">排程依据<"]) expect(html).toContain(tab);
+    expect(html).not.toContain(">重要性<");
+    // No day / week / month calendar any more, and 「本周已排」 is no longer said twice.
+    expect(html).not.toContain("mo-cell");
+    expect(html).not.toContain("wk-col");
+    expect(html).not.toContain("本周已排");
+    // Nothing has been timed on a fresh account: the measured charts say so instead of drawing empty axes.
+    expect(html).toContain("尚无实测");
     store.close();
     globalThis.crosslineStore = undefined;
   }, 20000);
@@ -50,7 +70,7 @@ describe("plan page", () => {
       importance: { "research-starter": "important", "startup-starter": "ordinary",
         "media-starter": "ordinary", "investment-starter": "ordinary" } })).toEqual({ ok: true });
     const { default: PlanPage } = await import("./page");
-    const html = renderToStaticMarkup(await PlanPage());
+    const html = renderToStaticMarkup(await PlanPage({}));
     expect(html).not.toContain("默认时段");
     store.close();
     globalThis.crosslineStore = undefined;
