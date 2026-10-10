@@ -220,7 +220,7 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
         {transcription && waitingForAudio && <TranscriptionCard status={transcription} busy={busy !== ""} onDownload={() => void downloadModel()} />}
         {busy === "turn" && pendingText && !(messages.at(-1)?.role === "user" && userText(messages.at(-1)!) === pendingText)
           && <div className="ob-turn ob-user"><p>{pendingText}</p></div>}
-        {busy === "turn" && <div className="ob-turn ob-assistant" role="status"><p className="ob-muted">正在整理回答并生成下一组问题…（通常不到一分钟）</p></div>}
+        {busy === "turn" && <div className="ob-turn ob-assistant" role="status"><p className="ob-muted">正在整理回答并生成下一组问题…（通常 1–4 分钟，可以先离开本页）</p></div>}
         <div ref={bottom} />
       </div>
       {error && <p className="ob-error" role="alert">{error}{waiting && busy === "" && <button type="button" className="ob-btn" onClick={() => void runTurn("")}>重试</button>}</p>}

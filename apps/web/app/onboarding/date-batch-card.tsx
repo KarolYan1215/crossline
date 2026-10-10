@@ -19,7 +19,7 @@ export function DateBatchCard({ batch, onDecide, onRedo, busy }: {
   const blocks = chosen.reduce((sum, item) => sum + item.blocks, 0);
   return <section className="ob-dates" aria-label="从文件识别到的日期">
     <header>
-      <b>从 {batch.documentCount} 个文件识别到 {batch.items.length} 项</b>
+      <b>{batch.documentCount ? `从 ${batch.documentCount} 个文件识别到 ${batch.items.length} 项` : `从回答中识别到 ${batch.items.length} 项`}</b>
       <span className="ob-muted">勾选的日期加入日历与画像；不确定的默认不勾选。</span>
     </header>
     <ul>
