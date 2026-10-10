@@ -1,0 +1,25 @@
+/* A line card's own interview, goal-change card and redraft offer (§4.2). */
+.lines-bar-card header[draggable="true"]{cursor:grab}
+.lines-bar-card .lines-bar-goal-button{justify-self:start}
+.lc-interview{display:grid;gap:6px;min-width:0;cursor:auto;border-top:1px solid var(--mist);padding-top:6px}
+.lc-description,.lc-reply{margin:0;font-size:13px;line-height:1.5;overflow-wrap:anywhere}
+.lc-reply{color:var(--ink)}
+.lc-edit{display:grid;gap:4px;padding:6px 8px;border:1px solid var(--lc,var(--ink));background:var(--chalk);font-size:13px}
+.lc-edit small{font-size:12px}
+.lc-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;min-width:0}
+.lc-row small{font-size:12px;color:var(--graphite)}
+.lc-redraft{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.lc-redraft small{font-size:12px;color:var(--graphite)}
+.lc-questions{display:grid;gap:6px;max-height:260px;overflow:auto}
+.lc-question{display:grid;gap:4px;border:0;margin:0;padding:0;min-width:0}
+.lc-question legend{font-size:13px;padding:0;overflow-wrap:anywhere}
+.lc-options{display:flex;flex-wrap:wrap;gap:4px}
+.lc-options button{padding:2px 6px;font:inherit;font-size:12px;background:var(--paper);color:var(--ink);border:1px solid var(--mist);cursor:pointer;text-align:left}
+.lc-options button[aria-pressed="true"]{border-color:var(--lc,var(--ink));background:var(--chalk);font-weight:700}
+.lc-composer{display:grid;gap:4px;min-width:0}
+.lc-composer textarea{width:100%;box-sizing:border-box;min-width:0;font:inherit;font-size:14px;padding:4px 6px;border:1px solid var(--mist);background:var(--paper);color:var(--ink);resize:vertical}
+.lc-full{margin-left:auto;font-size:12px;color:var(--ink)}
+.line-attr-section{display:grid;gap:6px;border:0;margin:0;padding:0;min-width:0}
+.line-attr-section legend{font-size:13px;margin-bottom:4px}
+@media (max-width:767px){.lc-composer textarea{font-size:16px}}
+article.lines-bar-card{cursor:auto}

@@ -16,7 +16,7 @@ export function createPortraitWriter(store: CrosslineStore, workspaceId: string,
     const client = getClient();
     if (!client) return { state: "blocked", code: "CODEX_SUPERVISOR_UNAVAILABLE", message: "模型服务不可用。" };
     const json = <T,>(key: string, fallback: T): T => { try { return JSON.parse(store.getSetting(workspaceId, key) ?? "null") ?? fallback; } catch { return fallback; } };
-    const profiles = json<Record<string, { description: string; goalCandidates: string[] }>>("lines.profiles", {});
+    const profiles = json<Record<string, { description?: string }>>("lines.profiles", {});
     const lines = identityLines(store, workspaceId).map((line) => ({ id: line.id, label: line.label, rank: line.rank ?? null, hard: Boolean(line.hard),
       goals: line.goals ?? [], description: profiles[line.id]?.description ?? "" }));
     if (!lines.length) return { state: "blocked", code: "PORTRAIT_NO_LINES", message: "尚未设定主线。" };

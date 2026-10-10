@@ -1,4 +1,4 @@
-import { interviewChecklist, profileGaps, PROFILE_CONFIRMED, portraitFingerprint, type ChecklistItem, type ProfileGap, type ProfileModel } from "@crossline/core";
+import { interviewChecklist, profileGaps, PROFILE_CONFIRMED, portraitFingerprint, type ChecklistItem, type ProfileGap, type ProfileModel, type StoredLineProfile } from "@crossline/core";
 import { unfiledFilesIn } from "./file-belonging";
 import { latestFileDates } from "./index";
 import type { CrosslineStore } from "./index";
@@ -15,7 +15,7 @@ export function interviewChecklistFor(store: CrosslineStore, workspaceId: string
   lines: Array<{ id: string; label: string; hard: boolean; goals: string[] }>, extras: { unfiledFiles: number | null; today?: string }): ChecklistItem[] {
   const today = extras.today ?? new Date().toISOString().slice(0, 10);
   const json = <T,>(key: string, fallback: T): T => { try { return JSON.parse(store.getSetting(workspaceId, key) ?? "null") ?? fallback; } catch { return fallback; } };
-  const profiles = json<Record<string, { description?: string; goalCandidates?: string[] }>>("lines.profiles", {});
+  const profiles = json<Record<string, StoredLineProfile>>("lines.profiles", {});
   const profile = json<Partial<ProfileModel>>("profile.model", {});
   const decided = new Map(store.listEvents(workspaceId, { type: "dates.decided" }).map((event) => [event.entityId,
     event.payload as { superseded?: boolean; included?: string[] }]));
@@ -31,7 +31,7 @@ export function interviewChecklistFor(store: CrosslineStore, workspaceId: string
   const confirmed = json<{ fingerprint?: string } | null>(PROFILE_CONFIRMED, null);
   return interviewChecklist({
     lines,
-    descriptions: Object.fromEntries(Object.entries(profiles).map(([id, value]) => [id, { description: value.description ?? "", candidates: (value.goalCandidates ?? []).length }])),
+    descriptions: Object.fromEntries(Object.entries(profiles).map(([id, value]) => [id, { description: value.description ?? "", candidates: (value.attributes ?? []).length || (value.goalCandidates ?? []).length }])),
     profile,
     facts: store.listProfileFacts(workspaceId).map(({ identityId, projectId, slot, status, sourceRef, value }) => ({ identityId, projectId, slot, status, sourceRef, value })),
     projects: store.listProjects(workspaceId).map(({ id, identityId, name }) => ({ id, identityId, name })),

@@ -19,6 +19,8 @@ export function pageFromLocation(): PageContext {
   const task = /^\/workbench\/([^/]+)/.exec(pathname);
   if (task) return { kind: "task", entityId: decodeURIComponent(task[1]!) };
   if (pathname.startsWith("/milestones") && searchParams.get("open")) return { kind: "milestone", entityId: searchParams.get("open")! };
+  // A line: its card on 主线 (the card sets `?line=` while the person works in it) or its own interview.
+  if ((pathname.startsWith("/milestones") || pathname.startsWith("/onboarding")) && searchParams.get("line")) return { kind: "line", entityId: searchParams.get("line")! };
   return { kind: pathname === "/" ? "today" : pathname.slice(1).split("/")[0] ?? "", entityId: "" };
 }
 

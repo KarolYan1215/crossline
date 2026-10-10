@@ -41,8 +41,9 @@ export type OnboardingState = {
   setupLines: boolean;
   /** A line's own interview, when the page was opened for one. */
   focusLine: { id: string; label: string } | null;
-  lines: Array<{ id: string; label: string; rank: number | null; hard: boolean; goals: string[] }>;
-  lineProfiles: Record<string, { description: string; goalCandidates: string[] }>;
+  lines: Array<{ id: string; label: string; rank: number | null; hard: boolean; goals: string[]; goalParts: string[] }>;
+  /** Per line: the interview's description and attribute candidates (`goalCandidates` only on lines interviewed before attributes existed). */
+  lineProfiles: Record<string, import("@crossline/core").StoredLineProfile>;
   profile: import("./portrait-panel").ProfileModelView | null;
   availabilityProposed: boolean;
   messages: Message[];

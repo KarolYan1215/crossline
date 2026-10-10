@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { lineAttributes, type StoredLineProfile } from "@crossline/core";
+import { AttributePicker } from "../ui/attribute-picker";
 
 export type ProfileModelView = {
   portrait: string; coreConflict: string; problem: string; gravity: string[]; designable: string[]; reframes: Array<{ fallacy: string; reframe: string }>;
@@ -8,7 +9,7 @@ export type ProfileModelView = {
   energyMap: Array<{ activity: string; skill: "high" | "low"; love: "high" | "low"; charge: "charge" | "drain" }>;
   flow: string[]; says: string; does: string; anchor: string; realWant: string; allocation: string;
 };
-export type LineView = { id: string; label: string; rank: number | null; hard: boolean; goals: string[] };
+export type LineView = { id: string; label: string; rank: number | null; hard: boolean; goals: string[]; goalParts: string[] };
 
 export const STAGES: Array<[string, string]> = [["orientation", "开场与规则"], ["situation", "现状"], ["compass", "指南针"], ["energy", "能量"], ["lines", "主线"], ["details", "细节"]];
 
@@ -33,17 +34,24 @@ function EnergyMap({ items }: { items: ProfileModelView["energyMap"] }) {
 
 /**
  * What the interview has understood about the person so far, kept beside the conversation: the portrait and core conflict, the problem
- * split into gravity and design, the compass, the energy map, and for each line its description and long-term goal candidates
- * (「成为 ___ 的 <身份>」), any of which can be adopted, edited or added in one place.
+ * split into gravity and design, the compass, the energy map, and for each line its description and the attribute candidates its long-term
+ * goal is built from (「成为 A 的、B 的<身份>」, §4.1): picked, ordered, reworded and adopted in one place.
  */
 export function PortraitPanel({ profile, lines, lineProfiles, onChanged }: {
   profile: ProfileModelView | null; lines: LineView[];
-  lineProfiles: Record<string, { description: string; goalCandidates: string[] }>; onChanged: () => void;
+  lineProfiles: Record<string, StoredLineProfile>; onChanged: () => void;
 }) {
-  const [editing, setEditing] = useState<Record<string, string>>({});
   const saveGoals = async (line: LineView, goals: string[]) => {
     const response = await fetch("/api/lines", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: line.id, goals }) }).catch(() => null);
     if (response?.ok) onChanged();
+  };
+  /** 「采用」 on the attribute picker: the parts in order become the line's goal (the composed sentence is `goals[0]`). */
+  const adoptParts = async (line: LineView, goalParts: string[]) => {
+    const response = await fetch("/api/lines", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: line.id, goalParts }) }).catch(() => null);
+    const body = await response?.json().catch(() => null) as { message?: string } | null;
+    if (!response?.ok) return body?.message ?? "未保存，请重试";
+    onChanged();
+    return "";
   };
   const has = (value: string | unknown[] | undefined) => Array.isArray(value) ? value.length > 0 : Boolean(value);
   return <section className="ob-portrait" aria-label="实时画像">
@@ -63,20 +71,14 @@ export function PortraitPanel({ profile, lines, lineProfiles, onChanged }: {
     {profile && has(profile.energyMap) && <EnergyMap items={profile.energyMap} />}
     <div className="ob-lines">{lines.map((line) => {
       const drawn = lineProfiles[line.id];
-      const candidates = (drawn?.goalCandidates ?? []).filter((goal) => !line.goals.includes(goal));
+      const candidates = lineAttributes(drawn, line.label).map(({ text, kind }) => ({ text, kind }));
       return <article key={line.id} className="ob-line" data-line={line.id}>
         <header><b>{line.label}</b>{line.hard && <span className="tag">硬约束</span>}<small className="mono">{line.rank ? line.rank === 1 ? "底座" : `第 ${line.rank}` : "平行"}</small></header>
         {drawn?.description && <p className="gen">{drawn.description}</p>}
         {line.goals.length > 0 && <ul className="ob-goals">{line.goals.map((goal) => <li key={goal}>{goal}
           <button type="button" aria-label="移除该长期目标" onClick={() => void saveGoals(line, line.goals.filter((item) => item !== goal))}>×</button></li>)}</ul>}
-        {candidates.length > 0 && <div className="ob-candidates"><small className="muted">长期目标候选（点击采用）</small>
-          {candidates.map((goal) => <button key={goal} type="button" className="gen" onClick={() => void saveGoals(line, [...line.goals, goal])}>＋ {goal}</button>)}</div>}
-        <form className="ob-goal-add" onSubmit={(event) => { event.preventDefault(); const value = (editing[line.id] ?? "").trim(); if (!value) return;
-          setEditing((current) => ({ ...current, [line.id]: "" })); void saveGoals(line, [...line.goals, value]); }}>
-          <input value={editing[line.id] ?? ""} maxLength={120} placeholder={`成为 ___ 的${line.label}`} aria-label={`为${line.label}新增长期目标`}
-            onChange={(event) => setEditing((current) => ({ ...current, [line.id]: event.target.value }))} />
-          <button type="submit">添加</button>
-        </form>
+        {(candidates.length > 0 || line.goalParts.length > 0) && <AttributePicker key={`${line.goalParts.join("|")}:${candidates.length}`} noun={line.label}
+          candidates={candidates} initial={line.goalParts} onAdopt={(parts) => adoptParts(line, parts)} />}
       </article>;
     })}</div>
   </section>;

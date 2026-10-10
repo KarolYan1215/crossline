@@ -40,7 +40,7 @@ export const ACTIONS = {
   "goal.add": { label: "新增长期目标", risk: "internal", args: { lineId: str(64), title: str(60) } },
   "milestone.draft": { label: "新建里程碑草稿", risk: "internal", args: { lineId: str(64), title: str(200), date: day, target: str(500) } },
   "line.add": { label: "新增主线", risk: "internal", args: { label: str(12) } },
-  "profile.tell": { label: "交给访谈", risk: "internal", args: { text: str(2000) } },
+  "profile.tell": { label: "交给访谈", risk: "internal", args: { text: str(2000), lineId: str(64) } },
   "proposal.decide": { label: "处理任务提案", risk: "commitment", args: { workOrderId: str(128), decision: enumOf(["approve", "reject"]), reason: str(300) } },
   "milestones.decide": { label: "处理里程碑草稿", risk: "commitment", args: { milestoneIds: { type: "array", maxItems: 20, items: str(128) },
     decision: enumOf(["approve", "reject"]) } },
@@ -75,7 +75,8 @@ type ArgsOf = {
   "goal.add": { lineId: string; title: string };
   "milestone.draft": { lineId: string; title: string; date: string; target: string };
   "line.add": { label: string };
-  "profile.tell": { text: string };
+  /** `lineId`: that line's own interview (the person is on its card or page); "" = the whole interview. */
+  "profile.tell": { text: string; lineId: string };
   "proposal.decide": { workOrderId: string; decision: "approve" | "reject"; reason: string };
   "milestones.decide": { milestoneIds: string[]; decision: "approve" | "reject" };
   "agent_result.review": { taskId: string; decision: "accepted" | "rejected"; note: string };
@@ -146,7 +147,8 @@ export function actionProblem(item: ProposedAction, refs: ConciergeRefs): string
       if (args.milestoneId && !refs.milestones.has(args.milestoneId)) return `里程碑 id「${args.milestoneId}」不存在`;
       return "";
     }
-    case "note.add": case "profile.tell": return String(a.text ?? "").trim() ? "" : "内容为空";
+    case "note.add": return String(a.text ?? "").trim() ? "" : "内容为空";
+    case "profile.tell": return !String(a.text ?? "").trim() ? "内容为空" : item.args.lineId && !refs.lines.has(item.args.lineId) ? `主线 id「${item.args.lineId}」不存在` : "";
     case "task.op": {
       const args = item.args;
       const missing = task(args.workOrderId);
@@ -304,7 +306,8 @@ export const actionLabel = (item: ProposedAction): string => ACTIONS[item.action
 export type ConciergePack = {
   now: string; today: string; timeZone: string;
   page: { kind: string; entityId: string; title: string };
-  lines: Array<{ id: string; label: string; goals: string[]; hard: boolean }>;
+  /** `description` is the interview's reading of the line (`lines.profiles`), "" before one exists. */
+  lines: Array<{ id: string; label: string; goals: string[]; hard: boolean; description: string }>;
   tasks: Array<{ id: string; title: string; line: string; project: string; state: string; dueDate: string; notBefore: string; usualMinutes: number;
     nextBlock: string; steps: Array<{ id: string; title: string; status: string; minutes: number; executor: string }> }>;
   proposals: Array<{ id: string; title: string; line: string }>;

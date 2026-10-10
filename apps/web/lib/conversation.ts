@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { formatInTimeZone } from "date-fns-tz";
 import { listAgentTasks, type StoredConversationMessage } from "@crossline/db";
 import {
-  ACTIONS, actionProblem, availableSlots, conciergeRefs, needsReview, taskTitleOf,
+  ACTIONS, LINE_PROFILES_SETTING, actionProblem, availableSlots, conciergeRefs, needsReview, taskTitleOf, type StoredLineProfile,
   type AccessContext, type ClarifyOption, type ConciergePack, type ConciergeTurn, type ProposedAction
 } from "@crossline/core";
 import { effectiveSchedulePreferences, effectiveWeight, getStore, loadCurrentPlan, loadGoalForecast, planToday, readAvailability } from "./crossline";
@@ -85,10 +85,11 @@ export async function contextPack(ctx: AccessContext, page: PageContext, now = n
   const forecast = (() => { try { return loadGoalForecast(ctx).goals; } catch { return []; } })();
   const titles = new Map(milestones.map((item) => [item.id, item.title]));
   const pageOrder = page.kind === "task" ? orders.find((order) => order.id === page.entityId) : undefined;
-  const pageTitle = pageOrder ? taskTitleOf(pageOrder) : page.kind === "milestone" ? titles.get(page.entityId) ?? "" : page.entityId;
+  const pageTitle = pageOrder ? taskTitleOf(pageOrder) : page.kind === "milestone" ? titles.get(page.entityId) ?? "" : page.kind === "line" ? labels[page.entityId] ?? "" : page.entityId;
+  const profiles = (() => { try { return JSON.parse(store.getSetting(ctx.workspaceId, LINE_PROFILES_SETTING) ?? "{}") as Record<string, StoredLineProfile>; } catch { return {}; } })();
   return {
     now: now.toISOString(), today, timeZone, page: { ...page, title: pageTitle },
-    lines: identityLines(ctx).map((line) => ({ id: line.id, label: line.label, goals: line.goals ?? [], hard: Boolean(line.hard) })),
+    lines: identityLines(ctx).map((line) => ({ id: line.id, label: line.label, goals: line.goals ?? [], hard: Boolean(line.hard), description: profiles[line.id]?.description ?? "" })),
     tasks: orders.filter((order) => OPEN.includes(order.state)).map((order) => {
       const payload = (order.payload ?? {}) as { dueDate?: string; notBefore?: string };
       return { id: order.id, title: taskTitleOf(order), line: label(order.identityId), project: projects.get(order.projectId) ?? "", state: order.state,
@@ -144,6 +145,7 @@ export function conciergeSnapshot(pack: ConciergePack, now = new Date(), options
     `主线（id | 名称）：${pack.lines.map((line) => `${line.id} | ${line.label}${line.hard ? "（硬约束）" : ""}`).join("；") || "无"}`,
     `项目（id | 名称 | 主线）：${pack.projects.map((project) => `${project.id} | ${project.name} | ${project.line}`).join("；") || "无"}`,
     ...pageTask(pack),
+    ...pageLine(pack),
     ...(pack.preferences.length ? ["本人的偏好与此前的更正（照此理解）：", ...pack.preferences.map((line) => `- ${line}`)] : []),
     ...lists
   ].join("\n");
@@ -153,6 +155,19 @@ export function conciergeSnapshot(pack: ConciergePack, now = new Date(), options
  * On a task's page, 「这一步」「做完了」 mean that task: its steps by id, the current one (the first not done) marked, so the turn can name
  * the step without a lookup.
  */
+/**
+ * On a line's card or interview (`kind: "line"`), 「这条线」「目标改成…」「我在这上面…」 mean that line: its id, long-term goal and the
+ * interview's reading of it, and that what the person says about it belongs to that line's own interview.
+ */
+export function pageLine(pack: ConciergePack): string[] {
+  if (pack.page.kind !== "line") return [];
+  const line = pack.lines.find((item) => item.id === pack.page.entityId);
+  if (!line) return [];
+  return [`本页主线：${line.id} | ${line.label}${line.hard ? "（硬约束）" : ""} | 长期目标：${line.goals[0] || "未设"}`,
+    ...(line.description ? [`访谈对该主线的描述：${line.description.slice(0, 300)}`] : []),
+    `关于这条主线的情况交给访谈时 profile.tell 的 lineId 填 ${line.id}；修改长期目标同样交给该主线的访谈（由本人在卡片上确认）。`];
+}
+
 function pageTask(pack: ConciergePack): string[] {
   if (pack.page.kind !== "task") return [];
   const task = pack.tasks.find((item) => item.id === pack.page.entityId);

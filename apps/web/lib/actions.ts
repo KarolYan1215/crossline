@@ -77,12 +77,16 @@ export const ACTION_HANDLERS: { [K in ActionId]: Handler<K> } = {
     return result.ok ? { ok: true, message: "这条主线的访谈可以开始了", href: `/onboarding?line=${encodeURIComponent(result.id)}` } : result;
   },
   "profile.tell": (ctx, args) => {
-    const session = getStore().getLatestOnboardingSession(ctx.workspaceId);
+    // About one line (said on its card or page): that line's own interview, the same session its card and /onboarding?line= use.
+    const line = args.lineId ? identityLines(ctx).find((pack) => pack.id === args.lineId) : undefined;
+    if (args.lineId && !line) return { ok: false, code: "LINE_NOT_FOUND" };
+    const session = line ? { id: `line-${line.id}` } : getStore().getLatestOnboardingSession(ctx.workspaceId);
     if (!session) return { ok: false, code: "INTERVIEW_NOT_STARTED", message: "还没有访谈，先在画像页开始访谈" };
     // The interview takes it as the person's reply, with its own instructions and everything it knows of them.
     void requestCodexSupervisor(ctx, "/v1/onboarding/turn", { method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ sessionId: session.id, text: args.text }), signal: AbortSignal.timeout(3 * 60 * 60_000) }).catch(() => undefined);
-    return { ok: true, message: "已交给访谈，画像随后更新", href: "/onboarding" };
+    return line ? { ok: true, message: `已交给「${line.label}」的访谈，主线卡片随后更新`, href: `/milestones?line=${encodeURIComponent(line.id)}` }
+      : { ok: true, message: "已交给访谈，画像随后更新", href: "/onboarding" };
   },
   "proposal.decide": (ctx, args) => args.decision === "approve"
     ? approveWorkOrderProposal(ctx, args.workOrderId)

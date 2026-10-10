@@ -216,3 +216,35 @@ test("with the completion list on, a 「ready」 before the portrait is written 
   expect(last.reply).toContain("完成访谈前还缺：画像各部分已写出");
   expect(last.questions.length).toBeGreaterThan(0);
 });
+
+const attributes = ["神经形态计算", "器件物理", "能独立立项", "能写基金申请", "持续产出", "被同行认可"]
+  .map((text, index) => ({ text, kind: index < 2 ? "domain" : index < 4 ? "ability" : "state", sourceRef: "reply-1" }));
+
+test("a line card's turn is that line's own interview: attributes refresh by line, and a goal change waits for the person", async () => {
+  store.setSetting(workspaceId, "lines.profiles", JSON.stringify({ research: { description: "旧描述",
+    attributes: [{ text: "类脑芯片方向能带队", kind: "domain", sourceRef: "goal" }, { text: "旧候选", kind: "domain", sourceRef: "reply-0" }] },
+    media: { description: "自媒体描述", goalCandidates: ["成为有影响力的科普创作者"] } }));
+  const answer = turn({ questions: [], nextAction: "ready_for_milestones",
+    lineProfiles: [{ lineId: "research", description: "以器件物理为底的神经形态计算研究", attributeCandidates: attributes }],
+    goalEdits: [{ lineId: "research", parts: [{ text: "器件物理", kind: "domain" }, { text: "能独立立项", kind: "ability" }], sourceRef: "reply-1" }] });
+  const { rpc, prompts } = fakeRuntime([answer]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc);
+  expect(await run({ sessionId: "line-research", text: "把目标改成器件物理方向能独立立项的研究者" })).toEqual({ state: "ready", sessionId: "line-research" });
+  expect(prompts()[0]).toContain("\"focusLine\":{\"id\":\"research\"");
+  const profiles = JSON.parse(store.getSetting(workspaceId, "lines.profiles")!) as Record<string, { description: string; attributes?: Array<{ text: string; sourceRef: string }>; goalCandidates?: string[] }>;
+  // The new candidates replace the old ones, but what was split from the adopted goal stays; the other line is untouched.
+  expect(profiles.research!.description).toBe("以器件物理为底的神经形态计算研究");
+  expect(profiles.research!.attributes!.map((item) => item.text)).toEqual([...attributes.map((item) => item.text), "类脑芯片方向能带队"]);
+  expect(profiles.media).toEqual({ description: "自媒体描述", goalCandidates: ["成为有影响力的科普创作者"] });
+  // Not applied: recorded for the card to show, in the person's order.
+  expect(JSON.parse(store.getSetting(workspaceId, "lines.goalEdits")!)).toMatchObject({ research: { parts: ["器件物理", "能独立立项"], sourceRef: "reply-1" } });
+  expect(store.getSetting(workspaceId, "lines.v1")).toBeUndefined();
+});
+
+test("a turn that leaves a line's candidates empty keeps those on record and only refines its description", async () => {
+  store.setSetting(workspaceId, "lines.profiles", JSON.stringify({ research: { description: "旧描述", attributes } }));
+  const { rpc } = fakeRuntime([turn({ questions: [], nextAction: "ready_for_milestones", lineProfiles: [{ lineId: "research", description: "新描述", attributeCandidates: [] }] })]);
+  await createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc)({ sessionId: "line-research", text: "补充一点" });
+  const profiles = JSON.parse(store.getSetting(workspaceId, "lines.profiles")!) as Record<string, { description: string; attributes: unknown[] }>;
+  expect(profiles.research).toMatchObject({ description: "新描述", attributes });
+});

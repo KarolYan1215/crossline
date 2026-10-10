@@ -23,7 +23,7 @@ export type ChecklistItem = {
 
 export type ChecklistInput = {
   lines: Array<{ id: string; label: string; hard: boolean; goals: string[] }>;
-  /** The interview's description of each line (`lines.profiles`), and how many goal candidates it proposed. */
+  /** The interview's description of each line (`lines.profiles`), and how many attribute candidates (or, before those, whole goal candidates) it proposed. */
   descriptions: Record<string, { description: string; candidates: number }>;
   profile: Partial<ProfileModel>;
   facts: Array<{ identityId: string; projectId: string; slot: string; status: string; sourceRef: string; value?: string }>;
@@ -78,7 +78,7 @@ export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
     const described = input.descriptions[line.id];
     items.push({ id: `line_desc:${line.id}`, group: "主线", label: `「${line.label}」有个性化描述与长期目标候选`,
       done: Boolean(described?.description.trim()) && (described?.candidates ?? 0) > 0,
-      detail: !described?.description.trim() ? "尚无描述" : (described.candidates ?? 0) === 0 ? "尚无长期目标候选" : "", owner: "interview" });
+      detail: !described?.description.trim() ? "尚无描述" : (described.candidates ?? 0) === 0 ? "尚无长期目标的定语候选" : "", owner: "interview" });
     items.push({ id: `line_goal:${line.id}`, group: "主线", label: `「${line.label}」已选定至少一个长期目标`, done: line.goals.length > 0,
       detail: line.goals.length ? "" : "从候选中采用或自己写一个", owner: "person" });
   }

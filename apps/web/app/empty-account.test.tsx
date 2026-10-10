@@ -7,6 +7,8 @@ const TEST_CTX = { principalId: "owner-1", workspaceId: "workspace-1", role: "ow
   identity: { provider: "credential" as const, issuer: "test", subject: "owner-1" },
   authMethod: "session" as const, requestId: "test-request" };
 vi.mock("../lib/access-guard", () => ({ requireSessionContext: async () => TEST_CTX }));
+// Rendered outside the app router: a line card refreshes itself in place with `router.refresh()` after its interview turn.
+vi.mock("next/navigation", async (original) => ({ ...await original<typeof import("next/navigation")>(), useRouter: () => ({ refresh: () => {} }) }));
 
 /**
  * A real account starts with no example goals or work on its board. Every page that used to lean on the

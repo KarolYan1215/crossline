@@ -104,9 +104,58 @@ test("duplicate question or option ids are refused", () => {
 
 test("when repairs run out, a turn keeps everything but the facts and questions that are malformed", () => {
   const kept = keepOnboardingTurn(turn({ slotUpdates: [update({}), update({ slot: "指南针" }), update({ slot: "fake", sourceQuote: "从未说过" })],
-    lineProfiles: [{ lineId: "research", description: "研究描述", goalCandidates: ["成为能独立带项目的研究者"] }, { lineId: "ghost", description: "", goalCandidates: [] }] }), known);
+    lineProfiles: [{ lineId: "research", description: "研究描述", attributeCandidates: [] }, { lineId: "ghost", description: "", attributeCandidates: [] }] }), known);
   expect(kept?.slotUpdates.map((fact) => fact.slot)).toEqual(["deadline"]);
   expect(kept?.lineProfiles?.map((line) => line.lineId)).toEqual(["research"]);
   // A turn that is wrong as a whole — an unfinished interview with no usable question — stays refused.
   expect(keepOnboardingTurn(turn({ questions: [{ ...turn().questions[0]!, identityId: "ghost" }] }), known)).toBeUndefined();
+});
+
+const attribute = (text: string, kind: "domain" | "ability" | "state" = "domain", sourceRef = "reply-1") => ({ text, kind, sourceRef });
+const SIX = [attribute("神经形态计算"), attribute("器件物理"), attribute("能独立立项", "ability"), attribute("能写基金申请", "ability"),
+  attribute("持续产出", "state"), attribute("被同行认可", "state")];
+
+test("a line's attribute candidates are 6–12 independent, cited attributes, or none at all", () => {
+  const ok = validateOnboardingTurn(turn({ lineProfiles: [{ lineId: "research", description: "研究描述", attributeCandidates: SIX }] }), known);
+  expect(ok.lineProfiles?.[0]?.attributeCandidates.map((item) => item.text)).toEqual(SIX.map((item) => item.text));
+  // An empty list keeps the candidates on record (a line still thin, or a turn that only refines the description).
+  expect(validateOnboardingTurn(turn({ lineProfiles: [{ lineId: "research", description: "", attributeCandidates: [] }] }), known).lineProfiles).toHaveLength(1);
+  expectRejected(turn({ lineProfiles: [{ lineId: "research", description: "", attributeCandidates: SIX.slice(0, 3) }] }), "ONBOARDING_ATTRIBUTES_COUNT");
+  expectRejected(turn({ lineProfiles: [{ lineId: "research", description: "", attributeCandidates: [...SIX, attribute("x", "domain", "reply-9")] }] }), "ONBOARDING_UNKNOWN_SOURCE_REF");
+  expectRejected(turn({ lineProfiles: [{ lineId: "research", description: "", attributeCandidates: [...SIX, attribute("严谨、高产", "state")] }] }), "ONBOARDING_ATTRIBUTE_NOT_ATOMIC");
+});
+
+test("two attributes that say the same thing are refused, naming both: after removing 的 and punctuation one contains the other", () => {
+  try {
+    validateOnboardingTurn(turn({ lineProfiles: [{ lineId: "research", description: "", attributeCandidates: [...SIX, attribute("神经形态计算的")] }] }), known);
+    throw new Error("expected a refusal");
+  } catch (error) {
+    expect((error as Error).message).toBe("ONBOARDING_ATTRIBUTE_DUPLICATE");
+    expect((error as Error & { detail?: string }).detail).toContain("神经形态计算");
+  }
+  expectRejected(turn({ lineProfiles: [{ lineId: "research", description: "", attributeCandidates: [...SIX, attribute("类脑神经形态计算")] }] }), "ONBOARDING_ATTRIBUTE_DUPLICATE");
+});
+
+test("attributes come back cleaned, with their kind: no leading 成为, no trailing 的", () => {
+  const ok = validateOnboardingTurn(turn({ lineProfiles: [{ lineId: "research", description: "", attributeCandidates: [{ ...SIX[0]!, text: "成为神经形态计算的" }, ...SIX.slice(1)] }] }), known);
+  expect(ok.lineProfiles?.[0]?.attributeCandidates[0]).toEqual({ text: "神经形态计算", kind: "domain", sourceRef: "reply-1" });
+});
+
+test("a goal edit must cite the reply that asked for it, and is never a free-standing idea of the interview's", () => {
+  const edit = { lineId: "research", parts: [{ text: "器件物理", kind: "domain" as const }, { text: "能独立立项", kind: "ability" as const }], sourceRef: "reply-1" };
+  expect(validateOnboardingTurn(turn({ goalEdits: [edit] }), known).goalEdits?.[0]?.parts.map((part) => part.text)).toEqual(["器件物理", "能独立立项"]);
+  expectRejected(turn({ goalEdits: [{ ...edit, sourceRef: "src-1" }] }), "ONBOARDING_GOAL_EDIT_UNASKED");
+  expectRejected(turn({ goalEdits: [{ ...edit, sourceRef: "inference" }] }), "ONBOARDING_GOAL_EDIT_UNASKED");
+  expectRejected(turn({ goalEdits: [{ ...edit, lineId: "ghost" }] }), "ONBOARDING_IDENTITY_UNKNOWN");
+  expectRejected(turn({ goalEdits: [{ ...edit, parts: [{ text: "器件", kind: "domain" }, { text: "器件物理", kind: "domain" }] }] }), "ONBOARDING_ATTRIBUTE_DUPLICATE");
+});
+
+test("when repairs run out, bad attributes are dropped one by one, and fewer than six left keeps the ones on record", () => {
+  const kept = keepOnboardingTurn(turn({ lineProfiles: [{ lineId: "research", description: "d",
+    attributeCandidates: [...SIX, attribute("神经形态计算的"), attribute("编造", "domain", "reply-7")] }],
+    goalEdits: [{ lineId: "research", parts: [{ text: "器件物理", kind: "domain" }], sourceRef: "inference" }] }), known);
+  expect(kept?.lineProfiles?.[0]?.attributeCandidates.map((item) => item.text)).toEqual(SIX.map((item) => item.text));
+  expect(kept?.goalEdits).toEqual([]);
+  const thin = keepOnboardingTurn(turn({ lineProfiles: [{ lineId: "research", description: "d", attributeCandidates: [...SIX.slice(0, 5), attribute("x", "domain", "reply-9")] }] }), known);
+  expect(thin?.lineProfiles?.[0]?.attributeCandidates).toEqual([]);
 });

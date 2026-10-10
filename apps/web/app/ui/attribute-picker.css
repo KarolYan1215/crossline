@@ -1,0 +1,22 @@
+/* The attribute picker (§4.1): chosen attributes in order, candidates as chips, a live preview. */
+.attr-picker{display:grid;gap:8px;min-width:0}
+.attr-preview{display:grid;gap:2px;margin:0;font-size:14px;line-height:1.5}
+.attr-preview small{font-size:12px}
+.attr-selected{display:flex;flex-wrap:wrap;gap:6px;margin:0;padding:0;list-style:none;min-width:0}
+.attr-selected li{display:flex;align-items:center;gap:2px;max-width:100%;padding:2px 4px;border:1px solid var(--lc,var(--ink));background:var(--paper);cursor:grab}
+.attr-selected li input{font:inherit;font-size:14px;min-width:0;width:12em;padding:2px 4px;border:1px solid var(--mist);background:var(--paper);color:var(--ink)}
+.attr-text{all:unset;cursor:text;font-size:14px;color:var(--ink);overflow-wrap:anywhere}
+.attr-text:focus-visible{outline:2px solid var(--ink)}
+.attr-moves{display:inline-flex;gap:0}
+.attr-moves button{min-width:24px;min-height:24px;padding:0 4px;font:inherit;font-size:13px;background:transparent;color:var(--ink);border:0;cursor:pointer}
+.attr-moves button:disabled{color:var(--graphite);opacity:.6;cursor:default}
+.attr-pool{display:flex;flex-wrap:wrap;gap:6px}
+.attr-chip{display:inline-flex;align-items:baseline;gap:4px;max-width:100%;padding:4px 8px;font:inherit;font-size:13px;text-align:left;
+  background:var(--paper);color:var(--ink);border:1px dashed var(--lc,var(--graphite));cursor:pointer}
+.attr-chip small{font-size:12px;color:var(--graphite)}
+.attr-chip[aria-pressed="true"]{border-style:solid;background:var(--chalk);font-weight:700}
+.attr-chip:hover{background:var(--chalk)}
+.attr-add{display:flex;gap:6px;flex-wrap:wrap}
+.attr-add input{flex:1 1 140px;min-width:0;font:inherit;padding:4px 6px;border:1px solid var(--mist);background:var(--paper);color:var(--ink)}
+.attr-warning{margin:0;font-size:13px;color:var(--ink);font-weight:700}
+.attr-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}

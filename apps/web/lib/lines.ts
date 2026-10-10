@@ -1,5 +1,5 @@
 import "server-only";
-import type { AccessContext } from "@crossline/core";
+import { checkGoalParts, composeGoal, type AccessContext } from "@crossline/core";
 import { LINE_PALETTE, LINE_SETTING, MAX_HARD_LINES, defaultIdentityPacks, freeLineColor, identityPacksFor, newLineId, readLineSpecs, type IdentityPack, type LineSpec } from "@crossline/identity-packs";
 import { getStore } from "./crossline";
 
@@ -43,16 +43,36 @@ export function addLine(ctx: AccessContext, input: { label: string; goal: string
   return { ok: true, id };
 }
 
-/** Renames a line, sets its goal or colour, or archives it (its work stays, filed under it). */
-export function updateLine(ctx: AccessContext, id: string, change: { label?: string; goal?: string; goals?: string[]; color?: string; archived?: boolean; hard?: boolean; rank?: number | null }): { ok: true } | { ok: false; code: string } {
+/**
+ * Renames a line, sets its goal or colour, or archives it (its work stays, filed under it). `goalParts` adopts a goal built from
+ * attributes (§4.1): the parts are kept in the order given and `goals[0]` becomes the sentence composed from them; a goal changed as a
+ * whole sentence drops parts that no longer compose it (the split pass splits it again).
+ */
+export function updateLine(ctx: AccessContext, id: string, change: { label?: string; goal?: string; goals?: string[]; goalParts?: string[]; color?: string; archived?: boolean; hard?: boolean; rank?: number | null }): { ok: true } | { ok: false; code: string; message?: string } {
   const specs = currentSpecs(ctx);
   const line = specs.find((item) => item.id === id);
   if (!line) return { ok: false, code: "LINE_NOT_FOUND" };
   if (change.hard && !line.hard && specs.filter((item) => item.hard && !item.archived).length >= MAX_HARD_LINES) return { ok: false, code: "LINE_HARD_LIMIT" };
-  const goals = change.goals !== undefined ? cleanGoals(change.goals) : change.goal !== undefined ? cleanGoals([change.goal, ...(line.goals ?? []).slice(1)]) : undefined;
-  const next: LineSpec = { ...line,
-    ...(change.label !== undefined && change.label.trim() ? { label: change.label.trim().slice(0, 20) } : {}),
+  const label = change.label !== undefined && change.label.trim() ? change.label.trim().slice(0, 20) : line.label;
+  const oldGoals = line.goals?.length ? line.goals : line.goal ? [line.goal] : [];
+  let goals = change.goals !== undefined ? cleanGoals(change.goals) : change.goal !== undefined ? cleanGoals([change.goal, ...oldGoals.slice(1)]) : undefined;
+  let goalParts = line.goalParts;
+  if (change.goalParts !== undefined) {
+    const checked = checkGoalParts(change.goalParts);
+    if (!checked.ok) return { ok: false, code: checked.code, message: checked.message };
+    const composed = composeGoal(checked.parts, label);
+    goals = cleanGoals([composed, ...(goals ?? oldGoals).slice(1).filter((goal) => goal !== composed)]);
+    goalParts = checked.parts;
+  } else if (goals && goals[0] !== oldGoals[0]) {
+    goalParts = undefined;
+  } else if (goalParts?.length && label !== line.label && oldGoals[0] === composeGoal(goalParts, line.label)) {
+    // A renamed line's composed goal follows its new name.
+    goals = cleanGoals([composeGoal(goalParts, label), ...oldGoals.slice(1)]);
+  }
+  const { goalParts: _parts, ...rest } = line;
+  const next: LineSpec = { ...rest, label,
     ...(goals ? { goals, goal: goals[0] ?? "" } : {}),
+    ...(goalParts?.length ? { goalParts } : {}),
     ...(change.color && LINE_PALETTE[change.color] ? { color: change.color } : {}),
     ...(change.archived !== undefined ? { archived: change.archived } : {}) };
   if (change.hard === true) next.hard = true;
@@ -63,9 +83,9 @@ export function updateLine(ctx: AccessContext, id: string, change: { label?: str
   return { ok: true };
 }
 
-/** Long-term goals as kept: trimmed, de-duplicated, at most eight of at most 120 characters. */
+/** Long-term goals as kept: trimmed, de-duplicated, at most eight of at most 300 characters (a goal composed of many attributes is long). */
 function cleanGoals(goals: string[]): string[] {
-  return [...new Set(goals.map((goal) => goal.trim().slice(0, 120)).filter(Boolean))].slice(0, 8);
+  return [...new Set(goals.map((goal) => goal.trim().slice(0, 300)).filter(Boolean))].slice(0, 8);
 }
 
 /** Sets the 12–24 month order: the listed lines ranked 1, 2, …; every other line runs in parallel (no rank). */

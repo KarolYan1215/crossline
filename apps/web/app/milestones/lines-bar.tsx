@@ -2,51 +2,64 @@
 
 import { useState } from "react";
 import { Sheet } from "../ui/overlay";
+import { AttributePicker, type AttributeOption } from "../ui/attribute-picker";
+import { LineCardInterview, type LineInterviewView } from "./line-card-interview";
 
-/** `candidates`: the long-term goals the interview proposed for this line and the person has not adopted yet. */
-export type LineCard = { id: string; label: string; color: string; goals: string[]; hard: boolean; rank: number | null; milestones: number; candidates: string[] };
+/**
+ * One line as its card shows it. `attributes`: the interview's candidates for the long-term goal (§4.1); `goalParts`: the ones the goal
+ * was composed from, in order; the rest is the line's own interview inside the card (§4.2).
+ */
+export type LineCard = { id: string; label: string; color: string; goals: string[]; hard: boolean; rank: number | null; milestones: number;
+  attributes: AttributeOption[]; goalParts: string[]; description: string; pendingEdit: { parts: string[] } | null; redraftDue: boolean;
+  interview: LineInterviewView };
 
 const post = async (body: unknown) => {
   const response = await fetch("/api/lines", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).catch(() => null);
-  return { ok: Boolean(response?.ok), body: await response?.json().catch(() => null) as { id?: string; code?: string } | null };
+  return { ok: Boolean(response?.ok), body: await response?.json().catch(() => null) as { id?: string; code?: string; message?: string } | null };
 };
 const FAILURE: Record<string, string> = { LINE_LABEL_REQUIRED: "需要主线名称（身份名词，如「研究者」）", LINE_LABEL_TAKEN: "已有同名主线",
   LINE_HARD_LIMIT: "硬约束最多两条" };
 
 /**
- * One line, or a new one: its name (an identity noun — 研究者, 创作者), its long-term goals (each 「成为 ___ 的 <身份>」; several are
- * normal), whether it is a hard constraint, and its colour.
+ * One line, or a new one: its name (an identity noun — 研究者, 创作者), its long-term goal built from attributes (an existing line), any
+ * further long-term goals, whether it is a hard constraint, and its colour.
  */
 function LineEditor({ line, palette, onDone }: { line?: LineCard; palette: Record<string, string>; onDone: () => void }) {
   const [label, setLabel] = useState(line?.label ?? "");
-  const [goals, setGoals] = useState<string[]>(line?.goals.length ? line.goals : [""]);
+  // For an existing line the first goal is built from attributes; the rows below are any further goals. A new line writes them freely.
+  const [goals, setGoals] = useState<string[]>(line ? line.goals.slice(1) : [""]);
   const [hard, setHard] = useState(line?.hard ?? false);
   const [color, setColor] = useState(line?.color ?? "");
   const [status, setStatus] = useState("");
   const save = async (extra: Record<string, unknown> = {}) => {
     setStatus("保存中…");
-    const result = await post({ ...(line ? { id: line.id } : {}), label, goals: goals.filter((goal) => goal.trim()), hard, ...(color ? { color } : {}), ...extra });
-    if (!result.ok) { setStatus(FAILURE[result.body?.code ?? ""] ?? "未保存，请重试"); return; }
+    const kept = goals.filter((goal) => goal.trim());
+    const result = await post({ ...(line ? { id: line.id } : {}), label, goals: line ? [...line.goals.slice(0, 1), ...kept] : kept, hard, ...(color ? { color } : {}), ...extra });
+    if (!result.ok) { setStatus(FAILURE[result.body?.code ?? ""] ?? result.body?.message ?? "未保存，请重试"); return; }
     // A new line is set up by its own interview: what the person does on it, where they stand, what they want from it.
     if (!line && result.body?.id) { location.href = `/onboarding?line=${encodeURIComponent(result.body.id)}`; return; }
     onDone(); location.reload();
   };
+  const adopt = async (parts: string[]) => {
+    const result = await post({ id: line!.id, goalParts: parts });
+    if (!result.ok) return result.body?.message ?? "未保存，请重试";
+    location.reload();
+    return "";
+  };
   const noun = label.trim() || "身份";
   return <div className="line-editor">
     <label>主线（身份名词） <input value={label} maxLength={20} placeholder="例如：研究者、创作者、工程师" onChange={(event) => setLabel(event.target.value)} /></label>
-    <fieldset className="line-goals"><legend>长期目标（可多个）</legend>
+    {line && <fieldset className="line-attr-section" data-line={line.id}><legend>长期目标：选定语组成，可多选、拖动排序、点击改字</legend>
+      {line.goals[0] && <small className="muted">当前：<span className="gen">{line.goals[0]}</span></small>}
+      <AttributePicker noun={line.label} candidates={line.attributes} initial={line.goalParts} onAdopt={adopt} />
+    </fieldset>}
+    <fieldset className="line-goals"><legend>{line ? "其他长期目标（可选）" : "长期目标（可多个）"}</legend>
       {goals.map((goal, index) => <div key={index} className="line-goal-row">
-        <input value={goal} maxLength={120} placeholder={`成为 ___ 的${noun}`} aria-label={`长期目标 ${index + 1}`}
+        <input value={goal} maxLength={120} placeholder={`成为 ___ 的${noun}`} aria-label={`长期目标 ${index + (line ? 2 : 1)}`}
           onChange={(event) => setGoals((list) => list.map((item, i) => i === index ? event.target.value : item))} />
-        {goals.length > 1 && <button type="button" aria-label="删除该目标" onClick={() => setGoals((list) => list.filter((_, i) => i !== index))}>×</button>}
+        {(line || goals.length > 1) && <button type="button" aria-label="删除该目标" onClick={() => setGoals((list) => list.filter((_, i) => i !== index))}>×</button>}
       </div>)}
       <button type="button" className="text-button" onClick={() => setGoals((list) => [...list, ""])}>＋ 添加长期目标</button>
-      {/* The interview's proposals for this line, adopted with one click (and edited above like any other). */}
-      {line && line.candidates.filter((candidate) => !goals.includes(candidate)).length > 0 && <div className="line-goal-candidates">
-        <small className="muted">访谈提出的候选：</small>
-        {line.candidates.filter((candidate) => !goals.includes(candidate)).map((candidate) => <button key={candidate} type="button" className="line-goal-candidate"
-          onClick={() => setGoals((list) => [...list.filter((item) => item.trim()), candidate])}>＋ {candidate}</button>)}
-      </div>}
     </fieldset>
     <label className="line-hard"><input type="checkbox" checked={hard} onChange={(event) => setHard(event.target.checked)} />
       硬约束：其固定日程是不可移动的骨架、截止日优先，可用时段由它推出（最多两条）</label>
@@ -65,8 +78,9 @@ function LineEditor({ line, palette, onDone }: { line?: LineCard; palette: Recor
 }
 
 /**
- * The lines above the timeline, in the person's 12–24 month order: ranked lines first (dragged into order; the first is the base), the
- * others in parallel. Each shows its long-term goals, whether it is a hard constraint, and its milestones. A click edits it.
+ * The lines above the timeline, in the person's 12–24 month order: ranked lines first (dragged into order by their header; the first is
+ * the base), the others in parallel. Each card shows its long-term goal, whether it is a hard constraint, its milestones, and the line's
+ * own interview. A click on the name or the goal edits it.
  */
 export function LinesBar({ lines, palette }: { lines: LineCard[]; palette: Record<string, string> }) {
   const [editing, setEditing] = useState<LineCard | "new" | null>(null);
@@ -81,23 +95,26 @@ export function LinesBar({ lines, palette }: { lines: LineCard[]; palette: Recor
     void order([...rest.slice(0, at < 0 ? rest.length : at), dragging, ...rest.slice(at < 0 ? rest.length : at)]);
     setDragging(null);
   };
-  const card = (line: LineCard, index?: number) => <article key={line.id} className="lines-bar-card" data-line={line.id} draggable
-    onDragStart={() => setDragging(line.id)} onDragOver={(event) => event.preventDefault()} onDrop={() => dropOn(line.rank ? line.id : null)}>
-    <header>
+  const goalLink = (line: LineCard) => line.goalParts.length ? "调整定语 →"
+    : line.attributes.length ? `${line.attributes.length} 个定语候选待选 →` : line.goals.length ? "调整长期目标 →" : "设定长期目标 →";
+  const card = (line: LineCard, index?: number) => <article key={line.id} className="lines-bar-card" data-line={line.id}
+    onDragOver={(event) => event.preventDefault()} onDrop={() => dropOn(line.rank ? line.id : null)}>
+    <header draggable onDragStart={() => setDragging(line.id)}>
       <button type="button" className="lines-bar-name" onClick={() => setEditing(line)}>{line.label}</button>
       {line.hard && <span className="tag">硬约束</span>}
       <small className="mono">{index !== undefined ? (index === 0 ? "底座" : `第 ${index + 1}`) : "平行"}</small>
     </header>
-    {line.goals.length ? <ul>{line.goals.map((goal) => <li key={goal}>{goal}</li>)}</ul>
-      : line.candidates.length ? <button type="button" className="text-button lines-bar-candidates" onClick={() => setEditing(line)}>{line.candidates.length} 个候选长期目标待选 →</button>
-        : <span className="muted">未设长期目标</span>}
+    {line.goals.length ? <ul>{line.goals.map((goal) => <li key={goal}>{goal}</li>)}</ul> : <span className="muted">未设长期目标</span>}
+    <button type="button" className="text-button lines-bar-goal-button" onClick={() => setEditing(line)}>{goalLink(line)}</button>
+    <LineCardInterview lineId={line.id} label={line.label} description={line.description} interview={line.interview}
+      pendingEdit={line.pendingEdit} redraftDue={line.redraftDue} />
     <footer><small className="mono">{line.milestones} 个里程碑</small>
       {line.rank ? <button type="button" className="text-button" onClick={() => void order(ranked.filter((item) => item.id !== line.id).map((item) => item.id))}>改为平行</button>
         : <button type="button" className="text-button" onClick={() => void order([...ranked.map((item) => item.id), line.id])}>加入主次</button>}</footer>
   </article>;
   return <section className="lines-bar" aria-label="主线、主次与长期目标">
     {ranked.length > 0 && <div className="lines-bar-group" onDragOver={(event) => event.preventDefault()} onDrop={() => dropOn(null)}>
-      <h3>未来 12–24 个月主次 <small className="muted">拖动排序</small></h3>
+      <h3>未来 12–24 个月主次 <small className="muted">拖动卡片标题排序</small></h3>
       <div className="lines-bar-row">{ranked.map((line, index) => card(line, index))}</div>
     </div>}
     <div className="lines-bar-group">

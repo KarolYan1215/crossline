@@ -51,10 +51,6 @@
 .ob-line p{margin:0;font-size:13px;line-height:1.5}
 .ob-goals{margin:0;padding-left:16px;font-size:13px}
 .ob-goals button{margin-left:6px;font-size:12px;color:var(--graphite);background:none;border:0;cursor:pointer}
-.ob-candidates{display:grid;gap:4px}
-.ob-candidates button{justify-self:start;text-align:left;font-size:13px;background:var(--paper);border:1px dashed var(--lc,var(--ink));padding:2px 8px;cursor:pointer}
-.ob-goal-add{display:flex;gap:6px}
-.ob-goal-add input{flex:1;min-width:0}
 .ob-guide{margin:0;display:grid;gap:8px;padding:10px 12px;border:1px solid var(--mist);background:var(--paper)}
 .ob-guide figcaption{display:grid;gap:2px}
 .ob-guide ol{margin:0;padding:0;list-style:none;display:grid;gap:4px}
