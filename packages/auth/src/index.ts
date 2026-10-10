@@ -5,6 +5,7 @@ import Database from "better-sqlite3";
 import { betterAuth, type Auth, type BetterAuthOptions } from "better-auth";
 import { nextCookies } from "better-auth/next-js";
 import { emailOTP } from "better-auth/plugins/email-otp";
+import { chatgptSignIn } from "./chatgpt";
 import { getMigrations } from "better-auth/db/migration";
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import nodemailer from "nodemailer";
@@ -27,6 +28,11 @@ export type CrosslineAuthOptions = {
    * verify → sign-in flow without a real mailbox. Never set outside the e2e build.
    */
   testMailboxDir?: string;
+  /**
+   * Sign in with ChatGPT for a copy run on the person's own machine (`chatgpt.ts`): the file that keeps this install's host id and the
+   * client id OpenAI issued on first sign-in. Absent, the flow does not exist.
+   */
+  chatgpt?: { installFile: string; fetch?: typeof fetch };
 };
 
 export type CrosslineAuth = Auth;
@@ -139,7 +145,7 @@ function crosslineAuthConfig(options: CrosslineAuthOptions): BetterAuthOptions {
     // A six-digit code by email signs in without a password and creates the account on first use: one step fewer than sign-up →
     // verification link → sign-in, and only offered where mail can actually be delivered. `nextCookies` stays last, as Better Auth asks.
     plugins: [...(emailCapable ? [emailOTP({ sendVerificationOTP: async ({ email, otp }) => { await deliver(email, "Crossline 登录验证码", `验证码：${otp}（10 分钟内有效）`); },
-      expiresIn: 600 })] : []), nextCookies()]
+      expiresIn: 600 })] : []), ...(options.chatgpt ? [chatgptSignIn(options.chatgpt)] : []), nextCookies()]
   };
 }
 

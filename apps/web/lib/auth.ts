@@ -31,6 +31,11 @@ export function isGoogleAuthConfigured(): boolean {
   return Boolean(googleFromEnv());
 }
 
+/** Sign in with ChatGPT is opted into on this install (`CROSSLINE_CHATGPT_SIGNIN=1`, for a copy run on the person's own machine). */
+export function isChatgptSignInConfigured(): boolean {
+  return process.env.CROSSLINE_CHATGPT_SIGNIN === "1";
+}
+
 /** Mail can be sent (SMTP, or the e2e mailbox): only then do email sign-up, the email code and password reset exist at all. */
 export function isEmailAuthConfigured(): boolean {
   return Boolean(smtpFromEnv() || process.env.CROSSLINE_AUTH_TEST_MAILBOX_DIR?.trim());
@@ -74,6 +79,8 @@ export function resolveCrosslineAuthOptions(): CrosslineAuthOptions | undefined 
     // an undefined value, which is also the distinction `createCrosslineAuth` uses to decide whether
     // email/password sign-up exists as a capability at all.
     ...(smtp ? { smtp } : {}), ...(google ? { google } : {}),
+    // The install's ChatGPT registration (host id, issued client id) lives beside the data, never in the ledger or an export.
+    ...(isChatgptSignInConfigured() ? { chatgpt: { installFile: path.join(dataDir, "chatgpt-signin.json") } } : {}),
     // Set only by the e2e build (`playwright.config.ts`) — never present in a real deployment, so this
     // never competes with `smtp` there.
     ...(testMailboxDir ? { testMailboxDir } : {})

@@ -1,11 +1,16 @@
 import { LoginForm } from "./login-form";
-import { isEmailAuthConfigured, isGoogleAuthConfigured } from "../../lib/auth";
+import { headers } from "next/headers";
+import { isChatgptSignInConfigured, isEmailAuthConfigured, isGoogleAuthConfigured } from "../../lib/auth";
 
-export default async function LoginPage({ searchParams }: { searchParams: Promise<{ verified?: string }> }) {
-  const { verified } = await searchParams;
+export default async function LoginPage({ searchParams }: { searchParams: Promise<{ verified?: string; error?: string }> }) {
+  const { verified, error } = await searchParams;
+  // OpenAI's open-source flow calls back only to 127.0.0.1, and the state cookie must be set on that same host: offered only there.
+  const host = (await headers()).get("host") ?? "";
+  const chatgpt = isChatgptSignInConfigured() && /^127\.0\.0\.1(:\d+)?$/.test(host);
   return <main className="offline-page"><div>
     <span className="brand-mark">C</span>
     <h1>登录 Crossline</h1>
-    <LoginForm googleEnabled={isGoogleAuthConfigured()} emailEnabled={isEmailAuthConfigured()} verified={verified === "1"} />
+    <LoginForm googleEnabled={isGoogleAuthConfigured()} emailEnabled={isEmailAuthConfigured()} chatgptEnabled={chatgpt} verified={verified === "1"}
+      {...(error ? { errorCode: error.slice(0, 60) } : {})} />
   </div></main>;
 }

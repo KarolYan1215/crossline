@@ -4,9 +4,12 @@ import { useState, type FormEvent } from "react";
 import { authClient, emailCode } from "../auth-client";
 import { authErrorMessage } from "../auth-errors";
 
-export function LoginForm({ googleEnabled, emailEnabled = true, verified = false }: { googleEnabled: boolean; emailEnabled?: boolean; verified?: boolean }) {
-  const [status, setStatus] = useState(verified ? "邮箱已验证，请登录。" : "");
-  const [error, setError] = useState(false);
+export function LoginForm({ googleEnabled, emailEnabled = true, chatgptEnabled = false, verified = false, errorCode }: { googleEnabled: boolean;
+  emailEnabled?: boolean; chatgptEnabled?: boolean; verified?: boolean;
+  /** A redirect back from a sign-in that failed elsewhere (ChatGPT, Google), as `/login?error=CODE`. */
+  errorCode?: string }) {
+  const [status, setStatus] = useState(errorCode ? authErrorMessage({ code: errorCode }, "登录没有完成，请重试。") : verified ? "邮箱已验证，请登录。" : "");
+  const [error, setError] = useState(Boolean(errorCode));
   const [busy, setBusy] = useState(false);
   // 「邮箱验证码」 signs in (and on first use, signs up) without a password; offered only where mail can be sent.
   const [mode, setMode] = useState<"password" | "code">("password");
@@ -84,6 +87,7 @@ export function LoginForm({ googleEnabled, emailEnabled = true, verified = false
     {/* Hidden rather than shown-but-broken when no Google client id/secret is configured — a button
         that always fails with no useful reason is worse than one that is not there at all. */}
     {googleEnabled && <button className="secondary-button" type="button" disabled={busy} onClick={() => void signInWithGoogle()}>用 Google 账号登录</button>}
+    {chatgptEnabled && <a className="secondary-button" href="/api/auth/chatgpt/start">用 ChatGPT 账号登录</a>}
     {status && <small role={error ? "alert" : "status"}>{status}</small>}
     {unverified && emailEnabled && <button type="button" disabled={busy} onClick={() => void resend()}>重发验证邮件</button>}
     <p>{emailEnabled && <><a href="/signup">还没有账号？注册</a> · <a href="/reset-password">忘记密码</a></>}</p>

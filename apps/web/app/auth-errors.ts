@@ -21,7 +21,15 @@ const AUTH_ERROR_TEXT: Record<string, string> = {
   VERIFICATION_EMAIL_FAILED: "邮件没有发出去：这台服务器的发信服务拒绝了这个地址或暂时连不上。账号已保留，稍后在登录页点「重发验证邮件」，或改用其他登录方式。",
   INVALID_OTP: "验证码不正确。",
   OTP_EXPIRED: "验证码已过期，请重新获取。",
-  TOO_MANY_ATTEMPTS: "尝试次数过多，请重新获取验证码。"
+  TOO_MANY_ATTEMPTS: "尝试次数过多，请重新获取验证码。",
+  CHATGPT_SIGNIN_LOCAL_ONLY: "ChatGPT 登录只能在本机用 127.0.0.1 打开时使用。",
+  CHATGPT_STATE_MISSING: "登录已超时，请重新点「用 ChatGPT 账号登录」。",
+  CHATGPT_STATE_MISMATCH: "登录请求不匹配，请重新点「用 ChatGPT 账号登录」。",
+  CHATGPT_REGISTRATION_INCOMPLETE: "OpenAI 没有完成这台电脑的注册，请重试。",
+  CHATGPT_CLIENT_INVALID: "这台电脑在 OpenAI 的注册已失效，请重试；仍不行时删除数据目录里的 chatgpt-signin.json 后重试。",
+  CHATGPT_TOKEN_FAILED: "OpenAI 没有完成登录，请重试。",
+  CHATGPT_EMAIL_MISSING: "这个 ChatGPT 账号没有提供邮箱，无法登录。",
+  account_not_linked: "这个邮箱已经用其他方式注册过；请用原来的方式登录。"
 };
 
 export function authErrorMessage(error: { code?: string | undefined; message?: string | null | undefined } | null | undefined,
