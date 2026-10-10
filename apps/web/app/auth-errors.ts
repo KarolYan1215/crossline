@@ -16,7 +16,12 @@ const AUTH_ERROR_TEXT: Record<string, string> = {
   EXPIRED_TOKEN: "链接已过期，请重新申请。",
   // The page was opened at an address the server does not accept sign-ins from (another host name or port than the configured one).
   INVALID_ORIGIN: "当前网址不在允许登录的地址之内，请改用设置里给出的地址打开。",
-  MISSING_OR_NULL_ORIGIN: "当前网址不在允许登录的地址之内，请改用设置里给出的地址打开。"
+  MISSING_OR_NULL_ORIGIN: "当前网址不在允许登录的地址之内，请改用设置里给出的地址打开。",
+  // The mail server refused or could not be reached; the account (if this was sign-up) exists, only the message did not go out.
+  VERIFICATION_EMAIL_FAILED: "邮件没有发出去：这台服务器的发信服务拒绝了这个地址或暂时连不上。账号已保留，稍后在登录页点「重发验证邮件」，或改用其他登录方式。",
+  INVALID_OTP: "验证码不正确。",
+  OTP_EXPIRED: "验证码已过期，请重新获取。",
+  TOO_MANY_ATTEMPTS: "尝试次数过多，请重新获取验证码。"
 };
 
 export function authErrorMessage(error: { code?: string | undefined; message?: string | null | undefined } | null | undefined,

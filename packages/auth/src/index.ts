@@ -4,7 +4,9 @@ import path from "node:path";
 import Database from "better-sqlite3";
 import { betterAuth, type Auth, type BetterAuthOptions } from "better-auth";
 import { nextCookies } from "better-auth/next-js";
+import { emailOTP } from "better-auth/plugins/email-otp";
 import { getMigrations } from "better-auth/db/migration";
+import { APIError, createAuthMiddleware } from "better-auth/api";
 import nodemailer from "nodemailer";
 import type { AccessContext } from "@crossline/core";
 import { CrosslineStore } from "@crossline/db";
@@ -68,6 +70,20 @@ function crosslineAuthConfig(options: CrosslineAuthOptions): BetterAuthOptions {
     return transport.sendMail({ from: options.smtp.from, to, subject, text: url }).then(() => undefined);
   };
   const emailCapable = Boolean(options.smtp || options.testMailboxDir);
+  // Better Auth sends through `runInBackgroundOrAwait`, which catches every error and only logs it, so a message that did not go out
+  // still answered the sign-up with success and the page said 「已发送验证邮件」 (a provider in test mode refuses every address but its
+  // owner's). A failure is noted here, by address, and turned into an honest error by the `after` hook below, in the same request.
+  const undelivered = new Map<string, string>();
+  const deliver = async (to: string, subject: string, url: string) => {
+    try { await sendMail(to, subject, url); undelivered.delete(to.toLowerCase()); }
+    catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      undelivered.set(to.toLowerCase(), reason);
+      // Typed for the routes that await the sender directly (resend): they answer with this code instead of a bare 500.
+      throw new APIError("BAD_GATEWAY", { code: "VERIFICATION_EMAIL_FAILED", message: `email not delivered: ${reason.slice(0, 160)}` });
+    }
+  };
+  const SENDING_PATHS = new Set(["/sign-up/email", "/send-verification-email", "/request-password-reset", "/email-otp/send-verification-otp"]);
 
   // Widened to the plain `BetterAuthOptions` return type: `betterAuth<Options>` returns `Auth<Options>`,
   // and letting `Options` infer as this specific literal object type makes the returned `Auth<...>`
@@ -100,17 +116,30 @@ function crosslineAuthConfig(options: CrosslineAuthOptions): BetterAuthOptions {
       emailAndPassword: {
         enabled: true,
         requireEmailVerification: true,
-        sendResetPassword: async ({ user, url }) => { await sendMail(user.email, "重置 Crossline 密码", url); }
+        sendResetPassword: async ({ user, url }) => { await deliver(user.email, "重置 Crossline 密码", url); }
       },
       emailVerification: {
         sendOnSignUp: true,
-        sendVerificationEmail: async ({ user, url }) => { await sendMail(user.email, "验证你的 Crossline 邮箱", url); }
+        sendVerificationEmail: async ({ user, url }) => { await deliver(user.email, "验证你的 Crossline 邮箱", url); }
+      },
+      hooks: {
+        after: createAuthMiddleware(async (ctx) => {
+          if (!SENDING_PATHS.has(ctx.path)) return;
+          const email = String((ctx.body as { email?: unknown } | undefined)?.email ?? "").toLowerCase();
+          const reason = undelivered.get(email);
+          if (reason === undefined) return;
+          undelivered.delete(email);
+          throw new APIError("BAD_GATEWAY", { code: "VERIFICATION_EMAIL_FAILED", message: `email not delivered: ${reason.slice(0, 160)}` });
+        })
       }
     } : {}),
     ...(options.google ? {
       socialProviders: { google: { clientId: options.google.clientId, clientSecret: options.google.clientSecret } }
     } : {}),
-    plugins: [nextCookies()]
+    // A six-digit code by email signs in without a password and creates the account on first use: one step fewer than sign-up →
+    // verification link → sign-in, and only offered where mail can actually be delivered. `nextCookies` stays last, as Better Auth asks.
+    plugins: [...(emailCapable ? [emailOTP({ sendVerificationOTP: async ({ email, otp }) => { await deliver(email, "Crossline 登录验证码", `验证码：${otp}（10 分钟内有效）`); },
+      expiresIn: 600 })] : []), nextCookies()]
   };
 }
 

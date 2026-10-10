@@ -16,4 +16,12 @@ describe("login form", () => {
     const html = renderToStaticMarkup(<LoginForm googleEnabled={true} />);
     expect(html).toContain("用 Google 账号登录");
   });
+
+  test("offers a code by email where mail can be sent, and hides sign-up and reset where it cannot", () => {
+    expect(renderToStaticMarkup(<LoginForm googleEnabled={false} emailEnabled />)).toContain("邮箱验证码");
+    const noMail = renderToStaticMarkup(<LoginForm googleEnabled={true} emailEnabled={false} />);
+    expect(noMail).not.toContain("邮箱验证码");
+    expect(noMail).not.toContain("/signup");
+    expect(noMail).not.toContain("忘记密码");
+  });
 });

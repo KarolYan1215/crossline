@@ -31,6 +31,11 @@ export function isGoogleAuthConfigured(): boolean {
   return Boolean(googleFromEnv());
 }
 
+/** Mail can be sent (SMTP, or the e2e mailbox): only then do email sign-up, the email code and password reset exist at all. */
+export function isEmailAuthConfigured(): boolean {
+  return Boolean(smtpFromEnv() || process.env.CROSSLINE_AUTH_TEST_MAILBOX_DIR?.trim());
+}
+
 /**
  * Shared by `getAuth()` (the request path) and `instrumentation.ts` (the one-time schema migration at
  * server start) so the two never resolve a different `authDbPath` or plugin set from the same env.
