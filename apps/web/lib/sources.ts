@@ -6,6 +6,7 @@ import { pathToFileURL } from "node:url";
 import { SOURCE_SIZE_LIMIT, sourceKindFor, type AccessContext, type SourceKind } from "@crossline/core";
 import type { StoredSourceDocument } from "@crossline/db";
 import { dataDirectory, getStore } from "./crossline";
+import { requestCodexSupervisor } from "./codex-runtime";
 
 /**
  * Files the person hands over so the system can learn about them: a syllabus, a lecture plan, notes, a
@@ -49,4 +50,38 @@ export function saveSourceFiles(ctx: AccessContext,
     }));
   }
   return { ok: true, documents };
+}
+
+export type UploadedDocument = { id: string; fileName: string; kind: SourceKind; extractionStatus: StoredSourceDocument["extractionStatus"]; extractionNote?: string;
+  projectId?: string };
+
+/**
+ * Stores the files, then has the worker read each one (one at a time, a minute each at most), and answers with what came of it. The
+ * bytes are safe before any reading starts, so a slow or failing parse never loses a file; with the worker down the documents stay
+ * `pending` and `deferred` says so.
+ */
+export async function uploadSources(ctx: AccessContext, files: Array<{ fileName: string; mediaType: string; buffer: Buffer }>, projectId?: string):
+  Promise<{ ok: true; documents: UploadedDocument[]; deferred: boolean } | { ok: false; code: string; message: string }> {
+  const saved = saveSourceFiles(ctx, files, projectId);
+  if (!saved.ok) return saved;
+  let deferred = false;
+  for (const document of saved.documents.filter((item) => item.extractionStatus === "pending")) {
+    try {
+      await requestCodexSupervisor<unknown>(ctx, "/v1/sources/extract", {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ documentId: document.id }),
+        signal: AbortSignal.timeout(60_000)
+      });
+    } catch { deferred = true; }
+  }
+  const documents = getStore().listSourceDocuments(ctx.workspaceId)
+    .filter((item) => saved.documents.some((doc) => doc.id === item.id))
+    .map(({ id, fileName, kind, extractionStatus, extractionNote, projectId: assigned }) =>
+      ({ id, fileName, kind, extractionStatus, ...(extractionNote ? { extractionNote } : {}), ...(assigned ? { projectId: assigned } : {}) }));
+  return { ok: true, documents, deferred };
+}
+
+/** Form files as the upload routes receive them. */
+export async function formFiles(form: FormData): Promise<Array<{ fileName: string; mediaType: string; buffer: Buffer }>> {
+  const files = form.getAll("file").filter((entry): entry is File => entry instanceof File);
+  return Promise.all(files.map(async (file) => ({ fileName: file.name || "file", mediaType: file.type, buffer: Buffer.from(await file.arrayBuffer()) })));
 }

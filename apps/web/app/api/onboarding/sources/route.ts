@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
-import { requestCodexSupervisor } from "../../../../lib/codex-runtime";
 import { resolveAccessContext } from "../../../../lib/access-guard";
 import { isCrossSiteWrite } from "../../../../lib/same-origin";
-import { saveSourceFiles } from "../../../../lib/sources";
+import { formFiles, uploadSources } from "../../../../lib/sources";
 import { getStore } from "../../../../lib/crossline";
 
 const MAX_FILES = 12;
@@ -27,24 +26,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, code: "PROJECT_NOT_FOUND" }, { status: 404 });
   }
 
-  const buffers = await Promise.all(files.map(async (file) => ({
-    fileName: file.name || "file", mediaType: file.type, buffer: Buffer.from(await file.arrayBuffer())
-  })));
-  const saved = saveSourceFiles(ctx, buffers, projectId || undefined);
-  if (!saved.ok) return NextResponse.json({ ok: false, code: saved.code, message: saved.message }, { status: 400 });
-
-  let deferred = false;
-  for (const document of saved.documents.filter((item) => item.extractionStatus === "pending")) {
-    try {
-      await requestCodexSupervisor<unknown>(ctx, "/v1/sources/extract", {
-        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ documentId: document.id }),
-        signal: AbortSignal.timeout(60_000)
-      });
-    } catch { deferred = true; }
-  }
-  const documents = getStore().listSourceDocuments(ctx.workspaceId)
-    .filter((item) => saved.documents.some((doc) => doc.id === item.id))
-    .map(({ id, fileName, kind, extractionStatus, extractionNote, projectId: assigned }) =>
-      ({ id, fileName, kind, extractionStatus, ...(extractionNote ? { extractionNote } : {}), ...(assigned ? { projectId: assigned } : {}) }));
-  return NextResponse.json({ ok: true, documents, ...(deferred ? { deferred: true } : {}) });
+  const uploaded = await uploadSources(ctx, await formFiles(form), projectId || undefined);
+  if (!uploaded.ok) return NextResponse.json({ ok: false, code: uploaded.code, message: uploaded.message }, { status: 400 });
+  return NextResponse.json({ ok: true, documents: uploaded.documents, ...(uploaded.deferred ? { deferred: true } : {}) });
 }

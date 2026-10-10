@@ -7,7 +7,7 @@ import { MenuButton } from "../ui/controls";
 export type Mention = { kind: "material" | "task" | "milestone"; id: string; title: string };
 export type ComposerInput = { text: string; files: File[]; mentions: Mention[]; batch: boolean };
 const KIND_LABEL: Record<Mention["kind"], string> = { material: "资料", task: "任务", milestone: "里程碑" };
-const ACCEPTED = "image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain";
+const ACCEPTED = "image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain,text/markdown,text/csv,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.md,.csv,.txt,.docx";
 
 /**
  * The one input box, for 快速收集 and 小助手 alike, laid out like the chat products people already know: a ＋ menu on the left (files,
@@ -66,7 +66,7 @@ export function Composer({ mode, placeholder, onSubmit, busy = false, children, 
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void submit(); }
   };
   const menu = [
-    { label: "上传文件", hint: "图片、PDF、文本", onSelect: () => fileInputRef.current?.click() },
+    { label: "上传文件", hint: "PDF、Word、文本、图片", onSelect: () => fileInputRef.current?.click() },
     { label: "从已有资料中选", hint: "已上传的文件", onSelect: () => setPicker({ query: "", kind: "material", fromAt: false }) },
     ...(mode === "capture" ? [{ label: batch ? "取消批量输入" : "批量输入", hint: "多项内容由 AI 拆分", onSelect: () => setBatch((value) => !value) }] : []),
     { label: "关联任务或里程碑", hint: "也可输入 @", onSelect: () => setPicker({ query: "", kind: "linkable", fromAt: false }) }

@@ -45,7 +45,18 @@ export const ACTIONS = {
   "milestones.decide": { label: "处理里程碑草稿", risk: "commitment", args: { milestoneIds: { type: "array", maxItems: 20, items: str(128) },
     decision: enumOf(["approve", "reject"]) } },
   "agent_result.review": { label: "审阅助手成果", risk: "commitment", args: { taskId: str(128), decision: enumOf(["accepted", "rejected"]), note: str(300) } },
-  "importance.set": { label: "调整重要性", risk: "internal", args: { milestoneId: str(128), weight: { type: "number" } } }
+  "importance.set": { label: "调整重要性", risk: "internal", args: { milestoneId: str(128), weight: { type: "number" } } },
+  // Files dropped into the box (P3): what each one is decides what is proposed.
+  "dates.read": { label: "读取文件中的日期", risk: "internal", args: { documentId: str(64), projectId: str(128) } },
+  "material.file": { label: "归入项目", risk: "internal", args: { documentId: str(64), projectId: str(128) } },
+  "material.attach": { label: "作为任务材料", risk: "internal", args: { documentId: str(64), workOrderId: str(128) } },
+  "evidence.submit": { label: "提交为证据", risk: "commitment", args: { workOrderId: str(128), documentIds: { type: "array", maxItems: 6, items: str(64) }, note: str(300) } },
+  // Carried over from the old assistant (2026-10-10): a file it writes for a task, and a milestone template the person asked for.
+  "material.save": { label: "保存为任务材料", risk: "internal", args: { workOrderId: str(128), fileName: str(80), content: str(60_000) } },
+  "template.add": { label: "新增里程碑模板", risk: "internal", args: { lineId: str(64), kind: enumOf(["deliverable", "threshold", "validation", "recurring_cadence", "decision"]),
+    titleHint: str(200), criteria: { type: "array", maxItems: 8, items: object({
+      statement: str(300), required: { type: "boolean" }, evidenceOf: enumOf(["output", "outcome"]), measure: enumOf(["count", "threshold", "artifact", "judgement"]),
+      unit: str(40), number: { type: "number" }, comparator: enumOf(["gte", "lte", ""]), mustExist: str(200), rubric: str(300), failsWhen: str(300) }) } } }
 } as const satisfies Record<string, { label: string; risk: ActionRisk; args: Record<string, Field> }>;
 
 export type ActionId = keyof typeof ACTIONS;
@@ -69,7 +80,17 @@ type ArgsOf = {
   "milestones.decide": { milestoneIds: string[]; decision: "approve" | "reject" };
   "agent_result.review": { taskId: string; decision: "accepted" | "rejected"; note: string };
   "importance.set": { milestoneId: string; weight: number };
+  "dates.read": { documentId: string; projectId: string };
+  "material.file": { documentId: string; projectId: string };
+  "material.attach": { documentId: string; workOrderId: string };
+  "evidence.submit": { workOrderId: string; documentIds: string[]; note: string };
+  "material.save": { workOrderId: string; fileName: string; content: string };
+  "template.add": { lineId: string; kind: "deliverable" | "threshold" | "validation" | "recurring_cadence" | "decision"; titleHint: string;
+    criteria: TemplateCriterion[] };
 };
+/** One criterion of a proposed template, flat (one shape for every measure); `templateCriterion` turns it into a `SuccessCriterion`. */
+export type TemplateCriterion = { statement: string; required: boolean; evidenceOf: "output" | "outcome"; measure: "count" | "threshold" | "artifact" | "judgement";
+  unit: string; number: number; comparator: "gte" | "lte" | ""; mustExist: string; rubric: string; failsWhen: string };
 export type ActionArgs<K extends ActionId> = ArgsOf[K];
 export type ProposedAction = { [K in ActionId]: { action: K; summary: string; args: ArgsOf[K] } }[ActionId];
 
@@ -105,6 +126,8 @@ export type ConciergeRefs = {
   ops: Set<string>; lines: Set<string>; milestones: Set<string>; draftMilestones: Set<string>; proposals: Set<string>; agentResults: Set<string>;
   /** `YYYY-MM-DD` in the person's zone; an event before it is refused. */
   today?: string;
+  /** The person's files and projects, for the file actions. */
+  documents?: Set<string>; projects?: Set<string>;
 };
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
@@ -168,6 +191,27 @@ export function actionProblem(item: ProposedAction, refs: ConciergeRefs): string
     }
     case "agent_result.review": return refs.agentResults.has(item.args.taskId) ? "" : `「${item.args.taskId}」不是待审阅的助手成果`;
     case "importance.set": return refs.milestones.has(item.args.milestoneId) && item.args.weight >= 0 && item.args.weight <= 100 ? "" : "里程碑不存在或重要性不在 0–100";
+    case "dates.read": case "material.file": {
+      const doc = refs.documents?.has(item.args.documentId) ? "" : `文件 id「${item.args.documentId}」不存在（用 find_materials 查）`;
+      if (doc) return doc;
+      if (!item.args.projectId) return item.action === "material.file" ? "归入项目需要 projectId" : "";
+      return refs.projects?.has(item.args.projectId) ? "" : `项目 id「${item.args.projectId}」不存在（见概况里的项目列表）`;
+    }
+    case "material.attach":
+      return !refs.documents?.has(item.args.documentId) ? `文件 id「${item.args.documentId}」不存在` : task(item.args.workOrderId);
+    case "evidence.submit": {
+      const missing = item.args.documentIds.filter((id) => !refs.documents?.has(id));
+      return !item.args.documentIds.length ? "没有指定文件" : missing.length ? `这些文件 id 不存在：${missing.join("、")}` : task(item.args.workOrderId);
+    }
+    case "material.save": {
+      if (!/^[\w\u4e00-\u9fff][\w\u4e00-\u9fff .-]{0,78}\.(md|txt|csv|json|py|ts|js|m|r|sh|ps1|tex|html|css|ipynb)$/.test(item.args.fileName) || item.args.fileName.includes(".."))
+        return "fileName 须是不含路径的文件名，扩展名为 md/txt/csv/json/py/ts/js/m/r/sh/ps1/tex/html/css/ipynb";
+      return item.args.content.trim() ? task(item.args.workOrderId) : "内容为空";
+    }
+    case "template.add":
+      if (!refs.lines.has(item.args.lineId)) return `主线 id「${item.args.lineId}」不存在`;
+      if (!item.args.titleHint.trim() || !item.args.criteria.length) return "模板需要标题与至少一条标准";
+      return item.args.criteria.every((criterion) => criterion.statement.trim()) ? "" : "每条标准都需要表述";
   }
 }
 
@@ -237,6 +281,18 @@ export function cardActionIndexes(turn: ConciergeTurn): number[] {
   return turn.actions.map((_, index) => index).filter((index) => !candidates.has(index));
 }
 
+/** A flat template criterion as the stored shape, or undefined when its measure lacks what that kind needs. */
+export function templateCriterion(raw: TemplateCriterion, index: number): import("./index").SuccessCriterion | undefined {
+  const base = { id: `c${index + 1}`, statement: raw.statement.trim().slice(0, 300), required: raw.required, evidenceOf: raw.evidenceOf };
+  switch (raw.measure) {
+    case "count": return raw.unit && raw.number > 0 ? { ...base, measure: { kind: "count", unit: raw.unit, atLeast: raw.number } } : undefined;
+    case "threshold": return raw.unit && (raw.comparator === "gte" || raw.comparator === "lte")
+      ? { ...base, measure: { kind: "threshold", unit: raw.unit, comparator: raw.comparator, value: raw.number } } : undefined;
+    case "artifact": return raw.mustExist ? { ...base, measure: { kind: "artifact", mustExist: raw.mustExist } } : undefined;
+    case "judgement": return raw.rubric && raw.failsWhen ? { ...base, measure: { kind: "judgement", rubric: raw.rubric, failsWhen: raw.failsWhen } } : undefined;
+  }
+}
+
 /** The words on the card for one action: its verb and the model's one-line summary. */
 export const actionLabel = (item: ProposedAction): string => ACTIONS[item.action].label;
 
@@ -261,6 +317,8 @@ export type ConciergePack = {
   ops: Array<{ id: string; label: string; at: string }>;
   agentResults: Array<{ taskId: string; title: string; summary: string }>;
   materials: Array<{ id: string; fileName: string; project: string }>;
+  /** The person's projects (courses, papers, accounts), by line. */
+  projects: Array<{ id: string; name: string; line: string }>;
   facts: string[];
   /** The person's standing preferences and their earlier corrections of how the box read them, newest and weightiest first. */
   preferences: string[];
@@ -274,7 +332,8 @@ export function conciergeRefs(pack: ConciergePack): ConciergeRefs {
     asks: new Map(pack.asks.map((ask) => [ask.id, new Set(ask.options.map((option) => option.id))])),
     ops: new Set(pack.ops.map((op) => op.id)), lines: new Set(pack.lines.map((line) => line.id)),
     milestones: new Set(pack.milestones.map((item) => item.id)), draftMilestones: new Set(pack.milestones.filter((item) => item.status === "draft").map((item) => item.id)),
-    proposals: new Set(pack.proposals.map((item) => item.id)), agentResults: new Set(pack.agentResults.map((item) => item.taskId)), today: pack.today
+    proposals: new Set(pack.proposals.map((item) => item.id)), agentResults: new Set(pack.agentResults.map((item) => item.taskId)), today: pack.today,
+    documents: new Set(pack.materials.map((item) => item.id)), projects: new Set(pack.projects.map((item) => item.id))
   };
 }
 
@@ -294,6 +353,7 @@ export const CONCIERGE_TOOL_SPECS = [
   { name: "list_agent_results", description: "等待本人审阅的助手成果：taskId、标题、摘要", inputSchema: NONE },
   { name: "get_forecast", description: "已批准里程碑的完成预测：通常与保守完成日、是否有风险", inputSchema: NONE },
   { name: "find_materials", description: "按关键词查已上传的文件：id、文件名、项目", inputSchema: QUERY },
+  { name: "list_projects", description: "本人的项目（课程、论文、账户等）：id、名称、主线", inputSchema: NONE },
   { name: "read_material", description: "读一个文件的文本（从 offset 起约 6000 字）", inputSchema: { type: "object",
     properties: { id: { type: "string" }, offset: { type: "integer" } }, required: ["id", "offset"], additionalProperties: false } },
   { name: "get_profile_facts", description: "本人确认过的情况（背景、课程评分、目标等），按关键词筛选", inputSchema: QUERY }
@@ -321,6 +381,7 @@ export function answerFromPack(pack: ConciergePack, name: string, args: Record<s
     case "list_agent_results": return json(pack.agentResults);
     case "get_forecast": return json(pack.forecast);
     case "find_materials": return json(pack.materials.filter((item) => matches(query, item.fileName, item.project)).slice(0, 30));
+    case "list_projects": return json(pack.projects);
     case "get_profile_facts": return json(pack.facts.filter((fact) => matches(query, fact)).slice(0, 40));
     default: return `没有名为 ${name} 的查询`;
   }

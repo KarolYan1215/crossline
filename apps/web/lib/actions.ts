@@ -1,8 +1,14 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
+import { writeFileSync } from "node:fs";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { reviewAgentTask } from "@crossline/db";
-import { ACTIONS, describeEvent, type AccessContext, type ActionArgs, type ActionId, type ProposedAction } from "@crossline/core";
-import { addCapturedTaskWithId, approveWorkOrderProposal, archiveWorkOrder, getStore } from "./crossline";
+import { ACTIONS, describeEvent, templateCriterion, type AccessContext, type ActionArgs, type ActionId, type ProposedAction } from "@crossline/core";
+import type { EvidenceClaimInput } from "@crossline/db";
+import { addCapturedTaskWithId, approveWorkOrderProposal, archiveWorkOrder, completeWorkOrderExecution, getStore, saveMilestoneTemplate,
+  startWorkOrderExecution } from "./crossline";
+import { saveSourceFiles } from "./sources";
+import { requestStepReplan } from "./steps";
 import { approveMilestoneDrafts, rejectMilestoneDrafts } from "./approvals";
 import { answerAsk, snoozeAsk } from "./asks";
 import { analyzeNewCapturesInBackground } from "./capture-followups";
@@ -90,13 +96,97 @@ export const ACTION_HANDLERS: { [K in ActionId]: Handler<K> } = {
     const result = reviewAgentTask(getStore(), ctx.workspaceId, args.taskId, args.decision, args.note);
     return result.ok ? { ok: true } : { ok: false, code: result.code };
   },
-  "importance.set": (ctx, args) => applyChange(ctx, { kind: "weight", milestoneId: args.milestoneId, weight: Math.round(args.weight) })
+  "importance.set": (ctx, args) => applyChange(ctx, { kind: "weight", milestoneId: args.milestoneId, weight: Math.round(args.weight) }),
+
+  // A syllabus or schedule: the interview reads its dates (the one place that reads them), and they come back as a batch to confirm.
+  "dates.read": (ctx, args) => {
+    const doc = findDoc(ctx, args.documentId);
+    if (!doc) return { ok: false, code: "DOCUMENT_NOT_FOUND" };
+    if (args.projectId && doc.projectId !== args.projectId) fileUnder(ctx, doc.id, args.projectId);
+    const session = getStore().getLatestOnboardingSession(ctx.workspaceId);
+    if (!session) return { ok: false, code: "INTERVIEW_NOT_STARTED", message: "还没有访谈；先在画像页开始访谈，日期由访谈读取" };
+    void requestCodexSupervisor(ctx, "/v1/onboarding/turn", { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sessionId: session.id, text: `我在输入框添加了文件《${doc.fileName}》。请只整理其中的日期（上课、作业、测验、考试、项目）。` }),
+      signal: AbortSignal.timeout(3 * 60 * 60_000) }).catch(() => undefined);
+    return { ok: true, message: "已交给访谈读取日期，几分钟后在「待确认 · 文件中的日期」确认", href: "/approvals" };
+  },
+  "material.file": (ctx, args) => {
+    if (!findDoc(ctx, args.documentId)) return { ok: false, code: "DOCUMENT_NOT_FOUND" };
+    fileUnder(ctx, args.documentId, args.projectId);
+    return { ok: true, message: "已归入项目；该项目的任务会读到它" };
+  },
+  // Material for a task: filed under the task's project (which is how plans and the assistant find a task's files) and the steps
+  // re-planned against it, because a plan rests on the person's own material.
+  "material.attach": (ctx, args) => {
+    const store = getStore();
+    const doc = findDoc(ctx, args.documentId);
+    const order = store.listWorkOrders(ctx.workspaceId).find((item) => item.id === args.workOrderId);
+    if (!doc || !order) return { ok: false, code: doc ? "WORK_ORDER_NOT_FOUND" : "DOCUMENT_NOT_FOUND" };
+    if (order.projectId && doc.projectId !== order.projectId) fileUnder(ctx, doc.id, order.projectId);
+    store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `task.note:${order.id}:${randomUUID()}`, type: "task.note",
+      entityId: order.id, payload: { text: `添加材料《${doc.fileName}》`, kind: "material", documentId: doc.id } });
+    if (store.getStepPlan(ctx.workspaceId, order.id)) requestStepReplan(ctx, order.id, `新增材料《${doc.fileName}》，按其内容核对并调整步骤`);
+    return { ok: true, message: "已挂到任务，步骤将按新材料重新安排", href: `/workbench/${encodeURIComponent(order.id)}` };
+  },
+  // A finished piece handed in: the task is started if it was not, and completed with the files as its evidence. A PDF or Word file is
+  // handed in with its text beside it, because the gate can quote only text.
+  "evidence.submit": (ctx, args) => {
+    const store = getStore();
+    const order = store.listWorkOrders(ctx.workspaceId).find((item) => item.id === args.workOrderId);
+    if (!order) return { ok: false, code: "WORK_ORDER_NOT_FOUND" };
+    const evidence: EvidenceClaimInput[] = [];
+    for (const id of args.documentIds) {
+      const doc = findDoc(ctx, id);
+      if (!doc) return { ok: false, code: "DOCUMENT_NOT_FOUND" };
+      evidence.push({ kind: "file", uri: doc.uri, description: doc.fileName.slice(0, 500) });
+      if ((doc.kind === "pdf" || doc.kind === "docx") && doc.extractionStatus === "done" && doc.extractedText.trim()) {
+        const text = `${fileURLToPath(doc.uri).replace(/\.[a-z]+$/i, "")}.extracted.txt`;
+        writeFileSync(text, doc.extractedText, "utf8");
+        evidence.push({ kind: "file", uri: pathToFileURL(text).href, description: `${doc.fileName}（文本）`.slice(0, 500) });
+      }
+    }
+    if (args.note.trim()) evidence.push({ kind: "record", uri: `note:${order.id}`, description: args.note.trim().slice(0, 500) });
+    if (["approved", "preparing", "ready_for_human"].includes(order.state)) {
+      const started = startWorkOrderExecution(ctx, order.id);
+      if (!started.ok) return started;
+    }
+    const done = completeWorkOrderExecution(ctx, order.id, evidence);
+    return done.ok ? { ok: true, message: "已提交，等待验收", href: `/workbench/${encodeURIComponent(order.id)}` } : done;
+  },
+  // A file the box wrote for a task (a script, a table, notes): kept as one of the person's materials under the task's project.
+  "material.save": (ctx, args) => {
+    const order = getStore().listWorkOrders(ctx.workspaceId).find((item) => item.id === args.workOrderId);
+    if (!order) return { ok: false, code: "WORK_ORDER_NOT_FOUND" };
+    const saved = saveSourceFiles(ctx, [{ fileName: args.fileName, mediaType: "text/plain", buffer: Buffer.from(args.content, "utf8") }], order.projectId || undefined);
+    if (!saved.ok) return { ok: false, code: saved.code, message: saved.message };
+    const doc = saved.documents[0]!;
+    getStore().setSourceDocumentExtraction(ctx.workspaceId, doc.id, { status: "done", text: args.content });
+    return { ok: true, message: `已保存为《${args.fileName}》`, href: `/api/source-documents/${encodeURIComponent(doc.id)}/file` };
+  },
+  "template.add": (ctx, args) => {
+    const criteria = args.criteria.map(templateCriterion);
+    if (criteria.some((item) => !item)) return { ok: false, code: "TEMPLATE_CRITERIA_INCOMPLETE", message: "有标准缺少衡量方式（单位、数值、产出物或判定规则）" };
+    const result = saveMilestoneTemplate(ctx, { identityId: args.lineId, kind: args.kind, titleHint: args.titleHint,
+      successCriteriaDefaults: criteria as NonNullable<(typeof criteria)[number]>[] });
+    return result.ok ? { ok: true, message: "模板已添加，新建里程碑时可选", href: "/milestones" } : result;
+  }
 };
+
+const findDoc = (ctx: AccessContext, id: string) => getStore().listSourceDocuments(ctx.workspaceId).find((doc) => doc.id === id);
+
+/** Files a document under a project the way 待决事项 does, with the same record (it can be undone). */
+function fileUnder(ctx: AccessContext, documentId: string, projectId: string): void {
+  const store = getStore();
+  store.assignSourceDocumentProject(ctx.workspaceId, documentId, projectId);
+  store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `source:assigned:${documentId}:${projectId}:${Date.now()}`,
+    type: "source.project_assigned", entityId: documentId, payload: { projectId, by: "person" } });
+}
 
 /** Words for the codes a handler can return, so a failed card says why in the person's terms. */
 const FAILURE: Record<string, string> = {
   WORK_ORDER_NOT_FOUND: "任务已不存在", ASK_NOT_FOUND: "这件待决事项已处理或已过期", OP_NOT_UNDOABLE: "该操作已撤销或超过 24 小时",
-  MILESTONE_NOT_DRAFT: "里程碑已不是草稿", LINE_NOT_FOUND: "主线不存在", TASK_NOT_FOUND: "助手任务不存在", PROPOSAL_VERSION_CHANGED: "任务已被改动，请刷新后重试"
+  MILESTONE_NOT_DRAFT: "里程碑已不是草稿", LINE_NOT_FOUND: "主线不存在", TASK_NOT_FOUND: "助手任务不存在", PROPOSAL_VERSION_CHANGED: "任务已被改动，请刷新后重试",
+  DOCUMENT_NOT_FOUND: "文件不存在", EXECUTION_NOT_ACTIVE: "任务当前不能提交", TEMPLATE_IDENTITY_UNKNOWN: "主线不存在", SOURCE_TYPE_NOT_ALLOWED: "不支持的文件类型"
 };
 
 /** Carries out one confirmed action. Everything except an undo is recorded for 撤销; a failure changes nothing and says why. */

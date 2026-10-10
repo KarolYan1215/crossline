@@ -25,7 +25,7 @@ export function pageFromLocation(): PageContext {
 /**
  * The one input box (docs/one-input.md): what the person types is kept, read, and answered in place — an answer, a card of proposed
  * actions carried out on 执行 (each undoable), or one question back. Today's conversation is shared by every page and device; the
- * floating 小助手 is the same conversation opened larger. Offline, and for attached files, a line is kept as a capture the old way.
+ * floating 小助手 is the same conversation opened larger. Files are read and proposed for; offline, a line is kept as a capture the old way.
  */
 export function Conversation({ variant, placeholder, page }: {
   /**
@@ -79,11 +79,23 @@ export function Conversation({ variant, placeholder, page }: {
   };
   const submit = async (input: ComposerInput): Promise<boolean> => {
     setStatus("");
-    if (!navigator.onLine || input.files.length) return keepAsCapture(input, "未能保存，请复制内容后重试");
+    if (!navigator.onLine) return keepAsCapture(input, "未能保存，请复制内容后重试");
     setBusy(true);
     try {
+      // Files are stored and read first, then sent with the line by id: the box says what each one is and what to do with it.
+      let files: string[] = [];
+      if (input.files.length) {
+        setStatus("正在读取文件…");
+        const form = new FormData();
+        for (const file of input.files) form.append("file", file);
+        const uploaded = await fetch("/api/conversation/files", { method: "POST", body: form });
+        const result = await uploaded.json().catch(() => null) as { ok?: boolean; documents?: Array<{ id: string }>; message?: string } | null;
+        if (!uploaded.ok || !result?.documents) { setStatus(result?.message ?? "文件未能保存，请重试"); return false; }
+        files = result.documents.map((doc) => doc.id);
+        setStatus("");
+      }
       const response = await fetch("/api/conversation/turn", { method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ text: input.text, mentions: input.mentions, page: page ?? pageFromLocation() }) });
+        body: JSON.stringify({ text: input.text, mentions: input.mentions, page: page ?? pageFromLocation(), files }) });
       const body = await response.json().catch(() => null) as { messages?: MessageView[] } | null;
       if (!response.ok || !body?.messages) { setStatus("未能发送，请重试"); return false; }
       setMessages((list) => [...list, ...body.messages!]);

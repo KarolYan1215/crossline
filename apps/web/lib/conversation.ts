@@ -101,6 +101,7 @@ export async function contextPack(ctx: AccessContext, page: PageContext, now = n
     agentResults: listAgentTasks(store, ctx.workspaceId).filter((task) => task.status === "needs_review")
       .map((task) => ({ taskId: task.taskId, title: task.title, summary: `产出：${task.artifacts.map((artifact) => artifact.path.split(/[\\/]/).at(-1)).slice(0, 6).join("、") || "无"}${task.needsHuman ? `；${task.needsHuman} 项需本人完成` : ""}` })),
     materials: docs.map((doc) => ({ id: doc.id, fileName: doc.fileName, project: doc.projectId ? projects.get(doc.projectId) ?? "" : "" })),
+    projects: store.listProjects(ctx.workspaceId).map((project) => ({ id: project.id, name: project.name, line: label(project.identityId) })),
     facts: store.listProfileFacts(ctx.workspaceId).filter((fact) => fact.status === "confirmed")
       .map((fact) => `[${label(fact.identityId)}${fact.projectId ? `/${projects.get(fact.projectId) ?? fact.projectId}` : ""}] ${fact.slot}：${fact.value.slice(0, 200)}`),
     preferences: store.preferenceLines(ctx.workspaceId, ["all"], 15),
@@ -133,6 +134,7 @@ export function conciergeSnapshot(pack: ConciergePack, now = new Date(), options
     `最近一次精力记录：${pack.energy ? `${pack.energy.level}（${formatInTimeZone(new Date(pack.energy.at), pack.timeZone, "MM-dd HH:mm")}）` : "无"}`,
     `当前页面：${pack.page.kind}${pack.page.title ? `「${pack.page.title}」(${pack.page.entityId})` : ""}`,
     `主线（id | 名称）：${pack.lines.map((line) => `${line.id} | ${line.label}${line.hard ? "（硬约束）" : ""}`).join("；") || "无"}`,
+    `项目（id | 名称 | 主线）：${pack.projects.map((project) => `${project.id} | ${project.name} | ${project.line}`).join("；") || "无"}`,
     ...pageTask(pack),
     ...(pack.preferences.length ? ["本人的偏好与此前的更正（照此理解）：", ...pack.preferences.map((line) => `- ${line}`)] : []),
     ...lists
@@ -190,18 +192,23 @@ const cardWords = (card: Card) => card.actions.map((item) => `${ACTIONS[item.act
  * snapshot and the pack, and its answer is kept with its card. When the model cannot be reached, the card offers the words as a new
  * task, so the person can still keep it as work with one click.
  */
-export async function conversationTurn(ctx: AccessContext, input: { text: string; mentions: Mention[]; page: PageContext }, now = new Date()): Promise<MessageView[]> {
+export async function conversationTurn(ctx: AccessContext, input: { text: string; mentions: Mention[]; page: PageContext; files?: string[] }, now = new Date()): Promise<MessageView[]> {
   const store = getStore();
   const conversation = store.conversationFor(ctx.workspaceId, planToday(ctx, now));
   const earlier = store.listConversationMessages(ctx.workspaceId, conversation.id);
   const history = earlier.map((message) => ({ role: message.role, text: message.text }));
   // Once the person has corrected the box today, it reads every later line on the stronger model at once.
   const corrected = earlier.some((message) => (message.payload.card as Card | undefined)?.corrects);
-  const text = [input.text.trim(), input.mentions.length ? `（引用：${input.mentions.map((item) => `${item.kind}:${item.id}「${item.title}」`).join("；")}）` : ""].filter(Boolean).join("\n");
+  // Files dropped with the line (already stored and read): named in the message, described in the snapshot.
+  const docs = (input.files ?? []).map((id) => store.listSourceDocuments(ctx.workspaceId).find((doc) => doc.id === id)).filter((doc) => doc !== undefined);
+  const text = [input.text.trim(), input.mentions.length ? `（引用：${input.mentions.map((item) => `${item.kind}:${item.id}「${item.title}」`).join("；")}）` : "",
+    docs.length ? `（附件：${docs.map((doc) => `《${doc.fileName}》`).join("")}）` : ""].filter(Boolean).join("\n");
   const person = store.appendConversationMessage({ id: randomUUID(), workspaceId: ctx.workspaceId, conversationId: conversation.id, role: "person", text,
-    payload: { page: input.page } });
+    payload: { page: input.page, ...(docs.length ? { files: docs.map((doc) => doc.id) } : {}) } });
   const pack = await contextPack(ctx, input.page, now);
-  const request = { conversationId: conversation.id, text: input.text, mentions: input.mentions, snapshot: conciergeSnapshot(pack, now, { lists: true }), pack, history,
+  const attached = attachedFiles(docs, pack);
+  const request = { conversationId: conversation.id, text: input.text || "（只附了文件）", mentions: input.mentions,
+    snapshot: `${conciergeSnapshot(pack, now, { lists: true })}${attached}`, pack, history,
     ...(corrected ? { corrected: true } : {}) };
   let reply: { text: string; card: Card };
   let warnings: string[] = [];
@@ -221,6 +228,14 @@ export async function conversationTurn(ctx: AccessContext, input: { text: string
     text: reply.text, payload: { card: reply.card } });
   if (review) void reviewCard(ctx, assistant.id, { ...request, review: true });
   return [view(person), view(assistant)];
+}
+
+/** The files that came with a line, as the snapshot names them: id, name, kind, whether the text could be read, project, opening. */
+export function attachedFiles(docs: Array<{ id: string; fileName: string; kind: string; extractionStatus: string; extractedText: string; projectId?: string }>,
+  pack: ConciergePack): string {
+  return docs.length ? ["\n本次附带的文件（id | 名称 | 类型 | 文本 | 所属项目 | 开头）：", ...docs.map((doc) => `- ${doc.id} | ${doc.fileName} | ${doc.kind} | `
+    + `${doc.extractionStatus === "done" ? `${doc.extractedText.length} 字` : doc.extractionStatus === "pending" ? "尚未读取" : "无法读取文本"} | `
+    + `${pack.projects.find((project) => project.id === doc.projectId)?.name ?? "未归入"} | ${doc.extractedText.slice(0, 400).replace(/\s+/g, " ")}`)].join("\n") : "";
 }
 
 const askWorker = (ctx: AccessContext, body: Record<string, unknown>) => requestCodexSupervisor<TurnOutcome>(ctx, "/v1/conversation/turn", {

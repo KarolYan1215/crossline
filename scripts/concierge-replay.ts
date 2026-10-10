@@ -1,5 +1,5 @@
 /**
- * The one input box's acceptance replay (docs/one-input.md §8, P1 and P2): thirty sentences written the way the person types, each sent as a
+ * The one input box's acceptance replay (docs/one-input.md §8, P1–P3): thirty sentences written the way the person types, each sent as a
  * fresh turn of `crossline-concierge` against a **copy** of the real ledger (the live database is only read, through SQLite's online
  * backup), with the real Codex. Each case states what a right reading is — which action, on which object — and the run prints, per
  * case, what came back, how long it took and whether it matches; at the end the pass count and the median time to the first card.
@@ -31,7 +31,9 @@ const { setUsageSink, startCodexSupervisor } = await import("../packages/codex/s
 const { createConcierge } = await import("../apps/worker/src/concierge");
 const store = new CrosslineStore(path.join(dataDir, "crossline.db"));
 (globalThis as { crosslineStore?: unknown }).crosslineStore = store;
-const { contextPack, conciergeSnapshot } = await import("../apps/web/lib/conversation");
+const { attachedFiles, contextPack, conciergeSnapshot } = await import("../apps/web/lib/conversation");
+const { saveSourceFiles } = await import("../apps/web/lib/sources");
+const { extractText } = await import("../apps/worker/src/extract");
 const { executeAction } = await import("../apps/web/lib/actions");
 type Turn = import("../packages/core/src/index").ConciergeTurn;
 type Pack = import("../packages/core/src/index").ConciergePack;
@@ -113,11 +115,46 @@ const cases: Array<[string, Check]> = [
 const hw2Task = pack0.tasks.find((task) => /作业\s*2/.test(task.title));
 const taskPage = { kind: "task", entityId: hw2Task?.id ?? "" };
 const currentStep = (pack: Pack) => pack.tasks.find((task) => task.id === taskPage.entityId)?.steps.find((step) => step.status === "planned")?.id;
-type Case = { text: string; check: Check; page?: { kind: string; entityId: string }; then?: { text: string; check: Check } };
+type Case = { text: string; check: Check; page?: { kind: string; entityId: string }; then?: { text: string; check: Check }; files?: string[] };
+
+// P3: real files the person has, stored into the copy and read the way an upload is.
+const { readFileSync, existsSync } = await import("node:fs");
+const downloads = path.join(process.env.USERPROFILE ?? "", "Downloads");
+const output = path.join(process.env.USERPROFILE ?? "", "Crossline", "ai-output");
+const upload = async (file: string): Promise<string> => {
+  if (!existsSync(file)) return "";
+  const name = path.basename(file);
+  const mediaType = name.endsWith(".pdf") ? "application/pdf" : name.endsWith(".docx") ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document" : "text/markdown";
+  const saved = saveSourceFiles(ctx, [{ fileName: name, mediaType, buffer: readFileSync(file) }]);
+  if (!saved.ok) return "";
+  const doc = saved.documents[0]!;
+  const read = await extractText(new Uint8Array(readFileSync(file)), doc.kind);
+  store.setSourceDocumentExtraction(workspace.id, doc.id, { status: read.status, text: read.text, ...(read.note ? { note: read.note } : {}) });
+  return doc.id;
+};
+const fileOf = { syllabus: path.join(downloads, "course_files_export", "F26-ECE555-Syllabus.pdf"), schedule: path.join(downloads, "course_files_export", "F26-ECE555-Course Schedule.pdf"),
+  hw1: path.join(downloads, "ECE_548_Homework-1.pdf"), hw2: path.join(downloads, "ECE_548_Homework-2.pdf"), slides: path.join(downloads, "S2-MOSFET_Device_OperationF26.pdf"),
+  hw555: path.join(downloads, "F26-Homework1-1.docx"), outline: path.join(output, "agent-253028b0-v1s2-4", "课程主题与讲次摘录.md"),
+  index: path.join(output, "agent-253028b0-v1s3-3", "主题材料索引.md") };
+const ids: Record<string, string> = {};
+for (const [key, file] of Object.entries(fileOf)) ids[key] = await upload(file);
+console.info(JSON.stringify({ uploaded: Object.fromEntries(Object.entries(ids).map(([key, id]) => [key, Boolean(id)])) }));
 const all: Case[] = [...cases.map(([text, check]) => ({ text, check })),
   { text: "这一步做完了", page: taskPage, check: both(only("task.op"), arg("stepId", (value, pack) => value === currentStep(pack), "本页任务的当前步骤")) },
   { text: "截止推迟两天", page: taskPage, check: both(only("task.op"), arg("workOrderId", (value) => value === taskPage.entityId, "本页任务")) },
   { text: "用了 30 分钟，卡在第三题", page: taskPage, check: either(only("task.op"), only("task.op", "task.op")) },
+  { text: "", files: [ids.syllabus!], check: either(only("dates.read"), only("dates.read", "material.file")) },
+  { text: "", files: [ids.schedule!], check: either(only("dates.read"), only("dates.read", "material.file")) },
+  // Homework 1 of both courses was due in September: asking whether it is done is the right reading, not a new overdue task.
+  { text: "", files: [ids.hw1!], check: either(only("material.attach"), only("material.file"), asksOrClarifies) },
+  { text: "这是作业 2 的题目", files: [ids.hw2!], check: either(only("material.attach"), only("task.create"), only("material.attach", "task.op")) },
+  { text: "", files: [ids.slides!], check: either(only("material.attach"), only("material.file"), asksOrClarifies) },
+  { text: "", files: [ids.hw555!], check: either(only("material.attach"), only("material.file"), asksOrClarifies) },
+  { text: "ECE 548 复习提纲我整理好了，交上去", files: [ids.outline!], check: either(only("evidence.submit"), asksOrClarifies) },
+  // The index is an assistant result waiting for review: accepting that result is the right reading.
+  { text: "这份主题材料索引是那个归档任务的成果", files: [ids.index!], check: either(only("agent_result.review"), only("evidence.submit"), only("material.attach"), asksOrClarifies) },
+  { text: "帮我写一个计算 pn 结耗尽区宽度的 Python 脚本，存到 ECE 555 作业 2 的材料里", check: both(only("material.save"), arg("fileName", (value) => String(value).endsWith(".py"), "一个 .py 文件")) },
+  { text: "给研究者加一个里程碑模板：期中考试达到分数线，标准是成绩不低于 85 分", check: only("template.add") },
   { text: "作业2截止改到周四", check: only("task.op"), then: { text: "不对，是周五",
     check: (turn) => turn.corrects ? both(only("task.op"), arg("date", (value) => new Date(`${String(value)}T12:00:00Z`).getUTCDay() === 5, "周五"))(turn, pack0) : "未标为更正" } }
 ];
@@ -127,9 +164,11 @@ const results: Array<{ n: number; ok: boolean; seconds: number; reviewed: boolea
 const run = createConcierge(store, workspace.id, repoRoot, client);
 const { needsReview } = await import("../packages/core/src/index");
 /** One turn as the web runs it: the quick reading, and when it needs one, the second look on the stronger model. */
-const turnOf = async (conversationId: string, text: string, page: { kind: string; entityId: string }, corrected: boolean) => {
+const turnOf = async (conversationId: string, text: string, page: { kind: string; entityId: string }, corrected: boolean, files: string[] = []) => {
   const pack = await contextPack(ctx, page);
-  const request = { conversationId, text, mentions: [], snapshot: conciergeSnapshot(pack, new Date(), { lists: true }), pack, history: [], ...(corrected ? { corrected } : {}) };
+  const docs = files.map((id) => store.listSourceDocuments(workspace.id).find((doc) => doc.id === id)).filter((doc) => doc !== undefined);
+  const request = { conversationId, text: text || "（只附了文件）", mentions: [], snapshot: `${conciergeSnapshot(pack, new Date(), { lists: true })}${attachedFiles(docs, pack)}`,
+    pack, history: [], ...(corrected ? { corrected } : {}) };
   const first = await run(request);
   if (first.state !== "replied" || corrected || !needsReview(first.turn, first.warnings)) return { pack, outcome: first, reviewed: false, changed: false };
   const second = await run({ ...request, review: true });
@@ -141,9 +180,10 @@ for (const [index, item] of all.entries()) {
   const conversation = store.conversationFor(workspace.id, `replay-${String(index + 1).padStart(2, "0")}`);
   const started = Date.now();
   lastUsage = undefined;
-  let { pack, outcome, reviewed, changed } = await turnOf(conversation.id, item.text, item.page ?? { kind: "today", entityId: "" }, false);
+  if (item.files && item.files.some((id) => !id)) { console.info(JSON.stringify({ n: index + 1, skipped: "file missing" })); continue; }
+  let { pack, outcome, reviewed, changed } = await turnOf(conversation.id, item.text, item.page ?? { kind: "today", entityId: "" }, false, item.files ?? []);
   let check = item.check;
-  let text = item.text;
+  let text = `${item.text}${item.files ? ` [${item.files.map((id) => store.listSourceDocuments(workspace.id).find((doc) => doc.id === id)?.fileName).join(", ")}]` : ""}`;
   if (item.then && outcome.state === "replied" && !item.check(outcome.turn, pack)) {
     // The correction is the next line on the same thread; from then on the stronger model reads at once.
     ({ pack, outcome, reviewed, changed } = await turnOf(conversation.id, item.then.text, item.page ?? { kind: "today", entityId: "" }, false));

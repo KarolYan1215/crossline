@@ -20,7 +20,8 @@ export function useAttachmentDrop(acceptedTypes: string[]) {
     const merged = new DataTransfer();
     const seen = new Set(existing.map((file) => `${file.name}:${file.size}:${file.lastModified}`));
     for (const file of [...existing, ...incoming]) {
-      if (!acceptedTypes.includes(file.type)) continue;
+      // A type, or an extension (".md"): Windows often gives Markdown and some Word files no type at all.
+      if (!acceptedTypes.includes(file.type) && !acceptedTypes.some((type) => type.startsWith(".") && file.name.toLowerCase().endsWith(type))) continue;
       const key = `${file.name}:${file.size}:${file.lastModified}`;
       if (seen.has(key) && !existing.includes(file)) continue;
       seen.add(key);
