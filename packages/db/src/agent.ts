@@ -79,6 +79,22 @@ export type AgentTaskRow = {
   /** One step of the order was handed over: an accepted result marks that step done. */
   stepId: string;
 };
+/**
+ * What a step delivers, as a comparison key: the step part of a run's `「task」 · 「step」` title, without case, spaces or punctuation.
+ * Two tasks of one course both planned 「汇集课程讲义、作业与样题，形成材料目录」; the key is what makes them the same work.
+ */
+export const deliverableKey = (title: string): string => (title.split(" · ").at(-1) ?? title).toLowerCase().replace(/[\s\p{P}\p{S}]/gu, "");
+
+/**
+ * The assistant's runs for any work order of a project, of the given statuses: what already exists (or is being made) for that course
+ * or project, so a sibling task neither plans nor dispatches it again. Accepted outputs used to be shared within one order only.
+ */
+export function projectAgentOutputs(store: CrosslineStore, workspaceId: string, projectId: string,
+  statuses: AgentTaskStatus[] = ["accepted", "needs_review", "running"]): AgentTaskRow[] {
+  if (!projectId) return [];
+  const orders = new Set(store.listWorkOrders(workspaceId).filter((order) => order.projectId === projectId).map((order) => order.id));
+  return listAgentTasks(store, workspaceId).filter((task) => orders.has(task.workOrderId) && statuses.includes(task.status));
+}
 /** A run with no outcome after this long was lost with the process that held it, not still going. */
 const STALE_AFTER_MS = 8 * 3_600_000;
 

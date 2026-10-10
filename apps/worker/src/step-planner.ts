@@ -4,7 +4,7 @@ import {
   PROGRESS_ASSESSMENT_SCHEMA, validateProgressAssessment, type ProgressAssessment, type StepPlan, type StepWarning, type ValidationReview
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
-import { listAgentTasks, type CrosslineStore, type StoredWorkOrder } from "@crossline/db";
+import { listAgentTasks, projectAgentOutputs, type CrosslineStore, type StoredWorkOrder } from "@crossline/db";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { learnedArchetypes } from "./archetype-curator";
 import { ownerOf } from "./owner";
@@ -55,6 +55,18 @@ export function planningContext(store: CrosslineStore, workspaceId: string, orde
 }
 
 /** The task's window: earliest start and latest finish, from its own payload, the confirmed goal deadline, or the milestone's. */
+/**
+ * The assistant's finished work for any task of this order's project — accepted, or waiting for the person's review — with which task
+ * it was for. It used to be this order's accepted runs only, so each task of one course planned (and ran) the same material catalogue.
+ */
+export function existingOutputs(store: CrosslineStore, workspaceId: string, order: StoredWorkOrder) {
+  const own = listAgentTasks(store, workspaceId).filter((task) => task.workOrderId === order.id && task.status === "accepted");
+  const project = projectAgentOutputs(store, workspaceId, order.projectId, ["accepted", "needs_review"]);
+  return [...new Map([...own, ...project].map((task) => [task.taskId, task])).values()].map((task) => ({
+    title: task.title, status: task.status === "accepted" ? "accepted" : "awaiting_review", forThisTask: task.workOrderId === order.id,
+    files: task.artifacts.map((artifact) => artifact.path.split(/[\\/]/).at(-1)), note: task.reviewNote }));
+}
+
 export function taskWindow(store: CrosslineStore, workspaceId: string, order: StoredWorkOrder, now = new Date()) {
   const payload = (order.payload ?? {}) as { notBefore?: string; dueDate?: string };
   let goalDeadline: string | undefined;
@@ -124,9 +136,8 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
       // Corrections and patterns the person has given: for this task, its line, or everything.
       personalPreferences: store.preferenceLines(workspaceId, [order.identityId, `task:${order.id}`], 15),
       doneSteps: done.map((step) => ({ title: step.title, role: step.role, deliverable: step.deliverable })),
-      // What the assistant already produced for this task and the person accepted: work that exists, not work to plan again.
-      acceptedOutputs: listAgentTasks(store, workspaceId).filter((task) => task.workOrderId === workOrderId && task.status === "accepted")
-        .map((task) => ({ title: task.title, files: task.artifacts.map((artifact) => artifact.path.split(/[\\/]/).at(-1)), note: task.reviewNote })),
+      // What the assistant already produced for this course or project: work that exists, not work to plan again.
+      acceptedOutputs: existingOutputs(store, workspaceId, order),
       feedback,
       // Every earlier instruction about this task's steps still holds unless the latest one says otherwise: a replan used to see only
       // the last one, and an answer to a plan question undid the person's 「本人只做推导、解题和自测」 a minute after they said it.

@@ -141,6 +141,31 @@ test("a preparation step the runtime lost (a stall, a restart) is tried again, u
   store.close();
 });
 
+test("one course's catalogue is made once: a second order in the same project does not get the same preparation run again", async () => {
+  // Real ledger, 2026-10-10: 「汇集课程讲义、作业与样题，形成材料目录」 ran four times for one course, once per task of that course.
+  const { CrosslineStore, setCategoryMode } = await import("@crossline/db");
+  const { stepDispatchCandidates } = await import("./agent-dispatch");
+  const store = new CrosslineStore(":memory:");
+  const estimate = { p25Minutes: 60, p50Minutes: 120, p85Minutes: 240, source: "llm_prior" as const, observationCount: 0, confidence: "low" as const };
+  const base = { deliverable: "目录.md", doneCriterion: "完成", share: 1, estimate: { p25Minutes: 20, p50Minutes: 30, p85Minutes: 50 }, dependsOn: [], notBefore: "", dueBy: "", tickOutcome: "" };
+  for (const [id, project] of [["hw1", "ece548"], ["hw2", "ece548"], ["essay", "ece555"]] as const) {
+    store.saveWorkOrder({ id, ownerId: "o", workspaceId: "w", identityId: "research", projectId: project, milestoneId: "", intent: id, state: "approved",
+      riskTier: "routine", estimate, payload: {} });
+    store.saveStepPlan("w", id, { archetypeId: "exam_prep", quantity: { basis: "讲", amount: 2, unit: "讲" }, rationale: "", steps: [
+      { ...base, id: "a", role: "gather", title: "汇集课程讲义、作业与样题，形成材料目录", schedulable: false, executor: "agent" }] }, "o", "planned");
+  }
+  setCategoryMode(store, "w", "read_research_organize", "review");
+  expect(stepDispatchCandidates(store, "w").map((item) => item.orderId).sort()).toEqual(["essay", "hw1", "hw2"]);
+  const stepId = store.getStepPlan("w", "hw1")!.steps[0]!.id;
+  // hw1's run finished and waits for review: its catalogue exists, so hw2 (same course) waits on it, the other course does not.
+  store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: "r1", type: "agent.task.requested", entityId: "t1",
+    payload: { taskId: "t1", workOrderId: "hw1", stepId, title: "hw1 · 汇集课程讲义、作业与样题，形成材料目录", category: "read_research_organize" } });
+  store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: "c1", type: "agent.task.completed", entityId: "t1",
+    payload: { taskId: "t1", reviewRequired: true, artifacts: [] } });
+  expect(stepDispatchCandidates(store, "w").map((item) => item.orderId)).toEqual(["essay"]);
+  store.close();
+});
+
 describe("自动交给 Agent", () => {
   const NOW = new Date("2026-10-12T15:00:00.000Z");
   const base = { deliverable: "对照表.md", doneCriterion: "完成", share: 0.25, estimate: { p25Minutes: 20, p50Minutes: 30, p85Minutes: 50 }, notBefore: "", dueBy: "", tickOutcome: "" };

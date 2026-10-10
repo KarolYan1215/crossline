@@ -13,7 +13,7 @@ Input is `crossline.step-plan.v1`:
 - `materials[]`: the task's own files **in full text**, each `{id: "doc-N", name, text}` — syllabi, lecture plans, problem sets, briefs, data descriptions.
 - `person`: `facts[]` (what the person confirmed: background and level, the course's grading and their target, what they said about this project; `（假设）` marks an assumption), `strengths[]` (what they are good at), `answers[]` (what they answered to this task's earlier questions — binding).
 - `projectDates[]`: the project's dated items (exams, homework due, releases).
-- `archetypes`, `doneSteps` (when replanning), `acceptedOutputs` (work the assistant already produced and the person accepted), `personalPreferences`, `feedback` (the latest instruction) and `earlierFeedback` (every earlier one — all still hold unless the latest contradicts them).
+- `archetypes`, `doneSteps` (when replanning), `acceptedOutputs` (work the assistant already produced for this course or project — `accepted`, or `awaiting_review` by the person; `forThisTask` says whether it was made for this task. Plan none of it again: refer to it as an input), `personalPreferences`, `feedback` (the latest instruction) and `earlierFeedback` (every earlier one — all still hold unless the latest contradicts them).
 
 Return raw JSON only: `{archetypeId, quantity, rationale, units, questions, steps}`.
 

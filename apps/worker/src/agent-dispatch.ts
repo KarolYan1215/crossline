@@ -1,7 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { DISPATCH_STATES, STEP_STARTS_SETTING, autoHandoffTiming, isAgentCategory, prepStepRetried, stepCategory, type AgentCategory } from "@crossline/core";
 import {
-  agentApprovalDecision, assistantPlanFor, decideAgentApproval, declinedCategories, isAutoHandoff, isPaused, listAgentTasks, readCategories, requestAgentApproval,
+  agentApprovalDecision, assistantPlanFor, decideAgentApproval, declinedCategories, deliverableKey, isAutoHandoff, isPaused, listAgentTasks, readCategories, requestAgentApproval,
   requestCategory, type CrosslineStore
 } from "@crossline/db";
 import type { AgentTaskInput } from "./agent-task";
@@ -112,11 +112,15 @@ export function stepDispatchCandidates(store: CrosslineStore, workspaceId: strin
   const orders = new Map(store.listWorkOrders(workspaceId).filter((order) => !order.tombstone && (DISPATCH_STATES.has(order.state) || order.state === "active"))
     .map((order) => [order.id, order]));
   const out: Array<{ orderId: string; stepId: string; due: string; seq: number }> = [];
+  const made = madeInProject(store, workspaceId);
   for (const plan of store.listStepPlans(workspaceId)) {
     if (!orders.has(plan.workOrderId)) continue;
-    const due = (orders.get(plan.workOrderId)!.payload as { dueDate?: string } | undefined)?.dueDate ?? "9999";
+    const order = orders.get(plan.workOrderId)!;
+    const due = (order.payload as { dueDate?: string } | undefined)?.dueDate ?? "9999";
     for (const step of plan.steps) {
       if (step.executor !== "agent" || step.status !== "planned" || tried.has(`${plan.workOrderId}#${step.id}`)) continue;
+      // Already made (or being made, or waiting for review) for another task of the same course or project.
+      if (made.get(order.projectId)?.has(deliverableKey(step.title))) continue;
       const category = stepCategory(step) ?? "read_research_organize";
       if (declined.has(category)) continue;
       if (!approved[category]) { requestCategory(store, workspaceId, category, plan.workOrderId, `准备步骤「${step.title}」`); continue; }
@@ -124,6 +128,18 @@ export function stepDispatchCandidates(store: CrosslineStore, workspaceId: strin
     }
   }
   return out.sort((a, b) => a.due.localeCompare(b.due) || a.seq - b.seq).map(({ orderId, stepId }) => ({ orderId, stepId }));
+}
+
+/** Per project, the deliverables the assistant has made, is making, or has waiting for review (`deliverableKey`). */
+function madeInProject(store: CrosslineStore, workspaceId: string): Map<string, Set<string>> {
+  const projectOf = new Map(store.listWorkOrders(workspaceId).map((order) => [order.id, order.projectId]));
+  const made = new Map<string, Set<string>>();
+  for (const task of listAgentTasks(store, workspaceId).filter((item) => ["accepted", "needs_review", "running"].includes(item.status))) {
+    const project = projectOf.get(task.workOrderId);
+    if (!project) continue;
+    made.set(project, (made.get(project) ?? new Set()).add(deliverableKey(task.title)));
+  }
+  return made;
 }
 
 /**
@@ -163,6 +179,7 @@ export function autoHandoffCandidates(store: CrosslineStore, workspaceId: string
   const declined = new Set(declinedCategories(store, workspaceId));
   const tried = triedSteps(store, workspaceId);
   const starts = readStepStarts(store, workspaceId);
+  const made = madeInProject(store, workspaceId);
   // The person is working on it right now: an open, unpaused session. The assistant does not start on the same task under them.
   const timing = new Set(store.listExecutions(workspaceId).filter((execution) => !execution.endedAt
     && !(execution.interruptions.at(-1) && !execution.interruptions.at(-1)!.resumedAt)).map((execution) => execution.workOrderId));
@@ -174,6 +191,7 @@ export function autoHandoffCandidates(store: CrosslineStore, workspaceId: string
     const finished = new Set(plan.steps.filter((step) => step.status === "done" || step.status === "skipped").map((step) => step.id));
     for (const step of plan.steps) {
       if (step.executor !== "mixed" || step.status !== "planned" || !step.schedulable || tried.has(`${plan.workOrderId}#${step.id}`)) continue;
+      if (made.get(orders.get(plan.workOrderId)!.projectId)?.has(deliverableKey(step.title))) continue;
       if (!step.dependsOn.every((id) => finished.has(id))) continue;
       const at = starts[`${plan.workOrderId}#${step.id}`];
       const when = autoHandoffTiming(at, now);

@@ -122,3 +122,22 @@ test("a plan rests on the person's own material and facts: units quote the file,
   expect(saved.steps[0]).toMatchObject({ covers: ["u1"], why: "目标 A−，余量小" });
   store.close();
 });
+
+test("the planner is told what the assistant already made for the same course, including what still waits for review", async () => {
+  const { CrosslineStore } = await import("@crossline/db");
+  const { existingOutputs } = await import("./step-planner");
+  const store = new CrosslineStore(":memory:");
+  const estimate = { p25Minutes: 60, p50Minutes: 120, p85Minutes: 240, source: "llm_prior" as const, observationCount: 0, confidence: "low" as const };
+  for (const [id, project] of [["hw1", "ece548"], ["hw2", "ece548"], ["other", "ece555"]] as const)
+    store.saveWorkOrder({ id, ownerId: "o", workspaceId: "w", identityId: "research", projectId: project, milestoneId: "", intent: id, state: "approved", riskTier: "routine", estimate, payload: {} });
+  const run = (task: string, order: string, reviewRequired: boolean) => {
+    store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: `r-${task}`, type: "agent.task.requested", entityId: task,
+      payload: { taskId: task, workOrderId: order, title: `${order} · 材料目录`, category: "read_research_organize" } });
+    store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: `c-${task}`, type: "agent.task.completed", entityId: task,
+      payload: { taskId: task, reviewRequired, artifacts: [{ path: "out/目录.md", sha256: "x", bytes: 1 }] } });
+  };
+  run("t1", "hw1", true); run("t2", "other", false);
+  const order = store.listWorkOrders("w").find((item) => item.id === "hw2")!;
+  expect(existingOutputs(store, "w", order)).toEqual([{ title: "hw1 · 材料目录", status: "awaiting_review", forThisTask: false, files: ["目录.md"], note: "" }]);
+  store.close();
+});
