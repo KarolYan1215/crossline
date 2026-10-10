@@ -237,6 +237,8 @@ export type ConciergePack = {
   asks: Array<{ id: string; kind: string; title: string; why: string; urgency: string;
     options: Array<{ id: string; label: string; fields: Array<{ id: string; label: string; required: boolean }> }> }>;
   plan: Array<{ day: string; start: string; end: string; title: string; kind: string }>;
+  /** Per day of the next seven: the person's available hours minus fixed arrangements (what work can use), and what work already holds. */
+  capacity: Array<{ day: string; availableMinutes: number; scheduledMinutes: number }>;
   ops: Array<{ id: string; label: string; at: string }>;
   agentResults: Array<{ taskId: string; title: string; summary: string }>;
   materials: Array<{ id: string; fileName: string; project: string }>;
@@ -265,7 +267,7 @@ export const CONCIERGE_TOOL_SPECS = [
   { name: "get_task", description: "一个任务的详情：步骤（id、标题、状态、时长、执行者）、截止、最早开始", inputSchema: ID },
   { name: "find_milestones", description: "按关键词查里程碑：id、标题、主线、状态（draft 为草稿）、截止、重要性", inputSchema: QUERY },
   { name: "list_asks", description: "所有待决事项：id、标题、原因、紧急程度、选项 id 与需要填写的字段", inputSchema: NONE },
-  { name: "get_plan", description: "未来 7 天的日程与排程块：日期、起止、标题、类型", inputSchema: { type: "object",
+  { name: "get_plan", description: "未来 7 天的日程与排程块（日期、起止、标题、类型），以及每天的可用分钟（可用时段扣除固定安排）与已排任务分钟", inputSchema: { type: "object",
     properties: { day: { type: "string", description: "YYYY-MM-DD；空字符串为全部 7 天" } }, required: ["day"], additionalProperties: false } },
   { name: "list_recent_ops", description: "最近 24 小时本人的可撤销操作：id、标签、时间，最新在前", inputSchema: NONE },
   { name: "list_agent_results", description: "等待本人审阅的助手成果：taskId、标题、摘要", inputSchema: NONE },
@@ -292,7 +294,8 @@ export function answerFromPack(pack: ConciergePack, name: string, args: Record<s
     case "get_task": { const task = pack.tasks.find((item) => item.id === id); return task ? json(task) : `没有 id 为 ${id} 的打开任务`; }
     case "find_milestones": return json(pack.milestones.filter((item) => matches(query, item.title, item.line)).slice(0, 30));
     case "list_asks": return json(pack.asks);
-    case "get_plan": return json(pack.plan.filter((block) => !args.day || block.day === args.day));
+    case "get_plan": return json({ blocks: pack.plan.filter((block) => !args.day || block.day === args.day),
+      capacity: pack.capacity.filter((day) => !args.day || day.day === args.day) });
     case "list_recent_ops": return json(pack.ops);
     case "list_agent_results": return json(pack.agentResults);
     case "get_forecast": return json(pack.forecast);

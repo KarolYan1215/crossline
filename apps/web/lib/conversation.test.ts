@@ -88,3 +88,12 @@ test("an action whose object is gone by the time it is confirmed fails with a re
   const decided = await decideCard(TEST_CTX, reply!.id, {}, NOW);
   expect(decided).toMatchObject({ ok: true, message: { card: { items: [{ state: "failed" }] } } });
 });
+
+test("the pack says how much time work can use: the available hours minus fixed arrangements, not the whole empty day", async () => {
+  setup();
+  const { contextPack, conciergeSnapshot } = await import("./conversation");
+  const pack = await contextPack(TEST_CTX, { kind: "today", entityId: "" }, NOW);
+  // The default pattern: weekdays 09–12 and 14–18 (7 h), weekends 10–12 (2 h); 2026-10-08 is a Thursday.
+  expect(pack.capacity.map((day) => day.availableMinutes)).toEqual([420, 420, 120, 120, 420, 420, 420]);
+  expect(conciergeSnapshot(pack, NOW)).toContain("可用时段扣除固定安排");
+});

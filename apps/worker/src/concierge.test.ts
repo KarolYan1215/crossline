@@ -9,7 +9,7 @@ const pack = (over: Partial<ConciergePack> = {}): ConciergePack => ({
   lines: [{ id: "research", label: "研究者", goals: [], hard: true }],
   tasks: [{ id: "wo-hw2", title: "完成 ECE 555 作业 2", line: "research", project: "ECE 555", state: "approved", dueDate: "2026-10-12", notBefore: "",
     usualMinutes: 120, nextBlock: "", steps: [{ id: "v1s1", title: "拆解题目", status: "planned", minutes: 20, executor: "human" }] }],
-  proposals: [], milestones: [], asks: [], plan: [], ops: [{ id: "op-1", label: "不等了：测量数据", at: "2026-10-09T19:59:00Z" }],
+  proposals: [], milestones: [], asks: [], plan: [], capacity: [], ops: [{ id: "op-1", label: "不等了：测量数据", at: "2026-10-09T19:59:00Z" }],
   agentResults: [], materials: [], facts: [], energy: null, forecast: [], ...over
 });
 const answer = (actions: unknown[], reply = "") => JSON.stringify({ reply, confidence: "high", actions, clarify: { question: "", options: [] } });

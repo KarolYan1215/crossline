@@ -6,7 +6,8 @@ import {
   actionProblem, conciergeRefs, taskTitleOf,
   type AccessContext, type ConciergePack, type ConciergeTurn, type ProposedAction
 } from "@crossline/core";
-import { effectiveSchedulePreferences, effectiveWeight, getStore, loadCurrentPlan, loadGoalForecast, planToday } from "./crossline";
+import { availableSlots } from "@crossline/core";
+import { effectiveSchedulePreferences, effectiveWeight, getStore, loadCurrentPlan, loadGoalForecast, planToday, readAvailability } from "./crossline";
 import { openAsks } from "./asks";
 import { executeAction } from "./actions";
 import { CodexSupervisorRequestError, requestCodexSupervisor } from "./codex-runtime";
@@ -43,6 +44,14 @@ export async function contextPack(ctx: AccessContext, page: PageContext, now = n
   const weekEnd = new Date(Date.parse(`${today}T00:00:00Z`) + 7 * 86_400_000).toISOString().slice(0, 10);
   const upcoming = plan.blocks.filter((block) => block.day && block.day >= today && block.day < weekEnd)
     .sort((a, b) => `${a.day} ${a.start}`.localeCompare(`${b.day} ${b.start}`));
+  // What there is to plan with, the scheduler's own arithmetic: available hours minus fixed arrangements, and what work already holds.
+  const minutesOf = (time: string) => { const [h, m] = time.split(":").map(Number); return (h ?? 0) * 60 + (m ?? 0); };
+  const days = Array.from({ length: 7 }, (_, index) => new Date(Date.parse(`${today}T12:00:00Z`) + index * 86_400_000).toISOString().slice(0, 10));
+  const isWork = (id: string) => id.startsWith("scheduled:") || id.startsWith("proposed:") || id.startsWith("optional:");
+  const free = availableSlots(readAvailability(ctx), days, upcoming.filter((block) => !isWork(block.id)).map((block) => ({ day: block.day!, start: block.start, end: block.end })));
+  const capacity = days.map((day) => ({ day,
+    availableMinutes: free.filter((slot) => slot.day === day).reduce((sum, slot) => sum + minutesOf(slot.end) - minutesOf(slot.start), 0),
+    scheduledMinutes: upcoming.filter((block) => block.day === day && block.id.startsWith("scheduled:")).reduce((sum, block) => sum + minutesOf(block.end) - minutesOf(block.start), 0) }));
   const nextBlock = new Map<string, string>();
   for (const block of upcoming.filter((item) => item.id.startsWith("scheduled:"))) {
     const id = block.id.split(":")[1]!;
@@ -74,6 +83,7 @@ export async function contextPack(ctx: AccessContext, page: PageContext, now = n
         fields: (option.fields ?? []).map((field) => ({ id: field.id, label: field.label, required: field.required })) })) })),
     plan: upcoming.map((block) => ({ day: block.day!, start: block.start, end: block.end, title: block.title,
       kind: block.id.split(":")[0] === "graph_calendar" ? "calendar" : block.id.split(":")[0]! })),
+    capacity,
     ops: recentOps(ctx, now).map((op) => ({ id: op.id, label: op.label, at: op.at })),
     agentResults: listAgentTasks(store, ctx.workspaceId).filter((task) => task.status === "needs_review")
       .map((task) => ({ taskId: task.taskId, title: task.title, summary: `产出：${task.artifacts.map((artifact) => artifact.path.split(/[\\/]/).at(-1)).slice(0, 6).join("、") || "无"}${task.needsHuman ? `；${task.needsHuman} 项需本人完成` : ""}` })),
@@ -103,6 +113,7 @@ export function conciergeSnapshot(pack: ConciergePack, now = new Date(), options
   return [
     `现在：${formatInTimeZone(now, pack.timeZone, "yyyy-MM-dd EEE HH:mm")}（${pack.timeZone}）`,
     `今天：${today.length ? today.map((block) => `${block.start}–${block.end} ${block.title}`).join("；") : "无安排"}`,
+    `未来 7 天可用于工作的时间（可用时段扣除固定安排；已排任务）：${pack.capacity.map((day) => `${day.day.slice(5)} ${(day.availableMinutes / 60).toFixed(1)}h；已排 ${(day.scheduledMinutes / 60).toFixed(1)}h`).join(" · ")}`,
     `待决事项 ${pack.asks.length} 项${pack.asks.length ? `，最紧急：${pack.asks.slice(0, 3).map((ask) => ask.title).join("；")}` : ""}`,
     `待批准的任务提案 ${pack.proposals.length} 项；里程碑草稿 ${pack.milestones.filter((item) => item.status === "draft").length} 个；待审阅的助手成果 ${pack.agentResults.length} 项`,
     `最近一次精力记录：${pack.energy ? `${pack.energy.level}（${formatInTimeZone(new Date(pack.energy.at), pack.timeZone, "MM-dd HH:mm")}）` : "无"}`,
