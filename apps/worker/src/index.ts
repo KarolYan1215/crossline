@@ -450,6 +450,10 @@ const agentService = createAgentService({
   store: analysisStore, repoRoot, getClient: () => codexSupervisor?.client, readCost: () => readCost(),
   log: (event) => console.info(JSON.stringify({ ...event, checkedAt: new Date().toISOString() }))
 });
+for (const workspace of analysisStore.listWorkspaces()) {
+  const lost = agentService.recoverLost(workspace.id);
+  if (lost.length) console.info(JSON.stringify({ type: "agent.recovered_lost", workspaceId: workspace.id, lost, checkedAt: new Date().toISOString() }));
+}
 const diligencePasses = new Set<string>();
 /**
  * The automatic research pass: once the interview is complete (or a report already exists, which makes this

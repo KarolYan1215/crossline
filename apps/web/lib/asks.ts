@@ -2,7 +2,7 @@ import "server-only";
 import { recordOp, retractedEventIds, withUndo } from "./undo";
 import {
   ATTENTION_SNAPSHOT, CALENDAR_LINES, CALENDAR_PUBLISH_FAILURE, CALENDAR_SYNC_FAILURE, calendarEventKey, daysBetween, describeEvent, missingInputsOf, rankAsks,
-  snoozeUntil, STEP_ANSWER_SLOT, stepAnswerSlot, taskTitleOf, urgencyFor, type CalendarLines,
+  prepStepRetried, snoozeUntil, STEP_ANSWER_SLOT, stepAnswerSlot, taskTitleOf, urgencyFor, type CalendarLines,
   validateAskAnswer, type AccessContext, type Ask, type AskField, type AskOption, type AskSnooze
 } from "@crossline/core";
 import { listAgentTasks, type StoredWorkOrder } from "@crossline/db";
@@ -378,7 +378,15 @@ const AGENT_REFUSAL: Record<string, string> = {
 function agentAsks({ store, ctx }: Source): Ask[] {
   const acknowledged = new Set(live(ctx, store.listEvents(ctx.workspaceId, { type: "agent.blocked_acknowledged" })).map((event) => event.entityId));
   const titles = new Map(store.listWorkOrders(ctx.workspaceId).map((order) => [order.id, order.intent]));
-  return listAgentTasks(store, ctx.workspaceId).filter((task) => task.status === "blocked" && !acknowledged.has(task.taskId)).map((task) => ({
+  const tasks = listAgentTasks(store, ctx.workspaceId);
+  // A preparation step's runs: only its latest is asked about, and not while the worker will run it again by itself.
+  const stepRuns = new Map<string, typeof tasks>();
+  for (const task of tasks.filter((item) => item.stepId)) stepRuns.set(`${task.workOrderId}#${task.stepId}`, [...(stepRuns.get(`${task.workOrderId}#${task.stepId}`) ?? []), task]);
+  const settledStep = (task: (typeof tasks)[number]) => {
+    const runs = task.stepId ? stepRuns.get(`${task.workOrderId}#${task.stepId}`) : undefined;
+    return !runs || (runs[0] === task && !prepStepRetried(runs));
+  };
+  return tasks.filter((task) => task.status === "blocked" && !acknowledged.has(task.taskId) && settledStep(task)).map((task) => ({
     id: `agent:${task.taskId}`, kind: "agent_blocked" as const, entityId: task.taskId, urgency: "later" as const, raisedAt: task.requestedAt,
     fingerprint: task.blockerCode, title: `助手没做成「${short(titles.get(task.workOrderId) ?? task.title)}」`,
     why: `${AGENT_REFUSAL[task.blockerCode] ?? clause(task.blockerMessage || task.blockerCode)}。助手不会自动重试，该任务转为本人处理。`,

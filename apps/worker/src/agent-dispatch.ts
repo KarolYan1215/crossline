@@ -1,5 +1,5 @@
 import { fileURLToPath } from "node:url";
-import { DISPATCH_STATES, isAgentCategory, type AgentCategory } from "@crossline/core";
+import { DISPATCH_STATES, isAgentCategory, prepStepRetried, type AgentCategory } from "@crossline/core";
 import {
   agentApprovalDecision, assistantPlanFor, decideAgentApproval, declinedCategories, isPaused, listAgentTasks, readCategories, requestAgentApproval, requestCategory,
   type CrosslineStore
@@ -117,13 +117,12 @@ export function stepDispatchCandidates(store: CrosslineStore, workspaceId: strin
   const declined = new Set(declinedCategories(store, workspaceId));
   // A step stays tried once a run of it finished, is going, or failed for a reason of its own; a run the runtime lost (a stall, a restart,
   // a cancelled turn) is tried again, at most three times in all.
-  const runs = new Map<string, Array<{ status: string; code: string }>>();
+  const runs = new Map<string, Array<{ status: string; blockerCode?: string | undefined }>>();
   for (const task of listAgentTasks(store, workspaceId).filter((item) => item.stepId)) {
     const key = `${task.workOrderId}#${task.stepId}`;
-    runs.set(key, [...(runs.get(key) ?? []), { status: task.status, code: task.blockerCode ?? "" }]);
+    runs.set(key, [...(runs.get(key) ?? []), task]);
   }
-  const lostToRuntime = (run: { status: string; code: string }) => run.status === "stale" || (run.status === "blocked" && /^(SKILL_|CODEX_)/.test(run.code));
-  const tried = new Set([...runs].filter(([, list]) => list.length >= 3 || !list.every(lostToRuntime)).map(([key]) => key));
+  const tried = new Set([...runs].filter(([, list]) => !prepStepRetried(list)).map(([key]) => key));
   const orders = new Map(store.listWorkOrders(workspaceId).filter((order) => !order.tombstone && (DISPATCH_STATES.has(order.state) || order.state === "active"))
     .map((order) => [order.id, order]));
   const out: Array<{ orderId: string; stepId: string; due: string; seq: number }> = [];

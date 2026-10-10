@@ -30,12 +30,11 @@ export default async function ReviewPage() {
   const insightKeys = new Map(permissionCandidates(ctx).filter((item) => item.kind === "insight" && item.eligible).map((item) => [item.id, item.key]));
   const night = lastNight(ctx.workspaceId, new Date());
 
-  return <SubpageShell active="主线" eyebrow="证据驱动" title="周复盘" description="只显示数据库事实；尚无观测的指标一律标记为未标定，不给出编造数字。">
+  return <SubpageShell active="主线" eyebrow="证据驱动" title="周复盘" description="本周的验收、里程碑进展与待定的跨主线关系；没有记录的指标标为「未标定」。">
     <section className="review-block">
       <h2>本周自动验收</h2>
       <p className="review-note">
-        里程碑绑定的条目由闸门自动验收，不再逐条人工确认。因此每一条都在这里逐项列出而不是折叠成一个数字 ——
-        看不见的自动化等于没有审计。每条都可撤销，撤销后退回证据复核且不丢证据。
+        关联里程碑的任务由系统按证据自动验收，每一条都列在这里。任一条都可撤销：撤销后回到证据复核，已交的证据保留。
       </p>
       {review.autoAccepted.length === 0
         ? <p className="review-empty">本周没有自动验收记录。</p>

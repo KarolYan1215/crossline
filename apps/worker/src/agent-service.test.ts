@@ -95,3 +95,12 @@ test("a delegated errand's accepted result is handed in as the order's evidence"
   expect(claims).toHaveLength(1);
   expect(claims[0]!.uri).toMatch(/^file:.*n\.md$/);
 });
+
+test("at startup a run with no outcome is recorded as lost, not shown as running for eight hours", () => {
+  store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: "req-old", type: "agent.task.requested", entityId: "old",
+    payload: { taskId: "old", workOrderId: "a", title: "汇编公式表", category: "read_research_organize" } });
+  const { svc } = service();
+  expect(svc.recoverLost(ws)).toEqual(["old"]);
+  expect(listAgentTasks(store, ws).find((task) => task.taskId === "old")).toMatchObject({ status: "blocked", blockerCode: "AGENT_RUN_LOST" });
+  expect(svc.recoverLost(ws)).toEqual([]);
+});

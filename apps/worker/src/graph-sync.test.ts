@@ -428,3 +428,23 @@ test("changing the declared time zone rereads unchanged events and updates their
   expect(cursors).toEqual([undefined, "delta-1", undefined, "delta-1"]);
   expect(blocks[0]?.start).toBe("09:00");
 });
+
+test("a cancelled meeting carried from before cancellations were dropped leaves quietly, and its pending change is excluded", async () => {
+  const { createHash } = await import("node:crypto");
+  seedPlan("draft", [imported("x", "Canceled: DEJA-VU Monthly Meeting", "12:00", "13:30")]);
+  const hash = createHash("sha1").update("graph_calendar:x").digest("hex").slice(0, 16);
+  store.savePlanChange({ id: `plan-1:${hash}:add`, ownerId: "local-owner", workspaceId: WORKSPACE, planVersionId: "plan-1", kind: "conflict",
+    triggerEventId: "graph-sync:2026-09-15", explanation: "日历新增「Canceled: DEJA-VU Monthly Meeting」", status: "pending" });
+  const sync = createGraphSync(store, WORKSPACE, {
+    sources: only([{ items: [event("b", "组会", "06:00", "07:00")], cursor: "delta-2" }]).sources, now: NOW, timeZone: "UTC"
+  });
+  store.saveSyncCursor({ ownerId: "local-owner", workspaceId: WORKSPACE, provider: "graph_calendar", collection: SOURCE_KEY, cursor: "delta-1" });
+  await sync();
+
+  const changes = store.listPlanChanges(WORKSPACE, "plan-1");
+  expect(changes.find((change) => change.id === `plan-1:${hash}:add`)?.status).toBe("excluded");
+  // Its leaving is not a change for the person to approve: only the new meeting is.
+  expect(changes.filter((change) => change.status === "pending").map((change) => change.kind)).toEqual(["add"]);
+  const blocks = (store.listPlanVersions(WORKSPACE)[0]?.payload as { blocks: Array<{ id: string }> }).blocks;
+  expect(blocks.map((block) => block.id)).toEqual(["graph_calendar:b"]);
+});

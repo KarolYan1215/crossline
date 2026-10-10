@@ -117,3 +117,14 @@ function delegateWhole(order: DispatchableOrder, human: Part[], context: { proje
 
 /** The states a work order can be in for the assistant to prepare it: approved, before the person has started it. */
 export const DISPATCH_STATES = new Set(["approved", "preparing", "ready_for_human"]);
+
+/**
+ * A preparation step's run that the runtime lost (a stall, a restart, a cancelled turn) is tried again, up to this many runs of the step
+ * in all; one that failed for a reason of its own (a missing artifact, a refused check) is not.
+ */
+export const PREP_STEP_MAX_RUNS = 3;
+export const lostToRuntime = (run: { status: string; blockerCode?: string | undefined }) =>
+  run.status === "stale" || (run.status === "blocked" && /^(SKILL_|CODEX_|AGENT_RUN_LOST$)/.test(run.blockerCode ?? ""));
+/** Whether a step whose runs so far are these will be run again by itself. */
+export const prepStepRetried = (runs: Array<{ status: string; blockerCode?: string | undefined }>) =>
+  runs.length > 0 && runs.length < PREP_STEP_MAX_RUNS && runs.every(lostToRuntime);

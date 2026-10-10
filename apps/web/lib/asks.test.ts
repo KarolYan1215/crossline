@@ -229,3 +229,19 @@ test("missing inputs of a milestone still in the task library wait until its win
   // Three weeks before the deadline the questions come up.
   expect(collectAsks(TEST_CTX, new Date("2026-11-26T15:00:00.000Z")).filter((ask) => ask.kind === "backplan_input")).toHaveLength(2);
 });
+
+test("a preparation step the runtime lost is not asked about while the worker will run it again; its last refusal on its own merits is", async () => {
+  const store = setup();
+  const run = (n: number, code: string) => {
+    store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `req-${n}`, type: "agent.task.requested", entityId: `t${n}`,
+      payload: { taskId: `t${n}`, workOrderId: "wo", stepId: "v1s1", title: "汇编公式表", category: "read_research_organize" } });
+    store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `blk-${n}`, type: "agent.task.blocked", entityId: `t${n}`,
+      payload: { taskId: `t${n}`, code, message: "已取消" } });
+  };
+  const assistantAsks = () => collectAsks(TEST_CTX, NOW).filter((ask) => ask.kind === "agent_blocked").map((ask) => ask.entityId);
+  run(1, "SKILL_CANCELED");
+  expect(assistantAsks()).toEqual([]);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  run(2, "AGENT_ARTIFACT_MISSING");
+  expect(assistantAsks()).toEqual(["t2"]);
+});

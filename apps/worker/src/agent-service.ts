@@ -1,10 +1,11 @@
 import { homedir } from "node:os";
 import path from "node:path";
 import { enterUsageWorkspace, type CodexRpcBoundary } from "@crossline/codex";
-import { deliverAgentResult, readCategories, requestCategory, type CrosslineStore } from "@crossline/db";
+import { deliverAgentResult, listAgentTasks, readCategories, requestCategory, type CrosslineStore } from "@crossline/db";
 import { AGENT_CATEGORIES, budgetPolicy, isAgentCategory, type AgentCategory, type CostSignal } from "@crossline/core";
 import { createAgentRunner, type AgentOutcome } from "./agent-task";
 import { dispatchCandidates, ledgerAsk, stepDispatchCandidates, taskFromWorkOrder } from "./agent-dispatch";
+import { ownerOf } from "./owner";
 
 /**
  * The assistant as the rest of the worker sees it: start a work order's task by hand (the button), and start approved ones by itself
@@ -19,6 +20,7 @@ export type DispatchResult =
 export const defaultOutputRoot = (): string => process.env.CROSSLINE_AI_OUTPUT_DIR ?? path.join(homedir(), "Crossline", "ai-output");
 /** Above this share of either quota window nothing is started by itself; a run already going is left to finish. */
 const QUOTA_CEILING_PERCENT = 95;
+export const AGENT_RUN_LOST = "AGENT_RUN_LOST";
 
 export function createAgentService(deps: {
   store: CrosslineStore; repoRoot: string; getClient: () => CodexRpcBoundary | undefined; readCost: () => Promise<CostSignal>;
@@ -81,6 +83,19 @@ export function createAgentService(deps: {
       log({ type: "agent.dispatched", workspaceId, orderId, ...(prep ? { stepId: prep.stepId } : {}), state: result.state });
     },
 
-    runningTasks: (workspaceId: string): string[] => [...mark(workspaceId)]
+    runningTasks: (workspaceId: string): string[] => [...mark(workspaceId)],
+
+    /**
+     * At startup: a run with no outcome was lost with the process that held it (only one worker runs at a time). It is recorded as
+     * lost now rather than shown as 「进行中」 until it ages out after eight hours — and a preparation step lost this way is tried again.
+     */
+    recoverLost(workspaceId: string): string[] {
+      const lost = listAgentTasks(deps.store, workspaceId).filter((task) => task.status === "running" && !mark(workspaceId).has(task.taskId));
+      for (const task of lost) {
+        deps.store.appendEvent({ ownerId: ownerOf(deps.store, workspaceId), workspaceId, idempotencyKey: `agent:blocked:${task.taskId}`, type: "agent.task.blocked",
+          entityId: task.taskId, payload: { taskId: task.taskId, code: AGENT_RUN_LOST, message: "后台进程重启，这次运行中断" } });
+      }
+      return lost.map((task) => task.taskId);
+    }
   };
 }

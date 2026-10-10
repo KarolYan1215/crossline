@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { realityChanges, syncWindowDays, toRealityBlock, type RealityBlock, type RealityChange } from "@crossline/core";
+import { isCancelledEvent, realityChanges, syncWindowDays, toRealityBlock, type RealityBlock, type RealityChange } from "@crossline/core";
 import { reconcileExternalItems, type ExternalItem, type GraphDeltaPage } from "@crossline/connectors";
 import type { CrosslineStore } from "@crossline/db";
 
@@ -183,7 +183,18 @@ export function createGraphSync(store: CrosslineStore, workspaceId: string, opti
       return { state: "synced", imported: blocks.length, skipped, changes: 0, resynced, ...(failed.length ? { failed } : {}) };
     }
 
-    const previous = planReality(current.payload, today);
+    const carried = planReality(current.payload, today);
+    // A meeting its organiser cancelled, carried from before cancellations were dropped at sync: the delta never mentions it again,
+    // so it would sit in the plan with its 「新增」 change pending for good, and a pending conflict blocks approval. It was never a
+    // commitment, so it leaves quietly — no 「removed」 change — and whatever is still pending about it is excluded.
+    const cancelled = carried.filter((block) => isCancelledEvent(block.title));
+    const previous = carried.filter((block) => !isCancelledEvent(block.title));
+    if (cancelled.length) {
+      const hashes = cancelled.map((block) => `:${createHash("sha1").update(block.id).digest("hex").slice(0, 16)}:`);
+      for (const change of store.listPlanChanges(workspaceId, current.id)) {
+        if (change.status === "pending" && hashes.some((hash) => change.id.includes(hash))) store.savePlanChange({ ...change, status: "excluded" });
+      }
+    }
     /**
      * An incremental delta page lists what CHANGED. A block it does not mention is unchanged, not
      * gone — treating every page as the authoritative set wiped the whole plan on the second tick and
@@ -233,7 +244,7 @@ export function createGraphSync(store: CrosslineStore, workspaceId: string, opti
       };
     }
 
-    const mine = new Set(previous.map((block) => block.id));
+    const mine = new Set(carried.map((block) => block.id));
     const authored = ((current.payload as { blocks?: Array<Record<string, unknown>> }).blocks ?? [])
       .filter((block) => !mine.has(String(block.id)));
     const merged = [
