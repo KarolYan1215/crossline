@@ -1,5 +1,6 @@
 import "server-only";
 import { computeEffectiveness, type AccessContext, type Effectiveness } from "@crossline/core";
+import { relationChecks } from "@crossline/db";
 import { getStore, loadCurrentPlan, loadGoalForecast, planToday, resolvedEstimate, workspaceCalibration } from "./crossline";
 import { countPending } from "./pending";
 import { identityLines } from "./lines";
@@ -83,7 +84,8 @@ export async function loadEffectiveness(ctx: AccessContext, now = new Date()): P
     decisions: { count: decisionEvents.length, minutes: 0 }, captureToScheduledMinutes: captureToScheduled, pendingNow: countPending(ctx).total,
     committedOrders: committed.length, committedWithBlock: committed.filter((order) => scheduled.has(order.id)).length,
     liveMilestones: approved.length, milestonesWithProgressLast7d: approved.filter((milestone) => progressed.has(milestone.id)).length,
-    waitingAnswered: waiting.length, waitingAnsweredOnTime: onTime.length
+    waitingAnswered: waiting.length, waitingAnsweredOnTime: onTime.length,
+    relationChecks: relationChecks(store, ctx.workspaceId)
   });
   // Out-of-sample accuracy from the calibration's own rolling backtest, when it has evaluated anything.
   const backtest = workspaceCalibration(ctx, now).backtest;

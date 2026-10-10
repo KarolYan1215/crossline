@@ -7,7 +7,8 @@
 export type TimelineNodeInput = { id: string; line: string; title: string; status: "draft" | "approved"; kind: "milestone" | "course";
   day?: string | undefined; dependsOn: string[] };
 export type TimelineTickInput = { id: string; milestoneId: string; line: string; day: string | null; state: "done" | "planned" | "postponed"; plannedDay: string | null };
-export type TimelineRelationInput = { id: string; from: string; to: string; pending: boolean; label?: string };
+/** `broken`: the relation's upstream milestone is now due too late for the downstream one; it is drawn as a red broken line. */
+export type TimelineRelationInput = { id: string; from: string; to: string; pending: boolean; label?: string; broken?: boolean };
 
 export const TL = { labelW: 96, nodeW: 176, laneH: 56, axisTop: 26, rowPad: 12, headH: 30, undatedGap: 48 } as const;
 
@@ -22,7 +23,7 @@ export type TimelineLayout = {
    * relations carry their kind as `label` at (`labelX`, `labelY`), the curve's midpoint.
    */
   edges: Array<{ id: string; kind: "chain" | "relation"; pending: boolean; path: string; line?: string; from: string; to: string;
-    label?: string; labelX?: number; labelY?: number }>;
+    label?: string; labelX?: number; labelY?: number; broken?: boolean }>;
 };
 
 const DAY_MS = 86_400_000;
@@ -127,7 +128,7 @@ export function layoutTimeline(input: { nodes: TimelineNodeInput[]; ticks: Timel
     const c1x = from.x + bow, c2x = to.x + bow, midY = (y0 + y1) / 2;
     const labelX = 0.125 * from.x + 0.375 * c1x + 0.375 * c2x + 0.125 * to.x;
     edges.push({ id: `relation:${relation.id}`, kind: "relation", pending: relation.pending, line: lineOf.get(relation.from)!,
-      from: relation.from, to: relation.to, ...(relation.label ? { label: relation.label } : {}), labelX, labelY: midY,
+      from: relation.from, to: relation.to, ...(relation.label ? { label: relation.label } : {}), labelX, labelY: midY, ...(relation.broken ? { broken: true } : {}),
       path: `M${from.x},${y0} C${c1x},${midY} ${c2x},${midY} ${to.x},${y1}` });
   }
   const width = Math.max(datedEnd, undatedMax ? datedEnd + TL.undatedGap + undatedMax * (TL.nodeW + 16) : 0) + 24;

@@ -8,7 +8,11 @@
  * experiment), recorded progress (progress monitoring, d≈0.40, stronger when recorded), and an answered
  * follow-up on what one waits for (external reminders improve whether intentions are carried out). These are
  * proximal measures: they say whether the person is getting the mechanism, not that the outcome followed.
+ *
+ * 跨线关系兑现率 is the flywheel's own test: each cross-line relation promised a measurable transfer by a check day, and the person said
+ * on that day whether it was delivered. "The flywheel compounds" has no evidence at the personal level; this is where the app tests it.
  */
+import { relationFulfilment, type RelationCheckOutcome } from "./artifact-plan";
 export type EffectivenessInput = {
   today: string;
   /** Approved milestones with a deadline, and each criterion's best reading with the day it was first met. */
@@ -29,6 +33,8 @@ export type EffectivenessInput = {
   committedOrders: number; committedWithBlock: number;
   liveMilestones: number; milestonesWithProgressLast7d: number;
   waitingAnswered: number; waitingAnsweredOnTime: number;
+  /** The person's answers to relation checks (兑现 / 部分 / 没有), with the artifact kind each was about. */
+  relationChecks?: Array<{ outcome: RelationCheckOutcome; kind: string }>;
 };
 
 export type Effectiveness = {
@@ -37,6 +43,7 @@ export type Effectiveness = {
   priorities: { minutesByLine: Record<string, number>; deadlineShare: number | null; topLine: string | null; topLineShare: number | null };
   overhead: { decisionsPerDay: number; decisionMinutesPerDay: number; medianCaptureToScheduled: number | null; pendingNow: number };
   coverage: { datedAndTimed: number | null; progressRecorded: number | null; followUpsOnTime: number | null };
+  relations: { checked: number; rate: number | null; byKind: Array<{ kind: string; checked: number; rate: number }> };
 };
 
 const median = (values: number[]) => {
@@ -78,6 +85,7 @@ export function computeEffectiveness(input: EffectivenessInput): Effectiveness {
       medianCaptureToScheduled: median(input.captureToScheduledMinutes), pendingNow: input.pendingNow },
     coverage: { datedAndTimed: share(input.committedWithBlock, input.committedOrders),
       progressRecorded: share(input.milestonesWithProgressLast7d, input.liveMilestones),
-      followUpsOnTime: share(input.waitingAnsweredOnTime, input.waitingAnswered) }
+      followUpsOnTime: share(input.waitingAnsweredOnTime, input.waitingAnswered) },
+    relations: (({ checked, rate, byKind }) => ({ checked, rate, byKind }))(relationFulfilment(input.relationChecks ?? []))
   };
 }

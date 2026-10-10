@@ -1,15 +1,20 @@
 import { randomUUID } from "node:crypto";
 import {
-  MILESTONE_PROPOSAL_SCHEMA, MILESTONE_RELATIONS_SCHEMA, profileFactId, validateMilestoneProposal, validateRelationsProposal, keepMilestoneProposal, computeMilestoneConfidence,
-  type CheckedRelations, type MilestoneProposal, type MilestoneProposalContext, type RelationsContext
+  ARTIFACT_PLAN_SCHEMA, ARTIFACT_PLAN_VERSION, MILESTONE_PROPOSAL_SCHEMA, deriveArtifactRelations, goalSettingKey, keptArtifactPlan, lineArtifacts, mergeArtifactPlan,
+  profileFactId, relationFulfilment, supplyWarnings, validateArtifactPlan, validateMilestoneProposal, keepMilestoneProposal, computeMilestoneConfidence,
+  type ArtifactMilestone, type ArtifactPlanContext, type CheckedArtifactPlan, type LineArtifacts, type MilestoneProposal, type MilestoneProposalContext,
+  type StoredArtifactPlan
 } from "@crossline/core";
 import { continueSkillTurn, runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
-import { latestFileDates, type CrosslineStore } from "@crossline/db";
+import {
+  latestFileDates, readStoredArtifactPlan, relationChecks, retireUnderivedRelations, saveStoredArtifactPlan, syncArtifactRelations, type CrosslineStore
+} from "@crossline/db";
 
 /** Only for a ledger that has no workspace owner on record, which a real account never is. */
 import { ownerOf } from "./owner";
 import { identityLines } from "./lines";
 export const MILESTONE_ARCHITECT_SKILL = "crossline:crossline-milestone-architect";
+export const ARTIFACT_PLANNER_SKILL = "crossline:crossline-artifact-planner";
 
 const INSTRUCTIONS = "Propose milestones for the supplied identities. Return only the requested JSON. "
   + "Every milestone needs a checkable target: at least one non-judgement criterion, and for anything graded (exam, quiz, homework, project) a threshold criterion with a real score line — never just 'completed'. A course is a chain of its graded parts in date order. "
@@ -38,19 +43,23 @@ const INSTRUCTIONS = "Propose milestones for the supplied identities. Return onl
   + "present it is web research the person has already accepted: build milestones on its findings and dates "
   + "(an accepted application deadline is a hard date), and do not re-propose what it already covers. Quantify "
   + "criteria wherever the facts allow (count, threshold worked back from the outcome, or an artefact that must exist); use judgement only "
-  + "when nothing countable captures the result. Write every human-readable field in Chinese, concise and in the third person.";
+  + "when nothing countable captures the result. When the input carries `artifacts`, every artifact this line is promised to another line is "
+  + "declared in plan.outputs of the milestone due in time for those waiting for it, and a milestone that builds on another line's artifact lists "
+  + "its id in plan.inputs and uses it in plan.derivation; both are [] otherwise. The links between lines are derived from these references. "
+  + "Write every human-readable field in Chinese, concise and in the third person.";
 
-const INSTRUCTIONS_RELATIONS = "You are given milestones that already exist, in different lines, and profile facts (including the person's own guesses "
-  + "about how the lines feed each other, slots starting with flywheel_). Return only the requested JSON: at most twelve cross-line relations, each between "
-  + "two milestones in DIFFERENT lines, copied by id; kind is enables, reuses, informs, constrains or recurring_feedback; explanation names the artefact "
-  + "or capability that transfers from one to the other; refutedWhen says what would show it does not hold; sourceFactIds are copied exactly from the "
-  + "facts. Prefer the few that carry weight. When `feedback` is present, fix what it names. Write every human-readable field in Chinese, concise and "
-  + "in the third person.";
+const INSTRUCTIONS_ARTIFACTS = "Plan, before any milestone is designed, what each line in planLines produces this period and the few cross-line "
+  + "supply pairs where one line's artifact measurably saves another line work, as the Skill describes. Return only the requested JSON. At most two "
+  + "pairs leave a line; every pair has a numeric transfer with a unit, a lag in days, and a counterfactual saying what the receiving line would "
+  + "spend or lack without it. Do not repeat what `kept` already holds. When `feedback` is present, fix what it names. Write every human-readable "
+  + "field in Chinese, concise and in the third person.";
 
 export type ProposalOutcome =
   | { state: "proposed"; drafts: Array<{ id: string; identityId: string; title: string }>; assumptions: string[]; threadId?: string;
       /** Lines that came back with nothing (not enough to go on, or the run failed): the rest were still saved. */
-      skipped?: Array<{ identityId: string; code: string; message: string }> }
+      skipped?: Array<{ identityId: string; code: string; message: string }>;
+      /** The cross-line relations derived after this run, and what could not be derived (with why). */
+      relations?: { derived: string[]; refused: Array<{ artifactId: string; toMilestoneId: string; code: string; detail: string }> } }
   | { state: "blocked"; code: string; message: string };
 
 /** What the person accepted from the web research, with the claims and pages behind each proposal. */
@@ -80,15 +89,53 @@ const isUntouchedDraft = (milestone: { status: string; version: number }) => mil
  * A new proposal replaces the drafts the person never touched: they were someone's first guess, and asking again with more
  * information must not leave twelve stale ones beside the fifteen new ones for the person to sort out. Archived, not deleted,
  * and only version 1 — a draft the person edited or approved is theirs.
+ *
+ * The relations that touched them are no longer archived here in bulk: that is how redoing one line used to lose every cross-line link
+ * for good. They are re-derived from the new drafts' references, and only those that cannot be derived again are retired
+ * (`retireUnderivedRelations`).
  */
 function supersedeUntouchedDrafts(store: CrosslineStore, workspaceId: string, keep: ReadonlySet<string>, lines: ReadonlySet<string>): void {
   // Only in the lines that got new drafts: a line whose run failed keeps the drafts the person already had.
   const old = store.listMilestones(workspaceId).filter((milestone) => isUntouchedDraft(milestone) && !keep.has(milestone.id) && lines.has(milestone.identityId));
-  const ids = new Set(old.map((milestone) => milestone.id));
   for (const milestone of old) store.saveMilestone({ ...milestone, status: "archived" });
-  for (const relation of store.listMilestoneRelations(workspaceId)) {
-    if (relation.status === "candidate" && (ids.has(relation.fromMilestoneId) || ids.has(relation.toMilestoneId))) store.saveMilestoneRelation({ ...relation, status: "archived" });
+}
+
+/**
+ * Every live milestone with its deadline (the confirmed one when the person set it, else the planned one) and the artifacts it produces and
+ * uses — what the artifact plan is asked against and what relations are derived from. `exclude` leaves out drafts about to be replaced.
+ */
+export function artifactMilestones(store: CrosslineStore, workspaceId: string, exclude: (milestone: { id: string; identityId: string; status: string; version: number }) => boolean = () => false): ArtifactMilestone[] {
+  const anchors = new Map(store.listMilestoneAnchors(workspaceId).map((anchor) => [anchor.milestoneId, anchor]));
+  return store.listMilestones(workspaceId).filter((milestone) => milestone.status !== "archived" && !exclude(milestone)).map((milestone) => {
+    const anchor = anchors.get(milestone.id);
+    let confirmed: string | undefined;
+    try { confirmed = (JSON.parse(store.getSetting(workspaceId, goalSettingKey(milestone.id)) ?? "{}") as { confirmedDeadline?: string }).confirmedDeadline; } catch { /* none */ }
+    return { id: milestone.id, line: milestone.identityId, title: milestone.title, status: milestone.status,
+      deadline: confirmed ?? anchor?.deadline, outputs: anchor?.outputs ?? [], inputs: anchor?.inputs ?? [] };
+  });
+}
+
+/**
+ * Derives the cross-line relations from the stored artifact plan and every live milestone's references, stores them (candidates until the
+ * downstream milestone is approved; never one the person removed or a check refuted), retires the candidates that can no longer be derived,
+ * and hands the new ones whose pair the loose checks flagged to the reviewer.
+ */
+export function rederiveArtifactRelations(store: CrosslineStore, workspaceId: string, labels: Record<string, string> = {}, options: { revised?: boolean } = {}) {
+  const plan = readStoredArtifactPlan(store, workspaceId);
+  const locked = new Set(store.listMilestoneRelations(workspaceId).filter((relation) => relation.status === "approved" && relation.artifactId).map((relation) => relation.id));
+  const derived = deriveArtifactRelations(artifactMilestones(store, workspaceId), plan, { labels, locked });
+  const ownerId = ownerOf(store, workspaceId);
+  const before = new Set(store.listMilestoneRelations(workspaceId).map((relation) => relation.id));
+  const { saved } = syncArtifactRelations(store, workspaceId, ownerId, derived.relations);
+  retireUnderivedRelations(store, workspaceId, new Set(derived.relations.map((relation) => relation.id)));
+  for (const relation of derived.relations.filter((item) => saved.includes(item.id) && !before.has(item.id))) {
+    const warnings = supplyWarnings({ use: relation.use, counterfactual: relation.counterfactual, hoursSaved: relation.transfer.hoursSaved });
+    if (!warnings.length) continue;
+    const version = store.listEvents(workspaceId, { type: "validation.warned", entityId: relation.id }).length + 1;
+    store.appendEvent({ ownerId, workspaceId, idempotencyKey: `validation.warned:milestone_relation:${relation.id}:${version}`, type: "validation.warned",
+      entityId: relation.id, payload: { subject: "milestone_relation", version, warnings, revised: Boolean(options.revised) } });
   }
+  return { derived: derived.relations.map((relation) => relation.id), refused: derived.refused };
 }
 
 export function buildProposalContext(store: CrosslineStore, workspaceId: string, request: string,
@@ -195,15 +242,49 @@ export function createMilestoneProposer(store: CrosslineStore, workspaceId: stri
     return { result, threadId };
   }
 
-  /** The links between lines: a second, small question about milestones that now exist. */
-  async function proposeRelations(client: CodexRpcBoundary, context: MilestoneProposalContext, drafts: Array<{ id: string; identityId: string }>, signal?: AbortSignal): Promise<void> {
-    if (!context.profile || new Set(drafts.map((draft) => draft.identityId)).size < 2) return;
-    await runRelations(store, workspaceId, cwd, client, drafts.map((draft) => draft.id), context.profile.facts, { ...(signal ? { signal } : {}) });
+  /**
+   * The artifact plan for `planLines`, before any of their milestones is designed: everything else in the stored plan is kept as it is, and
+   * the answer is merged into it. A failed run leaves the stored plan in place, so the lines are still designed against what was planned.
+   */
+  async function planArtifacts(client: CodexRpcBoundary, context: MilestoneProposalContext, planLines: string[], replaced: (milestone: { id: string; identityId: string; status: string; version: number }) => boolean,
+    signal?: AbortSignal, feedback?: string): Promise<{ plan: StoredArtifactPlan; note?: string; checked?: CheckedArtifactPlan }> {
+    const stored = readStoredArtifactPlan(store, workspaceId);
+    const milestones = artifactMilestones(store, workspaceId, replaced);
+    const kept = keptArtifactPlan(stored, milestones, planLines);
+    const facts = context.profile?.facts ?? [];
+    const lines = identityLines(store, workspaceId);
+    const planContext: ArtifactPlanContext = {
+      version: ARTIFACT_PLAN_VERSION, today: context.profile?.today ?? new Date().toISOString().slice(0, 10), planLines,
+      lines: lines.map((pack) => ({ id: pack.id, label: pack.label, goal: pack.goal ?? "",
+        facts: facts.filter((fact) => fact.identityId === pack.id && !fact.slot.startsWith("flywheel_"))
+          .sort((a, b) => (a.status === b.status ? 0 : a.status === "confirmed" ? -1 : 1)).slice(0, 40)
+          .map(({ id, projectId, slot, value, status }) => ({ id, projectId, slot, value, status })) })),
+      milestones: milestones.map((milestone) => ({ id: milestone.id, line: milestone.line, projectId: store.getMilestone(workspaceId, milestone.id)?.projectId ?? "",
+        title: milestone.title, status: milestone.status, deadline: milestone.deadline ?? "", outputs: milestone.outputs, inputs: milestone.inputs })),
+      flywheelFacts: facts.filter((fact) => fact.slot.startsWith("flywheel_")).map((fact) => ({ id: fact.id, line: fact.identityId, slot: fact.slot, value: fact.value, status: fact.status })),
+      kept: { artifacts: kept.artifacts, supplies: kept.supplies },
+      lowFulfilment: relationFulfilment(relationChecks(store, workspaceId)).low,
+      ...(feedback ? { feedback: feedback.slice(0, 2000) } : {})
+    };
+    const result = await runCodexSkill<CheckedArtifactPlan>(client, planContext, {
+      skillName: ARTIFACT_PLANNER_SKILL, cwd, developerInstructions: INSTRUCTIONS_ARTIFACTS, outputSchema: ARTIFACT_PLAN_SCHEMA,
+      prepareInput: () => planContext, validateOutput: (output) => validateArtifactPlan(output, planContext),
+      onAudit: () => {}, ...(signal ? { signal } : {}), timeoutMs: 60 * 60_000
+    });
+    if (!result.ok) return { plan: stored, note: result.blocker.message };
+    const at = new Date().toISOString();
+    const plan = mergeArtifactPlan(kept, result.output, at);
+    saveStoredArtifactPlan(store, workspaceId, plan);
+    const round = store.listEvents(workspaceId, { type: "artifact_plan.saved" }).length;
+    store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `artifact_plan.saved:${round}`, type: "artifact_plan.saved", entityId: "artifact-plan",
+      payload: { planLines, artifacts: result.output.artifacts.map((artifact) => artifact.id), supplies: result.output.supplies.length,
+        dropped: result.output.dropped, warnings: result.output.warnings, assumptions: result.output.assumptions } });
+    return { plan, checked: result.output };
   }
 
   /** `only` limits the run to those lines: changing a course's target redoes its line, not the whole board. */
-  /** `options.revised` marks a run the reviewer asked for, so its own warnings are not sent back for another redo. */
-  return async function propose(request: string, signal?: AbortSignal, only?: string[], options?: { revised?: boolean }): Promise<ProposalOutcome> {
+  /** `options.revised` marks a run the reviewer asked for, so its own warnings are not sent back for another redo; `options.feedback` is its brief for the artifact plan. */
+  return async function propose(request: string, signal?: AbortSignal, only?: string[], options?: { revised?: boolean; feedback?: string }): Promise<ProposalOutcome> {
     const client = getClient();
     if (!client) return { state: "blocked", code: "CODEX_SUPERVISOR_UNAVAILABLE", message: "Codex 运行时不可用。" };
 
@@ -223,7 +304,8 @@ export function createMilestoneProposer(store: CrosslineStore, workspaceId: stri
       persistTargetProposals(store, workspaceId, result.output.targetProposals ?? []);
       const drafts = persistProposals(store, workspaceId, result.output.milestones, context.request);
       supersedeUntouchedDrafts(store, workspaceId, new Set(drafts.map((draft) => draft.id)), new Set(drafts.map((draft) => draft.identityId)));
-      return { state: "proposed", drafts, assumptions: result.output.assumptions, ...(threadId ? { threadId } : {}) };
+      const relations = rederiveArtifactRelations(store, workspaceId, labelsOf(context), { revised: Boolean(options?.revised) });
+      return { state: "proposed", drafts, assumptions: result.output.assumptions, relations, ...(threadId ? { threadId } : {}) };
     }
 
     if (!lines.length) return { state: "blocked", code: "NO_MATCHING_LINE", message: "该主线信息不足或没有已确认的事实，未重新设计。" };
@@ -235,14 +317,28 @@ export function createMilestoneProposer(store: CrosslineStore, workspaceId: stri
     const assumptions: string[] = [];
     const skipped: Array<{ identityId: string; code: string; message: string }> = [];
     let lastThread: string | undefined;
+    // Drafts about to be replaced (untouched, in a line designed now, not from this run) are neither producers nor consumers any more.
+    const planned = new Set(lines);
+    const replaced = (milestone: { id: string; identityId: string; status: string; version: number }) =>
+      isUntouchedDraft(milestone) && planned.has(milestone.identityId) && !drafts.some((draft) => draft.id === milestone.id);
+    // Artifacts first, for every line designed now, when more than one line has anything on record to plan between.
+    const crossLine = new Set((context.profile?.facts ?? []).map((fact) => fact.identityId)).size >= 2;
+    let plan = readStoredArtifactPlan(store, workspaceId);
+    if (crossLine && !signal?.aborted) {
+      const planning = await planArtifacts(client, context, lines, replaced, signal, options?.feedback);
+      plan = planning.plan;
+      if (planning.note) assumptions.push(`跨主线产物计划本次未生成，按上次的计划设计：${planning.note}`);
+      for (const line of planning.checked?.dropped ?? []) assumptions.push(line);
+    }
     for (const identityId of lines) {
       if (signal?.aborted) break;
-      const own = lineContext(context, identityId);
+      // Recomputed per line: a line designed earlier in this run is already a producer or consumer for the next one.
+      const own = lineContext(context, identityId, crossLine ? lineArtifacts(plan, identityId, artifactMilestones(store, workspaceId, replaced), labelsOf(context)) : undefined);
       const { result, threadId } = await runLine(client, own, signal);
       if (threadId) lastThread = threadId;
       if (!result.ok) { skipped.push({ identityId, code: result.blocker.code, message: result.blocker.message }); continue; }
       persistTargetProposals(store, workspaceId, result.output.targetProposals ?? []);
-      const saved = persistProposals(store, workspaceId, result.output.milestones, context.request);
+      const saved = persistProposals(store, workspaceId, result.output.milestones, context.request, own.artifacts);
       drafts.push(...saved);
       if (result.audit.warnings?.length) {
         const entityId = `line:${identityId}`;
@@ -266,11 +362,13 @@ export function createMilestoneProposer(store: CrosslineStore, workspaceId: stri
     for (const item of skipped) assumptions.push(`「${labelOf(context, item.identityId)}」主线本次未生成：${item.message}`);
     for (const identityId of thinLines(context, allLines).filter((id) => !only?.length || only.includes(id))) assumptions.push(`「${labelOf(context, identityId)}」主线信息不足或仅有推断，暂未设计里程碑；在访谈中补充或确认后重新设计。`);
 
-    try { await proposeRelations(client, context, drafts, signal); } catch { /* a failed link run never takes the milestones with it */ }
-    return { state: "proposed", drafts, assumptions, ...(skipped.length ? { skipped } : {}), ...(lastThread ? { threadId: lastThread } : {}) };
+    // The links between lines follow from the references; nothing is asked of the model for them.
+    const relations = rederiveArtifactRelations(store, workspaceId, labelsOf(context), { revised: Boolean(options?.revised) });
+    return { state: "proposed", drafts, assumptions, relations, ...(skipped.length ? { skipped } : {}), ...(lastThread ? { threadId: lastThread } : {}) };
   };
 }
 
+const labelsOf = (context: MilestoneProposalContext) => Object.fromEntries(context.identities.map((identity) => [identity.id, identity.label]));
 const labelOf = (context: MilestoneProposalContext, identityId: string) => context.identities.find((item) => item.id === identityId)?.label ?? identityId;
 
 /** Lines the profile has something about but too little for a chain; they are named so the person knows why they are absent. */
@@ -281,11 +379,12 @@ const thinLines = (context: MilestoneProposalContext, asked: string[]): string[]
  * The context for one line's run: its own identity, projects, facts and templates, so everything the validator holds the answer to
  * (the identity it may name, the projects it must cover, the chain it owes) is about this line alone.
  */
-function lineContext(context: MilestoneProposalContext, identityId: string): MilestoneProposalContext {
+function lineContext(context: MilestoneProposalContext, identityId: string, artifacts?: LineArtifacts): MilestoneProposalContext {
   const profile = context.profile!;
   const ownProjects = profile.projects.filter((project) => project.identityId === identityId);
   return {
     ...context,
+    ...(artifacts ? { artifacts } : {}),
     identities: context.identities.filter((identity) => identity.id === identityId),
     templates: context.templates.filter((template) => template.identityId === identityId),
     ...(context.diligence ? { diligence: context.diligence.filter((item) => item.identityId === identityId) } : {}),
@@ -363,7 +462,10 @@ export function persistTargetProposals(store: CrosslineStore, workspaceId: strin
 }
 
 function persistProposals(store: CrosslineStore, workspaceId: string,
-  milestones: MilestoneProposal["milestones"], request: string): Array<{ id: string; identityId: string; title: string }> {
+  milestones: MilestoneProposal["milestones"], request: string, artifacts?: LineArtifacts): Array<{ id: string; identityId: string; title: string }> {
+  // Only ids the run was given are stored: a reference to nothing would derive nothing, and would read as a promise on the board.
+  const produced = new Set(artifacts?.produce.map((item) => item.id) ?? []);
+  const consumed = new Set(artifacts?.consume.map((item) => item.id) ?? []);
   const templates = store.listMilestoneTemplates(workspaceId);
   const ownerId = ownerOf(store, workspaceId);
   const drafts: Array<{ id: string; identityId: string; title: string }> = [];
@@ -390,6 +492,7 @@ function persistProposals(store: CrosslineStore, workspaceId: string,
         baseline: proposal.plan.baseline, target: proposal.plan.target, stakeholders: proposal.plan.stakeholders,
         sourceFactIds: proposal.plan.sourceFactIds,
         dependsOn: proposal.plan.dependsOn.map((dependency) => idByKey.get(dependency) ?? dependency),
+        outputs: (proposal.plan.outputs ?? []).filter((id) => produced.has(id)), inputs: (proposal.plan.inputs ?? []).filter((id) => consumed.has(id)),
         updatedAt: new Date().toISOString()
       });
     }
@@ -407,66 +510,18 @@ function persistProposals(store: CrosslineStore, workspaceId: string,
   return drafts;
 }
 
-type RelationFact = RelationsContext["facts"][number];
-
 /**
- * One relations run over the given milestones, stored as candidates. What the loose checks flag is written as `validation.warned` per
- * relation for the reviewer; nothing flagged is held back. With `feedback` (a reviewer's redo) the run is told what to fix.
+ * The reviewer's redo for one cross-line relation: relations are no longer proposed, so a link that should claim something else is fixed
+ * where it comes from — the receiving line is designed again (its artifact part and its untouched drafts), with the reviewer's notes as
+ * the brief, and the relations are derived again from the new drafts. One that is no longer derived is retired.
  */
-async function runRelations(store: CrosslineStore, workspaceId: string, cwd: string, client: CodexRpcBoundary, milestoneIds: string[],
-  profileFacts: RelationFact[], options: { signal?: AbortSignal; feedback?: string; revised?: boolean }): Promise<CheckedRelations | undefined> {
-  const ids = new Set(milestoneIds);
-  const anchors = new Map(store.listMilestoneAnchors(workspaceId).map((anchor) => [anchor.milestoneId, anchor]));
-  const milestones = store.listMilestones(workspaceId).filter((milestone) => ids.has(milestone.id)).map((milestone) => ({
-    id: milestone.id, identityId: milestone.identityId, projectId: milestone.projectId ?? "", title: milestone.title,
-    stage: anchors.get(milestone.id)?.stage ?? 1, deadline: anchors.get(milestone.id)?.deadline ?? "", target: anchors.get(milestone.id)?.target ?? ""
-  }));
-  // The interview's own guesses about how the lines feed each other, plus what each project is for.
-  const facts = profileFacts.filter((fact) => fact.slot.startsWith("flywheel_") || fact.slot === "goal" || fact.slot === "what");
-  const relationsContext: RelationsContext = { version: "crossline.milestone-relations.v1", milestones, facts,
-    ...(options.feedback ? { feedback: options.feedback } : {}) };
-  const result = await runCodexSkill<CheckedRelations>(client, relationsContext, {
-    skillName: MILESTONE_ARCHITECT_SKILL, cwd, developerInstructions: INSTRUCTIONS_RELATIONS, outputSchema: MILESTONE_RELATIONS_SCHEMA,
-    prepareInput: () => relationsContext, validateOutput: (output) => validateRelationsProposal(output, relationsContext),
-    onAudit: () => {}, ...(options.signal ? { signal: options.signal } : {}), timeoutMs: 60 * 60_000
-  });
-  if (!result.ok) return undefined;
-  const ownerId = ownerOf(store, workspaceId);
-  const when = new Date().toISOString();
-  const relationId = (relation: { fromId: string; toId: string; kind: string }) => `proposed:${relation.fromId}->${relation.toId}:${relation.kind}`;
-  for (const relation of result.output.relations) {
-    // The relation's evidence is the profile facts it rests on, so the 主线 page can show it dotted and the person can approve or
-    // reject it; nothing here makes one true.
-    store.saveMilestoneRelation({
-      id: relationId(relation), ownerId, workspaceId, fromMilestoneId: relation.fromId, toMilestoneId: relation.toId,
-      kind: relation.kind, status: "candidate", explanation: relation.explanation, refutedWhen: relation.refutedWhen,
-      evidence: relation.sourceFactIds.map((factId) => ({ uri: "/onboarding", source: `画像事实 ${factId}`, observedAt: when }))
-    });
-  }
-  for (const flagged of result.output.warnings) {
-    const id = relationId(flagged);
-    const version = store.listEvents(workspaceId, { type: "validation.warned", entityId: id }).length + 1;
-    store.appendEvent({ ownerId, workspaceId, idempotencyKey: `validation.warned:milestone_relation:${id}:${version}`, type: "validation.warned", entityId: id,
-      payload: { subject: "milestone_relation", version, warnings: flagged.warnings, revised: Boolean(options.revised) } });
-  }
-  return result.output;
-}
-
-/**
- * The reviewer's redo for one candidate relation: the same question asked again about its two milestones, with the reviewer's notes.
- * An answer that no longer proposes it retires the candidate; one that does replaces it (same id).
- */
-export function createRelationReviser(store: CrosslineStore, workspaceId: string, cwd: string, getClient: () => CodexRpcBoundary | undefined) {
+export function createRelationReviser(store: CrosslineStore, workspaceId: string, cwd: string, getClient: () => CodexRpcBoundary | undefined, now?: () => Date) {
   return async function revise(relationId: string, notes: string): Promise<void> {
-    const client = getClient();
-    const relation = store.listMilestoneRelations(workspaceId).find((item) => item.id === relationId);
-    if (!client || !relation || relation.status !== "candidate") return;
-    const facts = store.listProfileFacts(workspaceId).map((fact) => ({ id: profileFactId(fact), identityId: fact.identityId, projectId: fact.projectId,
-      slot: fact.slot, value: fact.value, status: fact.status }));
-    const output = await runRelations(store, workspaceId, cwd, client, [relation.fromMilestoneId, relation.toMilestoneId], facts,
-      { feedback: notes, revised: true });
-    if (!output) return;
-    const kept = output.relations.some((item) => `proposed:${item.fromId}->${item.toId}:${item.kind}` === relationId);
-    if (!kept) store.saveMilestoneRelation({ ...relation, status: "archived" });
+    const relation = store.getMilestoneRelation(workspaceId, relationId);
+    if (!relation || relation.status !== "candidate") return;
+    const downstream = store.listMilestones(workspaceId).find((milestone) => milestone.id === relation.toMilestoneId);
+    if (!downstream) return;
+    await createMilestoneProposer(store, workspaceId, cwd, getClient, now)(`复核意见（飞轮关系「${relation.explanation ?? relation.id}」）：${notes}`, undefined,
+      [downstream.identityId], { revised: true, feedback: notes });
   };
 }

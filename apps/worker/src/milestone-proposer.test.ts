@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, expect, test } from "vitest";
-import { CrosslineStore } from "@crossline/db";
+import { approveArtifactRelationsFor, CrosslineStore } from "@crossline/db";
 import { defaultMilestoneTemplates } from "@crossline/core";
-import { buildProposalContext, createMilestoneConversation, createMilestoneProposer, MILESTONE_ARCHITECT_SKILL } from "./milestone-proposer";
-import { fakeRuntime as sharedRuntime } from "./testing/fake-runtime";
+import { ARTIFACT_PLANNER_SKILL, buildProposalContext, createMilestoneConversation, createMilestoneProposer, MILESTONE_ARCHITECT_SKILL } from "./milestone-proposer";
+import { fakeRuntime as sharedRuntime, scriptedRuntime } from "./testing/fake-runtime";
 
 const fakeRuntime = (answers: Array<string | ((prompts: string[]) => string)>, _skill?: string) => sharedRuntime(answers, MILESTONE_ARCHITECT_SKILL);
 const WORKSPACE = "workspace-a";
@@ -179,34 +179,121 @@ const startupChain = JSON.stringify({ milestones: [
   startupStep("s3", 3, "Crossline 获得十位外部试用者的反馈", "2026-11-30", ["s2"])
 ], assumptions: [], blockers: [] });
 
-test("each line is asked on its own; the links between lines are a second, small question whose answers are kept as candidates", async () => {
-  seedProfile(); seedStartup();
-  const link = (from: string, to: string, over: object = {}) => ({ fromId: from, toId: to, kind: "reuses",
-    explanation: "西湖论文里的图表制作流程可以直接复用到 Crossline 的演示材料。", refutedWhen: "图表流程换了工具后无法复用",
-    sourceFactIds: ["research/westlake/goal"], ...over });
-  // The links answer has to name milestones that only exist once the first two runs are saved, so it reads their ids off its own prompt.
-  const idOf = (prompt: string, title: string) => new RegExp(`"id":"([^"]+)","identityId":"[a-z]+","projectId":"[^"]*","title":"${title}"`).exec(prompt)?.[1] ?? "?";
-  const links = (over: object = {}) => (prompts: string[]) => {
-    const prompt = prompts.find((entry) => entry.includes("crossline.milestone-relations.v1"))!;
-    return JSON.stringify({ relations: [link(idOf(prompt, "西湖图表交付师兄确认"), idOf(prompt, "Crossline 交到第一位外部试用者手里"), over)], assumptions: [], blockers: [] });
-  };
-  const runtime = fakeRuntime([chain(), startupChain, links({ toId: "nowhere" }), links()], "crossline:crossline-milestone-architect");
-  const outcome = await createMilestoneProposer(store, WORKSPACE, "C:\repo", () => runtime.rpc, NOW)("");
-  expect(outcome).toMatchObject({ state: "proposed" });
-  expect(outcome.state === "proposed" && outcome.drafts.map((draft) => draft.identityId)).toEqual(["research", "research", "research", "startup", "startup", "startup"]);
-  // The startup run was about startup only: it never saw the research facts.
-  expect(runtime.prompts()[1]).not.toContain("research/westlake");
-  expect(runtime.prompts()[1]).toContain("startup/-/goal");
+const artifactPlan = (over: object = {}) => JSON.stringify({
+  artifacts: [{ id: "research-figs", line: "research", kind: "论文图表", title: "西湖论文图表", readyBy: "2026-10-15" }],
+  needs: [{ line: "startup", input: "可信的演示材料", why: "试用者要看到真实效果" }],
+  supplies: [{ from: "research-figs", toLine: "startup", use: "做 Crossline 演示材料的配图", transfer: { metric: "图表", expected: 3, unit: "张" }, lagDays: 3,
+    counterfactual: "没有这些图要重做演示图，多花约 5 小时", hoursSaved: 5 }],
+  assumptions: [], blockers: [], ...over
+});
+const withRefs = (raw: string, refs: Record<string, { outputs?: string[]; inputs?: string[]; derivation?: string }>) => {
+  const answer = JSON.parse(raw) as { milestones: Array<{ plan: Record<string, unknown> }> };
+  for (const milestone of answer.milestones) {
+    const own = refs[String(milestone.plan.key)] ?? {};
+    milestone.plan = { ...milestone.plan, outputs: own.outputs ?? [], inputs: own.inputs ?? [], ...(own.derivation ? { derivation: own.derivation } : {}) };
+  }
+  return JSON.stringify(answer);
+};
+const researchWithFigs = () => withRefs(chain(), { a: { outputs: ["research-figs"] } });
+const startupUsing = (key: string) => withRefs(startupChain, { [key]: { inputs: ["research-figs"], derivation: "复用西湖论文图表 3 张（research-figs），演示材料从 6 小时减到 1 小时" } });
+/** Answers by what the prompt asks: the artifact plan, or one line's milestones; a repair turn gets the same answer again. */
+const flywheelRuntime = (answers: { plan: () => string; research: () => string; startup: () => string }) => {
+  let last = "";
+  return scriptedRuntime([MILESTONE_ARCHITECT_SKILL, ARTIFACT_PLANNER_SKILL], (prompt) => {
+    last = prompt.includes("crossline.artifact-plan.v1") ? answers.plan()
+      : prompt.includes('"requiredIdentities":["research"]') ? answers.research()
+      : prompt.includes('"requiredIdentities":["startup"]') ? answers.startup() : last;
+    return last;
+  });
+};
 
-  // The first links answer named a milestone that is not there, so nothing could be kept; it was sent back, and the corrected one is
-  // what was kept.
-  expect(runtime.prompts()[3]).toContain("RELATION_NONE_USABLE");
-  const candidates = store.listMilestoneRelations(WORKSPACE);
-  expect(candidates).toHaveLength(1);
-  expect(candidates[0]).toMatchObject({ kind: "reuses", status: "candidate", refutedWhen: "图表流程换了工具后无法复用" });
-  expect(candidates[0]!.evidence[0]!.source).toContain("research/westlake/goal");
-  const lineOf = new Map(store.listMilestones(WORKSPACE).map((milestone) => [milestone.id, milestone.identityId]));
-  expect([lineOf.get(candidates[0]!.fromMilestoneId), lineOf.get(candidates[0]!.toMilestoneId)]).toEqual(["research", "startup"]);
+test("artifacts are planned first, each line is designed against them, and the relation is derived from the references", async () => {
+  seedProfile(); seedStartup();
+  const runtime = flywheelRuntime({ plan: () => artifactPlan(), research: researchWithFigs, startup: () => startupUsing("s2") });
+  const outcome = await createMilestoneProposer(store, WORKSPACE, "C:\\repo", () => runtime.rpc, NOW)("");
+  expect(outcome).toMatchObject({ state: "proposed" });
+  const prompts = runtime.prompts();
+  expect(prompts[0]).toContain('"planLines":["research","startup"]');
+  // The startup run was about startup only, but it was told what research will hand it and which research draft produces it.
+  const startupPrompt = prompts.find((prompt) => prompt.includes('"requiredIdentities":["startup"]'))!;
+  expect(startupPrompt).not.toContain("research/westlake");
+  expect(startupPrompt).toContain('"consume":[{"id":"research-figs"');
+  expect(startupPrompt).toContain("西湖图表交付师兄确认");
+  // No separate relations run any more.
+  expect(prompts.some((prompt) => prompt.includes("milestone-relations"))).toBe(false);
+
+  const drafts = new Map(store.listMilestones(WORKSPACE).map((milestone) => [milestone.title, milestone.id]));
+  const relations = store.listMilestoneRelations(WORKSPACE);
+  expect(relations).toEqual([expect.objectContaining({
+    id: `artifact:research-figs:${drafts.get("西湖图表交付师兄确认")}->${drafts.get("Crossline 交到第一位外部试用者手里")}`,
+    status: "candidate", kind: "reuses", artifactId: "research-figs", checkOn: "2026-11-10", counterfactual: "没有这些图要重做演示图，多花约 5 小时",
+    transfer: { metric: "图表", expected: 3, unit: "张", hoursSaved: 5, lagDays: 3, measured: null } })]);
+  expect(outcome.state === "proposed" && outcome.relations?.derived).toEqual([relations[0]!.id]);
+  expect(store.listMilestoneAnchors(WORKSPACE).find((anchor) => anchor.milestoneId === drafts.get("西湖图表交付师兄确认"))?.outputs).toEqual(["research-figs"]);
+});
+
+test("a downstream milestone due before the artifact can arrive is sent back; after the repairs it is kept without the reference and no relation is drawn", async () => {
+  seedProfile(); seedStartup();
+  // s1 is due 10/20; the figures are due 10/15 with three days to adapt them: 10/18 is fine, so make the producer late instead.
+  const lateResearch = () => withRefs(chain([{ plan: { ...step("a", 1, "西湖图表交付师兄确认", "2026-10-19", []).plan } }]), { a: { outputs: ["research-figs"] } });
+  const runtime = flywheelRuntime({ plan: () => artifactPlan(), research: lateResearch, startup: () => startupUsing("s1") });
+  const outcome = await createMilestoneProposer(store, WORKSPACE, "C:\\repo", () => runtime.rpc, NOW)("");
+  expect(outcome).toMatchObject({ state: "proposed" });
+  expect(runtime.prompts().some((prompt) => prompt.includes("MILESTONE_INPUT_TOO_EARLY"))).toBe(true);
+  const s1 = store.listMilestones(WORKSPACE).find((milestone) => milestone.title === "Crossline 自己用满两周并留下记录")!;
+  expect(store.listMilestoneAnchors(WORKSPACE).find((anchor) => anchor.milestoneId === s1.id)?.inputs).toEqual([]);
+  expect(store.listMilestoneRelations(WORKSPACE)).toEqual([]);
+});
+
+test("redoing one line keeps the other lines' artifacts and re-derives the cross-line links instead of losing them", async () => {
+  seedProfile(); seedStartup();
+  let startup = () => startupUsing("s2");
+  let plan = () => artifactPlan();
+  const runtime = flywheelRuntime({ plan: () => plan(), research: researchWithFigs, startup: () => startup() });
+  const propose = createMilestoneProposer(store, WORKSPACE, "C:\\repo", () => runtime.rpc, NOW);
+  await propose("");
+  const research = store.listMilestones(WORKSPACE).filter((milestone) => milestone.identityId === "research").map((milestone) => milestone.id).sort();
+  const first = store.listMilestoneRelations(WORKSPACE)[0]!;
+
+  startup = () => startupUsing("s3");
+  // Startup's part is planned again: the pair into it is restated from research's kept artifact; research's own artifacts are not.
+  plan = () => artifactPlan({ artifacts: [], needs: [] });
+  const outcome = await propose("", undefined, ["startup"]);
+  expect(outcome).toMatchObject({ state: "proposed" });
+  const planPrompt = runtime.prompts().filter((prompt) => prompt.includes("crossline.artifact-plan.v1")).at(-1)!;
+  expect(planPrompt).toContain('"planLines":["startup"]');
+  expect(planPrompt).toContain('"kept":{"artifacts":[{"id":"research-figs"');
+  // Research was not redone, and its artifact is still in the plan.
+  expect(store.listMilestones(WORKSPACE).filter((milestone) => milestone.identityId === "research" && milestone.status === "draft").map((milestone) => milestone.id).sort()).toEqual(research);
+  expect(JSON.parse(store.getSetting(WORKSPACE, "flywheel.artifacts")!).artifacts.map((artifact: { id: string }) => artifact.id)).toEqual(["research-figs"]);
+  // The old link pointed at a superseded draft and is retired; the new one points at the new draft.
+  const live = store.listMilestoneRelations(WORKSPACE);
+  expect(live).toHaveLength(1);
+  expect(live[0]!.id).not.toBe(first.id);
+  const s3 = store.listMilestones(WORKSPACE).find((milestone) => milestone.status === "draft" && milestone.title === "Crossline 获得十位外部试用者的反馈")!;
+  expect(live[0]).toMatchObject({ toMilestoneId: s3.id, fromMilestoneId: first.fromMilestoneId, status: "candidate", checkOn: "2026-11-30" });
+});
+
+test("a pair an approved downstream milestone rests on survives redoing the upstream line, and its new relation is approved with the new upstream", async () => {
+  seedProfile(); seedStartup();
+  let plan = () => artifactPlan();
+  const runtime = flywheelRuntime({ plan: () => plan(), research: researchWithFigs, startup: () => startupUsing("s2") });
+  const propose = createMilestoneProposer(store, WORKSPACE, "C:\\repo", () => runtime.rpc, NOW);
+  await propose("");
+  const s2 = store.listMilestones(WORKSPACE).find((milestone) => milestone.title === "Crossline 交到第一位外部试用者手里")!;
+  store.saveMilestone({ ...s2, version: 2, status: "approved" });
+  expect(approveArtifactRelationsFor(store, WORKSPACE, "o", s2.id)).toHaveLength(1);
+
+  plan = () => artifactPlan({ artifacts: [], needs: [], supplies: [] });
+  await propose("", undefined, ["research"]);
+  const planPrompt = runtime.prompts().filter((prompt) => prompt.includes("crossline.artifact-plan.v1")).at(-1)!;
+  expect(planPrompt).toContain('"planLines":["research"]');
+  expect(planPrompt).toContain('"supplies":[{"from":"research-figs","toLine":"startup"');
+  const newA = store.listMilestones(WORKSPACE).find((milestone) => milestone.status === "draft" && milestone.title === "西湖图表交付师兄确认")!;
+  const relation = store.listMilestoneRelations(WORKSPACE).find((item) => item.fromMilestoneId === newA.id)!;
+  expect(relation).toMatchObject({ toMilestoneId: s2.id, status: "candidate", artifactId: "research-figs" });
+  store.saveMilestone({ ...newA, version: 2, status: "approved" });
+  expect(approveArtifactRelationsFor(store, WORKSPACE, "o", newA.id)).toEqual([relation.id]);
 });
 
 test("one line that cannot be done does not take the others with it, and the person is told which and why", async () => {

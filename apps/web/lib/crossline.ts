@@ -4,7 +4,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
-import { CrosslineStore, type EvidenceClaimInput, type StoredMilestone } from "@crossline/db";
+import { approveArtifactRelationsFor, CrosslineStore, type EvidenceClaimInput, type StoredMilestone } from "@crossline/db";
 import { availableSlots, deriveCapacity, requiredApproval, validateAvailability, DEFAULT_AVAILABILITY,
   defaultMilestoneTemplates, computeMilestoneConfidence, PRODUCTIVE, type ActivityCategory, validateSuccessCriteria, goalSettingKey, ANALYSIS_CONTEXT_VERSION, calibrationReport, calibratedEstimate,
   type CalibrationReport, presetImportance, taskTitleOf, type ImportancePreset, restoreTargetOf,
@@ -49,7 +49,7 @@ export function planToday(ctx?: AccessContext,
 
 /** The key the weekly availability lives under. One settings row, not a new table. */
 export { AVAILABILITY_SETTING } from "@crossline/core";
-import { AVAILABILITY_SETTING, RELATION_KIND_LABEL, isCancelledEvent } from "@crossline/core";
+import { AVAILABILITY_SETTING, BYPRODUCT_LAG_DAYS, RELATION_KIND_LABEL, isCancelledEvent } from "@crossline/core";
 import { identityLines, linePacks } from "./lines";
 const PREFERENCES_SETTING = "schedule.preferences";
 export type SchedulePreferences = { timeZone: string; mode: "buffered" | "asap";
@@ -1014,6 +1014,8 @@ export function saveMilestoneEdit(ctx: AccessContext, input: MilestoneInput): { 
     type: existing ? "milestone.revised" : "milestone.created", entityId: id,
     payload: { version, status: input.status, title, criteria: input.successCriteria.length }
   });
+  // A cross-line relation is approved together with its downstream milestone (batch or single approval alike).
+  if (input.status === "approved" && existing?.status !== "approved") approveArtifactRelationsFor(store, ctx.workspaceId, ctx.principalId, id);
   return { ok: true, id, version };
 }
 
@@ -1615,7 +1617,7 @@ export function byproductLanding(ctx: AccessContext, order: { payload: unknown }
   const doneAt = store.listExecutions(ctx.workspaceId, primaryId).map((execution) => execution.endedAt).filter((at): at is string => Boolean(at)).sort().at(-1);
   const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
   const doneDay = doneAt ? formatInTimeZone(new Date(doneAt), zone, "yyyy-MM-dd") : planToday(ctx);
-  return { dependsOn: [], dueDate: new Date(Date.parse(`${doneDay}T00:00:00Z`) + 2 * 86_400_000).toISOString().slice(0, 10) };
+  return { dependsOn: [], dueDate: new Date(Date.parse(`${doneDay}T00:00:00Z`) + BYPRODUCT_LAG_DAYS * 86_400_000).toISOString().slice(0, 10) };
 }
 
 export function releaseDayOf(ctx: AccessContext, order: { id: string; payload: unknown }): string | undefined {

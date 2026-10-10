@@ -1,10 +1,11 @@
 import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import { copyFileSync, existsSync } from "node:fs";
-import { advanceWorkOrder, validateAnalysisProposal, validateAnalysisContext, validateMilestoneGateResult, requiredContractRequirements, validateSuccessCriteria, summarizeRhythm,
+import { byproductArtifactId, advanceWorkOrder, validateAnalysisProposal, validateAnalysisContext, validateMilestoneGateResult, requiredContractRequirements, validateSuccessCriteria, summarizeRhythm,
   type MilestoneGateResult, type SuccessCriterion, type WorkOrderEvent, type WorkOrderState,
   type MilestoneTemplateKind, type EvidenceQuestionTemplate, type MilestoneTemplateSource,
   type ChecklistAnswer, type WorkRhythm } from "@crossline/core";
+import { handOffArtifacts } from "./artifacts";
 
 type LedgerEventInput = {
   ownerId: string;
@@ -221,6 +222,11 @@ export type StoredWaitingItem = {
 export type StoredMilestoneAnchor = {
   workspaceId: string; milestoneId: string; stage: number; deadline: string; baseline: string; target: string;
   stakeholders: string[]; sourceFactIds: string[]; dependsOn: string[]; updatedAt: string;
+  /**
+   * Artifact ids (`StoredArtifactPlan`) this milestone produces for other lines and the ones it uses from them; the cross-line relations
+   * are derived from these. Always present when read; left out of a save, the stored ones are kept.
+   */
+  outputs?: string[]; inputs?: string[];
 };
 
 /**
@@ -312,7 +318,19 @@ export type StoredMilestoneRelation = {
   explanation: string | null;
   /** What would show the claim is wrong — the relation's own falsifier, like `staleWhen` on a finding. */
   refutedWhen: string | null;
+  /**
+   * For a relation derived from the artifact plan: the artifact handed over, the measurable transfer promised (and, once checked, what
+   * was delivered), the day it is checked (the downstream deadline) and what the downstream line would lose without it. All null on
+   * relations from before the artifact plan (the nightly flywheel's, the old relations run's).
+   */
+  artifactId: string | null;
+  transfer: { metric: string; expected: number; unit: string; hoursSaved: number; lagDays: number; measured: number | null } | null;
+  checkOn: string | null;
+  counterfactual: string | null;
 };
+
+type RelationExtras = "evidence" | "counterexample" | "costMinutes" | "lastValidatedAt" | "explanation" | "refutedWhen"
+  | "artifactId" | "transfer" | "checkOn" | "counterfactual";
 
 export type StoredEnergyObservation = {
   id: string; ownerId: string; workspaceId: string;
@@ -400,8 +418,11 @@ function notBefore(at: string, floor: string | undefined): string {
 
 export class CrosslineStore {
   readonly #db: Database.Database;
+  /** The ledger file (`:memory:` in tests); the data directory is the folder it sits in. */
+  readonly file: string;
 
   constructor(path: string) {
+    this.file = path;
     this.#db = new Database(path);
     this.#db.pragma("journal_mode = WAL");
     this.#db.pragma("foreign_keys = ON");
@@ -966,6 +987,17 @@ export class CrosslineStore {
             id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, conversation_id TEXT NOT NULL, role TEXT NOT NULL,
             text TEXT NOT NULL, payload_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL);
           CREATE INDEX IF NOT EXISTS conversation_messages_by_conversation ON conversation_messages(workspace_id, conversation_id, created_at);`);
+      } },
+      // Artifact-first joint planning (docs/flywheel-and-views.md §5): a milestone names the artifacts it produces for and uses from other
+      // lines, and a relation derived from those references keeps the artifact, the promised transfer, the check day and the
+      // counterfactual. Plain columns: old anchors read as producing and using nothing, old relations as carrying no artifact.
+      { version: 13, up: () => {
+        if (!has("milestone_anchors", "outputs_json")) this.#db.exec("ALTER TABLE milestone_anchors ADD COLUMN outputs_json TEXT NOT NULL DEFAULT '[]'");
+        if (!has("milestone_anchors", "inputs_json")) this.#db.exec("ALTER TABLE milestone_anchors ADD COLUMN inputs_json TEXT NOT NULL DEFAULT '[]'");
+        if (!has("milestone_relations", "artifact_id")) this.#db.exec("ALTER TABLE milestone_relations ADD COLUMN artifact_id TEXT");
+        if (!has("milestone_relations", "transfer_json")) this.#db.exec("ALTER TABLE milestone_relations ADD COLUMN transfer_json TEXT");
+        if (!has("milestone_relations", "check_on")) this.#db.exec("ALTER TABLE milestone_relations ADD COLUMN check_on TEXT");
+        if (!has("milestone_relations", "counterfactual")) this.#db.exec("ALTER TABLE milestone_relations ADD COLUMN counterfactual TEXT");
       } }
     ];
 
@@ -1201,6 +1233,8 @@ export class CrosslineStore {
       this.#db.prepare(`UPDATE ${table} SET state = ? WHERE workspace_id = ? AND id = ?`)
         .run(isCapture && event.type === "analysis.accepted" ? "promoted" : next.to, workspaceId, id);
       if (!isCapture) this.#recordExecutionEffects(workspaceId, id, current.ownerId, event, update);
+      // A delivered task that produces an artifact hands its files to every task that uses it (docs/flywheel-and-views.md §5.5).
+      if (!isCapture && (event.type === "human.completed" || event.type === "agent.delivered")) handOffArtifacts(this, workspaceId, id);
       if (isCapture && update.attempt !== undefined) {
         this.#db.prepare("UPDATE captures SET attempt = ? WHERE workspace_id = ? AND id = ?").run(update.attempt, workspaceId, id);
       }
@@ -1367,7 +1401,10 @@ export class CrosslineStore {
         intent: `落地：${byproduct.artifact}`.slice(0, 200), state: "approved", riskTier: "routine",
         estimate: { p25Minutes: Math.max(1, Math.round(minutes * 0.7)), p50Minutes: minutes, p85Minutes: Math.round(minutes * 1.6),
           source: "llm_prior", observationCount: 0, confidence: "low" },
+        // A byproduct is a small artifact (`byproductArtifactId`) its main task produces and this task uses, landed within
+        // `BYPRODUCT_LAG_DAYS` of the main task's delivery; the hand-off gives it the main task's files.
         payload: { family: "preparation", byproductOf: primary.id, inheritsFrom: primary.id, dependsOn: [primary.id],
+          uses: [byproductArtifactId(primary.id, byproduct.lineId)],
           contextVersion: (primary.payload as { contextVersion?: string } | undefined)?.contextVersion ?? "",
           humanCore: [{ id: `${id}-core`, intent: byproduct.landing.description, energy: "medium", interruptible: true }],
           automationParts: [], materialContract: [],
@@ -1933,15 +1970,20 @@ export class CrosslineStore {
   }
 
   saveMilestoneAnchor(anchor: StoredMilestoneAnchor): void {
+    // A save that does not mention the artifact references (an edited date from the input box) keeps the stored ones.
+    const stored = anchor.outputs === undefined || anchor.inputs === undefined
+      ? this.listMilestoneAnchors(anchor.workspaceId).find((item) => item.milestoneId === anchor.milestoneId) : undefined;
     this.#db.prepare(`
       INSERT INTO milestone_anchors (workspace_id, milestone_id, stage, deadline, baseline, target, stakeholders_json,
-        source_fact_ids_json, depends_on_json, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        source_fact_ids_json, depends_on_json, updated_at, outputs_json, inputs_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(workspace_id, milestone_id) DO UPDATE SET stage = excluded.stage, deadline = excluded.deadline,
         baseline = excluded.baseline, target = excluded.target, stakeholders_json = excluded.stakeholders_json,
-        source_fact_ids_json = excluded.source_fact_ids_json, depends_on_json = excluded.depends_on_json, updated_at = excluded.updated_at
+        source_fact_ids_json = excluded.source_fact_ids_json, depends_on_json = excluded.depends_on_json, updated_at = excluded.updated_at,
+        outputs_json = excluded.outputs_json, inputs_json = excluded.inputs_json
     `).run(anchor.workspaceId, anchor.milestoneId, anchor.stage, anchor.deadline, anchor.baseline, anchor.target,
-      JSON.stringify(anchor.stakeholders), JSON.stringify(anchor.sourceFactIds), JSON.stringify(anchor.dependsOn), anchor.updatedAt);
+      JSON.stringify(anchor.stakeholders), JSON.stringify(anchor.sourceFactIds), JSON.stringify(anchor.dependsOn), anchor.updatedAt,
+      JSON.stringify(anchor.outputs ?? stored?.outputs ?? []), JSON.stringify(anchor.inputs ?? stored?.inputs ?? []));
   }
 
   saveWaitingItem(item: Omit<StoredWaitingItem, "createdAt" | "updatedAt"> & { createdAt?: string }): { inserted: boolean } {
@@ -2130,7 +2172,8 @@ export class CrosslineStore {
     return rows.map((row) => ({ workspaceId: String(row.workspace_id), milestoneId: String(row.milestone_id), stage: Number(row.stage),
       deadline: String(row.deadline), baseline: String(row.baseline), target: String(row.target),
       stakeholders: JSON.parse(String(row.stakeholders_json)), sourceFactIds: JSON.parse(String(row.source_fact_ids_json)),
-      dependsOn: JSON.parse(String(row.depends_on_json)), updatedAt: String(row.updated_at) }));
+      dependsOn: JSON.parse(String(row.depends_on_json)), updatedAt: String(row.updated_at),
+      outputs: JSON.parse(String(row.outputs_json ?? "[]")), inputs: JSON.parse(String(row.inputs_json ?? "[]")) }));
   }
 
   saveDiligenceReport(report: StoredDiligenceReport): void {
@@ -2401,16 +2444,15 @@ export class CrosslineStore {
     })();
   }
 
-  saveMilestoneRelation(relation:
-    Omit<StoredMilestoneRelation, "evidence" | "counterexample" | "costMinutes" | "lastValidatedAt" | "explanation" | "refutedWhen">
-    & Partial<Pick<StoredMilestoneRelation, "evidence" | "counterexample" | "costMinutes" | "lastValidatedAt" | "explanation" | "refutedWhen">>): void {
+  saveMilestoneRelation(relation: Omit<StoredMilestoneRelation, RelationExtras> & Partial<Pick<StoredMilestoneRelation, RelationExtras>>): void {
     // A relation with no evidence decides nothing, so it is not allowed to claim approval.
     const status = relation.status === "approved" && !(relation.evidence ?? []).length ? "candidate" : relation.status;
     this.#db.prepare(`
       INSERT INTO milestone_relations (
         id, owner_id, workspace_id, from_milestone_id, to_milestone_id, kind, status,
-        evidence_json, counterexample_json, cost_minutes, last_validated_at, explanation, refuted_when, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        evidence_json, counterexample_json, cost_minutes, last_validated_at, explanation, refuted_when, updated_at,
+        artifact_id, transfer_json, check_on, counterfactual
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(workspace_id, id) DO UPDATE SET
         from_milestone_id = excluded.from_milestone_id,
         to_milestone_id = excluded.to_milestone_id,
@@ -2422,13 +2464,18 @@ export class CrosslineStore {
         last_validated_at = excluded.last_validated_at,
         explanation = excluded.explanation,
         refuted_when = excluded.refuted_when,
-        updated_at = excluded.updated_at
+        updated_at = excluded.updated_at,
+        artifact_id = excluded.artifact_id,
+        transfer_json = excluded.transfer_json,
+        check_on = excluded.check_on,
+        counterfactual = excluded.counterfactual
     `).run(
       relation.id, relation.ownerId, relation.workspaceId, relation.fromMilestoneId,
       relation.toMilestoneId, relation.kind, status,
       JSON.stringify(relation.evidence ?? []), JSON.stringify(relation.counterexample ?? []),
       relation.costMinutes ?? null, relation.lastValidatedAt ?? null,
-      relation.explanation ?? null, relation.refutedWhen ?? null, new Date().toISOString()
+      relation.explanation ?? null, relation.refutedWhen ?? null, new Date().toISOString(),
+      relation.artifactId ?? null, relation.transfer ? JSON.stringify(relation.transfer) : null, relation.checkOn ?? null, relation.counterfactual ?? null
     );
   }
 
@@ -2436,7 +2483,17 @@ export class CrosslineStore {
     const rows = this.#db.prepare(
       "SELECT * FROM milestone_relations WHERE workspace_id = ? AND status <> 'archived' ORDER BY id"
     ).all(workspaceId) as Array<Record<string, string>>;
-    return rows.map((row) => ({
+    return rows.map((row) => this.#relationOf(row));
+  }
+
+  /** One relation by id, archived ones included — a re-derivation must not bring back one the person removed or the gate refuted. */
+  getMilestoneRelation(workspaceId: string, id: string): StoredMilestoneRelation | undefined {
+    const row = this.#db.prepare("SELECT * FROM milestone_relations WHERE workspace_id = ? AND id = ?").get(workspaceId, id) as Record<string, string> | undefined;
+    return row ? this.#relationOf(row) : undefined;
+  }
+
+  #relationOf(row: Record<string, string>): StoredMilestoneRelation {
+    return ({
       id: row.id!, ownerId: row.owner_id!, workspaceId: row.workspace_id!,
       fromMilestoneId: row.from_milestone_id!, toMilestoneId: row.to_milestone_id!,
       kind: row.kind as StoredMilestoneRelation["kind"], status: row.status as StoredMilestoneRelation["status"],
@@ -2445,8 +2502,12 @@ export class CrosslineStore {
       costMinutes: row.cost_minutes === null || row.cost_minutes === undefined ? null : Number(row.cost_minutes),
       lastValidatedAt: row.last_validated_at ?? null,
       explanation: row.explanation ?? null,
-      refutedWhen: row.refuted_when ?? null
-    }));
+      refutedWhen: row.refuted_when ?? null,
+      artifactId: row.artifact_id ?? null,
+      transfer: row.transfer_json ? JSON.parse(row.transfer_json) as StoredMilestoneRelation["transfer"] : null,
+      checkOn: row.check_on ?? null,
+      counterfactual: row.counterfactual ?? null
+    });
   }
 
   /**
@@ -3332,3 +3393,4 @@ export * from "./agent";
 export * from "./interview";
 export * from "./file-belonging";
 export * from "./push";
+export * from "./artifacts";

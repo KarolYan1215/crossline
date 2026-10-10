@@ -19,3 +19,9 @@ export const CALENDAR_PUBLISH_FAILURE = "calendar.publish.failure";
 export const ATTENTION_SNAPSHOT = "attention.snapshot";
 /** The person's devices that receive push notifications (`PushSubscriptionRecord[]`, see packages/connectors/src/web-push.ts). */
 export const PUSH_SUBSCRIPTIONS = "push.subscriptions";
+
+/**
+ * The cross-line artifact plan (`StoredArtifactPlan`, packages/core/src/artifact-plan.ts): what each line produces this period and the
+ * supply pairs between lines. In the ledger, not memory, so redoing one line keeps the others' part and a backup carries it.
+ */
+export const ARTIFACT_PLAN_SETTING = "flywheel.artifacts";

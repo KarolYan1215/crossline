@@ -1,6 +1,7 @@
 import "server-only";
-import { archetypeById, goalSettingKey, relevantDocuments, taskProgress, taskTitleOf, type AccessContext, type SuccessCriterion, type EvidenceQuestionTemplate } from "@crossline/core";
-import { listAgentTasks, type CrosslineStore, type StoredMilestone, type StoredWorkOrder, type StoredMaterial, type StoredExecution, type StoredMilestoneRelation,
+import { archetypeById, goalSettingKey, producedArtifacts, relevantDocuments, taskProgress, taskTitleOf, usedArtifacts, type AccessContext, type SuccessCriterion,
+  type EvidenceQuestionTemplate } from "@crossline/core";
+import { listAgentTasks, readStoredArtifactPlan, type CrosslineStore, type StoredMilestone, type StoredWorkOrder, type StoredMaterial, type StoredExecution, type StoredMilestoneRelation,
   type StoredBackgroundFact, type StoredStepPlan, type StoredTaskStep } from "@crossline/db";
 import { defaultIdentityPacks, identityPacksFor } from "@crossline/identity-packs";
 import { getStore, resolvedEstimate, relationKindLabel, accents, suggestedSessionMinutes } from "./crossline";
@@ -26,6 +27,11 @@ function taskExtras(store: CrosslineStore, workspaceId: string, orders: StoredWo
   const confirmed = store.listEvents(workspaceId, { type: "criterion.confirmed" });
   const assessed = store.listEvents(workspaceId, { type: "criteria.assessed" });
   const notes = store.listEvents(workspaceId, { type: "task.note" }).filter((event) => ids.has(event.entityId));
+  const artifactPlan = readStoredArtifactPlan(store, workspaceId);
+  const artifactsById = new Map(artifactPlan.artifacts.map((artifact) => [artifact.id, artifact]));
+  const liveOrders = store.listWorkOrders(workspaceId).filter((order) => order.state !== "archived");
+  const label = (line: string) => labels.get(line) ?? line;
+  const artifactRelations = relations.filter((relation) => relation.artifactId);
   const result = new Map<string, TaskExtras>();
   for (const order of orders) {
     const payload = (order.payload ?? {}) as { notBefore?: string; dueDate?: string; byproducts?: Array<{ lineId: string; artifact: string }>;
@@ -43,6 +49,25 @@ function taskExtras(store: CrosslineStore, workspaceId: string, orders: StoredWo
       }),
       ...(payload.byproducts ?? []).map((item) => ({ line: item.lineId, lineLabel: labels.get(item.lineId) ?? item.lineId, target: item.artifact, artifact: item.artifact, pending: false }))
     ];
+    // 「产出供 自媒体 · …」 and 「使用 研究 · … 的产出」: the task-level side of the artifact relations. A byproduct is already in `supports`.
+    const artifactLinks: NonNullable<TaskExtras["artifactLinks"]> = [
+      ...producedArtifacts(order).filter((id) => !id.startsWith("byproduct:")).flatMap((id) => {
+        const artifact = artifactsById.get(id);
+        const users = liveOrders.filter((other) => other.id !== order.id && usedArtifacts(other).includes(id));
+        const downstream = artifactRelations.filter((relation) => relation.artifactId === id && relation.fromMilestoneId === order.milestoneId)
+          .flatMap((relation) => { const target = milestones.get(relation.toMilestoneId); return target ? [target] : []; });
+        const targets = users.length ? users.map((user) => ({ line: user.identityId, title: taskTitleOf(user) }))
+          : downstream.length ? downstream.map((target) => ({ line: target.identityId, title: target.title }))
+          : artifactPlan.supplies.filter((pair) => pair.from === id).map((pair) => ({ line: pair.toLine, title: pair.use }));
+        return targets.map((target) => ({ direction: "produces" as const, line: target.line, lineLabel: label(target.line), title: target.title, artifact: artifact?.title ?? id }));
+      }),
+      ...usedArtifacts(order).flatMap((id) => {
+        const producer = liveOrders.find((other) => other.id !== order.id && producedArtifacts(other).includes(id));
+        const artifact = artifactsById.get(id);
+        if (producer) return [{ direction: "uses" as const, line: producer.identityId, lineLabel: label(producer.identityId), title: taskTitleOf(producer), artifact: artifact?.title ?? taskTitleOf(producer) }];
+        return artifact ? [{ direction: "uses" as const, line: artifact.line, lineLabel: label(artifact.line), title: artifact.title, artifact: artifact.title }] : [];
+      })
+    ];
     const worked = executions.filter((execution) => execution.workOrderId === order.id && execution.durationObserved).reduce((sum, execution) =>
       sum + Math.max(0, Math.round(((execution.endedAt ? Date.parse(execution.endedAt) : Date.now()) - Date.parse(execution.startedAt)) / 60_000) - execution.pauseMinutes), 0);
     const verdicts = new Map((payload.gateReview?.criteriaVerdict ?? []).map((item) => [item.criterionId, item]));
@@ -56,7 +81,7 @@ function taskExtras(store: CrosslineStore, workspaceId: string, orders: StoredWo
       window: { ...(payload.notBefore ? { notBefore: payload.notBefore } : {}), ...(dueBy ? { dueBy } : {}) },
       ...(plan ? { stepPlan: { archetypeLabel: archetypeById(plan.archetypeId)?.label ?? plan.archetypeId, quantity: plan.quantity, rationale: plan.rationale,
         progress: taskProgress(plan.steps), steps: plan.steps, units: plan.units, questions: plan.questions } } : {}),
-      supports, workedMinutes: worked,
+      supports, workedMinutes: worked, ...(artifactLinks.length ? { artifactLinks } : {}),
       criteria: (milestone?.successCriteria ?? []).map((criterion) => {
         if (personConfirmed.has(criterion.id)) return { id: criterion.id, statement: criterion.statement, quarters: 4, by: "person" as const };
         const assessment = latestAssessment.get(criterion.id);
@@ -150,6 +175,8 @@ export type TaskExtras = {
     steps: StoredTaskStep[]; units: StoredStepPlan["units"]; questions: StoredStepPlan["questions"] };
   /** Other lines this work feeds: the milestone relations from this task's milestone, and its byproducts. */
   supports: Array<{ line: string; lineLabel: string; target: string; artifact?: string; pending: boolean }>;
+  /** Cross-line artifacts at task level: what this task produces for another line's work, and whose output it uses (docs/flywheel-and-views.md §5.5). */
+  artifactLinks?: Array<{ direction: "produces" | "uses"; line: string; lineLabel: string; title: string; artifact: string }>;
   workedMinutes: number;
   /** Each standard the task is judged against, in quarters (0–4) and who said so. */
   criteria: Array<{ id: string; statement: string; quarters: number; by: "person" | "assessment" | "gate" | "none"; note?: string }>;

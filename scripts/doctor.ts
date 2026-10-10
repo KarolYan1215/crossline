@@ -68,7 +68,11 @@ const columns = (table: string) =>
 const expected: Array<[string, string]> = [
   ["milestones", "success_criteria_json"], ["milestones", "verifiability"], ["milestones", "project_id"],
   ["captures", "attempt"], ["work_orders", "recurrence_json"], ["work_orders", "tombstone_json"],
-  ["milestone_relations", "explanation"], ["milestone_relations", "refuted_when"], ["milestone_relations", "evidence_json"]
+  ["milestone_relations", "explanation"], ["milestone_relations", "refuted_when"], ["milestone_relations", "evidence_json"],
+  // Migration 13 (artifact-first planning): only once the file says it ran; a file still at 12 is not yet migrated, not half-migrated.
+  ...(Number(db.pragma("user_version", { simple: true })) >= 13 ? [["milestone_anchors", "outputs_json"], ["milestone_anchors", "inputs_json"],
+    ["milestone_relations", "artifact_id"], ["milestone_relations", "transfer_json"], ["milestone_relations", "check_on"],
+    ["milestone_relations", "counterfactual"]] as Array<[string, string]> : [])
 ];
 for (const [table, column] of expected) {
   if (!columns(table).includes(column)) findings.push(`schema 不完整：${table} 缺少 ${column}（半迁移）`);

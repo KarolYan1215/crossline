@@ -1,5 +1,5 @@
 import { validateSuccessCriteria, type SuccessCriterion } from "./index";
-import { RELATION_KINDS } from "./flywheel-schema";
+import { ARTIFACT_SOFT_CODES, sanitizeArtifactReferences, validateArtifactReferences, type LineArtifacts } from "./artifact-plan";
 import { MILESTONE_PLAN_SCHEMA, validateMilestonePlans, type MilestonePlan, type ProfileForMilestones, type TargetProposal } from "./milestone-plan";
 import { EVIDENCE_QUESTION_SCHEMA, validateEvidenceQuestionBank, type EvidenceQuestionTemplate } from "./milestone-templates";
 
@@ -158,6 +158,11 @@ export type MilestoneProposalContext = {
   profile?: ProfileForMilestones;
   /** Web research the person has accepted: what was found, with where, so a milestone can build on it instead of guessing. */
   diligence?: Array<{ identityId: string; title: string; why: string; kind: string; dueDate: string; claims: string[]; sources: string[] }>;
+  /**
+   * The artifact plan's part for this line (one line per run): what it is to produce for other lines and what other lines supply to it.
+   * The milestones declare them in `plan.outputs` / `plan.inputs`; the cross-line relations are derived from those references.
+   */
+  artifacts?: LineArtifacts;
 };
 
 export function validateMilestoneProposal(value: unknown, context: MilestoneProposalContext): MilestoneProposal {
@@ -207,6 +212,7 @@ export function validateMilestoneProposal(value: unknown, context: MilestoneProp
       }
     }
     validateMilestonePlans(raw.milestones, context.profile, new Set(context.existingMilestones.map((milestone) => milestone.id)), proposals);
+    if (context.artifacts) validateArtifactReferences(raw.milestones, context.artifacts);
   }
   const hedges = raw.blockers.map((blocker) => blocker.message.trim()).filter(Boolean);
   return { milestones: raw.milestones, targetProposals: raw.targetProposals ?? [], assumptions: [...raw.assumptions, ...hedges], blockers: [] };
@@ -222,7 +228,7 @@ export const MILESTONE_SOFT_CODES = new Set(["MILESTONE_TITLE_GENERIC", "MILESTO
   "MILESTONE_OUTCOME_UNSTATED", "MILESTONE_OUTCOME_REQUIRED", "MILESTONE_TARGET_UNPROPOSED", "MILESTONE_TARGET_NOT_CITED", "MILESTONE_TARGET_REQUIRED",
   "MILESTONE_COURSE_PARTS_MISSING", "MILESTONE_PROJECT_MISSING", "MILESTONE_CHAIN_TOO_SHORT", "MILESTONE_CHAIN_TOO_LONG", "MILESTONE_SOURCE_UNCONFIRMED",
   "MILESTONE_SOURCE_REQUIRED", "MILESTONE_BASELINE_REQUIRED", "MILESTONE_ORDER_INCONSISTENT", "MILESTONE_NOT_CHAINED", "MILESTONE_DEPENDENCY_ORDER",
-  "PROPOSAL_TARGET_UNREASONED"]);
+  "PROPOSAL_TARGET_UNREASONED", ...ARTIFACT_SOFT_CODES]);
 
 /**
  * What is left of a milestone answer once a soft refusal is set aside: everything `validateMilestoneProposal` checks without the
@@ -244,103 +250,8 @@ export function keepMilestoneProposal(value: unknown, context: MilestoneProposal
       || !Array.isArray(plan.sourceFactIds) || plan.dependsOn.some((key) => !keys.has(key))) return undefined;
     if (milestone.projectId && !projects.has(milestone.projectId)) return undefined;
   }
-  return { ...kept, targetProposals: (raw.targetProposals ?? []).filter((proposal) => projects.has(proposal.projectId)
+  // Artifact references that would not pass are dropped, so what is stored can only derive valid relations.
+  const milestones = context.artifacts ? sanitizeArtifactReferences(kept.milestones, context.artifacts) : kept.milestones;
+  return { ...kept, milestones, targetProposals: (raw.targetProposals ?? []).filter((proposal) => projects.has(proposal.projectId)
     && proposal.value.trim().length >= 2) };
 }
-
-/**
- * How milestones in different lines feed each other — the thing this app exists to show — asked for in its own, small run after the
- * lines have their milestones. Folded into the milestone answer it made that answer longer than a turn could be repaired in.
- */
-export type ProposedRelation = {
-  fromId: string; toId: string; kind: (typeof RELATION_KINDS)[number];
-  explanation: string; refutedWhen: string; sourceFactIds: string[];
-};
-export const MAX_PROPOSED_RELATIONS = 12;
-export type RelationsProposal = { relations: ProposedRelation[]; assumptions: string[]; blockers: Array<{ code: string; message: string }> };
-export type RelationsContext = {
-  version: "crossline.milestone-relations.v1";
-  /** A reviewer's notes when one relation is being redone; the answer should fix what they name. */
-  feedback?: string;
-  milestones: Array<{ id: string; identityId: string; projectId: string; title: string; stage: number; deadline: string; target: string }>;
-  /** The profile facts a relation may rest on, addressed as the profile addresses them. The interview's own `flywheel_*` guesses are in here. */
-  facts: Array<{ id: string; identityId: string; projectId: string; slot: string; value: string; status: "confirmed" | "inferred" }>;
-};
-
-export const MILESTONE_RELATIONS_SCHEMA = object({
-  relations: list(object({
-    fromId: str, toId: str, kind: { type: "string", enum: [...RELATION_KINDS] },
-    explanation: str, refutedWhen: str, sourceFactIds: strList
-  }), MAX_PROPOSED_RELATIONS),
-  assumptions: strList,
-  blockers: list(object({ code: str, message: str }), 10)
-});
-
-export type RelationWarning = { code: string; detail: string };
-/** A proposed relation that was kept, with what the loose checks found in it — for the reviewer to dismiss or have redone. */
-export type CheckedRelations = RelationsProposal & {
-  warnings: Array<{ fromId: string; toId: string; kind: ProposedRelation["kind"]; warnings: RelationWarning[] }>;
-  /** Relations that could not be stored at all (an end that is not a milestone, an unknown kind, a repeat), each with why. */
-  dropped: string[];
-};
-
-/** How long after the milestone that needs it an output may land before the timing is flagged. */
-const LATE_OUTPUT_DAYS = 14;
-
-/**
- * The loose mechanical check on one cross-line relation. It never refuses: a thin explanation, a missing way to be wrong, no source,
- * both ends in one line, or an output that lands well after the milestone that needs it are flagged for the reviewer, and the
- * relation is still drawn. The 主线 page and the proposer both use it, so a relation looks the same wherever it came from.
- */
-export function relationWarnings(relation: { kind: string; explanation: string; refutedWhen: string; sourceFactIds?: string[] },
-  from: { identityId: string; deadline?: string | undefined }, to: { identityId: string; deadline?: string | undefined }): RelationWarning[] {
-  const warnings: RelationWarning[] = [];
-  if (from.identityId === to.identityId) warnings.push({ code: "RELATION_SAME_LINE", detail: "两端在同一条主线。" });
-  if (relation.explanation.trim().length < 12) warnings.push({ code: "RELATION_EXPLANATION_THIN", detail: "说明过短，未写清可迁移的产出。" });
-  if (relation.refutedWhen.trim().length < 8) warnings.push({ code: "RELATION_REFUTATION_THIN", detail: "未写明证伪条件。" });
-  if (relation.sourceFactIds && !relation.sourceFactIds.length) warnings.push({ code: "RELATION_SOURCE_MISSING", detail: "没有引用画像事实。" });
-  if (relation.kind !== "constrains" && from.deadline && to.deadline
-    && Date.parse(from.deadline) - Date.parse(to.deadline) > LATE_OUTPUT_DAYS * 86_400_000) {
-    warnings.push({ code: "RELATION_LATE_OUTPUT", detail: `产出（${from.deadline}）晚于需要它的里程碑（${to.deadline}）两周以上。` });
-  }
-  return warnings;
-}
-
-/**
- * What a relations answer must be to be stored, and nothing more: both ends real milestones in the input, a known kind, no repeats,
- * fact ids that exist (unknown ones are removed, not fatal). Everything about whether a relation is *good* is a warning, so a strict
- * rule can never leave the flywheel empty; the reviewer reads the warnings afterwards.
- */
-export function validateRelationsProposal(value: unknown, context: RelationsContext): CheckedRelations {
-  const raw = value as RelationsProposal | undefined;
-  if (!raw || !Array.isArray(raw.relations) || !Array.isArray(raw.assumptions) || !Array.isArray(raw.blockers)) throw new Error("RELATION_SCHEMA_INVALID");
-  const byId = new Map(context.milestones.map((milestone) => [milestone.id, milestone]));
-  const facts = new Set(context.facts.map((fact) => fact.id));
-  const seen = new Set<string>();
-  const relations: ProposedRelation[] = [];
-  const warnings: CheckedRelations["warnings"] = [];
-  const dropped: string[] = [];
-  for (const relation of raw.relations) {
-    const from = byId.get(relation.fromId), to = byId.get(relation.toId);
-    const label = `「${relation.fromId} → ${relation.toId}」`;
-    const key = `${relation.fromId}>${relation.toId}:${relation.kind}`;
-    if (!from || !to) { dropped.push(`${label} 两端不是输入中的里程碑`); continue; }
-    if (relation.fromId === relation.toId) { dropped.push(`${label} 两端相同`); continue; }
-    if (!RELATION_KINDS.includes(relation.kind)) { dropped.push(`${label} 类型未知`); continue; }
-    if (seen.has(key)) { dropped.push(`${label} 重复`); continue; }
-    if (relations.length >= MAX_PROPOSED_RELATIONS) { dropped.push(`${label} 超出 ${MAX_PROPOSED_RELATIONS} 条上限`); continue; }
-    seen.add(key);
-    const kept = { ...relation, sourceFactIds: relation.sourceFactIds.filter((id) => facts.has(id)) };
-    relations.push(kept);
-    const found = relationWarnings(kept, { identityId: from.identityId, deadline: from.deadline || undefined }, { identityId: to.identityId, deadline: to.deadline || undefined });
-    if (found.length) warnings.push({ fromId: kept.fromId, toId: kept.toId, kind: kept.kind, warnings: found });
-  }
-  // Only when nothing at all could be kept is the answer sent back: dropping every link would leave the flywheel empty.
-  if (raw.relations.length && !relations.length) {
-    const error = new Error("RELATION_NONE_USABLE");
-    (error as Error & { detail?: string }).detail = `没有一条关系可以保存：${dropped.join("；")}`.slice(0, 400);
-    throw error;
-  }
-  return { relations, assumptions: raw.assumptions, blockers: [], warnings, dropped };
-}
-

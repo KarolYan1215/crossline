@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { CrosslineStore } from "@crossline/db";
+import { CrosslineStore, saveStoredArtifactPlan } from "@crossline/db";
 import { validateBackplan } from "@crossline/core";
 import { createGoalBackplanner } from "./goal-backplanner";
 import { fakeRuntime } from "./testing/fake-runtime";
@@ -257,5 +257,34 @@ test("an existing waiting item linked to a milestone's missing input is passed o
   const runtime = fakeRuntime([JSON.stringify({ steps: [step()], dateCandidates: [], blockers: [] })], "crossline:crossline-goal-backplanner");
   await createGoalBackplanner(store, workspaceId, "C:\repo", () => runtime.rpc)("m");
   expect(runtime.prompts()[0]).toContain('"waitingInputs":[{"what":"实测 MoS₂ 参数数据","who":"师兄","expectedAt":"2026-10-08"}]');
+  store.close();
+});
+
+test("cross-line artifacts at task level: the upstream milestone's task produces it, the downstream one's uses it and waits for it", async () => {
+  const store = new CrosslineStore(":memory:");
+  saveStoredArtifactPlan(store, workspaceId, { version: 1, updatedAt: "t", needs: [],
+    artifacts: [{ id: "research-figs", line: "research", kind: "论文图表", title: "仿真图表", readyBy: "2026-10-20" }],
+    supplies: [{ from: "research-figs", toLine: "media", use: "视频配图", transfer: { metric: "图表", expected: 3, unit: "张" }, lagDays: 3, counterfactual: "要重画，多 6 小时", hoursSaved: 6 }] });
+  const anchor = { workspaceId, stage: 1, baseline: "", target: "", stakeholders: [], sourceFactIds: [], dependsOn: [], updatedAt: "t" };
+  store.saveMilestone({ id: "up", ownerId, workspaceId, identityId: "research", projectId: "p", title: "稳定推进实验", status: "approved", version: 1 });
+  store.saveMilestoneAnchor({ ...anchor, milestoneId: "up", deadline: "2026-10-20", outputs: ["research-figs"], inputs: [] });
+  store.saveMilestone({ id: "down", ownerId, workspaceId, identityId: "media", projectId: "v", title: "发布科普视频", status: "approved", version: 1 });
+  store.saveMilestoneAnchor({ ...anchor, milestoneId: "down", deadline: "2026-11-01", outputs: [], inputs: ["research-figs"] });
+
+  // A first answer that forgets to say which task produces the figures is sent back.
+  const upRuntime = fakeRuntime([JSON.stringify({ steps: [step()], dateCandidates: [], blockers: [] }),
+    JSON.stringify({ steps: [step({ produces: "research-figs", uses: [] })], dateCandidates: [], blockers: [] })], "crossline:crossline-goal-backplanner");
+  expect((await createGoalBackplanner(store, workspaceId, "C:\\repo", () => upRuntime.rpc)("up")).state).toBe("proposed");
+  expect(upRuntime.prompts()[0]).toContain('"produce":[{"id":"research-figs"');
+  expect(upRuntime.prompts()[1]).toContain("BACKPLAN_ARTIFACT_UNPRODUCED");
+  const producer = store.listWorkOrders(workspaceId).find((order) => order.milestoneId === "up")!;
+  expect(producer.payload).toMatchObject({ produces: "research-figs" });
+
+  const downRuntime = fakeRuntime([JSON.stringify({ steps: [step({ sourceQuote: "发布科普视频", uses: ["research-figs"] })], dateCandidates: [], blockers: [] })],
+    "crossline:crossline-goal-backplanner");
+  expect((await createGoalBackplanner(store, workspaceId, "C:\\repo", () => downRuntime.rpc)("down")).state).toBe("proposed");
+  expect(downRuntime.prompts()[0]).toContain('"use":[{"id":"research-figs","title":"仿真图表","fromLine":"research"}]');
+  const user = store.listWorkOrders(workspaceId).find((order) => order.milestoneId === "down")!;
+  expect(user.payload).toMatchObject({ uses: ["research-figs"], dependsOn: [producer.id] });
   store.close();
 });

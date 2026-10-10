@@ -1,6 +1,7 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { relationWarnings, taskProgress, type AccessContext, type SuccessCriterion } from "@crossline/core";
+import { supplyWarnings, taskProgress, timeOrderProblem, type AccessContext, type SuccessCriterion } from "@crossline/core";
+import { readStoredArtifactPlan } from "@crossline/db";
 import { getStore, loadCurrentPlan, milestonesRetiredBySystem, planToday, readGoalSettings, relationKindLabel } from "./crossline";
 import { listCourseTargets } from "./targets";
 import { identityLines } from "./lines";
@@ -16,7 +17,13 @@ export type BoardTick = { id: string; workOrderId: string; taskTitle: string; ou
 export type BoardCriterion = { id: string; statement: string; quarters: number; observed?: string;
   threshold?: { comparator: "gte" | "lte"; value: number; bare?: number; unit: string } };
 export type BoardRelation = { id: string; direction: "out" | "in"; otherId: string; otherTitle: string; otherLine: string; kindLabel: string;
-  explanation: string; refutedWhen: string; pending: boolean; warning?: string };
+  explanation: string; refutedWhen: string; pending: boolean; warning?: string;
+  /** For a relation derived from the artifact plan: the artifact handed over, the transfer promised (and measured once checked), the check day, the counterfactual. */
+  artifact?: { id: string; title: string; kind: string };
+  transfer?: { metric: string; expected: number; unit: string; measured: number | null; lagDays: number; hoursSaved: number };
+  checkOn?: string; counterfactual?: string;
+  /** Set when the upstream milestone is now due too late for the downstream one (a deadline moved after the relation was made): drawn as a red broken line. */
+  broken?: string };
 export type BoardMilestone = {
   id: string; identityId: string; projectId: string; projectName?: string; title: string; status: "draft" | "approved";
   version: number; deadline?: string; daysLeft?: number; dependsOn: string[]; rationale?: string;
@@ -78,6 +85,8 @@ export async function loadMilestoneBoard(ctx: AccessContext): Promise<MilestoneB
   const notes = new Map(store.listEvents(ctx.workspaceId, { type: "milestone.retrospective" })
     .map((event) => [event.entityId, String((event.payload as { note?: string }).note ?? "")]));
   const labels = Object.fromEntries(identityLines(ctx).map((pack) => [pack.id, pack.label]));
+  const artifacts = new Map(readStoredArtifactPlan(store, ctx.workspaceId).artifacts.map((artifact) => [artifact.id, artifact]));
+  const deadlineOf = new Map(milestones.map((milestone) => [milestone.id, readGoalSettings(ctx, milestone.id)?.confirmedDeadline ?? anchors.get(milestone.id)?.deadline]));
 
   const board: BoardMilestone[] = milestones.map((milestone) => {
     const anchor = anchors.get(milestone.id);
@@ -105,14 +114,22 @@ export async function loadMilestoneBoard(ctx: AccessContext): Promise<MilestoneB
       const out = relation.fromMilestoneId === milestone.id;
       const other = byId.get(out ? relation.toMilestoneId : relation.fromMilestoneId);
       if (!other) return [];
-      // The same loose check the proposer runs (never blocking). Once the reviewer has looked and found it sound, it is not shown again.
-      const source = out ? milestone : other, target = out ? other : milestone;
-      const found = dismissed.has(relation.id) ? [] : relationWarnings({ kind: relation.kind, explanation: relation.explanation ?? "", refutedWhen: relation.refutedWhen ?? "" },
-        { identityId: source.identityId, deadline: anchors.get(source.id)?.deadline }, { identityId: target.identityId, deadline: anchors.get(target.id)?.deadline });
+      // The same loose check the proposer runs on a derived relation (never blocking). Once the reviewer has found it sound, it is not shown again.
+      const found = relation.artifactId && !dismissed.has(relation.id)
+        ? supplyWarnings({ use: relation.explanation ?? "", counterfactual: relation.counterfactual ?? "", hoursSaved: relation.transfer?.hoursSaved ?? 0 }) : [];
       const warning = found.map((item) => item.detail).join(" ") || undefined;
+      const artifact = relation.artifactId ? artifacts.get(relation.artifactId) : undefined;
+      const broken = relation.artifactId && relation.transfer
+        ? timeOrderProblem(deadlineOf.get(relation.fromMilestoneId), deadlineOf.get(relation.toMilestoneId), relation.transfer.lagDays, relation.kind === "recurring_feedback") ?? undefined
+        : undefined;
       return [{ id: relation.id, direction: out ? "out" as const : "in" as const, otherId: other.id, otherTitle: other.title, otherLine: other.identityId,
         kindLabel: relationKindLabel[relation.kind] ?? relation.kind, explanation: relation.explanation ?? "", refutedWhen: relation.refutedWhen ?? "",
-        pending: relation.status === "candidate", ...(warning ? { warning } : {}) }];
+        pending: relation.status === "candidate", ...(warning ? { warning } : {}),
+        ...(relation.artifactId ? { artifact: { id: relation.artifactId, title: artifact?.title ?? relation.artifactId, kind: artifact?.kind ?? "" } } : {}),
+        ...(relation.transfer ? { transfer: { metric: relation.transfer.metric, expected: relation.transfer.expected, unit: relation.transfer.unit,
+          measured: relation.transfer.measured, lagDays: relation.transfer.lagDays, hoursSaved: relation.transfer.hoursSaved } } : {}),
+        ...(relation.checkOn ? { checkOn: relation.checkOn } : {}), ...(relation.counterfactual ? { counterfactual: relation.counterfactual } : {}),
+        ...(broken ? { broken } : {}) }];
     });
     const achieved = criteria.length > 0 && criteria.every((criterion) => criterion.quarters === 4);
     const worked = executions.filter((execution) => own.some((order) => order.id === execution.workOrderId) && execution.durationObserved && execution.endedAt)

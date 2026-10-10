@@ -33,6 +33,12 @@ export function EffectivenessCard({ data, labels }: { data: Effectiveness & { de
       <div className="ui-stat"><b>{data.overhead.pendingNow}</b><span>当前待决</span></div>
       <div className="ui-stat"><b>{data.overhead.medianCaptureToScheduled === null ? "—" : `${data.overhead.medianCaptureToScheduled} 分`}</b><span>收集到排入（中位）</span></div>
     </div>
+    <div className="st-health-cell">
+      {data.relations.rate === null ? <div className="ui-stat"><b>—</b></div> : <Ring label="跨线关系兑现率" value={data.relations.rate} />}
+      <div><b>跨线关系兑现率</b><small>{data.relations.checked ? `${data.relations.checked} 条飞轮关系已到核对日，部分兑现按一半计` : "尚无到核对日的飞轮关系"}</small>
+        {data.relations.byKind.filter((kind) => kind.checked >= 2 && kind.rate < 0.5).map((kind) =>
+          <Tag key={kind.kind} tone="risk" title={`${kind.kind}：${kind.checked} 条，兑现 ${pct(kind.rate)}`}>{kind.kind} 兑现偏低</Tag>)}</div>
+    </div>
     <div className="st-health-cell st-health-wide">
       <b>机制覆盖</b>
       {([["有具体时段的承诺任务", data.coverage.datedAndTimed], ["近 7 天有进展记录的里程碑", data.coverage.progressRecorded], ["按时回复的等待项", data.coverage.followUpsOnTime]] as const)

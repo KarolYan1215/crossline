@@ -1,6 +1,6 @@
 ---
 name: crossline-milestone-architect
-description: Propose evidence-verifiable milestones, their success criteria, and cross-identity relationships from approved user goals and current reality.
+description: Propose evidence-verifiable milestones and their success criteria from approved user goals and current reality, producing and using the cross-line artifacts the artifact plan assigns.
 ---
 
 # Crossline Milestone Architect
@@ -10,8 +10,10 @@ This Skill decides **what counts as having got somewhere**. It runs in one of tw
 | input `version` | mode | returns |
 |---|---|---|
 | `crossline.milestone-proposal.v1` | propose new milestones | `{milestones[], assumptions[], blockers[]}` |
-| `crossline.milestone-relations.v1` | links between milestones in different lines | `{relations[], assumptions[], blockers[]}` |
+| `crossline.artifact-plan.v1` | what each line produces and supplies to others | handled by `crossline-artifact-planner`, not here |
 | `crossline.flywheel.v1` | relations between milestones | handled by `crossline-flywheel-scout`, not here |
+
+Links between lines are never proposed here: they are derived from the `outputs` and `inputs` the milestones declare (see **Artifacts** below).
 
 ## How to set a milestone
 
@@ -66,6 +68,8 @@ Once the person has been interviewed, milestones are designed from what they sai
 - `derivation` — the back-calculation, in numbers, from `outcome` to the line you set (see below). Required whenever the milestone has a `threshold`.
 - `sourceFactIds` — fact ids copied exactly from `profile.facts`, at least one of them `confirmed`. A milestone built only on guesses is refused.
 - `dependsOn` — keys of the earlier milestones it builds on; empty only for stage 1.
+- `outputs` — ids of the artifacts (from `artifacts.produce`) this milestone produces; `[]` when none.
+- `inputs` — ids of the artifacts (from `artifacts.consume`) this milestone uses from other lines; `[]` when none.
 
 **A milestone is an event that either happened by its deadline or did not, never a state.** 「课程学习保持可完成状态」, 「稳定推进实验」, 「做好准备」 are refused: nobody can check them on the day. Name the thing: 「ECE 555 期中考试（10/27）」, 「提交 CAD 项目」, 「师兄确认第 3、4 张图可用」. For a course, work from the syllabus dates in the facts — the next quiz, assignment, midterm, project submission or final — and make the nearest one the first milestone; if the facts give no date for it, say so in `assumptions` instead of writing a mood.
 
@@ -77,20 +81,23 @@ Once the person has been interviewed, milestones are designed from what they sai
 
 **Every milestone needs an `outcome` criterion**, exactly as above — in profile mode a milestone without one is refused rather than warned about.
 
-## Relations mode — `crossline.milestone-relations.v1`
+## Artifacts — the input has `artifacts`
 
-Input `{version, milestones[], facts[]}`: milestones that already exist, each `{id, identityId, projectId, title, stage, deadline, target}`, and profile facts `{id, identityId, projectId, slot, value, status}`. How a milestone in one line feeds a milestone in another is the point of having several lines. The person's own words about it are the facts whose slot starts with `flywheel_` (most are `inferred`, which is fine here: a relation is only ever a candidate the person approves or throws out).
+Before the lines are designed, an artifact plan decided what each line produces this period and which few artifacts one line hands to another. `artifacts` is this line's part of it:
 
-Return `{relations[], assumptions[], blockers[]}`, each relation `{fromId, toId, kind, explanation, refutedWhen, sourceFactIds}`:
+- `produce[]` — `{id, kind, title, readyBy, producedBy[], suppliedTo[]}`: artifacts this line makes. `suppliedTo[]` lists the other lines promised it, each with `use`, `transfer` (`expected` `unit` `metric`, e.g. 3 张图表), `lagDays`, `feedback` and the `consumers` — milestones of that line already waiting for it, with their deadlines.
+- `consume[]` — `{id, kind, title, readyBy, fromLine, fromLineLabel, use, transfer, lagDays, feedback, counterfactual, producers[]}`: artifacts other lines will hand to this one, with the milestones already producing them.
 
-- `fromId` / `toId` — milestone ids copied from the input, in **different** lines. Order within a line is already `dependsOn`.
-- `kind` — `enables` (the first makes the second possible), `reuses` (the second reuses what the first produced), `informs`, `constrains` (the first competes with it for time or attention) or `recurring_feedback`. Loops are allowed: media feeding back into research is meant.
-- `explanation` — what it claims, concretely: **name the artefact or capability that transfers** (「研究线的图表脚本 → 自媒体线第 2 期配图」), not a general benefit (「互相促进」). `refutedWhen` — what would be observed if it did not hold.
-- A relation whose output lands well after the milestone that needs it, or whose explanation names nothing that transfers, is flagged for review; it is still drawn, but it will usually be redone.
-- When the input carries `feedback`, a reviewer found a problem with an earlier answer about these milestones: fix exactly what it names. Returning no relation is a valid answer when the feedback shows the link does not hold.
-- `sourceFactIds` — the facts it rests on, copied exactly.
+Rules, all checked in code:
 
-At most twelve, the few that carry weight rather than every pair.
+- **Every artifact promised to another line is produced**: the milestone due at the right time names its id in `plan.outputs` (unless `producedBy` already lists an approved milestone).
+- **An output reaches those waiting for it in time**: the producing milestone is due no later than each consumer's deadline minus `lagDays`.
+- **An input is used for real**: a milestone that builds on another line's artifact names its id in `plan.inputs` **and** uses it in `plan.derivation` by id or title — what it saves or adds, in numbers (「复用 MoS2 器件仿真图 3 张，配图从 6 小时减到 1 小时」).
+- **An input arrives in time**: the milestone is due no earlier than the producing milestone's deadline (or, with none yet, the artifact's `readyBy`) plus `lagDays`.
+- When `feedback` is true the two lines supply each other: count at least one day of lag, and let the returning artifact land on a **later** milestone (the next period), never on the one that started the loop.
+- Never reference an id that is not in `artifacts`. Use only what fits the line's chain; a consume entry this line cannot honestly use is left out and said so in `assumptions`.
+
+The links between lines are derived from these references; nothing else creates them.
 
 
 ## Personal preferences

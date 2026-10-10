@@ -14,6 +14,7 @@ export * from "./materials-schema";
 export * from "./milestone-gate-schema";
 export * from "./milestone-templates";
 export * from "./milestone-plan";
+export * from "./artifact-plan";
 export * from "./onboarding-turn-schema";
 export * from "./line-attributes";
 export * from "./profile-gaps";

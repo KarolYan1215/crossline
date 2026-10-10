@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { BoardMilestone, BoardTick, MilestoneBoard } from "../../lib/milestone-board";
+import type { BoardMilestone, BoardRelation, BoardTick, MilestoneBoard } from "../../lib/milestone-board";
 import { Bullet } from "../ui/charts";
 import { TL, layoutTimeline } from "./timeline-model";
 import { MilestoneDrawer, CourseDrawer } from "./milestone-drawer";
@@ -19,6 +19,8 @@ export function MilestoneTimeline({ board }: { board: MilestoneBoard }) {
   const [tick, setTick] = useState<BoardTick | null>(null);
   // Hovering (or focusing) a milestone lights up its chain steps and relations and the milestones at their other ends; the rest dims.
   const [hover, setHover] = useState<string | null>(null);
+  // Hovering (or focusing) a cross-line edge's label shows what it carries: the artifact, the transfer, the check day, the counterfactual.
+  const [flow, setFlow] = useState<string | null>(null);
   // `?open=<id>` (a link from another page, such as the weekly review) opens that milestone's drawer.
   useEffect(() => {
     const id = new URLSearchParams(location.search).get("open");
@@ -32,7 +34,7 @@ export function MilestoneTimeline({ board }: { board: MilestoneBoard }) {
     ticks: board.milestones.flatMap((milestone) => milestone.ticks.map((item) => ({ id: item.id, milestoneId: milestone.id, line: milestone.identityId,
       day: item.day, state: item.state, plannedDay: item.plannedDay }))),
     relations: board.milestones.flatMap((milestone) => milestone.relations.filter((relation) => relation.direction === "out")
-      .map((relation) => ({ id: relation.id, from: milestone.id, to: relation.otherId, pending: relation.pending, label: relation.kindLabel }))),
+      .map((relation) => ({ id: relation.id, from: milestone.id, to: relation.otherId, pending: relation.pending, label: relation.kindLabel, broken: Boolean(relation.broken) }))),
     lineOrder: board.lineOrder, today: board.today
   });
   if (!layout.nodes.length) return <p className="flow-empty">尚无里程碑。完成初始访谈后生成里程碑草稿。</p>;
@@ -40,6 +42,8 @@ export function MilestoneTimeline({ board }: { board: MilestoneBoard }) {
   const course = selected?.kind === "course" ? board.courses.find((item) => `course:${item.projectId}` === selected.id) : undefined;
   const byId = new Map(board.milestones.map((item) => [item.id, item]));
   const ticksById = new Map(board.milestones.flatMap((item) => item.ticks.map((t) => [t.id, t] as const)));
+  const outgoing = new Map<string, { relation: BoardRelation; from: BoardMilestone }>(board.milestones.flatMap((item) => item.relations.filter((relation) => relation.direction === "out")
+    .map((relation) => [`relation:${relation.id}`, { relation, from: item }] as const)));
 
   const drafts = board.milestones.filter((item) => item.status === "draft");
   const hot = hover ? new Set(layout.edges.filter((edge) => edge.from === hover || edge.to === hover).flatMap((edge) => [edge.id, edge.from, edge.to]).concat(hover)) : null;
@@ -61,9 +65,11 @@ export function MilestoneTimeline({ board }: { board: MilestoneBoard }) {
             markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" className="mt-arrowhead" /></marker></g>)}</defs>
           {layout.edges.map((edge) => <g key={edge.id} data-line={edge.line} data-hot={hot?.has(edge.id) || undefined}
             className={edge.kind === "chain" ? "mt-edge mt-edge-chain" : "mt-edge mt-edge-relation"}>
-            <path d={edge.path} {...(edge.kind === "relation" && !edge.pending ? { pathLength: 1 } : {})} data-pending={edge.pending || undefined}
+            <path d={edge.path} {...(edge.kind === "relation" && !edge.pending && !edge.broken ? { pathLength: 1 } : {})} data-pending={edge.pending || undefined}
+              data-broken={edge.broken || undefined}
               className={edge.kind === "chain" ? "mt-chain" : "mt-relation"} markerEnd={`url(#mt-arrow-${(edge.line ?? "").replace(/[^a-zA-Z0-9_-]/g, "_")})`} />
-            {edge.label && edge.labelX !== undefined && <text x={edge.labelX} y={edge.labelY! - 4} textAnchor="middle" className="mt-relation-label">{edge.label}</text>}
+            {edge.label && edge.labelX !== undefined && !outgoing.get(edge.id)?.relation.artifact
+              && <text x={edge.labelX} y={edge.labelY! - 4} textAnchor="middle" className="mt-relation-label">{edge.label}</text>}
           </g>)}
           <line x1={layout.todayX} x2={layout.todayX} y1={TL.headH - 6} y2={layout.height} className="mt-today" />
           <text x={layout.todayX + 3} y={TL.headH - 8} className="mt-today-label">今天</text>
@@ -71,6 +77,16 @@ export function MilestoneTimeline({ board }: { board: MilestoneBoard }) {
             {item.plannedX !== null && <circle cx={item.plannedX} cy={item.axisY} r={3} className="mt-tick-ghost" />}
           </g>)}
         </svg>
+        {layout.edges.filter((edge) => edge.labelX !== undefined && outgoing.get(edge.id)?.relation.artifact).map((edge) => {
+          const { relation, from } = outgoing.get(edge.id)!;
+          return <div key={edge.id} className="mt-flow" style={{ left: edge.labelX!, top: edge.labelY! - 12 }} data-line={edge.line} data-hot={hot?.has(edge.id) || undefined}>
+            <button type="button" className="mt-flow-chip" data-pending={edge.pending || undefined} data-broken={edge.broken || undefined}
+              aria-label={`${edge.label ?? "飞轮关系"}：${flowSummary(relation)}`} aria-expanded={flow === edge.id}
+              onMouseEnter={() => setFlow(edge.id)} onMouseLeave={() => setFlow(null)} onFocus={() => setFlow(edge.id)} onBlur={() => setFlow(null)}
+              onClick={() => setFlow(flow === edge.id ? null : edge.id)}>{edge.label}</button>
+            {flow === edge.id && <FlowCard relation={relation} from={from} labels={board.labels} />}
+          </div>;
+        })}
         {layout.rows.map((row) => <div key={row.line} className="mt-line" data-line={row.line} style={{ top: row.y, height: row.height, width: TL.labelW - 8 }}>
           <b>{board.labels[row.line] ?? row.line}</b></div>)}
         {layout.ticks.map((item) => {
@@ -106,7 +122,8 @@ export function MilestoneTimeline({ board }: { board: MilestoneBoard }) {
       {layout.ticks.length > 0 && <span><span className="mt-key" data-k="planned" />计划刻度</span>}
       {layout.ticks.some((item) => item.state === "postponed") && <span><span className="mt-key" data-k="postponed" />已顺延</span>}
       {layout.edges.some((edge) => edge.kind === "chain") && <span><span className="mt-key" data-k="chain" />前后依赖</span>}
-      {layout.edges.some((edge) => edge.kind === "relation") && <span><span className="mt-key" data-k="relation" />跨主线关系（颜色为来源主线，虚线为待批准）</span>}
+      {layout.edges.some((edge) => edge.kind === "relation") && <span><span className="mt-key" data-k="relation" />飞轮关系（颜色为来源主线，虚线为待批准）</span>}
+      {layout.edges.some((edge) => edge.broken) && <span><span className="mt-key" data-k="broken" />时间顺序不成立</span>}
       {layout.edges.length > 0 && <span>悬停里程碑可高亮其关联</span>}</p>
     {tick && <div className="mt-result" role="dialog" aria-label="刻度结果">
       <header><b>{tick.state === "done" ? "已达成" : tick.state === "postponed" ? "已顺延" : "计划中"}</b>
@@ -120,14 +137,42 @@ export function MilestoneTimeline({ board }: { board: MilestoneBoard }) {
   </div>;
 }
 
+const mdOf = (day?: string) => day ? md(day) : "—";
+const amountOf = (relation: BoardRelation) => relation.transfer ? `${relation.transfer.expected} ${relation.transfer.unit}${relation.transfer.metric}` : "";
+const flowSummary = (relation: BoardRelation) => [relation.artifact ? `产物「${relation.artifact.title}」` : "", amountOf(relation) ? `预期 ${amountOf(relation)}` : "",
+  relation.checkOn ? `核对日 ${md(relation.checkOn)}` : "", relation.broken ? "时间顺序不成立" : ""].filter(Boolean).join("，");
+
+/** What a cross-line edge carries, on hover or focus: the artifact, the transfer expected and measured, the check day and the counterfactual. */
+function FlowCard({ relation, from, labels }: { relation: BoardRelation; from: BoardMilestone; labels: Record<string, string> }) {
+  return <div className="mt-flow-card" role="tooltip">
+    <b>{labels[from.identityId] ?? from.identityId} → {labels[relation.otherLine] ?? relation.otherLine}</b>
+    <dl>
+      <dt>产物</dt><dd className="gen">{relation.artifact?.title}{relation.artifact?.kind ? ` · ${relation.artifact.kind}` : ""}</dd>
+      <dt>传递量</dt><dd><span className="mono">预期 {amountOf(relation)}</span>{" / "}<span className="mono">实测 {relation.transfer?.measured === null || relation.transfer?.measured === undefined ? "—" : `${relation.transfer.measured} ${relation.transfer.unit}`}</span></dd>
+      <dt>核对日</dt><dd className="mono">{mdOf(relation.checkOn)}{relation.transfer?.lagDays ? ` · 传递 ${relation.transfer.lagDays} 天` : ""}</dd>
+      <dt>反事实</dt><dd className="gen">{relation.counterfactual}{relation.transfer?.hoursSaved ? `（约 ${relation.transfer.hoursSaved} 小时）` : ""}</dd>
+    </dl>
+    {relation.broken && <p className="mt-flow-broken">时间顺序不成立：{relation.broken}</p>}
+    {relation.pending && <small>随下游里程碑「{relation.otherTitle}」一起批准</small>}
+  </div>;
+}
+
 /**
  * What batch approval would add, line by line, before it is approved: each draft with its date and how many criteria it carries, opened
- * in the drawer on click, and one approve / undo pair per line. The same drafts are dashed on the timeline below.
+ * in the drawer on click, and one approve / undo pair per line. The same drafts are dashed on the timeline below. Under each draft, the
+ * cross-line artifacts it uses and supplies, each removable on its own (the relations are approved with the downstream milestone).
  */
 function DraftReview({ drafts, labels, lineOrder, onOpen }: { drafts: BoardMilestone[]; labels: Record<string, string>; lineOrder: string[];
   onOpen: (id: string) => void }) {
   const [state, setState] = useState<Record<string, string>>({});
+  const [removing, setRemoving] = useState<Record<string, string>>({});
   const lines = [...new Set(drafts.map((item) => item.identityId))].sort((a, b) => lineOrder.indexOf(a) - lineOrder.indexOf(b));
+  const remove = async (id: string) => {
+    setRemoving((current) => ({ ...current, [id]: "去掉中…" }));
+    const response = await fetch(`/api/milestone-relations/${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => undefined);
+    if (!response?.ok) { setRemoving((current) => ({ ...current, [id]: "未完成，请刷新后重试" })); return; }
+    location.reload();
+  };
   const decide = async (line: string, decision: "approved" | "archived") => {
     const ids = drafts.filter((item) => item.identityId === line).map((item) => item.id);
     setState((current) => ({ ...current, [line]: decision === "approved" ? "批准中…" : "撤销中…" }));
@@ -147,9 +192,23 @@ function DraftReview({ drafts, labels, lineOrder, onOpen }: { drafts: BoardMiles
             <button type="button" className="primary-button" disabled={Boolean(state[line])} onClick={() => void decide(line, "approved")}>批准 {own.length} 个</button>
             <button type="button" disabled={Boolean(state[line])} onClick={() => void decide(line, "archived")}>撤销</button>
           </span></header>
-        <ul>{own.map((item) => <li key={item.id}><button type="button" onClick={() => onOpen(item.id)}>
-          <span className="mono">{item.deadline ? md(item.deadline) : "未定"}</span><span>{item.title}</span>
-          <small>{item.criteria.length} 项标准{item.ticks.length ? ` · ${item.ticks.length} 个刻度` : ""}</small></button></li>)}</ul>
+        <ul>{own.map((item) => {
+          const flows = item.relations.filter((relation) => relation.artifact && relation.pending);
+          return <li key={item.id}><button type="button" onClick={() => onOpen(item.id)}>
+            <span className="mono">{item.deadline ? md(item.deadline) : "未定"}</span><span>{item.title}</span>
+            <small>{item.criteria.length} 项标准{item.ticks.length ? ` · ${item.ticks.length} 个刻度` : ""}</small></button>
+            {flows.length > 0 && <ul className="mt-draft-flows" aria-label="跨主线产物">{flows.map((relation) =>
+              <li key={relation.id} data-line={relation.otherLine} data-broken={relation.broken ? "" : undefined}>
+                <span className="mt-draft-flow-dir">{relation.direction === "in" ? "使用" : "供给"}</span>
+                <span>{relation.direction === "in" ? `${labels[relation.otherLine] ?? relation.otherLine} · ${relation.otherTitle} 的产出` : `${labels[relation.otherLine] ?? relation.otherLine} · ${relation.otherTitle}`}
+                  「{relation.artifact!.title}」</span>
+                <small className="mono">{amountOf(relation)}{relation.checkOn ? ` · 核对 ${md(relation.checkOn)}` : ""}</small>
+                <button type="button" className="ui-icon-button" aria-label={`去掉「${relation.artifact!.title}」这条飞轮关系`} disabled={Boolean(removing[relation.id])}
+                  onClick={() => void remove(relation.id)}>×</button>
+                {removing[relation.id] && <small role="status">{removing[relation.id]}</small>}
+              </li>)}</ul>}
+          </li>;
+        })}</ul>
         {state[line] && <p role="status">{state[line]}</p>}
       </div>;
     })}

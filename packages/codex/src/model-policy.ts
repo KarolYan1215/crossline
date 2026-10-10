@@ -29,6 +29,7 @@ export const DEFAULT_TIERS: Record<RouteTier, ModelRoute> = {
 export const SKILL_TIERS: Record<string, RouteTier> = {
   "crossline-onboarding": "top",
   "crossline-milestone-architect": "top",
+  "crossline-artifact-planner": "top",
   "crossline-goal-backplanner": "top",
   "crossline-flywheel-scout": "top",
   "crossline-automation-stripper": "mid",

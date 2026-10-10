@@ -3,7 +3,7 @@
 import { useState, type KeyboardEvent, type MouseEvent } from "react";
 import type { TaskDetail } from "../../lib/task-detail";
 import { riskLabel, riskTone, stateLabelFor } from "../../lib/labels";
-import { LineTag, SupportsTag, Tag } from "../ui/tag";
+import { ArtifactTag, LineTag, SupportsTag, Tag } from "../ui/tag";
 import { TaskActions } from "./task-actions";
 import { TaskDialog } from "./task-dialog";
 import { TaskQuickEdit } from "./quick-edit";
@@ -50,6 +50,8 @@ export function TaskCard({ detail, slot, reason, variant = "compact" }: { detail
     {slot && <p className="task-card-slot"><small>下一次</small> <a href={`/plan?day=${slot.day}`} className="mono">{slotLabel(slot)}</a></p>}
     {detail.supports.length > 0 && <p className="task-card-supports">{detail.supports.map((item) =>
       <SupportsTag key={`${item.line}:${item.target}`} line={item.line} lineLabel={item.lineLabel} target={item.target} {...(item.artifact ? { artifact: item.artifact } : {})} />)}</p>}
+    {detail.artifactLinks?.length ? <p className="task-card-supports">{detail.artifactLinks.map((item) =>
+      <ArtifactTag key={`${item.direction}:${item.line}:${item.title}`} {...item} />)}</p> : null}
     <TaskActions workOrderId={detail.id} state={detail.state} paused={detail.paused} agentReady={detail.agentSteps.length > 0} agentStepId={detail.agentSteps[0]?.id} onOpen={() => setOpen(true)}
       offline={{ ownerId: detail.viewerId, workspaceId: detail.workspaceId, intent: detail.intent }} />
     <TaskDialog detail={detail} open={open} onOpenChange={setOpen} />

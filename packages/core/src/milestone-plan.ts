@@ -15,6 +15,13 @@ export type MilestonePlan = {
   outcome: string;
   /** The back-calculation itself, in numbers: from `outcome` to the line set here, and how much margin was left on top of it. */
   derivation: string;
+  /**
+   * Artifact ids (from the artifact plan) this milestone produces for another line, and the ones from other lines it uses — each used one
+   * named in `derivation`. Cross-line relations are derived from these references (`deriveArtifactRelations`). Absent in answers
+   * recorded before the artifact plan existed.
+   */
+  outputs?: string[];
+  inputs?: string[];
 };
 
 /** A target the model proposes for a course from the person's long-term goals. It is stored as an unconfirmed fact, and the person can change it in one click. */
@@ -54,9 +61,11 @@ export const MILESTONE_PLAN_SCHEMA = {
     baseline: text(400), target: text(400), outcome: text(200), derivation: text(600),
     stakeholders: { type: "array", maxItems: 8, items: text(80, 1) },
     sourceFactIds: { type: "array", maxItems: 12, items: text(200, 1) },
-    dependsOn: { type: "array", maxItems: 6, items: text(200, 1) }
+    dependsOn: { type: "array", maxItems: 6, items: text(200, 1) },
+    outputs: { type: "array", maxItems: 6, items: text(64, 1) },
+    inputs: { type: "array", maxItems: 6, items: text(64, 1) }
   },
-  required: ["key", "stage", "deadline", "baseline", "target", "stakeholders", "sourceFactIds", "dependsOn", "outcome", "derivation"]
+  required: ["key", "stage", "deadline", "baseline", "target", "stakeholders", "sourceFactIds", "dependsOn", "outcome", "derivation", "outputs", "inputs"]
 } as const;
 
 /**

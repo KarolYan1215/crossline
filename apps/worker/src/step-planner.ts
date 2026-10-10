@@ -230,7 +230,7 @@ export function warningsAwaitingReview(store: CrosslineStore, workspaceId: strin
 
 /**
  * The second check: a reviewer model reads the flagged output and the warnings and either dismisses them or has the output redone with
- * its notes — a step plan through `replan`, a candidate relation through `reviseRelation`. Something that is itself a redo is never
+ * its notes — a step plan through `replan`, a candidate relation through `reviseRelation` (which designs its receiving line again). Something that is itself a redo is never
  * redone again by the reviewer — one round, so a disagreement cannot loop.
  */
 export function createWarningReviewer(store: CrosslineStore, workspaceId: string, cwd: string, getClient: () => CodexRpcBoundary | undefined,
@@ -300,7 +300,10 @@ function analysisSubject(store: CrosslineStore, workspaceId: string, item: Pendi
       evidence: (payload.evidenceContract ?? []).map((entry) => entry.description), materials: (payload.materialContract ?? []).map((entry) => entry.description) } };
 }
 
-/** A candidate relation with both milestones it joins and the facts it cites — enough to judge whether the claimed transfer is real. */
+/**
+ * A candidate relation with both milestones it joins, the artifact it hands over, the promised transfer, the lag and the counterfactual —
+ * enough to judge whether the claimed transfer is real. A redo designs the receiving line again (`createRelationReviser`).
+ */
 function relationSubject(store: CrosslineStore, workspaceId: string, item: PendingWarning) {
   const relation = store.listMilestoneRelations(workspaceId).find((row) => row.id === item.entityId);
   if (!relation || relation.status !== "candidate") return undefined;
@@ -314,5 +317,6 @@ function relationSubject(store: CrosslineStore, workspaceId: string, item: Pendi
   if (!from || !to) return undefined;
   return { version: "crossline.validation-review.v1", warnings: item.warnings,
     subject: { kind: "milestone_relation", relationKind: relation.kind, from, to, explanation: relation.explanation ?? "", refutedWhen: relation.refutedWhen ?? "",
-      sources: relation.evidence.map((evidence) => evidence.source) } };
+      sources: relation.evidence.map((evidence) => evidence.source),
+      ...(relation.artifactId ? { artifact: relation.artifactId, transfer: relation.transfer, checkOn: relation.checkOn, counterfactual: relation.counterfactual ?? "" } : {}) } };
 }

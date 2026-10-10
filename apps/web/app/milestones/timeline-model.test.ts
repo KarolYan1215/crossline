@@ -5,6 +5,15 @@ const node = (id: string, line: string, day?: string, dependsOn: string[] = []):
   ({ id, line, title: id, status: "approved", kind: "milestone", day, dependsOn });
 
 describe("milestone timeline", () => {
+  it("draws a cross-line edge in the upstream line's colour, dashed while a candidate, and marks one whose time order no longer holds", () => {
+    const layout = layoutTimeline({ nodes: [node("up", "research", "2026-10-31"), node("down", "media", "2026-11-01")], ticks: [],
+      relations: [{ id: "artifact:x:up->down", from: "up", to: "down", pending: true, label: "复用", broken: true },
+        { id: "ok", from: "down", to: "up", pending: false, label: "反馈回路" }], lineOrder: ["research", "media"], today: "2026-10-20" });
+    const edge = (id: string) => layout.edges.find((item) => item.id === `relation:${id}`)!;
+    expect(edge("artifact:x:up->down")).toMatchObject({ kind: "relation", line: "research", pending: true, broken: true, label: "复用" });
+    expect(edge("ok").broken).toBeUndefined();
+  });
+
   it("places milestones by date, so ones due on different days are not stacked in one column", () => {
     const layout = layoutTimeline({ nodes: [node("a", "research", "2026-10-10"), node("b", "research", "2026-10-27"), node("c", "media", "2026-10-10")],
       ticks: [], relations: [], lineOrder: ["research", "media"], today: "2026-10-08" });

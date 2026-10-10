@@ -1,5 +1,5 @@
 import "server-only";
-import { retractedEventIdsIn } from "@crossline/db";
+import { retractedEventIdsIn, withdrawArtifactRelationsFor } from "@crossline/db";
 import { taskTitleOf, type AccessContext, type WorkOrderState } from "@crossline/core";
 import { archiveWorkOrder, getStore, restoreCapture, restoreWorkOrder, saveMilestoneEdit } from "./crossline";
 
@@ -136,6 +136,8 @@ function applyInverse(ctx: AccessContext, inverse: Inverse): { ok: true } | { ok
           const saved = saveMilestoneEdit(ctx, { id, identityId: milestone.identityId, projectId: milestone.projectId ?? "", title: milestone.title,
             status: inverse.status, successCriteria: milestone.successCriteria ?? [], ...(milestone.templateId ? { templateId: milestone.templateId } : {}) });
           if (!saved.ok) return saved;
+          // The cross-line relations approved with it go back to candidates with it.
+          if (inverse.status === "draft") withdrawArtifactRelationsFor(store, ctx.workspaceId, id);
           // Undoing an approval also withdraws the tasks worked back from it that nobody has started; they come back with the next approval.
           if (inverse.status === "draft") for (const order of store.listWorkOrders(ctx.workspaceId)) {
             if (order.milestoneId === id && (order.payload as { backplan?: unknown } | undefined)?.backplan
