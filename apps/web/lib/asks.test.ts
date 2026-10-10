@@ -245,3 +245,30 @@ test("a preparation step the runtime lost is not asked about while the worker wi
   run(2, "AGENT_ARTIFACT_MISSING");
   expect(assistantAsks()).toEqual(["t2"]);
 });
+
+test("only this week's decisions are counted and listed; one whose work starts later waits under 「以后再定」 and comes back by itself", () => {
+  const store = setup();
+  refusedWithMissing(store);
+  // A second milestone due in seven weeks, with a proposal under it and a draft milestone due as far out.
+  store.saveMilestone({ id: "far", ownerId: owner, workspaceId: ws, identityId: "research", projectId: "p", title: "远期里程碑", status: "approved", version: 1 });
+  store.saveMilestoneAnchor({ workspaceId: ws, milestoneId: "far", stage: 1, deadline: "2026-11-25", baseline: "", target: "", stakeholders: [],
+    sourceFactIds: [], dependsOn: [], updatedAt: "2026-10-01T00:00:00Z" });
+  store.saveWorkOrder({ id: "far-task", ownerId: owner, workspaceId: ws, identityId: "research", projectId: "p", milestoneId: "far", intent: "远期任务",
+    state: "awaiting_plan_approval", riskTier: "routine", estimate, payload: {} });
+  store.saveMilestone({ id: "far-draft", ownerId: owner, workspaceId: ws, identityId: "research", projectId: "p", title: "远期草稿", status: "draft", version: 1 });
+  store.saveMilestoneAnchor({ workspaceId: ws, milestoneId: "far-draft", stage: 1, deadline: "2027-01-30", baseline: "", target: "", stakeholders: [],
+    sourceFactIds: [], dependsOn: [], updatedAt: "2026-10-01T00:00:00Z" });
+  const counts = countPending(TEST_CTX);
+  // The two drafts under the milestone due on 10-09 are this week's; the far task and the far draft are not.
+  expect(counts.workOrders).toBe(2);
+  expect(counts.milestoneDrafts).toBe(0);
+  expect(counts.later).toMatchObject({ workOrders: 1, milestoneDrafts: 1 });
+  expect(counts.total).toBe(counts.workOrders + counts.asks + counts.planChanges + counts.research + counts.dates + counts.targets
+    + counts.assistantKinds + counts.assistantQuestions + counts.assistantReviews + counts.questions);
+  // Asks about the near milestone are this week's and carry its importance; nothing about the far one is asked yet.
+  const asks = openAsks(TEST_CTX, NOW);
+  expect(asks.filter((ask) => ask.entityId === "mos2").every((ask) => !ask.entersOn && typeof ask.importance === "number")).toBe(true);
+  // Five weeks on, the far task is this week's.
+  vi.stubEnv("CROSSLINE_FIXED_NOW", "2026-11-18T15:00:00.000Z");
+  expect(countPending(TEST_CTX).later.workOrders).toBe(0);
+});

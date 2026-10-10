@@ -21,6 +21,7 @@ import { requestStepReplan } from "./steps";
 import { unfiledFiles } from "./file-belonging";
 import { decideEvent, eventProposals, publishFixedEvents } from "./fixed-events";
 import { identityLines } from "./lines";
+import { decisionHorizon } from "./horizon";
 
 /** Markers an undo has taken back are as if never written. */
 const live = <T extends { eventId: string }>(ctx: AccessContext, events: T[]): T[] => {
@@ -554,10 +555,14 @@ function snoozes(ctx: AccessContext): AskSnooze[] {
   return live(ctx, getStore().listEvents(ctx.workspaceId, { type: "ask.snoozed" })).map((event) => event.payload as AskSnooze);
 }
 
-/** The asks to show now: snoozed ones left out, most urgent first. */
+/**
+ * The open asks: snoozed ones left out, most urgent first, then the most important milestone's. Each carries `entersOn` when it is not
+ * this week's decision (`lib/horizon.ts`); callers that show this week's decisions use `thisWeek`.
+ */
 export function openAsks(ctx: AccessContext, now = new Date()): Ask[] {
-  return rankAsks(collectAsks(ctx, now), snoozes(ctx), planToday(ctx, now));
+  return rankAsks(decisionHorizon(ctx, now).annotate(collectAsks(ctx, now)), snoozes(ctx), planToday(ctx, now));
 }
+export const thisWeek = (asks: Ask[]) => asks.filter((ask) => !ask.entersOn);
 
 let runtimeCheck: { at: number; ask: Ask | null } | undefined;
 
@@ -585,7 +590,7 @@ async function runtimeAsk(ctx: AccessContext, now: Date): Promise<Ask | null> {
 /** What Today and 待确认 show: the ledger's asks plus whether the AI can run at all. */
 export async function loadAsks(ctx: AccessContext, now = new Date()): Promise<Ask[]> {
   const runtime = process.env.CROSSLINE_E2E_DATA_DIR || process.env.VITEST ? null : await runtimeAsk(ctx, now);
-  return rankAsks([...(runtime ? [runtime] : []), ...collectAsks(ctx, now)], snoozes(ctx), planToday(ctx, now));
+  return rankAsks(decisionHorizon(ctx, now).annotate([...(runtime ? [runtime] : []), ...collectAsks(ctx, now)]), snoozes(ctx), planToday(ctx, now));
 }
 
 export type AskResult = { ok: true } | { ok: false; code: string };

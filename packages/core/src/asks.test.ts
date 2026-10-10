@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { rankAsks, snoozeUntil, urgencyFor, validateAskAnswer, type Ask } from "./asks";
+import { horizonEntry, latestStart, rankAsks, snoozeUntil, urgencyFor, validateAskAnswer, type Ask } from "./asks";
 
 const ask = (id: string, over: Partial<Ask> = {}): Ask => ({ id, kind: "backplan_input", entityId: id, title: id, why: "", urgency: "later",
   raisedAt: "2026-10-07T00:00:00Z", fingerprint: "f1", options: [
@@ -38,5 +38,22 @@ describe("asks", () => {
     const ok = validateAskAnswer(ask("a"), "waiting", { date: "2026-10-09", who: " 师兄 ", extra: "dropped" });
     expect(ok).toMatchObject({ ok: true, values: { date: "2026-10-09", who: "师兄" } });
     expect(ok.ok && "extra" in ok.values).toBe(false);
+  });
+});
+
+describe("the week's decisions", () => {
+  it("work of six cautious hours at three hours a day, due on the 20th, must start by the 18th", () => {
+    expect(latestStart("2026-10-20", 360, 180)).toBe("2026-10-18");
+    expect(latestStart("2026-10-20", 0, 180)).toBe("2026-10-20");
+  });
+  it("a decision is this week's when its latest start is within seven days, and otherwise comes up seven days before it", () => {
+    expect(horizonEntry("2026-10-17", "2026-10-10")).toBeUndefined();
+    expect(horizonEntry(undefined, "2026-10-10")).toBeUndefined();
+    expect(horizonEntry("2026-10-30", "2026-10-10")).toBe("2026-10-23");
+  });
+  it("at equal urgency the more important milestone's ask comes first", () => {
+    const base = { kind: "backplan_input" as const, entityId: "m", why: "", options: [], urgency: "soon" as const, raisedAt: "", fingerprint: "f" };
+    const ranked = rankAsks([{ ...base, id: "a", title: "a", importance: 40 }, { ...base, id: "b", title: "b", importance: 90 }, { ...base, id: "c", title: "c" }], [], "2026-10-10");
+    expect(ranked.map((item) => item.id)).toEqual(["b", "c", "a"]);
   });
 });

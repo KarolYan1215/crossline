@@ -1,17 +1,20 @@
 import "server-only";
 import { profileGaps, type AccessContext } from "@crossline/core";
-import { latestFileDates } from "@crossline/db";
+import { latestFileDates, listAgentTasks } from "@crossline/db";
 import { getStore } from "./crossline";
 import { countProposedTargets } from "./targets";
 import { countAssistantPending } from "./agent";
 import { loadDiligence } from "./diligence";
 import { loadPendingDateBatch } from "./imported-dates";
 import { openAsks } from "./asks";
+import { decisionHorizon } from "./horizon";
 import { identityLines } from "./lines";
 
 /**
- * Everything waiting for the person to say yes or no, in one number per kind. The badge in the header and the
- * confirmation page both read this, so what the badge counts is exactly what the page lists.
+ * Everything waiting for the person to say yes or no this week, in one number per kind. The badge in the header and the
+ * confirmation page both read this, so what the badge counts is exactly what the page lists. Task proposals, milestone drafts, asks
+ * and assistant results whose work need not start within seven days (`lib/horizon.ts`) are counted in `later` instead and come
+ * into the week's numbers by themselves.
  */
 export type PendingCounts = {
   total: number;
@@ -42,16 +45,28 @@ export type PendingCounts = {
    * input, something awaited that was due, a refused capture, a failed gate, a milestone at risk. Snoozed ones are not counted.
    */
   asks: number;
+  /** Decisions that are not this week's, by kind; not in `total`. */
+  later: { workOrders: number; milestoneDrafts: number; asks: number; assistantReviews: number; total: number };
 };
 
 export function countPending(ctx: AccessContext): PendingCounts {
   const store = getStore();
   const assistant = countAssistantPending(ctx);
   const latestPlan = store.listPlanVersions(ctx.workspaceId)[0];
+  const horizon = decisionHorizon(ctx);
+  const orders = store.listWorkOrders(ctx.workspaceId);
+  const split = <T>(items: T[], deferred: (item: T) => boolean) => { const later = items.filter(deferred).length; return { now: items.length - later, later }; };
+  const proposals = split(orders.filter((order) => order.state === "awaiting_plan_approval"), (order) => Boolean(horizon.orderEntry(order)));
+  const drafts = split(store.listMilestones(ctx.workspaceId).filter((milestone) => milestone.status === "draft"), (milestone) => Boolean(horizon.milestoneEntry(milestone.id)));
+  const asks = split(openAsks(ctx), (ask) => Boolean(ask.entersOn));
+  const reviews = split(listAgentTasks(store, ctx.workspaceId).filter((task) => task.status === "needs_review"), (task) => {
+    const order = orders.find((item) => item.id === task.workOrderId);
+    return Boolean(order && horizon.orderEntry(order));
+  });
   const counts = {
-    workOrders: store.listWorkOrders(ctx.workspaceId).filter((order) => order.state === "awaiting_plan_approval").length,
+    workOrders: proposals.now,
     planChanges: latestPlan ? store.listPlanChanges(ctx.workspaceId, latestPlan.id).filter((change) => change.status === "pending").length : 0,
-    milestoneDrafts: store.listMilestones(ctx.workspaceId).filter((milestone) => milestone.status === "draft").length,
+    milestoneDrafts: drafts.now,
     relations: store.listMilestoneRelations(ctx.workspaceId).filter((relation) => relation.status === "candidate").length,
     research: loadDiligence(ctx).filter((report) => report.status === "done")
       .reduce((sum, report) => sum + report.proposals.filter((proposal) => proposal.status === "pending").length, 0),
@@ -59,8 +74,8 @@ export function countPending(ctx: AccessContext): PendingCounts {
     targets: countProposedTargets(ctx),
     assistantKinds: assistant.categories,
     assistantQuestions: assistant.approvals,
-    assistantReviews: assistant.reviews,
-    asks: openAsks(ctx).length,
+    assistantReviews: reviews.now,
+    asks: asks.now,
     questions: profileGaps({
       identities: identityLines(ctx).map((pack) => ({ id: pack.id, label: pack.label })),
       projects: store.listProjects(ctx.workspaceId).map(({ id, identityId, name }) => ({ id, identityId, name })),
@@ -71,5 +86,7 @@ export function countPending(ctx: AccessContext): PendingCounts {
   // Candidate relations are judged against each other in the weekly review (`/review`), not one by one as they arrive: they stay
   // listed there and are left out of the number that asks for today's decisions.
   const { relations: _weekly, ...today } = counts;
-  return { ...counts, total: Object.values(today).reduce((sum, value) => sum + value, 0) };
+  const later = { workOrders: proposals.later, milestoneDrafts: drafts.later, asks: asks.later, assistantReviews: reviews.later };
+  return { ...counts, total: Object.values(today).reduce((sum, value) => sum + value, 0),
+    later: { ...later, total: Object.values(later).reduce((sum, value) => sum + value, 0) } };
 }

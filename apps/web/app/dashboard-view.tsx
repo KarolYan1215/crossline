@@ -1,7 +1,7 @@
 import type { CSSProperties } from "react";
 import { OfflineReplay } from "./offline-command-forms";
 import { Conversation } from "./chat/conversation";
-import { AskList } from "./ask-list";
+import { AskStack } from "./ask-list";
 import type { Ask } from "@crossline/core";
 import { AnalogClock } from "./analog-clock";
 import { EnergyProbe } from "./energy-probe";
@@ -122,7 +122,7 @@ export function DashboardView({ data }: { data: DashboardData }) {
         <EnergyProbe context="after_rest" />
       </div>}
 
-      <AskList initial={data.asks ?? []} visible={3} moreHref="/approvals#asks" />
+      <AskStack initial={data.asks ?? []} moreHref="/approvals#asks" />
 
       <section className="panel capture-line" aria-labelledby="capture-title">
         <header><h2 id="capture-title">输入</h2><small>收集、修改、回答、提问，先确认再生效</small></header>

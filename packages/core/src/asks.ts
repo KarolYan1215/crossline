@@ -42,6 +42,10 @@ export type Ask = {
   raisedAt: string;
   /** Changes whenever the underlying thing changes; a snooze lasts only while it stays the same. */
   fingerprint: string;
+  /** The importance (0–100) of the milestone it bears on, when it bears on one; orders asks of equal urgency. */
+  importance?: number;
+  /** Set when the decision is not this week's: the day it comes into the week's decisions (see `horizonEntry`). */
+  entersOn?: string;
 };
 /** `until` is the person's local day (`YYYY-MM-DD`) on which the ask comes back. */
 export type AskSnooze = { askId: string; until: string; fingerprint: string };
@@ -61,14 +65,32 @@ export function urgencyFor(dueDay: string | undefined, today: string): AskUrgenc
 
 const URGENCY_RANK: Record<AskUrgency, number> = { now: 0, soon: 1, later: 2 };
 
-/** Snoozed asks removed (unless the thing changed since), the rest most urgent first, then soonest due, then oldest. */
+/**
+ * Decisions are asked for a week ahead, not all at once (decided 2026-10-10: 55 were waiting and one bore on the next seven days).
+ * A decision belongs to this week when the latest day the work behind it can start — its due day less the days its cautious
+ * estimate takes — falls within `HORIZON_DAYS`; anything without a date belongs to this week, since nothing says it can wait.
+ */
+export const HORIZON_DAYS = 7;
+const plusDays = (day: string, days: number) => new Date(Date.parse(`${day}T12:00:00Z`) + days * DAY).toISOString().slice(0, 10);
+/** The latest day work of `leadMinutes` can start to finish by `due`, at `dailyMinutes` of work a day. */
+export function latestStart(due: string, leadMinutes: number, dailyMinutes: number): string {
+  return plusDays(due, -Math.ceil(Math.max(0, leadMinutes) / Math.max(30, dailyMinutes)));
+}
+/** `undefined` when the decision is this week's; otherwise the day it comes into the week (`HORIZON_DAYS` before `decideBy`). */
+export function horizonEntry(decideBy: string | undefined, today: string): string | undefined {
+  if (!decideBy) return undefined;
+  const enters = plusDays(decideBy, -HORIZON_DAYS);
+  return enters <= today ? undefined : enters;
+}
+
+/** Snoozed asks removed (unless the thing changed since), the rest most urgent first, then most important, then soonest due, then oldest. */
 export function rankAsks(asks: Ask[], snoozes: AskSnooze[], today: string): Ask[] {
   const latest = new Map<string, AskSnooze>();
   for (const snooze of snoozes) latest.set(snooze.askId, snooze);
   return asks.filter((ask) => {
     const snooze = latest.get(ask.id);
     return !snooze || snooze.until <= today || snooze.fingerprint !== ask.fingerprint;
-  }).sort((a, b) => URGENCY_RANK[a.urgency] - URGENCY_RANK[b.urgency]
+  }).sort((a, b) => URGENCY_RANK[a.urgency] - URGENCY_RANK[b.urgency] || (b.importance ?? 50) - (a.importance ?? 50)
     || (a.dueDay ?? "9999").localeCompare(b.dueDay ?? "9999") || a.raisedAt.localeCompare(b.raisedAt));
 }
 

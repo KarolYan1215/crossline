@@ -579,6 +579,19 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .ask-group>ol{margin-top:4px}
 .ask-input{border-top:1px solid var(--mist);padding-top:8px;min-width:0}
 .ask-input h4{margin:0 0 4px;font-size:14px;overflow-wrap:anywhere}
+/* Today's asks as a stack: the top one open, the next two as edges beneath it, each a little narrower. */
+.ask-stack-nav{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--graphite)}
+.ask-stack-nav .text-button{min-width:32px;padding:2px 8px;font-size:14px}
+.ask-stack-nav a{margin-left:4px}
+.ask-stack .ask-deck{position:relative;z-index:2}
+.ask-stack .ask-deck>.ask-card{box-shadow:0 2px 6px rgb(0 0 0 / .06)}
+.ask-peek{display:block;width:auto;text-align:left;font:inherit;font-size:12px;color:var(--graphite);background:var(--paper);cursor:pointer;
+  border:1px solid var(--mist);border-top:0;border-left:4px solid var(--lc,var(--mist));padding:10px 10px 5px;margin:-6px 0 0;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.ask-peek[data-depth="1"]{margin-inline:8px;position:relative;z-index:1}
+.ask-peek[data-depth="2"]{margin-inline:16px}
+.ask-peek:hover{color:var(--ink)}
+.proposal-enters{font-size:12px;color:var(--graphite)}
 
 /* ── undo: top-bar list and the toast after an operation ── */
 .undo-trigger{padding:4px 10px;border:1px solid var(--mist);background:transparent;color:var(--graphite);font:inherit;font-size:13px;font-weight:600;cursor:pointer}

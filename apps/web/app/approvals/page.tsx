@@ -10,11 +10,10 @@ import { TaskCard } from "../task/task-card";
 import { loadTaskDetailsBatch } from "../../lib/task-detail";
 import { countPending } from "../../lib/pending";
 import { loadAsks } from "../../lib/asks";
+import { decisionHorizon } from "../../lib/horizon";
 import { AskList } from "../ask-list";
 
 export const dynamic = "force-dynamic";
-
-const FIRST_PROPOSALS = 5;
 
 export default async function ApprovalsPage() {
   const ctx = await requireSessionContext();
@@ -38,14 +37,21 @@ export default async function ApprovalsPage() {
   }
   const pending = countPending(ctx);
   const asks = await loadAsks(ctx);
+  const weekAsks = asks.filter((ask) => !ask.entersOn), laterAsks = asks.filter((ask) => ask.entersOn);
+  const horizon = decisionHorizon(ctx);
   const anchors = new Map(getStore().listMilestoneAnchors(ctx.workspaceId).map((anchor) => [anchor.milestoneId, anchor]));
   const executions = getStore().listExecutions(ctx.workspaceId);
+  const ordersById = new Map(getStore().listWorkOrders(ctx.workspaceId).map((item) => [item.id, item]));
+  const deferredOrder = (workOrderId: string) => { const order = ordersById.get(workOrderId); return order ? horizon.orderEntry(order) : undefined; };
   const taskDetails = loadTaskDetailsBatch(ctx, [...evidenceReviews, ...proposals].map((item) => item.id));
   const autoApproved = recentAutoApprovals(ctx);
-  // Soonest milestone deadline first: the queue is read top-down, and five is about what a person decides
-  // well in one sitting — the rest wait folded instead of lengthening the page.
+  // Soonest milestone deadline first. Proposals whose work need not start within a week wait folded under 「以后再定」, the soonest
+  // to come up first, and come into the week's list by themselves (`lib/horizon.ts`).
   const deadlineOf = (milestoneId: string) => anchors.get(milestoneId)?.deadline ?? "9999-12-31";
   const sortedProposals = [...proposals].sort((a, b) => deadlineOf(a.milestoneId).localeCompare(deadlineOf(b.milestoneId)));
+  const entersOn = new Map(sortedProposals.map((item) => [item.id, horizon.orderEntry(item)]));
+  const weekProposals = sortedProposals.filter((item) => !entersOn.get(item.id));
+  const laterProposals = sortedProposals.filter((item) => entersOn.get(item.id)).sort((a, b) => entersOn.get(a.id)!.localeCompare(entersOn.get(b.id)!));
   // The earliest suggested block per proposal (a split task has several; the first is when it would start).
   const slotOf = new Map<string, { day: string; start: string; end: string }>();
   for (const block of [...plan.blocks].filter((item) => item.id.startsWith("proposed:") && item.day)
@@ -57,25 +63,28 @@ export default async function ApprovalsPage() {
     const detail = taskDetails.get(item.id);
     if (!detail) return null;
     const slot = slotOf.get(item.id);
+    const enters = entersOn.get(item.id);
     return <div key={item.id} className="proposal-item">
       <label className="proposal-check"><input type="checkbox" name="proposal" value={item.id} defaultChecked /><span className="sr-only">选中「{item.intent}」</span></label>
       <TaskCard detail={detail} slot={slot} />
+      {enters && <small className="proposal-enters">{enters.slice(5)} 起列入本周</small>}
     </div>;
   };
   // Drafts, plan differences, targets and interview items are decided where they live (主线, 计划, 访谈); here they are counted and
   // linked. What is decided here is listed in full below.
   return <SubpageShell active="待确认" title="待确认"
-    description={pending.total ? `${pending.total} 项待决定。内部、可撤销的准备步骤自动生效，24 小时内可撤销；其余需要批准。` : "暂无待决定事项。"}>
+    description={`${pending.total ? `本周 ${pending.total} 项待决定。` : "本周暂无待决定事项。"}${pending.later.total ? `另有 ${pending.later.total} 项的工作一周后才需开始，列在「以后再定」，到时自动列入本周。` : ""}内部、可撤销的准备步骤自动生效，24 小时内可撤销。`}>
     <section className="pending-list" aria-label="待确认汇总">
       {([
-        ["待决事项", asks.length, "#asks"], ["任务提案", pending.workOrders, "#proposals"], ["待验收", evidenceReviews.length, "#evidence"],
+        ["待决事项", weekAsks.length, "#asks"], ["任务提案", pending.workOrders, "#proposals"], ["待验收", evidenceReviews.length, "#evidence"],
         ["助手", pending.assistantKinds + pending.assistantQuestions + pending.assistantReviews, "#assistant"],
         ["里程碑草稿", pending.milestoneDrafts, "/milestones"], ["计划差异", pending.planChanges, "/plan#plan-changes"], ["分数线待审阅", pending.targets, "/milestones"],
-        ["调研建议", pending.research, "/onboarding"], ["文件中的日期", pending.dates, "/onboarding"], ["访谈问题", pending.questions, "/onboarding"]
+        ["调研建议", pending.research, "/onboarding"], ["文件中的日期", pending.dates, "/onboarding"], ["访谈问题", pending.questions, "/onboarding"],
+        ["以后再定", pending.later.total, "#later"]
       ] as const).filter(([, count]) => count > 0).map(([label, count, href]) =>
         <a key={label} className="panel" href={href}><b>{count}</b><span>{label}</span></a>)}
     </section>
-    <AskList initial={asks} visible={50} />
+    <AskList initial={weekAsks} />
     {autoApproved.length > 0 && <section className="pending-block" aria-label="最近自动生效">
       <h2>最近自动生效 · {autoApproved.length}</h2>
       <p className="review-note">内部、可撤销的准备步骤；撤销后回到提案，不再自动生效。</p>
@@ -85,7 +94,7 @@ export default async function ApprovalsPage() {
       </li>)}</ul>
     </section>}
     {permissionModeEnabled(ctx) && <PermissionModePanel initialCandidates={permissionCandidates(ctx).filter((item) => item.kind !== "insight")} />}
-    <AssistantReview ctx={ctx} />
+    <AssistantReview ctx={ctx} deferred={deferredOrder} />
     <section className="approval-ledger" id="evidence">
       {evidenceReviews.map((item) => {
         const own = claims.filter((claim) => claim.workOrderId === item.id && claim.reviewStatus === "submitted");
@@ -112,12 +121,16 @@ export default async function ApprovalsPage() {
             : <AcceptEvidenceButton workOrderId={item.id} />}</article>;
       })}
     </section>
-    {proposals.length > 0 && <ProposalBatchForm count={proposals.length}>
-      <section className="work-order-list" id="proposals">{sortedProposals.slice(0, FIRST_PROPOSALS).map(renderProposal)}</section>
-      {sortedProposals.length > FIRST_PROPOSALS && <details className="fold advanced">
-        <summary>以后再说 · 还有 {sortedProposals.length - FIRST_PROPOSALS} 个（截止更远或没有截止）</summary>
-        <section className="work-order-list">{sortedProposals.slice(FIRST_PROPOSALS).map(renderProposal)}</section>
-      </details>}
+    {weekProposals.length > 0 && <ProposalBatchForm count={weekProposals.length}>
+      <section className="work-order-list" id="proposals">{weekProposals.map(renderProposal)}</section>
     </ProposalBatchForm>}
+    {(laterProposals.length > 0 || laterAsks.length > 0 || pending.later.milestoneDrafts > 0) && <details className="fold advanced" id="later">
+      <summary>以后再定 · {laterProposals.length + laterAsks.length + pending.later.milestoneDrafts} 项（工作一周后才需开始，到时自动列入本周）</summary>
+      <AskList initial={laterAsks} scope="later" heading="以后再定的待决事项" />
+      {pending.later.milestoneDrafts > 0 && <p><a href="/milestones">{pending.later.milestoneDrafts} 个里程碑草稿</a>在主线页，截止较远。</p>}
+      {laterProposals.length > 0 && <ProposalBatchForm count={laterProposals.length}>
+        <section className="work-order-list">{laterProposals.map(renderProposal)}</section>
+      </ProposalBatchForm>}
+    </details>}
   </SubpageShell>;
 }

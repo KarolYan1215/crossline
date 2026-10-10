@@ -110,6 +110,8 @@ export const MAX_STEPS = 40;
 /** A task is 30 minutes to 8 hours of usual work (longer work is split into tasks); a step is 5 minutes to 4 hours. */
 export const TASK_MINUTES = { min: 30, max: 480 } as const;
 export const STEP_MINUTES = { min: 5, max: 240 } as const;
+/** What the person may set by hand on a task or a step: 15 minutes to 8 hours (the slider's range; decided 2026-10-10). */
+export const EDIT_MINUTES = { min: 15, max: 480 } as const;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 /** The hard check: the shape. Throws so the runner sends the problem back on the same thread. */

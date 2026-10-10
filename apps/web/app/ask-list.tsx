@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Ask, AskOption } from "@crossline/core";
 import { PENDING_CHANGED } from "./pending-badge";
 
@@ -12,30 +12,85 @@ const URGENCY: Record<Ask["urgency"], string> = { now: "今天要答", soon: "�
  * 「下周再问」. Answering one takes it off the list and the next comes up without reloading the page — the list itself is
  * fetched again, because an answer can resolve or raise others (handing over a missing input re-plans the milestone).
  */
-export function AskList({ initial, visible, moreHref }: { initial: Ask[]; visible: number; moreHref?: string }) {
-  const [asks, setAsks] = useState(initial);
+type Scope = "week" | "later";
+const inScope = (scope: Scope) => (ask: Ask) => scope === "later" ? Boolean(ask.entersOn) : !ask.entersOn;
+
+/** The asks of one scope (this week's, or those that can wait), kept current after each answer. */
+function useAsks(initial: Ask[], scope: Scope) {
+  const [asks, setAsks] = useState(() => initial.filter(inScope(scope)));
   const reload = async () => {
     const response = await fetch("/api/asks", { cache: "no-store" }).catch(() => null);
     const body = await response?.json().catch(() => null) as { asks?: Ask[] } | null;
-    if (body?.asks) setAsks(body.asks);
+    if (body?.asks) setAsks(body.asks.filter(inScope(scope)));
   };
-  if (!asks.length) return null;
   const onDone = (id: string) => {
     setAsks((list) => list.filter((item) => item.id !== id));
     window.dispatchEvent(new Event(PENDING_CHANGED));
     void reload();
   };
-  return <section className="ask-list" id="asks" aria-label="待决事项">
-    <header><h2>待决事项 · {asks.length}</h2>
-      {asks.length > visible && moreHref && <a href={moreHref}>其余 {asks.length - visible} 条 →</a>}</header>
-    <ol>{groupByMilestone(asks.slice(0, visible)).map((group) => group.inputs
-      ? <li key={group.asks[0]!.id} className="ask-card ask-group" data-line={group.asks[0]!.line} data-urgency={group.asks[0]!.urgency}>
-        <AskMeta ask={group.asks[0]!} />
-        <h3>{group.subject}还缺 {group.asks.length} 样东西</h3>
-        <ol>{group.asks.map((ask, index) => <AskCard key={ask.id} ask={ask} heading={group.inputs![index]!} onDone={onDone} />)}</ol>
-      </li>
-      : <AskCard key={group.asks[0]!.id} ask={group.asks[0]!} onDone={onDone} />)}</ol>
+  return { asks, onDone };
+}
+
+/** The full list, on 待确认: this week's asks, or (`scope="later"`) those whose decision can wait, each with the day it comes up. */
+export function AskList({ initial, scope = "week", heading = "待决事项" }: { initial: Ask[]; scope?: Scope; heading?: string }) {
+  const { asks, onDone } = useAsks(initial, scope);
+  if (!asks.length) return null;
+  return <section className="ask-list" id={scope === "later" ? "later-asks" : "asks"} aria-label={heading}>
+    <header><h2>{heading} · {asks.length}</h2></header>
+    <ol>{groupByMilestone(asks).map((group) => <AskGroup key={group.asks[0]!.id} group={group} onDone={onDone} />)}</ol>
   </section>;
+}
+
+/**
+ * Today's asks as a stack (decided 2026-10-10): only the top one open, the next two as edges beneath it, most urgent first and, at
+ * equal urgency, the more important milestone's first. Answering the top one brings up the next; ‹ › and the left and right arrow keys
+ * (anywhere on the page, except while typing, on a slider or in a dialog) move through the stack without answering.
+ */
+export function AskStack({ initial, moreHref }: { initial: Ask[]; moreHref?: string }) {
+  const { asks, onDone } = useAsks(initial, "week");
+  const [index, setIndex] = useState(0);
+  const groups = groupByMilestone(asks);
+  const count = groups.length;
+  useEffect(() => {
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
+      if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || event.defaultPrevented) return;
+      const target = event.target as HTMLElement | null;
+      if (target && (/^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName) || target.isContentEditable || target.closest('[role="slider"],[role="dialog"],dialog'))) return;
+      if (document.querySelector("dialog[open]")) return;
+      event.preventDefault();
+      setIndex((current) => Math.max(0, Math.min(count - 1, Math.min(current, count - 1) + (event.key === "ArrowRight" ? 1 : -1))));
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [count]);
+  if (!count) return null;
+  const at = Math.min(index, count - 1);
+  const go = (step: number) => setIndex(Math.max(0, Math.min(count - 1, at + step)));
+  const top = groups[at]!;
+  const below = groups.slice(at + 1, at + 3);
+  return <section className="ask-list ask-stack" id="asks" aria-label="待决事项">
+    <header><h2>待决事项 · {asks.length}</h2>
+      <nav className="ask-stack-nav" aria-label="切换待决事项">
+        <button type="button" className="text-button" aria-label="上一项" disabled={at === 0} onClick={() => go(-1)}>‹</button>
+        <span className="mono" aria-live="polite">{at + 1} / {count}</span>
+        <button type="button" className="text-button" aria-label="下一项" disabled={at === count - 1} onClick={() => go(1)}>›</button>
+        {moreHref && <a href={moreHref}>全部</a>}
+      </nav></header>
+    <ol className="ask-deck"><AskGroup key={top.asks[0]!.id} group={top} onDone={onDone} /></ol>
+    {below.map((group, depth) => <button key={group.asks[0]!.id} type="button" className="ask-peek" data-depth={depth + 1} data-line={group.asks[0]!.line}
+      onClick={() => setIndex(at + depth + 1)}>{group.inputs ? `${group.subject}还缺 ${group.asks.length} 样东西` : group.asks[0]!.title}</button>)}
+  </section>;
+}
+
+function AskGroup({ group, onDone }: { group: { asks: Ask[]; subject?: string; inputs?: string[] }; onDone: (id: string) => void }) {
+  return group.inputs
+    ? <li className="ask-card ask-group" data-line={group.asks[0]!.line} data-urgency={group.asks[0]!.urgency}>
+      <AskMeta ask={group.asks[0]!} />
+      <h3>{group.subject}还缺 {group.asks.length} 样东西</h3>
+      <ol>{group.asks.map((ask, index) => <AskCard key={ask.id} ask={ask} heading={group.inputs![index]!} onDone={onDone} />)}</ol>
+    </li>
+    : <AskCard ask={group.asks[0]!} onDone={onDone} />;
 }
 
 const MISSING = "」还缺：";
@@ -61,7 +116,8 @@ function groupByMilestone(asks: Ask[]): Array<{ asks: Ask[]; subject?: string; i
 }
 
 function AskMeta({ ask }: { ask: Ask }) {
-  return <p className="ask-meta"><span className="tag">{URGENCY[ask.urgency]}</span>{ask.dueDay && <small>关系到 {ask.dueDay.slice(5)} 的截止</small>}</p>;
+  return <p className="ask-meta"><span className="tag">{URGENCY[ask.urgency]}</span>{ask.dueDay && <small>关系到 {ask.dueDay.slice(5)} 的截止</small>}
+    {ask.importance !== undefined && <small>里程碑重要性 {ask.importance}</small>}{ask.entersOn && <small>{ask.entersOn.slice(5)} 起列入本周</small>}</p>;
 }
 
 function AskCard({ ask, heading, onDone }: { ask: Ask; heading?: string; onDone: (id: string) => void }) {

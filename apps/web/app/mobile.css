@@ -10,7 +10,7 @@
   .page,.subpage{padding-bottom:calc(76px + env(safe-area-inset-bottom))}
   .bottom-nav>a,.bottom-nav-more>summary{min-height:48px;display:flex;align-items:center;justify-content:center}
   /* Touch targets: 44px is Apple's minimum for something tapped with a thumb. */
-  .ask-option,.primary-button,.secondary-button,.execution-actions button,.execution-actions a,.ask-later .text-button{min-height:44px}
+  .ask-option,.primary-button,.secondary-button,.execution-actions button,.execution-actions a,.ask-later .text-button,.ask-stack-nav .text-button{min-height:44px}
   .ask-options{grid-template-columns:minmax(0,1fr)}
   .ask-follow-up .execution-actions button{flex:1 1 auto}
   .ask-card{padding:10px 12px}

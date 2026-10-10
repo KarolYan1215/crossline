@@ -1,7 +1,7 @@
 "use client";
 
 import { useId, useRef, useState, type ReactNode } from "react";
-import { STEP_MINUTES, TASK_MINUTES } from "@crossline/core";
+import { EDIT_MINUTES } from "@crossline/core";
 
 /** A row of mutually exclusive choices that take effect at once — the standard settings control, in place of a select or a fold. */
 export function SegmentedControl<T extends string>({ value, options, onChange, label, disabled }: {
@@ -56,9 +56,9 @@ export function DateChip({ value, onChange, label, empty = "未定" }: { value: 
  * handle moves the usual value and the range follows in proportion; the number shows above the bar while dragging. `samples` is how
  * many measured runs the range rests on — a narrow range with samples behind it is what used to be called 「高置信」.
  */
-export { STEP_MINUTES, TASK_MINUTES };
+export { EDIT_MINUTES };
 
-export function DurationBar({ p25, p50, p85, samples = 0, bounds = TASK_MINUTES, onCommit, label = "时长" }: {
+export function DurationBar({ p25, p50, p85, samples = 0, bounds = EDIT_MINUTES, onCommit, label = "时长" }: {
   p25: number; p50: number; p85: number; samples?: number; bounds?: { min: number; max: number }; onCommit?: (p50: number) => void; label?: string;
 }) {
   const track = useRef<HTMLDivElement>(null);

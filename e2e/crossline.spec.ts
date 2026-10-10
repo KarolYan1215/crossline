@@ -424,9 +424,10 @@ test("a work order started on one device becomes a conflict when another device'
 });
 
 /**
- * The system's questions on Today: a backplan that found two missing inputs (shown under the milestone's name once) and
- * something awaited that was due, each answered in place from options already written out — one with a follow-up form
- * prefilled from what the system knew — and the next coming up, and the 待确认 count going down, without a page reload.
+ * The system's questions on Today, as a stack: something awaited that was due on top and a backplan that found two missing inputs
+ * (shown under the milestone's name once) beneath it, stepped through with ‹ › and the arrow keys, each answered in place from options
+ * already written out — one with a follow-up form prefilled from what the system knew — the next coming up by itself, and the 待确认
+ * count going down, without a page reload.
  */
 test("Today asks what only the person knows, with options and follow-ups, and moves to the next on answering", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-chrome");
@@ -445,8 +446,25 @@ test("Today asks what only the person knows, with options and follow-ups, and mo
   await page.goto("/");
   const list = page.getByRole("region", { name: "待决事项" });
   await expect(list.getByRole("heading", { name: /^待决事项/ })).toBeVisible();
+  // A stack: the most urgent (the awaited item, due today) on top, the milestone's missing inputs as the edge beneath it.
+  const waiting = list.locator(".ask-card").filter({ hasText: "师兄的「实测数据」到了吗？" });
+  await expect(waiting).toBeVisible();
+  await expect(list.locator(".ask-peek").first()).toContainText("还缺 2 样东西");
   const group = list.locator(".ask-group");
+  await expect(group).toHaveCount(0);
+  // ‹ › and the arrow keys move through the stack without answering anything.
+  await list.getByRole("button", { name: "下一项" }).click();
   await expect(group.getByRole("heading", { level: 3 })).toContainText("还缺 2 样东西");
+  await expect(waiting).toHaveCount(0);
+  await list.getByRole("button", { name: "上一项" }).focus();
+  await page.keyboard.press("ArrowLeft");
+  await expect(waiting).toBeVisible();
+  await page.keyboard.press("ArrowRight");
+  await expect(group).toBeVisible();
+  await page.keyboard.press("ArrowLeft");
+  // Answering the top one brings up the next by itself.
+  await waiting.getByRole("button", { name: /^不等了/ }).click();
+  await expect(list.locator(".ask-card").filter({ hasText: "实测数据」到了吗" })).toHaveCount(0);
   await expect(group.locator("h4")).toHaveText(["组会录音", "导师批注"]);
   const missing = group.locator(".ask-input").filter({ hasText: "组会录音" });
   await expect(missing).toContainText("没有组会录音，无法列出要回应的质疑。");
@@ -460,13 +478,11 @@ test("Today asks what only the person knows, with options and follow-ups, and mo
   await expect(list.getByText("组会录音", { exact: true })).toHaveCount(0);
   // The header's count follows the answer without a reload (it used to stay at the old number for up to a minute).
   await expect.poll(badgeMinusTotal).toBe(0);
+  // Waiting on the recording raised its own 「到了吗？」 for the 16th, which now sits on top; the remaining input is the edge beneath.
+  await list.locator(".ask-peek").filter({ hasText: "导师批注" }).click();
   const second = list.locator(".ask-card").filter({ hasText: "还缺：导师批注" });
   await second.getByRole("button", { name: /^自行获取/ }).click();
   await expect(second).toHaveCount(0);
-  const waiting = list.locator(".ask-card").filter({ hasText: "师兄的「实测数据」到了吗？" });
-  await expect(waiting).toBeVisible();
-  await waiting.getByRole("button", { name: /^不等了/ }).click();
-  await expect(list.locator(".ask-card").filter({ hasText: "实测数据」到了吗" })).toHaveCount(0);
   const after = openStore();
   try {
     const workspaceId = realWorkspaceId(after);

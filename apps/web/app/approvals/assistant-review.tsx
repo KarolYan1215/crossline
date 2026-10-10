@@ -34,10 +34,22 @@ function TaskBody({ ctx, task }: { ctx: AccessContext; task: AssistantView["task
 }
 
 /** The assistant's part of 待确认: kinds of work it asks to start, questions it put mid-run, and results waiting for review. */
-export function AssistantReview({ ctx }: { ctx: AccessContext }) {
+export function AssistantReview({ ctx, deferred = () => undefined }: { ctx: AccessContext; deferred?: (workOrderId: string) => string | undefined }) {
   const view = loadAssistant(ctx);
-  const review = view.tasks.filter((task) => task.status === "needs_review");
-  if (!view.categoryRequests.length && !view.approvals.length && !review.length) return null;
+  const results = view.tasks.filter((task) => task.status === "needs_review");
+  // Results for work that need not start within a week are folded (decided 2026-10-10), the soonest to come up first.
+  const review = results.filter((task) => !deferred(task.workOrderId));
+  const later = results.filter((task) => deferred(task.workOrderId)).sort((a, b) => deferred(a.workOrderId)!.localeCompare(deferred(b.workOrderId)!));
+  if (!view.categoryRequests.length && !view.approvals.length && !results.length) return null;
+  const card = (task: AssistantView["tasks"][number]) => <article key={task.taskId} className="assistant-task" data-status={task.status}>
+    <h3>{task.title}</h3>
+    <p className="assistant-meta"><Tag>{AGENT_CATEGORIES[task.category]}</Tag><small>用时 {minutes(task.durationMs)}</small>
+      {task.workOrderId && <a href={`/workbench/${encodeURIComponent(task.workOrderId)}`}>对应任务</a>}
+      {!task.checksPassed && <Tag tone="warn">自检未全部通过</Tag>}{task.autoApproved && <Tag tone="info">来自自动生效的任务</Tag>}
+      {deferred(task.workOrderId) && <small>{deferred(task.workOrderId)!.slice(5)} 起列入本周</small>}</p>
+    <TaskBody ctx={ctx} task={task} />
+    <ReviewButtons taskId={task.taskId} />
+  </article>;
   return <section className="pending-block" id="assistant" aria-label="助手">
     <h2>助手 · {view.categoryRequests.length + view.approvals.length + review.length}</h2>
     {view.categoryRequests.map((request) => <div key={request.category} className="assistant-ask">
@@ -48,13 +60,7 @@ export function AssistantReview({ ctx }: { ctx: AccessContext }) {
       <p><strong>运行中请求许可：</strong>{approval.reason || approval.rule} <small className="muted">10 分钟内未回复视为不同意</small></p>
       <ApprovalButtons id={approval.id} />
     </div>)}
-    {review.map((task) => <article key={task.taskId} className="assistant-task" data-status={task.status}>
-      <h3>{task.title}</h3>
-      <p className="assistant-meta"><Tag>{AGENT_CATEGORIES[task.category]}</Tag><small>用时 {minutes(task.durationMs)}</small>
-        {task.workOrderId && <a href={`/workbench/${encodeURIComponent(task.workOrderId)}`}>对应任务</a>}
-        {!task.checksPassed && <Tag tone="warn">自检未全部通过</Tag>}{task.autoApproved && <Tag tone="info">来自自动生效的任务</Tag>}</p>
-      <TaskBody ctx={ctx} task={task} />
-      <ReviewButtons taskId={task.taskId} />
-    </article>)}
+    {review.map(card)}
+    {later.length > 0 && <details className="fold advanced"><summary>以后再定的助手成果 · {later.length}（对应任务一周后才需开始）</summary>{later.map(card)}</details>}
   </section>;
 }
