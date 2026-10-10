@@ -26,6 +26,22 @@ export function linesAwaitingSplit(store: CrosslineStore, workspaceId: string): 
 }
 
 /**
+ * Lines that still carry only the interview's old whole-sentence candidates (`goalCandidates`, before attributes existed) and no attribute
+ * candidates: their candidates are split once into atomic attributes, so the picker offers independent parts instead of overlapping
+ * sentences cut into chips (seen on the real account on 2026-10-10: 「外推人类知识边界」 next to 「以神经形态…外推知识边界」).
+ */
+export function linesAwaitingCandidateSplit(store: CrosslineStore, workspaceId: string): GoalSplitContext["lines"] {
+  const done = new Set(store.listEvents(workspaceId, { type: "line.candidates_split" }).map((event) => event.entityId));
+  let profiles: Record<string, StoredLineProfile> = {};
+  try { profiles = JSON.parse(store.getSetting(workspaceId, "lines.profiles") ?? "{}") ?? {}; } catch { return []; }
+  return identityLines(store, workspaceId).flatMap((line) => {
+    const profile = profiles[line.id];
+    const candidates = (profile?.goalCandidates ?? []).filter((goal) => typeof goal === "string" && goal.trim());
+    return candidates.length && !profile?.attributes?.length && !done.has(line.id) ? [{ id: line.id, label: line.label, goals: candidates.slice(0, 6) }] : [];
+  });
+}
+
+/**
  * Splits each such goal into its attributes with a small model and keeps them chosen, in order, so the composed goal is the sentence the
  * person adopted — checked in code (`recomposes`); a goal no split recomposes is kept whole as one attribute. The goal's wording is never
  * changed here: `goals[0]` stays as written, `goalParts` is added beside it. The parts of the line's other goals join its candidates.
@@ -34,7 +50,9 @@ export function createGoalSplitter(store: CrosslineStore, workspaceId: string, c
   return async function split(): Promise<{ split: number } | { blocked: string }> {
     const client = getClient();
     if (!client) return { blocked: "CODEX_SUPERVISOR_UNAVAILABLE" };
-    const lines = linesAwaitingSplit(store, workspaceId).slice(0, 12);
+    const adopted = linesAwaitingSplit(store, workspaceId);
+    const candidateLines = linesAwaitingCandidateSplit(store, workspaceId).filter((line) => !adopted.some((item) => item.id === line.id));
+    const lines = [...adopted, ...candidateLines].slice(0, 12);
     if (!lines.length) return { split: 0 };
     const context: GoalSplitContext = { version: "crossline.goal-split.v1", lines };
     const result = await runCodexSkill<GoalSplit>(client, context, {
@@ -53,6 +71,21 @@ export function createGoalSplitter(store: CrosslineStore, workspaceId: string, c
     try { profiles = JSON.parse(store.getSetting(workspaceId, "lines.profiles") ?? "{}") ?? {}; } catch { /* rebuilt below */ }
     let count = 0;
     for (const answered of result.output.lines) {
+      // Old candidates: their parts become the line's attribute candidates (repeats and parts contained in another dropped); nothing chosen.
+      const candidateLine = candidateLines.find((item) => item.id === answered.lineId);
+      if (candidateLine) {
+        const added: AttributeCandidate[] = [];
+        for (const part of answered.goals.flatMap((goal) => goal.parts)) {
+          if (!part.text.trim() || duplicateAttributes([...added.map((item) => item.text), part.text]).some((pair) => pair.includes(part.text))) continue;
+          added.push({ text: part.text.trim(), kind: part.kind, sourceRef: "goal" });
+        }
+        if (!added.length || profiles[candidateLine.id]?.attributes?.length) continue;
+        profiles[candidateLine.id] = { ...profiles[candidateLine.id], description: profiles[candidateLine.id]?.description ?? "", attributes: added };
+        store.appendEvent({ ownerId, workspaceId, idempotencyKey: `line:candidates-split:${candidateLine.id}`, type: "line.candidates_split", entityId: candidateLine.id,
+          payload: { candidates: candidateLine.goals, attributes: added.map((item) => item.text) } });
+        count += 1;
+        continue;
+      }
       const line = lines.find((item) => item.id === answered.lineId);
       const spec = specs.find((item) => item.id === answered.lineId);
       const first = answered.goals.find((goal) => goal.goal === line?.goals[0]);
@@ -73,7 +106,7 @@ export function createGoalSplitter(store: CrosslineStore, workspaceId: string, c
       count += 1;
     }
     if (count) {
-      store.setSetting(workspaceId, LINE_SETTING, JSON.stringify(specs));
+      if (adopted.length) store.setSetting(workspaceId, LINE_SETTING, JSON.stringify(specs));
       store.setSetting(workspaceId, "lines.profiles", JSON.stringify(profiles));
     }
     return { split: count };

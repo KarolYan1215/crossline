@@ -22,7 +22,7 @@ import { createProgressJudge, createStepPlanner, createWarningReviewer, reportsA
 import { createArchetypeCurator, curationDue } from "./archetype-curator";
 import { createTaskTitler, untitledTasks } from "./task-titler";
 import { createCalendarClassifier, unfiledCalendarEvents } from "./calendar-classifier";
-import { createGoalSplitter, linesAwaitingSplit } from "./goal-splitter";
+import { createGoalSplitter, linesAwaitingCandidateSplit, linesAwaitingSplit } from "./goal-splitter";
 import { fileSourceDocuments } from "./source-filing";
 import { createPortraitWriter } from "./portrait-writer";
 import { createPortraitIllustrator } from "./portrait-illustrator";
@@ -187,7 +187,8 @@ async function calendarLinePass(workspaceId: string, checkedAt: string): Promise
  */
 const splittingGoals = new Set<string>();
 async function goalSplitPass(workspaceId: string, checkedAt = new Date().toISOString()): Promise<void> {
-  if (splittingGoals.has(workspaceId) || !codexSupervisor || !linesAwaitingSplit(analysisStore, workspaceId).length) return;
+  if (splittingGoals.has(workspaceId) || !codexSupervisor
+    || (!linesAwaitingSplit(analysisStore, workspaceId).length && !linesAwaitingCandidateSplit(analysisStore, workspaceId).length)) return;
   const signal = await readCost();
   if (!signal.available || budgetPolicy(Math.max(signal.short?.usedPercent ?? 0, signal.long?.usedPercent ?? 0)).mode === "manual_core_only") return;
   splittingGoals.add(workspaceId);

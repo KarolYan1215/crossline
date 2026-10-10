@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 import { CrosslineStore } from "@crossline/db";
 import { LINE_SETTING } from "@crossline/identity-packs";
 import { composeGoal } from "@crossline/core";
-import { createGoalSplitter, GOAL_SPLITTER, linesAwaitingSplit } from "./goal-splitter";
+import { createGoalSplitter, GOAL_SPLITTER, linesAwaitingCandidateSplit, linesAwaitingSplit } from "./goal-splitter";
 import { identityLines } from "./lines";
 import { fakeRuntime } from "./testing/fake-runtime";
 
@@ -85,4 +85,20 @@ test("a goal the person changed while the model ran keeps their change, and is s
 test("without the runtime nothing is recorded and the lines stay waiting", async () => {
   expect(await createGoalSplitter(store, workspaceId, "C:\\repo", () => undefined)()).toEqual({ blocked: "CODEX_SUPERVISOR_UNAVAILABLE" });
   expect(linesAwaitingSplit(store, workspaceId)).toHaveLength(2);
+});
+
+test("a line with only the interview's old whole-sentence candidates gets them split once into independent attribute candidates", async () => {
+  store.setSetting(workspaceId, "lines.profiles", JSON.stringify({ "line-media": { description: "科普", goalCandidates: ["成为会剪辑的创作者"] },
+    "line-empty": { description: "", goalCandidates: ["成为外推人类知识边界的投资者", "成为以长期研究外推人类知识边界的投资者"] } }));
+  expect(linesAwaitingCandidateSplit(store, workspaceId).map((line) => line.id)).toEqual(["line-media", "line-empty"]);
+  const empty = { lineId: "line-empty", goals: [
+    { goal: "成为外推人类知识边界的投资者", parts: [{ text: "外推人类知识边界", kind: "state" }] },
+    { goal: "成为以长期研究外推人类知识边界的投资者", parts: [{ text: "以长期研究", kind: "ability" }, { text: "外推人类知识边界", kind: "state" }] }] };
+  const runtime = fakeRuntime([JSON.stringify({ lines: [researchSplit, mediaGood, empty] })], GOAL_SPLITTER);
+  expect(await createGoalSplitter(store, workspaceId, "C:\repo", () => runtime.rpc)()).toEqual({ split: 3 });
+  const profiles = JSON.parse(store.getSetting(workspaceId, "lines.profiles")!) as Record<string, { attributes: Array<{ text: string }> }>;
+  // The repeated part is offered once; nothing is chosen for a line with no adopted goal.
+  expect(profiles["line-empty"]!.attributes.map((item) => item.text)).toEqual(["外推人类知识边界", "以长期研究"]);
+  expect(identityLines(store, workspaceId).find((line) => line.id === "line-empty")!.goalParts ?? []).toEqual([]);
+  expect(linesAwaitingCandidateSplit(store, workspaceId)).toEqual([]);
 });
