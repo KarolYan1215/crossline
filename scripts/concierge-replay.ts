@@ -79,7 +79,7 @@ const cases: Array<[string, Check]> = [
   ["作业2多给一小时", both(only("task.op"), arg("type", (value) => value === "estimate", "estimate"), arg("workOrderId", taskId(/作业\s*2/), "作业 2"))],
   ["ECE 548 复习提纲那个推到周日再做", both(only("task.op"), arg("type", (value) => value === "defer", "defer"), arg("workOrderId", taskId(/548/), "ECE 548 复习提纲"))],
   ["开始做作业2", both(only("task.op"), arg("type", (value) => value === "start", "start"))],
-  ["作业2第一步做完了", both(only("task.op"), arg("type", (value) => value === "step_done", "step_done"))],
+  ["作业2第一步做完了", both(either(only("task.op"), only("task.op", "task.op")), arg("type", (value) => value === "step_done", "step_done"))],
   ["刚才做了40分钟作业2，题目拆完了", either(only("task.op"), only("task.op", "task.op"))],
   ["今天好累，没什么精力", either(both(only("energy.report"), arg("level", (value) => value === "low", "low")), only("energy.report", "task.op"))],
   ["周四下午三点和导师开会一小时", both(only("event.create"), arg("startTime", (value) => value === "15:00", "15:00"), arg("endTime", (value) => value === "16:00", "16:00"))],

@@ -56,10 +56,11 @@ export const SKILL_TIERS: Record<string, RouteTier> = {
 };
 
 /**
- * Where a Skill needs something other than its tier's default. Empty today: every Skill runs as its tier says. The
- * mechanism stays so one Skill can think less (or more) without moving tier.
+ * Where a Skill needs something other than its tier's default, so one Skill can think less (or more) without moving tier. The one input
+ * box answers while the person waits: measured on the thirty-sentence replay (`scripts/concierge-replay.ts`, 2026-10-09), medium effort
+ * read as well as high (29 and 28 of 30, the misses not the same sentences) with a median of 11.4 s against 12.3 s.
  */
-export const SKILL_OVERRIDES: Record<string, Partial<ModelRoute>> = {};
+export const SKILL_OVERRIDES: Record<string, Partial<ModelRoute>> = { "crossline-concierge": { effort: "medium" } };
 
 /**
  * Skills that never step down a tier when the budget is tight. The gate decides whether work counts as done and
