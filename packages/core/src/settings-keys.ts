@@ -9,6 +9,8 @@ export const goalSettingKey = (milestoneId: string) => `goal.settings:${mileston
 export const AVAILABILITY_SETTING = "schedule.availability";
 /** What the interview proposed from the rhythm the person described (`{windows, why}`); used until a pattern is saved. */
 export const AVAILABILITY_PROPOSED_SETTING = "schedule.availability.proposed";
+/** `"1"` on the one workspace whose account owns this machine's Codex runtime and the shell assistant (decided once by the worker). */
+export const RUNTIME_OWNER_SETTING = "deployment.runtimeOwner";
 
 /** The last calendar read that failed (`{code, message, sources, at}`), written by the worker, cleared by a clean read. */
 export const CALENDAR_SYNC_FAILURE = "calendar.sync.failure";

@@ -38,8 +38,16 @@ export async function POST(request: Request) {
   if (isCrossSiteWrite(request)) return NextResponse.json({ code: "REQUEST_FORBIDDEN" }, { status: 403 });
   const access = await resolveAccessContext(request);
   if ("response" in access) return access.response;
+  const body = await request.json().catch(() => ({})) as { type?: unknown; apiKey?: unknown; action?: unknown };
   try {
-    return NextResponse.json(await requestCodexSupervisor(access.ctx, "/v1/codex/login", { method: "POST" }));
+    // Signing an account out of its own Codex deletes that account's home on this machine (login and memories).
+    if (body.action === "logout") return NextResponse.json(await requestCodexSupervisor(access.ctx, "/v1/codex/logout", { method: "POST" }));
+    const type = body.type === "apiKey" || body.type === "chatgptDeviceCode" ? body.type : "chatgpt";
+    const apiKey = typeof body.apiKey === "string" ? body.apiKey.trim() : "";
+    if (type === "apiKey" && (!apiKey || apiKey.length > 300)) return NextResponse.json({ blocker: { code: "API_KEY_INVALID", message: "请填写 API key" } }, { status: 400 });
+    // The key passes through to the account's own runtime, which stores it in that account's home; nothing here keeps or echoes it.
+    return NextResponse.json(await requestCodexSupervisor(access.ctx, "/v1/codex/login", { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify(type === "apiKey" ? { type, apiKey } : { type }) }));
   } catch (error) {
     return blockerResponse(error);
   }

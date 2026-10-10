@@ -1003,7 +1003,8 @@ export async function startCodexSupervisor(options: {
         if (request.method === "GET" && pathname === "/v1/codex/account") {
           const running = runtimes!.connected(workspace) ? await runtimes!.client(workspace) : undefined;
           const account = running?.ok ? await running.client.request("account/read", { refreshToken: false }) : { account: null, requiresOpenaiAuth: true };
-          sendJson(response, 200, { ...(record(account) ?? {}), login: runtimes!.loginStatus(workspace) });
+          // `guest`: this account runs on its own Codex, which it can sign out of here (the owner's is the machine's own).
+          sendJson(response, 200, { ...(record(account) ?? {}), login: runtimes!.loginStatus(workspace), guest: true });
           return;
         }
         if (request.method === "POST" && pathname === "/v1/codex/login") {

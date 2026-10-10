@@ -75,6 +75,9 @@ test("logging in starts the guest's runtime even before it is connected; device 
   const { registry, started } = setup({ answers: { "account/login/start": { type: "chatgptDeviceCode", loginId: "L1", verificationUrl: "https://auth.openai.com/codex/device", userCode: "ABCD-1234" } } });
   const login = await registry.login("ws-guest", { type: "chatgptDeviceCode" });
   expect(login).toMatchObject({ state: "pending", verificationUrl: "https://auth.openai.com/codex/device", userCode: "ABCD-1234" });
+  // An API key is handed to the runtime and not kept: what the registry remembers about that login carries no key.
+  const keyed = await registry.login("ws-other", { type: "apiKey", apiKey: "sk-test-SECRET" });
+  expect(JSON.stringify([keyed, registry.loginStatus("ws-other")])).not.toContain("SECRET");
   expect(started[0]!.calls).toEqual([{ method: "account/login/start", params: { type: "chatgptDeviceCode" } }]);
   started[0]!.emit({ method: "account/login/completed", params: { loginId: "L1", success: true } });
   expect(registry.loginStatus("ws-guest")?.state).toBe("completed");

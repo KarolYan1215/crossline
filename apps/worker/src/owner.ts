@@ -1,5 +1,6 @@
 import path from "node:path";
 import { codexProcessEnvironment, spentFor } from "@crossline/codex";
+import { RUNTIME_OWNER_SETTING } from "@crossline/core";
 import type { CrosslineStore } from "@crossline/db";
 
 /**
@@ -15,8 +16,6 @@ export function ownerOf(store: Pick<CrosslineStore, "getWorkspaceOwnerId">, work
   return store.getWorkspaceOwnerId(workspaceId) ?? SYSTEM_OWNER_ID;
 }
 
-/** Marks the workspace whose account owns this machine's Codex runtime (and the shell assistant). */
-export const RUNTIME_OWNER_SETTING = "deployment.runtimeOwner";
 
 /**
  * The machine owner's workspace: the one already marked; else the one named by `CROSSLINE_RUNTIME_LEGACY_WORKSPACE`; else the first
