@@ -58,11 +58,12 @@ test("wording that points at no kind needs the person to choose one; choosing on
   expect(svc.dispatch(ws, "wo-1", "draft_text")).toMatchObject({ state: "needs_category_approval", category: "draft_text" });
 });
 
-test("the tick starts one approved order by itself, but not when the quota is tight or unreadable, or a task is already going", async () => {
+test("the tick starts one approved order by itself, but not at 95% of either window or with the quota unreadable, or a task is already going", async () => {
   approveCategory(store, ws, "read_research_organize");
   order("wo-1", ["整理并摘要这三篇文献"]);
   order("wo-2", ["整理并摘要另外三篇文献"]);
-  for (const cost of [{ ...healthy, short: { usedPercent: 90, windowDurationMins: 300, resetsAt: null } }, { available: false as const, reason: "apiKey" }]) {
+  for (const cost of [{ ...healthy, short: { usedPercent: 97, windowDurationMins: 300, resetsAt: null } },
+    { ...healthy, long: { usedPercent: 95, windowDurationMins: 10080, resetsAt: null } }, { available: false as const, reason: "apiKey" }]) {
     await service({ cost }).svc.pass(ws);
     expect(listAgentTasks(store, ws)).toHaveLength(0);
   }
@@ -74,6 +75,16 @@ test("the tick starts one approved order by itself, but not when the quota is ti
   expect(listAgentTasks(store, ws).map((task) => task.workOrderId)).toEqual(["wo-1"]);
 });
 
+
+test("the assistant keeps working while the quota is only tight (economy): 90% of the week used still starts a task", async () => {
+  approveCategory(store, ws, "read_research_organize");
+  order("wo-1", ["整理并摘要这三篇文献"]);
+  const cost: CostSignal = { ...healthy, short: { usedPercent: 0, windowDurationMins: 300, resetsAt: null }, long: { usedPercent: 90, windowDurationMins: 10080, resetsAt: null } };
+  const { svc } = service({ cost });
+  await svc.pass(ws);
+  expect(svc.runningTasks(ws)).toHaveLength(1);
+  await settled(svc);
+});
 
 // Whole-task delegation: the assistant does the errand, the person accepts the result, and the files go in as the order's evidence —
 // which puts the order in front of the milestone gate.

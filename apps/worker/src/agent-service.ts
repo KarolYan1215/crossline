@@ -2,7 +2,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { enterUsageWorkspace, type CodexRpcBoundary } from "@crossline/codex";
 import { deliverAgentResult, listAgentTasks, readCategories, requestCategory, type CrosslineStore } from "@crossline/db";
-import { AGENT_CATEGORIES, backgroundSpend, isAgentCategory, spendAllows, type AgentCategory, type CostSignal } from "@crossline/core";
+import { AGENT_CATEGORIES, backgroundSpend, isAgentCategory, type AgentCategory, type CostSignal } from "@crossline/core";
 import { createAgentRunner, type AgentOutcome } from "./agent-task";
 import { autoHandoffCandidates, dispatchCandidates, ledgerAsk, stepDispatchCandidates, taskFromWorkOrder } from "./agent-dispatch";
 import { ownerOf } from "./owner";
@@ -19,6 +19,8 @@ export type DispatchResult =
 
 export const defaultOutputRoot = (): string => process.env.CROSSLINE_AI_OUTPUT_DIR ?? path.join(homedir(), "Crossline", "ai-output");
 export const AGENT_RUN_LOST = "AGENT_RUN_LOST";
+/** The assistant tick starts nothing once either quota window is this full (decided 2026-10-10). */
+export const QUOTA_CEILING_PERCENT = 95;
 
 export function createAgentService(deps: {
   store: CrosslineStore; repoRoot: string; getClient: () => CodexRpcBoundary | undefined; readCost: () => Promise<CostSignal>;
@@ -82,11 +84,14 @@ export function createAgentService(deps: {
       const next = step ?? (order ? { orderId: order, stepId: undefined } : auto.early[0]);
       if (!next) return;
       const { orderId, stepId } = next;
-      // Discretionary: it was a third of a real week's tokens, so it waits while the quota is tight (economy) or unreadable,
-      // and the person's own captures and plans keep the rest. Starting by hand from 待确认 is not gated here.
-      const spend = backgroundSpend(await deps.readCost().catch((error: unknown) => ({ available: false as const, reason: String(error) })));
-      if (!spendAllows(spend, "discretionary")) {
-        log({ type: "agent.skipped", workspaceId, code: spend.blocker?.code ?? "QUOTA_LOW", budget: spend.mode });
+      // Its own ceiling (the person's choice, 2026-10-10): it keeps working through economy and stops at 95% of either window, so the
+      // last few percent stay for the person's own captures and plans. An unreadable or exhausted quota pauses it like every other
+      // background pass. Starting by hand from 待确认 is not gated here.
+      const signal = await deps.readCost().catch((error: unknown): CostSignal => ({ available: false, reason: String(error) }));
+      const spend = backgroundSpend(signal);
+      const used = signal.available ? Math.max(signal.short?.usedPercent ?? 0, signal.long?.usedPercent ?? 0) : 100;
+      if (spend.mode === "manual_core_only" || used >= QUOTA_CEILING_PERCENT) {
+        log({ type: "agent.skipped", workspaceId, code: spend.blocker?.code ?? "QUOTA_LOW", budget: spend.mode, usedPercent: used });
         return;
       }
       const result = start(workspaceId, orderId, undefined, stepId);
