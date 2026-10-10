@@ -6,6 +6,7 @@ import "./ui/primitives.css";
 import "./task/task.css";
 import "./chat/composer.css";
 import "./milestones/milestones.css";
+import "./milestones/flywheel-edges.css";
 import "./plan/plan.css";
 import "./settings/settings.css";
 import "./onboarding/onboarding.css";

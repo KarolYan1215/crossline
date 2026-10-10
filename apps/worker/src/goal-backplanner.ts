@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { BACKPLAN_SCHEMA, mentionsExternalAction, validateBackplan, withCourse, type BackplanAnswer as Answer, type MissingInput } from "@crossline/core";
+import { BACKPLAN_SCHEMA, mentionsExternalAction, producedArtifacts, usedArtifacts, validateBackplan, withCourse, type BackplanAnswer as Answer,
+  type MissingInput } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
-import type { CrosslineStore, StoredWorkOrder } from "@crossline/db";
+import { handOffArtifacts, linkArtifactWork, readStoredArtifactPlan, type CrosslineStore, type StoredWorkOrder } from "@crossline/db";
 
 import { ownerOf } from "./owner";
 import { autoApproveEligible } from "./auto-approval";
@@ -24,6 +25,24 @@ function personInputs(store: CrosslineStore, workspaceId: string, milestoneId: s
 }
 
 const TRANSIENT = /^(SKILL_|CODEX_)/;
+
+/**
+ * The cross-line artifacts this milestone's tasks must produce and may use (docs/flywheel-and-views.md §5.5): from its anchor's `outputs`
+ * and `inputs`, less what open or finished work already produces or uses, with what the plan says about each.
+ */
+export function milestoneArtifacts(store: CrosslineStore, workspaceId: string, milestoneId: string) {
+  const anchor = store.listMilestoneAnchors(workspaceId).find((item) => item.milestoneId === milestoneId);
+  const plan = readStoredArtifactPlan(store, workspaceId);
+  const artifacts = new Map(plan.artifacts.map((artifact) => [artifact.id, artifact]));
+  const work = store.listWorkOrders(workspaceId).filter((order) => order.state !== "archived");
+  const produced = new Set(work.flatMap((order) => producedArtifacts(order)));
+  const used = new Set(work.filter((order) => order.milestoneId === milestoneId).flatMap((order) => usedArtifacts(order)));
+  const produce = (anchor?.outputs ?? []).filter((id) => artifacts.has(id) && !produced.has(id)).map((id) => ({ id, title: artifacts.get(id)!.title,
+    toLines: plan.supplies.filter((pair) => pair.from === id).map((pair) => ({ line: pair.toLine, use: pair.use })) }));
+  const use = (anchor?.inputs ?? []).filter((id) => artifacts.has(id) && !used.has(id)).map((id) => ({ id, title: artifacts.get(id)!.title,
+    fromLine: artifacts.get(id)!.line }));
+  return { produce, use };
+}
 const toMissing = (blockers: Answer["blockers"]): MissingInput[] => blockers.map((blocker, index) => ({ id: `m${index + 1}`,
   what: blocker.what.trim(), whoHas: blocker.whoHas.trim(), message: blocker.message.trim().slice(0, 300) }));
 
@@ -65,7 +84,8 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
       .filter(Boolean);
     const { supplied, waiting } = personInputs(store, workspaceId, milestone.id);
     const sources = [...dateSources, ...approvedInsights.map((item) => item.summary), ...supplied.map((item) => `${item.what}：${item.text}`)];
-    const context = { version: "crossline.goal-backplan.v2", milestone: {
+    const artifacts = milestoneArtifacts(store, workspaceId, milestone.id);
+    const context = { version: "crossline.goal-backplan.v2", artifacts, milestone: {
       id: milestone.id, version: milestone.version, identityId: milestone.identityId,
       projectId: milestone.projectId, title: milestone.title, successCriteria: milestone.successCriteria
     }, sourceText: request?.request ?? "", approvedInsights,
@@ -81,9 +101,11 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
           ? "Work backwards from the approved milestone. Some inputs it needs are missing (missingInputs). Do not block on them: make obtaining or confirming each one a step of its own, with `acquires` set to that input's id and `sourceQuote` quoting its `message`; steps that need it depend on that step. Every other step has `acquires` \"\". Return blockers only for what the milestone itself leaves unclear; never set a goal or deadline."
           : "Work backwards from the approved milestone. Return only sourced step drafts; never set a goal or deadline; every step's `acquires` is \"\". If a step needs an input that is in none of sourceText, suppliedInputs or approvedInsights (data, a specification, someone's decision), do not invent it: return it as a blocker with `what` (the input in a few words) and `whoHas` (who can provide it, \"\" if unknown). waitingInputs are on their way: steps that need them come after the steps that do not.")
           + " Each item in `steps` becomes one task in the person's list: group the work into coherent tasks that each produce one deliverable (an outline, a set of solved problems, a draft), not single actions — the step planner splits every task into its own steps afterwards."
+          + (artifacts.produce.length || artifacts.use.length ? " Cross-line artifacts (artifacts): exactly one step produces each artifacts.produce id (`produces`), every artifacts.use id is listed in `uses` by the steps that work with it; all other steps have produces \"\" and uses []." : "")
           + rolling,
         outputSchema: BACKPLAN_SCHEMA, prepareInput: () => input,
-        validateOutput: (output) => validateBackplan(output, runSources, dateSources, missingInputs.map((item) => item.id)), onAudit: () => {},
+        validateOutput: (output) => validateBackplan(output, runSources, dateSources, missingInputs.map((item) => item.id),
+          { produce: artifacts.produce.map((item) => item.id), use: artifacts.use.map((item) => item.id) }), onAudit: () => {},
         ...(signal ? { signal } : {}), timeoutMs: 60 * 60_000 });
     };
     const recordBlocked = (code: string, message: string, missingInputs: MissingInput[]) => {
@@ -129,6 +151,7 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
         payload: { title: withCourse(step.title, milestone.projectId), family: step.family, backplan: { milestoneVersion: milestone.version, sourceQuote: step.sourceQuote,
           rationale: step.rationale, stepId: step.id, ...(step.acquires ? { acquires: step.acquires, inputsFrom,
             missingInput: missing.find((item) => item.id === step.acquires)?.what ?? "" } : {}) }, dependsOn: step.dependsOn.map((dep) => ids.get(dep)).filter((dep): dep is string => Boolean(dep)),
+          ...(step.produces ? { produces: step.produces } : {}), ...(step.uses.length ? { uses: step.uses } : {}),
           automationParts: [], humanCore: [{ id: `${id}-core`, intent: step.intent, quote: step.sourceQuote,
             rationale: step.rationale, energy: step.energy, interruptible: step.interruptible }],
           materialContract: [], evidenceContract: [{ kind: "record", description: step.evidence,
@@ -143,6 +166,9 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
         ...(missing.length ? { missing } : {}),
         dateCandidates: result.output.dateCandidates, source: SKILL } });
     if (inserted) {
+      // A use waits for its producer across lines, and a producer already delivered hands its files over now.
+      linkArtifactWork(store, workspaceId);
+      handOffArtifacts(store, workspaceId);
       autoApproveEligible(store, workspaceId, workOrderIds);
       return { state: "proposed", workOrderIds, dateCandidates: result.output.dateCandidates };
     }

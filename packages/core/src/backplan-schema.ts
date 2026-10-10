@@ -19,7 +19,13 @@ export type BackplanStep = { id: string; title: string; intent: string; sourceQu
   family: "preparation" | "review" | "deep_work";
   riskTier: "routine" | "milestone" | "high_risk"; evidence: string;
   /** The id of the missing input this step obtains or confirms, "" when it is an ordinary step. */
-  acquires: string };
+  acquires: string;
+  /** The artifact (another line is promised it) this task's deliverable is, "" when none (docs/flywheel-and-views.md §5.5). */
+  produces: string;
+  /** Other lines' artifacts this task works with; it is scheduled after the task producing each, and handed its files. */
+  uses: string[] };
+/** The cross-line artifacts a milestone's tasks produce and use: from its anchor's `outputs`/`inputs`, less what existing work covers. */
+export type BackplanArtifacts = { produce: string[]; use: string[] };
 export type BackplanBlocker = { code: string; message: string; what: string; whoHas: string };
 /** Something a milestone's steps need that the system does not have: data, a specification, someone's decision. */
 export type MissingInput = { id: string; what: string; whoHas: string; message: string };
@@ -46,7 +52,8 @@ export const BACKPLAN_SCHEMA = object({ steps: { type: "array", items: object({
   estimate: object({ p25Minutes: { type: "number" }, p50Minutes: { type: "number" }, p85Minutes: { type: "number" } }),
   energy: { type: "string", enum: ["low", "medium", "high"] }, interruptible: { type: "boolean" },
   family: { type: "string", enum: ["preparation", "review", "deep_work"] },
-  riskTier: { type: "string", enum: ["routine", "milestone", "high_risk"] }, evidence: str, acquires: str
+  riskTier: { type: "string", enum: ["routine", "milestone", "high_risk"] }, evidence: str, acquires: str,
+  produces: str, uses: { type: "array", items: str }
 }) }, dateCandidates: { type: "array", items: object({ date: str, quote: str }) },
   blockers: { type: "array", items: object({ code: str, message: str, what: str, whoHas: str }) } });
 
@@ -55,7 +62,8 @@ export const BACKPLAN_SCHEMA = object({ steps: { type: "array", items: object({
  * Outside that mode no step may claim to acquire anything. Blockers are returned, not thrown: the caller decides
  * whether they stop the run (they do not in the assumptive mode, where they are more things to ask about).
  */
-export function validateBackplan(value: unknown, sources: string[], dateSources = sources, missingIds: string[] = []): BackplanAnswer {
+export function validateBackplan(value: unknown, sources: string[], dateSources = sources, missingIds: string[] = [],
+  artifacts: BackplanArtifacts = { produce: [], use: [] }): BackplanAnswer {
   const answer = value as BackplanAnswer | undefined;
   if (!answer || !Array.isArray(answer.steps) || !Array.isArray(answer.dateCandidates)
     || !Array.isArray(answer.blockers) || answer.steps.length > 20
@@ -94,7 +102,21 @@ export function validateBackplan(value: unknown, sources: string[], dateSources 
       || typeof step.interruptible !== "boolean") throw new Error("BACKPLAN_SCHEMA_INVALID");
     if (typeof step.acquires !== "string" || (step.acquires && !missingIds.includes(step.acquires)))
       throw new Error("BACKPLAN_ACQUIRES_INVALID");
+    // Answers recorded before artifacts existed carry neither field: they produce and use nothing.
+    step.produces = typeof step.produces === "string" ? step.produces.trim() : "";
+    step.uses = Array.isArray(step.uses) ? step.uses.filter((id): id is string => typeof id === "string" && Boolean(id.trim())) : [];
+    if (step.produces && !artifacts.produce.includes(step.produces))
+      throw new Error(`BACKPLAN_ARTIFACT_UNKNOWN: ${step.id} 的 produces「${step.produces}」不在 artifacts.produce 里；可选：${artifacts.produce.join("、") || "（无）"}`);
+    const unknown = step.uses.find((id) => !artifacts.use.includes(id));
+    if (unknown) throw new Error(`BACKPLAN_ARTIFACT_UNKNOWN: ${step.id} 的 uses「${unknown}」不在 artifacts.use 里；可选：${artifacts.use.join("、") || "（无）"}`);
     seen.add(step.id);
+  }
+  for (const id of artifacts.produce) {
+    const producers = answer.steps.filter((step) => step.produces === id).length;
+    if (producers !== 1) throw new Error(`BACKPLAN_ARTIFACT_UNPRODUCED: 产物「${id}」要由且只由一个任务产出（produces 设为它），现在是 ${producers} 个`);
+  }
+  for (const id of artifacts.use) {
+    if (!answer.steps.some((step) => step.uses.includes(id))) throw new Error(`BACKPLAN_ARTIFACT_UNUSED: 其他主线的产物「${id}」至少要被一个任务用到（uses 里列出它）`);
   }
   return answer;
 }

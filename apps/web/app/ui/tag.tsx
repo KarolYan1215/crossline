@@ -16,6 +16,13 @@ export function LineTag({ line, title, children }: { line: string | undefined; t
 }
 
 /** 「→ 支持 自媒体·首轮发布」: work here that another line reuses, in that other line's colour. */
+/** A task's cross-line artifact: 「产出供 自媒体 · …」 or 「使用 研究 · … 的产出」, in the other line's colour. */
+export function ArtifactTag({ direction, line, lineLabel, title, artifact }: { direction: "produces" | "uses"; line: string; lineLabel: string; title: string; artifact: string }) {
+  return <span className="ui-tag ui-supports" data-line={line} title={`产物：${artifact}`}>
+    {direction === "produces" ? `产出供 ${lineLabel} · ${title}` : `使用 ${lineLabel} · ${title} 的产出`}
+  </span>;
+}
+
 export function SupportsTag({ line, lineLabel, target, artifact }: { line: string; lineLabel: string; target: string; artifact?: string }) {
   return <span className="ui-tag ui-supports" data-line={line} title={artifact ? `复用产出：${artifact}` : undefined}>
     → 支持 {lineLabel}·{target}

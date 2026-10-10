@@ -22,6 +22,7 @@ import { unfiledFiles } from "./file-belonging";
 import { decideEvent, eventProposals, publishFixedEvents } from "./fixed-events";
 import { identityLines } from "./lines";
 import { decisionHorizon } from "./horizon";
+import { answerRelationCheck, relationCheckAsks } from "./artifact-relations";
 
 /** Markers an undo has taken back are as if never written. */
 const live = <T extends { eventId: string }>(ctx: AccessContext, events: T[]): T[] => {
@@ -522,7 +523,8 @@ function eventAsks({ ctx, today }: Source): Ask[] {
 
 export function collectAsks(ctx: AccessContext, now = new Date()): Ask[] {
   const source = { store: getStore(), ctx, today: planToday(ctx, now), now };
-  return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskAsks, missedAsks, agentAsks, calendarAsks, sourceProjectAsks, calendarLineAsks, interviewAsks, eventAsks, stepQuestionAsks]
+  return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskAsks, missedAsks, agentAsks, calendarAsks, sourceProjectAsks, calendarLineAsks, interviewAsks, eventAsks, stepQuestionAsks,
+    ({ ctx: context, now: at }: Source) => relationCheckAsks(context, at)]
     .flatMap((collect) => { try { return collect(source); } catch { return []; } });
 }
 
@@ -789,6 +791,7 @@ async function answerOne(ctx: AccessContext, ask: Ask, optionId: string, values:
       store.setSetting(ctx.workspaceId, CALENDAR_LINES, JSON.stringify(filing));
       return { ok: true };
     }
+    case "relation_check": return answerRelationCheck(ctx, ask, optionId, values);
     default: return { ok: false, code: "ASK_NOT_ANSWERABLE" };
   }
 }

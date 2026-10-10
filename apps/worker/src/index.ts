@@ -662,7 +662,7 @@ if (!capabilitySecret) {
       cwd: repoRoot,
       requiredSkills: [
         "crossline:crossline-automation-stripper", "crossline:crossline-milestone-gate",
-        "crossline:crossline-flywheel-scout", "crossline:crossline-manualbook-designer", "crossline:crossline-material-researcher", "crossline:crossline-material-writer", "crossline:crossline-milestone-architect",
+        "crossline:crossline-flywheel-scout", "crossline:crossline-manualbook-designer", "crossline:crossline-material-researcher", "crossline:crossline-material-writer", "crossline:crossline-milestone-architect", "crossline:crossline-artifact-planner",
         "crossline:crossline-goal-backplanner", "crossline:crossline-background-facts", "crossline:crossline-assistant",
         "crossline:crossline-onboarding", "crossline:crossline-due-diligence", "crossline:crossline-plan-explainer", "crossline:crossline-weekly-insight",
         "crossline:crossline-agent", "crossline:crossline-step-planner", "crossline:crossline-validation-reviewer", "crossline:crossline-progress-judge", "crossline:crossline-concierge", "crossline:crossline-archetype-curator", "crossline:crossline-task-titler", "crossline:crossline-portrait-writer", "crossline:crossline-portrait-illustrator", "crossline:crossline-calendar-classifier"

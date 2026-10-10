@@ -5,7 +5,7 @@ import { STEP_ROLES, plainEstimateWords } from "@crossline/core";
 import type { TaskDetail } from "../../lib/task-detail";
 import { Sheet } from "../ui/overlay";
 import { ProgressRing, formatMinutes, dayLabel } from "../ui/controls";
-import { LineTag, SupportsTag, Tag } from "../ui/tag";
+import { ArtifactTag, LineTag, SupportsTag, Tag } from "../ui/tag";
 import { riskLabel, riskTone, stateLabelFor } from "../../lib/labels";
 import { Conversation } from "../chat/conversation";
 import { ManualbookView } from "../manualbook-view";
@@ -210,6 +210,7 @@ export function TaskPanels({ detail, initialTab = "steps" }: { detail: TaskDetai
         <Tag>{stateLabelFor(detail.state, detail.paused)}</Tag>
         {detail.riskTier !== "routine" && <Tag tone={riskTone[detail.riskTier] ?? "neutral"}>{riskLabel[detail.riskTier]}</Tag>}
         {detail.supports.map((item) => <SupportsTag key={`${item.line}:${item.target}`} line={item.line} lineLabel={item.lineLabel} target={item.target} {...(item.artifact ? { artifact: item.artifact } : {})} />)}
+        {detail.artifactLinks?.map((item) => <ArtifactTag key={`${item.direction}:${item.line}:${item.title}`} {...item} />)}
       </div>
       {detail.intent !== detail.title && <p className="task-dialog-description gen">{detail.intent}</p>}
       {detail.milestone && <p className="task-dialog-milestone">→ <a href={`/milestones/${encodeURIComponent(detail.milestone.id)}`}>{detail.milestone.title}</a></p>}
