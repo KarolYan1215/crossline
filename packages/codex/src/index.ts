@@ -155,7 +155,9 @@ export function webResearchBlocker(
 ): { code: string; message: string } | undefined {
   const executable = env.CROSSLINE_CODEX_PATH ?? path.resolve(import.meta.dirname, "../../../vendor/codex/codex-rs/target/debug",
     platform === "win32" ? "codex.exe" : "codex");
-  const host = path.join(path.dirname(executable), platform === "win32" ? "codex-code-mode-host.exe" : "codex-code-mode-host");
+  // The platform's own path rules, not the host's: a Windows path checked on Linux has no "/" to split on.
+  const p = platform === "win32" ? path.win32 : path.posix;
+  const host = p.join(p.dirname(executable), platform === "win32" ? "codex-code-mode-host.exe" : "codex-code-mode-host");
   if (exists(host)) return undefined;
   return { code: "WEB_RESEARCH_HOST_MISSING",
     message: `联网查证需要 ${host}，但它不在那里，网页搜索无法启动。把已安装 Codex 应用 bin 目录里的 codex-code-mode-host.exe 复制到这个位置，或在 vendor/codex 里构建 codex-code-mode-host。` };

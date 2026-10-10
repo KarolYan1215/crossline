@@ -3255,7 +3255,8 @@ export class CrosslineStore {
   }
 
   listWorkspaces(): StoredWorkspace[] {
-    const rows = this.#db.prepare("SELECT * FROM workspaces ORDER BY created_at, id")
+    // rowid breaks a same-millisecond tie by creation order; the random id would make "the first workspace" a coin flip.
+    const rows = this.#db.prepare("SELECT * FROM workspaces ORDER BY created_at, rowid")
       .all() as Array<Record<string, string>>;
     return rows.map((row) => ({ id: row.id!, name: row.name!, createdAt: row.created_at! }));
   }

@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { agentApprovalDecision, approveCategory, CrosslineStore, declineCategory, decideAgentApproval, pendingAgentApprovals, pendingCategoryRequests, setAutoHandoff,
   setCategoryMode, setPaused } from "@crossline/db";
@@ -21,7 +22,7 @@ test("a work order becomes a task: the AI parts as the job, the files given for 
   const result = taskFromWorkOrder(store, ws, "wo-aaaa1111");
   if (!result.ok) throw new Error(result.message);
   expect(result.category).toBe("read_research_organize");
-  expect(result.input).toMatchObject({ workOrderId: "wo-aaaa1111", taskId: "agent-aaaa1111-1", title: "熟悉 Cadence", humanPart: "在 Virtuoso 里画图并自己提交", inputs: ["C:\\Users\\karol\\Downloads\\s.pdf"] });
+  expect(result.input).toMatchObject({ workOrderId: "wo-aaaa1111", taskId: "agent-aaaa1111-1", title: "熟悉 Cadence", humanPart: "在 Virtuoso 里画图并自己提交", inputs: [fileURLToPath("file:///C:/Users/karol/Downloads/s.pdf")] });
   expect(result.input.what).toContain("6T SRAM 知识点清单");
 });
 
