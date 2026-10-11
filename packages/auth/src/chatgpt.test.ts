@@ -24,7 +24,8 @@ const openai = (token: () => string, posted: URLSearchParams[] = []): typeof fet
 
 let dir: string;
 beforeEach(() => { dir = mkdtempSync(path.join(tmpdir(), "crossline-chatgpt-")); });
-afterEach(() => rmSync(dir, { recursive: true, force: true }));
+// Better Auth keeps its SQLite handle with no way to close it, and Windows refuses to delete an open file: best effort, the OS temp dir is swept anyway.
+afterEach(() => { try { rmSync(dir, { recursive: true, force: true }); } catch { /* locked on Windows */ } });
 
 test("an ID token is accepted only when OpenAI signed it for this install, now, for this attempt", async () => {
   const good = { iss: CHATGPT_ISSUER, aud: "oaiapp_1", sub: "user-1", email: "a@example.com", nonce: "n", exp: Math.floor(Date.now() / 1000) + 300 };

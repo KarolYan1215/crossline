@@ -44,7 +44,10 @@ async function audit(page: Page): Promise<Findings> {
       if (exempt(block) || !visible(block) || block.querySelector("p, h1, h2, h3, h4, h5, h6, ul, ol, fieldset, form")) continue;
       const style = getComputedStyle(block);
       const line = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.35;
-      if (block.getBoundingClientRect().height > line * 3.5) found.longText.push((block.textContent ?? "").trim().slice(0, 40));
+      // Lines are counted in the text's own height: a paragraph styled as a padded panel (Today's empty 下一步) is two lines on a phone.
+      const content = block.getBoundingClientRect().height - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom)
+        - parseFloat(style.borderTopWidth) - parseFloat(style.borderBottomWidth);
+      if (content > line * 3.5) found.longText.push((block.textContent ?? "").trim().slice(0, 40));
     }
     return found;
   }, DEVELOPER.source);

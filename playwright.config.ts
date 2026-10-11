@@ -66,11 +66,15 @@ export default defineConfig({
   // "chrome"` (below) is the default path and what actually runs there. A sandbox with only the
   // Playwright-bundled Chromium (no "chrome" channel available) sets CROSSLINE_E2E_CHROME_PATH to fall
   // back to it instead; unset, behavior is unchanged.
+  //
+  // The phone runs after the desktop, never beside it: both share one ledger, and the phone writes a next step of its own
+  // (`ensureOwnNextStep`). With more than one worker the two projects interleaved, that step reached the desktop Today
+  // before its screenshot, and the baselines matched or not depending on which worker got there first.
   projects: process.env.CROSSLINE_E2E_CHROME_PATH ? [
     { name: "desktop-chrome", use: { ...devices["Desktop Chrome"], launchOptions: { executablePath: process.env.CROSSLINE_E2E_CHROME_PATH }, viewport: { width: 1440, height: 1100 } } },
-    { name: "mobile-chrome", use: { ...devices["Pixel 7"], launchOptions: { executablePath: process.env.CROSSLINE_E2E_CHROME_PATH } } }
+    { name: "mobile-chrome", dependencies: ["desktop-chrome"], use: { ...devices["Pixel 7"], launchOptions: { executablePath: process.env.CROSSLINE_E2E_CHROME_PATH } } }
   ] : [
     { name: "desktop-chrome", use: { ...devices["Desktop Chrome"], channel: "chrome", viewport: { width: 1440, height: 1100 } } },
-    { name: "mobile-chrome", use: { ...devices["Pixel 7"], channel: "chrome" } }
+    { name: "mobile-chrome", dependencies: ["desktop-chrome"], use: { ...devices["Pixel 7"], channel: "chrome" } }
   ]
 });

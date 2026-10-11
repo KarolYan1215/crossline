@@ -102,7 +102,7 @@ export default async function ApprovalsPage() {
         return <article key={item.id}>
           <b>待验收</b><a href={`/workbench/${encodeURIComponent(item.id)}`}><strong>{item.intent}</strong></a>
           <p>
-            {own.length ? own.map((claim) => `${({ file: "文件", link: "链接", record: "记录", telemetry: "遥测" } as Record<string, string>)[claim.kind] ?? claim.kind} · ${claim.description} · ${claim.uri}`).join("；") : "本次提交没有证据声明"}
+            {own.length ? own.map((claim) => `${({ file: "文件", link: "链接", record: "记录", telemetry: "遥测" } as Record<string, string>)[claim.kind] ?? claim.kind} · ${claim.description}${claim.kind === "file" ? "" : ` · ${claim.uri}`}`).join("；") : "本次提交没有证据声明"}
             {execution?.durationObserved
               ? ` · 实际执行记录：被中断 ${execution.pauseMinutes} 分钟`
               : " · 时长未观测"}

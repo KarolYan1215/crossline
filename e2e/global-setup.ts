@@ -9,8 +9,8 @@ import { request, type FullConfig } from "@playwright/test";
  * in `packages/auth`); the server here is started with `CROSSLINE_AUTH_TEST_MAILBOX_DIR` set, so that
  * link lands as a JSON file on disk instead of a real mailbox.
  */
-const TEST_EMAIL = "e2e-tester@crossline.test";
-const TEST_PASSWORD = "Crossline-E2E-Test-Pass-1!";
+export const TEST_EMAIL = "e2e-tester@crossline.test";
+export const TEST_PASSWORD = "Crossline-E2E-Test-Pass-1!";
 
 type CapturedMail = { to: string; subject: string; url: string };
 

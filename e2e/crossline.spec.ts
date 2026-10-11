@@ -3,6 +3,7 @@ import path from "node:path";
 // Relative, not @crossline/db: the repo root is not a workspace package and has no such dependency.
 import { CrosslineStore } from "../packages/db/src/index.js";
 import { DEFAULT_AVAILABILITY } from "../packages/core/src/index.js";
+import { TEST_EMAIL, TEST_PASSWORD } from "./global-setup.js";
 
 function openStore(): CrosslineStore {
   return new CrosslineStore(path.join(process.env.CROSSLINE_E2E_DATA_DIR!, "crossline.db"));
@@ -632,6 +633,10 @@ test("signing out deletes this browser's offline database for the workspace it w
     request.onerror = () => reject(request.error);
   }), workspaceId);
 
+  // A session of this test's own: signing out revokes the session on the server, and the shared one from global-setup is what
+  // the phone tests (which run after the desktop) still sign in with.
+  const signIn = await apiFetch(page, "POST", "/api/auth/sign-in/email", { email: TEST_EMAIL, password: TEST_PASSWORD });
+  expect(signIn.ok).toBe(true);
   await page.getByRole("button", { name: "退出登录" }).click();
   await expect(page).toHaveURL(/\/login/);
 

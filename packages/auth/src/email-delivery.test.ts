@@ -13,7 +13,8 @@ beforeEach(async () => {
     smtp: { host: "127.0.0.1", port: 1, user: "u", password: "p", from: "Crossline <noreply@example.com>" } };
   await migrateCrosslineAuth(options);
 });
-afterEach(() => rmSync(dir, { recursive: true, force: true }));
+// Better Auth keeps its SQLite handle with no way to close it, and Windows refuses to delete an open file: best effort, the OS temp dir is swept anyway.
+afterEach(() => { try { rmSync(dir, { recursive: true, force: true }); } catch { /* locked on Windows */ } });
 
 test("a verification email that does not go out is a failed sign-up, not 「已发送验证邮件」", async () => {
   // Better Auth runs the sender through runInBackgroundOrAwait, which catches every error and only logs it; on the real deployment
