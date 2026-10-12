@@ -38,6 +38,7 @@ import { extractText, reextractForLayout } from "./extract";
 import { createTranscriber, createWhisperEngine, modelsDirectory } from "./transcribe";
 import { createBackgroundFactsExtractor } from "./background-facts-runner";
 import { createGraphSync, type SyncOutcome } from "./graph-sync";
+import { REQUIRED_SKILLS } from "./required-skills";
 import { monthSpend, ownerOf, runtimeOwner, runtimesDir } from "./owner";
 import { createBackgroundSpend } from "./spend";
 import {
@@ -706,13 +707,7 @@ if (!capabilitySecret) {
       name: "crossline",
       marketplacePath: path.join(repoRoot, "skills", "marketplace", ".agents", "plugins", "marketplace.json"),
       cwd: repoRoot,
-      requiredSkills: [
-        "crossline:crossline-automation-stripper", "crossline:crossline-milestone-gate",
-        "crossline:crossline-flywheel-scout", "crossline:crossline-manualbook-designer", "crossline:crossline-material-researcher", "crossline:crossline-material-writer", "crossline:crossline-milestone-architect", "crossline:crossline-artifact-planner",
-        "crossline:crossline-goal-backplanner", "crossline:crossline-background-facts", "crossline:crossline-assistant",
-        "crossline:crossline-onboarding", "crossline:crossline-due-diligence", "crossline:crossline-plan-explainer", "crossline:crossline-weekly-insight",
-        "crossline:crossline-agent", "crossline:crossline-step-planner", "crossline:crossline-validation-reviewer", "crossline:crossline-progress-judge", "crossline:crossline-concierge", "crossline:crossline-archetype-curator", "crossline:crossline-task-titler", "crossline:crossline-portrait-writer", "crossline:crossline-portrait-illustrator", "crossline:crossline-calendar-classifier", "crossline:crossline-goal-splitter"
-      ]
+      requiredSkills: REQUIRED_SKILLS
     },
     // Every account but the machine owner's runs on its own Codex (runtime-registry.ts), in its own home beside the owner's.
     runtimes: { baseDir: runtimesDir(), ownerWorkspaceId: () => runtimeOwner(analysisStore) },

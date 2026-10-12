@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   AGENT_HISTORY_SUMMARY, agentHistoryLines, type AgentHistorySummary,
   EMPTY_PROFILE_MODEL, GOAL_EDITS_SETTING, ONBOARDING_TURN_SCHEMA, duplicateAttributes, type PendingGoalEdit, type StoredLineProfile, PROFILE_CONFIRMED, portraitFingerprint, answeredGapFacts, keepOnboardingTurn, mergeFacts, sanitizeDateExtraction, validateOnboardingTurn,
-  type ProfileGap, type ProfileModel, type OnboardingStage,
+  gapCoveredBy, type ProfileGap, type ProfileModel, type OnboardingStage,
   type KnownSources, type OnboardingTurn, type OnboardingTurnContext
 } from "@crossline/core";
 import { continueSkillTurn, runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
@@ -324,12 +324,6 @@ export function withChecklist(output: OnboardingTurn, open: Array<{ label: strin
       : [{ id: "checklist-open", text: `完成访谈前还缺：${missing}。请补充。`, kind: "free", allowOther: true, identityId: "", projectId: "", options: [] }] };
 }
 
-/** Words that say a question from the model already asks what a gap is about, so the code-built one is not asked on top of it. */
-const COVERS: Partial<Record<ProfileGap["code"], RegExp>> = {
-  DATE_UNDATED: /待定|TBD|日期|什么时候/i,
-  COURSE_MEETINGS: /上课|几点|每周.*(时间|时段)/
-};
-
 /** Besides those that block, at most this many of the app's own questions join one round, so a batch stays answerable. */
 export const GAPS_PER_ROUND = 3;
 
@@ -346,11 +340,7 @@ export function withGapQuestions(output: OnboardingTurn, gaps: ProfileGap[], mes
   const open = gaps.filter((gap) => {
     if (output.questions.some((question) => question.id === gap.question.id)) return false;
     // Already asked by the model in its own words: a line it asks anything about, a project question that is about the same thing.
-    const covers = COVERS[gap.code];
-    const covered = output.questions.some((question) => gap.code === "LINE_UNCONFIRMED"
-      ? question.identityId === gap.identityId
-      : Boolean(covers) && question.projectId === gap.projectId && covers!.test(question.text));
-    if (covered) return false;
+    if (gapCoveredBy(gap, output.questions)) return false;
     return gap.blocking || !asked.has(gap.question.id);
   });
   const lines = new Set([...output.questions.map((question) => question.identityId), ...output.slotUpdates.map((update) => update.identityId)].filter(Boolean));

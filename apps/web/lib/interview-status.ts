@@ -1,5 +1,5 @@
 import "server-only";
-import { ONBOARDING_STAGES, type AccessContext, type ChecklistItem } from "@crossline/core";
+import { ONBOARDING_STAGES, gapCoveredBy, type AccessContext, type ChecklistItem } from "@crossline/core";
 import { interviewChecklistFor, interviewGapsFor } from "@crossline/db";
 import { identityLines } from "./lines";
 import { getStore, planToday } from "./crossline";
@@ -105,7 +105,7 @@ export function interviewStatus(ctx: AccessContext, now = new Date()): Interview
   const pending = readPending(ctx, session.id, lastAssistant?.seq ?? 0);
   const inRound = new Set(round.map((question) => question.id));
   const gaps = answered ? [] : interviewGapsFor(store, ctx.workspaceId, lines, today)
-    .filter((gap) => gap.code !== "FILE_UNFILED" && !inRound.has(gap.question.id)).map((gap) => gap.question as InterviewQuestion);
+    .filter((gap) => gap.code !== "FILE_UNFILED" && !inRound.has(gap.question.id) && !gapCoveredBy(gap, round)).map((gap) => gap.question as InterviewQuestion);
   const questions = [...round.filter((question) => !owned.has(question.id) && !question.id.startsWith("gap-file-")), ...gaps]
     .filter((question) => !pending.answers[question.id]);
   return { started: true, complete, awaitingPerson: open.length > 0 && open.every((item) => item.owner === "person"), parked,

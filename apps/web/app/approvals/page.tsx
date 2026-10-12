@@ -124,9 +124,11 @@ export default async function ApprovalsPage() {
     {weekProposals.length > 0 && <ProposalBatchForm count={weekProposals.length}>
       <section className="work-order-list" id="proposals">{weekProposals.map(renderProposal)}</section>
     </ProposalBatchForm>}
-    {(laterProposals.length > 0 || laterAsks.length > 0 || pending.later.milestoneDrafts > 0) && <details className="fold advanced" id="later">
-      <summary>以后再定 · {laterProposals.length + laterAsks.length + pending.later.milestoneDrafts} 项（工作一周后才需开始，到时自动列入本周）</summary>
+    {pending.later.total > 0 && <details className="fold advanced" id="later">
+      {/* The same total as the tile and the line on top; the assistant's results it counts are listed in their own section. */}
+      <summary>以后再定 · {pending.later.total} 项（工作一周后才需开始，到时自动列入本周）</summary>
       <AskList initial={laterAsks} scope="later" heading="以后再定的待决事项" />
+      {pending.later.assistantReviews > 0 && <p><a href="#assistant">{pending.later.assistantReviews} 份助手成果</a>在「助手」一节，对应任务一周后才需开始。</p>}
       {pending.later.milestoneDrafts > 0 && <p><a href="/milestones">{pending.later.milestoneDrafts} 个里程碑草稿</a>在主线页，截止较远。</p>}
       {laterProposals.length > 0 && <ProposalBatchForm count={laterProposals.length}>
         <section className="work-order-list">{laterProposals.map(renderProposal)}</section>

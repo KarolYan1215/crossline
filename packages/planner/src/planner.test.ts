@@ -91,6 +91,23 @@ describe("energy-aware planning", () => {
     expect(result.plan.blocks[0]?.taskId).toBe("due");
   });
 
+  test("work due soon takes a medium-energy hour rather than missing its deadline; work without one does not", async () => {
+    const estimate = { p25Minutes: 90, p50Minutes: 90, p85Minutes: 90, confidence: "high" as const };
+    const result = await planSchedule({ now: start, horizonDays: 1, mode: "asap", tasks: [
+      { id: "due", title: "明天截止的作业", estimate, inputsReady: true, deadlineTier: 1, energy: "high", deadline: "2026-09-14T19:00:00.000Z" },
+      { id: "open", title: "没有截止的研究", estimate: { ...estimate, p50Minutes: 60, p85Minutes: 60 }, inputsReady: true, deadlineTier: 3, energy: "high" }
+    ], availability: [
+      { start: "2026-09-14T14:00:00.000Z", end: "2026-09-14T15:00:00.000Z", energy: "high" },
+      { start: "2026-09-14T16:00:00.000Z", end: "2026-09-14T18:00:00.000Z", energy: "medium" }
+    ], frozenBlocks: [] });
+    const minutes = (id: string) => result.plan.blocks.filter((block) => block.taskId === id)
+      .reduce((sum, block) => sum + (Date.parse(block.end) - Date.parse(block.start)) / 60_000, 0);
+    expect(minutes("due")).toBe(90);
+    expect(result.bufferRelaxed).toBe(true);
+    // The undated work never moves into the medium slot: it keeps its own energy.
+    expect(result.plan.blocks.filter((block) => block.taskId === "open").every((block) => block.end <= "2026-09-14T15:00:00.000Z")).toBe(true);
+  });
+
   test("holds undated fourth-quadrant work with an actionable reason", async () => {
     const result = await planSchedule({ now: start, horizonDays: 7, mode: "asap",
       tasks: [{ id: "optional", title: "普通事项", estimate: { p25Minutes: 20,

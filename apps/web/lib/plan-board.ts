@@ -120,7 +120,10 @@ export async function loadPlanBoard(ctx: AccessContext, plan: PersistedPlan, req
     plannedByDay[today] = merged;
   }
   const now = (process.env.CROSSLINE_FIXED_NOW ? new Date(process.env.CROSSLINE_FIXED_NOW) : new Date()).toISOString();
-  const executions = store.listExecutions(ctx.workspaceId);
+  // A session with no end counts to now only while its order is actually running: one left open by an order discarded before
+  // sessions ended with it would otherwise read as weeks of work.
+  const running = new Set(orders.filter((order) => order.state === "active").map((order) => order.id));
+  const executions = store.listExecutions(ctx.workspaceId).filter((item) => item.endedAt || running.has(item.workOrderId));
   let portrait: PortraitReport | undefined;
   try { portrait = (JSON.parse(store.getSetting(ctx.workspaceId, "portrait.report") ?? "{}") as { report?: PortraitReport }).report; } catch { /* none yet */ }
   const facts = store.listProfileFacts(ctx.workspaceId);

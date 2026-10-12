@@ -7,7 +7,7 @@ import {
   type AccessContext, type NotifyLevelName, type NudgeBlock, type NudgeButton, type NudgeKind, type NudgeSlack, type PlannedNudge, type ProposedAction
 } from "@crossline/core";
 import { effectiveSchedulePreferences, getStore, loadCurrentPlan, planToday, readAvailability } from "./crossline";
-import { openAsks } from "./asks";
+import { openAsks, thisWeek } from "./asks";
 import { energyModel } from "./energy";
 import { systemContext } from "./auto-publish";
 import type { Card } from "./conversation";
@@ -203,7 +203,8 @@ export async function ensureOpener(ctx: AccessContext, now = new Date()): Promis
   const soon = store.listWorkOrders(ctx.workspaceId).filter((order) => ["approved", "preparing", "ready_for_human", "active"].includes(order.state))
     .map((order) => ({ order, due: (order.payload as { dueDate?: string }).dueDate || anchors.get(order.milestoneId) || "" }))
     .filter((item) => item.due && item.due >= today && item.due <= addDays(today, 3)).sort((a, b) => a.due.localeCompare(b.due));
-  const asks = openAsks(ctx, now);
+  // This week's, the same count as Today's stack and 待确认: the ones that can wait are not today's to mention.
+  const asks = thisWeek(openAsks(ctx, now));
   const md = (day: string) => `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}`;
   const lines = [
     `${Number(today.slice(5, 7))} 月 ${Number(today.slice(8, 10))} 日 周${"日一二三四五六"[new Date(`${today}T12:00:00Z`).getUTCDay()]}。`,

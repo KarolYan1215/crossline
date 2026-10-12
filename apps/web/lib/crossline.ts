@@ -670,6 +670,7 @@ function plannerItemsFor(ctx: AccessContext, orders: ActionableOrder[]) {
   const stepPlans = new Map(getStore().listStepPlans(ctx.workspaceId).map((plan) => [plan.workOrderId, plan]));
   const openSteps = (orderId: string) => stepPlans.get(orderId)?.steps.filter((step) => step.status === "planned" && step.schedulable) ?? [];
   const plannerIdsOf = (orderId: string) => { const steps = openSteps(orderId); return steps.length ? steps.map((step) => stepTaskId(orderId, step.id)) : [orderId]; };
+  const localToday = formatInTimeZone(process.env.CROSSLINE_FIXED_NOW ? new Date(process.env.CROSSLINE_FIXED_NOW) : new Date(), zone, "yyyy-MM-dd");
   return orders.flatMap((order) => {
     const base = plannerTaskOf(ctx, order);
     const steps = openSteps(order.id);
@@ -679,7 +680,10 @@ function plannerItemsFor(ctx: AccessContext, orders: ActionableOrder[]) {
     return steps.map((step) => {
       const internal = step.dependsOn.filter((dep) => open.has(dep)).map((dep) => stepTaskId(order.id, dep));
       const stepStart = step.notBefore ? toZonedInstant(step.notBefore, "00:00", zone) : undefined;
-      const stepDue = step.dueBy ? toZonedInstant(step.dueBy, "23:59", zone) : undefined;
+      // A step's own day is pacing inside the task, not a deadline of its own: from that day on the task's deadline governs. Kept as
+      // a hard limit, a homework whose steps slipped became unplaceable the evening before it was due — one step was still "due
+      // tonight" with tonight's hours already gone, and every later step waited on it.
+      const stepDue = step.dueBy && step.dueBy > localToday ? toZonedInstant(step.dueBy, "23:59", zone) : undefined;
       const notBefore = [base.notBefore, stepStart].filter(Boolean).sort().at(-1);
       const deadline = [base.deadline, stepDue].filter(Boolean).sort()[0];
       const { notBefore: _n, deadline: _d, dependsOn: _deps, ...rest } = base;
@@ -1710,7 +1714,10 @@ export function lastNight(workspaceId: string, now: Date): LastNight {
   if (!event) return { state: "none" };
   const payload = event.payload as { code?: string; message?: string; proposals?: number };
   if (event.type === "flywheel.nightly.ran") return { state: "ran", proposals: payload.proposals ?? 0 };
-  return { state: "skipped", reason: payload.message ?? payload.code ?? "未记录原因" };
+  // Shown on 周复盘: the stored message of a failed run or an unreadable quota is the runtime's own error text (a JSON-RPC body), so
+  // those two are said in words by their code.
+  const plain: Record<string, string> = { COST_SIGNAL_UNAVAILABLE: "读不到模型额度，今晚不运行。", FLYWHEEL_RUN_FAILED: "扩展运行出错，下一晚重试。" };
+  return { state: "skipped", reason: (payload.code && plain[payload.code]) ?? payload.message ?? payload.code ?? "未记录原因" };
 }
 
 const dayOf = (iso: string) => iso.slice(0, 10);

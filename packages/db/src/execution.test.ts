@@ -39,6 +39,19 @@ test("interrupted time stays distinguishable from actually active time", () => {
   } finally { store.close(); }
 });
 
+test("discarding an order mid-session ends the session, so nothing counts its wall clock on to now", () => {
+  const store = new CrosslineStore(":memory:");
+  vi.useFakeTimers();
+  try {
+    seed(store, "ready_for_human");
+    vi.setSystemTime(new Date("2026-09-27T04:42:00.000Z"));
+    store.transitionWorkOrder("w", "w1", { type: "human.started" }, "start:w1", { durationObserved: true });
+    vi.setSystemTime(new Date("2026-09-27T05:00:00.000Z"));
+    store.transitionWorkOrder("w", "w1", { type: "archived" }, "archive:w1");
+    expect(store.listExecutions("w")[0]).toMatchObject({ endedAt: "2026-09-27T05:00:00.000Z", outcome: "archived" });
+  } finally { store.close(); }
+});
+
 test("completing while paused closes the open interruption instead of losing it", () => {
   const store = new CrosslineStore(":memory:");
   vi.useFakeTimers();

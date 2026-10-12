@@ -71,15 +71,17 @@ test("a course nobody said the class times of, a file only the person can file a
     unfiled: [{ id: "doc-1", fileName: "Lecture Plan.pdf", lean: { id: "ece548" } }], portrait: { written: true, confirmed: false } };
   const gaps = profileGaps(input);
   expect(gaps.filter((gap) => gap.code !== "LINE_UNCONFIRMED").map((gap) => gap.question.text)).toEqual([
-    "「ECE 548」每周什么时候上课、在哪里？", "《Lecture Plan.pdf》属于哪个项目？", "「当前画像」里写的是否符合你？"]);
+    "「ECE 548」每周什么时候上课、在哪里？", "《Lecture Plan.pdf》属于哪个项目？", "「当前画像」写的是否符合本人？"]);
   // The project the interview leaned to is offered first.
   expect(gaps.find((gap) => gap.code === "FILE_UNFILED")!.question.options[0]).toMatchObject({ id: "ece548", detail: "访谈判断更可能是它" });
   const reply = ["【「ECE 548」每周什么时候上课、在哪里？】选择：我来写上课时间。补充：周二、四 11:00–12:15，EH 2317",
-    "【《Lecture Plan.pdf》属于哪个项目？】选择：ECE 548", "【「当前画像」里写的是否符合你？】选择：符合"].join("\n");
+    "【《Lecture Plan.pdf》属于哪个项目？】选择：ECE 548", "【「当前画像」写的是否符合本人？】选择：符合"].join("\n");
   expect(answeredGapFacts(reply, gaps)).toEqual([
     { identityId: "research", projectId: "ece548", slot: "meeting_times", value: "周二、四 11:00–12:15，EH 2317", quote: "周二、四 11:00–12:15，EH 2317" },
     { identityId: "", projectId: "", slot: "", value: "ECE 548", quote: "ECE 548", file: { documentId: "doc-1", projectId: "ece548" } },
     { identityId: "", projectId: "", slot: "", value: "符合", quote: "符合", confirmPortrait: true }
   ]);
+  // A round stored before the rewording is answered in its old words, and still confirms the portrait.
+  expect(answeredGapFacts("【「当前画像」里写的是否符合你？】选择：符合", gaps)).toEqual([{ identityId: "", projectId: "", slot: "", value: "符合", quote: "符合", confirmPortrait: true }]);
   expect(profileGaps({ ...input, meetings: ["ECE 555", "ece548"] }).some((gap) => gap.code === "COURSE_MEETINGS")).toBe(false);
 });

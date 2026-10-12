@@ -79,7 +79,7 @@ export function DecideRelations({ candidates }: { candidates: CandidateDetail[] 
         ? <small className="relation-evidence-missing">没有来源，不能批准（先勾选并“搁置”，或等周复盘补来源）。</small>
         : <ul className="relation-evidence">{candidate.evidence.map((item) => <li key={item.uri}>
           <a href={item.uri} target="_blank" rel="noreferrer noopener">{item.source || item.uri}</a>
-          <span> · 读取于 {item.observedAt}</span>
+          <span> · 读取于 {item.observedAt.slice(0, 10)}</span>
         </li>)}</ul>}
       <small className="relation-facts">
         目标停滞 {candidate.targetStalledDays} 天 ·

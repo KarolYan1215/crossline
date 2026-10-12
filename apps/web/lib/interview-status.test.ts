@@ -45,6 +45,14 @@ test("while the interview runs its questions stay in it; nothing about it is on 
   expect(asks.some((ask) => ["interview_open", "interview_question", "source_project"].includes(ask.kind))).toBe(false);
 });
 
+test("a course's class times the round already asks about are not asked again in the app's own words", () => {
+  const { store } = setup();
+  store.appendOnboardingMessage({ workspaceId: ws, sessionId: "s1", role: "assistant", createdAt: "2026-10-08T01:00:00Z",
+    content: { reply: "…", nextAction: "ask", stage: "lines", questions: [
+      { id: "ece548-fixed-class", text: "ECE 548 每周固定上课的星期、起止时间和地点？", kind: "free", allowOther: true, identityId: "research", projectId: "ece548", options: [] }] } });
+  expect(interviewStatus(TEST_CTX, SOON).questions.map((question) => question.id)).toEqual(["ece548-fixed-class", "gap-meetings-ece555"]);
+});
+
 test("used without finishing it, the interview's questions are asked on 待决事项, and the round goes to the interview once all are answered", async () => {
   setup();
   // A day with no reply counts as put aside, as does 「先开始使用」.

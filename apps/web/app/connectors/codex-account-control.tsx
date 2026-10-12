@@ -90,12 +90,12 @@ export function CodexAccountControl() {
     <header><h3>模型连接</h3><Tag tone={account ? "ok" : "warn"}>{account ? "已连接" : state ? "未连接" : "检查中"}</Tag></header>
     <div className="st-row"><span className="st-row-label">{account
       ? account.type === "apiKey" ? "API key（按用量计费，每月上限见「模型额度」）" : account.email ?? "ChatGPT 账号"
-      : guest ? "这个账号用自己的 Codex：分析、拆分与规划都在它上面运行，不使用电脑主人的额度与记忆。" : "分析、拆分与助手功能需要登录 ChatGPT 账号"}
+      : !state ? "正在读取登录状态…" : guest ? "这个账号用自己的 Codex：分析、拆分与规划都在它上面运行，不使用电脑主人的额度与记忆。" : "分析、拆分与助手功能需要登录 ChatGPT 账号"}
       {blocker && <small role="status">{blocker.message}</small>}</span>
       <span className="st-row-actions">
-        {!account && !loginUrl && (!guest || local) && <button type="button" className="primary-button" disabled={busy}
+        {state && !account && !loginUrl && (!guest || local) && <button type="button" className="primary-button" disabled={busy}
           onClick={() => void post({ type: "chatgpt" })}>{busy ? "启动中…" : "用 ChatGPT 登录"}</button>}
-        {!account && !loginUrl && guest && <button type="button" disabled={busy} onClick={() => void post({ type: "chatgptDeviceCode" })}>用设备码登录</button>}
+        {state && !account && !loginUrl && guest && <button type="button" disabled={busy} onClick={() => void post({ type: "chatgptDeviceCode" })}>用设备码登录</button>}
         {loginUrl && <a href={loginUrl} target="_blank" rel="noreferrer">打开登录页 →</a>}
         {loginUrl && <button type="button" disabled={busy} onClick={cancelLogin}>取消</button>}
         {account && guest && <button type="button" disabled={busy} onClick={() => void post({ action: "logout" })}>退出登录</button>}

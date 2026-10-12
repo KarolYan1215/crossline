@@ -36,3 +36,19 @@ test("a task with a step plan is placed step by step, in dependency order, skipp
   expect(first("v1s3") < first("v1s4")).toBe(true);
   expect(blocks.every((block) => block.title.includes(" · 步骤"))).toBe(true);
 });
+
+test("a step whose own day has come is still placed before the task's deadline", async () => {
+  // Thursday 9/17, 21:00 in Chicago: today's hours are over.
+  vi.stubEnv("CROSSLINE_FIXED_NOW", "2026-09-18T02:00:00.000Z");
+  const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
+  saveSchedulePreferences(TEST_CTX, { timeZone: "America/Chicago", mode: "buffered", windows: ALWAYS, importance: {} });
+  await loadCurrentPlan(TEST_CTX);
+  const order = store.listWorkOrders(TEST_CTX.workspaceId).find((item) => item.identityId === "research")!;
+  store.saveWorkOrder({ ...order, state: "ready_for_human", payload: { ...(order.payload as object), dueDate: "2026-09-18" } });
+  // Planned days earlier: the first step was paced for 9/15 (gone), the second for tonight (no hours left); the homework is due tomorrow.
+  store.saveStepPlan(TEST_CTX.workspaceId, order.id, { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 2, unit: "题" },
+    rationale: "", steps: [{ ...step("a", "read", 30), dueBy: "2026-09-15" }, { ...step("b", "solve", 60, ["a"]), dueBy: "2026-09-17" }] }, "o", "t");
+  const blocks = (await loadCurrentPlan(TEST_CTX)).blocks.filter((block) => block.id.startsWith(`scheduled:${order.id}`));
+  expect(new Set(blocks.map((block) => plannerIdOfBlock(block.id).split("#")[1]))).toEqual(new Set(["v1s1", "v1s2"]));
+  expect(blocks.every((block) => block.day === "2026-09-18")).toBe(true);
+});

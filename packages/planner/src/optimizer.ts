@@ -396,10 +396,16 @@ async function schedule(input: PlanningInput): Promise<PlanResult> {
   }) } : eligible;
   const first = await optimize(buffered);
   let result = first;
-  const relaxable = params.gapMinutes > 0 || params.maxDailyShare < 1 || params.deadlineBufferDays > 0;
+  // The relaxed run also lets work with a deadline take a slot one energy level lower (high work in a medium slot): a tired hour
+  // beats a missed deadline. Every step of a homework inherits the task's 「high」, and a day has three high hours, so a homework due
+  // tomorrow got nothing at all while those hours went to work with no deadline.
+  const lower = { high: "medium", medium: "low", low: "low" } as const;
+  const energyRelaxed = { ...eligible, tasks: eligible.tasks.map((task) => task.deadline && task.energy ? { ...task, energy: lower[task.energy] } : task) };
+  const relaxable = params.gapMinutes > 0 || params.maxDailyShare < 1 || params.deadlineBufferDays > 0
+    || eligible.tasks.some((task) => task.deadline && task.energy && task.energy !== "low");
   if (relaxable && first.blockers.some((blocker) => eligible.tasks.some((task) =>
     task.id === blocker.taskId && task.deadline))) {
-    const relaxed = await optimize(eligible, true);
+    const relaxed = await optimize(energyRelaxed, true);
     const hardPlaced = (value: PlanResult) => eligible.tasks.filter((task) => task.deadline &&
       value.plan.blocks.some((block) => block.taskId === task.id)).length;
     if (hardPlaced(relaxed) > hardPlaced(first)) result = { ...relaxed, bufferRelaxed: true };

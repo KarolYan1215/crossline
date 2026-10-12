@@ -92,7 +92,7 @@ export function DurationBar({ p25, p50, p85, samples = 0, bounds = EDIT_MINUTES,
           if (step) { event.preventDefault(); commit(clamp(p50 + step)); }
         }} />
     </div>
-    <span className="ui-duration-text mono"><span>{formatMinutes(usual)}</span><small>{formatMinutes(low)}–{formatMinutes(high)}</small></span>
+    <span className="ui-duration-text mono"><span>{formatMinutes(usual)}</span><small><span>{formatMinutes(low)}–</span><span>{formatMinutes(high)}</span></small></span>
   </div>;
 }
 

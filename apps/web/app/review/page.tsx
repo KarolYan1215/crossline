@@ -11,6 +11,7 @@ import { MilestonePreview } from "../task-preview";
 import { TaskCard } from "../task/task-card";
 import { Tag } from "../ui/tag";
 import { loadTaskDetailsBatch, loadMilestoneDetailsBatch } from "../../lib/task-detail";
+import { linePacks } from "../../lib/lines";
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +30,7 @@ export default async function ReviewPage() {
   const milestoneDetails = loadMilestoneDetailsBatch(ctx, review.milestoneProgress.map((item) => item.id));
   const insightKeys = new Map(permissionCandidates(ctx).filter((item) => item.kind === "insight" && item.eligible).map((item) => [item.id, item.key]));
   const night = lastNight(ctx.workspaceId, new Date());
+  const lineLabel = new Map(linePacks(ctx, { includeArchived: true }).map((pack) => [pack.id, pack.label]));
 
   return <SubpageShell active="主线" eyebrow="证据驱动" title="周复盘" description="本周的验收、里程碑进展与待定的跨主线关系；没有记录的指标标为「未标定」。">
     <section className="review-block">
@@ -97,8 +99,8 @@ export default async function ReviewPage() {
           highlighted: review.candidates.highlighted.some((item) => item.id === candidate.id),
           fromTitle: detail?.fromTitle ?? candidate.id,
           toTitle: detail?.toTitle ?? candidate.targetMilestoneId,
-          fromIdentityId: detail?.fromIdentityId ?? "",
-          toIdentityId: detail?.toIdentityId ?? "",
+          fromIdentityId: lineLabel.get(detail?.fromIdentityId ?? "") ?? detail?.fromIdentityId ?? "",
+          toIdentityId: lineLabel.get(detail?.toIdentityId ?? "") ?? detail?.toIdentityId ?? "",
           kind: detail?.kind ?? "",
           explanation: detail?.explanation ?? null,
           refutedWhen: detail?.refutedWhen ?? null,

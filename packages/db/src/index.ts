@@ -1268,7 +1268,7 @@ export class CrosslineStore {
     // this local rather than re-read from `open`, which is a snapshot taken before this closes anything —
     // the final payload write below has to see the closed interruption, not the stale open one.
     let interruptions = open?.interruptions ?? [];
-    if (event.type === "human.completed" || event.type === "blocked") {
+    if (event.type === "human.completed" || event.type === "blocked" || event.type === "archived") {
       const last = interruptions.at(-1);
       if (open && last && !last.resumedAt) {
         interruptions = [...interruptions.slice(0, -1), { ...last, resumedAt: now }];
@@ -1322,6 +1322,9 @@ export class CrosslineStore {
       // A reason that lives only in the ledger is a reason nobody reads; keep it on the row the UI renders.
       this.#mergeWorkOrderPayload(workspaceId, id, { blocker: { reason: event.reason, at: now } });
     }
+    // A session running when its order is discarded ends with it; left open, every reader that counts an open session to now
+    // (plan vs actual, the work rhythm) went on adding the wall clock — a demo order discarded mid-timer read as 350 hours of work.
+    if (event.type === "archived" && open) this.#db.prepare("UPDATE executions SET ended_at = ?, outcome = 'archived' WHERE id = ?").run(now, open.id);
     if (event.type === "plan.approved") this.#mergeWorkOrderPayload(workspaceId, id, { blocker: undefined });
   }
 

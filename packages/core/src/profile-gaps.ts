@@ -158,9 +158,9 @@ export function profileGaps(input: ProfileGapInput): ProfileGap[] {
     detail: "画像已写完，本人尚未确认。",
     question: {
       id: "gap-portrait", kind: "single", allowOther: true, identityId: "", projectId: "",
-      text: "「当前画像」里写的是否符合你？",
+      text: "「当前画像」写的是否符合本人？",
       options: [
-        { id: "yes", label: "符合", detail: "画像以此为准；之后改动会再请你确认" },
+        { id: "yes", label: "符合", detail: "画像以此为准；之后改动会再请本人确认" },
         { id: "mostly", label: "大体符合，有几处要改", detail: "在“其他”里写要改哪里" },
         { id: "no", label: "不符合", detail: "在“其他”里写哪里不对" }
       ]
@@ -170,6 +170,23 @@ export function profileGaps(input: ProfileGapInput): ProfileGap[] {
 }
 
 const MEETING_SLOT = /^(meeting|class)_?times?$|^no_meetings$/;
+
+/** Words that say a question from the model already asks what a gap is about, so the code-built one is not asked on top of it. */
+const COVERS: Partial<Record<ProfileGap["code"], RegExp>> = {
+  DATE_UNDATED: /待定|TBD|日期|什么时候/i,
+  COURSE_MEETINGS: /上课|几点|每周.*(时间|时段)/
+};
+
+/**
+ * Whether one of the model's questions already asks what a gap asks: anything about a line it rests on, or a question on the same
+ * project about the same thing. Used where a round is put together and where its open questions are listed, so a person is not asked
+ * 「ECE 548 每周固定上课的星期」 and 「「ECE 548」每周什么时候上课」 side by side.
+ */
+export function gapCoveredBy(gap: ProfileGap, questions: Array<{ identityId: string; projectId: string; text: string }>): boolean {
+  if (gap.code === "LINE_UNCONFIRMED") return questions.some((question) => question.identityId === gap.identityId);
+  const covers = COVERS[gap.code];
+  return Boolean(covers) && questions.some((question) => question.projectId === gap.projectId && covers!.test(question.text));
+}
 
 /** Facts as they will stand once a turn's updates are written: a confirmed fact is never replaced by a guess. */
 export function mergeFacts<T extends { identityId: string; projectId: string; slot: string; status: string }>(existing: T[], updates: T[]): T[] {
@@ -198,8 +215,10 @@ const stable = (text: string) => [...text].reduce((hash, char) => (hash * 31 + c
 export function answeredGapFacts(replyText: string, gaps: ProfileGap[]): GapAnswer[] {
   const out: GapAnswer[] = [];
   for (const gap of gaps) {
-    const marker = `【${gap.question.text}】`;
-    const at = replyText.indexOf(marker);
+    // A round stored before the portrait question was reworded still shows, and is answered in, its old words.
+    const texts = gap.code === "PORTRAIT_UNCONFIRMED" ? [gap.question.text, "「当前画像」里写的是否符合你？"] : [gap.question.text];
+    const marker = texts.map((text) => `【${text}】`).find((candidate) => replyText.includes(candidate)) ?? "";
+    const at = marker ? replyText.indexOf(marker) : -1;
     if (at < 0) continue;
     const line = replyText.slice(at + marker.length).split("\n")[0] ?? "";
     const picked = (/选择：([^。]*)/.exec(line)?.[1] ?? "").split("；").map((item) => item.trim()).filter(Boolean);
