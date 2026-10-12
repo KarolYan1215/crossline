@@ -35,6 +35,13 @@ export const STEP_ROLES = {
   summarize: "总结", handle: "办理", pay: "支付", book: "预约", publish: "发布", analyze: "分析", review: "复盘"
 } as const;
 export type StepRole = keyof typeof STEP_ROLES;
+
+/**
+ * The most energy a step of this kind needs, whatever its task needs (decided 2026-10-12): handing in and reading through do not take
+ * a high-energy hour, and every step used to inherit its task's 「high」, so a day's three high hours went to submitting and skimming.
+ * A step is scheduled at the lower of its task's energy and this ceiling; roles not listed take the task's.
+ */
+export const STEP_ENERGY_CEILING: Partial<Record<StepRole, "low" | "medium">> = { submit: "low", read: "medium" };
 export const isStepRole = (value: unknown): value is StepRole => typeof value === "string" && value in STEP_ROLES;
 
 export type Archetype = {

@@ -49,7 +49,7 @@ export function planToday(ctx?: AccessContext,
 
 /** The key the weekly availability lives under. One settings row, not a new table. */
 export { AVAILABILITY_SETTING } from "@crossline/core";
-import { AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, BYPRODUCT_LAG_DAYS, RELATION_KIND_LABEL, isCancelledEvent, resolveAvailability, hoursFromText, type AvailabilitySource, type PortraitReport } from "@crossline/core";
+import { STEP_ENERGY_CEILING, type StepRole, AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, BYPRODUCT_LAG_DAYS, RELATION_KIND_LABEL, isCancelledEvent, resolveAvailability, hoursFromText, type AvailabilitySource, type PortraitReport } from "@crossline/core";
 import { statedShares } from "./plan-stats";
 import { identityLines, linePacks } from "./lines";
 const PREFERENCES_SETTING = "schedule.preferences";
@@ -659,6 +659,8 @@ const scaledEstimate = <E extends { p25Minutes: number; p50Minutes: number; p85M
   p50 === undefined || p50 <= 0 ? estimate : { ...estimate, p50Minutes: Math.round(p50), p25Minutes: Math.max(1, Math.round(estimate.p25Minutes * p50 / Math.max(1, estimate.p50Minutes))),
     p85Minutes: Math.max(Math.round(p50), Math.round(estimate.p85Minutes * p50 / Math.max(1, estimate.p50Minutes))) };
 
+const ENERGY_RANK = { low: 1, medium: 2, high: 3 } as const;
+
 /**
  * The planner's input for a set of orders. A task with a step plan is placed step by step: each open, schedulable step is its own
  * planner task, keeping the task's tier, deadline and release, the step's own window, and its dependencies (on earlier steps, and for
@@ -686,11 +688,14 @@ function plannerItemsFor(ctx: AccessContext, orders: ActionableOrder[]) {
       const stepDue = step.dueBy && step.dueBy > localToday ? toZonedInstant(step.dueBy, "23:59", zone) : undefined;
       const notBefore = [base.notBefore, stepStart].filter(Boolean).sort().at(-1);
       const deadline = [base.deadline, stepDue].filter(Boolean).sort()[0];
-      const { notBefore: _n, deadline: _d, dependsOn: _deps, ...rest } = base;
+      const { notBefore: _n, deadline: _d, dependsOn: _deps, energy: taskEnergy, ...rest } = base;
+      // The lower of the task's energy and what this kind of step needs: handing in or reading through takes no high-energy hour.
+      const ceiling = STEP_ENERGY_CEILING[step.role as StepRole];
+      const energy = taskEnergy && ceiling && ENERGY_RANK[ceiling] < ENERGY_RANK[taskEnergy] ? ceiling : taskEnergy;
       const id = stepTaskId(order.id, step.id);
       return { orderId: order.id, title: `${order.intent} · ${step.title}`, step: step.title as string | undefined, task: { ...rest, id,
         title: `${order.intent} · ${step.title}`, estimate: scaledEstimate({ ...base.estimate, ...step.estimate }, overrides[id]),
-        ...(notBefore ? { notBefore } : {}), ...(deadline ? { deadline } : {}),
+        ...(energy ? { energy } : {}), ...(notBefore ? { notBefore } : {}), ...(deadline ? { deadline } : {}),
         ...(internal.length || external.length ? { dependsOn: internal.length ? internal : external } : {}) } };
     });
   });

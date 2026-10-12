@@ -1,7 +1,7 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { CrosslineStore } from "@crossline/db";
 vi.mock("server-only", () => ({}));
-import { loadCurrentPlan, plannerIdOfBlock, saveSchedulePreferences, scheduledBlockId } from "./crossline";
+import { loadCurrentPlan, plannerIdOfBlock, saveAvailability, saveSchedulePreferences, scheduledBlockId } from "./crossline";
 import { TEST_CTX } from "./test-support";
 
 afterEach(() => { globalThis.crosslineStore?.close(); globalThis.crosslineStore = undefined; vi.unstubAllEnvs(); });
@@ -51,4 +51,23 @@ test("a step whose own day has come is still placed before the task's deadline",
   const blocks = (await loadCurrentPlan(TEST_CTX)).blocks.filter((block) => block.id.startsWith(`scheduled:${order.id}`));
   expect(new Set(blocks.map((block) => plannerIdOfBlock(block.id).split("#")[1]))).toEqual(new Set(["v1s1", "v1s2"]));
   expect(blocks.every((block) => block.day === "2026-09-18")).toBe(true);
+});
+
+test("handing in takes a low-energy hour and reading through a medium one, even in a high-energy task", async () => {
+  vi.stubEnv("CROSSLINE_FIXED_NOW", "2026-09-18T12:00:00.000Z");
+  const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
+  // One high hour in the morning, a low evening: the task's own 「high」 used to leave the hand-in nowhere to go.
+  const windows = [{ days: [5], start: "08:00", end: "09:00", energy: "high" as const }, { days: [5], start: "18:00", end: "20:00", energy: "low" as const }];
+  saveSchedulePreferences(TEST_CTX, { timeZone: "America/Chicago", mode: "asap", importance: {}, windows });
+  saveAvailability(TEST_CTX, windows);
+  await loadCurrentPlan(TEST_CTX);
+  const order = store.listWorkOrders(TEST_CTX.workspaceId).find((item) => item.identityId === "research")!;
+  store.saveWorkOrder({ ...order, state: "ready_for_human", payload: { ...(order.payload as object), dueDate: "2026-09-18", humanCore: [{ energy: "high" }] } });
+  store.saveStepPlan(TEST_CTX.workspaceId, order.id, { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 1, unit: "题" },
+    rationale: "", steps: [step("a", "read", 25), step("b", "solve", 30, ["a"]), step("c", "submit", 15, ["b"])] }, "o", "t");
+  const blocks = (await loadCurrentPlan(TEST_CTX)).blocks.filter((block) => block.id.startsWith(`scheduled:${order.id}`));
+  const at = (stepId: string) => blocks.find((block) => plannerIdOfBlock(block.id).endsWith(`#${stepId}`));
+  expect(at("v1s1")?.start).toBe("08:00");
+  expect(at("v1s2")!.start < "09:00").toBe(true);
+  expect(at("v1s3")!.start >= "18:00").toBe(true);
 });
