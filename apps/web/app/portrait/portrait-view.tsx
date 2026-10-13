@@ -1,18 +1,23 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { portraitLabels, portraitType, redactPortrait, type PortraitReport } from "@crossline/core";
+import { portraitLabels, portraitType, redactPortrait, type PortraitReport, type SayDoReading } from "@crossline/core";
 import { LineNetwork, type NetworkEdge } from "../ui/line-network";
-import { AdviceMatrix, AllocationChart, EnergyScatter, Fit, GapChart, ValuesRadar } from "./portrait-charts";
+import { AdviceMatrix, DivergingAxes, EnergyScatter, Fit, GapChart, IdentityBars, ValuesRadar } from "./portrait-charts";
+import { radarValues } from "./poster-geometry";
 
 type Line = { id: string; label: string; rank: number | null; hard: boolean };
 type State = {
   report: PortraitReport | null; version: number; at: string | null; writing: boolean; blocker: string | null; lines: Line[];
-  images: Record<string, string>; agentHours: number | null; peakHours: number[] | null;
+  images: Record<string, string>; sayDo: SayDoReading;
   next: { lines: Array<{ id: string; label: string; approved: string[]; drafts: string[] }>; hoursProposed: boolean; hoursSet: boolean };
 };
 
 const PRIORITY: Record<string, string> = { high: "优先", medium: "其次", low: "可缓" };
+/** On the share card and the long image (decided 2026-10-12): what the portrait is, against the Barnum effect. */
+const CREDIBILITY = "基于访谈的推断，不是标准化心理测验";
+/** The paper colour of style A, also the background of the exported images. */
+const PAPER = "#F6F2EA";
 const roleOf = (line: Line) => line.hard ? "硬约束" : line.rank === 1 ? "底座" : line.rank ? `第 ${line.rank}` : "平行";
 
 /** The report's line-to-line feeds as the shared network. */
@@ -25,68 +30,72 @@ function Figure({ state, className }: { state: State; className: string }) {
   return at ? <img className={className} src={`/api/portrait/image/character?v=${encodeURIComponent(at)}`} alt="代表这一类型的卡通形象" /> : null;
 }
 
+/** A hard-coded section title, set in the poster's serif, with its number. */
+const Heading = ({ number, children }: { number: string; children: string }) => <h2><small>{number}</small><span className="pt-serif">{children}</span></h2>;
+
 /**
- * The shareable half: the type as a test's result page (figure, code, name, group, the four axes as bars), the labels computed from the
- * report, the portrait in a few lines, and the figures. Rendered twice — once from the person's own report on screen, once from the
- * redacted report off screen — and only the second is ever exported.
+ * The shareable half in style A 「编辑杂志」 (decided 2026-10-12): the type as a result page (figure on a disc of the group's colour, code,
+ * name, group), the one-line tagline, the four axes as diverging bars with their reasons, the labels computed in code with the other lines
+ * as identity bars, then the values and energy, and the lines as a flywheel with the say–do comparison. Rendered twice — from the person's
+ * own report on screen and from the redacted report off screen — and only the second is ever exported.
  */
 function SharePart({ report, state, ordered }: { report: PortraitReport; state: State; ordered: Line[] }) {
   const type = portraitType(report);
   const name = (id: string) => state.lines.find((line) => line.id === id)?.label ?? id;
-  const labels = portraitLabels(report, { lineLabel: name, ...(state.peakHours ? { peakHours: state.peakHours } : {}) });
+  const { cells, identities } = portraitLabels(report, { lineLabel: name });
   const edges = edgesOf(report);
-  const allocation = report.lines.items.map((item) => ({ lineId: item.lineId, name: name(item.lineId), share: item.share, targetShare: item.targetShare }));
+  const allLines = [...report.lines.items].sort((a, b) => (b.targetShare ?? 0) - (a.targetShare ?? 0))
+    .flatMap((item) => item.targetShare === undefined ? [] : [{ lineId: item.lineId, label: name(item.lineId), target: item.targetShare, now: item.share ?? null }]);
+  const values = radarValues(report.compass.values);
   return <>
     <section className="pt-page pt-type" style={type ? { ["--group" as string]: type.group.colour, ["--group-tint" as string]: type.group.tint } : undefined}>
-      <p className="pt-kicker">Crossline 人格类型</p>
+      <header className="pt-poster-head"><p className="pt-kicker">Crossline 思维模式类型</p><p className="pt-credibility">{CREDIBILITY}</p></header>
       <div className="pt-type-head">
-        <Figure state={state} className="pt-figure-img" />
+        <div className="pt-figure-disc"><Figure state={state} className="pt-figure-img" /></div>
         <div className="pt-type-id">
           {type ? <>
-            <p className="pt-type-code mono">{type.code}</p>
-            <h1 className="pt-type-name">{type.name}</h1>
-            <p className="pt-type-group"><span>{type.group.name}</span>{type.group.blurb}</p>
+            <p className="pt-type-code pt-serif">{type.code}</p>
+            <h1 className="pt-type-name pt-serif">{type.name}</h1>
+            <p className="pt-type-group"><span><b className="pt-serif">{type.group.name}</b> · {type.group.blurb}</span></p>
             <p className="pt-type-blurb">{type.blurb}</p>
           </> : <h1 className="pt-type-name gen">{report.cover.archetype ?? report.cover.keywords[0] ?? "个人画像"}</h1>}
-          {report.cover.tagline && <p className="pt-type-tagline gen">「{report.cover.tagline}」</p>}
         </div>
       </div>
-      {type && <ul className="pt-axes">{type.axes.map((axis) => <li key={axis.id}>
-        <span className="pt-axis-side" data-on={axis.score < 50 || undefined}>{axis.left}</span>
-        <span className="pt-axis-bar" aria-label={`${axis.label} ${axis.percent}%`}><i style={{ left: `${Math.min(axis.score, 50)}%`, width: `${Math.abs(axis.score - 50)}%` }} />
-          <b style={{ left: `${axis.score}%` }}>{axis.percent}%</b></span>
-        <span className="pt-axis-side" data-on={axis.score >= 50 || undefined}>{axis.right}</span>
-        {axis.evidence && <small className="gen">{axis.evidence}</small>}
-      </li>)}</ul>}
-      {labels.length > 0 && <dl className="pt-labels">{labels.map((label) => <div key={label.title}><dt>{label.title}</dt><dd><b className="gen">{label.value}</b>{label.detail && <small className="gen">{label.detail}</small>}</dd></div>)}</dl>}
+      {report.cover.tagline && <p className="pt-tagline gen">「{report.cover.tagline}」</p>}
+      {type && <DivergingAxes type={type} evidence />}
+      {(cells.length > 0 || identities.length > 0) && <dl className="pt-labels">
+        {cells.map((cell) => <div key={cell.title}><dt>{cell.title}</dt>
+          <dd><b className={cell.title === "核心词" ? "gen" : cell.title === "价值核心" ? "pt-serif" : undefined}>{cell.value}</b>{cell.detail && <small>{cell.detail}</small>}</dd></div>)}
+        {identities.length > 0 && <div className="pt-labels-wide"><dt>身份</dt><dd><IdentityBars rows={identities} /></dd></div>}
+      </dl>}
       <div className="pt-summary">
         <p className="gen pt-lead">{report.cover.portrait}</p>
         <div className="pt-conflict"><small>核心矛盾</small><p className="gen">{report.cover.coreConflict}</p></div>
-        <p className="pt-keywords">{report.cover.keywords.map((word) => <span key={word} className="tag">{word}</span>)}</p>
+        <p className="pt-keywords">{report.cover.keywords.map((word) => <span key={word} className="tag gen">{word}</span>)}</p>
       </div>
     </section>
 
     <section className="pt-page">
-      <h2><small>01</small>指南针与能量</h2>
+      <Heading number="01">价值与能量</Heading>
       <div className="pt-figure-row">
-        {report.compass.values?.length ? <figure><Fit initial={300} max={340}>{(width) => <ValuesRadar values={report.compass.values!} size={width} />}</Fit><figcaption>价值取向（0–100）</figcaption></figure> : null}
+        {values ? <figure><Fit initial={300} max={340}>{(width) => <ValuesRadar values={values} size={width} />}</Fit><figcaption>价值取向：施瓦茨 10 项基本价值（0–100）</figcaption></figure> : null}
         <div className="pt-north"><small>正北</small><p className="gen">↑ {report.compass.trueNorth}</p></div>
       </div>
-      <figure className="pt-figure"><Fit initial={520} max={680}>{(width) => <EnergyScatter map={report.energy.map} width={width} height={Math.round(Math.min(380, width * 0.7))} />}</Fit>
+      <figure className="pt-figure"><Fit initial={520} max={680}>{(width) => <EnergyScatter map={report.energy.map} width={width} />}</Fit>
         <figcaption>能量地图：实心为充电，空心为耗电；右上为擅长且热爱</figcaption></figure>
     </section>
 
     <section className="pt-page">
-      <h2><small>02</small>主线飞轮</h2>
+      <Heading number="02">主线飞轮</Heading>
       <LineNetwork lines={ordered} edges={edges} title="主线之间如何互相供养" />
-      {allocation.some((item) => item.share !== undefined) && <figure className="pt-figure">
-        <Fit initial={520} max={680}>{(width) => <AllocationChart items={allocation} label="精力分配：空心为现在，实心为建议" width={width} />}</Fit>
-        <figcaption>精力分配：空心为现在，实心为建议（%）</figcaption></figure>}
+      {allLines.length > 0 && <figure className="pt-figure"><IdentityBars rows={allLines} /><figcaption>精力分配：实心为建议，空心标记为现在（%）</figcaption></figure>}
       <ul className="pt-goal-strip">{report.lines.items.map((item) => item.goals[0] ? <li key={item.lineId} data-line={item.lineId}><b>{name(item.lineId)}</b><span className="gen">{item.goals[0]}</span></li> : null)}</ul>
-      {report.gap.pairs?.length ? <>
-        <h3>言行对照</h3>
-        <figure className="pt-figure"><Fit initial={520} max={680}>{(width) => <GapChart pairs={report.gap.pairs!} width={width} />}</Fit></figure>
-      </> : null}
+      <h3 className="pt-serif">言行对照</h3>
+      <figure className="pt-figure"><Fit initial={520} max={680}>{(width) => <GapChart pairs={report.gap.pairs ?? []} sayDo={state.sayDo} width={width} />}</Fit></figure>
+      {!state.sayDo.sufficient && <div className="pt-gap pt-gap-short">
+        <div><small>所说想要的</small><p className="gen">{report.gap.says}</p></div>
+        <div><small>行为在维护的</small><p className="gen">{report.gap.does}</p></div>
+      </div>}
     </section>
   </>;
 }
@@ -126,8 +135,8 @@ export function PortraitView({ initial, publicUrl, name }: { initial: State; pub
     setStatus("正在生成分享图片…");
     try {
       const { toBlob } = await import("html-to-image");
-      const blobs = [await toBlob(card.current, { pixelRatio: 2, backgroundColor: "#FAF7F0" }), await toBlob(sharedHalf.current, { pixelRatio: 2, backgroundColor: "#ffffff" })];
-      const files = blobs.flatMap((blob, index) => blob ? [new File([blob], index === 0 ? "我的人格类型.png" : "我的画像.png", { type: "image/png" })] : []);
+      const blobs = [await toBlob(card.current, { pixelRatio: 2, backgroundColor: PAPER }), await toBlob(sharedHalf.current, { pixelRatio: 2, backgroundColor: PAPER })];
+      const files = blobs.flatMap((blob, index) => blob ? [new File([blob], index === 0 ? "我的思维模式类型.png" : "我的画像.png", { type: "image/png" })] : []);
       const nav = navigator as Navigator & { canShare?: (data: { files: File[] }) => boolean };
       if (nav.canShare?.({ files })) await nav.share({ files, title: "我的 Crossline 画像" });
       else for (const file of files) { const link = document.createElement("a"); link.href = URL.createObjectURL(file); link.download = file.name; link.click(); }
@@ -144,6 +153,7 @@ export function PortraitView({ initial, publicUrl, name }: { initial: State; pub
   </section>;
   const shared = redactPortrait(raw);
   const sharedType = portraitType(shared);
+  const sharedLabels = portraitLabels(shared, { lineLabel: (id) => state.lines.find((line) => line.id === id)?.label ?? id });
   const lineById = new Map(state.lines.map((line) => [line.id, line]));
   const ordered = [...state.lines].sort((a, b) => (a.hard === b.hard ? 0 : a.hard ? -1 : 1) || (a.rank ?? 99) - (b.rank ?? 99));
   const date = (state.at ?? new Date().toISOString()).slice(0, 10);
@@ -153,7 +163,7 @@ export function PortraitView({ initial, publicUrl, name }: { initial: State; pub
   </footer>;
   const shareBar = (where: string) => <div className="pt-share-bar" data-no-export="">
     <button type="button" className="primary-button" onClick={() => void share()}>分享画像</button>
-    <small>{where}只分享前半部分：人格类型卡片与画像长图，人名、机构、课程编号等已隐去。</small>
+    <small>{where}只分享前半部分：思维模式类型卡片与画像长图，人名、机构、课程编号等已隐去。</small>
     {status && <small role="status">{status}</small>}
   </div>;
 
@@ -248,18 +258,22 @@ export function PortraitView({ initial, publicUrl, name }: { initial: State; pub
     {/* What is shared, rendered from the redacted report and never shown: the 4:5 type card and the first half as one image. */}
     <div className="pt-offscreen" aria-hidden="true" data-no-export="">
       <div ref={card} className="pt-card" style={sharedType ? { ["--group-tint" as string]: sharedType.group.tint, ["--group" as string]: sharedType.group.colour } : undefined}>
-        <small className="pt-card-kicker">Crossline 人格类型{name ? ` · ${name}` : ""}</small>
-        <Figure state={state} className="pt-card-figure" />
-        {sharedType ? <>
-          <p className="pt-type-code mono">{sharedType.code}</p>
-          <b className="pt-card-title">{sharedType.name}</b>
-          <p className="pt-type-group"><span>{sharedType.group.name}</span>{sharedType.blurb}</p>
-          <ul className="pt-card-axes">{sharedType.axes.map((axis) => <li key={axis.id}><b>{axis.percent}%</b> {axis.label}</li>)}</ul>
-        </> : <b className="pt-card-title gen">{shared.cover.archetype ?? "个人画像"}</b>}
-        {shared.cover.tagline && <p className="gen">「{shared.cover.tagline}」</p>}
-        <small className="pt-card-foot">Crossline · 个人画像{publicUrl ? ` · ${publicUrl}` : ""}</small>
+        <small className="pt-card-kicker">Crossline 思维模式类型{name ? ` · ${name}` : ""}</small>
+        <div className="pt-card-head">
+          <div className="pt-figure-disc"><Figure state={state} className="pt-card-figure" /></div>
+          <div>{sharedType ? <>
+            <p className="pt-type-code pt-serif">{sharedType.code}</p>
+            <b className="pt-card-title pt-serif">{sharedType.name}</b>
+          </> : <b className="pt-card-title gen">{shared.cover.archetype ?? "个人画像"}</b>}</div>
+        </div>
+        {shared.cover.tagline && <p className="pt-tagline gen">「{shared.cover.tagline}」</p>}
+        {sharedType && <ul className="pt-card-axes">{sharedType.axes.map((axis) => <li key={axis.id}><b>{axis.percent}%</b> <span className="pt-serif">{axis.label}</span></li>)}</ul>}
+        {sharedLabels.cells.length > 0 && <dl className="pt-card-labels">{sharedLabels.cells.map((cell) => <div key={cell.title}><dt>{cell.title}</dt>
+          <dd className={cell.title === "核心词" ? "gen" : cell.title === "价值核心" ? "pt-serif" : undefined}>{cell.value}</dd></div>)}</dl>}
+        {sharedLabels.identities.length > 0 && <div className="pt-card-identities"><small>身份</small><IdentityBars rows={sharedLabels.identities} /></div>}
+        <small className="pt-card-foot">{CREDIBILITY} · Crossline{publicUrl ? ` · ${publicUrl}` : ""}</small>
       </div>
-      <div ref={sharedHalf} className="pt-doc pt-shared-half"><SharePart report={shared} state={state} ordered={ordered} />{footer}</div>
+      <div ref={sharedHalf} className="pt-doc pt-shared-half"><SharePart report={shared} state={state} ordered={ordered} />{footer}<p className="pt-credibility">{CREDIBILITY}</p></div>
     </div>
   </div>;
 }

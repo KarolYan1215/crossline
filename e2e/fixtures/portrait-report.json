@@ -1,0 +1,376 @@
+{
+  "cover": {
+    "portrait": "在北岭大学读博的研究者，同时搭建小型产品、写技术长文并做长期投资，正在把四条主线连成一个整体。",
+    "coreConflict": "四条主线都想推进，但每周可用的深度工作时间只够其中两条。",
+    "keywords": [
+      "系统构想",
+      "证据优先",
+      "跨域连接",
+      "长期主义"
+    ],
+    "tagline": "用可检验的小原型把研究、产品、写作与长期投资连成一张彼此供养的网并持续扩展其边界",
+    "coreWord": "先证后行再连"
+  },
+  "problem": {
+    "statement": "真正的问题不是时间不够，而是缺少让一条主线的产出直接成为另一条主线输入的机制。",
+    "gravity": [
+      "博士课程与实验室安排是固定骨架"
+    ],
+    "designable": [
+      "把实验记录同时写成技术长文的素材"
+    ],
+    "reframes": [
+      {
+        "fallacy": "必须先把研究做完才能做产品",
+        "reframe": "研究的中间产物本身就可以是产品的第一版"
+      }
+    ]
+  },
+  "compass": {
+    "workView": "工作是把想法变成经得起检验的东西。",
+    "lifeView": "生活要留出不被打扰的长时间。",
+    "consistency": "两者都看重自主与长期。",
+    "trueNorth": "用可检验的作品连接研究与世界",
+    "values": [
+      {
+        "name": "自主",
+        "score": 91,
+        "evidence": "访谈中多次提到与自主相关的选择"
+      },
+      {
+        "name": "刺激",
+        "score": 88,
+        "evidence": "访谈中多次提到与刺激相关的选择"
+      },
+      {
+        "name": "享乐",
+        "score": 40,
+        "evidence": "访谈中多次提到与享乐相关的选择"
+      },
+      {
+        "name": "成就",
+        "score": 89,
+        "evidence": "访谈中多次提到与成就相关的选择"
+      },
+      {
+        "name": "权力",
+        "score": 35,
+        "evidence": "访谈中多次提到与权力相关的选择"
+      },
+      {
+        "name": "安全",
+        "score": 62,
+        "evidence": "访谈中多次提到与安全相关的选择"
+      },
+      {
+        "name": "遵从",
+        "score": 30,
+        "evidence": "访谈中多次提到与遵从相关的选择"
+      },
+      {
+        "name": "传统",
+        "score": 22,
+        "evidence": "访谈中多次提到与传统相关的选择"
+      },
+      {
+        "name": "仁慈",
+        "score": 58,
+        "evidence": "访谈中多次提到与仁慈相关的选择"
+      },
+      {
+        "name": "普世",
+        "score": 74,
+        "evidence": "访谈中多次提到与普世相关的选择"
+      }
+    ]
+  },
+  "energy": {
+    "summary": "深度构想与动手验证最能充电，协调与行政最耗电。",
+    "flow": [
+      "连续三小时调通一块原型板"
+    ],
+    "map": [
+      {
+        "activity": "跨学科系统构想",
+        "skill": "high",
+        "love": "high",
+        "charge": "charge",
+        "skillScore": 92,
+        "loveScore": 90,
+        "category": "深度工作"
+      },
+      {
+        "activity": "实验数据复核",
+        "skill": "high",
+        "love": "high",
+        "charge": "charge",
+        "skillScore": 86,
+        "loveScore": 84,
+        "category": "深度工作"
+      },
+      {
+        "activity": "原型电路调试",
+        "skill": "high",
+        "love": "high",
+        "charge": "charge",
+        "skillScore": 86,
+        "loveScore": 84,
+        "category": "创造产出"
+      },
+      {
+        "activity": "长篇技术写作",
+        "skill": "high",
+        "love": "high",
+        "charge": "charge",
+        "skillScore": 86,
+        "loveScore": 84,
+        "category": "创造产出"
+      },
+      {
+        "activity": "前沿论文精读",
+        "skill": "high",
+        "love": "high",
+        "charge": "charge",
+        "skillScore": 78,
+        "loveScore": 80,
+        "category": "学习输入"
+      },
+      {
+        "activity": "开源工具学习",
+        "skill": "high",
+        "love": "high",
+        "charge": "charge",
+        "skillScore": 64,
+        "loveScore": 72,
+        "category": "学习输入"
+      },
+      {
+        "activity": "合作进度追问",
+        "skill": "low",
+        "love": "low",
+        "charge": "drain",
+        "skillScore": 40,
+        "loveScore": 30,
+        "category": "沟通协作"
+      },
+      {
+        "activity": "例会信息同步",
+        "skill": "low",
+        "love": "low",
+        "charge": "drain",
+        "skillScore": 44,
+        "loveScore": 28,
+        "category": "沟通协作"
+      },
+      {
+        "activity": "报销与表格整理",
+        "skill": "low",
+        "love": "low",
+        "charge": "drain",
+        "skillScore": 35,
+        "loveScore": 18,
+        "category": "行政事务"
+      },
+      {
+        "activity": "日程反复协调",
+        "skill": "low",
+        "love": "low",
+        "charge": "drain",
+        "skillScore": 38,
+        "loveScore": 20,
+        "category": "行政事务"
+      },
+      {
+        "activity": "傍晚长距离慢跑",
+        "skill": "high",
+        "love": "high",
+        "charge": "charge",
+        "skillScore": 55,
+        "loveScore": 76,
+        "category": "休息恢复"
+      },
+      {
+        "activity": "周末无屏幕散步",
+        "skill": "high",
+        "love": "high",
+        "charge": "charge",
+        "skillScore": 52,
+        "loveScore": 70,
+        "category": "休息恢复"
+      }
+    ]
+  },
+  "lines": {
+    "allocation": "以研究为底座，其余三条主线从研究中取材。",
+    "items": [
+      {
+        "lineId": "research",
+        "description": "神经形态硬件方向的博士研究",
+        "goals": [
+          "成为能独立立项的神经形态硬件研究者"
+        ],
+        "feeds": [
+          {
+            "toLineId": "startup",
+            "how": "原型与数据"
+          },
+          {
+            "toLineId": "media",
+            "how": "选题"
+          }
+        ],
+        "share": 55,
+        "targetShare": 60
+      },
+      {
+        "lineId": "startup",
+        "description": "把研究原型做成小工具",
+        "goals": [
+          "成为能把原型卖出去的硬件创业者"
+        ],
+        "feeds": [
+          {
+            "toLineId": "investment",
+            "how": "行业判断"
+          }
+        ],
+        "share": 20,
+        "targetShare": 18
+      },
+      {
+        "lineId": "media",
+        "description": "写技术长文",
+        "goals": [
+          "成为讲清楚硬核技术的创作者"
+        ],
+        "feeds": [
+          {
+            "toLineId": "research",
+            "how": "读者反馈"
+          }
+        ],
+        "share": 15,
+        "targetShare": 12
+      },
+      {
+        "lineId": "investment",
+        "description": "长期持有科技公司",
+        "goals": [
+          "成为懂技术的长期投资者"
+        ],
+        "feeds": [],
+        "share": 10,
+        "targetShare": 10
+      }
+    ]
+  },
+  "gap": {
+    "says": "说想把研究连到产品。",
+    "does": "实际时间几乎都在研究上。",
+    "reading": "落差来自缺少衔接机制，而不是意愿。",
+    "anchor": "研究必须先完美",
+    "realWant": "希望工作被真实世界使用",
+    "reframe": "先发布可用的中间产物",
+    "pairs": [
+      {
+        "dimension": "按计划投入",
+        "says": 80,
+        "evidence": "访谈中的明确表述"
+      },
+      {
+        "dimension": "按时完成",
+        "says": 70,
+        "evidence": "访谈中的明确表述"
+      },
+      {
+        "dimension": "收尾",
+        "says": 85,
+        "evidence": "访谈中的明确表述"
+      },
+      {
+        "dimension": "外部验收",
+        "says": 75,
+        "evidence": "访谈中的明确表述"
+      },
+      {
+        "dimension": "回应等待",
+        "says": 60,
+        "evidence": "访谈中的明确表述"
+      }
+    ]
+  },
+  "insights": [
+    {
+      "insight": "研究记录与长文素材重复整理",
+      "advice": "每周五把实验记录直接改写成一篇短文",
+      "solves": "主线之间缺少衔接",
+      "priority": "high",
+      "impact": 5,
+      "effort": 2
+    },
+    {
+      "insight": "产品原型缺少真实用户",
+      "advice": "两周内找三位同行试用原型并记录反馈",
+      "solves": "产品方向不清",
+      "priority": "high",
+      "impact": 4,
+      "effort": 3
+    },
+    {
+      "insight": "协调工作挤占深度时间",
+      "advice": "把例会集中到周二下午",
+      "solves": "深度时间不足",
+      "priority": "medium",
+      "impact": 4,
+      "effort": 1
+    },
+    {
+      "insight": "投资研究与工作脱节",
+      "advice": "只研究与自身研究相关的三家公司",
+      "solves": "精力分散",
+      "priority": "low",
+      "impact": 2,
+      "effort": 2
+    },
+    {
+      "insight": "行政事务拖延",
+      "advice": "每天固定十五分钟处理报销",
+      "solves": "积压焦虑",
+      "priority": "medium",
+      "impact": 3,
+      "effort": 1
+    },
+    {
+      "insight": "合作进度靠追问",
+      "advice": "与合作者约定每周一次书面进度",
+      "solves": "沟通耗电",
+      "priority": "medium",
+      "impact": 3,
+      "effort": 1
+    }
+  ],
+  "type": {
+    "scope": 94,
+    "basis": 22,
+    "output": 31,
+    "rhythm": 52,
+    "evidence": {
+      "scope": "四条主线并行并互相取材",
+      "basis": "反复要求可复现的数据",
+      "output": "成就感主要来自做出原型",
+      "rhythm": "计划与调整大致各半"
+    }
+  },
+  "character": {
+    "outfit": "a light lab coat over a hoodie",
+    "props": [
+      "a notebook",
+      "a small circuit board"
+    ],
+    "pose": "standing confidently",
+    "expression": "focused"
+  },
+  "sensitive": [
+    "北岭大学"
+  ]
+}

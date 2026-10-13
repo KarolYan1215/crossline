@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { ensurePortrait } from "./ledger.js";
 
 /**
  * The Phase 4 acceptance bullets that a screenshot comparison cannot state: one typeface, nothing under 12px, text contrast
@@ -51,9 +52,10 @@ async function audit(page: Page): Promise<{ fonts: Finding[]; small: Finding[]; 
       if (seen.has(key)) continue;
       seen.add(key);
       const finding = (detail: string): Finding => ({ selector: describe(element), text: text.slice(0, 40), detail });
-      // Two faces only: Arial (with DengXian) for the system's own text, Microsoft YaHei for text a model wrote (inside `.gen`).
+      // Two faces: Arial (with DengXian) for the system's own text, Microsoft YaHei for text a model wrote (inside `.gen`). A third,
+      // the poster's serif, is allowed only inside `.pt-serif` on the portrait, which is used only for strings written in code.
       const face = style.fontFamily.split(",")[0]!.replace(/["']/g, "").trim().toLowerCase();
-      const expected = element.closest(".gen") ? "microsoft yahei" : "arial";
+      const expected = element.closest(".gen") ? "microsoft yahei" : element.closest(".pt-serif") ? "crossline poster serif" : "arial";
       if (face !== expected) fonts.push(finding(style.fontFamily.slice(0, 60)));
       if (parseFloat(style.fontSize) < 12) small.push(finding(style.fontSize));
       if (element.closest(":disabled, [aria-disabled='true']")) continue;
@@ -86,6 +88,8 @@ async function audit(page: Page): Promise<{ fonts: Finding[]; small: Finding[]; 
 
 for (const path of PAGES) {
   test(`${path} keeps one typeface, readable sizes, 7:1 text contrast and no sideways scroll`, async ({ page }, testInfo) => {
+    // The portrait is audited with a full report, not its empty state.
+    if (path === "/portrait") await ensurePortrait(page);
     await page.goto(path);
     await page.waitForLoadState("networkidle");
     const found = await audit(page);
@@ -110,3 +114,46 @@ for (const path of PAGES) {
     expect(found.overflow, `horizontal overflow at 1000px: ${found.wide.join("; ")}`).toBeLessThanOrEqual(1);
   });
 }
+
+/**
+ * The portrait's layout defects (decided 2026-10-12: axis percentages over their captions, energy labels on each other, two advice dots
+ * on one spot) as one property: no two pieces of text on the page — on screen or in the off-screen share images — overlap. Measured per
+ * line box with `Range.getClientRects()` (tighter than an element's box, and it works for SVG text). The share card must hold its content.
+ */
+test("/portrait: no two pieces of text overlap, and the share card fits", async ({ page }) => {
+  await ensurePortrait(page);
+  await page.goto("/portrait");
+  await page.waitForLoadState("networkidle");
+  const { overlaps, cardOverflow } = await page.evaluate(() => {
+    const describe = (element: Element) => `${element.tagName.toLowerCase()}${element.className && typeof element.className === "string" ? `.${element.className.trim().split(/s+/).slice(0, 2).join(".")}` : ""}`;
+    const boxes: Array<{ node: number; text: string; where: string; rect: DOMRect }> = [];
+    let index = 0;
+    // The off-screen share half is itself a `.pt-doc`: walk each root once.
+    for (const root of document.querySelectorAll(".pt-doc:not(.pt-offscreen .pt-doc), .pt-offscreen")) {
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const text = node.textContent?.trim();
+        const element = node.parentElement;
+        if (!text || !element) continue;
+        const style = getComputedStyle(element);
+        if (style.visibility === "hidden" || style.display === "none" || Number(style.opacity) === 0) continue;
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        index += 1;
+        for (const rect of range.getClientRects()) if (rect.width > 0 && rect.height > 0) boxes.push({ node: index, text: text.slice(0, 30), where: describe(element), rect });
+      }
+    }
+    const overlaps: string[] = [];
+    for (let a = 0; a < boxes.length; a += 1) for (let b = a + 1; b < boxes.length; b += 1) {
+      const one = boxes[a]!, two = boxes[b]!;
+      if (one.node === two.node) continue;
+      const width = Math.min(one.rect.right, two.rect.right) - Math.max(one.rect.left, two.rect.left);
+      const height = Math.min(one.rect.bottom, two.rect.bottom) - Math.max(one.rect.top, two.rect.top);
+      if (width > 1 && height > 1) overlaps.push(`「${one.text}」(${one.where}) × 「${two.text}」(${two.where})`);
+    }
+    const card = document.querySelector(".pt-card");
+    return { overlaps: [...new Set(overlaps)], cardOverflow: card ? card.scrollHeight - card.clientHeight : 0 };
+  });
+  expect.soft(overlaps, "text overlapping other text on /portrait").toEqual([]);
+  expect.soft(cardOverflow, "share card content taller than the card").toBeLessThanOrEqual(1);
+});

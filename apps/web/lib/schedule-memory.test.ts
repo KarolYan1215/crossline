@@ -1,8 +1,9 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { CrosslineStore } from "@crossline/db";
+import { scheduledMinutesKey } from "@crossline/core";
 vi.mock("server-only", () => ({}));
 import { loadCurrentPlan, planToday, saveSchedulePreferences } from "./crossline";
-import { readScheduledDay, readScheduledMinutes, recordScheduledToday, scheduledMinutesKey, stepStartsOf } from "./schedule-memory";
+import { readScheduledDay, readScheduledMinutes, recordScheduledToday, stepStartsOf } from "./schedule-memory";
 import { TEST_CTX } from "./test-support";
 
 afterEach(() => { globalThis.crosslineStore?.close(); globalThis.crosslineStore = undefined; vi.unstubAllEnvs(); });

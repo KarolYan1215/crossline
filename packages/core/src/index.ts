@@ -457,3 +457,4 @@ export * from "./portrait";
 export * from "./portrait-type";
 export * from "./schedule-frozen";
 export * from "./onboarding-attention";
+export * from "./portrait-say-do";

@@ -1,26 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
-import path from "node:path";
-// Relative, not @crossline/db: the repo root is not a workspace package and has no such dependency.
-import { CrosslineStore } from "../packages/db/src/index.js";
 import { DEFAULT_AVAILABILITY } from "../packages/core/src/index.js";
 import { TEST_EMAIL, TEST_PASSWORD } from "./global-setup.js";
 import { signUpAccount } from "./accounts.js";
-
-function openStore(): CrosslineStore {
-  return new CrosslineStore(path.join(process.env.CROSSLINE_E2E_DATA_DIR!, "crossline.db"));
-}
-
-/**
- * `global-setup.ts` signs in the one e2e test account once per run, and its first authenticated request
- * is what creates that account's principal+workspace row (`requireAccessContext`'s
- * `createPrincipalWithWorkspace`) — there is no hardcoded workspace id to read any more, real accounts
- * get a real generated one. A fresh per-run database has exactly one, so the first is the right one.
- */
-function realWorkspaceId(store: CrosslineStore): string {
-  const workspace = store.listWorkspaces()[0];
-  if (!workspace) throw new Error("No workspace exists yet — did global-setup.ts's sign-in run?");
-  return workspace.id;
-}
+import { ensurePortrait, openStore, realWorkspaceId } from "./ledger.js";
 
 type BrowserFetchResult = { ok: boolean; status: number; body: string };
 
@@ -570,6 +552,21 @@ test("Today's flywheel graph draws each line around its goal and opens a milesto
   expect(await page.evaluate(() => window.scrollY)).toBe(scrolled);
   await graph.getByRole("button", { name: "复位" }).click();
   await Promise.all([page.waitForURL(/\/milestones\?open=/), node.locator("circle").first().click()]);
+});
+
+// The poster in style A (decided 2026-10-12): the shareable half's first page and the 4:5 share card, from the fictional fixture.
+// No figure is drawn in e2e, which keeps the picture stable; the card is moved on screen only to be photographed.
+test("画像海报的视觉基线", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-chrome", "one width is enough for a poster of fixed size");
+  await ensurePortrait(page);
+  await page.goto("/portrait");
+  await page.waitForLoadState("networkidle");
+  await page.evaluate(() => document.fonts.ready);
+  // The poster is taller than the window: sticky bars would otherwise sit on its top edge in the photo.
+  await page.addStyleTag({ content: ".running-head,.pt-toolbar{position:static !important}" });
+  await expect(page.locator(".pt-page.pt-type").first()).toHaveScreenshot("portrait-share-half.png");
+  await page.addStyleTag({ content: ".pt-offscreen{position:static !important;left:auto !important}" });
+  await expect(page.locator(".pt-card")).toHaveScreenshot("portrait-card.png");
 });
 
 test("signing out deletes this browser's offline database for the workspace it was using", async ({ page }, testInfo) => {

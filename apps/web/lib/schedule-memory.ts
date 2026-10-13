@@ -1,5 +1,5 @@
 import "server-only";
-import { STEP_STARTS_SETTING, type AccessContext } from "@crossline/core";
+import { STEP_STARTS_SETTING, scheduledMinutesKey, type AccessContext } from "@crossline/core";
 import { effectiveSchedulePreferences, getStore, loadCurrentPlan, planToday, toZonedInstant } from "./crossline";
 
 /** The setting that remembers which work was given a time on a day: `schedule.day:<YYYY-MM-DD>` → `{ [orderId]: "HH:MM" }`. */
@@ -13,11 +13,10 @@ export function readScheduledDay(ctx: AccessContext, day: string): ScheduledDay 
 }
 
 /**
- * How long each order was planned for on a day: `schedule.minutes:<YYYY-MM-DD>` → `{ [orderId]: minutes }`, the most seen for it that day.
- * Kept beside `schedule.day` (whose shape the missed-block ask reads) so the plan page can compare planned with timed hours per line;
- * days before this was recorded have a start time and no length, and count as not recorded.
+ * How long each order was planned for on a day (`scheduledMinutesKey`), the most seen for it that day. Kept beside `schedule.day` (whose
+ * shape the missed-block ask reads) so the plan page can compare planned with timed hours per line; days before this was recorded have a
+ * start time and no length, and count as not recorded.
  */
-export const scheduledMinutesKey = (day: string) => `schedule.minutes:${day}`;
 export type ScheduledMinutes = Record<string, number>;
 
 export function readScheduledMinutes(ctx: AccessContext, day: string): ScheduledMinutes | null {

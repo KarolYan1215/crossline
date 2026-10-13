@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import type { PortraitReport } from "@crossline/core";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { SAY_DO_DIMENSIONS, type PortraitReport, type PortraitType, type SayDoReading } from "@crossline/core";
+import { axisBar, dodgeMatrix, energyLegend } from "./poster-geometry";
 
 /**
  * Draws its child at the width it actually has, so a chart's 12px labels are 12px on a phone and on an A4 page alike (an SVG scaled to
@@ -20,18 +21,51 @@ export function Fit({ initial, max, children }: { initial: number; max: number; 
 }
 
 /**
- * The portrait's charts (decided 2026-10-08: the report was all words). Hand-rolled SVG like every chart in the app; each reads one
- * field the writer scores from evidence, and draws nothing when the field is missing (a report written before the field existed).
+ * The portrait's charts (decided 2026-10-08: the report was all words; restyled 2026-10-12 as style A 「编辑杂志」). Hand-rolled like
+ * every chart in the app; each draws nothing when its field is missing (a report written before the field existed). Dots that carry a
+ * number are HTML, not SVG text, so the design audit reads the colour actually behind the number.
  */
 
-const INK = "#111", SOFT = "#4a4a4a", RULE = "#d0d0d0";
+const INK = "#1C1A17", MUTED = "#4F4A42", TRACK = "#DDD5C7";
 const LINE_COLOUR: Record<string, string> = { research: "#0A5198", startup: "#8C3709", media: "#792E9C", investment: "#085E3A", health: "#664E00" };
 const colourOf = (lineId: string) => LINE_COLOUR[lineId] ?? INK;
 
-/** What their work and life serve, each axis 0–100 from the evidence. */
+/**
+ * The four typing axes as diverging bars: both poles named, the one leaned to in bold, the bar growing from the middle towards it, the
+ * percentage inside a long bar and beside a short one. `evidence` adds each axis's reason under it.
+ */
+export function DivergingAxes({ type, evidence }: { type: PortraitType; evidence?: boolean }) {
+  return <ul className="pt-axes">{type.axes.map((axis) => {
+    const bar = axisBar(axis.score);
+    const outside: CSSProperties = bar.side === "right" ? { left: `calc(${bar.from + bar.width}% + 6px)` } : { right: `calc(${100 - bar.from}% + 6px)` };
+    return <li key={axis.id}>
+      <span className="pt-axis-side pt-serif" data-on={bar.side === "left" || undefined}>{axis.left}</span>
+      <span className="pt-axis-track" role="img" aria-label={`${axis.label} ${bar.percent}%`}>
+        <i style={{ left: `${bar.from}%`, width: `${bar.width}%` }} data-side={bar.side}>{bar.inside && <b>{bar.percent}%</b>}</i>
+        {!bar.inside && <b className="pt-axis-out" style={outside}>{bar.percent}%</b>}
+      </span>
+      <span className="pt-axis-side pt-serif" data-on={bar.side === "right" || undefined}>{axis.right}</span>
+      {evidence && axis.evidence && <small className="gen">{axis.evidence}</small>}
+    </li>;
+  })}</ul>;
+}
+
+/** Lines as rows: the suggested share as a solid bar in the line's colour, the current share as a hollow marker, and both in words. */
+export function IdentityBars({ rows }: { rows: Array<{ lineId: string; label: string; target: number; now: number | null }> }) {
+  if (!rows.length) return null;
+  return <ul className="pt-identities">{rows.map((row) => <li key={row.lineId} style={{ ["--lc" as string]: colourOf(row.lineId) }}>
+    <b>{row.label}</b>
+    <span className="pt-identity-track" role="img" aria-label={`${row.label}：${row.now === null ? "" : `现在 ${row.now}%，`}建议 ${row.target}%`}>
+      <i style={{ width: `${row.target}%` }} />
+      {row.now !== null && <u style={{ left: `${row.now}%` }} />}
+    </span>
+    <small>{row.now === null ? `建议 ${row.target}%` : `${row.now}% → ${row.target}%`}</small>
+  </li>)}</ul>;
+}
+
+/** Schwartz's ten values on fixed axes in the circle's order (`radarValues`), each 0–100 from the evidence. */
 export function ValuesRadar({ values, size = 300 }: { values: NonNullable<PortraitReport["compass"]["values"]>; size?: number }) {
-  if (values.length < 3) return null;
-  const c = size / 2, r = size / 2 - 58;
+  const c = size / 2, r = size / 2 - 72;
   const point = (index: number, value: number) => {
     const angle = -Math.PI / 2 + (index / values.length) * Math.PI * 2;
     return { x: c + Math.cos(angle) * r * (value / 100), y: c + Math.sin(angle) * r * (value / 100), angle };
@@ -39,78 +73,78 @@ export function ValuesRadar({ values, size = 300 }: { values: NonNullable<Portra
   const shape = values.map((item, index) => point(index, item.score)).map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
   return <svg className="pt-chart" viewBox={`0 0 ${size} ${size}`} role="img" aria-label={`价值取向：${values.map((item) => `${item.name} ${item.score}`).join("，")}`}>
     {[25, 50, 75, 100].map((ring) => <polygon key={ring} points={values.map((_, index) => point(index, ring)).map((p) => `${p.x},${p.y}`).join(" ")}
-      fill="none" stroke={RULE} strokeWidth={ring === 100 ? 1.2 : 0.8} />)}
-    {values.map((_, index) => { const p = point(index, 100); return <line key={index} x1={c} y1={c} x2={p.x} y2={p.y} stroke={RULE} strokeWidth="0.8" />; })}
-    <polygon points={shape} fill={INK} fillOpacity=".12" stroke={INK} strokeWidth="2" />
-    {values.map((item, index) => { const p = point(index, item.score); return <circle key={item.name} cx={p.x} cy={p.y} r="3.5" fill={INK}><title>{item.evidence}</title></circle>; })}
+      fill="none" stroke={TRACK} strokeWidth={ring === 100 ? 1.2 : 0.8} />)}
+    {values.map((_, index) => { const p = point(index, 100); return <line key={index} x1={c} y1={c} x2={p.x} y2={p.y} stroke={TRACK} strokeWidth="0.8" />; })}
+    <polygon points={shape} style={{ fill: "var(--pt-accent)", stroke: "var(--pt-accent)" }} fillOpacity=".16" strokeWidth="2" />
+    {values.map((item, index) => { const p = point(index, item.score); return <circle key={item.name} cx={p.x} cy={p.y} r="3.5" style={{ fill: "var(--pt-accent)" }}><title>{item.evidence}</title></circle>; })}
     {values.map((item, index) => {
-      const p = point(index, 118);
-      const anchor = Math.abs(Math.cos(p.angle)) < 0.2 ? "middle" : Math.cos(p.angle) > 0 ? "start" : "end";
-      return <text key={`t-${item.name}`} x={p.x} y={p.y + 4} textAnchor={anchor} fontSize="13" fontWeight="700" fill={INK}>{item.name}
-        <tspan fontWeight="400" fill={SOFT}> {item.score}</tspan></text>;
+      const p = point(index, 116);
+      const cos = Math.cos(p.angle), sin = Math.sin(p.angle);
+      const anchor = Math.abs(cos) < 0.2 ? "middle" : cos > 0 ? "start" : "end";
+      return <text key={`t-${item.name}`} x={p.x} y={p.y + 4 + (Math.abs(cos) < 0.2 ? sin * 6 : 0)} textAnchor={anchor} fontSize="13" fill={INK}>
+        <tspan className="pt-serif" fontWeight="700">{item.name}</tspan><tspan fill={MUTED}> {item.score}</tspan></text>;
     })}
   </svg>;
 }
 
-/** Activities on the energy plane: how good they are at it (→) and how much they love it (↑); filled = charges them, hollow = drains. */
-export function EnergyScatter({ map, width = 520, height = 360 }: { map: PortraitReport["energy"]["map"]; width?: number; height?: number }) {
-  if (!map.length) return null;
-  const pad = { left: 30, right: 16, top: 16, bottom: 30 };
+type PlaneDot = { key: string; x: number; y: number; number: number; filled: boolean; title: string };
+/** A plane of numbered dots (HTML, so a number's backdrop is real): `x`/`y` 0–100, filled or hollow, spread where they would touch. */
+function NumberedPlane({ dots, width, height, x, y, corner, shade, r }: { dots: PlaneDot[]; width: number; height: number; x: string; y: string;
+  corner: string; shade: "top-right" | "top-left"; r: number }) {
+  const pad = { left: 14, right: 14, top: 24, bottom: 24 };
   const w = width - pad.left - pad.right, h = height - pad.top - pad.bottom;
-  // An older report has only high/low: placed in its quadrant, spread so labels do not sit on each other.
-  const placed = map.map((item, index) => ({ ...item,
-    sx: item.skillScore ?? (item.skill === "high" ? 70 : 30) + ((index * 37) % 20) - 10,
-    ly: item.loveScore ?? (item.love === "high" ? 70 : 30) + ((index * 53) % 20) - 10 }));
-  const x = (value: number) => pad.left + (value / 100) * w, y = (value: number) => pad.top + (1 - value / 100) * h;
-  return <svg className="pt-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="能量地图：横轴擅长程度，纵轴热爱程度；实心为充电，空心为耗电">
-    <rect x={x(50)} y={y(100)} width={w / 2} height={h / 2} fill="#f4f4f1" />
-    <line x1={x(0)} y1={y(50)} x2={x(100)} y2={y(50)} stroke={RULE} />
-    <line x1={x(50)} y1={y(0)} x2={x(50)} y2={y(100)} stroke={RULE} />
-    <rect x={pad.left} y={pad.top} width={w} height={h} fill="none" stroke={SOFT} strokeWidth="1" />
-    <text x={x(100)} y={height - 8} textAnchor="end" fontSize="12" fill={SOFT}>擅长 →</text>
-    <text x={8} y={pad.top + 12} fontSize="12" fill={SOFT}>热爱 ↑</text>
-    <text x={x(98)} y={y(96)} textAnchor="end" fontSize="12" fill={SOFT}>擅长且热爱</text>
-    {placed.map((item) => <g key={item.activity}>
-      <circle cx={x(item.sx)} cy={y(item.ly)} r="6" fill={item.charge === "charge" ? INK : "#fff"} stroke={INK} strokeWidth="2" />
-      <text x={x(item.sx) + (item.sx > 75 ? -10 : 10)} y={y(item.ly) + 4} textAnchor={item.sx > 75 ? "end" : "start"} fontSize="12" fill={INK}>{item.activity}</text>
-    </g>)}
-  </svg>;
+  const placed = dodgeMatrix(dots.map((dot) => ({ ...dot, x: pad.left + (dot.x / 100) * w, y: pad.top + (1 - dot.y / 100) * h })), r);
+  return <div className="pt-plane" style={{ width, height }}>
+    <span className="pt-plane-frame" style={{ left: pad.left, top: pad.top, width: w, height: h }}>
+      <span className="pt-plane-shade" data-at={shade} />
+    </span>
+    <small className="pt-plane-y">{y}</small>
+    <small className="pt-plane-x">{x}</small>
+    <small className="pt-plane-corner" data-at={shade}>{corner}</small>
+    {placed.map((dot) => <span key={dot.key} className="pt-dot" data-filled={dot.filled || undefined} title={dot.title}
+      style={{ left: dot.x - r, top: dot.y - r, width: r * 2, height: r * 2 }}>{dot.number}</span>)}
+  </div>;
 }
 
-/** Each line's share of attention now (hollow) and what the portrait suggests (filled, in the line's colour). */
-export function AllocationChart({ items, label, width = 520 }: { items: Array<{ lineId: string; name: string; share?: number | undefined; targetShare?: number | undefined }>; label: string; width?: number }) {
-  const rows = items.filter((item) => item.share !== undefined && item.targetShare !== undefined);
-  if (!rows.length) return null;
-  const row = 34, left = 92, right = 60, height = rows.length * row + 30;
-  const x = (value: number) => left + (value / 100) * (width - left - right);
-  return <svg className="pt-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={label}>
-    {[0, 25, 50, 75, 100].map((tick) => <g key={tick}><line x1={x(tick)} y1={8} x2={x(tick)} y2={height - 20} stroke={RULE} strokeWidth="0.8" />
-      <text x={x(tick)} y={height - 6} textAnchor="middle" fontSize="12" fill={SOFT}>{tick}%</text></g>)}
-    {rows.map((item, index) => { const cy = 22 + index * row, now = item.share!, target = item.targetShare!; return <g key={item.lineId}>
-      <text x={left - 10} y={cy + 4} textAnchor="end" fontSize="13" fontWeight="700" fill={INK}>{item.name}</text>
-      <line x1={x(Math.min(now, target))} y1={cy} x2={x(Math.max(now, target))} y2={cy} stroke={colourOf(item.lineId)} strokeWidth="3" />
-      <circle cx={x(now)} cy={cy} r="6" fill="#fff" stroke={colourOf(item.lineId)} strokeWidth="2.5"><title>{`现在 ${now}%`}</title></circle>
-      <circle cx={x(target)} cy={cy} r="6" fill={colourOf(item.lineId)}><title>{`建议 ${target}%`}</title></circle>
-      <text x={width - right + 8} y={cy + 4} fontSize="12" fill={INK}>{now}→{target}</text>
-    </g>; })}
-  </svg>;
+/**
+ * Activities on the energy plane — how good they are at it (→) and how much they love it (↑) — as numbered dots (filled charges them,
+ * hollow drains), with a legend under it grouped by the six fixed categories; names never sit on the plane, so they cannot collide.
+ */
+export function EnergyScatter({ map, width = 520 }: { map: PortraitReport["energy"]["map"]; width?: number }) {
+  if (!map.length) return null;
+  const groups = energyLegend(map);
+  // An older report has only high/low: placed in its quadrant.
+  const dots = groups.flatMap((group) => group.entries).map((item) => ({ key: `${item.number}`, number: item.number, filled: item.charge === "charge", title: item.activity,
+    x: item.skillScore ?? (item.skill === "high" ? 70 : 30), y: item.loveScore ?? (item.love === "high" ? 70 : 30) }));
+  return <div className="pt-energy">
+    <NumberedPlane dots={dots} width={width} height={Math.round(Math.min(380, width * 0.66))} r={12} shade="top-right" x="擅长 →" y="热爱 ↑" corner="擅长且热爱" />
+    <dl className="pt-legend">{groups.map((group) => <div key={group.category}>
+      <dt>{group.category}</dt>
+      {group.entries.map((entry) => <dd key={entry.number}><b>{entry.number}</b><span className="gen">{entry.activity}</span><small>{entry.charge === "charge" ? "充电" : "耗电"}</small></dd>)}
+    </div>)}</dl>
+  </div>;
 }
 
-/** Where what they say and what they do part: says (filled) and does (hollow) on each dimension, 0–100. */
-export function GapChart({ pairs, width = 520 }: { pairs: NonNullable<PortraitReport["gap"]["pairs"]>; width?: number }) {
-  if (!pairs.length) return null;
-  const row = 38, left = 104, right = 52, height = pairs.length * row + 34;
+/**
+ * Say against do on the five fixed dimensions: what the person says matters (filled, from the interview) and what the execution record
+ * shows (hollow, `sayDoFor`). Until the record is long enough nothing is scored — a line says how much there is so far.
+ */
+export function GapChart({ pairs, sayDo, width = 520 }: { pairs: NonNullable<PortraitReport["gap"]["pairs"]>; sayDo: SayDoReading; width?: number }) {
+  if (!sayDo.sufficient) return <p className="pt-gap-note">执行记录满 14 天且不少于 10 次后画出对照（现有 {sayDo.days} 天、{sayDo.executions} 次）。</p>;
+  const rows = SAY_DO_DIMENSIONS.map((dimension) => ({ ...dimension, says: pairs.find((pair) => pair.dimension === dimension.label)?.says ?? null, does: sayDo.does[dimension.id] }));
+  const row = 38, left = 104, right = 76, height = rows.length * row + 34;
   const x = (value: number) => left + (value / 100) * (width - left - right);
-  return <svg className="pt-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`言行对照：${pairs.map((pair) => `${pair.dimension} 所说 ${pair.says}，所做 ${pair.does}`).join("；")}`}>
+  return <svg className="pt-chart" viewBox={`0 0 ${width} ${height}`} role="img"
+    aria-label={`言行对照：${rows.map((item) => `${item.label} 所说 ${item.says ?? "无"}，所做 ${item.does ?? "暂无记录"}`).join("；")}`}>
     <circle cx={left} cy={10} r="5" fill={INK} /><text x={left + 10} y={14} fontSize="12" fill={INK}>所说</text>
     <circle cx={left + 60} cy={10} r="5" fill="#fff" stroke={INK} strokeWidth="2" /><text x={left + 70} y={14} fontSize="12" fill={INK}>所做</text>
-    {pairs.map((pair, index) => { const cy = 38 + index * row; return <g key={pair.dimension}>
-      <line x1={x(0)} y1={cy} x2={x(100)} y2={cy} stroke={RULE} strokeWidth="0.8" />
-      <text x={left - 10} y={cy + 4} textAnchor="end" fontSize="13" fontWeight="700" fill={INK}>{pair.dimension}</text>
-      <line x1={x(Math.min(pair.says, pair.does))} y1={cy} x2={x(Math.max(pair.says, pair.does))} y2={cy} stroke={INK} strokeWidth="3" />
-      <circle cx={x(pair.says)} cy={cy} r="6" fill={INK} />
-      <circle cx={x(pair.does)} cy={cy} r="6" fill="#fff" stroke={INK} strokeWidth="2" />
-      <text x={width - right + 8} y={cy + 4} fontSize="12" fill={SOFT}>差 {Math.abs(pair.says - pair.does)}</text>
+    {rows.map((item, index) => { const cy = 38 + index * row; return <g key={item.id}>
+      <line x1={x(0)} y1={cy} x2={x(100)} y2={cy} stroke={TRACK} strokeWidth="0.8" />
+      <text x={left - 10} y={cy + 4} textAnchor="end" fontSize="13" fontWeight="700" fill={INK}>{item.label}</text>
+      {item.says !== null && item.does !== null && <line x1={x(Math.min(item.says, item.does))} y1={cy} x2={x(Math.max(item.says, item.does))} y2={cy} stroke={INK} strokeWidth="3" />}
+      {item.says !== null && <circle cx={x(item.says)} cy={cy} r="6" fill={INK} />}
+      {item.does !== null && <circle cx={x(item.does)} cy={cy} r="6" fill="#fff" stroke={INK} strokeWidth="2" />}
+      <text x={width - right + 8} y={cy + 4} fontSize="12" fill={MUTED}>{item.does === null ? "暂无记录" : item.says === null ? "" : `差 ${Math.abs(item.says - item.does)}`}</text>
     </g>; })}
   </svg>;
 }
@@ -119,19 +153,10 @@ export function GapChart({ pairs, width = 520 }: { pairs: NonNullable<PortraitRe
 export function AdviceMatrix({ insights }: { insights: PortraitReport["insights"] }) {
   const rated = insights.map((item, index) => ({ ...item, index })).filter((item) => item.impact && item.effort);
   if (!rated.length) return null;
-  const size = 300, pad = 30, span = size - pad * 2;
   // 1–5 sit in the middle of five equal bands, so a 5 is inside the frame, not on it.
-  const pos = (value: number) => ((value - 0.5) / 5) * span;
-  return <svg className="pt-chart pt-matrix" viewBox={`0 0 ${size} ${size}`} role="img" aria-label="建议矩阵：纵轴影响，横轴投入">
-    <rect x={pad} y={pad} width={span / 2} height={span / 2} fill="#f4f4f1" />
-    <rect x={pad} y={pad} width={span} height={span} fill="none" stroke={SOFT} />
-    <line x1={pad + span / 2} y1={pad} x2={pad + span / 2} y2={pad + span} stroke={RULE} />
-    <line x1={pad} y1={pad + span / 2} x2={pad + span} y2={pad + span / 2} stroke={RULE} />
-    <text x={pad + 6} y={pad + 16} fontSize="12" fill={SOFT}>先做</text>
-    <text x={pad + span} y={size - 8} textAnchor="end" fontSize="12" fill={SOFT}>投入 →</text>
-    <text x={4} y={pad - 10} fontSize="12" fill={SOFT}>影响 ↑</text>
-    {rated.map((item) => { const cx = pad + pos(item.effort!) + ((item.index * 7) % 9) - 4, cy = pad + span - pos(item.impact!) + ((item.index * 5) % 9) - 4;
-      return <g key={item.index}><circle cx={cx} cy={cy} r="11" fill={item.priority === "high" ? INK : "#fff"} stroke={INK} strokeWidth="2" />
-        <text x={cx} y={cy + 4} textAnchor="middle" fontSize="12" fontWeight="700" fill={item.priority === "high" ? "#fff" : INK}>{item.index + 1}</text></g>; })}
-  </svg>;
+  const band = (value: number) => ((value - 0.5) / 5) * 100;
+  return <div className="pt-matrix" role="img" aria-label="建议矩阵：纵轴影响，横轴投入">
+    <NumberedPlane dots={rated.map((item) => ({ key: `${item.index}`, number: item.index + 1, filled: item.priority === "high", title: item.advice, x: band(item.effort!), y: band(item.impact!) }))}
+      width={300} height={300} r={11} shade="top-left" x="投入 →" y="影响 ↑" corner="先做" />
+  </div>;
 }

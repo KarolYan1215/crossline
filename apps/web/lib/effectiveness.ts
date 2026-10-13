@@ -1,5 +1,5 @@
 import "server-only";
-import { computeEffectiveness, type AccessContext, type Effectiveness } from "@crossline/core";
+import { answeredOnTime, computeEffectiveness, type AccessContext, type Effectiveness } from "@crossline/core";
 import { relationChecks } from "@crossline/db";
 import { getStore, loadCurrentPlan, loadGoalForecast, planToday, resolvedEstimate, workspaceCalibration } from "./crossline";
 import { countPending } from "./pending";
@@ -76,7 +76,7 @@ export async function loadEffectiveness(ctx: AccessContext, now = new Date()): P
   const committed = [...orders.values()].filter((order) => ACTIONABLE.has(order.state) && !(order.payload as { seeded?: boolean }).seeded);
   const progressed = new Set(judged.filter((event) => event.createdAt >= weekAgo).map((event) => (event.payload as { milestoneId?: string }).milestoneId));
   const waiting = store.listWaitingItems(ctx.workspaceId).filter((item) => item.state !== "open");
-  const onTime = waiting.filter((item) => Date.parse(item.updatedAt) <= Date.parse(`${item.followUpAt}T00:00:00Z`) + 2 * DAY);
+  const onTime = waiting.filter(answeredOnTime);
 
   const result = computeEffectiveness({
     today, milestones, durations, minutesByLine, deadlineMinutes, totalMinutes,
