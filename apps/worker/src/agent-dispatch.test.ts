@@ -115,6 +115,9 @@ test("the assistant's preparation steps are picked up by themselves once the kin
   const [candidate] = stepDispatchCandidates(store, "w");
   expect(candidate?.orderId).toBe("wo");
   expect(store.getStepPlan("w", "wo")!.steps.find((step) => step.id === candidate!.stepId)?.title).toBe("汇编 L1–L7 公式表");
+  // Windowed to work starting soon (the worker's own pass): an order not starting within two days is not prepared yet.
+  expect(stepDispatchCandidates(store, "w", new Set())).toEqual([]);
+  expect(stepDispatchCandidates(store, "w", new Set(["wo"]))).toHaveLength(1);
   store.close();
 });
 

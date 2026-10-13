@@ -81,14 +81,15 @@ export function taskFromWorkOrder(store: CrosslineStore, workspaceId: string, or
  * Work orders the assistant may start on its own: not paused, a kind it is allowed, never tried before. A kind it is not yet allowed
  * to do is asked about instead (once, until the person answers), and a kind the person declined is left alone.
  */
-export function dispatchCandidates(store: CrosslineStore, workspaceId: string): string[] {
+/** `within`: only these orders (work starting soon); absent, every order — the person's own 「交给 Agent」 is never windowed. */
+export function dispatchCandidates(store: CrosslineStore, workspaceId: string, within?: Set<string>): string[] {
   if (isPaused(store, workspaceId)) return [];
   const approved = readCategories(store, workspaceId);
   const declined = new Set(declinedCategories(store, workspaceId));
   const tried = new Set(listAgentTasks(store, workspaceId).map((task) => task.workOrderId).filter(Boolean));
   const out: string[] = [];
   for (const order of store.listWorkOrders(workspaceId)) {
-    if (tried.has(order.id) || order.tombstone || !DISPATCH_STATES.has(order.state)) continue;
+    if (tried.has(order.id) || order.tombstone || !DISPATCH_STATES.has(order.state) || (within && !within.has(order.id))) continue;
     const result = taskFromWorkOrder(store, workspaceId, order.id);
     // Wording that points at no kind is the person's to decide; nothing starts without a kind.
     if (!result.ok || !result.category || declined.has(result.category)) continue;
@@ -104,7 +105,7 @@ export function dispatchCandidates(store: CrosslineStore, workspaceId: string): 
  * a committed task, never tried before, of a kind the person allowed; a kind not yet allowed is asked about once and the step waits.
  * Soonest-due task first, then in the step order.
  */
-export function stepDispatchCandidates(store: CrosslineStore, workspaceId: string): Array<{ orderId: string; stepId: string }> {
+export function stepDispatchCandidates(store: CrosslineStore, workspaceId: string, within?: Set<string>): Array<{ orderId: string; stepId: string }> {
   if (isPaused(store, workspaceId)) return [];
   const approved = readCategories(store, workspaceId);
   const declined = new Set(declinedCategories(store, workspaceId));
@@ -114,7 +115,7 @@ export function stepDispatchCandidates(store: CrosslineStore, workspaceId: strin
   const out: Array<{ orderId: string; stepId: string; due: string; seq: number }> = [];
   const made = madeInProject(store, workspaceId);
   for (const plan of store.listStepPlans(workspaceId)) {
-    if (!orders.has(plan.workOrderId)) continue;
+    if (!orders.has(plan.workOrderId) || (within && !within.has(plan.workOrderId))) continue;
     const order = orders.get(plan.workOrderId)!;
     const due = (order.payload as { dueDate?: string } | undefined)?.dueDate ?? "9999";
     for (const step of plan.steps) {

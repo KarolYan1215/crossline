@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { allowDiscretionarySpend, backgroundSpend, spendAllows, type CostSignal } from "./cost";
+import { allowDiscretionarySpend, backgroundSpend, engagementTier, spendAllows, type CostSignal } from "./cost";
 
 const policy = { windowSharePercent: 80, longWindowCeilingPercent: 90 };
 const signal = (over: Partial<Extract<CostSignal, { available: true }>> = {}): CostSignal => ({
@@ -69,4 +69,19 @@ test("a reached limit names when it comes back", () => {
   const spend = backgroundSpend({ available: true, limitReached: true, short: { usedPercent: 100, windowDurationMins: 300, resetsAt: Date.UTC(2026, 9, 11, 3) / 1000 } });
   expect(spend.blocker?.code).toBe("RATE_LIMIT_REACHED");
   expect(spend.blocker?.resetsAt).toBe("2026-10-11T03:00:00.000Z");
+});
+
+test("spending follows the person: active runs everything the quota allows, cooling only intake, dormant nothing", () => {
+  const now = new Date("2026-10-13T12:00:00.000Z");
+  expect(engagementTier("2026-10-12T00:00:00.000Z", now)).toBe("active");
+  expect(engagementTier("2026-10-10T12:00:00.000Z", now)).toBe("cooling");
+  expect(engagementTier("2026-09-27T04:44:00.000Z", now)).toBe("dormant");
+  // A new account with nothing done yet counts from when it began; with neither, it is active.
+  expect(engagementTier(undefined, now, "2026-10-13T08:00:00.000Z")).toBe("active");
+  expect(engagementTier(undefined, now)).toBe("active");
+  const normal = backgroundSpend({ available: true, short: { usedPercent: 10 }, long: { usedPercent: 10 }, limitReached: false } as CostSignal);
+  const kinds = ["intake", "core", "discretionary"] as const;
+  expect(kinds.map((kind) => spendAllows({ ...normal, engagement: "active" }, kind))).toEqual([true, true, true]);
+  expect(kinds.map((kind) => spendAllows({ ...normal, engagement: "cooling" }, kind))).toEqual([true, false, false]);
+  expect(kinds.map((kind) => spendAllows({ ...normal, engagement: "dormant" }, kind))).toEqual([false, false, false]);
 });

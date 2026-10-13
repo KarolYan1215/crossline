@@ -7,6 +7,8 @@ export const scheduledDayKey = (day: string) => `schedule.day:${day}`;
 export type ScheduledDay = Record<string, string>;
 /** Order ids with a scheduled block in the next seven days, rewritten on the web's timer. */
 export const UPCOMING_SETTING = "schedule.upcoming";
+/** `{ [orderId]: ISO instant }`: each order's earliest block this week; read by the worker (`apps/worker/src/schedule-window.ts`). */
+export const ORDER_STARTS_SETTING = "schedule.orderStarts";
 
 export function readScheduledDay(ctx: AccessContext, day: string): ScheduledDay {
   try { return JSON.parse(getStore().getSetting(ctx.workspaceId, scheduledDayKey(day)) || "{}") as ScheduledDay; } catch { return {}; }
@@ -59,9 +61,18 @@ export async function recordScheduledToday(ctx: AccessContext, now = new Date())
   // Where each step's next block starts, as an instant, for 「自动交给 Agent」 (the worker starts a step the system can do when its block
   // comes up). Rewritten whole each time, so a step the plan moved or dropped stops being due.
   const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
-  getStore().setSetting(ctx.workspaceId, STEP_STARTS_SETTING, JSON.stringify(stepStartsOf(plan.blocks, today, weekEnd, (day, time) => {
-    try { return toZonedInstant(day, time, zone); } catch { return undefined; }
-  })));
+  const instant = (day: string, time: string) => { try { return toZonedInstant(day, time, zone); } catch { return undefined; } };
+  getStore().setSetting(ctx.workspaceId, STEP_STARTS_SETTING, JSON.stringify(stepStartsOf(plan.blocks, today, weekEnd, instant)));
+  // Each order's earliest block this week, as an instant: the worker prepares tutorials and the assistant's preparation only for work
+  // starting within two days (docs/review-2026-10-13.md §6.1), and it cannot derive the schedule itself.
+  const orderStarts: Record<string, string> = {};
+  for (const block of plan.blocks) {
+    if (!block.id.startsWith("scheduled:") || !block.day || block.day < today || block.day >= weekEnd) continue;
+    const at = instant(block.day, block.start);
+    const orderId = block.id.split(":")[1]!;
+    if (at && (!orderStarts[orderId] || at < orderStarts[orderId]!)) orderStarts[orderId] = at;
+  }
+  getStore().setSetting(ctx.workspaceId, ORDER_STARTS_SETTING, JSON.stringify(orderStarts));
   return seen;
 }
 

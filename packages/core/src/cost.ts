@@ -70,11 +70,34 @@ export function allowDiscretionarySpend(signal: CostSignal, policy: SpendPolicy)
  * Background work the tick starts on its own. `core` is what keeps the person's own captures and tasks moving (analysis,
  * backplanning, step plans); `discretionary` is what nobody is waiting on (curation, titles, tutorials, research, the assistant).
  */
-export type SpendKind = "core" | "discretionary";
+/**
+ * `intake`: what turns the person's own input into something usable — capture analysis, filing calendar events under lines. It runs
+ * while the person is cooling off; everything else waits for them to come back (docs/review-2026-10-13.md §6.1).
+ */
+export type SpendKind = "intake" | "core" | "discretionary";
+
+/**
+ * How recently the person did something themselves: within 48 hours `active`; up to seven days `cooling` (only intake runs); beyond that
+ * `dormant` (no model calls at all — the calendar is still read and reminders still go out, neither costs a model call). Background work
+ * that nobody will look at is spending without value: the real account spent 51% of a week's tokens on manuals for work never started.
+ */
+export type Engagement = "active" | "cooling" | "dormant";
+export const ENGAGEMENT_ACTIVE_HOURS = 48;
+export const ENGAGEMENT_DORMANT_DAYS = 7;
+
+/** `lastActiveAt`: the person's latest own action; `since`: when the workspace began, standing in for it before there is any. */
+export function engagementTier(lastActiveAt: string | undefined, now: Date, since?: string): Engagement {
+  const from = lastActiveAt ?? since;
+  if (!from) return "active";
+  const hours = (now.getTime() - Date.parse(from)) / 3_600_000;
+  return hours <= ENGAGEMENT_ACTIVE_HOURS ? "active" : hours <= ENGAGEMENT_DORMANT_DAYS * 24 ? "cooling" : "dormant";
+}
 /** Setting the worker writes when it pauses a workspace's background passes, `{code, message, resetsAt?, at}`; the web asks about it. */
 export const BACKGROUND_BLOCKER = "background.blocker";
 /** `message` is for the person; `reason` is the runtime's own words, kept for logs and for telling a down worker apart. */
-export type BackgroundSpend = { mode: SpendMode; blocker?: { code: string; message: string; resetsAt?: string; reason?: string } };
+export type BackgroundSpend = { mode: SpendMode; blocker?: { code: string; message: string; resetsAt?: string; reason?: string };
+  /** Absent reads as `active` (callers that do not track the person). */
+  engagement?: Engagement };
 
 /**
  * The one reading of the quota for background work. It replaced eight copies of the same check that disagreed about an
@@ -100,5 +123,8 @@ export function backgroundSpend(signal: CostSignal): BackgroundSpend {
     : { mode };
 }
 
-export const spendAllows = (spend: BackgroundSpend, kind: SpendKind): boolean =>
-  kind === "core" ? spend.mode !== "manual_core_only" : spend.mode === "normal";
+export function spendAllows(spend: BackgroundSpend, kind: SpendKind): boolean {
+  const engagement = spend.engagement ?? "active";
+  if (engagement === "dormant" || (engagement === "cooling" && kind !== "intake")) return false;
+  return kind === "discretionary" ? spend.mode === "normal" : spend.mode !== "manual_core_only";
+}

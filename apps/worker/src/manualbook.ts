@@ -19,6 +19,7 @@ export const MANUAL_DESIGNER_SKILL = "crossline:crossline-manualbook-designer";
 export const MATERIAL_RESEARCHER_SKILL = "crossline:crossline-material-researcher";
 export const MATERIAL_WRITER_SKILL = "crossline:crossline-material-writer";
 import { ownerOf } from "./owner";
+import { startingWithin } from "./schedule-window";
 import { planningContext } from "./step-planner";
 
 const DESIGN_INSTRUCTIONS = "Design how this one task gets done, as a short flow of steps a person can follow from left to "
@@ -274,7 +275,8 @@ export function createManualbookBuilder(store: CrosslineStore, workspaceId: stri
     const sources = results.flatMap((result) => result.sources);
     const builds = store.listEvents(workspaceId, { type: "manualbook.built", entityId: workOrderId }).length;
     store.appendEvent({ ownerId, workspaceId, idempotencyKey: builds ? `manualbook:built:${workOrderId}:${builds}` : `manualbook:built:${workOrderId}`, type: "manualbook.built", entityId: workOrderId,
-      payload: { nodes: nodes.length, sources: sources.length, downloaded: sources.filter((source) => source.kept === "full_text").length } });
+      payload: { nodes: nodes.length, sources: sources.length, downloaded: sources.filter((source) => source.kept === "full_text").length,
+        inputs: tutorialInputs(store, workspaceId, workOrderId) } });
     return { state: "ready", workOrderId, artifacts: files.filter((item) => item.record).length, nodes: nodes.length, sources: sources.length,
       downloaded: sources.filter((source) => source.kept === "full_text").length };
   };
@@ -423,15 +425,46 @@ export function listManualbookFiles(materialsDir: string, workOrderId: string): 
  * Committed work coming up in the next seven days (the web writes `schedule.upcoming` on its timer) that has no tutorial yet: built on the
  * tick, one at a time. A failed build waits for the person (「生成教程」) instead of being retried on a timer.
  */
-export function pendingTutorials(store: CrosslineStore, workspaceId: string): string[] {
-  let upcoming: string[] = [];
-  try { upcoming = JSON.parse(store.getSetting(workspaceId, "schedule.upcoming") ?? "[]") as string[]; } catch { return []; }
-  const built = new Set(store.listEvents(workspaceId, { type: "manualbook.built" }).map((event) => event.entityId));
-  const failed = new Set(store.listEvents(workspaceId, { type: "tutorial.blocked" }).map((event) => event.entityId));
+/** A built tutorial older than this is made again before its work comes up (the person's decision, 2026-10-13). */
+export const TUTORIAL_MAX_AGE_DAYS = 7;
+
+/**
+ * What a tutorial is made from: the task's wording and due day, its step plan (the person's steps, by title — progress does not count),
+ * its required materials and the files of its project. A tutorial built from other inputs than these is out of date.
+ */
+export function tutorialInputs(store: CrosslineStore, workspaceId: string, workOrderId: string): string {
+  const order = store.getWorkOrder(workspaceId, workOrderId);
+  const payload = (order?.payload ?? {}) as { dueDate?: string; materialContract?: unknown[]; evidenceContract?: unknown[] };
+  const steps = (store.getStepPlan(workspaceId, workOrderId)?.steps ?? []).filter((step) => step.executor !== "agent").map((step) => step.title);
+  const files = order ? store.listSourceDocuments(workspaceId).filter((doc) => doc.projectId === order.projectId).map((doc) => doc.id).sort() : [];
+  return createHash("sha256").update(JSON.stringify({ intent: order?.intent ?? "", due: payload.dueDate ?? "", steps,
+    materials: payload.materialContract ?? [], evidence: payload.evidenceContract ?? [], files })).digest("hex").slice(0, 16);
+}
+
+/**
+ * Tutorials to make now: for committed work with a step plan whose next block starts within two days (just in time — the person's
+ * decision, 2026-10-13), never built, or built from inputs that have since changed, or built over a week ago. A tutorial that failed after
+ * its last build waits for the person (the failure is asked about).
+ */
+export function pendingTutorials(store: CrosslineStore, workspaceId: string, now = new Date()): string[] {
+  const soon = startingWithin(store, workspaceId, now);
+  const latest = (type: string) => {
+    const out = new Map<string, { createdAt: string; payload: Record<string, unknown> }>();
+    for (const event of store.listEvents(workspaceId, { type })) {
+      const seen = out.get(event.entityId);
+      if (!seen || seen.createdAt <= event.createdAt) out.set(event.entityId, { createdAt: event.createdAt, payload: event.payload as Record<string, unknown> });
+    }
+    return out;
+  };
+  const built = latest("manualbook.built"), failed = latest("tutorial.blocked");
   const orders = new Map(store.listWorkOrders(workspaceId).map((order) => [order.id, order]));
-  return upcoming.filter((id) => {
+  return [...soon].filter((id) => {
     const order = orders.get(id);
-    return order && ["approved", "ready_for_human", "active"].includes(order.state) && !built.has(id) && !failed.has(id)
-      && Boolean(store.getStepPlan(workspaceId, id));
+    if (!order || !["approved", "ready_for_human", "active"].includes(order.state) || !store.getStepPlan(workspaceId, id)) return false;
+    const build = built.get(id), failure = failed.get(id);
+    if (failure && (!build || failure.createdAt > build.createdAt)) return false;
+    if (!build) return true;
+    if (now.getTime() - Date.parse(build.createdAt) > TUTORIAL_MAX_AGE_DAYS * 86_400_000) return true;
+    return typeof build.payload.inputs === "string" && build.payload.inputs !== tutorialInputs(store, workspaceId, id);
   });
 }

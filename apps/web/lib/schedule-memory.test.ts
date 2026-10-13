@@ -2,8 +2,8 @@ import { afterEach, expect, test, vi } from "vitest";
 import { CrosslineStore } from "@crossline/db";
 import { scheduledMinutesKey } from "@crossline/core";
 vi.mock("server-only", () => ({}));
-import { loadCurrentPlan, planToday, saveSchedulePreferences } from "./crossline";
-import { readScheduledDay, readScheduledMinutes, recordScheduledToday, stepStartsOf } from "./schedule-memory";
+import { loadCurrentPlan, planToday, saveSchedulePreferences, toZonedInstant } from "./crossline";
+import { ORDER_STARTS_SETTING, readScheduledDay, readScheduledMinutes, recordScheduledToday, stepStartsOf } from "./schedule-memory";
 import { TEST_CTX } from "./test-support";
 
 afterEach(() => { globalThis.crosslineStore?.close(); globalThis.crosslineStore = undefined; vi.unstubAllEnvs(); });
@@ -31,6 +31,12 @@ test("the day's plan is remembered with each order's planned minutes, keeping th
   expect(readScheduledMinutes(TEST_CTX, today)).toEqual(expected);
   // The start-time record the missed-block ask reads keeps its shape.
   expect(Object.keys(readScheduledDay(TEST_CTX, today)).sort()).toEqual(Object.keys(expected).sort());
+  // Each order's earliest block as an instant, for the worker's just-in-time preparation.
+  const starts = JSON.parse(store.getSetting(TEST_CTX.workspaceId, ORDER_STARTS_SETTING)!) as Record<string, string>;
+  for (const order of Object.keys(expected)) {
+    const earliest = plan.blocks.filter((block) => block.id.startsWith(`scheduled:${order}`) && block.day === today).map((block) => block.start).sort()[0]!;
+    expect(starts[order]).toBe(toZonedInstant(today, earliest, "America/Chicago"));
+  }
 
   // A longer plan seen earlier in the day is kept; an order no longer planned is not forgotten.
   const [first] = Object.keys(expected);

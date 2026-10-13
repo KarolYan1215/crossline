@@ -2825,6 +2825,26 @@ export class CrosslineStore {
     this.setSetting(workspaceId, `background.${identityId}`, JSON.stringify([...byKey.values()]));
   }
 
+  /**
+   * When the person last did something themselves (docs/review-2026-10-13.md §6.1): said something in the input box, timed or confirmed
+   * work, answered a question, captured or discarded something, edited a milestone, reported a step's progress or their energy. A page
+   * left open is not activity, and nothing the system did on its own counts. Background spending follows this.
+   */
+  lastPersonActivity(workspaceId: string): string | undefined {
+    const PERSON_EVENTS = ["ask.answered", "block.confirmed", "execution.confirmed", "execution.paused", "execution.resumed", "capture.created",
+      "capture.discarded", "milestone.revised", "milestone.retrospective", "approval.revoked", "risk.accepted", "ask.snoozed"];
+    const latest = [
+      (this.#db.prepare("SELECT MAX(created_at) AS at FROM conversation_messages WHERE workspace_id = ? AND role = 'person'").get(workspaceId) as { at: string | null }).at,
+      (this.#db.prepare("SELECT MAX(MAX(started_at), COALESCE(MAX(ended_at), '')) AS at FROM executions WHERE workspace_id = ?").get(workspaceId) as { at: string | null }).at,
+      (this.#db.prepare("SELECT MAX(observed_at) AS at FROM energy_observations WHERE workspace_id = ? AND source = 'self_report'").get(workspaceId) as { at: string | null }).at,
+      (this.#db.prepare(`SELECT MAX(created_at) AS at FROM events WHERE workspace_id = ? AND type IN (${PERSON_EVENTS.map(() => "?").join(",")})`)
+        .get(workspaceId, ...PERSON_EVENTS) as { at: string | null }).at,
+      (this.#db.prepare("SELECT MAX(created_at) AS at FROM events WHERE workspace_id = ? AND type = 'task.step_progress' AND json_extract(payload_json, '$.source') IN ('user', 'person', 'confirm')")
+        .get(workspaceId) as { at: string | null }).at
+    ].filter((at): at is string => Boolean(at));
+    return latest.sort().at(-1);
+  }
+
   listEnergyObservations(workspaceId: string): StoredEnergyObservation[] {
     const rows = this.#db.prepare(
       "SELECT * FROM energy_observations WHERE workspace_id = ? ORDER BY observed_at DESC, id"

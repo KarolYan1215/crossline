@@ -5,6 +5,7 @@ import { deliverAgentResult, listAgentTasks, readCategories, requestCategory, ty
 import { AGENT_CATEGORIES, backgroundSpend, isAgentCategory, type AgentCategory, type CostSignal } from "@crossline/core";
 import { createAgentRunner, type AgentOutcome } from "./agent-task";
 import { autoHandoffCandidates, dispatchCandidates, ledgerAsk, stepDispatchCandidates, taskFromWorkOrder } from "./agent-dispatch";
+import { startingWithin } from "./schedule-window";
 import { ownerOf } from "./owner";
 
 /**
@@ -78,9 +79,12 @@ export function createAgentService(deps: {
       if (mark(workspaceId).size || (deps.isOwner && !deps.isOwner(workspaceId))) return;
       // In order: a step 「自动交给 Agent」 handed over whose block has come up (it is wanted now); preparation steps (what the person's
       // next session is waiting for); whole orders; and, with nothing else waiting, a handed-over step whose block is later this week.
+      // Preparation and whole errands only for work starting within two days (docs/review-2026-10-13.md §6.1): results for later work
+      // went unread and were stale by the time it came up.
+      const soon = startingWithin(deps.store, workspaceId, now);
       const auto = autoHandoffCandidates(deps.store, workspaceId, now);
-      const step = auto.due[0] ?? stepDispatchCandidates(deps.store, workspaceId)[0];
-      const order = step ? undefined : dispatchCandidates(deps.store, workspaceId)[0];
+      const step = auto.due[0] ?? stepDispatchCandidates(deps.store, workspaceId, soon)[0];
+      const order = step ? undefined : dispatchCandidates(deps.store, workspaceId, soon)[0];
       const next = step ?? (order ? { orderId: order, stepId: undefined } : auto.early[0]);
       if (!next) return;
       const { orderId, stepId } = next;

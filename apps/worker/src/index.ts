@@ -102,7 +102,7 @@ async function autoAnalyzePass(workspaceId: string, checkedAt = new Date().toISO
   try {
     const ids = capturesAwaitingAutoAnalysis(analysisStore, workspaceId);
     if (!ids.length) return;
-    if (!spendAllows(await spendFor(workspaceId), "core")) return;
+    if (!spendAllows(await spendFor(workspaceId), "intake")) return;
     // Started by the quota read just above when it is the account's own runtime; none means not connected, and that was just recorded.
     const client = codexSupervisor.clientFor(workspaceId);
     if (!client) return;
@@ -172,7 +172,7 @@ async function titlePass(workspaceId: string, checkedAt: string): Promise<void> 
 const filingCalendar = new Set<string>();
 async function calendarLinePass(workspaceId: string, checkedAt: string): Promise<void> {
   if (filingCalendar.has(workspaceId) || !codexSupervisor || !unfiledCalendarEvents(analysisStore, workspaceId).length) return;
-  if (!spendAllows(await spendFor(workspaceId), "core")) return;
+  if (!spendAllows(await spendFor(workspaceId), "intake")) return;
   filingCalendar.add(workspaceId);
   try {
     enterUsageWorkspace(workspaceId);
@@ -363,6 +363,9 @@ async function tick(): Promise<void> {
   // The nightly expansion decides for itself whether this tick is its moment; most ticks are not.
   for (const workspace of workspaces) {
     enterUsageWorkspace(workspace.id);
+    // The nightly flywheel, research and the assistant run only while the person is around (docs/review-2026-10-13.md §6.1): their
+    // results are for someone to look at, and for days nobody did.
+    if ((await spendFor(workspace.id)).engagement !== "active") continue;
     const decision = await getNightly(workspace.id)().catch(() => undefined);
     if (decision && !decision.run && decision.code !== "BEFORE_PLANNED_TIME" && decision.code !== "ALREADY_RAN_TODAY") {
       console.info(JSON.stringify({ type: "flywheel.nightly.skipped", checkedAt, workspaceId: workspace.id, code: decision.code }));

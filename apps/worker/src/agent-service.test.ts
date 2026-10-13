@@ -19,8 +19,13 @@ beforeEach(() => {
 afterEach(() => { store.close(); rmSync(root, { recursive: true, force: true }); });
 
 const estimate = { p25Minutes: 10, p50Minutes: 20, p85Minutes: 40, source: "llm_prior" as const, observationCount: 0, confidence: "low" as const };
-const order = (id: string, ai: string[], state = "approved") => store.saveWorkOrder({ id, ownerId: "o", workspaceId: ws, identityId: "research", projectId: "p", milestoneId: "", intent: `任务 ${id}`, state, riskTier: "routine", estimate,
-  payload: { automationParts: ai.map((intent, i) => ({ id: `a${i}`, intent })), humanCore: [{ id: "h", intent: "自己决定" }], materialContract: [] } });
+const order = (id: string, ai: string[], state = "approved") => {
+  store.saveWorkOrder({ id, ownerId: "o", workspaceId: ws, identityId: "research", projectId: "p", milestoneId: "", intent: `任务 ${id}`, state, riskTier: "routine", estimate,
+    payload: { automationParts: ai.map((intent, i) => ({ id: `a${i}`, intent })), humanCore: [{ id: "h", intent: "自己决定" }], materialContract: [] } });
+  // Its work starts within the hour: the worker's pass prepares only for work starting within two days.
+  const starts = JSON.parse(store.getSetting(ws, "schedule.orderStarts") ?? "{}") as Record<string, string>;
+  store.setSetting(ws, "schedule.orderStarts", JSON.stringify({ ...starts, [id]: new Date(Date.now() + 3_600_000).toISOString() }));
+};
 const healthy: CostSignal = { available: true, limitReached: false, short: { usedPercent: 10, windowDurationMins: 300, resetsAt: null }, long: { usedPercent: 10, windowDurationMins: 10080, resetsAt: null } };
 const summary = JSON.stringify({ summary: "整理了笔记。", artifacts: [{ path: "n.md", purpose: "笔记" }], verification: [{ check: "文件存在", result: "pass", evidence: "Get-Item 看到 n.md" }], needsHuman: [], notDone: [], assumptions: [] });
 const service = (over: { cost?: CostSignal; script?: boolean } = {}) => {
@@ -145,6 +150,15 @@ test("on a machine shared by several accounts, the assistant works only for the 
   order("wo-1", ["整理并摘要这三篇文献"]);
   const svc = createAgentService({ store, repoRoot: "C:\\repo", getClient: () => undefined, readCost: async () => healthy, isOwner: () => false });
   expect(svc.dispatch(ws, "wo-1")).toMatchObject({ state: "blocked", code: "AGENT_OWNER_ONLY" });
+  await svc.pass(ws);
+  expect(listAgentTasks(store, ws)).toHaveLength(0);
+});
+
+test("the worker's own pass leaves work starting later than two days alone", async () => {
+  approveCategory(store, ws, "read_research_organize");
+  order("wo-far", ["整理并摘要这三篇文献"]);
+  store.setSetting(ws, "schedule.orderStarts", JSON.stringify({ "wo-far": new Date(Date.now() + 5 * 86_400_000).toISOString() }));
+  const { svc } = service();
   await svc.pass(ws);
   expect(listAgentTasks(store, ws)).toHaveLength(0);
 });

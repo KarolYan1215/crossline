@@ -7,7 +7,7 @@ import { CrosslineStore } from "@crossline/db";
 import type { CostSignal } from "@crossline/core";
 import {
   MANUAL_DESIGNER_SKILL, MATERIAL_RESEARCHER_SKILL, MATERIAL_WRITER_SKILL, buildManualContext, createManualbookBuilder, listManualbookFiles, pendingMaterialWorkOrders,
-  pendingTutorials, type ManualbookDeps
+  pendingTutorials, tutorialInputs, type ManualbookDeps
 } from "./manualbook";
 import { scriptedRuntime } from "./testing/fake-runtime";
 
@@ -178,16 +178,35 @@ test("a tutorial is built for committed work without moving it, from its steps a
   expect(materials).toEqual([expect.objectContaining({ docId: "doc1", notes: [expect.objectContaining({ note: "第 1 题要求反相器 VTC" }), expect.anything()] })]);
 });
 
-test("work coming up this week gets a tutorial on the tick once; a failed one waits for the person", () => {
+test("a tutorial is made just in time: only for work starting within two days, again when its inputs change or it is a week old", () => {
+  const now = new Date("2026-10-13T12:00:00.000Z");
+  const hours = (n: number) => new Date(now.getTime() + n * 3_600_000).toISOString();
   store.saveWorkOrder({ id: "hw3", ownerId: "o", workspaceId: WS, identityId: "research", projectId: "p", milestoneId: "", intent: "作业 3", state: "approved", riskTier: "routine",
     estimate: { p25Minutes: 60, p50Minutes: 120, p85Minutes: 240, source: "llm_prior", observationCount: 0, confidence: "low" }, payload: {} });
   store.saveStepPlan(WS, "hw3", { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 1, unit: "题" }, rationale: "", steps: [plannedStep("a", "解题")] }, "o", "t");
-  expect(pendingTutorials(store, WS)).toEqual([]);
-  store.setSetting(WS, "schedule.upcoming", JSON.stringify(["hw3", "w1"]));
-  // w1 is still preparing (material preparation handles it); hw3 is committed with steps.
-  expect(pendingTutorials(store, WS)).toEqual(["hw3"]);
+  expect(pendingTutorials(store, WS, now)).toEqual([]);
+  // Three days out: not yet. w1 is still preparing (material preparation handles it).
+  store.setSetting(WS, "schedule.orderStarts", JSON.stringify({ hw3: hours(72), w1: hours(5) }));
+  expect(pendingTutorials(store, WS, now)).toEqual([]);
+  store.setSetting(WS, "schedule.orderStarts", JSON.stringify({ hw3: hours(30), w1: hours(5) }));
+  expect(pendingTutorials(store, WS, now)).toEqual(["hw3"]);
+  // Built from today's inputs: nothing to do.
+  const built = (key: string, inputs: string) => store.appendEvent({ ownerId: "o", workspaceId: WS, idempotencyKey: key, type: "manualbook.built", entityId: "hw3",
+    payload: { nodes: 1, sources: 0, downloaded: 0, inputs } });
+  built("b1", tutorialInputs(store, WS, "hw3"));
+  expect(pendingTutorials(store, WS, now)).toEqual([]);
+  // The step plan changed: made again.
+  store.saveStepPlan(WS, "hw3", { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 2, unit: "题" }, rationale: "", steps: [plannedStep("a", "解第 1 题"), plannedStep("b", "解第 2 题")] }, "o", "replan");
+  expect(pendingTutorials(store, WS, now)).toEqual(["hw3"]);
+  built("b2", tutorialInputs(store, WS, "hw3"));
+  expect(pendingTutorials(store, WS, now)).toEqual([]);
+  // A week later the same inputs are made again.
+  expect(pendingTutorials(store, WS, new Date(now.getTime() + 8 * 86_400_000 - 30 * 3_600_000 + 3_600_000))).toEqual([]);
+  store.setSetting(WS, "schedule.orderStarts", JSON.stringify({ hw3: new Date(now.getTime() + 8 * 86_400_000 + 3_600_000).toISOString() }));
+  expect(pendingTutorials(store, WS, new Date(now.getTime() + 8 * 86_400_000))).toEqual(["hw3"]);
+  // A failure after the last build waits for the person.
   store.appendEvent({ ownerId: "o", workspaceId: WS, idempotencyKey: "tb", type: "tutorial.blocked", entityId: "hw3", payload: { code: "X", message: "" } });
-  expect(pendingTutorials(store, WS)).toEqual([]);
+  expect(pendingTutorials(store, WS, new Date(now.getTime() + 8 * 86_400_000))).toEqual([]);
 });
 
 test("a page that refuses automated readers (403/429) keeps its link and summary, marked as not checked; one that does not exist is dropped", async () => {
