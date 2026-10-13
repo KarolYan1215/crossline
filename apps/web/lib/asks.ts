@@ -416,6 +416,23 @@ function calendarAsks({ store, ctx }: Source): Ask[] {
     title: sync.sources?.length ? `读不到日历：${sync.sources.join("、")}` : "日历无法读取",
     why: `${clause(sync.message || sync.code)}。在恢复之前，排程照常用最后一次读到的日程；账号登出需要重新登录。`,
     options: [{ id: "settings", label: "去设置看连接", href: "/settings" }] });
+  // Only an approved plan is written to the Crossline calendar. When reality moves under it (a new meeting) the plan becomes a draft,
+  // and every automatic write after that was skipped without a word: the real calendar kept a 4-day-old schedule while the page showed
+  // the new one. Said once there is something on the calendar that has gone stale.
+  const plan = store.listPlanVersions(ctx.workspaceId)[0];
+  let written = 0;
+  try { written = Object.keys(JSON.parse(store.getSetting(ctx.workspaceId, "calendar.published") ?? "{}") as Record<string, unknown>)
+    .filter((key) => key.startsWith("scheduled:")).length; } catch { /* nothing written */ }
+  const pending = plan && plan.status !== "approved" ? store.listPlanChanges(ctx.workspaceId, plan.id).filter((change) => change.status === "pending") : [];
+  if (written && pending.length) {
+    const conflicts = pending.filter((change) => change.kind === "conflict").length;
+    asks.push({ id: `calendar-stale:${plan!.id}`, kind: "calendar_stale", entityId: "calendar", urgency: "soon", raisedAt: new Date().toISOString(),
+      fingerprint: `${plan!.id}:${pending.length}`, title: "Crossline 日历停在旧排期",
+      why: `日历里新增或变动了 ${pending.length} 项日程，计划在本人确认之前不会写入 Crossline 日历；`
+        + `日历上的 ${written} 个工作块仍是上一版，可能与新日程重叠。网页上的排期已经避开新日程。`
+        + (conflicts ? `其中 ${conflicts} 项冲突需先处理，才能确认。` : ""),
+      options: [{ id: "plan", label: "去确认计划差异", href: "/plan", recommended: true }] });
+  }
   return asks;
 }
 

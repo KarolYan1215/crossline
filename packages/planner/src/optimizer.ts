@@ -5,8 +5,46 @@ import { createRequire } from "node:module";
 const loadHighs = createRequire(import.meta.url)("highs") as typeof import("highs").default;
 
 type Slot = { start: number; end: number; energy: "low" | "medium" | "high"; day: string };
-type Choice = { task: number; slot: number; presence: string; minutes?: string; duration: number; maximum: number };
+type Choice = { task: number; slot: number; presence: string; minutes?: string; duration: number; maximum: number; efficiency: number; short: number;
+  /** Longest session in this slot; `rests` counts the rests between sessions when the work here may run past one session. */
+  cap: number; rests?: string };
 const energyRank = { low: 1, medium: 2, high: 3 } as const;
+
+/*
+ * Energy is how much an hour yields, not whether the hour may be used (decided 2026-10-12). It used to be a hard filter: work needing
+ * 「high」 went only into high slots, about three hours a day, so a homework due tomorrow got nothing while those hours went to undated
+ * work. The evidence for time-of-day effects is real but moderate and task-dependent (effort can offset it on reasoning tasks), with no
+ * reliable percentage, so these factors are assumptions to be calibrated against timed work; time-on-task fatigue builds gradually,
+ * so work is done in sessions with a rest between (a long slot holds several), shorter where the slot is short of the energy needed.
+ *   EFFICIENCY[k]: share of an hour's work a slot k levels short of the task's need yields (one short ≈ 1.25×, two short ≈ 1.5× the time).
+ *   SESSION_CAP[k]: longest session there — 90 minutes even in a matching slot (sustained attention declines with time on task; the
+ *   60–90-minute session is the defensible default, not a precise cycle) — and REST_MINUTES between sessions. Work that cannot be
+ *   interrupted stays one block: a real evening once read 19:30–22:58 on one outline without a pause.
+ * One level short is open to all work; two levels short (high work in a low slot) only to work with a deadline: time pressure is the
+ * reason to work tired, and work without one waits for a better hour. Each minute short carries a small cost, so a matching slot is
+ * always taken first, but never one large enough to leave work unplaced rather than placed in a weaker hour.
+ */
+const EFFICIENCY = [1, 0.8, 0.65] as const;
+const SESSION_CAP = [90, 60, 45] as const;
+const REST_MINUTES = 10;
+const SHORT_COST_PER_MINUTE = 0.002;
+const shortfall = (task: PlannerTask, slot: Slot): number => task.energy ? Math.max(0, energyRank[task.energy] - energyRank[slot.energy]) : 0;
+const usable = (task: PlannerTask, short: number): boolean => short <= 1 || (short === 2 && Boolean(task.deadline));
+/** Wall minutes needed in a slot to get `work` minutes done there. */
+const wallMinutes = (work: number, efficiency: number) => Math.ceil(work / efficiency - 1e-9);
+const sessionCap = (task: PlannerTask, short: number) => task.interruptible === false ? Infinity : SESSION_CAP[short]!;
+/** `minutes` of work cut into the fewest sessions of at most `cap`, evenly (185 at 45 is five of 37, not four of 45 and a 5-minute tail). */
+const sessions = (minutes: number, cap: number): number[] => {
+  const count = cap === Infinity ? 1 : Math.max(1, Math.ceil(minutes / cap));
+  const base = Math.floor(minutes / count);
+  return Array.from({ length: count }, (_, index) => base + (index < minutes - base * count ? 1 : 0));
+};
+/** The most work minutes that fit in `room` minutes as sessions of at most `cap` with `rest` between. */
+const fitting = (room: number, cap: number, rest: number): number => {
+  let work = 0;
+  for (let left = room; left > 0; left -= cap + rest) work += Math.min(cap, left);
+  return work;
+};
 const highsReady = loadHighs();
 const MIN_SEGMENT = 15;
 
@@ -55,15 +93,20 @@ function validBlocks(blocks: ScheduleBlock[], slots: Slot[], input: PlanningInpu
     if (!slots.some((slot) => start >= slot.start && end <= slot.end)) return false;
     const task = input.tasks.find((item) => item.id === block.taskId);
     if (!task || (task.deadline && end > Date.parse(task.deadline)) ||
-      (task.energy && !slots.some((slot) => start >= slot.start && end <= slot.end &&
-        energyRank[slot.energy] >= energyRank[task.energy!]))) return false;
+      !slots.some((slot) => start >= slot.start && end <= slot.end && usable(task, shortfall(task, slot)))) return false;
   }
+  const credited = (task: PlannerTask, block: ScheduleBlock) => {
+    const start = Date.parse(block.start), end = Date.parse(block.end);
+    const slot = slots.find((item) => start >= item.start && end <= item.end);
+    return (end - start) / 60_000 * (slot ? EFFICIENCY[shortfall(task, slot)]! : 1);
+  };
   for (const task of input.tasks) {
     const own = sorted.filter((block) => block.taskId === task.id);
     if (!own.length) continue;
+    // Work done, not wall time: a slot short of the energy needed yields less per minute. Whole minutes leave at most one over.
     const expected = own.some((block) => block.progressOnly) ? 45 : durationOf(task);
-    if (own.reduce((sum, block) => sum + (Date.parse(block.end) - Date.parse(block.start)) / 60_000, 0)
-      !== expected) return false;
+    const done = own.reduce((sum, block) => sum + (block.frozen ? 0 : credited(task, block)), 0);
+    if (done < expected - 1e-6 || done > expected + 1 + 1e-6) return false;
     if (task.interruptible === false && own.length !== 1) return false;
     if (task.notBefore && Date.parse(own[0]!.start) < Date.parse(task.notBefore)) return false;
     for (const dependency of task.dependsOn ?? []) {
@@ -105,6 +148,20 @@ function clampContinuousBuffers(input: PlanningInput): { input: PlanningInput; n
   return { input: { ...input, tasks }, notes };
 }
 
+/**
+ * What placing a task is worth, in the solver's objective: urgency first (the deadline tier, lexicographic as before), then importance
+ * inside a tier — the weight moves a task by less than a whole tier, so a heavier task never outranks one in a more urgent tier. Library
+ * work earns nothing of its own.
+ */
+const taskValue = (task: PlannerTask, n: number) => task.floorOnly ? 0
+  : (task.deadline ? n ** 4 : 0) + ((4 - task.deadlineTier) + .9 * (task.weight ?? 50) / 100) * n + (task.inputsReady ? 1 : 0);
+
+/** What a plan is worth by the same measure, less the parts the greedy pass does not attempt (line floors, weekly progress). */
+function worth(result: PlanResult, tasks: PlannerTask[]): number {
+  const placed = new Set(result.plan.blocks.filter((block) => !block.frozen && !block.progressOnly).map((block) => block.taskId));
+  return tasks.reduce((sum, task) => placed.has(task.id) ? sum + taskValue(task, tasks.length + 1) : sum, 0);
+}
+
 function makeResult(input: PlanningInput, tasks: PlannerTask[], slots: Slot[], blocks: ScheduleBlock[],
   solver: PlanResult["solver"]): PlanResult {
   const scheduled = new Set(blocks.filter((block) => !block.progressOnly).map((block) => block.taskId));
@@ -143,41 +200,62 @@ function greedyFallback(input: PlanningInput, tasks: PlannerTask[], slots: Slot[
     if (index < 0) break;
     ordered.push(pending.splice(index, 1)[0]!);
   }
-  for (const task of ordered) {
-    if ((task.dependsOn ?? []).some((id) => tasks.some((item) => item.id === id) &&
-      !blocks.some((block) => block.taskId === id))) continue;
+  // One task at a time, in matching slots first; only when that cannot finish it are slots short of its energy used too.
+  const attempt = (task: PlannerTask, loose: boolean) => {
     const candidate = [...cursors];
     const nextUsed = new Map(dayUsed);
     const staged: ScheduleBlock[] = [];
     let left = durationOf(task);
-    for (let s = 0; s < slots.length && left > 0; s += 1) {
+    for (let s = 0; s < slots.length && left > 1e-9; s += 1) {
       const slot = slots[s]!;
-      if (task.energy && energyRank[slot.energy] < energyRank[task.energy]) continue;
-      const prior = [...blocks, ...staged].at(-1);
+      const short = shortfall(task, slot);
+      if (loose ? !usable(task, short) : short > 0) continue;
+      const efficiency = EFFICIENCY[short]!;
       const dependencyEnd = Math.max(0, ...(task.dependsOn ?? []).flatMap((id) =>
         blocks.filter((block) => block.taskId === id).map((block) => Date.parse(block.end))));
-      const start = Math.max(candidate[s]!, dependencyEnd, task.notBefore ? Date.parse(task.notBefore) : 0,
-        prior ? Date.parse(prior.end) + gap * 60_000 : slot.start);
+      // The slot's own cursor keeps the gap after whatever this slot already holds. It used to be the end of the last block placed
+      // anywhere, in placing order: once one task landed on Friday, every later task could only start after it, and the whole week
+      // before stood empty while twenty steps were reported as having no room.
+      // What it must keep the gap from is the block just before it in time — across the boundary of an adjacent window too.
+      const earliest = Math.max(candidate[s]!, dependencyEnd, task.notBefore ? Date.parse(task.notBefore) : 0);
+      const start = Math.max(earliest, ...[...blocks, ...staged].filter((block) => !block.frozen && Date.parse(block.end) <= earliest
+        && Date.parse(block.end) > earliest - gap * 60_000).map((block) => Date.parse(block.end) + gap * 60_000));
       const until = Math.min(slot.end, task.deadline ? Date.parse(task.deadline) : Infinity);
       const remainingCap = share >= 1 ? Infinity
         : Math.floor((dayCapacity.get(slot.day) ?? 0) * share) - (nextUsed.get(slot.day) ?? 0);
+      const need = wallMinutes(left, efficiency);
+      const cap = sessionCap(task, short);
       const focusCap = task.interruptible !== false && params.focusCapMinutes ? params.focusCapMinutes : Infinity;
-      const minutes = Math.min(left, Math.floor((until - start) / 60_000), remainingCap, focusCap);
-      if (minutes < (task.interruptible === false ? left : Math.min(left, MIN_SEGMENT))) continue;
-      staged.push({ taskId: task.id, start: new Date(start).toISOString(),
-        end: new Date(start + minutes * 60_000).toISOString() });
-      candidate[s] = start + (minutes + gap) * 60_000;
+      const rest = Math.max(REST_MINUTES, gap);
+      const minutes = Math.min(need, fitting(Math.floor((until - start) / 60_000), cap, rest), remainingCap, focusCap);
+      if (minutes < (task.interruptible === false ? need : Math.min(need, MIN_SEGMENT))) continue;
+      let at = start;
+      for (const length of sessions(minutes, cap)) {
+        if (at > start) at += rest * 60_000;
+        staged.push({ taskId: task.id, start: new Date(at).toISOString(),
+          end: new Date(at + length * 60_000).toISOString(), ...(efficiency < 1 ? { efficiency } : {}) });
+        at += length * 60_000;
+      }
+      candidate[s] = at + gap * 60_000;
       nextUsed.set(slot.day, (nextUsed.get(slot.day) ?? 0) + minutes);
-      left -= minutes;
+      left -= minutes * efficiency;
       if (task.interruptible === false) break;
     }
-    if (left === 0) { blocks.push(...staged); cursors.splice(0, cursors.length, ...candidate);
-      dayUsed.clear(); for (const [day, minutes] of nextUsed) dayUsed.set(day, minutes); }
+    return left <= 1e-9 ? { staged, candidate, nextUsed } : undefined;
+  };
+  for (const task of ordered) {
+    if ((task.dependsOn ?? []).some((id) => tasks.some((item) => item.id === id) &&
+      !blocks.some((block) => block.taskId === id))) continue;
+    const placed = attempt(task, false) ?? attempt(task, true);
+    if (!placed) continue;
+    blocks.push(...placed.staged);
+    cursors.splice(0, cursors.length, ...placed.candidate);
+    dayUsed.clear(); for (const [day, minutes] of placed.nextUsed) dayUsed.set(day, minutes);
   }
   return makeResult(input, tasks, slots, blocks, "fallback");
 }
 
-async function optimize(input: PlanningInput, emergency = false): Promise<PlanResult> {
+async function optimize(input: PlanningInput, emergency = false, trySolver = true): Promise<PlanResult> {
   const frozenIds = new Set(input.frozenBlocks.map((block) => block.taskId));
   const tasks = input.tasks.filter((task) => !frozenIds.has(task.id));
   const slots = freeSlots(input);
@@ -186,10 +264,12 @@ async function optimize(input: PlanningInput, emergency = false): Promise<PlanRe
   // correct plan read as broken. Tasks with no free time at all is a third, different situation.
   if (!tasks.length) return { ...greedyFallback(input, tasks, slots, emergency), solver: "empty" };
   if (!slots.length) return { ...greedyFallback(input, tasks, slots, emergency), solver: "no_capacity" };
+  if (!trySolver) return greedyFallback(input, tasks, slots, emergency);
 
   const params = paramsFor(input);
   const gap = emergency ? 0 : params.gapMinutes;
   const share = emergency ? 1 : params.maxDailyShare;
+  const rest = Math.max(REST_MINUTES, gap);
   const choices: Choice[] = [];
   const rows: string[] = [];
   const binary = tasks.map((_, i) => `a${i}`);
@@ -210,28 +290,47 @@ async function optimize(input: PlanningInput, emergency = false): Promise<PlanRe
       if (slot.start < frozenDependencyEnd) continue;
       // Waiting for something to arrive: a slot that opens before the release date is not offered at all.
       if (task.notBefore && slot.start < Date.parse(task.notBefore)) continue;
-      if (task.energy && energyRank[slot.energy] < energyRank[task.energy]) continue;
+      const short = shortfall(task, slot);
+      if (!usable(task, short)) continue;
+      const efficiency = EFFICIENCY[short]!;
+      // Wall minutes the whole task would take here.
+      const wall = wallMinutes(duration, efficiency);
       const end = Math.min(slot.end, task.deadline ? Date.parse(task.deadline) : Infinity);
-      // The focus cap: one task gets at most this long in a slot, and the rest goes to another slot.
-      const maximum = Math.min(Math.floor((end - slot.start) / 60_000), split && params.focusCapMinutes ? params.focusCapMinutes : Infinity);
-      if (maximum < (split ? Math.min(duration, MIN_SEGMENT) : duration)) continue;
+      // Short sessions with rests where the slot is short of the energy needed, and the focus cap: one task gets at most that long in a
+      // slot and the rest goes to another.
+      const cap = sessionCap(task, short);
+      const maximum = Math.min(fitting(Math.floor((end - slot.start) / 60_000), cap, rest), split && params.focusCapMinutes ? params.focusCapMinutes : Infinity);
+      if (maximum < (split ? Math.min(wall, MIN_SEGMENT) : wall)) continue;
       const presence = `x${i}_${s}`;
       binary.push(presence);
       if (split) {
         const minutes = `m${i}_${s}`;
-        choices.push({ task: i, slot: s, presence, minutes, duration, maximum: Math.min(duration, maximum) });
+        // More than one session may be needed here: k rests, at least minutes/cap − 1, each taking `rest` minutes of the slot.
+        const rests = Math.min(wall, maximum) > cap ? `k${i}_${s}` : undefined;
+        choices.push({ task: i, slot: s, presence, minutes, duration, maximum: Math.min(wall, maximum), efficiency, short, cap, ...(rests ? { rests } : {}) });
         general.push(minutes);
-        bounds.push(`0 <= ${minutes} <= ${Math.min(duration, maximum)}`);
-        rows.push(`link_hi_${i}_${s}: ${minutes} - ${Math.min(duration, maximum)} ${presence} <= 0`);
-        rows.push(`link_lo_${i}_${s}: ${minutes} - ${Math.min(duration, MIN_SEGMENT)} ${presence} >= 0`);
-      } else choices.push({ task: i, slot: s, presence, duration, maximum });
+        if (rests) {
+          general.push(rests);
+          bounds.push(`0 <= ${rests} <= ${Math.ceil(Math.min(wall, maximum) / cap) - 1}`);
+          rows.push(`rests_${i}_${s}: ${cap} ${rests} - ${minutes} >= -${cap}`);
+        }
+        bounds.push(`0 <= ${minutes} <= ${Math.min(wall, maximum)}`);
+        rows.push(`link_hi_${i}_${s}: ${minutes} - ${Math.min(wall, maximum)} ${presence} <= 0`);
+        rows.push(`link_lo_${i}_${s}: ${minutes} - ${Math.min(wall, MIN_SEGMENT)} ${presence} >= 0`);
+      } else choices.push({ task: i, slot: s, presence, duration: wall, maximum, efficiency, short, cap });
     }
     const own = choices.filter((choice) => choice.task === i);
-    rows.push(`assign_${i}: ${expression([
-      ...own.map((choice): [number, string] => [1, choice.minutes ?? choice.presence]),
+    // Work done, weighted by each slot's efficiency; whole minutes in a weaker slot can overshoot by under one, so the row is a band.
+    const done = expression([
+      ...own.map((choice): [number, string] => [split ? choice.efficiency : 1, choice.minutes ?? choice.presence]),
       [-(split ? duration : 1), `a${i}`],
       ...(progress[i] ? [[-45, progress[i]!] as [number, string]] : [])
-    ])} = 0`);
+    ]);
+    // A task every one of whose slots yields a full hour keeps the exact row it always had (and so the solver's same answer).
+    if (split && own.some((choice) => choice.efficiency < 1)) {
+      rows.push(`assign_${i}: ${done} >= 0`);
+      rows.push(`assign_cap_${i}: ${done} <= 1`);
+    } else rows.push(`assign_${i}: ${done} = 0`);
     if (progress[i]) rows.push(`progress_or_complete_${i}: a${i} + ${progress[i]} <= 1`);
   }
 
@@ -258,8 +357,9 @@ async function optimize(input: PlanningInput, emergency = false): Promise<PlanRe
   for (const [s, slot] of slots.entries()) {
     const own = choices.filter((choice) => choice.slot === s);
     if (!own.length) continue;
+    // Work in several sessions also takes the rests between them.
     const terms: Array<[number, string]> = own.flatMap((choice) => choice.minutes
-      ? [[1, choice.minutes] as [number, string], [gap, choice.presence] as [number, string]]
+      ? [[1, choice.minutes] as [number, string], [gap, choice.presence] as [number, string], ...(choice.rests ? [[rest, choice.rests] as [number, string]] : [])]
       : [[choice.duration + gap, choice.presence] as [number, string]]);
     rows.push(`slot_${s}: ${expression(terms)} <= ${Math.floor((slot.end - slot.start) / 60_000) + gap}`);
   }
@@ -288,11 +388,7 @@ async function optimize(input: PlanningInput, emergency = false): Promise<PlanRe
   }
 
   const n = tasks.length + 1;
-  // Urgency first (the deadline tier, lexicographic as before), then importance inside a tier: the weight moves a task by less than a
-  // whole tier, so a heavier task never outranks one in a more urgent tier. Library work earns nothing of its own.
-  const objective: Array<[number, string]> = tasks.map((task, i) => [task.floorOnly ? 0
-    : (task.deadline ? n ** 4 : 0) + ((4 - task.deadlineTier) + .9 * (task.weight ?? 50) / 100) * n + (task.inputsReady ? 1 : 0), `a${i}`
-  ]);
+  const objective: Array<[number, string]> = tasks.map((task, i) => [taskValue(task, n), `a${i}`]);
   for (const name of weeklyNames) objective.push([n * n, name]);
   // Line floors: `f` counts a line's minutes in the next seven days up to its share, and a whole floor is worth n² — as much as keeping
   // one milestone moving this week, far below any deadline (n⁴).
@@ -308,10 +404,15 @@ async function optimize(input: PlanningInput, emergency = false): Promise<PlanRe
     objective.push([n * n / floor, `f${k}`]);
   }
   if (share < 1) objective.push([-.1, "peak"]);
-  for (const choice of choices) objective.push([
-    (input.currentEnergy && choice.slot === currentSlot &&
-      tasks[choice.task]!.energy === input.currentEnergy ? .01 : 0)
-    - (params.gapMinutes === 0 && params.maxDailyShare >= 1 ? .0001 * choice.slot / slots.length : .00001), choice.presence]);
+  for (const choice of choices) {
+    objective.push([
+      (input.currentEnergy && choice.slot === currentSlot &&
+        tasks[choice.task]!.energy === input.currentEnergy ? .01 : 0)
+      - (params.gapMinutes === 0 && params.maxDailyShare >= 1 ? .0001 * choice.slot / slots.length : .00001)
+      - (choice.minutes ? 0 : SHORT_COST_PER_MINUTE * choice.short * choice.duration), choice.presence]);
+    // A minute short of the energy needed costs a little, so a matching hour is taken first; never more than placing the work is worth.
+    if (choice.minutes && choice.short) objective.push([-SHORT_COST_PER_MINUTE * choice.short, choice.minutes]);
+  }
   const model = ["Maximize", `score: ${expression(objective)}`, "Subject To", ...rows,
     "Bounds", ...bounds, "Binaries", ...binary, ...(general.length ? ["Generals", ...general] : []), "End"].join("\n");
 
@@ -341,19 +442,32 @@ async function optimize(input: PlanningInput, emergency = false): Promise<PlanRe
         // long on one run and 26 on the next; a half is rounded up, noise or not.
         const minutes = choice.minutes ? Math.round(valueOf(columns, choice.minutes) + 1e-6) : choice.duration;
         if (minutes <= 0) continue;
-        const end = cursor + minutes * 60_000;
-        blocks.push({ taskId: tasks[choice.task]!.id, start: new Date(cursor).toISOString(),
-          end: new Date(end).toISOString(),
-          ...(progress[choice.task] && valueOf(columns, progress[choice.task]!) > .5
-            ? { progressOnly: true } : {}) });
-        cursor = end + gap * 60_000;
+        const progressOnly = Boolean(progress[choice.task] && valueOf(columns, progress[choice.task]!) > .5);
+        sessions(minutes, choice.cap).forEach((length, index) => {
+          if (index) cursor += rest * 60_000;
+          blocks.push({ taskId: tasks[choice.task]!.id, start: new Date(cursor).toISOString(),
+            end: new Date(cursor + length * 60_000).toISOString(), ...(choice.efficiency < 1 ? { efficiency: choice.efficiency } : {}),
+            ...(progressOnly ? { progressOnly: true } : {}) });
+          cursor += length * 60_000;
+        });
+        cursor += gap * 60_000;
       }
     }
     if (!validBlocks(blocks, slots, input, gap)) return greedyFallback(input, tasks, slots, emergency);
-    return makeResult(input, tasks, slots, blocks, result.Status === "Optimal" ? "optimal" : "feasible_time_limit");
+    const solved = makeResult(input, tasks, slots, blocks, result.Status === "Optimal" ? "optimal" : "feasible_time_limit");
+    if (result.Status === "Optimal") return solved;
+    // Out of time, the solver hands back whatever it had, which can be far worse than the greedy pass: on the real account it gave the
+    // afternoon to line-share filler and left the homework due that night unplaced. The two are compared on the solver's own terms.
+    const greedy = greedyFallback(input, tasks, slots, emergency);
+    return worth(greedy, tasks) > worth(solved, tasks) ? greedy : solved;
   } catch {
     return greedyFallback(input, tasks, slots, emergency);
   }
+}
+
+/** The greedy pass alone, as used when the solver gives no usable answer; exported so its rules can be tested directly. */
+export function fallbackSchedule(input: PlanningInput): PlanResult {
+  return greedyFallback(input, input.tasks, freeSlots(input));
 }
 
 export async function planSchedule(original: PlanningInput): Promise<PlanResult> {
@@ -396,16 +510,29 @@ async function schedule(input: PlanningInput): Promise<PlanResult> {
   }) } : eligible;
   const first = await optimize(buffered);
   let result = first;
-  // The relaxed run also lets work with a deadline take a slot one energy level lower (high work in a medium slot): a tired hour
-  // beats a missed deadline. Every step of a homework inherits the task's 「high」, and a day has three high hours, so a homework due
-  // tomorrow got nothing at all while those hours went to work with no deadline.
-  const lower = { high: "medium", medium: "low", low: "low" } as const;
-  const energyRelaxed = { ...eligible, tasks: eligible.tasks.map((task) => task.deadline && task.energy ? { ...task, energy: lower[task.energy] } : task) };
-  const relaxable = params.gapMinutes > 0 || params.maxDailyShare < 1 || params.deadlineBufferDays > 0
-    || eligible.tasks.some((task) => task.deadline && task.energy && task.energy !== "low");
+  const relaxable = params.gapMinutes > 0 || params.maxDailyShare < 1 || params.deadlineBufferDays > 0;
   if (relaxable && first.blockers.some((blocker) => eligible.tasks.some((task) =>
     task.id === blocker.taskId && task.deadline))) {
-    const relaxed = await optimize(energyRelaxed, true);
+    // The relaxation is for the work with a deadline only (and what it waits on): that is placed first without the gap and the daily
+    // share, then everything else is placed around it on the person's own packing rules. Relaxing the whole plan packed a day from
+    // 09:00 to 22:50 without a break with undated work, because one homework needed the room.
+    // Unless the solver finished this model in time, both passes are the greedy pass: the same model again would spend another two
+    // seconds of every page load and run out of time all the same (105 tasks, ~9,500 rows on the real account).
+    const urgent = new Set(eligible.tasks.filter((task) => task.deadline).map((task) => task.id));
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const task of eligible.tasks) if (urgent.has(task.id)) for (const id of task.dependsOn ?? [])
+        if (!urgent.has(id) && eligible.tasks.some((item) => item.id === id)) { urgent.add(id); grew = true; }
+    }
+    const solverFits = first.solver === "optimal";
+    const pressed = await optimize({ ...eligible, tasks: eligible.tasks.filter((task) => urgent.has(task.id)) }, true, solverFits);
+    const placedFirst = pressed.plan.blocks.filter((block) => !block.frozen);
+    const around = await optimize({ ...buffered, tasks: buffered.tasks.filter((task) => !urgent.has(task.id)),
+      frozenBlocks: [...eligible.frozenBlocks, ...placedFirst.map(({ taskId, start, end }) => ({ taskId, start, end }))] }, false, solverFits);
+    const blocks = [...eligible.frozenBlocks.map((block) => ({ ...block, frozen: true })), ...placedFirst,
+      ...around.plan.blocks.filter((block) => !block.frozen)].sort((x, y) => Date.parse(x.start) - Date.parse(y.start));
+    const blockers = [...pressed.blockers, ...around.blockers];
+    const relaxed: PlanResult = { status: statusFor(blocks, blockers, eligible.frozenBlocks.length), plan: { blocks }, blockers, solver: pressed.solver };
     const hardPlaced = (value: PlanResult) => eligible.tasks.filter((task) => task.deadline &&
       value.plan.blocks.some((block) => block.taskId === task.id)).length;
     if (hardPlaced(relaxed) > hardPlaced(first)) result = { ...relaxed, bufferRelaxed: true };

@@ -1,5 +1,5 @@
-import { expect, test } from "vitest";
-import { DATE_EXTRACTION_SCHEMA, expandRecurring, quoteSupportsDate, sanitizeDateExtraction, validateDateExtraction, type DateExtraction } from "./date-schema";
+import { describe, expect, test } from "vitest";
+import { DATE_EXTRACTION_SCHEMA, expandRecurring, mergeDateExtractions, withoutOffHours, quoteSupportsDate, sanitizeDateExtraction, validateDateExtraction, type DateExtraction } from "./date-schema";
 
 const known = {
   today: "2026-10-02",
@@ -149,4 +149,22 @@ test("a date already past is history, not a plan: kept apart, never offered for 
   const { extraction } = sanitizeDateExtraction(out({ dates: [item(), past] }), known);
   expect(extraction.dates.map((entry) => entry.id)).toEqual(["d1"]);
   expect(extraction.past?.map((entry) => entry.id)).toEqual(["d0"]);
+});
+
+describe("batches and arrangements", () => {
+  const recurring = (over: object) => ({ id: "r", title: "", project: "", weekdays: [1], startTime: "12:00", endTime: "13:00", from: "2026-10-01", to: "2026-12-31",
+    exceptions: [], location: "", sourceRef: "reply-1", quote: "", confidence: "medium" as const, ...over });
+  test("a later batch adds to an unanswered one, the same id taking the newer item", () => {
+    const date = (id: string, title: string) => ({ id, date: "2026-10-27", startTime: "", endTime: "", kind: "exam" as const, title, project: "", sourceRef: "src-1", quote: "", confidence: "high" as const, note: "" });
+    const merged = mergeDateExtractions([{ dates: [date("a", "期中 1"), date("b", "旧")], recurring: [], questions: ["哪门课？"] }],
+      { dates: [date("b", "新")], recurring: [], questions: ["哪门课？", "几点？"] });
+    expect(merged.dates.map((item) => `${item.id}:${item.title}`)).toEqual(["a:期中 1", "b:新"]);
+    expect(merged.questions).toEqual(["哪门课？", "几点？"]);
+  });
+  test("meals outside the working hours are left out; a course's class is kept wherever it falls", () => {
+    const windows = [{ days: [1], start: "09:00", end: "12:00" }, { days: [1], start: "14:00", end: "18:00" }];
+    const kept = withoutOffHours([recurring({ id: "lunch", title: "午饭", project: "个人安排" }), recurring({ id: "class", title: "上课", project: "ECE 555", startTime: "19:00", endTime: "20:00" }),
+      recurring({ id: "group", title: "组会", startTime: "10:00", endTime: "11:00" })], windows, [{ id: "ece555", name: "ECE 555" }]);
+    expect(kept.map((item) => item.id)).toEqual(["class", "group"]);
+  });
 });

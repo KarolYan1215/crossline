@@ -77,7 +77,9 @@ export type PlanningInput = {
 };
 
 export type ScheduleBlock = { taskId: string; start: string; end: string;
-  frozen?: boolean; progressOnly?: boolean };
+  frozen?: boolean; progressOnly?: boolean;
+  /** Set when the slot is short of the energy the task needs: the share of an hour's work it yields, so the block runs that much longer. */
+  efficiency?: number };
 
 export type PlanBlocker = { code: string; taskId: string; message: string };
 export type PlanResult = {

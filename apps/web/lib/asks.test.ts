@@ -286,3 +286,20 @@ test("background work the worker paused is told to the person, with where to loo
   store.setSetting(ws, "background.blocker", "");
   expect(collectAsks(TEST_CTX, NOW).some((ask) => ask.kind === "background_paused")).toBe(false);
 });
+
+test("a draft plan with calendar changes waiting says that the Crossline calendar is still on the last approved schedule", () => {
+  const store = setup();
+  store.savePlanVersion({ id: "plan-v2", ownerId: owner, workspaceId: ws, version: 2, status: "draft", payload: { blocks: [] } });
+  const { eventId } = store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: "sync-1", type: "calendar.synced", entityId: "plan-v2", payload: {} });
+  store.savePlanChange({ id: "c1", ownerId: owner, workspaceId: ws, planVersionId: "plan-v2", kind: "add", triggerEventId: eventId,
+    explanation: "日历新增「Sync up」10/13 11:30–12:30", status: "pending" });
+  // Nothing written yet: nothing has gone stale, so nothing to say.
+  expect(collectAsks(TEST_CTX, NOW).some((ask) => ask.kind === "calendar_stale")).toBe(false);
+  store.setSetting(ws, "calendar.published", JSON.stringify({ "scheduled:hw3:v1s2": { eventId: "e1", hash: "h", reminder: 10 } }));
+  const ask = collectAsks(TEST_CTX, NOW).find((item) => item.kind === "calendar_stale");
+  expect(ask).toMatchObject({ title: "Crossline 日历停在旧排期", options: [{ href: "/plan", recommended: true }] });
+  expect(ask!.why).toContain("1 项日程");
+  // Approved, it is written again and the question goes away by itself.
+  store.savePlanVersion({ id: "plan-v2", ownerId: owner, workspaceId: ws, version: 2, status: "approved", payload: { blocks: [] } });
+  expect(collectAsks(TEST_CTX, NOW).some((item) => item.kind === "calendar_stale")).toBe(false);
+});

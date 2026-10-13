@@ -166,6 +166,30 @@ test("a turn with no dates writes no batch, and a newer batch retires one nobody
   const retired = store.listEvents(workspaceId, { type: "dates.decided" });
   expect(retired).toHaveLength(1);
   expect(retired[0]!.payload).toMatchObject({ superseded: true });
+  // A later turn adds to the batch nobody answered; it does not throw the earlier dates away.
+  const latest = store.listEvents(workspaceId, { type: "dates.extracted" }).at(-1)!.payload as { dates: Array<{ id: string }> };
+  expect(latest.dates.map((item) => item.id).sort()).toEqual(["d1", "d9"]);
+});
+
+test("a re-read of the files replaces the unanswered batch; meals outside the stated hours never become a batch", async () => {
+  store.saveSourceDocument({ id: "doc-1", ownerId: "o", workspaceId, kind: "docx", fileName: "Lecture Plan.docx", mediaType: "x", sha256: "1", uri: "file:///1",
+    extractedText: "Week-8: 27th Oct.\nL15: Mid-term-1", extractionStatus: "done", createdAt: "2026-10-02T00:00:00.000Z" });
+  const empty = { dates: [], recurring: [], questions: [] };
+  const meal = { id: "lunch", title: "午饭", project: "个人安排", weekdays: [0, 1, 2, 3, 4, 5, 6], startTime: "12:00", endTime: "14:00", from: "2026-10-12",
+    to: "2026-12-31", exceptions: [], location: "", sourceRef: "reply-3", quote: "12–14 点午饭", confidence: "medium" };
+  const hours = { windows: [{ days: [0, 1, 2, 3, 4, 5, 6], start: "09:00", end: "12:00", energy: "high" }, { days: [0, 1, 2, 3, 4, 5, 6], start: "14:00", end: "18:00", energy: "medium" }], why: "本人所述" };
+  const { rpc } = fakeRuntime([withDates({ ...empty, dates: [dateItem()] }),
+    turn({ fileDates: { ...empty, recurring: [meal] }, availability: hours, questions: [], nextAction: "ready_for_milestones" }),
+    withDates({ ...empty, dates: [dateItem({ id: "d9" })] })]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc, { checklist: false });
+  await run({ sessionId: "s1", text: "我添加了文件" });
+  // The meals are what the hours already leave out: no batch, and the course's date still waits for an answer.
+  await run({ sessionId: "s1", text: "上午 9–12 点效率最高，12–14 点午饭" });
+  expect(store.listEvents(workspaceId, { type: "dates.extracted" })).toHaveLength(1);
+  expect(store.getSetting(workspaceId, "schedule.availability.proposed")).toContain("09:00");
+  await run({ sessionId: "s1", text: "请重新读一遍日期", reread: true });
+  const latest = store.listEvents(workspaceId, { type: "dates.extracted" }).at(-1)!.payload as { dates: Array<{ id: string }> };
+  expect(latest.dates.map((item) => item.id)).toEqual(["d9"]);
 });
 
 const course = turn({

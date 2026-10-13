@@ -235,3 +235,30 @@ export function expandRecurring(meeting: Pick<RecurringMeeting, "weekdays" | "fr
   }
   return days;
 }
+
+/**
+ * A new batch beside ones nobody has answered yet. A re-read of the files replaces them; any other turn only adds to them (the same id
+ * takes the newer item). Every turn used to replace them: a turn that heard 「12–14 点午饭」 threw away an unanswered batch of a course's
+ * dates, both midterms among them, and put the two meals in its place.
+ */
+export function mergeDateExtractions(earlier: DateExtraction[], next: DateExtraction): DateExtraction {
+  const byId = <T extends { id: string }>(lists: T[][]): T[] => [...new Map(lists.flat().map((item) => [item.id, item])).values()];
+  const all = [...earlier, next];
+  return { dates: byId(all.map((batch) => batch.dates)), recurring: byId(all.map((batch) => batch.recurring)),
+    questions: [...new Set(all.flatMap((batch) => batch.questions))], undated: byId(all.map((batch) => batch.undated ?? [])),
+    past: [...new Map(all.flatMap((batch) => batch.past ?? []).map((item) => [item.id, item])).values()] };
+}
+
+/**
+ * Weekly arrangements that fall wholly outside the hours the person works and belong to no project — meals, sleep — say nothing the
+ * available hours do not already say. Kept out of the batch, they are not offered for confirmation or for the calendar. A course's
+ * class is kept even outside those hours: it is still an arrangement the person may want on the calendar.
+ */
+export function withoutOffHours(recurring: RecurringMeeting[], windows: Array<{ days: number[]; start: string; end: string }>,
+  projects: Array<{ id: string; name: string }>): RecurringMeeting[] {
+  const belongs = (item: RecurringMeeting) => Boolean(item.project) && projects.some((project) =>
+    item.project === project.id || item.project === project.name || item.project.includes(project.name));
+  const overlaps = (item: RecurringMeeting) => item.weekdays.some((day) => windows.some((window) =>
+    window.days.includes(day) && window.start < item.endTime && window.end > item.startTime));
+  return recurring.filter((item) => belongs(item) || overlaps(item));
+}

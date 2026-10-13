@@ -789,8 +789,9 @@ async function scheduledBlocks(ctx: AccessContext, today: string, committed: Per
     const blockDay = formatInTimeZone(new Date(block.start), zone, "yyyy-MM-dd");
     const needsRestCheck = currentEnergy === "low" && blockDay === today &&
       energyNeeds.get(block.taskId.split("#")[0]!) === "high" && Date.parse(block.start) > now.getTime();
-    const tag = block.progressOnly ? "本周未排完" : needsRestCheck ? "休息后复评" : library.has(block.taskId.split("#")[0]!) ? "按主线份额"
-      : tentative(block.taskId) ? "暂定" : undefined;
+    // 「精力偏低」: the slot has less energy than the work needs, so the block runs longer than the estimate (planner `efficiency`).
+    const tag = block.progressOnly ? "本周未排完" : needsRestCheck ? "休息后复评" : block.efficiency ? "精力偏低"
+      : library.has(block.taskId.split("#")[0]!) ? "按主线份额" : tentative(block.taskId) ? "暂定" : undefined;
     return {
     id: scheduledBlockId(block.taskId, index),
     lane: "human" as const,

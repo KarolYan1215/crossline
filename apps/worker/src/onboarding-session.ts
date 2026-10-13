@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import {
   AGENT_HISTORY_SUMMARY, agentHistoryLines, type AgentHistorySummary,
   EMPTY_PROFILE_MODEL, GOAL_EDITS_SETTING, ONBOARDING_TURN_SCHEMA, duplicateAttributes, type PendingGoalEdit, type StoredLineProfile, PROFILE_CONFIRMED, portraitFingerprint, answeredGapFacts, keepOnboardingTurn, mergeFacts, sanitizeDateExtraction, validateOnboardingTurn,
-  gapCoveredBy, type ProfileGap, type ProfileModel, type OnboardingStage,
+  gapCoveredBy, mergeDateExtractions, withoutOffHours, resolveAvailability, AVAILABILITY_SETTING, AVAILABILITY_PROPOSED_SETTING, type DateExtraction,
+  type ProfileGap, type ProfileModel, type OnboardingStage,
   type KnownSources, type OnboardingTurn, type OnboardingTurnContext
 } from "@crossline/core";
 import { continueSkillTurn, runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
@@ -164,20 +165,36 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
    * Each is checked against the file's own text; what cannot be verified is dropped and counted, and a newer batch
    * retires an older one nobody answered, so re-reading the files never leaves two batches asking about the same dates.
    */
-  function persistFileDates(turn: OnboardingTurn, ownerId: string, documentIds: string[], sources: Record<string, string>, today: string): void {
+  function persistFileDates(turn: OnboardingTurn, ownerId: string, documentIds: string[], sources: Record<string, string>, today: string,
+    reread: boolean): void {
     const read = turn.fileDates;
     if (!read || (!read.dates.length && !read.recurring.length && !read.questions.length && !(read.undated ?? []).length)) return;
     let checked;
     try { checked = sanitizeDateExtraction({ dates: read.dates, recurring: read.recurring, questions: read.questions, undated: read.undated ?? [] }, { sources, today }); }
     catch { return; /* nothing it read could be verified: no batch, and the interview itself is not failed over it */ }
+    // Meals and sleep are what the available hours already leave out: only filtered against hours the person stated (this turn's, the
+    // interview's earlier proposal, or what they painted), never against the generic default.
+    const stated = turn.availability?.windows.length ? turn.availability.windows : (() => {
+      const resolved = resolveAvailability({ saved: store.getSetting(workspaceId, AVAILABILITY_SETTING),
+        proposed: store.getSetting(workspaceId, AVAILABILITY_PROPOSED_SETTING), facts: [] });
+      return resolved.source === "saved" || resolved.source === "interview" ? resolved.windows : undefined;
+    })();
+    const fresh = { ...checked.extraction, recurring: stated ? withoutOffHours(checked.extraction.recurring, stated,
+      store.listProjects(workspaceId, { includeArchived: true })) : checked.extraction.recurring };
+    if (!fresh.dates.length && !fresh.recurring.length && !fresh.questions.length && !(fresh.undated ?? []).length) return;
     const answered = new Set(store.listEvents(workspaceId, { type: "dates.decided" }).map((event) => event.entityId));
+    const open = store.listEvents(workspaceId, { type: "dates.extracted" }).filter((event) => !answered.has(event.entityId));
+    // A re-read replaces what nobody answered; any other turn adds to it, so an earlier batch's dates are never lost to a later turn.
+    const carried = reread ? [] : open.map((event) => event.payload as unknown as DateExtraction & { documentIds?: string[] });
+    const merged = mergeDateExtractions(carried, fresh);
     const batchId = randomUUID();
-    for (const old of store.listEvents(workspaceId, { type: "dates.extracted" }).map((event) => event.entityId).filter((id) => !answered.has(id))) {
+    for (const old of open.map((event) => event.entityId)) {
       store.appendEvent({ ownerId, workspaceId, idempotencyKey: `dates:superseded:${old}`, type: "dates.decided", entityId: old,
-        payload: { superseded: true, by: batchId, included: [], excluded: [], blocks: 0 } });
+        payload: { superseded: true, by: batchId, merged: !reread, included: [], excluded: [], blocks: 0 } });
     }
     store.appendEvent({ ownerId, workspaceId, idempotencyKey: `dates:extracted:${batchId}`, type: "dates.extracted", entityId: batchId,
-      payload: { documentIds, dates: checked.extraction.dates, recurring: checked.extraction.recurring, questions: checked.extraction.questions, undated: checked.extraction.undated ?? [], past: checked.extraction.past ?? [], dropped: checked.dropped } });
+      payload: { documentIds: [...new Set([...carried.flatMap((batch) => batch.documentIds ?? []), ...documentIds])], dates: merged.dates,
+        recurring: merged.recurring, questions: merged.questions, undated: merged.undated ?? [], past: merged.past ?? [], dropped: checked.dropped } });
   }
 
   return async function turn(input: { sessionId: string; text: string; reread?: boolean }): Promise<OnboardingTurnOutcome> {
@@ -293,7 +310,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
 
     persistTurn(result.output, sessionId, ownerId);
     // A fixed weekly arrangement the person said (「每周二四上午组会」) is quoted from their reply, so replies count as sources here too.
-    persistFileDates(result.output, ownerId, sent.map(([, doc]) => doc.id), { ...known.sources, ...known.replies }, today);
+    persistFileDates(result.output, ownerId, sent.map(([, doc]) => doc.id), { ...known.sources, ...known.replies }, today, input.reread === true);
     const output = withChecklist(withGapQuestions(result.output, currentGaps(), messages, { freshDocuments: sent.map(([, doc]) => doc.id) }),
       focusLine || options.checklist === false ? [] : openChecklist());
     store.appendOnboardingMessage({ sessionId, workspaceId, role: "assistant", content: output, createdAt: new Date().toISOString() });

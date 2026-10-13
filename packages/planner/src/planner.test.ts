@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { planSchedule, recommendNextActions } from "./index";
+import { fallbackSchedule } from "./optimizer";
 
 const start = new Date("2026-09-14T14:00:00.000Z");
 
@@ -91,21 +92,104 @@ describe("energy-aware planning", () => {
     expect(result.plan.blocks[0]?.taskId).toBe("due");
   });
 
-  test("work due soon takes a medium-energy hour rather than missing its deadline; work without one does not", async () => {
-    const estimate = { p25Minutes: 90, p50Minutes: 90, p85Minutes: 90, confidence: "high" as const };
-    const result = await planSchedule({ now: start, horizonDays: 1, mode: "asap", tasks: [
-      { id: "due", title: "明天截止的作业", estimate, inputsReady: true, deadlineTier: 1, energy: "high", deadline: "2026-09-14T19:00:00.000Z" },
-      { id: "open", title: "没有截止的研究", estimate: { ...estimate, p50Minutes: 60, p85Minutes: 60 }, inputsReady: true, deadlineTier: 3, energy: "high" }
-    ], availability: [
-      { start: "2026-09-14T14:00:00.000Z", end: "2026-09-14T15:00:00.000Z", energy: "high" },
-      { start: "2026-09-14T16:00:00.000Z", end: "2026-09-14T18:00:00.000Z", energy: "medium" }
-    ], frozenBlocks: [] });
-    const minutes = (id: string) => result.plan.blocks.filter((block) => block.taskId === id)
-      .reduce((sum, block) => sum + (Date.parse(block.end) - Date.parse(block.start)) / 60_000, 0);
-    expect(minutes("due")).toBe(90);
+  describe("energy is how much an hour yields, not whether it may be used", () => {
+    const at = (time: string) => `2026-09-14T${time}:00.000Z`;
+    const exact = (minutes: number) => ({ p25Minutes: minutes, p50Minutes: minutes, p85Minutes: minutes, confidence: "high" as const });
+    const minutesOf = (block: { start: string; end: string }) => (Date.parse(block.end) - Date.parse(block.start)) / 60_000;
+    const workOf = (blocks: Array<{ start: string; end: string; efficiency?: number }>) =>
+      blocks.reduce((sum, block) => sum + minutesOf(block) * (block.efficiency ?? 1), 0);
+
+    test("when the matching hour is full, work goes on in a slot one level short, taking a quarter longer", async () => {
+      const result = await planSchedule({ now: start, horizonDays: 1, mode: "asap", tasks: [
+        { id: "due", title: "今晚截止的作业", estimate: exact(90), inputsReady: true, deadlineTier: 1, energy: "high", deadline: at("19:00") }
+      ], availability: [{ start: at("14:00"), end: at("15:00"), energy: "high" }, { start: at("16:00"), end: at("19:00"), energy: "medium" }],
+      frozenBlocks: [] });
+      const blocks = result.plan.blocks.filter((block) => block.taskId === "due");
+      expect(blocks.filter((block) => !block.efficiency).map(minutesOf)).toEqual([60]);
+      // 30 minutes of work left, at 0.8 of an hour per hour: 38 minutes on the clock.
+      expect(blocks.filter((block) => block.efficiency === .8).reduce((sum, block) => sum + minutesOf(block), 0)).toBe(38);
+      expect(workOf(blocks)).toBeGreaterThanOrEqual(90);
+    });
+
+    test("a matching hour is taken before a weaker one, even a day later", async () => {
+      const result = await planSchedule({ now: start, horizonDays: 2, mode: "asap", tasks: [
+        { id: "think", title: "推导", estimate: exact(60), inputsReady: true, deadlineTier: 3, energy: "high" }
+      ], availability: [{ start: at("14:00"), end: at("16:00"), energy: "medium" },
+        { start: "2026-09-15T14:00:00.000Z", end: "2026-09-15T15:00:00.000Z", energy: "high" }], frozenBlocks: [] });
+      expect(result.plan.blocks).toEqual([{ taskId: "think", start: "2026-09-15T14:00:00.000Z", end: "2026-09-15T15:00:00.000Z" }]);
+    });
+
+    test("two levels short only under a deadline, in even sessions of at most 45 minutes with rests between", async () => {
+      const task = { id: "hard", title: "难题", estimate: exact(120), inputsReady: true, deadlineTier: 1 as const, energy: "high" as const };
+      const evening = [{ start: at("14:00"), end: at("18:00"), energy: "low" as const }];
+      const waiting = await planSchedule({ now: start, horizonDays: 1, mode: "asap", tasks: [{ ...task, deadlineTier: 3 }], availability: evening, frozenBlocks: [] });
+      expect(waiting.plan.blocks).toEqual([]);
+      const pressed = await planSchedule({ now: start, horizonDays: 1, mode: "asap", tasks: [{ ...task, deadline: at("18:00") }], availability: evening, frozenBlocks: [] });
+      const blocks = pressed.plan.blocks;
+      // 120 minutes of work at 0.65: 185 on the clock, as five sessions of 37 with four ten-minute rests.
+      expect(blocks.map(minutesOf)).toEqual([37, 37, 37, 37, 37]);
+      expect(blocks.every((block) => block.efficiency === .65)).toBe(true);
+      for (let i = 1; i < blocks.length; i += 1) expect(Date.parse(blocks[i]!.start) - Date.parse(blocks[i - 1]!.end)).toBeGreaterThanOrEqual(10 * 60_000);
+      expect(workOf(blocks)).toBeGreaterThanOrEqual(120);
+    });
+
+    test("long work in a matching slot is cut into even sessions of at most 90 minutes, with rests", async () => {
+      const result = await planSchedule({ now: start, horizonDays: 1, mode: "asap", tasks: [
+        { id: "outline", title: "整理复习提纲", estimate: exact(200), inputsReady: true, deadlineTier: 2 }
+      ], availability: [{ start: at("14:00"), end: at("18:00"), energy: "high" }], frozenBlocks: [] });
+      const blocks = result.plan.blocks;
+      expect(blocks.map(minutesOf)).toEqual([67, 67, 66]);
+      for (let i = 1; i < blocks.length; i += 1) expect(Date.parse(blocks[i]!.start) - Date.parse(blocks[i - 1]!.end)).toBeGreaterThanOrEqual(10 * 60_000);
+    });
+
+    test("work that cannot be interrupted stays one block, lengthened", async () => {
+      const result = await planSchedule({ now: start, horizonDays: 1, mode: "asap", tasks: [
+        { id: "one", title: "一口气做完", estimate: exact(60), inputsReady: true, deadlineTier: 1, energy: "high", interruptible: false, deadline: at("18:00") }
+      ], availability: [{ start: at("14:00"), end: at("18:00"), energy: "medium" }], frozenBlocks: [] });
+      expect(result.plan.blocks.map(minutesOf)).toEqual([75]);
+    });
+
+    test("the greedy fallback fills earlier days after placing a task late in the week", () => {
+      const day = (n: number, time: string) => `2026-09-${String(14 + n).padStart(2, "0")}T${time}:00.000Z`;
+      const result = fallbackSchedule({ now: start, horizonDays: 5, mode: "asap", tasks: [
+        { id: "later", title: "周四才能开始", estimate: exact(60), inputsReady: true, deadlineTier: 1, notBefore: day(3, "00:00") },
+        { id: "now", title: "随时可做", estimate: exact(60), inputsReady: true, deadlineTier: 2 }
+      ], availability: [0, 1, 2, 3].map((n) => ({ start: day(n, "14:00"), end: day(n, "16:00"), energy: "high" as const })), frozenBlocks: [] });
+      expect(result.plan.blocks.find((block) => block.taskId === "now")?.start).toBe(day(0, "14:00"));
+    });
+
+    test("the greedy fallback follows the same rules: matching hours first, then sessions in a weaker slot", () => {
+      const result = fallbackSchedule({ now: start, horizonDays: 1, mode: "asap", tasks: [
+        { id: "due", title: "截止作业", estimate: exact(90), inputsReady: true, deadlineTier: 1, energy: "high", deadline: at("19:00") }
+      ], availability: [{ start: at("14:00"), end: at("14:30"), energy: "high" }, { start: at("16:00"), end: at("19:00"), energy: "medium" }],
+      frozenBlocks: [] });
+      const blocks = result.plan.blocks;
+      expect(blocks[0]).toMatchObject({ start: at("14:00"), end: at("14:30") });
+      expect(blocks[0]!.efficiency).toBeUndefined();
+      expect(blocks.slice(1).every((block) => minutesOf(block) <= 60 && block.efficiency === .8)).toBe(true);
+      expect(workOf(blocks)).toBeGreaterThanOrEqual(90);
+      // Matching slots only, when they suffice: nothing goes to the weaker one.
+      const roomy = fallbackSchedule({ now: start, horizonDays: 1, mode: "asap", tasks: [
+        { id: "due", title: "截止作业", estimate: exact(30), inputsReady: true, deadlineTier: 1, energy: "high", deadline: at("19:00") }
+      ], availability: [{ start: at("16:00"), end: at("19:00"), energy: "medium" }, { start: at("14:00"), end: at("15:00"), energy: "high" }], frozenBlocks: [] });
+      expect(roomy.plan.blocks.map((block) => block.efficiency)).toEqual([undefined]);
+    });
+  });
+
+  test("only the work with a deadline is relaxed; undated work around it keeps the gap", async () => {
+    const exact = (minutes: number) => ({ p25Minutes: minutes, p50Minutes: minutes, p85Minutes: minutes, confidence: "high" as const });
+    const result = await planSchedule({ now: start, horizonDays: 2, mode: "buffered", tasks: [
+      // 170 of 180 minutes is more than the daily share allows: placing it needs the relaxed run.
+      { id: "due", title: "今天截止", estimate: exact(170), inputsReady: true, deadlineTier: 1, deadline: "2026-09-14T17:00:00.000Z" },
+      { id: "a", title: "随时可做 A", estimate: exact(50), inputsReady: true, deadlineTier: 3 },
+      { id: "b", title: "随时可做 B", estimate: exact(50), inputsReady: true, deadlineTier: 3 }
+    ], availability: [{ start: "2026-09-14T14:00:00.000Z", end: "2026-09-14T17:00:00.000Z", energy: "high" },
+      { start: "2026-09-15T14:00:00.000Z", end: "2026-09-15T16:00:00.000Z", energy: "high" }], frozenBlocks: [] });
     expect(result.bufferRelaxed).toBe(true);
-    // The undated work never moves into the medium slot: it keeps its own energy.
-    expect(result.plan.blocks.filter((block) => block.taskId === "open").every((block) => block.end <= "2026-09-14T15:00:00.000Z")).toBe(true);
+    expect(result.plan.blocks.find((block) => block.taskId === "due")).toBeDefined();
+    const undated = result.plan.blocks.filter((block) => block.taskId === "a" || block.taskId === "b").sort((x, y) => x.start.localeCompare(y.start));
+    expect(undated).toHaveLength(2);
+    expect(Date.parse(undated[1]!.start) - Date.parse(undated[0]!.end)).toBeGreaterThanOrEqual(10 * 60_000);
   });
 
   test("holds undated fourth-quadrant work with an actionable reason", async () => {
@@ -498,6 +582,7 @@ describe("line floors (each line's share of the week, from what the person said)
     const due = research.map((task) => ({ ...task, deadlineTier: 2 as const, deadline: "2026-09-16T18:00:00.000Z" }));
     const result = await planSchedule({ now: start, horizonDays: 3, mode: "asap", tasks: [...due, ...startup], availability, frozenBlocks: [],
       lineShares: { research: 50, startup: 50 } });
-    expect(result.plan.blocks.filter((block) => block.taskId.startsWith("r"))).toHaveLength(6);
+    // Every one of the six placed (long ones now in sessions, so counted by task, not by block).
+    expect(new Set(result.plan.blocks.filter((block) => block.taskId.startsWith("r")).map((block) => block.taskId)).size).toBe(6);
   });
 });
