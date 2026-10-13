@@ -1,4 +1,5 @@
 import { CodexAccountControl } from "./codex-account-control";
+import { ModelProviderCard } from "../settings/model-provider-card";
 import { CalendarSources } from "./calendar-sources";
 import { CalendarApps } from "./calendar-apps";
 import { TailscaleTrust } from "./tailscale-trust";
@@ -33,6 +34,7 @@ export function CalendarModule({ ctx }: { ctx: AccessContext }) {
 export function ConnectionsSection() {
   return <div className="st-modules">
     <CodexAccountControl />
+    <ModelProviderCard />
     <TailscaleTrust />
     <DeviceLeases />
   </div>;
