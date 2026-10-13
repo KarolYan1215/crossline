@@ -24,7 +24,7 @@ import { createTaskTitler, untitledTasks } from "./task-titler";
 import { createCalendarClassifier, unfiledCalendarEvents } from "./calendar-classifier";
 import { createGoalSplitter, linesAwaitingCandidateSplit, linesAwaitingSplit } from "./goal-splitter";
 import { fileSourceDocuments } from "./source-filing";
-import { createPortraitWriter } from "./portrait-writer";
+import { createPortraitWriter, PORTRAIT_GAP_AT, PORTRAIT_REWRITE_MARKER, portraitRewriteDue } from "./portrait-writer";
 import { createPortraitIllustrator } from "./portrait-illustrator";
 import { materializeDatePairs } from "./date-pairs";
 import { createConcierge, type ConciergeRequest } from "./concierge";
@@ -198,6 +198,49 @@ async function goalSplitPass(workspaceId: string, checkedAt = new Date().toISOSt
   } finally { splittingGoals.delete(workspaceId); }
 }
 
+/**
+ * Writes the portrait (the interview's end, 重新生成, or the one rewrite after the fixed dimensions shipped): `portrait.requested` first,
+ * so the page shows it running, then `portrait.blocked` with the reason, or the figure drawn in the background after the words.
+ */
+async function writePortraitFor(workspaceId: string) {
+  enterUsageWorkspace(workspaceId);
+  const store = analysisStore;
+  store.appendEvent({ ownerId: store.getWorkspaceOwnerId(workspaceId) ?? "", workspaceId, idempotencyKey: `portrait.requested:${Date.now()}`, type: "portrait.requested", entityId: workspaceId, payload: {} });
+  const outcome = await createPortraitWriter(store, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))();
+  if (outcome.state === "blocked") store.appendEvent({ ownerId: store.getWorkspaceOwnerId(workspaceId) ?? "", workspaceId, idempotencyKey: `portrait.blocked:${Date.now()}`,
+    type: "portrait.blocked", entityId: workspaceId, payload: { code: outcome.code, message: outcome.message } });
+  // The pictures follow the words, in the background: the report is readable at once and gains its illustrations as they land.
+  else void createPortraitIllustrator(store, workspaceId, repoRoot, dataDir, () => codexSupervisor?.clientFor(workspaceId))()
+    .then((drawn) => console.info(JSON.stringify({ type: "portrait.illustrated", workspaceId, ...drawn })))
+    .catch(() => undefined);
+  return outcome;
+}
+
+/**
+ * Rewrites a portrait in the background when `portraitRewriteDue` says so: once for a report from before the fixed dimensions, and the
+ * say–do part at most monthly once the execution record can be drawn. Nobody is waiting on either, so both wait for a normal quota.
+ * The marker is written before the run: a failure shows on the page (重新生成 is the person's), it is never retried every tick.
+ */
+const rewritingPortraits = new Set<string>();
+async function portraitPass(workspaceId: string, checkedAt: string): Promise<void> {
+  if (rewritingPortraits.has(workspaceId) || !codexSupervisor) return;
+  const due = portraitRewriteDue(analysisStore, workspaceId, new Date(checkedAt));
+  if (!due || !spendAllows(await spendFor(workspaceId), "discretionary")) return;
+  rewritingPortraits.add(workspaceId);
+  try {
+    if (due === "schema") {
+      analysisStore.setSetting(workspaceId, PORTRAIT_REWRITE_MARKER, checkedAt);
+      const outcome = await writePortraitFor(workspaceId).catch(() => undefined);
+      console.info(JSON.stringify({ type: "portrait.rewritten", checkedAt, workspaceId, state: outcome?.state ?? "failed" }));
+    } else {
+      analysisStore.setSetting(workspaceId, PORTRAIT_GAP_AT, checkedAt);
+      enterUsageWorkspace(workspaceId);
+      const outcome = await createPortraitWriter(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId), { only: "gap" })().catch(() => undefined);
+      console.info(JSON.stringify({ type: "portrait.gap_rewrite", checkedAt, workspaceId, state: outcome?.state ?? "failed" }));
+    }
+  } finally { rewritingPortraits.delete(workspaceId); }
+}
+
 const stepPlanning = new Set<string>();
 async function stepPlanPass(workspaceId: string, checkedAt = new Date().toISOString()): Promise<void> {
   if (stepPlanning.has(workspaceId)) return;
@@ -285,6 +328,7 @@ async function tick(): Promise<void> {
   for (const workspace of workspaces) await curatorPass(workspace.id, checkedAt);
   for (const workspace of workspaces) await titlePass(workspace.id, checkedAt);
   for (const workspace of workspaces) await goalSplitPass(workspace.id, checkedAt);
+  for (const workspace of workspaces) await portraitPass(workspace.id, checkedAt);
   // Uploaded files are filed under the project their own name or opening names; what stays unclear is asked about on 待确认.
   for (const workspace of workspaces) {
     try {
@@ -757,19 +801,7 @@ if (!capabilitySecret) {
     // than at the next tick. `pendingMaterialWorkOrders`/`pendingMilestoneGates` still govern which
     // orders the loop itself picks up.
     prepareMaterials: (workOrderId, workspaceId) => getMaterialPreparer(workspaceId)(workOrderId),
-    writePortrait: async (workspaceId) => {
-      enterUsageWorkspace(workspaceId);
-      const store = analysisStore;
-      store.appendEvent({ ownerId: store.getWorkspaceOwnerId(workspaceId) ?? "", workspaceId, idempotencyKey: `portrait.requested:${Date.now()}`, type: "portrait.requested", entityId: workspaceId, payload: {} });
-      const outcome = await createPortraitWriter(store, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))();
-      if (outcome.state === "blocked") store.appendEvent({ ownerId: store.getWorkspaceOwnerId(workspaceId) ?? "", workspaceId, idempotencyKey: `portrait.blocked:${Date.now()}`,
-        type: "portrait.blocked", entityId: workspaceId, payload: { code: outcome.code, message: outcome.message } });
-      // The pictures follow the words, in the background: the report is readable at once and gains its illustrations as they land.
-      else void createPortraitIllustrator(store, workspaceId, repoRoot, dataDir, () => codexSupervisor?.clientFor(workspaceId))()
-        .then((drawn) => console.info(JSON.stringify({ type: "portrait.illustrated", workspaceId, ...drawn })))
-        .catch(() => undefined);
-      return outcome;
-    },
+    writePortrait: (workspaceId) => writePortraitFor(workspaceId),
     buildTutorial: (workOrderId, workspaceId) => { enterUsageWorkspace(workspaceId); return getMaterialPreparer(workspaceId)(workOrderId, { mode: "tutorial" }); },
     judgeMilestone: (workOrderId, workspaceId) => getMilestoneGate(workspaceId)(workOrderId),
     dispatchAgentTask: (workspaceId, workOrderId, category, stepId) => agentService.dispatch(workspaceId, workOrderId, category, stepId),

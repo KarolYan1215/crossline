@@ -67,6 +67,8 @@ const list = (max: number, length: number) => ({ type: "array", maxItems: max, i
 const object = (properties: Record<string, unknown>) => ({ type: "object", properties, required: Object.keys(properties), additionalProperties: false });
 
 const score = (min: number, max: number) => ({ type: "integer", minimum: min, maximum: max }) as const;
+const GAP = object({ says: text(300), does: text(300), reading: text(400), anchor: text(300), realWant: text(300), reframe: text(300),
+  pairs: { type: "array", maxItems: 5, items: object({ dimension: { type: "string", enum: SAY_DO_DIMENSIONS.map((dimension) => dimension.label) }, says: score(0, 100), evidence: text(80) }) } });
 export const PORTRAIT_SCHEMA = object({
   cover: object({ portrait: text(200), coreConflict: text(300), keywords: list(6, 12), tagline: text(40), coreWord: text(6) }),
   problem: object({ statement: text(500), gravity: list(6, 200), designable: list(6, 200),
@@ -78,8 +80,7 @@ export const PORTRAIT_SCHEMA = object({
     skillScore: score(0, 100), loveScore: score(0, 100), category: { type: "string", enum: [...ENERGY_CATEGORIES] } }) } }),
   lines: object({ allocation: text(500), items: { type: "array", maxItems: 8, items: object({ lineId: text(60), description: text(500), goals: list(6, 120),
     feeds: { type: "array", maxItems: 6, items: object({ toLineId: text(60), how: text(200) }) }, share: score(0, 100), targetShare: score(0, 100) }) } }),
-  gap: object({ says: text(300), does: text(300), reading: text(400), anchor: text(300), realWant: text(300), reframe: text(300),
-    pairs: { type: "array", maxItems: 5, items: object({ dimension: { type: "string", enum: SAY_DO_DIMENSIONS.map((dimension) => dimension.label) }, says: score(0, 100), evidence: text(80) }) } }),
+  gap: GAP,
   insights: { type: "array", maxItems: 6, items: object({ insight: text(300), advice: text(400), solves: text(200), priority: { type: "string", enum: ["high", "medium", "low"] },
     impact: score(1, 5), effort: score(1, 5) }) },
   type: object({ scope: score(0, 100), basis: score(0, 100), output: score(0, 100), rhythm: score(0, 100),
@@ -87,6 +88,9 @@ export const PORTRAIT_SCHEMA = object({
   character: object({ outfit: text(80), props: list(3, 40), pose: { type: "string", enum: [...CHARACTER_POSES] }, expression: { type: "string", enum: [...CHARACTER_EXPRESSIONS] } }),
   sensitive: list(30, 60)
 });
+
+/** The monthly say–do rewrite answers this alone: the rest of the report stays as it was. */
+export const PORTRAIT_GAP_SCHEMA = object({ gap: GAP });
 
 const refuse = (code: string, detail: string) => Object.assign(new Error(code), { detail });
 
