@@ -7,6 +7,7 @@ import { InsightActions } from "./insight-actions";
 import { permissionCandidates } from "../../lib/permission-mode";
 import { WeeklyInsightButton } from "./weekly-insight-button";
 import { requireSessionContext } from "../../lib/access-guard";
+import { gateUntilReady } from "../../lib/start-gate";
 import { MilestonePreview } from "../task-preview";
 import { TaskCard } from "../task/task-card";
 import { Tag } from "../ui/tag";
@@ -23,6 +24,7 @@ const metLabel: Record<string, string> = { met: "已达成", partial: "部分达
 
 export default async function ReviewPage() {
   const ctx = await requireSessionContext();
+  gateUntilReady(ctx);
   const workOrders = getStore().listWorkOrders(ctx.workspaceId);
   const accepted = workOrders.filter((workOrder) => workOrder.state === "accepted").length;
   const review = loadWeeklyReview(ctx);

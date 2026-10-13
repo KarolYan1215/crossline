@@ -19,6 +19,12 @@ export type ChecklistItem = {
   /** What is missing, in words, when not done. */
   detail: string;
   owner: "interview" | "person";
+  /**
+   * One of the five things that must stand before the person starts using the app (decided 2026-10-12, `docs/loop-and-scout.md` §7): a
+   * description of every line, the weekly hours, a hard line's fixed schedule, a current project per line with its deadline (or 「没有截止」),
+   * and a long-term goal the person adopted. These accept only the person's word or a file, never an assumption.
+   */
+  start?: true;
 };
 
 export type ChecklistInput = {
@@ -55,6 +61,8 @@ const PORTRAIT_PARTS: Array<{ label: string; slots: RegExp }> = [
 const PORTRAIT_FIELDS: Array<[keyof ProfileModel, string]> = [["portrait", "一句话画像"], ["coreConflict", "核心矛盾"], ["problem", "真问题"],
   ["workView", "工作观"], ["lifeView", "人生观"], ["trueNorth", "正北"], ["says", "所说想要的"], ["does", "行为在维护的"]];
 const isDefaultProject = (id: string) => /-default$/.test(id);
+/** A deadline the person said there is none of: an answer, and as good as a date for starting. */
+export const NO_DEADLINE = /没有截止|无截止|不设截止|no deadline/i;
 const PROJECT_SLOTS: Array<[RegExp, string]> = [[/^goal$|^target/, "目标"], [/^deadline$|^date_/, "截止日期"], [/^evidence$/, "进展证据"]];
 
 export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
@@ -76,11 +84,13 @@ export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
 
   for (const line of input.lines) {
     const described = input.descriptions[line.id];
+    // A goal the person wrote themselves needs no candidates to choose it from.
+    const candidates = (described?.candidates ?? 0) > 0 || line.goals.length > 0;
     items.push({ id: `line_desc:${line.id}`, group: "主线", label: `「${line.label}」有个性化描述与长期目标候选`,
-      done: Boolean(described?.description.trim()) && (described?.candidates ?? 0) > 0,
-      detail: !described?.description.trim() ? "尚无描述" : (described.candidates ?? 0) === 0 ? "尚无长期目标的定语候选" : "", owner: "interview" });
+      done: Boolean(described?.description.trim()) && candidates,
+      detail: !described?.description.trim() ? "尚无描述" : !candidates ? "尚无长期目标的定语候选" : "", owner: "interview", start: true });
     items.push({ id: `line_goal:${line.id}`, group: "主线", label: `「${line.label}」已选定至少一个长期目标`, done: line.goals.length > 0,
-      detail: line.goals.length ? "" : "从候选中采用或自己写一个", owner: "person" });
+      detail: line.goals.length ? "" : "从候选中采用或自己写一个", owner: "person", start: true });
   }
 
   const projectLine = (project: string) => input.projects.find((item) => item.id === project || item.name === project)?.identityId
@@ -89,14 +99,27 @@ export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
   for (const line of hardLines) {
     // A fixed weekly arrangement of this line: from its own projects, or — said in a reply under no project — when it is the only hard line.
     const fixed = input.dates.filter((entry) => entry.recurring && (projectLine(entry.project) === line.id || (!projectLine(entry.project) && hardLines.length === 1)));
-    const assumed = input.facts.some((fact) => fact.identityId === line.id && assumedFact(fact) && /schedule|meeting|class|fixed/.test(fact.slot));
-    items.push({ id: `hard_schedule:${line.id}`, group: "日程", label: `硬约束「${line.label}」的固定日程已收集`, done: fixed.length > 0 || assumed,
-      detail: fixed.length ? "" : assumed ? "以假设代替" : "上课、组会、值班等每周固定安排尚未收集", owner: "interview" });
+    // A start item: an assumed schedule does not count (dates still waiting in a batch do — the person supplied the file that has them).
+    items.push({ id: `hard_schedule:${line.id}`, group: "日程", label: `硬约束「${line.label}」的固定日程已收集`, done: fixed.length > 0,
+      detail: fixed.length ? "" : "上课、组会、值班等每周固定安排尚未收集", owner: "interview", start: true });
   }
   items.push({ id: "availability", group: "日程", label: "已提出建议的可用时段", done: input.availability,
-    detail: input.availability ? "" : "固定日程之外，每周哪些时段可以安排工作", owner: "interview" });
+    detail: input.availability ? "" : "固定日程之外，每周哪些时段可以安排工作", owner: "interview", start: true });
   const pending = input.dates.filter((entry) => entry.pending).length;
   if (pending) items.push({ id: "dates_confirmed", group: "日程", label: "文件与口述中的日期已确认", done: false, detail: `${pending} 项日期等待确认`, owner: "person" });
+
+  // Every line has something it is working on now, and when that is due — or the person said it has no deadline.
+  for (const line of input.lines) {
+    const current = input.projects.filter((project) => project.identityId === line.id && !isDefaultProject(project.id));
+    const knowsDeadline = (project: { id: string; name: string }) =>
+      input.facts.some((fact) => fact.projectId === project.id && confirmedFact(fact)
+        && (/^deadline$|^date_|^no_deadline$/.test(fact.slot) || NO_DEADLINE.test(fact.value ?? "")))
+      || input.dates.some((entry) => !entry.recurring && (entry.project === project.id || entry.project === project.name));
+    const done = current.some(knowsDeadline);
+    items.push({ id: `line_project:${line.id}`, group: "项目", label: `「${line.label}」有当前项目，且知道截止或没有截止`, done,
+      detail: done ? "" : current.length ? `缺截止（或说明没有截止）：${current.map((project) => project.name).join("、")}` : "尚无当前项目",
+      owner: "interview", start: true });
+  }
 
   for (const project of input.projects.filter((item) => !isDefaultProject(item.id))) {
     const own = input.facts.filter((fact) => fact.projectId === project.id && settledFact(fact));
@@ -116,6 +139,11 @@ export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
     detail: input.unfiledFiles ? `${input.unfiledFiles} 份文件待说明归属（见待决事项）` : "", owner: "person" });
   return items;
 }
+
+/** Whether the five start items all stand: the person may use the app. The portrait is not required. */
+export const readyToStart = (items: ChecklistItem[]) => items.filter((item) => item.start).every((item) => item.done);
+/** The start items still open, in checklist order. */
+export const startMissing = (items: ChecklistItem[]) => items.filter((item) => item.start && !item.done);
 
 /** The interview's own open items, as the lines it is told and the reason a premature 「ready」 is turned back. */
 export const interviewOwnedOpen = (items: ChecklistItem[]) => items.filter((item) => item.owner === "interview" && !item.done);

@@ -3,7 +3,7 @@ import { answeredGapFacts, isCourse, mergeFacts, profileGaps, type ProfileGapInp
 
 const identities = [{ id: "research", label: "科研" }, { id: "startup", label: "创业" }];
 const base: ProfileGapInput = {
-  identities, projects: [{ id: "ece555", identityId: "research", name: "ECE 555" }], meetings: ["ECE 555"],
+  identities, projects: [{ id: "ece555", identityId: "research", name: "ECE 555" }], meetings: ["ECE 555"], dated: ["ECE 555", "ece548"],
   facts: [
     { identityId: "research", projectId: "ece555", slot: "grading", value: "作业 20%、小测 30%、项目 25%、期末 25%", status: "confirmed" },
     { identityId: "startup", projectId: "", slot: "flywheel_research_informs", value: "猜的", status: "inferred" },
@@ -84,4 +84,13 @@ test("a course nobody said the class times of, a file only the person can file a
   // A round stored before the rewording is answered in its old words, and still confirms the portrait.
   expect(answeredGapFacts("【「当前画像」里写的是否符合你？】选择：符合", gaps)).toEqual([{ identityId: "", projectId: "", slot: "", value: "符合", quote: "符合", confirmPortrait: true }]);
   expect(profileGaps({ ...input, meetings: ["ECE 555", "ece548"] }).some((gap) => gap.code === "COURSE_MEETINGS")).toBe(false);
+});
+
+test("一个非默认项目没有截止时，问「有截止日期吗」，答「没有截止」写成 no_deadline", () => {
+  const gaps = profileGaps({ identities: [{ id: "media", label: "创作者" }], projects: [{ id: "xhs", identityId: "media", name: "小红书自媒体" }],
+    facts: [{ identityId: "media", projectId: "xhs", slot: "what", value: "账号", status: "confirmed" }] });
+  const gap = gaps.find((item) => item.code === "PROJECT_DEADLINE")!;
+  expect(gap).toMatchObject({ projectId: "xhs", blocking: true });
+  expect(answeredGapFacts(`【${gap.question.text}】选择：没有截止`, gaps)).toEqual([expect.objectContaining({ slot: "no_deadline", value: "没有截止" })]);
+  expect(answeredGapFacts(`【${gap.question.text}】选择：我来写日期。补充：2026-12-15`, gaps)).toEqual([expect.objectContaining({ slot: "deadline", value: "2026-12-15" })]);
 });

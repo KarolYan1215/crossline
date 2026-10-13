@@ -4,6 +4,7 @@ import path from "node:path";
 import { CrosslineStore } from "../packages/db/src/index.js";
 import { DEFAULT_AVAILABILITY } from "../packages/core/src/index.js";
 import { TEST_EMAIL, TEST_PASSWORD } from "./global-setup.js";
+import { signUpAccount } from "./accounts.js";
 
 function openStore(): CrosslineStore {
   return new CrosslineStore(path.join(process.env.CROSSLINE_E2E_DATA_DIR!, "crossline.db"));
@@ -595,3 +596,44 @@ test("signing out deletes this browser's offline database for the workspace it w
   expect(await page.evaluate(() => localStorage.getItem("crossline.offline.workspaceId"))).toBeNull();
 });
 
+
+test("未达可开始标准时打开今日页回到访谈，并写明还差什么；达标后停在今日页", async ({ browser }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-chrome");
+  const baseURL = testInfo.project.use.baseURL as string;
+  const email = "e2e-start-gate@crossline.test", password = "Crossline-E2E-Gate-Pass-1!";
+  await signUpAccount(baseURL, email, password, "E2E Gate");
+  // A second account of its own, so the shared ledger's main account is not touched.
+  const context = await browser.newContext({ storageState: { cookies: [], origins: [] } });
+  const page = await context.newPage();
+  try {
+    await page.goto("/login");
+    expect((await apiFetch(page, "POST", "/api/auth/sign-in/email", { email, password })).ok).toBe(true);
+    const before = (() => { const store = openStore(); try { return new Set(store.listWorkspaces().map((item) => item.id)); } finally { store.close(); } })();
+    // The example board meets the start standard: the first visit lands on Today.
+    await page.goto("/");
+    await expect(page).toHaveURL(/127\.0\.0\.1:3310\/$/);
+    const store = openStore();
+    let label = "";
+    let restore = "";
+    try {
+      const workspaceId = store.listWorkspaces().map((item) => item.id).find((id) => !before.has(id));
+      if (!workspaceId) throw new Error("the new account has no workspace");
+      restore = store.getSetting(workspaceId, "lines.v1") ?? "";
+      const lines = JSON.parse(restore) as Array<{ label: string; goal: string; goals?: string[] }>;
+      label = lines[0]!.label;
+      lines[0] = { ...lines[0]!, goal: "", goals: [] };
+      store.setSetting(workspaceId, "lines.v1", JSON.stringify(lines));
+      await page.goto("/");
+      await expect(page).toHaveURL(/\/onboarding/);
+      // The interview says what is missing: here, the first line's long-term goal, adopted under the portrait.
+      const missing = page.getByRole("region", { name: "开始使用前还差" });
+      await expect(missing).toContainText("开始使用前还差 1 项");
+      await expect(missing).toContainText(label);
+      store.setSetting(workspaceId, "lines.v1", restore);
+    } finally { store.close(); }
+    await page.goto("/");
+    await expect(page).toHaveURL(/127\.0\.0\.1:3310\/$/);
+  } finally {
+    await context.close();
+  }
+});

@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { pathToFileURL } from "node:url";
 import { SubpageShell } from "../../../subpage-shell";
 import { requireSessionContext } from "../../../../lib/access-guard";
+import { gateUntilReady } from "../../../../lib/start-gate";
 import { dataDirectory, getStore } from "../../../../lib/crossline";
 
 export const dynamic = "force-dynamic";
@@ -18,6 +19,7 @@ type Listed = { title: string; publisher: string; url: string; docId?: string; k
  */
 export default async function MaterialPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ doc?: string; m?: string }> }) {
   const ctx = await requireSessionContext();
+  gateUntilReady(ctx);
   const { id } = await params;
   const { doc, m } = await searchParams;
   if (!/^[a-zA-Z0-9_-]{1,128}$/.test(id)) notFound();

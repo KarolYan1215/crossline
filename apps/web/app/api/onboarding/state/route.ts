@@ -5,7 +5,7 @@ import { getStore } from "../../../../lib/crossline";
 import { loadPendingDateBatch } from "../../../../lib/imported-dates";
 import { loadDiligence } from "../../../../lib/diligence";
 import { identityLines, needsLineSetup } from "../../../../lib/lines";
-import { pendingAnswerIds, questionsOwnedElsewhere } from "../../../../lib/interview-status";
+import { interviewStatus, pendingAnswerIds, questionsOwnedElsewhere } from "../../../../lib/interview-status";
 
 /**
  * Everything the onboarding screen shows, in one read: the conversation so far, the projects and facts the
@@ -30,7 +30,17 @@ export async function GET(request: Request) {
   const messages = moved.size ? raw.map((message, index) => index === lastIndex
     ? { ...message, content: { ...(message.content as object), questions: lastQuestions.filter((question) => !moved.has(question.id)) } } : message) : raw;
   const identities = identityLines(access.ctx).map((pack) => ({ id: pack.id, label: pack.label }));
+  // The start standard (main interview only): what is still missing, and the app's own questions not in the open round — so an account
+  // whose interview already ended can answer 「没有截止」 here without waiting for a new round.
+  const status = focus ? null : interviewStatus(access.ctx);
+  const inRound = new Set(lastQuestions.map((question) => question.id));
+  const start = status ? {
+    readyToStart: status.readyToStart,
+    startMissing: status.startMissing.map(({ id, label, detail, owner }) => ({ id, label, detail, owner })),
+    extraQuestions: status.questions.filter((question) => !inRound.has(question.id))
+  } : { readyToStart: true, startMissing: [], extraQuestions: [] };
   return NextResponse.json({
+    ...start,
     ok: true,
     identities, answeredElsewhere: session ? pendingAnswerIds(access.ctx, session.id) : [],
     setupLines: !focus && needsLineSetup(access.ctx),

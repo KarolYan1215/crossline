@@ -196,7 +196,8 @@ const course = turn({
   projectsDetected: [{ id: "ece555", identityId: "research", name: "ECE 555", summary: "课程" }],
   slotUpdates: [
     { identityId: "research", projectId: "ece555", slot: "grading", value: "作业 20%、小测 30%、项目 25%、期末 25%", status: "confirmed", sourceRef: "reply-1", sourceQuote: "作业 20%、小测 30%、项目 25%、期末 25%" },
-    { identityId: "research", projectId: "ece555", slot: "goal", value: "拿高分", status: "confirmed", sourceRef: "reply-1", sourceQuote: "拿高分" }
+    { identityId: "research", projectId: "ece555", slot: "goal", value: "拿高分", status: "confirmed", sourceRef: "reply-1", sourceQuote: "拿高分" },
+    { identityId: "research", projectId: "ece555", slot: "deadline", value: "2026-12-15", status: "confirmed", sourceRef: "reply-1", sourceQuote: "期末 2026-12-15" }
   ],
   questions: [], nextAction: "ready_for_milestones"
 });
@@ -204,7 +205,7 @@ const course = turn({
 test("a course's target grade is not asked: the architect proposes one later, so a finished interview stays finished", async () => {
   const { rpc } = fakeRuntime([course]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc, { checklist: false });
-  expect(await run({ sessionId: "s", text: "ECE 555 评分：作业 20%、小测 30%、项目 25%、期末 25%，我想拿高分" })).toEqual({ state: "ready", sessionId: "s" });
+  expect(await run({ sessionId: "s", text: "ECE 555 评分：作业 20%、小测 30%、项目 25%、期末 25%，我想拿高分，期末 2026-12-15" })).toEqual({ state: "ready", sessionId: "s" });
   expect(store.listProfileFacts(workspaceId).some((fact) => fact.slot === "target_grade")).toBe(false);
 });
 
@@ -271,4 +272,19 @@ test("a turn that leaves a line's candidates empty keeps those on record and onl
   await createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc)({ sessionId: "line-research", text: "补充一点" });
   const profiles = JSON.parse(store.getSetting(workspaceId, "lines.profiles")!) as Record<string, { description: string; attributes: unknown[] }>;
   expect(profiles.research).toMatchObject({ description: "新描述", attributes });
+});
+
+test("先读材料：首轮把已读出的文件全部带上，清单标出可开始项，阶段从 orientation 开始", async () => {
+  for (const [id, fileName, text] of [["d1", "Resume.md", "博士二年级，研究忆阻器"], ["d2", "ECE555 Syllabus.md", "Final Exam: Dec 15"]] as const)
+    store.saveSourceDocument({ id, ownerId: "o", workspaceId, kind: "text", fileName, mediaType: "text/markdown", sha256: id, uri: `file:///${id}`,
+      extractedText: text, extractionStatus: "done", createdAt: "2026-10-02T00:00:00.000Z" });
+  const { rpc, prompts } = fakeRuntime([turn()]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc);
+  await run({ sessionId: "s", text: "材料已添加，请先从材料里读出能读的，再问还缺的。" });
+  const prompt = prompts()[0]!;
+  const context = JSON.parse(prompt.slice(prompt.indexOf("{"), prompt.lastIndexOf("}") + 1)) as {
+    sources: unknown[]; checklist: Array<{ start?: boolean }>; stage: string };
+  expect(context.sources).toHaveLength(2);
+  expect(context.checklist.some((item) => item.start === true)).toBe(true);
+  expect(context.stage).toBe("orientation");
 });

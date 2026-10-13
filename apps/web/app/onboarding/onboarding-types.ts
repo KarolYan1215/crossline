@@ -31,6 +31,12 @@ export type DiligenceReport = {
   sources: Array<{ id: string; title: string; publisher: string; finalUrl: string; accessedOn: string }>;
 };
 export type OnboardingState = {
+  /** The five start items stand (main interview; always true in a line's own interview): every page opens. */
+  readyToStart: boolean;
+  /** The start items still open, in checklist order. */
+  startMissing: Array<{ id: string; label: string; detail: string; owner: "interview" | "person" }>;
+  /** The app's own questions not in the open round (`profileGaps`), answered in the same reply. */
+  extraQuestions: Question[];
   /** Questions of the open round the person already answered on 待决事项 (those answers go in front of the next reply). */
   answeredElsewhere?: string[];
   diligence: DiligenceReport[];
@@ -51,6 +57,14 @@ export type OnboardingState = {
   facts: Fact[];
   documents: DocumentRow[];
 };
+
+/**
+ * The first reply when the person starts the interview from the materials step with files already read: the interview reads them before
+ * asking anything (decided 2026-10-12). `scripts/onboarding-eval.ts` sends the same words.
+ */
+export const MATERIALS_FIRST_REPLY = "材料已添加，请先从材料里读出能读的，再问还缺的。";
+/** The first reply when the person starts without any file. */
+export const NO_MATERIALS_REPLY = "没有材料，直接开始访谈。";
 
 /** One question's pending answer on the screen. */
 export type Answer = { picked: string[]; other: string };

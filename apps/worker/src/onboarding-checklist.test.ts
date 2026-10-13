@@ -19,7 +19,7 @@ test("each round gets the app's questions about what it is talking about; with n
   const gaps = profileGaps({ identities: [{ id: "research", label: "研究者" }, { id: "media", label: "创作者" }],
     projects: [{ id: "ece548", identityId: "research", name: "ECE 548" }, { id: "xhs", identityId: "media", name: "小红书" }],
     facts: [{ identityId: "media", projectId: "xhs", slot: "what", value: "图文", status: "confirmed" }, { identityId: "research", projectId: "", slot: "what", value: "博士", status: "confirmed" }],
-    unfiled: [{ id: "doc-1", fileName: "Plan.pdf" }], portrait: { written: true, confirmed: false } });
+    dated: ["ece548", "xhs"], unfiled: [{ id: "doc-1", fileName: "Plan.pdf" }], portrait: { written: true, confirmed: false } });
   const ask = (identityId: string, projectId: string) => turn({ nextAction: "ask", questions: [{ id: "q", text: "进展如何？", kind: "free", options: [], allowOther: true, identityId, projectId }] });
   const ids = (output: OnboardingTurn) => output.questions.map((question) => question.id).slice(1);
   // Talking about research: its course's class times, not the file or the portrait.
@@ -30,10 +30,14 @@ test("each round gets the app's questions about what it is talking about; with n
   expect(ids(withGapQuestions(ask("media", "xhs"), gaps, []))).toHaveLength(1);
 });
 
-test("from the second round in one stage, the interview is told to assume what is missing and move on", () => {
+test("同一阶段第二轮起才换阶段；五条没齐时前段不换阶段", () => {
   const round = (stage: string) => ({ role: "assistant", content: { stage } });
-  expect(stagePace([round("compass"), { role: "user", content: {} }, round("energy")])).toEqual({ stageRounds: 1 });
-  const stuck = stagePace([round("compass"), round("energy"), { role: "user", content: {} }, round("energy")]);
-  expect(stuck.stageRounds).toBe(2);
-  expect(stuck.moveOn).toContain("假设：");
+  expect(stagePace([round("compass"), { role: "user", content: {} }, round("energy")], { startOpen: false })).toEqual({ stageRounds: 1 });
+  const stuckFront = stagePace([round("lines"), { role: "user", content: {} }, round("lines")], { startOpen: true });
+  expect(stuckFront).toEqual({ stageRounds: 2 });
+  const stuckBack = stagePace([round("energy"), { role: "user", content: {} }, round("energy")], { startOpen: true });
+  expect(stuckBack.moveOn).toContain("进入下一阶段");
+  expect(stuckBack.moveOn).not.toContain("假设");
+  // With the start items in, the front stages move on like the rest.
+  expect(stagePace([round("lines"), { role: "user", content: {} }, round("lines")], { startOpen: false }).moveOn).toContain("进入下一阶段");
 });

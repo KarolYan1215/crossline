@@ -3,8 +3,9 @@ import { CrosslineStore } from "@crossline/db";
 
 vi.mock("server-only", () => ({}));
 
-const { ensureSeeded, needsOnboarding } = await import("./crossline");
-const { TEST_CTX } = await import("./test-support");
+const { ensureSeeded } = await import("./crossline");
+const { startReadiness } = await import("./start-gate");
+const { seedReadyToStart, TEST_CTX } = await import("./test-support");
 
 beforeEach(() => {
   // The suite-wide default turns the examples on; this file is about what a real account gets.
@@ -24,17 +25,14 @@ test("a new account starts with no example milestones, relations or work orders"
   expect(store.listPlanVersions(TEST_CTX.workspaceId)).toHaveLength(1);
 });
 
-test("an empty workspace is sent to the interview, and stops being once there is any profile or session", () => {
-  ensureSeeded(TEST_CTX);
-  expect(needsOnboarding(TEST_CTX)).toBe(true);
-  const store = globalThis.crosslineStore!;
-  store.upsertProfileFact({ workspaceId: TEST_CTX.workspaceId, identityId: "research", projectId: "", slot: "stage", value: "博一",
-    status: "confirmed", sourceRef: "reply-1", sourceQuote: "博一", updatedAt: "2026-10-02T00:00:00.000Z" });
-  expect(needsOnboarding(TEST_CTX)).toBe(false);
+test("an empty workspace is not ready to start; it is once the five start items stand", () => {
+  expect(startReadiness(TEST_CTX).ready).toBe(false);
+  seedReadyToStart(globalThis.crosslineStore!, TEST_CTX.workspaceId);
+  expect(startReadiness(TEST_CTX).ready).toBe(true);
 });
 
-test("an existing account with work on its board is never redirected", () => {
+test("with example data on, the example board meets the start standard", () => {
   vi.stubEnv("CROSSLINE_SEED_EXAMPLES", "1");
   ensureSeeded(TEST_CTX);
-  expect(needsOnboarding(TEST_CTX)).toBe(false);
+  expect(startReadiness(TEST_CTX).ready).toBe(true);
 });

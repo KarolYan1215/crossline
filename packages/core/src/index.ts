@@ -456,3 +456,4 @@ export * from "./fixed-events";
 export * from "./portrait";
 export * from "./portrait-type";
 export * from "./schedule-frozen";
+export * from "./onboarding-attention";

@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { requireSessionContext } from "../../lib/access-guard";
+import { gateUntilReady } from "../../lib/start-gate";
 import { countAssistantPending } from "../../lib/agent";
 
 export const dynamic = "force-dynamic";
@@ -10,6 +11,7 @@ export const dynamic = "force-dynamic";
  */
 export default async function AssistantPage() {
   const ctx = await requireSessionContext();
+  gateUntilReady(ctx);
   const pending = countAssistantPending(ctx);
   redirect(pending.categories + pending.approvals + pending.reviews ? "/approvals#assistant" : "/settings#automation");
 }

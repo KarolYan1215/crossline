@@ -13,6 +13,7 @@ import { availableSlots, deriveCapacity, requiredApproval, validateAvailability,
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { forecastGoals, normalizeParams, paramsFor, planSchedule, recommendNextActions, type ForecastResult, type PlanResult,
   type ScheduleParams, type PlanningInput } from "@crossline/planner";
+import { seedExampleReadiness } from "./example-readiness";
 import { energyCalibration, predictEnergyTransition, readTransitionOutcomes } from "./energy-learning";
 import { energyModel, slotEnergy } from "./energy";
 import { durationPriorFor } from "./estimate-calibration";
@@ -378,26 +379,14 @@ export function getStore(): CrosslineStore {
   return globalThis.crosslineStore;
 }
 
-/**
- * True for a workspace nobody has set up yet: no profile, no interview, no goals, no work. Such a person is
- * sent to the interview instead of an empty board that tells them nothing.
- */
-export function needsOnboarding(ctx: AccessContext): boolean {
-  // Seeding first: with example data switched on, a brand-new account has its board only after this runs.
-  ensureSeeded(ctx);
-  const store = getStore();
-  return !store.listProfileFacts(ctx.workspaceId).length
-    && !store.getLatestOnboardingSession(ctx.workspaceId)
-    && !store.listMilestones(ctx.workspaceId).some((milestone) => milestone.status !== "archived")
-    && !store.listWorkOrders(ctx.workspaceId).length;
-}
-
 export function ensureSeeded(ctx: AccessContext): void {
   const store = getStore();
   // Example milestones, relations and work orders exist only so the e2e suite and the unit tests have a board
   // to drive. A real account starts empty: its goals come from the interview, not from four placeholders that
   // every user shared and none of them chose.
   if (process.env.CROSSLINE_SEED_EXAMPLES === "1") {
+    // The example board meets the start standard, or every page of the suites would lead back to the interview.
+    seedExampleReadiness(store, ctx);
     // Earlier seeds wrote no projectId, and analysis only offers milestones that have one, so an existing
     // database would stay permanently unanalysable. Re-seeding is idempotent and repairs those rows.
     const seeded = store.listMilestones(ctx.workspaceId);

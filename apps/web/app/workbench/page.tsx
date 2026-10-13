@@ -5,6 +5,7 @@ import { SubpageShell } from "../subpage-shell";
 import { AnalyzeButton } from "./analyze-button";
 import { PromoteForm } from "./promote-form";
 import { requireSessionContext } from "../../lib/access-guard";
+import { gateUntilReady } from "../../lib/start-gate";
 import { loadTaskDetailsBatch } from "../../lib/task-detail";
 import { nextSlots } from "../../lib/steps";
 import { TaskCard } from "../task/task-card";
@@ -41,6 +42,7 @@ export default async function WorkbenchPage({ searchParams }: {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
   const ctx = await requireSessionContext();
+  gateUntilReady(ctx);
   const params = await searchParams;
   const sort: SortKey = params.sort === "identity" || params.sort === "state" ? params.sort : "default";
   ensureSeeded(ctx);

@@ -10,11 +10,13 @@ import { LineSetup } from "./line-setup";
 import { PortraitPanel, StageBar } from "./portrait-panel";
 import { HierarchyGuide } from "./hierarchy-guide";
 import {
-  composeAnswers, type Answer, type AssistantTurn, type DocumentRow, type Message, type OnboardingState
+  composeAnswers, MATERIALS_FIRST_REPLY, NO_MATERIALS_REPLY, type Answer, type AssistantTurn, type DocumentRow, type Message, type OnboardingState
 } from "./onboarding-types";
 
 const ACCEPT = ".pdf,.docx,.txt,.md,.csv,.png,.jpg,.jpeg,.gif,.webp,.m4a,.mp3,.wav,.aac,.ogg,.flac";
-const OPENING = "当前在做的事与最想推进的事；也可直接拖入课程大纲、项目说明、笔记或录音。";
+
+/** Put in front of the tab's title when a round lands while the page is hidden. */
+const NEW_ROUND_MARK = "● 新问题 · ";
 
 const asTurn = (message: Message): AssistantTurn | undefined =>
   message.role === "assistant" ? message.content as AssistantTurn : undefined;
@@ -50,6 +52,27 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
     return next;
   }, [line]);
   useEffect(() => { void load(); }, [load]);
+  // Attention time (decided 2026-10-12): every 15 seconds while the page is visible, the server is told how long ago the person last typed
+  // or clicked; it counts only beats within a minute of input, so the model's thinking time while the person is away is not counted.
+  useEffect(() => {
+    if (line) return;
+    let lastInput = Date.now();
+    const touched = () => { lastInput = Date.now(); };
+    const events = ["keydown", "pointerdown", "input"] as const;
+    events.forEach((name) => window.addEventListener(name, touched, { passive: true }));
+    const timer = setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      void fetch("/api/onboarding/attention", { method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ inputAgoMs: Math.min(600_000, Date.now() - lastInput) }) }).catch(() => {});
+    }, 15_000);
+    return () => { clearInterval(timer); events.forEach((name) => window.removeEventListener(name, touched)); };
+  }, [line]);
+  // A round that lands while the person is on another tab marks the tab's title until they come back.
+  useEffect(() => {
+    const clear = () => { if (document.visibilityState === "visible" && document.title.startsWith(NEW_ROUND_MARK)) document.title = document.title.slice(NEW_ROUND_MARK.length); };
+    document.addEventListener("visibilitychange", clear);
+    return () => document.removeEventListener("visibilitychange", clear);
+  }, []);
   // Within a turn's batch the questions are answered one by one, then sent together.
   const [current, setCurrent] = useState(0);
   // While a recording is waiting for text, keep looking: the model downloads and the transcription finishes
@@ -92,6 +115,7 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
     setPendingText("");
     setCurrent(0);
     setBusy("");
+    if (document.visibilityState === "hidden" && !document.title.startsWith(NEW_ROUND_MARK)) document.title = `${NEW_ROUND_MARK}${document.title}`;
   };
 
   const upload = async (files: FileList | File[]) => {
@@ -106,10 +130,11 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
     else if (body?.deferred) setError("文件已保存，但后台还没读取它（worker 没有运行）。");
     const next = await load();
     // The same model that interviews you reads what you added, in its next turn: it says what it found, asks about what
-    // it cannot tell, and returns the dates the files state. Nothing separate runs, and nothing waits for you to ask.
+    // it cannot tell, and returns the dates the files state. Nothing separate runs, and nothing waits for you to ask. On the
+    // materials step (no conversation yet) the person adds everything first and starts the interview themselves.
     const readable = list.filter((file) => next?.documents.some((doc) => doc.fileName === file.name && doc.extractionStatus === "done"));
     setBusy("");
-    if (response?.ok && !body?.deferred && readable.length) await runTurn(`我添加了这些文件：${readable.map((file) => file.name).join("、")}。请读一下，整理里面的日期和我的情况。`);
+    if (response?.ok && !body?.deferred && readable.length && (next?.messages.length ?? 0) > 0) await runTurn(`我添加了这些文件：${readable.map((file) => file.name).join("、")}。请读一下，整理里面的日期和我的情况。`);
   };
 
   const decideDates = async (batchId: string, includedIds: string[]) => {
@@ -146,12 +171,6 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
     await load();
   };
 
-  /** Puts the interview aside: its questions move to 待决事项 until the person replies here again. */
-  const park = async () => {
-    const response = await fetch("/api/onboarding/park", { method: "POST" }).catch(() => undefined);
-    if (response?.ok) window.location.href = "/"; else setError("没有记录成功，请重试。");
-  };
-
   /** Only from the button that names the model's source and size. */
   const downloadModel = async () => {
     setError("");
@@ -165,20 +184,29 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
   // already answered on 待决事项 are not shown again — those answers go in front of this reply.
   const answeredElsewhere = new Set(state?.answeredElsewhere ?? []);
   const roundQuestions = (open?.questions ?? []).filter((question) => !answeredElsewhere.has(question.id));
-  const composed = composeAnswers(roundQuestions, answers, text);
+  // The app's own questions not in this round (an account whose interview already ended can still answer 「没有截止」 here) join it, and
+  // their answers go in the same reply, read back by the worker without the model.
+  const inRound = new Set(roundQuestions.map((question) => question.id));
+  const extra = waiting ? [] : (state?.extraQuestions ?? []).filter((question) => !inRound.has(question.id) && !answeredElsewhere.has(question.id));
+  const batchQuestions = [...roundQuestions, ...extra];
+  const composed = composeAnswers(batchQuestions, answers, text);
   const canSend = busy === "" && (Boolean(composed.trim()) || waiting);
 
   if (!state) return <p className="ob-muted" role="status">正在读取…</p>;
   if (state.setupLines) return <div className="ob-start"><HierarchyGuide /><LineSetup onDone={() => void load()} /></div>;
-  const batch = roundQuestions;
+  const batch = batchQuestions;
   const stage = open?.stage ?? state.session?.coverage.stage ?? "orientation";
 
   return <div className="ob" onDragOver={(event) => { event.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={onDrop} data-dragging={over}>
     <section className="ob-chat" aria-label="访谈对话">
       <StageBar stage={stage} line={state.focusLine?.label} />
+      {!state.focusLine && <StartCard readyToStart={state.readyToStart} missing={state.startMissing} lines={state.lines} />}
       <div className="ob-thread" aria-live="polite">
         {messages.length === 0 && !state.focusLine && <HierarchyGuide />}
-        {messages.length === 0 && <div className="ob-turn ob-assistant"><p>{state.focusLine ? `「${state.focusLine.label}」的访谈：现状、长期目标、项目、截止日与已有文件。` : OPENING}</p></div>}
+        {messages.length === 0 && state.focusLine && <div className="ob-turn ob-assistant"><p>{`「${state.focusLine.label}」的访谈：现状、长期目标、项目、截止日与已有文件。`}</p></div>}
+        {messages.length === 0 && !state.focusLine && busy !== "turn" && <MaterialsFirst documents={state.documents} busy={busy !== ""}
+          onUpload={(files) => void upload(files)}
+          onStart={() => void runTurn(state.documents.some((doc) => doc.extractionStatus === "done") ? MATERIALS_FIRST_REPLY : NO_MATERIALS_REPLY)} />}
         {messages.map((message) => {
           const turn = asTurn(message);
           if (!turn) return <div className="ob-turn ob-user" key={message.seq}><p>{userText(message)}</p></div>;
@@ -233,8 +261,6 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
             {busy === "upload" ? "上传中…" : "添加文件 / 录音"}
           </label>
           <span className="ob-muted">PDF · Word · 文本 · 图片 · 录音；也可以直接拖进来</span>
-          {!state.focusLine && state.session?.state === "active" && <button type="button" className="ob-btn ob-quiet" disabled={busy !== ""} onClick={() => void park()}
-            title="访谈的问题会转到待决事项，可以在那里逐个回答；回到这里回复即继续">先开始使用</button>}
           <button type="submit" className="ob-btn" disabled={!canSend}>{open ? "发送这一轮" : "发送"}</button>
         </div>
       </form>
@@ -245,6 +271,47 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
       <ProfilePanel state={state} onChanged={() => void load()} />
     </div>
   </div>;
+}
+
+/**
+ * The interview's first step (decided 2026-10-12): the person adds what they have — a CV, a timetable, syllabi, project notes — and the
+ * first round reads it all before asking, so the questions are only about what the files leave open.
+ */
+export function MaterialsFirst({ documents, busy, onUpload, onStart }: { documents: DocumentRow[]; busy: boolean;
+  onUpload: (files: FileList) => void; onStart: () => void }) {
+  const read = documents.filter((doc) => doc.extractionStatus === "done");
+  const reading = documents.some((doc) => doc.extractionStatus === "pending");
+  return <section className="ob-materials" aria-label="第一步：添加材料">
+    <b>第一步：添加材料</b>
+    <span className="ob-muted">简历、课表、课程大纲、项目说明都可以。访谈先从材料里读出能读的，再只问还缺的；也可以直接拖进来。</span>
+    <label className="ob-file-button">
+      <input type="file" multiple accept={ACCEPT} hidden onChange={(event) => { if (event.target.files) onUpload(event.target.files); event.target.value = ""; }} />
+      添加文件
+    </label>
+    {documents.length > 0 && <ul>{documents.map((doc) => <li key={doc.id}>{doc.fileName}<span className="ob-muted">
+      {doc.extractionStatus === "done" ? " · 已读取" : doc.extractionStatus === "pending" ? " · 读取中" : " · 无法读取"}</span></li>)}</ul>}
+    <button type="button" className="ob-btn" disabled={busy || reading} onClick={onStart}>{read.length ? "读完材料，开始访谈" : "没有材料，直接开始"}</button>
+  </section>;
+}
+
+/**
+ * The start standard on the interview screen (decided 2026-10-12): until the five start items stand, every other page leads back here,
+ * so this says which are still missing and where each is settled; once they stand, 「开始使用」 opens the app and the portrait goes on here.
+ */
+export function StartCard({ readyToStart, missing, lines }: { readyToStart: boolean; missing: OnboardingState["startMissing"]; lines: OnboardingState["lines"] }) {
+  if (readyToStart) return <section className="ob-start-card" aria-label="开始使用">
+    <a className="ob-btn" href="/">开始使用</a>
+    <span className="ob-muted">基本信息已齐。画像访谈在同一处继续，问题也会列在待决事项。</span>
+  </section>;
+  // What only the person can settle says where to click; the rest is asked in the interview's next round.
+  const where = (item: OnboardingState["startMissing"][number]) => {
+    const line = item.id.startsWith("line_goal:") ? lines.find((entry) => entry.id === item.id.slice("line_goal:".length)) : undefined;
+    return line ? `在右侧画像下为「${line.label}」采用长期目标` : item.detail;
+  };
+  return <section className="ob-start-card" aria-label="开始使用前还差">
+    <b>开始使用前还差 {missing.length} 项</b>
+    <ul>{missing.map((item) => <li key={item.id}>{item.label}{where(item) ? <span className="ob-muted">：{where(item)}</span> : null}</li>)}</ul>
+  </section>;
 }
 
 export type { DocumentRow };

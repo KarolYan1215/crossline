@@ -6,6 +6,27 @@ import type { CrosslineStore } from "./index";
 type DateRow = { id: string; project?: string; kind?: string; sourceRef?: string; date?: string; to?: string };
 
 /**
+ * Every dated item read from files or replies, pending or confirmed (an excluded one does not count; a pending one already over is
+ * history, never offered, so it waits for nobody), with its project, kind and whether it repeats weekly.
+ */
+function datedItems(store: CrosslineStore, workspaceId: string, today: string) {
+  const decided = new Map(store.listEvents(workspaceId, { type: "dates.decided" }).map((event) => [event.entityId,
+    event.payload as { superseded?: boolean; included?: string[] }]));
+  return store.listEvents(workspaceId, { type: "dates.extracted" }).flatMap((event) => {
+    const decision = decided.get(event.entityId);
+    if (decision?.superseded) return [];
+    const payload = event.payload as { dates?: DateRow[]; recurring?: DateRow[] };
+    const keep = (row: DateRow) => decision ? (decision.included ?? []).includes(row.id) : (row.date ?? row.to ?? today) >= today;
+    return [...(payload.dates ?? []).filter(keep).map((row) => ({ row, recurring: false })), ...(payload.recurring ?? []).filter(keep).map((row) => ({ row, recurring: true }))]
+      .map(({ row, recurring }) => ({ project: row.project ?? "", kind: row.kind ?? (recurring ? "class" : "other"), recurring, pending: !decision, sourceRef: row.sourceRef ?? "" }));
+  });
+}
+
+/** The projects (by id or name) a one-off dated item is on record for: their deadline is known. */
+const datedProjects = (store: CrosslineStore, workspaceId: string, today: string) =>
+  [...new Set(datedItems(store, workspaceId, today).filter((entry) => !entry.recurring && entry.project).map((entry) => entry.project))];
+
+/**
  * The interview's completion list (`interviewChecklist`) built from what the ledger holds: the lines and their goals (given by the caller,
  * who knows the installed packs), the interview's line descriptions and working profile, the facts and projects, every dated item read
  * from files or replies (pending or confirmed; an excluded one does not count), the availability, and the person's confirmation of the
@@ -17,17 +38,7 @@ export function interviewChecklistFor(store: CrosslineStore, workspaceId: string
   const json = <T,>(key: string, fallback: T): T => { try { return JSON.parse(store.getSetting(workspaceId, key) ?? "null") ?? fallback; } catch { return fallback; } };
   const profiles = json<Record<string, StoredLineProfile>>("lines.profiles", {});
   const profile = json<Partial<ProfileModel>>("profile.model", {});
-  const decided = new Map(store.listEvents(workspaceId, { type: "dates.decided" }).map((event) => [event.entityId,
-    event.payload as { superseded?: boolean; included?: string[] }]));
-  const dates = store.listEvents(workspaceId, { type: "dates.extracted" }).flatMap((event) => {
-    const decision = decided.get(event.entityId);
-    if (decision?.superseded) return [];
-    const payload = event.payload as { dates?: DateRow[]; recurring?: DateRow[] };
-    // A pending item that is already over is history, never offered, so it waits for nobody.
-    const keep = (row: DateRow) => decision ? (decision.included ?? []).includes(row.id) : (row.date ?? row.to ?? today) >= today;
-    return [...(payload.dates ?? []).filter(keep).map((row) => ({ row, recurring: false })), ...(payload.recurring ?? []).filter(keep).map((row) => ({ row, recurring: true }))]
-      .map(({ row, recurring }) => ({ project: row.project ?? "", kind: row.kind ?? (recurring ? "class" : "other"), recurring, pending: !decision, sourceRef: row.sourceRef ?? "" }));
-  });
+  const dates = datedItems(store, workspaceId, today);
   const confirmed = json<{ fingerprint?: string } | null>(PROFILE_CONFIRMED, null);
   return interviewChecklist({
     lines,
@@ -70,6 +81,7 @@ export function interviewGapsFor(store: CrosslineStore, workspaceId: string, lin
     facts: store.listProfileFacts(workspaceId),
     undated: latestFileDates(store, workspaceId).undated,
     meetings: meetingProjects(store, workspaceId),
+    dated: datedProjects(store, workspaceId, today),
     unfiled,
     portrait: { written: Boolean(items.find((item) => item.id === "portrait_fields")?.done), confirmed: Boolean(items.find((item) => item.id === "portrait_confirmed")?.done) }
   });

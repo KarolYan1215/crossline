@@ -22,11 +22,13 @@ export type ProfileGapInput = {
   meetings?: string[];
   /** Uploaded files only the person can file (`unfiledFilesIn`), with the project the interview leaned to. */
   unfiled?: Array<{ id: string; fileName: string; lean?: { id: string } | undefined }>;
+  /** The projects (by id or name) a dated item is on record for, from the date batches: their deadline is known without asking. */
+  dated?: string[];
   /** The working portrait, once all its fields are written, and whether the person said it fits them (`profile.confirmed`). */
   portrait?: { written: boolean; confirmed: boolean };
 };
 export type ProfileGap = {
-  code: "LINE_UNCONFIRMED" | "DATE_UNDATED" | "COURSE_MEETINGS" | "FILE_UNFILED" | "PORTRAIT_UNCONFIRMED";
+  code: "LINE_UNCONFIRMED" | "PROJECT_DEADLINE" | "DATE_UNDATED" | "COURSE_MEETINGS" | "FILE_UNFILED" | "PORTRAIT_UNCONFIRMED";
   identityId: string; projectId: string;
   /** The file a `FILE_UNFILED` gap is about. */
   documentId?: string;
@@ -86,6 +88,26 @@ export function profileGaps(input: ProfileGapInput): ProfileGap[] {
           { id: "doing", label: "有，我来写下具体在做什么", detail: "在下面的“其他”里写项目名、截止日期、卡在哪" },
           { id: "later", label: "有，但现在不想规划", detail: "这条线先跳过，之后随时可以回来补" },
           { id: "none", label: "目前没有在做的事", detail: "这条线暂时留空，不为它生成里程碑" }
+        ]
+      }
+    });
+  }
+
+  // Every current project needs its deadline, or the person's word that it has none: one of the start items (decided 2026-10-12), and
+  // an answer the code can read back — otherwise 「没有截止」 rested on the model remembering to write it as a fact.
+  const dated = new Set(input.dated ?? []);
+  for (const project of input.projects) {
+    if (/-default$/.test(project.id) || dated.has(project.id) || dated.has(project.name)) continue;
+    if (input.facts.some((fact) => fact.projectId === project.id && confirmed(fact) && /^deadline$|^date_|^no_deadline$/.test(fact.slot))) continue;
+    gaps.push({
+      code: "PROJECT_DEADLINE", identityId: project.identityId, projectId: project.id, blocking: true,
+      detail: `「${project.name}」还不知道截止日期，也没有说明没有截止。`,
+      question: {
+        id: `gap-deadline-${project.id}`, kind: "single", allowOther: true, identityId: project.identityId, projectId: project.id,
+        text: `「${project.name}」有截止日期吗？`,
+        options: [
+          { id: "date", label: "我来写日期", detail: "在“其他”里写日期，例如「2026-12-15」" },
+          { id: "none", label: "没有截止", detail: "不设截止，排程按主线份额安排" }
         ]
       }
     });
@@ -173,6 +195,7 @@ const MEETING_SLOT = /^(meeting|class)_?times?$|^no_meetings$/;
 
 /** Words that say a question from the model already asks what a gap is about, so the code-built one is not asked on top of it. */
 const COVERS: Partial<Record<ProfileGap["code"], RegExp>> = {
+  PROJECT_DEADLINE: /截止|deadline|什么时候(交|完成)/i,
   DATE_UNDATED: /待定|TBD|日期|什么时候/i,
   COURSE_MEETINGS: /上课|几点|每周.*(时间|时段)/
 };
@@ -228,6 +251,9 @@ export function answeredGapFacts(replyText: string, gaps: ProfileGap[]): GapAnsw
       const declined = picked.find((label) => gap.question.options.some((option) => option.label === label && option.id !== "doing"));
       if (other) out.push({ ...base, slot: "what", value: other, quote: other });
       else if (declined) out.push({ ...base, slot: "skipped", value: declined, quote: declined });
+    } else if (gap.code === "PROJECT_DEADLINE") {
+      if (other) out.push({ ...base, slot: "deadline", value: other, quote: other });
+      else if (picked.includes("没有截止")) out.push({ ...base, slot: "no_deadline", value: "没有截止", quote: "没有截止" });
     } else if (gap.code === "DATE_UNDATED") {
       // 「知道具体日期」 without the date is not an answer.
       const value = other || picked.find((label) => gap.question.options.some((option) => option.label === label && option.id !== "known"));

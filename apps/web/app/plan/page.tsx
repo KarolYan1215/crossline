@@ -11,6 +11,7 @@ import { SubpageShell } from "../subpage-shell";
 import { getStore, loadCurrentPlan, loadPlanExplanation, planToday } from "../../lib/crossline";
 import { loadPlanBoard } from "../../lib/plan-board";
 import { requireSessionContext } from "../../lib/access-guard";
+import { gateUntilReady } from "../../lib/start-gate";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +23,7 @@ export const dynamic = "force-dynamic";
  */
 export default async function PlanPage(props: { searchParams?: Promise<{ horizon?: string }> }) {
   const ctx = await requireSessionContext();
+  gateUntilReady(ctx);
   const requested = (await props.searchParams)?.horizon;
   const plan = await loadCurrentPlan(ctx);
   const board = await loadPlanBoard(ctx, plan, requested);

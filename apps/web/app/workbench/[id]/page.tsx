@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { SubpageShell } from "../../subpage-shell";
 import { loadTaskDetail } from "../../../lib/task-detail";
 import { requireSessionContext } from "../../../lib/access-guard";
+import { gateUntilReady } from "../../../lib/start-gate";
 import { TaskPanels } from "../../task/task-dialog";
 import { TaskActions } from "../../task/task-actions";
 
@@ -13,6 +14,7 @@ export const dynamic = "force-dynamic";
  */
 export default async function WorkOrderDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const ctx = await requireSessionContext();
+  gateUntilReady(ctx);
   const { id } = await params;
   const detail = loadTaskDetail(ctx, id);
   if (!detail) notFound();
