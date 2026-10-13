@@ -146,12 +146,6 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
     await load();
   };
 
-  /** Puts the interview aside: its questions move to 待决事项 until the person replies here again. */
-  const park = async () => {
-    const response = await fetch("/api/onboarding/park", { method: "POST" }).catch(() => undefined);
-    if (response?.ok) window.location.href = "/"; else setError("没有记录成功，请重试。");
-  };
-
   /** Only from the button that names the model's source and size. */
   const downloadModel = async () => {
     setError("");
@@ -233,8 +227,6 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
             {busy === "upload" ? "上传中…" : "添加文件 / 录音"}
           </label>
           <span className="ob-muted">PDF · Word · 文本 · 图片 · 录音；也可以直接拖进来</span>
-          {!state.focusLine && state.session?.state === "active" && <button type="button" className="ob-btn ob-quiet" disabled={busy !== ""} onClick={() => void park()}
-            title="访谈的问题会转到待决事项，可以在那里逐个回答；回到这里回复即继续">先开始使用</button>}
           <button type="submit" className="ob-btn" disabled={!canSend}>{open ? "发送这一轮" : "发送"}</button>
         </div>
       </form>

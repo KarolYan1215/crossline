@@ -447,8 +447,8 @@ function calendarAsks({ store, ctx }: Source): Ask[] {
  * The interview no longer asks the same thing — its question about such a file is left out of its batch (`lib/interview-status.ts`).
  */
 function sourceProjectAsks({ store, ctx, today, now }: Source): Ask[] {
-  // While the interview runs, it asks this itself (its own round, with the projects as options); here only once it is done or put aside.
-  const interview = interviewStatus(ctx, now);
+  // While the interview runs, it asks this itself (its own round, with the projects as options); here only once it is done or 已可开始.
+  const interview = interviewStatus(ctx);
   if (interview.started && !interview.complete && !interview.parked) return [];
   const projects = store.listProjects(ctx.workspaceId).map((project) => ({ id: project.id, name: project.name, identityId: project.identityId }));
   return unfiledFiles(ctx, today).map(({ id, fileName, titles, days, lean, raisedAt }) => {
@@ -493,9 +493,9 @@ const STAGE_LABEL: Record<string, string> = { orientation: "开场与规则", si
  * but milestone drafts, long-term goals and the proposed hours are designed from what the interview has, so the gap is named here.
  */
 function interviewAsks({ ctx, now }: Source): Ask[] {
-  const status = interviewStatus(ctx, now);
-  // While the interview runs, its questions are asked in it, round by round; only once the person uses the app without finishing it
-  // are they asked here, each answerable in place (decided 2026-10-08).
+  const status = interviewStatus(ctx);
+  // While the interview runs, its questions are asked in it, round by round; only once the start standard stands and the person uses the
+  // app (已可开始) with the portrait unfinished are they asked here as well, each answerable in place (decided 2026-10-08, 2026-10-12).
   if (!status.started || status.complete || !status.parked) return [];
   const where = status.stage ? `访谈在「${STAGE_LABEL[status.stage] ?? status.stage}」阶段（第 ${status.stageIndex}/${status.stageCount} 阶段）` : "访谈";
   const questions = status.questions.map((question): Ask => {

@@ -1,5 +1,5 @@
 import "server-only";
-import { ONBOARDING_STAGES, gapCoveredBy, type AccessContext, type ChecklistItem } from "@crossline/core";
+import { ONBOARDING_STAGES, gapCoveredBy, readyToStart as startReady, startMissing as startOpen, type AccessContext, type ChecklistItem } from "@crossline/core";
 import { interviewChecklistFor, interviewGapsFor } from "@crossline/db";
 import { identityLines } from "./lines";
 import { getStore, planToday } from "./crossline";
@@ -33,12 +33,8 @@ export function questionsOwnedElsewhere(ctx: AccessContext, questions: Question[
   return out;
 }
 
-/** When the person chose to use the app before finishing the interview (「先开始使用」). A reply in the interview after it unparks. */
-export const ONBOARDING_PARKED = "onboarding.parkedAt";
 /** Answers given on 待决事项 while parked, sent to the interview together once the round's questions are all answered. */
 export const PENDING_ANSWERS = "onboarding.pendingAnswers";
-/** An interview nobody has replied to for this long is treated as parked: the person is using the app without it. */
-const PARK_AFTER_MS = 24 * 3_600_000;
 
 export type InterviewQuestion = { id: string; text: string; kind: "single" | "multi" | "free";
   options: Array<{ id: string; label: string; detail: string }>; allowOther: boolean; identityId: string; projectId: string };
@@ -52,10 +48,15 @@ export type InterviewStatus = {
   /** The interview has nothing more to ask; what is left is the person's to click. */
   awaitingPerson: boolean;
   /**
-   * Unfinished, and the person is using the app without it (they chose 「先开始使用」, or have not replied for a day). Only then are the
-   * interview's questions asked on 待决事项 (decided 2026-10-08); while it runs, they are asked in the interview, round by round.
+   * 已能使用、画像还没完成：访谈的问题同时列在待决事项。The start standard stands (`readyToStart`) and the checklist is not complete, so
+   * the person uses the app while the portrait goes on (decided 2026-10-12; the early-exit button is gone). Before the start
+   * standard stands every page leads back to the interview, which asks its questions round by round.
    */
   parked: boolean;
+  /** The five start items all stand (`readyToStart`): the person may use every page. */
+  readyToStart: boolean;
+  /** The start items still open, in checklist order. */
+  startMissing: ChecklistItem[];
   stage: string; stageIndex: number; stageCount: number;
   /** Questions still waiting for the person: the open round's (questions about a file left out) and the app's own not yet in a round. */
   questions: InterviewQuestion[];
@@ -77,9 +78,9 @@ function readPending(ctx: AccessContext, sessionId: string, afterSeq: number): P
 
 /**
  * Whether the main interview is finished, judged by the completion list built from the ledger — the portrait as much as the work —
- * plus where the conversation stands: its stage, the questions waiting, and whether the person has put it aside.
+ * plus where the conversation stands: its stage, the questions waiting, and whether the start standard already stands.
  */
-export function interviewStatus(ctx: AccessContext, now = new Date()): InterviewStatus {
+export function interviewStatus(ctx: AccessContext): InterviewStatus {
   const store = getStore();
   const session = store.getLatestOnboardingSession(ctx.workspaceId);
   const stageCount = ONBOARDING_STAGES.length;
@@ -87,7 +88,8 @@ export function interviewStatus(ctx: AccessContext, now = new Date()): Interview
   const lines = identityLines(ctx).map((line) => ({ id: line.id, label: line.label, hard: Boolean(line.hard), goals: line.goals ?? [] }));
   const checklist = interviewChecklistFor(store, ctx.workspaceId, lines, { unfiledFiles: unfiledFiles(ctx, today).length, today });
   const open = checklist.filter((item) => !item.done);
-  if (!session) return { started: false, complete: false, awaitingPerson: false, parked: false, stage: "", stageIndex: 0, stageCount,
+  const readyToStart = startReady(checklist), startMissing = startOpen(checklist);
+  if (!session) return { started: false, complete: false, awaitingPerson: false, parked: false, readyToStart, startMissing, stage: "", stageIndex: 0, stageCount,
     questions: [], openQuestions: 0, checklist, sessionId: "" };
   const messages = store.listOnboardingMessages(ctx.workspaceId, session.id);
   const lastAssistant = [...messages].reverse().find((message) => message.role === "assistant");
@@ -95,10 +97,7 @@ export function interviewStatus(ctx: AccessContext, now = new Date()): Interview
   const content = (lastAssistant?.content ?? {}) as AssistantContent;
   const stage = content.stage ?? String((session.coverage as { stage?: string }).stage ?? "");
   const complete = !open.length;
-  const lastReply = [...messages].reverse().find((message) => message.role === "user")?.createdAt ?? session.createdAt;
-  const parkedAt = store.getSetting(ctx.workspaceId, ONBOARDING_PARKED) ?? "";
-  const lastActivity = messages.at(-1)?.createdAt ?? session.updatedAt;
-  const parked = !complete && (parkedAt > lastReply || now.getTime() - Date.parse(lastActivity) > PARK_AFTER_MS);
+  const parked = readyToStart && !complete;
   // The open round, minus questions about a file (the file's own question covers it) and minus what was already answered.
   const round = (answered || content.nextAction === "ready_for_milestones" ? [] : content.questions ?? []) as InterviewQuestion[];
   const owned = questionsOwnedElsewhere(ctx, round);
@@ -108,14 +107,9 @@ export function interviewStatus(ctx: AccessContext, now = new Date()): Interview
     .filter((gap) => gap.code !== "FILE_UNFILED" && !inRound.has(gap.question.id) && !gapCoveredBy(gap, round)).map((gap) => gap.question as InterviewQuestion);
   const questions = [...round.filter((question) => !owned.has(question.id) && !question.id.startsWith("gap-file-")), ...gaps]
     .filter((question) => !pending.answers[question.id]);
-  return { started: true, complete, awaitingPerson: open.length > 0 && open.every((item) => item.owner === "person"), parked,
+  return { started: true, complete, awaitingPerson: open.length > 0 && open.every((item) => item.owner === "person"), parked, readyToStart, startMissing,
     stage, stageIndex: Math.max(0, ONBOARDING_STAGES.indexOf(stage as (typeof ONBOARDING_STAGES)[number])) + 1, stageCount,
     questions, openQuestions: questions.length, checklist, sessionId: session.id };
-}
-
-/** 「先开始使用」: the interview is put aside, and its questions move to 待决事项 until the person replies in it again. */
-export function parkInterview(ctx: AccessContext, now = new Date()): void {
-  getStore().setSetting(ctx.workspaceId, ONBOARDING_PARKED, now.toISOString());
 }
 
 const lineOf = (question: InterviewQuestion, option: { label: string } | undefined, other: string) =>
