@@ -4,8 +4,8 @@ import { nudgeCandidates, planNudges, type NudgeInput } from "./index";
 const base = (over: Partial<NudgeInput> = {}): NudgeInput => ({
   now: "2026-10-10T19:50:00.000Z", today: "2026-10-10", clock: "14:50", tomorrow: "2026-10-11", level: "normal",
   quiet: { timerRunning: false, inMeeting: false, answeredRecently: false }, muted: new Set(), sent: new Set(), countedToday: 0,
-  blocks: [{ id: "scheduled:hw2:v1s1", orderId: "hw2", stepId: "v1s1", title: "完成 ECE 555 作业 2", step: "拆解题目", start: "15:00", end: "15:30", dueDay: "2026-10-12", lastStartedAt: "" }],
-  slack: [], finished: [], ...over
+  blocks: [{ id: "scheduled:hw2:v1s1", orderId: "hw2", stepId: "v1s1", title: "完成 ECE 555 作业 2", step: "拆解题目", start: "15:00", end: "15:30", dueDay: "2026-10-12" }],
+  ending: [], slack: [], finished: [], ...over
 });
 
 test("fifteen minutes before a block that bears on a deadline, it says so with 开始计时 and 推到明天; not counted against the cap", () => {
@@ -17,10 +17,22 @@ test("fifteen minutes before a block that bears on a deadline, it says so with �
   expect(planNudges(base({ sent: new Set(["start:scheduled:hw2:v1s1:2026-10-10"]) }))).toEqual([]);
 });
 
-test("a block that ended unstarted is offered a remedy; one whose task began during it is not", () => {
-  expect(planNudges(base({ clock: "15:40", now: "2026-10-10T20:40:00.000Z" }))[0]).toMatchObject({ kind: "block_missed", urgent: true });
-  const started = base({ clock: "15:40", blocks: [{ ...base().blocks[0]!, lastStartedAt: "2026-10-10T15:05:00" }] });
-  expect(planNudges(started)).toEqual([]);
+test("every block of the day is asked about once within half an hour of its end, with a button that opens the confirm page", () => {
+  const ending = [{ id: "scheduled:read:v2s1", orderId: "read", stepId: "v2s1", title: "读 ECE 548 第 5 讲", step: "", day: "2026-10-10", start: "15:00", end: "15:30", endedTimerAt: "" }];
+  const [nudge] = planNudges(base({ blocks: [], ending, clock: "15:40", now: "2026-10-10T20:40:00.000Z" }));
+  expect(nudge).toMatchObject({ kind: "block_confirm", urgent: true, counted: true, fingerprint: "confirm:scheduled:read:v2s1:2026-10-10", block: ending[0] });
+  expect(nudge!.buttons[0]).toEqual({ kind: "href", label: "确认", href: "/confirm/{message}" });
+  expect(planNudges(base({ blocks: [], ending, clock: "15:29" }))).toEqual([]);
+  expect(planNudges(base({ blocks: [], ending, clock: "16:00" }))).toEqual([]);
+});
+
+test("no question for a block whose timer the person already stopped, one whose timer still runs, or at night", () => {
+  const block = { id: "scheduled:read:v2s1", orderId: "read", stepId: "v2s1", title: "读 ECE 548 第 5 讲", step: "", day: "2026-10-10", start: "15:00", end: "15:30", endedTimerAt: "" };
+  expect(planNudges(base({ blocks: [], ending: [{ ...block, endedTimerAt: "15:25" }], clock: "15:40" }))).toEqual([]);
+  const timer = { orderId: "read", title: "读", stepId: "v2s1", stepTitle: "", startedAt: "2026-10-10T20:00:00.000Z", usualMinutes: 300 };
+  expect(planNudges(base({ blocks: [], ending: [block], clock: "15:40", timer })).map((item) => item.kind)).not.toContain("block_confirm");
+  const late = { ...block, start: "23:00", end: "23:30" };
+  expect(planNudges(base({ blocks: [], ending: [late], clock: "23:40", night: true }))).toEqual([]);
 });
 
 test("too little time before a due day: tight below a day's worth of free time, late below zero (and late is urgent)", () => {

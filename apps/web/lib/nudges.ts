@@ -4,7 +4,7 @@ import { formatInTimeZone } from "date-fns-tz";
 import { listAgentTasks, type StoredConversationMessage } from "@crossline/db";
 import {
   availableSlots, isCancelledEvent, planNudges, taskTitleOf,
-  type AccessContext, type NotifyLevelName, type NudgeBlock, type NudgeButton, type NudgeKind, type NudgeSlack, type PlannedNudge, type ProposedAction
+  type AccessContext, type NotifyLevelName, type NudgeBlock, type NudgeEnding, type NudgeButton, type NudgeKind, type NudgeSlack, type PlannedNudge, type ProposedAction
 } from "@crossline/core";
 import { commitSoon, effectiveSchedulePreferences, getStore, loadCurrentPlan, planToday, readAvailability } from "./crossline";
 import { openAsks, thisWeek } from "./asks";
@@ -25,7 +25,9 @@ const DAY = 86_400_000;
 const addDays = (day: string, days: number) => new Date(Date.parse(`${day}T12:00:00Z`) + days * DAY).toISOString().slice(0, 10);
 const minutesOf = (clock: string) => { const [h, m] = clock.split(":").map(Number); return (h ?? 0) * 60 + (m ?? 0); };
 
-export type NudgePayload = { kind: NudgeKind | "opener"; fingerprint: string; covers?: string[]; counted: boolean; urgent: boolean; delivery: "page" | "pending" | "pushed" };
+export type NudgePayload = { kind: NudgeKind | "opener"; fingerprint: string; covers?: string[]; counted: boolean; urgent: boolean; delivery: "page" | "pending" | "pushed";
+  /** `block_confirm`: the block as it stood when asked; the confirm page writes against these times. */
+  block?: NudgeEnding };
 
 /** Runs the engine for every workspace (the web's timer). A workspace that fails is skipped until the next interval. */
 export async function nudgePass(now = new Date()): Promise<number> {
@@ -54,8 +56,10 @@ export async function nudgesFor(ctx: AccessContext, now = new Date()): Promise<P
   const anchors = new Map(store.listMilestoneAnchors(ctx.workspaceId).map((anchor) => [anchor.milestoneId, anchor.deadline]));
   const dueOf = (order: (typeof orders)[number]) => (order.payload as { dueDate?: string }).dueDate || anchors.get(order.milestoneId) || "";
   const executions = store.listExecutions(ctx.workspaceId);
-  const lastStart = new Map<string, string>();
-  for (const execution of executions) if ((lastStart.get(execution.workOrderId) ?? "") < execution.startedAt) lastStart.set(execution.workOrderId, execution.startedAt);
+  // When each order's timer was last stopped today: a block whose timer the person ended is not asked about afterwards.
+  const lastStopped = new Map<string, string>();
+  for (const execution of executions) if (execution.endedAt && local(execution.endedAt).slice(0, 10) === today
+    && (lastStopped.get(execution.workOrderId) ?? "") < local(execution.endedAt)) lastStopped.set(execution.workOrderId, local(execution.endedAt));
   const running = executions.find((execution) => !execution.endedAt && !execution.interruptions.some((pause) => !pause.resumedAt));
   const plan = await loadCurrentPlan(ctx);
   // This pass runs every two minutes, so it is also what closes the commit window on blocks about to start.
@@ -70,9 +74,15 @@ export async function nudgesFor(ctx: AccessContext, now = new Date()): Promise<P
     const due = order ? dueOf(order) : "";
     if (!order || !due || due < today || due > addDays(today, 7)) return [];
     const stepId = /^v\d+s\d+$/.test(block.id.split(":")[2] ?? "") ? block.id.split(":")[2]! : "";
-    return [{ id: block.id, orderId: order.id, stepId, title: taskTitleOf(order), step: block.step ?? "", start: block.start, end: block.end, dueDay: due,
-      lastStartedAt: lastStart.has(order.id) ? local(lastStart.get(order.id)!) : "" }];
+    return [{ id: block.id, orderId: order.id, stepId, title: taskTitleOf(order), step: block.step ?? "", start: block.start, end: block.end, dueDay: due }];
   });
+  // Every work block of today, deadline or not, for the completion check.
+  const ending = rememberBlocks(ctx, today, clock, todays.filter((block) => block.id.startsWith("scheduled:")).flatMap((block) => {
+    const order = byId.get(block.id.split(":")[1]!);
+    if (!order) return [];
+    const stepId = /^v\d+s\d+$/.test(block.id.split(":")[2] ?? "") ? block.id.split(":")[2]! : "";
+    return [{ id: block.id, orderId: order.id, stepId, title: taskTitleOf(order), step: block.step ?? "", day: today, start: block.start, end: block.end, endedTimerAt: "" }];
+  })).map((block) => ({ ...block, endedTimerAt: lastStopped.get(block.orderId)?.slice(11, 16) ?? "" }));
 
   // Time left before each due day: the person's free hours (fixed arrangements out, today from now on) less what other work holds.
   const windows = readAvailability(ctx);
@@ -112,13 +122,38 @@ export async function nudgesFor(ctx: AccessContext, now = new Date()): Promise<P
     sent: new Set(recent.flatMap((message) => [payloadOf(message)?.fingerprint ?? "", ...(payloadOf(message)?.covers ?? [])])),
     countedToday: recent.filter((message) => payloadOf(message)?.counted && message.createdAt.slice(0, 10) >= addDays(today, -1)
       && local(message.createdAt).slice(0, 10) === today).length,
-    blocks, slack, finished, ...(energyCheck ? { energyCheck } : {}),
+    blocks, ending, slack, finished, ...(energyCheck ? { energyCheck } : {}),
     ...(running && timerOrder ? { timer: { orderId: timerOrder.id, title: taskTitleOf(timerOrder), stepId: currentStep?.id ?? "", stepTitle: currentStep?.title ?? "",
       startedAt: running.startedAt, usualMinutes: currentStep?.estimate.p50Minutes ?? timerOrder.estimate.p50Minutes } } : {})
   });
   for (const nudge of planned) say(ctx, nudge.text, nudge.buttons, { kind: nudge.kind, fingerprint: nudge.fingerprint, counted: nudge.counted, urgent: nudge.urgent,
-    ...(nudge.covers ? { covers: nudge.covers } : {}) }, now);
+    ...(nudge.covers ? { covers: nudge.covers } : {}), ...(nudge.block ? { block: nudge.block } : {}) }, now);
   return planned;
+}
+
+/** Today's blocks as this pass has seen them (`nudge.blocks:<day>`). */
+export const seenBlocksKey = (day: string) => `nudge.blocks:${day}`;
+
+/**
+ * The blocks that really happened today, for the completion check. The schedule is derived and a block leaves it once it has ended,
+ * so this pass (every two minutes) remembers each block it sees; one counts once a pass saw it under way — the commit window holds a
+ * block in place from fifteen minutes before its start to its end, so every block that happened is seen under way at least once,
+ * and one moved elsewhere before it began is never asked about. A block keeps the times it had once it began.
+ */
+function rememberBlocks(ctx: AccessContext, today: string, clock: string, blocks: NudgeEnding[]): NudgeEnding[] {
+  const store = getStore();
+  type Seen = NudgeEnding & { began: boolean };
+  let seen: Record<string, Seen> = {};
+  try { seen = JSON.parse(store.getSetting(ctx.workspaceId, seenBlocksKey(today)) ?? "{}") as Record<string, Seen>; } catch { /* starts afresh */ }
+  let changed = false;
+  for (const block of blocks) {
+    if (seen[block.id]?.began) continue;
+    const began = block.start <= clock && clock < block.end;
+    const before = seen[block.id];
+    if (!before || before.start !== block.start || before.end !== block.end || began) { seen[block.id] = { ...block, began }; changed = true; }
+  }
+  if (changed) store.setSetting(ctx.workspaceId, seenBlocksKey(today), JSON.stringify(seen));
+  return Object.values(seen).filter((block) => block.began).map(({ began: _began, ...block }) => block);
 }
 
 /** Background work that finished in the last six hours and is waiting for the person: assistant results, preparation, new proposals. */
@@ -149,7 +184,7 @@ function backgroundDone(ctx: AccessContext, now: Date): Array<{ key: string; tex
  */
 function mutedKinds(ctx: AccessContext, recent: StoredConversationMessage[], today: string, now: Date): Set<NudgeKind> {
   const store = getStore();
-  const kinds: NudgeKind[] = ["block_start", "block_missed", "latest_start", "timer_overrun", "background_done", "energy_check"];
+  const kinds: NudgeKind[] = ["block_start", "block_confirm", "latest_start", "timer_overrun", "background_done", "energy_check"];
   const muted = new Set<NudgeKind>();
   for (const kind of kinds) {
     const until = store.getSetting(ctx.workspaceId, muteKey(kind));
@@ -174,16 +209,20 @@ export function muteNudgeKind(ctx: AccessContext, kind: string, now = new Date()
 function say(ctx: AccessContext, text: string, buttons: NudgeButton[], nudge: Omit<NudgePayload, "delivery">, now: Date): void {
   const store = getStore();
   const conversation = store.conversationFor(ctx.workspaceId, planToday(ctx, now));
+  const id = randomUUID();
   const actions: ProposedAction[] = [];
   const options = buttons.map((button) => {
-    if (button.kind !== "action") return { label: button.label, actions: [] as number[], kind: button.kind, ...(button.kind === "href" ? { href: button.href } : {}) };
+    if (button.kind !== "action") return { label: button.label, actions: [] as number[], kind: button.kind,
+      ...(button.kind === "href" ? { href: button.href.replace("{message}", encodeURIComponent(id)) } : {}) };
     actions.push(button.action);
     return { label: button.label, actions: [actions.length - 1], kind: "action" as const };
   });
   const card: Card = { actions, items: actions.map(() => ({ state: "pending" })), clarify: { question: text, options }, confidence: "high", nudgeKind: nudge.kind };
   const visibleAt = store.getSetting(ctx.workspaceId, PRESENCE_SETTING);
-  const delivery = visibleAt && now.getTime() - Date.parse(visibleAt) < PRESENCE_FRESH_MS ? "page" : "pending";
-  store.appendConversationMessage({ id: randomUUID(), workspaceId: ctx.workspaceId, conversationId: conversation.id, role: "nudge", text: "",
+  // A completion check goes to the desktop and the phone whatever page is open (docs/loop-and-scout.md §3): the person is rarely on
+  // the page at the moment a block ends.
+  const delivery = nudge.kind !== "block_confirm" && visibleAt && now.getTime() - Date.parse(visibleAt) < PRESENCE_FRESH_MS ? "page" : "pending";
+  store.appendConversationMessage({ id, workspaceId: ctx.workspaceId, conversationId: conversation.id, role: "nudge", text: "",
     payload: { nudge: { ...nudge, delivery }, card }, createdAt: now.toISOString() });
 }
 

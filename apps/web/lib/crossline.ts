@@ -1401,7 +1401,12 @@ export function startWorkOrderExecution(ctx: AccessContext, workOrderId: string,
   const store = getStore();
   const workOrder = findWorkOrder(ctx.workspaceId, workOrderId);
   if (!workOrder) return { ok: false, code: "WORK_ORDER_NOT_FOUND" };
-  if (workOrder.state === "active") return { ok: true };
+  if (workOrder.state === "active") {
+    // Active with no open session: a confirmed block closed the last one, and starting again has to time something.
+    if (!store.listExecutions(ctx.workspaceId, workOrderId).some((execution) => !execution.endedAt))
+      store.openSession(ctx.workspaceId, workOrderId, ctx.principalId, at);
+    return { ok: true };
+  }
   const run = executionRun(ctx.workspaceId, workOrderId);
   if (workOrder.state === "approved") {
     // Needing materials used to be a dead end: nothing emitted `automation.started`, so any WorkOrder
@@ -1713,14 +1718,18 @@ export function answerWaiting(ctx: AccessContext, id: string, answer: { kind: "a
  * (paper, a lab, a meeting) is invisible to it.
  */
 export function suggestedSessionMinutes(ctx: AccessContext, workOrderId: string, now = new Date()): number | undefined {
+  const open = getStore().listExecutions(ctx.workspaceId, workOrderId).find((execution) => !execution.endedAt);
+  return open ? activityMinutes(ctx, open.startedAt, now.toISOString()) : undefined;
+}
+
+/** Productive minutes the screen record holds between two instants, with the detail consent only; under five reads as nothing. */
+export function activityMinutes(ctx: AccessContext, from: string, to: string): number | undefined {
   const store = getStore();
   if (store.getSetting(ctx.workspaceId, ACTIVITY_DETAIL_CONSENT) !== "granted") return undefined;
-  const open = store.listExecutions(ctx.workspaceId, workOrderId).find((execution) => !execution.endedAt);
-  if (!open) return undefined;
-  const from = Date.parse(open.startedAt);
-  const minutes = store.listActivitySegments(ctx.workspaceId, open.startedAt)
+  const start = Date.parse(from), end = Date.parse(to);
+  const minutes = store.listActivitySegments(ctx.workspaceId, from)
     .filter((segment) => !segment.idle && PRODUCTIVE.has(segment.category as ActivityCategory))
-    .reduce((sum, segment) => sum + Math.max(0, Math.min(Date.parse(segment.end), now.getTime()) - Math.max(Date.parse(segment.start), from)) / 60_000, 0);
+    .reduce((sum, segment) => sum + Math.max(0, Math.min(Date.parse(segment.end), end) - Math.max(Date.parse(segment.start), start)) / 60_000, 0);
   return minutes >= 5 ? Math.round(minutes) : undefined;
 }
 

@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { computeEffectiveness, type EffectivenessInput } from "./effectiveness";
+import { computeEffectiveness, weeklyBias, type EffectivenessInput } from "./effectiveness";
 
 const base: EffectivenessInput = {
   today: "2026-10-20",
@@ -40,4 +40,10 @@ test("with no data every rate is unknown rather than zero", () => {
   expect(empty.onTime.rate).toBeNull();
   expect(empty.estimates.maeRaw).toBeNull();
   expect(empty.coverage.datedAndTimed).toBeNull();
+});
+
+test("estimate bias week by week: one point per week, null under three observations", () => {
+  const item = (observedAt: string, actual: number) => ({ llmP50: 60, llmP85: 90, calibratedP50: 60, calibratedP85: 90, actual, observedAt });
+  expect(weeklyBias([item("2026-10-05T15:00:00Z", 90), item("2026-10-06T15:00:00Z", 60), item("2026-10-11T15:00:00Z", 120),
+    item("2026-10-13T15:00:00Z", 60)])).toEqual([{ week: "2026-10-05", n: 3, medianBias: 1.5 }, { week: "2026-10-12", n: 1, medianBias: null }]);
 });

@@ -1,0 +1,12 @@
+/* The completion check's page (docs/loop-and-scout.md §3): one card, two rows of buttons. */
+.confirm-card { max-width: 640px; display: grid; gap: 14px; }
+.confirm-card h2 { margin: 0; font-size: 18px; }
+.confirm-card p { margin: 0; }
+.confirm-when, .confirm-note { color: var(--muted); font-size: 13px; }
+.confirm-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.confirm-activity { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.confirm-custom { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; }
+.confirm-custom input { width: 72px; }
+.confirm-evidence { display: grid; gap: 8px; }
+.confirm-evidence label { display: grid; gap: 4px; font-size: 13px; }
+.confirm-card .secondary-button[aria-pressed="true"] { outline: 2px solid currentColor; }

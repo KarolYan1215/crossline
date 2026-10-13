@@ -30,6 +30,8 @@ export type NotifyInput = {
   waitingDue: Array<{ id: string; who: string; title: string }>;
   dueSoon: Array<{ id: string; title: string; deadline: string; daysLeft: number }>;
   gateRefusals: Array<{ id: string; title: string; message: string }>;
+  /** Work blocks that ended last night after the quiet hours began and were never confirmed (the brief says how many). */
+  unconfirmedLastNight?: number;
   /**
    * The web's open asks (`lib/asks.ts`), when its snapshot is fresh. They then replace the three lists above as the
    * source of urgent messages — one definition of "needs you" for the badge, the brief and the desktop — and only an
@@ -60,7 +62,8 @@ export function planNotifications(input: NotifyInput): PlannedNotification[] {
       ...(input.asks ?? []).filter((ask) => ask.urgency === "now" && !ask.id.startsWith("wait:")).map((ask) => `待决：${ask.title}`)
     ].slice(0, 3);
     out.push({ key: briefKey, kind: "brief", path: "/", title: "今天的 Crossline",
-      body: [...lines, input.pending ? `${input.pending} 项待决定` : ""].filter(Boolean).join("；") || "今日无到期事项。" });
+      body: [...lines, input.unconfirmedLastNight ? `昨晚 ${input.unconfirmedLastNight} 块待确认` : "",
+        input.pending ? `${input.pending} 项待决定` : ""].filter(Boolean).join("；") || "今日无到期事项。" });
   }
   if (!inWindow(input)) return out;
   const due = input.dueSoon.filter((item) => item.daysLeft <= 1).map((item) => ({ key: `due:${item.id}:${input.today}`, kind: "urgent" as const, path: "/milestones",
@@ -148,7 +151,8 @@ export async function notifyPass(store: CrosslineStore, workspaceId: string, now
       .map((milestone) => ({ id: milestone.id, title: milestone.title, deadline: anchors.get(milestone.id)!, daysLeft: daysLeft(anchors.get(milestone.id)!) }))
       .filter((item) => item.daysLeft >= 0 && item.daysLeft <= 3).sort((a, b) => a.daysLeft - b.daysLeft),
     gateRefusals: store.listEvents(workspaceId, { type: "milestone_gate.blocked" }).filter((event) => event.createdAt >= since)
-      .map((event) => ({ id: event.eventId, title: orders.get(event.entityId) ?? "一项作业", message: String((event.payload as { message?: string }).message ?? "") }))
+      .map((event) => ({ id: event.eventId, title: orders.get(event.entityId) ?? "一项作业", message: String((event.payload as { message?: string }).message ?? "") })),
+    unconfirmedLastNight: unconfirmedLastNight(store, workspaceId, today)
   });
   const delivered: string[] = [];
   for (const item of planned) {
@@ -160,27 +164,47 @@ export async function notifyPass(store: CrosslineStore, workspaceId: string, now
     delivered.push(item.key);
   }
   // The system's own messages (docs/one-input.md §4) go to the desktop and phone only while no page is in front of the person; a page
-  // shows them itself. Each is sent once, within the hour it was said, and its message records that it went out.
+  // shows them itself. A completion check goes out whatever page is open (the web marks it pending regardless). Each is sent once,
+  // within the hour it was said, and its message records that it went out.
   const visibleAt = store.getSetting(workspaceId, "presence.visibleAt");
-  if (!visibleAt || now.getTime() - Date.parse(visibleAt) > PRESENCE_FRESH_MS) {
-    for (const message of store.listRecentNudges(workspaceId, new Date(now.getTime() - 3_600_000).toISOString())) {
-      const nudge = message.payload.nudge as { delivery?: string; fingerprint?: string } | undefined;
-      const text = (message.payload.card as { clarify?: { question?: string } } | undefined)?.clarify?.question ?? "";
-      if (nudge?.delivery !== "pending" || !text) continue;
-      const body = text.split("\n").slice(0, 3).join(" ").slice(0, 200);
-      // A nudge whose button starts a task (a block coming up, a latest start) carries that task, so the phone's 「开始计时」 starts the
-      // timer in one tap; before, the notification only opened the home page and the button was two screens away.
-      const start = ((message.payload.card as { actions?: Array<{ action?: string; args?: { type?: string; workOrderId?: string } }> } | undefined)?.actions ?? [])
-        .find((action) => action.action === "task.op" && action.args?.type === "start")?.args?.workOrderId;
-      const [desktop, phone] = await Promise.all([deliver("Crossline", body, `${baseUrl}/`),
-        push ? push(workspaceId, { title: "Crossline", body, path: start ? `/workbench/${encodeURIComponent(start)}` : "/", tag: nudge.fingerprint ?? message.id,
-          ...(start ? { start } : {}) }).catch(() => false) : Promise.resolve(false)]);
-      if (!desktop && !phone) continue;
-      store.updateConversationPayload(workspaceId, message.id, { ...message.payload, nudge: { ...nudge, delivery: "pushed" } });
-      delivered.push(`nudge:${nudge.fingerprint ?? message.id}`);
-    }
+  const pageShown = Boolean(visibleAt) && now.getTime() - Date.parse(visibleAt!) <= PRESENCE_FRESH_MS;
+  for (const message of store.listRecentNudges(workspaceId, new Date(now.getTime() - 3_600_000).toISOString())) {
+    const nudge = message.payload.nudge as { delivery?: string; fingerprint?: string; kind?: string } | undefined;
+    const text = (message.payload.card as { clarify?: { question?: string } } | undefined)?.clarify?.question ?? "";
+    if (nudge?.delivery !== "pending" || !text) continue;
+    const confirm = nudge.kind === "block_confirm";
+    if (pageShown && !confirm) continue;
+    const body = text.split("\n").slice(0, 3).join(" ").slice(0, 200);
+    // A completion check opens its confirm page, where the answer is written by a POST (a link in a notification never writes); no
+    // 「开始计时」 on it — the block is over. A nudge whose button starts a task (a block coming up, a latest start) carries that task, so
+    // the phone's 「开始计时」 starts the timer in one tap.
+    const start = confirm ? undefined : ((message.payload.card as { actions?: Array<{ action?: string; args?: { type?: string; workOrderId?: string } }> } | undefined)?.actions ?? [])
+      .find((action) => action.action === "task.op" && action.args?.type === "start")?.args?.workOrderId;
+    const path = confirm ? `/confirm/${encodeURIComponent(message.id)}` : start ? `/workbench/${encodeURIComponent(start)}` : "/";
+    const [desktop, phone] = await Promise.all([deliver("Crossline", body, `${baseUrl}${confirm ? path : "/"}`),
+      push ? push(workspaceId, { title: "Crossline", body, path, tag: nudge.fingerprint ?? message.id, ...(start ? { start } : {}) }).catch(() => false)
+        : Promise.resolve(false)]);
+    if (!desktop && !phone) continue;
+    store.updateConversationPayload(workspaceId, message.id, { ...message.payload, nudge: { ...nudge, delivery: "pushed" } });
+    delivered.push(`nudge:${nudge.fingerprint ?? message.id}`);
   }
   return delivered;
+}
+
+/** The quiet hours begin at 23:00; a block ending within the confirm window before them is not asked about either. */
+const NIGHT_FROM = "22:30";
+
+/**
+ * Last night's work blocks nobody was asked about: they ended after the evening's questions stopped, and no confirmation was written.
+ * Read from what the web's nudge pass saw under way (`nudge.blocks:<day>`), since the schedule itself is derived and keeps no past.
+ */
+export function unconfirmedLastNight(store: CrosslineStore, workspaceId: string, today: string): number {
+  const yesterday = new Date(Date.parse(`${today}T12:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
+  let seen: Record<string, { id: string; end: string; began?: boolean }> = {};
+  try { seen = JSON.parse(store.getSetting(workspaceId, `nudge.blocks:${yesterday}`) ?? "{}"); } catch { return 0; }
+  const confirmed = new Set(store.listEvents(workspaceId, { type: "block.confirmed" })
+    .filter((event) => (event.payload as { day?: string }).day === yesterday).map((event) => String((event.payload as { blockId?: string }).blockId)));
+  return Object.values(seen).filter((block) => block.began && block.end >= NIGHT_FROM && !confirmed.has(block.id)).length;
 }
 
 /** A page seen this recently is in front of the person; the web's `PRESENCE_FRESH_MS`, kept equal. */

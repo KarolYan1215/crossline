@@ -345,11 +345,14 @@ function missedAsks({ store, ctx, today }: Source): Ask[] {
   const anchors = deadlines(store, ctx.workspaceId);
   const handled = new Set(live(ctx, store.listEvents(ctx.workspaceId, { type: "missed.handled" })).map((event) => (event.payload as { askId?: string }).askId));
   const orders = new Map(store.listWorkOrders(ctx.workspaceId).map((order) => [order.id, order]));
+  // A block the person already answered the completion check for (any answer, 未执行 included) is not asked about again.
+  const confirmed = new Set(store.listEvents(ctx.workspaceId, { type: "block.confirmed" })
+    .filter((event) => (event.payload as { day?: string }).day === yesterday).map((event) => String((event.payload as { workOrderId?: string }).workOrderId)));
   return Object.entries(placed).flatMap(([orderId, start]) => {
     const order = orders.get(orderId);
     const id = `missed:${orderId}:${yesterday}`;
     // Still not begun: approved, preparing or ready. Started (or done, or discarded) is not missed.
-    if (!order || !["approved", "preparing", "ready_for_human"].includes(order.state) || handled.has(id)) return [];
+    if (!order || !["approved", "preparing", "ready_for_human"].includes(order.state) || handled.has(id) || confirmed.has(orderId)) return [];
     const dueDay = dueOf(order, anchors);
     if (!dueDay || daysBetween(today, dueDay) > MISSED_ASK_HORIZON_DAYS) return [];
     return [{ id, kind: "missed_block" as const, entityId: orderId, line: order.identityId, urgency: urgencyFor(dueDay, today), dueDay,

@@ -224,3 +224,35 @@ test("blocking mid-pause closes the interruption so the record never reads as wo
     expect(execution.interruptions.every((item) => item.resumedAt)).toBe(true);
   } finally { store.close(); }
 });
+
+test("a confirmed session ends the open one with the confirmed minutes, or is written closed over the block when none is open", () => {
+  const store = new CrosslineStore(":memory:");
+  seed(store, "ready_for_human");
+  store.transitionWorkOrder("w", "w1", { type: "human.started" }, "start:w1", { durationObserved: true, occurredAt: "2026-09-14T09:00:00.000Z" });
+  store.pauseExecution("w", "w1", "吃饭", "2026-09-14T09:30:00.000Z");
+  const first = store.recordConfirmedSession("w", "w1", "o", { startedAt: "2026-09-14T09:00:00.000Z", endedAt: "2026-09-14T10:00:00.000Z",
+    minutes: 90, source: "one_tap", key: "confirm:a" });
+  expect(first.changed).toBe(true);
+  const [closed] = store.listExecutions("w", "w1");
+  expect(closed).toMatchObject({ endedAt: "2026-09-14T10:00:00.000Z", outcome: "confirmed" });
+  expect(closed!.interruptions.at(-1)?.resumedAt).toBe("2026-09-14T10:00:00.000Z");
+  // The same confirmation twice writes once.
+  expect(store.recordConfirmedSession("w", "w1", "o", { startedAt: "2026-09-14T09:00:00.000Z", endedAt: "2026-09-14T10:00:00.000Z",
+    minutes: 90, source: "one_tap", key: "confirm:a" }).changed).toBe(false);
+  const second = store.recordConfirmedSession("w", "w1", "o", { startedAt: "2026-09-15T14:00:00.000Z", endedAt: "2026-09-15T15:00:00.000Z",
+    minutes: 45, source: "activity", key: "confirm:b" });
+  const rows = store.listExecutions("w", "w1");
+  expect(rows).toHaveLength(2);
+  expect(rows[1]).toMatchObject({ id: second.executionId, startedAt: "2026-09-15T14:00:00.000Z", endedAt: "2026-09-15T15:00:00.000Z", outcome: "confirmed" });
+  expect(store.listWorkOrders("w")[0]!.state).toBe("active");
+  expect(store.listEvents("w", { type: "execution.confirmed" })).toHaveLength(2);
+});
+
+test("an active order with no open session opens a new one", () => {
+  const store = new CrosslineStore(":memory:");
+  seed(store, "active");
+  const { executionId } = store.openSession("w", "w1", "o", "2026-09-14T09:00:00.000Z");
+  expect(store.openSession("w", "w1", "o").executionId).toBe(executionId);
+  const rows = store.listExecutions("w", "w1");
+  expect(rows.map((row) => [row.id, row.startedAt, row.endedAt ?? null])).toEqual([[executionId, "2026-09-14T09:00:00.000Z", null]]);
+});

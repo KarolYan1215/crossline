@@ -634,3 +634,40 @@ test("未达可开始标准时打开今日页回到访谈，并写明还差什�
     await context.close();
   }
 });
+
+test("确认时间块：通知打开的小页上点「超出预估 · 30 分钟」，账本多一条已关闭的会话，这一步完成", async ({ page }, testInfo) => {
+  const store = openStore();
+  const ws = realWorkspaceId(store);
+  const owner = store.getWorkspaceOwnerId(ws)!;
+  const orderId = `confirm-e2e-${testInfo.project.name}`;
+  store.saveWorkOrder({ id: orderId, ownerId: owner, workspaceId: ws, identityId: "research", projectId: "ece555", milestoneId: "", intent: "完成 ECE 555 作业 3",
+    state: "approved", riskTier: "routine", estimate: { p25Minutes: 40, p50Minutes: 60, p85Minutes: 90, source: "llm_prior", observationCount: 0, confidence: "high" },
+    payload: { family: "deep_work", materialContract: [] } });
+  const step = (id: string, title: string) => ({ id, role: "solve", title, deliverable: "解答", doneCriterion: "写完", share: 0.5,
+    estimate: { p25Minutes: 30, p50Minutes: 45, p85Minutes: 60 }, dependsOn: [], notBefore: "", dueBy: "", schedulable: true, executor: "human" as const, tickOutcome: "" });
+  store.saveStepPlan(ws, orderId, { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 4, unit: "题" }, rationale: "按题拆分",
+    steps: [step("s1", "推导第 1–2 题"), step("s2", "推导第 3–4 题")] }, owner, "e2e");
+  const messageId = `confirm-msg-${testInfo.project.name}`;
+  const block = { id: `scheduled:${orderId}:v1s1`, orderId, stepId: "v1s1", title: "完成 ECE 555 作业 3", step: "推导第 1–2 题", day: "2026-09-14", start: "09:00", end: "09:45", endedTimerAt: "" };
+  store.appendConversationMessage({ id: messageId, workspaceId: ws, conversationId: store.conversationFor(ws, "2026-09-14").id, role: "nudge", text: "", createdAt: "2026-09-14T14:47:00.000Z",
+    payload: { nudge: { kind: "block_confirm", fingerprint: `confirm:${block.id}:2026-09-14`, counted: true, urgent: true, delivery: "pushed", block },
+      card: { actions: [], items: [], clarify: { question: "09:00–09:45 的「完成 ECE 555 作业 3 · 推导第 1–2 题」做得怎么样？",
+        options: [{ label: "确认", actions: [], kind: "href", href: `/confirm/${messageId}` }] }, confidence: "high", nudgeKind: "block_confirm" } } });
+  store.close();
+
+  await page.goto(`/confirm/${messageId}`);
+  await expect(page.getByRole("heading", { name: "完成 ECE 555 作业 3 · 推导第 1–2 题" })).toBeVisible();
+  await expect(page.getByText("09/14 09:00–09:45，预估 45 分钟")).toBeVisible();
+  await page.getByRole("button", { name: "超出预估" }).click();
+  await page.getByRole("button", { name: "30 分钟" }).click();
+  await expect(page.getByText("已记下：用时 1 小时 15 分钟，这一步已完成。")).toBeVisible();
+
+  const after = openStore();
+  const sessions = after.listExecutions(ws, orderId);
+  expect(sessions.map((session) => [session.startedAt, session.endedAt, session.outcome])).toEqual([["2026-09-14T14:00:00.000Z", "2026-09-14T14:45:00.000Z", "confirmed"]]);
+  expect(after.getStepPlan(ws, orderId)!.steps[0]!.status).toBe("done");
+  after.close();
+  // Opened again from the notification, the page says what was recorded instead of asking twice.
+  await page.reload();
+  await expect(page.getByText("已记下：用时 1 小时 15 分钟，这一步已完成。")).toBeVisible();
+});

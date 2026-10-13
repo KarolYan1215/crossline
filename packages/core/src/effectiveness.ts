@@ -19,7 +19,7 @@ export type EffectivenessInput = {
   milestones: Array<{ id: string; title: string; deadline: string; requiredCriteria: string[]; metOn: Record<string, string>;
     /** The 8-week forecast's p85 finish for it, when there is one. */ p85Finish?: string | null }>;
   /** Finished work with the analysis's estimate and what it really took. */
-  durations: Array<{ llmP50: number; llmP85: number; calibratedP50: number; calibratedP85: number; actual: number }>;
+  durations: Array<{ llmP50: number; llmP85: number; calibratedP50: number; calibratedP85: number; actual: number; observedAt?: string }>;
   /** Worked minutes in the last 7 days by line, and the person's priority order of lines (first = highest). */
   minutesByLine: Record<string, number>;
   deadlineMinutes: number;
@@ -39,7 +39,9 @@ export type EffectivenessInput = {
 
 export type Effectiveness = {
   onTime: { due: number; met: number; rate: number | null; atRisk: string[] };
-  estimates: { n: number; medianBiasRaw: number | null; maeRaw: number | null; maeCalibrated: number | null; coverageRaw: number | null; coverageCalibrated: number | null };
+  estimates: { n: number; medianBiasRaw: number | null; maeRaw: number | null; maeCalibrated: number | null; coverageRaw: number | null; coverageCalibrated: number | null;
+    /** Week by week (Monday's date), the median of actual ÷ the analysis's estimate; null under three observations that week. */
+    weekly: Array<{ week: string; n: number; medianBias: number | null }> };
   priorities: { minutesByLine: Record<string, number>; deadlineShare: number | null; topLine: string | null; topLineShare: number | null };
   overhead: { decisionsPerDay: number; decisionMinutesPerDay: number; medianCaptureToScheduled: number | null; pendingNow: number };
   coverage: { datedAndTimed: number | null; progressRecorded: number | null; followUpsOnTime: number | null };
@@ -55,6 +57,22 @@ const median = (values: number[]) => {
 const mean = (values: number[]) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
 const share = (part: number, whole: number) => whole > 0 ? Math.round((part / whole) * 100) / 100 : null;
 const round = (value: number | null, digits = 2) => value === null ? null : Math.round(value * 10 ** digits) / 10 ** digits;
+
+/** Below this many observations a week's median says nothing. */
+const WEEKLY_MIN_OBSERVATIONS = 3;
+
+/** How far estimates are off, week by week, so an improvement (or not) is visible (docs/loop-and-scout.md §3). */
+export function weeklyBias(durations: EffectivenessInput["durations"]): Effectiveness["estimates"]["weekly"] {
+  const weeks = new Map<string, number[]>();
+  for (const item of durations) {
+    if (!item.observedAt || !(item.actual > 0) || !(item.llmP50 > 0)) continue;
+    const day = new Date(`${item.observedAt.slice(0, 10)}T00:00:00Z`);
+    const monday = new Date(day.getTime() - ((day.getUTCDay() + 6) % 7) * 86_400_000).toISOString().slice(0, 10);
+    weeks.set(monday, [...(weeks.get(monday) ?? []), item.actual / item.llmP50]);
+  }
+  return [...weeks.entries()].sort(([a], [b]) => a.localeCompare(b))
+    .map(([week, ratios]) => ({ week, n: ratios.length, medianBias: ratios.length >= WEEKLY_MIN_OBSERVATIONS ? round(median(ratios)) : null }));
+}
 
 export function computeEffectiveness(input: EffectivenessInput): Effectiveness {
   const due = input.milestones.filter((milestone) => milestone.deadline < input.today);
@@ -77,7 +95,8 @@ export function computeEffectiveness(input: EffectivenessInput): Effectiveness {
       maeRaw: round(mean(usable.map((item) => logError(item.llmP50, item.actual)))),
       maeCalibrated: round(mean(usable.map((item) => logError(item.calibratedP50, item.actual)))),
       coverageRaw: share(usable.filter((item) => item.actual <= item.llmP85).length, usable.length),
-      coverageCalibrated: share(usable.filter((item) => item.actual <= item.calibratedP85).length, usable.length)
+      coverageCalibrated: share(usable.filter((item) => item.actual <= item.calibratedP85).length, usable.length),
+      weekly: weeklyBias(usable)
     },
     priorities: { minutesByLine: input.minutesByLine, deadlineShare: share(input.deadlineMinutes, input.totalMinutes),
       topLine, topLineShare: topLine ? share(input.minutesByLine[topLine] ?? 0, totalLine) : null },

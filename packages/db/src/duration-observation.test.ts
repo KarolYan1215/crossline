@@ -215,3 +215,14 @@ test("finishing the work records how long it took, even before (or without) the 
     expect(store.listDurationObservations("w", "research", "deep_work")).toHaveLength(1);
   } finally { store.close(); }
 });
+
+test("sessions confirmed after the fact count towards the observation written at completion, marked one_tap", () => {
+  const store = new CrosslineStore(":memory:");
+  seed(store);
+  store.recordConfirmedSession("w", "w1", "o", { startedAt: "2026-09-14T09:00:00.000Z", endedAt: "2026-09-14T10:00:00.000Z", minutes: 90, source: "one_tap", key: "c1" });
+  store.transitionWorkOrder("w", "w1", { type: "human.started" }, "start:w1", { durationObserved: true, occurredAt: "2026-09-15T09:00:00.000Z" });
+  store.transitionWorkOrder("w", "w1", { type: "human.completed" }, "done:w1",
+    { occurredAt: "2026-09-15T09:40:00.000Z", reportedMinutes: 30, reportedSource: "one_tap", durationCalibrationBaseline: BASELINE });
+  const [observation] = store.listDurationObservations("w", "research", "deep_work");
+  expect(observation).toMatchObject({ observedMinutes: 120, actualSource: "one_tap" });
+});

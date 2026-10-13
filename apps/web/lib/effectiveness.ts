@@ -43,7 +43,7 @@ export async function loadEffectiveness(ctx: AccessContext, now = new Date()): P
     const order = orders.get(row.workOrderId);
     const calibrated = order ? resolvedEstimate(ctx, order) : undefined;
     return { llmP50: row.llmP50Minutes!, llmP85: row.llmP85Minutes!, calibratedP50: calibrated?.p50Minutes ?? row.llmP50Minutes!,
-      calibratedP85: calibrated?.p85Minutes ?? row.llmP85Minutes!, actual: row.observedMinutes };
+      calibratedP85: calibrated?.p85Minutes ?? row.llmP85Minutes!, actual: row.observedMinutes, observedAt: row.observedAt };
   });
 
   const minutesByLine: Record<string, number> = {};

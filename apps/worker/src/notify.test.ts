@@ -113,3 +113,37 @@ test("a nudge whose button starts a task reaches the phone with that task, so �
   expect(pushed).toMatchObject([{ path: "/workbench/wo-7", start: "wo-7" }]);
   store.close();
 });
+
+test("a completion check goes to the desktop and the phone even with a page open, opening its confirm page, with no 「开始计时」", async () => {
+  const store = new CrosslineStore(":memory:");
+  store.setSetting("w", "notify.level", "off");
+  store.setSetting("w", "presence.visibleAt", "2026-10-12T15:51:00.000Z");
+  const conversation = store.conversationFor("w", "2026-10-12");
+  store.appendConversationMessage({ id: "c1", workspaceId: "w", conversationId: conversation.id, role: "nudge", text: "", createdAt: "2026-10-12T15:47:00.000Z",
+    payload: { nudge: { kind: "block_confirm", fingerprint: "confirm:scheduled:hw3:v1s1:2026-10-12", counted: true, urgent: true, delivery: "pending" },
+      card: { actions: [], clarify: { question: "09:00–09:45 的「完成 ECE 555 作业 3」做得怎么样？", options: [{ label: "确认", actions: [], kind: "href", href: "/confirm/c1" }] } } } });
+  const desktop: string[] = [];
+  const pushed: Array<{ path: string; start?: string }> = [];
+  const sent = await notifyPass(store, "w", new Date("2026-10-12T15:52:00.000Z"), async (_title, _body, url) => { desktop.push(url); return true; }, "http://127.0.0.1:3210",
+    async (_ws, message) => { pushed.push(message); return true; });
+  expect(sent).toEqual(["nudge:confirm:scheduled:hw3:v1s1:2026-10-12"]);
+  expect(desktop).toEqual(["http://127.0.0.1:3210/confirm/c1"]);
+  expect(pushed).toEqual([expect.objectContaining({ path: "/confirm/c1" })]);
+  expect(pushed[0]).not.toHaveProperty("start");
+  store.close();
+});
+
+test("the morning brief says how many of last night's blocks wait to be confirmed", async () => {
+  const store = new CrosslineStore(":memory:");
+  store.setSetting("w", "nudge.blocks:2026-10-07", JSON.stringify({
+    "scheduled:a": { id: "scheduled:a", end: "23:30", began: true },
+    "scheduled:b": { id: "scheduled:b", end: "23:59", began: true },
+    "scheduled:c": { id: "scheduled:c", end: "15:00", began: true },
+    "scheduled:d": { id: "scheduled:d", end: "23:40", began: false } }));
+  store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: "block-confirmed:x", type: "block.confirmed", entityId: "x",
+    payload: { blockId: "scheduled:b", day: "2026-10-07", outcome: "as_planned" } });
+  const shown: string[] = [];
+  await notifyPass(store, "w", new Date("2026-10-08T14:05:00.000Z"), async (_title, body) => { shown.push(body); return true; });
+  expect(shown[0]).toContain("昨晚 1 块待确认");
+  store.close();
+});

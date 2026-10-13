@@ -220,6 +220,18 @@ test("work given a time yesterday and never started is asked about when it bears
   expect(collectAsks(TEST_CTX, NOW).some((ask) => ask.kind === "missed_block")).toBe(false);
 });
 
+test("a block whose completion check was answered yesterday is not asked about again the next day", () => {
+  const store = setup();
+  const save = (id: string) => store.saveWorkOrder({ id, ownerId: owner, workspaceId: ws, identityId: "research", projectId: "p",
+    milestoneId: "", intent: `任务 ${id}`, state: "approved", riskTier: "routine", estimate, payload: { dueDate: "2026-10-10" } });
+  save("answered");
+  save("silent");
+  store.setSetting(ws, "schedule.day:2026-10-06", JSON.stringify({ answered: "09:00", silent: "14:00" }));
+  store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: "block-confirmed:m1", type: "block.confirmed", entityId: "m1",
+    payload: { blockId: "scheduled:answered", workOrderId: "answered", day: "2026-10-06", outcome: "not_done" } });
+  expect(collectAsks(TEST_CTX, NOW).filter((ask) => ask.kind === "missed_block").map((ask) => ask.entityId)).toEqual(["silent"]);
+});
+
 test("missing inputs of a milestone still in the task library wait until its window opens", () => {
   const store = setup();
   store.saveMilestoneAnchor({ workspaceId: ws, milestoneId: "mos2", stage: 1, deadline: "2026-12-17", baseline: "", target: "", stakeholders: [],

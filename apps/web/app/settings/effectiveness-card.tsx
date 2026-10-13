@@ -1,5 +1,5 @@
 import type { Effectiveness } from "@crossline/core";
-import { Bullet, Ring, StackedBar } from "../ui/charts";
+import { Bullet, Ring, Sparkline, StackedBar } from "../ui/charts";
 import { Tag } from "../ui/tag";
 
 const pct = (value: number | null) => value === null ? "—" : `${Math.round(value * 100)}%`;
@@ -22,6 +22,17 @@ export function EffectivenessCard({ data, labels }: { data: Effectiveness & { de
     <div className="st-health-cell">
       {coverage !== null && <div className="st-health-bullet"><Bullet label="估时覆盖率" target={85} max={100} unit="%" actual={Math.round(coverage * 100)} /></div>}
       <div><b>估时覆盖率 {pct(coverage)}</b><small>{data.estimates.n ? `实际用时不超过保守估时的比例，目标 85%；${data.estimates.n} 个样本` : "尚无计时完成的任务"}</small></div>
+    </div>
+    <div className="st-health-cell">
+      {(() => {
+        const weeks = data.estimates.weekly.filter((week) => week.medianBias !== null);
+        return <>
+          {weeks.length > 1 && <Sparkline label="估时偏差（实际 ÷ 估时）按周" unit=" 倍" values={weeks.map((week) => week.medianBias!)}
+            labels={weeks.map((week) => `${week.week.slice(5).replace("-", "/")} 周`)} />}
+          <div><b>估时偏差 {weeks.length ? `${weeks.at(-1)!.medianBias} 倍` : "—"}</b><small>{weeks.length
+            ? "最近一周实际用时与估时之比的中位数，1 倍为准；每周至少 3 个样本才计" : "每周至少 3 个计时完成的任务后显示"}</small></div>
+        </>;
+      })()}
     </div>
     <div className="st-health-cell st-health-wide">
       <div><b>近 7 天投入 {h(lines.reduce((sum, [, minutes]) => sum + minutes, 0))} h</b><small>有截止日的工作占 {pct(data.priorities.deadlineShare)}</small></div>

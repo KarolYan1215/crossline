@@ -1520,6 +1520,56 @@ export class CrosslineStore {
 
   // Pause and resume are execution facts, not formal WorkOrder states: the order stays `active`
   // throughout and only the interruption record changes.
+  /**
+   * A work session the person confirmed after the fact (docs/loop-and-scout.md §3): 「按预估完成」 / 「超出 30 分钟」 on a block that
+   * ended. An open session (they pressed start and never stopped) is ended with the confirmed minutes; with none, a closed session is
+   * written over the block's own times. The order's state does not move — finishing the task is `human.completed`'s job. The minutes
+   * count towards the task's duration observation when it is completed (`reportedMinutes`, like a one-tap report at completion).
+   */
+  recordConfirmedSession(workspaceId: string, workOrderId: string, ownerId: string,
+    session: { startedAt: string; endedAt: string; minutes: number; source: "one_tap" | "activity"; key: string }): { executionId: string; changed: boolean } {
+    return this.#db.transaction(() => {
+      const minutes = Math.round(Math.min(24 * 60, Math.max(1, session.minutes)));
+      const appended = this.appendEvent({ ownerId, workspaceId, idempotencyKey: session.key, type: "execution.confirmed", entityId: workOrderId,
+        payload: { startedAt: session.startedAt, endedAt: session.endedAt, minutes, source: session.source } });
+      const open = this.#openExecution(workspaceId, workOrderId);
+      if (!appended.inserted) return { executionId: open?.id ?? "", changed: false };
+      if (open) {
+        const endedAt = notBefore(session.endedAt, open.interruptions.at(-1)?.resumedAt ?? open.interruptions.at(-1)?.pausedAt ?? open.startedAt);
+        const last = open.interruptions.at(-1);
+        const interruptions = last && !last.resumedAt ? [...open.interruptions.slice(0, -1), { ...last, resumedAt: endedAt }] : open.interruptions;
+        if (interruptions !== open.interruptions) this.#writeInterruptions(open.id, interruptions, open.durationObserved);
+        this.#db.prepare("UPDATE executions SET ended_at = ?, outcome = 'confirmed', payload_json = ? WHERE id = ?")
+          .run(endedAt, JSON.stringify({ durationObserved: open.durationObserved, interruptions, reportedMinutes: minutes, reportedSource: session.source }), open.id);
+        return { executionId: open.id, changed: true };
+      }
+      const id = randomUUID();
+      this.#db.prepare(`
+        INSERT INTO executions (id, owner_id, workspace_id, work_order_id, started_at, ended_at, pause_minutes, outcome, payload_json)
+        VALUES (?, ?, ?, ?, ?, ?, 0, 'confirmed', ?)
+      `).run(id, ownerId, workspaceId, workOrderId, session.startedAt, notBefore(session.endedAt, session.startedAt),
+        JSON.stringify({ durationObserved: false, interruptions: [], reportedMinutes: minutes, reportedSource: session.source }));
+      return { executionId: id, changed: true };
+    }).immediate();
+  }
+
+  /**
+   * Opens a timed session on an order already `active` with none open: after a confirmed session closed the last one, pressing start
+   * again has to time something (the state machine has no transition for it — the order never left `active`).
+   */
+  openSession(workspaceId: string, workOrderId: string, ownerId: string, at?: string): { executionId: string } {
+    return this.#db.transaction(() => {
+      const open = this.#openExecution(workspaceId, workOrderId);
+      if (open) return { executionId: open.id };
+      const id = randomUUID();
+      this.#db.prepare(`
+        INSERT INTO executions (id, owner_id, workspace_id, work_order_id, started_at, ended_at, pause_minutes, outcome, payload_json)
+        VALUES (?, ?, ?, ?, ?, NULL, 0, NULL, ?)
+      `).run(id, ownerId, workspaceId, workOrderId, at ?? new Date().toISOString(), JSON.stringify({ durationObserved: true, interruptions: [] }));
+      return { executionId: id };
+    }).immediate();
+  }
+
   pauseExecution(workspaceId: string, workOrderId: string, reason: string, at?: string): { changed: boolean } {
     return this.#db.transaction(() => {
       const open = this.#openExecution(workspaceId, workOrderId);
