@@ -152,6 +152,11 @@ export const AUTO_HANDOFF_SETTING = "agent.autoHandoff";
  * never stored, so the web's attention timer (every ten minutes) writes this for the coming seven days; the worker reads it.
  */
 export const STEP_STARTS_SETTING = "schedule.stepStarts";
+/**
+ * How long each order was planned for on a day: `schedule.minutes:<YYYY-MM-DD>` → `{ [orderId]: minutes }`, written by the same timer.
+ * Read by the plan page's plan-vs-actual chart and by the portrait's say–do reading (`sayDoFor`).
+ */
+export const scheduledMinutesKey = (day: string) => `schedule.minutes:${day}`;
 /** A block counts as come up this many minutes before it starts: the run gets a head start on the time the plan set aside for it. */
 export const AUTO_HANDOFF_LEAD_MINUTES = 30;
 

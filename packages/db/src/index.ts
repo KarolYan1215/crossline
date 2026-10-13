@@ -3403,3 +3403,4 @@ export * from "./interview";
 export * from "./file-belonging";
 export * from "./push";
 export * from "./artifacts";
+export * from "./portrait";
