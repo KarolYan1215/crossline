@@ -120,6 +120,8 @@ export type StepPlanInput = {
   /** The content units read from the person's material, and what only the person can answer (packages/core/src/steps.ts). */
   units?: Array<{ id: string; title: string; docId: string; quote: string }>;
   questions?: Array<{ id: string; text: string; why: string; options: string[] }>;
+  /** The planner's judgement of the task's long-term importance; absent on plans made before it was asked for. */
+  importance?: { longTerm: boolean; why: string };
 };
 export type StoredTaskStep = StepPlanInput["steps"][number] & {
   workOrderId: string; seq: number; status: "planned" | "done" | "skipped"; progressQuarter: number; updatedAt: string;
@@ -127,6 +129,7 @@ export type StoredTaskStep = StepPlanInput["steps"][number] & {
 export type StoredStepPlan = {
   workOrderId: string; version: number; archetypeId: string; quantity: StepPlanInput["quantity"]; rationale: string; plannedAt: string;
   units: NonNullable<StepPlanInput["units"]>; questions: NonNullable<StepPlanInput["questions"]>;
+  importance?: StepPlanInput["importance"];
   steps: StoredTaskStep[];
 };
 
@@ -2166,7 +2169,7 @@ export class CrosslineStore {
         archetype_id = excluded.archetype_id, quantity_json = excluded.quantity_json, rationale = excluded.rationale, planned_at = excluded.planned_at,
         detail_json = excluded.detail_json`)
         .run(workspaceId, workOrderId, version, plan.archetypeId, JSON.stringify(plan.quantity), plan.rationale, now,
-          JSON.stringify({ units: plan.units ?? [], questions: plan.questions ?? [] }));
+          JSON.stringify({ units: plan.units ?? [], questions: plan.questions ?? [], ...(plan.importance ? { importance: plan.importance } : {}) }));
       // New ids continue after the kept ones so a dependency on a done step still points at it.
       const offset = kept.length;
       const insert = this.#db.prepare(`INSERT INTO task_steps (workspace_id, work_order_id, id, seq, role, title, deliverable, done_criterion, share,
@@ -2211,8 +2214,8 @@ export class CrosslineStore {
     return plans.map((row) => ({ workOrderId: String(row.work_order_id), version: Number(row.version), archetypeId: String(row.archetype_id),
       quantity: JSON.parse(String(row.quantity_json)) as StoredStepPlan["quantity"], rationale: String(row.rationale),
       plannedAt: String(row.planned_at),
-      ...(() => { const detail = JSON.parse(String(row.detail_json ?? "{}")) as Partial<Pick<StoredStepPlan, "units" | "questions">>;
-        return { units: detail.units ?? [], questions: detail.questions ?? [] }; })(),
+      ...(() => { const detail = JSON.parse(String(row.detail_json ?? "{}")) as Partial<Pick<StoredStepPlan, "units" | "questions" | "importance">>;
+        return { units: detail.units ?? [], questions: detail.questions ?? [], ...(detail.importance ? { importance: detail.importance } : {}) }; })(),
       steps: byOrder.get(String(row.work_order_id)) ?? [] }));
   }
 

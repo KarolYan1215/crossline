@@ -34,7 +34,7 @@ test("the calendar carries milestone deadlines and confirmed dated facts as flag
   expect(Object.keys(timeline.quietByWeekday)).toHaveLength(7);
 });
 
-test("what is waiting is counted by kind, and the total is their sum", () => {
+test("what is waiting is counted by kind; the total is today's decisions, without what the weekly review decides", () => {
   const store = globalThis.crosslineStore!;
   const base = { ownerId: "o", workspaceId: TEST_CTX.workspaceId, identityId: "research", projectId: "p", version: 1 };
   store.saveMilestone({ ...base, id: "d1", title: "草稿一", status: "draft" });
@@ -44,7 +44,9 @@ test("what is waiting is counted by kind, and the total is their sum", () => {
     findings: [], sources: [], proposals: [{ id: "p1", title: "x", why: "y", kind: "task", dueDate: "", findingIds: [], status: "pending" }, { id: "p2", title: "z", why: "y", kind: "task", dueDate: "", findingIds: [], status: "accepted" }] });
   const counts = countPending(TEST_CTX);
   expect(counts).toMatchObject({ milestoneDrafts: 2, research: 1, dates: 0 });
-  expect(counts.total).toBe(counts.workOrders + counts.milestoneDrafts + counts.relations + counts.research + counts.dates);
+  // Research proposals and candidate relations are counted, and decided in the weekly review: they are not in the day's total.
+  expect(counts.total).toBe(counts.workOrders + counts.milestoneDrafts + counts.dates + counts.targets + counts.assistantKinds + counts.assistantQuestions
+    + counts.assistantReviews + counts.asks + counts.questions);
 });
 
 test("a proposal's preview block is its own kind and still links to its task", async () => {

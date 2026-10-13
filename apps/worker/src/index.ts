@@ -18,7 +18,7 @@ import { createCalendarPublisher } from "./calendar-publish";
 import { AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, backgroundSpend, CALENDAR_SYNC_FAILURE, spendAllows, type PlanRankingInput } from "@crossline/core";
 import { createFlywheelExpander } from "./flywheel";
 import { createManualbookBuilder, pendingMaterialWorkOrders, pendingTutorials } from "./manualbook";
-import { createProgressJudge, createStepPlanner, createWarningReviewer, reportsAwaitingJudgement, tasksAwaitingStepPlan, warningsAwaitingReview } from "./step-planner";
+import { createProgressJudge, createStepPlanner, createWarningReviewer, reportsAwaitingJudgement, settleOldQuestions, tasksAwaitingStepPlan, warningsAwaitingReview } from "./step-planner";
 import { createArchetypeCurator, curationDue } from "./archetype-curator";
 import { createTaskTitler, untitledTasks } from "./task-titler";
 import { createCalendarClassifier, unfiledCalendarEvents } from "./calendar-classifier";
@@ -250,6 +250,11 @@ async function stepPlanPass(workspaceId: string, checkedAt = new Date().toISOStr
       const created = materializeDatePairs(analysisStore, workspaceId);
       if (created.length) console.info(JSON.stringify({ type: "datepair.created", checkedAt, workspaceId, created }));
     } catch (error) { console.info(JSON.stringify({ type: "datepair.failed", checkedAt, workspaceId, message: error instanceof Error ? error.message : "" })); }
+    // Questions of plans made before importance was judged: filtered by rule, no model call (docs/review-2026-10-13.md §11).
+    try {
+      const settled = settleOldQuestions(analysisStore, workspaceId);
+      if (settled.length) console.info(JSON.stringify({ type: "step_questions.assumed", checkedAt, workspaceId, settled }));
+    } catch { /* next tick */ }
     if (!codexSupervisor) return;
     const ids = tasksAwaitingStepPlan(analysisStore, workspaceId);
     const reviews = warningsAwaitingReview(analysisStore, workspaceId);

@@ -79,9 +79,10 @@ export function countPending(ctx: AccessContext): PendingCounts {
       undated: latestFileDates(store, ctx.workspaceId).undated
     }).filter((gap) => gap.blocking).length
   };
-  // Candidate relations are judged against each other in the weekly review (`/review`), not one by one as they arrive: they stay
-  // listed there and are left out of the number that asks for today's decisions.
-  const { relations: _weekly, ...today } = counts;
+  // Candidate relations and research proposals are judged in the weekly review (`/review`), not one by one as they arrive (the
+  // person's decision, 2026-10-13): whether to take one is a judgement about direction, not a fact only they can give. They stay listed
+  // there and are left out of the number that asks for today's decisions.
+  const { relations: _weekly, research: _weeklyResearch, ...today } = counts;
   const later = { workOrders: proposals.later, milestoneDrafts: drafts.later, asks: asks.later, assistantReviews: reviews.later };
   return { ...counts, total: Object.values(today).reduce((sum, value) => sum + value, 0),
     later: { ...later, total: Object.values(later).reduce((sum, value) => sum + value, 0) } };

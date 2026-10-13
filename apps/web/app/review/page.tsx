@@ -14,6 +14,10 @@ import { Tag } from "../ui/tag";
 import { loadTaskDetailsBatch, loadMilestoneDetailsBatch } from "../../lib/task-detail";
 import { linePacks } from "../../lib/lines";
 
+import { loadDiligence } from "../../lib/diligence";
+import type { DiligenceReport } from "../onboarding/onboarding-types";
+import { DiligenceReview } from "./diligence-review";
+
 export const dynamic = "force-dynamic";
 
 
@@ -33,6 +37,8 @@ export default async function ReviewPage() {
   const insightKeys = new Map(permissionCandidates(ctx).filter((item) => item.kind === "insight" && item.eligible).map((item) => [item.id, item.key]));
   const night = lastNight(ctx.workspaceId, new Date());
   const lineLabel = new Map(linePacks(ctx, { includeArchived: true }).map((pack) => [pack.id, pack.label]));
+  const diligence: DiligenceReport[] = loadDiligence(ctx);
+  const identities = linePacks(ctx).filter((pack) => pack.kind === "identity").map((pack) => ({ id: pack.id, label: pack.label }));
 
   return <SubpageShell active="主线" eyebrow="证据驱动" title="周复盘" description="本周的验收、里程碑进展与待定的跨主线关系；没有记录的指标标为「未标定」。">
     <section className="review-block">
@@ -52,6 +58,12 @@ export default async function ReviewPage() {
           </div>;
         })}</div>}
     </section>
+
+    {diligence.length > 0 && <section className="review-block">
+      <h2>本周调研结论</h2>
+      <p className="review-note">网上调研得出的提议在这里一周批一次；采纳后只作为里程碑设计的参考，不会直接变成任务。</p>
+      <DiligenceReview reports={diligence} identities={identities} />
+    </section>}
 
     <section className="review-block">
       <h2>里程碑达成标准</h2>

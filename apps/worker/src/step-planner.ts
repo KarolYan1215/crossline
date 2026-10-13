@@ -190,7 +190,8 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
         payload: { code: result.blocker.code, message: result.blocker.message.slice(0, 300) } });
       return { state: "blocked", code: result.blocker.code, message: result.blocker.message };
     }
-    const { plan: normalized, warnings: fixed } = normalizeStepPlan(result.output);
+    const { plan: shapedPlan, warnings: fixed } = normalizeStepPlan(result.output);
+    const normalized = result.output.importance ? { ...shapedPlan, importance: result.output.importance } : shapedPlan;
     // Steps must not start before the window or end after it: clamp, the reviewer sees the warning.
     // What normalization already fixed (rescaled shares, a missing estimate filled in, an unknown dependency dropped) needs no judgement;
     // only the rest goes to the reviewer.
@@ -204,6 +205,22 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
       payload: { subject: "task_steps", version: saved.version, warnings, revised: Boolean(feedback) } });
     return { state: "planned", version: saved.version, warnings };
   };
+}
+
+/**
+ * Plans made before the planner judged importance keep questions nobody filtered (the person's decision, 2026-10-13: filter them by
+ * rule): a task important by rule keeps its questions for the person; the others' are settled as assumptions. Runs on the task pass.
+ */
+export function settleOldQuestions(store: CrosslineStore, workspaceId: string): string[] {
+  const orders = new Map(store.listWorkOrders(workspaceId).map((order) => [order.id, order]));
+  const settled: string[] = [];
+  for (const plan of store.listStepPlans(workspaceId)) {
+    const order = orders.get(plan.workOrderId);
+    if (!order || plan.importance || !plan.questions.length || importantByRule(store, workspaceId, order)) continue;
+    assumeAnswers(store, workspaceId, order, plan.questions);
+    settled.push(plan.workOrderId);
+  }
+  return settled;
 }
 
 /** Records each question's first option as an assumption under the question's answer slot: `假设：【question】option`. */

@@ -178,3 +178,25 @@ test("only an important task's questions are asked: a minor task's become assump
   expect(graded.listProfileFacts(workspaceId).find((item) => item.slot === slot)).toBeUndefined();
   store.close(); fresh.close(); graded.close();
 });
+
+test("questions of plans made before importance was judged are filtered by rule: graded work keeps them, the rest become assumptions", async () => {
+  const { stepAnswerSlot } = await import("@crossline/core");
+  const { settleOldQuestions } = await import("./step-planner");
+  const store = new CrosslineStore(":memory:");
+  seed(store);
+  const question = { id: "q1", text: "期中考到第几讲？", why: "", options: ["L1–L5", "L1–L7"] };
+  const old = { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 1, unit: "题" }, rationale: "", questions: [question], steps: [step("a", "solve")] };
+  store.saveStepPlan(workspaceId, "wo", old, ownerId, "t");
+  store.saveWorkOrder({ id: "hw", ownerId, workspaceId, identityId: "research", projectId: "ece548", milestoneId: "", intent: "作业 4", state: "approved", riskTier: "routine",
+    estimate: { p25Minutes: 60, p50Minutes: 120, p85Minutes: 240, source: "llm_prior", observationCount: 0, confidence: "low" }, payload: { datePair: { due: "2026-10-20" } } });
+  store.saveStepPlan(workspaceId, "hw", old, ownerId, "t");
+  store.saveWorkOrder({ id: "new", ownerId, workspaceId, identityId: "research", projectId: "ece999", milestoneId: "", intent: "新计划", state: "approved", riskTier: "routine",
+    estimate: { p25Minutes: 60, p50Minutes: 120, p85Minutes: 240, source: "llm_prior", observationCount: 0, confidence: "low" }, payload: {} });
+  store.saveStepPlan(workspaceId, "new", { ...old, importance: { longTerm: true, why: "毕业要求" } }, ownerId, "t");
+  expect(settleOldQuestions(store, workspaceId)).toEqual(["wo"]);
+  const facts = store.listProfileFacts(workspaceId).filter((fact) => fact.slot === stepAnswerSlot(question.text));
+  expect(facts.map((fact) => [fact.projectId, fact.value])).toEqual([["ece555", "假设：【期中考到第几讲？】L1–L5"]]);
+  // The planner's own judgement is kept with the plan.
+  expect(store.getStepPlan(workspaceId, "new")!.importance).toEqual({ longTerm: true, why: "毕业要求" });
+  store.close();
+});
