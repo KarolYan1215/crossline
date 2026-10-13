@@ -1,0 +1,33 @@
+import { redirect } from "next/navigation";
+import { SubpageShell } from "../subpage-shell";
+import { requireSessionContext } from "../../lib/access-guard";
+import { gateUntilReady } from "../../lib/start-gate";
+import { appNow, getStore } from "../../lib/crossline";
+import { cleanStale, returnDue, returnView } from "../../lib/return";
+import { withUndo } from "../../lib/undo";
+import { ReturnPanel } from "./return-panel";
+import "./return.css";
+
+export const dynamic = "force-dynamic";
+
+/**
+ * Coming back after days away (docs/review-2026-10-13.md §6.3): what happened meanwhile, the work that was due settled one tap each,
+ * the input box for anything else, and what nobody touched for fourteen days already archived — undoable from the page.
+ */
+export default async function ReturnPage() {
+  const ctx = await requireSessionContext();
+  gateUntilReady(ctx);
+  const now = appNow();
+  const due = returnDue(ctx, now);
+  const store = getStore();
+  const since = due?.since ?? store.lastPersonActivity(ctx.workspaceId) ?? store.listWorkspaces().find((item) => item.id === ctx.workspaceId)?.createdAt;
+  if (!since) redirect("/");
+  const before = returnView(ctx, since, now);
+  const cleaned = before.stale.orders.length || before.stale.milestones.length
+    ? await withUndo(ctx, `归档超过 14 天无人处理的 ${before.stale.orders.length + before.stale.milestones.length} 项`, () => cleanStale(ctx, now))
+    : undefined;
+  const view = cleaned ? returnView(ctx, since, now) : before;
+  return <SubpageShell active="今日" title="欢迎回来">
+    <ReturnPanel view={view} cleaned={cleaned ? { orders: before.stale.orders, milestones: before.stale.milestones, opId: cleaned.op?.id } : undefined} />
+  </SubpageShell>;
+}

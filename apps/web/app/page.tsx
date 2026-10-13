@@ -1,7 +1,9 @@
+import { redirect } from "next/navigation";
 import { DashboardView } from "./dashboard-view";
-import { loadDashboard, planToday, readChangeSummary } from "../lib/crossline";
+import { appNow, loadDashboard, planToday, readChangeSummary } from "../lib/crossline";
 import { requireSessionContext } from "../lib/access-guard";
 import { gateUntilReady } from "../lib/start-gate";
+import { returnDue } from "../lib/return";
 import { currentWorkState, loadTimeline } from "../lib/timeline";
 import { loadCurrentPlan } from "../lib/crossline";
 import { loadTaskDetailsBatch, loadMilestoneDetailsBatch } from "../lib/task-detail";
@@ -15,6 +17,8 @@ export const dynamic = "force-dynamic";
 export default async function HomePage() {
   const ctx = await requireSessionContext();
   gateUntilReady(ctx);
+  // Back after days away: what happened and the work that was due come first (docs/review-2026-10-13.md §6.3).
+  if (returnDue(ctx, appNow())) redirect("/return");
   const data = await loadDashboard(ctx);
   // One batched read behind every card on this page — kept out of `loadDashboard` itself (which lives in `lib/crossline.ts`) to avoid
   // a circular import with `lib/task-detail.ts`, which already imports from `lib/crossline.ts`.

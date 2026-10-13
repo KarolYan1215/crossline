@@ -9,7 +9,7 @@ import { expect, test, type Page } from "@playwright/test";
  *
  * Strict since the product pass finished (2026-10-08): any finding fails. `COPY_AUDIT_REPORT=1` only prints them, for a page being reworked.
  */
-const PAGES = ["/", "/milestones", "/plan", "/workbench", "/approvals", "/settings"];
+const PAGES = ["/", "/milestones", "/plan", "/workbench", "/approvals", "/settings", "/return"];
 
 type Findings = { secondPerson: string[]; folds: string[]; developer: string[]; longText: string[] };
 

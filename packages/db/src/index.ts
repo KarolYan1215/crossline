@@ -2832,7 +2832,7 @@ export class CrosslineStore {
    */
   lastPersonActivity(workspaceId: string): string | undefined {
     const PERSON_EVENTS = ["ask.answered", "block.confirmed", "execution.confirmed", "execution.paused", "execution.resumed", "capture.created",
-      "capture.discarded", "milestone.revised", "milestone.retrospective", "approval.revoked", "risk.accepted", "ask.snoozed"];
+      "capture.discarded", "milestone.revised", "milestone.retrospective", "approval.revoked", "risk.accepted", "ask.snoozed", "return.answered"];
     const latest = [
       (this.#db.prepare("SELECT MAX(created_at) AS at FROM conversation_messages WHERE workspace_id = ? AND role = 'person'").get(workspaceId) as { at: string | null }).at,
       (this.#db.prepare("SELECT MAX(MAX(started_at), COALESCE(MAX(ended_at), '')) AS at FROM executions WHERE workspace_id = ?").get(workspaceId) as { at: string | null }).at,

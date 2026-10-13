@@ -1,0 +1,15 @@
+/* Coming back after days away (docs/review-2026-10-13.md §6.3). */
+.return-page { display: grid; gap: 16px; max-width: 820px; }
+.return-card { display: grid; gap: 8px; }
+.return-card h2 { margin: 0; font-size: 16px; }
+.return-card p { margin: 0; }
+.return-hint, .return-item small { color: var(--muted); font-size: 13px; }
+.return-cleaned { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.return-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.return-item { display: grid; gap: 6px; padding-left: 10px; border-left: 3px solid var(--lc, var(--graphite)); }
+.return-item-head { display: grid; gap: 2px; }
+.return-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.return-row .secondary-button[aria-pressed="true"] { outline: 2px solid currentColor; }
+.return-steps { display: grid; gap: 6px; }
+.return-steps label { display: flex; gap: 6px; align-items: center; font-size: 14px; }
+.return-actions { display: flex; flex-wrap: wrap; gap: 8px; }

@@ -9,7 +9,7 @@ import { ensurePortrait } from "./ledger.js";
  * Disabled controls and text that is hidden on purpose (visibility, opacity 0) are exempt from contrast: WCAG exempts inactive
  * controls, and a hidden element is not read.
  */
-const PAGES = ["/", "/milestones", "/plan", "/workbench", "/approvals", "/settings", "/onboarding", "/review", "/portrait"];
+const PAGES = ["/", "/milestones", "/plan", "/workbench", "/approvals", "/settings", "/onboarding", "/review", "/portrait", "/return"];
 
 type Finding = { selector: string; text: string; detail: string };
 
