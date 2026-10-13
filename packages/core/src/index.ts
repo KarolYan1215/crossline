@@ -456,3 +456,4 @@ export * from "./interview-checklist";
 export * from "./fixed-events";
 export * from "./portrait";
 export * from "./portrait-type";
+export * from "./portrait-say-do";

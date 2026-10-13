@@ -1,5 +1,4 @@
-import { redactPortrait, type PortraitReport } from "./portrait";
-import { flywheelLoops } from "./flywheel-schema";
+import { SCHWARTZ_VALUES, redactPortrait, type PortraitReport } from "./portrait";
 
 /**
  * Crossline's own personality typing (decided 2026-10-08, after the popular result pages of MBTI-style tests): four axes about how a
@@ -69,37 +68,30 @@ export function portraitType(report: PortraitReport): PortraitType | null {
   return { code, ...TYPE_TABLE[code]!, group: { key: groupKey, ...TYPE_GROUPS[groupKey]! }, axes };
 }
 
+export type PortraitLabelCell = { title: string; value: string; detail?: string };
+export type PortraitIdentity = { lineId: string; label: string; target: number; now: number | null };
+
 /**
- * More labels in the style of a test's result page, each computed from what the report already holds — the flywheel's shape from the
- * feeds, what charges them from the energy map, their core value from the radar, and (with the agent history) when in the day they work.
+ * The poster's labels (decided 2026-10-12), each computed or taken from a fixed field so two people's posters compare: the core word
+ * the writer gave, the top-scoring Schwartz value (ties go to the earlier one in the circle), the line with the largest suggested share
+ * as the base, and every other line as an identity row — suggested share as a bar, current share as a marker. A cell whose source is
+ * missing (an older report) is left out.
  */
-export function portraitLabels(report: PortraitReport, options: { lineLabel: (id: string) => string; peakHours?: number[] }): Array<{ title: string; value: string; detail: string }> {
-  const labels: Array<{ title: string; value: string; detail: string }> = [];
-  const edges = report.lines.items.flatMap((item) => item.feeds.map((feed) => ({ from: item.lineId, to: feed.toLineId, kind: "" })));
-  const loops = flywheelLoops(edges);
-  const degree = new Map<string, number>();
-  for (const edge of edges) for (const id of [edge.from, edge.to]) degree.set(id, (degree.get(id) ?? 0) + 1);
-  const hub = [...degree].sort((a, b) => b[1] - a[1])[0];
-  const lines = report.lines.items.length;
-  const shape = !edges.length ? { value: "平行型", detail: "各条主线独立推进，尚无相互供养" }
-    : loops.some((loop) => loop.length >= 3) ? { value: "环形飞轮", detail: `${loops.find((loop) => loop.length >= 3)!.map(options.lineLabel).join(" → ")} 形成闭环` }
-    : hub && hub[1] >= Math.max(2, lines - 1) ? { value: "轴心型", detail: `以「${options.lineLabel(hub[0])}」为轴心，其他主线围绕它` }
-    : loops.length ? { value: "双向互补", detail: `${loops[0]!.map(options.lineLabel).join(" ⇄ ")} 互相供养` }
-    : { value: "链式", detail: "主线之间单向传递，尚未闭环" };
-  labels.push({ title: "飞轮形态", ...shape });
-  const charging = report.energy.map.filter((item) => item.charge === "charge").sort((a, b) => (b.loveScore ?? 0) - (a.loveScore ?? 0));
-  if (charging.length) labels.push({ title: "充电方式", value: charging[0]!.activity, detail: charging.slice(1, 3).map((item) => item.activity).join("、") });
-  const values = [...(report.compass.values ?? [])].sort((a, b) => b.score - a.score);
-  if (values.length) labels.push({ title: "价值核心", value: values[0]!.name, detail: values.slice(1, 3).map((item) => item.name).join("、") });
-  const peak = options.peakHours;
-  if (peak && peak.some((minutes) => minutes > 0)) {
-    const hour = peak.indexOf(Math.max(...peak));
-    const value = hour < 5 ? "深夜型" : hour < 11 ? "晨型" : hour < 17 ? "日间型" : "夜型";
-    labels.push({ title: "工作时段", value, detail: `编程助手记录中最常在 ${hour}:00 前后工作` });
+export function portraitLabels(report: PortraitReport, options: { lineLabel: (id: string) => string }): { cells: PortraitLabelCell[]; identities: PortraitIdentity[] } {
+  const cells: PortraitLabelCell[] = [];
+  const coreWord = report.cover.coreWord?.trim();
+  if (coreWord) cells.push({ title: "核心词", value: coreWord });
+  const values = report.compass.values ?? [];
+  const names = SCHWARTZ_VALUES.map((value) => value.name as string);
+  if (values.length === names.length && names.every((name) => values.some((value) => value.name === name))) {
+    const top = names.map((name) => values.find((value) => value.name === name)!).reduce((best, value) => (value.score > best.score ? value : best));
+    cells.push({ title: "价值核心", value: top.name });
   }
-  const base = [...report.lines.items].sort((a, b) => (b.targetShare ?? 0) - (a.targetShare ?? 0))[0];
-  if (base?.targetShare) labels.push({ title: "建议底座", value: options.lineLabel(base.lineId), detail: `建议投入约 ${base.targetShare}% 的注意力` });
-  return labels;
+  const ranked = [...report.lines.items].sort((a, b) => (b.targetShare ?? 0) - (a.targetShare ?? 0));
+  const base = ranked[0];
+  if (base?.targetShare) cells.push({ title: "建议底座", value: options.lineLabel(base.lineId), detail: `建议投入约 ${base.targetShare}%` });
+  const identities = ranked.slice(base?.targetShare ? 1 : 0).map((item) => ({ lineId: item.lineId, label: options.lineLabel(item.lineId), target: item.targetShare ?? 0, now: item.share ?? null }));
+  return { cells, identities };
 }
 
 /**

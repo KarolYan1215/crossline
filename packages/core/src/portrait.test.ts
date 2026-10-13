@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { redactPortrait, validatePortrait, type PortraitReport } from "./portrait";
+import { ENERGY_CATEGORIES, PORTRAIT_SCHEMA, PORTRAIT_SCHEMA_VERSION, SAY_DO_DIMENSIONS, SCHWARTZ_VALUES, redactPortrait, validatePortrait, type PortraitReport } from "./portrait";
 import { CHARACTER_STANDARD, characterPrompt, portraitLabels, portraitType } from "./portrait-type";
 
 const report: PortraitReport = {
@@ -39,7 +39,6 @@ test("the type is read from the axis scores into a fixed name and group; the fig
   expect(prompt).toContain(CHARACTER_STANDARD);
   expect(prompt).toContain("deep blue");
   expect(prompt).not.toContain("UW–Madison");
-  expect(portraitLabels(typed, { lineLabel: (id) => id }).find((label) => label.title === "飞轮形态")?.value).toBe("环形飞轮");
   expect(portraitType(report)).toBeNull();
 });
 
@@ -47,4 +46,65 @@ test("shares are scaled to a whole", () => {
   const checked = validatePortrait({ ...report, lines: { allocation: "", items: [
     { lineId: "research", description: "", goals: [], feeds: [], share: 60, targetShare: 30 }, { lineId: "media", description: "", goals: [], feeds: [], share: 60, targetShare: 30 }] } }, ["research", "media"]);
   expect(checked.lines.items.map((item) => [item.share, item.targetShare])).toEqual([[50, 50], [50, 50]]);
+});
+
+const SCHWARTZ = ["自主", "刺激", "享乐", "成就", "权力", "安全", "遵从", "传统", "仁慈", "普世"];
+const SAY_DO = ["按计划投入", "按时完成", "收尾", "外部验收", "回应等待"];
+const values = (names: string[]) => names.map((name, index) => ({ name, score: 40 + index, evidence: "" }));
+const pairs = (labels: string[]) => labels.map((dimension) => ({ dimension, says: 60, evidence: "" }));
+const detailOf = (run: () => unknown) => { try { run(); } catch (error) { return `${(error as Error).message} ${(error as Error & { detail?: string }).detail ?? ""}`; } return ""; };
+
+test("the fixed dimensions: Schwartz's ten values in circle order, six energy categories, five say–do dimensions", () => {
+  expect(SCHWARTZ_VALUES.map((value) => value.name)).toEqual(SCHWARTZ);
+  expect([...ENERGY_CATEGORIES]).toEqual(["深度工作", "学习输入", "创造产出", "沟通协作", "行政事务", "休息恢复"]);
+  expect(SAY_DO_DIMENSIONS.map((dimension) => dimension.label)).toEqual(SAY_DO);
+  expect(SAY_DO_DIMENSIONS.map((dimension) => dimension.id)).toEqual(["plan", "on_time", "follow_through", "acceptance", "waiting"]);
+  expect(PORTRAIT_SCHEMA_VERSION).toBe(2);
+});
+
+test("the schema asks for exactly those dimensions, a short core word, and no 'does' score", () => {
+  const props = PORTRAIT_SCHEMA.properties as Record<string, any>;
+  const valuesSchema = props.compass.properties.values;
+  expect(valuesSchema.items.properties.name.enum).toEqual(SCHWARTZ);
+  expect(valuesSchema.maxItems).toBe(10);
+  expect(props.energy.properties.map.items.properties.category.enum).toEqual([...ENERGY_CATEGORIES]);
+  const pairItem = props.gap.properties.pairs.items;
+  expect(Object.keys(pairItem.properties)).toEqual(["dimension", "says", "evidence"]);
+  expect(pairItem.properties.dimension.enum).toEqual(SAY_DO);
+  expect(props.cover.properties.coreWord.maxLength).toBe(6);
+});
+
+test("values and say–do pairs must be complete; they come back in the fixed order", () => {
+  const nine = { ...report, compass: { ...report.compass, values: values(SCHWARTZ.slice(0, 9)) } };
+  expect(detailOf(() => validatePortrait(nine, ["research", "media"]))).toMatch(/PORTRAIT_VALUES_INCOMPLETE.*普世/);
+  const repeated = { ...report, compass: { ...report.compass, values: values([...SCHWARTZ.slice(0, 9), "自主"]) } };
+  expect(detailOf(() => validatePortrait(repeated, ["research", "media"]))).toMatch(/PORTRAIT_VALUES_INCOMPLETE.*自主/);
+  const fourPairs = { ...report, gap: { ...report.gap, pairs: pairs(SAY_DO.slice(1)) } };
+  expect(detailOf(() => validatePortrait(fourPairs, ["research", "media"]))).toMatch(/PORTRAIT_SAY_DO_INCOMPLETE.*按计划投入/);
+  const shuffled = validatePortrait({ ...report, compass: { ...report.compass, values: values([...SCHWARTZ].reverse()) },
+    gap: { ...report.gap, pairs: pairs([...SAY_DO].reverse()) } }, ["research", "media"]);
+  expect(shuffled.compass.values!.map((value) => value.name)).toEqual(SCHWARTZ);
+  expect(shuffled.gap.pairs!.map((pair) => pair.dimension)).toEqual(SAY_DO);
+  // Leniently, the order is fixed but nothing is refused (the answer kept after repairs run out).
+  expect(validatePortrait(nine, ["research", "media"], { lenient: true }).compass.values).toHaveLength(9);
+});
+
+test("the labels are computed: core word, top Schwartz value, base line, and the other lines as identities", () => {
+  const labelled: PortraitReport = { ...report, cover: { ...report.cover, coreWord: "系统化" },
+    compass: { ...report.compass, values: SCHWARTZ.map((name) => ({ name, score: name === "成就" || name === "普世" ? 90 : 50, evidence: "" })) },
+    lines: { allocation: "", items: [
+      { lineId: "media", description: "", goals: [], feeds: [], share: 30, targetShare: 20 },
+      { lineId: "research", description: "", goals: [], feeds: [], share: 40, targetShare: 50 },
+      { lineId: "startup", description: "", goals: [], feeds: [], targetShare: 30 }] } };
+  const { cells, identities } = portraitLabels(labelled, { lineLabel: (id) => `L-${id}` });
+  expect(cells).toEqual([
+    { title: "核心词", value: "系统化" },
+    { title: "价值核心", value: "成就" },
+    { title: "建议底座", value: "L-research", detail: "建议投入约 50%" }]);
+  expect(identities).toEqual([
+    { lineId: "startup", label: "L-startup", target: 30, now: null },
+    { lineId: "media", label: "L-media", target: 20, now: 30 }]);
+  const old = portraitLabels({ ...labelled, cover: report.cover, compass: { ...report.compass, values: [{ name: "求真", score: 90, evidence: "" }] } }, { lineLabel: (id) => id });
+  expect(old.cells.map((cell) => cell.title)).toEqual(["建议底座"]);
+  for (const title of ["飞轮形态", "充电方式", "工作时段"]) expect(cells.some((cell) => cell.title === title)).toBe(false);
 });

@@ -33,7 +33,7 @@ function Figure({ state, className }: { state: State; className: string }) {
 function SharePart({ report, state, ordered }: { report: PortraitReport; state: State; ordered: Line[] }) {
   const type = portraitType(report);
   const name = (id: string) => state.lines.find((line) => line.id === id)?.label ?? id;
-  const labels = portraitLabels(report, { lineLabel: name, ...(state.peakHours ? { peakHours: state.peakHours } : {}) });
+  const labels = portraitLabels(report, { lineLabel: name }).cells;
   const edges = edgesOf(report);
   const allocation = report.lines.items.map((item) => ({ lineId: item.lineId, name: name(item.lineId), share: item.share, targetShare: item.targetShare }));
   return <>

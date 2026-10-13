@@ -97,7 +97,8 @@ export function AllocationChart({ items, label, width = 520 }: { items: Array<{ 
 }
 
 /** Where what they say and what they do part: says (filled) and does (hollow) on each dimension, 0–100. */
-export function GapChart({ pairs, width = 520 }: { pairs: NonNullable<PortraitReport["gap"]["pairs"]>; width?: number }) {
+export function GapChart({ pairs: given, width = 520 }: { pairs: NonNullable<PortraitReport["gap"]["pairs"]>; width?: number }) {
+  const pairs = given.flatMap((pair) => pair.does === undefined ? [] : [{ ...pair, does: pair.does }]);
   if (!pairs.length) return null;
   const row = 38, left = 104, right = 52, height = pairs.length * row + 34;
   const x = (value: number) => left + (value / 100) * (width - left - right);
