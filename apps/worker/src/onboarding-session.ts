@@ -18,7 +18,10 @@ const SOURCE_TEXT_PER_DOCUMENT = 14_000;
 const SOURCE_TEXT_TOTAL = 60_000;
 
 const INSTRUCTIONS = "You interview a Crossline user as the Skill describes: a life designer's interview in stages (orientation, "
-  + "situation, compass, energy, lines, details), never proposing milestones. The person already set their lines (`lines`: identity "
+  + "lines, situation, compass, energy, details), never proposing milestones. The first two stages gather the start standard: checklist "
+  + "items marked `start` must be answered by the person or read from a file, never written as 「假设：」; while one is open stay in the "
+  + "current stage and keep asking, and once all are in say in `reply` that the person can start using the app while the interview goes "
+  + "on here. The person already set their lines (`lines`: identity "
   + "nouns, their order, which are hard constraints); do not propose new ones. Each turn: a short, sharp reflection on what was just said "
   + "(name a contradiction, a self-imposed limit, or gravity mistaken for a problem; never judge a choice or decide for the person), then a "
   + "batch of up to five questions that do not depend on each other — one whose answer depends on another's waits for the next turn; follow "
@@ -73,7 +76,9 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
   /** The completion list as of now: the system's own record of what the interview still owes, never shown to the person. */
   const checklistNow = () => interviewChecklistFor(store, workspaceId, identityLines(store, workspaceId)
     .map((line) => ({ id: line.id, label: line.label, hard: Boolean(line.hard), goals: line.goals ?? [] })), { unfiledFiles: unfiled().length, today: todayIso() });
-  const openChecklist = () => checklistNow().filter((item) => !item.done).map(({ label, detail, owner }) => ({ label, detail, owner }));
+  const openChecklist = () => checklistNow().filter((item) => !item.done).map(({ label, detail, owner, start }) => ({ label, detail, owner, ...(start ? { start } : {}) }));
+  /** Whether a start item is still open: then the front stages do not move on. */
+  const startOpen = () => checklistNow().some((item) => item.start && !item.done);
 
   /** The person's coding-agent hours, time only, when they allowed it (Settings → 隐私). */
   const workHistory = () => {
@@ -271,7 +276,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         facts: store.listProfileFacts(workspaceId).map(({ identityId, projectId, slot, value, status }) => ({ identityId, projectId, slot, value, status })),
         today, timeZone, sources: clipDocuments(documents), ...(history ? { history } : {}), reply: { id: replyId, text: replyText },
         focusLine, profile: readProfile(), stage: ((session!.coverage as { stage?: OnboardingStage }).stage ?? (focusLine ? "details" : "orientation")),
-        checklist: openChecklist(), ...stagePace(messages),
+        checklist: openChecklist(), ...stagePace(messages, { startOpen: startOpen() }),
         ...(workHistory().length ? { workHistory: workHistory() } : {}),
         lines: identityLines(store, workspaceId).map((line) => ({ id: line.id, label: line.label, rank: line.rank ?? null, hard: Boolean(line.hard), goals: line.goals ?? [],
           ...(line.goalParts?.length ? { goalParts: line.goalParts } : {}) }))
@@ -291,7 +296,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       // Later turns carry only what is new: the reply, and any file that arrived since the last turn.
       const newSources = clipDocuments(fresh);
       // The completion list goes with every turn, so the model knows what it still owes without being told twice in prose.
-      const pace = stagePace(messages);
+      const pace = stagePace(messages, { startOpen: startOpen() });
       const message = JSON.stringify({ reply: { id: replyId, text: replyText }, ...(newSources.length ? { newSources } : {}), checklist: openChecklist(), ...pace });
       result = await continueSkillTurn<OnboardingTurn>(client, session.codexThreadId, message, {
         skillName: ONBOARDING_SKILL, cwd, outputSchema: ONBOARDING_TURN_SCHEMA, validateOutput, softAccept,
@@ -383,15 +388,20 @@ export function withGapQuestions(output: OnboardingTurn, gaps: ProfileGap[], mes
   };
 }
 
-/** Rounds spent in the latest stage, counted back from the newest answer; from the second on, the instruction to assume and move on. */
-export function stagePace(messages: Array<{ role: string; content: unknown }>): { stageRounds: number; moveOn?: string } {
+/** The stages that gather the start standard: while a start item is open they never move on (those items take only the person's word). */
+const FRONT_STAGES = new Set(["orientation", "lines"]);
+
+/**
+ * Rounds spent in the latest stage, counted back from the newest answer; from the second on, the instruction to move on. Writing what the
+ * person could not answer as 「假设：」 is a standing rule of the Skill, in the same round, not something this hands out per round.
+ */
+export function stagePace(messages: Array<{ role: string; content: unknown }>, options: { startOpen: boolean }): { stageRounds: number; moveOn?: string } {
   const stages = messages.filter((message) => message.role === "assistant").map((message) => (message.content as { stage?: string }).stage ?? "");
   const current = stages.at(-1) ?? "";
   let rounds = 0;
   for (let index = stages.length - 1; index >= 0 && stages[index] === current; index -= 1) rounds += 1;
-  return rounds >= 2 && current
-    ? { stageRounds: rounds, moveOn: `「${current}」阶段已问 ${rounds} 轮：本人答不上来或答「不确定」的，写成以「假设：」开头的 inferred 事实（并在 reply 里说明可随时修改），本轮进入下一阶段。` }
-    : { stageRounds: rounds };
+  if (rounds < 2 || !current || (options.startOpen && FRONT_STAGES.has(current))) return { stageRounds: rounds };
+  return { stageRounds: rounds, moveOn: `「${current}」阶段已问 ${rounds} 轮：本轮进入下一阶段。` };
 }
 
 /** The conversation as plain lines, for a thread that has to be rebuilt. Questions are kept; option lists are not. */

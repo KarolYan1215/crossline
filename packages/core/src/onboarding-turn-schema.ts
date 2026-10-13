@@ -40,12 +40,14 @@ export type FlywheelCandidate = {
 export type TurnCoverage = { identityId: string; filled: string[]; missing: string[] };
 
 /**
- * Where the interview is (decided 2026-10-08): the person sets their lines first on a structured screen (identity nouns, order, hard
- * constraints); the interview then goes, a batch of independent questions at a time, through how the app works, where they stand, their
- * compass, their energy, their lines (a personal description and 6–12 attribute candidates for the long-term goal of each), and each line's specifics. A line's
- * own interview (`focusLine`) runs only `details` for that line. The portrait report is written afterwards by its own Skill.
+ * Where the interview is (decided 2026-10-08, reordered 2026-10-12): the person sets their lines first on a structured screen (identity
+ * nouns, order, hard constraints); the interview then goes, a batch of independent questions at a time, in two parts. The front part —
+ * `orientation` (read every file first, then the hard lines' rules and the weekly hours) and `lines` (a personal description and 6–12
+ * attribute candidates for the long-term goal of each, and each line's current project with its deadline) — gathers the start standard
+ * (`readyToStart`); the back part — where they stand, their compass, their energy, and each line's specifics — writes the portrait, in the
+ * same interview. A line's own interview (`focusLine`) runs only `details` for that line. The portrait report is written afterwards by its own Skill.
  */
-export const ONBOARDING_STAGES = ["orientation", "situation", "compass", "energy", "lines", "details"] as const;
+export const ONBOARDING_STAGES = ["orientation", "lines", "situation", "compass", "energy", "details"] as const;
 export type OnboardingStage = (typeof ONBOARDING_STAGES)[number];
 /** The facts that are about the person rather than one line (their compass, their energy) are filed under this id. */
 export const PERSON_LINE = "person";
@@ -125,13 +127,14 @@ export type OnboardingTurnContext = {
   /** The portrait so far and the stage reached, so a rebuilt thread carries on rather than starting over. */
   profile?: ProfileModel; stage?: OnboardingStage;
   /** The completion list's items still open (`interviewChecklist`): what the interview owes before it may say it is ready, and what waits on the person. */
-  checklist?: Array<{ label: string; detail: string; owner: "interview" | "person" }>;
+  checklist?: Array<{ label: string; detail: string; owner: "interview" | "person"; start?: boolean }>;
   /** Hours spent in Codex and Claude Code per folder and when in the day (`agentHistoryLines`), when the person allowed it: habits, not a plan. */
   workHistory?: string[];
   /**
-   * How many rounds the interview has spent in its current stage. From the second round on, `moveOn` says to write what the person
-   * could not answer as an assumption (「假设：…」, inferred) and go to the next stage — an interview that waits for an answer the person
-   * does not have never ends (a simulated user who said 不确定 kept one in 「能量」 for seven rounds).
+   * How many rounds the interview has spent in its current stage. From the second round on, `moveOn` says to go to the next stage — an
+   * interview that waits for an answer the person does not have never ends (a simulated user who said 不确定 kept one in 「能量」 for seven
+   * rounds). What the person cannot answer is written as an assumption (「假设：…」) in the same round, by a standing rule of the Skill.
+   * The front stages are the exception: while a start item is open there is no `moveOn`, because those items accept only the person's word.
    */
   stageRounds?: number;
   moveOn?: string;

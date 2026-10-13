@@ -42,7 +42,7 @@ test("a model question about which project a file belongs to gives way to the ap
 test("while the interview runs its questions stay in it; nothing about it is on 待决事项", () => {
   setup();
   const status = interviewStatus(TEST_CTX);
-  expect(status).toMatchObject({ started: true, complete: false, parked: false, readyToStart: false, stage: "lines", stageIndex: 5, stageCount: 6 });
+  expect(status).toMatchObject({ started: true, complete: false, parked: false, readyToStart: false, stage: "lines", stageIndex: 2, stageCount: 6 });
   // The model's round (its file question left out) and the app's own questions: both courses' class times.
   expect(status.questions.map((question) => question.id)).toEqual(["q-meetings", "gap-meetings-ece555", "gap-meetings-ece548"]);
   const asks = collectAsks(TEST_CTX, SOON);

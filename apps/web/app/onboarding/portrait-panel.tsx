@@ -11,7 +11,7 @@ export type ProfileModelView = {
 };
 export type LineView = { id: string; label: string; rank: number | null; hard: boolean; goals: string[]; goalParts: string[] };
 
-export const STAGES: Array<[string, string]> = [["orientation", "开场与规则"], ["situation", "现状"], ["compass", "指南针"], ["energy", "能量"], ["lines", "主线"], ["details", "细节"]];
+export const STAGES: Array<[string, string]> = [["orientation", "开场与规则"], ["lines", "主线"], ["situation", "现状"], ["compass", "指南针"], ["energy", "能量"], ["details", "细节"]];
 
 /** Where the interview is, as a row of stages. */
 export function StageBar({ stage, line }: { stage: string; line?: string | undefined }) {

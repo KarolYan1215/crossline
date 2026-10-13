@@ -66,3 +66,6 @@
 .ob-start-card{display:grid;gap:6px;margin:8px 0;padding:10px 12px;border:1px solid var(--ink);background:var(--paper)}
 .ob-start-card ul{margin:0;padding-left:18px;display:grid;gap:4px}
 .ob-start-card .ob-btn{justify-self:start}
+.ob-materials{display:grid;gap:8px;padding:12px;border:1px solid var(--ink);background:var(--paper)}
+.ob-materials ul{margin:0;padding-left:18px;display:grid;gap:4px}
+.ob-materials .ob-file-button,.ob-materials .ob-btn{justify-self:start}

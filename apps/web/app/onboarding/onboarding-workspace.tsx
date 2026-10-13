@@ -10,11 +10,10 @@ import { LineSetup } from "./line-setup";
 import { PortraitPanel, StageBar } from "./portrait-panel";
 import { HierarchyGuide } from "./hierarchy-guide";
 import {
-  composeAnswers, type Answer, type AssistantTurn, type DocumentRow, type Message, type OnboardingState
+  composeAnswers, MATERIALS_FIRST_REPLY, NO_MATERIALS_REPLY, type Answer, type AssistantTurn, type DocumentRow, type Message, type OnboardingState
 } from "./onboarding-types";
 
 const ACCEPT = ".pdf,.docx,.txt,.md,.csv,.png,.jpg,.jpeg,.gif,.webp,.m4a,.mp3,.wav,.aac,.ogg,.flac";
-const OPENING = "当前在做的事与最想推进的事；也可直接拖入课程大纲、项目说明、笔记或录音。";
 
 const asTurn = (message: Message): AssistantTurn | undefined =>
   message.role === "assistant" ? message.content as AssistantTurn : undefined;
@@ -106,10 +105,11 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
     else if (body?.deferred) setError("文件已保存，但后台还没读取它（worker 没有运行）。");
     const next = await load();
     // The same model that interviews you reads what you added, in its next turn: it says what it found, asks about what
-    // it cannot tell, and returns the dates the files state. Nothing separate runs, and nothing waits for you to ask.
+    // it cannot tell, and returns the dates the files state. Nothing separate runs, and nothing waits for you to ask. On the
+    // materials step (no conversation yet) the person adds everything first and starts the interview themselves.
     const readable = list.filter((file) => next?.documents.some((doc) => doc.fileName === file.name && doc.extractionStatus === "done"));
     setBusy("");
-    if (response?.ok && !body?.deferred && readable.length) await runTurn(`我添加了这些文件：${readable.map((file) => file.name).join("、")}。请读一下，整理里面的日期和我的情况。`);
+    if (response?.ok && !body?.deferred && readable.length && (next?.messages.length ?? 0) > 0) await runTurn(`我添加了这些文件：${readable.map((file) => file.name).join("、")}。请读一下，整理里面的日期和我的情况。`);
   };
 
   const decideDates = async (batchId: string, includedIds: string[]) => {
@@ -178,7 +178,10 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
       {!state.focusLine && <StartCard readyToStart={state.readyToStart} missing={state.startMissing} lines={state.lines} />}
       <div className="ob-thread" aria-live="polite">
         {messages.length === 0 && !state.focusLine && <HierarchyGuide />}
-        {messages.length === 0 && <div className="ob-turn ob-assistant"><p>{state.focusLine ? `「${state.focusLine.label}」的访谈：现状、长期目标、项目、截止日与已有文件。` : OPENING}</p></div>}
+        {messages.length === 0 && state.focusLine && <div className="ob-turn ob-assistant"><p>{`「${state.focusLine.label}」的访谈：现状、长期目标、项目、截止日与已有文件。`}</p></div>}
+        {messages.length === 0 && !state.focusLine && busy !== "turn" && <MaterialsFirst documents={state.documents} busy={busy !== ""}
+          onUpload={(files) => void upload(files)}
+          onStart={() => void runTurn(state.documents.some((doc) => doc.extractionStatus === "done") ? MATERIALS_FIRST_REPLY : NO_MATERIALS_REPLY)} />}
         {messages.map((message) => {
           const turn = asTurn(message);
           if (!turn) return <div className="ob-turn ob-user" key={message.seq}><p>{userText(message)}</p></div>;
@@ -243,6 +246,27 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
       <ProfilePanel state={state} onChanged={() => void load()} />
     </div>
   </div>;
+}
+
+/**
+ * The interview's first step (decided 2026-10-12): the person adds what they have — a CV, a timetable, syllabi, project notes — and the
+ * first round reads it all before asking, so the questions are only about what the files leave open.
+ */
+export function MaterialsFirst({ documents, busy, onUpload, onStart }: { documents: DocumentRow[]; busy: boolean;
+  onUpload: (files: FileList) => void; onStart: () => void }) {
+  const read = documents.filter((doc) => doc.extractionStatus === "done");
+  const reading = documents.some((doc) => doc.extractionStatus === "pending");
+  return <section className="ob-materials" aria-label="第一步：添加材料">
+    <b>第一步：添加材料</b>
+    <span className="ob-muted">简历、课表、课程大纲、项目说明都可以。访谈先从材料里读出能读的，再只问还缺的；也可以直接拖进来。</span>
+    <label className="ob-file-button">
+      <input type="file" multiple accept={ACCEPT} hidden onChange={(event) => { if (event.target.files) onUpload(event.target.files); event.target.value = ""; }} />
+      添加文件
+    </label>
+    {documents.length > 0 && <ul>{documents.map((doc) => <li key={doc.id}>{doc.fileName}<span className="ob-muted">
+      {doc.extractionStatus === "done" ? " · 已读取" : doc.extractionStatus === "pending" ? " · 读取中" : " · 无法读取"}</span></li>)}</ul>}
+    <button type="button" className="ob-btn" disabled={busy || reading} onClick={onStart}>{read.length ? "读完材料，开始访谈" : "没有材料，直接开始"}</button>
+  </section>;
 }
 
 /**

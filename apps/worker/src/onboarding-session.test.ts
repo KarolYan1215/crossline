@@ -273,3 +273,18 @@ test("a turn that leaves a line's candidates empty keeps those on record and onl
   const profiles = JSON.parse(store.getSetting(workspaceId, "lines.profiles")!) as Record<string, { description: string; attributes: unknown[] }>;
   expect(profiles.research).toMatchObject({ description: "新描述", attributes });
 });
+
+test("先读材料：首轮把已读出的文件全部带上，清单标出可开始项，阶段从 orientation 开始", async () => {
+  for (const [id, fileName, text] of [["d1", "Resume.md", "博士二年级，研究忆阻器"], ["d2", "ECE555 Syllabus.md", "Final Exam: Dec 15"]] as const)
+    store.saveSourceDocument({ id, ownerId: "o", workspaceId, kind: "text", fileName, mediaType: "text/markdown", sha256: id, uri: `file:///${id}`,
+      extractedText: text, extractionStatus: "done", createdAt: "2026-10-02T00:00:00.000Z" });
+  const { rpc, prompts } = fakeRuntime([turn()]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc);
+  await run({ sessionId: "s", text: "材料已添加，请先从材料里读出能读的，再问还缺的。" });
+  const prompt = prompts()[0]!;
+  const context = JSON.parse(prompt.slice(prompt.indexOf("{"), prompt.lastIndexOf("}") + 1)) as {
+    sources: unknown[]; checklist: Array<{ start?: boolean }>; stage: string };
+  expect(context.sources).toHaveLength(2);
+  expect(context.checklist.some((item) => item.start === true)).toBe(true);
+  expect(context.stage).toBe("orientation");
+});

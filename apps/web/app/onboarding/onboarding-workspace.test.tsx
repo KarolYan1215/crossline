@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test } from "vitest";
-import { StartCard } from "./onboarding-workspace";
+import { MaterialsFirst, StartCard } from "./onboarding-workspace";
 
 const lines = [{ id: "media", label: "创作者", rank: null, hard: false, goals: [], goalParts: [] }];
 
@@ -20,4 +20,16 @@ test("达标后出现「开始使用」，并说明画像访谈在同一处继�
   expect(html).toMatch(/<a[^>]*href="\/"[^>]*>开始使用<\/a>/);
   expect(html).toContain("画像访谈在同一处继续，问题也会列在待决事项");
   expect(html).not.toContain("开始使用前还差");
+});
+
+test("第一步是材料：上传入口与「读完材料，开始访谈」；没有材料时是「没有材料，直接开始」", () => {
+  const doc = { id: "d1", fileName: "Syllabus.pdf", kind: "pdf", extractionStatus: "done" as const };
+  const withFiles = renderToStaticMarkup(<MaterialsFirst documents={[doc]} busy={false} onUpload={() => {}} onStart={() => {}} />);
+  expect(withFiles).toContain("第一步：添加材料");
+  expect(withFiles).toContain("添加文件");
+  expect(withFiles).toContain("Syllabus.pdf");
+  expect(withFiles).toContain("读完材料，开始访谈");
+  const empty = renderToStaticMarkup(<MaterialsFirst documents={[]} busy={false} onUpload={() => {}} onStart={() => {}} />);
+  expect(empty).toContain("没有材料，直接开始");
+  expect(empty).not.toContain("读完材料，开始访谈");
 });

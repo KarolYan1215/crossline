@@ -58,6 +58,14 @@ export type OnboardingState = {
   documents: DocumentRow[];
 };
 
+/**
+ * The first reply when the person starts the interview from the materials step with files already read: the interview reads them before
+ * asking anything (decided 2026-10-12). `scripts/onboarding-eval.ts` sends the same words.
+ */
+export const MATERIALS_FIRST_REPLY = "材料已添加，请先从材料里读出能读的，再问还缺的。";
+/** The first reply when the person starts without any file. */
+export const NO_MATERIALS_REPLY = "没有材料，直接开始访谈。";
+
 /** One question's pending answer on the screen. */
 export type Answer = { picked: string[]; other: string };
 
