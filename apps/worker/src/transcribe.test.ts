@@ -56,7 +56,8 @@ test("a recording that cannot be read, is empty, or is too long is refused with 
   expect(await run(async () => seconds(0))).toMatchObject({ state: "failed", code: "AUDIO_EMPTY" });
   expect(await run(async () => seconds(MAX_SECONDS + 10, 8_000))).toMatchObject({ state: "failed", code: "AUDIO_TOO_LONG" });
   expect(calls.recognise).toBe(0);
-});
+  // The too-long case allocates three hours of 8 kHz samples (~345 MB), close to five seconds on its own.
+}, 30_000);
 
 test("a recogniser that finds no words, or fails, is reported rather than stored as an empty transcript", async () => {
   const empty = fakeEngine({ recognise: async () => ({ text: "  ", chunks: [] }) });

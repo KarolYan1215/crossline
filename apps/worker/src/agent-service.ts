@@ -30,6 +30,10 @@ export function createAgentService(deps: {
   isOwner?: (workspaceId: string) => boolean;
 }) {
   const running = new Map<string, Set<string>>();
+  // Per task: how to stop it, and what it has done so far (docs/review-2026-10-13.md §6.4: the run is watched and can be stopped).
+  const controls = new Map<string, AbortController>();
+  const live = new Map<string, { startedAt: string; audit: { commands: Array<{ command: string; status: string; exitCode: number | null }>;
+    filesChanged: Array<{ path: string; kind: string }>; searches: string[] } }>();
   const log = deps.log ?? (() => {});
   const mark = (workspaceId: string) => running.get(workspaceId) ?? running.set(workspaceId, new Set()).get(workspaceId)!;
 
@@ -47,8 +51,11 @@ export function createAgentService(deps: {
     const taskId = planned.input.taskId!;
     if (mark(workspaceId).has(taskId)) return { state: "started", taskId };
     mark(workspaceId).add(taskId);
+    const control = new AbortController();
+    controls.set(taskId, control);
     const run = createAgentRunner(deps.store, workspaceId, deps.repoRoot, deps.getClient, {
-      outputRoot: deps.outputRoot ?? defaultOutputRoot(), askFor: (id) => ledgerAsk(deps.store, workspaceId, id)
+      outputRoot: deps.outputRoot ?? defaultOutputRoot(), askFor: (id) => ledgerAsk(deps.store, workspaceId, id),
+      signal: control.signal, onLive: (record) => live.set(taskId, record)
     });
     void (async () => {
       enterUsageWorkspace(workspaceId);
@@ -65,7 +72,7 @@ export function createAgentService(deps: {
       }
       const delivered = outcome.state === "done" && !outcome.reviewRequired && !prepStep ? deliverAgentResult(deps.store, workspaceId, taskId) : undefined;
       log({ type: `agent.${outcome.state}`, workspaceId, taskId, ...(outcome.state === "blocked" ? { code: outcome.code } : {}), ...(delivered ? { delivered } : {}) });
-    })().finally(() => mark(workspaceId).delete(taskId));
+    })().finally(() => { mark(workspaceId).delete(taskId); controls.delete(taskId); live.delete(taskId); });
     return { state: "started", taskId };
   }
 
@@ -103,6 +110,22 @@ export function createAgentService(deps: {
     },
 
     runningTasks: (workspaceId: string): string[] => [...mark(workspaceId)],
+
+    /** What a running task has done so far: the last commands, the files it changed, its searches. Undefined once it has ended. */
+    progress(workspaceId: string, taskId: string) {
+      if (!mark(workspaceId).has(taskId)) return undefined;
+      const record = live.get(taskId);
+      return { taskId, startedAt: record?.startedAt ?? "", commands: (record?.audit.commands ?? []).slice(-20).map(({ command, status, exitCode }) => ({ command, status, exitCode })),
+        files: [...new Set((record?.audit.filesChanged ?? []).map((change) => change.path))].slice(-30), searches: (record?.audit.searches ?? []).slice(-10) };
+    },
+
+    /** 「中止」: stops a running task; its result is recorded as stopped by the person and it is not started again by itself. */
+    cancel(workspaceId: string, taskId: string): { ok: true } | { ok: false; code: string } {
+      const control = controls.get(taskId);
+      if (!mark(workspaceId).has(taskId) || !control) return { ok: false, code: "AGENT_TASK_NOT_RUNNING" };
+      control.abort();
+      return { ok: true };
+    },
 
     /**
      * At startup: a run with no outcome was lost with the process that held it (only one worker runs at a time). It is recorded as

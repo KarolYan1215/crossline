@@ -73,3 +73,6 @@
 .st-quota-row { display: grid; grid-template-columns: minmax(0, 6em) minmax(0, 1fr) auto; align-items: center; gap: 4px 10px; }
 .st-quota-row meter { width: 100%; }
 .st-quota-row small { grid-column: 1 / -1; }
+/* 后台任务: the assistant's runs going on now, each with what it has done so far. */
+.bg-list{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.bg-steps{margin:4px 0 0;padding-left:18px;display:grid;gap:2px;font-size:13px;color:var(--muted);overflow-wrap:anywhere}

@@ -19,6 +19,8 @@
 .task-card-progress small{font-size:12px;color:var(--graphite)}
 .task-card-slot{margin:0;font-size:13px}
 .task-card-slot small{color:var(--graphite);margin-right:4px}
+.task-prepared{margin:0;font-size:13px;display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline;overflow-wrap:anywhere}
+.task-prepared small{color:var(--graphite)}
 .task-card-slot a{text-decoration:underline}
 .task-card-supports{display:flex;flex-wrap:wrap;gap:4px;margin:0}
 .task-card-note{margin:4px 0 0;font-size:12px;color:var(--graphite)}

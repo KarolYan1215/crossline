@@ -364,6 +364,10 @@ export async function startCodexSupervisor(options: {
   conciergeTurn?: (workspaceId: string, request: Record<string, unknown>, signal: AbortSignal) => Promise<unknown>;
   /** Hands a work order to the assistant. Answers at once: the task runs on, and writes its own outcome to the ledger. */
   dispatchAgentTask?: (workspaceId: string, workOrderId: string, category?: string, stepId?: string) => unknown;
+  /** A running assistant task's progress so far (commands, changed files, searches), or undefined once it has ended. */
+  agentProgress?: (workspaceId: string, taskId: string) => unknown;
+  /** Stops a running assistant task (「中止」). */
+  cancelAgentTask?: (workspaceId: string, taskId: string) => { ok: boolean };
   /** Writes plan blocks to the person's Crossline calendar. Only blocks; never touches any other calendar or event. */
   publishCalendar?: (workspaceId: string, blocks: Array<{ id: string; title: string; start: string; end: string; note?: string; reminderMinutes?: number | null;
     recurrence?: { daysOfWeek: string[]; startDate: string; endDate: string; localStart: string; localEnd: string; timeZone: string } }>,
@@ -857,6 +861,20 @@ export async function startCodexSupervisor(options: {
         }).slice(0, 300);
         // `fixed`: the person's own fixed events, managed apart from the plan's work blocks, so publishing one never removes the other.
         sendJson(response, 200, await options.publishCalendar(callerWorkspaceId, blocks, body?.scope === "fixed" ? "fixed" : "work"));
+        return;
+      }
+      const agentTaskRoute = /^\/v1\/agent\/tasks\/([a-zA-Z0-9_-]{1,128})\/(progress|cancel)$/.exec(pathname);
+      if (agentTaskRoute && request.method === "GET" && agentTaskRoute[2] === "progress" && options.agentProgress) {
+        sendJson(response, 200, { progress: options.agentProgress(callerWorkspaceId, agentTaskRoute[1]!) ?? null });
+        return;
+      }
+      if (agentTaskRoute && request.method === "POST" && agentTaskRoute[2] === "cancel" && options.cancelAgentTask) {
+        if (request.headers.origin || !request.headers["content-type"]?.startsWith("application/json")) {
+          sendJson(response, 403, { blocker: { code: "AGENT_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
+          return;
+        }
+        const result = options.cancelAgentTask(callerWorkspaceId, agentTaskRoute[1]!);
+        sendJson(response, result.ok ? 200 : 409, result);
         return;
       }
       if (request.method === "POST" && pathname === "/v1/agent/dispatch" && options.dispatchAgentTask) {

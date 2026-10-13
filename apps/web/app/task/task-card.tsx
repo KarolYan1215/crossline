@@ -1,4 +1,5 @@
 "use client";
+import { Prepared } from "./prepared";
 
 import { useState, type KeyboardEvent, type MouseEvent } from "react";
 import type { TaskDetail } from "../../lib/task-detail";
@@ -48,6 +49,7 @@ export function TaskCard({ detail, slot, reason, variant = "compact" }: { detail
       estimate={work?.estimate ?? detail.estimate} stepId={work?.id} editable={!["accepted", "archived"].includes(detail.state)}
       durationLabel={!work ? "时长" : work === current ? "本步时长" : "下一步时长"} />
     {slot && <p className="task-card-slot"><small>下一次</small> <a href={`/plan?day=${slot.day}`} className="mono">{slotLabel(slot)}</a></p>}
+    <Prepared detail={detail} />
     {detail.supports.length > 0 && <p className="task-card-supports">{detail.supports.map((item) =>
       <SupportsTag key={`${item.line}:${item.target}`} line={item.line} lineLabel={item.lineLabel} target={item.target} {...(item.artifact ? { artifact: item.artifact } : {})} />)}</p>}
     {detail.artifactLinks?.length ? <p className="task-card-supports">{detail.artifactLinks.map((item) =>

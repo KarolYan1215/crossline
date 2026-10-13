@@ -74,3 +74,8 @@ test("background work finished together is one message, and at night only what f
   expect(planNudges(base({ blocks: [], finished, night: true }))).toEqual([]);
   expect(planNudges(base({ night: true })).map((item) => item.kind)).toEqual(["block_start"]);
 });
+
+test("when a block comes up, what the assistant has ready for it is named", () => {
+  const [nudge] = planNudges(base({ blocks: [{ ...base().blocks[0]!, prepared: ["公式表.md", "样题清单.md"] }] }));
+  expect(nudge!.text).toContain("已备好：公式表.md、样题清单.md。");
+});

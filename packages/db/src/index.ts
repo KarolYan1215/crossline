@@ -2044,6 +2044,12 @@ export class CrosslineStore {
     return rows.map((row) => ({ day: row.day, runs: Number(row.runs), totalTokens: Number(row.total_tokens) }));
   }
 
+  /** Each Skill's latest run: when, and whether it ended well (the background tasks page). */
+  lastModelRuns(workspaceId: string): Array<{ skill: string; at: string; ok: boolean }> {
+    return (this.#db.prepare(`SELECT skill, at, ok FROM model_usage m WHERE workspace_id = ? AND at = (SELECT MAX(at) FROM model_usage x WHERE x.workspace_id = m.workspace_id AND x.skill = m.skill)`)
+      .all(workspaceId) as Array<{ skill: string; at: string; ok: number }>).map((row) => ({ skill: row.skill, at: row.at, ok: row.ok === 1 }));
+  }
+
   summarizeModelUsage(workspaceId: string, sinceIso: string): ModelUsageSummary[] {
     const rows = this.#db.prepare(`
       SELECT skill, model, COUNT(*) AS runs, SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS failed, SUM(repairs) AS repairs,

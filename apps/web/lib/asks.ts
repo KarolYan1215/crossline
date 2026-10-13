@@ -553,7 +553,7 @@ function lockedConflictAsks({ store, ctx, today, now }: Source): Ask[] {
   });
 }
 
-export function collectAsks(ctx: AccessContext, now = new Date()): Ask[] {
+export function collectAsks(ctx: AccessContext, now = appNow()): Ask[] {
   const source = { store: getStore(), ctx, today: planToday(ctx, now), now };
   return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskAsks, missedAsks, lockedConflictAsks, agentAsks, calendarAsks, sourceProjectAsks, calendarLineAsks, interviewAsks, eventAsks, stepQuestionAsks,
     ({ ctx: context, now: at }: Source) => relationCheckAsks(context, at), backgroundAsks]
@@ -593,7 +593,7 @@ function snoozes(ctx: AccessContext): AskSnooze[] {
  * The open asks: snoozed ones left out, most urgent first, then the most important milestone's. Each carries `entersOn` when it is not
  * this week's decision (`lib/horizon.ts`); callers that show this week's decisions use `thisWeek`.
  */
-export function openAsks(ctx: AccessContext, now = new Date()): Ask[] {
+export function openAsks(ctx: AccessContext, now = appNow()): Ask[] {
   return rankAsks(decisionHorizon(ctx, now).annotate(collectAsks(ctx, now)), snoozes(ctx), planToday(ctx, now));
 }
 export const thisWeek = (asks: Ask[]) => asks.filter((ask) => !ask.entersOn);
@@ -622,7 +622,7 @@ async function runtimeAsk(ctx: AccessContext, now: Date): Promise<Ask | null> {
 }
 
 /** What Today and 待确认 show: the ledger's asks plus whether the AI can run at all. */
-export async function loadAsks(ctx: AccessContext, now = new Date()): Promise<Ask[]> {
+export async function loadAsks(ctx: AccessContext, now = appNow()): Promise<Ask[]> {
   const runtime = process.env.CROSSLINE_E2E_DATA_DIR || process.env.VITEST ? null : await runtimeAsk(ctx, now);
   return rankAsks(decisionHorizon(ctx, now).annotate([...(runtime ? [runtime] : []), ...collectAsks(ctx, now)]), snoozes(ctx), planToday(ctx, now));
 }
@@ -797,7 +797,7 @@ async function answerOne(ctx: AccessContext, ask: Ask, optionId: string, values:
 }
 
 /** Carries out the person's answer to one ask, recording that they answered (the system's own cost, counted on 系统体检). */
-export async function answerAsk(ctx: AccessContext, askId: string, optionId: string, values: Record<string, unknown>, now = new Date()): Promise<AskResult> {
+export async function answerAsk(ctx: AccessContext, askId: string, optionId: string, values: Record<string, unknown>, now = appNow()): Promise<AskResult> {
   const ask = collectAsks(ctx, now).find((item) => item.id === askId);
   if (!ask) return { ok: false, code: "ASK_NOT_FOUND" };
   const checked = validateAskAnswer(ask, optionId, values);
@@ -809,7 +809,7 @@ export async function answerAsk(ctx: AccessContext, askId: string, optionId: str
 }
 
 /** 「明天再问」/「下周再问」: hidden until then, back sooner if what it is about changes. */
-export function snoozeAsk(ctx: AccessContext, askId: string, choice: "tomorrow" | "week", now = new Date()): AskResult {
+export function snoozeAsk(ctx: AccessContext, askId: string, choice: "tomorrow" | "week", now = appNow()): AskResult {
   const ask = collectAsks(ctx, now).find((item) => item.id === askId);
   if (!ask) return { ok: false, code: "ASK_NOT_FOUND" };
   const until = snoozeUntil(choice, planToday(ctx, now));

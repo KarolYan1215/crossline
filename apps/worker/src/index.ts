@@ -15,7 +15,7 @@ import { createNightlyFlywheel } from "./nightly";
 import { createDiligenceRunner, linesDueForDiligence } from "./diligence";
 import { createAgentService } from "./agent-service";
 import { createCalendarPublisher } from "./calendar-publish";
-import { AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, backgroundSpend, CALENDAR_SYNC_FAILURE, spendAllows, type PlanRankingInput } from "@crossline/core";
+import { AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, BACKGROUND_PAUSED, backgroundSpend, CALENDAR_SYNC_FAILURE, pausedKinds, spendAllows, type BackgroundKind, type PlanRankingInput } from "@crossline/core";
 import { createFlywheelExpander } from "./flywheel";
 import { createManualbookBuilder, pendingMaterialWorkOrders, pendingTutorials } from "./manualbook";
 import { createProgressJudge, createStepPlanner, createWarningReviewer, reportsAwaitingJudgement, settleOldQuestions, tasksAwaitingStepPlan, warningsAwaitingReview } from "./step-planner";
@@ -97,6 +97,7 @@ const beat = (): void => {
  */
 const autoAnalyzing = new Set<string>();
 async function autoAnalyzePass(workspaceId: string, checkedAt = new Date().toISOString()): Promise<void> {
+  if (paused(workspaceId, "intake")) return;
   if (!codexSupervisor || autoAnalyzing.has(workspaceId)) return;
   autoAnalyzing.add(workspaceId);
   try {
@@ -120,6 +121,7 @@ async function autoAnalyzePass(workspaceId: string, checkedAt = new Date().toISO
  */
 const autoBackplanning = new Set<string>();
 async function autoBackplanPass(workspaceId: string, checkedAt = new Date().toISOString()): Promise<void> {
+  if (paused(workspaceId, "planning")) return;
   if (!codexSupervisor || autoBackplanning.has(workspaceId)) return;
   autoBackplanning.add(workspaceId);
   try {
@@ -145,6 +147,7 @@ async function autoBackplanPass(workspaceId: string, checkedAt = new Date().toIS
  */
 const curating = new Set<string>();
 async function curatorPass(workspaceId: string, checkedAt: string): Promise<void> {
+  if (paused(workspaceId, "planning")) return;
   if (curating.has(workspaceId) || !codexSupervisor || !curationDue(analysisStore, workspaceId)) return;
   if (!spendAllows(await spendFor(workspaceId), "discretionary")) return;
   curating.add(workspaceId);
@@ -158,6 +161,7 @@ async function curatorPass(workspaceId: string, checkedAt: string): Promise<void
 /** Names tasks written before short names existed, a batch a tick, while the quota is normal. */
 const titling = new Set<string>();
 async function titlePass(workspaceId: string, checkedAt: string): Promise<void> {
+  if (paused(workspaceId, "planning")) return;
   if (titling.has(workspaceId) || !codexSupervisor || !untitledTasks(analysisStore, workspaceId).length) return;
   if (!spendAllows(await spendFor(workspaceId), "discretionary")) return;
   titling.add(workspaceId);
@@ -171,6 +175,7 @@ async function titlePass(workspaceId: string, checkedAt: string): Promise<void> 
 /** Files new calendar events under the person's lines after a sync, a batch a tick; a small model, so it still runs when quota is tight. */
 const filingCalendar = new Set<string>();
 async function calendarLinePass(workspaceId: string, checkedAt: string): Promise<void> {
+  if (paused(workspaceId, "intake")) return;
   if (filingCalendar.has(workspaceId) || !codexSupervisor || !unfiledCalendarEvents(analysisStore, workspaceId).length) return;
   if (!spendAllows(await spendFor(workspaceId), "intake")) return;
   filingCalendar.add(workspaceId);
@@ -187,6 +192,7 @@ async function calendarLinePass(workspaceId: string, checkedAt: string): Promise
  */
 const splittingGoals = new Set<string>();
 async function goalSplitPass(workspaceId: string, checkedAt = new Date().toISOString()): Promise<void> {
+  if (paused(workspaceId, "planning")) return;
   if (splittingGoals.has(workspaceId) || !codexSupervisor
     || (!linesAwaitingSplit(analysisStore, workspaceId).length && !linesAwaitingCandidateSplit(analysisStore, workspaceId).length)) return;
   if (!spendAllows(await spendFor(workspaceId), "core")) return;
@@ -255,7 +261,7 @@ async function stepPlanPass(workspaceId: string, checkedAt = new Date().toISOStr
       const settled = settleOldQuestions(analysisStore, workspaceId);
       if (settled.length) console.info(JSON.stringify({ type: "step_questions.assumed", checkedAt, workspaceId, settled }));
     } catch { /* next tick */ }
-    if (!codexSupervisor) return;
+    if (!codexSupervisor || paused(workspaceId, "planning")) return;
     const ids = tasksAwaitingStepPlan(analysisStore, workspaceId);
     const reviews = warningsAwaitingReview(analysisStore, workspaceId);
     const reports = reportsAwaitingJudgement(analysisStore, workspaceId);
@@ -317,7 +323,7 @@ async function tick(): Promise<void> {
     }
     // Tutorials for work coming up in the next seven days (decided 2026-10-08): one per workspace per tick, and only while the quota is normal.
     const tutorial = pendingTutorials(analysisStore, workspace.id)[0];
-    if (tutorial && codexSupervisor && spendAllows(await spendFor(workspace.id), "discretionary")) {
+    if (tutorial && codexSupervisor && !paused(workspace.id, "tutorials") && spendAllows(await spendFor(workspace.id), "discretionary")) {
       const outcome = await getMaterialPreparer(workspace.id)(tutorial, { mode: "tutorial" }).catch(() => undefined);
       if (outcome) console.info(JSON.stringify({ type: `tutorial.${outcome.state}`, checkedAt, workspaceId: workspace.id, ...outcome }));
     }
@@ -371,7 +377,7 @@ async function tick(): Promise<void> {
     // The nightly flywheel, research and the assistant run only while the person is around (docs/review-2026-10-13.md §6.1): their
     // results are for someone to look at, and for days nobody did.
     if ((await spendFor(workspace.id)).engagement !== "active") continue;
-    const decision = await getNightly(workspace.id)().catch(() => undefined);
+    const decision = paused(workspace.id, "nightly") ? undefined : await getNightly(workspace.id)().catch(() => undefined);
     if (decision && !decision.run && decision.code !== "BEFORE_PLANNED_TIME" && decision.code !== "ALREADY_RAN_TODAY") {
       console.info(JSON.stringify({ type: "flywheel.nightly.skipped", checkedAt, workspaceId: workspace.id, code: decision.code }));
     }
@@ -437,6 +443,8 @@ setUsageSink((usage) => {
 setSpendModeProvider(async (workspaceId) => backgroundSpend(await readCost(workspaceId)).mode);
 // The one quota gate for every background pass (core: keeps the person's own work moving; discretionary: nobody is waiting on it).
 const spendFor = createBackgroundSpend(analysisStore, (workspaceId) => readCost(workspaceId));
+/** A kind of background work the person paused on the background tasks page (the assistant has its own `agent.paused`). */
+const paused = (workspaceId: string, kind: BackgroundKind): boolean => pausedKinds(analysisStore.getSetting(workspaceId, BACKGROUND_PAUSED)).has(kind);
 const nightlies = new Map<string, ReturnType<typeof createNightlyFlywheel>>();
 const getNightly = (workspaceId: string) => {
   let nightly = nightlies.get(workspaceId);
@@ -532,6 +540,7 @@ const diligencePasses = new Set<string>();
  * background. It never holds the tick, because a line can take ten minutes and the calendar should not wait.
  */
 function startDiligencePass(workspaceId: string, checkedAt: string): void {
+  if (paused(workspaceId, "research")) return;
   if (diligencePasses.has(workspaceId)) return;
   const interviewDone = analysisStore.getLatestOnboardingSession(workspaceId)?.state === "complete";
   const hasReport = analysisStore.listDiligenceReports(workspaceId).some((report) => report.status === "done");
@@ -808,6 +817,8 @@ if (!capabilitySecret) {
     buildTutorial: (workOrderId, workspaceId) => { enterUsageWorkspace(workspaceId); return getMaterialPreparer(workspaceId)(workOrderId, { mode: "tutorial" }); },
     judgeMilestone: (workOrderId, workspaceId) => getMilestoneGate(workspaceId)(workOrderId),
     dispatchAgentTask: (workspaceId, workOrderId, category, stepId) => agentService.dispatch(workspaceId, workOrderId, category, stepId),
+    agentProgress: (workspaceId, taskId) => agentService.progress(workspaceId, taskId),
+    cancelAgentTask: (workspaceId, taskId) => agentService.cancel(workspaceId, taskId),
     publishCalendar: async (workspaceId, blocks, scope) => {
       const session = await getCalendarWriteSession();
       if (!session) return { state: "blocked", code: "GRAPH_NOT_CONFIGURED", message: "没有配置 Microsoft 日历（CROSSLINE_MS_CLIENT_ID）。" };

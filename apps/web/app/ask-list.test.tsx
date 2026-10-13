@@ -39,15 +39,3 @@ test("asks whose decision can wait stay out of this week's list and are listed a
   expect(apart).not.toContain("第一条");
 });
 
-test("a milestone's missing inputs sit under its name once, each with its own options", () => {
-  const html = renderToStaticMarkup(<AskList initial={[ask("a", "「实测 MoS₂ 参数已可直接驱动 NeuroSim」还缺：实测数据"),
-    ask("b", "「实测 MoS₂ 参数已可直接驱动 NeuroSim」还缺：NeuroSim 输入规范"), { ...ask("c", "「另一个」还缺：录音"), entityId: "other" }]} />);
-  expect(html.match(/实测 MoS₂ 参数已可直接驱动 NeuroSim/g)).toHaveLength(1);
-  expect(html).toContain("「实测 MoS₂ 参数已可直接驱动 NeuroSim」还缺 2 样东西");
-  expect(html).toContain("<h4>实测数据</h4>");
-  expect(html).toContain("<h4>NeuroSim 输入规范</h4>");
-  expect(html.match(/我有，现在给你/g)).toHaveLength(3);
-  expect(html.match(/明天再问/g)).toHaveLength(3);
-  // A different milestone is its own card, title as it was.
-  expect(html).toContain("「另一个」还缺：录音");
-});

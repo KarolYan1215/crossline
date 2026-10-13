@@ -98,3 +98,9 @@ describe("graded coursework", () => {
     expect(result.fit && result.graded).toBe(false);
   });
 });
+
+test("a run the person stopped is final; one the runtime lost is tried again", async () => {
+  const { prepStepRetried } = await import("./agent-dispatch");
+  expect(prepStepRetried([{ status: "blocked", blockerCode: "AGENT_CANCELLED" }])).toBe(false);
+  expect(prepStepRetried([{ status: "blocked", blockerCode: "SKILL_CANCELED" }])).toBe(true);
+});
