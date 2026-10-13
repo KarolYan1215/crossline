@@ -13,8 +13,10 @@ const SOON = new Date("2026-10-08T02:00:00Z"), DAY_LATER = new Date("2026-10-09T
 
 function setup(nextAction: "ask" | "ready_for_milestones" = "ask") {
   const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
-  for (const [id, name] of [["ece555", "ECE 555"], ["ece548", "ECE 548"]] as const)
+  for (const [id, name] of [["ece555", "ECE 555"], ["ece548", "ECE 548"]] as const) {
     store.saveProject({ id, ownerId: "o", workspaceId: ws, identityId: "research", name, summary: "", status: "active", createdAt: "2026-10-01T00:00:00Z", updatedAt: "2026-10-01T00:00:00Z" });
+    store.upsertProfileFact({ workspaceId: ws, identityId: "research", projectId: id, slot: "deadline", value: "2026-12-15", status: "confirmed", sourceRef: "reply-1", sourceQuote: "2026-12-15", updatedAt: "2026-10-01T00:00:00Z" });
+  }
   for (const [id, fileName, text] of [["a", "Course Overview.docx", "Fermi-Dirac Statistics"], ["b", "TENTATIVE_Lecture Plan for Fall 2026.docx", "Week-1"]] as const)
     store.saveSourceDocument({ id, ownerId: "o", workspaceId: ws, kind: "text", fileName, mediaType: "text/plain", sha256: id, uri: `file://${id}`,
       extractedText: text, extractionStatus: "done", createdAt: "2026-10-01T00:00:00Z" });

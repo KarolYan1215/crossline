@@ -19,7 +19,7 @@ test("each round gets the app's questions about what it is talking about; with n
   const gaps = profileGaps({ identities: [{ id: "research", label: "研究者" }, { id: "media", label: "创作者" }],
     projects: [{ id: "ece548", identityId: "research", name: "ECE 548" }, { id: "xhs", identityId: "media", name: "小红书" }],
     facts: [{ identityId: "media", projectId: "xhs", slot: "what", value: "图文", status: "confirmed" }, { identityId: "research", projectId: "", slot: "what", value: "博士", status: "confirmed" }],
-    unfiled: [{ id: "doc-1", fileName: "Plan.pdf" }], portrait: { written: true, confirmed: false } });
+    dated: ["ece548", "xhs"], unfiled: [{ id: "doc-1", fileName: "Plan.pdf" }], portrait: { written: true, confirmed: false } });
   const ask = (identityId: string, projectId: string) => turn({ nextAction: "ask", questions: [{ id: "q", text: "进展如何？", kind: "free", options: [], allowOther: true, identityId, projectId }] });
   const ids = (output: OnboardingTurn) => output.questions.map((question) => question.id).slice(1);
   // Talking about research: its course's class times, not the file or the portrait.

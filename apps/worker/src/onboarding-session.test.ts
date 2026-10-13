@@ -196,7 +196,8 @@ const course = turn({
   projectsDetected: [{ id: "ece555", identityId: "research", name: "ECE 555", summary: "课程" }],
   slotUpdates: [
     { identityId: "research", projectId: "ece555", slot: "grading", value: "作业 20%、小测 30%、项目 25%、期末 25%", status: "confirmed", sourceRef: "reply-1", sourceQuote: "作业 20%、小测 30%、项目 25%、期末 25%" },
-    { identityId: "research", projectId: "ece555", slot: "goal", value: "拿高分", status: "confirmed", sourceRef: "reply-1", sourceQuote: "拿高分" }
+    { identityId: "research", projectId: "ece555", slot: "goal", value: "拿高分", status: "confirmed", sourceRef: "reply-1", sourceQuote: "拿高分" },
+    { identityId: "research", projectId: "ece555", slot: "deadline", value: "2026-12-15", status: "confirmed", sourceRef: "reply-1", sourceQuote: "期末 2026-12-15" }
   ],
   questions: [], nextAction: "ready_for_milestones"
 });
@@ -204,7 +205,7 @@ const course = turn({
 test("a course's target grade is not asked: the architect proposes one later, so a finished interview stays finished", async () => {
   const { rpc } = fakeRuntime([course]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc, { checklist: false });
-  expect(await run({ sessionId: "s", text: "ECE 555 评分：作业 20%、小测 30%、项目 25%、期末 25%，我想拿高分" })).toEqual({ state: "ready", sessionId: "s" });
+  expect(await run({ sessionId: "s", text: "ECE 555 评分：作业 20%、小测 30%、项目 25%、期末 25%，我想拿高分，期末 2026-12-15" })).toEqual({ state: "ready", sessionId: "s" });
   expect(store.listProfileFacts(workspaceId).some((fact) => fact.slot === "target_grade")).toBe(false);
 });
 
