@@ -91,26 +91,8 @@ function backplanAsks({ store, ctx, today }: Source): Ask[] {
         options: [{ id: "retry", label: "再试一次", recommended: true }, { id: "own", label: "手动填写第一步", href: "/#capture-title" }, skip] });
       continue;
     }
-    for (const input of missing) {
-      const id = `bp:${event.eventId}:${input.id}`;
-      if (resolved.has(id)) continue;
-      const acquiring = orders.some((order) => order.state !== "archived"
-        && (order.payload as { backplan?: { inputsFrom?: string; acquires?: string } }).backplan?.inputsFrom === event.eventId
-        && (order.payload as { backplan?: { acquires?: string } }).backplan?.acquires === input.id);
-      asks.push({ ...base, id, kind: "backplan_input",
-        title: `「${short(milestone.title)}」还缺：${short(input.what, 50)}`,
-        why: `倒推该里程碑时缺少输入：${input.message}${acquiring ? "「获取该输入」已排为第一步（待批准）。" : "缺少该输入时后续步骤无法确定。"}`,
-        options: [
-          { id: "have", label: "已有，提供内容", detail: "填写内容或存放位置后重新拆分",
-            fields: [{ id: "text", label: "内容或存放位置（文件路径、链接、要点）", kind: "longtext", required: true }] },
-          { id: "waiting", label: "已索取，等待中", detail: "到期日确认是否到达；此前依赖它的步骤不排入",
-            fields: [{ id: "who", label: "谁给", kind: "text", required: false, initial: input.whoHas },
-              { id: "date", label: "大约哪天到", kind: "date", required: true }] },
-          acquiring ? { id: "ask_first", label: "尚未索取，按第一步执行", detail: "保留「获取该输入」步骤", recommended: true }
-            : { id: "ask_first", label: "自行获取", detail: "已记录，不再询问", recommended: true },
-          skip
-        ] });
-    }
+    // Missing inputs are not asked about (docs/review-2026-10-13.md §11, the person's decision): the split run makes getting each one a
+    // step of its own, and the person supplies it when they do that step. Asking as well was twelve decisions on the real account.
   }
   return asks;
 }
@@ -651,43 +633,16 @@ function record(ctx: AccessContext, type: string, entityId: string, key: string,
   getStore().appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: key, type, entityId, payload });
 }
 
-/**
- * Takes the step that was getting a missing input out of the plan (the person has it, or is already waiting for it),
- * and lets the steps that waited on that step stand on their own. Only steps nobody has started are touched.
- * Returns the steps that depended on it.
- */
-function releaseAcquisition(ctx: AccessContext, milestoneId: string, inputsFrom: string, inputId: string, reason: string): string[] {
-  const store = getStore();
-  const orders = store.listWorkOrders(ctx.workspaceId).filter((order) => order.milestoneId === milestoneId);
-  const started = new Set(store.listExecutions(ctx.workspaceId).map((execution) => execution.workOrderId));
-  const acquiring = new Set(orders.filter((order) => {
-    const backplan = (order.payload as { backplan?: { inputsFrom?: string; acquires?: string } }).backplan;
-    return backplan?.inputsFrom === inputsFrom && backplan.acquires === inputId && UNTOUCHED.has(order.state) && !started.has(order.id);
-  }).map((order) => order.id));
-  const dependents: string[] = [];
-  for (const order of orders) {
-    const dependsOn = (order.payload as { dependsOn?: string[] }).dependsOn ?? [];
-    if (!dependsOn.some((id) => acquiring.has(id))) continue;
-    store.saveWorkOrder({ ...order, payload: { ...(order.payload as object), dependsOn: dependsOn.filter((id) => !acquiring.has(id)) } });
-    dependents.push(order.id);
-  }
-  for (const id of acquiring) archiveWorkOrder(ctx, id, reason);
-  return dependents;
-}
-
 function rerunBackplan(ctx: AccessContext, milestoneId: string) {
   record(ctx, "goal.backplan_rerun_requested", milestoneId, `goal:backplan:rerun:${milestoneId}:${Date.now()}`, {});
   requestAutoBackplan(ctx);
 }
 
-function answerBackplan(ctx: AccessContext, ask: Ask, optionId: string, values: Record<string, string>): AskResult {
+function answerBackplan(ctx: AccessContext, ask: Ask, optionId: string): AskResult {
   const store = getStore();
-  const [, eventId, inputId] = ask.id.split(":") as [string, string, string];
   const milestoneId = ask.entityId;
   const milestone = store.listMilestones(ctx.workspaceId).find((item) => item.id === milestoneId && item.status === "approved");
   if (!milestone) return { ok: false, code: "MILESTONE_NOT_APPROVED" };
-  const event = store.listEvents(ctx.workspaceId, { type: "goal.backplan_blocked", entityId: milestoneId }).find((item) => item.eventId === eventId);
-  const input = missingInputsOf(event?.payload).find((item) => item.id === inputId);
   const resolve = (how: string, id = ask.id) => record(ctx, "goal.backplan_input_resolved", milestoneId, `goal:backplan:resolved:${id}`, { askId: id, how });
   if (optionId === "skip") {
     const started = new Set(store.listExecutions(ctx.workspaceId).map((execution) => execution.workOrderId));
@@ -698,35 +653,13 @@ function answerBackplan(ctx: AccessContext, ask: Ask, optionId: string, values: 
     return { ok: true };
   }
   if (optionId === "retry") { resolve("retry"); rerunBackplan(ctx, milestoneId); return { ok: true }; }
-  if (!input) return { ok: false, code: "ASK_STALE" };
-  if (optionId === "ask_first") { resolve("will_obtain"); return { ok: true }; }
-  if (optionId === "have") {
-    releaseAcquisition(ctx, milestoneId, eventId, inputId, "该输入已由本人提供");
-    record(ctx, "goal.backplan_input_supplied", milestoneId, `goal:backplan:supplied:${ask.id}`, { what: input.what, text: values.text, askId: ask.id });
-    resolve("supplied");
-    rerunBackplan(ctx, milestoneId);
-    return { ok: true };
-  }
-  if (optionId === "waiting") {
-    const dependents = releaseAcquisition(ctx, milestoneId, eventId, inputId, "该输入已在等待中");
-    const index = waitingIndex(store, ctx.workspaceId);
-    const existing = index.open.find((item) => index.sameWait(item, values.who ?? "", values.date!, `${milestone.identityId}/${milestone.projectId ?? ""}`));
-    const waitingId = existing?.id ?? `wait-bp-${milestoneId}-${eventId.slice(0, 8)}-${inputId}`;
-    if (existing) store.addWaitingBlocks(ctx.workspaceId, existing.id, dependents, ctx.principalId);
-    else store.saveWaitingItem({ id: waitingId, ownerId: ctx.principalId, workspaceId: ctx.workspaceId,
-      title: input.what, who: values.who ?? "", expectedAt: values.date!, approximate: true, followUpAt: values.date!, state: "open",
-      blocks: dependents, source: "backplan" });
-    record(ctx, "goal.backplan_input_waiting", milestoneId, `goal:backplan:waiting:${ask.id}`, { waitingId, askId: ask.id, what: input.what });
-    resolve("waiting");
-    return { ok: true };
-  }
   return { ok: false, code: "ASK_OPTION_UNKNOWN" };
 }
 
 async function answerOne(ctx: AccessContext, ask: Ask, optionId: string, values: Record<string, string>): Promise<AskResult> {
   const store = getStore();
   switch (ask.kind) {
-    case "backplan_input": return answerBackplan(ctx, ask, optionId, values);
+    case "backplan_input": return answerBackplan(ctx, ask, optionId);
     case "waiting_due": {
       const index = waitingIndex(store, ctx.workspaceId);
       const item = index.open.find((row) => row.id === ask.entityId);

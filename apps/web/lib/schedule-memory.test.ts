@@ -3,7 +3,7 @@ import { CrosslineStore } from "@crossline/db";
 import { scheduledMinutesKey } from "@crossline/core";
 vi.mock("server-only", () => ({}));
 import { loadCurrentPlan, planToday, saveSchedulePreferences, toZonedInstant } from "./crossline";
-import { ORDER_STARTS_SETTING, readScheduledDay, readScheduledMinutes, recordScheduledToday, stepStartsOf } from "./schedule-memory";
+import { MILESTONE_WEIGHTS_SETTING, ORDER_STARTS_SETTING, readScheduledDay, readScheduledMinutes, recordScheduledToday, stepStartsOf } from "./schedule-memory";
 import { TEST_CTX } from "./test-support";
 
 afterEach(() => { globalThis.crosslineStore?.close(); globalThis.crosslineStore = undefined; vi.unstubAllEnvs(); });
@@ -31,6 +31,11 @@ test("the day's plan is remembered with each order's planned minutes, keeping th
   expect(readScheduledMinutes(TEST_CTX, today)).toEqual(expected);
   // The start-time record the missed-block ask reads keeps its shape.
   expect(Object.keys(readScheduledDay(TEST_CTX, today)).sort()).toEqual(Object.keys(expected).sort());
+  // Each approved milestone's importance as the scheduler weighs it, for the worker's step planner.
+  const weights = JSON.parse(store.getSetting(TEST_CTX.workspaceId, MILESTONE_WEIGHTS_SETTING)!) as Record<string, number>;
+  const approved = store.listMilestones(TEST_CTX.workspaceId).filter((milestone) => milestone.status === "approved").map((milestone) => milestone.id);
+  expect(Object.keys(weights).sort()).toEqual([...new Set(approved)].sort());
+  expect(Object.values(weights).every((weight) => weight >= 0 && weight <= 100)).toBe(true);
   // Each order's earliest block as an instant, for the worker's just-in-time preparation.
   const starts = JSON.parse(store.getSetting(TEST_CTX.workspaceId, ORDER_STARTS_SETTING)!) as Record<string, string>;
   for (const order of Object.keys(expected)) {

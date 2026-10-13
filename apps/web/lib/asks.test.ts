@@ -37,66 +37,16 @@ function refusedWithMissing(store: CrosslineStore) {
   return eventId;
 }
 
-test("a refused backplan becomes one ask per missing input, explained, urgent when the deadline is two days out", () => {
+test("missing inputs are not asked about: the split makes getting each one a step, and nothing waits for a decision", () => {
   const store = setup();
-  const eventId = refusedWithMissing(store);
-  const asks = collectAsks(TEST_CTX, NOW).filter((ask) => ask.kind === "backplan_input");
-  expect(asks.map((ask) => ask.id)).toEqual([`bp:${eventId}:m1`, `bp:${eventId}:m2`]);
-  expect(asks[0]).toMatchObject({ urgency: "now", dueDay: "2026-10-09", line: "research" });
-  expect(asks[0]!.title).toContain("MoS₂ 实测参数数据");
-  expect(asks[0]!.why).toContain("已排为第一步");
-  expect(asks[0]!.options.map((option) => option.id)).toEqual(["have", "waiting", "ask_first", "skip"]);
-  // The person's own 「谁给」 is prefilled from what the model said.
-  expect(asks[0]!.options[1]!.fields![0]).toMatchObject({ id: "who", initial: "师兄" });
-  expect(countPending(TEST_CTX).asks).toBe(2);
+  refusedWithMissing(store);
+  expect(collectAsks(TEST_CTX, NOW).filter((ask) => ask.kind === "backplan_input")).toEqual([]);
+  expect(countPending(TEST_CTX).asks).toBe(0);
+  // The step that gets the first input is there, and the step after it waits for it.
+  expect(store.listWorkOrders(ws).find((order) => order.id === "map")!.payload).toMatchObject({ dependsOn: ["get-data"] });
 });
 
-test("an older refusal with only the joined message is still asked about, sentence by sentence", () => {
-  const store = setup();
-  store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: "legacy", type: "goal.backplan_blocked", entityId: "mos2",
-    payload: { milestoneVersion: 2, code: "BACKPLAN_INPUT_BLOCKED", message: "未提供实测数据。；未提供 NeuroSim 输入规范。" } });
-  expect(collectAsks(TEST_CTX, NOW).filter((ask) => ask.kind === "backplan_input").map((ask) => ask.title))
-    .toEqual(["「实测 MoS₂ 参数已可直接驱动 NeuroSim」还缺：未提供实测数据。", "「实测 MoS₂ 参数已可直接驱动 NeuroSim」还缺：未提供 NeuroSim 输入规范。"]);
-});
-
-test("「我有」 hands the input over: the step that was getting it goes, the next step stands alone, and the milestone is split again", async () => {
-  const store = setup();
-  const eventId = refusedWithMissing(store);
-  expect(await answerAsk(TEST_CTX, `bp:${eventId}:m1`, "have", { text: "D:/lab/mos2/iv.csv，字段 Vg, Id" }, NOW)).toMatchObject({ ok: true });
-  const orders = new Map(store.listWorkOrders(ws).map((order) => [order.id, order]));
-  expect(orders.get("get-data")!.state).toBe("archived");
-  expect((orders.get("map")!.payload as { dependsOn: string[] }).dependsOn).toEqual([]);
-  expect(store.listEvents(ws, { type: "goal.backplan_input_supplied" })[0]!.payload).toMatchObject({ what: "MoS₂ 实测参数数据", text: "D:/lab/mos2/iv.csv，字段 Vg, Id" });
-  expect(store.listEvents(ws, { type: "goal.backplan_rerun_requested" })).toHaveLength(1);
-  expect(requestCodexSupervisor).toHaveBeenCalledWith(TEST_CTX, "/v1/goals/auto-backplan", expect.objectContaining({ method: "POST" }));
-  expect(collectAsks(TEST_CTX, NOW).map((ask) => ask.id)).not.toContain(`bp:${eventId}:m1`);
-  expect(store.listEvents(ws, { type: "ask.answered" })).toHaveLength(1);
-  // A required field left empty is refused without changing anything.
-  expect(await answerAsk(TEST_CTX, `bp:${eventId}:m2`, "have", { text: " " }, NOW)).toEqual({ ok: false, code: "ASK_FIELD_REQUIRED" });
-});
-
-test("「在等」 becomes a waiting item that holds the next step; on its day 「到了」 splits the milestone again with what arrived", async () => {
-  const store = setup();
-  const eventId = refusedWithMissing(store);
-  expect(await answerAsk(TEST_CTX, `bp:${eventId}:m1`, "waiting", { who: "师兄", date: "2026-10-08" }, NOW)).toMatchObject({ ok: true });
-  const item = store.listWaitingItems(ws)[0]!;
-  expect(item).toMatchObject({ who: "师兄", title: "MoS₂ 实测参数数据", expectedAt: "2026-10-08", blocks: ["map"], source: "backplan" });
-  expect(collectAsks(TEST_CTX, NOW).some((ask) => ask.kind === "waiting_due")).toBe(false);
-  const dayOf = new Date("2026-10-08T15:00:00.000Z");
-  const waiting = collectAsks(TEST_CTX, dayOf).find((ask) => ask.kind === "waiting_due")!;
-  expect(waiting).toMatchObject({ urgency: "now", title: "师兄的「MoS₂ 实测参数数据」到了吗？" });
-  expect(waiting.options[0]!.fields?.[0]?.id).toBe("note");
-  vi.stubEnv("CROSSLINE_FIXED_NOW", dayOf.toISOString());
-  expect(await answerAsk(TEST_CTX, waiting.id, "arrived", { note: "在组里网盘 /mos2" }, dayOf)).toMatchObject({ ok: true });
-  expect(store.listWaitingItems(ws)[0]!.state).toBe("arrived");
-  expect(store.listEvents(ws, { type: "goal.backplan_input_supplied" })[0]!.payload).toMatchObject({ text: "在组里网盘 /mos2" });
-  expect(store.listEvents(ws, { type: "goal.backplan_rerun_requested" })).toHaveLength(1);
-});
-
-/**
- * The real account: 师兄's data was already a waiting item (recorded by hand on the next milestone's task, 「西湖 MoS2 真实
- *测量数据」), and answering the backplan's 「在等」 opened a second one for the same thing on the same day.
- */
+/** A waiting item the person already had, for the same thing a milestone's split now needs. */
 function alreadyWaiting(store: CrosslineStore) {
   store.saveMilestone({ id: "chart", ownerId: owner, workspaceId: ws, identityId: "research", projectId: "p", title: "真实数据仿真图表已获合作师兄接收",
     status: "approved", version: 2 });
@@ -105,25 +55,6 @@ function alreadyWaiting(store: CrosslineStore) {
   store.saveWaitingItem({ id: "wait-sim-0", ownerId: owner, workspaceId: ws, title: "西湖 MoS2 真实测量数据", who: "师兄", expectedAt: "2026-10-08",
     approximate: true, followUpAt: "2026-10-08", state: "open", blocks: ["sim"], source: "manual" });
 }
-
-test("「在等」 for something already waited on (same person, same day, same project) reuses that item; 「到了」 on it re-splits", async () => {
-  const store = setup();
-  alreadyWaiting(store);
-  const eventId = refusedWithMissing(store);
-  expect(await answerAsk(TEST_CTX, `bp:${eventId}:m1`, "waiting", { who: " 师兄", date: "2026-10-08" }, NOW)).toMatchObject({ ok: true });
-  expect(store.listWaitingItems(ws)).toEqual([expect.objectContaining({ id: "wait-sim-0", blocks: ["sim", "map"] })]);
-  const dayOf = new Date("2026-10-08T15:00:00.000Z");
-  const waiting = collectAsks(TEST_CTX, dayOf).filter((ask) => ask.kind === "waiting_due");
-  expect(waiting.map((ask) => ask.id)).toEqual(["wait:wait-sim-0"]);
-  expect(waiting[0]!.why).toContain("重新拆");
-  vi.stubEnv("CROSSLINE_FIXED_NOW", dayOf.toISOString());
-  expect(await answerAsk(TEST_CTX, waiting[0]!.id, "arrived", {}, dayOf)).toMatchObject({ ok: true });
-  expect(store.listEvents(ws, { type: "goal.backplan_input_supplied" }).map((event) => event.entityId)).toEqual(["mos2"]);
-  expect(store.listEvents(ws, { type: "goal.backplan_rerun_requested" }).map((event) => event.entityId)).toEqual(["mos2"]);
-  // A different person, or a different day, is a different wait.
-  expect(await answerAsk(TEST_CTX, `bp:${eventId}:m2`, "waiting", { who: "导师", date: "2026-10-09" }, dayOf)).toMatchObject({ ok: true });
-  expect(store.listWaitingItems(ws, { state: "open" }).map((item) => item.id)).toEqual([`wait-bp-mos2-${eventId.slice(0, 8)}-m2`]);
-});
 
 test("a pair recorded before this fix is one card, and 「到了」 on it closes both and re-splits the milestone", async () => {
   const store = setup();
@@ -141,21 +72,31 @@ test("a pair recorded before this fix is one card, and 「到了」 on it closes
   expect(collectAsks(TEST_CTX, dayOf).some((ask) => ask.kind === "waiting_due")).toBe(false);
 });
 
-test("「先不拆」 withdraws the milestone's unstarted steps and closes this version to the timer", async () => {
+/** A backplan that stopped with nothing split at all: the one backplan question still asked. */
+function refusedOutright(store: CrosslineStore) {
+  return store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: "blocked-all", type: "goal.backplan_blocked", entityId: "mos2",
+    payload: { milestoneVersion: 2, code: "BACKPLAN_SCHEMA_INVALID", message: "答案不完整" } }).eventId;
+}
+
+test("a backplan that split nothing is asked about; 「先不拆」 withdraws the milestone's unstarted steps and closes this version to the timer", async () => {
   const store = setup();
-  const eventId = refusedWithMissing(store);
-  expect(await answerAsk(TEST_CTX, `bp:${eventId}:m2`, "skip", {}, NOW)).toMatchObject({ ok: true });
+  refusedWithMissing(store);
+  const eventId = refusedOutright(store);
+  const [ask] = collectAsks(TEST_CTX, NOW).filter((item) => item.kind === "backplan_input");
+  expect(ask).toMatchObject({ id: `bp:${eventId}:all`, urgency: "now" });
+  expect(ask!.options.map((option) => option.id)).toEqual(["retry", "own", "skip"]);
+  expect(await answerAsk(TEST_CTX, ask!.id, "skip", {}, NOW)).toMatchObject({ ok: true });
   expect(store.listWorkOrders(ws).find((order) => order.id === "get-data")!.state).toBe("archived");
   expect(store.listEvents(ws, { type: "goal.backplan_declined" })[0]!.payload).toEqual({ milestoneVersion: 2 });
-  expect(collectAsks(TEST_CTX, NOW).filter((ask) => ask.kind === "backplan_input")).toEqual([]);
+  expect(collectAsks(TEST_CTX, NOW).filter((item) => item.kind === "backplan_input")).toEqual([]);
 });
 
 test("a snooze hides an ask until its day and lets it back early when the thing changes", () => {
   const store = setup();
-  const eventId = refusedWithMissing(store);
-  expect(snoozeAsk(TEST_CTX, `bp:${eventId}:m1`, "tomorrow", NOW)).toMatchObject({ ok: true });
-  expect(openAsks(TEST_CTX, NOW).map((ask) => ask.id)).toEqual([`bp:${eventId}:m2`]);
-  expect(openAsks(TEST_CTX, new Date("2026-10-08T15:00:00.000Z")).map((ask) => ask.id)).toContain(`bp:${eventId}:m1`);
+  const eventId = refusedOutright(store);
+  expect(snoozeAsk(TEST_CTX, `bp:${eventId}:all`, "tomorrow", NOW)).toMatchObject({ ok: true });
+  expect(openAsks(TEST_CTX, NOW).map((ask) => ask.id)).not.toContain(`bp:${eventId}:all`);
+  expect(openAsks(TEST_CTX, new Date("2026-10-08T15:00:00.000Z")).map((ask) => ask.id)).toContain(`bp:${eventId}:all`);
 });
 
 test("a refused capture is asked about; the person's note is added to it and the analysis asked for again", async () => {
@@ -232,14 +173,14 @@ test("a block whose completion check was answered yesterday is not asked about a
   expect(collectAsks(TEST_CTX, NOW).filter((ask) => ask.kind === "missed_block").map((ask) => ask.entityId)).toEqual(["silent"]);
 });
 
-test("missing inputs of a milestone still in the task library wait until its window opens", () => {
+test("a backplan question about a milestone still in the task library waits until its window opens", () => {
   const store = setup();
   store.saveMilestoneAnchor({ workspaceId: ws, milestoneId: "mos2", stage: 1, deadline: "2026-12-17", baseline: "", target: "", stakeholders: [],
     sourceFactIds: [], dependsOn: [], updatedAt: "2026-10-01T00:00:00Z" });
-  refusedWithMissing(store);
+  refusedOutright(store);
   expect(collectAsks(TEST_CTX, NOW).filter((ask) => ask.kind === "backplan_input")).toEqual([]);
-  // Three weeks before the deadline the questions come up.
-  expect(collectAsks(TEST_CTX, new Date("2026-11-26T15:00:00.000Z")).filter((ask) => ask.kind === "backplan_input")).toHaveLength(2);
+  // Three weeks before the deadline it comes up.
+  expect(collectAsks(TEST_CTX, new Date("2026-11-26T15:00:00.000Z")).filter((ask) => ask.kind === "backplan_input")).toHaveLength(1);
 });
 
 test("a preparation step the runtime lost is not asked about while the worker will run it again; its last refusal on its own merits is", async () => {

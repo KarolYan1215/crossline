@@ -1,12 +1,14 @@
 import "server-only";
 import { STEP_STARTS_SETTING, scheduledMinutesKey, type AccessContext } from "@crossline/core";
-import { effectiveSchedulePreferences, getStore, loadCurrentPlan, planToday, toZonedInstant } from "./crossline";
+import { effectiveSchedulePreferences, effectiveWeight, getStore, loadCurrentPlan, planToday, toZonedInstant } from "./crossline";
 
 /** The setting that remembers which work was given a time on a day: `schedule.day:<YYYY-MM-DD>` → `{ [orderId]: "HH:MM" }`. */
 export const scheduledDayKey = (day: string) => `schedule.day:${day}`;
 export type ScheduledDay = Record<string, string>;
 /** Order ids with a scheduled block in the next seven days, rewritten on the web's timer. */
 export const UPCOMING_SETTING = "schedule.upcoming";
+/** `{ [milestoneId]: 0–100 }`: approved milestones' effective importance; read by the worker's step planner. */
+export const MILESTONE_WEIGHTS_SETTING = "milestone.weights";
 /** `{ [orderId]: ISO instant }`: each order's earliest block this week; read by the worker (`apps/worker/src/schedule-window.ts`). */
 export const ORDER_STARTS_SETTING = "schedule.orderStarts";
 
@@ -73,6 +75,11 @@ export async function recordScheduledToday(ctx: AccessContext, now = new Date())
     if (at && (!orderStarts[orderId] || at < orderStarts[orderId]!)) orderStarts[orderId] = at;
   }
   getStore().setSetting(ctx.workspaceId, ORDER_STARTS_SETTING, JSON.stringify(orderStarts));
+  // Each approved milestone's importance as the scheduler weighs it (the slider, else the presets): the worker cannot compute the
+  // presets, and the step planner asks the person only about important work (docs/review-2026-10-13.md §11).
+  const weights = Object.fromEntries(getStore().listMilestones(ctx.workspaceId).filter((milestone) => milestone.status === "approved")
+    .map((milestone) => [milestone.id, effectiveWeight(ctx, milestone.id)]));
+  getStore().setSetting(ctx.workspaceId, MILESTONE_WEIGHTS_SETTING, JSON.stringify(weights));
   return seen;
 }
 

@@ -1,6 +1,6 @@
 import {
   ARCHETYPES, AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, resolveAvailability, VALIDATION_REVIEW_SCHEMA, archetypeBrief, archetypeById, stepPlanSchema, goalSettingKey,
-  normalizeStepPlan, relevantDocuments, STEP_ANSWER_SLOT, stepPlanWarnings, unverifiedUnits, validateStepPlanShape, validateValidationReview, weeklyAvailableHours,
+  normalizeStepPlan, relevantDocuments, STEP_ANSWER_SLOT, stepAnswerSlot, stepPlanWarnings, unverifiedUnits, validateStepPlanShape, validateValidationReview, weeklyAvailableHours,
   PROGRESS_ASSESSMENT_SCHEMA, validateProgressAssessment, type ProgressAssessment, type StepPlan, type StepWarning, type ValidationReview
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
@@ -102,6 +102,21 @@ export function tasksAwaitingStepPlan(store: CrosslineStore, workspaceId: string
     .slice(0, limit).map((order) => order.id);
 }
 
+/** A milestone this important or more makes its tasks important (the scheduler's own line for 「重要」). */
+export const IMPORTANT_WEIGHT = 60;
+
+/**
+ * Whether a task is important by rule (docs/review-2026-10-13.md §11, the person's decision): graded coursework read from the course's
+ * own files (a homework or exam date pair), or work for a milestone the scheduler weighs at 60 or more (the web records the weights in
+ * `milestone.weights`). The planner's own judgement of the long-term plan is the other half (`importance.longTerm`).
+ */
+export function importantByRule(store: CrosslineStore, workspaceId: string, order: { milestoneId: string; payload?: unknown }): boolean {
+  if ((order.payload as { datePair?: unknown } | undefined)?.datePair) return true;
+  let weights: Record<string, number> = {};
+  try { weights = JSON.parse(store.getSetting(workspaceId, "milestone.weights") ?? "{}") as Record<string, number>; } catch { /* none recorded */ }
+  return Boolean(order.milestoneId) && (weights[order.milestoneId] ?? 0) >= IMPORTANT_WEIGHT;
+}
+
 export function createStepPlanner(store: CrosslineStore, workspaceId: string, cwd: string, getClient: () => CodexRpcBoundary | undefined) {
   return async function plan(workOrderId: string, feedback = "", signal?: AbortSignal): Promise<{ state: "planned"; version: number; warnings: StepWarning[] } | { state: "blocked"; code: string; message: string }> {
     const order = store.listWorkOrders(workspaceId).find((item) => item.id === workOrderId);
@@ -118,8 +133,12 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
     // Archetypes the curator learned for this workspace are offered beside the built-in ones and checked the same way.
     const learned = learnedArchetypes(store, workspaceId);
     const grounding = planningContext(store, workspaceId, order);
+    // Important work the person does themselves is researched first (the web is open for this run): its background and the best known
+    // way to do it, the plan proposed on that basis, and only what the person alone can answer asked.
+    const research = importantByRule(store, workspaceId, order) && (payload.humanCore ?? []).length > 0;
     const input = {
       version: "crossline.step-plan.v1",
+      research,
       task: { intent: order.intent, line: order.identityId, project: project?.name ?? "", riskTier: order.riskTier,
         personsPart: (payload.humanCore ?? []).map((part) => part.intent), systemMayPrepare: (payload.automationParts ?? []).map((part) => part.intent),
         mustDeliver: (payload.evidenceContract ?? []).map((item) => item.description), needs: (payload.materialContract ?? []).map((item) => item.description),
@@ -146,7 +165,9 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
     };
     const result = await runCodexSkill<StepPlan>(client, input, { skillName: PLANNER, cwd,
       developerInstructions: "Choose the archetype and write the task's step graph as the Skill describes. Return raw JSON only."
-        + (feedback ? " Apply the feedback: it is what the reviewer or the person asked to change." : ""),
+        + (feedback ? " Apply the feedback: it is what the reviewer or the person asked to change." : "")
+        + (research ? " research is true: search the web for this task's background and the best known way to do it before planning, as the Skill's research section says." : ""),
+      ...(research ? { allowWebSearch: true } : {}),
       outputSchema: stepPlanSchema(learned.map((archetype) => archetype.id)), prepareInput: () => input,
       validateOutput: (output) => {
         const shaped = validateStepPlanShape(output, learned);
@@ -175,11 +196,25 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
     // only the rest goes to the reviewer.
     const warnings = [...fixed.filter((warning) => !AUTO_FIXED.has(warning.code)), ...stepPlanWarnings(normalized, window, learned)];
     const saved = store.saveStepPlan(workspaceId, workOrderId, normalized, ownerOf(store, workspaceId), feedback ? "revised" : "planned");
+    // Only an important task's questions go to the person; a minor task's are settled as assumptions the next plan reads (and the
+    // person can still correct on the task), so they never become a decision to make.
+    if (!research && !importantByRule(store, workspaceId, order) && !result.output.importance?.longTerm) assumeAnswers(store, workspaceId, order, normalized.questions);
     if (warnings.length) store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId,
       idempotencyKey: `validation.warned:task_steps:${workOrderId}:${saved.version}`, type: "validation.warned", entityId: workOrderId,
       payload: { subject: "task_steps", version: saved.version, warnings, revised: Boolean(feedback) } });
     return { state: "planned", version: saved.version, warnings };
   };
+}
+
+/** Records each question's first option as an assumption under the question's answer slot: `假设：【question】option`. */
+function assumeAnswers(store: CrosslineStore, workspaceId: string, order: { identityId: string; projectId: string }, questions: StepPlan["questions"]): void {
+  const answered = new Set(store.listProfileFacts(workspaceId).filter((fact) => fact.slot.startsWith(STEP_ANSWER_SLOT)).map((fact) => `${fact.projectId}|${fact.slot}`));
+  for (const question of questions) {
+    const slot = stepAnswerSlot(question.text);
+    if (answered.has(`${order.projectId}|${slot}`) || !question.options[0]) continue;
+    store.upsertProfileFact({ workspaceId, identityId: order.identityId, projectId: order.projectId, slot, value: `假设：【${question.text}】${question.options[0]}`,
+      status: "inferred", sourceRef: "", sourceQuote: "", updatedAt: new Date().toISOString() });
+  }
 }
 
 /** Progress reports nobody has read yet (`task.progress_reported` without a `task.progress_judged` for the same report). */

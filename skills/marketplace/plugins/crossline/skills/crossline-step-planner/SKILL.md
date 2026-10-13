@@ -7,6 +7,7 @@ description: Plan one Crossline task as the few intellectual steps only the pers
 
 Input is `crossline.step-plan.v1`:
 
+- `research`: true when the task is important by the app's rules (graded coursework, or a milestone weighed 60 or more) and the person does part of it themselves. The web is open for this run (section 0b).
 - `task`: intent, line, project, the person's part, what the system may prepare, what must be delivered, current estimate.
 - `milestone`: the result this task serves and its criteria (often a score line or an artefact).
 - `window`: `notBefore` (earliest start), `dueBy` (latest finish), `availableMinutes` (working time inside it).
@@ -15,7 +16,15 @@ Input is `crossline.step-plan.v1`:
 - `projectDates[]`: the project's dated items (exams, homework due, releases).
 - `archetypes`, `doneSteps` (when replanning), `acceptedOutputs` (work the assistant already produced for this course or project — `accepted`, or `awaiting_review` by the person; `forThisTask` says whether it was made for this task. Plan none of it again: refer to it as an input), `personalPreferences`, `feedback` (the latest instruction) and `earlierFeedback` (every earlier one — all still hold unless the latest contradicts them).
 
-Return raw JSON only: `{archetypeId, quantity, rationale, units, questions, steps}`.
+Return raw JSON only: `{archetypeId, quantity, rationale, importance, units, questions, steps}`.
+
+## 0a. Does this task matter to the long-term plan: `importance`
+
+`{longTerm, why}`. `longTerm` is true when the task moves something the person cares about over months — a graded part of a course they set a target for, a deliverable others will see (a submission, a release, a paper, an MVP), a step a milestone's outcome depends on — and false for upkeep, filing and errands whose result nobody depends on. `why` is one sentence naming the milestone, grade or deliverable it rests on. Only an important task's `questions` are put to the person; a minor task's questions are settled by the app as assumptions (their first option), so for a minor task put the most likely answer first.
+
+## 0b. When `research` is true: find the best way before planning
+
+Search the web before writing the steps: what this kind of task usually requires (the course's or venue's own pages first, then reputable guides), how people who do it well approach it, the known pitfalls. Plan the person's steps on the best approach you found and say so in `rationale` with the sources' names. Then ask in `questions` only what the person alone can answer — never what the search or the material already settles.
 
 ## 1. Read the material first: `units`
 

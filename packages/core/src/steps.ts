@@ -45,6 +45,12 @@ export type StepPlan = {
   archetypeId: string;
   quantity: { basis: string; amount: number; unit: string };
   rationale: string;
+  /**
+   * The planner's judgement of whether this task matters to the person's long-term plan (docs/review-2026-10-13.md §11): only an
+   * important task's questions are put to the person; a minor one's are settled as assumptions. Optional in the type for plans stored
+   * before it; the schema requires it.
+   */
+  importance?: { longTerm: boolean; why: string };
   units: StepUnit[];
   questions: StepQuestion[];
   steps: PlannedStep[];
@@ -60,6 +66,7 @@ export const stepPlanSchema = (extraIds: readonly string[] = []) => object({
   archetypeId: { type: "string", enum: [...ARCHETYPE_IDS, ...extraIds] },
   quantity: object({ basis: str, amount: num, unit: str }),
   rationale: str,
+  importance: object({ longTerm: { type: "boolean" }, why: str }),
   units: { type: "array", items: object({ id: str, title: str, docId: str, quote: str }) },
   questions: { type: "array", items: object({ id: str, text: str, why: str, options: { type: "array", items: str } }) },
   steps: { type: "array", items: object({

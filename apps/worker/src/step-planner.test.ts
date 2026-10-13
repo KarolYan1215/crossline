@@ -141,3 +141,40 @@ test("the planner is told what the assistant already made for the same course, i
   expect(existingOutputs(store, "w", order)).toEqual([{ title: "hw1 · 材料目录", status: "awaiting_review", forThisTask: false, files: ["目录.md"], note: "" }]);
   store.close();
 });
+
+test("only an important task's questions are asked: a minor task's become assumptions; graded work is researched first", async () => {
+  const { stepAnswerSlot } = await import("@crossline/core");
+  const store = new CrosslineStore(":memory:");
+  seed(store);
+  const question = { id: "q1", text: "海报用哪种尺寸？", why: "影响排版", options: ["A3", "A2"] };
+  const plan = (longTerm: boolean) => JSON.stringify({ archetypeId: "problem_set", quantity: { basis: "题目数", amount: 1, unit: "题" }, rationale: "",
+    importance: { longTerm, why: longTerm ? "期中 85 分要靠它" : "日常杂事" }, units: [], questions: [question], steps: [step("a", "solve")] });
+  const slot = stepAnswerSlot(question.text);
+  const fact = () => store.listProfileFacts(workspaceId).find((item) => item.slot === slot);
+
+  // Minor by rule and by the planner's own judgement: settled as an assumption the next plan reads, never asked.
+  let answer = plan(false);
+  const prompts: string[] = [];
+  const runtime = scriptedRuntime(["crossline:crossline-step-planner"], (prompt) => { prompts.push(prompt); return answer; });
+  expect((await createStepPlanner(store, workspaceId, "C:\repo", () => runtime.rpc)("wo")).state).toBe("planned");
+  expect(fact()).toMatchObject({ status: "inferred", value: "假设：【海报用哪种尺寸？】A3" });
+  expect(prompts[0]).toContain('"research":false');
+
+  // The planner judging it important for the long run: the question stays for the person.
+  const fresh = new CrosslineStore(":memory:");
+  seed(fresh);
+  answer = plan(true);
+  expect((await createStepPlanner(fresh, workspaceId, "C:\repo", () => runtime.rpc)("wo")).state).toBe("planned");
+  expect(fresh.listProfileFacts(workspaceId).find((item) => item.slot === slot)).toBeUndefined();
+
+  // Graded coursework read from the course's files is important by rule: researched on the web first, its questions asked.
+  const graded = new CrosslineStore(":memory:");
+  seed(graded);
+  const order = graded.getWorkOrder(workspaceId, "wo")!;
+  graded.saveWorkOrder({ ...order, payload: { ...(order.payload as object), datePair: { release: "2026-10-06", due: "2026-10-14" }, humanCore: [{ id: "h", intent: "解题" }] } });
+  answer = plan(false);
+  expect((await createStepPlanner(graded, workspaceId, "C:\repo", () => runtime.rpc)("wo")).state).toBe("planned");
+  expect(prompts.at(-1)).toContain('"research":true');
+  expect(graded.listProfileFacts(workspaceId).find((item) => item.slot === slot)).toBeUndefined();
+  store.close(); fresh.close(); graded.close();
+});
