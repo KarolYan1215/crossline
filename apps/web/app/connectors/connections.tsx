@@ -1,5 +1,6 @@
 import { CodexAccountControl } from "./codex-account-control";
 import { CalendarSources } from "./calendar-sources";
+import { CalendarApps } from "./calendar-apps";
 import { TailscaleTrust } from "./tailscale-trust";
 import { DeviceLeases } from "./device-leases";
 import { getStore, loadCalendarConnectorState } from "../../lib/crossline";
@@ -23,6 +24,7 @@ export function CalendarModule({ ctx }: { ctx: AccessContext }) {
       <div className="st-row"><span className="st-row-label">写入 Crossline 日历<small>只写入名为 Crossline 的日历，只改动本应用创建且未被手动修改的日程</small></span>
         <Tag tone={writer ? "ok" : "neutral"}>{writer ? "已设置账户" : "未设置账户"}</Tag></div>
     </section>
+    <CalendarApps />
     <CalendarSources />
   </div>;
 }

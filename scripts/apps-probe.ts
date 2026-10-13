@@ -1,6 +1,6 @@
 /**
  * What the local Codex runtime's apps (ChatGPT connectors) can read, called deterministically through `mcpServer/tool/call` with no
- * model turn (docs/loop-and-scout.md §13.2). Read tools only — the allowlist below is the whole set; any other name throws. Output is
+ * model turn (docs/loop-and-scout.md §13.2), and whether each calendar app is connected with the address to connect it. Read tools only — the allowlist below is the whole set; any other name throws. Output is
  * redacted: e-mail addresses keep their domain, titles become their length, ids keep six characters. The field names and the kinds of
  * values (reply status, organizer, iCalUID, recurring instances' original start, time formats) are kept, since that is what the
  * calendar design needs. Redacted raw answers are saved as fixtures for the apps parser tests.
@@ -11,6 +11,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { startCodexAppServer } from "../packages/codex/src/index";
+import { CALENDAR_APPS, calendarAppStatuses } from "../packages/core/src/calendar-apps";
 
 const READ_TOOLS = new Set([
   "google_calendar.get_profile", "google_calendar.list_calendars", "google_calendar.search_events",
@@ -39,15 +40,14 @@ const server = await startCodexAppServer(home);
 const call = (method: string, params: unknown) => server.client.request(method, params);
 try {
   const installed = await call("app/installed", { forceRefresh: true }) as { apps?: Array<{ id: string; runtimeName?: string; enabled: boolean; callable?: boolean }> };
-  // The directory (`app/list`) is fetched from chatgpt.com and can meet a Cloudflare challenge (403); that is recorded, not worked around.
-  const listed = await call("app/list", { limit: 200, forceRefetch: true }).catch((error: unknown) => {
-    console.log("app/list FAILED:", String(error).includes("403") ? "403 (chatgpt.com 质询页)" : String(error).slice(0, 200));
-    return {};
-  }) as { data?: Array<{ id: string; name: string; isAccessible: boolean; installUrl?: string | null }> };
+  // Connect addresses come from `app/read` by id (packages/core/src/calendar-apps.ts). The directory `app/list` is not called: it meets
+  // a Cloudflare challenge (403) on every attempt, and nothing needs it.
+  const metadata = await call("app/read", { appIds: CALENDAR_APPS.map((item) => item.connectorId) });
   const calendarish = (installed.apps ?? []).filter((app) => /calendar|gmail|outlook|notion|drive/i.test(app.runtimeName ?? ""));
   console.log("installed:", calendarish.map((app) => `${app.runtimeName} enabled=${app.enabled} callable=${app.callable}`).join(" · ") || "(none)");
-  console.log("listed:", (listed.data ?? []).filter((app) => /calendar|gmail|outlook|notion/i.test(app.name))
-    .map((app) => `${app.name} accessible=${app.isAccessible} installUrl=${app.installUrl ? "yes" : "no"}`).join(" · ") || "(none)");
+  for (const app of calendarAppStatuses(installed, metadata)) {
+    console.log(`calendar app ${app.app}: connected=${app.connected} callable=${app.callable} installUrl=${app.installUrl ?? "(none)"}`);
+  }
 
   const status = await call("mcpServerStatus/list", {}) as { data: Array<{ name: string; tools?: Record<string, { inputSchema?: unknown }> }> };
   const tools = status.data.find((item) => item.name === "codex_apps")?.tools ?? {};

@@ -38,6 +38,9 @@ function fakeSidecar() {
           if (method === "account/login/cancel") return { status: "canceled" };
           if (method === "account/read") return account;
           if (method === "plugin/install") return { authPolicy: "on_install", appsNeedingAuth: [] };
+          if (method === "app/installed") return { apps: [{ id: "connector_947e0d954944416db111db556030eea6", runtimeName: "Google Calendar", enabled: true, callable: true }] };
+          if (method === "app/read") return { apps: [{ id: "connector_e6a7394682e24467ac68c60696f275a4", installUrl: "https://chatgpt.com/apps/microsoft-outlook-calendar/connector_e6a7394682e24467ac68c60696f275a4" }], missingAppIds: [] };
+          if (method === "app/list") throw new Error("Request failed with status 403 Forbidden");
           if (method === "skills/list") return { data: [{ cwd: "C:\\repo", errors: [], skills: [{ name: "crossline-automation-stripper", path: "C:\\skill\\SKILL.md", enabled: true }] }] };
           throw new Error(`unexpected method: ${method}`);
         },
@@ -265,6 +268,23 @@ describe("Codex app-server boundary", () => {
       await supervisor.stop();
     }
     expect(sidecar.isStopped()).toBe(true);
+  });
+
+  test("calendar connection status comes from app/installed and app/read, never from the app/list directory", async () => {
+    const sidecar = fakeSidecar();
+    const supervisor = await codexModule.startCodexSupervisor({ port: 0, sidecarFactory: async () => sidecar.handle });
+    try {
+      const response = await fetch(`${supervisor.url}/v1/apps/calendar`);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ apps: [
+        { app: "google_calendar", label: "Google 日历", connected: true, callable: true, installUrl: null },
+        { app: "microsoft_outlook_calendar", label: "Outlook 日历", connected: false, callable: false,
+          installUrl: "https://chatgpt.com/apps/microsoft-outlook-calendar/connector_e6a7394682e24467ac68c60696f275a4" }
+      ] });
+      expect(sidecar.requests.map(({ method }) => method).sort()).toEqual(["app/installed", "app/read"]);
+    } finally {
+      await supervisor.stop();
+    }
   });
 
   test("login completion and account update notifications change observable supervisor status", async () => {

@@ -8,7 +8,7 @@ import path from "node:path";
 import { readCostSignal } from "./cost";
 import { verifyCapability } from "./capability";
 import { enterUsageWorkspace } from "./usage";
-import type { CostSignal } from "@crossline/core";
+import { CALENDAR_APPS, calendarAppStatuses, type CostSignal } from "@crossline/core";
 import { createRuntimeRegistry, type RuntimeRegistry, type RuntimeSidecar } from "./runtime-registry";
 export * from "./skill-runner";
 export * from "./style";
@@ -773,6 +773,21 @@ export async function startCodexSupervisor(options: {
         insighting.add(callerWorkspaceId);
         runDetached(() => options.runWeeklyInsight!(callerWorkspaceId), () => insighting.delete(callerWorkspaceId));
         sendJson(response, 202, { started: true });
+        return;
+      }
+      // Whether this account's runtime has Google / Outlook calendar connected in ChatGPT, and where to connect it. Two reads that run
+      // no model turn: `app/installed` and `app/read` by id. Never `app/list` — its directory call meets a Cloudflare challenge.
+      if (request.method === "GET" && pathname === "/v1/apps/calendar") {
+        const rt = await modelClient(response, callerWorkspaceId); if (!rt) return;
+        try {
+          const [installed, metadata] = await Promise.all([
+            rt.request("app/installed", { forceRefresh: true }),
+            rt.request("app/read", { appIds: CALENDAR_APPS.map((item) => item.connectorId) }).catch(() => undefined)
+          ]);
+          sendJson(response, 200, { apps: calendarAppStatuses(installed, metadata) });
+        } catch (error) {
+          sendJson(response, 502, { blocker: { code: "APPS_UNAVAILABLE", message: error instanceof Error ? error.message : "读取连接状态失败" } });
+        }
         return;
       }
       // Which calendars exist and which are read. Separate from the sync because listing is cheap and

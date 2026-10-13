@@ -293,7 +293,7 @@ Crossline 自己编译的 Codex 内核（`vendor/codex/codex-rs/target/debug/cod
 1. **用 Google 注册**（Better Auth 现有的 Google 提供方，1.7.5 支持 `scope`、`accessType: "offline"`、`prompt`）：同一个授权页额外申请 `calendar.app.created`，完成后 Crossline 自动在这个 Google 账号里建好 Crossline 日历。这个 Google 账号就是生活账号。
    - 已用邮箱或 ChatGPT 注册的账号（`disableImplicitLinking` 不会自动关联）：设置里「连接 Google 日历」走 `linkSocial` 带同样的 scope；`prompt=consent` 只用在这一步，不在每次登录弹出。
    - Google 允许本人在授权页取消勾选日历权限：登录后检查实际授予的 scope，缺了就是一个提问，不写入。
-2. **在本地 Codex 里登录 ChatGPT**（现有的模型连接：本机浏览器或设备码）：模型和本人在 ChatGPT 里已连接的邮箱、日历一起可用。哪些已连接用 `app/installed` 判断（实测可用）。连接器目录 `app/list` 实测**每次都被 chatgpt.com 的 Cloudflare 质询挡下（403）**：Crossline 以 `crossline` 为客户端名初始化运行时，这个名字成为请求的 originator，目录接口只对非官方客户端质询；改成官方客户端名属于冒充身份过反爬检测，不做。所以未连接的 app 由上手流程给出一个按钮，在本人自己的浏览器里打开 chatgpt.com，按页面写明的路径（设置 → 应用 / Connectors → 搜索并连接）完成连接；连好后下一个读取周期用 `app/installed` 刷新即可。`app/list` 哪次成功就用它给出的每个 app 的直达链接，失败不影响流程。
+2. **在本地 Codex 里登录 ChatGPT**（现有的模型连接：本机浏览器或设备码）：模型和本人在 ChatGPT 里已连接的邮箱、日历一起可用。哪些已连接用 `app/installed` 判断（实测可用）。连接器目录 `app/list` 实测**每次都被 chatgpt.com 的 Cloudflare 质询挡下（403）**，原因未查实。改成官方客户端名属于冒充身份过反爬检测，不做。连接流程不依赖目录：Google 日历、Outlook 日历的连接器 id 是 ChatGPT 自己的，对所有账号相同；`app/read` 按 id 读元数据不受质询，返回官方连接地址 `https://chatgpt.com/apps/<slug>/<id>`（与目录里给的地址一致）。未连接的 app 由上手流程和 设置 → 日历与连接 给出「连接 Google 日历 / 连接 Outlook 日历」，在本人自己的浏览器里打开该页完成连接；回来点「已连接，刷新」重读 `app/installed`。已实现：`packages/core/src/calendar-apps.ts`、supervisor `GET /v1/apps/calendar`、`app/connectors/calendar-apps.tsx`。
 
 每个提供方必须由本人同意一次，这是 OAuth 本身的下限。
 
