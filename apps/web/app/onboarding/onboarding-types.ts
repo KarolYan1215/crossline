@@ -31,6 +31,12 @@ export type DiligenceReport = {
   sources: Array<{ id: string; title: string; publisher: string; finalUrl: string; accessedOn: string }>;
 };
 export type OnboardingState = {
+  /** The five start items stand (main interview; always true in a line's own interview): every page opens. */
+  readyToStart: boolean;
+  /** The start items still open, in checklist order. */
+  startMissing: Array<{ id: string; label: string; detail: string; owner: "interview" | "person" }>;
+  /** The app's own questions not in the open round (`profileGaps`), answered in the same reply. */
+  extraQuestions: Question[];
   /** Questions of the open round the person already answered on 待决事项 (those answers go in front of the next reply). */
   answeredElsewhere?: string[];
   diligence: DiligenceReport[];

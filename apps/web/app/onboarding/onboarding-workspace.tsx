@@ -159,17 +159,23 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
   // already answered on 待决事项 are not shown again — those answers go in front of this reply.
   const answeredElsewhere = new Set(state?.answeredElsewhere ?? []);
   const roundQuestions = (open?.questions ?? []).filter((question) => !answeredElsewhere.has(question.id));
-  const composed = composeAnswers(roundQuestions, answers, text);
+  // The app's own questions not in this round (an account whose interview already ended can still answer 「没有截止」 here) join it, and
+  // their answers go in the same reply, read back by the worker without the model.
+  const inRound = new Set(roundQuestions.map((question) => question.id));
+  const extra = waiting ? [] : (state?.extraQuestions ?? []).filter((question) => !inRound.has(question.id) && !answeredElsewhere.has(question.id));
+  const batchQuestions = [...roundQuestions, ...extra];
+  const composed = composeAnswers(batchQuestions, answers, text);
   const canSend = busy === "" && (Boolean(composed.trim()) || waiting);
 
   if (!state) return <p className="ob-muted" role="status">正在读取…</p>;
   if (state.setupLines) return <div className="ob-start"><HierarchyGuide /><LineSetup onDone={() => void load()} /></div>;
-  const batch = roundQuestions;
+  const batch = batchQuestions;
   const stage = open?.stage ?? state.session?.coverage.stage ?? "orientation";
 
   return <div className="ob" onDragOver={(event) => { event.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={onDrop} data-dragging={over}>
     <section className="ob-chat" aria-label="访谈对话">
       <StageBar stage={stage} line={state.focusLine?.label} />
+      {!state.focusLine && <StartCard readyToStart={state.readyToStart} missing={state.startMissing} lines={state.lines} />}
       <div className="ob-thread" aria-live="polite">
         {messages.length === 0 && !state.focusLine && <HierarchyGuide />}
         {messages.length === 0 && <div className="ob-turn ob-assistant"><p>{state.focusLine ? `「${state.focusLine.label}」的访谈：现状、长期目标、项目、截止日与已有文件。` : OPENING}</p></div>}
@@ -237,6 +243,26 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
       <ProfilePanel state={state} onChanged={() => void load()} />
     </div>
   </div>;
+}
+
+/**
+ * The start standard on the interview screen (decided 2026-10-12): until the five start items stand, every other page leads back here,
+ * so this says which are still missing and where each is settled; once they stand, 「开始使用」 opens the app and the portrait goes on here.
+ */
+export function StartCard({ readyToStart, missing, lines }: { readyToStart: boolean; missing: OnboardingState["startMissing"]; lines: OnboardingState["lines"] }) {
+  if (readyToStart) return <section className="ob-start-card" aria-label="开始使用">
+    <a className="ob-btn" href="/">开始使用</a>
+    <span className="ob-muted">基本信息已齐。画像访谈在同一处继续，问题也会列在待决事项。</span>
+  </section>;
+  // What only the person can settle says where to click; the rest is asked in the interview's next round.
+  const where = (item: OnboardingState["startMissing"][number]) => {
+    const line = item.id.startsWith("line_goal:") ? lines.find((entry) => entry.id === item.id.slice("line_goal:".length)) : undefined;
+    return line ? `在右侧画像下为「${line.label}」采用长期目标` : item.detail;
+  };
+  return <section className="ob-start-card" aria-label="开始使用前还差">
+    <b>开始使用前还差 {missing.length} 项</b>
+    <ul>{missing.map((item) => <li key={item.id}>{item.label}{where(item) ? <span className="ob-muted">：{where(item)}</span> : null}</li>)}</ul>
+  </section>;
 }
 
 export type { DocumentRow };

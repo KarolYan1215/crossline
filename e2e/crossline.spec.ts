@@ -647,7 +647,7 @@ test("signing out deletes this browser's offline database for the workspace it w
 });
 
 
-test("未达可开始标准时打开今日页回到访谈；达标后停在今日页", async ({ browser }, testInfo) => {
+test("未达可开始标准时打开今日页回到访谈，并写明还差什么；达标后停在今日页", async ({ browser }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-chrome");
   const baseURL = testInfo.project.use.baseURL as string;
   const email = "e2e-start-gate@crossline.test", password = "Crossline-E2E-Gate-Pass-1!";
@@ -675,7 +675,10 @@ test("未达可开始标准时打开今日页回到访谈；达标后停在今�
       store.setSetting(workspaceId, "lines.v1", JSON.stringify(lines));
       await page.goto("/");
       await expect(page).toHaveURL(/\/onboarding/);
-      await expect(page.getByText(label).first()).toBeVisible();
+      // The interview says what is missing: here, the first line's long-term goal, adopted under the portrait.
+      const missing = page.getByRole("region", { name: "开始使用前还差" });
+      await expect(missing).toContainText("开始使用前还差 1 项");
+      await expect(missing).toContainText(label);
       store.setSetting(workspaceId, "lines.v1", restore);
     } finally { store.close(); }
     await page.goto("/");

@@ -63,3 +63,6 @@
 
 .ob-moved{margin:0;font-size:13px;color:var(--graphite)}
 
+.ob-start-card{display:grid;gap:6px;margin:8px 0;padding:10px 12px;border:1px solid var(--ink);background:var(--paper)}
+.ob-start-card ul{margin:0;padding-left:18px;display:grid;gap:4px}
+.ob-start-card .ob-btn{justify-self:start}
