@@ -258,9 +258,28 @@ function greedyFallback(input: PlanningInput, tasks: PlannerTask[], slots: Slot[
 /** How long the solver may run; the page passes nothing (two seconds), the bench and the background solve pass more. */
 export type SolveOptions = { timeLimitSeconds?: number };
 
-async function optimize(input: PlanningInput, emergency = false, trySolver = true, options: SolveOptions = {}): Promise<PlanResult> {
-  const frozenIds = new Set(input.frozenBlocks.map((block) => block.taskId));
-  const tasks = input.tasks.filter((task) => !frozenIds.has(task.id));
+/**
+ * A frozen block freezes that segment only (docs/loop-and-scout.md §1): the task keeps the rest of its minutes to place. Work that
+ * must sit in one slot (`interruptible: false`) is never cut, so a frozen block means it is placed; so is a task whose frozen minutes
+ * cover it. It used to drop every task with any frozen block, so locking one segment of a long task left the rest unplanned.
+ */
+function withoutFrozenMinutes(input: PlanningInput): PlanningInput {
+  const frozen = new Map<string, number>();
+  for (const block of input.frozenBlocks)
+    frozen.set(block.taskId, (frozen.get(block.taskId) ?? 0) + (Date.parse(block.end) - Date.parse(block.start)) / 60_000);
+  if (!frozen.size) return input;
+  return { ...input, tasks: input.tasks.flatMap((task) => {
+    const done = frozen.get(task.id);
+    if (done === undefined) return [task];
+    const left = Math.round(durationOf(task) - done);
+    if (task.interruptible === false || left < 15) return [];
+    return [{ ...task, estimate: { ...task.estimate, p25Minutes: left, p50Minutes: left, p85Minutes: left } }];
+  }) };
+}
+
+async function optimize(original: PlanningInput, emergency = false, trySolver = true, options: SolveOptions = {}): Promise<PlanResult> {
+  const input = withoutFrozenMinutes(original);
+  const tasks = input.tasks;
   const slots = freeSlots(input);
   const currentSlot = slots.findIndex((slot) => slot.day === input.currentDay);
   // Nothing to place is not a solver failure, and saying 「优化器未给出可用解」 over an empty week made a

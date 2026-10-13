@@ -43,37 +43,6 @@ async function apiFetch(page: Page, method: string, url: string, data?: unknown,
   }, { method, url, data, headers });
 }
 
-/**
- * Two pending diffs on the starter plan, written the way a calendar sync writes them.
- *
- * The seeded ledger used to ship two example diffs so the C lens had something to show. They pointed
- * at example blocks that no longer exist — the AI lane is the scheduler's real output now — so they
- * were removed, and with them the only thing the approval flow could be driven against. A test that
- * needs a precondition should create it: this opens the same SQLite file the server has open (WAL,
- * two writers, which is how this app already runs) rather than putting demo rows back in production.
- */
-async function seedPendingChanges(page: Page): Promise<void> {
-  // Touch a page first: the plan version is created by the server's own first-run seeding, and a
-  // change row cannot reference a plan that does not exist yet.
-  await page.goto("/plan");
-  const store = openStore();
-  try {
-    const workspaceId = realWorkspaceId(store);
-    if (store.listPlanChanges(workspaceId, "personal-plan-v1").length > 0) return;
-    const event = store.appendEvent({
-      ownerId: "e2e-tester", workspaceId, idempotencyKey: "e2e:plan-diff",
-      type: "calendar.synced", entityId: "personal-plan-v1", payload: { source: "e2e" }
-    });
-    for (const [index, explanation] of ["把写作挪到上午的高精力段", "为下午的会议让出一小时"].entries()) {
-      store.savePlanChange({
-        id: `e2e-change-${index + 1}`, ownerId: "e2e-tester", workspaceId,
-        planVersionId: "personal-plan-v1", kind: "move", triggerEventId: event.eventId,
-        explanation, status: "pending"
-      });
-    }
-  } finally { store.close(); }
-}
-
 async function ensureScheduleSetup(page: Page): Promise<void> {
   await page.goto("/plan");
   const result = await apiFetch(page, "POST", "/api/settings/schedule", { timeZone: "America/Chicago", mode: "buffered",
@@ -154,9 +123,8 @@ test("a task card opens its dialog in place, and the dialog's full-page link sho
   await expect(page).toHaveURL(new RegExp(href!.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "$"));
   await expect(page.locator(".subpage-header h1")).toHaveText(title);
 });
-test("Plan is the long view: no calendar, four charts over a chosen horizon, the version and its differences on top", async ({ page }, testInfo) => {
+test("Plan is the long view: no calendar, four charts over a chosen horizon, nothing to approve", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-chrome");
-  await seedPendingChanges(page);
   await page.goto("/plan");
   const plan = page.locator("[data-plan-version]");
   await expect(plan).toHaveAttribute("data-plan-version", "personal-plan-v1");
@@ -176,9 +144,8 @@ test("Plan is the long view: no calendar, four charts over a chosen horizon, the
   for (const tab of ["可用时段", "排程参数", "排程依据"]) await expect(settings.getByRole("radio", { name: tab })).toBeVisible();
   await expect(settings.getByRole("radio", { name: "重要性" })).toHaveCount(0);
   await page.goto("/plan");
-  // Pending differences announce themselves and open their fold, so the decision is one look away.
-  await expect(page.getByRole("link", { name: /项差异待处理/ })).toBeVisible();
-  await expect(page.getByText("批准本批变更")).toBeVisible();
+  // The plan takes effect by default (docs/loop-and-scout.md §1): no version to approve, no differences to settle.
+  await expect(page.getByText("批准本批变更")).toHaveCount(0);
   if (testInfo.project.name === "desktop-chrome") {
     await page.waitForTimeout(800);
     await page.addStyleTag({ content: STABLE_FOR_SCREENSHOT });
@@ -220,23 +187,6 @@ test("editing availability re-runs the scheduler instead of only storing a prefe
   // later assertion is looking at.
   const restored = await apiFetch(page, "POST", "/api/plan/impact", { change: { kind: "availability", windows: DEFAULT_AVAILABILITY }, apply: true });
   expect(restored.status).toBe(200);
-});
-
-test("Plan approval is confirmed and persisted", async ({ page }, testInfo) => {
-  test.skip(testInfo.project.name !== "desktop-chrome");
-  await seedPendingChanges(page);
-  await page.goto("/plan");
-  await page.getByRole("button", { name: "批准本批变更" }).click();
-  await expect(page.getByRole("dialog")).toContainText("批准计划 v1");
-  await page.getByRole("button", { name: "确认批准" }).click();
-  // R7 localised the status chip; the assertion must follow the text the page actually renders.
-  await expect(page.locator("[data-plan-version]")).toContainText("已批准");
-  await page.waitForLoadState("networkidle");
-  // Nothing is pending any more, so the differences fold closes; open it to read what was decided.
-  await page.getByText(/^计划差异（/).click();
-  await expect(page.getByText("本版本已批准")).toBeVisible();
-  // Scoped to the change ledger: "已批准" also labels the plan version and the blocks.
-  await expect(page.locator(".change-ledger article span").filter({ hasText: "已批准" })).toHaveCount(2);
 });
 
 test("energy check keeps self report only and rejects the removed camera path", async ({ page }, testInfo) => {

@@ -9,6 +9,8 @@ const node = process.execPath;
 const next = path.join(webRoot, "node_modules", "next", "dist", "bin", "next");
 const playwright = path.join(repoRoot, "node_modules", "@playwright", "test", "cli.js");
 const dataDir = mkdtempSync(path.join(tmpdir(), "crossline-e2e-"));
+// `CROSSLINE_E2E_PORT` lets parallel worktree sessions run e2e at once; playwright.config.ts reads the same variable.
+const port = Number(process.env.CROSSLINE_E2E_PORT ?? 3310);
 // Mirrors the same `path.join(e2eDataDir, "mailbox")` computation `playwright.config.ts` does from
 // `CROSSLINE_E2E_DATA_DIR` — this script owns the actual `next start` process on Windows (bypassing
 // Playwright's own `webServer`, see below), so it has to set the auth env vars on that process itself
@@ -22,7 +24,8 @@ const env = {
   CROSSLINE_NEXT_DIR: ".next-e2e",
   CROSSLINE_FIXED_NOW: "2026-09-14T16:45:00.000Z",
   BETTER_AUTH_SECRET: "e2e-test-secret-not-for-production-use",
-  CROSSLINE_WEB_BASE_URL: "http://127.0.0.1:3310",
+  CROSSLINE_WEB_BASE_URL: `http://127.0.0.1:${port}`,
+  CROSSLINE_E2E_PORT: String(port),
   CROSSLINE_AUTH_TEST_MAILBOX_DIR: authMailboxDir,
   // Pinned explicitly, not left to whatever `apps/web/.env` happens to say: Next.js loads that file on
   // its own inside the spawned `next build`/`next start` process regardless of what this script's own
@@ -58,7 +61,7 @@ function windowsListenerPid(port: number): number | null {
 
 function stop(processToStop: ChildProcess): void {
   if (process.platform === "win32") {
-    const pids = new Set([processToStop.pid, windowsListenerPid(3310)].filter((pid): pid is number => Boolean(pid)));
+    const pids = new Set([processToStop.pid, windowsListenerPid(port)].filter((pid): pid is number => Boolean(pid)));
     for (const pid of pids) spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore" });
     return;
   }
@@ -71,7 +74,7 @@ async function waitForHealth(server: ChildProcess): Promise<void> {
   while (Date.now() < deadline) {
     if (server.exitCode !== null) throw new Error(`E2E_SERVER_EXITED: ${server.exitCode}`);
     try {
-      const response = await fetch("http://127.0.0.1:3310/api/health");
+      const response = await fetch(`http://127.0.0.1:${port}/api/health`);
       if (response.ok) return;
     } catch { /* Server is still starting. */ }
     await new Promise((resolve) => setTimeout(resolve, 250));
@@ -79,9 +82,9 @@ async function waitForHealth(server: ChildProcess): Promise<void> {
   throw new Error("E2E_SERVER_START_TIMEOUT");
 }
 
-if (windowsListenerPid(3310)) throw new Error("E2E_PORT_IN_USE: 127.0.0.1:3310");
+if (windowsListenerPid(port)) throw new Error(`E2E_PORT_IN_USE: 127.0.0.1:${port}`);
 run(node, [next, "build", "--webpack"], webRoot);
-const server = spawn(node, [next, "start", "--hostname", "127.0.0.1", "--port", "3310"], {
+const server = spawn(node, [next, "start", "--hostname", "127.0.0.1", "--port", String(port)], {
   // Its own process group off Windows: `next start` forks a `next-server` child that a SIGTERM to the parent leaves running on 3310,
   // and every later run then failed to bind.
   cwd: webRoot, env, stdio: "inherit", detached: process.platform !== "win32"

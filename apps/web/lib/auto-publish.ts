@@ -17,7 +17,7 @@ export function systemContext(workspaceId: string, ownerId: string, now: Date): 
 }
 
 /**
- * Keeps the Crossline calendar in step with the approved plan without a click — the person's decision
+ * Keeps the Crossline calendar in step with the plan without a click — the person's decision
  * (`write_focus_block` is now `automatic`), and only the boundary of what is written moved: still only the
  * calendar named Crossline, only events this app made and the person has not changed, deletes only in the
  * future, previews never. A run with nothing new to write sends nothing (the blocks' hash is compared first).
@@ -40,11 +40,10 @@ export async function autoPublishPass(now = new Date()): Promise<Array<{ workspa
     const ownerId = store.getWorkspaceOwnerId(workspace.id);
     if (!ownerId || !store.getSetting(workspace.id, "calendar.write.account")) continue;
     const ctx = systemContext(workspace.id, ownerId, now);
-    // The person's fixed events are theirs, not the plan's: written whether or not the current plan version is approved.
+    // The person's fixed events are theirs, not the plan's: published as their own scope.
     await publishFixedEvents(ctx, now).catch(() => undefined);
     try {
-      const { approved, blocks } = await blocksToPublish(ctx, now);
-      if (!approved) { outcomes.push({ workspaceId: workspace.id, state: "plan_not_approved" }); continue; }
+      const { blocks } = await blocksToPublish(ctx, now);
       const hash = createHash("sha256").update(JSON.stringify(blocks)).digest("hex").slice(0, 32);
       if (store.getSetting(workspace.id, LAST_HASH) === hash) { outcomes.push({ workspaceId: workspace.id, state: "unchanged" }); continue; }
       const result = await requestCodexSupervisor<{ state?: string; code?: string; message?: string }>(ctx, "/v1/calendar/publish", {

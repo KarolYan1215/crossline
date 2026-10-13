@@ -44,7 +44,7 @@ test("what is waiting is counted by kind, and the total is their sum", () => {
     findings: [], sources: [], proposals: [{ id: "p1", title: "x", why: "y", kind: "task", dueDate: "", findingIds: [], status: "pending" }, { id: "p2", title: "z", why: "y", kind: "task", dueDate: "", findingIds: [], status: "accepted" }] });
   const counts = countPending(TEST_CTX);
   expect(counts).toMatchObject({ milestoneDrafts: 2, research: 1, dates: 0 });
-  expect(counts.total).toBe(counts.workOrders + counts.planChanges + counts.milestoneDrafts + counts.relations + counts.research + counts.dates);
+  expect(counts.total).toBe(counts.workOrders + counts.milestoneDrafts + counts.relations + counts.research + counts.dates);
 });
 
 test("a proposal's preview block is its own kind and still links to its task", async () => {

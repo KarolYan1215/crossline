@@ -1,6 +1,6 @@
 /**
  * What is waiting for a decision, by how soon it matters: each pending item with the date it bears on (a task's due day or its
- * milestone's deadline, an ask's due day, a draft's deadline, a plan change's day) bucketed into this week, later and no date. Read
+ * milestone's deadline, an ask's due day, a draft's deadline) bucketed into this week, later and no date. Read
  * from a **copy** of the live ledger (SQLite online backup); nothing is written.
  *
  *   pnpm exec tsx scripts/pending-horizon.ts

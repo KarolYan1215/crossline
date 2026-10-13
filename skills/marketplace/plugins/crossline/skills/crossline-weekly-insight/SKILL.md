@@ -5,7 +5,7 @@ description: Turn longitudinal Crossline execution data into reviewable user-ove
 
 # Crossline Weekly Insight
 
-Accept `{period, executions[], estimates[], energyObservations[], notificationEvents[], planChanges[], approvedMilestones[]}`. Return `{insightProposals[], estimateUpdates[], retentionActions[], blockers[]}`.
+Accept `{period, executions[], estimates[], energyObservations[], notificationEvents[], approvedMilestones[]}`. Return `{insightProposals[], estimateUpdates[], retentionActions[], blockers[]}`.
 
 Each insight proposal includes `claim, observationCount, period, supportingEventIds[], counterexampleEventIds[], proposedOverlayPatch`. Separate interruption, missing-input, and estimation error from user ability. Never change the overlay automatically. Do not generalize from fewer than three comparable observations; label weak patterns as insufficient evidence.
 

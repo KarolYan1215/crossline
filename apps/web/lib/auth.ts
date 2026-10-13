@@ -78,7 +78,9 @@ export function resolveCrosslineAuthOptions(): CrosslineAuthOptions | undefined 
     // `exactOptionalPropertyTypes` refuses `smtp: undefined` — the key must be absent, not present with
     // an undefined value, which is also the distinction `createCrosslineAuth` uses to decide whether
     // email/password sign-up exists as a capability at all.
-    ...(smtp ? { smtp } : {}), ...(google ? { google } : {}),
+    // The e2e build's test mailbox wins over a real provider in `.env`: Next loads `.env` into the e2e server too (an empty override
+    // counts as unset), and with Resend configured the sign-up mail went to the provider and global setup never saw it.
+    ...(smtp && !testMailboxDir ? { smtp } : {}), ...(google ? { google } : {}),
     // The install's ChatGPT registration (host id, issued client id) lives beside the data, never in the ledger or an export.
     ...(isChatgptSignInConfigured() ? { chatgpt: { installFile: path.join(dataDir, "chatgpt-signin.json") } } : {}),
     // Set only by the e2e build (`playwright.config.ts`) — never present in a real deployment, so this

@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { DashboardView } from "./dashboard-view";
-import { loadDashboard, needsOnboarding, planToday } from "../lib/crossline";
+import { loadDashboard, needsOnboarding, planToday, readChangeSummary } from "../lib/crossline";
 import { requireSessionContext } from "../lib/access-guard";
 import { currentWorkState, loadTimeline } from "../lib/timeline";
 import { loadCurrentPlan } from "../lib/crossline";
@@ -41,6 +41,7 @@ export default async function HomePage() {
     // Kept out of `loadDashboard` for the same reason: `lib/asks.ts` imports from `lib/crossline.ts`.
     asks: await loadAsks(ctx),
     calendar,
+    scheduleChanges: readChangeSummary(ctx),
     flywheelGraph: loadFlywheelGraph(ctx),
     ...(workState ? { workState } : {})
   }} />;

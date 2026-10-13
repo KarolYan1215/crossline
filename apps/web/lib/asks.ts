@@ -3,13 +3,14 @@ import { recordOp, retractedEventIds, withUndo } from "./undo";
 import {
   ATTENTION_SNAPSHOT, BACKGROUND_BLOCKER, CALENDAR_LINES, CALENDAR_PUBLISH_FAILURE, CALENDAR_SYNC_FAILURE, calendarEventKey, daysBetween, describeEvent, missingInputsOf, rankAsks,
   prepStepRetried, snoozeUntil, STEP_ANSWER_SLOT, stepAnswerSlot, taskTitleOf, urgencyFor, type CalendarLines,
-  validateAskAnswer, type AccessContext, type Ask, type AskField, type AskOption, type AskSnooze
+  validateAskAnswer, withFrozen, type AccessContext, type Ask, type AskField, type AskOption, type AskSnooze
 } from "@crossline/core";
 import { listAgentTasks, type StoredWorkOrder } from "@crossline/db";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import {
-  acceptWorkOrderEvidence, answerWaiting, approveWorkOrderProposal, archiveWorkOrder, discardCapture, getStore, loadGoalForecast,
-  markMaterialsReady, planToday, readGoalSettings, retryMaterialPreparation, saveGoalSettings, TASK_LIBRARY_WINDOW_DAYS
+  acceptWorkOrderEvidence, answerWaiting, appNow, approveWorkOrderProposal, archiveWorkOrder, discardCapture, effectiveSchedulePreferences, getStore, loadGoalForecast,
+  markMaterialsReady, planToday, plannerIdOfBlock, readFrozen, readGoalSettings, retryMaterialPreparation, saveGoalSettings, TASK_LIBRARY_WINDOW_DAYS,
+  toZonedInstant, unlockBlock, writeFrozen
 } from "./crossline";
 import { requestAutoBackplan } from "./approvals";
 import { readScheduledDay } from "./schedule-memory";
@@ -416,23 +417,6 @@ function calendarAsks({ store, ctx }: Source): Ask[] {
     title: sync.sources?.length ? `读不到日历：${sync.sources.join("、")}` : "日历无法读取",
     why: `${clause(sync.message || sync.code)}。在恢复之前，排程照常用最后一次读到的日程；账号登出需要重新登录。`,
     options: [{ id: "settings", label: "去设置看连接", href: "/settings" }] });
-  // Only an approved plan is written to the Crossline calendar. When reality moves under it (a new meeting) the plan becomes a draft,
-  // and every automatic write after that was skipped without a word: the real calendar kept a 4-day-old schedule while the page showed
-  // the new one. Said once there is something on the calendar that has gone stale.
-  const plan = store.listPlanVersions(ctx.workspaceId)[0];
-  let written = 0;
-  try { written = Object.keys(JSON.parse(store.getSetting(ctx.workspaceId, "calendar.published") ?? "{}") as Record<string, unknown>)
-    .filter((key) => key.startsWith("scheduled:")).length; } catch { /* nothing written */ }
-  const pending = plan && plan.status !== "approved" ? store.listPlanChanges(ctx.workspaceId, plan.id).filter((change) => change.status === "pending") : [];
-  if (written && pending.length) {
-    const conflicts = pending.filter((change) => change.kind === "conflict").length;
-    asks.push({ id: `calendar-stale:${plan!.id}`, kind: "calendar_stale", entityId: "calendar", urgency: "soon", raisedAt: new Date().toISOString(),
-      fingerprint: `${plan!.id}:${pending.length}`, title: "Crossline 日历停在旧排期",
-      why: `日历里新增或变动了 ${pending.length} 项日程，计划在本人确认之前不会写入 Crossline 日历；`
-        + `日历上的 ${written} 个工作块仍是上一版，可能与新日程重叠。网页上的排期已经避开新日程。`
-        + (conflicts ? `其中 ${conflicts} 项冲突需先处理，才能确认。` : ""),
-      options: [{ id: "plan", label: "去确认计划差异", href: "/plan", recommended: true }] });
-  }
   return asks;
 }
 
@@ -553,9 +537,40 @@ function backgroundAsks({ store, ctx }: Source): Ask[] {
     options: [{ id: "settings", label: "去看额度", href: "/settings#usage", recommended: true }] }];
 }
 
+/**
+ * A block the person started or locked that a calendar event now lands on (docs/loop-and-scout.md §1): it is not moved without a word —
+ * the person picks: the next free time, tomorrow, or keep the overlap.
+ */
+function lockedConflictAsks({ store, ctx, today, now }: Source): Ask[] {
+  const locked = readFrozen(ctx, now).filter((item) => (item.reason === "locked" || item.reason === "pinned") && !item.overlapOk);
+  if (!locked.length) return [];
+  const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
+  const plan = store.listPlanVersions(ctx.workspaceId)[0];
+  const external = ((plan?.payload as { blocks?: Array<{ id: string; title: string; day?: string; start: string; end: string }> } | undefined)?.blocks ?? [])
+    .filter((block) => block.day && (block.id.startsWith("graph_calendar:") || block.id.startsWith("import:")))
+    .flatMap((block) => { try { return [{ title: block.title, start: Date.parse(toZonedInstant(block.day!, block.start, zone)), end: Date.parse(toZonedInstant(block.day!, block.end, zone)) }]; } catch { return []; } });
+  const orders = new Map(store.listWorkOrders(ctx.workspaceId).map((order) => [order.id, order]));
+  return locked.flatMap((item) => {
+    const hit = external.find((block) => block.start < Date.parse(item.end) && block.end > Date.parse(item.start));
+    const order = orders.get(plannerIdOfBlock(item.blockId).split("#")[0]!);
+    if (!hit || !order) return [];
+    const clock = (iso: string) => new Date(iso).toLocaleTimeString("zh-CN", { timeZone: zone, hour: "2-digit", minute: "2-digit", hour12: false });
+    const day = new Date(item.start).toLocaleDateString("sv-SE", { timeZone: zone });
+    return [{ id: `locked:${item.blockId}`, kind: "locked_conflict" as const, entityId: order.id, line: order.identityId,
+      urgency: urgencyFor(day, today), dueDay: day, raisedAt: now.toISOString(), fingerprint: `${item.start}|${hit.title}`,
+      title: `锁定的「${short(taskTitleOf(order), 20)}」与「${short(hit.title, 20)}」重叠`,
+      why: `${format(day)} ${clock(item.start)}–${clock(item.end)} 这段是本人锁定的，日历上新出现的「${hit.title}」占了同一时间。锁定的块不会被自动挪走，请选一个处理方式。`,
+      options: [
+        { id: "move", label: "挪到下一个空档", detail: "解除锁定，由排程重新放", recommended: true },
+        { id: "tomorrow", label: "换到明天", detail: "解除锁定，明天起再排" },
+        { id: "keep", label: "保留重叠", detail: "两件事都留在原时间" }
+      ] }];
+  });
+}
+
 export function collectAsks(ctx: AccessContext, now = new Date()): Ask[] {
   const source = { store: getStore(), ctx, today: planToday(ctx, now), now };
-  return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskAsks, missedAsks, agentAsks, calendarAsks, sourceProjectAsks, calendarLineAsks, interviewAsks, eventAsks, stepQuestionAsks,
+  return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskAsks, missedAsks, lockedConflictAsks, agentAsks, calendarAsks, sourceProjectAsks, calendarLineAsks, interviewAsks, eventAsks, stepQuestionAsks,
     ({ ctx: context, now: at }: Source) => relationCheckAsks(context, at), backgroundAsks]
     .flatMap((collect) => { try { return collect(source); } catch { return []; } });
 }
@@ -770,6 +785,23 @@ async function answerOne(ctx: AccessContext, ask: Ask, optionId: string, values:
         store.saveWorkOrder({ ...order, payload: { ...(order.payload as object), notBefore: values.date } });
       }
       handled();
+      return { ok: true };
+    }
+    case "locked_conflict": {
+      const blockId = ask.id.slice("locked:".length);
+      if (optionId === "keep") {
+        const frozen = readFrozen(ctx, appNow());
+        const entry = frozen.find((item) => item.blockId === blockId);
+        if (entry) writeFrozen(ctx, withFrozen(frozen, { ...entry, overlapOk: true }));
+        return { ok: true };
+      }
+      unlockBlock(ctx, blockId);
+      if (optionId === "tomorrow") {
+        const order = store.listWorkOrders(ctx.workspaceId).find((item) => item.id === ask.entityId);
+        if (!order) return { ok: false, code: "WORK_ORDER_NOT_FOUND" };
+        const tomorrow = new Date(Date.parse(`${planToday(ctx)}T00:00:00Z`) + DAY).toISOString().slice(0, 10);
+        store.saveWorkOrder({ ...order, payload: { ...(order.payload as object), notBefore: tomorrow } });
+      }
       return { ok: true };
     }
     case "agent_blocked":

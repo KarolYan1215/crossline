@@ -6,7 +6,7 @@ import { ensureSeeded, getStore } from "./crossline";
 const MODE_KEY = "permission.mode";
 const WAIT_MS = 5 * 60_000;
 const HEARTBEAT_MAX_MS = 15_000;
-export type PermissionCandidate = { key: string; kind: "work_order" | "plan_change" | "insight";
+export type PermissionCandidate = { key: string; kind: "work_order" | "insight";
   id: string; title: string; eligible: boolean; reason: string; elapsedMs: number };
 type Timer = { elapsedMs: number; lastSeenMs: number | null };
 const timerKey = (key: string) => `permission.timer:${key}`;
@@ -53,15 +53,6 @@ export function permissionCandidates(ctx: AccessContext): PermissionCandidate[] 
         reason: eligible ? "普通本地作业，可在前台满 5 分钟后默认批准" : "风险或外部动作需要明确批准",
         elapsedMs: readTimer(ctx, key).elapsedMs };
     });
-  const plan = store.listPlanVersions(ctx.workspaceId)[0];
-  const changes = plan?.status === "draft" ? store.listPlanChanges(ctx.workspaceId, plan.id)
-    .filter((change) => change.status === "pending").map((change) => {
-      const eligible = change.kind !== "conflict";
-      const key = keyOf("plan_change", change.id, [plan, change]);
-      return { key, kind: "plan_change" as const, id: change.id, title: change.explanation, eligible,
-        reason: eligible ? "非冲突计划变化，可在前台满 5 分钟后默认采纳" : "现实冲突必须明确处理",
-        elapsedMs: readTimer(ctx, key).elapsedMs };
-    }) : [];
   const decided = new Set(store.listEvents(ctx.workspaceId, { type: ["insight.approved", "insight.rejected"] })
     .map((event) => event.entityId));
   const insights = store.listEvents(ctx.workspaceId, { type: "flywheel.finding" })
@@ -75,7 +66,7 @@ export function permissionCandidates(ctx: AccessContext): PermissionCandidate[] 
         eligible, reason: eligible ? "有来源、失效条件且可撤销的洞察补丁" : "来源或目标不足，须明确核对",
         elapsedMs: readTimer(ctx, key).elapsedMs };
     });
-  return [...orders, ...changes, ...insights];
+  return [...orders, ...insights];
 }
 
 export function approveInsight(ctx: AccessContext, eventId: string, key: string): boolean {
@@ -110,27 +101,14 @@ export function accrueVisibleTime(timer: Timer, nowMs: number, visible: boolean)
 function applyCandidate(ctx: AccessContext, candidate: PermissionCandidate, status: "approved" | "excluded"): boolean {
   const store = getStore();
   if (candidate.kind === "insight") return status === "approved" && approveInsight(ctx, candidate.id, candidate.key);
-  if (candidate.kind === "work_order") {
-    const order = store.listWorkOrders(ctx.workspaceId).find((item) => item.id === candidate.id);
-    if (!order || order.state !== "awaiting_plan_approval"
-      || keyOf("work_order", order.id, order) !== candidate.key) return false;
-    try {
-      return store.transitionWorkOrder(ctx.workspaceId, order.id,
-        status === "approved" ? { type: "plan.approved", approvalId: ctx.principalId }
-          : { type: "blocked", reason: "USER_REJECTED_PROPOSAL" },
-        `permission:proposal:${status}:${candidate.key}`, { expectedWorkOrder: order }).changed;
-    } catch (error) {
-      if (error instanceof Error && error.message === "PROPOSAL_VERSION_CHANGED") return false;
-      throw error;
-    }
-  }
-  const plan = store.listPlanVersions(ctx.workspaceId)[0];
-  const change = plan && store.listPlanChanges(ctx.workspaceId, plan.id).find((item) => item.id === candidate.id);
-  if (!plan || plan.status !== "draft" || !change || change.status !== "pending"
-    || keyOf("plan_change", change.id, [plan, change]) !== candidate.key) return false;
+  const order = store.listWorkOrders(ctx.workspaceId).find((item) => item.id === candidate.id);
+  if (!order || order.state !== "awaiting_plan_approval"
+    || keyOf("work_order", order.id, order) !== candidate.key) return false;
   try {
-    return store.resolvePlanChange(ctx.workspaceId, ctx.principalId, change.id, status,
-      `permission:plan-change:${status}:${candidate.key}`, { plan, change }).changed;
+    return store.transitionWorkOrder(ctx.workspaceId, order.id,
+      status === "approved" ? { type: "plan.approved", approvalId: ctx.principalId }
+        : { type: "blocked", reason: "USER_REJECTED_PROPOSAL" },
+      `permission:proposal:${status}:${candidate.key}`, { expectedWorkOrder: order }).changed;
   } catch (error) {
     if (error instanceof Error && error.message === "PROPOSAL_VERSION_CHANGED") return false;
     throw error;

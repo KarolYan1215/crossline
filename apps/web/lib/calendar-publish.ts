@@ -12,9 +12,10 @@ export const DEADLINE_NOTICE_DAYS = 2;
 /**
  * The blocks the scheduler placed for work orders, as instants. Only these go to the Crossline calendar: real calendar events,
  * imported class meetings and everything else on the plan came from the person and are never written back anywhere.
- * Nothing is written until the plan version is approved (`write_focus_block` is a batch approval).
+ * The plan takes effect by default (docs/loop-and-scout.md §1), so there is no approval to wait for; what may be written is the writer's
+ * boundary: only the calendar named Crossline, only events this app made and the person has not changed, deletes only in the future.
  */
-export async function blocksToPublish(ctx: AccessContext, now = new Date()): Promise<{ approved: boolean; blocks: PublishBlockInput[] }> {
+export async function blocksToPublish(ctx: AccessContext, now = new Date()): Promise<{ blocks: PublishBlockInput[] }> {
   const plan = await loadCurrentPlan(ctx);
   const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
   const blocks = plan.blocks.flatMap((block) => {
@@ -27,7 +28,7 @@ export async function blocksToPublish(ctx: AccessContext, now = new Date()): Pro
       return Date.parse(end) > now.getTime() && Date.parse(end) > Date.parse(start) ? [{ id: block.id, title: block.title, start, end, reminderMinutes: BLOCK_REMINDER_MINUTES }] : [];
     } catch { return []; }
   });
-  return { approved: plan.status === "approved", blocks: [...blocks, ...noticeBlocks(ctx, now)] };
+  return { blocks: [...blocks, ...noticeBlocks(ctx, now)] };
 }
 
 /**

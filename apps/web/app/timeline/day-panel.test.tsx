@@ -53,6 +53,13 @@ describe("the panel beside the day", () => {
     for (const action of ["开始计时", "完成并提交材料", "推迟", "交给 Agent", "返回下一项"]) expect(html).toContain(action);
   });
 
+  test("a picked work block can be locked at its time, and a locked one unlocked", () => {
+    expect(render({ selected: block(), onDeselect: () => {} })).toContain("锁定在此时间");
+    const locked = render({ selected: block({ tag: "已锁定" }), onDeselect: () => {} });
+    expect(locked).toContain("解除锁定");
+    expect(locked).toContain('aria-pressed="true"');
+  });
+
   test("交给 Agent only for a step the system can do; a block the assistant has says so instead", () => {
     expect(render({ selected: block({ id: "scheduled:wo-1:v1s1", stepId: "v1s1", step: "确定论证主线" }) })).not.toContain("交给 Agent");
     const running = render({ selected: block({ agent: "running" }) });

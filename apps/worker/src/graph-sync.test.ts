@@ -29,7 +29,10 @@ const only = (pages: GraphDeltaPage[]) => {
   return { sources: () => [{ key: SOURCE_KEY, label: "日历", reader: one }], calls: one.calls };
 };
 
-const seedPlan = (status: "draft" | "approved", blocks: unknown[]) => {
+/** What the last sync reported as changed (`plan.reality_changed`); the plan itself is one row updated in place. */
+const lastChanges = (): Array<{ kind: string; blockId: string; explanation: string }> =>
+  ((store.listEvents(WORKSPACE, { type: "plan.reality_changed" }).at(-1)?.payload as { changes?: Array<{ kind: string; blockId: string; explanation: string }> })?.changes ?? []);
+const seedPlan = (status: "current" | "draft" | "approved", blocks: unknown[]) => {
   store.savePlanVersion({ id: "plan-1", ownerId: "local-owner", workspaceId: WORKSPACE,
     version: 1, status, payload: { blocks } });
 };
@@ -51,7 +54,7 @@ test("calendar events become read-only reality blocks on the day plan", async ()
   expect(store.readSyncCursor(WORKSPACE, "graph_calendar", SOURCE_KEY)).toBe("delta-1");
 });
 
-test("a draft plan is updated in place; blocks the user authored are kept", async () => {
+test("the plan is updated in place; blocks the user authored are kept", async () => {
   seedPlan("draft", [imported("a", "组会", "06:00", "07:00"),
     { id: "mine", lane: "human", title: "深度工作", start: "08:00", end: "09:00", source: "自建", readOnly: false }]);
   const sync = createGraphSync(store, WORKSPACE, {
@@ -61,49 +64,28 @@ test("a draft plan is updated in place; blocks the user authored are kept", asyn
   await sync();
 
   const plans = store.listPlanVersions(WORKSPACE);
-  // Nothing was agreed yet, so the draft absorbs the change rather than forking.
+  // One current row, updated in place: there are no versions to fork any more.
   expect(plans).toHaveLength(1);
-  expect(plans[0]?.status).toBe("draft");
+  expect(plans[0]?.status).toBe("current");
   const blocks = (plans[0]?.payload as { blocks: Array<Record<string, unknown>> }).blocks;
   expect(blocks.find((block) => block.id === "graph_calendar:a")).toMatchObject({ start: "06:30" });
   expect(blocks.find((block) => block.id === "mine")).toMatchObject({ title: "深度工作" });
-  expect(store.listPlanChanges(WORKSPACE, "plan-1").map((change) => change.kind)).toEqual(["move"]);
+  expect(lastChanges().map((change) => change.kind)).toEqual(["move"]);
 });
 
-test("an approved plan is never rewritten: reality moving becomes a new draft of conflicts", async () => {
+test("a plan approved before migration 14 is updated in place like any other, not forked", async () => {
   seedPlan("approved", [imported("a", "组会", "06:00", "07:00")]);
   const sync = createGraphSync(store, WORKSPACE, {
     sources: only([{ items: [event("a", "组会", "09:00", "10:00")], cursor: "delta-3" }]).sources,
     now: NOW, timeZone: "UTC"
   });
   const outcome = await sync();
-
-  const approved = store.listPlanVersions(WORKSPACE).find((plan) => plan.id === "plan-1");
-  expect(approved?.status).toBe("approved");
-  // The plan you agreed to still says what it said; the disagreement is a separate draft.
-  expect((approved?.payload as { blocks: Array<Record<string, unknown>> }).blocks[0]).toMatchObject({ start: "06:00" });
-  const draftId = (outcome as { planVersionId: string }).planVersionId;
-  expect(draftId).not.toBe("plan-1");
-  const changes = store.listPlanChanges(WORKSPACE, draftId);
-  expect(changes.map((change) => change.kind)).toEqual(["conflict"]);
-  expect(changes[0]?.explanation).toContain("06:00");
-});
-
-test("a conflict can actually be resolved, so a plan is not permanently unapprovable", async () => {
-  seedPlan("approved", [imported("a", "组会", "06:00", "07:00")]);
-  const sync = createGraphSync(store, WORKSPACE, {
-    sources: only([{ items: [event("a", "组会", "09:00", "10:00")], cursor: "c" }]).sources,
-    now: NOW, timeZone: "UTC"
-  });
-  const outcome = await sync();
-  const draftId = (outcome as { planVersionId: string }).planVersionId;
-  const change = store.listPlanChanges(WORKSPACE, draftId)[0]!;
-
-  expect(store.resolvePlanChange(WORKSPACE, "local-owner", change.id, "excluded", "k1")).toEqual({ changed: true });
-  expect(store.listPlanChanges(WORKSPACE, draftId)[0]?.status).toBe("excluded");
-  // Resolving twice is not a second decision.
-  expect(store.resolvePlanChange(WORKSPACE, "local-owner", change.id, "approved", "k2")).toEqual({ changed: false });
-  expect(store.listEvents("personal-crossline").filter((e) => e.type === "plan_change.resolved")).toHaveLength(1);
+  expect((outcome as { planVersionId: string }).planVersionId).toBe("plan-1");
+  const plans = store.listPlanVersions(WORKSPACE);
+  expect(plans.map((plan) => [plan.id, plan.status])).toEqual([["plan-1", "current"]]);
+  expect((plans[0]?.payload as { blocks: Array<Record<string, unknown>> }).blocks[0]).toMatchObject({ start: "09:00" });
+  expect(lastChanges().map((change) => change.kind)).toEqual(["move"]);
+  expect(lastChanges()[0]?.explanation).toContain("06:00");
 });
 
 test("a deleted event is removed even when its tombstone arrives after its creation", async () => {
@@ -118,7 +100,7 @@ test("a deleted event is removed even when its tombstone arrives after its creat
   await sync();
   const blocks = (store.listPlanVersions(WORKSPACE)[0]?.payload as { blocks: unknown[] }).blocks;
   expect(blocks).toEqual([]);
-  expect(store.listPlanChanges(WORKSPACE, "plan-1").map((change) => change.kind)).toEqual(["remove"]);
+  expect(lastChanges().map((change) => change.kind)).toEqual(["remove"]);
 });
 
 test("a resync drops what the gap deleted, even though no tombstone ever arrives for it", async () => {
@@ -196,7 +178,7 @@ test("a block from before the plan carried days is not reported as having moved"
   expect(await sync()).toMatchObject({ state: "synced", changes: 0 });
 });
 
-test("a day change on an approved plan is described with the date, not just the clock", async () => {
+test("a day change is described with the date, not just the clock", async () => {
   seedPlan("approved", [{ id: "graph_calendar:a", lane: "human", title: "组会", day: "2026-09-16",
     start: "06:00", end: "07:00", source: "日历", readOnly: true }]);
   const sync = createGraphSync(store, WORKSPACE, {
@@ -205,16 +187,14 @@ test("a day change on an approved plan is described with the date, not just the 
     now: NOW, timeZone: "UTC"
   });
   const outcome = await sync();
-  const change = store.listPlanChanges(WORKSPACE, (outcome as { planVersionId: string }).planVersionId)[0];
-  expect(change?.kind).toBe("conflict");
+  const change = lastChanges()[0];
+  expect(change?.kind).toBe("move");
   // "moved to 9/18" is the fact that matters; two identical clock times would read as no change at all.
   expect(change?.explanation).toContain("9/18");
 });
 
 test("a long calendar id keeps add and move as separate changes", async () => {
   // A real Graph event id is ~150 characters and two events in one mailbox share almost all of it.
-  // Truncating the change id to fit cut the kind suffix off, so a move upserted onto the earlier add
-  // row: the C lens showed 新增 next to text describing a move.
   const longId = `AAMkADE0${"A".repeat(140)}==`;
   const longEvent = (from: string, to: string) => ({
     provider: "graph_calendar", externalId: longId, title: "组会",
@@ -231,11 +211,9 @@ test("a long calendar id keeps add and move as separate changes", async () => {
   await sync();
   await sync();
 
-  const kinds = store.listPlanChanges(WORKSPACE, "plan-1").map((change) => change.kind).sort();
+  const kinds = store.listEvents(WORKSPACE, { type: "plan.reality_changed" })
+    .flatMap((event) => (event.payload as { changes: Array<{ kind: string }> }).changes.map((change) => change.kind));
   expect(kinds).toEqual(["add", "move"]);
-  const ids = store.listPlanChanges(WORKSPACE, "plan-1").map((change) => change.id);
-  expect(new Set(ids).size).toBe(2);
-  expect(ids.every((id) => id.length < 120)).toBe(true);
 });
 
 test("a block that aged out of the window is not reported as deleted", async () => {
@@ -249,7 +227,7 @@ test("a block that aged out of the window is not reported as deleted", async () 
   });
   const outcome = await sync();
 
-  expect(store.listPlanChanges(WORKSPACE, "plan-1").map((change) => change.kind)).toEqual(["add"]);
+  expect(lastChanges().map((change) => change.kind)).toEqual(["add"]);
   expect(outcome).toMatchObject({ changes: 1 });
 });
 
@@ -260,7 +238,7 @@ test("a block inside the window that really disappeared is still reported", asyn
     sources: only([{ items: [], cursor: "c" }]).sources, now: NOW, timeZone: "UTC"
   });
   await sync();
-  const changes = store.listPlanChanges(WORKSPACE, "plan-1");
+  const changes = lastChanges();
   expect(changes.map((change) => change.kind)).toEqual(["remove"]);
   expect(changes[0]?.explanation).toContain("9/18");
 });
@@ -429,22 +407,16 @@ test("changing the declared time zone rereads unchanged events and updates their
   expect(blocks[0]?.start).toBe("09:00");
 });
 
-test("a cancelled meeting carried from before cancellations were dropped leaves quietly, and its pending change is excluded", async () => {
-  const { createHash } = await import("node:crypto");
+test("a cancelled meeting carried from before cancellations were dropped leaves quietly", async () => {
   seedPlan("draft", [imported("x", "Canceled: DEJA-VU Monthly Meeting", "12:00", "13:30")]);
-  const hash = createHash("sha1").update("graph_calendar:x").digest("hex").slice(0, 16);
-  store.savePlanChange({ id: `plan-1:${hash}:add`, ownerId: "local-owner", workspaceId: WORKSPACE, planVersionId: "plan-1", kind: "conflict",
-    triggerEventId: "graph-sync:2026-09-15", explanation: "日历新增「Canceled: DEJA-VU Monthly Meeting」", status: "pending" });
   const sync = createGraphSync(store, WORKSPACE, {
     sources: only([{ items: [event("b", "组会", "06:00", "07:00")], cursor: "delta-2" }]).sources, now: NOW, timeZone: "UTC"
   });
   store.saveSyncCursor({ ownerId: "local-owner", workspaceId: WORKSPACE, provider: "graph_calendar", collection: SOURCE_KEY, cursor: "delta-1" });
   await sync();
 
-  const changes = store.listPlanChanges(WORKSPACE, "plan-1");
-  expect(changes.find((change) => change.id === `plan-1:${hash}:add`)?.status).toBe("excluded");
-  // Its leaving is not a change for the person to approve: only the new meeting is.
-  expect(changes.filter((change) => change.status === "pending").map((change) => change.kind)).toEqual(["add"]);
+  // Its leaving is not reported as a change: only the new meeting is.
+  expect(lastChanges().map((change) => change.kind)).toEqual(["add"]);
   const blocks = (store.listPlanVersions(WORKSPACE)[0]?.payload as { blocks: Array<{ id: string }> }).blocks;
   expect(blocks.map((block) => block.id)).toEqual(["graph_calendar:b"]);
 });

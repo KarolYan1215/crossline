@@ -154,15 +154,11 @@ describe("event ledger", () => {
     store.close();
   });
 
-  test("stores one plan version and its traceable change set", () => {
+  test("stores one current plan row and updates it in place", () => {
     const store = new CrosslineStore(path);
-    store.savePlanVersion({ id: "plan-1", ownerId: "owner-1", workspaceId: "workspace-1", version: 1, status: "draft", payload: { blocks: [] } });
-    store.savePlanChange({
-      id: "change-1", ownerId: "owner-1", workspaceId: "workspace-1", planVersionId: "plan-1",
-      kind: "add", triggerEventId: "event-1", explanation: "新增准备块", after: { start: "09:00" }, status: "pending"
-    });
-    expect(store.listPlanVersions("workspace-1")).toEqual([expect.objectContaining({ id: "plan-1", status: "draft" })]);
-    expect(store.listPlanChanges("workspace-1", "plan-1")).toEqual([expect.objectContaining({ id: "change-1", triggerEventId: "event-1" })]);
+    store.savePlanVersion({ id: "plan-1", ownerId: "owner-1", workspaceId: "workspace-1", version: 1, status: "current", payload: { blocks: [] } });
+    store.savePlanVersion({ id: "plan-1", ownerId: "owner-1", workspaceId: "workspace-1", version: 1, status: "current", payload: { blocks: [{ id: "a" }] } });
+    expect(store.listPlanVersions("workspace-1")).toEqual([expect.objectContaining({ id: "plan-1", status: "current", payload: { blocks: [{ id: "a" }] } })]);
     store.close();
   });
 

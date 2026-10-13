@@ -78,7 +78,7 @@ export default async function ApprovalsPage() {
       {([
         ["待决事项", weekAsks.length, "#asks"], ["任务提案", pending.workOrders, "#proposals"], ["待验收", evidenceReviews.length, "#evidence"],
         ["助手", pending.assistantKinds + pending.assistantQuestions + pending.assistantReviews, "#assistant"],
-        ["里程碑草稿", pending.milestoneDrafts, "/milestones"], ["计划差异", pending.planChanges, "/plan#plan-changes"], ["分数线待审阅", pending.targets, "/milestones"],
+        ["里程碑草稿", pending.milestoneDrafts, "/milestones"], ["分数线待审阅", pending.targets, "/milestones"],
         ["调研建议", pending.research, "/onboarding"], ["文件中的日期", pending.dates, "/onboarding"], ["访谈问题", pending.questions, "/onboarding"],
         ["以后再定", pending.later.total, "#later"]
       ] as const).filter(([, count]) => count > 0).map(([label, count, href]) =>

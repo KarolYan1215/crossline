@@ -14,7 +14,6 @@ export type WeeklyInsightContext = {
   estimates: Array<{ workOrderId: string; identityId: string; family: string; p50Minutes: number }>;
   energyObservations: Array<{ id: string; level: string; observedAt: string }>;
   notificationEvents: Array<{ id: string; type: string; entityId: string; createdAt: string }>;
-  planChanges: Array<{ id: string; kind: string; status: string }>;
   approvedMilestones: Array<{ id: string; identityId: string; title: string }>;
   /**
    * Byproducts — what one line's work also produced for another — planned, landed (accepted) and missed (still
@@ -82,8 +81,7 @@ export function validateWeeklyInsight(value: unknown, context: WeeklyInsightCont
   }
   const knownIds = new Set([
     ...context.executions.map((item) => item.id),
-    ...context.notificationEvents.map((item) => item.id),
-    ...context.planChanges.map((item) => item.id)
+    ...context.notificationEvents.map((item) => item.id)
   ]);
   for (const proposal of raw.insightProposals) {
     if (proposal.observationCount < 3) throw new Error("WEEKLY_INSIGHT_INSUFFICIENT_EVIDENCE");

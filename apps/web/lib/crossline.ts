@@ -8,7 +8,8 @@ import { approveArtifactRelationsFor, CrosslineStore, type EvidenceClaimInput, t
 import { availableSlots, deriveCapacity, requiredApproval, validateAvailability, DEFAULT_AVAILABILITY,
   defaultMilestoneTemplates, computeMilestoneConfidence, PRODUCTIVE, type ActivityCategory, validateSuccessCriteria, goalSettingKey, ANALYSIS_CONTEXT_VERSION, calibrationReport, calibratedEstimate,
   type CalibrationReport, presetImportance, taskTitleOf, type ImportancePreset, restoreTargetOf,
-  type AccessContext, type AvailabilityWindow, type Estimate, type SuccessCriterion, type ChecklistAnswer, FIXED_EVENTS, fixedEventBlocks, type FixedEvent } from "@crossline/core";
+  type AccessContext, type AvailabilityWindow, type Estimate, type SuccessCriterion, type ChecklistAnswer, FIXED_EVENTS, fixedEventBlocks, type FixedEvent,
+  FROZEN_SETTING, parseFrozen, withFrozen, withoutFrozen, type FrozenBlock, type RealityChange } from "@crossline/core";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { forecastGoals, normalizeParams, paramsFor, planSchedule, recommendNextActions, type ForecastResult, type PlanResult,
   type ScheduleParams, type PlanningInput } from "@crossline/planner";
@@ -305,19 +306,11 @@ export function saveAvailability(ctx: AccessContext, windows: unknown): { ok: tr
 export type PersistedPlan = {
   id: string;
   version: number;
-  status: "draft" | "approved" | "superseded";
   blocks: PersistedScheduleBlock[];
   schedule: Pick<PlanResult, "status" | "blockers" | "solver" | "bufferRelaxed" | "notes">;
   /** True when nobody has saved a real time zone/availability/mode yet and this is computed off
    * defaults — a real, honestly-labelled preview rather than an empty page. */
   usingDefaultPreferences: boolean;
-  changes: Array<{
-    id: string;
-    kind: "add" | "move" | "remove" | "conflict";
-    explanation: string;
-    afterBlockId?: string;
-    status: "pending" | "approved" | "excluded";
-  }>;
 };
 
 // Shared with apps/web/lib/task-detail.ts, so a task/milestone detail view's relation labels and identity
@@ -364,9 +357,6 @@ function identityPrior(identityId: string, family: string) {
   return { ...(prior ?? { p25Minutes: 10, p50Minutes: 20, p85Minutes: 35 }),
     source: "identity_prior" as const, observationCount: 0, confidence: "low" as const };
 }
-
-/** The two example diffs a pre-scheduler database was seeded with, cleared once on open. */
-const RETIRED_SEED_CHANGES = ["personal-plan-v1-change-1", "personal-plan-v1-change-2"];
 
 declare global {
   // eslint-disable-next-line no-var
@@ -467,18 +457,11 @@ export function ensureSeeded(ctx: AccessContext): void {
     // schedule nobody had made, in a view whose whole job is to say what is really committed.
     store.savePlanVersion({
       id: "personal-plan-v1", ownerId: ctx.principalId, workspaceId: ctx.workspaceId,
-      version: 1, status: "draft", payload: { blocks: [] }
+      version: 1, status: "current", payload: { blocks: [] }
     });
   }
 
-  // A database seeded before the scheduler was wired up still holds the five example blocks and the
-  // two example diffs. `loadCurrentPlan` no longer reads the blocks, but the diffs are `pending` and
-  // `approvePlanVersion` refuses while anything is pending — so leaving them would make the plan
-  // permanently unapprovable over demo rows that no longer mean anything.
-  for (const changeId of RETIRED_SEED_CHANGES) {
-    const change = store.listPlanChanges(ctx.workspaceId, "personal-plan-v1").find((item) => item.id === changeId);
-    if (change && change.status === "pending") store.savePlanChange({ ...change, status: "excluded" });
-  }
+  // A database seeded before the scheduler was wired up still holds the five example blocks; `loadCurrentPlan` no longer reads them.
   for (const plan of store.listPlanVersions(ctx.workspaceId)) {
     const blocks = (plan.payload as { blocks?: PersistedScheduleBlock[] }).blocks ?? [];
     const real = blocks.filter((block) => block.source !== "示例数据");
@@ -584,37 +567,76 @@ export function scheduledBlockId(plannerTaskId: string, index: number): string {
   const [orderId, stepId] = plannerTaskId.split("#");
   return `scheduled:${orderId}${stepId ? `:${stepId}` : ""}${index > 1 ? `:${index}` : ""}`;
 }
-/** Blocks the person started from a pencilled-in (off-hours) block: fixed at that time, as real as anything scheduled. */
-export const SCHEDULE_PINS = "schedule.pins";
-type Pin = { taskId: string; day: string; start: string; end: string };
-export function readPins(ctx: AccessContext, today: string): Pin[] {
-  try { return (JSON.parse(getStore().getSetting(ctx.workspaceId, SCHEDULE_PINS) ?? "[]") as Pin[]).filter((pin) => pin.day >= today); }
-  catch { return []; }
+/**
+ * The schedule's frozen blocks (`schedule.frozen`, `packages/core/src/schedule-frozen.ts`): started, locked, kept by a local re-plan
+ * or inside the commit window. The two settings it replaced (`schedule.pins` from starting a pencilled-in block, `schedule.keep` from
+ * inserting an event) are taken over the first time they are seen and then deleted; their blocks had no segment number, so they
+ * become segment 1 of their task or step, the only id that can be inferred.
+ */
+/** The app's notion of now: `CROSSLINE_FIXED_NOW` when pinned (tests, e2e), else the clock. */
+export const appNow = () => process.env.CROSSLINE_FIXED_NOW ? new Date(process.env.CROSSLINE_FIXED_NOW) : new Date();
+const LEGACY_PINS = "schedule.pins";
+const LEGACY_KEEP = "schedule.keep";
+type LegacyPin = { taskId: string; day: string; start: string; end: string };
+export function readFrozen(ctx: AccessContext, now: Date): FrozenBlock[] {
+  const store = getStore();
+  const pinsRaw = store.getSetting(ctx.workspaceId, LEGACY_PINS);
+  const keepRaw = store.getSetting(ctx.workspaceId, LEGACY_KEEP);
+  if (pinsRaw || keepRaw) {
+    const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
+    const instant = (pin: LegacyPin) => { try { return { start: toZonedInstant(pin.day, pin.start, zone), end: toZonedInstant(pin.day, pin.end, zone) }; } catch { return undefined; } };
+    let list = parseFrozen(store.getSetting(ctx.workspaceId, FROZEN_SETTING), now);
+    try { for (const pin of JSON.parse(pinsRaw ?? "[]") as LegacyPin[]) { const at = instant(pin); if (at) list = withFrozen(list, { blockId: scheduledBlockId(pin.taskId, 1), ...at, reason: "pinned" }); } } catch { /* unreadable: dropped */ }
+    try {
+      const kept = JSON.parse(keepRaw ?? "null") as { until?: string; blocks?: LegacyPin[] } | null;
+      for (const pin of kept?.blocks ?? []) { const at = instant(pin); if (at && kept?.until) list = withFrozen(list, { blockId: scheduledBlockId(pin.taskId, 1), ...at, reason: "keep", until: kept.until }); }
+    } catch { /* unreadable: dropped */ }
+    writeFrozen(ctx, parseFrozen(JSON.stringify(list), now));
+    store.deleteSetting(ctx.workspaceId, LEGACY_PINS);
+    store.deleteSetting(ctx.workspaceId, LEGACY_KEEP);
+  }
+  return parseFrozen(store.getSetting(ctx.workspaceId, FROZEN_SETTING), now);
+}
+export function writeFrozen(ctx: AccessContext, list: FrozenBlock[]): void {
+  getStore().setSetting(ctx.workspaceId, FROZEN_SETTING, JSON.stringify(list));
 }
 /**
- * Local re-planning (decided 2026-10-08): when an event is added, the work blocks it does not touch stay where they were and only the
- * ones it lands on move. The blocks to keep are written here with an expiry a week out; the scheduler freezes those still valid — the task
- * still open, the slot not taken by anything since — and places the rest. A change that should re-plan everything (availability, packing
- * numbers, importance) clears it.
+ * Local re-planning (decided 2026-10-08): when an event is added, the work blocks it does not touch stay where they were for a week
+ * and only the ones it lands on move. A change that should re-plan everything (availability, packing numbers, importance, shares)
+ * clears the kept blocks, never what the person started or locked.
  */
-export const SCHEDULE_KEEP = "schedule.keep";
-export function readKeep(ctx: AccessContext, today: string, now: Date): Pin[] {
-  try {
-    const kept = JSON.parse(getStore().getSetting(ctx.workspaceId, SCHEDULE_KEEP) ?? "null") as { until?: string; blocks?: Pin[] } | null;
-    return kept?.until && Date.parse(kept.until) > now.getTime() ? (kept.blocks ?? []).filter((pin) => pin.day >= today) : [];
-  } catch { return []; }
+export function keepBlocks(ctx: AccessContext, blocks: Array<{ blockId: string; day: string; start: string; end: string }>, now: Date): void {
+  const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
+  const until = new Date(now.getTime() + 7 * 86_400_000).toISOString();
+  let list = readFrozen(ctx, now).filter((item) => item.reason !== "keep");
+  for (const block of blocks) {
+    try { if (!list.some((item) => item.blockId === block.blockId))
+      list = withFrozen(list, { blockId: block.blockId, start: toZonedInstant(block.day, block.start, zone), end: toZonedInstant(block.day, block.end, zone), reason: "keep", until }); }
+    catch { /* a clock change: not kept */ }
+  }
+  writeFrozen(ctx, list);
 }
-export function writeKeep(ctx: AccessContext, blocks: Pin[], now: Date): void {
-  getStore().setSetting(ctx.workspaceId, SCHEDULE_KEEP, JSON.stringify({ until: new Date(now.getTime() + 7 * 86_400_000).toISOString(), blocks }));
+export function clearKept(ctx: AccessContext, now = appNow()): void {
+  writeFrozen(ctx, readFrozen(ctx, now).filter((item) => item.reason !== "keep"));
 }
 
-/** Starting a pencilled-in block makes it formal: its time is kept for that task (or step) from now on. */
-export function pinBlock(ctx: AccessContext, blockId: string, at: { day: string; start: string; end: string }): { ok: true } | { ok: false; code: string } {
-  if (!blockId.startsWith("optional:") || !/^\d{4}-\d{2}-\d{2}$/.test(at.day) || !/^\d{2}:\d{2}$/.test(at.start) || !/^\d{2}:\d{2}$/.test(at.end) || at.end <= at.start)
+/**
+ * Locks one block at a time (docs/loop-and-scout.md §1): started (`pinned`) or locked by the button (`locked`). A pencilled-in block
+ * (`optional:`) becomes the same-numbered `scheduled:` block. The planner freezes that segment only; the task's others are still placed.
+ */
+export function lockBlock(ctx: AccessContext, blockId: string, at: { day: string; start: string; end: string },
+  reason: "pinned" | "locked" = "pinned", options: { overlapOk?: boolean } = {}): { ok: true } | { ok: false; code: string } {
+  if (!/^(scheduled|optional):/.test(blockId) || !/^\d{4}-\d{2}-\d{2}$/.test(at.day) || !/^\d{2}:\d{2}$/.test(at.start) || !/^\d{2}:\d{2}$/.test(at.end) || at.end <= at.start)
     return { ok: false, code: "PIN_INVALID" };
-  const taskId = plannerIdOfBlock(blockId);
-  const pins = readPins(ctx, planToday(ctx)).filter((pin) => pin.taskId !== taskId);
-  getStore().setSetting(ctx.workspaceId, SCHEDULE_PINS, JSON.stringify([...pins, { taskId, ...at }]));
+  const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
+  let start: string, end: string;
+  try { start = toZonedInstant(at.day, at.start, zone); end = toZonedInstant(at.day, at.end, zone); } catch { return { ok: false, code: "PIN_INVALID" }; }
+  const id = blockId.replace(/^optional:/, "scheduled:");
+  writeFrozen(ctx, withFrozen(readFrozen(ctx, appNow()), { blockId: id, start, end, reason, ...(options.overlapOk ? { overlapOk: true } : {}) }));
+  return { ok: true };
+}
+export function unlockBlock(ctx: AccessContext, blockId: string): { ok: true } {
+  writeFrozen(ctx, withoutFrozen(readFrozen(ctx, appNow()), blockId.replace(/^optional:/, "scheduled:")));
   return { ok: true };
 }
 
@@ -655,6 +677,8 @@ export type PreviewOverrides = { estimates?: Record<string, number>; dueDates?: 
   availability?: AvailabilityWindow[]; params?: ScheduleParams; weights?: Record<string, number>; lineShares?: Record<string, number> };
 const previewScope = new AsyncLocalStorage<PreviewOverrides>();
 export const withPreview = <T>(overrides: PreviewOverrides, run: () => T): T => previewScope.run(overrides, run);
+/** Inside an impact preview nothing is written, a change summary included. */
+const inPreview = () => previewScope.getStore() !== undefined;
 const scaledEstimate = <E extends { p25Minutes: number; p50Minutes: number; p85Minutes: number }>(estimate: E, p50: number | undefined): E =>
   p50 === undefined || p50 <= 0 ? estimate : { ...estimate, p50Minutes: Math.round(p50), p25Minutes: Math.max(1, Math.round(estimate.p25Minutes * p50 / Math.max(1, estimate.p50Minutes))),
     p85Minutes: Math.max(Math.round(p50), Math.round(estimate.p85Minutes * p50 / Math.max(1, estimate.p50Minutes))) };
@@ -758,10 +782,13 @@ export function planningInputFor(ctx: AccessContext, today: string, committed: P
     }) : undefined;
 
   const expanded = plannerItemsFor(ctx, eligibleOrders);
-  const pins = readPins(ctx, today).filter((pin) => expanded.some((item) => item.task.id === pin.taskId));
-  const overlapsBusy = (pin: Pin) => busy.some((block) => block.day === pin.day && block.start < pin.end && block.end > pin.start);
-  const kept = readKeep(ctx, today, now).filter((pin) => expanded.some((item) => item.task.id === pin.taskId) && !pins.some((other) => other.taskId === pin.taskId) && !overlapsBusy(pin));
-  const pinned = [...pins, ...kept].flatMap((pin) => { try { return [{ taskId: pin.taskId, start: iso(pin.day, pin.start), end: iso(pin.day, pin.end) }]; } catch { return []; } });
+  // Frozen blocks of work still open. One that a hard constraint now lands on moves if it was only kept or inside the commit window;
+  // one the person started or locked stays (they are asked about it, `locked_conflict`), unless they already accepted the overlap.
+  const busyInstants = busy.flatMap((block) => { try { return [{ start: Date.parse(iso(block.day, block.start)), end: Date.parse(iso(block.day, block.end)) }]; } catch { return []; } });
+  const overlapsBusy = (item: FrozenBlock) => busyInstants.some((block) => block.start < Date.parse(item.end) && block.end > Date.parse(item.start));
+  const frozen = readFrozen(ctx, now).filter((item) => expanded.some((entry) => entry.task.id === plannerIdOfBlock(item.blockId))
+    && !((item.reason === "keep" || item.reason === "commit") && overlapsBusy(item)));
+  const pinned = frozen.map((item) => ({ taskId: plannerIdOfBlock(item.blockId), start: item.start, end: item.end }));
   const input: PlanningInput = {
     now,
     horizonDays: days.length,
@@ -777,14 +804,14 @@ export function planningInputFor(ctx: AccessContext, today: string, committed: P
         end: iso(block.day!, block.end) })), ...pinned]
   };
   return { input, days, busy, preferences, zone, iso, now, currentEnergy, clockBlockers, instants, capacityIds, allOrders, orders,
-    stateById, dependencyBlockers, library, expanded, pins, kept, pinned };
+    stateById, dependencyBlockers, library, expanded, frozen, pinned };
 }
 
 async function scheduledBlocks(ctx: AccessContext, today: string, committed: PersistedScheduleBlock[]): Promise<{
   blocks: PersistedScheduleBlock[]; schedule: PersistedPlan["schedule"]
 }> {
   const { input, days, busy, preferences, zone, iso, now, currentEnergy, clockBlockers, instants, capacityIds, allOrders, orders,
-    stateById, dependencyBlockers, library, expanded, pins, kept, pinned } = planningInputFor(ctx, today, committed);
+    stateById, dependencyBlockers, library, expanded, frozen, pinned } = planningInputFor(ctx, today, committed);
   const result = await planSchedule(input);
   const placed = result.plan.blocks.filter((block) => !block.frozen);
   const orderStates = new Map(orders.map((order) => [order.id, order.state]));
@@ -794,10 +821,17 @@ async function scheduledBlocks(ctx: AccessContext, today: string, committed: Per
   const named = (taskId: string) => { const item = itemById.get(taskId); return { title: item?.title ?? taskId, task: intents.get(item?.orderId ?? "") ?? item?.title ?? taskId,
     ...(item?.step ? { step: item.step } : {}) }; };
   const energyNeeds = new Map(orders.map((order) => [order.id, humanCoreOf(order)?.energy]));
+  // A new segment never takes an id a frozen block holds: the frozen one keeps its id and its time.
+  const frozenIds = new Set(frozen.map((item) => item.blockId));
   const occurrences = new Map<string, number>();
+  const nextIndex = (taskId: string) => {
+    let index = (occurrences.get(taskId) ?? 0) + 1;
+    while (frozenIds.has(scheduledBlockId(taskId, index))) index += 1;
+    occurrences.set(taskId, index);
+    return index;
+  };
   const blocks = placed.map((block) => {
-    const index = (occurrences.get(block.taskId) ?? 0) + 1;
-    occurrences.set(block.taskId, index);
+    const index = nextIndex(block.taskId);
     const blockDay = formatInTimeZone(new Date(block.start), zone, "yyyy-MM-dd");
     const needsRestCheck = currentEnergy === "low" && blockDay === today &&
       energyNeeds.get(block.taskId.split("#")[0]!) === "high" && Date.parse(block.start) > now.getTime();
@@ -811,7 +845,7 @@ async function scheduledBlocks(ctx: AccessContext, today: string, committed: Per
     day: blockDay,
     start: formatInTimeZone(new Date(block.start), zone, "HH:mm"),
     end: formatInTimeZone(new Date(block.end), zone, "HH:mm"),
-    source: "建议·未批准",
+    source: "排程",
     readOnly: true
   }; });
   // Second pass, the preview: where proposals still waiting for approval would go, placed only into the
@@ -843,21 +877,18 @@ async function scheduledBlocks(ctx: AccessContext, today: string, committed: Per
     };
   });
   blocks.push(...previewBlocks);
-  // Started from a pencilled-in block: fixed where the person started it.
-  for (const pin of pins) blocks.push({ id: scheduledBlockId(pin.taskId, 1), lane: "human" as const, ...named(pin.taskId), tag: "已开始",
-    day: pin.day, start: pin.start, end: pin.end, source: "本人开始", readOnly: true });
-  // Kept where they were when an event was added (local re-planning): drawn as ordinary scheduled blocks.
-  for (const pin of kept) {
-    const index = (occurrences.get(pin.taskId) ?? 0) + 1;
-    occurrences.set(pin.taskId, index);
-    const tag = tentative(pin.taskId) ? "暂定" : undefined;
-    blocks.push({ id: scheduledBlockId(pin.taskId, index), lane: "human" as const, ...named(pin.taskId), ...(tag ? { tag } : {}),
-      day: pin.day, start: pin.start, end: pin.end, source: "建议·未批准", readOnly: true });
+  // Frozen blocks, each under its own id at its own time: started or locked ones say so; kept ones read as ordinary scheduled blocks.
+  for (const item of frozen) {
+    const taskId = plannerIdOfBlock(item.blockId);
+    const tag = item.reason === "pinned" || item.reason === "locked" ? "已锁定" : tentative(taskId) ? "暂定" : undefined;
+    blocks.push({ id: item.blockId, lane: "human" as const, ...named(taskId), ...(tag ? { tag } : {}),
+      day: formatInTimeZone(new Date(item.start), zone, "yyyy-MM-dd"), start: formatInTimeZone(new Date(item.start), zone, "HH:mm"),
+      end: formatInTimeZone(new Date(item.end), zone, "HH:mm"), source: "排程", readOnly: true });
   }
   // Third pass, pencilled in: what found no room in the person's hours, placed between 07:00 and 23:00 outside them. Dashed, never
   // published, never counted as planned; starting one (`pinBlock`) makes it formal.
   const unplaced = new Set(result.blockers.map((blocker) => blocker.taskId));
-  const leftovers = expanded.filter((item) => unplaced.has(item.task.id) && !pins.some((pin) => pin.taskId === item.task.id));
+  const leftovers = expanded.filter((item) => unplaced.has(item.task.id) && !frozen.some((entry) => plannerIdOfBlock(entry.blockId) === item.task.id));
   if (leftovers.length) {
     const offBusy = [...busy, ...blocks.filter((block) => block.day).map((block) => ({ day: block.day!, start: block.start, end: block.end }))];
     const offInstants = availableSlots(offHoursWindows(readAvailability(ctx)), days, offBusy).flatMap((slot) => {
@@ -955,24 +986,58 @@ export async function loadCurrentPlan(ctx: AccessContext): Promise<PersistedPlan
   // the person has saved their own time zone, availability and mode. `usingDefaultPreferences` is what
   // lets the page say so, instead of either lying about it or blocking on it.
   const suggested = await scheduledBlocks(ctx, planToday(ctx), committed);
+  if (!inPreview()) noteScheduleChanges(ctx, committed, suggested.blocks, appNow());
   return {
     id: stored.id,
     version: stored.version,
-    status: stored.status,
     blocks: [...committed, ...suggested.blocks],
     schedule: suggested.schedule,
-    usingDefaultPreferences: effectiveSchedulePreferences(ctx).isDefault,
-    changes: store.listPlanChanges(ctx.workspaceId, stored.id).map((change) => {
-      const after = change.after as { blockId?: string } | undefined;
-      return {
-        id: change.id,
-        kind: change.kind,
-        explanation: change.explanation,
-        ...(after?.blockId ? { afterBlockId: after.blockId } : {}),
-        status: change.status
-      };
-    })
+    usingDefaultPreferences: effectiveSchedulePreferences(ctx).isDefault
   };
+}
+
+/**
+ * 「作业 3 因 11:30 会议后移 30 分钟」 (docs/loop-and-scout.md §1): when a calendar change has come in since the schedule was last looked
+ * at, each work block whose old time the new event now covers is named with where it went and why. Kept as `schedule.changeSummary`
+ * (`{ at, realityAt, items, basis }`, the latest only); `basis` is the scheduled blocks' times the next comparison starts from. The
+ * re-plan itself is derived on read and has nothing to undo, so the way back is 「钉回原位」: lock that block at its old time.
+ */
+export const CHANGE_SUMMARY = "schedule.changeSummary";
+export type ScheduleChange = { blockId: string; title: string; day: string; from: { start: string; end: string }; to: { day: string; start: string; end: string }; cause: string };
+type ChangeSummary = { at: string; realityAt: string; items: ScheduleChange[]; basis: Record<string, { day: string; start: string; end: string }> };
+function noteScheduleChanges(ctx: AccessContext, committed: PersistedScheduleBlock[], blocks: PersistedScheduleBlock[], now: Date): void {
+  const store = getStore();
+  let saved: Partial<ChangeSummary> = {};
+  try { saved = JSON.parse(store.getSetting(ctx.workspaceId, CHANGE_SUMMARY) ?? "{}"); } catch { /* none */ }
+  const basis = Object.fromEntries(blocks.filter((block) => block.id.startsWith("scheduled:") && block.day)
+    .map((block) => [block.id, { day: block.day!, start: block.start, end: block.end }]));
+  const reality = store.listEvents(ctx.workspaceId, { type: "plan.reality_changed" }).at(-1);
+  const realityAt = reality?.createdAt ?? "";
+  const sameBasis = JSON.stringify(basis) === JSON.stringify(saved.basis ?? {});
+  if (sameBasis && realityAt === (saved.realityAt ?? "")) return;
+  let items = saved.items ?? [];
+  let at = saved.at ?? now.toISOString();
+  if (reality && realityAt !== saved.realityAt && saved.basis) {
+    const added = new Set(((reality.payload as { changes?: RealityChange[] }).changes ?? []).filter((change) => change.kind !== "remove").map((change) => change.blockId));
+    const external = committed.filter((block) => added.has(block.id) && block.day);
+    const titles = new Map(blocks.map((block) => [block.id, block.title]));
+    items = Object.entries(saved.basis).flatMap(([blockId, before]) => {
+      const after = basis[blockId];
+      if (!after || (after.day === before.day && after.start === before.start && after.end === before.end)) return [];
+      const cause = external.find((block) => block.day === before.day && block.start < before.end && block.end > before.start);
+      return cause ? [{ blockId, title: titles.get(blockId) ?? blockId, day: before.day, from: { start: before.start, end: before.end },
+        to: after, cause: `${cause.start} ${cause.title}` }] : [];
+    });
+    at = now.toISOString();
+  }
+  store.setSetting(ctx.workspaceId, CHANGE_SUMMARY, JSON.stringify({ at, realityAt, items, basis } satisfies ChangeSummary));
+}
+/** What Today shows: the last summary while it is under a day old. */
+export function readChangeSummary(ctx: AccessContext, now = appNow()): ScheduleChange[] {
+  try {
+    const saved = JSON.parse(getStore().getSetting(ctx.workspaceId, CHANGE_SUMMARY) ?? "{}") as Partial<ChangeSummary>;
+    return saved.at && now.getTime() - Date.parse(saved.at) < 86_400_000 ? saved.items ?? [] : [];
+  } catch { return []; }
 }
 
 /** The most recent `plan.explained` event for today, if the explainer has ever run for it. Read from
@@ -1136,43 +1201,6 @@ export function decideMilestoneRelations(ctx: AccessContext, ids: string[], deci
     }
   }
   return { ok: true, ...result };
-}
-
-/**
- * Resolves one pending plan change.
- *
- * Without this a conflict was a dead end: `approvePlanVersion` refuses while one is pending, and nothing
- * could move it out of `pending` — so a single calendar change would have made the plan permanently
- * unapprovable. Excluding a change is a decision, and the ledger records it as one.
- */
-export function resolvePlanChange(ctx: AccessContext, changeId: string, status: "approved" | "excluded"):
-  | { ok: true; changed: boolean } | { ok: false; code: string } {
-  if (!changeId || changeId.length > 200) return { ok: false, code: "PLAN_CHANGE_NOT_FOUND" };
-  const result = getStore().resolvePlanChange(ctx.workspaceId, ctx.principalId, changeId, status, `plan-change:${changeId}:${status}`);
-  return { ok: true, changed: result.changed };
-}
-
-export function approvePlanVersion(ctx: AccessContext, planId: string): { ok: true } | { ok: false; code: string } {
-  const store = getStore();
-  const plan = store.listPlanVersions(ctx.workspaceId).find((item) => item.id === planId);
-  if (!plan) return { ok: false, code: "PLAN_VERSION_NOT_FOUND" };
-  if (plan.status === "approved") return { ok: true };
-  if (plan.status !== "draft") return { ok: false, code: "PLAN_VERSION_NOT_APPROVABLE" };
-
-  const changes = store.listPlanChanges(ctx.workspaceId, planId);
-  if (changes.some((change) => change.kind === "conflict" && change.status === "pending")) {
-    return { ok: false, code: "PLAN_HAS_UNRESOLVED_CONFLICT" };
-  }
-  for (const change of changes) {
-    store.savePlanChange({ ...change, status: change.status === "pending" ? "approved" : change.status });
-  }
-  store.savePlanVersion({ ...plan, status: "approved" });
-  store.appendEvent({
-    ownerId: ctx.principalId, workspaceId: ctx.workspaceId,
-    idempotencyKey: `plan-approved:${planId}`, type: "plan.approved", entityId: planId,
-    payload: { from: "draft", to: "approved", approvedChangeIds: changes.filter((change) => change.status === "pending").map((change) => change.id) }
-  });
-  return { ok: true };
 }
 
 export function addCapturedTaskWithId(

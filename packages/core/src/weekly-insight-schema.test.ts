@@ -12,7 +12,6 @@ const context: WeeklyInsightContext = {
   estimates: [{ workOrderId: "w-1", identityId: "research", family: "deep_work", p50Minutes: 60 }],
   energyObservations: [],
   notificationEvents: [{ id: "n-1", type: "work_order.transitioned", entityId: "w-1", createdAt: "2026-09-21T10:00:00.000Z" }],
-  planChanges: [],
   approvedMilestones: [{ id: "m-1", identityId: "research", title: "稳定推进当前实验与论文" }]
 };
 

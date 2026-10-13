@@ -33,7 +33,7 @@ export function TaskActions({ workOrderId, state, paused, agentReady, agentStepI
   offline?: { ownerId: string; workspaceId: string; intent: string };
   /**
    * Runs before the timer starts; a message stops the start and is shown. A pencilled-in block on the day view becomes formal here
-   * (`pinIfPencilled`), so starting from a block and starting from a card are the same path.
+   * (`lockOnStart`), so starting from a block and starting from a card are the same path.
    */
   beforeStart?: (() => Promise<string | null>) | undefined;
   /** More buttons beside the primary one (the day panel's 完成并提交材料 and 推迟), before the overflow menu. */

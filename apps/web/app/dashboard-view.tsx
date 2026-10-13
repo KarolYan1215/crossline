@@ -9,6 +9,8 @@ import type { TaskDetail, MilestoneDetail } from "../lib/task-detail";
 import { AppShell } from "./app-shell";
 import { TaskCard, type TaskSlot } from "./task/task-card";
 import { CalendarPanel } from "./timeline/calendar-panel";
+import { ScheduleSummary } from "./schedule-summary";
+import type { ScheduleChange } from "../lib/crossline";
 import type { CalendarData } from "./plan/plan-view";
 import { FlywheelGraph } from "./flywheel/flywheel-graph";
 import type { FlywheelGraphData } from "./flywheel/graph-model";
@@ -73,6 +75,8 @@ export type DashboardData = {
   slotById?: Map<string, TaskSlot>;
   /** What the day timeline draws. Absent in tests that only care about the cards. */
   calendar?: CalendarData;
+  /** What the last calendar change moved, for the line above the timeline (`readChangeSummary`). */
+  scheduleChanges?: ScheduleChange[];
   /** The tasks behind the coming week's blocks, for the panel beside the day (a plain object: it crosses to the client). */
   calendarDetails?: Record<string, TaskDetail>;
   /** The flywheel graph: lines, live milestones and the relations between them (`lib/flywheel-graph.ts`). */
@@ -151,6 +155,7 @@ export function DashboardView({ data }: { data: DashboardData }) {
 
       {data.calendar && <section className="panel" aria-label="今天的时间轴">
         <header><h2>今天的时间轴</h2><a href="/plan">打开计划 →</a></header>
+        <ScheduleSummary changes={data.scheduleChanges ?? []} />
         <CalendarPanel items={data.calendar.items} deadlines={data.calendar.deadlines} today={data.calendar.today} nowIso={data.calendar.nowIso}
           timeZone={data.calendar.timeZone} labels={data.calendar.labels} quietByWeekday={data.calendar.quietByWeekday} proposals={data.calendar.proposals}
           taskDetails={data.calendarDetails} />

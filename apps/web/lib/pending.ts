@@ -20,8 +20,6 @@ export type PendingCounts = {
   total: number;
   /** Work orders the analysis proposed, waiting for their plan to be approved. */
   workOrders: number;
-  /** Differences between the plan and reality, or between plan versions. */
-  planChanges: number;
   /** Milestones the architect drafted. */
   milestoneDrafts: number;
   /** Cross-line relations proposed but not yet confirmed. Decided in the weekly review, so not in `total`. */
@@ -52,7 +50,6 @@ export type PendingCounts = {
 export function countPending(ctx: AccessContext): PendingCounts {
   const store = getStore();
   const assistant = countAssistantPending(ctx);
-  const latestPlan = store.listPlanVersions(ctx.workspaceId)[0];
   const horizon = decisionHorizon(ctx);
   const orders = store.listWorkOrders(ctx.workspaceId);
   const split = <T>(items: T[], deferred: (item: T) => boolean) => { const later = items.filter(deferred).length; return { now: items.length - later, later }; };
@@ -65,7 +62,6 @@ export function countPending(ctx: AccessContext): PendingCounts {
   });
   const counts = {
     workOrders: proposals.now,
-    planChanges: latestPlan ? store.listPlanChanges(ctx.workspaceId, latestPlan.id).filter((change) => change.status === "pending").length : 0,
     milestoneDrafts: drafts.now,
     relations: store.listMilestoneRelations(ctx.workspaceId).filter((relation) => relation.status === "candidate").length,
     research: loadDiligence(ctx).filter((report) => report.status === "done")

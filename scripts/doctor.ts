@@ -48,9 +48,6 @@ orphans("等待项指向不存在的作业",
 orphans("material 指向不存在的作业",
   `SELECT m.id AS id, m.work_order_id AS target FROM materials m
    WHERE NOT EXISTS (SELECT 1 FROM work_orders w WHERE w.id = m.work_order_id AND w.workspace_id = m.workspace_id)`);
-orphans("plan_change 指向不存在的计划版本",
-  `SELECT c.id AS id, c.plan_version_id AS target FROM plan_changes c
-   WHERE NOT EXISTS (SELECT 1 FROM plan_versions v WHERE v.id = c.plan_version_id)`);
 orphans("关系指向不存在的里程碑",
   `SELECT r.id AS id, r.to_milestone_id AS target FROM milestone_relations r
    WHERE NOT EXISTS (SELECT 1 FROM milestones m WHERE m.id = r.to_milestone_id AND m.workspace_id = r.workspace_id)`);

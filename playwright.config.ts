@@ -14,6 +14,10 @@ process.env.CROSSLINE_AUTH_TEST_MAILBOX_DIR = authMailboxDir;
 // Read back by `global-setup.ts` and by the `request` fixture (via each project's `storageState`) so
 // the real sign-up → verify → sign-in flow only has to run once per e2e run, not once per test.
 const authStatePath = path.join(e2eDataDir, "auth-state.json");
+// `CROSSLINE_E2E_PORT` lets two checkouts (parallel worktree sessions) run e2e at once without fighting over one port.
+const port = process.env.CROSSLINE_E2E_PORT ?? "3310";
+process.env.CROSSLINE_E2E_PORT = port;
+const origin = `http://127.0.0.1:${port}`;
 
 export default defineConfig({
   testDir: "./e2e",
@@ -26,7 +30,7 @@ export default defineConfig({
   // signs in and saves the resulting session cookie to `authStatePath` for every project to reuse.
   globalSetup: "./e2e/global-setup.ts",
   use: {
-    baseURL: "http://127.0.0.1:3310",
+    baseURL: origin,
     trace: "retain-on-failure",
     colorScheme: "light",
     storageState: authStatePath
@@ -40,8 +44,8 @@ export default defineConfig({
   // an environment that matches what actually runs.
   webServer: process.env.CROSSLINE_E2E_EXTERNAL_SERVER ? undefined : {
     command: "pnpm --filter @crossline/web exec next build --webpack"
-      + " && pnpm --filter @crossline/web exec next start --hostname 127.0.0.1 --port 3310",
-    url: "http://127.0.0.1:3310/api/health",
+      + " && pnpm --filter @crossline/web exec next start --hostname 127.0.0.1 --port " + port,
+    url: `${origin}/api/health`,
     env: {
       CROSSLINE_DATA_DIR: e2eDataDir,
       CROSSLINE_NEXT_DIR: ".next-e2e",
@@ -49,7 +53,7 @@ export default defineConfig({
       BETTER_AUTH_SECRET: "e2e-test-secret-not-for-production-use",
       // Better Auth stamps the verification link with this base URL — without overriding it here, the
       // captured link points at the dev server's port (3210) instead of the one e2e is actually running.
-      CROSSLINE_WEB_BASE_URL: "http://127.0.0.1:3310",
+      CROSSLINE_WEB_BASE_URL: origin,
       CROSSLINE_AUTH_TEST_MAILBOX_DIR: authMailboxDir,
       // Same reasoning as `scripts/run-e2e.ts`'s identical override: Next.js loads `apps/web/.env` on its
       // own inside the spawned process, and a developer's real `private`-mode config would otherwise leak

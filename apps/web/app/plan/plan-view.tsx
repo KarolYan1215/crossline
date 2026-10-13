@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import * as Dialog from "@radix-ui/react-dialog";
 import type { TimelineDeadline, TimelineItem } from "../timeline/model";
 
 export type ScheduleBlockData = {
@@ -19,13 +18,11 @@ export type ScheduleBlockData = {
 export type PlanVersionData = {
   id: string;
   version: number;
-  status: "draft" | "approved" | "superseded";
   blocks: ScheduleBlockData[];
   schedule?: { status: "feasible" | "partial" | "infeasible";
     blockers: Array<{ taskId: string; code: string; message: string }>;
     solver: "optimal" | "feasible_time_limit" | "fallback" | "empty" | "no_capacity"; bufferRelaxed?: boolean;
     notes?: Array<{ taskId: string; code: string; message: string }> };
-  changes: Array<{ id: string; kind: "add" | "move" | "remove" | "conflict"; explanation: string; afterBlockId?: string; status: "pending" | "approved" | "excluded" }>;
 };
 
 /** Today's calendar data (the plan page no longer draws a calendar; Today imports this type from here). */
@@ -34,8 +31,6 @@ export type CalendarData = {
   labels: Record<string, string>; quietByWeekday: Record<number, Array<[string, string]>>; proposals?: Array<{ id: string; title: string }>;
 };
 
-const statusLabel = { draft: "草稿", approved: "已批准", superseded: "已被替代", pending: "待处理", excluded: "已排除" } as const;
-const changeLabel = { add: "新增", move: "移动", remove: "移除", conflict: "冲突" } as const;
 
 /**
  * The planner reports one blocker per unplaced *step*, while 「排程依据」 lists tasks — counting blockers said 「13 项未排入」 over a list
@@ -50,17 +45,15 @@ function unplacedNote(plan: PlanVersionData): string {
 }
 
 /**
- * The plan page's top row (decided 2026-10-10: the calendar is on Today only): the version, its differences (a fold that opens by itself
- * while something waits for a decision), reading the calendar now, writing to the Crossline calendar, the horizon (`aside`), and the
- * schedule's status.
+ * The plan page's top row (decided 2026-10-10: the calendar is on Today only): reading the calendar now, writing to the Crossline
+ * calendar, the horizon (`aside`), and the schedule's status. The plan takes effect by default (docs/loop-and-scout.md §1): there is
+ * no version to approve and no difference to settle.
  */
 export function PlanView({ plan, aside }: { plan: PlanVersionData; aside?: ReactNode }) {
-  const [approvalState, setApprovalState] = useState<"idle" | "saving" | "error">("idle");
   const [syncState, setSyncState] = useState<"idle" | "syncing" | "done" | "error">("idle");
   const [syncNote, setSyncNote] = useState("");
   const [publishState, setPublishState] = useState<"idle" | "publishing" | "done" | "error">("idle");
   const [publishNote, setPublishNote] = useState("");
-  const pending = plan.changes.filter((change) => change.status === "pending");
 
   const syncNow = async () => {
     setSyncState("syncing");
@@ -76,7 +69,7 @@ export function PlanView({ plan, aside }: { plan: PlanVersionData; aside?: React
     setSyncNote("日历没有变化");
     setSyncState("done");
   };
-  // Writes only the blocks the scheduler placed, and only to the calendar named Crossline. Only an approved plan is written; the route enforces it.
+  // Writes only the blocks the scheduler placed, and only to the calendar named Crossline; it also runs on its own every ten minutes.
   const publish = async () => {
     setPublishState("publishing");
     const response = await fetch("/api/calendar/publish", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }).catch(() => undefined);
@@ -91,52 +84,17 @@ export function PlanView({ plan, aside }: { plan: PlanVersionData; aside?: React
     setPublishNote(r ? `Crossline 日历：新增 ${r.created}、调整 ${r.updated}、移除 ${r.deleted}、不变 ${r.unchanged}${r.keptAsEdited.length ? `；${r.keptAsEdited.length} 条已被手动修改，保持原样` : ""}。` : "已写入。");
     setPublishState("done");
   };
-  const resolve = async (changeId: string, status: "approved" | "excluded") => {
-    const response = await fetch(`/api/plans/changes/${encodeURIComponent(changeId)}`, {
-      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ status })
-    });
-    if (response.ok) location.reload(); else setApprovalState("error");
-  };
-  const approve = async () => {
-    setApprovalState("saving");
-    const response = await fetch(`/api/plans/${encodeURIComponent(plan.id)}/approve`, { method: "POST" });
-    if (!response.ok) { setApprovalState("error"); return; }
-    window.location.reload();
-  };
 
-  // The version's approval, shown on its own when there are no differences and under the ledger when there are.
-  const approval = <footer>
-    {plan.status === "draft" ? <Dialog.Root>
-      <Dialog.Trigger asChild><button type="button">批准本批变更</button></Dialog.Trigger>
-      <Dialog.Portal>
-        <Dialog.Overlay className="dialog-overlay" />
-        <Dialog.Content className="dialog-sheet">
-          <Dialog.Title>批准计划 v{plan.version}？</Dialog.Title>
-          <Dialog.Description>{pending.length} 项待处理差异一并批准；批准后 Crossline 日历按本版本写入。</Dialog.Description>
-          {approvalState === "error" && <p role="alert">批准未完成：请先处理冲突类差异。</p>}
-          <div className="dialog-actions">
-            <Dialog.Close asChild><button type="button" className="secondary">返回检查</button></Dialog.Close>
-            <button type="button" disabled={approvalState === "saving"} onClick={approve}>{approvalState === "saving" ? "批准中…" : "确认批准"}</button>
-          </div>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root> : <strong className="approved-mark">✓ 本版本已批准</strong>}
-    <small>批准后写入 Crossline 日历</small>
-  </footer>;
   return <div className="plan-view" data-plan-version={plan.id}>
     <div className="plan-bar">
-      <span className="tag">计划 v{plan.version} · {statusLabel[plan.status]}</span>
-      {pending.length > 0 && <a className="plan-pending" href="#plan-changes">{pending.length} 项差异待处理 ↓</a>}
       {/* Reality moves between ticks, and fifteen minutes of not knowing whether the plan has caught up is
           exactly when a person stops trusting it. This only reads the calendar. */}
       <button type="button" className="plan-sync" disabled={syncState === "syncing"} onClick={syncNow}>
         {syncState === "syncing" ? "读取日历中…" : syncState === "error" ? "同步失败，重试" : "立即同步日历"}
       </button>
       {syncState === "done" && <span role="status" className="plan-sync-note">{syncNote}</span>}
-      {/* The one place the app writes to a calendar: a separate calendar named Crossline, events it made itself. Publishing also runs
-          on its own every ten minutes; this is the manual nudge. */}
-      <button type="button" className="plan-sync" disabled={publishState === "publishing" || plan.status !== "approved"} onClick={publish}
-        title={plan.status === "approved" ? "立即写入 Crossline 日历（每 10 分钟自动写入；只写名为 Crossline 的日历）" : "计划批准后写入 Crossline 日历"}>
+      <button type="button" className="plan-sync" disabled={publishState === "publishing"} onClick={publish}
+        title="立即写入 Crossline 日历（每 10 分钟自动写入；只写名为 Crossline 的日历）">
         {publishState === "publishing" ? "写入中…" : "发布到 Crossline 日历"}
       </button>
       {(publishState === "done" || publishState === "error") && <span role="status" className="plan-sync-note">{publishNote}</span>}
@@ -153,29 +111,5 @@ export function PlanView({ plan, aside }: { plan: PlanVersionData; aside?: React
       {unplacedNote(plan) && <p><a href="#why">{unplacedNote(plan)}，原因见「排程依据」</a></p>}
       {plan.schedule.notes?.map((note) => <p key={`note-${note.taskId}`}>{note.message}</p>)}
     </section>}
-
-    {/* With no differences there is nothing to fold: only the version's approval is shown. The ledger of differences is a fold
-        (low-frequency history) that opens by itself while something in it waits for a decision. */}
-    {plan.changes.length === 0 ? <section className="plan-changes" id="plan-changes"><div className="change-ledger">
-      {approval}
-    </div></section> : <details className="plan-changes advanced" id="plan-changes" open={pending.length > 0}>
-      <summary>计划差异（{pending.length} 项待处理，共 {plan.changes.length} 项）</summary>
-      <div className="change-ledger">
-        {plan.changes.map((change) => <article key={change.id}>
-          <b>{changeLabel[change.kind]}</b>
-          <p>{change.explanation}</p>
-          <span>
-            {statusLabel[change.status]}
-            {/* A conflict with no way out would block approval forever, so every pending one is resolvable here.
-                Excluding is a decision the ledger records, not a deletion. */}
-            {change.status === "pending" && <span className="change-resolve">
-              <button type="button" onClick={() => void resolve(change.id, "approved")}>批准</button>
-              <button type="button" onClick={() => void resolve(change.id, "excluded")}>排除</button>
-            </span>}
-          </span>
-        </article>)}
-        {approval}
-      </div>
-    </details>}
   </div>;
 }

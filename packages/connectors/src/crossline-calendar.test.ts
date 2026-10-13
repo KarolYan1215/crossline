@@ -114,17 +114,47 @@ describe("what is the person's is never touched", () => {
     expect(writes(graph).some((request) => request.path.endsWith("/mine"))).toBe(false);
   });
 
-  test("an event of ours that they moved or renamed is left exactly as they made it, and reported", async () => {
+  test("an event of ours they dragged elsewhere is left where they put it and reported as moved, so the caller can lock it there", async () => {
+    const graph = fakeGraph(human());
+    const first = await writer(graph).publish([block("b1", "整理笔记", "2026-10-13T14:00:00Z", "2026-10-13T15:00:00Z")], {});
+    const event = crossline(graph).events[0]!;
+    event.start = { dateTime: "2026-10-13T18:00:00.0000000" };
+    event.end = { dateTime: "2026-10-13T19:00:00.0000000" };
+    const second = await writer(graph).publish([block("b1", "整理笔记", "2026-10-13T14:00:00Z", "2026-10-13T15:00:00Z")], first.ledger);
+    expect(second.edits.moved).toEqual([{ blockId: "b1", start: "2026-10-13T18:00:00.000Z", end: "2026-10-13T19:00:00.000Z" }]);
+    expect(second.result).toMatchObject({ updated: 0, keptAsEdited: ["b1"] });
+    expect(event.start.dateTime).toContain("2026-10-13T18:00");
+    // Once the plan follows (the block is locked at the new time), nothing is reported or rewritten.
+    const third = await writer(graph).publish([block("b1", "整理笔记", "2026-10-13T18:00:00Z", "2026-10-13T19:00:00Z")], second.ledger);
+    expect(third.edits).toEqual({ moved: [], retitled: [], removed: [] });
+    expect(third.result).toMatchObject({ updated: 0, unchanged: 1 });
+  });
+
+  test("an event of ours they only renamed keeps their title while its time keeps following the plan", async () => {
     const graph = fakeGraph(human());
     const first = await writer(graph).publish([block("b1", "整理笔记", "2026-10-13T14:00:00Z", "2026-10-13T15:00:00Z")], {});
     const event = crossline(graph).events[0]!;
     event.subject = "改成我自己的名字";
     const second = await writer(graph).publish([block("b1", "整理笔记（新）", "2026-10-13T16:00:00Z", "2026-10-13T17:00:00Z")], first.ledger);
-    expect(second.result).toMatchObject({ updated: 0, keptAsEdited: ["b1"] });
+    expect(second.edits.retitled).toEqual([{ blockId: "b1", title: "改成我自己的名字" }]);
+    expect(second.result).toMatchObject({ updated: 1, keptAsEdited: [] });
     expect(event.subject).toBe("改成我自己的名字");
-    const dropped = await writer(graph).publish([], first.ledger);
-    expect(dropped.result).toMatchObject({ deleted: 0, keptAsEdited: ["b1"] });
-    expect(crossline(graph).events).toHaveLength(1);
+    expect(event.start.dateTime).toContain("2026-10-13T16:00");
+  });
+
+  test("an event of ours they deleted is not made again; a finished task's leftover is removed even if they changed it", async () => {
+    const graph = fakeGraph(human());
+    const first = await writer(graph).publish([block("b1", "整理笔记", "2026-10-13T14:00:00Z", "2026-10-13T15:00:00Z"),
+      block("b2", "画图", "2026-10-14T14:00:00Z", "2026-10-14T15:00:00Z")], {});
+    crossline(graph).events.splice(0, 1);
+    crossline(graph).events[0]!.subject = "画图（我的）";
+    const second = await writer(graph).publish([block("b1", "整理笔记", "2026-10-13T14:00:00Z", "2026-10-13T15:00:00Z")], first.ledger,
+      { forceRemove: (id) => id === "b2" });
+    expect(second.edits.removed).toEqual(["b1"]);
+    expect(second.result).toMatchObject({ created: 0, deleted: 1 });
+    expect(crossline(graph).events).toHaveLength(0);
+    const third = await writer(graph).publish([block("b1", "整理笔记", "2026-10-13T14:00:00Z", "2026-10-13T15:00:00Z")], second.ledger);
+    expect(third.result.created).toBe(0);
   });
 
   test("with the record of what was written lost, nothing already there is overwritten", async () => {
@@ -175,7 +205,9 @@ describe("reminders", () => {
   test("an event written before reminders existed is given its reminder, and nothing else changes", async () => {
     const graph = fakeGraph(human());
     const first = await writer(graph).publish([remind(null)], {});
-    const legacy: PublishLedger = { "scheduled:a:1": { eventId: first.ledger["scheduled:a:1"]!.eventId, hash: first.ledger["scheduled:a:1"]!.hash } };
+    // A record from before titles and times were kept apart: only the event and a hash of what was written.
+    const written = crossline(graph).events[0]!;
+    const legacy: PublishLedger = { "scheduled:a:1": { eventId: written.id, hash: eventHash(written.subject, written.start.dateTime, written.end.dateTime), title: "", start: "", end: "" } };
     const { result } = await writer(graph).publish([remind(10)], legacy);
     expect(result).toMatchObject({ updated: 1, keptAsEdited: [] });
     expect(crossline(graph).events[0]).toMatchObject({ subject: "整理 SRAM 笔记", isReminderOn: true, reminderMinutesBeforeStart: 10 });

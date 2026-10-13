@@ -12,10 +12,12 @@ vi.mock("./crossline", () => ({
   effectiveSchedulePreferences: () => ({ preferences: { timeZone: "America/Chicago" } }),
   toZonedInstant: (day: string, time: string) => `${day}T${time}:00.000Z`,
   loadCurrentPlan: async () => ({
-    status: "approved",
     blocks: [
       { id: "scheduled:research-starter-work-order", title: "示例", day: "2099-01-01", start: "09:00", end: "10:00" },
       { id: "scheduled:real-order-1", title: "真实任务", day: "2099-01-01", start: "11:00", end: "12:00" },
+      { id: "scheduled:finished-order", title: "已结束", day: "2097-12-31", start: "11:00", end: "12:00" },
+      { id: "proposed:waiting-order", title: "待批准", day: "2099-01-01", start: "13:00", end: "14:00" },
+      { id: "optional:off-hours-order", title: "预排", day: "2099-01-01", start: "22:00", end: "23:00" },
       { id: "graph_calendar:abc", title: "上课", day: "2099-01-01", start: "14:00", end: "15:00" }
     ]
   })
@@ -24,10 +26,11 @@ vi.mock("./crossline", () => ({
 import { blocksToPublish } from "./calendar-publish";
 
 describe("blocksToPublish", () => {
-  it("publishes only the scheduler's blocks for real work orders, never the seeded demo orders or the person's own calendar", async () => {
+  // The write boundary that remains once the plan takes effect by default: only the scheduler's future blocks for real work, never a
+  // preview, a pencilled-in block, a demo order or the person's own calendar.
+  it("publishes only the scheduler's future blocks for real work orders, never previews, pencilled-in blocks, demo orders or the person's calendar", async () => {
     const result = await blocksToPublish({} as never, new Date("2098-01-01T00:00:00Z"));
-    expect(result.approved).toBe(true);
-    expect(result.blocks.filter((block) => block.id.startsWith("scheduled:")).map((block) => block.id)).toEqual(["scheduled:real-order-1"]);
+    expect(result.blocks.map((block) => block.id).filter((id) => !id.startsWith("followup:") && !id.startsWith("deadline:"))).toEqual(["scheduled:real-order-1"]);
     expect(result.blocks.find((block) => block.id === "scheduled:real-order-1")?.reminderMinutes).toBe(10);
   });
 

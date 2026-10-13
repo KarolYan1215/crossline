@@ -1,7 +1,7 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { CrosslineStore } from "@crossline/db";
 vi.mock("server-only", () => ({}));
-import { loadCurrentPlan, loadDashboard, loadGoalForecast, pinBlock, planToday, readAvailability, readSchedulePreferences,
+import { loadCurrentPlan, loadDashboard, loadGoalForecast, lockBlock, planToday, readAvailability, readSchedulePreferences,
   readGoalSettings, saveAvailability, saveGoalSettings, saveSchedulePreferences, toZonedInstant } from "./crossline";
 import { TEST_CTX } from "./test-support";
 
@@ -221,8 +221,9 @@ test("what finds no room in the person's hours is pencilled in outside them, and
   // Pencilled in between 07:00 and 23:00, never inside the person's own window, tagged rather than prefixed.
   expect(optional.every((block) => block.start >= "07:00" && block.end <= "23:00" && !(block.start < "08:30" && block.end > "08:00") && block.tag === "预排")).toBe(true);
   const first = optional[0]!;
-  expect(pinBlock(TEST_CTX, first.id, { day: first.day!, start: first.start, end: first.end })).toEqual({ ok: true });
+  expect(lockBlock(TEST_CTX, first.id, { day: first.day!, start: first.start, end: first.end })).toEqual({ ok: true });
   const after = await loadCurrentPlan(TEST_CTX);
-  expect(after.blocks.find((block) => block.id === first.id.replace(/^optional:/, "scheduled:").replace(/:\d+$/, ""))).toMatchObject({ tag: "已开始", start: first.start, end: first.end });
-  expect(pinBlock(TEST_CTX, "scheduled:x", { day: first.day!, start: first.start, end: first.end })).toEqual({ ok: false, code: "PIN_INVALID" });
+  // Started, it becomes the same-numbered scheduled block, locked at that time.
+  expect(after.blocks.find((block) => block.id === first.id.replace(/^optional:/, "scheduled:"))).toMatchObject({ tag: "已锁定", start: first.start, end: first.end });
+  expect(lockBlock(TEST_CTX, "graph_calendar:x", { day: first.day!, start: first.start, end: first.end })).toEqual({ ok: false, code: "PIN_INVALID" });
 });

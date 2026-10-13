@@ -67,19 +67,6 @@ test("the store refuses an auto approval after its proposal snapshot changes", (
     .toBe("awaiting_plan_approval");
 });
 
-test("the store refuses a plan change auto approval after its version changes", () => {
-  const { store } = setup();
-  store.savePlanChange({ id: "changing", ownerId, workspaceId: TEST_CTX.workspaceId,
-    planVersionId: "personal-plan-v1", kind: "add", triggerEventId: "trigger",
-    explanation: "新增建议块", status: "pending" });
-  const plan = store.listPlanVersions(TEST_CTX.workspaceId)[0]!;
-  const change = store.listPlanChanges(TEST_CTX.workspaceId, plan.id).find((item) => item.id === "changing")!;
-  store.savePlanVersion({ ...plan, payload: { changed: true } });
-  expect(() => store.resolvePlanChange(TEST_CTX.workspaceId, ownerId, change.id, "approved", "auto:changing",
-    { plan, change })).toThrow("PROPOSAL_VERSION_CHANGED");
-  expect(store.listPlanChanges(TEST_CTX.workspaceId, plan.id).find((item) => item.id === change.id)?.status).toBe("pending");
-});
-
 test("rejection blocks the candidate and high risk never auto approves", () => {
   const { store, add } = setup();
   add("reject", "整理本地记录", "routine");
@@ -96,20 +83,6 @@ test("rejection blocks the candidate and high risk never auto approves", () => {
     .every((item) => item.state === "awaiting_plan_approval")).toBe(true);
   expect(store.listWorkOrders(TEST_CTX.workspaceId).find((item) => item.id === "reject")?.state).toBe("blocked");
   expect(store.listEvents(TEST_CTX.workspaceId, { type: "permission.rejected" })).toHaveLength(1);
-});
-
-test("non-conflict plan change can auto apply, while a reality conflict stays pending", () => {
-  const { store } = setup();
-  for (const [id, kind] of [["simple", "add"], ["reality", "conflict"]] as const)
-    store.savePlanChange({ id, ownerId, workspaceId: TEST_CTX.workspaceId, planVersionId: "personal-plan-v1",
-      kind, triggerEventId: "trigger", explanation: id, status: "pending" });
-  setPermissionMode(TEST_CTX, true);
-  const candidates = permissionCandidates(TEST_CTX);
-  expect(candidates.find((item) => item.id === "reality")?.eligible).toBe(false);
-  for (let t = 0; t <= 300_000; t += 10_000)
-    permissionHeartbeat(TEST_CTX, candidates.map((item) => item.key), true, t);
-  expect(store.listPlanChanges(TEST_CTX.workspaceId, "personal-plan-v1").find((item) => item.id === "simple")?.status).toBe("approved");
-  expect(store.listPlanChanges(TEST_CTX.workspaceId, "personal-plan-v1").find((item) => item.id === "reality")?.status).toBe("pending");
 });
 
 test("sourced insight becomes usable after foreground approval and can be revoked", () => {

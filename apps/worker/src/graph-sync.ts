@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { isCancelledEvent, realityChanges, syncWindowDays, toRealityBlock, type RealityBlock, type RealityChange } from "@crossline/core";
 import { reconcileExternalItems, type ExternalItem, type GraphDeltaPage } from "@crossline/connectors";
 import type { CrosslineStore } from "@crossline/db";
@@ -97,12 +97,9 @@ type SourceRead =
 /**
  * Pulls the signed-in user's calendar and reflects it into the day plan.
  *
- * Two rules decide what happens to the plan, and they are the whole point of the job:
- *
- * - a **draft** plan is updated in place, because nothing has been agreed yet;
- * - an **approved** plan is never rewritten. Reality moving under a plan you already approved is a
- *   disagreement, not an update, so it becomes a new draft version whose changes are all `conflict` —
- *   which `approvePlanVersion` then refuses to wave through until each one has been looked at.
+ * The plan is one current row, updated in place (docs/loop-and-scout.md §1): external events are hard constraints the scheduler
+ * avoids, and what it placed takes effect by default. Plan versions to approve and differences to settle are gone (migration 14);
+ * each sync still appends `plan.reality_changed`, which the change summary on Today reads.
  */
 export function createGraphSync(store: CrosslineStore, workspaceId: string, options: {
   /** Resolved fresh on each tick, because the person can change which calendars are read. */
@@ -184,17 +181,9 @@ export function createGraphSync(store: CrosslineStore, workspaceId: string, opti
     }
 
     const carried = planReality(current.payload, today);
-    // A meeting its organiser cancelled, carried from before cancellations were dropped at sync: the delta never mentions it again,
-    // so it would sit in the plan with its 「新增」 change pending for good, and a pending conflict blocks approval. It was never a
-    // commitment, so it leaves quietly — no 「removed」 change — and whatever is still pending about it is excluded.
-    const cancelled = carried.filter((block) => isCancelledEvent(block.title));
+    // A meeting its organiser cancelled, carried from before cancellations were dropped at sync: the delta never mentions it again.
+    // It was never a commitment, so it leaves quietly — no 「removed」 change.
     const previous = carried.filter((block) => !isCancelledEvent(block.title));
-    if (cancelled.length) {
-      const hashes = cancelled.map((block) => `:${createHash("sha1").update(block.id).digest("hex").slice(0, 16)}:`);
-      for (const change of store.listPlanChanges(workspaceId, current.id)) {
-        if (change.status === "pending" && hashes.some((hash) => change.id.includes(hash))) store.savePlanChange({ ...change, status: "excluded" });
-      }
-    }
     /**
      * An incremental delta page lists what CHANGED. A block it does not mention is unchanged, not
      * gone — treating every page as the authoritative set wiped the whole plan on the second tick and
@@ -254,38 +243,17 @@ export function createGraphSync(store: CrosslineStore, workspaceId: string, opti
       ...authored
     ];
 
-    const target = current.status === "draft"
-      ? { id: current.id, version: current.version }
-      : { id: `plan-${randomUUID()}`, version: current.version + 1 };
-    store.savePlanVersion({
-      id: target.id, ownerId: ownerOf(store, workspaceId), workspaceId,
-      version: target.version, status: "draft", payload: { blocks: merged }
-    });
-    for (const change of changes) {
-      store.savePlanChange({
-        // Hashed, not truncated. A Graph event id is ~150 characters and two events in the same mailbox
-        // share almost all of it, so `.slice(0, 200)` cut the `:add`/`:move` suffix off and made a move
-        // upsert onto the earlier add row — the C lens then showed "新增" next to text describing a move.
-        // A long enough shared prefix would have collapsed two different events onto one row entirely.
-        id: `${target.id}:${createHash("sha1").update(change.blockId).digest("hex").slice(0, 16)}:${change.kind}`,
-        ownerId: ownerOf(store, workspaceId), workspaceId, planVersionId: target.id,
-        // Against an approved plan every reality change is a conflict, because it contradicts something
-        // already agreed. On a draft it keeps its own shape — nothing was agreed to contradict.
-        kind: current.status === "draft" ? change.kind : "conflict",
-        triggerEventId: `graph-sync:${today}`,
-        explanation: change.explanation,
-        status: "pending"
-      });
-    }
-    store.appendEvent({
+    store.savePlanVersion({ ...current, ownerId: ownerOf(store, workspaceId), status: "current", payload: { blocks: merged } });
+    if (changes.length) store.appendEvent({
       ownerId: ownerOf(store, workspaceId), workspaceId,
-      idempotencyKey: `graph-sync:${today}:${target.id}:${changes.length}`,
-      type: "plan.reality_changed", entityId: target.id,
-      payload: { changes, resynced, skipped, against: current.status, ...(failed.length ? { failed } : {}) }
+      // Keyed on what changed, not on how many: two different syncs a day with the same count used to collide and drop the second.
+      idempotencyKey: `graph-sync:${createHash("sha1").update(JSON.stringify(changes)).digest("hex").slice(0, 20)}`,
+      type: "plan.reality_changed", entityId: current.id,
+      payload: { changes, resynced, skipped, ...(failed.length ? { failed } : {}) }
     });
     return {
       state: "synced", imported: next.length, skipped,
-      changes: changes.length, planVersionId: target.id, resynced, ...(failed.length ? { failed } : {})
+      changes: changes.length, planVersionId: current.id, resynced, ...(failed.length ? { failed } : {})
     };
   };
 }

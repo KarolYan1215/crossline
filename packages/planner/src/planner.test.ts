@@ -302,6 +302,28 @@ describe("energy-aware planning", () => {
       if (index) expect(Date.parse(block.start)).toBeGreaterThanOrEqual(Date.parse(blocks[index - 1]!.end));
   }, 15_000);
 
+  test("a frozen block freezes that segment only: the rest of the task is still planned", async () => {
+    const day = (h: number) => `2026-09-14T${String(h).padStart(2, "0")}:00:00.000Z`;
+    const availability = [{ day: "2026-09-14", start: day(14), end: day(20), energy: "high" as const }];
+    const task = { id: "essay", title: "论文", estimate: { p25Minutes: 120, p50Minutes: 120, p85Minutes: 120, confidence: "high" as const },
+      inputsReady: true, deadlineTier: 3 as const };
+    const half = await planSchedule({ now: start, horizonDays: 1, tasks: [task], availability,
+      frozenBlocks: [{ taskId: "essay", start: day(14), end: day(15) }] });
+    const placed = half.plan.blocks.filter((block) => block.taskId === "essay" && !block.frozen);
+    expect(placed.reduce((sum, block) => sum + (Date.parse(block.end) - Date.parse(block.start)) / 60_000, 0)).toBe(60);
+    expect(half.blockers).toEqual([]);
+
+    const whole = await planSchedule({ now: start, horizonDays: 1, tasks: [task], availability,
+      frozenBlocks: [{ taskId: "essay", start: day(14), end: day(16) }] });
+    expect(whole.plan.blocks.filter((block) => block.taskId === "essay" && !block.frozen)).toEqual([]);
+    expect(whole.blockers).toEqual([]);
+
+    // Work that must sit in one slot is not cut: a frozen block means it is placed.
+    const unbroken = await planSchedule({ now: start, horizonDays: 1, tasks: [{ ...task, interruptible: false }], availability,
+      frozenBlocks: [{ taskId: "essay", start: day(14), end: day(15) }] });
+    expect(unbroken.plan.blocks.filter((block) => block.taskId === "essay" && !block.frozen)).toEqual([]);
+  });
+
   test("buffered mode keeps its ten-minute gap across adjacent availability windows", async () => {
     const tasks = ["first", "second"].map((id) => ({ id, title: id,
       estimate: { p25Minutes: 60, p50Minutes: 60, p85Minutes: 60, confidence: "high" as const },

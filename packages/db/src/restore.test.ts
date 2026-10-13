@@ -28,7 +28,7 @@ const OWNER = "owner-1";
 
 /** A spread wide enough that the round trip has to carry JSON columns, NULL columns and FK targets. */
 function populate(store: CrosslineStore): void {
-  const event = store.appendEvent({
+  store.appendEvent({
     ownerId: OWNER, workspaceId: WORKSPACE, idempotencyKey: "restore-1",
     type: "task.created", entityId: "work-order-1", payload: { title: "写论文", nested: { depth: 2 } }
   });
@@ -51,12 +51,7 @@ function populate(store: CrosslineStore): void {
     estimate: { p25Minutes: 30, p50Minutes: 45, p85Minutes: 60, source: "identity_prior", observationCount: 0, confidence: "low" },
     payload: { humanCore: [{ energy: "high", interruptible: false }] }
   });
-  store.savePlanVersion({ id: "plan-1", ownerId: OWNER, workspaceId: WORKSPACE, version: 1, status: "draft", payload: { blocks: [] } });
-  // `before`/`after` are omitted on purpose: they become NULL columns, which a naive importer drops.
-  store.savePlanChange({
-    id: "change-1", ownerId: OWNER, workspaceId: WORKSPACE, planVersionId: "plan-1",
-    kind: "add", triggerEventId: event.eventId, explanation: "种子", status: "pending"
-  });
+  store.savePlanVersion({ id: "plan-1", ownerId: OWNER, workspaceId: WORKSPACE, version: 1, status: "current", payload: { blocks: [] } });
   store.saveEnergyObservation({
     id: "energy-1", ownerId: OWNER, workspaceId: WORKSPACE, source: "self_report",
     level: "high", confidence: "high", aggregate: { responseSeconds: 3 }, observedAt: "2026-09-15T10:00:00.000Z"
@@ -119,6 +114,24 @@ test("a snapshot from a different schema version is refused rather than half-app
   const store = freshStore();
   const snapshot = { ...store.exportSnapshot(WORKSPACE), schemaVersion: 3 as unknown as 2 };
   expect(() => store.importSnapshot(snapshot)).toThrow("RESTORE_SCHEMA_UNSUPPORTED");
+});
+
+test("a backup taken before migration 14 still restores: its plan differences become archived events", () => {
+  const source = freshStore();
+  source.savePlanVersion({ id: "plan-1", ownerId: OWNER, workspaceId: WORKSPACE, version: 1, status: "approved", payload: { blocks: [] } });
+  source.savePlanVersion({ id: "plan-2", ownerId: OWNER, workspaceId: WORKSPACE, version: 2, status: "draft", payload: { blocks: [{ id: "x" }] } });
+  const snapshot = JSON.parse(JSON.stringify(source.exportSnapshot(WORKSPACE)));
+  // `before` is NULL on purpose: a naive converter drops the column.
+  snapshot.tables.plan_changes = [{ id: "change-1", owner_id: OWNER, workspace_id: WORKSPACE, plan_version_id: "plan-2", kind: "conflict",
+    trigger_event_id: "evt-1", explanation: "日历中已不存在", before_json: null, after_json: JSON.stringify({ id: "x" }), status: "pending" }];
+
+  const restored = freshStore();
+  restored.importSnapshot(snapshot);
+  const archived = restored.listEvents(WORKSPACE, { type: "plan.change_archived" });
+  expect(archived).toHaveLength(1);
+  expect(archived[0]!.payload).toMatchObject({ explanation: "日历中已不存在", after: { id: "x" }, before: null });
+  expect(restored.listPlanVersions(WORKSPACE).map((plan) => [plan.id, plan.status])).toEqual([["plan-2", "current"]]);
+  expect(restored.tableNames()).not.toContain("plan_changes");
 });
 
 test("table names in the snapshot are validated instead of reaching SQL", () => {

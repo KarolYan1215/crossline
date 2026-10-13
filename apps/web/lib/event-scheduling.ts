@@ -1,7 +1,7 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
 import { availableSlots, occurrences, type AccessContext, type FixedEvent } from "@crossline/core";
-import { loadCurrentPlan, planToday, plannerIdOfBlock, readAvailability, writeKeep } from "./crossline";
+import { keepBlocks, loadCurrentPlan, planToday, readAvailability } from "./crossline";
 import { addInputEvent, publishFixedEvents } from "./fixed-events";
 
 export type EventRequest = { title: string; lineId: string; date: string; weekdays: number[]; startTime: string; endTime: string; until: string; minutes: number; location?: string };
@@ -47,7 +47,7 @@ export async function scheduleEvent(ctx: AccessContext, request: EventRequest, n
   const scheduled = before.blocks.filter((block) => block.id.startsWith("scheduled:") && block.day && block.day >= today);
   const added = addInputEvent(ctx, event);
   if (!added.ok) return { ok: false, code: added.code, message: "日程信息不完整，未加入。" };
-  writeKeep(ctx, scheduled.filter((block) => !hit(block)).map((block) => ({ taskId: plannerIdOfBlock(block.id), day: block.day!, start: block.start, end: block.end })), now);
+  keepBlocks(ctx, scheduled.filter((block) => !hit(block)).map((block) => ({ blockId: block.id, day: block.day!, start: block.start, end: block.end })), now);
   void publishFixedEvents(ctx, now).catch(() => undefined);
   return { ok: true, event, moved: scheduled.filter(hit).length, placedBySystem };
 }

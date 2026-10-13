@@ -9,7 +9,7 @@ vi.mock("./crossline", () => ({
     setSetting: (ws: string, key: string, value: string) => settings.set(`${ws}:${key}`, value)
   })
 }));
-vi.mock("./calendar-publish", () => ({ blocksToPublish: async () => ({ approved: true, blocks: [{ id: "scheduled:a", title: "画图", start: "2099-01-01T09:00:00Z", end: "2099-01-01T10:00:00Z", reminderMinutes: 10 }] }) }));
+vi.mock("./calendar-publish", () => ({ blocksToPublish: async () => ({ blocks: [{ id: "scheduled:a", title: "画图", start: "2099-01-01T09:00:00Z", end: "2099-01-01T10:00:00Z", reminderMinutes: 10 }] }) }));
 const requestCodexSupervisor = vi.fn(async (..._args: unknown[]) => ({ state: "published" }));
 vi.mock("./codex-runtime", () => ({ requestCodexSupervisor: (...args: unknown[]) => (requestCodexSupervisor as (...a: unknown[]) => unknown)(...args) }));
 import { autoPublishPass } from "./auto-publish";

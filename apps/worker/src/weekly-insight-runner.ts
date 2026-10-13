@@ -50,9 +50,6 @@ export function buildWeeklyInsightContext(store: CrosslineStore, workspaceId: st
   const notificationEvents = store.listEvents(workspaceId, { type: ["work_order.transitioned", "materials.blocked", "milestone_gate.judged"] })
     .filter((event) => inPeriod(event.createdAt))
     .map((event) => ({ id: event.eventId, type: event.type, entityId: event.entityId, createdAt: event.createdAt }));
-  const planChanges = store.listPlanVersions(workspaceId)
-    .flatMap((plan) => store.listPlanChanges(workspaceId, plan.id))
-    .map((change) => ({ id: change.id, kind: change.kind, status: change.status }));
   const landedAt = (id: string) => store.listEvents(workspaceId, { type: "work_order.transitioned", entityId: id })
     .find((event) => (event.payload as { to?: string }).to === "accepted")?.createdAt;
   const byproductItems = store.listEvents(workspaceId, { type: "byproduct.planned" }).filter((event) => inPeriod(event.createdAt)).map((event) => {
@@ -68,7 +65,7 @@ export function buildWeeklyInsightContext(store: CrosslineStore, workspaceId: st
     period: { from, to },
     byproducts: { planned: byproductItems.length, landed: byproductItems.filter((item) => item.status === "landed").length,
       missed: byproductItems.filter((item) => item.status === "missed").length, items: byproductItems },
-    executions, estimates, energyObservations, notificationEvents, planChanges,
+    executions, estimates, energyObservations, notificationEvents,
     approvedMilestones: store.listMilestones(workspaceId).filter((milestone) => milestone.status === "approved")
       .map((milestone) => ({ id: milestone.id, identityId: milestone.identityId, title: milestone.title }))
   };

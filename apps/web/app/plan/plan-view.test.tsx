@@ -5,46 +5,29 @@ import { PlanView, type PlanVersionData } from "./plan-view";
 const plan: PlanVersionData = {
   id: "plan-7",
   version: 7,
-  status: "draft",
   blocks: [
     { id: "fixed-1", lane: "human", title: "组会", start: "09:00", end: "10:00", source: "UW Outlook", readOnly: true },
     { id: "ai-1", lane: "ai", title: "整理组会材料", start: "08:15", end: "08:50", source: "Codex", readOnly: false }
-  ],
-  changes: [{ id: "change-1", kind: "add", explanation: "为组会准备材料", afterBlockId: "ai-1", status: "pending" }]
+  ]
 };
 
 describe("PlanView", () => {
-  test("the top row: one plan version, reading and writing the calendar, the horizon, and the decisions folded under it — no calendar", () => {
+  test("the top row: reading and writing the calendar and the horizon — no calendar, no version to approve", () => {
     const html = renderToStaticMarkup(<PlanView plan={plan} aside={<span>统计范围</span>} />);
     expect(html).toContain('data-plan-version="plan-7"');
-    expect(html).toContain("计划 v7 · 草稿");
     expect(html).toContain("立即同步日历");
     expect(html).toContain("发布到 Crossline 日历");
     expect(html).toContain("统计范围");
     // The calendar lives on Today only (decided 2026-10-10).
     for (const view of [">日<", ">周<", ">月<"]) expect(html).not.toContain(view);
     expect(html).not.toContain("组会</");
-    expect(html).toContain("1 项差异待处理");
-    expect(html).toContain("为组会准备材料");
-    // A pending difference opens the fold, so what needs a decision is visible without a click.
-    expect(html).toContain('<details class="plan-changes advanced" id="plan-changes" open=""');
-    expect(html).toContain(">批准</button>");
-  });
-
-  test("with nothing to decide the differences stay folded", () => {
-    const html = renderToStaticMarkup(<PlanView plan={{ ...plan, changes: [] }} />);
-    expect(html).not.toContain("差异待处理");
-    expect(html).not.toContain('id="plan-changes" open');
-  });
-
-  test("an approved plan says so and offers no approve button", () => {
-    const html = renderToStaticMarkup(<PlanView plan={{ ...plan, status: "approved", changes: [] }} />);
-    expect(html).toContain("本版本已批准");
-    expect(html).not.toContain("批准本批变更");
+    // The plan takes effect by default (docs/loop-and-scout.md §1): nothing to approve, no differences to settle.
+    expect(html).not.toContain("批准");
+    expect(html).not.toContain("差异");
   });
 
   test("what the scheduler could not place is counted, with a link to the reasons under 「排程依据」", () => {
-    const html = renderToStaticMarkup(<PlanView plan={{ ...plan, status: "approved",
+    const html = renderToStaticMarkup(<PlanView plan={{ ...plan,
       schedule: { status: "partial", blockers: [{ taskId: "w2", code: "NO_CAPACITY", message: "复核数据没有可用容量" }], solver: "feasible_time_limit" }
     }} />);
     expect(html).toContain("部分任务未排入");

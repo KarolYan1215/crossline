@@ -37,7 +37,6 @@ test("the seeded plan never claims a connector imported it", async () => {
   for (const block of plan.blocks) {
     expect(["UW Outlook", "Google Calendar", "Codex", "Crossline"]).not.toContain(block.source);
   }
-  expect(JSON.stringify(plan.changes)).not.toContain("由 AI 准备完成");
 });
 
 test("an analysed work order appears on Today instead of vanishing from it", async () => {

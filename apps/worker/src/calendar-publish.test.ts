@@ -45,3 +45,21 @@ test("a permission Microsoft has not granted is reported as the same missing aut
   const refuse = (async () => new Response("", { status: 403 })) as typeof fetch;
   expect(await createCalendarPublisher(store, ws, { credentialFor, fetchImpl: refuse })([block])).toMatchObject({ state: "blocked", code: "CALENDAR_WRITE_NOT_AUTHORIZED" });
 });
+
+test("a work block the person dragged on their calendar is locked at the new time", async () => {
+  store.setSetting(ws, WRITE_ACCOUNT_SETTING, "acct-1");
+  store.setSetting(ws, "calendar.published", JSON.stringify({ "scheduled:a:1": { eventId: "ev-1", title: "整理笔记", start: block.start, end: block.end, reminder: null } }));
+  const dragged = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(String(input));
+    const method = init?.method ?? "GET";
+    if (url.pathname.endsWith("/me/calendars") && method === "GET") return json({ value: [{ id: "xl", name: "Crossline", isDefaultCalendar: false }] });
+    if (url.pathname.endsWith("/events") && method === "GET") return json({ value: [{ id: "ev-1", subject: "整理笔记",
+      start: { dateTime: "2099-01-01T18:00:00.0000000" }, end: { dateTime: "2099-01-01T19:00:00.0000000" },
+      singleValueExtendedProperties: [{ id: "String {7b6f8f0a-3c1d-4a53-9a5e-2f4d6c1b9e11} Name crosslineBlockId", value: "scheduled:a:1" }] }] });
+    return json({}, 404);
+  }) as typeof fetch;
+  const outcome = await createCalendarPublisher(store, ws, { credentialFor, fetchImpl: dragged, now: () => new Date("2098-12-31T00:00:00Z") })([block]);
+  expect(outcome).toMatchObject({ state: "published", result: { keptAsEdited: ["scheduled:a:1"] } });
+  expect(JSON.parse(store.getSetting(ws, "schedule.frozen")!)).toEqual([{ blockId: "scheduled:a:1", reason: "locked",
+    start: "2099-01-01T18:00:00.000Z", end: "2099-01-01T19:00:00.000Z" }]);
+});

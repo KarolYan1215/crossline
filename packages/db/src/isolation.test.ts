@@ -29,9 +29,6 @@ const seed = (workspaceId: string, suffix: string) => {
     level: "medium", confidence: "high", aggregate: { responseSeconds: 3 }, observedAt: new Date().toISOString() });
   store.savePlanVersion({ id: `plan-${suffix}`, ownerId: `owner-${suffix}`, workspaceId, version: 1,
     status: "draft", payload: { blocks: [] } });
-  store.savePlanChange({ id: `change-${suffix}`, ownerId: `owner-${suffix}`, workspaceId,
-    planVersionId: `plan-${suffix}`, kind: "add", triggerEventId: `trigger-${suffix}`,
-    explanation: `变化 ${suffix}`, status: "pending" });
   store.setSetting(workspaceId, "localActivity.consent", suffix === "a" ? "granted" : "denied");
   store.saveWaitingItem({ id: `wait-${suffix}`, ownerId: `owner-${suffix}`, workspaceId, title: `等 ${suffix}`, who: "师兄",
     expectedAt: "2026-10-08", approximate: true, followUpAt: "2026-10-08", state: "open", blocks: [`w-${suffix}`], source: "manual" });
@@ -83,25 +80,6 @@ test("a snapshot carries one workspace and restores without dragging the other a
   expect(snapshot.workspaceId).toBe(A);
   expect(JSON.stringify(snapshot)).not.toContain("workspace-b");
   expect(JSON.stringify(snapshot)).not.toContain("owner-b");
-});
-
-/**
- * `listPlanChanges` used to take only `planVersionId`, with no `workspaceId` at all — the one list
- * method the earlier isolation pass here missed. A real caller only ever has the `AccessContext` its own
- * session resolved to (here, A's), and the plan version id it names is itself just a string the caller
- * read off its own screen — nothing stopped that string from happening to name a row that belongs to a
- * workspace the caller was never a member of. Scoping the query on `workspaceId` first is what turns
- * "knows B's planVersionId" back into "cannot read B's plan changes" rather than a cross-tenant read.
- */
-test("a workspace A caller cannot read workspace B's plan changes by naming B's planVersionId", () => {
-  expect(store.listPlanChanges(A, "plan-b")).toEqual([]);
-  expect(store.listPlanChanges(B, "plan-b").map((row) => row.id)).toEqual(["change-b"]);
-});
-
-test("resolving a plan change is scoped the same way: A's workspaceId cannot touch B's change", () => {
-  const result = store.resolvePlanChange(A, "owner-a", "change-b", "approved", "cross-tenant-attempt");
-  expect(result).toEqual({ changed: false });
-  expect(store.listPlanChanges(B, "plan-b")[0]?.status).toBe("pending");
 });
 
 /**

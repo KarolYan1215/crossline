@@ -378,7 +378,6 @@ const APPROVAL_TIERS = {
   approve_work_orders: "batch",
   auto_approve_internal_order: "automatic",
   approve_milestone_relations: "batch",
-  approve_plan_changes: "batch",
   // The approved plan's own blocks follow it onto the calendar named Crossline without a click — the person's
   // choice (2026-10-06). What may be written did not move: only that calendar, only events this app made and
   // the person has not changed, deletes only in the future, previews never. See CLAUDE.md, Safety boundaries.
@@ -456,3 +455,4 @@ export * from "./interview-checklist";
 export * from "./fixed-events";
 export * from "./portrait";
 export * from "./portrait-type";
+export * from "./schedule-frozen";

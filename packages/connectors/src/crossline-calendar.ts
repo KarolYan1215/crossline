@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { classifyCalendarEdits, type CalendarEdits, type PublishedEntry, type ReadBack } from "./calendar-edits";
 
 /**
  * Writes the plan's own work blocks to one calendar named 「Crossline」 and nowhere else.
@@ -8,8 +9,8 @@ import { createHash } from "node:crypto";
  * `#assertWritable`, which allows exactly three things: creating the calendar named Crossline, creating an event in that calendar's
  * own events, and changing or deleting an event in it whose id was just read back **carrying this writer's marker**. An event
  * without the marker — one the person put in the Crossline calendar by hand, or anything in any other calendar — has no way past it.
- * An event that carries the marker but no longer matches what this writer last wrote has been edited by the person, and is theirs
- * from then on: it is neither updated nor deleted, and the result says so.
+ * What the person did to one of its events is judged by `classifyCalendarEdits` (moved = locked at the new time, renamed = their title
+ * from now on, deleted = never written again), the same for any calendar.
  */
 export const CROSSLINE_CALENDAR_NAME = "Crossline";
 /** The extended property that says an event was made by this writer; its value is the plan block's id. */
@@ -30,11 +31,11 @@ export type PublishBlock = {
   recurrence?: { daysOfWeek: string[]; startDate: string; endDate: string; localStart: string; localEnd: string; timeZone: string };
 };
 /**
- * What was last written for each block, kept by the caller between runs: the event, a hash of its content as written,
- * and the reminder it was given. `reminder` absent means an entry from before reminders existed, when every event was
- * written with none — so an event still without one is untouched and may be given its reminder.
+ * What was last written for each block, kept by the caller between runs: the event, its title and instants as written, the reminder
+ * it was given, the person's own title and whether they deleted it. An entry with only a `hash` is from before titles and times were
+ * kept apart; `reminder` absent means one from before reminders existed, when every event was written with none.
  */
-export type PublishLedger = Record<string, { eventId: string; hash: string; reminder?: number | null; recurrence?: string }>;
+export type PublishLedger = Record<string, PublishedEntry>;
 export type PublishResult = {
   calendarId: string; created: number; updated: number; deleted: number; unchanged: number;
   /** Blocks whose event the person has changed since; left exactly as they made it. */
@@ -151,12 +152,16 @@ export class CrosslineCalendarWriter {
 
   /**
    * Brings the calendar in line with `blocks`: makes the missing, moves the changed, removes the ones the plan dropped — in the
-   * future only, and only events it made and the person has not touched.
+   * future only, and only events it made. What the person did since the last write comes back as `edits`: a moved event is left
+   * where they put it (the caller locks that block there), a renamed one keeps their title while its time follows the plan, a deleted
+   * one is not made again.
    */
   async publish(blocks: PublishBlock[], ledger: PublishLedger, options: {
     /** Which of this writer's events this call is responsible for (work blocks, or the person's fixed events); others are left as they are. */
     manages?: (blockId: string) => boolean;
-  } = {}): Promise<{ result: PublishResult; ledger: PublishLedger }> {
+    /** Blocks whose task is finished: their leftover future events go even if the person changed them. */
+    forceRemove?: (blockId: string) => boolean;
+  } = {}): Promise<{ result: PublishResult; ledger: PublishLedger; edits: CalendarEdits }> {
     const manages = options.manages ?? (() => true);
     const calendarId = await this.ensureCalendar();
     const owned = await this.#ownedEvents(calendarId);
@@ -164,65 +169,92 @@ export class CrosslineCalendarWriter {
     const next: PublishLedger = { ...ledger };
     const result: PublishResult = { calendarId, created: 0, updated: 0, deleted: 0, unchanged: 0, keptAsEdited: [] };
     const events = `/me/calendars/${encodeURIComponent(calendarId)}/events`;
-    const wanted = new Set<string>();
+    const instant = (dateTime: string | undefined) => dateTime ? new Date(`${minute(dateTime)}:00Z`).toISOString() : "";
 
+    // A record from before titles and times were kept apart is upgraded when the event is still as written; otherwise the old rule holds.
+    const legacyEdited = new Set<string>();
+    for (const [blockId, entry] of Object.entries(ledger)) {
+      if (!manages(blockId) || !entry.hash || entry.start) continue;
+      const event = owned.get(blockId);
+      if (!event) continue;
+      if (event.id === entry.eventId && entry.hash === eventHash(event.subject ?? "", event.start?.dateTime ?? "", event.end?.dateTime ?? ""))
+        next[blockId] = { eventId: event.id, title: event.subject ?? "", start: instant(event.start?.dateTime), end: instant(event.end?.dateTime),
+          reminder: entry.reminder ?? null, ...(entry.recurrence ? { recurrence: entry.recurrence } : {}) };
+      else legacyEdited.add(blockId);
+    }
+    const judged = Object.fromEntries(Object.entries(next).filter(([blockId, entry]) => manages(blockId) && entry.start && !entry.recurrence));
+    const readBack: ReadBack[] = Object.entries(judged).flatMap(([blockId, entry]) => {
+      const event = owned.get(blockId);
+      return event && event.id === entry.eventId ? [{ blockId, eventId: event.id, title: event.subject ?? "", start: instant(event.start?.dateTime), end: instant(event.end?.dateTime) }] : [];
+    });
+    const edits = classifyCalendarEdits(judged, readBack, this.#now());
+    const moved = new Set(edits.moved.map((item) => item.blockId));
+    for (const item of edits.moved) next[item.blockId] = { ...next[item.blockId]!, start: item.start, end: item.end };
+    for (const item of edits.retitled) next[item.blockId] = { ...next[item.blockId]!, personTitle: item.title };
+    for (const blockId of edits.removed) next[blockId] = { ...next[blockId]!, removedByPerson: true };
+
+    const wanted = new Set<string>();
     for (const block of blocks) {
       // A series counts while its last day is ahead; a single event while it has not ended.
       if (block.recurrence ? block.recurrence.endDate < new Date(now).toISOString().slice(0, 10) : Date.parse(block.end) <= now) continue;
       wanted.add(block.id);
-      const subject = block.title;
-      const hash = eventHash(subject, block.start, block.end);
+      const entry = next[block.id];
+      if (entry?.removedByPerson) continue;
       const reminder = block.reminderMinutes ?? null;
       const reminderFields = reminder === null ? { isReminderOn: false } : { isReminderOn: true, reminderMinutesBeforeStart: reminder };
+      const series = block.recurrence ? { recurrence: recurrenceKey(block.recurrence) } : {};
       const existing = owned.get(block.id);
       if (!existing) {
         const response = await this.#call("POST", events, {
-          subject, start: asGraphTime(block.start), end: asGraphTime(block.end), categories: [CROSSLINE_CALENDAR_NAME], showAs: "free", ...reminderFields,
+          subject: block.title, start: asGraphTime(block.start), end: asGraphTime(block.end), categories: [CROSSLINE_CALENDAR_NAME], showAs: "free", ...reminderFields,
           ...(block.recurrence ? { ...seriesFields(block.recurrence), showAs: "busy" } : {}),
-          body: { contentType: "text", content: block.note ?? "由 Crossline 排入。在 Crossline 里改计划，这里会跟着变；在这里手动改过的，Crossline 之后不会再动它。" },
+          body: { contentType: "text", content: block.note ?? "由 Crossline 排入。在 Crossline 里改计划，这里会跟着变；在这里拖到别的时间，Crossline 会把它锁定在那里；删掉它，Crossline 不会再放回来。" },
           singleValueExtendedProperties: [{ id: OWNER_PROPERTY_ID, value: block.id }]
         });
         const made = response.ok ? await response.json() as { id?: string } : undefined;
         if (!made?.id) throw new Error(`CALENDAR_EVENT_CREATE_FAILED:${response.status}`);
         this.#owned.add(made.id);
-        next[block.id] = { eventId: made.id, hash, reminder, ...(block.recurrence ? { recurrence: recurrenceKey(block.recurrence) } : {}) };
+        next[block.id] = { eventId: made.id, title: block.title, start: block.start, end: block.end, reminder, ...series };
         result.created += 1;
         continue;
       }
-      const current = eventHash(existing.subject ?? "", existing.start?.dateTime ?? "", existing.end?.dateTime ?? "");
-      const lastWritten = ledger[block.id];
-      if (!lastWritten || lastWritten.eventId !== existing.id || lastWritten.hash !== current) {
-        // Not what this writer left there: the person changed it (or the record of what was written is gone). Theirs now.
+      // Not what this writer left there, or the record of what was written is gone: the person's now, left exactly as it is.
+      if (legacyEdited.has(block.id) || !entry || entry.eventId !== existing.id || moved.has(block.id)) {
         result.keptAsEdited.push(block.id);
         continue;
       }
+      const subject = entry.personTitle ?? block.title;
+      const timeChange = minute(existing.start?.dateTime ?? "") !== minute(block.start) || minute(existing.end?.dateTime ?? "") !== minute(block.end);
+      const titleChange = (existing.subject ?? "") !== subject;
       // The reminder is the person's too once they change it: compared with what was last written (none, for an
       // entry from before reminders), and left alone when it differs — only the content keeps following the plan.
       const currentReminder = existing.isReminderOn ? existing.reminderMinutesBeforeStart ?? 0 : null;
-      const reminderTheirs = currentReminder !== (lastWritten.reminder ?? null);
+      const reminderTheirs = currentReminder !== (entry.reminder ?? null);
       const reminderChange = !reminderTheirs && currentReminder !== reminder;
-      const seriesChange = recurrenceKey(block.recurrence) !== (lastWritten.recurrence ?? "");
-      if (current === hash && !reminderChange && !seriesChange) {
+      const seriesChange = recurrenceKey(block.recurrence) !== (entry.recurrence ?? "");
+      const written = { eventId: existing.id, title: block.title, ...(entry.personTitle ? { personTitle: entry.personTitle } : {}), start: block.start, end: block.end, ...series };
+      if (!timeChange && !titleChange && !reminderChange && !seriesChange) {
         result.unchanged += 1;
-        if (!reminderTheirs) next[block.id] = { eventId: existing.id, hash, reminder };
+        next[block.id] = { ...written, reminder: reminderTheirs ? entry.reminder ?? null : reminder };
         continue;
       }
       const response = await this.#call("PATCH", `${events}/${encodeURIComponent(existing.id)}`, {
-        ...(current !== hash || seriesChange ? block.recurrence ? { subject, ...seriesFields(block.recurrence) } : { subject, start: asGraphTime(block.start), end: asGraphTime(block.end) } : {}),
+        ...(timeChange || titleChange || seriesChange ? block.recurrence ? { subject, ...seriesFields(block.recurrence) } : { subject, start: asGraphTime(block.start), end: asGraphTime(block.end) } : {}),
         ...(reminderChange ? reminderFields : {}) });
       if (!response.ok) throw new Error(`CALENDAR_EVENT_UPDATE_FAILED:${response.status}`);
-      next[block.id] = { eventId: existing.id, hash, reminder: reminderChange ? reminder : lastWritten.reminder ?? null,
-        ...(block.recurrence ? { recurrence: recurrenceKey(block.recurrence) } : {}) };
+      next[block.id] = { ...written, reminder: reminderChange ? reminder : entry.reminder ?? null };
       result.updated += 1;
     }
 
-    // What the plan no longer has: removed only if it is still in the future and still exactly as written.
+    // What the plan no longer has: removed only if it is still in the future and the person has not made it theirs — unless its task is
+    // finished, when a leftover event is only clutter.
     for (const [blockId, event] of owned) {
       if (wanted.has(blockId) || !manages(blockId)) continue;
-      const lastWritten = ledger[blockId];
+      const entry = next[blockId];
       const start = Date.parse(event.start?.dateTime ? minute(event.start.dateTime) + ":00Z" : "");
       if (!Number.isFinite(start) || start <= now) continue;
-      if (!lastWritten || lastWritten.eventId !== event.id || lastWritten.hash !== eventHash(event.subject ?? "", event.start?.dateTime ?? "", event.end?.dateTime ?? "")) {
+      const theirs = legacyEdited.has(blockId) || !entry || entry.eventId !== event.id || moved.has(blockId) || Boolean(entry.personTitle);
+      if (theirs && !options.forceRemove?.(blockId)) {
         result.keptAsEdited.push(blockId);
         continue;
       }
@@ -231,6 +263,6 @@ export class CrosslineCalendarWriter {
       delete next[blockId];
       result.deleted += 1;
     }
-    return { result, ledger: next };
+    return { result, ledger: next, edits };
   }
 }

@@ -74,23 +74,19 @@ test("an all-output milestone still saves — the warning is the user's to judge
   expect(store.listMilestones(TEST_CTX.workspaceId)[0]?.successCriteria[0]?.evidenceOf).toBe("output");
 });
 
-test("a pre-scheduler database is cleared of its example blocks and unblocked diffs", () => {
+test("a pre-scheduler database is cleared of its example blocks", () => {
   const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
   store.savePlanVersion({ id: "personal-plan-v1", ownerId: TEST_CTX.principalId, workspaceId: TEST_CTX.workspaceId,
     version: 1, status: "draft", payload: { blocks: [
       { id: "class", lane: "human", title: "课程", start: "09:00", end: "10:15", source: "示例数据", readOnly: true },
       { id: "graph_calendar:real", lane: "human", title: "真实日程", start: "11:00", end: "12:00", source: "日历", readOnly: true }
     ] } });
-  store.savePlanChange({ id: "personal-plan-v1-change-1", ownerId: TEST_CTX.principalId, workspaceId: TEST_CTX.workspaceId,
-    planVersionId: "personal-plan-v1", kind: "add", triggerEventId: "seed", explanation: "示例", status: "pending" });
   ensureSeeded(TEST_CTX);
 
   // The lanes are computed from the calendar and the scheduler now, so a seeded example is not just
   // decoration — it is a claim about the day that nothing made.
   const blocks = (store.listPlanVersions(TEST_CTX.workspaceId)[0]?.payload as { blocks: Array<Record<string, string>> }).blocks;
   expect(blocks.map((block) => block.id)).toEqual(["graph_calendar:real"]);
-  // And the example diff no longer holds the plan hostage: approval refuses while anything is pending.
-  expect(store.listPlanChanges(TEST_CTX.workspaceId, "personal-plan-v1")[0]?.status).toBe("excluded");
 });
 
 test("ensureSeeded seeds the built-in milestone template library once per workspace", () => {

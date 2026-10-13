@@ -49,7 +49,7 @@ test("migration 13 adds the artifact columns to an existing ledger, keeping its 
   raw.pragma("user_version = 12");
   raw.close();
   const store = new CrosslineStore(file);
-  expect(store.schemaVersion()).toBe(13);
+  expect(store.schemaVersion()).toBeGreaterThanOrEqual(13);
   expect(store.listMilestoneAnchors(W)[0]).toMatchObject({ milestoneId: "m1", outputs: [], inputs: [] });
   expect(store.listMilestoneRelations(W)[0]).toMatchObject({ id: "old", artifactId: null, transfer: null, checkOn: null, counterfactual: null });
   store.close();

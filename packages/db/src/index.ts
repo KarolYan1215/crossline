@@ -76,7 +76,6 @@ export type CrosslineSnapshot = {
   workOrders: StoredWorkOrder[];
   milestoneRelations: StoredMilestoneRelation[];
   planVersions: StoredPlanVersion[];
-  planChanges: StoredPlanChange[];
   energyObservations: StoredEnergyObservation[];
   tables: Record<string, Array<Record<string, string | number | null>>>;
 };
@@ -284,7 +283,8 @@ export type StoredExecution = {
 
 export type StoredPlanVersion = {
   id: string; ownerId: string; workspaceId: string; version: number;
-  status: "draft" | "approved" | "superseded"; payload: unknown;
+  /** `current` since migration 14 (one row, updated in place); the others only on rows written before it. */
+  status: "current" | "draft" | "approved" | "superseded"; payload: unknown;
 };
 
 /** The one input box's conversation of a day (docs/one-input.md). */
@@ -293,13 +293,6 @@ export type StoredConversation = { id: string; workspaceId: string; day: string;
 export type ConversationRole = "person" | "assistant" | "nudge";
 export type StoredConversationMessage = {
   id: string; workspaceId: string; conversationId: string; role: ConversationRole; text: string; payload: Record<string, unknown>; createdAt: string;
-};
-
-export type StoredPlanChange = {
-  id: string; ownerId: string; workspaceId: string; planVersionId: string;
-  kind: "add" | "move" | "remove" | "conflict"; triggerEventId: string;
-  explanation: string; before?: unknown; after?: unknown;
-  status: "pending" | "approved" | "excluded";
 };
 
 export type StoredMilestoneRelation = {
@@ -506,11 +499,6 @@ export class CrosslineStore {
         id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
         version INTEGER NOT NULL, status TEXT NOT NULL, payload_json TEXT NOT NULL, created_at TEXT NOT NULL
       );
-      CREATE TABLE IF NOT EXISTS plan_changes (
-        id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
-        plan_version_id TEXT NOT NULL, kind TEXT NOT NULL, trigger_event_id TEXT NOT NULL,
-        explanation TEXT NOT NULL, before_json TEXT, after_json TEXT, status TEXT NOT NULL
-      );
       CREATE TABLE IF NOT EXISTS energy_observations (
         id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
         source TEXT NOT NULL, level TEXT NOT NULL, confidence TEXT NOT NULL,
@@ -710,6 +698,33 @@ export class CrosslineStore {
    * Rules: append only, never edit a shipped step, and keep each one idempotent anyway so a
    * half-applied step from the old regime can still be stepped over.
    */
+  /** Each row the query returns (shaped like the retired `plan_changes`) becomes a `plan.change_archived` event; the migration and the restore share it. */
+  #archivePlanChangeRows(query: string, params: unknown[] = []): void {
+    this.#db.prepare(`
+      INSERT OR IGNORE INTO events (event_id, owner_id, workspace_id, idempotency_key, type, entity_id, payload_json, created_at)
+      SELECT lower(hex(randomblob(16))), owner_id, workspace_id, 'plan-change-archived:' || id, 'plan.change_archived', plan_version_id,
+        json_object('id', id, 'planVersionId', plan_version_id, 'kind', kind, 'triggerEventId', trigger_event_id,
+          'explanation', explanation, 'before', json(before_json), 'after', json(after_json), 'status', status),
+        strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+      FROM (${query})`).run(...params);
+  }
+
+  /** Keeps each workspace's newest plan row as the one current plan; older rows become `plan.version_archived` events. */
+  #collapsePlanVersions(workspaceId?: string): void {
+    const scope = workspaceId ? "WHERE workspace_id = ?" : "";
+    const params = workspaceId ? [workspaceId] : [];
+    const older = `SELECT * FROM plan_versions p ${scope ? `${scope} AND` : "WHERE"} id <> (SELECT id FROM plan_versions q
+      WHERE q.workspace_id = p.workspace_id ORDER BY version DESC, created_at DESC LIMIT 1)`;
+    this.#db.prepare(`
+      INSERT OR IGNORE INTO events (event_id, owner_id, workspace_id, idempotency_key, type, entity_id, payload_json, created_at)
+      SELECT lower(hex(randomblob(16))), owner_id, workspace_id, 'plan-version-archived:' || id, 'plan.version_archived', id,
+        json_object('id', id, 'version', version, 'status', status, 'payload', json(payload_json), 'createdAt', created_at),
+        strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+      FROM (${older})`).run(...params);
+    this.#db.prepare(`DELETE FROM plan_versions WHERE id IN (SELECT id FROM (${older}))`).run(...params);
+    this.#db.prepare(`UPDATE plan_versions SET status = 'current' ${scope}`).run(...params);
+  }
+
   #runMigrations(path: string): void {
     const has = (table: string, column: string) =>
       (this.#db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).some((item) => item.name === column);
@@ -783,9 +798,10 @@ export class CrosslineStore {
           CREATE INDEX IF NOT EXISTS executions_workspace_order ON executions(workspace_id, work_order_id);
           CREATE INDEX IF NOT EXISTS evidence_workspace_order ON evidence_claims(workspace_id, work_order_id);
           CREATE INDEX IF NOT EXISTS materials_workspace_order ON materials(workspace_id, work_order_id);
-          CREATE INDEX IF NOT EXISTS plan_changes_version ON plan_changes(plan_version_id);
           CREATE INDEX IF NOT EXISTS milestones_workspace ON milestones(workspace_id, id);
         `);
+        // Since migration 14 a new database has no `plan_changes`; only an old one gets its index here.
+        if (this.#hasTable("plan_changes")) this.#db.exec("CREATE INDEX IF NOT EXISTS plan_changes_version ON plan_changes(plan_version_id)");
       } },
 
       // Migration 4 dropped the six tables and the base DDL created them straight back on the next
@@ -998,6 +1014,16 @@ export class CrosslineStore {
         if (!has("milestone_relations", "transfer_json")) this.#db.exec("ALTER TABLE milestone_relations ADD COLUMN transfer_json TEXT");
         if (!has("milestone_relations", "check_on")) this.#db.exec("ALTER TABLE milestone_relations ADD COLUMN check_on TEXT");
         if (!has("milestone_relations", "counterfactual")) this.#db.exec("ALTER TABLE milestone_relations ADD COLUMN counterfactual TEXT");
+      } },
+      // The plan takes effect by default (docs/loop-and-scout.md §1): one current row that calendar sync updates in place, no plan
+      // versions to approve and no differences to settle. Nothing is thrown away: each difference becomes a `plan.change_archived`
+      // event and each older version a `plan.version_archived` event before the table and the rows go.
+      { version: 14, up: () => {
+        if (this.#hasTable("plan_changes")) {
+          this.#archivePlanChangeRows("SELECT * FROM plan_changes");
+          this.#db.exec("DROP TABLE plan_changes");
+        }
+        this.#collapsePlanVersions();
       } }
     ];
 
@@ -2863,37 +2889,6 @@ export class CrosslineStore {
     }));
   }
 
-  savePlanChange(change: StoredPlanChange): void {
-    this.#db.prepare(`
-      INSERT INTO plan_changes (
-        id, owner_id, workspace_id, plan_version_id, kind, trigger_event_id,
-        explanation, before_json, after_json, status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      -- explanation is updatable because it describes the change rather than deciding anything, and a
-      -- stale seed explanation could otherwise never be corrected. kind and the before/after payload
-      -- stay immutable: those are what the person actually approved.
-      ON CONFLICT(id) DO UPDATE SET status = excluded.status, explanation = excluded.explanation
-    `).run(
-      change.id, change.ownerId, change.workspaceId, change.planVersionId, change.kind,
-      change.triggerEventId, change.explanation,
-      change.before === undefined ? null : JSON.stringify(change.before),
-      change.after === undefined ? null : JSON.stringify(change.after), change.status
-    );
-  }
-
-  listPlanChanges(workspaceId: string, planVersionId: string): StoredPlanChange[] {
-    const rows = this.#db.prepare(
-      "SELECT * FROM plan_changes WHERE workspace_id = ? AND plan_version_id = ? ORDER BY id"
-    ).all(workspaceId, planVersionId) as Array<Record<string, string | null>>;
-    return rows.map((row) => ({
-      id: row.id!, ownerId: row.owner_id!, workspaceId: row.workspace_id!, planVersionId: row.plan_version_id!,
-      kind: row.kind as StoredPlanChange["kind"], triggerEventId: row.trigger_event_id!, explanation: row.explanation!,
-      ...(row.before_json ? { before: JSON.parse(row.before_json) } : {}),
-      ...(row.after_json ? { after: JSON.parse(row.after_json) } : {}),
-      status: row.status as StoredPlanChange["status"]
-    }));
-  }
-
   exportSnapshot(workspaceId: string): CrosslineSnapshot {
     const planVersions = this.listPlanVersions(workspaceId);
     // The typed fields below are the readable audit view; this raw dump is what a restore replays.
@@ -2904,7 +2899,7 @@ export class CrosslineStore {
       "events", "milestones",
       "captures", "capture_attachments",
       "milestone_relations",
-      "work_orders", "executions", "evidence_claims", "plan_versions", "plan_changes",
+      "work_orders", "executions", "evidence_claims", "plan_versions",
       "materials",
       "energy_observations", "external_bindings",
       "capacity_commitments", "duration_observations",
@@ -2946,7 +2941,6 @@ export class CrosslineStore {
       workOrders: this.listWorkOrders(workspaceId),
       milestoneRelations: this.listMilestoneRelations(workspaceId),
       planVersions,
-      planChanges: planVersions.flatMap((plan) => this.listPlanChanges(workspaceId, plan.id)),
       energyObservations: this.listEnergyObservations(workspaceId),
       tables
     };
@@ -2983,40 +2977,6 @@ export class CrosslineStore {
     return Boolean(row);
   }
 
-  /**
-   * Resolves one plan change so an approval is not blocked forever.
-   *
-   * `approvePlanVersion` refuses while a `conflict` change is pending, and until now nothing could move
-   * one out of `pending` — so a single conflict made the plan permanently unapprovable. Excluding is a
-   * decision the person makes and the ledger records; it does not delete the change.
-   */
-  resolvePlanChange(workspaceId: string, ownerId: string, changeId: string, status: "approved" | "excluded",
-    idempotencyKey: string, expected?: { plan: StoredPlanVersion; change: StoredPlanChange }): { changed: boolean } {
-    // Check-then-act: two callers could both read `pending` and both append a resolution event.
-    return this.#db.transaction(() => {
-      const row = this.#db.prepare(
-        "SELECT plan_version_id, status FROM plan_changes WHERE workspace_id = ? AND id = ?"
-      ).get(workspaceId, changeId) as { plan_version_id?: string; status?: string } | undefined;
-      if (!row || row.status !== "pending") return { changed: false };
-      if (expected) {
-        const currentPlan = this.listPlanVersions(workspaceId)[0];
-        const currentChange = this.listPlanChanges(workspaceId, row.plan_version_id!).find((item) => item.id === changeId);
-        if (!currentPlan || currentPlan.id !== row.plan_version_id || currentPlan.status !== "draft"
-          || JSON.stringify(currentPlan) !== JSON.stringify(expected.plan)
-          || JSON.stringify(currentChange) !== JSON.stringify(expected.change))
-          throw new Error("PROPOSAL_VERSION_CHANGED");
-      }
-      this.#db.prepare("UPDATE plan_changes SET status = ? WHERE workspace_id = ? AND id = ?")
-        .run(status, workspaceId, changeId);
-      this.appendEvent({
-        ownerId, workspaceId, idempotencyKey,
-        type: "plan_change.resolved", entityId: changeId,
-        payload: { status, planVersionId: row.plan_version_id }
-      });
-      return { changed: true };
-    })["immediate"]();
-  }
-
   /** Every real table in this database, so the restore path can validate against reality. */
   tableNames(): string[] {
     return (this.#db
@@ -3047,6 +3007,8 @@ export class CrosslineStore {
       // A backup taken before migration 4 still lists the six tables that never carried a row. An
       // empty one is stepped over; one with rows is not, because the assumption behind dropping them
       // would have been wrong and skipping it would lose data without saying so.
+      // A backup taken before migration 14 still carries the plan differences: they are archived as events below, not refused.
+      if (!known.has(tableName) && tableName === "plan_changes") continue;
       if (!known.has(tableName) && retired.has(tableName)) {
         if (rows.length) throw new Error("RESTORE_RETIRED_TABLE_NOT_EMPTY");
         continue;
@@ -3087,6 +3049,17 @@ export class CrosslineStore {
         );
         for (const row of rows) statement.run(columns.map((column) => row[column] ?? null));
       }
+      const changes = snapshot.tables.plan_changes ?? [];
+      if (changes.length && !known.has("plan_changes")) {
+        counts.plan_changes = changes.length;
+        const fields = ["id", "owner_id", "workspace_id", "plan_version_id", "kind", "trigger_event_id", "explanation", "before_json", "after_json", "status"];
+        this.#db.exec(`CREATE TEMP TABLE restored_plan_changes (${fields.join(" TEXT, ")} TEXT)`);
+        const insert = this.#db.prepare(`INSERT INTO restored_plan_changes VALUES (${fields.map(() => "?").join(", ")})`);
+        for (const row of changes) insert.run(fields.map((field) => row[field] ?? null));
+        this.#archivePlanChangeRows("SELECT * FROM temp.restored_plan_changes");
+        this.#db.exec("DROP TABLE temp.restored_plan_changes");
+      }
+      this.#collapsePlanVersions(snapshot.workspaceId);
     })();
     return counts;
   }

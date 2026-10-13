@@ -11,7 +11,7 @@ import { TaskQuickEdit } from "../task/quick-edit";
 import { ImpactCard, useImpact } from "../task/impact";
 import { shiftDay, type TimelineItem } from "./model";
 import type { LineLabels } from "./views";
-import { pinIfPencilled } from "./block-start";
+import { lockOnStart } from "./block-start";
 import { CompleteDialog } from "./complete-dialog";
 import { agentStepFor, followingBlock, otherOpenSteps, stepOfBlock } from "./panel-model";
 
@@ -20,6 +20,28 @@ const KIND_TEXT: Record<TimelineItem["kind"], string> = {
   import: "来自导入的文件", calendar: "来自日历", activity: "实际记录"
 };
 const AGENT_TEXT = { planned: "Agent 将执行", running: "Agent 执行中" } as const;
+
+/**
+ * Locks this block at its time, or unlocks it (docs/loop-and-scout.md §1): a locked block is no longer moved by re-planning; one a
+ * calendar change lands on is asked about instead of moved.
+ */
+function LockToggle({ item }: { item: TimelineItem }) {
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+  if (item.kind !== "scheduled" || !item.day) return null;
+  const locked = item.tag === "已锁定";
+  const toggle = async () => {
+    setBusy(true); setFailed(false);
+    const response = await fetch("/api/plan/pin", { method: locked ? "DELETE" : "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify(locked ? { blockId: item.id } : { blockId: item.id, day: item.day, start: item.start, end: item.end, reason: "locked" }) }).catch(() => null);
+    if (response?.ok) { window.location.reload(); return; }
+    setBusy(false); setFailed(true);
+  };
+  return <>
+    <button type="button" className="secondary" aria-pressed={locked} disabled={busy} onClick={() => void toggle()}>{locked ? "解除锁定" : "锁定在此时间"}</button>
+    {failed && <small role="status">未能{locked ? "解除锁定" : "锁定"}，请重试</small>}
+  </>;
+}
 const FINISHED = ["accepted", "archived", "evidence_review"];
 
 /**
@@ -107,10 +129,11 @@ export function BlockOverview({ item, items, today, labels, details, compact = f
       {following && <p className="dq-meta"><small>下一个时段</small> <span className="mono">{slotText(following)}</span>{following.step ? ` · ${following.step}` : ""}</p>}
     </>}
     {detail && <TaskActions workOrderId={detail.id} state={detail.state} paused={detail.paused} agentReady={Boolean(agentStepId)} agentStepId={agentStepId}
-      beforeStart={() => pinIfPencilled(item)} onOpen={compact ? undefined : () => setOpen(true)}
+      beforeStart={() => lockOnStart(item)} onOpen={compact ? undefined : () => setOpen(true)}
       offline={{ ownerId: detail.viewerId, workspaceId: detail.workspaceId, intent: detail.intent }}>
       {!compact && ["approved", "ready_for_human", "active"].includes(detail.state) && <button type="button" onClick={() => setCompleting(true)}>完成并提交材料</button>}
       {!compact && live && !FINISHED.includes(detail.state) && <button type="button" aria-expanded={postponing} onClick={() => setPostponing((value) => !value)}>推迟</button>}
+      {!compact && live && !FINISHED.includes(detail.state) && <LockToggle item={item} />}
     </TaskActions>}
     {postponing && detail && <div className="dq-defer" role="group" aria-label="推迟到">
       <button type="button" disabled={impact.busy} onClick={() => void impact.propose({ kind: "defer", workOrderId: detail.id, date: shiftDay(today, 1) })}>明天</button>
