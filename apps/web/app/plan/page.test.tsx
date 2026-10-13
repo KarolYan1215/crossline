@@ -18,26 +18,27 @@ describe("plan page", () => {
     const { default: PlanPage } = await import("./page");
     const html = renderToStaticMarkup(await PlanPage({}));
     expect(html).toContain("计划");
-    // Default hours are flagged on the capacity chart, and the week editor is right there; nothing blocks the preview.
-    expect(html).toContain("默认时段");
+    // Unconfirmed hours are flagged on the capacity chart (the example account meets the start standard with the interview's proposed
+    // hours, so the flag says where they came from), and the week editor is right there; nothing blocks the preview.
+    expect(html).toContain("推断时段（访谈）");
     expect(html).toContain("每周可用时段");
     store.close();
     globalThis.crosslineStore = undefined;
   }, 20000);
 
   // The real account: the interview recorded 「所有事情合计每周约 72 小时」 but the pattern was still the 39-hour default.
-  test("with no painted week, the hours the person said they have are used, and the chart says they are inferred", async () => {
+  // Since the start standard (2026-10-12) a page opens only once weekly hours are known — proposed by the interview or painted — so the
+  // stated weekly hours are compared with the proposal instead of standing in for it.
+  test("with no painted week, the interview's proposed hours are used and marked inferred; stated hours beyond them are flagged", async () => {
     const store = new CrosslineStore(":memory:");
     globalThis.crosslineStore = store;
     store.upsertProfileFact({ workspaceId: "workspace-1", identityId: "research", projectId: "p", slot: "weekly_hours", updatedAt: "2026-10-01T00:00:00Z",
       value: "无法按项目拆分；所有事情合计每周约 72 小时。", status: "confirmed", sourceRef: "reply-1", sourceQuote: "72 小时" });
     const { default: PlanPage } = await import("./page");
     const html = renderToStaticMarkup(await PlanPage({}));
-    // Before 2026-10-10 the plan ran on the 39-hour default and could only flag the gap; now the 72 hours said are the pattern.
     expect(html).toContain("画像所述每周投入 72 小时");
-    expect(html).toMatch(/可用时段每周 7[0-4] 小时/);
-    expect(html).toContain("推断时段（每周小时）");
-    expect(html).not.toContain("可用时段不足");
+    expect(html).toContain("推断时段（访谈）");
+    expect(html).toContain("可用时段不足");
     store.close();
     globalThis.crosslineStore = undefined;
   }, 20000);

@@ -4,6 +4,7 @@ import { MilestoneStats, MilestoneTimeline } from "./milestone-timeline";
 import { ensureSeeded, getStore, milestonesRetiredBySystem } from "../../lib/crossline";
 import { loadMilestoneBoard } from "../../lib/milestone-board";
 import { requireSessionContext } from "../../lib/access-guard";
+import { gateUntilReady } from "../../lib/start-gate";
 import { identityLines } from "../../lib/lines";
 import { LINE_PALETTE } from "@crossline/identity-packs";
 import { LinesBar } from "./lines-bar";
@@ -13,6 +14,7 @@ export const dynamic = "force-dynamic";
 
 export default async function MilestonesPage() {
   const ctx = await requireSessionContext();
+  gateUntilReady(ctx);
   ensureSeeded(ctx);
   const board = await loadMilestoneBoard(ctx);
   // Drafts the architect replaced on its own are not shown; what the person archived themselves can be put back.

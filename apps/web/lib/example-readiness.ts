@@ -15,7 +15,7 @@ export function seedExampleReadiness(store: CrosslineStore, ctx: AccessContext):
   const lines = defaultIdentityPacks().filter((pack) => pack.kind === "identity");
   if (!store.getSetting(ws, LINE_SETTING)) {
     const specs: LineSpec[] = lines.map((pack) => {
-      const goal = `成为把「${pack.label}」做出可验收成果的${pack.label}`;
+      const goal = `成为能交出可验收成果的${pack.label}`;
       // Written with the clock the account had, as `currentSpecs` does: the built-in lines kept research first.
       return { id: pack.id, label: pack.label, color: pack.id, goal, goals: [goal], createdAt: EXAMPLE_AT, ...(pack.masterClock ? { rank: 1 } : {}) };
     });
@@ -29,7 +29,7 @@ export function seedExampleReadiness(store: CrosslineStore, ctx: AccessContext):
     store.setSetting(ws, LINE_PROFILES_SETTING, JSON.stringify(profiles));
   }
   if (!store.getSetting(ws, "schedule.availability.proposed") && !store.getSetting(ws, "schedule.availability"))
-    store.setSetting(ws, "schedule.availability.proposed", JSON.stringify({ windows: DEFAULT_AVAILABILITY, why: "示例账号的默认时段" }));
+    store.setSetting(ws, "schedule.availability.proposed", JSON.stringify({ windows: DEFAULT_AVAILABILITY, why: "示例账号的作息" }));
   const projects = new Set(store.listProjects(ws).map((project) => project.id));
   for (const pack of lines) {
     const id = `${pack.id}-example`;

@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { request, type FullConfig } from "@playwright/test";
+import { signUpAccount } from "./accounts";
 
 /**
  * Drives the real Better Auth sign-up → verify → sign-in flow once per e2e run, so every test starts
@@ -12,24 +13,6 @@ import { request, type FullConfig } from "@playwright/test";
 export const TEST_EMAIL = "e2e-tester@crossline.test";
 export const TEST_PASSWORD = "Crossline-E2E-Test-Pass-1!";
 
-type CapturedMail = { to: string; subject: string; url: string };
-
-/** Polls the mailbox directory for a message written after `since`, ignoring anything left by a prior run. */
-async function waitForMail(dir: string, since: number, timeoutMs = 20_000): Promise<CapturedMail> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (existsSync(dir)) {
-      const fresh = readdirSync(dir)
-        .filter((name) => name.endsWith(".json") && Number(name.split("-")[0]) >= since)
-        .sort();
-      const newest = fresh.at(-1);
-      if (newest) return JSON.parse(readFileSync(path.join(dir, newest), "utf8")) as CapturedMail;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 200));
-  }
-  throw new Error(`No verification email appeared in ${dir} within ${timeoutMs}ms`);
-}
-
 export default async function globalSetup(config: FullConfig): Promise<void> {
   const baseURL = config.projects[0]?.use.baseURL as string | undefined ?? "http://127.0.0.1:3310";
   const mailboxDir = process.env.CROSSLINE_AUTH_TEST_MAILBOX_DIR;
@@ -40,18 +23,9 @@ export default async function globalSetup(config: FullConfig): Promise<void> {
   mkdirSync(mailboxDir, { recursive: true });
   mkdirSync(path.dirname(authStatePath), { recursive: true });
 
+  await signUpAccount(baseURL, TEST_EMAIL, TEST_PASSWORD);
   const api = await request.newContext({ baseURL });
   try {
-    const since = Date.now();
-    const signUp = await api.post("/api/auth/sign-up/email", {
-      data: { name: "E2E Tester", email: TEST_EMAIL, password: TEST_PASSWORD, callbackURL: "/" }
-    });
-    if (!signUp.ok()) throw new Error(`sign-up failed: ${signUp.status()} ${await signUp.text()}`);
-
-    const mail = await waitForMail(mailboxDir, since);
-    const verify = await api.get(mail.url);
-    if (!verify.ok()) throw new Error(`verify-email failed: ${verify.status()} ${await verify.text()}`);
-
     // The proof verification actually took effect: sign-in refuses an unverified account outright
     // (`EMAIL_NOT_VERIFIED`), so a session here means the token really was accepted.
     const signIn = await api.post("/api/auth/sign-in/email", { data: { email: TEST_EMAIL, password: TEST_PASSWORD } });

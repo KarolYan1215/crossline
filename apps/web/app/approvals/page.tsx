@@ -6,6 +6,7 @@ import { recentAutoApprovals } from "../../lib/approvals";
 import { permissionCandidates, permissionModeEnabled } from "../../lib/permission-mode";
 import { PermissionModePanel } from "./permission-mode-panel";
 import { requireSessionContext } from "../../lib/access-guard";
+import { gateUntilReady } from "../../lib/start-gate";
 import { TaskCard } from "../task/task-card";
 import { loadTaskDetailsBatch } from "../../lib/task-detail";
 import { countPending } from "../../lib/pending";
@@ -17,6 +18,7 @@ export const dynamic = "force-dynamic";
 
 export default async function ApprovalsPage() {
   const ctx = await requireSessionContext();
+  gateUntilReady(ctx);
   ensureSeeded(ctx);
   const plan = await loadCurrentPlan(ctx);
   const evidenceReviews = getStore().listWorkOrders(ctx.workspaceId).filter((item) => item.state === "evidence_review");

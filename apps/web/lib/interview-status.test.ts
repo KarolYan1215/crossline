@@ -7,11 +7,13 @@ import { answerAsk, collectAsks } from "./asks";
 import { interviewStatus, questionsOwnedElsewhere, takePendingAnswers } from "./interview-status";
 import { seedReadyToStart, TEST_CTX } from "./test-support";
 
-afterEach(() => { globalThis.crosslineStore?.close(); globalThis.crosslineStore = undefined; supervisor.mockClear(); });
+afterEach(() => { vi.unstubAllEnvs(); globalThis.crosslineStore?.close(); globalThis.crosslineStore = undefined; supervisor.mockClear(); });
 const ws = TEST_CTX.workspaceId;
 const SOON = new Date("2026-10-08T02:00:00Z"), DAY_LATER = new Date("2026-10-09T03:00:00Z");
 
 function setup(nextAction: "ask" | "ready_for_milestones" = "ask") {
+  // The example board meets the start standard; these tests set it up themselves.
+  vi.stubEnv("CROSSLINE_SEED_EXAMPLES", "");
   const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
   for (const [id, name] of [["ece555", "ECE 555"], ["ece548", "ECE 548"]] as const) {
     store.saveProject({ id, ownerId: "o", workspaceId: ws, identityId: "research", name, summary: "", status: "active", createdAt: "2026-10-01T00:00:00Z", updatedAt: "2026-10-01T00:00:00Z" });

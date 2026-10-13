@@ -3,11 +3,13 @@ import { SubpageShell } from "../../subpage-shell";
 import { MilestoneDetailView } from "../../task-detail-view";
 import { loadMilestoneDetail } from "../../../lib/task-detail";
 import { requireSessionContext } from "../../../lib/access-guard";
+import { gateUntilReady } from "../../../lib/start-gate";
 
 export const dynamic = "force-dynamic";
 
 export default async function MilestoneDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const ctx = await requireSessionContext();
+  gateUntilReady(ctx);
   const { id } = await params;
   const detail = loadMilestoneDetail(ctx, id);
   if (!detail) notFound();

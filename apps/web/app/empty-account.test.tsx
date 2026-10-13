@@ -21,33 +21,45 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllEnvs(); globalThis.crosslineStore?.close(); globalThis.crosslineStore = undefined; });
 
 const noParams = { searchParams: Promise.resolve({}) };
+const seedReady = async () => (await import("../lib/test-support")).seedReadyToStart(globalThis.crosslineStore!, TEST_CTX.workspaceId);
 
-test.each([
+const PAGES = [
+  ["today", () => import("./page"), undefined],
   ["plan", () => import("./plan/page"), {}],
   ["milestones", () => import("./milestones/page"), noParams],
   ["workbench", () => import("./workbench/page"), noParams],
-  ["approvals", () => import("./approvals/page"), noParams],
-  ["settings", () => import("./settings/page"), {}]
-] as const)("the %s page renders on an account with nothing on it", async (_name, load, props) => {
+  ["approvals", () => import("./approvals/page"), noParams]
+] as const;
+const render = async (load: (typeof PAGES)[number][1], props: unknown) => {
   const { default: Page } = await load();
-  const html = renderToStaticMarkup(await (Page as (props: unknown) => Promise<React.ReactElement>)(props));
-  expect(html.length).toBeGreaterThan(200);
+  return renderToStaticMarkup(await (Page as (props: unknown) => Promise<React.ReactElement>)(props));
+};
+
+test.each(PAGES)("空账号打开 %s 页被带回访谈", async (_name, load, props) => {
+  await expect(render(load, props)).rejects.toMatchObject({ digest: expect.stringContaining("/onboarding") });
 }, 30000);
 
-test("the old assistant address sends an empty account to 设置 → 自动化与助手", async () => {
+/** What the old test meant by 「an empty account renders honestly」: one that meets the start standard and has no milestone or work yet. */
+test.each(PAGES)("达到可开始标准、还没有里程碑和工作时 %s 页照常渲染", async (_name, load, props) => {
+  await seedReady();
+  expect((await render(load, props)).length).toBeGreaterThan(200);
+}, 30000);
+
+test("the settings page is not gated: it renders on an account with nothing on it", async () => {
+  const { default: Page } = await import("./settings/page");
+  expect(renderToStaticMarkup(await Page()).length).toBeGreaterThan(200);
+}, 30000);
+
+test("the old assistant address sends an account to the interview until it is ready, then to 设置 → 自动化与助手", async () => {
   const { default: AssistantPage } = await import("./assistant/page");
+  await expect(AssistantPage()).rejects.toMatchObject({ digest: expect.stringContaining("/onboarding") });
+  await seedReady();
   await expect(AssistantPage()).rejects.toMatchObject({ digest: expect.stringContaining("/settings#automation") });
 });
 
-test("Today renders once the interview has produced a profile but no goal has been approved yet", async () => {
+test("a profile alone is not enough: with facts but not the start items, Today leads back to the interview", async () => {
   globalThis.crosslineStore!.upsertProfileFact({ workspaceId: TEST_CTX.workspaceId, identityId: "research", projectId: "", slot: "stage",
     value: "博一", status: "confirmed", sourceRef: "reply-1", sourceQuote: "博一", updatedAt: "2026-10-02T00:00:00.000Z" });
-  const { default: HomePage } = await import("./page");
-  const html = renderToStaticMarkup(await HomePage());
-  expect(html.length).toBeGreaterThan(500);
-}, 30000);
-
-test("Today sends a workspace nobody has set up to the interview", async () => {
   const { default: HomePage } = await import("./page");
   await expect(HomePage()).rejects.toMatchObject({ digest: expect.stringContaining("/onboarding") });
 }, 30000);
