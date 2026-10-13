@@ -1,6 +1,10 @@
 import "server-only";
 import type { AccessContext } from "@crossline/core";
 import { effectiveSchedulePreferences, getStore, loadCurrentPlan, planToday, toZonedInstant } from "./crossline";
+import { optimalWaitingMs } from "./optimal-schedule";
+
+/** How long the automatic publish waits for the optimal plan before writing the greedy one. */
+export const OPTIMAL_WAIT_MS = 60_000;
 
 export type PublishBlockInput = { id: string; title: string; start: string; end: string; reminderMinutes?: number | null };
 
@@ -15,8 +19,17 @@ export const DEADLINE_NOTICE_DAYS = 2;
  * The plan takes effect by default (docs/loop-and-scout.md §1), so there is no approval to wait for; what may be written is the writer's
  * boundary: only the calendar named Crossline, only events this app made and the person has not changed, deletes only in the future.
  */
-export async function blocksToPublish(ctx: AccessContext, now = new Date()): Promise<{ blocks: PublishBlockInput[] }> {
+export async function blocksToPublish(ctx: AccessContext, now = new Date(), options: { waitForOptimal?: boolean } = {}):
+  Promise<{ blocks: PublishBlockInput[]; pending?: true }> {
   const plan = await loadCurrentPlan(ctx);
+  // The automatic publish writes the optimal plan, not the greedy one shown while it is solved (docs/loop-and-scout.md §2): for up to a
+  // minute after this input was first asked for it reports `pending` and writes nothing; after that the greedy plan is written. The
+  // person's own click on 发布 never waits.
+  const { inputHash, optimal } = plan.schedule ?? {};
+  if (options.waitForOptimal && inputHash && !optimal) {
+    const waited = optimalWaitingMs(ctx, inputHash);
+    if (waited !== undefined && waited < OPTIMAL_WAIT_MS) return { blocks: [], pending: true };
+  }
   const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
   const blocks = plan.blocks.flatMap((block) => {
     if (!block.id.startsWith("scheduled:") || !block.day) return [];

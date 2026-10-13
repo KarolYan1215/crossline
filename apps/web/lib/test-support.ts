@@ -20,3 +20,23 @@ export const TEST_CTX: AccessContext = {
 export function seedReadyToStart(store: CrosslineStore, workspaceId: string): void {
   seedExampleReadiness(store, { ...TEST_CTX, workspaceId });
 }
+
+/**
+ * The plan once the background optimal solve has run (docs/loop-and-scout.md §2): a first read shows the greedy plan and asks for the
+ * optimal one, which is solved here with HiGHS in this process, and the read after it gets the cached result. For tests of what only
+ * the solver does — line-share library work, the current slot ordered by the self-reported energy.
+ */
+export async function settledPlan(ctx: AccessContext) {
+  const { createRequire } = await import("node:module");
+  const { loadCurrentPlan } = await import("./crossline");
+  const { configureOptimal, optimalIdle } = await import("./optimal-schedule");
+  const highs = await (createRequire(import.meta.url)("highs") as typeof import("highs").default)();
+  configureOptimal({ enabled: true, solver: async (model, limit) => highs.solve(model, { output_flag: false, time_limit: limit }) });
+  try {
+    await loadCurrentPlan(ctx);
+    await optimalIdle();
+    return await loadCurrentPlan(ctx);
+  } finally {
+    configureOptimal({ enabled: false });
+  }
+}

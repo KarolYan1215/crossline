@@ -11,8 +11,9 @@ import { availableSlots, deriveCapacity, requiredApproval, validateAvailability,
   type AccessContext, type AvailabilityWindow, type Estimate, type SuccessCriterion, type ChecklistAnswer, FIXED_EVENTS, fixedEventBlocks, type FixedEvent,
   FROZEN_SETTING, parseFrozen, withFrozen, withoutFrozen, type FrozenBlock, type RealityChange } from "@crossline/core";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
-import { forecastGoals, normalizeParams, paramsFor, planSchedule, recommendNextActions, type ForecastResult, type PlanResult,
+import { forecastGoals, normalizeParams, paramsFor, planSchedule, recommendNextActions, scheduleInputHash, type ForecastResult, type PlanResult,
   type ScheduleParams, type PlanningInput } from "@crossline/planner";
+import { optimalFor, requestOptimal } from "./optimal-schedule";
 import { seedExampleReadiness } from "./example-readiness";
 import { energyCalibration, predictEnergyTransition, readTransitionOutcomes } from "./energy-learning";
 import { energyModel, slotEnergy } from "./energy";
@@ -308,7 +309,9 @@ export type PersistedPlan = {
   id: string;
   version: number;
   blocks: PersistedScheduleBlock[];
-  schedule: Pick<PlanResult, "status" | "blockers" | "solver" | "bufferRelaxed" | "notes">;
+  schedule: Pick<PlanResult, "status" | "blockers" | "solver" | "bufferRelaxed" | "notes"> & {
+    /** The planner input's cache key and whether the blocks are the cached optimal plan (docs/loop-and-scout.md §2); absent in a preview. */
+    inputHash?: string; optimal?: boolean };
   /** True when nobody has saved a real time zone/availability/mode yet and this is computed off
    * defaults — a real, honestly-labelled preview rather than an empty page. */
   usingDefaultPreferences: boolean;
@@ -605,6 +608,28 @@ export function keepBlocks(ctx: AccessContext, blocks: Array<{ blockId: string; 
   }
   writeFrozen(ctx, list);
 }
+/** How soon before its start a scheduled block stops moving (docs/loop-and-scout.md §2, the commit window). */
+export const COMMIT_WINDOW_MINUTES = 15;
+/**
+ * The commit window: a work block under way or starting within fifteen minutes keeps its time until it ends, so the background optimal
+ * plan landing a minute later never moves what the person is about to start. A block already started or locked keeps that reason.
+ * Writes only when something new enters the window.
+ */
+export function commitSoon(ctx: AccessContext, blocks: Array<{ id: string; day?: string; start: string; end: string }>, now: Date): number {
+  const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
+  let list = readFrozen(ctx, now);
+  let added = 0;
+  for (const block of blocks) {
+    if (!block.id.startsWith("scheduled:") || !block.day || list.some((item) => item.blockId === block.id)) continue;
+    let start: string, end: string;
+    try { start = toZonedInstant(block.day, block.start, zone); end = toZonedInstant(block.day, block.end, zone); } catch { continue; }
+    if (Date.parse(start) - now.getTime() > COMMIT_WINDOW_MINUTES * 60_000 || Date.parse(end) <= now.getTime()) continue;
+    list = withFrozen(list, { blockId: block.id, start, end, reason: "commit", until: end });
+    added += 1;
+  }
+  if (added) writeFrozen(ctx, list);
+  return added;
+}
 export function clearKept(ctx: AccessContext, now = appNow()): void {
   writeFrozen(ctx, readFrozen(ctx, now).filter((item) => item.reason !== "keep"));
 }
@@ -796,12 +821,27 @@ export function planningInputFor(ctx: AccessContext, today: string, committed: P
     stateById, dependencyBlockers, library, expanded, frozen, pinned };
 }
 
+/**
+ * The cache key of this planning input: everything but `now`, with the slot the person is in and their self-reported energy standing
+ * in for it (`scheduleInputHash`), so time passing inside a slot keeps the optimal plan and crossing into the next one solves again.
+ */
+export function scheduleHashOf(input: PlanningInput, instants: Array<{ start: string; end: string }>, currentEnergy?: string): string {
+  const slot = instants.find((item) => Date.parse(item.end) > input.now.getTime());
+  return scheduleInputHash(input, `${slot?.start ?? ""}|${currentEnergy ?? ""}`);
+}
+
 async function scheduledBlocks(ctx: AccessContext, today: string, committed: PersistedScheduleBlock[]): Promise<{
   blocks: PersistedScheduleBlock[]; schedule: PersistedPlan["schedule"]
 }> {
   const { input, days, busy, preferences, zone, iso, now, currentEnergy, clockBlockers, instants, capacityIds, allOrders, orders,
     stateById, dependencyBlockers, library, expanded, frozen, pinned } = planningInputFor(ctx, today, committed);
-  const result = await planSchedule(input);
+  // The page gets the greedy plan at once; the optimal one is solved in the background and used once cached (docs/loop-and-scout.md
+  // §2). A preview neither reads nor asks for it: it must show what the change does to the plan the person has, at once.
+  const greedy = await planSchedule(input, { solver: "none" });
+  const hash = scheduleHashOf(input, instants, currentEnergy);
+  const cached = inPreview() ? undefined : optimalFor(ctx, hash);
+  if (!cached && !inPreview()) requestOptimal(ctx, input, hash);
+  const result = cached ? { ...cached.result, plan: { blocks: cached.result.plan.blocks.filter((block) => Date.parse(block.end) > now.getTime()) } } : greedy;
   const placed = result.plan.blocks.filter((block) => !block.frozen);
   const orderStates = new Map(orders.map((order) => [order.id, order.state]));
   const itemById = new Map(expanded.map((item) => [item.task.id, item]));
@@ -850,7 +890,7 @@ async function scheduledBlocks(ctx: AccessContext, today: string, committed: Per
     frozenBlocks: [...committed.filter((block) => block.day && block.id.startsWith("scheduled:"))
       .map((block) => ({ taskId: plannerIdOfBlock(block.id), start: iso(block.day!, block.start), end: iso(block.day!, block.end) })),
       ...result.plan.blocks.map((block) => ({ taskId: block.taskId, start: block.start, end: block.end }))]
-  }).catch(() => undefined) : undefined;
+  }, { solver: "none" }).catch(() => undefined) : undefined;
   const proposalTitles = new Map(proposals.map((order) => [order.id, taskTitleOf(order)]));
   const previewSeen = new Map<string, number>();
   const previewBlocks = (preview?.plan.blocks ?? []).filter((block) => !block.frozen && proposalTitles.has(block.taskId)).map((block) => {
@@ -886,7 +926,7 @@ async function scheduledBlocks(ctx: AccessContext, today: string, committed: Per
     const optional = offInstants.length ? await planSchedule({ now, horizonDays: days.length, mode: preferences.mode, params: effectiveParams(ctx),
       tasks: leftovers.map((item) => item.task), availability: offInstants,
       frozenBlocks: [...result.plan.blocks.map((block) => ({ taskId: block.taskId, start: block.start, end: block.end })), ...pinned]
-    }).catch(() => undefined) : undefined;
+    }, { solver: "none" }).catch(() => undefined) : undefined;
     const seen = new Map<string, number>();
     for (const block of (optional?.plan.blocks ?? []).filter((item) => !item.frozen && itemById.has(item.taskId))) {
       const index = (seen.get(block.taskId) ?? 0) + 1;
@@ -900,7 +940,7 @@ async function scheduledBlocks(ctx: AccessContext, today: string, committed: Per
     ? blocks.length ? "partial" : "infeasible" : result.status,
     blockers: [...result.blockers, ...clockBlockers, ...dependencyBlockers],
     solver: result.solver, ...(result.bufferRelaxed ? { bufferRelaxed: true } : {}),
-    ...(result.notes?.length ? { notes: result.notes } : {}) } };
+    ...(result.notes?.length ? { notes: result.notes } : {}), ...(inPreview() ? {} : { inputHash: hash, optimal: Boolean(cached) }) } };
 }
 
 /** `horizonDays`: how far the simulation runs — eight weeks unless the plan page asks for four weeks or up to six months. */

@@ -1,3 +1,4 @@
+import { createRequire } from "node:module";
 import { describe, expect, test } from "vitest";
 import { planSchedule, recommendNextActions } from "./index";
 import { fallbackSchedule } from "./optimizer";
@@ -300,6 +301,25 @@ describe("energy-aware planning", () => {
     expect(blocks.length).toBeGreaterThan(0);
     for (const [index, block] of blocks.entries())
       if (index) expect(Date.parse(block.start)).toBeGreaterThanOrEqual(Date.parse(blocks[index - 1]!.end));
+  }, 15_000);
+
+  test("solver \"none\" places with the greedy pass only; an injected solver replaces the in-process one with the same answer", async () => {
+    const tasks = Array.from({ length: 4 }, (_, index) => ({ id: `t${index}`, title: `任务 ${index}`,
+      estimate: { p25Minutes: 40, p50Minutes: 60, p85Minutes: 80, confidence: "high" as const }, inputsReady: true, deadlineTier: 3 as const }));
+    const availability = [{ day: "2026-09-14", start: "2026-09-14T14:00:00.000Z", end: "2026-09-14T20:00:00.000Z", energy: "high" as const }];
+    const input = { now: start, horizonDays: 1, tasks, availability, frozenBlocks: [] };
+    expect((await planSchedule(input, { solver: "none" })).solver).toBe("fallback");
+    const loadHighs = createRequire(import.meta.url)("highs") as typeof import("highs").default;
+    const highs = await loadHighs();
+    const models: string[] = [];
+    const injected = await planSchedule(input, { solver: async (model, limit) => {
+      models.push(model);
+      return highs.solve(model, { output_flag: false, time_limit: limit });
+    } });
+    expect(models.length).toBeGreaterThanOrEqual(1);
+    const inProcess = await planSchedule(input);
+    expect(injected.solver).toBe(inProcess.solver);
+    expect(injected.plan.blocks).toEqual(inProcess.plan.blocks);
   }, 15_000);
 
   test("a frozen block freezes that segment only: the rest of the task is still planned", async () => {

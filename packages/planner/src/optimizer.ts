@@ -255,8 +255,15 @@ function greedyFallback(input: PlanningInput, tasks: PlannerTask[], slots: Slot[
   return makeResult(input, tasks, slots, blocks, "fallback");
 }
 
-/** How long the solver may run; the page passes nothing (two seconds), the bench and the background solve pass more. */
-export type SolveOptions = { timeLimitSeconds?: number };
+export type HighsSolution = ReturnType<Awaited<ReturnType<typeof loadHighs>>["solve"]>;
+/** Solves an LP-format model within a time limit; the background solve passes one that runs HiGHS off the request thread. */
+export type ModelSolver = (model: string, timeLimitSeconds: number) => Promise<HighsSolution>;
+/**
+ * How the plan is solved. `timeLimitSeconds`: how long the solver may run (default two seconds; the bench and the background solve
+ * pass more). `solver`: `"none"` places with the greedy pass only (what the page shows at once, docs/loop-and-scout.md §2); a function
+ * replaces the in-process HiGHS; absent, HiGHS runs in this process.
+ */
+export type SolveOptions = { timeLimitSeconds?: number; solver?: "none" | ModelSolver };
 
 /**
  * A frozen block freezes that segment only (docs/loop-and-scout.md §1): the task keeps the rest of its minutes to place. Work that
@@ -439,8 +446,9 @@ async function optimize(original: PlanningInput, emergency = false, trySolver = 
     "Bounds", ...bounds, "Binaries", ...binary, ...(general.length ? ["Generals", ...general] : []), "End"].join("\n");
 
   try {
-    const highs = await highsReady;
-    const result = highs.solve(model, { output_flag: false, time_limit: options.timeLimitSeconds ?? 2 });
+    const limit = options.timeLimitSeconds ?? 2;
+    const result = typeof options.solver === "function" ? await options.solver(model, limit)
+      : (await highsReady).solve(model, { output_flag: false, time_limit: limit });
     if (result.Status !== "Optimal" && result.Status !== "Time limit reached")
       return greedyFallback(input, tasks, slots, emergency);
     const columns = result.Columns as Record<string, { Primal?: number }>;
@@ -530,7 +538,7 @@ async function schedule(input: PlanningInput, options: SolveOptions): Promise<Pl
     const early = Date.parse(task.deadline) - params.deadlineBufferDays * 86_400_000;
     return early > input.now.getTime() ? { ...task, deadline: new Date(early).toISOString() } : task;
   }) } : eligible;
-  const first = await optimize(buffered, false, true, options);
+  const first = await optimize(buffered, false, options.solver !== "none", options);
   let result = first;
   const relaxable = params.gapMinutes > 0 || params.maxDailyShare < 1 || params.deadlineBufferDays > 0;
   if (relaxable && first.blockers.some((blocker) => eligible.tasks.some((task) =>

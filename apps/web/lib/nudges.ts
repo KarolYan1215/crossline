@@ -6,7 +6,7 @@ import {
   availableSlots, isCancelledEvent, planNudges, taskTitleOf,
   type AccessContext, type NotifyLevelName, type NudgeBlock, type NudgeButton, type NudgeKind, type NudgeSlack, type PlannedNudge, type ProposedAction
 } from "@crossline/core";
-import { effectiveSchedulePreferences, getStore, loadCurrentPlan, planToday, readAvailability } from "./crossline";
+import { commitSoon, effectiveSchedulePreferences, getStore, loadCurrentPlan, planToday, readAvailability } from "./crossline";
 import { openAsks, thisWeek } from "./asks";
 import { energyModel } from "./energy";
 import { systemContext } from "./auto-publish";
@@ -58,6 +58,8 @@ export async function nudgesFor(ctx: AccessContext, now = new Date()): Promise<P
   for (const execution of executions) if ((lastStart.get(execution.workOrderId) ?? "") < execution.startedAt) lastStart.set(execution.workOrderId, execution.startedAt);
   const running = executions.find((execution) => !execution.endedAt && !execution.interruptions.some((pause) => !pause.resumedAt));
   const plan = await loadCurrentPlan(ctx);
+  // This pass runs every two minutes, so it is also what closes the commit window on blocks about to start.
+  commitSoon(ctx, plan.blocks, now);
   const todays = plan.blocks.filter((block) => (block.day ?? today) === today);
   const scheduled = plan.blocks.filter((block) => block.id.startsWith("scheduled:") && block.day && block.day >= today);
   const byId = new Map(orders.map((order) => [order.id, order]));

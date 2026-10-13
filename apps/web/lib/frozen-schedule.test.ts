@@ -1,7 +1,7 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { CrosslineStore } from "@crossline/db";
 vi.mock("server-only", () => ({}));
-import { clearKept, keepBlocks, loadCurrentPlan, lockBlock, readFrozen, saveSchedulePreferences, unlockBlock } from "./crossline";
+import { clearKept, commitSoon, keepBlocks, loadCurrentPlan, lockBlock, readFrozen, saveSchedulePreferences, unlockBlock } from "./crossline";
 import { TEST_CTX } from "./test-support";
 
 afterEach(() => { globalThis.crosslineStore?.close(); globalThis.crosslineStore = undefined; vi.unstubAllEnvs(); });
@@ -54,4 +54,21 @@ test("locking one segment keeps its id and time, and the task's other minutes ar
   };
   // 60 locked minutes and the other 60 placed elsewhere.
   expect(blocks.filter((block) => block.id !== `scheduled:${order.id}:2`).reduce((sum, block) => sum + minutes(block), 0)).toBeGreaterThanOrEqual(60);
+});
+
+test("the commit window: a block starting within fifteen minutes keeps its time until it ends; later ones and locked ones are left alone", () => {
+  setup();
+  // NOW is 08:00 in Chicago.
+  expect(lockBlock(TEST_CTX, "scheduled:locked", { day: "2026-09-18", start: "08:05", end: "08:30" }, "locked")).toEqual({ ok: true });
+  const added = commitSoon(TEST_CTX, [
+    { id: "scheduled:soon", day: "2026-09-18", start: "08:10", end: "08:40" },
+    { id: "scheduled:later", day: "2026-09-18", start: "09:00", end: "09:30" },
+    { id: "scheduled:locked", day: "2026-09-18", start: "08:05", end: "08:30" },
+    { id: "proposed:p", day: "2026-09-18", start: "08:05", end: "08:30" }
+  ], new Date(NOW));
+  expect(added).toBe(1);
+  const frozen = readFrozen(TEST_CTX, new Date(NOW));
+  expect(frozen.map((item) => [item.blockId, item.reason])).toEqual([["scheduled:locked", "locked"], ["scheduled:soon", "commit"]]);
+  expect(frozen[1]!.until).toBe("2026-09-18T13:40:00.000Z");
+  expect(readFrozen(TEST_CTX, new Date("2026-09-18T13:41:00.000Z")).map((item) => item.blockId)).toEqual([]);
 });

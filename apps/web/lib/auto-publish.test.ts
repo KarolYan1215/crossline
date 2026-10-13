@@ -9,12 +9,24 @@ vi.mock("./crossline", () => ({
     setSetting: (ws: string, key: string, value: string) => settings.set(`${ws}:${key}`, value)
   })
 }));
-vi.mock("./calendar-publish", () => ({ blocksToPublish: async () => ({ blocks: [{ id: "scheduled:a", title: "画图", start: "2099-01-01T09:00:00Z", end: "2099-01-01T10:00:00Z", reminderMinutes: 10 }] }) }));
+const BLOCKS = [{ id: "scheduled:a", title: "画图", start: "2099-01-01T09:00:00Z", end: "2099-01-01T10:00:00Z", reminderMinutes: 10 }];
+const blocksToPublish = vi.fn(async (..._args: unknown[]): Promise<{ blocks: typeof BLOCKS; pending?: true }> => ({ blocks: BLOCKS }));
+vi.mock("./calendar-publish", () => ({ blocksToPublish: (...args: unknown[]) => blocksToPublish(...args) }));
 const requestCodexSupervisor = vi.fn(async (..._args: unknown[]) => ({ state: "published" }));
 vi.mock("./codex-runtime", () => ({ requestCodexSupervisor: (...args: unknown[]) => (requestCodexSupervisor as (...a: unknown[]) => unknown)(...args) }));
-import { autoPublishPass } from "./auto-publish";
+import { autoPublishPass, publishNow } from "./auto-publish";
 
-afterEach(() => { settings.clear(); requestCodexSupervisor.mockClear(); });
+afterEach(() => { settings.clear(); requestCodexSupervisor.mockClear(); blocksToPublish.mockClear(); });
+
+test("while the optimal plan is being solved nothing is written; once it is, publishNow writes it at once", async () => {
+  blocksToPublish.mockResolvedValueOnce({ blocks: [], pending: true });
+  expect(await autoPublishPass(new Date("2098-12-31T12:00:00Z"))).toEqual([{ workspaceId: "ws", state: "pending" }]);
+  expect(requestCodexSupervisor).not.toHaveBeenCalled();
+  expect(blocksToPublish.mock.calls[0]![2]).toEqual({ waitForOptimal: true });
+  expect(await publishNow("ws")).toBe("published");
+  expect(requestCodexSupervisor).toHaveBeenCalledTimes(1);
+  expect(JSON.parse(String((requestCodexSupervisor.mock.calls[0]![2] as { body: string }).body))).toEqual({ blocks: BLOCKS });
+});
 
 test("publishes a changed schedule once, as a system job, and skips a workspace with no calendar account", async () => {
   expect(await autoPublishPass(new Date("2098-12-31T12:00:00Z"))).toEqual([{ workspaceId: "ws", state: "published" }]);

@@ -95,7 +95,8 @@ export type PlanResult = {
 
 const energyValue = { low: 1, medium: 2, high: 3 } as const;
 
-export { planSchedule, type SolveOptions } from "./optimizer";
+export { planSchedule, type SolveOptions, type ModelSolver, type HighsSolution } from "./optimizer";
+export { scheduleInputHash } from "./input-hash";
 export { forecastGoals, DEADLINE_MARGIN_DAYS, type ForecastGoal, type ForecastDay, type ForecastResult, type ForecastWeek, type GoalForecast, type WeekDemand } from "./forecast";
 
 export function recommendNextActions(_tasks: PlannerTask[], _gapMinutes: number,

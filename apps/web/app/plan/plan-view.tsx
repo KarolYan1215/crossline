@@ -21,7 +21,7 @@ export type PlanVersionData = {
   blocks: ScheduleBlockData[];
   schedule?: { status: "feasible" | "partial" | "infeasible";
     blockers: Array<{ taskId: string; code: string; message: string }>;
-    solver: "optimal" | "feasible_time_limit" | "fallback" | "empty" | "no_capacity"; bufferRelaxed?: boolean;
+    solver: "optimal" | "feasible_time_limit" | "fallback" | "empty" | "no_capacity"; bufferRelaxed?: boolean; optimal?: boolean;
     notes?: Array<{ taskId: string; code: string; message: string }> };
 };
 
@@ -105,7 +105,9 @@ export function PlanView({ plan, aside }: { plan: PlanVersionData; aside?: React
       <strong>{plan.schedule.status === "feasible" ? "建议时段已排入"
         : plan.schedule.status === "partial" ? "部分任务未排入" : "当前没有可行的建议时段"}</strong>
       {plan.schedule.solver === "feasible_time_limit" && <p>已显示验证过的可行安排；未证明最优。</p>}
-      {plan.schedule.solver === "fallback" && <p>这次没算出最优排法，先用一份简单排法，每块都核对过不冲突。</p>}
+      {plan.schedule.solver === "fallback" && (plan.schedule.optimal
+        ? <p>这次没算出最优排法，先用一份简单排法，每块都核对过不冲突。</p>
+        : <p>最优排法正在后台计算，算好后自动替换当前的简单排法。</p>)}
       {plan.schedule.solver === "no_capacity" && <p>可用时间里已经没有空档，下面这些暂时排不进去。</p>}
       {plan.schedule.bufferRelaxed && <p>为守住已确认截止时间，已放宽当天的缓冲规则。</p>}
       {unplacedNote(plan) && <p><a href="#why">{unplacedNote(plan)}，原因见「排程依据」</a></p>}

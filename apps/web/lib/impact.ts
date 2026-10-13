@@ -92,7 +92,9 @@ export async function previewChange(ctx: AccessContext, requested: Change, optio
   const change = resolveChange(ctx, requested);
   const order = isTaskChange(change) ? getStore().listWorkOrders(ctx.workspaceId).find((item) => item.id === change.workOrderId) : undefined;
   if (isTaskChange(change) && !order) throw new Error("WORK_ORDER_NOT_FOUND");
-  const before = await snapshot(ctx, order?.id, options.chartsHorizonDays);
+  // Both sides inside a preview, so both are the greedy plan: the cached optimal plan against a greedy "after" would report the
+  // difference between the two engines as the change's effect (docs/loop-and-scout.md §2).
+  const before = await withPreview({}, () => snapshot(ctx, order?.id, options.chartsHorizonDays));
   const after = await withPreview(overridesFor(change), () => snapshot(ctx, order?.id, options.chartsHorizonDays));
   const milestones = getStore().listMilestones(ctx.workspaceId);
   const labels = new Map(Object.entries(lineLabels(ctx)));

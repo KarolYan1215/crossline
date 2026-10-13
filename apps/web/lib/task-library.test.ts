@@ -2,7 +2,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import { CrosslineStore } from "@crossline/db";
 vi.mock("server-only", () => ({}));
 import { libraryUntil } from "./crossline";
-import { TEST_CTX } from "./test-support";
+import { settledPlan, TEST_CTX } from "./test-support";
 
 afterEach(() => { globalThis.crosslineStore?.close(); globalThis.crosslineStore = undefined; });
 
@@ -24,7 +24,7 @@ test("a task worked back from a milestone due beyond three weeks waits in the li
 
 test("a line the person gives a share of the week gets its library work placed, up to that share, and labelled why", async () => {
   vi.stubEnv("CROSSLINE_FIXED_NOW", "2026-10-12T14:00:00.000Z");
-  const { loadCurrentPlan, saveSchedulePreferences, LINE_SHARES_SETTING } = await import("./crossline");
+  const { saveSchedulePreferences, LINE_SHARES_SETTING } = await import("./crossline");
   const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
   const ws = TEST_CTX.workspaceId;
   saveSchedulePreferences(TEST_CTX, { timeZone: "America/Chicago", mode: "asap", importance: {},
@@ -35,7 +35,8 @@ test("a line the person gives a share of the week gets its library work placed, 
   const estimate = { p25Minutes: 120, p50Minutes: 120, p85Minutes: 120, source: "llm_prior" as const, observationCount: 0, confidence: "high" as const };
   store.saveWorkOrder({ id: "build", ownerId: TEST_CTX.principalId, workspaceId: ws, identityId: "startup", projectId: "crossline", milestoneId: "mvp",
     intent: "实现登录页", state: "approved", riskTier: "routine", estimate, payload: { backplan: { round: 1 }, materialContract: [] } });
-  const startupBlocks = async () => (await loadCurrentPlan(TEST_CTX)).blocks.filter((block) => block.id.startsWith("scheduled:build"));
+  // Line-share work is placed by the solver only (the greedy pass skips floor-only work), so this reads the plan after the background solve.
+  const startupBlocks = async () => (await settledPlan(TEST_CTX)).blocks.filter((block) => block.id.startsWith("scheduled:build"));
   expect(await startupBlocks()).toEqual([]);
   store.setSetting(ws, LINE_SHARES_SETTING, JSON.stringify({ research: 80, startup: 20 }));
   const placed = await startupBlocks();

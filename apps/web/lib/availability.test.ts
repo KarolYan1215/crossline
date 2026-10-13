@@ -3,7 +3,7 @@ import { CrosslineStore } from "@crossline/db";
 vi.mock("server-only", () => ({}));
 import { loadCurrentPlan, loadDashboard, loadGoalForecast, lockBlock, planToday, readAvailability, readSchedulePreferences,
   readGoalSettings, saveAvailability, saveGoalSettings, saveSchedulePreferences, toZonedInstant } from "./crossline";
-import { TEST_CTX } from "./test-support";
+import { settledPlan, TEST_CTX } from "./test-support";
 
 afterEach(() => { globalThis.crosslineStore?.close(); globalThis.crosslineStore = undefined; vi.unstubAllEnvs(); });
 
@@ -139,12 +139,13 @@ test("fresh L and H self-reports reorder today's suggestion blocks", async () =>
     store.saveEnergyObservation({ id, ownerId: TEST_CTX.principalId, workspaceId: TEST_CTX.workspaceId,
       source: "self_report", level, confidence: "high", aggregate: {}, observedAt });
   report("low", "low", "2026-09-18T13:59:00.000Z");
-  const first = (await loadCurrentPlan(TEST_CTX)).blocks.find((block) => block.day === "2026-09-18" &&
+  // The order inside the current slot by the reported energy is the solver's, so these read the plan after the background solve.
+  const first = (await settledPlan(TEST_CTX)).blocks.find((block) => block.day === "2026-09-18" &&
     block.id.startsWith("scheduled:"));
   expect(first?.id).toContain("media");
   expect((await loadCurrentPlan(TEST_CTX)).blocks.some((block) => block.tag === "休息后复评")).toBe(true);
   report("high", "high", "2026-09-18T14:00:00.000Z");
-  const second = (await loadCurrentPlan(TEST_CTX)).blocks.find((block) => block.day === "2026-09-18" &&
+  const second = (await settledPlan(TEST_CTX)).blocks.find((block) => block.day === "2026-09-18" &&
     block.id.startsWith("scheduled:"));
   expect(second?.id).toContain("research");
 });
