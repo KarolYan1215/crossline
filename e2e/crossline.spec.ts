@@ -608,7 +608,7 @@ test("未达可开始标准时打开今日页回到访谈，并写明还差什�
     const before = (() => { const store = openStore(); try { return new Set(store.listWorkspaces().map((item) => item.id)); } finally { store.close(); } })();
     // The example board meets the start standard: the first visit lands on Today.
     await page.goto("/");
-    await expect(page).toHaveURL(/127\.0\.0\.1:3310\/$/);
+    await expect(page).toHaveURL(`${baseURL}/`);
     const store = openStore();
     let label = "";
     let restore = "";
@@ -629,7 +629,7 @@ test("未达可开始标准时打开今日页回到访谈，并写明还差什�
       store.setSetting(workspaceId, "lines.v1", restore);
     } finally { store.close(); }
     await page.goto("/");
-    await expect(page).toHaveURL(/127\.0\.0\.1:3310\/$/);
+    await expect(page).toHaveURL(`${baseURL}/`);
   } finally {
     await context.close();
   }
