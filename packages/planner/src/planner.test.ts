@@ -285,6 +285,23 @@ describe("energy-aware planning", () => {
     }
   }, 15_000);
 
+  test("a caller-set time limit cuts the solve short and the result is still a legal plan", async () => {
+    const tasks = Array.from({ length: 50 }, (_, index) => ({ id: `job-${index}`,
+      title: `作业 ${index}`, estimate: { p25Minutes: 25, p50Minutes: 30, p85Minutes: 40, confidence: "high" as const },
+      inputsReady: true, deadlineTier: 3 as const, interruptible: false }));
+    const availability = Array.from({ length: 7 }, (_, day) => ({
+      day: `2026-09-${String(14 + day).padStart(2, "0")}`,
+      start: `2026-09-${String(14 + day).padStart(2, "0")}T14:00:00.000Z`,
+      end: `2026-09-${String(14 + day).padStart(2, "0")}T21:00:00.000Z`,
+      energy: "high" as const }));
+    const result = await planSchedule({ now: start, horizonDays: 7, tasks, availability, frozenBlocks: [] }, { timeLimitSeconds: 0.01 });
+    expect(["feasible_time_limit", "fallback"]).toContain(result.solver);
+    const blocks = [...result.plan.blocks].sort((a, b) => a.start.localeCompare(b.start));
+    expect(blocks.length).toBeGreaterThan(0);
+    for (const [index, block] of blocks.entries())
+      if (index) expect(Date.parse(block.start)).toBeGreaterThanOrEqual(Date.parse(blocks[index - 1]!.end));
+  }, 15_000);
+
   test("buffered mode keeps its ten-minute gap across adjacent availability windows", async () => {
     const tasks = ["first", "second"].map((id) => ({ id, title: id,
       estimate: { p25Minutes: 60, p50Minutes: 60, p85Minutes: 60, confidence: "high" as const },

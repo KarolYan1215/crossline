@@ -1,0 +1,61 @@
+{
+ "events": [
+  {
+   "organizer": {
+    "is_self": true,
+    "email": "<user>@gmail.com",
+    "display_name": null
+   },
+   "guests_can_modify": null,
+   "locked": null,
+   "id": "f0ref6…",
+   "summary": "<text 26>",
+   "status": "confirmed",
+   "location": "<text 11>",
+   "color_id": null,
+   "event_label_id": null,
+   "event_type": "fromGmail",
+   "start": "2026-10-16T10:06:00-07:00",
+   "end": "2026-10-16T12:49:00-07:00",
+   "url": "<url www.google.com>",
+   "description": "<text 178>",
+   "my_response_status": "accepted",
+   "transparency": "transparent",
+   "visibility": "private",
+   "attachments": null,
+   "recurring_event_id": null,
+   "original_start_time": null,
+   "display_url": "<url www.google.com>",
+   "display_title": "<text 26>"
+  },
+  {
+   "organizer": {
+    "is_self": true,
+    "email": "<user>@gmail.com",
+    "display_name": null
+   },
+   "guests_can_modify": null,
+   "locked": null,
+   "id": "7487rj…",
+   "summary": "<text 26>",
+   "status": "confirmed",
+   "location": "<text 10>",
+   "color_id": null,
+   "event_label_id": null,
+   "event_type": "fromGmail",
+   "start": "2026-10-19T03:55:00-07:00",
+   "end": "2026-10-19T06:47:00-07:00",
+   "url": "<url www.google.com>",
+   "description": "<text 177>",
+   "my_response_status": "accepted",
+   "transparency": "transparent",
+   "visibility": "private",
+   "attachments": null,
+   "recurring_event_id": null,
+   "original_start_time": null,
+   "display_url": "<url www.google.com>",
+   "display_title": "<text 26>"
+  }
+ ],
+ "next_page_token": null
+}

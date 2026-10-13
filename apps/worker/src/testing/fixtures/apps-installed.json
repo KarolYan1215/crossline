@@ -1,0 +1,38 @@
+[
+ {
+  "id": "asdk_app_69c18c28f1188191bf5b8445c4ab0a2e",
+  "runtimeName": "Notion",
+  "enabled": true,
+  "callable": true
+ },
+ {
+  "id": "connector_2128aebfecb84f64a069897515042a44",
+  "runtimeName": "Gmail",
+  "enabled": true,
+  "callable": true
+ },
+ {
+  "id": "connector_4aaab2856305417b993eca9a216aaf6e",
+  "runtimeName": "Microsoft Outlook Email",
+  "enabled": true,
+  "callable": true
+ },
+ {
+  "id": "connector_5f3c8c41a1e54ad7a76272c89e2554fa",
+  "runtimeName": "Google Drive",
+  "enabled": true,
+  "callable": true
+ },
+ {
+  "id": "connector_947e0d954944416db111db556030eea6",
+  "runtimeName": "Google Calendar",
+  "enabled": true,
+  "callable": true
+ },
+ {
+  "id": "connector_e6a7394682e24467ac68c60696f275a4",
+  "runtimeName": "Microsoft Outlook Calendar",
+  "enabled": true,
+  "callable": true
+ }
+]

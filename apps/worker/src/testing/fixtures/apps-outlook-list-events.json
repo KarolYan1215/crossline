@@ -1,0 +1,537 @@
+{
+ "value": [
+  {
+   "id": "AAMkAD…",
+   "subject": "<text 35>",
+   "body": {
+    "contentType": "html",
+    "content": "<text 0>"
+   },
+   "bodyPreview": "<text 0>",
+   "web_link": "<url outlook.office365.com>",
+   "start": {
+    "dateTime": "2026-10-13T16:30:00.0000000",
+    "timeZone": "UTC"
+   },
+   "end": {
+    "dateTime": "2026-10-13T17:30:00.0000000",
+    "timeZone": "UTC"
+   },
+   "is_all_day": false,
+   "show_as": "busy",
+   "is_cancelled": false,
+   "type": "singleInstance",
+   "response_status": {
+    "response": "accepted"
+   },
+   "online_meeting": null,
+   "importance": "normal",
+   "sensitivity": "normal",
+   "location": {
+    "displayName": "<text 0>"
+   },
+   "attendees": [
+    {
+     "emailAddress": {
+      "address": "<user>@wisc.edu",
+      "name": "<text 29>"
+     },
+     "type": "required",
+     "status": {
+      "response": "none"
+     }
+    },
+    {
+     "emailAddress": {
+      "address": "<user>@uci.edu",
+      "name": "<text 14>"
+     },
+     "type": "required",
+     "status": {
+      "response": "notResponded"
+     }
+    },
+    {
+     "emailAddress": {
+      "address": "<user>@wisc.edu",
+      "name": "<text 9>"
+     },
+     "type": "required",
+     "status": {
+      "response": "accepted"
+     }
+    },
+    {
+     "emailAddress": {
+      "address": "<user>@wisc.edu",
+      "name": "<text 16>"
+     },
+     "type": "required",
+     "status": {
+      "response": "notResponded"
+     }
+    },
+    {
+     "emailAddress": {
+      "address": "<user>@uci.edu",
+      "name": "<text 14>"
+     },
+     "type": "required",
+     "status": {
+      "response": "notResponded"
+     }
+    },
+    {
+     "emailAddress": {
+      "address": "<user>@uci.edu",
+      "name": "<text 14>"
+     },
+     "type": "optional",
+     "status": {
+      "response": "accepted"
+     }
+    },
+    {
+     "emailAddress": {
+      "address": "<user>@gmail.com",
+      "name": "<text 14>"
+     },
+     "type": "optional",
+     "status": {
+      "response": "accepted"
+     }
+    }
+   ],
+   "organizer": {
+    "emailAddress": {
+     "address": "<user>@wisc.edu",
+     "name": "<text 29>"
+    }
+   },
+   "recurrence": null,
+   "series_master_id": null,
+   "original_start": null,
+   "i_cal_u_id": "040000…",
+   "cancelled_occurrences": null,
+   "is_reminder_on": true,
+   "reminder_minutes_before_start": 15,
+   "display_url": "<url outlook.office365.com>",
+   "display_title": "<text 35>"
+  },
+  {
+   "id": "AAMkAD…",
+   "subject": "<text 23>",
+   "body": {
+    "contentType": "html",
+    "content": "<text 599>"
+   },
+   "bodyPreview": "<text 255>",
+   "web_link": "<url outlook.office365.com>",
+   "start": {
+    "dateTime": "2026-10-16T17:00:00.0000000",
+    "timeZone": "UTC"
+   },
+   "end": {
+    "dateTime": "2026-10-16T18:30:00.0000000",
+    "timeZone": "UTC"
+   },
+   "is_all_day": false,
+   "show_as": "tentative",
+   "is_cancelled": false,
+   "type": "singleInstance",
+   "response_status": {
+    "response": "notResponded"
+   },
+   "online_meeting": null,
+   "importance": "normal",
+   "sensitivity": "normal",
+   "location": {
+    "displayName": "<text 76>"
+   },
+   "attendees": [
+    {
+     "emailAddress": {
+      "address": "<user>@wisc.edu",
+      "name": "<text 11>"
+     },
+     "type": "required",
+     "status": {
+      "response": "none"
+     }
+    },
+    {
+     "emailAddress": {
+      "address": "<user>@wisc.edu",
+      "name": "<text 16>"
+     },
+     "type": "required",
+     "status": {
+      "response": "none"
+     }
+    },
+    {
+     "emailAddress": {
+      "address": "<user>@gmu.edu",
+      "name": "<text 16>"
+     },
+     "type": "required",
+     "status": {
+      "response": "none"
+     }
+    },
+    {
+     "emailAddress": {
+      "address": "<user>@gmail.com",
+      "name": "<text 19>"
+     },
+     "type": "required",
+     "status": {
+      "response": "none"
+     }
+    },
+    {
+     "emailAddress": {
+      "address": "<user>@uci.edu",
+      "name": "<text 14>"
+     },
+     "type": "required",
+     "status": {
+      "response": "accepted"
+     }
+    },
+    {
+     "emailAddress": {
+      "address": "<user>@wisc.edu",
+      "name": "<text 29>"
+     },
+     "type": "required",
+     "status": {
+      "response": "none"
+     }
+    },
+    {
+     "emailAddress": {
+      "address": "<user>@gmu.edu",
+      "name": "<text 14>"
+     },
+     "type": "required",
+     "status": {
+      "response": "none"
+     }
+    },
+    {
+     "emailAddress": {
+      "address": "<user>@gmu.edu",
+      "name": "<text 8>"
+     },
+     "type": "required",
+     "status": {
+      "response": "accepted"
+     }
+    },
+    {
+     "emailAddress": {
+      "address": "<user>@uci.edu",
+      "name": "<text 16>"
+     },
+     "type": "required",
+     "status": {
+      "response": "none"
+     }
+    },
+    {
+     "emailAddress": {
+      "address": "<user>@wisc.edu",
+      "name": "<text 9>"
+     },
+     "type": "required",
+     "status": {
+      "response": "none"
+     }
+    },
+    {
+     "emailAddress": {
+      "address": "<user>@uci.edu",
+      "name": "<text 16>"
+     },
+     "type": "required",
+     "status": {
+      "response": "none"
+     }
+    },
+    {
+     "emailAddress": {
+      "address": "<user>@gmu.edu",
+      "name": "<text 6>"
+     },
+     "type": "required",
+     "status": {
+      "response": "tentativelyAccepted"
+     }
+    },
+    {
+     "emailAddress": {
+      "address": "<user>@gmu.edu",
+      "name": "<text 15>"
+     },
+     "type": "required",
+     "status": {
+      "response": "none"
+     }
+    },
+    {
+     "emailAddress": {
+      "address": "<user>@uci.edu",
+      "name": "<text 22>"
+     },
+     "type": "required",
+     "status": {
+      "response": "none"
+     }
+    },
+    {
+     "emailAddress": {
+      "address": "<user>@uci.edu",
+      "name": "<text 16>"
+     },
+     "type": "required",
+     "status": {
+      "response": "none"
+     }
+    },
+    {
+     "emailAddress": {
+      "address": "<user>@uci.edu",
+      "name": "<text 16>"
+     },
+     "type": "required",
+     "status": {
+      "response": "accepted"
+     }
+    },
+    {
+     "emailAddress": {
+      "address": "<user>@uci.edu",
+      "name": "<text 16>"
+     },
+     "type": "required",
+     "status": {
+      "response": "none"
+     }
+    },
+    {
+     "emailAddress": {
+      "address": "<user>@uci.edu",
+      "name": "<text 14>"
+     },
+     "type": "optional",
+     "status": {
+      "response": "accepted"
+     }
+    }
+   ],
+   "organizer": {
+    "emailAddress": {
+     "address": "<user>@wisc.edu",
+     "name": "<text 11>"
+    }
+   },
+   "recurrence": null,
+   "series_master_id": null,
+   "original_start": null,
+   "i_cal_u_id": "040000…",
+   "cancelled_occurrences": null,
+   "is_reminder_on": true,
+   "reminder_minutes_before_start": 15,
+   "display_url": "<url outlook.office365.com>",
+   "display_title": "<text 23>"
+  },
+  {
+   "id": "AAMkAD…",
+   "subject": "<text 41>",
+   "body": {
+    "contentType": "html",
+    "content": "<text 194>"
+   },
+   "bodyPreview": "<text 184>",
+   "web_link": "<url outlook.office365.com>",
+   "start": {
+    "dateTime": "2026-10-13T16:00:00.0000000",
+    "timeZone": "UTC"
+   },
+   "end": {
+    "dateTime": "2026-10-13T17:00:00.0000000",
+    "timeZone": "UTC"
+   },
+   "is_all_day": false,
+   "show_as": "busy",
+   "is_cancelled": false,
+   "type": "occurrence",
+   "response_status": {
+    "response": "organizer"
+   },
+   "online_meeting": null,
+   "importance": "normal",
+   "sensitivity": "normal",
+   "location": {
+    "displayName": "<text 7>"
+   },
+   "attendees": [
+    {
+     "emailAddress": {
+      "address": "<user>@wisc.edu",
+      "name": "<text 16>"
+     },
+     "type": "required",
+     "status": {
+      "response": "none"
+     }
+    }
+   ],
+   "organizer": {
+    "emailAddress": {
+     "address": "<user>@wisc.edu",
+     "name": "<text 7>"
+    }
+   },
+   "recurrence": null,
+   "series_master_id": "AAMkAD…",
+   "original_start": null,
+   "i_cal_u_id": "040000…",
+   "cancelled_occurrences": null,
+   "is_reminder_on": true,
+   "reminder_minutes_before_start": 60,
+   "display_url": "<url outlook.office365.com>",
+   "display_title": "<text 41>"
+  },
+  {
+   "id": "AAMkAD…",
+   "subject": "<text 19>",
+   "body": {
+    "contentType": "html",
+    "content": "<text 593>"
+   },
+   "bodyPreview": "<text 255>",
+   "web_link": "<url outlook.office365.com>",
+   "start": {
+    "dateTime": "2026-10-15T19:00:00.0000000",
+    "timeZone": "UTC"
+   },
+   "end": {
+    "dateTime": "2026-10-15T20:30:00.0000000",
+    "timeZone": "UTC"
+   },
+   "is_all_day": false,
+   "show_as": "tentative",
+   "is_cancelled": false,
+   "type": "occurrence",
+   "response_status": {
+    "response": "notResponded"
+   },
+   "online_meeting": null,
+   "importance": "normal",
+   "sensitivity": "normal",
+   "location": {
+    "displayName": "<text 116>"
+   },
+   "attendees": [
+    {
+     "emailAddress": {
+      "address": "<user>@wisc.edu",
+      "name": "<text 25>"
+     },
+     "type": "required",
+     "status": {
+      "response": "none"
+     }
+    },
+    {
+     "emailAddress": {
+      "address": "<user>@wisc.edu",
+      "name": "<text 16>"
+     },
+     "type": "required",
+     "status": {
+      "response": "none"
+     }
+    },
+    {
+     "emailAddress": {
+      "address": "<user>@wisc.edu",
+      "name": "<text 29>"
+     },
+     "type": "required",
+     "status": {
+      "response": "accepted"
+     }
+    },
+    {
+     "emailAddress": {
+      "address": "<user>@wisc.edu",
+      "name": "<text 9>"
+     },
+     "type": "required",
+     "status": {
+      "response": "none"
+     }
+    },
+    {
+     "emailAddress": {
+      "address": "<user>@wisc.edu",
+      "name": "<text 19>"
+     },
+     "type": "required",
+     "status": {
+      "response": "none"
+     }
+    },
+    {
+     "emailAddress": {
+      "address": "<user>@wisc.edu",
+      "name": "<text 11>"
+     },
+     "type": "required",
+     "status": {
+      "response": "accepted"
+     }
+    },
+    {
+     "emailAddress": {
+      "address": "<user>@wisc.edu",
+      "name": "<text 21>"
+     },
+     "type": "required",
+     "status": {
+      "response": "accepted"
+     }
+    },
+    {
+     "emailAddress": {
+      "address": "<user>@wisc.edu",
+      "name": "<text 7>"
+     },
+     "type": "required",
+     "status": {
+      "response": "accepted"
+     }
+    }
+   ],
+   "organizer": {
+    "emailAddress": {
+     "address": "<user>@wisc.edu",
+     "name": "<text 25>"
+    }
+   },
+   "recurrence": null,
+   "series_master_id": "AAMkAD…",
+   "original_start": null,
+   "i_cal_u_id": "040000…",
+   "cancelled_occurrences": null,
+   "is_reminder_on": true,
+   "reminder_minutes_before_start": 15,
+   "display_url": "<url outlook.office365.com>",
+   "display_title": "<text 19>"
+  }
+ ],
+ "next_link": null
+}

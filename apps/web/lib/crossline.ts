@@ -11,7 +11,7 @@ import { availableSlots, deriveCapacity, requiredApproval, validateAvailability,
   type AccessContext, type AvailabilityWindow, type Estimate, type SuccessCriterion, type ChecklistAnswer, FIXED_EVENTS, fixedEventBlocks, type FixedEvent } from "@crossline/core";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { forecastGoals, normalizeParams, paramsFor, planSchedule, recommendNextActions, type ForecastResult, type PlanResult,
-  type ScheduleParams } from "@crossline/planner";
+  type ScheduleParams, type PlanningInput } from "@crossline/planner";
 import { energyCalibration, predictEnergyTransition, readTransitionOutcomes } from "./energy-learning";
 import { energyModel, slotEnergy } from "./energy";
 import { durationPriorFor } from "./estimate-calibration";
@@ -701,9 +701,11 @@ function plannerItemsFor(ctx: AccessContext, orders: ActionableOrder[]) {
   });
 }
 
-async function scheduledBlocks(ctx: AccessContext, today: string, committed: PersistedScheduleBlock[]): Promise<{
-  blocks: PersistedScheduleBlock[]; schedule: PersistedPlan["schedule"]
-}> {
+/**
+ * Everything the scheduler is given for the person's week, built once: the planner input itself plus the pieces `scheduledBlocks`
+ * needs afterwards to name, tag and extend the result. Pulled out so the cache key and the bench script read the same input.
+ */
+export function planningInputFor(ctx: AccessContext, today: string, committed: PersistedScheduleBlock[]) {
   const days = planDays(today);
   const busy = committed.filter((block) => block.day)
     .map((block) => ({ day: block.day!, start: block.start, end: block.end }));
@@ -760,7 +762,7 @@ async function scheduledBlocks(ctx: AccessContext, today: string, committed: Per
   const overlapsBusy = (pin: Pin) => busy.some((block) => block.day === pin.day && block.start < pin.end && block.end > pin.start);
   const kept = readKeep(ctx, today, now).filter((pin) => expanded.some((item) => item.task.id === pin.taskId) && !pins.some((other) => other.taskId === pin.taskId) && !overlapsBusy(pin));
   const pinned = [...pins, ...kept].flatMap((pin) => { try { return [{ taskId: pin.taskId, start: iso(pin.day, pin.start), end: iso(pin.day, pin.end) }]; } catch { return []; } });
-  const result = await planSchedule({
+  const input: PlanningInput = {
     now,
     horizonDays: days.length,
     mode: preferences.mode, params: effectiveParams(ctx),
@@ -773,7 +775,17 @@ async function scheduledBlocks(ctx: AccessContext, today: string, committed: Per
     frozenBlocks: [...committed.filter((block) => block.day && block.id.startsWith("scheduled:"))
       .map((block) => ({ taskId: plannerIdOfBlock(block.id), start: iso(block.day!, block.start),
         end: iso(block.day!, block.end) })), ...pinned]
-  });
+  };
+  return { input, days, busy, preferences, zone, iso, now, currentEnergy, clockBlockers, instants, capacityIds, allOrders, orders,
+    stateById, dependencyBlockers, library, expanded, pins, kept, pinned };
+}
+
+async function scheduledBlocks(ctx: AccessContext, today: string, committed: PersistedScheduleBlock[]): Promise<{
+  blocks: PersistedScheduleBlock[]; schedule: PersistedPlan["schedule"]
+}> {
+  const { input, days, busy, preferences, zone, iso, now, currentEnergy, clockBlockers, instants, capacityIds, allOrders, orders,
+    stateById, dependencyBlockers, library, expanded, pins, kept, pinned } = planningInputFor(ctx, today, committed);
+  const result = await planSchedule(input);
   const placed = result.plan.blocks.filter((block) => !block.frozen);
   const orderStates = new Map(orders.map((order) => [order.id, order.state]));
   const itemById = new Map(expanded.map((item) => [item.task.id, item]));

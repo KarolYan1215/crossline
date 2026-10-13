@@ -255,7 +255,10 @@ function greedyFallback(input: PlanningInput, tasks: PlannerTask[], slots: Slot[
   return makeResult(input, tasks, slots, blocks, "fallback");
 }
 
-async function optimize(input: PlanningInput, emergency = false, trySolver = true): Promise<PlanResult> {
+/** How long the solver may run; the page passes nothing (two seconds), the bench and the background solve pass more. */
+export type SolveOptions = { timeLimitSeconds?: number };
+
+async function optimize(input: PlanningInput, emergency = false, trySolver = true, options: SolveOptions = {}): Promise<PlanResult> {
   const frozenIds = new Set(input.frozenBlocks.map((block) => block.taskId));
   const tasks = input.tasks.filter((task) => !frozenIds.has(task.id));
   const slots = freeSlots(input);
@@ -418,7 +421,7 @@ async function optimize(input: PlanningInput, emergency = false, trySolver = tru
 
   try {
     const highs = await highsReady;
-    const result = highs.solve(model, { output_flag: false, time_limit: 2 });
+    const result = highs.solve(model, { output_flag: false, time_limit: options.timeLimitSeconds ?? 2 });
     if (result.Status !== "Optimal" && result.Status !== "Time limit reached")
       return greedyFallback(input, tasks, slots, emergency);
     const columns = result.Columns as Record<string, { Primal?: number }>;
@@ -470,13 +473,13 @@ export function fallbackSchedule(input: PlanningInput): PlanResult {
   return greedyFallback(input, input.tasks, freeSlots(input));
 }
 
-export async function planSchedule(original: PlanningInput): Promise<PlanResult> {
+export async function planSchedule(original: PlanningInput, options: SolveOptions = {}): Promise<PlanResult> {
   const { input, notes } = clampContinuousBuffers(original);
-  const result = await schedule(input);
+  const result = await schedule(input, options);
   return notes.length ? { ...result, notes } : result;
 }
 
-async function schedule(input: PlanningInput): Promise<PlanResult> {
+async function schedule(input: PlanningInput, options: SolveOptions): Promise<PlanResult> {
   const slots = freeSlots(input);
   const lookaheadSlots = input.lookaheadAvailability
     ? freeSlots({ ...input, availability: input.lookaheadAvailability }) : slots;
@@ -508,7 +511,7 @@ async function schedule(input: PlanningInput): Promise<PlanResult> {
     const early = Date.parse(task.deadline) - params.deadlineBufferDays * 86_400_000;
     return early > input.now.getTime() ? { ...task, deadline: new Date(early).toISOString() } : task;
   }) } : eligible;
-  const first = await optimize(buffered);
+  const first = await optimize(buffered, false, true, options);
   let result = first;
   const relaxable = params.gapMinutes > 0 || params.maxDailyShare < 1 || params.deadlineBufferDays > 0;
   if (relaxable && first.blockers.some((blocker) => eligible.tasks.some((task) =>
@@ -525,10 +528,10 @@ async function schedule(input: PlanningInput): Promise<PlanResult> {
         if (!urgent.has(id) && eligible.tasks.some((item) => item.id === id)) { urgent.add(id); grew = true; }
     }
     const solverFits = first.solver === "optimal";
-    const pressed = await optimize({ ...eligible, tasks: eligible.tasks.filter((task) => urgent.has(task.id)) }, true, solverFits);
+    const pressed = await optimize({ ...eligible, tasks: eligible.tasks.filter((task) => urgent.has(task.id)) }, true, solverFits, options);
     const placedFirst = pressed.plan.blocks.filter((block) => !block.frozen);
     const around = await optimize({ ...buffered, tasks: buffered.tasks.filter((task) => !urgent.has(task.id)),
-      frozenBlocks: [...eligible.frozenBlocks, ...placedFirst.map(({ taskId, start, end }) => ({ taskId, start, end }))] }, false, solverFits);
+      frozenBlocks: [...eligible.frozenBlocks, ...placedFirst.map(({ taskId, start, end }) => ({ taskId, start, end }))] }, false, solverFits, options);
     const blocks = [...eligible.frozenBlocks.map((block) => ({ ...block, frozen: true })), ...placedFirst,
       ...around.plan.blocks.filter((block) => !block.frozen)].sort((x, y) => Date.parse(x.start) - Date.parse(y.start));
     const blockers = [...pressed.blockers, ...around.blockers];

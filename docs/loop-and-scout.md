@@ -22,7 +22,7 @@
 - **旧数据与备份**：新迁移把 `plan_changes` 的旧行转成事件存档（`plan.change_archived`）后清空；`importSnapshot` 遇到旧备份里非空的 `plan_changes` 时同样转成事件，而不是拒绝恢复（否则真实账本的旧备份会因 `RESTORE_RETIRED_TABLE_NOT_EMPTY` 无法恢复）。补一条恢复测试。
 - **写日历的闸门**：真正的闸门是 `blocksToPublish` 返回的 `plan.status`（`calendar-publish.ts`、`auto-publish.ts`）与 `/api/calendar/publish` 的 409 `PLAN_NOT_APPROVED`，一并去掉；`write_focus_block` 早已是 `automatic`。CLAUDE.md 的 Safety boundaries 与 Gate 3 改写为现行规则。写入边界本身不变：只写名为 Crossline 的日历；只改本应用建且本人没改过的事件；只删未来事件；预排块不写。
 
-**未接受的邀请**：参照 Reclaim，本人拒绝或未回复的邀请不占时间；本人自己建的事件（response 为 `none`）和本人是组织者的事件（`organizer`）都是硬约束。**实施前先用真实日历实测 apps 返回的事件里回复状态与组织者字段的取值，再定规则。**
+**未接受的邀请**：参照 Reclaim，本人拒绝或未回复的邀请不占时间；本人自己建的事件和本人是组织者的事件都是硬约束。探针实测的字段（2026-10-12）：Google `my_response_status`（accepted 等）与 `organizer.is_self`；Outlook `response_status.response`（accepted / tentativelyAccepted / none / notResponded）与 `organizer`。规则：accepted、tentativelyAccepted、组织者是本人或 response 为 none（本人自建）→ 硬约束；notResponded、declined → 不占时间。注意 Google 从 Gmail 自动生成的事件（`event_type: fromGmail`，如航班）标为 `transparency: transparent`（空闲），但本人确实不在，所以 fromGmail 事件一律按忙处理，不看 transparency。
 
 **锁定（按块，不按任务）**：
 
@@ -51,7 +51,17 @@
 | 现状（求解 2 s + 比较） | 2.1 s | 19 / 33 | 1010 min | 0 |
 | 求解器给足时间（最优） | 12.9 s | 19 / 33 | 1118 min | 1375 min |
 
-简单排法不管主线份额，所以本人说的研究 64% / 创业 20% / 自媒体 11% / 投资 5% 至今从未被执行。本表在 10/12 未提交的规划器改动上测得，合入后重测。
+简单排法不管主线份额，所以本人说的研究 64% / 创业 20% / 自媒体 11% / 投资 5% 至今从未被执行。
+
+**合入后重测**（`scripts/schedule-bench.ts`，账本副本，2026-10-12 晚；输入 105 个任务、33 个有截止、67 个份额补位、21 个时段）：
+
+| 方案 | 耗时 | 求解结果 | 有截止的任务排上 | 有截止的工作时长 | 主线份额补位 |
+|---|---|---|---|---|---|
+| 时限 0.001 s | 2.36 s | 退回简单排法 | 17 / 33 | 784 min | 0 |
+| 时限 2 s（现在页面上） | 2.18 s | 退回简单排法 | 17 / 33 | 784 min | 0 |
+| 时限 20 s | 7.47 s | 最优 | 17 / 33 | 892 min | 1380 min |
+
+两点：时限 2 s 时求解器拿不出可用的解，页面每次白等约 2 秒后仍用简单排法；给足时间 7.5 秒内求出最优，有截止的工作多排 108 分钟，份额补位从 0 到 1380 分钟。简单排法本身也要约 2 秒（建模加两轮放宽），页面的「< 300 ms」目标需要在第 2 阶段让页面只跑不建模的简单排法。
 
 **决定**：页面用简单排法即时给出结果；后台用求解器（时限约 20 s）求最优，结果按「排程输入的哈希」缓存，命中即用并写入日历。
 
@@ -283,7 +293,7 @@ Crossline 自己编译的 Codex 内核（`vendor/codex/codex-rs/target/debug/cod
 1. **用 Google 注册**（Better Auth 现有的 Google 提供方，1.7.5 支持 `scope`、`accessType: "offline"`、`prompt`）：同一个授权页额外申请 `calendar.app.created`，完成后 Crossline 自动在这个 Google 账号里建好 Crossline 日历。这个 Google 账号就是生活账号。
    - 已用邮箱或 ChatGPT 注册的账号（`disableImplicitLinking` 不会自动关联）：设置里「连接 Google 日历」走 `linkSocial` 带同样的 scope；`prompt=consent` 只用在这一步，不在每次登录弹出。
    - Google 允许本人在授权页取消勾选日历权限：登录后检查实际授予的 scope，缺了就是一个提问，不写入。
-2. **在本地 Codex 里登录 ChatGPT**（现有的模型连接：本机浏览器或设备码）：模型和本人在 ChatGPT 里已连接的邮箱、日历一起可用。未连接的 app 从 `app/list` 读出 `install_url`，上手流程给出「连接 Outlook 日历」按钮，在浏览器里打开 chatgpt.com 的授权页。
+2. **在本地 Codex 里登录 ChatGPT**（现有的模型连接：本机浏览器或设备码）：模型和本人在 ChatGPT 里已连接的邮箱、日历一起可用。哪些已连接用 `app/installed` 判断（实测可用）。连接器目录 `app/list` 实测**每次都被 chatgpt.com 的 Cloudflare 质询挡下（403）**：Crossline 以 `crossline` 为客户端名初始化运行时，这个名字成为请求的 originator，目录接口只对非官方客户端质询；改成官方客户端名属于冒充身份过反爬检测，不做。所以未连接的 app 由上手流程给出一个按钮，在本人自己的浏览器里打开 chatgpt.com，按页面写明的路径（设置 → 应用 / Connectors → 搜索并连接）完成连接；连好后下一个读取周期用 `app/installed` 刷新即可。`app/list` 哪次成功就用它给出的每个 app 的直达链接，失败不影响流程。
 
 每个提供方必须由本人同意一次，这是 OAuth 本身的下限。
 
@@ -297,7 +307,7 @@ Crossline 自己编译的 Codex 内核（`vendor/codex/codex-rs/target/debug/cod
 - **整窗读取 = 权威**：每次读未来 56 天的整个窗口，与本地比对得出增删改（没有 delta，就用现在 410 重同步的逻辑）。apps 读回时排除 Crossline 日历本身。
 - **去重与归属**：
   - 现有去重只用 iCalUID，且只在单个来源内部做（`graph-sync.ts`）；Google 一个重复系列的所有实例共用一个 iCalUID，照搬会把每周的课合并成一块。
-  - 新规则：去重键 = iCalUID + 该次的原始开始时间；跨来源去重后，块上记 `sourceKeys[]`（所有贡献了它的来源）。
+  - 新规则：同一来源内，去重键 = 事件 id；跨来源（同一会议同时在工作与生活日历里），探针显示 Google 连接器**不返回 iCalUID**（Outlook 返回 `i_cal_u_id`），所以跨来源按「起止时间完全相同 + 标题相近」配对，沿用 `reconcileExternalItems` 的 `fuzzyGroups` 判定；块上记 `sourceKeys[]`（所有贡献了它的来源）。重复会议的单次实例：Google 带 `recurring_event_id` 与 `original_start_time`，Outlook 带 `series_master_id`、`original_start` 与 `type: occurrence`。
   - 每个来源只能增删改**自己**的 key：一个来源失败，它贡献的保留；一个来源被取消勾选，从各块的 `sourceKeys` 里移除它的 key，`sourceKeys` 为空的块才删除。
 - **块的前缀**：`graph_calendar:` 在约 20 个文件里被当作「外部事件」的判别（nudges、fixed-events、calendar-classifier、asks、crossline.ts 等）。新增 `isExternalBlock(id)` 一处判定，改名为 `calendar:`，旧前缀在判定里继续认，迁移完成后再去掉。
 
