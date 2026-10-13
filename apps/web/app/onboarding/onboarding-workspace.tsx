@@ -15,6 +15,9 @@ import {
 
 const ACCEPT = ".pdf,.docx,.txt,.md,.csv,.png,.jpg,.jpeg,.gif,.webp,.m4a,.mp3,.wav,.aac,.ogg,.flac";
 
+/** Put in front of the tab's title when a round lands while the page is hidden. */
+const NEW_ROUND_MARK = "● 新问题 · ";
+
 const asTurn = (message: Message): AssistantTurn | undefined =>
   message.role === "assistant" ? message.content as AssistantTurn : undefined;
 const userText = (message: Message) => String((message.content as { text?: string }).text ?? "");
@@ -49,6 +52,27 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
     return next;
   }, [line]);
   useEffect(() => { void load(); }, [load]);
+  // Attention time (decided 2026-10-12): every 15 seconds while the page is visible, the server is told how long ago the person last typed
+  // or clicked; it counts only beats within a minute of input, so the model's thinking time while the person is away is not counted.
+  useEffect(() => {
+    if (line) return;
+    let lastInput = Date.now();
+    const touched = () => { lastInput = Date.now(); };
+    const events = ["keydown", "pointerdown", "input"] as const;
+    events.forEach((name) => window.addEventListener(name, touched, { passive: true }));
+    const timer = setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      void fetch("/api/onboarding/attention", { method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ inputAgoMs: Math.min(600_000, Date.now() - lastInput) }) }).catch(() => {});
+    }, 15_000);
+    return () => { clearInterval(timer); events.forEach((name) => window.removeEventListener(name, touched)); };
+  }, [line]);
+  // A round that lands while the person is on another tab marks the tab's title until they come back.
+  useEffect(() => {
+    const clear = () => { if (document.visibilityState === "visible" && document.title.startsWith(NEW_ROUND_MARK)) document.title = document.title.slice(NEW_ROUND_MARK.length); };
+    document.addEventListener("visibilitychange", clear);
+    return () => document.removeEventListener("visibilitychange", clear);
+  }, []);
   // Within a turn's batch the questions are answered one by one, then sent together.
   const [current, setCurrent] = useState(0);
   // While a recording is waiting for text, keep looking: the model downloads and the transcription finishes
@@ -91,6 +115,7 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
     setPendingText("");
     setCurrent(0);
     setBusy("");
+    if (document.visibilityState === "hidden" && !document.title.startsWith(NEW_ROUND_MARK)) document.title = `${NEW_ROUND_MARK}${document.title}`;
   };
 
   const upload = async (files: FileList | File[]) => {

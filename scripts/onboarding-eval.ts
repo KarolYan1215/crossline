@@ -10,14 +10,21 @@
  * limit. Dates it reads are confirmed as a person would; nothing else is answered for them. The report scores the interview against its
  * own completion list (`interviewChecklistFor`, the interview's items only — the person's own clicks are not the interview's to earn),
  * per course and project, and prints turns, questions and minutes. It spends real quota and takes hours; it is never run as a side effect.
+ *
+ * Time (decided 2026-10-12): the targets count only the person's attention — start standard (`readyToStart`) in at most 6 rounds and 30
+ * minutes, the full checklist in 90. Every file is added before the first round (the materials step) and the first reply is the screen's
+ * own `MATERIALS_FIRST_REPLY`. The person's clicks are simulated as the screen would take them: confirming read dates, adopting the first
+ * two attribute candidates as a line's goal, and 「画像符合我」 once the interview says it is done. Simulated attention time is
+ * (questions shown + clicks) × 20 seconds per round; the model's time is reported apart and not counted. Any target missed sets exit code 1.
  */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { runCodexSkill, setUsageSink, startCodexSupervisor } from "../packages/codex/src/index";
+import { PROFILE_CONFIRMED, composeGoal, portraitFingerprint, readyToStart, type ProfileModel, type StoredLineProfile } from "../packages/core/src/index";
 import { CrosslineStore, interviewChecklistFor } from "../packages/db/src/index";
-import { composeAnswers, type Question } from "../apps/web/app/onboarding/onboarding-types";
+import { MATERIALS_FIRST_REPLY, NO_MATERIALS_REPLY, composeAnswers, type Question } from "../apps/web/app/onboarding/onboarding-types";
 import { extractText, sha256 } from "../apps/worker/src/extract";
 import { identityLines } from "../apps/worker/src/lines";
 import { createOnboardingSessionRunner } from "../apps/worker/src/onboarding-session";
@@ -65,15 +72,52 @@ async function upload(name: string) {
   store.setSourceDocumentExtraction(workspaceId, saved.id, { status: extracted.status, text: extracted.text, ...(extracted.note ? { note: extracted.note } : {}) });
 }
 
-/** A person confirming the dates the interview read (what the date card's 确认 does), so the checklist is not held by a click. */
-function confirmDates() {
+/** A person confirming the dates the interview read (what the date card's 确认 does), so the checklist is not held by a click. Returns the clicks. */
+function confirmDates(): number {
   const decided = new Set(store.listEvents(workspaceId, { type: "dates.decided" }).map((event) => event.entityId));
+  let clicks = 0;
   for (const event of store.listEvents(workspaceId, { type: "dates.extracted" }).filter((item) => !decided.has(item.entityId))) {
     const payload = event.payload as { dates?: Array<{ id: string }>; recurring?: Array<{ id: string }> };
     store.appendEvent({ ownerId: principal.id, workspaceId, idempotencyKey: `eval:decided:${event.entityId}`, type: "dates.decided", entityId: event.entityId,
       payload: { included: [...(payload.dates ?? []), ...(payload.recurring ?? [])].map((item) => item.id), excluded: [], blocks: 0 } });
+    clicks += 1;
   }
+  return clicks;
 }
+
+const json = <T,>(key: string, fallback: T): T => { try { return JSON.parse(store.getSetting(workspaceId, key) ?? "null") ?? fallback; } catch { return fallback; } };
+
+/** A person adopting a long-term goal from the candidates (「采用」 under the portrait): the first two attributes, for every line without a goal. */
+function adoptGoals(): number {
+  const specs = json<Array<{ id: string; label: string; goal: string; goals?: string[]; goalParts?: string[] }>>("lines.v1", []);
+  const profiles = json<Record<string, StoredLineProfile>>("lines.profiles", {});
+  let clicks = 0;
+  const next = specs.map((line) => {
+    const parts = (profiles[line.id]?.attributes ?? []).slice(0, 2).map((attribute) => attribute.text);
+    if ((line.goals ?? []).length || parts.length < 2) return line;
+    clicks += 1;
+    const goal = composeGoal(parts, line.label);
+    return { ...line, goal, goals: [goal], goalParts: parts };
+  });
+  if (clicks) store.setSetting(workspaceId, "lines.v1", JSON.stringify(next));
+  return clicks;
+}
+
+/** A person saying the written portrait fits them (「画像符合我」), once the interview has finished. */
+function confirmPortrait(): number {
+  const profile = json<Partial<ProfileModel>>("profile.model", {});
+  const fingerprint = portraitFingerprint(profile);
+  if (!profile.portrait || json<{ fingerprint?: string } | null>(PROFILE_CONFIRMED, null)?.fingerprint === fingerprint) return 0;
+  store.setSetting(workspaceId, PROFILE_CONFIRMED, JSON.stringify({ fingerprint, at: new Date().toISOString() }));
+  return 1;
+}
+
+const checklistNow = () => interviewChecklistFor(store, workspaceId,
+  identityLines(store, workspaceId).map((line) => ({ id: line.id, label: line.label, hard: Boolean(line.hard), goals: line.goals ?? [] })), { unfiledFiles: null });
+
+/** Seconds a real person is taken to spend on one question or one click (decided 2026-10-12). */
+const SECONDS_PER_ANSWER = 20;
+const TARGETS = { readyRounds: 6, readyMinutes: 30, completeMinutes: 90 };
 
 const supervisor = await startCodexSupervisor({
   port: Number(process.env.CROSSLINE_CODEX_SUPERVISOR_PORT ?? 3398),
@@ -90,21 +134,34 @@ const PERSONA_SCHEMA = { type: "object", additionalProperties: false, required: 
 type PersonaAnswer = { answers: Array<{ questionId: string; picked: string[]; other: string }>; freeText: string; upload: string[] };
 
 const transcript: string[] = [];
-let text = "你好，我想开始。";
-let turns = 0, questionsAsked = 0, state = "";
+// The materials step: everything the person has is added before the first round, and the interview reads it before asking.
+const uploaded = [...available.keys()];
+for (const name of uploaded) await upload(name);
+let text = uploaded.length ? MATERIALS_FIRST_REPLY : NO_MATERIALS_REPLY;
+let turns = 0, questionsAsked = 0, state = "", attentionSeconds = 0;
+const modelSeconds: number[] = [];
+let readyAt: { rounds: number; minutes: number } | undefined, completeAt: { rounds: number; minutes: number } | undefined;
 try {
   while (turns < turnLimit) {
     turns += 1;
+    const turnStarted = Date.now();
     const outcome = await interview({ sessionId: "eval", text });
+    modelSeconds.push((Date.now() - turnStarted) / 1000);
     state = outcome.state;
     if (outcome.state === "blocked") { transcript.push(`第 ${turns} 轮：中断 ${outcome.code} ${outcome.message}`); break; }
-    confirmDates();
     const last = store.listOnboardingMessages(workspaceId, "eval").at(-1)!;
     const turn = last.content as { reply: string; questions: Question[]; stage?: string; nextAction: string };
     questionsAsked += turn.questions.length;
+    const clicks = confirmDates() + adoptGoals() + (outcome.state === "ready" ? confirmPortrait() : 0);
+    attentionSeconds += (turn.questions.length + clicks) * SECONDS_PER_ANSWER;
+    const items = checklistNow();
+    const minutesNow = Math.round(attentionSeconds / 6) / 10;
+    if (!readyAt && readyToStart(items)) readyAt = { rounds: turns, minutes: minutesNow };
+    if (!completeAt && items.every((item) => item.done)) completeAt = { rounds: turns, minutes: minutesNow };
     transcript.push(`### 第 ${turns} 轮（${turn.stage ?? ""}）\n\n${turn.reply}\n\n${turn.questions.map((question, index) => `${index + 1}. ${question.text}`).join("\n")}`);
-    console.info(JSON.stringify({ turn: turns, stage: turn.stage, questions: turn.questions.length, next: turn.nextAction, minutes: Math.round((Date.now() - startedAt) / 60_000) }));
-    if (outcome.state === "ready") break;
+    console.info(JSON.stringify({ turn: turns, stage: turn.stage, questions: turn.questions.length, clicks, next: turn.nextAction,
+      attentionMinutes: minutesNow, modelSeconds: Math.round(modelSeconds.at(-1)!), ready: Boolean(readyAt), complete: Boolean(completeAt) }));
+    if (outcome.state === "ready" || completeAt) break;
     const context = { version: "crossline.eval-persona.v1", persona, reply: turn.reply,
       questions: turn.questions.map(({ id, text: body, kind, options }) => ({ id, text: body, kind, options: options.map((option) => ({ label: option.label })) })),
       files: [...available.keys()] };
@@ -126,11 +183,24 @@ try {
   const checklist = interviewChecklistFor(store, workspaceId, lines, { unfiledFiles: null });
   const own = checklist.filter((item) => item.owner === "interview");
   const minutes = Math.round((Date.now() - startedAt) / 60_000);
+  const sorted = [...modelSeconds].sort((a, b) => a - b);
+  const median = sorted.length ? sorted[Math.floor((sorted.length - 1) / 2)]! : 0;
+  const checks = [
+    { label: `可开始 ≤ ${TARGETS.readyRounds} 轮`, ok: Boolean(readyAt && readyAt.rounds <= TARGETS.readyRounds) },
+    { label: `可开始 ≤ ${TARGETS.readyMinutes} 分钟`, ok: Boolean(readyAt && readyAt.minutes <= TARGETS.readyMinutes) },
+    { label: `完整 ≤ ${TARGETS.completeMinutes} 分钟`, ok: Boolean(completeAt && completeAt.minutes <= TARGETS.completeMinutes) }];
+  if (checks.some((check) => !check.ok)) process.exitCode = 1;
   const report = [
     `# 访谈评测 · ${new Date().toISOString().slice(0, 16)}`, "",
     `- 模拟用户：${path.basename(personaFile)}（只答所问，不主动交代）`,
     `- 结束状态：${state}；${turns} 轮，${questionsAsked} 个问题，${minutes} 分钟；模型调用 ${runs} 次，修复 ${repairs} 次`,
     `- 访谈自身的清单项：完成 ${own.filter((item) => item.done).length}/${own.length}`, "",
+    "## 时间", "",
+    `- 每题（或每次点击）按 ${SECONDS_PER_ANSWER} 秒计；模型时间不计入注意力时间`,
+    `- 到达可开始：${readyAt ? `第 ${readyAt.rounds} 轮，模拟 ${readyAt.minutes} 分钟` : "未到达"}`,
+    `- 到达完整：${completeAt ? `第 ${completeAt.rounds} 轮，模拟 ${completeAt.minutes} 分钟` : "未到达"}`,
+    `- 每轮模型用时：中位数 ${Math.round(median)} 秒，最长 ${Math.round(sorted.at(-1) ?? 0)} 秒`,
+    ...checks.map((check) => `- ${check.ok ? "✓" : "✗"} ${check.label}`), "",
     "| 清单项 | 结果 | 缺 |", "|---|---|---|",
     ...own.map((item) => `| ${item.label} | ${item.done ? "✓" : "✗"} | ${item.done ? "" : item.detail} |`), "",
     `项目：${store.listProjects(workspaceId).map((project) => project.name).join("、") || "无"}`,
@@ -141,7 +211,8 @@ try {
   mkdirSync(out, { recursive: true });
   const file = path.join(out, `onboarding-${new Date().toISOString().replace(/[:.]/g, "-")}.md`);
   writeFileSync(file, report);
-  console.info(JSON.stringify({ report: file, interviewItems: `${own.filter((item) => item.done).length}/${own.length}`, turns, minutes }));
+  console.info(JSON.stringify({ report: file, interviewItems: `${own.filter((item) => item.done).length}/${own.length}`, turns, minutes, readyAt, completeAt,
+    checks: checks.map((check) => `${check.ok ? "✓" : "✗"} ${check.label}`) }));
   await supervisor.stop();
   store.close();
 }

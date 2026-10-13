@@ -34,12 +34,19 @@ export function unsubscribePush(ctx: AccessContext, endpoint: unknown): { ok: tr
   return { ok: true };
 }
 
-/** One test message to every device, so the person sees it arrive before relying on it. Devices the push service has forgotten are dropped. */
-export async function sendTestPush(ctx: AccessContext): Promise<{ sent: number; gone: number; failed: number }> {
-  const keys = loadVapidKeys(dataDirectory());
+type PushPayload = { title: string; body: string; path: string; tag: string };
+
+/** One message to every subscribed device. Devices the push service has forgotten are dropped. */
+export async function sendPush(ctx: AccessContext, payload: PushPayload): Promise<{ sent: number; gone: number; failed: number }> {
   const devices = listPushSubscriptions(getStore(), ctx.workspaceId);
-  const results = await Promise.all(devices.map((device) => sendWebPush(device, {
-    title: "Crossline 手机推送已接通", body: "早报和当天会误事的提醒会同时出现在这里和电脑上。", path: "/", tag: "test" }, keys)));
+  if (!devices.length) return { sent: 0, gone: 0, failed: 0 };
+  const keys = loadVapidKeys(dataDirectory());
+  const results = await Promise.all(devices.map((device) => sendWebPush(device, payload, keys)));
   removePushSubscriptions(getStore(), ctx.workspaceId, devices.filter((_, index) => results[index] === "gone").map((device) => device.endpoint));
   return { sent: results.filter((r) => r === "sent").length, gone: results.filter((r) => r === "gone").length, failed: results.filter((r) => r === "failed").length };
+}
+
+/** One test message to every device, so the person sees it arrive before relying on it. */
+export function sendTestPush(ctx: AccessContext): Promise<{ sent: number; gone: number; failed: number }> {
+  return sendPush(ctx, { title: "Crossline 手机推送已接通", body: "早报和当天会误事的提醒会同时出现在这里和电脑上。", path: "/", tag: "test" });
 }
