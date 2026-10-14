@@ -2,7 +2,9 @@ import { get } from "node:http";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { enterUsageWorkspace, setSpendModeProvider, setUsageSink, startCodexSupervisor, type CodexSupervisor } from "@crossline/codex";
+import { enterUsageWorkspace, setProviderResolver, setSpendModeProvider, setUsageSink, startCodexSupervisor, startModelGateway, type CodexSupervisor } from "@crossline/codex";
+import { createDpapiSecretStore } from "@crossline/connectors";
+import { createModelProviderService } from "./model-provider";
 import { CrosslineStore, listPushSubscriptions, removePushSubscriptions } from "@crossline/db";
 import { capturesAwaitingAutoAnalysis, createCaptureAnalyzer } from "./analysis";
 import { autoApproveEligible } from "./auto-approval";
@@ -414,6 +416,17 @@ if (!claimWorkerLock()) {
   process.exit(0);
 }
 const analysisStore = new CrosslineStore(path.join(dataDir, "crossline.db"));
+// A workspace's own third-party model (R7): Codex reaches it through this local gateway, which adds the key (model-gateway.ts).
+const modelProviders = createModelProviderService({
+  store: analysisStore, secrets: createDpapiSecretStore(dataDir), cwd: repoRoot,
+  gateway: await startModelGateway({ resolve: (workspaceId, providerId) => modelProviders.upstream(workspaceId, providerId) }),
+  signedIn: (workspaceId) => codexSupervisor?.runtimes?.signedIn(workspaceId) ?? true,
+  client: async (workspaceId) => {
+    const runtime = await codexSupervisor?.runtimes?.client(workspaceId);
+    return runtime?.ok ? runtime.client : codexSupervisor?.clientFor(workspaceId);
+  }
+});
+setProviderResolver((workspaceId) => modelProviders.routing(workspaceId));
 // Screen activity: a foreground-window reader feeding a tracker that asks every workspace for its own consent on every
 // reading. Without consent nothing is stored; the source itself reads only the window's app, title and idle time.
 const activityIntervalSeconds = Math.max(5, Number(process.env.CROSSLINE_ACTIVITY_INTERVAL_SECONDS) || 60);
@@ -766,7 +779,9 @@ if (!capabilitySecret) {
       requiredSkills: REQUIRED_SKILLS
     },
     // Every account but the machine owner's runs on its own Codex (runtime-registry.ts), in its own home beside the owner's.
-    runtimes: { baseDir: runtimesDir(), ownerWorkspaceId: () => runtimeOwner(analysisStore) },
+    runtimes: { baseDir: runtimesDir(), ownerWorkspaceId: () => runtimeOwner(analysisStore), hasProvider: (workspaceId) => modelProviders.hasProvider(workspaceId) },
+    modelProviders: { handle: (method, pathname, workspaceId, body) => modelProviders.handle(method, pathname, workspaceId, body),
+      cost: (workspaceId) => modelProviders.cost(workspaceId) },
     monthSpend: (workspaceId) => monthSpend(analysisStore, workspaceId),
     autoAnalyzeCaptures: (workspaceId) => autoAnalyzePass(workspaceId),
     autoBackplanGoals: (workspaceId) => autoBackplanPass(workspaceId),

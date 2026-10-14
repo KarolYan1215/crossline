@@ -58,6 +58,8 @@ const workspaceContext = new AsyncLocalStorage<{ workspaceId: string }>();
  * attributed without every runner passing a workspace id down to the Skill layer.
  */
 export function enterUsageWorkspace(workspaceId: string): void { workspaceContext.enterWith({ workspaceId }); }
+/** The workspace this async chain is working for, if one was entered. */
+export const currentUsageWorkspace = (): string | undefined => workspaceContext.getStore()?.workspaceId;
 
 export function reportUsage(usage: Omit<SkillUsage, "workspaceId">): void {
   const workspaceId = workspaceContext.getStore()?.workspaceId;

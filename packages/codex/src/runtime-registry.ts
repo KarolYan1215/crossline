@@ -26,8 +26,10 @@ const blocker = (code: RuntimeBlocker["code"]): RuntimeBlocker => ({ code, messa
 
 export type RuntimeRegistry = {
   isOwner(workspaceId: string): boolean;
-  /** Owner: always. A guest: once its own home holds a login. */
+  /** Owner: always. A guest: once its own home holds a login, or it has a model provider of its own (providers.ts). */
   connected(workspaceId: string): boolean;
+  /** Owner: always. A guest: only its own Codex sign-in — what serves the Skills a provider cannot. */
+  signedIn(workspaceId: string): boolean;
   /** The runtime for running Skills; starts a connected guest's process. */
   client(workspaceId: string): Promise<{ ok: true; client: CodexRpcBoundary } | { ok: false; blocker: RuntimeBlocker }>;
   /** Already running (the sync getters the worker's runners take); undefined until `client` has started it. */
@@ -48,6 +50,8 @@ export function createRuntimeRegistry(options: {
   baseDir: string;
   start: (codexHome: string) => Promise<RuntimeSidecar>;
   maxRunning?: number;
+  /** Whether a workspace has a model provider of its own; such a guest gets its own runtime even without a Codex sign-in. */
+  hasProvider?: (workspaceId: string) => boolean;
   /** Longer than a Skill's own stall limit (20 min), so a long turn that is still producing events is never stopped under it. */
   idleMs?: number;
   now?: () => number;
@@ -60,7 +64,8 @@ export function createRuntimeRegistry(options: {
   const logins = new Map<string, RuntimeLogin>();
   const isOwner = (workspaceId: string) => !workspaceId || workspaceId === options.ownerWorkspaceId();
   const homeOf = (workspaceId: string) => path.join(options.baseDir, workspaceId.replace(/[^a-zA-Z0-9_-]/g, "_"), "codex-home");
-  const connected = (workspaceId: string) => isOwner(workspaceId) || existsSync(path.join(homeOf(workspaceId), "auth.json"));
+  const signedIn = (workspaceId: string) => isOwner(workspaceId) || existsSync(path.join(homeOf(workspaceId), "auth.json"));
+  const connected = (workspaceId: string) => signedIn(workspaceId) || Boolean(options.hasProvider?.(workspaceId));
 
   const stop = (workspaceId: string) => {
     const entry = running.get(workspaceId);
@@ -111,7 +116,7 @@ export function createRuntimeRegistry(options: {
   };
 
   return {
-    isOwner, connected,
+    isOwner, connected, signedIn,
     client: (workspaceId) => clientFor(workspaceId),
     current: (workspaceId) => isOwner(workspaceId) ? options.owner.client : (touch(workspaceId), running.get(workspaceId)?.sidecar.client),
     async login(workspaceId, method) {

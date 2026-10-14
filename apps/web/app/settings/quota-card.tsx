@@ -13,6 +13,7 @@ function resetText(resetsAt: number | null, now: Date, timeZone: string): string
 
 /** The reason in words; settings never shows a code, an env name or the runtime's English (copy-style). */
 function unavailableText(reason: string): string {
+  if (/PROVIDER_BUDGET/.test(reason)) return "当前的其他模型按用量计费，应用不知道它的价格，无法替你设上限";
   if (/auth|login|apikey|api key/i.test(reason)) return "还没有登录模型账号，或当前登录方式（API key）没有额度窗口";
   if (/SUPERVISOR|CAPABILITY|ECONNREFUSED|fetch failed|timeout|abort|worker|unreachable/i.test(reason)) return "后台服务没有连上";
   return "暂时读不到";
