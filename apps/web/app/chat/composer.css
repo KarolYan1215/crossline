@@ -1,4 +1,4 @@
-/* The input box shared by 快速收集 and 小助手 (apps/web/app/chat/composer.tsx). */
+/* The input box shared by 快速收集 and 小帮手 (apps/web/app/chat/composer.tsx). */
 .composer{position:relative;display:grid;gap:6px}
 .composer-box{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:8px;align-items:end;padding:6px;border:1px solid var(--ink);background:var(--paper)}
 .composer.dragging .composer-box{outline:2px dashed var(--ink);outline-offset:2px}
@@ -85,3 +85,28 @@
 .assistant-nudge-preview{max-width:min(320px,calc(100vw - 32px));padding:8px 10px;border:1px solid var(--ink);background:var(--paper);font-size:13px;text-align:left;
   box-shadow:0 4px 12px rgba(0,0,0,.12)}
 @media (max-width:520px){.assistant-bubble-wrap{right:8px;bottom:64px}}
+
+/* ── 小帮手: the person's figure as the floating button and beside its replies ──
+   The portrait figure is full length, head near the top; the frame shows its upper part (head and shoulders) whatever the pose. */
+.helper-face{display:inline-block;flex:none;border-radius:50%;background-color:#F3EEE6;background-repeat:no-repeat;background-size:270%;background-position:50% 5%;
+  border:1.5px solid var(--ink)}
+.helper-face[data-size="button"]{width:56px;height:56px}
+.helper-face[data-size="reply"]{width:28px;height:28px;border-width:1px}
+.assistant-bubble.helper-bubble{padding:0;border:0;background:none;min-height:0;border-radius:50%;line-height:0}
+.assistant-bubble.helper-bubble:focus-visible{outline:2px solid var(--ink);outline-offset:3px}
+.assistant-panel header span{display:inline-flex;align-items:center;gap:8px}
+.conversation-reply[data-face]{display:grid;grid-template-columns:28px minmax(0,1fr);column-gap:8px;align-items:start}
+.conversation-reply[data-face]>:not(.helper-face){grid-column:2}
+@media (max-width:680px){.helper-face[data-size="button"]{width:48px;height:48px}}
+
+/* What it is doing, said by how it moves (helperMood). Idle: barely floating. A new message: a nod every few seconds. Thinking: a quicker
+   bob. The assistant at work: a slow sway. The background stopped: grey and still — the red bar at the top says why. */
+@keyframes helper-float{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
+@keyframes helper-nod{0%,82%,100%{transform:rotate(0)}86%{transform:rotate(-9deg)}91%{transform:rotate(7deg)}96%{transform:rotate(-3deg)}}
+@keyframes helper-sway{0%,100%{transform:rotate(-4deg)}50%{transform:rotate(4deg)}}
+.helper-face[data-size="button"][data-mood="idle"]{animation:helper-float 4s ease-in-out infinite}
+.helper-face[data-size="button"][data-mood="unread"]{animation:helper-nod 4s ease-in-out infinite;box-shadow:0 0 0 3px var(--paper),0 0 0 5px var(--now-ink)}
+.helper-face[data-size="button"][data-mood="thinking"]{animation:helper-float .9s ease-in-out infinite}
+.helper-face[data-size="button"][data-mood="working"]{animation:helper-sway 2.4s ease-in-out infinite}
+.helper-face[data-size="button"][data-mood="down"]{filter:grayscale(1);opacity:.55}
+@media (prefers-reduced-motion:reduce){.helper-face{animation:none!important}}

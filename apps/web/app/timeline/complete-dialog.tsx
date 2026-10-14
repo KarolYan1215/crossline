@@ -4,9 +4,9 @@ import { useRef, useState, type DragEvent } from "react";
 import { Sheet } from "../ui/overlay";
 
 const MAX_FILES = 5;
-/** What `evidence-attachments` keeps (`ALLOWED_ATTACHMENT_TYPES`): images, PDF and plain text. */
-const ACCEPT = ["image/png", "image/jpeg", "image/gif", "image/webp", "application/pdf", "text/plain"];
-const acceptable = (file: File) => ACCEPT.includes(file.type) || (!file.type && /\.txt$/i.test(file.name));
+/** What `evidence-attachments` keeps (`ALLOWED_ATTACHMENT_TYPES`): images, PDF, plain text, Markdown, CSV and JSON. */
+const ACCEPT = ["image/png", "image/jpeg", "image/gif", "image/webp", "application/pdf", "text/plain", "text/markdown", "text/csv", "application/json"];
+const acceptable = (file: File) => ACCEPT.includes(file.type) || (!file.type && /\.(txt|md|markdown|csv|json)$/i.test(file.name));
 const FAILURE: Record<string, string> = {
   MATERIALS_PREPARING: "任务已转入材料准备，准备完成后再提交。",
   EXECUTION_NOT_STARTABLE: "当前状态不能提交，请刷新。",

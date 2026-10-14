@@ -50,7 +50,7 @@ export function LineCardInterview({ lineId, label, description, interview, pendi
     return () => clearInterval(timer);
   }, [busy, interview.waiting, router]);
 
-  /** Tells the global 小助手 which line the person is working in (page context `line`). */
+  /** Tells the global 小帮手 which line the person is working in (page context `line`). */
   const markPage = () => {
     const url = new URL(window.location.href);
     if (url.searchParams.get("line") === lineId) return;

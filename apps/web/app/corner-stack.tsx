@@ -2,7 +2,7 @@
 import { useEffect, useRef, type ReactNode } from "react";
 
 /**
- * The fixed bottom-right corner (the timer above the 小助手 bubble). It records how far up the screen it reaches in
+ * The fixed bottom-right corner (the timer above the 小帮手 bubble). It records how far up the screen it reaches in
  * `--corner-clearance`, and the page keeps that much room at its foot (composer.css), so the last thing on any page can always be
  * scrolled clear of it instead of sitting under the bubble.
  */

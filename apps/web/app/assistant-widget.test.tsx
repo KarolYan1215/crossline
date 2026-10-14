@@ -18,6 +18,13 @@ describe("assistant widget", () => {
     expect(html).not.toContain("assistant-panel");
   });
 
+  test("before a figure is known (a new account, a guest that cannot draw images) the bubble is the text button 小帮手", () => {
+    const html = renderToStaticMarkup(<AssistantWidget />);
+    expect(html).toContain(">小帮手</button>");
+    expect(html).toContain('aria-label="打开小帮手"');
+    expect(html).not.toContain("helper-face");
+  });
+
   test("never reads or writes this application's own repository", () => {
     for (const forbidden of ["readFile", "writeFile", "child_process", "import(\"fs\"", "require(\"fs\""]) {
       expect(source).not.toContain(forbidden);

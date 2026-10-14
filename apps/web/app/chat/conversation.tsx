@@ -8,6 +8,7 @@ import { Composer, type ComposerInput } from "./composer";
 import { captureLine } from "../offline-command-forms";
 import { undoOperation } from "../undo-center";
 import { Markdown } from "../ui/markdown";
+import { announceThinking, HelperFace, useHelper } from "../helper-state";
 
 const PENDING_EVENTS = ["crossline:pending-changed", "crossline:plan-changed"];
 const ACCOUNT_KEY = "crossline-conversation-account";
@@ -27,7 +28,7 @@ export function pageFromLocation(): PageContext {
 /**
  * The one input box (docs/one-input.md): what the person types is kept, read, and answered in place — an answer, a card of proposed
  * actions carried out on 执行 (each undoable), or one question back. Today's conversation is shared by every page and device; the
- * floating 小助手 is the same conversation opened larger. Files are read and proposed for; offline, a line is kept as a capture the old way.
+ * floating 小帮手 is the same conversation opened larger. Files are read and proposed for; offline, a line is kept as a capture the old way.
  */
 export function Conversation({ variant, placeholder, page }: {
   /**
@@ -97,6 +98,7 @@ export function Conversation({ variant, placeholder, page }: {
         files = result.documents.map((doc) => doc.id);
         setStatus("");
       }
+      announceThinking(true);
       const response = await fetch("/api/conversation/turn", { method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ text: input.text, mentions: input.mentions, page: page ?? pageFromLocation(), files }) });
       const body = await response.json().catch(() => null) as { messages?: MessageView[] } | null;
@@ -105,7 +107,7 @@ export function Conversation({ variant, placeholder, page }: {
       return true;
     } catch {
       return keepAsCapture(input, "未能发送，请复制内容后重试");
-    } finally { setBusy(false); }
+    } finally { setBusy(false); announceThinking(false); }
   };
 
   const update = (message: MessageView) => {
@@ -158,8 +160,11 @@ function lastExchange(messages: MessageView[]): MessageView[] {
 }
 
 function MessageItem({ message, onUpdate, choices }: { message: MessageView; onUpdate: (message: MessageView) => void; choices: CardChoices | null }) {
+  const { avatar } = useHelper();
   if (message.role === "person") return <li className="conversation-person"><p>{message.text}</p></li>;
-  return <li className={message.role === "nudge" ? "conversation-reply conversation-nudge" : "conversation-reply"}>
+  // The 小帮手 speaks with the upper half of the person's figure (the 分身); the person's own lines carry no face.
+  return <li className={message.role === "nudge" ? "conversation-reply conversation-nudge" : "conversation-reply"} data-face={avatar ? "" : undefined}>
+    {avatar && <HelperFace src={avatar} size="reply" />}
     {message.text && <div className="gen"><Markdown text={message.text} /></div>}
     {message.card && <CardView messageId={message.id} card={message.card} onUpdate={onUpdate} choices={choices} />}
   </li>;

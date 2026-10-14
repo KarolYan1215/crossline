@@ -98,7 +98,7 @@ test("a goal change from the interview takes effect only on the person's click, 
   expect(decideGoalEdit(TEST_CTX, "research", "adopt")).toMatchObject({ ok: false, code: "GOAL_EDIT_NOT_FOUND" });
 });
 
-test("on a line's card the 小助手 knows the line, and what is said about it goes to that line's own interview", async () => {
+test("on a line's card the 小帮手 knows the line, and what is said about it goes to that line's own interview", async () => {
   const store = setup();
   store.setSetting(ws, "lines.profiles", JSON.stringify({ research: { description: "器件到算法", attributes: [] } }));
   const pack = await contextPack(TEST_CTX, { kind: "line", entityId: "research" }, new Date("2026-10-09T15:00:00Z"));

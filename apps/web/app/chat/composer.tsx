@@ -10,7 +10,7 @@ const KIND_LABEL: Record<Mention["kind"], string> = { material: "资料", task: 
 const ACCEPTED = "image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain,text/markdown,text/csv,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.md,.csv,.txt,.docx";
 
 /**
- * The one input box, for 快速收集 and 小助手 alike, laid out like the chat products people already know: a ＋ menu on the left (files,
+ * The one input box, for 快速收集 and 小帮手 alike, laid out like the chat products people already know: a ＋ menu on the left (files,
  * existing materials, batch input, a task or milestone to link), the text in the middle, send on the right. Pasting and dropping files
  * work anywhere on it; typing `@` searches materials, tasks and milestones and turns the choice into a chip. Enter sends, Shift+Enter
  * starts a new line.
