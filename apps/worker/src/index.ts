@@ -649,6 +649,8 @@ const agentService = createAgentService({
 for (const workspace of analysisStore.listWorkspaces()) {
   const lost = agentService.recoverLost(workspace.id);
   if (lost.length) console.info(JSON.stringify({ type: "agent.recovered_lost", workspaceId: workspace.id, lost, checkedAt: new Date().toISOString() }));
+  const salvaged = agentService.salvageStopped(workspace.id);
+  if (salvaged.length) console.info(JSON.stringify({ type: "agent.salvaged", workspaceId: workspace.id, salvaged, checkedAt: new Date().toISOString() }));
 }
 const diligencePasses = new Set<string>();
 /**

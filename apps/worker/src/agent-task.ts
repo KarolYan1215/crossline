@@ -78,6 +78,50 @@ export function fingerprint(inputs: string[], limit = 2000): Map<string, string>
   for (const input of inputs) walk(input);
   return result;
 }
+/** Codes for a run stopped from outside — by the person, a stall or a restart — whose files may still be worth a look. */
+const STOPPED = new Set(["AGENT_CANCELLED", "AGENT_RUN_LOST", "SKILL_STALLED", "SKILL_TIMEOUT"]);
+const HELPER = /(^|[\\/])(__pycache__|node_modules|\.git)([\\/]|$)|\.(pyc|py|ps1|psm1|sh|bat|cmd|js|mjs|ts)$|(^|[\\/])audit\.json$/i;
+
+/**
+ * A run stopped part way still leaves what it had made: the files in its directory (not its own helper scripts) go to 待确认 as an
+ * unfinished result the person can read, keep or reject — unchecked by the assistant and said to be so. The first real 小红书 run was
+ * stopped at the site's security check with a finished report on disk, and nothing of it reached the person (2026-10-14).
+ * Returns whether anything was recorded.
+ */
+export function salvageStoppedRun(store: CrosslineStore, workspaceId: string, taskId: string, outputRoot: string, now = new Date()): boolean {
+  const blocked = store.listEvents(workspaceId, { type: "agent.task.blocked", entityId: taskId }).at(-1);
+  const requested = store.listEvents(workspaceId, { type: "agent.task.requested", entityId: taskId }).at(-1);
+  const code = String((blocked?.payload as { code?: string } | undefined)?.code ?? "");
+  if (!blocked || !requested || !STOPPED.has(code) || store.listEvents(workspaceId, { type: "agent.task.completed", entityId: taskId }).length) return false;
+  const request = requested.payload as { title?: string; category?: string; workOrderId?: string };
+  const directory = path.join(outputRoot, taskId);
+  const files: string[] = [];
+  const walk = (dir: string) => {
+    let entries: import("node:fs").Dirent[] = [];
+    try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      if (HELPER.test(path.relative(directory, full))) continue;
+      if (entry.isDirectory()) walk(full);
+      else if (files.length < 40 && statSync(full).size <= 8 * 1024 * 1024) files.push(full);
+    }
+  };
+  walk(directory);
+  if (!files.length) return false;
+  const message = String((blocked.payload as { message?: string }).message ?? "");
+  const artifacts = files.map((file) => ({ path: path.relative(directory, file).replace(/\\/g, "/"), purpose: "停下前已产出", sha256: sha(file), bytes: statSync(file).size }));
+  const summary = `这次运行没有做完（${message || code}），以下是停下前已经写出的文件，助手没有做最后的自查，请本人判断是否可用。`;
+  writeFileSync(path.join(directory, "audit.json"), JSON.stringify({ taskId, title: request.title ?? "", category: request.category ?? "", directory, durationMs: 0, summary, artifacts,
+    verification: [], needsHuman: [{ what: "判断这份未完成的结果是否可用", why: `运行停在：${message || code}` }], notDone: [{ what: "助手的最后自查与总结", why: message || code }],
+    assumptions: [], audit: { commands: [], filesChanged: [], mcpCalls: [], searches: [], decisions: [], requests: { total: 0, allowed: 0 } }, inputsModified: [], checksPassed: false,
+    reviewRequired: true, partial: true }, null, 2), "utf8");
+  store.appendEvent({ ownerId: store.getWorkspaceOwnerId(workspaceId) ?? "", workspaceId, idempotencyKey: `agent:completed:${taskId}`, type: "agent.task.completed", entityId: taskId,
+    payload: { taskId, title: request.title ?? "", category: request.category ?? "", workOrderId: request.workOrderId ?? "", directory, durationMs: 0, commands: 0, filesChanged: 0,
+      mcpCalls: 0, searches: 0, denied: 0, artifacts: artifacts.map(({ path: p, sha256, bytes }) => ({ path: p, sha256, bytes })), verification: [], needsHuman: 1, inputsModified: [],
+      checksPassed: false, reviewRequired: true, partial: true, stoppedBy: code, auditFile: path.join(directory, "audit.json"), salvagedAt: now.toISOString() } });
+  return true;
+}
+
 export function changedFiles(before: Map<string, string>, after: Map<string, string>): string[] {
   return [...before].filter(([file, hash]) => after.get(file) !== hash).map(([file]) => file);
 }
@@ -234,6 +278,7 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
       const message = options.signal?.aborted ? "本人中止了这次运行。" : result.blocker.message;
       store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:blocked:${taskId}`, type: "agent.task.blocked", entityId: taskId,
         payload: { taskId, code, message: message.slice(0, 400), durationMs: Date.now() - startedAt, commands: audit.commands.length, decisions: audit.decisions.length, inputsModified } });
+      salvageStoppedRun(store, workspaceId, taskId, options.outputRoot);
       return blocked(code, message);
     }
 

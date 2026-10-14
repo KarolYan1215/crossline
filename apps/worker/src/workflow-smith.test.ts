@@ -303,3 +303,27 @@ test("a run reading an account opens each page once and stops at a security chec
   after!({ ...done("t", root), summary: { needsHuman: [{ what: "需要本人完成小红书安全验证", why: "详情页出现滑块" }] } } as unknown as AgentOutcome);
   expect(said().at(-1)).toContain("遇到了网站的安全验证，已停下，不会重试");
 });
+
+test("a run stopped part way offers what it had made for review, unchecked; its helper scripts and a run that made nothing are left out", async () => {
+  const { salvageStoppedRun } = await import("./agent-task");
+  const { listAgentTasks } = await import("@crossline/db");
+  const out = path.join(root, "out");
+  const request = (taskId: string) => store.appendEvent({ ownerId: owner(), workspaceId: ws, idempotencyKey: `rq-${taskId}`, type: "agent.task.requested", entityId: taskId,
+    payload: { taskId, title: "整理小红书收藏夹", category: "read_research_organize", workOrderId: "" } });
+  const stop = (taskId: string, code: string) => store.appendEvent({ ownerId: owner(), workspaceId: ws, idempotencyKey: `st-${taskId}`, type: "agent.task.blocked", entityId: taskId,
+    payload: { taskId, code, message: "本人中止了这次运行。" } });
+  request("t1"); stop("t1", "AGENT_CANCELLED");
+  mkdirSync(path.join(out, "t1", "__pycache__"), { recursive: true });
+  writeFileSync(path.join(out, "t1", "media_action_plan.md"), "# 本期创作者行动报告");
+  writeFileSync(path.join(out, "t1", "read_xhs.py"), "print(1)");
+  writeFileSync(path.join(out, "t1", "__pycache__", "x.pyc"), "x");
+  expect(salvageStoppedRun(store, ws, "t1", out)).toBe(true);
+  expect(listAgentTasks(store, ws).find((task) => task.taskId === "t1")).toMatchObject({ status: "needs_review", checksPassed: false, artifacts: [{ path: "media_action_plan.md" }] });
+  expect(JSON.parse(readFileSync(path.join(out, "t1", "audit.json"), "utf8")).summary).toContain("没有做完");
+  expect(salvageStoppedRun(store, ws, "t1", out)).toBe(false);
+  request("t2"); stop("t2", "AGENT_CANCELLED");
+  expect(salvageStoppedRun(store, ws, "t2", out)).toBe(false);
+  request("t3"); stop("t3", "AGENT_CATEGORY_NOT_APPROVED");
+  mkdirSync(path.join(out, "t3"), { recursive: true }); writeFileSync(path.join(out, "t3", "a.md"), "x");
+  expect(salvageStoppedRun(store, ws, "t3", out)).toBe(false);
+});

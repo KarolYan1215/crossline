@@ -3,7 +3,7 @@ import path from "node:path";
 import { enterUsageWorkspace, type CodexRpcBoundary } from "@crossline/codex";
 import { deliverAgentResult, listAgentTasks, readCategories, requestCategory, type CrosslineStore } from "@crossline/db";
 import { AGENT_CATEGORIES, backgroundSpend, isAgentCategory, type AgentCategory, type CostSignal } from "@crossline/core";
-import { createAgentRunner, type AgentOutcome, type AgentTaskInput } from "./agent-task";
+import { createAgentRunner, salvageStoppedRun, type AgentOutcome, type AgentTaskInput } from "./agent-task";
 import { autoHandoffCandidates, dispatchCandidates, ledgerAsk, stepDispatchCandidates, taskFromWorkOrder } from "./agent-dispatch";
 import { startingWithin } from "./schedule-window";
 import { ownerOf } from "./owner";
@@ -157,6 +157,15 @@ export function createAgentService(deps: {
      * At startup: a run with no outcome was lost with the process that held it (only one worker runs at a time). It is recorded as
      * lost now rather than shown as 「进行中」 until it ages out after eight hours — and a preparation step lost this way is tried again.
      */
+    /**
+     * At startup: a run stopped in the last day (by the person, a stall or a restart) that left files of its own, and was not yet offered
+     * for review, goes to 待确认 as an unfinished result (`salvageStoppedRun`).
+     */
+    salvageStopped(workspaceId: string, now = new Date()): string[] {
+      return listAgentTasks(deps.store, workspaceId, now).filter((task) => task.status === "blocked" && now.getTime() - Date.parse(task.requestedAt) < 86_400_000)
+        .filter((task) => salvageStoppedRun(deps.store, workspaceId, task.taskId, deps.outputRoot ?? defaultOutputRoot(), now)).map((task) => task.taskId);
+    },
+
     recoverLost(workspaceId: string): string[] {
       const lost = listAgentTasks(deps.store, workspaceId).filter((task) => task.status === "running" && !mark(workspaceId).has(task.taskId));
       for (const task of lost) {
