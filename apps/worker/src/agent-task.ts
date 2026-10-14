@@ -92,7 +92,8 @@ export function salvageStoppedRun(store: CrosslineStore, workspaceId: string, ta
   const blocked = store.listEvents(workspaceId, { type: "agent.task.blocked", entityId: taskId }).at(-1);
   const requested = store.listEvents(workspaceId, { type: "agent.task.requested", entityId: taskId }).at(-1);
   const code = String((blocked?.payload as { code?: string } | undefined)?.code ?? "");
-  if (!blocked || !requested || !STOPPED.has(code) || store.listEvents(workspaceId, { type: "agent.task.completed", entityId: taskId }).length) return false;
+  // A run growing a workflow is not a result for the person: what it wrote is installed by the grower or tried again.
+  if (taskId.startsWith("grow-") || !blocked || !requested || !STOPPED.has(code) || store.listEvents(workspaceId, { type: "agent.task.completed", entityId: taskId }).length) return false;
   const request = requested.payload as { title?: string; category?: string; workOrderId?: string };
   const directory = path.join(outputRoot, taskId);
   const files: string[] = [];

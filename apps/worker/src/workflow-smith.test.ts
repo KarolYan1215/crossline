@@ -327,3 +327,15 @@ test("a run stopped part way offers what it had made for review, unchecked; its 
   mkdirSync(path.join(out, "t3"), { recursive: true }); writeFileSync(path.join(out, "t3", "a.md"), "x");
   expect(salvageStoppedRun(store, ws, "t3", out)).toBe(false);
 });
+
+test("a stopped growing run is not offered for review, and one offered before is not listed", async () => {
+  const { salvageStoppedRun } = await import("./agent-task");
+  const { listAgentTasks } = await import("@crossline/db");
+  const out = path.join(root, "out-grow");
+  store.appendEvent({ ownerId: owner(), workspaceId: ws, idempotencyKey: "rq-g", type: "agent.task.requested", entityId: "grow-1", payload: { taskId: "grow-1", title: "把这类事固化成工作流", category: "read_research_organize" } });
+  store.appendEvent({ ownerId: owner(), workspaceId: ws, idempotencyKey: "st-g", type: "agent.task.blocked", entityId: "grow-1", payload: { taskId: "grow-1", code: "AGENT_RUN_LOST" } });
+  mkdirSync(path.join(out, "grow-1"), { recursive: true }); writeFileSync(path.join(out, "grow-1", "SKILL.md"), "x");
+  expect(salvageStoppedRun(store, ws, "grow-1", out)).toBe(false);
+  store.appendEvent({ ownerId: owner(), workspaceId: ws, idempotencyKey: "old-salvage", type: "agent.task.completed", entityId: "grow-1", payload: { taskId: "grow-1", partial: true, reviewRequired: true } });
+  expect(listAgentTasks(store, ws).find((task) => task.taskId === "grow-1")?.status).toBe("blocked");
+});

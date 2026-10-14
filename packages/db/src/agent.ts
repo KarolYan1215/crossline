@@ -112,6 +112,8 @@ export function listAgentTasks(store: CrosslineStore, workspaceId: string, now =
     }
     const row = rows.get(taskId);
     if (!row) continue;
+    // Half-written workflow drafts from stopped growing runs were once offered for review (2026-10-14); they are not results.
+    if (event.type === "agent.task.completed" && p.partial === true && taskId.startsWith("grow-")) continue;
     if (event.type === "agent.task.completed") {
       Object.assign(row, { status: p.reviewRequired === false ? "accepted" : "needs_review", directory: String(p.directory ?? ""), durationMs: Number(p.durationMs ?? 0),
         commands: Number(p.commands ?? 0), denied: Number(p.denied ?? 0), artifacts: Array.isArray(p.artifacts) ? p.artifacts as AgentTaskRow["artifacts"] : [],
