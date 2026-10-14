@@ -28,7 +28,7 @@ export type ProfileGapInput = {
   portrait?: { written: boolean; confirmed: boolean };
 };
 export type ProfileGap = {
-  code: "LINE_UNCONFIRMED" | "PROJECT_DEADLINE" | "DATE_UNDATED" | "COURSE_MEETINGS" | "FILE_UNFILED" | "PORTRAIT_UNCONFIRMED";
+  code: "LINE_UNCONFIRMED" | "PROJECT_DEADLINE" | "DATE_UNDATED" | "COURSE_MEETINGS" | "FILE_UNFILED" | "PORTRAIT_UNCONFIRMED" | "APPEARANCE";
   identityId: string; projectId: string;
   /** The file a `FILE_UNFILED` gap is about. */
   documentId?: string;
@@ -188,8 +188,26 @@ export function profileGaps(input: ProfileGapInput): ProfileGap[] {
       ]
     }
   });
+
+  // The cartoon figure is drawn from how the person says they look (decided 2026-10-14): asked once, beside the portrait, saying what it
+  // is for. Never assumed — with nothing said, the figure stays neutral.
+  if (input.portrait?.written && !input.facts.some((fact) => fact.identityId === "person" && APPEARANCE_SLOT.test(fact.slot))) gaps.push({
+    code: "APPEARANCE", identityId: "person", projectId: "", blocking: false,
+    detail: "本人外貌未知，画像形象只能用中性默认。",
+    question: {
+      id: "gap-appearance", kind: "single", allowOther: true, identityId: "person", projectId: "",
+      text: "画像报告会为本人生成一个卡通形象。希望它是什么样子（性别、发型、常穿的衣服或颜色）？这些描述只用于生成形象。",
+      options: [
+        { id: "write", label: "我来描述", detail: "在“其他”里写，例如「男，狼尾长发，常穿全黑」" },
+        { id: "skip", label: "不描述，用中性形象", detail: "之后在输入框里说一句也能改" }
+      ]
+    }
+  });
   return gaps;
 }
+
+/** Person facts that already say how they look, so the appearance question is not asked. */
+const APPEARANCE_SLOT = /^(appearance|appearance_skipped|gender|hairstyle|clothing_preference)$/;
 
 const MEETING_SLOT = /^(meeting|class)_?times?$|^no_meetings$/;
 
@@ -266,6 +284,9 @@ export function answeredGapFacts(replyText: string, gaps: ProfileGap[]): GapAnsw
       const option = gap.question.options.find((item) => picked.includes(item.label));
       if (option) out.push({ identityId: "", projectId: "", slot: "", value: option.label, quote: option.label,
         file: { documentId: gap.documentId ?? "", projectId: option.id === "none" ? "" : option.id } });
+    } else if (gap.code === "APPEARANCE") {
+      if (other) out.push({ ...base, slot: "appearance", value: other, quote: other });
+      else if (picked.includes("不描述，用中性形象")) out.push({ ...base, slot: "appearance_skipped", value: "不描述，用中性形象", quote: "不描述，用中性形象" });
     } else if (gap.code === "PORTRAIT_UNCONFIRMED") {
       if (picked.includes("符合")) out.push({ identityId: "", projectId: "", slot: "", value: "符合", quote: "符合", confirmPortrait: true });
     }

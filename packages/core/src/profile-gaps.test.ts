@@ -71,7 +71,8 @@ test("a course nobody said the class times of, a file only the person can file a
     unfiled: [{ id: "doc-1", fileName: "Lecture Plan.pdf", lean: { id: "ece548" } }], portrait: { written: true, confirmed: false } };
   const gaps = profileGaps(input);
   expect(gaps.filter((gap) => gap.code !== "LINE_UNCONFIRMED").map((gap) => gap.question.text)).toEqual([
-    "「ECE 548」每周什么时候上课、在哪里？", "《Lecture Plan.pdf》属于哪个项目？", "「当前画像」写的是否符合本人？"]);
+    "「ECE 548」每周什么时候上课、在哪里？", "《Lecture Plan.pdf》属于哪个项目？", "「当前画像」写的是否符合本人？",
+    "画像报告会为本人生成一个卡通形象。希望它是什么样子（性别、发型、常穿的衣服或颜色）？这些描述只用于生成形象。"]);
   // The project the interview leaned to is offered first.
   expect(gaps.find((gap) => gap.code === "FILE_UNFILED")!.question.options[0]).toMatchObject({ id: "ece548", detail: "访谈判断更可能是它" });
   const reply = ["【「ECE 548」每周什么时候上课、在哪里？】选择：我来写上课时间。补充：周二、四 11:00–12:15，EH 2317",
@@ -84,6 +85,20 @@ test("a course nobody said the class times of, a file only the person can file a
   // A round stored before the rewording is answered in its old words, and still confirms the portrait.
   expect(answeredGapFacts("【「当前画像」里写的是否符合你？】选择：符合", gaps)).toEqual([{ identityId: "", projectId: "", slot: "", value: "符合", quote: "符合", confirmPortrait: true }]);
   expect(profileGaps({ ...input, meetings: ["ECE 555", "ece548"] }).some((gap) => gap.code === "COURSE_MEETINGS")).toBe(false);
+});
+
+test("外貌在画像写成后问一次，说明只用于生成形象；答了或已知就不再问，不描述也记下", () => {
+  const input: ProfileGapInput = { ...base, portrait: { written: true, confirmed: true } };
+  const gap = profileGaps(input).find((item) => item.code === "APPEARANCE")!;
+  expect(gap).toMatchObject({ identityId: "person", blocking: false });
+  expect(gap.question.text).toContain("只用于生成形象");
+  expect(answeredGapFacts(`【${gap.question.text}】选择：我来描述。补充：男，狼尾长发，常穿全黑`, [gap]))
+    .toEqual([{ identityId: "person", projectId: "", slot: "appearance", value: "男，狼尾长发，常穿全黑", quote: "男，狼尾长发，常穿全黑" }]);
+  expect(answeredGapFacts(`【${gap.question.text}】选择：不描述，用中性形象`, [gap])).toEqual([expect.objectContaining({ slot: "appearance_skipped" })]);
+  // Not before the portrait exists, and not once the person has said how they look.
+  expect(profileGaps({ ...input, portrait: { written: false, confirmed: false } }).some((item) => item.code === "APPEARANCE")).toBe(false);
+  const said = [...base.facts, { identityId: "person", projectId: "", slot: "hairstyle", value: "狼尾长发", status: "confirmed" }];
+  expect(profileGaps({ ...input, facts: said }).some((item) => item.code === "APPEARANCE")).toBe(false);
 });
 
 test("一个非默认项目没有截止时，问「有截止日期吗」，答「没有截止」写成 no_deadline", () => {

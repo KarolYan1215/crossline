@@ -369,7 +369,7 @@ export function withGapQuestions(output: OnboardingTurn, gaps: ProfileGap[], mes
   const projects = new Set([...output.questions.map((question) => question.projectId), ...output.slotUpdates.map((update) => update.projectId)].filter(Boolean));
   const fresh = new Set(round.freshDocuments ?? []);
   const relevant = (gap: ProfileGap) => gap.code === "FILE_UNFILED" ? fresh.has(gap.documentId ?? "")
-    : gap.code === "PORTRAIT_UNCONFIRMED" ? Boolean(output.profile?.portrait)
+    : gap.code === "PORTRAIT_UNCONFIRMED" || gap.code === "APPEARANCE" ? Boolean(output.profile?.portrait)
     : gap.projectId ? projects.has(gap.projectId) || lines.has(gap.identityId) : lines.has(gap.identityId);
   const blockingGaps = open.filter((gap) => gap.blocking);
   const near = open.filter((gap) => !gap.blocking && relevant(gap));
