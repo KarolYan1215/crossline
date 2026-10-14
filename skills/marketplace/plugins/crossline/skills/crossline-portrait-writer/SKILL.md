@@ -29,7 +29,9 @@ When the context carries `only: "gap"` and `previous` (the current report), answ
 
 ## Character — their cartoon figure
 
-`character` describes what is personal in the cartoon figure that stands for them; the app fixes everything else (style, proportions, backdrop in their type group's colour, outfit colour from their base line). In English: `outfit` — what they would plausibly wear at work, ≤ 80 characters (「a light lab coat over a hoodie」); `props` — up to three objects tied to their lines and what charges them, each a few words (「a notebook」「a small circuit board」「a camera」); `pose` and `expression` — one of the listed values that fits them. Never names, logos, text, brands, places or anything that identifies them; do not describe face, hair, gender or body.
+`character` describes what is personal in the cartoon figure that stands for them; the app fixes everything else (style, proportions, backdrop in their type group's colour, outfit colour from their base line). In English: `outfit` — what they would plausibly wear at work, ≤ 80 characters (「a light lab coat over a hoodie」); `props` — up to three objects tied to their lines and what charges them, each a few words (「a notebook」「a small circuit board」「a camera」); `pose` and `expression` — one of the listed values that fits them; `appearance` — how the person **says** they look, in English, ≤ 160 characters: gender presentation, hairstyle, the clothes and colours they wear (「male, long wolf-cut hair, dressed all in black」), taken only from their own words in a confirmed fact or a reply, never guessed from anything else; "" when they never said. When `appearance` gives clothing colours, write `outfit` in those colours. Never names, logos, text, brands, places or anything that identifies them; never a face or a body beyond what `appearance` carries from their own words.
+
+A personality label the person reports about themselves (an MBTI such as ENTP) is their own word about how they think: weigh it as one more piece of evidence for the axes, never name it, quote it or put any outside type in the report.
 
 ## Privacy
 

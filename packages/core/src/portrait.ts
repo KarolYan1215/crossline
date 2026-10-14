@@ -57,8 +57,12 @@ export type PortraitReport = {
    * their four-letter type by `portraitType`; the names are fixed in code, not written here.
    */
   type?: { scope: number; basis: number; output: number; rhythm: number; evidence: { scope: string; basis: string; output: string; rhythm: string } };
-  /** What varies in their cartoon figure (`CHARACTER_STANDARD` fixes the rest): outfit, up to three props, a pose and an expression. */
-  character?: { outfit: string; props: string[]; pose: string; expression: string };
+  /**
+   * What varies in their cartoon figure (`CHARACTER_STANDARD` fixes the rest): outfit, up to three props, a pose and an expression, and
+   * `appearance` — how the person says they look (gender presentation, hair, the clothes they wear), only from their own words, "" when
+   * they said nothing. Older reports have no `appearance`.
+   */
+  character?: { outfit: string; props: string[]; pose: string; expression: string; appearance?: string };
   sensitive: string[];
 };
 
@@ -85,7 +89,8 @@ export const PORTRAIT_SCHEMA = object({
     impact: score(1, 5), effort: score(1, 5) }) },
   type: object({ scope: score(0, 100), basis: score(0, 100), output: score(0, 100), rhythm: score(0, 100),
     evidence: object({ scope: text(80), basis: text(80), output: text(80), rhythm: text(80) }) }),
-  character: object({ outfit: text(80), props: list(3, 40), pose: { type: "string", enum: [...CHARACTER_POSES] }, expression: { type: "string", enum: [...CHARACTER_EXPRESSIONS] } }),
+  character: object({ outfit: text(80), props: list(3, 40), pose: { type: "string", enum: [...CHARACTER_POSES] }, expression: { type: "string", enum: [...CHARACTER_EXPRESSIONS] },
+    appearance: text(160) }),
   sensitive: list(30, 60)
 });
 

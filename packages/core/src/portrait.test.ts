@@ -42,6 +42,24 @@ test("the type is read from the axis scores into a fixed name and group; the fig
   expect(portraitType(report)).toBeNull();
 });
 
+test("the person's own appearance replaces the neutral defaults; the base line's colour moves to accessories and the circle keeps the group tint", () => {
+  const typed: PortraitReport = { ...report,
+    type: { scope: 82, basis: 30, output: 40, rhythm: 55, evidence: { scope: "", basis: "", output: "", rhythm: "" } },
+    character: { outfit: "an all-black hoodie and black trousers", props: ["a notebook"], pose: "standing confidently", expression: "focused",
+      appearance: "male, long wolf-cut hair, dressed all in black" },
+    lines: { allocation: "", items: [{ lineId: "research", description: "", goals: [], feeds: [], targetShare: 60 }, { lineId: "media", description: "", goals: [], feeds: [], targetShare: 40 }] } };
+  const prompt = characterPrompt(typed)!;
+  expect(prompt).toContain("male, long wolf-cut hair, dressed all in black");
+  expect(prompt).not.toContain("gender-neutral");
+  expect(prompt).not.toContain("simple neat hairstyle");
+  expect(prompt).toContain("Accessories and small details");
+  expect(prompt).toContain("deep blue");
+  expect(prompt).not.toContain("main colour deep blue");
+  expect(prompt).toContain(`Group tint for the circle: ${portraitType(typed)!.group.tint}`);
+  // Without the person's words nothing changes.
+  expect(characterPrompt({ ...typed, character: { ...typed.character!, appearance: "" } })).toContain("main colour deep blue");
+});
+
 test("shares are scaled to a whole", () => {
   const checked = validatePortrait({ ...report, lines: { allocation: "", items: [
     { lineId: "research", description: "", goals: [], feeds: [], share: 60, targetShare: 30 }, { lineId: "media", description: "", goals: [], feeds: [], share: 60, targetShare: 30 }] } }, ["research", "media"]);
