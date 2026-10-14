@@ -26,7 +26,7 @@ import { createTaskTitler, untitledTasks } from "./task-titler";
 import { createCalendarClassifier, unfiledCalendarEvents } from "./calendar-classifier";
 import { createInsightCompiler, linesAwaitingMineSkill } from "./insight-compiler";
 import { cleanPublicSkills, createSkillScout, scoutDue } from "./public-skills";
-import { browserProfilesRoot, cleanGrownSkills, growCandidates, growTask, installGrown, markWorkflowRun, openWorkflowLogin, sayToPerson, startWorkflowRun,
+import { browserProfilesRoot, cleanGrownSkills, finishWorkflowLogin, growCandidates, growTask, installGrown, markWorkflowRun, openWorkflowLogin, sayToPerson, startWorkflowRun,
   workflowSchedulePass } from "./workflow-smith";
 import { createGoalSplitter, linesAwaitingCandidateSplit, linesAwaitingSplit } from "./goal-splitter";
 import { fileSourceDocuments } from "./source-filing";
@@ -941,6 +941,7 @@ if (!capabilitySecret) {
     growWorkflows: (workspaceId) => { void workflowPass(workspaceId, new Date().toISOString()).catch(() => undefined); },
     workflowAction: (workspaceId, id, action, service) => {
       if (action === "login") return openWorkflowLogin(analysisStore, workspaceId, id, service, browserProfilesRoot(workspaceId));
+      if (action === "login_done") return finishWorkflowLogin(analysisStore, workspaceId, id, service);
       const record = readGrownSkills(analysisStore, workspaceId).find((item) => item.id === id && item.status === "active");
       if (!record) return { ok: false, code: "WORKFLOW_NOT_ACTIVE", message: "这个工作流还没启用。" };
       if (isPaused(analysisStore, workspaceId)) return { ok: false, code: "AGENT_PAUSED", message: "助手已暂停。" };

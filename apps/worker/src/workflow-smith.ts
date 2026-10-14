@@ -228,39 +228,78 @@ export const browserProfilesRoot = (workspaceId: string, env: NodeJS.ProcessEnv 
 /** Where a service's login lives for this workspace: a browser profile of Crossline's own, never the person's everyday browser. */
 export const accessProfileDir = (profilesRoot: string, access: Pick<WorkflowAccess, "site" | "service">) => path.join(profilesRoot, accessProfileSlug(access));
 
-/** The browser the person logs in with and the scripts read with: `CROSSLINE_LOGIN_BROWSER`, else Edge, else Chrome. */
+/**
+ * The browser the person logs in with and the scripts read with: `CROSSLINE_LOGIN_BROWSER`, else Playwright's own Chromium, else Chrome,
+ * else Edge. Chromium first: a fresh Edge profile signed itself in with the Windows account, raised sign-in prompts for unrelated
+ * apps, and kept running in the background after the window was closed, so the login was never recorded and the profile stayed locked
+ * (2026-10-14).
+ */
 export function loginBrowser(env: NodeJS.ProcessEnv = process.env): string | undefined {
-  const candidates = [env.CROSSLINE_LOGIN_BROWSER,
-    path.join(env["ProgramFiles(x86)"] ?? "C:\Program Files (x86)", "Microsoft", "Edge", "Application", "msedge.exe"),
-    path.join(env.ProgramFiles ?? "C:\Program Files", "Microsoft", "Edge", "Application", "msedge.exe"),
-    path.join(env.ProgramFiles ?? "C:\Program Files", "Google", "Chrome", "Application", "chrome.exe")];
+  const playwright = path.join(env.LOCALAPPDATA ?? "", "ms-playwright");
+  let chromium: string | undefined;
+  try {
+    chromium = readdirSync(playwright).filter((name) => /^chromium-\d+$/.test(name)).sort((a, b) => Number(b.split("-")[1]) - Number(a.split("-")[1]))
+      .flatMap((name) => ["chrome-win64", "chrome-win"].map((dir) => path.join(playwright, name, dir, "chrome.exe"))).find((file) => existsSync(file));
+  } catch { chromium = undefined; }
+  const candidates = [env.CROSSLINE_LOGIN_BROWSER, chromium,
+    path.join(env.ProgramFiles ?? "C:\\Program Files", "Google", "Chrome", "Application", "chrome.exe"),
+    path.join(env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)", "Microsoft", "Edge", "Application", "msedge.exe")];
   return candidates.find((candidate): candidate is string => Boolean(candidate) && existsSync(candidate!));
 }
+/** Flags that keep a login window to itself: no first-run pages, no account sync, and no running on in the background once closed. */
+const LOGIN_FLAGS = ["--no-first-run", "--no-default-browser-check", "--disable-sync", "--disable-background-mode", "--new-window"];
 
 type RunFree = (input: AgentTaskInput & { taskId: string }, after?: (outcome: AgentOutcome | { state: "failed"; message: string }) => void) => DispatchResult;
-/** Login windows still open, by workflow: a run would find the profile in use, so it waits for the person to close it. */
-const openLogins = new Map<string, number>();
+/** Login windows still open, by workflow: a run would find the profile in use, so it waits; 「我已登录」 closes the window. */
+const openLogins = new Map<string, { service: string; browser: string; close: () => void }>();
 
 /**
  * 「登录」: opens the service's site in a browser window of its own (its own profile folder), for the person to log in themselves. Nothing
- * is typed for them and nothing is read from their everyday browser; when they close the window the login is recorded.
+ * is typed for them and nothing is read from their everyday browser; when they close the window, or press 「我已登录」, the login is
+ * recorded with the browser it was made in (the run must read with the same one).
  */
 export function openWorkflowLogin(store: CrosslineStore, workspaceId: string, id: string, service: string, profilesRoot: string,
-  deps: { launch?: (browser: string, args: string[], onExit: () => void) => void; browser?: string; now?: () => Date } = {}):
+  deps: { launch?: (browser: string, args: string[], onExit: () => void) => { close: () => void }; browser?: string; now?: () => Date } = {}):
   { ok: true } | { ok: false; code: string; message: string } {
   const record = readGrownSkills(store, workspaceId).find((item) => item.id === id);
   const access = record ? workflowAccess(record).access.find((item) => item.service === service && item.login) : undefined;
   if (!record || !access) return { ok: false, code: "WORKFLOW_ACCESS_NOT_FOUND", message: "这个工作流不需要登录这个网站。" };
   const browser = deps.browser ?? loginBrowser();
-  if (!browser) return { ok: false, code: "LOGIN_BROWSER_MISSING", message: "这台电脑上没有找到 Edge 或 Chrome。" };
+  if (!browser) return { ok: false, code: "LOGIN_BROWSER_MISSING", message: "这台电脑上没有找到可用的浏览器。" };
   const key = `${workspaceId}:${id}`;
-  if (openLogins.has(key)) return { ok: false, code: "LOGIN_WINDOW_OPEN", message: "登录窗口已经打开，登录后关掉它即可。" };
+  if (openLogins.has(key)) return { ok: false, code: "LOGIN_WINDOW_OPEN", message: "登录窗口已经打开；登录后点「我已登录」。" };
   const dir = accessProfileDir(profilesRoot, access);
   mkdirSync(dir, { recursive: true });
-  openLogins.set(key, Date.now());
-  const done = () => { openLogins.delete(key); recordGrownLogin(store, workspaceId, id, service, deps.now?.() ?? new Date()); };
-  const launch = deps.launch ?? ((exe, args, onExit) => { spawn(exe, args, { stdio: "ignore", windowsHide: false }).on("exit", onExit).on("error", onExit); });
-  launch(browser, [`--user-data-dir=${dir}`, "--no-first-run", "--no-default-browser-check", "--new-window", access.site], done);
+  let recorded = false;
+  const done = () => {
+    openLogins.delete(key);
+    if (!recorded) { recorded = true; recordGrownLogin(store, workspaceId, id, service, deps.now?.() ?? new Date(), browser); }
+  };
+  const launch = deps.launch ?? ((exe, args, onExit) => {
+    const child = spawn(exe, args, { stdio: "ignore", windowsHide: false });
+    child.on("exit", onExit).on("error", onExit);
+    // Closed the way a person closes it (no /F first), so the browser writes its cookies out; forced only if it does not go.
+    return { close: () => {
+      if (child.exitCode !== null || !child.pid) return;
+      spawn("taskkill", ["/PID", String(child.pid), "/T"], { stdio: "ignore", windowsHide: true });
+      setTimeout(() => { if (child.exitCode === null) spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true }); }, 10_000).unref();
+    } };
+  });
+  const window = launch(browser, [`--user-data-dir=${dir}`, ...LOGIN_FLAGS, access.site], done);
+  openLogins.set(key, { service, browser, close: window.close });
+  return { ok: true };
+}
+
+/** 「我已登录」: the person says they are done; the window (and any browser it left running) is closed and the login recorded. */
+export function finishWorkflowLogin(store: CrosslineStore, workspaceId: string, id: string, service: string, now = new Date()): { ok: true } | { ok: false; code: string; message: string } {
+  const record = readGrownSkills(store, workspaceId).find((item) => item.id === id);
+  if (!record || !workflowAccess(record).access.some((item) => item.service === service && item.login))
+    return { ok: false, code: "WORKFLOW_ACCESS_NOT_FOUND", message: "这个工作流不需要登录这个网站。" };
+  const open = openLogins.get(`${workspaceId}:${id}`);
+  openLogins.delete(`${workspaceId}:${id}`);
+  open?.close();
+  // A window opened before the worker last restarted is no longer tracked; the person's word is taken, with the browser in use now.
+  recordGrownLogin(store, workspaceId, id, service, now, open?.browser ?? record.loginBrowsers?.[service] ?? loginBrowser() ?? "");
   return { ok: true };
 }
 
@@ -270,15 +309,19 @@ export function openWorkflowLogin(store: CrosslineStore, workspaceId: string, id
  * login, or why it did not start.
  */
 export function startWorkflowRun(store: CrosslineStore, workspaceId: string, record: GrownSkillRecord, runFree: RunFree, profilesRoot: string,
-  now = new Date(), browser = loginBrowser()): DispatchResult {
+  now = new Date(), fallbackBrowser = loginBrowser()): DispatchResult {
   if (openLogins.has(`${workspaceId}:${record.id}`)) return { state: "blocked", code: "LOGIN_WINDOW_OPEN", message: "登录窗口还开着；登录后关掉它再运行。" };
   const { access } = workflowAccess(record);
   const home = grownHomeLine(store, workspaceId, record);
   const personSteps = record.manifest.steps.filter((step) => step.by === "person").map((step) => step.title);
   const folders = record.manifest.inputs.filter((item) => path.isAbsolute(item) && existsSync(item));
-  const accounts = access.map((item) => item.login
+  const accounts = access.map((item) => {
+    // The same browser the person logged in with: a profile is read by the browser that wrote it.
+    const browser = record.loginBrowsers?.[item.service] || fallbackBrowser;
+    return item.login
     ? `${item.service}（${item.site}）：浏览器配置目录 ${accessProfileDir(profilesRoot, item)}${browser ? `，浏览器程序 ${browser}` : ""}，本人已在其中登录。`
-    : `${item.service}（${item.site}）：公开页面，不需要登录。`);
+    : `${item.service}（${item.site}）：公开页面，不需要登录。`;
+  });
   const accountRules = accounts.length ? [
     `要读取的网站：${accounts.join(" ")}`,
     "把这两个路径作为 --profile 与 --browser 交给工作流的脚本，只用浏览器自动化打开页面读取，放慢速度；不读、不复制、不打印配置目录里的任何文件（Cookies、Local Storage 等），不在账号里做任何改动（移动、删除、取消收藏、点赞、评论、发布）。",

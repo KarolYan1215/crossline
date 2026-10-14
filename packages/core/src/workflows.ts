@@ -166,6 +166,8 @@ export type GrownSkillRecord = {
   /** When the person accepted the risks of what it reads, and when they last logged in to each service it reads behind a login. */
   consentedAt?: string;
   logins?: Record<string, string>;
+  /** The browser each login was made in: the profile it wrote is read by that same browser. */
+  loginBrowsers?: Record<string, string>;
   /** Kept by the person: never removed for being idle. */
   pinned: boolean;
   createdAt: string; updatedAt: string; lastUsedAt: string;

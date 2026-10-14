@@ -374,7 +374,7 @@ export async function startCodexSupervisor(options: {
    * A grown workflow, by hand (docs/skills-library.md §6): `login` opens a browser window of its own for the person to log in to a site
    * it reads; `run` starts it now. Both answer at once.
    */
-  workflowAction?: (workspaceId: string, id: string, action: "login" | "run", service: string) => { ok: boolean; [key: string]: unknown };
+  workflowAction?: (workspaceId: string, id: string, action: "login" | "login_done" | "run", service: string) => { ok: boolean; [key: string]: unknown };
   /** The person asked for a workflow in words: grow it now rather than at the next tick. Answers at once. */
   growWorkflows?: (workspaceId: string) => void;
   /** Writes plan blocks to the person's Crossline calendar. Only blocks; never touches any other calendar or event. */
@@ -908,7 +908,7 @@ export async function startCodexSupervisor(options: {
         sendJson(response, 202, { ok: true });
         return;
       }
-      const workflowRoute = /^\/v1\/workflows\/([a-zA-Z0-9_-]{1,128})\/(login|run)$/.exec(pathname);
+      const workflowRoute = /^\/v1\/workflows\/([a-zA-Z0-9_-]{1,128})\/(login|login_done|run)$/.exec(pathname);
       if (workflowRoute && request.method === "POST" && options.workflowAction) {
         if (request.headers.origin || !request.headers["content-type"]?.startsWith("application/json")) {
           sendJson(response, 403, { blocker: { code: "AGENT_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
@@ -916,7 +916,7 @@ export async function startCodexSupervisor(options: {
         }
         if (workflowRoute[2] === "run") { const rt = await modelClient(response, callerWorkspaceId); if (!rt) return; }
         const body = await readJsonBody(request);
-        const result = options.workflowAction(callerWorkspaceId, workflowRoute[1]!, workflowRoute[2] as "login" | "run",
+        const result = options.workflowAction(callerWorkspaceId, workflowRoute[1]!, workflowRoute[2] as "login" | "login_done" | "run",
           typeof body?.service === "string" ? body.service.slice(0, 40) : "");
         // Refusals are answers ({ok:false, code, message}), so the page can say why.
         sendJson(response, 200, result);

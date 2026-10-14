@@ -95,9 +95,10 @@ export function consentToGrownSkill(store: CrosslineStore, workspaceId: string, 
 }
 
 /** Records that the person finished logging in to a service a workflow reads (the browser window they logged in with was closed). */
-export function recordGrownLogin(store: CrosslineStore, workspaceId: string, id: string, service: string, now = new Date()): void {
+export function recordGrownLogin(store: CrosslineStore, workspaceId: string, id: string, service: string, now = new Date(), browser = ""): void {
   const at = now.toISOString();
-  writeGrownSkills(store, workspaceId, readGrownSkills(store, workspaceId).map((item) => item.id === id ? { ...item, logins: { ...(item.logins ?? {}), [service]: at } } : item));
+  writeGrownSkills(store, workspaceId, readGrownSkills(store, workspaceId).map((item) => item.id === id ? { ...item, logins: { ...(item.logins ?? {}), [service]: at },
+    ...(browser ? { loginBrowsers: { ...(item.loginBrowsers ?? {}), [service]: browser } } : {}) } : item));
   store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.logged_in:${id}:${at}`, type: "skill.grown.logged_in",
     entityId: id, payload: { id, service } });
 }

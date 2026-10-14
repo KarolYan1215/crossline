@@ -17,8 +17,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const result = changeGrownSkill(guard.ctx, id, "consent");
     return NextResponse.json(result, { status: result.ok ? 200 : 409 });
   }
-  if (action === "login" || action === "run") {
-    if (action === "login" && (typeof service !== "string" || !service.trim() || service.length > 40)) return NextResponse.json({ ok: false, code: "INVALID_REQUEST" }, { status: 400 });
+  if (action === "login" || action === "login_done" || action === "run") {
+    if (action !== "run" && (typeof service !== "string" || !service.trim() || service.length > 40)) return NextResponse.json({ ok: false, code: "INVALID_REQUEST" }, { status: 400 });
     const result = await grownSkillAction(guard.ctx, id, action, typeof service === "string" ? service : "");
     return NextResponse.json(result, { status: result.ok ? 200 : 409 });
   }

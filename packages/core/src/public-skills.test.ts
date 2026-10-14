@@ -39,6 +39,9 @@ test("the scan flags text that steers the model, and text hidden with invisible 
     expect(scanSkillFiles([{ path: "SKILL.md", text: line }]).injection, line).toBe(true);
   }
   expect(scanSkillFiles([{ path: "references/guide.md", text: "Ask the user before publishing." }]).injection).toBe(false);
+  // Excel's byte-order mark at the start of a CSV is not hidden text; the same character inside a line still is.
+  expect(scanSkillFiles([{ path: "examples/material_audit.csv", text: "﻿file,lecture\nL1.pdf,1" }]).injection).toBe(false);
+  expect(scanSkillFiles([{ path: "examples/a.csv", text: "file\nL1﻿.pdf" }]).injection).toBe(true);
 });
 
 test("the scan caps the review: a risky script means text only, an injection means no", () => {

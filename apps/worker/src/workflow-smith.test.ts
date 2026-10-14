@@ -6,7 +6,7 @@ import { CrosslineStore, consentToGrownSkill, createReminderWorkflow, grownHomeL
 import { LINE_SETTING } from "@crossline/identity-packs";
 import { validateWorkflowManifest } from "@crossline/core";
 import type { AgentOutcome } from "./agent-task";
-import { cleanGrownSkills, growCandidates, growTask, installGrown, openWorkflowLogin, SKILL_CREATOR, startWorkflowRun, workflowSchedulePass } from "./workflow-smith";
+import { cleanGrownSkills, finishWorkflowLogin, growCandidates, growTask, installGrown, openWorkflowLogin, SKILL_CREATOR, startWorkflowRun, workflowSchedulePass } from "./workflow-smith";
 import { fakeRuntime, scriptedRuntime } from "./testing/fake-runtime";
 import { librarySkillsFor } from "./skill-library";
 
@@ -194,20 +194,20 @@ test("the person logs in in a window of its own; a run is told that profile, and
     createdAt: "", updatedAt: "", lastUsedAt: "" }]));
   const profiles = path.join(root, "profiles");
   let launched: { exe: string; args: string[]; onExit: () => void } | undefined;
-  const opened = openWorkflowLogin(store, ws, "flow-xhs", "小红书", profiles, { browser: "msedge.exe", launch: (exe, args, onExit) => { launched = { exe, args, onExit }; } });
+  const opened = openWorkflowLogin(store, ws, "flow-xhs", "小红书", profiles, { browser: "chrome.exe", launch: (exe, args, onExit) => { launched = { exe, args, onExit }; return { close: () => {} }; } });
   expect(opened).toEqual({ ok: true });
-  expect(launched!.args).toEqual([`--user-data-dir=${path.join(profiles, "xiaohongshu.com")}`, "--no-first-run", "--no-default-browser-check", "--new-window", "https://www.xiaohongshu.com/explore"]);
-  expect(openWorkflowLogin(store, ws, "flow-xhs", "小红书", profiles, { browser: "x", launch: () => {} })).toMatchObject({ ok: false, code: "LOGIN_WINDOW_OPEN" });
+  expect(launched!.args).toEqual([`--user-data-dir=${path.join(profiles, "xiaohongshu.com")}`, "--no-first-run", "--no-default-browser-check", "--disable-sync", "--disable-background-mode", "--new-window", "https://www.xiaohongshu.com/explore"]);
+  expect(openWorkflowLogin(store, ws, "flow-xhs", "小红书", profiles, { browser: "x", launch: () => ({ close: () => {} }) })).toMatchObject({ ok: false, code: "LOGIN_WINDOW_OPEN" });
   const record = readGrownSkills(store, ws)[0]!;
   // While the window is open the profile is in use, so a run waits.
   expect(startWorkflowRun(store, ws, record, () => ({ state: "started", taskId: "t" }), profiles)).toMatchObject({ state: "blocked", code: "LOGIN_WINDOW_OPEN" });
   launched!.onExit();
-  expect(readGrownSkills(store, ws)[0]!.logins).toEqual({ 小红书: expect.any(String) });
+  expect(readGrownSkills(store, ws)[0]!).toMatchObject({ logins: { 小红书: expect.any(String) }, loginBrowsers: { 小红书: "chrome.exe" } });
   let after: ((outcome: AgentOutcome) => void) | undefined;
   const inputs: Array<{ what: string; inputs?: string[] }> = [];
-  expect(startWorkflowRun(store, ws, record, (input, then) => { inputs.push(input); after = then; return { state: "started", taskId: input.taskId }; }, profiles, new Date(), "msedge.exe").state).toBe("started");
+  expect(startWorkflowRun(store, ws, readGrownSkills(store, ws)[0]!, (input, then) => { inputs.push(input); after = then; return { state: "started", taskId: input.taskId }; }, profiles, new Date(), "other.exe").state).toBe("started");
   expect(inputs[0]!.inputs).toEqual([root]);
-  expect(inputs[0]!.what).toContain(`浏览器配置目录 ${path.join(profiles, "xiaohongshu.com")}，浏览器程序 msedge.exe`);
+  expect(inputs[0]!.what).toContain(`浏览器配置目录 ${path.join(profiles, "xiaohongshu.com")}，浏览器程序 chrome.exe`);
   after!({ ...done("t", root), summary: { needsHuman: [{ what: "需要登录：小红书", why: "打开收藏页跳到了登录页" }] } } as unknown as AgentOutcome);
   expect(said().at(-1)).toContain("这次没读到：需要登录：小红书");
 });
@@ -275,4 +275,18 @@ test("a request whose growing run was lost to a restart is grown again, up to th
   const other = requestWorkflow(store, ws, "每周剪 vlog", "media", owner());
   store.appendEvent({ ownerId: owner(), workspaceId: ws, idempotencyKey: "att-g4", type: "skill.grown.attempted", entityId: "media", payload: { taskId: "g4", state: "started", requestId: other } });
   expect(growCandidates(store, ws)).toEqual([]);
+});
+
+test("「我已登录」 closes a login window the browser kept running in the background and records the login with that browser", () => {
+  store.setSetting(ws, "skills.grown", JSON.stringify([{ id: "flow-xhs", kind: "grown", name: "xhs", description: "d", lines: ["media"], category: "files_calendar_prep",
+    manifest: favourites, origin: { kind: "asked", text: "t", requestId: "r" }, taskId: "", files: [], scan: { risk: "low", injection: false, findings: [] },
+    review: { verdict: "usable", reasons: [], final: "usable" }, status: "active", pinned: false, createdAt: "", updatedAt: "", lastUsedAt: "" }]));
+  let closed = 0;
+  openWorkflowLogin(store, ws, "flow-xhs", "小红书", path.join(root, "p"), { browser: "chromium.exe", launch: () => ({ close: () => { closed += 1; } }) });
+  expect(finishWorkflowLogin(store, ws, "flow-xhs", "小红书")).toEqual({ ok: true });
+  expect(closed).toBe(1);
+  expect(readGrownSkills(store, ws)[0]).toMatchObject({ loginBrowsers: { 小红书: "chromium.exe" } });
+  // The window is no longer in the way of a run.
+  expect(startWorkflowRun(store, ws, readGrownSkills(store, ws)[0]!, (input) => ({ state: "started", taskId: input.taskId }), path.join(root, "p")).state).toBe("started");
+  expect(finishWorkflowLogin(store, ws, "flow-xhs", "微博")).toMatchObject({ ok: false });
 });

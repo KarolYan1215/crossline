@@ -121,11 +121,14 @@ function GrownFlow({ flow, onChanged }: { flow: GrownSkillView; onChanged: (flow
   const send = async (method: "POST" | "DELETE", body?: object) => fetch(`/api/skills/grown/${encodeURIComponent(flow.id)}`,
     { method, headers: { "content-type": "application/json" }, ...(body ? { body: JSON.stringify(body) } : {}) }).then((response) => response.ok).catch(() => false);
   // 「登录」 and 「立即运行」 are carried out by the worker; its refusal says why in words.
-  const act = async (body: object, success: string) => {
+  const act = async (body: object, success: string): Promise<boolean> => {
     const result = await fetch(`/api/skills/grown/${encodeURIComponent(flow.id)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
       .then((response) => response.json() as Promise<{ ok: boolean; message?: string }>).catch(() => ({ ok: false, message: "未完成" }));
     setNote(result.ok ? success : result.message || "未完成");
+    return result.ok;
   };
+  // Services whose login window this page opened: 「我已登录」 closes it and records the login.
+  const [opened, setOpened] = useState<string[]>([]);
   const verdict = VERDICT[flow.verdict];
   const person = flow.steps.filter((step) => step.person);
   const waiting = flow.status === "needs_consent";
@@ -141,9 +144,16 @@ function GrownFlow({ flow, onChanged }: { flow: GrownSkillView; onChanged: (flow
           const status = flow.status === "active" ? "off" : "active";
           if (await send("POST", { status })) onChanged({ ...flow, status }); else setNote("未保存");
         }}>{flow.status === "active" ? "关闭" : "启用"}</button>}
-        {flow.access.filter((item) => item.login).map((item) => <button key={item.service} type="button" className="secondary-button"
-          onClick={() => act({ action: "login", service: item.service }, `已打开${item.service}的登录窗口：在窗口里登录，登录后关掉窗口`)}>
-          {item.loggedInAt ? `重新登录${item.service}` : `登录${item.service}`}</button>)}
+        {flow.access.filter((item) => item.login).map((item) => opened.includes(item.service)
+          ? <button key={item.service} type="button" className="secondary-button" onClick={async () => {
+            if (await act({ action: "login_done", service: item.service }, `已记下${item.service}的登录，登录窗口已关闭`)) {
+              setOpened((all) => all.filter((name) => name !== item.service));
+              onChanged({ ...flow, access: flow.access.map((one) => one.service === item.service ? { ...one, loggedInAt: new Date().toISOString() } : one) });
+            }
+          }}>我已登录{item.service}</button>
+          : <button key={item.service} type="button" className="secondary-button" onClick={async () => {
+            if (await act({ action: "login", service: item.service }, `已打开${item.service}的登录窗口：在窗口里自己登录，登录后点「我已登录${item.service}」`)) setOpened((all) => [...all, item.service]);
+          }}>{item.loggedInAt ? `重新登录${item.service}` : `登录${item.service}`}</button>)}
         {flow.status === "active" && flow.action === "run" && <button type="button" className="secondary-button"
           onClick={() => act({ action: "run" }, "已交给助手，做好后通知")}>立即运行</button>}
         <button type="button" className="secondary-button" aria-pressed={flow.pinned} onClick={async () => {

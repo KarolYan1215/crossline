@@ -122,7 +122,7 @@ export function changeGrownSkill(ctx: AccessContext, id: string, change: { statu
 }
 
 /** 「登录」 (a browser window of its own opens on this computer) and 「立即运行」, both carried out by the worker. */
-export async function grownSkillAction(ctx: AccessContext, id: string, action: "login" | "run", service = ""):
+export async function grownSkillAction(ctx: AccessContext, id: string, action: "login" | "login_done" | "run", service = ""):
   Promise<{ ok: boolean; code?: string; message?: string; taskId?: string }> {
   try {
     return await requestCodexSupervisor<{ ok: boolean; code?: string; message?: string; taskId?: string }>(ctx, `/v1/workflows/${encodeURIComponent(id)}/${action}`, {

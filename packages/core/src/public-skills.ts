@@ -103,7 +103,9 @@ export function scanSkillFiles(files: Array<{ path: string; text: string }>): Sk
         for (const entry of SCRIPT_RULES) if (entry.pattern.test(entry.rule === "outside" ? withoutFonts : text)) add(entry.rule);
       });
     } else {
-      lines.forEach((line, index) => {
+      lines.forEach((raw, index) => {
+        // A UTF-8 byte-order mark opening a file is how Excel saves a CSV, not hidden text (a real grown workflow was refused for it).
+        const line = index === 0 ? raw.replace(/^﻿/, "") : raw;
         if (INJECTION.test(line)) { injection = true; findings.push({ file: file.path, line: index + 1, rule: "injection", excerpt: line.trim().slice(0, 160) }); }
         if (HIDDEN.test(line)) { injection = true; findings.push({ file: file.path, line: index + 1, rule: "hidden.text", excerpt: line.replace(HIDDEN, "␣").trim().slice(0, 160) }); }
       });
