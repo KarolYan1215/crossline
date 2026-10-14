@@ -165,8 +165,8 @@ function MessageItem({ message, onUpdate, choices }: { message: MessageView; onU
   </li>;
 }
 
-/** A turn's card: the actions proposed (执行 carries out every pending one), and the question back when there is one. */
-function CardView({ messageId, card, onUpdate, choices }: { messageId: string; card: Card; onUpdate: (message: MessageView) => void; choices: CardChoices | null }) {
+/** A turn's card: the actions proposed (执行 carries out every pending one), and the question back when there is one. Exported for its test. */
+export function CardView({ messageId, card, onUpdate, choices }: { messageId: string; card: Card; onUpdate: (message: MessageView) => void; choices: CardChoices | null }) {
   const [working, setWorking] = useState(false);
   const [error, setError] = useState("");
   // Fields changed on the card, by action index; sent with 执行 and checked again on the server.
@@ -186,6 +186,8 @@ function CardView({ messageId, card, onUpdate, choices }: { messageId: string; c
   const chosen = card.clarify.chosen !== undefined ? card.clarify.options[card.clarify.chosen] : undefined;
   const ran = [...visible, ...(chosen?.actions ?? [])];
   const pending = visible.filter((index) => card.items[index]?.state === "pending");
+  // An answer with nothing to carry out, ask or report has no card: an empty one drew a grey bar under every plain reply.
+  if (!card.reviewing && !(card.reviewed && card.revised) && !ran.length && !card.clarify.question && !error) return null;
   return <div className="conversation-card" data-error={card.error ? "" : undefined} aria-busy={card.reviewing || undefined}>
     {card.reviewing && <small className="conversation-reviewing" role="status">正在用更强的模型仔细核对…</small>}
     {card.reviewed && card.revised && <small className="muted">已核对并修改</small>}

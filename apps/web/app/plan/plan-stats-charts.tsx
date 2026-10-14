@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 import { availabilityGrid, type CapacityWeek, type EstimatePoint, type GoalRow, type Investment } from "../../lib/plan-stats";
 import { Ring } from "../ui/charts";
 import { LineTag, Tag } from "../ui/tag";
@@ -14,14 +14,20 @@ import { usePlanPreview } from "./preview-context";
  */
 
 /** The width a chart has, so it is drawn at that width and its 12px labels stay 12px on a phone. */
-function useWidth(initial: number): [RefObject<HTMLDivElement | null>, number] {
-  const box = useRef<HTMLDivElement>(null);
+/**
+ * The width a chart has, measured from the element the returned ref lands on. A callback ref, not an effect on mount: a chart that
+ * first renders its empty state attaches the box later, and the mount-time effect never saw it — the width stayed at `initial` (640)
+ * and a phone drew the wide layout 510px across a 375px screen.
+ */
+function useWidth(initial: number): [(node: HTMLDivElement | null) => void, number] {
   const [width, setWidth] = useState(initial);
-  useEffect(() => {
-    if (!box.current || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(([entry]) => { const next = Math.round(entry?.contentRect.width ?? 0); if (next > 0) setWidth(next); });
-    observer.observe(box.current);
-    return () => observer.disconnect();
+  const observer = useRef<ResizeObserver | null>(null);
+  const box = useCallback((node: HTMLDivElement | null) => {
+    observer.current?.disconnect();
+    observer.current = null;
+    if (!node || typeof ResizeObserver === "undefined") return;
+    observer.current = new ResizeObserver(([entry]) => { const next = Math.round(entry?.contentRect.width ?? 0); if (next > 0) setWidth(next); });
+    observer.current.observe(node);
   }, []);
   return [box, width];
 }
