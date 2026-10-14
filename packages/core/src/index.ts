@@ -196,10 +196,22 @@ export function validateMilestoneGateResult(
   const mayPass = complete && contractCovered
     && !result.incomplete.some((item) => item.isBlockingPass)
     && result.blockers.length === 0;
-  const quoteIsExact = (quote: string) => quote.length > 0 && evidenceTexts.some((text) => text.includes(quote));
-  if (!complete || quotes.some((quote) => !quoteIsExact(quote)) || (result.verdict === "pass") !== mayPass) {
-    throw new Error("GATE_VERDICT_INCONSISTENT");
-  }
+  // Verbatim in content, not in markup: evidence can be Markdown (what the assistant delivers), and a quote copied out of a bold phrase
+  // or a table cell drops the `**` and `|` around it. Formatting marks and runs of whitespace are ignored on both sides; the words are not.
+  const plain = (text: string) => text.replace(/[*_`#>|]+/g, "").replace(/\s+/g, " ").trim();
+  const evidencePlain = evidenceTexts.map(plain);
+  const quoteIsExact = (quote: string) => plain(quote).length > 0 && evidencePlain.some((text) => text.includes(plain(quote)));
+  // Which rule broke, said back to the Skill as the repair's detail (and to the person if the repairs run out). A bare code gave the
+  // model nothing to correct, and both repairs of a real judgement were spent on it (2026-10-14).
+  const problem = !complete
+    ? `每条达成标准恰好一条判定：缺 ${ids.filter((id) => !verdictIds.includes(id)).join("、") || "无"}${verdictIds.filter((id) => !ids.includes(id)).length ? `，多出 ${verdictIds.filter((id) => !ids.includes(id)).join("、")}` : ""}`
+    : quotes.find((quote) => !quoteIsExact(quote)) !== undefined
+      ? `这句引文在证据里找不到，须逐字摘自证据：「${(quotes.find((quote) => !quoteIsExact(quote)) ?? "").slice(0, 120)}」`
+      : (result.verdict === "pass") !== mayPass
+        ? mayPass ? "契约要求都已覆盖且没有阻塞项，verdict 应为 pass"
+          : `verdict 为 pass，但${!contractCovered ? `这些要求未标出 satisfiedBy：${declared.filter((requirement) => !satisfied.has(requirement)).join("；")}` : "存在阻塞通过的未完成项或 blockers"}`
+        : "";
+  if (problem) throw Object.assign(new Error("GATE_VERDICT_INCONSISTENT"), { detail: problem });
   return result;
 }
 
