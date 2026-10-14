@@ -205,7 +205,7 @@ export function RhythmChart({ rhythm, width = 620, height = 240 }: { rhythm: Ene
     {[rhythm.thresholds.low, rhythm.thresholds.high].map((value) => <line key={value} x1={x(0)} x2={x(24)} y1={y(value)} y2={y(value)} stroke={MUTED} strokeWidth="0.8" strokeDasharray="4 4" />)}
     {(["high", "medium", "low"] as const).map((level) => <text key={level} x={x(24) + 6} y={y(bandOf[level]!) + 4} fontSize="12" fill={MUTED}>{LEVEL_LABEL[level]}</text>)}
     <path d={segments.join(" ")} fill="none" stroke={INK} strokeWidth="2.5" strokeLinejoin="round" />
-    {dots.map((dot, index) => <circle key={index} cx={dot.cx} cy={dot.cy} r="4" fill="#fff" stroke={INK} strokeWidth="1.5" />)}
+    {dots.map((dot, index) => <circle key={index} className="pt-report-dot" cx={dot.cx} cy={dot.cy} r="4" fill="#fff" stroke={INK} strokeWidth="1.5" />)}
     <line x1={x(0)} x2={x(24)} y1={plotTop + plotHeight} y2={plotTop + plotHeight} stroke={INK} strokeWidth="1" />
     {[0, 3, 6, 9, 12, 15, 18, 21, 24].map((hour) => <text key={hour} x={x(hour)} y={height - 10} textAnchor="middle" fontSize="12" fill={MUTED}>{hour}</text>)}
     {sleepSpans.length > 0 && <text x={x(sleepSpans[0]![0]!) + 4} y={plotTop + plotHeight - 6} fontSize="12" fill={MUTED}>睡眠</text>}

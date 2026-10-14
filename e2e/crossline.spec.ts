@@ -559,7 +559,8 @@ test("画像海报的视觉基线", async ({ page }, testInfo) => {
   // The poster is taller than the window: sticky bars would otherwise sit on its top edge in the photo.
   await page.addStyleTag({ content: ".running-head,.pt-toolbar{position:static !important}" });
   await expect(page.locator(".pt-page.pt-type").first()).toHaveScreenshot("portrait-share-half.png");
-  await page.addStyleTag({ content: ".pt-offscreen{position:static !important;left:auto !important}" });
+  // The self-report dots sit at the hour each report was made, and the energy test writes one at the wall-clock time of the run.
+  await page.addStyleTag({ content: ".pt-offscreen{position:static !important;left:auto !important}.pt-report-dot{visibility:hidden}" });
   await expect(page.locator(".pt-card:not(.pt-card-energy)")).toHaveScreenshot("portrait-card.png");
   await expect(page.locator(".pt-card-energy")).toHaveScreenshot("portrait-energy-card.png");
 });
