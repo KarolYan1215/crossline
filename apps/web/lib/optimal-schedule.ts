@@ -11,13 +11,18 @@ import { getStore } from "./crossline";
 export const OPTIMAL_SETTING = "schedule.optimal";
 export const OPTIMAL_TIME_LIMIT_SECONDS = 20;
 
-export type OptimalEntry = { hash: string; result: PlanResult; at: string };
+/**
+ * Bumped whenever the planner's answer for the same input can change (a fixed solver or validator): the cache is keyed on the input,
+ * so without this a result from before a fix — the fallback the half-frozen-step bug forced (2026-10-13) — is served forever.
+ */
+export const OPTIMAL_VERSION = 2;
+export type OptimalEntry = { hash: string; result: PlanResult; at: string; version?: number };
 
 /** The cached plan for this input, or nothing. Blocks already over are the caller's to drop. */
 export function optimalFor(ctx: AccessContext, hash: string): OptimalEntry | undefined {
   try {
     const entry = JSON.parse(getStore().getSetting(ctx.workspaceId, OPTIMAL_SETTING) ?? "") as OptimalEntry;
-    return entry?.hash === hash && entry.result?.plan ? entry : undefined;
+    return entry?.hash === hash && entry.version === OPTIMAL_VERSION && entry.result?.plan ? entry : undefined;
   } catch {
     return undefined;
   }
@@ -55,7 +60,7 @@ async function run(job: Job): Promise<void> {
   const started = Date.now();
   try {
     const result = await planSchedule(job.input, { solver: await defaultSolver(), timeLimitSeconds: OPTIMAL_TIME_LIMIT_SECONDS });
-    getStore().setSetting(workspaceId, OPTIMAL_SETTING, JSON.stringify({ hash: job.hash, result, at: new Date().toISOString() } satisfies OptimalEntry));
+    getStore().setSetting(workspaceId, OPTIMAL_SETTING, JSON.stringify({ hash: job.hash, result, at: new Date().toISOString(), version: OPTIMAL_VERSION } satisfies OptimalEntry));
     console.info(JSON.stringify({ type: "solver.optimal", workspaceId, ms: Date.now() - started, solver: result.solver }));
     for (const listener of listeners) {
       try { listener(workspaceId); } catch { /* a listener's failure is its own */ }
