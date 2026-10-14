@@ -9,6 +9,7 @@ import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { learnedArchetypes } from "./archetype-curator";
 import { ownerOf } from "./owner";
 
+import { MINE_SKILL_INSTRUCTION, librarySkillsFor } from "./skill-library";
 const PLANNER = "crossline:crossline-step-planner";
 const REVIEWER = "crossline:crossline-validation-reviewer";
 const JUDGE = "crossline:crossline-progress-judge";
@@ -117,7 +118,8 @@ export function importantByRule(store: CrosslineStore, workspaceId: string, orde
   return Boolean(order.milestoneId) && (weights[order.milestoneId] ?? 0) >= IMPORTANT_WEIGHT;
 }
 
-export function createStepPlanner(store: CrosslineStore, workspaceId: string, cwd: string, getClient: () => CodexRpcBoundary | undefined) {
+export function createStepPlanner(store: CrosslineStore, workspaceId: string, cwd: string, getClient: () => CodexRpcBoundary | undefined,
+  options: { libraryDir?: string } = {}) {
   return async function plan(workOrderId: string, feedback = "", signal?: AbortSignal): Promise<{ state: "planned"; version: number; warnings: StepWarning[] } | { state: "blocked"; code: string; message: string }> {
     const order = store.listWorkOrders(workspaceId).find((item) => item.id === workOrderId);
     if (!order) return { state: "blocked", code: "STEP_PLAN_TASK_NOT_FOUND", message: "任务不存在" };
@@ -163,8 +165,11 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
       earlierFeedback: store.listEvents(workspaceId, { type: "task.steps_replan_requested", entityId: workOrderId })
         .map((event) => String((event.payload as { feedback?: string }).feedback ?? "").trim()).filter((text) => text && text !== feedback).slice(-8)
     };
-    const result = await runCodexSkill<StepPlan>(client, input, { skillName: PLANNER, cwd,
+    // The person's own skill for this line, read beside the planner's: how they do this kind of work shapes which steps there are.
+    const extraSkills = await librarySkillsFor(client, store, workspaceId, order.identityId, { cwd, ...(options.libraryDir ? { dir: options.libraryDir } : {}) });
+    const result = await runCodexSkill<StepPlan>(client, input, { skillName: PLANNER, cwd, ...(extraSkills.length ? { extraSkills } : {}),
       developerInstructions: "Choose the archetype and write the task's step graph as the Skill describes. Return raw JSON only."
+        + (extraSkills.length ? MINE_SKILL_INSTRUCTION : "")
         + (feedback ? " Apply the feedback: it is what the reviewer or the person asked to change." : "")
         + (research ? " research is true: search the web for this task's background and the best known way to do it before planning, as the Skill's research section says." : ""),
       ...(research ? { allowWebSearch: true } : {}),

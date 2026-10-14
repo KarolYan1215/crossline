@@ -17,6 +17,7 @@ import { extractText } from "./extract";
 
 export const MANUAL_DESIGNER_SKILL = "crossline:crossline-manualbook-designer";
 export const MATERIAL_RESEARCHER_SKILL = "crossline:crossline-material-researcher";
+import { MINE_SKILL_INSTRUCTION, librarySkillsFor } from "./skill-library";
 export const MATERIAL_WRITER_SKILL = "crossline:crossline-material-writer";
 import { ownerOf } from "./owner";
 import { startingWithin } from "./schedule-window";
@@ -52,6 +53,8 @@ export type ManualbookDeps = {
   safeGet: SafeGetDeps; readCost: () => Promise<CostSignal>; now: () => Date;
   /** Why web research cannot run here, if it cannot. A manualbook is still built without it, just without found sources. */
   webBlocker: () => { code: string; message: string } | undefined;
+  /** Where the person's skill library is written (tests); the default sits beside the Codex homes. */
+  libraryDir?: string;
 };
 
 type KeptSource = {
@@ -225,6 +228,8 @@ export function createManualbookBuilder(store: CrosslineStore, workspaceId: stri
     }
 
     // 3. the write-up, per step ---------------------------------------------------------------------------------
+    // The person's own skill for this task's line, read beside the writer's: a tutorial for their way of doing it, not a generic one.
+    const writerSkills = await librarySkillsFor(client, store, workspaceId, order.identityId, { cwd, ...(all.libraryDir ? { dir: all.libraryDir } : {}) });
     for (const [index, result] of results.entries()) {
       progress("writing", index, results.length);
       const writeContext: WriteContext = { version: "crossline.manualbook.write.v1", today, task: { intent: context.workOrder.intent },
@@ -233,7 +238,8 @@ export function createManualbookBuilder(store: CrosslineStore, workspaceId: stri
         inputs: context.inputs, profile: context.profile, person: context.person ?? [],
         covers: context.plannedSteps?.find((step) => step.title === result.node.title)?.covers ?? [] };
       const written = await runCodexSkill<NodeWriteup>(client, writeContext, {
-        skillName: MATERIAL_WRITER_SKILL, cwd, developerInstructions: WRITE_INSTRUCTIONS, outputSchema: NODE_WRITEUP_SCHEMA,
+        skillName: MATERIAL_WRITER_SKILL, cwd, developerInstructions: WRITE_INSTRUCTIONS + (writerSkills.length ? MINE_SKILL_INSTRUCTION : ""),
+        ...(writerSkills.length ? { extraSkills: writerSkills } : {}), outputSchema: NODE_WRITEUP_SCHEMA,
         prepareInput: () => writeContext, validateOutput: (output) => validateNodeWriteup(output, writeContext), onAudit: () => {}, timeoutMs: 60 * 60_000
       });
       if (written.ok) result.writeup = written.output;

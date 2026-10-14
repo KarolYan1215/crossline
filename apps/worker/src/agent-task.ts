@@ -9,6 +9,7 @@ import {
 } from "@crossline/core";
 import { runCodexSkill, type AgentItem, type CodexRpcBoundary } from "@crossline/codex";
 import { approveCategory, CLEAN_RUNS_TO_TRUST, readCategories, recordReview, type CategoryState, type CrosslineStore } from "@crossline/db";
+import { MINE_SKILL_INSTRUCTION, librarySkillsFor } from "./skill-library";
 
 export const AGENT_SKILL = "crossline:crossline-agent";
 
@@ -161,6 +162,8 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
   signal?: AbortSignal;
   /** Handed the run's live record when it starts (commands, file changes, searches as they happen), for the page that watches it. */
   onLive?: (live: { startedAt: string; audit: AuditRecord }) => void;
+  /** Where the person's skill library is written (tests); the default sits beside the Codex homes. */
+  libraryDir?: string;
 }) {
   return async function run(input: AgentTaskInput): Promise<AgentOutcome> {
     const taskId = input.taskId ?? `agent-${randomUUID().slice(0, 8)}`;
@@ -195,8 +198,12 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
       const insideDirectory = full.toLowerCase().startsWith(`${directory.toLowerCase()}${path.sep}`);
       try { const stat = statSync(full); return { exists: stat.isFile(), bytes: stat.size, insideDirectory }; } catch { return { exists: false, bytes: 0, insideDirectory }; }
     };
+    // The person's own skill for this task's line (docs/skills-library.md §3), switched on beside the assistant's for this run only.
+    const lineId = input.workOrderId ? store.listWorkOrders(workspaceId).find((order) => order.id === input.workOrderId)?.identityId : undefined;
+    const extraSkills = await librarySkillsFor(client, store, workspaceId, lineId, { cwd, ...(options.libraryDir ? { dir: options.libraryDir } : {}) });
     const result = await runCodexSkill<AgentSummary>(client, task, {
-      skillName: AGENT_SKILL, cwd, developerInstructions: AGENT_INSTRUCTIONS, outputSchema: AGENT_SUMMARY_SCHEMA,
+      skillName: AGENT_SKILL, cwd, developerInstructions: AGENT_INSTRUCTIONS + (extraSkills.length ? MINE_SKILL_INSTRUCTION : ""), outputSchema: AGENT_SUMMARY_SCHEMA,
+      ...(extraSkills.length ? { extraSkills } : {}),
       prepareInput: () => task, validateOutput: (output) => validateAgentSummary(output, probe), onAudit: () => {},
       allowWebSearch: true, timeoutMs: 6 * 60 * 60_000, idleMs: 60 * 60_000, ...(options.signal ? { signal: options.signal } : {}),
       agent: {
@@ -236,7 +243,7 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
         filesChanged: audit.filesChanged.length, mcpCalls: audit.mcpCalls.length, searches: audit.searches.length,
         denied: audit.decisions.filter((d) => d.outcome === "declined").length, artifacts: artifacts.map(({ path: p, sha256, bytes }) => ({ path: p, sha256, bytes })),
         verification: result.output.verification.map((v) => ({ check: v.check, result: v.result })), needsHuman: result.output.needsHuman.length,
-        inputsModified, checksPassed, reviewRequired, auditFile: path.join(directory, "audit.json") } });
+        inputsModified, checksPassed, reviewRequired, auditFile: path.join(directory, "audit.json"), ...(result.audit.skills?.length ? { skills: result.audit.skills } : {}) } });
     return { state: "done", taskId, directory, summary: result.output, artifacts, audit, inputsModified, checksPassed, reviewRequired };
   };
 }

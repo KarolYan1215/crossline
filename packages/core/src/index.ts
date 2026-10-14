@@ -104,7 +104,8 @@ export type SuccessCriterion = {
 };
 
 export type MilestoneGateResult = {
-  verdict: "pass" | "insufficient" | "refuted";
+  /** `partial`: the contract is covered but the delivery breaks the person's own line skill (`fit.violated` says which rules). */
+  verdict: "pass" | "partial" | "insufficient" | "refuted";
   criteriaVerdict: Array<{
     criterionId: string;
     met: "met" | "partial" | "unmet" | "unverifiable";
@@ -128,6 +129,8 @@ export type MilestoneGateResult = {
   gaps: Array<{ code: string; whatWouldSatisfyIt: string }>;
   proposedNextMilestones: unknown[];
   blockers: Array<{ code: string; message: string }>;
+  /** Against the person's line skill. Absent on judgements made before it existed, which read as fitting. */
+  fit?: { fits: boolean; violated: string[]; why: string };
 };
 
 /**
@@ -161,7 +164,9 @@ export function validateMilestoneGateResult(
    * has to be supplied: without it the check degenerated into `contractCoverage.every(...)`, which an
    * empty array satisfies — a gate that accepted anything simply by reporting nothing.
    */
-  contractRequirements: string[] = []
+  contractRequirements: string[] = [],
+  /** Whether the gate was given the person's line skill. Without one there is nothing to break, so `fit.fits` must be true. */
+  hasMineSkill = false
 ): MilestoneGateResult {
   const ids = criteria.map((criterion) => criterion.id);
   const verdictIds = result.criteriaVerdict.map((item) => item.criterionId);
@@ -193,9 +198,14 @@ export function validateMilestoneGateResult(
     .filter((item) => item.satisfiedBy)
     .map((item) => item.requirement.trim()));
   const contractCovered = declared.every((requirement) => satisfied.has(requirement));
-  const mayPass = complete && contractCovered
+  const contractHolds = complete && contractCovered
     && !result.incomplete.some((item) => item.isBlockingPass)
     && result.blockers.length === 0;
+  // The person's own play is part of the bar (decided 2026-10-14): a delivery that does what the contract says but not the way this
+  // person does it — a research-report note on a line whose play is conflict and a sold solution — is sent back as `partial`.
+  const fit = result.fit ?? { fits: true, violated: [], why: "" };
+  const fits = fit.fits !== false;
+  const mayPass = contractHolds && fits;
   // Verbatim in content, not in markup: evidence can be Markdown (what the assistant delivers), and a quote copied out of a bold phrase
   // or a table cell drops the `**` and `|` around it. Formatting marks and runs of whitespace are ignored on both sides; the words are not.
   const plain = (text: string) => text.replace(/[*_`#>|]+/g, "").replace(/\s+/g, " ").trim();
@@ -207,9 +217,16 @@ export function validateMilestoneGateResult(
     ? `每条达成标准恰好一条判定：缺 ${ids.filter((id) => !verdictIds.includes(id)).join("、") || "无"}${verdictIds.filter((id) => !ids.includes(id)).length ? `，多出 ${verdictIds.filter((id) => !ids.includes(id)).join("、")}` : ""}`
     : quotes.find((quote) => !quoteIsExact(quote)) !== undefined
       ? `这句引文在证据里找不到，须逐字摘自证据：「${(quotes.find((quote) => !quoteIsExact(quote)) ?? "").slice(0, 120)}」`
+      : !hasMineSkill && !fits ? "没有给出本人的主线 skill，无规则可违背：fit.fits 应为 true、violated 为空"
+      : !fits && !fit.violated.some((rule) => rule.trim()) ? "fit.fits 为 false 时，violated 须逐条写明违背了主线 skill 的哪条规则"
       : (result.verdict === "pass") !== mayPass
-        ? mayPass ? "契约要求都已覆盖且没有阻塞项，verdict 应为 pass"
+        ? mayPass ? "契约要求都已覆盖、没有阻塞项且符合本人主线 skill，verdict 应为 pass"
+          : contractHolds ? `契约已覆盖，但不符合本人主线 skill（${fit.violated.join("；").slice(0, 200)}），verdict 应为 partial`
           : `verdict 为 pass，但${!contractCovered ? `这些要求未标出 satisfiedBy：${declared.filter((requirement) => !satisfied.has(requirement)).join("；")}` : "存在阻塞通过的未完成项或 blockers"}`
+        : result.verdict === "partial" && !(contractHolds && !fits)
+          ? contractHolds ? "契约已覆盖且符合主线 skill 时不是 partial" : "partial 只用于契约已覆盖、但违背本人主线 skill 的交付；契约未覆盖时用 insufficient"
+        : contractHolds && !fits && result.verdict === "insufficient"
+          ? `契约已覆盖，只是不符合本人主线 skill，verdict 应为 partial 而不是 insufficient`
         : "";
   if (problem) throw Object.assign(new Error("GATE_VERDICT_INCONSISTENT"), { detail: problem });
   return result;
@@ -472,5 +489,6 @@ export * from "./calendar-apps";
 export * from "./onboarding-attention";
 export * from "./portrait-say-do";
 export * from "./background";
+export * from "./mine-skill";
 export * from "./provider-conformance";
 export * from "./local-stamp";

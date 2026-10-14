@@ -18,7 +18,9 @@ export type AnalysisAudit = { threadId?: string; turnId?: string;
    * Content-quality problems the answer still had when the repairs ran out and the caller chose to keep it (`softAccept`). The
    * caller records them for the reviewer; nothing was blocked for them.
    */
-  warnings?: Array<{ code: string; detail: string }> };
+  warnings?: Array<{ code: string; detail: string }>;
+  /** The library skills (`extraSkills`) that were installed and switched on for this run. */
+  skills?: string[] };
 export type SkillRunResult<T> = { ok: true; output: T; audit: AnalysisAudit }
   | { ok: false; blocker: { code: string; message: string }; audit: AnalysisAudit };
 
@@ -63,6 +65,12 @@ export type SkillRunOptions<T> = {
   tier?: RouteTier;
   /** Run on exactly this provider, bypassing routing: only the conformance check, which measures a provider before it may be routed to. */
   provider?: ThreadProvider;
+  /**
+   * Skills from the person's library switched on beside the target for this run only and named in the first prompt
+   * (`$crossline-mine:<line>`, docs/skills-library.md §3). One that is not installed is skipped, never a failure: a line with no skill yet
+   * runs as before. Which ones were actually on is reported in `audit.skills`.
+   */
+  extraSkills?: string[];
 };
 
 /**
@@ -147,7 +155,9 @@ function underConfigLock<T>(client: object, work: () => Promise<T>): Promise<T> 
 /** What one run carries through its turns: the route it was given, and the meter. */
 type RunContext = { route: ModelRoute | undefined; spendMode: SpendMode; usage: UsageCollector;
   /** Set when this run goes to a provider other than the workspace's Codex sign-in (providers.ts); the thread is started on it. */
-  provider?: ThreadProvider };
+  provider?: ThreadProvider;
+  /** The library skills switched on for this run, named in its first prompt beside the target. */
+  extraSkills: string[] };
 const DEFAULT_MAX_REPAIRS = 2;
 /** No event of any kind for this long means a hung turn. Generous: slow work still produces events, silence does not. */
 const DEFAULT_IDLE_MS = 20 * 60_000;
@@ -157,7 +167,7 @@ const MAX_STALL_RETRIES = 2;
  * Everything the two entry points share: waiting in the right lane, switching the Skill on, running, switching
  * it back off, and reporting what the run used.
  */
-async function executeSkill<T>(client: CodexRpcBoundary, options: { skillName: string; cwd: string; tier?: RouteTier; provider?: ThreadProvider },
+async function executeSkill<T>(client: CodexRpcBoundary, options: { skillName: string; cwd: string; tier?: RouteTier; provider?: ThreadProvider; extraSkills?: string[] },
   body: (context: RunContext) => Promise<SkillRunResult<T>>): Promise<SkillRunResult<T>> {
   return serializeSkillRun(client, options.skillName, async () => {
     const startedAt = Date.now();
@@ -170,19 +180,33 @@ async function executeSkill<T>(client: CodexRpcBoundary, options: { skillName: s
     const route = provider ? { model: provider.model }
       : options.tier && spendMode === "normal" && process.env.CROSSLINE_MODEL_ROUTING?.trim().toLowerCase() !== "off"
       ? { ...tierRoutes()[options.tier] } : routeForSkill(options.skillName, process.env, spendMode);
-    const context: RunContext = { route, spendMode, usage: createUsageCollector(), ...(provider ? { provider } : {}) };
+    const context: RunContext = { route, spendMode, usage: createUsageCollector(), ...(provider ? { provider } : {}), extraSkills: [] };
     let skill: NativeSkill | undefined;
+    // Library skills switched on for this run, with whether they were on before (only those that were off are switched back).
+    const extras: Array<NativeSkill & { name: string }> = [];
     let result: SkillRunResult<T>;
     try {
       skill = await underConfigLock(client, async () => {
         const found = await findNativeSkill(client, options.skillName, options.cwd);
         if (!found.enabled) await setNativeSkill(client, found.path, true);
+        for (const name of options.extraSkills ?? []) {
+          const extra = await findNativeSkill(client, name, options.cwd).catch(() => undefined);
+          if (!extra) continue;
+          if (!extra.enabled) await setNativeSkill(client, extra.path, true);
+          extras.push({ ...extra, name });
+        }
         return found;
       });
+      context.extraSkills = extras.map((extra) => extra.name);
       result = await body(context);
+      if (extras.length) result.audit.skills = context.extraSkills;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "";
       result = skillBlocker<T>(/^SKILL_(LIST_FAILED|MISSING|CONFIG_FAILED)$/.test(errorMessage) ? errorMessage : "SKILL_CONFIG_FAILED");
+    }
+    for (const extra of extras.filter((item) => !item.enabled)) {
+      try { await underConfigLock(client, () => setNativeSkill(client, extra.path, false)); }
+      catch { result = skillBlocker<T>("SKILL_CONFIG_FAILED", result.audit); }
     }
     if (skill && !skill.enabled) {
       const path = skill.path;
@@ -197,6 +221,28 @@ async function executeSkill<T>(client: CodexRpcBoundary, options: { skillName: s
       durationMs: Date.now() - startedAt, at: new Date(startedAt).toISOString(), turnSeconds: context.usage.turnSeconds(), ...context.usage.total()
     });
     return result;
+  });
+}
+
+/**
+ * Installs one plugin of the person's skill library (`crossline-mine`, `crossline-public`), or installs it again after a skill in it was
+ * rewritten: the runtime copies a plugin into its own cache, so the copy it serves changes only on install. Its skills are then switched
+ * off, so each is on only for the runs that name it (`extraSkills`), not listed to every Skill run. Returns the skills it now holds.
+ */
+export async function installLibraryPlugin(client: CodexRpcBoundary, plugin: { marketplacePath: string; name: string; cwd: string }): Promise<string[]> {
+  return underConfigLock(client, async () => {
+    try { await client.request("plugin/install", { marketplacePath: plugin.marketplacePath, pluginName: plugin.name }); }
+    catch { fail("SKILL_LIBRARY_INSTALL_FAILED"); }
+    let response: unknown;
+    try { response = await client.request("skills/list", { cwds: [plugin.cwd], forceReload: true }); }
+    catch { fail("SKILL_LIST_FAILED"); }
+    const entries = record(response)?.data;
+    const skills = (Array.isArray(entries) ? entries : []).flatMap((entry) => {
+      const listed = record(entry)?.skills;
+      return Array.isArray(listed) ? listed.map(record).filter((skill): skill is Record<string, unknown> => Boolean(skill)) : [];
+    }).filter((skill) => typeof skill.name === "string" && skill.name.startsWith(`${plugin.name}:`) && typeof skill.path === "string");
+    for (const skill of skills.filter((item) => item.enabled === true)) await setNativeSkill(client, String(skill.path), false);
+    return [...new Set(skills.map((skill) => String(skill.name)))].sort();
   });
 }
 
@@ -660,7 +706,7 @@ async function runSkillTurn<T>(client: CodexRpcBoundary, input: unknown, options
     const output = await runTurnsUntilValid(client, scope, context, audit, {
       skillName: options.skillName, threadId, outputSchema: options.outputSchema, allowedItemTypes, ...(options.onImage ? { onImage: options.onImage } : {}),
       ...(options.agent ? { agent: options.agent } : {}),
-      firstPrompt: `$${options.skillName}\n\n${JSON.stringify(prepared)}`,
+      firstPrompt: `${[options.skillName, ...context.extraSkills].map((name) => `$${name}`).join(" ")}\n\n${JSON.stringify(prepared)}`,
       validate: (answer) => options.validateOutput(answer, prepared), onAudit: options.onAudit, ...(options.idleMs ? { idleMs: options.idleMs } : {}),
       ...(options.softAccept ? { soften: (rejection: Error, answer: unknown) => options.softAccept!(rejection, answer, prepared) } : {})
     });

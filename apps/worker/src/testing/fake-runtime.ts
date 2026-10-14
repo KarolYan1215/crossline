@@ -33,13 +33,17 @@ export function fakeRuntime(answers: Array<string | ((prompts: string[]) => stri
   /** As the real runtime does: an interrupted turn then reports `turn/completed` with status `interrupted`, right away. */
   completeOnInterrupt?: boolean; usage?: { input: number; cached?: number; output: number; reasoning?: number };
   /** What the runtime does during a turn before it answers: tool items, and requests the client has to answer. */
-  script?: AgentScript; threadResponse?: Record<string, unknown> } = {}): {
+  script?: AgentScript; threadResponse?: Record<string, unknown>;
+  /** Skills of the person's library the runtime has installed (off until a run switches them on), e.g. `crossline-mine:media`. */
+  library?: string[] } = {}): {
   rpc: JsonLineRpcClient;
   turns: () => number;
   prompts: () => string[];
   interrupts: () => number;
   /** The thread/start parameters the runner sent. */
   threadStarts: () => Array<Record<string, unknown>>;
+  /** Every `skills/config/write` and `plugin/install` the runner sent, in order. */
+  configCalls: () => Array<{ method: string; params: Record<string, unknown> }>;
 } {
   let turns = 0;
   let interrupts = 0;
@@ -49,6 +53,9 @@ export function fakeRuntime(answers: Array<string | ((prompts: string[]) => stri
   const starts: Array<Record<string, unknown>> = [];
   const pendingAsks = new Map<string, (value: Record<string, unknown>) => void>();
   let askId = 0;
+  const configCalls: Array<{ method: string; params: Record<string, unknown> }> = [];
+  const libraryPath = (name: string) => `C:\\library\\${name.replace(":", "\\")}\\SKILL.md`;
+  const libraryEnabled = new Map((options.library ?? []).map((name) => [libraryPath(name), false]));
   const rpc = new JsonLineRpcClient((line) => {
     const request = JSON.parse(line) as { id?: number | string; method: string; params?: Record<string, unknown>; result?: Record<string, unknown>; error?: unknown };
     // The client answering one of the runtime's requests.
@@ -67,8 +74,12 @@ export function fakeRuntime(answers: Array<string | ((prompts: string[]) => stri
       if (options.completeOnInterrupt) queueMicrotask(() => rpc.receiveLine(JSON.stringify({ method: "turn/completed",
         params: { threadId, turn: { id: String(request.params?.turnId), status: "interrupted" } } })));
     }
+    if (request.method === "skills/config/write" || request.method === "plugin/install") configCalls.push({ method: request.method, params: request.params ?? {} });
+    if (request.method === "skills/config/write" && libraryEnabled.has(String(request.params?.path))) libraryEnabled.set(String(request.params?.path), request.params?.enabled === true);
     const result = request.method === "skills/list"
-      ? { data: [{ cwd: "C:\\repo", errors: [], skills: [{ name: skillName, path: "C:\\skill\\SKILL.md", enabled: true }] }] }
+      ? { data: [{ cwd: "C:\\repo", errors: [], skills: [{ name: skillName, path: "C:\\skill\\SKILL.md", enabled: true },
+        ...(options.library ?? []).map((name) => ({ name, path: libraryPath(name), enabled: libraryEnabled.get(libraryPath(name)) ?? false }))] }] }
+      : request.method === "skills/config/write" ? { effectiveEnabled: request.params?.enabled === true }
       : request.method === "account/read" ? { account: { type: "chatgpt" } }
       : request.method === "config/read" ? { config: {} }
       : request.method === "thread/start"
@@ -110,7 +121,7 @@ export function fakeRuntime(answers: Array<string | ((prompts: string[]) => stri
       }, options.delayMs ?? 1);
     }
   });
-  return { rpc, turns: () => turns, prompts: () => prompts, interrupts: () => interrupts, threadStarts: () => starts };
+  return { rpc, turns: () => turns, prompts: () => prompts, interrupts: () => interrupts, threadStarts: () => starts, configCalls: () => configCalls };
 }
 
 const FIXTURES = path.join(import.meta.dirname, "fixtures");

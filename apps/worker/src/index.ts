@@ -24,6 +24,7 @@ import { createProgressJudge, createStepPlanner, createWarningReviewer, reportsA
 import { createArchetypeCurator, curationDue } from "./archetype-curator";
 import { createTaskTitler, untitledTasks } from "./task-titler";
 import { createCalendarClassifier, unfiledCalendarEvents } from "./calendar-classifier";
+import { createInsightCompiler, linesAwaitingMineSkill } from "./insight-compiler";
 import { createGoalSplitter, linesAwaitingCandidateSplit, linesAwaitingSplit } from "./goal-splitter";
 import { fileSourceDocuments } from "./source-filing";
 import { createPortraitWriter, PORTRAIT_GAP_AT, PORTRAIT_REWRITE_MARKER, portraitRewriteDue } from "./portrait-writer";
@@ -207,6 +208,23 @@ async function goalSplitPass(workspaceId: string, checkedAt = new Date().toISOSt
 }
 
 /**
+ * Rewrites a line's own skill (`crossline-mine:<line>`, docs/skills-library.md §1) when the person has said or decided something new about how
+ * they do that line's work: one line a tick, while the quota allows core work. The version it replaces stays in the ledger.
+ */
+const compilingMine = new Set<string>();
+async function minePass(workspaceId: string, checkedAt: string): Promise<void> {
+  if (paused(workspaceId, "planning")) return;
+  if (compilingMine.has(workspaceId) || !codexSupervisor || !linesAwaitingMineSkill(analysisStore, workspaceId).length) return;
+  if (!spendAllows(await spendFor(workspaceId), "core")) return;
+  compilingMine.add(workspaceId);
+  try {
+    enterUsageWorkspace(workspaceId);
+    const outcome = await createInsightCompiler(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))().catch(() => undefined);
+    if (outcome) console.info(JSON.stringify({ type: "skill.mine.compiled", checkedAt, workspaceId, ...outcome }));
+  } finally { compilingMine.delete(workspaceId); }
+}
+
+/**
  * Writes the portrait (the interview's end, 重新生成, or the one rewrite after the fixed dimensions shipped): `portrait.requested` first,
  * so the page shows it running, then `portrait.blocked` with the reason, or the figure drawn in the background after the words.
  */
@@ -341,6 +359,7 @@ async function tick(): Promise<void> {
   for (const workspace of workspaces) await curatorPass(workspace.id, checkedAt);
   for (const workspace of workspaces) await titlePass(workspace.id, checkedAt);
   for (const workspace of workspaces) await goalSplitPass(workspace.id, checkedAt);
+  for (const workspace of workspaces) await minePass(workspace.id, checkedAt);
   for (const workspace of workspaces) await portraitPass(workspace.id, checkedAt);
   // Uploaded files are filed under the project their own name or opening names; what stays unclear is asked about on 待确认.
   for (const workspace of workspaces) {

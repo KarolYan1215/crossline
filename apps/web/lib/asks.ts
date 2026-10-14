@@ -202,7 +202,7 @@ function materialsAsks({ store, ctx, today }: Source): Ask[] {
 }
 
 type GateReview = { verdict?: string; gaps?: Array<{ whatWouldSatisfyIt: string }>;
-  criteriaVerdict?: Array<{ met: string; shortfall?: string }> };
+  criteriaVerdict?: Array<{ met: string; shortfall?: string }>; fit?: { fits: boolean; violated: string[]; why: string } };
 
 /** The gate's own 「not enough」, and a gate run that did not happen — two different things, asked differently. */
 function gateAsks({ store, ctx, today }: Source): Ask[] {
@@ -221,10 +221,13 @@ function gateAsks({ store, ctx, today }: Source): Ask[] {
       const needs = [...(review.gaps ?? []).map((gap) => gap.whatWouldSatisfyIt),
         ...(review.criteriaVerdict ?? []).filter((item) => item.met !== "met" && item.shortfall).map((item) => item.shortfall!)]
         .filter(Boolean).slice(0, 3);
+      // Covered its contract but not done the person's way (their line skill): the broken rules are the return note.
+      const offPlay = review.verdict === "partial" && review.fit && !review.fit.fits;
       asks.push({ id: `gate:${transition?.eventId ?? order.id}`, kind: "gate_insufficient", entityId: order.id, ...timing,
         raisedAt: transition?.createdAt ?? "", fingerprint: transition?.eventId ?? "",
-        title: `「${short(order.intent)}」未通过验收`,
-        why: needs.length ? `验收尚缺：${clause(needs.join("；"))}。补充后重新提交即重新判定。` : "验收证据不足。补充后重新提交即重新判定。",
+        title: offPlay ? `「${short(order.intent)}」不符合本人的打法` : `「${short(order.intent)}」未通过验收`,
+        why: offPlay ? `契约要求已覆盖，但违背了主线 skill：${clause(review.fit!.violated.join("；"))}。${review.fit!.why ? `${clause(review.fit!.why)}。` : ""}改后重新提交即重新判定。`
+          : needs.length ? `验收尚缺：${clause(needs.join("；"))}。补充后重新提交即重新判定。` : "验收证据不足。补充后重新提交即重新判定。",
         options: [
           { id: "redo", label: "重新排上，补做缺的", recommended: true },
           { id: "look", label: "去看判定细节", href: `/workbench/${encodeURIComponent(order.id)}` },

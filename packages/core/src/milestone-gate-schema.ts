@@ -33,6 +33,11 @@ export type MilestoneGateContext = {
   outgoingRelations: Array<{
     id: string; targetMilestoneId: string; targetIdentityId: string; kind: string; status: string;
   }>;
+  /**
+   * The person's own skill for this order's line (`crossline-mine:<line>`, docs/skills-library.md §4): their plays, preferences and red
+   * lines, in full. Null when the line has none yet; then nothing can be violated and `fit.fits` is true.
+   */
+  mineSkill: { lineId: string; text: string } | null;
 };
 
 const str = { type: "string", minLength: 1, maxLength: 4000 } as const;
@@ -44,7 +49,7 @@ const object = (properties: Record<string, unknown>) =>
 const list = (items: unknown, maxItems = 40) => ({ type: "array", maxItems, items });
 
 export const MILESTONE_GATE_OUTPUT_SCHEMA = object({
-  verdict: { type: "string", enum: ["pass", "insufficient", "refuted"] },
+  verdict: { type: "string", enum: ["pass", "partial", "insufficient", "refuted"] },
   criteriaVerdict: list(object({
     criterionId: str,
     met: { type: "string", enum: ["met", "partial", "unmet", "unverifiable"] },
@@ -71,7 +76,10 @@ export const MILESTONE_GATE_OUTPUT_SCHEMA = object({
   // A concrete shape, not a bare object: strict mode rejects an object with no declared properties,
   // and "a proposal with a title and a reason" is what this was always meant to carry.
   proposedNextMilestones: list(object({ title: str, why: str }), 10),
-  blockers: list(object({ code: str, message: str }), 10)
+  blockers: list(object({ code: str, message: str }), 10),
+  // Whether the delivery follows the person's own line skill. `violated` names each broken rule; a delivery that covers its contract
+  // but breaks one is `partial`, not `pass`.
+  fit: object({ fits: { type: "boolean" }, violated: strList, why: emptyableStr })
 });
 
 // Structured output runs in strict mode: every object needs additionalProperties:false and must
@@ -138,7 +146,10 @@ export const MILESTONE_PROPOSAL_SCHEMA = object({
   }), 20),
   targetProposals: list(object({ projectId: str, value: str, why: str }), 8),
   assumptions: strList,
-  blockers: list(object({ code: str, message: str }), 10)
+  blockers: list(object({ code: str, message: str }), 10),
+  // Whether the delivery follows the person's own line skill. `violated` names each broken rule; a delivery that covers its contract
+  // but breaks one is `partial`, not `pass`.
+  fit: object({ fits: { type: "boolean" }, violated: strList, why: emptyableStr })
 });
 
 export type MilestoneProposalContext = {

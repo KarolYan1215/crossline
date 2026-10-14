@@ -123,6 +123,16 @@ test("a gate's real 「not enough」 is asked with what would satisfy it; 「重
   expect(store.listWorkOrders(ws).find((order) => order.id === "wo")!.state).toBe("approved");
 });
 
+test("a gate's 「部分」 (contract covered, the person's play not followed) says which rules of the line skill were broken", () => {
+  const store = setup();
+  store.saveWorkOrder({ id: "wo", ownerId: owner, workspaceId: ws, identityId: "media", projectId: "p", milestoneId: "m", intent: "小红书首篇笔记提纲",
+    state: "blocked", riskTier: "milestone", estimate, payload: { gateReview: { verdict: "partial", gaps: [], criteriaVerdict: [],
+      fit: { fits: false, violated: ["先制造冲突、点出焦虑，再给出 solution"], why: "提纲按科研报告写成" } } } });
+  const ask = collectAsks(TEST_CTX, NOW).find((item) => item.kind === "gate_insufficient")!;
+  expect(ask.title).toBe("「小红书首篇笔记提纲」不符合本人的打法");
+  expect(ask.why).toContain("违背了主线 skill：先制造冲突、点出焦虑，再给出 solution。提纲按科研报告写成。");
+});
+
 test("the risk explanation says when, how much, and by how much it misses — and that it is a forecast", () => {
   const text = explainRisk({ deadline: "2026-10-12", today: "2026-10-07", p50Day: "2026-10-10", p85Day: "2026-10-13", slackDays: -1,
     steps: 2, p50Minutes: 180, p85Minutes: 300, moreToSplit: true });

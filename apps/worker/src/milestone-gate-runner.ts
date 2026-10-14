@@ -1,5 +1,5 @@
 import {
-  MILESTONE_GATE_OUTPUT_SCHEMA, requiredContractRequirements, validateMilestoneGateResult,
+  MILESTONE_GATE_OUTPUT_SCHEMA, currentMineVersion, mineSkillSettingKey, readMineSkill, requiredContractRequirements, validateMilestoneGateResult,
   type MilestoneGateContext, type MilestoneGateResult
 } from "@crossline/core";
 import { readFileSync } from "node:fs";
@@ -24,7 +24,10 @@ const INSTRUCTIONS = "Judge the submitted evidence. Return only the requested JS
   + "many work orders, so an unmet criterion is normal and is not a reason to withhold pass, and a "
   + "criterion must never be marked met to justify a verdict. Quote verbatim only for met or partial; "
   + "for unmet or unverifiable leave evidenceQuote empty and explain in observed and shortfall. Do not "
-  + "modify criteria, do not perform missing work, and do not accept external effects.";
+  + "modify criteria, do not perform missing work, and do not accept external effects. When mineSkill is given, it is the "
+  + "person's own way of doing this line's work: judge fit against each of its rules and red lines, name every broken rule in "
+  + "fit.violated, and when the contract is covered but a rule is broken the verdict is partial, never pass. Without mineSkill, "
+  + "fit.fits is true and violated is empty.";
 
 type GateOutcome =
   | { state: "accepted" | "held"; workOrderId: string; verdict: MilestoneGateResult["verdict"] }
@@ -120,6 +123,7 @@ export function buildMilestoneGateContext(store: CrosslineStore, workspaceId: st
         pauseMinutes: execution?.pauseMinutes ?? 0,
         interruptions: (execution?.interruptions ?? []).map((item) => ({ reason: item.reason }))
       },
+      mineSkill: mineSkillText(store, workspaceId, order.identityId),
       outgoingRelations: relations.map((relation) => ({
         id: relation.id,
         targetMilestoneId: relation.toMilestoneId,
@@ -129,6 +133,12 @@ export function buildMilestoneGateContext(store: CrosslineStore, workspaceId: st
       }))
     }
   };
+}
+
+/** The line's own skill in force, in full, for the gate to judge fit against; null when the line has none yet. */
+function mineSkillText(store: CrosslineStore, workspaceId: string, lineId: string): MilestoneGateContext["mineSkill"] {
+  const version = currentMineVersion(readMineSkill(store.getSetting(workspaceId, mineSkillSettingKey(lineId))));
+  return version ? { lineId, text: version.markdown } : null;
 }
 
 /**
@@ -177,7 +187,7 @@ export function createMilestoneGate(store: CrosslineStore, workspaceId: string, 
       // anything, so a fluent judgement built on invented text cannot accept the work.
       validateOutput: (output) => validateMilestoneGateResult(output as MilestoneGateResult,
         context.milestone.successCriteria, evidenceTexts,
-        context.evidenceContract.filter((item) => item.required).map((item) => item.requirement)),
+        context.evidenceContract.filter((item) => item.required).map((item) => item.requirement), context.mineSkill !== null),
       onAudit: () => {},
       timeoutMs: 60 * 60_000
     });

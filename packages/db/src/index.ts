@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import { copyFileSync, existsSync } from "node:fs";
 import { byproductArtifactId, advanceWorkOrder, validateAnalysisProposal, validateAnalysisContext, validateMilestoneGateResult, requiredContractRequirements, validateSuccessCriteria, summarizeRhythm,
+  currentMineVersion, mineSkillSettingKey, readMineSkill,
   type MilestoneGateResult, type SuccessCriterion, type WorkOrderEvent, type WorkOrderState,
   type MilestoneTemplateKind, type EvidenceQuestionTemplate, type MilestoneTemplateSource,
   type ChecklistAnswer, type WorkRhythm } from "@crossline/core";
@@ -2682,7 +2683,8 @@ export class CrosslineStore {
     // have cleared is re-checked here rather than trusted from the caller.
     const contractRequirements = requiredContractRequirements(
       (order.payload as { evidenceContract?: Array<{ description?: string; kind?: string; required?: boolean }> }).evidenceContract);
-    validateMilestoneGateResult(result, milestone.successCriteria, evidenceTexts, contractRequirements);
+    validateMilestoneGateResult(result, milestone.successCriteria, evidenceTexts, contractRequirements,
+      Boolean(currentMineVersion(readMineSkill(this.getSetting(workspaceId, mineSkillSettingKey(order.identityId))))));
     // Milestone progress is recorded on every judgement, pass or not. The verdict says whether this one
     // work order delivered; this says how far the milestone itself has moved, which is the question the
     // person actually has and which no single verdict can answer.
