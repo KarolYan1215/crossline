@@ -40,6 +40,19 @@ export type WorkflowManifest = {
 };
 
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/**
+ * Whether a step's words say it leaves the machine (sends, uploads, publishes, submits, pays). The shared external-action pattern alone
+ * read 「锁定提纲和发布前核对清单」 and 「在任何发送、上传或发布动作前停止」 as publishing (two real grown workflows were refused for
+ * them, 2026-10-14), so what is built on those verbs without doing them — 「……前 / 之前」, a pre-publish checklist, a publishing package,
+ * 「不发布」 — is taken out first; the verb itself still counts.
+ */
+export function stepLeavesMachine(title: string): boolean {
+  const cleaned = title.replace(/(发布|发送|上传|投稿|提交)[^，。；,.;]{0,14}?(之前|前)/g, "")
+    .replace(/(发布|发送|上传|投稿|提交)(包|稿|版|清单|计划|时间|日期|渠道|格式|要求|说明|材料|准备)/g, "")
+    .replace(/(不|未|无需|不要|不会|暂不|待|可|准备)(发布|发送|上传|投稿|提交)/g, "").replace(/\b(pre-?publish|publish-ready|draft post|before (sending|posting|publishing))\b/gi, "");
+  return mentionsExternalAction(cleaned);
+}
 const short = (value: unknown, max: number) => typeof value === "string" && value.trim().length > 0 && value.length <= max;
 
 /** Refuses a manifest that cannot be stored or would let a step that leaves the machine run without the person. */
@@ -47,7 +60,8 @@ export function validateWorkflowManifest(value: unknown, lineIds: string[]): Wor
   const manifest = value as WorkflowManifest;
   const problems: string[] = [];
   if (!manifest || typeof manifest !== "object") throw Object.assign(new Error("WORKFLOW_MANIFEST_INVALID"), { detail: "workflow.json 不是对象" });
-  if (!short(manifest.name, 60) || !/^[a-z0-9][a-z0-9-]*$/.test(manifest.name)) problems.push("name 须为小写字母、数字和连字符");
+  // The name is only a label: the installed id is made in code (`grownSkillId`), so a name in Chinese is not a reason to refuse the workflow.
+  if (!short(manifest.name, 60)) problems.push("name 不能为空");
   if (!short(manifest.summary, 300)) problems.push("summary 须为 1–300 字");
   if (!Array.isArray(manifest.lines) || manifest.lines.some((id) => !lineIds.includes(id))) problems.push(`lines 只能是 ${lineIds.join("、")}`);
   if (!isAgentCategory(manifest.category)) problems.push("category 不是已知的助手工作类别");
@@ -64,14 +78,21 @@ export function validateWorkflowManifest(value: unknown, lineIds: string[]): Wor
   if (!Array.isArray(manifest.steps) || !manifest.steps.length || manifest.steps.length > 20) problems.push("steps 须为 1–20 步");
   for (const step of Array.isArray(manifest.steps) ? manifest.steps : []) {
     if (!short(step?.title, 120)) { problems.push("每一步须有标题"); break; }
-    // Anything that sends, publishes, submits or pays is the person's, whatever the manifest says about it.
-    if ((step.external || mentionsExternalAction(step.title)) && step.by !== "person") problems.push(`「${step.title}」会离开本机，须由本人完成（by: person, external: true）`);
   }
   if (!Array.isArray(manifest.inputs) || !Array.isArray(manifest.outputs)) problems.push("inputs 与 outputs 须为列表");
   if (problems.length) throw Object.assign(new Error("WORKFLOW_MANIFEST_INVALID"), { detail: problems.slice(0, 6).join("；") });
+  // Anything that sends, uploads, publishes, submits or pays is the person's, whatever the manifest says: such a step is handed to the
+  // person rather than the workflow refused, since refusing for a sentence about *not* publishing threw good workflows away.
   return { ...manifest, schedule: manifest.trigger === "schedule" ? manifest.schedule : null,
-    steps: manifest.steps.map((step) => ({ title: step.title, by: step.by === "person" ? "person" : "assistant", external: Boolean(step.external) || mentionsExternalAction(step.title) })) };
+    steps: manifest.steps.map((step) => {
+      const external = Boolean(step.external) || stepLeavesMachine(step.title);
+      return { title: step.title, by: external || step.by === "person" ? "person" : "assistant", external };
+    }) };
 }
+
+/** The steps a manifest handed to the person because they leave the machine, though it gave them to the assistant (said when installed). */
+export const reassignedSteps = (raw: { steps?: Array<{ title?: string; by?: string }> }, manifest: WorkflowManifest) =>
+  manifest.steps.filter((step, index) => step.external && raw.steps?.[index]?.by !== "person").map((step) => step.title);
 
 const WEEKDAY_OF: Record<string, Weekday> = { Mon: "MO", Tue: "TU", Wed: "WE", Thu: "TH", Fri: "FR", Sat: "SA", Sun: "SU" };
 /** The person's wall clock: day of week and `HH:MM`, and the date, in their own zone. */

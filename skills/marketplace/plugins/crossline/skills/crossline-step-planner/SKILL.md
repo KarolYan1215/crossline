@@ -59,9 +59,17 @@ Everything the system can produce from the material and public sources is an `ag
 
 `mixed` is for a step where the assistant drafts and the person must finish with judgement (a draft argument, a first-pass solution to be checked line by line).
 
+## 4a. Plan with the AI tools the person has: `aiTools`
+
+`aiTools` lists what the person works with: `by: "system"` is Crossline's own assistant (and its web research), which does whole steps — section 4; `by: "person"` is a tool the person uses themselves (a chat model, a coding agent, an editor with automatic captions, a reading or note tool). Plan the way someone fluent with these tools works today, not the way the work was done before them:
+
+- For every `human` and `mixed` step, set `aiAssist`: the one listed tool (exact `name`) that takes the most drudgery out of it, `how` — one concrete line the person can act on (the operation, or the prompt to give it: 「把 L5 讲义贴给 ChatGPT，让它出 5 道同难度题并隐藏答案」, 「剪映自动字幕后只校对专有名词」) — and `minutesSaved` against doing it by hand. The step's `estimate` is the time **with** that tool. A step no listed tool helps has `aiAssist` `{ "tool": "", "how": "", "minutesSaved": 0 }`; never name a tool that is not listed.
+- The tool speeds the drudgery around the intellectual core; it never does the core for the person (a graded answer, the argument, the decision). Learning steps still require the person to retrieve and solve; a tool may generate the practice, check the answer or explain a mistake.
+- What a tool would do from start to finish without the person's judgement is not a person's step at all: give it to the assistant (section 4) when the assistant can, else make the person's step the few minutes of driving and checking it.
+
 ## 5. Each step's fields
 
-`id` (unique), `role` (from the chosen archetype's roles where they fit), `title` (short imperative naming the units: 「推导 L5–L6 P-N 结静电与 I-V」), `deliverable`, `doneCriterion` (quantified, checkable), `share` (of the task's progress; sums to 1; proportional to effort and value, the person's steps carrying most), `estimate` (p25/p50/p85 minutes; p85 = 1.2–3× p50), `dependsOn`, `notBefore`/`dueBy` (`YYYY-MM-DD` inside the window, or `""`; use `projectDates`), `schedulable` (false for waiting and for agent steps), `executor`, `tickOutcome` (for the two to five steps whose result is a real capability or artefact: 「能在 20 分钟内独立解出 BJT 小信号题」; `""` otherwise), `covers`, `why`.
+`id` (unique), `role` (from the chosen archetype's roles where they fit), `title` (short imperative naming the units: 「推导 L5–L6 P-N 结静电与 I-V」), `deliverable`, `doneCriterion` (quantified, checkable), `share` (of the task's progress; sums to 1; proportional to effort and value, the person's steps carrying most), `estimate` (p25/p50/p85 minutes; p85 = 1.2–3× p50), `dependsOn`, `notBefore`/`dueBy` (`YYYY-MM-DD` inside the window, or `""`; use `projectDates`), `schedulable` (false for waiting and for agent steps), `executor`, `tickOutcome` (for the two to five steps whose result is a real capability or artefact: 「能在 20 分钟内独立解出 BJT 小信号题」; `""` otherwise), `covers`, `why`, `aiAssist` (section 4a).
 
 Choose `archetypeId` by the structure of the work; the archetype's roles are a vocabulary, not a required sequence — never add a step just to use a role.
 

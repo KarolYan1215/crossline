@@ -1,0 +1,51 @@
+{
+  "name": "批准科研传播首篇提纲",
+  "summary": "整理本人科研经历与公开来源，形成单一主线、逐页提纲和恰好 3 个来源的批准包；经本人明确批准后锁定版本，不发布内容。",
+  "lines": ["research", "media"],
+  "category": "read_research_organize",
+  "trigger": "on_request",
+  "schedule": null,
+  "action": "run",
+  "reminder": "",
+  "steps": [
+    {
+      "title": "Crossline 助手读取本次给定材料，按四类整理已确认经历与待答问题",
+      "by": "assistant",
+      "external": false
+    },
+    {
+      "title": "联网调研（Codex）检索并打开原始公开来源，记录要点、证据类型与边界",
+      "by": "assistant",
+      "external": false
+    },
+    {
+      "title": "Crossline 助手拟定一个推荐主线、逐页提纲、排除项和恰好 3 个互补来源，生成提纲批准包",
+      "by": "assistant",
+      "external": false
+    },
+    {
+      "title": "本人在 Crossline 任务界面审阅批准包，并按“主线：批准/改为…；公开边界：批准/删除…；来源：批准 S…/替换…”回复",
+      "by": "person",
+      "external": false
+    },
+    {
+      "title": "Crossline 助手落实批准意见，复核来源与数字，锁定获批提纲、3 个来源和发布前核对清单",
+      "by": "assistant",
+      "external": false
+    }
+  ],
+  "inputs": [
+    "主题、平台、受众、内容形态与长度",
+    "本人主动提供且允许读取的经历、研究笔记或既有素材",
+    "本人愿意公开的身份、项目与情绪边界",
+    "已有来源或来源偏好（可选）"
+  ],
+  "outputs": [
+    "素材清单.md",
+    "公开来源候选表.csv",
+    "公开来源候选表.md",
+    "提纲批准包.md",
+    "获批提纲与来源.md（仅在本人明确批准后）"
+  ]
+}
+

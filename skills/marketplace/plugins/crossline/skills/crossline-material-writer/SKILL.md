@@ -27,6 +27,8 @@ What the material says that matters for this step: what it establishes, what to 
 
 The concrete way to do this step, in order, for this person: a numbered step-by-step guide (1., 2., 3. …), each item one piece of the real work with what to look at, what to produce and how to check it — the formulas and their conditions, the reasoning, the worked example, the commands or settings, the check against a reference — built from the sources, `covers` and `node.steps`. Fit it to `person` and `profile` (their tools, their level). Where the sources do not support a detail, say so plainly instead of filling it in from memory.
 
+Write it for someone who works with the AI tools in `aiTools`. When `aiAssist` names one for this step, the tutorial uses it where the plan expects — the exact operation or the prompt to give it, what to check in what it returns — because the step's time was planned with it. Use any other listed tool where it plainly takes drudgery out (generating practice at the same level, checking an answer, captioning, reformatting), never for the part the person must do with their own head, and never a tool that is not listed.
+
 ## sourceNotes
 
 One entry per source you used, `{sourceId, note}`: what in that material matters for this step (which part, what it says), how to use it, and what to watch out for. This is shown next to the material itself on its own page, so write it to stand alone.

@@ -1,7 +1,7 @@
 import {
-  GROWN_LIBRARY_SETTING, SKILL_LIBRARY_SETTING, categoryFromWording, grownSkillFilesKey, grownSkillId, isScriptFile, mineSkillSettingKey, publicSkillFilesKey,
+  AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, AI_TOOLS_SETTING, GROWN_LIBRARY_SETTING, SKILL_LIBRARY_SETTING, allAiTools, detectedAiTools, personAiTool, readPersonAiTools, categoryFromWording, grownSkillFilesKey, grownSkillId, isScriptFile, mineSkillSettingKey, publicSkillFilesKey,
   readGrownLibrary, readMineSkill, readSkillLibrary,
-  type GrownSkillRecord, type PublicSkillRecord, type StoredMineSkill, type Weekday, type WorkflowSchedule
+  type AiTool, type GrownSkillRecord, type PublicSkillRecord, type StoredMineSkill, type Weekday, type WorkflowSchedule
 } from "@crossline/core";
 import { randomUUID } from "node:crypto";
 import type { CrosslineStore } from "./index";
@@ -117,4 +117,32 @@ export function requestWorkflow(store: CrosslineStore, workspaceId: string, text
   store.appendEvent({ ownerId, workspaceId, idempotencyKey: `workflow.requested:${id}`, type: "workflow.requested", entityId: id,
     payload: { text: text.slice(0, 1000), lineId, ...(category ? { category } : {}) } });
   return id;
+}
+
+/**
+ * The AI tools this person works with (docs/skills-library.md §7): the system's own assistant and research, Codex and Claude Code when
+ * their logs show use (only while the person allowed reading them), and the tools the person named. Plans, tutorials and workflows read this.
+ */
+export function aiToolsFor(store: CrosslineStore, workspaceId: string): AiTool[] {
+  let summary: { folders?: Array<{ codex: number; claude: number }> } | undefined;
+  if (store.getSetting(workspaceId, AGENT_HISTORY_CONSENT) === "on") {
+    try { summary = JSON.parse(store.getSetting(workspaceId, AGENT_HISTORY_SUMMARY) ?? "null") ?? undefined; } catch { summary = undefined; }
+  }
+  return allAiTools(store.getSetting(workspaceId, AI_TOOLS_SETTING), detectedAiTools(summary));
+}
+
+/** The person names a tool they use (「剪映：自动字幕、粗剪」); returns it, or undefined for an empty name. */
+export function addAiTool(store: CrosslineStore, workspaceId: string, input: { name: string; kind: string; goodFor: string }): AiTool | undefined {
+  const current = readPersonAiTools(store.getSetting(workspaceId, AI_TOOLS_SETTING));
+  const tool = personAiTool(input, aiToolsFor(store, workspaceId).map((item) => item.id));
+  if (!tool) return undefined;
+  store.setSetting(workspaceId, AI_TOOLS_SETTING, JSON.stringify([...current.filter((item) => item.name.toLowerCase() !== tool.name.toLowerCase()), tool]));
+  return tool;
+}
+
+export function removeAiTool(store: CrosslineStore, workspaceId: string, id: string): boolean {
+  const current = readPersonAiTools(store.getSetting(workspaceId, AI_TOOLS_SETTING));
+  if (!current.some((tool) => tool.id === id)) return false;
+  store.setSetting(workspaceId, AI_TOOLS_SETTING, JSON.stringify(current.filter((tool) => tool.id !== id)));
+  return true;
 }

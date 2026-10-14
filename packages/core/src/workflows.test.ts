@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { categoryFromWording, grownSkillId, scheduleLabel, validateWorkflowManifest, workflowDue, type WorkflowManifest } from "./index";
+import { categoryFromWording, grownSkillId, reassignedSteps, scheduleLabel, stepLeavesMachine, validateWorkflowManifest, workflowDue, type WorkflowManifest } from "./index";
 
 const manifest: WorkflowManifest = {
   name: "weekly-vlog-cut", summary: "每周把素材剪成一条 3 分钟 vlog", lines: ["media"], category: "media_edit", trigger: "schedule",
@@ -9,12 +9,14 @@ const manifest: WorkflowManifest = {
   inputs: ["本周素材文件夹"], outputs: ["成片 mp4", "封面图"]
 };
 
-test("a manifest is stored only when every step that leaves the machine is the person's", () => {
+test("every step that leaves the machine is the person's, whatever the manifest said", () => {
   expect(validateWorkflowManifest(manifest, ["media"]).steps[2]).toEqual({ title: "上传到小红书并发布", by: "person", external: true });
-  // Publishing handed to the assistant is refused, even when the manifest forgot to call it external.
+  // Publishing handed to the assistant goes to the person, even when the manifest forgot to call it external.
   const posting = { ...manifest, steps: [...manifest.steps.slice(0, 2), { title: "发布到小红书", by: "assistant", external: false }] };
-  expect(() => validateWorkflowManifest(posting, ["media"])).toThrow("WORKFLOW_MANIFEST_INVALID");
-  try { validateWorkflowManifest(posting, ["media"]); } catch (error) { expect((error as Error & { detail?: string }).detail).toContain("「发布到小红书」会离开本机，须由本人完成"); }
+  const fixed = validateWorkflowManifest(posting, ["media"]);
+  expect(fixed.steps[2]).toEqual({ title: "发布到小红书", by: "person", external: true });
+  expect(reassignedSteps(posting, fixed)).toEqual(["发布到小红书"]);
+  expect(reassignedSteps(manifest, validateWorkflowManifest(manifest, ["media"]))).toEqual([]);
   for (const bad of [{ ...manifest, lines: ["x"] }, { ...manifest, category: "trading" }, { ...manifest, schedule: { type: "weekly", days: [], time: "18:00" } },
     { ...manifest, schedule: { type: "daily", time: "25:00" } }, { ...manifest, action: "remind", reminder: "" }, { ...manifest, trigger: "on_request" }]) {
     expect(() => validateWorkflowManifest(bad, ["media"])).toThrow("WORKFLOW_MANIFEST_INVALID");
@@ -41,4 +43,14 @@ test("editing words point at the new kind of work, and ids stay unique", () => {
   expect(categoryFromWording("把这周的素材剪辑成一条 vlog")).toBe("media_edit");
   expect(categoryFromWording("用 python 脚本画图")).toBe("data_code_sim");
   expect(grownSkillId("Weekly Vlog Cut", ["flow-weekly-vlog-cut"])).toBe("flow-weekly-vlog-cut-2");
+});
+
+test("a step leaves the machine by what it does, not by a noun built on the verb", () => {
+  expect(stepLeavesMachine("锁定获批提纲、3 个来源和发布前核对清单")).toBe(false);
+  expect(stepLeavesMachine("整理发布包，不发布")).toBe(false);
+  // The second real grown workflow's own safety line (2026-10-14).
+  expect(stepLeavesMachine("Crossline 助手运行本地资料包校验并抽查原始来源；在任何发送、上传或发布动作前停止")).toBe(false);
+  expect(stepLeavesMachine("发布到小红书")).toBe(true);
+  expect(stepLeavesMachine("上传成片并提交审核")).toBe(true);
+  expect(stepLeavesMachine("Email the draft to the editor")).toBe(true);
 });

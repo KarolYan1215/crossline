@@ -59,11 +59,16 @@ export type SkillScan = {
   findings: ScanFinding[];
 };
 
-const SCRIPT_FILE = /(^|\/)scripts\/|\.(sh|bash|zsh|ps1|psm1|bat|cmd|py|js|mjs|cjs|ts|rb|pl|php|lua|go|rs|exe|dll|so|dylib|bin|jar)$/i;
-export const isScriptFile = (file: string) => SCRIPT_FILE.test(file);
+/**
+ * Something that runs: a file with an executable extension anywhere, or a file without an extension under `scripts/`. A JSON, Markdown or
+ * CSV file under `scripts/` is a script's test data, not a script — counting it as one flagged an `https://example.com` in a grown
+ * workflow's fixture as network access and took away its (offline) checker (2026-10-14).
+ */
+const EXECUTABLE = /\.(sh|bash|zsh|ps1|psm1|bat|cmd|py|js|mjs|cjs|ts|rb|pl|php|lua|go|rs|exe|dll|so|dylib|bin|jar)$/i;
+export const isScriptFile = (file: string) => EXECUTABLE.test(file) || /(^|\/)scripts\/(?:[^/]+\/)*[^/.]+$/i.test(file);
 
 const SCRIPT_RULES: Array<{ rule: string; pattern: RegExp }> = [
-  { rule: "net", pattern: /\b(curl|wget|invoke-webrequest|invoke-restmethod|iwr|irm|nc|ncat|telnet|ssh|scp|ftp)\b|requests\.(get|post|put|patch|delete|session)|urllib|http\.client|httpx|aiohttp|\bfetch\s*\(|axios|xmlhttprequest|websocket|socket\.|net\.(connect|createconnection)|https?:\/\/(?!localhost|127\.0\.0\.1)/i },
+  { rule: "net", pattern: /\b(curl|wget|invoke-webrequest|invoke-restmethod|iwr|irm|nc|ncat|telnet|ssh|scp|ftp)\b|requests\.(get|post|put|patch|delete|session)|urllib\.request|urlopen|urlretrieve|http\.client|httpx|aiohttp|\bfetch\s*\(|axios|xmlhttprequest|websocket|socket\.|net\.(connect|createconnection)|https?:\/\/(?!localhost|127\.0\.0\.1)/i },
   { rule: "delete", pattern: /\brm\s+-|\bremove-item\b|\bdel\s|\brmdir\b|\brd\s|shutil\.rmtree|os\.(remove|unlink|rmdir|removedirs)|\.unlink\(|fs\.(rm|rmdir|unlink)(sync)?\b|rmsync|unlinksync|\btruncate\b/i },
   { rule: "outside", pattern: /(^|[\s"'(=:,])([a-z]:[\\/]|\/(etc|usr|var|root|home|users|opt|system|library|private)\/|~[\\/]|\$home\b|%userprofile%|\$env:(userprofile|appdata|localappdata)|%appdata%|os\.path\.expanduser|homedir\(\)|\.\.[\\/])/i },
   { rule: "system", pattern: /\bsudo\b|\bsu\s|chmod\s+[0-7]*7[0-7]*\b|chown\b|systemctl|launchctl|\bsetx\b|crontab|\/etc\/(hosts|passwd|shadow|sudoers)|defaults\s+write|gsettings\s+set/i },

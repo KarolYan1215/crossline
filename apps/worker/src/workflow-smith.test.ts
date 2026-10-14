@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
@@ -65,7 +65,7 @@ test("two accepted edits of the same kind on a line, or the person's words, beco
   expect(growCandidates(store, ws)).toEqual([expect.objectContaining({ origin: { kind: "asked", text: "每周五下午六点提醒我发小红书", requestId } })]);
 });
 
-test("a grown workflow is read back, checked, reviewed, installed and announced; one whose manifest hands publishing to the assistant is refused", async () => {
+test("a grown workflow is read back, checked, reviewed, installed and announced; publishing handed to the assistant goes to the person", async () => {
   const dir = path.join(root, "grow-1");
   writeSkill(dir);
   const candidate = { lineId: "media", category: "media_edit" as const, origin: { kind: "repeated" as const, taskIds: ["a1", "a2"] }, text: "剪辑 vlog", examples: [] };
@@ -78,10 +78,18 @@ test("a grown workflow is read back, checked, reviewed, installed and announced;
   expect((said.payload.card as { clarify: { question: string } }).clarify.question).toContain("新工作流「每周把素材剪成一条 3 分钟 vlog」已可用（每周五 18:00）");
   expect((said.payload.nudge as { delivery: string }).delivery).toBe("pending");
 
-  const bad = path.join(root, "grow-2");
-  writeSkill(bad, { ...workflowJson, steps: [{ title: "发布到小红书", by: "assistant", external: false }] });
-  expect(await installGrown(store, ws, candidate, done("grow-2", bad), { client: reviewer().rpc, cwd: "C:\\repo" }))
-    .toMatchObject({ state: "rejected", reason: expect.stringContaining("须由本人完成") });
+  // Publishing handed to the assistant is handed to the person, and the person is told so.
+  const posting = path.join(root, "grow-2");
+  writeSkill(posting, { ...workflowJson, name: "post-it", steps: [{ title: "发布到小红书", by: "assistant", external: false }] });
+  expect(await installGrown(store, ws, candidate, done("grow-2", posting), { client: reviewer().rpc, cwd: "C:\\repo" })).toMatchObject({ state: "installed" });
+  expect(readGrownSkills(store, ws).at(-1)!.manifest.steps).toEqual([{ title: "发布到小红书", by: "person", external: true }]);
+  expect((store.listRecentNudges(ws, "2000-01-01T00:00:00Z").at(-1)!.payload.card as { clarify: { question: string } }).clarify.question)
+    .toContain("「发布到小红书」涉及对外发出，已改由本人完成");
+  // A manifest that cannot be stored is still refused.
+  const bad = path.join(root, "grow-2b");
+  writeSkill(bad, { ...workflowJson, lines: ["nowhere"] });
+  expect(await installGrown(store, ws, candidate, done("grow-2b", bad), { client: reviewer().rpc, cwd: "C:\\repo" }))
+    .toMatchObject({ state: "rejected", reason: expect.stringContaining("lines 只能是") });
   // A script that reaches the network keeps the workflow, without the script.
   const risky = path.join(root, "grow-3");
   writeSkill(risky, { ...workflowJson, name: "vlog-upload-prep" }, "curl -X POST https://upload.example.com --data @out.mp4\n");
@@ -135,4 +143,18 @@ test("a reminder set in words is in place at once, kept, and said at its time on
     .toEqual([record.id]);
   expect(runs).toEqual([]);
   expect((store.listRecentNudges(ws, "2000-01-01T00:00:00Z").at(-1)!.payload.card as { clarify: { question: string } }).clarify.question).toBe("该发本周的小红书了");
+});
+
+test("the first real grown workflow (2026-10-14) installs: a Chinese name is a label, and 「发布前核对清单」 is not publishing", async () => {
+  const dir = path.join(root, "grow-real");
+  const manifest = JSON.parse(readFileSync(path.join(import.meta.dirname, "testing", "fixtures", "grown-workflow-real-2026-10-14.json"), "utf8")) as object;
+  writeSkill(dir, manifest);
+  store.setSetting(ws, LINE_SETTING, JSON.stringify([{ id: "research", label: "研究者", color: "research", goal: "", goals: [], createdAt: "" },
+    { id: "media", label: "创作者", color: "media", goal: "", goals: [], createdAt: "" }]));
+  const candidate = { lineId: "media", category: "read_research_organize" as const, origin: { kind: "repeated" as const, taskIds: ["a", "b"] }, text: "提纲与来源", examples: [] };
+  expect(await installGrown(store, ws, candidate, done("grow-real", dir), { client: reviewer().rpc, cwd: "C:\repo" }))
+    .toEqual({ state: "installed", id: "flow-weekly-vlog-cut" });
+  expect(readGrownSkills(store, ws)[0]!.manifest.steps.at(-1)).toMatchObject({ by: "assistant", external: false });
+  // The run that grows it knows the line, so the line's own skill is on for it.
+  expect(growTask(candidate, ["media"]).lineId).toBe("media");
 });

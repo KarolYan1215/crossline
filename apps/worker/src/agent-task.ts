@@ -38,6 +38,8 @@ export type AgentTaskInput = {
    * a grown workflow for its scheduled run.
    */
   extraSkills?: string[];
+  /** The line a task tied to no work order serves (growing a workflow, its scheduled run): its own skill is switched on like an order's. */
+  lineId?: string;
 };
 
 export type AuditCommand = { command: string; cwd: string; status: string; exitCode: number | null; reads: string[] };
@@ -204,7 +206,7 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
       try { const stat = statSync(full); return { exists: stat.isFile(), bytes: stat.size, insideDirectory }; } catch { return { exists: false, bytes: 0, insideDirectory }; }
     };
     // The person's own skill for this task's line and the public skills that fit it (docs/skills-library.md §3), on for this run only.
-    const lineId = input.workOrderId ? store.listWorkOrders(workspaceId).find((order) => order.id === input.workOrderId)?.identityId : undefined;
+    const lineId = input.lineId ?? (input.workOrderId ? store.listWorkOrders(workspaceId).find((order) => order.id === input.workOrderId)?.identityId : undefined);
     const chosen = await librarySkillsFor(client, store, workspaceId, lineId, { cwd, task: `${input.title}\n${input.what}`, wantIfMissing: true,
       ...(options.libraryDir ? { dir: options.libraryDir } : {}) });
     const extraSkills = [...new Set([...(input.extraSkills ?? []), ...chosen])];

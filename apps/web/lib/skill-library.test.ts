@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { CrosslineStore, requestWorkflow, saveMineVersion, writeGrownSkills, writePublicSkills } from "@crossline/db";
+import { CrosslineStore, addAiTool, removeAiTool, requestWorkflow, saveMineVersion, writeGrownSkills, writePublicSkills } from "@crossline/db";
 import { currentMineVersion, mineSkillSettingKey, readMineSkill, type PublicSkillRecord } from "@crossline/core";
 vi.mock("server-only", () => ({}));
 import { changeGrownSkill, deletePublicSkill, editMineSkill, loadSkillLibrary, restoreMineSkill } from "./skill-library";
@@ -64,4 +64,13 @@ test("a grown workflow shows when it runs, which steps are the person's and what
   expect(loadSkillLibrary(TEST_CTX).grown[0]).toMatchObject({ status: "off", pinned: true });
   expect(changeGrownSkill(TEST_CTX, "flow-weekly-vlog-cut", "remove")).toEqual({ ok: true });
   expect(changeGrownSkill(TEST_CTX, "flow-weekly-vlog-cut", "remove")).toEqual({ ok: false, code: "SKILL_NOT_FOUND" });
+});
+
+test("the AI tools plans assume are listed: the assistant's own always, the person's named ones removable", () => {
+  const store = setup();
+  expect(loadSkillLibrary(TEST_CTX).aiTools.map((tool) => [tool.name, tool.source])).toEqual([["Crossline 助手", "built_in"], ["联网调研（Codex）", "built_in"]]);
+  const tool = addAiTool(store, ws, { name: "剪映", kind: "media", goodFor: "自动字幕、粗剪" })!;
+  expect(loadSkillLibrary(TEST_CTX).aiTools.at(-1)).toMatchObject({ name: "剪映", kind: "media", source: "person" });
+  expect(removeAiTool(store, ws, tool.id)).toBe(true);
+  expect(removeAiTool(store, ws, "crossline-assistant")).toBe(false);
 });

@@ -27,6 +27,8 @@ A different input and answer: `skill` (name, description, source repository and 
 
 `reasons`: one finding per line, naming the file and what in it decided the verdict; for a scan finding you judge a false alarm, say why. Chinese, objective, third person.
 
+`reject` is for harm and deception only — steering the model, misleading about what it does, or nothing usable at all. A skill that could be more thorough, more specific or better organised is `usable` (or `text_only` when its scripts are the issue): write what would improve it in `reasons`, where the person reads it. When `subject.kind` is `grown_skill`, the skill was written by the person's own assistant from errands the person already accepted (or asked for): judge whether it is safe and does the errand as described, not whether it is the best possible version.
+
 ## Language
 
 Every human-readable field: Simplified Chinese, concise, standard academic or workplace register, objective third person (no 你/您, no 我, no greetings or filler). Fixed terms: 主线, 里程碑, 任务, 步骤, 长期目标, 分数线; verbs 批准, 验收, 撤销. Text quoted from the person or a source stays verbatim.

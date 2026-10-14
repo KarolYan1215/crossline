@@ -1,8 +1,8 @@
 import {
   AGENT_CATEGORIES, PUBLIC_SKILL_CATEGORY_LABEL, currentMineVersion, scheduleLabel, ensureMineFrontmatter, mineSkillSettingKey, publicSkillFilesKey, grownSkillFilesKey, readMineSkill,
-  type AccessContext, type PublicSkillRecord, type StoredMineRule
+  type AccessContext, type AiTool, type PublicSkillRecord, type StoredMineRule
 } from "@crossline/core";
-import { readGrownSkills, readPublicSkills, removeGrownSkill, removePublicSkill, saveMineVersion, updateGrownSkill } from "@crossline/db";
+import { aiToolsFor, readGrownSkills, readPublicSkills, removeGrownSkill, removePublicSkill, saveMineVersion, updateGrownSkill } from "@crossline/db";
 import { getStore } from "./crossline";
 import { identityLines } from "./lines";
 
@@ -26,7 +26,7 @@ export type PublicSkillView = Pick<PublicSkillRecord, "id" | "name" | "descripti
 export type GrownSkillView = { id: string; summary: string; name: string; category: string; lines: string[]; schedule: string; action: "run" | "remind";
   origin: string; steps: Array<{ title: string; person: boolean }>; status: "active" | "off"; pinned: boolean; verdict: "usable" | "text_only" | "reject";
   risk: "low" | "high"; reasons: string[]; files: number; createdAt: string; lastUsedAt: string; lastRunAt?: string; skillText: string };
-export type SkillLibraryView = { mine: MineSkillView[]; grown: GrownSkillView[]; publics: PublicSkillView[];
+export type SkillLibraryView = { mine: MineSkillView[]; grown: GrownSkillView[]; publics: PublicSkillView[]; aiTools: AiTool[];
   removed: Array<{ name: string; reason: string; at: string; by: string }>; growing: number };
 
 export function loadSkillLibrary(ctx: AccessContext): SkillLibraryView {
@@ -67,7 +67,7 @@ export function loadSkillLibrary(ctx: AccessContext): SkillLibraryView {
   // Requests made in words that no growing run has picked up yet: the page says they are on their way.
   const tried = new Set(store.listEvents(ctx.workspaceId, { type: "skill.grown.attempted" }).map((event) => String((event.payload as { requestId?: string }).requestId ?? "")));
   const growing = store.listEvents(ctx.workspaceId, { type: "workflow.requested" }).filter((event) => !tried.has(event.entityId)).length;
-  return { mine, grown, publics, removed, growing };
+  return { mine, grown, publics, removed, growing, aiTools: aiToolsFor(store, ctx.workspaceId) };
 }
 
 const MAX_SKILL_CHARS = 20_000;

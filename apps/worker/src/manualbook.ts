@@ -9,8 +9,8 @@ import {
   type MaterialSearchContext, type NodeWriteup, type WriteContext
 } from "@crossline/core";
 import { runCodexSkill, webResearchBlocker, type CodexRpcBoundary } from "@crossline/codex";
-import { listAgentTasks, type CrosslineStore } from "@crossline/db";
-import { requiredApproval } from "@crossline/core";
+import { aiToolsFor, listAgentTasks, type CrosslineStore } from "@crossline/db";
+import { aiToolBrief, requiredApproval } from "@crossline/core";
 import { claimedTitleMatches } from "./diligence";
 import { arxivPdfAddress, defaultSafeGetDeps, htmlToText, safeGet, type SafeGetDeps } from "./safe-fetch";
 import { extractText } from "./extract";
@@ -123,7 +123,7 @@ export function buildManualContext(store: CrosslineStore, workspaceId: string, w
     person: planningContext(store, workspaceId, order).person,
     ...(prepared.length ? { prepared } : {}),
     ...(steps.length ? { plannedSteps: steps.map((step) => ({ id: step.id, title: step.title, role: step.role, doneCriterion: step.doneCriterion ?? "",
-      covers: (step.covers ?? []).map((id) => unitTitle.get(id) ?? id), why: step.why ?? "" })) } : {})
+      covers: (step.covers ?? []).map((id) => unitTitle.get(id) ?? id), why: step.why ?? "", ...(step.aiAssist?.tool ? { aiAssist: step.aiAssist } : {}) })) } : {})
   };
 }
 
@@ -236,7 +236,9 @@ export function createManualbookBuilder(store: CrosslineStore, workspaceId: stri
         node: { id: result.node.id, title: result.node.title, kind: result.node.kind, goal: result.node.goal, steps: result.node.steps, acceptance: result.node.acceptance },
         sources: [...uploads, ...result.sources].map((source) => ({ id: source.id, title: source.title, url: source.url, kept: source.kept, text: source.text })),
         inputs: context.inputs, profile: context.profile, person: context.person ?? [],
-        covers: context.plannedSteps?.find((step) => step.title === result.node.title)?.covers ?? [] };
+        covers: context.plannedSteps?.find((step) => step.title === result.node.title)?.covers ?? [],
+        aiTools: aiToolsFor(store, workspaceId).map(aiToolBrief),
+        ...(() => { const assist = context.plannedSteps?.find((step) => step.title === result.node.title)?.aiAssist; return assist ? { aiAssist: assist } : {}; })() };
       const written = await runCodexSkill<NodeWriteup>(client, writeContext, {
         skillName: MATERIAL_WRITER_SKILL, cwd, developerInstructions: WRITE_INSTRUCTIONS + libraryInstruction(writerSkills),
         ...(writerSkills.length ? { extraSkills: writerSkills } : {}), outputSchema: NODE_WRITEUP_SCHEMA,

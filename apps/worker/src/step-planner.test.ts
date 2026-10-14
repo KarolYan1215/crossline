@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { CrosslineStore } from "@crossline/db";
+import { CrosslineStore, addAiTool } from "@crossline/db";
 import { createStepPlanner, createWarningReviewer, tasksAwaitingStepPlan, warningsAwaitingReview } from "./step-planner";
 import { materializeDatePairs } from "./date-pairs";
 import { taskFromWorkOrder } from "./agent-dispatch";
@@ -199,4 +199,19 @@ test("questions of plans made before importance was judged are filtered by rule:
   // The planner's own judgement is kept with the plan.
   expect(store.getStepPlan(workspaceId, "new")!.importance).toEqual({ longTerm: true, why: "毕业要求" });
   store.close();
+});
+
+test("the planner is given the person's AI tools, and each step keeps the tool that speeds it — one the person does not have is dropped", async () => {
+  const store = new CrosslineStore(":memory:");
+  seed(store);
+  addAiTool(store, workspaceId, { name: "剪映", kind: "media", goodFor: "自动字幕、粗剪" });
+  const answer = { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 4, unit: "题" }, rationale: "", units: [], questions: [],
+    importance: { longTerm: false, why: "" },
+    steps: [step("s", "solve", { aiAssist: { tool: "剪映", how: "自动字幕后只校对专有名词", minutesSaved: 25 } }),
+      step("u", "submit", { dependsOn: ["s"], aiAssist: { tool: "Midjourney", how: "画封面", minutesSaved: 10 } })] };
+  const runtime = scriptedRuntime(["crossline:crossline-step-planner"], () => JSON.stringify(answer));
+  expect((await createStepPlanner(store, workspaceId, "C:\repo", () => runtime.rpc)("wo")).state).toBe("planned");
+  const sent = JSON.parse(runtime.prompts()[0]!.split("\n\n").slice(1).join("\n\n")) as { aiTools: Array<{ name: string; by: string }> };
+  expect(sent.aiTools.map((tool) => [tool.name, tool.by])).toEqual([["Crossline 助手", "system"], ["联网调研（Codex）", "system"], ["剪映", "person"]]);
+  expect(store.getStepPlan(workspaceId, "wo")!.steps.map((item) => item.aiAssist?.tool ?? "")).toEqual(["剪映", ""]);
 });

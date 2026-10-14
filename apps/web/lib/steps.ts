@@ -84,7 +84,7 @@ export function editSteps(ctx: AccessContext, workOrderId: string, edited: Array
     return { id: `e${index + 1}`, role: old?.role ?? "deliver", title: item.title.trim().slice(0, 120), deliverable: old?.deliverable ?? "",
       doneCriterion: old?.doneCriterion ?? "", share: old?.share ?? 0, estimate: old?.estimate ?? { p25Minutes: 20, p50Minutes: 30, p85Minutes: 45 },
       dependsOn: index ? [`e${index}`] : [], notBefore: old?.notBefore ?? "", dueBy: old?.dueBy ?? "", schedulable: old?.schedulable ?? true,
-      executor: old?.executor ?? "human" as const, tickOutcome: old?.tickOutcome ?? "", covers: old?.covers ?? [], why: old?.why ?? "" };
+      executor: old?.executor ?? "human" as const, tickOutcome: old?.tickOutcome ?? "", covers: old?.covers ?? [], why: old?.why ?? "", ...(old?.aiAssist ? { aiAssist: old.aiAssist } : {}) };
   });
   const total = steps.reduce((sum, step) => sum + step.share, 0) || 1;
   const remaining = 1 - plan.steps.filter((step) => step.status !== "planned").reduce((sum, step) => sum + step.share, 0);

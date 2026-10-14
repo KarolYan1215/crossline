@@ -492,5 +492,6 @@ export * from "./background";
 export * from "./mine-skill";
 export * from "./public-skills";
 export * from "./workflows";
+export * from "./ai-tools";
 export * from "./provider-conformance";
 export * from "./local-stamp";

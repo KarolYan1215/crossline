@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { AI_TOOL_KIND_LABEL, type AiTool, type AiToolKind } from "@crossline/core";
 import { Markdown } from "../ui/markdown";
 import { LineTag, Tag } from "../ui/tag";
 import type { GrownSkillView, MineSkillView, PublicSkillView, SkillLibraryView } from "../../lib/skill-library";
@@ -21,6 +22,7 @@ export function SkillLibraryModule({ library }: { library: SkillLibraryView }) {
   const [publics, setPublics] = useState(library.publics);
   const [grown, setGrown] = useState(library.grown);
   return <div className="st-modules">
+    <AiToolsCard initial={library.aiTools} />
     <section className="st-card st-card-wide" aria-label="本人的主线 skill">
       <header><h3>本人的主线 skill</h3><small>每条主线一份，从本人的话与验收中整理；助手、步骤拆分、教程与验收都按它执行；不会被自动删除</small></header>
       <ul className="sk-lines">{mine.map((line) => <MineLine key={line.lineId} line={line} onSaved={(next) => setMine((all) => all.map((item) => item.lineId === next.lineId ? next : item))} />)}</ul>
@@ -156,4 +158,46 @@ function ConfirmDelete({ name, onConfirm }: { name: string; onConfirm: () => Pro
     if (!armed) { setArmed(true); setTimeout(() => setArmed(false), 5000); return; }
     await onConfirm();
   }}>{armed ? "确认删除" : "删除"}</button>;
+}
+
+const SOURCE = { built_in: "内置", detected: "使用记录", person: "本人添加" } as const;
+
+/**
+ * The AI tools plans assume (docs/skills-library.md §7): the assistant's own, the coding agents seen in use, and what the person names.
+ * Each step of a plan says which one speeds it and is timed with it, so a tool listed here changes how much a day can hold.
+ */
+function AiToolsCard({ initial }: { initial: AiTool[] }) {
+  const [tools, setTools] = useState(initial);
+  const [name, setName] = useState("");
+  const [kind, setKind] = useState<AiToolKind>("chat");
+  const [goodFor, setGoodFor] = useState("");
+  const [note, setNote] = useState("");
+  const send = (method: "POST" | "DELETE", body: object) => fetch("/api/ai-tools", { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
+    .then(async (response) => (response.ok ? await response.json() : undefined) as { tool?: AiTool } | undefined).catch(() => undefined);
+  return <section className="st-card st-card-wide" aria-label="可用的 AI 工具">
+    <header><h3>可用的 AI 工具 · {tools.length}</h3><small>步骤拆分、估时、教程与工作流按这些工具规划：能由助手整份做的交给助手，本人的步骤写明用哪个工具、怎么用，时间按用了工具计算</small></header>
+    <ul className="st-prefs">{tools.map((tool) => <li key={tool.id}>
+      <Tag>{AI_TOOL_KIND_LABEL[tool.kind]}</Tag><strong>{tool.name}</strong>
+      <span className="st-pref-text">{tool.goodFor}{tool.by === "system" ? "（由助手执行）" : ""}</span>
+      <small>{SOURCE[tool.source]}</small>
+      {tool.source === "person" && <button type="button" className="st-pref-remove" aria-label={`删除工具：${tool.name}`} title="删除" onClick={async () => {
+        if (await send("DELETE", { id: tool.id })) setTools((all) => all.filter((item) => item.id !== tool.id)); else setNote("删除未完成");
+      }}>×</button>}
+    </li>)}</ul>
+    <form className="sk-tool-form" onSubmit={async (event) => {
+      event.preventDefault();
+      const result = await send("POST", { name, kind, goodFor });
+      if (!result?.tool) { setNote("未添加：请写工具名称"); return; }
+      setTools((all) => [...all.filter((item) => item.name.toLowerCase() !== result.tool!.name.toLowerCase()), result.tool!]);
+      setName(""); setGoodFor(""); setNote(`已添加「${result.tool.name}」，之后的规划会用到它`);
+    }}>
+      <label><span>工具</span><input value={name} maxLength={40} placeholder="例如 剪映、NotebookLM" onChange={(event) => setName(event.target.value)} /></label>
+      <label><span>类别</span><select value={kind} onChange={(event) => setKind(event.target.value as AiToolKind)}>
+        {(Object.keys(AI_TOOL_KIND_LABEL) as AiToolKind[]).filter((item) => item !== "assistant").map((item) => <option key={item} value={item}>{AI_TOOL_KIND_LABEL[item]}</option>)}
+      </select></label>
+      <label className="sk-tool-good"><span>用来做什么</span><input value={goodFor} maxLength={120} placeholder="例如 自动字幕、粗剪" onChange={(event) => setGoodFor(event.target.value)} /></label>
+      <button type="submit" className="secondary-button" disabled={!name.trim()}>添加</button>
+    </form>
+    {note && <p role="status" className="st-note">{note}</p>}
+  </section>;
 }

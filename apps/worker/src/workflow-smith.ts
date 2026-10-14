@@ -3,7 +3,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import {
   AGENT_CATEGORIES, GROW_AFTER_ACCEPTED, GROWN_SKILL_IDLE_DAYS, PUBLIC_SKILL_REVIEW_SCHEMA, categoryFromWording, finalVerdict, grownSkillFilesKey, grownSkillId,
-  grownSkillName, scanSkillFiles, scheduleLabel, skillFrontmatter, textTerms, validatePublicSkillReview, validateWorkflowManifest, workflowDue,
+  grownSkillName, scanSkillFiles, scheduleLabel, skillFrontmatter, textTerms, reassignedSteps, validatePublicSkillReview, validateWorkflowManifest, workflowDue,
   type AgentCategory, type GrownSkillRecord, type PublicSkillReview, type WorkflowOrigin
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
@@ -70,7 +70,8 @@ export function growCandidates(store: CrosslineStore, workspaceId: string, now =
       const alike = tasks.filter((other) => other === task || shared(other.title, task.title) >= 3);
       if (alike.length < GROW_AFTER_ACCEPTED) continue;
       repeated.push({ lineId, category, origin: { kind: "repeated", taskIds: alike.map((item) => item.taskId) },
-        text: alike.map((item) => item.title).join("；"), examples: alike.slice(0, 4).map((item) => ({ taskId: item.taskId, title: item.title, directory: item.directory })) });
+        // The same errand run as several steps repeats its task's title; each distinct one is said once.
+        text: [...new Set(alike.map((item) => item.title))].slice(0, 6).join("；"), examples: alike.slice(0, 4).map((item) => ({ taskId: item.taskId, title: item.title, directory: item.directory })) });
       break;
     }
   }
@@ -78,10 +79,10 @@ export function growCandidates(store: CrosslineStore, workspaceId: string, now =
 }
 
 /** What the assistant is asked to do when it grows a workflow. */
-export function growTask(candidate: GrowCandidate, lineIds: string[]): AgentTaskInput & { taskId: string } {
+export function growTask(candidate: GrowCandidate, lineIds: string[], tools: Array<{ name: string; goodFor: string; by: "system" | "person" }> = []): AgentTaskInput & { taskId: string } {
   const basis = candidate.origin.kind === "asked" ? `本人的要求：「${candidate.text}」` : `本人已采纳过的同类结果：${candidate.text}`;
   return {
-    taskId: `grow-${randomUUID().slice(0, 8)}`, category: candidate.category, prep: true, extraSkills: [SKILL_CREATOR],
+    taskId: `grow-${randomUUID().slice(0, 8)}`, category: candidate.category, prep: true, extraSkills: [SKILL_CREATOR], lineId: candidate.lineId,
     title: `把这类事固化成工作流：${candidate.text.slice(0, 40)}`,
     humanPart: "是否保留这个工作流，由本人在设置里决定。",
     inputs: candidate.examples.map((example) => example.directory).filter(Boolean),
@@ -92,6 +93,7 @@ export function growTask(candidate: GrowCandidate, lineIds: string[]): AgentTask
       "2. skill/scripts/：能确定下来的步骤写成脚本（例如剪辑用 ffmpeg、批量重命名、格式转换），用示例输入在本任务目录里实际跑通；脚本只读写自己的工作目录，不联网、不删除目录外的文件、不读凭据。",
       `3. skill/workflow.json：{"name","summary","lines","category","trigger","schedule","action","reminder","steps":[{"title","by","external"}],"inputs","outputs"}。lines 从 ${JSON.stringify(lineIds)} 中选；category 为 "${candidate.category}"；trigger 为 "on_request"，本人要求定时（例如「每周五提醒」「每天早上整理」）时为 "schedule"，schedule 为 {"type":"daily"|"weekdays","time":"HH:MM"} 或 {"type":"weekly","days":["MO".."SU"],"time":"HH:MM"}；只需到点提醒时 action 为 "remind" 并写 reminder，否则为 "run"、reminder 为 ""。`,
       "发送、上传、发布、投稿、付款这类离开本机的步骤，by 为 \"person\"、external 为 true：工作流在它们之前停下，把要发出的东西备好放在产出目录。",
+      ...(tools.length ? [`本人能用的 AI 工具：${tools.map((tool) => `${tool.name}（${tool.goodFor}${tool.by === "system" ? "；由助手执行" : ""}）`).join("；")}。按今天会用这些工具的人的做法设计：能由助手整份做的步骤归助手，本人的步骤写明用哪个工具、怎么用（具体操作或给它的提示词），只把需要本人判断的部分留给本人。`] : []),
       "这次只建工作流，不执行原任务本身，不发布、不发送任何东西。产物列出 skill/ 下的每个文件。"
     ].join("\n")
   };
@@ -153,7 +155,12 @@ export async function installGrown(store: CrosslineStore, workspaceId: string, c
   const front = skillFrontmatter(skillText);
   if (!front) return reject("SKILL.md 没有 name 和 description");
   let manifest;
-  try { manifest = validateWorkflowManifest(JSON.parse(read.files.find((file) => file.path === "workflow.json")?.text ?? "null"), identityLines(store, workspaceId).map((line) => line.id)); }
+  let handedToPerson: string[] = [];
+  try {
+    const raw = JSON.parse(read.files.find((file) => file.path === "workflow.json")?.text ?? "null") as { steps?: Array<{ title?: string; by?: string }> };
+    manifest = validateWorkflowManifest(raw, identityLines(store, workspaceId).map((line) => line.id));
+    handedToPerson = reassignedSteps(raw, manifest);
+  }
   catch (error) { return reject(`workflow.json 不合格：${(error as Error & { detail?: string }).detail ?? (error as Error).message}`); }
   const scan = scanSkillFiles(read.files);
   if (!deps.client) return reject("审查未完成：模型服务不可用", { scan });
@@ -169,7 +176,9 @@ export async function installGrown(store: CrosslineStore, workspaceId: string, c
   const final = finalVerdict(scan, reviewed.output);
   if (final === "reject") return reject(scan.injection ? "SKILL.md 含有要求模型越权或外传的语句" : reviewed.output.reasons.join("；").slice(0, 300), { scan });
   const records = readGrownSkills(store, workspaceId);
-  const id = grownSkillId(manifest.name, records.map((record) => record.id));
+  // An id the runtime can name: the manifest's or the SKILL.md's name when either is plain ASCII, else the line and the kind of work.
+  const plain = [manifest.name, front.name].find((name) => /^[a-z0-9][a-z0-9-]*$/i.test(name)) ?? `${candidate.lineId}-${candidate.category}`.replace(/_/g, "-");
+  const id = grownSkillId(plain, records.map((record) => record.id));
   const at = now.toISOString();
   const record: GrownSkillRecord = { id, kind: "grown", name: front.name, description: front.description.slice(0, 600), lines: manifest.lines, category: manifest.category,
     manifest, origin: candidate.origin, taskId: outcome.taskId,
@@ -179,7 +188,7 @@ export async function installGrown(store: CrosslineStore, workspaceId: string, c
   writeGrownSkills(store, workspaceId, [...records, record]);
   store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.created:${id}`, type: "skill.grown.created", entityId: id,
     payload: { id, name: front.name, lines: manifest.lines, category: manifest.category, trigger: manifest.trigger, schedule: manifest.schedule, final, origin: candidate.origin.kind, taskId: outcome.taskId } });
-  sayToPerson(store, workspaceId, `新工作流「${manifest.summary}」已可用（${scheduleLabel(manifest.schedule)}${final === "text_only" ? "；脚本未通过扫描，只用文字" : ""}）。之后同类的事由助手按它做，发出、上传一类的步骤仍由本人完成。`,
+  sayToPerson(store, workspaceId, `新工作流「${manifest.summary}」已可用（${scheduleLabel(manifest.schedule)}${final === "text_only" ? "；脚本未通过扫描，只用文字" : ""}）。之后同类的事由助手按它做，发出、上传一类的步骤仍由本人完成${handedToPerson.length ? `；「${handedToPerson.join("」「")}」涉及对外发出，已改由本人完成` : ""}。`,
     "skill_grown", `grown:${id}`, [{ label: "查看或关闭", href: "/settings#skills" }], now);
   return { state: "installed", id };
 }
@@ -206,6 +215,7 @@ export function workflowSchedulePass(store: CrosslineStore, workspaceId: string,
       // what it made is for them to send, so it must not finish unseen.
       const personSteps = record.manifest.steps.filter((step) => step.by === "person").map((step) => step.title);
       const started = runFree({ taskId: `flow-${record.id.replace(/^flow-/, "")}-${now.getTime().toString(36)}`, category: record.category,
+        ...(record.lines[0] ? { lineId: record.lines[0] } : {}),
         extraSkills: [grownSkillName(record.id)], title: record.manifest.summary.slice(0, 80), humanPart: personSteps.join("；") || "查看结果",
         what: `按工作流 $${grownSkillName(record.id)} 做本期的这件事：${record.manifest.summary}。在由本人完成的步骤之前停下，把要发出的东西备好。` },
       (outcome) => sayToPerson(store, workspaceId, outcome.state === "done"

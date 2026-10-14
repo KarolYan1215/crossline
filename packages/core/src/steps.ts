@@ -1,4 +1,5 @@
 import { ARCHETYPE_IDS, STEP_ROLES, archetypeById, isStepRole, type Archetype, type StepRole } from "./archetypes";
+import { normalizeAiAssist } from "./ai-tools";
 
 /**
  * A task's step graph: the step planner's wire contract, the normalization that makes any answer usable, the warnings a reviewer
@@ -29,6 +30,12 @@ export type PlannedStep = {
   covers: string[];
   /** Why this step, for this person: the fact or material it rests on (their level, the weight of the part, the exam format). */
   why: string;
+  /**
+   * The AI tool that takes the drudgery out of a step the person does (docs/skills-library.md §7): which of the person's tools, how in one
+   * concrete line, and the minutes it saves against doing it by hand — the estimate is already the time with it. Empty tool: none fits.
+   * Optional for plans stored before it; the schema requires it.
+   */
+  aiAssist?: { tool: string; how: string; minutesSaved: number };
 };
 /**
  * One unit of the task's actual content, read from the person's material — a lecture, a chapter, a problem set, a section of a brief —
@@ -73,7 +80,8 @@ export const stepPlanSchema = (extraIds: readonly string[] = []) => object({
     id: str, role: { type: "string", enum: Object.keys(STEP_ROLES) }, title: str, deliverable: str, doneCriterion: str, share: num,
     estimate: object({ p25Minutes: num, p50Minutes: num, p85Minutes: num }),
     dependsOn: { type: "array", items: str }, notBefore: str, dueBy: str, schedulable: { type: "boolean" },
-    executor: { type: "string", enum: ["human", "agent", "mixed"] }, tickOutcome: str, covers: { type: "array", items: str }, why: str
+    executor: { type: "string", enum: ["human", "agent", "mixed"] }, tickOutcome: str, covers: { type: "array", items: str }, why: str,
+    aiAssist: object({ tool: str, how: str, minutesSaved: num })
   }) }
 });
 export const STEP_PLAN_SCHEMA = stepPlanSchema();
@@ -151,7 +159,7 @@ export function unverifiedUnits(units: StepUnit[], documents: Array<{ id: string
  * Makes any shape-valid plan usable: unique safe ids, ordered estimates, dependencies only on known earlier-or-later steps with cycles
  * broken, shares normalized, dates kept only when they are dates. Returns what it had to change as warnings.
  */
-export function normalizeStepPlan(plan: StepPlan): { plan: StepPlan; warnings: StepWarning[] } {
+export function normalizeStepPlan(plan: StepPlan, toolNames?: string[]): { plan: StepPlan; warnings: StepWarning[] } {
   const warnings: StepWarning[] = [];
   const idMap = new Map<string, string>();
   const steps = plan.steps.map((step, index) => {
@@ -169,7 +177,8 @@ export function normalizeStepPlan(plan: StepPlan): { plan: StepPlan; warnings: S
       schedulable: step.role === "wait" ? false : step.schedulable !== false,
       executor: (["human", "agent", "mixed"] as const).includes(step.executor) ? step.executor : "human",
       tickOutcome: (step.tickOutcome ?? "").trim().slice(0, 120), dependsOn: step.dependsOn ?? [],
-      covers: Array.isArray(step.covers) ? step.covers.filter((id) => typeof id === "string") : [], why: (step.why ?? "").trim().slice(0, 300) };
+      covers: Array.isArray(step.covers) ? step.covers.filter((id) => typeof id === "string") : [], why: (step.why ?? "").trim().slice(0, 300),
+      aiAssist: normalizeAiAssist(step.aiAssist, toolNames, p50) };
   });
   // Preparation is the assistant's: a person's step that only gathers or files material moves to it, and the assistant's steps never
   // take time on the person's calendar.

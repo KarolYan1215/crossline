@@ -75,6 +75,8 @@ function StepsPanel({ detail }: { detail: TaskDetail }) {
             {step?.doneCriterion && <small className="gen step-criterion">{step.doneCriterion}</small>}
             {covered.length > 0 && <small className="step-covers">内容：{covered.join("、")}</small>}
             {step?.why && <small className="gen step-why">{step.why}</small>}
+            {step?.aiAssist?.tool && <small className="step-ai" title="计划按用这个工具估算时间"><Tag tone="info">{step.aiAssist.tool}</Tag> <span className="gen">{step.aiAssist.how}</span>
+              {step.aiAssist.minutesSaved > 0 && <span className="muted">（约省 {step.aiAssist.minutesSaved} 分钟）</span>}</small>}
           </span>
           <span className="step-tools">
             {step && step.executor !== "human" && <button type="button" className="step-agent" title="由 Agent 完成该步骤"

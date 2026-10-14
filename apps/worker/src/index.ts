@@ -5,7 +5,7 @@ import path from "node:path";
 import { enterUsageWorkspace, setProviderResolver, setSpendModeProvider, setUsageSink, startCodexSupervisor, startModelGateway, type CodexSupervisor } from "@crossline/codex";
 import { createDpapiSecretStore } from "@crossline/connectors";
 import { createModelProviderService } from "./model-provider";
-import { CrosslineStore, isPaused, listPushSubscriptions, removePushSubscriptions } from "@crossline/db";
+import { CrosslineStore, aiToolsFor, isPaused, listPushSubscriptions, removePushSubscriptions } from "@crossline/db";
 import { capturesAwaitingAutoAnalysis, createCaptureAnalyzer } from "./analysis";
 import { autoApproveEligible } from "./auto-approval";
 import { retireShadowedDemos } from "./demo-cleanup";
@@ -268,7 +268,7 @@ async function workflowPass(workspaceId: string, checkedAt: string): Promise<voi
   if (assistantOff || growingWorkflows.has(workspaceId) || agentService.runningTasks(workspaceId).length) return;
   const candidate = growCandidates(analysisStore, workspaceId)[0];
   if (!candidate || !spendAllows(await spendFor(workspaceId), "discretionary")) return;
-  const input = growTask(candidate, identityLines(analysisStore, workspaceId).map((line) => line.id));
+  const input = growTask(candidate, identityLines(analysisStore, workspaceId).map((line) => line.id), aiToolsFor(analysisStore, workspaceId));
   growingWorkflows.add(workspaceId);
   const started = agentService.runFree(workspaceId, input, (outcome) => {
     void installGrown(analysisStore, workspaceId, candidate, outcome, { client: codexSupervisor?.clientFor(workspaceId), cwd: repoRoot })

@@ -1,10 +1,10 @@
 import {
-  ARCHETYPES, AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, resolveAvailability, VALIDATION_REVIEW_SCHEMA, archetypeBrief, archetypeById, stepPlanSchema, goalSettingKey,
+  ARCHETYPES, AVAILABILITY_PROPOSED_SETTING, aiToolBrief, AVAILABILITY_SETTING, resolveAvailability, VALIDATION_REVIEW_SCHEMA, archetypeBrief, archetypeById, stepPlanSchema, goalSettingKey,
   normalizeStepPlan, relevantDocuments, STEP_ANSWER_SLOT, stepAnswerSlot, stepPlanWarnings, unverifiedUnits, validateStepPlanShape, validateValidationReview, weeklyAvailableHours,
   PROGRESS_ASSESSMENT_SCHEMA, validateProgressAssessment, type ProgressAssessment, type StepPlan, type StepWarning, type ValidationReview
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
-import { listAgentTasks, projectAgentOutputs, type CrosslineStore, type StoredWorkOrder } from "@crossline/db";
+import { aiToolsFor, listAgentTasks, projectAgentOutputs, type CrosslineStore, type StoredWorkOrder } from "@crossline/db";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { learnedArchetypes } from "./archetype-curator";
 import { ownerOf } from "./owner";
@@ -135,6 +135,7 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
     // Archetypes the curator learned for this workspace are offered beside the built-in ones and checked the same way.
     const learned = learnedArchetypes(store, workspaceId);
     const grounding = planningContext(store, workspaceId, order);
+    const tools = aiToolsFor(store, workspaceId);
     // Important work the person does themselves is researched first (the web is open for this run): its background and the best known
     // way to do it, the plan proposed on that basis, and only what the person alone can answer asked.
     const research = importantByRule(store, workspaceId, order) && (payload.humanCore ?? []).length > 0;
@@ -154,6 +155,9 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
       person: { facts: grounding.person, strengths: grounding.strengths, answers: grounding.answers },
       projectDates: grounding.dated,
       archetypes: [...ARCHETYPES, ...learned].map(archetypeBrief),
+      // The AI tools the person works with (docs/skills-library.md §7): the assistant takes whole steps, the rest name the tool that
+      // speeds them, and every estimate is the time with it.
+      aiTools: tools.map(aiToolBrief),
       // Corrections and patterns the person has given: for this task, its line, or everything.
       personalPreferences: store.preferenceLines(workspaceId, [order.identityId, `task:${order.id}`], 15),
       doneSteps: done.map((step) => ({ title: step.title, role: step.role, deliverable: step.deliverable })),
@@ -195,7 +199,7 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
         payload: { code: result.blocker.code, message: result.blocker.message.slice(0, 300) } });
       return { state: "blocked", code: result.blocker.code, message: result.blocker.message };
     }
-    const { plan: shapedPlan, warnings: fixed } = normalizeStepPlan(result.output);
+    const { plan: shapedPlan, warnings: fixed } = normalizeStepPlan(result.output, tools.map((tool) => tool.name));
     const normalized = result.output.importance ? { ...shapedPlan, importance: result.output.importance } : shapedPlan;
     // Steps must not start before the window or end after it: clamp, the reviewer sees the warning.
     // What normalization already fixed (rescaled shares, a missing estimate filled in, an unknown dependency dropped) needs no judgement;
