@@ -7,13 +7,13 @@ import { energyRhythm } from "./energy-rhythm";
 const all = (value: number) => Object.fromEntries(QUIZ_ITEMS.map((item) => [item.id, value]));
 
 describe("quiz", () => {
-  test("four statements per axis, two keyed to each pole", () => {
+  test("eight statements per axis, four keyed to each pole", () => {
     for (const axis of TYPE_AXES) {
       const items = QUIZ_ITEMS.filter((item) => item.axis === axis.id);
-      expect(items).toHaveLength(4);
-      expect(items.filter((item) => item.reverse)).toHaveLength(2);
+      expect(items).toHaveLength(8);
+      expect(items.filter((item) => item.reverse)).toHaveLength(4);
     }
-    expect(new Set(QUIZ_ITEMS.map((item) => item.id)).size).toBe(16);
+    expect(new Set(QUIZ_ITEMS.map((item) => item.id)).size).toBe(32);
   });
 
   test("agreeing with everything cancels out on every axis; reversed statements are keyed the other way", () => {
