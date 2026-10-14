@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, onTestFinished, test, vi } from "vitest";
 import { mkdtempSync, readFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -180,6 +180,10 @@ test("a tutorial is built for committed work without moving it, from its steps a
 
 test("a tutorial is made just in time: only for work starting within two days, again when its inputs change or it is a week old", () => {
   const now = new Date("2026-10-13T12:00:00.000Z");
+  // The ledger stamps events with the wall clock; pin it to the test's `now`, or the week-old rebuild below stops holding as real time passes.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(now);
+  onTestFinished(() => { vi.useRealTimers(); });
   const hours = (n: number) => new Date(now.getTime() + n * 3_600_000).toISOString();
   store.saveWorkOrder({ id: "hw3", ownerId: "o", workspaceId: WS, identityId: "research", projectId: "p", milestoneId: "", intent: "作业 3", state: "approved", riskTier: "routine",
     estimate: { p25Minutes: 60, p50Minutes: 120, p85Minutes: 240, source: "llm_prior", observationCount: 0, confidence: "low" }, payload: {} });
@@ -205,6 +209,7 @@ test("a tutorial is made just in time: only for work starting within two days, a
   store.setSetting(WS, "schedule.orderStarts", JSON.stringify({ hw3: new Date(now.getTime() + 8 * 86_400_000 + 3_600_000).toISOString() }));
   expect(pendingTutorials(store, WS, new Date(now.getTime() + 8 * 86_400_000))).toEqual(["hw3"]);
   // A failure after the last build waits for the person.
+  vi.setSystemTime(new Date(now.getTime() + 8 * 86_400_000));
   store.appendEvent({ ownerId: "o", workspaceId: WS, idempotencyKey: "tb", type: "tutorial.blocked", entityId: "hw3", payload: { code: "X", message: "" } });
   expect(pendingTutorials(store, WS, new Date(now.getTime() + 8 * 86_400_000))).toEqual([]);
 });
