@@ -132,8 +132,6 @@ export function DashboardView({ data }: { data: DashboardData }) {
         <EnergyProbe context="after_rest" />
       </div>}
 
-      <AskStack initial={data.asks ?? []} moreHref="/approvals#asks" />
-
       <section className="panel capture-line" aria-labelledby="capture-title">
         <header><h2 id="capture-title">输入</h2><small>收集、修改、回答、提问，先确认再生效</small></header>
         <Conversation variant="inline" />
@@ -153,13 +151,17 @@ export function DashboardView({ data }: { data: DashboardData }) {
         </div>)}</div>}
       </section>
 
-      {data.calendar && <section className="panel" aria-label="今天的时间轴">
-        <header><h2>今天的时间轴</h2><a href="/plan">打开计划 →</a></header>
-        <ScheduleSummary changes={data.scheduleChanges ?? []} />
-        <CalendarPanel items={data.calendar.items} deadlines={data.calendar.deadlines} today={data.calendar.today} nowIso={data.calendar.nowIso}
-          timeZone={data.calendar.timeZone} labels={data.calendar.labels} quietByWeekday={data.calendar.quietByWeekday} proposals={data.calendar.proposals}
-          taskDetails={data.calendarDetails} />
-      </section>}
+      {/* The day and what is waiting on the person side by side, the stack as tall as the timeline (the person's layout, 2026-10-13). */}
+      <div className="today-day">
+        {data.calendar && <section className="panel today-timeline" aria-label="今天的时间轴">
+          <header><h2>今天的时间轴</h2><a href="/plan">打开计划 →</a></header>
+          <ScheduleSummary changes={data.scheduleChanges ?? []} />
+          <CalendarPanel items={data.calendar.items} deadlines={data.calendar.deadlines} today={data.calendar.today} nowIso={data.calendar.nowIso}
+            timeZone={data.calendar.timeZone} labels={data.calendar.labels} quietByWeekday={data.calendar.quietByWeekday} proposals={data.calendar.proposals}
+            taskDetails={data.calendarDetails} />
+        </section>}
+        <div className="today-asks"><AskStack initial={data.asks ?? []} moreHref="/approvals#asks" /></div>
+      </div>
 
       {data.flywheelGraph && <section className="panel" aria-labelledby="flywheel-title">
         <header><h2 id="flywheel-title">飞轮图谱</h2><a href="/milestones">打开主线 →</a></header>
