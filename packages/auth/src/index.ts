@@ -117,7 +117,10 @@ function crosslineAuthConfig(options: CrosslineAuthOptions): BetterAuthOptions {
       // 127.0.0.1/localhost is a browser-trustworthy secure context even over plain HTTP, so `secure`
       // does not need to be relaxed for local dev — only the Tailscale hostname (real HTTPS, stage six)
       // and loopback dev both satisfy it as written.
-      defaultCookieAttributes: { httpOnly: true, secure: true, sameSite: "lax", path: "/" }
+      defaultCookieAttributes: { httpOnly: true, secure: true, sameSite: "lax", path: "/" },
+      // Cookies are not kept apart by port: an installed copy at 127.0.0.1:<its port> and a checkout's resident app at 127.0.0.1:3210 on
+      // the same machine would overwrite each other's session in one browser. The installed copy's cookies get their own names.
+      ...(options.localCodex ? { cookiePrefix: "crossline-local" } : {})
     },
     account: {
       // The big plan requires explicit linking: signing in with Google using an email that already has

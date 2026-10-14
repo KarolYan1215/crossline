@@ -6,6 +6,13 @@
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["exec", "tsx", "scripts/review-server.ts"],
       "port": 3320
+    },
+    {
+      "name": "install-preview",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["exec", "tsx", "scripts/install-preview-server.ts"],
+      "port": 3330,
+      "url": "http://localhost:3330"
     }
   ]
 }

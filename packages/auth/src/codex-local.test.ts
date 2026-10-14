@@ -55,7 +55,8 @@ test("Codex signed in to ChatGPT becomes a Crossline session; signed out it does
   account = { email: "tester@example.com" };
   const ok = await auth.handler(post());
   expect(ok.status).toBe(200);
-  expect(ok.headers.get("set-cookie")).toContain("session_token");
+  // Its own cookie names: a resident app on 127.0.0.1:3210 in the same browser keeps its session (ports do not separate cookies).
+  expect(ok.headers.get("set-cookie")).toMatch(/^(__Secure-)?crossline-local\.session_token=/);
   // The same account again is the same user, not a second one.
   const again = await auth.handler(post());
   const session = await auth.api.getSession({ headers: new Headers({ cookie: again.headers.get("set-cookie")!.split(";")[0]! }) });

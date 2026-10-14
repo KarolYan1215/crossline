@@ -76,3 +76,10 @@
 7. 日历官方直连（逐个）。
 
 每阶段：实现 → 测试 → 以用户视角走查（摩擦、阅读量、语言、视觉）→ 给机主看 → 下一阶段。
+
+## 进展
+
+- 阶段 1（2026-10-14）：已合并（`2bf7b30`），全量 1704 项测试通过。
+- 阶段 2（2026-10-14）：登录页完成。`app/login/page.tsx`（本机版分支）、`login-preview.tsx`（四条示例主线依次接入、一周日历块依次落位，减少动态效果时静止）、`local-login.tsx`（三步、当前一步转圈、Codex 启动时显示已等待秒数）、`login.css`。标题用画像的衬线体（`.pt-serif`），界面用到的固定标题在 `app/ui/serif-strings.ts`，字体子集随之重建。手机宽度下隐藏示意图（标签会缩到 12px 以下；安装版只在桌面上用）。
+  - 走查时发现：安装版和常驻版都在 127.0.0.1 上，cookie 不按端口区分，同一浏览器里登录一边会挤掉另一边的会话。安装版的 cookie 改用 `crossline-local` 前缀（`packages/auth/src/index.ts`）。
+  - 预览：`scripts/install-preview-server.ts`（`.claude/launch.json` 的 `install-preview`，`localhost:3330`），本机版模式加一个替身 Codex 服务，`PREVIEW_CODEX=signed-out|starting|signed-in` 切换登录状态，不运行模型。
