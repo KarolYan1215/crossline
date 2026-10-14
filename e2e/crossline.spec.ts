@@ -695,10 +695,22 @@ test("设置里的 Skill 库：主线 skill 逐条带来源；编辑存为新版
   await expect(mine.getByRole("status")).toContainText("已回到第 1 版");
   await expect(mine.getByText("以冲突和焦虑作为内容核心切口，并以 solution 完成变现。")).toBeVisible();
 
+  // A grown workflow says when it runs and which step stays the person's; it can be turned off.
+  const flows = page.getByRole("region", { name: "生长的工作流" });
+  await expect(flows.getByText("每周五 18:00，到点由助手执行")).toBeVisible();
+  await expect(flows.getByText("上传并发布到小红书", { exact: true })).toBeVisible();
   if (testInfo.project.name !== "desktop-chrome") return;
+  await flows.getByRole("button", { name: "关闭", exact: true }).click();
+  await expect(flows.getByText("已关闭")).toBeVisible();
+  const off = openStore();
+  expect((JSON.parse(off.getSetting(realWorkspaceId(off), "skills.grown")!) as Array<{ status: string }>)[0]!.status).toBe("off");
+  off.close();
   const publics = page.getByRole("region", { name: /公开 skills/ });
   await expect(publics.getByText("example/skills/skills/note-tools")).toBeVisible();
   await expect(publics.getByText("发现联网，脚本未安装")).toBeVisible();
+  // Removing takes a second click.
   await publics.getByRole("button", { name: "删除公开 skill「note-tools」" }).click();
+  await expect(publics.getByText("example/skills/skills/note-tools")).toBeVisible();
+  await publics.getByRole("button", { name: "确认删除公开 skill「note-tools」" }).click();
   await expect(publics.getByText("example/skills/skills/note-tools")).toHaveCount(0);
 });

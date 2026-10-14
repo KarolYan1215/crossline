@@ -18,7 +18,8 @@ export const AGENT_CATEGORIES = {
   data_code_sim: "数据、代码、仿真",
   read_research_organize: "阅读、调研、整理",
   draft_text: "起草文字（不发送）",
-  files_calendar_prep: "文件整理和日程准备"
+  files_calendar_prep: "文件整理和日程准备",
+  media_edit: "剪辑音视频和图片（不发布）"
 } as const;
 export type AgentCategory = keyof typeof AGENT_CATEGORIES;
 export const isAgentCategory = (value: unknown): value is AgentCategory => typeof value === "string" && value in AGENT_CATEGORIES;
@@ -28,16 +29,22 @@ export const AGENT_CATEGORY_EXPLAINED: Record<AgentCategory, string> = {
   data_code_sim: "清洗数据、写和改脚本与代码（在项目分支里）、跑已有的仿真和批处理、画图表。产出是脚本、代码和图。",
   read_research_organize: "读文献和资料做带引文的摘要和对照笔记、查公开信息并核实来源、整理会议和课程材料。产出是笔记和清单。",
   draft_text: "起草邮件、报告、帖子和申请材料；只存放在产出目录，不发送，由本人修改后发出。",
-  files_calendar_prep: "归档与重命名文件、会前备齐材料、在 Crossline 日历排工作块；不改动原文件。"
+  files_calendar_prep: "归档与重命名文件、会前备齐材料、在 Crossline 日历排工作块；不改动原文件。",
+  media_edit: "按本人的素材剪辑视频与音频、加字幕、转码、裁图和做封面；成片只存放在产出目录，不上传不发布，由本人发出。"
 };
 
 /** Ordered: a tie goes to the earlier kind, because code and data are the most specific words. */
 const KEYWORDS: Array<[AgentCategory, RegExp]> = [
+  // Before code: 「用脚本剪视频」 is editing, and the words for it are the more specific ones.
+  ["media_edit", /剪辑|剪视频|剪片|粗剪|精剪|成片|视频|音频|配音|字幕|转码|封面图|裁图|抠图|ffmpeg|vlog/i],
   ["data_code_sim", /代码|脚本|程序|编程|仿真|模拟|数据|绘图|画图|图表|可视化|python|matlab|neurosim|spice|netlist|matplotlib|调试|重构|单元测试|批处理|跑一遍|拟合/i],
   ["read_research_organize", /阅读|读一?[遍下]|文献|调研|检索|搜索|查找|查证|核实|整理|摘要|总结|笔记|资料|对照|清单|综述|梳理|纪要/],
   ["draft_text", /起草|草稿|撰写|拟写|润色|改写|邮件|报告|帖子|文案|申请材料|说明书|提纲/],
   ["files_calendar_prep", /归档|重命名|文件夹|整理文件|日程|会前|备齐|备料|准备材料|检查表|模板/]
 ];
+
+/** The kind of work a sentence points at (the first keyword list it matches), or undefined when it points at none. */
+export const categoryFromWording = (text: string): AgentCategory | undefined => KEYWORDS.find(([, pattern]) => pattern.test(text))?.[0];
 
 const PERSONS_CALL = /选定|选出|挑选|决定|拍板|亲自|本人确认|和.{0,8}(谈|聊|面谈)/;
 const GRADED = /作业|小测|测验|考试|期中|期末|课程项目|大作业|实验报告|homework|\bhw\s?\d|quiz|exam|midterm|final project|\blab\b|assignment|take-?home/i;

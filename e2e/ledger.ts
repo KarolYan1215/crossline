@@ -40,7 +40,7 @@ export async function ensurePortrait(page: Page): Promise<void> {
 /**
  * Gives the account a skill library for the settings page's audits: one line skill with its sources (a person's review note, a confirmed
  * fact, a platform page) and an earlier version, and two public skills — one usable, one kept as text only after the scan found a script
- * that reaches the network. Written only when none exists.
+ * that reaches the network — and one grown workflow (a weekly vlog cut whose publishing step is the person's). Written only when none exists.
  */
 export async function ensureSkillLibrary(page: Page): Promise<void> {
   await page.goto("/settings");
@@ -49,9 +49,11 @@ export async function ensureSkillLibrary(page: Page): Promise<void> {
     const workspaceId = realWorkspaceId(store);
     if (store.getSetting(workspaceId, "skills.library")) return;
     const fixture = JSON.parse(readFileSync(path.join(import.meta.dirname, "fixtures", "skill-library.json"), "utf8")) as
-      { mine: Record<string, unknown>; library: unknown[] };
+      { mine: Record<string, unknown>; library: unknown[]; grown: unknown[]; grownFiles: Record<string, unknown> };
     const line = (store.getSetting(workspaceId, "lines.v1") ? (JSON.parse(store.getSetting(workspaceId, "lines.v1")!) as Array<{ id: string }>)[0]?.id : undefined) ?? "media";
     store.setSetting(workspaceId, `skills.mine.${line}`, JSON.stringify({ ...fixture.mine, lineId: line }));
     store.setSetting(workspaceId, "skills.library", JSON.stringify(fixture.library));
+    store.setSetting(workspaceId, "skills.grown", JSON.stringify(fixture.grown));
+    for (const [id, files] of Object.entries(fixture.grownFiles)) store.setSetting(workspaceId, `skills.grown.files.${id}`, JSON.stringify(files));
   } finally { store.close(); }
 }

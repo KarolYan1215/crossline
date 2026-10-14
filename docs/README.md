@@ -14,7 +14,7 @@
 | [flywheel-and-views.md](flywheel-and-views.md) | 跨主线飞轮（产物优先的联合规划）、今日页图谱与左侧面板、计划页统计、原子化身份定语（已审定） |
 | [review-2026-10-10.md](review-2026-10-10.md) | 系统评审：真实账本两周数据、临时账号走查、竞品对标，问题清单（P0/P1/P2）与已修复项、八个重点问题的回答 |
 | [review-2026-10-13.md](review-2026-10-13.md) | 系统评审：10-10 修复后真实账本三天零回流、后台开销反增、待决 85 项；逐条复核 10-10 问题；竞品与大厂对标；第一性原理方案 R1–R7（参与度三档、决定预算、回归流程、及时准备）；自带 Codex 与多模型接口设计；云端未验证项的本机结果 |
-| [skills-library.md](skills-library.md) | Skill 库（已实现，S1–S3）：公开 skills 的检索、扫描、AI 审查与 30 天清理；本人每条主线一个由本人的话整理的 skill；验收闸门按主线 skill 判「是否符合打法」 |
+| [skills-library.md](skills-library.md) | Skill 库（已实现）：本人每条主线一个由本人的话整理的 skill，验收闸门按它判「是否符合打法」；助手用 Codex 自带的 skill-creator 把重复的琐事长成工作流（可定时执行或提醒，发出与发布始终由本人完成）；公开 skills 的检索、扫描、AI 审查与 30 天清理 |
 | [loop-and-scout.md](loop-and-scout.md) | 闭环与机会侦察：排期自动生效与锁定、后台最优排程、完成确认、日历整理（工作 + 生活邮箱）、上手提速、画像海报与定制形象、名人库、机会侦察（已定稿 2026-10-12）；实施计划在 [plans/](plans/)（P-A 闭环、P-B 上手、P-C 海报、P-D 形象、P-E 名人库、P-F 侦察） |
 | [model-providers.md](model-providers.md) | 接入本人自己的 Codex 与其他 API 模型：现有耦合清单、接口设计、分阶段与风险（设计稿，待审） |
 | [assistant-agent.md](assistant-agent.md) | 带 shell 的助手：设计、守卫、信任与审阅流程 |

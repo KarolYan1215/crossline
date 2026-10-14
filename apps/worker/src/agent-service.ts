@@ -3,7 +3,7 @@ import path from "node:path";
 import { enterUsageWorkspace, type CodexRpcBoundary } from "@crossline/codex";
 import { deliverAgentResult, listAgentTasks, readCategories, requestCategory, type CrosslineStore } from "@crossline/db";
 import { AGENT_CATEGORIES, backgroundSpend, isAgentCategory, type AgentCategory, type CostSignal } from "@crossline/core";
-import { createAgentRunner, type AgentOutcome } from "./agent-task";
+import { createAgentRunner, type AgentOutcome, type AgentTaskInput } from "./agent-task";
 import { autoHandoffCandidates, dispatchCandidates, ledgerAsk, stepDispatchCandidates, taskFromWorkOrder } from "./agent-dispatch";
 import { startingWithin } from "./schedule-window";
 import { ownerOf } from "./owner";
@@ -107,6 +107,32 @@ export function createAgentService(deps: {
       }
       const result = start(workspaceId, orderId, undefined, stepId);
       log({ type: "agent.dispatched", workspaceId, orderId, ...(stepId ? { stepId } : {}), state: result.state });
+    },
+
+    /**
+     * A run tied to no work order — a workflow being grown, or a grown workflow's scheduled run (docs/skills-library.md §6): the same
+     * owner-only, one-at-a-time, approved-kinds-only machinery as an order's, with `after` told how it ended. A busy assistant or a kind
+     * the person has not allowed is refused, and the caller tries again later.
+     */
+    runFree(workspaceId: string, input: AgentTaskInput & { taskId: string }, after?: (outcome: AgentOutcome | { state: "failed"; message: string }) => void): DispatchResult {
+      if (deps.isOwner && !deps.isOwner(workspaceId))
+        return { state: "blocked", code: "AGENT_OWNER_ONLY", message: "这台电脑上的助手只为电脑主人工作。" };
+      if (!readCategories(deps.store, workspaceId)[input.category]) return { state: "needs_category_approval", category: input.category, label: AGENT_CATEGORIES[input.category] };
+      if (mark(workspaceId).size) return { state: "blocked", code: "AGENT_BUSY", message: "助手正在做别的事。" };
+      mark(workspaceId).add(input.taskId);
+      const control = new AbortController();
+      controls.set(input.taskId, control);
+      const run = createAgentRunner(deps.store, workspaceId, deps.repoRoot, deps.getClient, {
+        outputRoot: deps.outputRoot ?? defaultOutputRoot(), askFor: (id) => ledgerAsk(deps.store, workspaceId, id),
+        signal: control.signal, onLive: (record) => live.set(input.taskId, record)
+      });
+      void (async () => {
+        enterUsageWorkspace(workspaceId);
+        const outcome = await run(input).catch((error): { state: "failed"; message: string } => ({ state: "failed", message: error instanceof Error ? error.message : "" }));
+        try { after?.(outcome); } catch (error) { log({ type: "agent.after_failed", workspaceId, taskId: input.taskId, message: error instanceof Error ? error.message : "" }); }
+        log({ type: `agent.${outcome.state}`, workspaceId, taskId: input.taskId });
+      })().finally(() => { mark(workspaceId).delete(input.taskId); controls.delete(input.taskId); live.delete(input.taskId); });
+      return { state: "started", taskId: input.taskId };
     },
 
     runningTasks: (workspaceId: string): string[] => [...mark(workspaceId)],

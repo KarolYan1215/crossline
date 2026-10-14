@@ -2,8 +2,8 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { reviewAgentTask } from "@crossline/db";
-import { ACTIONS, describeEvent, templateCriterion, type AccessContext, type ActionArgs, type ActionId, type ProposedAction } from "@crossline/core";
+import { createReminderWorkflow, requestWorkflow, reviewAgentTask } from "@crossline/db";
+import { ACTIONS, describeEvent, scheduleLabel, templateCriterion, type AccessContext, type ActionArgs, type ActionId, type ProposedAction } from "@crossline/core";
 import type { EvidenceClaimInput } from "@crossline/db";
 import { addCapturedTaskWithId, approveWorkOrderProposal, archiveWorkOrder, completeWorkOrderExecution, getStore, saveMilestoneTemplate,
   startWorkOrderExecution } from "./crossline";
@@ -89,6 +89,21 @@ export const ACTION_HANDLERS: { [K in ActionId]: Handler<K> } = {
       body: JSON.stringify({ sessionId: session.id, text: args.text }), signal: AbortSignal.timeout(3 * 60 * 60_000) }).catch(() => undefined);
     return line ? { ok: true, message: `已交给「${line.label}」的访谈，主线卡片随后更新`, href: `/milestones?line=${encodeURIComponent(line.id)}` }
       : { ok: true, message: "已交给访谈，画像随后更新", href: "/onboarding" };
+  },
+  "workflow.request": (ctx, args) => {
+    // The assistant grows it into a workflow on the worker's next pass (docs/skills-library.md §6) and says so when it is ready.
+    const line = args.lineId ? identityLines(ctx).find((pack) => pack.id === args.lineId) : undefined;
+    if (args.lineId && !line) return { ok: false, code: "LINE_NOT_FOUND" };
+    // A plain reminder needs no method written down: it is set at once and said at its time (desktop and phone when no page is open).
+    if (args.reminder.trim() && args.time) {
+      const record = createReminderWorkflow(getStore(), ctx.workspaceId,
+        { text: args.text, reminder: args.reminder.trim(), time: args.time, weekdays: args.weekdays, lineId: line?.id ?? "" });
+      return { ok: true, message: `已设好：${scheduleLabel(record.manifest.schedule)}提醒「${args.reminder.trim()}」`, href: "/settings#skills" };
+    }
+    const target = line ?? identityLines(ctx)[0];
+    if (!target) return { ok: false, code: "LINE_NOT_FOUND" };
+    requestWorkflow(getStore(), ctx.workspaceId, args.text, target.id, ctx.principalId);
+    return { ok: true, message: "已交给助手建成工作流，建好后会通知；发出、发布一类的步骤仍由本人完成", href: "/settings#skills" };
   },
   "proposal.decide": (ctx, args) => args.decision === "approve"
     ? approveWorkOrderProposal(ctx, args.workOrderId)

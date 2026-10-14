@@ -1,8 +1,8 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { CrosslineStore, saveMineVersion, writePublicSkills } from "@crossline/db";
+import { CrosslineStore, requestWorkflow, saveMineVersion, writeGrownSkills, writePublicSkills } from "@crossline/db";
 import { currentMineVersion, mineSkillSettingKey, readMineSkill, type PublicSkillRecord } from "@crossline/core";
 vi.mock("server-only", () => ({}));
-import { deletePublicSkill, editMineSkill, loadSkillLibrary, restoreMineSkill } from "./skill-library";
+import { changeGrownSkill, deletePublicSkill, editMineSkill, loadSkillLibrary, restoreMineSkill } from "./skill-library";
 import { TEST_CTX } from "./test-support";
 
 afterEach(() => { globalThis.crosslineStore?.close(); globalThis.crosslineStore = undefined; });
@@ -25,6 +25,8 @@ test("the person's edit is a new version in force at once, made loadable; an ear
   expect(restoreMineSkill(TEST_CTX, "media", 3)).toEqual({ ok: false, code: "VERSION_IN_FORCE" });
   expect(editMineSkill(TEST_CTX, "nope", "x")).toEqual({ ok: false, code: "LINE_NOT_FOUND" });
   expect(editMineSkill(TEST_CTX, "media", "  ")).toEqual({ ok: false, code: "SKILL_EMPTY" });
+  // The page's empty template (headings and 「1. 」) is not a skill.
+  expect(editMineSkill(TEST_CTX, "media", "# 创作者：本人的做法\n\n## 打法\n\n1. \n\n## 偏好\n\n1. \n")).toEqual({ ok: false, code: "SKILL_EMPTY" });
   const view = loadSkillLibrary(TEST_CTX).mine.find((line) => line.lineId === "media")!;
   expect(view.current).toMatchObject({ version: 3, by: "person", restoredFrom: 1, rules: [expect.objectContaining({ text: "先抛冲突" })] });
   expect(view.versions.map((version) => version.version)).toEqual([3, 2, 1]);
@@ -44,4 +46,22 @@ test("a public skill is shown with its source, licence, scan and review, and the
   expect(deletePublicSkill(TEST_CTX, "pub-x")).toEqual({ ok: true });
   expect(deletePublicSkill(TEST_CTX, "pub-x")).toEqual({ ok: false, code: "SKILL_NOT_FOUND" });
   expect(loadSkillLibrary(TEST_CTX)).toMatchObject({ publics: [], removed: [{ name: "x", reason: "本人删除", by: "person" }] });
+});
+
+test("a grown workflow shows when it runs, which steps are the person's and what the checks found; the person turns it off, keeps it or removes it", () => {
+  const store = setup();
+  const manifest = { name: "weekly-vlog-cut", summary: "每周剪一条 vlog", lines: ["media"], category: "media_edit" as const, trigger: "schedule" as const,
+    schedule: { type: "weekly" as const, days: ["FR" as const], time: "18:00" }, action: "run" as const, reminder: "",
+    steps: [{ title: "粗剪", by: "assistant" as const, external: false }, { title: "发布", by: "person" as const, external: true }], inputs: [], outputs: [] };
+  writeGrownSkills(store, ws, [{ id: "flow-weekly-vlog-cut", kind: "grown", name: "weekly-vlog-cut", description: "d", lines: ["media"], category: "media_edit", manifest,
+    origin: { kind: "asked", text: "以后每周五把素材剪成 vlog", requestId: "r" }, taskId: "t", files: [], scan: { risk: "low", injection: false, findings: [] },
+    review: { verdict: "usable", reasons: ["可用"], final: "usable" }, status: "active", pinned: false, createdAt: "2026-10-12T00:00:00Z", updatedAt: "", lastUsedAt: "2026-10-12T00:00:00Z" }]);
+  requestWorkflow(store, ws, "每天九点提醒喝水", "media", TEST_CTX.principalId);
+  expect(loadSkillLibrary(TEST_CTX)).toMatchObject({ growing: 1, grown: [{ id: "flow-weekly-vlog-cut", schedule: "每周五 18:00", category: "剪辑音视频和图片（不发布）",
+    origin: "本人要求：「以后每周五把素材剪成 vlog」", steps: [{ title: "粗剪", person: false }, { title: "发布", person: true }] }] });
+  expect(changeGrownSkill(TEST_CTX, "flow-weekly-vlog-cut", { status: "off" })).toEqual({ ok: true });
+  expect(changeGrownSkill(TEST_CTX, "flow-weekly-vlog-cut", { pinned: true })).toEqual({ ok: true });
+  expect(loadSkillLibrary(TEST_CTX).grown[0]).toMatchObject({ status: "off", pinned: true });
+  expect(changeGrownSkill(TEST_CTX, "flow-weekly-vlog-cut", "remove")).toEqual({ ok: true });
+  expect(changeGrownSkill(TEST_CTX, "flow-weekly-vlog-cut", "remove")).toEqual({ ok: false, code: "SKILL_NOT_FOUND" });
 });

@@ -491,5 +491,6 @@ export * from "./portrait-say-do";
 export * from "./background";
 export * from "./mine-skill";
 export * from "./public-skills";
+export * from "./workflows";
 export * from "./provider-conformance";
 export * from "./local-stamp";

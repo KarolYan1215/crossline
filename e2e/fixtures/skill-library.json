@@ -157,5 +157,102 @@
    "lastUsedAt": "2026-10-10T00:00:00.000Z",
    "why": "小红书写作"
   }
- ]
+ ],
+ "grown": [
+  {
+   "id": "flow-weekly-vlog-cut",
+   "kind": "grown",
+   "name": "weekly-vlog-cut",
+   "description": "把一周素材剪成一条 vlog",
+   "lines": [
+    "media"
+   ],
+   "category": "media_edit",
+   "manifest": {
+    "name": "weekly-vlog-cut",
+    "summary": "每周把素材剪成一条 3 分钟 vlog",
+    "lines": [
+     "media"
+    ],
+    "category": "media_edit",
+    "trigger": "schedule",
+    "schedule": {
+     "type": "weekly",
+     "days": [
+      "FR"
+     ],
+     "time": "18:00"
+    },
+    "action": "run",
+    "reminder": "",
+    "steps": [
+     {
+      "title": "粗剪并加字幕",
+      "by": "assistant",
+      "external": false
+     },
+     {
+      "title": "导出成片与封面",
+      "by": "assistant",
+      "external": false
+     },
+     {
+      "title": "上传并发布到小红书",
+      "by": "person",
+      "external": true
+     }
+    ],
+    "inputs": [
+     "本周素材"
+    ],
+    "outputs": [
+     "成片",
+     "封面图"
+    ]
+   },
+   "origin": {
+    "kind": "repeated",
+    "taskIds": [
+     "agent-a",
+     "agent-b"
+    ]
+   },
+   "taskId": "grow-1",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+     "bytes": 400
+    }
+   ],
+   "scan": {
+    "risk": "low",
+    "injection": false,
+    "findings": []
+   },
+   "review": {
+    "verdict": "usable",
+    "reasons": [
+     "脚本只处理本周素材目录",
+     "发布由本人完成"
+    ],
+    "final": "usable"
+   },
+   "status": "active",
+   "pinned": false,
+   "createdAt": "2026-10-12T00:00:00.000Z",
+   "updatedAt": "2026-10-12T00:00:00.000Z",
+   "lastUsedAt": "2026-10-12T00:00:00.000Z"
+  }
+ ],
+ "grownFiles": {
+  "flow-weekly-vlog-cut": {
+   "files": [
+    {
+     "path": "SKILL.md",
+     "text": "---\nname: weekly-vlog-cut\ndescription: 把一周素材剪成一条 vlog\n---\n\n# 每周 vlog 剪辑\n\n1. 按时间线挑选片段并粗剪。\n2. 加字幕，导出成片与封面。\n3. 上传与发布由本人完成。\n"
+    }
+   ]
+  }
+ }
 }

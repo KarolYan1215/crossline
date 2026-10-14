@@ -8,6 +8,14 @@ import { useEffect, useState } from "react";
  */
 export function SettingsNav({ sections }: { sections: Array<{ id: string; label: string }> }) {
   const [current, setCurrent] = useState(sections[0]?.id ?? "");
+  // A link to one module (a notification's 「查看」 → /settings#skills) lands on it: the browser jumps before the cards above have their
+  // height, so the jump is made again once they have.
+  useEffect(() => {
+    const id = decodeURIComponent(window.location.hash.slice(1));
+    if (!id || !sections.some((section) => section.id === id)) return;
+    const timer = window.setTimeout(() => document.getElementById(id)?.scrollIntoView({ block: "start" }), 250);
+    return () => window.clearTimeout(timer);
+  }, [sections]);
   useEffect(() => {
     const observer = new IntersectionObserver((entries) => {
       const visible = entries.filter((entry) => entry.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];

@@ -6,7 +6,7 @@ import type { CardChoices } from "../../lib/conversation";
 const LABEL: Record<string, string> = {
   title: "标题", context: "补充", lineId: "主线", dueDate: "截止", milestoneId: "里程碑", workOrderId: "任务", date: "日期", minutes: "分钟",
   stepId: "步骤", text: "内容", who: "谁", energy: "精力", level: "精力", note: "备注", startTime: "开始", endTime: "结束", until: "截至", location: "地点",
-  target: "目标", label: "名称", reason: "原因", weight: "重要性"
+  target: "目标", label: "名称", reason: "原因", weight: "重要性", reminder: "提醒的话", time: "时间"
 };
 const ENERGY = [["low", "低"], ["medium", "中"], ["high", "高"]] as const;
 
@@ -25,6 +25,7 @@ export function editableFields(item: ProposedAction): string[] {
     }
     case "note.add": return ["text"];
     case "profile.tell": return ["text", "lineId"];
+    case "workflow.request": return ["text", "lineId", "reminder", "time"];
     case "energy.report": return ["level", "note"];
     case "event.create": return ["title", "date", "startTime", "endTime", "until", "location", "lineId"];
     case "goal.add": return ["lineId", "title"];
@@ -54,7 +55,7 @@ export function CardFields({ item, value, choices, onChange }: {
       switch (field) {
         case "date": case "dueDate": case "until":
           return <input id={id} type="date" value={String(current ?? "")} onChange={(event) => onChange(field, event.target.value)} />;
-        case "startTime": case "endTime":
+        case "startTime": case "endTime": case "time":
           return <input id={id} type="time" value={String(current ?? "")} onChange={(event) => onChange(field, event.target.value)} />;
         case "minutes": case "weight":
           return <input id={id} type="number" min={field === "weight" ? 0 : 5} max={field === "weight" ? 100 : 480} value={Number(current ?? 0)}

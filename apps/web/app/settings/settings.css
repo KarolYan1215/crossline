@@ -85,7 +85,9 @@
 .sk-actions{margin-left:auto;display:inline-flex;gap:6px}
 .sk-rules{gap:6px;font-size:13px}
 .sk-rules li{display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 8px;align-items:baseline}
-.sk-rules li small{grid-column:2;font-size:12px;color:var(--graphite);overflow-wrap:anywhere}
+.sk-rules li p{margin:0;min-width:0}
+.sk-rules li .sk-source{grid-column:2;font-size:12px;color:var(--graphite);overflow-wrap:anywhere}
+.sk-status{margin:0;font-size:12px;color:var(--graphite);flex:1 1 200px;min-width:0}
 .sk-edit{display:grid;gap:6px}
 .sk-edit textarea{width:100%;box-sizing:border-box;font-size:13px;line-height:1.5;resize:vertical}
 .sk-edit button{justify-self:start}

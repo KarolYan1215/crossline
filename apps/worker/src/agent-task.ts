@@ -33,6 +33,11 @@ export type AgentTaskInput = {
    * step, in 材料 and in the tutorial — not work handed in, so a run whose checks pass does not wait in the review queue.
    */
   prep?: boolean;
+  /**
+   * Runtime skills named by the caller beside the library's own choice: the runtime's `skill-creator` for a run that grows a workflow,
+   * a grown workflow for its scheduled run.
+   */
+  extraSkills?: string[];
 };
 
 export type AuditCommand = { command: string; cwd: string; status: string; exitCode: number | null; reads: string[] };
@@ -200,8 +205,9 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
     };
     // The person's own skill for this task's line and the public skills that fit it (docs/skills-library.md §3), on for this run only.
     const lineId = input.workOrderId ? store.listWorkOrders(workspaceId).find((order) => order.id === input.workOrderId)?.identityId : undefined;
-    const extraSkills = await librarySkillsFor(client, store, workspaceId, lineId, { cwd, task: `${input.title}\n${input.what}`, wantIfMissing: true,
+    const chosen = await librarySkillsFor(client, store, workspaceId, lineId, { cwd, task: `${input.title}\n${input.what}`, wantIfMissing: true,
       ...(options.libraryDir ? { dir: options.libraryDir } : {}) });
+    const extraSkills = [...new Set([...(input.extraSkills ?? []), ...chosen])];
     const result = await runCodexSkill<AgentSummary>(client, task, {
       skillName: AGENT_SKILL, cwd, developerInstructions: AGENT_INSTRUCTIONS + libraryInstruction(extraSkills), outputSchema: AGENT_SUMMARY_SCHEMA,
       ...(extraSkills.length ? { extraSkills } : {}),

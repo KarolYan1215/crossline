@@ -5,7 +5,7 @@ import path from "node:path";
 import { enterUsageWorkspace, setProviderResolver, setSpendModeProvider, setUsageSink, startCodexSupervisor, startModelGateway, type CodexSupervisor } from "@crossline/codex";
 import { createDpapiSecretStore } from "@crossline/connectors";
 import { createModelProviderService } from "./model-provider";
-import { CrosslineStore, listPushSubscriptions, removePushSubscriptions } from "@crossline/db";
+import { CrosslineStore, isPaused, listPushSubscriptions, removePushSubscriptions } from "@crossline/db";
 import { capturesAwaitingAutoAnalysis, createCaptureAnalyzer } from "./analysis";
 import { autoApproveEligible } from "./auto-approval";
 import { retireShadowedDemos } from "./demo-cleanup";
@@ -26,6 +26,7 @@ import { createTaskTitler, untitledTasks } from "./task-titler";
 import { createCalendarClassifier, unfiledCalendarEvents } from "./calendar-classifier";
 import { createInsightCompiler, linesAwaitingMineSkill } from "./insight-compiler";
 import { cleanPublicSkills, createSkillScout, scoutDue } from "./public-skills";
+import { cleanGrownSkills, growCandidates, growTask, installGrown, sayToPerson, workflowSchedulePass } from "./workflow-smith";
 import { createGoalSplitter, linesAwaitingCandidateSplit, linesAwaitingSplit } from "./goal-splitter";
 import { fileSourceDocuments } from "./source-filing";
 import { createPortraitWriter, PORTRAIT_GAP_AT, PORTRAIT_REWRITE_MARKER, portraitRewriteDue } from "./portrait-writer";
@@ -44,6 +45,7 @@ import { createBackgroundFactsExtractor } from "./background-facts-runner";
 import { createGraphSync, type SyncOutcome } from "./graph-sync";
 import { REQUIRED_SKILLS } from "./required-skills";
 import { monthSpend, ownerOf, runtimeOwner, runtimesDir } from "./owner";
+import { identityLines } from "./lines";
 import { createBackgroundSpend } from "./spend";
 import {
   buildSources, calendarLabel, listCatalogue, readSelection, saveSelection, seedNewAccounts, sourceKey, mayUseGraphLogin, withdrawForeignCalendar } from "./calendar-sources";
@@ -247,6 +249,43 @@ async function publicSkillPass(workspaceId: string, checkedAt: string): Promise<
 }
 
 /**
+ * Grown workflows (docs/skills-library.md §6): reminders and scheduled runs whose time has come, the daily clean-up, and — when the
+ * assistant is free, not paused and the quota allows — one errand grown into a workflow. Growing and scheduled runs go through the same
+ * assistant machinery as any task (owner only, approved kinds only); reminders go out whatever the assistant is doing.
+ */
+const growingWorkflows = new Set<string>();
+async function workflowPass(workspaceId: string, checkedAt: string): Promise<void> {
+  try {
+    const removed = cleanGrownSkills(analysisStore, workspaceId);
+    if (removed.length) console.info(JSON.stringify({ type: "skill.grown.cleaned", checkedAt, workspaceId, removed }));
+  } catch { /* housekeeping */ }
+  const assistantOff = isPaused(analysisStore, workspaceId) || !codexSupervisor;
+  try {
+    const fired = workflowSchedulePass(analysisStore, workspaceId, (input, after) => assistantOff
+      ? { state: "blocked", code: "AGENT_PAUSED", message: "助手已暂停。" } : agentService.runFree(workspaceId, input, after));
+    if (fired.length) console.info(JSON.stringify({ type: "skill.grown.scheduled", checkedAt, workspaceId, fired }));
+  } catch { /* next tick */ }
+  if (assistantOff || growingWorkflows.has(workspaceId) || agentService.runningTasks(workspaceId).length) return;
+  const candidate = growCandidates(analysisStore, workspaceId)[0];
+  if (!candidate || !spendAllows(await spendFor(workspaceId), "discretionary")) return;
+  const input = growTask(candidate, identityLines(analysisStore, workspaceId).map((line) => line.id));
+  growingWorkflows.add(workspaceId);
+  const started = agentService.runFree(workspaceId, input, (outcome) => {
+    void installGrown(analysisStore, workspaceId, candidate, outcome, { client: codexSupervisor?.clientFor(workspaceId), cwd: repoRoot })
+      .then((result) => console.info(JSON.stringify({ type: "skill.grown." + result.state, workspaceId, ...result })))
+      .catch(() => undefined).finally(() => growingWorkflows.delete(workspaceId));
+  });
+  if (started.state !== "started") growingWorkflows.delete(workspaceId);
+  // A busy assistant or another account's workspace is tried again on a later tick; nothing is recorded for it.
+  if (started.state === "blocked") return;
+  // Tried once per errand or request: a kind the person has not allowed is said once, not every tick.
+  analysisStore.appendEvent({ ownerId: ownerOf(analysisStore, workspaceId), workspaceId, idempotencyKey: "skill.grown.attempted:" + input.taskId, type: "skill.grown.attempted",
+    entityId: candidate.lineId, payload: { taskId: input.taskId, state: started.state, ...(candidate.origin.kind === "asked" ? { requestId: candidate.origin.requestId } : { taskIds: candidate.origin.taskIds }) } });
+  if (started.state === "needs_category_approval") sayToPerson(analysisStore, workspaceId, "要把「" + candidate.text.slice(0, 40) + "」固化成工作流，需要先允许助手做「" + started.label + "」这类工作。",
+    "skill_grown", "grow-needs:" + input.taskId, [{ label: "去开启", href: "/settings#automation" }]);
+}
+
+/**
  * Writes the portrait (the interview's end, 重新生成, or the one rewrite after the fixed dimensions shipped): `portrait.requested` first,
  * so the page shows it running, then `portrait.blocked` with the reason, or the figure drawn in the background after the words.
  */
@@ -428,6 +467,7 @@ async function tick(): Promise<void> {
     startDiligencePass(workspace.id, checkedAt);
     // The assistant starts approved kinds of work by itself; it never holds the tick (its runs are detached).
     if (codexSupervisor) await agentService.pass(workspace.id).catch(() => undefined);
+    await workflowPass(workspace.id, checkedAt).catch(() => undefined);
   }
   // Bounded, and never able to wedge the tick: a health probe that neither errors nor fires its socket
   // timeout — which is what a web server killed mid-response looks like — would otherwise hold the

@@ -41,6 +41,8 @@ export const ACTIONS = {
   "milestone.draft": { label: "新建里程碑草稿", risk: "internal", args: { lineId: str(64), title: str(200), date: day, target: str(500) } },
   "line.add": { label: "新增主线", risk: "internal", args: { label: str(12) } },
   "profile.tell": { label: "交给访谈", risk: "internal", args: { text: str(2000), lineId: str(64) } },
+  "workflow.request": { label: "建成工作流", risk: "internal", args: { text: str(1000), lineId: str(64), reminder: str(200), time: str(5),
+    weekdays: { type: "array", maxItems: 7, items: { type: "integer", minimum: 0, maximum: 6 } } } },
   "proposal.decide": { label: "处理任务提案", risk: "commitment", args: { workOrderId: str(128), decision: enumOf(["approve", "reject"]), reason: str(300) } },
   "milestones.decide": { label: "处理里程碑草稿", risk: "commitment", args: { milestoneIds: { type: "array", maxItems: 20, items: str(128) },
     decision: enumOf(["approve", "reject"]) } },
@@ -77,6 +79,7 @@ type ArgsOf = {
   "line.add": { label: string };
   /** `lineId`: that line's own interview (the person is on its card or page); "" = the whole interview. */
   "profile.tell": { text: string; lineId: string };
+  "workflow.request": { text: string; lineId: string; reminder: string; time: string; weekdays: number[] };
   "proposal.decide": { workOrderId: string; decision: "approve" | "reject"; reason: string };
   "milestones.decide": { milestoneIds: string[]; decision: "approve" | "reject" };
   "agent_result.review": { taskId: string; decision: "accepted" | "rejected"; note: string };
@@ -148,6 +151,8 @@ export function actionProblem(item: ProposedAction, refs: ConciergeRefs): string
       return "";
     }
     case "note.add": return String(a.text ?? "").trim() ? "" : "内容为空";
+    case "workflow.request": return !String(a.text ?? "").trim() ? "内容为空"
+      : String(a.reminder ?? "").trim() && !/^([01]\d|2[0-3]):[0-5]\d$/.test(String(a.time ?? "")) ? "提醒须有 HH:MM 的时间" : item.args.lineId && !refs.lines.has(item.args.lineId) ? `主线 id「${item.args.lineId}」不存在` : "";
     case "profile.tell": return !String(a.text ?? "").trim() ? "内容为空" : item.args.lineId && !refs.lines.has(item.args.lineId) ? `主线 id「${item.args.lineId}」不存在` : "";
     case "task.op": {
       const args = item.args;

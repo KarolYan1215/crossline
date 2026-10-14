@@ -238,6 +238,8 @@ export function skillFrontmatter(text: string): { name: string; description: str
 /** The installed SKILL.md: the frontmatter name replaced by the library id, so two published skills with one name cannot collide. */
 export const renameSkill = (text: string, id: string) => text.replace(/^(\uFEFF?---\r?\n[\s\S]*?^name:\s*).*$/m, `$1${id}`);
 
+/** Terms of a text for overlap: CJK pairs and Latin words. */
+export const textTerms = (text: string) => terms(text);
 /** Characters of overlap between what a skill says it does and a task: CJK pairs and Latin words. */
 const terms = (text: string) => {
   const lower = text.toLowerCase();
@@ -245,11 +247,11 @@ const terms = (text: string) => {
   const han = [...lower.matchAll(/[\u4e00-\u9fff]+/g)].flatMap((run) => [...run[0]].slice(0, -1).map((char, index) => char + run[0][index + 1]));
   return new Set([...words, ...han]);
 };
-/** How well a public skill fits a task on a line: 0 when it is for other lines or shares nothing with the task. */
-export function publicSkillRelevance(record: PublicSkillRecord, lineId: string, task: string): number {
+/** How well a library skill (public or grown) fits a task on a line: 0 when it is for other lines or shares nothing with the task. */
+export function publicSkillRelevance(record: { name: string; description: string; category: string; lines: string[] }, lineId: string, task: string): number {
   if (record.lines.length && !record.lines.includes(lineId)) return 0;
   const wanted = terms(task);
-  const have = terms(`${record.name} ${record.description} ${PUBLIC_SKILL_CATEGORY_LABEL[record.category]} ${record.category}`);
+  const have = terms(`${record.name} ${record.description} ${PUBLIC_SKILL_CATEGORY_LABEL[record.category as PublicSkillCategory] ?? ""} ${record.category}`);
   let shared = 0;
   for (const term of have) if (wanted.has(term)) shared += 1;
   return shared;
