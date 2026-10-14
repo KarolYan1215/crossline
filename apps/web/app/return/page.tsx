@@ -22,11 +22,11 @@ export default async function ReturnPage() {
   const store = getStore();
   const since = due?.since ?? store.lastPersonActivity(ctx.workspaceId) ?? store.listWorkspaces().find((item) => item.id === ctx.workspaceId)?.createdAt;
   if (!since) redirect("/");
-  const before = returnView(ctx, since, now);
+  const before = returnView(ctx, since, now, due?.until);
   const cleaned = before.stale.orders.length || before.stale.milestones.length
     ? await withUndo(ctx, `归档超过 14 天无人处理的 ${before.stale.orders.length + before.stale.milestones.length} 项`, () => cleanStale(ctx, now))
     : undefined;
-  const view = cleaned ? returnView(ctx, since, now) : before;
+  const view = cleaned ? returnView(ctx, since, now, due?.until) : before;
   return <SubpageShell active="今日" title="欢迎回来">
     <ReturnPanel view={view} cleaned={cleaned ? { orders: before.stale.orders, milestones: before.stale.milestones, opId: cleaned.op?.id } : undefined} />
   </SubpageShell>;

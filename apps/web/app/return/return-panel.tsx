@@ -10,7 +10,7 @@ const duration = (minutes: number) => minutes >= 60 ? `${Math.round(minutes / 6)
 /** What the page says the person has been away for and what happened; exported for its test. */
 export function absenceSummary(view: ReturnView): string[] {
   // The page can be opened at any time, not only after days away: under a day it says how many hours, never a rounded-up 「1 天」.
-  const lines = [view.daysAway >= 1 ? `离开了 ${view.daysAway} 天（上次操作 ${md(view.sinceDay)}）。`
+  const lines = [view.hoursAway >= 24 ? `离开了 ${view.daysAway} 天（上次操作 ${md(view.sinceDay)}）。`
     : `上次操作在${view.hoursAway >= 1 ? ` ${view.hoursAway} 小时前` : "不到 1 小时前"}（${md(view.sinceDay)}）。`];
   if (view.items.length) lines.push(`期间有 ${view.items.length} 项任务排了时间或到了截止，下面逐项点一下就能更新。`);
   if (view.happened.deadlinesSoon.length) lines.push(`未来 7 天到期：${view.happened.deadlinesSoon.map((item) => `${item.title}（${md(item.deadline)}）`).join("、")}。`);

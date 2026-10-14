@@ -412,6 +412,26 @@ function notBefore(at: string, floor: string | undefined): string {
   return floor && Date.parse(at) < Date.parse(floor) ? floor : at;
 }
 
+/**
+ * The person's own actions — what they said in the input box or the interview, timing or confirming work, an answered question, a
+ * capture or discard, a milestone or line edit, a step's progress, an energy self-report — never anything the system did. One row per
+ * action, as `at`, for workspace `@ws` from `@since`.
+ */
+const PERSON_EVENTS = ["ask.answered", "block.confirmed", "execution.confirmed", "execution.paused", "execution.resumed", "capture.created",
+  "capture.discarded", "milestone.revised", "milestone.retrospective", "approval.revoked", "risk.accepted", "ask.snoozed", "return.answered",
+  // Setting up: a line or its goal changed, a batch of dates decided, a file filed. Missing these, someone in the middle of the interview
+  // read as days away, and the engagement tier held back the planning their answers were for.
+  "line.created", "line.updated", "line.ranked", "lines.set_up", "dates.decided", "source.project_assigned"];
+const PERSON_ACTIVITY_SQL = `
+  SELECT created_at AS at FROM conversation_messages WHERE workspace_id = @ws AND role = 'person' AND created_at >= @since
+  UNION ALL SELECT created_at FROM onboarding_messages WHERE workspace_id = @ws AND role = 'user' AND created_at >= @since
+  UNION ALL SELECT started_at FROM executions WHERE workspace_id = @ws AND started_at >= @since
+  UNION ALL SELECT ended_at FROM executions WHERE workspace_id = @ws AND ended_at IS NOT NULL AND ended_at >= @since
+  UNION ALL SELECT observed_at FROM energy_observations WHERE workspace_id = @ws AND source = 'self_report' AND observed_at >= @since
+  UNION ALL SELECT created_at FROM events WHERE workspace_id = @ws AND created_at >= @since
+    AND (type IN (${PERSON_EVENTS.map((type) => `'${type}'`).join(",")})
+      OR (type = 'task.step_progress' AND json_extract(payload_json, '$.source') IN ('user', 'person', 'confirm')))`;
+
 export class CrosslineStore {
   readonly #db: Database.Database;
   /** The ledger file (`:memory:` in tests); the data directory is the folder it sits in. */
@@ -2840,18 +2860,16 @@ export class CrosslineStore {
    * left open is not activity, and nothing the system did on its own counts. Background spending follows this.
    */
   lastPersonActivity(workspaceId: string): string | undefined {
-    const PERSON_EVENTS = ["ask.answered", "block.confirmed", "execution.confirmed", "execution.paused", "execution.resumed", "capture.created",
-      "capture.discarded", "milestone.revised", "milestone.retrospective", "approval.revoked", "risk.accepted", "ask.snoozed", "return.answered"];
-    const latest = [
-      (this.#db.prepare("SELECT MAX(created_at) AS at FROM conversation_messages WHERE workspace_id = ? AND role = 'person'").get(workspaceId) as { at: string | null }).at,
-      (this.#db.prepare("SELECT MAX(MAX(started_at), COALESCE(MAX(ended_at), '')) AS at FROM executions WHERE workspace_id = ?").get(workspaceId) as { at: string | null }).at,
-      (this.#db.prepare("SELECT MAX(observed_at) AS at FROM energy_observations WHERE workspace_id = ? AND source = 'self_report'").get(workspaceId) as { at: string | null }).at,
-      (this.#db.prepare(`SELECT MAX(created_at) AS at FROM events WHERE workspace_id = ? AND type IN (${PERSON_EVENTS.map(() => "?").join(",")})`)
-        .get(workspaceId, ...PERSON_EVENTS) as { at: string | null }).at,
-      (this.#db.prepare("SELECT MAX(created_at) AS at FROM events WHERE workspace_id = ? AND type = 'task.step_progress' AND json_extract(payload_json, '$.source') IN ('user', 'person', 'confirm')")
-        .get(workspaceId) as { at: string | null }).at
-    ].filter((at): at is string => Boolean(at));
-    return latest.sort().at(-1);
+    return (this.#db.prepare(`SELECT MAX(at) AS at FROM (${PERSON_ACTIVITY_SQL})`).get({ ws: workspaceId, since: "" }) as { at: string | null }).at ?? undefined;
+  }
+
+  /**
+   * Every own action of the person since `since` (ISO; "" for all), oldest first (`PERSON_ACTIVITY_SQL` says what counts). The
+   * return page finds the person's last absence in the gaps between them.
+   */
+  personActivityTimes(workspaceId: string, since: string): string[] {
+    const rows = this.#db.prepare(`SELECT at FROM (${PERSON_ACTIVITY_SQL}) WHERE at IS NOT NULL ORDER BY at`).all({ ws: workspaceId, since }) as Array<{ at: string }>;
+    return rows.map((row) => row.at);
   }
 
   listEnergyObservations(workspaceId: string): StoredEnergyObservation[] {

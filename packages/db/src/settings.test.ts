@@ -27,5 +27,12 @@ test("the person's latest own action: what they said, timed, answered or reporte
   expect(store.lastPersonActivity("w")).toBe("2026-10-01T12:00:00.000Z");
   store.saveEnergyObservation({ id: "e1", ownerId: "o", workspaceId: "w", source: "self_report", level: "high", confidence: "high", aggregate: {}, observedAt: "2026-10-03T09:00:00.000Z" });
   expect(store.lastPersonActivity("w")).toBe("2026-10-03T09:00:00.000Z");
+  // A reply in the interview and a goal adopted are the person acting too; the interviewer's own turn is not.
+  store.appendOnboardingMessage({ sessionId: "s", workspaceId: "w", role: "assistant", content: {}, createdAt: "2026-10-05T09:00:00.000Z" });
+  expect(store.lastPersonActivity("w")).toBe("2026-10-03T09:00:00.000Z");
+  store.appendOnboardingMessage({ sessionId: "s", workspaceId: "w", role: "user", content: { text: "a" }, createdAt: "2026-10-04T09:00:00.000Z" });
+  expect(store.lastPersonActivity("w")).toBe("2026-10-04T09:00:00.000Z");
+  store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: "goal", type: "line.updated", entityId: "media", payload: {} });
+  expect(store.lastPersonActivity("w")! > "2026-10-04T09:00:00.000Z").toBe(true);
   store.close();
 });

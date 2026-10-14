@@ -20,13 +20,27 @@ export const RETURN_DISMISSED = "return.dismissed";
 const DAY = 86_400_000;
 const OPEN = ["approved", "preparing", "ready_for_human", "active"];
 
-/** When the person's absence began, if they have been away long enough for the return page and have not skipped it for this absence. */
-export function returnDue(ctx: AccessContext, now: Date): { since: string } | undefined {
+/**
+ * When the person's absence began and when it ended, if the return page is due: they have been away over two days, or they came back
+ * within the last week and the work of that absence is not all settled yet — answering something elsewhere first (the interview, a
+ * goal) must not make the page and its list disappear. Skipping it (`return.dismissed`) closes that absence.
+ */
+export function returnDue(ctx: AccessContext, now: Date): { since: string; until?: string } | undefined {
   const store = getStore();
-  const since = store.lastPersonActivity(ctx.workspaceId);
+  const latest = store.lastPersonActivity(ctx.workspaceId);
   // Someone who never did anything yet is new, not back.
-  if (!since || now.getTime() - Date.parse(since) <= RETURN_AFTER_HOURS * 3_600_000) return undefined;
-  return store.getSetting(ctx.workspaceId, RETURN_DISMISSED) === since ? undefined : { since };
+  if (!latest) return undefined;
+  const away = RETURN_AFTER_HOURS * 3_600_000;
+  const dismissed = store.getSetting(ctx.workspaceId, RETURN_DISMISSED);
+  if (now.getTime() - Date.parse(latest) > away) return dismissed === latest ? undefined : { since: latest };
+  const times = store.personActivityTimes(ctx.workspaceId, new Date(now.getTime() - 14 * DAY).toISOString());
+  for (let index = times.length - 1; index > 0; index -= 1) {
+    if (Date.parse(times[index]!) - Date.parse(times[index - 1]!) <= away) continue;
+    const absence = { since: times[index - 1]!, until: times[index]! };
+    if (dismissed === absence.since || now.getTime() - Date.parse(absence.until) > 7 * DAY) return undefined;
+    return returnView(ctx, absence.since, now, absence.until).items.length ? absence : undefined;
+  }
+  return undefined;
 }
 
 export type ReturnItem = { orderId: string; title: string; line: string; lineLabel: string; plannedDays: string[]; dueDay: string;
@@ -59,13 +73,15 @@ function staleItems(ctx: AccessContext, now: Date): ReturnView["stale"] {
   return { orders, milestones };
 }
 
-export function returnView(ctx: AccessContext, since: string, now: Date): ReturnView {
+export function returnView(ctx: AccessContext, since: string, now: Date, until?: string): ReturnView {
   const store = getStore();
   const today = planToday(ctx, now);
   const from = planToday(ctx, new Date(since));
+  // Once back, the days after the return are ordinary days, not the absence.
+  const end = until ? planToday(ctx, new Date(until)) : today;
   // The days the person was away, as the attention timer recorded each day's planned work (the schedule itself keeps no past).
   const planned = new Map<string, string[]>();
-  for (let day = from; day < today; day = addDays(day, 1))
+  for (let day = from; day < end; day = addDays(day, 1))
     for (const orderId of Object.keys(readScheduledDay(ctx, day))) planned.set(orderId, [...(planned.get(orderId) ?? []), day]);
   const labels = lineLabels(ctx);
   const anchors = new Map(store.listMilestoneAnchors(ctx.workspaceId).map((anchor) => [anchor.milestoneId, anchor.deadline]));
@@ -86,7 +102,8 @@ export function returnView(ctx: AccessContext, since: string, now: Date): Return
     .sort((a, b) => a.deadline.localeCompare(b.deadline));
   const finishedAt = (task: { requestedAt: string; durationMs: number }) => new Date(Date.parse(task.requestedAt) + task.durationMs).toISOString();
   return {
-    since, sinceDay: from, daysAway: Math.floor((now.getTime() - Date.parse(since)) / DAY), hoursAway: Math.floor((now.getTime() - Date.parse(since)) / 3_600_000), items,
+    since, sinceDay: from, daysAway: Math.round(((until ? Date.parse(until) : now.getTime()) - Date.parse(since)) / DAY),
+    hoursAway: Math.floor(((until ? Date.parse(until) : now.getTime()) - Date.parse(since)) / 3_600_000), items,
     happened: {
       assistantDone: listAgentTasks(store, ctx.workspaceId).filter((task) => ["needs_review", "accepted"].includes(task.status) && finishedAt(task) >= since).length,
       proposals: store.listWorkOrders(ctx.workspaceId).filter((order) => order.state === "awaiting_plan_approval").length,
