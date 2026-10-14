@@ -32,7 +32,8 @@ export function returnDue(ctx: AccessContext, now: Date): { since: string } | un
 export type ReturnItem = { orderId: string; title: string; line: string; lineLabel: string; plannedDays: string[]; dueDay: string;
   p50Minutes: number; steps: Array<{ id: string; title: string; done: boolean }> };
 export type ReturnView = {
-  since: string; daysAway: number; items: ReturnItem[];
+  /** `sinceDay` is the day of the last own action in the person's zone; `daysAway` is whole days, 0 when under one. */
+  since: string; sinceDay: string; daysAway: number; hoursAway: number; items: ReturnItem[];
   happened: { assistantDone: number; proposals: number; calendarChanges: number; deadlinesSoon: Array<{ title: string; deadline: string }> };
   stale: { orders: Array<{ id: string; title: string }>; milestones: Array<{ id: string; title: string }> };
 };
@@ -85,7 +86,7 @@ export function returnView(ctx: AccessContext, since: string, now: Date): Return
     .sort((a, b) => a.deadline.localeCompare(b.deadline));
   const finishedAt = (task: { requestedAt: string; durationMs: number }) => new Date(Date.parse(task.requestedAt) + task.durationMs).toISOString();
   return {
-    since, daysAway: Math.max(1, Math.round((now.getTime() - Date.parse(since)) / DAY)), items,
+    since, sinceDay: from, daysAway: Math.floor((now.getTime() - Date.parse(since)) / DAY), hoursAway: Math.floor((now.getTime() - Date.parse(since)) / 3_600_000), items,
     happened: {
       assistantDone: listAgentTasks(store, ctx.workspaceId).filter((task) => ["needs_review", "accepted"].includes(task.status) && finishedAt(task) >= since).length,
       proposals: store.listWorkOrders(ctx.workspaceId).filter((order) => order.state === "awaiting_plan_approval").length,

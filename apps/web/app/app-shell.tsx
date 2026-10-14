@@ -27,8 +27,11 @@ export function AppShell({ active, children, className = "page" }: { active?: st
       </div>
     </header>
     <BottomNav active={active} />
-    <AssistantWidget />
-    <TimerFloat />
+    {/* One corner, stacked: the timer above the 小助手 bubble, each as tall as it is, so neither covers the other's buttons. */}
+    <div className="corner-stack">
+      <TimerFloat />
+      <AssistantWidget />
+    </div>
     <main className={className}>{children}</main>
   </>;
 }

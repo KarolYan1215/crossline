@@ -68,6 +68,12 @@
 .conversation-nudge .conversation-card{border-left-color:var(--now-ink)}
 .conversation-nudge .conversation-clarify p{font-weight:400}
 .assistant-bubble-wrap{position:fixed;right:16px;bottom:76px;z-index:60;display:grid;justify-items:end;gap:6px}
+/* The timer and the bubble share one fixed corner and stack by their own heights: with fixed offsets the nudge preview grew over
+   the timer's 结束 button. The open panel keeps its own fixed position. */
+.corner-stack{position:fixed;right:16px;bottom:76px;z-index:60;display:flex;flex-direction:column;align-items:flex-end;gap:8px;pointer-events:none}
+.corner-stack>*{pointer-events:auto}
+.corner-stack .timer-float,.corner-stack .assistant-bubble-wrap,.corner-stack .assistant-bubble-wrap .assistant-bubble{position:static}
+@media (max-width:680px){.corner-stack{right:8px;bottom:calc(60px + env(safe-area-inset-bottom))}}
 .assistant-bubble-wrap .assistant-bubble{position:static}
 .assistant-bubble[data-unread]{outline:2px solid var(--now-ink);outline-offset:2px}
 .assistant-nudge-preview{max-width:min(320px,calc(100vw - 32px));padding:8px 10px;border:1px solid var(--ink);background:var(--paper);font-size:13px;text-align:left;
