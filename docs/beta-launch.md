@@ -133,6 +133,17 @@
 5. 结果页：先出类型和基础形象，个性化形象生成好后替换。导出 3:4 海报和长图，海报二维码就是本人的邀请链接。
 6. 「邀请 TA 测」→ 朋友做完当场生成双人对比卡，本人收到邮件通知（§1.1）。从邀请链接进来的人走同样的 1–5 步，只是落地页换成「署名 邀请你测测你们是什么关系」。
 
+### 3.1 页面做法的依据（W4，2026-10-14 检索）
+
+- **一屏一题、自动前进、可以后退。** 一项随机对照实验（计算机问卷的「下一题」按钮与后退按钮）发现：自动前进和按「下一题」相比，缺失数据和量表信度没有差别，按钮版多花约一半时间，作者建议自动前进并保留返回上一题。另一项分支问卷研究也发现逐题自动前进最快、自动滚动让人迷失方向。Qualtrics 与 SurveyMonkey 都把一屏一题作为默认做法。所以：选完停 0.26 秒让人看到所选，再进下一题；「上一题」始终在；键盘 1–5 作答、Enter 下一题。
+- **进度条按整套 32 题计，不按小节归零。** 关于进度条和完成率没找到对照研究，厂商意见不一（长问卷里进度条可能劝退）；共识只有一条：显示全程进度，小节之间不要重置。外貌和邮箱两步另写「最后两步 · 1 / 2」。
+- **单选组用原生 `<input type="radio">`。** WAI-ARIA APG 的单选组模式规定方向键在组内移动并选中；原生单选框由浏览器提供这些行为和读屏语义，无需自写 roving tabindex。由此有一条细节：方向键只改选择、不自动前进（否则按方向键浏览选项会一路跳题），点击、轻触、空格和数字键才前进。
+- **微信里保存图片。** 微信内置浏览器不允许 H5 页面用脚本或下载链接保存文件，但对 `https` 地址的普通 `<img>` 长按可以「保存图片」；base64 / blob 图片有长按保存失败的报告。所以海报和双人卡都是服务器渲染的 PNG 地址，直接放 `<img>`，手机上写「长按图片保存」，有鼠标的设备才显示「下载海报 / 下载长图」（`download` 属性）。两者用 CSS 的 `(hover:none) and (pointer:coarse)` 切换，服务端渲染和浏览器不会对不上。
+- **分享。** 先检测 `navigator.share`，有就显示「分享邀请」；用户关掉分享面板（`AbortError`）不算失败；其余失败退回复制。「复制链接」始终显示（藏起来用户会以为没有这个功能），在点击处理里直接调用 `navigator.clipboard.writeText`，失败就选中链接文字并提示手动复制；结果写进 `aria-live` 区域。
+- **360 px 手机优先。** 单列、两侧 16 px；输入框字号 16 px（iOS 小于 16 px 会放大页面且不复原）；可点区域至少 44 px；正文不小于 12 px，灰字 #4F4A42 在纸色上约 7.9:1。
+
+来源：[Next/back 按钮实验（eScholarship）](https://escholarship.org/uc/item/3557w1mn)、[分支问卷研究（UMD）](https://drum.lib.umd.edu/items/89eb861e-8e4e-4b44-a221-fa73a901ee3e/full)、[SurveyMonkey 一屏一题](https://help.surveymonkey.com/en/create/one-question-at-a-time/)、[GuidedTrack 进度条](https://docs.guidedtrack.com/research-guide/building-user-friendly-surveys/progress-bar/)、[W3C APG 单选组模式](https://w3.org/WAI/ARIA/apg/patterns/radio)、[微信 H5 无法下载图片（阿里云开发者社区）](https://developer.aliyun.com/article/906395)、[微信开放社区：base64 图片长按保存失败](https://developers.weixin.qq.com/community/develop/doc/0000a8c4cbce10fd356391fa566400)、[W3C Web Share API](https://www.w3.org/TR/2022/WD-web-share-20220607)。
+
 ## 4. 形象生成
 - **基础角色**：16 个，每种类型生成 3 个候选，由本人挑选，作为该类型的参考图，存进代码库。画风自己设计，不模仿 16Personalities。
 - **用户形象**：在类型模板（参考图）上按外貌描述做图生图小改动，作为免费福利，费用由本人承担。按第三方报价约 0.008–0.06 美元一张（官方人民币价未核实），每个邮箱限 3 次。
