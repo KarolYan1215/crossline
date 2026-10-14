@@ -107,7 +107,7 @@ export function growTask(candidate: GrowCandidate, lineIds: string[], tools: Arr
       "2. skill/scripts/：能确定下来的步骤写成脚本（例如批量重命名、格式转换、表格整理；剪辑一类用 ffmpeg），用示例输入在本任务目录里实际跑通（剪辑一类可用 ffmpeg 的 testsrc/sine 生成样片）。脚本只写自己的工作目录或调用时给的输出目录，不删除目录外的文件，不读凭据；不需要时不联网。",
       `3. skill/workflow.json：{"name","summary","lines","category","trigger","schedule","action","reminder","steps":[{"title","by","external"}],"inputs","outputs","access","risks"}。lines 为 ${JSON.stringify([candidate.lineId])}（只服务这一条主线）；category 为 "${candidate.category}"；trigger 为 "on_request"，本人要求定时或定期（例如「每周五提醒」「每天早上整理」「定期整理」）时为 "schedule"，schedule 为 {"type":"daily"|"weekdays","time":"HH:MM"} 或 {"type":"weekly","days":["MO".."SU"],"time":"HH:MM"}（本人没说时间就选一个合理的，并在 summary 里写出）；只需到点提醒时 action 为 "remind" 并写 reminder，否则为 "run"、reminder 为 ""。inputs 写这件事要读的东西；本人给了文件夹的绝对路径就原样写进 inputs，执行时会把它交给助手。`,
       "发送、上传、发布、投稿、付款这类离开本机的步骤，by 为 \"person\"、external 为 true：工作流在它们之前停下，把要发出的东西备好放在产出目录。读取网页、联网核验、下载公开资料不算离开本机，external 为 false。",
-      "要读本人在某个网站上的账号或数据（收藏夹、订单、课程平台等）时：先联网查清能用的接口，写进 SKILL.md——优先官方 API 或官方导出，其次平台允许的工具，最后才是在本人登录的浏览器里读取页面；不要求本人交出密码或 Cookie，不用来路不明的代抓服务。登录由本人在 Crossline 打开的浏览器窗口里完成：执行时会给出浏览器配置目录与浏览器程序，脚本接受 --profile 与 --browser 两个参数，用 Playwright 的 launch_persistent_context（user_data_dir=--profile，executable_path=--browser）打开页面，只读、像人一样放慢；未登录就退出并打印 NEED_LOGIN。在 access 里列出每个网站 {\"service\",\"site\"(https 地址),\"login\"(true/false),\"how\"(用什么接口、怎么读)}，在 risks 里如实写出风险（是否违反平台协议、账号可能受限、验证码、页面改版会失效、读到的数据存在本机哪里）；本人看过风险并同意后才会启用。改动账号的事（移动、删除、取消收藏、点赞、评论、发布）一律是本人的步骤。这次没有登录、读不到真实数据：用离线样例把整理部分跑通，读取部分写好并在 SKILL.md 里说明尚未在真实账号上验证。不读账号时 access 与 risks 为 []。",
+      "要读本人在某个网站上的账号或数据（收藏夹、订单、课程平台等）时：先联网查清能用的接口，写进 SKILL.md——优先官方 API 或官方导出，其次平台允许的工具，最后才是在本人登录的浏览器里读取页面；不要求本人交出密码或 Cookie，不用来路不明的代抓服务。登录由本人在 Crossline 打开的浏览器窗口里完成：执行时会给出浏览器配置目录与浏览器程序，脚本接受 --profile 与 --browser 两个参数，用 Playwright 的 launch_persistent_context（user_data_dir=--profile，executable_path=--browser）打开页面，只读、像人一样放慢，每次运行每个页面只打开一次、不逐条打开详情页；未登录就退出并打印 NEED_LOGIN，出现安全验证、验证码或风控提示就关掉浏览器退出并打印 NEED_VERIFY，不重试、不绕过。在 access 里列出每个网站 {\"service\",\"site\"(https 地址),\"login\"(true/false),\"how\"(用什么接口、怎么读)}，在 risks 里如实写出风险（是否违反平台协议、账号可能受限、验证码、页面改版会失效、读到的数据存在本机哪里）；本人看过风险并同意后才会启用。改动账号的事（移动、删除、取消收藏、点赞、评论、发布）一律是本人的步骤。这次没有登录、读不到真实数据：用离线样例把整理部分跑通，读取部分写好并在 SKILL.md 里说明尚未在真实账号上验证。不读账号时 access 与 risks 为 []。",
       ...(tools.length ? [`本人能用的 AI 工具：${tools.map((tool) => `${tool.name}（${tool.goodFor}${tool.by === "system" ? "；由助手执行" : ""}）`).join("；")}。按今天会用这些工具的人的做法设计：能由助手整份做的步骤归助手，本人的步骤写明用哪个工具、怎么用（具体操作或给它的提示词），只把需要本人判断的部分留给本人。`] : []),
       "这次只建工作流，不执行原任务本身，不发布、不发送任何东西。产物列出 skill/ 下的每个文件。"
     ].join("\n")
@@ -325,6 +325,10 @@ export function startWorkflowRun(store: CrosslineStore, workspaceId: string, rec
   const accountRules = accounts.length ? [
     `要读取的网站：${accounts.join(" ")}`,
     "把这两个路径作为 --profile 与 --browser 交给工作流的脚本，只用浏览器自动化打开页面读取，放慢速度；不读、不复制、不打印配置目录里的任何文件（Cookies、Local Storage 等），不在账号里做任何改动（移动、删除、取消收藏、点赞、评论、发布）。",
+    // The first real run read the favourites and the creator's page, then wrote its own scripts to open every note and re-check every
+    // link, and the site answered with its security check again and again (2026-10-14). Each page once; a check is a stop, never a retry.
+    "每个页面只打开一次：只打开工作流说明里的页面（例如收藏页、指定账号主页），不逐条打开详情页，不为核验再次访问链接，不另写脚本扩大读取范围；本期读到多少就用多少。",
+    "页面出现安全验证、验证码、滑块、风控提示或跳回登录：立即关闭浏览器停下，不重试、不换方式、不尝试绕过；已读到的照常整理交付，needsHuman 第一项的 what 写「需要本人完成<网站名>安全验证」。",
     "打开后发现未登录，立即停下，needsHuman 第一项的 what 写「需要登录：<网站名>」。"] : [];
   const day = now.toISOString().slice(0, 10);
   return runFree({ taskId: `flow-${record.id.replace(/^flow-/, "")}-${now.getTime().toString(36)}`, category: record.category,
@@ -337,6 +341,13 @@ export function startWorkflowRun(store: CrosslineStore, workspaceId: string, rec
     if (login) {
       sayToPerson(store, workspaceId, `「${record.manifest.summary}」这次没读到：${login}。请在设置里点「登录」，在弹出的窗口里登录后关掉窗口，再点「立即运行」。`,
         "workflow_login", `login:${record.id}:${day}`, [{ label: "去登录", href: "/settings#skills" }]);
+      return;
+    }
+    // Stopped at the site's security check: what was read is still delivered, and the person is told not to run it again soon.
+    const check = outcome.state === "done" ? outcome.summary.needsHuman.find((item) => item.what.startsWith("需要本人完成"))?.what : undefined;
+    if (check) {
+      sayToPerson(store, workspaceId, `「${record.manifest.summary}」读到一半遇到了网站的安全验证，已停下，不会重试。已读到的内容照常整理好了。请本人在手机或常用浏览器里正常使用一段时间后再运行；频繁触发验证可能让账号受限。`,
+        "workflow_done", `check:${record.id}:${day}`, [{ label: "去看结果", href: "/approvals#assistant" }]);
       return;
     }
     sayToPerson(store, workspaceId, outcome.state === "done"

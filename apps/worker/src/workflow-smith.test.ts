@@ -290,3 +290,16 @@ test("「我已登录」 closes a login window the browser kept running in the b
   expect(startWorkflowRun(store, ws, readGrownSkills(store, ws)[0]!, (input) => ({ state: "started", taskId: input.taskId }), path.join(root, "p")).state).toBe("started");
   expect(finishWorkflowLogin(store, ws, "flow-xhs", "微博")).toMatchObject({ ok: false });
 });
+
+test("a run reading an account opens each page once and stops at a security check; stopped there, the person is told not to run it again soon", () => {
+  store.setSetting(ws, "skills.grown", JSON.stringify([{ id: "flow-xhs", kind: "grown", name: "xhs", description: "d", lines: ["media"], category: "files_calendar_prep",
+    manifest: favourites, origin: { kind: "asked", text: "t", requestId: "r" }, taskId: "", files: [], scan: { risk: "low", injection: false, findings: [] },
+    review: { verdict: "usable", reasons: [], final: "usable" }, status: "active", pinned: false, createdAt: "", updatedAt: "", lastUsedAt: "" }]));
+  let what = "";
+  let after: ((outcome: AgentOutcome) => void) | undefined;
+  startWorkflowRun(store, ws, readGrownSkills(store, ws)[0]!, (input, then) => { what = input.what; after = then; return { state: "started", taskId: input.taskId }; }, path.join(root, "p"), new Date(), "chrome.exe");
+  expect(what).toContain("每个页面只打开一次");
+  expect(what).toContain("不重试、不换方式、不尝试绕过");
+  after!({ ...done("t", root), summary: { needsHuman: [{ what: "需要本人完成小红书安全验证", why: "详情页出现滑块" }] } } as unknown as AgentOutcome);
+  expect(said().at(-1)).toContain("遇到了网站的安全验证，已停下，不会重试");
+});
