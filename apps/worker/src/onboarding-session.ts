@@ -16,6 +16,8 @@ export const ONBOARDING_SKILL = "crossline:crossline-onboarding";
 /** Each document is cut to this much text per turn; the full text stays in the ledger for citation checks. */
 const SOURCE_TEXT_PER_DOCUMENT = 14_000;
 const SOURCE_TEXT_TOTAL = 60_000;
+/** New files one turn reads at most; more wait for the next turn. */
+const SOURCES_PER_TURN = 12;
 
 const INSTRUCTIONS = "You interview a Crossline user as the Skill describes: a life designer's interview in stages (orientation, "
   + "lines, situation, compass, energy, details), never proposing milestones. The first two stages gather the start standard: checklist "
@@ -89,6 +91,17 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
   /** What the ledger still lacks, as of now. */
   const currentGaps = (): ProfileGap[] => interviewGapsFor(store, workspaceId, identityLines(store, workspaceId)
     .map((line) => ({ id: line.id, label: line.label, hard: Boolean(line.hard), goals: line.goals ?? [] })), todayIso());
+
+  const withinBudget = (entries: Array<[string, StoredSourceDocument]>) => {
+    let budget = SOURCE_TEXT_TOTAL;
+    const taken: Array<[string, StoredSourceDocument]> = [];
+    for (const entry of entries) {
+      if (taken.length && (budget <= 0 || taken.length >= SOURCES_PER_TURN)) break;
+      taken.push(entry);
+      budget -= Math.min(SOURCE_TEXT_PER_DOCUMENT, entry[1].extractedText.length);
+    }
+    return taken;
+  };
 
   const clipDocuments = (entries: Array<[string, StoredSourceDocument]>) => {
     let budget = SOURCE_TEXT_TOTAL;
@@ -257,7 +270,11 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     const known = knownSources(messages, docs);
     // A re-read hands every file over again, as if none had been seen.
     const announced = input.reread ? new Set<string>() : new Set((session.coverage as Announced).announcedSources ?? []);
-    const fresh = [...docs].filter(([id, doc]) => doc.extractionStatus === "done" && !announced.has(id));
+    // A turn takes the new files that fit its reading budget; the rest wait for the next turn instead of being marked read with their text
+    // cut away (an authorized folder can bring hundreds at once). The model is told how many still wait.
+    const unread = [...docs].filter(([id, doc]) => doc.extractionStatus === "done" && !announced.has(id));
+    const fresh = withinBudget(unread);
+    const waiting = unread.length - fresh.length;
     // What the connected calendars hold in the coming week: sent on the first turn and again whenever it changed.
     const week = calendarWeek(((store.listPlanVersions(workspaceId)[0]?.payload as { blocks?: [] } | undefined)?.blocks ?? []), today);
     const weekSent = JSON.stringify(week);
@@ -279,7 +296,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         identities: identities(),
         projects: store.listProjects(workspaceId).map(({ id, identityId, name, summary }) => ({ id, identityId, name, summary })),
         facts: store.listProfileFacts(workspaceId).map(({ identityId, projectId, slot, value, status }) => ({ identityId, projectId, slot, value, status })),
-        today, timeZone, sources: clipDocuments(documents), ...(history ? { history } : {}), reply: { id: replyId, text: replyText },
+        today, timeZone, sources: clipDocuments(documents), ...(waiting > 0 ? { sourcesWaiting: waiting } : {}), ...(history ? { history } : {}), reply: { id: replyId, text: replyText },
         focusLine, profile: readProfile(), stage: ((session!.coverage as { stage?: OnboardingStage }).stage ?? (focusLine ? "details" : "orientation")),
         checklist: openChecklist(), ...stagePace(messages, { startOpen: startOpen() }), tone: readTone(store.getSetting(workspaceId, ONBOARDING_TONE_SETTING)),
         ...(workHistory().length ? { workHistory: workHistory() } : {}), ...(week.length ? { calendar: week } : {}),
@@ -323,7 +340,8 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         // The completion list goes with every turn, so the model knows what it still owes without being told twice in prose.
         const pace = stagePace(messages, { startOpen: startOpen() });
         const message = JSON.stringify({ reply: { id: replyId, text: replyText }, ...(newSources.length ? { newSources } : {}), checklist: openChecklist(), ...pace,
-          tone: readTone(store.getSetting(workspaceId, ONBOARDING_TONE_SETTING)), ...(calendarChanged ? { calendar: week } : {}) });
+          tone: readTone(store.getSetting(workspaceId, ONBOARDING_TONE_SETTING)), ...(calendarChanged ? { calendar: week } : {}),
+        ...(waiting > 0 ? { sourcesWaiting: waiting } : {}) });
         result = await continueSkillTurn<OnboardingTurn>(client, session.codexThreadId, message, {
           skillName: ONBOARDING_SKILL, cwd, outputSchema: ONBOARDING_TURN_SCHEMA, validateOutput, softAccept,
           onAudit: () => {}, onProgress, timeoutMs: 60 * 60_000

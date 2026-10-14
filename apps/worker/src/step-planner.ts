@@ -8,6 +8,7 @@ import { listAgentTasks, projectAgentOutputs, type CrosslineStore, type StoredWo
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { learnedArchetypes } from "./archetype-curator";
 import { ownerOf } from "./owner";
+import { folderDocuments } from "./source-folders";
 
 const PLANNER = "crossline:crossline-step-planner";
 const REVIEWER = "crossline:crossline-validation-reviewer";
@@ -27,8 +28,14 @@ const MATERIAL_TEXT_PER_DOC = 16_000, MATERIAL_TEXT_TOTAL = 48_000;
 export function planningContext(store: CrosslineStore, workspaceId: string, order: StoredWorkOrder) {
   const project = store.listProjects(workspaceId, { includeArchived: true }).find((item) => item.id === order.projectId);
   let budget = MATERIAL_TEXT_TOTAL;
-  const documents = relevantDocuments(store.listSourceDocuments(workspaceId).filter((doc) => doc.extractionStatus === "done"),
-    { projectId: order.projectId, projectName: project?.name })
+  const readable = store.listSourceDocuments(workspaceId).filter((doc) => doc.extractionStatus === "done");
+  const relevant = relevantDocuments(readable, { projectId: order.projectId, projectName: project?.name });
+  // Few files of its own: the unfiled material of the folders the person (or the model) put on this task's line comes next, in the
+  // reading budget left (docs/onboarding-v3.md 「文件夹授权」).
+  const fromFolders = folderDocuments(store, workspaceId);
+  const lineFolderDocs = relevant.length >= 3 ? [] : readable.filter((doc) => !doc.projectId && !relevant.includes(doc)
+    && (fromFolders.get(doc.id)?.lines ?? []).includes(order.identityId));
+  const documents = [...relevant, ...lineFolderDocs]
     .map((doc, index) => {
       const text = doc.extractedText.slice(0, Math.max(0, Math.min(MATERIAL_TEXT_PER_DOC, budget)));
       budget -= text.length;

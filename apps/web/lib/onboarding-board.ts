@@ -1,5 +1,5 @@
 import "server-only";
-import { calendarWeek, type AccessContext, type AvailabilityWindow, type DateCandidate, type RecurringMeeting, type WeekCalendarEvent } from "@crossline/core";
+import { SOURCE_FOLDERS_SETTING, readSourceFolders, sourceFolderIndexSetting, calendarWeek, type AccessContext, type AvailabilityWindow, type DateCandidate, type RecurringMeeting, type WeekCalendarEvent } from "@crossline/core";
 import { getStore, resolvedAvailability } from "./crossline";
 
 /**
@@ -66,4 +66,15 @@ export function projectTimeline(ctx: AccessContext, today: string): ProjectTimel
       noDeadline: facts.some((fact) => fact.projectId === project.id && fact.slot === "no_deadline"),
       items: (items.get(project.id) ?? []).sort((a, b) => a.date.localeCompare(b.date)) };
   });
+}
+
+/** Documents read from an authorized folder: shown in the folder's own card, not one by one among the uploads (a folder can hold hundreds). */
+export function folderDocumentIds(ctx: AccessContext): Set<string> {
+  const store = getStore();
+  const ids = new Set<string>();
+  for (const folder of readSourceFolders(store.getSetting(ctx.workspaceId, SOURCE_FOLDERS_SETTING))) {
+    try { for (const entry of Object.values(JSON.parse(store.getSetting(ctx.workspaceId, sourceFolderIndexSetting(folder.id)) ?? "{}") as Record<string, { documentId: string }>)) ids.add(entry.documentId); }
+    catch { /* unreadable index: nothing to hide */ }
+  }
+  return ids;
 }

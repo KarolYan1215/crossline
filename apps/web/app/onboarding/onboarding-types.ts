@@ -8,6 +8,8 @@ export type Fact = {
 export type DocumentRow = {
   id: string; fileName: string; kind: string; projectId?: string;
   extractionStatus: "pending" | "done" | "failed" | "unsupported"; extractionNote?: string;
+  /** Read from an authorized folder (shown in the folder's card, not in the list of uploads). */
+  fromFolder?: boolean;
 };
 export type Question = {
   id: string; text: string; kind: "single" | "multi" | "free";

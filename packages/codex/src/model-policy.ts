@@ -43,6 +43,7 @@ export const SKILL_TIERS: Record<string, RouteTier> = {
   "crossline-concierge": "low",
   "crossline-task-titler": "low",
   "crossline-calendar-classifier": "low",
+  "crossline-folder-classifier": "low",
   "crossline-goal-splitter": "low",
   "crossline-portrait-writer": "top",
   "crossline-portrait-illustrator": "low",

@@ -154,6 +154,8 @@ export type OnboardingTurnContext = {
   workHistory?: string[];
   /** The connected calendars' events in the next seven days (`calendarWeek`), when any calendar is connected: what the week already holds. */
   calendar?: Array<{ title: string; weekday: number; start: string; end: string; source: string }>;
+  /** New files that did not fit this turn's reading budget; they come with the next turns. */
+  sourcesWaiting?: number;
   /**
    * How many rounds the interview has spent in its current stage. From the second round on, `moveOn` says to go to the next stage — an
    * interview that waits for an answer the person does not have never ends (a simulated user who said 不确定 kept one in 「能量」 for seven

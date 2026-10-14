@@ -5,6 +5,7 @@ import { lineAttributes } from "@crossline/core";
 import { AttributePicker, type AttributeOption } from "../ui/attribute-picker";
 import { CalendarApps } from "../connectors/calendar-apps";
 import { CalendarSubscriptions } from "../connectors/calendar-subscriptions";
+import { SourceFolders } from "../connectors/source-folders";
 import { FactList } from "./profile-panel";
 import { QuestionCard } from "./question-card";
 import type { Answer, DocumentRow, OnboardingState, Question } from "./onboarding-types";
@@ -35,6 +36,8 @@ export function LeftColumn({ state, busy, accept, onUpload, onChanged, heldQuest
     return "";
   };
   const facts = state.facts.filter((fact) => !fact.slot.startsWith("flywheel_"));
+  // Files from an authorized folder are summed up in its own card.
+  const uploads = state.documents.filter((doc) => !doc.fromFolder);
   const confirmed = facts.filter((fact) => fact.status === "confirmed").length;
   return <aside className="ob-left" aria-label="材料与决定">
     <section className="ob-card" aria-label="材料与日历">
@@ -44,9 +47,10 @@ export function LeftColumn({ state, busy, accept, onUpload, onChanged, heldQuest
         <b>{busy ? "处理中…" : "添加文件或录音"}</b>
         <small>简历、课表、课程大纲、项目说明；也可以直接拖进页面</small>
       </label>
-      {state.documents.length > 0 && <ul className="ob-doclist">{state.documents.map((doc) => <li key={doc.id} data-status={doc.extractionStatus}>
+      {uploads.length > 0 && <ul className="ob-doclist">{uploads.map((doc) => <li key={doc.id} data-status={doc.extractionStatus}>
         <span>{doc.fileName}</span><small>{DOC_STATUS[doc.extractionStatus]}{doc.projectId ? ` · ${state.projects.find((project) => project.id === doc.projectId)?.name ?? ""}` : ""}</small>
       </li>)}</ul>}
+      <SourceFolders onChanged={onChanged} />
       <CalendarApps />
       <CalendarSubscriptions onChanged={onChanged} />
     </section>

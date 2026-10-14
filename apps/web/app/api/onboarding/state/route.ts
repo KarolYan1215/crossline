@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { ONBOARDING_TONE_SETTING, readTone, type StoredLineProfile } from "@crossline/core";
 import { resolveAccessContext } from "../../../../lib/access-guard";
 import { getStore, planToday } from "../../../../lib/crossline";
-import { projectTimeline, weekSkeleton } from "../../../../lib/onboarding-board";
+import { folderDocumentIds, projectTimeline, weekSkeleton } from "../../../../lib/onboarding-board";
 import { loadPendingDateBatch } from "../../../../lib/imported-dates";
 import { loadDiligence } from "../../../../lib/diligence";
 import { identityLines, needsLineSetup } from "../../../../lib/lines";
@@ -62,7 +62,7 @@ export async function GET(request: Request) {
     diligence: loadDiligence(access.ctx),
     projects: store.listProjects(workspaceId),
     facts: store.listProfileFacts(workspaceId),
-    documents: store.listSourceDocuments(workspaceId).map(({ id, fileName, kind, extractionStatus, extractionNote, projectId }) =>
-      ({ id, fileName, kind, extractionStatus, ...(extractionNote ? { extractionNote } : {}), ...(projectId ? { projectId } : {}) }))
+    documents: (() => { const fromFolders = folderDocumentIds(access.ctx); return store.listSourceDocuments(workspaceId).map(({ id, fileName, kind, extractionStatus, extractionNote, projectId }) =>
+      ({ id, fileName, kind, extractionStatus, ...(extractionNote ? { extractionNote } : {}), ...(projectId ? { projectId } : {}), ...(fromFolders.has(id) ? { fromFolder: true } : {}) })); })()
   });
 }

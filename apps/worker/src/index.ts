@@ -41,6 +41,9 @@ import { createTranscriber, createWhisperEngine, modelsDirectory } from "./trans
 import { createBackgroundFactsExtractor } from "./background-facts-runner";
 import { createGraphSync, type SyncOutcome } from "./graph-sync";
 import { addSubscription, hasSubscriptions, removeSubscription, subscriptionSources } from "./calendar-subscriptions";
+import { addFolder, previewFolder, removeFolder, setFolderLines, syncFolders } from "./source-folders";
+import { createFolderClassifier } from "./folder-classifier";
+import { homedir } from "node:os";
 import { defaultSafeGetDeps } from "./safe-fetch";
 import { REQUIRED_SKILLS } from "./required-skills";
 import { monthSpend, ownerOf, runtimeOwner, runtimesDir } from "./owner";
@@ -178,6 +181,38 @@ async function titlePass(workspaceId: string, checkedAt: string): Promise<void> 
 }
 
 /** Files new calendar events under the person's lines after a sync, a batch a tick; a small model, so it still runs when quota is tight. */
+/**
+ * Reads a stored document's text: the worker's one extraction path (the web's upload, the supervisor route and authorized folders).
+ * Only files this app wrote itself, by the path it recorded: the model and the browser never supply one.
+ */
+async function extractDocument(documentId: string, workspaceId: string) {
+  const doc = analysisStore.listSourceDocuments(workspaceId).find((item) => item.id === documentId);
+  if (!doc) return { state: "blocked" as const, code: "SOURCE_NOT_FOUND", message: "找不到这个文件。" };
+  if (doc.kind === "audio") return transcribeDocument(workspaceId, doc.id);
+  let result;
+  try { result = await extractText(new Uint8Array(readFileSync(fileURLToPath(doc.uri))), doc.kind); }
+  catch { result = { status: "failed" as const, text: "", note: "读不到已保存的文件。" }; }
+  analysisStore.setSourceDocumentExtraction(workspaceId, doc.id, { status: result.status, text: result.text, ...(result.note ? { note: result.note } : {}) });
+  return { state: "extracted" as const, documentId: doc.id, status: result.status, characters: result.text.length };
+}
+
+/** Authorized folders (source-folders.ts): read what is new or changed, then have the model propose lines for newly read folders. */
+const folderDeps = { dataDir, home: homedir(), extract: (workspaceId: string, documentId: string) => extractDocument(documentId, workspaceId) };
+const readingFolders = new Set<string>();
+async function folderPass(workspaceId: string, checkedAt: string): Promise<void> {
+  if (readingFolders.has(workspaceId) || paused(workspaceId, "intake")) return;
+  readingFolders.add(workspaceId);
+  try {
+    const outcomes = await syncFolders(analysisStore, workspaceId, folderDeps).catch(() => []);
+    const read = outcomes.reduce((sum, item) => sum + item.read, 0);
+    if (read) console.info(JSON.stringify({ type: "sources.folders_read", checkedAt, workspaceId, outcomes }));
+    if (!codexSupervisor || !spendAllows(await spendFor(workspaceId), "intake")) return;
+    enterUsageWorkspace(workspaceId);
+    const filed = await createFolderClassifier(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))().catch(() => undefined);
+    if (filed && "filed" in filed && filed.filed) console.info(JSON.stringify({ type: "sources.folder_lines_filed", checkedAt, workspaceId, ...filed }));
+  } finally { readingFolders.delete(workspaceId); }
+}
+
 const filingCalendar = new Set<string>();
 async function calendarLinePass(workspaceId: string, checkedAt: string): Promise<void> {
   if (paused(workspaceId, "intake")) return;
@@ -345,6 +380,8 @@ async function tick(): Promise<void> {
   for (const workspace of workspaces) await titlePass(workspace.id, checkedAt);
   for (const workspace of workspaces) await goalSplitPass(workspace.id, checkedAt);
   for (const workspace of workspaces) await portraitPass(workspace.id, checkedAt);
+  // Authorized folders: what changed since the last tick is read (at most forty files a folder a tick), before filing runs over it.
+  for (const workspace of workspaces) await folderPass(workspace.id, checkedAt);
   // Uploaded files are filed under the project their own name or opening names; what stays unclear is asked about on 待确认.
   for (const workspace of workspaces) {
     try {
@@ -849,16 +886,18 @@ if (!capabilitySecret) {
       return { state: "downloading", progress: 0 };
     },
     runDiligence: (_client, identityId, force, workspaceId) => getDiligence(workspaceId)(identityId, { force }),
-    extractSource: async (documentId, workspaceId) => {
-      const doc = analysisStore.listSourceDocuments(workspaceId).find((item) => item.id === documentId);
-      if (!doc) return { state: "blocked", code: "SOURCE_NOT_FOUND", message: "找不到这个文件。" };
-      if (doc.kind === "audio") return transcribeDocument(workspaceId, doc.id);
-      // Only files this app wrote itself, by the path it recorded: the model and the browser never supply one.
-      let result;
-      try { result = await extractText(new Uint8Array(readFileSync(fileURLToPath(doc.uri))), doc.kind); }
-      catch { result = { status: "failed" as const, text: "", note: "读不到已保存的文件。" }; }
-      analysisStore.setSourceDocumentExtraction(workspaceId, doc.id, { status: result.status, text: result.text, ...(result.note ? { note: result.note } : {}) });
-      return { state: "extracted", documentId: doc.id, status: result.status, characters: result.text.length };
+    extractSource: (documentId, workspaceId) => extractDocument(documentId, workspaceId),
+    // Authorized folders: a preview (what would be read) before anything is read, then the folder is kept and read in the background.
+    sourceFolders: {
+      preview: (_workspaceId: string, folderPath: string) => previewFolder(folderPath, folderDeps),
+      add: async (workspaceId: string, folderPath: string) => {
+        const added = await addFolder(analysisStore, workspaceId, folderPath, folderDeps);
+        // Read in the background: a folder can take minutes; the page shows its progress from the folder list.
+        if (added.state === "added") void folderPass(workspaceId, new Date().toISOString()).catch(() => undefined);
+        return added;
+      },
+      remove: async (workspaceId: string, id: string) => ({ removed: removeFolder(analysisStore, workspaceId, id) }),
+      setLines: async (workspaceId: string, id: string, lines: string[]) => ({ saved: setFolderLines(analysisStore, workspaceId, id, lines) })
     },
     extractBackgroundFacts: (_client, captureTitle, captureContext, signal, workspaceId) =>
       createBackgroundFactsExtractor(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))(captureTitle, captureContext, signal),

@@ -87,3 +87,15 @@
 .ob-left .calendar-subscriptions-form{grid-template-columns:minmax(0,1fr)}
 @media (max-width:640px){.calendar-subscriptions-form{grid-template-columns:minmax(0,1fr)}}
 .calendar-subscriptions-help{justify-self:start}
+/* Authorized folders (connectors/source-folders.tsx): the path, what would be read, and each folder's lines. */
+.source-folder{display:grid;gap:4px;padding-bottom:6px;border-bottom:1px solid var(--mist)}
+.source-folder-lines{display:flex;flex-wrap:wrap;gap:4px 6px;align-items:center}
+.source-folder-lines small{font-size:12px;color:var(--graphite)}
+.source-folder-lines .ob-chip{font:inherit;font-size:13px;padding:2px 8px;border:1px solid var(--mist);background:var(--paper);color:var(--ink);cursor:pointer}
+.source-folder-lines .ob-chip[aria-pressed="true"]{border-color:var(--ink);background:var(--ink);color:var(--paper)}
+.source-folders-form{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;align-items:center}
+.source-folders-form input{min-width:0;font:inherit;font-size:13px;padding:5px 8px;border:1px solid var(--ink);background:var(--paper);color:var(--ink)}
+.source-folders-preview{display:grid;gap:6px;padding:8px;border:1px dashed var(--ink)}
+.source-folders-preview p{margin:0;font-size:13px}
+.source-folders-preview ul{margin:0;padding-left:18px;font-size:12px;color:var(--graphite);overflow-wrap:anywhere}
+.source-folders-preview .ob-btn{justify-self:start}

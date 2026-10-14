@@ -3,6 +3,7 @@ import { ModelProviderCard } from "../settings/model-provider-card";
 import { CalendarSources } from "./calendar-sources";
 import { CalendarApps } from "./calendar-apps";
 import { CalendarSubscriptions } from "./calendar-subscriptions";
+import { SourceFolders } from "./source-folders";
 import { TailscaleTrust } from "./tailscale-trust";
 import { DeviceLeases } from "./device-leases";
 import { effectiveSchedulePreferences, getStore, loadCalendarConnectorState } from "../../lib/crossline";
@@ -28,6 +29,7 @@ export function CalendarModule({ ctx }: { ctx: AccessContext }) {
     </section>
     <CalendarApps />
     <CalendarSubscriptions />
+    <SourceFolders />
     <CalendarSources />
   </div>;
 }

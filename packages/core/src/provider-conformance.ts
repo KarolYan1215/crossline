@@ -5,6 +5,7 @@ import { ARTIFACT_PLAN_SCHEMA } from "./artifact-plan";
 import { BACKGROUND_FACTS_OUTPUT_SCHEMA } from "./background-facts-schema";
 import { BACKPLAN_SCHEMA } from "./backplan-schema";
 import { CALENDAR_CLASSIFICATION_SCHEMA } from "./calendar-lines";
+import { FOLDER_LINES_SCHEMA } from "./source-folders";
 import { CONCIERGE_SCHEMA } from "./concierge";
 import { DATE_EXTRACTION_SCHEMA } from "./date-schema";
 import { DILIGENCE_OUTPUT_SCHEMA } from "./diligence-schema";
@@ -61,6 +62,7 @@ export const SKILL_NEEDS: Record<string, SkillNeeds> = {
   "crossline-concierge": { label: "输入框", schemas: ["CONCIERGE_SCHEMA"], tools: true },
   "crossline-task-titler": { label: "任务命名", schemas: ["TASK_TITLES_SCHEMA"] },
   "crossline-calendar-classifier": { label: "日历归类", schemas: ["CALENDAR_CLASSIFICATION_SCHEMA"] },
+  "crossline-folder-classifier": { label: "文件夹归类", schemas: ["FOLDER_LINES_SCHEMA"] },
   "crossline-goal-splitter": { label: "目标拆分", schemas: ["GOAL_SPLIT_SCHEMA"] },
   "crossline-portrait-writer": { label: "画像", schemas: ["PORTRAIT_SCHEMA", "PORTRAIT_GAP_SCHEMA"] },
   "crossline-portrait-illustrator": { label: "画像插图", schemas: [], image: true },
@@ -115,7 +117,7 @@ const DEEP_SCHEMA = level(level(level({ type: "object", additionalProperties: fa
 
 const CONFORMANCE_SCHEMAS: Record<string, Record<string, unknown>> = {
   AGENT_SUMMARY_SCHEMA, ANALYSIS_OUTPUT_SCHEMA, ARCHETYPE_CURATION_SCHEMA, ARTIFACT_PLAN_SCHEMA, BACKGROUND_FACTS_OUTPUT_SCHEMA, BACKPLAN_SCHEMA,
-  CALENDAR_CLASSIFICATION_SCHEMA, CONCIERGE_SCHEMA, DATE_EXTRACTION_SCHEMA, DILIGENCE_OUTPUT_SCHEMA, FLYWHEEL_OUTPUT_SCHEMA, GOAL_SPLIT_SCHEMA,
+  CALENDAR_CLASSIFICATION_SCHEMA, CONCIERGE_SCHEMA, DATE_EXTRACTION_SCHEMA, DILIGENCE_OUTPUT_SCHEMA, FLYWHEEL_OUTPUT_SCHEMA, FOLDER_LINES_SCHEMA, GOAL_SPLIT_SCHEMA,
   MANUAL_DESIGN_SCHEMA, MATERIAL_SEARCH_SCHEMA, NODE_WRITEUP_SCHEMA, MILESTONE_GATE_OUTPUT_SCHEMA, MILESTONE_PROPOSAL_SCHEMA, MILESTONE_PLAN_SCHEMA,
   ONBOARDING_TURN_SCHEMA, PLAN_EXPLAINER_OUTPUT_SCHEMA, PORTRAIT_SCHEMA, PORTRAIT_GAP_SCHEMA, STEP_PLAN_SCHEMA,
   VALIDATION_REVIEW_SCHEMA, PROGRESS_ASSESSMENT_SCHEMA, TASK_TITLES_SCHEMA, WEEKLY_INSIGHT_OUTPUT_SCHEMA

@@ -421,6 +421,13 @@ export async function startCodexSupervisor(options: {
   listCalendarSources?: (workspaceId: string) => Promise<unknown>;
   /** Replaces the ticked set with exactly these `<accountId>:<calendarId>` keys. */
   saveCalendarSources?: (workspaceId: string, keys: string[]) => Promise<unknown>;
+  /** Folders the person authorized: a preview before anything is read, then added (read in the background), removed, or given lines. */
+  sourceFolders?: {
+    preview: (workspaceId: string, path: string) => Promise<unknown>;
+    add: (workspaceId: string, path: string) => Promise<unknown>;
+    remove: (workspaceId: string, id: string) => Promise<unknown>;
+    setLines: (workspaceId: string, id: string, lines: string[]) => Promise<unknown>;
+  };
   /** Calendars read from a subscription link: added after one read (the link goes to the worker's secret store), and removed. */
   calendarSubscriptions?: {
     add: (workspaceId: string, input: { link: string; label: string }) => Promise<unknown>;
@@ -851,6 +858,35 @@ export async function startCodexSupervisor(options: {
             message: error instanceof Error ? error.message : "保存日历选择失败" } });
         }
         return;
+      }
+      // Authorized folders (docs/onboarding-v3.md 「文件夹授权」). The path is the person's own, typed on this machine; the worker checks it
+      // (absolute, an existing folder, not a drive, the user folder, a system folder or the app's own data) before walking anything.
+      if (pathname.startsWith("/v1/sources/folders") && options.sourceFolders) {
+        if (request.headers.origin || (request.method !== "DELETE" && !request.headers["content-type"]?.startsWith("application/json"))) {
+          sendJson(response, 403, { blocker: { code: "SYNC_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
+          return;
+        }
+        const folders = options.sourceFolders;
+        const one = /^\/v1\/sources\/folders\/([A-Za-z0-9-]{1,40})(\/lines)?$/.exec(pathname);
+        try {
+          if (request.method === "POST" && (pathname === "/v1/sources/folders/preview" || pathname === "/v1/sources/folders")) {
+            const body = await readJsonBody(request).catch(() => undefined) as { path?: unknown } | undefined;
+            if (typeof body?.path !== "string" || !body.path.trim() || body.path.length > 1000) {
+              sendJson(response, 400, { blocker: { code: "FOLDER_PATH_REQUIRED", message: "需要文件夹路径" } });
+              return;
+            }
+            sendJson(response, 200, await (pathname.endsWith("/preview") ? folders.preview(callerWorkspaceId, body.path) : folders.add(callerWorkspaceId, body.path)));
+            return;
+          }
+          if (request.method === "DELETE" && one && !one[2]) { sendJson(response, 200, await folders.remove(callerWorkspaceId, one[1]!)); return; }
+          if (request.method === "POST" && one?.[2]) {
+            const body = await readJsonBody(request).catch(() => undefined) as { lines?: unknown } | undefined;
+            const lines = Array.isArray(body?.lines) ? body.lines.filter((line): line is string => typeof line === "string" && line.length <= 80) : undefined;
+            if (!lines) { sendJson(response, 400, { blocker: { code: "FOLDER_LINES_REQUIRED", message: "需要 lines 数组" } }); return; }
+            sendJson(response, 200, await folders.setLines(callerWorkspaceId, one[1]!, lines));
+            return;
+          }
+        } catch { sendJson(response, 502, { blocker: { code: "FOLDER_FAILED", message: "文件夹操作没有完成" } }); return; }
       }
       // A subscription link (docs/onboarding-v3.md 「日历接入」): read once here before it is kept, so a link that does not open is refused
       // now rather than failing every tick. The answer is awaited: a read takes a second or two and the person is waiting for it.
