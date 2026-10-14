@@ -2,10 +2,10 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
-import { CrosslineStore, createReminderWorkflow, readGrownSkills, requestWorkflow, updateGrownSkill } from "@crossline/db";
+import { CrosslineStore, consentToGrownSkill, createReminderWorkflow, readGrownSkills, requestWorkflow, updateGrownSkill } from "@crossline/db";
 import { LINE_SETTING } from "@crossline/identity-packs";
 import type { AgentOutcome } from "./agent-task";
-import { cleanGrownSkills, growCandidates, growTask, installGrown, SKILL_CREATOR, workflowSchedulePass } from "./workflow-smith";
+import { cleanGrownSkills, growCandidates, growTask, installGrown, openWorkflowLogin, SKILL_CREATOR, startWorkflowRun, workflowSchedulePass } from "./workflow-smith";
 import { scriptedRuntime } from "./testing/fake-runtime";
 
 const REVIEWER = "crossline:crossline-validation-reviewer";
@@ -157,4 +157,55 @@ test("the first real grown workflow (2026-10-14) installs: a Chinese name is a l
   expect(readGrownSkills(store, ws)[0]!.manifest.steps.at(-1)).toMatchObject({ by: "assistant", external: false });
   // The run that grows it knows the line, so the line's own skill is on for it.
   expect(growTask(candidate, ["media"]).lineId).toBe("media");
+});
+
+const said = () => store.listRecentNudges(ws, "2000-01-01T00:00:00Z").map((message) => (message.payload.card as { clarify: { question: string } }).clarify.question);
+const favourites = { name: "xhs-favorites-digest", summary: "每周日整理小红书收藏夹，按主题归类并列出可删的重复项", lines: ["media"], category: "files_calendar_prep",
+  trigger: "schedule", schedule: { type: "weekly", days: ["SU"], time: "20:00" }, action: "run", reminder: "",
+  steps: [{ title: "读取收藏夹并归类", by: "assistant", external: false }, { title: "在小红书里把笔记移进专辑", by: "person", external: false }],
+  inputs: [], outputs: ["收藏夹索引.md"],
+  access: [{ service: "小红书", site: "https://www.xiaohongshu.com/explore", login: true, how: "在本人登录的浏览器里打开个人页的收藏标签逐屏读取" }],
+  risks: ["自动读取页面不符合小红书用户协议，账号有被限制的可能", "页面改版后脚本会失效"] };
+
+test("a workflow that reads the person's account installs waiting for their yes, says its risks, and reaching that site does not cap its scripts", async () => {
+  const dir = path.join(root, "grow-xhs");
+  writeSkill(dir, favourites, "from playwright.sync_api import sync_playwright; page.goto('https://www.xiaohongshu.com/user/profile/me?tab=fav')");
+  const candidate = { lineId: "media", category: "files_calendar_prep" as const, origin: { kind: "asked" as const, text: "定期整理我的小红书收藏夹", requestId: "r1" },
+    text: "定期整理我的小红书收藏夹", examples: [] };
+  expect(await installGrown(store, ws, candidate, done("grow-xhs", dir), { client: reviewer().rpc, cwd: "C:\repo" })).toEqual({ state: "installed", id: "flow-xhs-favorites-digest" });
+  const record = readGrownSkills(store, ws)[0]!;
+  expect(record).toMatchObject({ status: "needs_consent", review: { final: "usable" }, scan: { risk: "low" } });
+  expect(record.scan.findings.map((finding) => finding.rule)).toContain("net");
+  expect(said().at(-1)).toContain("先请本人看风险：自动读取页面不符合小红书用户协议");
+  // Not scheduled, and not switched on by the plain on/off, until the person accepts the risks.
+  expect(workflowSchedulePass(store, ws, () => ({ state: "started", taskId: "t" }), new Date("2026-10-19T01:10:00Z"))).toEqual([]);
+  expect(updateGrownSkill(store, ws, record.id, { status: "active" })).toBe(false);
+  expect(consentToGrownSkill(store, ws, record.id)).toBe(true);
+  expect(readGrownSkills(store, ws)[0]).toMatchObject({ status: "active", consentedAt: expect.any(String) });
+});
+
+test("the person logs in in a window of its own; a run is told that profile, and a run that found itself logged out asks for a login", () => {
+  writeFileSync(path.join(root, "clip.mp4"), "x");
+  store.setSetting(ws, "skills.grown", JSON.stringify([{ id: "flow-xhs", kind: "grown", name: "xhs", description: "d", lines: ["media"], category: "files_calendar_prep",
+    manifest: { ...favourites, inputs: [root, "本周素材"] }, origin: { kind: "asked", text: "t", requestId: "r" }, taskId: "", files: [],
+    scan: { risk: "low", injection: false, findings: [] }, review: { verdict: "usable", reasons: [], final: "usable" }, status: "active", pinned: false,
+    createdAt: "", updatedAt: "", lastUsedAt: "" }]));
+  const profiles = path.join(root, "profiles");
+  let launched: { exe: string; args: string[]; onExit: () => void } | undefined;
+  const opened = openWorkflowLogin(store, ws, "flow-xhs", "小红书", profiles, { browser: "msedge.exe", launch: (exe, args, onExit) => { launched = { exe, args, onExit }; } });
+  expect(opened).toEqual({ ok: true });
+  expect(launched!.args).toEqual([`--user-data-dir=${path.join(profiles, "xiaohongshu.com")}`, "--no-first-run", "--no-default-browser-check", "--new-window", "https://www.xiaohongshu.com/explore"]);
+  expect(openWorkflowLogin(store, ws, "flow-xhs", "小红书", profiles, { browser: "x", launch: () => {} })).toMatchObject({ ok: false, code: "LOGIN_WINDOW_OPEN" });
+  const record = readGrownSkills(store, ws)[0]!;
+  // While the window is open the profile is in use, so a run waits.
+  expect(startWorkflowRun(store, ws, record, () => ({ state: "started", taskId: "t" }), profiles)).toMatchObject({ state: "blocked", code: "LOGIN_WINDOW_OPEN" });
+  launched!.onExit();
+  expect(readGrownSkills(store, ws)[0]!.logins).toEqual({ 小红书: expect.any(String) });
+  let after: ((outcome: AgentOutcome) => void) | undefined;
+  const inputs: Array<{ what: string; inputs?: string[] }> = [];
+  expect(startWorkflowRun(store, ws, record, (input, then) => { inputs.push(input); after = then; return { state: "started", taskId: input.taskId }; }, profiles, new Date(), "msedge.exe").state).toBe("started");
+  expect(inputs[0]!.inputs).toEqual([root]);
+  expect(inputs[0]!.what).toContain(`浏览器配置目录 ${path.join(profiles, "xiaohongshu.com")}，浏览器程序 msedge.exe`);
+  after!({ ...done("t", root), summary: { needsHuman: [{ what: "需要登录：小红书", why: "打开收藏页跳到了登录页" }] } } as unknown as AgentOutcome);
+  expect(said().at(-1)).toContain("这次没读到：需要登录：小红书");
 });

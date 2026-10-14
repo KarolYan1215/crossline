@@ -53,10 +53,35 @@ export function updateGrownSkill(store: CrosslineStore, workspaceId: string, id:
   const records = readGrownSkills(store, workspaceId);
   const record = records.find((item) => item.id === id);
   if (!record) return false;
+  // One that reads an account is switched on only by accepting its risks (`consentToGrownSkill`), never by the plain on/off.
+  if (patch.status === "active" && record.status === "needs_consent") return false;
   writeGrownSkills(store, workspaceId, records.map((item) => item.id === id ? { ...item, ...patch, updatedAt: now.toISOString() } : item));
   store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.updated:${id}:${now.toISOString()}`, type: "skill.grown.updated",
     entityId: id, payload: { id, ...patch } });
   return true;
+}
+
+/**
+ * The person accepted the risks of a workflow that reads their account or a site (docs/skills-library.md §6): it is switched on and the
+ * acceptance recorded with the risks it was shown, so a later change of what it reads can be told apart from what was agreed to.
+ */
+export function consentToGrownSkill(store: CrosslineStore, workspaceId: string, id: string, now = new Date()): boolean {
+  const records = readGrownSkills(store, workspaceId);
+  const record = records.find((item) => item.id === id);
+  if (!record || record.status !== "needs_consent") return false;
+  const at = now.toISOString();
+  writeGrownSkills(store, workspaceId, records.map((item) => item.id === id ? { ...item, status: "active" as const, consentedAt: at, updatedAt: at } : item));
+  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.consented:${id}:${at}`, type: "skill.grown.consented",
+    entityId: id, payload: { id, access: record.manifest.access ?? [], risks: record.manifest.risks ?? [] } });
+  return true;
+}
+
+/** Records that the person finished logging in to a service a workflow reads (the browser window they logged in with was closed). */
+export function recordGrownLogin(store: CrosslineStore, workspaceId: string, id: string, service: string, now = new Date()): void {
+  const at = now.toISOString();
+  writeGrownSkills(store, workspaceId, readGrownSkills(store, workspaceId).map((item) => item.id === id ? { ...item, logins: { ...(item.logins ?? {}), [service]: at } } : item));
+  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.logged_in:${id}:${at}`, type: "skill.grown.logged_in",
+    entityId: id, payload: { id, service } });
 }
 
 /** Removes a grown workflow and its files (`skill.grown.removed` keeps why and by whom). */
@@ -100,7 +125,7 @@ export function createReminderWorkflow(store: CrosslineStore, workspaceId: strin
   const record: GrownSkillRecord = { id, kind: "grown", name: id.replace(/^flow-/, ""), description: input.reminder, lines: input.lineId ? [input.lineId] : [],
     category: "files_calendar_prep",
     manifest: { name: id.replace(/^flow-/, ""), summary: input.reminder, lines: input.lineId ? [input.lineId] : [], category: "files_calendar_prep", trigger: "schedule",
-      schedule, action: "remind", reminder: input.reminder, steps: [{ title: input.reminder, by: "person", external: false }], inputs: [], outputs: [] },
+      schedule, action: "remind", reminder: input.reminder, steps: [{ title: input.reminder, by: "person", external: false }], inputs: [], outputs: [], access: [], risks: [] },
     origin: { kind: "asked", text: input.text, requestId: `reminder-${id}` }, taskId: "", files: [],
     scan: { risk: "low", injection: false, findings: [] }, review: { verdict: "usable", reasons: ["本人在输入框里设的提醒，没有脚本"], final: "usable" },
     status: "active", pinned: true, createdAt: at, updatedAt: at, lastUsedAt: at };

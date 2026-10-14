@@ -52,7 +52,7 @@ test("a grown workflow shows when it runs, which steps are the person's and what
   const store = setup();
   const manifest = { name: "weekly-vlog-cut", summary: "每周剪一条 vlog", lines: ["media"], category: "media_edit" as const, trigger: "schedule" as const,
     schedule: { type: "weekly" as const, days: ["FR" as const], time: "18:00" }, action: "run" as const, reminder: "",
-    steps: [{ title: "粗剪", by: "assistant" as const, external: false }, { title: "发布", by: "person" as const, external: true }], inputs: [], outputs: [] };
+    steps: [{ title: "粗剪", by: "assistant" as const, external: false }, { title: "发布", by: "person" as const, external: true }], inputs: [], outputs: [], access: [], risks: [] };
   writeGrownSkills(store, ws, [{ id: "flow-weekly-vlog-cut", kind: "grown", name: "weekly-vlog-cut", description: "d", lines: ["media"], category: "media_edit", manifest,
     origin: { kind: "asked", text: "以后每周五把素材剪成 vlog", requestId: "r" }, taskId: "t", files: [], scan: { risk: "low", injection: false, findings: [] },
     review: { verdict: "usable", reasons: ["可用"], final: "usable" }, status: "active", pinned: false, createdAt: "2026-10-12T00:00:00Z", updatedAt: "", lastUsedAt: "2026-10-12T00:00:00Z" }]);

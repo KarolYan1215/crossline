@@ -4,6 +4,7 @@
  *
  *   pnpm exec tsx scripts/workflow-grow-demo.ts                 the first errand the ledger shows repeated (two accepted results alike)
  *   pnpm exec tsx scripts/workflow-grow-demo.ts "以后……"        a request in the person's words (`workflow.request`)
+ *   … --line=media --run-at=2026-10-17T01:05:00Z                             then the schedule pass at that instant: the run it starts is awaited
  *
  * It runs the assistant with the runtime's own `skill-creator`, reads back what it wrote, checks the manifest, scans and reviews it,
  * installs it, prints what the person is told, and then shows a later task of the same kind switching the workflow on.
@@ -32,11 +33,13 @@ const { currentMineVersion, grownSkillFilesKey, mineSkillSettingKey, readMineSki
 const { createInsightCompiler, INSIGHT_COMPILER } = await import("../apps/worker/src/insight-compiler");
 const { setUsageSink, startCodexSupervisor } = await import("../packages/codex/src/index");
 const { createAgentRunner, AGENT_SKILL } = await import("../apps/worker/src/agent-task");
-const { growCandidates, growTask, installGrown, SKILL_CREATOR } = await import("../apps/worker/src/workflow-smith");
+const { growCandidates, growTask, installGrown, SKILL_CREATOR, workflowSchedulePass } = await import("../apps/worker/src/workflow-smith");
 const { librarySkillsFor } = await import("../apps/worker/src/skill-library");
 const { identityLines } = await import("../apps/worker/src/lines");
 
-const request = process.argv[2];
+const request = process.argv.slice(2).find((arg) => !arg.startsWith("--"));
+const runAt = process.argv.slice(2).find((arg) => arg.startsWith("--run-at="))?.slice("--run-at=".length);
+const lineArg = process.argv.slice(2).find((arg) => arg.startsWith("--line="))?.slice("--line=".length) ?? "";
 const store = new CrosslineStore(path.join(dataDir, "crossline.db"));
 const workspace = store.listWorkspaces().find((item) => listAgentTasks(store, item.id).length) ?? store.listWorkspaces()[0]!;
 const ws = workspace.id;
@@ -44,7 +47,7 @@ const heading = (text: string) => console.info(`\n== ${text}`);
 const runs: Array<{ skill: string; seconds: number; repairs: number; ok: boolean }> = [];
 setUsageSink((usage) => { runs.push({ skill: usage.skillName, seconds: Math.round(usage.durationMs / 1000), repairs: usage.repairs, ok: usage.ok }); });
 
-if (request) requestWorkflow(store, ws, request, "", store.getWorkspaceOwnerId(ws)!);
+if (request) requestWorkflow(store, ws, request, lineArg, store.getWorkspaceOwnerId(ws)!);
 const candidates = growCandidates(store, ws);
 const candidate = request ? candidates.find((item) => item.origin.kind === "asked") : candidates.find((item) => item.origin.kind === "repeated");
 if (!candidate) { console.error("账本副本里没有可生长的事项。"); process.exit(1); }
@@ -98,6 +101,25 @@ try {
     heading("之后同类任务启用它");
     const chosen = await librarySkillsFor(supervisor.client, store, ws, candidate.lineId, { cwd: repoRoot, dir: libraryDir, task: candidate.text.split("；")[0] ?? candidate.text });
     console.info(JSON.stringify(chosen));
+    if (runAt) {
+      heading(`到点执行：在 ${runAt} 跑一次定时检查`);
+      let finished: Promise<unknown> = Promise.resolve();
+      const runner = createAgentRunner(store, ws, repoRoot, () => supervisor.client, { outputRoot: path.join(dataDir, "ai-output"), libraryDir, ask: async () => false });
+      const fired = workflowSchedulePass(store, ws, (runInput, after) => {
+        console.info(runInput.what);
+        finished = runner(runInput).then((runOutcome) => { after?.(runOutcome); return runOutcome; });
+        return { state: "started", taskId: runInput.taskId };
+      }, new Date(runAt), path.join(dataDir, "browser-profiles", ws));
+      console.info(JSON.stringify({ fired }));
+      const runStarted = Date.now();
+      const ran = await finished as Awaited<ReturnType<typeof runner>> | undefined;
+      if (ran) console.info(JSON.stringify({ state: ran.state, seconds: Math.round((Date.now() - runStarted) / 1000),
+        ...(ran.state === "done" ? { directory: ran.directory, summary: ran.summary.summary, artifacts: ran.artifacts, needsHuman: ran.summary.needsHuman,
+          verification: ran.summary.verification, skills: (store.listEvents(ws, { type: "agent.task.completed", entityId: ran.taskId }).at(-1)?.payload as { skills?: string[] })?.skills }
+          : ran) }, null, 1));
+      const told = store.listRecentNudges(ws, new Date(Date.now() - 3_600_000).toISOString()).at(-1);
+      console.info(`对本人说：${(told?.payload.card as { clarify?: { question?: string } } | undefined)?.clarify?.question ?? "（无）"}`);
+    }
   } else {
     const reading = path.join(path.join(dataDir, "ai-output"), input.taskId, "skill", "workflow.json");
     if (existsSync(reading)) console.info(readFileSync(reading, "utf8").slice(0, 2000));

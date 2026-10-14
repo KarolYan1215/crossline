@@ -5,7 +5,7 @@ import path from "node:path";
 import { enterUsageWorkspace, setProviderResolver, setSpendModeProvider, setUsageSink, startCodexSupervisor, startModelGateway, type CodexSupervisor } from "@crossline/codex";
 import { createDpapiSecretStore } from "@crossline/connectors";
 import { createModelProviderService } from "./model-provider";
-import { CrosslineStore, aiToolsFor, isPaused, listPushSubscriptions, removePushSubscriptions } from "@crossline/db";
+import { CrosslineStore, aiToolsFor, isPaused, listPushSubscriptions, readGrownSkills, removePushSubscriptions } from "@crossline/db";
 import { capturesAwaitingAutoAnalysis, createCaptureAnalyzer } from "./analysis";
 import { autoApproveEligible } from "./auto-approval";
 import { retireShadowedDemos } from "./demo-cleanup";
@@ -26,7 +26,8 @@ import { createTaskTitler, untitledTasks } from "./task-titler";
 import { createCalendarClassifier, unfiledCalendarEvents } from "./calendar-classifier";
 import { createInsightCompiler, linesAwaitingMineSkill } from "./insight-compiler";
 import { cleanPublicSkills, createSkillScout, scoutDue } from "./public-skills";
-import { cleanGrownSkills, growCandidates, growTask, installGrown, sayToPerson, workflowSchedulePass } from "./workflow-smith";
+import { browserProfilesRoot, cleanGrownSkills, growCandidates, growTask, installGrown, markWorkflowRun, openWorkflowLogin, sayToPerson, startWorkflowRun,
+  workflowSchedulePass } from "./workflow-smith";
 import { createGoalSplitter, linesAwaitingCandidateSplit, linesAwaitingSplit } from "./goal-splitter";
 import { fileSourceDocuments } from "./source-filing";
 import { createPortraitWriter, PORTRAIT_GAP_AT, PORTRAIT_REWRITE_MARKER, portraitRewriteDue } from "./portrait-writer";
@@ -265,7 +266,7 @@ async function workflowPass(workspaceId: string, checkedAt: string): Promise<voi
   const assistantOff = isPaused(analysisStore, workspaceId) || !codexSupervisor;
   try {
     const fired = workflowSchedulePass(analysisStore, workspaceId, (input, after) => assistantOff
-      ? { state: "blocked", code: "AGENT_PAUSED", message: "助手已暂停。" } : agentService.runFree(workspaceId, input, after));
+      ? { state: "blocked", code: "AGENT_PAUSED", message: "助手已暂停。" } : agentService.runFree(workspaceId, input, after), new Date(), browserProfilesRoot(workspaceId));
     if (fired.length) console.info(JSON.stringify({ type: "skill.grown.scheduled", checkedAt, workspaceId, fired }));
   } catch { /* next tick */ }
   if (assistantOff || growingWorkflows.has(workspaceId) || agentService.runningTasks(workspaceId).length) return;
@@ -929,6 +930,16 @@ if (!capabilitySecret) {
     dispatchAgentTask: (workspaceId, workOrderId, category, stepId) => agentService.dispatch(workspaceId, workOrderId, category, stepId),
     agentProgress: (workspaceId, taskId) => agentService.progress(workspaceId, taskId),
     cancelAgentTask: (workspaceId, taskId) => agentService.cancel(workspaceId, taskId),
+    workflowAction: (workspaceId, id, action, service) => {
+      if (action === "login") return openWorkflowLogin(analysisStore, workspaceId, id, service, browserProfilesRoot(workspaceId));
+      const record = readGrownSkills(analysisStore, workspaceId).find((item) => item.id === id && item.status === "active");
+      if (!record) return { ok: false, code: "WORKFLOW_NOT_ACTIVE", message: "这个工作流还没启用。" };
+      if (isPaused(analysisStore, workspaceId)) return { ok: false, code: "AGENT_PAUSED", message: "助手已暂停。" };
+      const started = startWorkflowRun(analysisStore, workspaceId, record, (input, after) => agentService.runFree(workspaceId, input, after), browserProfilesRoot(workspaceId));
+      if (started.state === "started") markWorkflowRun(analysisStore, workspaceId, id, "started_by_person");
+      return started.state === "started" ? { ok: true, taskId: started.taskId }
+        : { ok: false, code: started.state === "blocked" ? started.code : "AGENT_CATEGORY_NOT_APPROVED", message: started.state === "blocked" ? started.message : `助手还没获准做「${started.label}」这类工作。` };
+    },
     publishCalendar: async (workspaceId, blocks, scope) => {
       const session = await getCalendarWriteSession();
       if (!session) return { state: "blocked", code: "GRAPH_NOT_CONFIGURED", message: "没有配置 Microsoft 日历（CROSSLINE_MS_CLIENT_ID）。" };

@@ -3,6 +3,13 @@ import { mentionsExternalAction } from "./external-action";
 import type { PublicSkillReview, PublicSkillVerdict, SkillScan } from "./public-skills";
 
 /**
+ * A site the workflow reads on the person's behalf (「整理小红书收藏夹」), found by the run that grew it. Only reading: anything that
+ * changes the account — moving, deleting, liking, posting — is a step of the person's. `login`: it reads behind the person's own login,
+ * which the person does themselves in a browser window Crossline opens with a profile of its own for this workflow.
+ */
+export type WorkflowAccess = { service: string; site: string; login: boolean; how: string };
+
+/**
  * Grown workflows (`crossline-grown:<id>`, docs/skills-library.md §6): skills the assistant writes itself — with the runtime's own
  * `skill-creator` — once the person has had the same kind of errand done twice, or asks for one in words. A workflow is a skill (SKILL.md,
  * scripts it tested, references) plus a manifest Crossline reads (`workflow.json`): which lines and kind of work it serves, whether it runs
@@ -37,6 +44,9 @@ export type WorkflowManifest = {
   steps: Array<{ title: string; by: "assistant" | "person"; external: boolean }>;
   inputs: string[];
   outputs: string[];
+  /** What it reads on the person's behalf, and the risks of doing so in the person's words; a workflow with any waits for the person's yes. */
+  access: WorkflowAccess[];
+  risks: string[];
 };
 
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -80,10 +90,21 @@ export function validateWorkflowManifest(value: unknown, lineIds: string[]): Wor
     if (!short(step?.title, 120)) { problems.push("每一步须有标题"); break; }
   }
   if (!Array.isArray(manifest.inputs) || !Array.isArray(manifest.outputs)) problems.push("inputs 与 outputs 须为列表");
+  // Older manifests carry neither; a workflow that reads an account must say what it reads, how, and what could go wrong.
+  const access = Array.isArray(manifest.access) ? manifest.access : [];
+  const risks = Array.isArray(manifest.risks) ? manifest.risks.filter((risk) => short(risk, 200)) : [];
+  if (access.length > 3) problems.push("access 至多 3 项");
+  for (const item of access) {
+    if (!short(item?.service, 40) || typeof item.site !== "string" || !/^https:\/\/[^\s/]+/.test(item.site) || typeof item.login !== "boolean" || !short(item.how, 300)) {
+      problems.push("access 每项须有 service、https 的 site、login（true/false）与 how"); break;
+    }
+  }
+  if (access.length && !risks.length) problems.push("读取本人账号或网站的工作流须在 risks 里写明风险");
   if (problems.length) throw Object.assign(new Error("WORKFLOW_MANIFEST_INVALID"), { detail: problems.slice(0, 6).join("；") });
   // Anything that sends, uploads, publishes, submits or pays is the person's, whatever the manifest says: such a step is handed to the
   // person rather than the workflow refused, since refusing for a sentence about *not* publishing threw good workflows away.
   return { ...manifest, schedule: manifest.trigger === "schedule" ? manifest.schedule : null,
+    access: access.map((item) => ({ service: item.service.trim(), site: item.site.trim(), login: item.login, how: item.how.trim() })), risks: risks.slice(0, 8),
     steps: manifest.steps.map((step) => {
       const external = Boolean(step.external) || stepLeavesMachine(step.title);
       return { title: step.title, by: external || step.by === "person" ? "person" : "assistant", external };
@@ -135,8 +156,11 @@ export type GrownSkillRecord = {
   files: Array<{ path: string; sha256: string; bytes: number }>;
   scan: SkillScan;
   review: PublicSkillReview & { final: PublicSkillVerdict };
-  /** `off`: kept but not used or scheduled. */
-  status: "active" | "off";
+  /** `off`: kept but not used or scheduled; `needs_consent`: reads an account or site, and waits for the person to accept its risks. */
+  status: "active" | "off" | "needs_consent";
+  /** When the person accepted the risks of what it reads, and when they last logged in to each service it reads behind a login. */
+  consentedAt?: string;
+  logins?: Record<string, string>;
   /** Kept by the person: never removed for being idle. */
   pinned: boolean;
   createdAt: string; updatedAt: string; lastUsedAt: string;
@@ -157,3 +181,22 @@ export function grownSkillId(name: string, taken: Iterable<string>): string {
   while (used.has(id)) id = `${base}-${n++}`;
   return id;
 }
+
+/** A grown record stored before `access` existed reads as one that reads nothing. */
+export const workflowAccess = (record: { manifest: Partial<Pick<WorkflowManifest, "access" | "risks">> }) =>
+  ({ access: record.manifest.access ?? [], risks: record.manifest.risks ?? [] });
+
+/**
+ * The scan of a workflow that declares what it reads: reaching the network is what it was written to do, so a `net` finding is kept on
+ * the record but no longer caps it to text; anything else (deleting, leaving its folder, secrets, the system, downloading and running) still does.
+ */
+export function scanForDeclaredAccess(scan: SkillScan, declared: boolean): SkillScan {
+  if (!declared) return scan;
+  return { ...scan, risk: scan.findings.some((finding) => !["net", "injection", "hidden.text"].includes(finding.rule)) ? "high" : "low" };
+}
+
+/** The folder name of a service's browser profile: ASCII from its site's host, so 「小红书」 and `https://www.xiaohongshu.com` share one. */
+export const accessProfileSlug = (access: Pick<WorkflowAccess, "site" | "service">): string => {
+  const host = /^https:\/\/([^/:?#]+)/i.exec(access.site)?.[1]?.toLowerCase().replace(/^www\./, "") ?? "";
+  return (host || access.service).replace(/[^a-z0-9.-]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "site";
+};

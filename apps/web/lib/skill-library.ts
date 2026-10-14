@@ -2,7 +2,8 @@ import {
   AGENT_CATEGORIES, PUBLIC_SKILL_CATEGORY_LABEL, currentMineVersion, scheduleLabel, ensureMineFrontmatter, mineSkillSettingKey, publicSkillFilesKey, grownSkillFilesKey, readMineSkill,
   type AccessContext, type AiTool, type PublicSkillRecord, type StoredMineRule
 } from "@crossline/core";
-import { aiToolsFor, readGrownSkills, readPublicSkills, removeGrownSkill, removePublicSkill, saveMineVersion, updateGrownSkill } from "@crossline/db";
+import { aiToolsFor, consentToGrownSkill, readGrownSkills, readPublicSkills, removeGrownSkill, removePublicSkill, saveMineVersion, updateGrownSkill } from "@crossline/db";
+import { CodexSupervisorRequestError, requestCodexSupervisor } from "./codex-runtime";
 import { getStore } from "./crossline";
 import { identityLines } from "./lines";
 
@@ -24,7 +25,9 @@ export type PublicSkillView = Pick<PublicSkillRecord, "id" | "name" | "descripti
 };
 /** A workflow the assistant grew: what it does and when, where it came from, which steps stay the person's, and what the checks found. */
 export type GrownSkillView = { id: string; summary: string; name: string; category: string; lines: string[]; schedule: string; action: "run" | "remind";
-  origin: string; steps: Array<{ title: string; person: boolean }>; status: "active" | "off"; pinned: boolean; verdict: "usable" | "text_only" | "reject";
+  origin: string; steps: Array<{ title: string; person: boolean }>; status: "active" | "off" | "needs_consent"; pinned: boolean; verdict: "usable" | "text_only" | "reject";
+  /** The sites it reads and the risks it was installed with; when the person accepted them and last logged in to each. */
+  access: Array<{ service: string; site: string; login: boolean; how: string; loggedInAt?: string }>; risks: string[]; consentedAt?: string;
   risk: "low" | "high"; reasons: string[]; files: number; createdAt: string; lastUsedAt: string; lastRunAt?: string; skillText: string };
 export type SkillLibraryView = { mine: MineSkillView[]; grown: GrownSkillView[]; publics: PublicSkillView[]; aiTools: AiTool[];
   removed: Array<{ name: string; reason: string; at: string; by: string }>; growing: number };
@@ -61,6 +64,8 @@ export function loadSkillLibrary(ctx: AccessContext): SkillLibraryView {
       schedule: scheduleLabel(record.manifest.schedule), action: record.manifest.action,
       origin: record.origin.kind === "asked" ? `本人要求：「${record.origin.text.slice(0, 60)}」` : `由 ${record.origin.taskIds.length} 次采纳的同类结果生成`,
       steps: record.manifest.steps.map((step) => ({ title: step.title, person: step.by === "person" })), status: record.status, pinned: record.pinned,
+      access: (record.manifest.access ?? []).map((item) => ({ ...item, ...(record.logins?.[item.service] ? { loggedInAt: record.logins[item.service] } : {}) })),
+      risks: record.manifest.risks ?? [], ...(record.consentedAt ? { consentedAt: record.consentedAt } : {}),
       verdict: record.review.final, risk: record.scan.risk, reasons: record.review.reasons, files: record.files.length, createdAt: record.createdAt,
       lastUsedAt: record.lastUsedAt, ...(record.lastRunAt ? { lastRunAt: record.lastRunAt } : {}), skillText: skillText.replace(/^---[\s\S]*?\n---\n/, "") };
   });
@@ -102,9 +107,28 @@ export function deletePublicSkill(ctx: AccessContext, id: string): { ok: boolean
   return removePublicSkill(getStore(), ctx.workspaceId, id, "本人删除", "person") ? { ok: true } : { ok: false, code: "SKILL_NOT_FOUND" };
 }
 
-/** The person turns a grown workflow on or off, keeps it for good, or removes it. */
-export function changeGrownSkill(ctx: AccessContext, id: string, change: { status?: "active" | "off"; pinned?: boolean } | "remove"): { ok: boolean; code?: string } {
+/**
+ * The person turns a grown workflow on or off, keeps it for good, removes it, or — for one that reads an account — accepts its risks,
+ * which is the only way such a workflow is switched on.
+ */
+export function changeGrownSkill(ctx: AccessContext, id: string, change: { status?: "active" | "off"; pinned?: boolean } | "remove" | "consent"): { ok: boolean; code?: string } {
   const store = getStore();
-  const done = change === "remove" ? removeGrownSkill(store, ctx.workspaceId, id, "本人删除", "person") : updateGrownSkill(store, ctx.workspaceId, id, change);
-  return done ? { ok: true } : { ok: false, code: "SKILL_NOT_FOUND" };
+  const done = change === "remove" ? removeGrownSkill(store, ctx.workspaceId, id, "本人删除", "person")
+    : change === "consent" ? consentToGrownSkill(store, ctx.workspaceId, id) : updateGrownSkill(store, ctx.workspaceId, id, change);
+  return done ? { ok: true } : { ok: false, code: change === "consent" ? "SKILL_NOT_AWAITING_CONSENT" : "SKILL_NOT_FOUND" };
+}
+
+/** 「登录」 (a browser window of its own opens on this computer) and 「立即运行」, both carried out by the worker. */
+export async function grownSkillAction(ctx: AccessContext, id: string, action: "login" | "run", service = ""):
+  Promise<{ ok: boolean; code?: string; message?: string; taskId?: string }> {
+  try {
+    return await requestCodexSupervisor<{ ok: boolean; code?: string; message?: string; taskId?: string }>(ctx, `/v1/workflows/${encodeURIComponent(id)}/${action}`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ service }), signal: AbortSignal.timeout(15_000) });
+  } catch (error) {
+    if (error instanceof CodexSupervisorRequestError) {
+      const blocker = error.blocker as { code?: string; message?: string } | undefined;
+      return { ok: false, code: blocker?.code ?? "WORKER_UNAVAILABLE", message: blocker?.message ?? "后台服务没有回应。" };
+    }
+    return { ok: false, code: "WORKER_UNAVAILABLE", message: "后台服务没有回应。" };
+  }
 }

@@ -75,6 +75,8 @@ const SCRIPT_RULES: Array<{ rule: string; pattern: RegExp }> = [
   { rule: "download.execute", pattern: /\bpip3?\s+install\b|\bnpm\s+(i|install|exec)\b|\bnpx\s|\bpnpm\s+(add|dlx)\b|\byarn\s+(add|dlx)\b|\bgo\s+(get|install)\b|\bcargo\s+install\b|\bgem\s+install\b|base64[^\n]{0,60}(exec|eval)|(exec|eval)\s*\([^)]*(b64|base64|decode)/i }
 ];
 const INJECTION = /ignore\s+(all\s+|any\s+|the\s+)?(previous|prior|above|earlier|system|developer)\s+(instructions|rules|messages|prompts)|disregard\s+(all\s+|the\s+)?(previous|prior|above|system|developer)|忽略(之前|以上|所有|前面|上述|系统)的?(指令|规则|要求|提示)|(do\s+not|don't|never)\s+(tell|inform|show|mention|reveal)\s+(this\s+to\s+)?(the\s+)?user|不要(告诉|告知|透露给)(用户|本人|使用者)|exfiltrat|(send|upload|post|transmit|forward)\s[^.\n]{0,60}(credential|secret|token|api[\s_-]?key|password|\.env|cookie|private key)|bypass\s+(the\s+)?(approval|guard|sandbox|safety|permission|review)|绕过(审批|审查|限制|安全|权限)|without\s+(asking|approval|permission|confirmation)|不经(本人|用户)?(同意|批准|确认)|reveal\s+(the\s+|your\s+)?(system|developer)\s+prompt|you\s+are\s+now\s+|jailbreak|\bDAN\b/i;
+/** The system's own font folders: a script that reads a font to draw a title is not leaving its directory (the first grown vlog workflow did). */
+const SYSTEM_FONTS = /([a-z]:[\\/]windows[\\/]fonts|\/usr\/(local\/)?share\/fonts|\/system\/library\/fonts|\/library\/fonts)[\\/][^\s"'`),;]*/gi;
 const HIDDEN = /[\u200B-\u200F\u2060-\u2064\uFEFF\u202A-\u202E]/;
 const GUARD_CONTEXT = { taskDir: "C:\\skill-scan\\task", homeDir: "C:\\Users\\skill-scan" };
 
@@ -97,7 +99,8 @@ export function scanSkillFiles(files: Array<{ path: string; text: string }>): Sk
         const guard = decideCommand(text, GUARD_CONTEXT);
         if (guard.decision !== "allow") add(guard.rule);
         else if (text.split(/[\s"'`(),;|&<>=]+/).some((token) => token && isSecretPath(token))) add("secret.path");
-        for (const entry of SCRIPT_RULES) if (entry.pattern.test(text)) add(entry.rule);
+        const withoutFonts = text.replace(SYSTEM_FONTS, "font");
+        for (const entry of SCRIPT_RULES) if (entry.pattern.test(entry.rule === "outside" ? withoutFonts : text)) add(entry.rule);
       });
     } else {
       lines.forEach((line, index) => {

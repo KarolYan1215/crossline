@@ -1,12 +1,12 @@
 import { expect, test } from "vitest";
-import { categoryFromWording, grownSkillId, reassignedSteps, scheduleLabel, stepLeavesMachine, validateWorkflowManifest, workflowDue, type WorkflowManifest } from "./index";
+import { accessProfileSlug, categoryFromWording, grownSkillId, scanForDeclaredAccess, reassignedSteps, scheduleLabel, stepLeavesMachine, validateWorkflowManifest, workflowDue, type WorkflowManifest } from "./index";
 
 const manifest: WorkflowManifest = {
   name: "weekly-vlog-cut", summary: "每周把素材剪成一条 3 分钟 vlog", lines: ["media"], category: "media_edit", trigger: "schedule",
   schedule: { type: "weekly", days: ["FR"], time: "18:00" }, action: "run", reminder: "",
   steps: [{ title: "按时间线挑选片段并粗剪", by: "assistant", external: false }, { title: "加字幕并导出成片", by: "assistant", external: false },
     { title: "上传到小红书并发布", by: "person", external: true }],
-  inputs: ["本周素材文件夹"], outputs: ["成片 mp4", "封面图"]
+  inputs: ["本周素材文件夹"], outputs: ["成片 mp4", "封面图"], access: [], risks: []
 };
 
 test("every step that leaves the machine is the person's, whatever the manifest said", () => {
@@ -53,4 +53,22 @@ test("a step leaves the machine by what it does, not by a noun built on the verb
   expect(stepLeavesMachine("发布到小红书")).toBe(true);
   expect(stepLeavesMachine("上传成片并提交审核")).toBe(true);
   expect(stepLeavesMachine("Email the draft to the editor")).toBe(true);
+});
+
+test("a workflow that reads the person's account says what it reads and what could go wrong; an older one reads nothing", () => {
+  const reads = { ...manifest, category: "files_calendar_prep", access: [{ service: "小红书", site: "https://www.xiaohongshu.com/explore", login: true, how: "在本人登录的浏览器里打开收藏页读取" }],
+    risks: ["自动访问违反平台用户协议，账号可能被限制"] };
+  expect(validateWorkflowManifest(reads, ["media"]).access).toEqual(reads.access);
+  expect(() => validateWorkflowManifest({ ...reads, risks: [] }, ["media"])).toThrow();
+  expect(() => validateWorkflowManifest({ ...reads, access: [{ ...reads.access[0], site: "http://x.example" }] }, ["media"])).toThrow();
+  const { access: _a, risks: _r, ...older } = manifest;
+  expect(validateWorkflowManifest(older, ["media"])).toMatchObject({ access: [], risks: [] });
+  expect(accessProfileSlug(reads.access[0]!)).toBe("xiaohongshu.com");
+});
+
+test("reaching the network does not cap a workflow that declared what it reads; deleting or secrets still do", () => {
+  const net = { risk: "high" as const, injection: false, findings: [{ file: "scripts/read.py", line: 3, rule: "net", excerpt: "page.goto(url)" }] };
+  expect(scanForDeclaredAccess(net, true).risk).toBe("low");
+  expect(scanForDeclaredAccess(net, false).risk).toBe("high");
+  expect(scanForDeclaredAccess({ ...net, findings: [...net.findings, { file: "scripts/read.py", line: 9, rule: "delete", excerpt: "os.remove(x)" }] }, true).risk).toBe("high");
 });

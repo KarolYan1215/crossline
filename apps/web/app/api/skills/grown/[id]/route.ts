@@ -1,14 +1,27 @@
 import { NextResponse } from "next/server";
-import { changeGrownSkill } from "../../../../../lib/skill-library";
+import { changeGrownSkill, grownSkillAction } from "../../../../../lib/skill-library";
 import { writeGuard, validId } from "../../../agent/guard";
 
-/** A grown workflow, changed by the person: `{status: "active" | "off"}` turns it on or off, `{pinned}` keeps it from idle removal. */
+/**
+ * A grown workflow, changed by the person: `{status: "active" | "off"}` turns it on or off, `{pinned}` keeps it from idle removal,
+ * `{action: "consent"}` accepts the risks of one that reads an account, `{action: "login", service}` opens a window to log in with and
+ * `{action: "run"}` starts it now.
+ */
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const guard = await writeGuard(request);
   if ("response" in guard) return guard.response;
   const { id } = await context.params;
   if (!validId(id)) return NextResponse.json({ ok: false, code: "INVALID_SKILL" }, { status: 400 });
-  const { status, pinned } = guard.body;
+  const { status, pinned, action, service } = guard.body;
+  if (action === "consent") {
+    const result = changeGrownSkill(guard.ctx, id, "consent");
+    return NextResponse.json(result, { status: result.ok ? 200 : 409 });
+  }
+  if (action === "login" || action === "run") {
+    if (action === "login" && (typeof service !== "string" || !service.trim() || service.length > 40)) return NextResponse.json({ ok: false, code: "INVALID_REQUEST" }, { status: 400 });
+    const result = await grownSkillAction(guard.ctx, id, action, typeof service === "string" ? service : "");
+    return NextResponse.json(result, { status: result.ok ? 200 : 409 });
+  }
   if ((status !== undefined && status !== "active" && status !== "off") || (pinned !== undefined && typeof pinned !== "boolean") || (status === undefined && pinned === undefined)) {
     return NextResponse.json({ ok: false, code: "INVALID_REQUEST" }, { status: 400 });
   }

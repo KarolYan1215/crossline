@@ -120,17 +120,32 @@ function GrownFlow({ flow, onChanged }: { flow: GrownSkillView; onChanged: (flow
   const [note, setNote] = useState("");
   const send = async (method: "POST" | "DELETE", body?: object) => fetch(`/api/skills/grown/${encodeURIComponent(flow.id)}`,
     { method, headers: { "content-type": "application/json" }, ...(body ? { body: JSON.stringify(body) } : {}) }).then((response) => response.ok).catch(() => false);
+  // 「登录」 and 「立即运行」 are carried out by the worker; its refusal says why in words.
+  const act = async (body: object, success: string) => {
+    const result = await fetch(`/api/skills/grown/${encodeURIComponent(flow.id)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
+      .then((response) => response.json() as Promise<{ ok: boolean; message?: string }>).catch(() => ({ ok: false, message: "未完成" }));
+    setNote(result.ok ? success : result.message || "未完成");
+  };
   const verdict = VERDICT[flow.verdict];
   const person = flow.steps.filter((step) => step.person);
+  const waiting = flow.status === "needs_consent";
   return <li className="sk-public">
     <div className="sk-line-head">
-      <strong className="gen">{flow.summary}</strong><Tag>{flow.category}</Tag><Tag tone={flow.status === "active" ? "ok" : "neutral"}>{flow.status === "active" ? "启用" : "已关闭"}</Tag>
+      <strong className="gen">{flow.summary}</strong><Tag>{flow.category}</Tag>
+      <Tag tone={flow.status === "active" ? "ok" : waiting ? "warn" : "neutral"}>{flow.status === "active" ? "启用" : waiting ? "待本人确认风险" : "已关闭"}</Tag>
       {flow.verdict === "text_only" && <Tag tone={verdict.tone}>{verdict.label}</Tag>}
       <span className="sk-actions">
-        <button type="button" className="secondary-button" onClick={async () => {
+        {waiting ? <button type="button" className="secondary-button" onClick={async () => {
+          if (await send("POST", { action: "consent" })) onChanged({ ...flow, status: "active", consentedAt: new Date().toISOString() }); else setNote("未保存");
+        }}>接受风险并启用</button> : <button type="button" className="secondary-button" onClick={async () => {
           const status = flow.status === "active" ? "off" : "active";
           if (await send("POST", { status })) onChanged({ ...flow, status }); else setNote("未保存");
-        }}>{flow.status === "active" ? "关闭" : "启用"}</button>
+        }}>{flow.status === "active" ? "关闭" : "启用"}</button>}
+        {flow.access.filter((item) => item.login).map((item) => <button key={item.service} type="button" className="secondary-button"
+          onClick={() => act({ action: "login", service: item.service }, `已打开${item.service}的登录窗口：在窗口里登录，登录后关掉窗口`)}>
+          {item.loggedInAt ? `重新登录${item.service}` : `登录${item.service}`}</button>)}
+        {flow.status === "active" && flow.action === "run" && <button type="button" className="secondary-button"
+          onClick={() => act({ action: "run" }, "已交给助手，做好后通知")}>立即运行</button>}
         <button type="button" className="secondary-button" aria-pressed={flow.pinned} onClick={async () => {
           if (await send("POST", { pinned: !flow.pinned })) onChanged({ ...flow, pinned: !flow.pinned }); else setNote("未保存");
         }}>{flow.pinned ? "已保留" : "保留"}</button>
@@ -140,6 +155,9 @@ function GrownFlow({ flow, onChanged }: { flow: GrownSkillView; onChanged: (flow
     <dl className="sk-facts">
       <dt>时间</dt><dd>{flow.schedule}{flow.action === "remind" ? "，到点提醒" : flow.schedule === "按需" ? "，同类任务出现时使用" : "，到点由助手执行"}</dd>
       <dt>来由</dt><dd>{flow.origin} · {day(flow.createdAt)}</dd>
+      {flow.access.length > 0 && <><dt>读取</dt><dd>{flow.access.map((item) => <span key={item.service} className="gen">
+        {item.service}（{item.login ? item.loggedInAt ? `${day(item.loggedInAt)} 登录` : "需本人登录" : "公开页面"}）：{item.how}<br /></span>)}</dd>
+        <dt>风险</dt><dd className="gen">{flow.risks.map((risk) => <span key={risk}>{risk}<br /></span>)}{flow.consentedAt ? `本人于 ${day(flow.consentedAt)} 接受` : "本人接受前不会运行"}</dd></>}
       <dt>步骤</dt><dd>{flow.steps.map((step) => step.person ? `${step.title}（本人）` : step.title).join(" → ")}</dd>
       {person.length > 0 && <><dt>本人完成</dt><dd>{person.map((step) => step.title).join("；")}</dd></>}
       <dt>检查</dt><dd>{flow.risk === "high" ? "脚本扫描发现风险，只用文字" : "脚本扫描未发现风险"} · {flow.files} 个文件已记录校验值</dd>

@@ -370,6 +370,11 @@ export async function startCodexSupervisor(options: {
   agentProgress?: (workspaceId: string, taskId: string) => unknown;
   /** Stops a running assistant task (「中止」). */
   cancelAgentTask?: (workspaceId: string, taskId: string) => { ok: boolean };
+  /**
+   * A grown workflow, by hand (docs/skills-library.md §6): `login` opens a browser window of its own for the person to log in to a site
+   * it reads; `run` starts it now. Both answer at once.
+   */
+  workflowAction?: (workspaceId: string, id: string, action: "login" | "run", service: string) => { ok: boolean; [key: string]: unknown };
   /** Writes plan blocks to the person's Crossline calendar. Only blocks; never touches any other calendar or event. */
   publishCalendar?: (workspaceId: string, blocks: Array<{ id: string; title: string; start: string; end: string; note?: string; reminderMinutes?: number | null;
     recurrence?: { daysOfWeek: string[]; startDate: string; endDate: string; localStart: string; localEnd: string; timeZone: string } }>,
@@ -890,6 +895,20 @@ export async function startCodexSupervisor(options: {
         }
         const result = options.cancelAgentTask(callerWorkspaceId, agentTaskRoute[1]!);
         sendJson(response, result.ok ? 200 : 409, result);
+        return;
+      }
+      const workflowRoute = /^\/v1\/workflows\/([a-zA-Z0-9_-]{1,128})\/(login|run)$/.exec(pathname);
+      if (workflowRoute && request.method === "POST" && options.workflowAction) {
+        if (request.headers.origin || !request.headers["content-type"]?.startsWith("application/json")) {
+          sendJson(response, 403, { blocker: { code: "AGENT_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
+          return;
+        }
+        if (workflowRoute[2] === "run") { const rt = await modelClient(response, callerWorkspaceId); if (!rt) return; }
+        const body = await readJsonBody(request);
+        const result = options.workflowAction(callerWorkspaceId, workflowRoute[1]!, workflowRoute[2] as "login" | "run",
+          typeof body?.service === "string" ? body.service.slice(0, 40) : "");
+        // Refusals are answers ({ok:false, code, message}), so the page can say why.
+        sendJson(response, 200, result);
         return;
       }
       if (request.method === "POST" && pathname === "/v1/agent/dispatch" && options.dispatchAgentTask) {
