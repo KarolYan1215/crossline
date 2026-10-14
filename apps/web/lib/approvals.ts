@@ -2,6 +2,7 @@ import "server-only";
 import { AUTO_APPROVAL_UNDO_MS, requiredApproval, type AccessContext } from "@crossline/core";
 import { approveWorkOrderProposal, ensureSeeded, getStore, saveMilestoneEdit } from "./crossline";
 import { requestCodexSupervisor } from "./codex-runtime";
+import { requestTaskPass } from "./steps";
 
 export type BatchResult = { approved: string[]; skipped: Array<{ id: string; code: string }> };
 
@@ -17,6 +18,8 @@ export function approveWorkOrderProposals(ctx: AccessContext, ids: string[]): Ba
     const outcome = approveWorkOrderProposal(ctx, id);
     if (outcome.ok) result.approved.push(id); else result.skipped.push({ id, code: outcome.code });
   }
+  // What was just approved is split into steps now, not at the worker's next tick.
+  if (result.approved.length) requestTaskPass(ctx);
   return result;
 }
 

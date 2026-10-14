@@ -38,7 +38,7 @@ export async function POST(request: Request) {
   if (aggregateEntries.some(([key, value]) => !numericAggregateKeys.has(key) || typeof value !== "number" || !Number.isFinite(value))) {
     return NextResponse.json({ ok: false, code: "AGGREGATE_FEATURES_ONLY" }, { status: 400 });
   }
-  if (!["general", "before_task", "after_task", "after_rest"].includes(String(context)) ||
+  if (!["general", "before_task", "after_task", "after_rest", "correction"].includes(String(context)) ||
     (context === "before_task" || context === "after_task") !== (typeof workOrderId === "string") ||
     (actualLoad !== undefined && (context !== "after_task" || !["low", "medium", "high"].includes(String(actualLoad))))) {
     return NextResponse.json({ ok: false, code: "ENERGY_CONTEXT_INVALID" }, { status: 400 });

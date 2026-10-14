@@ -116,7 +116,9 @@ export type StepPlanInput = {
   archetypeId: string; quantity: { basis: string; amount: number; unit: string }; rationale: string;
   steps: Array<{ id: string; role: string; title: string; deliverable: string; doneCriterion: string; share: number;
     estimate: { p25Minutes: number; p50Minutes: number; p85Minutes: number }; dependsOn: string[]; notBefore: string; dueBy: string;
-    schedulable: boolean; executor: "human" | "agent" | "mixed"; tickOutcome: string; covers?: string[]; why?: string }>;
+    schedulable: boolean; executor: "human" | "agent" | "mixed"; tickOutcome: string; covers?: string[]; why?: string;
+    /** A concrete first move of at most five minutes for a person's step ("" for the assistant's steps and waits). */
+    firstAction?: string }>;
   /** The content units read from the person's material, and what only the person can answer (packages/core/src/steps.ts). */
   units?: Array<{ id: string; title: string; docId: string; quote: string }>;
   questions?: Array<{ id: string; text: string; why: string; options: string[] }>;
@@ -2207,7 +2209,7 @@ export class CrosslineStore {
         insert.run(workspaceId, workOrderId, rename.get(step.id)!, offset + index, step.role, step.title, step.deliverable, step.doneCriterion,
           step.share, step.estimate.p25Minutes, step.estimate.p50Minutes, step.estimate.p85Minutes,
           JSON.stringify(step.dependsOn.map((dep) => rename.get(dep) ?? dep)), step.notBefore, step.dueBy, step.schedulable ? 1 : 0,
-          step.executor, step.tickOutcome, now, JSON.stringify({ covers: step.covers ?? [], why: step.why ?? "" }));
+          step.executor, step.tickOutcome, now, JSON.stringify({ covers: step.covers ?? [], why: step.why ?? "", ...(step.firstAction ? { firstAction: step.firstAction } : {}) }));
       });
       this.appendEvent({ ownerId, workspaceId, idempotencyKey: `task.steps_planned:${workOrderId}:${version}`, type: "task.steps_planned",
         entityId: workOrderId, payload: { version, archetypeId: plan.archetypeId, steps: plan.steps.length, kept: kept.length, reason } });
@@ -2234,7 +2236,7 @@ export class CrosslineStore {
         dependsOn: JSON.parse(String(row.depends_on_json)) as string[], notBefore: String(row.not_before), dueBy: String(row.due_by),
         schedulable: Number(row.schedulable) === 1, executor: row.executor as StoredTaskStep["executor"], tickOutcome: String(row.tick_outcome),
         status: row.status as StoredTaskStep["status"], progressQuarter: Number(row.progress_quarter), updatedAt: String(row.updated_at),
-        ...(JSON.parse(String(row.detail_json ?? "{}")) as { covers?: string[]; why?: string }) });
+        ...(JSON.parse(String(row.detail_json ?? "{}")) as { covers?: string[]; why?: string; firstAction?: string }) });
       byOrder.set(String(row.work_order_id), list);
     }
     return plans.map((row) => ({ workOrderId: String(row.work_order_id), version: Number(row.version), archetypeId: String(row.archetype_id),

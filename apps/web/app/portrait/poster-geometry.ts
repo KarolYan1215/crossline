@@ -1,4 +1,4 @@
-import { ENERGY_CATEGORIES, SCHWARTZ_VALUES, TYPE_AXES, TYPE_GROUPS, TYPE_TABLE, type PortraitReport } from "@crossline/core";
+import { CHRONOTYPE_LABEL, ENERGY_CATEGORIES, SCHWARTZ_VALUES, TYPE_AXES, TYPE_GROUPS, TYPE_TABLE, type EnergyRhythm, type PortraitReport } from "@crossline/core";
 
 /**
  * The poster's layout as pure functions (decided 2026-10-12, after the real report's render: percentages over captions, labels on top of
@@ -76,8 +76,29 @@ export function radarValues(values: NonNullable<PortraitReport["compass"]["value
   return ordered.every(Boolean) ? ordered as NonNullable<PortraitReport["compass"]["values"]> : null;
 }
 
+/** 9.5 → "9:30"; hours past midnight wrap. */
+export const hourClock = (hours: number) => { const m = ((Math.round(hours * 60) % 1440) + 1440) % 1440; return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}`; };
+
+/**
+ * The 「精力节律」 page's four readings under the curve, each with what it rests on; a reading the record cannot give yet says what it
+ * needs instead of a number. Social jetlag keeps its sign: positive is later on free days.
+ */
+export function rhythmStats(rhythm: EnergyRhythm): Array<{ title: string; value: string; detail: string }> {
+  const chrono = rhythm.chronotype;
+  const sjl = chrono ? Math.round(chrono.sjlRel * 10) / 10 : null;
+  return [
+    { title: "最佳时段", value: `${hourClock(rhythm.peak.start)}–${hourClock(rhythm.peak.end)}`, detail: "模型曲线最高的连续 3 小时" },
+    chrono?.chronotype ? { title: "早晚型", value: CHRONOTYPE_LABEL[chrono.chronotype], detail: `休息日校正睡眠中点 ${hourClock(chrono.msfSc!)}` }
+      : { title: "早晚型", value: "待定", detail: "需要工作日与休息日各两晚睡眠记录" },
+    sjl === null ? { title: "社会时差", value: "待定", detail: "需要工作日与休息日各两晚睡眠记录" }
+      : { title: "社会时差", value: `${sjl > 0 ? "+" : ""}${sjl.toFixed(1)} 小时`, detail: sjl === 0 ? "休息日与工作日睡眠中点相同" : `休息日睡眠中点比工作日${sjl > 0 ? "晚" : "早"}` },
+    rhythm.debt.nights >= 3 ? { title: "睡眠债", value: rhythm.debt.perNight > 0 ? `每晚少 ${rhythm.debt.perNight.toFixed(1)} 小时` : "无", detail: `近两周 ${rhythm.debt.nights} 晚加权，最近一晚占 15%` }
+      : { title: "睡眠债", value: "待定", detail: "需要至少 3 晚睡眠记录" }
+  ];
+}
+
 /** Section titles of the report, shared half first. Hard-coded, so they may be set in the poster's serif. */
-export const POSTER_SECTION_TITLES = ["价值与能量", "主线飞轮", "言行对照", "真问题", "指南针、能量与主线", "言行落差与锚", "现况洞察与可行建议", "Crossline 下一步"] as const;
+export const POSTER_SECTION_TITLES = ["精力节律", "价值与能量", "主线飞轮", "言行对照", "真问题", "指南针、能量与主线", "言行落差与锚", "现况洞察与可行建议", "Crossline 下一步"] as const;
 export const POSTER_LABEL_TITLES = ["核心词", "价值核心", "建议底座", "身份"] as const;
 
 /**

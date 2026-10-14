@@ -29,6 +29,12 @@ export type PlannedStep = {
   covers: string[];
   /** Why this step, for this person: the fact or material it rests on (their level, the weight of the part, the exam format). */
   why: string;
+  /**
+   * The concrete first move of a person's step, five minutes at most (「打开讲义第 3 章，读第一页」): what makes a step easy to begin
+   * (docs/energy-and-ecosystem.md §6). "" for the assistant's steps and waits. Optional in the type for plans stored before it; the
+   * schema requires it. Not `opener`: that names the day's first message.
+   */
+  firstAction?: string;
 };
 /**
  * One unit of the task's actual content, read from the person's material — a lecture, a chapter, a problem set, a section of a brief —
@@ -61,6 +67,9 @@ const str = { type: "string" };
 const num = { type: "number" };
 const object = (properties: Record<string, unknown>) => ({ type: "object", properties, required: Object.keys(properties), additionalProperties: false });
 
+/** A first move is one short line: anything longer is a step of its own. */
+export const FIRST_ACTION_MAX = 80;
+
 /** The step plan schema; `extraIds` adds the archetypes learned for this workspace to the ones the answer may name. */
 export const stepPlanSchema = (extraIds: readonly string[] = []) => object({
   archetypeId: { type: "string", enum: [...ARCHETYPE_IDS, ...extraIds] },
@@ -73,7 +82,8 @@ export const stepPlanSchema = (extraIds: readonly string[] = []) => object({
     id: str, role: { type: "string", enum: Object.keys(STEP_ROLES) }, title: str, deliverable: str, doneCriterion: str, share: num,
     estimate: object({ p25Minutes: num, p50Minutes: num, p85Minutes: num }),
     dependsOn: { type: "array", items: str }, notBefore: str, dueBy: str, schedulable: { type: "boolean" },
-    executor: { type: "string", enum: ["human", "agent", "mixed"] }, tickOutcome: str, covers: { type: "array", items: str }, why: str
+    executor: { type: "string", enum: ["human", "agent", "mixed"] }, tickOutcome: str, covers: { type: "array", items: str }, why: str,
+    firstAction: str
   }) }
 });
 export const STEP_PLAN_SCHEMA = stepPlanSchema();
@@ -169,7 +179,8 @@ export function normalizeStepPlan(plan: StepPlan): { plan: StepPlan; warnings: S
       schedulable: step.role === "wait" ? false : step.schedulable !== false,
       executor: (["human", "agent", "mixed"] as const).includes(step.executor) ? step.executor : "human",
       tickOutcome: (step.tickOutcome ?? "").trim().slice(0, 120), dependsOn: step.dependsOn ?? [],
-      covers: Array.isArray(step.covers) ? step.covers.filter((id) => typeof id === "string") : [], why: (step.why ?? "").trim().slice(0, 300) };
+      covers: Array.isArray(step.covers) ? step.covers.filter((id) => typeof id === "string") : [], why: (step.why ?? "").trim().slice(0, 300),
+      firstAction: (step.firstAction ?? "").trim().slice(0, FIRST_ACTION_MAX) };
   });
   // Preparation is the assistant's: a person's step that only gathers or files material moves to it, and the assistant's steps never
   // take time on the person's calendar.
@@ -179,6 +190,8 @@ export function normalizeStepPlan(plan: StepPlan): { plan: StepPlan; warnings: S
       warnings.push({ code: "STEP_TRIVIAL_TO_AGENT", detail: `「${step.title}」是准备工作，改由助手完成` });
     }
     if (step.executor === "agent") step.schedulable = false;
+    // A first move is the person's: the assistant's steps and waits have none.
+    if (step.executor === "agent" || step.role === "wait") step.firstAction = "";
   }
   // Dependencies: known ids only, then any edge that closes a cycle is dropped (the latest-listed edge first).
   for (const step of steps) {

@@ -1,6 +1,6 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { CrosslineStore } from "@crossline/db";
-import { createStepPlanner, createWarningReviewer, tasksAwaitingStepPlan, warningsAwaitingReview } from "./step-planner";
+import { createStepPlanner, createWarningReviewer, requestFinerSplits, tasksAwaitingStepPlan, warningsAwaitingReview } from "./step-planner";
 import { materializeDatePairs } from "./date-pairs";
 import { taskFromWorkOrder } from "./agent-dispatch";
 import { scriptedRuntime } from "./testing/fake-runtime";
@@ -199,4 +199,62 @@ test("questions of plans made before importance was judged are filtered by rule:
   // The planner's own judgement is kept with the plan.
   expect(store.getStepPlan(workspaceId, "new")!.importance).toEqual({ longTerm: true, why: "毕业要求" });
   store.close();
+});
+
+test("the task changed last is planned first, ahead of an older backlog", () => {
+  const store = new CrosslineStore(":memory:");
+  const order = (id: string) => ({ id, ownerId, workspaceId, identityId: "research", projectId: "ece555", milestoneId: "m", intent: `作业 ${id}`,
+    state: "approved", riskTier: "routine" as const, estimate: { p25Minutes: 30, p50Minutes: 60, p85Minutes: 90, source: "llm_prior" as const, observationCount: 0, confidence: "low" as const },
+    payload: { family: "deep_work" } });
+  vi.useFakeTimers();
+  try {
+    vi.setSystemTime(new Date("2026-10-01T12:00:00Z"));
+    seed(store);
+    for (const id of ["zold1", "zold2", "zold3"]) store.saveWorkOrder(order(id));
+    vi.setSystemTime(new Date("2026-10-02T12:00:00Z"));
+    store.saveWorkOrder(order("fresh"));
+    expect(tasksAwaitingStepPlan(store, workspaceId)[0]).toBe("fresh");
+  } finally { vi.useRealTimers(); }
+});
+
+test("a step not got through on two days is planned again smaller, once: 未执行 one day, a block nobody started the next", () => {
+  const store = new CrosslineStore(":memory:");
+  vi.useFakeTimers();
+  try {
+    vi.setSystemTime(new Date("2026-10-11T12:00:00Z"));
+    seed(store);
+    store.saveStepPlan(workspaceId, "wo", { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 4, unit: "题" }, rationale: "",
+      steps: [step("a", "solve", { title: "推导第 1–2 题" }), step("b", "submit", { dependsOn: ["a"] })] }, ownerId, "planned");
+    expect(tasksAwaitingStepPlan(store, workspaceId)).toEqual([]);
+    vi.setSystemTime(new Date("2026-10-14T15:00:00Z"));
+    store.appendEvent({ ownerId, workspaceId, idempotencyKey: "c1", type: "block.confirmed", entityId: "m1",
+      payload: { blockId: "scheduled:wo:v1s1", workOrderId: "wo", stepId: "v1s1", day: "2026-10-12", outcome: "not_done" } });
+    // One day alone is not enough.
+    expect(requestFinerSplits(store, workspaceId)).toEqual([]);
+    store.setSetting(workspaceId, "nudge.blocks:2026-10-13", JSON.stringify({ "scheduled:wo:v1s1": { id: "scheduled:wo:v1s1", orderId: "wo", stepId: "v1s1", began: true } }));
+    expect(requestFinerSplits(store, workspaceId)).toEqual([{ orderId: "wo", stepId: "v1s1", version: 1, days: ["2026-10-12", "2026-10-13"] }]);
+    const request = store.listEvents(workspaceId, { type: "task.steps_replan_requested" }).at(-1)!;
+    expect((request.payload as { feedback: string }).feedback).toBe("「推导第 1–2 题」2 天没做成：拆细，首步 ≤15 分钟");
+    expect(tasksAwaitingStepPlan(store, workspaceId)).toEqual(["wo"]);
+    // Asked once: not again this week.
+    expect(requestFinerSplits(store, workspaceId)).toEqual([]);
+  } finally { vi.useRealTimers(); store.close(); }
+});
+
+test("a block the person started that day is not a trouble, and nor is a block not yet over", () => {
+  const store = new CrosslineStore(":memory:");
+  vi.useFakeTimers();
+  try {
+    vi.setSystemTime(new Date("2026-10-11T12:00:00Z"));
+    seed(store);
+    store.saveStepPlan(workspaceId, "wo", { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 4, unit: "题" }, rationale: "",
+      steps: [step("a", "solve"), step("b", "submit", { dependsOn: ["a"] })] }, ownerId, "planned");
+    vi.setSystemTime(new Date("2026-10-14T15:00:00Z"));
+    const seen = JSON.stringify({ "scheduled:wo:v1s1": { id: "scheduled:wo:v1s1", orderId: "wo", stepId: "v1s1", began: true } });
+    store.setSetting(workspaceId, "nudge.blocks:2026-10-12", seen);
+    store.setSetting(workspaceId, "nudge.blocks:2026-10-13", seen);
+    store.setSetting(workspaceId, "nudge.blocks:2026-10-14", seen);
+    store.recordConfirmedSession(workspaceId, "wo", ownerId, { startedAt: "2026-10-13T16:00:00.000Z", endedAt: "2026-10-13T17:00:00.000Z", minutes: 60, source: "one_tap", key: "s1" });
+    expect(requestFinerSplits(store, workspaceId)).toEqual([]);
+  } finally { vi.useRealTimers(); store.close(); }
 });

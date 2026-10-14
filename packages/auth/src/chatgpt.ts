@@ -73,8 +73,11 @@ export function chatgptSignIn(options: { installFile: string; fetch?: typeof fet
         const verifier = b64url(randomBytes(32)), state = b64url(randomBytes(16)), nonce = b64url(randomBytes(16));
         await ctx.setSignedCookie(COOKIE, JSON.stringify({ verifier, state, nonce }), ctx.context.secret,
           { httpOnly: true, sameSite: "lax", path: "/", maxAge: 600 });
+        // OpenAI's sign-in page: `ext_agent_host_id` on every request (same value per host), `agent_name_hint` on registration only and
+        // equal to the app-server `initialize` clientInfo.name (`crossline`, packages/codex) so plan usage is attributed to the same app.
         const query = new URLSearchParams({
-          client_id: install.clientId ?? "dynamic_agent_client", ...(install.clientId ? {} : { agent_name_hint: "Crossline", ext_agent_host_id: install.hostId }),
+          client_id: install.clientId ?? "dynamic_agent_client", ext_agent_host_id: install.hostId,
+          ...(install.clientId ? {} : { agent_name_hint: "crossline" }),
           response_type: "code", redirect_uri: redirectUri, scope: "openid profile email", state, nonce,
           code_challenge_method: "S256", code_challenge: b64url(createHash("sha256").update(verifier).digest())
         });
@@ -103,7 +106,8 @@ export function chatgptSignIn(options: { installFile: string; fetch?: typeof fet
         if (typeof claims.email !== "string" || !claims.email) throw fail("CHATGPT_EMAIL_MISSING");
         const result = await handleOAuthUserInfo(ctx, {
           userInfo: { id: claims.sub as string, email: claims.email, name: typeof claims.name === "string" ? claims.name : "",
-            emailVerified: claims.email_verified !== false, image: typeof claims.picture === "string" ? claims.picture : null },
+            // Only OpenAI's own `email_verified: true` counts: it is what lets this sign-in join an existing account with the same email.
+            emailVerified: claims.email_verified === true, image: typeof claims.picture === "string" ? claims.picture : null },
           account: { providerId: "chatgpt", accountId: claims.sub as string }, callbackURL: "/",
           source: { method: "oauth", oauth: { providerId: "chatgpt", profile: claims } }
         });

@@ -1,4 +1,4 @@
-import { CHARACTER_EXPRESSIONS, CHARACTER_POSES } from "./portrait-type";
+import { CHARACTER_EXPRESSIONS, CHARACTER_POSES } from "./portrait-character";
 
 /**
  * Fixed dimensions (decided 2026-10-12) so two people's portraits can be compared: Schwartz's ten basic values in their circular order

@@ -8,6 +8,7 @@
  * mention but the schema leaves out (as `event`/`profile` once were in the input router) cannot happen again.
  */
 import type { TaskOpType } from "./assistant-schema";
+import { SHIFT_MINUTES } from "./schedule-frozen";
 
 export type ActionRisk = "internal" | "commitment";
 
@@ -34,6 +35,8 @@ export const ACTIONS = {
   "ask.snooze": { label: "稍后再问", risk: "internal", args: { askId: str(200), until: enumOf(["tomorrow", "week"]) } },
   "undo": { label: "撤销", risk: "internal", args: { opId: str(64) } },
   "energy.report": { label: "记录精力", risk: "internal", args: { level: enumOf(["low", "medium", "high"]), note: str(300) } },
+  /** 「后面都推 10 分钟」: today's plan from now on starts later; what the person started or locked stays. */
+  "schedule.shift": { label: "整体顺延", risk: "internal", args: { minutes: { type: "number" } } },
   "event.create": { label: "加入日程", risk: "internal", args: {
     title: str(120), date: day, weekdays: { type: "array", maxItems: 7, items: { type: "integer", minimum: 0, maximum: 6 } },
     startTime: str(5), endTime: str(5), until: day, minutes: { type: "number" }, lineId: str(64), location: str(300) } },
@@ -72,6 +75,7 @@ type ArgsOf = {
   "undo": { opId: string };
   "energy.report": { level: "low" | "medium" | "high"; note: string };
   "event.create": { title: string; date: string; weekdays: number[]; startTime: string; endTime: string; until: string; minutes: number; lineId: string; location: string };
+  "schedule.shift": { minutes: number };
   "goal.add": { lineId: string; title: string };
   "milestone.draft": { lineId: string; title: string; date: string; target: string };
   "line.add": { label: string };
@@ -172,6 +176,8 @@ export function actionProblem(item: ProposedAction, refs: ConciergeRefs): string
     case "ask.snooze": return refs.asks.has(item.args.askId) ? "" : `待决事项 id「${item.args.askId}」不存在`;
     case "undo": return refs.ops.has(item.args.opId) ? "" : `操作 id「${item.args.opId}」不在最近 24 小时的可撤销操作里`;
     case "energy.report": return "";
+    case "schedule.shift": return Number.isInteger(item.args.minutes) && item.args.minutes >= SHIFT_MINUTES.min && item.args.minutes <= SHIFT_MINUTES.max
+      ? "" : `顺延分钟数须为 ${SHIFT_MINUTES.min}–${SHIFT_MINUTES.max} 的整数`;
     case "event.create": {
       const args = item.args;
       if (!args.title.trim()) return "日程缺少标题";

@@ -6,7 +6,7 @@ import {
   availableSlots, isCancelledEvent, planNudges, taskTitleOf,
   type AccessContext, type NotifyLevelName, type NudgeBlock, type NudgeEnding, type NudgeButton, type NudgeKind, type NudgeSlack, type PlannedNudge, type ProposedAction
 } from "@crossline/core";
-import { commitSoon, effectiveSchedulePreferences, getStore, loadCurrentPlan, planToday, readAvailability } from "./crossline";
+import { commitSoon, effectiveSchedulePreferences, energyAnswerMatters, getStore, loadCurrentPlan, planToday, readAvailability } from "./crossline";
 import { openAsks, thisWeek } from "./asks";
 import { energyModel } from "./energy";
 import { systemContext } from "./auto-publish";
@@ -27,7 +27,9 @@ const minutesOf = (clock: string) => { const [h, m] = clock.split(":").map(Numbe
 
 export type NudgePayload = { kind: NudgeKind | "opener"; fingerprint: string; covers?: string[]; counted: boolean; urgent: boolean; delivery: "page" | "pending" | "pushed";
   /** `block_confirm`: the block as it stood when asked; the confirm page writes against these times. */
-  block?: NudgeEnding };
+  block?: NudgeEnding;
+  /** `timer_overrun`: the step that ran over, read by the worker's adaptive granularity. */
+  step?: { orderId: string; stepId: string } };
 
 /** Runs the engine for every workspace (the web's timer). A workspace that fails is skipped until the next interval. */
 export async function nudgePass(now = new Date()): Promise<number> {
@@ -79,15 +81,17 @@ export async function nudgesFor(ctx: AccessContext, now = new Date()): Promise<P
     if (!order || !due || due < today || due > addDays(today, 7)) return [];
     const stepId = /^v\d+s\d+$/.test(block.id.split(":")[2] ?? "") ? block.id.split(":")[2]! : "";
     const prepared = readyFiles.get(order.id);
+    const firstAction = stepId ? store.getStepPlan(ctx.workspaceId, order.id)?.steps.find((step) => step.id === stepId)?.firstAction : undefined;
     return [{ id: block.id, orderId: order.id, stepId, title: taskTitleOf(order), step: block.step ?? "", start: block.start, end: block.end, dueDay: due,
-      ...(prepared?.length ? { prepared } : {}) }];
+      ...(prepared?.length ? { prepared } : {}), ...(firstAction ? { firstAction } : {}) }];
   });
   // Every work block of today, deadline or not, for the completion check.
   const ending = rememberBlocks(ctx, today, clock, todays.filter((block) => block.id.startsWith("scheduled:")).flatMap((block) => {
     const order = byId.get(block.id.split(":")[1]!);
     if (!order) return [];
     const stepId = /^v\d+s\d+$/.test(block.id.split(":")[2] ?? "") ? block.id.split(":")[2]! : "";
-    return [{ id: block.id, orderId: order.id, stepId, title: taskTitleOf(order), step: block.step ?? "", day: today, start: block.start, end: block.end, endedTimerAt: "" }];
+    return [{ id: block.id, orderId: order.id, stepId, title: taskTitleOf(order), step: block.step ?? "", day: today, start: block.start, end: block.end, endedTimerAt: "",
+      ...(block.energy ? { energy: block.energy } : {}) }];
   })).map((block) => ({ ...block, endedTimerAt: lastStopped.get(block.orderId)?.slice(11, 16) ?? "" }));
 
   // Time left before each due day: the person's free hours (fixed arrangements out, today from now on) less what other work holds.
@@ -113,13 +117,14 @@ export async function nudgesFor(ctx: AccessContext, now = new Date()): Promise<P
   const meeting = todays.some((block) => block.id.startsWith("graph_calendar:") && !isCancelledEvent(block.title)
     && minutesOf(block.start) <= nowMinute && nowMinute < minutesOf(block.end));
   const answeredAt = store.getSetting(ctx.workspaceId, ANSWERED_SETTING);
-  // The energy question: the next three hours hold work, the model is unsure about now, and the last word on it is over three hours old.
+  // The energy question: the next three hours hold work, the model is unsure about now, the last word on it is over three hours old,
+  // and the answer would change what happens in those three hours (「低」 and 「高」 give different plans; checked last, it plans twice).
   const model = energyModel(ctx, windows);
   const nextWork = todays.filter((block) => block.id.startsWith("scheduled:") && minutesOf(block.start) > nowMinute && minutesOf(block.start) <= nowMinute + 180)
     .sort((a, b) => a.start.localeCompare(b.start))[0];
   const stale = !model.lastReportAt || now.getTime() - Date.parse(model.lastReportAt) > 3 * 3_600_000;
   const prediction = model.predict(now.toISOString());
-  const energyCheck = nextWork && stale && prediction.confidence === "low"
+  const energyCheck = nextWork && stale && prediction.confidence === "low" && !muted.has("energy_check") && await energyAnswerMatters(ctx)
     ? { nextBlock: `${nextWork.start}「${nextWork.task ?? nextWork.title}」`, why: "回答后，今天剩下和之后的时段会按精力重新安排。" } : undefined;
   const planned = planNudges({
     now: now.toISOString(), today, clock, tomorrow: addDays(today, 1), level, muted,
@@ -133,7 +138,7 @@ export async function nudgesFor(ctx: AccessContext, now = new Date()): Promise<P
       startedAt: running.startedAt, usualMinutes: currentStep?.estimate.p50Minutes ?? timerOrder.estimate.p50Minutes } } : {})
   });
   for (const nudge of planned) say(ctx, nudge.text, nudge.buttons, { kind: nudge.kind, fingerprint: nudge.fingerprint, counted: nudge.counted, urgent: nudge.urgent,
-    ...(nudge.covers ? { covers: nudge.covers } : {}), ...(nudge.block ? { block: nudge.block } : {}) }, now);
+    ...(nudge.covers ? { covers: nudge.covers } : {}), ...(nudge.block ? { block: nudge.block } : {}), ...(nudge.step ? { step: nudge.step } : {}) }, now);
   return planned;
 }
 

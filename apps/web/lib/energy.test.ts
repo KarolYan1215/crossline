@@ -5,6 +5,7 @@ vi.mock("./codex-runtime", () => ({ requestCodexSupervisor: vi.fn(async () => ({
 import { DEFAULT_AVAILABILITY } from "@crossline/core";
 import { HEALTH_SLEEP_SETTING, energyModel, issueHealthToken, slotEnergy, storeHealthSummary, workspaceForHealthToken } from "./energy";
 import { nudgesFor } from "./nudges";
+import { ENERGY_VOI_SETTING } from "./crossline";
 import { loadConversation } from "./conversation";
 import { TEST_CTX } from "./test-support";
 import { POST as healthPost } from "../app/api/health/sleep/route";
@@ -45,13 +46,20 @@ test("a slot takes the model's level only when it is at least moderately sure; w
   expect(slotEnergy(model, "2026-10-10T15:00:00Z", "medium")).toBe("medium");
 });
 
-test("the energy question is asked when work starts within three hours, the model is unsure and no report is fresh — and not twice", async () => {
+test("the energy question is asked when work starts within three hours, the model is unsure, no report is fresh and the answer would change the next three hours — and not twice", async () => {
   vi.stubEnv("CROSSLINE_FIXED_NOW", "2026-10-12T13:30:00.000Z"); // Monday 08:30 in Chicago
   const store = setup();
-  store.saveWorkOrder({ id: "hw2", ownerId: TEST_CTX.principalId, workspaceId: ws, identityId: "research", projectId: "p", milestoneId: "", intent: "完成 ECE 555 作业 2",
-    state: "approved", riskTier: "routine", estimate: { p25Minutes: 30, p50Minutes: 45, p85Minutes: 60, source: "llm_prior", observationCount: 0, confidence: "low" },
-    payload: { dueDate: "2026-10-14" } });
+  const order = (id: string, intent: string, energy: "low" | "high", dueDate?: string) => store.saveWorkOrder({ id, ownerId: TEST_CTX.principalId, workspaceId: ws,
+    identityId: "research", projectId: "p", milestoneId: "", intent, state: "approved", riskTier: "routine",
+    estimate: { p25Minutes: 30, p50Minutes: 45, p85Minutes: 60, source: "llm_prior", observationCount: 0, confidence: "low" },
+    payload: { ...(dueDate ? { dueDate } : {}), humanCore: [{ energy }] } });
+  // Light work alone: any hour suits it, 「低」 and 「高」 give the same next three hours, so the question would change nothing and is not asked.
+  order("tidy", "整理文献笔记", "low", "2026-10-13");
   const now = new Date("2026-10-12T13:30:00.000Z");
+  expect((await nudgesFor(TEST_CTX, now)).map((item) => item.kind)).not.toContain("energy_check");
+  expect(JSON.parse(store.getSetting(ws, ENERGY_VOI_SETTING)!)).toMatchObject({ differs: false });
+  // A homework that needs a high hour beside it: now the answer decides which of the two the morning goes to.
+  order("hw2", "完成 ECE 555 作业 2", "high", "2026-10-14");
   const said = await nudgesFor(TEST_CTX, now);
   expect(said.map((item) => item.kind)).toContain("energy_check");
   const card = loadConversation(TEST_CTX, "2026-10-12").messages.find((message) => message.card?.nudgeKind === "energy_check")!.card!;
@@ -82,4 +90,32 @@ test("with nights known and reports that agree, the model is sure enough for the
   const morning = new Date(Date.parse(gaps[9]!.to) + 3 * 3_600_000).toISOString();
   expect(model.predict(morning)).toMatchObject({ level: "high", confidence: "high" });
   expect(slotEnergy(model, morning, "low")).toBe("high");
+});
+
+test("the phone's bed and wake moments become a night; the day's other readings are kept within range and merged per day", () => {
+  const store = setup();
+  storeHealthSummary(ws, { events: [{ type: "bed", at: "2026-10-10T04:30:00Z" }, { type: "wake", at: "2026-10-10T12:10:00Z" }, { type: "nap", at: "2026-10-10T13:00:00Z" }] });
+  storeHealthSummary(ws, { day: "2026-10-10", restingHr: 58, wristTempDeltaC: 0.62, steps: -5, daylightMin: 95 });
+  storeHealthSummary(ws, { day: "2026-10-10", hrvMs: 51, source: "android-health" });
+  expect(JSON.parse(store.getSetting(ws, "health.daily")!)).toEqual([{ day: "2026-10-10", restingHr: 58, wristTempDeltaC: 0.62, daylightMin: 95, hrvMs: 51 }]);
+  const model = energyModel(TEST_CTX, DEFAULT_AVAILABILITY);
+  expect(model.episodes).toEqual([{ sleepAt: "2026-10-10T04:30:00.000Z", wakeAt: "2026-10-10T12:10:00.000Z", source: "phone-focus" }]);
+  expect(model.capacity("2026-10-10T15:00:00Z", "2026-10-10").multiplier).toBe(0.9);
+});
+
+test("Siri's capture token writes a line and nothing else; a health token cannot write one, and thirty an hour is the limit", async () => {
+  const store = setup();
+  const { workspace } = store.createPrincipalWithWorkspace("phone-owner", "个人");
+  const ctx = { ...TEST_CTX, workspaceId: workspace.id };
+  const { POST: capturePost } = await import("../app/api/capture/shortcut/route");
+  const { issueDeviceToken } = await import("./energy");
+  const capture = issueDeviceToken(ctx, "capture"), health = issueDeviceToken(ctx, "health");
+  const send = (bearer: string, text = "周五前把报销单交了") => capturePost(new Request("http://127.0.0.1:3210/api/capture/shortcut",
+    { method: "POST", headers: { authorization: `Bearer ${bearer}` }, body: JSON.stringify({ text }) }));
+  expect((await send(health)).status).toBe(401);
+  expect((await send(capture)).status).toBe(200);
+  expect(store.listCaptures(workspace.id).map((item) => item.title)).toEqual(["周五前把报销单交了"]);
+  expect((await send(capture, "x".repeat(241))).status).toBe(400);
+  for (let i = 0; i < 29; i += 1) await send(capture, `第 ${i} 条`);
+  expect((await send(capture)).status).toBe(429);
 });

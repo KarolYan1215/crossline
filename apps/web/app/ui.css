@@ -137,7 +137,13 @@
 .day-stats dt{font-size:12px;color:var(--graphite)}
 .day-stats dd{margin:0;font-size:13px;font-weight:700}
 .day-stats .time-bar{display:block;margin-top:3px}
-.day-energy{display:flex;align-items:center;gap:8px;font-size:13px}
+.energy-capsule{display:grid;gap:2px;justify-items:start;max-width:320px;font-size:13px}
+.energy-capsule-button{display:flex;align-items:baseline;gap:6px;border:1px solid var(--mist);background:var(--paper);color:var(--ink);padding:6px 10px;font:inherit;cursor:pointer}
+.energy-capsule-button:hover{border-color:var(--ink)}
+.energy-capsule-button small{font-size:12px;color:var(--graphite)}
+.energy-capsule-button b{font-size:13px}
+.energy-capsule-basis{font-size:12px;color:var(--graphite)}
+.energy-capsule-correct{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--graphite)}
 .today-grid{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:8px;background:none;border:0}
 .capture-line{display:block}
 .capture-line>*+*{margin-top:6px}
@@ -146,7 +152,7 @@
 @media (max-width:900px){
   .today-grid{grid-template-columns:1fr}
   .day-head{grid-template-columns:auto 1fr}
-  .day-stats,.day-energy{grid-column:1 / -1}
+  .day-stats,.energy-capsule{grid-column:1 / -1}
 }
 
 .pending-list{display:flex;flex-wrap:wrap;gap:8px}

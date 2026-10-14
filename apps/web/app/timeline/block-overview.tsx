@@ -117,6 +117,7 @@ export function BlockOverview({ item, items, today, labels, details, compact = f
     {(step || progress !== undefined) && <div className="dq-step">
       <small>{step ? (step.executor === "human" ? "本步" : "本步 · 系统可做") : "进度"}</small>
       {step && <span className="dq-step-title">{step.title}</span>}
+      {step?.firstAction && step.status === "planned" && <span className="dq-first"><small>第一步</small> <span className="gen">{step.firstAction}</span></span>}
       {progress !== undefined && <span className="dq-progress"><span className="task-progress-bar" aria-hidden="true"><i style={{ width: `${progress}%` }} /></span>
         <b className="mono">{progress}%</b></span>}
     </div>}

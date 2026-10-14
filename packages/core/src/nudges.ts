@@ -28,6 +28,8 @@ export type PlannedNudge = {
   covers?: string[];
   /** `block_confirm`: the block as it was when asked — the confirm page writes against these times, not the re-planned ones. */
   block?: NudgeEnding;
+  /** `timer_overrun`: the step the timer ran over, kept so adaptive granularity can count it (`packages/core/src/granularity.ts`). */
+  step?: { orderId: string; stepId: string };
 };
 
 /** The page a confirm question opens; `{message}` is replaced by the id of the message the question is written into. */
@@ -38,12 +40,16 @@ export type NudgeBlock = {
   id: string; orderId: string; stepId: string; title: string; step: string; start: string; end: string; dueDay: string;
   /** What the assistant has ready for this work (file names), said when the block comes up. */
   prepared?: string[];
+  /** The step's first move, five minutes at most (docs/energy-and-ecosystem.md §6), said so the block is easy to begin. */
+  firstAction?: string;
 };
 /**
  * Any of today's scheduled blocks, for the completion check (docs/loop-and-scout.md §3). `endedTimerAt`: when this order's timer was
  * last stopped today (`HH:mm`), or "" — a block whose timer the person already ended is not asked about.
  */
-export type NudgeEnding = { id: string; orderId: string; stepId: string; title: string; step: string; day: string; start: string; end: string; endedTimerAt: string };
+export type NudgeEnding = { id: string; orderId: string; stepId: string; title: string; step: string; day: string; start: string; end: string; endedTimerAt: string;
+  /** The block's slot and work energy and the factor the plan used, carried to the completion check (absent on older blocks). */
+  energy?: { slot: "low" | "medium" | "high"; need: "low" | "medium" | "high"; efficiency: number } };
 /** How much time is left for one task with a due day: free minutes before it (after other work's blocks) against what remains of it. */
 export type NudgeSlack = { orderId: string; title: string; dueDay: string; remainingMinutes: number; freeMinutes: number; dailyMinutes: number };
 
@@ -88,7 +94,7 @@ export function nudgeCandidates(input: NudgeInput): PlannedNudge[] {
     const label = `「${block.title}${block.step ? ` · ${block.step}` : ""}」`;
     if (now >= start - START_LEAD_MINUTES && now < start && input.timer?.orderId !== block.orderId) {
       out.push({ kind: "block_start", fingerprint: `start:${block.id}:${input.today}`, urgent: true, counted: false,
-        text: `${block.start} 做${label}（${end - start} 分），关系到 ${md(block.dueDay)} 的截止。${block.prepared?.length ? `已备好：${block.prepared.slice(0, 3).join("、")}${block.prepared.length > 3 ? ` 等 ${block.prepared.length} 份` : ""}。` : ""}`,
+        text: `${block.start} 做${label}（${end - start} 分），关系到 ${md(block.dueDay)} 的截止。${block.firstAction ? `第一步：${block.firstAction}。` : ""}${block.prepared?.length ? `已备好：${block.prepared.slice(0, 3).join("、")}${block.prepared.length > 3 ? ` 等 ${block.prepared.length} 份` : ""}。` : ""}`,
         buttons: [{ kind: "action", label: "开始计时", action: op(block.orderId, "start", `开始${label}`) },
           { kind: "action", label: "推到明天", action: op(block.orderId, "defer", `${label}推到明天`, { date: input.tomorrow }) }, mute] });
     }
@@ -121,6 +127,7 @@ export function nudgeCandidates(input: NudgeInput): PlannedNudge[] {
     if (elapsed >= timer.usualMinutes * OVERRUN_RATIO) {
       const what = timer.stepTitle ? `「${timer.stepTitle}」` : `「${timer.title}」`;
       out.push({ kind: "timer_overrun", fingerprint: `overrun:${timer.startedAt}`, urgent: true, counted: true,
+        ...(timer.stepId ? { step: { orderId: timer.orderId, stepId: timer.stepId } } : {}),
         text: `${what}已计时 ${Math.round(elapsed)} 分钟，比通常的 ${timer.usualMinutes} 分钟多一半。`,
         buttons: [...(timer.stepId ? [{ kind: "action" as const, label: "这步做完了", action: op(timer.orderId, "step_done", `${what}完成`, { stepId: timer.stepId }) }] : []),
           { kind: "ack", label: "还差一点" }, { kind: "say", label: "卡住了" }, mute] });

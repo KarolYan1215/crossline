@@ -9,9 +9,9 @@ import { availableSlots, deriveCapacity, requiredApproval, validateAvailability,
   defaultMilestoneTemplates, computeMilestoneConfidence, PRODUCTIVE, type ActivityCategory, validateSuccessCriteria, goalSettingKey, ANALYSIS_CONTEXT_VERSION, calibrationReport, calibratedEstimate,
   type CalibrationReport, presetImportance, taskTitleOf, type ImportancePreset, restoreTargetOf,
   type AccessContext, type AvailabilityWindow, type Estimate, type SuccessCriterion, type ChecklistAnswer, FIXED_EVENTS, fixedEventBlocks, type FixedEvent,
-  FROZEN_SETTING, parseFrozen, withFrozen, withoutFrozen, type FrozenBlock, type RealityChange } from "@crossline/core";
+  DELAY_SETTING, FROZEN_SETTING, SHIFT_MINUTES, parseFrozen, shiftFrozen, withFrozen, withoutFrozen, type FrozenBlock, type RealityChange } from "@crossline/core";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
-import { forecastGoals, normalizeParams, paramsFor, planSchedule, recommendNextActions, scheduleInputHash, type ForecastResult, type PlanResult,
+import { forecastGoals, normalizeParams, paramsFor, planHeadDiffers, planSchedule, recommendNextActions, scheduleInputHash, type ForecastResult, type PlanResult,
   type ScheduleParams, type PlanningInput } from "@crossline/planner";
 import { optimalFor, requestOptimal } from "./optimal-schedule";
 import { seedExampleReadiness } from "./example-readiness";
@@ -35,6 +35,11 @@ export type PersistedScheduleBlock = {
   end: string;
   source: string;
   readOnly: boolean;
+  /**
+   * A scheduled block's energy (docs/energy-and-ecosystem.md §3): the slot's, the work's, and the share of an hour's work the plan
+   * counted on there. The completion check records it, so the factors can be learned (`learnedEfficiency`).
+   */
+  energy?: { slot: "low" | "medium" | "high"; need: "low" | "medium" | "high"; efficiency: number };
 };
 
 /**
@@ -52,7 +57,7 @@ export function planToday(ctx?: AccessContext,
 
 /** The key the weekly availability lives under. One settings row, not a new table. */
 export { AVAILABILITY_SETTING } from "@crossline/core";
-import { STEP_ENERGY_CEILING, type StepRole, AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, BYPRODUCT_LAG_DAYS, RELATION_KIND_LABEL, isCancelledEvent, resolveAvailability, hoursFromText, type AvailabilitySource, type PortraitReport } from "@crossline/core";
+import { STEP_ENERGY_CEILING, learnedEfficiency, type StepRole, AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, BYPRODUCT_LAG_DAYS, RELATION_KIND_LABEL, isCancelledEvent, resolveAvailability, hoursFromText, type AvailabilitySource, type PortraitReport } from "@crossline/core";
 import { statedShares } from "./plan-stats";
 import { identityLines, linePacks } from "./lines";
 const PREFERENCES_SETTING = "schedule.preferences";
@@ -630,6 +635,36 @@ export function commitSoon(ctx: AccessContext, blocks: Array<{ id: string; day?:
   if (added) writeFrozen(ctx, list);
   return added;
 }
+/**
+ * 「后面都推 10 分钟」 (`schedule.shift`, docs/energy-and-ecosystem.md §6): today's committed and kept blocks move later by `minutes`
+ * (`shiftFrozen`; started and locked ones stay), and the time from now until `now + minutes` is busy (`schedule.delayUntil`, read by
+ * `planningInputFor`), so the rest of the day is re-planned to start after it. Both are `schedule.` settings, so the input box's undo
+ * restores them.
+ */
+export function shiftToday(ctx: AccessContext, minutes: number, now = appNow()): { ok: true; message: string } | { ok: false; code: string } {
+  if (!Number.isInteger(minutes) || minutes < SHIFT_MINUTES.min || minutes > SHIFT_MINUTES.max) return { ok: false, code: "SHIFT_MINUTES_INVALID" };
+  const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
+  const today = formatInTimeZone(now, zone, "yyyy-MM-dd");
+  const tomorrow = new Date(Date.parse(`${today}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+  const before = readFrozen(ctx, now);
+  const after = shiftFrozen(before, minutes, now, new Date(toZonedInstant(tomorrow, "00:00", zone)));
+  if (JSON.stringify(after) !== JSON.stringify(before)) writeFrozen(ctx, after);
+  // Two shifts in a row add up: the second starts from the end of the first.
+  const current = Date.parse(getStore().getSetting(ctx.workspaceId, DELAY_SETTING) ?? "") || 0;
+  getStore().setSetting(ctx.workspaceId, DELAY_SETTING, new Date(Math.max(current, now.getTime()) + minutes * 60_000).toISOString());
+  const held = after.filter((item) => (item.reason === "pinned" || item.reason === "locked") && Date.parse(item.end) > now.getTime()
+    && formatInTimeZone(new Date(item.start), zone, "yyyy-MM-dd") === today).length;
+  return { ok: true, message: `今天之后的安排顺延 ${minutes} 分钟${held ? `，已锁定的 ${held} 块不动` : ""}` };
+}
+/** The stretch `schedule.shift` holds from now on, as a busy block of today in the person's clock; undefined once it has passed. */
+function delayBlock(ctx: AccessContext, now: Date, zone: string): { day: string; start: string; end: string } | undefined {
+  const until = Date.parse(getStore().getSetting(ctx.workspaceId, DELAY_SETTING) ?? "");
+  if (!until || until <= now.getTime()) return undefined;
+  const day = formatInTimeZone(now, zone, "yyyy-MM-dd");
+  const end = formatInTimeZone(new Date(until), zone, "yyyy-MM-dd") === day ? formatInTimeZone(new Date(until), zone, "HH:mm") : "23:59";
+  const start = formatInTimeZone(now, zone, "HH:mm");
+  return end > start ? { day, start, end } : undefined;
+}
 export function clearKept(ctx: AccessContext, now = appNow()): void {
   writeFrozen(ctx, readFrozen(ctx, now).filter((item) => item.reason !== "keep"));
 }
@@ -688,7 +723,9 @@ export function plannerIdOfBlock(blockId: string): string {
  */
 export type PreviewOverrides = { estimates?: Record<string, number>; dueDates?: Record<string, string>; notBefore?: Record<string, string>;
   /** The plan page's own controls: a repainted week, other packing numbers, a moved importance slider (by milestone id). */
-  availability?: AvailabilityWindow[]; params?: ScheduleParams; weights?: Record<string, number>; lineShares?: Record<string, number> };
+  availability?: AvailabilityWindow[]; params?: ScheduleParams; weights?: Record<string, number>; lineShares?: Record<string, number>;
+  /** The energy of the slot the person is in, as if they had just said it (the energy question's value-of-information gate). */
+  currentEnergy?: "low" | "medium" | "high" };
 const previewScope = new AsyncLocalStorage<PreviewOverrides>();
 export const withPreview = <T>(overrides: PreviewOverrides, run: () => T): T => previewScope.run(overrides, run);
 /** Inside an impact preview nothing is written, a change summary included. */
@@ -740,27 +777,46 @@ function plannerItemsFor(ctx: AccessContext, orders: ActionableOrder[]) {
 }
 
 /**
+ * The person's own yield in slots short of the work's energy, from the blocks they confirmed (`block.confirmed` carries the block's
+ * energy since 2026-10-14), or undefined while the assumed 0.8 and 0.65 predict as well.
+ */
+function personalEfficiency(ctx: AccessContext): [number, number] | undefined {
+  type Confirmed = { outcome?: string; minutes?: number; blockMinutes?: number;
+    energy?: { slot: "low" | "medium" | "high"; need: "low" | "medium" | "high"; efficiency: number } };
+  return learnedEfficiency(getStore().listEvents(ctx.workspaceId, { type: "block.confirmed" }).flatMap((event) => {
+    const payload = event.payload as Confirmed;
+    return payload.energy && payload.minutes && payload.blockMinutes && payload.outcome !== "not_done"
+      ? [{ at: event.createdAt, slot: payload.energy.slot, need: payload.energy.need, planned: payload.energy.efficiency,
+        blockMinutes: payload.blockMinutes, minutes: payload.minutes }] : [];
+  }));
+}
+
+/**
  * Everything the scheduler is given for the person's week, built once: the planner input itself plus the pieces `scheduledBlocks`
  * needs afterwards to name, tag and extend the result. Pulled out so the cache key and the bench script read the same input.
  */
 export function planningInputFor(ctx: AccessContext, today: string, committed: PersistedScheduleBlock[]) {
   const days = planDays(today);
-  const busy = committed.filter((block) => block.day)
-    .map((block) => ({ day: block.day!, start: block.start, end: block.end }));
-  const slots = availableSlots(readAvailability(ctx), days, busy);
   const preferences = effectiveSchedulePreferences(ctx).preferences;
   const zone = preferences.timeZone;
   const iso = (day: string, time: string) => toZonedInstant(day, time, zone);
   const now = process.env.CROSSLINE_FIXED_NOW ? new Date(process.env.CROSSLINE_FIXED_NOW) : new Date();
+  // 「后面都推 10 分钟」 holds the time from now until then (`shiftToday`).
+  const delay = delayBlock(ctx, now, zone);
+  const busy = [...committed.filter((block) => block.day)
+    .map((block) => ({ day: block.day!, start: block.start, end: block.end })), ...(delay ? [delay] : [])];
+  const slots = availableSlots(readAvailability(ctx), days, busy);
   const capacity = latestCapacity(ctx, now);
-  const currentEnergy = capacity.basis.includes("self_report") && capacity.level !== "uncalibrated"
-    ? capacity.level : undefined;
+  const currentEnergy = previewScope.getStore()?.currentEnergy ?? (capacity.basis.includes("self_report") && capacity.level !== "uncalibrated"
+    ? capacity.level : undefined);
   const currentClock = formatInTimeZone(now, zone, "HH:mm");
   const currentSlot = slots.findIndex((slot) => slot.day === today && slot.end > currentClock);
   const clockBlockers: PlanResult["blockers"] = [];
   // The energy expected in each slot: the person's word for the slot they are in, the model's for the rest when it is sure enough,
   // the pattern's otherwise (docs/one-input.md §5).
   const model = energyModel(ctx, readAvailability(ctx));
+  // A tired day (sleep debt, a heart-rate reading off the person's baseline) holds today's work without a deadline below its share.
+  const dayCapacity = model.capacity(now.toISOString(), today);
   const instants = slots.flatMap((slot, index) => {
     try { const start = iso(slot.day, slot.start); return [{ start, end: iso(slot.day, slot.end),
       day: slot.day, energy: currentEnergy && index === currentSlot ? currentEnergy : slotEnergy(model, String(start), slot.energy) }]; }
@@ -803,6 +859,7 @@ export function planningInputFor(ctx: AccessContext, today: string, committed: P
   const frozen = readFrozen(ctx, now).filter((item) => expanded.some((entry) => entry.task.id === plannerIdOfBlock(item.blockId))
     && !((item.reason === "keep" || item.reason === "commit") && overlapsBusy(item)));
   const pinned = frozen.map((item) => ({ taskId: plannerIdOfBlock(item.blockId), start: item.start, end: item.end }));
+  const efficiency = personalEfficiency(ctx);
   const input: PlanningInput = {
     now,
     horizonDays: days.length,
@@ -811,13 +868,15 @@ export function planningInputFor(ctx: AccessContext, today: string, committed: P
     tasks: expanded.map((item) => library.has(item.orderId)
       ? (({ deadline: _d, ...task }) => ({ ...task, deadlineTier: 3 as const, floorOnly: true }))(item.task) : item.task),
     ...(shares ? { lineShares: shares } : {}),
+    ...(dayCapacity.multiplier < 1 ? { capacityByDay: { [today]: dayCapacity.multiplier } } : {}),
+    ...(efficiency ? { efficiency } : {}),
     availability: instants,
     ...(lookaheadAvailability ? { lookaheadAvailability } : {}),
     frozenBlocks: [...committed.filter((block) => block.day && block.id.startsWith("scheduled:"))
       .map((block) => ({ taskId: plannerIdOfBlock(block.id), start: iso(block.day!, block.start),
         end: iso(block.day!, block.end) })), ...pinned]
   };
-  return { input, days, busy, preferences, zone, iso, now, currentEnergy, clockBlockers, instants, capacityIds, allOrders, orders,
+  return { input, days, busy, preferences, zone, iso, now, currentEnergy, dayCapacity, clockBlockers, instants, capacityIds, allOrders, orders,
     stateById, dependencyBlockers, library, expanded, frozen, pinned };
 }
 
@@ -867,10 +926,13 @@ async function scheduledBlocks(ctx: AccessContext, today: string, committed: Per
     // 「精力偏低」: the slot has less energy than the work needs, so the block runs longer than the estimate (planner `efficiency`).
     const tag = block.progressOnly ? "本周未排完" : needsRestCheck ? "休息后复评" : block.efficiency ? "精力偏低"
       : library.has(block.taskId.split("#")[0]!) ? "按主线份额" : tentative(block.taskId) ? "暂定" : undefined;
+    const slot = instants.find((item) => Date.parse(block.start) >= Date.parse(String(item.start)) && Date.parse(block.start) < Date.parse(String(item.end)));
+    const need = itemById.get(block.taskId)?.task.energy;
     return {
     id: scheduledBlockId(block.taskId, index),
     lane: "human" as const,
     ...named(block.taskId), ...(tag ? { tag } : {}),
+    ...(slot && need ? { energy: { slot: slot.energy, need, efficiency: block.efficiency ?? 1 } } : {}),
     day: blockDay,
     start: formatInTimeZone(new Date(block.start), zone, "HH:mm"),
     end: formatInTimeZone(new Date(block.end), zone, "HH:mm"),
@@ -999,18 +1061,49 @@ function personEventBlocks(ctx: AccessContext, days: string[]): PersistedSchedul
   try { return fixedEventBlocks(JSON.parse(getStore().getSetting(ctx.workspaceId, FIXED_EVENTS) ?? "[]") as FixedEvent[], days); } catch { return []; }
 }
 
+/**
+ * The calendar's blocks are stored; the scheduled ones are derived on read. Persisting a schedule would mean the plan disagreed with
+ * the work orders the moment one of them moved. The person's own fixed events (typed into the input box) are busy time too, derived
+ * on read like the schedule itself. A cancelled meeting still on the calendar (imported before cancellations were dropped) holds no time.
+ */
+function committedBlocks(ctx: AccessContext, payload: unknown): PersistedScheduleBlock[] {
+  return [...((payload as { blocks?: PersistedScheduleBlock[] }).blocks ?? []).filter((block) => !(block.id.startsWith("graph_calendar:") && isCancelledEvent(block.title))),
+    ...personEventBlocks(ctx, planDays(planToday(ctx)))];
+}
+
+/**
+ * The energy question's value-of-information gate (docs/energy-and-ecosystem.md §6): would the answer change what the person does in
+ * the next three hours? The greedy plan is made twice, with the current slot's energy as if they had said 「低」 and 「高」, and the
+ * question is worth asking only when the two heads differ (`planHeadDiffers`). Cached per schedule epoch (`scheduleHashOf`: the input,
+ * the slot the person is in, their reported energy), so the two-minute nudge pass solves at most twice per slot and input.
+ */
+export const ENERGY_VOI_SETTING = "energy.voi";
+export async function energyAnswerMatters(ctx: AccessContext): Promise<boolean> {
+  const store = getStore();
+  const stored = store.listPlanVersions(ctx.workspaceId)[0];
+  if (!stored) return false;
+  const today = planToday(ctx);
+  const committed = committedBlocks(ctx, stored.payload);
+  const { input, instants, currentEnergy } = planningInputFor(ctx, today, committed);
+  const hash = scheduleHashOf(input, instants, currentEnergy);
+  try {
+    const cached = JSON.parse(store.getSetting(ctx.workspaceId, ENERGY_VOI_SETTING) ?? "null") as { hash?: string; differs?: boolean } | null;
+    if (cached?.hash === hash && typeof cached.differs === "boolean") return cached.differs;
+  } catch { /* computed afresh */ }
+  const headAt = async (level: "low" | "high") => (await planSchedule(withPreview({ currentEnergy: level }, () => planningInputFor(ctx, today, committed)).input,
+    { solver: "none" })).plan.blocks;
+  const [low, high] = [await headAt("low"), await headAt("high")];
+  const differs = planHeadDiffers(low, high, input.now);
+  store.setSetting(ctx.workspaceId, ENERGY_VOI_SETTING, JSON.stringify({ hash, differs }));
+  return differs;
+}
+
 export async function loadCurrentPlan(ctx: AccessContext): Promise<PersistedPlan> {
   ensureSeeded(ctx);
   const store = getStore();
   const stored = store.listPlanVersions(ctx.workspaceId)[0];
   if (!stored) throw new Error("PLAN_VERSION_NOT_FOUND");
-  const payload = stored.payload as { blocks?: PersistedScheduleBlock[] };
-  // The calendar's blocks are stored; the scheduled ones are derived on read. Persisting a schedule
-  // would mean the plan disagreed with the work orders the moment one of them moved.
-  // The person's own fixed events (typed into the input box) are busy time too, derived on read like the schedule itself.
-  // A cancelled meeting still on the calendar (imported before cancellations were dropped) holds no time.
-  const committed = [...(payload.blocks ?? []).filter((block) => !(block.id.startsWith("graph_calendar:") && isCancelledEvent(block.title))),
-    ...personEventBlocks(ctx, planDays(planToday(ctx)))];
+  const committed = committedBlocks(ctx, stored.payload);
   // A real, computed preview beats an empty page: the scheduler runs against sane defaults even before
   // the person has saved their own time zone, availability and mode. `usingDefaultPreferences` is what
   // lets the page say so, instead of either lying about it or blocking on it.
@@ -1067,6 +1160,24 @@ export function readChangeSummary(ctx: AccessContext, now = appNow()): ScheduleC
     const saved = JSON.parse(getStore().getSetting(ctx.workspaceId, CHANGE_SUMMARY) ?? "{}") as Partial<ChangeSummary>;
     return saved.at && now.getTime() - Date.parse(saved.at) < 86_400_000 ? saved.items ?? [] : [];
   } catch { return []; }
+}
+
+/**
+ * Steps split again because they did not get done on two days (adaptive granularity, `requestFinerSplits` in the worker): named in the
+ * change summary on Today for a day once the smaller plan exists. Said there and nowhere else — no push, nothing to answer.
+ */
+export type FinerSplitNote = { orderId: string; title: string; step: string; days: number };
+export function readFinerSplits(ctx: AccessContext, now = appNow()): FinerSplitNote[] {
+  const store = getStore();
+  const orders = new Map(store.listWorkOrders(ctx.workspaceId).map((order) => [order.id, order]));
+  const planned = store.listEvents(ctx.workspaceId, { type: "task.steps_planned" });
+  return store.listEvents(ctx.workspaceId, { type: "task.steps_replan_requested" }).flatMap((event) => {
+    const split = (event.payload as { finerSplit?: { title?: string; days?: string[] } }).finerSplit;
+    const order = orders.get(event.entityId);
+    const redone = planned.find((item) => item.entityId === event.entityId && item.createdAt > event.createdAt);
+    if (!split || !order || !redone || now.getTime() - Date.parse(redone.createdAt) >= 86_400_000) return [];
+    return [{ orderId: order.id, title: taskTitleOf(order), step: split.title ?? "", days: split.days?.length ?? 2 }];
+  });
 }
 
 /** The most recent `plan.explained` event for today, if the explainer has ever run for it. Read from
@@ -1885,6 +1996,23 @@ const toAction = (ctx: AccessContext, order: ActionableOrder | undefined, reason
 // in `page.tsx` instead, to avoid a circular import between this file and `lib/task-detail.ts` (which
 // already imports from here). `page.tsx` spreads them into what this returns before handing it to
 // `DashboardView`.
+/**
+ * What the Today head says about energy (docs/energy-and-ecosystem.md §3.4): the model's reading of now — the one the schedule uses —
+ * with its basis, the day's capacity when it is held below its share, and the person's own word when they gave it in the last four
+ * hours (which then also stands for the current slot).
+ */
+function energyEstimateFor(ctx: AccessContext, now: Date, today: string): NonNullable<DashboardData["energyEstimate"]> {
+  const model = energyModel(ctx, readAvailability(ctx));
+  const prediction = model.predict(now.toISOString());
+  const capacity = model.capacity(now.toISOString(), today);
+  const report = getStore().listEnergyObservations(ctx.workspaceId)
+    .filter((item) => item.source === "self_report" && item.level !== "uncalibrated" && now.getTime() - Date.parse(item.observedAt) < 4 * 3_600_000)
+    .sort((a, b) => b.observedAt.localeCompare(a.observedAt))[0];
+  return { level: prediction.level, confidence: prediction.confidence, basis: prediction.basis,
+    ...(capacity.multiplier < 1 ? { capacity } : {}),
+    ...(report ? { selfReport: report.level as "low" | "medium" | "high" } : {}) };
+}
+
 export async function loadDashboard(ctx: AccessContext): Promise<Omit<DashboardData, "taskDetailById" | "milestoneDetailById">> {
   ensureSeeded(ctx);
   const store = getStore();
@@ -2050,6 +2178,7 @@ export async function loadDashboard(ctx: AccessContext): Promise<Omit<DashboardD
     dateLabel: new Intl.DateTimeFormat("en-US", { day: "2-digit", timeZone }).format(now),
     monthLabel: new Intl.DateTimeFormat("en-US", { month: "short", year: "numeric", timeZone }).format(now).toUpperCase(),
     capacity,
+    energyEstimate: energyEstimateFor(ctx, now, today),
     energyLearning: energyCalibration(outcomes),
     awaitingApproval: orders.filter((order) => order.state === "awaiting_plan_approval").length,
     ...(primary ? { primary } : {}),

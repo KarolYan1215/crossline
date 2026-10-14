@@ -74,6 +74,17 @@ export type PlanningInput = {
    * 64 / 20 / 11 / 5).
    */
   lineShares?: Record<string, number>;
+  /**
+   * A day's capacity (docs/energy-and-ecosystem.md §3.3): a multiplier below 1 holds that day's work without a deadline to that part of
+   * its share — after short nights or a heart-rate reading off the person's baseline. Work with a deadline is not held, so a tired day
+   * never puts a deadline at risk; the relaxed (emergency) run ignores it.
+   */
+  capacityByDay?: Record<string, number>;
+  /**
+   * How much of an hour's work a slot one and two energy levels short of the work yields, learned from the person's own confirmed
+   * blocks (`packages/core/src/efficiency.ts`) and passed only once a backtest shows them better than the assumed 0.8 and 0.65.
+   */
+  efficiency?: [number, number];
 };
 
 export type ScheduleBlock = { taskId: string; start: string; end: string;
@@ -94,6 +105,19 @@ export type PlanResult = {
 };
 
 const energyValue = { low: 1, medium: 2, high: 3 } as const;
+
+/**
+ * Whether two plans do something different over the next `hours` (docs/energy-and-ecosystem.md §6, the value-of-information gate): the
+ * blocks not yet over that start before then, compared by task and start rounded to 15 minutes. Frozen blocks are the same in both and
+ * left out. Equal heads mean the answer to a question about now would change nothing the person is about to do.
+ */
+export function planHeadDiffers(a: ScheduleBlock[], b: ScheduleBlock[], now: Date, hours = 3): boolean {
+  const from = now.getTime(), until = from + hours * 3_600_000;
+  const head = (blocks: ScheduleBlock[]) => new Set(blocks.filter((block) => !block.frozen && Date.parse(block.end) > from && Date.parse(block.start) < until)
+    .map((block) => `${block.taskId}|${Math.round(Date.parse(block.start) / 900_000)}`));
+  const left = head(a), right = head(b);
+  return left.size !== right.size || [...left].some((key) => !right.has(key));
+}
 
 export { planSchedule, type SolveOptions, type ModelSolver, type HighsSolution } from "./optimizer";
 export { scheduleInputHash } from "./input-hash";

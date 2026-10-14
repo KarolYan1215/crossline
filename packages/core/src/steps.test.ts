@@ -78,6 +78,15 @@ describe("grounded, non-trivial plans", () => {
     expect(normalized.steps.map((item) => [item.executor, item.schedulable])).toEqual([["agent", false], ["human", true]]);
     expect(warnings.map((warning) => warning.code)).toContain("STEP_TRIVIAL_TO_AGENT");
   });
+  it("a first move stays on the person's steps, one short line; the assistant's steps and waits have none", () => {
+    const { plan: normalized } = normalizeStepPlan(plan([
+      step("a", "gather", { title: "清点材料", firstAction: "打开文件夹" }),
+      step("b", "draft", { title: "推导 P-N 结耗尽区宽度", firstAction: `  打开 L5 讲义，读到第一个例题${"啊".repeat(100)}` }),
+      step("c", "wait", { title: "等批改", firstAction: "刷新邮箱" }),
+      step("d", "check", { title: "对答案" })]));
+    expect(normalized.steps.map((item) => item.firstAction?.slice(0, 16))).toEqual(["", "打开 L5 讲义，读到第一个例题", "", ""]);
+    expect(normalized.steps[1]!.firstAction).toHaveLength(80);
+  });
   it("a content unit stands only on a verbatim line of the document it names", async () => {
     const { unverifiedUnits } = await import("./steps");
     const docs = [{ id: "doc-1", text: "Week 3: L5 PN Junction electrostatics; L6 Diode I-V" }];

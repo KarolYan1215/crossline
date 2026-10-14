@@ -3,7 +3,7 @@
 import { useState } from "react";
 
 export function EnergyProbe({ context = "general", workOrderId }: {
-  context?: "general" | "before_task" | "after_task" | "after_rest"; workOrderId?: string
+  context?: "general" | "before_task" | "after_task" | "after_rest" | "correction"; workOrderId?: string
 }) {
   const [status, setStatus] = useState<"idle" | "sampling" | "error">("idle");
   const [actualLoad, setActualLoad] = useState<"" | "low" | "medium" | "high">("");

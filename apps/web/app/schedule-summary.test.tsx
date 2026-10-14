@@ -15,3 +15,9 @@ test("each moved block reads as one line with its cause and how far it moved, an
 test("nothing moved, nothing shown", () => {
   expect(renderToStaticMarkup(<ScheduleSummary changes={[]} />)).toBe("");
 });
+
+test("a step split again after two days of not getting done is one line with nothing to press", () => {
+  const html = renderToStaticMarkup(<ScheduleSummary changes={[]} splits={[{ orderId: "hw3", title: "作业 3", step: "推导第 1–2 题", days: 2 }]} />);
+  expect(html).toContain("「作业 3 · 推导第 1–2 题」2 天没做成，已拆成更小的步骤，第一步不超过 15 分钟");
+  expect(html).not.toContain("<button");
+});

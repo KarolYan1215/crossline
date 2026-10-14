@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { SAY_DO_DIMENSIONS, type PortraitReport, type PortraitType, type SayDoReading } from "@crossline/core";
-import { axisBar, dodgeMatrix, energyLegend } from "./poster-geometry";
+import { SAY_DO_DIMENSIONS, type EnergyRhythm, type PortraitReport, type PortraitType, type SayDoReading } from "@crossline/core";
+import { axisBar, dodgeMatrix, energyLegend, hourClock } from "./poster-geometry";
 
 /**
  * Draws its child at the width it actually has, so a chart's 12px labels are 12px on a phone and on an A4 page alike (an SVG scaled to
@@ -165,3 +165,50 @@ export function AdviceMatrix({ insights }: { insights: PortraitReport["insights"
       width={300} height={300} r={11} shade="top-left" x="投入 →" y="影响 ↑" corner="先做" />
   </div>;
 }
+
+/**
+ * The 「精力节律」 curve (decided 2026-10-14): the energy model over one usual day at the person's phase (`energyRhythm`), the usual
+ * sleep shaded, the best three hours as a band in the type group's colour, the person's low/high cut points as dashed lines, and each
+ * of their own L/M/H reports as a hollow dot in its band at the hour it was given.
+ */
+export function RhythmChart({ rhythm, width = 620, height = 240 }: { rhythm: EnergyRhythm; width?: number; height?: number }) {
+  const pad = { left: 30, right: 30, top: 26, bottom: 30 };
+  const values = rhythm.curve.flatMap((point) => point.value === null ? [] : [point.value]);
+  if (!values.length) return null;
+  const top = Math.max(...values, rhythm.thresholds.high) + 1, bottom = Math.min(...values, rhythm.thresholds.low) - 1;
+  const x = (hour: number) => pad.left + (hour / 24) * (width - pad.left - pad.right);
+  const y = (value: number) => pad.top + ((top - value) / (top - bottom)) * (height - pad.top - pad.bottom);
+  const segments: string[] = [];
+  let open = false;
+  for (const point of rhythm.curve) {
+    if (point.value === null) { open = false; continue; }
+    segments.push(`${open ? "L" : "M"}${x(point.hour).toFixed(1)},${y(point.value).toFixed(1)}`);
+    open = true;
+  }
+  const bandOf: Record<string, number> = { low: (bottom + rhythm.thresholds.low) / 2, medium: (rhythm.thresholds.low + rhythm.thresholds.high) / 2, high: (rhythm.thresholds.high + top) / 2 };
+  const seen = new Map<string, number>();
+  const dots = rhythm.reports.map((report) => {
+    const key = `${report.hour}:${report.level}`;
+    const n = seen.get(key) ?? 0;
+    seen.set(key, n + 1);
+    return { cx: x(report.hour) + (n % 3) * 6 - (n % 3 ? 3 : 0), cy: y(bandOf[report.level]!) - Math.floor(n / 3) * 6 };
+  });
+  // Sleep runs over midnight: one shaded span before the waking hour and one after the onset (or one between them after midnight).
+  const from = rhythm.sleep.from >= 24 ? rhythm.sleep.from - 24 : rhythm.sleep.from;
+  const sleepSpans = rhythm.sleep.from >= 24 ? [[from, rhythm.sleep.to]] : [[0, rhythm.sleep.to], [from, 24]];
+  const plotTop = pad.top, plotHeight = height - pad.top - pad.bottom;
+  return <svg className="pt-chart" viewBox={`0 0 ${width} ${height}`} role="img"
+    aria-label={`一日精力曲线：最佳时段 ${hourClock(rhythm.peak.start)}–${hourClock(rhythm.peak.end)}，通常 ${hourClock(rhythm.sleep.from)} 入睡、${hourClock(rhythm.sleep.to)} 醒来`}>
+    {sleepSpans.map(([a, b]) => <rect key={a} x={x(a!)} y={plotTop} width={x(b!) - x(a!)} height={plotHeight} fill="#ECE5D8" />)}
+    <rect x={x(rhythm.peak.start)} y={plotTop} width={x(rhythm.peak.end) - x(rhythm.peak.start)} height={plotHeight} style={{ fill: "var(--group)" }} fillOpacity=".18" />
+    <text x={x((rhythm.peak.start + rhythm.peak.end) / 2)} y={plotTop - 8} textAnchor="middle" fontSize="12" fontWeight="700" fill={INK}>最佳 {hourClock(rhythm.peak.start)}–{hourClock(rhythm.peak.end)}</text>
+    {[rhythm.thresholds.low, rhythm.thresholds.high].map((value) => <line key={value} x1={x(0)} x2={x(24)} y1={y(value)} y2={y(value)} stroke={MUTED} strokeWidth="0.8" strokeDasharray="4 4" />)}
+    {(["high", "medium", "low"] as const).map((level) => <text key={level} x={x(24) + 6} y={y(bandOf[level]!) + 4} fontSize="12" fill={MUTED}>{LEVEL_LABEL[level]}</text>)}
+    <path d={segments.join(" ")} fill="none" stroke={INK} strokeWidth="2.5" strokeLinejoin="round" />
+    {dots.map((dot, index) => <circle key={index} cx={dot.cx} cy={dot.cy} r="4" fill="#fff" stroke={INK} strokeWidth="1.5" />)}
+    <line x1={x(0)} x2={x(24)} y1={plotTop + plotHeight} y2={plotTop + plotHeight} stroke={INK} strokeWidth="1" />
+    {[0, 3, 6, 9, 12, 15, 18, 21, 24].map((hour) => <text key={hour} x={x(hour)} y={height - 10} textAnchor="middle" fontSize="12" fill={MUTED}>{hour}</text>)}
+    {sleepSpans.length > 0 && <text x={x(sleepSpans[0]![0]!) + 4} y={plotTop + plotHeight - 6} fontSize="12" fill={MUTED}>睡眠</text>}
+  </svg>;
+}
+const LEVEL_LABEL = { high: "高", medium: "中", low: "低" } as const;

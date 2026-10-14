@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { expect, test } from "vitest";
 import { SCHWARTZ_VALUES, validatePortrait, type PortraitReport } from "@crossline/core";
-import { axisBar, dodgeMatrix, energyLegend, posterSerifText, radarValues } from "./poster-geometry";
+import { axisBar, dodgeMatrix, energyLegend, hourClock, posterSerifText, radarValues, rhythmStats } from "./poster-geometry";
 
 const fixture = JSON.parse(readFileSync(path.resolve(import.meta.dirname, "../../../../e2e/fixtures/portrait-report.json"), "utf8")) as PortraitReport;
 
@@ -54,4 +54,15 @@ test("the e2e fixture is a report the validator accepts", () => {
 test("every character set in the poster's serif is in the self-hosted subset, so none falls back to another face", () => {
   const glyphs = new Set(readFileSync(path.resolve(import.meta.dirname, "../../public/fonts/poster-serif.glyphs.txt"), "utf8"));
   expect([...posterSerifText()].filter((char) => !glyphs.has(char))).toEqual([]);
+});
+
+test("the rhythm page's four readings: the best window as a clock range, signed social jetlag, and what is missing said instead of a number", () => {
+  const base = { curve: [], sleep: { from: 23.5, to: 7.5 }, peak: { start: 9.5, end: 12.5 }, thresholds: { low: 9.5, high: 12.5 }, reports: [], nights: 0 };
+  expect(hourClock(25.25)).toBe("1:15");
+  const empty = rhythmStats({ ...base, chronotype: null, debt: { perNight: 0, nights: 0 } });
+  expect(empty.map((cell) => [cell.title, cell.value])).toEqual([["最佳时段", "9:30–12:30"], ["早晚型", "待定"], ["社会时差", "待定"], ["睡眠债", "待定"]]);
+  const full = rhythmStats({ ...base, nights: 20, debt: { perNight: 0.6, nights: 14 },
+    chronotype: { sdWork: 7, sdFree: 8.5, sdWeek: 7.4, msw: 3.5, msf: 4.25, msfSc: 3.9, sjlRel: 0.75, sjl: 0.75, chronotype: "intermediate" } });
+  expect(full.map((cell) => cell.value)).toEqual(["9:30–12:30", "中间型", "+0.8 小时", "每晚少 0.6 小时"]);
+  expect(full[2]!.detail).toBe("休息日睡眠中点比工作日晚");
 });

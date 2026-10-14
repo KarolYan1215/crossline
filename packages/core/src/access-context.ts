@@ -16,7 +16,8 @@ export type AccessContext = {
     tenantId?: string;
     objectId?: string;
   };
-  authMethod: "session" | "tailscale-binding" | "system-job";
+  /** `device-token`: a phone shortcut's bearer token, scoped to one kind of write (docs/energy-and-ecosystem.md §5). */
+  authMethod: "session" | "tailscale-binding" | "system-job" | "device-token";
   requestId: string;
 };
 

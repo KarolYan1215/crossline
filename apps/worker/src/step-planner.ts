@@ -1,7 +1,8 @@
 import {
   ARCHETYPES, AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, resolveAvailability, VALIDATION_REVIEW_SCHEMA, archetypeBrief, archetypeById, stepPlanSchema, goalSettingKey,
   normalizeStepPlan, relevantDocuments, STEP_ANSWER_SLOT, stepAnswerSlot, stepPlanWarnings, unverifiedUnits, validateStepPlanShape, validateValidationReview, weeklyAvailableHours,
-  PROGRESS_ASSESSMENT_SCHEMA, validateProgressAssessment, type ProgressAssessment, type StepPlan, type StepWarning, type ValidationReview
+  PROGRESS_ASSESSMENT_SCHEMA, validateProgressAssessment, type ProgressAssessment, type StepPlan, type StepWarning, type ValidationReview,
+  FINER_SPLIT_FEEDBACK, stepsNeedingFinerSplit, type FinerSplit, type StepTrouble
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import { listAgentTasks, projectAgentOutputs, type CrosslineStore, type StoredWorkOrder } from "@crossline/db";
@@ -86,7 +87,8 @@ export function taskWindow(store: CrosslineStore, workspaceId: string, order: St
 /**
  * Tasks that need a step plan: committed (approved or later), not a seeded demo, not capacity work, and either never planned or asked to
  * be planned again (`task.steps_replan_requested` after the last plan). Two per tick: the migration of every open task happens over a few
- * ticks instead of one long one.
+ * ticks instead of one long one. A replan the person asked for comes first, then the most recently changed — a task just approved is
+ * planned in this pass, not after every older task (decided 2026-10-14: a new task used to wait behind the backlog for up to two ticks).
  */
 export function tasksAwaitingStepPlan(store: CrosslineStore, workspaceId: string, limit = 2): string[] {
   const capacity = new Set(defaultIdentityPacks().filter((pack) => pack.kind === "capacity").map((pack) => pack.id));
@@ -99,7 +101,72 @@ export function tasksAwaitingStepPlan(store: CrosslineStore, workspaceId: string
     // A plan that failed for a reason of its own is not retried every tick; a request to replan (or a new day) does.
     .filter((order) => !store.listEvents(workspaceId, { type: "task.steps_blocked", entityId: order.id })
       .some((event) => event.createdAt > (replan.get(order.id) ?? "") && day(event.createdAt) === day(new Date().toISOString())))
+    .reverse()
+    .sort((a, b) => Number(plans.has(b.id)) - Number(plans.has(a.id)))
     .slice(0, limit).map((order) => order.id);
+}
+
+/** How far back adaptive granularity reads what happened to the steps. */
+const TROUBLE_LOOKBACK_DAYS = 14;
+const localDay = (iso: string, zone: string) => new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(iso));
+
+/**
+ * Adaptive granularity (docs/energy-and-ecosystem.md §6): reads what happened to each open step from the ledger (`StepTrouble`) and,
+ * for a step that did not get done on two days, asks for the task's steps to be planned again smaller (`task.steps_replan_requested`
+ * with `finerSplit`), which the task pass then picks up like any replan. Rules only, no model call and no question; the person sees it
+ * in the change summary on Today once the new plan exists. Returns what it asked for.
+ */
+export function requestFinerSplits(store: CrosslineStore, workspaceId: string, now = new Date()): FinerSplit[] {
+  let zone = process.env.CROSSLINE_TIME_ZONE?.trim() || "America/Chicago";
+  try { zone = (JSON.parse(store.getSetting(workspaceId, "schedule.preferences") ?? "null") as { timeZone?: string } | null)?.timeZone || zone; } catch { /* default */ }
+  const today = localDay(now.toISOString(), zone);
+  const orders = new Map(store.listWorkOrders(workspaceId).filter((order) => PLANNABLE.includes(order.state)).map((order) => [order.id, order]));
+  const stepPlans = store.listStepPlans(workspaceId).filter((plan) => orders.has(plan.workOrderId));
+  const plans = stepPlans.map((plan) => ({ orderId: plan.workOrderId, version: plan.version,
+    openStepIds: plan.steps.filter((step) => step.status === "planned" && step.schedulable && step.executor !== "agent").map((step) => step.id) }));
+  const troubles: StepTrouble[] = [];
+  const confirmed = store.listEvents(workspaceId, { type: "block.confirmed" }).map((event) => event.payload as { blockId?: string; workOrderId?: string; stepId?: string; day?: string; outcome?: string });
+  for (const answer of confirmed) if (answer.outcome === "not_done" && answer.workOrderId && answer.stepId && answer.day)
+    troubles.push({ kind: "not_done", orderId: answer.workOrderId, stepId: answer.stepId, day: answer.day });
+  // The blocks the nudge pass saw under way (`nudge.blocks:<day>`, apps/web/lib/nudges.ts): one with no timer started that day and no
+  // completion answer was not started. Past days only, so a block under way now is not counted.
+  const startedOn = new Set(store.listExecutions(workspaceId).map((execution) => `${execution.workOrderId}|${localDay(execution.startedAt, zone)}`));
+  const seenByDay = new Map<string, Array<{ id: string; orderId: string; stepId: string; began?: boolean }>>();
+  for (let back = 1; back <= TROUBLE_LOOKBACK_DAYS; back += 1) {
+    const dayKey = new Date(Date.parse(`${today}T12:00:00Z`) - back * 86_400_000).toISOString().slice(0, 10);
+    let seen: Record<string, { id: string; orderId: string; stepId: string; began?: boolean }> = {};
+    try { seen = JSON.parse(store.getSetting(workspaceId, `nudge.blocks:${dayKey}`) ?? "{}"); } catch { /* none */ }
+    const blocks = Object.values(seen);
+    seenByDay.set(dayKey, blocks);
+    for (const block of blocks) if (block.began && block.stepId && !startedOn.has(`${block.orderId}|${dayKey}`)
+      && !confirmed.some((answer) => answer.blockId === block.id && answer.day === dayKey))
+      troubles.push({ kind: "not_started", orderId: block.orderId, stepId: block.stepId, day: dayKey });
+  }
+  // 「昨天排的没做」 rolled forward: the steps that task had blocks for that day.
+  for (const event of store.listEvents(workspaceId, { type: "missed.handled" })) {
+    const { askId, how } = event.payload as { askId?: string; how?: string };
+    const [, orderId, missedDay] = (askId ?? "").split(":");
+    if (!orderId || !missedDay || !["roll", "later"].includes(how ?? "")) continue;
+    for (const block of seenByDay.get(missedDay) ?? []) if (block.orderId === orderId && block.stepId)
+      troubles.push({ kind: "missed", orderId, stepId: block.stepId, day: missedDay });
+  }
+  const since = new Date(now.getTime() - TROUBLE_LOOKBACK_DAYS * 86_400_000).toISOString();
+  for (const message of store.listRecentNudges(workspaceId, since)) {
+    const nudge = message.payload.nudge as { kind?: string; step?: { orderId: string; stepId: string } } | undefined;
+    if (nudge?.kind === "timer_overrun" && nudge.step) troubles.push({ kind: "overrun", ...nudge.step, day: localDay(message.createdAt, zone) });
+  }
+  const asked = store.listEvents(workspaceId, { type: "task.steps_replan_requested" }).flatMap((event) => {
+    const split = (event.payload as { finerSplit?: { stepId: string; version: number } }).finerSplit;
+    return split ? [{ orderId: event.entityId, stepId: split.stepId, version: split.version, at: event.createdAt }] : [];
+  });
+  const splits = stepsNeedingFinerSplit(troubles, { plans, asked, now: now.toISOString() });
+  for (const split of splits) {
+    const title = stepPlans.find((plan) => plan.workOrderId === split.orderId)?.steps.find((step) => step.id === split.stepId)?.title ?? "";
+    store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `task.steps_finer_split:${split.orderId}:${split.stepId}:${split.version}`,
+      type: "task.steps_replan_requested", entityId: split.orderId,
+      payload: { feedback: `「${title}」${split.days.length} 天没做成：${FINER_SPLIT_FEEDBACK}`, finerSplit: { stepId: split.stepId, version: split.version, title, days: split.days } } });
+  }
+  return splits;
 }
 
 /** A milestone this important or more makes its tasks important (the scheduler's own line for 「重要」). */

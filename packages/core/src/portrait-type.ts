@@ -1,4 +1,5 @@
 import { SCHWARTZ_VALUES, redactPortrait, type PortraitReport } from "./portrait";
+export { CHARACTER_EXPRESSIONS, CHARACTER_POSES } from "./portrait-character";
 
 /**
  * Crossline's own personality typing (decided 2026-10-08, after the popular result pages of MBTI-style tests): four axes about how a
@@ -6,8 +7,6 @@ import { SCHWARTZ_VALUES, redactPortrait, type PortraitReport } from "./portrait
  * sixteen fixed types in four groups. The names live here, not in the model's answer, so the same profile always lands on the same,
  * comparable, shareable type — the model only says where on each axis the person stands and why.
  */
-export const CHARACTER_POSES = ["standing confidently", "holding an object up to look at it", "mid-stride, walking forward", "sitting on a simple stool", "arms crossed, relaxed", "gesturing as if explaining"] as const;
-export const CHARACTER_EXPRESSIONS = ["calm", "focused", "curious", "cheerful", "determined", "thoughtful"] as const;
 
 export type TypeAxisId = "scope" | "basis" | "output" | "rhythm";
 /** Each letter is the initial of an English word (`en`), so the code reads as words: GEMA = Generalist, Evidence, Making, Adapting. */
@@ -72,20 +71,27 @@ export type PortraitType = {
   axes: Array<{ id: TypeAxisId; left: string; right: string; leftEn: string; rightEn: string; score: number; letter: string; label: string; percent: number; evidence: string }>;
 };
 
-/** The person's type from the writer's axis scores (0 = left pole, 100 = right pole); none for a report written before the axes existed. */
-export function portraitType(report: PortraitReport): PortraitType | null {
-  const type = report.type;
-  if (!type) return null;
+/**
+ * A type from four axis scores (0 = left pole, 100 = right pole; exactly 50 reads as the right pole), with each axis's reason when there
+ * is one. Shared by the portrait (scores from the writer) and the public quick test (scores from `quizScores`), so both land on the same
+ * sixteen names.
+ */
+export function typeFromScores(scores: Record<TypeAxisId, number>, evidence: Partial<Record<TypeAxisId, string>> = {}): PortraitType {
   const axes = TYPE_AXES.map((axis) => {
-    const score = Math.max(0, Math.min(100, Math.round(type[axis.id])));
+    const score = Math.max(0, Math.min(100, Math.round(scores[axis.id])));
     const right = score >= 50;
     const side = right ? axis.right : axis.left;
     return { id: axis.id, left: axis.left.label, right: axis.right.label, leftEn: axis.left.en, rightEn: axis.right.en, score, letter: side.letter, label: side.label,
-      percent: right ? score : 100 - score, evidence: type.evidence[axis.id] ?? "" };
+      percent: right ? score : 100 - score, evidence: evidence[axis.id] ?? "" };
   });
   const code = axes.map((axis) => axis.letter).join("");
   const groupKey = code.slice(0, 2);
-  return { code, ...TYPE_TABLE[code]!, summary: (type.summary ?? "").trim(), group: { key: groupKey, ...TYPE_GROUPS[groupKey]! }, axes };
+  return { code, ...TYPE_TABLE[code]!, summary: "", group: { key: groupKey, ...TYPE_GROUPS[groupKey]! }, axes };
+}
+
+/** The person's type from the writer's axis scores, with the writer's summary; none for a report written before the axes existed. */
+export function portraitType(report: PortraitReport): PortraitType | null {
+  return report.type ? { ...typeFromScores(report.type, report.type.evidence), summary: (report.type.summary ?? "").trim() } : null;
 }
 
 export type PortraitLabelCell = { title: string; value: string; detail?: string };

@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { DashboardView } from "./dashboard-view";
-import { appNow, loadDashboard, planToday, readChangeSummary } from "../lib/crossline";
+import { appNow, loadDashboard, planToday, readChangeSummary, readFinerSplits } from "../lib/crossline";
 import { requireSessionContext } from "../lib/access-guard";
 import { gateUntilReady } from "../lib/start-gate";
 import { returnDue } from "../lib/return";
@@ -46,6 +46,7 @@ export default async function HomePage() {
     asks: await loadAsks(ctx),
     calendar,
     scheduleChanges: readChangeSummary(ctx),
+    finerSplits: readFinerSplits(ctx),
     flywheelGraph: loadFlywheelGraph(ctx),
     ...(workState ? { workState } : {})
   }} />;

@@ -1,6 +1,6 @@
 import { createRequire } from "node:module";
 import { describe, expect, test } from "vitest";
-import { planSchedule, recommendNextActions } from "./index";
+import { planHeadDiffers, planSchedule, recommendNextActions } from "./index";
 import { fallbackSchedule, invalidBlocks } from "./optimizer";
 
 const start = new Date("2026-09-14T14:00:00.000Z");
@@ -620,6 +620,24 @@ describe("schedule parameters and importance", () => {
     expect(Date.parse(placed[1]!.start) - Date.parse(placed[0]!.end)).toBeGreaterThanOrEqual(15 * 60_000);
   });
 
+  test("a tired day holds work without a deadline to its capacity; deadline work and the next day are not held", async () => {
+    const loose = ["a", "b", "c", "d"].map((id) => ({ id, title: id, estimate: estimate(60), inputsReady: true, deadlineTier: 3 as const, interruptible: false }));
+    const due = { id: "hw", title: "作业", estimate: estimate(60), inputsReady: true, deadlineTier: 1 as const, interruptible: false,
+      deadline: "2026-10-06T23:00:00.000Z" };
+    const params = { gapMinutes: 0, maxDailyShare: 1, focusCapMinutes: 0, deadlineBufferDays: 0 };
+    for (const solver of ["solver", "greedy"] as const) {
+      const result = await planSchedule({ now, horizonDays: 2, frozenBlocks: [], tasks: [...loose, due], params,
+        capacityByDay: { "2026-10-06": 0.5 }, availability: [day("2026-10-06", "14:00", "19:00"), day("2026-10-07", "14:00", "19:00")] },
+        solver === "greedy" ? { solver: "none" } : {});
+      const on = (date: string) => result.plan.blocks.filter((block) => !block.frozen && block.start.startsWith(date));
+      const minutes = (blocks: typeof result.plan.blocks) => blocks.reduce((sum, block) => sum + (Date.parse(block.end) - Date.parse(block.start)) / 60_000, 0);
+      expect(on("2026-10-06").some((block) => block.taskId === "hw"), solver).toBe(true);
+      // Five hours that day, half of it for work without a deadline: two of the loose hours, the rest the next day.
+      expect(minutes(on("2026-10-06").filter((block) => block.taskId !== "hw")), solver).toBeLessThanOrEqual(150);
+      expect(on("2026-10-07").length, solver).toBeGreaterThan(0);
+    }
+  });
+
   test("a deadline buffer finishes work early when there is room, and never makes a deadline impossible", async () => {
     const task = { id: "hw", title: "作业", estimate: estimate(60), inputsReady: true, deadlineTier: 2 as const, interruptible: false,
       deadline: "2026-10-09T23:00:00.000Z" };
@@ -670,4 +688,15 @@ describe("line floors (each line's share of the week, from what the person said)
     // Every one of the six placed (long ones now in sessions, so counted by task, not by block).
     expect(new Set(result.plan.blocks.filter((block) => block.taskId.startsWith("r")).map((block) => block.taskId)).size).toBe(6);
   });
+});
+
+test("two plans differ at the head only by what starts in the next three hours, by task and quarter hour", () => {
+  const now = new Date("2026-10-12T14:00:00.000Z");
+  const at = (taskId: string, start: string, end: string, frozen = false) => ({ taskId, start: `2026-10-12T${start}:00.000Z`, end: `2026-10-12T${end}:00.000Z`, ...(frozen ? { frozen } : {}) });
+  const base = [at("a", "14:30", "15:30"), at("b", "16:00", "17:00"), at("c", "18:00", "19:00")];
+  // A few minutes off, a different end, a later block moved, a frozen block and one already over: the same head.
+  expect(planHeadDiffers(base, [at("a", "14:33", "15:50"), at("b", "16:05", "16:40"), at("c", "18:45", "19:30"), at("x", "15:00", "16:00", true), at("y", "13:00", "13:50")], now)).toBe(false);
+  expect(planHeadDiffers(base, [at("b", "14:30", "15:30"), at("a", "16:00", "17:00"), at("c", "18:00", "19:00")], now)).toBe(true);
+  expect(planHeadDiffers(base, [at("a", "14:30", "15:30"), at("c", "18:00", "19:00")], now)).toBe(true);
+  expect(planHeadDiffers(base, [at("a", "15:00", "16:00"), at("b", "16:00", "17:00")], now)).toBe(true);
 });

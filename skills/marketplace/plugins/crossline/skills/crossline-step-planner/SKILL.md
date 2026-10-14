@@ -63,6 +63,8 @@ Everything the system can produce from the material and public sources is an `ag
 
 `id` (unique), `role` (from the chosen archetype's roles where they fit), `title` (short imperative naming the units: 「推导 L5–L6 P-N 结静电与 I-V」), `deliverable`, `doneCriterion` (quantified, checkable), `share` (of the task's progress; sums to 1; proportional to effort and value, the person's steps carrying most), `estimate` (p25/p50/p85 minutes; p85 = 1.2–3× p50), `dependsOn`, `notBefore`/`dueBy` (`YYYY-MM-DD` inside the window, or `""`; use `projectDates`), `schedulable` (false for waiting and for agent steps), `executor`, `tickOutcome` (for the two to five steps whose result is a real capability or artefact: 「能在 20 分钟内独立解出 BJT 小信号题」; `""` otherwise), `covers`, `why`.
 
+`firstAction`: for every step the person does (`human` or `mixed`), the concrete first move that starts it, doable in five minutes or less, naming the actual thing to open or write — 「打开 L5 讲义，读到第一个例题」, 「新建 hw3.md，抄下第 1 题题干」, 「把去年期中卷第一页打印出来」. Not a restatement of the title, not 「开始复习」 or 「做好准备」. One short line, at most 80 characters. `""` for `agent` steps and waits.
+
 Choose `archetypeId` by the structure of the work; the archetype's roles are a vocabulary, not a required sequence — never add a step just to use a role.
 
 Never invent facts about the person, the course or the material; mark an assumption as one in `rationale` and ask instead when it matters. Do not set goals, deadlines or importance. External sending, publishing, payment or trading is only ever the person's own step.

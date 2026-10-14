@@ -76,7 +76,8 @@ export function confirmBlock(ctx: AccessContext, messageId: string, answer: Conf
   const last = isLastStep(ctx, block);
   const record = (outcome: string, extra: Record<string, unknown> = {}) => {
     store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `block-confirmed:${messageId}`, type: "block.confirmed",
-      entityId: messageId, payload: { blockId: block.id, workOrderId: block.orderId, stepId: block.stepId, day: block.day, outcome, ...extra } });
+      entityId: messageId, payload: { blockId: block.id, workOrderId: block.orderId, stepId: block.stepId, day: block.day, outcome, blockMinutes,
+        ...(block.energy ? { energy: block.energy } : {}), ...extra } });
     // The card counts as answered, so the question is not taken as ignored (three ignored in a row would mute the kind).
     const card = payload.card as Card | undefined;
     if (card) store.updateConversationPayload(ctx.workspaceId, messageId, { ...payload, card: { ...card, clarify: { ...card.clarify, chosen: 0 } } });

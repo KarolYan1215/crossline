@@ -44,3 +44,22 @@ export const withFrozen = (list: FrozenBlock[], entry: FrozenBlock): FrozenBlock
 
 export const withoutFrozen = (list: FrozenBlock[], blockId: string): FrozenBlock[] =>
   list.filter((item) => item.blockId !== blockId);
+
+/** `schedule.shift` (「后面都推 10 分钟」): the stretch from now until this instant is busy, so nothing new is placed in it. */
+export const DELAY_SETTING = "schedule.delayUntil";
+export const SHIFT_MINUTES = { min: 5, max: 120 } as const;
+
+/**
+ * 「后面都推 10 分钟」 (docs/energy-and-ecosystem.md §6): today's `commit` and `keep` blocks move later by `minutes`. One under way starts
+ * `minutes` from now and its end moves by the same amount (the time already passed is not given back), so no shifted block overlaps the
+ * next. `pinned` and `locked` stay where the person put them; blocks of later days are left alone. `dayEnd` is the end of the person's today.
+ */
+export function shiftFrozen(list: FrozenBlock[], minutes: number, now: Date, dayEnd: Date): FrozenBlock[] {
+  const by = minutes * 60_000, at = now.getTime();
+  return list.map((item) => {
+    if ((item.reason !== "commit" && item.reason !== "keep") || Date.parse(item.end) <= at || Date.parse(item.start) >= dayEnd.getTime()) return item;
+    const start = new Date(Math.max(Date.parse(item.start), at) + by).toISOString();
+    const end = new Date(Date.parse(item.end) + by).toISOString();
+    return { ...item, start, end, ...(item.reason === "commit" ? { until: end } : {}) };
+  });
+}

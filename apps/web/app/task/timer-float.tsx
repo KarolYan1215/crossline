@@ -10,6 +10,9 @@ const clock = (seconds: number) => {
   return `${sign}${h ? `${h}:` : ""}${String(m).padStart(h ? 2 : 1, "0")}:${String(s).padStart(2, "0")}`;
 };
 
+/** The step's first move is a way in: shown for the first five minutes of a session, then the corner is the countdown alone again. */
+const FIRST_ACTION_SECONDS = 5 * 60;
+
 /**
  * The floating countdown for a running session, on every page. It counts down from the current step's usual duration; at zero it
  * notifies once and keeps counting (shown as overtime). Closing it ends the session — the minutes are recorded as worked — and then
@@ -70,7 +73,8 @@ export function TimerFloat() {
         <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true"><circle cx="17" cy="17" r="14" className="timer-bg" />
           <circle cx="17" cy="17" r="14" className="timer-fg" strokeDasharray={`${share * 88} 88`} transform="rotate(-90 17 17)" /></svg>
         <a href={`/workbench/${encodeURIComponent(timer.workOrderId)}`} className="timer-text">
-          <b className="mono">{timer.paused ? "已暂停" : clock(left)}</b><small>{timer.stepTitle ?? timer.intent}</small></a>
+          <b className="mono">{timer.paused ? "已暂停" : clock(left)}</b><small>{timer.stepTitle ?? timer.intent}</small>
+          {timer.firstAction && !timer.paused && elapsed < FIRST_ACTION_SECONDS && <small className="gen" title={timer.firstAction}>第一步：{timer.firstAction}</small>}</a>
         {timer.paused
           ? <button type="button" onClick={() => void post(timer.workOrderId, "execution", { action: "resume" }).then(() => void load())}>继续</button>
           : <button type="button" onClick={() => void end(timer)} aria-label="结束本次计时">结束</button>}
