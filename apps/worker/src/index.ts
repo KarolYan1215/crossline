@@ -279,7 +279,12 @@ async function workflowPass(workspaceId: string, checkedAt: string): Promise<voi
   const started = agentService.runFree(workspaceId, input, (outcome) => {
     void installGrown(analysisStore, workspaceId, candidate, outcome, { client: codexSupervisor?.clientFor(workspaceId), cwd: repoRoot })
       .then((result) => console.info(JSON.stringify({ type: "skill.grown." + result.state, workspaceId, ...result })))
-      .catch(() => undefined).finally(() => growingWorkflows.delete(workspaceId));
+      .catch(() => undefined).finally(() => {
+        growingWorkflows.delete(workspaceId);
+        // A request the person made while this one was growing is taken up now, not a tick later (found 2026-10-14: a request typed
+        // during a system-noticed growth waited behind it for the next tick).
+        if (growCandidates(analysisStore, workspaceId).some((next) => next.origin.kind === "asked")) void workflowPass(workspaceId, new Date().toISOString()).catch(() => undefined);
+      });
   });
   if (started.state !== "started") growingWorkflows.delete(workspaceId);
   // A busy assistant or another account's workspace is tried again on a later tick; nothing is recorded for it.
