@@ -28,6 +28,7 @@ export function editableFields(item: ProposedAction): string[] {
     case "workflow.request": return ["text", "lineId", "reminder", "time"];
     case "energy.report": return ["level", "note"];
     case "event.create": return ["title", "date", "startTime", "endTime", "until", "location", "lineId"];
+    case "schedule.shift": return ["minutes"];
     case "goal.add": return ["lineId", "title"];
     case "milestone.draft": return ["lineId", "title", "date", "target"];
     case "line.add": return ["label"];

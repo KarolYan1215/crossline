@@ -1,7 +1,7 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { CrosslineStore } from "@crossline/db";
 vi.mock("server-only", () => ({}));
-import { loadCurrentPlan, readChangeSummary, readFrozen, lockBlock, saveSchedulePreferences } from "./crossline";
+import { loadCurrentPlan, readChangeSummary, readFinerSplits, readFrozen, lockBlock, saveSchedulePreferences } from "./crossline";
 import { TEST_CTX } from "./test-support";
 
 afterEach(() => { globalThis.crosslineStore?.close(); globalThis.crosslineStore = undefined; vi.unstubAllEnvs(); });
@@ -36,4 +36,27 @@ test("a calendar event that lands on a work block is named with where the block 
   expect(readFrozen(TEST_CTX, new Date(NOW))).toEqual([expect.objectContaining({ blockId: before.id, reason: "locked", overlapOk: true })]);
   const after = (await loadCurrentPlan(TEST_CTX)).blocks.find((block) => block.id === before.id)!;
   expect(after).toMatchObject({ day: before.day, start: before.start, end: before.end, tag: "已锁定" });
+});
+
+test("a step split again is said in the summary once its smaller plan exists, for a day", () => {
+  const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
+  const ws = TEST_CTX.workspaceId;
+  vi.useFakeTimers();
+  try {
+    store.saveWorkOrder({ id: "hw3", ownerId: TEST_CTX.principalId, workspaceId: ws, identityId: "research", projectId: "p", milestoneId: "", intent: "完成作业 3",
+      state: "approved", riskTier: "routine", estimate: { p25Minutes: 30, p50Minutes: 60, p85Minutes: 90, source: "llm_prior", observationCount: 0, confidence: "low" }, payload: {} });
+    const plan = (title: string) => ({ archetypeId: "problem_set", quantity: { basis: "题", amount: 2, unit: "题" }, rationale: "", steps: [{ id: "a", role: "solve", title,
+      deliverable: "", doneCriterion: "", share: 1, estimate: { p25Minutes: 20, p50Minutes: 30, p85Minutes: 45 }, dependsOn: [], notBefore: "", dueBy: "",
+      schedulable: true, executor: "human" as const, tickOutcome: "" }] });
+    vi.setSystemTime(new Date("2026-10-12T12:00:00Z"));
+    store.saveStepPlan(ws, "hw3", plan("推导第 1–2 题"), TEST_CTX.principalId, "planned");
+    vi.setSystemTime(new Date("2026-10-14T12:00:00Z"));
+    store.appendEvent({ ownerId: TEST_CTX.principalId, workspaceId: ws, idempotencyKey: "split", type: "task.steps_replan_requested", entityId: "hw3",
+      payload: { feedback: "「推导第 1–2 题」2 天没做成：拆细，首步 ≤15 分钟", finerSplit: { stepId: "v1s1", version: 1, title: "推导第 1–2 题", days: ["2026-10-12", "2026-10-13"] } } });
+    expect(readFinerSplits(TEST_CTX, new Date("2026-10-14T12:30:00Z"))).toEqual([]);
+    vi.setSystemTime(new Date("2026-10-14T12:40:00Z"));
+    store.saveStepPlan(ws, "hw3", plan("读第 1 题题干"), TEST_CTX.principalId, "revised");
+    expect(readFinerSplits(TEST_CTX, new Date("2026-10-14T13:00:00Z"))).toEqual([{ orderId: "hw3", title: "完成作业 3", step: "推导第 1–2 题", days: 2 }]);
+    expect(readFinerSplits(TEST_CTX, new Date("2026-10-15T13:00:00Z"))).toEqual([]);
+  } finally { vi.useRealTimers(); }
 });

@@ -74,7 +74,7 @@ test("Today keeps capture semantic-only and health outside identity navigation",
   if (testInfo.project.name === "mobile-chrome") ensureOwnNextStep();
   await page.goto("/");
   await expect(page.getByRole("navigation", { name: "主导航" })).toBeVisible();
-  await expect(page.getByText("精力自评", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("energy-capsule")).toBeVisible();
   await expect(page.locator(".composer select")).toHaveCount(0);
   await expect(page.locator('.composer textarea[name="title"]')).toBeVisible();
   await expect(page.getByRole("button", { name: "提交完成证据" })).toHaveCount(0);
@@ -177,6 +177,8 @@ test("energy check keeps self report only and rejects the removed camera path", 
   await page.goto("/");
   await expect(page.getByRole("button", { name: "运行十二秒本地摄像头代理采样" })).toHaveCount(0);
   const submitted = page.waitForResponse((response) => response.url().endsWith("/api/energy-observations") && response.request().method() === "POST");
+  // The level is chosen from the capsule on the Today head, which opens the three levels on a tap.
+  await page.getByTestId("energy-capsule").locator(".energy-capsule-button").click();
   await page.getByRole("button", { name: "记录中精力" }).click();
   expect((await submitted).ok()).toBe(true);
   // The dashboard reloads itself after a successful submission to reflect the new energy reading —
@@ -557,8 +559,10 @@ test("画像海报的视觉基线", async ({ page }, testInfo) => {
   // The poster is taller than the window: sticky bars would otherwise sit on its top edge in the photo.
   await page.addStyleTag({ content: ".running-head,.pt-toolbar{position:static !important}" });
   await expect(page.locator(".pt-page.pt-type").first()).toHaveScreenshot("portrait-share-half.png");
-  await page.addStyleTag({ content: ".pt-offscreen{position:static !important;left:auto !important}" });
-  await expect(page.locator(".pt-card")).toHaveScreenshot("portrait-card.png");
+  // The self-report dots sit at the hour each report was made, and the energy test writes one at the wall-clock time of the run.
+  await page.addStyleTag({ content: ".pt-offscreen{position:static !important;left:auto !important}.pt-report-dot{visibility:hidden}" });
+  await expect(page.locator(".pt-card:not(.pt-card-energy)")).toHaveScreenshot("portrait-card.png");
+  await expect(page.locator(".pt-card-energy")).toHaveScreenshot("portrait-energy-card.png");
 });
 
 test("signing out deletes this browser's offline database for the workspace it was using", async ({ page }, testInfo) => {

@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { ENERGY_CATEGORIES, PORTRAIT_SCHEMA, PORTRAIT_SCHEMA_VERSION, SAY_DO_DIMENSIONS, SCHWARTZ_VALUES, redactPortrait, validatePortrait, type PortraitReport } from "./portrait";
-import { CHARACTER_STANDARD, characterPrompt, portraitLabels, portraitType } from "./portrait-type";
+import { CHARACTER_STANDARD, TYPE_AXES, TYPE_TABLE, characterPrompt, portraitLabels, portraitType, typeSummaryProblem } from "./portrait-type";
 
 const report: PortraitReport = {
   cover: { portrait: "在 UW–Madison 读博的研究者，想把研究连到产品。", coreConflict: "并行承诺多于可用注意力", keywords: ["研究者"] },
@@ -33,13 +33,31 @@ test("the type is read from the axis scores into a fixed name and group; the fig
     lines: { allocation: "", items: [{ lineId: "research", description: "", goals: [], feeds: [{ toLineId: "media", how: "" }], targetShare: 60 },
       { lineId: "media", description: "", goals: [], feeds: [{ toLineId: "startup", how: "" }], targetShare: 20 }, { lineId: "startup", description: "", goals: [], feeds: [{ toLineId: "research", how: "" }], targetShare: 20 }] } };
   const type = portraitType(typed)!;
-  expect([type.code, type.name, type.group.name]).toEqual(["GEMA", "跨界建造者", "架构组"]);
+  expect([type.code, type.name, type.group.name]).toEqual(["GEMA", "改装师", "架构组"]);
   expect(type.axes.map((axis) => [axis.label, axis.percent])).toEqual([["跨界", 82], ["实证", 70], ["造物", 60], ["应变", 55]]);
   const prompt = characterPrompt(typed)!;
   expect(prompt).toContain(CHARACTER_STANDARD);
   expect(prompt).toContain("deep blue");
   expect(prompt).not.toContain("UW–Madison");
   expect(portraitType(report)).toBeNull();
+});
+
+test("the person's own appearance replaces the neutral defaults; the base line's colour moves to accessories and the circle keeps the group tint", () => {
+  const typed: PortraitReport = { ...report,
+    type: { scope: 82, basis: 30, output: 40, rhythm: 55, evidence: { scope: "", basis: "", output: "", rhythm: "" } },
+    character: { outfit: "an all-black hoodie and black trousers", props: ["a notebook"], pose: "standing confidently", expression: "focused",
+      appearance: "male, long wolf-cut hair, dressed all in black" },
+    lines: { allocation: "", items: [{ lineId: "research", description: "", goals: [], feeds: [], targetShare: 60 }, { lineId: "media", description: "", goals: [], feeds: [], targetShare: 40 }] } };
+  const prompt = characterPrompt(typed)!;
+  expect(prompt).toContain("male, long wolf-cut hair, dressed all in black");
+  expect(prompt).not.toContain("gender-neutral");
+  expect(prompt).not.toContain("simple neat hairstyle");
+  expect(prompt).toContain("Accessories and small details");
+  expect(prompt).toContain("deep blue");
+  expect(prompt).not.toContain("main colour deep blue");
+  expect(prompt).toContain(`Group tint for the circle: ${portraitType(typed)!.group.tint}`);
+  // Without the person's words nothing changes.
+  expect(characterPrompt({ ...typed, character: { ...typed.character!, appearance: "" } })).toContain("main colour deep blue");
 });
 
 test("shares are scaled to a whole", () => {
@@ -59,7 +77,7 @@ test("the fixed dimensions: Schwartz's ten values in circle order, six energy ca
   expect([...ENERGY_CATEGORIES]).toEqual(["深度工作", "学习输入", "创造产出", "沟通协作", "行政事务", "休息恢复"]);
   expect(SAY_DO_DIMENSIONS.map((dimension) => dimension.label)).toEqual(SAY_DO);
   expect(SAY_DO_DIMENSIONS.map((dimension) => dimension.id)).toEqual(["plan", "on_time", "follow_through", "acceptance", "waiting"]);
-  expect(PORTRAIT_SCHEMA_VERSION).toBe(2);
+  expect(PORTRAIT_SCHEMA_VERSION).toBe(3);
 });
 
 test("the schema asks for exactly those dimensions, a short core word, and no 'does' score", () => {
@@ -107,4 +125,15 @@ test("the labels are computed: core word, top Schwartz value, base line, and the
   const old = portraitLabels({ ...labelled, cover: report.cover, compass: { ...report.compass, values: [{ name: "求真", score: 90, evidence: "" }] } }, { lineLabel: (id) => id });
   expect(old.cells.map((cell) => cell.title)).toEqual(["建议底座"]);
   for (const title of ["飞轮形态", "充电方式", "工作时段"]) expect(cells.some((cell) => cell.title === title)).toBe(false);
+});
+
+test("类型名互不共用字词；字母是英文词首字母；个人简介对本人说、不写类型名", () => {
+  const names = Object.values(TYPE_TABLE).map((type) => type.name);
+  expect(new Set(names).size).toBe(16);
+  for (const name of names) expect(names.filter((other) => other !== name && (other.includes(name) || name.includes(other)))).toEqual([]);
+  for (const axis of TYPE_AXES) for (const side of [axis.left, axis.right]) expect(side.en[0]).toBe(side.letter);
+  expect(typeSummaryProblem("你习惯把几条线接在一起，代价是收尾常被打断，")).toBeNull();
+  expect(typeSummaryProblem("习惯把几条线接在一起")).toContain("「你」");
+  expect(typeSummaryProblem("你是改装师")).toContain("改装师");
+  expect(typeSummaryProblem("你像 ENTP 一样")).toContain("外部人格类型");
 });

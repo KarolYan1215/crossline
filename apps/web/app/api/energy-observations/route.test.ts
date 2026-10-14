@@ -33,6 +33,14 @@ const post = async (body: unknown) => {
 };
 
 describe("energy observation route", () => {
+  test("a correction from the Today capsule is stored as an ordinary self-report, so it calibrates the model", async () => {
+    saved.length = 0;
+    const response = await post({ source: "self_report", level: "low", confidence: "high", aggregate: { responseSeconds: 2 }, context: "correction" });
+    expect(response.status).toBe(200);
+    expect(saved.at(-1)).toMatchObject({ source: "self_report", level: "low" });
+    expect((await post({ source: "self_report", level: "low", confidence: "high", aggregate: {}, context: "correction", workOrderId: "work-1" })).status).toBe(400);
+  });
+
   test("rejects the removed camera proxy source", async () => {
     const response = await post({ source: "camera_proxy", level: "unclassified", confidence: "low", aggregate: {} });
     expect(response.status).toBe(400);

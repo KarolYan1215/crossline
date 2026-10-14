@@ -16,6 +16,8 @@
 | [review-2026-10-13.md](review-2026-10-13.md) | 系统评审：10-10 修复后真实账本三天零回流、后台开销反增、待决 85 项；逐条复核 10-10 问题；竞品与大厂对标；第一性原理方案 R1–R7（参与度三档、决定预算、回归流程、及时准备）；自带 Codex 与多模型接口设计；云端未验证项的本机结果 |
 | [skills-library.md](skills-library.md) | Skill 库（已实现）：本人每条主线一个由本人的话整理的 skill，验收闸门按它判「是否符合打法」；助手用 Codex 自带的 skill-creator 把重复的琐事长成工作流（可定时执行或提醒，发出与发布始终由本人完成）；公开 skills 的检索、扫描、AI 审查与 30 天清理 |
 | [loop-and-scout.md](loop-and-scout.md) | 闭环与机会侦察：排期自动生效与锁定、后台最优排程、完成确认、日历整理（工作 + 生活邮箱）、上手提速、画像海报与定制形象、名人库、机会侦察（已定稿 2026-10-12）；实施计划在 [plans/](plans/)（P-A 闭环、P-B 上手、P-C 海报、P-D 形象、P-E 名人库、P-F 侦察） |
+| [energy-and-ecosystem.md](energy-and-ecosystem.md) | 竞品尽调（Tiimo、Pikko、RISE、Visible、Muse、Manus 等）后的精力模型 v2（睡眠债、睡眠惯性、当日容量）、效率系数学习、手机接入与 Siri 收集、拆分提速、测评传播与分期（已定稿 2026-10-14） |
+| [assess-deploy.md](assess-deploy.md) | 公开速测 `apps/assess`（16 题类型、MCTQ 精简版、3 分钟 PVT-B）：内容、为什么不连任何东西、本地运行、部署到 Cloudflare Pages（未部署） |
 | [model-providers.md](model-providers.md) | 接入本人自己的 Codex 与其他 API 模型：现有耦合清单、接口设计、分阶段与风险（设计稿，待审） |
 | [assistant-agent.md](assistant-agent.md) | 带 shell 的助手：设计、守卫、信任与审阅流程 |
 | [structured-output.md](structured-output.md) | 模型的结构化输出怎么约束、怎么校验、怎么修正，出问题怎么查，现有的实测数据 |

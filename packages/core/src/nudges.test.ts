@@ -13,6 +13,9 @@ test("fifteen minutes before a block that bears on a deadline, it says so with �
   expect(nudge).toMatchObject({ kind: "block_start", urgent: true, counted: false, fingerprint: "start:scheduled:hw2:v1s1:2026-10-10" });
   expect(nudge!.text).toContain("关系到 10/12 的截止");
   expect(nudge!.buttons.map((button) => button.label)).toEqual(["开始计时", "推到明天", "少问这类"]);
+  expect(nudge!.text).not.toContain("第一步");
+  // The step's first move, when the plan has one, is said with it so the block is easy to begin.
+  expect(planNudges(base({ blocks: [{ ...base().blocks[0]!, firstAction: "打开作业 PDF，抄下第 1 题" }] }))[0]!.text).toContain("第一步：打开作业 PDF，抄下第 1 题。");
   expect(planNudges(base({ clock: "14:40" }))).toEqual([]);
   expect(planNudges(base({ sent: new Set(["start:scheduled:hw2:v1s1:2026-10-10"]) }))).toEqual([]);
 });
@@ -47,7 +50,7 @@ test("too little time before a due day: tight below a day's worth of free time, 
 test("a timer half again over the step's usual minutes asks whether the step is done", () => {
   const timer = { orderId: "hw2", title: "完成 ECE 555 作业 2", stepId: "v1s1", stepTitle: "拆解题目", startedAt: "2026-10-10T19:00:00.000Z", usualMinutes: 30 };
   const [nudge] = planNudges(base({ blocks: [], timer, quiet: { timerRunning: true, inMeeting: false, answeredRecently: false } }));
-  expect(nudge).toMatchObject({ kind: "timer_overrun" });
+  expect(nudge).toMatchObject({ kind: "timer_overrun", step: { orderId: "hw2", stepId: "v1s1" } });
   expect(nudge!.buttons[0]).toMatchObject({ kind: "action", label: "这步做完了", action: { args: { type: "step_done", stepId: "v1s1" } } });
   expect(planNudges(base({ blocks: [], timer: { ...timer, startedAt: "2026-10-10T19:30:00.000Z" } }))).toEqual([]);
 });

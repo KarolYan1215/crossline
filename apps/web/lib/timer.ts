@@ -4,6 +4,8 @@ import { getStore, resolvedEstimate } from "./crossline";
 
 export type ActiveTimer = {
   workOrderId: string; intent: string; stepId?: string; stepTitle?: string;
+  /** The step's first move, five minutes at most (docs/energy-and-ecosystem.md §6), shown under its title as the session begins. */
+  firstAction?: string;
   /** When the running session began (the start, or the last resume). */
   sessionStart: string; paused: boolean;
   /** What this session is expected to take: the current step's usual minutes, else the task's. */
@@ -29,7 +31,8 @@ export function activeTimers(ctx: AccessContext): ActiveTimer[] {
     const before = executions.filter((item) => item.workOrderId === order.id && item.durationObserved && item.id !== execution.id && item.endedAt)
       .reduce((sum, item) => sum + Math.max(0, Math.round((Date.parse(item.endedAt!) - Date.parse(item.startedAt)) / 60_000) - item.pauseMinutes), 0)
       + Math.max(0, Math.round((Date.parse(sessionStart) - Date.parse(execution.startedAt)) / 60_000) - execution.pauseMinutes);
-    return { workOrderId: order.id, intent: order.intent, ...(step ? { stepId: step.id, stepTitle: step.title } : {}), sessionStart, paused,
+    return { workOrderId: order.id, intent: order.intent, ...(step ? { stepId: step.id, stepTitle: step.title } : {}),
+      ...(step?.firstAction ? { firstAction: step.firstAction } : {}), sessionStart, paused,
       targetMinutes: step?.estimate.p50Minutes ?? resolvedEstimate(ctx, order).p50Minutes, workedBefore: before };
   });
 }

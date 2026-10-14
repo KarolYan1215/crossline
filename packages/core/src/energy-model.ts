@@ -1,9 +1,11 @@
 /**
- * Energy without asking every time (docs/one-input.md §5). A biomathematical prior — the three-process model of alertness (Åkerstedt &
- * Folkard): a homeostatic term that falls exponentially with time awake and recovers with sleep, plus a 24-hour circadian cosine —
- * driven by when the person slept and woke, read from where it is known (the screen's long idle stretches, a phone's sleep record),
- * then calibrated to the person by their own L/M/H reports. It says how sure it is; below `medium` the schedule does not use it and
- * the person is asked instead. A wearable is another `EnergySource`; nothing below changes.
+ * Energy without asking every time (docs/one-input.md §5, docs/energy-and-ecosystem.md §3). A biomathematical prior — the three-process
+ * model of alertness (Åkerstedt, Folkard & Portin 2004): a homeostatic term S that falls with time awake and recovers with sleep, carried
+ * across the last fourteen nights so short nights add up; a 24-hour circadian cosine C; a 12-hour ultradian term U (the afternoon dip);
+ * and sleep inertia W in the first hours after waking — driven by when the person slept and woke, read from where it is known (the
+ * screen's long idle stretches, a phone's sleep record), then calibrated to the person by their own L/M/H reports. It says how sure it is;
+ * below `medium` the schedule does not use it and the person is asked instead. Separately, a day's capacity (how much, not when) comes
+ * from the sleep debt and the phone's heart-rate readings against the person's own baseline, and can only lower what the day holds.
  */
 
 import type { EnergyLevel } from "./index";
@@ -18,18 +20,27 @@ export const SLEEP_TRACKING_CONSENT = "activity.sleepTracking";
 export const ACTIVITY_LAST_ACTIVE = "activity.lastActiveAt";
 export const ACTIVITY_LONG_GAPS = "activity.longGaps";
 
+/** One day's readings from a phone or watch: heart-rate variability, resting heart rate, wrist temperature against its own baseline. */
+export type DailyPhysiology = { day: string; hrvMs?: number; restingHr?: number; wristTempDeltaC?: number; steps?: number; daylightMin?: number };
+
 /** Where sleep comes from: the screen's idle gaps, a phone's health record, later a ring or watch. */
 export interface EnergySource {
   id: string;
   /** Sleep episodes known for the days around `day` (ISO instants). */
   sleep(): SleepEpisode[];
-  /** Per-day physiology when the source has it (heart-rate variability, resting heart rate). */
-  physiology?(): Array<{ day: string; hrvMs?: number; restingHr?: number }>;
+  /** Per-day physiology when the source has it. */
+  physiology?(): DailyPhysiology[];
 }
 
-// Three-process model constants (Åkerstedt & Folkard 1997; Åkerstedt, Folkard & Portin 2004).
+// Three-process model constants, as published in Åkerstedt, Folkard & Portin 2004 (Aviat Space Environ Med 75(3) A75–A83):
+// S = (Sa − L)·e^(−0.0353t) + L awake; S′ = U − (U − Sr)·e^(−0.381t) asleep, recovering no faster below 12.5 than at 12.5;
+// C = 2.5·cos(2π(t − p)/24); the ultradian dip has amplitude 0.5 on a 12-hour period, phased 3 h before C's peak;
+// W = −5.7·e^(−0.65692t) after waking (the paper keeps W out of its fitted predictions; here the person's own cut points absorb it).
 const S_LOWER = 2.4, S_UPPER = 14.3, AWAKE_DECAY = 0.0353, SLEEP_RECOVERY = 0.381, C_AMPLITUDE = 2.5, C_ACROPHASE = 16.8;
+const S_CRITICAL = 12.5, U_AMPLITUDE = 0.5, U_LEAD = 3, W_INIT = 5.7, W_DECAY = 0.65692;
 const HOUR = 3_600_000;
+/** How far back the homeostat is carried. */
+const HISTORY_DAYS = 14;
 
 /** A stretch of no activity is sleep when it lasts four hours or more and covers some of the night (00:00–06:00 local). */
 export function sleepFromGaps(gaps: Array<{ from: string; to: string }>, localHour: (iso: string) => number): SleepEpisode[] {
@@ -42,30 +53,112 @@ export function sleepFromGaps(gaps: Array<{ from: string; to: string }>, localHo
   }).map((gap) => ({ sleepAt: gap.from, wakeAt: gap.to, source: "screen" }));
 }
 
-/** Several sources: a record the person's phone made wins over the screen's guess for the same night. */
+/** A moment the phone noticed: the person went to bed (sleep focus on, 「就寝开始」) or got up (an alarm stopped, 「醒来」). */
+export type PhoneSleepEvent = { type: "bed" | "wake"; at: string };
+
+/**
+ * Nights from the phone's bed and wake moments: each wake paired with the last bed moment 3–14 hours before it. A wake with no bed
+ * moment is not a night — the screen's idle stretch, or nothing, tells when that sleep began.
+ */
+export function sleepFromPhoneEvents(events: PhoneSleepEvent[]): SleepEpisode[] {
+  const sorted = [...events].sort((a, b) => a.at.localeCompare(b.at));
+  return sorted.flatMap((event, index) => {
+    if (event.type !== "wake") return [];
+    const bed = sorted.slice(0, index).reverse().find((item) => item.type === "bed");
+    const hours = bed ? (Date.parse(event.at) - Date.parse(bed.at)) / HOUR : 0;
+    return bed && hours >= 3 && hours <= 14 ? [{ sleepAt: bed.at, wakeAt: event.at, source: "phone-focus" }] : [];
+  });
+}
+
+/**
+ * Several sources, one night each: what a phone's health record says wins over the phone's sleep-focus switch, which wins over the
+ * screen's guess for the same night.
+ */
+const SOURCE_RANK: Record<string, number> = { screen: 0, "phone-focus": 1 };
 export function mergeSleep(...sources: SleepEpisode[][]): SleepEpisode[] {
+  const rank = (episode: SleepEpisode) => SOURCE_RANK[episode.source] ?? 2;
   const byWake = new Map<string, SleepEpisode>();
   for (const episode of sources.flat()) {
     const night = new Date(Date.parse(episode.wakeAt) - 12 * HOUR).toISOString().slice(0, 10);
     const existing = byWake.get(night);
-    if (!existing || (existing.source === "screen" && episode.source !== "screen")) byWake.set(night, episode);
+    if (!existing || rank(episode) > rank(existing)) byWake.set(night, episode);
   }
   return [...byWake.values()].sort((a, b) => a.wakeAt.localeCompare(b.wakeAt));
 }
 
+/** S after `hours` awake. */
+const decayAwake = (s: number, hours: number) => S_LOWER + (s - S_LOWER) * Math.exp(-AWAKE_DECAY * hours);
+/** S after `hours` asleep: below the critical level it recovers at the rate it has at that level, then exponentially towards the top. */
+function recoverAsleep(s: number, hours: number): number {
+  let left = hours, value = s;
+  if (value < S_CRITICAL) {
+    const rate = SLEEP_RECOVERY * (S_UPPER - S_CRITICAL);
+    const toCritical = (S_CRITICAL - value) / rate;
+    if (left <= toCritical) return value + rate * left;
+    left -= toCritical;
+    value = S_CRITICAL;
+  }
+  return S_UPPER - (S_UPPER - value) * Math.exp(-SLEEP_RECOVERY * left);
+}
+
 /**
- * Alertness at `at` on the model's scale (about 4–16), from the last sleep before it: S at waking after `sleepHours`, falling with time
- * awake, plus the circadian term at the local hour (shifted by `phaseShift` hours for an early or late person).
+ * S at `at`, carried through the known sleep of the last fourteen days. Before the first record the person is taken as rested on a usual
+ * rhythm. A stretch between two records too long to have been spent awake (over 30 hours — a weekend away from the computer, a phone left
+ * off) is not invented as an all-nighter: each missing night is taken as a usual one, and counted in `assumedNights` so the basis says so.
  */
-export function alertness(at: string, episode: SleepEpisode, localHourOf: (iso: string) => number, phaseShift = 0): number {
-  const sleepHours = Math.max(0, (Date.parse(episode.wakeAt) - Date.parse(episode.sleepAt)) / HOUR);
-  // At sleep onset S stands where sixteen hours awake leave it; sleep recovers it towards the upper asymptote.
-  const atOnset = S_LOWER + (S_UPPER - S_LOWER) * Math.exp(-AWAKE_DECAY * 16);
-  const atWake = S_UPPER - (S_UPPER - atOnset) * Math.exp(-SLEEP_RECOVERY * sleepHours);
-  const awake = Math.max(0, (Date.parse(at) - Date.parse(episode.wakeAt)) / HOUR);
-  const s = S_LOWER + (atWake - S_LOWER) * Math.exp(-AWAKE_DECAY * awake);
-  const c = C_AMPLITUDE * Math.cos((2 * Math.PI * (localHourOf(at) - (C_ACROPHASE + phaseShift))) / 24);
-  return s + c;
+export function homeostat(at: string, episodes: SleepEpisode[]): { s: number; assumedNights: number } {
+  const end = Date.parse(at), start = end - HISTORY_DAYS * 24 * HOUR;
+  const within = episodes.filter((episode) => Date.parse(episode.wakeAt) > start && Date.parse(episode.sleepAt) < end)
+    .sort((a, b) => a.sleepAt.localeCompare(b.sleepAt));
+  let s = RESTED_WAKE, assumedNights = 0;
+  let clock = within.length ? Math.max(start, Date.parse(within[0]!.sleepAt) - USUAL_AWAKE_HOURS * HOUR) : end - USUAL_AWAKE_HOURS * HOUR;
+  const awakeFor = (hours: number) => {
+    let left = hours;
+    while (left > MAX_AWAKE_HOURS) {
+      s = recoverAsleep(decayAwake(s, USUAL_AWAKE_HOURS), 24 - USUAL_AWAKE_HOURS);
+      left -= 24;
+      assumedNights += 1;
+    }
+    s = decayAwake(s, Math.max(0, left));
+  };
+  for (const episode of within) {
+    const sleepAt = Math.max(clock, Date.parse(episode.sleepAt)), wakeAt = Math.min(end, Date.parse(episode.wakeAt));
+    if (wakeAt <= clock) continue;
+    awakeFor((sleepAt - clock) / HOUR);
+    s = recoverAsleep(s, Math.max(0, wakeAt - sleepAt) / HOUR);
+    clock = wakeAt;
+  }
+  awakeFor((end - clock) / HOUR);
+  return { s, assumedNights };
+}
+const MAX_AWAKE_HOURS = 30;
+const USUAL_AWAKE_HOURS = 16;
+/** The steady wake level of eight hours' sleep after sixteen awake (the fixed point of one usual day). */
+const RESTED_WAKE = (() => {
+  let s = 13;
+  for (let day = 0; day < 30; day += 1) s = recoverAsleep(decayAwake(s, USUAL_AWAKE_HOURS), 8);
+  return s;
+})();
+
+/** The rhythm terms at a local hour: the circadian cosine and the ultradian afternoon dip, both shifted for an early or late person. */
+function rhythm(localHour: number, phaseShift: number): number {
+  const peak = C_ACROPHASE + phaseShift;
+  const c = C_AMPLITUDE * Math.cos((2 * Math.PI * (localHour - peak)) / 24);
+  const u = -U_AMPLITUDE * Math.cos((2 * Math.PI * (localHour - (peak - U_LEAD))) / 12);
+  return c + u;
+}
+/** Sleep inertia: how much lower alertness stands `hoursAwake` after waking. */
+export const inertia = (hoursAwake: number): number => -W_INIT * Math.exp(-W_DECAY * Math.max(0, hoursAwake));
+
+/**
+ * Alertness at `at` on the model's scale (about 3–17): S carried across the recorded nights, the rhythm terms at the local hour (shifted
+ * by `phaseShift` hours for an early or late person) and sleep inertia since the last waking. Undefined when the last sleep is unknown.
+ */
+export function alertnessAt(at: string, episodes: SleepEpisode[], localHourOf: (iso: string) => number, phaseShift = 0): number | undefined {
+  const last = lastSleepBefore(episodes, at);
+  if (!last) return undefined;
+  const awake = (Date.parse(at) - Date.parse(last.wakeAt)) / HOUR;
+  return homeostat(at, episodes).s + rhythm(localHourOf(at), phaseShift) + inertia(awake);
 }
 
 /** The last sleep that ended before `at` (and not more than a day before it), or undefined. */
@@ -106,16 +199,94 @@ export type EnergyPrediction = { level: EnergyLevel; confidence: "low" | "medium
 export function predictEnergy(at: string, episodes: SleepEpisode[], calibration: EnergyCalibration, localHourOf: (iso: string) => number,
   phaseShift = 0): EnergyPrediction {
   const episode = lastSleepBefore(episodes, at);
-  if (!episode) return { level: "medium", confidence: "low", basis: ["不知道最近一次睡眠"] };
-  const value = alertness(at, episode, localHourOf, phaseShift);
+  const value = alertnessAt(at, episodes, localHourOf, phaseShift);
+  if (!episode || value === undefined) return { level: "medium", confidence: "low", basis: ["不知道最近一次睡眠"] };
   const level: EnergyLevel = value < calibration.low ? "low" : value < calibration.high ? "medium" : "high";
   const awake = (Date.parse(at) - Date.parse(episode.wakeAt)) / HOUR;
   const slept = (Date.parse(episode.wakeAt) - Date.parse(episode.sleepAt)) / HOUR;
   const confidence = calibration.reports >= 8 && calibration.agreement >= 0.7 ? "high"
     : calibration.reports >= 4 && calibration.agreement >= 0.6 ? "medium" : "low";
+  const debt = sleepDebt(at, episodes);
   return { level, confidence, alertness: Math.round(value * 10) / 10,
-    basis: [`睡了约 ${slept.toFixed(1)} 小时（${episode.source === "screen" ? "由电脑空闲推断" : "手机记录"}）`, `已醒 ${awake.toFixed(1)} 小时`,
+    basis: [`睡了约 ${slept.toFixed(1)} 小时（${SOURCE_LABEL[episode.source] ?? "手机记录"}）`, `已醒 ${awake.toFixed(1)} 小时`,
+      ...(awake < 1 ? ["刚醒不久，头一小时偏低"] : []),
+      ...(debt.nights >= 3 && debt.hours >= 2 ? [`近两周少睡约 ${Math.round(debt.hours)} 小时`] : []),
       calibration.reports ? `按本人 ${calibration.reports} 次自评校准` : "尚无自评，用通用曲线"] };
+}
+const SOURCE_LABEL: Record<string, string> = { screen: "由电脑空闲推断", "phone-focus": "手机睡眠模式" };
+
+/**
+ * The person's sleep need: the upper quartile of the nights on record (the nights they could sleep as long as they needed), between 7 and
+ * 9.5 hours; 8 until there are seven nights. The median would understate it for anyone short of sleep through the week.
+ */
+export function sleepNeed(episodes: SleepEpisode[]): number {
+  const hours = episodes.map((episode) => (Date.parse(episode.wakeAt) - Date.parse(episode.sleepAt)) / HOUR).filter((value) => value >= 3 && value <= 14)
+    .sort((a, b) => a - b);
+  if (hours.length < 7) return 8;
+  return Math.max(7, Math.min(9.5, hours[Math.floor(hours.length * 0.75)]!));
+}
+
+/**
+ * Sleep debt over the last fourteen recorded nights (RISE's weighting: last night 15%, the thirteen before 85% with the more recent
+ * counting more): `perNight` is the weighted shortfall in hours a night, `hours` the plain total of shortfall less surplus. Nights not on
+ * record are left out, never taken as short.
+ */
+export function sleepDebt(at: string, episodes: SleepEpisode[], need = sleepNeed(episodes)): { hours: number; perNight: number; nights: number } {
+  const end = Date.parse(at);
+  const nights = episodes.filter((episode) => Date.parse(episode.wakeAt) <= end && end - Date.parse(episode.wakeAt) < HISTORY_DAYS * 24 * HOUR)
+    .sort((a, b) => b.wakeAt.localeCompare(a.wakeAt));
+  if (!nights.length) return { hours: 0, perNight: 0, nights: 0 };
+  const short = nights.map((episode) => need - (Date.parse(episode.wakeAt) - Date.parse(episode.sleepAt)) / HOUR);
+  // Last night 0.15; the rest share 0.85, each 0.85 of the one after it.
+  const rest = short.slice(1).map((_, index) => Math.pow(0.85, index));
+  const restSum = rest.reduce((sum, weight) => sum + weight, 0) || 1;
+  const weights = [short.length > 1 ? 0.15 : 1, ...rest.map((weight) => 0.85 * weight / restSum)];
+  const perNight = short.reduce((sum, value, index) => sum + value * weights[index]!, 0);
+  return { hours: Math.max(0, short.reduce((sum, value) => sum + value, 0)), perNight, nights: nights.length };
+}
+
+export type DayCapacity = { multiplier: number; basis: string[] };
+
+/**
+ * How much of the day can be filled, as a multiplier on the day's share (decided 2026-10-14, docs/energy-and-ecosystem.md §3.3): it
+ * only ever lowers, and only on evidence — a weighted sleep shortfall over half an hour a night, heart-rate variability or resting heart
+ * rate a standard deviation off the person's own 28-day baseline (four days of baseline before either counts), a wrist temperature half a
+ * degree up. The sizes are priors, not fitted: each costs at most a tenth, and the day keeps at least 70%.
+ */
+/** `day` is the person's local date (YYYY-MM-DD) the phone's readings are filed under. */
+export function dayCapacity(at: string, day: string, episodes: SleepEpisode[], physiology: DailyPhysiology[]): DayCapacity {
+  let multiplier = 1;
+  const basis: string[] = [];
+  const debt = sleepDebt(at, episodes);
+  if (debt.nights >= 3 && debt.perNight > 0.5) {
+    const cut = Math.min(0.15, 0.06 * (debt.perNight - 0.5));
+    multiplier -= cut;
+    basis.push(`近两周平均每晚少睡 ${debt.perNight.toFixed(1)} 小时`);
+  }
+  const today = physiology.find((item) => item.day === day);
+  const before = physiology.filter((item) => item.day < day && Date.parse(day) - Date.parse(item.day) <= 28 * 24 * HOUR);
+  const zOf = (value: number | undefined, history: number[]) => {
+    if (value === undefined || history.length < 4) return undefined;
+    const mean = history.reduce((sum, item) => sum + item, 0) / history.length;
+    const sd = Math.sqrt(history.reduce((sum, item) => sum + (item - mean) ** 2, 0) / (history.length - 1));
+    return sd > 0 ? (value - mean) / sd : undefined;
+  };
+  const hrvZ = zOf(today?.hrvMs !== undefined ? Math.log(today.hrvMs) : undefined,
+    before.flatMap((item) => item.hrvMs !== undefined ? [Math.log(item.hrvMs)] : []));
+  if (hrvZ !== undefined && hrvZ < -1) {
+    multiplier -= Math.min(0.1, 0.05 * (-hrvZ));
+    basis.push("心率变异性低于本人近期水平");
+  }
+  const restingZ = zOf(today?.restingHr, before.flatMap((item) => item.restingHr !== undefined ? [item.restingHr] : []));
+  if (restingZ !== undefined && restingZ > 1) {
+    multiplier -= Math.min(0.1, 0.05 * restingZ);
+    basis.push("静息心率高于本人近期水平");
+  }
+  if (today?.wristTempDeltaC !== undefined && today.wristTempDeltaC >= 0.5) {
+    multiplier -= 0.1;
+    basis.push(`手腕温度比平时高 ${today.wristTempDeltaC.toFixed(1)}°C`);
+  }
+  return { multiplier: Math.max(0.7, Math.round(multiplier * 100) / 100), basis };
 }
 
 /**

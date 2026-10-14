@@ -4,13 +4,14 @@ import { Conversation } from "./chat/conversation";
 import { AskStack } from "./ask-list";
 import type { Ask } from "@crossline/core";
 import { AnalogClock } from "./analog-clock";
+import { EnergyCapsule } from "./energy-capsule";
 import { EnergyProbe } from "./energy-probe";
 import type { TaskDetail, MilestoneDetail } from "../lib/task-detail";
 import { AppShell } from "./app-shell";
 import { TaskCard, type TaskSlot } from "./task/task-card";
 import { CalendarPanel } from "./timeline/calendar-panel";
 import { ScheduleSummary } from "./schedule-summary";
-import type { ScheduleChange } from "../lib/crossline";
+import type { FinerSplitNote, ScheduleChange } from "../lib/crossline";
 import type { CalendarData } from "./plan/plan-view";
 import { FlywheelGraph } from "./flywheel/flywheel-graph";
 import type { FlywheelGraphData } from "./flywheel/graph-model";
@@ -46,6 +47,9 @@ export type DashboardData = {
     basis: Array<"self_report" | "execution_history" | "local_activity">;
     blockers: Array<{ code: string; message: string }>;
   };
+  /** The energy model's reading of now, with its basis; the person's own fresh word, when there is one, stands above it. */
+  energyEstimate?: { level: "low" | "medium" | "high"; confidence: "low" | "medium" | "high"; basis: string[];
+    capacity?: { multiplier: number; basis: string[] }; selfReport?: "low" | "medium" | "high" };
   energyLearning?: { status: "rule_only" | "personal_unvalidated" | "personal_calibrated";
     count: number; predictedCorrect: number; baselineCorrect: number };
   primary?: DashboardAction;
@@ -77,6 +81,8 @@ export type DashboardData = {
   calendar?: CalendarData;
   /** What the last calendar change moved, for the line above the timeline (`readChangeSummary`). */
   scheduleChanges?: ScheduleChange[];
+  /** Steps split again after two days of not getting done (`readFinerSplits`), said in the same place. */
+  finerSplits?: FinerSplitNote[];
   /** The tasks behind the coming week's blocks, for the panel beside the day (a plain object: it crosses to the client). */
   calendarDetails?: Record<string, TaskDetail>;
   /** The flywheel graph: lines, live milestones and the relations between them (`lib/flywheel-graph.ts`). */
@@ -114,14 +120,14 @@ export function DashboardView({ data }: { data: DashboardData }) {
         <AnalogClock nowIso={data.nowIso} timeZone={data.timeZone} fixed={data.clockPinned} />
         <div className="day-title"><h1>{data.dateLabel} 日 <small>{data.monthLabel}</small></h1><span>{data.nowLabel}</span></div>
         <dl className="day-stats">
-          <div><dt>精力</dt><dd>{capacityLabel(data.capacity)}</dd></div>
+          {!data.energyEstimate && <div><dt>精力</dt><dd>{capacityLabel(data.capacity)}</dd></div>}
           <div><dt>今天可用 / 待办</dt><dd>{data.todayCapacity.availableMinutes} / {data.todayCapacity.committedMinutes} 分钟
             <span className="time-bar" aria-hidden="true"><span className="time-bar-fill" style={{ "--pct": `${load}%` } as CSSProperties} /></span></dd></div>
           {data.workState && <div data-testid="work-state"><dt>此刻状态</dt><dd title={data.workState.reasons.join(" ")}>{data.workState.label}
             <small> · {{ low: "把握低", medium: "把握中", high: "把握高" }[data.workState.confidence]}</small></dd></div>}
           <div><dt>本周完成</dt><dd>{data.progress.weekCount} 件</dd></div>
         </dl>
-        <div className="day-energy"><span>精力自评</span><EnergyProbe /></div>
+        {data.energyEstimate && <EnergyCapsule estimate={data.energyEstimate} />}
       </section>
       {/* 「需要至少 14 天本机活动观测…」 is a note about the system's own calibration, not something to act on today. */}
       {data.capacity.blockers.filter((blocker) => blocker.code !== "BASELINE_INSUFFICIENT")
@@ -155,7 +161,7 @@ export function DashboardView({ data }: { data: DashboardData }) {
       <div className="today-day">
         {data.calendar && <section className="panel today-timeline" aria-label="今天的时间轴">
           <header><h2>今天的时间轴</h2><a href="/plan">打开计划 →</a></header>
-          <ScheduleSummary changes={data.scheduleChanges ?? []} />
+          <ScheduleSummary changes={data.scheduleChanges ?? []} splits={data.finerSplits ?? []} />
           <CalendarPanel items={data.calendar.items} deadlines={data.calendar.deadlines} today={data.calendar.today} nowIso={data.calendar.nowIso}
             timeZone={data.calendar.timeZone} labels={data.calendar.labels} quietByWeekday={data.calendar.quietByWeekday} proposals={data.calendar.proposals}
             taskDetails={data.calendarDetails} />

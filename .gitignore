@@ -2,6 +2,8 @@ node_modules/
 .next/
 .next-e2e/
 .next-prod/
+# The public quick test's static export (docs/assess-deploy.md).
+apps/assess/out/
 *.log
 .artifacts/
 crossline-test-*.db*

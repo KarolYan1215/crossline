@@ -156,6 +156,22 @@ describe("capacity honesty", () => {
     expect(html).not.toContain("次自评");
   });
 
+  test("with the model's estimate, the head shows one capsule — the reading, how sure, why — and no always-visible L/M/H", () => {
+    const html = renderToStaticMarkup(<DashboardView data={{
+      principalId: "test-owner", workspaceId: "test-workspace", nowLabel: "周一 · 09:00", nowIso: "2026-09-14T14:00:00.000Z", timeZone: "America/Chicago", clockPinned: true, dateLabel: "14", monthLabel: "SEP · 2026",
+      capacity: { level: "uncalibrated", observationCount: 0, basis: [], blockers: [] },
+      energyEstimate: { level: "medium", confidence: "low", basis: ["睡了约 6.2 小时（手机记录）", "已醒 9.0 小时", "近两周少睡约 5 小时"],
+        capacity: { multiplier: 0.85, basis: ["近两周平均每晚少睡 1.2 小时"] } },
+      progress: { streakDays: 0, weekCount: 0 }, care: [], identities: [], upcoming: [], milestonePulse: [], todayCapacity: { availableMinutes: 0, committedMinutes: 0 }, flywheel: [], flywheelStrip: { nodes: [], edges: [] },
+      ...noPreviews
+    }} />);
+    expect(html).toContain("中 · 把握低");
+    expect(html).toContain("睡了约 6.2 小时（手机记录） · 已醒 9.0 小时");
+    expect(html).toContain("按 85% 安排");
+    expect(html).not.toContain("记录低精力");
+    expect(html).not.toContain("精力未标定");
+  });
+
   // The calibration note is about the system, not something to act on today: it is not printed on Today any more.
   test("an uncalibrated reading says so without a note about the system's own baseline", () => {
     const html = withCapacity({ level: "uncalibrated", observationCount: 3, basis: [],

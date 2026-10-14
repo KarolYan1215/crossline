@@ -1,17 +1,19 @@
 "use client";
 
 import { useState } from "react";
-import type { ScheduleChange } from "../lib/crossline";
+import type { FinerSplitNote, ScheduleChange } from "../lib/crossline";
 
 /**
  * 「作业 3 因 11:30 会议后移 30 分钟」 above Today's timeline (docs/loop-and-scout.md §1): what a calendar change moved, one line each.
  * The re-plan is derived and has nothing to undo, so the way back is 「钉回原位」 — lock that block at its old time and accept the
- * overlap.
+ * overlap. Below them, steps planned again smaller after two days of not getting done (adaptive granularity), one line each.
  */
-export function ScheduleSummary({ changes }: { changes: ScheduleChange[] }) {
+export function ScheduleSummary({ changes, splits = [] }: { changes: ScheduleChange[];
+  /** Steps planned again smaller after two days of not getting done: a line each, nothing to answer. */
+  splits?: FinerSplitNote[] }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
-  if (!changes.length) return null;
+  if (!changes.length && !splits.length) return null;
   const pinBack = async (change: ScheduleChange) => {
     setBusy(change.blockId); setFailed(null);
     const response = await fetch("/api/plan/pin", { method: "POST", headers: { "content-type": "application/json" },
@@ -30,6 +32,9 @@ export function ScheduleSummary({ changes }: { changes: ScheduleChange[] }) {
       <span>「{change.title}」因 {change.cause} {shift(change)}</span>
       <button type="button" className="secondary" disabled={busy === change.blockId} onClick={() => void pinBack(change)}>钉回原位</button>
       {failed === change.blockId && <small role="status">未能钉回，请重试</small>}
+    </li>)}
+    {splits.map((split) => <li key={`split:${split.orderId}`}>
+      <span>「{split.title}{split.step ? ` · ${split.step}` : ""}」{split.days} 天没做成，已拆成更小的步骤，第一步不超过 15 分钟</span>
     </li>)}
   </ul>;
 }

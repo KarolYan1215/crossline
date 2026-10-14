@@ -6,9 +6,9 @@ import { createReminderWorkflow, requestWorkflow, reviewAgentTask } from "@cross
 import { ACTIONS, describeEvent, scheduleLabel, templateCriterion, type AccessContext, type ActionArgs, type ActionId, type ProposedAction } from "@crossline/core";
 import type { EvidenceClaimInput } from "@crossline/db";
 import { addCapturedTaskWithId, approveWorkOrderProposal, archiveWorkOrder, completeWorkOrderExecution, getStore, saveMilestoneTemplate,
-  startWorkOrderExecution } from "./crossline";
+  shiftToday, startWorkOrderExecution } from "./crossline";
 import { saveSourceFiles } from "./sources";
-import { requestStepReplan } from "./steps";
+import { requestStepReplan, requestTaskPass } from "./steps";
 import { approveMilestoneDrafts, rejectMilestoneDrafts } from "./approvals";
 import { answerAsk, snoozeAsk } from "./asks";
 import { analyzeNewCapturesInBackground } from "./capture-followups";
@@ -58,6 +58,11 @@ export const ACTION_HANDLERS: { [K in ActionId]: Handler<K> } = {
     return result.ok ? { ok: true, message: `已撤销：${result.label}` } : result;
   },
   "energy.report": (ctx, args) => recordEnergy(ctx, args.level, args.note),
+  // 「后面都推 10 分钟」: today's plan starts later; started and locked blocks stay. Undone like any `schedule.` setting.
+  "schedule.shift": (ctx, args) => {
+    const result = shiftToday(ctx, args.minutes);
+    return result.ok ? { ok: true, message: result.message, href: "/" } : result;
+  },
   "event.create": async (ctx, args) => {
     const result = await scheduleEvent(ctx, { title: args.title, lineId: args.lineId, date: args.date, weekdays: args.weekdays, startTime: args.startTime,
       endTime: args.endTime, until: args.until, minutes: args.minutes > 0 ? args.minutes : 60, location: args.location });
@@ -105,9 +110,12 @@ export const ACTION_HANDLERS: { [K in ActionId]: Handler<K> } = {
     requestWorkflow(getStore(), ctx.workspaceId, args.text, target.id, ctx.principalId);
     return { ok: true, message: "已交给助手建成工作流，建好后会通知；发出、发布一类的步骤仍由本人完成", href: "/settings#skills" };
   },
-  "proposal.decide": (ctx, args) => args.decision === "approve"
-    ? approveWorkOrderProposal(ctx, args.workOrderId)
-    : archiveWorkOrder(ctx, args.workOrderId, args.reason.trim() || "在输入框中拒绝"),
+  "proposal.decide": (ctx, args) => {
+    if (args.decision !== "approve") return archiveWorkOrder(ctx, args.workOrderId, args.reason.trim() || "在输入框中拒绝");
+    const result = approveWorkOrderProposal(ctx, args.workOrderId);
+    if (result.ok) requestTaskPass(ctx);
+    return result;
+  },
   "milestones.decide": (ctx, args) => {
     const result = (args.decision === "approve" ? approveMilestoneDrafts : rejectMilestoneDrafts)(ctx, args.milestoneIds);
     if (!result.approved.length) return { ok: false, code: result.skipped[0]?.code ?? "MILESTONE_NOT_DRAFT" };
@@ -207,7 +215,7 @@ function fileUnder(ctx: AccessContext, documentId: string, projectId: string): v
 const FAILURE: Record<string, string> = {
   WORK_ORDER_NOT_FOUND: "任务已不存在", ASK_NOT_FOUND: "这件待决事项已处理或已过期", OP_NOT_UNDOABLE: "该操作已撤销或超过 24 小时",
   MILESTONE_NOT_DRAFT: "里程碑已不是草稿", LINE_NOT_FOUND: "主线不存在", TASK_NOT_FOUND: "助手任务不存在", PROPOSAL_VERSION_CHANGED: "任务已被改动，请刷新后重试",
-  DOCUMENT_NOT_FOUND: "文件不存在", EXECUTION_NOT_ACTIVE: "任务当前不能提交", TEMPLATE_IDENTITY_UNKNOWN: "主线不存在", SOURCE_TYPE_NOT_ALLOWED: "不支持的文件类型"
+  DOCUMENT_NOT_FOUND: "文件不存在", SHIFT_MINUTES_INVALID: "顺延须在 5–120 分钟之间", EXECUTION_NOT_ACTIVE: "任务当前不能提交", TEMPLATE_IDENTITY_UNKNOWN: "主线不存在", SOURCE_TYPE_NOT_ALLOWED: "不支持的文件类型"
 };
 
 /** Carries out one confirmed action. Everything except an undo is recorded for 撤销; a failure changes nothing and says why. */

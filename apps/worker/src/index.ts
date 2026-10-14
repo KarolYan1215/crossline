@@ -20,7 +20,7 @@ import { createCalendarPublisher } from "./calendar-publish";
 import { AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, BACKGROUND_PAUSED, backgroundSpend, CALENDAR_SYNC_FAILURE, pausedKinds, spendAllows, type BackgroundKind, type PlanRankingInput } from "@crossline/core";
 import { createFlywheelExpander } from "./flywheel";
 import { createManualbookBuilder, pendingMaterialWorkOrders, pendingTutorials } from "./manualbook";
-import { createProgressJudge, createStepPlanner, createWarningReviewer, reportsAwaitingJudgement, settleOldQuestions, tasksAwaitingStepPlan, warningsAwaitingReview } from "./step-planner";
+import { createProgressJudge, createStepPlanner, createWarningReviewer, reportsAwaitingJudgement, requestFinerSplits, settleOldQuestions, tasksAwaitingStepPlan, warningsAwaitingReview } from "./step-planner";
 import { createArchetypeCurator, curationDue } from "./archetype-curator";
 import { createTaskTitler, untitledTasks } from "./task-titler";
 import { createCalendarClassifier, unfiledCalendarEvents } from "./calendar-classifier";
@@ -118,6 +118,8 @@ async function autoAnalyzePass(workspaceId: string, checkedAt = new Date().toISO
       const outcome = await getCaptureAnalyzer(workspaceId)(client, id).catch(() => undefined);
       if (outcome) console.info(JSON.stringify({ type: `analysis.auto.${outcome.state}`, checkedAt, workspaceId, captureId: id }));
     }
+    // A proposal that took effect by default is planned into steps now, not at the next tick.
+    void stepPlanPass(workspaceId).catch(() => {});
   } finally { autoAnalyzing.delete(workspaceId); }
 }
 
@@ -140,6 +142,7 @@ async function autoBackplanPass(workspaceId: string, checkedAt = new Date().toIS
       const outcome = await backplan(id).catch(() => undefined);
       if (outcome) console.info(JSON.stringify({ type: `backplan.auto.${outcome.state}`, checkedAt, workspaceId, milestoneId: id }));
     }
+    void stepPlanPass(workspaceId).catch(() => {});
   } finally { autoBackplanning.delete(workspaceId); }
 }
 
@@ -329,8 +332,10 @@ async function portraitPass(workspaceId: string, checkedAt: string): Promise<voi
 }
 
 const stepPlanning = new Set<string>();
+/** Asked for while a pass was running: run once more when it ends, so a task approved mid-pass is not left for the next tick. */
+const stepPlanAgain = new Set<string>();
 async function stepPlanPass(workspaceId: string, checkedAt = new Date().toISOString()): Promise<void> {
-  if (stepPlanning.has(workspaceId)) return;
+  if (stepPlanning.has(workspaceId)) { stepPlanAgain.add(workspaceId); return; }
   stepPlanning.add(workspaceId);
   try {
     try {
@@ -341,6 +346,11 @@ async function stepPlanPass(workspaceId: string, checkedAt = new Date().toISOStr
     try {
       const settled = settleOldQuestions(analysisStore, workspaceId);
       if (settled.length) console.info(JSON.stringify({ type: "step_questions.assumed", checkedAt, workspaceId, settled }));
+    } catch { /* next tick */ }
+    // A step that did not get done on two days is planned again smaller: rules only, picked up below like any replan.
+    try {
+      const splits = requestFinerSplits(analysisStore, workspaceId);
+      if (splits.length) console.info(JSON.stringify({ type: "steps.finer_split_requested", checkedAt, workspaceId, splits }));
     } catch { /* next tick */ }
     if (!codexSupervisor || paused(workspaceId, "planning")) return;
     const ids = tasksAwaitingStepPlan(analysisStore, workspaceId);
@@ -370,7 +380,10 @@ async function stepPlanPass(workspaceId: string, checkedAt = new Date().toISOStr
       const verdict = await reviewer(item).catch(() => undefined);
       if (verdict) console.info(JSON.stringify({ type: `validation.${verdict.verdict}`, checkedAt, workspaceId, subject: item.subject, entityId: item.entityId }));
     }
-  } finally { stepPlanning.delete(workspaceId); }
+  } finally {
+    stepPlanning.delete(workspaceId);
+    if (stepPlanAgain.delete(workspaceId)) void stepPlanPass(workspaceId).catch(() => {});
+  }
 }
 
 async function tick(): Promise<void> {

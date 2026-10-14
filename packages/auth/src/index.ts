@@ -113,10 +113,12 @@ function crosslineAuthConfig(options: CrosslineAuthOptions): BetterAuthOptions {
       defaultCookieAttributes: { httpOnly: true, secure: true, sameSite: "lax", path: "/" }
     },
     account: {
-      // The big plan requires explicit linking: signing in with Google using an email that already has
-      // a password account must not silently become the same account. `linkSocial()` while authenticated
-      // is still how a user connects a second provider on purpose.
-      accountLinking: { disableImplicitLinking: true }
+      // Same email, same account (the person's decision, 2026-10-13; it replaced explicit-only linking, which refused a Google or
+      // ChatGPT sign-in for the owner's own address and offered no way to link). Better Auth links only when both sides vouch for the
+      // address: the provider says it verified it (Google's `email_verified`; ChatGPT's, see chatgpt.ts) — no provider is listed as
+      // trusted, so an unverified claim never links — and the local account's own email is verified (`requireLocalEmailVerified`, on
+      // by default), so an unverified password sign-up cannot squat an address and inherit the real owner's sign-in.
+      accountLinking: { enabled: true }
     },
     ...(emailCapable ? {
       emailAndPassword: {

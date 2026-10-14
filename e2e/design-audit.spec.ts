@@ -119,9 +119,9 @@ for (const path of PAGES) {
 /**
  * The portrait's layout defects (decided 2026-10-12: axis percentages over their captions, energy labels on each other, two advice dots
  * on one spot) as one property: no two pieces of text on the page — on screen or in the off-screen share images — overlap. Measured per
- * line box with `Range.getClientRects()` (tighter than an element's box, and it works for SVG text). The share card must hold its content.
+ * line box with `Range.getClientRects()` (tighter than an element's box, and it works for SVG text). Both share cards must hold their content.
  */
-test("/portrait: no two pieces of text overlap, and the share card fits", async ({ page }) => {
+test("/portrait: no two pieces of text overlap, and the share cards fit", async ({ page }) => {
   await ensurePortrait(page);
   await page.goto("/portrait");
   await page.waitForLoadState("networkidle");
@@ -152,8 +152,9 @@ test("/portrait: no two pieces of text overlap, and the share card fits", async 
       const height = Math.min(one.rect.bottom, two.rect.bottom) - Math.max(one.rect.top, two.rect.top);
       if (width > 1 && height > 1) overlaps.push(`「${one.text}」(${one.where}) × 「${two.text}」(${two.where})`);
     }
-    const card = document.querySelector(".pt-card");
-    return { overlaps: [...new Set(overlaps)], cardOverflow: card ? card.scrollHeight - card.clientHeight : 0 };
+    // Both 3:4 cards (type and energy rhythm) must hold their content.
+    const cardOverflow = Math.max(0, ...[...document.querySelectorAll(".pt-card")].map((card) => card.scrollHeight - card.clientHeight));
+    return { overlaps: [...new Set(overlaps)], cardOverflow };
   });
   expect.soft(overlaps, "text overlapping other text on /portrait").toEqual([]);
   expect.soft(cardOverflow, "share card content taller than the card").toBeLessThanOrEqual(1);
