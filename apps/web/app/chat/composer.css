@@ -73,7 +73,9 @@
 .corner-stack{position:fixed;right:16px;bottom:76px;z-index:60;display:flex;flex-direction:column;align-items:flex-end;gap:8px;pointer-events:none}
 .corner-stack>*{pointer-events:auto}
 .corner-stack .timer-float,.corner-stack .assistant-bubble-wrap,.corner-stack .assistant-bubble-wrap .assistant-bubble{position:static}
-@media (max-width:680px){.corner-stack{right:8px;bottom:calc(60px + env(safe-area-inset-bottom))}}
+/* On a phone the corner must stay small: with the timer, its alert and the nudge preview stacked it covered the input box. The bubble
+   already carries the unread mark, and opening it shows the message, so the preview is left out there. */
+@media (max-width:680px){.corner-stack{right:8px;bottom:calc(60px + env(safe-area-inset-bottom))}.corner-stack .assistant-nudge-preview{display:none}}
 /* Room at the foot of every page as tall as the corner reaches (`--corner-clearance`, measured by CornerStack), so nothing is left
    under the bubble once scrolled to the end. `:root` outranks the plain `.page` rules in globals.css and mobile.css. */
 :root .page,:root .subpage{padding-bottom:max(28px,var(--corner-clearance,0px))}
