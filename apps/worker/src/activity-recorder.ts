@@ -1,6 +1,6 @@
 import { classifyWindow, isPrivateWindow, type ActivityReading, type ActivityRule } from "@crossline/core";
 import type { CrosslineStore } from "@crossline/db";
-import { ACTIVITY_LAST_ACTIVE, ACTIVITY_LONG_GAPS, SLEEP_TRACKING_CONSENT } from "@crossline/core";
+import { ACTIVITY_LAST_ACTIVE, ACTIVITY_LONG_GAPS, INPUT_RHYTHM_BUCKETS, INPUT_RHYTHM_CONSENT, SLEEP_TRACKING_CONSENT, type InputRhythmBucket } from "@crossline/core";
 
 /** Consent v1: idle time and window changes, as daily aggregates only. Never a window title, never an app name. */
 export const LOCAL_ACTIVITY_CONSENT = "localActivity.consent";
@@ -60,9 +60,34 @@ export function createActivityTracker(store: CrosslineStore, listWorkspaceIds: (
     if (store.getSetting(workspaceId, ACTIVITY_LONG_GAPS) !== undefined) store.deleteSetting(workspaceId, ACTIVITY_LONG_GAPS);
   }
 
+  /**
+   * 键鼠节律 (docs/energy-and-ecosystem.md §8), under its own consent: the reading's input seconds, pauses and pointer travel added to
+   * the quarter hour it falls in, the last fourteen days kept. Off deletes them. Nothing about which keys, where the pointer was or
+   * which window was in front.
+   */
+  function noteRhythm(workspaceId: string, reading: ActivityReading, paused: boolean): void {
+    if (store.getSetting(workspaceId, INPUT_RHYTHM_CONSENT) !== "granted") {
+      if (store.getSetting(workspaceId, INPUT_RHYTHM_BUCKETS) !== undefined) store.deleteSetting(workspaceId, INPUT_RHYTHM_BUCKETS);
+      return;
+    }
+    if (paused || !reading.rhythm) return;
+    const at = Date.parse(reading.at);
+    const start = new Date(at - at % (15 * 60_000)).toISOString();
+    let buckets: InputRhythmBucket[] = [];
+    try { buckets = JSON.parse(store.getSetting(workspaceId, INPUT_RHYTHM_BUCKETS) ?? "[]") as InputRhythmBucket[]; } catch { /* starts afresh */ }
+    const bucket = buckets.find((item) => item.start === start) ?? (buckets.push({ start, minutes: 0, activeSec: 0, pauses: 0, mousePx: 0 }), buckets.at(-1)!);
+    bucket.minutes += intervalSeconds / 60;
+    bucket.activeSec += reading.rhythm.activeSec;
+    bucket.pauses += reading.rhythm.pauses;
+    bucket.mousePx += reading.rhythm.mousePx;
+    const since = new Date(at - 14 * 86_400_000).toISOString();
+    store.setSetting(workspaceId, INPUT_RHYTHM_BUCKETS, JSON.stringify(buckets.filter((item) => item.start >= since)));
+  }
+
   function handleFor(workspaceId: string, reading: ActivityReading): "skipped" | "recorded" {
     const pausedUntil = store.getSetting(workspaceId, ACTIVITY_PAUSED_UNTIL);
     const paused = Boolean(pausedUntil && Date.parse(pausedUntil) > Date.parse(reading.at));
+    noteRhythm(workspaceId, reading, paused);
     // 作息记录 answers to its own consent only; without it nothing of it is kept (and what was is gone).
     if (store.getSetting(workspaceId, SLEEP_TRACKING_CONSENT) === "granted") { if (!paused && reading.idleMs < IDLE_AFTER_MS) noteLongGap(workspaceId, reading.at); }
     else forgetGaps(workspaceId);

@@ -80,7 +80,10 @@ export default async function SettingsPage() {
   const energyStatus: EnergyStatus = { now: energy.predict(new Date().toISOString()),
     nights: { screen: recentNights.filter((episode) => episode.source === "screen").length, phone: recentNights.filter((episode) => episode.source !== "screen").length },
     reports: energy.calibration.reports, agreement: energy.calibration.agreement, phoneConnected: Boolean(store.getSetting(ctx.workspaceId, HEALTH_TOKEN_SETTING)),
-    sleepTracking: store.getSetting(ctx.workspaceId, SLEEP_TRACKING_CONSENT) === "granted" };
+    sleepTracking: store.getSetting(ctx.workspaceId, SLEEP_TRACKING_CONSENT) === "granted",
+    inputRhythm: store.getSetting(ctx.workspaceId, "activity.inputRhythm") === "granted",
+    camera: store.getSetting(ctx.workspaceId, "energy.camera") === "granted",
+    signals: energy.covariates.map(({ id, label, evaluated, hitsWith, hitsWithout, enabled }) => ({ id, label, evaluated, hitsWith, hitsWithout, enabled })) };
 
   return <SubpageShell active="设置" title="设置">
     <div className="st-layout">

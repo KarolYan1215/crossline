@@ -53,7 +53,9 @@ export default withSerwist({
         { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains" },
         { key: "Content-Security-Policy", value: [
           "default-src 'self'",
-          "script-src 'self' 'unsafe-inline'",
+          // 'wasm-unsafe-eval' lets the page compile WebAssembly (MediaPipe for 摄像头精力采样, docs/energy-and-ecosystem.md §8) without
+          // allowing JavaScript eval; the wasm itself is served from this origin.
+          "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'",
           "style-src 'self' 'unsafe-inline'",
           "img-src 'self' blob: data:",
           // FullCalendar (the Plan A-lens and the Workbench timeline view) ships its own icon font as a

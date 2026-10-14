@@ -113,3 +113,29 @@ test("作息记录 is its own switch: a night away is kept as its start and end 
     expect(store.getSetting(w, "activity.lastActiveAt")).toBeUndefined();
   } finally { store.close(); }
 });
+
+test("键鼠节律 is its own switch: quarter-hour totals of input seconds, pauses and pointer travel, nothing else; off deletes them", async () => {
+  const { INPUT_RHYTHM_BUCKETS, INPUT_RHYTHM_CONSENT, inputRhythmAt } = await import("@crossline/core");
+  const { store, tracker, w } = setup();
+  try {
+    const at = (iso: string): ActivityReading => ({ at: iso, idleMs: 500, app: "Code.exe", title: "secret.ts", rhythm: { activeSec: 50, pauses: 2, mousePx: 900 } });
+    tracker.handle(at("2026-09-20T10:01:00.000Z"));
+    expect(store.getSetting(w, INPUT_RHYTHM_BUCKETS)).toBeUndefined();
+    store.setSetting(w, INPUT_RHYTHM_CONSENT, "granted");
+    for (let minute = 1; minute <= 14; minute += 1) tracker.handle(at(`2026-09-20T10:${String(minute).padStart(2, "0")}:00.000Z`));
+    const buckets = JSON.parse(store.getSetting(w, INPUT_RHYTHM_BUCKETS)!);
+    expect(buckets).toEqual([{ start: "2026-09-20T10:00:00.000Z", minutes: 14, activeSec: 700, pauses: 28, mousePx: 12_600 }]);
+    expect(JSON.stringify(buckets)).not.toContain("secret");
+    expect(inputRhythmAt(buckets, "2026-09-20T10:30:00.000Z")).toEqual({ fragmentation: 2.4, pointerPace: 18 });
+    store.setSetting(w, INPUT_RHYTHM_CONSENT, "denied");
+    tracker.handle(at("2026-09-20T10:20:00.000Z"));
+    expect(store.getSetting(w, INPUT_RHYTHM_BUCKETS)).toBeUndefined();
+  } finally { store.close(); }
+});
+
+test("the source's rhythm fields are kept only when all three are sane numbers", () => {
+  const at = new Date("2026-09-20T10:00:00.000Z");
+  expect(parseReadingLine(JSON.stringify({ idleMs: 5, app: "a", title: "b", activeSec: 40, pauses: 3, mousePx: 1200 }), at)?.rhythm)
+    .toEqual({ activeSec: 40, pauses: 3, mousePx: 1200 });
+  expect(parseReadingLine(JSON.stringify({ idleMs: 5, app: "a", title: "b", activeSec: -1, pauses: 3, mousePx: 1200 }), at)?.rhythm).toBeUndefined();
+});

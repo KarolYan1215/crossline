@@ -4,6 +4,7 @@ import { getStore } from "../../../lib/crossline";
 import { resolveAccessContext } from "../../../lib/access-guard";
 import { predictEnergyTransition, readTransitionOutcomes, type EnergyLevel } from "../../../lib/energy-learning";
 import { isCrossSiteWrite } from "../../../lib/same-origin";
+import { CAMERA_AGGREGATE_RANGES, CAMERA_ENERGY_CONSENT } from "@crossline/core";
 
 const numericAggregateKeys = new Set(["responseSeconds"]);
 
@@ -27,6 +28,23 @@ export async function POST(request: Request) {
   const actualLoad = body.actualLoad;
   if (source === "camera_proxy") {
     return NextResponse.json({ ok: false, code: "CAMERA_ENERGY_PATH_REMOVED" }, { status: 400 });
+  }
+  // The camera's window aggregate (docs/energy-and-ecosystem.md §8): only with its own consent, only the five numbers, each in range;
+  // never a frame or anything else. It carries no level — it is a covariate the energy model must earn the use of.
+  if (source === "camera_aggregate") {
+    if (getStore().getSetting(ctx.workspaceId, CAMERA_ENERGY_CONSENT) !== "granted")
+      return NextResponse.json({ ok: false, code: "CAMERA_NOT_ENABLED" }, { status: 403 });
+    const aggregate = rawAggregate as Record<string, unknown> | undefined;
+    const keys = Object.keys(CAMERA_AGGREGATE_RANGES) as Array<keyof typeof CAMERA_AGGREGATE_RANGES>;
+    if (!aggregate || typeof aggregate !== "object" || Array.isArray(aggregate) || Object.keys(aggregate).some((key) => !(key in CAMERA_AGGREGATE_RANGES))
+      || keys.some((key) => { const value = aggregate[key]; const [low, high] = CAMERA_AGGREGATE_RANGES[key];
+        return typeof value !== "number" || !Number.isFinite(value) || value < low || value > high; })
+      || context !== "general" || workOrderId !== undefined || actualLoad !== undefined)
+      return NextResponse.json({ ok: false, code: "AGGREGATE_FEATURES_ONLY" }, { status: 400 });
+    const id = randomUUID();
+    getStore().saveEnergyObservation({ id, ownerId: ctx.principalId, workspaceId: ctx.workspaceId, source: "camera_aggregate", level: "uncalibrated",
+      confidence: "low", aggregate: Object.fromEntries(keys.map((key) => [key, aggregate[key] as number])), observedAt: new Date().toISOString() });
+    return NextResponse.json({ ok: true, id });
   }
   if (source !== "self_report" ||
       !["low", "medium", "high"].includes(String(level)) ||

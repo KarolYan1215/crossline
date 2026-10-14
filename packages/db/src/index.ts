@@ -334,7 +334,7 @@ type RelationExtras = "evidence" | "counterexample" | "costMinutes" | "lastValid
 
 export type StoredEnergyObservation = {
   id: string; ownerId: string; workspaceId: string;
-  source: "self_report" | "execution_history" | "time_pattern" | "local_activity";
+  source: "self_report" | "execution_history" | "time_pattern" | "local_activity" | "camera_aggregate";
   level: "low" | "medium" | "high" | "uncalibrated";
   confidence: "low" | "medium" | "high";
   aggregate: Record<string, number>;
@@ -2875,6 +2875,11 @@ export class CrosslineStore {
   personActivityTimes(workspaceId: string, since: string): string[] {
     const rows = this.#db.prepare(`SELECT at FROM (${PERSON_ACTIVITY_SQL}) WHERE at IS NOT NULL ORDER BY at`).all({ ws: workspaceId, since }) as Array<{ at: string }>;
     return rows.map((row) => row.at);
+  }
+
+  /** Deletes a workspace's observations from one source (the camera's, when its consent is withdrawn). Returns how many went. */
+  deleteEnergyObservations(workspaceId: string, source: StoredEnergyObservation["source"]): number {
+    return this.#db.prepare("DELETE FROM energy_observations WHERE workspace_id = ? AND source = ?").run(workspaceId, source).changes;
   }
 
   listEnergyObservations(workspaceId: string): StoredEnergyObservation[] {

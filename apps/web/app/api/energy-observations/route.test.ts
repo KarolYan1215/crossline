@@ -8,10 +8,12 @@ const TEST_CTX = { principalId: "test-owner", workspaceId: "test-workspace", rol
 vi.mock("../../../lib/access-guard", () => ({ resolveAccessContext: async () => ({ ctx: TEST_CTX }) }));
 
 const saved: Array<Record<string, unknown>> = [];
+const settings = new Map<string, string>();
 const events: Array<Record<string, unknown>> = [];
 
 vi.mock("../../../lib/crossline", () => ({
   getStore: () => ({
+    getSetting: (_workspaceId: string, key: string) => settings.get(key),
     saveEnergyObservation: (observation: Record<string, unknown>) => { saved.push(observation); },
     appendEvent: (event: Record<string, unknown>) => { events.push(event); },
     listEvents: (_workspaceId: string, options: { type?: string | string[]; entityId?: string }) =>
@@ -33,6 +35,21 @@ const post = async (body: unknown) => {
 };
 
 describe("energy observation route", () => {
+  test("a camera window's aggregate is taken only with its consent, only the five numbers in range, and carries no level", async () => {
+    const aggregate = { blinkRate: 14, perclos: 0.06, heartRate: 71, quality: 0.62, windowSeconds: 20 };
+    const body = (extra: Record<string, unknown> = {}) => ({ source: "camera_aggregate", level: "uncalibrated", confidence: "low", aggregate: { ...aggregate, ...extra } });
+    settings.delete("energy.camera");
+    expect((await post(body())).status).toBe(403);
+    settings.set("energy.camera", "granted");
+    saved.length = 0;
+    expect((await post(body())).status).toBe(200);
+    expect(saved.at(-1)).toMatchObject({ source: "camera_aggregate", level: "uncalibrated", aggregate });
+    expect((await post(body({ frame: 1 }))).status).toBe(400);
+    expect((await post(body({ perclos: 3 }))).status).toBe(400);
+    expect((await post({ ...body(), frame: "data:image/jpeg;base64,x" })).status).toBe(400);
+    settings.delete("energy.camera");
+  });
+
   test("a correction from the Today capsule is stored as an ordinary self-report, so it calibrates the model", async () => {
     saved.length = 0;
     const response = await post({ source: "self_report", level: "low", confidence: "high", aggregate: { responseSeconds: 2 }, context: "correction" });

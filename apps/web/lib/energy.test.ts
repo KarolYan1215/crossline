@@ -119,3 +119,31 @@ test("Siri's capture token writes a line and nothing else; a health token cannot
   for (let i = 0; i < 29; i += 1) await send(capture, `第 ${i} 条`);
   expect((await send(capture)).status).toBe(429);
 });
+
+test("an optional signal moves a reading only after it earns it: off by consent, recorded while unproven, applied once the backtest admits it", () => {
+  const store = setup();
+  const nights = Array.from({ length: 14 }, (_, index) => {
+    const wake = Date.parse("2026-10-01T12:00:00Z") + index * 86_400_000;
+    return { start: new Date(wake - 8 * 3_600_000).toISOString(), end: new Date(wake).toISOString() };
+  });
+  storeHealthSummary(ws, { sleep: nights });
+  // Twenty-eight afternoon reports (16:00 and 17:00 local, where the sleep model alone reads medium) whose level follows how broken up
+  // the input was in the hour before.
+  const buckets: Array<{ start: string; minutes: number; activeSec: number; pauses: number; mousePx: number }> = [];
+  for (let index = 0; index < 28; index += 1) {
+    const day = Math.floor(index / 2), observedAt = new Date(Date.parse("2026-10-01T21:00:00Z") + day * 86_400_000 + (index % 2) * 3_600_000).toISOString();
+    const level = (["low", "medium", "high"] as const)[index % 3]!;
+    const pauses = level === "low" ? 60 : level === "medium" ? 20 : 2;
+    for (let q = 1; q <= 4; q += 1) buckets.push({ start: new Date(Date.parse(observedAt) - q * 15 * 60_000).toISOString(), minutes: 15, activeSec: 600, pauses, mousePx: 5000 });
+    store.saveEnergyObservation({ id: `r${index}`, ownerId: "x", workspaceId: ws, source: "self_report", level, confidence: "high", aggregate: { responseSeconds: 2 }, observedAt });
+  }
+  store.setSetting(ws, "activity.inputRhythm.buckets", JSON.stringify(buckets));
+  expect(energyModel(TEST_CTX, DEFAULT_AVAILABILITY).covariates).toEqual([]);
+  store.setSetting(ws, "activity.inputRhythm", "granted");
+  const model = energyModel(TEST_CTX, DEFAULT_AVAILABILITY);
+  const fragmentation = model.covariates.find((item) => item.id === "input.fragmentation")!;
+  expect(fragmentation.enabled).toBe(true);
+  expect(fragmentation.hitsWith).toBeGreaterThan(fragmentation.hitsWithout);
+  const last = "2026-10-14T22:00:00.000Z";
+  expect(model.predict(last).basis.join(" ")).toContain("按键鼠停顿");
+});

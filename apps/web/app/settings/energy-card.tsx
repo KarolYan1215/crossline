@@ -11,6 +11,11 @@ export type EnergyStatus = {
   phoneConnected: boolean;
   /** 作息记录, its own consent: the start and end of long idle stretches, read as sleep. */
   sleepTracking: boolean;
+  /** 键鼠节律 and 摄像头精力采样, each its own consent (docs/energy-and-ecosystem.md §8). */
+  inputRhythm: boolean;
+  camera: boolean;
+  /** Each turned-on signal's backtest against the person's own reports: it moves a reading only once `enabled`. */
+  signals: Array<{ id: string; label: string; evaluated: number; hitsWith: number; hitsWithout: number; enabled: boolean }>;
 };
 
 const LEVEL = { low: "低", medium: "中", high: "高" } as const;
@@ -31,6 +36,16 @@ export function EnergyCard({ status, phoneUrl }: { status: EnergyStatus; phoneUr
     if (!response?.ok) { setTracking(!on); setTrackingNote("未保存，请重试"); } else setTrackingNote(on ? "已开启：从下一段长时间空闲开始记录" : "已关闭，已删除记录");
   };
   const [note, setNote] = useState("");
+  const [rhythm, setRhythm] = useState(status.inputRhythm);
+  const [camera, setCamera] = useState(status.camera);
+  const [signalNote, setSignalNote] = useState("");
+  const changeSignal = async (signal: "input_rhythm" | "camera", on: boolean) => {
+    const set = signal === "camera" ? setCamera : setRhythm;
+    set(on);
+    const response = await fetch("/api/settings/energy-signals", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ signal, on }) }).catch(() => undefined);
+    if (!response?.ok) { set(!on); setSignalNote("未保存，请重试"); return; }
+    setSignalNote(on ? signal === "camera" ? "已开启：本机桌面页面打开时，每 20 分钟采样 20 秒" : "已开启：从下一分钟开始记录" : "已关闭，已删除记录");
+  };
   const [captureToken, setCaptureToken] = useState("");
   const issue = async (scope: "health" | "capture") => {
     const response = await fetch("/api/health/token", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope }) }).catch(() => undefined);
@@ -47,6 +62,16 @@ export function EnergyCard({ status, phoneUrl }: { status: EnergyStatus; phoneUr
       <SegmentedControl label="作息记录" value={tracking ? "on" : "off"} onChange={(next) => void changeTracking(next === "on")}
         options={[{ value: "off", label: "关闭" }, { value: "on", label: "开启" }]} /></div>
     {trackingNote && <p role="status" className="st-note">{trackingNote}</p>}
+    <div className="st-row"><span className="st-row-label">键鼠节律<small>只记每 15 分钟内有输入的秒数、5 秒以上的停顿次数和鼠标移动距离；不记按键、内容和窗口；关闭即删除</small></span>
+      <SegmentedControl label="键鼠节律" value={rhythm ? "on" : "off"} onChange={(next) => void changeSignal("input_rhythm", next === "on")}
+        options={[{ value: "off", label: "关闭" }, { value: "on", label: "开启" }]} /></div>
+    <div className="st-row"><span className="st-row-label">摄像头精力采样<small>仅电脑：页面在前台时每 20 分钟开摄像头 20 秒，在本机算眨眼、闭眼比例和心率估计，只保存这四个数；画面不保存、不上传；关闭即删除</small></span>
+      <SegmentedControl label="摄像头精力采样" value={camera ? "on" : "off"} onChange={(next) => void changeSignal("camera", next === "on")}
+        options={[{ value: "off", label: "关闭" }, { value: "on", label: "开启" }]} /></div>
+    {signalNote && <p role="status" className="st-note">{signalNote}</p>}
+    {status.signals.length > 0 && <ul className="st-list">{status.signals.map((signal) => <li key={signal.id}>{signal.label}：{signal.enabled
+      ? `已用于修正当前精力（回测 ${signal.evaluated} 次自评，命中 ${signal.hitsWithout} → ${signal.hitsWith}）`
+      : signal.evaluated ? `验证中：回测 ${signal.evaluated} 次自评，未比不用时更准，暂不使用` : "验证中：还需要更多自评"}</li>)}</ul>}
     <div className="st-row"><span className="st-row-label">现在<small>{SURE[status.now.confidence]}</small></span><b>{LEVEL[status.now.level]}</b></div>
     <ul className="st-list">{status.now.basis.map((line) => <li key={line}>{line}</li>)}</ul>
     <div className="st-row"><span className="st-row-label">依据<small>近 14 天</small></span>

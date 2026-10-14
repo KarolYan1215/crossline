@@ -478,6 +478,8 @@ export * from "./nudges";
 export * from "./granularity";
 export * from "./energy-model";
 export * from "./efficiency";
+export * from "./energy-covariates";
+export * from "./camera-signals";
 export * from "./relevance";
 export * from "./task-title";
 export * from "./calendar-lines";

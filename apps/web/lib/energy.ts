@@ -2,8 +2,8 @@ import "server-only";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { formatInTimeZone } from "date-fns-tz";
 import {
-  ACTIVITY_LONG_GAPS, SLEEP_TRACKING_CONSENT, calibrate, dayCapacity, mergeSleep, phaseShiftFromPeak, predictEnergy, sleepFromGaps, sleepFromPhoneEvents, alertnessAt,
-  type AccessContext, type AvailabilityWindow, type DailyPhysiology, type DayCapacity, type EnergyCalibration, type EnergyLevel, type EnergyPrediction, type EnergySource, type PhoneSleepEvent, type SleepEpisode
+  ACTIVITY_LONG_GAPS, CAMERA_ENERGY_CONSENT, INPUT_RHYTHM_BUCKETS, INPUT_RHYTHM_CONSENT, SLEEP_TRACKING_CONSENT, calibrate, covariateShift, inputRhythmAt, judgeCovariate, dayCapacity, mergeSleep, phaseShiftFromPeak, predictEnergy, sleepFromGaps, sleepFromPhoneEvents, alertnessAt,
+  type AccessContext, type AvailabilityWindow, type CovariateVerdict, type DailyPhysiology, type InputRhythmBucket, type DayCapacity, type EnergyCalibration, type EnergyLevel, type EnergyPrediction, type EnergySource, type PhoneSleepEvent, type SleepEpisode
 } from "@crossline/core";
 import { effectiveSchedulePreferences, getStore } from "./crossline";
 
@@ -38,7 +38,34 @@ export type EnergyModel = {
   capacity: (at: string, day: string) => DayCapacity;
   /** When the person last said how they are, ISO, or "". */
   lastReportAt: string;
+  /** Each optional signal the person turned on, with its backtest: only an `enabled` one moves a reading. */
+  covariates: Array<CovariateVerdict & { label: string }>;
 };
+
+type Signal = { id: string; label: string; valueAt: (at: string) => number | undefined };
+
+/**
+ * The optional signals (docs/energy-and-ecosystem.md §8), each read only with its own consent: the input rhythm over the hour before a
+ * moment, and the camera's last window within half an hour before it. Both exist only for the past, so they can move a reading of now and
+ * never one of a later slot.
+ */
+function optionalSignals(ctx: AccessContext): Signal[] {
+  const store = getStore(), ws = ctx.workspaceId;
+  const signals: Signal[] = [];
+  if (store.getSetting(ws, INPUT_RHYTHM_CONSENT) === "granted") {
+    const buckets = read(store.getSetting(ws, INPUT_RHYTHM_BUCKETS), [] as InputRhythmBucket[]);
+    signals.push({ id: "input.fragmentation", label: "键鼠停顿", valueAt: (at) => inputRhythmAt(buckets, at)?.fragmentation },
+      { id: "input.pointer", label: "鼠标移动", valueAt: (at) => inputRhythmAt(buckets, at)?.pointerPace });
+  }
+  if (store.getSetting(ws, CAMERA_ENERGY_CONSENT) === "granted") {
+    const windows = store.listEnergyObservations(ws).filter((item) => item.source === "camera_aggregate");
+    const near = (at: string) => windows.find((item) => item.observedAt <= at && Date.parse(at) - Date.parse(item.observedAt) <= 30 * 60_000);
+    signals.push({ id: "camera.perclos", label: "闭眼比例", valueAt: (at) => near(at)?.aggregate.perclos },
+      { id: "camera.blinks", label: "眨眼频率", valueAt: (at) => near(at)?.aggregate.blinkRate },
+      { id: "camera.pulse", label: "心率", valueAt: (at) => { const item = near(at); return item && (item.aggregate.quality ?? 0) >= 0.4 ? item.aggregate.heartRate : undefined; } });
+  }
+  return signals;
+}
 
 /**
  * The person's energy model as of now: sleep from every source (a phone's record wins over the screen's guess), the circadian peak
@@ -60,7 +87,29 @@ export function energyModel(ctx: AccessContext, windows: AvailabilityWindow[]): 
     return value === undefined ? [] : [{ alertness: value, level: report.level as EnergyLevel }];
   }));
   const lastReportAt = reports.map((report) => report.observedAt).sort().at(-1) ?? "";
-  return { episodes, calibration, phaseShift, hourOf, lastReportAt, predict: (at) => predictEnergy(at, episodes, calibration, hourOf, phaseShift),
+  // Each optional signal judged on the person's own reports; only one the backtest admits moves a reading.
+  const signals = optionalSignals(ctx);
+  const covariates = signals.map((signal) => ({ label: signal.label, ...judgeCovariate(signal.id, reports.flatMap((report) => {
+    const value = alertnessAt(report.observedAt, episodes, hourOf, phaseShift);
+    return value === undefined ? [] : [{ at: report.observedAt, alertness: value, level: report.level as EnergyLevel, value: signal.valueAt(report.observedAt) }];
+  }), calibration) }));
+  const predict = (at: string): EnergyPrediction => {
+    const base = predictEnergy(at, episodes, calibration, hourOf, phaseShift);
+    if (base.alertness === undefined) return base;
+    let shift = 0;
+    const used: string[] = [];
+    for (const verdict of covariates) {
+      const signal = signals.find((item) => item.id === verdict.id);
+      if (!verdict.enabled || !verdict.fit || !signal) continue;
+      const moved = covariateShift(verdict.fit, signal.valueAt(at));
+      if (moved !== 0) { shift += moved; used.push(verdict.label); }
+    }
+    if (!used.length) return base;
+    const value = base.alertness + shift;
+    const level: EnergyLevel = value < calibration.low ? "low" : value < calibration.high ? "medium" : "high";
+    return { ...base, level, alertness: Math.round(value * 10) / 10, basis: [...base.basis, `按${used.join("、")}修正`] };
+  };
+  return { episodes, calibration, phaseShift, hourOf, lastReportAt, covariates, predict,
     capacity: (at, day) => dayCapacity(at, day, episodes, phone.physiology?.() ?? []) };
 }
 

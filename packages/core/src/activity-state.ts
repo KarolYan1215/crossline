@@ -17,7 +17,30 @@ export const CATEGORY_LABEL: Record<ActivityCategory | "idle", string> = {
 export const PRODUCTIVE: ReadonlySet<ActivityCategory> = new Set(["coding", "research_tool", "writing", "reading"]);
 
 /** One reading from a source: the instant, how long since input, the foreground app, and the title of its window. */
-export type ActivityReading = { at: string; idleMs: number; app: string; title: string };
+/**
+ * `rhythm` (Windows source, docs/energy-and-ecosystem.md §8): over the reading's interval, how many seconds had input, how many pauses of
+ * five seconds or more broke it, and how far the pointer travelled in pixels — timing and distance only, never a key or a position.
+ */
+export type InputRhythm = { activeSec: number; pauses: number; mousePx: number };
+export type ActivityReading = { at: string; idleMs: number; app: string; title: string; rhythm?: InputRhythm };
+
+/** 键鼠节律, its own consent (off unless turned on; off deletes what was kept), and where its quarter-hour totals are kept (14 days). */
+export const INPUT_RHYTHM_CONSENT = "activity.inputRhythm";
+export const INPUT_RHYTHM_BUCKETS = "activity.inputRhythm.buckets";
+export type InputRhythmBucket = { start: string; minutes: number; activeSec: number; pauses: number; mousePx: number };
+
+/**
+ * The input rhythm over the hour before `at`, as the energy model's two candidate covariates: pauses per minute of input (how broken
+ * up the work is) and pointer travel per second of input. Undefined with under ten minutes of input in that hour.
+ */
+export function inputRhythmAt(buckets: InputRhythmBucket[], at: string): { fragmentation: number; pointerPace: number } | undefined {
+  const end = Date.parse(at), start = end - 3_600_000;
+  const within = buckets.filter((bucket) => Date.parse(bucket.start) >= start - 15 * 60_000 && Date.parse(bucket.start) < end);
+  const active = within.reduce((sum, bucket) => sum + bucket.activeSec, 0);
+  if (active < 600) return undefined;
+  return { fragmentation: within.reduce((sum, bucket) => sum + bucket.pauses, 0) / (active / 60),
+    pointerPace: within.reduce((sum, bucket) => sum + bucket.mousePx, 0) / active };
+}
 
 /**
  * Where readings come from. The Windows foreground window is one; a wearable that reports heart rate or a phone that reports

@@ -9,6 +9,7 @@ import { PendingBadge } from "./pending-badge";
 import { TimerFloat } from "./task/timer-float";
 import { UndoCenter } from "./undo-center";
 import { LineColors } from "./line-colors";
+import { CameraSampler } from "./camera-sampler";
 
 /**
  * The frame every signed-in page shares: the name, the four working views, the decisions waiting for you, the
@@ -31,6 +32,7 @@ export function AppShell({ active, children, className = "page" }: { active?: st
     <BottomNav active={active} />
     {/* One corner, stacked: the timer above the 小帮手 bubble, each as tall as it is, so neither covers the other's buttons. */}
     <CornerStack>
+      <CameraSampler />
       <TimerFloat />
       <AssistantWidget />
     </CornerStack>
