@@ -102,17 +102,26 @@ export class JsonLineRpcClient {
 export const CODEX_BASELINE_COMMIT = "f0a1b8f0849d90960bc406b848f32e5a129b0457";
 export const CODEX_GENERATED_PROTOCOL_SHA256 = "cff5bf0f8f52d3d4fd2d00145462c5a3e21df86ec3b3b652668884831eb5c6a3";
 export const CODEX_FORK_BINARY_SHA256 = "4bcc1d8452c75cd132e010f41ccfaf6afb8699317f9a90d88df0b20be2335497";
+/** The release build of the same pinned source that the installed copy ships (docs/local-installer.md, Codex 的 Release 构建). */
+export const CODEX_RELEASE_BINARY_SHA256 = "ce19ac66ee6204888bf6318f0ae1b02f83b35f512ca5144f1e8bf42b9f7b11b9";
 
 export function codexProcessEnvironment(
   base: NodeJS.ProcessEnv = process.env,
   localAppData = base.LOCALAPPDATA
 ): NodeJS.ProcessEnv {
-  if (!localAppData) throw new Error("LOCALAPPDATA_UNAVAILABLE");
-  const isPackagedRedirect = /\\packages\\[^\\]+\\localcache\\local$/i.test(localAppData);
-  const durableLocalAppData = isPackagedRedirect && base.USERPROFILE
-    ? path.win32.join(base.USERPROFILE, "AppData", "Local")
-    : localAppData;
-  const crosslineHome = path.win32.join(durableLocalAppData, "Crossline", "codex-home");
+  // An installed copy (docs/local-installer.md) points CROSSLINE_STATE_DIR at its own folder, so on a machine that also runs a
+  // checkout's resident app the two never share a Codex login, its memories or guest homes.
+  const stateDir = base.CROSSLINE_STATE_DIR?.trim();
+  let crosslineHome: string;
+  if (stateDir) crosslineHome = path.win32.join(stateDir, "codex-home");
+  else {
+    if (!localAppData) throw new Error("LOCALAPPDATA_UNAVAILABLE");
+    const isPackagedRedirect = /\\packages\\[^\\]+\\localcache\\local$/i.test(localAppData);
+    const durableLocalAppData = isPackagedRedirect && base.USERPROFILE
+      ? path.win32.join(base.USERPROFILE, "AppData", "Local")
+      : localAppData;
+    crosslineHome = path.win32.join(durableLocalAppData, "Crossline", "codex-home");
+  }
   const env: NodeJS.ProcessEnv = { ...base, CODEX_HOME: crosslineHome, CROSSLINE_CODEX_HOME: crosslineHome };
   delete env.CODEX_INTERNAL_ORIGINATOR_OVERRIDE;
   return env;
@@ -141,7 +150,8 @@ export function resolveCodexCommand(
     platform === "win32" ? "codex.exe" : "codex");
   const executable = env.CROSSLINE_CODEX_PATH ?? fork;
   if (!path.isAbsolute(executable) || !exists(executable)) throw new Error("CODEX_FORK_BINARY_NOT_FOUND");
-  if (sha256(executable) !== CODEX_FORK_BINARY_SHA256) throw new Error("CODEX_FORK_BINARY_MISMATCH");
+  const hash = sha256(executable);
+  if (hash !== CODEX_FORK_BINARY_SHA256 && hash !== CODEX_RELEASE_BINARY_SHA256) throw new Error("CODEX_FORK_BINARY_MISMATCH");
   return { command: executable, args: [] };
 }
 

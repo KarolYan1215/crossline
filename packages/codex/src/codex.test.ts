@@ -236,6 +236,11 @@ describe("Codex app-server boundary", () => {
     expect(env.SAFE).toBe("1");
   });
 
+  test("an installed copy's state folder keeps its Codex home apart from a resident app's", () => {
+    const env = codexProcessEnvironment({ CROSSLINE_STATE_DIR: "C:\\Users\\k\\AppData\\Local\\Crossline\\state" }, "C:\\Users\\k\\AppData\\Local");
+    expect(env.CODEX_HOME).toBe("C:\\Users\\k\\AppData\\Local\\Crossline\\state\\codex-home");
+  });
+
   test("sidecar keeps the completed login outside a packaged app LOCALAPPDATA redirect", () => {
     const base = {
       USERPROFILE: "C:\\Users\\karol",
@@ -416,6 +421,12 @@ describe("codex executable resolution", () => {
     expect(() => codexModule.resolveCodexCommand({ Path: path.dirname(desktop) },
       (file) => file === desktop, "win32", () => codexModule.CODEX_FORK_BINARY_SHA256))
       .toThrow("CODEX_FORK_BINARY_NOT_FOUND");
+  });
+
+  test("the release build an installed copy ships is accepted by its own hash", () => {
+    const shipped = "C:\\Users\\k\\AppData\\Local\\Crossline\\app\\codex\\codex.exe";
+    expect(codexModule.resolveCodexCommand({ CROSSLINE_CODEX_PATH: shipped }, (file) => file === shipped, "win32",
+      () => codexModule.CODEX_RELEASE_BINARY_SHA256)).toEqual({ command: shipped, args: [] });
   });
 
   test("a changed executable is refused before app-server starts", () => {

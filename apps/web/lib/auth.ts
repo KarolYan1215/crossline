@@ -4,6 +4,7 @@ import { mkdirSync } from "node:fs";
 import {
   createCrosslineAuth, type CrosslineAuth, type CrosslineAuthOptions, type GoogleConfig, type SmtpConfig
 } from "@crossline/auth";
+import { isLocalInstall, readLocalCodexAccount } from "./local-install";
 
 declare global {
   // eslint-disable-next-line no-var
@@ -11,12 +12,15 @@ declare global {
 }
 
 function smtpFromEnv(): SmtpConfig | undefined {
+  // An installed copy signs in only through its own Codex: no mail, whatever the environment carries.
+  if (isLocalInstall()) return undefined;
   const { CROSSLINE_SMTP_HOST, CROSSLINE_SMTP_PORT, CROSSLINE_SMTP_USER, CROSSLINE_SMTP_PASSWORD, CROSSLINE_SMTP_FROM } = process.env;
   if (!CROSSLINE_SMTP_HOST || !CROSSLINE_SMTP_PORT || !CROSSLINE_SMTP_USER || !CROSSLINE_SMTP_PASSWORD || !CROSSLINE_SMTP_FROM) return undefined;
   return { host: CROSSLINE_SMTP_HOST, port: Number(CROSSLINE_SMTP_PORT), user: CROSSLINE_SMTP_USER, password: CROSSLINE_SMTP_PASSWORD, from: CROSSLINE_SMTP_FROM };
 }
 
 function googleFromEnv(): GoogleConfig | undefined {
+  if (isLocalInstall()) return undefined;
   const { CROSSLINE_GOOGLE_CLIENT_ID, CROSSLINE_GOOGLE_CLIENT_SECRET } = process.env;
   if (!CROSSLINE_GOOGLE_CLIENT_ID || !CROSSLINE_GOOGLE_CLIENT_SECRET) return undefined;
   return { clientId: CROSSLINE_GOOGLE_CLIENT_ID, clientSecret: CROSSLINE_GOOGLE_CLIENT_SECRET };
@@ -33,12 +37,12 @@ export function isGoogleAuthConfigured(): boolean {
 
 /** Sign in with ChatGPT is opted into on this install (`CROSSLINE_CHATGPT_SIGNIN=1`, for a copy run on the person's own machine). */
 export function isChatgptSignInConfigured(): boolean {
-  return process.env.CROSSLINE_CHATGPT_SIGNIN === "1";
+  return process.env.CROSSLINE_CHATGPT_SIGNIN === "1" && !isLocalInstall();
 }
 
 /** Mail can be sent (SMTP, or the e2e mailbox): only then do email sign-up, the email code and password reset exist at all. */
 export function isEmailAuthConfigured(): boolean {
-  return Boolean(smtpFromEnv() || process.env.CROSSLINE_AUTH_TEST_MAILBOX_DIR?.trim());
+  return Boolean(smtpFromEnv() || (!isLocalInstall() && process.env.CROSSLINE_AUTH_TEST_MAILBOX_DIR?.trim()));
 }
 
 /**
@@ -71,7 +75,7 @@ export function resolveCrosslineAuthOptions(): CrosslineAuthOptions | undefined 
 
   const smtp = smtpFromEnv();
   const google = googleFromEnv();
-  const testMailboxDir = process.env.CROSSLINE_AUTH_TEST_MAILBOX_DIR?.trim();
+  const testMailboxDir = isLocalInstall() ? undefined : process.env.CROSSLINE_AUTH_TEST_MAILBOX_DIR?.trim();
   return {
     authDbPath: path.join(dataDir, "auth.db"),
     secret, baseURL, trustedOrigins,
@@ -83,6 +87,8 @@ export function resolveCrosslineAuthOptions(): CrosslineAuthOptions | undefined 
     ...(smtp && !testMailboxDir ? { smtp } : {}), ...(google ? { google } : {}),
     // The install's ChatGPT registration (host id, issued client id) lives beside the data, never in the ledger or an export.
     ...(isChatgptSignInConfigured() ? { chatgpt: { installFile: path.join(dataDir, "chatgpt-signin.json") } } : {}),
+    // An installed copy: the session is the account the machine's Codex is signed in to (docs/local-installer.md, 登录).
+    ...(isLocalInstall() ? { localCodex: { readAccount: readLocalCodexAccount } } : {}),
     // Set only by the e2e build (`playwright.config.ts`) — never present in a real deployment, so this
     // never competes with `smtp` there.
     ...(testMailboxDir ? { testMailboxDir } : {})

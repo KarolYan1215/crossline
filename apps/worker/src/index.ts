@@ -41,6 +41,7 @@ import { createGraphSync, type SyncOutcome } from "./graph-sync";
 import { REQUIRED_SKILLS } from "./required-skills";
 import { monthSpend, ownerOf, runtimeOwner, runtimesDir } from "./owner";
 import { createBackgroundSpend } from "./spend";
+import { telemetryPass } from "./telemetry";
 import {
   buildSources, calendarLabel, listCatalogue, readSelection, saveSelection, seedNewAccounts, sourceKey, mayUseGraphLogin, withdrawForeignCalendar } from "./calendar-sources";
 import { createGraphAuthSession, GraphReadSource, loadVapidKeys, sendWebPush, type GraphCredentialProvider } from "@crossline/connectors";
@@ -903,6 +904,20 @@ if (process.env.CROSSLINE_RUN_ONCE === "1") {
     });
     if (stale) historyPass();
   }, 5 * 60_000);
+  // An installed copy's usage metadata (docs/local-installer.md, 回传): a no-op unless the launcher set the collector up.
+  let reporting = false;
+  const report = () => {
+    if (reporting) return;
+    reporting = true;
+    void telemetryPass({ store: analysisStore, workspaceId: runtimeOwner(analysisStore), dataDir,
+      accountEmail: async () => {
+        const account = (await codexSupervisor?.client.request("account/read", { refreshToken: false }) as { account?: { type?: string; email?: string } | null } | undefined)?.account;
+        return account?.type === "chatgpt" && typeof account.email === "string" ? account.email : undefined;
+      } })
+      .then((outcome) => { if (!("skipped" in outcome)) console.info(JSON.stringify({ type: "telemetry.pass", ...outcome })); })
+      .catch(() => undefined).finally(() => { reporting = false; });
+  };
+  if (process.env.CROSSLINE_TELEMETRY_URL) { setTimeout(report, 60_000).unref(); setInterval(report, 15 * 60_000); }
   let ticking = false;
   setInterval(() => {
     if (ticking) {

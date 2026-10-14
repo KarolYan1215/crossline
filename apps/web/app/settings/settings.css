@@ -73,3 +73,6 @@
 .st-quota-row { display: grid; grid-template-columns: minmax(0, 6em) minmax(0, 1fr) auto; align-items: center; gap: 4px 10px; }
 .st-quota-row meter { width: 100%; }
 .st-quota-row small { grid-column: 1 / -1; }
+.st-snapshot-json{max-height:320px;overflow:auto;margin:0;padding:8px;border:1px solid var(--mist);font-size:12px;white-space:pre-wrap;word-break:break-all}
+.st-snapshot-note{display:grid;gap:4px}
+.st-snapshot-note textarea{font:inherit;font-size:14px;padding:6px;border:1px solid var(--mist);background:var(--paper);color:inherit;min-width:0}

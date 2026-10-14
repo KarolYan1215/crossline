@@ -2056,6 +2056,37 @@ export class CrosslineStore {
       reasoningTokens: Number(row.reasoning_tokens), totalTokens: Number(row.total_tokens), averageSeconds: Math.round(Number(row.avg_ms) / 100) / 10, longestSeconds: Math.round(Number(row.max_ms) / 100) / 10 }));
   }
 
+  /**
+   * What an installed copy's usage sender reads (`apps/worker/src/telemetry.ts`), each strictly after its own cursor: ledger events
+   * by rowid, model runs by id, interview replies by time. Rows, not meaning: the sender keeps only what
+   * `packages/core/src/telemetry.ts` whitelists, and an interview reply contributes its number and the stage it answered, never its text.
+   */
+  telemetrySince(workspaceId: string, cursor: { eventRow: number; usageId: number; roundAt: string }, limit = 500): {
+    events: Array<{ row: number; type: string; entityId: string; payload: unknown; createdAt: string }>;
+    usage: Array<{ id: number; skill: string; ok: boolean; code: string; repairs: number; ms: number; input: number; cached: number; output: number; at: string }>;
+    rounds: Array<{ seq: number; createdAt: string; stage?: string }>;
+  } {
+    const events = (this.#db.prepare("SELECT rowid AS row, type, entity_id, payload_json, created_at FROM events WHERE workspace_id = ? AND rowid > ? ORDER BY rowid LIMIT ?")
+      .all(workspaceId, cursor.eventRow, limit) as Array<{ row: number; type: string; entity_id: string; payload_json: string; created_at: string }>)
+      .map((row) => ({ row: Number(row.row), type: row.type, entityId: row.entity_id, createdAt: row.created_at,
+        payload: (() => { try { return JSON.parse(row.payload_json) as unknown; } catch { return {}; } })() }));
+    const usage = (this.#db.prepare(`SELECT id, skill, ok, error_code, repairs, duration_ms, input_tokens, cached_input_tokens, output_tokens, at
+      FROM model_usage WHERE workspace_id = ? AND id > ? ORDER BY id LIMIT ?`).all(workspaceId, cursor.usageId, limit) as Array<Record<string, string | number>>)
+      .map((row) => ({ id: Number(row.id), skill: String(row.skill), ok: Number(row.ok) === 1, code: String(row.error_code), repairs: Number(row.repairs),
+        ms: Number(row.duration_ms), input: Number(row.input_tokens), cached: Number(row.cached_input_tokens), output: Number(row.output_tokens), at: String(row.at) }));
+    const rounds = (this.#db.prepare(`SELECT user.seq AS seq, user.created_at AS created_at,
+        (SELECT content_json FROM onboarding_messages a WHERE a.workspace_id = user.workspace_id AND a.session_id = user.session_id
+          AND a.role = 'assistant' AND a.seq < user.seq ORDER BY a.seq DESC LIMIT 1) AS asked
+      FROM onboarding_messages user WHERE user.workspace_id = ? AND user.role = 'user' AND user.created_at > ? ORDER BY user.created_at LIMIT ?`)
+      .all(workspaceId, cursor.roundAt, limit) as Array<{ seq: number; created_at: string; asked: string | null }>)
+      .map((row) => {
+        let stage: unknown;
+        try { stage = (JSON.parse(row.asked ?? "{}") as { stage?: unknown }).stage; } catch { /* no stage */ }
+        return { seq: Number(row.seq), createdAt: row.created_at, ...(typeof stage === "string" ? { stage } : {}) };
+      });
+    return { events, usage, rounds };
+  }
+
   saveMilestoneAnchor(anchor: StoredMilestoneAnchor): void {
     // A save that does not mention the artifact references (an edited date from the input box) keeps the stored ones.
     const stored = anchor.outputs === undefined || anchor.inputs === undefined

@@ -195,6 +195,22 @@ importers:
         specifier: latest
         version: 5.0.3(@types/node@26.6.5)(vite@8.3.0(@types/node@26.6.5)(esbuild@0.28.2)(tsx@4.23.13))
 
+  apps/collector:
+    devDependencies:
+      '@types/node':
+        specifier: 26.5.1
+        version: 26.5.1
+
+  apps/launcher:
+    dependencies:
+      tsx:
+        specifier: 4.23.13
+        version: 4.23.13
+    devDependencies:
+      '@types/node':
+        specifier: 26.5.1
+        version: 26.5.1
+
   apps/web:
     dependencies:
       '@crossline/auth':

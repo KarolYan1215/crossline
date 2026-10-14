@@ -5,6 +5,10 @@ import type { AccessContext } from "@crossline/core";
 import { requireAccessContext } from "@crossline/auth";
 import { getAuth } from "./auth";
 import { getStore } from "./crossline";
+import { currentLocalAccount, isLocalInstall } from "./local-install";
+
+/** On an installed copy every session is checked against the account the machine's Codex still holds. */
+const localAccount = () => isLocalInstall() ? currentLocalAccount : undefined;
 
 export type ResolvedRoute = { ctx: AccessContext } | { response: Response };
 
@@ -15,7 +19,7 @@ export type ResolvedRoute = { ctx: AccessContext } | { response: Response };
  * hands back `ctx` on success instead of `undefined`, because every caller needs it next.
  */
 export async function resolveAccessContext(request: Request): Promise<ResolvedRoute> {
-  const result = await requireAccessContext(getAuth(), getStore(), request);
+  const result = await requireAccessContext(getAuth(), getStore(), request, localAccount());
   if ("ctx" in result) return { ctx: result.ctx };
   const status = result.error === "UNAUTHENTICATED" ? 401 : 403;
   return { response: Response.json({ ok: false, code: result.error }, { status }) };
@@ -28,7 +32,7 @@ export async function resolveAccessContext(request: Request): Promise<ResolvedRo
  */
 export async function requireSessionContext(): Promise<AccessContext> {
   const request = new Request("http://internal.invalid/", { headers: await headers() });
-  const result = await requireAccessContext(getAuth(), getStore(), request);
+  const result = await requireAccessContext(getAuth(), getStore(), request, localAccount());
   if ("ctx" in result) return result.ctx;
   redirect("/login");
 }
