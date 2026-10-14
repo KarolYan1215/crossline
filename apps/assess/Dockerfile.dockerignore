@@ -1,0 +1,26 @@
+# Build context for apps/assess/Dockerfile (BuildKit reads <Dockerfile>.dockerignore beside the Dockerfile). The image is built from
+# source inside Linux: nothing installed or built on the host, and nothing private (data, ledgers, env files) may enter the context.
+.git
+**/node_modules
+**/.next
+**/.next-*
+**/out
+**/data
+**/data-e2e
+**/*.db
+**/*.db-shm
+**/*.db-wal
+**/*.bak
+**/.env*
+**/*.log
+backups
+restored
+vendor
+.vendor
+.claude
+.crossline-evidence
+e2e
+docs
+playwright-report
+test-results
+coverage
