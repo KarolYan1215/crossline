@@ -80,20 +80,22 @@ function statusFor(blocks: ScheduleBlock[], blockers: PlanResult["blockers"], fr
 }
 
 /** Verify the returned clock times independently of the MILP's own constraint bookkeeping. */
-function validBlocks(blocks: ScheduleBlock[], slots: Slot[], input: PlanningInput, gap: number): boolean {
+/** Why a plan breaks a rule (the first broken one, naming the block or task), or undefined when it keeps them all. Exported for its test. */
+export function invalidBlocks(blocks: ScheduleBlock[], slots: Slot[], input: PlanningInput, gap: number): string | undefined {
   const sorted = [...blocks].sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
   for (let i = 0; i < sorted.length; i += 1) {
     const block = sorted[i]!;
     const start = Date.parse(block.start), end = Date.parse(block.end);
-    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return false;
-    if (i && start < Date.parse(sorted[i - 1]!.end)) return false;
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return `empty_block:${block.taskId}`;
+    if (i && start < Date.parse(sorted[i - 1]!.end)) return `overlap:${sorted[i - 1]!.taskId}/${block.taskId}`;
     if (i && !block.frozen && !sorted[i - 1]!.frozen &&
-      start < Date.parse(sorted[i - 1]!.end) + gap * 60_000) return false;
+      start < Date.parse(sorted[i - 1]!.end) + gap * 60_000) return `gap:${sorted[i - 1]!.taskId}/${block.taskId}`;
     if (block.frozen) continue;
-    if (!slots.some((slot) => start >= slot.start && end <= slot.end)) return false;
+    if (!slots.some((slot) => start >= slot.start && end <= slot.end)) return `outside_slot:${block.taskId}`;
     const task = input.tasks.find((item) => item.id === block.taskId);
-    if (!task || (task.deadline && end > Date.parse(task.deadline)) ||
-      !slots.some((slot) => start >= slot.start && end <= slot.end && usable(task, shortfall(task, slot)))) return false;
+    if (!task) return `unknown_task:${block.taskId}`;
+    if (task.deadline && end > Date.parse(task.deadline)) return `after_deadline:${task.id}`;
+    if (!slots.some((slot) => start >= slot.start && end <= slot.end && usable(task, shortfall(task, slot)))) return `energy:${task.id}`;
   }
   const credited = (task: PlannerTask, block: ScheduleBlock) => {
     const start = Date.parse(block.start), end = Date.parse(block.end);
@@ -101,21 +103,24 @@ function validBlocks(blocks: ScheduleBlock[], slots: Slot[], input: PlanningInpu
     return (end - start) / 60_000 * (slot ? EFFICIENCY[shortfall(task, slot)]! : 1);
   };
   for (const task of input.tasks) {
-    const own = sorted.filter((block) => block.taskId === task.id);
+    // Only what this solve placed is judged. `input` is already without the frozen minutes (`withoutFrozenMinutes`), so a task whose
+    // frozen block is all that exists has nothing placed here — the solver may leave the rest for later — and is not "short". Counting
+    // the frozen block as placed made one half-frozen step reject every optimal plan on the real account (2026-10-13).
+    const own = sorted.filter((block) => block.taskId === task.id && !block.frozen);
     if (!own.length) continue;
     // Work done, not wall time: a slot short of the energy needed yields less per minute. Whole minutes leave at most one over.
     const expected = own.some((block) => block.progressOnly) ? 45 : durationOf(task);
-    const done = own.reduce((sum, block) => sum + (block.frozen ? 0 : credited(task, block)), 0);
-    if (done < expected - 1e-6 || done > expected + 1 + 1e-6) return false;
-    if (task.interruptible === false && own.length !== 1) return false;
-    if (task.notBefore && Date.parse(own[0]!.start) < Date.parse(task.notBefore)) return false;
+    const done = own.reduce((sum, block) => sum + credited(task, block), 0);
+    if (done < expected - 1e-6 || done > expected + 1 + 1e-6) return `minutes:${task.id}:${done.toFixed(2)}/${expected}`;
+    if (task.interruptible === false && own.length !== 1) return `split:${task.id}`;
+    if (task.notBefore && Date.parse(own[0]!.start) < Date.parse(task.notBefore)) return `before_release:${task.id}`;
     for (const dependency of task.dependsOn ?? []) {
       const prerequisite = sorted.filter((block) => block.taskId === dependency);
-      if (input.tasks.some((item) => item.id === dependency) && !prerequisite.length) return false;
-      if (prerequisite.length && Date.parse(prerequisite.at(-1)!.end) > Date.parse(own[0]!.start)) return false;
+      if (input.tasks.some((item) => item.id === dependency) && !prerequisite.length) return `dependency_unplaced:${dependency}->${task.id}`;
+      if (prerequisite.length && Date.parse(prerequisite.at(-1)!.end) > Date.parse(own[0]!.start)) return `dependency_order:${dependency}->${task.id}`;
     }
   }
-  return true;
+  return undefined;
 }
 
 /** The longest unbroken stretch this task could use: slots too low-energy for it do not count. */
@@ -167,7 +172,15 @@ function makeResult(input: PlanningInput, tasks: PlannerTask[], slots: Slot[], b
   const scheduled = new Set(blocks.filter((block) => !block.progressOnly).map((block) => block.taskId));
   // 「截止日前不够」 only when the deadline falls inside the days being planned; one beyond them is simply not reached yet.
   const horizon = Math.max(0, ...slots.map((slot) => slot.end));
-  const blockers = tasks.filter((task) => !scheduled.has(task.id) && !task.floorOnly).map((task) => ({
+  // Work that cannot start before the days being planned are over — released later, or waiting on work that is — is not blocked: the
+  // planning window reaches it later. Reporting it made the plan page say 「3 个任务未排入」 for next week's revision steps.
+  const byId = new Map(tasks.map((task) => [task.id, task]));
+  const later = (task: PlannerTask, seen = new Set<string>()): boolean => {
+    if (task.notBefore && Date.parse(task.notBefore) >= horizon) return true;
+    seen.add(task.id);
+    return (task.dependsOn ?? []).some((id) => { const before = byId.get(id); return Boolean(before && !seen.has(id) && !scheduled.has(id) && later(before, seen)); });
+  };
+  const blockers = tasks.filter((task) => !scheduled.has(task.id) && !task.floorOnly && !later(task)).map((task) => ({
     taskId: task.id,
     code: blocks.some((block) => block.taskId === task.id && block.progressOnly) ? "PROGRESS_ONLY"
       : task.interruptible === false ? "NO_CONTINUOUS_SLOT" : task.deadline && Date.parse(task.deadline) <= horizon ? "DEADLINE_CAPACITY" : "NO_CAPACITY",
@@ -177,7 +190,7 @@ function makeResult(input: PlanningInput, tasks: PlannerTask[], slots: Slot[], b
         ? longestSlotMinutes(slots, task) < durationOf(task)
           ? `${task.title}需要连续 ${durationOf(task)} 分钟，但最长的连续空档只有 ${longestSlotMinutes(slots, task)} 分钟；可以补充更长的可用时间，或确认它其实可以分几次做`
           : `${task.title}需要连续 ${durationOf(task)} 分钟`
-      : task.deadline ? `${task.title}无法在已确认截止时间前排入` : `${task.title}在排程窗口内没有可用容量`
+      : task.deadline && Date.parse(task.deadline) <= horizon ? `${task.title}无法在已确认截止时间前排入` : `${task.title}在排程窗口内没有可用容量`
   }));
   return { status: statusFor(blocks, blockers, input.frozenBlocks.length),
     plan: { blocks: blocks.sort((a, b) => Date.parse(a.start) - Date.parse(b.start)) }, blockers, solver };
@@ -483,7 +496,12 @@ async function optimize(original: PlanningInput, emergency = false, trySolver = 
         cursor += gap * 60_000;
       }
     }
-    if (!validBlocks(blocks, slots, input, gap)) return greedyFallback(input, tasks, slots, emergency);
+    const broken = invalidBlocks(blocks, slots, input, gap);
+    if (broken) {
+      // The solver's answer breaks a rule its own model should have kept: a model bug, so it is said rather than silently replaced.
+      console.warn(JSON.stringify({ type: "solver.answer_rejected", reason: broken }));
+      return greedyFallback(input, tasks, slots, emergency);
+    }
     const solved = makeResult(input, tasks, slots, blocks, result.Status === "Optimal" ? "optimal" : "feasible_time_limit");
     if (result.Status === "Optimal") return solved;
     // Out of time, the solver hands back whatever it had, which can be far worse than the greedy pass: on the real account it gave the

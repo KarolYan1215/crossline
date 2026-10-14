@@ -1,7 +1,7 @@
 import { createRequire } from "node:module";
 import { describe, expect, test } from "vitest";
 import { planSchedule, recommendNextActions } from "./index";
-import { fallbackSchedule } from "./optimizer";
+import { fallbackSchedule, invalidBlocks } from "./optimizer";
 
 const start = new Date("2026-09-14T14:00:00.000Z");
 
@@ -342,6 +342,32 @@ describe("energy-aware planning", () => {
     const unbroken = await planSchedule({ now: start, horizonDays: 1, tasks: [{ ...task, interruptible: false }], availability,
       frozenBlocks: [{ taskId: "essay", start: day(14), end: day(15) }] });
     expect(unbroken.plan.blocks.filter((block) => block.taskId === "essay" && !block.frozen)).toEqual([]);
+  });
+
+  test("a task whose frozen block is all that exists in a plan is not judged short: the rest may wait for a later solve", () => {
+    // As on the real account (2026-10-13): a step planned at its cautious 30 minutes had 15 frozen and the solver left the other 15 for
+    // later. Counting the frozen block as placed called it 「0 of 15 minutes」 and threw away the whole optimal plan.
+    const day = (h: number, m = 0) => `2026-09-14T${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:00.000Z`;
+    const slots = [{ day: "2026-09-14", start: Date.parse(day(14, 15)), end: Date.parse(day(15)), energy: "high" as const }];
+    const record = { id: "record", title: "记录结论", estimate: { p25Minutes: 15, p50Minutes: 15, p85Minutes: 15, confidence: "high" as const },
+      inputsReady: true, deadlineTier: 3 as const };
+    const hw = { id: "hw", title: "作业", estimate: { p25Minutes: 45, p50Minutes: 45, p85Minutes: 45, confidence: "high" as const }, inputsReady: true, deadlineTier: 1 as const };
+    const input = { now: start, horizonDays: 1, tasks: [record, hw], availability: [], frozenBlocks: [] };
+    const blocks = [{ taskId: "record", start: day(14), end: day(14, 15), frozen: true }, { taskId: "hw", start: day(14, 15), end: day(15) }];
+    expect(invalidBlocks(blocks, slots, input, 0)).toBeUndefined();
+    // A placed block that falls short is still caught.
+    expect(invalidBlocks([...blocks.slice(0, 1), { taskId: "hw", start: day(14, 15), end: day(14, 45) }], slots, input, 0)).toMatch(/^minutes:hw/);
+  });
+
+  test("work released after the days being planned is not reported as blocked; the window reaches it later", async () => {
+    const day = (h: number) => `2026-09-14T${String(h).padStart(2, "0")}:00:00.000Z`;
+    const availability = [{ day: "2026-09-14", start: day(14), end: day(16), energy: "high" as const }];
+    const revise = { id: "revise", title: "复习", estimate: { p25Minutes: 60, p50Minutes: 60, p85Minutes: 60, confidence: "high" as const },
+      inputsReady: true, deadlineTier: 1 as const, deadline: "2026-09-27T23:00:00.000Z", notBefore: "2026-09-20T00:00:00.000Z" };
+    const { notBefore: _released, ...unreleased } = revise;
+    const selfTest = { ...unreleased, id: "self-test", title: "自测", dependsOn: ["revise"] };
+    const result = await planSchedule({ now: start, horizonDays: 1, tasks: [revise, selfTest], availability, frozenBlocks: [] });
+    expect(result.blockers).toEqual([]);
   });
 
   test("buffered mode keeps its ten-minute gap across adjacent availability windows", async () => {
