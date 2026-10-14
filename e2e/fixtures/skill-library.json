@@ -1,0 +1,161 @@
+{
+ "mine": {
+  "lineId": "media",
+  "current": 2,
+  "versions": [
+   {
+    "version": 1,
+    "at": "2026-10-13T08:00:00.000Z",
+    "by": "compiler",
+    "markdown": "---\nname: media\ndescription: \"本人在「创作者」主线上的打法、偏好与红线（第 1 版）。\"\n---\n\n# 创作者：本人的做法\n\n## 打法\n\n1. 以冲突和焦虑作为内容核心切口。\n",
+    "rules": [
+     {
+      "kind": "play",
+      "text": "以冲突和焦虑作为内容核心切口，并以 solution 完成变现。",
+      "sources": [
+       "m2"
+      ],
+      "quote": "自媒体的核心是制造冲突和贩卖焦虑，再通过卖 solution 变现",
+      "url": "",
+      "sourceLabels": [
+       "2026-10-14 本人采纳助手结果「为小红书首篇笔记形成提纲」时的备注"
+      ]
+     }
+    ],
+    "fingerprint": "a"
+   },
+   {
+    "version": 2,
+    "at": "2026-10-14T08:00:00.000Z",
+    "by": "compiler",
+    "markdown": "---\nname: media\ndescription: \"本人在「创作者」主线上的打法、偏好与红线（第 2 版）。\"\n---\n\n# 创作者：本人的做法\n\n## 打法\n\n1. 以冲突和焦虑作为内容核心切口。\n\n## 偏好\n\n1. 面向高野心年轻人的焦虑与选择，表达好笑且准确。\n\n## 红线\n\n1. 不以群体差异、未经证实的指控或煽动性言论制造冲突。\n",
+    "rules": [
+     {
+      "kind": "play",
+      "text": "以冲突和焦虑作为内容核心切口，并以 solution 完成变现。",
+      "sources": [
+       "m2"
+      ],
+      "quote": "自媒体的核心是制造冲突和贩卖焦虑，再通过卖 solution 变现",
+      "url": "",
+      "sourceLabels": [
+       "2026-10-14 本人采纳助手结果「为小红书首篇笔记形成提纲」时的备注"
+      ]
+     },
+     {
+      "kind": "preference",
+      "text": "面向高野心年轻人的焦虑与选择，表达好笑且准确。",
+      "sources": [
+       "m5"
+      ],
+      "quote": "把高野心年轻人的焦虑与选择讲得好笑且准确",
+      "url": "",
+      "sourceLabels": [
+       "访谈中确认的「positioning」"
+      ]
+     },
+     {
+      "kind": "redline",
+      "text": "不以群体差异、未经证实的指控或煽动性言论制造冲突。",
+      "sources": [],
+      "quote": "请不要轻易对他人进行指控或发布煽动性的言论",
+      "url": "https://pgy.xiaohongshu.com/help/detail?id=1",
+      "sourceLabels": []
+     }
+    ],
+    "fingerprint": "b"
+   }
+  ]
+ },
+ "library": [
+  {
+   "id": "pub-note-writer",
+   "kind": "public",
+   "name": "note-writer",
+   "description": "Short-form social posts: hooks, structure and a closing call to action.",
+   "lines": [
+    "media"
+   ],
+   "category": "writing",
+   "source": {
+    "repo": "https://github.com/example/skills",
+    "path": "skills/note-writer",
+    "url": "https://github.com/example/skills/tree/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/skills/note-writer"
+   },
+   "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "license": "MIT",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "bytes": 1200
+    }
+   ],
+   "scan": {
+    "risk": "low",
+    "injection": false,
+    "findings": []
+   },
+   "review": {
+    "verdict": "usable",
+    "reasons": [
+     "方法具体：开头钩子、分段结构与结尾行动号召",
+     "无脚本"
+    ],
+    "final": "usable"
+   },
+   "installedAt": "2026-10-10T00:00:00.000Z",
+   "updatedAt": "2026-10-10T00:00:00.000Z",
+   "lastUsedAt": "2026-10-12T00:00:00.000Z",
+   "why": "小红书写作"
+  },
+  {
+   "id": "pub-note-tools",
+   "kind": "public",
+   "name": "note-tools",
+   "description": "Drafts posts and uploads them for scheduling.",
+   "lines": [
+    "media"
+   ],
+   "category": "writing",
+   "source": {
+    "repo": "https://github.com/example/skills",
+    "path": "skills/note-tools",
+    "url": "https://github.com/example/skills/tree/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/skills/note-tools"
+   },
+   "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "license": "MIT",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "bytes": 1200
+    }
+   ],
+   "scan": {
+    "risk": "high",
+    "injection": false,
+    "findings": [
+     {
+      "file": "scripts/post.sh",
+      "line": 3,
+      "rule": "net",
+      "excerpt": "curl -X POST"
+     }
+    ]
+   },
+   "review": {
+    "verdict": "text_only",
+    "reasons": [
+     "写作方法可用",
+     "scripts/post.sh 向外部地址上传，已去掉脚本"
+    ],
+    "final": "text_only"
+   },
+   "installedAt": "2026-10-10T00:00:00.000Z",
+   "updatedAt": "2026-10-10T00:00:00.000Z",
+   "lastUsedAt": "2026-10-10T00:00:00.000Z",
+   "why": "小红书写作"
+  }
+ ]
+}

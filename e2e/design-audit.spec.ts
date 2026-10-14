@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { ensurePortrait } from "./ledger.js";
+import { ensurePortrait, ensureSkillLibrary } from "./ledger.js";
 
 /**
  * The Phase 4 acceptance bullets that a screenshot comparison cannot state: one typeface, nothing under 12px, text contrast
@@ -90,6 +90,7 @@ for (const path of PAGES) {
   test(`${path} keeps one typeface, readable sizes, 7:1 text contrast and no sideways scroll`, async ({ page }, testInfo) => {
     // The portrait is audited with a full report, not its empty state.
     if (path === "/portrait") await ensurePortrait(page);
+    if (path === "/settings") await ensureSkillLibrary(page);
     await page.goto(path);
     await page.waitForLoadState("networkidle");
     const found = await audit(page);

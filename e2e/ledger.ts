@@ -36,3 +36,22 @@ export async function ensurePortrait(page: Page): Promise<void> {
     store.setSetting(workspaceId, "portrait.report", JSON.stringify({ version: 1, at: "2026-10-12T09:00:00.000Z", schema: 2, report }));
   } finally { store.close(); }
 }
+
+/**
+ * Gives the account a skill library for the settings page's audits: one line skill with its sources (a person's review note, a confirmed
+ * fact, a platform page) and an earlier version, and two public skills — one usable, one kept as text only after the scan found a script
+ * that reaches the network. Written only when none exists.
+ */
+export async function ensureSkillLibrary(page: Page): Promise<void> {
+  await page.goto("/settings");
+  const store = openStore();
+  try {
+    const workspaceId = realWorkspaceId(store);
+    if (store.getSetting(workspaceId, "skills.library")) return;
+    const fixture = JSON.parse(readFileSync(path.join(import.meta.dirname, "fixtures", "skill-library.json"), "utf8")) as
+      { mine: Record<string, unknown>; library: unknown[] };
+    const line = (store.getSetting(workspaceId, "lines.v1") ? (JSON.parse(store.getSetting(workspaceId, "lines.v1")!) as Array<{ id: string }>)[0]?.id : undefined) ?? "media";
+    store.setSetting(workspaceId, `skills.mine.${line}`, JSON.stringify({ ...fixture.mine, lineId: line }));
+    store.setSetting(workspaceId, "skills.library", JSON.stringify(fixture.library));
+  } finally { store.close(); }
+}

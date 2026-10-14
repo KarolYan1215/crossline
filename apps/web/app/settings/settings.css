@@ -76,3 +76,21 @@
 /* 后台任务: the assistant's runs going on now, each with what it has done so far. */
 .bg-list{list-style:none;margin:0;padding:0;display:grid;gap:8px}
 .bg-steps{margin:4px 0 0;padding-left:18px;display:grid;gap:2px;font-size:13px;color:var(--muted);overflow-wrap:anywhere}
+/* Skill 库: each line's own skill (rules with their sources, the full text and its versions folded) and the public skills with what was found. */
+.sk-lines,.sk-publics,.sk-rules{list-style:none;margin:0;padding:0;display:grid;gap:10px}
+.sk-line,.sk-public{display:grid;gap:6px;padding:8px 0;border-top:1px solid var(--chalk);min-width:0}
+.sk-line:first-child,.sk-public:first-child{border-top:0}
+.sk-line-head{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px}
+.sk-line-head small{font-size:12px;color:var(--graphite)}
+.sk-actions{margin-left:auto;display:inline-flex;gap:6px}
+.sk-rules{gap:6px;font-size:13px}
+.sk-rules li{display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 8px;align-items:baseline}
+.sk-rules li small{grid-column:2;font-size:12px;color:var(--graphite);overflow-wrap:anywhere}
+.sk-edit{display:grid;gap:6px}
+.sk-edit textarea{width:100%;box-sizing:border-box;font-size:13px;line-height:1.5;resize:vertical}
+.sk-edit button{justify-self:start}
+.sk-full .long-form{font-size:13px;max-height:420px;overflow:auto}
+.sk-desc{margin:0;font-size:13px;overflow-wrap:anywhere}
+.sk-facts{display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 10px;margin:0;font-size:12px}
+.sk-facts dt{color:var(--graphite)}
+.sk-facts dd{margin:0;overflow-wrap:anywhere}

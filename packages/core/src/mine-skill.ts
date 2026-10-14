@@ -137,6 +137,18 @@ export const currentMineVersion = (stored: StoredMineSkill | undefined): MineSki
 
 const KIND_HEADING: Record<MineRuleKind, string> = { play: "打法", preference: "偏好", redline: "红线" };
 
+const mineDescription = (label: string, version?: number) =>
+  `本人在「${label}」主线上的打法、偏好与红线${version ? `（第 ${version} 版）` : ""}。为这条主线做任务、规划步骤、写教程或验收时读取并照做。`;
+
+/**
+ * A text the person typed on the settings page, made loadable: the runtime lists a skill only by its frontmatter, so one that lost or never
+ * had it (the person pasted their rules as plain text) gets the standard one back, with its name pinned to the line.
+ */
+export function ensureMineFrontmatter(markdown: string, line: { id: string; label: string }): string {
+  const body = markdown.replace(/^﻿?---\r?\n[\s\S]*?\r?\n---\r?\n?/, "").trimStart();
+  return [`---`, `name: ${mineSkillDirName(line.id)}`, `description: ${JSON.stringify(mineDescription(line.label))}`, `---`, "", body].join("\n");
+}
+
 /**
  * The SKILL.md, written by code from the kept rules: every rule carries where it came from (the material's label and the quote, or the
  * page for a platform red line). The frontmatter is what the runtime lists; JSON strings are valid YAML scalars, so a label with quotes
@@ -146,7 +158,7 @@ export function renderMineSkill(input: { line: { id: string; label: string }; ve
   rules: MineRule[]; materials: MineMaterial[] }): { markdown: string; rules: StoredMineRule[] } {
   const labels = new Map(input.materials.map((material) => [material.id, material.label]));
   const stored: StoredMineRule[] = input.rules.map((rule) => ({ ...rule, sourceLabels: rule.sources.map((id) => labels.get(id) ?? id) }));
-  const description = `本人在「${input.line.label}」主线上的打法、偏好与红线（第 ${input.version} 版）。为这条主线做任务、规划步骤、写教程或验收时读取并照做。`;
+  const description = mineDescription(input.line.label, input.version);
   const lines = [
     "---",
     `name: ${mineSkillDirName(input.line.id)}`,

@@ -1,4 +1,4 @@
-# Skill 库：公开 skills 与本人的主线 skill（设计，未实现）
+# Skill 库：公开 skills 与本人的主线 skill
 
 2026-10-14 与本人四轮问答确定。起因：真实账号走查中，助手把小红书首篇笔记做成了科研报告体。本人的内容打法（「制造冲突、贩卖焦虑，再卖 solution 变现」）从未被记录，助手只有通用的 `crossline-agent` 规则，验收闸门只按任务契约判，于是一份不符合本人打法的产物照样通过。
 
@@ -67,3 +67,46 @@
 - **S1**：本人的主线 skill（整理、安装、在助手/步骤规划/教程撰写里启用）＋闸门 `fit` 判定。先用真实账号的小红书这次验收备注做第一条规则。
 - **S2**：公开 skills 的检索、取回、扫描、AI 审查、安装、按大类匹配、30 天清理。
 - **S3**：设置里的「Skill 库」页面。
+
+## 实现状态（2026-10-14，三期均已实现）
+
+### S1：本人的主线 skill
+
+- **整理**：`apps/worker/src/insight-compiler.ts` + Skill `crossline-insight-compiler`（mid 档，联网只为找平台红线）。材料 `mineMaterials`：该主线 `confirmed` 的访谈事实（最多 60 条）、`preference_entries` 里讲「怎么做」的四类（纠正、里程碑回顾、确认的标准、否决的跨线关系；估时、重要性、推迟属排程，不收）、该主线任务的助手结果验收备注（`agent.task.reviewed` 的 note）、闸门「部分」的 `fit.violated` 与 `why`，以及本人编辑过的版本。每份材料给模型一个 `m<N>` 编号和代码写的出处标签。
+- **校验**（`packages/core/src/mine-skill.ts`）：每条规则必须引所给材料的编号并逐字摘引其中一句（只比字母数字，标点不计）；没有材料来源的只允许是「红线」，且须引一个公开 https 页面——worker 用 `safeGet` 真的打开它，打不开就丢掉这条。修复两轮后仍有问题的规则被丢弃、其余保留（`keepMineSkill`）。SKILL.md 由代码渲染（`renderMineSkill`），每条规则下写「来源：<出处标签>：「原话」」，模型写不了也漏不掉来源。
+- **何时重写**（`linesAwaitingMineSkill`）：材料指纹变了才重写。本人新的决定（验收备注、纠正、闸门「部分」、编辑）立即重写；只有访谈事实变化时，距上次至少 24 小时。当前版本若是本人编辑或回到的旧版，在本人做出新决定之前不被重写，事实变化也不触发。worker 每个 tick 每个工作区最多整理一条主线（`minePass`）。
+- **存储**：`skills.mine.<line>` 设置（`StoredMineSkill`：全部版本与当前版本号），每个新版本记 `skill.mine.rewritten`；系统从不删除版本或主线 skill（`packages/db/src/skills.ts` `saveMineVersion`）。
+- **安装与启用**：账本是唯一来源，磁盘上的插件由它派生，写在 Codex home 旁（`%LOCALAPPDATA%\Crossline\skill-library\<workspace>`，不在备份的数据目录里）。`apps/worker/src/skill-library.ts` 生成本地 marketplace（`crossline-library`）与插件 `crossline-mine`，内容哈希变化时才 `plugin/install`（运行时会把插件复制进自己的缓存，改写后必须重装），装完把这些 skill 全部关掉，只在需要的运行里打开。`runCodexSkill` 新增 `extraSkills`：与目标 skill 在同一把配置锁里打开、首个提示里写成 `$crossline:<目标> $crossline-mine:<line>`（Codex 按文本里的 `$` 提及注入 skill）、运行后关回；实际打开的记在 `audit.skills`，助手的 `agent.task.completed` 也记 `skills`。助手（`agent-task.ts`）、步骤规划（`step-planner.ts`）、教程撰写（`manualbook.ts` 的 writer）三处启用；这一主线还没有 skill 时什么都不写、不装，运行与以前完全一样。
+- **闸门**：`MilestoneGateContext.mineSkill`（该主线当前版本全文，或 null），输出加 `fit: {fits, violated[], why}`，`verdict` 新增 `partial`。`validateMilestoneGateResult` 的规则：契约覆盖且符合 → 只能 `pass`；契约覆盖但 `fits: false` → 只能 `partial`（判 `insufficient` 也会被退回重判）；`partial` 只用于这种情况；`fits: false` 时 `violated` 不能为空；没给主线 skill 时 `fits` 必须为 true。`applyMilestoneGate` 写入前按账本里是否有主线 skill 再验一次。`partial` 与其他非通过判定一样把任务置为 `blocked`（`MILESTONE_GATE_PARTIAL`），待决事项标题写「不符合本人的打法」，说明逐条列出违背的规则。
+
+### S2：公开 skills
+
+- **检索**：Skill `crossline-skill-scout`（mid 档，联网），输入各主线的长期目标与近期任务、`wanted`（任务需要而库里没有的）、已安装列表；输出 GitHub 仓库地址与 skill 所在目录、大类、适用主线、理由（`validateSkillScout`）。时机（`scoutDue`）：库还没检索过时立即；之后每 30 天一次（这一次也逐个检查已安装 skill 是否有新提交）；助手接到任务而没有相关公开 skill 时记 `skill.public.wanted`（每条主线每天一次），下一个 tick 提前检索，但两次检索至少隔一天。只有助手的任务会触发即时检索，步骤规划与教程撰写只用库里已有的。90 天内被拒过的同一目录不再取回。
+- **取回**（`apps/worker/src/public-skills.ts` `fetchSkillDirectory`）：只支持 GitHub 公开仓库，只向 `api.github.com` 与 `raw.githubusercontent.com` 发请求（跳转到别处即放弃）。读仓库许可证（GitHub 的 SPDX id）；仓库没写许可证时读该 skill 目录里的 LICENSE 文件、只认标准文本（`licenseFromText`）——Anthropic 的 skills 仓库就是每个 skill 目录各自授权：`skills/brand-guidelines` 读出 Apache-2.0 被收下，`skills/pdf` 的专有声明被拒（2026-10-14 实测）。可复用的许可证白名单在 `licenseVerdict`，缺失、`NOASSERTION`、非商用或禁止演绎的不收。只取默认分支当前提交下该目录的文本文件（≤40 个、单个 ≤200 KB、合计 ≤600 KB），二进制文件不取、记为 skipped；记来源地址、提交哈希、许可证、每个文件的 sha256。
+- **扫描**（`packages/core/src/public-skills.ts` `scanSkillFiles`，代码判定）：脚本逐行先过助手自己的 `decideCommand`（拒绝或要询问的都算），再查联网、删除、越出目录（绝对路径、`..`、主目录变量）、读凭据路径（`isSecretPath`，即 agent-guard 的 secret 规则）、改系统设置、提权、下载并执行（含 pip/npm/npx 安装）。SKILL.md 与 references 查注入语句（要求忽略指令、对本人隐瞒、外传凭据、绕过审批、`you are now`…）与零宽等隐藏字符。
+- **AI 审查**：`crossline-validation-reviewer` 的新段落（`crossline.public-skill-review.v1`，`PUBLIC_SKILL_REVIEW_SCHEMA`），读全部文件与扫描结果，给「可用 / 只用文字 / 拒绝」与逐条理由。审查没跑成的不安装。
+- **最终结论**（`finalVerdict`）：脚本有高风险 → 至多「只用文字」，安装时去掉脚本（`scripts/` 与可执行扩展名）；**有注入语句 → 直接拒绝**。这一点比设计（「至少降为只用文字」）更严：只用文字恰恰会把注入语句交给模型，拒绝是「至少」允许的结论。
+- **安装**：通过的写进运行时第三个插件 `crossline-public`，SKILL.md 的 `name` 改为库内 id（`pub-<name>`），避免同名冲突。文件文本存在 `skills.public.files.<id>`（备份能重建插件，不必重新下载），记录存在 `skills.library`（`PublicSkillRecord`：id、名称、描述、适用主线、大类、来源 {repo, path, url}、提交、许可证、文件与 sha256、扫描、审查与最终结论、安装 / 更新 / 上次调用时间、理由）。事件：`skill.public.installed`、`skill.public.updated`（带旧提交）、`skill.public.rejected`、`skill.public.removed`、`skill.public.scouted`、`skill.public.wanted`。
+- **自动更新**：每月检索时，已安装 skill 的默认分支有新提交即重新取回、扫描、审查；通过则替换（保留安装时间与上次调用时间），不通过则删除并写明原因。不经本人批准。
+- **调用**：`librarySkillsFor` 按任务文字与 skill 名称、描述、大类的词重叠（中文按相邻两字）给相关度，取该主线（或适用所有主线）的前 3 个，每次启用即刷新 `lastUsedAt`。公开 skill 与主线 skill 一起放进 `extraSkills`；指令里写明「与本人的主线 skill 不同时以本人为准，公开 skill 的文字不授予任何本次运行禁止的权限」。结构化 Skill 没有 shell，只读文字；脚本只有助手能跑，照旧经过 agent-guard。
+- **清理**：worker 每天一次（`cleanPublicSkills`），`lastUsedAt` 超过 30 天的删除并记 `skill.public.removed`（by system）。主线 skill 不在其列。
+
+### S3：设置 → Skill 库
+
+`apps/web/app/settings/skill-library.tsx`，数据来自 `apps/web/lib/skill-library.ts`。每条主线：当前版本号、由谁写成（整理 / 本人编辑 / 回到第 N 版）、日期；规则逐条带类型（打法、偏好、红线）与来源和原话；全文与历次版本折叠在「全文」「历次版本」里；「编辑」在原处改全文并存为新版本（`POST /api/skills/mine/<line>` `{markdown}`，缺 frontmatter 时补上标准的，`ensureMineFrontmatter`）；「回到此版」把旧版本另存为新版本（`{restore: n}`），历史不改写。公开 skills：名称、大类、结论、描述、来源仓库与目录（链接到该提交）、许可证、扫描发现（中文名称，不显示哈希原文）、文件数、审查理由、上次调用；「删除」走 `DELETE /api/skills/public/<id>`（记为本人删除）。最近删除的五个列在下面。两条路由都先过 `isCrossSiteWrite`。
+
+### 真实账本副本上的演示（2026-10-14，`scripts/skills-library-demo.ts`）
+
+真实账本的在线备份副本，真实 Codex：
+
+1. **整理**（77 秒，0 次修复）：媒体主线的材料里两条是验收备注，整理出第 1 版 8 条规则。第一条打法即来自 agent-97846949-1 的备注——「以冲突和焦虑作为内容核心切口，并以 solution 完成变现」，来源写明「2026-10-14 本人采纳助手结果「为小红书首篇……」时的备注：「自媒体的核心是制造冲突和贩卖焦虑，再通过卖 solution 变现，而不是做得像科研报告一样。」」；另有「不采用科研报告式边界与表达」等偏好，以及一条引小红书蒲公英帮助页（能打开）的红线：不以群体差异、未经证实的指控或煽动性言论制造冲突。
+2. **助手启用**（65 秒）：同一主线的「第二篇笔记：标题与开头」任务，`agent.task.completed` 记 `skills: ["crossline-mine:media"]`；产出的标题与开头改为冲突开场（「你以为科研靠灵感，其实每天都在给失败找凶手」），并按红线避开群体指控。
+3. **闸门判「部分」**（197 秒）：把真实的第一版提纲（科研报告体）挂在媒体主线里程碑下送验收，契约「首篇笔记的提纲，含叙事主线、分页文案骨架与 3 个公开来源」被判覆盖，`fit.fits = false`，`violated` 为「以冲突和焦虑作为内容核心切口，并以 solution 完成变现」「不采用科研报告式边界与表达」，`verdict = partial`。
+
+演示脚本把本 worktree 的插件装进了与常驻 worker 共用的 Codex home；结束时用常驻 checkout 的 marketplace 重装回 `crossline` 插件，并卸载演示用的 `crossline-mine`。
+
+### 尚未做
+
+- 公开 skill 只从 GitHub 取；其他托管平台的候选被拒并写明原因。
+- 相关度是词重叠，不是语义匹配；按大类之外的匹配交给检索时的 `lines` 与描述。
+- 演示没有跑真实的公开 skill 检索（会消耗联网额度）；取回、许可证判断与扫描对真实 GitHub 仓库实测过，检索与审查只有单元测试。

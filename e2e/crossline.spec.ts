@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { DEFAULT_AVAILABILITY } from "../packages/core/src/index.js";
 import { TEST_EMAIL, TEST_PASSWORD } from "./global-setup.js";
 import { signUpAccount } from "./accounts.js";
-import { ensurePortrait, openStore, realWorkspaceId } from "./ledger.js";
+import { ensurePortrait, ensureSkillLibrary, openStore, realWorkspaceId } from "./ledger.js";
 
 type BrowserFetchResult = { ok: boolean; status: number; body: string };
 
@@ -662,4 +662,43 @@ test("确认时间块：通知打开的小页上点「超出预估 · 30 分钟�
   // Opened again from the notification, the page says what was recorded instead of asking twice.
   await page.reload();
   await expect(page.getByText("已记下：用时 1 小时 15 分钟，这一步已完成。")).toBeVisible();
+});
+
+test("设置里的 Skill 库：主线 skill 逐条带来源；编辑存为新版本，回到旧版另存为新版本；公开 skill 可删除", async ({ page }, testInfo) => {
+  await ensureSkillLibrary(page);
+  await page.goto("/settings#skills");
+  const mine = page.getByRole("region", { name: "本人的主线 skill" });
+  await expect(mine.getByText("以冲突和焦虑作为内容核心切口，并以 solution 完成变现。")).toBeVisible();
+  await expect(mine.getByText(/来源：2026-10-14 本人采纳助手结果/)).toBeVisible();
+
+  await mine.getByRole("button", { name: "编辑", exact: true }).click();
+  const editor = mine.getByRole("textbox", { name: /主线 skill 全文/ });
+  const added = `4. 标题不超过 15 个字（${testInfo.project.name}）`;
+  await editor.fill(`${await editor.inputValue()}\n${added}`);
+  await mine.getByRole("button", { name: "保存为新版本" }).click();
+  await expect(mine.getByRole("status")).toContainText(/已保存为第 \d+ 版/);
+  const store = openStore();
+  const ws = realWorkspaceId(store);
+  // The line the fixture was written for (ensureSkillLibrary): the account's first line, or media when it has the built-in four.
+  const lines = store.getSetting(ws, "lines.v1");
+  const line = lines ? (JSON.parse(lines) as Array<{ id: string }>)[0]!.id : "media";
+  const saved = JSON.parse(store.getSetting(ws, `skills.mine.${line}`)!) as { current: number; versions: Array<{ version: number; by: string; markdown: string }> };
+  store.close();
+  const current = saved.versions.find((version) => version.version === saved.current)!;
+  expect(current.by).toBe("person");
+  expect(current.markdown).toContain(added);
+  expect(current.markdown).toMatch(/^---\nname: /);
+
+  await page.reload();
+  await mine.getByText(/历次版本/).click();
+  await mine.getByRole("button", { name: "回到此版" }).last().click();
+  await expect(mine.getByRole("status")).toContainText("已回到第 1 版");
+  await expect(mine.getByText("以冲突和焦虑作为内容核心切口，并以 solution 完成变现。")).toBeVisible();
+
+  if (testInfo.project.name !== "desktop-chrome") return;
+  const publics = page.getByRole("region", { name: /公开 skills/ });
+  await expect(publics.getByText("example/skills/skills/note-tools")).toBeVisible();
+  await expect(publics.getByText("发现联网，脚本未安装")).toBeVisible();
+  await publics.getByRole("button", { name: "删除公开 skill「note-tools」" }).click();
+  await expect(publics.getByText("example/skills/skills/note-tools")).toHaveCount(0);
 });

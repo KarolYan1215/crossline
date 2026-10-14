@@ -16,6 +16,8 @@ import { BackgroundModule } from "./background-module";
 import { backgroundOverview } from "../../lib/background";
 import { SettingsNav } from "./settings-nav";
 import { PersonalizationModule } from "./personalization";
+import { SkillLibraryModule } from "./skill-library";
+import { loadSkillLibrary } from "../../lib/skill-library";
 import { loadPreferences } from "../../lib/preferences";
 import { CalendarModule, ConnectionsSection } from "../connectors/connections";
 import { loadEffectiveness } from "../../lib/effectiveness";
@@ -31,7 +33,7 @@ import { interviewStatus } from "../../lib/interview-status";
 
 export const dynamic = "force-dynamic";
 const USAGE_DAYS = 7;
-const SECTIONS = [["general", "通用"], ["notify", "时间与提醒"], ["automation", "自动化与助手"], ["background", "后台任务"], ["personal", "个性化"], ["calendar", "日历与连接"],
+const SECTIONS = [["general", "通用"], ["notify", "时间与提醒"], ["automation", "自动化与助手"], ["background", "后台任务"], ["personal", "个性化"], ["skills", "Skill 库"], ["calendar", "日历与连接"],
   ["privacy", "隐私与屏幕活动"], ["usage", "用量与体检"]] as const;
 const TONE: Record<string, RecentTask["tone"]> = { running: "info", needs_review: "warn", accepted: "ok", rejected: "neutral", blocked: "risk", stale: "neutral" };
 
@@ -132,6 +134,10 @@ export default async function SettingsPage() {
 
         <section id="personal" className="st-section" aria-labelledby="st-personal"><h2 id="st-personal">个性化</h2>
           <PersonalizationModule {...loadPreferences(ctx)} />
+        </section>
+
+        <section id="skills" className="st-section" aria-labelledby="st-skills"><h2 id="st-skills">Skill 库</h2>
+          <SkillLibraryModule library={loadSkillLibrary(ctx)} />
         </section>
 
         <section id="calendar" className="st-section" aria-labelledby="st-calendar"><h2 id="st-calendar">日历与连接</h2>

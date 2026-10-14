@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { ensureSkillLibrary } from "./ledger.js";
 
 /**
  * The automatable half of the review rubric (docs/copy-style.md): no second person in the system's own text, folds only for advanced
@@ -55,6 +56,7 @@ async function audit(page: Page): Promise<Findings> {
 
 for (const path of PAGES) {
   test(`${path} reads as product copy: third person, few folds, nothing developer-facing, no long paragraphs`, async ({ page }) => {
+    if (path === "/settings") await ensureSkillLibrary(page);
     await page.goto(path);
     await page.waitForLoadState("networkidle");
     const found = await audit(page);
