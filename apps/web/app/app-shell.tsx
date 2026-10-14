@@ -14,26 +14,30 @@ import { LineColors } from "./line-colors";
  * The frame every signed-in page shares: the name, the four working views, the decisions waiting for you, the
  * settings, and the assistant. Pages put their content inside it and say which view they are.
  */
-export function AppShell({ active, children, className = "page" }: { active?: string | undefined; children: ReactNode; className?: string }) {
+export function AppShell({ active, children, className = "page", focus = false, corner = !focus }: { active?: string | undefined; children: ReactNode; className?: string;
+  /** The interview before the start standard stands (docs/onboarding-v3.md): every working view would lead back to it, so none is offered, and no assistant. */
+  focus?: boolean;
+  /** The timer and 小帮手 corner; off on a page that is itself the conversation. */
+  corner?: boolean }) {
   return <>
     <LineColors />
     <header className="running-head">
       <a className="wordmark" href="/">Crossline</a>
-      <nav aria-label="主导航">{NAV_ITEMS.map((item) =>
+      <nav aria-label="主导航">{(focus ? [] : NAV_ITEMS).map((item) =>
         <a href={item.href} key={item.label} className={item.label === active ? "active" : ""} aria-current={item.label === active ? "page" : undefined}>{item.label}</a>)}</nav>
       <div className="system-state">
-        {SIDE_ITEMS.map((item) => <a href={item.href} key={item.label} className={item.label === active ? "active" : ""} aria-current={item.label === active ? "page" : undefined}>
+        {(focus ? SIDE_ITEMS.filter((item) => item.href === "/settings") : SIDE_ITEMS).map((item) => <a href={item.href} key={item.label} className={item.label === active ? "active" : ""} aria-current={item.label === active ? "page" : undefined}>
           {item.label}{item.badge && <PendingBadge />}</a>)}
         <UndoCenter />
         <SignOutButton />
       </div>
     </header>
-    <BottomNav active={active} />
+    {!focus && <BottomNav active={active} />}
     {/* One corner, stacked: the timer above the 小帮手 bubble, each as tall as it is, so neither covers the other's buttons. */}
-    <CornerStack>
+    {corner && <CornerStack>
       <TimerFloat />
       <AssistantWidget />
-    </CornerStack>
+    </CornerStack>}
     <main className={className}><RuntimeBanner />{children}</main>
   </>;
 }

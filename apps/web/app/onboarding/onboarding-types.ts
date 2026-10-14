@@ -33,6 +33,8 @@ export type DiligenceReport = {
 export type OnboardingState = {
   /** The five start items stand (main interview; always true in a line's own interview): every page opens. */
   readyToStart: boolean;
+  /** How many start items there are (they are per line, so not a fixed five). */
+  startTotal: number;
   /** The start items still open, in checklist order. */
   startMissing: Array<{ id: string; label: string; detail: string; owner: "interview" | "person" }>;
   /** The app's own questions not in the open round (`profileGaps`), answered in the same reply. */
@@ -52,6 +54,12 @@ export type OnboardingState = {
   lineProfiles: Record<string, import("@crossline/core").StoredLineProfile>;
   profile: import("./portrait-panel").ProfileModelView | null;
   availabilityProposed: boolean;
+  /** How the interview talks (`ONBOARDING_TONE_SETTING`), and whether the person has chosen yet. */
+  tone: import("@crossline/core").OnboardingTone;
+  toneChosen: boolean;
+  /** The right column's week and project axis. */
+  week: import("../../lib/onboarding-board").WeekSkeleton;
+  timeline: import("../../lib/onboarding-board").ProjectTimeline;
   messages: Message[];
   projects: Project[];
   facts: Fact[];

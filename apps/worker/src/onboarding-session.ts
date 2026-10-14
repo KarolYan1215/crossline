@@ -3,7 +3,7 @@ import {
   AGENT_HISTORY_SUMMARY, agentHistoryLines, type AgentHistorySummary,
   EMPTY_PROFILE_MODEL, GOAL_EDITS_SETTING, ONBOARDING_TURN_SCHEMA, duplicateAttributes, type PendingGoalEdit, type StoredLineProfile, PROFILE_CONFIRMED, portraitFingerprint, answeredGapFacts, keepOnboardingTurn, mergeFacts, sanitizeDateExtraction, validateOnboardingTurn,
   gapCoveredBy, mergeDateExtractions, withoutOffHours, resolveAvailability, AVAILABILITY_SETTING, AVAILABILITY_PROPOSED_SETTING, type DateExtraction,
-  type ProfileGap, type ProfileModel, type OnboardingStage,
+  type ProfileGap, type ProfileModel, type OnboardingStage, DEEP_STAGES, ONBOARDING_TONE_SETTING, readTone,
   type KnownSources, type OnboardingTurn, type OnboardingTurnContext
 } from "@crossline/core";
 import { continueSkillTurn, runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
@@ -22,10 +22,11 @@ const INSTRUCTIONS = "You interview a Crossline user as the Skill describes: a l
   + "items marked `start` must be answered by the person or read from a file, never written as 「假设：」; while one is open stay in the "
   + "current stage and keep asking, and once all are in say in `reply` that the person can start using the app while the interview goes "
   + "on here. The person already set their lines (`lines`: identity "
-  + "nouns, their order, which are hard constraints); do not propose new ones. Each turn: a short, sharp reflection on what was just said "
-  + "(name a contradiction, a self-imposed limit, or gravity mistaken for a problem; never judge a choice or decide for the person), then a "
-  + "batch of up to five questions that do not depend on each other — one whose answer depends on another's waits for the next turn; follow "
-  + "a thread that carries a clue before returning to the stage. Ask about the hard-constraint lines' rules first (fixed schedule, terms, "
+  + "nouns, their order, which are hard constraints); do not propose new ones. Each turn: a short reflection on what was just said in the "
+  + "person's chosen `tone`, addressing them as 「你」 (name a contradiction, a self-imposed limit, or gravity mistaken for a problem; never "
+  + "judge a choice or decide for the person). In orientation, lines and details follow it with a batch of up to five fact questions that "
+  + "do not depend on each other; in situation, compass and energy with exactly one question, the one that matters most now; follow a "
+  + "thread that carries a clue before returning to the stage. Ask about the hard-constraint lines' rules first (fixed schedule, terms, "
   + "deadlines), put every fixed weekly arrangement the person states into `fileDates.recurring` quoting their reply, and as soon as the "
   + "person has said when they can work (or a stage has enough to infer it) propose weekly available hours in `availability` — do not wait "
   + "for every fixed arrangement: classes and meetings are subtracted from these hours automatically. Every single/multi question has concrete candidate options (8-14 when the "
@@ -276,7 +277,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         facts: store.listProfileFacts(workspaceId).map(({ identityId, projectId, slot, value, status }) => ({ identityId, projectId, slot, value, status })),
         today, timeZone, sources: clipDocuments(documents), ...(history ? { history } : {}), reply: { id: replyId, text: replyText },
         focusLine, profile: readProfile(), stage: ((session!.coverage as { stage?: OnboardingStage }).stage ?? (focusLine ? "details" : "orientation")),
-        checklist: openChecklist(), ...stagePace(messages, { startOpen: startOpen() }),
+        checklist: openChecklist(), ...stagePace(messages, { startOpen: startOpen() }), tone: readTone(store.getSetting(workspaceId, ONBOARDING_TONE_SETTING)),
         ...(workHistory().length ? { workHistory: workHistory() } : {}),
         lines: identityLines(store, workspaceId).map((line) => ({ id: line.id, label: line.label, rank: line.rank ?? null, hard: Boolean(line.hard), goals: line.goals ?? [],
           ...(line.goalParts?.length ? { goalParts: line.goalParts } : {}) }))
@@ -297,7 +298,8 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       const newSources = clipDocuments(fresh);
       // The completion list goes with every turn, so the model knows what it still owes without being told twice in prose.
       const pace = stagePace(messages, { startOpen: startOpen() });
-      const message = JSON.stringify({ reply: { id: replyId, text: replyText }, ...(newSources.length ? { newSources } : {}), checklist: openChecklist(), ...pace });
+      const message = JSON.stringify({ reply: { id: replyId, text: replyText }, ...(newSources.length ? { newSources } : {}), checklist: openChecklist(), ...pace,
+        tone: readTone(store.getSetting(workspaceId, ONBOARDING_TONE_SETTING)) });
       result = await continueSkillTurn<OnboardingTurn>(client, session.codexThreadId, message, {
         skillName: ONBOARDING_SKILL, cwd, outputSchema: ONBOARDING_TURN_SCHEMA, validateOutput, softAccept,
         onAudit: () => {}, timeoutMs: 60 * 60_000
@@ -316,7 +318,8 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     persistTurn(result.output, sessionId, ownerId);
     // A fixed weekly arrangement the person said (「每周二四上午组会」) is quoted from their reply, so replies count as sources here too.
     persistFileDates(result.output, ownerId, sent.map(([, doc]) => doc.id), { ...known.sources, ...known.replies }, today, input.reread === true);
-    const output = withChecklist(withGapQuestions(result.output, currentGaps(), messages, { freshDocuments: sent.map(([, doc]) => doc.id) }),
+    const paced = paceDeepRound(result.output, Boolean(focusLine));
+    const output = withChecklist(paced.deep ? paced.output : withGapQuestions(paced.output, currentGaps(), messages, { freshDocuments: sent.map(([, doc]) => doc.id) }),
       focusLine || options.checklist === false ? [] : openChecklist());
     store.appendOnboardingMessage({ sessionId, workspaceId, role: "assistant", content: output, createdAt: new Date().toISOString() });
     store.saveOnboardingSession({
@@ -348,6 +351,16 @@ export function withChecklist(output: OnboardingTurn, open: Array<{ label: strin
 
 /** Besides those that block, at most this many of the app's own questions join one round, so a batch stays answerable. */
 export const GAPS_PER_ROUND = 3;
+
+/**
+ * Mixed pacing (docs/onboarding-v3.md, decided 2026-10-14): in the deep stages — what weighs most, the compass, energy — a round is one
+ * question and the reflection on the last answer, so the person thinks about one thing at a time. The model is told so; this holds it to
+ * that, and the app's own fact questions wait for the next fact round (the screen lists them beside the conversation meanwhile).
+ */
+export function paceDeepRound(output: OnboardingTurn, focus: boolean): { output: OnboardingTurn; deep: boolean } {
+  const deep = !focus && DEEP_STAGES.has(output.stage as OnboardingStage) && output.nextAction === "ask";
+  return { deep, output: deep ? { ...output, questions: output.questions.slice(0, 1) } : output };
+}
 
 /**
  * Adds the app's own questions (`profileGaps`) to the round, **the ones about this round** first (decided 2026-10-08): a question about a

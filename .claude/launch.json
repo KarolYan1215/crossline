@@ -13,6 +13,13 @@
       "runtimeArgs": ["exec", "tsx", "scripts/install-preview-server.ts"],
       "port": 3330,
       "url": "http://localhost:3330"
+    },
+    {
+      "name": "install-preview-signed-in",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["exec", "tsx", "scripts/install-preview-server.ts", "signed-in", "reset"],
+      "port": 3330,
+      "url": "http://localhost:3330"
     }
   ]
 }

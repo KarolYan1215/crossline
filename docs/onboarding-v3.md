@@ -83,3 +83,10 @@
 - 阶段 2（2026-10-14）：登录页完成。`app/login/page.tsx`（本机版分支）、`login-preview.tsx`（四条示例主线依次接入、一周日历块依次落位，减少动态效果时静止）、`local-login.tsx`（三步、当前一步转圈、Codex 启动时显示已等待秒数）、`login.css`。标题用画像的衬线体（`.pt-serif`），界面用到的固定标题在 `app/ui/serif-strings.ts`，字体子集随之重建。手机宽度下隐藏示意图（标签会缩到 12px 以下；安装版只在桌面上用）。
   - 走查时发现：安装版和常驻版都在 127.0.0.1 上，cookie 不按端口区分，同一浏览器里登录一边会挤掉另一边的会话。安装版的 cookie 改用 `crossline-local` 前缀（`packages/auth/src/index.ts`）。
   - 预览：`scripts/install-preview-server.ts`（`.claude/launch.json` 的 `install-preview`，`localhost:3330`），本机版模式加一个替身 Codex 服务，`PREVIEW_CODEX=signed-out|starting|signed-in` 切换登录状态，不运行模型。
+- 阶段 3（2026-10-14）：访谈三栏完成。
+  - 中栏：`onboarding-workspace.tsx`。开场卡（`opening-card.tsx`）先说前提、三段和约 30 分钟，再问语气（直接犀利 / 温和支持 / 中性客观，默认中性，`onboarding.tone`，`POST /api/onboarding/tone`）、身份、未来 12–24 个月的底座和哪几条有固定日程；答案写入主线（排名、硬约束），再作为首轮回答发给访谈。事实类一批答完；深度阶段（现状、指南针、能量）一次一个大号问题，其余事实题挪到左栏「待补充的事实」，随下一次回答一起发。对话固定在中栏内滚动，新一轮把问题滚到视野顶部；设计里程碑和网上查证在达到开始标准后才出现。
+  - 左栏：`left-column.tsx`。材料与日历、待补充的事实、长期目标（已采用的收成一行加「修改」）、已记下的事实（槽位名一律中文，未知的显示「备注」）。
+  - 右栏：`stage-view.tsx`。画像一句话、开始使用进度环（缺项列成待办框，最多三条）、剩余时间估计（开始前每项约 2.5 分钟，之后每阶段约 5 分钟，完成后显示「访谈已完成」）、按阶段切换的图：主线网络、一周骨架（`lib/onboarding-board.ts` 的 `weekSkeleton`：可用时段按精力着色、文件里的固定课程、待确认的虚线）、施瓦茨价值雷达、能量四象限、项目时间轴、六层结构全貌。
+  - 访谈 Skill 和 worker：语气进上下文；深度阶段只留第一个问题（`paceDeepRound`）；对话用「你」，copy-audit 对 `.ob-voice` 区域放行；画像模型新增 `values`（施瓦茨十项，带分数）。
+  - 外壳：未达开始标准时只留「设置」（`AppShell focus`）；访谈页不显示右下角小帮手（中栏本身就是对话，`corner={false}`）。
+  - 预览种子：`scripts/install-preview-seed.ts <lines|compass|energy|details|complete>`，虚构一个人，每次新开一个会话接管页面，不跑模型。走查了五个阶段的 1440、1100 和 375 宽度，均无横向滚动。

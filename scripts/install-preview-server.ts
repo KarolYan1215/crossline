@@ -11,16 +11,16 @@ import path from "node:path";
  * `signed-in` (the page signs straight in). No model ever runs; nothing here reaches the real ledger, the resident app or the
  * installed copy.
  *
- *   pnpm exec tsx scripts/install-preview-server.ts
+ *   pnpm exec tsx scripts/install-preview-server.ts [signed-out | starting | signed-in] [reset]
  *
  * `localhost`, never 127.0.0.1: cookies are not kept apart by port, and the resident app and the installed copy both live on 127.0.0.1.
  */
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const webRoot = path.join(repoRoot, "apps", "web");
 const dataDir = path.join(tmpdir(), "crossline-install-preview");
-if (process.env.PREVIEW_RESET === "1") rmSync(dataDir, { recursive: true, force: true });
+if (process.env.PREVIEW_RESET === "1" || process.argv.includes("reset")) rmSync(dataDir, { recursive: true, force: true });
 mkdirSync(dataDir, { recursive: true });
-const mode = process.env.PREVIEW_CODEX ?? "signed-out";
+const mode = process.env.PREVIEW_CODEX ?? process.argv.slice(2).find((arg) => ["signed-out", "starting", "signed-in"].includes(arg)) ?? "signed-out";
 const SUPERVISOR_PORT = 3331;
 
 const supervisor = createServer((request, response) => {

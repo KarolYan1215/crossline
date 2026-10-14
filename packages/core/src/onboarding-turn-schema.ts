@@ -1,5 +1,6 @@
 import { RELATION_KINDS } from "./flywheel-schema";
 import { DATE_EXTRACTION_SCHEMA, type DateExtraction } from "./date-schema";
+import { SCHWARTZ_VALUES } from "./portrait";
 import {
   ATTRIBUTE_CANDIDATES_MAX, ATTRIBUTE_CANDIDATES_MIN, ATTRIBUTE_KIND_FIELD, ATTRIBUTE_KINDS, ATTRIBUTE_MAX_LENGTH, cleanAttribute, duplicateAttributes, guessKind,
   notAtomic, type AttributeCandidate, type AttributeKind
@@ -49,6 +50,23 @@ export type TurnCoverage = { identityId: string; filled: string[]; missing: stri
  */
 export const ONBOARDING_STAGES = ["orientation", "lines", "situation", "compass", "energy", "details"] as const;
 export type OnboardingStage = (typeof ONBOARDING_STAGES)[number];
+/**
+ * The stages asked one deep question at a time (docs/onboarding-v3.md, decided 2026-10-14): what weighs most, why they work, what life is
+ * for, what absorbs and drains them. The others gather facts in a batch of option cards.
+ */
+export const DEEP_STAGES: ReadonlySet<OnboardingStage> = new Set<OnboardingStage>(["situation", "compass", "energy"]);
+/** How the interview talks, chosen by the person at the start (default neutral); a setting, so it can change mid-interview. */
+export const ONBOARDING_TONES = ["direct", "warm", "neutral"] as const;
+export type OnboardingTone = (typeof ONBOARDING_TONES)[number];
+export const ONBOARDING_TONE_SETTING = "onboarding.tone";
+export const ONBOARDING_TONE_LABEL: Record<OnboardingTone, { label: string; detail: string }> = {
+  direct: { label: "直接犀利", detail: "点破自我设限和逻辑漏洞，不绕弯，不做无谓攻击" },
+  warm: { label: "温和支持", detail: "先肯定再追问，语气柔和" },
+  neutral: { label: "中性客观", detail: "就事论事，不加情绪" }
+};
+export function readTone(value: string | null | undefined): OnboardingTone {
+  return (ONBOARDING_TONES as readonly string[]).includes(value ?? "") ? value as OnboardingTone : "neutral";
+}
 /** The facts that are about the person rather than one line (their compass, their energy) are filed under this id. */
 export const PERSON_LINE = "person";
 
@@ -71,9 +89,11 @@ export type ProfileModel = {
   /** An idea held long after it stopped working, and what they really want behind it. */
   anchor: string; realWant: string;
   allocation: string;
+  /** Schwartz's ten values scored 0–100 from what was said (any subset so far), drawn as a radar while the compass stage runs. */
+  values: Array<{ value: string; score: number }>;
 };
 export const EMPTY_PROFILE_MODEL: ProfileModel = { portrait: "", coreConflict: "", problem: "", gravity: [], designable: [], reframes: [], workView: "",
-  lifeView: "", consistency: "", trueNorth: "", energyMap: [], flow: [], says: "", does: "", anchor: "", realWant: "", allocation: "" };
+  lifeView: "", consistency: "", trueNorth: "", energyMap: [], flow: [], says: "", does: "", anchor: "", realWant: "", allocation: "", values: [] };
 /**
  * For each line: a personal description from what was said, and 6–12 mutually independent attributes (`attributeCandidates`) the person
  * builds a long-term goal 「成为 A 的、B 的<身份>」 from — each cited to the reply or file it came from and labelled with its kind
@@ -126,6 +146,8 @@ export type OnboardingTurnContext = {
   lines?: Array<{ id: string; label: string; rank: number | null; hard: boolean; goals: string[]; goalParts?: string[] }>;
   /** The portrait so far and the stage reached, so a rebuilt thread carries on rather than starting over. */
   profile?: ProfileModel; stage?: OnboardingStage;
+  /** How the person asked to be spoken to (`ONBOARDING_TONE_SETTING`); also sent with every later turn, since it can change. */
+  tone?: OnboardingTone;
   /** The completion list's items still open (`interviewChecklist`): what the interview owes before it may say it is ready, and what waits on the person. */
   checklist?: Array<{ label: string; detail: string; owner: "interview" | "person"; start?: boolean }>;
   /** Hours spent in Codex and Claude Code per folder and when in the day (`agentHistoryLines`), when the person allowed it: habits, not a plan. */
@@ -221,7 +243,8 @@ export const ONBOARDING_TURN_SCHEMA = object({
     energyMap: { type: "array", maxItems: 12, items: object({ activity: text(80), skill: { type: "string", enum: ["high", "low"] }, love: { type: "string", enum: ["high", "low"] },
       charge: { type: "string", enum: ["charge", "drain"] } }) },
     flow: { type: "array", maxItems: 8, items: text(200) }, says: { type: "string", maxLength: 400 }, does: { type: "string", maxLength: 400 },
-    anchor: { type: "string", maxLength: 400 }, realWant: { type: "string", maxLength: 400 }, allocation: { type: "string", maxLength: 600 }
+    anchor: { type: "string", maxLength: 400 }, realWant: { type: "string", maxLength: 400 }, allocation: { type: "string", maxLength: 600 },
+    values: { type: "array", maxItems: 10, items: object({ value: { type: "string", enum: SCHWARTZ_VALUES.map((value) => value.name) }, score: { type: "integer", minimum: 0, maximum: 100 } }) }
   })
 });
 
@@ -316,7 +339,16 @@ export function validateOnboardingTurn(value: unknown, known: KnownSources): Onb
     lineProfiles: (turn.lineProfiles ?? []).map((line) => ({ ...line, attributeCandidates: cleanCandidates(line.attributeCandidates ?? []) })),
     goalEdits: (turn.goalEdits ?? []).map((edit) => ({ ...edit, parts: edit.parts.map((part) => ({ text: cleanAttribute(part.text), kind: kindOf(part) })).filter((part) => part.text) })),
     availability: turn.availability ?? { windows: [], why: "" },
-    profile: { ...EMPTY_PROFILE_MODEL, ...(turn.profile ?? {}) } };
+    profile: withValues({ ...EMPTY_PROFILE_MODEL, ...(turn.profile ?? {}) }) };
+}
+
+/** Known values only, each once, scores clamped: a profile from before values existed has none. */
+function withValues(profile: ProfileModel): ProfileModel {
+  const names = new Set(SCHWARTZ_VALUES.map((value) => value.name as string));
+  const seen = new Set<string>();
+  const values = (Array.isArray(profile.values) ? profile.values : []).filter((item) => names.has(item.value) && !seen.has(item.value) && Boolean(seen.add(item.value)))
+    .map((item) => ({ value: item.value, score: Math.max(0, Math.min(100, Math.round(Number(item.score) || 0))) }));
+  return { ...profile, values };
 }
 
 const kindOf = (part: { text: string; kind?: string }): AttributeKind =>

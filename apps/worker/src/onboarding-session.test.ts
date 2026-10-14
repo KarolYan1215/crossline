@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { CrosslineStore } from "@crossline/db";
-import { createOnboardingSessionRunner, ONBOARDING_SKILL } from "./onboarding-session";
+import { createOnboardingSessionRunner, ONBOARDING_SKILL, paceDeepRound } from "./onboarding-session";
 import { fakeRuntime as sharedRuntime } from "./testing/fake-runtime";
 
 const fakeRuntime = (answers: string[], options: { lostThreads?: string[] } = {}) => sharedRuntime(answers, ONBOARDING_SKILL, options);
@@ -287,4 +287,26 @@ test("先读材料：首轮把已读出的文件全部带上，清单标出可�
   expect(context.sources).toHaveLength(2);
   expect(context.checklist.some((item) => item.start === true)).toBe(true);
   expect(context.stage).toBe("orientation");
+});
+
+test("a deep-stage round asks one thing at a time, and a fact stage keeps its batch", () => {
+  const two = JSON.parse(turn({ stage: "compass", questions: [
+    { id: "q1", text: "工作对你意味着什么？", kind: "free", allowOther: true, identityId: "person", projectId: "", options: [] },
+    { id: "q2", text: "人生的意义？", kind: "free", allowOther: true, identityId: "person", projectId: "", options: [] }] }));
+  expect(paceDeepRound(two, false)).toMatchObject({ deep: true, output: { questions: [{ id: "q1" }] } });
+  // A line's own interview is all details; a fact stage keeps every question.
+  expect(paceDeepRound(two, true).output.questions).toHaveLength(2);
+  expect(paceDeepRound({ ...two, stage: "lines" }, false)).toMatchObject({ deep: false });
+  expect(paceDeepRound({ ...two, stage: "lines" }, false).output.questions).toHaveLength(2);
+});
+
+test("the tone the person chose goes with the first turn and every later one", async () => {
+  store.setSetting(workspaceId, "onboarding.tone", "direct");
+  const { rpc, prompts } = fakeRuntime([firstAnswer, turn()]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc);
+  await run({ sessionId: "s1", text: "开始" });
+  store.setSetting(workspaceId, "onboarding.tone", "warm");
+  await run({ sessionId: "s1", text: "继续" });
+  expect(prompts()[0]).toContain('"tone":"direct"');
+  expect(prompts().slice(1).some((prompt) => prompt.includes('"tone":"warm"'))).toBe(true);
 });

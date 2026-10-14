@@ -1,35 +1,51 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test } from "vitest";
-import { MaterialsFirst, StartCard } from "./onboarding-workspace";
+import { OpeningCard, openingReply } from "./opening-card";
+import { minutesLeft, viewForStage, WeekView } from "./stage-view";
+import { MATERIALS_FIRST_REPLY, NO_MATERIALS_REPLY } from "./onboarding-types";
 
-const lines = [{ id: "media", label: "创作者", rank: null, hard: false, goals: [], goalParts: [] }];
-
-test("未达可开始时写明还差哪几项、在哪里补；没有「开始使用」", () => {
-  const html = renderToStaticMarkup(<StartCard readyToStart={false} lines={lines} missing={[
-    { id: "line_goal:media", label: "「创作者」已选定至少一个长期目标", detail: "从候选中采用或自己写一个", owner: "person" },
-    { id: "line_project:media", label: "「创作者」有当前项目，且知道截止或没有截止", detail: "缺截止（或说明没有截止）：小红书", owner: "interview" }]} />);
-  expect(html).toContain("开始使用前还差 2 项");
-  expect(html).toContain("「创作者」已选定至少一个长期目标");
-  expect(html).toContain("在右侧画像下为「创作者」采用长期目标");
-  expect(html).toContain("缺截止（或说明没有截止）：小红书");
-  expect(html).not.toContain("开始使用</a>");
+/** The interview v3 (docs/onboarding-v3.md): the opening card, the stage pictures and the time left. */
+test("the opening states the premise, the three parts and the time, then asks tone and lines — no six-level lecture", () => {
+  const html = renderToStaticMarkup(<OpeningCard linesKnown={false} knownLines={[]} initialTone="neutral" busy={false} hasMaterials={false} onStart={() => {}} />);
+  expect(html).toContain("可以反复修改");
+  expect(html).toContain("大约 30 分钟");
+  expect(html).toContain("你希望我怎么跟你说话");
+  expect(html).toContain("中性客观");
+  expect(html).toContain("你正在投入的身份有哪些");
+  expect(html).not.toContain("长期目标</b>");
+  // Lines already set: only the tone is asked.
+  const known = renderToStaticMarkup(<OpeningCard linesKnown knownLines={["研究者"]} initialTone="warm" busy={false} hasMaterials onStart={() => {}} />);
+  expect(known).not.toContain("你正在投入的身份有哪些");
+  expect(known).toContain("读完材料，开始访谈");
 });
 
-test("达标后出现「开始使用」，并说明画像访谈在同一处继续", () => {
-  const html = renderToStaticMarkup(<StartCard readyToStart lines={lines} missing={[]} />);
-  expect(html).toMatch(/<a[^>]*href="\/"[^>]*>开始使用<\/a>/);
-  expect(html).toContain("画像访谈在同一处继续，问题也会列在待决事项");
-  expect(html).not.toContain("开始使用前还差");
+test("the opening answers become the first reply in the screen's own words, ending with the materials sentence the eval also sends", () => {
+  const reply = openingReply({ tone: "direct", lines: ["研究者", "创业者"], base: "研究者", fixed: ["研究者"] }, true);
+  expect(reply).toContain("【语气】直接犀利");
+  expect(reply).toContain("【我的主线】研究者、创业者");
+  expect(reply).toContain("【未来 12–24 个月的底座】研究者");
+  expect(reply).toContain("【有固定日程的主线】研究者");
+  expect(reply.endsWith(MATERIALS_FIRST_REPLY)).toBe(true);
+  const none = openingReply({ tone: "neutral", lines: ["学生"], base: "", fixed: [] }, false);
+  expect(none).toContain("【未来 12–24 个月的底座】几条并重");
+  expect(none).toContain("【有固定日程的主线】都没有");
+  expect(none.endsWith(NO_MATERIALS_REPLY)).toBe(true);
 });
 
-test("第一步是材料：上传入口与「读完材料，开始访谈」；没有材料时是「没有材料，直接开始」", () => {
-  const doc = { id: "d1", fileName: "Syllabus.pdf", kind: "pdf", extractionStatus: "done" as const };
-  const withFiles = renderToStaticMarkup(<MaterialsFirst documents={[doc]} busy={false} onUpload={() => {}} onStart={() => {}} />);
-  expect(withFiles).toContain("第一步：添加材料");
-  expect(withFiles).toContain("添加文件");
-  expect(withFiles).toContain("Syllabus.pdf");
-  expect(withFiles).toContain("读完材料，开始访谈");
-  const empty = renderToStaticMarkup(<MaterialsFirst documents={[]} busy={false} onUpload={() => {}} onStart={() => {}} />);
-  expect(empty).toContain("没有材料，直接开始");
-  expect(empty).not.toContain("读完材料，开始访谈");
+test("each stage brings its own picture, and the time left is said before and after the start standard", () => {
+  expect(["orientation", "lines", "situation", "compass", "energy", "details"].map((stage) => viewForStage(stage, false)))
+    .toEqual(["lines", "lines", "week", "compass", "energy", "projects"]);
+  expect(viewForStage("details", true)).toBe("structure");
+  expect(minutesLeft({ readyToStart: false, startMissing: [{ id: "a", label: "", detail: "", owner: "interview" }, { id: "b", label: "", detail: "", owner: "person" }] }, "lines"))
+    .toEqual({ label: "开始使用前约", minutes: 5 });
+  expect(minutesLeft({ readyToStart: true, startMissing: [] }, "compass")).toEqual({ label: "画像访谈还剩约", minutes: 15 });
+});
+
+test("the week draws working hours and fixed arrangements, waiting ones dashed, and says where the hours came from", () => {
+  const html = renderToStaticMarkup(<WeekView week={{ source: "interview", windows: [{ days: [1, 2, 3, 4, 5], start: "09:00", end: "17:00", energy: "high" }],
+    fixed: [{ id: "c1", title: "ECE 548", project: "ece548", weekdays: [2, 4], start: "11:00", end: "12:15", status: "pending" }] }} />);
+  expect(html).toContain("可用约 40 小时");
+  expect(html).toContain("ECE 548 · 周二 11:00–12:15（待确认）");
+  expect(html).toContain('data-status="pending"');
+  expect(html).toContain("访谈提议");
 });
