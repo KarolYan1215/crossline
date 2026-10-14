@@ -4,9 +4,9 @@ import {
   EMPTY_PROFILE_MODEL, GOAL_EDITS_SETTING, ONBOARDING_TURN_SCHEMA, duplicateAttributes, type PendingGoalEdit, type StoredLineProfile, PROFILE_CONFIRMED, portraitFingerprint, answeredGapFacts, keepOnboardingTurn, mergeFacts, sanitizeDateExtraction, validateOnboardingTurn,
   gapCoveredBy, mergeDateExtractions, withoutOffHours, resolveAvailability, AVAILABILITY_SETTING, AVAILABILITY_PROPOSED_SETTING, type DateExtraction,
   type ProfileGap, type ProfileModel, type OnboardingStage, DEEP_STAGES, ONBOARDING_TONE_SETTING, readTone,
-  type KnownSources, type OnboardingTurn, type OnboardingTurnContext
+  type KnownSources, type OnboardingTurn, type OnboardingTurnContext, ONBOARDING_PROGRESS_SETTING, readPartialTurn, type OnboardingProgress
 } from "@crossline/core";
-import { continueSkillTurn, runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
+import { continueSkillTurn, runCodexSkill, type CodexRpcBoundary, type SkillProgress } from "@crossline/codex";
 import { interviewChecklistFor, interviewGapsFor, unfiledFilesIn, type CrosslineStore, type StoredOnboardingMessage, type StoredSourceDocument } from "@crossline/db";
 import { sourceIds } from "./source-ids";
 import { identityLines } from "./lines";
@@ -285,34 +285,55 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       return runCodexSkill<OnboardingTurn>(client, context, {
         skillName: ONBOARDING_SKILL, cwd, developerInstructions: INSTRUCTIONS, outputSchema: ONBOARDING_TURN_SCHEMA,
         prepareInput: () => context, validateOutput, softAccept,
-        onAudit: (audit) => { if (audit.threadId) threadId = audit.threadId; },
+        onAudit: (audit) => { if (audit.threadId) threadId = audit.threadId; }, onProgress,
         timeoutMs: 60 * 60_000
       });
     };
 
-    let result;
-    if (!session.codexThreadId) {
-      result = await startThread(fresh);
-    } else {
-      // Later turns carry only what is new: the reply, and any file that arrived since the last turn.
-      const newSources = clipDocuments(fresh);
-      // The completion list goes with every turn, so the model knows what it still owes without being told twice in prose.
-      const pace = stagePace(messages, { startOpen: startOpen() });
-      const message = JSON.stringify({ reply: { id: replyId, text: replyText }, ...(newSources.length ? { newSources } : {}), checklist: openChecklist(), ...pace,
-        tone: readTone(store.getSetting(workspaceId, ONBOARDING_TONE_SETTING)) });
-      result = await continueSkillTurn<OnboardingTurn>(client, session.codexThreadId, message, {
-        skillName: ONBOARDING_SKILL, cwd, outputSchema: ONBOARDING_TURN_SCHEMA, validateOutput, softAccept,
-        onAudit: () => {}, timeoutMs: 60 * 60_000
-      });
-      // The runtime forgets a conversation when it restarts. The interview does not: the profile, the files and
-      // every message are in the ledger, so a new thread is told what was said and carries on from there.
-      if (!result.ok && result.blocker.code === "SKILL_THREAD_LOST") {
-        threadId = undefined;
-        announcedNow = new Set();
-        sent = [...docs].filter(([, doc]) => doc.extractionStatus === "done");
-        result = await startThread(sent, conversationSoFar(messages.slice(0, -1)));
-      }
+    // The wait, made visible (docs/onboarding-v3.md 「等待」): what the model is reading and has written so far, polled by the page and
+    // deleted when the turn ends. Unvalidated; only counted and previewed.
+    const progressKey = `${ONBOARDING_PROGRESS_SETTING}:${sessionId}`;
+    const startedAt = new Date().toISOString();
+    const files = fresh.map(([, doc]) => doc.fileName);
+    let lastWrite = 0;
+    let latest: OnboardingProgress | undefined;
+    const write = (record: OnboardingProgress) => {
+      latest = record;
+      try { store.setSetting(workspaceId, progressKey, JSON.stringify(record)); } catch { /* the screen's view must never fail the turn */ }
+    };
+    function onProgress(live: SkillProgress) {
+      if (live.phase === "writing") { if (Date.now() - lastWrite < 1000) return; lastWrite = Date.now(); }
+      write({ sessionId, startedAt, updatedAt: new Date().toISOString(), phase: live.phase, files, ...readPartialTurn(live.text), repairs: live.repairs, stalls: live.stalls });
     }
+    onProgress({ phase: "thinking", text: "", repairs: 0, stalls: 0 });
+    // A model reading the files says nothing for a minute or more; the heartbeat tells the page the turn is still alive.
+    const heartbeat = setInterval(() => { if (latest) write({ ...latest, updatedAt: new Date().toISOString() }); }, 15_000);
+
+    let result;
+    try {
+      if (!session.codexThreadId) {
+        result = await startThread(fresh);
+      } else {
+        // Later turns carry only what is new: the reply, and any file that arrived since the last turn.
+        const newSources = clipDocuments(fresh);
+        // The completion list goes with every turn, so the model knows what it still owes without being told twice in prose.
+        const pace = stagePace(messages, { startOpen: startOpen() });
+        const message = JSON.stringify({ reply: { id: replyId, text: replyText }, ...(newSources.length ? { newSources } : {}), checklist: openChecklist(), ...pace,
+          tone: readTone(store.getSetting(workspaceId, ONBOARDING_TONE_SETTING)) });
+        result = await continueSkillTurn<OnboardingTurn>(client, session.codexThreadId, message, {
+          skillName: ONBOARDING_SKILL, cwd, outputSchema: ONBOARDING_TURN_SCHEMA, validateOutput, softAccept,
+          onAudit: () => {}, onProgress, timeoutMs: 60 * 60_000
+        });
+        // The runtime forgets a conversation when it restarts. The interview does not: the profile, the files and
+        // every message are in the ledger, so a new thread is told what was said and carries on from there.
+        if (!result.ok && result.blocker.code === "SKILL_THREAD_LOST") {
+          threadId = undefined;
+          announcedNow = new Set();
+          sent = [...docs].filter(([, doc]) => doc.extractionStatus === "done");
+          result = await startThread(sent, conversationSoFar(messages.slice(0, -1)));
+        }
+      }
+    } finally { clearInterval(heartbeat); store.deleteSetting(workspaceId, progressKey); }
     if (!result.ok) return blocked(result.blocker.code, result.blocker.message);
 
     persistTurn(result.output, sessionId, ownerId);

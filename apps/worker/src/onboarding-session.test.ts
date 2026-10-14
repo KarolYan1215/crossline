@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { CrosslineStore } from "@crossline/db";
+import { ONBOARDING_PROGRESS_SETTING, type OnboardingProgress } from "@crossline/core";
 import { createOnboardingSessionRunner, ONBOARDING_SKILL, paceDeepRound } from "./onboarding-session";
 import { fakeRuntime as sharedRuntime } from "./testing/fake-runtime";
 
@@ -44,6 +45,20 @@ test("a first turn opens a thread, saves the reply, and writes the projects and 
   const messages = store.listOnboardingMessages(workspaceId, "s1");
   expect(messages.map((message) => message.role)).toEqual(["user", "assistant"]);
   expect(store.getOnboardingSession(workspaceId, "s1")).toMatchObject({ codexThreadId: expect.any(String), state: "active" });
+});
+
+test("while a turn is written the page can read what it holds so far, and nothing is left behind when it ends", async () => {
+  let seen: OnboardingProgress | undefined;
+  const key = `${ONBOARDING_PROGRESS_SETTING}:s1`;
+  const { rpc } = sharedRuntime([firstAnswer], ONBOARDING_SKILL, { script: async ({ threadId, turnId, emit }) => {
+    // The runtime streams the answer as it writes it: here, up to the middle of the facts.
+    emit({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "m1", delta: firstAnswer.slice(0, firstAnswer.indexOf("flywheelCandidates")) } });
+    seen = JSON.parse(store.getSetting(workspaceId, key) ?? "null") as OnboardingProgress;
+  } });
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc);
+  await run({ sessionId: "s1", text: "西湖那篇 10/31 前要投出，数据下周到。" });
+  expect(seen).toMatchObject({ sessionId: "s1", phase: "writing", reply: "收到，我先确认几件事。", questions: 1, facts: 1, dates: 0, repairs: 0 });
+  expect(store.getSetting(workspaceId, key)).toBeUndefined();
 });
 
 test("the second turn continues the same thread and only carries what is new", async () => {

@@ -90,3 +90,10 @@
   - 访谈 Skill 和 worker：语气进上下文；深度阶段只留第一个问题（`paceDeepRound`）；对话用「你」，copy-audit 对 `.ob-voice` 区域放行；画像模型新增 `values`（施瓦茨十项，带分数）。
   - 外壳：未达开始标准时只留「设置」（`AppShell focus`）；访谈页不显示右下角小帮手（中栏本身就是对话，`corner={false}`）。
   - 预览种子：`scripts/install-preview-seed.ts <lines|compass|energy|details|complete>`，虚构一个人，每次新开一个会话接管页面，不跑模型。走查了五个阶段的 1440、1100 和 375 宽度，均无横向滚动。
+- 阶段 4（2026-10-14）：等待体验完成。
+  - 运行时把答案边写边推（`item/agentMessage/delta`），runner 新增 `onProgress`（`SkillProgress`：thinking / writing / checking，带修正与重发次数，写作阶段每半秒一次）。答案按 schema 顺序出，`reply` 在最前，所以 `readPartialTurn`（`packages/core/src/onboarding-progress.ts`）能在一轮结束前读出回复的前半段，并数出已写的问题、事实和日期。这些都不入账、不信任，验收后的答案一到就替换。
+  - worker 在一轮运行时把进度写进账本 `onboarding.progress:<会话>`（写作阶段每秒最多一次，另有 15 秒心跳，读文件时也不会被当成停止），结束即删；网页 `GET /api/onboarding/progress` 读取，超过 45 秒没更新视为没有在跑。
+  - 中栏的等待气泡（`turn-progress.tsx`）：正在读哪几个文件 → 正在写（回复逐段出现）→ 正在核对引文和日期；已整理几条事实、几个日期、几个问题；已用时间。刷新页面后若后台仍在跑，会接上并在结束时自动载入，期间不能再发一轮。
+  - 等待时可做别的事：左栏（长期目标、待补充的事实、事实修改、上传）和日期确认在一轮进行中仍可操作；确认日期不会打断这一轮的等待状态。
+  - 提醒：页面不在前台时标签页标题加「● 新问题」；允许后由页面自己发桌面通知（「好了用桌面通知提醒我」）；安装版另有托盘气泡——网页在用户离开 90 秒后往 stdout 写一行 `@crossline:notify {…}`，启动器检查（只许本应用的页面路径）后转给托盘，点气泡打开访谈；手机推送照旧。
+  - 预览：`scripts/install-preview-progress.ts [秒]` 在预览账本里模拟一轮进行中的进度。

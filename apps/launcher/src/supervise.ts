@@ -62,7 +62,23 @@ export const STABLE_AFTER_MS = 5 * 60_000;
 
 export type SupervisorEvent =
   | { type: "child.started"; name: string; pid: number | undefined }
-  | { type: "child.exited"; name: string; code: number | null; restartInMs: number };
+  | { type: "child.exited"; name: string; code: number | null; restartInMs: number }
+  | { type: "notify"; title: string; text: string; path: string };
+
+/** The one line a child writes to ask the tray for a balloon (docs/onboarding-v3.md 「等待」): `@crossline:notify {"title","text","path"}`. */
+export const NOTICE_PREFIX = "@crossline:notify ";
+
+/** A child's notice line, checked: short plain strings and a same-app path only, so a log line can never make the tray open elsewhere. */
+export function noticeFrom(line: string): Extract<SupervisorEvent, { type: "notify" }> | undefined {
+  if (!line.startsWith(NOTICE_PREFIX)) return undefined;
+  try {
+    const body = JSON.parse(line.slice(NOTICE_PREFIX.length)) as Record<string, unknown>;
+    const short = (value: unknown, max: number) => typeof value === "string" && value.length > 0 && value.length <= max ? value : undefined;
+    const title = short(body.title, 60), text = short(body.text, 200), path = short(body.path, 120);
+    if (!title || !text || !path || !/^\/[A-Za-z0-9/_-]*$/.test(path)) return undefined;
+    return { type: "notify", title, text, path };
+  } catch { return undefined; }
+}
 
 type Spawn = (spec: ChildSpec, log: { out: NodeJS.WritableStream; err: NodeJS.WritableStream }) => ChildProcess;
 
@@ -93,6 +109,14 @@ export class Supervisor {
     const startedAt = this.now();
     const child = this.spawnChild(spec, log);
     this.#children.set(spec.name, child);
+    // Notice lines ride the child's ordinary output (it is also logged); each complete line is checked once.
+    let pending = "";
+    child.stdout?.on("data", (chunk: Buffer | string) => {
+      pending += chunk.toString();
+      const lines = pending.split(/\r?\n/);
+      pending = lines.pop()!.slice(-4096);
+      for (const line of lines) { const notice = noticeFrom(line); if (notice) this.onEvent(notice); }
+    });
     this.onEvent({ type: "child.started", name: spec.name, pid: child.pid });
     let done = false;
     const exited = (code: number | null) => {

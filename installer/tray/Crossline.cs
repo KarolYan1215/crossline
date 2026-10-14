@@ -55,6 +55,8 @@ namespace Crossline
         Process launcher;
         string url;
         string pendingUpdate;
+        // What a click on the last balloon opens: the update, or the page a notice named.
+        string balloonOpens;
         bool quitting;
         int restarts;
 
@@ -78,7 +80,11 @@ namespace Crossline
             icon.Text = "Crossline 正在启动";
             icon.Visible = true;
             icon.DoubleClick += (s, e) => Send("open");
-            icon.BalloonTipClicked += (s, e) => { if (pendingUpdate != null) ConfirmUpdate(); };
+            icon.BalloonTipClicked += (s, e) =>
+            {
+                if (balloonOpens == "update") { if (pendingUpdate != null) ConfirmUpdate(); }
+                else if (balloonOpens != null && url != null) Process.Start(url.TrimEnd('/') + balloonOpens);
+            };
             job = CreateKillOnCloseJob();
             StartLauncher();
         }
@@ -136,8 +142,19 @@ namespace Crossline
             if (type == "error") { icon.ShowBalloonTip(10000, "Crossline", "Crossline 没能启动，日志在数据文件夹的 logs 里。", ToolTipIcon.Error); return; }
             if (type == "update-none") { icon.ShowBalloonTip(5000, "Crossline", "已是最新版本。", ToolTipIcon.Info); return; }
             if (type == "update-failed") { icon.ShowBalloonTip(8000, "Crossline", "更新没有完成：" + (Field(line, "code") ?? "未知原因"), ToolTipIcon.Warning); return; }
+            if (type == "notify")
+            {
+                // A child asked to call the person back (the interview's next round landed while no page was open). The path was
+                // checked by the launcher; it is always one of this app's own pages.
+                var path = Field(line, "path");
+                if (path == null || !path.StartsWith("/")) return;
+                balloonOpens = path;
+                icon.ShowBalloonTip(10000, Field(line, "title") ?? "Crossline", Field(line, "text") ?? "", ToolTipIcon.Info);
+                return;
+            }
             if (type == "update-available")
             {
+                balloonOpens = "update";
                 pendingUpdate = Field(line, "version");
                 updateItem.Text = "更新到 " + pendingUpdate;
                 icon.ShowBalloonTip(15000, "Crossline 有新版本", "新版本 " + pendingUpdate + " 可以安装，点这里更新。", ToolTipIcon.Info);

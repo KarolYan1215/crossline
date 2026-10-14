@@ -148,3 +148,13 @@
 .ob-ring-missing{list-style:none;padding-left:0}
 .ob-ring-missing li::before{content:"□ "}
 .ob-goal>.ob-btn{justify-self:start}
+/* The wait for a turn (turn-progress.tsx): what is read, the reply as it is written, and the counts so far. */
+.ob3 .ob-progress{display:grid;gap:6px;border-left-style:dashed}
+.ob-progress-head{display:flex;gap:8px;align-items:center;font-weight:700;font-size:15px}
+.ob-progress-dot{width:8px;height:8px;border-radius:50%;background:var(--ink);animation:ob-pulse 1.4s ease-in-out infinite}
+@keyframes ob-pulse{0%,100%{opacity:1}50%{opacity:.25}}
+@media (prefers-reduced-motion:reduce){.ob-progress-dot{animation:none}}
+.ob3 .ob-progress-reply{color:var(--graphite);font-size:15px;line-height:1.7}
+.ob-progress-counts{font-size:13px;color:var(--graphite)}
+.ob-progress-counts b{color:var(--ink);font-variant-numeric:tabular-nums}
+.ob3 .ob-progress .ob-btn{justify-self:start}

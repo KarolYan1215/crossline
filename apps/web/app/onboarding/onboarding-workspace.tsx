@@ -10,6 +10,7 @@ import { StageBar } from "./portrait-panel";
 import { LeftColumn } from "./left-column";
 import { StageView } from "./stage-view";
 import { OpeningCard, openingReply, type OpeningAnswer } from "./opening-card";
+import { announceRound, TurnProgress } from "./turn-progress";
 import { SegmentedControl } from "../ui/controls";
 import { composeAnswers, type Answer, type AssistantTurn, type DocumentRow, type Message, type OnboardingState } from "./onboarding-types";
 
@@ -33,6 +34,8 @@ const userText = (message: Message) => String((message.content as { text?: strin
 export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
   const [state, setState] = useState<OnboardingState | undefined>();
   const [sessionId, setSessionId] = useState("");
+  // A turn still running in the background after a reload: its reply is on the way, so nothing else may be sent meanwhile.
+  const [background, setBackground] = useState(false);
   const [busy, setBusy] = useState<"" | "turn" | "upload" | "dates" | "milestones" | "diligence">("");
   const [error, setError] = useState("");
   const [text, setText] = useState("");
@@ -103,7 +106,7 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
     if (thread && thread.scrollHeight > thread.clientHeight + 1)
       thread.scrollTop = target ? thread.scrollTop + target.getBoundingClientRect().top - thread.getBoundingClientRect().top - 12 : thread.scrollHeight;
     else bottom.current?.scrollIntoView({ block: "nearest" });
-  }, [state?.messages.length, busy]);
+  }, [state?.messages.length, busy, background]);
 
   const messages = state?.messages ?? [];
   const lastTurn = [...messages].reverse().map(asTurn).find(Boolean);
@@ -128,6 +131,7 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
     setCurrent(0);
     setBusy("");
     if (document.visibilityState === "hidden" && !document.title.startsWith(NEW_ROUND_MARK)) document.title = `${NEW_ROUND_MARK}${document.title}`;
+    if (response?.ok && body?.state !== "blocked") announceRound();
   };
 
   const upload = async (files: FileList | File[]) => {
@@ -149,12 +153,13 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
     if (response?.ok && !body?.deferred && readable.length && (next?.messages.length ?? 0) > 0) await runTurn(`我添加了这些文件：${readable.map((file) => file.name).join("、")}。请读一下，整理里面的日期和我的情况。`);
   };
 
+  // Dates may be confirmed while a turn runs (docs/onboarding-v3.md 「等待」): that must not end the turn's own wait.
   const decideDates = async (batchId: string, includedIds: string[]) => {
-    setBusy("dates"); setError("");
+    setBusy((now) => now === "turn" ? now : "dates"); setError("");
     const response = await fetch("/api/onboarding/dates/decide", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ batchId, includedIds }) }).catch(() => undefined);
     if (!response?.ok) setError("没有加入成功，请重试。");
     await load();
-    setBusy("");
+    setBusy((now) => now === "dates" ? "" : now);
   };
 
   /** Designs the goals from the profile. They arrive as drafts on the Milestones page, where the person approves them. */
@@ -202,7 +207,7 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
   const extra = waiting ? [] : (state?.extraQuestions ?? []).filter((question) => !inRound.has(question.id) && !answeredElsewhere.has(question.id));
   const batchQuestions = [...roundQuestions, ...extra];
   const composed = composeAnswers(batchQuestions, answers, text);
-  const canSend = busy === "" && (Boolean(composed.trim()) || waiting);
+  const canSend = busy === "" && !background && (Boolean(composed.trim()) || waiting);
 
 
   if (!state) return <p className="ob-muted" role="status">正在读取…</p>;
@@ -234,7 +239,7 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
   };
 
   return <div className="ob3" onDragOver={(event) => { event.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={onDrop} data-dragging={over}>
-    <LeftColumn state={state} busy={busy !== ""} accept={ACCEPT} onUpload={(files) => void upload(files)} onChanged={() => void load()}
+    <LeftColumn state={state} busy={busy !== "" && busy !== "turn"} accept={ACCEPT} onUpload={(files) => void upload(files)} onChanged={() => void load()}
       heldQuestions={held} answers={answers} onAnswer={(id, next) => setAnswers((previous) => ({ ...previous, [id]: next }))} />
 
     <section className="ob-centre" aria-label="访谈对话">
@@ -257,6 +262,10 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
             {latest && turn.nextAction === "ready_for_milestones" && state.readyToStart && <p className="ob-done">信息已基本完整，可以在下方设计里程碑；画像报告随后生成。</p>}
           </div>;
         })}
+        {busy === "turn" && pendingText && !(messages.at(-1)?.role === "user" && userText(messages.at(-1)!) === pendingText)
+          && <div className="ob-turn ob-user" data-user-text><p>{pendingText}</p></div>}
+        {busy === "turn" && <div ref={asked}><TurnProgress sessionId={line ? `line-${line}` : sessionId} /></div>}
+        {busy === "" && waiting && !error && <div ref={asked}><TurnProgress sessionId={line ? `line-${line}` : state.session?.id ?? ""} resumed onRunning={setBackground} onEnded={() => { setBackground(false); void load(); }} /></div>}
         {answeredElsewhere.size > 0 && !waiting && <p className="ob-moved">本轮有 {answeredElsewhere.size} 题已在待决事项答过，会随这一轮一起发送。</p>}
         {deep && centre[0] && <div ref={asked} className="ob-turn ob-assistant ob-deep" aria-label="本轮问题">
           <p className="ob-deep-question gen">{centre[0].text}</p>
@@ -276,7 +285,7 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
             <small className="ob-muted">{centre.length} 题一起作答，答完一并发送；不确定的可以跳过。</small>
           </div>
         </div>}
-        {state.dateBatch && <DateBatchCard key={state.dateBatch.id} batch={state.dateBatch} busy={busy !== ""} onDecide={(batchId, ids) => void decideDates(batchId, ids)} onRedo={() => void runTurn("请把我已添加的文件里的日期重新读一遍，只整理日期。", true)} />}
+        {state.dateBatch && <DateBatchCard key={state.dateBatch.id} batch={state.dateBatch} busy={busy !== "" && busy !== "turn"} onDecide={(batchId, ids) => void decideDates(batchId, ids)} onRedo={() => void runTurn("请把我已添加的文件里的日期重新读一遍，只整理日期。", true)} />}
         {!state.focusLine && complete && <section className="ob-design" aria-label="画像报告">
           <b>画像报告</b>
           <span className="ob-muted">个人画像与洞察（可导出分享版），以及现况洞察与可行建议；可下载 PDF 或图片。</span>
@@ -293,9 +302,6 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
         {(state.diligence.length > 0 || state.readyToStart) && !opening && <DiligencePanel reports={state.diligence}
           identities={state.identities} busy={busy !== ""} onRun={(id) => void runDiligence(id)} onDecide={(report, proposal, decision) => void decideDiligence(report, proposal, decision)} />}
         {transcription && waitingForAudio && <TranscriptionCard status={transcription} busy={busy !== ""} onDownload={() => void downloadModel()} />}
-        {busy === "turn" && pendingText && !(messages.at(-1)?.role === "user" && userText(messages.at(-1)!) === pendingText)
-          && <div className="ob-turn ob-user" data-user-text><p>{pendingText}</p></div>}
-        {busy === "turn" && <div className="ob-turn ob-assistant" role="status"><p className="ob-muted">正在整理回答、准备下一组问题…（通常 1–4 分钟，可以先离开本页）</p></div>}
         <div ref={bottom} />
       </div>
       {error && <p className="ob-error" role="alert">{error}{waiting && busy === "" && <button type="button" className="ob-btn" onClick={() => void runTurn("")}>重试</button>}</p>}

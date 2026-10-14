@@ -19,6 +19,12 @@ export type AnalysisAudit = { threadId?: string; turnId?: string;
    * caller records them for the reviewer; nothing was blocked for them.
    */
   warnings?: Array<{ code: string; detail: string }> };
+/**
+ * What a running turn has done so far, for a screen that shows the wait (docs/onboarding-v3.md 「等待」): `thinking` until the first
+ * word, `writing` with the answer streamed so far (unvalidated — never stored, only counted and previewed), `checking` once it is in.
+ * `repairs` and `stalls` say this is a second look or a resent turn.
+ */
+export type SkillProgress = { phase: "thinking" | "writing" | "checking"; text: string; repairs: number; stalls: number };
 export type SkillRunResult<T> = { ok: true; output: T; audit: AnalysisAudit }
   | { ok: false; blocker: { code: string; message: string }; audit: AnalysisAudit };
 
@@ -51,6 +57,8 @@ export type SkillRunOptions<T> = {
   allowImageGeneration?: boolean;
   onImage?: (image: { base64: string; revisedPrompt: string }) => void;
   onAudit: (audit: AnalysisAudit) => void;
+  /** Called as the turn moves (throttled to twice a second while it writes); see `SkillProgress`. */
+  onProgress?: (progress: SkillProgress) => void;
   signal?: AbortSignal;
   timeoutMs?: number;
   /** Silence, in ms, after which a turn is treated as hung and sent again. Defaults to 20 minutes (`CROSSLINE_SKILL_IDLE_MINUTES`). */
@@ -242,6 +250,7 @@ export type ContinueTurnOptions<T> = {
   outputSchema: unknown;
   validateOutput: (output: unknown) => T;
   onAudit: (audit: AnalysisAudit) => void;
+  onProgress?: (progress: SkillProgress) => void;
   signal?: AbortSignal;
   timeoutMs?: number;
   idleMs?: number;
@@ -442,9 +451,19 @@ async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, con
   validate: (output: unknown) => T; onAudit: (audit: AnalysisAudit) => void; idleMs?: number; agent?: AgentMode;
   soften?: (rejection: Error, output: unknown) => T | undefined;
   onImage?: (image: { base64: string; revisedPrompt: string }) => void;
+  onProgress?: (progress: SkillProgress) => void;
 }): Promise<T> {
   audit.threadId = run.threadId;
   let finalText: string | undefined;
+  // The answer as it streams in, for `onProgress` only.
+  let streamed = "";
+  let reportedAt = 0;
+  // Writing is throttled against the previous write only, so the first words show at once.
+  const progress = (phase: SkillProgress["phase"]) => {
+    if (!run.onProgress) return;
+    if (phase === "writing") { if (Date.now() - reportedAt < 500) return; reportedAt = Date.now(); }
+    try { run.onProgress({ phase, text: streamed, repairs: audit.repairs ?? 0, stalls: audit.stalls ?? 0 }); } catch { /* a screen's bookkeeping must never fail the work */ }
+  };
   // The last time the runtime said anything at all about this thread. A turn with no event for a long while is not slow, it is hung:
   // a real run sat for over an hour with the runtime logging nothing, and only the wall-clock limit ended it.
   let lastEventAt = Date.now();
@@ -468,6 +487,10 @@ async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, con
     // Events can precede the turn/start response; capture only this isolated thread.
     if (audit.turnId && turnId !== audit.turnId) return;
     if (message.method === "thread/tokenUsage/updated") { context.usage.note(params); return; }
+    if (message.method === "item/agentMessage/delta") {
+      if (typeof params.delta === "string" && streamed.length < 200_000) { streamed += params.delta; progress("writing"); }
+      return;
+    }
     if (message.method === "item/completed" || message.method === "item/started") {
       const item = record(params.item);
       if (item?.type === "agentMessage" && message.method === "item/completed" && (item.phase === "final_answer" || item.phase === null)) {
@@ -500,6 +523,9 @@ async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, con
   /** One turn on the thread, from prompt to the model's final text. */
   const runTurn = async (text: string): Promise<string> => {
     finalText = undefined;
+    streamed = "";
+    reportedAt = 0;
+    progress("thinking");
     lastEventAt = Date.now();
     // Cleared so the handler's "events can precede the turn/start response" guard arms again.
     delete audit.turnId;
@@ -530,6 +556,8 @@ async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, con
     finally { limit.clear(); if (watch) clearInterval(watch); context.usage.noteTurnSeconds((Date.now() - turnStarted) / 1000); }
     recordAnswer(run.skillName, answer);
     if (!answer) return fail("SKILL_REFUSED");
+    streamed = answer;
+    progress("checking");
     return answer;
   };
 
@@ -627,6 +655,7 @@ export function continueSkillTurn<T>(client: CodexRpcBoundary, threadId: string,
         skillName: options.skillName, threadId, outputSchema: options.outputSchema,
         allowedItemTypes: ["agentMessage", "reasoning", "userMessage", ...(options.tools ? ["dynamicToolCall"] : [])],
         firstPrompt: message, validate: options.validateOutput, onAudit: options.onAudit, ...(options.idleMs ? { idleMs: options.idleMs } : {}),
+        ...(options.onProgress ? { onProgress: options.onProgress } : {}),
         ...(options.softAccept ? { soften: options.softAccept } : {})
       });
       return { ok: true, output, audit };
@@ -662,6 +691,7 @@ async function runSkillTurn<T>(client: CodexRpcBoundary, input: unknown, options
       ...(options.agent ? { agent: options.agent } : {}),
       firstPrompt: `$${options.skillName}\n\n${JSON.stringify(prepared)}`,
       validate: (answer) => options.validateOutput(answer, prepared), onAudit: options.onAudit, ...(options.idleMs ? { idleMs: options.idleMs } : {}),
+      ...(options.onProgress ? { onProgress: options.onProgress } : {}),
       ...(options.softAccept ? { soften: (rejection: Error, answer: unknown) => options.softAccept!(rejection, answer, prepared) } : {})
     });
     return { ok: true, output, audit };

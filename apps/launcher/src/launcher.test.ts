@@ -5,7 +5,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ChildProcess } from "node:child_process";
 import { choosePorts, ensureSecrets, layoutFor, prepareConfig, PORT_RANGE, readRelease } from "./config";
-import { childSpecs, restartDelay, Supervisor, type ChildSpec } from "./supervise";
+import { childSpecs, noticeFrom, restartDelay, Supervisor, type ChildSpec, type SupervisorEvent } from "./supervise";
 
 const dirs: string[] = [];
 const temp = () => { const dir = mkdtempSync(path.join(tmpdir(), "crossline-launcher-")); dirs.push(dir); return dir; };
@@ -115,6 +115,36 @@ describe("children", () => {
     await new Promise((resolve) => setTimeout(resolve, 1100));
     expect(spawned).toEqual(["web", "web"]);
     expect(events).toEqual(["child.started", "child.exited", "child.started"]);
+  });
+});
+
+describe("notices from a child", () => {
+  it("passes a checked notice line on to the tray, split across chunks, and ignores everything else a child prints", async () => {
+    const events: SupervisorEvent[] = [];
+    let child: (EventEmitter & { stdout: EventEmitter; pid: number; exitCode: number | null }) | undefined;
+    const fake = () => { child = Object.assign(new EventEmitter(), { stdout: new EventEmitter(), pid: 1, exitCode: null, signalCode: null }); return child as unknown as ChildProcess; };
+    const supervisor = new Supervisor([{ name: "web", command: "x", args: [], cwd: ".", env: {} }], temp(), (event) => events.push(event), fake);
+    supervisor.start();
+    const line = `@crossline:notify ${JSON.stringify({ title: "访谈下一轮已就绪", text: "点这里回到访谈。", path: "/onboarding" })}`;
+    child!.stdout.emit("data", "▲ Next.js ready\n" + line.slice(0, 20));
+    child!.stdout.emit("data", line.slice(20) + "\r\n");
+    expect(events.filter((event) => event.type === "notify")).toEqual([{ type: "notify", title: "访谈下一轮已就绪", text: "点这里回到访谈。", path: "/onboarding" }]);
+    // Let the child go (already exited, so nothing is killed), so its log files are closed before the folder is removed.
+    child!.exitCode = 0;
+    const stopped = supervisor.stop(10);
+    child!.emit("exit", 0);
+    await stopped;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+
+  it("refuses a notice that would open anything but one of the app's own pages", () => {
+    const notice = (body: object) => noticeFrom(`@crossline:notify ${JSON.stringify(body)}`);
+    expect(notice({ title: "t", text: "x", path: "https://evil.example" })).toBeUndefined();
+    expect(notice({ title: "t", text: "x", path: "//evil.example" })).toBeUndefined();
+    expect(notice({ title: "t", text: "x", path: "/a?b=1" })).toBeUndefined();
+    expect(notice({ title: "", text: "x", path: "/" })).toBeUndefined();
+    expect(noticeFrom("@crossline:notify {not json")).toBeUndefined();
+    expect(noticeFrom("plain log line")).toBeUndefined();
   });
 });
 
