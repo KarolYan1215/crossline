@@ -375,6 +375,8 @@ export async function startCodexSupervisor(options: {
    * it reads; `run` starts it now. Both answer at once.
    */
   workflowAction?: (workspaceId: string, id: string, action: "login" | "run", service: string) => { ok: boolean; [key: string]: unknown };
+  /** The person asked for a workflow in words: grow it now rather than at the next tick. Answers at once. */
+  growWorkflows?: (workspaceId: string) => void;
   /** Writes plan blocks to the person's Crossline calendar. Only blocks; never touches any other calendar or event. */
   publishCalendar?: (workspaceId: string, blocks: Array<{ id: string; title: string; start: string; end: string; note?: string; reminderMinutes?: number | null;
     recurrence?: { daysOfWeek: string[]; startDate: string; endDate: string; localStart: string; localEnd: string; timeZone: string } }>,
@@ -895,6 +897,15 @@ export async function startCodexSupervisor(options: {
         }
         const result = options.cancelAgentTask(callerWorkspaceId, agentTaskRoute[1]!);
         sendJson(response, result.ok ? 200 : 409, result);
+        return;
+      }
+      if (request.method === "POST" && pathname === "/v1/workflows/grow" && options.growWorkflows) {
+        if (request.headers.origin || !request.headers["content-type"]?.startsWith("application/json")) {
+          sendJson(response, 403, { blocker: { code: "AGENT_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
+          return;
+        }
+        options.growWorkflows(callerWorkspaceId);
+        sendJson(response, 202, { ok: true });
         return;
       }
       const workflowRoute = /^\/v1\/workflows\/([a-zA-Z0-9_-]{1,128})\/(login|run)$/.exec(pathname);

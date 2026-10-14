@@ -209,3 +209,13 @@ test("the person logs in in a window of its own; a run is told that profile, and
   after!({ ...done("t", root), summary: { needsHuman: [{ what: "需要登录：小红书", why: "打开收藏页跳到了登录页" }] } } as unknown as AgentOutcome);
   expect(said().at(-1)).toContain("这次没读到：需要登录：小红书");
 });
+
+test("the first grown vlog workflow (2026-10-14) installs with its script: reading a system font is not leaving its directory", async () => {
+  const fixture = JSON.parse(readFileSync(path.join(import.meta.dirname, "testing", "fixtures", "grown-vlog-workflow-real-2026-10-14.json"), "utf8")) as { files: Array<{ path: string; text: string }> };
+  const dir = path.join(root, "grow-vlog");
+  for (const file of fixture.files) { mkdirSync(path.dirname(path.join(dir, "skill", file.path)), { recursive: true }); writeFileSync(path.join(dir, "skill", file.path), file.text); }
+  const candidate = { lineId: "media", category: "media_edit" as const, origin: { kind: "asked" as const, text: "每周五剪 vlog", requestId: "r-vlog" }, text: "每周五剪 vlog", examples: [] };
+  expect(await installGrown(store, ws, candidate, done("grow-vlog", dir), { client: reviewer().rpc, cwd: "C:\repo" })).toMatchObject({ state: "installed" });
+  expect(readGrownSkills(store, ws)[0]).toMatchObject({ status: "active", scan: { risk: "low", findings: [] }, review: { final: "usable" },
+    manifest: { trigger: "schedule", schedule: { type: "weekly", days: ["FR"], time: "20:00" } } });
+});

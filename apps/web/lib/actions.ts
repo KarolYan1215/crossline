@@ -108,6 +108,8 @@ export const ACTION_HANDLERS: { [K in ActionId]: Handler<K> } = {
     const target = line ?? identityLines(ctx)[0];
     if (!target) return { ok: false, code: "LINE_NOT_FOUND" };
     requestWorkflow(getStore(), ctx.workspaceId, args.text, target.id, ctx.principalId);
+    // Grown now, not at the worker's next tick; a worker that is down picks it up when it is back.
+    void requestCodexSupervisor(ctx, "/v1/workflows/grow", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }).catch(() => undefined);
     return { ok: true, message: "已交给助手建成工作流，建好后会通知；发出、发布一类的步骤仍由本人完成", href: "/settings#skills" };
   },
   "proposal.decide": (ctx, args) => {

@@ -271,7 +271,9 @@ async function workflowPass(workspaceId: string, checkedAt: string): Promise<voi
   } catch { /* next tick */ }
   if (assistantOff || growingWorkflows.has(workspaceId) || agentService.runningTasks(workspaceId).length) return;
   const candidate = growCandidates(analysisStore, workspaceId)[0];
-  if (!candidate || !spendAllows(await spendFor(workspaceId), "discretionary")) return;
+  // What the person asked for in words is their own work, like a capture: it runs while the quota lasts. An errand the system noticed
+  // repeating is its own idea, and waits for a normal quota.
+  if (!candidate || !spendAllows(await spendFor(workspaceId), candidate.origin.kind === "asked" ? "core" : "discretionary")) return;
   const input = growTask(candidate, identityLines(analysisStore, workspaceId).map((line) => line.id), aiToolsFor(analysisStore, workspaceId));
   growingWorkflows.add(workspaceId);
   const started = agentService.runFree(workspaceId, input, (outcome) => {
@@ -479,9 +481,10 @@ async function tick(): Promise<void> {
       console.info(JSON.stringify({ type: "flywheel.nightly.skipped", checkedAt, workspaceId: workspace.id, code: decision.code }));
     }
     startDiligencePass(workspace.id, checkedAt);
+    // A workflow the person asked for goes before the assistant's own background work, which would otherwise keep it busy.
+    await workflowPass(workspace.id, checkedAt).catch(() => undefined);
     // The assistant starts approved kinds of work by itself; it never holds the tick (its runs are detached).
     if (codexSupervisor) await agentService.pass(workspace.id).catch(() => undefined);
-    await workflowPass(workspace.id, checkedAt).catch(() => undefined);
   }
   // Bounded, and never able to wedge the tick: a health probe that neither errors nor fires its socket
   // timeout — which is what a web server killed mid-response looks like — would otherwise hold the
@@ -930,6 +933,7 @@ if (!capabilitySecret) {
     dispatchAgentTask: (workspaceId, workOrderId, category, stepId) => agentService.dispatch(workspaceId, workOrderId, category, stepId),
     agentProgress: (workspaceId, taskId) => agentService.progress(workspaceId, taskId),
     cancelAgentTask: (workspaceId, taskId) => agentService.cancel(workspaceId, taskId),
+    growWorkflows: (workspaceId) => { void workflowPass(workspaceId, new Date().toISOString()).catch(() => undefined); },
     workflowAction: (workspaceId, id, action, service) => {
       if (action === "login") return openWorkflowLogin(analysisStore, workspaceId, id, service, browserProfilesRoot(workspaceId));
       const record = readGrownSkills(analysisStore, workspaceId).find((item) => item.id === id && item.status === "active");
