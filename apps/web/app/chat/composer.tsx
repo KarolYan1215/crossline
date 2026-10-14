@@ -15,6 +15,19 @@ const ACCEPTED = "image/png,image/jpeg,image/gif,image/webp,application/pdf,text
  * work anywhere on it; typing `@` searches materials, tasks and milestones and turns the choice into a chip. Enter sends, Shift+Enter
  * starts a new line.
  */
+/**
+ * A textarea as tall as what it holds — the hint included while it is empty — up to 220px. `field-sizing: content` (composer.css) does
+ * this where the browser has it; elsewhere the hint is measured by putting it in the box for a moment.
+ */
+export function fitTextarea(el: HTMLTextAreaElement | null) {
+  if (!el || (typeof CSS !== "undefined" && CSS.supports?.("field-sizing", "content"))) return;
+  el.style.height = "auto";
+  const empty = !el.value;
+  if (empty) el.value = el.placeholder;
+  el.style.height = `${Math.min(el.scrollHeight, 220)}px`;
+  if (empty) el.value = "";
+}
+
 export function Composer({ mode, placeholder, onSubmit, busy = false, children, name = "title", takeShare = false }: {
   mode: "capture" | "chat"; placeholder: string; busy?: boolean; name?: string;
   /** Fill the box from a share-sheet arrival (`share_title`/`share_text`/`share_url` on the address, see the manifest). */
@@ -30,6 +43,14 @@ export function Composer({ mode, placeholder, onSubmit, busy = false, children, 
   const [picker, setPicker] = useState<{ query: string; kind?: Mention["kind"] | "linkable"; fromAt: boolean } | null>(null);
   const [results, setResults] = useState<Mention[]>([]);
   const textRef = useRef<HTMLTextAreaElement>(null);
+  // Neither what is typed nor the hint may be cut off on a narrow phone: fit on every change, on mount and when the width changes.
+  useEffect(() => {
+    const el = textRef.current;
+    fitTextarea(el);
+    const refit = () => fitTextarea(el);
+    window.addEventListener("resize", refit);
+    return () => window.removeEventListener("resize", refit);
+  }, [text, placeholder]);
   const { fileInputRef, fileNames, dragOver, setDragOver, onDrop, onPaste, onInputChange, reset } = useAttachmentDrop(ACCEPTED.split(","));
 
   useEffect(() => {
@@ -98,7 +119,7 @@ export function Composer({ mode, placeholder, onSubmit, busy = false, children, 
         </div>}
         <textarea ref={textRef} name={name} rows={batch ? 4 : 1} value={text} maxLength={4000} placeholder={placeholder} aria-label={placeholder}
           onChange={(event) => onChange(event.target.value)} onKeyDown={onKeyDown}
-          onInput={(event) => { const el = event.currentTarget; el.style.height = "auto"; el.style.height = `${Math.min(el.scrollHeight, 220)}px`; }} />
+          onInput={(event) => fitTextarea(event.currentTarget)} />
       </div>
       <button type="submit" className="composer-send" disabled={busy || (!text.trim() && !fileNames.length)} aria-label="发送">{busy ? "…" : "↑"}</button>
       <input ref={fileInputRef} type="file" multiple accept={ACCEPTED} hidden onChange={onInputChange} name="attachments" />

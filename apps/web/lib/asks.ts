@@ -510,7 +510,7 @@ function eventAsks({ ctx, today }: Source): Ask[] {
 /**
  * Background work the worker paused for this workspace (`BACKGROUND_BLOCKER`): an unreadable quota (an API-key login reports no
  * windows) or a spent one. It used to stop with nothing said, so captures sat unanalysed while the page looked normal. A worker that is
- * down is its own ask (`runtimeAsk`), not this one.
+ * down is the runtime banner (`lib/runtime-status.ts`), not this one.
  */
 function backgroundAsks({ store, ctx }: Source): Ask[] {
   const paused = readFailure(store, ctx.workspaceId, BACKGROUND_BLOCKER) as ({ resetsAt?: string; reason?: string } & NonNullable<ReturnType<typeof readFailure>>) | null;
@@ -598,33 +598,12 @@ export function openAsks(ctx: AccessContext, now = appNow()): Ask[] {
 }
 export const thisWeek = (asks: Ask[]) => asks.filter((ask) => !ask.entersOn);
 
-let runtimeCheck: { at: number; ask: Ask | null } | undefined;
-
 /**
- * Whether the AI can work at all: signed in, and the worker running. Asked over the network, so only pages call it
- * (cached a minute, given two and a half seconds) — the badge counts the ledger-only asks.
+ * What Today and 待确认 show. Whether the worker and its model runtime can run at all is not an ask: it is an error the banner on
+ * every page shows (`lib/runtime-status.ts`), so the list and the count always agree.
  */
-async function runtimeAsk(ctx: AccessContext, now: Date): Promise<Ask | null> {
-  if (runtimeCheck && now.getTime() - runtimeCheck.at < 60_000) return runtimeCheck.ask;
-  const timeout = new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), 2_500));
-  const account = await Promise.race([requestCodexSupervisor<{ account?: unknown }>(ctx, "/v1/codex/account")
-    .then((value) => ({ ok: true as const, value })).catch(() => ({ ok: false as const })), timeout]);
-  const base = { entityId: "codex", urgency: "soon" as const, raisedAt: now.toISOString(), options: [{ id: "settings", label: "去设置", href: "/settings" }] };
-  const ask: Ask | null = account === "timeout" || !account.ok
-    ? { ...base, id: "runtime:worker", kind: "codex_signed_out", fingerprint: "worker", title: "后台没在运行",
-      why: "自动分析、倒推、材料准备、验收与提醒均由后台服务执行，当前无法连接；已收集的内容不受影响。重启本机服务后恢复。" }
-    : !account.value.account
-      ? { ...base, id: "runtime:signed-out", kind: "codex_signed_out", fingerprint: "signed-out", title: "模型服务未登录，自动功能已暂停",
-        why: "模型服务未登录，自动分析、倒推、材料准备与验收均暂停；在「设置」中登录后恢复。" }
-      : null;
-  runtimeCheck = { at: now.getTime(), ask };
-  return ask;
-}
-
-/** What Today and 待确认 show: the ledger's asks plus whether the AI can run at all. */
 export async function loadAsks(ctx: AccessContext, now = appNow()): Promise<Ask[]> {
-  const runtime = process.env.CROSSLINE_E2E_DATA_DIR || process.env.VITEST ? null : await runtimeAsk(ctx, now);
-  return rankAsks(decisionHorizon(ctx, now).annotate([...(runtime ? [runtime] : []), ...collectAsks(ctx, now)]), snoozes(ctx), planToday(ctx, now));
+  return openAsks(ctx, now);
 }
 
 export type AskResult = { ok: true } | { ok: false; code: string };
