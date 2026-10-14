@@ -36,6 +36,8 @@ export const CONFIRM_HREF = "/confirm/{message}";
 /** A scheduled block of work that bears on a deadline within a week (the only blocks reminded about). */
 export type NudgeBlock = {
   id: string; orderId: string; stepId: string; title: string; step: string; start: string; end: string; dueDay: string;
+  /** What the assistant has ready for this work (file names), said when the block comes up. */
+  prepared?: string[];
 };
 /**
  * Any of today's scheduled blocks, for the completion check (docs/loop-and-scout.md §3). `endedTimerAt`: when this order's timer was
@@ -86,7 +88,7 @@ export function nudgeCandidates(input: NudgeInput): PlannedNudge[] {
     const label = `「${block.title}${block.step ? ` · ${block.step}` : ""}」`;
     if (now >= start - START_LEAD_MINUTES && now < start && input.timer?.orderId !== block.orderId) {
       out.push({ kind: "block_start", fingerprint: `start:${block.id}:${input.today}`, urgent: true, counted: false,
-        text: `${block.start} 做${label}（${end - start} 分），关系到 ${md(block.dueDay)} 的截止。`,
+        text: `${block.start} 做${label}（${end - start} 分），关系到 ${md(block.dueDay)} 的截止。${block.prepared?.length ? `已备好：${block.prepared.slice(0, 3).join("、")}${block.prepared.length > 3 ? ` 等 ${block.prepared.length} 份` : ""}。` : ""}`,
         buttons: [{ kind: "action", label: "开始计时", action: op(block.orderId, "start", `开始${label}`) },
           { kind: "action", label: "推到明天", action: op(block.orderId, "defer", `${label}推到明天`, { date: input.tomorrow }) }, mute] });
     }

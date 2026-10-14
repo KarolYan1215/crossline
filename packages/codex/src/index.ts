@@ -20,6 +20,8 @@ export * from "./capability";
 export * from "./agent-mode";
 export * from "./runtime-registry";
 export * from "./prices";
+export * from "./providers";
+export * from "./model-gateway";
 
 const record = (value: unknown): Record<string, unknown> | undefined =>
   typeof value === "object" && value !== null ? value as Record<string, unknown> : undefined;
@@ -374,6 +376,10 @@ export async function startCodexSupervisor(options: {
   conciergeTurn?: (workspaceId: string, request: Record<string, unknown>, signal: AbortSignal) => Promise<unknown>;
   /** Hands a work order to the assistant. Answers at once: the task runs on, and writes its own outcome to the ledger. */
   dispatchAgentTask?: (workspaceId: string, workOrderId: string, category?: string, stepId?: string) => unknown;
+  /** A running assistant task's progress so far (commands, changed files, searches), or undefined once it has ended. */
+  agentProgress?: (workspaceId: string, taskId: string) => unknown;
+  /** Stops a running assistant task (「中止」). */
+  cancelAgentTask?: (workspaceId: string, taskId: string) => { ok: boolean };
   /** Writes plan blocks to the person's Crossline calendar. Only blocks; never touches any other calendar or event. */
   publishCalendar?: (workspaceId: string, blocks: Array<{ id: string; title: string; start: string; end: string; note?: string; reminderMinutes?: number | null;
     recurrence?: { daysOfWeek: string[]; startDate: string; endDate: string; localStart: string; localEnd: string; timeZone: string } }>,
@@ -428,7 +434,15 @@ export async function startCodexSupervisor(options: {
    * (tests that do not exercise this). The worker always sets it.
    */
   runtimes?: { baseDir: string; ownerWorkspaceId: () => string | undefined; start?: (codexHome: string) => Promise<RuntimeSidecar>;
-    maxRunning?: number; idleMs?: number };
+    maxRunning?: number; idleMs?: number; hasProvider?: (workspaceId: string) => boolean };
+  /**
+   * A workspace's own model provider (R7, providers.ts): its routes under `/v1/model/provider*`, answered for the caller's workspace,
+   * and the quota reading that replaces the Codex one while a provider serves that workspace.
+   */
+  modelProviders?: {
+    handle: (method: string, pathname: string, workspaceId: string, body: Record<string, unknown> | undefined) => Promise<{ status: number; body: unknown } | undefined>;
+    cost: (workspaceId: string) => CostSignal | undefined;
+  };
   /** This month's spend and cap for a workspace on a pay-per-use (API key) login, which reports no quota windows of its own. */
   monthSpend?: (workspaceId: string) => { spent: number; cap: number };
 } = {}): Promise<CodexSupervisor> {
@@ -459,6 +473,7 @@ export async function startCodexSupervisor(options: {
   const runtimes = options.runtimes ? createRuntimeRegistry({ owner: sidecar, ownerWorkspaceId: options.runtimes.ownerWorkspaceId,
     baseDir: options.runtimes.baseDir, ...(options.runtimes.maxRunning ? { maxRunning: options.runtimes.maxRunning } : {}),
     ...(options.runtimes.idleMs ? { idleMs: options.runtimes.idleMs } : {}),
+    ...(options.runtimes.hasProvider ? { hasProvider: options.runtimes.hasProvider } : {}),
     // A guest's runtime gets the same Crossline plugin the owner's has.
     start: options.runtimes.start ?? (async (home) => {
       const started = await startCodexAppServer(home);
@@ -482,6 +497,8 @@ export async function startCodexSupervisor(options: {
    * pass stopped without a word.
    */
   const costFor = async (client: CodexRpcBoundary, workspaceId: string): Promise<CostSignal> => {
+    const provided = options.modelProviders?.cost(workspaceId);
+    if (provided) return provided;
     const signal = await readCostSignal(client);
     if (signal.available || !options.monthSpend) return signal;
     const account = record(record(await client.request("account/read", { refreshToken: false }).catch(() => undefined))?.account);
@@ -494,6 +511,8 @@ export async function startCodexSupervisor(options: {
   };
   /** A guest's quota, read from its own runtime; an account that has not connected one has none to read. */
   const guestCost = async (workspaceId: string): Promise<CostSignal> => {
+    const provided = options.modelProviders?.cost(workspaceId);
+    if (provided) return provided;
     if (!runtimes!.connected(workspaceId)) return { available: false, reason: "RUNTIME_UNCONNECTED" };
     const runtime = await runtimes!.client(workspaceId);
     return runtime.ok ? costFor(runtime.client, workspaceId) : { available: false, reason: runtime.blocker.code };
@@ -869,6 +888,20 @@ export async function startCodexSupervisor(options: {
         sendJson(response, 200, await options.publishCalendar(callerWorkspaceId, blocks, body?.scope === "fixed" ? "fixed" : "work"));
         return;
       }
+      const agentTaskRoute = /^\/v1\/agent\/tasks\/([a-zA-Z0-9_-]{1,128})\/(progress|cancel)$/.exec(pathname);
+      if (agentTaskRoute && request.method === "GET" && agentTaskRoute[2] === "progress" && options.agentProgress) {
+        sendJson(response, 200, { progress: options.agentProgress(callerWorkspaceId, agentTaskRoute[1]!) ?? null });
+        return;
+      }
+      if (agentTaskRoute && request.method === "POST" && agentTaskRoute[2] === "cancel" && options.cancelAgentTask) {
+        if (request.headers.origin || !request.headers["content-type"]?.startsWith("application/json")) {
+          sendJson(response, 403, { blocker: { code: "AGENT_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
+          return;
+        }
+        const result = options.cancelAgentTask(callerWorkspaceId, agentTaskRoute[1]!);
+        sendJson(response, result.ok ? 200 : 409, result);
+        return;
+      }
       if (request.method === "POST" && pathname === "/v1/agent/dispatch" && options.dispatchAgentTask) {
         if (request.headers.origin || !request.headers["content-type"]?.startsWith("application/json")) {
           sendJson(response, 403, { blocker: { code: "AGENT_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
@@ -1010,6 +1043,11 @@ export async function startCodexSupervisor(options: {
         try { sendJson(response, 200, await options.backplanGoal(rt, String(body?.milestoneId ?? ""), controller.signal, callerWorkspaceId)); }
         finally { if (proposing === controller) proposing = undefined; }
         return;
+      }
+      if (options.modelProviders && pathname.startsWith("/v1/model/provider")) {
+        const answer = await options.modelProviders.handle(request.method ?? "GET", pathname, callerWorkspaceId,
+          request.method === "GET" ? undefined : await readJsonBody(request));
+        if (answer) { sendJson(response, answer.status, answer.body); return; }
       }
       // Discretionary spending needs a reading it can refuse on, so this stays available even while
       // the runtime is blocked: an unreachable runtime is itself an "unavailable" cost signal.

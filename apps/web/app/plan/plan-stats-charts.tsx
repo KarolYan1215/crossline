@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 import { availabilityGrid, type CapacityWeek, type EstimatePoint, type GoalRow, type Investment } from "../../lib/plan-stats";
 import { Ring } from "../ui/charts";
 import { LineTag, Tag } from "../ui/tag";
@@ -14,14 +14,20 @@ import { usePlanPreview } from "./preview-context";
  */
 
 /** The width a chart has, so it is drawn at that width and its 12px labels stay 12px on a phone. */
-function useWidth(initial: number): [RefObject<HTMLDivElement | null>, number] {
-  const box = useRef<HTMLDivElement>(null);
+/**
+ * The width a chart has, measured from the element the returned ref lands on. A callback ref, not an effect on mount: a chart that
+ * first renders its empty state attaches the box later, and the mount-time effect never saw it — the width stayed at `initial` (640)
+ * and a phone drew the wide layout 510px across a 375px screen.
+ */
+function useWidth(initial: number): [(node: HTMLDivElement | null) => void, number] {
   const [width, setWidth] = useState(initial);
-  useEffect(() => {
-    if (!box.current || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(([entry]) => { const next = Math.round(entry?.contentRect.width ?? 0); if (next > 0) setWidth(next); });
-    observer.observe(box.current);
-    return () => observer.disconnect();
+  const observer = useRef<ResizeObserver | null>(null);
+  const box = useCallback((node: HTMLDivElement | null) => {
+    observer.current?.disconnect();
+    observer.current = null;
+    if (!node || typeof ResizeObserver === "undefined") return;
+    observer.current = new ResizeObserver(([entry]) => { const next = Math.round(entry?.contentRect.width ?? 0); if (next > 0) setWidth(next); });
+    observer.current.observe(node);
   }, []);
   return [box, width];
 }
@@ -188,7 +194,8 @@ export function MilestoneForecast({ rows, today, spanDays, weeks, labels, inferr
             </span>
             <span className="pl-gantt-end">
               <small className="mono" title={`剩余工作：通常 ${hours(row.remainingP50Minutes)} 小时，保守 ${hours(row.remainingP85Minutes)} 小时`}>剩 {h1(row.remainingP50Minutes)}</small>
-              {row.status === "no_tasks" && <Tag title="该里程碑下尚无可排程的任务">尚无任务</Tag>}
+              {row.status === "no_tasks" && (row.proposals ? <Tag title="在「待确认」批准后排入日程">{row.proposals} 项提案待批准</Tag>
+                : <Tag title="该里程碑下尚无可排程的任务">尚无任务</Tag>)}
               {row.status === "unforecast" && <Tag title="重要性低于 60 且无截止日的里程碑不参与预测">无截止日</Tag>}
               {row.status === "unfinished" && <Tag tone="warn" title={row.bottleneck ?? `按当前容量 ${weeks} 周内排不完`}>{weeks} 周内未完成</Tag>}
               {row.atRisk ? <Tag tone="risk" title={`保守完成日距截止 ${row.slackDays} 天，不足 2 天`}>余量 {row.slackDays} 天</Tag>

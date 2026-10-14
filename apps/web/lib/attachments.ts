@@ -12,8 +12,18 @@ const PROJECT_ROOT = path.resolve(process.cwd(), "..", "..");
  * the uploader's browser happened to send. */
 export const ALLOWED_ATTACHMENT_TYPES: Record<string, string> = {
   "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp",
-  "application/pdf": "pdf", "text/plain": "txt"
+  "application/pdf": "pdf", "text/plain": "txt",
+  // What the assistant delivers and the gate quotes (milestone-gate-runner reads .md/.csv/.json): refusing them made an accepted
+  // assistant result impossible to hand in as evidence (2026-10-14).
+  "text/markdown": "md", "text/csv": "csv", "application/json": "json"
 };
+
+/** A browser on Windows sends `.md` with no type at all; the extension decides then, and only among the types allowed above. */
+const BY_EXTENSION: Record<string, string> = { md: "text/markdown", markdown: "text/markdown", csv: "text/csv", json: "application/json", txt: "text/plain" };
+export function attachmentMediaType(mediaType: string, fileName: string): string {
+  if (mediaType && mediaType !== "application/octet-stream") return mediaType;
+  return BY_EXTENSION[fileName.toLowerCase().split(".").at(-1) ?? ""] ?? mediaType;
+}
 
 const MAX_BYTES = 10 * 1024 * 1024;
 
@@ -47,7 +57,8 @@ function writeAttachmentFiles(root: string, files: Array<{ fileName: string; med
   AttachmentSaveResult {
   const saved: Array<{ id: string; uri: string; mediaType: string; fileName: string }> = [];
   for (const file of files) {
-    const ext = ALLOWED_ATTACHMENT_TYPES[file.mediaType];
+    const mediaType = attachmentMediaType(file.mediaType, file.fileName);
+    const ext = ALLOWED_ATTACHMENT_TYPES[mediaType];
     if (!ext) return { ok: false, code: "ATTACHMENT_TYPE_NOT_ALLOWED", message: `不支持的文件类型：${file.mediaType || "未知"}` };
     if (file.buffer.byteLength > MAX_BYTES) return { ok: false, code: "ATTACHMENT_TOO_LARGE", message: "单个文件不能超过 10MB。" };
     const target = path.resolve(root, `${randomUUID()}.${ext}`);
@@ -59,7 +70,7 @@ function writeAttachmentFiles(root: string, files: Array<{ fileName: string; med
     writeFileSync(target, file.buffer);
     // Generated once here and reused as the ledger row's own id below — the caller reports the same id
     // back to the uploader, so a turn can reference exactly the attachment that was actually stored.
-    saved.push({ id: randomUUID(), uri: pathToFileURL(target).href, mediaType: file.mediaType, fileName: file.fileName });
+    saved.push({ id: randomUUID(), uri: pathToFileURL(target).href, mediaType, fileName: file.fileName });
   }
   return { ok: true, saved };
 }

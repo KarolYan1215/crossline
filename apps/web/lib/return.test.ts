@@ -38,6 +38,26 @@ test("the return page is due after two days away, once per absence; never for so
   expect(returnDue(TEST_CTX, now)).toBeUndefined();
 });
 
+test("coming back by answering something elsewhere first keeps the absence's page until its work is settled or skipped", () => {
+  const { store, order } = setup();
+  const now = new Date();
+  const left = new Date(now.getTime() - 4 * DAY);
+  said(store, left);
+  order("hw3", "完成 ECE 555 作业 3");
+  const day = new Date(now.getTime() - 2 * DAY).toLocaleDateString("en-CA", { timeZone: "America/Chicago" });
+  store.setSetting(ws, `schedule.day:${day}`, JSON.stringify({ hw3: "09:00" }));
+  // Back an hour ago, through the interview: still the page for the four days away, with the homework that had a time in them.
+  store.appendOnboardingMessage({ sessionId: "s", workspaceId: ws, role: "user", content: { text: "没有截止" }, createdAt: new Date(now.getTime() - 3_600_000).toISOString() });
+  const due = returnDue(TEST_CTX, now)!;
+  expect(due.since).toBe(left.toISOString());
+  const view = returnView(TEST_CTX, due.since, now, due.until);
+  expect(view.daysAway).toBe(4);
+  expect(view.items.map((item) => item.orderId)).toEqual(["hw3"]);
+  // Settled — or skipped — it is gone.
+  expect(answerReturn(TEST_CTX, "hw3", "rolled", {}, now)).toEqual({ ok: true });
+  expect(returnDue(TEST_CTX, now)).toBeUndefined();
+});
+
 test("the work that had a time while away or whose due day passed is listed; what is done or untouched is not", () => {
   const { store, order } = setup();
   const now = new Date();

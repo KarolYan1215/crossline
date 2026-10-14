@@ -89,11 +89,13 @@ export type GoalRowStatus = "forecast" | "no_tasks" | "unforecast" | "unfinished
 export type GoalRow = { id: string; title: string; line: string; p50Day: string | null; p85Day: string | null; deadline: string | null;
   slackDays: number | null; atRisk: boolean; remainingP50Minutes: number; remainingP85Minutes: number;
   /** The earliest day one of its tasks leaves the task library and is scheduled; null when none waits there. */
-  libraryDay: string | null; status: GoalRowStatus; bottleneck: string | null };
+  libraryDay: string | null; status: GoalRowStatus; bottleneck: string | null;
+  /** Task proposals for it waiting for the person: a milestone with none approved yet is not 「尚无任务」 when work is proposed. */
+  proposals: number };
 
 export function goalRows(input: { goals: GoalForecast[]; lineOf: Record<string, string>; lineOrder: string[]; marginDays: number;
   /** Milestones the forecast does not follow (ordinary importance, no deadline). */ unforecast: Set<string>;
-  library: Array<{ milestoneId: string; libraryUntil: string | null }> }): GoalRow[] {
+  library: Array<{ milestoneId: string; libraryUntil: string | null }>; proposals?: Record<string, number> }): GoalRow[] {
   const libraryDay = new Map<string, string>();
   for (const task of input.library) {
     if (!task.libraryUntil) continue;
@@ -106,7 +108,7 @@ export function goalRows(input: { goals: GoalForecast[]; lineOf: Record<string, 
     return { id: goal.milestoneId, title: goal.title, line: input.lineOf[goal.milestoneId] ?? "none", p50Day: goal.p50Day, p85Day: goal.p85Day,
       deadline: goal.confirmedDeadline, slackDays: goal.slackDays, atRisk: goal.slackDays !== null && goal.slackDays < input.marginDays,
       remainingP50Minutes: goal.p50Minutes, remainingP85Minutes: goal.p85Minutes, libraryDay: libraryDay.get(goal.milestoneId) ?? null, status,
-      bottleneck: goal.bottleneck };
+      bottleneck: goal.bottleneck, proposals: input.proposals?.[goal.milestoneId] ?? 0 };
   }).sort((a, b) => rank(a.line) - rank(b.line) || a.line.localeCompare(b.line) || (a.deadline ?? "9999").localeCompare(b.deadline ?? "9999")
     || a.title.localeCompare(b.title));
 }

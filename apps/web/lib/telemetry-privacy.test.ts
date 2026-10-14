@@ -31,7 +31,8 @@ const using = (needle: RegExp) => files.filter((file) => needle.test(readFileSyn
 test("the collector's address is known to the launcher that sets it and the two senders that use it — nothing else", () => {
   expect(using(/CROSSLINE_TELEMETRY_URL/)).toEqual([
     "apps/launcher/src/supervise.ts", "apps/web/lib/diagnostic-snapshot.ts", "apps/worker/src/index.ts", "apps/worker/src/telemetry.ts"]);
-});
+  // The first read of every source file in the tree: past the 5 s default under a full-suite load (5.6 s on 2026-10-14).
+}, 30_000);
 
 test("the usage sender posts exactly one thing: the batch that came out of the whitelist", () => {
   const source = readFileSync(path.join(root, "apps/worker/src/telemetry.ts"), "utf8");

@@ -1,4 +1,5 @@
-import { getStore, lastNight } from "../../lib/crossline";
+import { effectiveSchedulePreferences, getStore, lastNight } from "../../lib/crossline";
+import { localStamp } from "@crossline/core";
 import { loadWeeklyReview } from "../../lib/review";
 import { SubpageShell } from "../subpage-shell";
 import { RevokeAcceptance } from "./revoke-acceptance";
@@ -52,7 +53,7 @@ export default async function ReviewPage() {
           const detail = taskDetails.get(item.workOrderId);
           return <div key={item.workOrderId} className="review-card">
             {detail ? <TaskCard detail={detail} /> : <b>{item.intent}</b>}
-            <p className="review-card-meta"><small>自动验收 · {item.acceptedAt.slice(5, 16).replace("T", " ")}</small>
+            <p className="review-card-meta"><small>自动验收 · {localStamp(item.acceptedAt, effectiveSchedulePreferences(ctx).preferences.timeZone)}</small>
               {item.questioned && <Tag tone="warn">关系已被反证，需复核</Tag>}
               <RevokeAcceptance workOrderId={item.workOrderId} /></p>
           </div>;

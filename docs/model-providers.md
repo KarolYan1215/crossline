@@ -1,6 +1,6 @@
 # 模型来源：自带 Codex 与其他 API 模型（设计稿）
 
-状态：**A 部分已定、实施中**（2026-10-10 晚，本人确认）；B 部分仍是设计稿。路径以 2026-10-10 的仓库为准。
+状态：A 部分已实施（2026-10-10）；B 部分按 2026-10-13 的决定改为「全部经 Codex」并已实施（R7，第 3 节）。原先的 B2 直连适配器不做。
 
 **已定的决定（覆盖下文中与之冲突的地方）**
 - 将来公开部署，本人仍是管理员。**其他用户只用他们自己的 Codex**，绝不回落到主人的运行时、额度或记忆。
@@ -12,14 +12,14 @@
   - API key。
 - API key：按美元算月上限，默认 **$10**（`model.budget.monthly`），由 `model_usage` × 价目表算出本月花费。不再是「没设上限就不跑」。
 - 带 shell 的助手只给主人工作区（`AGENT_OWNER_ONLY`）。
-- Sign in with ChatGPT 用作**本机自装版的登录方式**（开源动态注册，回调 `127.0.0.1`），不用作模型通道：模型继续走 Codex，以保留全部能力。
+- Sign in with ChatGPT 用作**本机自装版的登录方式**（开源动态注册，回调 `127.0.0.1`）。
+- **2026-10-13 更新**：访客首选 SIWC 套餐额度共享（作为模型通道，见 3.6）；同时任何第三方模型都要能接（GLM、DeepSeek、Kimi、Qwen、Claude、ChatGPT/OpenAI API、Gemini），**全部走和 Codex 完全一样的路径**；生图等做不到的能力如实告诉用户。只有 Chat Completions 的模型由本机转换层改写。
 
 ## 0. 结论
 
 1. **A（每个 workspace 接自己的 Codex）先做，B 拆两半。** 现在任何注册进来的第二个账号都在用本人的 ChatGPT 额度和本人的 Codex 记忆（见 1.2），这是真实隐患，不是将来的需求。
-2. **B1：凡是说 Responses 协议的模型，都走同一个 Codex 运行时**（OpenAI API key、Azure OpenAI、Ollama、LM Studio、OpenRouter 的 Responses 接口）。几乎不用写代码，线程、动态工具、修正循环、用量事件全部保留。
-3. **B2：Anthropic / Gemini 只给结构化 Skill 用，自己写适配器**（Vercel AI SDK 当传输层），共用 `runTurnsUntilValid` 和全部校验器。联网研究、画像插图、带 shell 的助手**不**迁移。
-4. 每一步先用 `scripts/structured-output-check.ts` 跑多提供方对照，修正率不达标的提供方不许承担 `NEVER_DOWNGRADED` 的 Skill。
+2. **B：所有模型都走同一个 Codex 运行时**（2026-10-13 定，已实施，第 3 节）。说 Responses 的原样透传，只有 Chat Completions 的经本机转换层；线程、动态工具、修正循环、用量事件全部保留。联网研究、画像插图、带 shell 的助手只在 ChatGPT 登录（或 OpenAI API key）下可用。
+3. 提供方只承担通过一致性检验的功能；验收判定和收集分析要求每次都一次答对。
 
 ## 1. 现状：哪些地方绑死在 Codex 上
 
@@ -54,7 +54,7 @@
 - 提供方：`thread/start` 有 `model_provider`（`v2/thread.rs`）；内置 `openai`、`amazon-bedrock`、`ollama`（11434）、`lmstudio`（1234）；自定义提供方写在 `model_providers.<id>`，字段有 `base_url`、`env_key`、`auth`（命令取 token）、`http_headers`、`query_params`（`model-provider-info/src/lib.rs`）。
 - **只支持 Responses 协议**：`WireApi` 只剩 `Responses`，写 `chat` 直接报错（同文件 `CHAT_WIRE_API_REMOVED_ERROR`）。所以 Anthropic Messages、Gemini 原生接口进不了 Codex。
 - 凭据存放：`cli_auth_credentials_store = file | keyring | auto | ephemeral`（`config/src/types.rs` `AuthCredentialsStoreMode`）。
-- 未核实、须先写探针：`thread/start.config` 能否临时定义 `model_providers.*`；Ollama/LM Studio 的 Responses 兼容层是否真的执行 `strict` schema；keyring 条目是否按 CODEX_HOME 区分。
+- 已由探针核实（2026-10-13，3.1）：`thread/start.config` 可以临时定义 `model_providers.*`；Ollama 的 `/v1/responses` 可直接驱动 Codex。仍未核实：LM Studio、vLLM 是否执行 `strict`（一致性检验会测出来）；keyring 条目是否按 CODEX_HOME 区分。
 
 ## 2. 接口 A：每个 workspace 接自己的 Codex
 
@@ -156,100 +156,84 @@ export interface RuntimeRegistry {
 
 现在的 `codex-home` 整体改名为主人 workspace 的运行时目录（保留 `auth.json`、记忆、`state_5.sqlite`），主人 workspace 判定：只有一个 workspace 时就是它，否则必须设 `CROSSLINE_RUNTIME_LEGACY_WORKSPACE`，不猜。其他 workspace 从「未连接」开始，**不继承**主人的登录和记忆。`copy-codex-memory.ts` 与备份脚本改为遍历 `runtimes\*`。迁移前照例备份目录。
 
-## 3. 接口 B：多提供方
+## 3. 接口 B：其他模型，全部经同一条 Codex 路径（R7，2026-10-13 实施）
 
-### 3.1 两条路
+2026-10-13 的决定取代了原先的 B1/B2 两分法：**任何模型都走和 ChatGPT 完全一样的 Codex 路径**（线程、Skill 原生加载、修正循环、校验器、用量事件都不变），不另写直连适配器。Codex 0.155 只认 `wire_api = "responses"`，所以只有 Chat Completions 的模型（GLM、DeepSeek、Kimi、通义千问，以及 Claude、Gemini 的 OpenAI 兼容接口）由本机一个很薄的转换层改写；说 Responses 的（OpenAI API、OpenRouter、本机 Ollama）原样透传。做不到的能力如实告诉本人。
 
-| 路 | 范围 | 保留什么 | 失去什么 |
-|---|---|---|---|
-| **B1：Codex 内换提供方** | 说 Responses 的：OpenAI API key、Azure OpenAI、Ollama、LM Studio、OpenRouter（Responses 接口）、Bedrock（实验） | 线程、动态工具、修正循环、用量事件、审批钩子 | 联网搜索和图像（OpenAI 托管工具）；`strict` 是否执行看对方实现 |
-| **B2：直连适配器** | Anthropic、Gemini 原生接口，以及 B1 跑不通的 | 修正循环、校验器、`softAccept`、用量记账 | 原生线程（改为重放）、联网、图像、shell |
+### 3.1 探针结果（真实运行，`scripts/provider-probe.ts`，2026-10-13）
 
-B1 的做法：每个 workspace 运行时的 `config.toml` 写入 `model_providers.<id>`，密钥用 `auth`（命令型取 token，命令读 DPAPI 文件）而不是明文 `experimental_bearer_token`；`thread/start` 带 `model_provider`。本地模型的 `base_url` 只允许 loopback 的 `http://`，其余必须 `https://`。
+本机 Ollama 0.35（qwen3:8b，上下文 40960，约一半在 CPU）、钉死的 Codex 分支、真实的 `crossline-task-titler` Skill 与校验器：
 
-### 3.2 Skill 声明需要什么
-
-```ts
-// packages/codex/src/capabilities.ts
-export type Capability =
-  | "structuredStrict" | "tools" | "webSearch" | "imageGeneration" | "shellAgent" | "nativeThreads" | "longContext";
-
-export type SkillRequirement = { needs: Capability[]; prefers?: Capability[]; minContextTokens?: number };
-
-export const SKILL_REQUIREMENTS: Record<string, SkillRequirement> = {
-  "crossline-automation-stripper": { needs: ["structuredStrict"] },
-  "crossline-milestone-gate":      { needs: ["structuredStrict"], minContextTokens: 64_000 },
-  "crossline-concierge":           { needs: ["structuredStrict", "tools"], prefers: ["nativeThreads"] },
-  "crossline-onboarding":          { needs: ["structuredStrict", "longContext"], prefers: ["nativeThreads"] },
-  "crossline-step-planner":        { needs: ["structuredStrict", "longContext"] },   // files in full, 48k
-  "crossline-due-diligence":       { needs: ["structuredStrict", "webSearch"] },
-  "crossline-portrait-illustrator":{ needs: ["imageGeneration"] },
-  "crossline-agent":               { needs: ["shellAgent"] },
-  // …each of the 24; a discovery test fails when a Skill directory has no entry
-};
-```
-
-分三类：**结构化**（18 个，含 gate、分析、架构师、反推、步骤、标题、日历归类、讲解、周报、画像文字，以及要工具调用的输入框；`crossline-eval-persona` 只用于测试）可以上任何支持 JSON schema 和 function calling 的提供方；**要联网**（4 个）只在 Codex+OpenAI 上；**图像、shell**（各 1 个）只在 Codex 上。
-
-### 3.3 提供方与路由
-
-```ts
-// packages/codex/src/provider.ts
-export type ProviderOffer = {
-  id: string;                         // "codex" | "openai" | "azure" | "anthropic" | "google" | "openrouter" | "ollama" | "lmstudio"
-  transport: "codex" | "direct";
-  models: Array<{ model: string; tier: RouteTier; capabilities: Capability[]; contextTokens: number }>;
-  consented: boolean;
-};
-
-export interface ModelProvider {
-  readonly id: string;
-  /** Turns our strict schema into this provider's dialect; `dropped` lists keywords it cannot express. */
-  lowerSchema(schema: unknown): { schema: unknown; dropped: string[] };
-  /** One model call; tool rounds happen inside, bounded. */
-  turn(request: TurnRequest, signal: AbortSignal): Promise<TurnResult>;
-}
-export type TurnRequest = {
-  system: string; messages: Array<{ role: "user" | "assistant"; text: string }>;
-  schema: unknown; tools?: SkillTools; model: string; effort?: string; maxToolRounds?: number;
-};
-export type TurnResult = { text: string; usage: TokenBreakdown & { costMicros?: number }; toolRounds: number };
-
-// model-policy.ts grows a provider; the env overrides become `provider/model[:effort]`
-export type ModelRoute = { provider: string; model: string; effort?: string; maxRepairs?: number };
-export function routeForSkill(skill: string, offers: ProviderOffer[], mode: SpendMode, env?: NodeJS.ProcessEnv):
-  ModelRoute | { blocker: { code: "MODEL_CAPABILITY_MISSING"; message: string } };
-```
-
-选择规则：先按 `SKILL_REQUIREMENTS` 过滤（缺能力的直接排除），再按本人在 设置 → 模型连接 排的提供方顺序，取该档位的模型；economy 时**在同一提供方内**降一档。`NEVER_DOWNGRADED` 的 Skill 还有一条：只能落在「已认证」的提供方上（3.7 的修正率门槛），不会因为首选不可用而悄悄换到更弱的提供方——没有合格的就报 `MODEL_CAPABILITY_MISSING`（「任务分析需要一个已通过检验的模型，目前连接的都没通过」）。
-
-### 3.4 B2 适配器怎么保住现有保证
-
-- **共用修正循环。** 把 `runTurnsUntilValid` 里与 Codex 通知相关的部分抽成 `TurnDriver { send(prompt): Promise<string>; interrupt(): void }`，解析、清洗（`cleanAnswerStrings`）、校验、`_BLOCKED` 不修、`softAccept`、修正次数全部留在共用层。Codex 驱动就是今天的代码，先重构、Codex 测试一行不改地通过，再加直连驱动。
-- **SKILL.md。** Codex 路径继续由运行时加载；直连路径读 SKILL.md 正文（去掉 frontmatter）+ `STYLE_INSTRUCTIONS` 作为 system，并把文件哈希写进审计。「SKILL.md 不进 baseInstructions」这条规则是为了不和运行时的原生加载重复，直连时没有原生加载，所以不适用。
-- **线程。** 直连没有线程：我们在 worker 内存里按自己的线程 id 存消息，丢了就从账本重建——和 `SKILL_THREAD_LOST` 后「用历史开新线程」是同一条路，访谈、输入框、里程碑对话都已经有这段代码。
-- **Schema 方言。** OpenAI：原样 strict `json_schema`。Anthropic：一个强制调用的工具，`input_schema` 为我们的 schema。Gemini：`responseSchema`，`anyOf[…, null]` 改写为 `nullable`，去掉 `additionalProperties`。各家不认的 `minLength/maxLength/maxItems` 去掉，记在 `dropped`——**这些约束由校验器执行，本来就不靠解码器**。`structuredOutputProblems(schema, dialect)` 加方言参数，发现式测试对每个 `*_SCHEMA` × 每种方言断言 `dropped` 只含白名单关键字。
-- **动态工具。** `SkillTools.specs` 直接映射到原生 function calling，回答仍由同一个 `call` 给出；工具轮数上限 8，超过算一次拒绝进入修正。
-- **超时与停滞。** 直连是一次 HTTP 流：沿用每轮一小时上限，「20 分钟无事件」改为「20 分钟无流数据」。
-
-### 3.5 不迁移的三项
-
-- **联网研究**：别家的搜索工具引用格式不同，没有搜索引擎我们也补不上（`safeGet` 只能打开 URL，不能找 URL）。`verifySource` 已经逐个核实来源，将来接 Anthropic `web_search` 或 Gemini grounding 只是多一个来源格式，留到有真实需要时。
-- **图像**：画像插图是非必要功能，非 OpenAI 时显示「画像插图需要 ChatGPT 登录或 OpenAI API」，其余照常。
-- **带 shell 的助手**：守卫挂在运行时的审批请求上；在别的模型上自己写 shell 循环，就是重写命令审批、补丁应用和沙箱——正是 CLAUDE.md「不是我们该造的」里的东西。将来若接 Claude Code 或 OpenAI Agents SDK，作为第二个 `AgentRuntime`，单独设计它的权限钩子。
-
-### 3.6 传输库选型
-
-| 选项 | 评价 |
+| 探针 | 结果 |
 |---|---|
-| **Vercel AI SDK**（`ai` + `@ai-sdk/anthropic`、`@ai-sdk/google`、`@ai-sdk/openai-compatible`） | **采用**。进程内、无额外服务；统一 usage 字段；工具调用和 `jsonSchema()` 都有；只在 worker 引入，不进 web 包，包体无关紧要。只当传输用，不依赖它的 `generateObject` 做校验；版本钉死 |
-| LiteLLM 代理 | 多一个 Python 服务要守护、备份、升级，违背「一台机器、两个进程」 |
-| 只接 OpenRouter | 一把钥匙通吃，但所有内容多经一家中间商；作为一个 `openai-compatible` 提供方提供即可，不当抽象层 |
-| 直接用三家 SDK | 三套工具调用和 schema 差异要自己抹平，重写的正是 AI SDK 已经写好的部分 |
+| (a) Chat Completions 经转换层 → Codex → Skill | 通过，0 次修正，148 s，7.9k token |
+| (b) `thread/start` 带 `modelProvider` + `config["model_providers.<id>"]`，config.toml 里没有这个提供方 | **生效**（回合完成，转换层收到请求）。所以提供方按线程定义，不改任何 CODEX_HOME 的 config.toml |
+| (c) Ollama `/v1/responses` 原生，不经转换层 | 通过，0 次修正，226 s |
 
-### 3.7 用量与成本
+探针发现、已在代码里处理的：
+- 自定义提供方（`requires_openai_auth = false`）下 `account/read` 返回 `account: null, requiresOpenaiAuth: false`，`requireLogin` 原先会判成未登录；走提供方时不再检查 Codex 登录。
+- Codex 的记忆两个阶段默认用 `gpt-5.6-terra`，在别的提供方上会对一个不存在的模型重试六次。走提供方的线程关掉记忆（`memories.*`、`features.memories`）。
+- Codex 会发 `namespace` 工具和 `additional_tools` 输入项；转换层把 `ns.name` 展平成 `ns__name`，回程按映射还原（含 custom 工具）。
+- 路由覆盖 `CROSSLINE_MODEL_*="model:effort"` 原先按第一个冒号拆，`qwen3:8b` 被拆成模型 `qwen3`、档位 `8b`；现在只有冒号后是已知档位才算档位（`parseRoute`）。
 
-`SkillUsage` 加 `provider`、`costMicros`；`TokenBreakdown` 已经与提供方无关，映射 Anthropic `cache_read_input_tokens`、Gemini `cachedContentTokenCount` 到 `cachedInputTokens`。设置 → 模型用量 按功能画，提供方作为图例，不出现模型名（遵守 `docs/copy-style.md`）。
+### 3.2 结构
+
+| 部件 | 文件 | 做什么 |
+|---|---|---|
+| 转换 | `packages/codex/src/chat-bridge.ts` | 纯函数。Responses 请求 → 一次 Chat Completions：`instructions` 和所有 developer/system 文本合成一条开头的 system；`text.format` json_schema → `response_format`（只支持 JSON 模式的提供方改成 `json_object`，schema 写进 system）；function/custom/namespace 工具；之前的工具调用与输出回放成 assistant `tool_calls` + `tool` 消息；推理项不回传（无状态）。流：`reasoning_content`/`reasoning` 字段或行内 `<think>` → reasoning 项（也让慢模型的连接保持有事件），正文 → message 项，工具调用 → function_call 项，usage → `response.completed`；`finish_reason: length` → `response.incomplete`；上游错误映射到 Codex 认识的码（`context_length_exceeded`、`insufficient_quota`、`rate_limit_exceeded`、`server_is_overloaded`） |
+| 网关 | `packages/codex/src/model-gateway.ts` | worker 进程里一个只听 127.0.0.1 的监听。Codex 拿到的 `base_url` 是 `http://127.0.0.1:<port>/<route>`，route 是「工作区 + 提供方」在本次启动的随机密钥下的 HMAC（猜不到，进程重启即失效）；上游地址由 route 查出，从不取自请求。`chat` 走转换，`responses`（和 SIWC 套餐）原样透传。**密钥由网关逐请求加上**：Codex 的环境、config、线程设置、rollout 文件里都没有它；令牌更新（SIWC 刷新）下一次请求就生效，不用重启 sidecar |
+| 路由 | `packages/codex/src/providers.ts` | `ProviderConfig`（`model.provider` 设置，无密钥，只有 `keyLast4`）、`decideRoute`、`threadProvider`。`skill-runner` 的 `executeSkill` 先问 `decideRoute`：提供方能做这件事且检验准入 → 在这个线程上定义提供方（`modelProvider` + `model_providers.<id>`，`requires_openai_auth=false`、`supports_websockets=false`，不带 effort）；否则该工作区自己的 Codex 登录；都没有 → `MODEL_CAPABILITY_MISSING` / `MODEL_NOT_ADMITTED`，白话说明，**不启动线程、绝不借用主人的运行时** |
+| 需求与检验 | `packages/core/src/provider-conformance.ts` | `SKILL_NEEDS`（每个 Skill 的白话名、输出 schema、critical、tools/webSearch/image/shell）、`capabilityGap`、`conformanceCases`、`jsonSchemaProblems`、`admittedSkills`、`conformanceCurrent` |
+| 服务 | `apps/worker/src/model-provider.ts` | 设置行、DPAPI 密钥、网关上游解析、额度读数、检验运行、supervisor 路由 `/v1/model/provider`（GET/POST/DELETE）与 `/v1/model/provider/test` |
+| 密钥 | `packages/connectors/src/secret-file.ts` | `data/secrets/<ws>/provider-key.bin`，DPAPI（当前 Windows 用户），不进账本、导出和备份；非 Windows 拒绝保存，不写明文 |
+| 界面 | `apps/web/app/settings/model-provider-card.tsx`，`/api/model/provider[/test]` | 设置 → 日历与连接 → 「其他模型」：起点（DeepSeek、Kimi、通义千问、智谱 GLM、Claude、Gemini、OpenAI API、OpenRouter、本机 Ollama）、接口类型、地址、模型、密钥（只发一次给 worker，之后只显示末 4 位）、运行检验与进度、交给它的功能与其余功能各自的原因、做不到的能力一句话 |
+
+运行时注册表加了 `hasProvider`：只配了提供方、没有 Codex 登录的访客也有自己的进程（`connected`），但 `signedIn` 为假，需要联网、生图的 Skill 对它直接报不可用。
+
+### 3.3 能力：固定的，不测
+
+第三方提供方一律没有：联网搜索（due-diligence、flywheel-scout、material-researcher、archetype-curator）、图像（portrait-illustrator）、带 shell 的助手（只给主人自己的 Codex）、托管连接器（apps 日历读取）、跨次记忆。设置卡片原话：「联网查证、画像插图、电脑上的助手、日历应用读取和跨次记忆只在 ChatGPT 登录（或 OpenAI API key）下可用；其余功能按检验结果开放。」工作区同时有 Codex 登录时，这些功能照常走它。
+
+### 3.4 一致性检验（准入）
+
+- 用例：每个导出的 `*_SCHEMA`（30 个，发现式测试保证不漏）各一个最小真实提示，另加三个对抗用例：长文本（≥1500 字的字段）、`anyOf` 联合加 `null`、四层嵌套。critical（验收判定、收集分析）的 schema 各跑 3 次。
+- 运行：测试专用 Skill `crossline-conformance` 经**同一条**路径（网关、Codex、修正循环），输出 schema 就是被测 schema；`validateOutput` = `jsonSchemaProblems`，不合格就作为拒绝送回修正。
+- 判定：critical Skill 每次都过且修正率 ≤ 5%（3 次即不许修正）；其余 Skill 自己的 schema 都过且整体通过率 ≥ 90%；缺能力的永不准入。
+- 记录：`model.provider.conformance` 事件（`ConformanceRecord`：通过率、修正率、p95、每次运行）。换模型、换运行时（以钉死二进制的哈希为版本）、满 30 天、或配置在检验之后又保存过，都算过期，需重测。
+- 真实运行脚本：`scripts/provider-conformance.ts <chat|responses> <baseUrl> <model> [密钥环境变量名] [json_object]`（临时账本、临时 CODEX_HOME；密钥只按变量名读，不作参数）。
+
+### 3.5 额度
+
+本机模型（loopback 地址）不计费：`{available:true}`，后台照常。按量付费的第三方，应用不知道价格，读数是 `PROVIDER_BUDGET_UNKNOWN`（不可读）→ `backgroundSpend` 让后台暂停，本人发起的操作照常；额度卡片写明原因。工作区有自己的 Codex 登录时仍读 Codex 的窗口。给第三方定价和月上限是后续工作（价目表在 `prices.ts`，额度逻辑归 R1）。
+
+### 3.6 Sign in with ChatGPT 套餐共享
+
+`ProviderKind` 有 `siwc-plan`：OpenAI 的 Responses 端点 `https://api.openai.com/v1`，套餐令牌作为该工作区的密钥由网关加上，等同官方配方（`openai_chatgpt_plan`、`env_key=ACCESS_TOKEN`、`requires_openai_auth=false`、`supports_websockets=false`），但令牌不进 sidecar 的环境，所以刷新后不需要重启 sidecar 和 `thread/resume`。OAuth 拿令牌、刷新、`chatgpt.tokens.use.direct` 校验属于登录那条线（R6），尚未接上；接上后只需把令牌写进 `secret-file` 并保存一行 `kind: "siwc-plan"` 的设置。图像、托管连接器在这条路上不可用，同 3.3。
+
+### 3.7 检验结果（真实运行）
+
+2026-10-13 在本机真实运行 `scripts/provider-conformance.ts`。环境：Ollama 0.35，qwen3:8b，约一半在 CPU；钉死的 Codex 分支；临时账本与临时 CODEX_HOME。两种接法各跑 30 个 schema 加 3 个对抗用例，其中验收判定和收集分析各跑 3 次，共 34 次。
+
+| | chat 接法（`/v1/chat/completions` 经转换层） | responses 接法（`/v1/responses` 经网关透传） |
+|---|---|---|
+| 通过 | 33/34（97.1%） | 33/34（97.1%） |
+| 需要修正 | 0 | 0 |
+| 验收判定、收集分析 | 各 3/3，0 修正 | 各 3/3，0 修正 |
+| 失败 | 长文本对抗用例（要求 ≥1500 字）在 20 分钟时超时（`SKILL_TIMEOUT`） | 同左 |
+| 单个用例耗时 | 79–413 s，p95 1201 s | 52–752 s，p95 752 s |
+| 总耗时 | 246 min | 113 min |
+| 准入 | 19 项 | 19 项（同左） |
+
+准入的 19 项：访谈、里程碑设计、跨主线产出规划、任务倒推、收集分析、教程设计、教程写作、步骤拆分、复核、进度判断、输入框、任务命名、日历归类、目标拆分、画像、验收判定、每周洞察、背景整理、排程说明。
+
+按设计不准入的：网上查证、跨主线扩展、资料检索、任务类型整理（这四项要联网）；画像插图（要生图）；电脑上的助手（要 shell）。这几项的 schema 本身都通过了。
+
+读这张表时要注意四点：
+
+- **chat 接法的总耗时含一次睡眠。** 第一个收集分析用例记为 6059 s。系统日志显示，电脑在本地时间 15:00:55 睡眠、16:16:01 唤醒。唤醒后停滞检测中断了这一轮并重发，重发的一轮约 9 分钟答完，未修正。这一条不代表转换层的速度。
+- **长文本用例两种接法都没过。** 原因是脚本给每一轮的上限是 20 分钟（产品里是一小时），这台机器上的 8B 模型 20 分钟写不出 1500 字。这说明的是本机模型太慢，不是格式问题。
+- **检验只证明能按 schema 回答，不证明判断质量。** 8B 本地模型能拿到验收判定的准入，只是因为它的格式靠得住；本地模型不该承担验收判定和收集分析，这一点仍然成立（见第 5 节）。
+- **chat 接法用 Ollama 的 Chat Completions 接口代替「只有 Chat Completions 的厂商」。** 这证明了转换层能用。DeepSeek、Kimi、通义千问、GLM、Claude、Gemini 这些真实云端厂商还没有实测：各家对 `response_format` 的支持不同（例如 DeepSeek 只有 JSON 模式），上线某一家之前，要先用它的密钥跑一遍这个脚本。
 
 ## 4. 安全与隐私
 
@@ -261,7 +245,7 @@ export function routeForSkill(skill: string, offers: ProviderOffer[], mode: Spen
 | Ollama / LM Studio | 无 | 不需要 |
 
 - **屏幕活动永不出门**：`apps/web/lib/activity-privacy.test.ts` 已禁止任何构建模型上下文的代码碰窗口段；把直连适配器所在目录加入它的扫描范围。录音继续本机转写。
-- **出站白名单**：直连只连 `model.connection` 里登记的 base URL；`https` 必须，loopback 例外；不接受 IP 字面量（loopback 除外），复用 `safe-fetch.ts` 的主机检查。
+- **出站白名单**：网关只连 `model.provider` 里登记的地址，地址由 route 查出、不取自请求；`https` 必须，loopback 例外（`providerConfigProblem`）；地址里不许带账号、参数。
 - **同意按 workspace、按提供方**，撤销后该提供方立即退出路由（`model.consent.<id>`）。
 - 密钥规则见 2.3；`model.connection` 的发现式测试断言导出快照和所有 API 响应里不出现 `sk-`、`AIza`、`sk-ant-` 前缀。
 
@@ -271,8 +255,8 @@ export function routeForSkill(skill: string, offers: ProviderOffer[], mode: Spen
 |---|---|---|
 | **P0**（立即，小） | 非主人 workspace 关闭记忆、禁用助手；API key 时后台 pass 不再因 `available:false` 静默停，改报 `BUDGET_CAP_MISSING` | 单测：两个 workspace 的线程参数里记忆开关不同；worker pass 在 API key 下产生一条可见的 ask |
 | **P1** A | `RuntimeRegistry`、每 workspace CODEX_HOME、三种登录、模型连接页、迁移、按 workspace 的预算 | 假 sidecar 单测（两个 workspace 拿到不同 client、空闲停止、崩溃退避）；发现式测试：supervisor 里不再出现 `sidecar.client`；导出/响应里无密钥；`scripts/gate-identity-check.ts` 扩展为两个账号各自登录 |
-| **P2** B1 | Responses 提供方经 Codex | 先写 `scripts/provider-probe.ts` 核实 1.3 的三个未知；对 Ollama、Azure 各跑一遍结构化检验 |
-| **P3** B2 | `TurnDriver` 重构 → AI SDK 直连，只开放结构化 Skill | 重构后 Codex 测试原样通过；直连驱动用录制的回答回放（`apps/worker/src/testing/fixtures/`） |
+| **P2** B（R7，已做） | 所有提供方经 Codex：转换层、网关、按线程定义提供方、一致性检验、设置卡片 | `scripts/provider-probe.ts`（3.1）；`scripts/provider-conformance.ts`（3.7）；单测见各文件旁的 `*.test.ts` |
+| ~~P3 B2~~ | 不做（2026-10-13：全部走 Codex） | — |
 | 以后 | 别家联网、别的 agent 运行时 | 有真实需要时另写设计 |
 
 **度量。** `scripts/structured-output-check.ts` 加 `--provider <id>/<model>` 矩阵，`scripts/concierge-replay.ts` 同理。每个提供方 × Skill 记录：通过率、修正率、`softAccept` 率、安全类拒绝数、p50/p95 时长、token 与花费。门槛：承担 `NEVER_DOWNGRADED` 的提供方，修正率不高于 Codex 基线 + 10 个百分点、安全类拒绝为零（每 Skill 至少 10 次）；输入框回放 ≥ 27/30。不达标的提供方只能用于其余 Skill，界面上标「未通过检验」。

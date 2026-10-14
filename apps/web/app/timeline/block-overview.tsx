@@ -1,4 +1,5 @@
 "use client";
+import { Prepared } from "../task/prepared";
 
 import { useEffect, useState } from "react";
 import type { TaskDetail } from "../../lib/task-detail";
@@ -127,6 +128,7 @@ export function BlockOverview({ item, items, today, labels, details, compact = f
       {personsPart.length > 0 && <div className="dq-part"><small>本人负责</small>
         <ul>{personsPart.map((text) => <li key={text} className="gen">{text}</li>)}</ul></div>}
       {following && <p className="dq-meta"><small>下一个时段</small> <span className="mono">{slotText(following)}</span>{following.step ? ` · ${following.step}` : ""}</p>}
+      <Prepared detail={detail} />
     </>}
     {detail && <TaskActions workOrderId={detail.id} state={detail.state} paused={detail.paused} agentReady={Boolean(agentStepId)} agentStepId={agentStepId}
       beforeStart={() => lockOnStart(item)} onOpen={compact ? undefined : () => setOpen(true)}

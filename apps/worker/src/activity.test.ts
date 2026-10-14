@@ -13,7 +13,8 @@ test("only three aggregate numbers leave the sampler, never a raw sequence", () 
 });
 
 test("a real sample carries a window handle and no window title", async () => {
-  const sample = await sampleLocalActivity();
+  // A cold PowerShell compiling its helper type takes well over the default 10 s on a busy machine.
+  const sample = await sampleLocalActivity(25_000);
   if (process.platform !== "win32") { expect(sample).toBeUndefined(); return; }
   expect(sample).toBeDefined();
   expect(Number.isFinite(sample!.idleMs)).toBe(true);

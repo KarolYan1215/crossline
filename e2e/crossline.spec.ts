@@ -390,71 +390,63 @@ test("a work order started on one device becomes a conflict when another device'
 });
 
 /**
- * The system's questions on Today, as a stack: something awaited that was due on top and a backplan that found two missing inputs
- * (shown under the milestone's name once) beneath it, stepped through with ‹ › and the arrow keys, each answered in place from options
- * already written out — one with a follow-up form prefilled from what the system knew — the next coming up by itself, and the 待确认
- * count going down, without a page reload.
+ * The system's questions on Today, as a stack: something awaited that was due on top and a backplan that split nothing beneath it,
+ * stepped through with ‹ › and the arrow keys, each answered in place from options already written out — one with a follow-up form —
+ * the next coming up by itself, and the 待确认 count going down, without a page reload. (A backplan's missing inputs are no longer
+ * asked about: the split makes getting each one a step, docs/review-2026-10-13.md §11.)
  */
 test("Today asks what only the person knows, with options and follow-ups, and moves to the next on answering", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-chrome");
   await page.goto("/");
+  let milestoneTitle = "";
   const store = openStore();
   try {
     const workspaceId = realWorkspaceId(store);
     const milestone = store.listMilestones(workspaceId).filter((item) => item.status === "approved").at(-1)!;
+    milestoneTitle = milestone.title;
     store.appendEvent({ ownerId: "e2e-tester", workspaceId, idempotencyKey: "e2e:backplan-blocked", type: "goal.backplan_blocked", entityId: milestone.id,
-      payload: { milestoneVersion: milestone.version, code: "BACKPLAN_INPUT_BLOCKED", message: "缺组会录音",
-        missing: [{ id: "m1", what: "组会录音", whoHas: "导师", message: "没有组会录音，无法列出要回应的质疑。" },
-          { id: "m2", what: "导师批注", whoHas: "", message: "没有导师对初稿的批注。" }] } });
+      payload: { milestoneVersion: milestone.version, code: "BACKPLAN_SCHEMA_INVALID", message: "答案不完整" } });
     store.saveWaitingItem({ id: "wait-e2e", ownerId: "e2e-tester", workspaceId, title: "实测数据", who: "师兄", expectedAt: "2026-09-14",
       approximate: true, followUpAt: "2026-09-14", state: "open", blocks: [], source: "manual" });
   } finally { store.close(); }
   await page.goto("/");
   const list = page.getByRole("region", { name: "待决事项" });
   await expect(list.getByRole("heading", { name: /^待决事项/ })).toBeVisible();
-  // A stack: the most urgent (the awaited item, due today) on top, the milestone's missing inputs as the edge beneath it.
+  // A stack: the most urgent (the awaited item, due today) on top, the backplan that split nothing as an edge beneath it.
   const waiting = list.locator(".ask-card").filter({ hasText: "师兄的「实测数据」到了吗？" });
+  const backplan = list.locator(".ask-card").filter({ hasText: "未能自动拆分" });
   await expect(waiting).toBeVisible();
-  await expect(list.locator(".ask-peek").first()).toContainText("还缺 2 样东西");
-  const group = list.locator(".ask-group");
-  await expect(group).toHaveCount(0);
+  await expect(list.locator(".ask-peek").filter({ hasText: `「${milestoneTitle.slice(0, 10)}` }).first()).toContainText("未能自动拆分");
   // ‹ › and the arrow keys move through the stack without answering anything.
-  await list.getByRole("button", { name: "下一项" }).click();
-  await expect(group.getByRole("heading", { level: 3 })).toContainText("还缺 2 样东西");
+  await list.locator(".ask-peek").filter({ hasText: "未能自动拆分" }).first().click();
+  await expect(backplan).toBeVisible();
   await expect(waiting).toHaveCount(0);
   await list.getByRole("button", { name: "上一项" }).focus();
   await page.keyboard.press("ArrowLeft");
   await expect(waiting).toBeVisible();
   await page.keyboard.press("ArrowRight");
-  await expect(group).toBeVisible();
+  await expect(backplan).toBeVisible();
   await page.keyboard.press("ArrowLeft");
-  // Answering the top one brings up the next by itself.
-  await waiting.getByRole("button", { name: /^不等了/ }).click();
-  await expect(list.locator(".ask-card").filter({ hasText: "实测数据」到了吗" })).toHaveCount(0);
-  await expect(group.locator("h4")).toHaveText(["组会录音", "导师批注"]);
-  const missing = group.locator(".ask-input").filter({ hasText: "组会录音" });
-  await expect(missing).toContainText("没有组会录音，无法列出要回应的质疑。");
   const badge = page.locator(".running-head .pending-badge");
   const badgeMinusTotal = async () => (await badge.count() ? Number(await badge.textContent()) : 0)
     - await page.evaluate(async () => ((await (await fetch("/api/pending", { cache: "no-store" })).json()) as { total: number }).total);
-  await missing.getByRole("button", { name: /已索取，等待中/ }).click();
-  await expect(missing.getByLabel(/谁给/)).toHaveValue("导师");
-  await missing.getByLabel("大约哪天到").fill("2026-09-16");
-  await missing.getByRole("button", { name: "确定：已索取，等待中" }).click();
-  await expect(list.getByText("组会录音", { exact: true })).toHaveCount(0);
-  // The header's count follows the answer without a reload (it used to stay at the old number for up to a minute).
+  // An option with a follow-up form: 「还没，推迟」 asks for the day.
+  await waiting.getByRole("button", { name: /^还没，推迟/ }).click();
+  await waiting.getByLabel("推迟到").fill("2026-09-16");
+  await waiting.getByRole("button", { name: "确定：还没，推迟" }).click();
+  // Answering the top one brings up the next by itself, and the header's count follows without a reload.
+  await expect(list.locator(".ask-card").filter({ hasText: "实测数据」到了吗" })).toHaveCount(0);
+  await expect(backplan).toBeVisible();
   await expect.poll(badgeMinusTotal).toBe(0);
-  // Waiting on the recording raised its own 「到了吗？」 for the 16th, which now sits on top; the remaining input is the edge beneath.
-  await list.locator(".ask-peek").filter({ hasText: "导师批注" }).click();
-  const second = list.locator(".ask-card").filter({ hasText: "还缺：导师批注" });
-  await second.getByRole("button", { name: /^自行获取/ }).click();
-  await expect(second).toHaveCount(0);
+  await backplan.getByRole("button", { name: /^暂不拆分该里程碑/ }).click();
+  await expect(backplan).toHaveCount(0);
+  await expect.poll(badgeMinusTotal).toBe(0);
   const after = openStore();
   try {
     const workspaceId = realWorkspaceId(after);
-    expect(after.listWaitingItems(workspaceId).find((item) => item.title === "组会录音")).toMatchObject({ who: "导师", expectedAt: "2026-09-16", source: "backplan" });
-    expect(after.listWaitingItems(workspaceId).find((item) => item.id === "wait-e2e")!.state).toBe("cancelled");
-    expect(after.listEvents(workspaceId, { type: "ask.answered" })).toHaveLength(3);
+    expect(after.listWaitingItems(workspaceId).find((item) => item.id === "wait-e2e")!.followUpAt).toBe("2026-09-16");
+    expect(after.listEvents(workspaceId, { type: "goal.backplan_declined" })).toHaveLength(1);
+    expect(after.listEvents(workspaceId, { type: "ask.answered" })).toHaveLength(2);
   } finally { after.close(); }
 });
 

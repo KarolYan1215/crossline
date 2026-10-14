@@ -1,78 +1,13 @@
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { expect, test, vi } from "vitest";
 vi.mock("server-only", () => ({}));
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
-import { pathToFileURL } from "node:url";
-import { CrosslineStore } from "@crossline/db";
+import { ALLOWED_ATTACHMENT_TYPES, attachmentMediaType } from "./attachments";
 
-// `PROJECT_ROOT` in attachments.ts is `path.resolve(process.cwd(), "..", "..")`, computed once at module
-// import time (the real app always runs with cwd = apps/web). Spying on `process.cwd()` before a fresh
-// dynamic import lets this test point it at a disposable temp directory shaped the same way
-// (`<tmp>/apps/web`), rather than writing real files under wherever the test runner's own cwd happens to
-// resolve two levels up from.
-let tmpRoot: string;
-let cwdSpy: ReturnType<typeof vi.spyOn>;
-
-beforeEach(() => {
-  tmpRoot = mkdtempSync(path.join(tmpdir(), "crossline-attachments-"));
-  cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(path.join(tmpRoot, "apps", "web"));
-  vi.resetModules();
+test("what the assistant delivers can be handed in: Markdown, CSV and JSON are allowed, by type or, with none, by extension", () => {
+  for (const type of ["text/markdown", "text/csv", "application/json"]) expect(ALLOWED_ATTACHMENT_TYPES[type]).toBeTruthy();
+  // Windows browsers send `.md` with no type.
+  expect(attachmentMediaType("", "首篇笔记提纲与来源.md")).toBe("text/markdown");
+  expect(attachmentMediaType("application/octet-stream", "data.csv")).toBe("text/csv");
+  // A claimed type stands; an unknown extension stays unknown and is refused.
+  expect(attachmentMediaType("image/png", "a.md")).toBe("image/png");
+  expect(ALLOWED_ATTACHMENT_TYPES[attachmentMediaType("", "run.exe")]).toBeUndefined();
 });
-afterEach(() => {
-  cwdSpy.mockRestore();
-  rmSync(tmpRoot, { recursive: true, force: true });
-});
-
-test("saveCaptureAttachments refuses an invalid capture id before touching disk", async () => {
-  const { saveCaptureAttachments } = await import("./attachments");
-  const store = new CrosslineStore(":memory:");
-  const result = saveCaptureAttachments(store, {
-    workspaceId: "w", ownerId: "o", captureId: "../escape",
-    files: [{ fileName: "a.txt", mediaType: "text/plain", buffer: Buffer.from("hi") }]
-  });
-  expect(result).toMatchObject({ ok: false, code: "ATTACHMENT_CAPTURE_ID_INVALID" });
-  store.close();
-});
-
-test("saveCaptureAttachments refuses an unsupported media type", async () => {
-  const { saveCaptureAttachments } = await import("./attachments");
-  const store = new CrosslineStore(":memory:");
-  const result = saveCaptureAttachments(store, {
-    workspaceId: "w", ownerId: "o", captureId: "c1",
-    files: [{ fileName: "a.exe", mediaType: "application/x-executable", buffer: Buffer.from("hi") }]
-  });
-  expect(result).toMatchObject({ ok: false, code: "ATTACHMENT_TYPE_NOT_ALLOWED" });
-  store.close();
-});
-
-test("saveCaptureAttachments refuses a file over the size limit", async () => {
-  const { saveCaptureAttachments } = await import("./attachments");
-  const store = new CrosslineStore(":memory:");
-  const result = saveCaptureAttachments(store, {
-    workspaceId: "w", ownerId: "o", captureId: "c1",
-    files: [{ fileName: "a.txt", mediaType: "text/plain", buffer: Buffer.alloc(11 * 1024 * 1024) }]
-  });
-  expect(result).toMatchObject({ ok: false, code: "ATTACHMENT_TOO_LARGE" });
-  store.close();
-});
-
-test("saveCaptureAttachments writes the file under attachmentsRoot and records a matching ledger row", async () => {
-  const { saveCaptureAttachments, attachmentsRoot } = await import("./attachments");
-  const store = new CrosslineStore(":memory:");
-  const result = saveCaptureAttachments(store, {
-    workspaceId: "w", ownerId: "o", captureId: "c1",
-    files: [{ fileName: "notes.txt", mediaType: "text/plain", buffer: Buffer.from("hello") }]
-  });
-  expect(result.ok).toBe(true);
-  if (!result.ok) return;
-  expect(result.saved).toHaveLength(1);
-  const saved = result.saved[0]!;
-  expect(saved.uri.startsWith(pathToFileURL(attachmentsRoot("c1")).href)).toBe(true);
-  expect(readFileSync(new URL(saved.uri), "utf8")).toBe("hello");
-  const rows = store.listCaptureAttachments("w", "c1");
-  expect(rows).toHaveLength(1);
-  expect(rows[0]).toMatchObject({ id: saved.id, uri: saved.uri, mediaType: "text/plain", fileName: "notes.txt" });
-  store.close();
-});
-

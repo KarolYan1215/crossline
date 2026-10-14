@@ -162,6 +162,15 @@ button:disabled{opacity:.4;cursor:not-allowed}
 
 /* ── today grid ────────────────────────────── */
 .today-grid{display:grid;grid-template-columns:minmax(0,2fr) minmax(260px,.8fr);gap:1px;background:var(--mist);border-bottom:1px solid var(--ink)}
+/* The timeline sets the row's height; the stack beside it scrolls inside that height instead of stretching the row. */
+/* The worker or its model runtime is down: an error, above everything on the page (lib/runtime-status.ts). 9.6:1 text. */
+.runtime-banner{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline;margin:10px 0 0;padding:8px 12px;border:1.5px solid #8A1F24;background:#FBEDEE;color:#5C1418;font-size:13px;line-height:1.5}
+.runtime-banner b{font-size:14px}
+.runtime-banner a{color:#5C1418;text-decoration:underline}
+.today-day{display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,360px);gap:14px;align-items:stretch}
+.today-day:has(>.today-asks:empty){grid-template-columns:minmax(0,1fr)}
+.today-day>.today-asks{position:relative;min-height:0}
+.today-day>.today-asks>.ask-stack{position:absolute;inset:0;margin:0;overflow-y:auto;align-content:start}
 /* The "stretched link" pattern: an absolutely-positioned, invisible `<a>` sized to the card makes the
    whole card clickable without nesting a real `<button>` (the preview trigger) inside a real `<a>`,
    which HTML forbids. The two sit as siblings; the cover link is behind everything else via z-index. */
@@ -352,6 +361,10 @@ button:disabled{opacity:.4;cursor:not-allowed}
    as the range below it, rather than a cramped two-column one distinct from both phone and desktop. */
 @media (max-width:1024px){
   .today-grid{grid-template-columns:1fr}
+  /* One column: the questions come before the timeline, at their own height. */
+  .today-day{grid-template-columns:minmax(0,1fr)}
+  .today-day>.today-asks{order:-1}
+  .today-day>.today-asks>.ask-stack{position:static;overflow:visible}
   .day-head,.care-band,.capture-line{grid-template-columns:1fr}
   .change-ledger header{display:none}
   .change-ledger article{grid-template-columns:1fr;gap:4px}
@@ -576,9 +589,6 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .ask-follow-up textarea,.ask-follow-up input{font:inherit;font-size:14px;padding:4px 6px;border:1px solid var(--mist);background:var(--paper);color:var(--ink);max-width:100%}
 .ask-later{display:flex;gap:8px;align-items:center;margin:6px 0 0;flex-wrap:wrap}
 .ask-later .text-button{font-size:12px;padding:2px 8px}
-.ask-group>ol{margin-top:4px}
-.ask-input{border-top:1px solid var(--mist);padding-top:8px;min-width:0}
-.ask-input h4{margin:0 0 4px;font-size:14px;overflow-wrap:anywhere}
 /* Today's asks as a stack: the top one open, the next two as edges beneath it, each a little narrower. */
 .ask-stack-nav{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--graphite)}
 .ask-stack-nav .text-button{min-width:32px;padding:2px 8px;font-size:14px}

@@ -1,0 +1,10 @@
+.model-provider-form{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px 12px;padding-top:4px;border-top:1px solid var(--chalk)}
+.model-provider-form label{display:grid;gap:3px;font-size:13px;min-width:0}
+.model-provider-form label small{font-size:12px;color:var(--graphite)}
+.model-provider-form input:not([type=checkbox]),.model-provider-form select{min-width:0;width:100%}
+.model-provider-form .model-provider-check{display:flex;align-items:center;gap:6px;grid-column:1/-1}
+.model-provider-form .st-row-actions{grid-column:1/-1}
+.model-provider-features{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px 12px;font-size:13px}
+.model-provider-features ul{margin:4px 0 0;padding-left:18px;display:grid;gap:2px}
+.model-provider-features li small{display:block;font-size:12px;color:var(--graphite)}
+.model-provider-card meter{flex:1 1 120px;min-width:0}

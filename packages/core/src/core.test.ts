@@ -34,6 +34,20 @@ test("milestone gate derives pass from per-criterion facts and exact evidence qu
     .toThrow("GATE_VERDICT_INCONSISTENT");
 });
 
+test("a quote from Markdown evidence matches without its formatting marks; an invented one still fails, and says which", () => {
+  // As the assistant writes it: the phrase is bold and inside a table row.
+  const markdown = [["| 1 | 封面 | **three   records** | 来源2 |", "", "- causal *account*"].join("\n")];
+  expect(core.validateMilestoneGateResult(gateResult, gateCriteria, markdown)).toBe(gateResult);
+  const invented = { ...gateResult, criteriaVerdict: gateResult.criteriaVerdict.map((item) => ({ ...item, evidenceQuote: "four records" })) };
+  expect(() => core.validateMilestoneGateResult(invented, gateCriteria, markdown)).toThrow("GATE_VERDICT_INCONSISTENT");
+  try { core.validateMilestoneGateResult(invented, gateCriteria, markdown); } catch (error) {
+    expect((error as Error & { detail?: string }).detail).toContain("「four records」");
+  }
+  try { core.validateMilestoneGateResult({ ...gateResult, criteriaVerdict: gateResult.criteriaVerdict.slice(0, 1) }, gateCriteria, markdown); } catch (error) {
+    expect((error as Error & { detail?: string }).detail).toContain("缺 quality");
+  }
+});
+
 test("a blocking incomplete item mechanically prevents a pass verdict", () => {
   expect(() => core.validateMilestoneGateResult({ ...gateResult,
     incomplete: [{ what: "missing trace", blocksWhich: ["count"], isBlockingPass: true }] }, gateCriteria,

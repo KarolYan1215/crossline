@@ -76,3 +76,6 @@
 .st-snapshot-json{max-height:320px;overflow:auto;margin:0;padding:8px;border:1px solid var(--mist);font-size:12px;white-space:pre-wrap;word-break:break-all}
 .st-snapshot-note{display:grid;gap:4px}
 .st-snapshot-note textarea{font:inherit;font-size:14px;padding:6px;border:1px solid var(--mist);background:var(--paper);color:inherit;min-width:0}
+/* 后台任务: the assistant's runs going on now, each with what it has done so far. */
+.bg-list{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.bg-steps{margin:4px 0 0;padding-left:18px;display:grid;gap:2px;font-size:13px;color:var(--muted);overflow-wrap:anywhere}

@@ -93,3 +93,15 @@ test("signing a guest out deletes its home — its login and its memories — an
   await registry.logout("ws-owner");
   expect((await registry.client("ws-owner"))).toEqual({ ok: true, client: owner.client });
 });
+
+test("a guest with only a model provider of its own gets its own runtime, but does not count as signed in to Codex", async () => {
+  const owner = fakeSidecar("owner");
+  const registry = createRuntimeRegistry({ owner, ownerWorkspaceId: () => "ws-owner", baseDir: dir, now: () => 0,
+    hasProvider: (workspaceId) => workspaceId === "ws-provider", start: async (home) => fakeSidecar(home) });
+  expect(registry.connected("ws-provider")).toBe(true);
+  expect(registry.signedIn("ws-provider")).toBe(false);
+  const runtime = await registry.client("ws-provider");
+  expect(runtime.ok && runtime.client).not.toBe(owner.client);
+  expect(registry.connected("ws-other")).toBe(false);
+  expect(registry.signedIn("ws-owner")).toBe(true);
+});

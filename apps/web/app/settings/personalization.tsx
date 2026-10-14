@@ -10,7 +10,7 @@ const post = (body: unknown) => fetch("/api/preferences", { method: "POST", head
   .then((response) => response.ok).catch(() => false);
 
 /**
- * 个性化: everything the system has learned about how this person works — corrections told to 小助手, milestone retrospectives,
+ * 个性化: everything the system has learned about how this person works — corrections told to 小帮手, milestone retrospectives,
  * estimates and importance changed by hand, standards confirmed by hand, relations turned down — each removable, plus how often
  * new task archetypes are drawn from the accumulated history.
  */
@@ -25,7 +25,7 @@ export function PersonalizationModule({ rows, period, learned }: { rows: Row[]; 
   return <div className="st-modules">
     <section className="st-card st-card-wide" aria-label="已学到的偏好">
       <header><h3>已学到的偏好 · {list.length}</h3><small>之后的分析、步骤拆分与里程碑设计都会参考；删除后不再使用</small></header>
-      {list.length === 0 ? <p className="muted">尚无记录。向小助手纠正分类或步骤、修改估时与重要性、填写里程碑回顾后，会出现在这里。</p> : <>
+      {list.length === 0 ? <p className="muted">尚无记录。向小帮手纠正分类或步骤、修改估时与重要性、填写里程碑回顾后，会出现在这里。</p> : <>
         {sources.length > 1 && <SegmentedControl label="来源" value={filter} onChange={setFilter}
           options={["全部", ...sources].map((value) => ({ value, label: value }))} />}
         <ul className="st-prefs">{shown.map((row) => <li key={row.id}>

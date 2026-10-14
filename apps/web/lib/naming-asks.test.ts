@@ -49,6 +49,21 @@ test("a file nothing on record ties to a project is asked about once, with the i
   expect(collectAsks(TEST_CTX, NOW).some((ask) => ask.kind === "source_project")).toBe(true);
 });
 
+test("a profile or CV is about the person, even when it names only one project in passing; a plain note still is asked about", () => {
+  const store = setup();
+  // As the real profile did: one project named only well past the opening, so nothing files it and it would be asked about.
+  const text = `博士一年级，方向是神经形态计算。${"每周大约投入七十二小时。".repeat(160)}课程里有 ECE 548。`;
+  const doc = (id: string, fileName: string) => store.saveSourceDocument({ id, ownerId: "o", workspaceId: ws, kind: "text", fileName, mediaType: "text/markdown",
+    sha256: id, uri: `file://${id}`, extractedText: text, extractionStatus: "done", createdAt: "2026-10-05T00:00:00Z" });
+  doc("p", "personal-profile.md");
+  doc("r", "Resume 2026.pdf");
+  doc("n", "notes.md");
+  const asked = collectAsks(TEST_CTX, NOW).filter((ask) => ask.kind === "source_project").map((ask) => ask.entityId);
+  expect(asked).not.toContain("p");
+  expect(asked).not.toContain("r");
+  expect(asked).toContain("n");
+});
+
 test("a calendar event nothing places is asked about, and the person's answer colours it and survives a renamed line", async () => {
   const store = setup();
   const day = "2026-10-08";

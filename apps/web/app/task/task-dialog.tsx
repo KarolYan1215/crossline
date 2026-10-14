@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { STEP_ROLES, plainEstimateWords } from "@crossline/core";
+import { STEP_ROLES, localStamp, plainEstimateWords } from "@crossline/core";
 import type { TaskDetail } from "../../lib/task-detail";
 import { Sheet } from "../ui/overlay";
 import { ProgressRing, formatMinutes, dayLabel } from "../ui/controls";
@@ -169,7 +169,7 @@ function RecordPanel({ detail }: { detail: TaskDetail }) {
       <span className="ui-stat"><b>{detail.executions.length}</b><span>次计时</span></span>
       <span className="ui-stat"><b>{detail.executions.reduce((sum, item) => sum + item.interruptions.length, 0)}</b><span>次中断</span></span></p>
     {detail.notes.length > 0 && <ol className="record-notes">{detail.notes.map((note, index) => <li key={index} data-kind={note.kind}>
-      <small className="mono">{note.at.slice(5, 16).replace("T", " ")}</small><span>{note.text}</span></li>)}</ol>}
+      <small className="mono">{localStamp(note.at, detail.timeZone)}</small><span>{note.text}</span></li>)}</ol>}
     <ExecutionActions workOrderId={detail.id} intent={detail.intent} state={detail.state} paused={detail.paused} ownerId={detail.ownerId}
       workspaceId={detail.workspaceId} evidenceChecklist={detail.evidenceChecklist} estimateP50={detail.estimate.p50Minutes}
       {...(detail.suggestedMinutes ? { suggestedMinutes: detail.suggestedMinutes } : {})} />

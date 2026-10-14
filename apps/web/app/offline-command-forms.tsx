@@ -5,7 +5,7 @@ import {
   createCommand, deviceId, enqueue, listConflicts, listDeadLetters, nextSequence, rememberWorkspace,
   replayQueue, type OfflineCommand
 } from "./offline-queue";
-import type { DeadLetter } from "@crossline/core";
+import { localStamp, type DeadLetter } from "@crossline/core";
 import type { ComposerInput } from "./chat/composer";
 
 /** Renews (or first-issues) this browser's 24-hour device lease. Best-effort: a lease that fails to
@@ -49,7 +49,7 @@ export function OfflineReplay({ workspaceId }: { workspaceId: string }) {
       {conflicts.length > 0 && `${conflicts.length} 条与其他设备冲突`}</b>
     <ul>{[...dead, ...conflicts].map((entry) => <li key={entry.command.clientCommandId}>
       <span>{String(entry.command.payload.title ?? entry.command.type)}</span>
-      <small>{entry.reason} · {entry.failedAt.slice(0, 16).replace("T", " ")}</small>
+      <small>{entry.reason} · {localStamp(entry.failedAt)}</small>
     </li>)}</ul>
     <a href="/offline">查看并处理 →</a>
   </aside>;

@@ -37,7 +37,7 @@ export function AskList({ initial, scope = "week", heading = "待决事项" }: {
   if (!asks.length) return null;
   return <section className="ask-list" id={scope === "later" ? "later-asks" : "asks"} aria-label={heading}>
     <header><h2>{heading} · {asks.length}</h2></header>
-    <ol>{groupByMilestone(asks).map((group) => <AskGroup key={group.asks[0]!.id} group={group} onDone={onDone} />)}</ol>
+    <ol>{asks.map((ask) => <AskCard key={ask.id} ask={ask} onDone={onDone} />)}</ol>
   </section>;
 }
 
@@ -49,8 +49,7 @@ export function AskList({ initial, scope = "week", heading = "待决事项" }: {
 export function AskStack({ initial, moreHref }: { initial: Ask[]; moreHref?: string }) {
   const { asks, onDone } = useAsks(initial, "week");
   const [index, setIndex] = useState(0);
-  const groups = groupByMilestone(asks);
-  const count = groups.length;
+  const count = asks.length;
   useEffect(() => {
     const onKey = (event: globalThis.KeyboardEvent) => {
       if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
@@ -67,8 +66,8 @@ export function AskStack({ initial, moreHref }: { initial: Ask[]; moreHref?: str
   if (!count) return null;
   const at = Math.min(index, count - 1);
   const go = (step: number) => setIndex(Math.max(0, Math.min(count - 1, at + step)));
-  const top = groups[at]!;
-  const below = groups.slice(at + 1, at + 3);
+  const top = asks[at]!;
+  const below = asks.slice(at + 1, at + 3);
   return <section className="ask-list ask-stack" id="asks" aria-label="待决事项">
     <header><h2>待决事项 · {asks.length}</h2>
       <nav className="ask-stack-nav" aria-label="切换待决事项">
@@ -77,50 +76,18 @@ export function AskStack({ initial, moreHref }: { initial: Ask[]; moreHref?: str
         <button type="button" className="text-button" aria-label="下一项" disabled={at === count - 1} onClick={() => go(1)}>›</button>
         {moreHref && <a href={moreHref}>全部</a>}
       </nav></header>
-    <ol className="ask-deck"><AskGroup key={top.asks[0]!.id} group={top} onDone={onDone} /></ol>
-    {below.map((group, depth) => <button key={group.asks[0]!.id} type="button" className="ask-peek" data-depth={depth + 1} data-line={group.asks[0]!.line}
-      onClick={() => setIndex(at + depth + 1)}>{group.inputs ? `${group.subject}还缺 ${group.asks.length} 样东西` : group.asks[0]!.title}</button>)}
+    <ol className="ask-deck"><AskCard key={top.id} ask={top} onDone={onDone} /></ol>
+    {below.map((ask, depth) => <button key={ask.id} type="button" className="ask-peek" data-depth={depth + 1} data-line={ask.line}
+      onClick={() => setIndex(at + depth + 1)}>{ask.title}</button>)}
   </section>;
 }
 
-function AskGroup({ group, onDone }: { group: { asks: Ask[]; subject?: string; inputs?: string[] }; onDone: (id: string) => void }) {
-  return group.inputs
-    ? <li className="ask-card ask-group" data-line={group.asks[0]!.line} data-urgency={group.asks[0]!.urgency}>
-      <AskMeta ask={group.asks[0]!} />
-      <h3>{group.subject}还缺 {group.asks.length} 样东西</h3>
-      <ol>{group.asks.map((ask, index) => <AskCard key={ask.id} ask={ask} heading={group.inputs![index]!} onDone={onDone} />)}</ol>
-    </li>
-    : <AskCard ask={group.asks[0]!} onDone={onDone} />;
-}
-
-const MISSING = "」还缺：";
-
-/**
- * A backplan that names several missing inputs asks about each one, and every title used to repeat the milestone's long
- * name. Consecutive asks about one milestone's inputs are shown under one heading — the name once, each input a row with
- * its own options — while each is still answered (and snoozed) on its own.
- */
-function groupByMilestone(asks: Ask[]): Array<{ asks: Ask[]; subject?: string; inputs?: string[] }> {
-  const groups: Array<{ asks: Ask[] }> = [];
-  for (const ask of asks) {
-    const last = groups.at(-1)?.asks.at(-1);
-    if (last && ask.kind === "backplan_input" && last.kind === "backplan_input" && last.entityId === ask.entityId
-      && ask.title.includes(MISSING) && last.title.includes(MISSING)) groups.at(-1)!.asks.push(ask);
-    else groups.push({ asks: [ask] });
-  }
-  return groups.map((group) => group.asks.length < 2 ? group : {
-    asks: group.asks,
-    subject: group.asks[0]!.title.slice(0, group.asks[0]!.title.indexOf(MISSING) + 1),
-    inputs: group.asks.map((ask) => ask.title.slice(ask.title.indexOf(MISSING) + MISSING.length))
-  });
-}
-
 function AskMeta({ ask }: { ask: Ask }) {
-  return <p className="ask-meta"><span className="tag">{URGENCY[ask.urgency]}</span>{ask.dueDay && <small>关系到 {ask.dueDay.slice(5)} 的截止</small>}
+  return <p className="ask-meta"><span className="tag">{URGENCY[ask.urgency]}</span>{ask.dueDay && <small>关系到 {`${Number(ask.dueDay.slice(5, 7))}/${Number(ask.dueDay.slice(8, 10))}`} 的截止</small>}
     {ask.importance !== undefined && <small>里程碑重要性 {ask.importance}</small>}{ask.entersOn && <small>{ask.entersOn.slice(5)} 起列入本周</small>}</p>;
 }
 
-function AskCard({ ask, heading, onDone }: { ask: Ask; heading?: string; onDone: (id: string) => void }) {
+function AskCard({ ask, onDone }: { ask: Ask; onDone: (id: string) => void }) {
   const [chosen, setChosen] = useState<AskOption | undefined>();
   const [values, setValues] = useState<Record<string, string>>({});
   const [status, setStatus] = useState("");
@@ -139,8 +106,8 @@ function AskCard({ ask, heading, onDone }: { ask: Ask; heading?: string; onDone:
     }
     void post("/api/asks/answer", { askId: ask.id, optionId: option.id, values: {} });
   };
-  return <li className={heading ? "ask-input" : "ask-card"} data-line={ask.line} data-urgency={ask.urgency}>
-    {heading ? <h4>{heading}</h4> : <><AskMeta ask={ask} /><h3>{ask.title}</h3></>}
+  return <li className="ask-card" data-line={ask.line} data-urgency={ask.urgency}>
+    <AskMeta ask={ask} /><h3>{ask.title}</h3>
     <p className="ask-why">{ask.why}</p>
     <div className="ask-options" role="group" aria-label="选一个">
       {ask.options.map((option) => option.href

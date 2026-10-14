@@ -68,13 +68,19 @@ export async function nudgesFor(ctx: AccessContext, now = new Date()): Promise<P
   const scheduled = plan.blocks.filter((block) => block.id.startsWith("scheduled:") && block.day && block.day >= today);
   const byId = new Map(orders.map((order) => [order.id, order]));
   const nowMinute = minutesOf(clock);
+  // What the assistant has ready per task (its accepted results and preparation in review), named when the block comes up.
+  const readyFiles = new Map<string, string[]>();
+  for (const task of listAgentTasks(store, ctx.workspaceId).filter((item) => item.status === "accepted" || item.status === "needs_review"))
+    readyFiles.set(task.workOrderId, [...(readyFiles.get(task.workOrderId) ?? []), ...task.artifacts.map((artifact) => artifact.path.split(/[\\/]/).at(-1) ?? artifact.path)]);
 
   const blocks: NudgeBlock[] = todays.filter((block) => block.id.startsWith("scheduled:")).flatMap((block) => {
     const order = byId.get(block.id.split(":")[1]!);
     const due = order ? dueOf(order) : "";
     if (!order || !due || due < today || due > addDays(today, 7)) return [];
     const stepId = /^v\d+s\d+$/.test(block.id.split(":")[2] ?? "") ? block.id.split(":")[2]! : "";
-    return [{ id: block.id, orderId: order.id, stepId, title: taskTitleOf(order), step: block.step ?? "", start: block.start, end: block.end, dueDay: due }];
+    const prepared = readyFiles.get(order.id);
+    return [{ id: block.id, orderId: order.id, stepId, title: taskTitleOf(order), step: block.step ?? "", start: block.start, end: block.end, dueDay: due,
+      ...(prepared?.length ? { prepared } : {}) }];
   });
   // Every work block of today, deadline or not, for the completion check.
   const ending = rememberBlocks(ctx, today, clock, todays.filter((block) => block.id.startsWith("scheduled:")).flatMap((block) => {

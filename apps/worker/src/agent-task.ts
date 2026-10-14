@@ -159,6 +159,8 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
   /** A question-asker made for one task, when the way to reach the person depends on which task is asking. */
   askFor?: (taskId: string) => (request: { kind: string; subject: string; rule: string; reason: string }) => Promise<boolean>;
   signal?: AbortSignal;
+  /** Handed the run's live record when it starts (commands, file changes, searches as they happen), for the page that watches it. */
+  onLive?: (live: { startedAt: string; audit: AuditRecord }) => void;
 }) {
   return async function run(input: AgentTaskInput): Promise<AgentOutcome> {
     const taskId = input.taskId ?? `agent-${randomUUID().slice(0, 8)}`;
@@ -177,6 +179,7 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
     const worktree = input.projectRepo ? prepareWorktree(path.resolve(input.projectRepo), directory, taskId) : undefined;
     const guard: GuardContext = { taskDir: directory, homeDir: options.homeDir ?? homedir(), ...(worktree ? { writableRoots: [worktree] } : {}) };
     const audit: AuditRecord = { commands: [], filesChanged: [], mcpCalls: [], searches: [], decisions: [], requests: { total: 0, allowed: 0 } };
+    options.onLive?.({ startedAt: new Date().toISOString(), audit });
     const pendingChanges = new Map<string, string[]>();
     const startedAt = Date.now();
     store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:requested:${taskId}`, type: "agent.task.requested", entityId: taskId,
@@ -206,9 +209,12 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
     const after = fingerprint(inputs);
     const inputsModified = changedFiles(before, after);
     if (!result.ok) {
+      // Stopped by the person (「中止」): a code of its own, so it is never taken for a run the runtime lost and tried again.
+      const code = options.signal?.aborted ? "AGENT_CANCELLED" : result.blocker.code;
+      const message = options.signal?.aborted ? "本人中止了这次运行。" : result.blocker.message;
       store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:blocked:${taskId}`, type: "agent.task.blocked", entityId: taskId,
-        payload: { taskId, code: result.blocker.code, message: result.blocker.message.slice(0, 400), durationMs: Date.now() - startedAt, commands: audit.commands.length, decisions: audit.decisions.length, inputsModified } });
-      return blocked(result.blocker.code, result.blocker.message);
+        payload: { taskId, code, message: message.slice(0, 400), durationMs: Date.now() - startedAt, commands: audit.commands.length, decisions: audit.decisions.length, inputsModified } });
+      return blocked(code, message);
     }
 
     const artifacts: ArtifactRecord[] = result.output.artifacts.map((artifact) => {

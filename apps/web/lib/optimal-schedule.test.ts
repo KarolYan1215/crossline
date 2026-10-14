@@ -4,7 +4,7 @@ import { CrosslineStore } from "@crossline/db";
 import type { ModelSolver, PlanningInput } from "@crossline/planner";
 vi.mock("server-only", () => ({}));
 import { loadCurrentPlan, planToday, planningInputFor, saveSchedulePreferences, scheduleHashOf, withPreview } from "./crossline";
-import { configureOptimal, OPTIMAL_SETTING, optimalFor, optimalIdle, requestOptimal } from "./optimal-schedule";
+import { configureOptimal, OPTIMAL_SETTING, OPTIMAL_VERSION, optimalFor, optimalIdle, requestOptimal } from "./optimal-schedule";
 import { TEST_CTX } from "./test-support";
 import { blocksToPublish, OPTIMAL_WAIT_MS } from "./calendar-publish";
 
@@ -91,7 +91,7 @@ test("a cached plan replaces the greedy one on read, without its blocks that are
   const { input: planning, instants, currentEnergy } = planningInputFor(TEST_CTX, planToday(TEST_CTX), committed);
   const hash = scheduleHashOf(planning, instants, currentEnergy);
   const taskId = planning.tasks[0]!.id;
-  store.setSetting(TEST_CTX.workspaceId, OPTIMAL_SETTING, JSON.stringify({ hash, at: NOW, result: { status: "feasible", solver: "optimal", blockers: [],
+  store.setSetting(TEST_CTX.workspaceId, OPTIMAL_SETTING, JSON.stringify({ hash, at: NOW, version: OPTIMAL_VERSION, result: { status: "feasible", solver: "optimal", blockers: [],
     plan: { blocks: [{ taskId, start: "2026-09-18T12:00:00.000Z", end: "2026-09-18T12:30:00.000Z" },
       { taskId, start: "2026-09-18T16:00:00.000Z", end: "2026-09-18T17:00:00.000Z" }] } } }));
   const mine = (await loadCurrentPlan(TEST_CTX)).blocks.filter((block) => block.id.startsWith("scheduled:"));
@@ -137,4 +137,13 @@ test("a preview neither reads nor asks for the optimal plan", async () => {
   await optimalIdle();
   expect(solver.calls).toHaveLength(0);
   expect(store.getSetting(TEST_CTX.workspaceId, OPTIMAL_SETTING)).toBe("untouched");
+});
+
+test("a cached answer from an older planner is not served: a fix to the solver reaches a week whose input did not change", () => {
+  const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
+  const result = { status: "feasible", solver: "fallback", blockers: [], plan: { blocks: [] } };
+  store.setSetting(TEST_CTX.workspaceId, OPTIMAL_SETTING, JSON.stringify({ hash: "h", at: "2026-10-13T00:00:00.000Z", result }));
+  expect(optimalFor(TEST_CTX, "h")).toBeUndefined();
+  store.setSetting(TEST_CTX.workspaceId, OPTIMAL_SETTING, JSON.stringify({ hash: "h", at: "2026-10-13T00:00:00.000Z", result, version: OPTIMAL_VERSION }));
+  expect(optimalFor(TEST_CTX, "h")?.hash).toBe("h");
 });

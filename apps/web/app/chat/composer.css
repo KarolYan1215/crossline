@@ -1,10 +1,10 @@
-/* The input box shared by 快速收集 and 小助手 (apps/web/app/chat/composer.tsx). */
+/* The input box shared by 快速收集 and 小帮手 (apps/web/app/chat/composer.tsx). */
 .composer{position:relative;display:grid;gap:6px}
 .composer-box{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:8px;align-items:end;padding:6px;border:1px solid var(--ink);background:var(--paper)}
 .composer.dragging .composer-box{outline:2px dashed var(--ink);outline-offset:2px}
 .composer-box .ui-menu-trigger{width:34px;height:34px;border-radius:50%;border-color:var(--mist)}
 .composer-main{display:grid;gap:4px;min-width:0}
-.composer-main textarea{width:100%;min-height:34px;max-height:220px;padding:7px 4px;border:0;resize:none;line-height:1.4;background:transparent}
+.composer-main textarea{width:100%;min-height:34px;max-height:220px;padding:7px 4px;border:0;resize:none;line-height:1.4;background:transparent;field-sizing:content;overflow-y:auto}
 .composer-main textarea:focus-visible{outline:none}
 .composer-send{width:34px;height:34px;border-radius:50%;background:var(--ink);color:var(--paper);font-size:16px;font-weight:700}
 .composer-send:disabled{background:var(--mist);color:var(--paper);cursor:default}
@@ -68,8 +68,45 @@
 .conversation-nudge .conversation-card{border-left-color:var(--now-ink)}
 .conversation-nudge .conversation-clarify p{font-weight:400}
 .assistant-bubble-wrap{position:fixed;right:16px;bottom:76px;z-index:60;display:grid;justify-items:end;gap:6px}
+/* The timer and the bubble share one fixed corner and stack by their own heights: with fixed offsets the nudge preview grew over
+   the timer's 结束 button. The open panel keeps its own fixed position. */
+.corner-stack{position:fixed;right:16px;bottom:76px;z-index:60;display:flex;flex-direction:column;align-items:flex-end;gap:8px;pointer-events:none}
+.corner-stack>*{pointer-events:auto}
+.corner-stack .timer-float,.corner-stack .assistant-bubble-wrap,.corner-stack .assistant-bubble-wrap .assistant-bubble{position:static}
+/* On a phone the corner must stay small: with the timer, its alert and the nudge preview stacked it covered the input box. The bubble
+   already carries the unread mark, and opening it shows the message, so the preview is left out there. */
+@media (max-width:680px){.corner-stack{right:8px;bottom:calc(60px + env(safe-area-inset-bottom))}.corner-stack .assistant-nudge-preview{display:none}}
+/* Room at the foot of every page as tall as the corner reaches (`--corner-clearance`, measured by CornerStack), so nothing is left
+   under the bubble once scrolled to the end. `:root` outranks the plain `.page` rules in globals.css and mobile.css. */
+:root .page,:root .subpage{padding-bottom:max(28px,var(--corner-clearance,0px))}
+@media (max-width:680px){:root .page,:root .subpage{padding-bottom:max(calc(76px + env(safe-area-inset-bottom)),var(--corner-clearance,0px))}}
 .assistant-bubble-wrap .assistant-bubble{position:static}
 .assistant-bubble[data-unread]{outline:2px solid var(--now-ink);outline-offset:2px}
 .assistant-nudge-preview{max-width:min(320px,calc(100vw - 32px));padding:8px 10px;border:1px solid var(--ink);background:var(--paper);font-size:13px;text-align:left;
   box-shadow:0 4px 12px rgba(0,0,0,.12)}
 @media (max-width:520px){.assistant-bubble-wrap{right:8px;bottom:64px}}
+
+/* ── 小帮手: the person's figure as the floating button and beside its replies ──
+   The portrait figure is full length, head near the top; the frame shows its upper part (head and shoulders) whatever the pose. */
+.helper-face{display:inline-block;flex:none;border-radius:50%;background-color:#F3EEE6;background-repeat:no-repeat;background-size:270%;background-position:50% 5%;
+  border:1.5px solid var(--ink)}
+.helper-face[data-size="button"]{width:56px;height:56px}
+.helper-face[data-size="reply"]{width:28px;height:28px;border-width:1px}
+.assistant-bubble.helper-bubble{padding:0;border:0;background:none;min-height:0;border-radius:50%;line-height:0}
+.assistant-bubble.helper-bubble:focus-visible{outline:2px solid var(--ink);outline-offset:3px}
+.assistant-panel header span{display:inline-flex;align-items:center;gap:8px}
+.conversation-reply[data-face]{display:grid;grid-template-columns:28px minmax(0,1fr);column-gap:8px;align-items:start}
+.conversation-reply[data-face]>:not(.helper-face){grid-column:2}
+@media (max-width:680px){.helper-face[data-size="button"]{width:48px;height:48px}}
+
+/* What it is doing, said by how it moves (helperMood). Idle: barely floating. A new message: a nod every few seconds. Thinking: a quicker
+   bob. The assistant at work: a slow sway. The background stopped: grey and still — the red bar at the top says why. */
+@keyframes helper-float{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
+@keyframes helper-nod{0%,82%,100%{transform:rotate(0)}86%{transform:rotate(-9deg)}91%{transform:rotate(7deg)}96%{transform:rotate(-3deg)}}
+@keyframes helper-sway{0%,100%{transform:rotate(-4deg)}50%{transform:rotate(4deg)}}
+.helper-face[data-size="button"][data-mood="idle"]{animation:helper-float 4s ease-in-out infinite}
+.helper-face[data-size="button"][data-mood="unread"]{animation:helper-nod 4s ease-in-out infinite;box-shadow:0 0 0 3px var(--paper),0 0 0 5px var(--now-ink)}
+.helper-face[data-size="button"][data-mood="thinking"]{animation:helper-float .9s ease-in-out infinite}
+.helper-face[data-size="button"][data-mood="working"]{animation:helper-sway 2.4s ease-in-out infinite}
+.helper-face[data-size="button"][data-mood="down"]{filter:grayscale(1);opacity:.55}
+@media (prefers-reduced-motion:reduce){.helper-face{animation:none!important}}

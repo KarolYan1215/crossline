@@ -2,7 +2,7 @@ import "server-only";
 import { recordOp, retractedEventIds, withUndo } from "./undo";
 import {
   ATTENTION_SNAPSHOT, BACKGROUND_BLOCKER, CALENDAR_LINES, CALENDAR_PUBLISH_FAILURE, CALENDAR_SYNC_FAILURE, calendarEventKey, daysBetween, describeEvent, missingInputsOf, rankAsks,
-  prepStepRetried, snoozeUntil, STEP_ANSWER_SLOT, stepAnswerSlot, taskTitleOf, urgencyFor, type CalendarLines,
+  localStamp, prepStepRetried, snoozeUntil, STEP_ANSWER_SLOT, stepAnswerSlot, taskTitleOf, urgencyFor, type CalendarLines,
   validateAskAnswer, withFrozen, type AccessContext, type Ask, type AskField, type AskOption, type AskSnooze
 } from "@crossline/core";
 import { listAgentTasks, type StoredWorkOrder } from "@crossline/db";
@@ -340,7 +340,7 @@ function missedAsks({ store, ctx, today }: Source): Ask[] {
     return [{ id, kind: "missed_block" as const, entityId: orderId, line: order.identityId, urgency: urgencyFor(dueDay, today), dueDay,
       raisedAt: `${yesterday}T${start}`, fingerprint: yesterday,
       title: `昨天 ${start} 排的「${short(order.intent)}」没开始`,
-      why: `它已经被顺延到后面的空档，关系到 ${format(dueDay)} 的截止（还剩 ${daysBetween(today, dueDay)} 天）。顺延没问题就点一下；要是其实做了，去补记；要是已经不需要，就不做了。`,
+      why: `它已经被顺延到后面的空档，关系到 ${format(dueDay)} 的截止（${((left) => left > 0 ? `还剩 ${left} 天` : left === 0 ? "今天截止" : `已过 ${-left} 天`)(daysBetween(today, dueDay))}）。顺延没问题就点一下；要是其实做了，去补记；要是已经不需要，就不做了。`,
       options: [
         { id: "roll", label: "顺延就好", detail: "按重新排的时间做", recommended: true },
         { id: "later", label: "推到某天再做", fields: [{ id: "date", label: "从哪天起再排", kind: "date" as const, required: true }] },
@@ -510,12 +510,12 @@ function eventAsks({ ctx, today }: Source): Ask[] {
 /**
  * Background work the worker paused for this workspace (`BACKGROUND_BLOCKER`): an unreadable quota (an API-key login reports no
  * windows) or a spent one. It used to stop with nothing said, so captures sat unanalysed while the page looked normal. A worker that is
- * down is its own ask (`runtimeAsk`), not this one.
+ * down is the runtime banner (`lib/runtime-status.ts`), not this one.
  */
 function backgroundAsks({ store, ctx }: Source): Ask[] {
   const paused = readFailure(store, ctx.workspaceId, BACKGROUND_BLOCKER) as ({ resetsAt?: string; reason?: string } & NonNullable<ReturnType<typeof readFailure>>) | null;
   if (!paused || paused.reason === "CODEX_SUPERVISOR_UNAVAILABLE") return [];
-  const until = paused.resetsAt ? `，预计 ${paused.resetsAt.slice(5, 16).replace("T", " ")}（UTC）恢复` : "";
+  const until = paused.resetsAt ? `，预计 ${localStamp(paused.resetsAt, effectiveSchedulePreferences(ctx).preferences.timeZone)} 恢复` : "";
   return [{ id: `background:${paused.code}`, kind: "background_paused", entityId: "background", urgency: "soon", raisedAt: paused.at,
     fingerprint: paused.code, title: "后台自动工作已暂停",
     why: `${clause(paused.message)}${until}。新收集的事项会在恢复后自动分析；需要现在处理的可以在任务页手动点「分析」。`,
@@ -553,7 +553,7 @@ function lockedConflictAsks({ store, ctx, today, now }: Source): Ask[] {
   });
 }
 
-export function collectAsks(ctx: AccessContext, now = new Date()): Ask[] {
+export function collectAsks(ctx: AccessContext, now = appNow()): Ask[] {
   const source = { store: getStore(), ctx, today: planToday(ctx, now), now };
   return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskAsks, missedAsks, lockedConflictAsks, agentAsks, calendarAsks, sourceProjectAsks, calendarLineAsks, interviewAsks, eventAsks, stepQuestionAsks,
     ({ ctx: context, now: at }: Source) => relationCheckAsks(context, at), backgroundAsks]
@@ -593,38 +593,17 @@ function snoozes(ctx: AccessContext): AskSnooze[] {
  * The open asks: snoozed ones left out, most urgent first, then the most important milestone's. Each carries `entersOn` when it is not
  * this week's decision (`lib/horizon.ts`); callers that show this week's decisions use `thisWeek`.
  */
-export function openAsks(ctx: AccessContext, now = new Date()): Ask[] {
+export function openAsks(ctx: AccessContext, now = appNow()): Ask[] {
   return rankAsks(decisionHorizon(ctx, now).annotate(collectAsks(ctx, now)), snoozes(ctx), planToday(ctx, now));
 }
 export const thisWeek = (asks: Ask[]) => asks.filter((ask) => !ask.entersOn);
 
-let runtimeCheck: { at: number; ask: Ask | null } | undefined;
-
 /**
- * Whether the AI can work at all: signed in, and the worker running. Asked over the network, so only pages call it
- * (cached a minute, given two and a half seconds) — the badge counts the ledger-only asks.
+ * What Today and 待确认 show. Whether the worker and its model runtime can run at all is not an ask: it is an error the banner on
+ * every page shows (`lib/runtime-status.ts`), so the list and the count always agree.
  */
-async function runtimeAsk(ctx: AccessContext, now: Date): Promise<Ask | null> {
-  if (runtimeCheck && now.getTime() - runtimeCheck.at < 60_000) return runtimeCheck.ask;
-  const timeout = new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), 2_500));
-  const account = await Promise.race([requestCodexSupervisor<{ account?: unknown }>(ctx, "/v1/codex/account")
-    .then((value) => ({ ok: true as const, value })).catch(() => ({ ok: false as const })), timeout]);
-  const base = { entityId: "codex", urgency: "soon" as const, raisedAt: now.toISOString(), options: [{ id: "settings", label: "去设置", href: "/settings" }] };
-  const ask: Ask | null = account === "timeout" || !account.ok
-    ? { ...base, id: "runtime:worker", kind: "codex_signed_out", fingerprint: "worker", title: "后台没在运行",
-      why: "自动分析、倒推、材料准备、验收与提醒均由后台服务执行，当前无法连接；已收集的内容不受影响。重启本机服务后恢复。" }
-    : !account.value.account
-      ? { ...base, id: "runtime:signed-out", kind: "codex_signed_out", fingerprint: "signed-out", title: "模型服务未登录，自动功能已暂停",
-        why: "模型服务未登录，自动分析、倒推、材料准备与验收均暂停；在「设置」中登录后恢复。" }
-      : null;
-  runtimeCheck = { at: now.getTime(), ask };
-  return ask;
-}
-
-/** What Today and 待确认 show: the ledger's asks plus whether the AI can run at all. */
-export async function loadAsks(ctx: AccessContext, now = new Date()): Promise<Ask[]> {
-  const runtime = process.env.CROSSLINE_E2E_DATA_DIR || process.env.VITEST ? null : await runtimeAsk(ctx, now);
-  return rankAsks(decisionHorizon(ctx, now).annotate([...(runtime ? [runtime] : []), ...collectAsks(ctx, now)]), snoozes(ctx), planToday(ctx, now));
+export async function loadAsks(ctx: AccessContext, now = appNow()): Promise<Ask[]> {
+  return openAsks(ctx, now);
 }
 
 export type AskResult = { ok: true } | { ok: false; code: string };
@@ -797,7 +776,7 @@ async function answerOne(ctx: AccessContext, ask: Ask, optionId: string, values:
 }
 
 /** Carries out the person's answer to one ask, recording that they answered (the system's own cost, counted on 系统体检). */
-export async function answerAsk(ctx: AccessContext, askId: string, optionId: string, values: Record<string, unknown>, now = new Date()): Promise<AskResult> {
+export async function answerAsk(ctx: AccessContext, askId: string, optionId: string, values: Record<string, unknown>, now = appNow()): Promise<AskResult> {
   const ask = collectAsks(ctx, now).find((item) => item.id === askId);
   if (!ask) return { ok: false, code: "ASK_NOT_FOUND" };
   const checked = validateAskAnswer(ask, optionId, values);
@@ -809,7 +788,7 @@ export async function answerAsk(ctx: AccessContext, askId: string, optionId: str
 }
 
 /** 「明天再问」/「下周再问」: hidden until then, back sooner if what it is about changes. */
-export function snoozeAsk(ctx: AccessContext, askId: string, choice: "tomorrow" | "week", now = new Date()): AskResult {
+export function snoozeAsk(ctx: AccessContext, askId: string, choice: "tomorrow" | "week", now = appNow()): AskResult {
   const ask = collectAsks(ctx, now).find((item) => item.id === askId);
   if (!ask) return { ok: false, code: "ASK_NOT_FOUND" };
   const until = snoozeUntil(choice, planToday(ctx, now));

@@ -5,6 +5,7 @@ import { cleanAnswerStrings } from "@crossline/core";
 import type { CodexRpcBoundary } from "./index";
 import { routeForSkill, tierForSkill, tierRoutes, type ModelRoute, type RouteTier, type SpendMode } from "./model-policy";
 import { createUsageCollector, currentSpendMode, reportUsage, type UsageCollector } from "./usage";
+import { currentProviderRouting, decideRoute, type ThreadProvider } from "./providers";
 
 import { registerAgentThread, type AgentMode } from "./agent-mode";
 
@@ -60,6 +61,8 @@ export type SkillRunOptions<T> = {
   tools?: SkillTools;
   /** Run on this tier instead of the Skill's own (the input box's second, stronger look). Ignored when the budget is tight. */
   tier?: RouteTier;
+  /** Run on exactly this provider, bypassing routing: only the conformance check, which measures a provider before it may be routed to. */
+  provider?: ThreadProvider;
 };
 
 /**
@@ -142,7 +145,9 @@ function underConfigLock<T>(client: object, work: () => Promise<T>): Promise<T> 
 }
 
 /** What one run carries through its turns: the route it was given, and the meter. */
-type RunContext = { route: ModelRoute | undefined; spendMode: SpendMode; usage: UsageCollector };
+type RunContext = { route: ModelRoute | undefined; spendMode: SpendMode; usage: UsageCollector;
+  /** Set when this run goes to a provider other than the workspace's Codex sign-in (providers.ts); the thread is started on it. */
+  provider?: ThreadProvider };
 const DEFAULT_MAX_REPAIRS = 2;
 /** No event of any kind for this long means a hung turn. Generous: slow work still produces events, silence does not. */
 const DEFAULT_IDLE_MS = 20 * 60_000;
@@ -152,15 +157,20 @@ const MAX_STALL_RETRIES = 2;
  * Everything the two entry points share: waiting in the right lane, switching the Skill on, running, switching
  * it back off, and reporting what the run used.
  */
-async function executeSkill<T>(client: CodexRpcBoundary, options: { skillName: string; cwd: string; tier?: RouteTier },
+async function executeSkill<T>(client: CodexRpcBoundary, options: { skillName: string; cwd: string; tier?: RouteTier; provider?: ThreadProvider },
   body: (context: RunContext) => Promise<SkillRunResult<T>>): Promise<SkillRunResult<T>> {
   return serializeSkillRun(client, options.skillName, async () => {
     const startedAt = Date.now();
     const spendMode = await currentSpendMode();
+    // The workspace's own provider when it can serve this Skill, else its own Codex sign-in, else a blocker (never the owner's runtime).
+    const decision = options.provider ? { via: "provider" as const, provider: options.provider } : decideRoute(options.skillName, currentProviderRouting());
+    if (decision.via === "blocked") return { ok: false, blocker: { code: decision.code, message: decision.message }, audit: {} };
+    const provider = decision.via === "provider" ? decision.provider : undefined;
     // A stronger look is a cost the person did not ask for: in economy mode the Skill keeps its own route.
-    const route = options.tier && spendMode === "normal" && process.env.CROSSLINE_MODEL_ROUTING?.trim().toLowerCase() !== "off"
+    const route = provider ? { model: provider.model }
+      : options.tier && spendMode === "normal" && process.env.CROSSLINE_MODEL_ROUTING?.trim().toLowerCase() !== "off"
       ? { ...tierRoutes()[options.tier] } : routeForSkill(options.skillName, process.env, spendMode);
-    const context: RunContext = { route, spendMode, usage: createUsageCollector() };
+    const context: RunContext = { route, spendMode, usage: createUsageCollector(), ...(provider ? { provider } : {}) };
     let skill: NativeSkill | undefined;
     let result: SkillRunResult<T>;
     try {
@@ -298,9 +308,12 @@ function openScope(client: CodexRpcBoundary, options: { timeoutMs?: number; sign
 }
 type Scope = ReturnType<typeof openScope>;
 
-async function requireLogin(scope: Scope): Promise<void> {
+async function requireLogin(scope: Scope, context: RunContext): Promise<void> {
+  // A provider routed through the gateway has its key there; there is no Codex account to be signed in to.
+  if (context.provider) return;
   const account = record(await scope.rpc("account/read", { refreshToken: false }));
-  if (!record(account?.account)) fail("SKILL_UNAUTHENTICATED");
+  // A provider that takes its key from the environment (`requires_openai_auth = false`) has no account to sign in to.
+  if (!record(account?.account) && account?.requiresOpenaiAuth !== false) fail("SKILL_UNAUTHENTICATED");
 }
 
 /**
@@ -369,7 +382,10 @@ async function startIsolatedThread<T>(scope: Scope, options: SkillRunOptions<T>,
     ...Object.fromEntries(["shell_tool", "multi_agent", "multi_agent_v2", "apps", "hooks", "codex_hooks", "plugin_hooks", "web_search", "standalone_web_search", "image_generation", "view_image", "request_permissions_tool", "tool_suggest", "token_budget", "current_time_reminder", "sleep_tool", "send_message_to_user_async", "js_repl", "code_mode", "deferred_executor"]
       .map((key) => [`features.${key}`, (Boolean(options.allowWebSearch) && (key === "web_search" || key === "standalone_web_search"))
         || (Boolean(options.allowImageGeneration) && key === "image_generation")])),
-    ...Object.fromEntries(Object.keys(mcp).map((key) => [`mcp_servers.${key}.enabled`, false]))
+    ...Object.fromEntries(Object.keys(mcp).map((key) => [`mcp_servers.${key}.enabled`, false])),
+    // Another provider: defined for this thread only, and no memories — Codex's memory runs would call an OpenAI model on it.
+    ...(context.provider ? { [`model_providers.${context.provider.id}`]: context.provider.definition,
+      "memories.use_memories": false, "memories.generate_memories": false, "features.memories": false } : {})
   };
   const threadParams = {
     environments: [], runtimeWorkspaceRoots: [], sandbox: "read-only", approvalPolicy: "untrusted", approvalsReviewer: "user",
@@ -377,7 +393,8 @@ async function startIsolatedThread<T>(scope: Scope, options: SkillRunOptions<T>,
     ephemeral: false, experimentalRawEvents: false,
     developerInstructions: `${options.developerInstructions}\n\n${STYLE_INSTRUCTIONS}`,
     // Left unset for a Skill with no route, so an unlisted job still runs on the runtime's default.
-    ...(context.route ? { model: context.route.model } : {})
+    ...(context.route ? { model: context.route.model } : {}),
+    ...(context.provider ? { modelProvider: context.provider.id } : {})
   };
   // The flag list is written against the newest runtime, but `--strict-config` rejects the whole call
   // over one field an older runtime never defined. A field this runtime does not know names a feature
@@ -605,7 +622,7 @@ export function continueSkillTurn<T>(client: CodexRpcBoundary, threadId: string,
     const scope = openScope(client, options);
     const unregister = options.tools ? registerAgentThread(client, threadId, toolAnswerer(options.tools)) : undefined;
     try {
-      await requireLogin(scope);
+      await requireLogin(scope, context);
       const output = await runTurnsUntilValid(client, scope, context, audit, {
         skillName: options.skillName, threadId, outputSchema: options.outputSchema,
         allowedItemTypes: ["agentMessage", "reasoning", "userMessage", ...(options.tools ? ["dynamicToolCall"] : [])],
@@ -634,7 +651,7 @@ async function runSkillTurn<T>(client: CodexRpcBoundary, input: unknown, options
   try {
     const prepared = options.prepareInput(input);
     scope = openScope(client, options);
-    await requireLogin(scope);
+    await requireLogin(scope, context);
     const threadId = await startIsolatedThread(scope, options, context);
     audit.threadId = threadId;
     options.onAudit({ ...audit });

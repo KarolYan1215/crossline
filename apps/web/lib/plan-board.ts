@@ -68,7 +68,10 @@ export function loadForecastCharts(ctx: AccessContext, plan: PersistedPlan, hori
   const milestones = store.listMilestones(ctx.workspaceId);
   const lineOf = Object.fromEntries(milestones.map((item) => [item.id, item.identityId]));
   const titleOf = Object.fromEntries(milestones.map((item) => [item.id, item.title]));
-  const orderLine = Object.fromEntries(store.listWorkOrders(ctx.workspaceId).map((order) => [order.id, order.identityId]));
+  const orders = store.listWorkOrders(ctx.workspaceId);
+  const orderLine = Object.fromEntries(orders.map((order) => [order.id, order.identityId]));
+  const proposals: Record<string, number> = {};
+  for (const order of orders) if (order.state === "awaiting_plan_approval" && order.milestoneId) proposals[order.milestoneId] = (proposals[order.milestoneId] ?? 0) + 1;
   const lineOrder = identityLines(ctx).map((line) => line.id);
   const scheduled = plan.blocks.filter((block) => block.id.startsWith("scheduled:") && block.day && block.day >= today)
     .map((block) => ({ day: block.day!, line: orderLine[block.id.split(":")[1]!] ?? "none", minutes: blockMinutes(block) }));
@@ -79,7 +82,7 @@ export function loadForecastCharts(ctx: AccessContext, plan: PersistedPlan, hori
     .map((goal) => goal.milestoneId));
   return {
     capacity: capacityWeeks({ today, weeks: forecast.weeks, lineOf, titleOf, scheduled, lineOrder }),
-    goals: goalRows({ goals: forecast.goals, lineOf, lineOrder, marginDays: DEADLINE_MARGIN_DAYS, unforecast, library: ranking }),
+    goals: goalRows({ goals: forecast.goals, lineOf, lineOrder, marginDays: DEADLINE_MARGIN_DAYS, unforecast, library: ranking, proposals }),
     next7, windows: readAvailability(ctx), inferredRegularBlocks: forecast.inferredRegularBlocks,
     summary: { goals: forecast.goals, weeks: forecast.weeks.map((week) => ({ week: week.week, netMinutes: week.netMinutes })) }
   };

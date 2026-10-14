@@ -47,6 +47,8 @@ export const SKILL_TIERS: Record<string, RouteTier> = {
   "crossline-portrait-writer": "top",
   "crossline-portrait-illustrator": "low",
   "crossline-eval-persona": "low",
+  // Test-only: measures a model connection (provider-conformance.ts); always given the provider under test explicitly.
+  "crossline-conformance": "low",
   "crossline-milestone-gate": "mid",
   "crossline-weekly-insight": "mid",
   "crossline-due-diligence": "mid",
@@ -72,12 +74,15 @@ export const NEVER_DOWNGRADED = new Set(["crossline-milestone-gate", "crossline-
 const TIERS: RouteTier[] = ["top", "mid", "low"];
 const skillKey = (skillName: string) => skillName.replace(/^crossline:/, "");
 
-/** `model` or `model:effort`. */
-function parseRoute(value: string | undefined): ModelRoute | undefined {
+const EFFORTS = new Set(["none", "minimal", "low", "medium", "high", "xhigh"]);
+/** `model` or `model:effort`. Only a known effort counts as one: other providers' model ids carry colons of their own (`qwen3:8b`). */
+export function parseRoute(value: string | undefined): ModelRoute | undefined {
   const text = value?.trim();
   if (!text) return undefined;
-  const [model, effort] = text.split(":");
-  return model ? { model: model.trim(), ...(effort?.trim() ? { effort: effort.trim() } : {}) } : undefined;
+  const at = text.lastIndexOf(":");
+  const effort = at > 0 ? text.slice(at + 1).trim() : "";
+  const model = EFFORTS.has(effort) ? text.slice(0, at).trim() : text;
+  return model ? { model, ...(EFFORTS.has(effort) ? { effort } : {}) } : undefined;
 }
 
 export function tierRoutes(env: NodeJS.ProcessEnv = process.env): Record<RouteTier, ModelRoute> {
