@@ -1,5 +1,5 @@
 import { fileURLToPath } from "node:url";
-import { DISPATCH_STATES, STEP_STARTS_SETTING, autoHandoffTiming, isAgentCategory, prepStepRetried, stepCategory, type AgentCategory } from "@crossline/core";
+import { DISPATCH_STATES, STEP_STARTS_SETTING, autoHandoffTiming, isAgentCategory, prepStepRetried, relevantDocuments, stepCategory, type AgentCategory } from "@crossline/core";
 import {
   agentApprovalDecision, assistantPlanFor, decideAgentApproval, declinedCategories, deliverableKey, isAutoHandoff, isPaused, listAgentTasks, readCategories, requestAgentApproval,
   requestCategory, type CrosslineStore
@@ -28,8 +28,7 @@ function taskFromStep(store: CrosslineStore, workspaceId: string, orderId: strin
   const step = store.getStepPlan(workspaceId, orderId)?.steps.find((item) => item.id === stepId);
   if (!step || step.status !== "planned" || step.executor === "human")
     return { ok: false, code: "ORDER_NOT_DISPATCHABLE", message: "该步骤需要本人完成" };
-  const inputs = store.listSourceDocuments(workspaceId).filter((doc) => (doc.projectId === order.projectId || !doc.projectId) && doc.uri.startsWith("file:"))
-    .flatMap((doc) => { try { return [fileURLToPath(doc.uri)]; } catch { return []; } });
+  const inputs = projectFiles(store, workspaceId, order.projectId);
   const category = categoryOverride ?? stepCategory(step);
   const attempt = listAgentTasks(store, workspaceId).filter((task) => task.workOrderId === orderId).length + 1;
   const plan = store.getStepPlan(workspaceId, orderId);
@@ -47,6 +46,17 @@ function taskFromStep(store: CrosslineStore, workspaceId: string, orderId: strin
       ...(step.executor === "agent" ? { prep: true } : {}) } };
 }
 
+/**
+ * The files the person gave for this project, where they are on disk, and the unfiled uploads that name the project in their name or
+ * opening (the real ECE 548 lecture plan was one) — the same choice the step planner and the tutorial make. It used to be every unfiled
+ * upload, so a media errand was handed the course syllabi, the CV and the profile notes. Read, never changed.
+ */
+function projectFiles(store: CrosslineStore, workspaceId: string, projectId: string): string[] {
+  const project = store.listProjects(workspaceId, { includeArchived: true }).find((item) => item.id === projectId);
+  return relevantDocuments(store.listSourceDocuments(workspaceId), { projectId, projectName: project?.name })
+    .filter((doc) => doc.uri.startsWith("file:")).flatMap((doc) => { try { return [fileURLToPath(doc.uri)]; } catch { return []; } });
+}
+
 export function taskFromWorkOrder(store: CrosslineStore, workspaceId: string, orderId: string, categoryOverride?: AgentCategory, stepId?: string): TaskFromOrder {
   if (stepId) return taskFromStep(store, workspaceId, orderId, stepId, categoryOverride);
   const planned = assistantPlanFor(store, workspaceId, orderId);
@@ -54,12 +64,7 @@ export function taskFromWorkOrder(store: CrosslineStore, workspaceId: string, or
   const { plan, title, projectId } = planned;
   const order = { projectId, intent: title };
   const category = categoryOverride ?? plan.category;
-  // The files the person gave for this project, where they are on disk — and the ones uploaded during the interview, which belong
-  // to no project (the real ECE 548 lecture plan was one; the assistant was handed nothing and wrote an empty template). Read, never
-  // changed; the assistant picks what is relevant.
-  const inputs = store.listSourceDocuments(workspaceId)
-    .filter((doc) => (doc.projectId === order.projectId || !doc.projectId) && doc.uri.startsWith("file:"))
-    .flatMap((doc) => { try { return [fileURLToPath(doc.uri)]; } catch { return []; } });
+  const inputs = projectFiles(store, workspaceId, order.projectId);
   // What the person has confirmed about this line, so the work is about them rather than a generic version of the task (the first
   // content list had to leave every personal angle blank). Confirmed facts only, never the interviewer's guesses.
   const workOrder = store.listWorkOrders(workspaceId).find((item) => item.id === orderId);

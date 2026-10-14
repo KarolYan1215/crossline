@@ -105,8 +105,9 @@ export const ACTION_HANDLERS: { [K in ActionId]: Handler<K> } = {
         { text: args.text, reminder: args.reminder.trim(), time: args.time, weekdays: args.weekdays, lineId: line?.id ?? "" });
       return { ok: true, message: `已设好：${scheduleLabel(record.manifest.schedule)}提醒「${args.reminder.trim()}」`, href: "/settings#skills" };
     }
-    const target = line ?? identityLines(ctx)[0];
-    if (!target) return { ok: false, code: "LINE_NOT_FOUND" };
+    // No line, no guess: the first line is not a default (a media request filed under research was grown in research's way).
+    const target = line;
+    if (!target) return { ok: false, code: "LINE_REQUIRED", message: "请说明这件事服务哪条主线" };
     requestWorkflow(getStore(), ctx.workspaceId, args.text, target.id, ctx.principalId);
     // Grown now, not at the worker's next tick; a worker that is down picks it up when it is back.
     void requestCodexSupervisor(ctx, "/v1/workflows/grow", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }).catch(() => undefined);

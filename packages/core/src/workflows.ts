@@ -61,8 +61,10 @@ export function stepLeavesMachine(title: string): boolean {
   const cleaned = title.replace(/(发布|发送|上传|投稿|提交)[^，。；,.;]{0,14}?(之前|前)/g, "")
     .replace(/(发布|发送|上传|投稿|提交)(包|稿|版|清单|计划|时间|日期|渠道|格式|要求|说明|材料|准备)/g, "")
     .replace(/(不|未|无需|不要|不会|暂不|待|可|准备)(发布|发送|上传|投稿|提交)/g, "").replace(/\b(pre-?publish|publish-ready|draft post|before (sending|posting|publishing))\b/gi, "");
-  return mentionsExternalAction(cleaned);
+  // The shared pattern has no 「上传」 or 「付款」, and a workflow's step says 「上传到小红书」 as often as 「发布」.
+  return mentionsExternalAction(cleaned) || /上传|付款|支付|\b(upload|pay)\b/i.test(cleaned);
 }
+const READS = /只读|读取|采集|浏览|核验|调研|搜索|检索|查找|下载公开|read|fetch|scrape|search|verify/i;
 const short = (value: unknown, max: number) => typeof value === "string" && value.trim().length > 0 && value.length <= max;
 
 /** Refuses a manifest that cannot be stored or would let a step that leaves the machine run without the person. */
@@ -106,7 +108,10 @@ export function validateWorkflowManifest(value: unknown, lineIds: string[]): Wor
   return { ...manifest, schedule: manifest.trigger === "schedule" ? manifest.schedule : null,
     access: access.map((item) => ({ service: item.service.trim(), site: item.site.trim(), login: item.login, how: item.how.trim() })), risks: risks.slice(0, 8),
     steps: manifest.steps.map((step) => {
-      const external = Boolean(step.external) || stepLeavesMachine(step.title);
+      // Reading a page is not leaving the machine: the first account-reading workflow marked 「低频只读采集」 and 「联网核验」 external,
+      // which would have handed its own reading to the person (2026-10-14). The words decide when they plainly only read.
+      const onlyReads = READS.test(step.title) && !stepLeavesMachine(step.title);
+      const external = (Boolean(step.external) && !onlyReads) || stepLeavesMachine(step.title);
       return { title: step.title, by: external || step.by === "person" ? "person" : "assistant", external };
     }) };
 }

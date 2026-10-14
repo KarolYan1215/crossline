@@ -156,7 +156,9 @@ export function actionProblem(item: ProposedAction, refs: ConciergeRefs): string
     }
     case "note.add": return String(a.text ?? "").trim() ? "" : "内容为空";
     case "workflow.request": return !String(a.text ?? "").trim() ? "内容为空"
-      : String(a.reminder ?? "").trim() && !/^([01]\d|2[0-3]):[0-5]\d$/.test(String(a.time ?? "")) ? "提醒须有 HH:MM 的时间" : item.args.lineId && !refs.lines.has(item.args.lineId) ? `主线 id「${item.args.lineId}」不存在` : "";
+      : String(a.reminder ?? "").trim() && !/^([01]\d|2[0-3]):[0-5]\d$/.test(String(a.time ?? "")) ? "提醒须有 HH:MM 的时间" : item.args.lineId && !refs.lines.has(item.args.lineId) ? `主线 id「${item.args.lineId}」不存在`
+      // A workflow is written in one line's way and used on that line only; with none named it used to land on the first line.
+      : !String(a.reminder ?? "").trim() && !item.args.lineId ? "工作流须写明服务哪条主线（lineId）；看不出是哪条时用 clarify 列出主线让本人选" : "";
     case "profile.tell": return !String(a.text ?? "").trim() ? "内容为空" : item.args.lineId && !refs.lines.has(item.args.lineId) ? `主线 id「${item.args.lineId}」不存在` : "";
     case "task.op": {
       const args = item.args;

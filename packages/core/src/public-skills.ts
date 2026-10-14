@@ -160,7 +160,9 @@ export function validateSkillScout(value: unknown, context: SkillScoutContext): 
     return [
       ...(parseGithubRepo(candidate.repo) ? [] : [`${name}：repo 须为 https://github.com/<owner>/<repo>`]),
       ...(safeRepoPath(candidate.path) === undefined ? [`${name}：path 须为仓库内的相对目录`] : []),
-      ...(candidate.lines.filter((id) => !lineIds.has(id)).length ? [`${name}：lines 只能是 ${[...lineIds].join("、")}`] : [])
+      ...(candidate.lines.filter((id) => !lineIds.has(id)).length ? [`${name}：lines 只能是 ${[...lineIds].join("、")}`] : []),
+      // A skill on no line was switched on for every line's tasks by word overlap alone; it must name the lines it is for.
+      ...(!candidate.lines.length ? [`${name}：lines 至少列出一条主线`] : [])
     ];
   });
   if (problems.length) throw Object.assign(new Error("SKILL_SCOUT_CANDIDATE_INVALID"), { detail: problems.slice(0, 6).join("；") });
@@ -257,7 +259,7 @@ const terms = (text: string) => {
 };
 /** How well a library skill (public or grown) fits a task on a line: 0 when it is for other lines or shares nothing with the task. */
 export function publicSkillRelevance(record: { name: string; description: string; category: string; lines: string[] }, lineId: string, task: string): number {
-  if (record.lines.length && !record.lines.includes(lineId)) return 0;
+  if (!record.lines.includes(lineId)) return 0;
   const wanted = terms(task);
   const have = terms(`${record.name} ${record.description} ${PUBLIC_SKILL_CATEGORY_LABEL[record.category as PublicSkillCategory] ?? ""} ${record.category}`);
   let shared = 0;

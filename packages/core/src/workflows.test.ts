@@ -72,3 +72,4 @@ test("reaching the network does not cap a workflow that declared what it reads; 
   expect(scanForDeclaredAccess(net, false).risk).toBe("high");
   expect(scanForDeclaredAccess({ ...net, findings: [...net.findings, { file: "scripts/read.py", line: 9, rule: "delete", excerpt: "os.remove(x)" }] }, true).risk).toBe("high");
 });
+

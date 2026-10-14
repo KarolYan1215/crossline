@@ -2,7 +2,7 @@ import {
   AGENT_CATEGORIES, PUBLIC_SKILL_CATEGORY_LABEL, currentMineVersion, scheduleLabel, ensureMineFrontmatter, mineSkillSettingKey, publicSkillFilesKey, grownSkillFilesKey, readMineSkill,
   type AccessContext, type AiTool, type PublicSkillRecord, type StoredMineRule
 } from "@crossline/core";
-import { aiToolsFor, consentToGrownSkill, readGrownSkills, readPublicSkills, removeGrownSkill, removePublicSkill, saveMineVersion, updateGrownSkill } from "@crossline/db";
+import { aiToolsFor, consentToGrownSkill, grownHomeLine, readGrownSkills, readPublicSkills, removeGrownSkill, removePublicSkill, saveMineVersion, updateGrownSkill } from "@crossline/db";
 import { CodexSupervisorRequestError, requestCodexSupervisor } from "./codex-runtime";
 import { getStore } from "./crossline";
 import { identityLines } from "./lines";
@@ -24,7 +24,7 @@ export type PublicSkillView = Pick<PublicSkillRecord, "id" | "name" | "descripti
   verdict: "usable" | "text_only" | "reject"; reasons: string[];
 };
 /** A workflow the assistant grew: what it does and when, where it came from, which steps stay the person's, and what the checks found. */
-export type GrownSkillView = { id: string; summary: string; name: string; category: string; lines: string[]; schedule: string; action: "run" | "remind";
+export type GrownSkillView = { id: string; summary: string; name: string; category: string; lines: string[]; lineLabel: string; schedule: string; action: "run" | "remind";
   origin: string; steps: Array<{ title: string; person: boolean }>; status: "active" | "off" | "needs_consent"; pinned: boolean; verdict: "usable" | "text_only" | "reject";
   /** The sites it reads and the risks it was installed with; when the person accepted them and last logged in to each. */
   access: Array<{ service: string; site: string; login: boolean; how: string; loggedInAt?: string }>; risks: string[]; consentedAt?: string;
@@ -60,7 +60,10 @@ export function loadSkillLibrary(ctx: AccessContext): SkillLibraryView {
     let skillText = "";
     try { skillText = ((JSON.parse(store.getSetting(ctx.workspaceId, grownSkillFilesKey(record.id)) ?? "{}") as { files?: Array<{ path: string; text: string }> }).files ?? [])
       .find((file) => file.path === "SKILL.md")?.text ?? ""; } catch { /* none stored */ }
-    return { id: record.id, summary: record.manifest.summary, name: record.name, category: AGENT_CATEGORIES[record.category] ?? record.category, lines: record.lines,
+    const home = grownHomeLine(store, ctx.workspaceId, record);
+    const homeLabel = identityLines(ctx).find((line) => line.id === home)?.label ?? "";
+    return { id: record.id, summary: record.manifest.summary, name: record.name, category: AGENT_CATEGORIES[record.category] ?? record.category,
+      lines: home ? [home] : record.lines, lineLabel: homeLabel,
       schedule: scheduleLabel(record.manifest.schedule), action: record.manifest.action,
       origin: record.origin.kind === "asked" ? `本人要求：「${record.origin.text.slice(0, 60)}」` : `由 ${record.origin.taskIds.length} 次采纳的同类结果生成`,
       steps: record.manifest.steps.map((step) => ({ title: step.title, person: step.by === "person" })), status: record.status, pinned: record.pinned,

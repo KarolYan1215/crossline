@@ -99,10 +99,22 @@ export function decideCommand(command: string, context: GuardContext): GuardDeci
   for (const entry of ASK) {
     if (!entry.pattern.test(text)) continue;
     // Deleting or moving inside the task's own directory is the task's business.
-    if ((entry.rule === "delete.recursive" || entry.rule === "move.bulk") && mentionsOnly(unquoted, [context.taskDir, ...(context.writableRoots ?? [])])) continue;
+    // So is one that names only relative paths: commands run in the task directory, and 「删除 skill/scripts/__pycache__」 was put
+    // to the person twice in one evening (2026-10-14). Leaving it — `..`, `~`, a drive, an environment variable — still asks.
+    if ((entry.rule === "delete.recursive" || entry.rule === "move.bulk")
+      && (mentionsOnly(withoutShell(unquoted), [context.taskDir, ...(context.writableRoots ?? [])]) || onlyRelative(withoutShell(unquoted)))) continue;
     return { decision: "ask", rule: entry.rule, reason: entry.reason };
   }
   return { decision: "allow", rule: "default", reason: "" };
+}
+
+/** The runtime spells out the shell it runs a command in (`C:\Windows\…\powershell.exe -Command …`); that path is not a target. */
+const withoutShell = (command: string) => command.replace(/^\s*[a-z]:[\\/][^\s]*?[\\/](powershell|pwsh|cmd)(\.exe)?\s+((-|\/)\w+\s+)*/i, "");
+
+/** No path in the command can leave the working directory: no drive, root, UNC, home, environment variable, parent or wildcard-only target. */
+function onlyRelative(command: string): boolean {
+  return !/[a-z]:[\\/]|(^|[\s=(])[\\/]|\\\\|~|\$env:|\$home|%[a-z_]+%|\.\.|(^|[\s;|&])(cd|set-location|push-location|sl|pushd)\b/i.test(command)
+    && !/(remove-item|\brm\b|\bdel\b|\brmdir\b|\brd\b|\berase\b|move-item|\bmv\b|\bmove\b)\s+(-\S+\s+)*\*(\s|$)/i.test(command);
 }
 
 /** Whether every absolute path in the command lies inside one of the roots (and there is at least one). */

@@ -131,7 +131,7 @@ function GrownFlow({ flow, onChanged }: { flow: GrownSkillView; onChanged: (flow
   const waiting = flow.status === "needs_consent";
   return <li className="sk-public">
     <div className="sk-line-head">
-      <strong className="gen">{flow.summary}</strong><Tag>{flow.category}</Tag>
+      {flow.lines[0] && <LineTag line={flow.lines[0]}>{flow.lineLabel || flow.lines[0]}</LineTag>}<strong className="gen">{flow.summary}</strong><Tag>{flow.category}</Tag>
       <Tag tone={flow.status === "active" ? "ok" : waiting ? "warn" : "neutral"}>{flow.status === "active" ? "启用" : waiting ? "待本人确认风险" : "已关闭"}</Tag>
       {flow.verdict === "text_only" && <Tag tone={verdict.tone}>{verdict.label}</Tag>}
       <span className="sk-actions">

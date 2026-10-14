@@ -4,6 +4,16 @@ import { decideCommand, decideFileChange, decideMcpTool, isSecretPath, type Guar
 const context: GuardContext = { taskDir: "C:\\Users\\karol\\Crossline\\ai\\t1", writableRoots: ["C:\\Users\\karol\\Crossline\\ai\\t1\\repo"], homeDir: "C:\\Users\\karol" };
 const decide = (command: string) => decideCommand(command, context);
 
+test("cleaning up inside the task directory is not put to the person, however the runtime spells the shell; leaving it still is (2026-10-14)", () => {
+  const shell = "\"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\" -Command ";
+  expect(decide(`${shell}'$cache = Resolve-Path -LiteralPath 'skill/scripts/__pycache__'; Remove-Item -LiteralPath $cache.Path -Recurse -Force'`).decision).toBe("allow");
+  expect(decide(`${shell}'Remove-Item -LiteralPath C:\\Users\\karol\\Crossline\\ai\\t1\\skill\\scripts\\__pycache__ -Recurse -Force'`).decision).toBe("allow");
+  expect(decide(`${shell}'Remove-Item -Recurse -Force ..\\other'`).decision).toBe("ask");
+  expect(decide("Remove-Item -Recurse -Force C:\\Users\\karol\\Documents\\x").decision).toBe("ask");
+  expect(decide("Remove-Item -Recurse -Force *").decision).toBe("ask");
+  expect(decide("Set-Location C:\\Users; Remove-Item -Recurse -Force notes").decision).toBe("ask");
+});
+
 describe("what the assistant may never read", () => {
   test("credential stores, keys, browser sessions and env files are refused wherever they are written", () => {
     for (const path of ["C:\\Users\\karol\\.ssh\\id_ed25519", "C:/Users/karol/.aws/credentials", "C:\\Users\\karol\\AppData\\Local\\Google\\Chrome\\User Data\\Default\\Login Data",

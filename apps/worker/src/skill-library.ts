@@ -7,7 +7,7 @@ import {
 } from "@crossline/core";
 import { installLibraryPlugin, type CodexRpcBoundary } from "@crossline/codex";
 import { linePacks } from "./lines";
-import { installedGrownFiles, installedPublicFiles, readGrownSkills, readPublicSkills, writeGrownSkills, type CrosslineStore } from "@crossline/db";
+import { grownHomeLine, installedGrownFiles, installedPublicFiles, readGrownSkills, readPublicSkills, writeGrownSkills, type CrosslineStore } from "@crossline/db";
 import { markPublicSkillsUsed, wantPublicSkill } from "./public-skills";
 import { runtimesDir } from "./owner";
 
@@ -140,13 +140,15 @@ export const libraryInstruction = (skills: string[]) =>
  * is the copy the run reads; each public skill chosen has its idle clock restarted. A task no public skill fits asks the next scout to look.
  */
 export async function librarySkillsFor(client: CodexRpcBoundary, store: CrosslineStore, workspaceId: string, lineId: string | undefined,
-  options: { dir?: string; cwd: string; task?: string; wantIfMissing?: boolean }): Promise<string[]> {
+  options: { dir?: string; cwd: string; task?: string; wantIfMissing?: boolean; grown?: boolean }): Promise<string[]> {
   if (!lineId) return [];
   const mine = currentMineVersion(readMineSkill(store.getSetting(workspaceId, mineSkillSettingKey(lineId)))) ? [mineSkillName(lineId)] : [];
   const task = options.task ?? "";
   // The person's own grown workflows come before strangers' skills; together at most three.
-  const grown = readGrownSkills(store, workspaceId).filter((record) => record.status === "active" && record.review.final !== "reject")
-    .map((record) => ({ record, score: publicSkillRelevance(record, lineId, task) })).filter((item) => item.score > 0)
+  // Only workflows grown on this very line, and none for a run that is itself growing a workflow (it would copy another's method).
+  const grown = (options.grown === false ? [] : readGrownSkills(store, workspaceId))
+    .filter((record) => record.status === "active" && record.review.final !== "reject" && grownHomeLine(store, workspaceId, record) === lineId)
+    .map((record) => ({ record, score: publicSkillRelevance({ ...record, lines: [lineId] }, lineId, task) })).filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score).slice(0, PUBLIC_SKILLS_PER_RUN);
   const publics = readPublicSkills(store, workspaceId).filter((record) => record.review.final !== "reject")
     .map((record) => ({ record, score: publicSkillRelevance(record, lineId, task) })).filter((item) => item.score > 0)

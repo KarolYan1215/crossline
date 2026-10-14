@@ -78,12 +78,15 @@ test("a question for the person is answered from the ledger, and declined if nob
 
 // The real ECE 548 outline came back an empty template: the lecture plan was uploaded during the interview, under no project, and the
 // assistant was handed nothing. Unassigned uploads now go with every task, and the line's confirmed facts with them.
-test("files uploaded under no project and the line's confirmed facts reach the task; another project's files and guesses do not", () => {
+test("an unfiled upload that names the project and the line's confirmed facts reach the task; another project's or line's files and guesses do not", () => {
   order("wo-bbbb2222", "整理期中复习提纲", ["整理前几章的概念清单"], { projectId: "ece548" });
+  store.saveProject({ id: "ece548", ownerId: "o", workspaceId: ws, identityId: "research", name: "ECE 548", status: "active", summary: "", createdAt: "2026-10-01T00:00:00Z", updatedAt: "2026-10-01T00:00:00Z" });
   const doc = (id: string, projectId: string | undefined, file: string) => store.saveSourceDocument({ id, ownerId: "o", workspaceId: ws,
     ...(projectId ? { projectId } : {}), kind: "docx", fileName: file, mediaType: "x", sha256: id, uri: `file:///C:/data/${file}`,
     extractedText: "", extractionStatus: "done", createdAt: "2026-10-05T00:00:00.000Z" });
-  doc("u1", undefined, "Lecture-Plan.docx");
+  doc("u1", undefined, "ECE548-Lecture-Plan.docx");
+  // Unfiled and about something else (a media brief, a CV): every unfiled upload used to go with every task.
+  doc("u2", undefined, "xhs-content-brief.docx");
   doc("o1", "ece555", "ECE555.pdf");
   const fact = (slot: string, status: "confirmed" | "inferred", identityId = "research") => store.upsertProfileFact({ workspaceId: ws, identityId,
     projectId: "ece548", slot, value: `${slot} 的值`, status, sourceRef: "reply-1", sourceQuote: status === "confirmed" ? "原话" : "", updatedAt: "2026-10-05T00:00:00.000Z" });
@@ -93,7 +96,7 @@ test("files uploaded under no project and the line's confirmed facts reach the t
   const result = taskFromWorkOrder(store, ws, "wo-bbbb2222");
   if (!result.ok) throw new Error(result.message);
   expect(result.input.inputs).toHaveLength(1);
-  expect(result.input.inputs![0]).toMatch(/Lecture-Plan\.docx$/);
+  expect(result.input.inputs![0]).toMatch(/ECE548-Lecture-Plan\.docx$/);
   expect(result.input.what).toContain("target_grade：target_grade 的值");
   expect(result.input.what).not.toContain("guess");
   expect(result.input.what).not.toContain("media_only");

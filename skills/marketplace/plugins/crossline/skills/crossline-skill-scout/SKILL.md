@@ -15,7 +15,7 @@ For each candidate:
 - `path`: the skill's directory inside the repository, relative (`skills/xiaohongshu-writer`, or `""` when the repository itself is the skill). It must be the directory that holds the `SKILL.md`. Open the repository page to check that the directory and the file exist; do not guess a path.
 - `name`: the skill's own name.
 - `category`: the broad kind of work it serves, one of the given category ids. Categories are broad on purpose: one skill can serve several lines.
-- `lines`: the line ids it would help (empty when it helps all of them).
+- `lines`: the line ids it would help — at least one; list each line it helps rather than leaving it empty.
 - `why`: what in the line's goals or recent tasks this skill helps with, and why this one rather than a generic one.
 
 Prefer, in order: a skill in a well-known collection, with a licence file in the repository, recently maintained, specific to the work. A skill with no licence cannot be used, so skip repositories that show none. Skip anything already in `installed` (same repository and directory). Items in `wanted` come first: each is a task that needed help now.

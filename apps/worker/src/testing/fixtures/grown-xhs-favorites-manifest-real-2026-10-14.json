@@ -1,0 +1,62 @@
+{
+  "name": "organize-xiaohongshu-creator-research",
+  "summary": "每周五 09:00 只读整理本人的小红书收藏夹，并重点分析已由本人确认的“人类最强编导”账号作品，生成本地自媒体打法研究包；首次启用前须由本人批准账号读取风险并完成登录。",
+  "lines": ["media", "research"],
+  "category": "read_research_organize",
+  "trigger": "schedule",
+  "schedule": {
+    "type": "weekly",
+    "days": ["FR"],
+    "time": "09:00"
+  },
+  "action": "run",
+  "reminder": "",
+  "steps": [
+    {"title": "本人审阅并批准小红书只读访问风险及准确的重点账号主页", "by": "person", "external": false},
+    {"title": "本人在 Crossline 打开的持久浏览器窗口中登录并打开收藏页", "by": "person", "external": true},
+    {"title": "Crossline 助手低频只读采集收藏页与重点账号的可见内容", "by": "assistant", "external": true},
+    {"title": "Crossline 助手去重、分类并生成重点账号观察索引", "by": "assistant", "external": false},
+    {"title": "联网调研（Codex）按需核验定位、选题与公开事实依据", "by": "assistant", "external": true},
+    {"title": "Crossline 助手形成最多三个原创内容实验选项并执行红线自查", "by": "assistant", "external": false},
+    {"title": "本人批准保留的打法与下一轮实验；如需发布则另行操作", "by": "person", "external": false}
+  ],
+  "inputs": [
+    "Crossline 提供的浏览器配置目录（运行时作为 --profile 传入，不复制、不导出凭据）",
+    "Crossline 提供的浏览器程序路径（运行时作为 --browser 传入）",
+    "本人小红书收藏页 HTTPS 地址",
+    "本人确认的‘人类最强编导’准确主页 HTTPS 地址",
+    "可选：上次研究包所在的任务产出目录",
+    "可选：本人对既有打法与选题的批准/淘汰记录"
+  ],
+  "outputs": [
+    "raw-notes.jsonl",
+    "organized/collection-index.csv",
+    "organized/focus-account.md",
+    "organized/creator-playbook.md",
+    "organized/run-summary.json"
+  ],
+  "access": [
+    {
+      "service": "小红书",
+      "site": "https://www.xiaohongshu.com/",
+      "login": true,
+      "how": "官方开放账号平台截至 2026-10-14 仅提供 basic_info，电商开放平台不含个人收藏接口，也未找到官方收藏导出；在本人批准风险并自行登录后，使用 Playwright launch_persistent_context 通过 --profile 与 --browser 打开本人给出的收藏页和重点账号主页，低频、串行、只读页面可见内容，不调用非公开接口、不导出 Cookie。"
+    },
+    {
+      "service": "小红书开放平台",
+      "site": "https://openaccount.xiaohongshu.com/docs/quick-start",
+      "login": false,
+      "how": "仅用于核验官方授权能力边界；当前 basic_info 无法满足收藏夹读取。"
+    }
+  ],
+  "risks": [
+    "使用登录浏览器自动读取页面可能不受平台条款支持；即使只读、低频，也可能触发风控、验证码、临时限制或账号受限。本人明确批准前不启用。",
+    "页面结构、链接格式或登录流程改版会令选择器失效；遇到结构不明、验证码或限制立即停止，不绕过风控。",
+    "昵称可能重名或变更；必须由本人批准准确主页，不能仅凭‘人类最强编导’昵称自动认定账号。",
+    "浏览器配置目录含登录状态，由浏览器进程使用；脚本不读取配置文件、不打印或导出 Cookie/Token，但本机产出的 raw-notes.jsonl 会包含收藏标题、链接、页面可见正文和采集时间。",
+    "研究包保存在每次任务指定的本地产出目录；可能反映本人兴趣偏好，应按私人资料保存，不上传第三方服务。",
+    "对作品的归类和打法解释可能存在误判；页面可见相关性不能证明传播效果因果，所有结论必须保留链接、样本数和人工复核标记。",
+    "账号移动、删除、取消收藏、关注、点赞、评论、私信和发布均不自动执行，只能由本人另行决定。"
+  ]
+}
+

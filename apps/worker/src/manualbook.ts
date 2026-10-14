@@ -119,7 +119,9 @@ export function buildManualContext(store: CrosslineStore, workspaceId: string, w
     localFiles: relevantDocuments(store.listSourceDocuments(workspaceId), { projectId: order.projectId, projectName }).map((doc) => doc.fileName).slice(0, 30),
     profile: store.listProfileFacts(workspaceId).filter((fact) => fact.identityId === order.identityId && fact.status === "confirmed").slice(0, 30)
       .map((fact) => ({ id: profileFactId(fact), value: fact.value })),
-    constraints: store.listProfileFacts(workspaceId).filter((fact) => /constraint|限制|约束/.test(fact.slot) || /无法|不能|不要/.test(fact.value)).map((fact) => fact.value).slice(0, 8),
+    // This line's and the person's own: another line's 「不能……」 is not a constraint on this task.
+    constraints: store.listProfileFacts(workspaceId).filter((fact) => (fact.identityId === order.identityId || fact.identityId === "person")
+      && (/constraint|限制|约束/.test(fact.slot) || /无法|不能|不要/.test(fact.value))).map((fact) => fact.value).slice(0, 8),
     person: planningContext(store, workspaceId, order).person,
     ...(prepared.length ? { prepared } : {}),
     ...(steps.length ? { plannedSteps: steps.map((step) => ({ id: step.id, title: step.title, role: step.role, doneCriterion: step.doneCriterion ?? "",

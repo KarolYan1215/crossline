@@ -5,6 +5,7 @@ import {
 } from "@crossline/core";
 import { randomUUID } from "node:crypto";
 import type { CrosslineStore } from "./index";
+import { listAgentTasks } from "./agent";
 
 /**
  * The skill library's ledger side (docs/skills-library.md), shared by the worker that writes it and the settings page where the person
@@ -39,6 +40,23 @@ export function installedPublicFiles(store: CrosslineStore, workspaceId: string,
 export const readGrownSkills = (store: CrosslineStore, workspaceId: string) => readGrownLibrary(store.getSetting(workspaceId, GROWN_LIBRARY_SETTING));
 export const writeGrownSkills = (store: CrosslineStore, workspaceId: string, records: GrownSkillRecord[]) =>
   store.setSetting(workspaceId, GROWN_LIBRARY_SETTING, JSON.stringify(records));
+
+/**
+ * The one line a grown workflow belongs to: the line of the request it was grown from, or of the errands it repeats. A workflow is used
+ * only on that line — a media workflow whose manifest also named research was switched on for a course-material errand (2026-10-14).
+ * Records written since carry it as their only line; older ones are read from their origin. Undefined when the origin says nothing.
+ */
+export function grownHomeLine(store: CrosslineStore, workspaceId: string, record: GrownSkillRecord): string | undefined {
+  if (record.origin.kind === "asked") {
+    const asked = store.listEvents(workspaceId, { type: "workflow.requested", entityId: record.origin.requestId }).at(-1);
+    const line = (asked?.payload as { lineId?: string } | undefined)?.lineId;
+    return line || (record.lines.length === 1 ? record.lines[0] : undefined);
+  }
+  const taskIds = new Set(record.origin.taskIds);
+  const orderId = listAgentTasks(store, workspaceId).find((task) => taskIds.has(task.taskId) && task.workOrderId)?.workOrderId;
+  return (orderId ? store.listWorkOrders(workspaceId).find((order) => order.id === orderId)?.identityId : undefined)
+    ?? (record.lines.length === 1 ? record.lines[0] : undefined);
+}
 
 /** A grown workflow's files: all of them, or — when the scan or the review allowed it only as text — all but its scripts. */
 export function installedGrownFiles(store: CrosslineStore, workspaceId: string, record: GrownSkillRecord): Array<{ path: string; text: string }> {

