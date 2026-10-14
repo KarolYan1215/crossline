@@ -92,11 +92,14 @@
 .pt-tagline{margin:0;padding-left:16px;border-left:6px solid var(--group);font-size:20px;line-height:1.5;font-weight:700}
 /* the axes: both poles named, the bar from the middle towards the one leaned to (`axisBar`) */
 .pt-axes{margin:0;padding:0;list-style:none;display:grid;gap:14px}
-.pt-axes li{display:grid;grid-template-columns:48px minmax(0,1fr) 48px;column-gap:12px;row-gap:4px;align-items:center}
+.pt-axes li{display:grid;grid-template-columns:64px minmax(0,1fr) 64px;column-gap:12px;row-gap:4px;align-items:center}
 .pt-axes small{grid-column:2;font-size:12px;line-height:1.5;color:var(--pt-muted)}
 .pt-axis-side{font-size:17px;font-weight:400;color:var(--pt-muted)}
 .pt-axes li>.pt-axis-side:last-of-type{text-align:right}
 .pt-axis-side[data-on]{color:var(--pt-ink);font-weight:700}
+.pt-axis-side .pt-serif{font-weight:inherit}
+.pt-axes .pt-axis-en{display:block;font-family:var(--f-sans);font-size:12px;font-weight:400;line-height:1.3;color:var(--pt-muted)}
+.pt-axis-en b{font-weight:700;color:var(--pt-ink)}
 .pt-axis-track{position:relative;height:28px;background:linear-gradient(var(--pt-track),var(--pt-track)) center/100% 14px no-repeat}
 .pt-axis-track::after{content:"";position:absolute;left:50%;top:0;bottom:0;width:2px;margin-left:-1px;background:var(--pt-ink)}
 .pt-axis-track i{position:absolute;top:0;bottom:0;display:flex;align-items:center;background:var(--group);border-radius:14px;font-style:normal}
@@ -186,7 +189,7 @@
   .pt-type-head .pt-figure-disc{width:min(260px,100%);justify-self:center}
   .pt-type-code{font-size:52px}.pt-type-name{font-size:34px}
   .pt-page{padding:24px 16px}
-  .pt-axes li{grid-template-columns:40px minmax(0,1fr) 40px;column-gap:8px}
+  .pt-axes li{grid-template-columns:58px minmax(0,1fr) 58px;column-gap:8px}
   .pt-axis-side{font-size:15px}
   .pt-labels{grid-template-columns:1fr}
   .pt-cols,.pt-compass,.pt-lines,.pt-gap-short{grid-template-columns:1fr}

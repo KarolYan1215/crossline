@@ -34,17 +34,22 @@ const colourOf = (lineId: string) => LINE_COLOUR[lineId] ?? INK;
  * The four typing axes as diverging bars: both poles named, the one leaned to in bold, the bar growing from the middle towards it, the
  * percentage inside a long bar and beside a short one. `evidence` adds each axis's reason under it.
  */
+/** The English word a type letter stands for, its initial in bold: the code reads as words (GEMA = Generalist, Evidence, Making, Adapting). */
+function AxisWord({ word }: { word: string }) {
+  return <small className="pt-axis-en"><b>{word[0]}</b>{word.slice(1)}</small>;
+}
+
 export function DivergingAxes({ type, evidence }: { type: PortraitType; evidence?: boolean }) {
   return <ul className="pt-axes">{type.axes.map((axis) => {
     const bar = axisBar(axis.score);
     const outside: CSSProperties = bar.side === "right" ? { left: `calc(${bar.from + bar.width}% + 6px)` } : { right: `calc(${100 - bar.from}% + 6px)` };
     return <li key={axis.id}>
-      <span className="pt-axis-side pt-serif" data-on={bar.side === "left" || undefined}>{axis.left}</span>
+      <span className="pt-axis-side" data-on={bar.side === "left" || undefined}><span className="pt-serif">{axis.left}</span><AxisWord word={axis.leftEn} /></span>
       <span className="pt-axis-track" role="img" aria-label={`${axis.label} ${bar.percent}%`}>
         <i style={{ left: `${bar.from}%`, width: `${bar.width}%` }} data-side={bar.side}>{bar.inside && <b>{bar.percent}%</b>}</i>
         {!bar.inside && <b className="pt-axis-out" style={outside}>{bar.percent}%</b>}
       </span>
-      <span className="pt-axis-side pt-serif" data-on={bar.side === "right" || undefined}>{axis.right}</span>
+      <span className="pt-axis-side" data-on={bar.side === "right" || undefined}><span className="pt-serif">{axis.right}</span><AxisWord word={axis.rightEn} /></span>
       {evidence && axis.evidence && <small className="gen">{axis.evidence}</small>}
     </li>;
   })}</ul>;

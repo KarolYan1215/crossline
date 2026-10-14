@@ -57,7 +57,10 @@ function SharePart({ report, state, ordered }: { report: PortraitReport; state: 
             <p className="pt-type-code pt-serif">{type.code}</p>
             <h1 className="pt-type-name pt-serif">{type.name}</h1>
             <p className="pt-type-group"><span><b className="pt-serif">{type.group.name}</b> · {type.group.blurb}</span></p>
-            <p className="pt-type-blurb">{type.blurb}</p>
+            {/* The writer's paragraph to the person, ended in code with the type the scores make, so the two never disagree. */}
+            <p className="pt-type-blurb">{type.summary
+              ? <><span className="gen">{type.summary.replace(/[，,。.；;、\s]+$/u, "")}，</span>你是 {type.code} {type.name}。</>
+              : type.blurb}</p>
           </> : <h1 className="pt-type-name gen">{report.cover.archetype ?? report.cover.keywords[0] ?? "个人画像"}</h1>}
         </div>
       </div>

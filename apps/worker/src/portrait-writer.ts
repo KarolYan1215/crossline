@@ -1,12 +1,15 @@
-import { PORTRAIT_GAP_SCHEMA, PORTRAIT_SCHEMA, PORTRAIT_SCHEMA_VERSION, validatePortrait, type PortraitReport, AGENT_HISTORY_SUMMARY, agentHistoryLines, type AgentHistorySummary } from "@crossline/core";
+import { PORTRAIT_GAP_SCHEMA, PORTRAIT_SCHEMA, PORTRAIT_SCHEMA_VERSION, typeSummaryProblem, validatePortrait, type PortraitReport, AGENT_HISTORY_SUMMARY, agentHistoryLines, type AgentHistorySummary } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import { sayDoFor, type CrosslineStore } from "@crossline/db";
 import { identityLines } from "./lines";
 import { ownerOf } from "./owner";
 
 export const PORTRAIT_WRITER = "crossline:crossline-portrait-writer";
-/** Written before the one rewrite of a report from before the fixed dimensions, so a failure is shown, not retried every tick. */
-export const PORTRAIT_REWRITE_MARKER = "portrait.rewrite.v2";
+/**
+ * Written before the one rewrite of a report from an older schema, so a failure is shown, not retried every tick. Per version: an account
+ * rewritten for schema 2 is rewritten once more for 3 (the personal type summary).
+ */
+export const PORTRAIT_REWRITE_MARKER = `portrait.rewrite.v${PORTRAIT_SCHEMA_VERSION}`;
 /** When the say–do part was last written against the execution record (or last attempted). */
 export const PORTRAIT_GAP_AT = "portrait.gap.at";
 const GAP_INTERVAL_MS = 30 * 86_400_000;
@@ -20,7 +23,16 @@ const readSaved = (store: CrosslineStore, workspaceId: string): SavedPortrait | 
 };
 
 // Content-quality refusals: when the repairs run out the answer is kept in fixed order, and the page leaves out what it cannot draw.
-const KEPT_WHEN_INCOMPLETE = new Set(["PORTRAIT_VALUES_INCOMPLETE", "PORTRAIT_SAY_DO_INCOMPLETE"]);
+const KEPT_WHEN_INCOMPLETE = new Set(["PORTRAIT_VALUES_INCOMPLETE", "PORTRAIT_SAY_DO_INCOMPLETE", "PORTRAIT_TYPE_SUMMARY_INVALID"]);
+/** `validatePortrait` plus the type summary's own rule; a kept answer loses a summary that breaks it rather than the whole report. */
+function checked(output: unknown, lineIds: string[], options: { lenient?: boolean } = {}): PortraitReport {
+  const report = validatePortrait(output, lineIds, options);
+  const problem = report.type ? typeSummaryProblem(report.type.summary ?? "") : null;
+  if (!problem) return report;
+  if (options.lenient) return { ...report, type: { ...report.type!, summary: "" } };
+  throw Object.assign(new Error("PORTRAIT_TYPE_SUMMARY_INVALID"), { detail: problem });
+}
+
 const keepIncomplete = (rejection: Error, build: () => PortraitReport): PortraitReport | undefined => {
   if (!KEPT_WHEN_INCOMPLETE.has(rejection.message)) return undefined;
   try { return build(); } catch { return undefined; }
@@ -99,8 +111,8 @@ export function createPortraitWriter(store: CrosslineStore, workspaceId: string,
       ...(workHistory.length ? { workHistory } : {}) };
     const result = await runCodexSkill<PortraitReport>(client, context, { skillName: PORTRAIT_WRITER, cwd,
       developerInstructions: "Write the portrait report as the Skill describes, from the supplied material only. Return raw JSON only.",
-      outputSchema: PORTRAIT_SCHEMA, prepareInput: () => context, validateOutput: (output) => validatePortrait(output, lineIds),
-      softAccept: (rejection, output) => keepIncomplete(rejection, () => validatePortrait(output, lineIds, { lenient: true })),
+      outputSchema: PORTRAIT_SCHEMA, prepareInput: () => context, validateOutput: (output) => checked(output, lineIds),
+      softAccept: (rejection, output) => keepIncomplete(rejection, () => checked(output, lineIds, { lenient: true })),
       onAudit: () => {}, timeoutMs: 60 * 60_000 });
     if (!result.ok) return { state: "blocked", code: result.blocker.code, message: result.blocker.message };
     const version = store.listEvents(workspaceId, { type: "portrait.written" }).length + 1;

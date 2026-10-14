@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 import { CrosslineStore } from "@crossline/db";
 import { LINE_SETTING } from "@crossline/identity-packs";
 import { ENERGY_CATEGORIES, PORTRAIT_SCHEMA_VERSION, SAY_DO_DIMENSIONS, SCHWARTZ_VALUES, type PortraitReport } from "@crossline/core";
-import { createPortraitWriter, PORTRAIT_WRITER, portraitRewriteDue } from "./portrait-writer";
+import { createPortraitWriter, PORTRAIT_REWRITE_MARKER, PORTRAIT_WRITER, portraitRewriteDue } from "./portrait-writer";
 import { fakeRuntime } from "./testing/fake-runtime";
 
 const SKILL = readFileSync(path.resolve(import.meta.dirname, "../../../skills/marketplace/plugins/crossline/skills/crossline-portrait-writer/SKILL.md"), "utf8");
@@ -78,12 +78,20 @@ test("an old report is rewritten once after the new version ships; never twice, 
   expect(portraitRewriteDue(store, workspaceId, NOW)).toBe("schema");
   store.appendEvent({ ownerId: "o", workspaceId, idempotencyKey: "req", type: "portrait.requested", entityId: workspaceId, payload: {} });
   expect(portraitRewriteDue(store, workspaceId, new Date())).toBeNull();
+  store.setSetting(workspaceId, PORTRAIT_REWRITE_MARKER, "2026-10-14T00:00:00.000Z");
+  expect(portraitRewriteDue(store, workspaceId, NOW)).toBeNull();
+});
+
+test("the marker is per schema version: a report rewritten for schema 2 is rewritten once more for 3", () => {
   store.setSetting(workspaceId, "portrait.rewrite.v2", "2026-10-12T00:00:00.000Z");
+  keep({ version: 3, at: "2026-10-01T00:00:00.000Z", schema: 2, report: report() });
+  expect(portraitRewriteDue(store, workspaceId, NOW)).toBe("schema");
+  store.setSetting(workspaceId, PORTRAIT_REWRITE_MARKER, "2026-10-14T00:00:00.000Z");
   expect(portraitRewriteDue(store, workspaceId, NOW)).toBeNull();
 });
 
 test("the say–do part is rewritten at most monthly, once there is enough record; the old schema comes first", () => {
-  keep({ version: 2, at: "2026-10-01T00:00:00.000Z", schema: 2, report: report() });
+  keep({ version: 2, at: "2026-10-01T00:00:00.000Z", schema: PORTRAIT_SCHEMA_VERSION, report: report() });
   expect(portraitRewriteDue(store, workspaceId, NOW)).toBeNull();
   enoughExecutions();
   expect(portraitRewriteDue(store, workspaceId, NOW)).toBe("gap");
@@ -97,12 +105,12 @@ test("the say–do part is rewritten at most monthly, once there is enough recor
 
 test("a say–do rewrite replaces the gap only: the rest, the version and the figure stay", async () => {
   const before = report();
-  keep({ version: 4, at: "2026-10-01T00:00:00.000Z", schema: 2, report: before });
+  keep({ version: 4, at: "2026-10-01T00:00:00.000Z", schema: PORTRAIT_SCHEMA_VERSION, report: before });
   const gap = { ...before.gap, reading: "按计划投入偏低", pairs: before.gap.pairs!.map((pair) => ({ ...pair, says: 80 })) };
   const runtime = fakeRuntime([JSON.stringify({ gap })], PORTRAIT_WRITER);
   expect(await createPortraitWriter(store, workspaceId, "C:\\repo", () => runtime.rpc, { only: "gap" })()).toEqual({ state: "written", version: 4 });
   const after = saved();
-  expect(after).toMatchObject({ version: 4, at: "2026-10-01T00:00:00.000Z", schema: 2 });
+  expect(after).toMatchObject({ version: 4, at: "2026-10-01T00:00:00.000Z", schema: PORTRAIT_SCHEMA_VERSION });
   expect(after.report).toEqual({ ...before, gap });
   expect(runtime.prompts()[0]).toContain("\"previous\"");
   expect(store.getSetting(workspaceId, "portrait.gap.at")).toBeTruthy();
