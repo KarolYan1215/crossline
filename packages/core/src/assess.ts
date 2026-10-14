@@ -1,7 +1,7 @@
 import { TYPE_AXES, typeFromScores, type PortraitType, type TypeAxisId } from "./portrait-type";
 
 /**
- * The public quick test (docs/energy-and-ecosystem.md §7, decided 2026-10-14): sixteen statements for the four typing axes, a short
+ * The public quick test (docs/energy-and-ecosystem.md §7, docs/beta-launch.md, decided 2026-10-14): thirty-two statements for the four typing axes, a short
  * Munich ChronoType Questionnaire and a three-minute psychomotor vigilance test, all scored here as pure functions so the static
  * `apps/assess` site computes everything in the browser — no ledger, no model, no account. Every module this file imports must stay pure.
  */
@@ -9,7 +9,10 @@ import { TYPE_AXES, typeFromScores, type PortraitType, type TypeAxisId } from ".
 /** A statement on one axis. Agreeing points to the axis's right pole, or to its left pole when `reverse`. */
 export type QuizItem = { id: string; axis: TypeAxisId; text: string; reverse: boolean };
 
-/** Four statements per axis, two keyed to each pole, interleaved so neighbours never share an axis. */
+/**
+ * Eight statements per axis, four keyed to each pole, interleaved so neighbours never share an axis (decided 2026-10-14,
+ * docs/beta-launch.md: thirty-two rather than sixteen, so a type sits on more than four answers an axis).
+ */
 export const QUIZ_ITEMS: QuizItem[] = [
   { id: "q1", axis: "scope", text: "我常把一个领域里学到的东西，用到另一个完全不同的领域。", reverse: false },
   { id: "q2", axis: "basis", text: "做重要决定前，我一定要先看到数据或证据。", reverse: true },
@@ -26,7 +29,23 @@ export const QUIZ_ITEMS: QuizItem[] = [
   { id: "q13", axis: "scope", text: "新方向再有意思，我也会先把手头这一件做深。", reverse: true },
   { id: "q14", axis: "basis", text: "打动我的往往是一个远景，而不是眼前的数字。", reverse: false },
   { id: "q15", axis: "output", text: "我会花不少时间写作、演讲或在网上分享。", reverse: false },
-  { id: "q16", axis: "rhythm", text: "临时冒出来的机会，我通常会马上抓住。", reverse: false }
+  { id: "q16", axis: "rhythm", text: "临时冒出来的机会，我通常会马上抓住。", reverse: false },
+  { id: "q17", axis: "scope", text: "别人问我是做什么的，我很难用一个词回答。", reverse: false },
+  { id: "q18", axis: "basis", text: "遇到重要的选择，我会专门列表格或给各项打分。", reverse: true },
+  { id: "q19", axis: "output", text: "我更在意东西本身做得好不好，而不是有多少人看到。", reverse: true },
+  { id: "q20", axis: "rhythm", text: "我的待办清单经常被我自己推翻重排。", reverse: false },
+  { id: "q21", axis: "scope", text: "我能说出自己最擅长的那一件事，而且十年后大概还在做它。", reverse: true },
+  { id: "q22", axis: "basis", text: "就算数据还不支持，我也愿意先押注自己看好的方向。", reverse: false },
+  { id: "q23", axis: "output", text: "做完一件事，我第一时间就想把它分享出去。", reverse: false },
+  { id: "q24", axis: "rhythm", text: "离截止日期还早，我就会把事情做完。", reverse: true },
+  { id: "q25", axis: "scope", text: "我的收藏夹里，什么领域的东西都有。", reverse: false },
+  { id: "q26", axis: "basis", text: "听到一个新说法，我的第一反应是去找出处。", reverse: true },
+  { id: "q27", axis: "output", text: "比起开会讨论，我更愿意自己动手先把原型做出来。", reverse: true },
+  { id: "q28", axis: "rhythm", text: "太早定死的计划，会让我觉得被束缚。", reverse: false },
+  { id: "q29", axis: "scope", text: "比起认识很多圈子的人，我更愿意和同行深入交流。", reverse: true },
+  { id: "q30", axis: "basis", text: "我做决定常常是先有答案，再去找理由。", reverse: false },
+  { id: "q31", axis: "output", text: "能把复杂的事讲明白，是我最得意的本事之一。", reverse: false },
+  { id: "q32", axis: "rhythm", text: "我会提前一周排好接下来每天要做的事。", reverse: true }
 ];
 
 /** The five Likert answers, 1 to 5. */
@@ -149,3 +168,5 @@ export function pvtSummary(trials: PvtTrial[], prematureTaps = 0): PvtSummary {
     falseStarts: fast + prematureTaps, reliable: rts.length >= 20 };
 }
 export type { PortraitType, TypeAxisId } from "./portrait-type";
+/** The type tables, for the public app, which may import only this module and the other pure subpaths. */
+export { TYPE_AXES, TYPE_GROUPS, TYPE_TABLE, typeFromScores } from "./portrait-type";
