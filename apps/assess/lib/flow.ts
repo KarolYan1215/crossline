@@ -192,7 +192,7 @@ const ERROR_TEXT: Record<string, string> = {
   REJECTED: "这次提交没有通过检查。请刷新页面后再试。",
   RATE_LIMITED: "提交太频繁了，请过几分钟再试。",
   INVITE_NOT_FOUND: "这个邀请链接已失效（过期或已被删除）。可以不带邀请提交，只是不会生成双人卡。",
-  ALREADY_PAIRED: "这个邮箱已经和 TA 生成过双人卡，请查收之前的邮件。",
+  ALREADY_PAIRED: "这是你自己的邀请链接。把它转发给朋友，让 TA 来测。",
   NOT_FOUND: "没有找到这个结果，可能已过期或已被删除。",
   NETWORK: "网络连不上，请检查网络后重试。"
 };

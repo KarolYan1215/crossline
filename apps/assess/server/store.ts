@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHmac, randomBytes, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { TYPE_AXES, type TypeAxisId } from "@crossline/core/assess";
@@ -90,19 +90,46 @@ export function recordedScores(): Partial<Record<TypeAxisId, number[]>> {
 
 /** The avatar pipeline reports progress here. */
 export function setAvatarState(resultId: string, state: AvatarStatus["state"], file?: string): void {
-  if (file === undefined) db().prepare("UPDATE results SET avatar_state = ? WHERE id = ?").run(state, resultId);
-  else db().prepare("UPDATE results SET avatar_state = ?, avatar_file = ? WHERE id = ?").run(state, file, resultId);
+  db().transaction(() => {
+    if (file === undefined) db().prepare("UPDATE results SET avatar_state = ? WHERE id = ?").run(state, resultId);
+    else db().prepare("UPDATE results SET avatar_state = ?, avatar_file = ? WHERE id = ?").run(state, file, resultId);
+    if (state !== "drawing" && state !== "ready") return;
+    const row = db().prepare("SELECT email FROM results WHERE id = ?").get(resultId) as { email: string } | undefined;
+    if (row) db().prepare("INSERT OR IGNORE INTO avatar_draws (result_id, email_key, created_at) VALUES (?, ?, ?)")
+      .run(resultId, emailKey(row.email), new Date().toISOString());
+  }).immediate();
 }
 
+let secret: { dir: string; key: Buffer } | undefined;
+
+/** This install's own key (`<dataDir>/draw-key`, made on first use): the draw record keeps HMAC(address), never the address. */
+function drawKey(): Buffer {
+  const dir = dataDir();
+  if (secret?.dir === dir) return secret.key;
+  const file = path.join(dir, "draw-key");
+  let key: Buffer;
+  try { key = fs.readFileSync(file); }
+  catch {
+    fs.mkdirSync(dir, { recursive: true });
+    key = randomBytes(32);
+    try { fs.writeFileSync(file, key, { flag: "wx", mode: 0o600 }); }
+    catch { key = fs.readFileSync(file); }
+  }
+  secret = { dir, key };
+  return key;
+}
+
+const emailKey = (email: string): string => createHmac("sha256", drawKey()).update(email.trim().toLowerCase()).digest("base64url");
+
 /**
- * Figures already drawn (or being drawn) for this address, across all its results: a result in `drawing` or `ready`, or one that has a
- * drawn file. A result still `queued` (the one being enqueued right now) or settled on the template without a file does not count, so
- * every address gets its full `AVATARS_PER_EMAIL`. Counts only what is still stored: deleting a result forgets its address entirely,
- * so a deleted result's figure no longer counts (docs/assess-deploy.md, 「数据」).
+ * Figures already drawn (or being drawn) for this address within the retention period: every result that reached `drawing` or
+ * `ready`, recorded under a keyed hash of the address in `avatar_draws`. A result still `queued` (the one being enqueued right now)
+ * or settled on the template does not count, so every address gets its full `AVATARS_PER_EMAIL`; deleting a result does not give one
+ * back, so deleting and retaking cannot draw more. The record holds no address and goes after `RESULT_RETENTION_DAYS`.
  */
 export function avatarsDrawnFor(email: string): number {
-  const row = db().prepare("SELECT COUNT(*) AS n FROM results WHERE email = ? AND (avatar_state IN ('drawing', 'ready') OR avatar_file != '')")
-    .get(email.trim().toLowerCase()) as { n: number };
+  const since = new Date(Date.now() - RESULT_RETENTION_DAYS * 86_400_000).toISOString();
+  const row = db().prepare("SELECT COUNT(*) AS n FROM avatar_draws WHERE email_key = ? AND created_at > ?").get(emailKey(email), since) as { n: number };
   return row.n;
 }
 
@@ -191,5 +218,6 @@ export function purgeExpired(now: Date = new Date()): number {
   const ids = db().prepare("SELECT id FROM results WHERE expires_at <= ?").all(now.toISOString()) as Array<{ id: string }>;
   let removed = 0;
   for (const { id } of ids) if (deleteResult(id)) removed++;
+  db().prepare("DELETE FROM avatar_draws WHERE created_at <= ?").run(new Date(now.getTime() - RESULT_RETENTION_DAYS * 86_400_000).toISOString());
   return removed;
 }

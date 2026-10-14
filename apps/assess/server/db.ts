@@ -40,6 +40,16 @@ const MIGRATIONS: Migration[] = [
     );
     CREATE INDEX pairs_inviter ON pairs(inviter_id);
     CREATE INDEX pairs_invitee ON pairs(invitee_id);
+  `),
+  // 2: figures drawn, keyed by a keyed hash of the address, so deleting and retaking does not reset the per-address limit. Holds no
+  // address and no result content; rows go after the retention period.
+  (db) => db.exec(`
+    CREATE TABLE avatar_draws (
+      result_id TEXT PRIMARY KEY,
+      email_key TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX avatar_draws_email ON avatar_draws(email_key);
   `)
 ];
 

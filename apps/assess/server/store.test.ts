@@ -33,7 +33,7 @@ test("a result is stored with a lowercased email, two distinct tokens and the re
 
 test("the schema is migrated once, inside the user_version gate, with WAL on", () => {
   createResult(input());
-  expect(db().pragma("user_version", { simple: true })).toBe(1);
+  expect(db().pragma("user_version", { simple: true })).toBe(2);
   expect(db().pragma("journal_mode", { simple: true })).toBe("wal");
   expect(fs.existsSync(path.join(dir, "assess.db"))).toBe(true);
   expect(db().prepare("SELECT name FROM pragma_table_info('results')").all().map((row) => (row as { name: string }).name))
@@ -132,4 +132,9 @@ test("recorded scores collect every kept result per axis; avatars are counted pe
   setAvatarState(second.id, "ready", "avatars/x.png");
   expect(getResultById(second.id)?.avatar).toEqual({ state: "ready", file: "avatars/x.png" });
   expect(avatarsDrawnFor("a@example.com")).toBe(1);
+  deleteResult(second.id);
+  expect(avatarsDrawnFor("a@example.com")).toBe(1);
+  expect(JSON.stringify(db().prepare("SELECT * FROM avatar_draws").all())).not.toContain("example.com");
+  expect(purgeExpired(new Date(Date.now() + 91 * 86_400_000))).toBe(1);
+  expect(avatarsDrawnFor("a@example.com")).toBe(0);
 });
