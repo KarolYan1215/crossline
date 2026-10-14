@@ -110,14 +110,15 @@ export function salvageStoppedRun(store: CrosslineStore, workspaceId: string, ta
   walk(directory);
   if (!files.length) return false;
   const message = String((blocked.payload as { message?: string }).message ?? "");
+  const durationMs = Number((blocked.payload as { durationMs?: number }).durationMs ?? 0);
   const artifacts = files.map((file) => ({ path: path.relative(directory, file).replace(/\\/g, "/"), purpose: "停下前已产出", sha256: sha(file), bytes: statSync(file).size }));
   const summary = `这次运行没有做完（${message || code}），以下是停下前已经写出的文件，助手没有做最后的自查，请本人判断是否可用。`;
-  writeFileSync(path.join(directory, "audit.json"), JSON.stringify({ taskId, title: request.title ?? "", category: request.category ?? "", directory, durationMs: 0, summary, artifacts,
+  writeFileSync(path.join(directory, "audit.json"), JSON.stringify({ taskId, title: request.title ?? "", category: request.category ?? "", directory, durationMs, summary, artifacts,
     verification: [], needsHuman: [{ what: "判断这份未完成的结果是否可用", why: `运行停在：${message || code}` }], notDone: [{ what: "助手的最后自查与总结", why: message || code }],
     assumptions: [], audit: { commands: [], filesChanged: [], mcpCalls: [], searches: [], decisions: [], requests: { total: 0, allowed: 0 } }, inputsModified: [], checksPassed: false,
     reviewRequired: true, partial: true }, null, 2), "utf8");
   store.appendEvent({ ownerId: store.getWorkspaceOwnerId(workspaceId) ?? "", workspaceId, idempotencyKey: `agent:completed:${taskId}`, type: "agent.task.completed", entityId: taskId,
-    payload: { taskId, title: request.title ?? "", category: request.category ?? "", workOrderId: request.workOrderId ?? "", directory, durationMs: 0, commands: 0, filesChanged: 0,
+    payload: { taskId, title: request.title ?? "", category: request.category ?? "", workOrderId: request.workOrderId ?? "", directory, durationMs, commands: 0, filesChanged: 0,
       mcpCalls: 0, searches: 0, denied: 0, artifacts: artifacts.map(({ path: p, sha256, bytes }) => ({ path: p, sha256, bytes })), verification: [], needsHuman: 1, inputsModified: [],
       checksPassed: false, reviewRequired: true, partial: true, stoppedBy: code, auditFile: path.join(directory, "audit.json"), salvagedAt: now.toISOString() } });
   return true;
