@@ -43,9 +43,12 @@ test("each stage brings its own picture, and the time left is said before and af
 
 test("the week draws working hours and fixed arrangements, waiting ones dashed, and says where the hours came from", () => {
   const html = renderToStaticMarkup(<WeekView week={{ source: "interview", windows: [{ days: [1, 2, 3, 4, 5], start: "09:00", end: "17:00", energy: "high" }],
-    fixed: [{ id: "c1", title: "ECE 548", project: "ece548", weekdays: [2, 4], start: "11:00", end: "12:15", status: "pending" }] }} />);
+    fixed: [{ id: "c1", title: "ECE 548", project: "ece548", weekdays: [2, 4], start: "11:00", end: "12:15", status: "pending" }],
+    calendar: [{ title: "Dentist", weekday: 3, start: "10:00", end: "11:00", source: "家里的日历" }] }} />);
   expect(html).toContain("可用约 40 小时");
   expect(html).toContain("ECE 548 · 周二 11:00–12:15（待确认）");
   expect(html).toContain('data-status="pending"');
   expect(html).toContain("访谈提议");
+  // A connected calendar's events are drawn under it, and named.
+  expect(html).toContain("Dentist · 周三 10:00–11:00（家里的日历）");
 });

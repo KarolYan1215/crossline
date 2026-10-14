@@ -2,6 +2,7 @@ import { CodexAccountControl } from "./codex-account-control";
 import { ModelProviderCard } from "../settings/model-provider-card";
 import { CalendarSources } from "./calendar-sources";
 import { CalendarApps } from "./calendar-apps";
+import { CalendarSubscriptions } from "./calendar-subscriptions";
 import { TailscaleTrust } from "./tailscale-trust";
 import { DeviceLeases } from "./device-leases";
 import { effectiveSchedulePreferences, getStore, loadCalendarConnectorState } from "../../lib/crossline";
@@ -26,6 +27,7 @@ export function CalendarModule({ ctx }: { ctx: AccessContext }) {
         <Tag tone={writer ? "ok" : "neutral"}>{writer ? "已设置账户" : "未设置账户"}</Tag></div>
     </section>
     <CalendarApps />
+    <CalendarSubscriptions />
     <CalendarSources />
   </div>;
 }

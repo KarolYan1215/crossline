@@ -40,6 +40,8 @@ import { extractText, reextractForLayout } from "./extract";
 import { createTranscriber, createWhisperEngine, modelsDirectory } from "./transcribe";
 import { createBackgroundFactsExtractor } from "./background-facts-runner";
 import { createGraphSync, type SyncOutcome } from "./graph-sync";
+import { addSubscription, hasSubscriptions, removeSubscription, subscriptionSources } from "./calendar-subscriptions";
+import { defaultSafeGetDeps } from "./safe-fetch";
 import { REQUIRED_SKILLS } from "./required-skills";
 import { monthSpend, ownerOf, runtimeOwner, runtimesDir } from "./owner";
 import { createBackgroundSpend } from "./spend";
@@ -363,10 +365,11 @@ async function tick(): Promise<void> {
   }
   // Calendar reality is pulled every tick. It never rewrites an approved plan — a change there becomes
   // a new draft whose diffs are conflicts for the person to look at.
-  if (calendar) {
+  {
     for (const workspace of workspaces) {
-      const outcome = await calendar.sync(workspace.id).catch((error): SyncOutcome =>
+      const outcome = await syncCalendarFor(workspace.id).catch((error): SyncOutcome =>
         ({ state: "blocked", code: "GRAPH_SYNC_FAILED", message: error instanceof Error ? error.message : "" }));
+      if (!outcome) continue;
       recordCalendarOutcome(analysisStore, workspace.id, outcome, checkedAt);
       await calendarLinePass(workspace.id, checkedAt);
       if (outcome.state === "blocked" || outcome.changes > 0 || outcome.resynced) {
@@ -417,9 +420,11 @@ if (!claimWorkerLock()) {
   process.exit(0);
 }
 const analysisStore = new CrosslineStore(path.join(dataDir, "crossline.db"));
+// Keys and links that are credentials (a model provider's key, a calendar's private link): DPAPI files, never the ledger.
+const secrets = createDpapiSecretStore(dataDir);
 // A workspace's own third-party model (R7): Codex reaches it through this local gateway, which adds the key (model-gateway.ts).
 const modelProviders = createModelProviderService({
-  store: analysisStore, secrets: createDpapiSecretStore(dataDir), cwd: repoRoot,
+  store: analysisStore, secrets, cwd: repoRoot,
   gateway: await startModelGateway({ resolve: (workspaceId, providerId) => modelProviders.upstream(workspaceId, providerId) }),
   signedIn: (workspaceId) => codexSupervisor?.runtimes?.signedIn(workspaceId) ?? true,
   client: async (workspaceId) => {
@@ -639,8 +644,36 @@ const getWeeklyInsight = (workspaceId: string) => {
   }
   return insight;
 };
+/** The zone calendar events are placed in: the person's setting, else the machine's configured zone. */
+const calendarZone = (workspaceId: string): string | undefined => {
+  const raw = analysisStore.getSetting(workspaceId, "schedule.preferences");
+  if (raw) {
+    try {
+      const zone = (JSON.parse(raw) as { timeZone?: unknown }).timeZone;
+      if (typeof zone === "string") {
+        new Intl.DateTimeFormat("en", { timeZone: zone });
+        return zone;
+      }
+    } catch { /* An unreadable setting must not stop calendar sync. */ }
+  }
+  return process.env.CROSSLINE_TIME_ZONE;
+};
+// Calendars read from a subscription link (calendar-subscriptions.ts): no Graph, no sign-in, any workspace.
+const subscriptionDeps = { secrets, fetch: defaultSafeGetDeps() };
+const subscriptionsOf = (workspaceId: string) => subscriptionSources(analysisStore, workspaceId, subscriptionDeps, () => calendarZone(workspaceId));
+// A workspace that reads only subscriptions (no Graph login of its own) has its own syncer over them alone.
+const subscriptionSyncers = new Map<string, ReturnType<typeof createGraphSync>>();
+const subscriptionSync = (workspaceId: string) => {
+  let syncer = subscriptionSyncers.get(workspaceId);
+  if (!syncer) {
+    syncer = createGraphSync(analysisStore, workspaceId, { sources: () => subscriptionsOf(workspaceId), timeZone: () => calendarZone(workspaceId) });
+    subscriptionSyncers.set(workspaceId, syncer);
+  }
+  return syncer;
+};
+
 /**
- * Calendar sync only exists when a client id is configured. Without one there is nothing to read, and
+ * Graph calendar sync only exists when a client id is configured. Without one there is nothing to read, and
  * inventing a connector that always fails would put a permanent blocker on every tick.
  *
  * The Graph login itself is one credential session for the whole worker process — signing in is a real
@@ -688,21 +721,10 @@ const calendar = await (async () => {
       let syncer = syncers.get(workspaceId);
       if (!syncer) {
         syncer = createGraphSync(analysisStore, workspaceId, {
-          // Resolved per tick, so unticking a calendar takes effect on the next sync with no restart.
-          sources: () => buildSources(analysisStore, workspaceId, credential, reader),
-          timeZone: () => {
-            const raw = analysisStore.getSetting(workspaceId, "schedule.preferences");
-            if (raw) {
-              try {
-                const zone = (JSON.parse(raw) as { timeZone?: unknown }).timeZone;
-                if (typeof zone === "string") {
-                  new Intl.DateTimeFormat("en", { timeZone: zone });
-                  return zone;
-                }
-              } catch { /* An unreadable setting must not stop calendar sync. */ }
-            }
-            return process.env.CROSSLINE_TIME_ZONE;
-          }
+          // Resolved per tick, so unticking a calendar takes effect on the next sync with no restart. One syncer over every source
+          // (Graph calendars and subscriptions alike): per-source authority drops the blocks of any source not in this list.
+          sources: () => [...buildSources(analysisStore, workspaceId, credential, reader), ...subscriptionsOf(workspaceId)],
+          timeZone: () => calendarZone(workspaceId)
         });
         syncers.set(workspaceId, syncer);
       }
@@ -730,7 +752,15 @@ const calendar = await (async () => {
       return { state: "blocked", code: "GRAPH_LOGIN_OTHER_ACCOUNT", message: "本机的日历登录属于另一个账号；这个账号要读日历需用自己的微软账号登录。" };
     };
     return {
-      sync: async (workspaceId: string) => (await foreign(workspaceId)) ?? (await ensureCatalogueSeeded(workspaceId), getSyncer(workspaceId)()),
+      sync: async (workspaceId: string) => {
+        // Not this machine's Graph login, but calendars of its own by link: those are read, and the owner's blocks leave with the
+        // selection withdrawn (a source not in the list loses its blocks).
+        if (!mayUseGraphLogin(analysisStore, workspaceId) && hasSubscriptions(analysisStore, workspaceId)) {
+          withdrawForeignCalendar(analysisStore, workspaceId);
+          return subscriptionSync(workspaceId)();
+        }
+        return (await foreign(workspaceId)) ?? (await ensureCatalogueSeeded(workspaceId), getSyncer(workspaceId)());
+      },
       listSources: async (workspaceId: string) => {
         if (await foreign(workspaceId)) return [];
         await ensureCatalogueSeeded(workspaceId);
@@ -763,6 +793,15 @@ const calendar = await (async () => {
     return undefined;
   }
 })();
+
+/**
+ * One calendar sync per workspace: through Graph (subscriptions included) when this machine has a Graph login, else its
+ * subscriptions alone; null when the workspace reads no calendar at all, which is not a failure to report.
+ */
+const syncCalendarFor = async (workspaceId: string): Promise<SyncOutcome | null> => {
+  if (calendar) return calendar.sync(workspaceId);
+  return hasSubscriptions(analysisStore, workspaceId) ? subscriptionSync(workspaceId)() : null;
+};
 
 // Independent from BETTER_AUTH_SECRET on purpose: the auth secret leaking should not also hand out the
 // ability to trigger real Codex runs on the loopback supervisor port — see `packages/codex/src/capability.ts`.
@@ -842,17 +881,25 @@ if (!capabilitySecret) {
     },
     explainPlan: (today, workspaceId, ranking) => getPlanExplainer(workspaceId)(today, readRanking(ranking)),
     runWeeklyInsight: (workspaceId) => getWeeklyInsight(workspaceId)(),
-    // Undefined when no client id is configured or nobody has signed in, in which case the route is
-    // simply not mounted and the button says the connector is unavailable rather than lying.
+    // 立即同步日历 records its outcome like a tick does, so a read that works clears 「日历无法读取」 at once. A workspace that reads no
+    // calendar at all is told so, and nothing is recorded (it is not a failure).
+    syncCalendar: async (workspaceId: string) => {
+      const outcome = await syncCalendarFor(workspaceId);
+      if (!outcome) return { state: "blocked", code: "CALENDAR_NOT_CONNECTED", message: "还没有接入任何日历。" };
+      recordCalendarOutcome(analysisStore, workspaceId, outcome, new Date().toISOString());
+      // New events are filed under their lines in the background; the answer does not wait for the model.
+      void calendarLinePass(workspaceId, new Date().toISOString()).catch(() => undefined);
+      return outcome;
+    },
+    // Subscription links: read once before they are kept, the link itself only in the secret store.
+    calendarSubscriptions: {
+      add: (workspaceId: string, input: { link: string; label: string }) =>
+        addSubscription(analysisStore, workspaceId, subscriptionDeps, { ...input, timeZone: calendarZone(workspaceId) ?? "UTC" }),
+      remove: async (workspaceId: string, id: string) => ({ removed: removeSubscription(analysisStore, workspaceId, secrets, id) })
+    },
+    // Undefined when no client id is configured or nobody has signed in, in which case the routes are
+    // simply not mounted and the card says the connector is unavailable rather than lying.
     ...(calendar ? {
-      // 立即同步日历 records its outcome like a tick does, so a read that works clears 「日历无法读取」 at once.
-      syncCalendar: async (workspaceId: string) => {
-        const outcome = await calendar.sync(workspaceId);
-        recordCalendarOutcome(analysisStore, workspaceId, outcome, new Date().toISOString());
-        // New events are filed under their lines in the background; the answer does not wait for the model.
-        void calendarLinePass(workspaceId, new Date().toISOString()).catch(() => undefined);
-        return outcome;
-      },
       listCalendarSources: (workspaceId: string) => calendar.listSources(workspaceId),
       saveCalendarSources: (workspaceId: string, keys: string[]) => calendar.saveSources(workspaceId, keys)
     } : {})

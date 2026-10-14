@@ -4,7 +4,7 @@ import {
   EMPTY_PROFILE_MODEL, GOAL_EDITS_SETTING, ONBOARDING_TURN_SCHEMA, duplicateAttributes, type PendingGoalEdit, type StoredLineProfile, PROFILE_CONFIRMED, portraitFingerprint, answeredGapFacts, keepOnboardingTurn, mergeFacts, sanitizeDateExtraction, validateOnboardingTurn,
   gapCoveredBy, mergeDateExtractions, withoutOffHours, resolveAvailability, AVAILABILITY_SETTING, AVAILABILITY_PROPOSED_SETTING, type DateExtraction,
   type ProfileGap, type ProfileModel, type OnboardingStage, DEEP_STAGES, ONBOARDING_TONE_SETTING, readTone,
-  type KnownSources, type OnboardingTurn, type OnboardingTurnContext, ONBOARDING_PROGRESS_SETTING, readPartialTurn, type OnboardingProgress
+  type KnownSources, type OnboardingTurn, type OnboardingTurnContext, ONBOARDING_PROGRESS_SETTING, readPartialTurn, type OnboardingProgress, calendarWeek
 } from "@crossline/core";
 import { continueSkillTurn, runCodexSkill, type CodexRpcBoundary, type SkillProgress } from "@crossline/codex";
 import { interviewChecklistFor, interviewGapsFor, unfiledFilesIn, type CrosslineStore, type StoredOnboardingMessage, type StoredSourceDocument } from "@crossline/db";
@@ -49,7 +49,7 @@ export type OnboardingTurnOutcome =
   | { state: "asked" | "ready"; sessionId: string }
   | { state: "blocked"; sessionId: string; code: string; message: string };
 
-type Announced = { announcedSources?: string[] };
+type Announced = { announcedSources?: string[]; calendarSent?: string };
 
 export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId: string, cwd: string,
   getClient: () => CodexRpcBoundary | undefined, options: {
@@ -258,6 +258,10 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     // A re-read hands every file over again, as if none had been seen.
     const announced = input.reread ? new Set<string>() : new Set((session.coverage as Announced).announcedSources ?? []);
     const fresh = [...docs].filter(([id, doc]) => doc.extractionStatus === "done" && !announced.has(id));
+    // What the connected calendars hold in the coming week: sent on the first turn and again whenever it changed.
+    const week = calendarWeek(((store.listPlanVersions(workspaceId)[0]?.payload as { blocks?: [] } | undefined)?.blocks ?? []), today);
+    const weekSent = JSON.stringify(week);
+    const calendarChanged = week.length > 0 && (input.reread || weekSent !== (session.coverage as Announced).calendarSent);
 
     // `line-<id>`: the interview of one line, added after the first one.
     const focus = sessionId.startsWith("line-") ? identityLines(store, workspaceId).find((line) => line.id === sessionId.slice(5)) : undefined;
@@ -278,7 +282,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         today, timeZone, sources: clipDocuments(documents), ...(history ? { history } : {}), reply: { id: replyId, text: replyText },
         focusLine, profile: readProfile(), stage: ((session!.coverage as { stage?: OnboardingStage }).stage ?? (focusLine ? "details" : "orientation")),
         checklist: openChecklist(), ...stagePace(messages, { startOpen: startOpen() }), tone: readTone(store.getSetting(workspaceId, ONBOARDING_TONE_SETTING)),
-        ...(workHistory().length ? { workHistory: workHistory() } : {}),
+        ...(workHistory().length ? { workHistory: workHistory() } : {}), ...(week.length ? { calendar: week } : {}),
         lines: identityLines(store, workspaceId).map((line) => ({ id: line.id, label: line.label, rank: line.rank ?? null, hard: Boolean(line.hard), goals: line.goals ?? [],
           ...(line.goalParts?.length ? { goalParts: line.goalParts } : {}) }))
       };
@@ -319,7 +323,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         // The completion list goes with every turn, so the model knows what it still owes without being told twice in prose.
         const pace = stagePace(messages, { startOpen: startOpen() });
         const message = JSON.stringify({ reply: { id: replyId, text: replyText }, ...(newSources.length ? { newSources } : {}), checklist: openChecklist(), ...pace,
-          tone: readTone(store.getSetting(workspaceId, ONBOARDING_TONE_SETTING)) });
+          tone: readTone(store.getSetting(workspaceId, ONBOARDING_TONE_SETTING)), ...(calendarChanged ? { calendar: week } : {}) });
         result = await continueSkillTurn<OnboardingTurn>(client, session.codexThreadId, message, {
           skillName: ONBOARDING_SKILL, cwd, outputSchema: ONBOARDING_TURN_SCHEMA, validateOutput, softAccept,
           onAudit: () => {}, onProgress, timeoutMs: 60 * 60_000
@@ -347,7 +351,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       ...session, ...(threadId ? { codexThreadId: threadId } : {}),
       state: output.nextAction === "ready_for_milestones" ? "complete" : "active",
       coverage: { ...session.coverage, coverage: output.coverage, ...(output.stage ? { stage: output.stage } : {}),
-        announcedSources: [...announcedNow, ...sent.map(([id]) => id)] },
+        announcedSources: [...announcedNow, ...sent.map(([id]) => id)], ...(week.length ? { calendarSent: weekSent } : {}) },
       updatedAt: new Date().toISOString()
     });
     return { state: output.nextAction === "ready_for_milestones" ? "ready" : "asked", sessionId };

@@ -1,5 +1,5 @@
 import "server-only";
-import type { AccessContext, AvailabilityWindow, DateCandidate, RecurringMeeting } from "@crossline/core";
+import { calendarWeek, type AccessContext, type AvailabilityWindow, type DateCandidate, type RecurringMeeting, type WeekCalendarEvent } from "@crossline/core";
 import { getStore, resolvedAvailability } from "./crossline";
 
 /**
@@ -8,7 +8,7 @@ import { getStore, resolvedAvailability } from "./crossline";
  * date batches the confirmation card uses: an item the person turned down is left out, one waiting for them is drawn as pending.
  */
 export type WeekFixed = { id: string; title: string; project: string; weekdays: number[]; start: string; end: string; status: "confirmed" | "pending" };
-export type WeekSkeleton = { windows: AvailabilityWindow[]; source: string; fixed: WeekFixed[] };
+export type WeekSkeleton = { windows: AvailabilityWindow[]; source: string; fixed: WeekFixed[]; calendar: WeekCalendarEvent[] };
 export type TimelineItem = { id: string; date: string; title: string; kind: string; status: "confirmed" | "pending" };
 export type ProjectTimeline = Array<{ id: string; identityId: string; name: string; deadline: string; noDeadline: boolean; items: TimelineItem[] }>;
 
@@ -38,8 +38,11 @@ export function weekSkeleton(ctx: AccessContext, today: string): WeekSkeleton {
     seen.add(key);
     fixed.push({ id: meeting.id, title: meeting.title, project: meeting.project, weekdays: meeting.weekdays, start: meeting.startTime, end: meeting.endTime, status });
   }
-  return { windows, source, fixed };
+  const plan = getStore().listPlanVersions(ctx.workspaceId)[0];
+  return { windows, source, fixed, calendar: calendarWeek((plan?.payload as { blocks?: [] } | undefined)?.blocks ?? [], today) };
 }
+
+
 
 const DATED_KINDS = new Set(["exam", "project_due", "deadline", "homework_due", "quiz", "meeting", "other"]);
 

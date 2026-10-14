@@ -152,6 +152,8 @@ export type OnboardingTurnContext = {
   checklist?: Array<{ label: string; detail: string; owner: "interview" | "person"; start?: boolean }>;
   /** Hours spent in Codex and Claude Code per folder and when in the day (`agentHistoryLines`), when the person allowed it: habits, not a plan. */
   workHistory?: string[];
+  /** The connected calendars' events in the next seven days (`calendarWeek`), when any calendar is connected: what the week already holds. */
+  calendar?: Array<{ title: string; weekday: number; start: string; end: string; source: string }>;
   /**
    * How many rounds the interview has spent in its current stage. From the second round on, `moveOn` says to go to the next stage — an
    * interview that waits for an answer the person does not have never ends (a simulated user who said 不确定 kept one in 「能量」 for seven

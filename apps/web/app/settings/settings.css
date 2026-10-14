@@ -79,3 +79,11 @@
 /* 后台任务: the assistant's runs going on now, each with what it has done so far. */
 .bg-list{list-style:none;margin:0;padding:0;display:grid;gap:8px}
 .bg-steps{margin:4px 0 0;padding-left:18px;display:grid;gap:2px;font-size:13px;color:var(--muted);overflow-wrap:anywhere}
+/* Subscription calendars (connectors/calendar-subscriptions.tsx): the link, an optional name, and where each app keeps the link. */
+.calendar-subscriptions-form{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,160px) auto;gap:6px;align-items:center}
+.calendar-subscriptions-form input{min-width:0;font:inherit;font-size:13px;padding:5px 8px;border:1px solid var(--ink);background:var(--paper);color:var(--ink)}
+.calendar-subscriptions-guide{display:grid;gap:6px}
+.calendar-subscriptions-guide ol{margin:0;padding-left:18px;display:grid;gap:2px;font-size:13px}
+.ob-left .calendar-subscriptions-form{grid-template-columns:minmax(0,1fr)}
+@media (max-width:640px){.calendar-subscriptions-form{grid-template-columns:minmax(0,1fr)}}
+.calendar-subscriptions-help{justify-self:start}

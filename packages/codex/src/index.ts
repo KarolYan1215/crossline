@@ -421,6 +421,11 @@ export async function startCodexSupervisor(options: {
   listCalendarSources?: (workspaceId: string) => Promise<unknown>;
   /** Replaces the ticked set with exactly these `<accountId>:<calendarId>` keys. */
   saveCalendarSources?: (workspaceId: string, keys: string[]) => Promise<unknown>;
+  /** Calendars read from a subscription link: added after one read (the link goes to the worker's secret store), and removed. */
+  calendarSubscriptions?: {
+    add: (workspaceId: string, input: { link: string; label: string }) => Promise<unknown>;
+    remove: (workspaceId: string, id: string) => Promise<unknown>;
+  };
   plugin?: LocalPluginContract;
   /**
    * When set, every request must carry a valid `x-crossline-capability` token signed with this secret
@@ -845,6 +850,32 @@ export async function startCodexSupervisor(options: {
           sendJson(response, 502, { blocker: { code: "GRAPH_CALENDARS_UNAVAILABLE",
             message: error instanceof Error ? error.message : "保存日历选择失败" } });
         }
+        return;
+      }
+      // A subscription link (docs/onboarding-v3.md 「日历接入」): read once here before it is kept, so a link that does not open is refused
+      // now rather than failing every tick. The answer is awaited: a read takes a second or two and the person is waiting for it.
+      if (request.method === "POST" && pathname === "/v1/calendar/subscriptions" && options.calendarSubscriptions) {
+        if (request.headers.origin || !request.headers["content-type"]?.startsWith("application/json")) {
+          sendJson(response, 403, { blocker: { code: "SYNC_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
+          return;
+        }
+        const body = await readJsonBody(request).catch(() => undefined) as { link?: unknown; label?: unknown } | undefined;
+        if (typeof body?.link !== "string" || body.link.length > 2000) {
+          sendJson(response, 400, { blocker: { code: "ICAL_LINK_INVALID", message: "需要日历链接" } });
+          return;
+        }
+        try { sendJson(response, 200, await options.calendarSubscriptions.add(callerWorkspaceId, { link: body.link, label: typeof body.label === "string" ? body.label : "" })); }
+        catch { sendJson(response, 502, { blocker: { code: "ICAL_ADD_FAILED", message: "没能接入这个日历" } }); }
+        return;
+      }
+      const subscriptionMatch = /^\/v1\/calendar\/subscriptions\/([A-Za-z0-9-]{1,40})$/.exec(pathname);
+      if (request.method === "DELETE" && subscriptionMatch && options.calendarSubscriptions) {
+        if (request.headers.origin) {
+          sendJson(response, 403, { blocker: { code: "SYNC_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
+          return;
+        }
+        try { sendJson(response, 200, await options.calendarSubscriptions.remove(callerWorkspaceId, subscriptionMatch[1]!)); }
+        catch { sendJson(response, 502, { blocker: { code: "ICAL_REMOVE_FAILED", message: "没能移除这个日历" } }); }
         return;
       }
       // Pull the calendar now. The tick is fifteen minutes wide, which makes "change your calendar and

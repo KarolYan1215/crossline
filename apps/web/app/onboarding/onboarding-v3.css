@@ -158,3 +158,6 @@
 .ob-progress-counts{font-size:13px;color:var(--graphite)}
 .ob-progress-counts b{color:var(--ink);font-variant-numeric:tabular-nums}
 .ob3 .ob-progress .ob-btn{justify-self:start}
+/* Events from a connected calendar under the interview's own reading (weekSkeleton.calendar). */
+.ob-calendar{fill:#8A8478;fill-opacity:.55}
+.ob-key[data-k="calendar"]{background:#8A8478;opacity:.55}

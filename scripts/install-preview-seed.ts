@@ -63,6 +63,18 @@ store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `preview-da
     { id: "d2", date: day(17), startTime: "", endTime: "", kind: "deadline", title: "西湖合作论文投稿", project: "westlake", sourceRef: "reply-1", quote: "10/31 前要投出", confidence: "high", note: "" },
     { id: "d3", date: day(40), startTime: "", endTime: "", kind: "homework_due", title: "ECE 548 期末项目", project: "ece548", sourceRef: "src-1", quote: "Final project due", confidence: "medium", note: "" }] } });
 
+// A subscribed calendar (calendar-subscriptions.ts) and what it put on the plan this week: the link itself is never in the ledger.
+store.setSetting(ws, "calendar.subscriptions", JSON.stringify([{ id: "preview1", label: "家里的日历", host: "p01-caldav.icloud.com", addedAt: now,
+  lastReadAt: now, lastEvents: 3 }]));
+{
+  const plan = store.listPlanVersions(ws)[0];
+  const others = ((plan?.payload as { blocks?: Array<{ id: string }> } | undefined)?.blocks ?? []).filter((block) => !block.id.startsWith("graph_calendar:ical:preview1:"));
+  const event = (offset: number, title: string, start: string, end: string) => ({ id: `graph_calendar:ical:preview1:${title}:${offset}`, day: day(offset), title, start, end,
+    source: "家里的日历", sourceKey: "ical:preview1", lane: "human", readOnly: true });
+  const blocks = [...others, event(1, "牙医复诊", "10:00", "11:00"), event(2, "健身", "18:30", "19:30"), event(4, "健身", "18:30", "19:30"), event(5, "和父母视频", "20:00", "21:00")];
+  store.savePlanVersion({ id: plan?.id ?? "preview-plan", ownerId: owner, workspaceId: ws, version: plan?.version ?? 1, status: "current", payload: { blocks } });
+}
+
 const profile = {
   portrait: reached("compass") ? "一个把研究当底座、想用产品验证自己判断力的博士生，时间被课程和组会切碎。" : "",
   coreConflict: reached("compass") ? "想要独立立项的掌控感，却把最好的上午交给了别人的会议。" : "", problem: "", gravity: [], designable: [], reframes: [],

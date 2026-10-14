@@ -58,7 +58,9 @@ export function StageView({ state, stage, complete, onChanged }: {
     </section>
     <nav className="ob-stage-tabs" aria-label="各阶段的图">
       {VIEWS.map((view, index) => <button key={view.key} type="button" aria-current={shown === view.key || undefined}
-        disabled={index > reached} onClick={() => setShown(view.key)}>{view.label}</button>)}
+        // The week is there from the start once a calendar or a file has put something in it.
+        disabled={index > reached && !(view.key === "week" && (state.week.calendar.length > 0 || state.week.fixed.length > 0))}
+        onClick={() => setShown(view.key)}>{view.label}</button>)}
     </nav>
     <div className="ob-stage-body">
       {shown === "lines" && <LinesView state={state} onChanged={onChanged} />}
@@ -111,7 +113,7 @@ export function WeekView({ week }: { week: WeekSkeleton }) {
   const hours = week.windows.reduce((sum, window) => sum + window.days.length * Math.max(0, minutes(window.end) - minutes(window.start)), 0) / 60;
   return <div className="ob-view">
     <svg className="ob-week" viewBox={`0 0 ${left + column * 7 + 4} ${top + height + 6}`} role="img"
-      aria-label={`一周骨架：可用约 ${Math.round(hours)} 小时，固定安排 ${week.fixed.length} 项`}>
+      aria-label={`一周骨架：可用约 ${Math.round(hours)} 小时，固定安排 ${week.fixed.length} 项，日历日程 ${week.calendar.length} 项`}>
       {DAYS.map((day, index) => <text key={day} x={left + index * column + column / 2} y={12} textAnchor="middle" className="ob-axis">{day}</text>)}
       {[6, 9, 12, 15, 18, 21, 24].map((hour) => <g key={hour}>
         <line x1={left} x2={left + column * 7} y1={y(`${hour}:00`)} y2={y(`${hour}:00`)} className="ob-grid" />
@@ -120,12 +122,16 @@ export function WeekView({ week }: { week: WeekSkeleton }) {
       {week.windows.flatMap((window, w) => window.days.map((day) => <rect key={`${w}-${day}`} x={left + dayIndex(day) * column + 2} width={column - 4}
         y={y(window.start)} height={Math.max(2, y(window.end) - y(window.start))} className="ob-window" data-energy={window.energy}>
         <title>{`周${DAYS[dayIndex(day)]} ${window.start}–${window.end} 可用（精力${window.energy === "high" ? "高" : window.energy === "low" ? "低" : "中"}）`}</title></rect>))}
+      {week.calendar.map((event, index) => <rect key={`cal-${index}`} x={left + dayIndex(event.weekday) * column + 4} width={column - 8}
+        y={y(event.start)} height={Math.max(3, y(event.end) - y(event.start))} className="ob-calendar">
+        <title>{`${event.title} · 周${DAYS[dayIndex(event.weekday)]} ${event.start}–${event.end}（${event.source}）`}</title></rect>)}
       {week.fixed.flatMap((item) => item.weekdays.map((day) => <rect key={`${item.id}-${day}`} x={left + dayIndex(day) * column + 6} width={column - 12}
         y={y(item.start)} height={Math.max(3, y(item.end) - y(item.start))} className="ob-fixed" data-status={item.status}>
         <title>{`${item.title} · 周${DAYS[dayIndex(day)]} ${item.start}–${item.end}${item.status === "pending" ? "（待确认）" : ""}`}</title></rect>))}
     </svg>
     <p className="ob-legend"><span className="ob-key" data-k="high" />精力高 <span className="ob-key" data-k="medium" />中 <span className="ob-key" data-k="low" />低
-      <span className="ob-key" data-k="fixed" />固定安排 <span className="ob-key" data-k="pending" />待确认</p>
+      <span className="ob-key" data-k="fixed" />固定安排 <span className="ob-key" data-k="pending" />待确认
+      {week.calendar.length > 0 && <><span className="ob-key" data-k="calendar" />日历</>}</p>
     <p className="ob-muted">{week.source === "default" ? "还不知道可用时间，先按默认的每周 39 小时画；说出工作时间后会更新。"
       : `每周可用约 ${Math.round(hours)} 小时${week.source === "interview" ? "（访谈提议，可在计划页修改）" : week.source === "stated_hours" ? "（按说过的每周小时数推算）" : ""}。`}</p>
   </div>;

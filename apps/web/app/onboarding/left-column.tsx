@@ -4,6 +4,7 @@ import { useState } from "react";
 import { lineAttributes } from "@crossline/core";
 import { AttributePicker, type AttributeOption } from "../ui/attribute-picker";
 import { CalendarApps } from "../connectors/calendar-apps";
+import { CalendarSubscriptions } from "../connectors/calendar-subscriptions";
 import { FactList } from "./profile-panel";
 import { QuestionCard } from "./question-card";
 import type { Answer, DocumentRow, OnboardingState, Question } from "./onboarding-types";
@@ -47,6 +48,7 @@ export function LeftColumn({ state, busy, accept, onUpload, onChanged, heldQuest
         <span>{doc.fileName}</span><small>{DOC_STATUS[doc.extractionStatus]}{doc.projectId ? ` · ${state.projects.find((project) => project.id === doc.projectId)?.name ?? ""}` : ""}</small>
       </li>)}</ul>}
       <CalendarApps />
+      <CalendarSubscriptions onChanged={onChanged} />
     </section>
 
     {heldQuestions.length > 0 && <section className="ob-card ob-voice" aria-label="待补充的事实">
