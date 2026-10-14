@@ -8,6 +8,9 @@ test("cleaning up inside the task directory is not put to the person, however th
   const shell = "\"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\" -Command ";
   expect(decide(`${shell}'$cache = Resolve-Path -LiteralPath 'skill/scripts/__pycache__'; Remove-Item -LiteralPath $cache.Path -Recurse -Force'`).decision).toBe("allow");
   expect(decide(`${shell}'Remove-Item -LiteralPath C:\\Users\\karol\\Crossline\\ai\\t1\\skill\\scripts\\__pycache__ -Recurse -Force'`).decision).toBe("allow");
+  // The model writes PowerShell paths with doubled backslashes (the third real ask, 2026-10-14); a UNC path still asks.
+  expect(decide(`${shell}'$cache = Resolve-Path -LiteralPath '.\\\\skill\\\\scripts\\\\__pycache__'; Remove-Item -LiteralPath $cache.Path -Recurse -Force'`).decision).toBe("allow");
+  expect(decide(`${shell}'Remove-Item -Recurse -Force \\\\server\\share\\x'`).decision).toBe("ask");
   expect(decide(`${shell}'Remove-Item -Recurse -Force ..\\other'`).decision).toBe("ask");
   expect(decide("Remove-Item -Recurse -Force C:\\Users\\karol\\Documents\\x").decision).toBe("ask");
   expect(decide("Remove-Item -Recurse -Force *").decision).toBe("ask");

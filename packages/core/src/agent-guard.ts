@@ -113,7 +113,7 @@ const withoutShell = (command: string) => command.replace(/^\s*[a-z]:[\\/][^\s]*
 
 /** No path in the command can leave the working directory: no drive, root, UNC, home, environment variable, parent or wildcard-only target. */
 function onlyRelative(command: string): boolean {
-  return !/[a-z]:[\\/]|(^|[\s=(])[\\/]|\\\\|~|\$env:|\$home|%[a-z_]+%|\.\.|(^|[\s;|&])(cd|set-location|push-location|sl|pushd)\b/i.test(command)
+  return !/[a-z]:[\\/]|(^|[\s='"(])[\\/]|~|\$env:|\$home|%[a-z_]+%|\.\.|(^|[\s;|&])(cd|set-location|push-location|sl|pushd)\b/i.test(command)
     && !/(remove-item|\brm\b|\bdel\b|\brmdir\b|\brd\b|\berase\b|move-item|\bmv\b|\bmove\b)\s+(-\S+\s+)*\*(\s|$)/i.test(command);
 }
 
