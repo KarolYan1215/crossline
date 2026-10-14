@@ -3,8 +3,8 @@ import type { ReactNode } from "react";
 import "./assess.css";
 
 export const metadata: Metadata = {
-  title: "Crossline 速测：思维模式与精力节律",
-  description: "16 道题的思维模式类型、精简版慕尼黑时型问卷和 3 分钟反应测试。全部在浏览器里计算，不上传任何数据。"
+  title: "Crossline 速测：你怎么同时活好几条线",
+  description: "32 道题加上你的样子，约 4–5 分钟，得到一张类型海报：你的思维模式、适合同时推进的 3 条主线和最合拍的搭子。"
 };
 export const viewport: Viewport = { width: "device-width", initialScale: 1, themeColor: "#F6F2EA" };
 
