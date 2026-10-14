@@ -83,7 +83,7 @@ export function AskStack({ initial, moreHref }: { initial: Ask[]; moreHref?: str
 }
 
 function AskMeta({ ask }: { ask: Ask }) {
-  return <p className="ask-meta"><span className="tag">{URGENCY[ask.urgency]}</span>{ask.dueDay && <small>关系到 {ask.dueDay.slice(5)} 的截止</small>}
+  return <p className="ask-meta"><span className="tag">{URGENCY[ask.urgency]}</span>{ask.dueDay && <small>关系到 {`${Number(ask.dueDay.slice(5, 7))}/${Number(ask.dueDay.slice(8, 10))}`} 的截止</small>}
     {ask.importance !== undefined && <small>里程碑重要性 {ask.importance}</small>}{ask.entersOn && <small>{ask.entersOn.slice(5)} 起列入本周</small>}</p>;
 }
 

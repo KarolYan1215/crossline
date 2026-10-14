@@ -21,7 +21,7 @@ test("Today's stack opens only the top ask, shows the next two as edges, and can
   expect(html).not.toContain("第四条");
   expect(html).toContain("自动倒推时发现缺数据。");
   expect(html).toContain("今天要答");
-  expect(html).toContain("关系到 10-09 的截止");
+  expect(html).toContain("关系到 10/9 的截止");
   expect(html.match(/· 推荐/g)).toHaveLength(1);
   expect(html).toContain('href="/milestones"');
   expect(html).toContain("明天再问");

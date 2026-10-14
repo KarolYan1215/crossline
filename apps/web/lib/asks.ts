@@ -340,7 +340,7 @@ function missedAsks({ store, ctx, today }: Source): Ask[] {
     return [{ id, kind: "missed_block" as const, entityId: orderId, line: order.identityId, urgency: urgencyFor(dueDay, today), dueDay,
       raisedAt: `${yesterday}T${start}`, fingerprint: yesterday,
       title: `昨天 ${start} 排的「${short(order.intent)}」没开始`,
-      why: `它已经被顺延到后面的空档，关系到 ${format(dueDay)} 的截止（还剩 ${daysBetween(today, dueDay)} 天）。顺延没问题就点一下；要是其实做了，去补记；要是已经不需要，就不做了。`,
+      why: `它已经被顺延到后面的空档，关系到 ${format(dueDay)} 的截止（${((left) => left > 0 ? `还剩 ${left} 天` : left === 0 ? "今天截止" : `已过 ${-left} 天`)(daysBetween(today, dueDay))}）。顺延没问题就点一下；要是其实做了，去补记；要是已经不需要，就不做了。`,
       options: [
         { id: "roll", label: "顺延就好", detail: "按重新排的时间做", recommended: true },
         { id: "later", label: "推到某天再做", fields: [{ id: "date", label: "从哪天起再排", kind: "date" as const, required: true }] },

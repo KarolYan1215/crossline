@@ -13,6 +13,8 @@ export function retractedEventIdsIn(store: CrosslineStore, workspaceId: string):
 }
 
 const PERSONAL = /^(个人|本人|个人档案|个人信息|person|personal)$/iu;
+/** A file whose own name says it is about the person — a profile, a CV — whatever projects it happens to name in passing. */
+const PROFILE_FILE = /(profile|resume|résumé|(^|[^a-z])cv([^a-z]|$)|简历|个人档案|个人资料|个人简介|画像)/iu;
 
 export type UnfiledFile = { id: string; fileName: string; titles: string[]; days: string[]; lean: KnownProject | undefined; raisedAt: string };
 
@@ -52,7 +54,7 @@ export function unfiledFilesIn(store: CrosslineStore, workspaceId: string, input
   // A file the interview read the person's own history from (its dates filed under 「个人档案」 or a line's name) is about the person.
   const personal = new Set(extracted.flatMap((event) => itemsOf(event).filter(personalItem).flatMap((item) => item.sourceRef ? [byRef.get(item.sourceRef)?.id ?? ""] : [])));
   for (const doc of docs) {
-    if (doc.projectId || cleared.has(doc.id) || personal.has(doc.id) || named(doc) > 0) continue;
+    if (doc.projectId || cleared.has(doc.id) || personal.has(doc.id) || PROFILE_FILE.test(doc.fileName) || named(doc) > 0) continue;
     const whole = inWhole(doc);
     if (whole.length > 1) continue;
     entry(doc).lean = whole[0];
