@@ -139,6 +139,34 @@
 - **防爆量**：设每日预算上限；超限或排队太久时，直接给该类型的基础形象。服务器要能扛住突发访问，避免网易云那种 503。
 - **访谈后**：按访谈内容重画个性化形象，作为注册的奖励。
 
+### 4.1 形象流程的实现依据（W5，2026-10-14 查证）
+
+**硅基流动接口**（官方文档：[创建图片生成请求](https://docs.siliconflow.com/cn/api-reference/images/images-generations.md)、[生图模型](https://docs.siliconflow.com/cn/userguide/capabilities/images.md)、[速率限制](https://docs.siliconflow.com/en/userguide/rate-limits/rate-limit-and-upgradation.md)、[错误处理](https://docs.siliconflow.com/en/faqs/error-code.md)；`docs.siliconflow.cn` 上的同名页面目前返回 404，内容以 `docs.siliconflow.com` 为准）：
+- 接口：`POST {base}/images/generations`，`Authorization: Bearer <key>`，JSON 请求体。国内地址 `https://api.siliconflow.cn/v1`（文档示例用的就是它），国际站 `https://api.siliconflow.com/v1`。
+- 图生图模型 id：`black-forest-labs/FLUX.1-Kontext-dev`。它的请求体必填 `model`、`prompt`、`image`，可选 `seed`（0–9999999999）和 `prompt_enhancement`（默认 false）；**没有** `image_size`，输出尺寸跟随参考图。参考图字段是 `image`，格式是 `data:image/png;base64,…` 字符串。注意 Kontext pro/max 的字段名是 `input_image`，换模型时要一起改。
+- Kontext [dev] 必须带参考图，所以出模板候选（纯文生图）改用 `black-forest-labs/FLUX.1-dev`（`image_size: "1024x1024"`，`num_inference_steps` 1–30）。
+- 返回：`{ images: [{ url }], timings: { inference }, seed }`。**图片链接只有一小时有效**，必须立即下载保存。
+- 错误：429 是限流（消息里写明是 RPM/TPM/IPM/IPD 哪一项）；503/504 是负载过高，稍后重试；400 是参数错，401 是 key 没设对，403 多半是模型要求实名认证。
+- 限流：图片模型按 IPM（每分钟张数）和 IPD（每天张数）计，最低一档是 **IPM 2、IPD 400**，按账号（不是按 key）、按模型分别计算，消费越多档位越高。
+- 价格：模型页标价 **0.015 美元/张**（[模型页](https://www.siliconflow.com/models/black-forest-labs-flux-1-kontext-dev)，国际站美元价；人民币价未核实）。每天 300 张，最坏约 4.5 美元/天。
+
+**保持角色不变的提示词写法**（Black Forest Labs 官方：[FLUX.1 Kontext 图像编辑](https://docs.bfl.ml/kontext/kontext_image_editing.md)、[单参考图编辑](https://docs.bfl.ml/guides/prompting_editing_single_reference.md)）：Kontext 擅长多次编辑后保持角色一致；指令里先写清楚改什么，再**逐项列出不变的东西**（不能只写「其余不变」）；颜色用十六进制色值；要保留的细节直接点名，例如「keep her pose」「Preserve its identity」。所以提示词是固定英文：只改性别呈现、发型、眼镜、肤色（附色值）和衣服版型，然后逐项写明不变的部分：画风、线条粗细、平涂颜色、姿势、比例、表情、构图、服装颜色、道具、背景和圆形底。`prompt_enhancement` 关掉，避免平台改写这段固定指令。
+
+**用户自填文字的安全处理**（[OWASP LLM 提示注入防护速查表](https://cheatsheetseries.owasp.org/cheatsheets/LLM_Prompt_Injection_Prevention_Cheat_Sheet.html)）：这份速查表要求多层防护，也明确说**只靠分隔符或标签分不开指令和数据**；它把不可见字符夹带列为一种攻击方式。所以填空不是原样拼进提示词，而是：
+1. NFKC 规范化，去掉所有控制字符和不可见字符，截到 40 字，去掉网址和邮箱；
+2. 读起来像指令（「忽略以上」「你现在是」「system」等）或涉及不安全内容（裸露、血腥、武器、仇恨符号、像某个真人），就**整条丢弃**；
+3. 剩下的文字只提取固定词表里的外貌词（发色、帽子、围巾、耳环、雀斑、胡子、刘海、马尾……），翻译成固定的英文短语，最多 4 个，用引号标明是描述，不是指令。
+
+这样，词表以外的任何字都进不了提示词。邮箱、署名和答案从来不进提示词。
+
+**排队与重试**（[AWS 架构博客：指数退避与抖动](https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/)；`Retry-After` 见 RFC 9110）：进程内队列，并发 2（对应最低档 IPM 2），最多 40 个排队，再多就直接给模板。每次调用 60 秒超时。只对 429 和 5xx（含超时）重试**一次**：有 `Retry-After` 就按它等，加不到 1 秒的随机抖动；没有的话，429 等 20–40 秒，5xx 等 2–5 秒。400、401、403 不重试。
+
+**费用护栏**：每日上限 `ASSESS_IMAGE_DAILY_LIMIT`（默认 300，低于最低档 IPD 400），按北京时间自然日计，存在 `dataDir()/avatar-budget.json`（原子写入，重启不清零）。**每次调用模型都占一个名额，重试也算**，所以计数只会多算、不会少算。另有每个邮箱最多 3 张（`AVATARS_PER_EMAIL`）。没有 key、超出上限、队列满或调用失败，都立即给该类型的模板，结果页永远不会因为画图而卡住或报错。
+
+**下载生成的图片**：只接受 https，每一跳重定向都检查，地址里不能带账号密码；最大 12 MB，内容必须是 PNG/JPEG/WebP；下载时不带 API key。
+
+**实现位置**：`apps/assess/server/avatar/`（`provider.ts` 接口、`prompt.ts` 提示词和填空处理、`queue.ts`、`budget.ts`、`templates.ts`、`placeholder.ts`）、`apps/assess/app/api/avatar/[file]/route.ts`、`scripts/assess-templates.ts`；模板与审定流程见 `apps/assess/templates/README.md`。
+
 ## 5. 托管内测
 - **服务器**：香港或东京的 Linux 云主机（约 10–30 美元 / 月），HTTPS，非 .cn 域名。
 - **公网前提**：要先满足 `docs/external-deployment.md` 列出的解禁条件，例如安全头、频率限制、注册与邀请码、备份。
