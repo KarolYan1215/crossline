@@ -9,7 +9,7 @@ import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { learnedArchetypes } from "./archetype-curator";
 import { ownerOf } from "./owner";
 
-import { MINE_SKILL_INSTRUCTION, librarySkillsFor } from "./skill-library";
+import { libraryInstruction, librarySkillsFor } from "./skill-library";
 const PLANNER = "crossline:crossline-step-planner";
 const REVIEWER = "crossline:crossline-validation-reviewer";
 const JUDGE = "crossline:crossline-progress-judge";
@@ -165,11 +165,11 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
       earlierFeedback: store.listEvents(workspaceId, { type: "task.steps_replan_requested", entityId: workOrderId })
         .map((event) => String((event.payload as { feedback?: string }).feedback ?? "").trim()).filter((text) => text && text !== feedback).slice(-8)
     };
-    // The person's own skill for this line, read beside the planner's: how they do this kind of work shapes which steps there are.
-    const extraSkills = await librarySkillsFor(client, store, workspaceId, order.identityId, { cwd, ...(options.libraryDir ? { dir: options.libraryDir } : {}) });
+    // The line's own skill and the public skills that fit the task, read beside the planner's: how this work is done shapes the steps.
+    const extraSkills = await librarySkillsFor(client, store, workspaceId, order.identityId, { cwd, task: order.intent, ...(options.libraryDir ? { dir: options.libraryDir } : {}) });
     const result = await runCodexSkill<StepPlan>(client, input, { skillName: PLANNER, cwd, ...(extraSkills.length ? { extraSkills } : {}),
       developerInstructions: "Choose the archetype and write the task's step graph as the Skill describes. Return raw JSON only."
-        + (extraSkills.length ? MINE_SKILL_INSTRUCTION : "")
+        + libraryInstruction(extraSkills)
         + (feedback ? " Apply the feedback: it is what the reviewer or the person asked to change." : "")
         + (research ? " research is true: search the web for this task's background and the best known way to do it before planning, as the Skill's research section says." : ""),
       ...(research ? { allowWebSearch: true } : {}),

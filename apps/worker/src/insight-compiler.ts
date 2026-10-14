@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
 import {
   MINE_SKILL_SCHEMA, currentMineVersion, keepMineSkill, mineSkillSettingKey, readMineSkill, renderMineSkill, validateMineSkill,
-  type MineMaterial, type MineSkillCompilation, type MineSkillContext, type StoredMineSkill
+  type MineMaterial, type MineSkillCompilation, type MineSkillContext
 } from "@crossline/core";
 import { runCodexSkill, webResearchBlocker, type CodexRpcBoundary } from "@crossline/codex";
-import { listAgentTasks, type CrosslineStore, type StoredPreference } from "@crossline/db";
+import { listAgentTasks, saveMineVersion, type CrosslineStore, type StoredPreference } from "@crossline/db";
 import { identityLines } from "./lines";
 import { ownerOf } from "./owner";
 import { defaultSafeGetDeps, safeGet, type SafeGetDeps } from "./safe-fetch";
@@ -101,19 +101,6 @@ export function linesAwaitingMineSkill(store: CrosslineStore, workspaceId: strin
     const newDecision = decided.some((material) => material.at > compiled.at);
     return newDecision || now.getTime() - Date.parse(compiled.at) >= FACT_ONLY_REWRITE_HOURS * 3_600_000;
   }).map((line) => line.id);
-}
-
-/** Appends a version and makes it current; the old ones stay, and the system never removes one. */
-export function saveMineVersion(store: CrosslineStore, workspaceId: string, lineId: string,
-  version: Omit<StoredMineSkill["versions"][number], "version">, eventType = "skill.mine.rewritten"): number {
-  const stored = readMineSkill(store.getSetting(workspaceId, mineSkillSettingKey(lineId))) ?? { lineId, current: 0, versions: [] };
-  const number = Math.max(0, ...stored.versions.map((item) => item.version)) + 1;
-  const next: StoredMineSkill = { lineId, current: number, versions: [...stored.versions, { ...version, version: number }] };
-  store.setSetting(workspaceId, mineSkillSettingKey(lineId), JSON.stringify(next));
-  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.mine:${lineId}:v${number}`, type: eventType, entityId: lineId,
-    payload: { lineId, version: number, by: version.by, rules: version.rules?.length ?? 0, ...(version.fingerprint ? { fingerprint: version.fingerprint } : {}),
-      ...(version.restoredFrom ? { restoredFrom: version.restoredFrom } : {}) } });
-  return number;
 }
 
 /**

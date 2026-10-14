@@ -17,7 +17,7 @@ import { extractText } from "./extract";
 
 export const MANUAL_DESIGNER_SKILL = "crossline:crossline-manualbook-designer";
 export const MATERIAL_RESEARCHER_SKILL = "crossline:crossline-material-researcher";
-import { MINE_SKILL_INSTRUCTION, librarySkillsFor } from "./skill-library";
+import { libraryInstruction, librarySkillsFor } from "./skill-library";
 export const MATERIAL_WRITER_SKILL = "crossline:crossline-material-writer";
 import { ownerOf } from "./owner";
 import { startingWithin } from "./schedule-window";
@@ -228,8 +228,8 @@ export function createManualbookBuilder(store: CrosslineStore, workspaceId: stri
     }
 
     // 3. the write-up, per step ---------------------------------------------------------------------------------
-    // The person's own skill for this task's line, read beside the writer's: a tutorial for their way of doing it, not a generic one.
-    const writerSkills = await librarySkillsFor(client, store, workspaceId, order.identityId, { cwd, ...(all.libraryDir ? { dir: all.libraryDir } : {}) });
+    // The line's own skill and the public skills that fit the task, read beside the writer's: a tutorial for the person's way of doing it.
+    const writerSkills = await librarySkillsFor(client, store, workspaceId, order.identityId, { cwd, task: order.intent, ...(all.libraryDir ? { dir: all.libraryDir } : {}) });
     for (const [index, result] of results.entries()) {
       progress("writing", index, results.length);
       const writeContext: WriteContext = { version: "crossline.manualbook.write.v1", today, task: { intent: context.workOrder.intent },
@@ -238,7 +238,7 @@ export function createManualbookBuilder(store: CrosslineStore, workspaceId: stri
         inputs: context.inputs, profile: context.profile, person: context.person ?? [],
         covers: context.plannedSteps?.find((step) => step.title === result.node.title)?.covers ?? [] };
       const written = await runCodexSkill<NodeWriteup>(client, writeContext, {
-        skillName: MATERIAL_WRITER_SKILL, cwd, developerInstructions: WRITE_INSTRUCTIONS + (writerSkills.length ? MINE_SKILL_INSTRUCTION : ""),
+        skillName: MATERIAL_WRITER_SKILL, cwd, developerInstructions: WRITE_INSTRUCTIONS + libraryInstruction(writerSkills),
         ...(writerSkills.length ? { extraSkills: writerSkills } : {}), outputSchema: NODE_WRITEUP_SCHEMA,
         prepareInput: () => writeContext, validateOutput: (output) => validateNodeWriteup(output, writeContext), onAudit: () => {}, timeoutMs: 60 * 60_000
       });

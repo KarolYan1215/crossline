@@ -46,6 +46,7 @@ export const SKILL_TIERS: Record<string, RouteTier> = {
   "crossline-goal-splitter": "low",
   // The person's own rules for a line: what every later run on that line follows, so read carefully, not cheaply.
   "crossline-insight-compiler": "mid",
+  "crossline-skill-scout": "mid",
   "crossline-portrait-writer": "top",
   "crossline-portrait-illustrator": "low",
   "crossline-eval-persona": "low",

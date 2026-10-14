@@ -25,6 +25,7 @@ import { createArchetypeCurator, curationDue } from "./archetype-curator";
 import { createTaskTitler, untitledTasks } from "./task-titler";
 import { createCalendarClassifier, unfiledCalendarEvents } from "./calendar-classifier";
 import { createInsightCompiler, linesAwaitingMineSkill } from "./insight-compiler";
+import { cleanPublicSkills, createSkillScout, scoutDue } from "./public-skills";
 import { createGoalSplitter, linesAwaitingCandidateSplit, linesAwaitingSplit } from "./goal-splitter";
 import { fileSourceDocuments } from "./source-filing";
 import { createPortraitWriter, PORTRAIT_GAP_AT, PORTRAIT_REWRITE_MARKER, portraitRewriteDue } from "./portrait-writer";
@@ -225,6 +226,27 @@ async function minePass(workspaceId: string, checkedAt: string): Promise<void> {
 }
 
 /**
+ * Public skills (docs/skills-library.md §2): once a day the ones not called for thirty days are removed; the scout runs for a new library,
+ * once a month (checking installed ones for a newer commit too), and the day after a task found nothing that fits. Discretionary spend.
+ */
+const scoutingSkills = new Set<string>();
+async function publicSkillPass(workspaceId: string, checkedAt: string): Promise<void> {
+  try {
+    const removed = cleanPublicSkills(analysisStore, workspaceId);
+    if (removed.length) console.info(JSON.stringify({ type: "skill.public.cleaned", checkedAt, workspaceId, removed }));
+  } catch { /* housekeeping */ }
+  if (paused(workspaceId, "planning")) return;
+  if (scoutingSkills.has(workspaceId) || !codexSupervisor || !scoutDue(analysisStore, workspaceId)) return;
+  if (!spendAllows(await spendFor(workspaceId), "discretionary")) return;
+  scoutingSkills.add(workspaceId);
+  try {
+    enterUsageWorkspace(workspaceId);
+    const outcome = await createSkillScout(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))().catch(() => undefined);
+    if (outcome) console.info(JSON.stringify({ type: "skill.public.scouted", checkedAt, workspaceId, ...outcome }));
+  } finally { scoutingSkills.delete(workspaceId); }
+}
+
+/**
  * Writes the portrait (the interview's end, 重新生成, or the one rewrite after the fixed dimensions shipped): `portrait.requested` first,
  * so the page shows it running, then `portrait.blocked` with the reason, or the figure drawn in the background after the words.
  */
@@ -360,6 +382,7 @@ async function tick(): Promise<void> {
   for (const workspace of workspaces) await titlePass(workspace.id, checkedAt);
   for (const workspace of workspaces) await goalSplitPass(workspace.id, checkedAt);
   for (const workspace of workspaces) await minePass(workspace.id, checkedAt);
+  for (const workspace of workspaces) await publicSkillPass(workspace.id, checkedAt);
   for (const workspace of workspaces) await portraitPass(workspace.id, checkedAt);
   // Uploaded files are filed under the project their own name or opening names; what stays unclear is asked about on 待确认.
   for (const workspace of workspaces) {

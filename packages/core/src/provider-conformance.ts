@@ -14,6 +14,7 @@ import { MANUAL_DESIGN_SCHEMA, MATERIAL_SEARCH_SCHEMA, NODE_WRITEUP_SCHEMA } fro
 import { MILESTONE_GATE_OUTPUT_SCHEMA, MILESTONE_PROPOSAL_SCHEMA } from "./milestone-gate-schema";
 import { MILESTONE_PLAN_SCHEMA } from "./milestone-plan";
 import { MINE_SKILL_SCHEMA } from "./mine-skill";
+import { PUBLIC_SKILL_REVIEW_SCHEMA, SKILL_SCOUT_SCHEMA } from "./public-skills";
 import { ONBOARDING_TURN_SCHEMA } from "./onboarding-turn-schema";
 import { PLAN_EXPLAINER_OUTPUT_SCHEMA } from "./plan-explainer-schema";
 import { PORTRAIT_GAP_SCHEMA, PORTRAIT_SCHEMA } from "./portrait";
@@ -57,13 +58,14 @@ export const SKILL_NEEDS: Record<string, SkillNeeds> = {
   "crossline-material-writer": { label: "教程写作", schemas: ["NODE_WRITEUP_SCHEMA"] },
   "crossline-step-planner": { label: "步骤拆分", schemas: ["STEP_PLAN_SCHEMA"] },
   "crossline-archetype-curator": { label: "任务类型整理", schemas: ["ARCHETYPE_CURATION_SCHEMA"], webSearch: true },
-  "crossline-validation-reviewer": { label: "复核", schemas: ["VALIDATION_REVIEW_SCHEMA"] },
+  "crossline-validation-reviewer": { label: "复核", schemas: ["VALIDATION_REVIEW_SCHEMA", "PUBLIC_SKILL_REVIEW_SCHEMA"] },
   "crossline-progress-judge": { label: "进度判断", schemas: ["PROGRESS_ASSESSMENT_SCHEMA"] },
   "crossline-concierge": { label: "输入框", schemas: ["CONCIERGE_SCHEMA"], tools: true },
   "crossline-task-titler": { label: "任务命名", schemas: ["TASK_TITLES_SCHEMA"] },
   "crossline-calendar-classifier": { label: "日历归类", schemas: ["CALENDAR_CLASSIFICATION_SCHEMA"] },
   "crossline-goal-splitter": { label: "目标拆分", schemas: ["GOAL_SPLIT_SCHEMA"] },
   "crossline-insight-compiler": { label: "主线 skill 整理", schemas: ["MINE_SKILL_SCHEMA"], webSearch: true },
+  "crossline-skill-scout": { label: "公开 skill 检索", schemas: ["SKILL_SCOUT_SCHEMA"], webSearch: true },
   "crossline-portrait-writer": { label: "画像", schemas: ["PORTRAIT_SCHEMA", "PORTRAIT_GAP_SCHEMA"] },
   "crossline-portrait-illustrator": { label: "画像插图", schemas: [], image: true },
   "crossline-eval-persona": { label: "访谈评测", schemas: [], testOnly: true },
@@ -120,7 +122,7 @@ const CONFORMANCE_SCHEMAS: Record<string, Record<string, unknown>> = {
   CALENDAR_CLASSIFICATION_SCHEMA, CONCIERGE_SCHEMA, DATE_EXTRACTION_SCHEMA, DILIGENCE_OUTPUT_SCHEMA, FLYWHEEL_OUTPUT_SCHEMA, GOAL_SPLIT_SCHEMA,
   MANUAL_DESIGN_SCHEMA, MATERIAL_SEARCH_SCHEMA, NODE_WRITEUP_SCHEMA, MILESTONE_GATE_OUTPUT_SCHEMA, MILESTONE_PROPOSAL_SCHEMA, MILESTONE_PLAN_SCHEMA, MINE_SKILL_SCHEMA,
   ONBOARDING_TURN_SCHEMA, PLAN_EXPLAINER_OUTPUT_SCHEMA, PORTRAIT_SCHEMA, PORTRAIT_GAP_SCHEMA, STEP_PLAN_SCHEMA,
-  VALIDATION_REVIEW_SCHEMA, PROGRESS_ASSESSMENT_SCHEMA, TASK_TITLES_SCHEMA, WEEKLY_INSIGHT_OUTPUT_SCHEMA
+  VALIDATION_REVIEW_SCHEMA, PROGRESS_ASSESSMENT_SCHEMA, TASK_TITLES_SCHEMA, WEEKLY_INSIGHT_OUTPUT_SCHEMA, PUBLIC_SKILL_REVIEW_SCHEMA, SKILL_SCOUT_SCHEMA
 } as unknown as Record<string, Record<string, unknown>>;
 
 /** How many times a critical Skill's schema is run: at 3 runs, "repair rate ≤ 5%" means no repair at all. */
