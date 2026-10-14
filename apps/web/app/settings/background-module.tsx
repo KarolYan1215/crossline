@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import type { BackgroundOverview } from "../../lib/background";
+import { localStamp } from "@crossline/core";
 import { SegmentedControl } from "../ui/controls";
 import { Tag } from "../ui/tag";
 
@@ -10,12 +11,7 @@ const TIER: Record<BackgroundOverview["engagement"]["tier"], { text: string; ton
   dormant: { text: "暂停调用模型", tone: "neutral" }
 };
 /** 「10/13 22:46」 in the person's zone; the stored times are UTC. Exported for its test. */
-export function when(iso: string | null, timeZone: string): string {
-  if (!iso) return "—";
-  const part = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone, month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
-    .formatToParts(new Date(iso)).map((item) => [item.type, item.value]));
-  return `${part.month}/${part.day} ${part.hour}:${part.minute}`;
-}
+export const when = (iso: string | null, timeZone: string): string => iso ? localStamp(iso, timeZone) : "—";
 const tokens = (n: number) => n >= 10_000 ? `${Math.round(n / 1_000) / 10} 万` : String(n);
 
 type Progress = { commands: Array<{ command: string; status: string; exitCode: number | null }>; files: string[]; searches: string[] } | null;

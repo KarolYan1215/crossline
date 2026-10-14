@@ -25,12 +25,15 @@ describe("plan charts", () => {
 
   test("milestone ranges: grouped by line, each row opens its milestone, risk and the library day are drawn", () => {
     const row = (extra: Partial<GoalRow>): GoalRow => ({ id: "m", title: "里程碑", line: "research", p50Day: null, p85Day: null, deadline: null, slackDays: null, atRisk: false,
-      remainingP50Minutes: 0, remainingP85Minutes: 0, libraryDay: null, status: "no_tasks", bottleneck: null, ...extra });
+      remainingP50Minutes: 0, remainingP85Minutes: 0, libraryDay: null, status: "no_tasks", bottleneck: null, proposals: 0, ...extra });
     const html = renderToStaticMarkup(<MilestoneForecast today="2026-10-10" spanDays={56} weeks={8} labels={labels} inferredRegularBlocks={0} rows={[
       row({ id: "a", title: "期中考试", p50Day: "2026-10-20", p85Day: "2026-10-24", deadline: "2026-10-25", slackDays: 1, atRisk: true, remainingP50Minutes: 600, remainingP85Minutes: 900, status: "forecast" }),
       row({ id: "b", title: "论文投稿", deadline: "2027-02-01", libraryDay: "2026-11-02", remainingP50Minutes: 1200, status: "unfinished", bottleneck: "八周内容量或步骤依赖不足" }),
-      row({ id: "c", title: "首期视频", line: "media" })
+      row({ id: "c", title: "首期视频", line: "media" }),
+      row({ id: "d", title: "导师评审", proposals: 1 })
     ]} />);
+    // Proposed work waiting for approval is said, not 「尚无任务」.
+    expect(html).toContain("1 项提案待批准");
     expect(html).toContain('href="/milestones?open=a"');
     expect(html).toContain('data-risk="true"');
     expect(html).toContain("余量 1 天");

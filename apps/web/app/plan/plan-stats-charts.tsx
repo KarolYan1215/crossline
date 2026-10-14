@@ -194,7 +194,8 @@ export function MilestoneForecast({ rows, today, spanDays, weeks, labels, inferr
             </span>
             <span className="pl-gantt-end">
               <small className="mono" title={`剩余工作：通常 ${hours(row.remainingP50Minutes)} 小时，保守 ${hours(row.remainingP85Minutes)} 小时`}>剩 {h1(row.remainingP50Minutes)}</small>
-              {row.status === "no_tasks" && <Tag title="该里程碑下尚无可排程的任务">尚无任务</Tag>}
+              {row.status === "no_tasks" && (row.proposals ? <Tag title="在「待确认」批准后排入日程">{row.proposals} 项提案待批准</Tag>
+                : <Tag title="该里程碑下尚无可排程的任务">尚无任务</Tag>)}
               {row.status === "unforecast" && <Tag title="重要性低于 60 且无截止日的里程碑不参与预测">无截止日</Tag>}
               {row.status === "unfinished" && <Tag tone="warn" title={row.bottleneck ?? `按当前容量 ${weeks} 周内排不完`}>{weeks} 周内未完成</Tag>}
               {row.atRisk ? <Tag tone="risk" title={`保守完成日距截止 ${row.slackDays} 天，不足 2 天`}>余量 {row.slackDays} 天</Tag>

@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import type { DeadLetter } from "@crossline/core";
+import { localStamp, type DeadLetter } from "@crossline/core";
 import {
   currentWorkspaceId, discardConflict, discardDeadLetter, listConflicts, listDeadLetters,
   listPending, type OfflineCommand
@@ -43,7 +43,7 @@ export function DeadLetters() {
   const row = (entry: DeadLetter<OfflineCommand>, kind: "dead" | "conflict") => <li key={entry.command.clientCommandId}>
     <b>{String(entry.command.payload.title ?? entry.command.type)}</b>
     {Boolean(entry.command.payload.context) && <small>{String(entry.command.payload.context)}</small>}
-    <small>{entry.reason} · {entry.failedAt.slice(0, 16).replace("T", " ")}</small>
+    <small>{entry.reason} · {localStamp(entry.failedAt)}</small>
     {/* Copy first, then discard: discarding is the only way out, so the text must not vanish with it. */}
     <button type="button" onClick={() => { void navigator.clipboard?.writeText(String(entry.command.payload.title ?? "")); }}>复制原文</button>
     <button type="button" onClick={async () => {

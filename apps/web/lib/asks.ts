@@ -2,7 +2,7 @@ import "server-only";
 import { recordOp, retractedEventIds, withUndo } from "./undo";
 import {
   ATTENTION_SNAPSHOT, BACKGROUND_BLOCKER, CALENDAR_LINES, CALENDAR_PUBLISH_FAILURE, CALENDAR_SYNC_FAILURE, calendarEventKey, daysBetween, describeEvent, missingInputsOf, rankAsks,
-  prepStepRetried, snoozeUntil, STEP_ANSWER_SLOT, stepAnswerSlot, taskTitleOf, urgencyFor, type CalendarLines,
+  localStamp, prepStepRetried, snoozeUntil, STEP_ANSWER_SLOT, stepAnswerSlot, taskTitleOf, urgencyFor, type CalendarLines,
   validateAskAnswer, withFrozen, type AccessContext, type Ask, type AskField, type AskOption, type AskSnooze
 } from "@crossline/core";
 import { listAgentTasks, type StoredWorkOrder } from "@crossline/db";
@@ -515,7 +515,7 @@ function eventAsks({ ctx, today }: Source): Ask[] {
 function backgroundAsks({ store, ctx }: Source): Ask[] {
   const paused = readFailure(store, ctx.workspaceId, BACKGROUND_BLOCKER) as ({ resetsAt?: string; reason?: string } & NonNullable<ReturnType<typeof readFailure>>) | null;
   if (!paused || paused.reason === "CODEX_SUPERVISOR_UNAVAILABLE") return [];
-  const until = paused.resetsAt ? `，预计 ${paused.resetsAt.slice(5, 16).replace("T", " ")}（UTC）恢复` : "";
+  const until = paused.resetsAt ? `，预计 ${localStamp(paused.resetsAt, effectiveSchedulePreferences(ctx).preferences.timeZone)} 恢复` : "";
   return [{ id: `background:${paused.code}`, kind: "background_paused", entityId: "background", urgency: "soon", raisedAt: paused.at,
     fingerprint: paused.code, title: "后台自动工作已暂停",
     why: `${clause(paused.message)}${until}。新收集的事项会在恢复后自动分析；需要现在处理的可以在任务页手动点「分析」。`,

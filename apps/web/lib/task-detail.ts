@@ -4,7 +4,7 @@ import { archetypeById, goalSettingKey, producedArtifacts, relevantDocuments, ta
 import { listAgentTasks, readStoredArtifactPlan, type CrosslineStore, type StoredMilestone, type StoredWorkOrder, type StoredMaterial, type StoredExecution, type StoredMilestoneRelation,
   type StoredBackgroundFact, type StoredStepPlan, type StoredTaskStep } from "@crossline/db";
 import { defaultIdentityPacks, identityPacksFor } from "@crossline/identity-packs";
-import { getStore, resolvedEstimate, relationKindLabel, accents, suggestedSessionMinutes } from "./crossline";
+import { effectiveSchedulePreferences, getStore, resolvedEstimate, relationKindLabel, accents, suggestedSessionMinutes } from "./crossline";
 import { linePacks } from "./lines";
 
 const quartersOfVerdict: Record<string, number> = { met: 4, partial: 2, unmet: 0, unverifiable: 0 };
@@ -113,6 +113,8 @@ export type TaskDetail = {
   ownerId: string;
   /** Who is looking: what a command queued offline from this card is signed as. */
   viewerId: string;
+  /** The person's zone, for times shown on the card and in the dialog. */
+  timeZone?: string;
   workspaceId: string;
   paused: boolean;
   identityId: string;
@@ -282,7 +284,7 @@ function assembleTaskDetail(ctx: AccessContext, order: StoredWorkOrder, deps: {
   const discardReason = discardReasonFrom(order.state, deps.archivedEvents);
 
   return {
-    id: order.id, ownerId: order.ownerId, viewerId: ctx.principalId, workspaceId: order.workspaceId, paused: pausedFrom(executions),
+    id: order.id, ownerId: order.ownerId, viewerId: ctx.principalId, timeZone: effectiveSchedulePreferences(ctx).preferences.timeZone, workspaceId: order.workspaceId, paused: pausedFrom(executions),
     identityId: order.identityId, identityLabel, accent, title: taskTitleOf(order), intent: order.intent, state: order.state,
     riskTier: order.riskTier, estimate: resolvedEstimate(ctx, order),
     ...(() => { const minutes = order.state === "active" ? suggestedSessionMinutes(ctx, order.id) : undefined; return minutes ? { suggestedMinutes: minutes } : {}; })(), manualPromotion: Boolean(payload.manualPromotion), seeded: Boolean(payload.seeded),
