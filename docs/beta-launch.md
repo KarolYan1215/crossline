@@ -64,6 +64,17 @@
 
 **双人对比卡。** 对方用邀请链接做题后自动生成：两个形象并排，标出两人的关系名和两条相处建议，再加上两人推荐主线的交集。
 
+### 1.2 海报渲染（W3，2026-10-14）
+
+**为什么在服务器上出 PNG。** 微信内置浏览器里，`<a download>` 和脚本触发的下载基本没有反应，长按保存只对页面上真正的 `<img>` 有效；前端 canvas 导出还会遇到跨域图片、安卓上 base64 / Blob 图片长按存不下来等问题。所以海报、长图、双人卡都由服务器画成 PNG，页面用 `<img src="/api/poster/…">` 展示（依据：阿里云开发者社区 developer.aliyun.com/article/906395、jb51.net/article/250735.htm、掘金 juejin.cn/post/6885952653075939335，均为经验文章，上线前要在安卓和 iOS 微信里实测）。
+
+**做法。**
+- satori 0.33.5 把元素树排版成 SVG，文字转成路径；@resvg/resvg-js 按 `fitTo: { mode: "width", value: 1080 }` 栅格化，不加载系统字体。satori 只支持 flex 布局和它列出的 CSS 子集（`display` 只有 flex / block / none，`position` 支持 absolute，支持 `borderRadius`、`opacity`、`textWrap: balance`），字体只认 TTF / OTF / WOFF，**不认 WOFF2**；没有给到的字形会被直接丢掉（只回调 `loadAdditionalAsset`），不会换成别的字体（satori 自带 README）。图片用 data URI 嵌入并写明宽高，免去渲染时的 I/O；形象文件按开头字节判断 PNG / JPEG，WebP 等 satori 解不了的格式退回类型模板，再不行就在圆里写四字母代码。
+- 字体：Noto Sans SC、Noto Serif SC（SIL OFL 1.1，来自 github.com/notofonts/noto-cjk），用 `scripts/assess-poster-fonts.ts`（subset-font / HarfBuzz）裁成子集放在 `apps/assess/fonts/`，许可在 `OFL.txt`。黑体两个字重收全部固定文字 + GB2312 一级 3,755 字 + ASCII（每个约 1 MB），宋体两个字重只收固定文字（每个约 235 KB）。昵称里子集没有的字符印成「·」，不会悄悄消失。改了类型名、副标题、主线、关系或海报文字后要重跑脚本，测试会提醒。
+- 样式沿用画像海报的「编辑杂志」：纸色 #F6F2EA、墨色 #1E1B16、灰 #4F4A42，节与节之间用墨线分隔；1080 宽时没有小于 24 px 的字。测试遍历 16 种类型的海报和长图、256 种双人组合的卡片，检查文字不重叠、不出画布、不小于 24 px。
+- 缓存：PNG 存在 `dataDir()/posters`，文件名是版式版本、类型视图、昵称、邀请链接和形象文件字节的哈希，换了形象就是新文件；海报上有昵称，所以文件写入一周后删除，之后再请求就重画。路由返回 `Cache-Control: private, max-age=300`、`Referrer-Policy: no-referrer`、`X-Robots-Tag: noindex`，未知或过期的令牌给 404。字体加载后，单张海报在本机约 0.2–0.5 秒。
+- 部署（交给 W2 的 `next.config.mjs`）：`@resvg/resvg-js` 是原生模块，要列进 `serverExternalPackages`；`fonts/**` 要用 `outputFileTracingIncludes` 带进 standalone 产物（或设 `ASSESS_FONTS_DIR`）。
+
 ## 2. 文案草稿（待本人逐条改）
 
 ### 2.1 副标题（更狠的版本）

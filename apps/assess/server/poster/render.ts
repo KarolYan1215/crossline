@@ -1,0 +1,297 @@
+import type { ReactNode } from "react";
+import satori, { type SatoriNode } from "satori";
+import { Resvg } from "@resvg/resvg-js";
+import { TYPE_AXES, TYPE_GROUPS } from "@crossline/core/assess";
+import { RELATIONS } from "@crossline/core/assess-content";
+import type { PartnerView, PublicAxis, PublicType, RelationView } from "../../lib/contract";
+import { posterFonts, safe, type Family } from "./fonts";
+import { LABELS, poleExplanations, rankLine } from "./labels";
+import { qrDataUri } from "./qr";
+
+/**
+ * The three posters as satori trees, style A 「编辑杂志」 (CLAUDE.md, the portrait paragraph): paper #F6F2EA, ink #1E1B16, grey #4F4A42
+ * (7.9:1 on the paper), ink rules between sections, the type group's colour for the type itself and its tint behind the figure. Every
+ * size is set for a 1080-wide canvas and no text is under 24 px. Plain `{ type, props }` objects rather than JSX: satori reads them
+ * the same, and the module then needs no JSX runtime under tsx, vitest or Next.
+ */
+
+export const WIDTH = 1080;
+export const HEIGHT = 1440;
+const PAPER = "#F6F2EA";
+const INK = "#1E1B16";
+const GREY = "#4F4A42";
+const TRACK = "#DDD5C7";
+const PAD = 64;
+const INNER = WIDTH - PAD * 2;
+
+type Style = Record<string, string | number>;
+type Child = El | string | null | undefined | false;
+type El = { type: string; props: Record<string, unknown> };
+
+function h(type: string, props: Record<string, unknown> | null, ...children: Child[]): El {
+  const kept = children.filter((child): child is El | string => child !== null && child !== undefined && child !== false);
+  return { type, props: { ...props, children: kept.length === 1 ? kept[0] : kept } };
+}
+const box = (style: Style, ...children: Child[]) => h("div", { style: { display: "flex", ...style } }, ...children);
+/** Text in one family; `safe` swaps anything the face cannot print for 「·」. */
+const text = (value: string, family: Family, style: Style) => h("div", { style: { display: "flex", fontFamily: family, ...style } }, safe(value, family));
+const rule = (margin = 26) => box({ height: 2, backgroundColor: INK, marginTop: margin, marginBottom: margin, width: "100%" });
+
+/** The figure as a data URI (`figure.ts`), or none: the disc then shows the type code. */
+export type Figure = { dataUri: string | null };
+
+/** The figure on a disc of the group's tint; with no picture on disk, the type's code in the group's colour instead. */
+function disc(figure: Figure, type: PublicType, size: number): El {
+  return box({ width: size, height: size, borderRadius: size / 2, backgroundColor: type.group.tint, overflow: "hidden", alignItems: "center", justifyContent: "center", flexShrink: 0 },
+    figure.dataUri
+      ? h("img", { src: figure.dataUri, width: size, height: size, style: { width: size, height: size, objectFit: "cover" } })
+      : text(type.code, "Serif", { fontSize: size * 0.24, fontWeight: 700, color: type.group.colour, letterSpacing: 4 }));
+}
+
+/** The four letters, each the group's colour; a letter within ten of the middle (both plausible) is drawn faint. */
+function codeLetters(type: PublicType, size: number): El {
+  return box({ alignItems: "flex-end" }, ...type.axes.map((axis, index) =>
+    text(axis.letter, "Serif", { fontSize: size, fontWeight: 700, color: type.group.colour, opacity: axis.ambiguous ? 0.38 : 1, marginRight: index < 3 ? size * 0.12 : 0, lineHeight: 1 })));
+}
+
+function hero(type: PublicType, nickname: string, figure: Figure, compact: boolean): El {
+  const owner = nickname.trim() ? `${nickname.trim()} 的${LABELS.kicker}` : LABELS.kicker;
+  const group = TYPE_GROUPS[type.group.key];
+  return box({ width: "100%", alignItems: "center" },
+    disc(figure, type, compact ? 300 : 340),
+    box({ flexDirection: "column", marginLeft: 44, flexGrow: 1, flexShrink: 1, minWidth: 0 },
+      text(owner, "Sans", { fontSize: 26, color: GREY, marginBottom: 10 }),
+      codeLetters(type, compact ? 58 : 64),
+      text(type.name, "Serif", { fontSize: compact ? 88 : 108, fontWeight: 700, color: INK, lineHeight: 1.15, marginTop: 4 }),
+      text(group ? `${type.group.name} · ${group.blurb}` : type.group.name, "Sans", { fontSize: 24, color: GREY, marginTop: 4 }),
+      text(type.subtitle, "Serif", { fontSize: compact ? 30 : 34, color: INK, lineHeight: 1.4, marginTop: 12, textWrap: "balance" })));
+}
+
+/** A bar that grows from the middle towards the pole leaned to, as on the portrait (`axisBar`). */
+function axisBar(axis: PublicAxis, colour: string, height: number): El {
+  const right = axis.score >= 50;
+  const width = Math.abs(axis.score - 50);
+  return box({ flexGrow: 1, height, backgroundColor: TRACK, borderRadius: height / 2, position: "relative", marginLeft: 16, marginRight: 16 },
+    box({ position: "absolute", top: 0, height, left: `${right ? 50 : 50 - width}%`, width: `${Math.max(width, 0.8)}%`, backgroundColor: colour, opacity: axis.ambiguous ? 0.45 : 1,
+      borderRadius: height / 2 }),
+    box({ position: "absolute", top: -6, left: "50%", width: 2, height: height + 12, backgroundColor: INK }));
+}
+
+const POLE_WIDTH = 178;
+
+/** One pole: its letter and name, and — on the side leaned to — the percentage, next to the bar. */
+function pole(label: string, letter: string, percent: number | null, align: "left" | "right"): El {
+  const on = percent !== null;
+  const style = { fontSize: 28, color: on ? INK : GREY, fontWeight: on ? 700 : 400 };
+  const name = text(align === "left" ? `${letter} ${label}` : `${label} ${letter}`, "Serif", style);
+  const value = on ? text(`${percent}%`, "Sans", { fontSize: 28, fontWeight: 700, color: INK, [align === "left" ? "marginLeft" : "marginRight"]: 12 }) : null;
+  return box({ width: POLE_WIDTH, flexShrink: 0, justifyContent: align === "left" ? "flex-start" : "flex-end", alignItems: "baseline" },
+    ...(align === "left" ? [name, value] : [value, name]));
+}
+
+function axisRow(axis: PublicAxis, colour: string): El {
+  const right = axis.score >= 50;
+  const percent = right ? axis.score : 100 - axis.score;
+  return box({ flexDirection: "column", width: "100%" },
+    box({ alignItems: "center", width: "100%" },
+      pole(axis.leftLabel, axis.leftLetter, right ? null : percent, "left"),
+      axisBar(axis, colour, 16),
+      pole(axis.rightLabel, axis.rightLetter, right ? percent : null, "right")),
+    text(rankLine(axis.rank), "Sans", { fontSize: 24, color: GREY, lineHeight: 1.25, marginTop: 2, marginLeft: POLE_WIDTH + 16 }));
+}
+
+/** The four steps as a cycle: across the top, down, back along the bottom, up — the last step feeding the first. */
+function loopCycle(loop: PublicType["loop"], colour: string, tint: string): El {
+  const boxW = 240, boxH = 58, gapX = 56, gapY = 40, width = boxW * 2 + gapX, height = boxH * 2 + gapY;
+  const at = [[0, 0], [boxW + gapX, 0], [boxW + gapX, boxH + gapY], [0, boxH + gapY]] as const;
+  const step = (label: string, index: number) => box({ position: "absolute", left: at[index]![0], top: at[index]![1], width: boxW, height: boxH, alignItems: "center", justifyContent: "center",
+    border: `2px solid ${colour}`, borderRadius: 10, backgroundColor: index === 0 ? tint : PAPER },
+  text(label, "Sans", { fontSize: 24, color: INK }));
+  const midY = boxH / 2, midX = boxW / 2, rightX = boxW + gapX + boxW / 2;
+  const arrow = (x1: number, y1: number, x2: number, y2: number) => {
+    const angle = Math.atan2(y2 - y1, x2 - x1), head = 12;
+    const p1 = [x2 - head * Math.cos(angle - 0.5), y2 - head * Math.sin(angle - 0.5)];
+    const p2 = [x2 - head * Math.cos(angle + 0.5), y2 - head * Math.sin(angle + 0.5)];
+    return `M${x1} ${y1}L${x2} ${y2}M${p1[0]} ${p1[1]}L${x2} ${y2}L${p2[0]} ${p2[1]}`;
+  };
+  const d = [arrow(boxW + 8, midY, boxW + gapX - 8, midY), arrow(rightX, boxH + 6, rightX, boxH + gapY - 6),
+    arrow(boxW + gapX - 8, boxH + gapY + midY, boxW + 8, boxH + gapY + midY), arrow(midX, boxH + gapY - 6, midX, boxH + 6)].join("");
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><path d="${d}" fill="none" stroke="${colour}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  return box({ position: "relative", width, height, flexShrink: 0 },
+    h("img", { src: `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`, width, height, style: { position: "absolute", left: 0, top: 0 } }),
+    ...loop.map(step));
+}
+
+/** The three lines and the cycle they feed; the poster prints its heading and the call to run them in the left column. */
+function linesBlock(type: PublicType, withLabels: boolean): El {
+  return box({ width: "100%", alignItems: "center", justifyContent: "space-between" },
+    box({ flexDirection: "column", flexShrink: 1, minWidth: 0 },
+      withLabels ? text(LABELS.linesHeading, "Sans", { fontSize: 24, color: GREY, marginBottom: 8 }) : null,
+      ...type.lines.map((line, index) => box({ alignItems: "baseline", marginTop: index ? 4 : 0 },
+        text(String(index + 1), "Serif", { fontSize: 26, fontWeight: 700, color: type.group.colour, width: 30 }),
+        text(line, "Serif", { fontSize: 32, fontWeight: 700, color: INK, lineHeight: 1.3 }))),
+      withLabels ? text(LABELS.loopCaption, "Sans", { fontSize: 24, color: GREY, marginTop: 10 }) : null),
+    loopCycle(type.loop, type.group.colour, type.group.tint));
+}
+
+function partner(label: string, view: PartnerView, colour: string, tips: string[], when?: string): El {
+  return box({ flexDirection: "column", width: (INNER - 48) / 2 },
+    text(label, "Sans", { fontSize: 24, color: GREY }),
+    box({ alignItems: "baseline", marginTop: 8 },
+      text(view.name, "Serif", { fontSize: 38, fontWeight: 700, color: INK }),
+      text(view.code, "Serif", { fontSize: 26, fontWeight: 700, color: GREY, marginLeft: 12, letterSpacing: 2 })),
+    text(view.relation, "Sans", { fontSize: 28, fontWeight: 700, color: colour, marginTop: 6 }),
+    when ? text(when, "Sans", { fontSize: 24, color: GREY, marginTop: 4 }) : null,
+    ...tips.map((tip) => text(tip, "Sans", { fontSize: 24, color: INK, lineHeight: 1.45, marginTop: 6 })));
+}
+
+function qrBlock(inviteUrl: string, size: number): El {
+  const qr = qrDataUri(inviteUrl, INK);
+  return box({ alignItems: "center" },
+    box({ width: size + 16, height: size + 16, backgroundColor: "#FFFFFF", alignItems: "center", justifyContent: "center", flexShrink: 0 },
+      h("img", { src: qr.uri, width: size, height: size })),
+    box({ flexDirection: "column", marginLeft: 26 },
+      text(LABELS.scan, "Serif", { fontSize: 32, fontWeight: 700, color: INK }),
+      text(LABELS.scanSub, "Sans", { fontSize: 24, color: GREY, marginTop: 8 })));
+}
+
+/** The Crossline mark: two lines crossing, then the name. */
+function brand(): El {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 30 30"><path d="M3 5C12 5 18 25 27 25M3 25C12 25 18 5 27 5" fill="none" stroke="${INK}" stroke-width="3.2" stroke-linecap="round"/></svg>`;
+  return box({ alignItems: "center" },
+    h("img", { src: `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`, width: 30, height: 30 }),
+    text(LABELS.brand, "Sans", { fontSize: 26, fontWeight: 700, color: INK, marginLeft: 10 }));
+}
+
+function footer(): El {
+  return box({ width: "100%", justifyContent: "space-between", alignItems: "center" },
+    text(LABELS.disclaimer, "Sans", { fontSize: 24, color: GREY }),
+    brand());
+}
+
+/** The page; its sections never shrink, so a poster that runs long overflows (and the layout test fails) instead of overlapping. */
+const page = (height: number | undefined, ...children: Child[]) =>
+  box({ flexDirection: "column", width: WIDTH, ...(height ? { height } : {}), backgroundColor: PAPER, padding: `${PAD - 16}px ${PAD}px 40px`, fontFamily: "Sans" },
+    ...children.map((child) => child && typeof child === "object"
+      ? { ...child, props: { ...child.props, style: { flexShrink: 0, ...(child.props.style as Style) } } } : child));
+
+export function typePosterTree(type: PublicType, nickname: string, figure: Figure, inviteUrl: string): El {
+  return page(HEIGHT,
+    hero(type, nickname, figure, true),
+    rule(17),
+    box({ flexDirection: "column", width: "100%" }, ...type.axes.map((axis, index) => box({ marginTop: index ? 4 : 0, width: "100%" }, axisRow(axis, type.group.colour)))),
+    rule(17),
+    linesBlock(type, true),
+    rule(17),
+    box({ width: "100%", justifyContent: "space-between" },
+      partner(LABELS.best, type.best, type.group.colour, [type.best.tip]),
+      partner(LABELS.hardest, type.hardest, type.group.colour, [type.hardest.tip])),
+    box({ flexGrow: 1 }),
+    rule(17),
+    box({ width: "100%", justifyContent: "space-between", alignItems: "flex-end" },
+      qrBlock(inviteUrl, 112),
+      box({ flexDirection: "column", alignItems: "flex-end" },
+        text(LABELS.disclaimer, "Sans", { fontSize: 24, color: GREY, marginBottom: 10 }),
+        brand())));
+}
+
+const relationByName = (name: string) => Object.values(RELATIONS).find((relation) => relation.name === name);
+
+function section(title: string, ...children: Child[]): El {
+  return box({ flexDirection: "column", width: "100%" }, text(title, "Serif", { fontSize: 36, fontWeight: 700, color: INK, marginBottom: 18 }), ...children);
+}
+
+export function longImageTree(type: PublicType, nickname: string, figure: Figure, inviteUrl: string): El {
+  const axisDetail = (axis: PublicAxis, index: number) => {
+    const definition = TYPE_AXES.find((item) => item.id === axis.id)!;
+    const [leftText, rightText] = poleExplanations(definition.question);
+    const pole = (letter: string, label: string, en: string, explanation: string, on: boolean) => box({ flexDirection: "column", width: (INNER - 40) / 2 },
+      box({ alignItems: "baseline" },
+        text(`${letter} ${label}`, "Serif", { fontSize: 30, fontWeight: 700, color: on ? type.group.colour : INK }),
+        text(en, "Sans", { fontSize: 24, color: GREY, marginLeft: 10 })),
+      text(explanation, "Sans", { fontSize: 24, color: INK, lineHeight: 1.45, marginTop: 4 }));
+    return box({ flexDirection: "column", width: "100%", marginTop: index ? 30 : 0 },
+      axisRow(axis, type.group.colour),
+      box({ width: "100%", justifyContent: "space-between", marginTop: 14 },
+        pole(axis.leftLetter, axis.leftLabel, axis.leftEn, leftText, axis.score < 50),
+        pole(axis.rightLetter, axis.rightLabel, axis.rightEn, rightText, axis.score >= 50)));
+  };
+  const detail = (label: string, view: PartnerView) => {
+    const relation = relationByName(view.relation);
+    return partner(label, view, type.group.colour, relation ? relation.tips.map((tip, index) => `${index + 1}. ${tip}`) : [view.tip], relation?.when);
+  };
+  return page(undefined,
+    hero(type, nickname, figure, false),
+    rule(34),
+    section(LABELS.axesHeading,
+      type.axes.some((axis) => axis.ambiguous) ? text(LABELS.ambiguous, "Sans", { fontSize: 24, color: GREY, marginBottom: 20 }) : null,
+      ...type.axes.map(axisDetail)),
+    rule(34),
+    section(LABELS.linesHeading, linesBlock(type, false),
+      text(LABELS.loopHeading, "Serif", { fontSize: 28, fontWeight: 700, color: INK, marginTop: 24 }),
+      text(`${type.loop.join(" → ")} → ${type.loop[0]}`, "Sans", { fontSize: 26, color: INK, lineHeight: 1.5, marginTop: 8 }),
+      text(LABELS.loopExplain, "Sans", { fontSize: 24, color: GREY, lineHeight: 1.5, marginTop: 6 }),
+      text(LABELS.loopCaption, "Sans", { fontSize: 24, color: GREY, marginTop: 4 })),
+    rule(34),
+    section(LABELS.partnersHeading,
+      box({ width: "100%", justifyContent: "space-between" },
+        detail(LABELS.best, type.best),
+        detail(LABELS.hardest, type.hardest))),
+    rule(34),
+    qrBlock(inviteUrl, 168),
+    box({ height: 40 }),
+    footer());
+}
+
+type Side = { type: PublicType; nickname: string; figure: Figure };
+
+export function pairCardTree(a: Side, b: Side, primary: RelationView, secondary: RelationView | undefined, sharedLines: string[], inviteUrl: string): El {
+  const person = (side: Side, fallback: string) => box({ flexDirection: "column", alignItems: "center", width: (INNER - 60) / 2 },
+    disc(side.figure, side.type, 360),
+    text(side.nickname.trim() || fallback, "Sans", { fontSize: 32, fontWeight: 700, color: INK, marginTop: 20 }),
+    box({ alignItems: "baseline", marginTop: 6 },
+      text(side.type.name, "Serif", { fontSize: 46, fontWeight: 700, color: INK }),
+      text(side.type.code, "Serif", { fontSize: 28, fontWeight: 700, color: side.type.group.colour, marginLeft: 12, letterSpacing: 2 })));
+  return page(HEIGHT,
+    text(LABELS.pairKicker, "Sans", { fontSize: 26, color: GREY, marginBottom: 22 }),
+    box({ width: "100%", justifyContent: "space-between", alignItems: "flex-start" }, person(a, LABELS.friendA), person(b, LABELS.friendB)),
+    rule(30),
+    text(primary.name, "Serif", { fontSize: 92, fontWeight: 700, color: INK, lineHeight: 1.1 }),
+    text(primary.when, "Sans", { fontSize: 26, color: GREY, marginTop: 10 }),
+    ...primary.tips.map((tip, index) => box({ marginTop: index ? 10 : 22, alignItems: "flex-start" },
+      text(String(index + 1), "Serif", { fontSize: 30, fontWeight: 700, color: a.type.group.colour, width: 36, lineHeight: 1.4 }),
+      text(tip, "Sans", { fontSize: 30, color: INK, lineHeight: 1.4, flexShrink: 1 }))),
+    secondary ? box({ marginTop: 22, alignItems: "baseline" },
+      text(`${LABELS.also}：`, "Sans", { fontSize: 26, color: GREY }),
+      text(secondary.name, "Serif", { fontSize: 30, fontWeight: 700, color: INK }),
+      text(`（${secondary.when}）`, "Sans", { fontSize: 24, color: GREY, flexShrink: 1 })) : null,
+    rule(30),
+    box({ alignItems: "baseline", flexWrap: "wrap" },
+      text(LABELS.shared, "Sans", { fontSize: 24, color: GREY, marginRight: 20 }),
+      sharedLines.length
+        ? box({ alignItems: "baseline" }, ...sharedLines.map((line) => text(line, "Serif", { fontSize: 34, fontWeight: 700, color: INK, marginRight: 22 })))
+        : text(LABELS.noShared, "Serif", { fontSize: 34, fontWeight: 700, color: INK })),
+    box({ flexGrow: 1 }),
+    rule(22),
+    box({ width: "100%", justifyContent: "space-between", alignItems: "flex-end" },
+      qrBlock(inviteUrl, 128),
+      box({ flexDirection: "column", alignItems: "flex-end" },
+        text(LABELS.disclaimer, "Sans", { fontSize: 24, color: GREY, marginBottom: 10 }),
+        brand())));
+}
+
+export type Rendered = { png: Buffer; height: number; nodes: SatoriNode[] };
+
+/** satori lays the tree out and writes SVG with text as paths; resvg rasterises it at exactly 1080 wide. */
+export async function toPng(tree: El, height?: number, options: { collect?: boolean; onMissing?: (segment: string) => void } = {}): Promise<Rendered> {
+  const nodes: SatoriNode[] = [];
+  const { onMissing } = options;
+  const svg = await satori(tree as unknown as ReactNode, {
+    width: WIDTH, ...(height ? { height } : {}), fonts: posterFonts().fonts,
+    ...(options.collect ? { onNodeDetected: (node: SatoriNode) => { nodes.push(node); } } : {}),
+    // Called only for a segment no passed font can draw: `safe` should have made that impossible, the tests make sure of it.
+    ...(onMissing ? { loadAdditionalAsset: async (_language: string, segment: string) => { onMissing(segment); return []; } } : {})
+  });
+  const image = new Resvg(svg, { fitTo: { mode: "width", value: WIDTH }, font: { loadSystemFonts: false }, background: PAPER }).render();
+  return { png: Buffer.from(image.asPng()), height: image.height, nodes };
+}
