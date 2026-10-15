@@ -178,7 +178,7 @@ test("a tutorial is built for committed work without moving it, from its steps a
   expect(materials).toEqual([expect.objectContaining({ docId: "doc1", notes: [expect.objectContaining({ note: "第 1 题要求反相器 VTC" }), expect.anything()] })]);
 });
 
-test("a tutorial is made just in time: only for work starting within two days, again when its inputs change or it is a week old", () => {
+test("a tutorial is made just in time: only for work starting within a week, again when its inputs change or it is a week old", () => {
   const now = new Date("2026-10-13T12:00:00.000Z");
   // The ledger stamps events with the wall clock; pin it to the test's `now`, or the week-old rebuild below stops holding as real time passes.
   vi.useFakeTimers({ toFake: ["Date"] });
@@ -189,8 +189,8 @@ test("a tutorial is made just in time: only for work starting within two days, a
     estimate: { p25Minutes: 60, p50Minutes: 120, p85Minutes: 240, source: "llm_prior", observationCount: 0, confidence: "low" }, payload: {} });
   store.saveStepPlan(WS, "hw3", { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 1, unit: "题" }, rationale: "", steps: [plannedStep("a", "解题")] }, "o", "t");
   expect(pendingTutorials(store, WS, now)).toEqual([]);
-  // Three days out: not yet. w1 is still preparing (material preparation handles it).
-  store.setSetting(WS, "schedule.orderStarts", JSON.stringify({ hw3: hours(72), w1: hours(5) }));
+  // Nine days out: not yet. w1 is still preparing (material preparation handles it).
+  store.setSetting(WS, "schedule.orderStarts", JSON.stringify({ hw3: hours(9 * 24), w1: hours(5) }));
   expect(pendingTutorials(store, WS, now)).toEqual([]);
   store.setSetting(WS, "schedule.orderStarts", JSON.stringify({ hw3: hours(30), w1: hours(5) }));
   expect(pendingTutorials(store, WS, now)).toEqual(["hw3"]);

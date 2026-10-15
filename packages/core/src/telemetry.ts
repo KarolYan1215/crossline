@@ -41,7 +41,7 @@ export type TelemetryEvent = {
  * opened, which carries ids — and `apps/web/lib/telemetry-privacy.test.ts` checks this list against the `page.tsx` files, so a new
  * page is added here or never reported.
  */
-export const APP_PAGES = ["/", "/approvals", "/assistant", "/confirm/[id]", "/login", "/milestones", "/milestones/[id]", "/offline",
+export const APP_PAGES = ["/", "/approvals", "/assistant", "/confirm/[id]", "/login", "/materials/[id]", "/materials/view", "/milestones", "/milestones/[id]", "/offline",
   "/onboarding", "/plan", "/portrait", "/reset-password", "/return", "/review", "/settings", "/signup", "/workbench", "/workbench/[id]",
   "/workbench/[id]/material"] as const;
 

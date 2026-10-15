@@ -36,6 +36,10 @@ Keep it to what the task needs: usually three to seven steps. A task that is one
 
 When `plannedSteps` is present the task already has its steps, and the person schedules and tracks those: the manualbook follows them. Make **one node per planned step, in the same order**, with the planned step's title as the node title (a waiting step that is only about something arriving can be left out), and write `steps` as the concrete sub-actions for doing it. Its `acceptance` is the planned step's `doneCriterion`. The contract items named `step-<id>` are these steps' completion criteria. Each planned step names the content units it covers (`covers`, in the material's own words) and why it is there for this person (`why`): the sub-actions and research questions are about **those units** at **this person's level** — the derivation, problem type or method the unit requires — never generic advice on organising material or making notes.
 
+### Concise and complete
+
+The tutorial is read as one page with a section per node, linked one-to-one with the task's steps. So: no two nodes overlap (each sub-action lives in exactly one node), together they cover every required contract item and every planned step, and a node's `steps` are the few concrete actions it needs — no restating the goal, no generic advice, nothing repeated from another node.
+
 ## edges[]
 
 `{from, to}`: `from` must be done before `to`. The result is a chain with **no loops**; every step connects to the rest. Steps that can be done in either order simply share a predecessor.

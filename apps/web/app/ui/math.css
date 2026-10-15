@@ -1,0 +1,5 @@
+/* Formulas drawn by KaTeX inside the shared Markdown (app/ui/markdown.tsx). KaTeX's own stylesheet and fonts are bundled from
+   node_modules (katex/dist/katex.min.css), never fetched from a CDN. A wide formula scrolls inside its own box, never the page. */
+.md-math .katex{font-size:1.1em;color:inherit}
+.md-math-display{display:block;max-width:100%;overflow-x:auto;overflow-y:hidden;margin:0 0 10px}
+.md-math-display .katex-display{margin:.3em 0}

@@ -8,6 +8,9 @@
   /* The tab bar sits on the home indicator otherwise (viewport-fit=cover in layout.tsx makes the inset available). */
   .bottom-nav{padding-bottom:env(safe-area-inset-bottom)}
   .page,.subpage{padding-bottom:calc(76px + env(safe-area-inset-bottom))}
+  .page,.subpage{padding-inline:16px}
+  /* With the 16px side margin a phone's content is 343px wide; the proposal grid's 360px track would scroll the page sideways. */
+  #proposals.work-order-list{grid-template-columns:minmax(0,1fr)}
   .bottom-nav>a,.bottom-nav-more>summary{min-height:48px;display:flex;align-items:center;justify-content:center}
   /* Touch targets: 44px is Apple's minimum for something tapped with a thumb. */
   .ask-option,.primary-button,.secondary-button,.execution-actions button,.execution-actions a,.ask-later .text-button,.ask-stack-nav .text-button{min-height:44px}

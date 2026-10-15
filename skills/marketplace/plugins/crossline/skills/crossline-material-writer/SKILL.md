@@ -39,6 +39,15 @@ One entry per source you used, `{sourceId, note}`: what in that material matters
 
 The ids of the sources you actually used. A step that was given sources and cites none is sent back.
 
+## Concise, complete, one step at a time
+
+The tutorial is read as one page, a section per step of the task, with the sources numbered once at the end. Write for that page:
+
+- **One-to-one with the step.** Everything this step needs is here; nothing that belongs to the step before or after it. When something is done in another step, name that step in one line instead of repeating it.
+- **Complete.** Every item of `node.steps` and every unit in `covers` is dealt with, and the tutorial ends with how the person checks the step is done (`node.acceptance`).
+- **No repetition.** Say each point once. The analysis does not restate the tutorial; two items that say the same thing become one. Do not re-describe a source in every step it is used in: cite it by id, and in `sourceNotes` write only what matters for **this** step.
+- **Short paragraphs, numbered actions.** One action per numbered item; a paragraph of more than four sentences is split or cut. No preamble, no closing summary.
+
 ## Rules
 
 - Cite only by id. **Never write a web address yourself**: an address that was not given to you is refused.

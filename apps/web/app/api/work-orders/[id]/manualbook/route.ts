@@ -47,9 +47,13 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     });
     nodes[node.id] = { task: read(inside(`${base}/task.md`) ?? ""), analysis: read(inside(`${base}/analysis.md`) ?? ""), tutorial: read(inside(`${base}/tutorial.md`) ?? ""), sources };
   }
-  let listed: Array<{ title: string; publisher: string; kept: string; docId?: string; notes: unknown[] }> = [];
+  let listed: Array<{ id?: string; title: string; publisher: string; url?: string; kept: string; docId?: string; notes: Array<{ node?: string }> }> = [];
   try { listed = JSON.parse(read(path.join(root, "materials.json")) || "[]"); } catch { /* a book built before materials were listed */ }
-  return NextResponse.json({ built: true, building, progress, blocker, flow, manual: read(path.join(root, "manual.md")), nodes,
-    materials: listed.map((item, index) => ({ index, title: item.title, publisher: item.publisher, kept: item.kept, ...(item.docId ? { docId: item.docId } : {}), notes: item.notes.length })) },
+  // The task's own steps, so the reading page puts each section under its step and links the two both ways.
+  const steps = (store.getStepPlan(access.ctx.workspaceId, id)?.steps ?? []).map((step) => ({ id: step.id, title: step.title, status: step.status }));
+  return NextResponse.json({ built: true, building, progress, blocker, flow, manual: read(path.join(root, "manual.md")), nodes, steps,
+    materials: listed.map((item, index) => ({ index, ...(item.id ? { id: item.id } : {}), title: item.title, publisher: item.publisher, kept: item.kept,
+      ...(item.docId ? { docId: item.docId } : {}), ...(item.url ? { url: item.url } : {}), notes: item.notes.length,
+      nodes: [...new Set(item.notes.map((note) => note.node).filter((node): node is string => typeof node === "string"))] })) },
     { headers: { "cache-control": "no-store" } });
 }

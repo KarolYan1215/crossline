@@ -3,6 +3,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { dataDirectory, getStore } from "../../../../../lib/crossline";
 import { resolveAccessContext } from "../../../../../lib/access-guard";
+import { contentDisposition } from "../../../../materials/file-response";
+import { buildPreview, htmlPageText } from "../../../../materials/preview";
 
 /**
  * Serves one prepared material back to the person who asked for it.
@@ -36,13 +38,20 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   }
   try {
     const bytes = readFileSync(file);
+    if (new URL(request.url).searchParams.get("view") === "preview") {
+      // A kept web page is shown as its text, never as the page.
+      const page = /\.html?$/i.test(file);
+      return Response.json(await buildPreview(page ? { fileName: "page.txt", extractedText: htmlPageText(bytes.toString("utf8")), kind: "text" } : { fileName: path.basename(file), bytes }),
+        { headers: { "cache-control": "no-store" } });
+    }
     // A downloaded paper is a PDF and is shown as one; everything else is shown as text and never executed, whatever
     // media type it claims.
     const pdf = file.toLowerCase().endsWith(".pdf");
     return new Response(bytes, {
       headers: {
         "content-type": pdf ? "application/pdf" : "text/plain; charset=utf-8",
-        "content-disposition": `inline; filename="${path.basename(file)}"`,
+        // A name outside ASCII written straight into the header made the route answer 500.
+        "content-disposition": contentDisposition("inline", path.basename(file)),
         "x-content-type-options": "nosniff"
       }
     });

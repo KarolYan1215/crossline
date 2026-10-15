@@ -28,7 +28,8 @@ const DESIGN_INSTRUCTIONS = "Design how this one task gets done, as a short flow
   + "serves at least one item of the task's contract by id, and a step that needs material the person does not have "
   + "says what to look for. Every REQUIRED contract item must be served by some step. Steps form a chain with no loops: "
   + "edges point from what must come first to what follows. Use the person's own facts and local files where they bear "
-  + "on the how. Do not do the work itself and do not claim it is done. Write every human-readable field in Chinese.";
+  + "on the how. Concise and complete: one node per planned step when the task has them, each covering its step fully and no two "
+  + "overlapping. Do not do the work itself and do not claim it is done. Write every human-readable field in Chinese.";
 const SEARCH_INSTRUCTIONS = "Find the best material for ONE step of a task on the public web. Return only the requested "
   + "JSON. A source is a public https page you opened, with its real title. Prefer primary and open-access sources "
   + "(official documentation, the paper itself, a maintained tutorial) over summaries of them. Say honestly whether you "
@@ -42,6 +43,8 @@ const WRITE_INSTRUCTIONS = "Write up ONE step of a task from the supplied source
   + "the supplied material allows — start the tutorial with where and how to get what is missing (named from the sources, e.g. the "
   + "course platform the syllabus names), then the method, the topics and checks that apply whatever the exact content turns out to be — "
   + "and open the analysis with a 「需要补充」 line naming each missing item. Return a blocker only when nothing useful can be written at all. "
+  + "Concise and complete: cover everything this one step needs and nothing that belongs to another step; say each point once (the analysis "
+  + "does not repeat the tutorial); a source's note says only what matters for this step, not what it already said for others. "
   + "Return only the requested JSON. Write in Chinese.";
 
 export type ManualProgress = { stage: "designing" | "researching" | "writing" | "assembling"; done: number; total: number };
@@ -373,8 +376,13 @@ function assemble(input: { design: ManualDesign; nodes: NodeResult[]; context: M
     depth.set(result.node.id, parents.length ? Math.max(...parents) + 1 : 0);
   }
   files.push({ path: "flow.json", mediaType: "application/json", record: true, sourceRefs: [],
-    bytes: JSON.stringify({ version: 1, nodes: nodes.map((result) => ({ id: result.node.id, title: result.node.title, kind: result.node.kind, goal: result.node.goal,
-      stage: depth.get(result.node.id) ?? 0, order: order.get(result.node.id), hasWriteup: Boolean(result.writeup), sources: result.sources.length })), edges: design.edges }, null, 2) });
+    // `stepId`: the task step this section is written for (one node per planned step, same title), so the reading page and the step
+    // list link to each other.
+    bytes: JSON.stringify({ version: 1, nodes: nodes.map((result) => {
+      const stepId = context.plannedSteps?.find((step) => step.title.trim() === result.node.title.trim())?.id;
+      return { id: result.node.id, title: result.node.title, kind: result.node.kind, goal: result.node.goal, ...(stepId ? { stepId } : {}),
+        stage: depth.get(result.node.id) ?? 0, order: order.get(result.node.id), hasWriteup: Boolean(result.writeup), sources: result.sources.length };
+    }), edges: design.edges }, null, 2) });
 
   const sourceList = (result: NodeResult) => result.sources.map((source) => `- **${source.id}** ${source.title}（${source.publisher || "—"}）${source.url}\n  - ${source.kept === "full_text" ? `已下载全文：${source.verdict}` : source.verdict}\n  - 摘要：${source.summary}`).join("\n");
   files.push({ path: "manual.md", mediaType: "text/markdown", record: true, sourceRefs: [],
@@ -452,8 +460,8 @@ export function tutorialInputs(store: CrosslineStore, workspaceId: string, workO
 }
 
 /**
- * Tutorials to make now: for committed work with a step plan whose next block starts within two days (just in time — the person's
- * decision, 2026-10-13), never built, or built from inputs that have since changed, or built over a week ago. A tutorial that failed after
+ * Tutorials to make now: for committed work with a step plan whose next block starts within `TUTORIAL_LEAD_DAYS` (a week — the person's
+ * decision, 2026-10-15; two days before), never built, or built from inputs that have since changed, or built over a week ago. A tutorial that failed after
  * its last build waits for the person (the failure is asked about).
  */
 export function pendingTutorials(store: CrosslineStore, workspaceId: string, now = new Date()): string[] {

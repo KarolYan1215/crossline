@@ -325,6 +325,13 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .auth-form input{padding:9px 10px;border:1px solid var(--mist);background:var(--paper);color:var(--ink)}
 .auth-form button[disabled]{opacity:.5;cursor:default}
 .auth-form>button{width:100%}
+/* The two ways in were bare buttons with no gap — 「密码登录邮箱验证码」 read as one word. */
+.auth-form .auth-modes{display:flex;gap:0;margin:0}
+.auth-form .auth-modes button{flex:1;min-height:36px;padding:6px 10px;border:1px solid var(--ink);background:transparent;color:var(--ink);font-size:13px;cursor:pointer}
+.auth-form .auth-modes button+button{border-left:0}
+.auth-form .auth-modes button[aria-pressed="true"]{background:var(--ink);color:var(--paper)}
+.login-panel .auth-form{width:100%;padding:0;border:0}
+.login-panel .auth-form small{font-size:13px}
 /* Errors and a completed step both use the same ink-on-paper language as `.review-flag` elsewhere —
    this app never reaches for a second colour to mean "wrong", only a stronger left border. */
 .auth-form small[role="alert"]{display:block;font-family:var(--f-mono);font-size:12px;
@@ -614,3 +621,5 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .undo-toast span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .undo-toast button{background:transparent;color:var(--paper);border:1px solid currentColor;padding:2px 8px;font:inherit;cursor:pointer}
 @media (max-width:640px){.undo-toast{bottom:84px}}
+.login-panel .auth-form form>button[type="submit"]{min-height:44px;border:1.5px solid var(--ink);background:var(--ink);color:var(--paper);font-size:15px}
+.login-panel .auth-form form>button[type="submit"]:hover{background:var(--paper);color:var(--ink)}
