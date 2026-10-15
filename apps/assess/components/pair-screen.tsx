@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { api, type ClientErrorCode } from "../lib/api-client";
 import type { PairView, RelationView } from "../lib/contract";
 import { LAST_RESULT_KEY, errorMessage } from "../lib/flow";
-import { SavableImage } from "./poster";
+import { SavableImage, smallFigure } from "./poster";
 import { DISCLAIMER } from "./result-screen";
 import { readStored } from "./storage";
 import { TypeHeading, groupStyle } from "./type-summary";
@@ -51,15 +51,17 @@ export function PairScreen({ token }: { token: string }) {
       <h2>你们俩</h2>
       <div className="as-people">{people.map((person, index) => <div key={index} className="as-person" style={groupStyle(person.type)}>
         {/* eslint-disable-next-line @next/next/no-img-element -- a figure, a plain image */}
-        <img className="as-figure" src={person.avatar.url} alt={`${names[index]}的形象`} width={120} height={180} />
+        <img className="as-figure" src={smallFigure(person.avatar.url)} alt={`${names[index]}的形象`} width={120} height={180} />
         <p className="as-person-name">{names[index]}</p>
         <TypeHeading type={person.type} as="h3" />
       </div>)}</div>
       <p>{pair.sharedLines.length ? `你们都适合的主线：${pair.sharedLines.join("、")}` : "你们适合的主线没有重合，正好各管一摊。"}</p>
     </section>
     <section className="as-block">
-      {ownResult ? <a className="as-button as-primary" href={`/r/${ownResult}`}>也邀请别人测</a>
-        : <a className="as-button as-primary" href="/">我也测一测</a>}
+      {ownResult ? <>
+        <a className="as-button as-primary" href={`/r/${ownResult}`}>看我自己的海报，再拉别人测</a>
+        <p className="as-note">你的类型海报、邀请链接和所有双人卡都在那一页。</p>
+      </> : <a className="as-button as-primary" href="/">我也测一测</a>}
     </section>
     <p className="as-disclaimer">{DISCLAIMER}</p>
   </main>;

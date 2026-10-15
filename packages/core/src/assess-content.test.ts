@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { QUIZ_ITEMS, quizScores } from "./assess";
-import { RELATIONS, TYPE_CODES, TYPE_LINES, TYPE_SUBTITLE, axisRank, isAmbiguous, pairFit, partnersOf, relationOf } from "./assess-content";
+import { LINE_IDENTITIES, RELATIONS, TYPE_CODES, TYPE_LINES, TYPE_SUBTITLE, axisRank, isAmbiguous, shownRank, pairFit, partnersOf, relationOf } from "./assess-content";
 import { TYPE_AXES } from "./portrait-type";
 
 describe("the thirty-two statements", () => {
@@ -29,6 +29,23 @@ describe("type content", () => {
       expect(TYPE_SUBTITLE[code]!.length).toBeGreaterThan(4);
       expect(TYPE_LINES[code]!.lines).toHaveLength(3);
       expect(TYPE_LINES[code]!.loop).toHaveLength(4);
+      // The poster's loop boxes hold ten characters on one line; an identity runs at most twelve beside it.
+      for (const step of TYPE_LINES[code]!.loop) expect([...step].length, step).toBeLessThanOrEqual(10);
+      // Four combinations of three lines from the vocabulary; within a type the twelve identities never repeat; a field runs at most
+      // seven characters, and a licensed profession stands alone with none.
+      const all = [TYPE_LINES[code]!.lines, ...TYPE_LINES[code]!.more];
+      expect(all).toHaveLength(4);
+      for (const combo of all) {
+        expect(combo).toHaveLength(3);
+        for (const line of combo) {
+          expect(LINE_IDENTITIES, line.identity).toContain(line.identity);
+          expect([...line.domain].length, line.domain).toBeLessThanOrEqual(7);
+          if (["医生", "律师", "中医师"].includes(line.identity)) expect(line.domain).toBe("");
+          else expect(line.domain, line.identity).not.toBe("");
+        }
+      }
+      expect(new Set(all.flat().map((line) => line.identity)).size, code).toBe(12);
+      expect(all.flat().some((line) => /行业$/.test(line.domain) && line.identity === "职场人" && /医疗|法律|中医/.test(line.domain))).toBe(false);
     }
   });
 });
@@ -76,11 +93,24 @@ describe("rank and ambiguity", () => {
     expect(mild).toMatchObject({ pole: "跨界", estimated: true });
     expect(strong.percent).toBeGreaterThan(mild.percent);
     expect(axisRank("scope", 10).pole).toBe("深耕");
-    expect(axisRank("scope", 100).percent).toBeLessThanOrEqual(99);
+    expect(axisRank("scope", 100).percent).toBeLessThanOrEqual(96);
+  });
+  test("over 95 the rank is 91–96, fixed per result and axis, spread across results; at or under 95 it is untouched", () => {
+    const seeds = Array.from({ length: 200 }, (_, index) => `result-${index}`);
+    const shown = seeds.map((seed) => axisRank("scope", 95, [], seed).percent);
+    for (const value of shown) expect(value).toBeGreaterThanOrEqual(91), expect(value).toBeLessThanOrEqual(96);
+    expect(new Set(shown).size).toBe(6);
+    expect(axisRank("scope", 95, [], "result-7").percent).toBe(axisRank("scope", 95, [], "result-7").percent);
+    expect(axisRank("scope", 60, [], "x").percent).toBe(axisRank("scope", 60).percent);
+    expect(shownRank(95, "a", "scope")).toBe(95);
+    expect(shownRank(42, "a", "basis")).toBe(42);
   });
   test("from two hundred recorded scores the rank is the people's own", () => {
     const recorded = Array.from({ length: 200 }, (_, index) => index % 2 ? 55 : 45);
-    const rank = axisRank("scope", 80, recorded);
-    expect(rank).toMatchObject({ estimated: false, percent: 99 });
+    const rank = axisRank("scope", 80, recorded, "r1");
+    expect(rank.estimated).toBe(false);
+    // 99% of recorded people lean less far, shown capped like the estimate.
+    expect(rank.percent).toBe(shownRank(99, "r1", "scope"));
+    expect(rank.percent).toBeLessThanOrEqual(96);
   });
 });

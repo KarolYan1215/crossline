@@ -10,7 +10,8 @@ import { HEIGHT, longImageTree, pairCardTree, toPng, typePosterTree } from "./re
  * Each is cached on disk by a hash of its input and the figure's bytes (`cache.ts`).
  */
 
-export type PosterInput = { type: PublicType; nickname: string; avatarPath: string; inviteUrl: string };
+/** `cacheTag` names whose poster this is (the invitation token, or the pair token for a pair card), so deleting the result deletes it. */
+export type PosterInput = { type: PublicType; nickname: string; avatarPath: string; inviteUrl: string; cacheTag?: string };
 export type PairCardInput = {
   a: { type: PublicType; nickname: string; avatarPath: string };
   b: { type: PublicType; nickname: string; avatarPath: string };
@@ -19,23 +20,25 @@ export type PairCardInput = {
   sharedLines: string[];
   /** Printed as the card's QR code: the inviter's invitation, so the card keeps spreading. */
   inviteUrl: string;
+  cacheTag?: string;
 };
 
 const keyParts = (input: PosterInput) => ({ type: input.type, nickname: input.nickname, inviteUrl: input.inviteUrl, figure: fileDigest(input.avatarPath) });
 
 export async function renderTypePoster(input: PosterInput): Promise<Buffer> {
-  return cachedPng(posterKey("type", keyParts(input)), async () =>
+  return cachedPng(posterKey("type", keyParts(input), input.cacheTag), async () =>
     (await toPng(typePosterTree(input.type, input.nickname, figureFrom(input.avatarPath, input.type.code), input.inviteUrl), HEIGHT)).png);
 }
 
 export async function renderLongImage(input: PosterInput): Promise<Buffer> {
-  return cachedPng(posterKey("long", keyParts(input)), async () =>
+  return cachedPng(posterKey("long", keyParts(input), input.cacheTag), async () =>
     (await toPng(longImageTree(input.type, input.nickname, figureFrom(input.avatarPath, input.type.code), input.inviteUrl))).png);
 }
 
 export async function renderPairCard(input: PairCardInput): Promise<Buffer> {
   const side = (person: PairCardInput["a"]) => ({ type: person.type, nickname: person.nickname, figure: figureFrom(person.avatarPath, person.type.code) });
-  const parts = { ...input, a: { ...input.a, avatarPath: fileDigest(input.a.avatarPath) }, b: { ...input.b, avatarPath: fileDigest(input.b.avatarPath) } };
-  return cachedPng(posterKey("pair", parts), async () =>
+  const { cacheTag, ...rest } = input;
+  const parts = { ...rest, a: { ...input.a, avatarPath: fileDigest(input.a.avatarPath) }, b: { ...input.b, avatarPath: fileDigest(input.b.avatarPath) } };
+  return cachedPng(posterKey("pair", parts, cacheTag), async () =>
     (await toPng(pairCardTree(side(input.a), side(input.b), input.primary, input.secondary, input.sharedLines, input.inviteUrl), HEIGHT)).png);
 }

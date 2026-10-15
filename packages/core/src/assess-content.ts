@@ -30,26 +30,115 @@ export const TYPE_SUBTITLE: Record<string, string> = {
   GIRA: "八个副本同时开，存档点一个都没有"
 };
 
-/** Three lines a type suits and the loop they feed: each step's output is the next one's input, and the last feeds the first. */
-export type TypeLines = { lines: [string, string, string]; loop: [string, string, string, string] };
+/**
+ * One recommended line, 「<领域>的<身份>」: the identity at the level of a whole line of life (研究者, 创业者, 创作者, 投资者, a hobby
+ * such as 跑者), printed large, and the field it is in, printed small. A licensed profession (医生, 律师, 中医师) is its own identity with
+ * no field, rather than 「医疗行业的职场人」 (decided 2026-10-15). Vocabulary and rules: docs/plans/2026-10-15-type-line-combos.md §2.1–§2.3.
+ */
+export type LineIdentity = { domain: string; identity: string };
+
+/** Every identity a recommendation may use (§2.2's vocabulary, plus the licensed professions). */
+export const LINE_IDENTITIES = ["研究者", "学生", "职场人", "创业者", "自由职业者", "投资者", "创作者", "教育者", "社群主理人", "家长", "跑者", "健身者", "骑行者", "户外爱好者", "球友", "舞者", "音乐人", "画手", "摄影者", "写作者", "读者", "手作人", "书法爱好者", "coser", "医生", "律师", "中医师"] as const;
+
+/** 「人工智能的研究者」, or 「医生」 for a line with no field. */
+export const lineText = (line: LineIdentity): string =>
+  line.domain ? `${line.domain}的${latinGap(line.identity)}${line.identity}` : line.identity;
+/** A space between Chinese and a Latin word (「二次元的 coser」), none between two runs of Chinese. */
+export const latinGap = (identity: string): string => /^[A-Za-z]/.test(identity) ? " " : "";
+
+/**
+ * What the poster offers a type, as a suggestion (「你也许想做」), not a verdict: the first combination of three lines with the loop they
+ * feed (each step's output is the next one's input, the last feeds the first), and three more combinations without a loop. Settled
+ * 2026-10-15 from docs/plans/2026-10-15-type-line-combos.md §2.5; within one type the twelve identities never repeat.
+ */
+export type TypeLines = {
+  lines: [LineIdentity, LineIdentity, LineIdentity];
+  loop: [string, string, string, string];
+  more: [LineCombo, LineCombo, LineCombo];
+};
+export type LineCombo = [LineIdentity, LineIdentity, LineIdentity];
 
 export const TYPE_LINES: Record<string, TypeLines> = {
-  SEMP: { lines: ["研究者", "工程师", "讲师"], loop: ["研究成果", "工程实现", "课程讲义", "新的研究问题"] },
-  SEMA: { lines: ["实验者", "产品人", "记录者"], loop: ["实验", "小产品", "公开的实验日志", "用户反馈变成新实验"] },
-  SERP: { lines: ["学者", "讲师", "作者"], loop: ["研究", "课程", "书稿", "学生的问题回到研究"] },
-  SERA: { lines: ["专家", "顾问", "内容作者"], loop: ["专业积累", "咨询案例", "案例文章", "新客户带来新问题"] },
-  SIMP: { lines: ["创作者", "导师", "展示者"], loop: ["作品", "教学", "作品展示", "观众反馈养出下一件"] },
-  SIMA: { lines: ["创作者", "表演者", "内容作者"], loop: ["即兴作品", "现场表达", "片段剪辑", "灵感素材库"] },
-  SIRP: { lines: ["践行者", "讲者", "社群主理人"], loop: ["亲身实践", "分享", "社群", "社群案例回到实践"] },
-  SIRA: { lines: ["探索者", "写作者", "播客主"], loop: ["体验", "写作", "播客", "听众带来新去处"] },
-  GEMP: { lines: ["工程师", "研究者", "创业者"], loop: ["系统", "方法论", "产品", "用户数据回到系统"] },
-  GEMA: { lines: ["开发者", "创业者", "内容作者"], loop: ["拼出的工具", "小产品", "教程", "用户需求变成新工具"] },
-  GERP: { lines: ["分析师", "管理者", "写作者"], loop: ["分析", "方案落地", "复盘文章", "影响力带来新课题"] },
-  GERA: { lines: ["连接者", "产品人", "内容作者"], loop: ["人脉", "合作项目", "故事内容", "新的人脉"] },
-  GIMP: { lines: ["创业者", "研究者", "投资人"], loop: ["事业", "行业洞察", "投资判断", "资源回到事业"] },
-  GIMA: { lines: ["发明者", "创业者", "内容作者"], loop: ["新点子", "原型", "公开展示", "反馈筛出值得做的"] },
-  GIRP: { lines: ["领导者", "讲者", "社群主理人"], loop: ["愿景", "演讲", "社群", "成员成为执行者"] },
-  GIRA: { lines: ["探索者", "内容作者", "投资人"], loop: ["跨界体验", "内容", "判断力", "判断力换来新门票"] }
+  SEMP: {
+    lines: [{ domain: "人工智能", identity: "研究者" }, { domain: "软件工具", identity: "创业者" }, { domain: "指数基金", identity: "投资者" }],
+    loop: ["课题里的代码", "做成工具上架", "收入按月定投", "现金流撑住长课题"],
+    more: [[{ domain: "互联网", identity: "职场人" }, { domain: "马拉松", identity: "跑者" }, { domain: "技术写作", identity: "写作者" }], [{ domain: "理工科", identity: "学生" }, { domain: "考研辅导", identity: "教育者" }, { domain: "行书", identity: "书法爱好者" }], [{ domain: "古典钢琴", identity: "音乐人" }, { domain: "音乐知识", identity: "创作者" }, { domain: "人文社科", identity: "读者" }]]
+  },
+  SEMA: {
+    lines: [{ domain: "制造业", identity: "职场人" }, { domain: "街头小吃", identity: "创业者" }, { domain: "生活方式", identity: "创作者" }],
+    loop: ["工资兜底", "摆摊试新品", "流水拍成 vlog", "数据定下周卖什么"],
+    more: [[{ domain: "商科", identity: "学生" }, { domain: "电商运营", identity: "自由职业者" }, { domain: "A 股", identity: "投资者" }], [{ domain: "力量训练", identity: "健身者" }, { domain: "体能训练", identity: "教育者" }, { domain: "公路车", identity: "骑行者" }], [{ domain: "运动科学", identity: "研究者" }, { domain: "攀岩", identity: "户外爱好者" }, { domain: "攀岩同好", identity: "社群主理人" }]]
+  },
+  SERP: {
+    lines: [{ domain: "社会科学", identity: "研究者" }, { domain: "高等教育", identity: "教育者" }, { domain: "知识科普", identity: "创作者" }],
+    loop: ["研究", "系统课程", "知识短视频", "评论区问题回到研究"],
+    more: [[{ domain: "文科", identity: "学生" }, { domain: "学习打卡", identity: "社群主理人" }, { domain: "人文社科", identity: "读者" }], [{ domain: "", identity: "医生" }, { domain: "医学人文", identity: "写作者" }, { domain: "二孩家庭", identity: "家长" }], [{ domain: "马拉松", identity: "跑者" }, { domain: "长途骑行", identity: "骑行者" }, { domain: "运动康复", identity: "自由职业者" }]]
+  },
+  SERA: {
+    lines: [{ domain: "", identity: "医生" }, { domain: "医学科普", identity: "创作者" }, { domain: "临床医学", identity: "研究者" }],
+    loop: ["门诊病例", "科普视频", "高频提问", "提问变成研究选题"],
+    more: [[{ domain: "", identity: "律师" }, { domain: "法考培训", identity: "教育者" }, { domain: "创业者交流", identity: "社群主理人" }], [{ domain: "金融学", identity: "学生" }, { domain: "个人理财", identity: "写作者" }, { domain: "指数基金", identity: "投资者" }], [{ domain: "低龄孩子", identity: "家长" }, { domain: "亲子摄影", identity: "摄影者" }, { domain: "儿童手工", identity: "手作人" }]]
+  },
+  SIMP: {
+    lines: [{ domain: "陶艺", identity: "手作人" }, { domain: "手工艺品", identity: "创业者" }, { domain: "手工技艺", identity: "创作者" }],
+    loop: ["长期练拉坯", "工作室接定制", "拉坯视频", "观众报名体验课"],
+    more: [[{ domain: "互联网", identity: "职场人" }, { domain: "长篇小说", identity: "写作者" }, { domain: "文学", identity: "读者" }], [{ domain: "二孩家庭", identity: "家长" }, { domain: "绘本", identity: "画手" }, { domain: "亲子共读", identity: "社群主理人" }], [{ domain: "古典舞", identity: "舞者" }, { domain: "舞台摄影", identity: "摄影者" }, { domain: "舞蹈教学", identity: "教育者" }]]
+  },
+  SIMA: {
+    lines: [{ domain: "艺术类", identity: "学生" }, { domain: "插画", identity: "自由职业者" }, { domain: "绘画", identity: "创作者" }],
+    loop: ["课业灵感", "随手接稿", "画画 vlog", "约稿需求变成新练习"],
+    more: [[{ domain: "设计行业", identity: "职场人" }, { domain: "独立乐队", identity: "音乐人" }, { domain: "现场演出", identity: "摄影者" }], [{ domain: "二次元", identity: "coser" }, { domain: "道具制作", identity: "手作人" }, { domain: "漫展同好", identity: "社群主理人" }], [{ domain: "爵士舞", identity: "舞者" }, { domain: "舞蹈工作室", identity: "创业者" }, { domain: "街舞教学", identity: "教育者" }]]
+  },
+  SIRP: {
+    lines: [{ domain: "二孩家庭", identity: "家长" }, { domain: "育儿", identity: "创作者" }, { domain: "家长互助", identity: "社群主理人" }],
+    loop: ["带娃实践", "育儿笔记", "家长群", "群里案例回到实践"],
+    more: [[{ domain: "文学", identity: "读者" }, { domain: "书评", identity: "写作者" }, { domain: "阅读写作", identity: "教育者" }], [{ domain: "行书", identity: "书法爱好者" }, { domain: "传统文化", identity: "研究者" }, { domain: "文房用品", identity: "创业者" }], [{ domain: "", identity: "中医师" }, { domain: "传统功法", identity: "健身者" }, { domain: "健康管理", identity: "自由职业者" }]]
+  },
+  SIRA: {
+    lines: [{ domain: "神经科学", identity: "研究者" }, { domain: "科研生活", identity: "创作者" }, { domain: "随笔", identity: "写作者" }],
+    loop: ["研究里的追问", "科研 vlog", "整理成随笔", "读者问题回到研究"],
+    more: [[{ domain: "翻译", identity: "自由职业者" }, { domain: "外语", identity: "教育者" }, { domain: "外国文学", identity: "读者" }], [{ domain: "徒步", identity: "户外爱好者" }, { domain: "风光摄影", identity: "摄影者" }, { domain: "户外同好", identity: "社群主理人" }], [{ domain: "互联网", identity: "职场人" }, { domain: "长途骑行", identity: "骑行者" }, { domain: "旅行速写", identity: "画手" }]]
+  },
+  GEMP: {
+    lines: [{ domain: "工程制造", identity: "职场人" }, { domain: "机器人", identity: "研究者" }, { domain: "硬科技", identity: "创业者" }],
+    loop: ["工程系统", "研究方法论", "产品化", "用户数据回到系统"],
+    more: [[{ domain: "资产配置", identity: "投资者" }, { domain: "数据分析", identity: "教育者" }, { domain: "马拉松", identity: "跑者" }], [{ domain: "工科", identity: "学生" }, { domain: "电子制作", identity: "手作人" }, { domain: "科技数码", identity: "创作者" }], [{ domain: "软件开发", identity: "自由职业者" }, { domain: "力量训练", identity: "健身者" }, { domain: "商业", identity: "读者" }]]
+  },
+  GEMA: {
+    lines: [{ domain: "互联网", identity: "职场人" }, { domain: "AI 应用", identity: "创业者" }, { domain: "AI 技能", identity: "教育者" }],
+    loop: ["主业痛点", "AI 拼出小工具", "开工作坊教人", "学员需求变成新工具"],
+    more: [[{ domain: "AI 绘画", identity: "自由职业者" }, { domain: "AI 工具", identity: "创作者" }, { domain: "外语", identity: "学生" }], [{ domain: "公路车", identity: "骑行者" }, { domain: "车辆改装", identity: "手作人" }, { domain: "A 股", identity: "投资者" }], [{ domain: "AI 音乐", identity: "音乐人" }, { domain: "街头摄影", identity: "摄影者" }, { domain: "AI 学习", identity: "社群主理人" }]]
+  },
+  GERP: {
+    lines: [{ domain: "金融行业", identity: "职场人" }, { domain: "美股科技股", identity: "投资者" }, { domain: "财经", identity: "创作者" }],
+    loop: ["行业一线信息", "投资判断", "财经复盘", "读者追问校正判断"],
+    more: [[{ domain: "公共政策", identity: "研究者" }, { domain: "职业发展", identity: "教育者" }, { domain: "行业交流", identity: "社群主理人" }], [{ domain: "", identity: "律师" }, { domain: "商业思考", identity: "写作者" }, { domain: "马拉松", identity: "跑者" }], [{ domain: "管理学", identity: "学生" }, { domain: "商业", identity: "读者" }, { domain: "校园服务", identity: "创业者" }]]
+  },
+  GERA: {
+    lines: [{ domain: "企业服务", identity: "职场人" }, { domain: "匹克球", identity: "球友" }, { domain: "同城社交", identity: "社群主理人" }],
+    loop: ["客户人脉", "约匹克球", "同城局", "局里的人成为新客户"],
+    more: [[{ domain: "海外留学", identity: "学生" }, { domain: "留学经验", identity: "创作者" }, { domain: "留学咨询", identity: "自由职业者" }], [{ domain: "社交电商", identity: "创业者" }, { domain: "一级市场", identity: "投资者" }, { domain: "公路车", identity: "骑行者" }], [{ domain: "社交舞", identity: "舞者" }, { domain: "人物访谈", identity: "写作者" }, { domain: "人像摄影", identity: "摄影者" }]]
+  },
+  GIMP: {
+    lines: [{ domain: "材料科学", identity: "研究者" }, { domain: "餐饮", identity: "创业者" }, { domain: "创业记录", identity: "创作者" }],
+    loop: ["专业所学", "小生意起步", "创业日记", "关注者变成首批客户"],
+    more: [[{ domain: "商科", identity: "学生" }, { domain: "原创饰品", identity: "手作人" }, { domain: "校园代理", identity: "社群主理人" }], [{ domain: "设计行业", identity: "职场人" }, { domain: "消费品牌", identity: "投资者" }, { domain: "品牌研究", identity: "写作者" }], [{ domain: "原创音乐", identity: "音乐人" }, { domain: "音乐教学", identity: "教育者" }, { domain: "诗歌", identity: "读者" }]]
+  },
+  GIMA: {
+    lines: [{ domain: "设计行业", identity: "职场人" }, { domain: "软件工具", identity: "创业者" }, { domain: "3D 打印", identity: "手作人" }],
+    loop: ["设计灵感", "App 原型", "3D 打印小发明", "反馈筛出值得做的"],
+    more: [[{ domain: "工科", identity: "学生" }, { domain: "游戏", identity: "创作者" }, { domain: "电子音乐", identity: "音乐人" }], [{ domain: "化学", identity: "研究者" }, { domain: "游戏角色", identity: "coser" }, { domain: "山地车", identity: "骑行者" }], [{ domain: "低龄孩子", identity: "家长" }, { domain: "儿童涂鸦", identity: "画手" }, { domain: "亲子美育", identity: "教育者" }]]
+  },
+  GIRP: {
+    lines: [{ domain: "互联网", identity: "职场人" }, { domain: "马拉松", identity: "跑者" }, { domain: "跑步", identity: "社群主理人" }],
+    loop: ["训练计划", "带跑团", "团员一起备赛", "团员进度推着自己练"],
+    more: [[{ domain: "理工科", identity: "学生" }, { domain: "自律成长", identity: "创作者" }, { domain: "人文社科", identity: "读者" }], [{ domain: "AI 应用", identity: "创业者" }, { domain: "公开演讲", identity: "教育者" }, { domain: "创业思考", identity: "写作者" }], [{ domain: "广场舞", identity: "舞者" }, { domain: "二孩家庭", identity: "家长" }, { domain: "健康减脂", identity: "健身者" }]]
+  },
+  GIRA: {
+    lines: [{ domain: "平面设计", identity: "自由职业者" }, { domain: "攀岩", identity: "户外爱好者" }, { domain: "户外运动", identity: "创作者" }],
+    loop: ["远程接单", "去新岩场攀岩", "拍成户外视频", "视频收入换下一站"],
+    more: [[{ domain: "全球资产", identity: "投资者" }, { domain: "长途骑行", identity: "骑行者" }, { domain: "旅行随笔", identity: "写作者" }], [{ domain: "理工科", identity: "学生" }, { domain: "中学数学", identity: "教育者" }, { domain: "街头小吃", identity: "创业者" }], [{ domain: "互联网", identity: "职场人" }, { domain: "街舞", identity: "舞者" }, { domain: "城市漫游", identity: "社群主理人" }]]
+  }
 };
 
 export type RelationId = "twin" | "mirror" | "rabbit_holes" | "double_safe" | "pace" | "well_and_road" | "maker_and_teller" | "data_vs_hunch";
@@ -136,17 +225,37 @@ function normalCdf(z: number): number {
 /** Below this many people on record the rank is the theoretical estimate; from it on, the people's own distribution. */
 export const OWN_NORM_MINIMUM = 200;
 
+/** Above this a rank is not shown as it is: everyone with a strong lean would post the same 99. */
+export const RANK_CAP = 95;
+
+// FNV-1a, 32 bits: a stable spread for a string, nothing more.
+function fnv1a(text: string): number {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < text.length; index++) hash = Math.imul(hash ^ text.charCodeAt(index), 0x01000193) >>> 0;
+  return hash;
+}
+
+/**
+ * The percentage a person sees (decided 2026-10-15): at or under `RANK_CAP` as computed; above it, a number from 91 to 96 picked by a
+ * hash of the result and the axis, so two people with a strong lean do not post the same figure and one result always shows the same
+ * one. The same rule for the estimate and for the people's own distribution.
+ */
+export function shownRank(percent: number, seed: string, axis: TypeAxisId): number {
+  return percent <= RANK_CAP ? percent : 91 + fnv1a(`${seed}:${axis}`) % 6;
+}
+
 /**
  * 「你的跨界倾向约超过 X% 的人」: the share of people leaning less far towards the pole this score leans to. With fewer than
  * `OWN_NORM_MINIMUM` scores on record it is a theoretical estimate from N(50, 15) and says so (`estimated`); from then on it is the
- * share of recorded scores on the same axis that lean less far. Between 1 and 99.
+ * share of recorded scores on the same axis that lean less far. Between 1 and 96: anything over `RANK_CAP` goes through `shownRank`,
+ * keyed by `seed` (the result's id), so a poster, its long image, the pair card and the page all show the same number.
  */
-export function axisRank(axis: TypeAxisId, score: number, recorded: number[] = []): { pole: string; percent: number; estimated: boolean } {
+export function axisRank(axis: TypeAxisId, score: number, recorded: number[] = [], seed = ""): { pole: string; percent: number; estimated: boolean } {
   const definition = TYPE_AXES.find((item) => item.id === axis)!;
   const right = score >= 50;
   const pole = right ? definition.right.label : definition.left.label;
   const lean = Math.abs(score - 50);
-  const clamp = (value: number) => Math.max(1, Math.min(99, Math.round(value)));
+  const clamp = (value: number) => shownRank(Math.max(1, Math.min(99, Math.round(value))), seed, axis);
   if (recorded.length >= OWN_NORM_MINIMUM) {
     const less = recorded.filter((value) => (value >= 50) !== right || Math.abs(value - 50) < lean).length;
     return { pole, percent: clamp(less / recorded.length * 100), estimated: false };

@@ -11,7 +11,7 @@ import { dataDir } from "../config";
  */
 
 /** Bump when the layout changes, so posters drawn by the old layout are not served. */
-export const LAYOUT_VERSION = 1;
+export const LAYOUT_VERSION = 6;
 const KEEP_MS = 7 * 24 * 60 * 60 * 1000;
 const PRUNE_EVERY_MS = 60 * 60 * 1000;
 
@@ -28,8 +28,26 @@ export function fileDigest(file: string): string {
   }
 }
 
-export function posterKey(kind: string, parts: unknown): string {
-  return `${kind}-${createHash("sha256").update(JSON.stringify({ v: LAYOUT_VERSION, kind, parts })).digest("hex").slice(0, 40)}`;
+/**
+ * The file name a poster is kept under. `owner` — the invitation token for a type poster or long image, the pair token for a pair card —
+ * goes in front, so deleting a result can remove every poster drawn for it (`removeOwnedPosters`) instead of leaving a picture with the
+ * person's nickname and figure on disk for up to a week. Tokens are base64url, which has no `.`, so `<owner>.` never matches another.
+ */
+export function posterKey(kind: string, parts: unknown, owner?: string): string {
+  const key = `${kind}-${createHash("sha256").update(JSON.stringify({ v: LAYOUT_VERSION, kind, parts })).digest("hex").slice(0, 40)}`;
+  return owner ? `${owner}.${key}` : key;
+}
+
+/** Removes every cached poster drawn for these owners (a deleted result's invitation token and its pairs' tokens). */
+export function removeOwnedPosters(owners: string[]): void {
+  const dir = postersDir();
+  let names: string[];
+  try { names = readdirSync(dir); } catch { return; }
+  const prefixes = owners.filter(Boolean).map((owner) => `${owner}.`);
+  for (const name of names) {
+    if (!prefixes.some((prefix) => name.startsWith(prefix))) continue;
+    try { unlinkSync(path.join(dir, name)); } catch { /* already gone */ }
+  }
 }
 
 function prune(dir: string, now: number): void {

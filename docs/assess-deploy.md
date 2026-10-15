@@ -6,10 +6,12 @@
 
 ## 它做什么
 
-1. 访客答完 32 题、选好外貌，填邮箱（「把海报和结果发到我的邮箱」默认勾选），可选填邀请署名。
+1. 访客答完 32 题、选好外貌，填邮箱（「把结果链接发到我的邮箱」默认勾选），可选填昵称。
 2. `POST /api/results` 在服务器上**重新计分**（`quizScores`，不信任浏览器算的分），保存结果，生成两个令牌，开始生成形象，按勾选发结果邮件。
 3. 本人从邮件或结果页回到 `/r/<结果令牌>`；别人只会拿到 `/t/<邀请令牌>`（海报二维码、转发链接）。
 4. 被邀请的人从 `/t/<邀请令牌>` 做题提交，双人卡当场生成（`/p/<双人卡令牌>`），发起人收到邮件通知。
+5. 结果页的「申请内测」记下申请（`beta_requests`），机主用 `pnpm --filter @crossline/assess exec tsx scripts/beta-requests.ts` 看名单；页面上同时给出机主邮箱（mailto，主题「Crossline 内测申请」，正文带类型代码）。
+6. 加入内测的人用同一个邮箱登录 App 后，App 通过 `POST /api/link` 取回这份结果（见下文「与 App 的结果连接」）。
 
 | 路由 | 用途 | 令牌 |
 |---|---|---|
@@ -18,16 +20,20 @@
 | `DELETE /api/results/<resultToken>` | 删除结果、两边的双人卡和形象文件 | 结果令牌 |
 | `GET /api/invites/<inviteToken>` | 邀请落地页（`InviteView`） | 邀请令牌 |
 | `GET /api/pairs/<pairToken>` | 双人卡（`PairView`） | 双人卡令牌 |
+| `POST /api/results/<resultToken>/beta` | 申请内测 | 结果令牌 |
+| `GET /api/avatar/<inviteToken>.png[?size=small]` | 形象；`size=small` 为 360 宽（邀请页、双人卡页用），模板缩图缓存在 `data/thumbs/` | 邀请令牌 |
+| `POST /api/link` | App 取某邮箱最近一份结果；只在设了 `ASSESS_LINK_SECRET` 时存在 | `Authorization: Bearer <ASSESS_LINK_SECRET>` |
 
 接口形状在 `apps/assess/lib/contract.ts`。所有公开视图都只由四轴得分算出（`lib/public-type.ts`），**任何视图都不含邮箱、答案或外貌**；邀请页和双人卡里也不出现结果令牌。
 
 ### 提交的规则
 
-- 拒绝顺序：跨站 `Origin`（`REJECTED`）→ 每个 IP 每小时 30 次（`RATE_LIMITED`，带 `Retry-After`）→ 蜜罐字段 `website` 非空（`REJECTED`）→ `startedAt` 不是数字（`REJECTED`）→ 32 题有缺或不在 1–5（`QUIZ_INCOMPLETE`）→ 外貌不在枚举里、多了字段或备注去掉不可见字符后超过 40 字（`APPEARANCE_INVALID`）→ 邮箱格式或长度（≤254）不对（`EMAIL_INVALID`）→ 署名超过 12 字（`NICKNAME_INVALID`）→ 距 `startedAt` 不到 40 秒（`TOO_FAST`）→ 邀请令牌无效或已过期（`INVITE_NOT_FOUND`，页面可去掉邀请重新提交，答案不丢）→ 用发起人自己的邮箱回答自己的邀请（`ALREADY_PAIRED`，409）→ 同一邮箱每天 5 次（`RATE_LIMITED`）。
+- 拒绝顺序：跨站 `Origin`（`REJECTED`）→ 每个 IP 每小时 120 次（`RATE_LIMITED`；国内移动网络和宿舍大量共用出口 IP，挡脚本靠每邮箱每天 5 次、40 秒下限和蜜罐，带 `Retry-After`）→ 蜜罐字段 `website` 非空（`REJECTED`）→ `startedAt` 不是数字（`REJECTED`）→ 32 题有缺或不在 1–5（`QUIZ_INCOMPLETE`）→ 外貌不在枚举里、多了字段或备注去掉不可见字符后超过 40 字（`APPEARANCE_INVALID`）→ 邮箱格式或长度（≤254）不对（`EMAIL_INVALID`）→ 署名超过 12 字（`NICKNAME_INVALID`）→ 距 `startedAt` 不到 40 秒（`TOO_FAST`）→ 邀请令牌无效或已过期（`INVITE_NOT_FOUND`，页面可去掉邀请重新提交，答案不丢）→ 用发起人自己的邮箱回答自己的邀请（`ALREADY_PAIRED`，409）→ 同一邮箱每天 5 次（`RATE_LIMITED`）→ 同一邮箱已测满 3 次（`EMAIL_LIMIT_REACHED`，409；服务器把最新一份结果的链接重新发到这个邮箱，回答里不带任何令牌，因为填邮箱的人不一定是邮箱主人）。
 - 署名和外貌备注会去掉控制字符、零宽字符、双向控制符等不可见字符；只由这些字符组成的署名按空处理（页面显示「你的朋友」）。
 - **答案不保存**：只存四轴得分和类型代码，比 §6 列的「只收必要数据」更少一步。
 - 形象：创建结果后调用 W5 的 `enqueueAvatar`，包在 try/catch 里——形象出错不影响提交，页面先显示类型模板。
-- **同一邀请、同一邮箱只配对一次**：同一个邮箱再次回答同一个邀请时，新结果照常保存（有自己的令牌），但返回第一次生成的双人卡令牌；双人卡保留第一次的答案，发起人看到的卡不会被改写，也不会再收到通知。
+- **一个邮箱最多测 3 次，只保留最新一次**（2026-10-15 本人定）：每次提交成功后，删除这个邮箱之前的全部结果，规则和「删除我的结果」相同（结果、两边的双人卡、形象文件、海报缓存一起删，旧的邀请链接失效）。次数记在 `email_tests`，只存邮箱的 HMAC（与 `avatar_draws` 同一把 `draw-key`），删除结果不归还次数，记录 90 天后清除。迁移 4 之前留下的结果没有计数。
+- **同一邀请、同一邮箱再答一次**：按上一条替换掉第一次的结果和双人卡，发起人只在第一次收到通知。
 - 发起人关掉了邮件勾选时，不发配对通知；双人卡仍会出现在他的结果页（最多 20 张，新的在前）。
 
 ## 数据与保存期限
@@ -37,8 +43,20 @@
 - 迁移按 `PRAGMA user_version` 编号，每个迁移和它写的版本号在**同一个事务**里，崩溃不会留下半迁移的文件（和私有 App 的账本同一规则）。
 - 令牌：`crypto.randomBytes(16)` 的 base64url，128 位，22 个字符。
 - 过期：所有读取都把过了 `expires_at` 的结果当作不存在；服务启动时和之后每小时删一次过期结果（`instrumentation.ts` → `server/purge.ts`），连同两边的双人卡和形象文件。
-- 删除：邮件里的「删除我的结果」链接打开 `/r/<结果令牌>?delete=1`，页面确认后调用 `DELETE`；结果、两边的双人卡和形象文件一起删除，所有链接立即失效。「每个邮箱 3 次形象」记在 `avatar_draws`：只存邮箱的 HMAC（密钥 `<ASSESS_DATA_DIR>/draw-key`，本机生成，不存邮箱本身），删除结果不归还次数，记录 90 天后清除，所以删了重测不能多画。
-- 估算排位用的「全部已记录得分」每分钟最多读一次（`recordedScores`）。
+- 删除：邮件里的「删除我的结果」链接打开 `/r/<结果令牌>?delete=1`，页面确认后调用 `DELETE`；结果、两边的双人卡、形象文件和为它们画过的海报缓存（`posters/` 里以邀请令牌或双人卡令牌开头的文件）一起删除，所有链接立即失效。同一邮箱的新结果替换旧结果、到期清理，都走同一个删除函数。「每个邮箱 3 次形象」记在 `avatar_draws`：只存邮箱的 HMAC（密钥 `<ASSESS_DATA_DIR>/draw-key`，本机生成，不存邮箱本身），删除结果不归还次数，记录 90 天后清除，所以删了重测不能多画。
+- `email_tests`（迁移 4）：`result_id`、邮箱的 HMAC、时间；用来数「一个邮箱测了几次」。
+- `beta_requests`（迁移 3）：只存 `result_id` 和申请时间，外键 `ON DELETE CASCADE`，随结果删除或过期；90 天内没发邀请的人会从名单上消失。
+- 估算排位用的「全部已记录得分」每分钟最多读一次（`recordedScores`）。排位超过 95% 时显示 91–96 之间的一个数，由结果 id 和轴的哈希决定（`shownRank`，`packages/core/src/assess-content.ts`）：同一份结果在页面、海报、长图、双人卡上永远一样，不同的人不会都晒出同一个 99；满 200 人改用真实分布后同样封顶。
+
+## 与 App 的结果连接
+
+加入内测的人用同一个邮箱登录 Crossline App 后，App 在服务器之间取回这份速测结果，作为访谈的上下文。契约在 `packages/core/src/assess-link.ts`（经 `@crossline/core/assess` 导出）：
+
+- 请求：`POST <ASSESS_BASE_URL>/api/link`，头 `Authorization: Bearer <ASSESS_LINK_SECRET>`，正文 `{"email": "…"}`。
+- 回答 `AssessLinkResponse`：`{found:false}`，或 `{found:true, code, typeName, group, axes:{scope,basis,output,rhythm}, takenAt, resultUrl?, figureUrl?}`。`group` 是组别代码（`SE`/`SI`/`GE`/`GI`）；`resultUrl` 是本人的结果页，`figureUrl` 是形象缩略图（`/api/avatar/<邀请令牌>.png?size=small`，360 宽），两者都是绝对地址，只在设了 `ASSESS_BASE_URL` 时给出。不返回外貌、署名、答案，也不涉及任何其他人。App 用 `parseAssessLinkResponse` 校验后再用。
+- 查的是该邮箱**最近一份未过期**的结果；因为同一邮箱只保留最新一次，这也是它唯一的一份。删除或过期后永远是 `{found:false}`。
+- App 只能用本人验证过的邮箱来查：回答属于邮箱的主人，`resultUrl` 还能删除这份结果。
+- **`ASSESS_LINK_SECRET`**：两台服务器共享的一串随机密钥，用来证明请求来自 App。生成：`openssl rand -base64 32`；在测评的 `assess.env` 和 App 的环境里各设一次同样的值。没设时 `/api/link` 返回 404，等于没有这个接口。密钥按 SHA-256 后常量时间比较。错误密钥 401；每个 IP 每分钟 60 次（错误密钥也计数），超出 429。换密钥：两边同时改、重启。
 
 ## 安全
 
@@ -125,6 +143,7 @@ docker build -f apps/assess/Dockerfile -t crossline-assess .
    | `ASSESS_SMTP_USER` / `ASSESS_SMTP_PASSWORD` | 控制台里的发信地址和 SMTP 密码（不是账号密码） |
    | `ASSESS_MAIL_FROM` | 如 `Crossline 测评 <noreply@mail.example.com>`，必须是已验证的发信地址 |
    | `ASSESS_TEMPLATES_DIR` | 可选，类型模板目录（W5），默认用镜像里自带的 |
+   | `ASSESS_LINK_SECRET` | 可选，与 App 共享的密钥，开启 `/api/link`（见「与 App 的结果连接」）；不设则接口不存在 |
    | W5 的形象生成变量 | 见 W5 的说明（模型 key、每日预算） |
 
 3. 运行（端口只绑定本机）：

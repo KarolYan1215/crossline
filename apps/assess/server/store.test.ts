@@ -4,8 +4,8 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 import { PAIRS_SHOWN_MAX, RESULT_RETENTION_DAYS } from "../lib/contract";
 import { db } from "./db";
 import {
-  avatarsDrawnFor, createPair, createResult, deleteResult, getPairByToken, getResultById, getResultByInvite, getResultByToken, listPairs,
-  newToken, purgeExpired, recordedScores, setAvatarState, type NewResult
+  avatarsDrawnFor, betaRequested, createPair, createResult, deleteResult, getPairByToken, getResultById, getResultByInvite, getResultByToken, listPairs,
+  keepOnlyNewest, listBetaRequests, newToken, purgeExpired, requestBeta, testsTakenBy, recordedScores, setAvatarState, type NewResult
 } from "./store";
 import { appearance, useTempDataDir } from "./testing";
 
@@ -33,7 +33,7 @@ test("a result is stored with a lowercased email, two distinct tokens and the re
 
 test("the schema is migrated once, inside the user_version gate, with WAL on", () => {
   createResult(input());
-  expect(db().pragma("user_version", { simple: true })).toBe(2);
+  expect(db().pragma("user_version", { simple: true })).toBe(4);
   expect(db().pragma("journal_mode", { simple: true })).toBe("wal");
   expect(fs.existsSync(path.join(dir, "assess.db"))).toBe(true);
   expect(db().prepare("SELECT name FROM pragma_table_info('results')").all().map((row) => (row as { name: string }).name))
@@ -137,4 +137,36 @@ test("recorded scores collect every kept result per axis; avatars are counted pe
   expect(JSON.stringify(db().prepare("SELECT * FROM avatar_draws").all())).not.toContain("example.com");
   expect(purgeExpired(new Date(Date.now() + 91 * 86_400_000))).toBe(1);
   expect(avatarsDrawnFor("a@example.com")).toBe(0);
+});
+
+test("a beta request is kept once, listed with the result's address, and goes with the result", () => {
+  const result = createResult(input("beta@example.com"));
+  expect(betaRequested(result.id)).toBe(false);
+  requestBeta(result.id, new Date("2026-10-15T08:00:00Z"));
+  requestBeta(result.id, new Date("2026-10-16T08:00:00Z"));
+  expect(betaRequested(result.id)).toBe(true);
+  expect(listBetaRequests()).toEqual([{ email: "beta@example.com", nickname: result.nickname, code: result.code, requestedAt: "2026-10-15T08:00:00.000Z" }]);
+  deleteResult(result.id);
+  expect(listBetaRequests()).toEqual([]);
+  expect(db().prepare("SELECT COUNT(*) AS n FROM beta_requests").get()).toEqual({ n: 0 });
+});
+
+test("only an address's newest result is kept; the count survives deletion and is held under a keyed hash", () => {
+  const first = createResult(input("keep@example.com"), new Date(Date.now() - 60_000));
+  const friend = createResult(input("pal@example.com"));
+  const pair = createPair(first.id, friend.id).pair;
+  keepOnlyNewest(first);
+  const posters = path.join(dir, "posters");
+  fs.mkdirSync(posters, { recursive: true });
+  for (const name of [`${first.inviteToken}.type-x.png`, `${pair.pairToken}.pair-y.png`, "someone-else.type-z.png"]) fs.writeFileSync(path.join(posters, name), "png");
+  const second = createResult(input("KEEP@example.com"));
+  expect(keepOnlyNewest(second)).toBe(1);
+  expect(getResultById(first.id)).toBeUndefined();
+  expect(getPairByToken(pair.pairToken)).toBeUndefined();
+  expect(getResultById(friend.id)).toBeDefined();
+  expect(fs.readdirSync(posters)).toEqual(["someone-else.type-z.png"]);
+  expect(testsTakenBy("keep@example.com")).toBe(2);
+  deleteResult(second.id);
+  expect(testsTakenBy("Keep@Example.com")).toBe(2);
+  expect(JSON.stringify(db().prepare("SELECT * FROM email_tests").all())).not.toContain("example.com");
 });

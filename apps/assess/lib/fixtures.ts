@@ -51,7 +51,7 @@ export function fixtureResult(token: string): ResultView {
     nickname: "小林", type: INVITER, avatar: avatar(INVITER, state),
     posterUrl: placeholderImage(INVITER, `海报占位 · ${bust}`),
     longUrl: placeholderImage(INVITER, "长图占位", { width: 1080, height: 3000 }),
-    inviteUrl: `${origin()}/t/fixture-invite`, sendEmail: true,
+    inviteUrl: `${origin()}/t/fixture-invite`, sendEmail: true, mailOn: true, betaRequested: false,
     pairs: [
       { pairToken: "fixture-pair", nickname: "阿青", code: VISITOR.code, name: VISITOR.name, relation: pairRelation(INVITER.code, VISITOR.code).primary.name },
       { pairToken: "fixture-pair-2", nickname: "你的朋友", code: INVITER.best.code, name: INVITER.best.name, relation: INVITER.best.relation }
@@ -80,6 +80,7 @@ export const fixtureApi: AssessApi = {
     return delay({ ok: true, data: { resultToken: "fixture-result", inviteToken: "fixture-invite", ...(request.inviteToken ? { pairToken: "fixture-pair" } : {}) } });
   },
   getResult: (token) => delay(token === "missing" ? notFound : { ok: true, data: fixtureResult(token) }),
+  requestBeta: (token) => delay(token === "missing" ? notFound : { ok: true, data: null }),
   deleteResult: (token) => delay(token === "missing" ? notFound : { ok: true, data: null }),
   getInvite: (token) => delay(token === "missing" ? notFound : { ok: true, data: fixtureInvite() }),
   getPair: (token) => delay(token === "missing" ? notFound : { ok: true, data: fixturePair() })

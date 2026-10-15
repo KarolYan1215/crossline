@@ -18,6 +18,9 @@ function smtpConfig(): SmtpConfig | undefined {
   return { host, port: Number(port) || 465, user, password, from };
 }
 
+/** Whether mail can go out at all: the result page says so instead of promising a mail that is only logged as skipped. */
+export const mailConfigured = (): boolean => smtpConfig() !== undefined;
+
 let transport: { key: string; send: Transporter } | undefined;
 
 function transporter(config: SmtpConfig): Transporter {

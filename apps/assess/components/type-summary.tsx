@@ -1,4 +1,5 @@
-import type { PublicAxis, PublicType } from "../lib/contract";
+import { latinGap } from "@crossline/core/assess-content";
+import type { LineView, PublicAxis, PublicType } from "../lib/contract";
 
 /** The pole an axis leans to and by how much, e.g. 「跨界 78%」. */
 export function axisLean(axis: PublicAxis): { label: string; percent: number } {
@@ -32,13 +33,23 @@ export function AxesList({ type, ranks = true }: { type: PublicType; ranks?: boo
   })}</ul>;
 }
 
-/** Everything else the poster says: the three lines and their loop, the best partner and the hardest. */
+/** 「人工智能的研究者 · 软件工具的创业者 · …」: each field small, each identity bold. */
+function Combo({ lines, className }: { lines: LineView[]; className?: string }) {
+  return <p className={className}>{lines.map((line, index) => <span key={line.identity}>{index ? " · " : ""}
+    {line.domain && <span className="as-form">{line.domain}的{latinGap(line.identity)}</span>}<b>{line.identity}</b></span>)}</p>;
+}
+
+/** Everything else the poster says: the suggested lines and their loop (and three more combinations), the best partner and the hardest. */
 export function TypeDetails({ type }: { type: PublicType }) {
   return <div className="as-details">
     <section>
-      <h3>推荐主线</h3>
-      <p>{type.lines.join(" · ")}</p>
+      <h3>你也许想做</h3>
+      <Combo lines={type.lines} className="as-lines" />
       <p className="as-note">飞轮：{type.loop.join(" → ")}</p>
+      {type.more.length > 0 && <>
+        <p className="as-note">也可以这样组合：</p>
+        {type.more.map((combo, index) => <Combo key={index} lines={combo} className={`as-more as-more-${index + 1}`} />)}
+      </>}
     </section>
     <section>
       <h3>最佳搭子：{type.best.name} {type.best.code}</h3>

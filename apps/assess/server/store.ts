@@ -5,6 +5,7 @@ import { TYPE_AXES, type TypeAxisId } from "@crossline/core/assess";
 import { PAIRS_SHOWN_MAX, RESULT_RETENTION_DAYS, type Appearance, type AvatarStatus } from "../lib/contract";
 import { dataDir } from "./config";
 import { db } from "./db";
+import { removeOwnedPosters } from "./poster/cache";
 
 /**
  * The public test's storage (workstream W2, docs/beta-launch.md §7 P-L1): results, their two tokens, pairs, the avatar state and the
@@ -133,6 +134,25 @@ export function avatarsDrawnFor(email: string): number {
   return row.n;
 }
 
+/** Tests this address has taken within the retention period, deleted or replaced ones included (`email_tests`, HMAC of the address). */
+export function testsTakenBy(email: string): number {
+  const since = new Date(Date.now() - RESULT_RETENTION_DAYS * 86_400_000).toISOString();
+  const row = db().prepare("SELECT COUNT(*) AS n FROM email_tests WHERE email_key = ? AND created_at > ?").get(emailKey(email), since) as { n: number };
+  return row.n;
+}
+
+/**
+ * After a new test from this address: counts it, and deletes every earlier result held under the address (with their pairs, figures
+ * and posters), so only the newest is kept. Returns how many were replaced.
+ */
+export function keepOnlyNewest(result: StoredResult): number {
+  db().prepare("INSERT OR IGNORE INTO email_tests (result_id, email_key, created_at) VALUES (?, ?, ?)").run(result.id, emailKey(result.email), result.createdAt);
+  const earlier = db().prepare("SELECT id FROM results WHERE email = ? AND id <> ?").all(result.email, result.id) as Array<{ id: string }>;
+  let replaced = 0;
+  for (const { id } of earlier) if (deleteResult(id)) replaced++;
+  return replaced;
+}
+
 export type NewResult = {
   email: string; nickname: string; scores: Record<TypeAxisId, number>; code: string; appearance: Appearance; sendEmail: boolean;
 };
@@ -198,19 +218,49 @@ function removeAvatarFile(file: string): void {
   try { fs.rmSync(target, { force: true }); } catch (error) { console.warn(JSON.stringify({ event: "assess.avatar_remove_failed", error: String(error) })); }
 }
 
-/** Removes a result, every pair it is part of (both sides) and its drawn figure. Returns whether there was anything to remove. */
+/**
+ * Removes a result, every pair it is part of (both sides), its drawn figure and every cached poster drawn for it or its pairs. Returns
+ * whether there was anything to remove. The one deletion rule: 「删除我的结果」, expiry, and a newer test from the same address.
+ */
 export function deleteResult(id: string): boolean {
   const removed = db().transaction(() => {
-    const row = db().prepare("SELECT avatar_file FROM results WHERE id = ?").get(id) as { avatar_file: string } | undefined;
+    const row = db().prepare("SELECT avatar_file, invite_token FROM results WHERE id = ?").get(id) as { avatar_file: string; invite_token: string } | undefined;
     if (!row) return undefined;
+    const pairTokens = (db().prepare("SELECT pair_token FROM pairs WHERE inviter_id = ? OR invitee_id = ?").all(id, id) as Array<{ pair_token: string }>)
+      .map((pair) => pair.pair_token);
     db().prepare("DELETE FROM pairs WHERE inviter_id = ? OR invitee_id = ?").run(id, id);
+    db().prepare("DELETE FROM beta_requests WHERE result_id = ?").run(id);
     db().prepare("DELETE FROM results WHERE id = ?").run(id);
-    return row;
+    return { ...row, pairTokens };
   }).immediate();
   if (!removed) return false;
   removeAvatarFile(removed.avatar_file);
+  removeOwnedPosters([removed.invite_token, ...removed.pairTokens]);
   recordedMemo = undefined;
   return true;
+}
+
+/** The newest live result held under this address, for the app's link (`/api/link`). */
+export function latestResultByEmail(email: string): StoredResult | undefined {
+  const row = db().prepare("SELECT * FROM results WHERE email = ? AND expires_at > ? ORDER BY created_at DESC LIMIT 1")
+    .get(email.trim().toLowerCase(), nowIso()) as ResultRow | undefined;
+  return row ? toResult(row) : undefined;
+}
+
+/** Records that this result's owner asked to be invited to the full app; asking twice keeps the first time. */
+export function requestBeta(resultId: string, now: Date = new Date()): void {
+  db().prepare("INSERT OR IGNORE INTO beta_requests (result_id, created_at) VALUES (?, ?)").run(resultId, now.toISOString());
+}
+
+export function betaRequested(resultId: string): boolean {
+  return Boolean(db().prepare("SELECT 1 FROM beta_requests WHERE result_id = ?").get(resultId));
+}
+
+/** Every live request, oldest first, for the owner sending invitations (`scripts/beta-requests.ts`). */
+export function listBetaRequests(): Array<{ email: string; nickname: string; code: string; requestedAt: string }> {
+  return db().prepare(`
+    SELECT r.email, r.nickname, r.code, b.created_at AS requestedAt FROM beta_requests b JOIN results r ON r.id = b.result_id
+    WHERE r.expires_at > ? ORDER BY b.created_at`).all(nowIso()) as Array<{ email: string; nickname: string; code: string; requestedAt: string }>;
 }
 
 /** Deletes every result past its retention date (with its pairs and figure). Returns how many results went. */
@@ -218,6 +268,7 @@ export function purgeExpired(now: Date = new Date()): number {
   const ids = db().prepare("SELECT id FROM results WHERE expires_at <= ?").all(now.toISOString()) as Array<{ id: string }>;
   let removed = 0;
   for (const { id } of ids) if (deleteResult(id)) removed++;
+  db().prepare("DELETE FROM email_tests WHERE created_at <= ?").run(new Date(now.getTime() - RESULT_RETENTION_DAYS * 86_400_000).toISOString());
   db().prepare("DELETE FROM avatar_draws WHERE created_at <= ?").run(new Date(now.getTime() - RESULT_RETENTION_DAYS * 86_400_000).toISOString());
   return removed;
 }

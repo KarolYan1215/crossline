@@ -20,10 +20,11 @@ export async function GET(_request: Request, context: { params: Promise<{ token:
   const result = render ? getResultByInvite(token) : undefined;
   if (!render || !result || Date.parse(result.expiresAt) <= Date.now()) return posterNotFound();
   const png = await render({
-    type: publicType(result.scores, recordedScores()),
+    type: publicType(result.scores, recordedScores(), result.id),
     nickname: result.nickname,
     avatarPath: avatarImagePath(result),
-    inviteUrl: `${baseUrl()}/t/${result.inviteToken}`
+    inviteUrl: `${baseUrl()}/t/${result.inviteToken}`,
+    cacheTag: result.inviteToken
   });
   return pngResponse(png);
 }

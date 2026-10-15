@@ -170,3 +170,5 @@ export function pvtSummary(trials: PvtTrial[], prematureTaps = 0): PvtSummary {
 export type { PortraitType, TypeAxisId } from "./portrait-type";
 /** The type tables, for the public app, which may import only this module and the other pure subpaths. */
 export { TYPE_AXES, TYPE_GROUPS, TYPE_TABLE, typeFromScores } from "./portrait-type";
+/** The quick test ↔ app link contract (`assess-link.ts`): reached as `@crossline/core/assess` or `@crossline/core`, so no new subpath. */
+export * from "./assess-link";

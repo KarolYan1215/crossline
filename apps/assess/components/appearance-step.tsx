@@ -36,7 +36,7 @@ export function AppearanceStep({ draft, onChange, onBack, onNext }: {
   return <section className="as-sheet">
     <p className="as-kicker">最后两步 · 1 / 2</p>
     <h2>你大概长什么样？</h2>
-    <p className="as-note">只用于生成你的形象，不会显示给任何人。</p>
+    <p className="as-note">这些选项只用来画你海报上的形象，选项本身不会给别人看。</p>
     <Segments name="presentation" legend="性别呈现" choices={entries(APPEARANCE_LABELS.presentation)} value={draft.presentation}
       onChange={(value) => set({ presentation: value as Appearance["presentation"] })} />
     <Segments name="hair" legend="发型" choices={entries(APPEARANCE_LABELS.hair)} value={draft.hair}

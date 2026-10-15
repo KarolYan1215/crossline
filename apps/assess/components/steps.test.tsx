@@ -19,9 +19,15 @@ test("the email step's checkbox is ticked by default and says what it does", () 
   const box = /<input[^>]*name="sendEmail"[^>]*>/.exec(html)?.[0] ?? "";
   expect(box).toContain("type=\"checkbox\"");
   expect(box).toContain("checked=\"\"");
-  expect(html).toContain("把海报和结果发到我的邮箱");
-  expect(html).toContain("保存 90 天，注册后可带入访谈，可随时删除");
-  expect(html).toContain("邀请卡署名（可选）");
+  expect(html).toContain("把结果链接发到我的邮箱");
+  // What the address is for, how long it is kept and how to delete it, said before it is asked for.
+  expect(html).toContain("邮箱只用来");
+  expect(html).toContain("结果保存 90 天后自动删除");
+  expect(html).toContain("一个邮箱最多测 3 次，只保留最新一次");
+  expect(html).toContain("「删除我的结果」");
+  expect(html).toContain("不发营销邮件");
+  expect(html).toContain("这次结果会自动带进 App");
+  expect(html).toContain("你的昵称（可选）");
 });
 
 test("the honeypot is present, named website, out of the tab order, away from autofill and hidden from people", () => {

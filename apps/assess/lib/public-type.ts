@@ -3,10 +3,11 @@ import { TYPE_LINES, TYPE_SUBTITLE, axisRank, isAmbiguous, partnersOf, relationO
 import type { PartnerView, PublicType, RelationView } from "./contract";
 
 /**
- * The public face of a result, built from its four axis scores alone (and, for the rank, the recorded scores of everyone so far):
+ * The public face of a result, built from its four axis scores alone (and, for the rank, the recorded scores of everyone so far, and
+ * `seed` — the result's id — which picks a capped rank's shown number, so every view of one result agrees):
  * the views the result page, the invitation, the pair card and the poster all draw from. Pure.
  */
-export function publicType(scores: Record<TypeAxisId, number>, recorded: Partial<Record<TypeAxisId, number[]>> = {}): PublicType {
+export function publicType(scores: Record<TypeAxisId, number>, recorded: Partial<Record<TypeAxisId, number[]>> = {}, seed = ""): PublicType {
   const type = typeFromScores(scores);
   const partners = partnersOf(type.code);
   const partner = (side: { code: string; relation: Relation }): PartnerView =>
@@ -18,10 +19,11 @@ export function publicType(scores: Record<TypeAxisId, number>, recorded: Partial
       const shown = type.axes[index]!;
       return { id: axis.id, leftLetter: axis.left.letter, rightLetter: axis.right.letter, leftLabel: axis.left.label, rightLabel: axis.right.label,
         leftEn: axis.left.en, rightEn: axis.right.en, score: shown.score, letter: shown.letter, ambiguous: isAmbiguous(shown.score),
-        rank: axisRank(axis.id, shown.score, recorded[axis.id] ?? []) };
+        rank: axisRank(axis.id, shown.score, recorded[axis.id] ?? [], seed) };
     }),
     lines: TYPE_LINES[type.code]!.lines,
     loop: TYPE_LINES[type.code]!.loop,
+    more: TYPE_LINES[type.code]!.more,
     best: partner(partners.best),
     hardest: partner(partners.hardest)
   };
@@ -29,10 +31,10 @@ export function publicType(scores: Record<TypeAxisId, number>, recorded: Partial
 
 const relationView = (relation: Relation): RelationView => ({ name: relation.name, when: relation.when, tips: relation.tips });
 
-/** What two people's card says about them: the main and second relation, and the lines both types suit. */
+/** What two people's card says about them: the main and second relation, and the identities both types' lines share. */
 export function pairRelation(a: string, b: string): { primary: RelationView; secondary?: RelationView; sharedLines: string[] } {
   const { primary, secondary } = relationOf(a, b);
-  const other = new Set(TYPE_LINES[b]!.lines);
+  const other = new Set(TYPE_LINES[b]!.lines.map((line) => line.identity));
   return { primary: relationView(primary), ...(secondary ? { secondary: relationView(secondary) } : {}),
-    sharedLines: TYPE_LINES[a]!.lines.filter((line) => other.has(line)) };
+    sharedLines: TYPE_LINES[a]!.lines.map((line) => line.identity).filter((identity) => other.has(identity)) };
 }

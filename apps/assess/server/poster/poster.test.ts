@@ -10,7 +10,7 @@ import { PLANNER, ROAMER, samplePair, samplePoster, writeFigure } from "./fixtur
 import { renderLongImage, renderPairCard, renderTypePoster } from "./index";
 import { posterFixedText } from "./labels";
 import { figureFrom, imageMime } from "./figure";
-import { HEIGHT, WIDTH, longImageTree, pairCardTree, toPng, typePosterTree } from "./render";
+import { HEIGHT, WIDTH, longImageTree, pairCardTree, strongestAxis, toPng, typePosterTree } from "./render";
 
 // The type's template, which a figure the renderer cannot read gives way to (W5 owns the real one).
 const template = { file: "" };
@@ -152,8 +152,14 @@ describe("fonts", () => {
     const rendered = await toPng(typePosterTree(input.type, input.nickname, figureFrom(input.avatarPath, input.type.code), input.inviteUrl), HEIGHT,
       { collect: true, onMissing: (segment) => missing.push(segment) });
     expect(missing).toEqual([]);
-    expect(rendered.nodes.some((node) => node.textContent === "阿乔·· 的思维模式类型")).toBe(true);
+    expect(rendered.nodes.some((node) => node.textContent === "阿乔··的思维模式类型")).toBe(true);
   });
+});
+
+test("the poster's one rank line is the clearest lean, never an ambiguous axis while a clear one exists", () => {
+  const type = publicType({ scope: 52, basis: 18, output: 70, rhythm: 45 });
+  expect(strongestAxis(type).id).toBe("basis");
+  expect(strongestAxis(publicType({ scope: 55, basis: 45, output: 61, rhythm: 50 })).id).toBe("output");
 });
 
 describe("layout", () => {

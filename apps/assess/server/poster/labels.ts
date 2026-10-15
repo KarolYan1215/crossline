@@ -9,7 +9,8 @@ export const LABELS = {
   kicker: "思维模式类型",
   pairKicker: "双人关系卡",
   rankTail: "（理论估算）",
-  linesHeading: "适合同时推进的三条主线",
+  linesHeading: "你也许想做",
+  moreHeading: "也可以这样组合",
   loopHeading: "它们如何互相供养",
   loopCaption: "在 Crossline 里把这几条线真的跑起来",
   loopExplain: "每一步的产出是下一步的输入，最后一步又回到第一步。",
@@ -49,7 +50,10 @@ export function posterFixedText(): string {
   for (const group of Object.values(TYPE_GROUPS)) parts.push(group.name, group.blurb);
   for (const axis of TYPE_AXES) parts.push(axis.left.letter, axis.left.label, axis.left.en, axis.right.letter, axis.right.label, axis.right.en, axis.question, `${axis.left.label}倾向约超过 ${axis.right.label}倾向约超过`);
   parts.push(...Object.values(TYPE_SUBTITLE));
-  for (const lines of Object.values(TYPE_LINES)) parts.push(...lines.lines, ...lines.loop);
+  for (const lines of Object.values(TYPE_LINES)) {
+    for (const line of [...lines.lines, ...lines.more.flat()]) parts.push(line.identity, `${line.domain}的`);
+    parts.push(...lines.loop);
+  }
   for (const relation of Object.values(RELATIONS)) parts.push(relation.name, relation.when, ...relation.tips);
   return [...new Set(parts.join(""))].sort().join("");
 }

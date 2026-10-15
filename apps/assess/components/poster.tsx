@@ -24,3 +24,6 @@ export function SavableImage({ src, alt, width, height, downloadName, label = "æ
 /** A cache-buster for an image that is redrawn under the same address; inline placeholders are left alone. */
 export const withVersion = (url: string, version: number): string =>
   !version || url.startsWith("data:") ? url : `${url}${url.includes("?") ? "&" : "?"}v=${version}`;
+
+/** A figure shown small (the invitation, the pair page): the route's 360-wide copy instead of the 1.8 MB original. */
+export const smallFigure = (url: string): string => url.startsWith("data:") ? url : `${url}${url.includes("?") ? "&" : "?"}size=small`;

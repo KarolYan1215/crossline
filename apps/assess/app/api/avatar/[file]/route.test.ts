@@ -51,3 +51,16 @@ test("an unknown token, a malformed name or a path is a 404", async () => {
   expect((await get("inv_public_token_0001.jpg")).status).toBe(404);
   expect(getResultByInvite).toHaveBeenCalledTimes(1);
 });
+
+test("?size=small answers the figure 360 wide; a template's copy is cached, a drawn figure's is not", async () => {
+  vi.mocked(getResultByInvite).mockReturnValue(storedResult({ code: "SEMP", avatar: { state: "drawing", file: "" } }));
+  const small = Buffer.from(await (await get("inv_public_token_0001.png", "?size=small")).arrayBuffer());
+  expect(small.readUInt32BE(16)).toBe(360);
+  expect(small.length).toBeLessThan(fs.statSync(templateImagePath("SEMP")).size / 4);
+  expect(fs.readdirSync(path.join(dir, "thumbs"))).toHaveLength(1);
+  fs.mkdirSync(path.join(dir, "avatars"));
+  fs.writeFileSync(path.join(dir, "avatars", "res_0001.png"), TINY_PNG);
+  vi.mocked(getResultByInvite).mockReturnValue(storedResult({ avatar: { state: "ready", file: path.join("avatars", "res_0001.png") } }));
+  expect((await get("inv_public_token_0001.png", "?size=small")).status).toBe(200);
+  expect(fs.readdirSync(path.join(dir, "thumbs"))).toHaveLength(1);
+});

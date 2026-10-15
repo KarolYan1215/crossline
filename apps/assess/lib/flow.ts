@@ -1,5 +1,5 @@
 import { QUIZ_ITEMS } from "@crossline/core/assess";
-import { NICKNAME_MAX, NOTE_MAX, type Appearance, type SubmitRequest } from "./contract";
+import { NICKNAME_MAX, NOTE_MAX, TESTS_PER_EMAIL, type Appearance, type SubmitRequest } from "./contract";
 
 /**
  * The test's own state, kept pure so the pages stay thin and the rules are tested: intro → 32 statements one per screen → appearance →
@@ -188,12 +188,13 @@ const ERROR_TEXT: Record<string, string> = {
   APPEARANCE_INVALID: "外貌的选择不完整，请返回检查。",
   EMAIL_INVALID: "邮箱格式不对，请检查。",
   NICKNAME_INVALID: `署名不能用，请换一个（最多 ${NICKNAME_MAX} 个字）。`,
-  TOO_FAST: "答得太快，看起来不像逐题读过。请回到题目，读完再答。",
+  TOO_FAST: "提交得太快了，需要确认是真人在答题。请等几秒再点「看结果」。",
   REJECTED: "这次提交没有通过检查。请刷新页面后再试。",
   RATE_LIMITED: "提交太频繁了，请过几分钟再试。",
   INVITE_NOT_FOUND: "这个邀请链接已失效（过期或已被删除）。可以不带邀请提交，只是不会生成双人卡。",
   ALREADY_PAIRED: "这是你自己的邀请链接。把它转发给朋友，让 TA 来测。",
   NOT_FOUND: "没有找到这个结果，可能已过期或已被删除。",
+  EMAIL_LIMIT_REACHED: `这个邮箱已测满 ${TESTS_PER_EMAIL} 次，只保留最新一次的结果。最新结果的链接已重新发到这个邮箱；想再测，可以换一个邮箱。`,
   NETWORK: "网络连不上，请检查网络后重试。"
 };
 

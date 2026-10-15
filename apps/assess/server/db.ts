@@ -50,6 +50,24 @@ const MIGRATIONS: Migration[] = [
       created_at TEXT NOT NULL
     );
     CREATE INDEX avatar_draws_email ON avatar_draws(email_key);
+  `),
+  // 3: 「申请 Crossline 内测」 on the result page: the person asks to be invited to the full app. Holds no address of its own — the
+  // result row has it — so the request goes with the result when it is deleted or expires.
+  (db) => db.exec(`
+    CREATE TABLE beta_requests (
+      result_id TEXT PRIMARY KEY REFERENCES results(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL
+    );
+  `),
+  // 4: tests taken per address (decided 2026-10-15: three per address, only the newest kept). Keyed by the same HMAC of the address as
+  // `avatar_draws`, so deleting or replacing a result does not give a test back; rows go after the retention period.
+  (db) => db.exec(`
+    CREATE TABLE email_tests (
+      result_id TEXT PRIMARY KEY,
+      email_key TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX email_tests_email ON email_tests(email_key);
   `)
 ];
 

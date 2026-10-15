@@ -46,6 +46,7 @@ pnpm exec tsx scripts/assess-templates.ts placeholders
    ```
    会覆盖 `<CODE>-female.png` / `<CODE>-male.png` 并更新 `manifest.json`。定稿时会铺上组别底色、缩到 1024×1536：ChatGPT 画出来的是透明底，透明的参考图交给改图模型会变成黑底。
 6. 提交 32 个模板和 `manifest.json`。`candidates/` 不进仓库（已写进 .gitignore）。
+7. 落地页的四张示例图（`public/samples/<CODE>.png`，240×360，每张约 140 KB；选哪四型在 `lib/samples.ts`）是模板缩出来的。改了这几型的模板，重跑 `pnpm --filter @crossline/assess exec tsx scripts/sample-thumbs.ts`。邀请页、双人卡页的小图走 `/api/avatar/<令牌>.png?size=small`，在服务端按需缩到 360 宽（模板缓存在 `data/thumbs/`），不用手动生成。
 
 ## 部署时怎么带上模板
 

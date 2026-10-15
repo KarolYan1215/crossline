@@ -1,13 +1,14 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { InviteView, PairView, ResultView, SubmitResponse } from "../../lib/contract";
 import { flushMail } from "../../server/mail";
-import { resetRateLimits } from "../../server/security";
+import { resetRateLimits, submitsPerIp } from "../../server/security";
 import { createResult, getResultByToken, listPairs } from "../../server/store";
 import { answersFor, appearance, get, params, post, submission, useTempDataDir } from "../../server/testing";
 import { GET as getInvite } from "./invites/[token]/route";
 import { GET as getPair } from "./pairs/[token]/route";
 import { DELETE as deleteResultRoute, GET as getResult } from "./results/[token]/route";
 import { POST as submit } from "./results/route";
+import { POST as requestBetaRoute } from "./results/[token]/beta/route";
 
 const mocks = vi.hoisted(() => ({
   sendMail: vi.fn(async () => ({ messageId: "x" })),
@@ -119,12 +120,13 @@ test("the free note is kept without invisible characters; a name made only of th
 });
 
 test("submissions are limited per address and per email", async () => {
-  for (let index = 0; index < 5; index++) await submitOk({ email: "same@example.com" });
+  for (let index = 0; index < 3; index++) await submitOk({ email: "same@example.com" });
+  for (let index = 0; index < 2; index++) expect((await submit(post(submission({ email: "same@example.com" })))).status).toBe(409);
   const perEmail = await submit(post(submission({ email: "same@example.com" })));
   expect(perEmail.status).toBe(429);
   expect(perEmail.headers.get("retry-after")).toMatch(/^\d+$/);
   expect((await perEmail.json() as { code: string }).code).toBe("RATE_LIMITED");
-  for (let index = 0; index < 24; index++) await submitOk({ email: `n${index}@example.com` });
+  for (let index = 0; index < submitsPerIp.limit - 6; index++) await submitOk({ email: `n${index}@example.com` });
   expect((await submit(post(submission({ email: "fresh@example.com" })))).status).toBe(429);
   // Another client behind the same proxy is counted on its own.
   expect((await submit(post(submission({ email: "fresh@example.com" }), { "x-forwarded-for": "198.51.100.9" }))).status).toBe(200);
@@ -146,13 +148,15 @@ test("an invitation makes the pair at once, mails the inviter, and a repeat by t
   expect(notice.text).toContain(`https://assess.example/r/${inviter.resultToken}?delete=1`);
   expect(notice.text).not.toContain("b@example.com");
 
+  // Answering again replaces the first answer and its card; the inviter is not mailed a second time.
   mocks.sendMail.mockClear();
   const again = await submitOk({ email: "B@Example.com", inviteToken: inviter.inviteToken, sendEmail: false });
-  expect(again.pairToken).toBe(invited.pairToken);
-  expect(again.resultToken).not.toBe(invited.resultToken);
+  expect(again.pairToken).toBeDefined();
+  expect(again.pairToken).not.toBe(invited.pairToken);
+  expect(getResultByToken(invited.resultToken)).toBeUndefined();
   await flushMail();
   expect(mocks.sendMail).not.toHaveBeenCalled();
-  expect(listPairs(getResultByToken(inviter.resultToken)!.id)).toHaveLength(1);
+  expect(listPairs(getResultByToken(inviter.resultToken)!.id).map((pair) => pair.pairToken)).toEqual([again.pairToken]);
 });
 
 test("the inviter cannot answer their own invitation, and an inviter with mail off is not mailed", async () => {
@@ -236,4 +240,42 @@ test("an address that keeps missing tokens is slowed down", async () => {
   expect(limited.status).toBe(429);
   const stored = createResult({ email: "z@example.com", nickname: "", scores: { scope: 50, basis: 50, output: 50, rhythm: 50 }, code: "GIRA", appearance, sendEmail: false });
   expect((await getInvite(get(`/api/invites/${stored.inviteToken}`, { "x-forwarded-for": "198.51.100.1" }), params(stored.inviteToken))).status).toBe(200);
+});
+
+test("「申请内测」 is recorded on the person's own result only, refuses a forged origin, and shows on the result", async () => {
+  const answer = await submitOk({ email: "beta@example.com" });
+  const before = await (await getResult(get(`/api/results/${answer.resultToken}`), params(answer.resultToken))).json() as ResultView;
+  expect(before.betaRequested).toBe(false);
+  const forged = await requestBetaRoute(get(`/api/results/${answer.resultToken}/beta`, { origin: "https://evil.example" }, "POST"), params(answer.resultToken));
+  expect(forged.status).toBe(400);
+  // The invitation token is public (it is on the poster): it must not ask on the person's behalf.
+  expect((await requestBetaRoute(get(`/api/results/${answer.inviteToken}/beta`, {}, "POST"), params(answer.inviteToken))).status).toBe(404);
+  expect((await requestBetaRoute(get(`/api/results/${answer.resultToken}/beta`, {}, "POST"), params(answer.resultToken))).status).toBe(200);
+  const after = await (await getResult(get(`/api/results/${answer.resultToken}`), params(answer.resultToken))).json() as ResultView;
+  expect(after.betaRequested).toBe(true);
+});
+
+test("three tests per address, only the newest kept; a fourth is refused and the newest link is mailed, not returned", async () => {
+  const first = await submitOk({ email: "three@example.com" });
+  const friend = await submitOk({ email: "friend@example.com", inviteToken: first.inviteToken, sendEmail: false });
+  await submitOk({ email: "three@example.com" });
+  const third = await submitOk({ email: "THREE@example.com" });
+  // The earlier results, their invitations and their pair cards are gone, as if deleted by hand.
+  expect(getResultByToken(first.resultToken)).toBeUndefined();
+  expect((await getInvite(get(`/api/invites/${first.inviteToken}`), params(first.inviteToken))).status).toBe(404);
+  expect((await getPair(get(`/api/pairs/${friend.pairToken}`), params(friend.pairToken!))).status).toBe(404);
+  expect(getResultByToken(third.resultToken)).toBeDefined();
+  await flushMail();
+  mocks.sendMail.mockClear();
+  const fourth = await submit(post(submission({ email: "three@example.com" })));
+  expect(fourth.status).toBe(409);
+  const body = await fourth.json() as Record<string, unknown>;
+  expect(body).toEqual({ ok: false, code: "EMAIL_LIMIT_REACHED" });
+  await flushMail();
+  const resent = (mocks.sendMail.mock.calls[0] as unknown as [Record<string, string>])[0];
+  expect(resent.to).toBe("three@example.com");
+  expect(resent.text).toContain(`/r/${third.resultToken}`);
+  // Deleting the newest does not give a test back.
+  await deleteResultRoute(get(`/api/results/${third.resultToken}`, {}, "DELETE"), params(third.resultToken));
+  expect((await submit(post(submission({ email: "three@example.com" })))).status).toBe(409);
 });

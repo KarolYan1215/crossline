@@ -3,7 +3,8 @@ import type { AvatarStatus, InviteView, PairView, ResultView } from "../lib/cont
 import { pairRelation, publicType } from "../lib/public-type";
 import { avatarStatus } from "./avatar";
 import { baseUrl } from "./config";
-import { getResultById, listPairs, recordedScores, type StoredPair, type StoredResult } from "./store";
+import { mailConfigured } from "./mail";
+import { betaRequested, getResultById, listPairs, recordedScores, type StoredPair, type StoredResult } from "./store";
 
 /**
  * What each route answers, built from stored rows. Anything another person can reach is addressed by the invitation token; the result
@@ -25,7 +26,7 @@ export function avatarOf(result: StoredResult): AvatarStatus {
   }
 }
 
-const typeOf = (result: StoredResult) => publicType(result.scores, recordedScores());
+const typeOf = (result: StoredResult) => publicType(result.scores, recordedScores(), result.id);
 
 export function resultView(result: StoredResult): ResultView {
   const pairs = listPairs(result.id).flatMap((pair) => {
@@ -36,7 +37,8 @@ export function resultView(result: StoredResult): ResultView {
   });
   return {
     nickname: result.nickname, type: typeOf(result), avatar: avatarOf(result), posterUrl: posterUrl(result), longUrl: longUrl(result),
-    inviteUrl: inviteUrl(result), sendEmail: result.sendEmail, pairs, expiresAt: result.expiresAt
+    inviteUrl: inviteUrl(result), sendEmail: result.sendEmail, mailOn: mailConfigured(),
+    betaRequested: betaRequested(result.id), pairs, expiresAt: result.expiresAt
   };
 }
 

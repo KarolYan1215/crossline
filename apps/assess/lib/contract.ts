@@ -31,7 +31,7 @@ export type SubmitRequest = {
   answers: Record<string, number>;
   appearance: Appearance;
   email: string;
-  /** 「把海报和结果发到我的邮箱」, ticked by default. */
+  /** 「把结果链接发到我的邮箱」, ticked by default. */
   sendEmail: boolean;
   /** Signs the invitation (「XX 邀请你测测…」); "" shows 「你的朋友」. */
   nickname: string;
@@ -48,7 +48,7 @@ export type SubmitResponse = { resultToken: string; inviteToken: string; pairTok
 /** Every refusal the API gives, as `{ ok: false, code }` with an HTTP status. */
 export type ApiErrorCode =
   | "QUIZ_INCOMPLETE" | "APPEARANCE_INVALID" | "EMAIL_INVALID" | "NICKNAME_INVALID" | "TOO_FAST" | "REJECTED"
-  | "RATE_LIMITED" | "INVITE_NOT_FOUND" | "ALREADY_PAIRED" | "NOT_FOUND";
+  | "RATE_LIMITED" | "INVITE_NOT_FOUND" | "ALREADY_PAIRED" | "NOT_FOUND" | "UNAUTHORIZED" | "EMAIL_LIMIT_REACHED";
 
 /** One axis as shown: both poles, the score 0–100 towards the right pole, light when ambiguous, and the rank. */
 export type PublicAxis = {
@@ -57,6 +57,9 @@ export type PublicAxis = {
   rank: { pole: string; percent: number; estimated: boolean };
 };
 
+/** A recommended line, 「<domain>的<identity>」: the identity large on the poster, the field small; a licensed profession has no field. */
+export type LineView = { domain: string; identity: string };
+
 export type PartnerView = { code: string; name: string; relation: string; tip: string };
 
 /** The part of a result anyone holding a link may see: never the email, the answers or the appearance. */
@@ -64,7 +67,10 @@ export type PublicType = {
   code: string; name: string; subtitle: string;
   group: { key: string; name: string; colour: string; tint: string };
   axes: PublicAxis[];
-  lines: [string, string, string];
+  /** The first combination, offered as 「你也许想做」, with `loop`. */
+  lines: [LineView, LineView, LineView];
+  /** Three more combinations, shown smaller and without a loop. */
+  more: Array<[LineView, LineView, LineView]>;
   loop: [string, string, string, string];
   best: PartnerView;
   hardest: PartnerView;
@@ -84,6 +90,10 @@ export type ResultView = {
   /** The invitation link printed as the poster's QR code. */
   inviteUrl: string;
   sendEmail: boolean;
+  /** Whether this server can send mail at all (SMTP configured); without it the page tells the person to keep the link themselves. */
+  mailOn: boolean;
+  /** Whether the person has asked to be invited to the full Crossline app (「申请内测」). */
+  betaRequested: boolean;
   pairs: Array<{ pairToken: string; nickname: string; code: string; name: string; relation: string }>;
   expiresAt: string;
 };
@@ -99,7 +109,7 @@ export type PairView = {
   b: { nickname: string; type: PublicType; avatar: AvatarStatus };
   primary: RelationView;
   secondary?: RelationView;
-  /** Lines both types suit, possibly none. */
+  /** Identities both types' lines share (「创业者」), possibly none. */
   sharedLines: string[];
   cardUrl: string;
 };
@@ -108,5 +118,7 @@ export type PairView = {
 export const RESULT_RETENTION_DAYS = 90;
 /** Pair cards listed on one person's result. */
 export const PAIRS_SHOWN_MAX = 20;
+/** Tests one address may take within the retention period; each new one replaces the last (decided 2026-10-15). */
+export const TESTS_PER_EMAIL = 3;
 /** Figures drawn per email address, ever. */
 export const AVATARS_PER_EMAIL = 3;

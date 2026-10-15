@@ -17,5 +17,15 @@ test("a pair names its relations and the lines both types suit", () => {
   const pair = pairRelation("SEMP", "SEMA");
   expect(pair.primary.name).toBe("进度条之争");
   expect(pair.secondary?.name).toBe("复刻搭子");
-  expect(pairRelation("GEMA", "GIMA").sharedLines).toEqual(expect.arrayContaining(["创业者", "内容作者"]));
+  expect(pairRelation("SEMP", "GIMA").sharedLines).toEqual(["创业者"]);
+  expect(pairRelation("SEMP", "SIMA").sharedLines).toEqual([]);
+});
+
+test("a strong lean's rank is capped and keyed by the result: one result always shows the same number", () => {
+  const strong = { scope: 98, basis: 2, output: 97, rhythm: 99 };
+  const one = publicType(strong, {}, "result-a").axes.map((axis) => axis.rank.percent);
+  expect(publicType(strong, {}, "result-a").axes.map((axis) => axis.rank.percent)).toEqual(one);
+  for (const percent of one) expect(percent).toBeGreaterThanOrEqual(91), expect(percent).toBeLessThanOrEqual(96);
+  const others = Array.from({ length: 30 }, (_, index) => publicType(strong, {}, `result-${index}`).axes[0]!.rank.percent);
+  expect(new Set(others).size).toBeGreaterThan(1);
 });

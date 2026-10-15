@@ -2,10 +2,11 @@ import type { ReactNode } from "react";
 import satori, { type SatoriNode } from "satori";
 import { Resvg } from "@resvg/resvg-js";
 import { TYPE_AXES, TYPE_GROUPS } from "@crossline/core/assess";
-import { RELATIONS } from "@crossline/core/assess-content";
+import { RELATIONS, latinGap } from "@crossline/core/assess-content";
 import type { PartnerView, PublicAxis, PublicType, RelationView } from "../../lib/contract";
 import { posterFonts, safe, type Family } from "./fonts";
 import { LABELS, poleExplanations, rankLine } from "./labels";
+import { withName } from "../../lib/names";
 import { qrDataUri } from "./qr";
 
 /**
@@ -58,17 +59,24 @@ function codeLetters(type: PublicType, size: number): El {
     text(axis.letter, "Serif", { fontSize: size, fontWeight: 700, color: type.group.colour, opacity: axis.ambiguous ? 0.38 : 1, marginRight: index < 3 ? size * 0.12 : 0, lineHeight: 1 })));
 }
 
+/** The axis leaned to furthest (a clear lean before an ambiguous one): the poster's one 「约超过 X% 的人」. */
+export function strongestAxis(type: PublicType): PublicAxis {
+  return [...type.axes].sort((a, b) => Number(a.ambiguous) - Number(b.ambiguous) || Math.abs(b.score - 50) - Math.abs(a.score - 50))[0]!;
+}
+
 function hero(type: PublicType, nickname: string, figure: Figure, compact: boolean): El {
-  const owner = nickname.trim() ? `${nickname.trim()} 的${LABELS.kicker}` : LABELS.kicker;
+  const owner = nickname.trim() ? `${withName(nickname.trim(), "的")}${LABELS.kicker}` : LABELS.kicker;
   const group = TYPE_GROUPS[type.group.key];
   return box({ width: "100%", alignItems: "center" },
-    panel(figure, type, compact ? 236 : 280),
+    panel(figure, type, compact ? 300 : 280),
     box({ flexDirection: "column", marginLeft: 44, flexGrow: 1, flexShrink: 1, minWidth: 0 },
       text(owner, "Sans", { fontSize: 26, color: GREY, marginBottom: 10 }),
       codeLetters(type, compact ? 58 : 64),
-      text(type.name, "Serif", { fontSize: compact ? 88 : 108, fontWeight: 700, color: INK, lineHeight: 1.15, marginTop: 4 }),
+      text(type.name, "Serif", { fontSize: compact ? 92 : 108, fontWeight: 700, color: INK, lineHeight: 1.15, marginTop: 4 }),
       text(group ? `${type.group.name} · ${group.blurb}` : type.group.name, "Sans", { fontSize: 24, color: GREY, marginTop: 4 }),
-      text(type.subtitle, "Serif", { fontSize: compact ? 30 : 34, color: INK, lineHeight: 1.4, marginTop: 12, textWrap: "balance" })));
+      text(type.subtitle, "Serif", { fontSize: compact ? 32 : 34, color: INK, lineHeight: 1.4, marginTop: 12, textWrap: "balance" }),
+      compact ? box({ marginTop: 18, paddingTop: 12, borderTop: `2px solid ${type.group.colour}` },
+        text(rankLine(strongestAxis(type).rank), "Sans", { fontSize: 26, fontWeight: 700, color: INK })) : null));
 }
 
 /** A bar that grows from the middle towards the pole leaned to, as on the portrait (`axisBar`). */
@@ -93,7 +101,8 @@ function pole(label: string, letter: string, percent: number | null, align: "lef
     ...(align === "left" ? [name, value] : [value, name]));
 }
 
-function axisRow(axis: PublicAxis, colour: string): El {
+/** One axis; the long image adds the rank under each bar, the poster prints only the strongest one, in the hero. */
+function axisRow(axis: PublicAxis, colour: string, withRank = true): El {
   const right = axis.score >= 50;
   const percent = right ? axis.score : 100 - axis.score;
   return box({ flexDirection: "column", width: "100%" },
@@ -101,12 +110,13 @@ function axisRow(axis: PublicAxis, colour: string): El {
       pole(axis.leftLabel, axis.leftLetter, right ? null : percent, "left"),
       axisBar(axis, colour, 16),
       pole(axis.rightLabel, axis.rightLetter, right ? percent : null, "right")),
-    text(rankLine(axis.rank), "Sans", { fontSize: 24, color: GREY, lineHeight: 1.25, marginTop: 2, marginLeft: POLE_WIDTH + 16 }));
+    withRank ? text(rankLine(axis.rank), "Sans", { fontSize: 24, color: GREY, lineHeight: 1.25, marginTop: 2, marginLeft: POLE_WIDTH + 16 }) : null);
 }
 
 /** The four steps as a cycle: across the top, down, back along the bottom, up — the last step feeding the first. */
 function loopCycle(loop: PublicType["loop"], colour: string, tint: string): El {
-  const boxW = 240, boxH = 58, gapX = 56, gapY = 40, width = boxW * 2 + gapX, height = boxH * 2 + gapY;
+  // 256 wide holds a ten-character step at 24 px on one line (the content test caps steps at ten).
+  const boxW = 256, boxH = 58, gapX = 44, gapY = 40, width = boxW * 2 + gapX, height = boxH * 2 + gapY;
   const at = [[0, 0], [boxW + gapX, 0], [boxW + gapX, boxH + gapY], [0, boxH + gapY]] as const;
   const step = (label: string, index: number) => box({ position: "absolute", left: at[index]![0], top: at[index]![1], width: boxW, height: boxH, alignItems: "center", justifyContent: "center",
     border: `2px solid ${colour}`, borderRadius: 10, backgroundColor: index === 0 ? tint : PAPER },
@@ -126,16 +136,28 @@ function loopCycle(loop: PublicType["loop"], colour: string, tint: string): El {
     ...loop.map(step));
 }
 
-/** The three lines and the cycle they feed; the poster prints its heading and the call to run them in the left column. */
+/** The three lines and the cycle they feed; the poster prints its heading above the lines and the call to run them on a row of its own. */
 function linesBlock(type: PublicType, withLabels: boolean): El {
-  return box({ width: "100%", alignItems: "center", justifyContent: "space-between" },
+  const row = box({ width: "100%", alignItems: "center", justifyContent: "space-between" },
     box({ flexDirection: "column", flexShrink: 1, minWidth: 0 },
       withLabels ? text(LABELS.linesHeading, "Sans", { fontSize: 24, color: GREY, marginBottom: 8 }) : null,
+      // The field small, the identity large: 「人工智能的 研究者」.
       ...type.lines.map((line, index) => box({ alignItems: "baseline", marginTop: index ? 4 : 0 },
         text(String(index + 1), "Serif", { fontSize: 26, fontWeight: 700, color: type.group.colour, width: 30 }),
-        text(line, "Serif", { fontSize: 32, fontWeight: 700, color: INK, lineHeight: 1.3 }))),
-      withLabels ? text(LABELS.loopCaption, "Sans", { fontSize: 24, color: GREY, marginTop: 10 }) : null),
+        line.domain ? text(`${line.domain}的`, "Sans", { fontSize: 24, color: GREY, lineHeight: 1.3 }) : null,
+        text(line.identity, "Serif", { fontSize: 32, fontWeight: 700, color: INK, lineHeight: 1.3, marginLeft: line.domain && latinGap(line.identity) ? 8 : 0 })))),
     loopCycle(type.loop, type.group.colour, type.group.tint));
+  return withLabels ? box({ flexDirection: "column", width: "100%" }, row, text(LABELS.loopCaption, "Sans", { fontSize: 24, color: GREY, marginTop: 12 })) : row;
+}
+
+/** One more combination on a row: fields small and grey, identities bold at `size`, joined by 「·」. */
+function comboLine(combo: PublicType["lines"], size: number, marginTop: number): El {
+  return box({ alignItems: "baseline", flexWrap: "wrap", marginTop },
+    ...combo.flatMap((line, index) => [
+      index ? text(" · ", "Sans", { fontSize: 24, color: GREY, marginLeft: 6, marginRight: 6 }) : null,
+      line.domain ? text(`${line.domain}的`, "Sans", { fontSize: 24, color: GREY }) : null,
+      text(line.identity, "Serif", { fontSize: size, fontWeight: 700, color: INK, marginLeft: line.domain && latinGap(line.identity) ? 8 : 0 })
+    ]));
 }
 
 function partner(label: string, view: PartnerView, colour: string, tips: string[], when?: string): El {
@@ -183,7 +205,7 @@ export function typePosterTree(type: PublicType, nickname: string, figure: Figur
   return page(HEIGHT,
     hero(type, nickname, figure, true),
     rule(17),
-    box({ flexDirection: "column", width: "100%" }, ...type.axes.map((axis, index) => box({ marginTop: index ? 4 : 0, width: "100%" }, axisRow(axis, type.group.colour)))),
+    box({ flexDirection: "column", width: "100%" }, ...type.axes.map((axis, index) => box({ marginTop: index ? 16 : 0, width: "100%" }, axisRow(axis, type.group.colour, false)))),
     rule(17),
     linesBlock(type, true),
     rule(17),
@@ -235,7 +257,10 @@ export function longImageTree(type: PublicType, nickname: string, figure: Figure
       text(LABELS.loopHeading, "Serif", { fontSize: 28, fontWeight: 700, color: INK, marginTop: 24 }),
       text(`${type.loop.join(" → ")} → ${type.loop[0]}`, "Sans", { fontSize: 26, color: INK, lineHeight: 1.5, marginTop: 8 }),
       text(LABELS.loopExplain, "Sans", { fontSize: 24, color: GREY, lineHeight: 1.5, marginTop: 6 }),
-      text(LABELS.loopCaption, "Sans", { fontSize: 24, color: GREY, marginTop: 4 })),
+      text(LABELS.loopCaption, "Sans", { fontSize: 24, color: GREY, marginTop: 4 }),
+      text(LABELS.moreHeading, "Serif", { fontSize: 28, fontWeight: 700, color: INK, marginTop: 28 }),
+      // Three more combinations, each a step smaller (30 / 27 / 24 px for the identities), never under 24 px.
+      ...type.more.map((combo, index) => comboLine(combo, [30, 27, 24][index]!, index ? 10 : 12))),
     rule(34),
     section(LABELS.partnersHeading,
       box({ width: "100%", justifyContent: "space-between" },

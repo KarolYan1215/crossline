@@ -1,12 +1,14 @@
 import fs from "node:fs";
 import { avatarImagePath, avatarStatus } from "../../../../server/avatar";
 import { imageType } from "../../../../server/avatar/provider";
+import { thumbnail } from "../../../../server/avatar/thumb";
 import { getResultByInvite } from "../../../../server/store";
 
 /**
  * GET /api/avatar/<inviteToken>.png — a result's figure: the drawn PNG once it is ready, else the type's template; 404 for anything
  * else. Keyed by the invitation token (printed on the poster), never the result token. A `?v=` address names one drawn file and may be
- * cached for good; the bare address changes from template to drawn figure, so it is revalidated every time.
+ * cached for good; the bare address changes from template to drawn figure, so it is revalidated every time. `?size=small` answers the
+ * same figure 360 wide (`thumb.ts`), for pages that show it small.
  */
 
 export const runtime = "nodejs";
@@ -21,13 +23,16 @@ export async function GET(request: Request, context: { params: Promise<{ file: s
   const token = FILE.exec(file)?.[1];
   const result = token ? getResultByInvite(token) : undefined;
   if (!result) return notFound();
+  const source = avatarImagePath(result);
+  const query = new URL(request.url).searchParams;
   let bytes: Buffer;
   try {
-    bytes = fs.readFileSync(avatarImagePath(result));
+    bytes = fs.readFileSync(source);
+    if (query.get("size") === "small") bytes = thumbnail(source, bytes);
   } catch {
     return notFound();
   }
-  const versioned = new URL(request.url).searchParams.has("v") && avatarStatus(result).state === "ready";
+  const versioned = query.has("v") && avatarStatus(result).state === "ready";
   return new Response(new Uint8Array(bytes), {
     headers: {
       "content-type": imageType(bytes) ?? "application/octet-stream",
