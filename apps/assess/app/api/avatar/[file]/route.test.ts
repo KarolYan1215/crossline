@@ -29,7 +29,8 @@ test("a figure still drawing is served as its type's template, revalidated every
   expect(response.status).toBe(200);
   expect(response.headers.get("content-type")).toBe("image/png");
   expect(response.headers.get("cache-control")).toMatch(/max-age=0/);
-  expect(Buffer.from(await response.arrayBuffer())).toEqual(fs.readFileSync(templateImagePath("SEMP")));
+  // Buffer.equals: toEqual walks a 1.7 MB template byte by byte and runs past the test timeout.
+  expect(Buffer.from(await response.arrayBuffer()).equals(fs.readFileSync(templateImagePath("SEMP")))).toBe(true);
   expect(getResultByInvite).toHaveBeenCalledWith("inv_public_token_0001");
 });
 

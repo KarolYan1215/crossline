@@ -76,7 +76,7 @@ describe("drawing", () => {
     const file = vi.mocked(setAvatarState).mock.calls.at(-1)![2]!;
     expect(file).toBe(path.join("avatars", "res_0001.png"));
     expect(fs.readFileSync(path.join(dir, file))).toEqual(TINY_PNG);
-    expect(provider.edits[0]!.reference).toEqual(fs.readFileSync(templateImagePath("GEMA")));
+    expect(provider.edits[0]!.reference.equals(fs.readFileSync(templateImagePath("GEMA")))).toBe(true);
 
     const ready = { ...result, avatar: { state: "ready" as const, file } };
     expect(avatarStatus(ready).url).toMatch(/^\/api\/avatar\/inv_public_token_0001\.png\?v=\d+$/);

@@ -124,7 +124,7 @@ const LOOKS: Record<string, Look> = {
     gag: "several unfinished gadgets clipped to the jacket and belt, one giving off a small spark",
     pose: "jumping slightly off the ground as the contraption lifts", expression: "manic delight" },
   GIRP: { trait: "rallies people around a grand vision", build: "athletic and tall",
-    hair: { female: "a short pixie cut", male: "short hair with a bold quiff" },
+    hair: { female: "shoulder-length wavy hair held back by a sporty headband", male: "short hair with a bold quiff" },
     outfit: "a windbreaker jacket zipped to the collar, track trousers",
     prop: "a plain flag on a short pole held high, the flag in the backdrop colour with no marks",
     gag: "a completely blank planner tucked under the other arm",
@@ -177,7 +177,7 @@ export function templatePrompt(code: string, variant: TemplateVariant = "female"
   if (!type || !group || !look) throw new Error(`unknown type ${code}`);
   return [
     stylePrompt(group.tone, group.tint),
-    `The character is a young ${variant === "female" ? "woman" : "man"}, ${look.build}; hair: ${look.hair[variant]}, dark brown; medium skin tone; no glasses.`,
+    `The character is a young ${variant === "female" ? "woman, clearly feminine at a glance" : "man, clearly masculine at a glance"}, ${look.build}; hair: ${look.hair[variant]}, dark brown; medium skin tone; no glasses.`,
     `The character's core: ${look.trait}.`,
     `Outfit: ${look.outfit}.`,
     `Holding: ${look.prop}.`,
