@@ -47,7 +47,7 @@ export function MilestoneActions({ lines, archived }: { lines: Array<{ id: strin
 
   return <div className="ms-actions">
     <Sheet title="新建里程碑" open={open} onOpenChange={setOpen}
-      trigger={<button type="button" className="primary-button" disabled={!lines.length}>新建里程碑</button>}
+      trigger={<button type="button" disabled={!lines.length}>新建里程碑</button>}
       footer={<div className="md-actions">
         <button type="button" className="primary-button" disabled={busy || !form.title.trim() || !form.lineId} onClick={() => void create()}>保存为草稿</button>
         <button type="button" disabled={busy} onClick={() => setOpen(false)}>取消</button>
@@ -69,11 +69,13 @@ export function MilestoneActions({ lines, archived }: { lines: Array<{ id: strin
     </Sheet>
     <button type="button" disabled={busy} onClick={() => void propose()}>让 AI 重新提议草稿</button>
     {!open && status && <small role="status">{status}</small>}
-    {archived.length > 0 && <details className="fold ms-archived"><summary>已归档（{archived.length}）</summary>
-      <ul>{archived.map((milestone) => <li key={milestone.id}>
+    {archived.length > 0 && <Sheet title={`已归档的里程碑（${archived.length}）`} side="right"
+      trigger={<button type="button" className="text-button">已归档 {archived.length}</button>}>
+      <ul className="ms-archived">{archived.map((milestone) => <li key={milestone.id} data-line={milestone.identityId}>
         <span>{labels.get(milestone.identityId) ?? milestone.identityId} · {milestone.title}</span>
         <button type="button" className="text-button" disabled={busy} onClick={() => void restore(milestone)}>恢复为草稿</button>
       </li>)}</ul>
-    </details>}
+      {status && <p role="status">{status}</p>}
+    </Sheet>}
   </div>;
 }

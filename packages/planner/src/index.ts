@@ -25,6 +25,11 @@ export type PlannerTask = {
    * to meet its line's weekly floor (`PlanningInput.lineShares`); left out, it is not reported as unplaced.
    */
   floorOnly?: boolean;
+  /**
+   * Extra days this work is aimed to finish before its deadline because its milestone carries a risk (`riskBufferDays` in core: two for
+   * a high one, one for a medium one). Added to the person's own deadline buffer and dropped with it in the relaxed run.
+   */
+  riskBufferDays?: number;
 };
 
 /**

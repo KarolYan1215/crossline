@@ -359,6 +359,18 @@ describe("energy-aware planning", () => {
     expect(invalidBlocks([...blocks.slice(0, 1), { taskId: "hw", start: day(14, 15), end: day(14, 45) }], slots, input, 0)).toMatch(/^minutes:hw/);
   });
 
+  test("two frozen blocks on each other do not void every answer; a placed block on a frozen one still does", () => {
+    // Two held blocks that overlap are the person's to settle (they are asked); before, every optimal answer was thrown away for it.
+    const day = (h: number, m = 0) => `2026-09-14T${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:00.000Z`;
+    const slots = [{ day: "2026-09-14", start: Date.parse(day(15)), end: Date.parse(day(16)), energy: "high" as const }];
+    const hw = { id: "hw", title: "作业", estimate: { p25Minutes: 30, p50Minutes: 30, p85Minutes: 30, confidence: "high" as const }, inputsReady: true, deadlineTier: 1 as const };
+    const input = { now: start, horizonDays: 1, tasks: [hw], availability: [], frozenBlocks: [] };
+    const held = [{ taskId: "a", start: day(14), end: day(15), frozen: true }, { taskId: "b", start: day(14, 30), end: day(14, 50), frozen: true }];
+    expect(invalidBlocks([...held, { taskId: "hw", start: day(15), end: day(15, 30) }], slots, input, 0)).toBeUndefined();
+    // Placed inside the long frozen block, even though the block just before it in time is the short one that already ended.
+    expect(invalidBlocks([...held, { taskId: "hw", start: day(14, 50), end: day(15, 20) }], [{ ...slots[0]!, start: Date.parse(day(14)) }], input, 0)).toMatch(/^overlap:a\/hw/);
+  });
+
   test("work released after the days being planned is not reported as blocked; the window reaches it later", async () => {
     const day = (h: number) => `2026-09-14T${String(h).padStart(2, "0")}:00:00.000Z`;
     const availability = [{ day: "2026-09-14", start: day(14), end: day(16), energy: "high" as const }];
@@ -647,6 +659,21 @@ describe("schedule parameters and importance", () => {
     expect(early.plan.blocks.find((block) => block.taskId === "hw")?.start.slice(0, 10)).toBe("2026-10-06");
     const late = await planSchedule({ now, horizonDays: 4, frozenBlocks: [], tasks: [task], params, availability: [day("2026-10-09")] });
     expect(late.plan.blocks.find((block) => block.taskId === "hw")?.start.slice(0, 10)).toBe("2026-10-09");
+  });
+
+  test("a milestone's risk adds its own days to the buffer of that work only, and is dropped like the buffer when there is no room", async () => {
+    const task = (id: string, weight: number, riskBufferDays?: number) => ({ id, title: id, estimate: estimate(60), inputsReady: true, deadlineTier: 2 as const,
+      interruptible: false, weight, deadline: "2026-10-09T23:00:00.000Z", ...(riskBufferDays ? { riskBufferDays } : {}) });
+    const params = { gapMinutes: 0, maxDailyShare: 1, focusCapMinutes: 0, deadlineBufferDays: 0 };
+    // One early hour, one hour on the due day: without a risk the heavier work takes the early hour; the risky one takes it with one.
+    const availability = [day("2026-10-09", "14:00", "15:00"), day("2026-10-06", "17:00", "18:00")];
+    for (const solver of ["solver", "greedy"] as const) for (const buffer of [0, 2]) {
+      const result = await planSchedule({ now, horizonDays: 4, frozenBlocks: [], tasks: [task("risky", 10, buffer), task("heavy", 90)], params, availability },
+        solver === "greedy" ? { solver: "none" } : {});
+      expect(result.plan.blocks.find((block) => block.start.startsWith("2026-10-06"))?.taskId, `${solver} ${buffer}`).toBe(buffer ? "risky" : "heavy");
+    }
+    const late = await planSchedule({ now, horizonDays: 4, frozenBlocks: [], tasks: [task("risky", 10, 2)], params, availability: [day("2026-10-09")] });
+    expect(late.plan.blocks.find((block) => block.taskId === "risky")?.start.slice(0, 10)).toBe("2026-10-09");
   });
 
   test("inside one tier the heavier milestone goes first; a lighter one in a more urgent tier still wins", async () => {

@@ -1,80 +1,145 @@
 /**
- * Where everything sits on the 主线 timeline. The horizontal axis is dates; each line is a row with its own axis; a milestone is a
- * marker at its deadline, with its label hung below in the first lane where it does not overlap the previous one; the ticks before it
- * (near-term results) are dots on the same axis. Chains inside a line run along the axis; relations between lines are curves from one
- * marker to the other. Milestones without a date sit after the last date, in an 「未定日期」 zone. Pure arithmetic, tested without a browser.
+ * Where everything sits on the 主线 timeline: one shared date axis across the page's width, a row per line, so lines can be compared at a
+ * glance. A milestone is a marker at its deadline with a short label hung below it, in one of at most `TL.maxLanes` lanes; a label that
+ * finds no room is cut short, then left out (the marker stays, named on hover and on focus). The ticks before a milestone (near-term
+ * results) are dots on the same axis. Chains inside a line arc above the axis; relations between lines are curves from one marker to the
+ * other. Milestones without a date sit in an 「未定日期」 zone at the right. The scale fits the whole span into the width it is given (a
+ * phone gets `TL.minWidth` and scrolls inside its frame), and the axis says the year: on the first mark, and at every 1 January as a
+ * separator line. A relation's kind is its dash pattern; its label is drawn only while it is hovered, and only where it covers nothing
+ * (`placeEdgeLabels`). Pure arithmetic, tested without a browser.
  */
 export type TimelineNodeInput = { id: string; line: string; title: string; status: "draft" | "approved"; kind: "milestone" | "course";
   day?: string | undefined; dependsOn: string[] };
 export type TimelineTickInput = { id: string; milestoneId: string; line: string; day: string | null; state: "done" | "planned" | "postponed"; plannedDay: string | null };
-/** `broken`: the relation's upstream milestone is now due too late for the downstream one; it is drawn as a red broken line. */
-export type TimelineRelationInput = { id: string; from: string; to: string; pending: boolean; label?: string; broken?: boolean };
+/**
+ * `broken`: the relation's upstream milestone is now due too late for the downstream one; it is drawn as a red broken line. `kind`
+ * (enables, reuses, …) picks the curve's dash pattern, so the kind reads without a label on the curve.
+ */
+export type TimelineRelationInput = { id: string; from: string; to: string; pending: boolean; label?: string; kind?: string; broken?: boolean };
 
-export const TL = { labelW: 96, nodeW: 176, laneH: 56, axisTop: 26, rowPad: 12, headH: 30, undatedGap: 48 } as const;
+export const TL = {
+  /** The row label column (line name, drafts waiting). */
+  labelW: 92,
+  /** Header: the year line above the month or week line. */
+  headH: 34,
+  /** Axis distance from a row's top: room for the chain arcs and the risk glyph above it. */
+  axisTop: 22,
+  laneH: 18, maxLanes: 2, rowPad: 6,
+  /** The longest a label may be, and the shortest worth showing. */
+  labelMax: 150, labelMin: 40,
+  undatedW: 132,
+  /** Below this the canvas keeps this width and its frame scrolls sideways, so a phone does not crush a year into 300px. */
+  minWidth: 600,
+  /** A row with more chain steps than this draws them faint, and only the hovered or focused milestone's at full strength. */
+  chainMax: 6
+} as const;
 
+/** A cubic Bézier: start, first control, second control, end. */
+export type Curve = [number, number, number, number, number, number, number, number];
+
+export type AxisMark = { x: number; label: string; kind: "week" | "month" };
 export type TimelineLayout = {
   width: number; height: number; start: string; pxPerDay: number; datedEnd: number;
-  axis: Array<{ x: number; label: string; month: boolean }>; todayX: number;
+  axis: AxisMark[];
+  /** Years: the first one at the left edge (`boundary: false`), then each 1 January inside the span, drawn as a separator. */
+  years: Array<{ x: number; label: string; boundary: boolean }>;
+  todayX: number;
   rows: Array<{ line: string; y: number; height: number; axisY: number }>;
-  nodes: Array<TimelineNodeInput & { x: number; axisY: number; labelY: number; undated: boolean }>;
+  /** `labelW` 0 = no room for a label; the marker stands alone. */
+  nodes: Array<TimelineNodeInput & { x: number; axisY: number; labelX: number; labelY: number; labelW: number; undated: boolean }>;
   ticks: Array<TimelineTickInput & { x: number; axisY: number; plannedX: number | null }>;
   /**
-   * `from`/`to` are node ids (hover highlights both ends); `line` is the source's line, which colours the edge and its arrowhead;
-   * relations carry their kind as `label` at (`labelX`, `labelY`), the curve's midpoint.
+   * `from`/`to` are node ids (hover highlights both ends); `line` is the source's line, which colours the edge and its arrowhead.
+   * A relation carries its kind (`relationKind`, and `label` to name it), its curve (`curve`) and the curve's midpoint (`labelX`,
+   * `labelY`); whether and where its label is drawn is `placeEdgeLabels`'s to decide. A chain step in a crowded row is `faint`.
    */
   edges: Array<{ id: string; kind: "chain" | "relation"; pending: boolean; path: string; line?: string; from: string; to: string;
-    label?: string; labelX?: number; labelY?: number; broken?: boolean }>;
+    label?: string; labelX?: number; labelY?: number; broken?: boolean; relationKind?: string; curve?: Curve; faint?: boolean }>;
 };
 
 const DAY_MS = 86_400_000;
 const toTime = (day: string) => Date.parse(`${day}T12:00:00Z`);
 const toDay = (time: number) => new Date(time).toISOString().slice(0, 10);
 
+/** About how wide a label is drawn at 12px: a CJK character is 12px, anything else about 6.5px, plus the label's padding. */
+export function labelWidth(text: string): number {
+  let width = 10;
+  for (const char of text) width += /[⺀-鿿豈-﫿＀-￯]/.test(char) ? 12 : 6.5;
+  return Math.ceil(width);
+}
+
 export function layoutTimeline(input: { nodes: TimelineNodeInput[]; ticks: TimelineTickInput[]; relations: TimelineRelationInput[]; lineOrder: string[]; today: string;
-  maxWidth?: number }): TimelineLayout {
+  /** The width of the frame the canvas is drawn in. */
+  width?: number }): TimelineLayout {
   const days = [input.today, ...input.nodes.flatMap((node) => node.day ? [node.day] : []), ...input.ticks.flatMap((tick) => [tick.day, tick.plannedDay].filter((day): day is string => Boolean(day)))];
   const start = toDay(Math.min(...days.map(toTime)) - 3 * DAY_MS);
   const end = toDay(Math.max(...days.map(toTime)) + 5 * DAY_MS);
   const span = Math.max(14, (toTime(end) - toTime(start)) / DAY_MS);
-  const pxPerDay = Math.max(14, Math.min(48, (input.maxWidth ?? 1400) / span));
+  const hasUndated = input.nodes.some((node) => !node.day);
+  const width = Math.max(TL.minWidth, Math.round(input.width ?? 1100));
+  // The last label hangs right of its marker; keep room for a short one.
+  const room = width - TL.labelW - (hasUndated ? TL.undatedW : 0) - TL.labelMin - 8;
+  const pxPerDay = Math.max(0.2, Math.min(40, room / span));
   const xOf = (day: string) => TL.labelW + ((toTime(day) - toTime(start)) / DAY_MS) * pxPerDay;
   const datedEnd = xOf(end);
 
-  const axis: TimelineLayout["axis"] = [];
+  // Weeks while a week is wide enough for 「10/12」, months while a month fits 「12月」, else every quarter's first month.
+  const step = pxPerDay * 7 >= 36 ? "week" : pxPerDay * 30 >= 30 ? "month" : "quarter";
+  const axis: AxisMark[] = [];
+  const years: TimelineLayout["years"] = [{ x: TL.labelW + 2, label: start.slice(0, 4), boundary: false }];
   for (let time = toTime(start); time <= toTime(end); time += DAY_MS) {
     const date = new Date(time);
-    const monthStart = date.getUTCDate() === 1;
-    if (date.getUTCDay() === 1 || monthStart) axis.push({ x: xOf(toDay(time)), label: monthStart ? `${date.getUTCMonth() + 1}月` : `${date.getUTCMonth() + 1}/${date.getUTCDate()}`, month: monthStart });
+    const monthStart = date.getUTCDate() === 1, month = date.getUTCMonth();
+    const x = xOf(toDay(time));
+    if (monthStart && month === 0 && time > toTime(start)) years.push({ x, label: String(date.getUTCFullYear()), boundary: true });
+    if (monthStart && (step !== "quarter" || month % 3 === 0)) axis.push({ x, label: `${month + 1}月`, kind: "month" });
+    else if (step === "week" && date.getUTCDay() === 1) axis.push({ x, label: `${month + 1}/${date.getUTCDate()}`, kind: "week" });
   }
   // A Monday within three days of a month's first day would print on top of it; the month label wins.
   for (let index = axis.length - 1; index >= 0; index -= 1) {
     const mark = axis[index]!;
-    if (!mark.month && axis.some((other) => other.month && Math.abs(other.x - mark.x) < 3 * pxPerDay)) axis.splice(index, 1);
+    if (mark.kind === "week" && axis.some((other) => other.kind === "month" && Math.abs(other.x - mark.x) < 3 * pxPerDay)) axis.splice(index, 1);
   }
+  // The starting year's label gives way to a 1 January close to it.
+  if (years.length > 1 && years[1]!.x - years[0]!.x < 44) years.shift();
 
   const lines = [...new Set([...input.lineOrder.filter((line) => input.nodes.some((node) => node.line === line)), ...input.nodes.map((node) => node.line)])];
   const rows: TimelineLayout["rows"] = [];
   const nodes: TimelineLayout["nodes"] = [];
   let y = TL.headH;
-  let undatedMax = 0;
   for (const line of lines) {
     const own = input.nodes.filter((node) => node.line === line);
     const dated = own.filter((node) => node.day).sort((a, b) => a.day!.localeCompare(b.day!));
     const undated = own.filter((node) => !node.day);
+    const zone = datedEnd + 12;
     const placed = [...dated.map((node) => ({ node, x: xOf(node.day!), undated: false })),
-      ...undated.map((node, index) => ({ node, x: datedEnd + TL.undatedGap + index * (TL.nodeW + 16), undated: true }))];
-    undatedMax = Math.max(undatedMax, undated.length);
-    // Labels hang below the axis, each in the first lane where it clears the label before it.
-    const laneEnds: number[] = [];
-    const lanes = placed.map(({ x }) => {
-      let lane = laneEnds.findIndex((endX) => x >= endX + 8);
-      if (lane < 0) { lane = laneEnds.length; laneEnds.push(0); }
-      laneEnds[lane] = x + TL.nodeW;
-      return lane;
+      ...undated.map((node, index) => ({ node, x: zone + 10 + index * 18, undated: true }))];
+    // Each label starts just left of its marker and wants its full width; it takes the first lane that is clear, else the lane where cutting
+    // the label before it leaves both at least `labelMin`; else it is left out.
+    const lanes: Array<Array<{ index: number; start: number; want: number }>> = Array.from({ length: TL.maxLanes }, () => []);
+    const assigned = placed.map(({ node, x }, index) => {
+      const startX = x - 6;
+      const want = Math.min(TL.labelMax, labelWidth(node.title));
+      const clear = lanes.findIndex((lane) => { const last = lane.at(-1); return !last || last.start + last.want + 4 <= startX; });
+      const squeeze = clear >= 0 ? clear : lanes.findIndex((lane) => { const last = lane.at(-1)!; return startX - last.start - 4 >= TL.labelMin; });
+      if (squeeze < 0) return { lane: -1, start: startX, want };
+      lanes[squeeze]!.push({ index, start: startX, want });
+      return { lane: squeeze, start: startX, want };
     });
+    const rowRight = (undatedNode: boolean) => undatedNode ? width - 4 : zone - 4;
+    const widths = assigned.map((item, index) => {
+      if (item.lane < 0) return 0;
+      const lane = lanes[item.lane]!;
+      const next = lane[lane.findIndex((entry) => entry.index === index) + 1];
+      const limit = Math.min(next ? next.start - 4 : Infinity, rowRight(placed[index]!.undated)) - item.start;
+      const labelW = Math.min(item.want, limit);
+      return labelW >= TL.labelMin || labelW >= item.want ? Math.floor(labelW) : 0;
+    });
+    const used = Math.max(1, ...assigned.map((item, index) => widths[index] ? item.lane + 1 : 0));
     const axisY = y + TL.axisTop;
-    const height = TL.axisTop + Math.max(1, laneEnds.length) * TL.laneH + TL.rowPad;
-    placed.forEach(({ node, x, undated: isUndated }, index) => nodes.push({ ...node, x, axisY, labelY: axisY + 12 + lanes[index]! * TL.laneH, undated: isUndated }));
+    const height = TL.axisTop + 8 + used * TL.laneH + TL.rowPad;
+    placed.forEach(({ node, x, undated: isUndated }, index) => nodes.push({ ...node, x, axisY, undated: isUndated,
+      labelX: assigned[index]!.start, labelY: axisY + 8 + Math.max(0, assigned[index]!.lane) * TL.laneH, labelW: widths[index]! }));
     rows.push({ line, y, height, axisY });
     y += height;
   }
@@ -90,10 +155,9 @@ export function layoutTimeline(input: { nodes: TimelineNodeInput[]; ticks: Timel
   });
 
   const edges: TimelineLayout["edges"] = [];
-  // A step of a chain is an arc over the axis from the earlier marker to the later one, ending in an arrow just short of the marker,
-  // so the order reads at a glance instead of disappearing into the axis line. A dependency that another path in the same line already
-  // implies (A→C beside A→B→C) is not drawn — it only stacked arcs on top of each other — and an arc that passes over more markers
-  // rises higher, so arcs of different lengths do not run along one height.
+  // A step of a chain is an arc over the axis from the earlier marker to the later one, ending in an arrow just short of the marker. A
+  // dependency that another path in the same line already implies (A→C beside A→B→C) is not drawn, and an arc that passes over more
+  // markers rises higher, so arcs of different lengths do not run along one height.
   const sameLineParents = (node: TimelineLayout["nodes"][number]) => node.dependsOn.filter((id) => byId.get(id)?.line === node.line);
   const reaches = (from: string, target: string, skip: string, seen = new Set<string>()): boolean => {
     const node = byId.get(from);
@@ -108,16 +172,20 @@ export function layoutTimeline(input: { nodes: TimelineNodeInput[]; ticks: Timel
       const [a, b] = from.x <= node.x ? [from, node] : [node, from];
       const forward = a === from;
       const between = nodes.filter((other) => other.line === node.line && other.x > a.x + 1 && other.x < b.x - 1).length;
-      // The arc peaks at y0 - lift, which stays inside the row (the axis sits `TL.axisTop` below its top).
-      const lift = Math.min(TL.axisTop - 8, 7 + between * 4);
+      // The arc peaks at y0 - lift, inside the row (the axis sits `TL.axisTop` below its top).
+      const lift = Math.min(TL.axisTop - 10, 5 + between * 3);
       const startX = forward ? a.x + 6 : b.x - 6, endX = forward ? b.x - 9 : a.x + 9;
       const y0 = node.axisY - 6;
       edges.push({ id: `chain:${parent}>${node.id}`, kind: "chain", pending: from.status === "draft" || node.status === "draft", line: node.line,
         from: parent, to: node.id, path: `M${startX},${y0} Q${(startX + endX) / 2},${y0 - lift * 2} ${endX},${y0}` });
     }
   }
-  // A relation between lines leaves its source marker and enters the target's, bowing sideways when both sit on one date; its kind is
-  // written at the curve's midpoint.
+  // A row with many chain steps is a tangle of arcs; there they are drawn faint until one of their milestones is hovered or focused.
+  for (const row of rows) {
+    const own = edges.filter((edge) => edge.kind === "chain" && edge.line === row.line);
+    if (own.length > TL.chainMax) for (const edge of own) edge.faint = true;
+  }
+  // A relation between lines leaves its source marker and enters the target's, bowing sideways when both sit on one date.
   const lineOf = new Map(nodes.map((node) => [node.id, node.line]));
   for (const relation of input.relations) {
     const from = byId.get(relation.from), to = byId.get(relation.to);
@@ -129,8 +197,86 @@ export function layoutTimeline(input: { nodes: TimelineNodeInput[]; ticks: Timel
     const labelX = 0.125 * from.x + 0.375 * c1x + 0.375 * c2x + 0.125 * to.x;
     edges.push({ id: `relation:${relation.id}`, kind: "relation", pending: relation.pending, line: lineOf.get(relation.from)!,
       from: relation.from, to: relation.to, ...(relation.label ? { label: relation.label } : {}), labelX, labelY: midY, ...(relation.broken ? { broken: true } : {}),
+      ...(relation.kind ? { relationKind: relation.kind } : {}), curve: [from.x, y0, c1x, midY, c2x, midY, to.x, y1],
       path: `M${from.x},${y0} C${c1x},${midY} ${c2x},${midY} ${to.x},${y1}` });
   }
-  const width = Math.max(datedEnd, undatedMax ? datedEnd + TL.undatedGap + undatedMax * (TL.nodeW + 16) : 0) + 24;
-  return { width, height: y + 8, start, pxPerDay, datedEnd, axis, todayX: xOf(input.today), rows, nodes, ticks, edges };
+  return { width, height: y + 6, start, pxPerDay, datedEnd, axis, years, todayX: xOf(input.today), rows, nodes, ticks, edges };
+}
+
+/**
+ * What may not be drawn over, and where a label may go instead. Each box is what the timeline actually draws: a marker's 22px square, a
+ * milestone label's strip, a tick's dot, a risk glyph above and right of its marker.
+ */
+export type Box = { x: number; y: number; w: number; h: number };
+type LaidNode = TimelineLayout["nodes"][number];
+export const markerBox = (node: LaidNode): Box => ({ x: node.x - 11, y: node.axisY - 11, w: 22, h: 22 });
+export const nodeLabelBox = (node: LaidNode): Box | null => node.labelW > 0 ? { x: node.labelX, y: node.labelY, w: node.labelW, h: 17 } : null;
+export const tickBox = (tick: TimelineLayout["ticks"][number]): Box => ({ x: tick.x - 6, y: tick.axisY - 6, w: 12, h: 12 });
+export const riskBox = (node: LaidNode): Box => ({ x: node.x + 7, y: node.axisY - 21, w: 14, h: 14 });
+/** A relation's label: its kind as plain text, or as a chip (1px border, 6px padding) when the relation hands over an artifact. */
+export const edgeLabelSize = (label: string, chip: boolean): { w: number; h: number } => chip ? { w: labelWidth(label) + 4, h: 24 } : { w: labelWidth(label), h: 16 };
+
+export function boxesOverlap(a: Box, b: Box, gap = 0): boolean {
+  return a.x < b.x + b.w + gap && b.x < a.x + a.w + gap && a.y < b.y + b.h + gap && b.y < a.y + a.h + gap;
+}
+
+/**
+ * Which milestones' risk glyphs fit. A glyph sits just right of its marker; where another marker, a tick or a glyph already drawn is
+ * closer than that, it is left out — the risk stays in the marker's name and in the drawer. Row by row, left to right.
+ */
+export function riskGlyphsShown(layout: TimelineLayout, withRisk: ReadonlySet<string>): Set<string> {
+  const shown = new Set<string>();
+  const drawn: Box[] = [];
+  const candidates = layout.nodes.filter((node) => withRisk.has(node.id)).sort((a, b) => a.axisY - b.axisY || a.x - b.x);
+  for (const node of candidates) {
+    const box = riskBox(node);
+    if (layout.nodes.some((other) => other.id !== node.id && boxesOverlap(box, markerBox(other), 1))
+      || layout.ticks.some((tick) => boxesOverlap(box, tickBox(tick), 1)) || drawn.some((other) => boxesOverlap(box, other, 1))) continue;
+    shown.add(node.id);
+    drawn.push(box);
+  }
+  return shown;
+}
+
+/** Everything a relation's label must stay clear of: markers, shown milestone labels, ticks and the risk glyphs drawn (`risks`). */
+export function labelObstacles(layout: TimelineLayout, risks: ReadonlySet<string>): Box[] {
+  return [...layout.nodes.map(markerBox), ...layout.nodes.flatMap((node) => nodeLabelBox(node) ?? []), ...layout.ticks.map(tickBox),
+    ...layout.nodes.filter((node) => risks.has(node.id)).map(riskBox)];
+}
+
+const bezier = (curve: Curve, t: number): [number, number] => {
+  const [x0, y0, x1, y1, x2, y2, x3, y3] = curve;
+  const u = 1 - t, a = u * u * u, b = 3 * u * u * t, c = 3 * u * t * t, d = t * t * t;
+  return [a * x0 + b * x1 + c * x2 + d * x3, a * y0 + b * y1 + c * y2 + d * y3];
+};
+/** Where along its curve a label is tried: the middle first, then outwards. */
+const ALONG = [0.5, 0.4, 0.6, 0.3, 0.7, 0.2, 0.8, 0.12, 0.88];
+
+/**
+ * Where each requested relation label goes: the first spot along its own curve (each point on the curve, then just above and just below
+ * it, then a little further off) that stays inside the canvas below the header and 2px clear of every obstacle and of the labels placed
+ * before it. A label with no such spot is `null` and is not drawn; its curve names it on hover instead. Requests are placed in order.
+ */
+export function placeEdgeLabels(layout: TimelineLayout, requests: Array<{ id: string; w: number; h: number }>, obstacles: Box[]): Map<string, Box | null> {
+  const placed = new Map<string, Box | null>();
+  const taken: Box[] = [];
+  const curves = new Map(layout.edges.flatMap((edge) => edge.curve ? [[edge.id, edge.curve] as const] : []));
+  for (const request of requests) {
+    const curve = curves.get(request.id);
+    let found: Box | null = null;
+    for (const t of curve ? ALONG : []) {
+      const [px, py] = bezier(curve!, t);
+      for (const dy of [0, -(request.h / 2 + 5), request.h / 2 + 5, -(request.h + 8), request.h + 8]) {
+        const box = { x: px - request.w / 2, y: py + dy - request.h / 2, w: request.w, h: request.h };
+        if (box.x < TL.labelW || box.x + box.w > layout.width || box.y < TL.headH || box.y + box.h > layout.height) continue;
+        if (obstacles.some((other) => boxesOverlap(box, other, 2)) || taken.some((other) => boxesOverlap(box, other, 2))) continue;
+        found = box;
+        break;
+      }
+      if (found) break;
+    }
+    placed.set(request.id, found);
+    if (found) taken.push(found);
+  }
+  return placed;
 }

@@ -1,12 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { TARGET_GRADE_OPTIONS, type SuccessCriterion } from "@crossline/core";
+import { riskLevelOf, TARGET_GRADE_OPTIONS, type SuccessCriterion } from "@crossline/core";
 import type { BoardCourse, BoardCriterion, BoardMilestone } from "../../lib/milestone-board";
 import { Sheet } from "../ui/overlay";
 import { DateChip, ProgressRing, Slider, formatMinutes } from "../ui/controls";
 import { Bullet } from "../ui/charts";
 import { LineTag, Tag } from "../ui/tag";
+import { RiskGlyph, RiskList } from "./risk-glyph";
 
 const post = (url: string, body: unknown) => fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
   .catch(() => undefined);
@@ -26,9 +27,11 @@ function useAction() {
 }
 
 /**
- * Everything about one milestone beside the timeline: when it is due and how much it matters (both edited in place), what it is judged
- * by with each reading as a ring and each score line as a bullet chart, the tasks and steps under it, how it feeds or draws on other
- * lines, the reasoning it was proposed with, and — once every criterion is met — its retrospective.
+ * Everything about one milestone beside the timeline, decided and edited in place: what could keep it from being reached (risk glyphs and
+ * short tags), its title, date and importance (always editable — a draft's date is its proposal, an approved one's is confirmed), what it
+ * is judged by with each reading as a ring and each score line as a bullet chart, how it feeds or draws on other lines, the tasks and
+ * steps under it, the reasoning it was proposed with, and — once every criterion is met — its retrospective. A draft is approved or
+ * withdrawn from the footer, next to its risks.
  */
 export function MilestoneDrawer({ milestone, labels, onClose }: { milestone: BoardMilestone; labels: Record<string, string>; onClose: () => void }) {
   const action = useAction();
@@ -46,10 +49,19 @@ export function MilestoneDrawer({ milestone, labels, onClose }: { milestone: Boa
     successCriteria: milestone.successCriteria.map((criterion: SuccessCriterion) => criterion.id === criterionId && criterion.measure.kind === "threshold"
       ? { ...criterion, measure: { ...criterion.measure, value } } : criterion) }, "保存中…", "未保存，请检查数值。");
   const [title, setTitle] = useState(milestone.title);
+  const level = riskLevelOf(milestone.risks);
+  // A draft's date and importance wait beside it until approval; an approved milestone's are its goal settings.
+  const saveDraft = (body: { deadline?: string; weight?: number }) =>
+    action.run("保存中…", () => post(`/api/milestones/${encodeURIComponent(milestone.id)}/draft-settings`, body), "未保存，请重试。");
+  const saveDeadline = (value: string) => approved ? saveGoal({ confirmedDeadline: value }) : saveDraft({ deadline: value });
+  const saveWeight = (value: number) => approved ? saveGoal({ weight: value }) : saveDraft({ weight: value });
+  const removeFlow = (id: string) => action.run("去掉中…", () => fetch(`/api/milestone-relations/${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => undefined),
+    "未完成，请刷新后重试。");
 
   return <Sheet side="right" title={milestone.title} open onOpenChange={(open) => !open && onClose()}
     footer={<div className="md-actions">
       {milestone.status === "draft" && <>
+        <span className="md-approve-risk">{level ? <><RiskGlyph level={level} />批准即接受 {milestone.risks.length} 项风险</> : "未见明显风险"}</span>
         <button type="button" className="primary-button" disabled={action.busy} onClick={() => void decideDraft("approved")}>批准</button>
         <button type="button" disabled={action.busy} onClick={() => void decideDraft("archived")}>撤销草稿</button>
       </>}
@@ -59,8 +71,14 @@ export function MilestoneDrawer({ milestone, labels, onClose }: { milestone: Boa
       <div className="md-tags">
         <LineTag line={milestone.identityId}>{labels[milestone.identityId] ?? milestone.identityId}</LineTag>
         {milestone.projectName && <Tag>{milestone.projectName}</Tag>}
-        <Tag tone={approved ? "ok" : "info"}>{approved ? "已批准" : "草稿"}</Tag>
+        <Tag tone={approved ? "ok" : "info"}>{approved ? "已批准" : "待批准"}</Tag>
       </div>
+
+      <section className="md-risk" aria-label="风险">
+        <h3><RiskGlyph level={level} size={14} />{level ? `风险 ${milestone.risks.length} 项` : "未见明显风险"}
+          <small className="md-sub">{milestone.riskSource === "model" ? "里程碑生成时审查" : "按日期、依赖与标准估算"}</small></h3>
+        <RiskList risks={milestone.risks} gen={milestone.riskSource === "model"} />
+      </section>
 
       <form className="md-row md-title" onSubmit={(event) => { event.preventDefault(); if (title.trim() && title.trim() !== milestone.title) void saveMilestone({ title: title.trim() }); }}>
         <label className="md-key" htmlFor={`md-title-${milestone.id}`}>标题</label>
@@ -70,14 +88,15 @@ export function MilestoneDrawer({ milestone, labels, onClose }: { milestone: Boa
 
       <section className="md-block" aria-label="日期与重要性">
         <div className="md-row"><span className="md-key">截止</span>
-          {approved ? <DateChip label="截止日" value={milestone.deadline} onChange={(value) => void saveGoal({ confirmedDeadline: value })} />
-            : <span className="mono">{milestone.deadline ? md(milestone.deadline) : "未定"}</span>}
+          <DateChip label="截止日" value={milestone.deadline} onChange={(value) => void saveDeadline(value)} />
           {milestone.daysLeft !== undefined && <span className="mono md-sub">{milestone.daysLeft >= 0 ? `剩 ${milestone.daysLeft} 天` : `已过 ${-milestone.daysLeft} 天`}</span>}
           {milestone.confirmedDeadline && <Tag tone="info" title="排程以此日期为硬约束">已确认</Tag>}
         </div>
-        {approved && <div className="md-row"><span className="md-key">重要性</span>
-          <Slider label="重要性" value={weight} onChange={setWeight} onCommit={(value) => value !== milestone.weight && void saveGoal({ weight: value })} />
-        </div>}
+        <div className="md-row"><span className="md-key">重要性</span>
+          <Slider label="重要性" value={weight} preset={milestone.presetWeight} onChange={setWeight}
+            onCommit={(value) => value !== milestone.weight && void saveWeight(value)} />
+          <small className="md-sub">{milestone.ownWeight ? approved ? "本人调整" : "本人调整，批准后生效" : "系统判断，可拖动调整"}</small>
+        </div>
         {milestone.ticks.length > 0 && <TickStrip milestone={milestone} />}
       </section>
 
@@ -106,7 +125,8 @@ export function MilestoneDrawer({ milestone, labels, onClose }: { milestone: Boa
       {milestone.relations.length > 0 && <section className="md-block" aria-label="与其他主线的关系">
         <h3>与其他主线的关系</h3>
         {milestone.relations.map((relation) => <RelationRow key={relation.id} relation={relation} labels={labels} busy={action.busy}
-          onDecide={(decision) => void action.run("保存中…", () => post("/api/milestone-relations/decide", { ids: [relation.id], decision }), "未保存，请重试。")} />)}
+          onDecide={(decision) => void action.run("保存中…", () => post("/api/milestone-relations/decide", { ids: [relation.id], decision }), "未保存，请重试。")}
+          onRemove={relation.artifact && relation.pending ? () => void removeFlow(relation.id) : undefined} />)}
       </section>}
 
       {milestone.retrospective && <Retrospective milestone={milestone} />}
@@ -185,8 +205,10 @@ function CriterionRow({ criterion, busy, onSave }: { criterion: BoardCriterion; 
   </div>;
 }
 
-function RelationRow({ relation, labels, busy, onDecide }: { relation: BoardMilestone["relations"][number]; labels: Record<string, string>; busy: boolean;
-  onDecide: (decision: "approved" | "archived") => void }) {
+function RelationRow({ relation, labels, busy, onDecide, onRemove }: { relation: BoardMilestone["relations"][number]; labels: Record<string, string>; busy: boolean;
+  onDecide: (decision: "approved" | "archived") => void;
+  /** A cross-line artifact on a draft: removed on its own (it is approved together with the downstream milestone otherwise). */
+  onRemove?: (() => void) | undefined }) {
   return <div className="md-relation" data-line={relation.otherLine} data-pending={relation.pending || undefined}>
     <div className="md-relation-head">
       <span className="md-relation-dir" aria-hidden="true">{relation.direction === "out" ? "→" : "←"}</span>
@@ -195,7 +217,12 @@ function RelationRow({ relation, labels, busy, onDecide }: { relation: BoardMile
       <Tag>{relation.kindLabel}</Tag>
       {relation.pending && <Tag tone="info">待审阅</Tag>}
       {relation.warning && <Tag tone="warn">{relation.warning}</Tag>}
+      {relation.broken && <Tag tone="risk" title={relation.broken}>时间顺序不成立</Tag>}
+      {onRemove && <button type="button" className="text-button md-relation-remove" disabled={busy} aria-label={`去掉「${relation.artifact?.title ?? relation.otherTitle}」这条飞轮关系`}
+        onClick={onRemove}>去掉</button>}
     </div>
+    {relation.artifact && <p className="md-artifact"><span className="md-key">{relation.direction === "in" ? "使用" : "供给"}</span>
+      <span className="gen">「{relation.artifact.title}」</span>{relation.transfer && <small className="mono md-sub">{relation.transfer.expected} {relation.transfer.unit}{relation.transfer.metric}</small>}</p>}
     {relation.explanation && <p className="gen">{relation.explanation}</p>}
     {relation.refutedWhen && <p className="md-refuted"><span className="md-key">证伪条件</span><span className="gen">{relation.refutedWhen}</span></p>}
     {relation.pending && <div className="md-actions">

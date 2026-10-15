@@ -1,8 +1,11 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { supplyWarnings, taskProgress, timeOrderProblem, type AccessContext, type SuccessCriterion } from "@crossline/core";
+import {
+  currentRiskReview, FIRST_DRAFTS_SETTING, firstDraftsState, MILESTONE_RISKS_SETTING, milestoneRiskFingerprint, parseMilestoneRisks, riskCriteriaKeys,
+  ruleMilestoneRisks, supplyWarnings, taskProgress, timeOrderProblem, type AccessContext, type MilestoneRisk, type SuccessCriterion
+} from "@crossline/core";
 import { readStoredArtifactPlan } from "@crossline/db";
-import { getStore, loadCurrentPlan, milestonesRetiredBySystem, planToday, readGoalSettings, relationKindLabel } from "./crossline";
+import { effectiveWeight, getStore, importancePresets, loadCurrentPlan, loadGoalForecast, milestonesRetiredBySystem, planToday, readGoalSettings, relationKindLabel, saveGoalSettings } from "./crossline";
 import { listCourseTargets } from "./targets";
 import { identityLines } from "./lines";
 
@@ -29,7 +32,14 @@ export type BoardMilestone = {
   version: number; deadline?: string; daysLeft?: number; dependsOn: string[]; rationale?: string;
   criteria: BoardCriterion[]; successCriteria: SuccessCriterion[]; templateId?: string;
   tasks: Array<{ id: string; intent: string; state: string; progress: number | null; steps: Array<{ id: string; title: string; status: string; tick: string }> }>;
-  ticks: BoardTick[]; relations: BoardRelation[]; weight: number; confirmedDeadline: string | null;
+  ticks: BoardTick[]; relations: BoardRelation[]; confirmedDeadline: string | null;
+  /**
+   * Importance as the scheduler uses it (`effectiveWeight`): judged by the system (`presetWeight`, from the line's standing, its relations,
+   * what is graded and how near it is) until the person moves the slider on this milestone (`ownWeight`).
+   */
+  weight: number; presetWeight: number; ownWeight: boolean;
+  /** What could keep it from being reached: the reviewer's answer for this version (`model`), else the deterministic estimate (`rules`). */
+  risks: MilestoneRisk[]; riskSource: "model" | "rules";
   retrospective?: { tasks: number; workedMinutes: number; reused: number; readings: Array<{ statement: string; observed: string }>;
     /** What the person recorded about it, once they have; it goes into the ledger and from there into their preferences. */
     note?: string };
@@ -37,6 +47,8 @@ export type BoardMilestone = {
 export type BoardCourse = { projectId: string; identityId: string; name: string; value: string; why: string; proposed: boolean; endDay?: string };
 export type MilestoneBoard = {
   today: string; milestones: BoardMilestone[]; courses: BoardCourse[]; labels: Record<string, string>; lineOrder: string[];
+  /** With no milestone yet: whether the worker is designing the first drafts on its own, or that run ended without any. */
+  firstDrafts?: "none" | "running" | "stalled";
   stats: { ticksDone: number; ticksPlanned: number; reuse: number; nearest?: { id: string; title: string; line: string; days: number } };
 };
 
@@ -87,6 +99,12 @@ export async function loadMilestoneBoard(ctx: AccessContext): Promise<MilestoneB
   const labels = Object.fromEntries(identityLines(ctx).map((pack) => [pack.id, pack.label]));
   const artifacts = new Map(readStoredArtifactPlan(store, ctx.workspaceId).artifacts.map((artifact) => [artifact.id, artifact]));
   const deadlineOf = new Map(milestones.map((milestone) => [milestone.id, readGoalSettings(ctx, milestone.id)?.confirmedDeadline ?? anchors.get(milestone.id)?.deadline]));
+  const presets = importancePresets(ctx);
+  const draftWeights = readDraftWeights(ctx);
+  const storedRisks = parseMilestoneRisks(store.getSetting(ctx.workspaceId, MILESTONE_RISKS_SETTING));
+  // The forecast's room before each approved milestone's deadline, for the rule estimate; the page still draws without it.
+  let slack = new Map<string, number | null>();
+  try { slack = new Map(loadGoalForecast(ctx).goals.map((goal) => [goal.milestoneId, goal.p85Minutes > 0 ? goal.slackDays : null])); } catch { /* no forecast */ }
 
   const board: BoardMilestone[] = milestones.map((milestone) => {
     const anchor = anchors.get(milestone.id);
@@ -145,7 +163,21 @@ export async function loadMilestoneBoard(ctx: AccessContext): Promise<MilestoneB
         progress: plan ? taskProgress(plan.steps) : order.state === "accepted" ? 1 : null,
         steps: (plan?.steps ?? []).map((step) => ({ id: step.id, title: step.title, status: step.status, tick: step.tickOutcome })) }; }),
       ticks, relations: relationRows,
-      weight: goal?.weight ?? (goal?.importance === "important" ? 75 : 50), confirmedDeadline: goal?.confirmedDeadline ?? null,
+      ...(() => {
+        const presetWeight = presets.get(milestone.id)?.weight ?? 50;
+        const dependsOn = anchor?.dependsOn ?? [];
+        const fingerprint = milestoneRiskFingerprint({ title: milestone.title, deadline: deadline ?? null, criteria: riskCriteriaKeys(milestone.successCriteria), dependsOn });
+        const reviewed = currentRiskReview(storedRisks[milestone.id], fingerprint);
+        const draftWeight = milestone.status === "draft" ? draftWeights[milestone.id] : undefined;
+        return { presetWeight, weight: milestone.status === "approved" ? effectiveWeight(ctx, milestone.id) : draftWeight ?? presetWeight,
+          ownWeight: milestone.status === "approved" ? typeof goal?.weight === "number" : draftWeight !== undefined,
+          risks: reviewed ?? ruleMilestoneRisks({ today, deadline: deadline ?? null, criteria: milestone.successCriteria,
+            dependsOn: dependsOn.flatMap((id) => byId.get(id) ? [{ title: byId.get(id)!.title, deadline: deadlineOf.get(id) ?? null }] : []),
+            otherDeadlines: milestones.filter((other) => other.id !== milestone.id && deadlineOf.get(other.id)).map((other) => deadlineOf.get(other.id)!),
+            slackDays: slack.get(milestone.id) ?? null }),
+          riskSource: reviewed ? "model" as const : "rules" as const };
+      })(),
+      confirmedDeadline: goal?.confirmedDeadline ?? null,
       ...(achieved ? { retrospective: { tasks: own.length, workedMinutes: worked,
         reused: relationRows.filter((relation) => relation.direction === "out" && !relation.pending).length,
         readings: criteria.map((criterion) => ({ statement: criterion.statement, observed: criterion.observed ?? "" })),
@@ -163,6 +195,7 @@ export async function loadMilestoneBoard(ctx: AccessContext): Promise<MilestoneB
     .sort((a, b) => a.daysLeft! - b.daysLeft!)[0];
   return {
     today, milestones: board, courses, labels, lineOrder: Object.keys(labels),
+    firstDrafts: firstDraftsState(getStore().getSetting(ctx.workspaceId, FIRST_DRAFTS_SETTING), board.length > 0),
     stats: {
       ticksDone: allTicks.filter((tick) => tick.state === "done" && tick.day && tick.day >= weekStart && tick.day <= today).length,
       ticksPlanned: allTicks.filter((tick) => tick.day && tick.day >= weekStart && tick.day < weekEnd).length,
@@ -189,4 +222,57 @@ export async function recordRetrospective(ctx: AccessContext, milestoneId: strin
   if (text) getStore().addPreference({ workspaceId: ctx.workspaceId, source: "retrospective", scope: milestone.identityId, weight: 1, refId: milestoneId,
     text: `里程碑「${milestone.title}」回顾：${text}` });
   return { ok: true };
+}
+
+/** The importance the person set on a draft (`Record<milestoneId, 0–100>`), held until approval moves it into the goal settings. */
+export const DRAFT_WEIGHTS_SETTING = "milestones.draftWeights";
+
+function readDraftWeights(ctx: AccessContext): Record<string, number> {
+  try {
+    const value = JSON.parse(getStore().getSetting(ctx.workspaceId, DRAFT_WEIGHTS_SETTING) ?? "{}") as Record<string, unknown>;
+    return Object.fromEntries(Object.entries(value ?? {}).filter((entry): entry is [string, number] => typeof entry[1] === "number"));
+  } catch { return {}; }
+}
+
+/**
+ * A draft edited before approval: its proposed deadline (the anchor's date) and its importance. An approved milestone's deadline and
+ * weight are its goal settings (`/api/goals/[id]`), which the scheduler reads as the person's word; a draft is not scheduled yet, so its
+ * date is the proposal itself and its weight waits beside it (`DRAFT_WEIGHTS_SETTING`) until `applyDraftWeight` runs on approval.
+ */
+export function saveDraftSettings(ctx: AccessContext, milestoneId: string, input: { deadline?: unknown; weight?: unknown }): { ok: true } | { ok: false; code: string } {
+  const store = getStore();
+  const draft = store.listMilestones(ctx.workspaceId).find((item) => item.id === milestoneId && item.status === "draft");
+  if (!draft) return { ok: false, code: "MILESTONE_NOT_DRAFT" };
+  if (input.deadline === undefined && input.weight === undefined) return { ok: false, code: "MILESTONE_DRAFT_NOTHING_TO_SAVE" };
+  const day = input.deadline;
+  if (day !== undefined && (typeof day !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(day) || Number.isNaN(Date.parse(`${day}T00:00:00Z`))
+    || new Date(`${day}T00:00:00Z`).toISOString().slice(0, 10) !== day)) return { ok: false, code: "MILESTONE_DATE_INVALID" };
+  if (input.weight !== undefined && (typeof input.weight !== "number" || !Number.isFinite(input.weight))) return { ok: false, code: "MILESTONE_WEIGHT_INVALID" };
+  if (typeof input.weight === "number") {
+    const weights = readDraftWeights(ctx);
+    weights[milestoneId] = Math.max(0, Math.min(100, Math.round(input.weight)));
+    store.setSetting(ctx.workspaceId, DRAFT_WEIGHTS_SETTING, JSON.stringify(weights));
+  }
+  const anchor = store.listMilestoneAnchors(ctx.workspaceId).find((item) => item.milestoneId === milestoneId);
+  if (typeof day === "string" && anchor?.deadline !== day) {
+    store.saveMilestoneAnchor({ workspaceId: ctx.workspaceId, milestoneId, stage: anchor?.stage ?? 1, deadline: day, baseline: anchor?.baseline ?? "",
+      target: anchor?.target ?? "", stakeholders: anchor?.stakeholders ?? [], sourceFactIds: anchor?.sourceFactIds ?? [], dependsOn: anchor?.dependsOn ?? [],
+      updatedAt: new Date().toISOString() });
+  }
+  store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, type: "milestone.revised", entityId: milestoneId,
+    idempotencyKey: `milestone:draft-settings:${milestoneId}:${randomUUID()}`,
+    payload: { ...(typeof day === "string" ? { deadline: { previous: anchor?.deadline ?? null, next: day } } : {}),
+      ...(typeof input.weight === "number" ? { weight: Math.max(0, Math.min(100, Math.round(input.weight))) } : {}) } });
+  return { ok: true };
+}
+
+/** On approval: the weight set on the draft becomes the milestone's goal setting (so the slider's preset history records it too). */
+export function applyDraftWeight(ctx: AccessContext, milestoneId: string): void {
+  const weights = readDraftWeights(ctx);
+  const weight = weights[milestoneId];
+  if (weight === undefined) return;
+  if (saveGoalSettings(ctx, milestoneId, { weight }).ok) {
+    delete weights[milestoneId];
+    getStore().setSetting(ctx.workspaceId, DRAFT_WEIGHTS_SETTING, JSON.stringify(weights));
+  }
 }

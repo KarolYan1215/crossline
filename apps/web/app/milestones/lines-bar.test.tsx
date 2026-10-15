@@ -34,3 +34,13 @@ test("a line with candidates and no chosen attributes says how many wait; one wi
   expect(renderToStaticMarkup(<LinesBar palette={{}} lines={[line({ goalParts: [], goals: [] })]} />)).toContain("2 个定语候选待选 →");
   expect(renderToStaticMarkup(<LinesBar palette={{}} lines={[line({ goalParts: [], goals: [], attributes: [] })]} />)).toContain("设定长期目标 →");
 });
+
+test("every line sits in one row: a hard constraint is a tag, not a row of its own, and each attribute is its own box", () => {
+  const html = renderToStaticMarkup(<LinesBar palette={{}} lines={[line(), line({ id: "media", label: "创作者", hard: false, rank: null,
+    goalParts: ["有影响力", "科普", "稳定更新"], goals: ["成为有影响力的、科普的、稳定更新的创作者"] })]} />);
+  expect(html.match(/class="lines-bar-row"/g)).toHaveLength(1);
+  expect(html.match(/class="tag">硬约束</g)).toHaveLength(1);
+  expect(html).not.toContain("<h3>平行");
+  expect(html).toContain('aria-label="成为有影响力的、科普的、稳定更新的创作者"');
+  expect([...html.matchAll(/class="lb-attr gen" data-i="(\d)"/g)].map((match) => match[1])).toEqual(["0", "1", "0", "1", "2"]);
+});

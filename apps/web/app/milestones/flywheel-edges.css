@@ -4,10 +4,11 @@
 :root[data-theme="dark"]{--broken:#FF8A80;--broken-ink:#FF8A80}
 
 /* An edge whose upstream is now due too late for the downstream milestone: red, broken. */
-.mt-relation[data-broken]{stroke:var(--broken);stroke-dasharray:7 3 1 3;animation:none;opacity:1}
+.mt-edge .mt-relation[data-broken]{stroke:var(--broken);stroke-dasharray:7 3 1 3;animation:none;opacity:1}
 .mt-key[data-k="broken"]{width:22px;height:0;border-width:2px 0 0;border-radius:0;border-style:dashed;border-color:var(--broken)}
 
-.mt-flow{position:absolute;z-index:3;transform:translateX(-50%)}
+/* Placed by `placeEdgeLabels` (left/top are the chip's own corner), only while its relation is hovered. */
+.mt-flow{position:absolute;z-index:3}
 .mt[data-hover] .mt-flow:not([data-hot]){opacity:.18}
 .mt-flow-chip{all:unset;box-sizing:border-box;display:inline-block;min-height:24px;padding:2px 6px;font-size:12px;line-height:18px;cursor:pointer;
   color:var(--ink);background:var(--paper);border:1px solid var(--lc,var(--ink));white-space:nowrap}
@@ -21,12 +22,3 @@
 .mt-flow-card dd{margin:0;min-width:0;overflow-wrap:anywhere}
 .mt-flow-card small{font-size:12px;color:var(--graphite)}
 .mt-flow-broken{margin:0;color:var(--broken-ink);font-size:13px}
-
-/* The artifacts a draft uses and supplies, each removable on its own. */
-.mt-draft-line ul.mt-draft-flows{margin:2px 0 4px calc(3.2em + 12px);gap:2px}
-.mt-draft-flows li{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;padding:2px 4px;font-size:13px;border-left:3px solid var(--lc,var(--mist))}
-.mt-draft-flows li[data-broken]{border-left-color:var(--broken)}
-.mt-draft-flows li small{font-size:12px;color:var(--graphite)}
-.mt-draft-flow-dir{font-size:12px;color:var(--graphite)}
-.mt-draft-line .mt-draft-flows li button.ui-icon-button{all:revert;min-width:24px;min-height:24px;margin-left:auto;font-size:14px;cursor:pointer;
-  background:transparent;border:1px solid var(--mist);color:var(--ink)}

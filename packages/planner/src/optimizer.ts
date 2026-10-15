@@ -94,7 +94,10 @@ export function invalidBlocks(blocks: ScheduleBlock[], slots: Slot[], input: Pla
     const block = sorted[i]!;
     const start = Date.parse(block.start), end = Date.parse(block.end);
     if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return `empty_block:${block.taskId}`;
-    if (i && start < Date.parse(sorted[i - 1]!.end)) return `overlap:${sorted[i - 1]!.taskId}/${block.taskId}`;
+    // Two frozen blocks on each other are the person's to settle (a held block is asked about, never moved), not this solve's: they
+    // must not make every answer invalid. Anything this solve placed still may not touch any other block.
+    const clash = sorted.slice(0, i).find((other) => start < Date.parse(other.end) && !(block.frozen && other.frozen));
+    if (clash) return `overlap:${clash.taskId}/${block.taskId}`;
     if (i && !block.frozen && !sorted[i - 1]!.frozen &&
       start < Date.parse(sorted[i - 1]!.end) + gap * 60_000) return `gap:${sorted[i - 1]!.taskId}/${block.taskId}`;
     if (block.frozen) continue;
@@ -573,14 +576,17 @@ async function schedule(input: PlanningInput, options: SolveOptions): Promise<Pl
   // The deadline buffer: work is aimed to finish this many days early, only where that day is still ahead. The relaxed run below
   // uses the real deadlines, so a buffer never makes a deadline impossible.
   const params = paramsFor(input);
-  const buffered = params.deadlineBufferDays ? { ...eligible, tasks: eligible.tasks.map((task) => {
-    if (!task.deadline) return task;
-    const early = Date.parse(task.deadline) - params.deadlineBufferDays * 86_400_000;
+  // A milestone with a risk on record adds its own days (`riskBufferDays`) to the person's buffer, under the same rule.
+  const bufferOf = (task: PlannerTask) => params.deadlineBufferDays + Math.max(0, task.riskBufferDays ?? 0);
+  const anyBuffer = eligible.tasks.some((task) => task.deadline && bufferOf(task) > 0);
+  const buffered = anyBuffer ? { ...eligible, tasks: eligible.tasks.map((task) => {
+    if (!task.deadline || !bufferOf(task)) return task;
+    const early = Date.parse(task.deadline) - bufferOf(task) * 86_400_000;
     return early > input.now.getTime() ? { ...task, deadline: new Date(early).toISOString() } : task;
   }) } : eligible;
   const first = await optimize(buffered, false, options.solver !== "none", options);
   let result = first;
-  const relaxable = params.gapMinutes > 0 || params.maxDailyShare < 1 || params.deadlineBufferDays > 0;
+  const relaxable = params.gapMinutes > 0 || params.maxDailyShare < 1 || anyBuffer;
   if (relaxable && first.blockers.some((blocker) => eligible.tasks.some((task) =>
     task.id === blocker.taskId && task.deadline))) {
     // The relaxation is for the work with a deadline only (and what it waits on): that is placed first without the gap and the daily
