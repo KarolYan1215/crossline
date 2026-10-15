@@ -14,7 +14,12 @@ pnpm exec tsx scripts/assess-templates.ts placeholders
 
 ## 本人审定流程
 
-1. 在环境里设置硅基流动的 key（只放在本机环境变量或部署平台的密钥里，不要写进仓库）：
+1. 两种画法，二选一：
+   - **本机 Codex（推荐，用本人的 ChatGPT 画图额度）**：不需要 key，加 `--via=codex`；可以同时开几个进程分摊，每个用不同的 `--port`：
+     ```powershell
+     pnpm exec tsx scripts/assess-templates.ts candidates --via=codex --port=3397
+     ```
+   - **硅基流动**：在环境里设置硅基流动的 key（只放在本机环境变量或部署平台的密钥里，不要写进仓库）：
    ```powershell
    $env:ASSESS_IMAGE_API_KEY = "sk-..."
    ```
@@ -25,19 +30,20 @@ pnpm exec tsx scripts/assess-templates.ts placeholders
    pnpm exec tsx scripts/assess-templates.ts candidates            # 全部 16 种
    pnpm exec tsx scripts/assess-templates.ts candidates GEMA SEMP  # 只画这两种
    ```
-4. 本人逐张看候选图，按这几条挑：
+4. 生成总览图 `candidates/sheet.png`（每种类型一行，按海报里的圆盘裁好）：`pnpm exec tsx scripts/assess-templates.ts sheet`。本人逐张看候选图，按这几条挑：
    - 16 张放在一起像同一个系列（同一画风、同样的线条和比例）；
    - **不像 16Personalities 的人物**（他们是低多边形、切面上色；我们是平涂 + 墨线）；
    - 图里没有任何文字、字母、数字或标志；
    - 脸和发型是中性的，戴不戴眼镜都能改，方便之后按外貌改图；
-   - 服装颜色是组别色，道具和类型名对得上。
-   都不满意就改 `scripts/assess-templates.ts` 里的 `ROLES` 或风格句，再加 `--force` 重画。
+   - 服装颜色是组别色，道具和类型名对得上；
+   - 一眼能看出副标题说的那个缺点（笑点），缩到海报圆盘大小也认得出。
+   都不满意就改 `scripts/assess-templates.ts` 里的 `LOOKS`（核心特征、服装、道具、笑点、姿态、表情，设计依据见 docs/beta-launch.md §4.2）或风格句，再加 `--force` 重画。
 5. 把选中的候选复制成正式模板：
    ```powershell
    pnpm exec tsx scripts/assess-templates.ts pick GEMA=2 SEMP=1 SERP=3
    ```
-   会覆盖 `<CODE>.png` 并更新 `manifest.json`。
-6. 提交 `<CODE>.png` 和 `manifest.json`。`candidates/` 可以不提交（落选的图没有用）。
+   会覆盖 `<CODE>.png` 并更新 `manifest.json`。定稿时会铺上组别底色、缩到 1024×1024：ChatGPT 画出来的是透明底，透明的参考图交给改图模型会变成黑底。
+6. 提交 `<CODE>.png` 和 `manifest.json`。`candidates/` 不进仓库（已写进 .gitignore，48 张约 70 MB）。
 
 ## 部署时怎么带上模板
 

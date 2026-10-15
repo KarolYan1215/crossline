@@ -189,6 +189,31 @@
 
 **实现位置**：`apps/assess/server/avatar/`（`provider.ts` 接口、`prompt.ts` 提示词和填空处理、`queue.ts`、`budget.ts`、`templates.ts`、`placeholder.ts`）、`apps/assess/app/api/avatar/[file]/route.ts`、`scripts/assess-templates.ts`；模板与审定流程见 `apps/assess/templates/README.md`。
 
+### 4.2 16 个基础角色怎么设计（2026-10-14）
+
+本人要求：抽出每种类型的核心特征，体现在外貌上，参考 MBTI 和 SBTI。两者都只取做法，不照搬形象：
+
+- **16Personalities 的做法**：每种类型一身「角色服装 + 招牌道具」，同组共用一套颜色。角色由 Zeda Labs 绘制，作品集按 Sentinels、Analysts 等分组整理，说明颜色体系以组为单位（[Zeda Labs 作品集](https://dribbble.com/zedalabs/projects/240402-16-Personalities)）。虚拟角色研究发现，服装（颜色、款式、类型）比动作更能细致地改变观者对角色性格的判断（[MDPI 2024，服装对虚拟角色性格感知的影响](https://payment.mdpi.com/2813-2084/3/1/2)）。所以性格主要靠服装和道具表达。
+- **SBTI 的做法**：B 站 UP 主做的恶搞版人格测试，27 种类型全是自嘲式网络梗标签，结果配可分享的形象卡片，靠「被说中缺点」传播（[ai-bot.cn 介绍](https://ai-bot.cn/sbti-test/)、[星岛报道](https://www.stheadline.com/zh-hans/lifetips/3560918/MBTI已经过时内地搞笑版人格测试SBTI爆红-27种自嘲式人格-背后藏暖心理由)、[香港01 报道](https://global.hk01.com/数码生活/60340864/sbti人格测试爆红-恶搞版mbti测出荒诞标签-网-imsb是在骂我)）。所以每个角色要把副标题里的缺点**演出来**。
+
+于是每个角色由五部分组成（`scripts/assess-templates.ts` 的 `LOOKS`）：
+1. **核心特征**：一句话，取自类型名和简介；
+2. **服装 + 招牌道具**：表现长处（钟表匠的放大镜和镊子、改装师的胶带与扳手）；
+3. **一个自嘲笑点**：把副标题的缺点画出来（试验家口袋里拖到画外的实验记录、旗手腋下一片空白的日程本、探险家每个口袋都插着地图和票）；
+4. **姿态**：四个字母各对应一种身体语言——S 收拢专注、G 敞开且挂满东西；E 在测量和记录、I 抬头、有灵光；M 手里有工具、R 张嘴比划；P 扣好扣子、左右对称、A 松散、在动；
+5. **表情**：随类型变化，不再统一「冷静自信」。
+
+几条不变的规矩：
+- 同组共用组别色和底色；
+- 半身构图，满底色，内容都在中心圆里，因为海报会把图裁成圆；
+- 发型简单中性，不戴眼镜，个人外貌之后再按描述改；
+- 图里没有任何文字，纸和屏幕上只有空白或抽象线条；
+- 画风是平涂加墨线，不用 16Personalities 的低多边形和切面上色。
+
+每种类型出 3 张候选：一张按描述画，一张换更有动感的姿势和角度，一张把笑点再夸张一点。
+
+候选图走本机的 Codex（本人自己的 ChatGPT 画图额度，`--via=codex`），路径和画像形象相同（Skill `crossline-portrait-illustrator`）。只用来画这 16 张模板。每个用户的个人形象仍然走硅基流动，理由见对话记录：公网服务器上不放本人的 ChatGPT 登录，个人订阅也不用来对外服务。
+
 ## 5. 托管内测
 - **服务器**：香港或东京的 Linux 云主机（约 10–30 美元 / 月），HTTPS，非 .cn 域名。
 - **公网前提**：要先满足 `docs/external-deployment.md` 列出的解禁条件，例如安全头、频率限制、注册与邀请码、备份。

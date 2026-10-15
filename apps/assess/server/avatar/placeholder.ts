@@ -48,9 +48,11 @@ export function placeholderSvg(code: string): string {
 
 /** The placeholder as a 1024×1024 PNG. */
 export function renderPlaceholder(code: string): Buffer {
-  const resvg = new Resvg(placeholderSvg(code), {
-    fitTo: { mode: "width", value: 1024 },
-    font: { loadSystemFonts: true, defaultFontFamily: "Microsoft YaHei" }
-  });
+  return renderSvg(placeholderSvg(code), 1024);
+}
+
+/** Any SVG as a PNG of the given width, with the system's fonts (also used by scripts/assess-templates.ts, outside this package). */
+export function renderSvg(svg: string, width: number): Buffer {
+  const resvg = new Resvg(svg, { fitTo: { mode: "width", value: width }, font: { loadSystemFonts: true, defaultFontFamily: "Microsoft YaHei" } });
   return Buffer.from(resvg.render().asPng());
 }

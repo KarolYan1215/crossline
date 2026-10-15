@@ -35,3 +35,4 @@ apps/web/public/sw.js.map
 # The migration runner's forced pre-migration backup. Named after the database it copied, so it slips
 # past the `*.db` patterns above — thirteen of them reached a commit before this line existed.
 *.bak
+apps/assess/templates/candidates/
