@@ -1,11 +1,11 @@
 import {
   ARCHETYPES, AVAILABILITY_PROPOSED_SETTING, aiToolBrief, AVAILABILITY_SETTING, resolveAvailability, VALIDATION_REVIEW_SCHEMA, archetypeBrief, archetypeById, stepPlanSchema, goalSettingKey,
-  normalizeStepPlan, relevantDocuments, STEP_ANSWER_SLOT, stepAnswerSlot, stepPlanWarnings, unverifiedUnits, validateStepPlanShape, validateValidationReview, weeklyAvailableHours,
+  normalizeStepPlan, readableFromMaterial, relevantDocuments, STEP_ANSWER_SLOT, stepAnswerSlot, stepPlanWarnings, unverifiedUnits, validateStepPlanShape, validateValidationReview, weeklyAvailableHours,
   PROGRESS_ASSESSMENT_SCHEMA, validateProgressAssessment, type ProgressAssessment, type StepPlan, type StepWarning, type ValidationReview,
   FINER_SPLIT_FEEDBACK, stepsNeedingFinerSplit, type FinerSplit, type StepTrouble
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
-import { aiToolsFor, listAgentTasks, projectAgentOutputs, type CrosslineStore, type StoredWorkOrder } from "@crossline/db";
+import { aiToolsFor, assistantAvailable, listAgentTasks, projectAgentOutputs, type CrosslineStore, type StoredWorkOrder } from "@crossline/db";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { learnedArchetypes } from "./archetype-curator";
 import { ownerOf } from "./owner";
@@ -18,7 +18,7 @@ const JUDGE = "crossline:crossline-progress-judge";
 /** States in which a task is committed and its steps get time on the calendar. */
 const PLANNABLE = ["approved", "preparing", "ready_for_human", "active"];
 const day = (iso: string) => iso.slice(0, 10);
-const AUTO_FIXED = new Set(["STEP_SHARE_NORMALIZED", "STEP_SHARE_MISSING", "STEP_ESTIMATE_MISSING", "STEP_DEPENDENCY_UNKNOWN", "STEP_TRIVIAL_TO_AGENT"]);
+const AUTO_FIXED = new Set(["STEP_SHARE_NORMALIZED", "STEP_SHARE_MISSING", "STEP_ESTIMATE_MISSING", "STEP_DEPENDENCY_UNKNOWN", "STEP_TRIVIAL_TO_AGENT", "STEP_NO_ASSISTANT"]);
 const MATERIAL_TEXT_PER_DOC = 16_000, MATERIAL_TEXT_TOTAL = 48_000;
 
 /**
@@ -97,20 +97,24 @@ export function taskWindow(store: CrosslineStore, workspaceId: string, order: St
  * be planned again (`task.steps_replan_requested` after the last plan). Two per tick: the migration of every open task happens over a few
  * ticks instead of one long one. A replan the person asked for comes first, then the most recently changed — a task just approved is
  * planned in this pass, not after every older task (decided 2026-10-14: a new task used to wait behind the backlog for up to two ticks).
+ * A proposal still waiting for the person is planned too, and before everything else (decided 2026-10-15): the person approves the steps
+ * they will do, not a title and a duration, and the proposal is not listed for them until its steps exist (`proposalReady`).
  */
 export function tasksAwaitingStepPlan(store: CrosslineStore, workspaceId: string, limit = 2): string[] {
   const capacity = new Set(defaultIdentityPacks().filter((pack) => pack.kind === "capacity").map((pack) => pack.id));
   const plans = new Map(store.listStepPlans(workspaceId).map((plan) => [plan.workOrderId, plan.plannedAt]));
   const replan = new Map<string, string>();
   for (const event of store.listEvents(workspaceId, { type: "task.steps_replan_requested" })) replan.set(event.entityId, event.createdAt);
+  const proposal = (order: StoredWorkOrder) => Number(order.state === "awaiting_plan_approval");
   return store.listWorkOrders(workspaceId)
-    .filter((order) => PLANNABLE.includes(order.state) && !capacity.has(order.identityId) && !(order.payload as { seeded?: boolean } | undefined)?.seeded)
+    .filter((order) => (PLANNABLE.includes(order.state) || order.state === "awaiting_plan_approval") && !capacity.has(order.identityId)
+      && !(order.payload as { seeded?: boolean } | undefined)?.seeded)
     .filter((order) => !plans.has(order.id) || (replan.get(order.id) ?? "") > plans.get(order.id)!)
     // A plan that failed for a reason of its own is not retried every tick; a request to replan (or a new day) does.
     .filter((order) => !store.listEvents(workspaceId, { type: "task.steps_blocked", entityId: order.id })
       .some((event) => event.createdAt > (replan.get(order.id) ?? "") && day(event.createdAt) === day(new Date().toISOString())))
     .reverse()
-    .sort((a, b) => Number(plans.has(b.id)) - Number(plans.has(a.id)))
+    .sort((a, b) => proposal(b) - proposal(a) || Number(plans.has(b.id)) - Number(plans.has(a.id)))
     .slice(0, limit).map((order) => order.id);
 }
 
@@ -200,7 +204,7 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
     const client = getClient();
     if (!client) return { state: "blocked", code: "CODEX_SUPERVISOR_UNAVAILABLE", message: "Codex 运行时不可用" };
     const payload = (order.payload ?? {}) as { humanCore?: Array<{ intent: string }>; automationParts?: Array<{ intent: string }>;
-      evidenceContract?: Array<{ description: string }>; materialContract?: Array<{ description: string }> };
+      evidenceContract?: Array<{ description: string }>; materialContract?: Array<{ description: string }>; infoRequests?: unknown[] };
     const milestone = store.listMilestones(workspaceId).filter((item) => item.id === order.milestoneId).at(-1);
     const project = store.listProjects(workspaceId, { includeArchived: true }).find((item) => item.id === order.projectId);
     const window = taskWindow(store, workspaceId, order);
@@ -219,7 +223,9 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
       task: { intent: order.intent, line: order.identityId, project: project?.name ?? "", riskTier: order.riskTier,
         personsPart: (payload.humanCore ?? []).map((part) => part.intent), systemMayPrepare: (payload.automationParts ?? []).map((part) => part.intent),
         mustDeliver: (payload.evidenceContract ?? []).map((item) => item.description), needs: (payload.materialContract ?? []).map((item) => item.description),
-        currentEstimate: order.estimate },
+        currentEstimate: order.estimate,
+        // Facts to get from someone before the work (folded in by the backplanner or the daily merge): each is a drafted email and a send.
+        getFirst: payload.infoRequests ?? [] },
       milestone: milestone ? { title: milestone.title, criteria: milestone.successCriteria.map((item) => item.statement) } : null,
       window,
       // The task's own material in full: units are read from it and cite it; a quantity is never assumed when it can be counted here.
@@ -273,7 +279,7 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
         payload: { code: result.blocker.code, message: result.blocker.message.slice(0, 300) } });
       return { state: "blocked", code: result.blocker.code, message: result.blocker.message };
     }
-    const { plan: shapedPlan, warnings: fixed } = normalizeStepPlan(result.output, tools.map((tool) => tool.name));
+    const { plan: shapedPlan, warnings: fixed } = normalizeStepPlan(result.output, tools.map((tool) => tool.name), { assistant: assistantAvailable(store, workspaceId) });
     const normalized = result.output.importance ? { ...shapedPlan, importance: result.output.importance } : shapedPlan;
     // Steps must not start before the window or end after it: clamp, the reviewer sees the warning.
     // What normalization already fixed (rescaled shares, a missing estimate filled in, an unknown dependency dropped) needs no judgement;
@@ -283,6 +289,8 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
     // Only an important task's questions go to the person; a minor task's are settled as assumptions the next plan reads (and the
     // person can still correct on the task), so they never become a decision to make.
     if (!research && !importantByRule(store, workspaceId, order) && !result.output.importance?.longTerm) assumeAnswers(store, workspaceId, order, normalized.questions);
+    // What the task's own files settle (the problem set, how it is handed in, the AI rule) is read from them, not asked.
+    else assumeAnswers(store, workspaceId, order, materialQuestions(store, workspaceId, order, normalized.questions), true);
     if (warnings.length) store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId,
       idempotencyKey: `validation.warned:task_steps:${workOrderId}:${saved.version}`, type: "validation.warned", entityId: workOrderId,
       payload: { subject: "task_steps", version: saved.version, warnings, revised: Boolean(feedback) } });
@@ -299,20 +307,34 @@ export function settleOldQuestions(store: CrosslineStore, workspaceId: string): 
   const settled: string[] = [];
   for (const plan of store.listStepPlans(workspaceId)) {
     const order = orders.get(plan.workOrderId);
-    if (!order || plan.importance || !plan.questions.length || importantByRule(store, workspaceId, order)) continue;
+    if (!order || !plan.questions.length) continue;
+    const readable = materialQuestions(store, workspaceId, order, plan.questions);
+    if (readable.length) assumeAnswers(store, workspaceId, order, readable, true);
+    if (plan.importance || importantByRule(store, workspaceId, order)) { if (readable.length) settled.push(plan.workOrderId); continue; }
     assumeAnswers(store, workspaceId, order, plan.questions);
     settled.push(plan.workOrderId);
   }
   return settled;
 }
 
-/** Records each question's first option as an assumption under the question's answer slot: `假设：【question】option`. */
-function assumeAnswers(store: CrosslineStore, workspaceId: string, order: { identityId: string; projectId: string }, questions: StepPlan["questions"]): void {
+/** The questions the task's own files answer (`readableFromMaterial`), when the task's project has files at all. */
+function materialQuestions(store: CrosslineStore, workspaceId: string, order: { projectId: string }, questions: StepPlan["questions"]): StepPlan["questions"] {
+  const readable = questions.filter((question) => readableFromMaterial(question.text));
+  return readable.length && order.projectId && store.listSourceDocuments(workspaceId).some((doc) => doc.projectId === order.projectId) ? readable : [];
+}
+
+/**
+ * Records each question's first option as an assumption under the question's answer slot: `假设：【question】option`. One the files
+ * answer says so: the files rule, the option only where they say nothing.
+ */
+function assumeAnswers(store: CrosslineStore, workspaceId: string, order: { identityId: string; projectId: string }, questions: StepPlan["questions"],
+  fromMaterial = false): void {
   const answered = new Set(store.listProfileFacts(workspaceId).filter((fact) => fact.slot.startsWith(STEP_ANSWER_SLOT)).map((fact) => `${fact.projectId}|${fact.slot}`));
   for (const question of questions) {
     const slot = stepAnswerSlot(question.text);
-    if (answered.has(`${order.projectId}|${slot}`) || !question.options[0]) continue;
-    store.upsertProfileFact({ workspaceId, identityId: order.identityId, projectId: order.projectId, slot, value: `假设：【${question.text}】${question.options[0]}`,
+    if (answered.has(`${order.projectId}|${slot}`) || (!question.options[0] && !fromMaterial)) continue;
+    const value = fromMaterial ? `假设：【${question.text}】以任务材料为准${question.options[0] ? `；材料未写明时按「${question.options[0]}」` : ""}` : `假设：【${question.text}】${question.options[0]}`;
+    store.upsertProfileFact({ workspaceId, identityId: order.identityId, projectId: order.projectId, slot, value,
       status: "inferred", sourceRef: "", sourceQuote: "", updatedAt: new Date().toISOString() });
   }
 }

@@ -1,4 +1,4 @@
-import { validateCommandEnvelope } from "@crossline/core";
+import { readCompletionOutcome, validateCommandEnvelope } from "@crossline/core";
 import {
   addCapturedTaskWithId, completeWorkOrderExecution, pauseWorkOrderExecution,
   resumeWorkOrderExecution, startWorkOrderExecution, type ExecutionResult
@@ -24,7 +24,7 @@ const workOrderCommands: Record<string, (ctx: Parameters<typeof startWorkOrderEx
     const evidence = readEvidence(payload.evidence);
     const checklistAnswers = readChecklistAnswers(payload.checklistAnswers);
     if (!evidence || !checklistAnswers) return { ok: false, code: "INVALID_EVIDENCE_CLAIM" };
-    return completeWorkOrderExecution(ctx, String(payload.workOrderId ?? ""), evidence, checklistAnswers, at, readReport(payload));
+    return completeWorkOrderExecution(ctx, String(payload.workOrderId ?? ""), evidence, checklistAnswers, at, readReport(payload), readCompletionOutcome(payload.outcome));
   }
 };
 

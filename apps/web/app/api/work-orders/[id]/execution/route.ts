@@ -7,6 +7,7 @@ import { rejectUnsafeRequest } from "../guard";
 import { requestCodexSupervisor } from "../../../../../lib/codex-runtime";
 import { titleOf, withUndo } from "../../../../../lib/undo";
 import { readChecklistAnswers, readEvidence, readReport } from "../../../../../lib/execution-input";
+import { readCompletionOutcome } from "@crossline/core";
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params;
@@ -39,7 +40,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       if (!evidence) return Response.json({ ok: false, code: "INVALID_EVIDENCE_CLAIM" }, { status: 400 });
       const checklistAnswers = readChecklistAnswers(body.checklistAnswers);
       if (!checklistAnswers) return Response.json({ ok: false, code: "INVALID_CHECKLIST_ANSWER" }, { status: 400 });
-      result = completeWorkOrderExecution(ctx, id, evidence, checklistAnswers, undefined, readReport(body));
+      // `outcome: {level: "smooth"|"barely"|"gaps", note}` is the optional 「完成情况」; completing is accepting (completion.ts).
+      result = completeWorkOrderExecution(ctx, id, evidence, checklistAnswers, undefined, readReport(body), readCompletionOutcome(body.outcome));
     } else return Response.json({ ok: false, code: "EXECUTION_ACTION_NOT_ALLOWED" }, { status: 400 });
   } catch (error) {
     // A store-level guard is still a known failure, so it stays a typed blocker rather than a 500.

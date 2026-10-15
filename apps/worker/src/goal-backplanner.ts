@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { BACKPLAN_SCHEMA, mentionsExternalAction, producedArtifacts, usedArtifacts, validateBackplan, withCourse, type BackplanAnswer as Answer,
+import { BACKPLAN_SCHEMA, foldInfoRequests, mentionsExternalAction, producedArtifacts, usedArtifacts, validateBackplan, withCourse, type BackplanAnswer as Answer,
   type MissingInput } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import { handOffArtifacts, linkArtifactWork, readStoredArtifactPlan, type CrosslineStore, type StoredWorkOrder } from "@crossline/db";
@@ -98,9 +98,10 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
       const runSources = [...sources, ...missingInputs.flatMap((item) => [item.message, item.what])];
       return runCodexSkill<Answer>(client, input, { skillName: SKILL, cwd,
         developerInstructions: (missingInputs.length
-          ? "Work backwards from the approved milestone. Some inputs it needs are missing (missingInputs). Do not block on them: make obtaining or confirming each one a step of its own, with `acquires` set to that input's id and `sourceQuote` quoting its `message`; steps that need it depend on that step. Every other step has `acquires` \"\". Return blockers only for what the milestone itself leaves unclear; never set a goal or deadline."
+          ? "Work backwards from the approved milestone. Some inputs it needs are missing (missingInputs). Do not block on them: obtaining or confirming each one is the first part of the task that needs it, which sets `acquires` to that input's id and quotes its `message` in `sourceQuote`; only when obtaining it is real work of its own (not a message to someone) is it a separate step that the steps needing it depend on. Every other step has `acquires` \"\". Return blockers only for what the milestone itself leaves unclear; never set a goal or deadline."
           : "Work backwards from the approved milestone. Return only sourced step drafts; never set a goal or deadline; every step's `acquires` is \"\". If a step needs an input that is in none of sourceText, suppliedInputs or approvedInsights (data, a specification, someone's decision), do not invent it: return it as a blocker with `what` (the input in a few words) and `whoHas` (who can provide it, \"\" if unknown). waitingInputs are on their way: steps that need them come after the steps that do not.")
           + " Each item in `steps` becomes one task in the person's list: group the work into coherent tasks that each produce one deliverable (an outline, a set of solved problems, a draft), not single actions — the step planner splits every task into its own steps afterwards."
+          + " Getting a fact from someone (an exam's scope, a rubric, a format rule — one email and its reply, 15 minutes of the person's time) is never an item: it is the first part of the task that needs the answer."
           + (artifacts.produce.length || artifacts.use.length ? " Cross-line artifacts (artifacts): exactly one step produces each artifacts.produce id (`produces`), every artifacts.use id is listed in `uses` by the steps that work with it; all other steps have produces \"\" and uses []." : "")
           + rolling,
         outputSchema: BACKPLAN_SCHEMA, prepareInput: () => input,
@@ -136,8 +137,10 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
       if (!missing.length) recordBlocked("BACKPLAN_INPUT_BLOCKED", message, toMissing(result.output.blockers));
       return { state: "blocked", code: "BACKPLAN_INPUT_BLOCKED", message };
     }
+    // A request for a fact that another item needs becomes that item's first step instead of a task (info-request.ts, 2026-10-15).
+    const { steps: shaped } = foldInfoRequests(result.output.steps);
     // Steps come in dependency order (each depends only on earlier ones), so the first ones are the ones that can start.
-    const steps = options.rolling ? result.output.steps.slice(0, ROLLING_STEPS) : result.output.steps;
+    const steps = options.rolling ? shaped.slice(0, ROLLING_STEPS) : shaped;
     const ids = new Map(steps.map((step) => [step.id, `backplan-${randomUUID()}`]));
     const drafts: StoredWorkOrder[] = steps.map((step) => {
       const id = ids.get(step.id)!;
@@ -152,6 +155,8 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
           rationale: step.rationale, stepId: step.id, ...(step.acquires ? { acquires: step.acquires, inputsFrom,
             missingInput: missing.find((item) => item.id === step.acquires)?.what ?? "" } : {}) }, dependsOn: step.dependsOn.map((dep) => ids.get(dep)).filter((dep): dep is string => Boolean(dep)),
           ...(step.produces ? { produces: step.produces } : {}), ...(step.uses.length ? { uses: step.uses } : {}),
+          // What the task first has to get from someone: the step planner makes each a drafted email (assistant) and a send (person).
+          ...(step.infoRequests?.length ? { infoRequests: step.infoRequests } : {}),
           automationParts: [], humanCore: [{ id: `${id}-core`, intent: step.intent, quote: step.sourceQuote,
             rationale: step.rationale, energy: step.energy, interruptible: step.interruptible }],
           materialContract: [], evidenceContract: [{ kind: "record", description: step.evidence,
@@ -195,8 +200,9 @@ export const AUTO_BACKPLAN_HORIZON_DAYS = 21;
 export function milestonesAwaitingBackplan(store: CrosslineStore, workspaceId: string, now = new Date(), limit = 3): string[] {
   const today = now.toISOString().slice(0, 10);
   const deadlines = new Map(store.listMilestoneAnchors(workspaceId).map((anchor) => [anchor.milestoneId, anchor.deadline]));
+  // A task the daily merge kept for several milestones (`alsoServes`) serves each of them: none is split again for having lost its own.
   const open = new Set(store.listWorkOrders(workspaceId).filter((order) => !["archived", "accepted"].includes(order.state))
-    .map((order) => order.milestoneId));
+    .flatMap((order) => [order.milestoneId, ...((order.payload as { alsoServes?: string[] } | undefined)?.alsoServes ?? [])]));
   // Proposed, or tried and refused (the model said the milestone's own text cannot justify a step): either way this
   // version is not tried again on a timer — a refusal repeated every fifteen minutes is quota spent on the same answer.
   // A refusal recorded before missing inputs were itemised (no `missing` field) gets one more try: the next run asks about

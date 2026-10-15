@@ -1,5 +1,5 @@
 import "server-only";
-import { retractedEventIdsIn, withdrawArtifactRelationsFor } from "@crossline/db";
+import { retractedEventIdsIn, withdrawArtifactRelationsFor, type StepPlanInput } from "@crossline/db";
 import { taskTitleOf, type AccessContext, type WorkOrderState } from "@crossline/core";
 import { archiveWorkOrder, getStore, restoreCapture, restoreWorkOrder, saveMilestoneEdit } from "./crossline";
 
@@ -26,6 +26,8 @@ export type Inverse =
   | { kind: "event.retract"; eventIds: string[] }
   /** An uploaded file put back under the project it had (or none). */
   | { kind: "source.project"; entries: Array<{ id: string; projectId: string | null }> }
+  /** The daily merge (apps/worker/src/dedupe.ts): the absorbed tasks come back and the kept one gets its payload and step plan back. */
+  | { kind: "task.unmerge"; keepId: string; payload: unknown; plan: StepPlanInput | null; restore: string[] }
   | { kind: "batch"; items: Inverse[] };
 
 export type Op = { id: string; label: string; at: string; inverse: Inverse };
@@ -56,6 +58,28 @@ export function recentOps(ctx: AccessContext, now = new Date()): Op[] {
 
 /** Event ids of `type` that an undo has taken back (a risk accepted, a question put off): readers skip them. */
 export const retractedEventIds = (ctx: AccessContext): Set<string> => retractedEventIdsIn(getStore(), ctx.workspaceId);
+
+/**
+ * 撤销 on a task the daily merge absorbed (the 「已合并」 group of the 已丢弃 drawer), at any time, not only within the 24-hour undo
+ * window. The whole merge is reversed — the absorbed tasks come back and the kept one gets its payload and step plan back — while
+ * nothing has been merged into the kept task since; after a later merge only the absorbed tasks come back, so the later one is not lost.
+ */
+export function undoMerge(ctx: AccessContext, absorbedId: string): { ok: true } | { ok: false; code: string } {
+  const store = getStore();
+  const event = store.listEvents(ctx.workspaceId, { type: "op.applied" }).filter((item) => {
+    const inverse = (item.payload as { inverse?: Inverse }).inverse;
+    return inverse?.kind === "task.unmerge" && inverse.restore.includes(absorbedId);
+  }).at(-1);
+  if (!event) return { ok: false, code: "MERGE_NOT_FOUND" };
+  const inverse = (event.payload as { inverse: Extract<Inverse, { kind: "task.unmerge" }> }).inverse;
+  const undone = store.listEvents(ctx.workspaceId, { type: "op.undone", entityId: event.entityId }).length > 0;
+  const later = store.listEvents(ctx.workspaceId, { type: "task.merged", entityId: inverse.keepId }).some((item) => item.createdAt > event.createdAt);
+  const result = applyInverse(ctx, undone || later ? { kind: "work_order.restore", ids: [absorbedId] } : inverse);
+  if (!result.ok) return result;
+  if (!undone) store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `op.undone:${event.entityId}`,
+    type: "op.undone", entityId: event.entityId, payload: { label: (event.payload as { label?: string }).label ?? "", partly: later } });
+  return { ok: true };
+}
 
 /** Undoes one recorded operation. */
 export function undoOp(ctx: AccessContext, opId: string): { ok: true; label: string } | { ok: false; code: string } {
@@ -96,6 +120,13 @@ function applyInverse(ctx: AccessContext, inverse: Inverse): { ok: true } | { ok
           const attempt = store.listEvents(ctx.workspaceId, { type: "approval.revoked", entityId: id }).length;
           store.transitionWorkOrder(ctx.workspaceId, id, { type: "approval.revoked", reason: "撤销批准" }, `undo-approval:${id}:${attempt}`);
         }
+        return { ok: true };
+      }
+      case "task.unmerge": {
+        for (const id of inverse.restore) { const result = restoreWorkOrder(ctx, id); if (!result.ok) return result; }
+        const keep = store.listWorkOrders(ctx.workspaceId).find((item) => item.id === inverse.keepId);
+        if (keep) store.saveWorkOrder({ ...keep, payload: inverse.payload });
+        if (keep && inverse.plan) store.saveStepPlan(ctx.workspaceId, inverse.keepId, inverse.plan, ctx.principalId, "unmerged");
         return { ok: true };
       }
       case "source.project":

@@ -199,7 +199,7 @@ export function ExecutionActions({ workOrderId, intent, state, paused, ownerId, 
       </button>
     </>}
     {(state === "evidence_review" || state === "accepted") && showEnergyProbe && <>
-      <span className="micro">完成后精力与实际负荷</span>
+      <span className="micro">顺手记一下（可跳过，用来校准估时与精力）</span>
       <EnergyProbe context="after_task" workOrderId={workOrderId} />
     </>}
     {/* A proposal the analysis got wrong had no exit: approve it or look at it forever. The reason is optional;

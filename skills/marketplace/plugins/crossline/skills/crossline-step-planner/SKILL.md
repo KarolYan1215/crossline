@@ -8,7 +8,7 @@ description: Plan one Crossline task as the few intellectual steps only the pers
 Input is `crossline.step-plan.v1`:
 
 - `research`: true when the task is important by the app's rules (graded coursework, or a milestone weighed 60 or more) and the person does part of it themselves. The web is open for this run (section 0b).
-- `task`: intent, line, project, the person's part, what the system may prepare, what must be delivered, current estimate.
+- `task`: intent, line, project, the person's part, what the system may prepare, what must be delivered, current estimate, and `getFirst` — facts this task first has to get from someone (`{kind, what, who}`; section 4b).
 - `milestone`: the result this task serves and its criteria (often a score line or an artefact).
 - `window`: `notBefore` (earliest start), `dueBy` (latest finish), `availableMinutes` (working time inside it).
 - `materials[]`: the task's own files **in full text**, each `{id: "doc-N", name, text}` — syllabi, lecture plans, problem sets, briefs, data descriptions.
@@ -38,6 +38,8 @@ Before planning anything, read `materials` and list the task's actual content as
 
 Up to five `{id, text, why, options}` — the facts the plan depends on that neither the material nor `person` gives: the exam's scope or format, which units they already master, where they lost points before, the tool version they must use, who reviews the result. `options` are four to six concrete answers drawn from the material (e.g. the lecture numbers), so a click answers it. Never ask what `person.facts`, `person.answers` or the material already say. A question already in `person.answers` is answered: use the answer.
 
+Ask only what changes the plan or the schedule, or what a step's judgement depends on — and only what the person alone knows. What the task's own material settles is read, never asked: the problem set and how many problems, how and where it is handed in, the format and length, the rules on collaboration and AI use, the rubric, the due time. When the material in `materials[]` does not show it (a handout not uploaded yet), plan a step that reads it from the course's files or page and assume the usual answer, saying so in `rationale` — the app writes such a question as an assumption (「假设：…以任务材料为准」) and does not put it to the person. Never ask where something takes place.
+
 Until a question is answered the plan is provisional: plan what the known units allow, and say in `rationale` which steps change with the answer.
 
 ## 3. The person's steps: only the intellectual core
@@ -58,6 +60,15 @@ The person's attention is for what moves the outcome: understanding, solving, de
 Everything the system can produce from the material and public sources is an `agent` step, so the result is waiting when the person starts: for a course, a formula sheet compiled from the lecture notes or the list of past exams with their solutions; for media, a rough cut with captions or a table of the reference notes' hooks and structures; for a startup, interview notes coded by pain point or a competitor table with sources; and anywhere, a glossary, a dataset cleaned, a template filled, a reference list checked. Each `agent` step names its exact deliverable (a file), which person step it feeds (`dependsOn` from the person's step to it), and `covers`. Graded work is never done for the person (the assistant may prepare material for it, never the answers to be handed in); choosing or deciding is the person's.
 
 `mixed` is for a step where the assistant drafts and the person must finish with judgement (a draft argument, a first-pass solution to be checked line by line).
+
+## 4b. Getting a fact from someone: two small steps, not a task
+
+A request for a fact has four marks: its only purpose is to obtain one fact, file or confirmation that somebody else holds or decides (an exam's scope, a rubric, a format rule, a version, a date); its product is a message plus the other side's reply; the person's own time is at most 15 minutes; and the rest of the task waits for the answer. Plan each entry of `task.getFirst`, and any such fact the task needs and `questions` cannot settle (only the person knows it, but the person must ask someone for it), as steps at the start of this task:
+
+- `kind: "ask_person"`: an `agent` step (role `prepare`) that drafts the email — recipient (`who`, or the course's teaching assistant), subject, body listing each point to confirm — as a file, **never sent**; then a `human` step (role `contact`, 10–15 minutes p50, title 「向助教确认…」) that checks the draft and sends it, with `firstAction` 「打开助手起草的邮件，核对收件人和正文后发送」. Sending is an external act and is always the person's.
+- `kind: "look_up"`: one step that looks it up (the assistant's, when it is on a public page; the person's, when it sits in their own account).
+
+Steps that need the answer depend on the send step, and only those: everything else in the task proceeds meanwhile. Never make such a request the whole task, and never plan it longer than 15 minutes of the person's time.
 
 ## 4a. Plan with the AI tools the person has: `aiTools`
 

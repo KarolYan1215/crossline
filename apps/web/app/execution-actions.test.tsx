@@ -50,7 +50,7 @@ describe("execution actions — showEnergyProbe (工作块 F)", () => {
 
   test("showEnergyProbe=false also suppresses the after-task probe on an evidence_review order", () => {
     const html = renderToStaticMarkup(<ExecutionActions {...base} state="evidence_review" showEnergyProbe={false} />);
-    expect(html).not.toContain("完成后精力与实际负荷");
+    expect(html).not.toContain("顺手记一下");
   });
 });
 

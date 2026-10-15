@@ -78,22 +78,24 @@ test("a step that is not the last: 「超出预估 · 30 分钟」 writes one cl
   expect(confirmView(TEST_CTX, message.id)!.answered).toMatchObject({ outcome: "over", minutes: view.blockMinutes + 30 });
 });
 
-test("the last step finishes the task: it waits for review with a one-tap duration observation", async () => {
+test("the last step finishes the task: accepted at once, with a one-tap duration observation", async () => {
   const { store, at } = setup({ steps: 1 });
   const { message } = await askAboutFirstBlock(at);
   expect(confirmView(TEST_CTX, message.id)!.lastStep).toBe(true);
   const outcome = confirmBlock(TEST_CTX, message.id, { kind: "as_planned" });
   expect(outcome).toMatchObject({ ok: true, done: "task" });
   expect(outcome).not.toHaveProperty("needsEvidence");
-  expect(store.listWorkOrders(ws)[0]!.state).toBe("evidence_review");
+  expect(store.listWorkOrders(ws)[0]!.state).toBe("accepted");
   expect(store.listDurationObservations(ws, "research", "deep_work")[0]).toMatchObject({ actualSource: "one_tap", observedMinutes: (outcome as { minutes: number }).minutes });
 });
 
-test("a milestone-bound last step with no evidence says it needs some; a task with no family still leaves an observation", async () => {
+test("a milestone-bound last step with no evidence is accepted all the same (2026-10-15); a task with no family still leaves an observation", async () => {
   const { store, at } = setup({ steps: 1, milestoneId: "ece555-hw-series", family: null });
   const { message } = await askAboutFirstBlock(at);
-  expect(confirmBlock(TEST_CTX, message.id, { kind: "under", minutes: 15 })).toMatchObject({ ok: true, done: "task", needsEvidence: true });
-  expect(store.listWorkOrders(ws)[0]).toMatchObject({ state: "evidence_review", payload: expect.objectContaining({ family: "preparation" }) });
+  const outcome = confirmBlock(TEST_CTX, message.id, { kind: "under", minutes: 15 });
+  expect(outcome).toMatchObject({ ok: true, done: "task" });
+  expect(outcome).not.toHaveProperty("needsEvidence");
+  expect(store.listWorkOrders(ws)[0]).toMatchObject({ state: "accepted", payload: expect.objectContaining({ family: "preparation" }) });
   expect(store.listDurationObservations(ws, "research", "preparation")).toHaveLength(1);
 });
 

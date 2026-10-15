@@ -112,7 +112,6 @@ export function confirmBlock(ctx: AccessContext, messageId: string, answer: Conf
   if (block.stepId && store.getStepPlan(ctx.workspaceId, block.orderId)?.steps.some((step) => step.id === block.stepId))
     store.updateStepProgress(ctx.workspaceId, block.orderId, block.stepId, { status: "done" }, ctx.principalId, "confirm");
   record(answer.kind, { minutes, source, finished: true });
-  const needsEvidence = Boolean(order.milestoneId) && !(answer.evidence ?? []).length
-    && !store.listEvidenceClaims(ctx.workspaceId).some((claim) => claim.workOrderId === order.id);
-  return { ok: true, done: "task", minutes, ...(needsEvidence ? { needsEvidence: true as const } : {}) };
+  // Finishing is accepting (2026-10-15): a milestone-bound task no longer needs evidence, so `needsEvidence` is never set.
+  return { ok: true, done: "task", minutes };
 }

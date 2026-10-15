@@ -114,7 +114,7 @@ test("work_order.complete forwards well-formed evidence", async () => {
     workOrderId: "w1", evidence: [{ kind: "record", uri: "local://note", description: "结论记录" }]
   }));
   expect(response.status).toBe(200);
-  expect(completeWorkOrderExecution).toHaveBeenCalledWith(TEST_CTX, "w1", [{ kind: "record", uri: "local://note", description: "结论记录" }], [], undefined, undefined);
+  expect(completeWorkOrderExecution).toHaveBeenCalledWith(TEST_CTX, "w1", [{ kind: "record", uri: "local://note", description: "结论记录" }], [], undefined, undefined, undefined);
 });
 
 test("a completion queued offline keeps the minutes the person tapped and the checklist they answered", async () => {
@@ -122,5 +122,14 @@ test("a completion queued offline keeps the minutes the person tapped and the ch
   await post(envelope("work_order.complete", { workOrderId: "w1", evidence: [], reportedMinutes: 45, reportedSource: "one_tap",
     checklistAnswers: [{ questionId: "q1", answer: "做完了" }] }));
   expect(completeWorkOrderExecution).toHaveBeenCalledWith(TEST_CTX, "w1", [], [{ questionId: "q1", answer: "做完了" }], undefined,
-    { minutes: 45, source: "one_tap" });
+    { minutes: 45, source: "one_tap" }, undefined);
+});
+
+test("a completion queued offline keeps the 完成情况 the person picked; a malformed one is simply left out", async () => {
+  completeWorkOrderExecution.mockReturnValueOnce({ ok: true });
+  await post(envelope("work_order.complete", { workOrderId: "w1", evidence: [], outcome: { level: "gaps", note: "第 4 题没做完" } }));
+  expect(completeWorkOrderExecution).toHaveBeenLastCalledWith(TEST_CTX, "w1", [], [], undefined, undefined, { level: "gaps", note: "第 4 题没做完" });
+  completeWorkOrderExecution.mockReturnValueOnce({ ok: true });
+  await post(envelope("work_order.complete", { workOrderId: "w1", evidence: [], outcome: { level: "perfect" } }));
+  expect(completeWorkOrderExecution).toHaveBeenLastCalledWith(TEST_CTX, "w1", [], [], undefined, undefined, undefined);
 });

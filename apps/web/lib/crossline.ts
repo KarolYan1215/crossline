@@ -4,12 +4,12 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
-import { approveArtifactRelationsFor, CrosslineStore, type EvidenceClaimInput, type StoredMilestone } from "@crossline/db";
+import { approveArtifactRelationsFor, assistantAvailable, CrosslineStore, type EvidenceClaimInput, type StoredMilestone } from "@crossline/db";
 import { availableSlots, deriveCapacity, requiredApproval, validateAvailability, DEFAULT_AVAILABILITY,
   defaultMilestoneTemplates, computeMilestoneConfidence, PRODUCTIVE, type ActivityCategory, validateSuccessCriteria, goalSettingKey, ANALYSIS_CONTEXT_VERSION, calibrationReport, calibratedEstimate,
   type CalibrationReport, presetImportance, taskTitleOf, type ImportancePreset, restoreTargetOf,
   type AccessContext, type AvailabilityWindow, type Estimate, type SuccessCriterion, type ChecklistAnswer, FIXED_EVENTS, fixedEventBlocks, type FixedEvent,
-  DELAY_SETTING, FROZEN_SETTING, SHIFT_MINUTES, parseFrozen, shiftFrozen, withFrozen, withoutFrozen, type FrozenBlock, type RealityChange } from "@crossline/core";
+  DELAY_SETTING, FROZEN_SETTING, SHIFT_MINUTES, parseFrozen, settleFrozen, shiftFrozen, withFrozen, withoutFrozen, type FrozenBlock, type RealityChange } from "@crossline/core";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { forecastGoals, normalizeParams, paramsFor, planHeadDiffers, planSchedule, recommendNextActions, scheduleInputHash, type ForecastResult, type PlanResult,
   type ScheduleParams, type PlanningInput } from "@crossline/planner";
@@ -57,8 +57,10 @@ export function planToday(ctx?: AccessContext,
 
 /** The key the weekly availability lives under. One settings row, not a new table. */
 export { AVAILABILITY_SETTING } from "@crossline/core";
-import { STEP_ENERGY_CEILING, learnedEfficiency, type StepRole, AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, BYPRODUCT_LAG_DAYS, RELATION_KIND_LABEL, isCancelledEvent, resolveAvailability, hoursFromText, type AvailabilitySource, type PortraitReport } from "@crossline/core";
+import { FIRST_DRAFTS_SETTING, firstDraftsState, STEP_ENERGY_CEILING, learnedEfficiency, type StepRole, AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, BYPRODUCT_LAG_DAYS, RELATION_KIND_LABEL, isCancelledEvent, resolveAvailability, hoursFromText, type AvailabilitySource, type PortraitReport } from "@crossline/core";
 import { statedShares } from "./plan-stats";
+import { completionRule, type CompletionMode, type CompletionOutcome } from "@crossline/core";
+import { MILESTONE_RISKS_SETTING, parseMilestoneRisks, riskBufferDays } from "@crossline/core";
 import { identityLines, linePacks } from "./lines";
 const PREFERENCES_SETTING = "schedule.preferences";
 export type SchedulePreferences = { timeZone: string; mode: "buffered" | "asap";
@@ -592,7 +594,15 @@ export function readFrozen(ctx: AccessContext, now: Date): FrozenBlock[] {
     store.deleteSetting(ctx.workspaceId, LEGACY_PINS);
     store.deleteSetting(ctx.workspaceId, LEGACY_KEEP);
   }
-  return parseFrozen(store.getSetting(ctx.workspaceId, FROZEN_SETTING), now);
+  const list = parseFrozen(store.getSetting(ctx.workspaceId, FROZEN_SETTING), now);
+  // Inside an impact preview of 「改时间」: the held block as if already locked at its new time.
+  const lock = previewScope.getStore()?.lock;
+  if (!lock) return list;
+  const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
+  try {
+    return withFrozen(list, { blockId: lock.blockId.replace(/^optional:/, "scheduled:"), start: toZonedInstant(lock.day, lock.start, zone),
+      end: toZonedInstant(lock.day, lock.end, zone), reason: "locked" });
+  } catch { return list; }
 }
 export function writeFrozen(ctx: AccessContext, list: FrozenBlock[]): void {
   getStore().setSetting(ctx.workspaceId, FROZEN_SETTING, JSON.stringify(list));
@@ -684,6 +694,31 @@ export function lockBlock(ctx: AccessContext, blockId: string, at: { day: string
   writeFrozen(ctx, withFrozen(readFrozen(ctx, appNow()), { blockId: id, start, end, reason, ...(options.overlapOk ? { overlapOk: true } : {}) }));
   return { ok: true };
 }
+/**
+ * Held blocks (started or locked) in the way of something without the person's acceptance (`settleFrozen`): a calendar event, a file's
+ * class meeting, an event the person added, or another held block. One entry per held block, with what it overlaps, for the
+ * `locked_conflict` ask.
+ */
+export function heldConflicts(ctx: AccessContext, now = appNow()): Array<{ entry: FrozenBlock; title: string }> {
+  const store = getStore();
+  const stored = store.listPlanVersions(ctx.workspaceId)[0];
+  const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
+  const blocks = stored ? committedBlocks(ctx, stored.payload).filter((block) => block.day && !block.id.startsWith("scheduled:")) : [];
+  const busy = blocks.flatMap((block) => { try {
+    return [{ id: block.id, start: Date.parse(toZonedInstant(block.day!, block.start, zone)), end: Date.parse(toZonedInstant(block.day!, block.end === "24:00" ? "23:59" : block.end, zone)) }];
+  } catch { return []; } });
+  const titles = new Map(blocks.map((block) => [block.id, block.title]));
+  const orders = new Map(store.listWorkOrders(ctx.workspaceId).map((order) => [order.id, order]));
+  const frozen = readFrozen(ctx, now);
+  const seen = new Set<string>();
+  return settleFrozen(frozen, busy).conflicts.flatMap((conflict) => {
+    const entry = frozen.find((item) => item.blockId === conflict.blockId);
+    if (!entry || seen.has(conflict.blockId)) return [];
+    seen.add(conflict.blockId);
+    const other = conflict.kind === "frozen" ? orders.get(plannerIdOfBlock(conflict.with).split("#")[0]!) : undefined;
+    return [{ entry, title: conflict.kind === "busy" ? titles.get(conflict.with) ?? "" : other ? taskTitleOf(other) : "" }];
+  });
+}
 export function unlockBlock(ctx: AccessContext, blockId: string): { ok: true } {
   writeFrozen(ctx, withoutFrozen(readFrozen(ctx, appNow()), blockId.replace(/^optional:/, "scheduled:")));
   return { ok: true };
@@ -725,7 +760,9 @@ export type PreviewOverrides = { estimates?: Record<string, number>; dueDates?: 
   /** The plan page's own controls: a repainted week, other packing numbers, a moved importance slider (by milestone id). */
   availability?: AvailabilityWindow[]; params?: ScheduleParams; weights?: Record<string, number>; lineShares?: Record<string, number>;
   /** The energy of the slot the person is in, as if they had just said it (the energy question's value-of-information gate). */
-  currentEnergy?: "low" | "medium" | "high" };
+  currentEnergy?: "low" | "medium" | "high";
+  /** A held block as if moved to this time on the day panel (`move_block`), in the person's zone. */
+  lock?: { blockId: string; day: string; start: string; end: string } };
 const previewScope = new AsyncLocalStorage<PreviewOverrides>();
 export const withPreview = <T>(overrides: PreviewOverrides, run: () => T): T => previewScope.run(overrides, run);
 /** Inside an impact preview nothing is written, a change summary included. */
@@ -854,10 +891,12 @@ export function planningInputFor(ctx: AccessContext, today: string, committed: P
   const expanded = plannerItemsFor(ctx, eligibleOrders);
   // Frozen blocks of work still open. One that a hard constraint now lands on moves if it was only kept or inside the commit window;
   // one the person started or locked stays (they are asked about it, `locked_conflict`), unless they already accepted the overlap.
-  const busyInstants = busy.flatMap((block) => { try { return [{ start: Date.parse(iso(block.day, block.start)), end: Date.parse(iso(block.day, block.end)) }]; } catch { return []; } });
-  const overlapsBusy = (item: FrozenBlock) => busyInstants.some((block) => block.start < Date.parse(item.end) && block.end > Date.parse(item.start));
-  const frozen = readFrozen(ctx, now).filter((item) => expanded.some((entry) => entry.task.id === plannerIdOfBlock(item.blockId))
-    && !((item.reason === "keep" || item.reason === "commit") && overlapsBusy(item)));
+  // Kept or committed blocks that land on each other or on a held block are let go as well, and a lock older than the task's deferral
+  // (`notBefore`) lapses; a block the person started stays whatever happened since (`settleFrozen`).
+  const busyInstants = busy.flatMap((block, index) => { try { return [{ id: `busy:${index}`, start: Date.parse(iso(block.day, block.start)), end: Date.parse(iso(block.day, block.end)) }]; } catch { return []; } });
+  const releaseAt = new Map(expanded.flatMap((entry) => entry.task.notBefore ? [[entry.task.id, Date.parse(entry.task.notBefore)] as const] : []));
+  const frozen = settleFrozen(readFrozen(ctx, now).filter((item) => expanded.some((entry) => entry.task.id === plannerIdOfBlock(item.blockId))),
+    busyInstants, (blockId) => releaseAt.get(plannerIdOfBlock(blockId))).kept;
   const pinned = frozen.map((item) => ({ taskId: plannerIdOfBlock(item.blockId), start: item.start, end: item.end }));
   const efficiency = personalEfficiency(ctx);
   const input: PlanningInput = {
@@ -1366,7 +1405,12 @@ function findWorkOrder(workspaceId: string, workOrderId: string) {
   return getStore().listWorkOrders(workspaceId).find((item) => item.id === workOrderId);
 }
 
-export function approveWorkOrderProposal(ctx: AccessContext, workOrderId: string): ExecutionResult {
+/**
+ * Approves a proposal. `acceptanceStandard` is the standard as the person edited it on the card before approving (one line per item, in
+ * the order of the proposal's evidence contract): it replaces the contract's wording, and from then on the task is judged by it and
+ * nothing more (the owner's decision of 2026-10-15). Without it the proposal's own contract is the standard, fixed at approval.
+ */
+export function approveWorkOrderProposal(ctx: AccessContext, workOrderId: string, options: { acceptanceStandard?: string[] } = {}): ExecutionResult {
   if (requiredApproval("approve_work_orders") === "never") return { ok: false, code: "APPROVAL_NOT_PERMITTED" };
   const workOrder = findWorkOrder(ctx.workspaceId, workOrderId);
   if (!workOrder) return { ok: false, code: "WORK_ORDER_NOT_FOUND" };
@@ -1374,6 +1418,15 @@ export function approveWorkOrderProposal(ctx: AccessContext, workOrderId: string
   // A blocked WorkOrder is recoverable by the same human approval that admitted it; the transition table
   // has always allowed it, and refusing here would strand a real item with no way back.
   if (workOrder.state !== "awaiting_plan_approval" && workOrder.state !== "blocked") return { ok: false, code: "PROPOSAL_NOT_APPROVABLE" };
+  const edited = (options.acceptanceStandard ?? []).map((line) => String(line).trim().slice(0, 300)).filter(Boolean).slice(0, 10);
+  if (edited.length) {
+    const payload = (workOrder.payload ?? {}) as { evidenceContract?: Array<{ kind?: string; description?: string; why?: string; required?: boolean }> };
+    const before = payload.evidenceContract ?? [];
+    const evidenceContract = edited.map((description, index) => ({ kind: before[index]?.kind ?? "record", description,
+      why: before[index]?.why ?? "本人批准时定下的验收标准", required: before[index]?.required ?? true }));
+    getStore().saveWorkOrder({ ...workOrder, payload: { ...payload, evidenceContract,
+      acceptanceStandard: { fixedAt: new Date().toISOString(), lines: edited, by: "person" } } });
+  }
   getStore().transitionWorkOrder(ctx.workspaceId, workOrderId, { type: "plan.approved", approvalId: ctx.principalId },
     `proposal-approved:${workOrderId}:${executionRun(ctx.workspaceId, workOrderId)}`);
   return { ok: true };
@@ -1552,20 +1605,50 @@ export function resumeWorkOrderExecution(ctx: AccessContext, workOrderId: string
   return { ok: true };
 }
 
+/** What a completion did: always accepted; `followUp` is the question the 小帮手 will ask later when the result is not known yet. */
+export type CompletionResult = { ok: true; completion?: { mode: CompletionMode; followUp?: string } } | { ok: false; code: string };
+
+/** Recorded on `assessment.pending`: what to ask about a finished task whose result is not known yet, and from when (`lib/outcome-check.ts`). */
+export type PendingAssessment = { reason: string; question: string; askAfter: string; milestoneId: string };
+
+/**
+ * The person pressed 完成: that is the acceptance (the owner's decision of 2026-10-15, `completionRule` in core). The order goes through
+ * `human.completed` (the session closes, the duration is observed, files are handed on) and straight on to `accepted` — no gate, no
+ * question, no evidence required, milestone-bound or not. `outcome` is the optional 「完成情况」 the person gave (顺利 / 勉强 / 有遗漏 and a
+ * line). Work whose result is not known when it is finished (`needs_assessment`: an exam's score, a draft's quality, an exploration) also
+ * leaves an `assessment.pending` record the 小帮手 asks about later at an idle moment — unless the person already said how it went and
+ * nothing else is to come (a score always is).
+ */
 export function completeWorkOrderExecution(ctx: AccessContext, workOrderId: string, evidence: EvidenceClaimInput[],
-  checklistAnswers: ChecklistAnswer[] = [], at?: string, report?: { minutes: number; source: "one_tap" | "activity" }): ExecutionResult {
+  checklistAnswers: ChecklistAnswer[] = [], at?: string, report?: { minutes: number; source: "one_tap" | "activity" },
+  outcome?: CompletionOutcome): CompletionResult {
   const store = getStore();
   const workOrder = findWorkOrder(ctx.workspaceId, workOrderId);
   if (!workOrder) return { ok: false, code: "WORK_ORDER_NOT_FOUND" };
-  if (workOrder.state === "evidence_review") return { ok: true };
+  // Already handed in (a replayed offline command, or an order completed before this rule that still waits for the gate).
+  if (workOrder.state === "evidence_review" || workOrder.state === "accepted") return { ok: true };
   if (workOrder.state !== "active") return { ok: false, code: "EXECUTION_NOT_ACTIVE" };
   const baseline = durationPriorFor(workOrder.identityId, workOrder.payload);
+  const run = executionRun(ctx.workspaceId, workOrderId) - 1;
   store.transitionWorkOrder(ctx.workspaceId, workOrderId, { type: "human.completed" },
-    `execution:${workOrderId}:${executionRun(ctx.workspaceId, workOrderId) - 1}:completed`,
+    `execution:${workOrderId}:${run}:completed`,
     { evidence, ...(checklistAnswers.length ? { checklistAnswers } : {}), ...(at ? { occurredAt: at } : {}),
       ...(report ? { reportedMinutes: report.minutes, reportedSource: report.source } : {}),
       ...(baseline ? { durationCalibrationBaseline: baseline } : {}) });
-  return { ok: true };
+  store.transitionWorkOrder(ctx.workspaceId, workOrderId, { type: "evidence.accepted", approvalId: ctx.principalId, onCompletion: true },
+    `completion-accepted:${workOrderId}:${run}`, { ...(at ? { occurredAt: at } : {}), ...(baseline ? { durationCalibrationBaseline: baseline } : {}) });
+  const doneAt = at ?? new Date().toISOString();
+  if (outcome) store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `work_order.outcome:${workOrderId}:${run}`,
+    type: "work_order.outcome_reported", entityId: workOrderId, payload: { level: outcome.level, note: outcome.note, at: doneAt, source: "completion" } });
+  const rule = completionRule(workOrder);
+  const followUp = rule.mode === "needs_assessment" && (rule.reason === "result_pending" || !outcome);
+  if (followUp) {
+    const pending: PendingAssessment = { reason: rule.reason ?? "quality", question: rule.question ?? "", milestoneId: workOrder.milestoneId,
+      askAfter: new Date(Date.parse(doneAt) + (rule.askAfterHours ?? 2) * 3_600_000).toISOString() };
+    store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `assessment.pending:${workOrderId}:${run}`,
+      type: "assessment.pending", entityId: workOrderId, payload: pending });
+  }
+  return { ok: true, completion: { mode: rule.mode, ...(followUp && rule.question ? { followUp: rule.question } : {}) } };
 }
 
 export function acceptWorkOrderEvidence(ctx: AccessContext, workOrderId: string): ExecutionResult {
@@ -1748,8 +1831,15 @@ export function libraryUntil(ctx: AccessContext, order: { state: string; milesto
 }
 const addDays = (day: string, days: number) => new Date(Date.parse(`${day}T12:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
 
+/** Days a milestone's reviewed risk asks its work to finish early (the reviewer's latest answer; none without a review). */
+const riskBufferOf = (ctx: AccessContext, milestoneId: string | undefined): number => {
+  const stored = milestoneId ? parseMilestoneRisks(getStore().getSetting(ctx.workspaceId, MILESTONE_RISKS_SETTING))[milestoneId] : undefined;
+  return stored && "risks" in stored ? riskBufferDays(stored.risks) : 0;
+};
+
 const plannerTaskOf = (ctx: AccessContext, order: ActionableOrder) => {
   const preferences = readSchedulePreferences(ctx);
+  const riskBuffer = riskBufferOf(ctx, order.milestoneId);
   const goal = readGoalSettings(ctx, order.milestoneId);
   const weight = effectiveWeight(ctx, order.milestoneId);
   const important = weight >= IMPORTANT_WEIGHT;
@@ -1785,6 +1875,7 @@ const plannerTaskOf = (ctx: AccessContext, order: ActionableOrder) => {
     })(),
     ...(release ? { notBefore: toZonedInstant(release, "00:00", zone) } : {}),
     ...(dependsOn?.length ? { dependsOn } : {}),
+    ...(riskBuffer ? { riskBufferDays: riskBuffer } : {}),
     interruptible: core?.interruptible ?? true
   };
 };
@@ -2177,10 +2268,16 @@ export async function loadDashboard(ctx: AccessContext): Promise<Omit<DashboardD
     clockPinned: Boolean(process.env.CROSSLINE_FIXED_NOW),
     dateLabel: new Intl.DateTimeFormat("en-US", { day: "2-digit", timeZone }).format(now),
     monthLabel: new Intl.DateTimeFormat("en-US", { month: "short", year: "numeric", timeZone }).format(now).toUpperCase(),
-    capacity,
+    // 「本机活动采集未开启」 points at a switch only this computer's owner has (2026-10-15 walkthrough): not said to a guest.
+    capacity: assistantAvailable(store, ctx.workspaceId) ? capacity
+      : { ...capacity, blockers: capacity.blockers.filter((blocker) => blocker.code !== "LOCAL_ACTIVITY_NOT_AUTHORISED") },
     energyEstimate: energyEstimateFor(ctx, now, today),
     energyLearning: energyCalibration(outcomes),
     awaitingApproval: orders.filter((order) => order.state === "awaiting_plan_approval").length,
+    // Milestones that exist and wait for approval, and whether any exist at all: an empty 「下一步」 says which step comes next.
+    milestones: { drafts: new Set(store.listMilestones(ctx.workspaceId).filter((item) => item.status === "draft").map((item) => item.id)).size,
+      any: store.listMilestones(ctx.workspaceId).some((item) => item.status !== "archived"),
+      firstDrafts: firstDraftsState(store.getSetting(ctx.workspaceId, FIRST_DRAFTS_SETTING), store.listMilestones(ctx.workspaceId).some((item) => item.status !== "archived"), now) },
     ...(primary ? { primary } : {}),
     ...(higherPriority ? { higherPriority } : {}),
     ...(lowEnergy ? { lowEnergy } : {}),

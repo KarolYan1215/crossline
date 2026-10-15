@@ -2,6 +2,7 @@ import type { WorkOrder } from "./index";
 import { trimLeakedTail } from "./text-hygiene";
 import { quoteSupportsDate } from "./date-schema";
 import { cleanTaskTitle, withCourse } from "./task-title";
+import { infoRequestTraits } from "./info-request";
 
 export type AnalysisContext = {
   version: string;
@@ -299,6 +300,15 @@ export function validateAnalysisProposal(value: unknown, input: AnalysisContext)
     const error = new Error("ANALYSIS_EVIDENCE_INVALID");
     (error as Error & { detail?: string }).detail =
       `分析被拒绝：以下引用不是原文逐字内容，无法核对 —— ${fabricated.map((s) => `「${s.quote}」`).join("、")}。可重新分析。`.slice(0, 400);
+    throw error;
+  }
+  // Getting a fact from someone (info-request.ts): the assistant may draft the message, but sending it is the person's, an external act.
+  const request = infoRequestTraits({ title: proposal.title, intent: proposal.intent, p50Minutes: proposal.estimate.p50Minutes }).request;
+  const sends = request?.kind === "ask_person" ? proposal.automationParts.filter((part) => /(发送|发出|寄出|send)/i.test(part.intent) && !/(草稿|起草|draft)/i.test(part.intent)) : [];
+  if (sends.length) {
+    const error = new Error("ANALYSIS_INFO_REQUEST_SENT_BY_SYSTEM");
+    (error as Error & { detail?: string }).detail =
+      `分析被拒绝：向别人询问时，系统只起草邮件（收件人、主题、正文），发送由本人完成 —— ${sends.map((part) => `「${part.intent.slice(0, 40)}」`).join("、")} 应改为起草，发送放进 humanCore。`.slice(0, 400);
     throw error;
   }
   if (proposal.blockers.length) {

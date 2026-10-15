@@ -82,3 +82,16 @@ test("when a block comes up, what the assistant has ready for it is named", () =
   const [nudge] = planNudges(base({ blocks: [{ ...base().blocks[0]!, prepared: ["公式表.md", "样题清单.md"] }] }));
   expect(nudge!.text).toContain("已备好：公式表.md、样题清单.md。");
 });
+
+test("finished work whose result is not known is asked about at an idle moment only: never while busy, at night, or twice", () => {
+  const outcomes = [{ askId: "outcome:mid1:e1", orderId: "mid1", question: "「ECE 548 期中考试 1」完成得怎么样？", fingerprint: "e1:2026-10-10",
+    options: [{ id: "smooth", label: "顺利" }, { id: "barely", label: "勉强" }, { id: "gaps", label: "有遗漏" }], laterLabel: "还说不准，说个日期" }];
+  const idle = base({ blocks: [], outcomes });
+  const [nudge] = planNudges(idle);
+  expect(nudge).toMatchObject({ kind: "outcome_check", urgent: false, counted: true, fingerprint: "outcome:e1:2026-10-10" });
+  expect(nudge!.buttons.map((button) => button.label)).toEqual(["顺利", "勉强", "有遗漏", "还说不准，说个日期", "少问这类"]);
+  expect(nudge!.buttons[0]).toMatchObject({ kind: "action", action: { action: "ask.answer", args: { askId: "outcome:mid1:e1", optionId: "smooth", fields: [] } } });
+  expect(planNudges(base({ blocks: [], outcomes, quiet: { timerRunning: true, inMeeting: false, answeredRecently: false } }))).toEqual([]);
+  expect(planNudges(base({ blocks: [], outcomes, night: true }))).toEqual([]);
+  expect(planNudges(base({ blocks: [], outcomes, sent: new Set(["outcome:e1:2026-10-10"]) }))).toEqual([]);
+});

@@ -230,6 +230,10 @@ test("the task changed last is planned first, ahead of an older backlog", () => 
     vi.setSystemTime(new Date("2026-10-02T12:00:00Z"));
     store.saveWorkOrder(order("fresh"));
     expect(tasksAwaitingStepPlan(store, workspaceId)[0]).toBe("fresh");
+    // A proposal still waiting for the person is planned before any committed task, so it is complete when it is shown.
+    vi.setSystemTime(new Date("2026-10-01T06:00:00Z"));
+    store.saveWorkOrder({ ...order("proposal"), state: "awaiting_plan_approval" });
+    expect(tasksAwaitingStepPlan(store, workspaceId)[0]).toBe("proposal");
   } finally { vi.useRealTimers(); }
 });
 
@@ -273,4 +277,30 @@ test("a block the person started that day is not a trouble, and nor is a block n
     store.recordConfirmedSession(workspaceId, "wo", ownerId, { startedAt: "2026-10-13T16:00:00.000Z", endedAt: "2026-10-13T17:00:00.000Z", minutes: 60, source: "one_tap", key: "s1" });
     expect(requestFinerSplits(store, workspaceId)).toEqual([]);
   } finally { vi.useRealTimers(); store.close(); }
+});
+
+// The real account, 2026-10-15: 「作业 3 题面及题目数」「作业提交方式」「协作与 AI 使用规则」 were put to the person for graded homework whose
+// course files were on record. What the files settle is read from them; only what changes the plan stays a question.
+test("an important task's questions the files answer become assumptions; the rest still go to the person", async () => {
+  const { stepAnswerSlot } = await import("@crossline/core");
+  const { settleOldQuestions } = await import("./step-planner");
+  const store = new CrosslineStore(":memory:");
+  seed(store);
+  store.saveWorkOrder({ id: "hw", ownerId, workspaceId, identityId: "research", projectId: "ece555", milestoneId: "", intent: "作业 3", state: "approved", riskTier: "routine",
+    estimate: { p25Minutes: 60, p50Minutes: 120, p85Minutes: 240, source: "llm_prior", observationCount: 0, confidence: "low" }, payload: { datePair: { due: "2026-10-20" } } });
+  const questions = [{ id: "q1", text: "作业 3 题面及题目数？", why: "", options: ["5 题", "6 题"] },
+    { id: "q2", text: "协作与 AI 使用规则？", why: "", options: [] },
+    { id: "q3", text: "当前完成状态？", why: "", options: ["未开始", "做了一半"] }];
+  store.saveStepPlan(workspaceId, "hw", { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 1, unit: "题" }, rationale: "", questions, steps: [step("a", "solve")] }, ownerId, "t");
+  // No file for the course yet: nothing can be read, nothing is assumed.
+  settleOldQuestions(store, workspaceId);
+  expect(store.listProfileFacts(workspaceId).some((fact) => fact.slot === stepAnswerSlot("作业 3 题面及题目数？"))).toBe(false);
+  store.saveSourceDocument({ id: "syl", ownerId, workspaceId, kind: "text", fileName: "ECE555 syllabus.pdf", mediaType: "text/plain", sha256: "s", uri: "file://s",
+    extractedText: "Homework policy", extractionStatus: "done", projectId: "ece555", createdAt: "2026-10-01T00:00:00Z" } as never);
+  expect(settleOldQuestions(store, workspaceId)).toContain("hw");
+  const facts = new Map(store.listProfileFacts(workspaceId).map((fact) => [fact.slot, fact.value]));
+  expect(facts.get(stepAnswerSlot("作业 3 题面及题目数？"))).toBe("假设：【作业 3 题面及题目数？】以任务材料为准；材料未写明时按「5 题」");
+  expect(facts.get(stepAnswerSlot("协作与 AI 使用规则？"))).toBe("假设：【协作与 AI 使用规则？】以任务材料为准");
+  expect(facts.has(stepAnswerSlot("当前完成状态？"))).toBe(false);
+  store.close();
 });

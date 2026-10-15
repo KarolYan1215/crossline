@@ -6,7 +6,7 @@
  */
 import type { ProposedAction } from "./concierge";
 
-export type NudgeKind = "block_start" | "block_confirm" | "latest_start" | "timer_overrun" | "background_done" | "energy_check";
+export type NudgeKind = "block_start" | "block_confirm" | "latest_start" | "timer_overrun" | "background_done" | "energy_check" | "outcome_check";
 export type NotifyLevelName = "off" | "less" | "normal" | "more";
 
 /** A button: an action carried out on click, a page to open, an acknowledgement, 「少问这类」, or a cue to type. */
@@ -70,6 +70,12 @@ export type NudgeInput = {
    * hours ago (docs/one-input.md §5.3). Unlimited, as the person chose, but never while they are busy or at night.
    */
   energyCheck?: { nextBlock: string; why: string };
+  /**
+   * Finished work whose result was not known when it was finished (`completion.ts`, needs_assessment), due to be asked about: how it
+   * went, or when its score comes out. Asked only at an idle moment — never urgent, so never while busy or at night — one at a time.
+   * Each option answers the ask `askId`; `later` is the person saying when the result comes, which needs a date, so it is typed.
+   */
+  outcomes?: Array<{ askId: string; orderId: string; question: string; options: Array<{ id: string; label: string }>; laterLabel: string; fingerprint: string }>;
 };
 
 export const DAILY_CAP: Record<NotifyLevelName, number> = { off: 0, less: 3, normal: 6, more: 10 };
@@ -132,6 +138,13 @@ export function nudgeCandidates(input: NudgeInput): PlannedNudge[] {
         buttons: [...(timer.stepId ? [{ kind: "action" as const, label: "这步做完了", action: op(timer.orderId, "step_done", `${what}完成`, { stepId: timer.stepId }) }] : []),
           { kind: "ack", label: "还差一点" }, { kind: "say", label: "卡住了" }, mute] });
     }
+  }
+  const outcome = input.outcomes?.find((item) => !input.sent.has(`outcome:${item.fingerprint}`));
+  if (outcome) {
+    const answer = (option: { id: string; label: string }): NudgeButton => ({ kind: "action", label: option.label,
+      action: { action: "ask.answer", summary: `${outcome.question} ${option.label}`.slice(0, 200), args: { askId: outcome.askId, optionId: option.id, fields: [] } } });
+    out.push({ kind: "outcome_check", fingerprint: `outcome:${outcome.fingerprint}`, urgent: false, counted: true, text: outcome.question,
+      buttons: [...outcome.options.map(answer), { kind: "say", label: outcome.laterLabel }, mute] });
   }
   if (input.energyCheck) {
     const report = (level: "low" | "medium" | "high", word: string): NudgeButton => ({ kind: "action", label: word,

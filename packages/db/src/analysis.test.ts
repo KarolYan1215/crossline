@@ -103,6 +103,17 @@ test("a milestone-bound work order cannot be accepted on an empty evidence set",
   } finally { store.close(); }
 });
 
+test("the person's own 完成 accepts a milestone-bound order with no evidence (owner's decision, 2026-10-15)", () => {
+  const store = new CrosslineStore(":memory:");
+  try {
+    store.saveWorkOrder({ id: "hw2", ownerId: "o", workspaceId: "w", identityId: "research", projectId: "ece555", milestoneId: "m",
+      intent: "完成 ECE 555 作业 2", state: "evidence_review", riskTier: "routine", payload: {},
+      estimate: { p25Minutes: 120, p50Minutes: 180, p85Minutes: 300, source: "llm_prior", observationCount: 0, confidence: "low" } });
+    expect(store.transitionWorkOrder("w", "hw2", { type: "evidence.accepted", approvalId: "o", onCompletion: true }, "done:hw2"))
+      .toMatchObject({ changed: true, state: "accepted" });
+  } finally { store.close(); }
+});
+
 test("milestone gate auto-accepts, can be revoked without losing evidence, and relation refutation questions it", () => {
   const store = new CrosslineStore(":memory:");
   try {

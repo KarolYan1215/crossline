@@ -2,7 +2,7 @@ import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import { copyFileSync, existsSync } from "node:fs";
 import { byproductArtifactId, advanceWorkOrder, validateAnalysisProposal, validateAnalysisContext, validateMilestoneGateResult, requiredContractRequirements, validateSuccessCriteria, summarizeRhythm,
-  currentMineVersion, mineSkillSettingKey, readMineSkill,
+  currentMineVersion, mineSkillSettingKey, readMineSkill, acceptanceStandardLines,
   type MilestoneGateResult, type SuccessCriterion, type WorkOrderEvent, type WorkOrderState,
   type MilestoneTemplateKind, type EvidenceQuestionTemplate, type MilestoneTemplateSource,
   type ChecklistAnswer, type WorkRhythm } from "@crossline/core";
@@ -1280,6 +1280,14 @@ export class CrosslineStore {
           this.#mergeWorkOrderPayload(workspaceId, id, { evidenceChecklist: milestone.evidenceQuestionBank });
         }
       }
+      // The acceptance standard is fixed when the work is approved: judging afterwards uses this and adds nothing (the owner's decision of
+      // 2026-10-15). A standard the person edited before approving is already there and is kept; a re-approval keeps the first one.
+      if (!isCapture && event.type === "plan.approved") {
+        const payload = ((current as StoredWorkOrder).payload ?? {}) as { evidenceContract?: Array<{ description?: string; required?: boolean }>; acceptanceStandard?: unknown };
+        if (!payload.acceptanceStandard)
+          this.#mergeWorkOrderPayload(workspaceId, id, { acceptanceStandard: { fixedAt: update.occurredAt ?? new Date().toISOString(),
+            lines: acceptanceStandardLines(payload.evidenceContract) } });
+      }
       const table = isCapture ? "captures" : "work_orders";
       // A promoted capture keeps its raw text and audit but stops being a capture: without this marker
       // the same id would sit in both tables at the same state and could resurface as analysable.
@@ -1356,8 +1364,10 @@ export class CrosslineStore {
     if (event.type === "evidence.accepted") {
       const order = this.listWorkOrders(workspaceId).find((item) => item.id === id);
       const submitted = this.listEvidenceClaims(workspaceId).filter((claim) => claim.workOrderId === id && claim.reviewStatus === "submitted");
-      // A milestone-bound item cannot be accepted on an empty evidence set.
-      if (order?.milestoneId && !submitted.length) throw new Error("EVIDENCE_REQUIRED");
+      // A milestone-bound item cannot be accepted on an empty evidence set — unless the person pressed 完成 and that is the acceptance
+      // (the owner's decision of 2026-10-15, `completionRule` in core): 「ECE 555 作业 2」 marked done is done, with or without a file.
+      // The rule still holds for every other acceptance (the gate, a manual review, the assistant's delivery).
+      if (order?.milestoneId && !submitted.length && !(event.type === "evidence.accepted" && event.onCompletion)) throw new Error("EVIDENCE_REQUIRED");
       this.#db.prepare("UPDATE evidence_claims SET review_status = 'accepted' WHERE workspace_id = ? AND work_order_id = ? AND review_status = 'submitted'")
         .run(workspaceId, id);
       this.#recordDurationObservationIfCalibratable(workspaceId, id, ownerId, order, update.durationCalibrationBaseline);

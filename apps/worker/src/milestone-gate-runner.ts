@@ -15,7 +15,8 @@ const ARTIFACT_TEXT_LIMIT = 40_000;
 
 const INSTRUCTIONS = "Judge the submitted evidence. Return only the requested JSON. Every quote must be "
   + "copied verbatim from the supplied evidence text — never paraphrased, never invented. `verdict` "
-  + "answers one question only: did this work order deliver what its evidenceContract promised? `pass` "
+  + "answers one question only: did this work order deliver what its evidenceContract promised? The evidenceContract is the "
+  + "acceptance standard fixed when the person approved the task: judge by it alone and never add a requirement of your own. `pass` "
   + "is allowed exactly when every supplied evidenceContract requirement with required=true appears in "
   + "contractCoverage with a non-null satisfiedBy, nothing incomplete blocks passing, and there are no "
   + "blockers; requirements with required=false are still reported but never hold back pass. Copy "

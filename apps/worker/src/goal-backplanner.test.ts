@@ -25,12 +25,12 @@ test("backplanner refuses invented quotes, unknown dependencies and implausible 
     dateCandidates: [], blockers: [] }, ["稳定推进实验"])).toThrow("BACKPLAN_TASK_SIZE");
 });
 
-test("approved goal expands into sourced, bound drafts once; a high-risk step stays a proposal", async () => {
+test("approved goal expands into sourced, bound drafts once; a step that reaches outside stays a proposal", async () => {
   const store = new CrosslineStore(":memory:");
   store.saveMilestone({ id: "m", ownerId, workspaceId, identityId: "research", projectId: "p",
     title: "稳定推进实验", status: "approved", version: 1 });
-  // Steps of an approved milestone take effect by themselves now, unless they are high-risk or reach outside: this one is.
-  const runtime = fakeRuntime([JSON.stringify({ steps: [step({ family: "deep_work", riskTier: "high_risk" })], dateCandidates: [], blockers: [] })],
+  // Steps of an approved milestone take effect by themselves, unless they need the person: this one sends something out.
+  const runtime = fakeRuntime([JSON.stringify({ steps: [step({ family: "deep_work", intent: "把实验方案发送给导师" })], dateCandidates: [], blockers: [] })],
     "crossline:crossline-goal-backplanner");
   const backplan = createGoalBackplanner(store, workspaceId, "C:\\repo", () => runtime.rpc);
   const first = await backplan("m");
@@ -142,8 +142,10 @@ test("a missing input is recorded with who has it, and the milestone is split an
   const blocked = store.listEvents(workspaceId, { type: "goal.backplan_blocked" });
   expect(blocked).toHaveLength(1);
   expect((blocked[0]!.payload as { missing: unknown[] }).missing).toEqual([{ id: "m1", what: "MoS₂ 实测数据", whoHas: "师兄", message: "实测数据还没有到" }]);
+  // Asking 师兄 is one email, not a task (2026-10-15): it is folded into the task that needs the data, as that task's first step.
   const drafts = store.listWorkOrders(workspaceId);
-  expect(drafts.map((order) => (order.payload as { backplan: { acquires?: string } }).backplan.acquires).sort()).toEqual(["m1", undefined]);
+  expect(drafts).toHaveLength(1);
+  expect(drafts[0]!.payload).toMatchObject({ backplan: { acquires: "m1" }, infoRequests: [{ kind: "ask_person", who: "师兄" }] });
   // Open work now serves it, so the timer leaves it alone.
   expect(milestonesAwaitingBackplan(store, workspaceId, new Date("2026-10-06T12:00:00Z"))).toEqual([]);
   store.close();

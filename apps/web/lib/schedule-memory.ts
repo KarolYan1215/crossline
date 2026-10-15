@@ -66,7 +66,7 @@ export async function recordScheduledToday(ctx: AccessContext, now = new Date())
   const instant = (day: string, time: string) => { try { return toZonedInstant(day, time, zone); } catch { return undefined; } };
   getStore().setSetting(ctx.workspaceId, STEP_STARTS_SETTING, JSON.stringify(stepStartsOf(plan.blocks, today, weekEnd, instant)));
   // Each order's earliest block this week, as an instant: the worker prepares tutorials and the assistant's preparation only for work
-  // starting within two days (docs/review-2026-10-13.md §6.1), and it cannot derive the schedule itself.
+  // starting soon (a week for tutorials, two days for the assistant: `apps/worker/src/schedule-window.ts`), and it cannot derive the schedule itself.
   const orderStarts: Record<string, string> = {};
   for (const block of plan.blocks) {
     if (!block.id.startsWith("scheduled:") || !block.day || block.day < today || block.day >= weekEnd) continue;
