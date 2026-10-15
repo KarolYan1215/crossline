@@ -44,7 +44,7 @@ const LOOKS: Record<string, Look> = {
     outfit: "a crisp buttoned shirt under a fitted work apron, sleeve garters, a jeweller's loupe pushed up on the forehead",
     prop: "fine tweezers lowering a tiny gear into an open pocket-watch held close to the face",
     gag: "a small schedule card clipped to the apron with every box neatly ticked, perfectly squared",
-    pose: "bent slightly forward over the watch, one foot exactly beside the other, elbows tucked in", expression: "intensely focused, tongue just visible at the corner of the mouth" },
+    pose: "heels together, leaning forward from the hips, the watch lifted close to one eye and the tweezers poised above it, one elbow out", expression: "intensely focused, one eye squinting" },
   SEMA: { trait: "try it first, let the result speak", build: "wiry and quick",
     hair: { female: "a messy high ponytail with flyaway strands", male: "short tousled hair sticking up at the back" },
     outfit: "a lab coat with sleeves rolled up over a plain sweater, safety goggles pushed up on the head, one smudge on the cheek",
@@ -80,7 +80,7 @@ const LOOKS: Record<string, Look> = {
     outfit: "a long buttoned coat with a scarf flowing behind",
     prop: "a lit lantern held high above the head",
     gag: "the whole audience is one sleepy little bird perched on the shoulder",
-    pose: "standing on a low step, free hand on the chest, coat blown by the wind", expression: "fervent, eyes shining" },
+    pose: "standing tall with feet apart, lantern lifted high overhead, free hand flung out to the side, coat and scarf blowing in the wind", expression: "fervent, eyes shining" },
   SIRA: { trait: "thinks while wandering, shares half-finished thoughts", build: "slight and loose-limbed",
     hair: { female: "a long side braid", male: "wavy hair under a soft beret" },
     outfit: "a hooded travelling cloak over simple clothes, a small lute slung across the back, worn boots",
@@ -92,7 +92,7 @@ const LOOKS: Record<string, Look> = {
     outfit: "a utility vest with many neat pockets over a collared shirt, a pencil behind each ear",
     prop: "a small model made of modular blocks balanced on one palm while the other hand lifts one block to move it",
     gag: "an eraser on a cord worn down to a tiny nub",
-    pose: "crouching slightly to look at the model at eye level", expression: "analytical, one eyebrow raised" },
+    pose: "standing with weight on one leg, the model held at chest height, turning one block between finger and thumb, head tilted to study it", expression: "analytical, one eyebrow raised" },
   GEMA: { trait: "builds whatever works from whatever is at hand", build: "stocky and energetic",
     hair: { female: "two short space buns", male: "a backwards cap over short hair" },
     outfit: "work overalls with one strap undone and the sleeves rolled up, a roll of duct tape worn on the wrist like a bracelet",
@@ -116,7 +116,7 @@ const LOOKS: Record<string, Look> = {
     outfit: "a waistcoat over a shirt with rolled sleeves, sturdy boots",
     prop: "a young sapling in a small pot held carefully in the crook of one arm",
     gag: "a presentation clicker in the other hand and three nearly identical blank slide cards fanned behind",
-    pose: "one foot on a step, leaning forward, looking into the distance", expression: "determined visionary gaze" },
+    pose: "walking briskly forward, the sapling cradled in one arm, the other arm pointing ahead with the clicker", expression: "determined visionary gaze" },
   GIMA: { trait: "keeps inventing new things before finishing the last", build: "small and restless",
     hair: { female: "frizzy hair held back by the goggles", male: "wild spiky hair under the goggles" },
     outfit: "a workshop jacket with goggles pushed up on the head, utility belt, cargo shorts over leggings",
@@ -128,7 +128,7 @@ const LOOKS: Record<string, Look> = {
     outfit: "a windbreaker jacket zipped to the collar, track trousers",
     prop: "a plain flag on a short pole held high, the flag in the backdrop colour with no marks",
     gag: "a completely blank planner tucked under the other arm",
-    pose: "one foot up on a rock, flag raised, heroic", expression: "rousing, mouth open mid-cheer" },
+    pose: "marching forward with long strides, the flag raised high and streaming behind, free fist pumping", expression: "rousing, mouth open mid-cheer" },
   GIRA: { trait: "opens new paths everywhere at once", build: "lean and long-legged",
     hair: { female: "wind-blown shoulder-length hair", male: "messy wind-blown short hair" },
     outfit: "an explorer's jacket, cargo trousers and hiking boots, a small backpack stuffed with rolled maps",
@@ -144,14 +144,28 @@ const LOOKS: Record<string, Look> = {
  * their purple/green/blue/yellow), and every outfit, prop and gag is ours (`LOOKS`). Skin stays medium and there are no glasses, so a
  * person's own appearance can be edited in later.
  */
+/**
+ * The groups' colours in words as well as hex, keyed by the hex so a palette change in `TYPE_GROUPS` that is not named here falls back to
+ * the hex alone instead of naming the wrong colour.
+ */
+const COLOUR_WORDS: Record<string, string> = {
+  "#8C9A7E": "muted sage green", "#E2E6DA": "very pale sage green",
+  "#A88C93": "muted dusty rose", "#EBDEE0": "very pale dusty pink",
+  "#8497A6": "muted haze blue", "#DCE3E9": "very pale grey-blue",
+  "#B48C72": "muted warm clay terracotta", "#EFE2D7": "very pale warm sand"
+};
+const named = (hex: string) => (COLOUR_WORDS[hex] ? `${COLOUR_WORDS[hex]} (${hex})` : hex);
+
 function stylePrompt(tone: string, tint: string): string {
   return [
-    "Exactly one full-body stylized 3D-look cartoon character with the shape language of popular MBTI personality-test avatars: smooth low-poly faceted shapes with soft flat shading on each facet, a clean geometric silhouette, stylised proportions about six heads tall.",
-    "Small head with a minimal face: small dark dot eyes, simple brows, a tiny mouth, almost no nose; not a likeness of any real person.",
-    `Colour: a soft muted Morandi palette, dusty and slightly greyed, low saturation; the outfit's main colour is ${tone}, with off-white and one quiet neutral as accents; no saturated or neon colours.`,
-    "The whole figure from head to shoes is visible, with a soft oval ground shadow, centered, filling about 85% of the frame height with a little margin above the head and below the feet.",
+    "Exactly one full-body character in the angular low-poly 3D style of popular MBTI personality-test avatars: every form is built from a few large flat planar facets with crisp hard edges, like a faceted papercraft figure or a low-polygon game model.",
+    "Chunky squared-off geometry: boxy shoulders and torso, angular jaw, hair made of a few big polygonal chunks, limbs as straight faceted segments, hands as simple geometric mitten shapes, shoes as angular blocks.",
+    "Flat shading with one solid tone per facet and visible facet edges; no smooth gradients, no soft rounded curves, no glossy or realistic render, no outlines. Stylised proportions about six heads tall.",
+    "Small head with a minimal face: small dark dot eyes, simple straight brows, a tiny mouth, no nose detail; not a likeness of any real person.",
+    `Colour: a soft muted Morandi palette, dusty and slightly greyed, low saturation; the outfit's main colour is clearly ${named(tone)} — the most visible garment must be this colour, not grey or another hue — with off-white and one quiet neutral as accents; no saturated or neon colours.`,
+    "The whole figure from head to shoes is visible, standing on the floor with only a soft oval ground shadow under the feet (no rock, step, box, stand or platform unless the pose names one), centered, filling about 85% of the frame height with a little margin above the head and below the feet.",
     "Props drawn simply and clearly readable at small size. An original character design, not a copy of any existing character.",
-    `Backdrop: one flat plain fill of ${tint} from edge to edge; no frame, no scenery.`,
+    `Backdrop: one flat plain fill of ${named(tint)} from edge to edge; no frame, no scenery.`,
     "Absolutely no text, letters, numbers, logos or brand marks anywhere. Tall portrait frame, 2:3."
   ].join(" ");
 }
