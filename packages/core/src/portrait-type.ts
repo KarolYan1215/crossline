@@ -17,12 +17,17 @@ export const TYPE_AXES: Array<{ id: TypeAxisId; left: { letter: string; label: s
   { id: "rhythm", left: { letter: "P", label: "规划", en: "Planning" }, right: { letter: "A", label: "应变", en: "Adapting" }, question: "按计划推进，还是边做边调整" }
 ];
 
-/** The four groups (first two letters), each with its colour — the type card's background and the character's backdrop. */
-export const TYPE_GROUPS: Record<string, { name: string; colour: string; tint: string; blurb: string }> = {
-  SE: { name: "工匠组", colour: "#085E3A", tint: "#DCEBE3", blurb: "在一处做深，用证据说话" },
-  SI: { name: "求索组", colour: "#792E9C", tint: "#EADDF1", blurb: "在一处做深，跟随内在的问题" },
-  GE: { name: "架构组", colour: "#0A5198", tint: "#DAE6F2", blurb: "连接多条线，用证据搭结构" },
-  GI: { name: "开拓组", colour: "#8C3709", tint: "#F1E0D5", blurb: "连接多条线，凭远景开新路" }
+/**
+ * The four groups (first two letters), each one muted Morandi hue (decided 2026-10-14: not the purple/green/blue/yellow of the popular
+ * MBTI test): `tone` is the figure's outfit colour, `tint` the card's and the figure's backdrop, `colour` the same hue deep enough for
+ * text (at least 7:1 on the poster's paper, checked in portrait-type.test.ts) — sage for 工匠组, dusty rose for 求索组, haze blue for
+ * 架构组, clay for 开拓组.
+ */
+export const TYPE_GROUPS: Record<string, { name: string; colour: string; tone: string; tint: string; blurb: string }> = {
+  SE: { name: "工匠组", colour: "#3D4A35", tone: "#8C9A7E", tint: "#E2E6DA", blurb: "在一处做深，用证据说话" },
+  SI: { name: "求索组", colour: "#66404A", tone: "#A88C93", tint: "#EBDEE0", blurb: "在一处做深，跟随内在的问题" },
+  GE: { name: "架构组", colour: "#34495A", tone: "#8497A6", tint: "#DCE3E9", blurb: "连接多条线，用证据搭结构" },
+  GI: { name: "开拓组", colour: "#623E29", tone: "#B48C72", tint: "#EFE2D7", blurb: "连接多条线，凭远景开新路" }
 };
 
 /**
