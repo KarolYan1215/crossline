@@ -31,6 +31,14 @@ apps/web/public/sw.js.map
 # restore to anything usable.
 .crossline-materials/
 .crossline-attachments/
+# Submitted-evidence files (`evidenceAttachmentsRoot`), same reasoning; the e2e suite writes its throwaway ones here too.
+.crossline-evidence/
+
+# Written by every `next dev`/`next build`/`tsc` run and different per build directory (`.next`, `.next-e2e`,
+# `.next-prod`), so tracking them left the tree dirty after each build. Next's own docs say to ignore
+# `next-env.d.ts`; `tsc --noEmit` passes without it.
+next-env.d.ts
+*.tsbuildinfo
 
 # The migration runner's forced pre-migration backup. Named after the database it copied, so it slips
 # past the `*.db` patterns above — thirteen of them reached a commit before this line existed.
