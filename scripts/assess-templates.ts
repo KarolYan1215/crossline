@@ -119,7 +119,7 @@ const LOOKS: Record<string, Look> = {
 /** The three candidates of a type differ in framing of the same look, so the owner chooses between real alternatives. */
 const VARIANTS = [
   "Show the look exactly as described.",
-  "Same look, with a different, more dynamic pose and camera angle.",
+  "Same look, with a different, more dynamic pose and camera angle; still one single figure, not a turnaround or a second view.",
   "Same look, with the gag exaggerated a little more for comic effect, still clean and readable."
 ];
 
@@ -131,7 +131,7 @@ const VARIANTS = [
  */
 function stylePrompt(tint: string, variant: TemplateVariant): string {
   return [
-    "Full-body stylized 3D-look cartoon character in the style of popular MBTI personality-test avatars: smooth low-poly faceted shapes with soft flat shading on each facet, a clean geometric silhouette, slender stylised proportions about six heads tall.",
+    "Exactly one full-body stylized 3D-look cartoon character in the style of popular MBTI personality-test avatars: smooth low-poly faceted shapes with soft flat shading on each facet, a clean geometric silhouette, slender stylised proportions about six heads tall.",
     "Small head with a minimal face: small dark dot eyes, simple brows, a tiny mouth, almost no nose; not a likeness of any real person.",
     variant === "female"
       ? "The character is a young woman: simple neat dark brown hair to the shoulders, medium skin tone, no glasses."
