@@ -61,3 +61,41 @@
 
 /* A block the assistant has, on the day timeline. */
 .dv-block[data-agent] .dv-tag[data-agent]{border-style:dashed}
+
+/* Overlap is allowed, conflict is not: an accepted overlap is outlined dashed and says so; a conflict keeps the red edge and says so. */
+.dv-block[data-overlap-ok]{box-shadow:inset 0 0 0 2px var(--graphite);outline:1px dashed var(--ink);outline-offset:-4px}
+.dv-tag[data-overlap="clash"]{border-color:#C00000;border-width:2px}
+.dv-tag[data-overlap="allowed"]{border-style:dashed}
+.wk-block[data-clash]{box-shadow:inset 0 0 0 2px #C00000}
+.wk-block[data-overlap-ok]{outline:1px dashed var(--ink);outline-offset:-2px}
+
+/* A held block in the panel: what it overlaps, and how to change it. */
+.dq-held{display:grid;gap:8px;padding:8px 0 0;border-top:1px solid var(--mist);font-size:13px;min-width:0}
+.dq-held p{margin:0}
+.dq-held ul{margin:0;padding-left:18px}
+.dq-held-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.dq-held-row label{display:inline-flex;gap:4px;align-items:center}
+.dq-held input,.dq-held textarea{font:inherit;font-size:14px;padding:4px 6px;border:1px solid var(--mist);background:var(--paper);color:var(--ink);min-width:0}
+.dq-held textarea{width:100%;min-height:60px;resize:vertical}
+.dq-held-reply{padding:6px 8px;background:var(--chalk);overflow-wrap:anywhere}
+
+/* Short blocks on the day timeline (layoutDay): a block too short for a line of text is a bare colour bar, and a run of bars close
+   together carries one 「+N 项」 label that opens the list of what they are, so no two pieces of text overlap. */
+.dv-block[data-tight]{padding-top:0;padding-bottom:0}
+.dv-block[data-tight] .dv-block-head b,.dv-block[data-tight] small{line-height:15px}
+.dv-block[data-tight] .dv-tag{line-height:13px}
+.dv-bar{position:absolute;min-height:3px;padding:0;border:0;border-left:4px solid var(--lc,var(--graphite));cursor:pointer;
+  background:color-mix(in srgb,var(--lc,var(--graphite)) 45%,var(--paper));outline:1px solid var(--paper)}
+.dv-bar[data-kind="calendar"],.dv-bar[data-kind="import"],.dv-bar[data-kind="proposed"],.dv-bar[data-kind="optional"]{background:color-mix(in srgb,var(--lc,var(--graphite)) 22%,var(--paper))}
+.dv-bar:hover,.dv-bar[aria-pressed="true"],.dv-bar:focus-visible{background:var(--lc,var(--graphite));outline:2px solid var(--ink)}
+.dv-bar[data-clash]{box-shadow:inset 0 0 0 2px #C00000}
+.dv-more{position:absolute;z-index:3;height:18px;display:flex;justify-content:flex-end;pointer-events:none}
+.dv-more>*{pointer-events:auto}
+.dv-more-label{font:inherit;font-size:12px;line-height:16px;height:18px;padding:0 6px;border:1px solid var(--ink);background:var(--paper);color:var(--ink);cursor:pointer;white-space:nowrap}
+.dv-more-label:hover,.dv-more[data-open] .dv-more-label{background:var(--ink);color:var(--paper)}
+.dv-more-list{display:none;position:absolute;top:18px;right:0;z-index:5;margin:0;padding:4px 0;list-style:none;min-width:min(260px,100%);max-width:360px;
+  background:var(--paper);border:1px solid var(--ink);box-shadow:0 4px 12px rgba(0,0,0,.12)}
+.dv-more:hover .dv-more-list,.dv-more:focus-within .dv-more-list,.dv-more[data-open] .dv-more-list{display:block}
+.dv-more-list button{display:block;width:100%;padding:4px 10px;border:0;border-left:4px solid var(--lc,var(--graphite));background:none;font:inherit;font-size:13px;
+  text-align:left;color:var(--ink);cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dv-more-list button:hover,.dv-more-list button[aria-pressed="true"]{background:var(--chalk)}

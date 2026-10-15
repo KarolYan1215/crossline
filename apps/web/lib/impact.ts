@@ -2,7 +2,7 @@ import "server-only";
 import { EDIT_MINUTES, type AccessContext, type AvailabilityWindow } from "@crossline/core";
 import { DEADLINE_MARGIN_DAYS, type ScheduleParams } from "@crossline/planner";
 import { effectiveSchedulePreferences, getStore, loadCurrentPlan, loadGoalForecast, planToday, resolvedEstimate, saveAvailability, saveGoalSettings,
-  saveLineShares, saveScheduleParams, clearKept, withPreview, type PreviewOverrides } from "./crossline";
+  saveLineShares, saveScheduleParams, clearKept, lockBlock, withPreview, type PreviewOverrides } from "./crossline";
 import { lineLabels } from "./lines";
 import { loadForecastCharts } from "./plan-board";
 import type { ForecastCharts } from "./plan-stats";
@@ -23,7 +23,9 @@ export type Change =
   | { kind: "availability"; windows: AvailabilityWindow[]; timeZone?: string }
   | { kind: "params"; params: ScheduleParams }
   | { kind: "weight"; milestoneId: string; weight: number }
-  | { kind: "shares"; shares: Record<string, number> };
+  | { kind: "shares"; shares: Record<string, number> }
+  /** A held block (started or locked) moved to another time on the day panel; it stays locked there. Times in the person's zone. */
+  | { kind: "move_block"; workOrderId: string; blockId: string; day: string; start: string; end: string };
 
 type TaskChange = Extract<Change, { workOrderId: string }>;
 const isTaskChange = (change: Change): change is TaskChange => "workOrderId" in change;
@@ -60,6 +62,7 @@ export function overridesFor(change: Exclude<Change, { kind: "estimate_delta" }>
   if (change.kind === "params") return { params: change.params };
   if (change.kind === "weight") return { weights: { [change.milestoneId]: change.weight } };
   if (change.kind === "shares") return { lineShares: change.shares };
+  if (change.kind === "move_block") return { lock: { blockId: change.blockId, day: change.day, start: change.start, end: change.end } };
   return change.kind === "estimate"
     ? { estimates: { [change.stepId ? `${change.workOrderId}#${change.stepId}` : change.workOrderId]: change.p50Minutes } }
     : change.kind === "due" ? { dueDates: { [change.workOrderId]: change.date } } : { notBefore: { [change.workOrderId]: change.date } };
@@ -150,6 +153,8 @@ export function applyChange(ctx: AccessContext, requested: Change): { ok: true }
   }
   const order = store.listWorkOrders(ctx.workspaceId).find((item) => item.id === change.workOrderId);
   if (!order) return { ok: false, code: "WORK_ORDER_NOT_FOUND" };
+  // Moved by the person, so locked at the new time (an overlap they accepted at the old time is not carried over).
+  if (change.kind === "move_block") return lockBlock(ctx, change.blockId, { day: change.day, start: change.start, end: change.end }, "locked");
   if (change.kind === "defer") {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(change.date)) return { ok: false, code: "DUE_DATE_INVALID" };
     const payload = (order.payload ?? {}) as Record<string, unknown>;

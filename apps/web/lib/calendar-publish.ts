@@ -1,5 +1,5 @@
 import "server-only";
-import type { AccessContext } from "@crossline/core";
+import { CALENDAR_PUBLISH_FAILURE, type AccessContext } from "@crossline/core";
 import { effectiveSchedulePreferences, getStore, loadCurrentPlan, planToday, toZonedInstant } from "./crossline";
 import { optimalWaitingMs } from "./optimal-schedule";
 
@@ -70,4 +70,32 @@ export function noticeBlocks(ctx: AccessContext, now = new Date()): PublishBlock
     return day >= today ? marker(`deadline:${milestone.id}`, `${DEADLINE_NOTICE_DAYS} 天后到期：${milestone.title}`, day) : [];
   });
   return [...followUps, ...deadlines];
+}
+
+export type PublishStatus = {
+  /** An account to write with was chosen (`calendar.write.account`). */
+  account: boolean;
+  /** The last write that went through, and what it did. */
+  last?: { at: string; created: number; updated: number; deleted: number; unchanged: number; keptAsEdited: number };
+  /** The last write that did not, in the person's words; `relogin` when the account's sign-in has lapsed. */
+  failure?: { at: string; text: string; relogin: boolean };
+};
+
+/** What the calendar card says about writing the Crossline calendar: when it last went through, and why it did not if it did not. */
+export function publishStatus(ctx: AccessContext): PublishStatus {
+  const store = getStore();
+  const account = Boolean(store.getSetting(ctx.workspaceId, "calendar.write.account"));
+  const event = store.listEvents(ctx.workspaceId, { type: "calendar.published" }).at(-1);
+  const payload = event?.payload as { created?: number; updated?: number; deleted?: number; unchanged?: number; keptAsEdited?: number } | undefined;
+  let failure: PublishStatus["failure"];
+  try {
+    const raw = JSON.parse(store.getSetting(ctx.workspaceId, CALENDAR_PUBLISH_FAILURE) || "null") as { code?: string; message?: string; at?: string } | null;
+    if (raw?.code && raw.at) {
+      const relogin = raw.code === "CALENDAR_WRITE_NOT_AUTHORIZED";
+      failure = { at: raw.at, relogin, text: relogin ? "写入账号的登录已过期或未授权，需要本人重新登录" : raw.code === "CODEX_SUPERVISOR_UNAVAILABLE"
+        ? "后台服务未运行，恢复后自动重试" : raw.code === "GRAPH_NOT_CONFIGURED" ? "本机没有配置 Microsoft 日历" : "上次写入未完成，下次自动重试" };
+    }
+  } catch { /* unreadable: none */ }
+  return { account, ...(event && payload ? { last: { at: event.createdAt, created: payload.created ?? 0, updated: payload.updated ?? 0, deleted: payload.deleted ?? 0,
+    unchanged: payload.unchanged ?? 0, keptAsEdited: payload.keptAsEdited ?? 0 } } : {}), ...(failure ? { failure } : {}) };
 }

@@ -5,6 +5,7 @@ import { minuteInZone, monthOf, shiftDay, shiftMonth, weekDays, weekdayOf, type 
 import { DayTimeline, MonthView, WeekView, type LineLabels } from "./views";
 import { ImpactCard, useImpact } from "../task/impact";
 import { DayQuickActions, type QuickProposal } from "./quick-actions";
+import { useReturnState } from "../ui/return-state";
 import type { TaskDetail } from "../../lib/task-detail";
 
 export type CalendarView = "day" | "week" | "month";
@@ -28,6 +29,13 @@ export function CalendarPanel({ items, deadlines, today, nowIso, timeZone, label
   const [selected, setSelected] = useState<TimelineItem | undefined>();
   const impact = useImpact();
   const nowMinute = minuteInZone(nowIso, timeZone);
+  // Back from a task's page, the calendar opens on the view, day and block it was left on.
+  useReturnState("calendar", { view, anchor, picked: selected?.id }, (saved) => {
+    if (saved.view) setView(saved.view);
+    if (saved.anchor) setAnchor(saved.anchor);
+    const picked = saved.picked ? items.find((item) => item.id === saved.picked) : undefined;
+    if (picked) setSelected(picked);
+  });
 
   // The week opens at the start of the working day rather than at midnight.
   useEffect(() => {

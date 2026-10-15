@@ -1,4 +1,4 @@
-import { CrosslineCalendarWriter, type PublishBlock, type PublishLedger, type PublishResult } from "@crossline/connectors";
+import { CrosslineCalendarWriter, PublishInterruptedError, type PublishBlock, type PublishLedger, type PublishResult } from "@crossline/connectors";
 import { FROZEN_SETTING, parseFrozen, withFrozen } from "@crossline/core";
 import type { CrosslineStore } from "@crossline/db";
 
@@ -22,13 +22,30 @@ export function readPublishLedger(store: CrosslineStore, workspaceId: string): P
   try { return JSON.parse(store.getSetting(workspaceId, LEDGER) ?? "{}") as PublishLedger; } catch { return {}; }
 }
 
+/**
+ * One publish per workspace at a time. Each publish reads the record of what was written, changes the calendar and writes the record
+ * back; two at once (the ten-minute pass, the optimal plan landing, the fixed events, the 发布 button) each read the other's fresh writes
+ * as the person's doing. On the real account (2026-10-15) that had locked 56 blocks no one had touched (read back at the other run's
+ * new time = 「dragged」), marked 10 as deleted by the person and left 19 events in the Crossline calendar with no record at all.
+ */
+const queues = new Map<string, Promise<unknown>>();
+function serialized<T>(workspaceId: string, run: () => Promise<T>): Promise<T> {
+  const previous = queues.get(workspaceId) ?? Promise.resolve();
+  const current = previous.catch(() => undefined).then(run);
+  const tail = current.catch(() => undefined);
+  queues.set(workspaceId, tail);
+  void tail.then(() => { if (queues.get(workspaceId) === tail) queues.delete(workspaceId); });
+  return current;
+}
+
 export function createCalendarPublisher(store: CrosslineStore, workspaceId: string, deps: {
   /** A credential for one account, asked for the calendar-write scopes. */
   credentialFor: (accountId: string) => { getAccessToken(): Promise<string | undefined> };
   fetchImpl?: typeof fetch; now?: () => Date;
 }) {
   /** `fixed`: the person's fixed events (ids `fixed:`); `work`: everything else this writer made. Each call manages only its own. */
-  return async function publish(blocks: PublishBlock[], scope: "work" | "fixed" = "work"): Promise<PublishOutcome> {
+  return (blocks: PublishBlock[], scope: "work" | "fixed" = "work"): Promise<PublishOutcome> => serialized(workspaceId, () => publishOnce(blocks, scope));
+  async function publishOnce(blocks: PublishBlock[], scope: "work" | "fixed"): Promise<PublishOutcome> {
     const accountId = store.getSetting(workspaceId, ACCOUNT);
     if (!accountId) return NOT_AUTHORIZED;
     const writer = new CrosslineCalendarWriter({
@@ -48,7 +65,7 @@ export function createCalendarPublisher(store: CrosslineStore, workspaceId: stri
       if (dragged.length) {
         const now = deps.now?.() ?? new Date();
         let frozen = parseFrozen(store.getSetting(workspaceId, FROZEN_SETTING), now);
-        for (const item of dragged) frozen = withFrozen(frozen, { blockId: item.blockId, start: item.start, end: item.end, reason: "locked" });
+        for (const item of dragged) frozen = withFrozen(frozen, { blockId: item.blockId, start: item.start, end: item.end, reason: "locked", via: "calendar" });
         store.setSetting(workspaceId, FROZEN_SETTING, JSON.stringify(frozen));
       }
       const ownerId = store.getWorkspaceOwnerId(workspaceId);
@@ -59,11 +76,13 @@ export function createCalendarPublisher(store: CrosslineStore, workspaceId: stri
       }
       return { state: "published", account: accountId, result };
     } catch (error) {
+      // What was written before it stopped stays on record, so the next run does not take this run's own writes for the person's.
+      if (error instanceof PublishInterruptedError) store.setSetting(workspaceId, LEDGER, JSON.stringify(error.ledger));
       const code = error instanceof Error ? error.message.split(":")[0]! : "CALENDAR_PUBLISH_FAILED";
       if (code === "CALENDAR_WRITE_NOT_AUTHORIZED") return NOT_AUTHORIZED;
       return { state: "blocked", code, message: `Crossline 日历写入未完成；其他日历未受影响。` };
     }
-  };
+  }
 }
 
 export { ACCOUNT as WRITE_ACCOUNT_SETTING };

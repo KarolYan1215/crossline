@@ -1,9 +1,9 @@
 import "server-only";
-import type { AccessContext, AvailabilityWindow } from "@crossline/core";
+import type { AccessContext, AvailabilityWindow, FrozenBlock } from "@crossline/core";
 import { CALENDAR_LINES, CATEGORY_LABEL, calendarLineOf, currentFiling, importedProjects, importedTitle, itemProjectResolver, inferWorkState, stepCategory, suggestAvailability, type ActivitySegment, type CalendarLines, type WorkState } from "@crossline/core";
 import { isAutoHandoff, isPaused, listAgentTasks, readCategories } from "@crossline/db";
 import {
-  ACTIVITY_DETAIL_CONSENT, effectiveSchedulePreferences, getStore, loadCurrentPlan, planToday, readAvailability, toZonedInstant
+  ACTIVITY_DETAIL_CONSENT, effectiveSchedulePreferences, getStore, loadCurrentPlan, planToday, readAvailability, readFrozen, toZonedInstant
 } from "./crossline";
 import { itemsFromPlan, toMinutes, withAgentMarks, type TimelineDeadline, type TimelineItem } from "../app/timeline/model";
 import { identityLines } from "./lines";
@@ -89,6 +89,19 @@ export function currentWorkState(ctx: AccessContext, plan: Awaited<ReturnType<ty
 const DATE_KIND_LABEL: Record<string, string> = { class: "上课", quiz: "小测", homework_out: "作业发布", homework_due: "作业截止", exam: "考试",
   project_due: "项目截止", deadline: "截止", meeting: "会议", other: "其他" };
 
+/**
+ * Why a work block keeps its time (`schedule.frozen`), whether the person accepted an overlap and whether the lock came from their
+ * calendar app. Only when the block still sits at the frozen time: an entry the planner let go may share its id with a block placed anew.
+ */
+function withFrozenState(item: TimelineItem, held: Map<string, FrozenBlock>, zone: string): TimelineItem {
+  const entry = item.kind === "scheduled" ? held.get(item.id) : undefined;
+  if (!entry) return item;
+  try {
+    if (Date.parse(toZonedInstant(item.day, item.start, zone)) !== Date.parse(entry.start)) return item;
+  } catch { return item; }
+  return { ...item, frozen: entry.reason, ...(entry.overlapOk ? { overlapOk: true } : {}), ...(entry.via ? { lockedVia: entry.via } : {}) };
+}
+
 /** Everything the three calendar views draw, read once: the plan's blocks, what is due, and the person's own hours. */
 export async function loadTimeline(ctx: AccessContext, loaded?: Awaited<ReturnType<typeof loadCurrentPlan>>): Promise<TimelineData> {
   const store = getStore();
@@ -106,6 +119,7 @@ export async function loadTimeline(ctx: AccessContext, loaded?: Awaited<ReturnTy
   const knownProjects = store.listProjects(ctx.workspaceId).map((project) => ({ id: project.id, name: project.name, identityId: project.identityId }));
   const projectOfItem = itemProjectResolver(knownProjects, store.listSourceDocuments(ctx.workspaceId));
   const imported = importedProjects(store.listEvents(ctx.workspaceId, { type: "dates.extracted" }), projectOfItem);
+  const held = new Map(readFrozen(ctx, instantNow()).map((entry) => [entry.blockId, entry]));
   const items = [...withAgentMarks(itemsFromPlan(plan.blocks, today, meta), agentMarks(ctx)).map((item) => {
     if (item.kind !== "calendar" && item.kind !== "import") return item;
     const named = item.kind === "import" ? { ...item, title: importedTitle(item.id, item.title, imported) } : item;
@@ -113,7 +127,7 @@ export async function loadTimeline(ctx: AccessContext, loaded?: Awaited<ReturnTy
     // An event the person added names its line itself; only when it does not is it filed like any calendar title.
     const lineId = (item.id.startsWith("event:") ? eventLine.get(item.id.split(":")[1]!) : "") || calendarLineOf(filing, named.title);
     return lineId ? { ...named, identityId: lineId } : named;
-  }), ...activityItems(ctx, zone, instantNow())];
+  }).map((item) => withFrozenState(item, held, zone)), ...activityItems(ctx, zone, instantNow())];
 
   // What is due: each live milestone's deadline, and every confirmed dated fact the person's files gave us.
   const anchors = new Map(store.listMilestoneAnchors(ctx.workspaceId).map((anchor) => [anchor.milestoneId, anchor]));

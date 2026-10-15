@@ -72,3 +72,25 @@ test("the commit window: a block starting within fifteen minutes keeps its time 
   expect(frozen[1]!.until).toBe("2026-09-18T13:40:00.000Z");
   expect(readFrozen(TEST_CTX, new Date("2026-09-18T13:41:00.000Z")).map((item) => item.blockId)).toEqual([]);
 });
+
+test("改时间 on a held block is previewed without writing, then locks it at the new time; deferring the task voids an older lock", async () => {
+  const store = setup();
+  await loadCurrentPlan(TEST_CTX);
+  const order = store.listWorkOrders(TEST_CTX.workspaceId).find((item) => item.identityId === "research")!;
+  store.saveWorkOrder({ ...order, state: "ready_for_human", estimate: { ...order.estimate, p25Minutes: 60, p50Minutes: 60, p85Minutes: 60, confidence: "high" },
+    payload: { ...(order.payload as object), humanCore: [{ energy: "high", interruptible: true }] } });
+  const id = `scheduled:${order.id}`;
+  expect(lockBlock(TEST_CTX, id, { day: "2026-09-19", start: "09:00", end: "10:00" }, "locked")).toEqual({ ok: true });
+  const { previewChange, applyChange } = await import("./impact");
+  const move = { kind: "move_block" as const, workOrderId: order.id, blockId: id, day: "2026-09-19", start: "15:00", end: "16:00" };
+  const impact = await previewChange(TEST_CTX, move);
+  expect(impact.task?.firstAfter).toBe("2026-09-19 15:00");
+  expect(readFrozen(TEST_CTX, new Date(NOW))[0]).toMatchObject({ start: "2026-09-19T14:00:00.000Z" });
+  expect(applyChange(TEST_CTX, move)).toEqual({ ok: true });
+  expect((await loadCurrentPlan(TEST_CTX)).blocks.find((block) => block.id === id)).toMatchObject({ day: "2026-09-19", start: "15:00", tag: "已锁定" });
+  // 「推到 21 号再做」: the lock on the 19th no longer holds the task there.
+  store.saveWorkOrder({ ...store.listWorkOrders(TEST_CTX.workspaceId).find((item) => item.id === order.id)!,
+    payload: { ...(order.payload as object), humanCore: [{ energy: "high", interruptible: true }], notBefore: "2026-09-21" } });
+  const after = (await loadCurrentPlan(TEST_CTX)).blocks.filter((block) => block.id.startsWith(id));
+  expect(after.every((block) => (block.day ?? "") >= "2026-09-21")).toBe(true);
+});

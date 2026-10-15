@@ -26,6 +26,13 @@ export type TimelineItem = {
   stepId?: string;
   /** The assistant has this block's step: `planned` = 「自动交给 Agent」 will start it when the block comes up; `running` = it is at work on it. */
   agent?: "planned" | "running";
+  /**
+   * A work block that keeps its time while the rest is re-planned (`schedule.frozen`): started, locked, kept by a local re-plan or about
+   * to start. `overlapOk`: the person accepted that it overlaps something; `lockedVia: "calendar"`: locked by dragging it on their calendar app.
+   */
+  frozen?: "pinned" | "locked" | "keep" | "commit";
+  overlapOk?: boolean;
+  lockedVia?: "calendar";
   source: string;
   readOnly: boolean;
 };
@@ -111,6 +118,34 @@ export function conflictingIds(items: Array<{ id: string; start: string; end: st
   return out;
 }
 
+const WORK_KINDS: ReadonlyArray<TimelineItem["kind"]> = ["scheduled", "optional", "proposed"];
+export type OverlapState = "clash" | "allowed";
+/**
+ * How each item that shares time with another is drawn. Overlap is allowed, conflict is not (the person's rule, 2026-10-15):
+ * - `allowed`: a work block whose overlap the person accepted (「保留重叠」 on a held block) — side by side, labelled 「已允许重叠」;
+ * - `clash`: work on top of anything else without that acceptance — the scheduler does not do this on its own, so one on screen is a
+ *   held block a new event landed on, waiting for the person's answer.
+ * Two of the person's own commitments (calendar events, class meetings, events they added) sharing time is their calendar as it is,
+ * and what screen activity recorded is what happened: neither is marked. A clash wins over an allowed overlap on the same item.
+ */
+export function overlapStates(items: TimelineItem[]): Map<string, OverlapState> {
+  const out = new Map<string, OverlapState>();
+  const relevant = items.filter((item) => item.kind !== "activity");
+  for (let i = 0; i < relevant.length; i += 1) for (let j = i + 1; j < relevant.length; j += 1) {
+    const a = relevant[i]!, b = relevant[j]!;
+    if (a.day !== b.day || !overlaps(a, b)) continue;
+    const work = [a, b].filter((item) => WORK_KINDS.includes(item.kind));
+    if (!work.length) continue;
+    const state: OverlapState = work.some((item) => item.overlapOk) ? "allowed" : "clash";
+    for (const item of [a, b]) if (out.get(item.id) !== "clash") out.set(item.id, state);
+  }
+  return out;
+}
+
+/** The items a block shares time with on its day (activity left out), for saying what a held block overlaps. */
+export const overlapping = (items: TimelineItem[], of: TimelineItem): TimelineItem[] =>
+  items.filter((item) => item.id !== of.id && item.day === of.day && item.kind !== "activity" && overlaps(item, of));
+
 type PlanBlock = { id: string; lane: "human" | "ai"; title: string; task?: string; step?: string; tag?: string; day?: string; start: string; end: string; source: string; readOnly: boolean };
 export type WorkOrderMeta = { identityId: string; milestone?: string };
 
@@ -155,4 +190,87 @@ export function dayRange(items: Array<{ start: string; end: string }>): { from: 
   const from = Math.floor(Math.min(7 * 60, ...starts) / 60) * 60;
   const to = Math.ceil(Math.max(22 * 60, ...ends) / 60) * 60;
   return { from, to: Math.min(MINUTES_PER_DAY, to) };
+}
+
+/** The least height, in pixels, a day-view block needs to carry one line of text. Anything shorter is drawn as a bare colour bar. */
+export const MIN_TEXT_PX = 18;
+
+type Slot = { column: number; columns: number };
+/**
+ * One piece of the vertical day view, in pixels from the top of the drawn range:
+ * - `block`: tall enough for its text, drawn at its true time and height; `textTop` pushes the text below a `more` label sitting on
+ *   its top edge (0 almost always);
+ * - `bar`: too short for a line of text, a colour bar at its true time with no text (its title is in the tooltip and the list);
+ * - `more`: the 「+N 项」 label over a run of bars close together, opening the list of what they are.
+ */
+export type DayPiece<T> =
+  | ({ kind: "block"; item: T; top: number; height: number; textTop: number } & Slot)
+  | ({ kind: "bar"; item: T; top: number; height: number } & Slot)
+  | ({ kind: "more"; items: T[]; top: number; height: number } & Slot);
+
+const sideBySide = (a: Slot, b: Slot) => a.column / a.columns < (b.column + 1) / b.columns && b.column / b.columns < (a.column + 1) / a.columns;
+
+/**
+ * Lays out the vertical day so that no two pieces of text ever overlap (the real account's 11:35–11:47 and 11:47–11:55 blocks were
+ * both stretched to a minimum height and wrote over each other). Blocks that share time sit side by side (`packColumns`). A block
+ * shorter than `MIN_TEXT_PX` carries no text: it is a bar, and bars sharing width less than a line apart are one run, labelled
+ * 「+N 项」 once it holds two or more. A label is one line tall at the run's top; a block starting under it has its text moved down
+ * below it, and one left with less than a line of its own joins the run.
+ */
+export function layoutDay<T extends { id: string; start: string; end: string }>(items: T[], from: number, pxPerHour: number): Array<DayPiece<T>> {
+  const px = (minutes: number) => (minutes / 60) * pxPerHour;
+  const placed = packColumns(items).map(({ item, column, columns }) => {
+    const start = toMinutes(item.start), end = Math.max(toMinutes(item.end), start + 1);
+    return { item, column, columns, top: px(start - from), height: px(end - start) };
+  });
+  type Placed = (typeof placed)[number];
+  type Run = Slot & { members: Placed[]; top: number; bottom: number };
+  const runs: Run[] = [];
+  const join = (entry: Placed) => {
+    const run = runs.find((candidate) => sideBySide(candidate, entry)
+      && entry.top - candidate.bottom < MIN_TEXT_PX && candidate.top - (entry.top + entry.height) < MIN_TEXT_PX);
+    if (run) { run.members.push(entry); run.top = Math.min(run.top, entry.top); run.bottom = Math.max(run.bottom, entry.top + entry.height); }
+    else runs.push({ column: entry.column, columns: entry.columns, members: [entry], top: entry.top, bottom: entry.top + entry.height });
+  };
+  const tall = new Map<string, Placed & { textTop: number }>();
+  for (const entry of placed) {
+    if (entry.height < MIN_TEXT_PX) join(entry);
+    else tall.set(entry.item.id, { ...entry, textTop: 0 });
+  }
+  // A label covers [run.top, run.top + MIN_TEXT_PX) in its column. A block whose text would start under it is pushed down, or, with
+  // less than a line left, becomes one more bar of the run — which can lengthen the run, so repeat until nothing moves.
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const run of runs) {
+      if (run.members.length < 2) continue;
+      const labelEnd = run.top + MIN_TEXT_PX;
+      for (const block of [...tall.values()]) {
+        if (!sideBySide(run, block) || block.top < run.top || block.top >= labelEnd) continue;
+        const textTop = labelEnd - block.top;
+        if (block.height - textTop >= MIN_TEXT_PX) { if (block.textTop !== textTop) { block.textTop = textTop; changed = true; } continue; }
+        tall.delete(block.item.id);
+        run.members.push(block); run.bottom = Math.max(run.bottom, block.top + block.height);
+        changed = true;
+      }
+    }
+    // Two runs sharing width that a demotion brought within a line of each other become one, so two labels never meet.
+    for (let i = 0; i < runs.length; i += 1) for (let j = runs.length - 1; j > i; j -= 1) {
+      const a = runs[i]!, b = runs[j]!;
+      if (!sideBySide(a, b) || b.top - a.bottom >= MIN_TEXT_PX || a.top - b.bottom >= MIN_TEXT_PX) continue;
+      a.members.push(...b.members); a.top = Math.min(a.top, b.top); a.bottom = Math.max(a.bottom, b.bottom);
+      runs.splice(j, 1); changed = true;
+    }
+  }
+  const pieces: Array<DayPiece<T>> = [];
+  for (const entry of placed) {
+    const block = tall.get(entry.item.id);
+    if (block) pieces.push({ kind: "block", item: block.item, column: block.column, columns: block.columns, top: block.top, height: block.height, textTop: block.textTop });
+    else pieces.push({ kind: "bar", item: entry.item, column: entry.column, columns: entry.columns, top: entry.top, height: entry.height });
+  }
+  for (const run of runs) {
+    if (run.members.length < 2) continue;
+    const members = [...run.members].sort((a, b) => a.top - b.top);
+    pieces.push({ kind: "more", items: members.map((member) => member.item), column: run.column, columns: run.columns, top: run.top, height: MIN_TEXT_PX });
+  }
+  return pieces;
 }

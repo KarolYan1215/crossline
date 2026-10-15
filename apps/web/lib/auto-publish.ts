@@ -43,8 +43,26 @@ export async function autoPublishPass(now = new Date()): Promise<Array<{ workspa
   return outcomes;
 }
 
-/** One workspace's publish; undefined when it has no writer account. `pending`: the optimal plan is still being solved. */
-export async function publishWorkspace(workspaceId: string, now = new Date()): Promise<string | undefined> {
+/**
+ * One workspace's publish; undefined when it has no writer account. `pending`: the optimal plan is still being solved. A call while
+ * one is running joins it and asks for one more pass after it, with the plan as it is then: the ten-minute pass, the optimal plan
+ * landing and an answered ask often come together, and each is a full read and write of the calendar (the worker also runs them one
+ * at a time, which is what keeps them from reading each other's writes as the person's).
+ */
+const running = new Map<string, Promise<string | undefined>>();
+const again = new Set<string>();
+export function publishWorkspace(workspaceId: string, now = new Date()): Promise<string | undefined> {
+  const current = running.get(workspaceId);
+  if (current) { again.add(workspaceId); return current; }
+  const run = publishOnce(workspaceId, now).finally(() => {
+    running.delete(workspaceId);
+    if (again.delete(workspaceId)) void publishWorkspace(workspaceId).catch(() => undefined);
+  });
+  running.set(workspaceId, run);
+  return run;
+}
+
+async function publishOnce(workspaceId: string, now: Date): Promise<string | undefined> {
   const store = getStore();
   const ownerId = store.getWorkspaceOwnerId(workspaceId);
   if (!ownerId || !store.getSetting(workspaceId, "calendar.write.account")) return undefined;

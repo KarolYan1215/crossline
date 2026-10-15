@@ -6,7 +6,7 @@ import { isCrossSiteWrite } from "../../../../lib/same-origin";
 import { withUndo } from "../../../../lib/undo";
 
 const CHANGE_LABEL: Record<string, string> = { estimate: "修改时长", estimate_delta: "修改时长", due: "修改截止日", defer: "推迟开始",
-  availability: "修改可用时段", params: "修改排程参数", weight: "修改重要性", shares: "修改主线份额" };
+  availability: "修改可用时段", params: "修改排程参数", weight: "修改重要性", shares: "修改主线份额", move_block: "改时间" };
 
 const parse = (value: unknown): Change | undefined => {
   const body = value as Partial<Record<string, unknown>> | undefined;
@@ -27,6 +27,11 @@ const parse = (value: unknown): Change | undefined => {
     return { kind: "estimate_delta", workOrderId: body.workOrderId, deltaMinutes: body.deltaMinutes, ...(typeof body.stepId === "string" ? { stepId: body.stepId } : {}) };
   if (body.kind === "due" && typeof body.date === "string") return { kind: "due", workOrderId: body.workOrderId, date: body.date };
   if (body.kind === "defer" && typeof body.date === "string") return { kind: "defer", workOrderId: body.workOrderId, date: body.date };
+  // A held block of this task at a new time on one day: `scheduled:<task>…` only, HH:MM, end after start.
+  if (body.kind === "move_block" && typeof body.blockId === "string" && body.blockId.split(":")[0] === "scheduled" && body.blockId.split(":")[1] === body.workOrderId
+    && typeof body.day === "string" && /^\d{4}-\d{2}-\d{2}$/.test(body.day) && typeof body.start === "string" && /^\d{2}:\d{2}$/.test(body.start)
+    && typeof body.end === "string" && /^\d{2}:\d{2}$/.test(body.end) && body.end > body.start)
+    return { kind: "move_block", workOrderId: body.workOrderId, blockId: body.blockId, day: body.day, start: body.start, end: body.end };
   return undefined;
 };
 

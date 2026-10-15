@@ -22,7 +22,44 @@ export type FrozenBlock = {
   until?: string;
   /** The person accepted that it overlaps a hard constraint (「保留重叠」 / 「钉回原位」). */
   overlapOk?: boolean;
+  /** `calendar`: locked because the person dragged the event on their calendar app, not by a button in Crossline. */
+  via?: "calendar";
 };
+
+/** Started or locked by the person: kept where it is and asked about, never moved without a word. */
+export const isHeld = (item: FrozenBlock) => item.reason === "pinned" || item.reason === "locked";
+
+export type FrozenConflict = { blockId: string; with: string; kind: "busy" | "frozen" };
+
+/**
+ * Which frozen blocks hold this time, and which stand in each other's way (docs/loop-and-scout.md §1). A `keep` or `commit` block
+ * that a hard constraint, a held block or an earlier kept block now lands on is let go, so the planner places it again; a held one
+ * (`pinned`/`locked`) stays and, unless the person accepted the overlap (`overlapOk`), is reported as a conflict for them to settle.
+ * A block of work the person has since deferred (`notBefore` after its start) is let go too: deferring the task voids its earlier lock
+ * (not a block they started: that is what they did, not what was planned).
+ * Instants are milliseconds; `busy` is the calendar, imported class meetings, the person's own events and any delay they asked for.
+ */
+export function settleFrozen(list: FrozenBlock[], busy: Array<{ id: string; start: number; end: number }>,
+  notBefore: (blockId: string) => number | undefined = () => undefined): { kept: FrozenBlock[]; released: FrozenBlock[]; conflicts: FrozenConflict[] } {
+  const span = (item: FrozenBlock) => ({ start: Date.parse(item.start), end: Date.parse(item.end) });
+  const hits = (a: { start: number; end: number }, b: { start: number; end: number }) => a.start < b.end && b.start < a.end;
+  const rank = (item: FrozenBlock) => isHeld(item) ? 0 : item.reason === "commit" ? 1 : 2;
+  const ordered = [...list].sort((a, b) => rank(a) - rank(b) || Date.parse(a.start) - Date.parse(b.start));
+  const kept: FrozenBlock[] = [], released: FrozenBlock[] = [], conflicts: FrozenConflict[] = [];
+  for (const item of ordered) {
+    const at = span(item);
+    const releaseFrom = notBefore(item.blockId);
+    if (releaseFrom !== undefined && item.reason !== "pinned" && at.start < releaseFrom) { released.push(item); continue; }
+    const onBusy = busy.filter((block) => hits(at, block));
+    const onFrozen = kept.filter((other) => hits(at, span(other)));
+    if (!isHeld(item) && (onBusy.length || onFrozen.length)) { released.push(item); continue; }
+    kept.push(item);
+    if (item.overlapOk) continue;
+    for (const block of onBusy) conflicts.push({ blockId: item.blockId, with: block.id, kind: "busy" });
+    for (const other of onFrozen) if (!other.overlapOk) conflicts.push({ blockId: item.blockId, with: other.blockId, kind: "frozen" });
+  }
+  return { kept: list.filter((item) => kept.includes(item)), released, conflicts };
+}
 
 const REASONS = new Set(["pinned", "locked", "keep", "commit"]);
 

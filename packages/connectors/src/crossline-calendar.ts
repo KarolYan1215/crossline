@@ -42,6 +42,24 @@ export type PublishResult = {
   keptAsEdited: string[];
 };
 
+export type PublishOptions = {
+  /** Which of this writer's events this call is responsible for (work blocks, or the person's fixed events); others are left as they are. */
+  manages?: (blockId: string) => boolean;
+  /** Blocks whose task is finished: their leftover future events go even if the person changed them. */
+  forceRemove?: (blockId: string) => boolean;
+};
+/** A publish that stopped part way. `ledger` holds what was written before it stopped, for the caller to keep; the message keeps the cause's code. */
+export class PublishInterruptedError extends Error {
+  readonly ledger: PublishLedger;
+  readonly original: unknown;
+  constructor(original: unknown, ledger: PublishLedger) {
+    super(original instanceof Error ? original.message : String(original));
+    this.name = "PublishInterruptedError";
+    this.ledger = ledger;
+    this.original = original;
+  }
+}
+
 type Credential = { getAccessToken(): Promise<string | undefined> };
 type GraphEvent = {
   id?: string; subject?: string; start?: { dateTime?: string }; end?: { dateTime?: string };
@@ -105,7 +123,13 @@ export class CrosslineCalendarWriter {
     const path = pathOrUrl.startsWith(BASE) ? pathOrUrl.slice(BASE.length) : pathOrUrl;
     const route = path.split("?")[0]!;
     this.#assertWritable(method, route, body);
-    const token = await this.#credential.getAccessToken();
+    const token = await this.#credential.getAccessToken().catch((error: unknown) => {
+      // A sign-in that has lapsed (MSAL asks for interaction) is the person's to renew, not a failure to retry.
+      const { name, errorCode } = (error ?? {}) as { name?: string; errorCode?: string };
+      if (name === "InteractionRequiredAuthError" || ["invalid_grant", "interaction_required", "login_required", "consent_required"].includes(errorCode ?? ""))
+        throw new Error("CALENDAR_WRITE_NOT_AUTHORIZED");
+      throw error;
+    });
     if (!token) throw new Error("CALENDAR_WRITE_NOT_AUTHORIZED");
     const response = await this.#fetch(`${BASE}${path}`, {
       method,
@@ -132,9 +156,12 @@ export class CrosslineCalendarWriter {
     return made.id;
   }
 
-  /** The events in the Crossline calendar that this writer made, by block id. Everything else in there is the person's. */
-  async #ownedEvents(calendarId: string): Promise<Map<string, GraphEvent & { id: string }>> {
-    const owned = new Map<string, GraphEvent & { id: string }>();
+  /**
+   * The events in the Crossline calendar that this writer made, by block id — every copy, since two writes that once overlapped could
+   * each have made one for the same block. Everything else in there is the person's.
+   */
+  async #ownedEvents(calendarId: string): Promise<Map<string, Array<GraphEvent & { id: string }>>> {
+    const owned = new Map<string, Array<GraphEvent & { id: string }>>();
     const filter = encodeURIComponent(`id eq '${OWNER_PROPERTY_ID}'`);
     let url: string | undefined = `/me/calendars/${encodeURIComponent(calendarId)}/events?$top=100&$select=id,subject,start,end,isReminderOn,reminderMinutesBeforeStart&$expand=singleValueExtendedProperties($filter=${filter})`;
     for (let pages = 0; url && pages < 30; pages += 1) {
@@ -143,7 +170,7 @@ export class CrosslineCalendarWriter {
       const body = await response.json() as { value?: GraphEvent[]; "@odata.nextLink"?: string };
       for (const event of body.value ?? []) {
         const marker = event.singleValueExtendedProperties?.find((property) => property.id?.toLowerCase() === OWNER_PROPERTY_ID.toLowerCase());
-        if (event.id && marker?.value) { owned.set(marker.value, event as GraphEvent & { id: string }); this.#owned.add(event.id); }
+        if (event.id && marker?.value) { owned.set(marker.value, [...owned.get(marker.value) ?? [], event as GraphEvent & { id: string }]); this.#owned.add(event.id); }
       }
       url = body["@odata.nextLink"];
     }
@@ -156,17 +183,31 @@ export class CrosslineCalendarWriter {
    * where they put it (the caller locks that block there), a renamed one keeps their title while its time follows the plan, a deleted
    * one is not made again.
    */
-  async publish(blocks: PublishBlock[], ledger: PublishLedger, options: {
-    /** Which of this writer's events this call is responsible for (work blocks, or the person's fixed events); others are left as they are. */
-    manages?: (blockId: string) => boolean;
-    /** Blocks whose task is finished: their leftover future events go even if the person changed them. */
-    forceRemove?: (blockId: string) => boolean;
-  } = {}): Promise<{ result: PublishResult; ledger: PublishLedger; edits: CalendarEdits }> {
+  async publish(blocks: PublishBlock[], ledger: PublishLedger, options: PublishOptions = {}): Promise<{ result: PublishResult; ledger: PublishLedger; edits: CalendarEdits }> {
+    // The record is updated in place as each event is written, so a failure part way hands back what was already done
+    // (`PublishInterruptedError`). A record that forgot an event it had moved, made or removed read that as the person's doing next
+    // time: a move became a lock, a made event became the person's for good, a removal became 「deleted by the person」.
+    const next: PublishLedger = { ...ledger };
+    try {
+      return await this.#publishInto(blocks, ledger, options, next);
+    } catch (error) {
+      throw new PublishInterruptedError(error, next);
+    }
+  }
+
+  async #publishInto(blocks: PublishBlock[], ledger: PublishLedger, options: PublishOptions, next: PublishLedger): Promise<{ result: PublishResult; ledger: PublishLedger; edits: CalendarEdits }> {
     const manages = options.manages ?? (() => true);
     const calendarId = await this.ensureCalendar();
-    const owned = await this.#ownedEvents(calendarId);
+    const copies = await this.#ownedEvents(calendarId);
+    // One event per block: the one the record names, else the first. Any other is a copy, settled below.
+    const owned = new Map<string, GraphEvent & { id: string }>();
+    const extras: Array<{ blockId: string; event: GraphEvent & { id: string } }> = [];
+    for (const [blockId, events] of copies) {
+      const primary = events.find((event) => event.id === ledger[blockId]?.eventId) ?? events[0]!;
+      owned.set(blockId, primary);
+      for (const event of events) if (event !== primary) extras.push({ blockId, event });
+    }
     const now = this.#now().getTime();
-    const next: PublishLedger = { ...ledger };
     const result: PublishResult = { calendarId, created: 0, updated: 0, deleted: 0, unchanged: 0, keptAsEdited: [] };
     const events = `/me/calendars/${encodeURIComponent(calendarId)}/events`;
     const instant = (dateTime: string | undefined) => dateTime ? new Date(`${minute(dateTime)}:00Z`).toISOString() : "";
@@ -193,6 +234,27 @@ export class CrosslineCalendarWriter {
     for (const item of edits.retitled) next[item.blockId] = { ...next[item.blockId]!, personTitle: item.title };
     for (const blockId of edits.removed) next[blockId] = { ...next[blockId]!, removedByPerson: true };
 
+    // A second event for one block, left by two writes that once overlapped. An exact copy of what was recorded for that block is this
+    // writer's own and goes (future only); one that differs from the record may have been changed by the person and is left alone.
+    // An event that carries this writer's marker but has no record at all is an orphan: made by a run whose record was then lost, so
+    // nobody could have changed it relative to a record. The owner decided (2026-10-15) that a future orphan goes; a past one stays.
+    const futureStart = (event: GraphEvent) => { const at = Date.parse(instant(event.start?.dateTime)); return Number.isFinite(at) && at > now; };
+    const deleteEvent = async (event: GraphEvent & { id: string }) => {
+      const response = await this.#call("DELETE", `${events}/${encodeURIComponent(event.id)}`);
+      if (!response.ok && response.status !== 404) throw new Error(`CALENDAR_EVENT_DELETE_FAILED:${response.status}`);
+      result.deleted += 1;
+    };
+    for (const { blockId, event } of extras) {
+      if (!manages(blockId)) continue;
+      if (!futureStart(event)) continue;
+      const entry = ledger[blockId];
+      if (!entry && !next[blockId]) { await deleteEvent(event); continue; }
+      const copy = Boolean(entry?.start) && !entry!.recurrence && (event.subject ?? "") === (entry!.personTitle ?? entry!.title)
+        && minute(event.start?.dateTime ?? "") === minute(entry!.start) && minute(event.end?.dateTime ?? "") === minute(entry!.end);
+      if (!copy) { result.keptAsEdited.push(blockId); continue; }
+      await deleteEvent(event);
+    }
+
     const wanted = new Set<string>();
     for (const block of blocks) {
       // A series counts while its last day is ahead; a single event while it has not ended.
@@ -203,7 +265,9 @@ export class CrosslineCalendarWriter {
       const reminder = block.reminderMinutes ?? null;
       const reminderFields = reminder === null ? { isReminderOn: false } : { isReminderOn: true, reminderMinutesBeforeStart: reminder };
       const series = block.recurrence ? { recurrence: recurrenceKey(block.recurrence) } : {};
-      const existing = owned.get(block.id);
+      let existing = owned.get(block.id);
+      // A future orphan for a block the plan still has: removed and written afresh, so it is on record from now on.
+      if (existing && !entry && futureStart(existing)) { await deleteEvent(existing); owned.delete(block.id); existing = undefined; }
       if (!existing) {
         const response = await this.#call("POST", events, {
           subject: block.title, start: asGraphTime(block.start), end: asGraphTime(block.end), categories: [CROSSLINE_CALENDAR_NAME], showAs: "free", ...reminderFields,
@@ -253,7 +317,8 @@ export class CrosslineCalendarWriter {
       const entry = next[blockId];
       const start = Date.parse(event.start?.dateTime ? minute(event.start.dateTime) + ":00Z" : "");
       if (!Number.isFinite(start) || start <= now) continue;
-      const theirs = legacyEdited.has(blockId) || !entry || entry.eventId !== event.id || moved.has(blockId) || Boolean(entry.personTitle);
+      // No record at all: an orphan (above), removed. A record naming another event, a move or a title of theirs: the person's.
+      const theirs = Boolean(entry) && (legacyEdited.has(blockId) || entry!.eventId !== event.id || moved.has(blockId) || Boolean(entry!.personTitle));
       if (theirs && !options.forceRemove?.(blockId)) {
         result.keptAsEdited.push(blockId);
         continue;

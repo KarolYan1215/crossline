@@ -2,16 +2,19 @@
 
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import {
-  MINUTES_PER_DAY, conflictingIds, dayRange, itemsOn, monthGrid, packColumns, toMinutes, weekDays,
+  MINUTES_PER_DAY, dayRange, itemsOn, layoutDay, monthGrid, overlapStates, packColumns, toMinutes, weekDays,
   type TimelineDeadline, type TimelineItem
 } from "./model";
+import "./day-panel.css";
 
 export type LineLabels = Record<string, string>;
 const WEEKDAY = ["一", "二", "三", "四", "五", "六", "日"];
 const KIND_LABEL: Record<TimelineItem["kind"], string> = { calendar: "日历", scheduled: "排程", proposed: "预览", optional: "预排", import: "文件", activity: "实际" };
 
 const lineOf = (identityId?: string) => identityId ?? "none";
+const WORK = new Set<TimelineItem["kind"]>(["scheduled", "optional", "proposed"]);
 const timeText = (item: { start: string; end: string }) => `${item.start}–${item.end}`;
+const OVERLAP_TEXT = { clash: "时间冲突", allowed: "已允许重叠" } as const;
 
 const DAY_HOUR_PX = 72;
 const clockOf = (minutes: number) => `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
@@ -30,10 +33,12 @@ export function DayTimeline({ day, items, deadlines, nowMinute, labels, quiet, s
   aside?: ReactNode;
 }) {
   const [resizing, setResizing] = useState<{ id: string; end: string } | null>(null);
+  /** The 「+N 项」 run whose list is open, by its first item's id. */
+  const [openRun, setOpenRun] = useState<string | null>(null);
   const gridRef = useRef<{ top: number } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const rows = itemsOn(items, day);
-  const clashes = conflictingIds(rows);
+  const overlapState = overlapStates(rows);
   const flags = deadlines.filter((deadline) => deadline.day === day);
   const range = dayRange(rows);
   const height = ((range.to - range.from) / 60) * DAY_HOUR_PX;
@@ -57,18 +62,39 @@ export function DayTimeline({ day, items, deadlines, nowMinute, labels, quiet, s
           })}
           {hours.map((hour) => <i key={hour} className="dv-hour" style={{ top: y(hour * 60) }} aria-hidden="true"><span>{String(hour % 24).padStart(2, "0")}:00</span></i>)}
           <div className="dv-lane">
-            {packColumns(rows).map(({ item, column, columns }) => {
-              const end = resizing?.id === item.id ? resizing.end : item.end;
-              const top = y(toMinutes(item.start)), blockHeight = Math.max(y(Math.max(toMinutes(end), toMinutes(item.start) + 10)) - top, 22);
+            {layoutDay(rows.map((item) => resizing?.id === item.id ? { ...item, end: resizing.end } : item), range.from, DAY_HOUR_PX).map((piece) => {
+              const slot = { left: `${(piece.column / piece.columns) * 100}%`, width: `calc(${100 / piece.columns}% - 4px)` };
+              if (piece.kind === "more") {
+                const key = piece.items[0]!.id;
+                return <div key={`more:${key}`} className="dv-more" data-open={openRun === key || undefined} style={{ top: piece.top, ...slot }}>
+                  <button type="button" className="dv-more-label" aria-expanded={openRun === key}
+                    onClick={() => setOpenRun(openRun === key ? null : key)}>+{piece.items.length} 项</button>
+                  <ul className="dv-more-list" aria-label={`${piece.items[0]!.start} 起的 ${piece.items.length} 项`}>
+                    {piece.items.map((item) => <li key={item.id}><button type="button" data-line={lineOf(item.identityId)} aria-pressed={selectedId === item.id}
+                      onClick={() => { setOpenRun(null); onSelect?.(item); }}><span className="mono">{timeText(item)}</span> {item.title}{item.step ? ` · ${item.step}` : ""}</button></li>)}
+                  </ul>
+                </div>;
+              }
+              // `piece.item` carries the end being dragged; `item` is the block as stored, which the resize handle measures from.
+              const item = rows.find((row) => row.id === piece.item.id) ?? piece.item, end = piece.item.end;
+              const state = overlapState.get(item.id);
+              const title = `${item.title}${item.step ? ` · ${item.step}` : ""} ${timeText(item)}${item.identityId ? ` · ${labels[item.identityId] ?? item.identityId}` : ""}${state ? ` · ${OVERLAP_TEXT[state]}` : ""}`;
+              const common = {
+                "data-line": lineOf(item.identityId), "data-kind": item.kind, "data-agent": item.agent, "data-work-order": item.workOrderId,
+                "data-clash": state === "clash" || undefined, "data-overlap-ok": state === "allowed" || undefined, "aria-pressed": selectedId === item.id,
+                title, onClick: () => onSelect?.(item)
+              };
+              // Too short for a line of text: a bare colour bar at its true time; what it is shows on hover, in the 「+N 项」 list and beside the day.
+              if (piece.kind === "bar") return <button type="button" key={item.id} className="dv-bar" {...common} aria-label={title}
+                style={{ top: piece.top, height: piece.height, ...slot }} />;
               const resizable = Boolean(onResize && item.kind === "scheduled");
               const minutes = toMinutes(end) - toMinutes(item.start);
-              return <button type="button" key={item.id} className="dv-block" data-line={lineOf(item.identityId)} data-kind={item.kind}
-                data-agent={item.agent} data-work-order={item.workOrderId} data-short={blockHeight < 40 || undefined} data-clash={clashes.has(item.id) || undefined} aria-pressed={selectedId === item.id}
-                style={{ top, height: blockHeight, left: `${(column / columns) * 100}%`, width: `calc(${100 / columns}% - 4px)` }}
-                title={`${item.title}${item.step ? ` · ${item.step}` : ""} ${timeText({ start: item.start, end })}${item.identityId ? ` · ${labels[item.identityId] ?? item.identityId}` : ""}`}
-                onClick={() => onSelect?.(item)}>
+              return <button type="button" key={item.id} className="dv-block" {...common}
+                data-short={piece.height - piece.textTop < 40 || undefined} data-tight={piece.height - piece.textTop < 24 || undefined}
+                style={{ top: piece.top, height: piece.height, ...slot, ...(piece.textTop ? { paddingTop: piece.textTop + 1 } : {}) }}>
                 <span className="dv-block-head"><b>{item.title}</b>{item.tag && <em className="dv-tag">{item.tag}</em>}
-                  {item.agent && <em className="dv-tag" data-agent={item.agent}>{item.agent === "running" ? "Agent 执行中" : "Agent 将执行"}</em>}</span>
+                  {item.agent && <em className="dv-tag" data-agent={item.agent}>{item.agent === "running" ? "Agent 执行中" : "Agent 将执行"}</em>}
+                  {state && WORK.has(item.kind) && <em className="dv-tag" data-overlap={state}>{OVERLAP_TEXT[state]}</em>}</span>
                 <small>{item.step ? `${item.step} · ` : ""}<span className="mono">{timeText({ start: item.start, end })}</span>{minutes >= 60 ? ` · ${Math.round(minutes / 6) / 10} 小时` : ` · ${minutes} 分`}</small>
                 {resizable && <i className="dv-resize" aria-hidden="true" title="拖动调整时长"
                   onClick={(event) => event.stopPropagation()}
@@ -123,14 +149,17 @@ export function WeekView({ anchor, today, items, deadlines, labels, selectedId, 
       <div className="wk-body" data-scroll-to-morning style={{ "--hour": `${HOUR_PX}px` } as CSSProperties}>
         <div className="wk-gutter">{Array.from({ length: 24 }, (_, hour) => <i key={hour} style={{ top: hour * HOUR_PX }}>{String(hour).padStart(2, "0")}</i>)}</div>
         {days.map((day) => {
-          const packed = packColumns(itemsOn(items, day));
+          const ofDay = itemsOn(items, day);
+          const packed = packColumns(ofDay);
+          const overlapState = overlapStates(ofDay);
           return <div className="wk-col" key={day} data-today={day === today || undefined}>
             {packed.map(({ item, column, columns }) => {
               const top = (toMinutes(item.start) / 60) * HOUR_PX;
               const height = Math.max(((toMinutes(item.end) - toMinutes(item.start)) / 60) * HOUR_PX, 14);
               return <button type="button" key={item.id} className="wk-block" data-line={lineOf(item.identityId)} data-kind={item.kind} data-work-order={item.workOrderId} aria-pressed={selectedId === item.id}
+                data-clash={overlapState.get(item.id) === "clash" || undefined} data-overlap-ok={overlapState.get(item.id) === "allowed" || undefined}
                 style={{ top, height, left: `${(column / columns) * 100}%`, width: `${100 / columns}%` }} onClick={() => onSelect?.(item)}
-                title={`${item.title} ${timeText(item)}${item.identityId ? ` · ${labels[item.identityId] ?? item.identityId}` : ""}`}>
+                title={`${item.title} ${timeText(item)}${item.identityId ? ` · ${labels[item.identityId] ?? item.identityId}` : ""}${overlapState.get(item.id) ? ` · ${OVERLAP_TEXT[overlapState.get(item.id)!]}` : ""}`}>
                 <b>{item.title}</b><small>{item.start}</small>
               </button>;
             })}

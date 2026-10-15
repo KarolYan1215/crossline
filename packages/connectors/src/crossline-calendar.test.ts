@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { CROSSLINE_CALENDAR_NAME, CrosslineCalendarWriter, eventHash, OWNER_PROPERTY_ID, type PublishBlock, type PublishLedger } from "./crossline-calendar";
+import { CROSSLINE_CALENDAR_NAME, CrosslineCalendarWriter, eventHash, OWNER_PROPERTY_ID, PublishInterruptedError, type PublishBlock, type PublishLedger } from "./crossline-calendar";
 
 type Event = { id: string; subject: string; start: { dateTime: string }; end: { dateTime: string }; isReminderOn?: boolean; reminderMinutesBeforeStart?: number; singleValueExtendedProperties?: Array<{ id: string; value: string }> };
 type Calendar = { id: string; name: string; isDefaultCalendar: boolean; events: Event[] };
@@ -157,12 +157,19 @@ describe("what is the person's is never touched", () => {
     expect(third.result.created).toBe(0);
   });
 
-  test("with the record of what was written lost, nothing already there is overwritten", async () => {
+  test("an orphan — our marker, no record at all — is removed when it lies ahead and written afresh if the plan still has it; a past one stays", async () => {
+    // The owner's decision (2026-10-15): nobody can have changed an event relative to a record that never existed.
     const graph = fakeGraph(human());
-    await writer(graph).publish([block("b1", "x", "2026-10-13T14:00:00Z", "2026-10-13T15:00:00Z")], {});
+    await writer(graph).publish([block("b1", "x", "2026-10-13T14:00:00Z", "2026-10-13T15:00:00Z"), block("gone", "y", "2026-10-14T14:00:00Z", "2026-10-14T15:00:00Z"),
+      block("past", "z", "2026-10-12T11:00:00Z", "2026-10-12T13:00:00Z")], {});
     const lost: PublishLedger = {};
     const again = await writer(graph).publish([block("b1", "x2", "2026-10-13T18:00:00Z", "2026-10-13T19:00:00Z")], lost);
-    expect(again.result).toMatchObject({ created: 0, updated: 0, keptAsEdited: ["b1"] });
+    expect(again.result).toMatchObject({ created: 1, updated: 0, deleted: 2, keptAsEdited: [] });
+    expect(crossline(graph).events.map((event) => [event.subject, event.start.dateTime.slice(0, 16)]).sort())
+      .toEqual([["x2", "2026-10-13T18:00"], ["z", "2026-10-12T11:00"]]);
+    expect(Object.keys(again.ledger)).toEqual(["b1"]);
+    // Only the Crossline calendar's own events were touched.
+    expect(graph.calendars.find((calendar) => calendar.id === "main")!.events.map((event) => event.id)).toEqual(["h1"]);
   });
 
   test("across any sequence of publishes, every write names the Crossline calendar's own events and nothing of the person's", async () => {
@@ -222,3 +229,42 @@ describe("reminders", () => {
     expect(crossline(graph).events[0]).toMatchObject({ subject: "整理 SRAM 笔记（改）", reminderMinutesBeforeStart: 30 });
   });
 });
+
+describe("records that must not be lost (the real account, 2026-10-15)", () => {
+  test("two writes that overlapped read each other's work as the person's — the reason the caller runs them one at a time", async () => {
+    const graph = fakeGraph(human());
+    const first = await writer(graph).publish([block("b1", "x", "2026-10-13T14:00:00Z", "2026-10-13T15:00:00Z")], {});
+    // One run moves the block; another, started from the record before that run wrote back, sees the event at the new time.
+    await writer(graph).publish([block("b1", "x", "2026-10-13T16:00:00Z", "2026-10-13T17:00:00Z")], first.ledger);
+    const stale = await writer(graph).publish([block("b1", "x", "2026-10-13T16:00:00Z", "2026-10-13T17:00:00Z")], first.ledger);
+    expect(stale.edits.moved.map((item) => item.blockId)).toEqual(["b1"]);
+  });
+
+  test("a run that stops part way hands back what it already wrote, so the next run does not take it for the person's", async () => {
+    const graph = fakeGraph(human(), { forbid: 5 });
+    const blocks = ["b1", "b2", "b3"].map((id, index) => block(id, id, `2026-10-13T1${index + 4}:00:00Z`, `2026-10-13T1${index + 4}:30:00Z`));
+    const failed = await writer(graph).publish(blocks, {}).catch((error: unknown) => error);
+    expect(failed).toBeInstanceOf(PublishInterruptedError);
+    expect((failed as PublishInterruptedError).message).toMatch(/^CALENDAR_WRITE_NOT_AUTHORIZED/);
+    const kept = (failed as PublishInterruptedError).ledger;
+    expect(Object.keys(kept)).toEqual(["b1"]);
+    const retry = await writer(fakeGraphFrom(graph)).publish(blocks, kept);
+    expect(retry.result).toMatchObject({ created: 2, unchanged: 1, keptAsEdited: [] });
+    expect(retry.edits.moved).toEqual([]);
+  });
+
+  test("a second event for one block that is an exact copy of what was written is removed; one that differs is left alone", async () => {
+    const graph = fakeGraph(human());
+    const b1 = block("b1", "整理笔记", "2026-10-13T14:00:00Z", "2026-10-13T15:00:00Z");
+    const first = await writer(graph).publish([b1], {});
+    const original = crossline(graph).events[0]!;
+    crossline(graph).events.push({ ...original, id: "dup-same" }, { ...original, id: "dup-moved", start: { dateTime: "2026-10-13T18:00:00.0000000" }, end: { dateTime: "2026-10-13T19:00:00.0000000" } });
+    const again = await writer(graph).publish([b1], first.ledger);
+    expect(crossline(graph).events.map((event) => event.id).sort()).toEqual([original.id, "dup-moved"].sort());
+    expect(again.result).toMatchObject({ deleted: 1, unchanged: 1, keptAsEdited: ["b1"] });
+    expect(again.ledger["b1"]!.eventId).toBe(original.id);
+  });
+});
+
+/** The same calendars, without the forbidding. */
+function fakeGraphFrom(graph: ReturnType<typeof fakeGraph>) { return fakeGraph(graph.calendars); }

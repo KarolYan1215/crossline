@@ -14,6 +14,8 @@ import { shiftDay, type TimelineItem } from "./model";
 import type { LineLabels } from "./views";
 import { lockOnStart } from "./block-start";
 import { CompleteDialog } from "./complete-dialog";
+import { HeldBlock } from "./held-block";
+import { useReturnState } from "../ui/return-state";
 import { agentStepFor, followingBlock, otherOpenSteps, stepOfBlock } from "./panel-model";
 
 const KIND_TEXT: Record<TimelineItem["kind"], string> = {
@@ -30,6 +32,8 @@ function LockToggle({ item }: { item: TimelineItem }) {
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
   if (item.kind !== "scheduled" || !item.day) return null;
+  // A held block (started or locked) is changed in `HeldBlock`: 改时间, 解锁, 保留重叠, 留言.
+  if (item.frozen === "pinned" || item.frozen === "locked") return null;
   const locked = item.tag === "已锁定";
   const toggle = async () => {
     setBusy(true); setFailed(false);
@@ -81,6 +85,8 @@ export function BlockOverview({ item, items, today, labels, details, compact = f
   const [postponing, setPostponing] = useState(false);
   const [deferDay, setDeferDay] = useState(shiftDay(today, 1));
   const impact = useImpact();
+  // Back from a task's page, the block's task dialog is open again if it was.
+  useReturnState(`block-overview:${item.id}`, { open }, (saved) => { if (saved.open) setOpen(true); });
   const line = item.identityId ? labels[item.identityId] ?? "" : "";
   const steps = detail?.stepPlan?.steps ?? [];
   const step = item.workOrderId ? stepOfBlock(item, steps) : undefined;
@@ -138,6 +144,7 @@ export function BlockOverview({ item, items, today, labels, details, compact = f
       {!compact && live && !FINISHED.includes(detail.state) && <button type="button" aria-expanded={postponing} onClick={() => setPostponing((value) => !value)}>推迟</button>}
       {!compact && live && !FINISHED.includes(detail.state) && <LockToggle item={item} />}
     </TaskActions>}
+    {!compact && live && !FINISHED.includes(detail.state) && <HeldBlock item={item} items={items} title={detail.title} />}
     {postponing && detail && <div className="dq-defer" role="group" aria-label="推迟到">
       <button type="button" disabled={impact.busy} onClick={() => void impact.propose({ kind: "defer", workOrderId: detail.id, date: shiftDay(today, 1) })}>明天</button>
       <label><span>选一天</span><input type="date" value={deferDay} min={shiftDay(today, 1)} onChange={(event) => setDeferDay(event.target.value)} /></label>
