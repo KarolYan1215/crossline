@@ -5,7 +5,7 @@ import path from "node:path";
 import { enterUsageWorkspace, setProviderResolver, setSpendModeProvider, setUsageSink, startCodexSupervisor, startModelGateway, type CodexSupervisor } from "@crossline/codex";
 import { createDpapiSecretStore } from "@crossline/connectors";
 import { createModelProviderService } from "./model-provider";
-import { CrosslineStore, aiToolsFor, isPaused, listPushSubscriptions, readGrownSkills, removePushSubscriptions } from "@crossline/db";
+import { CrosslineStore, aiToolsFor, grownHomeLine, isPaused, listPushSubscriptions, readGrownSkills, readPublicSkills, removePushSubscriptions } from "@crossline/db";
 import { capturesAwaitingAutoAnalysis, createCaptureAnalyzer } from "./analysis";
 import { autoApproveEligible } from "./auto-approval";
 import { retireShadowedDemos } from "./demo-cleanup";
@@ -17,7 +17,7 @@ import { createNightlyFlywheel } from "./nightly";
 import { createDiligenceRunner, linesDueForDiligence } from "./diligence";
 import { createAgentService } from "./agent-service";
 import { createCalendarPublisher } from "./calendar-publish";
-import { AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, BACKGROUND_PAUSED, backgroundSpend, CALENDAR_SYNC_FAILURE, pausedKinds, spendAllows, type BackgroundKind, type PlanRankingInput } from "@crossline/core";
+import { AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, BACKGROUND_PAUSED, backgroundSpend, CALENDAR_SYNC_FAILURE, grownSkillName, publicSkillName, pausedKinds, spendAllows, type BackgroundKind, type PlanRankingInput } from "@crossline/core";
 import { createFlywheelExpander } from "./flywheel";
 import { createManualbookBuilder, pendingMaterialWorkOrders, pendingTutorials } from "./manualbook";
 import { createProgressJudge, createStepPlanner, createWarningReviewer, reportsAwaitingJudgement, requestFinerSplits, settleOldQuestions, tasksAwaitingStepPlan, warningsAwaitingReview } from "./step-planner";
@@ -274,7 +274,12 @@ async function workflowPass(workspaceId: string, checkedAt: string): Promise<voi
   // What the person asked for in words is their own work, like a capture: it runs while the quota lasts. An errand the system noticed
   // repeating is its own idea, and waits for a normal quota.
   if (!candidate || !spendAllows(await spendFor(workspaceId), candidate.origin.kind === "asked" ? "core" : "discretionary")) return;
-  const input = growTask(candidate, identityLines(analysisStore, workspaceId).map((line) => line.id), aiToolsFor(analysisStore, workspaceId));
+  // What this line's library already holds, so the new workflow names and builds on it instead of copying it.
+  const library = [...readPublicSkills(analysisStore, workspaceId).filter((skill) => skill.lines.includes(candidate.lineId) && skill.review.final !== "reject")
+    .map((skill) => ({ name: publicSkillName(skill.id), description: skill.description })),
+    ...readGrownSkills(analysisStore, workspaceId).filter((skill) => skill.status === "active" && grownHomeLine(analysisStore, workspaceId, skill) === candidate.lineId)
+      .map((skill) => ({ name: grownSkillName(skill.id), description: skill.manifest.summary }))];
+  const input = growTask(candidate, identityLines(analysisStore, workspaceId).map((line) => line.id), aiToolsFor(analysisStore, workspaceId), library);
   growingWorkflows.add(workspaceId);
   const started = agentService.runFree(workspaceId, input, (outcome) => {
     void installGrown(analysisStore, workspaceId, candidate, outcome, { client: codexSupervisor?.clientFor(workspaceId), cwd: repoRoot })

@@ -7,7 +7,7 @@ import {
   AGENT_CATEGORIES, AGENT_SUMMARY_SCHEMA, decideCommand, decideFileChange, decideMcpTool, validateAgentSummary,
   type AgentCategory, type AgentSummary, type GuardContext, type GuardDecision
 } from "@crossline/core";
-import { runCodexSkill, type AgentItem, type CodexRpcBoundary } from "@crossline/codex";
+import { runCodexSkill, type AgentItem, type CodexRpcBoundary, type SkillTools } from "@crossline/codex";
 import { approveCategory, CLEAN_RUNS_TO_TRUST, readCategories, recordReview, type CategoryState, type CrosslineStore } from "@crossline/db";
 import { libraryInstruction, librarySkillsFor } from "./skill-library";
 
@@ -42,6 +42,8 @@ export type AgentTaskInput = {
   lineId?: string;
   /** A run that grows a workflow: no other grown workflow is switched on for it. */
   growing?: boolean;
+  /** Crossline's own reader for the sites a workflow reads behind the person's login (`site-reader.ts`): its tool, and how often it refused. */
+  reader?: { tools: SkillTools; refusals: () => number; close: () => Promise<void> };
 };
 
 export type AuditCommand = { command: string; cwd: string; status: string; exitCode: number | null; reads: string[] };
@@ -79,7 +81,25 @@ export function fingerprint(inputs: string[], limit = 2000): Map<string, string>
   return result;
 }
 /** Codes for a run stopped from outside — by the person, a stall or a restart — whose files may still be worth a look. */
-const STOPPED = new Set(["AGENT_CANCELLED", "AGENT_RUN_LOST", "SKILL_STALLED", "SKILL_TIMEOUT"]);
+const STOPPED = new Set(["AGENT_CANCELLED", "AGENT_RUN_LOST", "AGENT_LOOP_STOPPED", "SKILL_STALLED", "SKILL_TIMEOUT"]);
+
+/** The same command run this many times, or a site's reader refusing this many reads, is a run going round in circles. */
+export const LOOP_REPEATS = 4;
+export const LOOP_REFUSALS = 3;
+/**
+ * Whether a run is going round in circles (decided 2026-10-14, after the person had to spot one themselves): the same command again
+ * and again, or reads a site's reader keeps refusing. Returns why, in the person's words, or undefined.
+ */
+export function loopReason(commands: Array<{ command: string }>, refusals: number): string | undefined {
+  const counts = new Map<string, number>();
+  for (const { command } of commands) {
+    const key = command.replace(/\s+/g, " ").trim();
+    const count = (counts.get(key) ?? 0) + 1;
+    counts.set(key, count);
+    if (count >= LOOP_REPEATS) return `同一条命令重复执行了 ${count} 次`;
+  }
+  return refusals >= LOOP_REFUSALS ? `读取网站被拒绝了 ${refusals} 次仍在继续尝试` : undefined;
+}
 const HELPER = /(^|[\\/])(__pycache__|node_modules|\.git)([\\/]|$)|\.(pyc|py|ps1|psm1|sh|bat|cmd|js|mjs|ts)$|(^|[\\/])audit\.json$/i;
 
 /**
@@ -260,24 +280,35 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
       ...(input.growing ? { grown: false } : {}),
       ...(options.libraryDir ? { dir: options.libraryDir } : {}) });
     const extraSkills = [...new Set([...(input.extraSkills ?? []), ...chosen])];
+    // The watchdog: a run going round in circles is stopped by the app, not left for the person to notice.
+    const stopper = new AbortController();
+    let loopStop: string | undefined;
+    const watch = () => {
+      if (loopStop) return;
+      loopStop = loopReason(audit.commands, input.reader?.refusals() ?? 0);
+      if (loopStop) stopper.abort();
+    };
+    const signal = options.signal ? AbortSignal.any([options.signal, stopper.signal]) : stopper.signal;
     const result = await runCodexSkill<AgentSummary>(client, task, {
       skillName: AGENT_SKILL, cwd, developerInstructions: AGENT_INSTRUCTIONS + libraryInstruction(extraSkills), outputSchema: AGENT_SUMMARY_SCHEMA,
       ...(extraSkills.length ? { extraSkills } : {}),
       prepareInput: () => task, validateOutput: (output) => validateAgentSummary(output, probe), onAudit: () => {},
-      allowWebSearch: true, timeoutMs: 6 * 60 * 60_000, idleMs: 60 * 60_000, ...(options.signal ? { signal: options.signal } : {}),
+      allowWebSearch: true, timeoutMs: 6 * 60 * 60_000, idleMs: 60 * 60_000, signal,
+      ...(input.reader?.tools.specs.length ? { tools: input.reader.tools } : {}),
       agent: {
         cwd: directory,
-        onItem: (item, phase) => noteItem(audit, pendingChanges, item, phase),
+        onItem: (item, phase) => { noteItem(audit, pendingChanges, item, phase); if (phase === "completed") watch(); },
         answer: createAgentAnswerer(guard, audit, pendingChanges, options.askFor?.(taskId) ?? options.ask)
       }
     });
 
+    await input.reader?.close().catch(() => undefined);
     const after = fingerprint(inputs);
     const inputsModified = changedFiles(before, after);
     if (!result.ok) {
       // Stopped by the person (「中止」): a code of its own, so it is never taken for a run the runtime lost and tried again.
-      const code = options.signal?.aborted ? "AGENT_CANCELLED" : result.blocker.code;
-      const message = options.signal?.aborted ? "本人中止了这次运行。" : result.blocker.message;
+      const code = loopStop ? "AGENT_LOOP_STOPPED" : options.signal?.aborted ? "AGENT_CANCELLED" : result.blocker.code;
+      const message = loopStop ? `${loopStop}，已自动停下；已写出的文件照常交本人查看。` : options.signal?.aborted ? "本人中止了这次运行。" : result.blocker.message;
       store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:blocked:${taskId}`, type: "agent.task.blocked", entityId: taskId,
         payload: { taskId, code, message: message.slice(0, 400), durationMs: Date.now() - startedAt, commands: audit.commands.length, decisions: audit.decisions.length, inputsModified } });
       salvageStoppedRun(store, workspaceId, taskId, options.outputRoot);

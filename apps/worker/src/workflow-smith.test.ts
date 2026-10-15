@@ -207,7 +207,10 @@ test("the person logs in in a window of its own; a run is told that profile, and
   const inputs: Array<{ what: string; inputs?: string[] }> = [];
   expect(startWorkflowRun(store, ws, readGrownSkills(store, ws)[0]!, (input, then) => { inputs.push(input); after = then; return { state: "started", taskId: input.taskId }; }, profiles, new Date(), "other.exe").state).toBe("started");
   expect(inputs[0]!.inputs).toEqual([root]);
-  expect(inputs[0]!.what).toContain(`浏览器配置目录 ${path.join(profiles, "xiaohongshu.com")}，浏览器程序 chrome.exe`);
+  // The run is given Crossline's reader, never the profile itself.
+  expect(inputs[0]!.what).toContain("只能用工具 site_read 读取");
+  expect(inputs[0]!.what).not.toContain(path.join(profiles, "xiaohongshu.com"));
+  expect((inputs[0] as { reader?: { tools: { specs: Array<{ name: string }> } } }).reader?.tools.specs.map((spec) => spec.name)).toEqual(["site_read"]);
   after!({ ...done("t", root), summary: { needsHuman: [{ what: "需要登录：小红书", why: "打开收藏页跳到了登录页" }] } } as unknown as AgentOutcome);
   expect(said().at(-1)).toContain("这次没读到：需要登录：小红书");
 });
@@ -298,8 +301,8 @@ test("a run reading an account opens each page once and stops at a security chec
   let what = "";
   let after: ((outcome: AgentOutcome) => void) | undefined;
   startWorkflowRun(store, ws, readGrownSkills(store, ws)[0]!, (input, then) => { what = input.what; after = then; return { state: "started", taskId: input.taskId }; }, path.join(root, "p"), new Date(), "chrome.exe");
-  expect(what).toContain("每个页面只打开一次");
-  expect(what).toContain("不重试、不换方式、不尝试绕过");
+  expect(what).toContain("每个页面只读一次");
+  expect(what).toContain("不换方式、不尝试绕过");
   after!({ ...done("t", root), summary: { needsHuman: [{ what: "需要本人完成小红书安全验证", why: "详情页出现滑块" }] } } as unknown as AgentOutcome);
   expect(said().at(-1)).toContain("遇到了网站的安全验证，已停下，不会重试");
 });
@@ -338,4 +341,20 @@ test("a stopped growing run is not offered for review, and one offered before is
   expect(salvageStoppedRun(store, ws, "grow-1", out)).toBe(false);
   store.appendEvent({ ownerId: owner(), workspaceId: ws, idempotencyKey: "old-salvage", type: "agent.task.completed", entityId: "grow-1", payload: { taskId: "grow-1", partial: true, reviewRequired: true } });
   expect(listAgentTasks(store, ws).find((task) => task.taskId === "grow-1")?.status).toBe("blocked");
+});
+
+test("a skill naming another library skill of its line switches that one on too, one level deep; another line's is not", async () => {
+  const { referencedSkills } = await import("./skill-library");
+  store.setSetting(ws, "skills.library", JSON.stringify([
+    { id: "pub-hooks", kind: "public", name: "hooks", description: "开头", category: "writing", lines: ["media"], review: { final: "usable" } },
+    { id: "pub-papers", kind: "public", name: "papers", description: "文献", category: "research", lines: ["research"], review: { final: "usable" } }]));
+  const flow = { id: "flow-xhs-note", kind: "grown", name: "xhs-note", description: "d", lines: ["media"], category: "media_edit",
+    manifest: { ...workflowJson, access: [], risks: [] }, origin: { kind: "asked", text: "t", requestId: "r-ref" }, taskId: "", files: [],
+    scan: { risk: "low", injection: false, findings: [] }, review: { verdict: "usable", reasons: [], final: "usable" }, status: "active", pinned: false, createdAt: "", updatedAt: "", lastUsedAt: "" };
+  store.setSetting(ws, "skills.grown", JSON.stringify([flow]));
+  store.setSetting(ws, "skills.grown.files.flow-xhs-note", JSON.stringify({ files: [{ path: "SKILL.md", text: "开头按 $crossline-public:pub-hooks 写；文献用 $crossline-public:pub-papers。" }] }));
+  store.appendEvent({ ownerId: owner(), workspaceId: ws, idempotencyKey: "req-ref", type: "workflow.requested", entityId: "r-ref", payload: { text: "t", lineId: "media" } });
+  const available = ["crossline-grown:flow-xhs-note", "crossline-public:pub-hooks", "crossline-public:pub-papers"];
+  expect(referencedSkills(store, ws, "media", ["crossline-grown:flow-xhs-note"], available)).toEqual(["crossline-public:pub-hooks"]);
+  expect(referencedSkills(store, ws, "media", ["crossline-grown:flow-xhs-note"], ["crossline-grown:flow-xhs-note"])).toEqual([]);
 });

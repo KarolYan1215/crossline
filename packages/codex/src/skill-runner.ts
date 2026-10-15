@@ -378,6 +378,8 @@ async function startAgentThread<T>(scope: Scope, options: SkillRunOptions<T>, co
   };
   const threadParams = {
     cwd: agent.cwd, sandbox: "danger-full-access", approvalPolicy: "untrusted", approvalsReviewer: "user",
+    // Tools Crossline answers itself (reading a site behind the person's login, so the assistant never holds the browser profile).
+    dynamicTools: (options.tools?.specs ?? []).map((spec) => ({ type: "function", name: spec.name, description: spec.description, inputSchema: spec.inputSchema })),
     ephemeral: false, experimentalRawEvents: false, developerInstructions: options.developerInstructions,
     ...(context.route ? { model: context.route.model } : {})
   };
@@ -701,7 +703,12 @@ async function runSkillTurn<T>(client: CodexRpcBoundary, input: unknown, options
     const threadId = await startIsolatedThread(scope, options, context);
     audit.threadId = threadId;
     options.onAudit({ ...audit });
-    if (options.agent) unregister = registerAgentThread(client, threadId, options.agent.answer);
+    if (options.agent) {
+      // One handler per thread: a tool call goes to the tools, everything else (approvals) to the guard.
+      const agentAnswer = options.agent.answer;
+      const tools = options.tools ? toolAnswerer(options.tools) : undefined;
+      unregister = registerAgentThread(client, threadId, (method, params) => method === "item/tool/call" && tools ? tools(method, params) : agentAnswer(method, params));
+    }
     else if (options.tools) unregister = registerAgentThread(client, threadId, toolAnswerer(options.tools));
     const output = await runTurnsUntilValid(client, scope, context, audit, {
       skillName: options.skillName, threadId, outputSchema: options.outputSchema, allowedItemTypes, ...(options.onImage ? { onImage: options.onImage } : {}),

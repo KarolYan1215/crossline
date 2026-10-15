@@ -46,7 +46,9 @@ const SECRET_PATH = [
   /\.kdbx?$/i, /keepass/i, /1password/i, /bitwarden/i, /[\\/]login data$/i, /[\\/]cookies$/i, /[\\/]web data$/i,
   /id_(rsa|dsa|ecdsa|ed25519)(\.pub)?$/i, /\.(pem|pfx|p12|ppk)$/i,
   /(^|[\\/])\.env(\.[a-z0-9_-]+)?$/i,
-  /[\\/]data[\\/]auth\.db/i, /[\\/]auth\.db(-wal|-shm)?$/i, /[\\/]crossline\.db(-wal|-shm)?$/i
+  /[\\/]data[\\/]auth\.db/i, /[\\/]auth\.db(-wal|-shm)?$/i, /[\\/]crossline\.db(-wal|-shm)?$/i,
+  // The browser profiles the person logged in with for a workflow: read only by Crossline's site reader, never by the assistant.
+  /crossline[\\/]browser-profiles/i
 ];
 const EXAMPLE_ENV = /\.env\.(example|sample|template)$/i;
 

@@ -13,6 +13,7 @@ import type { AgentOutcome, AgentTaskInput } from "./agent-task";
 import type { DispatchResult } from "./agent-service";
 import { identityLines } from "./lines";
 import { ownerOf, runtimesDir } from "./owner";
+import { createSiteReader, SITE_PAGES_PER_RUN } from "./site-reader";
 
 /**
  * Grown workflows (docs/skills-library.md §6): the assistant fixes an errand the person keeps having done — or one they asked for in words —
@@ -93,7 +94,8 @@ export function growCandidates(store: CrosslineStore, workspaceId: string, now =
 }
 
 /** What the assistant is asked to do when it grows a workflow. */
-export function growTask(candidate: GrowCandidate, lineIds: string[], tools: Array<{ name: string; goodFor: string; by: "system" | "person" }> = []): AgentTaskInput & { taskId: string } {
+export function growTask(candidate: GrowCandidate, lineIds: string[], tools: Array<{ name: string; goodFor: string; by: "system" | "person" }> = [],
+  library: Array<{ name: string; description: string }> = []): AgentTaskInput & { taskId: string } {
   const basis = candidate.origin.kind === "asked" ? `本人的要求：「${candidate.text}」` : `本人已采纳过的同类结果：${candidate.text}`;
   return {
     taskId: `grow-${randomUUID().slice(0, 8)}`, category: candidate.category, prep: true, extraSkills: [SKILL_CREATOR], lineId: candidate.lineId, growing: true,
@@ -107,8 +109,9 @@ export function growTask(candidate: GrowCandidate, lineIds: string[], tools: Arr
       "2. skill/scripts/：能确定下来的步骤写成脚本（例如批量重命名、格式转换、表格整理；剪辑一类用 ffmpeg），用示例输入在本任务目录里实际跑通（剪辑一类可用 ffmpeg 的 testsrc/sine 生成样片）。脚本只写自己的工作目录或调用时给的输出目录，不删除目录外的文件，不读凭据；不需要时不联网。",
       `3. skill/workflow.json：{"name","summary","lines","category","trigger","schedule","action","reminder","steps":[{"title","by","external"}],"inputs","outputs","access","risks"}。lines 为 ${JSON.stringify([candidate.lineId])}（只服务这一条主线）；category 为 "${candidate.category}"；trigger 为 "on_request"，本人要求定时或定期（例如「每周五提醒」「每天早上整理」「定期整理」）时为 "schedule"，schedule 为 {"type":"daily"|"weekdays","time":"HH:MM"} 或 {"type":"weekly","days":["MO".."SU"],"time":"HH:MM"}（本人没说时间就选一个合理的，并在 summary 里写出）；只需到点提醒时 action 为 "remind" 并写 reminder，否则为 "run"、reminder 为 ""。inputs 写这件事要读的东西；本人给了文件夹的绝对路径就原样写进 inputs，执行时会把它交给助手。`,
       "发送、上传、发布、投稿、付款这类离开本机的步骤，by 为 \"person\"、external 为 true：工作流在它们之前停下，把要发出的东西备好放在产出目录。读取网页、联网核验、下载公开资料不算离开本机，external 为 false。",
-      "要读本人在某个网站上的账号或数据（收藏夹、订单、课程平台等）时：先联网查清能用的接口，写进 SKILL.md——优先官方 API 或官方导出，其次平台允许的工具，最后才是在本人登录的浏览器里读取页面；不要求本人交出密码或 Cookie，不用来路不明的代抓服务。登录由本人在 Crossline 打开的浏览器窗口里完成：执行时会给出浏览器配置目录与浏览器程序，脚本接受 --profile 与 --browser 两个参数，用 Playwright 的 launch_persistent_context（user_data_dir=--profile，executable_path=--browser）打开页面，只读、像人一样放慢，每次运行每个页面只打开一次、不逐条打开详情页；未登录就退出并打印 NEED_LOGIN，出现安全验证、验证码或风控提示就关掉浏览器退出并打印 NEED_VERIFY，不重试、不绕过。在 access 里列出每个网站 {\"service\",\"site\"(https 地址),\"login\"(true/false),\"how\"(用什么接口、怎么读)}，在 risks 里如实写出风险（是否违反平台协议、账号可能受限、验证码、页面改版会失效、读到的数据存在本机哪里）；本人看过风险并同意后才会启用。改动账号的事（移动、删除、取消收藏、点赞、评论、发布）一律是本人的步骤。这次没有登录、读不到真实数据：用离线样例把整理部分跑通，读取部分写好并在 SKILL.md 里说明尚未在真实账号上验证。不读账号时 access 与 risks 为 []。",
+      "要读本人在某个网站上的账号或数据（收藏夹、订单、课程平台等）时：先联网查清能用的接口，写进 SKILL.md——优先官方 API 或官方导出，其次平台允许的工具，最后才是在本人登录的浏览器里读取页面；不要求本人交出密码或 Cookie，不用来路不明的代抓服务。登录由本人在 Crossline 打开的浏览器窗口里完成；执行时需要登录的网站由 Crossline 的读取工具 site_read 代为打开（每个页面只读一次、每期最多几页、遇到安全验证或要求登录就停），助手拿不到浏览器配置目录。所以脚本不自己访问这些网站：SKILL.md 写清每期用 site_read 读哪几个页面（列表页，不逐条打开详情页）、把返回的文字和链接存成什么文件，脚本只负责整理这些文件。在 access 里列出每个网站 {\"service\",\"site\"(https 地址),\"login\"(true/false),\"how\"(用什么接口、怎么读)}，在 risks 里如实写出风险（是否违反平台协议、账号可能受限、验证码、页面改版会失效、读到的数据存在本机哪里）；本人看过风险并同意后才会启用。改动账号的事（移动、删除、取消收藏、点赞、评论、发布）一律是本人的步骤。这次没有登录、读不到真实数据：用离线样例把整理部分跑通，读取部分写好并在 SKILL.md 里说明尚未在真实账号上验证。不读账号时 access 与 risks 为 []。",
       ...(tools.length ? [`本人能用的 AI 工具：${tools.map((tool) => `${tool.name}（${tool.goodFor}${tool.by === "system" ? "；由助手执行" : ""}）`).join("；")}。按今天会用这些工具的人的做法设计：能由助手整份做的步骤归助手，本人的步骤写明用哪个工具、怎么用（具体操作或给它的提示词），只把需要本人判断的部分留给本人。`] : []),
+      ...(library.length ? [`这条主线的 skill 库里已有：${library.map((skill) => `$${skill.name}（${skill.description.slice(0, 60)}）`).join("；")}。工作流要用到其中某个时，在 SKILL.md 正文写它的完整名（如上，带 $），执行时会一起启用；不要把它的内容抄进来。`] : []),
       "这次只建工作流，不执行原任务本身，不发布、不发送任何东西。产物列出 skill/ 下的每个文件。"
     ].join("\n")
   };
@@ -315,25 +318,22 @@ export function startWorkflowRun(store: CrosslineStore, workspaceId: string, rec
   const home = grownHomeLine(store, workspaceId, record);
   const personSteps = record.manifest.steps.filter((step) => step.by === "person").map((step) => step.title);
   const folders = record.manifest.inputs.filter((item) => path.isAbsolute(item) && existsSync(item));
-  const accounts = access.map((item) => {
-    // The same browser the person logged in with: a profile is read by the browser that wrote it.
-    const browser = record.loginBrowsers?.[item.service] || fallbackBrowser;
-    return item.login
-    ? `${item.service}（${item.site}）：浏览器配置目录 ${accessProfileDir(profilesRoot, item)}${browser ? `，浏览器程序 ${browser}` : ""}，本人已在其中登录。`
-    : `${item.service}（${item.site}）：公开页面，不需要登录。`;
-  });
-  const accountRules = accounts.length ? [
-    `要读取的网站：${accounts.join(" ")}`,
-    "把这两个路径作为 --profile 与 --browser 交给工作流的脚本，只用浏览器自动化打开页面读取，放慢速度；不读、不复制、不打印配置目录里的任何文件（Cookies、Local Storage 等），不在账号里做任何改动（移动、删除、取消收藏、点赞、评论、发布）。",
-    // The first real run read the favourites and the creator's page, then wrote its own scripts to open every note and re-check every
-    // link, and the site answered with its security check again and again (2026-10-14). Each page once; a check is a stop, never a retry.
-    "每个页面只打开一次：只打开工作流说明里的页面（例如收藏页、指定账号主页），不逐条打开详情页，不为核验再次访问链接，不另写脚本扩大读取范围；本期读到多少就用多少。",
-    "页面出现安全验证、验证码、滑块、风控提示或跳回登录：立即关闭浏览器停下，不重试、不换方式、不尝试绕过；已读到的照常整理交付，needsHuman 第一项的 what 写「需要本人完成<网站名>安全验证」。",
-    "打开后发现未登录，立即停下，needsHuman 第一项的 what 写「需要登录：<网站名>」。"] : [];
+  // Sites behind the person's login are read by Crossline's own reader (`site-reader.ts`), never by the assistant with the profile:
+  // the first real run, given the profile and told to be gentle, opened every note and re-checked every link until the site's
+  // security check came up again and again (2026-10-14). The reader holds the rules in code; the words below only explain them.
+  const reader = access.some((item) => item.login) ? createSiteReader(store, workspaceId, record,
+    (item) => ({ dir: accessProfileDir(profilesRoot, item), browser: record.loginBrowsers?.[item.service] || fallbackBrowser || "" }),
+    { notify: (text) => sayToPerson(store, workspaceId, text, "workflow_done", `breaker:${record.id}:${now.toISOString().slice(0, 10)}`, [{ label: "去看结果", href: "/approvals#assistant" }]) }) : undefined;
+  const accountRules = access.length ? [
+    `要读取的网站：${access.map((item) => item.login ? `${item.service}（${item.site}，本人已登录）` : `${item.service}（${item.site}，公开页面）`).join("；")}。`,
+    ...(reader ? [`需要登录的网站只能用工具 site_read 读取：传网站名和页面地址，它打开本人登录过的浏览器并返回页面上的文字和链接。你拿不到浏览器配置目录，也不要自己启动浏览器去读这些网站。site_read 每个页面只读一次、本期最多 ${SITE_PAGES_PER_RUN} 页；只读工作流说明里的页面（例如收藏页、指定账号主页），不逐条打开详情页，不为核验再次访问。`] : []),
+    "把读到的内容存进任务目录，再用工作流的脚本整理；不在账号里做任何改动（移动、删除、取消收藏、点赞、评论、发布）。",
+    "site_read 说已停止（安全验证或要求登录）时，不再读取、不换方式、不尝试绕过；用已读到的内容完成本期，needsHuman 第一项照它说的写。"] : [];
   const day = now.toISOString().slice(0, 10);
   return runFree({ taskId: `flow-${record.id.replace(/^flow-/, "")}-${now.getTime().toString(36)}`, category: record.category,
     ...(home ? { lineId: home } : {}), ...(folders.length ? { inputs: folders } : {}),
     extraSkills: [grownSkillName(record.id)], title: record.manifest.summary.slice(0, 80), humanPart: personSteps.join("；") || "查看结果",
+    ...(reader ? { reader } : {}),
     what: [`按工作流 $${grownSkillName(record.id)} 做本期的这件事：${record.manifest.summary.replace(/[。.\s]+$/, "")}。在由本人完成的步骤之前停下，把要发出或要本人在账号里操作的东西备好。`,
       ...(folders.length ? [`本期的输入在：${folders.join("；")}（只读）。`] : []), ...accountRules].join("\n") },
   (outcome) => {

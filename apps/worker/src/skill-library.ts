@@ -158,11 +158,41 @@ export async function librarySkillsFor(client: CodexRpcBoundary, store: Crosslin
   // A line with nothing in the library runs exactly as before: nothing is written or installed for it.
   if (!mine.length && !publics.length && !grown.length) return [];
   const available = await ensureSkillLibrary(client, store, workspaceId, options);
-  const chosen = [...mine, ...grown.map((item) => grownSkillName(item.record.id)), ...publics.map((item) => publicSkillName(item.record.id))]
+  const picked = [...mine, ...grown.map((item) => grownSkillName(item.record.id)), ...publics.map((item) => publicSkillName(item.record.id))]
     .filter((name) => available.includes(name));
+  const chosen = [...picked, ...referencedSkills(store, workspaceId, lineId, picked, available)].slice(0, MAX_LIBRARY_SKILLS);
   markPublicSkillsUsed(store, workspaceId, publics.filter((item) => chosen.includes(publicSkillName(item.record.id))).map((item) => item.record.id));
   markGrownSkillsUsed(store, workspaceId, grown.filter((item) => chosen.includes(grownSkillName(item.record.id))).map((item) => item.record.id));
   return chosen;
+}
+
+/** At most this many library skills on one run, references included. */
+const MAX_LIBRARY_SKILLS = 5;
+const SKILL_REFERENCE = /\$(crossline-(?:mine|grown|public):[a-z0-9][a-z0-9-]*)/gi;
+
+/**
+ * Skills a chosen skill names in its own text (`$crossline-public:pub-x`), one level deep: the runtime injects only the skills the
+ * prompt names and never follows a mention inside a skill it injected, so a workflow that builds on another skill names it and Crossline
+ * switches that one on too — when it is installed and serves this line.
+ */
+export function referencedSkills(store: CrosslineStore, workspaceId: string, lineId: string, picked: string[], available: string[]): string[] {
+  const grownById = new Map(readGrownSkills(store, workspaceId).map((record) => [grownSkillName(record.id), record]));
+  const publicById = new Map(readPublicSkills(store, workspaceId).map((record) => [publicSkillName(record.id), record]));
+  const textOf = (name: string) => {
+    const grown = grownById.get(name);
+    if (grown) return installedGrownFiles(store, workspaceId, grown).find((file) => file.path === "SKILL.md")?.text ?? "";
+    const pub = publicById.get(name);
+    return pub ? installedPublicFiles(store, workspaceId, pub).find((file) => file.path === "SKILL.md")?.text ?? "" : "";
+  };
+  const servesLine = (name: string) => name === mineSkillName(lineId)
+    || (grownById.has(name) && grownHomeLine(store, workspaceId, grownById.get(name)!) === lineId)
+    || (publicById.get(name)?.lines.includes(lineId) ?? false);
+  const found = new Set<string>();
+  for (const name of picked) for (const match of textOf(name).matchAll(SKILL_REFERENCE)) {
+    const ref = match[1]!.toLowerCase();
+    if (!picked.includes(ref) && available.includes(ref) && servesLine(ref)) found.add(ref);
+  }
+  return [...found];
 }
 
 /** A run switched these grown workflows on: their idle clock restarts. */

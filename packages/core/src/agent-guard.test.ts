@@ -20,7 +20,7 @@ test("cleaning up inside the task directory is not put to the person, however th
 describe("what the assistant may never read", () => {
   test("credential stores, keys, browser sessions and env files are refused wherever they are written", () => {
     for (const path of ["C:\\Users\\karol\\.ssh\\id_ed25519", "C:/Users/karol/.aws/credentials", "C:\\Users\\karol\\AppData\\Local\\Google\\Chrome\\User Data\\Default\\Login Data",
-      "D:\\vault\\passwords.kdbx", "C:\\proj\\apps\\web\\.env", "C:\\proj\\.env.local", "C:\\Users\\karol\\AppData\\Local\\Crossline\\codex-home\\auth.json", "C:\\x\\data\\auth.db"]) {
+      "D:\\vault\\passwords.kdbx", "C:\\Users\\karol\\AppData\\Local\\Crossline\\browser-profiles\\ws\\xiaohongshu.com", "C:\\proj\\apps\\web\\.env", "C:\\proj\\.env.local", "C:\\Users\\karol\\AppData\\Local\\Crossline\\codex-home\\auth.json", "C:\\x\\data\\auth.db"]) {
       expect(isSecretPath(path), path).toBe(true);
     }
     expect(isSecretPath("C:\\proj\\.env.example")).toBe(false);
