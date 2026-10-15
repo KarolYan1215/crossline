@@ -77,7 +77,8 @@ test("a grown workflow is read back, checked, reviewed, installed and announced;
   expect(record).toMatchObject({ status: "active", pinned: false, category: "media_edit", review: { final: "usable" }, scan: { risk: "low" }, taskId: "grow-1" });
   expect(record!.files.map((file) => file.path).sort()).toEqual(["SKILL.md", "scripts/cut.sh", "workflow.json"]);
   const said = store.listRecentNudges(ws, "2000-01-01T00:00:00Z").at(-1)!;
-  expect((said.payload.card as { clarify: { question: string } }).clarify.question).toContain("创作者主线：同类事已由助手做过 2 次，系统据此长出新工作流「每周把素材剪成一条 3 分钟 vlog」，已可用（每周五 18:00）");
+  expect((said.payload.card as { clarify: { question: string } }).clarify.question).toContain("创作者主线：同类事已由助手做过 2 次，系统据此长出新工作流「每周把素材剪成一条 3 分钟 vlog」，已可用并默认保留（每周五 18:00）");
+  expect((said.payload.card as { clarify: { question: string } }).clarify.question).toContain("不需要可在设置里关闭");
   expect((said.payload.nudge as { delivery: string }).delivery).toBe("pending");
 
   // Publishing handed to the assistant is handed to the person, and the person is told so.
@@ -267,17 +268,23 @@ test("reading a page is not leaving the machine: the first account-reading workf
 test("a request whose growing run was lost to a restart is grown again, up to three runs; one that ended on its own is not", () => {
   const id = requestWorkflow(store, ws, "定期整理小红书收藏夹", "media", owner());
   const attempt = (taskId: string, lost: boolean) => {
+    store.appendEvent({ ownerId: owner(), workspaceId: ws, idempotencyKey: `req-${taskId}`, type: "agent.task.requested", entityId: taskId,
+      payload: { taskId, title: "把这类事固化成工作流：定期整理小红书收藏夹", category: "files_calendar_prep", workOrderId: "" } });
     store.appendEvent({ ownerId: owner(), workspaceId: ws, idempotencyKey: `att-${taskId}`, type: "skill.grown.attempted", entityId: "media", payload: { taskId, state: "started", requestId: id } });
     if (lost) store.appendEvent({ ownerId: owner(), workspaceId: ws, idempotencyKey: `lost-${taskId}`, type: "agent.task.blocked", entityId: taskId, payload: { taskId, code: "AGENT_RUN_LOST" } });
   };
   attempt("g1", true);
-  expect(growCandidates(store, ws).map((item) => item.origin.kind)).toEqual(["asked"]);
+  // Not at once: the next run waits out its backoff (five minutes after the first interruption).
+  expect(growCandidates(store, ws)).toEqual([]);
+  const later = new Date(Date.now() + 6 * 60_000);
+  const [again] = growCandidates(store, ws, later);
+  expect(again).toMatchObject({ origin: { kind: "asked" }, retry: { text: expect.stringContaining("后台进程重启") } });
   attempt("g2", true);
   attempt("g3", true);
-  expect(growCandidates(store, ws)).toEqual([]);
+  expect(growCandidates(store, ws, new Date(Date.now() + 3_600_000))).toEqual([]);
   const other = requestWorkflow(store, ws, "每周剪 vlog", "media", owner());
   store.appendEvent({ ownerId: owner(), workspaceId: ws, idempotencyKey: "att-g4", type: "skill.grown.attempted", entityId: "media", payload: { taskId: "g4", state: "started", requestId: other } });
-  expect(growCandidates(store, ws)).toEqual([]);
+  expect(growCandidates(store, ws, new Date(Date.now() + 3_600_000))).toEqual([]);
 });
 
 test("「我已登录」 closes a login window the browser kept running in the background and records the login with that browser", () => {

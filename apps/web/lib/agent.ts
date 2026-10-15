@@ -7,6 +7,7 @@ import {
   type AgentApprovalRow, type AgentTaskRow
 } from "@crossline/db";
 import { getStore } from "./crossline";
+import { namesFrom, type Names } from "../app/materials/humanize";
 
 /**
  * What the Assistant page and the 待确认 summary show, read from the ledger. The worker writes it (tasks, requests, questions); the
@@ -76,6 +77,20 @@ export function loadTaskAudit(ctx: AccessContext, taskId: string): TaskAudit | u
   const directory = taskDirectory(ctx, taskId);
   if (!directory) return undefined;
   try { return JSON.parse(readFileSync(path.join(directory, "audit.json"), "utf8")) as TaskAudit; } catch { return undefined; }
+}
+
+/**
+ * The readable names behind what a run wrote: the person's uploaded files whose stored copies (named by hash) the run read, and the
+ * codes it gave them (`S01`). Read from the run's text files and the inputs it was handed, so the materials page can call a file by its
+ * own name instead of its hash.
+ */
+export function outputNames(ctx: AccessContext, taskId: string, audit: Pick<TaskAudit, "artifacts">): Names {
+  const texts = audit.artifacts.filter((item) => /\.(md|csv|txt)$/i.test(item.path))
+    .map((item) => readTaskFile(ctx, taskId, item.path)?.body.toString("utf8") ?? "");
+  const requested = getStore().listEvents(ctx.workspaceId, { type: "agent.task.requested", entityId: taskId }).at(-1);
+  const inputs = (requested?.payload as { inputs?: unknown } | undefined)?.inputs;
+  if (Array.isArray(inputs)) texts.push(inputs.filter((item): item is string => typeof item === "string").join("\n"));
+  return namesFrom(texts, getStore().listSourceDocuments(ctx.workspaceId).map((doc) => ({ sha256: doc.sha256, fileName: doc.fileName })));
 }
 
 const MIME: Record<string, string> = {

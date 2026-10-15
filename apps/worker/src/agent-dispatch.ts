@@ -1,8 +1,13 @@
+import { existsSync, readdirSync } from "node:fs";
+import { homedir } from "node:os";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { DISPATCH_STATES, STEP_STARTS_SETTING, autoHandoffTiming, isAgentCategory, prepStepRetried, relevantDocuments, stepCategory, type AgentCategory } from "@crossline/core";
 import {
-  agentApprovalDecision, assistantPlanFor, decideAgentApproval, declinedCategories, deliverableKey, isAutoHandoff, isPaused, listAgentTasks, readCategories, requestAgentApproval,
-  requestCategory, type CrosslineStore
+  DISPATCH_STATES, STEP_STARTS_SETTING, agentChainKey, autoHandoffTiming, isAgentCategory, relevantDocuments, retryDue, stepCategory, type AgentCategory, type AgentChain
+} from "@crossline/core";
+import {
+  agentApprovalDecision, agentChainsFor, assistantPlanFor, decideAgentApproval, declinedCategories, deliverableKey, isAutoHandoff, isPaused, listAgentTasks, readCategories,
+  requestAgentApproval, requestCategory, type CrosslineStore
 } from "@crossline/db";
 import type { AgentTaskInput } from "./agent-task";
 
@@ -38,11 +43,12 @@ function taskFromStep(store: CrosslineStore, workspaceId: string, orderId: strin
     .slice(0, 15).map((fact) => `- ${fact.slot}：${fact.value.slice(0, 160)}`);
   const context = [units.length ? `涉及的内容：\n${units.join("\n")}` : "", feeds.length ? `产出供本人在这些步骤中直接使用：${feeds.join("；")}` : "",
     facts.length ? `本人的相关情况（产出要贴合）：\n${facts.join("\n")}` : "", step.why ? `为什么做这一步：${step.why}` : ""].filter(Boolean).join("\n");
+  const title = `${order.intent} · ${step.title}`;
+  const before = retryContext(store, workspaceId, agentChainKey({ workOrderId: orderId, stepId, title }));
   return { ok: true, category, why: `步骤「${step.title}」可由系统完成`, graded: false,
-    input: { taskId: `agent-${orderId.replace(/[^a-zA-Z0-9]/g, "").slice(-8)}-${stepId}-${attempt}`, workOrderId: orderId, stepId,
-      title: `${order.intent} · ${step.title}`,
-      what: `完成任务「${order.intent}」中的一个准备步骤：${step.title}\n产出：${step.deliverable || "（未写明）"}\n完成标准：${step.doneCriterion || "（未写明）"}${context ? `\n${context}` : ""}\n产出是直接可用的成品（文件），不是计划或说明；只依据给出的文件与公开来源，找不到的写明。`,
-      category: category ?? "read_research_organize", humanPart: "该任务的其余步骤由本人完成；需要本人判断或选择的内容列入待本人处理。", inputs,
+    input: { taskId: `agent-${orderId.replace(/[^a-zA-Z0-9]/g, "").slice(-8)}-${stepId}-${attempt}`, workOrderId: orderId, stepId, title,
+      what: `完成任务「${order.intent}」中的一个准备步骤：${step.title}\n产出：${step.deliverable || "（未写明）"}\n完成标准：${step.doneCriterion || "（未写明）"}${context ? `\n${context}` : ""}\n产出是直接可用的成品（文件），不是计划或说明；只依据给出的文件与公开来源，找不到的写明。${before.text ? `\n${before.text}` : ""}`,
+      category: category ?? "read_research_organize", humanPart: "该任务的其余步骤由本人完成；需要本人判断或选择的内容列入待本人处理。", inputs: [...inputs, ...before.inputs],
       ...(step.executor === "agent" ? { prep: true } : {}) } };
 }
 
@@ -72,12 +78,13 @@ export function taskFromWorkOrder(store: CrosslineStore, workspaceId: string, or
     .filter((fact) => fact.status === "confirmed" && workOrder && fact.identityId === workOrder.identityId
       && (!fact.projectId || fact.projectId === workOrder.projectId || fact.projectId === `${workOrder.identityId}-default`))
     .slice(0, 20).map((fact) => `- ${fact.slot}：${fact.value.slice(0, 200)}`);
-  const what = facts.length ? `${plan.what}\n本人确认过的相关事实（可以直接用）：\n${facts.join("\n")}` : plan.what;
+  const before = retryContext(store, workspaceId, agentChainKey({ workOrderId: orderId, stepId: "", title: order.intent }));
+  const what = [facts.length ? `${plan.what}\n本人确认过的相关事实（可以直接用）：\n${facts.join("\n")}` : plan.what, before.text].filter(Boolean).join("\n");
   const attempt = listAgentTasks(store, workspaceId).filter((task) => task.workOrderId === orderId).length + 1;
   return {
     ok: true, category, why: plan.why, graded: plan.graded,
     input: { taskId: `agent-${orderId.replace(/[^a-zA-Z0-9]/g, "").slice(-8)}-${attempt}`, workOrderId: orderId, title: order.intent, what,
-      category: category ?? "read_research_organize", humanPart: plan.humanPart, inputs, ...(plan.notes ? { notes: plan.notes } : {}),
+      category: category ?? "read_research_organize", humanPart: plan.humanPart, inputs: [...inputs, ...before.inputs], ...(plan.notes ? { notes: plan.notes } : {}),
       ...(plan.delegated ? { delegated: true } : {}) }
   };
 }
@@ -87,11 +94,15 @@ export function taskFromWorkOrder(store: CrosslineStore, workspaceId: string, or
  * to do is asked about instead (once, until the person answers), and a kind the person declined is left alone.
  */
 /** `within`: only these orders (work starting soon); absent, every order — the person's own 「交给 Agent」 is never windowed. */
-export function dispatchCandidates(store: CrosslineStore, workspaceId: string, within?: Set<string>): string[] {
+export function dispatchCandidates(store: CrosslineStore, workspaceId: string, within?: Set<string>, now = new Date()): string[] {
   if (isPaused(store, workspaceId)) return [];
   const approved = readCategories(store, workspaceId);
   const declined = new Set(declinedCategories(store, workspaceId));
-  const tried = new Set(listAgentTasks(store, workspaceId).map((task) => task.workOrderId).filter(Boolean));
+  // An order is tried once any run of it (or of a step of it) exists, unless its whole-order runs were interrupted and the next is due.
+  const chains = agentChainsFor(store, workspaceId, now);
+  const due = new Set(chains.filter((chain) => !chain.latest.stepId && retryDue(chain, now)).map((chain) => chain.latest.workOrderId));
+  const tried = new Set(chains.map((chain) => chain.latest.workOrderId).filter((id) => id && !due.has(id)));
+  for (const chain of chains) if (chain.latest.stepId) tried.add(chain.latest.workOrderId);
   const out: string[] = [];
   for (const order of store.listWorkOrders(workspaceId)) {
     if (tried.has(order.id) || order.tombstone || !DISPATCH_STATES.has(order.state) || (within && !within.has(order.id))) continue;
@@ -110,11 +121,11 @@ export function dispatchCandidates(store: CrosslineStore, workspaceId: string, w
  * a committed task, never tried before, of a kind the person allowed; a kind not yet allowed is asked about once and the step waits.
  * Soonest-due task first, then in the step order.
  */
-export function stepDispatchCandidates(store: CrosslineStore, workspaceId: string, within?: Set<string>): Array<{ orderId: string; stepId: string }> {
+export function stepDispatchCandidates(store: CrosslineStore, workspaceId: string, within?: Set<string>, now = new Date()): Array<{ orderId: string; stepId: string }> {
   if (isPaused(store, workspaceId)) return [];
   const approved = readCategories(store, workspaceId);
   const declined = new Set(declinedCategories(store, workspaceId));
-  const tried = triedSteps(store, workspaceId);
+  const tried = triedSteps(store, workspaceId, now);
   const orders = new Map(store.listWorkOrders(workspaceId).filter((order) => !order.tombstone && (DISPATCH_STATES.has(order.state) || order.state === "active"))
     .map((order) => [order.id, order]));
   const out: Array<{ orderId: string; stepId: string; due: string; seq: number }> = [];
@@ -149,16 +160,62 @@ function madeInProject(store: CrosslineStore, workspaceId: string): Map<string, 
 }
 
 /**
- * Steps already handed over: a step stays tried once a run of it finished, is going, or failed for a reason of its own; a run the
- * runtime lost (a stall, a restart, a cancelled turn) is tried again, at most three times in all.
+ * Steps already handed over: a step stays tried once a run of it finished, is going, or stopped for a reason of its own; an interrupted
+ * run (a stall, a restart, a cancelled turn) is tried again once its backoff is over, at most three runs in a row (`agentChains`).
  */
-function triedSteps(store: CrosslineStore, workspaceId: string): Set<string> {
-  const runs = new Map<string, Array<{ status: string; blockerCode?: string | undefined }>>();
-  for (const task of listAgentTasks(store, workspaceId).filter((item) => item.stepId)) {
-    const key = `${task.workOrderId}#${task.stepId}`;
-    runs.set(key, [...(runs.get(key) ?? []), task]);
+function triedSteps(store: CrosslineStore, workspaceId: string, now = new Date()): Set<string> {
+  return new Set(agentChainsFor(store, workspaceId, now).filter((chain) => chain.latest.stepId && !retryDue(chain, now))
+    .map((chain) => `${chain.latest.workOrderId}#${chain.latest.stepId}`));
+}
+
+/**
+ * Work whose next run is due — interrupted with runs left and the backoff over, or asked for by the person — that can still be done:
+ * the order is still open (and the step still planned and not the person's), and its kind is still allowed. The person's own
+ * (「交给 Agent」, a retry they asked for) are not held to `within`; the system's own are, as their first run was.
+ */
+export function retryCandidates(store: CrosslineStore, workspaceId: string, now = new Date(), within?: Set<string>):
+  Array<{ orderId: string; stepId: string | undefined; chain: AgentChain }> {
+  if (isPaused(store, workspaceId)) return [];
+  const approved = readCategories(store, workspaceId);
+  const tasks = new Map(listAgentTasks(store, workspaceId, now).map((row) => [row.taskId, row]));
+  const orders = new Map(store.listWorkOrders(workspaceId).filter((order) => !order.tombstone).map((order) => [order.id, order]));
+  const out: Array<{ orderId: string; stepId: string | undefined; chain: AgentChain }> = [];
+  for (const chain of agentChainsFor(store, workspaceId, now)) {
+    const { workOrderId, stepId } = chain.latest;
+    const order = orders.get(workOrderId);
+    if (!retryDue(chain, now) || !order) continue;
+    const category = tasks.get(chain.latest.taskId)?.category;
+    if (category && !approved[category]) continue;
+    if (!chain.byPerson && within && !within.has(workOrderId)) continue;
+    if (stepId) {
+      const step = store.getStepPlan(workspaceId, workOrderId)?.steps.find((item) => item.id === stepId);
+      if (!step || step.status !== "planned" || step.executor === "human" || !(DISPATCH_STATES.has(order.state) || order.state === "active")) continue;
+    } else if (!DISPATCH_STATES.has(order.state)) continue;
+    out.push({ orderId: workOrderId, stepId: stepId || undefined, chain });
   }
-  return new Set([...runs].filter(([, list]) => !prepStepRetried(list)).map(([key]) => key));
+  // The person's first, then the longest waiting.
+  return out.sort((a, b) => Number(b.chain.byPerson) - Number(a.chain.byPerson) || (a.chain.retryAt ?? "").localeCompare(b.chain.retryAt ?? ""));
+}
+
+const defaultRoot = () => process.env.CROSSLINE_AI_OUTPUT_DIR ?? path.join(homedir(), "Crossline", "ai-output");
+const hasFiles = (dir: string) => { try { return readdirSync(dir).some((name) => !/^(audit|progress)\.json$/i.test(name)); } catch { return false; } };
+
+/**
+ * What the next run of work that stopped before is told: where the last one stopped, the folders its earlier runs wrote (read only, to
+ * carry on from rather than start over), and the person's own words, which come first. Empty for work never run.
+ */
+export function retryContext(store: CrosslineStore, workspaceId: string, key: string, outputRoot = defaultRoot()): { text: string; inputs: string[] } {
+  const chain = agentChainsFor(store, workspaceId).find((item) => item.key === key);
+  if (!chain || chain.state === "done" && !chain.notes.length) return { text: "", inputs: [] };
+  const rows = new Map(listAgentTasks(store, workspaceId).map((row) => [row.taskId, row]));
+  const inputs = chain.runs.map((run) => rows.get(run.taskId)?.directory || path.join(outputRoot, run.taskId)).filter((dir) => existsSync(dir) && hasFiles(dir));
+  const before = chain.failure ? `这件事之前做过 ${chain.runs.length} 次没做完，上一次停在：${chain.failure.stuckAt}。` : `这件事之前做过 ${chain.runs.length} 次，本人要求再做一次。`;
+  return {
+    text: [before,
+      inputs.length ? `之前写出的文件在：${inputs.join("；")}（只读）。先看这些文件，接着做，不要从头重做已经做好的部分。` : "",
+      chain.notes.length ? `本人的交代（按这个做，与上面的要求冲突时以这里为准）：\n${chain.notes.map((note) => `- ${note}`).join("\n")}` : ""].filter(Boolean).join("\n"),
+    inputs
+  };
 }
 
 export function readStepStarts(store: CrosslineStore, workspaceId: string): Record<string, string> {
@@ -183,7 +240,7 @@ export function autoHandoffCandidates(store: CrosslineStore, workspaceId: string
   if (!isAutoHandoff(store, workspaceId) || isPaused(store, workspaceId)) return { due: [], early: [] };
   const approved = readCategories(store, workspaceId);
   const declined = new Set(declinedCategories(store, workspaceId));
-  const tried = triedSteps(store, workspaceId);
+  const tried = triedSteps(store, workspaceId, now);
   const starts = readStepStarts(store, workspaceId);
   const made = madeInProject(store, workspaceId);
   // The person is working on it right now: an open, unpaused session. The assistant does not start on the same task under them.

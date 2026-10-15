@@ -5,10 +5,12 @@ import path from "node:path";
 import {
   AGENT_CATEGORIES, GROW_AFTER_ACCEPTED, GROWN_SKILL_IDLE_DAYS, PUBLIC_SKILL_REVIEW_SCHEMA, accessProfileSlug, categoryFromWording, finalVerdict, grownSkillFilesKey, grownSkillId,
   grownSkillName, scanForDeclaredAccess, scanSkillFiles, scheduleLabel, skillFrontmatter, textTerms, reassignedSteps, validatePublicSkillReview, validateWorkflowManifest,
-  workflowAccess, workflowDue, type AgentCategory, type GrownSkillRecord, type PublicSkillReview, type WorkflowAccess, type WorkflowOrigin
+  workflowAccess, workflowDue, agentChainKey, retryDue, type AgentCategory, type AgentChain, type GrownSkillRecord, type PublicSkillReview, type WorkflowAccess,
+  type WorkflowOrigin
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
-import { grownHomeLine, listAgentTasks, readGrownSkills, recordGrownLogin, removeGrownSkill, writeGrownSkills, type CrosslineStore } from "@crossline/db";
+import { agentChainsFor, grownHomeLine, listAgentTasks, readGrownSkills, recordGrownLogin, removeGrownSkill, writeGrownSkills, type CrosslineStore } from "@crossline/db";
+import { retryContext } from "./agent-dispatch";
 import type { AgentOutcome, AgentTaskInput } from "./agent-task";
 import type { DispatchResult } from "./agent-service";
 import { identityLines } from "./lines";
@@ -33,11 +35,19 @@ export type GrowCandidate = {
   /** What the workflow is for, in words: the person's request, or the titles of the errands it repeats. */
   text: string;
   examples: Array<{ taskId: string; title: string; directory: string }>;
+  /** Grown before and stopped (interrupted, or the person asked again): where it stopped, its files, the person's words. */
+  retry?: { text: string; inputs: string[] };
 };
 
-const attemptedTaskIds = (store: CrosslineStore, workspaceId: string, now: Date) => new Set(store.listEvents(workspaceId, { type: "skill.grown.attempted" })
-  .filter((event) => now.getTime() - Date.parse(event.createdAt) < ATTEMPT_COOLDOWN_DAYS * 86_400_000)
-  .flatMap((event) => ((event.payload as { taskIds?: string[] }).taskIds ?? [])));
+/** The title a growing run carries, which is also how its runs are told apart from other work (`agentChainKey`). */
+const growTitle = (text: string) => `把这类事固化成工作流：${text.slice(0, 40)}`;
+
+/** Errands already tried as a workflow in the last month — except an attempt whose run was interrupted and is due to run again. */
+const attemptedTaskIds = (store: CrosslineStore, workspaceId: string, now: Date, again: (taskId: string) => AgentChain | undefined) =>
+  new Set(store.listEvents(workspaceId, { type: "skill.grown.attempted" })
+    .filter((event) => now.getTime() - Date.parse(event.createdAt) < ATTEMPT_COOLDOWN_DAYS * 86_400_000)
+    .filter((event) => !again(String((event.payload as { taskId?: string }).taskId ?? "")))
+    .flatMap((event) => ((event.payload as { taskIds?: string[] }).taskIds ?? [])));
 const shared = (a: string, b: string) => { const left = textTerms(a); let count = 0; for (const term of textTerms(b)) if (left.has(term)) count += 1; return count; };
 
 /**
@@ -47,31 +57,41 @@ const shared = (a: string, b: string) => { const left = textTerms(a); let count 
  */
 export function growCandidates(store: CrosslineStore, workspaceId: string, now = new Date()): GrowCandidate[] {
   const lines = identityLines(store, workspaceId);
-  // A request counts as tried once a run for it ended on its own; a run the process lost (a restart, `AGENT_RUN_LOST`) is tried again,
-  // up to three runs — the first real request was lost to a redeploy and, counted as tried, would never have been grown (2026-10-14).
-  const lost = new Set(store.listEvents(workspaceId, { type: "agent.task.blocked" })
-    .filter((event) => (event.payload as { code?: string }).code === "AGENT_RUN_LOST").map((event) => event.entityId));
-  const attempts = new Map<string, { runs: number; settled: boolean }>();
+  // One rule for every run of the assistant (`agentChains`): a growing run that was interrupted is grown again once its backoff is over,
+  // at most three runs in a row; one the person asked to run again is grown now, with their words. The first real request was lost to a
+  // redeploy and, counted as tried, would never have been grown (2026-10-14).
+  const chains = agentChainsFor(store, workspaceId, now);
+  const chainOf = new Map(chains.flatMap((chain) => chain.runs.map((run) => [run.taskId, chain] as const)));
+  const again = (taskId: string) => { const chain = chainOf.get(taskId); return chain && chain.latest.taskId === taskId && retryDue(chain, now) ? chain : undefined; };
+  const lastAttempt = new Map<string, { taskId: string; state: string }>();
+  const settled = new Set<string>();
   for (const event of store.listEvents(workspaceId, { type: "skill.grown.attempted" })) {
     const payload = event.payload as { requestId?: string; taskId?: string; state?: string };
     if (!payload.requestId) continue;
-    const seen = attempts.get(payload.requestId) ?? { runs: 0, settled: false };
-    const lostRun = payload.state === "started" && lost.has(String(payload.taskId ?? ""));
-    attempts.set(payload.requestId, { runs: seen.runs + 1, settled: seen.settled || !lostRun });
+    // A kind the person had not allowed was said once: that request is settled.
+    if (payload.state !== "started") settled.add(payload.requestId);
+    lastAttempt.set(payload.requestId, { taskId: String(payload.taskId ?? ""), state: String(payload.state ?? "") });
   }
-  const tried = new Set([...attempts].filter(([, attempt]) => attempt.settled || attempt.runs >= 3).map(([id]) => id));
+  const retryOf = new Map<string, AgentChain>();
+  const tried = new Set<string>();
+  for (const [requestId, attempt] of lastAttempt) {
+    const chain = again(attempt.taskId);
+    if (chain && !settled.has(requestId)) retryOf.set(requestId, chain); else tried.add(requestId);
+  }
   const asked = store.listEvents(workspaceId, { type: "workflow.requested" }).filter((event) => !tried.has(event.entityId)).map((event): GrowCandidate | undefined => {
     const payload = event.payload as { text?: string; lineId?: string; category?: string };
     const text = String(payload.text ?? "").trim();
     // A request on no known line is not guessed onto the first one; it waits (the input box now always names one).
     const lineId = lines.some((line) => line.id === payload.lineId) ? payload.lineId! : undefined;
     const category = payload.category && payload.category in AGENT_CATEGORIES ? payload.category as AgentCategory : categoryFromWording(text) ?? "files_calendar_prep";
-    return text && lineId ? { lineId, category, origin: { kind: "asked", text, requestId: event.entityId }, text, examples: [] } : undefined;
+    const chain = retryOf.get(event.entityId);
+    const retry = chain ? retryContext(store, workspaceId, chain.key) : undefined;
+    return text && lineId ? { lineId, category, origin: { kind: "asked", text, requestId: event.entityId }, text, examples: [], ...(retry?.text ? { retry } : {}) } : undefined;
   }).filter((item): item is GrowCandidate => Boolean(item));
 
   const orders = new Map(store.listWorkOrders(workspaceId).map((order) => [order.id, order]));
   const covered = new Set([...readGrownSkills(store, workspaceId).flatMap((record) => record.origin.kind === "repeated" ? record.origin.taskIds : []),
-    ...attemptedTaskIds(store, workspaceId, now)]);
+    ...attemptedTaskIds(store, workspaceId, now, again)]);
   const accepted = listAgentTasks(store, workspaceId).filter((task) => task.status === "accepted" && !covered.has(task.taskId) && orders.has(task.workOrderId));
   const repeated: GrowCandidate[] = [];
   const groups = new Map<string, typeof accepted>();
@@ -84,9 +104,11 @@ export function growCandidates(store: CrosslineStore, workspaceId: string, now =
     for (const task of tasks) {
       const alike = tasks.filter((other) => other === task || shared(other.title, task.title) >= 3);
       if (alike.length < GROW_AFTER_ACCEPTED) continue;
-      repeated.push({ lineId, category, origin: { kind: "repeated", taskIds: alike.map((item) => item.taskId) },
-        // The same errand run as several steps repeats its task's title; each distinct one is said once.
-        text: [...new Set(alike.map((item) => item.title))].slice(0, 6).join("；"), examples: alike.slice(0, 4).map((item) => ({ taskId: item.taskId, title: item.title, directory: item.directory })) });
+      // The same errand run as several steps repeats its task's title; each distinct one is said once.
+      const text = [...new Set(alike.map((item) => item.title))].slice(0, 6).join("；");
+      const retry = retryContext(store, workspaceId, agentChainKey({ workOrderId: "", stepId: "", title: growTitle(text) }));
+      repeated.push({ lineId, category, origin: { kind: "repeated", taskIds: alike.map((item) => item.taskId) }, text,
+        examples: alike.slice(0, 4).map((item) => ({ taskId: item.taskId, title: item.title, directory: item.directory })), ...(retry.text ? { retry } : {}) });
       break;
     }
   }
@@ -99,9 +121,9 @@ export function growTask(candidate: GrowCandidate, lineIds: string[], tools: Arr
   const basis = candidate.origin.kind === "asked" ? `本人的要求：「${candidate.text}」` : `本人已采纳过的同类结果：${candidate.text}`;
   return {
     taskId: `grow-${randomUUID().slice(0, 8)}`, category: candidate.category, prep: true, extraSkills: [SKILL_CREATOR], lineId: candidate.lineId, growing: true,
-    title: `把这类事固化成工作流：${candidate.text.slice(0, 40)}`,
-    humanPart: "是否保留这个工作流，由本人在设置里决定。",
-    inputs: candidate.examples.map((example) => example.directory).filter(Boolean),
+    title: growTitle(candidate.text),
+    humanPart: "工作流默认保留；不需要时本人可在设置里关闭。",
+    inputs: [...candidate.examples.map((example) => example.directory).filter(Boolean), ...(candidate.retry?.inputs ?? [])],
     what: [
       `把下面这类反复出现的事固化成一个可复用的工作流 skill，供以后同类任务直接使用。${basis}。`,
       "按 $skill-creator 的写法，在任务目录下建 skill/ 文件夹：",
@@ -112,7 +134,8 @@ export function growTask(candidate: GrowCandidate, lineIds: string[], tools: Arr
       "要读本人在某个网站上的账号或数据（收藏夹、订单、课程平台等）时：先联网查清能用的接口，写进 SKILL.md——优先官方 API 或官方导出，其次平台允许的工具，最后才是在本人登录的浏览器里读取页面；不要求本人交出密码或 Cookie，不用来路不明的代抓服务。登录由本人在 Crossline 打开的浏览器窗口里完成；执行时需要登录的网站由 Crossline 的读取工具 site_read 代为打开（每个页面只读一次、每期最多几页、遇到安全验证或要求登录就停），助手拿不到浏览器配置目录。所以脚本不自己访问这些网站：SKILL.md 写清每期用 site_read 读哪几个页面（列表页，不逐条打开详情页）、把返回的文字和链接存成什么文件，脚本只负责整理这些文件。在 access 里列出每个网站 {\"service\",\"site\"(https 地址),\"login\"(true/false),\"how\"(用什么接口、怎么读)}，在 risks 里如实写出风险（是否违反平台协议、账号可能受限、验证码、页面改版会失效、读到的数据存在本机哪里）；本人看过风险并同意后才会启用。改动账号的事（移动、删除、取消收藏、点赞、评论、发布）一律是本人的步骤。这次没有登录、读不到真实数据：用离线样例把整理部分跑通，读取部分写好并在 SKILL.md 里说明尚未在真实账号上验证。不读账号时 access 与 risks 为 []。",
       ...(tools.length ? [`本人能用的 AI 工具：${tools.map((tool) => `${tool.name}（${tool.goodFor}${tool.by === "system" ? "；由助手执行" : ""}）`).join("；")}。按今天会用这些工具的人的做法设计：能由助手整份做的步骤归助手，本人的步骤写明用哪个工具、怎么用（具体操作或给它的提示词），只把需要本人判断的部分留给本人。`] : []),
       ...(library.length ? [`这条主线的 skill 库里已有：${library.map((skill) => `$${skill.name}（${skill.description.slice(0, 60)}）`).join("；")}。工作流要用到其中某个时，在 SKILL.md 正文写它的完整名（如上，带 $），执行时会一起启用；不要把它的内容抄进来。`] : []),
-      "这次只建工作流，不执行原任务本身，不发布、不发送任何东西。产物列出 skill/ 下的每个文件。"
+      "这次只建工作流，不执行原任务本身，不发布、不发送任何东西。产物列出 skill/ 下的每个文件。",
+      ...(candidate.retry?.text ? [candidate.retry.text] : [])
     ].join("\n")
   };
 }
@@ -218,7 +241,7 @@ export async function installGrown(store: CrosslineStore, workspaceId: string, c
     sayToPerson(store, workspaceId, `${basis}建好工作流「${manifest.summary}」，要读取${manifest.access.map((item) => item.service).join("、")}，先请本人看风险：${manifest.risks.slice(0, 3).join("；")}。同意后${logins.length ? `在弹出的浏览器窗口里登录${logins.join("、")}，` : ""}再交给助手执行${handed}。`,
       "skill_grown", `grown:${id}`, [{ label: "查看风险并启用", href: "/settings#skills" }], now);
   } else {
-    sayToPerson(store, workspaceId, `${basis}长出新工作流「${manifest.summary}」，已可用（${scheduleLabel(manifest.schedule)}${final === "text_only" ? "；脚本未通过扫描，只用文字" : ""}）。之后同类的事由助手按它做，发出、上传一类的步骤仍由本人完成${handed}。`,
+    sayToPerson(store, workspaceId, `${basis}长出新工作流「${manifest.summary}」，已可用并默认保留（${scheduleLabel(manifest.schedule)}${final === "text_only" ? "；脚本未通过扫描，只用文字" : ""}）。之后同类的事由助手按它做，发出、上传一类的步骤仍由本人完成${handed}。不需要可在设置里关闭。`,
       "skill_grown", `grown:${id}`, [{ label: "查看或关闭", href: "/settings#skills" }], now);
   }
   return { state: "installed", id };
@@ -330,12 +353,15 @@ export function startWorkflowRun(store: CrosslineStore, workspaceId: string, rec
     "把读到的内容存进任务目录，再用工作流的脚本整理；不在账号里做任何改动（移动、删除、取消收藏、点赞、评论、发布）。",
     "site_read 说已停止（安全验证或要求登录）时，不再读取、不换方式、不尝试绕过；用已读到的内容完成本期，needsHuman 第一项照它说的写。"] : [];
   const day = now.toISOString().slice(0, 10);
+  const title = record.manifest.summary.slice(0, 80);
+  // Run again after an interruption, or because the person asked: where the last run stopped, its files, and the person's words.
+  const before = retryContext(store, workspaceId, agentChainKey({ workOrderId: "", stepId: "", title }));
   return runFree({ taskId: `flow-${record.id.replace(/^flow-/, "")}-${now.getTime().toString(36)}`, category: record.category,
-    ...(home ? { lineId: home } : {}), ...(folders.length ? { inputs: folders } : {}),
-    extraSkills: [grownSkillName(record.id)], title: record.manifest.summary.slice(0, 80), humanPart: personSteps.join("；") || "查看结果",
+    ...(home ? { lineId: home } : {}), ...(folders.length || before.inputs.length ? { inputs: [...folders, ...before.inputs] } : {}),
+    extraSkills: [grownSkillName(record.id)], title, humanPart: personSteps.join("；") || "查看结果",
     ...(reader ? { reader } : {}),
     what: [`按工作流 $${grownSkillName(record.id)} 做本期的这件事：${record.manifest.summary.replace(/[。.\s]+$/, "")}。在由本人完成的步骤之前停下，把要发出或要本人在账号里操作的东西备好。`,
-      ...(folders.length ? [`本期的输入在：${folders.join("；")}（只读）。`] : []), ...accountRules].join("\n") },
+      ...(folders.length ? [`本期的输入在：${folders.join("；")}（只读）。`] : []), ...accountRules, ...(before.text ? [before.text] : [])].join("\n") },
   (outcome) => {
     const login = outcome.state === "done" ? outcome.summary.needsHuman.find((item) => item.what.startsWith("需要登录"))?.what : undefined;
     if (login) {

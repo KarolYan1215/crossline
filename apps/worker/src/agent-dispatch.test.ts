@@ -140,10 +140,12 @@ test("a preparation step the runtime lost (a stall, a restart) is tried again, u
     store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: `b${n}`, type: "agent.task.blocked", entityId: `t${n}`, payload: { taskId: `t${n}`, code, message: "" } });
   };
   run(1, "SKILL_CANCELED");
-  expect(stepDispatchCandidates(store, "w")).toHaveLength(1);
+  // Tried again once the backoff after the interruption is over, not at once.
+  expect(stepDispatchCandidates(store, "w")).toEqual([]);
+  expect(stepDispatchCandidates(store, "w", undefined, new Date(Date.now() + 6 * 60_000))).toHaveLength(1);
   run(2, "SKILL_STALLED");
   run(3, "SKILL_CANCELED");
-  expect(stepDispatchCandidates(store, "w")).toEqual([]);
+  expect(stepDispatchCandidates(store, "w", undefined, new Date(Date.now() + 3_600_000))).toEqual([]);
   store.close();
 });
 

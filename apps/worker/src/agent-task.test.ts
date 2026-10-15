@@ -80,7 +80,7 @@ test("the ledger keeps where it came from and what it made, never the content", 
   const events = store.listEvents(workspaceId, { type: ["agent.task.requested", "agent.task.completed"] });
   expect(events.map((event) => event.type)).toEqual(["agent.task.requested", "agent.task.completed"]);
   expect(JSON.stringify(events)).not.toContain("SECRET-BODY");
-  expect(events[1]!.payload).toMatchObject({ artifacts: [{ path: "notes.md" }], inputsModified: [], checksPassed: true, reviewRequired: true });
+  expect(events[1]!.payload).toMatchObject({ artifacts: [{ path: "notes.md" }], inputsModified: [], checksPassed: true, reviewRequired: false });
 });
 
 test("an artifact it claims but did not make is sent back, and the corrected answer is accepted", async () => {

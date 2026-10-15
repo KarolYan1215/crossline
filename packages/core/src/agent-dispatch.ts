@@ -1,4 +1,5 @@
 import { mentionsExternalAction } from "./external-action";
+import { AGENT_MAX_RUNS, classifyAgentFailure } from "./agent-failure";
 
 /**
  * Which work the assistant may take, and what to hand it.
@@ -126,12 +127,13 @@ function delegateWhole(order: DispatchableOrder, human: Part[], context: { proje
 export const DISPATCH_STATES = new Set(["approved", "preparing", "ready_for_human"]);
 
 /**
- * A preparation step's run that the runtime lost (a stall, a restart, a cancelled turn) is tried again, up to this many runs of the step
- * in all; one that failed for a reason of its own (a missing artifact, a refused check) is not.
+ * A run that was interrupted (a stall, a restart, a cancelled turn) is tried again, up to this many runs in all; one that failed for a
+ * reason of its own is not. The one rule for every run of the assistant is `agentChains` (`agent-failure.ts`); this is kept for callers
+ * that only have a list of runs, without backoff.
  */
-export const PREP_STEP_MAX_RUNS = 3;
+export const PREP_STEP_MAX_RUNS = AGENT_MAX_RUNS;
 export const lostToRuntime = (run: { status: string; blockerCode?: string | undefined }) =>
-  run.status === "stale" || (run.status === "blocked" && /^(SKILL_|CODEX_|AGENT_RUN_LOST$)/.test(run.blockerCode ?? ""));
+  (run.status === "stale" || run.status === "blocked") && classifyAgentFailure({ status: run.status, blockerCode: run.blockerCode ?? "", blockerMessage: "" }).retry;
 /** Whether a step whose runs so far are these will be run again by itself. */
 export const prepStepRetried = (runs: Array<{ status: string; blockerCode?: string | undefined }>) =>
   runs.length > 0 && runs.length < PREP_STEP_MAX_RUNS && runs.every(lostToRuntime);

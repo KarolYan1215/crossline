@@ -4,11 +4,11 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import {
-  AGENT_CATEGORIES, AGENT_SUMMARY_SCHEMA, decideCommand, decideFileChange, decideMcpTool, validateAgentSummary,
-  type AgentCategory, type AgentSummary, type GuardContext, type GuardDecision
+  AGENT_CATEGORIES, AGENT_SUMMARY_SCHEMA, decideCommand, decideFileChange, decideMcpTool, resultNeedsPerson, validateAgentSummary,
+  type AgentCategory, type AgentProgressRecord, type AgentSummary, type GuardContext, type GuardDecision
 } from "@crossline/core";
 import { runCodexSkill, type AgentItem, type CodexRpcBoundary, type SkillTools } from "@crossline/codex";
-import { approveCategory, CLEAN_RUNS_TO_TRUST, readCategories, recordReview, type CategoryState, type CrosslineStore } from "@crossline/db";
+import { agentChainsFor, approveCategory, CLEAN_RUNS_TO_TRUST, readCategories, recordReview, type CategoryState, type CrosslineStore } from "@crossline/db";
 import { libraryInstruction, librarySkillsFor } from "./skill-library";
 
 export const AGENT_SKILL = "crossline:crossline-agent";
@@ -44,6 +44,8 @@ export type AgentTaskInput = {
   growing?: boolean;
   /** Crossline's own reader for the sites a workflow reads behind the person's login (`site-reader.ts`): its tool, and how often it refused. */
   reader?: { tools: SkillTools; refusals: () => number; close: () => Promise<void> };
+  /** Who asked for this run: the person (「交给 Agent」, a retry they asked for) or the system (the worker's own pass). */
+  by?: "person" | "system";
 };
 
 export type AuditCommand = { command: string; cwd: string; status: string; exitCode: number | null; reads: string[] };
@@ -58,7 +60,7 @@ export type ArtifactRecord = { path: string; purpose: string; sha256: string; by
 export type AgentOutcome =
   | { state: "needs_category_approval"; category: AgentCategory; label: string }
   | { state: "done"; taskId: string; directory: string; summary: AgentSummary; artifacts: ArtifactRecord[]; audit: AuditRecord;
-      inputsModified: string[]; checksPassed: boolean; reviewRequired: boolean }
+      inputsModified: string[]; checksPassed: boolean; reviewRequired: boolean; reviewReasons: string[] }
   | { state: "blocked"; taskId: string; directory: string; code: string; message: string };
 
 const sha = (file: string) => createHash("sha256").update(readFileSync(file)).digest("hex");
@@ -100,7 +102,7 @@ export function loopReason(commands: Array<{ command: string }>, refusals: numbe
   }
   return refusals >= LOOP_REFUSALS ? `读取网站被拒绝了 ${refusals} 次仍在继续尝试` : undefined;
 }
-const HELPER = /(^|[\\/])(__pycache__|node_modules|\.git)([\\/]|$)|\.(pyc|py|ps1|psm1|sh|bat|cmd|js|mjs|ts)$|(^|[\\/])audit\.json$/i;
+const HELPER = /(^|[\\/])(__pycache__|node_modules|\.git)([\\/]|$)|\.(pyc|py|ps1|psm1|sh|bat|cmd|js|mjs|ts)$|(^|[\\/])(audit|progress)\.json$/i;
 
 /**
  * A run stopped part way still leaves what it had made: the files in its directory (not its own helper scripts) go to 待确认 as an
@@ -114,6 +116,8 @@ export function salvageStoppedRun(store: CrosslineStore, workspaceId: string, ta
   const code = String((blocked?.payload as { code?: string } | undefined)?.code ?? "");
   // A run growing a workflow is not a result for the person: what it wrote is installed by the grower or tried again.
   if (taskId.startsWith("grow-") || !blocked || !requested || !STOPPED.has(code) || store.listEvents(workspaceId, { type: "agent.task.completed", entityId: taskId }).length) return false;
+  // A run that will be run again (interrupted, retries left) is not a result: the next run is handed its files and carries on from them.
+  if (agentChainsFor(store, workspaceId, now).some((chain) => chain.latest.taskId === taskId && chain.state === "retry")) return false;
   const request = requested.payload as { title?: string; category?: string; workOrderId?: string };
   const directory = path.join(outputRoot, taskId);
   const files: string[] = [];
@@ -142,6 +146,19 @@ export function salvageStoppedRun(store: CrosslineStore, workspaceId: string, ta
       mcpCalls: 0, searches: 0, denied: 0, artifacts: artifacts.map(({ path: p, sha256, bytes }) => ({ path: p, sha256, bytes })), verification: [], needsHuman: 1, inputsModified: [],
       checksPassed: false, reviewRequired: true, partial: true, stoppedBy: code, auditFile: path.join(directory, "audit.json"), salvagedAt: now.toISOString() } });
   return true;
+}
+
+/**
+ * What a run has done so far, beside its files (`progress.json`): written while it runs (at most every ten seconds) and when it stops,
+ * so a run lost with the process still says how far it got. Commands, files and searches only — what the card about a stopped run shows.
+ */
+export function writeProgress(directory: string, audit: AuditRecord): void {
+  const inside = (file: string) => { const relative = path.relative(directory, file); return relative && !relative.startsWith("..") && !path.isAbsolute(relative) ? relative : file; };
+  const record: AgentProgressRecord & { updatedAt: string } = { updatedAt: new Date().toISOString(),
+    commands: audit.commands.slice(-40).map(({ command, exitCode }) => ({ command, exitCode })),
+    filesChanged: [...new Set(audit.filesChanged.map((change) => inside(change.path)))].slice(-60), searches: audit.searches.slice(-20),
+    decisions: audit.decisions.map(({ rule, reason, outcome }) => ({ rule, reason, outcome })).slice(-20) };
+  try { writeFileSync(path.join(directory, "progress.json"), JSON.stringify(record, null, 2), "utf8"); } catch { /* the directory is gone */ }
 }
 
 export function changedFiles(before: Map<string, string>, after: Map<string, string>): string[] {
@@ -262,7 +279,7 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
     const startedAt = Date.now();
     store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:requested:${taskId}`, type: "agent.task.requested", entityId: taskId,
       payload: { taskId, title: input.title, category: input.category, workOrderId: input.workOrderId ?? "", inputs, humanPart: input.humanPart, ...(worktree ? { worktree } : {}),
-        ...(input.delegated ? { delegated: true } : {}), ...(input.stepId ? { stepId: input.stepId } : {}),
+        ...(input.delegated ? { delegated: true } : {}), ...(input.stepId ? { stepId: input.stepId } : {}), ...(input.by === "person" ? { by: "person" } : {}),
         // Taken up because the order took effect by itself (nobody clicked approve): the review card says so.
         ...(input.workOrderId && store.listEvents(workspaceId, { type: "work_order.auto_approved", entityId: input.workOrderId }).length ? { autoApproved: true } : {}) } });
 
@@ -289,6 +306,7 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
       if (loopStop) stopper.abort();
     };
     const signal = options.signal ? AbortSignal.any([options.signal, stopper.signal]) : stopper.signal;
+    let progressAt = 0;
     const result = await runCodexSkill<AgentSummary>(client, task, {
       skillName: AGENT_SKILL, cwd, developerInstructions: AGENT_INSTRUCTIONS + libraryInstruction(extraSkills), outputSchema: AGENT_SUMMARY_SCHEMA,
       ...(extraSkills.length ? { extraSkills } : {}),
@@ -297,7 +315,12 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
       ...(input.reader?.tools.specs.length ? { tools: input.reader.tools } : {}),
       agent: {
         cwd: directory,
-        onItem: (item, phase) => { noteItem(audit, pendingChanges, item, phase); if (phase === "completed") watch(); },
+        onItem: (item, phase) => {
+          noteItem(audit, pendingChanges, item, phase);
+          if (phase !== "completed") return;
+          watch();
+          if (Date.now() - progressAt > 10_000) { progressAt = Date.now(); writeProgress(directory, audit); }
+        },
         answer: createAgentAnswerer(guard, audit, pendingChanges, options.askFor?.(taskId) ?? options.ask)
       }
     });
@@ -309,8 +332,14 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
       // Stopped by the person (「中止」): a code of its own, so it is never taken for a run the runtime lost and tried again.
       const code = loopStop ? "AGENT_LOOP_STOPPED" : options.signal?.aborted ? "AGENT_CANCELLED" : result.blocker.code;
       const message = loopStop ? `${loopStop}，已自动停下；已写出的文件照常交本人查看。` : options.signal?.aborted ? "本人中止了这次运行。" : result.blocker.message;
+      writeProgress(directory, audit);
+      // What the card about it needs to say where it stopped and whether trying again could act outside the machine: the guard's refusals
+      // (their rules, never their subjects), how often a site's reader refused, and where its files are.
+      const deniedRules = [...new Set(audit.decisions.filter((decision) => decision.outcome === "declined").map((decision) => decision.rule))];
+      const siteRefusals = input.reader?.refusals() ?? 0;
       store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:blocked:${taskId}`, type: "agent.task.blocked", entityId: taskId,
-        payload: { taskId, code, message: message.slice(0, 400), durationMs: Date.now() - startedAt, commands: audit.commands.length, decisions: audit.decisions.length, inputsModified } });
+        payload: { taskId, code, message: message.slice(0, 400), durationMs: Date.now() - startedAt, commands: audit.commands.length, decisions: audit.decisions.length, inputsModified,
+          directory, filesChanged: audit.filesChanged.length, searches: audit.searches.length, ...(deniedRules.length ? { deniedRules } : {}), ...(siteRefusals ? { siteRefusals } : {}) } });
       salvageStoppedRun(store, workspaceId, taskId, options.outputRoot);
       return blocked(code, message);
     }
@@ -321,12 +350,13 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
     });
     const checksPassed = result.output.verification.every((check) => check.result !== "fail") && inputsModified.length === 0
       && audit.commands.every((command) => command.exitCode === 0 || command.exitCode === null || result.output.verification.length > 0);
-    const trust = categories[input.category]!.trust;
-    // Reviewed unless the kind has earned trust AND this result passed its own checks, left the originals alone, and asks nothing of the person.
-    const reviewRequired = input.prep ? !checksPassed : !(trust === "auto_checked" && checksPassed && !result.output.needsHuman.length);
+    // Accepted by itself unless the person has to act, allow or judge something (the owner's rule, 2026-10-15: automatic by default, the
+    // exceptions are confirmed) — it replaced counting accepted results per kind before a kind was trusted.
+    const reviewReasons = resultNeedsPerson({ needsHuman: result.output.needsHuman, checksPassed, inputsModified, decisions: audit.decisions, ...(input.growing ? { growing: true } : {}) });
+    const reviewRequired = reviewReasons.length > 0;
     const record = { taskId, title: input.title, category: input.category, directory, durationMs: Date.now() - startedAt, summary: result.output.summary,
       artifacts, verification: result.output.verification, needsHuman: result.output.needsHuman, notDone: result.output.notDone, assumptions: result.output.assumptions,
-      audit, inputsModified, checksPassed, reviewRequired };
+      audit, inputsModified, checksPassed, reviewRequired, reviewReasons };
     writeFileSync(path.join(directory, "audit.json"), JSON.stringify(record, null, 2), "utf8");
     // The ledger keeps the provenance, never the content: who asked what, what ran, what was read and changed, what was made and its hash.
     store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:completed:${taskId}`, type: "agent.task.completed", entityId: taskId,
@@ -334,8 +364,8 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
         filesChanged: audit.filesChanged.length, mcpCalls: audit.mcpCalls.length, searches: audit.searches.length,
         denied: audit.decisions.filter((d) => d.outcome === "declined").length, artifacts: artifacts.map(({ path: p, sha256, bytes }) => ({ path: p, sha256, bytes })),
         verification: result.output.verification.map((v) => ({ check: v.check, result: v.result })), needsHuman: result.output.needsHuman.length,
-        inputsModified, checksPassed, reviewRequired, auditFile: path.join(directory, "audit.json"), ...(result.audit.skills?.length ? { skills: result.audit.skills } : {}) } });
-    return { state: "done", taskId, directory, summary: result.output, artifacts, audit, inputsModified, checksPassed, reviewRequired };
+        inputsModified, checksPassed, reviewRequired, ...(reviewReasons.length ? { reviewReasons } : {}), auditFile: path.join(directory, "audit.json"), ...(result.audit.skills?.length ? { skills: result.audit.skills } : {}) } });
+    return { state: "done", taskId, directory, summary: result.output, artifacts, audit, inputsModified, checksPassed, reviewRequired, reviewReasons };
   };
 }
 
@@ -347,4 +377,7 @@ const AGENT_INSTRUCTIONS = "You are the person's assistant on their own computer
   + "system settings; the guard will refuse them and you must not work around a refusal. When the task is graded coursework (the Skill says how "
   + "to tell), it is learning aid only: explain, make your own practice problems, check the person's work; never produce something they could "
   + "submit as their own. Run and check what "
-  + "you make, record what you verified honestly, and finish with the requested JSON. Write every human-readable field in Chinese.";
+  + "you make, record what you verified honestly, and finish with the requested JSON. Write every human-readable field in Chinese. "
+  + "notDone, assumptions and needsHuman are shown to the person word for word: write them in plain everyday words about the work, as the "
+  + "person would say it (「这次只建了流程，还没真正汇编课程材料」, not 「本次任务明确只创建工作流，不执行原任务」), with no file names, paths, "
+  + "commands, code or field names, one short sentence each saying what is missing or what the person has to do and why.";

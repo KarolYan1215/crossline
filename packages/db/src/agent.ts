@@ -1,4 +1,7 @@
-import { AGENT_CATEGORIES, AUTO_HANDOFF_SETTING, DISPATCH_STATES, isAgentCategory, isCourse, planAssistantTask, type AgentCategory, type AssistantPlan } from "@crossline/core";
+import {
+  AGENT_CATEGORIES, AUTO_HANDOFF_SETTING, DISPATCH_STATES, GROWN_LIBRARY_SETTING, agentChains, isAgentCategory, isCourse, planAssistantTask, readGrownLibrary,
+  type AgentCategory, type AgentChain, type AgentChainMarks, type AgentRunRow, type AssistantPlan
+} from "@crossline/core";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { latestFileDates, type CrosslineStore } from "./index";
@@ -78,6 +81,16 @@ export type AgentTaskRow = {
   delegated: boolean;
   /** One step of the order was handed over: an accepted result marks that step done. */
   stepId: string;
+  /** When it stopped (blocked), for the retry backoff. */
+  endedAt?: string;
+  /** Who started it: the person (「交给 Agent」, a retry they asked for) or the system. */
+  by: "person" | "system";
+  /** Rules of what the guard refused it (blocked runs that recorded them). */
+  deniedRules: string[];
+  /** Reads of a site behind the person's login that were refused (a security check, a login page). */
+  siteRefusals: number;
+  /** A run stopped part way whose files were offered for review as they were (`salvageStoppedRun`). */
+  partial: boolean;
 };
 /**
  * What a step delivers, as a comparison key: the step part of a run's `「task」 · 「step」` title, without case, spaces or punctuation.
@@ -107,7 +120,8 @@ export function listAgentTasks(store: CrosslineStore, workspaceId: string, now =
     if (event.type === "agent.task.requested") {
       rows.set(taskId, { taskId, title: String(p.title ?? ""), category: isAgentCategory(p.category) ? p.category : "read_research_organize", workOrderId: String(p.workOrderId ?? ""),
         requestedAt: event.createdAt, status: "running", directory: "", durationMs: 0, commands: 0, denied: 0, artifacts: [], needsHuman: 0, checksPassed: false, inputsModified: [], blockerCode: "", blockerMessage: "", reviewNote: "", autoApproved: p.autoApproved === true,
-        delegated: p.delegated === true, stepId: typeof p.stepId === "string" ? p.stepId : "" });
+        delegated: p.delegated === true, stepId: typeof p.stepId === "string" ? p.stepId : "", by: p.by === "person" ? "person" : "system", deniedRules: [],
+        siteRefusals: 0, partial: false });
       continue;
     }
     const row = rows.get(taskId);
@@ -117,9 +131,12 @@ export function listAgentTasks(store: CrosslineStore, workspaceId: string, now =
     if (event.type === "agent.task.completed") {
       Object.assign(row, { status: p.reviewRequired === false ? "accepted" : "needs_review", directory: String(p.directory ?? ""), durationMs: Number(p.durationMs ?? 0),
         commands: Number(p.commands ?? 0), denied: Number(p.denied ?? 0), artifacts: Array.isArray(p.artifacts) ? p.artifacts as AgentTaskRow["artifacts"] : [],
-        needsHuman: Number(p.needsHuman ?? 0), checksPassed: p.checksPassed === true, inputsModified: Array.isArray(p.inputsModified) ? p.inputsModified.map(String) : [] });
+        needsHuman: Number(p.needsHuman ?? 0), checksPassed: p.checksPassed === true, inputsModified: Array.isArray(p.inputsModified) ? p.inputsModified.map(String) : [],
+        partial: p.partial === true });
     } else if (event.type === "agent.task.blocked") {
-      Object.assign(row, { status: "blocked", blockerCode: String(p.code ?? ""), blockerMessage: String(p.message ?? ""), durationMs: Number(p.durationMs ?? 0), commands: Number(p.commands ?? 0), denied: Number(p.decisions ?? 0) });
+      Object.assign(row, { status: "blocked", blockerCode: String(p.code ?? ""), blockerMessage: String(p.message ?? ""), durationMs: Number(p.durationMs ?? 0), commands: Number(p.commands ?? 0), denied: Number(p.decisions ?? 0),
+        endedAt: event.createdAt, deniedRules: Array.isArray(p.deniedRules) ? p.deniedRules.map(String) : [], siteRefusals: Number(p.siteRefusals ?? 0),
+        ...(typeof p.directory === "string" && p.directory ? { directory: p.directory } : {}) });
     } else if (event.type === "agent.task.reviewed") {
       row.status = p.decision === "accepted" ? "accepted" : "rejected";
       row.reviewNote = String(p.note ?? "");
@@ -235,6 +252,87 @@ export function assistantPlanFor(store: CrosslineStore, workspaceId: string, ord
   const plan = planAssistantTask(order, { projectIsCourse: isCourse(order.projectId, facts, dates, undated), ...(milestoneTitle ? { milestoneTitle } : {}) });
   if (!plan.fit) return { ok: false, code: "NOTHING_FOR_ASSISTANT", message: plan.reason };
   return { ok: true, plan, title: order.intent, projectId: order.projectId };
+}
+
+/**
+ * The person's answers about stopped or finished runs, as the chain rule reads them: a retry they asked for (with their words, and the
+ * checks or items to redo), and a chain they closed (they do it themselves, or it is dropped).
+ */
+export function agentChainMarks(store: CrosslineStore, workspaceId: string): AgentChainMarks {
+  return {
+    retries: store.listEvents(workspaceId, { type: "agent.retry_requested" }).map((event) => {
+      const p = event.payload as { note?: unknown; approach?: unknown; only?: unknown };
+      const only = Array.isArray(p.only) ? p.only.map(String).filter(Boolean) : [];
+      const note = [typeof p.note === "string" ? p.note : "", only.length ? `只重做这些：${only.join("；")}` : ""].filter(Boolean).join("\n");
+      return { taskId: event.entityId, at: event.createdAt, note, ...(typeof p.approach === "string" && p.approach ? { approach: p.approach } : {}) };
+    }),
+    closed: store.listEvents(workspaceId, { type: "agent.blocked_acknowledged" })
+      .map((event) => ({ taskId: event.entityId, at: event.createdAt, how: String((event.payload as { how?: unknown }).how ?? "self") }))
+  };
+}
+
+/** The hosts whose reading is paused after a security check (`site.breaker.<host>` in the future). */
+function pausedSites(store: CrosslineStore, workspaceId: string, now: Date): Map<string, boolean> {
+  const byWorkflow = new Map<string, boolean>();
+  for (const record of readGrownLibrary(store.getSetting(workspaceId, GROWN_LIBRARY_SETTING))) {
+    const paused = (record.manifest.access ?? []).some((item) => {
+      try { const until = store.getSetting(workspaceId, `site.breaker.${new URL(item.site).host}`); return Boolean(until && Date.parse(until) > now.getTime()); }
+      catch { return false; }
+    });
+    byWorkflow.set(record.manifest.summary.slice(0, 80), paused);
+  }
+  return byWorkflow;
+}
+
+/** Every piece of the assistant's work with all its runs and where it stands (`agentChains` in core): the one reading of "run it again?". */
+export function agentChainsFor(store: CrosslineStore, workspaceId: string, now = new Date()): AgentChain[] {
+  const sites = pausedSites(store, workspaceId, now);
+  const runs: AgentRunRow[] = listAgentTasks(store, workspaceId, now).map((task) => ({
+    taskId: task.taskId, workOrderId: task.workOrderId, stepId: task.stepId, title: task.title, requestedAt: task.requestedAt,
+    status: task.status, blockerCode: task.blockerCode, blockerMessage: task.blockerMessage, deniedRules: task.deniedRules, by: task.by, partial: task.partial,
+    ...(task.endedAt ? { endedAt: task.endedAt } : {}),
+    // A workflow run that was refused by a site, or whose site is paused after a security check, is never tried again by itself.
+    siteStopped: task.siteRefusals > 0 || (!task.workOrderId && sites.get(task.title) === true)
+  }));
+  return agentChains(runs, agentChainMarks(store, workspaceId));
+}
+
+/**
+ * The person asks for another run of a task: their words (and the checks or items to redo) go into the next run's instructions. A finished
+ * result they want redone leaves the review queue (`redo`, which does not count against the kind's trust). Refused while it runs.
+ */
+export function requestAgentRetry(store: CrosslineStore, workspaceId: string, taskId: string, input: { note?: string; only?: string[]; approach?: string },
+  now = new Date()): { ok: true } | { ok: false; code: "TASK_NOT_FOUND" | "TASK_RUNNING" } {
+  const task = listAgentTasks(store, workspaceId, now).find((row) => row.taskId === taskId);
+  if (!task) return { ok: false, code: "TASK_NOT_FOUND" };
+  if (task.status === "running") return { ok: false, code: "TASK_RUNNING" };
+  const ownerId = store.getWorkspaceOwnerId(workspaceId) ?? "";
+  const only = (input.only ?? []).map((item) => item.trim().slice(0, 300)).filter(Boolean).slice(0, 20);
+  if (task.status === "needs_review" && !task.partial) store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:reviewed:${taskId}:redo:${now.getTime()}`,
+    type: "agent.task.reviewed", entityId: taskId, payload: { taskId, decision: "redo", note: (input.note ?? "").slice(0, 500), category: task.category } });
+  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:retry:${taskId}:${now.getTime()}`, type: "agent.retry_requested", entityId: taskId,
+    payload: { taskId, note: (input.note ?? "").trim().slice(0, 4000), ...(only.length ? { only } : {}), ...(input.approach ? { approach: input.approach.slice(0, 300) } : {}), by: "person" } });
+  return { ok: true };
+}
+
+/** The person closes a stopped task (they do it, or it is dropped): never run again by itself, and no longer asked about. */
+export function closeAgentTask(store: CrosslineStore, workspaceId: string, taskId: string, how: "self" | "drop", now = new Date()): void {
+  store.appendEvent({ ownerId: store.getWorkspaceOwnerId(workspaceId) ?? "", workspaceId, idempotencyKey: `agent:blocked:ack:${taskId}:${now.getTime()}`,
+    type: "agent.blocked_acknowledged", entityId: taskId, payload: { how } });
+}
+
+/**
+ * 「我自己做这一步」: a step the assistant was given becomes the person's — scheduled like their own steps, never handed over again by
+ * itself. Saved as a new version of the plan (as every edit is), so planned steps get new ids.
+ */
+export function takeStepBack(store: CrosslineStore, workspaceId: string, workOrderId: string, stepId: string, ownerId: string): boolean {
+  const plan = store.getStepPlan(workspaceId, workOrderId);
+  const step = plan?.steps.find((item) => item.id === stepId);
+  if (!plan || !step || step.status !== "planned") return false;
+  store.saveStepPlan(workspaceId, workOrderId, { archetypeId: plan.archetypeId, quantity: plan.quantity, rationale: plan.rationale, units: plan.units,
+    questions: plan.questions, steps: plan.steps.map((item) => item.id === stepId ? { ...item, executor: "human" as const, schedulable: true } : item) },
+    ownerId, "taken_back");
+  return true;
 }
 
 export { AGENT_CATEGORIES };

@@ -1,11 +1,12 @@
 import { homedir } from "node:os";
 import path from "node:path";
 import { enterUsageWorkspace, type CodexRpcBoundary } from "@crossline/codex";
-import { deliverAgentResult, listAgentTasks, readCategories, requestCategory, type CrosslineStore } from "@crossline/db";
-import { AGENT_CATEGORIES, backgroundSpend, isAgentCategory, type AgentCategory, type CostSignal } from "@crossline/core";
+import { agentChainsFor, deliverAgentResult, isPaused, listAgentTasks, readCategories, readGrownSkills, requestAgentRetry, requestCategory, type CrosslineStore } from "@crossline/db";
+import { AGENT_CATEGORIES, backgroundSpend, isAgentCategory, retryDue, type AgentCategory, type CostSignal } from "@crossline/core";
 import { createAgentRunner, salvageStoppedRun, type AgentOutcome, type AgentTaskInput } from "./agent-task";
-import { autoHandoffCandidates, dispatchCandidates, ledgerAsk, stepDispatchCandidates, taskFromWorkOrder } from "./agent-dispatch";
-import { startingWithin } from "./schedule-window";
+import { autoHandoffCandidates, dispatchCandidates, ledgerAsk, retryCandidates, stepDispatchCandidates, taskFromWorkOrder } from "./agent-dispatch";
+import { browserProfilesRoot, sayToPerson, startWorkflowRun } from "./workflow-smith";
+import { ASSISTANT_PREP_HOURS, startingWithin } from "./schedule-window";
 import { ownerOf } from "./owner";
 
 /**
@@ -37,7 +38,7 @@ export function createAgentService(deps: {
   const log = deps.log ?? (() => {});
   const mark = (workspaceId: string) => running.get(workspaceId) ?? running.set(workspaceId, new Set()).get(workspaceId)!;
 
-  function start(workspaceId: string, orderId: string, category: AgentCategory | undefined, stepId?: string): DispatchResult {
+  function start(workspaceId: string, orderId: string, category: AgentCategory | undefined, stepId?: string, by: "person" | "system" = "system"): DispatchResult {
     if (deps.isOwner && !deps.isOwner(workspaceId))
       return { state: "blocked", code: "AGENT_OWNER_ONLY", message: "这台电脑上的助手只为电脑主人工作；其他账号的任务请本人完成。" };
     const planned = taskFromWorkOrder(deps.store, workspaceId, orderId, category, stepId);
@@ -59,7 +60,7 @@ export function createAgentService(deps: {
     });
     void (async () => {
       enterUsageWorkspace(workspaceId);
-      const outcome: AgentOutcome | { state: "failed"; message: string } = await run({ ...planned.input, category: chosen })
+      const outcome: AgentOutcome | { state: "failed"; message: string } = await run({ ...planned.input, category: chosen, by })
         .catch((error): { state: "failed"; message: string } => ({ state: "failed", message: error instanceof Error ? error.message : "" }));
       // A delegated result the kind's earned trust lets through goes straight to the gate; one that needs review waits for the person.
       // A preparation step is done when its run is: the result is material for the person's own steps, waiting in 材料 and 教程.
@@ -71,42 +72,135 @@ export function createAgentService(deps: {
         try { deps.store.updateStepProgress(workspaceId, orderId, handed.id, { status: "done" }, deps.store.getWorkspaceOwnerId(workspaceId) ?? "", "agent"); } catch { /* replanned away */ }
       }
       const delivered = outcome.state === "done" && !outcome.reviewRequired && !prepStep ? deliverAgentResult(deps.store, workspaceId, taskId) : undefined;
+      // Taken as accepted by itself (nothing for the person to do, allow or judge): the person is told what was made and where it is.
+      if (outcome.state === "done" && !outcome.reviewRequired) {
+        try { tellAccepted(workspaceId, taskId, planned.input.title, orderId, outcome); } catch { /* the message is a courtesy */ }
+      }
       log({ type: `agent.${outcome.state}`, workspaceId, taskId, ...(outcome.state === "blocked" ? { code: outcome.code } : {}), ...(delivered ? { delivered } : {}) });
     })().finally(() => { mark(workspaceId).delete(taskId); controls.delete(taskId); live.delete(taskId); });
     return { state: "started", taskId };
   }
 
-  return {
+  // Results taken without review since the last pass, said to the person together (the owner's choice, 2026-10-15: one message per
+  // pass listing what was finished and where each is; no daily digest).
+  const accepted = new Map<string, Array<{ taskId: string; title: string; orderId: string; files: string[]; directory: string }>>();
+  function tellAccepted(workspaceId: string, taskId: string, title: string, orderId: string, outcome: Extract<AgentOutcome, { state: "done" }>): void {
+    accepted.set(workspaceId, [...(accepted.get(workspaceId) ?? []), { taskId, title, orderId, files: outcome.artifacts.map((artifact) => artifact.path), directory: outcome.directory }]);
+  }
+  /** One message for every result accepted since the last pass: what each was, what it made, where it is. */
+  function sayAccepted(workspaceId: string, now: Date): void {
+    const done = accepted.get(workspaceId) ?? [];
+    if (!done.length) return;
+    accepted.delete(workspaceId);
+    const line = (item: (typeof done)[number]) => {
+      const shown = item.files.length > 3 ? `${item.files.slice(0, 3).join("、")} 等 ${item.files.length} 个文件` : item.files.join("、");
+      return `「${item.title.length > 40 ? `${item.title.slice(0, 40)}…` : item.title}」${shown ? `：${shown}` : ""}，放在 ${item.directory}`;
+    };
+    const text = done.length === 1 ? `助手做好了${line(done[0]!)}。自检全部通过、没有需要本人处理的事，已直接采纳。`
+      : `助手做好了 ${done.length} 件事，自检全部通过、没有需要本人处理的事，已直接采纳：\n${done.map((item, i) => `${i + 1}. ${line(item)}`).join("\n")}`;
+    const orders = [...new Set(done.map((item) => item.orderId).filter(Boolean))];
+    sayToPerson(deps.store, workspaceId, text, "agent_accepted", `accepted:${done.map((item) => item.taskId).join(",")}`,
+      [{ label: "查看", href: orders.length === 1 ? `/workbench/${encodeURIComponent(orders[0]!)}` : "/approvals#assistant" }], now);
+  }
+
+  function runFree(workspaceId: string, input: AgentTaskInput & { taskId: string }, after?: (outcome: AgentOutcome | { state: "failed"; message: string }) => void): DispatchResult {
+    if (deps.isOwner && !deps.isOwner(workspaceId))
+      return { state: "blocked", code: "AGENT_OWNER_ONLY", message: "这台电脑上的助手只为电脑主人工作。" };
+    if (!readCategories(deps.store, workspaceId)[input.category]) return { state: "needs_category_approval", category: input.category, label: AGENT_CATEGORIES[input.category] };
+    if (mark(workspaceId).size) return { state: "blocked", code: "AGENT_BUSY", message: "助手正在做别的事。" };
+    mark(workspaceId).add(input.taskId);
+    const control = new AbortController();
+    controls.set(input.taskId, control);
+    const run = createAgentRunner(deps.store, workspaceId, deps.repoRoot, deps.getClient, {
+      outputRoot: deps.outputRoot ?? defaultOutputRoot(), askFor: (id) => ledgerAsk(deps.store, workspaceId, id),
+      signal: control.signal, onLive: (record) => live.set(input.taskId, record)
+    });
+    void (async () => {
+      enterUsageWorkspace(workspaceId);
+      const outcome = await run(input).catch((error): { state: "failed"; message: string } => ({ state: "failed", message: error instanceof Error ? error.message : "" }));
+      try { after?.(outcome); } catch (error) { log({ type: "agent.after_failed", workspaceId, taskId: input.taskId, message: error instanceof Error ? error.message : "" }); }
+      log({ type: `agent.${outcome.state}`, workspaceId, taskId: input.taskId });
+    })().finally(() => { mark(workspaceId).delete(input.taskId); controls.delete(input.taskId); live.delete(input.taskId); });
+    return { state: "started", taskId: input.taskId };
+  }
+
+  /** A grown workflow's run whose next run is due again (interrupted, or asked for by the person): the workflow and the chain. */
+  function flowRetry(workspaceId: string, now: Date) {
+    const records = readGrownSkills(deps.store, workspaceId).filter((record) => record.status === "active");
+    for (const chain of agentChainsFor(deps.store, workspaceId, now)) {
+      if (chain.latest.workOrderId || !chain.latest.taskId.startsWith("flow-") || !retryDue(chain, now)) continue;
+      const record = records.find((item) => chain.latest.taskId.startsWith(`flow-${item.id.replace(/^flow-/, "")}-`));
+      if (record) return { record, chain };
+    }
+    return undefined;
+  }
+
+  /** Whether the assistant may start background work now: its own ceiling (95% of either window), and a readable quota. */
+  async function quotaAllows(workspaceId: string): Promise<boolean> {
+    const signal = await deps.readCost().catch((error: unknown): CostSignal => ({ available: false, reason: String(error) }));
+    const spend = backgroundSpend(signal);
+    const used = signal.available ? Math.max(signal.short?.usedPercent ?? 0, signal.long?.usedPercent ?? 0) : 100;
+    if (spend.mode === "manual_core_only" || used >= QUOTA_CEILING_PERCENT) {
+      log({ type: "agent.skipped", workspaceId, code: spend.blocker?.code ?? "QUOTA_LOW", budget: spend.mode, usedPercent: used });
+      return false;
+    }
+    return true;
+  }
+
+  const api = {
     /** The 交给助手 button: the person chose this order (and maybe the kind). */
     dispatch: (workspaceId: string, orderId: string, categoryName?: string, stepId?: string): DispatchResult =>
-      start(workspaceId, orderId, categoryName === undefined ? undefined : isAgentCategory(categoryName) ? categoryName : undefined, stepId),
+      start(workspaceId, orderId, categoryName === undefined ? undefined : isAgentCategory(categoryName) ? categoryName : undefined, stepId, "person"),
+
+    /**
+     * The person asks for another run of a task (`POST /api/agent/tasks/<id>/retry`, or an answer on 待确认): their words and the items to
+     * redo are recorded for the next run, which starts now when the assistant is free, not paused and the quota allows — otherwise at a
+     * later tick, under the same rules. A workflow being grown is picked up by the workflow pass.
+     */
+    async retry(workspaceId: string, taskId: string, input: { note?: string; only?: string[] }, now = new Date()):
+      Promise<{ ok: true; state: "started" | "queued"; message: string } | { ok: false; code: string; message: string }> {
+      if (deps.isOwner && !deps.isOwner(workspaceId)) return { ok: false, code: "AGENT_OWNER_ONLY", message: "这台电脑上的助手只为电脑主人工作。" };
+      if (mark(workspaceId).has(taskId)) return { ok: false, code: "TASK_RUNNING", message: "这个任务正在运行。" };
+      const recorded = requestAgentRetry(deps.store, workspaceId, taskId, input, now);
+      if (!recorded.ok) return { ok: false, code: recorded.code, message: recorded.code === "TASK_NOT_FOUND" ? "找不到这个助手任务。" : "这个任务正在运行。" };
+      if (isPaused(deps.store, workspaceId)) return { ok: true, state: "queued", message: "助手已暂停；恢复后按本人的说明重做。" };
+      if (mark(workspaceId).size) return { ok: true, state: "queued", message: "助手正在做别的事；做完后按本人的说明重做。" };
+      if (!(await quotaAllows(workspaceId))) return { ok: true, state: "queued", message: "额度紧张；额度恢复后按本人的说明重做。" };
+      // A clock read after the request was written: the request is due from the moment it was recorded.
+      await api.pass(workspaceId, new Date(Math.max(now.getTime(), Date.now())), { quotaChecked: true });
+      return mark(workspaceId).size ? { ok: true, state: "started", message: "已按本人的说明重新开始。" } : { ok: true, state: "queued", message: "已记下；稍后按本人的说明重做。" };
+    },
 
     /** On the tick: at most one new task per workspace, only of an approved kind, only with quota to spare, only when none is going. */
-    async pass(workspaceId: string, now = new Date()): Promise<void> {
+    async pass(workspaceId: string, now = new Date(), options: { quotaChecked?: boolean } = {}): Promise<void> {
+      try { sayAccepted(workspaceId, now); } catch { /* the message is a courtesy */ }
       if (mark(workspaceId).size || (deps.isOwner && !deps.isOwner(workspaceId))) return;
       // In order: a step 「自动交给 Agent」 handed over whose block has come up (it is wanted now); preparation steps (what the person's
       // next session is waiting for); whole orders; and, with nothing else waiting, a handed-over step whose block is later this week.
       // Preparation and whole errands only for work starting within two days (docs/review-2026-10-13.md §6.1): results for later work
       // went unread and were stale by the time it came up.
-      const soon = startingWithin(deps.store, workspaceId, now);
+      const soon = startingWithin(deps.store, workspaceId, now, ASSISTANT_PREP_HOURS);
+      // Work that was interrupted (or that the person asked to redo) goes first: it was already under way.
+      const retry = retryCandidates(deps.store, workspaceId, now, soon)[0];
+      const flow = retry || isPaused(deps.store, workspaceId) ? undefined : flowRetry(workspaceId, now);
       const auto = autoHandoffCandidates(deps.store, workspaceId, now);
-      const step = auto.due[0] ?? stepDispatchCandidates(deps.store, workspaceId, soon)[0];
-      const order = step ? undefined : dispatchCandidates(deps.store, workspaceId, soon)[0];
-      const next = step ?? (order ? { orderId: order, stepId: undefined } : auto.early[0]);
-      if (!next) return;
-      const { orderId, stepId } = next;
+      const step = retry ? undefined : auto.due[0] ?? stepDispatchCandidates(deps.store, workspaceId, soon, now)[0];
+      const order = retry || step ? undefined : dispatchCandidates(deps.store, workspaceId, soon, now)[0];
+      const next = retry ?? step ?? (order ? { orderId: order, stepId: undefined } : auto.early[0]);
+      if (!next && !flow) return;
       // Its own ceiling (the person's choice, 2026-10-10): it keeps working through economy and stops at 95% of either window, so the
       // last few percent stay for the person's own captures and plans. An unreadable or exhausted quota pauses it like every other
       // background pass. Starting by hand from 待确认 is not gated here.
-      const signal = await deps.readCost().catch((error: unknown): CostSignal => ({ available: false, reason: String(error) }));
-      const spend = backgroundSpend(signal);
-      const used = signal.available ? Math.max(signal.short?.usedPercent ?? 0, signal.long?.usedPercent ?? 0) : 100;
-      if (spend.mode === "manual_core_only" || used >= QUOTA_CEILING_PERCENT) {
-        log({ type: "agent.skipped", workspaceId, code: spend.blocker?.code ?? "QUOTA_LOW", budget: spend.mode, usedPercent: used });
+      if (!options.quotaChecked && !(await quotaAllows(workspaceId))) return;
+      if (!next && flow) {
+        const result = startWorkflowRun(deps.store, workspaceId, flow.record, (input, after) => runFree(workspaceId, { ...input, by: flow.chain.byPerson ? "person" : "system" }, after),
+          browserProfilesRoot(workspaceId), now);
+        log({ type: "agent.retried_workflow", workspaceId, id: flow.record.id, state: result.state });
         return;
       }
-      const result = start(workspaceId, orderId, undefined, stepId);
-      log({ type: "agent.dispatched", workspaceId, orderId, ...(stepId ? { stepId } : {}), state: result.state });
+      const { orderId, stepId } = next!;
+      const result = start(workspaceId, orderId, undefined, stepId, retry?.chain.byPerson ? "person" : "system");
+      log({ type: retry ? "agent.retried" : "agent.dispatched", workspaceId, orderId, ...(stepId ? { stepId } : {}), state: result.state });
     },
 
     /**
@@ -115,24 +209,7 @@ export function createAgentService(deps: {
      * the person has not allowed is refused, and the caller tries again later.
      */
     runFree(workspaceId: string, input: AgentTaskInput & { taskId: string }, after?: (outcome: AgentOutcome | { state: "failed"; message: string }) => void): DispatchResult {
-      if (deps.isOwner && !deps.isOwner(workspaceId))
-        return { state: "blocked", code: "AGENT_OWNER_ONLY", message: "这台电脑上的助手只为电脑主人工作。" };
-      if (!readCategories(deps.store, workspaceId)[input.category]) return { state: "needs_category_approval", category: input.category, label: AGENT_CATEGORIES[input.category] };
-      if (mark(workspaceId).size) return { state: "blocked", code: "AGENT_BUSY", message: "助手正在做别的事。" };
-      mark(workspaceId).add(input.taskId);
-      const control = new AbortController();
-      controls.set(input.taskId, control);
-      const run = createAgentRunner(deps.store, workspaceId, deps.repoRoot, deps.getClient, {
-        outputRoot: deps.outputRoot ?? defaultOutputRoot(), askFor: (id) => ledgerAsk(deps.store, workspaceId, id),
-        signal: control.signal, onLive: (record) => live.set(input.taskId, record)
-      });
-      void (async () => {
-        enterUsageWorkspace(workspaceId);
-        const outcome = await run(input).catch((error): { state: "failed"; message: string } => ({ state: "failed", message: error instanceof Error ? error.message : "" }));
-        try { after?.(outcome); } catch (error) { log({ type: "agent.after_failed", workspaceId, taskId: input.taskId, message: error instanceof Error ? error.message : "" }); }
-        log({ type: `agent.${outcome.state}`, workspaceId, taskId: input.taskId });
-      })().finally(() => { mark(workspaceId).delete(input.taskId); controls.delete(input.taskId); live.delete(input.taskId); });
-      return { state: "started", taskId: input.taskId };
+      return runFree(workspaceId, input, after);
     },
 
     runningTasks: (workspaceId: string): string[] => [...mark(workspaceId)],
@@ -170,9 +247,11 @@ export function createAgentService(deps: {
       const lost = listAgentTasks(deps.store, workspaceId).filter((task) => task.status === "running" && !mark(workspaceId).has(task.taskId));
       for (const task of lost) {
         deps.store.appendEvent({ ownerId: ownerOf(deps.store, workspaceId), workspaceId, idempotencyKey: `agent:blocked:${task.taskId}`, type: "agent.task.blocked",
-          entityId: task.taskId, payload: { taskId: task.taskId, code: AGENT_RUN_LOST, message: "后台进程重启，这次运行中断" } });
+          entityId: task.taskId, payload: { taskId: task.taskId, code: AGENT_RUN_LOST, message: "后台进程重启，这次运行中断",
+            directory: path.join(deps.outputRoot ?? defaultOutputRoot(), task.taskId) } });
       }
       return lost.map((task) => task.taskId);
     }
   };
+  return api;
 }
