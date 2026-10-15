@@ -64,6 +64,17 @@
 
 **双人对比卡。** 对方用邀请链接做题后自动生成：两个形象并排，标出两人的关系名和两条相处建议，再加上两人推荐主线的交集。
 
+### 1.2 海报渲染（W3，2026-10-14）
+
+**为什么在服务器上出 PNG。** 微信内置浏览器里，`<a download>` 和脚本触发的下载基本没有反应，长按保存只对页面上真正的 `<img>` 有效；前端 canvas 导出还会遇到跨域图片、安卓上 base64 / Blob 图片长按存不下来等问题。所以海报、长图、双人卡都由服务器画成 PNG，页面用 `<img src="/api/poster/…">` 展示（依据：阿里云开发者社区 developer.aliyun.com/article/906395、jb51.net/article/250735.htm、掘金 juejin.cn/post/6885952653075939335，均为经验文章，上线前要在安卓和 iOS 微信里实测）。
+
+**做法。**
+- satori 0.33.5 把元素树排版成 SVG，文字转成路径；@resvg/resvg-js 按 `fitTo: { mode: "width", value: 1080 }` 栅格化，不加载系统字体。satori 只支持 flex 布局和它列出的 CSS 子集（`display` 只有 flex / block / none，`position` 支持 absolute，支持 `borderRadius`、`opacity`、`textWrap: balance`），字体只认 TTF / OTF / WOFF，**不认 WOFF2**；没有给到的字形会被直接丢掉（只回调 `loadAdditionalAsset`），不会换成别的字体（satori 自带 README）。图片用 data URI 嵌入并写明宽高，免去渲染时的 I/O；形象文件按开头字节判断 PNG / JPEG，WebP 等 satori 解不了的格式退回类型模板，再不行就在圆里写四字母代码。
+- 字体：Noto Sans SC、Noto Serif SC（SIL OFL 1.1，来自 github.com/notofonts/noto-cjk），用 `scripts/assess-poster-fonts.ts`（subset-font / HarfBuzz）裁成子集放在 `apps/assess/fonts/`，许可在 `OFL.txt`。黑体两个字重收全部固定文字 + GB2312 一级 3,755 字 + ASCII（每个约 1 MB），宋体两个字重只收固定文字（每个约 235 KB）。昵称里子集没有的字符印成「·」，不会悄悄消失。改了类型名、副标题、主线、关系或海报文字后要重跑脚本，测试会提醒。
+- 样式沿用画像海报的「编辑杂志」：纸色 #F6F2EA、墨色 #1E1B16、灰 #4F4A42，节与节之间用墨线分隔；1080 宽时没有小于 24 px 的字。测试遍历 16 种类型的海报和长图、256 种双人组合的卡片，检查文字不重叠、不出画布、不小于 24 px。
+- 缓存：PNG 存在 `dataDir()/posters`，文件名是版式版本、类型视图、昵称、邀请链接和形象文件字节的哈希，换了形象就是新文件；海报上有昵称，所以文件写入一周后删除，之后再请求就重画。路由返回 `Cache-Control: private, max-age=300`、`Referrer-Policy: no-referrer`、`X-Robots-Tag: noindex`，未知或过期的令牌给 404。字体加载后，单张海报在本机约 0.2–0.5 秒。
+- 部署（交给 W2 的 `next.config.mjs`）：`@resvg/resvg-js` 是原生模块，要列进 `serverExternalPackages`；`fonts/**` 要用 `outputFileTracingIncludes` 带进 standalone 产物（或设 `ASSESS_FONTS_DIR`）。
+
 ## 2. 文案草稿（待本人逐条改）
 
 ### 2.1 副标题（更狠的版本）
@@ -133,11 +144,50 @@
 5. 结果页：先出类型和基础形象，个性化形象生成好后替换。导出 3:4 海报和长图，海报二维码就是本人的邀请链接。
 6. 「邀请 TA 测」→ 朋友做完当场生成双人对比卡，本人收到邮件通知（§1.1）。从邀请链接进来的人走同样的 1–5 步，只是落地页换成「署名 邀请你测测你们是什么关系」。
 
+### 3.1 页面做法的依据（W4，2026-10-14 检索）
+
+- **一屏一题、自动前进、可以后退。** 一项随机对照实验（计算机问卷的「下一题」按钮与后退按钮）发现：自动前进和按「下一题」相比，缺失数据和量表信度没有差别，按钮版多花约一半时间，作者建议自动前进并保留返回上一题。另一项分支问卷研究也发现逐题自动前进最快、自动滚动让人迷失方向。Qualtrics 与 SurveyMonkey 都把一屏一题作为默认做法。所以：选完停 0.26 秒让人看到所选，再进下一题；「上一题」始终在；键盘 1–5 作答、Enter 下一题。
+- **进度条按整套 32 题计，不按小节归零。** 关于进度条和完成率没找到对照研究，厂商意见不一（长问卷里进度条可能劝退）；共识只有一条：显示全程进度，小节之间不要重置。外貌和邮箱两步另写「最后两步 · 1 / 2」。
+- **单选组用原生 `<input type="radio">`。** WAI-ARIA APG 的单选组模式规定方向键在组内移动并选中；原生单选框由浏览器提供这些行为和读屏语义，无需自写 roving tabindex。由此有一条细节：方向键只改选择、不自动前进（否则按方向键浏览选项会一路跳题），点击、轻触、空格和数字键才前进。
+- **微信里保存图片。** 微信内置浏览器不允许 H5 页面用脚本或下载链接保存文件，但对 `https` 地址的普通 `<img>` 长按可以「保存图片」；base64 / blob 图片有长按保存失败的报告。所以海报和双人卡都是服务器渲染的 PNG 地址，直接放 `<img>`，手机上写「长按图片保存」，有鼠标的设备才显示「下载海报 / 下载长图」（`download` 属性）。两者用 CSS 的 `(hover:none) and (pointer:coarse)` 切换，服务端渲染和浏览器不会对不上。
+- **分享。** 先检测 `navigator.share`，有就显示「分享邀请」；用户关掉分享面板（`AbortError`）不算失败；其余失败退回复制。「复制链接」始终显示（藏起来用户会以为没有这个功能），在点击处理里直接调用 `navigator.clipboard.writeText`，失败就选中链接文字并提示手动复制；结果写进 `aria-live` 区域。
+- **360 px 手机优先。** 单列、两侧 16 px；输入框字号 16 px（iOS 小于 16 px 会放大页面且不复原）；可点区域至少 44 px；正文不小于 12 px，灰字 #4F4A42 在纸色上约 7.9:1。
+
+来源：[Next/back 按钮实验（eScholarship）](https://escholarship.org/uc/item/3557w1mn)、[分支问卷研究（UMD）](https://drum.lib.umd.edu/items/89eb861e-8e4e-4b44-a221-fa73a901ee3e/full)、[SurveyMonkey 一屏一题](https://help.surveymonkey.com/en/create/one-question-at-a-time/)、[GuidedTrack 进度条](https://docs.guidedtrack.com/research-guide/building-user-friendly-surveys/progress-bar/)、[W3C APG 单选组模式](https://w3.org/WAI/ARIA/apg/patterns/radio)、[微信 H5 无法下载图片（阿里云开发者社区）](https://developer.aliyun.com/article/906395)、[微信开放社区：base64 图片长按保存失败](https://developers.weixin.qq.com/community/develop/doc/0000a8c4cbce10fd356391fa566400)、[W3C Web Share API](https://www.w3.org/TR/2022/WD-web-share-20220607)。
+
 ## 4. 形象生成
 - **基础角色**：16 个，每种类型生成 3 个候选，由本人挑选，作为该类型的参考图，存进代码库。画风自己设计，不模仿 16Personalities。
 - **用户形象**：在类型模板（参考图）上按外貌描述做图生图小改动，作为免费福利，费用由本人承担。按第三方报价约 0.008–0.06 美元一张（官方人民币价未核实），每个邮箱限 3 次。
 - **防爆量**：设每日预算上限；超限或排队太久时，直接给该类型的基础形象。服务器要能扛住突发访问，避免网易云那种 503。
 - **访谈后**：按访谈内容重画个性化形象，作为注册的奖励。
+
+### 4.1 形象流程的实现依据（W5，2026-10-14 查证）
+
+**硅基流动接口**（官方文档：[创建图片生成请求](https://docs.siliconflow.com/cn/api-reference/images/images-generations.md)、[生图模型](https://docs.siliconflow.com/cn/userguide/capabilities/images.md)、[速率限制](https://docs.siliconflow.com/en/userguide/rate-limits/rate-limit-and-upgradation.md)、[错误处理](https://docs.siliconflow.com/en/faqs/error-code.md)；`docs.siliconflow.cn` 上的同名页面目前返回 404，内容以 `docs.siliconflow.com` 为准）：
+- 接口：`POST {base}/images/generations`，`Authorization: Bearer <key>`，JSON 请求体。国内地址 `https://api.siliconflow.cn/v1`（文档示例用的就是它），国际站 `https://api.siliconflow.com/v1`。
+- 图生图模型 id：`black-forest-labs/FLUX.1-Kontext-dev`。它的请求体必填 `model`、`prompt`、`image`，可选 `seed`（0–9999999999）和 `prompt_enhancement`（默认 false）；**没有** `image_size`，输出尺寸跟随参考图。参考图字段是 `image`，格式是 `data:image/png;base64,…` 字符串。注意 Kontext pro/max 的字段名是 `input_image`，换模型时要一起改。
+- Kontext [dev] 必须带参考图，所以出模板候选（纯文生图）改用 `black-forest-labs/FLUX.1-dev`（`image_size: "1024x1024"`，`num_inference_steps` 1–30）。
+- 返回：`{ images: [{ url }], timings: { inference }, seed }`。**图片链接只有一小时有效**，必须立即下载保存。
+- 错误：429 是限流（消息里写明是 RPM/TPM/IPM/IPD 哪一项）；503/504 是负载过高，稍后重试；400 是参数错，401 是 key 没设对，403 多半是模型要求实名认证。
+- 限流：图片模型按 IPM（每分钟张数）和 IPD（每天张数）计，最低一档是 **IPM 2、IPD 400**，按账号（不是按 key）、按模型分别计算，消费越多档位越高。
+- 价格：模型页标价 **0.015 美元/张**（[模型页](https://www.siliconflow.com/models/black-forest-labs-flux-1-kontext-dev)，国际站美元价；人民币价未核实）。每天 300 张，最坏约 4.5 美元/天。
+
+**保持角色不变的提示词写法**（Black Forest Labs 官方：[FLUX.1 Kontext 图像编辑](https://docs.bfl.ml/kontext/kontext_image_editing.md)、[单参考图编辑](https://docs.bfl.ml/guides/prompting_editing_single_reference.md)）：Kontext 擅长多次编辑后保持角色一致；指令里先写清楚改什么，再**逐项列出不变的东西**（不能只写「其余不变」）；颜色用十六进制色值；要保留的细节直接点名，例如「keep her pose」「Preserve its identity」。所以提示词是固定英文：只改性别呈现、发型、眼镜、肤色（附色值）和衣服版型，然后逐项写明不变的部分：画风、线条粗细、平涂颜色、姿势、比例、表情、构图、服装颜色、道具、背景和圆形底。`prompt_enhancement` 关掉，避免平台改写这段固定指令。
+
+**用户自填文字的安全处理**（[OWASP LLM 提示注入防护速查表](https://cheatsheetseries.owasp.org/cheatsheets/LLM_Prompt_Injection_Prevention_Cheat_Sheet.html)）：这份速查表要求多层防护，也明确说**只靠分隔符或标签分不开指令和数据**；它把不可见字符夹带列为一种攻击方式。所以填空不是原样拼进提示词，而是：
+1. NFKC 规范化，去掉所有控制字符和不可见字符，截到 40 字，去掉网址和邮箱；
+2. 读起来像指令（「忽略以上」「你现在是」「system」等）或涉及不安全内容（裸露、血腥、武器、仇恨符号、像某个真人），就**整条丢弃**；
+3. 剩下的文字只提取固定词表里的外貌词（发色、帽子、围巾、耳环、雀斑、胡子、刘海、马尾……），翻译成固定的英文短语，最多 4 个，用引号标明是描述，不是指令。
+
+这样，词表以外的任何字都进不了提示词。邮箱、署名和答案从来不进提示词。
+
+**排队与重试**（[AWS 架构博客：指数退避与抖动](https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/)；`Retry-After` 见 RFC 9110）：进程内队列，并发 2（对应最低档 IPM 2），最多 40 个排队，再多就直接给模板。每次调用 60 秒超时。只对 429 和 5xx（含超时）重试**一次**：有 `Retry-After` 就按它等，加不到 1 秒的随机抖动；没有的话，429 等 20–40 秒，5xx 等 2–5 秒。400、401、403 不重试。
+
+**费用护栏**：每日上限 `ASSESS_IMAGE_DAILY_LIMIT`（默认 300，低于最低档 IPD 400），按北京时间自然日计，存在 `dataDir()/avatar-budget.json`（原子写入，重启不清零）。**每次调用模型都占一个名额，重试也算**，所以计数只会多算、不会少算。另有每个邮箱最多 3 张（`AVATARS_PER_EMAIL`）。没有 key、超出上限、队列满或调用失败，都立即给该类型的模板，结果页永远不会因为画图而卡住或报错。
+
+**下载生成的图片**：只接受 https，每一跳重定向都检查，地址里不能带账号密码；最大 12 MB，内容必须是 PNG/JPEG/WebP；下载时不带 API key。
+
+**实现位置**：`apps/assess/server/avatar/`（`provider.ts` 接口、`prompt.ts` 提示词和填空处理、`queue.ts`、`budget.ts`、`templates.ts`、`placeholder.ts`）、`apps/assess/app/api/avatar/[file]/route.ts`、`scripts/assess-templates.ts`；模板与审定流程见 `apps/assess/templates/README.md`。
 
 ## 5. 托管内测
 - **服务器**：香港或东京的 Linux 云主机（约 10–30 美元 / 月），HTTPS，非 .cn 域名。
