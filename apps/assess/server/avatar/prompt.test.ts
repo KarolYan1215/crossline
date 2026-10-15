@@ -32,7 +32,7 @@ test("the prompt changes only the chosen appearance and names what stays", () =>
   expect(prompt).toMatch(/#7A5139/);
   expect(prompt).toMatch(/sporty cut .* same outfit colours/);
   expect(prompt).toMatch(/same pose/);
-  expect(prompt).toMatch(/same plain background/);
+  expect(prompt).toMatch(/same flat plain background/);
   expect(prompt).not.toMatch(/Extra appearance details/);
 });
 

@@ -6,14 +6,14 @@ import { getPairByToken, getResultById, recordedScores } from "../../../../../se
 import { pairRelation, publicType } from "../../../../../lib/public-type";
 
 /**
- * GET /api/poster/pair/<pairToken> — the two people's card as a PNG. Its QR code is the inviter's invitation, so the card keeps
+ * GET /api/poster/pair/<pairToken>.png (the `.png` optional) — the two people's card as a PNG. Its QR code is the inviter's invitation, so the card keeps
  * spreading the way the poster does. Gone when either result is gone.
  */
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(_request: Request, context: { params: Promise<{ pairToken: string }> }): Promise<Response> {
-  const { pairToken } = await context.params;
+  const pairToken = (await context.params).pairToken.replace(/\.png$/, "");
   const pair = getPairByToken(pairToken);
   const inviter = pair ? getResultById(pair.inviterId) : undefined;
   const invitee = pair ? getResultById(pair.inviteeId) : undefined;

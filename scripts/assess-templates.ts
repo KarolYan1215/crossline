@@ -8,13 +8,12 @@
  *   pnpm exec tsx scripts/assess-templates.ts pick GEMA=2 SEMP=1 ... copy the owner's chosen candidates over the templates
  *   pnpm exec tsx scripts/assess-templates.ts prompt CODE            print the prompt a type's candidates are drawn from
  *
- * The candidates share one style prompt built from the portrait's CHARACTER_STANDARD, with its one reference to personality-test
- * avatars and their faceted shading replaced by our own editorial comic style: the figures must be ours, never 16Personalities'.
+ * The candidates share one style prompt in our own editorial comic style (`stylePrompt`), never 16Personalities' figures.
  */
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { CHARACTER_POSES, CHARACTER_STANDARD, TYPE_GROUPS, TYPE_TABLE } from "../packages/core/src/portrait-type";
+import { CHARACTER_POSES, TYPE_GROUPS, TYPE_TABLE } from "../packages/core/src/portrait-type";
 import { placeholderSvg, renderPlaceholder } from "../apps/assess/server/avatar/placeholder";
 import { providerFromEnv, imageType } from "../apps/assess/server/avatar/provider";
 
@@ -44,14 +43,20 @@ const ROLES: Record<string, { outfit: string; prop: string; pose: (typeof CHARAC
   GIRA: { outfit: "an explorer's jacket with a small backpack", prop: "an open compass held in one hand", pose: "mid-stride, walking forward" }
 };
 
-const OWN_STYLE = "Full-body stylized cartoon character in an original editorial comic style: flat colour shapes with clean dark ink outlines of even weight, one soft cel-shade tone per colour, a clean readable silhouette; not low-poly, not faceted, and not resembling any existing personality-test characters.";
-
-function stylePrompt(): string {
-  const first = CHARACTER_STANDARD.indexOf(". ") + 1;
-  if (!CHARACTER_STANDARD.startsWith("Full-body stylized cartoon character in the style of modern personality-test avatars")) {
-    throw new Error("CHARACTER_STANDARD changed: review OWN_STYLE in scripts/assess-templates.ts before drafting templates");
-  }
-  return `${OWN_STYLE}${CHARACTER_STANDARD.slice(first)}`;
+/**
+ * The templates' own style, written out rather than derived from the portrait's CHARACTER_STANDARD: the public poster shows the figure
+ * cropped to a disc of about 340 px, so a waist-up figure on a flat full-bleed backdrop reads there, where a full-body figure on its
+ * own inner circle came out small and as a ring inside the disc.
+ */
+function stylePrompt(tint: string): string {
+  return [
+    "Waist-up stylized cartoon character in an original editorial comic style: flat colour shapes with clean dark ink outlines of even weight, one soft cel-shade tone per colour, a clean readable silhouette; not low-poly, not faceted, and not resembling any existing personality-test characters.",
+    "Three-quarter view, centered, the head in the upper half and the hands with the prop in the lower half; everything important inside the central circle of the frame, because the image is shown cropped to a circle.",
+    "Simplified face: small dot eyes, a small mouth, no nose detail; gender-neutral, not a likeness of any real person.",
+    "Exactly one main outfit colour and one accent colour; props drawn simply and clearly readable at small size.",
+    `Backdrop: one flat plain fill of ${tint} from edge to edge; no circle, no frame, no shadow, no scenery.`,
+    "Absolutely no text, letters, numbers, logos or brand marks anywhere. Square 1:1 frame."
+  ].join(" ");
 }
 
 export function templatePrompt(code: string): string {
@@ -60,8 +65,7 @@ export function templatePrompt(code: string): string {
   const role = ROLES[code];
   if (!type || !group || !role) throw new Error(`unknown type ${code}`);
   return [
-    stylePrompt(),
-    `Group tint for the circle: ${group.tint}.`,
+    stylePrompt(group.tint),
     "A neutral face and simple short neutral hair, no glasses, so a later edit can change presentation, hair, glasses and skin tone.",
     `Outfit: ${role.outfit}, main colour ${group.colour}, accent off-white.`,
     `Holding or carrying: ${role.prop}.`,

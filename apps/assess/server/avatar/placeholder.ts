@@ -30,8 +30,7 @@ export function placeholderSvg(code: string): string {
     ? `<path d="M452 716 L512 770 L572 716" fill="none" ${line}/><path d="M512 770 L490 806 L512 900 L534 806 Z" fill="${group.tint}" ${line}/>`
     : `<path d="M440 712 C470 760 554 760 584 712" fill="none" ${line}/><path d="M470 752 L466 846" ${line}/><path d="M554 752 L558 846" ${line}/>`;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <rect width="1024" height="1024" fill="${PAPER}"/>
-  <circle cx="512" cy="520" r="380" fill="${group.tint}"/>
+  <rect width="1024" height="1024" fill="${group.tint}"/>
   <path d="M212 1024 C212 820 330 704 512 704 C694 704 812 820 812 1024 Z" fill="${group.colour}" ${line}/>
   <rect x="470" y="600" width="84" height="120" fill="${SKIN}" ${line}/>
   ${collar}
@@ -40,8 +39,8 @@ export function placeholderSvg(code: string): string {
   ${hair}
   ${eyes}
   <path d="M482 552 C500 568 524 568 542 552" fill="none" ${line}/>
-  <rect x="40" y="40" width="200" height="64" rx="32" fill="${INK}"/>
-  <text x="140" y="83" text-anchor="middle" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif" font-size="30" font-weight="700" fill="${PAPER}">占位图</text>
+  <rect x="412" y="120" width="200" height="64" rx="32" fill="${INK}"/>
+  <text x="512" y="163" text-anchor="middle" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif" font-size="30" font-weight="700" fill="${PAPER}">占位图</text>
   <rect x="312" y="900" width="400" height="92" rx="46" fill="${PAPER}" ${line}/>
   <text x="512" y="962" text-anchor="middle" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif" font-size="44" font-weight="700" fill="${INK}">${code} ${type.name}</text>
 </svg>`;

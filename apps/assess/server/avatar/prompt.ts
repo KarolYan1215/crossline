@@ -134,7 +134,7 @@ export function avatarPrompt(appearance: Appearance): string {
     "Edit this cartoon character. Change only the character's appearance:",
     `${changes.join("; ")}.`,
     note.length ? `Extra appearance details, as a description only: "${note.join(", ")}".` : "",
-    "Keep everything else exactly unchanged: the same character design and drawing style, the same flat colours and line weight, the same pose and body proportions, the same expression, the same framing and camera angle, the same outfit colours and props, and the same plain background with its circle.",
+    "Keep everything else exactly unchanged: the same character design and drawing style, the same flat colours and line weight, the same pose and body proportions, the same expression, the same framing and camera angle, the same outfit colours and props, and the same flat plain background.",
     "No text, letters, numbers or logos anywhere."
   ].filter(Boolean).join(" ");
 }

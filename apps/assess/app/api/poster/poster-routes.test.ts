@@ -73,6 +73,8 @@ describe("GET /api/poster/pair/[pairToken]", () => {
     expect([input.a.type.code, input.b.type.code]).toEqual(["SEMP", "GIRA"]);
     expect(input.primary.name).toBe("镜像对手");
     expect(input.inviteUrl).toMatch(/\/t\/invite-a$/);
+    // The card URL the views hand out carries `.png` (server/views.ts pairCardUrl).
+    expect((await pairGET(new Request("http://x/api"), call({ pairToken: "pair-ab.png" }))).status).toBe(200);
   });
 
   test("an unknown pair, or a pair whose other side is gone, is 404", async () => {
