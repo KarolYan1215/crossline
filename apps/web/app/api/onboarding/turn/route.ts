@@ -6,20 +6,24 @@ import { getStore } from "../../../../lib/crossline";
 import { PRESENCE_SETTING } from "../../../../lib/nudges";
 import { sendPush } from "../../../../lib/push";
 import { isCrossSiteWrite } from "../../../../lib/same-origin";
+import { isLocalInstall } from "../../../../lib/install-mode";
 
 /** No page has been visible for this long: the person left while the model was thinking. */
 const AWAY_MS = 90_000;
 
 /**
  * A round that lands while the person is away (no page visible for 90 seconds, `presence.visibleAt`) calls them back on their phone, so
- * the model's time is not their waiting time (decided 2026-10-12). The desktop has no push subscription on 127.0.0.1; the page marks its
- * tab title instead.
+ * the model's time is not their waiting time (decided 2026-10-12). The desktop has no push subscription on 127.0.0.1: the page marks its
+ * tab title and, once allowed, shows a desktop notification itself; on the installed copy the tray shows a balloon.
  */
 function callBack(ctx: Parameters<typeof sendPush>[0], result: unknown): void {
   if ((result as { state?: string } | undefined)?.state === "blocked") return;
   const visibleAt = Date.parse(getStore().getSetting(ctx.workspaceId, PRESENCE_SETTING) ?? "");
   if (!Number.isFinite(visibleAt) || Date.now() - visibleAt < AWAY_MS) return;
   void sendPush(ctx, { title: "访谈下一轮已就绪", body: "新的一组问题已经生成，可以回到访谈继续。", path: "/onboarding", tag: "onboarding-round" }).catch(() => {});
+  // The installed copy's tray shows a balloon for this line (apps/launcher `noticeFrom`); a click opens the interview.
+  if (isLocalInstall()) process.stdout.write(`@crossline:notify ${JSON.stringify({ title: "访谈下一轮已就绪", text: "新的一组问题已经生成，点这里回到访谈。", path: "/onboarding" })}
+`);
 }
 
 /**

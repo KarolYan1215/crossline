@@ -4,14 +4,15 @@ import { useCallback, useEffect, useRef, useState, type DragEvent } from "react"
 import { DateBatchCard } from "./date-batch-card";
 import { DiligencePanel } from "./diligence-panel";
 import { TranscriptionCard, type TranscriptionStatus } from "./transcription-card";
-import { ProfilePanel } from "./profile-panel";
+import { DEEP_STAGES, ONBOARDING_TONE_LABEL, ONBOARDING_TONES, type OnboardingStage, type OnboardingTone } from "@crossline/core";
 import { QuestionCard } from "./question-card";
-import { LineSetup } from "./line-setup";
-import { PortraitPanel, StageBar } from "./portrait-panel";
-import { HierarchyGuide } from "./hierarchy-guide";
-import {
-  composeAnswers, MATERIALS_FIRST_REPLY, NO_MATERIALS_REPLY, type Answer, type AssistantTurn, type DocumentRow, type Message, type OnboardingState
-} from "./onboarding-types";
+import { StageBar } from "./portrait-panel";
+import { LeftColumn } from "./left-column";
+import { StageView } from "./stage-view";
+import { OpeningCard, openingReply, type OpeningAnswer } from "./opening-card";
+import { announceRound, TurnProgress } from "./turn-progress";
+import { SegmentedControl } from "../ui/controls";
+import { composeAnswers, type Answer, type AssistantTurn, type DocumentRow, type Message, type OnboardingState } from "./onboarding-types";
 
 const ACCEPT = ".pdf,.docx,.txt,.md,.csv,.png,.jpg,.jpeg,.gif,.webp,.m4a,.mp3,.wav,.aac,.ogg,.flac";
 
@@ -23,7 +24,8 @@ const asTurn = (message: Message): AssistantTurn | undefined =>
 const userText = (message: Message) => String((message.content as { text?: string }).text ?? "");
 
 /**
- * The interview screen: a conversation on the left, what it has learned on the right.
+ * The interview screen (docs/onboarding-v3.md): materials and decisions on the left, the conversation in the middle, and on the right
+ * what the answers are building, one picture per stage.
  *
  * The conversation lives in the ledger, so this component holds only what is in flight — the answers being
  * composed, a turn that is running, an upload — and re-reads everything else. Reloading the page, or opening
@@ -32,6 +34,8 @@ const userText = (message: Message) => String((message.content as { text?: strin
 export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
   const [state, setState] = useState<OnboardingState | undefined>();
   const [sessionId, setSessionId] = useState("");
+  // A turn still running in the background after a reload: its reply is on the way, so nothing else may be sent meanwhile.
+  const [background, setBackground] = useState(false);
   const [busy, setBusy] = useState<"" | "turn" | "upload" | "dates" | "milestones" | "diligence">("");
   const [error, setError] = useState("");
   const [text, setText] = useState("");
@@ -42,11 +46,14 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
   const [transcription, setTranscription] = useState<TranscriptionStatus | undefined>();
   const [designed, setDesigned] = useState<Array<{ id: string; identityId: string; title: string }> | undefined>();
   const bottom = useRef<HTMLDivElement>(null);
+  const asked = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
     const response = await fetch(`/api/onboarding/state${line ? `?line=${encodeURIComponent(line)}` : ""}`, { cache: "no-store" }).catch(() => undefined);
     if (!response?.ok) { setError("读不到访谈状态，请刷新。"); return undefined; }
-    const next = await response.json() as OnboardingState;
+    const loaded = await response.json() as OnboardingState;
+    // Before the opening card is answered a new account still reads as the four built-in lines: none of them is the person's yet.
+    const next: OnboardingState = loaded.setupLines ? { ...loaded, lines: [], identities: [], lineProfiles: {}, startMissing: [], startTotal: 0 } : loaded;
     setState(next);
     setSessionId((current) => next.session?.id ?? current ?? "");
     return next;
@@ -91,7 +98,15 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
     const timer = setInterval(() => void look(), 4000);
     return () => { live = false; clearInterval(timer); };
   }, [waitingForAudio, load]);
-  useEffect(() => { bottom.current?.scrollIntoView({ block: "end" }); }, [state?.messages.length, busy]);
+  // The thread scrolls inside its own column on a wide screen; scrolling the window there pushed the header over the first message.
+  useEffect(() => {
+    const thread = bottom.current?.parentElement;
+    // A new round lands with its question at the top of the view, not under the cards that follow it.
+    const target = asked.current;
+    if (thread && thread.scrollHeight > thread.clientHeight + 1)
+      thread.scrollTop = target ? thread.scrollTop + target.getBoundingClientRect().top - thread.getBoundingClientRect().top - 12 : thread.scrollHeight;
+    else bottom.current?.scrollIntoView({ block: "nearest" });
+  }, [state?.messages.length, busy, background]);
 
   const messages = state?.messages ?? [];
   const lastTurn = [...messages].reverse().map(asTurn).find(Boolean);
@@ -116,6 +131,7 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
     setCurrent(0);
     setBusy("");
     if (document.visibilityState === "hidden" && !document.title.startsWith(NEW_ROUND_MARK)) document.title = `${NEW_ROUND_MARK}${document.title}`;
+    if (response?.ok && body?.state !== "blocked") announceRound();
   };
 
   const upload = async (files: FileList | File[]) => {
@@ -137,12 +153,13 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
     if (response?.ok && !body?.deferred && readable.length && (next?.messages.length ?? 0) > 0) await runTurn(`我添加了这些文件：${readable.map((file) => file.name).join("、")}。请读一下，整理里面的日期和我的情况。`);
   };
 
+  // Dates may be confirmed while a turn runs (docs/onboarding-v3.md 「等待」): that must not end the turn's own wait.
   const decideDates = async (batchId: string, includedIds: string[]) => {
-    setBusy("dates"); setError("");
+    setBusy((now) => now === "turn" ? now : "dates"); setError("");
     const response = await fetch("/api/onboarding/dates/decide", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ batchId, includedIds }) }).catch(() => undefined);
     if (!response?.ok) setError("没有加入成功，请重试。");
     await load();
-    setBusy("");
+    setBusy((now) => now === "dates" ? "" : now);
   };
 
   /** Designs the goals from the profile. They arrive as drafts on the Milestones page, where the person approves them. */
@@ -190,128 +207,123 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
   const extra = waiting ? [] : (state?.extraQuestions ?? []).filter((question) => !inRound.has(question.id) && !answeredElsewhere.has(question.id));
   const batchQuestions = [...roundQuestions, ...extra];
   const composed = composeAnswers(batchQuestions, answers, text);
-  const canSend = busy === "" && (Boolean(composed.trim()) || waiting);
+  const canSend = busy === "" && !background && (Boolean(composed.trim()) || waiting);
+
 
   if (!state) return <p className="ob-muted" role="status">正在读取…</p>;
-  if (state.setupLines) return <div className="ob-start"><HierarchyGuide /><LineSetup onDone={() => void load()} /></div>;
-  const batch = batchQuestions;
   const stage = open?.stage ?? state.session?.coverage.stage ?? "orientation";
+  const complete = state.session?.state === "complete";
+  // Mixed pacing: in a deep stage the round is one question in the conversation; the app's own fact questions wait in the left column.
+  const deep = !state.focusLine && DEEP_STAGES.has(stage as OnboardingStage) && !waiting;
+  const centre = deep ? roundQuestions : batchQuestions;
+  const held = deep ? extra : [];
+  const opening = !state.focusLine && messages.length === 0 && busy !== "turn" && !pendingText;
+  const filesRead = state.documents.some((doc) => doc.extractionStatus === "done");
 
-  return <div className="ob" onDragOver={(event) => { event.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={onDrop} data-dragging={over}>
-    <section className="ob-chat" aria-label="访谈对话">
-      <StageBar stage={stage} line={state.focusLine?.label} />
-      {!state.focusLine && <StartCard readyToStart={state.readyToStart} missing={state.startMissing} lines={state.lines} />}
-      <div className="ob-thread" aria-live="polite">
-        {messages.length === 0 && !state.focusLine && <HierarchyGuide />}
+  /** The opening card's answers: tone and lines are written at once, then sent as the first reply the interview quotes. */
+  const start = async (answer: OpeningAnswer) => {
+    setBusy("turn"); setError("");
+    await fetch("/api/onboarding/tone", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ tone: answer.tone }) }).catch(() => undefined);
+    if (state.setupLines) {
+      const ordered = answer.base ? [answer.base, ...answer.lines.filter((label) => label !== answer.base)] : answer.lines;
+      const response = await fetch("/api/lines", { method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ setup: ordered.map((label) => ({ label, ranked: label === answer.base, hard: answer.fixed.includes(label) })) }) }).catch(() => undefined);
+      if (!response?.ok) { setError("主线没有保存成功，请重试。"); setBusy(""); return; }
+    }
+    setBusy("");
+    await runTurn(openingReply(answer, filesRead));
+  };
+  const changeTone = async (tone: OnboardingTone) => {
+    const response = await fetch("/api/onboarding/tone", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ tone }) }).catch(() => undefined);
+    if (response?.ok) await load();
+  };
+
+  return <div className="ob3" onDragOver={(event) => { event.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={onDrop} data-dragging={over}>
+    <LeftColumn state={state} busy={busy !== "" && busy !== "turn"} accept={ACCEPT} onUpload={(files) => void upload(files)} onChanged={() => void load()}
+      heldQuestions={held} answers={answers} onAnswer={(id, next) => setAnswers((previous) => ({ ...previous, [id]: next }))} />
+
+    <section className="ob-centre" aria-label="访谈对话">
+      <header className="ob-centre-head">
+        <StageBar stage={stage} line={state.focusLine?.label} />
+        {!opening && !state.focusLine && <div className="ob-tone"><span>语气</span>
+          <SegmentedControl label="访谈语气" value={state.tone} onChange={(next) => void changeTone(next)}
+            options={ONBOARDING_TONES.map((id) => ({ value: id, label: ONBOARDING_TONE_LABEL[id].label }))} /></div>}
+      </header>
+      <div className="ob-thread ob-voice" aria-live="polite">
+        {opening && <OpeningCard linesKnown={!state.setupLines} knownLines={state.lines.map((line) => line.label)} initialTone={state.tone}
+          busy={busy !== ""} hasMaterials={filesRead} onStart={(answer) => void start(answer)} />}
         {messages.length === 0 && state.focusLine && <div className="ob-turn ob-assistant"><p>{`「${state.focusLine.label}」的访谈：现状、长期目标、项目、截止日与已有文件。`}</p></div>}
-        {messages.length === 0 && !state.focusLine && busy !== "turn" && <MaterialsFirst documents={state.documents} busy={busy !== ""}
-          onUpload={(files) => void upload(files)}
-          onStart={() => void runTurn(state.documents.some((doc) => doc.extractionStatus === "done") ? MATERIALS_FIRST_REPLY : NO_MATERIALS_REPLY)} />}
         {messages.map((message) => {
           const turn = asTurn(message);
-          if (!turn) return <div className="ob-turn ob-user" key={message.seq}><p>{userText(message)}</p></div>;
+          if (!turn) return <div className="ob-turn ob-user" key={message.seq} data-user-text><p>{userText(message)}</p></div>;
           const latest = message.seq === messages.at(-1)?.seq;
           return <div className="ob-turn ob-assistant" key={message.seq}>
-            <p>{turn.reply}</p>
-            {latest && turn.nextAction === "ready_for_milestones" && <p className="ob-done">信息已基本完整，可在下方生成画像报告与里程碑。</p>}
+            <p className="gen">{turn.reply}</p>
+            {latest && turn.nextAction === "ready_for_milestones" && state.readyToStart && <p className="ob-done">信息已基本完整，可以在下方设计里程碑；画像报告随后生成。</p>}
           </div>;
         })}
+        {busy === "turn" && pendingText && !(messages.at(-1)?.role === "user" && userText(messages.at(-1)!) === pendingText)
+          && <div className="ob-turn ob-user" data-user-text><p>{pendingText}</p></div>}
+        {busy === "turn" && <div ref={asked}><TurnProgress sessionId={line ? `line-${line}` : sessionId} /></div>}
+        {busy === "" && waiting && !error && <div ref={asked}><TurnProgress sessionId={line ? `line-${line}` : state.session?.id ?? ""} resumed onRunning={setBackground} onEnded={() => { setBackground(false); void load(); }} /></div>}
         {answeredElsewhere.size > 0 && !waiting && <p className="ob-moved">本轮有 {answeredElsewhere.size} 题已在待决事项答过，会随这一轮一起发送。</p>}
-        {batch.length > 0 && !waiting && <div className="ob-turn ob-assistant ob-batch" aria-label="本轮问题">
-          <nav className="ob-batch-nav" aria-label="问题进度">{batch.map((question, index) => <button key={question.id} type="button" aria-current={index === Math.min(current, batch.length - 1) || undefined}
+        {deep && centre[0] && <div ref={asked} className="ob-turn ob-assistant ob-deep" aria-label="本轮问题">
+          <p className="ob-deep-question gen">{centre[0].text}</p>
+          {centre[0].kind !== "free" && <QuestionCard question={centre[0]} answer={answers[centre[0].id] ?? { picked: [], other: "" }} identities={state.identities}
+            projects={state.projects} disabled={busy !== ""} hideText hideOther onChange={(next) => setAnswers((previous) => ({ ...previous, [centre[0]!.id]: next }))} />}
+          <small className="ob-muted">在下方写下你的回答，想到什么写什么；也可以先选一个最接近的。</small>
+        </div>}
+        {!deep && centre.length > 0 && !waiting && <div ref={asked} className="ob-turn ob-assistant ob-batch" aria-label="本轮问题">
+          <nav className="ob-batch-nav" aria-label="问题进度">{centre.map((question, index) => <button key={question.id} type="button" aria-current={index === Math.min(current, centre.length - 1) || undefined}
             data-answered={Boolean(answers[question.id]?.picked.length || answers[question.id]?.other.trim()) || undefined} onClick={() => setCurrent(index)}>{index + 1}</button>)}</nav>
-          {(() => { const question = batch[Math.min(current, batch.length - 1)]!; return <QuestionCard key={question.id} question={question}
+          {(() => { const question = centre[Math.min(current, centre.length - 1)]!; return <QuestionCard key={question.id} question={question}
             answer={answers[question.id] ?? { picked: [], other: "" }} identities={state.identities} projects={state.projects} disabled={busy !== ""}
             onChange={(next) => setAnswers((previous) => ({ ...previous, [question.id]: next }))} />; })()}
           <div className="ob-batch-actions">
-            {current > 0 && <button type="button" className="ob-btn" onClick={() => setCurrent((index) => index - 1)}>上一题</button>}
-            {current < batch.length - 1 && <button type="button" className="ob-btn" onClick={() => setCurrent((index) => index + 1)}>下一题</button>}
-            <small className="ob-muted">{batch.length} 题互不依赖，答完一并发送；可跳过不答的题。</small>
+            {current > 0 && <button type="button" className="ob-btn ob-quiet" onClick={() => setCurrent((index) => index - 1)}>上一题</button>}
+            {current < centre.length - 1 && <button type="button" className="ob-btn ob-quiet" onClick={() => setCurrent((index) => index + 1)}>下一题</button>}
+            <small className="ob-muted">{centre.length} 题一起作答，答完一并发送；不确定的可以跳过。</small>
           </div>
         </div>}
-        {state.dateBatch && <DateBatchCard key={state.dateBatch.id} batch={state.dateBatch} busy={busy !== ""} onDecide={(batchId, ids) => void decideDates(batchId, ids)} onRedo={() => void runTurn("请把我已添加的文件里的日期重新读一遍，只整理日期。", true)} />}
-        {!state.focusLine && state.session?.state === "complete" && <section className="ob-design" aria-label="画像报告">
+        {state.dateBatch && <DateBatchCard key={state.dateBatch.id} batch={state.dateBatch} busy={busy !== "" && busy !== "turn"} onDecide={(batchId, ids) => void decideDates(batchId, ids)} onRedo={() => void runTurn("请把我已添加的文件里的日期重新读一遍，只整理日期。", true)} />}
+        {!state.focusLine && complete && <section className="ob-design" aria-label="画像报告">
           <b>画像报告</b>
           <span className="ob-muted">个人画像与洞察（可导出分享版），以及现况洞察与可行建议；可下载 PDF 或图片。</span>
-          <a className="ob-btn" href="/portrait">查看画像报告 →</a>
+          <a className="ob-btn" href="/portrait">查看画像报告</a>
         </section>}
-        {state.facts.some((fact) => fact.status === "confirmed") && <section className="ob-design" aria-label="设计里程碑">
-          <b>{state.session?.state === "complete" ? "了解得够了，可以设计里程碑了" : "随时可以先设计里程碑，之后补充再重来"}</b>
+        {state.readyToStart && !opening && <section className="ob-design" aria-label="设计里程碑">
+          <b>{complete ? "了解得够了，可以设计里程碑了" : "随时可以先设计里程碑，之后补充再重来"}</b>
           <span className="ob-muted">由已确认的事实与日期倒推，每条主线 3–5 个前后相接的里程碑草稿，批准后生效。</span>
           {designed
-            ? <p className="ob-done">已生成 {designed.length} 个草稿：{designed.map((item) => item.title).join("、")}。<a href="/milestones">去审阅并批准 →</a></p>
-            : <button type="button" className="ob-btn" disabled={busy !== ""} onClick={() => void designMilestones()}>
+            ? <p className="ob-done">已生成 {designed.length} 个草稿：{designed.map((item) => item.title).join("、")}。<a href="/milestones">去审阅并批准</a></p>
+            : <button type="button" className="ob-btn ob-quiet" disabled={busy !== ""} onClick={() => void designMilestones()}>
                 {busy === "milestones" ? "正在设计…（通常 2–5 分钟）" : "设计里程碑草稿"}</button>}
         </section>}
-        {(state.diligence.length > 0 || state.facts.some((fact) => fact.status === "confirmed")) && <DiligencePanel reports={state.diligence}
+        {(state.diligence.length > 0 || state.readyToStart) && !opening && <DiligencePanel reports={state.diligence}
           identities={state.identities} busy={busy !== ""} onRun={(id) => void runDiligence(id)} onDecide={(report, proposal, decision) => void decideDiligence(report, proposal, decision)} />}
         {transcription && waitingForAudio && <TranscriptionCard status={transcription} busy={busy !== ""} onDownload={() => void downloadModel()} />}
-        {busy === "turn" && pendingText && !(messages.at(-1)?.role === "user" && userText(messages.at(-1)!) === pendingText)
-          && <div className="ob-turn ob-user"><p>{pendingText}</p></div>}
-        {busy === "turn" && <div className="ob-turn ob-assistant" role="status"><p className="ob-muted">正在整理回答并生成下一组问题…（通常 1–4 分钟，可以先离开本页）</p></div>}
         <div ref={bottom} />
       </div>
       {error && <p className="ob-error" role="alert">{error}{waiting && busy === "" && <button type="button" className="ob-btn" onClick={() => void runTurn("")}>重试</button>}</p>}
-      <form className="ob-composer" onSubmit={(event) => { event.preventDefault(); if (canSend) void runTurn(composed || ""); }}>
-        <textarea value={text} rows={open ? 2 : 4} onChange={(event) => setText(event.target.value)} disabled={busy !== ""}
-          placeholder={open ? "补充说明（可选）" : "当前情况…"} aria-label="回答" />
+      {!opening && <form className="ob-composer ob-voice" onSubmit={(event) => { event.preventDefault(); if (canSend) void runTurn(composed || ""); }}>
+        <textarea value={text} rows={deep ? 4 : open ? 2 : 3} onChange={(event) => setText(event.target.value)} disabled={busy !== ""}
+          placeholder={deep ? "写下你的回答…" : open ? "补充说明（可选）" : "想说的都可以写在这里…"} aria-label="回答" />
         <div className="ob-composer-row">
           <label className="ob-file-button">
             <input type="file" multiple accept={ACCEPT} hidden onChange={(event) => { void upload(event.target.files ?? []); event.target.value = ""; }} />
-            {busy === "upload" ? "上传中…" : "添加文件 / 录音"}
+            {busy === "upload" ? "上传中…" : "添加文件"}
           </label>
-          <span className="ob-muted">PDF · Word · 文本 · 图片 · 录音；也可以直接拖进来</span>
-          <button type="submit" className="ob-btn" disabled={!canSend}>{open ? "发送这一轮" : "发送"}</button>
+          <button type="submit" className="ob-btn ob-primary" disabled={!canSend}>{deep ? "回答" : open ? "发送这一轮" : "发送"}</button>
         </div>
-      </form>
+      </form>}
     </section>
-    <div className="ob-side">
-      <PortraitPanel profile={state.profile} lines={state.lines} lineProfiles={state.lineProfiles} onChanged={() => void load()} />
-      {state.availabilityProposed && <p className="ob-note">已按硬约束规则提议每周可用时段，可在 <a href="/plan#time">计划页</a> 预览后采用。</p>}
-      <ProfilePanel state={state} onChanged={() => void load()} />
+
+    <div className="ob-right">
+      {state.profile?.portrait && <p className="ob-portrait-now gen">{state.profile.portrait}</p>}
+      <StageView state={state} stage={stage} complete={complete} onChanged={() => void load()} />
+      {state.availabilityProposed && <p className="ob-note">已按说过的时间提议每周可用时段，可在 <a href="/plan#time">计划页</a> 预览后采用。</p>}
     </div>
   </div>;
-}
-
-/**
- * The interview's first step (decided 2026-10-12): the person adds what they have — a CV, a timetable, syllabi, project notes — and the
- * first round reads it all before asking, so the questions are only about what the files leave open.
- */
-export function MaterialsFirst({ documents, busy, onUpload, onStart }: { documents: DocumentRow[]; busy: boolean;
-  onUpload: (files: FileList) => void; onStart: () => void }) {
-  const read = documents.filter((doc) => doc.extractionStatus === "done");
-  const reading = documents.some((doc) => doc.extractionStatus === "pending");
-  return <section className="ob-materials" aria-label="第一步：添加材料">
-    <b>第一步：添加材料</b>
-    <span className="ob-muted">简历、课表、课程大纲、项目说明都可以。访谈先从材料里读出能读的，再只问还缺的；也可以直接拖进来。</span>
-    <label className="ob-file-button">
-      <input type="file" multiple accept={ACCEPT} hidden onChange={(event) => { if (event.target.files) onUpload(event.target.files); event.target.value = ""; }} />
-      添加文件
-    </label>
-    {documents.length > 0 && <ul>{documents.map((doc) => <li key={doc.id}>{doc.fileName}<span className="ob-muted">
-      {doc.extractionStatus === "done" ? " · 已读取" : doc.extractionStatus === "pending" ? " · 读取中" : " · 无法读取"}</span></li>)}</ul>}
-    <button type="button" className="ob-btn" disabled={busy || reading} onClick={onStart}>{read.length ? "读完材料，开始访谈" : "没有材料，直接开始"}</button>
-  </section>;
-}
-
-/**
- * The start standard on the interview screen (decided 2026-10-12): until the five start items stand, every other page leads back here,
- * so this says which are still missing and where each is settled; once they stand, 「开始使用」 opens the app and the portrait goes on here.
- */
-export function StartCard({ readyToStart, missing, lines }: { readyToStart: boolean; missing: OnboardingState["startMissing"]; lines: OnboardingState["lines"] }) {
-  if (readyToStart) return <section className="ob-start-card" aria-label="开始使用">
-    <a className="ob-btn" href="/">开始使用</a>
-    <span className="ob-muted">基本信息已齐。画像访谈在同一处继续，问题也会列在待决事项。</span>
-  </section>;
-  // What only the person can settle says where to click; the rest is asked in the interview's next round.
-  const where = (item: OnboardingState["startMissing"][number]) => {
-    const line = item.id.startsWith("line_goal:") ? lines.find((entry) => entry.id === item.id.slice("line_goal:".length)) : undefined;
-    return line ? `在右侧画像下为「${line.label}」采用长期目标` : item.detail;
-  };
-  return <section className="ob-start-card" aria-label="开始使用前还差">
-    <b>开始使用前还差 {missing.length} 项</b>
-    <ul>{missing.map((item) => <li key={item.id}>{item.label}{where(item) ? <span className="ob-muted">：{where(item)}</span> : null}</li>)}</ul>
-  </section>;
 }
 
 export type { DocumentRow };

@@ -19,7 +19,8 @@ const DEVELOPER = /\b[A-Z][A-Z0-9]*_[A-Z0-9_]{2,}\b|scripts[\\/]|\.ps1\b|\.tsx?\
 async function audit(page: Page): Promise<Findings> {
   return page.evaluate((developerSource) => {
     const developer = new RegExp(developerSource);
-    const exempt = (element: Element) => Boolean(element.closest(".gen, [data-user-text], .long-form, details.advanced, script, style, noscript"));
+    // `.ob-voice`: the interview's conversation, which addresses the person as 你 by decision (docs/onboarding-v3.md, 2026-10-14).
+    const exempt = (element: Element) => Boolean(element.closest(".gen, .ob-voice, [data-user-text], .long-form, details.advanced, script, style, noscript"));
     const visible = (element: Element) => {
       const style = getComputedStyle(element);
       const box = element.getBoundingClientRect();

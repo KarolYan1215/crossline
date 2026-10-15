@@ -104,17 +104,26 @@ export class JsonLineRpcClient {
 export const CODEX_BASELINE_COMMIT = "f0a1b8f0849d90960bc406b848f32e5a129b0457";
 export const CODEX_GENERATED_PROTOCOL_SHA256 = "cff5bf0f8f52d3d4fd2d00145462c5a3e21df86ec3b3b652668884831eb5c6a3";
 export const CODEX_FORK_BINARY_SHA256 = "4bcc1d8452c75cd132e010f41ccfaf6afb8699317f9a90d88df0b20be2335497";
+/** The release build of the same pinned source that the installed copy ships (docs/local-installer.md, Codex 的 Release 构建). */
+export const CODEX_RELEASE_BINARY_SHA256 = "ce19ac66ee6204888bf6318f0ae1b02f83b35f512ca5144f1e8bf42b9f7b11b9";
 
 export function codexProcessEnvironment(
   base: NodeJS.ProcessEnv = process.env,
   localAppData = base.LOCALAPPDATA
 ): NodeJS.ProcessEnv {
-  if (!localAppData) throw new Error("LOCALAPPDATA_UNAVAILABLE");
-  const isPackagedRedirect = /\\packages\\[^\\]+\\localcache\\local$/i.test(localAppData);
-  const durableLocalAppData = isPackagedRedirect && base.USERPROFILE
-    ? path.win32.join(base.USERPROFILE, "AppData", "Local")
-    : localAppData;
-  const crosslineHome = path.win32.join(durableLocalAppData, "Crossline", "codex-home");
+  // An installed copy (docs/local-installer.md) points CROSSLINE_STATE_DIR at its own folder, so on a machine that also runs a
+  // checkout's resident app the two never share a Codex login, its memories or guest homes.
+  const stateDir = base.CROSSLINE_STATE_DIR?.trim();
+  let crosslineHome: string;
+  if (stateDir) crosslineHome = path.win32.join(stateDir, "codex-home");
+  else {
+    if (!localAppData) throw new Error("LOCALAPPDATA_UNAVAILABLE");
+    const isPackagedRedirect = /\\packages\\[^\\]+\\localcache\\local$/i.test(localAppData);
+    const durableLocalAppData = isPackagedRedirect && base.USERPROFILE
+      ? path.win32.join(base.USERPROFILE, "AppData", "Local")
+      : localAppData;
+    crosslineHome = path.win32.join(durableLocalAppData, "Crossline", "codex-home");
+  }
   const env: NodeJS.ProcessEnv = { ...base, CODEX_HOME: crosslineHome, CROSSLINE_CODEX_HOME: crosslineHome };
   delete env.CODEX_INTERNAL_ORIGINATOR_OVERRIDE;
   return env;
@@ -143,7 +152,8 @@ export function resolveCodexCommand(
     platform === "win32" ? "codex.exe" : "codex");
   const executable = env.CROSSLINE_CODEX_PATH ?? fork;
   if (!path.isAbsolute(executable) || !exists(executable)) throw new Error("CODEX_FORK_BINARY_NOT_FOUND");
-  if (sha256(executable) !== CODEX_FORK_BINARY_SHA256) throw new Error("CODEX_FORK_BINARY_MISMATCH");
+  const hash = sha256(executable);
+  if (hash !== CODEX_FORK_BINARY_SHA256 && hash !== CODEX_RELEASE_BINARY_SHA256) throw new Error("CODEX_FORK_BINARY_MISMATCH");
   return { command: executable, args: [] };
 }
 
@@ -418,6 +428,18 @@ export async function startCodexSupervisor(options: {
   listCalendarSources?: (workspaceId: string) => Promise<unknown>;
   /** Replaces the ticked set with exactly these `<accountId>:<calendarId>` keys. */
   saveCalendarSources?: (workspaceId: string, keys: string[]) => Promise<unknown>;
+  /** Folders the person authorized: a preview before anything is read, then added (read in the background), removed, or given lines. */
+  sourceFolders?: {
+    preview: (workspaceId: string, path: string) => Promise<unknown>;
+    add: (workspaceId: string, path: string) => Promise<unknown>;
+    remove: (workspaceId: string, id: string) => Promise<unknown>;
+    setLines: (workspaceId: string, id: string, lines: string[]) => Promise<unknown>;
+  };
+  /** Calendars read from a subscription link: added after one read (the link goes to the worker's secret store), and removed. */
+  calendarSubscriptions?: {
+    add: (workspaceId: string, input: { link: string; label: string }) => Promise<unknown>;
+    remove: (workspaceId: string, id: string) => Promise<unknown>;
+  };
   plugin?: LocalPluginContract;
   /**
    * When set, every request must carry a valid `x-crossline-capability` token signed with this secret
@@ -842,6 +864,61 @@ export async function startCodexSupervisor(options: {
           sendJson(response, 502, { blocker: { code: "GRAPH_CALENDARS_UNAVAILABLE",
             message: error instanceof Error ? error.message : "保存日历选择失败" } });
         }
+        return;
+      }
+      // Authorized folders (docs/onboarding-v3.md 「文件夹授权」). The path is the person's own, typed on this machine; the worker checks it
+      // (absolute, an existing folder, not a drive, the user folder, a system folder or the app's own data) before walking anything.
+      if (pathname.startsWith("/v1/sources/folders") && options.sourceFolders) {
+        if (request.headers.origin || (request.method !== "DELETE" && !request.headers["content-type"]?.startsWith("application/json"))) {
+          sendJson(response, 403, { blocker: { code: "SYNC_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
+          return;
+        }
+        const folders = options.sourceFolders;
+        const one = /^\/v1\/sources\/folders\/([A-Za-z0-9-]{1,40})(\/lines)?$/.exec(pathname);
+        try {
+          if (request.method === "POST" && (pathname === "/v1/sources/folders/preview" || pathname === "/v1/sources/folders")) {
+            const body = await readJsonBody(request).catch(() => undefined) as { path?: unknown } | undefined;
+            if (typeof body?.path !== "string" || !body.path.trim() || body.path.length > 1000) {
+              sendJson(response, 400, { blocker: { code: "FOLDER_PATH_REQUIRED", message: "需要文件夹路径" } });
+              return;
+            }
+            sendJson(response, 200, await (pathname.endsWith("/preview") ? folders.preview(callerWorkspaceId, body.path) : folders.add(callerWorkspaceId, body.path)));
+            return;
+          }
+          if (request.method === "DELETE" && one && !one[2]) { sendJson(response, 200, await folders.remove(callerWorkspaceId, one[1]!)); return; }
+          if (request.method === "POST" && one?.[2]) {
+            const body = await readJsonBody(request).catch(() => undefined) as { lines?: unknown } | undefined;
+            const lines = Array.isArray(body?.lines) ? body.lines.filter((line): line is string => typeof line === "string" && line.length <= 80) : undefined;
+            if (!lines) { sendJson(response, 400, { blocker: { code: "FOLDER_LINES_REQUIRED", message: "需要 lines 数组" } }); return; }
+            sendJson(response, 200, await folders.setLines(callerWorkspaceId, one[1]!, lines));
+            return;
+          }
+        } catch { sendJson(response, 502, { blocker: { code: "FOLDER_FAILED", message: "文件夹操作没有完成" } }); return; }
+      }
+      // A subscription link (docs/onboarding-v3.md 「日历接入」): read once here before it is kept, so a link that does not open is refused
+      // now rather than failing every tick. The answer is awaited: a read takes a second or two and the person is waiting for it.
+      if (request.method === "POST" && pathname === "/v1/calendar/subscriptions" && options.calendarSubscriptions) {
+        if (request.headers.origin || !request.headers["content-type"]?.startsWith("application/json")) {
+          sendJson(response, 403, { blocker: { code: "SYNC_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
+          return;
+        }
+        const body = await readJsonBody(request).catch(() => undefined) as { link?: unknown; label?: unknown } | undefined;
+        if (typeof body?.link !== "string" || body.link.length > 2000) {
+          sendJson(response, 400, { blocker: { code: "ICAL_LINK_INVALID", message: "需要日历链接" } });
+          return;
+        }
+        try { sendJson(response, 200, await options.calendarSubscriptions.add(callerWorkspaceId, { link: body.link, label: typeof body.label === "string" ? body.label : "" })); }
+        catch { sendJson(response, 502, { blocker: { code: "ICAL_ADD_FAILED", message: "没能接入这个日历" } }); }
+        return;
+      }
+      const subscriptionMatch = /^\/v1\/calendar\/subscriptions\/([A-Za-z0-9-]{1,40})$/.exec(pathname);
+      if (request.method === "DELETE" && subscriptionMatch && options.calendarSubscriptions) {
+        if (request.headers.origin) {
+          sendJson(response, 403, { blocker: { code: "SYNC_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
+          return;
+        }
+        try { sendJson(response, 200, await options.calendarSubscriptions.remove(callerWorkspaceId, subscriptionMatch[1]!)); }
+        catch { sendJson(response, 502, { blocker: { code: "ICAL_REMOVE_FAILED", message: "没能移除这个日历" } }); }
         return;
       }
       // Pull the calendar now. The tick is fifteen minutes wide, which makes "change your calendar and

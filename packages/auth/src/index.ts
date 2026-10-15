@@ -6,6 +6,8 @@ import { betterAuth, type Auth, type BetterAuthOptions } from "better-auth";
 import { nextCookies } from "better-auth/next-js";
 import { emailOTP } from "better-auth/plugins/email-otp";
 import { chatgptSignIn } from "./chatgpt";
+import { codexLocalSignIn, type ReadLocalCodexAccount } from "./codex-local";
+export { chatgptAccountOf, isDirectLoopbackRequest, type LocalCodexAccount, type ReadLocalCodexAccount } from "./codex-local";
 import { getMigrations } from "better-auth/db/migration";
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import nodemailer from "nodemailer";
@@ -33,6 +35,11 @@ export type CrosslineAuthOptions = {
    * client id OpenAI issued on first sign-in. Absent, the flow does not exist.
    */
   chatgpt?: { installFile: string; fetch?: typeof fetch };
+  /**
+   * An installed copy (`CROSSLINE_INSTALL_MODE=local`, docs/local-installer.md): the session comes from the machine's own Codex
+   * ChatGPT login (`codex-local.ts`), and nothing else signs in.
+   */
+  localCodex?: { readAccount: ReadLocalCodexAccount };
 };
 
 export type CrosslineAuth = Auth;
@@ -110,7 +117,10 @@ function crosslineAuthConfig(options: CrosslineAuthOptions): BetterAuthOptions {
       // 127.0.0.1/localhost is a browser-trustworthy secure context even over plain HTTP, so `secure`
       // does not need to be relaxed for local dev — only the Tailscale hostname (real HTTPS, stage six)
       // and loopback dev both satisfy it as written.
-      defaultCookieAttributes: { httpOnly: true, secure: true, sameSite: "lax", path: "/" }
+      defaultCookieAttributes: { httpOnly: true, secure: true, sameSite: "lax", path: "/" },
+      // Cookies are not kept apart by port: an installed copy at 127.0.0.1:<its port> and a checkout's resident app at 127.0.0.1:3210 on
+      // the same machine would overwrite each other's session in one browser. The installed copy's cookies get their own names.
+      ...(options.localCodex ? { cookiePrefix: "crossline-local" } : {})
     },
     account: {
       // Same email, same account (the person's decision, 2026-10-13; it replaced explicit-only linking, which refused a Google or
@@ -147,7 +157,8 @@ function crosslineAuthConfig(options: CrosslineAuthOptions): BetterAuthOptions {
     // A six-digit code by email signs in without a password and creates the account on first use: one step fewer than sign-up →
     // verification link → sign-in, and only offered where mail can actually be delivered. `nextCookies` stays last, as Better Auth asks.
     plugins: [...(emailCapable ? [emailOTP({ sendVerificationOTP: async ({ email, otp }) => { await deliver(email, "Crossline 登录验证码", `验证码：${otp}（10 分钟内有效）`); },
-      expiresIn: 600 })] : []), ...(options.chatgpt ? [chatgptSignIn(options.chatgpt)] : []), nextCookies()]
+      expiresIn: 600 })] : []), ...(options.chatgpt ? [chatgptSignIn(options.chatgpt)] : []),
+      ...(options.localCodex ? [codexLocalSignIn(options.localCodex)] : []), nextCookies()]
   };
 }
 
@@ -180,13 +191,22 @@ export type ResolvedAccessContext = { ctx: AccessContext } | { error: "UNAUTHENT
  * previously verified the caller was allowed to use the `workspaceId` it passed.
  */
 export async function requireAccessContext(
-  auth: CrosslineAuth, store: CrosslineStore, request: Request
+  auth: CrosslineAuth, store: CrosslineStore, request: Request, localAccount?: ReadLocalCodexAccount
 ): Promise<ResolvedAccessContext> {
   // Untouchable: this must stay a live, uncached call on every single request — `cookieCache.enabled:
   // false` is what makes a revoked session or a demoted role take effect on the very next request,
   // proven end to end by `scripts/gate-identity-check.ts`. Nothing below this line may weaken that.
   const session = await auth.api.getSession({ headers: request.headers });
   if (!session) return { error: "UNAUTHENTICATED" };
+  // An installed copy's session stands for the account its Codex is signed in to. Codex signed out, or signed in as someone else,
+  // ends every session of this user; a Codex that cannot be asked right now (starting, restarting) is not a reason to sign out.
+  if (localAccount) {
+    const account = await localAccount().catch(() => undefined);
+    if (account === null || (account && account.email !== session.user.email.toLowerCase())) {
+      await (await auth.$context).internalAdapter.deleteUserSessions(session.user.id);
+      return { error: "UNAUTHENTICATED" };
+    }
+  }
 
   // One indexed query on the steady-state path instead of the 4 separate statements
   // `createPrincipalWithWorkspace` + a redundant `getWorkspaceMembership` used to cost per request — see

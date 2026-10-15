@@ -42,7 +42,10 @@ async function readCapped(response: Response, maxBytes: number): Promise<Uint8Ar
   return out;
 }
 
-export async function safeGet(address: string, deps: SafeGetDeps, options: { maxBytes: number; timeoutMs?: number }): Promise<SafeGetResult> {
+export async function safeGet(address: string, deps: SafeGetDeps, options: { maxBytes: number; timeoutMs?: number;
+  /** Content types accepted instead of the page types (a calendar subscription reads `text/calendar`). */
+  types?: string[] }): Promise<SafeGetResult> {
+  const allowed = options.types ?? ALLOWED_TYPES;
   let url = publicHttpsUrl(address);
   for (let hop = 0; hop < 4; hop += 1) {
     if (!url) return { ok: false, reason: "地址不是公开的 https 页面" };
@@ -51,7 +54,7 @@ export async function safeGet(address: string, deps: SafeGetDeps, options: { max
     try {
       response = await deps.fetchImpl(url.toString(), {
         redirect: "manual", signal: AbortSignal.timeout(options.timeoutMs ?? 30_000),
-        headers: { "user-agent": "Crossline/1.0 (personal research; local)", accept: ALLOWED_TYPES.join(",") }
+        headers: { "user-agent": "Crossline/1.0 (personal research; local)", accept: allowed.join(",") }
       });
     } catch { return { ok: false, reason: "打不开" }; }
     if (response.status >= 300 && response.status < 400) {
@@ -61,7 +64,7 @@ export async function safeGet(address: string, deps: SafeGetDeps, options: { max
     }
     if (response.status < 200 || response.status >= 300) return { ok: false, reason: `返回 ${response.status}` };
     const contentType = (response.headers.get("content-type") ?? "").split(";")[0]!.trim().toLowerCase();
-    if (!ALLOWED_TYPES.includes(contentType)) return { ok: false, reason: `内容类型 ${contentType || "未知"} 不在允许范围内` };
+    if (!allowed.includes(contentType)) return { ok: false, reason: `内容类型 ${contentType || "未知"} 不在允许范围内` };
     let bytes: Uint8Array | undefined;
     try { bytes = await readCapped(response, options.maxBytes); } catch { return { ok: false, reason: "读取中断" }; }
     if (!bytes) return { ok: false, reason: `超过 ${Math.round(options.maxBytes / 1_000_000)} MB 上限` };

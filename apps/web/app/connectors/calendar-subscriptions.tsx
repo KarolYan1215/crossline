@@ -1,0 +1,79 @@
+"use client";
+import { useEffect, useState } from "react";
+import { SUBSCRIPTION_GUIDES, type CalendarSubscription } from "@crossline/core";
+import { SegmentedControl } from "../ui/controls";
+
+const ago = (at: string | undefined, now: number) => {
+  if (!at) return "";
+  const minutes = Math.max(0, Math.round((now - Date.parse(at)) / 60_000));
+  return minutes < 1 ? "刚刚读过" : minutes < 60 ? `${minutes} 分钟前读过` : minutes < 1440 ? `${Math.round(minutes / 60)} 小时前读过` : `${Math.round(minutes / 1440)} 天前读过`;
+};
+
+/**
+ * A calendar by its subscription link (docs/onboarding-v3.md 「日历接入」, decided 2026-10-14): the private iCal address Apple, Google
+ * and Outlook all export. Read-only, no sign-in. The link is a key to the calendar, so it is kept only on this computer, never in a
+ * backup; the card shows where it points and how the last read went.
+ */
+export function CalendarSubscriptions({ onChanged }: { onChanged?: () => void }) {
+  const [items, setItems] = useState<CalendarSubscription[] | undefined>();
+  const [link, setLink] = useState("");
+  const [label, setLabel] = useState("");
+  const [guide, setGuide] = useState(SUBSCRIPTION_GUIDES[0]!.app);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const [now, setNow] = useState(0);
+  const [help, setHelp] = useState(false);
+
+  const load = async () => {
+    const response = await fetch("/api/calendar/subscriptions", { cache: "no-store" }).catch(() => undefined);
+    const body = await response?.json().catch(() => undefined) as { subscriptions?: CalendarSubscription[] } | undefined;
+    setItems(body?.subscriptions ?? []);
+    setNow(Date.now());
+  };
+  useEffect(() => { void load(); }, []);
+
+  const add = async () => {
+    setBusy(true); setMessage("");
+    const response = await fetch("/api/calendar/subscriptions", { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ link, label }) }).catch(() => undefined);
+    const body = await response?.json().catch(() => undefined) as { state?: string; events?: number; message?: string } | undefined;
+    if (body?.state === "added") {
+      setLink(""); setLabel("");
+      setMessage(`已接入，读到未来九周的 ${body.events ?? 0} 个日程。`);
+      onChanged?.();
+    } else setMessage(body?.message ?? "没能接入这个日历，稍后再试。");
+    await load();
+    setBusy(false);
+  };
+  const remove = async (id: string) => {
+    setBusy(true);
+    await fetch(`/api/calendar/subscriptions?id=${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => undefined);
+    await load();
+    onChanged?.();
+    setBusy(false);
+  };
+  const steps = SUBSCRIPTION_GUIDES.find((item) => item.app === guide)?.steps ?? [];
+
+  return <section className="st-card calendar-subscriptions" aria-label="订阅日历">
+    <header><h3>订阅日历</h3><small>粘贴日历的订阅链接，只读、不用登录；苹果、Google、Outlook 都能导出</small></header>
+    {items?.map((item) => <div className="st-row" key={item.id}>
+      <span className="st-row-label">{item.label}
+        <small>{item.host}{item.lastError ? ` · ${item.lastError}` : item.lastReadAt ? ` · ${ago(item.lastReadAt, now)}，${item.lastEvents ?? 0} 个日程` : ""}</small>
+      </span>
+      <button type="button" className="ob-btn ob-quiet secondary-button" disabled={busy} onClick={() => void remove(item.id)}>移除</button>
+    </div>)}
+    <form className="calendar-subscriptions-form" onSubmit={(event) => { event.preventDefault(); if (link.trim()) void add(); }}>
+      <input type="url" inputMode="url" value={link} onChange={(event) => setLink(event.target.value)} placeholder="webcal://… 或 https://…ics" aria-label="日历订阅链接" disabled={busy} />
+      <input value={label} onChange={(event) => setLabel(event.target.value)} placeholder="名称（可选，如「课表」）" aria-label="日历名称" maxLength={40} disabled={busy} />
+      <button type="submit" className="ob-btn primary-button" disabled={busy || !link.trim()}>{busy ? "读取中…" : "接入"}</button>
+    </form>
+    {message && <p role="status" className="muted">{message}</p>}
+    <button type="button" className="ob-btn ob-quiet secondary-button calendar-subscriptions-help" aria-expanded={help} onClick={() => setHelp((open) => !open)}>
+      {help ? "收起说明" : "链接在哪里？"}</button>
+    {help && <div className="calendar-subscriptions-guide">
+      <SegmentedControl label="链接在哪里" value={guide} options={SUBSCRIPTION_GUIDES.map((item) => ({ value: item.app, label: item.app }))} onChange={setGuide} />
+      <ol>{steps.map((step) => <li key={step}>{step}</li>)}</ol>
+      <small className="muted">链接相当于这本日历的钥匙：只保存在这台电脑上，不进备份，换电脑后需要重新粘贴。</small>
+    </div>}
+  </section>;
+}

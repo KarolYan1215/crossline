@@ -250,6 +250,22 @@ importers:
         specifier: ^2.9.0
         version: 2.9.0
 
+  apps/collector:
+    devDependencies:
+      '@types/node':
+        specifier: 26.5.1
+        version: 26.5.1
+
+  apps/launcher:
+    dependencies:
+      tsx:
+        specifier: 4.23.13
+        version: 4.23.13
+    devDependencies:
+      '@types/node':
+        specifier: 26.5.1
+        version: 26.5.1
+
   apps/web:
     dependencies:
       '@crossline/auth':
@@ -457,6 +473,9 @@ importers:
       '@azure/msal-node-extensions':
         specifier: ^5.5.0
         version: 5.5.0
+      ical.js:
+        specifier: 2.2.1
+        version: 2.2.1
       web-push:
         specifier: ^3.6.7
         version: 3.6.7
@@ -2383,6 +2402,9 @@ packages:
   https-proxy-agent@7.0.6:
     resolution: {integrity: sha512-vK9P5/iUfdl95AI+JVyUuIcVtd4ofvtrOr3HNtM2yxC9bnMbEdp3x01OhQNnjb8IJYi38VlTE3mBXwcfvywuSw==}
     engines: {node: '>= 14'}
+
+  ical.js@2.2.1:
+    resolution: {integrity: sha512-yK/UlPbEs316igb/tjRgbFA8ZV75rCsBJp/hWOatpyaPNlgw0dGDmU+FoicOcwX4xXkeXOkYiOmCqNPFpNPkQg==}
 
   idb@8.0.3:
     resolution: {integrity: sha512-LtwtVyVYO5BqRvcsKuB2iUMnHwPVByPCXFXOpuU96IZPPoPN6xjOGxZQ74pgSVVLQWtUOYgyeL4GE98BY5D3wg==}
@@ -4767,6 +4789,8 @@ snapshots:
       debug: 4.4.3
     transitivePeerDependencies:
       - supports-color
+
+  ical.js@2.2.1: {}
 
   idb@8.0.3: {}
 

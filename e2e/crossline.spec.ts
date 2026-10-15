@@ -618,8 +618,8 @@ test("未达可开始标准时打开今日页回到访谈，并写明还差什�
       store.setSetting(workspaceId, "lines.v1", JSON.stringify(lines));
       await page.goto("/");
       await expect(page).toHaveURL(/\/onboarding/);
-      // The interview says what is missing: here, the first line's long-term goal, adopted under the portrait.
-      const missing = page.getByRole("region", { name: "开始使用前还差" });
+      // The interview says what is missing, in the right column's ring: here, the first line's long-term goal.
+      const missing = page.getByRole("region", { name: "开始使用的进度" });
       await expect(missing).toContainText("开始使用前还差 1 项");
       await expect(missing).toContainText(label);
       store.setSetting(workspaceId, "lines.v1", restore);

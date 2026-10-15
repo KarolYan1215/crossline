@@ -1,0 +1,14 @@
+# The owner's collector (docs/local-installer.md, 接收端). Fill in database_id after `wrangler d1 create crossline-collector`,
+# and ACCESS_TEAM_DOMAIN / ACCESS_AUD from the Cloudflare Access application that protects /dashboard.
+name = "crossline-collector"
+main = "src/index.ts"
+compatibility_date = "2026-09-01"
+
+[vars]
+ACCESS_TEAM_DOMAIN = "https://<team>.cloudflareaccess.com"
+ACCESS_AUD = "<application audience tag>"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "crossline-collector"
+database_id = "<database id>"

@@ -23,6 +23,8 @@ const KIND_LABEL = { chat: "Chat Completions 兼容接口", responses: "Response
 const draftOf = (source: Preset | Provider): Draft => ({ id: source.id, label: source.label, kind: source.kind === "chat" ? "chat" : "responses",
   baseUrl: source.baseUrl, model: source.model, json: source.responseFormat === "json_object", apiKey: "" });
 const percent = (value: number) => `${Math.round(value * 100)}%`;
+/** The worker being down or not configured comes back as the supervisor's own English; the page says it in words (copy-style). */
+const shown = (blocker: { code: string; message: string }) => /SUPERVISOR|CAPABILITY/.test(blocker.code) ? "后台服务没有连上，稍后再试。" : blocker.message;
 
 /**
  * Settings → 模型连接 → 其他模型 (R7, decided 2026-10-13). Any model can be added — DeepSeek, Kimi, 通义千问, 智谱 GLM, Claude, Gemini, the
@@ -36,7 +38,7 @@ export function ModelProviderCard({ initial }: { initial?: ProviderView }) {
   const [message, setMessage] = useState<string>();
   const refresh = async () => {
     const answer = await fetch("/api/model/provider", { cache: "no-store" }).then((response) => response.json() as Promise<ProviderView>).catch(() => undefined);
-    if (answer?.blocker) setMessage(answer.blocker.message); else if (answer) setView(answer);
+    if (answer?.blocker) setMessage(shown(answer.blocker)); else if (answer) setView(answer);
   };
   useEffect(() => { if (!initial) void refresh(); }, []);
   useEffect(() => {
@@ -51,7 +53,7 @@ export function ModelProviderCard({ initial }: { initial?: ProviderView }) {
     const answer = await fetch(path, { method, headers: { "content-type": "application/json" }, ...(body ? { body: JSON.stringify(body) } : {}) })
       .then((response) => response.json() as Promise<ProviderView>).catch(() => ({ blocker: { code: "", message: "后台服务没有连上，稍后再试。" } }) as ProviderView);
     setBusy(false);
-    if (answer.blocker) { setMessage(answer.blocker.message); return false; }
+    if (answer.blocker) { setMessage(shown(answer.blocker)); return false; }
     setView(answer);
     return true;
   };

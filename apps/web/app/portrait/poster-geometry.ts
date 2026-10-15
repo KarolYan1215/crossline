@@ -1,4 +1,5 @@
 import { CHRONOTYPE_LABEL, ENERGY_CATEGORIES, SCHWARTZ_VALUES, TYPE_AXES, TYPE_GROUPS, TYPE_TABLE, type EnergyRhythm, type PortraitReport } from "@crossline/core";
+import { INTERFACE_SERIF_STRINGS } from "../ui/serif-strings";
 
 /**
  * The poster's layout as pure functions (decided 2026-10-12, after the real report's render: percentages over captions, labels on top of
@@ -103,14 +104,15 @@ export const POSTER_LABEL_TITLES = ["核心词", "价值核心", "建议底座",
 
 /**
  * Every character the poster sets in its serif (`.pt-serif`): only strings written in code — type codes, the sixteen names, the group
- * names, the Schwartz values, section and label titles — plus digits, so the self-hosted subset (`scripts/poster-font-subset.ts`) can be
- * small and complete. Text a model or the person wrote never uses it.
+ * names, the Schwartz values, section and label titles, and the login and interview headings that share the style (`ui/serif-strings.ts`)
+ * — plus digits, so the self-hosted subset (`scripts/poster-font-subset.ts`) can be small and complete. Text a model or the person
+ * wrote never uses it.
  */
 export function posterSerifText(): string {
   const strings = [
     ...TYPE_AXES.flatMap((axis) => [axis.left.letter, axis.right.letter]),
     ...Object.values(TYPE_TABLE).map((type) => type.name), ...Object.values(TYPE_GROUPS).map((group) => group.name),
-    ...SCHWARTZ_VALUES.map((value) => value.name), ...POSTER_SECTION_TITLES, ...POSTER_LABEL_TITLES, "0123456789%· "
+    ...SCHWARTZ_VALUES.map((value) => value.name), ...POSTER_SECTION_TITLES, ...POSTER_LABEL_TITLES, ...INTERFACE_SERIF_STRINGS, "0123456789%· "
   ];
   return [...new Set(strings.join(""))].sort().join("");
 }

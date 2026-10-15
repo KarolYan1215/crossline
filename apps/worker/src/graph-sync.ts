@@ -133,7 +133,7 @@ export function createGraphSync(store: CrosslineStore, workspaceId: string, opti
         const message = error instanceof Error ? error.message : "";
         // One account being signed out, rate-limited or unreachable must not take the others down with
         // it, and above all must not look like its events were deleted.
-        reads.push({ ok: false, source, code: /^GRAPH_[A-Z_]+/.test(message) ? message.split(":")[0]! : "GRAPH_SYNC_FAILED" });
+        reads.push({ ok: false, source, code: /^(?:GRAPH|ICAL)_[A-Z_]+/.test(message) ? message.split(":")[0]! : "GRAPH_SYNC_FAILED" });
         continue;
       }
       // Tombstones first: an item that arrived earlier in the same stream and was then deleted must not

@@ -12,6 +12,8 @@ import "./settings/settings.css";
 import "./onboarding/onboarding.css";
 import "./portrait/portrait.css";
 import "./mobile.css";
+import { isLocalInstall } from "../lib/install-mode";
+import { PageBeacon } from "./page-beacon";
 
 export const metadata: Metadata = {
   title: "Crossline",
@@ -27,6 +29,6 @@ export const viewport: Viewport = { width: "device-width", initialScale: 1, view
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return <html lang="zh-CN">
-    <body>{children}</body>
+    <body>{children}{isLocalInstall() && <PageBeacon />}</body>
   </html>;
 }

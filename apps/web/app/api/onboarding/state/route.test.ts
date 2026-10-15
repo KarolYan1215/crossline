@@ -25,4 +25,4 @@ test("an account whose interview ended but one line's project has no deadline is
   expect(body.readyToStart).toBe(false);
   expect(body.startMissing).toEqual([expect.objectContaining({ id: "line_project:media", owner: "interview" })]);
   expect(body.extraQuestions.map((question) => question.id)).toContain("gap-deadline-media-example");
-});
+}, 30_000); // the route imports the whole board (week, timeline, checklist): a cold import alone can pass five seconds on a busy machine

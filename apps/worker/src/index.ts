@@ -44,10 +44,16 @@ import { extractText, reextractForLayout } from "./extract";
 import { createTranscriber, createWhisperEngine, modelsDirectory } from "./transcribe";
 import { createBackgroundFactsExtractor } from "./background-facts-runner";
 import { createGraphSync, type SyncOutcome } from "./graph-sync";
+import { addSubscription, hasSubscriptions, removeSubscription, subscriptionSources } from "./calendar-subscriptions";
+import { addFolder, previewFolder, removeFolder, setFolderLines, syncFolders } from "./source-folders";
+import { createFolderClassifier } from "./folder-classifier";
+import { homedir } from "node:os";
+import { defaultSafeGetDeps } from "./safe-fetch";
 import { REQUIRED_SKILLS } from "./required-skills";
 import { monthSpend, ownerOf, runtimeOwner, runtimesDir } from "./owner";
 import { identityLines } from "./lines";
 import { createBackgroundSpend } from "./spend";
+import { telemetryPass } from "./telemetry";
 import {
   buildSources, calendarLabel, listCatalogue, readSelection, saveSelection, seedNewAccounts, sourceKey, mayUseGraphLogin, withdrawForeignCalendar } from "./calendar-sources";
 import { createGraphAuthSession, GraphReadSource, loadVapidKeys, sendWebPush, type GraphCredentialProvider } from "@crossline/connectors";
@@ -183,6 +189,38 @@ async function titlePass(workspaceId: string, checkedAt: string): Promise<void> 
 }
 
 /** Files new calendar events under the person's lines after a sync, a batch a tick; a small model, so it still runs when quota is tight. */
+/**
+ * Reads a stored document's text: the worker's one extraction path (the web's upload, the supervisor route and authorized folders).
+ * Only files this app wrote itself, by the path it recorded: the model and the browser never supply one.
+ */
+async function extractDocument(documentId: string, workspaceId: string) {
+  const doc = analysisStore.listSourceDocuments(workspaceId).find((item) => item.id === documentId);
+  if (!doc) return { state: "blocked" as const, code: "SOURCE_NOT_FOUND", message: "找不到这个文件。" };
+  if (doc.kind === "audio") return transcribeDocument(workspaceId, doc.id);
+  let result;
+  try { result = await extractText(new Uint8Array(readFileSync(fileURLToPath(doc.uri))), doc.kind); }
+  catch { result = { status: "failed" as const, text: "", note: "读不到已保存的文件。" }; }
+  analysisStore.setSourceDocumentExtraction(workspaceId, doc.id, { status: result.status, text: result.text, ...(result.note ? { note: result.note } : {}) });
+  return { state: "extracted" as const, documentId: doc.id, status: result.status, characters: result.text.length };
+}
+
+/** Authorized folders (source-folders.ts): read what is new or changed, then have the model propose lines for newly read folders. */
+const folderDeps = { dataDir, home: homedir(), extract: (workspaceId: string, documentId: string) => extractDocument(documentId, workspaceId) };
+const readingFolders = new Set<string>();
+async function folderPass(workspaceId: string, checkedAt: string): Promise<void> {
+  if (readingFolders.has(workspaceId) || paused(workspaceId, "intake")) return;
+  readingFolders.add(workspaceId);
+  try {
+    const outcomes = await syncFolders(analysisStore, workspaceId, folderDeps).catch(() => []);
+    const read = outcomes.reduce((sum, item) => sum + item.read, 0);
+    if (read) console.info(JSON.stringify({ type: "sources.folders_read", checkedAt, workspaceId, outcomes }));
+    if (!codexSupervisor || !spendAllows(await spendFor(workspaceId), "intake")) return;
+    enterUsageWorkspace(workspaceId);
+    const filed = await createFolderClassifier(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))().catch(() => undefined);
+    if (filed && "filed" in filed && filed.filed) console.info(JSON.stringify({ type: "sources.folder_lines_filed", checkedAt, workspaceId, ...filed }));
+  } finally { readingFolders.delete(workspaceId); }
+}
+
 const filingCalendar = new Set<string>();
 async function calendarLinePass(workspaceId: string, checkedAt: string): Promise<void> {
   if (paused(workspaceId, "intake")) return;
@@ -449,6 +487,8 @@ async function tick(): Promise<void> {
   for (const workspace of workspaces) await minePass(workspace.id, checkedAt);
   for (const workspace of workspaces) await publicSkillPass(workspace.id, checkedAt);
   for (const workspace of workspaces) await portraitPass(workspace.id, checkedAt);
+  // Authorized folders: what changed since the last tick is read (at most forty files a folder a tick), before filing runs over it.
+  for (const workspace of workspaces) await folderPass(workspace.id, checkedAt);
   // Uploaded files are filed under the project their own name or opening names; what stays unclear is asked about on 待确认.
   for (const workspace of workspaces) {
     try {
@@ -469,10 +509,11 @@ async function tick(): Promise<void> {
   }
   // Calendar reality is pulled every tick. It never rewrites an approved plan — a change there becomes
   // a new draft whose diffs are conflicts for the person to look at.
-  if (calendar) {
+  {
     for (const workspace of workspaces) {
-      const outcome = await calendar.sync(workspace.id).catch((error): SyncOutcome =>
+      const outcome = await syncCalendarFor(workspace.id).catch((error): SyncOutcome =>
         ({ state: "blocked", code: "GRAPH_SYNC_FAILED", message: error instanceof Error ? error.message : "" }));
+      if (!outcome) continue;
       recordCalendarOutcome(analysisStore, workspace.id, outcome, checkedAt);
       await calendarLinePass(workspace.id, checkedAt);
       if (outcome.state === "blocked" || outcome.changes > 0 || outcome.resynced) {
@@ -525,9 +566,11 @@ if (!claimWorkerLock()) {
   process.exit(0);
 }
 const analysisStore = new CrosslineStore(path.join(dataDir, "crossline.db"));
+// Keys and links that are credentials (a model provider's key, a calendar's private link): DPAPI files, never the ledger.
+const secrets = createDpapiSecretStore(dataDir);
 // A workspace's own third-party model (R7): Codex reaches it through this local gateway, which adds the key (model-gateway.ts).
 const modelProviders = createModelProviderService({
-  store: analysisStore, secrets: createDpapiSecretStore(dataDir), cwd: repoRoot,
+  store: analysisStore, secrets, cwd: repoRoot,
   gateway: await startModelGateway({ resolve: (workspaceId, providerId) => modelProviders.upstream(workspaceId, providerId) }),
   signedIn: (workspaceId) => codexSupervisor?.runtimes?.signedIn(workspaceId) ?? true,
   client: async (workspaceId) => {
@@ -749,8 +792,36 @@ const getWeeklyInsight = (workspaceId: string) => {
   }
   return insight;
 };
+/** The zone calendar events are placed in: the person's setting, else the machine's configured zone. */
+const calendarZone = (workspaceId: string): string | undefined => {
+  const raw = analysisStore.getSetting(workspaceId, "schedule.preferences");
+  if (raw) {
+    try {
+      const zone = (JSON.parse(raw) as { timeZone?: unknown }).timeZone;
+      if (typeof zone === "string") {
+        new Intl.DateTimeFormat("en", { timeZone: zone });
+        return zone;
+      }
+    } catch { /* An unreadable setting must not stop calendar sync. */ }
+  }
+  return process.env.CROSSLINE_TIME_ZONE;
+};
+// Calendars read from a subscription link (calendar-subscriptions.ts): no Graph, no sign-in, any workspace.
+const subscriptionDeps = { secrets, fetch: defaultSafeGetDeps() };
+const subscriptionsOf = (workspaceId: string) => subscriptionSources(analysisStore, workspaceId, subscriptionDeps, () => calendarZone(workspaceId));
+// A workspace that reads only subscriptions (no Graph login of its own) has its own syncer over them alone.
+const subscriptionSyncers = new Map<string, ReturnType<typeof createGraphSync>>();
+const subscriptionSync = (workspaceId: string) => {
+  let syncer = subscriptionSyncers.get(workspaceId);
+  if (!syncer) {
+    syncer = createGraphSync(analysisStore, workspaceId, { sources: () => subscriptionsOf(workspaceId), timeZone: () => calendarZone(workspaceId) });
+    subscriptionSyncers.set(workspaceId, syncer);
+  }
+  return syncer;
+};
+
 /**
- * Calendar sync only exists when a client id is configured. Without one there is nothing to read, and
+ * Graph calendar sync only exists when a client id is configured. Without one there is nothing to read, and
  * inventing a connector that always fails would put a permanent blocker on every tick.
  *
  * The Graph login itself is one credential session for the whole worker process — signing in is a real
@@ -798,21 +869,10 @@ const calendar = await (async () => {
       let syncer = syncers.get(workspaceId);
       if (!syncer) {
         syncer = createGraphSync(analysisStore, workspaceId, {
-          // Resolved per tick, so unticking a calendar takes effect on the next sync with no restart.
-          sources: () => buildSources(analysisStore, workspaceId, credential, reader),
-          timeZone: () => {
-            const raw = analysisStore.getSetting(workspaceId, "schedule.preferences");
-            if (raw) {
-              try {
-                const zone = (JSON.parse(raw) as { timeZone?: unknown }).timeZone;
-                if (typeof zone === "string") {
-                  new Intl.DateTimeFormat("en", { timeZone: zone });
-                  return zone;
-                }
-              } catch { /* An unreadable setting must not stop calendar sync. */ }
-            }
-            return process.env.CROSSLINE_TIME_ZONE;
-          }
+          // Resolved per tick, so unticking a calendar takes effect on the next sync with no restart. One syncer over every source
+          // (Graph calendars and subscriptions alike): per-source authority drops the blocks of any source not in this list.
+          sources: () => [...buildSources(analysisStore, workspaceId, credential, reader), ...subscriptionsOf(workspaceId)],
+          timeZone: () => calendarZone(workspaceId)
         });
         syncers.set(workspaceId, syncer);
       }
@@ -840,7 +900,15 @@ const calendar = await (async () => {
       return { state: "blocked", code: "GRAPH_LOGIN_OTHER_ACCOUNT", message: "本机的日历登录属于另一个账号；这个账号要读日历需用自己的微软账号登录。" };
     };
     return {
-      sync: async (workspaceId: string) => (await foreign(workspaceId)) ?? (await ensureCatalogueSeeded(workspaceId), getSyncer(workspaceId)()),
+      sync: async (workspaceId: string) => {
+        // Not this machine's Graph login, but calendars of its own by link: those are read, and the owner's blocks leave with the
+        // selection withdrawn (a source not in the list loses its blocks).
+        if (!mayUseGraphLogin(analysisStore, workspaceId) && hasSubscriptions(analysisStore, workspaceId)) {
+          withdrawForeignCalendar(analysisStore, workspaceId);
+          return subscriptionSync(workspaceId)();
+        }
+        return (await foreign(workspaceId)) ?? (await ensureCatalogueSeeded(workspaceId), getSyncer(workspaceId)());
+      },
       listSources: async (workspaceId: string) => {
         if (await foreign(workspaceId)) return [];
         await ensureCatalogueSeeded(workspaceId);
@@ -873,6 +941,15 @@ const calendar = await (async () => {
     return undefined;
   }
 })();
+
+/**
+ * One calendar sync per workspace: through Graph (subscriptions included) when this machine has a Graph login, else its
+ * subscriptions alone; null when the workspace reads no calendar at all, which is not a failure to report.
+ */
+const syncCalendarFor = async (workspaceId: string): Promise<SyncOutcome | null> => {
+  if (calendar) return calendar.sync(workspaceId);
+  return hasSubscriptions(analysisStore, workspaceId) ? subscriptionSync(workspaceId)() : null;
+};
 
 // Independent from BETTER_AUTH_SECRET on purpose: the auth secret leaking should not also hand out the
 // ability to trigger real Codex runs on the loopback supervisor port — see `packages/codex/src/capability.ts`.
@@ -920,16 +997,18 @@ if (!capabilitySecret) {
       return { state: "downloading", progress: 0 };
     },
     runDiligence: (_client, identityId, force, workspaceId) => getDiligence(workspaceId)(identityId, { force }),
-    extractSource: async (documentId, workspaceId) => {
-      const doc = analysisStore.listSourceDocuments(workspaceId).find((item) => item.id === documentId);
-      if (!doc) return { state: "blocked", code: "SOURCE_NOT_FOUND", message: "找不到这个文件。" };
-      if (doc.kind === "audio") return transcribeDocument(workspaceId, doc.id);
-      // Only files this app wrote itself, by the path it recorded: the model and the browser never supply one.
-      let result;
-      try { result = await extractText(new Uint8Array(readFileSync(fileURLToPath(doc.uri))), doc.kind); }
-      catch { result = { status: "failed" as const, text: "", note: "读不到已保存的文件。" }; }
-      analysisStore.setSourceDocumentExtraction(workspaceId, doc.id, { status: result.status, text: result.text, ...(result.note ? { note: result.note } : {}) });
-      return { state: "extracted", documentId: doc.id, status: result.status, characters: result.text.length };
+    extractSource: (documentId, workspaceId) => extractDocument(documentId, workspaceId),
+    // Authorized folders: a preview (what would be read) before anything is read, then the folder is kept and read in the background.
+    sourceFolders: {
+      preview: (_workspaceId: string, folderPath: string) => previewFolder(folderPath, folderDeps),
+      add: async (workspaceId: string, folderPath: string) => {
+        const added = await addFolder(analysisStore, workspaceId, folderPath, folderDeps);
+        // Read in the background: a folder can take minutes; the page shows its progress from the folder list.
+        if (added.state === "added") void folderPass(workspaceId, new Date().toISOString()).catch(() => undefined);
+        return added;
+      },
+      remove: async (workspaceId: string, id: string) => ({ removed: removeFolder(analysisStore, workspaceId, id) }),
+      setLines: async (workspaceId: string, id: string, lines: string[]) => ({ saved: setFolderLines(analysisStore, workspaceId, id, lines) })
     },
     extractBackgroundFacts: (_client, captureTitle, captureContext, signal, workspaceId) =>
       createBackgroundFactsExtractor(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))(captureTitle, captureContext, signal),
@@ -964,17 +1043,25 @@ if (!capabilitySecret) {
     },
     explainPlan: (today, workspaceId, ranking) => getPlanExplainer(workspaceId)(today, readRanking(ranking)),
     runWeeklyInsight: (workspaceId) => getWeeklyInsight(workspaceId)(),
-    // Undefined when no client id is configured or nobody has signed in, in which case the route is
-    // simply not mounted and the button says the connector is unavailable rather than lying.
+    // 立即同步日历 records its outcome like a tick does, so a read that works clears 「日历无法读取」 at once. A workspace that reads no
+    // calendar at all is told so, and nothing is recorded (it is not a failure).
+    syncCalendar: async (workspaceId: string) => {
+      const outcome = await syncCalendarFor(workspaceId);
+      if (!outcome) return { state: "blocked", code: "CALENDAR_NOT_CONNECTED", message: "还没有接入任何日历。" };
+      recordCalendarOutcome(analysisStore, workspaceId, outcome, new Date().toISOString());
+      // New events are filed under their lines in the background; the answer does not wait for the model.
+      void calendarLinePass(workspaceId, new Date().toISOString()).catch(() => undefined);
+      return outcome;
+    },
+    // Subscription links: read once before they are kept, the link itself only in the secret store.
+    calendarSubscriptions: {
+      add: (workspaceId: string, input: { link: string; label: string }) =>
+        addSubscription(analysisStore, workspaceId, subscriptionDeps, { ...input, timeZone: calendarZone(workspaceId) ?? "UTC" }),
+      remove: async (workspaceId: string, id: string) => ({ removed: removeSubscription(analysisStore, workspaceId, secrets, id) })
+    },
+    // Undefined when no client id is configured or nobody has signed in, in which case the routes are
+    // simply not mounted and the card says the connector is unavailable rather than lying.
     ...(calendar ? {
-      // 立即同步日历 records its outcome like a tick does, so a read that works clears 「日历无法读取」 at once.
-      syncCalendar: async (workspaceId: string) => {
-        const outcome = await calendar.sync(workspaceId);
-        recordCalendarOutcome(analysisStore, workspaceId, outcome, new Date().toISOString());
-        // New events are filed under their lines in the background; the answer does not wait for the model.
-        void calendarLinePass(workspaceId, new Date().toISOString()).catch(() => undefined);
-        return outcome;
-      },
       listCalendarSources: (workspaceId: string) => calendar.listSources(workspaceId),
       saveCalendarSources: (workspaceId: string, keys: string[]) => calendar.saveSources(workspaceId, keys)
     } : {})
@@ -1052,6 +1139,20 @@ if (process.env.CROSSLINE_RUN_ONCE === "1") {
     });
     if (stale) historyPass();
   }, 5 * 60_000);
+  // An installed copy's usage metadata (docs/local-installer.md, 回传): a no-op unless the launcher set the collector up.
+  let reporting = false;
+  const report = () => {
+    if (reporting) return;
+    reporting = true;
+    void telemetryPass({ store: analysisStore, workspaceId: runtimeOwner(analysisStore), dataDir,
+      accountEmail: async () => {
+        const account = (await codexSupervisor?.client.request("account/read", { refreshToken: false }) as { account?: { type?: string; email?: string } | null } | undefined)?.account;
+        return account?.type === "chatgpt" && typeof account.email === "string" ? account.email : undefined;
+      } })
+      .then((outcome) => { if (!("skipped" in outcome)) console.info(JSON.stringify({ type: "telemetry.pass", ...outcome })); })
+      .catch(() => undefined).finally(() => { reporting = false; });
+  };
+  if (process.env.CROSSLINE_TELEMETRY_URL) { setTimeout(report, 60_000).unref(); setInterval(report, 15 * 60_000); }
   let ticking = false;
   setInterval(() => {
     if (ticking) {

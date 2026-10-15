@@ -118,10 +118,12 @@ export type GraphAccount = { id: string; username: string };
 /** One calendar inside one account. `accountId` is what ties it back to a credential. */
 export type GraphCalendar = { accountId: string; id: string; name: string; isDefault: boolean };
 
-export function graphCacheConfiguration(localAppData = process.env.LOCALAPPDATA) {
-  if (!localAppData) throw new Error("LOCALAPPDATA_UNAVAILABLE");
+export function graphCacheConfiguration(localAppData = process.env.LOCALAPPDATA, stateDir = process.env.CROSSLINE_STATE_DIR?.trim()) {
+  // An installed copy's own state folder (CROSSLINE_STATE_DIR, docs/local-installer.md), never a resident app's sign-ins.
+  const base = stateDir || (localAppData ? path.win32.join(localAppData, "Crossline") : undefined);
+  if (!base) throw new Error("LOCALAPPDATA_UNAVAILABLE");
   return {
-    cachePath: path.win32.join(localAppData, "Crossline", "auth", "msal-cache.lock"),
+    cachePath: path.win32.join(base, "auth", "msal-cache.lock"),
     dataProtectionScope: DataProtectionScope.CurrentUser,
     serviceName: "Crossline.Graph",
     accountName: "personal-workspace",
@@ -655,3 +657,4 @@ export * from "./crossline-calendar";
 export * from "./web-push";
 export * from "./calendar-edits";
 export * from "./secret-file";
+export * from "./ical";

@@ -1,8 +1,12 @@
-import { AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, CATEGORY_LABEL, RUNTIME_OWNER_SETTING, SLEEP_TRACKING_CONSENT, type ActivityCategory, type AgentHistorySummary } from "@crossline/core";
+import { AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, CATEGORY_LABEL, RUNTIME_OWNER_SETTING, SLEEP_TRACKING_CONSENT, TELEMETRY_ENABLED_SETTING, type ActivityCategory, type AgentHistorySummary } from "@crossline/core";
 import { categoryMode, isAutoHandoff, readCategories } from "@crossline/db";
 import { SubpageShell } from "../subpage-shell";
 import { LocalActivityToggle } from "./local-activity-toggle";
 import { AgentHistoryCard } from "./agent-history-card";
+import { TelemetryCard } from "./telemetry-card";
+import { AutostartCard } from "./autostart-card";
+import { autostartAvailable, readAutostart } from "../../lib/autostart";
+import { isLocalInstall } from "../../lib/install-mode";
 import { EnergyCard, type EnergyStatus } from "./energy-card";
 import { HEALTH_TOKEN_SETTING, energyModel } from "../../lib/energy";
 import { UsageCard } from "./usage-card";
@@ -85,6 +89,8 @@ export default async function SettingsPage() {
     camera: store.getSetting(ctx.workspaceId, "energy.camera") === "granted",
     signals: energy.covariates.map(({ id, label, evaluated, hitsWith, hitsWithout, enabled }) => ({ id, label, evaluated, hitsWith, hitsWithout, enabled })) };
 
+  const autostart = autostartAvailable() ? await readAutostart() : undefined;
+
   return <SubpageShell active="设置" title="设置">
     <div className="st-layout">
       <SettingsNav sections={SECTIONS.map(([id, label]) => ({ id, label }))} />
@@ -105,6 +111,7 @@ export default async function SettingsPage() {
                 <PhonePush />
               </> : <p className="muted">手机访问未开启。</p>}
             </section>
+            {autostart !== undefined && <AutostartCard on={autostart} />}
           </div>
         </section>
 
@@ -154,6 +161,7 @@ export default async function SettingsPage() {
               .map(([category, minutes]) => ({ label: CATEGORY_LABEL[category as ActivityCategory] ?? "其他", minutes }))} />
           <EnergyCard status={energyStatus} phoneUrl={phoneUrl ?? null} />
           <AgentHistoryCard on={setting(AGENT_HISTORY_CONSENT) === "on"} summary={(() => { try { return JSON.parse(setting(AGENT_HISTORY_SUMMARY) ?? "null") as AgentHistorySummary | null; } catch { return null; } })()} />
+          {isLocalInstall() && <TelemetryCard on={setting(TELEMETRY_ENABLED_SETTING) !== "0"} />}
         </section>
 
         <section id="usage" className="st-section" aria-labelledby="st-usage"><h2 id="st-usage">用量与体检</h2>
