@@ -1,17 +1,19 @@
 import { Resvg } from "@resvg/resvg-js";
 import { TYPE_GROUPS, TYPE_TABLE } from "@crossline/core/assess";
+import type { TemplateVariant } from "./templates";
 
 /**
- * Placeholder templates, until the owner picks real ones (templates/README.md): a flat comic bust in the type group's colour on the
- * group's tint, its four letters drawn as small cues (S neat hair / G tufts, E glasses / I a spark, M a pen / R a speech bubble,
- * P a tie / A hoodie strings), with the code, the name and 「占位图」 printed so nobody mistakes it for the finished art.
+ * Placeholder templates, until the owner picks real ones (templates/README.md): a flat full-length figure, 2:3 like the real templates,
+ * in the type group's colour on the group's tint — one woman (long hair) and one man per type — its four letters drawn as small cues
+ * (S neat hair / G tufts, E glasses / I a spark, M a pen / R a speech bubble, P a tie / A hoodie strings), with the code, the name and
+ * 「占位图」 printed so nobody mistakes it for the finished art.
  */
 
 const INK = "#24211D";
 const PAPER = "#F3EFE6";
 const SKIN = "#E8CDB5";
 
-export function placeholderSvg(code: string): string {
+export function placeholderSvg(code: string, variant: TemplateVariant = "female"): string {
   const type = TYPE_TABLE[code];
   const group = TYPE_GROUPS[code.slice(0, 2)];
   if (!type || !group) throw new Error(`AVATAR_TYPE_UNKNOWN: ${code}`);
@@ -29,9 +31,19 @@ export function placeholderSvg(code: string): string {
   const collar = rhythm === "P"
     ? `<path d="M452 716 L512 770 L572 716" fill="none" ${line}/><path d="M512 770 L490 806 L512 900 L534 806 Z" fill="${group.tint}" ${line}/>`
     : `<path d="M440 712 C470 760 554 760 584 712" fill="none" ${line}/><path d="M470 752 L466 846" ${line}/><path d="M554 752 L558 846" ${line}/>`;
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <rect width="1024" height="1024" fill="${group.tint}"/>
-  <path d="M212 1024 C212 820 330 704 512 704 C694 704 812 820 812 1024 Z" fill="${group.colour}" ${line}/>
+  const longHair = variant === "female"
+    ? `<path d="M356 470 C330 640 352 770 420 820 L604 820 C672 770 694 640 668 470 Z" fill="${INK}"/>` : "";
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1536" viewBox="0 0 1024 1536">
+  <rect width="1024" height="1536" fill="${group.tint}"/>
+  <rect x="412" y="40" width="200" height="64" rx="32" fill="${INK}"/>
+  <text x="512" y="83" text-anchor="middle" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif" font-size="30" font-weight="700" fill="${PAPER}">占位图</text>
+  <g transform="translate(0,90)">
+  ${longHair}
+  <rect x="330" y="1180" width="150" height="190" fill="${INK}" ${line}/>
+  <rect x="544" y="1180" width="150" height="190" fill="${INK}" ${line}/>
+  <rect x="300" y="1350" width="190" height="50" rx="22" fill="${PAPER}" ${line}/>
+  <rect x="534" y="1350" width="190" height="50" rx="22" fill="${PAPER}" ${line}/>
+  <path d="M212 1190 L212 1024 C212 820 330 704 512 704 C694 704 812 820 812 1024 L812 1190 Z" fill="${group.colour}" ${line}/>
   <rect x="470" y="600" width="84" height="120" fill="${SKIN}" ${line}/>
   ${collar}
   ${cue}
@@ -39,16 +51,15 @@ export function placeholderSvg(code: string): string {
   ${hair}
   ${eyes}
   <path d="M482 552 C500 568 524 568 542 552" fill="none" ${line}/>
-  <rect x="412" y="120" width="200" height="64" rx="32" fill="${INK}"/>
-  <text x="512" y="163" text-anchor="middle" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif" font-size="30" font-weight="700" fill="${PAPER}">占位图</text>
-  <rect x="312" y="900" width="400" height="92" rx="46" fill="${PAPER}" ${line}/>
-  <text x="512" y="962" text-anchor="middle" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif" font-size="44" font-weight="700" fill="${INK}">${code} ${type.name}</text>
+  <rect x="312" y="980" width="400" height="92" rx="46" fill="${PAPER}" ${line}/>
+  <text x="512" y="1042" text-anchor="middle" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif" font-size="44" font-weight="700" fill="${INK}">${code} ${type.name}</text>
+  </g>
 </svg>`;
 }
 
-/** The placeholder as a 1024×1024 PNG. */
-export function renderPlaceholder(code: string): Buffer {
-  return renderSvg(placeholderSvg(code), 1024);
+/** The placeholder as a 1024×1536 PNG. */
+export function renderPlaceholder(code: string, variant: TemplateVariant = "female"): Buffer {
+  return renderSvg(placeholderSvg(code, variant), 1024);
 }
 
 /** Any SVG as a PNG of the given width, with the system's fonts (also used by scripts/assess-templates.ts, outside this package). */

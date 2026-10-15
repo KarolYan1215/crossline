@@ -92,7 +92,7 @@ h3.as-type-name{font-size:20px}
 .as-inviter{display:grid;grid-template-columns:auto minmax(0,1fr);gap:12px;align-items:center}
 .as-inviter .as-type-name{font-size:22px}
 .as-inviter .as-subtitle{font-size:14px}
-.as-figure{display:block;width:96px;height:96px;object-fit:cover;background:var(--group-tint);border:2px solid var(--ink)}
+.as-figure{display:block;width:96px;height:144px;object-fit:contain;border-radius:10px;background:var(--group-tint);border:2px solid var(--ink)}
 .as-pair-head{display:grid;gap:4px}
 .as-pair-head h1{font-size:30px}
 .as-tips{margin:0;padding-left:22px;display:grid;gap:6px}
@@ -115,7 +115,7 @@ h3.as-type-name{font-size:20px}
 }
 @media (min-width:720px){
   .as-main{padding-top:40px}
-  .as-figure{width:140px;height:140px}
+  .as-figure{width:140px;height:210px}
 }
 @media (prefers-reduced-motion:reduce){.as-progress i{transition:none}}
 input::placeholder{color:var(--muted);opacity:1}

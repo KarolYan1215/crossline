@@ -3,7 +3,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 /**
- * Where the sixteen type templates live (`apps/assess/templates/<CODE>.png`), found without trusting the working directory:
+ * Where the type templates live (`apps/assess/templates/<CODE>-female.png` and `<CODE>-male.png`: a woman and a man per type, full
+ * length, 2:3), found without trusting the working directory:
  *
  * 1. `ASSESS_TEMPLATES_DIR`, when set (a deployment may keep them anywhere);
  * 2. beside this module's source (`../../templates`) — dev, vitest, tsx scripts;
@@ -12,8 +13,22 @@ import { fileURLToPath } from "node:url";
  *    names the build machine's source path, which is why step 2 alone is not enough;
  * 4. `<cwd>/apps/assess/templates` — a script run from the repository root.
  *
- * The first directory that holds `GEMA.png` wins and is remembered.
+ * The first directory that holds `GEMA-female.png` wins and is remembered.
  */
+
+export type TemplateVariant = "female" | "male";
+export const TEMPLATE_VARIANTS: TemplateVariant[] = ["female", "male"];
+
+/**
+ * Which template a person's figure starts from: the one matching how they present; someone who chose 「中性」 gets one of the two by a
+ * stable hash of their result id (the editing model then draws them androgynous), so the same result always shows the same figure.
+ */
+export function templateVariant(presentation: "female" | "male" | "neutral", id: string): TemplateVariant {
+  if (presentation !== "neutral") return presentation;
+  let hash = 0;
+  for (const char of id) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  return hash % 2 ? "male" : "female";
+}
 
 let resolved: string | undefined;
 
@@ -29,7 +44,7 @@ function candidates(): string[] {
 export function templatesDir(): string {
   if (resolved) return resolved;
   const all = candidates();
-  const found = all.find((dir) => fs.existsSync(path.join(dir, "GEMA.png")));
+  const found = all.find((dir) => fs.existsSync(path.join(dir, "GEMA-female.png")));
   if (found) resolved = found;
   return found ?? all[0]!;
 }

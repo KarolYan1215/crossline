@@ -8,6 +8,7 @@ import { FakeImageProvider, TINY_PNG } from "./fake-provider";
 import { avatarImagePath, avatarQueueIdle, avatarStatus, configureAvatarPipeline, enqueueAvatar, templateImagePath } from "./index";
 import { ProviderError, downloadImage, providerFromEnv } from "./provider";
 import { storedResult } from "./testing";
+import { templateVariant } from "./templates";
 
 vi.mock("../store", () => ({ setAvatarState: vi.fn(), avatarsDrawnFor: vi.fn(() => 0) }));
 
@@ -127,11 +128,25 @@ describe("what the pages and posters are given", () => {
     expect(avatarImagePath(missing)).toBe(templateImagePath("GEMA"));
   });
 
-  test("every type has a template PNG on disk", () => {
+  test("every type has a woman's and a man's template PNG on disk, full length 2:3", () => {
     for (const code of ["SEMP", "SEMA", "SERP", "SERA", "SIMP", "SIMA", "SIRP", "SIRA", "GEMP", "GEMA", "GERP", "GERA", "GIMP", "GIMA", "GIRP", "GIRA"]) {
-      expect(fs.readFileSync(templateImagePath(code)).subarray(1, 4).toString()).toBe("PNG");
+      for (const variant of ["female", "male"] as const) {
+        const png = fs.readFileSync(templateImagePath(code, variant));
+        expect(png.subarray(1, 4).toString()).toBe("PNG");
+        expect(png.readUInt32BE(20) / png.readUInt32BE(16)).toBeCloseTo(1.5, 2);
+      }
     }
     expect(() => templateImagePath("../x")).toThrow(/AVATAR_TYPE_UNKNOWN/);
+  });
+
+  test("the template follows how the person presents; 中性 gets one of the two, the same one every time", () => {
+    pipeline(null);
+    const man = storedResult({ appearance: { ...storedResult().appearance, presentation: "male" } });
+    expect(avatarImagePath(man)).toBe(templateImagePath("GEMA", "male"));
+    expect(avatarImagePath(storedResult())).toBe(templateImagePath("GEMA", "female"));
+    expect(templateVariant("neutral", "res_a")).toBe(templateVariant("neutral", "res_a"));
+    const picks = new Set(Array.from({ length: 20 }, (_, index) => templateVariant("neutral", `res_${index}`)));
+    expect([...picks].sort()).toEqual(["female", "male"]);
   });
 });
 

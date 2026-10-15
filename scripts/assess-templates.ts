@@ -1,20 +1,20 @@
 /**
- * The sixteen type templates of the public quick test (docs/beta-launch.md §4, apps/assess/templates/README.md).
+ * The type templates of the public quick test, a woman and a man per type, full length, 2:3 (docs/beta-launch.md §4,
+ * apps/assess/templates/README.md).
  *
- *   pnpm exec tsx scripts/assess-templates.ts placeholders           redraw the 16 placeholder PNGs (no model, no key)
- *   pnpm exec tsx scripts/assess-templates.ts candidates [CODE ...]  draft 3 candidates per type with the image model (needs
- *                                                                    ASSESS_IMAGE_API_KEY; 48 paid images for all 16; existing files
- *                                                                    are kept unless --force)
- *   pnpm exec tsx scripts/assess-templates.ts pick GEMA=2 SEMP=1 ... copy the owner's chosen candidates over the templates
- *   pnpm exec tsx scripts/assess-templates.ts prompt CODE            print the prompt a type's candidates are drawn from
- *
- * The candidates share one style prompt in our own editorial comic style (`stylePrompt`), never 16Personalities' figures.
+ *   pnpm exec tsx scripts/assess-templates.ts placeholders                 redraw the 32 placeholder PNGs (no model, no key)
+ *   pnpm exec tsx scripts/assess-templates.ts candidates [CODE ...] [--via=codex [--port=N]] [--variant=female|male] [--force]
+ *                                                                          draft 3 candidates per type and variant (96 for all)
+ *   pnpm exec tsx scripts/assess-templates.ts sheet                        one overview of every candidate to choose from
+ *   pnpm exec tsx scripts/assess-templates.ts pick GEMA-f=2 GEMA-m=1 ...   make the chosen candidates the templates
+ *   pnpm exec tsx scripts/assess-templates.ts prompt CODE [female|male]    print the prompt a candidate is drawn from
  */
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { TYPE_GROUPS, TYPE_TABLE } from "../packages/core/src/portrait-type";
 import { placeholderSvg, renderPlaceholder, renderSvg } from "../apps/assess/server/avatar/placeholder";
+import { TEMPLATE_VARIANTS, type TemplateVariant } from "../apps/assess/server/avatar/templates";
 import { providerFromEnv, imageType } from "../apps/assess/server/avatar/provider";
 
 const TEMPLATES = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "apps", "assess", "templates");
@@ -124,36 +124,40 @@ const VARIANTS = [
 ];
 
 /**
- * The templates' own style, written out rather than derived from the portrait's CHARACTER_STANDARD: the public poster shows the figure
- * cropped to a disc of about 340 px, so a waist-up figure on a flat full-bleed backdrop reads there, where a full-body figure on its
- * own inner circle came out small and as a ring inside the disc.
+ * The templates' style (the owner's direction, 2026-10-14): the look of the popular MBTI personality-test avatars — full length, smooth
+ * low-poly facets with soft flat shading, slender stylised bodies, small heads with minimal faces — so the figure reads at a glance as
+ * "my type's character". Only the style is borrowed: every outfit, prop and gag is our own (`LOOKS`), never one of their characters.
+ * Hair stays simple, skin medium, no glasses, so a person's own appearance can be edited in later; a woman and a man per type.
  */
-function stylePrompt(tint: string): string {
+function stylePrompt(tint: string, variant: TemplateVariant): string {
   return [
-    "Waist-up stylized cartoon character in an original editorial comic style: flat colour shapes with clean dark ink outlines of even weight, one soft cel-shade tone per colour, a clean readable silhouette; not low-poly, not faceted, and not resembling any existing personality-test characters.",
-    "Three-quarter view, centered, the head in the upper half and the hands with the prop in the lower half; everything important inside the central circle of the frame, because the image is shown cropped to a circle.",
-    "Simplified face: small dot eyes with simple brows, a small expressive mouth, no nose detail; gender-neutral, not a likeness of any real person.",
-    "Exactly one main outfit colour and one accent colour; props drawn simply and clearly readable at small size.",
-    `Backdrop: one flat plain fill of ${tint} from edge to edge; no circle, no frame, no shadow, no scenery.`,
-    "Absolutely no text, letters, numbers, logos or brand marks anywhere. Square 1:1 frame."
+    "Full-body stylized 3D-look cartoon character in the style of popular MBTI personality-test avatars: smooth low-poly faceted shapes with soft flat shading on each facet, a clean geometric silhouette, slender stylised proportions about six heads tall.",
+    "Small head with a minimal face: small dark dot eyes, simple brows, a tiny mouth, almost no nose; not a likeness of any real person.",
+    variant === "female"
+      ? "The character is a young woman: simple neat dark brown hair to the shoulders, medium skin tone, no glasses."
+      : "The character is a young man: simple neat short dark brown hair, medium skin tone, no glasses.",
+    "Keep hair, skin and face plain and easy to change later; the personality shows in the outfit, prop, pose and expression.",
+    "The whole figure from head to shoes is visible, standing on a soft oval ground shadow, centered, filling about 85% of the frame height with a little margin above the head and below the feet.",
+    "Exactly one main outfit colour and one accent colour; props drawn simply and clearly readable at small size. An original outfit design, not a copy of any existing character.",
+    `Backdrop: one flat plain fill of ${tint} from edge to edge; no frame, no scenery.`,
+    "Absolutely no text, letters, numbers, logos or brand marks anywhere. Tall portrait frame, 2:3."
   ].join(" ");
 }
 
-export function templatePrompt(code: string, variant = 0): string {
+export function templatePrompt(code: string, variant: TemplateVariant = "female", take = 0): string {
   const type = TYPE_TABLE[code];
   const group = TYPE_GROUPS[code.slice(0, 2)];
   const look = LOOKS[code];
   if (!type || !group || !look) throw new Error(`unknown type ${code}`);
   return [
-    stylePrompt(group.tint),
+    stylePrompt(group.tint, variant),
     `The character's core: ${look.trait}.`,
-    "Plain simple short hair and no glasses, so a later edit can change presentation, hair, glasses and skin tone; the personality shows in the outfit, prop, pose and expression.",
     `Outfit: ${look.outfit}; main colour ${group.colour}, accent off-white.`,
     `Holding: ${look.prop}.`,
     `One small self-mocking visual gag: ${look.gag}.`,
     `Pose: ${look.pose}. Expression: ${look.expression}.`,
     "Any paper, card, screen or chart in the picture is blank or has only abstract lines, never writing.",
-    VARIANTS[variant] ?? VARIANTS[0]!
+    VARIANTS[take] ?? VARIANTS[0]!
   ].join(" ");
 }
 
@@ -166,11 +170,15 @@ function placeholders(): void {
   const manifest = readManifest();
   fs.mkdirSync(TEMPLATES, { recursive: true });
   for (const code of CODES) {
-    fs.writeFileSync(path.join(TEMPLATES, `${code}.png`), renderPlaceholder(code));
-    manifest[code] = { source: "placeholder", at: new Date().toISOString() };
+    for (const variant of TEMPLATE_VARIANTS) {
+      fs.writeFileSync(path.join(TEMPLATES, `${code}-${variant}.png`), renderPlaceholder(code, variant));
+      manifest[`${code}-${variant}`] = { source: "placeholder", at: new Date().toISOString() };
+    }
+    delete manifest[code];
+    fs.rmSync(path.join(TEMPLATES, `${code}.png`), { force: true });
   }
   writeManifest(manifest);
-  console.log(`wrote ${CODES.length} placeholders to ${TEMPLATES}`);
+  console.log(`wrote ${CODES.length * TEMPLATE_VARIANTS.length} placeholders to ${TEMPLATES}`);
 }
 
 type Drawer = { draw(prompt: string, seed: number): Promise<Buffer>; stop(): Promise<void> };
@@ -216,19 +224,21 @@ async function candidates(args: string[]): Promise<void> {
     drawer = { draw: (prompt, seed) => provider.generate({ prompt, seed }), stop: async () => {} };
   }
   const force = args.includes("--force");
+  const only = flag("variant");
+  const variants = TEMPLATE_VARIANTS.filter((variant) => !only || variant === only);
   const codes = args.filter((arg) => !arg.startsWith("--"));
   const chosen = codes.length ? codes : CODES;
   for (const code of chosen) if (!TYPE_TABLE[code]) throw new Error(`unknown type ${code}`);
   fs.mkdirSync(CANDIDATES, { recursive: true });
   let failed = 0;
   try {
-    for (const code of chosen) {
+    for (const code of chosen) for (const variant of variants) {
       for (let n = 1; n <= PER_TYPE; n += 1) {
-        const file = path.join(CANDIDATES, `${code}-${n}.png`);
+        const file = path.join(CANDIDATES, `${code}-${variant}-${n}.png`);
         if (fs.existsSync(file) && !force) { console.log(`keep ${path.basename(file)}`); continue; }
         const started = Date.now();
         try {
-          const image = await drawer.draw(templatePrompt(code, n - 1), 1000 * CODES.indexOf(code) + n);
+          const image = await drawer.draw(templatePrompt(code, variant, n - 1), 1000 * CODES.indexOf(code) + 100 * TEMPLATE_VARIANTS.indexOf(variant) + n);
           if (imageType(image) !== "image/png") console.warn(`${path.basename(file)}: the model returned ${imageType(image)}, saved as is`);
           fs.writeFileSync(file, image);
           console.log(`wrote ${path.basename(file)} in ${Math.round((Date.now() - started) / 1000)} s`);
@@ -247,47 +257,50 @@ async function candidates(args: string[]): Promise<void> {
 function pick(args: string[]): void {
   const manifest = readManifest();
   for (const arg of args) {
-    const match = /^([SG][EI][MR][PA])=(\d+)$/.exec(arg);
-    if (!match || !TYPE_TABLE[match[1]!]) throw new Error(`expected CODE=n, got ${arg}`);
-    const [, code, n] = match as unknown as [string, string, string];
-    const source = path.join(CANDIDATES, `${code}-${n}.png`);
+    const match = /^([SG][EI][MR][PA])-(female|male|f|m)=(\d+)$/.exec(arg);
+    if (!match || !TYPE_TABLE[match[1]!]) throw new Error(`expected CODE-female=n or CODE-male=n (or CODE-f=n / CODE-m=n), got ${arg}`);
+    const code = match[1]!, variant: TemplateVariant = match[2]!.startsWith("f") ? "female" : "male", n = match[3]!;
+    const source = path.join(CANDIDATES, `${code}-${variant}-${n}.png`);
     if (!fs.existsSync(source)) throw new Error(`no candidate ${path.basename(source)}`);
     const bytes = fs.readFileSync(source);
     if (imageType(bytes) !== "image/png") throw new Error(`${path.basename(source)} is not a PNG`);
-    fs.writeFileSync(path.join(TEMPLATES, `${code}.png`), flatten(bytes, TYPE_GROUPS[code.slice(0, 2)]!.tint));
-    manifest[code] = { source: `candidate-${n}`, at: new Date().toISOString() };
-    console.log(`${code}.png ← ${path.basename(source)}`);
+    fs.writeFileSync(path.join(TEMPLATES, `${code}-${variant}.png`), flatten(bytes, TYPE_GROUPS[code.slice(0, 2)]!.tint));
+    manifest[`${code}-${variant}`] = { source: `candidate-${n}`, at: new Date().toISOString() };
+    console.log(`${code}-${variant}.png ← ${path.basename(source)}`);
   }
   writeManifest(manifest);
 }
 
 /**
- * A candidate as the template the pipeline expects: 1024×1024 on the group's tint. ChatGPT's image tool answers with a transparent
+ * A candidate as the template the pipeline expects: 1024×1536 on the group's tint. ChatGPT's image tool answers with a transparent
  * background and its own size, whatever the prompt asks; a transparent reference would come back from the editing model on black.
  */
 function flatten(png: Buffer, tint: string): Buffer {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024"><rect width="1024" height="1024" fill="${tint}"/>`
-    + `<image href="data:image/png;base64,${png.toString("base64")}" width="1024" height="1024" preserveAspectRatio="xMidYMid meet"/></svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1536"><rect width="1024" height="1536" fill="${tint}"/>`
+    + `<image href="data:image/png;base64,${png.toString("base64")}" width="1024" height="1536" preserveAspectRatio="xMidYMid meet"/></svg>`;
   return renderSvg(svg, 1024);
 }
 
-/** Every candidate on one sheet (`candidates/sheet.png`): a row per type, as the poster's disc shows it, for the owner to choose from. */
+/**
+ * Every candidate on one sheet (`candidates/sheet.png`): a row per type, the woman's three then the man's three, each in the poster's
+ * 2:3 panel, for the owner to choose from.
+ */
 function sheet(): void {
-  const cell = 300, label = 240, gap = 20, rows = CODES.filter((code) => fs.existsSync(path.join(CANDIDATES, `${code}-1.png`)));
-  const width = label + PER_TYPE * (cell + gap), height = rows.length * (cell + gap) + gap;
+  const cellW = 200, cellH = 300, label = 200, gap = 16, split = 28;
+  const rows = CODES.filter((code) => TEMPLATE_VARIANTS.some((variant) => fs.existsSync(path.join(CANDIDATES, `${code}-${variant}-1.png`))));
+  const width = label + 2 * PER_TYPE * (cellW + gap) + split, height = rows.length * (cellH + gap + 30) + gap;
   const parts = rows.map((code, row) => {
-    const y = gap + row * (cell + gap), group = TYPE_GROUPS[code.slice(0, 2)]!;
-    const discs = Array.from({ length: PER_TYPE }, (_, i) => {
-      const file = path.join(CANDIDATES, `${code}-${i + 1}.png`);
-      if (!fs.existsSync(file)) return "";
-      const x = label + i * (cell + gap), id = `c${row}-${i}`;
-      return `<clipPath id="${id}"><circle cx="${x + cell / 2}" cy="${y + cell / 2}" r="${cell / 2}"/></clipPath>`
-        + `<circle cx="${x + cell / 2}" cy="${y + cell / 2}" r="${cell / 2}" fill="${group.tint}"/>`
-        + `<image clip-path="url(#${id})" x="${x}" y="${y}" width="${cell}" height="${cell}" href="data:image/png;base64,${fs.readFileSync(file).toString("base64")}"/>`
-        + `<text x="${x + cell - 8}" y="${y + cell - 8}" font-size="28" font-weight="700" fill="#1E1B16" text-anchor="end" font-family="Arial">${i + 1}</text>`;
-    }).join("");
-    return `<text x="16" y="${y + cell / 2 - 10}" font-size="40" font-weight="700" fill="${group.colour}" font-family="Arial">${code}</text>`
-      + `<text x="16" y="${y + cell / 2 + 40}" font-size="34" fill="#1E1B16" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif">${TYPE_TABLE[code]!.name}</text>${discs}`;
+    const y = gap + row * (cellH + gap + 30), group = TYPE_GROUPS[code.slice(0, 2)]!;
+    const cells = TEMPLATE_VARIANTS.flatMap((variant, side) => Array.from({ length: PER_TYPE }, (_, i) => {
+      const file = path.join(CANDIDATES, `${code}-${variant}-${i + 1}.png`);
+      const x = label + side * (PER_TYPE * (cellW + gap) + split) + i * (cellW + gap);
+      const tag = `<text x="${x + cellW / 2}" y="${y + cellH + 26}" font-size="22" fill="#1E1B16" text-anchor="middle" font-family="Arial">${variant === "female" ? "f" : "m"}${i + 1}</text>`;
+      if (!fs.existsSync(file)) return tag;
+      return `<rect x="${x}" y="${y}" width="${cellW}" height="${cellH}" rx="14" fill="${group.tint}"/>`
+        + `<image x="${x}" y="${y}" width="${cellW}" height="${cellH}" preserveAspectRatio="xMidYMid meet" href="data:image/png;base64,${fs.readFileSync(file).toString("base64")}"/>${tag}`;
+    })).join("");
+    return `<text x="16" y="${y + cellH / 2 - 10}" font-size="38" font-weight="700" fill="${group.colour}" font-family="Arial">${code}</text>`
+      + `<text x="16" y="${y + cellH / 2 + 36}" font-size="32" fill="#1E1B16" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif">${TYPE_TABLE[code]!.name}</text>${cells}`;
   }).join("");
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><rect width="${width}" height="${height}" fill="#F6F2EA"/>${parts}</svg>`;
   const out = path.join(CANDIDATES, "sheet.png");
@@ -301,9 +314,9 @@ async function main(): Promise<void> {
   if (mode === "candidates") return candidates(args);
   if (mode === "pick") return pick(args);
   if (mode === "sheet") return sheet();
-  if (mode === "prompt") return void console.log(templatePrompt(args[0] ?? ""));
-  if (mode === "svg") return void console.log(placeholderSvg(args[0] ?? ""));
-  console.error("usage: assess-templates.ts placeholders | candidates [CODE ...] [--force] [--via=codex [--port=N]] | pick CODE=n ... | sheet | prompt CODE");
+  if (mode === "prompt") return void console.log(templatePrompt(args[0] ?? "", args[1] === "male" ? "male" : "female"));
+  if (mode === "svg") return void console.log(placeholderSvg(args[0] ?? "", args[1] === "male" ? "male" : "female"));
+  console.error("usage: assess-templates.ts placeholders | candidates [CODE ...] [--force] [--via=codex [--port=N]] [--variant=female|male] | sheet | pick CODE-f=n CODE-m=n ... | prompt CODE [female|male]");
   process.exitCode = 1;
 }
 

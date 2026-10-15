@@ -8,7 +8,7 @@ import { writeFileAtomic } from "./files";
 import { avatarPrompt, seedFor } from "./prompt";
 import { ProviderError, providerFromEnv, type ImageProvider } from "./provider";
 import { createQueue, type Queue } from "./queue";
-import { templatesDir } from "./templates";
+import { templatesDir, templateVariant, type TemplateVariant } from "./templates";
 
 /**
  * The figure pipeline (workstream W5, docs/beta-launch.md §4): the type's template plus the person's appearance, drawn by an image
@@ -70,7 +70,7 @@ export function enqueueAvatar(result: StoredResult): void {
 async function draw(provider: ImageProvider, result: StoredResult): Promise<void> {
   try {
     setAvatarState(result.id, "drawing");
-    const reference = fs.readFileSync(templateImagePath(result.code));
+    const reference = fs.readFileSync(templateImagePath(result.code, templateVariant(result.appearance.presentation, result.id)));
     const input = { reference, prompt: avatarPrompt(result.appearance), seed: seedFor(result.id) };
     let image: Buffer;
     try {
@@ -134,11 +134,11 @@ export function avatarStatus(result: StoredResult): AvatarStatus {
 
 /** A PNG file on disk for the poster renderer: the drawn figure when ready, else the template. */
 export function avatarImagePath(result: StoredResult): string {
-  return drawnPath(result) ?? templateImagePath(result.code);
+  return drawnPath(result) ?? templateImagePath(result.code, templateVariant(result.appearance.presentation, result.id));
 }
 
-/** The type's template PNG on disk. */
-export function templateImagePath(code: string): string {
+/** The type's template PNG on disk, the woman's or the man's. */
+export function templateImagePath(code: string, variant: TemplateVariant = "female"): string {
   if (!/^[SG][EI][MR][PA]$/.test(code)) throw new Error(`AVATAR_TYPE_UNKNOWN: ${code}`);
-  return path.join(templatesDir(), `${code}.png`);
+  return path.join(templatesDir(), `${code}-${variant}.png`);
 }

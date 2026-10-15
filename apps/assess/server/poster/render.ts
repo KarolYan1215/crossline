@@ -37,15 +37,19 @@ const box = (style: Style, ...children: Child[]) => h("div", { style: { display:
 const text = (value: string, family: Family, style: Style) => h("div", { style: { display: "flex", fontFamily: family, ...style } }, safe(value, family));
 const rule = (margin = 26) => box({ height: 2, backgroundColor: INK, marginTop: margin, marginBottom: margin, width: "100%" });
 
-/** The figure as a data URI (`figure.ts`), or none: the disc then shows the type code. */
+/** The figure as a data URI (`figure.ts`), or none: the panel then shows the type code. */
 export type Figure = { dataUri: string | null };
 
-/** The figure on a disc of the group's tint; with no picture on disk, the type's code in the group's colour instead. */
-function disc(figure: Figure, type: PublicType, size: number): El {
-  return box({ width: size, height: size, borderRadius: size / 2, backgroundColor: type.group.tint, overflow: "hidden", alignItems: "center", justifyContent: "center", flexShrink: 0 },
+/**
+ * The full-length figure in a 2:3 panel of the group's tint (the templates are 2:3, a woman and a man per type); with no picture on disk,
+ * the type's code in the group's colour instead.
+ */
+function panel(figure: Figure, type: PublicType, width: number): El {
+  const height = Math.round(width * 1.5);
+  return box({ width, height, borderRadius: 24, backgroundColor: type.group.tint, overflow: "hidden", alignItems: "center", justifyContent: "center", flexShrink: 0 },
     figure.dataUri
-      ? h("img", { src: figure.dataUri, width: size, height: size, style: { width: size, height: size, objectFit: "cover" } })
-      : text(type.code, "Serif", { fontSize: size * 0.24, fontWeight: 700, color: type.group.colour, letterSpacing: 4 }));
+      ? h("img", { src: figure.dataUri, width, height, style: { width, height, objectFit: "contain" } })
+      : text(type.code, "Serif", { fontSize: width * 0.24, fontWeight: 700, color: type.group.colour, letterSpacing: 4 }));
 }
 
 /** The four letters, each the group's colour; a letter within ten of the middle (both plausible) is drawn faint. */
@@ -58,7 +62,7 @@ function hero(type: PublicType, nickname: string, figure: Figure, compact: boole
   const owner = nickname.trim() ? `${nickname.trim()} 的${LABELS.kicker}` : LABELS.kicker;
   const group = TYPE_GROUPS[type.group.key];
   return box({ width: "100%", alignItems: "center" },
-    disc(figure, type, compact ? 300 : 340),
+    panel(figure, type, compact ? 236 : 280),
     box({ flexDirection: "column", marginLeft: 44, flexGrow: 1, flexShrink: 1, minWidth: 0 },
       text(owner, "Sans", { fontSize: 26, color: GREY, marginBottom: 10 }),
       codeLetters(type, compact ? 58 : 64),
@@ -247,7 +251,7 @@ type Side = { type: PublicType; nickname: string; figure: Figure };
 
 export function pairCardTree(a: Side, b: Side, primary: RelationView, secondary: RelationView | undefined, sharedLines: string[], inviteUrl: string): El {
   const person = (side: Side, fallback: string) => box({ flexDirection: "column", alignItems: "center", width: (INNER - 60) / 2 },
-    disc(side.figure, side.type, 360),
+    panel(side.figure, side.type, 300),
     text(side.nickname.trim() || fallback, "Sans", { fontSize: 32, fontWeight: 700, color: INK, marginTop: 20 }),
     box({ alignItems: "baseline", marginTop: 6 },
       text(side.type.name, "Serif", { fontSize: 46, fontWeight: 700, color: INK }),

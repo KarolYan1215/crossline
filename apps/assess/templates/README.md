@@ -1,10 +1,10 @@
 # 类型模板（16 个基础角色）
 
-`<CODE>.png`（1024×1024）是每种类型的基础角色：海报上的默认形象，也是按外貌生成个人形象时的参考图（docs/beta-launch.md §4）。
+`<CODE>-female.png` 和 `<CODE>-male.png`（1024×1536，全身，2:3）是每种类型的两个基础角色：海报上的默认形象，也是按外貌生成个人形象时的参考图（docs/beta-launch.md §4）。测评里选「女生」用女版、「男生」用男版、「中性」按结果固定分到其中一版。
 
 ## 现在全部是占位图
 
-当前 16 张都是**占位图**：代码画的半身剪影，组别底色，左上角印着「占位图」，底部印着代码和类型名。它们只是为了让形象流程和海报现在就能跑通，**不能上线**。`manifest.json` 记录每张图的来源：`placeholder` 是占位图，`candidate-<n>` 是本人选定的候选图。
+当前 32 张都是**占位图**：代码画的全身剪影（女版长发），组别底色，顶部印着「占位图」，胸前印着代码和类型名。它们只是为了让形象流程和海报现在就能跑通，**不能上线**。`manifest.json` 记录每张图的来源：`placeholder` 是占位图，`candidate-<n>` 是本人选定的候选图。
 
 重画占位图（不调用模型、不花钱）：
 
@@ -40,10 +40,10 @@ pnpm exec tsx scripts/assess-templates.ts placeholders
    都不满意就改 `scripts/assess-templates.ts` 里的 `LOOKS`（核心特征、服装、道具、笑点、姿态、表情，设计依据见 docs/beta-launch.md §4.2）或风格句，再加 `--force` 重画。
 5. 把选中的候选复制成正式模板：
    ```powershell
-   pnpm exec tsx scripts/assess-templates.ts pick GEMA=2 SEMP=1 SERP=3
+   pnpm exec tsx scripts/assess-templates.ts pick GEMA-f=2 GEMA-m=1 SEMP-f=3
    ```
-   会覆盖 `<CODE>.png` 并更新 `manifest.json`。定稿时会铺上组别底色、缩到 1024×1024：ChatGPT 画出来的是透明底，透明的参考图交给改图模型会变成黑底。
-6. 提交 `<CODE>.png` 和 `manifest.json`。`candidates/` 不进仓库（已写进 .gitignore，48 张约 70 MB）。
+   会覆盖 `<CODE>-female.png` / `<CODE>-male.png` 并更新 `manifest.json`。定稿时会铺上组别底色、缩到 1024×1536：ChatGPT 画出来的是透明底，透明的参考图交给改图模型会变成黑底。
+6. 提交 32 个模板和 `manifest.json`。`candidates/` 不进仓库（已写进 .gitignore，96 张约 200 MB）。
 
 ## 部署时怎么带上模板
 

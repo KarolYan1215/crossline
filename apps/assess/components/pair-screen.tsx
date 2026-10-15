@@ -51,7 +51,7 @@ export function PairScreen({ token }: { token: string }) {
       <h2>你们俩</h2>
       <div className="as-people">{people.map((person, index) => <div key={index} className="as-person" style={groupStyle(person.type)}>
         {/* eslint-disable-next-line @next/next/no-img-element -- a figure, a plain image */}
-        <img className="as-figure" src={person.avatar.url} alt={`${names[index]}的形象`} width={120} height={120} />
+        <img className="as-figure" src={person.avatar.url} alt={`${names[index]}的形象`} width={120} height={180} />
         <p className="as-person-name">{names[index]}</p>
         <TypeHeading type={person.type} as="h3" />
       </div>)}</div>

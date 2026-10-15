@@ -5,7 +5,7 @@ import type { Figure } from "./render";
 /**
  * The figure for a poster as a data URI. A drawn figure is saved as `.png` whatever the image model sent back, so the type is read off
  * the file's first bytes: PNG and JPEG go in as they are; anything else (WebP, which satori 0.33 does not decode) gives way to the
- * type's template, and with no readable template the disc shows the type's code.
+ * type's template, and with no readable template the panel shows the type's code.
  */
 export function imageMime(bytes: Buffer): "image/png" | "image/jpeg" | null {
   if (bytes.length >= 8 && bytes.subarray(0, 8).toString("hex") === "89504e470d0a1a0a") return "image/png";
