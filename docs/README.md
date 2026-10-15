@@ -19,6 +19,12 @@
 | [beta-launch.md](beta-launch.md) | 公开测评（32 题 + 漫画形象海报 + 关系与双人卡）和托管内测（香港 / 东京服务器、邀请码、国产模型与 ¥30 上限、本人迁移）的定稿方案与文案草稿（五轮问答，2026-10-14，待审） |
 | [energy-and-ecosystem.md](energy-and-ecosystem.md) | 竞品尽调（Tiimo、Pikko、RISE、Visible、Muse、Manus 等）后的精力模型 v2（睡眠债、睡眠惯性、当日容量）、效率系数学习、手机接入与 Siri 收集、拆分提速、测评传播与分期（已定稿 2026-10-14） |
 | [assess-deploy.md](assess-deploy.md) | 公开速测 `apps/assess`（32 题类型、类型海报、双人卡）：接口与规则、数据与保留期、邮件、Docker 构建、部署到香港/东京 VPS（未部署） |
+| [local-installer.md](local-installer.md) | 本机安装版（给内测者，不 clone 代码、用自己的 ChatGPT 额度）：目录结构、启动器与托盘、Codex 登录、使用记录回传与诊断快照、更新、已知限制与工作包 |
+| [onboarding-v3.md](onboarding-v3.md) | 登录页与访谈页 v3：安装版走查的审查发现，三栏访谈、引导开场、语气选择、混合节奏、iCal 订阅与授权文件夹，各阶段进展（2026-10-14） |
+| [calendar-write-setup.md](calendar-write-setup.md) | Crossline 日历的写入授权（只写名为 Crossline 的日历），以及分享到 Google 日历 |
+| [setup-google-oauth.md](setup-google-oauth.md) | 开启「用 Google 账号登录」的一次性配置 |
+| [setup-siwc.md](setup-siwc.md) | Sign in with ChatGPT：能做什么、怎样打开、订阅额度共享还差什么 |
+| [competitors.md](competitors.md) | 竞品与证据（2026-10-06）：各产品的机制、借鉴点与可信度，以及设计所依据的研究 |
 | [model-providers.md](model-providers.md) | 接入本人自己的 Codex 与其他 API 模型：现有耦合清单、接口设计、分阶段与风险（设计稿，待审） |
 | [assistant-agent.md](assistant-agent.md) | 带 shell 的助手：设计、守卫、信任与审阅流程 |
 | [structured-output.md](structured-output.md) | 模型的结构化输出怎么约束、怎么校验、怎么修正，出问题怎么查，现有的实测数据 |
