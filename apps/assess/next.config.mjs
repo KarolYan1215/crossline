@@ -32,8 +32,15 @@ export default {
   outputFileTracingRoot: path.join(import.meta.dirname, "../.."),
   // Files read from disk at run time (W3's poster fonts, W5's type templates) are not imports, so the tracer cannot see them. The
   // Dockerfile also copies both folders beside the standalone server.
+  // satori's own .wasm files (yoga, and harfbuzz through harfbuzzjs) are read from beside their modules at run time, so they are not
+  // traced either: without them every poster is a 500 in the container, while a standalone run inside the repo quietly falls back to
+  // the root node_modules and works (found building the image, 2026-10-14).
   outputFileTracingIncludes: {
-    "/api/**": ["./templates/**/*.png", "./fonts/**/*"]
+    "/api/**": [
+      "./templates/**/*.png", "./fonts/**/*",
+      "../../node_modules/.pnpm/satori@*/node_modules/satori/*.wasm",
+      "../../node_modules/.pnpm/harfbuzzjs@*/node_modules/harfbuzzjs/*.wasm"
+    ]
   },
   reactStrictMode: true,
   poweredByHeader: false,

@@ -108,7 +108,7 @@ docker build -f apps/assess/Dockerfile -t crossline-assess .
 - 构建后把 `.next/static`、`public`、`templates`、`fonts` 复制到 standalone 目录里服务器旁边（standalone 默认不带静态文件[^next-output]）。
 - 运行阶段：只含 standalone 目录，代码归 root 所有，进程以 `node` 用户运行，只有 `/data` 可写；`ASSESS_DATA_DIR=/data`，`HOSTNAME=0.0.0.0`、`PORT=3340`，带健康检查。
 - 构建上下文的排除表是 `apps/assess/Dockerfile.dockerignore`（BuildKit 会读和 Dockerfile 同名、同目录的忽略文件[^docker-ignore]）：不带 `node_modules`、`.next`、`data`、数据库、`.env*`、`.git`、`vendor` 等。
-- 2026-10-14 在 WSL Ubuntu（Linux x64、Node 22）上按 Dockerfile 的步骤走过一遍：过滤安装、构建、只拷 standalone 目录后启动，提交、读取、删除都正常，`assess.db` 以 WAL 方式创建。本机的 Docker 引擎当时没有运行，镜像本身还没有实际构建过，第一次部署前先在主机上构建一次。
+- 2026-10-14 在本机 Docker（29.4.3）上实际构建并运行了镜像（约 439 MB）：提交、读取、自己的邀请被拒、配对、太快与蜜罐被拒、三张海报和形象图、删除后全部 404，进程以 `node` 用户运行，`/data` 里是 WAL 方式的 `assess.db`。第一次构建时三张海报都是 500：satori 运行时从模块旁读取的 `yoga.wasm` 和 harfbuzzjs 的 `hb.wasm` 没被追踪进 standalone；在仓库里直接跑 standalone 会悄悄回退到根目录的 `node_modules`，所以只有容器能暴露这类问题。`next.config.mjs` 的 `outputFileTracingIncludes` 现在带上这两个文件。**每次改依赖或配置后，部署前先在本机构建镜像跑一遍上面的流程**，不要只跑仓库里的 standalone。
 
 ## 部署到一台 Linux 云主机
 
