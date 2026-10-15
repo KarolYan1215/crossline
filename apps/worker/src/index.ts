@@ -5,7 +5,7 @@ import path from "node:path";
 import { enterUsageWorkspace, setProviderResolver, setSpendModeProvider, setUsageSink, startCodexSupervisor, startModelGateway, type CodexSupervisor } from "@crossline/codex";
 import { createDpapiSecretStore } from "@crossline/connectors";
 import { createModelProviderService } from "./model-provider";
-import { CrosslineStore, aiToolsFor, grownHomeLine, isPaused, listPushSubscriptions, readGrownSkills, readPublicSkills, removePushSubscriptions } from "@crossline/db";
+import { CrosslineStore, aiToolsFor, grownHomeLine, interviewChecklistFor, isPaused, listPushSubscriptions, readGrownSkills, readPublicSkills, removePushSubscriptions } from "@crossline/db";
 import { capturesAwaitingAutoAnalysis, createCaptureAnalyzer } from "./analysis";
 import { autoApproveEligible } from "./auto-approval";
 import { retireShadowedDemos } from "./demo-cleanup";
@@ -17,11 +17,15 @@ import { createNightlyFlywheel } from "./nightly";
 import { createDiligenceRunner, linesDueForDiligence } from "./diligence";
 import { createAgentService } from "./agent-service";
 import { createCalendarPublisher } from "./calendar-publish";
-import { AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, BACKGROUND_PAUSED, backgroundSpend, CALENDAR_SYNC_FAILURE, grownSkillName, publicSkillName, pausedKinds, spendAllows, type BackgroundKind, type PlanRankingInput } from "@crossline/core";
+import { repairFrozenRace } from "./calendar-repair";
+import { createWriteLogin } from "./calendar-write-login";
+import { AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, BACKGROUND_PAUSED, backgroundSpend, CALENDAR_SYNC_FAILURE, FIRST_DRAFTS_SETTING, grownSkillName, publicSkillName, pausedKinds, readyToStart, spendAllows, type BackgroundKind, type PlanRankingInput } from "@crossline/core";
 import { createFlywheelExpander } from "./flywheel";
 import { createManualbookBuilder, pendingMaterialWorkOrders, pendingTutorials } from "./manualbook";
 import { createProgressJudge, createStepPlanner, createWarningReviewer, reportsAwaitingJudgement, requestFinerSplits, settleOldQuestions, tasksAwaitingStepPlan, warningsAwaitingReview } from "./step-planner";
 import { createArchetypeCurator, curationDue } from "./archetype-curator";
+import { energyAdvicePass } from "./energy-advice";
+import { dedupePass } from "./dedupe";
 import { createTaskTitler, untitledTasks } from "./task-titler";
 import { createCalendarClassifier, unfiledCalendarEvents } from "./calendar-classifier";
 import { createInsightCompiler, linesAwaitingMineSkill } from "./insight-compiler";
@@ -29,6 +33,7 @@ import { cleanPublicSkills, createSkillScout, scoutDue } from "./public-skills";
 import { browserProfilesRoot, cleanGrownSkills, finishWorkflowLogin, growCandidates, growTask, installGrown, markWorkflowRun, openWorkflowLogin, sayToPerson, startWorkflowRun,
   workflowSchedulePass } from "./workflow-smith";
 import { createGoalSplitter, linesAwaitingCandidateSplit, linesAwaitingSplit } from "./goal-splitter";
+import { createMilestoneRiskReviewer, milestonesAwaitingRiskReview } from "./milestone-risk-review";
 import { fileSourceDocuments } from "./source-filing";
 import { createPortraitWriter, PORTRAIT_GAP_AT, PORTRAIT_REWRITE_MARKER, portraitRewriteDue } from "./portrait-writer";
 import { createPortraitIllustrator } from "./portrait-illustrator";
@@ -205,10 +210,18 @@ async function extractDocument(documentId: string, workspaceId: string) {
 }
 
 /** Authorized folders (source-folders.ts): read what is new or changed, then have the model propose lines for newly read folders. */
+/**
+ * Whatever reads this computer itself — its folders, its screen, its idle stretches, its coding agents' logs — belongs to the machine
+ * owner's account only. A guest reaches this app over the private network from another device; offering them these readings handed
+ * them the owner's documents, window titles and working hours (found walking the app as an invitee, 2026-10-15).
+ */
+const machineOwner = (workspaceId: string) => runtimeOwner(analysisStore) === workspaceId;
+const OWNER_ONLY_FOLDER = { state: "blocked" as const, code: "FOLDER_OWNER_ONLY",
+  message: "文件夹在运行 Crossline 的那台电脑上，只有那台电脑的主人能授权。请改用「添加文件」上传。" };
 const folderDeps = { dataDir, home: homedir(), extract: (workspaceId: string, documentId: string) => extractDocument(documentId, workspaceId) };
 const readingFolders = new Set<string>();
 async function folderPass(workspaceId: string, checkedAt: string): Promise<void> {
-  if (readingFolders.has(workspaceId) || paused(workspaceId, "intake")) return;
+  if (readingFolders.has(workspaceId) || paused(workspaceId, "intake") || !machineOwner(workspaceId)) return;
   readingFolders.add(workspaceId);
   try {
     const outcomes = await syncFolders(analysisStore, workspaceId, folderDeps).catch(() => []);
@@ -250,6 +263,50 @@ async function goalSplitPass(workspaceId: string, checkedAt = new Date().toISOSt
     const outcome = await createGoalSplitter(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))().catch(() => undefined);
     if (outcome) console.info(JSON.stringify({ type: "lines.goals_split", checkedAt, workspaceId, ...outcome }));
   } finally { splittingGoals.delete(workspaceId); }
+}
+
+/**
+ * Reads new milestone drafts critically for what could keep them from being reached (`crossline-milestone-risk-reviewer`), once per
+ * draft as drafted: after every architect run and on the tick. Part of designing milestones, so it runs while the quota allows core work.
+ */
+const reviewingRisks = new Set<string>();
+async function milestoneRiskPass(workspaceId: string, checkedAt = new Date().toISOString()): Promise<void> {
+  if (paused(workspaceId, "planning") || reviewingRisks.has(workspaceId) || !codexSupervisor) return;
+  if (!milestonesAwaitingRiskReview(analysisStore, workspaceId).length) return;
+  if (!spendAllows(await spendFor(workspaceId), "core")) return;
+  reviewingRisks.add(workspaceId);
+  try {
+    enterUsageWorkspace(workspaceId);
+    const outcome = await createMilestoneRiskReviewer(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))().catch(() => undefined);
+    if (outcome) console.info(JSON.stringify({ type: "milestones.risk_reviewed", checkedAt, workspaceId, ...outcome }));
+  } finally { reviewingRisks.delete(workspaceId); }
+}
+
+/**
+ * The first milestone drafts, made once the start standard holds and the account has no milestone yet. Before this the person reached
+ * Today with 「暂无可执行任务」 and nothing said that the next step was a button inside the interview (2026-10-15 walkthrough). Drafts take
+ * effect only when approved on 主线, so designing them unasked costs a run and decides nothing. Once per account (`milestones.firstDrafts`).
+ */
+const draftingFirst = new Set<string>();
+async function firstDraftsPass(workspaceId: string, checkedAt = new Date().toISOString()): Promise<void> {
+  if (paused(workspaceId, "planning") || draftingFirst.has(workspaceId) || !codexSupervisor) return;
+  if (analysisStore.getSetting(workspaceId, FIRST_DRAFTS_SETTING) || analysisStore.listMilestones(workspaceId).length) return;
+  const lines = identityLines(analysisStore, workspaceId).map((line) => ({ id: line.id, label: line.label, hard: Boolean(line.hard), goals: line.goals ?? [] }));
+  if (!lines.length || !readyToStart(interviewChecklistFor(analysisStore, workspaceId, lines, { unfiledFiles: null }))) return;
+  // Not while the person is still in the interview: the architect runs in the interview's lane, and a round waited behind it for a
+  // quarter of an hour (2026-10-15 walkthrough). Once the interview is complete, or nobody has answered in twenty minutes.
+  const session = analysisStore.getLatestOnboardingSession(workspaceId);
+  const lastSaid = session ? analysisStore.listOnboardingMessages(workspaceId, session.id).at(-1)?.createdAt : undefined;
+  if (session?.state !== "complete" && lastSaid && Date.parse(checkedAt) - Date.parse(lastSaid) < 20 * 60_000) return;
+  if (!spendAllows(await spendFor(workspaceId), "core")) return;
+  draftingFirst.add(workspaceId);
+  analysisStore.setSetting(workspaceId, FIRST_DRAFTS_SETTING, checkedAt);
+  try {
+    enterUsageWorkspace(workspaceId);
+    const outcome = await createMilestoneProposer(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))("", undefined).catch(() => undefined);
+    console.info(JSON.stringify({ type: "milestones.first_drafts", checkedAt, workspaceId, state: outcome?.state ?? "failed" }));
+  } finally { draftingFirst.delete(workspaceId); }
+  void milestoneRiskPass(workspaceId).catch(() => undefined);
 }
 
 /**
@@ -369,8 +426,8 @@ async function portraitPass(workspaceId: string, checkedAt: string): Promise<voi
   if (!due || !spendAllows(await spendFor(workspaceId), "discretionary")) return;
   rewritingPortraits.add(workspaceId);
   try {
-    if (due === "schema") {
-      analysisStore.setSetting(workspaceId, PORTRAIT_REWRITE_MARKER, checkedAt);
+    if (due === "schema" || due === "first") {
+      if (due === "schema") analysisStore.setSetting(workspaceId, PORTRAIT_REWRITE_MARKER, checkedAt);
       const outcome = await writePortraitFor(workspaceId).catch(() => undefined);
       console.info(JSON.stringify({ type: "portrait.rewritten", checkedAt, workspaceId, state: outcome?.state ?? "failed" }));
     } else {
@@ -482,8 +539,12 @@ async function tick(): Promise<void> {
   }
   for (const workspace of workspaces) await stepPlanPass(workspace.id, checkedAt);
   for (const workspace of workspaces) await curatorPass(workspace.id, checkedAt);
+  for (const workspace of workspaces) await energyAdvicePass({ store: analysisStore, workspaceId: workspace.id, cwd: repoRoot, client: () => codexSupervisor?.clientFor(workspace.id), spend: () => spendFor(workspace.id), paused: (kind) => paused(workspace.id, kind), enterUsage: enterUsageWorkspace }).catch(() => undefined);
+  for (const workspace of workspaces) await dedupePass({ store: analysisStore, workspaceId: workspace.id, cwd: repoRoot, client: () => codexSupervisor?.clientFor(workspace.id), spend: () => spendFor(workspace.id), paused: (kind) => paused(workspace.id, kind), enterUsage: enterUsageWorkspace }).catch(() => undefined);
   for (const workspace of workspaces) await titlePass(workspace.id, checkedAt);
   for (const workspace of workspaces) await goalSplitPass(workspace.id, checkedAt);
+  for (const workspace of workspaces) await milestoneRiskPass(workspace.id, checkedAt);
+  for (const workspace of workspaces) void firstDraftsPass(workspace.id, checkedAt).catch(() => undefined);
   for (const workspace of workspaces) await minePass(workspace.id, checkedAt);
   for (const workspace of workspaces) await publicSkillPass(workspace.id, checkedAt);
   for (const workspace of workspaces) await portraitPass(workspace.id, checkedAt);
@@ -582,7 +643,7 @@ setProviderResolver((workspaceId) => modelProviders.routing(workspaceId));
 // Screen activity: a foreground-window reader feeding a tracker that asks every workspace for its own consent on every
 // reading. Without consent nothing is stored; the source itself reads only the window's app, title and idle time.
 const activityIntervalSeconds = Math.max(5, Number(process.env.CROSSLINE_ACTIVITY_INTERVAL_SECONDS) || 60);
-const activityTracker = createActivityTracker(analysisStore, () => analysisStore.listWorkspaces().map((workspace) => workspace.id), activityIntervalSeconds);
+const activityTracker = createActivityTracker(analysisStore, () => analysisStore.listWorkspaces().map((workspace) => workspace.id).filter(machineOwner), activityIntervalSeconds);
 const activitySource = createWindowsActivitySource({ intervalSeconds: activityIntervalSeconds });
 if (process.env.CROSSLINE_RUN_ONCE !== "1") activitySource.start((reading) => activityTracker.handle(reading));
 process.on("exit", () => activitySource.stop());
@@ -688,6 +749,8 @@ const getCalendarWriteSession = () => calendarWriteSession ??= (async () => {
   if (!clientId) return undefined;
   return createGraphAuthSession({ clientId, ...(process.env.CROSSLINE_MS_TENANT_ID?.trim() ? { tenantId: process.env.CROSSLINE_MS_TENANT_ID.trim() } : {}), access: "calendar-write" });
 })().catch(() => undefined);
+// The writer account's sign-in from the calendar card: the same MSAL cache the publisher reads, so a new token is used at once.
+const calendarWriteLogin = createWriteLogin(analysisStore, { session: getCalendarWriteSession, ownerOf: (workspaceId) => ownerOf(analysisStore, workspaceId) });
 const agentService = createAgentService({
   // The shell assistant runs on the machine owner's runtime only: it works with the operating system user's files, and a guard is a
   // tripwire, not a sandbox, so it is not offered to other accounts on this machine (docs/model-providers.md).
@@ -699,6 +762,14 @@ for (const workspace of analysisStore.listWorkspaces()) {
   if (lost.length) console.info(JSON.stringify({ type: "agent.recovered_lost", workspaceId: workspace.id, lost, checkedAt: new Date().toISOString() }));
   const salvaged = agentService.salvageStopped(workspace.id);
   if (salvaged.length) console.info(JSON.stringify({ type: "agent.salvaged", workspaceId: workspace.id, salvaged, checkedAt: new Date().toISOString() }));
+  // Once: the locks and 「deleted by the person」 marks that overlapping calendar publishes left behind (before the supervisor serves a publish).
+  const repaired = repairFrozenRace(analysisStore, workspace.id, ownerOf(analysisStore, workspace.id));
+  if (repaired && (repaired.released.length || repaired.republished.length))
+    console.info(JSON.stringify({ type: "repair.frozen_race", workspaceId: workspace.id, released: repaired.released.length, republished: repaired.republished.length, checkedAt: new Date().toISOString() }));
+  // First drafts begun by a worker that stopped before any milestone existed were lost with it: forget the start, so the pass runs
+  // again and the screens do not say 「正在设计」 for a run nobody is doing.
+  if (analysisStore.getSetting(workspace.id, FIRST_DRAFTS_SETTING) && !analysisStore.listMilestones(workspace.id).length)
+    analysisStore.deleteSetting(workspace.id, FIRST_DRAFTS_SETTING);
 }
 const diligencePasses = new Set<string>();
 /**
@@ -983,7 +1054,9 @@ if (!capabilitySecret) {
     // account the same way material prep/the milestone gate/calendar sync were (see `getMaterialPreparer`
     // above for the fuller explanation; this is the same bug, same fix, in the same file).
     proposeMilestones: (_client, request, signal, workspaceId, only) =>
-      createMilestoneProposer(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))(request, signal, only),
+      createMilestoneProposer(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))(request, signal, only)
+        // The new drafts are read for risks right away, so the person sees them when deciding (in the background; the answer is not held for it).
+        .finally(() => { void milestoneRiskPass(workspaceId).catch(() => undefined); }),
     continueMilestoneConversation: (_client, threadId, message, signal, workspaceId) =>
       createMilestoneConversation(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))(threadId, message, signal),
     onboardingTurn: (_client, sessionId, text, _signal, workspaceId, reread) =>
@@ -1000,8 +1073,9 @@ if (!capabilitySecret) {
     extractSource: (documentId, workspaceId) => extractDocument(documentId, workspaceId),
     // Authorized folders: a preview (what would be read) before anything is read, then the folder is kept and read in the background.
     sourceFolders: {
-      preview: (_workspaceId: string, folderPath: string) => previewFolder(folderPath, folderDeps),
+      preview: async (workspaceId: string, folderPath: string) => machineOwner(workspaceId) ? previewFolder(folderPath, folderDeps) : OWNER_ONLY_FOLDER,
       add: async (workspaceId: string, folderPath: string) => {
+        if (!machineOwner(workspaceId)) return OWNER_ONLY_FOLDER;
         const added = await addFolder(analysisStore, workspaceId, folderPath, folderDeps);
         // Read in the background: a folder can take minutes; the page shows its progress from the folder list.
         if (added.state === "added") void folderPass(workspaceId, new Date().toISOString()).catch(() => undefined);
@@ -1024,6 +1098,7 @@ if (!capabilitySecret) {
     dispatchAgentTask: (workspaceId, workOrderId, category, stepId) => agentService.dispatch(workspaceId, workOrderId, category, stepId),
     agentProgress: (workspaceId, taskId) => agentService.progress(workspaceId, taskId),
     cancelAgentTask: (workspaceId, taskId) => agentService.cancel(workspaceId, taskId),
+    retryAgentTask: async (workspaceId, taskId, input) => { const result = await agentService.retry(workspaceId, taskId, input); void workflowPass(workspaceId, new Date().toISOString()).catch(() => undefined); return result; },
     growWorkflows: (workspaceId) => { void workflowPass(workspaceId, new Date().toISOString()).catch(() => undefined); },
     workflowAction: (workspaceId, id, action, service) => {
       if (action === "login") return openWorkflowLogin(analysisStore, workspaceId, id, service, browserProfilesRoot(workspaceId));
@@ -1035,6 +1110,10 @@ if (!capabilitySecret) {
       if (started.state === "started") markWorkflowRun(analysisStore, workspaceId, id, "started_by_person");
       return started.state === "started" ? { ok: true, taskId: started.taskId }
         : { ok: false, code: started.state === "blocked" ? started.code : "AGENT_CATEGORY_NOT_APPROVED", message: started.state === "blocked" ? started.message : `助手还没获准做「${started.label}」这类工作。` };
+    },
+    calendarWriteLogin: {
+      start: (workspaceId: string) => calendarWriteLogin.start(workspaceId),
+      status: (workspaceId: string) => calendarWriteLogin.status(workspaceId)
     },
     publishCalendar: async (workspaceId, blocks, scope) => {
       const session = await getCalendarWriteSession();
@@ -1108,7 +1187,8 @@ if (process.env.CROSSLINE_RUN_ONCE === "1") {
     void (async () => {
       for (const workspace of analysisStore.listWorkspaces()) {
         try {
-          const sent = await notifyPass(analysisStore, workspace.id, new Date(), undefined, undefined, pushToPhones);
+          // The desktop toast shows on this computer's screen: only for its owner. A guest is told on their own subscribed devices.
+          const sent = await notifyPass(analysisStore, workspace.id, new Date(), machineOwner(workspace.id) ? undefined : async () => false, undefined, pushToPhones);
           if (sent.length) console.info(JSON.stringify({ type: "notification.sent", workspaceId: workspace.id, sent }));
         } catch { /* a notification is never worth a crash */ }
       }
@@ -1127,7 +1207,7 @@ if (process.env.CROSSLINE_RUN_ONCE === "1") {
   const historyPass = () => {
     if (readingHistory) return;
     readingHistory = true;
-    void agentHistoryPass(analysisStore, analysisStore.listWorkspaces().map((workspace) => workspace.id), dataDir, zoneOf)
+    void agentHistoryPass(analysisStore, analysisStore.listWorkspaces().map((workspace) => workspace.id).filter(machineOwner), dataDir, zoneOf)
       .catch((error) => console.warn(JSON.stringify({ type: "agent_history.failed", message: error instanceof Error ? error.message : "" })))
       .finally(() => { readingHistory = false; });
   };

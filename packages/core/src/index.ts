@@ -14,6 +14,7 @@ export * from "./materials-schema";
 export * from "./milestone-gate-schema";
 export * from "./milestone-templates";
 export * from "./milestone-plan";
+export * from "./milestone-risk";
 export * from "./artifact-plan";
 export * from "./onboarding-turn-schema";
 export * from "./line-attributes";
@@ -21,6 +22,7 @@ export * from "./profile-gaps";
 export * from "./agent-guard";
 export * from "./agent-summary";
 export * from "./agent-dispatch";
+export * from "./agent-failure";
 export * from "./source-kinds";
 export * from "./date-schema";
 export * from "./diligence-schema";
@@ -323,7 +325,8 @@ export type WorkOrderEvent =
   | { type: "human.completed" }
   // The assistant did the whole order (whole-task delegation) and hands in its files as the evidence.
   | { type: "agent.delivered"; taskId: string }
-  | { type: "evidence.accepted"; approvalId?: string }
+  // `onCompletion`: the person pressed 完成 and that is the acceptance (decided 2026-10-15, `completion.ts`); no evidence is required.
+  | { type: "evidence.accepted"; approvalId?: string; onCompletion?: boolean }
   | { type: "acceptance.revoked"; reason: string }
   | { type: "blocked"; reason: string }
   | { type: "archived" }
@@ -402,9 +405,9 @@ const APPROVAL_TIERS = {
   // Candidate relations are reviewed together in the weekly pass, so batch is the honest mode: they
   // are cheap individually and only mean anything compared against each other.
   approve_milestones: "batch",
-  // Work-order proposals can be approved together (「全部批准」); a routine, internal preparation one takes
-  // effect by itself with a 24-hour undo (see `autoApprovalEligible`). Never a milestone, target or
-  // anything that leaves the machine — those stay a click each.
+  // Work-order proposals can be approved together (「全部批准」); any proposal takes effect by itself with a
+  // 24-hour undo unless it is the person's own choice, needs a login or permission, acts outside the machine,
+  // or was taken back before (see `autoApprovalEligible`). Milestones and targets stay a click each.
   approve_work_orders: "batch",
   auto_approve_internal_order: "automatic",
   approve_milestone_relations: "batch",
@@ -490,7 +493,9 @@ export * from "./fixed-events";
 export * from "./portrait";
 export * from "./portrait-type";
 export * from "./assess";
+export * from "./assess-link";
 export * from "./energy-rhythm";
+export * from "./energy-advice";
 export * from "./schedule-frozen";
 export * from "./calendar-apps";
 export * from "./onboarding-attention";
@@ -505,3 +510,6 @@ export * from "./local-stamp";
 export * from "./onboarding-progress";
 export * from "./calendar-subscriptions";
 export * from "./source-folders";
+export * from "./info-request";
+export * from "./completion";
+export * from "./task-merge";

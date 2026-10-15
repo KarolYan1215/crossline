@@ -380,6 +380,8 @@ export async function startCodexSupervisor(options: {
   agentProgress?: (workspaceId: string, taskId: string) => unknown;
   /** Stops a running assistant task (「中止」). */
   cancelAgentTask?: (workspaceId: string, taskId: string) => { ok: boolean };
+  /** Runs an assistant task again with the person's words (and the checks or items to redo), under the pause, quota and busy rules. */
+  retryAgentTask?: (workspaceId: string, taskId: string, input: { note?: string; only?: string[] }) => Promise<{ ok: boolean; [key: string]: unknown }>;
   /**
    * A grown workflow, by hand (docs/skills-library.md §6): `login` opens a browser window of its own for the person to log in to a site
    * it reads; `run` starts it now. Both answer at once.
@@ -435,6 +437,8 @@ export async function startCodexSupervisor(options: {
     remove: (workspaceId: string, id: string) => Promise<unknown>;
     setLines: (workspaceId: string, id: string, lines: string[]) => Promise<unknown>;
   };
+  /** Signing in the account that holds the Crossline calendar by device code: the code goes to the page and the person signs in there. */
+  calendarWriteLogin?: { start: (workspaceId: string) => Promise<unknown>; status: (workspaceId: string) => unknown };
   /** Calendars read from a subscription link: added after one read (the link goes to the worker's secret store), and removed. */
   calendarSubscriptions?: {
     add: (workspaceId: string, input: { link: string; label: string }) => Promise<unknown>;
@@ -943,6 +947,15 @@ export async function startCodexSupervisor(options: {
         } finally { syncing = false; }
         return;
       }
+      if (pathname === "/v1/calendar/write-login" && options.calendarWriteLogin && (request.method === "GET" || request.method === "POST")) {
+        if (request.method === "GET") { sendJson(response, 200, options.calendarWriteLogin.status(callerWorkspaceId)); return; }
+        if (request.headers.origin || !request.headers["content-type"]?.startsWith("application/json")) {
+          sendJson(response, 403, { blocker: { code: "CALENDAR_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
+          return;
+        }
+        sendJson(response, 200, await options.calendarWriteLogin.start(callerWorkspaceId));
+        return;
+      }
       if (request.method === "POST" && pathname === "/v1/calendar/publish" && options.publishCalendar) {
         if (request.headers.origin || !request.headers["content-type"]?.startsWith("application/json")) {
           sendJson(response, 403, { blocker: { code: "CALENDAR_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
@@ -962,7 +975,7 @@ export async function startCodexSupervisor(options: {
         sendJson(response, 200, await options.publishCalendar(callerWorkspaceId, blocks, body?.scope === "fixed" ? "fixed" : "work"));
         return;
       }
-      const agentTaskRoute = /^\/v1\/agent\/tasks\/([a-zA-Z0-9_-]{1,128})\/(progress|cancel)$/.exec(pathname);
+      const agentTaskRoute = /^\/v1\/agent\/tasks\/([a-zA-Z0-9_-]{1,128})\/(progress|cancel|retry)$/.exec(pathname);
       if (agentTaskRoute && request.method === "GET" && agentTaskRoute[2] === "progress" && options.agentProgress) {
         sendJson(response, 200, { progress: options.agentProgress(callerWorkspaceId, agentTaskRoute[1]!) ?? null });
         return;
@@ -973,6 +986,18 @@ export async function startCodexSupervisor(options: {
           return;
         }
         const result = options.cancelAgentTask(callerWorkspaceId, agentTaskRoute[1]!);
+        sendJson(response, result.ok ? 200 : 409, result);
+        return;
+      }
+      if (agentTaskRoute && request.method === "POST" && agentTaskRoute[2] === "retry" && options.retryAgentTask) {
+        if (request.headers.origin || !request.headers["content-type"]?.startsWith("application/json")) {
+          sendJson(response, 403, { blocker: { code: "AGENT_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
+          return;
+        }
+        const body = await readJsonBody(request).catch(() => undefined);
+        const note = typeof body?.note === "string" ? body.note.slice(0, 4000) : "";
+        const only = Array.isArray(body?.only) ? body.only.filter((item): item is string => typeof item === "string").slice(0, 20) : [];
+        const result = await options.retryAgentTask(callerWorkspaceId, agentTaskRoute[1]!, { ...(note ? { note } : {}), ...(only.length ? { only } : {}) });
         sendJson(response, result.ok ? 200 : 409, result);
         return;
       }

@@ -9,11 +9,13 @@ import { FOLDER_LINES_SCHEMA } from "./source-folders";
 import { CONCIERGE_SCHEMA } from "./concierge";
 import { DATE_EXTRACTION_SCHEMA } from "./date-schema";
 import { DILIGENCE_OUTPUT_SCHEMA } from "./diligence-schema";
+import { ENERGY_ADVICE_REVIEW_SCHEMA } from "./energy-advice";
 import { FLYWHEEL_OUTPUT_SCHEMA } from "./flywheel-schema";
 import { GOAL_SPLIT_SCHEMA } from "./line-attributes";
 import { MANUAL_DESIGN_SCHEMA, MATERIAL_SEARCH_SCHEMA, NODE_WRITEUP_SCHEMA } from "./manualbook-schema";
 import { MILESTONE_GATE_OUTPUT_SCHEMA, MILESTONE_PROPOSAL_SCHEMA } from "./milestone-gate-schema";
 import { MILESTONE_PLAN_SCHEMA } from "./milestone-plan";
+import { MILESTONE_RISK_SCHEMA } from "./milestone-risk";
 import { MINE_SKILL_SCHEMA } from "./mine-skill";
 import { PUBLIC_SKILL_REVIEW_SCHEMA, SKILL_SCOUT_SCHEMA } from "./public-skills";
 import { ONBOARDING_TURN_SCHEMA } from "./onboarding-turn-schema";
@@ -21,6 +23,7 @@ import { PLAN_EXPLAINER_OUTPUT_SCHEMA } from "./plan-explainer-schema";
 import { PORTRAIT_GAP_SCHEMA, PORTRAIT_SCHEMA } from "./portrait";
 import { PROGRESS_ASSESSMENT_SCHEMA, STEP_PLAN_SCHEMA, VALIDATION_REVIEW_SCHEMA } from "./steps";
 import { TASK_TITLES_SCHEMA } from "./task-title";
+import { TASK_MERGE_REVIEW_SCHEMA } from "./task-merge";
 import { WEEKLY_INSIGHT_OUTPUT_SCHEMA } from "./weekly-insight-schema";
 
 /**
@@ -50,6 +53,7 @@ export type SkillNeeds = {
 export const SKILL_NEEDS: Record<string, SkillNeeds> = {
   "crossline-onboarding": { label: "访谈", schemas: ["ONBOARDING_TURN_SCHEMA"] },
   "crossline-milestone-architect": { label: "里程碑设计", schemas: ["MILESTONE_PROPOSAL_SCHEMA"] },
+  "crossline-milestone-risk-reviewer": { label: "里程碑风险审查", schemas: ["MILESTONE_RISK_SCHEMA"] },
   "crossline-artifact-planner": { label: "跨主线产出规划", schemas: ["ARTIFACT_PLAN_SCHEMA"] },
   "crossline-goal-backplanner": { label: "任务倒推", schemas: ["BACKPLAN_SCHEMA"] },
   "crossline-flywheel-scout": { label: "跨主线扩展", schemas: ["FLYWHEEL_OUTPUT_SCHEMA"], webSearch: true },
@@ -59,7 +63,7 @@ export const SKILL_NEEDS: Record<string, SkillNeeds> = {
   "crossline-material-writer": { label: "教程写作", schemas: ["NODE_WRITEUP_SCHEMA"] },
   "crossline-step-planner": { label: "步骤拆分", schemas: ["STEP_PLAN_SCHEMA"] },
   "crossline-archetype-curator": { label: "任务类型整理", schemas: ["ARCHETYPE_CURATION_SCHEMA"], webSearch: true },
-  "crossline-validation-reviewer": { label: "复核", schemas: ["VALIDATION_REVIEW_SCHEMA", "PUBLIC_SKILL_REVIEW_SCHEMA"] },
+  "crossline-validation-reviewer": { label: "复核", schemas: ["VALIDATION_REVIEW_SCHEMA", "PUBLIC_SKILL_REVIEW_SCHEMA", "TASK_MERGE_REVIEW_SCHEMA"] },
   "crossline-progress-judge": { label: "进度判断", schemas: ["PROGRESS_ASSESSMENT_SCHEMA"] },
   "crossline-concierge": { label: "输入框", schemas: ["CONCIERGE_SCHEMA"], tools: true },
   "crossline-task-titler": { label: "任务命名", schemas: ["TASK_TITLES_SCHEMA"] },
@@ -75,6 +79,7 @@ export const SKILL_NEEDS: Record<string, SkillNeeds> = {
   "crossline-milestone-gate": { label: "验收判定", schemas: ["MILESTONE_GATE_OUTPUT_SCHEMA"], critical: true },
   "crossline-weekly-insight": { label: "每周洞察", schemas: ["WEEKLY_INSIGHT_OUTPUT_SCHEMA"] },
   "crossline-due-diligence": { label: "网上查证", schemas: ["DILIGENCE_OUTPUT_SCHEMA"], webSearch: true },
+  "crossline-energy-advisor": { label: "精力时段复核", schemas: ["ENERGY_ADVICE_REVIEW_SCHEMA"], webSearch: true },
   "crossline-background-facts": { label: "背景整理", schemas: ["BACKGROUND_FACTS_OUTPUT_SCHEMA"] },
   "crossline-plan-explainer": { label: "排程说明", schemas: ["PLAN_EXPLAINER_OUTPUT_SCHEMA"] },
   "crossline-agent": { label: "电脑上的助手", schemas: ["AGENT_SUMMARY_SCHEMA"], shell: true }
@@ -121,10 +126,10 @@ const DEEP_SCHEMA = level(level(level({ type: "object", additionalProperties: fa
 
 const CONFORMANCE_SCHEMAS: Record<string, Record<string, unknown>> = {
   AGENT_SUMMARY_SCHEMA, ANALYSIS_OUTPUT_SCHEMA, ARCHETYPE_CURATION_SCHEMA, ARTIFACT_PLAN_SCHEMA, BACKGROUND_FACTS_OUTPUT_SCHEMA, BACKPLAN_SCHEMA,
-  CALENDAR_CLASSIFICATION_SCHEMA, CONCIERGE_SCHEMA, DATE_EXTRACTION_SCHEMA, DILIGENCE_OUTPUT_SCHEMA, FLYWHEEL_OUTPUT_SCHEMA, FOLDER_LINES_SCHEMA, GOAL_SPLIT_SCHEMA,
-  MANUAL_DESIGN_SCHEMA, MATERIAL_SEARCH_SCHEMA, NODE_WRITEUP_SCHEMA, MILESTONE_GATE_OUTPUT_SCHEMA, MILESTONE_PROPOSAL_SCHEMA, MILESTONE_PLAN_SCHEMA, MINE_SKILL_SCHEMA,
+  CALENDAR_CLASSIFICATION_SCHEMA, CONCIERGE_SCHEMA, DATE_EXTRACTION_SCHEMA, DILIGENCE_OUTPUT_SCHEMA, ENERGY_ADVICE_REVIEW_SCHEMA, FLYWHEEL_OUTPUT_SCHEMA, FOLDER_LINES_SCHEMA, GOAL_SPLIT_SCHEMA,
+  MANUAL_DESIGN_SCHEMA, MATERIAL_SEARCH_SCHEMA, NODE_WRITEUP_SCHEMA, MILESTONE_GATE_OUTPUT_SCHEMA, MILESTONE_PROPOSAL_SCHEMA, MILESTONE_PLAN_SCHEMA, MILESTONE_RISK_SCHEMA, MINE_SKILL_SCHEMA,
   ONBOARDING_TURN_SCHEMA, PLAN_EXPLAINER_OUTPUT_SCHEMA, PORTRAIT_SCHEMA, PORTRAIT_GAP_SCHEMA, STEP_PLAN_SCHEMA,
-  VALIDATION_REVIEW_SCHEMA, PROGRESS_ASSESSMENT_SCHEMA, TASK_TITLES_SCHEMA, WEEKLY_INSIGHT_OUTPUT_SCHEMA, PUBLIC_SKILL_REVIEW_SCHEMA, SKILL_SCOUT_SCHEMA
+  VALIDATION_REVIEW_SCHEMA, PROGRESS_ASSESSMENT_SCHEMA, TASK_TITLES_SCHEMA, WEEKLY_INSIGHT_OUTPUT_SCHEMA, PUBLIC_SKILL_REVIEW_SCHEMA, SKILL_SCOUT_SCHEMA, TASK_MERGE_REVIEW_SCHEMA
 } as unknown as Record<string, Record<string, unknown>>;
 
 /** How many times a critical Skill's schema is run: at 3 runs, "repair rate ≤ 5%" means no repair at all. */

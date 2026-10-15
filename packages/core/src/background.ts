@@ -10,11 +10,11 @@ export const BACKGROUND_KINDS: ReadonlyArray<{ kind: BackgroundKind; label: stri
     skills: ["crossline-automation-stripper", "crossline-calendar-classifier", "crossline-folder-classifier"] },
   { kind: "planning", label: "拆分与步骤规划", explained: "从里程碑倒推任务、给任务排步骤、复核与改写",
     skills: ["crossline-goal-backplanner", "crossline-step-planner", "crossline-validation-reviewer", "crossline-progress-judge", "crossline-goal-splitter",
-      "crossline-task-titler", "crossline-archetype-curator", "crossline-milestone-architect", "crossline-artifact-planner", "crossline-background-facts"] },
+      "crossline-task-titler", "crossline-archetype-curator", "crossline-milestone-architect", "crossline-milestone-risk-reviewer", "crossline-artifact-planner", "crossline-background-facts"] },
   { kind: "tutorials", label: "任务教程", explained: "为 48 小时内要做的任务查资料、写教程",
     skills: ["crossline-manualbook-designer", "crossline-material-researcher", "crossline-material-writer"] },
   { kind: "assistant", label: "助手代办", explained: "助手代为完成准备类杂事", skills: ["crossline-agent"] },
-  { kind: "research", label: "主线调研", explained: "每周为每条主线上网调研一次", skills: ["crossline-due-diligence"] },
+  { kind: "research", label: "主线调研", explained: "每周为每条主线上网调研一次，并对照研究复核精力时段建议", skills: ["crossline-due-diligence", "crossline-energy-advisor"] },
   { kind: "nightly", label: "夜间飞轮", explained: "夜里找跨主线可以互相促进的地方", skills: ["crossline-flywheel-scout"] }
 ];
 

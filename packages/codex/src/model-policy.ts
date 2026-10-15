@@ -30,6 +30,8 @@ export const SKILL_TIERS: Record<string, RouteTier> = {
   "crossline-onboarding": "top",
   "crossline-milestone-architect": "top",
   "crossline-artifact-planner": "top",
+  // Reads drafts critically for what could keep them from being reached; a judgement, not a lookup.
+  "crossline-milestone-risk-reviewer": "mid",
   "crossline-goal-backplanner": "top",
   "crossline-flywheel-scout": "top",
   "crossline-automation-stripper": "mid",
@@ -56,6 +58,8 @@ export const SKILL_TIERS: Record<string, RouteTier> = {
   "crossline-milestone-gate": "mid",
   "crossline-weekly-insight": "mid",
   "crossline-due-diligence": "mid",
+  // The weekly energy-advice review: reads research and argues with a rule, once a week.
+  "crossline-energy-advisor": "mid",
   "crossline-background-facts": "low",
   "crossline-plan-explainer": "low",
   // The assistant that works on the person's machine: coding and multi-step work, so the strongest tier, and never stepped down.

@@ -62,7 +62,7 @@ function ensureOwnNextStep(): void {
 // The plan page's charts, ranking lists and capacity figures come from the same time-limited solve, so they are left out as well; the
 // ranking and the overload list are removed rather than hidden because how many rows they hold changes their height.
 const STABLE_FOR_SCREENSHOT = ".pending-badge,.dv-block,.dv-aside,.undo-trigger,.wk-block,.mo-chip[data-kind=\"scheduled\"],.ui-bar-value,.ui-bar-fill,"
-  + ".task-card-slot a,.pl-hours,.pl-svg,.pl-gantt-track,.pl-gantt-end,.pl-inv-share{visibility:hidden}"
+  + ".task-card-slot a,.pl-hours,.pl-svg,.pl-timeline>header small,.pl-advice-count{visibility:hidden}"
   + ".pl-rank-table,.pl-library,.pl-explain p,.pl-over-list,.pl-stat .pl-chart-foot,.forecast-delta{display:none}";
 
 test.beforeEach(async ({ page }, testInfo) => {
@@ -96,7 +96,8 @@ test("a task card opens its dialog in place, and the dialog's full-page link sho
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole("heading", { name: title })).toBeVisible();
   await expect(page).toHaveURL(/\/$/);
-  for (const tab of ["步骤", "教程", "材料", "标准", "记录"]) await expect(dialog.getByRole("tab", { name: tab })).toBeVisible();
+  // The detail reads in the order the work goes: 1 步骤 → 2 材料与教程 → 3 提交与完成 (tabs were replaced on 2026-10-15).
+  for (const section of ["步骤", "材料与教程", "提交与完成"]) await expect(dialog.locator(".task-section-title", { hasText: section })).toBeVisible();
   // The task's own input box sits above the tabs: everything about the task, in words.
   await expect(dialog.locator(".task-entry textarea, .task-entry [contenteditable], .task-entry input").first()).toBeVisible();
   const full = dialog.getByRole("link", { name: "完整页面" });
@@ -105,27 +106,31 @@ test("a task card opens its dialog in place, and the dialog's full-page link sho
   await full.click();
   await expect(page).toHaveURL(new RegExp(href!.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "$"));
   await expect(page.locator(".subpage-header h1")).toHaveText(title);
+  // 「← 返回今日」 goes back to the page it was opened from, as it was left: Today, with this task's dialog open again.
+  await page.getByRole("link", { name: /返回今日/ }).click();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole("dialog").getByRole("heading", { name: title })).toBeVisible();
 });
-test("Plan is the long view: no calendar, four charts over a chosen horizon, nothing to approve", async ({ page }, testInfo) => {
+test("Plan is the long view: no calendar, a milestone timeline and three charts over a chosen horizon, nothing to approve", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-chrome");
   await page.goto("/plan");
   const plan = page.locator("[data-plan-version]");
   await expect(plan).toHaveAttribute("data-plan-version", "personal-plan-v1");
   // The calendar is on Today only (decided 2026-10-10).
   await expect(page.locator(".mo-cell, .wk-col, .dv-block")).toHaveCount(0);
-  for (const chart of ["容量与需求", "里程碑完成预测", "主线投入：计划与实际", "估时准确度与节律"]) await expect(page.getByRole("region", { name: chart })).toBeVisible();
+  for (const chart of ["里程碑时间轴", "容量与需求", "主线投入：计划与实际", "估时准确度", "时段与精力"]) await expect(page.getByRole("region", { name: chart })).toBeVisible();
   await expect(page.getByRole("button", { name: "立即同步日历" })).toBeVisible();
   await expect(page.getByRole("button", { name: "发布到 Crossline 日历" })).toBeVisible();
+  // Each milestone mark opens its drawer on 主线 (the default eight-week horizon).
+  await expect(page.locator('.pl-ms-point[href^="/milestones?open="]').first()).toBeVisible();
   // Eight weekly bars by default; four once the horizon is switched, kept in the address.
   await expect(page.locator(".pl-cd-week")).toHaveCount(8);
   await Promise.all([page.waitForURL(/horizon=4/), page.getByRole("radiogroup", { name: "统计范围" }).getByRole("radio", { name: "4 周" }).click()]);
   await expect(page.locator(".pl-cd-week")).toHaveCount(4);
-  // Each milestone row opens its drawer on 主线.
-  await expect(page.locator('.pl-gantt-row[href^="/milestones?open="]').first()).toBeVisible();
-  // The settings are three tabs; importance lives only in 「排程依据」.
-  const settings = page.getByRole("radiogroup", { name: "设置项" });
-  for (const tab of ["可用时段", "排程参数", "排程依据"]) await expect(settings.getByRole("radio", { name: tab })).toBeVisible();
-  await expect(settings.getByRole("radio", { name: "重要性" })).toHaveCount(0);
+  // No settings tabs and no importance slider (decided 2026-10-15): the packing numbers, shares and ordering sit in one advanced fold.
+  await expect(page.getByRole("radiogroup", { name: "设置项" })).toHaveCount(0);
+  await expect(page.locator(".pl-rank-weight, .pl-imp-basis[aria-label$='重要性预设依据']")).toHaveCount(0);
+  await expect(page.locator("details.pl-advanced > summary")).toHaveText("高级：排程参数、主线份额与排程顺序");
   await page.goto("/plan");
   // The plan takes effect by default (docs/loop-and-scout.md §1): no version to approve, no differences to settle.
   await expect(page.getByText("批准本批变更")).toHaveCount(0);
@@ -204,18 +209,19 @@ test("energy check keeps self report only and rejects the removed camera path", 
 test("goal confirmation and permission-mode rejection persist through the real pages", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-chrome");
   await page.goto("/milestones");
-  // The deadline is edited where it is shown: the milestone's drawer, opened from its node on the timeline.
-  await page.locator(".mt-node").filter({ hasText: "稳定推进当前实验与论文" }).click();
+  // The deadline is edited where it is shown: the milestone's drawer, opened from its marker on the timeline (a label may be left out
+  // where labels would overlap; the marker never is).
+  await page.locator('.mt-marker[aria-label^="稳定推进当前实验与论文"]').click();
   const drawer = page.locator(".ui-sheet");
   await Promise.all([
     page.waitForNavigation({ waitUntil: "load" }),
     drawer.locator('input[type="date"]').fill("2026-09-30", { force: true })
   ]);
-  await page.locator(".mt-node").filter({ hasText: "稳定推进当前实验与论文" }).click();
+  await page.locator('.mt-marker[aria-label^="稳定推进当前实验与论文"]').click();
   await expect(page.locator(".ui-sheet").locator('input[type="date"]')).toHaveValue("2026-09-30");
   await page.goto("/plan");
-  // The confirmed deadline is the ◆ on that milestone's row of the finish-range chart.
-  await expect(page.locator('.pl-gantt-deadline[data-deadline="2026-09-30"]')).toHaveCount(1);
+  // The confirmed deadline places that milestone's mark on the plan page's timeline.
+  await expect(page.locator('.pl-ms-point[data-deadline="2026-09-30"]')).toHaveCount(1);
 
   const store = openStore();
   try { store.appendEvent({ ownerId: "e2e-tester", workspaceId: realWorkspaceId(store),
@@ -354,12 +360,11 @@ test("a work order started on one device becomes a conflict when another device'
   // double-click online must not error), so the order has to move somewhere `start` can no longer apply
   // at all for device B's stale `start` to actually collide with anything.
   await page.goto("/workbench");
-  // 开始计时 starts the session and opens the task's own page; completion is in its 记录 tab.
+  // 开始计时 starts the session and opens the task's own page; completion is in its 「提交与完成」 section, in view without a tab.
   await Promise.all([
     page.waitForURL(new RegExp(`/workbench/${id}$`)),
     page.locator(`#work-order-${id}`).getByRole("button", { name: "开始计时" }).click()
   ]);
-  await page.getByRole("tab", { name: "记录" }).click();
   await Promise.all([
     page.waitForNavigation({ waitUntil: "load" }),
     page.getByRole("button", { name: "完成（记为无证据）" }).click()
@@ -370,7 +375,8 @@ test("a work order started on one device becomes a conflict when another device'
     const afterA = openStore();
     try { return afterA.listWorkOrders(workspaceId).find((item) => item.id === id)?.state; }
     finally { afterA.close(); }
-  }, { timeout: 10_000 }).toBe("evidence_review");
+  // Since 2026-10-15 completing self-evident work is acceptance itself (the person said so); no evidence_review stop.
+  }, { timeout: 10_000 }).toBe("accepted");
 
   // Device B, still believing the order is `ready_for_human`, starts it too — offline, so this queues
   // instead of failing outright.
@@ -512,7 +518,7 @@ test("Today's day panel switches to a picked block's task, starts it there, and 
   const store = openStore();
   try {
     const workspaceId = realWorkspaceId(store);
-    expect(store.listWorkOrders(workspaceId).find((order) => order.id === workOrderId)?.state).toBe("evidence_review");
+    expect(store.listWorkOrders(workspaceId).find((order) => order.id === workOrderId)?.state).toBe("accepted");
     const claims = store.listEvidenceClaims(workspaceId).filter((claim) => claim.workOrderId === workOrderId);
     expect(claims.map((claim) => claim.kind).sort()).toEqual(["file", "record"]);
   } finally { store.close(); }

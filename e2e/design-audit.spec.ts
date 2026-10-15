@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { ensurePortrait, ensureSkillLibrary } from "./ledger.js";
+import { ensureMaterials, ensurePortrait, ensureSkillLibrary } from "./ledger.js";
 
 /**
  * The Phase 4 acceptance bullets that a screenshot comparison cannot state: one typeface, nothing under 12px, text contrast
@@ -9,7 +9,11 @@ import { ensurePortrait, ensureSkillLibrary } from "./ledger.js";
  * Disabled controls and text that is hidden on purpose (visibility, opacity 0) are exempt from contrast: WCAG exempts inactive
  * controls, and a hidden element is not read.
  */
-const PAGES = ["/", "/milestones", "/plan", "/workbench", "/approvals", "/settings", "/onboarding", "/review", "/portrait", "/return"];
+const PAGES = ["/", "/milestones", "/plan", "/workbench", "/approvals", "/settings", "/onboarding", "/review", "/portrait", "/return", "/materials/[id]", "/materials/view"];
+
+/** The material pages need a tutorial and an upload to draw (`ensureMaterials`); every other entry is its own address. */
+const addressOf = async (page: Page, path: string) => path === "/materials/[id]" ? (await ensureMaterials(page)).tutorial
+  : path === "/materials/view" ? (await ensureMaterials(page)).view : path;
 
 type Finding = { selector: string; text: string; detail: string };
 
@@ -56,8 +60,12 @@ async function audit(page: Page): Promise<{ fonts: Finding[]; small: Finding[]; 
       // the poster's serif, is allowed only inside `.pt-serif` on the portrait, which is used only for strings written in code.
       const face = style.fontFamily.split(",")[0]!.replace(/["']/g, "").trim().toLowerCase();
       const expected = element.closest(".gen") ? "microsoft yahei" : element.closest(".pt-serif") ? "crossline poster serif" : "arial";
-      if (face !== expected) fonts.push(finding(style.fontFamily.slice(0, 60)));
-      if (parseFloat(style.fontSize) < 12) small.push(finding(style.fontSize));
+      // A formula typeset by KaTeX (`.katex`, app/ui/markdown.tsx) is drawn in KaTeX's own math fonts, bundled with the app: a formula in
+      // Arial would no longer read as mathematics. Its sub- and superscripts are set at about 70% of the line by mathematical
+      // convention, so the size rule does not apply inside it either; the formula's base size follows the text around it.
+      const formula = Boolean(element.closest(".katex"));
+      if (face !== expected && !formula) fonts.push(finding(style.fontFamily.slice(0, 60)));
+      if (parseFloat(style.fontSize) < 12 && !formula) small.push(finding(style.fontSize));
       if (element.closest(":disabled, [aria-disabled='true']")) continue;
       const fg = parse(style.color);
       const bg = backdrop(element);
@@ -91,7 +99,7 @@ for (const path of PAGES) {
     // The portrait is audited with a full report, not its empty state.
     if (path === "/portrait") await ensurePortrait(page);
     if (path === "/settings") await ensureSkillLibrary(page);
-    await page.goto(path);
+    await page.goto(await addressOf(page, path));
     await page.waitForLoadState("networkidle");
     const found = await audit(page);
     if (process.env.AUDIT_VERBOSE) console.log(`AUDIT ${path} ${JSON.stringify(found)}`);
@@ -109,7 +117,7 @@ for (const path of PAGES) {
   test(`${path} does not scroll sideways in a 1000px laptop window`, async ({ page }, testInfo) => {
     test.skip(testInfo.project.name.includes("mobile"), "the phone width is covered above");
     await page.setViewportSize({ width: 1000, height: 800 });
-    await page.goto(path);
+    await page.goto(await addressOf(page, path));
     await page.waitForLoadState("networkidle");
     const found = await audit(page);
     expect(found.overflow, `horizontal overflow at 1000px: ${found.wide.join("; ")}`).toBeLessThanOrEqual(1);

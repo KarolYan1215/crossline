@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { ensureSkillLibrary } from "./ledger.js";
+import { ensureMaterials, ensureSkillLibrary } from "./ledger.js";
 
 /**
  * The automatable half of the review rubric (docs/copy-style.md): no second person in the system's own text, folds only for advanced
@@ -10,7 +10,11 @@ import { ensureSkillLibrary } from "./ledger.js";
  *
  * Strict since the product pass finished (2026-10-08): any finding fails. `COPY_AUDIT_REPORT=1` only prints them, for a page being reworked.
  */
-const PAGES = ["/", "/milestones", "/plan", "/workbench", "/approvals", "/settings", "/return"];
+const PAGES = ["/", "/milestones", "/plan", "/workbench", "/approvals", "/settings", "/return", "/materials/[id]", "/materials/view"];
+
+/** The material pages need a tutorial and an upload to draw (`ensureMaterials`); every other entry is its own address. */
+const addressOf = async (page: Page, path: string) => path === "/materials/[id]" ? (await ensureMaterials(page)).tutorial
+  : path === "/materials/view" ? (await ensureMaterials(page)).view : path;
 
 type Findings = { secondPerson: string[]; folds: string[]; developer: string[]; longText: string[] };
 
@@ -58,7 +62,7 @@ async function audit(page: Page): Promise<Findings> {
 for (const path of PAGES) {
   test(`${path} reads as product copy: third person, few folds, nothing developer-facing, no long paragraphs`, async ({ page }) => {
     if (path === "/settings") await ensureSkillLibrary(page);
-    await page.goto(path);
+    await page.goto(await addressOf(page, path));
     await page.waitForLoadState("networkidle");
     const found = await audit(page);
     if (process.env.AUDIT_VERBOSE || process.env.COPY_AUDIT_REPORT) console.log(`COPY ${path} ${JSON.stringify(found)}`);

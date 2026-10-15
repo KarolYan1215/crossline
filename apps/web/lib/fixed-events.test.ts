@@ -22,8 +22,15 @@ function setup(calendar: Array<{ title: string; day: string; start: string; end:
       { id: "due", title: "作业截止", project: "ECE 555", date: "2026-10-20", startTime: "", endTime: "", kind: "homework_due", sourceRef: "src-1" }], undated: [] } });
   store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: "dates:2", type: "dates.decided", entityId: "b1", payload: { included: ["class", "exam", "due"], excluded: [] } });
   store.setSetting(ws, "portrait.report", JSON.stringify({ version: 1 }));
+  // Offered only where there is a Crossline calendar to write to (2026-10-15).
+  store.setSetting(ws, "calendar.write.account", "acct");
   return store;
 }
+
+test("without an account to write the Crossline calendar with, nothing is offered: 「创建」 could only fail", async () => {
+  setup().deleteSetting(ws, "calendar.write.account");
+  expect(collectAsks(TEST_CTX, NOW).filter((ask) => ask.kind === "event_propose")).toEqual([]);
+});
 
 test("after the report, confirmed fixed arrangements the calendar lacks are offered — the class as weekly, the exam as one day; untimed items are not events", async () => {
   setup();
