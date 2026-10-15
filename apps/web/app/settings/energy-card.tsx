@@ -26,7 +26,9 @@ const SURE = { low: "把握低，需要时询问", medium: "把握中等", high:
  * connection — iPhone automations that post the bed and wake moments and a morning health summary with a token made here (shown once),
  * and Siri 「记一下」 with its own capture token. Set once, then nothing to do each day; never prompted.
  */
-export function EnergyCard({ status, phoneUrl }: { status: EnergyStatus; phoneUrl: string | null }) {
+export function EnergyCard({ status, phoneUrl, hostSignals = true }: { status: EnergyStatus; phoneUrl: string | null;
+  /** False for a guest: 作息记录 and 键鼠节律 read the computer Crossline runs on, which is not theirs. */
+  hostSignals?: boolean }) {
   const [token, setToken] = useState("");
   const [tracking, setTracking] = useState(status.sleepTracking);
   const [trackingNote, setTrackingNote] = useState("");
@@ -58,13 +60,13 @@ export function EnergyCard({ status, phoneUrl }: { status: EnergyStatus; phoneUr
   const endpoint = `${base}/api/health/sleep`;
   return <section className="st-card" aria-label="精力">
     <header><h3>精力</h3><small>由作息推算，按本人自评校准；把握低时才询问</small></header>
-    <div className="st-row"><span className="st-row-label">作息记录<small>只记电脑 4 小时以上无活动（如夜间）的开始与结束时刻，用于推算睡眠；关闭即删除</small></span>
+    {hostSignals && <><div className="st-row"><span className="st-row-label">作息记录<small>只记电脑 4 小时以上无活动（如夜间）的开始与结束时刻，用于推算睡眠；关闭即删除</small></span>
       <SegmentedControl label="作息记录" value={tracking ? "on" : "off"} onChange={(next) => void changeTracking(next === "on")}
         options={[{ value: "off", label: "关闭" }, { value: "on", label: "开启" }]} /></div>
     {trackingNote && <p role="status" className="st-note">{trackingNote}</p>}
     <div className="st-row"><span className="st-row-label">键鼠节律<small>只记每 15 分钟内有输入的秒数、5 秒以上的停顿次数和鼠标移动距离；不记按键、内容和窗口；关闭即删除</small></span>
       <SegmentedControl label="键鼠节律" value={rhythm ? "on" : "off"} onChange={(next) => void changeSignal("input_rhythm", next === "on")}
-        options={[{ value: "off", label: "关闭" }, { value: "on", label: "开启" }]} /></div>
+        options={[{ value: "off", label: "关闭" }, { value: "on", label: "开启" }]} /></div></>}
     <div className="st-row"><span className="st-row-label">摄像头精力采样<small>仅电脑：页面在前台时每 20 分钟开摄像头 20 秒，在本机算眨眼、闭眼比例和心率估计，只保存这四个数；画面不保存、不上传；关闭即删除</small></span>
       <SegmentedControl label="摄像头精力采样" value={camera ? "on" : "off"} onChange={(next) => void changeSignal("camera", next === "on")}
         options={[{ value: "off", label: "关闭" }, { value: "on", label: "开启" }]} /></div>

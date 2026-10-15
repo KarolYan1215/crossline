@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { lineAttributes } from "@crossline/core";
 import { AttributePicker, type AttributeOption } from "../ui/attribute-picker";
-import { CalendarApps } from "../connectors/calendar-apps";
 import { CalendarSubscriptions } from "../connectors/calendar-subscriptions";
 import { SourceFolders } from "../connectors/source-folders";
 import { FactList } from "./profile-panel";
@@ -51,7 +50,8 @@ export function LeftColumn({ state, busy, accept, onUpload, onChanged, heldQuest
         <span>{doc.fileName}</span><small>{DOC_STATUS[doc.extractionStatus]}{doc.projectId ? ` · ${state.projects.find((project) => project.id === doc.projectId)?.name ?? ""}` : ""}</small>
       </li>)}</ul>}
       <SourceFolders onChanged={onChanged} />
-      <CalendarApps />
+      {/* Only the subscription link brings calendar events in: the ChatGPT connectors' card shows a status and imports nothing, and
+          on the interview it sent an invitee off to connect Google for nothing (2026-10-15 walkthrough). It stays under 设置. */}
       <CalendarSubscriptions onChanged={onChanged} />
     </section>
 

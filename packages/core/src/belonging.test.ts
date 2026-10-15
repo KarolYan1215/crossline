@@ -20,3 +20,10 @@ test("a plain project string is taken at its word, an uncertain one only as a le
   expect(leaningProject("课程待确认（可能为 ECE 548）", projects)?.id).toBe("ece548");
   expect(leaningProject("半导体器件课程材料", projects)).toBeUndefined();
 });
+
+// 2026-10-15 walkthrough: the course's syllabus named both the course and its final project, and stayed unfiled.
+test("a file naming a course and its part belongs to the course", () => {
+  const projects = [{ id: "rbt610", name: "RBT 610 Robot Perception" }, { id: "rbt610-final", name: "RBT 610 期末项目" }];
+  expect(documentProject({ fileName: "RBT610-Fall2026-Syllabus.pdf", extractedText: "" }, projects as never)?.project.id).toBe("rbt610");
+  expect(documentProject({ fileName: "ECE555 RBT610 notes.pdf", extractedText: "" }, [...projects, { id: "ece555", name: "ECE 555" }] as never)).toBeUndefined();
+});

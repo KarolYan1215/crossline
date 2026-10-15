@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { ONBOARDING_TONE_SETTING, readTone, type StoredLineProfile } from "@crossline/core";
+import { FIRST_DRAFTS_SETTING, ONBOARDING_TONE_SETTING, firstDraftsState, questionKind, readTone, screenQuestions, type StoredLineProfile, type TurnQuestion } from "@crossline/core";
+import { questionScreenFor } from "@crossline/db";
 import { resolveAccessContext } from "../../../../lib/access-guard";
 import { getStore, planToday } from "../../../../lib/crossline";
 import { folderDocumentIds, projectTimeline, weekSkeleton } from "../../../../lib/onboarding-board";
@@ -26,10 +27,14 @@ export async function GET(request: Request) {
   const raw = session ? store.listOnboardingMessages(workspaceId, session.id) : [];
   // A model question that names a file the app itself asks about (or has settled) is left out: the app's question is the one kept.
   const lastIndex = raw.length - 1;
-  const lastQuestions = raw[lastIndex]?.role === "assistant" ? ((raw[lastIndex]!.content as { questions?: Array<{ id: string; text: string }> }).questions ?? []) : [];
+  const lastQuestions = raw[lastIndex]?.role === "assistant" ? ((raw[lastIndex]!.content as { questions?: TurnQuestion[] }).questions ?? []) : [];
   const moved = questionsOwnedElsewhere(access.ctx, lastQuestions);
-  const messages = moved.size ? raw.map((message, index) => index === lastIndex
-    ? { ...message, content: { ...(message.content as object), questions: lastQuestions.filter((question) => !moved.has(question.id)) } } : message) : raw;
+  // A round stored before the screen existed is screened here as on 待决事项 (`lib/interview-status.ts`): a room, class times on record, a
+  // calendar's recurrence are not the person's to answer. A question asking for several things is shown as multiple choice.
+  for (const item of screenQuestions(lastQuestions, questionScreenFor(store, workspaceId)).screened) moved.add(item.question.id);
+  const messages = lastQuestions.length ? raw.map((message, index) => index === lastIndex
+    ? { ...message, content: { ...(message.content as object), questions: lastQuestions.filter((question) => !moved.has(question.id))
+      .map((question) => ({ ...question, kind: questionKind(question) })) } } : message) : raw;
   const identities = identityLines(access.ctx).map((pack) => ({ id: pack.id, label: pack.label }));
   // The start standard (main interview only): what is still missing, and the app's own questions not in the open round — so an account
   // whose interview already ended can answer 「没有截止」 here without waiting for a new round.
@@ -51,6 +56,9 @@ export async function GET(request: Request) {
     lineProfiles: json<Record<string, StoredLineProfile>>("lines.profiles", {}),
     profile: json<Record<string, unknown> | null>("profile.model", null),
     availabilityProposed: Boolean(store.getSetting(workspaceId, "schedule.availability.proposed")),
+    // The worker designs the first milestone drafts on its own once the start standard holds: the screen says so instead of offering a
+    // second, concurrent run.
+    firstDrafts: firstDraftsState(store.getSetting(workspaceId, FIRST_DRAFTS_SETTING), store.listMilestones(workspaceId).some((item) => item.status !== "archived")),
     // The right column's week and project axis (docs/onboarding-v3.md), and how the person asked to be spoken to.
     tone: readTone(store.getSetting(workspaceId, ONBOARDING_TONE_SETTING)),
     toneChosen: Boolean(store.getSetting(workspaceId, ONBOARDING_TONE_SETTING)),

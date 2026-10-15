@@ -15,7 +15,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
     <section className="login-hero" aria-labelledby="login-tagline">
       <span className="login-brand pt-serif">{LOGIN_SERIF.brand}</span>
       <h1 id="login-tagline" className="login-tagline pt-serif">{LOGIN_SERIF.tagline}</h1>
-      <p className="login-lede">研究、创业、创作、投资……每条主线有自己的长期目标与截止日。Crossline 从访谈和本人的材料里读出这些，把要做的事排进一周的日历，按完成情况随时重排。</p>
+      <p className="login-lede">{LEDE}</p>
       <LoginPreview />
     </section>
     <section className="login-panel" aria-labelledby="login-panel-title">
@@ -26,10 +26,33 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   // OpenAI's open-source flow calls back only to 127.0.0.1, and the state cookie must be set on that same host: offered only there.
   const host = (await headers()).get("host") ?? "";
   const chatgpt = isChatgptSignInConfigured() && /^127\.0\.0\.1(:\d+)?$/.test(host);
-  return <main className="offline-page"><div>
-    <span className="brand-mark">C</span>
-    <h1>登录 Crossline</h1>
-    <LoginForm googleEnabled={isGoogleAuthConfigured()} emailEnabled={isEmailAuthConfigured()} chatgptEnabled={chatgpt} verified={verified === "1"}
-      {...(error ? { errorCode: error.slice(0, 60) } : {})} />
-  </div></main>;
+  // The same picture as the installed copy, with the way in for a shared server (an invitee over the private network): the steps say what
+  // comes after signing in, so nobody needs a separate guide to know that their own ChatGPT is connected once, inside, by a code.
+  return <main className="login-split">
+    <section className="login-hero" aria-labelledby="login-tagline">
+      <span className="login-brand pt-serif">{LOGIN_SERIF.brand}</span>
+      <h1 id="login-tagline" className="login-tagline pt-serif">{LOGIN_SERIF.tagline}</h1>
+      <p className="login-lede">{LEDE}</p>
+      <LoginPreview />
+    </section>
+    <section className="login-panel" aria-labelledby="login-panel-title">
+      <h2 id="login-panel-title" className="pt-serif">{LOGIN_SERIF.panel}</h2>
+      <LoginForm googleEnabled={isGoogleAuthConfigured()} emailEnabled={isEmailAuthConfigured()} chatgptEnabled={chatgpt} verified={verified === "1"}
+        {...(error ? { errorCode: error.slice(0, 60) } : {})} />
+      <ol className="login-steps" aria-label="开始使用的步骤">{HOSTED_STEPS.map((step, index) =>
+        <li key={step.title} data-state={index === 0 ? "current" : "next"}>
+          <span className="login-step-mark" aria-hidden="true">{index + 1}</span>
+          <span><b>{step.title}</b><small>{step.detail}</small></span>
+        </li>)}</ol>
+      <p className="login-privacy">资料和本人的 ChatGPT 登录都保存在运行这个 Crossline 的电脑上，只能通过私有网络访问；模型用本人的 ChatGPT 额度。</p>
+    </section>
+  </main>;
 }
+
+const LEDE = "研究、创业、创作、投资……每条主线有自己的长期目标与截止日。Crossline 从访谈和本人的材料里读出这些，把要做的事排进一周的日历，按完成情况随时重排。";
+
+const HOSTED_STEPS = [
+  { title: "用邮箱验证码登录", detail: "第一次用这个邮箱登录即创建账号，不用设密码" },
+  { title: "连接本人的 ChatGPT", detail: "进入后按页面提示用一次性代码授权，约 1 分钟" },
+  { title: "回答几轮问题", detail: "约 30 分钟得到第一版一周安排" }
+] as const;

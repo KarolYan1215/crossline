@@ -12,6 +12,8 @@ import { StageView } from "./stage-view";
 import { OpeningCard, openingReply, type OpeningAnswer } from "./opening-card";
 import { announceRound, TurnProgress } from "./turn-progress";
 import { SegmentedControl } from "../ui/controls";
+import { CodexAccountControl } from "../connectors/codex-account-control";
+import { AssessCard } from "./assess-card";
 import { composeAnswers, type Answer, type AssistantTurn, type DocumentRow, type Message, type OnboardingState } from "./onboarding-types";
 
 const ACCEPT = ".pdf,.docx,.txt,.md,.csv,.png,.jpg,.jpeg,.gif,.webp,.m4a,.mp3,.wav,.aac,.ogg,.flac";
@@ -45,6 +47,9 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
   const [over, setOver] = useState(false);
   const [transcription, setTranscription] = useState<TranscriptionStatus | undefined>();
   const [designed, setDesigned] = useState<Array<{ id: string; identityId: string; title: string }> | undefined>();
+  // Whether this account has a model connection: every round runs on it, so until it has one the interview's first step is connecting,
+  // here, instead of a red bar pointing to the bottom of the settings page (found walking the app as an invitee, 2026-10-15).
+  const [connected, setConnected] = useState<boolean | undefined>();
   const bottom = useRef<HTMLDivElement>(null);
   const asked = useRef<HTMLDivElement>(null);
 
@@ -100,6 +105,8 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
   }, [waitingForAudio, load]);
   // The thread scrolls inside its own column on a wide screen; scrolling the window there pushed the header over the first message.
   useEffect(() => {
+    // Before the first round the thread holds only the opening card, read from its top: scrolling it to the bottom hid the premise.
+    if (!state?.messages.length && busy !== "turn") return;
     const thread = bottom.current?.parentElement;
     // A new round lands with its question at the top of the view, not under the cards that follow it.
     const target = asked.current;
@@ -113,8 +120,25 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
   const waiting = messages.at(-1)?.role === "user";
   const open = lastTurn && !waiting ? lastTurn : undefined;
 
+  /**
+   * A round's question about a line's long-term goal (「研究者长期目标保留哪些品质？」), answered by picking, is the person choosing that
+   * goal: it is adopted as if from the left column's picker. Otherwise the interview said 「可以开始使用」 while the start standard still
+   * waited on three goals nobody had adopted (2026-10-15 walkthrough).
+   */
+  const adoptGoalsFromRound = async () => {
+    for (const question of batchQuestions) {
+      if (!/长期目标/.test(question.text) || !question.identityId) continue;
+      const line = state?.lines.find((item) => item.id === question.identityId);
+      const parts = (answers[question.id]?.picked ?? []).map((id) => question.options.find((option) => option.id === id)?.label ?? "").filter(Boolean);
+      if (!line || line.goals.length || !parts.length) continue;
+      await fetch("/api/lines", { method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: line.id, goalParts: parts.slice(0, 3) }) }).catch(() => undefined);
+    }
+  };
+
   const runTurn = async (message: string, reread = false) => {
     setBusy("turn"); setError("");
+    if (message) await adoptGoalsFromRound();
     if (message) { setPendingText(message); setText(""); setAnswers({}); }
     // A line's own interview lives in its own session; the full interview mints its id once.
     const id = line ? `line-${line}` : sessionId || crypto.randomUUID();
@@ -214,7 +238,8 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
   const stage = open?.stage ?? state.session?.coverage.stage ?? "orientation";
   const complete = state.session?.state === "complete";
   // Mixed pacing: in a deep stage the round is one question in the conversation; the app's own fact questions wait in the left column.
-  const deep = !state.focusLine && DEEP_STAGES.has(stage as OnboardingStage) && !waiting;
+  // While a round runs the questions just answered are not shown again: emptied, they read as answers lost (2026-10-15 walkthrough).
+  const deep = !state.focusLine && DEEP_STAGES.has(stage as OnboardingStage) && !waiting && busy !== "turn";
   const centre = deep ? roundQuestions : batchQuestions;
   const held = deep ? extra : [];
   const opening = !state.focusLine && messages.length === 0 && busy !== "turn" && !pendingText;
@@ -224,6 +249,8 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
   const start = async (answer: OpeningAnswer) => {
     setBusy("turn"); setError("");
     await fetch("/api/onboarding/tone", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ tone: answer.tone }) }).catch(() => undefined);
+    // The tone switch above the thread shows the chosen tone at once, not the default until the first round ends.
+    setState((previous) => previous && { ...previous, tone: answer.tone });
     if (state.setupLines) {
       const ordered = answer.base ? [answer.base, ...answer.lines.filter((label) => label !== answer.base)] : answer.lines;
       const response = await fetch("/api/lines", { method: "POST", headers: { "content-type": "application/json" },
@@ -250,8 +277,14 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
             options={ONBOARDING_TONES.map((id) => ({ value: id, label: ONBOARDING_TONE_LABEL[id].label }))} /></div>}
       </header>
       <div className="ob-thread ob-voice" aria-live="polite">
+        {!state.focusLine && connected !== true && <section className="ob-connect" aria-label="连接 ChatGPT" hidden={connected === undefined}>
+          <b>第一步：连接本人的 ChatGPT</b>
+          <span className="ob-muted">访谈和之后的分析、规划都用本人的 ChatGPT 额度运行。连接一次即可，约 1 分钟；连接时可以先在左侧放入简历、课表、课程大纲。</span>
+          <CodexAccountControl onConnected={setConnected} />
+        </section>}
+        {!state.focusLine && <AssessCard />}
         {opening && <OpeningCard linesKnown={!state.setupLines} knownLines={state.lines.map((line) => line.label)} initialTone={state.tone}
-          busy={busy !== ""} hasMaterials={filesRead} onStart={(answer) => void start(answer)} />}
+          busy={busy !== ""} hasMaterials={filesRead} needsConnection={!state.focusLine && connected === false} onStart={(answer) => void start(answer)} />}
         {messages.length === 0 && state.focusLine && <div className="ob-turn ob-assistant"><p>{`「${state.focusLine.label}」的访谈：现状、长期目标、项目、截止日与已有文件。`}</p></div>}
         {messages.map((message) => {
           const turn = asTurn(message);
@@ -265,7 +298,7 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
         {busy === "turn" && pendingText && !(messages.at(-1)?.role === "user" && userText(messages.at(-1)!) === pendingText)
           && <div className="ob-turn ob-user" data-user-text><p>{pendingText}</p></div>}
         {busy === "turn" && <div ref={asked}><TurnProgress sessionId={line ? `line-${line}` : sessionId} /></div>}
-        {busy === "" && waiting && !error && <div ref={asked}><TurnProgress sessionId={line ? `line-${line}` : state.session?.id ?? ""} resumed onRunning={setBackground} onEnded={() => { setBackground(false); void load(); }} /></div>}
+        {busy === "" && waiting && !error && <div ref={asked}><TurnProgress sessionId={line ? `line-${line}` : state.session?.id ?? ""} resumed onRunning={setBackground} onEnded={() => { setBackground(false); void load(); }} onRetry={() => void runTurn("")} /></div>}
         {answeredElsewhere.size > 0 && !waiting && <p className="ob-moved">本轮有 {answeredElsewhere.size} 题已在待决事项答过，会随这一轮一起发送。</p>}
         {deep && centre[0] && <div ref={asked} className="ob-turn ob-assistant ob-deep" aria-label="本轮问题">
           <p className="ob-deep-question gen">{centre[0].text}</p>
@@ -273,7 +306,7 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
             projects={state.projects} disabled={busy !== ""} hideText hideOther onChange={(next) => setAnswers((previous) => ({ ...previous, [centre[0]!.id]: next }))} />}
           <small className="ob-muted">在下方写下你的回答，想到什么写什么；也可以先选一个最接近的。</small>
         </div>}
-        {!deep && centre.length > 0 && !waiting && <div ref={asked} className="ob-turn ob-assistant ob-batch" aria-label="本轮问题">
+        {!deep && centre.length > 0 && !waiting && busy !== "turn" && <div ref={asked} className="ob-turn ob-assistant ob-batch" aria-label="本轮问题">
           <nav className="ob-batch-nav" aria-label="问题进度">{centre.map((question, index) => <button key={question.id} type="button" aria-current={index === Math.min(current, centre.length - 1) || undefined}
             data-answered={Boolean(answers[question.id]?.picked.length || answers[question.id]?.other.trim()) || undefined} onClick={() => setCurrent(index)}>{index + 1}</button>)}</nav>
           {(() => { const question = centre[Math.min(current, centre.length - 1)]!; return <QuestionCard key={question.id} question={question}
@@ -294,7 +327,9 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
         {state.readyToStart && !opening && <section className="ob-design" aria-label="设计里程碑">
           <b>{complete ? "了解得够了，可以设计里程碑了" : "随时可以先设计里程碑，之后补充再重来"}</b>
           <span className="ob-muted">由已确认的事实与日期倒推，每条主线 3–5 个前后相接的里程碑草稿，批准后生效。</span>
-          {designed
+          {state.firstDrafts === "running" && !designed
+            ? <p className="ob-muted">系统正在按访谈为每条主线设计里程碑草稿（每条主线几分钟），好了出现在 <a href="/milestones">主线</a> 页等待批准。</p>
+            : designed
             ? <p className="ob-done">已生成 {designed.length} 个草稿：{designed.map((item) => item.title).join("、")}。<a href="/milestones">去审阅并批准</a></p>
             : <button type="button" className="ob-btn ob-quiet" disabled={busy !== ""} onClick={() => void designMilestones()}>
                 {busy === "milestones" ? "正在设计…（通常 2–5 分钟）" : "设计里程碑草稿"}</button>}

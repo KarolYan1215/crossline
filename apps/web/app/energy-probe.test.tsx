@@ -13,7 +13,8 @@ describe("energy probe", () => {
 
   test("after-task check allows the actual load to be skipped", () => {
     const html = renderToStaticMarkup(<EnergyProbe context="after_task" workOrderId="work-1" />);
-    expect(html).toContain("实际负荷（可跳过）");
+    expect(html).toContain("这件事累不累");
+    expect(html).toContain("此刻精力");
     expect(html).toContain("跳过");
   });
 

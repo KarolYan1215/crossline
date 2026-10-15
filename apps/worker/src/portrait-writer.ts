@@ -43,11 +43,13 @@ const keepIncomplete = (rejection: Error, build: () => PortraitReport): Portrait
  * (`PORTRAIT_SCHEMA_VERSION`), and `"gap"` — the say–do part only — at most every thirty days once the execution record is long enough
  * to be drawn. Nothing while a write asked for in the last hour may still be running; a new account is written when its interview ends.
  */
-export function portraitRewriteDue(store: CrosslineStore, workspaceId: string, now: Date): "schema" | "gap" | null {
+export function portraitRewriteDue(store: CrosslineStore, workspaceId: string, now: Date): "first" | "schema" | "gap" | null {
   const saved = readSaved(store, workspaceId);
-  if (!saved) return null;
   const last = store.listEvents(workspaceId, { type: "portrait.requested" }).at(-1);
   if (last && now.getTime() - Date.parse(last.createdAt) < 3_600_000) return null;
+  // The first report was asked for only by the interview page that saw the last round land; a person who had moved on to another page
+  // (or closed it) got 「生成画像报告」 and a button instead (2026-10-15 walkthrough). Once the interview is complete, write it here.
+  if (!saved) return store.getLatestOnboardingSession(workspaceId)?.state === "complete" ? "first" : null;
   if ((saved.schema ?? 1) < PORTRAIT_SCHEMA_VERSION) return store.getSetting(workspaceId, PORTRAIT_REWRITE_MARKER) ? null : "schema";
   const gapAt = store.getSetting(workspaceId, PORTRAIT_GAP_AT);
   if (gapAt && now.getTime() - Date.parse(gapAt) < GAP_INTERVAL_MS) return null;

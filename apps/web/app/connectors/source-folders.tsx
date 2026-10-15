@@ -17,10 +17,13 @@ export function SourceFolders({ onChanged }: { onChanged?: () => void }) {
   const [preview, setPreview] = useState<Preview | undefined>();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  // Folders are on the computer Crossline runs on: only its owner's account may authorize one (a guest uploads files instead).
+  const [available, setAvailable] = useState(true);
 
   const load = useCallback(async () => {
     const response = await fetch("/api/sources/folders", { cache: "no-store" }).catch(() => undefined);
-    const body = await response?.json().catch(() => undefined) as { folders?: SourceFolder[]; lines?: Array<{ id: string; label: string }> } | undefined;
+    const body = await response?.json().catch(() => undefined) as { folders?: SourceFolder[]; lines?: Array<{ id: string; label: string }>; available?: boolean } | undefined;
+    setAvailable(body?.available !== false);
     setFolders(body?.folders ?? []);
     setLines(body?.lines ?? []);
   }, []);
@@ -68,6 +71,7 @@ export function SourceFolders({ onChanged }: { onChanged?: () => void }) {
     setBusy(false);
   };
 
+  if (!available) return null;
   return <section className="st-card source-folders" aria-label="授权文件夹">
     <header><h3>授权文件夹</h3><small>读取文件夹里所有能读的文件（PDF、Word、文本），之后有新文件或改动会自动重读</small></header>
     {folders?.map((folder) => <div className="source-folder" key={folder.id}>

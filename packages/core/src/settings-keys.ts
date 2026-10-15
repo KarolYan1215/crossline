@@ -29,3 +29,23 @@ export const PUSH_SUBSCRIPTIONS = "push.subscriptions";
  * supply pairs between lines. In the ledger, not memory, so redoing one line keeps the others' part and a backup carries it.
  */
 export const ARTIFACT_PLAN_SETTING = "flywheel.artifacts";
+
+/**
+ * The public quick test's result the person chose to carry into the app (`assess-link.ts`; decided 2026-10-15): the contract's fields plus
+ * `source: "public-assess"` and `acceptedAt`. Written only when the person presses 「使用该结果」; the interview reads it as corroboration,
+ * never as the portrait's own scores.
+ */
+export const ASSESS_RESULT_SETTING = "assess.result";
+/** When the person said the found result is not theirs, or removed it: the test's server is not asked again. */
+export const ASSESS_DECLINED_SETTING = "assess.declined";
+
+/** When the worker began the account's first milestone drafts on its own, once the start standard held (ISO time). */
+export const FIRST_DRAFTS_SETTING = "milestones.firstDrafts";
+/**
+ * What an account with no milestone is told: drafts are being designed (started within the hour), the run is over without drafts
+ * (`stalled`: the person can ask again), or nothing has started.
+ */
+export function firstDraftsState(startedAt: string | undefined, anyMilestone: boolean, now = new Date()): "none" | "running" | "stalled" {
+  if (anyMilestone || !startedAt || Number.isNaN(Date.parse(startedAt))) return "none";
+  return now.getTime() - Date.parse(startedAt) < 60 * 60_000 ? "running" : "stalled";
+}

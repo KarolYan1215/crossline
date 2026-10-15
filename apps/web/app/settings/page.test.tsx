@@ -28,8 +28,9 @@ describe("settings page", () => {
     // The 系统体检 card renders from an empty ledger without inventing numbers.
     expect(html).toContain("系统体检");
     expect(html).toContain("尚无计时完成的任务");
-    // Each assistant capability is a three-way control.
-    expect(html).toContain("逐次审阅");
+    // Each assistant capability is on or off (2026-10-15): results take effect by default, only what needs the person is reviewed.
+    expect(html).toContain("助手做完的结果默认直接生效");
+    expect(html).not.toContain("逐次审阅");
     globalThis.crosslineStore.close();
     globalThis.crosslineStore = undefined;
   }, 20000);

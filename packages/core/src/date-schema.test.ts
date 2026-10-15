@@ -168,3 +168,18 @@ describe("batches and arrangements", () => {
     expect(kept.map((item) => item.id)).toEqual(["class", "group"]);
   });
 });
+
+// A turn after the person confirmed a batch returned the same dates as a new batch to confirm (2026-10-15 walkthrough).
+test("dates the person already decided are not offered again, even reworded", async () => {
+  const { withoutDecidedDates } = await import("./date-schema");
+  const date = (id: string, title: string, day: string, kind: "quiz" | "exam" = "quiz") => ({ id, date: day, startTime: "", endTime: "", kind, title, project: "rbt610",
+    sourceRef: "src-1", quote: day, confidence: "high" as const, note: "" });
+  const weekly = (id: string, title: string) => ({ id, title, project: "rbt610", weekdays: [2, 4], startTime: "11:00", endTime: "12:15", from: "2026-10-15",
+    to: "2026-12-10", exceptions: [], location: "", sourceRef: "src-1", quote: "Tuesday and Thursday", confidence: "high" as const });
+  const decided = [date("a", "RBT 610 测验 3", "2026-10-15"), weekly("w", "RBT 610 课程")];
+  const next = { dates: [date("b", "RBT 610 第三次测验", "2026-10-15"), date("c", "RBT 610 期中考试", "2026-10-29", "exam")],
+    recurring: [weekly("v", "RBT 610 固定课程")], questions: [] };
+  const left = withoutDecidedDates(next, decided);
+  expect(left.dates.map((item) => item.id)).toEqual(["c"]);
+  expect(left.recurring).toEqual([]);
+});

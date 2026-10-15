@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { SOURCE_FOLDERS_SETTING, readSourceFolders } from "@crossline/core";
+import { assistantAvailable } from "@crossline/db";
 import { getStore } from "../../../../lib/crossline";
 import { identityLines } from "../../../../lib/lines";
 import { resolveAccessContext } from "../../../../lib/access-guard";
@@ -16,6 +17,8 @@ export async function GET(request: Request) {
   if ("response" in access) return access.response;
   return NextResponse.json({
     folders: readSourceFolders(getStore().getSetting(access.ctx.workspaceId, SOURCE_FOLDERS_SETTING)),
+    // The worker refuses a guest's folder (`FOLDER_OWNER_ONLY`); the card is not shown to one at all.
+    available: assistantAvailable(getStore(), access.ctx.workspaceId),
     lines: identityLines(access.ctx).map((line) => ({ id: line.id, label: line.label }))
   }, { headers: { "cache-control": "no-store" } });
 }

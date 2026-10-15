@@ -25,7 +25,7 @@ export const AI_TOOL_KIND_LABEL: Record<AiToolKind, string> = {
 /** Always on the machine owner's runtime: the assistant that does whole errands, and web research inside every plan and tutorial. */
 export const BUILT_IN_AI_TOOLS: AiTool[] = [
   { id: "crossline-assistant", name: "Crossline 助手", kind: "assistant", by: "system", source: "built_in",
-    goodFor: "整份地做琐事：整理与汇集材料、起草、数据与脚本、剪辑与转码、按工作流定期执行；不发送不发布" },
+    goodFor: "整份做琐事：汇集材料、起草、数据与脚本、剪辑转码、定期跑工作流；不发送不发布" },
   { id: "codex-web-research", name: "联网调研（Codex）", kind: "research", by: "system", source: "built_in",
     goodFor: "查公开资料并核实来源，供规划与教程引用" }
 ];

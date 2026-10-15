@@ -35,11 +35,23 @@ export function plainProject(project: string | undefined, projects: KnownProject
 
 /** The project a file's own name, or else the opening of its text, names unambiguously; with which of the two decided it. */
 export function documentProject(doc: { fileName: string; extractedText: string }, projects: KnownProject[]): { project: KnownProject; basis: "文件名" | "正文开头" } | undefined {
-  const byName = projectsNamedIn(doc.fileName, projects);
+  const byName = oneCourse(projectsNamedIn(doc.fileName, projects));
   if (byName.length === 1) return { project: byName[0]!, basis: "文件名" };
   if (byName.length > 1) return undefined;
-  const byHead = projectsNamedIn(doc.extractedText.slice(0, 1500), projects);
+  const byHead = oneCourse(projectsNamedIn(doc.extractedText.slice(0, 1500), projects));
   return byHead.length === 1 ? { project: byHead[0]!, basis: "正文开头" } : undefined;
+}
+
+/** A part of a course (its final project, an exam) — named like the course but not the course itself. */
+const COURSE_PART = /项目|作业|考试|测验|报告|论文|展示|project|homework|assignment|exam|quiz|report|paper|presentation/i;
+/**
+ * 「RBT610-Fall2026-Syllabus.pdf」 names both 「RBT 610 Robot Perception」 and 「RBT 610 期末项目」: the course's file belongs to the course.
+ * Before, the tie left every file of that course unfiled and its tasks without material (2026-10-15 walkthrough).
+ */
+function oneCourse(named: KnownProject[]): KnownProject[] {
+  if (named.length < 2) return named;
+  const courses = named.filter((project) => !COURSE_PART.test(project.name));
+  return courses.length === 1 && named.every((project) => courseCodeOf(project.name) && courseCodeOf(project.name) === courseCodeOf(courses[0]!.name)) ? courses : named;
 }
 
 /** A project an uncertain string leans towards (「课程待确认（可能为 ECE 548）」 → ECE 548): the recommended answer when the person is asked. */

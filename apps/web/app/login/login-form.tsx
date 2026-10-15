@@ -12,7 +12,8 @@ export function LoginForm({ googleEnabled, emailEnabled = true, chatgptEnabled =
   const [error, setError] = useState(Boolean(errorCode));
   const [busy, setBusy] = useState(false);
   // 「邮箱验证码」 signs in (and on first use, signs up) without a password; offered only where mail can be sent.
-  const [mode, setMode] = useState<"password" | "code">("password");
+  // The code is the default: one address, one code, and a first-time address is an account — no password, no separate verification mail.
+  const [mode, setMode] = useState<"password" | "code">(emailEnabled ? "code" : "password");
   const [codeSentTo, setCodeSentTo] = useState("");
   // The address that was refused for being unverified: the person can have the link sent again right here.
   const [unverified, setUnverified] = useState("");
@@ -71,8 +72,8 @@ export function LoginForm({ googleEnabled, emailEnabled = true, chatgptEnabled =
 
   return <div className="auth-form">
     {emailEnabled && <p className="auth-modes">
-      <button type="button" aria-pressed={mode === "password"} onClick={() => { setMode("password"); setStatus(""); }}>密码登录</button>
       <button type="button" aria-pressed={mode === "code"} onClick={() => { setMode("code"); setStatus(""); setCodeSentTo(""); }}>邮箱验证码</button>
+      <button type="button" aria-pressed={mode === "password"} onClick={() => { setMode("password"); setStatus(""); }}>密码登录</button>
     </p>}
     {mode === "password" ? <form method="post" onSubmit={submitPassword}>
       <label><span>邮箱</span><input name="email" type="email" required autoComplete="email" autoFocus /></label>
@@ -90,6 +91,7 @@ export function LoginForm({ googleEnabled, emailEnabled = true, chatgptEnabled =
     {chatgptEnabled && <a className="secondary-button" href="/api/auth/chatgpt/start">用 ChatGPT 账号登录</a>}
     {status && <small role={error ? "alert" : "status"}>{status}</small>}
     {unverified && emailEnabled && <button type="button" disabled={busy} onClick={() => void resend()}>重发验证邮件</button>}
-    <p>{emailEnabled && <><a href="/signup">还没有账号？注册</a> · <a href="/reset-password">忘记密码</a></>}</p>
+    {/* A code signs up on first use, so the separate sign-up and reset pages belong to the password way in only. */}
+    {emailEnabled && mode === "password" && <p><a href="/signup">还没有账号？注册</a> · <a href="/reset-password">忘记密码</a></p>}
   </div>;
 }

@@ -123,3 +123,6 @@
 .source-folders-preview p{margin:0;font-size:13px}
 .source-folders-preview ul{margin:0;padding-left:18px;font-size:12px;color:var(--graphite);overflow-wrap:anywhere}
 .source-folders-preview .ob-btn{justify-self:start}
+/* The model connection's three steps and the code itself: the code is what the person copies, so it is big enough to read off a phone. */
+.codex-steps{margin:0;padding:0 0 0 20px;display:grid;gap:4px;font-size:13px;line-height:1.6}
+.codex-user-code{font-size:20px;letter-spacing:.08em;user-select:all}

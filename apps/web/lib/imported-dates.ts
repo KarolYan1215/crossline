@@ -88,7 +88,16 @@ export function decideDateBatch(ctx: AccessContext, batchId: string, includedIds
   if (plan && blocks.length) {
     const existing = ((plan.payload as { blocks?: PersistedScheduleBlock[] }).blocks ?? []);
     const known = new Set(existing.map((block) => block.id));
-    store.savePlanVersion({ ...plan, payload: { ...(plan.payload as object), blocks: [...existing, ...blocks.filter((block) => !known.has(block.id))] } });
+    // A syllabus lists the class both as a weekly pattern and as each dated lecture: one slot, one block — the dated one, which says
+    // what that lecture covers. Twice, the day panel counted 2.5 fixed hours for one 75-minute class (2026-10-15 walkthrough).
+    const slot = (block: PersistedScheduleBlock) => `${block.day}|${block.start}|${block.end}`;
+    const taken = new Set(existing.filter((block) => block.id.startsWith("import:")).map(slot));
+    const fresh = blocks.filter((block) => !known.has(block.id)).filter((block) => {
+      if (taken.has(slot(block))) return false;
+      taken.add(slot(block));
+      return true;
+    });
+    store.savePlanVersion({ ...plan, payload: { ...(plan.payload as object), blocks: [...existing, ...fresh] } });
   }
   store.appendEvent({
     ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `dates:decided:${batchId}:${randomUUID()}`,

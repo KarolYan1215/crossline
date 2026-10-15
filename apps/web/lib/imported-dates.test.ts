@@ -69,3 +69,11 @@ test("choosing nothing is a valid answer and writes nothing", () => {
 test("an unknown batch is refused", () => {
   expect(decideDateBatch(TEST_CTX, "nope", ["x"])).toEqual({ ok: false, code: "DATE_BATCH_NOT_FOUND" });
 });
+
+// 2026-10-15 walkthrough: a dated lecture and the weekly pattern put the same class on the calendar twice.
+test("a dated item and the weekly pattern in the same slot become one block, the dated one", () => {
+  extract();
+  decideDateBatch(TEST_CTX, "b1", ["class", "quiz"]);
+  const friday = planBlocks().filter((block) => block.day === "2026-10-09");
+  expect(friday.map((block) => block.id)).toEqual(["import:b1:quiz"]);
+});

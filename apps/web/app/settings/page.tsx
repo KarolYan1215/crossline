@@ -1,5 +1,5 @@
-import { AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, CATEGORY_LABEL, RUNTIME_OWNER_SETTING, SLEEP_TRACKING_CONSENT, TELEMETRY_ENABLED_SETTING, type ActivityCategory, type AgentHistorySummary } from "@crossline/core";
-import { categoryMode, isAutoHandoff, readCategories } from "@crossline/db";
+import { AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, CATEGORY_LABEL, SLEEP_TRACKING_CONSENT, TELEMETRY_ENABLED_SETTING, type ActivityCategory, type AgentHistorySummary } from "@crossline/core";
+import { assistantAvailable, categoryMode, isAutoHandoff, readCategories } from "@crossline/db";
 import { SubpageShell } from "../subpage-shell";
 import { LocalActivityToggle } from "./local-activity-toggle";
 import { AgentHistoryCard } from "./agent-history-card";
@@ -89,6 +89,8 @@ export default async function SettingsPage() {
     camera: store.getSetting(ctx.workspaceId, "energy.camera") === "granted",
     signals: energy.covariates.map(({ id, label, evaluated, hitsWith, hitsWithout, enabled }) => ({ id, label, evaluated, hitsWith, hitsWithout, enabled })) };
 
+  // This computer's own readings (folders, screen, idle stretches, coding agents' logs) are the machine owner's only.
+  const machine = assistantAvailable(store, ctx.workspaceId);
   const autostart = autostartAvailable() ? await readAutostart() : undefined;
 
   return <SubpageShell active="设置" title="设置">
@@ -128,9 +130,9 @@ export default async function SettingsPage() {
 
         <section id="automation" className="st-section" aria-labelledby="st-automation"><h2 id="st-automation">自动化与助手</h2>
           {/* The shell assistant runs as this machine's user, so it works only for the machine owner's account (decided 2026-10-10). */}
-          {store.listWorkspaces().some((workspace) => store.getSetting(workspace.id, RUNTIME_OWNER_SETTING) === "1") && setting(RUNTIME_OWNER_SETTING) !== "1"
-            && <p className="muted">这台电脑上的助手只为电脑主人工作；这个账号的分析、拆分与规划照常在自己的模型连接上运行。</p>}
-          <AutomationModule paused={assistant.paused} permissionMode={permissionModeEnabled(ctx)} autoHandoff={isAutoHandoff(store, ctx.workspaceId)}
+          {!machine
+            && <p className="muted">这台电脑上的助手只为电脑主人工作，这个账号的步骤都由本人完成；分析、拆分与规划照常在自己的模型连接上运行。</p>}
+          <AutomationModule assistant={machine} paused={assistant.paused} permissionMode={permissionModeEnabled(ctx)} autoHandoff={isAutoHandoff(store, ctx.workspaceId)}
             categories={assistant.categories.map((item) => ({ category: item.category, label: item.label, explained: item.explained,
               mode: categoryMode(states[item.category]), cleanRuns: item.cleanRuns, runsToTrust: item.runsToTrust }))}
             recent={assistant.tasks.slice(0, 8).map((task) => ({ taskId: task.taskId, title: task.title, kind: assistant.categories.find((item) => item.category === task.category)?.label ?? "",
@@ -156,11 +158,12 @@ export default async function SettingsPage() {
         </section>
 
         <section id="privacy" className="st-section" aria-labelledby="st-privacy"><h2 id="st-privacy">隐私与屏幕活动</h2>
-          <LocalActivityToggle consent={consent} detail={detail} pausedUntil={setting(ACTIVITY_PAUSED_UNTIL) || null} blacklist={blacklist}
+          {!machine && <p className="muted">屏幕活动、作息记录、键鼠节律和 Codex 使用记录读的是运行 Crossline 的那台电脑，只对它的主人开放。</p>}
+          {machine && <LocalActivityToggle consent={consent} detail={detail} pausedUntil={setting(ACTIVITY_PAUSED_UNTIL) || null} blacklist={blacklist}
             hours={hours} categories={[...byCategory].sort((a, b) => b[1] - a[1])
-              .map(([category, minutes]) => ({ label: CATEGORY_LABEL[category as ActivityCategory] ?? "其他", minutes }))} />
-          <EnergyCard status={energyStatus} phoneUrl={phoneUrl ?? null} />
-          <AgentHistoryCard on={setting(AGENT_HISTORY_CONSENT) === "on"} summary={(() => { try { return JSON.parse(setting(AGENT_HISTORY_SUMMARY) ?? "null") as AgentHistorySummary | null; } catch { return null; } })()} />
+              .map(([category, minutes]) => ({ label: CATEGORY_LABEL[category as ActivityCategory] ?? "其他", minutes }))} />}
+          <EnergyCard status={energyStatus} phoneUrl={phoneUrl ?? null} hostSignals={machine} />
+          {machine && <AgentHistoryCard on={setting(AGENT_HISTORY_CONSENT) === "on"} summary={(() => { try { return JSON.parse(setting(AGENT_HISTORY_SUMMARY) ?? "null") as AgentHistorySummary | null; } catch { return null; } })()} />}
           {isLocalInstall() && <TelemetryCard on={setting(TELEMETRY_ENABLED_SETTING) !== "0"} />}
         </section>
 

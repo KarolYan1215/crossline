@@ -18,9 +18,9 @@ export async function runtimeStatus(ctx: AccessContext, now = Date.now()): Promi
     .then((value) => ({ ok: true as const, value })).catch(() => ({ ok: false as const })), timeout]);
   const status: RuntimeStatus | null = account === "timeout" || !account.ok
     ? { code: "worker_down", title: "后台服务没有运行",
-      message: "自动分析、倒推、材料准备、验收与提醒都已停止；已收集的内容不受影响。在本机重新启动 Crossline 后恢复。" }
+      message: "自动分析、倒推、材料准备、验收与提醒都已停止；已收集的内容不受影响。在运行 Crossline 的那台电脑上重新启动后恢复。" }
     : !account.value.account
-      ? { code: "signed_out", title: "模型服务未登录", message: "自动分析、倒推、材料准备与验收已暂停；在「设置 · 日历与连接」的模型连接里登录后恢复。" }
+      ? { code: "signed_out", title: "还没有连接 ChatGPT", message: "访谈、自动分析、倒推、材料准备与验收都要用它；用本人的 ChatGPT 账号连接一次即可，约 1 分钟。" }
       : null;
   cached = { workspaceId: ctx.workspaceId, at: now, status };
   return status;

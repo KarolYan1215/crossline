@@ -120,7 +120,7 @@ const localParts = (now: Date, zone: string) => {
  * phones; it is recorded as sent if either reached them, so a laptop that is closed does not make the phone ask again later.
  */
 export async function notifyPass(store: CrosslineStore, workspaceId: string, now: Date,
-  deliver: (title: string, body: string, url: string) => Promise<boolean> = showToast, baseUrl = "http://127.0.0.1:3210",
+  deliver: (title: string, body: string, url: string) => Promise<boolean> = showToast, baseUrl = process.env.CROSSLINE_WEB_BASE_URL || "http://127.0.0.1:3210",
   push?: (workspaceId: string, message: { title: string; body: string; path: string; tag: string; start?: string }) => Promise<boolean>): Promise<string[]> {
   const level = (store.getSetting(workspaceId, NOTIFY_LEVEL_SETTING) as NotifyLevel | undefined) ?? "normal";
   let zone = process.env.CROSSLINE_TIME_ZONE?.trim() || "America/Chicago";

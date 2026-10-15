@@ -23,9 +23,11 @@ export function openingReply(answer: OpeningAnswer, withMaterials: boolean): str
     withMaterials ? MATERIALS_FIRST_REPLY : NO_MATERIALS_REPLY].join("\n");
 }
 
-export function OpeningCard({ linesKnown, knownLines, initialTone, busy, hasMaterials, onStart }: {
+export function OpeningCard({ linesKnown, knownLines, initialTone, busy, hasMaterials, needsConnection = false, onStart }: {
   /** The lines are already set (an account from before this card): only the tone is asked. */
   linesKnown: boolean; knownLines: string[]; initialTone: OnboardingTone; busy: boolean; hasMaterials: boolean;
+  /** No model connection yet: the card can be filled in, but the first round cannot run until the step above it is done. */
+  needsConnection?: boolean;
   onStart: (answer: OpeningAnswer) => void;
 }) {
   const [tone, setTone] = useState<OnboardingTone>(initialTone);
@@ -92,9 +94,10 @@ export function OpeningCard({ linesKnown, knownLines, initialTone, busy, hasMate
     </>}
 
     <div className="ob-opening-go">
-      <button type="button" className="ob-btn ob-primary" disabled={busy || !lines.length} onClick={() => onStart({ tone, lines, base: chosenBase, fixed: chosenFixed })}>
+      <button type="button" className="ob-btn ob-primary" disabled={busy || !lines.length || needsConnection} onClick={() => onStart({ tone, lines, base: chosenBase, fixed: chosenFixed })}>
         {hasMaterials ? "读完材料，开始访谈" : "开始访谈"}</button>
-      {!lines.length && <small className="ob-muted">先选至少一个身份</small>}
+      {!lines.length ? <small className="ob-muted">先选至少一个身份</small>
+        : needsConnection && <small className="ob-muted">先完成上方的「连接本人的 ChatGPT」</small>}
     </div>
   </section>;
 }

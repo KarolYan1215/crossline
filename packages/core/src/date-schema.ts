@@ -250,6 +250,22 @@ export function mergeDateExtractions(earlier: DateExtraction[], next: DateExtrac
 }
 
 /**
+ * What the person already answered is not offered again. Every interview turn may return the files' dates, and a turn after the person
+ * confirmed a batch returned the same 24 dates as a new one to confirm (2026-10-15 walkthrough) — confirming it twice would put every class
+ * on the calendar twice. A date matches on day, start time and kind within its project, or on day and title; a weekly arrangement on its
+ * weekdays and times within its project, or on its title (the model rewords 「RBT 610 课程」 as 「RBT 610 固定课程」 between turns).
+ */
+export function withoutDecidedDates(next: DateExtraction, decided: Array<DateCandidate | RecurringMeeting>): DateExtraction {
+  const norm = (value: string) => value.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+  const keys = new Set<string>();
+  const dateKeys = (item: DateCandidate) => [`d|${item.date}|${item.startTime}|${item.kind}|${norm(item.project)}`, `t|${item.date}|${norm(item.title)}`];
+  const weeklyKeys = (item: RecurringMeeting) => [`w|${[...item.weekdays].sort().join(",")}|${item.startTime}|${item.endTime}|${norm(item.project)}`, `n|${norm(item.title)}`];
+  for (const item of decided) for (const key of "weekdays" in item ? weeklyKeys(item) : dateKeys(item)) keys.add(key);
+  return { ...next, dates: next.dates.filter((item) => !dateKeys(item).some((key) => keys.has(key))),
+    recurring: next.recurring.filter((item) => !weeklyKeys(item).some((key) => keys.has(key))) };
+}
+
+/**
  * Weekly arrangements that fall wholly outside the hours the person works and belong to no project — meals, sleep — say nothing the
  * available hours do not already say. Kept out of the batch, they are not offered for confirmation or for the calendar. A course's
  * class is kept even outside those hours: it is still an arrangement the person may want on the calendar.

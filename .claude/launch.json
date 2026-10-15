@@ -8,6 +8,13 @@
       "port": 3320
     },
     {
+      "name": "beta",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["exec", "tsx", "scripts/beta-instance.ts", "web"],
+      "port": 3350,
+      "url": "http://localhost:3350"
+    },
+    {
       "name": "assess",
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["--filter", "@crossline/assess", "dev"],

@@ -46,7 +46,9 @@ export function visibleCodexBlocker(state: AccountState | undefined): { code: st
  * device code (from anywhere, a phone included), or with an API key, which goes straight to that account's own runtime and is never
  * kept or shown by the app.
  */
-export function CodexAccountControl() {
+export function CodexAccountControl({ onConnected }: {
+  /** Told after every read whether this account now has a model connection (the interview waits on it). */
+  onConnected?: (connected: boolean) => void } = {}) {
   const [state, setState] = useState<AccountState>();
   const [loginUrl, setLoginUrl] = useState<string>();
   const [busy, setBusy] = useState(false);
@@ -58,6 +60,7 @@ export function CodexAccountControl() {
     const nextState = await response.json() as AccountState;
     setState(nextState);
     setLoginUrl((current) => reconcileCodexLoginUrl(current, nextState));
+    onConnected?.(Boolean(nextState.account));
   };
   useEffect(() => { void refresh(); }, []);
   useEffect(() => {
@@ -86,7 +89,9 @@ export function CodexAccountControl() {
   const login = loginOf(state);
   const blocker = visibleCodexBlocker(state);
   const guest = state?.guest === true;
-  return <section className="st-card codex-account-card" aria-label="模型连接">
+  // Away from this computer a guest has only the device code, so it is the main button; on it, the browser sign-in is.
+  const codeFirst = guest && !local;
+  return <section className="st-card codex-account-card" aria-label="模型连接" id="model">
     <header><h3>模型连接</h3><Tag tone={account ? "ok" : "warn"}>{account ? "已连接" : state ? "未连接" : "检查中"}</Tag></header>
     <div className="st-row"><span className="st-row-label">{account
       ? account.type === "apiKey" ? "API key（按用量计费，每月上限见「模型额度」）" : account.email ?? "ChatGPT 账号"
@@ -95,14 +100,24 @@ export function CodexAccountControl() {
       <span className="st-row-actions">
         {state && !account && !loginUrl && (!guest || local) && <button type="button" className="primary-button" disabled={busy}
           onClick={() => void post({ type: "chatgpt" })}>{busy ? "启动中…" : "用 ChatGPT 登录"}</button>}
-        {state && !account && !loginUrl && guest && <button type="button" disabled={busy} onClick={() => void post({ type: "chatgptDeviceCode" })}>用设备码登录</button>}
-        {loginUrl && <a href={loginUrl} target="_blank" rel="noreferrer">打开登录页 →</a>}
+        {state && !account && !loginUrl && guest && <button type="button" className={codeFirst ? "primary-button" : "secondary-button"} disabled={busy}
+          onClick={() => void post({ type: "chatgptDeviceCode" })}>{busy && codeFirst ? "正在取代码…" : "用一次性代码连接"}</button>}
+        {loginUrl && <a href={loginUrl} target="_blank" rel="noreferrer">{login?.userCode ? "打开 OpenAI 的页面 →" : "打开登录页 →"}</a>}
         {loginUrl && <button type="button" disabled={busy} onClick={cancelLogin}>取消</button>}
         {account && guest && <button type="button" disabled={busy} onClick={() => void post({ action: "logout" })}>退出登录</button>}
         <button type="button" onClick={refresh} aria-label="刷新登录状态" title="刷新">↻</button>
       </span></div>
-    {login?.state === "pending" && login.userCode && <div className="st-row"><span className="st-row-label">在登录页输入这个验证码
-      <small>{login.verificationUrl}</small></span><b className="mono">{login.userCode}</b></div>}
+    {state && !account && guest && <ol className="codex-steps">
+      {/* OpenAI refuses every code until this switch is on, and a code entered before it is spent (owner's run, 2026-10-15). */}
+      <li>先在 ChatGPT 网页版打开 设置 → 安全，开启「为 Codex、Excel、PowerPoint 和 Word 启用设备代码登录」（只需一次）</li>
+      <li>点「用一次性代码连接」，这里会显示一串代码；在新标签页打开 OpenAI 的页面，用本人的 ChatGPT 账号登录，输入这串代码</li>
+      <li>回到这里，几秒内自动显示「已连接」</li>
+    </ol>}
+    {login?.state === "pending" && login.userCode && <div className="st-row"><span className="st-row-label">在 OpenAI 的页面输入这串代码
+      <small>代码只给本人用，不要发给别人。页面提示要先启用设备代码登录时，按上面第 1 步开启后点「获取新代码」。</small></span>
+      <b className="mono codex-user-code">{login.userCode}</b>
+      <span className="st-row-actions"><button type="button" disabled={busy} onClick={() => void (async () => { await cancelLogin(); await post({ type: "chatgptDeviceCode" }); })()}>获取新代码</button></span></div>}
+    {login?.state === "failed" && guest && !account && <p className="muted" role="status">这串代码没有通过。确认已按第 1 步开启设备代码登录，再点「用一次性代码连接」取一串新代码。</p>}
     {!account && guest && <form className="st-row" onSubmit={(event) => { event.preventDefault(); if (apiKey.trim()) void post({ type: "apiKey", apiKey }); }}>
       <label className="st-row-label">或填写 OpenAI API key<small>只交给这个账号自己的运行时保存，本应用不留存、不显示。</small>
         <input type="password" autoComplete="off" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="sk-…" /></label>

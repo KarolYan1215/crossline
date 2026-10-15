@@ -32,7 +32,7 @@ export function CalendarAppsView({ apps, problem, busy, onRefresh }: {
   apps: CalendarAppStatus[] | undefined; problem: string; busy: boolean; onRefresh: () => void;
 }) {
   return <section className="st-card calendar-apps" aria-label="日历连接">
-    <header><h3>日历连接</h3><small>日历内容经 OpenAI 的 ChatGPT 连接器读取；用 API key 登录的账号读不到外部日历</small></header>
+    <header><h3>ChatGPT 日历连接器</h3><small>只显示连接状态，暂不把日程读入计划；要让日历里的课表进入计划，用「订阅日历」粘贴链接</small></header>
     {!apps && <p className="muted">读取中…</p>}
     {apps?.map((app) => <div className="st-row" key={app.app}>
       <span className="st-row-label">{app.label}

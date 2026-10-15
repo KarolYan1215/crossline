@@ -1,5 +1,5 @@
 import {
-  AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, AI_TOOLS_SETTING, GROWN_LIBRARY_SETTING, SKILL_LIBRARY_SETTING, allAiTools, detectedAiTools, personAiTool, readPersonAiTools, categoryFromWording, grownSkillFilesKey, grownSkillId, isScriptFile, mineSkillSettingKey, publicSkillFilesKey,
+  AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, AI_TOOLS_SETTING, RUNTIME_OWNER_SETTING, GROWN_LIBRARY_SETTING, SKILL_LIBRARY_SETTING, allAiTools, detectedAiTools, personAiTool, readPersonAiTools, categoryFromWording, grownSkillFilesKey, grownSkillId, isScriptFile, mineSkillSettingKey, publicSkillFilesKey,
   readGrownLibrary, readMineSkill, readSkillLibrary,
   type AiTool, type GrownSkillRecord, type PublicSkillRecord, type StoredMineSkill, type Weekday, type WorkflowSchedule
 } from "@crossline/core";
@@ -172,7 +172,16 @@ export function aiToolsFor(store: CrosslineStore, workspaceId: string): AiTool[]
   if (store.getSetting(workspaceId, AGENT_HISTORY_CONSENT) === "on") {
     try { summary = JSON.parse(store.getSetting(workspaceId, AGENT_HISTORY_SUMMARY) ?? "null") ?? undefined; } catch { summary = undefined; }
   }
-  return allAiTools(store.getSetting(workspaceId, AI_TOOLS_SETTING), detectedAiTools(summary));
+  const tools = allAiTools(store.getSetting(workspaceId, AI_TOOLS_SETTING), detectedAiTools(summary));
+  // The shell assistant works only for the machine owner's account (`AGENT_OWNER_ONLY`): a guest's plans must not hand it steps that
+  // would never run (found walking the app as an invitee, 2026-10-15).
+  return assistantAvailable(store, workspaceId) ? tools : tools.filter((tool) => tool.kind !== "assistant");
+}
+
+/** Whether this workspace has the machine's assistant: it is the runtime owner, or no workspace has been marked owner yet. */
+export function assistantAvailable(store: CrosslineStore, workspaceId: string): boolean {
+  if (store.getSetting(workspaceId, RUNTIME_OWNER_SETTING) === "1") return true;
+  return !store.listWorkspaces().some((workspace) => store.getSetting(workspace.id, RUNTIME_OWNER_SETTING) === "1");
 }
 
 /** The person names a tool they use (「剪映：自动字幕、粗剪」); returns it, or undefined for an empty name. */

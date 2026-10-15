@@ -25,11 +25,15 @@ const clock = (seconds: number) => seconds < 60 ? `${seconds} 秒` : `${Math.flo
  * keep working on the left meanwhile, or leave: the round calls them back (a desktop notification once allowed here, the tab's title, and
  * the tray on the installed copy).
  */
-export function TurnProgress({ sessionId, resumed = false, onEnded, onRunning }: { sessionId: string;
+export function TurnProgress({ sessionId, resumed = false, onEnded, onRunning, onRetry }: { sessionId: string;
   /** Opened on a page that was reloaded mid-turn: shown only while the worker says a turn runs, and `onEnded` when it stops. */
-  resumed?: boolean; onEnded?: () => void; onRunning?: (running: boolean) => void }) {
+  resumed?: boolean; onEnded?: () => void; onRunning?: (running: boolean) => void;
+  /** A reply is waiting but no turn runs for it (the background was restarted): send it again. */
+  onRetry?: () => void }) {
   const [progress, setProgress] = useState<OnboardingProgress | null>(null);
   const [seen, setSeen] = useState(false);
+  // Reads that found no running turn: after a few, a resumed page says the round was lost instead of showing nothing at all.
+  const [empty, setEmpty] = useState(0);
   const [shownFrom] = useState(() => Date.now());
   const [now, setNow] = useState(() => Date.now());
   const [notify, setNotify] = useState<NotificationPermission | "unsupported">("unsupported");
@@ -41,7 +45,7 @@ export function TurnProgress({ sessionId, resumed = false, onEnded, onRunning }:
       const body = await response?.json().catch(() => undefined) as { progress?: OnboardingProgress | null } | undefined;
       if (!live || !body) return;
       setProgress(body.progress ?? null);
-      if (body.progress) setSeen(true);
+      if (body.progress) setSeen(true); else setEmpty((count) => count + 1);
     };
     void read();
     const poll = setInterval(() => void read(), 1500);
@@ -50,6 +54,12 @@ export function TurnProgress({ sessionId, resumed = false, onEnded, onRunning }:
   }, [sessionId]);
   useEffect(() => { if (resumed && seen && !progress) onEnded?.(); }, [resumed, seen, progress, onEnded]);
   useEffect(() => { onRunning?.(Boolean(progress)); }, [progress, onRunning]);
+  // The answer was sent but nothing is answering it: a worker restart drops a turn that was waiting or running (2026-10-15 walkthrough,
+  // where the page showed the answer and nothing else, with no way on).
+  if (resumed && !progress && !seen && empty >= 3 && onRetry) return <div className="ob-turn ob-assistant ob-progress" role="alert">
+    <p className="ob-progress-head">这一轮没有在后台运行（后台服务重启过），回答已保存。</p>
+    <button type="button" className="ob-btn ob-primary" onClick={onRetry}>重新发送这一轮</button>
+  </div>;
   if (resumed && !progress) return null;
   const started = progress ? Date.parse(progress.startedAt) : shownFrom;
   const elapsed = Math.max(0, Math.round((now - (Number.isFinite(started) ? started : shownFrom)) / 1000));

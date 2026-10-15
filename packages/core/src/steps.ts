@@ -1,5 +1,6 @@
 import { ARCHETYPE_IDS, STEP_ROLES, archetypeById, isStepRole, type Archetype, type StepRole } from "./archetypes";
 import { normalizeAiAssist } from "./ai-tools";
+import { INFO_REQUEST_PERSON_MINUTES, infoRequestTraits } from "./info-request";
 
 /**
  * A task's step graph: the step planner's wire contract, the normalization that makes any answer usable, the warnings a reviewer
@@ -169,7 +170,10 @@ export function unverifiedUnits(units: StepUnit[], documents: Array<{ id: string
  * Makes any shape-valid plan usable: unique safe ids, ordered estimates, dependencies only on known earlier-or-later steps with cycles
  * broken, shares normalized, dates kept only when they are dates. Returns what it had to change as warnings.
  */
-export function normalizeStepPlan(plan: StepPlan, toolNames?: string[]): { plan: StepPlan; warnings: StepWarning[] } {
+export function normalizeStepPlan(plan: StepPlan, toolNames?: string[], options: {
+  /** False for an account the machine's assistant does not work for: every step is then the person's (or mixed), none is handed over. */
+  assistant?: boolean } = {}): { plan: StepPlan; warnings: StepWarning[] } {
+  const assistant = options.assistant !== false;
   const warnings: StepWarning[] = [];
   const idMap = new Map<string, string>();
   const steps = plan.steps.map((step, index) => {
@@ -194,7 +198,20 @@ export function normalizeStepPlan(plan: StepPlan, toolNames?: string[]): { plan:
   // Preparation is the assistant's: a person's step that only gathers or files material moves to it, and the assistant's steps never
   // take time on the person's calendar.
   for (const step of steps) {
-    if (step.executor !== "agent" && step.role !== "wait" && TRIVIAL_STEP.test(step.title)) {
+    if (!assistant && step.executor === "agent") {
+      step.executor = "human";
+      step.schedulable = step.role !== "wait";
+      warnings.push({ code: "STEP_NO_ASSISTANT", detail: `「${step.title}」改由本人完成：这个账号没有电脑上的助手` });
+    }
+    // Asking someone for a fact: the assistant drafts the message, the person sends it — sending is an external act (info-request.ts).
+    const request = step.role === "prepare" || /草稿|起草/.test(step.title) ? null : infoRequestTraits({ title: step.title, p50Minutes: step.estimate.p50Minutes }).request;
+    if (request?.kind === "ask_person" && step.executor !== "human") {
+      step.executor = "human";
+      step.schedulable = true;
+      warnings.push({ code: "STEP_INFO_REQUEST_PERSON", detail: `「${step.title}」要向别人发出询问，改由本人检查草稿后发送` });
+      continue;
+    }
+    if (assistant && step.executor !== "agent" && step.role !== "wait" && TRIVIAL_STEP.test(step.title)) {
       step.executor = "agent";
       warnings.push({ code: "STEP_TRIVIAL_TO_AGENT", detail: `「${step.title}」是准备工作，改由助手完成` });
     }
@@ -255,7 +272,8 @@ export function stepPlanWarnings(plan: StepPlan, window: { notBefore?: string; d
   const warnings: StepWarning[] = [];
   const roles = plan.steps.map((step) => step.role);
   for (const step of plan.steps) {
-    if (step.schedulable && step.estimate.p50Minutes < 15) warnings.push({ code: "STEP_TOO_SHORT", detail: `「${step.title}」只有 ${step.estimate.p50Minutes} 分钟，不足一个工作时段` });
+    // A request for a fact is a quarter of an hour by design (info-request.ts), not a step too short to schedule.
+    if (step.schedulable && step.estimate.p50Minutes < 15 && !(step.estimate.p50Minutes <= INFO_REQUEST_PERSON_MINUTES && infoRequestTraits({ title: step.title }).match)) warnings.push({ code: "STEP_TOO_SHORT", detail: `「${step.title}」只有 ${step.estimate.p50Minutes} 分钟，不足一个工作时段` });
     if (!archetype.roles.includes(step.role)) warnings.push({ code: "STEP_ROLE_OUTSIDE_ARCHETYPE", detail: `「${step.title}」的类型「${STEP_ROLES[step.role]}」不在「${archetype.label}」的常见步骤中` });
     if (!step.doneCriterion) warnings.push({ code: "STEP_DONE_CRITERION_MISSING", detail: `「${step.title}」没有完成标准` });
   }

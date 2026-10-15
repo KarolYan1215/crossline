@@ -29,11 +29,13 @@ const SaveState = ({ state }: { state: string }) => state === "failed" ? <small 
 
 /**
  * 自动化与助手: everything that decides what happens without a click, in one module (it used to be split over the assistant page,
- * the confirmation page's default-approval fold and the composer). Each assistant capability is one three-way control; the other
+ * the confirmation page's default-approval fold and the composer). Each assistant capability is one on/off control, as are the other
  * switches are two-way. What waits for the person's decision is on 待确认, not here.
  */
-export function AutomationModule({ categories, paused, permissionMode, recent, autoHandoff = false }: {
+export function AutomationModule({ categories, paused, permissionMode, recent, autoHandoff = false, assistant = true }: {
   categories: CategoryRow[]; paused: boolean; permissionMode: boolean; recent: RecentTask[];
+  /** False for an account the machine's assistant does not work for: its switches would do nothing, so they are not shown. */
+  assistant?: boolean;
   /** 「自动交给 Agent」: steps on the calendar the system can do start by themselves when their block comes up. Off by default. */
   autoHandoff?: boolean;
 }) {
@@ -41,8 +43,8 @@ export function AutomationModule({ categories, paused, permissionMode, recent, a
   const handoff = useSetting(autoHandoff ? "on" : "off", (value) => post("/api/agent/auto-handoff", { enabled: value === "on" }));
   const permission = useSetting(permissionMode ? "on" : "off", (value) => post("/api/permission-mode", { enabled: value === "on" }));
   return <div className="st-modules">
-    <section className="st-card" aria-label="助手能力">
-      <header><h3>助手能力</h3><small>关闭：不做 · 逐次审阅：每份产出待审阅 · 自动：自检全过即完成，抽查</small></header>
+    {assistant && <section className="st-card" aria-label="助手能力">
+      <header><h3>助手能力</h3><small>开启后，助手做完的结果默认直接生效并通知本人；需要本人判断或涉及对外动作的才进待确认</small></header>
       <ul className="st-rows">{categories.map((row) => <CapabilityRow key={row.category} row={row} />)}</ul>
       <div className="st-row"><span className="st-row-label">自动开工<small>已批准、尚未开始的任务由助手接手，一次一个</small></span>
         <SegmentedControl label="助手自动开工" value={pause.value} onChange={(value) => void pause.change(value)}
@@ -51,7 +53,7 @@ export function AutomationModule({ categories, paused, permissionMode, recent, a
         <SegmentedControl label="自动交给 Agent" value={handoff.value} onChange={(value) => void handoff.change(value)}
           options={[{ value: "off", label: "关闭" }, { value: "on", label: "开启" }]} /><SaveState state={handoff.state} /></div>
       <p className="st-note">对外发送、付款交易、代为承诺始终由本人完成。</p>
-    </section>
+    </section>}
     <section className="st-card" aria-label="自动生效">
       <header><h3>自动生效</h3><small>撤销入口在「待确认 · 最近自动生效」</small></header>
       <div className="st-row"><span className="st-row-label">低风险提案<small>在「待确认」前台停留 5 分钟且未拒绝即批准</small></span>
@@ -71,14 +73,13 @@ export function AutomationModule({ categories, paused, permissionMode, recent, a
 }
 
 function CapabilityRow({ row }: { row: CategoryRow }) {
-  const mode = useSetting<Mode>(row.mode, (value) => post("/api/agent/categories", { category: row.category, mode: value }));
+  // Two positions (decided 2026-10-15): results take effect by default and only those that need the person go to 待确认
+  // (`resultNeedsPerson` in the worker), so 「逐次审阅」 and 「自动」 no longer differ. On is stored as the old 「自动」 (`auto_checked`).
+  const mode = useSetting<"on" | "off">(row.mode === "off" ? "off" : "on", (value) => post("/api/agent/categories", { category: row.category, mode: value === "on" ? "auto" : "off" }));
   return <li className="st-row" title={row.explained}>
-    <span className="st-row-label">{row.label}
-      {mode.value === "review" && <small className="st-trust" title={`连续 ${row.runsToTrust} 次采纳且自检全过后可设为自动`}>
-        <span className="st-trust-bar" aria-hidden="true"><i style={{ width: `${Math.min(1, row.cleanRuns / row.runsToTrust) * 100}%` }} /></span>
-        连续采纳 {row.cleanRuns}/{row.runsToTrust}</small>}</span>
+    <span className="st-row-label">{row.label}</span>
     <SegmentedControl label={row.label} value={mode.value} onChange={(value) => void mode.change(value)}
-      options={[{ value: "off", label: "关闭" }, { value: "review", label: "逐次审阅" }, { value: "auto", label: "自动" }]} />
+      options={[{ value: "off", label: "关闭" }, { value: "on", label: "开启" }]} />
     <SaveState state={mode.state} />
   </li>;
 }

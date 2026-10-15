@@ -35,6 +35,8 @@ export type DiligenceReport = {
 export type OnboardingState = {
   /** The five start items stand (main interview; always true in a line's own interview): every page opens. */
   readyToStart: boolean;
+  /** The worker's own first milestone drafts: being designed, or that run ended with none. */
+  firstDrafts?: "none" | "running" | "stalled";
   /** How many start items there are (they are per line, so not a fixed five). */
   startTotal: number;
   /** The start items still open, in checklist order. */

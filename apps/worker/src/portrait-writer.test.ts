@@ -117,3 +117,12 @@ test("a say–do rewrite replaces the gap only: the rest, the version and the fi
   expect(store.listEvents(workspaceId, { type: "portrait.gap_rewritten" })).toHaveLength(1);
   expect(store.listEvents(workspaceId, { type: "portrait.written" })).toHaveLength(0);
 });
+
+// 2026-10-15 walkthrough: the first report was asked for only by the interview page that saw the last round land.
+test("with no report yet, a complete interview makes the first one due; an unfinished one does not", () => {
+  expect(portraitRewriteDue(store, workspaceId, NOW)).toBeNull();
+  store.saveOnboardingSession({ id: "s1", ownerId: "o", workspaceId, state: "active", coverage: {}, createdAt: NOW.toISOString(), updatedAt: NOW.toISOString() });
+  expect(portraitRewriteDue(store, workspaceId, NOW)).toBeNull();
+  store.saveOnboardingSession({ id: "s1", ownerId: "o", workspaceId, state: "complete", coverage: {}, createdAt: NOW.toISOString(), updatedAt: NOW.toISOString() });
+  expect(portraitRewriteDue(store, workspaceId, NOW)).toBe("first");
+});

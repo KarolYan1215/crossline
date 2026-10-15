@@ -53,6 +53,15 @@ describe("step plans", () => {
     expect(warnings.map((w) => w.code)).toEqual(expect.arrayContaining(["STEP_DEPENDENCY_UNKNOWN", "STEP_CYCLE_BROKEN", "STEP_SHARE_NORMALIZED"]));
   });
 
+  it("an account without the machine's assistant keeps every step its own (found walking the app as an invitee, 2026-10-15)", () => {
+    const steps = [step("g", "gather", { title: "收集课程讲义", executor: "agent", schedulable: false }), step("t", "gather", { title: "整理材料清单" })];
+    const guest = normalizeStepPlan(plan(steps), undefined, { assistant: false });
+    expect(guest.plan.steps.map((s) => [s.executor, s.schedulable])).toEqual([["human", true], ["human", true]]);
+    expect(guest.warnings.map((w) => w.code)).toContain("STEP_NO_ASSISTANT");
+    const owner = normalizeStepPlan(plan(steps));
+    expect(owner.plan.steps.map((s) => s.executor)).toEqual(["agent", "agent"]);
+  });
+
   it("orders estimates and makes a waiting step take no calendar time", () => {
     const { plan: normalized } = normalizeStepPlan(plan([step("w", "wait", { estimate: { p25Minutes: 90, p50Minutes: 30, p85Minutes: 10 } })], "problem_set"));
     const [only] = normalized.steps;
