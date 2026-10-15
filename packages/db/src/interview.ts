@@ -1,4 +1,4 @@
-import { interviewChecklist, profileGaps, PROFILE_CONFIRMED, portraitFingerprint, type ChecklistItem, type ProfileGap, type ProfileModel, type StoredLineProfile } from "@crossline/core";
+import { interviewChecklist, profileGaps, PROFILE_CONFIRMED, portraitStillConfirmed, type ChecklistItem, type ProfileGap, type ProfileModel, type QuestionScreenInput, type StoredLineProfile } from "@crossline/core";
 import { unfiledFilesIn } from "./file-belonging";
 import { latestFileDates } from "./index";
 import type { CrosslineStore } from "./index";
@@ -49,7 +49,7 @@ export function interviewChecklistFor(store: CrosslineStore, workspaceId: string
     dates,
     availability: Boolean(store.getSetting(workspaceId, "schedule.availability.proposed") || store.getSetting(workspaceId, "schedule.availability")),
     unfiledFiles: extras.unfiledFiles,
-    portraitConfirmed: Boolean(confirmed?.fingerprint && confirmed.fingerprint === portraitFingerprint(profile))
+    portraitConfirmed: portraitStillConfirmed(confirmed?.fingerprint, profile)
   });
 }
 
@@ -82,7 +82,37 @@ export function interviewGapsFor(store: CrosslineStore, workspaceId: string, lin
     undated: latestFileDates(store, workspaceId).undated,
     meetings: meetingProjects(store, workspaceId),
     dated: datedProjects(store, workspaceId, today),
+    datedItems: latestFileDates(store, workspaceId).dates.map(({ project, title }) => ({ project, title })),
+    calendarRecurring: calendarRecurringTitles(store, workspaceId),
     unfiled,
     portrait: { written: Boolean(items.find((item) => item.id === "portrait_fields")?.done), confirmed: Boolean(items.find((item) => item.id === "portrait_confirmed")?.done) }
   });
+}
+
+/**
+ * Titles the connected calendars hold on more than one day of the current plan (`graph_calendar:` blocks, every provider): a weekly class
+ * or meeting. What repeats is read from the calendar, never asked.
+ */
+export function calendarRecurringTitles(store: CrosslineStore, workspaceId: string): string[] {
+  const blocks = ((store.listPlanVersions(workspaceId)[0]?.payload as { blocks?: Array<{ id: string; title?: string; day?: string }> } | undefined)?.blocks ?? []);
+  const days = new Map<string, { title: string; days: Set<string> }>();
+  for (const block of blocks) {
+    if (!block.id.startsWith("graph_calendar:") || !block.title || !block.day) continue;
+    const key = block.title.replace(/\s+/g, "").toLowerCase();
+    const entry = days.get(key) ?? { title: block.title, days: new Set<string>() };
+    entry.days.add(block.day);
+    days.set(key, entry);
+  }
+  return [...days.values()].filter((entry) => entry.days.size >= 2).map((entry) => entry.title);
+}
+
+/** What the app needs to keep from the person the interview's questions that are not theirs to answer (`screenQuestions`). */
+export function questionScreenFor(store: CrosslineStore, workspaceId: string): QuestionScreenInput {
+  const meetingFacts = store.listProfileFacts(workspaceId).filter((fact) => fact.projectId && /^(meeting|class)_?times?$|^no_meetings$/.test(fact.slot)
+    && fact.status === "confirmed").map((fact) => fact.projectId);
+  return {
+    projects: store.listProjects(workspaceId).map(({ id, name }) => ({ id, name })),
+    meetings: [...new Set([...meetingProjects(store, workspaceId), ...meetingFacts])],
+    calendarRecurring: calendarRecurringTitles(store, workspaceId)
+  };
 }

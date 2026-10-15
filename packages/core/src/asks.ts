@@ -24,7 +24,7 @@ export type AskKind =
   | "backplan_input" | "waiting_due" | "capture_blocked" | "materials_blocked" | "gate_insufficient" | "gate_failed"
   | "evidence_manual" | "milestone_risk" | "agent_blocked" | "calendar_publish_failed" | "calendar_sync_failed" | "codex_signed_out"
   | "missed_block" | "source_project" | "calendar_line_unclear" | "interview_open" | "interview_question" | "event_propose" | "step_question"
-  | "relation_check" | "background_paused" | "locked_conflict";
+  | "relation_check" | "background_paused" | "locked_conflict" | "outcome_check";
 
 export type AskField = { id: string; label: string; kind: "text" | "longtext" | "date"; required: boolean;
   initial?: string; placeholder?: string };
@@ -47,7 +47,51 @@ export type Ask = {
   importance?: number;
   /** Set when the decision is not this week's: the day it comes into the week's decisions (see `horizonEntry`). */
   entersOn?: string;
+  /**
+   * Whether the answer matters beyond itself: it blocks other work, the assistant needs it to go on, it bears on a
+   * milestone weighted 60 or more, or it is a start-standard item. Unset falls back to `importance >= 60` (`askQuadrant`).
+   */
+  important?: boolean;
+  /** `many` when more than one option can be true at once (several goals); `one` (the default) when they exclude each other. */
+  select?: "one" | "many";
+  /** The thing the question is about, to look at before answering (the portrait, the drafts, a task, a file). */
+  preview?: AskPreview;
+  /**
+   * The person may answer in their own words instead of (or beside) an option: the input is shown in place, its placeholder
+   * the recommended answer in words, and typing goes straight into it — no second dialog.
+   */
+  freeText?: { placeholder: string };
+  /** For the assistant's work: how far it got and where it stopped, so the person can decide the next step in place. */
+  progress?: AskProgress;
 };
+export type AskPreview = { kind: "portrait" | "milestones" | "plan" | "task" | "file" | "agent"; href: string; label: string };
+export type AskProgress = {
+  /** One sentence: what the run was doing. */
+  summary: string;
+  /** What it finished, in order. */
+  done: string[];
+  /** Where it stopped and why, in the person's words — never a bare code. */
+  stuckAt: string;
+  /** What only the person can supply or decide for it to go on. */
+  needs: string[];
+  /** True when retrying could act outside this machine (a login that may lock the account, spending, sending). */
+  external: boolean;
+  /** Automatic retries already made after an interruption. */
+  retries: number;
+};
+
+/** The four Eisenhower quadrants the 待确认 page is laid out in. */
+export type AskQuadrant = "urgent_important" | "important" | "urgent" | "neither";
+export const ASK_QUADRANTS: AskQuadrant[] = ["urgent_important", "important", "urgent", "neither"];
+export const ASK_QUADRANT_LABEL: Record<AskQuadrant, string> = {
+  urgent_important: "紧急重要", important: "重要不紧急", urgent: "紧急不重要", neither: "不重要不紧急"
+};
+/** Urgent = answering later would cost a deadline within two days (`urgency: "now"`); important as `Ask.important` says. */
+export function askQuadrant(ask: Pick<Ask, "urgency" | "important" | "importance">): AskQuadrant {
+  const urgent = ask.urgency === "now";
+  const important = ask.important ?? (ask.importance ?? 0) >= 60;
+  return urgent && important ? "urgent_important" : important ? "important" : urgent ? "urgent" : "neither";
+}
 /** `until` is the person's local day (`YYYY-MM-DD`) on which the ask comes back. */
 export type AskSnooze = { askId: string; until: string; fingerprint: string };
 
@@ -119,4 +163,30 @@ export function validateAskAnswer(ask: Ask, optionId: string, values: Record<str
     clean[field.id] = value;
   }
   return { ok: true, option, values: clean };
+}
+
+/** The longest answer in the person's own words (`Ask.freeText`). */
+export const ASK_NOTE_MAX = 4000;
+/**
+ * Checks a choice that may hold several options (`select: "many"`) and/or the person's own words (`freeText`). Exactly one
+ * option for a single-choice ask; at least one for a multiple-choice ask; none at all only when there is a note and the ask
+ * takes free text. Each chosen option's fields are checked as `validateAskAnswer` checks them.
+ */
+export function validateAskChoice(ask: Ask, optionIds: string[], values: Record<string, unknown>, note = ""):
+  { ok: true; options: AskOption[]; values: Record<string, string>; note: string } | { ok: false; code: string } {
+  const text = note.trim();
+  if (text.length > ASK_NOTE_MAX) return { ok: false, code: "ASK_FIELD_TOO_LONG" };
+  if (text && !ask.freeText) return { ok: false, code: "ASK_NOTE_NOT_TAKEN" };
+  const ids = [...new Set(optionIds)];
+  if (ids.length === 0 && !text) return { ok: false, code: "ASK_OPTION_UNKNOWN" };
+  if (ids.length > 1 && (ask.select ?? "one") === "one") return { ok: false, code: "ASK_SINGLE_CHOICE" };
+  const options: AskOption[] = [];
+  const clean: Record<string, string> = {};
+  for (const id of ids) {
+    const checked = validateAskAnswer(ask, id, values);
+    if (!checked.ok) return checked;
+    options.push(checked.option);
+    Object.assign(clean, checked.values);
+  }
+  return { ok: true, options, values: clean, note: text };
 }

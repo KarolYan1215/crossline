@@ -1,0 +1,119 @@
+import { ASK_QUADRANTS, askQuadrant, type Ask, type AskKind, type AskQuadrant } from "@crossline/core";
+
+/**
+ * What the 待确认 page and Today's stack need to say about an ask beyond what the ask itself carries: what happens once it is
+ * answered, what happens if nobody answers, and where the thing it is about can be opened. Pure, so the card can be tested without a
+ * browser and the wording stays in one place.
+ */
+
+/** Per kind, the effect of an answer and of silence, in the app's own terms (read off `lib/asks.ts`'s handlers). */
+const OUTCOMES: Record<AskKind, { answered: string; unanswered: string }> = {
+  backplan_input: { answered: "重新倒推该里程碑的步骤，或撤回尚未开始的自动步骤。", unanswered: "该里程碑没有新的自动步骤，排程只含已有工作。" },
+  waiting_due: { answered: "到了：依赖它的工作排进日历；推迟：到新日期再问。", unanswered: "依赖它的工作继续留在日历之外。" },
+  capture_blocked: { answered: "按补充的说明重新分析，生成任务提案。", unanswered: "这条收集保持未分析，不进入排程。" },
+  materials_blocked: { answered: "重新准备材料，或不等材料直接开始。", unanswered: "任务停在准备材料阶段，不会开始。" },
+  gate_insufficient: { answered: "重新排上补做，补交后重新判定。", unanswered: "任务保持未通过，不计入里程碑进度。" },
+  gate_failed: { answered: "重新运行验收判定。", unanswered: "已提交的证据保持待判定。" },
+  evidence_manual: { answered: "任务记为已验收。", unanswered: "任务停在待验收。" },
+  milestone_risk: { answered: "按所选方式调整时间、截止或标准；接受风险后 7 天内不再问。", unanswered: "排程不变，预测完成日仍贴近或晚于截止。" },
+  agent_blocked: { answered: "任务转为本人处理，或带着补充的信息重试。", unanswered: "助手的这部分工作保持中断。" },
+  calendar_publish_failed: { answered: "重新写入 Crossline 日历。", unanswered: "Crossline 日历停在上次写入的排程。" },
+  calendar_sync_failed: { answered: "在设置中恢复日历连接。", unanswered: "排程继续使用最后一次读到的日程。" },
+  codex_signed_out: { answered: "重新登录后，后台分析与准备恢复。", unanswered: "需要模型的后台工作保持暂停。" },
+  missed_block: { answered: "按所选方式顺延、改期、补记或归档。", unanswered: "已按顺延处理，截止前的余量可能变小。" },
+  source_project: { answered: "文件归入所选项目，其中的日程与截止带上项目名。", unanswered: "文件中的日程保持无项目名。" },
+  calendar_line_unclear: { answered: "该日程按所选主线着色，同名日程相同。", unanswered: "该日程保持无色。" },
+  interview_open: { answered: "回到访谈继续下一轮。", unanswered: "长期目标与里程碑草稿按现有信息设计。" },
+  interview_question: { answered: "本轮问题答完后一并交给访谈，进入下一轮。", unanswered: "访谈停在本轮，下一轮不会开始。" },
+  event_propose: { answered: "写入 Crossline 日历，提前 10 分钟提醒。", unanswered: "日历中不出现该日程；排程照样避开这段时间。" },
+  step_question: { answered: "任务的步骤按回答重新安排。", unanswered: "步骤保持现有安排。" },
+  relation_check: { answered: "记录这条飞轮关系是否兑现，计入兑现率。", unanswered: "这条关系的兑现情况不计入。" },
+  background_paused: { answered: "查看额度，恢复后自动继续。", unanswered: "新收集的事项等恢复后再分析。" },
+  locked_conflict: { answered: "挪开锁定块，或保留两件事的重叠。", unanswered: "锁定块与新日程继续重叠。" },
+  outcome_check: { answered: "完成情况或结果记入任务与里程碑进度；说了出结果的日期就到那天再问。", unanswered: "任务保持已验收，完成情况不计入里程碑进度。" }
+};
+
+/** What an answer does and what silence does. An option's own detail is preferred over the kind's sentence when it is the recommended one. */
+export function askOutcome(ask: Pick<Ask, "kind" | "options">): { answered: string; unanswered: string } {
+  const fallback = OUTCOMES[ask.kind] ?? { answered: "按所选处理。", unanswered: "相关工作保持现状。" };
+  const recommended = ask.options.find((option) => option.recommended && !option.href && option.detail);
+  return { answered: recommended ? `推荐「${recommended.label}」：${recommended.detail}` : fallback.answered, unanswered: fallback.unanswered };
+}
+
+export type AskSource = { label: string; href: string };
+
+const WORK_ORDER_KINDS = new Set<AskKind>(["materials_blocked", "gate_insufficient", "gate_failed", "evidence_manual", "missed_block", "locked_conflict", "step_question"]);
+const MILESTONE_KINDS = new Set<AskKind>(["backplan_input", "milestone_risk"]);
+
+/** The first 「…」 or 《…》 in a title: the name of the thing the ask is about. */
+export function quotedName(title: string): string | undefined {
+  return /[「《][^」》]+[」》]/.exec(title)?.[0];
+}
+
+/**
+ * Where the thing an ask is about can be opened: the task, the milestone, the file, the interview. An option that already links to the
+ * same page is not repeated, and the preview's own link is left to the preview.
+ */
+export function askSources(ask: Pick<Ask, "kind" | "entityId" | "title" | "options" | "preview">): AskSource[] {
+  const name = quotedName(ask.title) ?? "";
+  const id = encodeURIComponent(ask.entityId);
+  const sources: AskSource[] = [];
+  if (WORK_ORDER_KINDS.has(ask.kind)) sources.push({ label: `任务${ask.kind === "step_question" ? "" : name}`, href: `/workbench/${id}` });
+  if (MILESTONE_KINDS.has(ask.kind)) sources.push({ label: `里程碑${name}`, href: `/milestones?open=${id}` });
+  if (ask.kind === "source_project") sources.push({ label: `文件${name}`, href: `/api/source-documents/${id}/file` });
+  if (ask.kind === "capture_blocked") sources.push({ label: "收集", href: "/workbench" });
+  if (ask.kind === "interview_question") sources.push({ label: "访谈", href: "/onboarding" });
+  if (ask.kind === "relation_check") sources.push({ label: "飞轮关系", href: "/milestones" });
+  const taken = new Set([...ask.options.map((option) => option.href).filter(Boolean), ask.preview?.href]);
+  return sources.filter((source) => !taken.has(source.href));
+}
+
+/** One card per id: the ledger can raise the same question twice (two file dates with one TBD item), and two cards for one answer mislead. */
+export function uniqueAsks(asks: Ask[]): Ask[] {
+  const seen = new Set<string>();
+  return asks.filter((ask) => !seen.has(ask.id) && Boolean(seen.add(ask.id)));
+}
+
+/** The asks of each quadrant, in the order they came (already ranked by urgency and importance). */
+export function byQuadrant(asks: Ask[]): Record<AskQuadrant, Ask[]> {
+  const groups = Object.fromEntries(ASK_QUADRANTS.map((quadrant) => [quadrant, [] as Ask[]])) as Record<AskQuadrant, Ask[]>;
+  for (const ask of asks) groups[askQuadrant(ask)].push(ask);
+  return groups;
+}
+
+/** The request body for `POST /api/asks/answer`. A single option also goes as `optionId`, which the route has always taken. */
+export function answerBody(askId: string, optionIds: string[], values: Record<string, string>, note: string): Record<string, unknown> {
+  const text = note.trim();
+  return { askId, optionIds, ...(optionIds.length === 1 ? { optionId: optionIds[0] } : {}), values, ...(text ? { note: text } : {}) };
+}
+
+/** The person's words for a refused answer. */
+export function answerProblem(code: string | undefined): string {
+  switch (code) {
+    case "ASK_FIELD_REQUIRED": return "还有必填项未填写";
+    case "ASK_FIELD_DATE_INVALID": return "日期格式不对";
+    case "ASK_FIELD_TOO_LONG": return "内容过长";
+    case "ASK_SINGLE_CHOICE": return "这一题只能选一项";
+    case "ASK_NOTE_NOT_TAKEN": return "这一题需要从选项中选择";
+    case "ASK_OPTION_UNKNOWN": return "先选一项";
+    case "ASK_NOT_FOUND": return "这条已经处理过了";
+    default: return "未保存，请重试";
+  }
+}
+
+/**
+ * The days the decisions that can wait come into the week, counted per day over the coming weeks, for the small chart on 待确认.
+ * Days before `today` count on `today`; beyond `days` they are folded into the last bar.
+ */
+export function entryHistogram(entries: string[], today: string, days = 28): Array<{ day: string; count: number }> {
+  const start = Date.parse(`${today}T12:00:00Z`);
+  const bars = Array.from({ length: days }, (_, index) => ({ day: new Date(start + index * 86_400_000).toISOString().slice(0, 10), count: 0 }));
+  for (const entry of entries) {
+    const offset = Math.round((Date.parse(`${entry}T12:00:00Z`) - start) / 86_400_000);
+    if (Number.isNaN(offset)) continue;
+    bars[Math.max(0, Math.min(days - 1, offset))]!.count += 1;
+  }
+  return bars;
+}
+
+export const shortDay = (day: string) => `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}`;

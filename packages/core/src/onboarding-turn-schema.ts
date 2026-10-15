@@ -154,6 +154,11 @@ export type OnboardingTurnContext = {
   workHistory?: string[];
   /** The connected calendars' events in the next seven days (`calendarWeek`), when any calendar is connected: what the week already holds. */
   calendar?: Array<{ title: string; weekday: number; start: string; end: string; source: string }>;
+  /**
+   * The public quick test's result the person chose to bring in (`ASSESS_RESULT_SETTING`): their own 32-statement answer, corroboration only.
+   * The portrait's four axes are still scored from the interview's own evidence and never copied from it.
+   */
+  publicAssessment?: { code: string; typeName: string; axes: Record<string, number>; takenAt: string; note: string };
   /** New files that did not fit this turn's reading budget; they come with the next turns. */
   sourcesWaiting?: number;
   /**
@@ -339,11 +344,22 @@ export function validateOnboardingTurn(value: unknown, known: KnownSources): Onb
   for (const window of turn.availability?.windows ?? []) if (!/^\d{2}:\d{2}$/.test(window.start) || !/^\d{2}:\d{2}$/.test(window.end) || window.end <= window.start)
     reject("ONBOARDING_AVAILABILITY_INVALID", `可用时段 ${window.start}–${window.end} 不合法：用 HH:MM，且结束晚于开始。`);
   // A turn recorded before the portrait existed has none of it; every live answer carries all of it (strict schema).
-  return { ...turn, stage: turn.stage ?? "details",
+  return { ...turn, stage: turn.stage ?? "details", questions: turn.questions.map((question) => ({ ...question, kind: questionKind(question) })),
     lineProfiles: (turn.lineProfiles ?? []).map((line) => ({ ...line, attributeCandidates: cleanCandidates(line.attributeCandidates ?? []) })),
     goalEdits: (turn.goalEdits ?? []).map((edit) => ({ ...edit, parts: edit.parts.map((part) => ({ text: cleanAttribute(part.text), kind: kindOf(part) })).filter((part) => part.text) })),
     availability: turn.availability ?? { windows: [], why: "" },
     profile: withValues({ ...EMPTY_PROFILE_MODEL, ...(turn.profile ?? {}) }) };
+}
+
+/**
+ * Whether a question takes several answers at once. `kind` says so (`multi`), and the Skill is told when to use it; a choice question
+ * whose own words ask for several — 「哪些」, 「哪几」, a goal (「本学期最重要的目标？」: a grade and a skill can both be goals) — is read as
+ * `multi` even when the model wrote `single`, because a single choice there forces a wrong answer. A goal measured as one number
+ * (目标分数, 目标成绩) stays single.
+ */
+const MANY = /哪些|哪几|多选|可多选|都有什么|目标(?!分|成绩|绩点|线|是多少)/u;
+export function questionKind(question: Pick<TurnQuestion, "kind" | "text">): TurnQuestion["kind"] {
+  return question.kind === "single" && MANY.test(question.text) ? "multi" : question.kind;
 }
 
 /** Known values only, each once, scores clamped: a profile from before values existed has none. */

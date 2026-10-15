@@ -63,7 +63,13 @@ const PORTRAIT_FIELDS: Array<[keyof ProfileModel, string]> = [["portrait", "一�
 const isDefaultProject = (id: string) => /-default$/.test(id);
 /** A deadline the person said there is none of: an answer, and as good as a date for starting. */
 export const NO_DEADLINE = /没有截止|无截止|不设截止|no deadline/i;
-const PROJECT_SLOTS: Array<[RegExp, string]> = [[/^goal$|^target/, "目标"], [/^deadline$|^date_/, "截止日期"], [/^evidence$/, "进展证据"]];
+// The slot names the interview actually writes vary (`course_goal`, `progress_evidence`, `class_schedule` on 2026-10-15): read by meaning,
+// or an interview that had every answer kept the person in a round with nothing left to ask and a list of what was 「missing」.
+const PROJECT_SLOTS: Array<[RegExp, string]> = [[/^goal$|^target|_goal$/, "目标"], [/^deadline$|^date_|_deadline$/, "截止日期"],
+  [/^evidence$|_evidence$|^progress/, "进展证据"]];
+const MEETING_SLOTS = /^(meeting|class)_?(times?|schedule)$|^no_meetings$|^fixed_class_time$/;
+/** A part of a course (its project, an exam): graded and timed through the course itself, not on its own. */
+const COURSE_PART = /项目|作业|考试|测验|报告|论文|展示|project|homework|assignment|exam|quiz|report|paper|presentation/i;
 
 export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
   const items: ChecklistItem[] = [];
@@ -124,12 +130,12 @@ export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
   for (const project of input.projects.filter((item) => !isDefaultProject(item.id))) {
     const own = input.facts.filter((fact) => fact.projectId === project.id && settledFact(fact));
     const dated = input.dates.some((entry) => entry.project === project.id || entry.project === project.name);
-    const course = Boolean(courseCodeOf(project.name) ?? courseCodeOf(project.id)) || own.some((fact) => fact.slot === "grading");
+    const course = (Boolean(courseCodeOf(project.name) ?? courseCodeOf(project.id)) && !COURSE_PART.test(project.name)) || own.some((fact) => fact.slot === "grading");
     const missing = PROJECT_SLOTS.filter(([slot, label]) => !(own.some((fact) => slot.test(fact.slot)) || (label === "截止日期" && dated))).map(([, label]) => label);
     if (course && !own.some((fact) => fact.slot === "grading")) missing.push("评分占比");
     // A course meets: its weekly class times are the frame of the person's week (a course whose meetings nobody asked about left a hole).
     const meets = input.dates.some((entry) => entry.recurring && (entry.project === project.id || entry.project === project.name))
-      || own.some((fact) => /^(meeting|class)_?times?$|^no_meetings$/.test(fact.slot));
+      || own.some((fact) => MEETING_SLOTS.test(fact.slot));
     if (course && !meets) missing.push("上课时间");
     items.push({ id: `project:${project.id}`, group: "项目", label: `「${project.name}」${course ? "目标、截止、进展证据、评分占比与上课时间" : "目标、截止与进展证据"}`,
       done: !missing.length, detail: missing.length ? `缺：${missing.join("、")}` : "", owner: "interview" });
@@ -153,3 +159,26 @@ export const PROFILE_CONFIRMED = "profile.confirmed";
 /** What a confirmation is about: the portrait's one line, its core conflict and its problem. A portrait rewritten after is asked again. */
 export const portraitFingerprint = (profile: Partial<ProfileModel>) =>
   [profile.portrait, profile.coreConflict, profile.problem].map((text) => String(text ?? "").replace(/\s+/g, "")).join("|");
+
+/** How alike two portraits must read (character-pair Dice) for a confirmation of one to hold for the other. */
+export const PORTRAIT_SAME_SIMILARITY = 0.7;
+const pairs = (text: string) => { const out = new Map<string, number>(); const chars = [...text];
+  for (let index = 0; index < chars.length - 1; index += 1) { const pair = chars[index]! + chars[index + 1]!; out.set(pair, (out.get(pair) ?? 0) + 1); }
+  return out; };
+/**
+ * Whether the person's 「符合」 still holds for the portrait as it stands. The interview rewrites the portrait every round, and an exact
+ * match made every small rewording (「均被赋予」 → 「均承载」) a new portrait: the real account confirmed it and was asked again the next
+ * round, every round (2026-10-15). A portrait that reads substantially the same keeps the confirmation; one rewritten in substance is
+ * asked again.
+ */
+export function portraitStillConfirmed(confirmedFingerprint: string | undefined, profile: Partial<ProfileModel>): boolean {
+  if (!confirmedFingerprint) return false;
+  const current = portraitFingerprint(profile);
+  if (current === confirmedFingerprint) return true;
+  if (current.replace(/\|/g, "").length < 10) return false;
+  const a = pairs(confirmedFingerprint), b = pairs(current);
+  let shared = 0, total = 0;
+  for (const [pair, count] of a) { shared += Math.min(count, b.get(pair) ?? 0); total += count; }
+  for (const count of b.values()) total += count;
+  return total > 0 && (2 * shared) / total >= PORTRAIT_SAME_SIMILARITY;
+}

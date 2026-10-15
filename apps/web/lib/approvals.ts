@@ -3,6 +3,7 @@ import { AUTO_APPROVAL_UNDO_MS, requiredApproval, type AccessContext } from "@cr
 import { approveWorkOrderProposal, ensureSeeded, getStore, saveMilestoneEdit } from "./crossline";
 import { requestCodexSupervisor } from "./codex-runtime";
 import { requestTaskPass } from "./steps";
+import { applyDraftWeight } from "./milestone-board";
 
 export type BatchResult = { approved: string[]; skipped: Array<{ id: string; code: string }> };
 
@@ -41,7 +42,7 @@ export function approveMilestoneDrafts(ctx: AccessContext, ids: string[]): Batch
     const saved = saveMilestoneEdit(ctx, { id, identityId: draft.identityId, projectId: draft.projectId ?? "",
       title: draft.title, status: "approved", successCriteria: draft.successCriteria ?? [],
       ...(draft.templateId ? { templateId: draft.templateId } : {}) });
-    if (saved.ok) result.approved.push(id); else result.skipped.push({ id, code: saved.code });
+    if (saved.ok) { result.approved.push(id); applyDraftWeight(ctx, id); } else result.skipped.push({ id, code: saved.code });
   }
   if (result.approved.length) requestAutoBackplan(ctx);
   return result;

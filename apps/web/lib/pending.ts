@@ -6,9 +6,10 @@ import { countProposedTargets } from "./targets";
 import { countAssistantPending } from "./agent";
 import { loadDiligence } from "./diligence";
 import { loadPendingDateBatch } from "./imported-dates";
-import { openAsks } from "./asks";
+import { listed, openAsks } from "./asks";
 import { decisionHorizon } from "./horizon";
 import { identityLines } from "./lines";
+import { preparingProposalIds } from "./proposal-ready";
 
 /**
  * Everything waiting for the person to say yes or no this week, in one number per kind. The badge in the header and the
@@ -53,9 +54,11 @@ export function countPending(ctx: AccessContext): PendingCounts {
   const horizon = decisionHorizon(ctx);
   const orders = store.listWorkOrders(ctx.workspaceId);
   const split = <T>(items: T[], deferred: (item: T) => boolean) => { const later = items.filter(deferred).length; return { now: items.length - later, later }; };
-  const proposals = split(orders.filter((order) => order.state === "awaiting_plan_approval"), (order) => Boolean(horizon.orderEntry(order)));
+  // A proposal whose steps are still being planned is not a decision yet (`lib/proposal-ready.ts`).
+  const preparing = preparingProposalIds(ctx);
+  const proposals = split(orders.filter((order) => order.state === "awaiting_plan_approval" && !preparing.has(order.id)), (order) => Boolean(horizon.orderEntry(order)));
   const drafts = split(store.listMilestones(ctx.workspaceId).filter((milestone) => milestone.status === "draft"), (milestone) => Boolean(horizon.milestoneEntry(milestone.id)));
-  const asks = split(openAsks(ctx), (ask) => Boolean(ask.entersOn));
+  const asks = split(listed(openAsks(ctx)), (ask) => Boolean(ask.entersOn));
   const reviews = split(listAgentTasks(store, ctx.workspaceId).filter((task) => task.status === "needs_review"), (task) => {
     const order = orders.find((item) => item.id === task.workOrderId);
     return Boolean(order && horizon.orderEntry(order));

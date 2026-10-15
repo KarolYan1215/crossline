@@ -1,36 +1,133 @@
 import { AGENT_CATEGORIES } from "@crossline/core";
 import type { AccessContext } from "@crossline/core";
-import { loadAssistant, loadTaskAudit, type AssistantView } from "../../lib/agent";
-import { ApprovalButtons, CategoryDecision, ReviewButtons } from "./assistant-controls";
+import { loadAssistant, loadTaskAudit, outputNames, readTaskFile, type AssistantView, type TaskAudit } from "../../lib/agent";
+import { ApprovalButtons, CategoryDecision, RetryCheckButton, ReviewButtons, SendBackItem } from "./assistant-controls";
+import { csvHead, groupOutputs, markdownHead, workflowSteps, type OutputItem } from "./assistant-outputs";
+import { Markdown } from "../ui/markdown";
+import { Namer, cleanText, humanTable, humanizeMarkdown } from "../materials/humanize";
 import { Tag } from "../ui/tag";
 
-const RESULT: Record<string, string> = { pass: "通过", fail: "未通过", not_run: "未运行" };
 const minutes = (ms: number) => ms >= 60_000 ? `${Math.round(ms / 60_000)} 分钟` : `${Math.max(1, Math.round(ms / 1000))} 秒`;
 
+/** A file of the task's directory as text, for a preview; nothing when it cannot be read. */
+function readText(ctx: AccessContext, taskId: string, relative: string): string | undefined {
+  const file = readTaskFile(ctx, taskId, relative);
+  return file && file.type.startsWith("text/") ? file.body.toString("utf8") : undefined;
+}
+
 /**
- * What a finished assistant task did and made, from the record written beside its files. The assistant's own account is set in the
- * generated-text face; the app's own record (commands, refusals, file changes) is listed apart from it.
+ * One deliverable: what it is and what it is for, opened in a new tab, with the opening of a document or the first rows of a table — both
+ * cleaned of local paths, hashes and bookkeeping columns, each file called by its own name (`humanize`).
+ */
+function OutputCard({ ctx, taskId, item, namer }: { ctx: AccessContext; taskId: string; item: OutputItem; namer: Namer }) {
+  const href = (relative: string) => `/api/agent/tasks/${encodeURIComponent(taskId)}/file?path=${encodeURIComponent(relative)}`;
+  const text = item.previewPath && item.preview !== "image" ? readText(ctx, taskId, item.previewPath) : undefined;
+  return <li className="ar-output">
+    <p className="ar-output-head"><a href={href(item.path)} target="_blank" rel="noreferrer"><b>{item.name}</b></a></p>
+    {item.purpose && <p className="gen ar-output-purpose">{cleanText(item.purpose, namer)}</p>}
+    {item.preview === "markdown" && text && (() => {
+      const head = markdownHead(text);
+      return <div className="ar-preview gen"><Markdown text={humanizeMarkdown(head.text, namer)} />{head.more && <a href={href(item.previewPath!)} target="_blank" rel="noreferrer">读全文 →</a>}</div>;
+    })()}
+    {item.preview === "table" && text && (() => {
+      const head = csvHead(text, 5, 64);
+      const table = humanTable(head.header, head.rows, namer);
+      if (table.kind === "summary") return <p className="gen ar-output-purpose">{table.text}</p>;
+      return <div className="ar-table-wrap">
+        <table className="ar-table gen"><thead><tr>{table.header.map((cell, index) => <th key={index} scope="col">{cell}</th>)}</tr></thead>
+          <tbody>{table.rows.map((row, index) => <tr key={index}>{row.map((cell, column) => <td key={column}>{cell}</td>)}</tr>)}</tbody></table>
+        <small>共 {head.totalRows} 行{head.totalRows > table.rows.length ? "，此处显示开头部分" : ""}</small>
+      </div>;
+    })()}
+    {item.preview === "image" && <img className="ar-image" src={href(item.path)} alt={item.name} loading="lazy" />}
+  </li>;
+}
+
+/** A reusable workflow, in words and as a row of steps (whose each one is); no file names. */
+function WorkflowCard({ ctx, taskId, workflow }: { ctx: AccessContext; taskId: string; workflow: NonNullable<ReturnType<typeof groupOutputs>["workflow"]> }) {
+  let manifest: unknown;
+  try { manifest = workflow.manifestPath ? JSON.parse(readText(ctx, taskId, workflow.manifestPath) ?? "null") : null; } catch { manifest = null; }
+  const read = workflowSteps(manifest);
+  return <div className="ar-workflow">
+    <p><b>{read.name || "可复用工作流"}</b></p>
+    {(read.summary || workflow.purpose) && <p className="gen">{read.summary || workflow.purpose}</p>}
+    {read.steps.length > 0 && <ol className="ar-flow" aria-label="工作流步骤">{read.steps.map((step, index) =>
+      <li key={index} data-by={step.by}><span className="gen">{step.title}</span><small>{step.by === "person" ? "本人" : "助手"}</small></li>)}</ol>}
+    <small>保留与启用在 设置 → 自动化与助手 → Skill 库。</small>
+  </div>;
+}
+
+/**
+ * What a finished assistant task made, in the person's terms: deliverables grouped by use with a preview, a reusable workflow as words and
+ * steps, the self-checks as one line (only failures spelled out, each with a redo), what was not done and what was assumed with a way to
+ * send it back, and — folded at the bottom — what the assistant did, without commands.
  */
 function TaskBody({ ctx, task }: { ctx: AccessContext; task: AssistantView["tasks"][number] }) {
   const detail = loadTaskAudit(ctx, task.taskId);
   if (!detail) return <p className="muted">{task.blockerCode ? `未完成：${task.blockerMessage || "运行中断"}` : "未找到本次记录。"}</p>;
-  const file = (relative: string) => `/api/agent/tasks/${encodeURIComponent(task.taskId)}/file?path=${encodeURIComponent(relative)}`;
-  const declined = detail.audit.decisions.filter((d) => d.outcome === "declined").length;
+  const outputs = groupOutputs(detail.artifacts);
+  const namer = new Namer(outputNames(ctx, task.taskId, detail));
+  const passed = detail.verification.filter((item) => item.result === "pass");
+  const failed = detail.verification.filter((item) => item.result !== "pass");
   return <div className="assistant-detail">
-    <p className="gen">{detail.summary}</p>
+    <p className="gen">{cleanText(detail.summary, namer)}</p>
     {detail.inputsModified.length > 0 && <p role="alert"><strong>原文件被改动：</strong>{detail.inputsModified.join("；")}</p>}
-    {detail.needsHuman.length > 0 && <div><h4>需本人完成</h4><ul>{detail.needsHuman.map((item, i) => <li key={i}><strong>{item.what}</strong> <span className="gen">{item.why}</span></li>)}</ul></div>}
-    {detail.artifacts.length > 0 && <div><h4>产出 · {detail.artifacts.length}</h4><ul>{detail.artifacts.map((item) => <li key={item.path}>
-      <a href={file(item.path)} target="_blank" rel="noreferrer">{item.path}</a> <span className="gen">{item.purpose}</span></li>)}</ul></div>}
-    {detail.verification.length > 0 && <div><h4>自检</h4><ul>{detail.verification.map((item, i) => <li key={i}>
-      <Tag tone={item.result === "pass" ? "ok" : item.result === "fail" ? "risk" : "neutral"}>{RESULT[item.result] ?? item.result}</Tag> <span className="gen">{item.check}</span></li>)}</ul></div>}
-    {detail.notDone.length > 0 && <div><h4>未完成</h4><ul>{detail.notDone.map((item, i) => <li key={i} className="gen">{item.what} — {item.why}</li>)}</ul></div>}
-    {detail.assumptions.length > 0 && <div><h4>假设</h4><ul>{detail.assumptions.map((item, i) => <li key={i} className="gen">{item}</li>)}</ul></div>}
-    <details className="fold advanced"><summary>运行记录：{detail.audit.commands.length} 条命令 · {detail.audit.filesChanged.length} 处文件改动 · {detail.audit.searches.length} 次搜索 · 拦下 {declined} 次</summary>
-      {detail.audit.decisions.length > 0 && <ul>{detail.audit.decisions.map((d, i) => <li key={i}>{d.outcome === "declined" ? "拦下" : "允许"} · {d.reason || d.rule}</li>)}</ul>}
-      {detail.audit.searches.length > 0 && <ul>{detail.audit.searches.map((q, i) => <li key={i}>搜索：{q}</li>)}</ul>}
-    </details>
+
+    {(outputs.groups.length > 0 || outputs.workflow) && <div className="ar-outputs">
+      {outputs.groups.map((entry) => <section key={entry.group} className="ar-group" aria-label={entry.group}>
+        <h4>{entry.group} · {entry.items.length}</h4>
+        <ul>{entry.items.map((item) => <OutputCard key={item.path} ctx={ctx} taskId={task.taskId} item={item} namer={namer} />)}</ul>
+      </section>)}
+      {outputs.workflow && <section className="ar-group" aria-label="可复用工作流"><h4>可复用工作流</h4>
+        <WorkflowCard ctx={ctx} taskId={task.taskId} workflow={outputs.workflow} /></section>}
+    </div>}
+
+    {detail.verification.length > 0 && <div className="ar-checks">
+      {passed.length > 0 && <p className="ar-check-line" title={passed.map((item) => item.check).join("、")}>
+        <ChecksBar passed={passed.length} total={detail.verification.length} />已自检 {passed.length} 项{failed.length ? `，${failed.length} 项未通过` : "，全部通过"}</p>}
+      {failed.map((item, index) => <p key={index} className="ar-check-failed">
+        <Tag tone={item.result === "fail" ? "risk" : "neutral"}>{item.result === "fail" ? "未通过" : "未运行"}</Tag>
+        <span>检查「<span className="gen">{item.check}</span>」{item.result === "fail" ? "没有通过，这部分结果可能不可靠" : "没有运行，这部分结果未经核对"}。</span>
+        <RetryCheckButton taskId={task.taskId} check={item.check} />
+      </p>)}
+    </div>}
+
+    {detail.needsHuman.length > 0 && <div className="ar-list"><h4>需本人完成</h4><ul>{detail.needsHuman.map((item, index) => <li key={index}>
+      <span className="gen">{item.what}</span>{item.why && <small className="gen">{item.why}</small>}</li>)}</ul></div>}
+    <Leftovers taskId={task.taskId} title="本次没有做" items={detail.notDone.map((item) => ({ what: item.what, why: item.why }))} />
+    <Leftovers taskId={task.taskId} title="所依据的假设" items={detail.assumptions.map((item) => ({ what: item, why: "" }))} />
+
+    <RunRecord audit={detail.audit} />
   </div>;
+}
+
+/** Things the assistant left out or assumed, each one returnable with a note. */
+function Leftovers({ taskId, title, items }: { taskId: string; title: string; items: Array<{ what: string; why: string }> }) {
+  if (!items.length) return null;
+  return <div className="ar-list"><h4>{title}</h4><ul>{items.map((item, index) => <li key={index}>
+    <span className="gen">{item.what}</span>{item.why && <small className="gen">{item.why}</small>}
+    <SendBackItem taskId={taskId} what={item.what} />
+  </li>)}</ul></div>;
+}
+
+function ChecksBar({ passed, total }: { passed: number; total: number }) {
+  return <svg className="ar-checks-bar" viewBox={`0 0 ${total * 10} 8`} width={Math.min(120, total * 12)} height="8" aria-hidden="true">
+    {Array.from({ length: total }, (_, index) => <rect key={index} x={index * 10} width="8" height="8" data-pass={index < passed || undefined} />)}
+  </svg>;
+}
+
+/** For whoever wants it: what the assistant did, as steps and searches and refusals, never as command lines. */
+function RunRecord({ audit }: { audit: TaskAudit["audit"] }) {
+  const declined = audit.decisions.filter((item) => item.outcome === "declined");
+  const steps = audit.commands.length;
+  return <details className="fold advanced ar-record">
+    <summary>助手做了哪些操作（{steps} 步）{declined.length ? ` · 拦下 ${declined.length} 次` : ""}</summary>
+    <ul>
+      {audit.searches.length > 0 && <li>上网查了 {audit.searches.length} 次：<span className="gen">{audit.searches.slice(0, 6).join("；")}</span></li>}
+      <li>在任务目录里运行了 {steps} 步操作，改动 {audit.filesChanged.length} 个文件。</li>
+      {declined.map((item, index) => <li key={index}>拦下一次：{item.reason || "超出允许范围"}</li>)}
+    </ul>
+  </details>;
 }
 
 /** The assistant's part of 待确认: kinds of work it asks to start, questions it put mid-run, and results waiting for review. */
@@ -45,7 +142,7 @@ export function AssistantReview({ ctx, deferred = () => undefined }: { ctx: Acce
     <h3>{task.title}</h3>
     <p className="assistant-meta"><Tag>{AGENT_CATEGORIES[task.category]}</Tag><small>用时 {minutes(task.durationMs)}</small>
       {task.workOrderId && <a href={`/workbench/${encodeURIComponent(task.workOrderId)}`}>对应任务</a>}
-      {!task.checksPassed && <Tag tone="warn">自检未全部通过</Tag>}{task.autoApproved && <Tag tone="info">来自自动生效的任务</Tag>}
+      {task.autoApproved && <Tag tone="info">来自自动生效的任务</Tag>}
       {deferred(task.workOrderId) && <small>{deferred(task.workOrderId)!.slice(5)} 起列入本周</small>}</p>
     <TaskBody ctx={ctx} task={task} />
     <ReviewButtons taskId={task.taskId} />

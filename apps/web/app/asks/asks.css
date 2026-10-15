@@ -1,0 +1,119 @@
+/*
+ * Asks (待决事项): the card and the drawer shared by Today's stack and 待确认's quadrants. Grey shades only; the line colour is the card's
+ * left edge (`--lc`, set by data-line). The older `.ask-*` rules in globals.css still give the base box; these refine it.
+ */
+.ak-card{display:grid;gap:6px;padding:9px 11px}
+.ak-card .ask-meta{flex-wrap:wrap;row-gap:2px}
+.ak-title{margin:0;font-size:14px;font-weight:700;line-height:1.4;overflow-wrap:anywhere}
+.ak-brief{display:grid;grid-template-columns:auto minmax(0,1fr);gap:3px 10px;margin:0;font-size:13px;line-height:1.5}
+.ak-brief>div{display:contents}
+.ak-brief dt{font-size:12px;font-weight:700;color:var(--graphite);padding-top:1px;white-space:nowrap}
+.ak-brief dd{margin:0;color:var(--ink);overflow-wrap:anywhere;min-width:0}
+.ak-clamp{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.ak-clamp[data-open]{display:block;-webkit-line-clamp:unset;overflow:visible}
+.ak-more{border:0;background:transparent;padding:0;margin:0;font:inherit;font-size:12px;color:var(--ink);text-decoration:underline;cursor:pointer}
+.ak-sources{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;margin:0;font-size:13px}
+.ak-sources>span{font-size:12px;font-weight:700;color:var(--graphite)}
+.ak-sources a{color:var(--ink);overflow-wrap:anywhere}
+
+/* The preview opens in place: the row height grows from nothing, and the contents fade in. */
+.ak-preview-wrap{display:grid;gap:4px}
+.ak-preview-bar{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;margin:0;font-size:13px}
+.ak-preview-bar .text-button{font-size:13px;padding:2px 10px}
+.ak-preview-bar a{color:var(--ink)}
+.ak-preview{display:grid;grid-template-rows:0fr;opacity:0;transition:grid-template-rows .22s ease,opacity .22s ease}
+.ak-preview[data-open]{grid-template-rows:1fr;opacity:1}
+.ak-preview-inner{min-height:0;overflow:hidden;visibility:hidden;transition:visibility 0s linear .22s}
+.ak-preview[data-open] .ak-preview-inner{visibility:visible;transition:visibility 0s}
+.ak-preview-inner>*{margin:2px 0 4px;padding:8px 10px;border:1px solid var(--mist);background:var(--chalk)}
+@media (prefers-reduced-motion:reduce){.ak-preview,.ak-preview-inner{transition:none}}
+.ak-pv-portrait{display:flex;gap:12px;align-items:flex-start}
+.ak-pv-portrait img{width:72px;height:auto;flex:none;border:1px solid var(--mist);background:var(--paper)}
+.ak-pv-portrait p,.ak-pv-task p,.ak-pv-file p{margin:0 0 4px;font-size:13px}
+.ak-pv-type b{font-size:16px;letter-spacing:.04em}
+.ak-pv-summary{display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
+.ak-pv-tags{display:flex;flex-wrap:wrap;gap:4px}
+.ak-pv-list{list-style:none;margin:0;padding:0;display:grid;gap:3px;font-size:13px}
+.ak-pv-list li{display:flex;justify-content:space-between;gap:10px;padding-left:6px;border-left:3px solid var(--lc,var(--mist))}
+.ak-pv-list li[data-done] span{text-decoration:line-through}
+.ak-pv-list small{font-size:12px;color:var(--graphite);white-space:nowrap}
+
+/* Options: one click for a single choice; ticks and one 确定 for several. */
+.ak-card .ask-options{margin:0}
+.ak-many{border:0;padding:0;min-width:0}
+.ak-legend{padding:0;margin:0 0 4px;font-size:12px;font-weight:700;color:var(--graphite)}
+.ak-check{grid-template-columns:auto minmax(0,1fr);align-items:start;column-gap:8px;cursor:pointer}
+.ak-check input{width:18px;height:18px;margin:1px 0 0;accent-color:var(--ink)}
+.ak-check>span{display:grid;gap:2px;min-width:0}
+.ak-check[data-checked]{border-color:var(--ink);outline:2px solid var(--ink);outline-offset:-2px}
+.ak-link b{font-weight:600}
+.ak-card .ask-follow-up{margin:0}
+.ak-free{display:block}
+.ak-free textarea{display:block;width:100%;box-sizing:border-box;min-height:38px;field-sizing:content;max-height:200px;resize:vertical;font:inherit;font-size:14px;
+  line-height:1.5;padding:7px 9px;border:1px solid var(--mist);background:var(--paper);color:var(--ink)}
+.ak-free textarea::placeholder{color:var(--graphite);opacity:1}
+.ak-free textarea:focus{border-color:var(--ink);outline:none}
+.ak-submit{display:flex;flex-wrap:wrap;gap:8px}
+.ak-card .ask-later{margin:0}
+
+/* The importance of the milestone an ask bears on, drawn beside its number. */
+.ak-weight{display:inline-flex;align-items:center;gap:4px}
+.ak-weight-bg{fill:var(--mist)}
+.ak-weight-fill{fill:var(--ink)}
+
+/* An assistant run that stopped: finished steps as filled cells, the one it stopped at hatched. */
+.ak-progress{display:grid;gap:6px;padding:8px 10px;border:1px solid var(--mist);background:var(--chalk)}
+.ak-progress p{margin:0;font-size:13px}
+.ak-progress-head{display:grid;gap:3px}
+.ak-progress-head small{font-size:12px;color:var(--graphite)}
+.ak-progress-bar{display:flex;gap:2px;height:8px}
+.ak-cell{flex:1 1 0;min-width:6px;background:var(--mist)}
+.ak-cell[data-state="done"]{background:var(--ink)}
+.ak-cell[data-state="stuck"]{background:repeating-linear-gradient(45deg,var(--ink) 0 2px,transparent 2px 5px);outline:1px solid var(--ink);outline-offset:-1px}
+.ak-steps{list-style:none;margin:0;padding:0;display:grid;gap:2px;font-size:13px}
+.ak-steps li{display:grid;grid-template-columns:16px minmax(0,1fr);gap:4px}
+.ak-steps li[data-state="done"]{color:var(--graphite)}
+.ak-needs h4{margin:0 0 2px;font-size:12px;color:var(--graphite)}
+.ak-needs ul{margin:0;padding-left:18px;font-size:13px}
+.ak-external{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px}
+
+/* 待确认: four quadrants, each a drawer. */
+.ak-board{display:grid;gap:8px;margin:10px 0}
+.ak-board-head{display:grid;gap:6px}
+.ak-board-head h2{margin:0;font-size:15px;font-weight:700}
+.ak-empty{margin:0}
+.ak-qbar{display:flex;gap:2px;height:28px;min-width:0}
+.ak-qbar a{flex-basis:0;display:flex;align-items:center;gap:6px;min-width:34px;padding:0 8px;overflow:hidden;white-space:nowrap;text-decoration:none;font-size:12px;border:1px solid transparent}
+.ak-qbar a .mono{font-size:13px;font-weight:700}
+.ak-qbar-label{overflow:hidden;text-overflow:ellipsis}
+.ak-qbar a[data-quadrant="urgent_important"]{background:var(--ink);color:var(--paper)}
+.ak-qbar a[data-quadrant="important"]{background:var(--graphite);color:var(--paper)}
+.ak-qbar a[data-quadrant="urgent"]{background:var(--chalk);color:var(--ink);border-color:var(--ink)}
+.ak-qbar a[data-quadrant="neither"]{background:var(--paper);color:var(--graphite);border-color:var(--mist)}
+.ak-quadrants{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;align-items:start}
+.ak-quadrant{display:grid;gap:6px;min-width:0;padding:8px;border:1px solid var(--mist);border-top:2px solid var(--ink);background:var(--paper)}
+.ak-quadrant[data-quadrant="important"],.ak-quadrant[data-quadrant="neither"]{border-top-color:var(--graphite)}
+.ak-quadrant[data-empty]{padding:4px 8px;border-top-width:1px}
+.ak-quadrant>header{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+.ak-quadrant h3{margin:0;font-size:14px;font-weight:700}
+.ak-q-toggle{display:inline-flex;align-items:center;gap:8px;min-height:32px;padding:0;border:0;background:transparent;color:var(--ink);font:inherit;font-weight:700;cursor:pointer}
+.ak-q-toggle:disabled{cursor:default;color:var(--graphite)}
+.ak-q-count{font-weight:700}
+.ak-quadrant[data-empty] .ak-q-count{font-weight:400}
+.ak-q-mark{width:12px;height:12px;flex:none;border:1px solid currentColor;box-sizing:border-box}
+.ak-quadrant[data-quadrant="urgent_important"] .ak-q-mark{background:linear-gradient(currentColor,currentColor) 0 0/50% 50% no-repeat}
+.ak-quadrant[data-quadrant="important"] .ak-q-mark{background:linear-gradient(currentColor,currentColor) 100% 0/50% 50% no-repeat}
+.ak-quadrant[data-quadrant="urgent"] .ak-q-mark{background:linear-gradient(currentColor,currentColor) 0 100%/50% 50% no-repeat}
+.ak-quadrant[data-quadrant="neither"] .ak-q-mark{background:linear-gradient(currentColor,currentColor) 100% 100%/50% 50% no-repeat}
+.ak-quadrant .ask-deck{list-style:none;margin:0;padding:0}
+.ak-list{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+
+@media (max-width:900px){.ak-quadrants{grid-template-columns:minmax(0,1fr)}}
+@media (max-width:680px){
+  .ak-q-toggle,.ak-check,.ak-preview-bar .text-button,.ak-preview-bar a,.ak-submit button{min-height:44px}
+  .ak-preview-bar a{display:inline-flex;align-items:center}
+  .ak-more{min-height:44px;padding:0 6px}
+  .ak-brief{grid-template-columns:minmax(0,1fr)}
+  .ak-brief dt{padding-top:2px}
+  .ak-qbar-label{display:none}
+}

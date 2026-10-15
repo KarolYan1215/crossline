@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 const post = (path: string, body: Record<string, unknown>) => fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 
@@ -33,7 +33,7 @@ export function ReviewButtons({ taskId }: { taskId: string }) {
   const { act, busy, message } = useAct();
   const [note, setNote] = useState("");
   return <div className="assistant-actions">
-    <button type="button" className="primary-button" disabled={busy} onClick={() => void act(`/api/agent/tasks/${encodeURIComponent(taskId)}/review`, { decision: "accepted", note })}>采纳</button>
+    <button type="button" className="primary-button" disabled={busy} onClick={() => void act(`/api/agent/tasks/${encodeURIComponent(taskId)}/review`, { decision: "accepted", note })}>批准</button>
     <label><span className="sr-only">退回原因</span><input value={note} maxLength={300} placeholder="备注或退回原因（可选）" onChange={(event) => setNote(event.target.value)} /></label>
     <button type="button" className="secondary-button" disabled={busy} onClick={() => void act(`/api/agent/tasks/${encodeURIComponent(taskId)}/review`, { decision: "rejected", note })}>退回</button>
     {message && <small role="status">{message}</small>}
@@ -50,3 +50,48 @@ export function ApprovalButtons({ id }: { id: string }) {
   </span>;
 }
 
+
+/**
+ * Whether the assistant can redo part of a result (`POST /api/agent/tasks/<id>/retry`). Asked once per page: a route that does not exist
+ * answers 404 to any method, one that exists answers something else, so the button appears only where the action is real.
+ */
+let retryRoute: Promise<boolean> | undefined;
+function useRetryAvailable(taskId: string) {
+  const [available, setAvailable] = useState(false);
+  useEffect(() => {
+    retryRoute ??= fetch(`/api/agent/tasks/${encodeURIComponent(taskId)}/retry`, { method: "HEAD" })
+      .then((response) => response.status !== 404).catch(() => false);
+    let live = true;
+    void retryRoute.then((value) => { if (live) setAvailable(value); });
+    return () => { live = false; };
+  }, [taskId]);
+  return available;
+}
+
+/** 「让助手重做这一项」 for one self-check that did not pass. */
+export function RetryCheckButton({ taskId, check }: { taskId: string; check: string }) {
+  const available = useRetryAvailable(taskId);
+  const { act, busy, message } = useAct();
+  if (!available) return null;
+  return <span className="assistant-actions">
+    <button type="button" className="secondary-button" disabled={busy}
+      onClick={() => void act(`/api/agent/tasks/${encodeURIComponent(taskId)}/retry`, { only: [check] }, "未能交给助手重做，请刷新后重试。")}>让助手重做这一项</button>
+    {message && <small role="status">{message}</small>}
+  </span>;
+}
+
+/** 「退回让助手补上」 beside something the assistant left out or assumed: the existing send-back, with the item and an optional note. */
+export function SendBackItem({ taskId, what }: { taskId: string; what: string }) {
+  const { act, busy, message } = useAct();
+  const [open, setOpen] = useState(false);
+  const [note, setNote] = useState("");
+  if (!open) return <button type="button" className="text-button ar-sendback" onClick={() => setOpen(true)}>退回让助手补上</button>;
+  return <span className="assistant-actions ar-sendback-form">
+    <label><span className="sr-only">补充说明</span>
+      <input value={note} maxLength={300} placeholder="补充说明（可选）" autoFocus onChange={(event) => setNote(event.target.value)} /></label>
+    <button type="button" className="primary-button" disabled={busy} onClick={() => void act(`/api/agent/tasks/${encodeURIComponent(taskId)}/review`,
+      { decision: "rejected", note: `补上：${what}${note.trim() ? `。${note.trim()}` : ""}`.slice(0, 300) })}>退回</button>
+    <button type="button" className="text-button" disabled={busy} onClick={() => setOpen(false)}>取消</button>
+    {message && <small role="status">{message}</small>}
+  </span>;
+}

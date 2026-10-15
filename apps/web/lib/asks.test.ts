@@ -221,6 +221,10 @@ test("only this week's decisions are counted and listed; one whose work starts l
   store.saveMilestone({ id: "far-draft", ownerId: owner, workspaceId: ws, identityId: "research", projectId: "p", title: "远期草稿", status: "draft", version: 1 });
   store.saveMilestoneAnchor({ workspaceId: ws, milestoneId: "far-draft", stage: 1, deadline: "2027-01-30", baseline: "", target: "", stakeholders: [],
     sourceFactIds: [], dependsOn: [], updatedAt: "2026-10-01T00:00:00Z" });
+  // A proposal counts once its steps are planned (`proposalReady`).
+  for (const id of ["get-data", "map", "far-task"]) store.saveStepPlan(ws, id, { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 1, unit: "题" },
+    rationale: "", steps: [{ id: "s", role: "solve", title: "做", deliverable: "产出", doneCriterion: "完成", share: 1, estimate: { p25Minutes: 20, p50Minutes: 30, p85Minutes: 50 },
+      dependsOn: [], notBefore: "", dueBy: "", schedulable: true, executor: "human", tickOutcome: "" }] }, owner, "planned");
   const counts = countPending(TEST_CTX);
   // The two drafts under the milestone due on 10-09 are this week's; the far task and the far draft are not.
   expect(counts.workOrders).toBe(2);
@@ -278,4 +282,61 @@ test("a locked block a calendar event lands on is asked about, and each answer d
   lock();
   expect(await answerAsk(TEST_CTX, ask!.id, "move", {}, NOW)).toMatchObject({ ok: true });
   expect(JSON.parse(store.getSetting(ws, "schedule.frozen")!)).toEqual([]);
+});
+
+test("a locked block is also asked about when the person's own event or another locked block takes its time", async () => {
+  const store = setup();
+  store.setSetting(ws, "schedule.preferences", JSON.stringify({ timeZone: "America/Chicago", mode: "buffered" }));
+  for (const id of ["hw3", "hw4"]) store.saveWorkOrder({ id, ownerId: owner, workspaceId: ws, identityId: "research", projectId: "p", milestoneId: "mos2", intent: id === "hw3" ? "作业 3" : "作业 4",
+    state: "ready_for_human", riskTier: "routine", estimate, payload: {} });
+  store.savePlanVersion({ id: "plan-1", ownerId: owner, workspaceId: ws, version: 1, status: "current", payload: { blocks: [] } });
+  const slot = { start: "2026-10-08T16:00:00.000Z", end: "2026-10-08T17:00:00.000Z" };
+  store.setSetting(ws, "schedule.frozen", JSON.stringify([{ blockId: "scheduled:hw3", reason: "locked", ...slot }]));
+  store.setSetting(ws, "schedule.events", JSON.stringify([{ id: "dentist", title: "看牙", lineId: "", repeat: null, date: "2026-10-08", start: "11:30", end: "12:00",
+    location: "", source: "input" }]));
+  expect(collectAsks(TEST_CTX, NOW).find((item) => item.kind === "locked_conflict")?.title).toContain("看牙");
+  store.setSetting(ws, "schedule.events", "[]");
+  store.setSetting(ws, "schedule.frozen", JSON.stringify([{ blockId: "scheduled:hw3", reason: "locked", ...slot }, { blockId: "scheduled:hw4", reason: "pinned", ...slot }]));
+  const asks = collectAsks(TEST_CTX, NOW).filter((item) => item.kind === "locked_conflict");
+  expect(asks).toHaveLength(1);
+  expect(asks[0]!.title).toContain("作业 4");
+});
+
+test("a refused capture is answered in the person's own words straight into the card, and carries its contract fields", async () => {
+  const store = setup();
+  store.capture({ id: "cap", ownerId: owner, workspaceId: ws, title: "整理组会意见", context: "组会上的三个质疑" }, "cap-1");
+  store.transitionWorkOrder(ws, "cap", { type: "analysis.proposed", proposalId: "cap" }, "a1");
+  store.transitionWorkOrder(ws, "cap", { type: "blocked", reason: "ANALYSIS_POLICY_BLOCKED" }, "a2",
+    { audit: { blocker: { code: "ANALYSIS_POLICY_BLOCKED", message: "不清楚要交付什么" } } });
+  const ask = collectAsks(TEST_CTX, NOW).find((item) => item.kind === "capture_blocked")!;
+  expect(ask).toMatchObject({ important: true, preview: { kind: "task" }, freeText: { placeholder: expect.stringMatching(/^例如/) } });
+  // Two options on a single-choice ask are refused; the words alone are the context.
+  expect(await answerAsk(TEST_CTX, ask.id, { optionIds: ["context", "discard"] }, {}, NOW)).toMatchObject({ ok: false, code: "ASK_SINGLE_CHOICE" });
+  expect(await answerAsk(TEST_CTX, ask.id, { optionIds: [], note: "交付一页回应清单，周五组会前" }, {}, NOW)).toMatchObject({ ok: true });
+  expect(store.listCaptures(ws)[0]!.context).toContain("交付一页回应清单");
+  expect(store.listEvents(ws, { type: "ask.answered" }).at(-1)!.payload).toMatchObject({ askId: ask.id, note: "交付一页回应清单，周五组会前" });
+});
+
+test("a note beside an option fills the field that option asks for, and is kept on the answer where nothing reads it", async () => {
+  const store = setup();
+  store.saveWorkOrder({ id: "wo", ownerId: owner, workspaceId: ws, identityId: "research", projectId: "p", milestoneId: "mos2", intent: "跑一轮仿真",
+    state: "blocked", riskTier: "milestone", estimate, payload: { gateReview: { verdict: "insufficient", gaps: [], criteriaVerdict: [] } } });
+  const ask = collectAsks(TEST_CTX, NOW).find((item) => item.kind === "gate_insufficient")!;
+  expect(ask.preview).toMatchObject({ kind: "task", href: "/workbench/wo" });
+  expect(await answerAsk(TEST_CTX, ask.id, { optionIds: ["drop"], note: "导师说这轮不用做了" }, {}, NOW)).toMatchObject({ ok: true });
+  expect(store.listWorkOrders(ws).find((order) => order.id === "wo")!.state).toBe("archived");
+});
+
+test("a step question the task's own files answer is not asked; the same question from two tasks of one project is one card", () => {
+  const store = setup();
+  for (const id of ["hw3", "hw4"]) store.saveWorkOrder({ id, ownerId: owner, workspaceId: ws, identityId: "research", projectId: "ece555", milestoneId: "", intent: id,
+    state: "approved", riskTier: "routine", estimate, payload: {} });
+  const plan = { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 1, unit: "题" }, rationale: "", steps: [],
+    questions: [{ id: "q1", text: "作业提交方式？", why: "", options: ["Canvas"] }, { id: "q2", text: "当前完成状态？", why: "", options: ["未开始", "一半"] }] };
+  for (const id of ["hw3", "hw4"]) store.saveStepPlan(ws, id, plan as never, owner, "t");
+  const titles = () => collectAsks(TEST_CTX, NOW).filter((ask) => ask.kind === "step_question").map((ask) => ask.title.split("：")[1]);
+  expect(titles()).toEqual(["作业提交方式？", "当前完成状态？"]);
+  store.saveSourceDocument({ id: "syl", ownerId: owner, workspaceId: ws, kind: "text", fileName: "syllabus.pdf", mediaType: "text/plain", sha256: "s", uri: "file://s",
+    extractedText: "…", extractionStatus: "done", projectId: "ece555", createdAt: "2026-10-01T00:00:00Z" } as never);
+  expect(titles()).toEqual(["当前完成状态？"]);
 });

@@ -1,6 +1,7 @@
 import "server-only";
-import { ONBOARDING_STAGES, gapCoveredBy, readyToStart as startReady, startMissing as startOpen, type AccessContext, type ChecklistItem } from "@crossline/core";
-import { interviewChecklistFor, interviewGapsFor } from "@crossline/db";
+import { ONBOARDING_STAGES, gapCoveredBy, questionKind, readyToStart as startReady, screenQuestions, screenedNote, startMissing as startOpen, type AccessContext, type ChecklistItem,
+  type ScreenReason } from "@crossline/core";
+import { interviewChecklistFor, interviewGapsFor, questionScreenFor } from "@crossline/db";
 import { identityLines } from "./lines";
 import { getStore, planToday } from "./crossline";
 import { unfiledFiles } from "./file-belonging";
@@ -60,6 +61,8 @@ export type InterviewStatus = {
   stage: string; stageIndex: number; stageCount: number;
   /** Questions still waiting for the person: the open round's (questions about a file left out) and the app's own not yet in a round. */
   questions: InterviewQuestion[];
+  /** The open round's questions the app keeps from the person (`screenQuestions`), named to the interview when the round is sent. */
+  screened: Array<{ question: InterviewQuestion; reason: ScreenReason }>;
   openQuestions: number;
   /** The system's own completion record: never shown to the person. */
   checklist: ChecklistItem[];
@@ -90,7 +93,7 @@ export function interviewStatus(ctx: AccessContext): InterviewStatus {
   const open = checklist.filter((item) => !item.done);
   const readyToStart = startReady(checklist), startMissing = startOpen(checklist);
   if (!session) return { started: false, complete: false, awaitingPerson: false, parked: false, readyToStart, startMissing, stage: "", stageIndex: 0, stageCount,
-    questions: [], openQuestions: 0, checklist, sessionId: "" };
+    questions: [], screened: [], openQuestions: 0, checklist, sessionId: "" };
   const messages = store.listOnboardingMessages(ctx.workspaceId, session.id);
   const lastAssistant = [...messages].reverse().find((message) => message.role === "assistant");
   const answered = messages.at(-1)?.role === "user";
@@ -99,43 +102,83 @@ export function interviewStatus(ctx: AccessContext): InterviewStatus {
   const complete = !open.length;
   const parked = readyToStart && !complete;
   // The open round, minus questions about a file (the file's own question covers it) and minus what was already answered.
-  const round = (answered || content.nextAction === "ready_for_milestones" ? [] : content.questions ?? []) as InterviewQuestion[];
+  // A round stored before the screen existed is screened on read, so a question that is not the person's never holds the round up.
+  const stored = (answered || content.nextAction === "ready_for_milestones" ? [] : content.questions ?? []) as InterviewQuestion[];
+  const { keep, screened } = screenQuestions(stored.map((question) => ({ ...question, kind: questionKind(question) })), questionScreenFor(store, ctx.workspaceId));
+  const round = keep;
   const owned = questionsOwnedElsewhere(ctx, round);
   const pending = readPending(ctx, session.id, lastAssistant?.seq ?? 0);
   const inRound = new Set(round.map((question) => question.id));
   const gaps = answered ? [] : interviewGapsFor(store, ctx.workspaceId, lines, today)
     .filter((gap) => gap.code !== "FILE_UNFILED" && !inRound.has(gap.question.id) && !gapCoveredBy(gap, round)).map((gap) => gap.question as InterviewQuestion);
+  const seen = new Set<string>();
   const questions = [...round.filter((question) => !owned.has(question.id) && !question.id.startsWith("gap-file-")), ...gaps]
-    .filter((question) => !pending.answers[question.id]);
+    .filter((question) => !pending.answers[question.id] && !seen.has(question.id) && Boolean(seen.add(question.id)));
   return { started: true, complete, awaitingPerson: open.length > 0 && open.every((item) => item.owner === "person"), parked, readyToStart, startMissing,
     stage, stageIndex: Math.max(0, ONBOARDING_STAGES.indexOf(stage as (typeof ONBOARDING_STAGES)[number])) + 1, stageCount,
-    questions, openQuestions: questions.length, checklist, sessionId: session.id };
+    questions, screened, openQuestions: questions.length, checklist, sessionId: session.id };
 }
 
-const lineOf = (question: InterviewQuestion, option: { label: string } | undefined, other: string) =>
-  `【${question.text}】${[option ? `选择：${option.label}` : "", other.trim() ? `补充：${other.trim()}` : ""].filter(Boolean).join("。")}`;
+/** The answer in the words the interview screen sends (`composeAnswers`): several options joined by 「；」, the person's own words after 补充. */
+const lineOf = (question: InterviewQuestion, options: Array<{ label: string }>, other: string) =>
+  `【${question.text}】${[options.length ? `选择：${options.map((option) => option.label).join("；")}` : "", other.trim() ? `补充：${other.trim()}` : ""].filter(Boolean).join("。")}`;
+
+/**
+ * The answers that still count: one given to a question the screen now keeps from the person (a room, class times on record, a
+ * calendar's recurrence answered as a single choice) is dropped — it was not theirs to answer, and a forced single choice over two
+ * events is a wrong answer (the owner's decision, 2026-10-15).
+ */
+const validAnswers = (answers: Record<string, string>, status: InterviewStatus) => {
+  const screened = new Set(status.screened.map((item) => item.question.id));
+  return Object.entries(answers).filter(([id]) => !screened.has(id)).map(([, line]) => line);
+};
+
+/** The round as one reply: the answers that count, then a line naming the questions the app kept from the person. */
+const roundReply = (answers: Record<string, string>, status: InterviewStatus) =>
+  [...validAnswers(answers, status), screenedNote(status.screened)].filter(Boolean).join("\n");
 
 /**
  * One interview question answered on 待决事项. Answers wait until every waiting question is answered, then go to the interview as one
  * reply in the words the interview screen sends (so the app's own questions are read straight out of it), and the next round follows.
  */
-export async function answerInterviewQuestion(ctx: AccessContext, questionId: string, optionId: string, other: string,
+export async function answerInterviewQuestion(ctx: AccessContext, questionId: string, optionIds: string[], other: string,
   send: (sessionId: string, text: string) => Promise<void>): Promise<{ ok: true; sent: boolean } | { ok: false; code: string }> {
   const status = interviewStatus(ctx);
   const question = status.questions.find((item) => item.id === questionId);
   if (!question) return { ok: false, code: "INTERVIEW_QUESTION_NOT_OPEN" };
-  const option = question.options.find((item) => item.id === optionId);
-  if (!option && !other.trim()) return { ok: false, code: "INTERVIEW_ANSWER_EMPTY" };
+  const options = question.options.filter((item) => optionIds.includes(item.id));
+  if (options.length > 1 && question.kind !== "multi") return { ok: false, code: "ASK_SINGLE_CHOICE" };
+  if (!options.length && !other.trim()) return { ok: false, code: "INTERVIEW_ANSWER_EMPTY" };
   const store = getStore();
   const pending = readPending(ctx, status.sessionId, lastAssistantSeq(store.listOnboardingMessages(ctx.workspaceId, status.sessionId)));
-  pending.answers[questionId] = lineOf(question, option, other);
+  pending.answers[questionId] = lineOf(question, options, other);
   if (status.questions.some((item) => item.id !== questionId)) {
     store.setSetting(ctx.workspaceId, PENDING_ANSWERS, JSON.stringify(pending));
     return { ok: true, sent: false };
   }
   store.setSetting(ctx.workspaceId, PENDING_ANSWERS, "null");
-  await send(status.sessionId, Object.values(pending.answers).join("\n"));
+  await send(status.sessionId, roundReply(pending.answers, status));
   return { ok: true, sent: true };
+}
+
+/**
+ * Answers waiting on 待决事项 for a round with nothing left to answer — the rest were questions no longer asked (an answered TBD date, a
+ * portrait already confirmed, a question the screen keeps from the person) — go to the interview now. Without this the real account's
+ * five answers waited for three dead questions no answer could clear (2026-10-15). Run on the web's attention timer.
+ */
+export async function flushPendingAnswers(ctx: AccessContext, send: (sessionId: string, text: string) => Promise<void>): Promise<boolean> {
+  const status = interviewStatus(ctx);
+  if (!status.started || !status.sessionId || status.questions.length) return false;
+  const store = getStore();
+  const messages = store.listOnboardingMessages(ctx.workspaceId, status.sessionId);
+  if (messages.at(-1)?.role !== "assistant") return false;
+  const pending = readPending(ctx, status.sessionId, lastAssistantSeq(messages));
+  if (!Object.keys(pending.answers).length) return false;
+  store.setSetting(ctx.workspaceId, PENDING_ANSWERS, "null");
+  // Nothing left that counts: no reply is sent and no interview round is started for it.
+  if (!validAnswers(pending.answers, status).length) return false;
+  await send(status.sessionId, roundReply(pending.answers, status));
+  return true;
 }
 
 /** Answers given on 待决事项 and not yet sent: they go in front of the person's next reply in the interview itself. */
@@ -144,7 +187,7 @@ export function takePendingAnswers(ctx: AccessContext, sessionId: string): strin
   const pending = readPending(ctx, sessionId, lastAssistantSeq(store.listOnboardingMessages(ctx.workspaceId, sessionId)));
   if (!Object.keys(pending.answers).length) return "";
   store.setSetting(ctx.workspaceId, PENDING_ANSWERS, "null");
-  return Object.values(pending.answers).join("\n");
+  return validAnswers(pending.answers, interviewStatus(ctx)).join("\n");
 }
 
 /** Question ids already answered on 待决事项, so the interview screen does not show them again. */

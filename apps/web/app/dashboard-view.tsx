@@ -3,6 +3,7 @@ import { OfflineReplay } from "./offline-command-forms";
 import { Conversation } from "./chat/conversation";
 import { AskStack } from "./ask-list";
 import type { Ask } from "@crossline/core";
+import type { AskPreviews } from "./asks/types";
 import { AnalogClock } from "./analog-clock";
 import { EnergyCapsule } from "./energy-capsule";
 import { EnergyProbe } from "./energy-probe";
@@ -40,6 +41,7 @@ export type DashboardData = {
   monthLabel: string;
   /** Proposals the system has made that wait for the person; with nothing recommendable yet, Today says so instead of asking for more input. */
   awaitingApproval?: number;
+  milestones?: { drafts: number; any: boolean; firstDrafts: "none" | "running" | "stalled" };
   capacity: {
     level: "low" | "medium" | "high" | "uncalibrated";
     confidence?: "low" | "medium" | "high";
@@ -63,6 +65,8 @@ export type DashboardData = {
   /** Things the person is waiting for whose expected day has come: each asks 「到了吗？」. Absent on old data. */
   /** The system's open questions, most urgent first (`lib/asks.ts`); 「…到了吗？」 is one of them. */
   asks?: Ask[];
+  /** What an ask's preview opens in place (`asks/previews.ts`), keyed by ask id. */
+  askPreviews?: AskPreviews;
   flywheel: Array<{ id: string; fromTitle: string; toTitle: string; kindLabel: string; explanation: string | null; pending: boolean }>;
   identities: Array<{ id: string; label: string; accent: string; completedCount: number; activeMilestone: string; taskCount: number; totalCount: number; pct: number }>;
   flywheelStrip: {
@@ -149,7 +153,15 @@ export function DashboardView({ data }: { data: DashboardData }) {
           {primaryDetail ? <TaskCard variant="hero" detail={primaryDetail} reason={data.primary!.reason} slot={data.slotById?.get(primaryDetail.id)} />
             : <p className="panel today-empty">{data.awaitingApproval
               ? <><b className="mono">{data.awaitingApproval}</b> 项提案待批准，批准后在此推荐下一步。 <a href="/approvals#proposals">前往批准</a></>
-              : "暂无可执行任务。收集一项工作后，系统完成拆解与排程。"}</p>}
+              : data.milestones?.drafts
+                ? <><b className="mono">{data.milestones.drafts}</b> 个里程碑草稿待批准；批准后系统从它们倒推任务并排进日历。 <a href="/milestones">前往主线</a></>
+                : data.milestones?.firstDrafts === "running"
+                  ? "系统正在按访谈为每条主线设计里程碑草稿（每条主线几分钟），好了会出现在「主线」页等待批准。也可以先在上方输入框写下手头要做的事。"
+                  : data.milestones?.firstDrafts === "stalled"
+                    ? <>里程碑草稿没有生成。到「主线」页点「让 AI 重新提议草稿」再试一次。 <a href="/milestones">前往主线</a></>
+                    : data.milestones && !data.milestones.any
+                      ? <>访谈结束（或停下 20 分钟）后，系统按访谈为每条主线设计里程碑草稿，批准后倒推出任务。想现在就设计，在 <a href="/onboarding">访谈页</a> 点「设计里程碑草稿」。</>
+                      : "暂无可执行任务。收集一项工作后，系统完成拆解与排程。"}</p>}
         </div>
         {alternatives.length > 0 && <div className="today-alts">{alternatives.map(([label, detail]) => <div key={detail.id}>
           <h3 className="section-label">{label}</h3>
@@ -166,7 +178,7 @@ export function DashboardView({ data }: { data: DashboardData }) {
             timeZone={data.calendar.timeZone} labels={data.calendar.labels} quietByWeekday={data.calendar.quietByWeekday} proposals={data.calendar.proposals}
             taskDetails={data.calendarDetails} />
         </section>}
-        <div className="today-asks"><AskStack initial={data.asks ?? []} moreHref="/approvals#asks" /></div>
+        <div className="today-asks"><AskStack initial={data.asks ?? []} moreHref="/approvals#asks" {...(data.askPreviews ? { previews: data.askPreviews } : {})} /></div>
       </div>
 
       {data.flywheelGraph && <section className="panel" aria-labelledby="flywheel-title">

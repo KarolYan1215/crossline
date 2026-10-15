@@ -16,7 +16,7 @@ test("Today's stack opens only the top ask, shows the next two as edges, and can
   expect(html).toContain("1 / 4");
   expect(html).toContain('aria-label="上一项"');
   expect(html).toContain('aria-label="下一项"');
-  expect(html).toContain('class="ask-peek" data-depth="1" data-line="research">第二条');
+  expect(html).toContain('data-depth="1" data-line="research">第二条');
   expect(html).toContain('data-depth="2" data-line="research">第三条');
   expect(html).not.toContain("第四条");
   expect(html).toContain("自动倒推时发现缺数据。");

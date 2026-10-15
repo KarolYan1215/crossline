@@ -341,3 +341,17 @@ test("the tone the person chose goes with the first turn and every later one", a
   expect(prompts()[0]).toContain('"tone":"direct"');
   expect(prompts().slice(1).some((prompt) => prompt.includes('"tone":"warm"'))).toBe(true);
 });
+
+test("a round keeps from the person what is not theirs to answer, writes the calendar's recurrence as an assumption, and reads a goal question as multiple choice", async () => {
+  const options = (...labels: string[]) => labels.map((label, index) => ({ id: `o${index}`, label, detail: "" }));
+  const { rpc } = fakeRuntime([turn({ questions: [
+    { id: "q-goal", text: "西湖合作这学期最重要的目标？", kind: "single", allowOther: true, identityId: "research", projectId: "", options: options("投出论文", "跑通片上训练") },
+    { id: "q-room", text: "组会在哪个房间？", kind: "free", allowOther: true, identityId: "research", projectId: "", options: [] },
+    { id: "q-cal", text: "日历中的两项活动，哪些属于持续安排？", kind: "single", allowOther: true, identityId: "research", projectId: "", options: options("Build Nights 每周", "DEJA-VU 每月") }] })]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc);
+  await run({ sessionId: "s1", text: "西湖那篇 10/31 前要投出，数据下周到。" });
+  const stored = store.listOnboardingMessages(workspaceId, "s1").at(-1)!.content as { questions: Array<{ id: string; kind: string }> };
+  expect(stored.questions.filter((question) => question.id.startsWith("q-")).map((question) => [question.id, question.kind])).toEqual([["q-goal", "multi"]]);
+  expect(store.listProfileFacts(workspaceId).find((fact) => fact.slot.startsWith("assumed_")))
+    .toMatchObject({ status: "inferred", sourceRef: "inference", value: expect.stringMatching(/^假设：日历中的两项活动/) });
+});

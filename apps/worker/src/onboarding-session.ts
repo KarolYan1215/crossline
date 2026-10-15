@@ -2,12 +2,12 @@ import { randomUUID } from "node:crypto";
 import {
   AGENT_HISTORY_SUMMARY, agentHistoryLines, type AgentHistorySummary,
   EMPTY_PROFILE_MODEL, GOAL_EDITS_SETTING, ONBOARDING_TURN_SCHEMA, duplicateAttributes, type PendingGoalEdit, type StoredLineProfile, PROFILE_CONFIRMED, portraitFingerprint, answeredGapFacts, keepOnboardingTurn, mergeFacts, sanitizeDateExtraction, validateOnboardingTurn,
-  gapCoveredBy, mergeDateExtractions, withoutOffHours, resolveAvailability, AVAILABILITY_SETTING, AVAILABILITY_PROPOSED_SETTING, type DateExtraction,
-  type ProfileGap, type ProfileModel, type OnboardingStage, DEEP_STAGES, ONBOARDING_TONE_SETTING, readTone,
+  gapCoveredBy, screenQuestions, screenAssumption, mergeDateExtractions, withoutDecidedDates, withoutOffHours, resolveAvailability, AVAILABILITY_SETTING, AVAILABILITY_PROPOSED_SETTING, type DateExtraction,
+  type ProfileGap, type ProfileModel, type OnboardingStage, DEEP_STAGES, ONBOARDING_TONE_SETTING, ASSESS_RESULT_SETTING, readTone,
   type KnownSources, type OnboardingTurn, type OnboardingTurnContext, ONBOARDING_PROGRESS_SETTING, readPartialTurn, type OnboardingProgress, calendarWeek
 } from "@crossline/core";
 import { continueSkillTurn, runCodexSkill, type CodexRpcBoundary, type SkillProgress } from "@crossline/codex";
-import { interviewChecklistFor, interviewGapsFor, unfiledFilesIn, type CrosslineStore, type StoredOnboardingMessage, type StoredSourceDocument } from "@crossline/db";
+import { interviewChecklistFor, interviewGapsFor, questionScreenFor, unfiledFilesIn, type CrosslineStore, type StoredOnboardingMessage, type StoredSourceDocument } from "@crossline/db";
 import { sourceIds } from "./source-ids";
 import { identityLines } from "./lines";
 
@@ -198,8 +198,19 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         proposed: store.getSetting(workspaceId, AVAILABILITY_PROPOSED_SETTING), facts: [] });
       return resolved.source === "saved" || resolved.source === "interview" ? resolved.windows : undefined;
     })();
-    const fresh = { ...checked.extraction, recurring: stated ? withoutOffHours(checked.extraction.recurring, stated,
-      store.listProjects(workspaceId, { includeArchived: true })) : checked.extraction.recurring };
+    // What the person already confirmed or turned down in an earlier batch is not offered again.
+    const decidedEvents = store.listEvents(workspaceId, { type: "dates.decided" })
+      .map((event) => ({ id: event.entityId, payload: event.payload as { superseded?: boolean; included?: string[]; excluded?: string[] } }))
+      .filter((event) => !event.payload.superseded);
+    const extracted = new Map(store.listEvents(workspaceId, { type: "dates.extracted" }).map((event) => [event.entityId, event.payload as unknown as DateExtraction]));
+    const decided = decidedEvents.flatMap((event) => {
+      const batch = extracted.get(event.id);
+      const ids = new Set([...(event.payload.included ?? []), ...(event.payload.excluded ?? [])]);
+      return batch ? [...batch.dates, ...batch.recurring].filter((item) => ids.has(item.id)) : [];
+    });
+    const unseen = withoutDecidedDates(checked.extraction, decided);
+    const fresh = { ...unseen, recurring: stated ? withoutOffHours(unseen.recurring, stated,
+      store.listProjects(workspaceId, { includeArchived: true })) : unseen.recurring };
     if (!fresh.dates.length && !fresh.recurring.length && !fresh.questions.length && !(fresh.undated ?? []).length) return;
     const answered = new Set(store.listEvents(workspaceId, { type: "dates.decided" }).map((event) => event.entityId));
     const open = store.listEvents(workspaceId, { type: "dates.extracted" }).filter((event) => !answered.has(event.entityId));
@@ -289,6 +300,18 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     const validateOutput = (output: unknown) => validateOnboardingTurn(output, known);
     const softAccept = (_rejection: Error, output: unknown) => keepOnboardingTurn(output, known);
 
+    // The public quick test's result, only when the person pressed 「使用该结果」 (apps/web/lib/assess-link.ts): corroboration for the
+    // portrait, never its scores. Sent with every turn while it is kept, so removing it stops it at once.
+    const publicAssessment = (() => {
+      try {
+        const kept = JSON.parse(store.getSetting(workspaceId, ASSESS_RESULT_SETTING) ?? "null") as { source?: string; code?: string; typeName?: string;
+          axes?: Record<string, number>; takenAt?: string } | null;
+        return kept?.source === "public-assess" && kept.code && kept.typeName && kept.axes && kept.takenAt
+          ? { code: kept.code, typeName: kept.typeName, axes: kept.axes, takenAt: kept.takenAt,
+            note: "本人在公开测评（32 题自评）中的结果，由本人确认带入；只作佐证，画像四轴仍按访谈证据评分，不照抄" } : undefined;
+      } catch { return undefined; }
+    })();
+
     /** A first turn: everything the ledger knows goes in, because the thread starts empty. */
     const startThread = async (documents: typeof fresh, history?: OnboardingTurnContext["history"]) => {
       const context: OnboardingTurnContext = {
@@ -300,6 +323,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         focusLine, profile: readProfile(), stage: ((session!.coverage as { stage?: OnboardingStage }).stage ?? (focusLine ? "details" : "orientation")),
         checklist: openChecklist(), ...stagePace(messages, { startOpen: startOpen() }), tone: readTone(store.getSetting(workspaceId, ONBOARDING_TONE_SETTING)),
         ...(workHistory().length ? { workHistory: workHistory() } : {}), ...(week.length ? { calendar: week } : {}),
+        ...(publicAssessment ? { publicAssessment } : {}),
         lines: identityLines(store, workspaceId).map((line) => ({ id: line.id, label: line.label, rank: line.rank ?? null, hard: Boolean(line.hard), goals: line.goals ?? [],
           ...(line.goalParts?.length ? { goalParts: line.goalParts } : {}) }))
       };
@@ -341,7 +365,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         const pace = stagePace(messages, { startOpen: startOpen() });
         const message = JSON.stringify({ reply: { id: replyId, text: replyText }, ...(newSources.length ? { newSources } : {}), checklist: openChecklist(), ...pace,
           tone: readTone(store.getSetting(workspaceId, ONBOARDING_TONE_SETTING)), ...(calendarChanged ? { calendar: week } : {}),
-        ...(waiting > 0 ? { sourcesWaiting: waiting } : {}) });
+        ...(publicAssessment ? { publicAssessment } : {}), ...(waiting > 0 ? { sourcesWaiting: waiting } : {}) });
         result = await continueSkillTurn<OnboardingTurn>(client, session.codexThreadId, message, {
           skillName: ONBOARDING_SKILL, cwd, outputSchema: ONBOARDING_TURN_SCHEMA, validateOutput, softAccept,
           onAudit: () => {}, onProgress, timeoutMs: 60 * 60_000
@@ -361,7 +385,14 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     persistTurn(result.output, sessionId, ownerId);
     // A fixed weekly arrangement the person said (「每周二四上午组会」) is quoted from their reply, so replies count as sources here too.
     persistFileDates(result.output, ownerId, sent.map(([, doc]) => doc.id), { ...known.sources, ...known.replies }, today, input.reread === true);
-    const paced = paceDeepRound(result.output, Boolean(focusLine));
+    // Questions that are not the person's to answer (a room, class times already on record, whether a calendar event repeats) are taken
+    // out before the round is stored; what something rests on is written as an assumption the person can correct.
+    const screen = screenQuestions(result.output.questions, questionScreenFor(store, workspaceId));
+    for (const item of screen.screened) {
+      const assumption = screenAssumption(item);
+      if (assumption) store.upsertProfileFact({ workspaceId, ...assumption, status: "inferred", sourceRef: "inference", sourceQuote: "", updatedAt: new Date().toISOString() });
+    }
+    const paced = paceDeepRound({ ...result.output, questions: screen.keep }, Boolean(focusLine));
     const output = withChecklist(paced.deep ? paced.output : withGapQuestions(paced.output, currentGaps(), messages, { freshDocuments: sent.map(([, doc]) => doc.id) }),
       focusLine || options.checklist === false ? [] : openChecklist());
     store.appendOnboardingMessage({ sessionId, workspaceId, role: "assistant", content: output, createdAt: new Date().toISOString() });

@@ -2,28 +2,30 @@ import "server-only";
 import { recordOp, retractedEventIds, withUndo } from "./undo";
 import {
   ATTENTION_SNAPSHOT, BACKGROUND_BLOCKER, CALENDAR_LINES, CALENDAR_PUBLISH_FAILURE, CALENDAR_SYNC_FAILURE, calendarEventKey, daysBetween, describeEvent, missingInputsOf, rankAsks,
-  localStamp, prepStepRetried, snoozeUntil, STEP_ANSWER_SLOT, stepAnswerSlot, taskTitleOf, urgencyFor, type CalendarLines,
-  validateAskAnswer, withFrozen, type AccessContext, type Ask, type AskField, type AskOption, type AskSnooze
+  localStamp, prepStepRetried, readableFromMaterial, snoozeUntil, STEP_ANSWER_SLOT, stepAnswerSlot, taskTitleOf, urgencyFor, type CalendarLines,
+  validateAskChoice, withFrozen, type AccessContext, type Ask, type AskField, type AskOption, type AskPreview, type AskSnooze
 } from "@crossline/core";
 import { listAgentTasks, type StoredWorkOrder } from "@crossline/db";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import {
   acceptWorkOrderEvidence, answerWaiting, appNow, approveWorkOrderProposal, archiveWorkOrder, discardCapture, effectiveSchedulePreferences, getStore, loadGoalForecast,
   markMaterialsReady, planToday, plannerIdOfBlock, readFrozen, readGoalSettings, retryMaterialPreparation, saveGoalSettings, TASK_LIBRARY_WINDOW_DAYS,
-  toZonedInstant, unlockBlock, writeFrozen
+  heldConflicts, unlockBlock, writeFrozen
 } from "./crossline";
 import { requestAutoBackplan } from "./approvals";
 import { readScheduledDay } from "./schedule-memory";
 import { requestCodexSupervisor } from "./codex-runtime";
 import { autoPublishPass, forgetPublishedHash } from "./auto-publish";
 import { calendarFiling } from "./timeline";
-import { answerInterviewQuestion, interviewStatus } from "./interview-status";
+import { answerInterviewQuestion, flushPendingAnswers, interviewStatus } from "./interview-status";
 import { requestStepReplan } from "./steps";
 import { unfiledFiles } from "./file-belonging";
 import { decideEvent, eventProposals, publishFixedEvents } from "./fixed-events";
 import { identityLines } from "./lines";
 import { decisionHorizon } from "./horizon";
 import { answerRelationCheck, relationCheckAsks } from "./artifact-relations";
+import { agentBlockedAsks, answerAgentAsk } from "./agent-ask";
+import { answerOutcome, outcomeAsks } from "./outcome-check";
 
 /** Markers an undo has taken back are as if never written. */
 const live = <T extends { eventId: string }>(ctx: AccessContext, events: T[]): T[] => {
@@ -52,6 +54,11 @@ const lineLabel = (id: string) => defaultIdentityPacks().find((pack) => pack.id 
 const short = (text: string, length = 40) => text.length > length ? `${text.slice(0, length)}…` : text;
 
 type Source = { store: ReturnType<typeof getStore>; ctx: AccessContext; today: string; now: Date };
+
+/** What a question is about, to look at before answering (`Ask.preview`). */
+const taskPreview = (orderId: string, label = "看任务"): AskPreview => ({ kind: "task", href: `/workbench/${encodeURIComponent(orderId)}`, label });
+const milestonePreview = (milestoneId: string, label = "看里程碑"): AskPreview => ({ kind: "milestones", href: `/milestones?open=${encodeURIComponent(milestoneId)}`, label });
+const filePreview = (documentId: string, label = "打开文件"): AskPreview => ({ kind: "file", href: `/api/source-documents/${encodeURIComponent(documentId)}/file`, label });
 
 function deadlines(store: Source["store"], workspaceId: string) {
   return new Map(store.listMilestoneAnchors(workspaceId).map((anchor) => [anchor.milestoneId, anchor.deadline]));
@@ -86,7 +93,8 @@ function backplanAsks({ store, ctx, today }: Source): Ask[] {
     if (!missing.length) {
       const id = `bp:${event.eventId}:all`;
       if (resolved.has(id)) continue;
-      asks.push({ ...base, id, kind: "backplan_input", title: `「${short(milestone.title)}」未能自动拆分`,
+      // Important: until it is split, none of the milestone's work exists to be scheduled.
+      asks.push({ ...base, id, kind: "backplan_input", important: true, preview: milestonePreview(milestoneId), title: `「${short(milestone.title)}」未能自动拆分`,
         why: `自动倒推中止：${clause(payload.message || payload.code)}。可重试，或手动填写第一步。`,
         options: [{ id: "retry", label: "再试一次", recommended: true }, { id: "own", label: "手动填写第一步", href: "/#capture-title" }, skip] });
       continue;
@@ -144,7 +152,10 @@ function waitingAsks({ store, ctx, today }: Source): Ask[] {
     const twins = index.withTwins(item);
     const forMilestone = twins.some((twin) => index.milestonesOf(twin).length);
     const blocks = new Set(twins.flatMap((twin) => twin.blocks)).size;
+    // Important when work waits on it: the answer is what lets that work onto the calendar (or re-splits a milestone).
+    const blocked = twins.flatMap((twin) => twin.blocks);
     return { id: `wait:${item.id}`, kind: "waiting_due" as const, entityId: item.id, urgency: "now" as const, dueDay: item.followUpAt,
+      important: forMilestone || blocked.length > 0, ...(blocked[0] ? { preview: taskPreview(blocked[0], "看等它的任务") } : {}),
       raisedAt: item.updatedAt, fingerprint: item.followUpAt,
       title: `${item.who ? `${item.who}的` : ""}「${short(item.title, 50)}」到了吗？`,
       why: `原定${item.approximate ? "大约" : ""} ${item.expectedAt.slice(5)} 到。${forMilestone ? "到了以后系统会带着它重新拆这个里程碑的步骤。"
@@ -163,6 +174,9 @@ function captureAsks({ store, ctx }: Source): Ask[] {
   return store.listCaptures(ctx.workspaceId).filter((capture) => capture.state === "blocked"
     && capture.audit.blocker?.code !== "ANALYSIS_APPROVED_MILESTONE_REQUIRED").map((capture) => ({
     id: `cap:${capture.id}:${capture.attempt}`, kind: "capture_blocked" as const, entityId: capture.id, urgency: "later" as const,
+    // The analysis needs the answer to go on; what is written in place is the context it is re-run with.
+    important: true, preview: { kind: "task" as const, href: "/workbench", label: "看收集的事项" },
+    freeText: { placeholder: "例如：交给导师的一页周报，周五组会前，手上有上周的实验数据" },
     raisedAt: store.listEvents(ctx.workspaceId, { entityId: capture.id }).at(-1)?.createdAt ?? "", fingerprint: String(capture.attempt),
     title: `「${short(capture.title)}」未能自动分析`,
     why: `${clause(capture.audit.blocker?.message || capture.audit.blocker?.code || "分析中止")}。补充说明后重新分析。`,
@@ -189,7 +203,8 @@ function materialsAsks({ store, ctx, today }: Source): Ask[] {
     if (!block) return [];
     const detail = block.payload as { code?: string; message?: string };
     const dueDay = dueOf(order, anchors);
-    return [{ id: `mat:${block.eventId}`, kind: "materials_blocked" as const, entityId: order.id, line: order.identityId,
+    // Important: the task waits in preparation until this is answered.
+    return [{ id: `mat:${block.eventId}`, kind: "materials_blocked" as const, entityId: order.id, line: order.identityId, important: true, preview: taskPreview(order.id),
       urgency: urgencyFor(dueDay, today), ...(dueDay ? { dueDay } : {}), raisedAt: block.createdAt, fingerprint: block.eventId,
       title: `「${short(order.intent)}」材料未准备完成`,
       why: `${clause(detail.message || detail.code || "准备中止")}。可重试，或不等材料直接开始。`,
@@ -214,7 +229,7 @@ function gateAsks({ store, ctx, today }: Source): Ask[] {
   }
   for (const order of store.listWorkOrders(ctx.workspaceId)) {
     const dueDay = dueOf(order, anchors);
-    const timing = { urgency: urgencyFor(dueDay, today), ...(dueDay ? { dueDay } : {}), line: order.identityId };
+    const timing = { urgency: urgencyFor(dueDay, today), ...(dueDay ? { dueDay } : {}), line: order.identityId, preview: taskPreview(order.id, "看交付与判定") };
     const review = (order.payload as { gateReview?: GateReview }).gateReview;
     if (order.state === "blocked" && review && review.verdict !== "pass") {
       const transition = store.listEvents(ctx.workspaceId, { type: "work_order.transitioned", entityId: order.id }).at(-1);
@@ -223,7 +238,8 @@ function gateAsks({ store, ctx, today }: Source): Ask[] {
         .filter(Boolean).slice(0, 3);
       // Covered its contract but not done the person's way (their line skill): the broken rules are the return note.
       const offPlay = review.verdict === "partial" && review.fit && !review.fit.fits;
-      asks.push({ id: `gate:${transition?.eventId ?? order.id}`, kind: "gate_insufficient", entityId: order.id, ...timing,
+      // Important when a milestone rests on it: its acceptance waits for the redo. Otherwise left to the milestone's weight.
+      asks.push({ id: `gate:${transition?.eventId ?? order.id}`, kind: "gate_insufficient", entityId: order.id, ...timing, ...(order.milestoneId ? {} : { important: false }),
         raisedAt: transition?.createdAt ?? "", fingerprint: transition?.eventId ?? "",
         title: offPlay ? `「${short(order.intent)}」不符合本人的打法` : `「${short(order.intent)}」未通过验收`,
         why: offPlay ? `契约要求已覆盖，但违背了主线 skill：${clause(review.fit!.violated.join("；"))}。${review.fit!.why ? `${clause(review.fit!.why)}。` : ""}改后重新提交即重新判定。`
@@ -302,6 +318,7 @@ function riskAsks({ store, ctx, today }: Source): Ask[] {
       && slack >= Number((event.payload as { slackDays?: number }).slackDays ?? -999));
     if (acceptedRecently) return [];
     return [{ id: `risk:${goal.milestoneId}`, kind: "milestone_risk" as const, entityId: goal.milestoneId, line: milestone.identityId,
+      preview: milestonePreview(goal.milestoneId),
       urgency: urgencyFor(deadline, today), dueDay: deadline, raisedAt: "", fingerprint: `${goal.p85Day}|${deadline}`,
       title: `「${short(milestone.title)}」可能赶不上 ${format(deadline)}`,
       why: explainRisk({ deadline, today, p50Day: goal.p50Day, p85Day: goal.p85Day, slackDays: goal.slackDays, steps: own.length,
@@ -340,7 +357,7 @@ function missedAsks({ store, ctx, today }: Source): Ask[] {
     if (!order || !["approved", "preparing", "ready_for_human"].includes(order.state) || handled.has(id) || confirmed.has(orderId)) return [];
     const dueDay = dueOf(order, anchors);
     if (!dueDay || daysBetween(today, dueDay) > MISSED_ASK_HORIZON_DAYS) return [];
-    return [{ id, kind: "missed_block" as const, entityId: orderId, line: order.identityId, urgency: urgencyFor(dueDay, today), dueDay,
+    return [{ id, kind: "missed_block" as const, entityId: orderId, line: order.identityId, urgency: urgencyFor(dueDay, today), dueDay, preview: taskPreview(orderId),
       raisedAt: `${yesterday}T${start}`, fingerprint: yesterday,
       title: `昨天 ${start} 排的「${short(order.intent)}」没开始`,
       why: `它已经被顺延到后面的空档，关系到 ${format(dueDay)} 的截止（${((left) => left > 0 ? `还剩 ${left} 天` : left === 0 ? "今天截止" : `已过 ${-left} 天`)(daysBetween(today, dueDay))}）。顺延没问题就点一下；要是其实做了，去补记；要是已经不需要，就不做了。`,
@@ -353,36 +370,8 @@ function missedAsks({ store, ctx, today }: Source): Ask[] {
   });
 }
 
-/**
- * Why an assistant result was refused, in the person's words. The refusal itself is written for the model (it is sent back to it to
- * repair: 「你说做了…从 artifacts 里去掉并写进 notDone」), so it is never shown as it is.
- */
-const AGENT_REFUSAL: Record<string, string> = {
-  AGENT_ARTIFACT_MISSING: "助手报告的产出文件在任务目录里并不存在，结果未被采纳",
-  AGENT_ARTIFACT_EMPTY: "助手报告的产出文件是空的，结果未被采纳",
-  AGENT_ARTIFACT_PATH: "助手报告的产出不在任务目录内，结果未被采纳",
-  AGENT_EVIDENCE_MISSING: "助手的结果缺少可以核对的证据，未被采纳",
-  AGENT_UNCHECKED: "助手的结果没有通过自检，未被采纳",
-  AGENT_SUMMARY_INVALID: "助手的总结格式不完整，结果未被采纳"
-};
-
-function agentAsks({ store, ctx }: Source): Ask[] {
-  const acknowledged = new Set(live(ctx, store.listEvents(ctx.workspaceId, { type: "agent.blocked_acknowledged" })).map((event) => event.entityId));
-  const titles = new Map(store.listWorkOrders(ctx.workspaceId).map((order) => [order.id, order.intent]));
-  const tasks = listAgentTasks(store, ctx.workspaceId);
-  // A preparation step's runs: only its latest is asked about, and not while the worker will run it again by itself.
-  const stepRuns = new Map<string, typeof tasks>();
-  for (const task of tasks.filter((item) => item.stepId)) stepRuns.set(`${task.workOrderId}#${task.stepId}`, [...(stepRuns.get(`${task.workOrderId}#${task.stepId}`) ?? []), task]);
-  const settledStep = (task: (typeof tasks)[number]) => {
-    const runs = task.stepId ? stepRuns.get(`${task.workOrderId}#${task.stepId}`) : undefined;
-    return !runs || (runs[0] === task && !prepStepRetried(runs));
-  };
-  return tasks.filter((task) => task.status === "blocked" && !acknowledged.has(task.taskId) && settledStep(task)).map((task) => ({
-    id: `agent:${task.taskId}`, kind: "agent_blocked" as const, entityId: task.taskId, urgency: "later" as const, raisedAt: task.requestedAt,
-    fingerprint: task.blockerCode, title: `助手没做成「${short(titles.get(task.workOrderId) ?? task.title)}」`,
-    why: `${AGENT_REFUSAL[task.blockerCode] ?? clause(task.blockerMessage || task.blockerCode)}。助手不会自动重试，该任务转为本人处理。`,
-    options: [{ id: "self", label: "本人处理", recommended: true }, { id: "look", label: "查看助手任务", href: "/settings#automation" }] }));
-}
+/** The assistant's work that stopped and will not be run again by itself, with its progress and the next step to choose (`lib/agent-ask.ts`). */
+const agentAsks = ({ ctx, now, today }: Source): Ask[] => agentBlockedAsks(ctx, now, today);
 
 function readFailure(store: Source["store"], workspaceId: string, key: string) {
   try { return JSON.parse(store.getSetting(workspaceId, key) || "null") as { code: string; message: string; sources?: string[]; at: string } | null; }
@@ -429,7 +418,9 @@ function sourceProjectAsks({ store, ctx, today, now }: Source): Ask[] {
     const ordered = [...(lean ? [lean] : []), ...projects.filter((project) => project.id !== lean?.id)
       .sort((a, b) => Number(b.identityId === lean?.identityId) - Number(a.identityId === lean?.identityId))].slice(0, 6);
     const named = titles.slice(0, 3).map((title) => `「${short(title, 16)}」`).join("、");
+    // Important when dates were read from it: until it is filed they carry no course, and its deadlines bear on no project.
     return { id: `src:${id}`, kind: "source_project" as const, entityId: id, urgency: urgencyFor(dueDay, today), ...(dueDay ? { dueDay } : {}),
+      important: titles.length > 0, preview: filePreview(id, `打开《${short(fileName, 20)}》`),
       raisedAt, fingerprint: `${id}:${titles.length}`, title: `《${short(fileName, 32)}》属于哪个项目？`,
       why: titles.length
         ? `文件名和正文开头都没有写明所属课程或项目，从中读出的 ${titles.length} 项日程（${named}${titles.length > 3 ? " 等" : ""}）因此无法标明归属`
@@ -452,11 +443,26 @@ function calendarLineAsks({ store, ctx }: Source): Ask[] {
   for (const block of ((store.listPlanVersions(ctx.workspaceId)[0]?.payload as { blocks?: Array<{ id: string; title: string }> } | undefined)?.blocks ?? []))
     if (block.id.startsWith("graph_calendar:") || block.id.startsWith("import:")) titles.set(calendarEventKey(block.title), block.title);
   return Object.entries(filing.entries).filter(([key, entry]) => entry.unclear && entry.by !== "person" && titles.has(key)).slice(0, 3)
-    .map(([key, entry]) => ({ id: `calline:${key}`, kind: "calendar_line_unclear" as const, entityId: key, urgency: "later" as const, raisedAt: entry.at,
+    .map(([key, entry]) => ({ id: `calline:${key}`, kind: "calendar_line_unclear" as const, entityId: key, urgency: "later" as const, raisedAt: entry.at, important: false,
       fingerprint: entry.at, title: `日历中的「${short(titles.get(key)!, 30)}」属于哪条主线？`,
       why: `标题和时间都看不出它服务于哪条主线${entry.why ? `（${clause(entry.why)}）` : ""}。确认后，它在日历上按该主线着色，以后同名的日程也一样。`,
       options: [...lines.map((line) => ({ id: `l:${line.id}`, label: line.label })), { id: "none", label: "不属于任何主线", detail: "个人事务等，保持无色" }] }));
 }
+
+/** The app's own interview questions that are start items (`profileGaps`: LINE_UNCONFIRMED, PROJECT_DEADLINE). */
+const START_GAP = /^gap-(line|deadline)-/;
+/** The recommended answer in words, as the input's placeholder: the app's own questions say what a good answer looks like. */
+const GAP_PLACEHOLDER: Array<[RegExp, string]> = [
+  [/^gap-line-/, "例如：在做 MoS₂ 器件测量，12 月底前交初稿，卡在等数据"],
+  [/^gap-deadline-/, "例如：2026-12-15；没有截止就写「没有截止」"],
+  [/^gap-undated-/, "例如：大约学期最后一周，通知下来再改"],
+  [/^gap-meetings-/, "例如：周二、四 11:00–12:15"],
+  [/^gap-portrait$/, "例如：符合；第二句里的“…”要改成…"],
+  [/^gap-appearance$/, "例如：男，狼尾长发，常穿全黑"]
+];
+const interviewPlaceholder = (question: { id: string; kind: string; options: Array<{ label: string }> }) =>
+  GAP_PLACEHOLDER.find(([pattern]) => pattern.test(question.id))?.[1]
+  ?? (question.kind !== "free" && question.options[0] ? `例如：${question.options[0].label}，或用自己的话说` : "用自己的话回答");
 
 const STAGE_LABEL: Record<string, string> = { orientation: "开场与规则", situation: "现状", compass: "指南针", energy: "能量", lines: "主线", details: "细节" };
 
@@ -473,10 +479,16 @@ function interviewAsks({ ctx, now }: Source): Ask[] {
   const questions = status.questions.map((question): Ask => {
     const single = question.kind !== "free" && question.options.length > 0;
     const other: AskField = { id: "other", label: "补充", kind: "text", required: false, placeholder: "可不填" };
+    const portrait = question.id === "gap-portrait" || question.id === "gap-appearance";
     return { id: `iq:${question.id}`, kind: "interview_question", entityId: question.id, urgency: "later", raisedAt: "",
       fingerprint: `${status.sessionId}:${question.id}`, ...(question.identityId ? { line: question.identityId } : {}),
       title: question.text,
       why: `${where}的问题。本轮的问题都答完后，会一起交给访谈，接着下一轮。`,
+      // A line resting on guesses and a project's deadline are start items: milestones are designed from them.
+      important: START_GAP.test(question.id),
+      select: question.kind === "multi" ? "many" : "one",
+      ...(portrait ? { preview: { kind: "portrait" as const, href: "/portrait", label: "看画像" } } : {}),
+      ...(single && !question.allowOther ? {} : { freeText: { placeholder: interviewPlaceholder(question) } }),
       options: single
         ? question.options.slice(0, 8).map((option) => ({ id: option.id, label: option.label, ...(option.detail ? { detail: option.detail } : {}),
           ...(question.allowOther ? { fields: [other] } : {}) }))
@@ -496,6 +508,9 @@ function interviewAsks({ ctx, now }: Source): Ask[] {
  * event. At most four open at a time, soonest first.
  */
 function eventAsks({ ctx, today }: Source): Ask[] {
+  // Without an account to write the Crossline calendar with, 「创建」 can only answer 「未连接」: an invitee was asked this for every class
+  // (2026-10-15 walkthrough), while the schedule already keeps those hours free either way.
+  if (!getStore().getSetting(ctx.workspaceId, "calendar.write.account")) return [];
   return eventProposals(ctx).slice(0, 4).map((event) => {
     const kind = event.repeat ? "周期性" : "一次性";
     const first = event.repeat ? undefined : event.date;
@@ -530,24 +545,22 @@ function backgroundAsks({ store, ctx }: Source): Ask[] {
  * the person picks: the next free time, tomorrow, or keep the overlap.
  */
 function lockedConflictAsks({ store, ctx, today, now }: Source): Ask[] {
-  const locked = readFrozen(ctx, now).filter((item) => (item.reason === "locked" || item.reason === "pinned") && !item.overlapOk);
-  if (!locked.length) return [];
+  // Calendar events, class meetings, the person's own events and other held blocks alike (`heldConflicts`, `settleFrozen`).
+  const conflicts = heldConflicts(ctx, now);
+  if (!conflicts.length) return [];
   const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
-  const plan = store.listPlanVersions(ctx.workspaceId)[0];
-  const external = ((plan?.payload as { blocks?: Array<{ id: string; title: string; day?: string; start: string; end: string }> } | undefined)?.blocks ?? [])
-    .filter((block) => block.day && (block.id.startsWith("graph_calendar:") || block.id.startsWith("import:")))
-    .flatMap((block) => { try { return [{ title: block.title, start: Date.parse(toZonedInstant(block.day!, block.start, zone)), end: Date.parse(toZonedInstant(block.day!, block.end, zone)) }]; } catch { return []; } });
   const orders = new Map(store.listWorkOrders(ctx.workspaceId).map((order) => [order.id, order]));
-  return locked.flatMap((item) => {
-    const hit = external.find((block) => block.start < Date.parse(item.end) && block.end > Date.parse(item.start));
+  return conflicts.flatMap(({ entry: item, title }) => {
+    const hit = { title };
     const order = orders.get(plannerIdOfBlock(item.blockId).split("#")[0]!);
-    if (!hit || !order) return [];
+    if (!order) return [];
     const clock = (iso: string) => new Date(iso).toLocaleTimeString("zh-CN", { timeZone: zone, hour: "2-digit", minute: "2-digit", hour12: false });
     const day = new Date(item.start).toLocaleDateString("sv-SE", { timeZone: zone });
     return [{ id: `locked:${item.blockId}`, kind: "locked_conflict" as const, entityId: order.id, line: order.identityId,
+      preview: { kind: "plan" as const, href: "/", label: "看当天日程" },
       urgency: urgencyFor(day, today), dueDay: day, raisedAt: now.toISOString(), fingerprint: `${item.start}|${hit.title}`,
       title: `锁定的「${short(taskTitleOf(order), 20)}」与「${short(hit.title, 20)}」重叠`,
-      why: `${format(day)} ${clock(item.start)}–${clock(item.end)} 这段是本人锁定的，日历上新出现的「${hit.title}」占了同一时间。锁定的块不会被自动挪走，请选一个处理方式。`,
+      why: `${format(day)} ${clock(item.start)}–${clock(item.end)} 这段是本人锁定的，「${hit.title}」占了同一时间。锁定的块不会被自动挪走，请选一个处理方式。`,
       options: [
         { id: "move", label: "挪到下一个空档", detail: "解除锁定，由排程重新放", recommended: true },
         { id: "tomorrow", label: "换到明天", detail: "解除锁定，明天起再排" },
@@ -559,8 +572,10 @@ function lockedConflictAsks({ store, ctx, today, now }: Source): Ask[] {
 export function collectAsks(ctx: AccessContext, now = appNow()): Ask[] {
   const source = { store: getStore(), ctx, today: planToday(ctx, now), now };
   return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskAsks, missedAsks, lockedConflictAsks, agentAsks, calendarAsks, sourceProjectAsks, calendarLineAsks, interviewAsks, eventAsks, stepQuestionAsks,
-    ({ ctx: context, now: at }: Source) => relationCheckAsks(context, at), backgroundAsks]
-    .flatMap((collect) => { try { return collect(source); } catch { return []; } });
+    ({ ctx: context, now: at }: Source) => relationCheckAsks(context, at), backgroundAsks, ({ ctx: context, now: at }: Source) => outcomeAsks(context, at)]
+    .flatMap((collect) => { try { return collect(source); } catch { return []; } })
+    // One card per id: two with one id are the same question twice, and answering finds only the first.
+    .filter((ask, index, all) => all.findIndex((other) => other.id === ask.id) === index);
 }
 
 /**
@@ -572,13 +587,25 @@ function stepQuestionAsks({ store, ctx, today }: Source): Ask[] {
   const orders = new Map(store.listWorkOrders(ctx.workspaceId).filter((order) => ["approved", "preparing", "ready_for_human", "active"].includes(order.state))
     .map((order) => [order.id, order]));
   const answered = new Set(store.listProfileFacts(ctx.workspaceId).filter((fact) => fact.slot.startsWith(STEP_ANSWER_SLOT)).map((fact) => `${fact.projectId}|${fact.slot}`));
+  // The answer is kept per project, so the same question from two tasks of one project is one question: asked once, it answers both.
+  const asked = new Set<string>();
+  // What a task's own files answer (the problem set, how it is handed in, the AI rule) is read from them, never asked: the worker's task
+  // pass writes it as an assumption, and it is left out here already so it never shows meanwhile.
+  const withFiles = new Set(store.listSourceDocuments(ctx.workspaceId).map((doc) => doc.projectId).filter(Boolean));
   return store.listStepPlans(ctx.workspaceId).flatMap((plan) => {
     const order = orders.get(plan.workOrderId);
     if (!order) return [];
     const due = (order.payload as { dueDate?: string } | undefined)?.dueDate;
-    return plan.questions.filter((question) => !answered.has(`${order.projectId}|${stepAnswerSlot(question.text)}`)).map((question): Ask => ({
+    return plan.questions.filter((question) => {
+      const key = `${order.projectId}|${stepAnswerSlot(question.text)}`;
+      if (withFiles.has(order.projectId) && readableFromMaterial(question.text)) return false;
+      return !answered.has(key) && !asked.has(key) && Boolean(asked.add(key));
+    }).map((question): Ask => ({
       id: `stepq:${order.id}:${stepAnswerSlot(question.text)}`, kind: "step_question", entityId: order.id, line: order.identityId,
       urgency: urgencyFor(due, today), ...(due ? { dueDay: due } : {}), raisedAt: plan.plannedAt, fingerprint: `${plan.version}:${question.text}`,
+      // The step planner asks only for important work and only what it cannot read from the material: its plan waits on the answer.
+      important: true, preview: taskPreview(order.id),
+      freeText: { placeholder: question.options[0] ? `例如：${question.options[0]}，或用自己的话说` : "用自己的话回答" },
       title: `「${short(taskTitleOf(order), 24)}」：${question.text}`,
       why: `${question.why ? `${clause(question.why)}。` : ""}回答后，这个任务的步骤会按回答重新安排；材料里已有的信息不会再问。`,
       options: [...question.options.map((option, index) => ({ id: `o${index}`, label: option,
@@ -606,8 +633,15 @@ export const thisWeek = (asks: Ask[]) => asks.filter((ask) => !ask.entersOn);
  * every page shows (`lib/runtime-status.ts`), so the list and the count always agree.
  */
 export async function loadAsks(ctx: AccessContext, now = appNow()): Promise<Ask[]> {
-  return openAsks(ctx, now);
+  return listed(openAsks(ctx, now));
 }
+
+/**
+ * The asks that are listed and counted (Today's stack, 待确认, the badge, the opener). A follow-up on finished work (`outcome_check`) is
+ * only ever asked by the 小帮手 at an idle moment (decided 2026-10-15): it stays answerable — from the nudge's buttons or typed into the
+ * box — but is never a decision waiting on the person.
+ */
+export const listed = (asks: Ask[]) => asks.filter((ask) => ask.kind !== "outcome_check");
 
 export type AskResult = { ok: true } | { ok: false; code: string };
 
@@ -638,8 +672,12 @@ function answerBackplan(ctx: AccessContext, ask: Ask, optionId: string): AskResu
   return { ok: false, code: "ASK_OPTION_UNKNOWN" };
 }
 
-async function answerOne(ctx: AccessContext, ask: Ask, optionId: string, values: Record<string, string>): Promise<AskResult> {
+/** What the person chose: the options (several only where `select` is `many`) and their own words (`freeText`), already checked. */
+type AskChoice = { optionIds: string[]; note: string };
+
+async function answerOne(ctx: AccessContext, ask: Ask, choice: AskChoice, values: Record<string, string>): Promise<AskResult> {
   const store = getStore();
+  const optionId = choice.optionIds[0] ?? "";
   switch (ask.kind) {
     case "backplan_input": return answerBackplan(ctx, ask, optionId);
     case "waiting_due": {
@@ -667,7 +705,10 @@ async function answerOne(ctx: AccessContext, ask: Ask, optionId: string, values:
     }
     case "capture_blocked": {
       if (optionId === "discard") return discardCapture(ctx, ask.entityId, values.reason!);
-      try { store.addCaptureContext(ctx.workspaceId, ask.entityId, values.note!); }
+      // The person's own words are the context, whether typed into the option's field or straight into the card.
+      const context = values.note || choice.note;
+      if (!context) return { ok: false, code: "ASK_FIELD_REQUIRED" };
+      try { store.addCaptureContext(ctx.workspaceId, ask.entityId, context); }
       catch (error) { return { ok: false, code: error instanceof Error ? error.message : "CAPTURE_NOTE_FAILED" }; }
       // Started, not awaited: the analysis takes a minute or more and the page only needs to know it was asked for.
       requestCodexSupervisor(ctx, `/v1/captures/${ask.entityId}/analyze`, { method: "POST", headers: { "content-type": "application/json" },
@@ -722,9 +763,7 @@ async function answerOne(ctx: AccessContext, ask: Ask, optionId: string, values:
       }
       return { ok: true };
     }
-    case "agent_blocked":
-      record(ctx, "agent.blocked_acknowledged", ask.entityId, `agent:blocked:ack:${ask.entityId}:${Date.now()}`, {});
-      return { ok: true };
+    case "agent_blocked": return answerAgentAsk(ctx, ask, { optionIds: choice.optionIds, values, note: choice.note });
     case "calendar_publish_failed":
       getStore().setSetting(ctx.workspaceId, CALENDAR_PUBLISH_FAILURE, "");
       forgetPublishedHash(ctx.workspaceId);
@@ -735,8 +774,8 @@ async function answerOne(ctx: AccessContext, ask: Ask, optionId: string, values:
       const plan = order ? store.getStepPlan(ctx.workspaceId, order.id) : undefined;
       const question = plan?.questions.find((item) => ask.id.endsWith(stepAnswerSlot(item.text)));
       if (!order || !question) return { ok: false, code: "STEP_QUESTION_GONE" };
-      const option = ask.options.find((item) => item.id === optionId);
-      const answer = [option && option.id !== "free" ? option.label : "", (values.other ?? "").trim()].filter(Boolean).join("；");
+      const labels = ask.options.filter((item) => choice.optionIds.includes(item.id) && item.id !== "free").map((item) => item.label);
+      const answer = [...new Set([...labels, (values.other ?? "").trim(), choice.note].filter(Boolean))].join("；");
       if (!answer) return { ok: false, code: "STEP_ANSWER_EMPTY" };
       store.upsertProfileFact({ workspaceId: ctx.workspaceId, identityId: order.identityId, projectId: order.projectId, slot: stepAnswerSlot(question.text),
         value: `【${question.text}】${answer}`, status: "confirmed", sourceRef: "ask", sourceQuote: answer, updatedAt: new Date().toISOString() });
@@ -744,11 +783,9 @@ async function answerOne(ctx: AccessContext, ask: Ask, optionId: string, values:
       return { ok: true };
     }
     case "interview_question": {
-      const result = await answerInterviewQuestion(ctx, ask.entityId, optionId === "free" ? "" : optionId, values.other ?? "", async (sessionId, text) => {
-        // The round is complete: it goes to the interview as the person's reply; the next round's questions follow when it answers.
-        void requestCodexSupervisor(ctx, "/v1/onboarding/turn", { method: "POST", headers: { "content-type": "application/json" },
-          body: JSON.stringify({ sessionId, text }), signal: AbortSignal.timeout(3 * 60 * 60_000) }).catch(() => undefined);
-      });
+      // Several options and the person's own words go into the reply as the interview screen writes them (「选择：A；B。补充：…」).
+      const other = [...new Set([values.other ?? "", choice.note].map((text) => text.trim()).filter(Boolean))].join("；");
+      const result = await answerInterviewQuestion(ctx, ask.entityId, choice.optionIds.filter((id) => id !== "free"), other, sendInterviewReply(ctx));
       return result.ok ? { ok: true } : result;
     }
     case "source_project": {
@@ -774,19 +811,53 @@ async function answerOne(ctx: AccessContext, ask: Ask, optionId: string, values:
       return { ok: true };
     }
     case "relation_check": return answerRelationCheck(ctx, ask, optionId, values);
+    case "outcome_check": return answerOutcome(ctx, ask, optionId, values, choice.note);
     default: return { ok: false, code: "ASK_NOT_ANSWERABLE" };
   }
 }
 
-/** Carries out the person's answer to one ask, recording that they answered (the system's own cost, counted on 系统体检). */
-export async function answerAsk(ctx: AccessContext, askId: string, optionId: string, values: Record<string, unknown>, now = appNow()): Promise<AskResult> {
+/** A round answered in full goes to the interview as the person's reply; the next round's questions follow when it answers. */
+const sendInterviewReply = (ctx: AccessContext) => async (sessionId: string, text: string) => {
+  void requestCodexSupervisor(ctx, "/v1/onboarding/turn", { method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ sessionId, text }), signal: AbortSignal.timeout(3 * 60 * 60_000) }).catch(() => undefined);
+};
+
+/**
+ * An option's one required text field left empty while the person wrote in the card itself: their words fill it (「不要了」 with the reason
+ * typed into the card), so the free text is never a second, ignored place to answer.
+ */
+function withNoteInFields(ask: Ask, optionIds: string[], values: Record<string, unknown>, note: string): Record<string, unknown> {
+  if (!note.trim()) return values;
+  const filled = { ...values };
+  for (const option of ask.options.filter((item) => optionIds.includes(item.id))) {
+    const empty = (option.fields ?? []).filter((field) => field.kind !== "date" && !(typeof filled[field.id] === "string" && String(filled[field.id]).trim()));
+    const required = empty.filter((field) => field.required);
+    const target = required.length === 1 ? required[0] : !required.length && empty.length === 1 && ask.kind !== "interview_question" && ask.kind !== "step_question" ? empty[0] : undefined;
+    if (target) filled[target.id] = note.trim();
+  }
+  return filled;
+}
+
+/**
+ * Carries out the person's answer to one ask, recording that they answered (the system's own cost, counted on 系统体检). `choice` is one
+ * option id (the original shape) or `{optionIds, note}`: several options where the ask takes several, and the person's own words where it
+ * takes them. Where nothing downstream reads the words they are kept on the `ask.answered` event.
+ */
+export async function answerAsk(ctx: AccessContext, askId: string, choice: string | { optionIds?: string[]; note?: string },
+  values: Record<string, unknown>, now = appNow()): Promise<AskResult> {
   const ask = collectAsks(ctx, now).find((item) => item.id === askId);
   if (!ask) return { ok: false, code: "ASK_NOT_FOUND" };
-  const checked = validateAskAnswer(ask, optionId, values);
+  const optionIds = typeof choice === "string" ? [choice] : choice.optionIds ?? [];
+  const note = typeof choice === "string" ? "" : choice.note ?? "";
+  // A note written into an ask that takes no free text, beside an option, still reaches a field that option asks for.
+  const checked = validateAskChoice(ask.freeText ? ask : { ...ask, freeText: { placeholder: "" } }, optionIds, withNoteInFields(ask, optionIds, values, note), note);
   if (!checked.ok) return checked;
-  const option = ask.options.find((item) => item.id === optionId)?.label ?? optionId;
-  const result = await withUndo(ctx, `${option}：${ask.title}`, () => answerOne(ctx, ask, optionId, checked.values));
-  if (result.ok) record(ctx, "ask.answered", ask.entityId, `ask:answered:${ask.id}:${optionId}:${now.getTime()}`, { askId: ask.id, kind: ask.kind, optionId });
+  if (!ask.freeText && !checked.options.length) return { ok: false, code: "ASK_OPTION_UNKNOWN" };
+  const ids = checked.options.map((option) => option.id);
+  const label = checked.options.map((option) => option.label).join("、") || "自己回答";
+  const result = await withUndo(ctx, `${label}：${ask.title}`, () => answerOne(ctx, ask, { optionIds: ids, note: checked.note }, checked.values));
+  if (result.ok) record(ctx, "ask.answered", ask.entityId, `ask:answered:${ask.id}:${ids.join("+") || "note"}:${now.getTime()}`,
+    { askId: ask.id, kind: ask.kind, optionId: ids[0] ?? "", ...(ids.length > 1 ? { optionIds: ids } : {}), ...(checked.note ? { note: checked.note } : {}) });
   return result;
 }
 
@@ -809,7 +880,10 @@ export function snoozeAsk(ctx: AccessContext, askId: string, choice: "tomorrow" 
  * an urgent message all count the same things. Called on the web's own timer.
  */
 export function writeAttentionSnapshot(ctx: AccessContext, pending: number, now = new Date()): void {
-  const asks = openAsks(ctx, now).map((ask) => ({ id: ask.id, title: ask.title, urgency: ask.urgency, dueDay: ask.dueDay ?? null,
+  const asks = listed(openAsks(ctx, now)).map((ask) => ({ id: ask.id, title: ask.title, urgency: ask.urgency, dueDay: ask.dueDay ?? null,
     path: ask.urgency === "now" ? "/" : "/approvals#asks" }));
   getStore().setSetting(ctx.workspaceId, ATTENTION_SNAPSHOT, JSON.stringify({ at: now.toISOString(), pending, asks }));
+  // A round whose remaining questions were dead (answered, no longer asked, screened out) still holds the answers given on 待决事项:
+  // they go to the interview here, on the same timer, so a restarted resident app settles it by itself.
+  void flushPendingAnswers(ctx, sendInterviewReply(ctx)).catch(() => undefined);
 }

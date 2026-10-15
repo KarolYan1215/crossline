@@ -24,6 +24,10 @@ export type ProfileGapInput = {
   unfiled?: Array<{ id: string; fileName: string; lean?: { id: string } | undefined }>;
   /** The projects (by id or name) a dated item is on record for, from the date batches: their deadline is known without asking. */
   dated?: string[];
+  /** One-off dated items on record (`project` by id or name): an undated item that has since been given a day is not asked about. */
+  datedItems?: Array<{ project: string; title: string }>;
+  /** Titles of events the connected calendars repeat on more than one day: a course whose code is in one meets at those times. */
+  calendarRecurring?: string[];
   /** The working portrait, once all its fields are written, and whether the person said it fits them (`profile.confirmed`). */
   portrait?: { written: boolean; confirmed: boolean };
 };
@@ -113,15 +117,27 @@ export function profileGaps(input: ProfileGapInput): ProfileGap[] {
     });
   }
 
+  // One question per undated thing, asked once. The same TBD row came back in every batch under a new wording (「期末课程项目报告截止」,
+  // 「提交 ECE 555 期末课程项目报告」) and twice in one batch (once from the file, once from the reply saying 「还不知道」), and the answer was
+  // never read back — so the real account carried two to four identical cards of it that no answer could clear (2026-10-15).
+  const undatedSeen = new Set<string>();
   for (const item of input.undated ?? []) {
     if (!GRADED_KINDS.has(item.kind) && item.kind !== "deadline") continue;
+    // 「每周作业截止」 recurs on a weekday; asking for 「大致日期」 of it made no sense (2026-10-15 walkthrough).
+    if (/每周|每星期|weekly/i.test(item.title)) continue;
     const project = input.projects.find((entry) => entry.id === item.project);
     if (!project) continue;
+    const key = undatedKey(item.title);
+    if (!key || undatedSeen.has(`${project.id}|${key}`)) continue;
+    undatedSeen.add(`${project.id}|${key}`);
+    // Answered (any answer, 「还不知道」 included, is kept as an `undated_*` fact naming the item), or since given a day.
+    if (input.facts.some((fact) => fact.projectId === project.id && fact.slot.startsWith("undated_") && undatedKey(fact.value).includes(key))) continue;
+    if ((input.datedItems ?? []).some((dated) => (dated.project === project.id || dated.project === project.name) && undatedKey(dated.title) === key)) continue;
     gaps.push({
       code: "DATE_UNDATED", identityId: project.identityId, projectId: project.id, blocking: false,
       detail: `「${project.name}」的「${item.title}」文件里写的是待定，不是日期。`,
       question: {
-        id: `gap-undated-${project.id}-${item.title.replace(/[^\p{L}\p{N}]+/gu, "-").slice(0, 30)}`, kind: "single", allowOther: true,
+        id: `gap-undated-${project.id}-${key.slice(0, 30)}`, kind: "single", allowOther: true,
         identityId: project.identityId, projectId: project.id,
         text: `「${project.name}」的「${item.title}」在文件中标为待定，大致日期？`,
         options: [
@@ -134,20 +150,30 @@ export function profileGaps(input: ProfileGapInput): ProfileGap[] {
     });
   }
 
+  const COURSE_PART = /项目|作业|考试|测验|报告|论文|展示|project|homework|assignment|exam|quiz|report|paper|presentation/i;
   // A course meets: when nobody has said when, ask, with the files as one answer (an interview had two courses and asked about one).
   const meets = new Set(input.meetings ?? []);
   for (const project of input.projects) {
     const own = input.facts.filter((fact) => fact.projectId === project.id && confirmed(fact));
-    const course = Boolean(courseCodeOf(project.name) ?? courseCodeOf(project.id)) || own.some((fact) => fact.slot === "grading");
+    const code = courseCodeOf(project.name) ?? courseCodeOf(project.id);
+    const course = Boolean(code) || own.some((fact) => fact.slot === "grading");
     if (!course || meets.has(project.id) || meets.has(project.name) || own.some((fact) => MEETING_SLOT.test(fact.slot))) continue;
+    // A part of a course (its final project, an exam) does not meet on its own; nor does a course whose class times another project with
+    // the same code already holds. Asking when 「RBT 610 期末项目」 meets was found walking the app as an invitee (2026-10-15).
+    if (!own.some((fact) => fact.slot === "grading") && COURSE_PART.test(project.name)) continue;
+    if (code && input.projects.some((other) => other.id !== project.id && (meets.has(other.id) || meets.has(other.name))
+      && (courseCodeOf(other.name) ?? courseCodeOf(other.id)) === code)) continue;
+    // A course the connected calendar already repeats every week meets at those times: read, not asked.
+    if (code && (input.calendarRecurring ?? []).some((title) => squashCode(title).includes(squashCode(code)))) continue;
+    // Only when it meets, never where: the room does not change the schedule (2026-10-15, 「ECE 548 上课地点」 asked twice).
     gaps.push({
       code: "COURSE_MEETINGS", identityId: project.identityId, projectId: project.id, blocking: false,
       detail: `「${project.name}」还不知道每周什么时候上课。`,
       question: {
         id: `gap-meetings-${project.id}`, kind: "single", allowOther: true, identityId: project.identityId, projectId: project.id,
-        text: `「${project.name}」每周什么时候上课、在哪里？`,
+        text: `「${project.name}」每周什么时候上课？`,
         options: [
-          { id: "write", label: "我来写上课时间", detail: "在“其他”里写，例如「周二、四 11:00–12:15，EH 2317」" },
+          { id: "write", label: "我来写上课时间", detail: "在“其他”里写，例如「周二、四 11:00–12:15」" },
           { id: "file", label: "上传的课程文件里有", detail: "访谈会从文件里读出，读出后请确认" },
           { id: "none", label: "没有固定上课时间", detail: "线上或自学，不占每周的固定时段" }
         ]
@@ -203,7 +229,22 @@ export function profileGaps(input: ProfileGapInput): ProfileGap[] {
       ]
     }
   });
-  return gaps;
+  // One question per id, whatever produced it twice: the same id twice is the same card twice, and an answer clears only one of them.
+  const seen = new Set<string>();
+  return gaps.filter((gap) => !seen.has(gap.question.id) && Boolean(seen.add(gap.question.id)));
+}
+
+/** A course code without its space and case (「ECE 548」 and 「ece548」 are one course). */
+const squashCode = (text: string) => text.replace(/\s+/g, "").toLowerCase();
+
+/**
+ * An undated item's identity across wordings — course codes, the verbs around it (提交, 截止, due) and punctuation removed — so 「期末课程项目
+ * 报告截止」, 「提交 ECE 555 期末课程项目报告」 and 「ECE 555 期末课程项目报告截止」 are one item, asked about once.
+ */
+export function undatedKey(title: string): string {
+  return title.replace(/提交|上交|交付|截止|due|submit(?:ted|sion)?/giu, "")
+    .replace(/(?<![A-Za-z])[A-Za-z]{2,5}\s?\d{3,4}[A-Za-z]?(?![\dA-Za-z])/gu, "")
+    .replace(/[^\p{L}\p{N}]+/gu, "").toLowerCase();
 }
 
 /** Person facts that already say how they look, so the appearance question is not asked. */
@@ -257,7 +298,8 @@ export function answeredGapFacts(replyText: string, gaps: ProfileGap[]): GapAnsw
   const out: GapAnswer[] = [];
   for (const gap of gaps) {
     // A round stored before the portrait question was reworded still shows, and is answered in, its old words.
-    const texts = gap.code === "PORTRAIT_UNCONFIRMED" ? [gap.question.text, "「当前画像」里写的是否符合你？"] : [gap.question.text];
+    const texts = gap.code === "PORTRAIT_UNCONFIRMED" ? [gap.question.text, "「当前画像」里写的是否符合你？"]
+      : gap.code === "COURSE_MEETINGS" ? [gap.question.text, gap.question.text.replace(/？$/, "、在哪里？")] : [gap.question.text];
     const marker = texts.map((text) => `【${text}】`).find((candidate) => replyText.includes(candidate)) ?? "";
     const at = marker ? replyText.indexOf(marker) : -1;
     if (at < 0) continue;
@@ -292,4 +334,82 @@ export function answeredGapFacts(replyText: string, gaps: ProfileGap[]): GapAnsw
     }
   }
   return out;
+}
+
+/** Why one of the interview's own questions is kept from the person (rule 「只问只有本人知道、而且会改变计划的事」, 2026-10-15). */
+export type ScreenReason = "location" | "known_schedule" | "calendar_inferable";
+export const SCREEN_REASON_LABEL: Record<ScreenReason, string> = {
+  location: "只问地点，地点不影响排程",
+  known_schedule: "上课时间已在文件、日历或回答里",
+  calendar_inferable: "日历活动是否每周重复，按日历自身的重复规则判断"
+};
+export type QuestionScreenInput = {
+  projects: Array<{ id: string; name: string }>;
+  /** Projects (by id or name) whose weekly meetings are on record: a fact, a recurring item of a date batch. */
+  meetings: string[];
+  /** Titles the connected calendars repeat on more than one day. */
+  calendarRecurring?: string[];
+};
+
+const PLACE = /地点|在哪|教室|房间|地址|location|where|room|building|venue/i;
+const WHEN = /星期|周[一二三四五六日天几]|哪几天|几号|几点|时间|时段|起止|什么时候|哪天|日期|频率|多久|多长|结束|开始|几次|when|time|day|hour/i;
+const CLASS = /上课|课程?时间|课时|lecture|class/i;
+const CALENDAR = /日历|calendar/i;
+const RECURRENCE = /持续|重复|周期|每周都|每月|一次性|固定安排|长期安排|循环|recurr|one-?off/i;
+
+/**
+ * The interview's questions that are not the person's to answer, taken out before a round is stored or listed: one that asks only where
+ * something happens (the room never changes the schedule), one that asks when a course meets when the files, the calendar or an earlier
+ * answer already say, and one that asks which calendar events are ongoing — the calendar's own recurrence and common sense decide that,
+ * and a single choice over two events gave a wrong combination (「DEJA-VU 每月固定」 picked alone, Build Nights dropped). The app's own
+ * questions (`gap-*`) are built only when needed and are never screened here.
+ */
+export function screenQuestions<Q extends { id: string; text: string; projectId: string }>(questions: Q[], input: QuestionScreenInput):
+  { keep: Q[]; screened: Array<{ question: Q; reason: ScreenReason }> } {
+  const known = new Set(input.meetings.map(squashCode));
+  const meets = (projectId: string, text: string) => {
+    const project = input.projects.find((item) => item.id === projectId);
+    if (project && (known.has(squashCode(project.id)) || known.has(squashCode(project.name)))) return true;
+    const code = courseCodeOf(text.replace(/[?？]/gu, ""));
+    if (!code) return false;
+    const named = input.projects.filter((item) => (courseCodeOf(item.name) ?? courseCodeOf(item.id)) === code);
+    return named.some((item) => known.has(squashCode(item.id)) || known.has(squashCode(item.name)))
+      || (input.calendarRecurring ?? []).some((title) => squashCode(title).includes(squashCode(code)));
+  };
+  const keep: Q[] = [], screened: Array<{ question: Q; reason: ScreenReason }> = [];
+  for (const question of questions) {
+    const reason: ScreenReason | undefined = question.id.startsWith("gap-") ? undefined
+      : CALENDAR.test(question.text) && RECURRENCE.test(question.text) ? "calendar_inferable"
+      : PLACE.test(question.text) && !WHEN.test(question.text) ? "location"
+      : CLASS.test(question.text) && WHEN.test(question.text) && meets(question.projectId, question.text) ? "known_schedule"
+      : undefined;
+    if (reason) screened.push({ question, reason }); else keep.push(question);
+  }
+  return { keep, screened };
+}
+
+/** What is written in place of a screened question that something rests on: an assumption the person can correct (only the calendar's). */
+export function screenAssumption(item: { question: { id: string; text: string; identityId: string; projectId: string }; reason: ScreenReason }):
+  { identityId: string; projectId: string; slot: string; value: string } | undefined {
+  if (item.reason !== "calendar_inferable") return undefined;
+  return { identityId: item.question.identityId || "person", projectId: item.question.projectId, slot: `assumed_${stable(item.question.id)}`,
+    value: `假设：${item.question.text.replace(/[？?]$/u, "")}——按日历自身的重复规则判断：重复的系列视为持续安排，单次事件视为一次性。本人说一句即可更正。` };
+}
+
+/** A line for the interview, sent with a round answered on 待决事项, naming the questions the app kept from the person and why. */
+export function screenedNote(screened: Array<{ question: { text: string }; reason: ScreenReason }>): string {
+  if (!screened.length) return "";
+  return `（系统说明，不是本人的回答：以下问题未交给本人——${screened.map((item) => `「${item.question.text}」（${SCREEN_REASON_LABEL[item.reason]}）`).join("；")}。`
+    + "不必再问；需要时按已有记录和常识自行判断，记为「假设：」。）";
+}
+
+/**
+ * A step plan's question the task's own material answers — the problem set and how many problems, how and where it is handed in, the
+ * format and length, the rules on collaboration and AI, the grading rubric, the due time. When the task has files these are read from
+ * them (by the assistant and the next plan), never asked; whatever the files do not say is assumed (the owner's decision, 2026-10-15:
+ * 「作业 3 题面及题目数」「作业提交方式」「协作与 AI 使用规则」 were put to the person for a homework whose handout was on record).
+ */
+const FROM_MATERIAL = /题面|题目|几道|题数|多少题|提交(方式|平台|渠道|格式|位置|地址)|怎么提交|如何提交|交到哪|格式要求|页数|字数|篇幅|协作(与|和)?.{0,6}规则|合作规则|AI.{0,4}(使用|规则|政策)|使用\s*AI|评分(标准|细则|方式)|rubric|截止(时间|日期)|几点截止|submission|handout/i;
+export function readableFromMaterial(questionText: string): boolean {
+  return FROM_MATERIAL.test(questionText);
 }

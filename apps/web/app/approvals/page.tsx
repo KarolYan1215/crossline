@@ -1,4 +1,4 @@
-import { ensureSeeded, getStore, loadCurrentPlan } from "../../lib/crossline";
+import { ensureSeeded, getStore, loadCurrentPlan, planToday } from "../../lib/crossline";
 import { SubpageShell } from "../subpage-shell";
 import { AcceptEvidenceButton, JudgeMilestoneButton, ProposalBatchForm, RevokeAutoApprovalButton } from "./approval-actions";
 import { AssistantReview } from "./assistant-review";
@@ -11,8 +11,15 @@ import { TaskCard } from "../task/task-card";
 import { loadTaskDetailsBatch } from "../../lib/task-detail";
 import { countPending } from "../../lib/pending";
 import { loadAsks } from "../../lib/asks";
+import { loadAssistant } from "../../lib/agent";
+import { preparingProposalIds } from "../../lib/proposal-ready";
 import { decisionHorizon } from "../../lib/horizon";
 import { AskList } from "../ask-list";
+import { AskBoard } from "../asks/ask-board";
+import { loadAskPreviews } from "../asks/previews";
+import { uniqueAsks } from "../asks/model";
+import { PendingSummary } from "./summary";
+import "./approvals.css";
 
 export const dynamic = "force-dynamic";
 
@@ -22,7 +29,11 @@ export default async function ApprovalsPage() {
   ensureSeeded(ctx);
   const plan = await loadCurrentPlan(ctx);
   const evidenceReviews = getStore().listWorkOrders(ctx.workspaceId).filter((item) => item.state === "evidence_review");
-  const proposals = getStore().listWorkOrders(ctx.workspaceId).filter((item) => item.state === "awaiting_plan_approval");
+  // A proposal whose steps are still being planned is not a decision yet (`preparingProposalIds`): it is neither listed nor approvable here.
+  const preparing = preparingProposalIds(ctx);
+  const waiting = getStore().listWorkOrders(ctx.workspaceId).filter((item) => item.state === "awaiting_plan_approval");
+  const proposals = waiting.filter((item) => !preparing.has(item.id));
+  const preparingCount = waiting.length - proposals.length;
   const claims = getStore().listEvidenceClaims(ctx.workspaceId);
   // A revoked acceptance puts the order back here with the same evidence, and the gate deliberately
   // will not re-judge it on its own — so without the reason on screen the order looks stuck for no
@@ -38,8 +49,9 @@ export default async function ApprovalsPage() {
     else gateBlocks.delete(event.entityId);
   }
   const pending = countPending(ctx);
-  const asks = await loadAsks(ctx);
+  const asks = uniqueAsks(await loadAsks(ctx));
   const weekAsks = asks.filter((ask) => !ask.entersOn), laterAsks = asks.filter((ask) => ask.entersOn);
+  const previews = loadAskPreviews(ctx, asks);
   const horizon = decisionHorizon(ctx);
   const anchors = new Map(getStore().listMilestoneAnchors(ctx.workspaceId).map((anchor) => [anchor.milestoneId, anchor]));
   const executions = getStore().listExecutions(ctx.workspaceId);
@@ -54,6 +66,14 @@ export default async function ApprovalsPage() {
   const entersOn = new Map(sortedProposals.map((item) => [item.id, horizon.orderEntry(item)]));
   const weekProposals = sortedProposals.filter((item) => !entersOn.get(item.id));
   const laterProposals = sortedProposals.filter((item) => entersOn.get(item.id)).sort((a, b) => entersOn.get(a.id)!.localeCompare(entersOn.get(b.id)!));
+  // When each decision that can wait comes into the week: asks, proposals, milestone drafts and assistant results — the same four
+  // `pending.later` counts.
+  const laterDays = [
+    ...laterAsks.map((ask) => ask.entersOn!),
+    ...laterProposals.map((item) => entersOn.get(item.id)!),
+    ...getStore().listMilestones(ctx.workspaceId).filter((item) => item.status === "draft").flatMap((item) => horizon.milestoneEntry(item.id) ?? []),
+    ...loadAssistant(ctx).tasks.filter((task) => task.status === "needs_review").flatMap((task) => deferredOrder(task.workOrderId) ?? [])
+  ];
   // The earliest suggested block per proposal (a split task has several; the first is when it would start).
   const slotOf = new Map<string, { day: string; start: string; end: string }>();
   for (const block of [...plan.blocks].filter((item) => item.id.startsWith("proposed:") && item.day)
@@ -72,37 +92,26 @@ export default async function ApprovalsPage() {
       {enters && <small className="proposal-enters">{enters.slice(5)} 起列入本周</small>}
     </div>;
   };
-  // Drafts, plan differences, targets and interview items are decided where they live (主线, 计划, 访谈); here they are counted and
-  // linked. What is decided here is listed in full below.
+  const assistantCount = pending.assistantKinds + pending.assistantQuestions + pending.assistantReviews;
+  // Drafts, targets and interview items are decided where they live (主线, 访谈); here they are counted and linked. What is decided here
+  // is laid out below: the week's questions in four quadrants, then the assistant's results, evidence and task proposals.
   return <SubpageShell active="待确认" title="待确认"
-    description={`${pending.total ? `本周 ${pending.total} 项待决定。` : "本周暂无待决定事项。"}${pending.later.total ? `另有 ${pending.later.total} 项的工作一周后才需开始，列在「以后再定」，到时自动列入本周。` : ""}内部、可撤销的准备步骤自动生效，24 小时内可撤销。`}>
-    <section className="pending-list" aria-label="待确认汇总">
-      {([
-        ["待决事项", weekAsks.length, "#asks"], ["任务提案", pending.workOrders, "#proposals"], ["待验收", evidenceReviews.length, "#evidence"],
-        ["助手", pending.assistantKinds + pending.assistantQuestions + pending.assistantReviews, "#assistant"],
-        ["里程碑草稿", pending.milestoneDrafts, "/milestones"], ["分数线待审阅", pending.targets, "/milestones"],
-        ["调研建议", pending.research, "/onboarding"], ["文件中的日期", pending.dates, "/onboarding"], ["访谈问题", pending.questions, "/onboarding"],
-        ["以后再定", pending.later.total, "#later"]
-      ] as const).filter(([, count]) => count > 0).map(([label, count, href]) =>
-        <a key={label} className="panel" href={href}><b>{count}</b><span>{label}</span></a>)}
-    </section>
-    <AskList initial={weekAsks} />
-    {autoApproved.length > 0 && <section className="pending-block" aria-label="最近自动生效">
-      <h2>最近自动生效 · {autoApproved.length}</h2>
-      <p className="review-note">内部、可撤销的准备步骤；撤销后回到提案，不再自动生效。</p>
-      <ul>{autoApproved.map((item) => <li key={item.id}>
-        <a href={`/workbench/${encodeURIComponent(item.id)}`}>{item.intent}</a>
-        {item.undoable ? <RevokeAutoApprovalButton workOrderId={item.id} /> : <small> · 已开始做</small>}
-      </li>)}</ul>
-    </section>}
-    {permissionModeEnabled(ctx) && <PermissionModePanel initialCandidates={permissionCandidates(ctx).filter((item) => item.kind !== "insight")} />}
+    description={`本周 ${pending.total} 项待决定${pending.later.total ? `，另有 ${pending.later.total} 项以后再定` : ""}。只有需本人选择、授权登录或涉及对外动作的才需确认，其余自动生效，24 小时内可撤销。`}>
+    <PendingSummary later={laterDays} today={planToday(ctx)}
+      here={[{ label: "助手", count: assistantCount, href: "#assistant" }, { label: "待验收", count: evidenceReviews.length, href: "#evidence" },
+        { label: "任务提案", count: pending.workOrders, href: "#proposals" }, { label: "最近自动生效", count: autoApproved.length, href: "#auto" }]}
+      elsewhere={[{ label: "里程碑草稿", count: pending.milestoneDrafts, href: "/milestones" }, { label: "分数线待审阅", count: pending.targets, href: "/milestones" },
+        { label: "调研建议", count: pending.research, href: "/review" }, { label: "文件中的日期", count: pending.dates, href: "/onboarding" },
+        { label: "访谈问题", count: pending.questions, href: "/onboarding" }]} />
+    <AskBoard initial={weekAsks} previews={previews} />
     <AssistantReview ctx={ctx} deferred={deferredOrder} />
-    <section className="approval-ledger" id="evidence">
+    {evidenceReviews.length > 0 && <section className="approval-ledger" id="evidence" aria-label="待验收">
+      <h2>待验收 · {evidenceReviews.length}</h2>
       {evidenceReviews.map((item) => {
         const own = claims.filter((claim) => claim.workOrderId === item.id && claim.reviewStatus === "submitted");
         const execution = executions.filter((entry) => entry.workOrderId === item.id).at(-1);
         return <article key={item.id}>
-          <b>待验收</b><a href={`/workbench/${encodeURIComponent(item.id)}`}><strong>{item.intent}</strong></a>
+          <a href={`/workbench/${encodeURIComponent(item.id)}`}><strong>{item.intent}</strong></a>
           <p>
             {own.length ? own.map((claim) => `${({ file: "文件", link: "链接", record: "记录", telemetry: "遥测" } as Record<string, string>)[claim.kind] ?? claim.kind} · ${claim.description}${claim.kind === "file" ? "" : ` · ${claim.uri}`}`).join("；") : "本次提交没有证据声明"}
             {execution?.durationObserved
@@ -114,7 +123,7 @@ export default async function ApprovalsPage() {
                 {gateBlocks.has(item.id)
                   ? <p role="alert"><strong>闸门没有判定这份证据</strong> · {gateBlocks.get(item.id)!.message}
                   </p>
-                  : <p><strong>等待里程碑闸门</strong> · 闸门判这份证据是否兑现了本作业的交付承诺；里程碑整体是否达成另行记录。</p>}
+                  : <p><strong>等待里程碑闸门</strong> · 闸门判这份证据是否兑现了本任务的交付承诺；里程碑整体是否达成另行记录。</p>}
                 {revocations.has(item.id) && <p role="status">
                   验收已撤销，原因：{revocations.get(item.id)}。同一份证据不会自动重判；补充后点「现在判定」。
                 </p>}
@@ -122,14 +131,24 @@ export default async function ApprovalsPage() {
               </>
             : <AcceptEvidenceButton workOrderId={item.id} />}</article>;
       })}
-    </section>
+    </section>}
+    {preparingCount > 0 && <p className="ap-preparing" role="status">{preparingCount} 项提案正在规划步骤，规划完成后列在这里。</p>}
     {weekProposals.length > 0 && <ProposalBatchForm count={weekProposals.length}>
       <section className="work-order-list" id="proposals">{weekProposals.map(renderProposal)}</section>
     </ProposalBatchForm>}
+    {permissionModeEnabled(ctx) && <PermissionModePanel initialCandidates={permissionCandidates(ctx).filter((item) => item.kind !== "insight")} />}
+    {autoApproved.length > 0 && <section className="pending-block ap-auto" id="auto" aria-label="最近自动生效">
+      <h2>最近自动生效 · {autoApproved.length}</h2>
+      <p className="review-note">无需本人决定、不对外的任务已自动生效；24 小时内可撤销，撤销后回到提案。</p>
+      <ul>{autoApproved.map((item) => <li key={item.id}>
+        <a href={`/workbench/${encodeURIComponent(item.id)}`}>{item.intent}</a>
+        {item.undoable ? <RevokeAutoApprovalButton workOrderId={item.id} /> : <small> · 已开始做</small>}
+      </li>)}</ul>
+    </section>}
     {pending.later.total > 0 && <details className="fold advanced" id="later">
-      {/* The same total as the tile and the line on top; the assistant's results it counts are listed in their own section. */}
+      {/* The same total as the line on top; the assistant's results it counts are listed in their own section. */}
       <summary>以后再定 · {pending.later.total} 项（工作一周后才需开始，到时自动列入本周）</summary>
-      <AskList initial={laterAsks} scope="later" heading="以后再定的待决事项" />
+      <AskList initial={laterAsks} scope="later" heading="以后再定的待决事项" previews={previews} />
       {pending.later.assistantReviews > 0 && <p><a href="#assistant">{pending.later.assistantReviews} 份助手成果</a>在「助手」一节，对应任务一周后才需开始。</p>}
       {pending.later.milestoneDrafts > 0 && <p><a href="/milestones">{pending.later.milestoneDrafts} 个里程碑草稿</a>在主线页，截止较远。</p>}
       {laterProposals.length > 0 && <ProposalBatchForm count={laterProposals.length}>

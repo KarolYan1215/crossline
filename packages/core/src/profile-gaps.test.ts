@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { answeredGapFacts, isCourse, mergeFacts, profileGaps, type ProfileGapInput } from "./profile-gaps";
+import { answeredGapFacts, isCourse, mergeFacts, profileGaps, screenAssumption, screenedNote, screenQuestions, undatedKey, type ProfileGapInput } from "./profile-gaps";
+import { questionKind } from "./onboarding-turn-schema";
 
 const identities = [{ id: "research", label: "科研" }, { id: "startup", label: "创业" }];
 const base: ProfileGapInput = {
@@ -71,7 +72,7 @@ test("a course nobody said the class times of, a file only the person can file a
     unfiled: [{ id: "doc-1", fileName: "Lecture Plan.pdf", lean: { id: "ece548" } }], portrait: { written: true, confirmed: false } };
   const gaps = profileGaps(input);
   expect(gaps.filter((gap) => gap.code !== "LINE_UNCONFIRMED").map((gap) => gap.question.text)).toEqual([
-    "「ECE 548」每周什么时候上课、在哪里？", "《Lecture Plan.pdf》属于哪个项目？", "「当前画像」写的是否符合本人？",
+    "「ECE 548」每周什么时候上课？", "《Lecture Plan.pdf》属于哪个项目？", "「当前画像」写的是否符合本人？",
     "画像报告会为本人生成一个卡通形象。希望它是什么样子（性别、发型、常穿的衣服或颜色）？这些描述只用于生成形象。"]);
   // The project the interview leaned to is offered first.
   expect(gaps.find((gap) => gap.code === "FILE_UNFILED")!.question.options[0]).toMatchObject({ id: "ece548", detail: "访谈判断更可能是它" });
@@ -108,4 +109,87 @@ test("一个非默认项目没有截止时，问「有截止日期吗」，答�
   expect(gap).toMatchObject({ projectId: "xhs", blocking: true });
   expect(answeredGapFacts(`【${gap.question.text}】选择：没有截止`, gaps)).toEqual([expect.objectContaining({ slot: "no_deadline", value: "没有截止" })]);
   expect(answeredGapFacts(`【${gap.question.text}】选择：我来写日期。补充：2026-12-15`, gaps)).toEqual([expect.objectContaining({ slot: "deadline", value: "2026-12-15" })]);
+});
+
+// Found walking the app as an invitee (2026-10-15): the interview asked when 「RBT 610 期末项目」 meets, and for 「大致日期」 of a weekly
+// homework deadline the model had filed as undated.
+test("a course's parts and weekly deadlines are not asked as meetings or undated dates", () => {
+  const input: ProfileGapInput = { ...base, meetings: ["rbt610"], dated: ["rbt610", "rbt610-final", "dsc520"],
+    projects: [{ id: "rbt610", identityId: "research", name: "RBT 610 Robot Perception" }, { id: "rbt610-final", identityId: "research", name: "RBT 610 期末项目" },
+      { id: "dsc520", identityId: "research", name: "DSC 520" }, { id: "rbt611", identityId: "research", name: "RBT 611" }],
+    undated: [{ project: "dsc520", title: "DSC 520 每周作业截止", kind: "homework" }] } as ProfileGapInput;
+  const gaps = profileGaps(input);
+  expect(gaps.filter((gap) => gap.code === "COURSE_MEETINGS").map((gap) => gap.projectId).sort()).toEqual(["dsc520", "rbt611"]);
+  expect(gaps.some((gap) => gap.code === "DATE_UNDATED")).toBe(false);
+});
+
+// The real account, 2026-10-15: the same TBD row came back under three wordings and twice in one batch (once from the file, once from the
+// reply 「还不知道」), the answer was never read back, and two to four identical cards sat on 待确认 that no answer could clear.
+test("an undated item is asked once whatever its wording, and not again once answered or given a day", () => {
+  expect(undatedKey("期末课程项目报告截止")).toBe(undatedKey("提交 ECE 555 期末课程项目报告"));
+  expect(undatedKey("ECE 555 期末课程项目报告截止")).toBe("期末课程项目报告");
+  const undated = [
+    { project: "ece555", kind: "project_due", title: "ECE 555 期末课程项目报告截止" },
+    { project: "ece555", kind: "project_due", title: "ECE 555 期末课程项目报告截止" },
+    { project: "ece555", kind: "project_due", title: "提交 ECE 555 期末课程项目报告" }];
+  const gaps = profileGaps({ ...base, undated }).filter((gap) => gap.code === "DATE_UNDATED");
+  expect(gaps).toHaveLength(1);
+  const reply = `【${gaps[0]!.question.text}】选择：还不知道`;
+  const [answer] = answeredGapFacts(reply, gaps);
+  expect(answer).toMatchObject({ projectId: "ece555", value: expect.stringContaining("还不知道") });
+  const facts = [...base.facts, { identityId: "research", projectId: "ece555", slot: answer!.slot, value: answer!.value, status: "confirmed" }];
+  expect(profileGaps({ ...base, undated, facts }).some((gap) => gap.code === "DATE_UNDATED")).toBe(false);
+  // An answer recorded under an older question id still counts: it names the item.
+  const old = [...base.facts, { identityId: "research", projectId: "ece555", slot: "undated_6uyhx6",
+    value: "「ECE 555」的「ECE 555 期末课程项目报告截止」文件里写的是待定，不是日期。还不知道", status: "confirmed" }];
+  expect(profileGaps({ ...base, undated, facts: old }).some((gap) => gap.code === "DATE_UNDATED")).toBe(false);
+  // A later batch that dates it settles it too.
+  expect(profileGaps({ ...base, undated, datedItems: [{ project: "ECE 555", title: "ECE 555 期末项目报告截止" }, { project: "ece555", title: "期末课程项目报告" }] })
+    .some((gap) => gap.code === "DATE_UNDATED")).toBe(false);
+});
+
+test("a course the calendar repeats every week is not asked when it meets, and the question never asks where", () => {
+  const input: ProfileGapInput = { ...base, projects: [...base.projects, { id: "ece548", identityId: "research", name: "ECE 548" }] };
+  expect(profileGaps(input).find((gap) => gap.code === "COURSE_MEETINGS")!.question.text).toBe("「ECE 548」每周什么时候上课？");
+  expect(profileGaps({ ...input, calendarRecurring: ["ECE548 Lecture"] }).some((gap) => gap.code === "COURSE_MEETINGS")).toBe(false);
+});
+
+test("questions that are not the person's to answer are kept from them; a calendar's recurrence becomes an assumption", () => {
+  const ask = (id: string, text: string, projectId = "") => ({ id, text, kind: "single", identityId: "research", projectId, options: [] });
+  const round = [
+    ask("q-ece548-location", "ECE 548 每周上课地点？", "ece548"),
+    ask("q-ece548-schedule", "ECE 548 每周固定上课的星期、起止时间和地点？", "ece548"),
+    ask("q-calendar-events", "日历中的两项活动，哪些属于持续安排？"),
+    ask("q-one-on-one", "你每周二的导师 1V1 通常几点结束？"),
+    ask("q-ece555-class", "ECE 555 每周几上课？"),
+    ask("gap-meetings-ece548", "「ECE 548」每周什么时候上课？", "ece548")];
+  const screen = screenQuestions(round, { projects: [{ id: "ece548", name: "ECE 548" }, { id: "ece555", name: "ECE 555" }], meetings: ["ece548"] });
+  expect(screen.keep.map((question) => question.id)).toEqual(["q-one-on-one", "q-ece555-class", "gap-meetings-ece548"]);
+  expect(screen.screened.map((item) => [item.question.id, item.reason])).toEqual([
+    ["q-ece548-location", "location"], ["q-ece548-schedule", "known_schedule"], ["q-calendar-events", "calendar_inferable"]]);
+  // The calendar decides class times too.
+  expect(screenQuestions([round[4]!], { projects: [{ id: "ece555", name: "ECE 555" }], meetings: [], calendarRecurring: ["ECE 555 Lecture"] }).keep).toEqual([]);
+  expect(screen.screened.map(screenAssumption).filter(Boolean)).toEqual([expect.objectContaining({ identityId: "research",
+    slot: expect.stringMatching(/^assumed_/), value: expect.stringMatching(/^假设：日历中的两项活动/) })]);
+  expect(screenedNote(screen.screened)).toContain("「ECE 548 每周上课地点？」（只问地点，地点不影响排程）");
+  expect(screenedNote([])).toBe("");
+});
+
+test("a question that asks for several things takes several answers; one with exclusive options stays single", () => {
+  expect(questionKind({ kind: "single", text: "ECE 548 本学期最重要的目标？" })).toBe("multi");
+  expect(questionKind({ kind: "single", text: "哪些结果可以证明 ECE 548 正在取得进展？" })).toBe("multi");
+  expect(questionKind({ kind: "single", text: "ECE 548 的目标成绩？" })).toBe("single");
+  expect(questionKind({ kind: "single", text: "「ECE 548」有截止日期吗？" })).toBe("single");
+  expect(questionKind({ kind: "free", text: "还有哪些？" })).toBe("free");
+  // Every question the app builds itself has options that exclude each other.
+  const all = profileGaps({ ...base, projects: [...base.projects, { id: "x", identityId: "startup", name: "X" }],
+    undated: [{ project: "ece555", kind: "exam", title: "期末" }], unfiled: [{ id: "d", fileName: "a.pdf" }], portrait: { written: true, confirmed: false } });
+  expect(all.length).toBeGreaterThan(4);
+  expect(all.every((gap) => gap.question.kind === "single" && questionKind(gap.question) === "single")).toBe(true);
+});
+
+test("a step question the task's own files answer is recognised; one only the person knows is not", async () => {
+  const { readableFromMaterial } = await import("./profile-gaps");
+  for (const text of ["作业 3 题面及题目数？", "作业提交方式？", "协作与 AI 使用规则？", "评分标准是什么？", "报告的字数要求？"]) expect(readableFromMaterial(text)).toBe(true);
+  for (const text of ["当前完成状态？", "当前 A− 安全分数线？", "哪几讲已经掌握？"]) expect(readableFromMaterial(text)).toBe(false);
 });

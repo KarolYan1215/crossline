@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { horizonEntry, latestStart, rankAsks, snoozeUntil, urgencyFor, validateAskAnswer, type Ask } from "./asks";
+import { askQuadrant, horizonEntry, latestStart, rankAsks, snoozeUntil, urgencyFor, validateAskAnswer, validateAskChoice, type Ask } from "./asks";
 
 const ask = (id: string, over: Partial<Ask> = {}): Ask => ({ id, kind: "backplan_input", entityId: id, title: id, why: "", urgency: "later",
   raisedAt: "2026-10-07T00:00:00Z", fingerprint: "f1", options: [
@@ -55,5 +55,28 @@ describe("the week's decisions", () => {
     const base = { kind: "backplan_input" as const, entityId: "m", why: "", options: [], urgency: "soon" as const, raisedAt: "", fingerprint: "f" };
     const ranked = rankAsks([{ ...base, id: "a", title: "a", importance: 40 }, { ...base, id: "b", title: "b", importance: 90 }, { ...base, id: "c", title: "c" }], [], "2026-10-10");
     expect(ranked.map((item) => item.id)).toEqual(["b", "c", "a"]);
+  });
+});
+
+describe("ask quadrants and choices", () => {
+  it("places an ask by urgency and importance", () => {
+    expect(askQuadrant({ urgency: "now", important: true })).toBe("urgent_important");
+    expect(askQuadrant({ urgency: "soon", important: true })).toBe("important");
+    expect(askQuadrant({ urgency: "now", important: false })).toBe("urgent");
+    expect(askQuadrant({ urgency: "later" })).toBe("neither");
+    expect(askQuadrant({ urgency: "later", importance: 70 })).toBe("important");
+  });
+
+  it("takes several options only where the ask allows several", () => {
+    const pick = ask("m", { options: [{ id: "a", label: "A" }, { id: "b", label: "B" }] });
+    expect(validateAskChoice(pick, ["a", "b"], {})).toMatchObject({ ok: false, code: "ASK_SINGLE_CHOICE" });
+    expect(validateAskChoice({ ...pick, select: "many" }, ["a", "b"], {})).toMatchObject({ ok: true });
+    expect(validateAskChoice(pick, [], {})).toMatchObject({ ok: false, code: "ASK_OPTION_UNKNOWN" });
+  });
+
+  it("takes the person's own words only where the ask takes them", () => {
+    const pick = ask("t", { options: [{ id: "a", label: "A" }] });
+    expect(validateAskChoice(pick, [], {}, "周三下午")).toMatchObject({ ok: false, code: "ASK_NOTE_NOT_TAKEN" });
+    expect(validateAskChoice({ ...pick, freeText: { placeholder: "A" } }, [], {}, " 周三下午 ")).toMatchObject({ ok: true, note: "周三下午" });
   });
 });

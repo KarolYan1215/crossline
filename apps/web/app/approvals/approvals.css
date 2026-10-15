@@ -1,0 +1,70 @@
+/* 待确认: the summary line on top, the evidence and auto-approved sections, and the assistant's results shown by what they are for. */
+.ap-summary{display:flex;flex-wrap:wrap;align-items:center;gap:6px 22px;margin:10px 0 0;font-size:13px}
+.ap-summary-line{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 0;margin:0;color:var(--graphite)}
+.ap-summary-line>span:first-child{font-size:12px;font-weight:700;margin-right:8px}
+.ap-summary-line a{color:var(--ink);text-decoration:none}
+.ap-summary-line a:hover b{text-decoration:underline}
+.ap-later{display:grid;grid-template-columns:auto 168px;grid-template-rows:auto auto;column-gap:10px;align-items:end;color:var(--ink);text-decoration:none}
+.ap-later-label{grid-row:1 / span 2;align-self:center;font-size:13px}
+.ap-later-label small{font-size:12px;color:var(--graphite)}
+.ap-later-bars{width:168px;height:24px;display:block}
+.ap-later-slot{fill:transparent}
+.ap-later-bar{fill:var(--ink)}
+.ap-later-tick{fill:var(--graphite)}
+.ap-later-axis{display:flex;justify-content:space-between;font-size:12px;color:var(--graphite)}
+.ap-later-axis small{font-size:12px}
+.approval-ledger{margin:12px 0}
+.approval-ledger>h2,.ap-auto>h2{margin:0;font-size:15px;font-weight:700}
+
+/* An assistant result: deliverables by use, each with its preview. */
+.ar-outputs{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr));gap:10px;align-items:start}
+.ar-group{display:grid;gap:4px;min-width:0}
+.ar-group>h4{margin:0;font-size:12px;font-weight:700;color:var(--graphite)}
+.ar-group>ul{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.ar-output{display:grid;gap:4px;padding:7px 9px;border:1px solid var(--mist);min-width:0}
+.ar-output p{margin:0}
+.ar-output-head a{color:var(--ink);overflow-wrap:anywhere}
+.ar-output-purpose{font-size:13px}
+.ar-preview{font-size:13px;line-height:1.5;padding:6px 8px;border-left:3px solid var(--mist);background:var(--chalk);max-height:220px;overflow:hidden}
+.ar-preview h1,.ar-preview h2,.ar-preview h3,.ar-preview h4{margin:2px 0;font-size:13px}
+.ar-preview p,.ar-preview ul,.ar-preview ol{margin:2px 0}
+.ar-preview ul,.ar-preview ol{padding-left:18px}
+.ar-preview a{font-size:12px;color:var(--ink)}
+.ar-table-wrap{display:grid;gap:3px;overflow-x:auto;min-width:0}
+.ar-table{border-collapse:collapse;font-size:12px;min-width:100%}
+.ar-table th,.ar-table td{border:1px solid var(--mist);padding:3px 6px;text-align:left;vertical-align:top;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ar-table th{background:var(--chalk);font-weight:700}
+.ar-table-wrap small{font-size:12px;color:var(--graphite)}
+.ar-image{max-width:100%;max-height:200px;border:1px solid var(--mist);justify-self:start}
+/* A reusable workflow: its steps in a row, the person's own ones outlined in ink. */
+.ar-workflow{display:grid;gap:5px;padding:7px 9px;border:1px solid var(--mist)}
+.ar-workflow p{margin:0;font-size:13px}
+.ar-workflow>small{font-size:12px;color:var(--graphite)}
+.ar-flow{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;align-items:stretch;gap:4px 18px;counter-reset:flow}
+.ar-flow li{position:relative;display:grid;gap:1px;padding:4px 8px;border:1px solid var(--mist);font-size:13px;max-width:220px;counter-increment:flow}
+.ar-flow li[data-by="person"]{border:2px solid var(--ink)}
+.ar-flow li small{font-size:12px;color:var(--graphite)}
+.ar-flow li+li::before{content:"→";position:absolute;left:-15px;top:50%;transform:translateY(-50%);color:var(--graphite);font-size:12px}
+/* Self-checks: one line for those that passed, failures spelled out. */
+.ar-checks{display:grid;gap:4px}
+.ar-check-line{display:flex;align-items:center;gap:8px;margin:0;font-size:13px;color:var(--graphite)}
+.ar-checks-bar rect{fill:var(--mist)}
+.ar-checks-bar rect[data-pass]{fill:var(--ink)}
+.ar-check-failed{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;margin:0;font-size:13px}
+.ar-list h4{margin:4px 0 2px;font-size:12px;font-weight:700;color:var(--graphite)}
+.ar-list ul{list-style:none;margin:0;padding:0;display:grid;gap:4px}
+.ar-list li{display:grid;gap:2px;padding-left:8px;border-left:2px solid var(--mist);font-size:13px}
+.ar-list li small{font-size:12px;color:var(--graphite)}
+.ar-sendback{justify-self:start;font-size:12px;padding:2px 8px}
+.ar-sendback-form input{padding:4px 6px;border:1px solid var(--mist);background:var(--paper);color:var(--ink)}
+.ar-record summary{font-size:13px;color:var(--graphite)}
+.ar-record ul{margin:4px 0 0;padding-left:18px;font-size:13px}
+@media (max-width:680px){
+  .ap-later{grid-template-columns:minmax(0,1fr)}
+  .ap-later-label{grid-row:auto}
+  .ar-sendback,.ar-check-failed .secondary-button{min-height:44px}
+  .ar-flow{flex-direction:column;gap:14px}
+  .ar-flow li{max-width:none}
+  .ar-flow li+li::before{content:"↓";left:12px;top:-13px;transform:none}
+}
+.ap-preparing{margin:10px 0 0;font-size:13px;color:var(--graphite)}

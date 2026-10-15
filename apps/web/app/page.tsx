@@ -8,6 +8,7 @@ import { currentWorkState, loadTimeline } from "../lib/timeline";
 import { loadCurrentPlan } from "../lib/crossline";
 import { loadTaskDetailsBatch, loadMilestoneDetailsBatch } from "../lib/task-detail";
 import { loadAsks } from "../lib/asks";
+import { loadAskPreviews } from "./asks/previews";
 import { nextSlots } from "../lib/steps";
 import { loadFlywheelGraph } from "../lib/flywheel-graph";
 import { shiftDay } from "./timeline/model";
@@ -36,14 +37,16 @@ export default async function HomePage() {
   const calendarOrderIds = [...new Set(calendar.items.filter((item) => item.workOrderId && item.day >= calendar.today && item.day < weekEnd)
     .map((item) => item.workOrderId!))];
   const details = loadTaskDetailsBatch(ctx, [...new Set([...taskWorkOrderIds, ...calendarOrderIds])]);
+  // Kept out of `loadDashboard` for the same reason: `lib/asks.ts` imports from `lib/crossline.ts`.
+  const asks = await loadAsks(ctx);
   return <DashboardView data={{
     ...data,
     taskDetailById: details,
     calendarDetails: Object.fromEntries(calendarOrderIds.flatMap((id) => details.has(id) ? [[id, details.get(id)!]] : [])),
     milestoneDetailById: loadMilestoneDetailsBatch(ctx, milestoneIds),
     slotById: nextSlots(plan.blocks, planToday(ctx)),
-    // Kept out of `loadDashboard` for the same reason: `lib/asks.ts` imports from `lib/crossline.ts`.
-    asks: await loadAsks(ctx),
+    asks,
+    askPreviews: loadAskPreviews(ctx, asks),
     calendar,
     scheduleChanges: readChangeSummary(ctx),
     finerSplits: readFinerSplits(ctx),
