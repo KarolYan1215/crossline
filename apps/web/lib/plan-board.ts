@@ -1,8 +1,9 @@
 import "server-only";
-import { hoursFromText, statedWeeklyHours, weeklyAvailableHours, type AccessContext, type AvailabilitySource, type AvailabilityWindow, type ImportancePreset, type PortraitReport } from "@crossline/core";
+import { ENERGY_ADVICE_DISMISSED, ENERGY_ADVICE_SETTING, hoursFromText, readEnergyAdvice, statedWeeklyHours, weeklyAvailableHours, type AccessContext, type AvailabilitySource,
+  type AvailabilityWindow, type EnergyAdvice, type PortraitReport } from "@crossline/core";
 import { DEADLINE_MARGIN_DAYS, PARAMS_ASAP, PARAMS_BUFFERED, type ScheduleParams } from "@crossline/planner";
-import { effectiveParams, effectiveSchedulePreferences, effectiveWeight, getStore, IMPORTANT_WEIGHT, importancePresets, loadGoalForecast, planRanking, planToday,
-  LINE_SHARES_SETTING, readAvailability, readGoalSettings, readLineShares, readSchedulePreferences, resolvedAvailability, type PersistedPlan, type RankedTask } from "./crossline";
+import { effectiveParams, effectiveSchedulePreferences, effectiveWeight, getStore, IMPORTANT_WEIGHT, loadGoalForecast, planRanking, planToday,
+  LINE_SHARES_SETTING, readAvailability, readGoalSettings, readLineShares, resolvedAvailability, type PersistedPlan, type RankedTask } from "./crossline";
 import { suggestedAvailabilityFor } from "./timeline";
 import { identityLines, lineLabels } from "./lines";
 import { readScheduledMinutes } from "./schedule-memory";
@@ -30,9 +31,15 @@ export type PlanBoard = {
   estimates: { points: EstimatePoint[]; covered: number; coverage: number | null };
   /** Minutes worked per weekday × hour over the last eight weeks, and the availability pattern on the same grid. */
   rhythm: { worked: number[][]; available: number[][]; since: string };
+  /** The scheduler's own ordering, read-only (decided 2026-10-15: importance is the agent's, set on each milestone's card; due days on task cards). */
   ranking: RankedTask[];
   params: ScheduleParams; presets: { buffered: ScheduleParams; asap: ScheduleParams };
-  importance: Array<{ id: string; title: string; line: string; weight: number; custom: boolean; preset: ImportancePreset }>;
+  /** What the ordering rests on, as the page shows it: each line's long-term goal. */
+  goals: Array<{ line: string; label: string; goal: string | null }>;
+  /** This week's energy advice (worker, weekly), and whether the person set exactly this one aside. */
+  advice: { value: EnergyAdvice | null; dismissed: boolean };
+  /** Milestones whose work is all accepted: left off the timeline. */
+  doneMilestones: string[];
   week: { windows: AvailabilityWindow[]; suggested: AvailabilityWindow[];
     /** Hours the interview proposed from a hard-constraint line's rules (or the person's working hours), with why; null when none. */
     proposed: { windows: AvailabilityWindow[]; why: string } | null;
@@ -94,7 +101,6 @@ export async function loadPlanBoard(ctx: AccessContext, plan: PersistedPlan, req
   const timeZone = effectiveSchedulePreferences(ctx).preferences.timeZone;
   const labels = lineLabels(ctx);
   const lineOrder = identityLines(ctx).map((line) => line.id);
-  const milestones = store.listMilestones(ctx.workspaceId);
   const twoWeeks = addDays(today, 14);
   const ranking = planRanking(ctx, plan);
   const horizon = planHorizon(ctx, requestedHorizon);
@@ -132,9 +138,7 @@ export async function loadPlanBoard(ctx: AccessContext, plan: PersistedPlan, req
   const facts = store.listProfileFacts(ctx.workspaceId);
   const since = addDays(today, -55);
 
-  const presets = importancePresets(ctx);
-  const approved = milestones.filter((item) => item.status === "approved");
-  const preferences = readSchedulePreferences(ctx);
+  const advice = readEnergyAdvice(store.getSetting(ctx.workspaceId, ENERGY_ADVICE_SETTING));
   return {
     today, timeZone, labels, lineOrder, horizon, charts, inferredRegularBlocks, forecastSummary: summary,
     capacity: {
@@ -151,15 +155,18 @@ export async function loadPlanBoard(ctx: AccessContext, plan: PersistedPlan, req
       available: availabilityGrid(readAvailability(ctx)), since },
     ranking,
     params: effectiveParams(ctx), presets: { buffered: PARAMS_BUFFERED, asap: PARAMS_ASAP },
-    importance: approved.flatMap((item) => {
-      const preset = presets.get(item.id);
-      if (!preset) return [];
-      const goal = readGoalSettings(ctx, item.id);
-      const custom = typeof goal?.weight === "number" || Boolean(goal?.importance ?? preferences?.importance[item.id]);
-      return [{ id: item.id, title: item.title, line: item.identityId, weight: effectiveWeight(ctx, item.id), custom, preset }];
-    }),
+    goals: identityLines(ctx).map((line) => ({ line: line.id, label: line.label, goal: line.goals?.[0] ?? line.goal ?? null })),
+    doneMilestones: doneMilestones(orders),
+    advice: { value: advice, dismissed: Boolean(advice && "id" in advice && store.getSetting(ctx.workspaceId, ENERGY_ADVICE_DISMISSED) === advice.id) },
     week: { windows: readAvailability(ctx), suggested: suggestedAvailabilityFor(ctx), busy, proposed: interviewAvailability(ctx) }
   };
+}
+
+/** A milestone with work, all of it accepted (or discarded) and at least one accepted. */
+function doneMilestones(orders: Array<{ milestoneId: string; state: string }>): string[] {
+  const byMilestone = new Map<string, string[]>();
+  for (const order of orders) if (order.milestoneId) byMilestone.set(order.milestoneId, [...(byMilestone.get(order.milestoneId) ?? []), order.state]);
+  return [...byMilestone].filter(([, states]) => states.includes("accepted") && states.every((state) => state === "accepted" || state === "archived")).map(([id]) => id);
 }
 
 /** The weekly hours the interview proposed (`schedule.availability.proposed`), valid windows only. */

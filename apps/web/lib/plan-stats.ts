@@ -1,4 +1,4 @@
-import type { AvailabilityWindow } from "@crossline/core";
+import { workedRhythm, type AvailabilityWindow } from "@crossline/core";
 import type { ForecastWeek, GoalForecast } from "@crossline/planner";
 
 /**
@@ -113,6 +113,48 @@ export function goalRows(input: { goals: GoalForecast[]; lineOf: Record<string, 
     || a.title.localeCompare(b.title));
 }
 
+/* ── one timeline per line ── */
+
+/**
+ * What can be said about a milestone at a glance (decided 2026-10-15, the plan page's top): it may not finish in time (its cautious finish
+ * leaves under the margin, or it does not finish inside the horizon), nothing is ready to work on yet (no task, or only proposals
+ * waiting), or its tasks still wait in the task library. A milestone can be several at once; none means on track.
+ */
+export type MilestoneState = "risk" | "unprepared" | "library";
+export const MILESTONE_STATE_ORDER: MilestoneState[] = ["risk", "unprepared", "library"];
+export type MilestoneMark = { id: string; title: string; line: string;
+  /** Where it sits: the deadline, else the cautious finish, else the usual one; null in the 「未定日期」 zone. */
+  day: string | null; states: MilestoneState[]; row: GoalRow };
+
+export function milestoneMarks(rows: GoalRow[], today: string): MilestoneMark[] {
+  return rows.map((row) => {
+    const states: MilestoneState[] = [];
+    if (row.atRisk || row.status === "unfinished") states.push("risk");
+    if (row.status === "no_tasks") states.push("unprepared");
+    if (row.libraryDay && row.libraryDay > today) states.push("library");
+    return { id: row.id, title: row.title, line: row.line, day: row.deadline ?? row.p85Day ?? row.p50Day, states, row };
+  });
+}
+
+/**
+ * What the timeline shows by default (decided 2026-10-15): the unfinished milestones due inside the chosen horizon, and those already
+ * past their day and not finished; the rest are counted, not drawn. `done`: milestones whose work is all accepted.
+ */
+export function timelineMarks(marks: MilestoneMark[], today: string, horizonDays: number, done: ReadonlySet<string>): { shown: MilestoneMark[]; outside: number } {
+  const end = addDays(today, horizonDays);
+  const shown = marks.filter((mark) => !done.has(mark.id) && mark.day !== null && mark.day <= end);
+  return { shown, outside: marks.length - shown.length };
+}
+
+/** The axis: the horizon from a few days back, reaching back further for an overdue milestone (at most eight weeks). */
+export function timelineSpan(marks: MilestoneMark[], today: string, horizonDays: number): { start: string; end: string; days: number } {
+  const earliest = marks.flatMap((mark) => mark.day ? [mark.day] : []).sort()[0];
+  const floor = addDays(today, -56);
+  const start = [addDays(today, -3), earliest ? addDays(earliest < floor ? floor : earliest, -3) : addDays(today, -3)].sort()[0]!;
+  const end = addDays(today, horizonDays);
+  return { start, end, days: daysBetween(start, end) };
+}
+
 /* ── planned against timed hours ── */
 
 export type ExecutionLike = { workOrderId: string; startedAt: string; endedAt?: string | undefined; pauseMinutes: number;
@@ -219,39 +261,11 @@ export function estimatePoints(observations: Array<{ id: string; identityId: str
 
 /* ── rhythm ── */
 
-/** Weekday (0 = Sunday) and hour of an instant in a zone. */
-function localSlot(zone: string) {
-  const format = new Intl.DateTimeFormat("en-US", { timeZone: zone, weekday: "short", hour: "2-digit", hourCycle: "h23" });
-  const WEEKDAY: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
-  return (time: number) => {
-    const parts = format.formatToParts(new Date(time));
-    return { weekday: WEEKDAY[parts.find((part) => part.type === "weekday")!.value] ?? 0, hour: Number(parts.find((part) => part.type === "hour")!.value) % 24 };
-  };
-}
-
 /**
- * Minutes worked per weekday (0 = Sunday) × hour, from the timer's own start and end in the person's zone, with every pause cut out.
- * Each stretch is walked in quarter hours, which every zone's offset divides, so a minute is never filed under the wrong hour.
+ * Minutes worked per weekday (0 = Sunday) × hour, every pause cut out: `workedRhythm` in core, which the worker's weekly energy advice
+ * reads too, so the page and the advice see the same rhythm.
  */
-export function rhythmGrid(executions: ExecutionLike[], zone: string, now: string): number[][] {
-  const grid = Array.from({ length: 7 }, () => Array.from({ length: 24 }, () => 0));
-  const slot = localSlot(zone);
-  const QUARTER = 15 * 60_000;
-  for (const execution of executions) {
-    const start = Date.parse(execution.startedAt), end = Date.parse(execution.endedAt ?? now);
-    if (!(end > start)) continue;
-    const pauses = (execution.interruptions ?? []).map((item) => [Date.parse(item.pausedAt), Date.parse(item.resumedAt ?? execution.endedAt ?? now)] as const)
-      .filter(([from, to]) => to > from);
-    for (let from = start; from < end;) {
-      const to = Math.min(end, (Math.floor(from / QUARTER) + 1) * QUARTER);
-      const paused = pauses.reduce((sum, [a, b]) => sum + Math.max(0, Math.min(b, to) - Math.max(a, from)), 0);
-      const minutes = (to - from - paused) / 60_000;
-      if (minutes > 0) { const { weekday, hour } = slot(from); grid[weekday]![hour]! += minutes; }
-      from = to;
-    }
-  }
-  return grid.map((row) => row.map((value) => Math.round(value)));
-}
+export const rhythmGrid = (executions: ExecutionLike[], zone: string, now: string): number[][] => workedRhythm(executions, zone, now);
 
 /** The availability pattern on the same weekday × hour grid: the share of each hour the person marked available (0–1). */
 export function availabilityGrid(windows: AvailabilityWindow[]): number[][] {

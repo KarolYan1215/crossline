@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { bands, dayAt, dayTicks, heatLevel, hours, labelEvery, linear, linearTicks, logDomain, logScale, md, minuteLabel } from "./chart-geometry";
+import { bands, dayAt, dayTicks, heatLevel, hours, labelEvery, linear, linearTicks, logDomain, logScale, md, minuteLabel, monthTicks, packLabels, textWidth } from "./chart-geometry";
 
 describe("chart geometry", () => {
   test("linear ticks are round, start at zero and reach the maximum", () => {
@@ -52,5 +52,19 @@ describe("chart geometry", () => {
     expect(heatLevel(0, 60)).toBe(0);
     expect(heatLevel(1, 60)).toBe(1);
     expect(heatLevel(60, 60)).toBe(4);
+  });
+
+  test("labels are packed into the fewest rows that keep them apart, and turn back at the right edge", () => {
+    expect(textWidth("ECE 548 期中")).toBe(Math.ceil(12 * 0.68 * 3 + 12 * 0.58 * 3 + 12 * 0.3 * 2 + 24));
+    const packed = packLabels([{ x: 10, width: 100 }, { x: 60, width: 100 }, { x: 130, width: 40 }, { x: 390, width: 100 }], 400);
+    expect(packed.map((item) => item.row)).toEqual([0, 1, 0, 0]);
+    // The last would run past 400: it ends at its point instead.
+    expect(packed[3]).toEqual({ row: 0, left: 294 });
+  });
+
+  test("month ticks carry the year where it turns, and thin out over long spans", () => {
+    expect(monthTicks("2026-10-07", "2027-02-15").map((tick) => tick.label)).toEqual(["2026年11月", "12月", "2027年1月", "2月"]);
+    expect(monthTicks("2026-10-01", "2027-10-01").map((tick) => tick.day)).toEqual(["2026-10-01", "2026-12-01", "2027-02-01", "2027-04-01", "2027-06-01", "2027-08-01", "2027-10-01"]);
+    expect(monthTicks("2026-10-01", "2027-10-01")[2]!.label).toBe("2027年2月");
   });
 });

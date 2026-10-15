@@ -1,39 +1,79 @@
-/* ── plan page: the four long-range charts (plan-stats-charts.tsx) and the horizon ── */
-.pl-stats{display:grid;gap:12px;min-width:0}
+/* ── plan page: the milestone timeline, the three charts, time and energy (decided 2026-10-15) ── */
+
+/* Energy has its own hue (teal), one no line uses, in three steps; milestone states use red (risk), grey (task library) and hollow (not ready). */
+:root{--en-3:#00616B;--en-2:#3F9AA3;--en-1:#A9D6DA;--ms-risk:#A1262B;--ms-library:#767676}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--en-3:#5FD0D9;--en-2:#2C8790;--en-1:#1E4A4F;--ms-risk:#FF8A80;--ms-library:#9A9A9A}}
+:root[data-theme="dark"]{--en-3:#5FD0D9;--en-2:#2C8790;--en-1:#1E4A4F;--ms-risk:#FF8A80;--ms-library:#9A9A9A}
+
+.pl-stats{display:grid;gap:12px;min-width:0;grid-template-columns:minmax(0,1fr);align-items:start}
+@media (min-width:700px) and (max-width:1099px){.pl-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.pl-stats>:first-child{grid-column:1 / -1}}
+@media (min-width:1100px){.pl-stats{grid-template-columns:minmax(0,1.4fr) minmax(0,1fr) minmax(0,.72fr)}}
 .pl-stat{position:relative}
 .pl-chart-box{position:relative;min-width:0}
 .pl-svg{display:block;max-width:100%;height:auto}
 .pl-svg text{font-family:var(--f-sans);font-size:12px}
 .pl-axis-text{fill:var(--graphite);color:var(--graphite)}
+.pl-axis-strong{fill:var(--ink);color:var(--ink);font-weight:700}
 .pl-grid-line{stroke:var(--mist);stroke-width:1}
-.pl-empty{margin:0;padding:18px 8px;text-align:center;font-size:13px;color:var(--graphite);border:1px dashed var(--mist)}
+.pl-empty{margin:0;padding:14px 8px;text-align:center;font-size:13px;color:var(--graphite);border:1px dashed var(--mist)}
 .pl-chart-foot{margin:0;font-size:12px;color:var(--graphite)}
 .pl-preview-note{margin:0;font-size:12px;color:var(--ink)}
 .pl-horizon{display:inline-flex;flex-wrap:wrap;align-items:center;gap:8px}
 .pl-horizon small{font-size:12px;color:var(--graphite)}
 .plan-bar-aside{margin-left:auto}
-.pl-anchor{display:block;height:0}
 .pl-why{display:grid;gap:8px}
-.pl-rank-weight{display:flex;align-items:center;gap:6px;min-width:0}
-.pl-rank-weight .ui-slider{flex:1;min-width:110px}
+.pl-why h3,.pl-params h3,.pl-compare h3,.pl-library h3{margin:0;font-size:13px}
 
 /* legend keys added by these charts (the base .pl-key is in plan.css) */
+.pl-legend>span{display:inline-flex;align-items:center}
 .pl-key[data-k="solid"]{background:var(--ink)}
 .pl-key[data-k="hatch"]{background:repeating-linear-gradient(45deg,color-mix(in srgb,var(--ink) 70%,var(--paper)) 0 3px,var(--paper) 3px 5px)}
 .pl-key[data-k="extra"]{background:color-mix(in srgb,var(--ink) 22%,var(--paper));outline:1px dashed var(--ink);outline-offset:-1px}
 .pl-key[data-k="usable"]{height:2px;background:var(--ink);vertical-align:3px}
 .pl-key[data-k="ghost"]{background:transparent;border:1.5px dashed var(--graphite)}
-.pl-key[data-k="range"]{background:var(--ink)}
-.pl-gantt .pl-key[data-k="deadline"]{width:9px;height:9px;transform:rotate(45deg);background:var(--ink)}
-.pl-key[data-k="library"]{width:0;border-left:2px dashed var(--graphite);background:transparent}
-.pl-key[data-k="planned"],.pl-key[data-k="next"]{width:10px;border-radius:50%;background:var(--paper);border:2px solid var(--ink)}
-.pl-key[data-k="next"]{border-style:dashed}
 .pl-key[data-k="actual"]{width:10px;border-radius:50%;background:var(--ink)}
-.pl-key[data-k="heat"]{background:color-mix(in srgb,var(--ink) 60%,var(--paper))}
-.pl-key[data-k="avail"]{background:transparent;border:1.5px solid #1F8A4C}
 .pl-key[data-k="outside"]{width:10px;border-radius:50%;background:var(--paper);border:2px solid var(--ink)}
+.pl-key[data-k="heat"]{background:color-mix(in srgb,var(--ink) 60%,var(--paper))}
+.pl-key[data-k="lvbar"]{height:4px;background:var(--en-3);vertical-align:2px}
+.pl-key[data-k^="ms-"]{width:10px;height:10px;border-radius:50%}
+.pl-key[data-k="ms-on"]{background:conic-gradient(var(--c-research) 0 25%,var(--c-startup) 0 50%,var(--c-media) 0 75%,var(--c-investment) 0)}
+.pl-key[data-k="ms-risk"]{background:var(--ms-risk)}
+.pl-key[data-k="ms-unprepared"]{background:var(--paper);border:1.5px solid var(--ink)}
+.pl-key[data-k="ms-library"]{background:var(--ms-library)}
+.pl-key[data-k="ms-combo"]{border-radius:0;border:1px solid var(--ink);background:linear-gradient(to right,var(--ms-risk) 0 50%,var(--ms-library) 50%)}
+.pl-key[data-k="bar-planned"]{background:color-mix(in srgb,var(--ink) 18%,var(--paper));border:1.5px solid var(--ink)}
+.pl-key[data-k="bar-actual"]{background:var(--ink)}
+.pl-key[data-k="bar-next"]{background:transparent;border:1.5px dashed var(--ink)}
 
-/* 1. capacity and demand */
+/* 1. one timeline per line */
+.pl-timeline>header small{font-size:12px}
+.pl-timeline>header .forecast-delta{flex-basis:100%}
+.pl-ms-line{fill:var(--ink);color:var(--ink);font-weight:700}
+.pl-svg .pl-ms-line{font-size:13px}
+.pl-ms-bar{fill:var(--lc,var(--graphite))}
+.pl-ms-track{stroke:var(--lc,var(--graphite));stroke-width:2;opacity:.5}
+.pl-ms-leader{stroke:var(--mist);stroke-width:1}
+.pl-ms-label{fill:var(--ink);color:var(--ink)}
+.pl-ms-today{stroke:var(--ink);stroke-width:1;stroke-dasharray:2 3}
+.pl-ms-point{cursor:pointer;outline:none}
+.pl-ms-point:hover .pl-ms-label,.pl-ms-point:focus-visible .pl-ms-label{text-decoration:underline}
+.pl-ms-point:focus-visible .pl-ms-mark{stroke:var(--ink);stroke-width:2}
+.pl-ms-mark{stroke:var(--paper);stroke-width:1.5}
+.pl-ms-mark[data-state="on_track"]{fill:var(--lc,var(--ink))}
+.pl-ms-mark[data-state="risk"]{fill:var(--ms-risk)}
+.pl-ms-mark[data-state="library"]{fill:var(--ms-library)}
+.pl-ms-mark[data-state="unprepared"]{fill:var(--paper);stroke:var(--ink);stroke-width:1.5}
+.pl-ms-combo .pl-ms-mark{stroke:none}
+.pl-ms-combo-frame{fill:none;stroke:var(--ink);stroke-width:1}
+.pl-ms-ghost{fill:none;stroke:var(--graphite);stroke-width:1.3;stroke-dasharray:2 2}
+.pl-ms-list{display:grid;gap:10px}
+.pl-ms-list section{display:grid;gap:4px;border-left:3px solid var(--lc,var(--mist));padding-left:8px}
+.pl-ms-list ol{margin:0;padding:0;list-style:none;display:grid;gap:4px}
+.pl-ms-list li a{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;color:var(--ink);text-decoration:none;font-size:13px}
+.pl-ms-list li a .mono{font-size:12px;color:var(--graphite)}
+.pl-ms-name{min-width:0}
+
+/* 2. capacity and demand */
 .pl-seg{fill:var(--lc,var(--graphite))}
 .pl-seg-pending{fill:color-mix(in srgb,var(--lc,var(--graphite)) 72%,var(--paper))}
 .pl-hatch-bg{fill:transparent}
@@ -55,66 +95,52 @@
 .pl-tip-line{display:block}
 .pl-swatch{display:inline-block;width:8px;height:8px;margin-right:4px;background:var(--lc,var(--graphite))}
 
-/* 2. milestone finish ranges */
-.pl-gantt{--gt-title:30%;--gt-end:150px;display:grid;gap:4px}
-.pl-gantt-axis{position:relative;height:16px;margin-left:calc(var(--gt-title) + 17px);margin-right:calc(var(--gt-end) + 8px);font-size:12px;color:var(--graphite)}
-.pl-gantt-axis span{position:absolute;transform:translateX(-50%);white-space:nowrap}
-.pl-gantt-axis span[data-edge="start"]{transform:none}
-.pl-gantt-axis span[data-edge="end"]{transform:translateX(-100%)}
-.pl-gantt-group{display:grid;gap:2px}
-.pl-gantt-head{margin-top:6px}
-.pl-gantt-row{display:grid;grid-template-columns:var(--gt-title) minmax(0,1fr) var(--gt-end);gap:8px;align-items:center;padding:3px 0 3px 6px;border-left:3px solid var(--lc,var(--mist));color:var(--ink);text-decoration:none;font-size:13px}
-.pl-gantt-row:hover,.pl-gantt-row:focus-visible{background:var(--chalk)}
-.pl-gantt-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700}
-.pl-gantt-track{position:relative;height:16px;background:var(--chalk)}
-.pl-gantt-track i{position:absolute;top:3px;bottom:3px}
-.pl-gantt-bar{background:var(--lc,var(--ink))}
-.pl-gantt-bar[data-open]{background:linear-gradient(to right,var(--lc,var(--ink)),color-mix(in srgb,var(--lc,var(--ink)) 15%,var(--paper)))}
-.pl-gantt-row[data-risk] .pl-gantt-bar{box-shadow:0 0 0 2px #A1262B}
-.pl-gantt-ghost{border:1.5px dashed var(--graphite);background:transparent}
-.pl-gantt-deadline{width:10px;height:10px;top:3px!important;bottom:auto!important;margin-left:-5px;transform:rotate(45deg);background:var(--ink)}
-.pl-gantt-row[data-risk] .pl-gantt-deadline{background:#A1262B}
-.pl-gantt-deadline[data-clipped]{background:var(--paper);border:2px solid var(--ink)}
-.pl-gantt-library{width:0;top:-2px!important;bottom:-2px!important;border-left:2px dashed var(--graphite)}
-.pl-gantt-end{display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:4px;font-size:12px;color:var(--graphite)}
-.pl-gantt-end small{font-size:12px;color:var(--graphite)}
-
 /* 3. planned against timed hours */
-.pl-inv{display:grid;gap:4px}
-.pl-inv-row{display:grid;grid-template-columns:minmax(0,1fr);gap:2px 12px;align-items:center}
-.pl-inv[data-wide] .pl-inv-row{grid-template-columns:96px minmax(0,1fr) 132px}
-.pl-inv-cols>span:empty{display:none}
-.pl-inv[data-wide] .pl-inv-cols>span:empty{display:block}
-.pl-inv-name{font-size:13px;color:var(--ink);border-left:3px solid var(--lc,var(--mist));padding-left:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.pl-inv-share{display:flex;flex-wrap:wrap;gap:2px 8px;font-size:12px;color:var(--graphite)}
-.pl-dumbbell{stroke:var(--lc,var(--ink));stroke-width:2}
-.pl-dot-planned{fill:var(--paper);stroke:var(--lc,var(--ink));stroke-width:2}
-.pl-dot-actual{fill:var(--lc,var(--ink))}
-.pl-dot-next{fill:var(--paper);stroke:var(--lc,var(--ink));stroke-width:2;stroke-dasharray:3 2}
-.pl-dot-ghost{fill:none;stroke:var(--graphite);stroke-width:1.5;stroke-dasharray:2 2}
+.pl-bar-planned{fill:color-mix(in srgb,var(--lc,var(--ink)) 20%,var(--paper));stroke:var(--lc,var(--ink));stroke-width:1.5}
+.pl-bar-actual{fill:var(--lc,var(--ink))}
+.pl-bar-next{fill:none;stroke:var(--lc,var(--ink));stroke-width:1.5;stroke-dasharray:3 2}
 
-/* 4. estimates and rhythm */
-.pl-er{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr));gap:16px;align-items:start}
-.pl-er-part{display:grid;gap:6px;min-width:0}
-.pl-er-part h3{margin:0;font-size:13px}
+/* 4. estimates */
+.pl-est{display:grid;gap:6px;justify-items:start}
 .pl-diagonal{stroke:var(--ink);stroke-width:1;stroke-dasharray:4 3}
 .pl-point{fill:var(--lc,var(--ink));stroke:var(--paper);stroke-width:1}
 .pl-point:not([data-covered]){fill:var(--paper);stroke:var(--lc,var(--ink));stroke-width:2}
 .pl-coverage{display:flex;align-items:center;gap:10px;font-size:13px}
-.pl-coverage small{color:var(--graphite)}
+
+/* 5. time and energy, and the timed rhythm beside it */
+.pl-time>header{gap:8px 14px}
+.pl-time-body{display:grid;gap:14px;grid-template-columns:minmax(0,1fr);align-items:start}
+@media (min-width:1100px){.pl-time-body{grid-template-columns:minmax(0,1.7fr) minmax(280px,1fr)}}
+.pl-compare{display:grid;gap:6px;min-width:0}
+.pl-compare-row{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(min(220px,100%),1fr))}
+.pl-mini{margin:0;display:grid;gap:2px;min-width:0}
+.pl-mini figcaption{font-size:12px;color:var(--graphite)}
 .pl-heat[data-level="0"]{fill:var(--chalk)}
 .pl-heat[data-level="1"]{fill:color-mix(in srgb,var(--ink) 18%,var(--paper))}
 .pl-heat[data-level="2"]{fill:color-mix(in srgb,var(--ink) 38%,var(--paper))}
 .pl-heat[data-level="3"]{fill:color-mix(in srgb,var(--ink) 60%,var(--paper))}
 .pl-heat[data-level="4"]{fill:color-mix(in srgb,var(--ink) 85%,var(--paper))}
-.pl-heat-avail{fill:none;stroke:#1F8A4C;stroke-width:1.5;pointer-events:none}
-.pl-heat-ghost{stroke:var(--graphite);stroke-dasharray:2 2}
-@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .pl-heat-avail:not(.pl-heat-ghost){stroke:#5FE3AE}}
-:root[data-theme="dark"] .pl-heat-avail:not(.pl-heat-ghost){stroke:#5FE3AE}
+.pl-lv[data-level="1"]{fill:var(--en-1)}
+.pl-lv[data-level="2"]{fill:var(--en-2)}
+.pl-lv[data-level="3"]{fill:var(--en-3)}
+.pl-advice{display:grid;gap:6px;padding:8px 10px;border:1px solid var(--en-3);border-left-width:4px;max-width:760px}
+.pl-advice p{margin:0;font-size:13px}
+.pl-advice-head{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px}
+.pl-advice-head small{font-size:12px;color:var(--graphite)}
+.pl-advice-sources{display:flex;flex-wrap:wrap;gap:4px 12px}
+.pl-advice-sources a{font-size:12px;color:var(--ink)}
+
+/* 6. long-term goals, and the advanced fold */
+.pl-goals ul{margin:0;padding:0;list-style:none;display:grid;gap:4px}
+.pl-goals li{display:grid;grid-template-columns:minmax(64px,auto) minmax(0,1fr) auto;gap:4px 12px;align-items:baseline;padding:3px 0 3px 8px;border-left:3px solid var(--lc,var(--mist));font-size:13px}
+.pl-goals li small{font-size:12px;color:var(--graphite)}
+.pl-advanced-body{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(min(360px,100%),1fr))}
+.pl-advanced-body .pl-why{grid-column:1 / -1}
 
 @media (max-width:640px){
-  .pl-gantt-row{grid-template-columns:minmax(0,1fr) auto}
-  .pl-gantt-track{grid-column:1 / -1;grid-row:2}
-  .pl-gantt-axis{margin-left:9px;margin-right:0}
   .plan-bar-aside{margin-left:0}
+  .pl-goals li{grid-template-columns:minmax(0,1fr) auto}
+  .pl-goals li>span{grid-column:1 / -1;grid-row:2}
 }
+.pl-ms-more{font-weight:700;fill:var(--ink);color:var(--ink)}
+.pl-advice .pl-advice-basis{font-size:12px;color:var(--graphite)}

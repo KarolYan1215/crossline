@@ -43,22 +43,55 @@ describe("plan page", () => {
     globalThis.crosslineStore = undefined;
   }, 20000);
 
-  // Decided 2026-10-10: the calendar is on Today only; the plan page is the long view over a horizon, then the schedule's settings.
-  test("no calendar: four charts over the chosen horizon, then the settings as three tabs without a separate importance tab", async () => {
+  // Decided 2026-10-10: the calendar is on Today only. Laid out again 2026-10-15: a milestone timeline per line on top, three charts,
+  // then the week's hours and energy beside the timed rhythm, the long-term goals, and one advanced fold — no tabs, no importance slider.
+  test("no calendar: the timeline, three charts, time and energy, long-term goals and an advanced fold — no tabs and no importance slider", async () => {
     const store = new CrosslineStore(":memory:");
     globalThis.crosslineStore = store;
     const { default: PlanPage } = await import("./page");
     const html = renderToStaticMarkup(await PlanPage({ searchParams: Promise.resolve({ horizon: "4" }) }));
-    for (const title of ["容量与需求", "里程碑完成预测", "主线投入：计划 vs 实际", "估时准确度与节律", "排程设置"]) expect(html).toContain(title);
+    for (const title of ["里程碑时间轴", "容量与需求", "主线投入：计划 vs 实际", "估时准确度", "时段与精力", "近 8 周实际节律", "排程依据", "高级：排程参数、主线份额与排程顺序"])
+      expect(html).toContain(title);
     expect(html).toMatch(/aria-checked="true"[^>]*>4 周</);
-    for (const tab of [">可用时段<", ">排程参数<", ">排程依据<"]) expect(html).toContain(tab);
-    expect(html).not.toContain(">重要性<");
+    expect(html).not.toContain('aria-label="设置项"');
+    expect(html).not.toContain("重要性预设依据");
+    expect(html).not.toContain("里程碑完成预测");
+    // The day axis of the grid runs to 24.
+    expect(html).toMatch(/data-edge="end"[^>]*>24</);
     // No day / week / month calendar any more, and 「本周已排」 is no longer said twice.
     expect(html).not.toContain("mo-cell");
     expect(html).not.toContain("wk-col");
     expect(html).not.toContain("本周已排");
     // Nothing has been timed on a fresh account: the measured charts say so instead of drawing empty axes.
     expect(html).toContain("尚无实测");
+    expect(html).toContain("尚无计时记录");
+    store.close();
+    globalThis.crosslineStore = undefined;
+  }, 20000);
+
+  test("this week's energy advice is laid over the grid with its reason, until the person sets it aside", async () => {
+    const store = new CrosslineStore(":memory:");
+    globalThis.crosslineStore = store;
+    const { ensureSeeded } = await import("../../lib/crossline");
+    ensureSeeded(TEST_CTX);
+    const { ENERGY_ADVICE_SETTING, ENERGY_ADVICE_DISMISSED } = await import("@crossline/core");
+    // Every waking half hour advised low: anything the person marked otherwise differs.
+    const levels = Array.from({ length: 7 }, () => Array.from({ length: 48 }, (_, slot) => slot >= 16 && slot < 46 ? 1 : 0));
+    store.setSetting("workspace-1", ENERGY_ADVICE_SETTING, JSON.stringify({ computedAt: "2026-10-12T10:00:00.000Z", id: "abc12345", levels, ruleLevels: levels,
+      summary: "按通用作息与 2 次自评：高精力 无。", basis: ["作息：尚无记录，按通用作息"], evidence: { nights: 0, reports: 2 },
+      review: { state: "skipped", summary: "额度偏紧", findings: [], adjustments: [], droppedSources: 0 }, sources: [] }));
+    const { default: PlanPage } = await import("./page");
+    const html = renderToStaticMarkup(await PlanPage({}));
+    expect(html).toContain("本周建议");
+    expect(html).toContain("按通用作息与 2 次自评");
+    expect(html).toContain('data-advice="1"');
+    expect(html).toContain("批准建议并预览");
+    // Thin footing is said on the card, and does not stop 批准.
+    expect(html).toContain("依据：2 次自评、无睡眠记录，依据偏薄");
+    store.setSetting("workspace-1", ENERGY_ADVICE_DISMISSED, "abc12345");
+    const after = renderToStaticMarkup(await PlanPage({}));
+    expect(after).not.toContain("批准建议并预览");
+    expect(after).not.toContain('data-advice="1"');
     store.close();
     globalThis.crosslineStore = undefined;
   }, 20000);

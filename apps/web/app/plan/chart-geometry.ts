@@ -73,3 +73,51 @@ export function dayTicks(start: string, spanDays: number): string[] {
 
 /** A level 0–4 for a heatmap cell, from its minutes against the busiest cell (0 = none). */
 export const heatLevel = (minutes: number, max: number) => minutes <= 0 || max <= 0 ? 0 : Math.min(4, Math.max(1, Math.ceil((minutes / max) * 4)));
+
+/** The width of a label in Arial at `px`: CJK and full-width characters one em, digits and Latin about 0.58 em. */
+export function textWidth(text: string, px = 12): number {
+  let width = 0;
+  for (const char of text) width += /[⺀-￯]/.test(char) ? px : /[A-Z]/.test(char) ? px * 0.68 : /\s/.test(char) ? px * 0.3 : px * 0.58;
+  return Math.ceil(width);
+}
+
+/**
+ * Labels beside points on one axis, packed into as few rows as keep them apart: each label starts at its point (or, where it would run
+ * off the right edge, ends there) and takes the lowest row whose last label ends `gap` before it. Points are taken left to right.
+ * Returns, per input index, the row and the label's left edge.
+ */
+export function packLabels(items: Array<{ x: number; width: number }>, plotWidth: number, gap = 10): Array<{ row: number; left: number }> {
+  const order = items.map((item, index) => ({ ...item, index })).sort((a, b) => a.x - b.x || a.index - b.index);
+  const rowEnds: number[] = [];
+  const out: Array<{ row: number; left: number }> = items.map(() => ({ row: 0, left: 0 }));
+  for (const item of order) {
+    const left = Math.max(0, item.x - 4 + item.width > plotWidth ? item.x + 4 - item.width : item.x - 4);
+    let row = rowEnds.findIndex((end) => end + gap <= left);
+    if (row < 0) { row = rowEnds.length; rowEnds.push(0); }
+    rowEnds[row] = left + item.width;
+    out[item.index] = { row, left };
+  }
+  return out;
+}
+
+const DAY_MS = 86_400_000;
+/**
+ * Month ticks from `start` to `end` (YYYY-MM-DD): the first of each month inside the span, every month up to nine months and every
+ * other one beyond; a label carries the year on the first tick and wherever the year turns (「2026年10月」, 「11月」, 「2027年1月」).
+ */
+export function monthTicks(start: string, end: string): Array<{ day: string; label: string }> {
+  const span = (Date.parse(`${end}T12:00:00Z`) - Date.parse(`${start}T12:00:00Z`)) / DAY_MS;
+  const step = span > 270 ? 2 : 1;
+  const ticks: Array<{ day: string; label: string }> = [];
+  let year = Number(start.slice(0, 4)), month = Number(start.slice(5, 7));
+  if (Number(start.slice(8, 10)) > 1) { month += 1; if (month > 12) { month = 1; year += 1; } }
+  for (let guard = 0; guard < 40; guard += 1) {
+    const day = `${year}-${String(month).padStart(2, "0")}-01`;
+    if (day > end) break;
+    const newYear = !ticks.length || ticks.at(-1)!.day.slice(0, 4) !== String(year);
+    ticks.push({ day, label: newYear ? `${year}年${month}月` : `${month}月` });
+    month += step;
+    while (month > 12) { month -= 12; year += 1; }
+  }
+  return ticks;
+}

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { hoursFromText } from "@crossline/core";
 import type { ForecastWeek } from "@crossline/planner";
-import { availabilityGrid, capacityWeeks, estimatePoints, goalRows, horizonFor, investment, rhythmGrid, statedShares, workedMinutes } from "./plan-stats";
+import { availabilityGrid, capacityWeeks, estimatePoints, goalRows, horizonFor, investment, milestoneMarks, rhythmGrid, statedShares, timelineMarks, timelineSpan, workedMinutes, type GoalRow } from "./plan-stats";
 
 describe("horizon", () => {
   test("eight weeks by default, four on request, and 「到最远截止」 rounded up to whole weeks and capped at six months", () => {
@@ -153,5 +153,26 @@ describe("estimates and rhythm", () => {
     expect(grid[1]![10]).toBe(1);
     expect(grid[3]![10]).toBe(1);
     expect(grid[2]![10]).toBe(0);
+  });
+});
+
+describe("milestone marks for the timeline", () => {
+  const row = (extra: Partial<GoalRow>): GoalRow => ({ id: "m", title: "里程碑", line: "research", p50Day: null, p85Day: null, deadline: null, slackDays: null, atRisk: false,
+    remainingP50Minutes: 0, remainingP85Minutes: 0, libraryDay: null, status: "forecast", bottleneck: null, proposals: 0, ...extra });
+  test("states: at risk, not ready, waiting in the library — several at once; placed at the deadline, else the cautious finish", () => {
+    const marks = milestoneMarks([
+      row({ id: "a", deadline: "2026-11-01", p85Day: "2026-11-03", atRisk: true, libraryDay: "2026-10-20" }),
+      row({ id: "b", status: "no_tasks" }),
+      row({ id: "c", p50Day: "2026-10-30", p85Day: "2026-11-05" }),
+      row({ id: "d", status: "unfinished", p50Day: "2026-12-01", libraryDay: "2026-10-01" })
+    ], "2026-10-10");
+    expect(marks.map((mark) => [mark.id, mark.day, mark.states])).toEqual([
+      ["a", "2026-11-01", ["risk", "library"]], ["b", null, ["unprepared"]], ["c", "2026-11-05", []], ["d", "2026-12-01", ["risk"]]]);
+    expect(timelineSpan(marks, "2026-10-10", 56)).toEqual({ start: "2026-10-07", end: "2026-12-05", days: 59 });
+    // An overdue milestone pulls the axis back to it (at most eight weeks).
+    expect(timelineSpan(milestoneMarks([row({ deadline: "2026-09-20" })], "2026-10-10"), "2026-10-10", 28).start).toBe("2026-09-17");
+    const { shown, outside } = timelineMarks(marks, "2026-10-10", 28, new Set(["c"]));
+    expect(shown.map((mark) => mark.id)).toEqual(["a"]);
+    expect(outside).toBe(3);
   });
 });

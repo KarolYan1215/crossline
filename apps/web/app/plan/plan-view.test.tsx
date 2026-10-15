@@ -26,12 +26,12 @@ describe("PlanView", () => {
     expect(html).not.toContain("差异");
   });
 
-  test("what the scheduler could not place is counted, with a link to the reasons under 「排程依据」", () => {
+  test("what the scheduler could not place is counted, with a link to the reasons under 「排程顺序」", () => {
     const html = renderToStaticMarkup(<PlanView plan={{ ...plan,
       schedule: { status: "partial", blockers: [{ taskId: "w2", code: "NO_CAPACITY", message: "复核数据没有可用容量" }], solver: "feasible_time_limit" }
     }} />);
     expect(html).toContain("部分任务未排入");
-    expect(html).toContain("1 个任务未排入，原因见「排程依据」");
+    expect(html).toContain("1 个任务未排入，原因见「排程顺序」");
     expect(html).toContain("未证明最优");
   });
 });

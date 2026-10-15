@@ -33,7 +33,7 @@ export type CalendarData = {
 
 
 /**
- * The planner reports one blocker per unplaced *step*, while 「排程依据」 lists tasks — counting blockers said 「13 项未排入」 over a list
+ * The planner reports one blocker per unplaced *step*, while 「排程顺序」 lists tasks — counting blockers said 「13 项未排入」 over a list
  * with one. Counted per task here: wholly unplaced, and placed in part (some steps have a block, some do not).
  */
 function unplacedNote(plan: PlanVersionData): string {
@@ -110,7 +110,7 @@ export function PlanView({ plan, aside }: { plan: PlanVersionData; aside?: React
         : <p>最优排法正在后台计算，算好后自动替换当前的简单排法。</p>)}
       {plan.schedule.solver === "no_capacity" && <p>可用时间里已经没有空档，下面这些暂时排不进去。</p>}
       {plan.schedule.bufferRelaxed && <p>为守住已确认截止时间，已放宽当天的缓冲规则。</p>}
-      {unplacedNote(plan) && <p><a href="#why">{unplacedNote(plan)}，原因见「排程依据」</a></p>}
+      {unplacedNote(plan) && <p><a href="#why">{unplacedNote(plan)}，原因见「排程顺序」</a></p>}
       {plan.schedule.notes?.map((note) => <p key={`note-${note.taskId}`}>{note.message}</p>)}
     </section>}
   </div>;
