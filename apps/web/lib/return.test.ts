@@ -2,7 +2,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import { CrosslineStore } from "@crossline/db";
 vi.mock("server-only", () => ({}));
 import { saveSchedulePreferences } from "./crossline";
-import { answerReturn, cleanStale, dismissReturn, returnDue, returnView } from "./return";
+import { answerReturn, cleanStale, dismissReturn, returnDue, returnPageLines, returnView } from "./return";
 import { TEST_CTX } from "./test-support";
 
 /** Coming back after days away, on a real store (docs/review-2026-10-13.md §6.3). */
@@ -89,7 +89,7 @@ test("one tap each: 完成 hands the task in with how long it took; 做了一部
   store.saveStepPlan(ws, "hw4", { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 4, unit: "题" }, rationale: "按题拆分",
     steps: [step("s1", "推导第 1–2 题"), step("s2", "推导第 3–4 题")] }, TEST_CTX.principalId, "t");
   expect(answerReturn(TEST_CTX, "hw3", "done", { minutes: 90 }, now)).toEqual({ ok: true });
-  expect(store.getWorkOrder(ws, "hw3")!.state).toBe("evidence_review");
+  expect(store.getWorkOrder(ws, "hw3")!.state).toBe("accepted");
   expect(store.listDurationObservations(ws, "research", "deep_work")[0]).toMatchObject({ observedMinutes: 90, actualSource: "one_tap" });
   const first = store.getStepPlan(ws, "hw4")!.steps[0]!.id;
   expect(answerReturn(TEST_CTX, "hw4", "partial", { stepIds: [] }, now)).toEqual({ ok: false, code: "RETURN_STEPS_REQUIRED" });
@@ -120,4 +120,80 @@ test("proposals and drafts nobody touched for fourteen days are archived, recove
   expect(cleanStale(TEST_CTX, later)).toEqual({ ok: true, orders: ["old"], milestones: ["draft-old"] });
   expect(store.getWorkOrder(ws, "old")!.state).toBe("archived");
   expect(store.listMilestones(ws).find((item) => item.id === "draft-edited")!.status).toBe("draft");
+});
+
+test("each step that had a time while away is its own item, named 「任务 · 步骤」; answering one leaves the others", () => {
+  const { store, order } = setup();
+  const now = new Date();
+  const since = new Date(now.getTime() - 4 * DAY);
+  said(store, since);
+  order("paper", "汇集当前论文材料");
+  store.saveStepPlan(ws, "paper", { archetypeId: "problem_set", quantity: { basis: "步", amount: 3, unit: "步" }, rationale: "按步拆分",
+    steps: [step("s1", "盘点当前版本文件"), step("s2", "汇总论文基线包"), step("s3", "核对引用")] }, TEST_CTX.principalId, "t");
+  const [s1, s2, s3] = store.getStepPlan(ws, "paper")!.steps.map((item) => item.id);
+  const day = new Date(now.getTime() - 2 * DAY).toLocaleDateString("en-CA", { timeZone: "America/Chicago" });
+  store.setSetting(ws, `schedule.day:${day}`, JSON.stringify({ paper: "09:00" }));
+  // What the two-minute pass saw under way that day: two of the three steps; one seen only before it began does not count.
+  const seen = (stepId: string, start: string, began: boolean) => ({ id: `scheduled:paper:${stepId}`, orderId: "paper", stepId, title: "汇集当前论文材料", step: "",
+    day, start, end: `${start.slice(0, 2)}:50`, endedTimerAt: "", began });
+  store.setSetting(ws, `nudge.blocks:${day}`, JSON.stringify({ a: seen(s1!, "09:00", true), b: seen(s2!, "10:00", true), c: seen(s3!, "11:00", false) }));
+  const view = returnView(TEST_CTX, since.toISOString(), now);
+  expect(view.items.map((item) => [item.key, item.step, item.plannedDays, item.lastStep])).toEqual([
+    [`paper#${s1}`, "盘点当前版本文件", [day], false], [`paper#${s2}`, "汇总论文基线包", [day], false]]);
+  // 完成 on a step that is not the last marks it done, with how long it took as a session over its block; the task stays open.
+  expect(answerReturn(TEST_CTX, "paper", "done", { stepId: s1!, minutes: 40 }, now)).toEqual({ ok: true });
+  expect(store.getStepPlan(ws, "paper")!.steps.map((item) => item.status)).toEqual(["done", "planned", "planned"]);
+  expect(store.getWorkOrder(ws, "paper")!.state).toBe("approved");
+  expect(store.listEvents(ws, { type: "execution.confirmed", entityId: "paper" })[0]?.payload).toMatchObject({ minutes: 40, source: "one_tap" });
+  // 顺延 on the other settles only that step.
+  expect(answerReturn(TEST_CTX, "paper", "rolled", { stepId: s2! }, now)).toEqual({ ok: true });
+  expect(returnView(TEST_CTX, since.toISOString(), now).items).toEqual([]);
+  expect(store.listEvents(ws, { type: "return.answered" }).map((event) => (event.payload as { stepId?: string }).stepId)).toEqual([s1, s2]);
+});
+
+test("finishing the last open step hands the task in", () => {
+  const { store, order } = setup();
+  const now = new Date();
+  said(store, new Date(now.getTime() - 4 * DAY));
+  order("hw5", "完成 ECE 555 作业 5");
+  store.saveStepPlan(ws, "hw5", { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 4, unit: "题" }, rationale: "按题拆分",
+    steps: [step("s1", "推导第 1–2 题"), step("s2", "推导第 3–4 题")] }, TEST_CTX.principalId, "t");
+  const [s1, s2] = store.getStepPlan(ws, "hw5")!.steps.map((item) => item.id);
+  store.updateStepProgress(ws, "hw5", s1!, { status: "done" }, TEST_CTX.principalId, "t");
+  expect(answerReturn(TEST_CTX, "hw5", "done", { stepId: s2!, minutes: 50 }, now)).toEqual({ ok: true });
+  expect(store.getWorkOrder(ws, "hw5")!.state).toBe("accepted");
+  expect(store.getStepPlan(ws, "hw5")!.steps.every((item) => item.status === "done")).toBe(true);
+});
+
+test("a line typed on the return page carries the absence's steps by id and the step it was typed beside", () => {
+  const { store, order } = setup();
+  const now = new Date();
+  said(store, new Date(now.getTime() - 4 * DAY));
+  order("hw3", "完成 ECE 555 作业 3");
+  store.saveStepPlan(ws, "hw3", { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 4, unit: "题" }, rationale: "按题拆分",
+    steps: [step("s1", "推导第 1–2 题"), step("s2", "推导第 3–4 题")] }, TEST_CTX.principalId, "t");
+  const day = new Date(now.getTime() - 2 * DAY).toLocaleDateString("en-CA", { timeZone: "America/Chicago" });
+  store.setSetting(ws, `schedule.day:${day}`, JSON.stringify({ hw3: "09:00" }));
+  const [s1] = store.getStepPlan(ws, "hw3")!.steps.map((item) => item.id);
+  const lines = returnPageLines(TEST_CTX, { kind: "return", entityId: `hw3#${s1}` }, now);
+  expect(lines.join("\n")).toContain(`- hw3 | ${s1} | 完成 ECE 555 作业 3 · 推导第 1–2 题 | ${day} | —`);
+  expect(lines.join("\n")).toContain(`本人这句话说的是任务 hw3「完成 ECE 555 作业 3」的步骤 ${s1}「推导第 1–2 题」`);
+  expect(lines.at(-1)).toContain("task.op step_done");
+  // From the page's own box: the list, no single step.
+  expect(returnPageLines(TEST_CTX, { kind: "return", entityId: "" }, now).join("\n")).not.toContain("本人这句话说的是");
+});
+
+test("做了一部分 with nothing ticked records the step as begun (a quarter), so the planner knows it has started; a task with no step still needs a tick", () => {
+  const { store, order } = setup();
+  const now = new Date();
+  said(store, new Date(now.getTime() - 4 * DAY));
+  order("hw6", "完成 ECE 555 作业 6");
+  order("plain", "读第 6 讲");
+  store.saveStepPlan(ws, "hw6", { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 4, unit: "题" }, rationale: "按题拆分",
+    steps: [step("s1", "推导第 1–2 题"), step("s2", "推导第 3–4 题")] }, TEST_CTX.principalId, "t");
+  const [s1] = store.getStepPlan(ws, "hw6")!.steps.map((item) => item.id);
+  expect(answerReturn(TEST_CTX, "hw6", "partial", { stepId: s1! }, now)).toEqual({ ok: true });
+  expect(store.getStepPlan(ws, "hw6")!.steps.map((item) => [item.status, item.progressQuarter])).toEqual([["planned", 1], ["planned", 0]]);
+  expect(store.listEvents(ws, { type: "return.answered", entityId: "hw6" })[0]?.payload).toMatchObject({ verdict: "partial", stepId: s1 });
+  expect(answerReturn(TEST_CTX, "plain", "partial", {}, now)).toEqual({ ok: false, code: "RETURN_STEPS_REQUIRED" });
 });

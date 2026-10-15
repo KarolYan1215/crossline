@@ -13,10 +13,12 @@ import { CodexSupervisorRequestError, requestCodexSupervisor } from "./codex-run
 import { identityLines, lineLabels } from "./lines";
 import { recentOps } from "./undo";
 import { ANSWERED_SETTING, muteNudgeKind } from "./nudges";
+import { readOpener, type OpenerView } from "./opener";
+import { returnPageLines } from "./return";
 
 /** Where the person typed from: the page and the object open there (a task, a milestone, a plan day). */
 export type PageContext = { kind: string; entityId: string };
-export type Mention = { kind: "material" | "task" | "milestone"; id: string; title: string };
+export type Mention = { kind: "material" | "task" | "milestone" | "goal"; id: string; title: string };
 
 /** One action on a card and what became of it. */
 export type CardItem = { state: "pending" | "done" | "failed" | "dismissed"; message?: string; opId?: string; href?: string };
@@ -41,7 +43,9 @@ export type Card = {
   /** This turn corrected the previous card. */
   corrects?: boolean;
 };
-export type MessageView = { id: string; role: StoredConversationMessage["role"]; text: string; createdAt: string; card?: Card; page?: PageContext };
+export type MessageView = { id: string; role: StoredConversationMessage["role"]; text: string; createdAt: string; card?: Card; page?: PageContext;
+  /** The day's opener as data (`lib/opener.ts`); absent on older openers, which are shown as their text. */
+  opener?: OpenerView };
 /** What a card's fields can be changed to, by name: the open tasks (with their steps), the lines and the milestones. */
 export type CardChoices = { tasks: Array<{ id: string; title: string; steps: Array<{ id: string; title: string }> }>; lines: Array<{ id: string; label: string }>;
   milestones: Array<{ id: string; title: string }> };
@@ -178,7 +182,8 @@ function pageTask(pack: ConciergePack): string[] {
 }
 
 const view = (message: StoredConversationMessage): MessageView => ({ id: message.id, role: message.role, text: message.text, createdAt: message.createdAt,
-  ...(message.payload.card ? { card: message.payload.card as Card } : {}), ...(message.payload.page ? { page: message.payload.page as PageContext } : {}) });
+  ...(message.payload.card ? { card: message.payload.card as Card } : {}), ...(message.payload.page ? { page: message.payload.page as PageContext } : {}),
+  ...(readOpener(message.payload.opener) ? { opener: readOpener(message.payload.opener)! } : {}) });
 
 /** The names a card's editable fields take their values from. */
 export async function cardChoices(ctx: AccessContext): Promise<CardChoices> {
@@ -231,8 +236,10 @@ export async function conversationTurn(ctx: AccessContext, input: { text: string
     payload: { page: input.page, ...(docs.length ? { files: docs.map((doc) => doc.id) } : {}) } });
   const pack = await contextPack(ctx, input.page, now);
   const attached = attachedFiles(docs, pack);
+  // From the return page: what the absence left to settle, and which task and step a line typed beside one is about.
+  const returning = input.page.kind === "return" ? ["", ...returnPageLines(ctx, input.page, now)].join("\n") : "";
   const request = { conversationId: conversation.id, text: input.text || "（只附了文件）", mentions: input.mentions,
-    snapshot: `${conciergeSnapshot(pack, now, { lists: true })}${attached}`, pack, history,
+    snapshot: `${conciergeSnapshot(pack, now, { lists: true })}${returning}${attached}`, pack, history,
     ...(corrected ? { corrected: true } : {}) };
   let reply: { text: string; card: Card };
   let warnings: string[] = [];

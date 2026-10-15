@@ -13,3 +13,16 @@
 .return-steps { display: grid; gap: 6px; }
 .return-steps label { display: flex; gap: 6px; align-items: center; font-size: 14px; }
 .return-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.return-step{font-weight:400}
+.return-steps label[data-current]{font-weight:700}
+.return-item-settled{opacity:1}
+.return-item-settled b{font-weight:400}
+.return-say{display:grid;gap:6px;min-width:0}
+.return-say-form{display:flex;gap:8px;min-width:0}
+.return-say-form input{flex:1 1 auto;min-width:0;padding:6px 8px;border:1px solid var(--mist);font:inherit;font-size:14px;background:var(--paper);color:var(--ink)}
+.return-say-reply{display:grid;gap:6px;font-size:13px}
+.return-say-reply .gen p{margin:0}
+@media (max-width:680px){
+  .return-say-form input{min-height:44px}
+  .return-steps label{min-height:44px}
+}

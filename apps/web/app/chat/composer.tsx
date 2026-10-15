@@ -4,9 +4,9 @@ import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type R
 import { useAttachmentDrop } from "../attachment-drop";
 import { MenuButton } from "../ui/controls";
 
-export type Mention = { kind: "material" | "task" | "milestone"; id: string; title: string };
+export type Mention = { kind: "material" | "task" | "milestone" | "goal"; id: string; title: string };
 export type ComposerInput = { text: string; files: File[]; mentions: Mention[]; batch: boolean };
-const KIND_LABEL: Record<Mention["kind"], string> = { material: "资料", task: "任务", milestone: "里程碑" };
+const KIND_LABEL: Record<Mention["kind"], string> = { material: "资料", task: "任务", milestone: "里程碑", goal: "长期目标" };
 const ACCEPTED = "image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain,text/markdown,text/csv,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.md,.csv,.txt,.docx";
 
 /**

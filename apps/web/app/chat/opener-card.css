@@ -1,0 +1,35 @@
+/* The day's opener as a card (chat/opener-card.tsx): a day timeline in the lines' colours, the most urgent decision apart. */
+.opener-card{display:grid;gap:10px;min-width:0;font-size:13px;line-height:1.5}
+.opener-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px}
+.opener-head b{font-size:15px}
+.opener-badge{display:inline-flex;align-items:center;gap:6px;padding:2px 10px;border:1px solid var(--ink);color:var(--ink);text-decoration:none;font-size:13px;background:var(--paper)}
+.opener-badge span{font-weight:700;font-variant-numeric:tabular-nums}
+.opener-badge[data-empty]{border-color:var(--mist);color:var(--muted)}
+.opener-figure{position:relative;display:grid;gap:4px;min-width:0}
+.opener-lane{display:grid;grid-template-columns:36px minmax(0,1fr);align-items:center;min-width:0}
+.opener-lane-label{font-size:12px;color:var(--muted)}
+.opener-track{position:relative;height:14px;margin:0;padding:0;list-style:none;background:var(--chalk);overflow:hidden}
+.opener-block{position:absolute;top:0;bottom:0;background:var(--lc,var(--graphite))}
+/* Fixed arrangements are outlined, work is filled: the colour is the line, the outline says it is not the plan's. */
+.opener-lane[data-kind="fixed"] .opener-block{background:var(--paper);box-shadow:inset 0 0 0 2px var(--lc,var(--graphite))}
+.opener-lane[data-kind="work"] .opener-block{box-shadow:inset -1px 0 0 var(--paper)}
+.opener-axis{position:relative;height:18px;margin-left:36px}
+.opener-axis span{position:absolute;top:0;transform:translateX(-50%);font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+.opener-axis span:first-child{transform:none}
+.opener-axis span:last-child{transform:translateX(-100%)}
+.opener-now{position:absolute;top:0;height:calc(100% - 18px);width:2px;background:var(--now-ink,var(--ink))}
+.opener-facts{display:grid;gap:4px;margin:0}
+.opener-facts>div{display:grid;grid-template-columns:72px minmax(0,1fr);gap:8px;min-width:0}
+.opener-facts dt{color:var(--muted)}
+.opener-facts dd{margin:0;min-width:0;overflow-wrap:anywhere}
+.opener-next{display:block}
+.opener-soon{display:flex;flex-wrap:wrap;gap:4px 12px;margin:0;padding:0;list-style:none}
+.opener-soon li{padding-left:6px;border-left:3px solid var(--lc,var(--graphite));min-width:0;overflow-wrap:anywhere}
+.opener-soon small{margin-left:6px;color:var(--muted);font-size:12px}
+.opener-urgent{display:grid;gap:2px;padding:8px 10px;border:1px solid var(--ink);border-left:4px solid var(--lc,var(--ink));background:var(--paper)}
+.opener-urgent small{font-size:12px;color:var(--muted)}
+.opener-urgent b{overflow-wrap:anywhere}
+@media (max-width:680px){
+  .opener-badge{min-height:44px}
+  .opener-facts>div{grid-template-columns:minmax(0,1fr);gap:0}
+}

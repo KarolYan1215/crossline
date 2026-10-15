@@ -9,6 +9,7 @@ import { captureLine } from "../offline-command-forms";
 import { undoOperation } from "../undo-center";
 import { Markdown } from "../ui/markdown";
 import { announceThinking, HelperFace, useHelper } from "../helper-state";
+import { OpenerCard } from "./opener-card";
 
 const PENDING_EVENTS = ["crossline:pending-changed", "crossline:plan-changed"];
 const ACCOUNT_KEY = "crossline-conversation-account";
@@ -166,12 +167,17 @@ function MessageItem({ message, onUpdate, choices }: { message: MessageView; onU
   return <li className={message.role === "nudge" ? "conversation-reply conversation-nudge" : "conversation-reply"} data-face={avatar ? "" : undefined}>
     {avatar && <HelperFace src={avatar} size="reply" />}
     {message.text && <div className="gen"><Markdown text={message.text} /></div>}
-    {message.card && <CardView messageId={message.id} card={message.card} onUpdate={onUpdate} choices={choices} />}
+    {message.card && <CardView messageId={message.id} card={message.card} onUpdate={onUpdate} choices={choices}
+      {...(message.opener ? { body: <OpenerCard opener={message.opener} /> } : {})} />}
   </li>;
 }
 
-/** A turn's card: the actions proposed (执行 carries out every pending one), and the question back when there is one. Exported for its test. */
-export function CardView({ messageId, card, onUpdate, choices }: { messageId: string; card: Card; onUpdate: (message: MessageView) => void; choices: CardChoices | null }) {
+/**
+ * A turn's card: the actions proposed (执行 carries out every pending one), and the question back when there is one. `body` draws the
+ * question instead of its text (the day's opener, as a card). Exported for its test and for the return page.
+ */
+export function CardView({ messageId, card, onUpdate, choices, body }: { messageId: string; card: Card; onUpdate: (message: MessageView) => void;
+  choices: CardChoices | null; body?: ReactNode }) {
   const [working, setWorking] = useState(false);
   const [error, setError] = useState("");
   // Fields changed on the card, by action index; sent with 执行 and checked again on the server.
@@ -203,7 +209,7 @@ export function CardView({ messageId, card, onUpdate, choices }: { messageId: st
           onChange={(field, next) => setEdits((all) => ({ ...all, [index]: { ...(all[index] ?? {}), [field]: next } }))} />,
         changed: Boolean(edits[index] && Object.keys(edits[index]!).length) } : {})} />)}</ul>}
     {card.clarify.question && <div className="conversation-clarify">
-      {card.nudgeKind ? <Markdown text={card.clarify.question} /> : <p>{card.clarify.question}</p>}
+      {body ?? (card.nudgeKind ? <Markdown text={card.clarify.question} /> : <p>{card.clarify.question}</p>)}
       {chosen ? <small className="muted">已选：{chosen.label}</small>
         : <div className="conversation-options">{card.clarify.options.map((option, index) =>
           <button type="button" key={index} disabled={working} onClick={async () => {

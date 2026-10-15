@@ -62,7 +62,8 @@ test("finished work handed in starts the task if needed, completes it, and puts 
   doc("d2", "HW2-solution.pdf", "pdf", "Problem 1: W = 0.42 um");
   const result = await executeAction(TEST_CTX, { action: "evidence.submit", summary: "提交作业 2", args: { workOrderId: "hw2", documentIds: ["d2"], note: "三题都做了" } });
   expect(result).toMatchObject({ ok: true });
-  expect(store.listWorkOrders(ws).find((order) => order.id === "hw2")!.state).toBe("evidence_review");
+  // Handing in is accepting (2026-10-15); the files are kept as its evidence all the same.
+  expect(store.listWorkOrders(ws).find((order) => order.id === "hw2")!.state).toBe("accepted");
   const claims = store.listEvidenceClaims(ws).filter((claim) => claim.workOrderId === "hw2");
   expect(claims.map((claim) => claim.kind).sort()).toEqual(["file", "file", "record"]);
   const text = claims.find((claim) => claim.uri.endsWith(".extracted.txt"))!;

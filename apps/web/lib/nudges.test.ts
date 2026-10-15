@@ -4,7 +4,7 @@ vi.mock("server-only", () => ({}));
 vi.mock("./codex-runtime", () => ({ requestCodexSupervisor: vi.fn(async () => ({})), CodexSupervisorRequestError: class extends Error {} }));
 import { decideCard, loadConversation } from "./conversation";
 import { ANSWERED_SETTING, PRESENCE_SETTING, ensureOpener, nudgesFor } from "./nudges";
-import { TEST_CTX } from "./test-support";
+import { TEST_CTX, seedReadyToStart } from "./test-support";
 
 afterEach(() => { globalThis.crosslineStore?.close(); globalThis.crosslineStore = undefined; vi.unstubAllEnvs(); });
 
@@ -16,11 +16,18 @@ const estimate = { p25Minutes: 30, p50Minutes: 45, p85Minutes: 60, source: "llm_
 function setup() {
   vi.stubEnv("CROSSLINE_FIXED_NOW", NOW.toISOString());
   const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
+  seedReadyToStart(store, ws);
   store.saveWorkOrder({ id: "hw2", ownerId: TEST_CTX.principalId, workspaceId: ws, identityId: "research", projectId: "p", milestoneId: "", intent: "完成 ECE 555 作业 2",
     state: "approved", riskTier: "routine", estimate, payload: { dueDate: "2026-10-14" } });
   return store;
 }
 const nudges = () => loadConversation(TEST_CTX, "2026-10-12").messages.filter((message) => message.role === "nudge");
+
+test("no day summary is written before the start standard holds: it would describe an empty plan all day", async () => {
+  vi.stubEnv("CROSSLINE_FIXED_NOW", NOW.toISOString());
+  globalThis.crosslineStore = new CrosslineStore(":memory:");
+  expect(await ensureOpener(TEST_CTX, NOW)).toBe(false);
+});
 
 test("the day opens with its arrangements, its work and what is due soon, once", async () => {
   setup();
@@ -54,4 +61,30 @@ test("with a page in front of the person it is shown there; while they just answ
   const said = await nudgesFor(TEST_CTX, NOW);
   expect(said.every((item) => item.urgent)).toBe(true);
   expect(store.getConversationMessage(ws, nudges()[0]!.id)!.payload.nudge).toMatchObject({ delivery: "page" });
+});
+
+test("the opener also stores the day as data, which the conversation hands to the card; its text stays for the phone", async () => {
+  setup();
+  await ensureOpener(TEST_CTX, NOW);
+  const [opener] = nudges();
+  expect(opener!.opener).toMatchObject({ day: "2026-10-12", label: "10 月 12 日 周一", timeZone: expect.any(String),
+    soon: [{ title: "完成 ECE 555 作业 2", due: "2026-10-14", line: "research" }], asks: { count: expect.any(Number) } });
+  expect(Array.isArray(opener!.opener!.work) && Array.isArray(opener!.opener!.fixed)).toBe(true);
+  expect(opener!.card!.clarify.question.startsWith("10 月 12 日 周一。")).toBe(true);
+});
+
+test("a new proposal is announced once its steps are planned, not while it is still being prepared", async () => {
+  const store = setup();
+  store.saveWorkOrder({ id: "prop", ownerId: TEST_CTX.principalId, workspaceId: ws, identityId: "research", projectId: "p", milestoneId: "", intent: "选定首轮选题",
+    state: "awaiting_plan_approval", riskTier: "routine", estimate, payload: {} });
+  store.appendEvent({ ownerId: TEST_CTX.principalId, workspaceId: ws, idempotencyKey: "prop:proposed", type: "work_order.transitioned", entityId: "prop",
+    payload: { from: "analyzing", to: "awaiting_plan_approval" } });
+  const announced = () => nudges().some((message) => message.card?.clarify.question.includes("「选定首轮选题」已分析好"));
+  await nudgesFor(TEST_CTX, NOW);
+  expect(announced()).toBe(false);
+  store.saveStepPlan(ws, "prop", { archetypeId: "problem_set", quantity: { basis: "选题数", amount: 4, unit: "个" }, rationale: "",
+    steps: [{ id: "s", role: "solve", title: "列出候选选题", deliverable: "候选清单", doneCriterion: "四类各一", share: 1, estimate: { p25Minutes: 20, p50Minutes: 30, p85Minutes: 50 },
+      dependsOn: [], notBefore: "", dueBy: "", schedulable: true, executor: "human", tickOutcome: "" }] }, TEST_CTX.principalId, "planned");
+  await nudgesFor(TEST_CTX, NOW);
+  expect(announced()).toBe(true);
 });

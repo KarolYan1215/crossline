@@ -62,7 +62,7 @@ export function OfflineReplay({ workspaceId }: { workspaceId: string }) {
  */
 export async function captureLine(ownerId: string, workspaceId: string, { text, files, mentions }: ComposerInput): Promise<string | null> {
   const [title, ...rest] = text.split("\n");
-  const linked = mentions.length ? `关联：${mentions.map((item) => `${{ material: "资料", task: "任务", milestone: "里程碑" }[item.kind]}「${item.title}」`).join("；")}` : "";
+  const linked = mentions.length ? `关联：${mentions.map((item) => `${{ material: "资料", task: "任务", milestone: "里程碑", goal: "长期目标" }[item.kind]}「${item.title}」`).join("；")}` : "";
   const command = createCommand(ownerId, workspaceId, await nextSequence(workspaceId), "task.capture", {
     title: (title || files[0]?.name || "附件").slice(0, 240), context: [rest.join("\n").trim(), linked].filter(Boolean).join("\n").slice(0, 500) });
   const save = async (message: string) => {

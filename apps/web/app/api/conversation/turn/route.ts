@@ -2,7 +2,7 @@ import { resolveAccessContext } from "../../../../lib/access-guard";
 import { isCrossSiteWrite } from "../../../../lib/same-origin";
 import { conversationTurn, type Mention } from "../../../../lib/conversation";
 
-const KINDS = new Set(["material", "task", "milestone"]);
+const KINDS = new Set(["material", "task", "milestone", "goal"]);
 
 /** `{text, mentions, page, files}`: one turn of the one input box (`files`: ids from `/api/conversation/files`). The person's words are kept before anything else happens. */
 export async function POST(request: Request) {

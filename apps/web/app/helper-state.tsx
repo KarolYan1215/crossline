@@ -53,3 +53,30 @@ export function useHelper(): Shared & { thinking: boolean } {
 export function HelperFace({ src, size, mood }: { src: string; size: "button" | "reply"; mood?: HelperMood }) {
   return <span className="helper-face" data-size={size} data-mood={mood} style={{ backgroundImage: `url("${src}")` }} aria-hidden="true" />;
 }
+
+/** A message's text without its Markdown marks, for the bubble beside the figure and for finding it elsewhere on the page. */
+export function plainText(markdown: string): string {
+  return markdown
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/^\s{0,3}(?:#{1,6}\s+|[-*+]\s+|>\s?)/gm, "")
+    .replace(/[*_`~]+/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** How much of a message the bubble shows: about three lines at its 320px width. */
+export const PREVIEW_CHARACTERS = 60;
+
+/**
+ * A message cut for the bubble by characters (not UTF-16 units, so a character is never split), ending in 「…」 when cut. A cut inside a
+ * 「」 quote closes it after the ellipsis — the real bubble ended on a bare 「, which read as broken.
+ */
+export function previewText(text: string, max = PREVIEW_CHARACTERS): string {
+  const characters = Array.from(text.trim());
+  if (characters.length <= max) return characters.join("");
+  let kept = characters.slice(0, max - 1).join("").replace(/[\s，、。；：,.;:]+$/u, "");
+  // A cut right after an opening quote leaves nothing quoted: drop the quote instead of showing 「…」.
+  kept = kept.replace(/[「『“‘(（]+$/u, "");
+  const open = (kept.match(/「/g) ?? []).length - (kept.match(/」/g) ?? []).length;
+  return `${kept}…${open > 0 ? "」".repeat(open) : ""}`;
+}

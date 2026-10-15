@@ -3,12 +3,17 @@ import { randomUUID } from "node:crypto";
 import { formatInTimeZone } from "date-fns-tz";
 import { listAgentTasks, type StoredConversationMessage } from "@crossline/db";
 import {
-  availableSlots, isCancelledEvent, planNudges, taskTitleOf,
+  availableSlots, calendarLineOf, isCancelledEvent, planNudges, taskTitleOf,
   type AccessContext, type NotifyLevelName, type NudgeBlock, type NudgeEnding, type NudgeButton, type NudgeKind, type NudgeSlack, type PlannedNudge, type ProposedAction
 } from "@crossline/core";
 import { commitSoon, effectiveSchedulePreferences, energyAnswerMatters, getStore, loadCurrentPlan, planToday, readAvailability } from "./crossline";
-import { openAsks, thisWeek } from "./asks";
+import { listed, openAsks, thisWeek } from "./asks";
+import { calendarFiling } from "./timeline";
+import { dayLabel, type OpenerView } from "./opener";
+import { interviewStatus } from "./interview-status";
+import { preparingProposalIds } from "./proposal-ready";
 import { energyModel } from "./energy";
+import { outcomeNudgeInputs } from "./outcome-check";
 import { systemContext } from "./auto-publish";
 import type { Card } from "./conversation";
 
@@ -134,6 +139,8 @@ export async function nudgesFor(ctx: AccessContext, now = new Date()): Promise<P
     countedToday: recent.filter((message) => payloadOf(message)?.counted && message.createdAt.slice(0, 10) >= addDays(today, -1)
       && local(message.createdAt).slice(0, 10) === today).length,
     blocks, ending, slack, finished, ...(energyCheck ? { energyCheck } : {}),
+    // Finished work whose result is not known yet: asked at an idle moment (completion.ts).
+    outcomes: outcomeNudgeInputs(ctx, now),
     ...(running && timerOrder ? { timer: { orderId: timerOrder.id, title: taskTitleOf(timerOrder), stepId: currentStep?.id ?? "", stepTitle: currentStep?.title ?? "",
       startedAt: running.startedAt, usualMinutes: currentStep?.estimate.p50Minutes ?? timerOrder.estimate.p50Minutes } } : {})
   });
@@ -179,12 +186,17 @@ function backgroundDone(ctx: AccessContext, now: Date): Array<{ key: string; tex
     else if (task.status === "accepted" && task.stepId) out.push({ key: `agent:${task.taskId}`, text: `「${name}」已备好，可在任务的材料里查看。`, label: "打开任务",
       href: `/workbench/${encodeURIComponent(task.workOrderId)}` });
   }
-  const proposed = store.listEvents(ctx.workspaceId, { type: "work_order.transitioned" }).filter((event) => Date.parse(event.createdAt) >= since
-    && (event.payload as { to?: string }).to === "awaiting_plan_approval");
   const orders = new Map(store.listWorkOrders(ctx.workspaceId).map((order) => [order.id, order]));
-  for (const event of proposed) {
-    const order = orders.get(event.entityId);
-    if (order?.state === "awaiting_plan_approval") out.push({ key: `proposal:${order.id}`, text: `「${taskTitleOf(order)}」已分析好，等待批准。`, label: "去批准", href: "/approvals#proposals" });
+  // A proposal is announced once its steps are planned, not when the analysis lands (`lib/proposal-ready.ts`): it counts from whichever
+  // came later, so one planned hours after it was proposed is still announced.
+  const preparing = preparingProposalIds(ctx);
+  const plannedAt = new Map(store.listStepPlans(ctx.workspaceId).map((plan) => [plan.workOrderId, Date.parse(plan.plannedAt)]));
+  const proposedAt = new Map<string, number>();
+  for (const event of store.listEvents(ctx.workspaceId, { type: "work_order.transitioned" }))
+    if ((event.payload as { to?: string }).to === "awaiting_plan_approval") proposedAt.set(event.entityId, Date.parse(event.createdAt));
+  for (const [id, at] of proposedAt) {
+    const order = orders.get(id);
+    if (order?.state === "awaiting_plan_approval" && !preparing.has(id) && Math.max(at, plannedAt.get(id) ?? 0) >= since) out.push({ key: `proposal:${order.id}`, text: `「${taskTitleOf(order)}」已分析好，等待批准。`, label: "去批准", href: "/approvals#proposals" });
   }
   return out.slice(0, 5);
 }
@@ -217,7 +229,7 @@ export function muteNudgeKind(ctx: AccessContext, kind: string, now = new Date()
  * Writes one system message into the day's conversation, its buttons as the card's options (choosing one is the answer). Shown on
  * the page when one was visible in the last ten minutes; otherwise left for the worker to send to the desktop and phone.
  */
-function say(ctx: AccessContext, text: string, buttons: NudgeButton[], nudge: Omit<NudgePayload, "delivery">, now: Date): void {
+function say(ctx: AccessContext, text: string, buttons: NudgeButton[], nudge: Omit<NudgePayload, "delivery">, now: Date, extra: Record<string, unknown> = {}): void {
   const store = getStore();
   const conversation = store.conversationFor(ctx.workspaceId, planToday(ctx, now));
   const id = randomUUID();
@@ -234,7 +246,7 @@ function say(ctx: AccessContext, text: string, buttons: NudgeButton[], nudge: Om
   // the page at the moment a block ends.
   const delivery = nudge.kind !== "block_confirm" && visibleAt && now.getTime() - Date.parse(visibleAt) < PRESENCE_FRESH_MS ? "page" : "pending";
   store.appendConversationMessage({ id, workspaceId: ctx.workspaceId, conversationId: conversation.id, role: "nudge", text: "",
-    payload: { nudge: { ...nudge, delivery }, card }, createdAt: now.toISOString() });
+    payload: { ...extra, nudge: { ...nudge, delivery }, card }, createdAt: now.toISOString() });
 }
 
 /**
@@ -244,6 +256,9 @@ function say(ctx: AccessContext, text: string, buttons: NudgeButton[], nudge: Om
 export async function ensureOpener(ctx: AccessContext, now = new Date()): Promise<boolean> {
   const store = getStore();
   const today = planToday(ctx, now);
+  // The day's summary is written once: before the start standard it was written from an empty plan (the 小帮手 on the settings page
+  // fetches the conversation during the interview) and said 「今天没有固定安排」 all day over a class the interview had just read in.
+  if (!interviewStatus(ctx).readyToStart) return false;
   const conversation = store.conversationFor(ctx.workspaceId, today);
   if (store.listConversationMessages(ctx.workspaceId, conversation.id).some((message) => (message.payload.nudge as NudgePayload | undefined)?.kind === "opener")) return false;
   const plan = await loadCurrentPlan(ctx);
@@ -256,7 +271,7 @@ export async function ensureOpener(ctx: AccessContext, now = new Date()): Promis
     .map((order) => ({ order, due: (order.payload as { dueDate?: string }).dueDate || anchors.get(order.milestoneId) || "" }))
     .filter((item) => item.due && item.due >= today && item.due <= addDays(today, 3)).sort((a, b) => a.due.localeCompare(b.due));
   // This week's, the same count as Today's stack and 待确认: the ones that can wait are not today's to mention.
-  const asks = thisWeek(openAsks(ctx, now));
+  const asks = thisWeek(listed(openAsks(ctx, now)));
   const md = (day: string) => `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}`;
   const lines = [
     `${Number(today.slice(5, 7))} 月 ${Number(today.slice(8, 10))} 日 周${"日一二三四五六"[new Date(`${today}T12:00:00Z`).getUTCDay()]}。`,
@@ -274,6 +289,18 @@ export async function ensureOpener(ctx: AccessContext, now = new Date()): Promis
     ...(asks.length ? [{ kind: "href" as const, label: `全部待决（${asks.length}）`, href: "/approvals" }] : []),
     { kind: "href", label: "打开计划", href: "/plan" }
   ];
-  say(ctx, lines.join("\n"), buttons, { kind: "opener", fingerprint: `opener:${today}`, counted: false, urgent: false }, now);
+  // The same day as data, for the card Today's conversation and the return page draw (the text above stays for push and older pages).
+  const lineOfOrder = new Map(store.listWorkOrders(ctx.workspaceId).map((order) => [order.id, order.identityId]));
+  const filing = (() => { try { return calendarFiling(ctx); } catch { return null; } })();
+  const withLine = <T extends object>(item: T, line: string | undefined): T & { line?: string } => line ? { ...item, line } : item;
+  const opener: OpenerView = {
+    day: today, label: dayLabel(today), timeZone: effectiveSchedulePreferences(ctx).preferences.timeZone,
+    fixed: fixed.map((block) => withLine({ start: block.start, end: block.end, title: block.title }, calendarLineOf(filing, block.title))),
+    work: work.map((block) => withLine({ start: block.start, end: block.end, title: block.task ?? block.title, ...(block.step ? { step: block.step } : {}) },
+      lineOfOrder.get(block.id.split(":")[1]!))),
+    soon: soon.slice(0, 6).map((item) => withLine({ title: taskTitleOf(item.order), due: item.due }, item.order.identityId)),
+    asks: { count: asks.length, ...(first ? { top: withLine({ title: first.title, urgency: first.urgency }, first.line) } : {}) }
+  };
+  say(ctx, lines.join("\n"), buttons, { kind: "opener", fingerprint: `opener:${today}`, counted: false, urgent: false }, now, { opener });
   return true;
 }

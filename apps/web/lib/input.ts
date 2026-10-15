@@ -1,8 +1,9 @@
 import "server-only";
 import type { AccessContext } from "@crossline/core";
 import { getStore, saveMilestoneEdit } from "./crossline";
+import { identityLines } from "./lines";
 
-export type Mention = { kind: "material" | "task" | "milestone"; id: string; title: string };
+export type Mention = { kind: "material" | "task" | "milestone" | "goal"; id: string; title: string };
 
 /**
  * A milestone the person stated: a draft on its line, approved on the 主线 page like any other. Its deadline (when said) and target go
@@ -28,5 +29,8 @@ export function searchMentions(ctx: AccessContext, query: string, kind?: Mention
     .map((order) => ({ kind: "task" as const, id: order.id, title: order.intent })));
   if (!kind || kind === "milestone") results.push(...store.listMilestones(ctx.workspaceId).filter((item) => item.status !== "archived" && match(item.title))
     .map((item) => ({ kind: "milestone" as const, id: item.id, title: item.title })));
-  return results.slice(0, 12);
+  // A line's long-term goal, by the line's id; few enough that each matching one keeps its place at the end of the list.
+  const goals = !kind || kind === "goal" ? identityLines(ctx).filter((line) => line.goals?.[0] && match(`${line.label} ${line.goals[0]}`))
+    .map((line) => ({ kind: "goal" as const, id: line.id, title: `${line.label} · ${line.goals![0]}` })) : [];
+  return [...results.slice(0, 12 - goals.length), ...goals];
 }

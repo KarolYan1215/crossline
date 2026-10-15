@@ -8,5 +8,5 @@ export async function GET(request: Request) {
   const params = new URL(request.url).searchParams;
   const kind = params.get("kind");
   return Response.json({ ok: true, results: searchMentions(access.ctx, params.get("q") ?? "",
-    kind === "material" || kind === "task" || kind === "milestone" ? kind as Mention["kind"] : undefined) });
+    kind === "material" || kind === "task" || kind === "milestone" || kind === "goal" ? kind as Mention["kind"] : undefined) });
 }
