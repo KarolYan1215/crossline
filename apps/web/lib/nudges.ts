@@ -232,10 +232,8 @@ export function muteNudgeKind(ctx: AccessContext, kind: string, now = new Date()
  * Writes one system message into the day's conversation, its buttons as the card's options (choosing one is the answer). Shown on
  * the page when one was visible in the last ten minutes; otherwise left for the worker to send to the desktop and phone.
  */
-function say(ctx: AccessContext, text: string, buttons: NudgeButton[], nudge: Omit<NudgePayload, "delivery">, now: Date, extra: Record<string, unknown> = {}): void {
-  const store = getStore();
-  const conversation = store.conversationFor(ctx.workspaceId, planToday(ctx, now));
-  const id = randomUUID();
+/** A nudge's card: its words as the question and its buttons as options (`{message}` in a link becomes the message's id). */
+function nudgeCard(id: string, text: string, buttons: NudgeButton[], kind: NudgePayload["kind"]): Card {
   const actions: ProposedAction[] = [];
   const options = buttons.map((button) => {
     if (button.kind !== "action") return { label: button.label, actions: [] as number[], kind: button.kind,
@@ -243,7 +241,14 @@ function say(ctx: AccessContext, text: string, buttons: NudgeButton[], nudge: Om
     actions.push(button.action);
     return { label: button.label, actions: [actions.length - 1], kind: "action" as const };
   });
-  const card: Card = { actions, items: actions.map(() => ({ state: "pending" })), clarify: { question: text, options }, confidence: "high", nudgeKind: nudge.kind };
+  return { actions, items: actions.map(() => ({ state: "pending" })), clarify: { question: text, options }, confidence: "high", nudgeKind: kind };
+}
+
+function say(ctx: AccessContext, text: string, buttons: NudgeButton[], nudge: Omit<NudgePayload, "delivery">, now: Date, extra: Record<string, unknown> = {}): void {
+  const store = getStore();
+  const conversation = store.conversationFor(ctx.workspaceId, planToday(ctx, now));
+  const id = randomUUID();
+  const card = nudgeCard(id, text, buttons, nudge.kind);
   const visibleAt = store.getSetting(ctx.workspaceId, PRESENCE_SETTING);
   // A completion check goes to the desktop and the phone whatever page is open (docs/loop-and-scout.md §3): the person is rarely on
   // the page at the moment a block ends.
@@ -263,7 +268,15 @@ export async function ensureOpener(ctx: AccessContext, now = new Date()): Promis
   // fetches the conversation during the interview) and said 「今天没有固定安排」 all day over a class the interview had just read in.
   if (!interviewStatus(ctx).readyToStart) return false;
   const conversation = store.conversationFor(ctx.workspaceId, today);
-  if (store.listConversationMessages(ctx.workspaceId, conversation.id).some((message) => (message.payload.nudge as NudgePayload | undefined)?.kind === "opener")) return false;
+  // Written once a day, then kept current: it used to say 「待决事项 2 项，最紧急的是『访谈未完成』」 all day after both were settled. It is
+  // read again at most every five minutes (the conversation is polled every 30 s, and each reading places the day's schedule) and rewritten
+  // in place when it changed, unless the person already acted on its buttons.
+  const existing = store.listConversationMessages(ctx.workspaceId, conversation.id).find((message) => (message.payload.nudge as NudgePayload | undefined)?.kind === "opener");
+  if (existing) {
+    const read = Date.parse(String(existing.payload.openerReadAt ?? existing.createdAt));
+    const acted = ((existing.payload.card as Card | undefined)?.items ?? []).some((item) => item.state !== "pending");
+    if (acted || now.getTime() - read < OPENER_REFRESH_MS) return false;
+  }
   const plan = await loadCurrentPlan(ctx);
   const todays = plan.blocks.filter((block) => (block.day ?? today) === today).sort((a, b) => a.start.localeCompare(b.start));
   const fixed = todays.filter((block) => !block.id.startsWith("scheduled:") && !block.id.startsWith("proposed:") && !block.id.startsWith("optional:")
@@ -308,6 +321,16 @@ export async function ensureOpener(ctx: AccessContext, now = new Date()): Promis
     soon: soon.slice(0, 6).map((item) => withLine({ title: taskTitleOf(item.order), due: item.due }, item.order.identityId)),
     asks: { count: asks.length, ...(first ? { top: withLine({ title: first.title, urgency: first.urgency }, first.line) } : {}) }
   };
+  if (existing) {
+    const text = lines.join("\n");
+    const same = (existing.payload.card as Card | undefined)?.clarify?.question === text && JSON.stringify(existing.payload.opener) === JSON.stringify(opener);
+    store.updateConversationPayload(ctx.workspaceId, existing.id, { ...existing.payload, openerReadAt: now.toISOString(),
+      ...(same ? {} : { opener, card: nudgeCard(existing.id, text, buttons, "opener") }) });
+    return false;
+  }
   say(ctx, lines.join("\n"), buttons, { kind: "opener", fingerprint: `opener:${today}`, counted: false, urgent: false }, now, { opener });
   return true;
 }
+
+/** How often the day's opener is read again to keep it current. */
+const OPENER_REFRESH_MS = 5 * 60_000;

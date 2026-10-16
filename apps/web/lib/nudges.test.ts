@@ -65,6 +65,19 @@ test("with a page in front of the person it is shown there; while they just answ
   expect(store.getConversationMessage(ws, nudges()[0]!.id)!.payload.nudge).toMatchObject({ delivery: "page" });
 });
 
+test("the opener is kept current: read again after five minutes and rewritten in place when the day changed, never a second message", async () => {
+  const store = setup();
+  await ensureOpener(TEST_CTX, NOW);
+  expect(nudges()[0]!.card!.clarify.question).toContain("三天内截止：完成 ECE 555 作业 2");
+  // The homework is handed in; within five minutes the opener is not read again.
+  store.saveWorkOrder({ ...store.getWorkOrder(ws, "hw2")!, state: "accepted" });
+  expect(await ensureOpener(TEST_CTX, new Date(NOW.getTime() + 60_000))).toBe(false);
+  expect(nudges()[0]!.card!.clarify.question).toContain("三天内截止");
+  expect(await ensureOpener(TEST_CTX, new Date(NOW.getTime() + 6 * 60_000))).toBe(false);
+  expect(nudges()).toHaveLength(1);
+  expect(nudges()[0]!.card!.clarify.question).not.toContain("三天内截止");
+});
+
 test("the opener also stores the day as data, which the conversation hands to the card; its text stays for the phone", async () => {
   setup();
   await ensureOpener(TEST_CTX, NOW);

@@ -27,7 +27,9 @@ const INSTRUCTIONS = "You interview a Crossline user as the Skill describes: a l
   + "nouns, their order, which are hard constraints); do not propose new ones. Each turn: a short reflection on what was just said in the "
   + "person's chosen `tone`, addressing them as 「你」 (name a contradiction, a self-imposed limit, or gravity mistaken for a problem; never "
   + "judge a choice or decide for the person). In orientation, lines and details follow it with a batch of up to five fact questions that "
-  + "do not depend on each other; in situation, compass and energy with exactly one question, the one that matters most now; follow a "
+  + "do not depend on each other; in situation, compass and energy with two to four questions that do not need each other's answers "
+  + "(usually more than one: the stage has several sides to ask about), most important first, keeping only a follow-up that builds on "
+  + "another answer for the next round; follow a "
   + "thread that carries a clue before returning to the stage. Ask about the hard-constraint lines' rules first (fixed schedule, terms, "
   + "deadlines), put every fixed weekly arrangement the person states into `fileDates.recurring` quoting their reply, and as soon as the "
   + "person has said when they can work (or a stage has enough to infer it) propose weekly available hours in `availability` — do not wait "
@@ -337,7 +339,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       return runCodexSkill<OnboardingTurn>(client, context, {
         skillName: ONBOARDING_SKILL, cwd, developerInstructions: INSTRUCTIONS, outputSchema: ONBOARDING_TURN_SCHEMA,
         prepareInput: () => context, validateOutput, softAccept, keepEarly,
-        onAudit: (audit) => { if (audit.threadId) threadId = audit.threadId; }, onProgress,
+        onAudit: (audit) => { if (audit.threadId) threadId = audit.threadId; }, onProgress, onQueued,
         timeoutMs: 60 * 60_000
       });
     };
@@ -357,6 +359,12 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       if (live.phase === "writing") { if (Date.now() - lastWrite < 1000) return; lastWrite = Date.now(); }
       write({ sessionId, startedAt, updatedAt: new Date().toISOString(), phase: live.phase, files, ...readPartialTurn(live.text), repairs: live.repairs, stalls: live.stalls });
     }
+    // Waiting for the server's one model slot (model-gate.ts): the page says how many runs are ahead; 0 is this turn starting.
+    function onQueued(ahead: number) {
+      const base: OnboardingProgress = latest ?? { sessionId, startedAt, updatedAt: startedAt, phase: "thinking", files, facts: 0, dates: 0, questions: 0, reply: "", repairs: 0, stalls: 0 };
+      const { ahead: _previous, ...rest } = base;
+      write({ ...rest, updatedAt: new Date().toISOString(), ...(ahead > 0 ? { phase: "queued" as const, ahead } : { phase: "thinking" as const }) });
+    }
     onProgress({ phase: "thinking", text: "", repairs: 0, stalls: 0 });
     // A model reading the files says nothing for a minute or more; the heartbeat tells the page the turn is still alive.
     const heartbeat = setInterval(() => { if (latest) write({ ...latest, updatedAt: new Date().toISOString() }); }, 15_000);
@@ -375,7 +383,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         ...(publicAssessment ? { publicAssessment } : {}), ...(waiting > 0 ? { sourcesWaiting: waiting } : {}) });
         result = await continueSkillTurn<OnboardingTurn>(client, session.codexThreadId, message, {
           skillName: ONBOARDING_SKILL, cwd, outputSchema: ONBOARDING_TURN_SCHEMA, validateOutput, softAccept, keepEarly,
-          onAudit: () => {}, onProgress, timeoutMs: 60 * 60_000
+          onAudit: () => {}, onProgress, onQueued, timeoutMs: 60 * 60_000
         });
         // The runtime forgets a conversation when it restarts. The interview does not: the profile, the files and
         // every message are in the ledger, so a new thread is told what was said and carries on from there.
@@ -405,8 +413,8 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       if (assumption) store.upsertProfileFact({ workspaceId, ...assumption, status: "inferred", sourceRef: "inference", sourceQuote: "", updatedAt: new Date().toISOString() });
     }
     const paced = paceDeepRound({ ...result.output, questions: screen.keep }, Boolean(focusLine));
-    const output = withChecklist(paced.deep ? paced.output : withGapQuestions(paced.output, currentGaps(), messages, { freshDocuments: sent.map(([, doc]) => doc.id) }),
-      focusLine || options.checklist === false ? [] : openChecklist());
+    const output = withSomethingToAnswer(withChecklist(paced.deep ? paced.output : withGapQuestions(paced.output, currentGaps(), messages, { freshDocuments: sent.map(([, doc]) => doc.id) }),
+      focusLine || options.checklist === false ? [] : openChecklist()), currentGaps(), messages);
     store.appendOnboardingMessage({ sessionId, workspaceId, role: "assistant", content: output, createdAt: new Date().toISOString() });
     store.saveOnboardingSession({
       ...session, ...(threadId ? { codexThreadId: threadId } : {}),
@@ -433,6 +441,30 @@ export function withChecklist(output: OnboardingTurn, open: Array<{ label: strin
 完成访谈前还缺：${missing}。`,
     questions: output.questions.length ? output.questions
       : [{ id: "checklist-open", text: `完成访谈前还缺：${missing}。请补充。`, kind: "free", allowOther: true, identityId: "", projectId: "", options: [] }] };
+}
+
+/** What a round that still asks but holds no question asks, by stage: open, in the interview's own voice. */
+const OPEN_QUESTION: Record<OnboardingStage, string> = {
+  orientation: "还有哪条主线、哪份材料没提到？",
+  lines: "哪条主线你最想先说清楚：现在在做什么、想做成什么样？",
+  situation: "说说你现在的处境：这几周最占你精力、最让你担心的是什么？",
+  compass: "做这些事，你最终想得到什么？",
+  energy: "一天里什么时候状态最好，什么事最耗你？",
+  details: "还有哪个项目的截止日、交付物或验收方式没说清楚？"
+};
+
+/**
+ * A round that still asks always has something to answer. The model's questions can all be screened out (already on record, not the
+ * person's to answer), and in a deep stage the app's own questions used to wait for a fact round: the hosted walkthrough of 2026-10-16 met
+ * a round with a reply and an empty box the moment the start standard stood. Then the app's waiting questions join, else one open question
+ * for the stage.
+ */
+export function withSomethingToAnswer(output: OnboardingTurn, gaps: ProfileGap[], messages: StoredOnboardingMessage[]): OnboardingTurn {
+  if (output.nextAction !== "ask" || output.questions.length) return output;
+  const withGaps = withGapQuestions(output, gaps, messages);
+  if (withGaps.questions.length) return withGaps;
+  const stage = (output.stage && output.stage in OPEN_QUESTION ? output.stage : "situation") as OnboardingStage;
+  return { ...output, questions: [{ id: `open-${stage}`, text: OPEN_QUESTION[stage], kind: "free", allowOther: true, identityId: "", projectId: "", options: [] }] };
 }
 
 /** Besides those that block, at most this many of the app's own questions join one round, so a batch stays answerable. */

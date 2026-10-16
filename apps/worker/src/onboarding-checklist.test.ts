@@ -41,3 +41,15 @@ test("同一阶段第二轮起才换阶段；五条没齐时前段不换阶段",
   // With the start items in, the front stages move on like the rest.
   expect(stagePace([round("lines"), { role: "user", content: {} }, round("lines")], { startOpen: false }).moveOn).toContain("进入下一阶段");
 });
+
+test("a round that still asks always has something to answer: the app's waiting questions, else one open question for the stage", async () => {
+  const { withSomethingToAnswer } = await import("./onboarding-session");
+  const empty = turn({ nextAction: "ask", stage: "situation" });
+  const gaps = profileGaps({ identities: [{ id: "research", label: "研究者" }], projects: [{ id: "ece548", identityId: "research", name: "ECE 548" }],
+    facts: [], dated: ["ece548"], unfiled: [], portrait: { written: false, confirmed: false } });
+  expect(withSomethingToAnswer(empty, gaps, []).questions.map((question) => question.id)).toContain("gap-meetings-ece548");
+  const open = withSomethingToAnswer(empty, [], []);
+  expect(open.questions).toEqual([expect.objectContaining({ id: "open-situation", kind: "free" })]);
+  // A round with questions, or one that is finished, is left alone.
+  expect(withSomethingToAnswer(turn({}), [], []).questions).toEqual([]);
+});
