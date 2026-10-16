@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { useT } from "../locale-context";
 
 type Calendar = { id: string; name: string; isDefault: boolean; selected: boolean };
 type Account = { accountId: string; username: string; signedIn: boolean; calendars: Calendar[]; error?: string };
@@ -14,6 +15,7 @@ const key = (accountId: string, calendarId: string) => `${accountId}:${calendarI
  * and told the person nothing. Everything here is a read except the save, which writes one settings row.
  */
 export function CalendarSources() {
+  const t = useT();
   const [accounts, setAccounts] = useState<Account[] | undefined>();
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
@@ -23,7 +25,7 @@ export function CalendarSources() {
     const body = await response?.json().catch(() => undefined) as { ok?: boolean; accounts?: Account[]; message?: string } | undefined;
     if (body?.ok && body.accounts) { setAccounts(body.accounts); setStatus(""); return; }
     setAccounts([]);
-    setStatus(body?.message ? "日历列表暂时无法读取。" : "日历列表暂时无法读取。");
+    setStatus(t("日历列表暂时无法读取。"));
   };
   useEffect(() => { void load(); }, []);
 
@@ -45,31 +47,31 @@ export function CalendarSources() {
     if (body?.ok && body.accounts) {
       setAccounts(body.accounts);
       // Said plainly: saving changes what the NEXT sync reads; it does not itself pull anything.
-      setStatus("已保存，下次同步时生效；「计划」页的同步按钮可立即同步。");
+      setStatus(t("已保存，下次同步时生效；「计划」页的同步按钮可立即同步。"));
     } else {
-      setStatus("未保存，请重试。");
+      setStatus(t("未保存，请重试。"));
     }
     setBusy(false);
   };
 
-  if (!accounts) return <section className="st-card"><header><h3>读取的日历</h3></header><p className="muted">读取中…</p></section>;
+  if (!accounts) return <section className="st-card"><header><h3>{t("读取的日历")}</h3></header><p className="muted">{t("读取中…")}</p></section>;
 
-  return <section className="st-card calendar-sources" aria-label="读取的日历">
-    <header><h3>读取的日历</h3><small>勾选的日历作为固定日程进入计划；新账号默认勾选其默认日历</small></header>
-    {accounts.length === 0 && <p className="muted">尚无已登录的日历账号。</p>}
+  return <section className="st-card calendar-sources" aria-label={t("读取的日历")}>
+    <header><h3>{t("读取的日历")}</h3><small>{t("勾选的日历作为固定日程进入计划；新账号默认勾选其默认日历")}</small></header>
+    {accounts.length === 0 && <p className="muted">{t("尚无已登录的日历账号。")}</p>}
     {accounts.map((account) => <div className="calendar-account" key={account.accountId}>
       <h3>{account.username}</h3>
       {account.error
-        ? <p role="status">该账号的日历暂时无法读取；已导入的日程保持不变。</p>
+        ? <p role="status">{t("该账号的日历暂时无法读取；已导入的日程保持不变。")}</p>
         : account.calendars.map((calendar) => <label key={calendar.id}>
           <input type="checkbox" checked={calendar.selected}
             onChange={() => toggle(account.accountId, calendar.id)} />
-          <span>{calendar.name}{calendar.isDefault ? "（默认）" : ""}</span>
+          <span>{calendar.name}{calendar.isDefault ? t("（默认）") : ""}</span>
         </label>)}
     </div>)}
     {accounts.length > 0 && <div className="calendar-sources-actions">
       <button type="button" className="primary-button" disabled={busy} onClick={() => void save()}>
-        {busy ? "保存中…" : "保存选择"}
+        {busy ? t("保存中…") : t("保存选择")}
       </button>
     </div>}
     {status && <p role="status">{status}</p>}
