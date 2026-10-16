@@ -23,7 +23,7 @@ export const QUIZ_ITEMS: QuizItem[] = [
   { id: "q7", axis: "output", text: "把想法讲给别人听、看到别人被说服，让我很有成就感。", reverse: false },
   { id: "q8", axis: "rhythm", text: "我更喜欢边做边调整，而不是事先定好每一步。", reverse: false },
   { id: "q9", axis: "scope", text: "同时推进几件不相关的事，比只做一件事更让我有劲。", reverse: false },
-  { id: "q10", axis: "basis", text: "没有经过验证的想法，我不太愿意投入时间。", reverse: true },
+  { id: "q10", axis: "basis", text: "做完一件事，我会用数字回头核对效果，而不是凭感觉说好不好。", reverse: true },
   { id: "q11", axis: "output", text: "我享受独自把东西一点点做出来的过程。", reverse: true },
   { id: "q12", axis: "rhythm", text: "计划被打乱会让我明显不舒服。", reverse: true },
   { id: "q13", axis: "scope", text: "新方向再有意思，我也会先把手头这一件做深。", reverse: true },
@@ -32,20 +32,20 @@ export const QUIZ_ITEMS: QuizItem[] = [
   { id: "q16", axis: "rhythm", text: "临时冒出来的机会，我通常会马上抓住。", reverse: false },
   { id: "q17", axis: "scope", text: "别人问我是做什么的，我很难用一个词回答。", reverse: false },
   { id: "q18", axis: "basis", text: "遇到重要的选择，我会专门列表格或给各项打分。", reverse: true },
-  { id: "q19", axis: "output", text: "我更在意东西本身做得好不好，而不是有多少人看到。", reverse: true },
+  { id: "q19", axis: "output", text: "有空的时候，我更愿意钻研一门手艺或工具，而不是经营自己的账号和人脉。", reverse: true },
   { id: "q20", axis: "rhythm", text: "我的待办清单经常被我自己推翻重排。", reverse: false },
   { id: "q21", axis: "scope", text: "我能说出自己最擅长的那一件事，而且十年后大概还在做它。", reverse: true },
-  { id: "q22", axis: "basis", text: "就算数据还不支持，我也愿意先押注自己看好的方向。", reverse: false },
-  { id: "q23", axis: "output", text: "做完一件事，我第一时间就想把它分享出去。", reverse: false },
+  { id: "q22", axis: "basis", text: "认识一个人几分钟，我对他靠不靠谱的判断通常八九不离十。", reverse: false },
+  { id: "q23", axis: "output", text: "我很容易和陌生人聊起来，并让对方记住我在做什么。", reverse: false },
   { id: "q24", axis: "rhythm", text: "离截止日期还早，我就会把事情做完。", reverse: true },
   { id: "q25", axis: "scope", text: "我的收藏夹里，什么领域的东西都有。", reverse: false },
   { id: "q26", axis: "basis", text: "听到一个新说法，我的第一反应是去找出处。", reverse: true },
   { id: "q27", axis: "output", text: "比起开会讨论，我更愿意自己动手先把原型做出来。", reverse: true },
-  { id: "q28", axis: "rhythm", text: "太早定死的计划，会让我觉得被束缚。", reverse: false },
+  { id: "q28", axis: "rhythm", text: "我常看当天的状态和心情，再决定先做哪件事。", reverse: false },
   { id: "q29", axis: "scope", text: "比起认识很多圈子的人，我更愿意和同行深入交流。", reverse: true },
   { id: "q30", axis: "basis", text: "我做决定常常是先有答案，再去找理由。", reverse: false },
   { id: "q31", axis: "output", text: "能把复杂的事讲明白，是我最得意的本事之一。", reverse: false },
-  { id: "q32", axis: "rhythm", text: "我会提前一周排好接下来每天要做的事。", reverse: true }
+  { id: "q32", axis: "rhythm", text: "我的作息和工作习惯，每天都差不多固定。", reverse: true }
 ];
 
 /** The five Likert answers, 1 to 5. */
