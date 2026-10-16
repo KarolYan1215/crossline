@@ -229,6 +229,8 @@ export function createMilestoneProposer(store: CrosslineStore, workspaceId: stri
     const result = await runCodexSkill<MilestoneProposal>(client, context, {
       skillName: MILESTONE_ARCHITECT_SKILL,
       cwd,
+      // The person may answer this proposal in a conversation (`continueConversation` below).
+      keepThread: true,
       developerInstructions: INSTRUCTIONS,
       outputSchema: MILESTONE_PROPOSAL_SCHEMA,
       prepareInput: () => context,

@@ -44,7 +44,10 @@ export function fakeRuntime(answers: Array<string | ((prompts: string[]) => stri
   threadStarts: () => Array<Record<string, unknown>>;
   /** Every `skills/config/write` and `plugin/install` the runner sent, in order. */
   configCalls: () => Array<{ method: string; params: Record<string, unknown> }>;
+  /** Threads the runner let go of (`thread/unsubscribe`), in order. */
+  unsubscribed: () => string[];
 } {
+  const unsubscribed: string[] = [];
   let turns = 0;
   let interrupts = 0;
   let threads = 0;
@@ -74,6 +77,7 @@ export function fakeRuntime(answers: Array<string | ((prompts: string[]) => stri
       if (options.completeOnInterrupt) queueMicrotask(() => rpc.receiveLine(JSON.stringify({ method: "turn/completed",
         params: { threadId, turn: { id: String(request.params?.turnId), status: "interrupted" } } })));
     }
+    if (request.method === "thread/unsubscribe") unsubscribed.push(String(request.params?.threadId));
     if (request.method === "skills/config/write" || request.method === "plugin/install") configCalls.push({ method: request.method, params: request.params ?? {} });
     if (request.method === "skills/config/write" && libraryEnabled.has(String(request.params?.path))) libraryEnabled.set(String(request.params?.path), request.params?.enabled === true);
     const result = request.method === "skills/list"
@@ -121,7 +125,8 @@ export function fakeRuntime(answers: Array<string | ((prompts: string[]) => stri
       }, options.delayMs ?? 1);
     }
   });
-  return { rpc, turns: () => turns, prompts: () => prompts, interrupts: () => interrupts, threadStarts: () => starts, configCalls: () => configCalls };
+  return { rpc, turns: () => turns, prompts: () => prompts, interrupts: () => interrupts, threadStarts: () => starts, configCalls: () => configCalls,
+    unsubscribed: () => unsubscribed };
 }
 
 const FIXTURES = path.join(import.meta.dirname, "fixtures");

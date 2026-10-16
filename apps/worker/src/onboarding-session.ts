@@ -337,7 +337,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
           ...(line.goalParts?.length ? { goalParts: line.goalParts } : {}) }))
       };
       return runCodexSkill<OnboardingTurn>(client, context, {
-        skillName: ONBOARDING_SKILL, cwd, developerInstructions: INSTRUCTIONS, outputSchema: ONBOARDING_TURN_SCHEMA,
+        skillName: ONBOARDING_SKILL, cwd, developerInstructions: INSTRUCTIONS, outputSchema: ONBOARDING_TURN_SCHEMA, keepThread: true,
         prepareInput: () => context, validateOutput, softAccept, keepEarly,
         onAudit: (audit) => { if (audit.threadId) threadId = audit.threadId; }, onProgress, onQueued,
         timeoutMs: 60 * 60_000

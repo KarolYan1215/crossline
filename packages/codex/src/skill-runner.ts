@@ -39,6 +39,12 @@ export type SkillRunResult<T> = { ok: true; output: T; audit: AnalysisAudit }
 export type SkillRunOptions<T> = {
   skillName: string;
   cwd: string;
+  /**
+   * The caller will send more turns on this thread (`continueSkillTurn`): it stays loaded for `THREAD_KEEP_MS` after its last turn
+   * instead of being released when the run ends. A later turn on a released thread answers SKILL_THREAD_LOST, which those callers
+   * already rebuild from their own history.
+   */
+  keepThread?: boolean;
   developerInstructions: string;
   outputSchema: unknown;
   /** Validated before the turn starts; whatever it returns is what gets sent. */
@@ -771,6 +777,7 @@ export function continueSkillTurn<T>(client: CodexRpcBoundary, threadId: string,
   if (options.signal?.aborted) return Promise.resolve({ ok: false, blocker: { code: "SKILL_CANCELED", message: "已取消；未开始运行。" }, audit: {} });
   return executeSkill(client, options, async (context): Promise<SkillRunResult<T>> => {
     const audit: AnalysisAudit = { threadId };
+    holdThread(client, threadId);
     const scope = openScope(client, options);
     const unregister = options.tools ? registerAgentThread(client, threadId, toolAnswerer(options.tools)) : undefined;
     try {
@@ -785,13 +792,47 @@ export function continueSkillTurn<T>(client: CodexRpcBoundary, threadId: string,
       });
       return { ok: true, output, audit };
     } catch (error) { return failureResult<T>(client, error, audit); }
-    finally { unregister?.(); scope.dispose(); }
+    finally { unregister?.(); scope.dispose(); releaseThread(client, threadId, THREAD_KEEP_MS); }
   });
 }
 
 export function runCodexSkill<T>(client: CodexRpcBoundary, input: unknown, options: SkillRunOptions<T>): Promise<SkillRunResult<T>> {
   if (options.signal?.aborted) return Promise.resolve({ ok: false, blocker: { code: "SKILL_CANCELED", message: "已取消；未开始运行。" }, audit: {} });
   return executeSkill(client, options, (context) => runSkillTurn(client, input, options, context));
+}
+
+/**
+ * Releasing threads (found on the hosted beta, 2026-10-16). The runtime keeps a thread loaded — and with it every MCP server its plugins
+ * start, a ChatGPT account's curated `codex-security` plugin among them, a 79 MB node process each — for as long as a client is
+ * subscribed, and this client never left one: twelve of them filled the worker's 600 MB. Unsubscribing lets the runtime unload the
+ * thread (and stop its servers) a minute later. A one-off run's thread is released when the run ends; a conversation's after
+ * `THREAD_KEEP_MS` without a turn.
+ */
+export const THREAD_KEEP_MS = Math.max(60_000, (Number(process.env.CROSSLINE_THREAD_KEEP_MINUTES) || 10) * 60_000);
+const releaseTimers = new WeakMap<object, Map<string, ReturnType<typeof setTimeout>>>();
+function timersOf(client: CodexRpcBoundary): Map<string, ReturnType<typeof setTimeout>> {
+  let timers = releaseTimers.get(client);
+  if (!timers) { timers = new Map(); releaseTimers.set(client, timers); }
+  return timers;
+}
+/** A turn is about to use this thread: it must not be released under it. */
+function holdThread(client: CodexRpcBoundary, threadId: string): void {
+  const timers = timersOf(client);
+  const timer = timers.get(threadId);
+  if (timer) clearTimeout(timer);
+  timers.delete(threadId);
+}
+export function releaseThread(client: CodexRpcBoundary, threadId: string, afterMs = 0): void {
+  holdThread(client, threadId);
+  const release = () => {
+    timersOf(client).delete(threadId);
+    // Best effort: a runtime that is gone or restarted has unloaded the thread already.
+    void Promise.resolve().then(() => client.request("thread/unsubscribe", { threadId })).catch(() => undefined);
+  };
+  if (afterMs <= 0) { release(); return; }
+  const timer = setTimeout(release, afterMs);
+  (timer as { unref?: () => void }).unref?.();
+  timersOf(client).set(threadId, timer);
 }
 
 async function runSkillTurn<T>(client: CodexRpcBoundary, input: unknown, requested: SkillRunOptions<T>, context: RunContext): Promise<SkillRunResult<T>> {
@@ -828,5 +869,8 @@ async function runSkillTurn<T>(client: CodexRpcBoundary, input: unknown, request
     });
     return { ok: true, output, audit };
   } catch (error) { return failureResult<T>(client, error, audit); }
-  finally { unregister?.(); scope?.dispose(); }
+  finally {
+    unregister?.(); scope?.dispose();
+    if (audit.threadId) releaseThread(client, audit.threadId, options.keepThread ? THREAD_KEEP_MS : 0);
+  }
 }

@@ -85,7 +85,7 @@ export function createConcierge(store: CrosslineStore, workspaceId: string, cwd:
         : { state: "blocked", code: reviewed.blocker.code, message: reviewed.blocker.message };
     }
     const fresh = () => runCodexSkill<ConciergeTurn>(client, null, {
-      ...shared, developerInstructions: INSTRUCTIONS, onAudit: (audit) => { threadId = audit.threadId; },
+      ...shared, developerInstructions: INSTRUCTIONS, keepThread: true, onAudit: (audit) => { threadId = audit.threadId; },
       prepareInput: () => ({ version: "crossline.concierge.v1", today: request.pack.today, timeZone: request.pack.timeZone,
         history: request.history.slice(-30).map((item) => ({ role: item.role, text: item.text.slice(0, 1500) })), ...message })
     });
