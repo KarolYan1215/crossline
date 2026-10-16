@@ -58,7 +58,7 @@ describe("text built in English, unchanged in Chinese", () => {
       .toBe("计入课程成绩，距截止 10 天");
     expect(validateSuccessCriteria([], "en")).toMatchObject({ ok: false, blocker: { message: "A milestone needs at least one success criterion" } });
     expect(advanceWorkOrder({ state: "captured" }, { type: "human.completed" } as never, "en"))
-      .toMatchObject({ ok: false, blocker: { message: "Cannot move from captured by human.completed" } });
+      .toMatchObject({ ok: false, blocker: { message: "Cannot move from captured via human.completed" } });
     expect(validateCommandEnvelope(null, "en")).toMatchObject({ ok: false, blocker: { message: "The offline command is missing a required field" } });
   });
 
@@ -71,7 +71,7 @@ describe("text built in English, unchanged in Chinese", () => {
     const order = { id: "o", intent: "Choose the venue for the retreat", state: "approved", projectId: "p", payload: { family: "preparation" } };
     expect(planAssistantTask(order, { projectIsCourse: false, locale: "en" })).toEqual({ fit: false, reason: "This step needs your own choice or decision, so it is not handed to the assistant whole." });
     const split = { ...order, intent: "Prepare notes", payload: { automationParts: [{ intent: "Summarize the three papers into notes" }] } };
-    expect(planAssistantTask(split, { projectIsCourse: false, locale: "en" })).toMatchObject({ category: "read_research_organize", why: "The AI part reads as \"Reading, research and organizing\"." });
+    expect(planAssistantTask(split, { projectIsCourse: false, locale: "en" })).toMatchObject({ category: "read_research_organize", why: "The description of the AI part points to \"Reading, research and organizing\"." });
   });
 
   test("interview questions and checklist", () => {

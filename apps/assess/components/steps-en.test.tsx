@@ -20,7 +20,7 @@ const HAN = /[㐀-鿿]/;
 test("a statement screen in English: the statement rewritten for English readers, the five answers and the controls", () => {
   const flow = { ...emptyFlow(), step: "quiz" as const, startedAt: 0, index: 0, answers: { q1: 4 } };
   const html = english(<QuizStep flow={flow} onChoose={noop} onBack={noop} onNext={noop} />);
-  expect(html).toContain("I often take what I learn in one field and use it in a completely different one.");
+  expect(html).toContain("I often apply what I learn in one field to a completely different one.");
   expect(html).toContain("Strongly disagree");
   expect(html).toContain("1 of 32 answered");
   expect(html).toContain("Keyboard: press 1–5 to answer");
@@ -39,8 +39,8 @@ test("the appearance, email and wants steps in English carry no Chinese", () => 
   for (const html of steps) expect(html).not.toMatch(HAN);
   expect(steps[0]).toContain("Roughly what do you look like?");
   expect(steps[1]).toContain("Email me the link to my result");
-  expect(steps[1]).toContain("One email can take the test up to 3 times");
-  expect(steps[2]).toContain("Coding / products");
+  expect(steps[1]).toContain("One email address can take the test up to 3 times");
+  expect(steps[2]).toContain("Coding and products");
   expect(steps[2]).toContain("0 / 120");
 });
 
@@ -49,7 +49,7 @@ test("the result's type and details in English, built in English by the server a
   const html = english(<><AxesList type={type} /><TypeDetails type={type} /></>);
   expect(html).toContain("Generalist 80%");
   expect(html).toContain("ahead of about");
-  expect(html).toContain("You might want to do");
+  expect(html).toContain("You might try");
   expect(html).toContain("Best partner:");
   expect(html).not.toMatch(HAN);
 });
@@ -67,8 +67,8 @@ test("the test's messages in English, Chinese unchanged", () => {
   expect(errorMessage("WANTS_INVALID", "en")).toContain("up to 120 characters");
   expect(errorMessage("WANTS_INVALID")).toContain("最多 60 个字");
   expect(errorMessage("UNKNOWN_CODE", "en")).toBe("Something went wrong. Try again later.");
-  expect(appearanceProblem({ note: "" }, "en")).toBe("Still missing: Presentation, Hair, Glasses, Skin tone, Clothing style");
+  expect(appearanceProblem({ note: "" }, "en")).toBe("Still missing: Gender presentation, Hair, Glasses, Skin tone, Clothing style");
   expect(emailProblem("", "en")).toBe("Enter your email");
   expect(wantsProblem({ picks: ["media"], text: "x".repeat(61) }, "en")).toBeNull();
-  expect(wantsProblem({ picks: ["media"], text: "x".repeat(121) }, "en")).toBe("120 characters at most");
+  expect(wantsProblem({ picks: ["media"], text: "x".repeat(121) }, "en")).toBe("Up to 120 characters");
 });

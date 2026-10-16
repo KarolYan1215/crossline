@@ -14,7 +14,7 @@ test("the opening card speaks English and offers the common roles as English wor
   const html = en(<OpeningCard linesKnown={false} knownLines={[]} initialTone="neutral" busy={false} hasMaterials={false} onStart={() => {}} />);
   expect(html).toContain("A note from the developer");
   expect(html).toContain("How would you like me to talk to you?");
-  expect(html).toContain("Which roles are you investing in right now?");
+  expect(html).toContain("Which roles are you putting your time into?");
   expect(html).toContain("Researcher");
   expect(html).toContain("Start the interview");
   expect(html).not.toMatch(/[一-鿿]{2,}.*你希望/);
@@ -24,7 +24,7 @@ test("the opening card speaks English and offers the common roles as English wor
 test("the first reply is said in English on an English screen, and stays Chinese otherwise", () => {
   const reply = openingReply({ tone: "direct", lines: ["Researcher", "Entrepreneur"], base: "", fixed: [] }, true, "en");
   expect(reply).toContain("[My tracks] Researcher, Entrepreneur");
-  expect(reply).toContain("[Foundation for the next 12–24 months] All equally");
+  expect(reply).toContain("[Base for the next 12–24 months] Several, equally");
   expect(reply).toContain("[Tracks with a fixed schedule] None");
   expect(reply.endsWith("I've added my materials. Please read what you can from them first, then ask about what's missing.")).toBe(true);
   expect(openingReply({ tone: "direct", lines: ["研究者"], base: "", fixed: [] }, false)).toContain("【我的主线】研究者");
