@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
+import { markClientBusy } from "./model-gate";
 import { createRuntimeRegistry, type RuntimeSidecar } from "./runtime-registry";
 
 let dir: string;
@@ -23,12 +24,13 @@ function fakeSidecar(home: string, answers: Record<string, unknown> = {}) {
 }
 const connect = (home: string) => { mkdirSync(home, { recursive: true }); writeFileSync(path.join(home, "auth.json"), "{}"); };
 
-function setup(extra: { maxRunning?: number; answers?: Record<string, unknown> } = {}) {
+function setup(extra: { maxRunning?: number; pollMs?: number; maxQueueMs?: number; answers?: Record<string, unknown> } = {}) {
   let clock = 0;
   const owner = fakeSidecar("owner");
   const started: ReturnType<typeof fakeSidecar>[] = [];
   const registry = createRuntimeRegistry({ owner, ownerWorkspaceId: () => "ws-owner", baseDir: dir, now: () => clock,
     ...(extra.maxRunning ? { maxRunning: extra.maxRunning } : {}),
+    ...(extra.pollMs !== undefined ? { pollMs: extra.pollMs } : {}), ...(extra.maxQueueMs !== undefined ? { maxQueueMs: extra.maxQueueMs } : {}),
     start: async (home) => { const sidecar = fakeSidecar(home, extra.answers); started.push(sidecar); return sidecar; } });
   return { registry, owner, started, advance: (ms: number) => { clock += ms; }, homeOf: (ws: string) => path.join(dir, ws, "codex-home") };
 }
@@ -58,17 +60,58 @@ test("a connected account gets its own process in its own home, reused while in 
   expect(registry.current("ws-guest")).toBeUndefined();
 });
 
-test("at most N guests run at once: the least recently used idle one makes room, a busy set says so", async () => {
-  const { registry, started, advance, homeOf } = setup({ maxRunning: 2 });
-  for (const ws of ["a", "b", "c"]) connect(homeOf(ws));
+const handle = (result: Awaited<ReturnType<ReturnType<typeof setup>["registry"]["client"]>>) => {
+  if (!result.ok) throw new Error(result.blocker.code);
+  return result.client;
+};
+
+test("at most N guests run at once: the least recently used idle one makes room, a newcomer waits while all are working", async () => {
+  const { registry, started, advance, homeOf } = setup({ maxRunning: 2, pollMs: 5 });
+  for (const ws of ["a", "b", "c", "d"]) connect(homeOf(ws));
   await registry.client("a"); advance(120_000);
-  await registry.client("b"); advance(120_000);
-  expect((await registry.client("c")).ok).toBe(true);
+  const b = handle(await registry.client("b")); advance(120_000);
+  const c = handle(await registry.client("c"));
   expect(started[0]!.stopped).toBe(true);
-  // b and c were both used within the last minute: a fourth waits rather than cutting into someone's run.
+  // b and c both have a run in flight: d waits in line instead of being refused or cutting into someone's run.
+  markClientBusy(b, 1); markClientBusy(c, 1);
+  let settled = false;
+  const d = registry.client("d").then((result) => { settled = true; return result; });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  expect(settled).toBe(false);
+  expect(started[1]!.stopped || started[2]!.stopped).toBe(false);
+  // b's run ends and it has been quiet past the grace: d gets b's place.
+  markClientBusy(b, -1); advance(20_000);
+  expect((await d).ok).toBe(true);
+  expect(started[1]!.stopped).toBe(true);
+  expect(started[2]!.stopped).toBe(false);
+  markClientBusy(c, -1);
+});
+
+test("work that held a client while its runtime made room for someone else starts the runtime again on its first request", async () => {
+  const { registry, started, advance, homeOf } = setup({ maxRunning: 1, answers: { "thread/start": { thread: { id: "t1" } } } });
+  for (const ws of ["a", "b"]) connect(homeOf(ws));
+  const a = handle(await registry.client("a"));
+  const heard: unknown[] = [];
+  a.onNotification((message) => heard.push(message.method));
+  advance(60_000);
   await registry.client("b");
-  connect(homeOf("d"));
-  expect(await registry.client("d")).toMatchObject({ ok: false, blocker: { code: "RUNTIME_LIMIT_REACHED" } });
+  expect(started[0]!.stopped).toBe(true);
+  advance(60_000);
+  // a's queued run gets its turn: the same client works, on a new process, and its listeners hear the new process.
+  expect(await a.request("thread/start", {})).toEqual({ thread: { id: "t1" } });
+  expect(started).toHaveLength(3);
+  expect(started[1]!.stopped).toBe(true);
+  started[2]!.emit({ method: "turn/started" });
+  expect(heard).toEqual(["turn/started"]);
+});
+
+test("a runtime stuck busy past the longest wait is refused, not waited on forever", async () => {
+  const { registry, advance, homeOf } = setup({ maxRunning: 1, maxQueueMs: 0 });
+  for (const ws of ["a", "b"]) connect(homeOf(ws));
+  const a = handle(await registry.client("a")); advance(60_000);
+  markClientBusy(a, 1);
+  expect(await registry.client("b")).toMatchObject({ ok: false, blocker: { code: "RUNTIME_LIMIT_REACHED" } });
+  markClientBusy(a, -1);
 });
 
 test("logging in starts the guest's runtime even before it is connected; device code shows the address and the code", async () => {

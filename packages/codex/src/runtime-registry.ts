@@ -46,6 +46,12 @@ export type RuntimeRegistry = {
   stopAll(): void;
 };
 
+/**
+ * A runtime quiet this long with no run in flight may be stopped for another account or under memory pressure. Short, because the
+ * runtime holds nothing the ledger does not: an interview's thread is rebuilt from its messages when it is gone (SKILL_THREAD_LOST).
+ */
+const EVICT_GRACE_MS = 15_000;
+
 export function createRuntimeRegistry(options: {
   owner: RuntimeSidecar;
   ownerWorkspaceId: () => string | undefined;
@@ -57,14 +63,20 @@ export function createRuntimeRegistry(options: {
   hasProvider?: (workspaceId: string) => boolean;
   /** Longer than a Skill's own stall limit (20 min), so a long turn that is still producing events is never stopped under it. */
   idleMs?: number;
+  /** While every runtime is working, how often to look for one that finished, and how long to wait before refusing. */
+  pollMs?: number;
+  maxQueueMs?: number;
   now?: () => number;
 }): RuntimeRegistry {
   const maxRunning = options.maxRunning ?? 3;
+  const pollMs = options.pollMs ?? 2_000;
+  const maxQueueMs = options.maxQueueMs ?? 30 * 60_000;
   const idleMs = options.idleMs ?? 30 * 60_000;
   const now = options.now ?? Date.now;
   const running = new Map<string, { sidecar: RuntimeSidecar; lastUsed: number }>();
   const starting = new Map<string, Promise<RuntimeSidecar>>();
   const logins = new Map<string, RuntimeLogin>();
+  const handles = new Map<string, Handle>();
   const isOwner = (workspaceId: string) => !workspaceId || workspaceId === options.ownerWorkspaceId();
   const homeOf = (workspaceId: string) => path.join(options.baseDir, workspaceId.replace(/[^a-zA-Z0-9_-]/g, "_"), "codex-home");
   const signedIn = (workspaceId: string) => isOwner(workspaceId) || existsSync(path.join(homeOf(workspaceId), "auth.json"));
@@ -76,19 +88,55 @@ export function createRuntimeRegistry(options: {
     try { entry?.sidecar.stop(); } catch { /* already gone */ }
   };
   const touch = (workspaceId: string) => { const entry = running.get(workspaceId); if (entry) entry.lastUsed = now(); };
-  // A runtime with a run in flight is never stopped for being idle or to make room, however quiet its turn is (model-gate.ts).
-  const stoppable = (entry: { sidecar: RuntimeSidecar; lastUsed: number }, quietMs: number) => !clientBusy(entry.sidecar.client) && now() - entry.lastUsed >= quietMs;
+  // A runtime with a run in flight is never stopped for being idle or to make room, however quiet its turn is (model-gate.ts). Runs
+  // hold the workspace's handle, not the process's own client, so that is what is marked busy.
+  const stoppable = (workspaceId: string, entry: { lastUsed: number }, quietMs: number) =>
+    !clientBusy(handleFor(workspaceId)) && now() - entry.lastUsed >= quietMs;
+
+  /**
+   * The client every caller gets for a guest: one per workspace, kept across the process behind it being stopped and started again.
+   * Work waiting for the model gate holds a client but has no run in flight, so its runtime may be stopped to make room for someone
+   * else's; when its turn comes, its first request starts the runtime again instead of failing on a dead process. Notifications and
+   * the runtime's own requests are forwarded from whichever process is current.
+   */
+  type Handle = CodexRpcBoundary & { notify: Set<(message: Record<string, unknown>) => void>; serve?: (method: string, params: unknown) => unknown };
+  function handleFor(workspaceId: string): Handle {
+    const known = handles.get(workspaceId);
+    if (known) return known;
+    const handle: Handle = {
+      notify: new Set(),
+      async request(method, params) {
+        if (!connected(workspaceId)) throw new Error("RUNTIME_UNCONNECTED");
+        const started = await ensure(workspaceId);
+        if ("code" in started) throw new Error(started.code);
+        return started.client.request(method, params);
+      },
+      onNotification(handler) { handle.notify.add(handler); return () => { handle.notify.delete(handler); }; },
+      onServerRequest(handler) {
+        handle.serve = handler;
+        return () => { if (handle.serve === handler) delete handle.serve; };
+      }
+    };
+    handles.set(workspaceId, handle);
+    return handle;
+  }
 
   async function ensure(workspaceId: string): Promise<RuntimeSidecar | RuntimeBlocker> {
     const existing = running.get(workspaceId);
     if (existing) { existing.lastUsed = now(); return existing.sidecar; }
     const pending = starting.get(workspaceId);
     if (pending) return pending;
-    if (running.size >= maxRunning) {
-      // Make room by stopping the least recently used guest; if every one is in use right now, say so rather than queue for hours.
-      const oldest = [...running].filter(([, entry]) => stoppable(entry, 60_000)).sort((a, b) => a[1].lastUsed - b[1].lastUsed)[0];
-      if (!oldest) return blocker("RUNTIME_LIMIT_REACHED");
-      stop(oldest[0]);
+    // Make room by stopping the least recently used guest with no run in flight. When every one is working, wait for one to finish
+    // instead of refusing: refusing meant a second person got 「同时运行的模型连接已满」 whenever another had used the app in the last
+    // minute (the hosted beta, 2026-10-16). Only a wait past `maxQueueMs` (a runtime stuck busy) is refused.
+    const queuedAt = now();
+    while (running.size >= maxRunning) {
+      const oldest = [...running].filter(([id, entry]) => stoppable(id, entry, EVICT_GRACE_MS)).sort((a, b) => a[1].lastUsed - b[1].lastUsed)[0];
+      if (oldest) { stop(oldest[0]); break; }
+      if (now() - queuedAt >= maxQueueMs) return blocker("RUNTIME_LIMIT_REACHED");
+      await new Promise((resolve) => setTimeout(resolve, pollMs));
+      const arrived = running.get(workspaceId)?.sidecar ?? await starting.get(workspaceId)?.catch(() => undefined);
+      if (arrived) return arrived;
     }
     // Another process is the largest single thing this can add: with memory above the high-water mark, wait (reclaiming meanwhile).
     await waitForMemory();
@@ -103,8 +151,14 @@ export function createRuntimeRegistry(options: {
       const sidecar = await launch;
       running.set(workspaceId, { sidecar, lastUsed: now() });
       // Every event from the runtime is activity: a long turn keeps its process alive as long as it is still working.
+      const handle = handleFor(workspaceId);
+      sidecar.client.onServerRequest?.((method, params) => {
+        if (!handle.serve) throw new Error("no run is waiting on this thread");
+        return handle.serve(method, params);
+      });
       sidecar.client.onNotification((message) => {
         touch(workspaceId);
+        for (const handler of handle.notify) { try { handler(message); } catch { /* one listener must not stop the others */ } }
         if (message.method !== "account/login/completed") return;
         const login = logins.get(workspaceId);
         const params = (message.params ?? {}) as { loginId?: unknown; success?: unknown };
@@ -122,16 +176,18 @@ export function createRuntimeRegistry(options: {
     if (isOwner(workspaceId)) return { ok: true, client: options.owner.client };
     if (!forLogin && !connected(workspaceId)) return { ok: false, blocker: blocker("RUNTIME_UNCONNECTED") };
     const started = await ensure(workspaceId);
-    return "code" in started ? { ok: false, blocker: started } : { ok: true, client: started.client };
+    return "code" in started ? { ok: false, blocker: started } : { ok: true, client: handleFor(workspaceId) };
   };
 
   return {
     isOwner, connected, signedIn,
     client: (workspaceId) => clientFor(workspaceId),
-    current: (workspaceId) => isOwner(workspaceId) ? options.owner.client : (touch(workspaceId), running.get(workspaceId)?.sidecar.client),
+    current: (workspaceId) => isOwner(workspaceId) ? options.owner.client : (touch(workspaceId), running.has(workspaceId) ? handleFor(workspaceId) : undefined),
     async login(workspaceId, method) {
-      const runtime = await clientFor(workspaceId, true);
-      if (!runtime.ok) throw new Error(runtime.blocker.code);
+      // Not through the handle: an account that is not connected yet is exactly the one that logs in.
+      const started = isOwner(workspaceId) ? options.owner : await ensure(workspaceId);
+      if ("code" in started) throw new Error(started.code);
+      const runtime = { client: started.client };
       const params = method.type === "chatgpt" ? { type: "chatgpt", appBrand: "codex", codexStreamlinedLogin: true, useHostedLoginSuccessPage: true }
         : method.type === "apiKey" ? { type: "apiKey", apiKey: method.apiKey } : { type: "chatgptDeviceCode" };
       const answer = (await runtime.client.request("account/login/start", params) ?? {}) as Record<string, unknown>;
@@ -159,8 +215,8 @@ export function createRuntimeRegistry(options: {
       logins.delete(workspaceId);
       rmSync(path.dirname(homeOf(workspaceId)), { recursive: true, force: true });
     },
-    stopIdle() { for (const [workspaceId, entry] of [...running]) if (stoppable(entry, idleMs)) stop(workspaceId); },
-    reclaim() { for (const [workspaceId, entry] of [...running]) if (stoppable(entry, 60_000)) stop(workspaceId); },
+    stopIdle() { for (const [workspaceId, entry] of [...running]) if (stoppable(workspaceId, entry, idleMs)) stop(workspaceId); },
+    reclaim() { for (const [workspaceId, entry] of [...running]) if (stoppable(workspaceId, entry, EVICT_GRACE_MS)) stop(workspaceId); },
     stopAll() { for (const workspaceId of [...running.keys()]) stop(workspaceId); }
   };
 }
