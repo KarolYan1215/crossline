@@ -5,6 +5,7 @@ import {
   currentWorkspaceId, discardConflict, discardDeadLetter, listConflicts, listDeadLetters,
   listPending, type OfflineCommand
 } from "../offline-queue";
+import { useT } from "../locale-context";
 
 /**
  * Dead letters are captures the server permanently refused; conflicts are commands the server refused
@@ -18,6 +19,7 @@ import {
  * actually online, that writes the workspace id down for this page to read back with no network.
  */
 export function DeadLetters() {
+  const t = useT();
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [dead, setDead] = useState<Array<DeadLetter<OfflineCommand>>>([]);
   const [conflicts, setConflicts] = useState<Array<DeadLetter<OfflineCommand>>>([]);
@@ -29,7 +31,7 @@ export function DeadLetters() {
       setDead(await listDeadLetters(id));
       setConflicts(await listConflicts(id));
       setPending((await listPending(id)).length);
-    } catch { setError("浏览器存储不可用，无法读取离线队列。"); }
+    } catch { setError(t("浏览器存储不可用，无法读取离线队列。")); }
   };
   useEffect(() => {
     const id = currentWorkspaceId();
@@ -37,7 +39,7 @@ export function DeadLetters() {
     if (id) void refresh(id);
   }, []);
 
-  if (!workspaceId) return <p className="micro">尚未记录当前账号，请先在联网时打开一次首页。</p>;
+  if (!workspaceId) return <p className="micro">{t("尚未记录当前账号，请先在联网时打开一次首页。")}</p>;
   if (error) return <p role="alert">{error}</p>;
 
   const row = (entry: DeadLetter<OfflineCommand>, kind: "dead" | "conflict") => <li key={entry.command.clientCommandId}>
@@ -45,25 +47,25 @@ export function DeadLetters() {
     {Boolean(entry.command.payload.context) && <small>{String(entry.command.payload.context)}</small>}
     <small>{entry.reason} · {localStamp(entry.failedAt)}</small>
     {/* Copy first, then discard: discarding is the only way out, so the text must not vanish with it. */}
-    <button type="button" onClick={() => { void navigator.clipboard?.writeText(String(entry.command.payload.title ?? "")); }}>复制原文</button>
+    <button type="button" onClick={() => { void navigator.clipboard?.writeText(String(entry.command.payload.title ?? "")); }}>{t("复制原文")}</button>
     <button type="button" onClick={async () => {
       if (kind === "dead") await discardDeadLetter(workspaceId, entry.command.clientCommandId);
       else await discardConflict(workspaceId, entry.command.clientCommandId);
       void refresh(workspaceId);
-    }}>丢弃</button>
+    }}>{t("丢弃")}</button>
   </li>;
 
   return <>
     <section className="dead-letter-list">
-      <p className="micro">等待同步 {pending} 条 · 无法同步 {dead.length} 条</p>
+      <p className="micro">{t("等待同步 {{pending}} 条 · 无法同步 {{dead}} 条", { pending, dead: dead.length })}</p>
       {dead.length === 0
-        ? <p className="micro">没有无法同步的记录。</p>
+        ? <p className="micro">{t("没有无法同步的记录。")}</p>
         : <ul>{dead.map((entry) => row(entry, "dead"))}</ul>}
     </section>
     <section className="dead-letter-list">
-      <p className="micro">与其他设备冲突 {conflicts.length} 条</p>
+      <p className="micro">{t("与其他设备冲突 {{count}} 条", { count: conflicts.length })}</p>
       {conflicts.length === 0
-        ? <p className="micro">没有冲突记录。</p>
+        ? <p className="micro">{t("没有冲突记录。")}</p>
         : <ul>{conflicts.map((entry) => row(entry, "conflict"))}</ul>}
     </section>
   </>;

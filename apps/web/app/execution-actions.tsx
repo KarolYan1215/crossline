@@ -3,6 +3,7 @@ import { useState } from "react";
 import type { EvidenceQuestionTemplate } from "@crossline/core";
 import { EnergyProbe } from "./energy-probe";
 import { createCommand, enqueue, nextSequence, type OfflineCommandType } from "./offline-queue";
+import { useT } from "./locale-context";
 
 /** The only four actions the offline outbox can carry — everything else (approve, materials retry/ready,
  * archive) stays online-only, matching the plan's stated scope for the offline workbench. */
@@ -37,6 +38,7 @@ export function ExecutionActions({ workOrderId, intent, state, paused, ownerId, 
    * controls on one page. Workbench and the task detail page have no such section, so they keep it on. */
   showEnergyProbe?: boolean;
 }) {
+  const t = useT();
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [reason, setReason] = useState("");
@@ -71,7 +73,7 @@ export function ExecutionActions({ workOrderId, intent, state, paused, ownerId, 
     const command = createCommand(ownerId, workspaceId, await nextSequence(workspaceId), type, payload);
     try {
       await enqueue(workspaceId, command);
-      setStatus("已离线保存，联网后自动同步");
+      setStatus(t("已离线保存，联网后自动同步"));
       return true;
     } catch { return false; }
   };
@@ -89,10 +91,10 @@ export function ExecutionActions({ workOrderId, intent, state, paused, ownerId, 
       });
       if (response.ok) { location.reload(); return; }
       const failure = await response.json().catch(() => ({})) as { code?: string };
-      setStatus(codes[failure.code ?? ""] ?? "操作未生效，请刷新查看真实状态。");
+      setStatus(t(codes[failure.code ?? ""] ?? "操作未生效，请刷新查看真实状态。"));
     } catch {
       if (endpoint === "execution" && await queueOffline(action, body)) { setBusy(false); return; }
-      setStatus("连接中断；请刷新查看真实状态。");
+      setStatus(t("连接中断；请刷新查看真实状态。"));
     }
     setBusy(false);
   };
@@ -105,9 +107,9 @@ export function ExecutionActions({ workOrderId, intent, state, paused, ownerId, 
       form.append("file", file);
       const response = await fetch(`/api/work-orders/${encodeURIComponent(workOrderId)}/evidence-attachments`, { method: "POST", body: form });
       const body = await response.json().catch(() => null) as { saved?: Array<{ uri: string; fileName: string }>; message?: string } | null;
-      if (!response.ok || !body?.saved?.[0]) { setUploadStatus(body?.message ?? "文件上传失败，请重试"); return; }
+      if (!response.ok || !body?.saved?.[0]) { setUploadStatus(body?.message ?? t("文件上传失败，请重试")); return; }
       setUploadedFile(body.saved[0]);
-    } catch { setUploadStatus("网络不可用，文件未上传"); }
+    } catch { setUploadStatus(t("网络不可用，文件未上传")); }
     finally { setUploading(false); }
   };
 
@@ -128,31 +130,31 @@ export function ExecutionActions({ workOrderId, intent, state, paused, ownerId, 
         `awaiting_plan_approval` and the Workbench offered no way to advance it, even though the API has
         always accepted the transition. Every successful analysis was a dead end. */}
     {state === "awaiting_plan_approval" &&
-      <button className="primary-button" type="button" disabled={busy} onClick={() => void send({}, "approve")}>批准</button>}
+      <button className="primary-button" type="button" disabled={busy} onClick={() => void send({}, "approve")}>{t("批准")}</button>}
     {state === "blocked" &&
-      <button className="primary-button" type="button" disabled={busy} onClick={() => void send({}, "approve")}>恢复</button>}
+      <button className="primary-button" type="button" disabled={busy} onClick={() => void send({}, "approve")}>{t("恢复")}</button>}
     {state === "preparing" && <>
-      <span className="micro">材料准备中</span>
-      <button type="button" disabled={busy} onClick={() => void send({ action: "materials_retry" })}>重新准备材料</button>
-      <button type="button" disabled={busy} onClick={() => void send({ action: "materials_ready" })}>材料已备好</button>
+      <span className="micro">{t("材料准备中")}</span>
+      <button type="button" disabled={busy} onClick={() => void send({ action: "materials_retry" })}>{t("重新准备材料")}</button>
+      <button type="button" disabled={busy} onClick={() => void send({ action: "materials_ready" })}>{t("材料已备好")}</button>
     </>}
     {(state === "approved" || state === "ready_for_human") && <>
-      {showEnergyProbe && <><span className="micro">开始前精力</span><EnergyProbe context="before_task" workOrderId={workOrderId} /></>}
-      <button className="primary-button" type="button" disabled={busy} onClick={() => void send({ action: "start" })}>开始计时</button>
+      {showEnergyProbe && <><span className="micro">{t("开始前精力")}</span><EnergyProbe context="before_task" workOrderId={workOrderId} /></>}
+      <button className="primary-button" type="button" disabled={busy} onClick={() => void send({ action: "start" })}>{t("开始计时")}</button>
     </>}
     {state === "active" && !paused && <>
-      <label><span className="sr-only">中断原因</span>
-        <input value={reason} maxLength={200} placeholder="中断原因（必填）" onChange={(event) => setReason(event.target.value)} /></label>
-      <button type="button" disabled={busy} onClick={() => void send({ action: "pause", reason })}>暂停</button>
+      <label><span className="sr-only">{t("中断原因")}</span>
+        <input value={reason} maxLength={200} placeholder={t("中断原因（必填）")} onChange={(event) => setReason(event.target.value)} /></label>
+      <button type="button" disabled={busy} onClick={() => void send({ action: "pause", reason })}>{t("暂停")}</button>
     </>}
     {state === "active" && paused &&
-      <button type="button" disabled={busy} onClick={() => void send({ action: "resume" })}>继续</button>}
+      <button type="button" disabled={busy} onClick={() => void send({ action: "resume" })}>{t("继续")}</button>}
     {state === "active" && <>
       {/* Pre-generated at milestone approval time (see 工作块 E) — the person just clicks a checkbox
           option or types the specifics, AI records the exact answer rather than asking them to write
           free-form evidence prose from scratch. */}
       {evidenceChecklist.length > 0 && <fieldset className="evidence-checklist">
-        <legend className="micro">完成情况（可选）</legend>
+        <legend className="micro">{t("完成情况（可选）")}</legend>
         {evidenceChecklist.map((question) => <div key={question.id} className="evidence-question">
           <span>{question.prompt}</span>
           {question.kind === "checkbox"
@@ -161,58 +163,58 @@ export function ExecutionActions({ workOrderId, intent, state, paused, ownerId, 
                   onChange={() => setAnswers((current) => ({ ...current, [question.id]: option }))} />
                 <span>{option}</span>
               </label>)}</div>
-            : <input value={answers[question.id] ?? ""} maxLength={2000} placeholder="输入具体情况"
+            : <input value={answers[question.id] ?? ""} maxLength={2000} placeholder={t("输入具体情况")}
                 onChange={(event) => setAnswers((current) => ({ ...current, [question.id]: event.target.value }))} />}
         </div>)}
       </fieldset>}
-      <label><span className="sr-only">证据位置</span>
-        <input value={uri} maxLength={500} placeholder="证据位置（可留空）" onChange={(event) => setUri(event.target.value)} /></label>
-      <label><span className="sr-only">证据说明</span>
-        <input value={description} maxLength={500} placeholder="证据说明" onChange={(event) => setDescription(event.target.value)} /></label>
+      <label><span className="sr-only">{t("证据位置")}</span>
+        <input value={uri} maxLength={500} placeholder={t("证据位置（可留空）")} onChange={(event) => setUri(event.target.value)} /></label>
+      <label><span className="sr-only">{t("证据说明")}</span>
+        <input value={description} maxLength={500} placeholder={t("证据说明")} onChange={(event) => setDescription(event.target.value)} /></label>
       <label className="evidence-file-upload">
-        <span className="sr-only">上传证据文件，由 AI 审阅</span>
+        <span className="sr-only">{t("上传证据文件，由 AI 审阅")}</span>
         <input type="file" disabled={uploading || busy}
           onChange={(event) => { const file = event.currentTarget.files?.[0]; if (file) void uploadEvidenceFile(file); }} />
         <small>
-          {uploading ? "上传中…" : uploadedFile ? `已上传：${uploadedFile.fileName}` : "可选：上传证据文件"}
+          {uploading ? t("上传中…") : uploadedFile ? t("已上传：{{name}}", { name: uploadedFile.fileName }) : t("可选：上传证据文件")}
         </small>
       </label>
       {uploadStatus && <small className="muted" role="status">{uploadStatus}</small>}
       {estimateP50 ? <fieldset className="reported-minutes">
-        <legend className="micro">实际用时（用于校准估时）</legend>
+        <legend className="micro">{t("实际用时（用于校准估时）")}</legend>
         {suggestedMinutes ? <button type="button" aria-pressed={reported?.source === "activity"} onClick={() => setReported({ minutes: suggestedMinutes, source: "activity" })}>
-          屏幕记录约 {suggestedMinutes} 分</button> : null}
+          {t("屏幕记录约 {{minutes}} 分", { minutes: suggestedMinutes })}</button> : null}
         {([["≈估时", 1], ["一半", 0.5], ["多一半", 1.5], ["两倍", 2]] as const).map(([label, factor]) => {
           const minutes = Math.max(5, Math.round(estimateP50 * factor / 5) * 5);
           return <button key={label} type="button" aria-pressed={reported?.source === "one_tap" && reported.minutes === minutes}
-            onClick={() => setReported({ minutes, source: "one_tap" })}>{label} {minutes} 分</button>;
+            onClick={() => setReported({ minutes, source: "one_tap" })}>{t("{{label}} {{minutes}} 分", { label: t(label), minutes })}</button>;
         })}
-        <label><span className="sr-only">自己填分钟数</span>
-          <input inputMode="numeric" value={ownMinutes} placeholder="分钟数" maxLength={4} onChange={(event) => {
+        <label><span className="sr-only">{t("自己填分钟数")}</span>
+          <input inputMode="numeric" value={ownMinutes} placeholder={t("分钟数")} maxLength={4} onChange={(event) => {
             setOwnMinutes(event.target.value);
             const minutes = Number(event.target.value);
             setReported(Number.isInteger(minutes) && minutes > 0 && minutes <= 1440 ? { minutes, source: "one_tap" } : null);
           }} /></label>
       </fieldset> : null}
       <button className="primary-button" type="button" disabled={busy} onClick={() => void send(completeEvidence())}>
-        {hasEvidence ? "提交完成与证据" : "完成（记为无证据）"}
+        {hasEvidence ? t("提交完成与证据") : t("完成（记为无证据）")}
       </button>
     </>}
     {(state === "evidence_review" || state === "accepted") && showEnergyProbe && <>
-      <span className="micro">顺手记一下（可跳过，用来校准估时与精力）</span>
+      <span className="micro">{t("顺手记一下（可跳过，用来校准估时与精力）")}</span>
       <EnergyProbe context="after_task" workOrderId={workOrderId} />
     </>}
     {/* A proposal the analysis got wrong had no exit: approve it or look at it forever. The reason is optional;
         an archived order stays in the drawer and can be restored. */}
     {state !== "accepted" && state !== "archived" && (discarding
       ? <>
-          <label><span className="sr-only">归档原因</span>
-            <input value={discardReason} maxLength={200} placeholder="归档原因（选填）"
+          <label><span className="sr-only">{t("归档原因")}</span>
+            <input value={discardReason} maxLength={200} placeholder={t("归档原因（选填）")}
               onChange={(event) => setDiscardReason(event.target.value)} /></label>
-          <button type="button" disabled={busy} onClick={() => void send({ action: "archive", reason: discardReason })}>确认归档</button>
-          <button type="button" disabled={busy} onClick={() => setDiscarding(false)}>取消</button>
+          <button type="button" disabled={busy} onClick={() => void send({ action: "archive", reason: discardReason })}>{t("确认归档")}</button>
+          <button type="button" disabled={busy} onClick={() => setDiscarding(false)}>{t("取消")}</button>
         </>
-      : <button type="button" disabled={busy} onClick={() => setDiscarding(true)}>归档</button>)}
+      : <button type="button" disabled={busy} onClick={() => setDiscarding(true)}>{t("归档")}</button>)}
     {status && <p role="status">{status}</p>}
   </div>;
 }

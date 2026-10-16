@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import * as Tooltip from "@radix-ui/react-tooltip";
+import { useT } from "../locale-context";
 
 /**
  * The one dialog chrome: `side="center"` for the task dialog, `side="right"` for the milestone drawer that keeps the timeline in view.
@@ -12,6 +13,7 @@ export function Sheet({ title, side = "center", trigger, open, onOpenChange, foo
   title: string; side?: "center" | "right"; trigger?: ReactNode; open?: boolean; onOpenChange?: (open: boolean) => void;
   footer?: ReactNode; children: ReactNode;
 }) {
+  const t = useT();
   return <Dialog.Root {...(open !== undefined ? { open } : {})} {...(onOpenChange ? { onOpenChange } : {})}>
     {trigger && <Dialog.Trigger asChild>{trigger}</Dialog.Trigger>}
     <Dialog.Portal>
@@ -19,7 +21,7 @@ export function Sheet({ title, side = "center", trigger, open, onOpenChange, foo
       <Dialog.Content className="ui-sheet" data-side={side} aria-describedby={undefined}>
         <header className="ui-sheet-head">
           <Dialog.Title>{title}</Dialog.Title>
-          <Dialog.Close asChild><button type="button" className="ui-icon-button" aria-label="关闭">×</button></Dialog.Close>
+          <Dialog.Close asChild><button type="button" className="ui-icon-button" aria-label={t("关闭")}>×</button></Dialog.Close>
         </header>
         <div className="ui-sheet-body">{children}</div>
         {footer && <footer className="ui-sheet-foot">{footer}</footer>}

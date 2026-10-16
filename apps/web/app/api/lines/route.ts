@@ -1,4 +1,5 @@
 import { resolveAccessContext } from "../../../lib/access-guard";
+import { tOf } from "../../../lib/locale";
 import { addLine, linePacks, rankLines, setupLines, updateLine } from "../../../lib/lines";
 import { isCrossSiteWrite } from "../../../lib/same-origin";
 import { withUndo } from "../../../lib/undo";
@@ -28,12 +29,12 @@ export async function POST(request: Request) {
   if (Array.isArray(body.setup)) {
     const lines = (body.setup as Array<Record<string, unknown>>).filter((item) => item && typeof item.label === "string")
       .map((item) => ({ label: String(item.label), ranked: item.ranked === true, hard: item.hard === true })).slice(0, 8);
-    const result = await withUndo(access.ctx, "设定主线", () => setupLines(access.ctx, lines));
+    const result = await withUndo(access.ctx, tOf(access.ctx)("设定主线"), () => setupLines(access.ctx, lines));
     return Response.json(result, { status: result.ok ? 200 : 400 });
   }
   if (Array.isArray(body.order)) {
     const order = (body.order as unknown[]).filter((id): id is string => typeof id === "string");
-    return Response.json(await withUndo(access.ctx, "调整主线主次", () => rankLines(access.ctx, order)));
+    return Response.json(await withUndo(access.ctx, tOf(access.ctx)("调整主线主次"), () => rankLines(access.ctx, order)));
   }
   if (typeof body.id === "string") {
     const change = { ...(text(body.label) !== undefined ? { label: text(body.label)! } : {}), ...(text(body.goal) !== undefined ? { goal: text(body.goal)! } : {}),
@@ -41,10 +42,10 @@ export async function POST(request: Request) {
       ...(body.rank === null || typeof body.rank === "number" ? { rank: body.rank as number | null } : {}),
       ...(text(body.color) ? { color: text(body.color)! } : {}), ...(typeof body.archived === "boolean" ? { archived: body.archived } : {}) };
     const name = text(body.label) ?? linePacks(access.ctx, { includeArchived: true }).find((pack) => pack.id === body.id)?.label ?? body.id;
-    const result = await withUndo(access.ctx, `${body.goalParts !== undefined ? "修改长期目标" : "修改主线"}：${name}`, () => updateLine(access.ctx, body.id as string, change));
+    const result = await withUndo(access.ctx, tOf(access.ctx)(body.goalParts !== undefined ? "修改长期目标：{{name}}" : "修改主线：{{name}}", { name }), () => updateLine(access.ctx, body.id as string, change));
     return Response.json(result, { status: result.ok ? 200 : result.code === "LINE_NOT_FOUND" ? 404 : 400 });
   }
-  const result = await withUndo(access.ctx, `新增主线：${text(body.label) ?? ""}`, () => addLine(access.ctx, { label: text(body.label) ?? "", goal: text(body.goal) ?? "", ...(goals ? { goals } : {}),
+  const result = await withUndo(access.ctx, tOf(access.ctx)("新增主线：{{name}}", { name: text(body.label) ?? "" }), () => addLine(access.ctx, { label: text(body.label) ?? "", goal: text(body.goal) ?? "", ...(goals ? { goals } : {}),
     ...(body.hard === true ? { hard: true } : {}), ...(text(body.color) ? { color: text(body.color)! } : {}) }));
   return Response.json(result, { status: result.ok ? 200 : 400 });
 }

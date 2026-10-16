@@ -13,7 +13,9 @@ vi.mock("../../../../lib/crossline", () => ({
   getStore: () => ({
     saveTailscaleBinding: (...args: unknown[]) => saveTailscaleBinding(...args),
     listTailscaleBindings: (...args: unknown[]) => listTailscaleBindings(...args),
-    revokeTailscaleBinding: (...args: unknown[]) => revokeTailscaleBinding(...args)
+    revokeTailscaleBinding: (...args: unknown[]) => revokeTailscaleBinding(...args),
+    // The language of a message the route writes (`tOf`): no setting, so Chinese.
+    getSetting: () => undefined
   })
 }));
 

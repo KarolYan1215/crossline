@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import { useAttachmentDrop } from "../attachment-drop";
 import { MenuButton } from "../ui/controls";
+import { useT } from "../locale-context";
 
 export type Mention = { kind: "material" | "task" | "milestone" | "goal"; id: string; title: string };
 export type ComposerInput = { text: string; files: File[]; mentions: Mention[]; batch: boolean };
@@ -43,6 +44,9 @@ export function Composer({ mode, placeholder, onSubmit, busy = false, children, 
   /** Status and results shown under the box. */
   children?: ReactNode;
 }) {
+  const t = useT();
+  // A mention's kind, read with the `kind` context: 「任务」 here is one task, not the Tasks page.
+  const kindLabel = (kind: Mention["kind"]) => t(KIND_LABEL[kind], { context: "kind" });
   const [text, setText] = useState("");
   const [mentions, setMentions] = useState<Mention[]>([]);
   const [batch, setBatch] = useState(false);
@@ -110,38 +114,38 @@ export function Composer({ mode, placeholder, onSubmit, busy = false, children, 
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void submit(); }
   };
   const menu = [
-    { label: "上传文件", hint: "PDF、Word、文本、图片", onSelect: () => fileInputRef.current?.click() },
-    { label: "从已有资料中选", hint: "已上传的文件", onSelect: () => setPicker({ query: "", kind: "material", fromAt: false }) },
-    ...(mode === "capture" ? [{ label: batch ? "取消批量输入" : "批量输入", hint: "多项内容由 AI 拆分", onSelect: () => setBatch((value) => !value) }] : []),
-    { label: "关联任务或里程碑", hint: "也可输入 @", onSelect: () => setPicker({ query: "", kind: "linkable", fromAt: false }) }
+    { label: t("上传文件"), hint: t("PDF、Word、文本、图片"), onSelect: () => fileInputRef.current?.click() },
+    { label: t("从已有资料中选"), hint: t("已上传的文件"), onSelect: () => setPicker({ query: "", kind: "material", fromAt: false }) },
+    ...(mode === "capture" ? [{ label: batch ? t("取消批量输入") : t("批量输入"), hint: t("多项内容由 AI 拆分"), onSelect: () => setBatch((value) => !value) }] : []),
+    { label: t("关联任务或里程碑"), hint: t("也可输入 @"), onSelect: () => setPicker({ query: "", kind: "linkable", fromAt: false }) }
   ];
 
   return <form className={`composer${dragOver ? " dragging" : ""}`} data-mode={mode} onSubmit={(event) => void submit(event)} onPaste={onPaste}
     onDragOver={(event) => { event.preventDefault(); setDragOver(true); }} onDragLeave={() => setDragOver(false)} onDrop={onDrop}>
     <div className="composer-box">
-      <MenuButton label="添加" icon="＋" items={menu} />
+      <MenuButton label={t("添加")} icon="＋" items={menu} />
       <div className="composer-main">
         {(mentions.length > 0 || fileNames.length > 0 || batch) && <div className="composer-chips">
-          {batch && <span className="composer-chip" data-kind="batch">批量 · AI 拆分 <button type="button" aria-label="取消批量" onClick={() => setBatch(false)}>×</button></span>}
-          {mentions.map((item) => <span key={`${item.kind}:${item.id}`} className="composer-chip" data-kind={item.kind}>{KIND_LABEL[item.kind]} · {item.title}
-            <button type="button" aria-label={`移除 ${item.title}`} onClick={() => setMentions((list) => list.filter((m) => m !== item))}>×</button></span>)}
+          {batch && <span className="composer-chip" data-kind="batch">{t("批量 · AI 拆分")} <button type="button" aria-label={t("取消批量")} onClick={() => setBatch(false)}>×</button></span>}
+          {mentions.map((item) => <span key={`${item.kind}:${item.id}`} className="composer-chip" data-kind={item.kind}>{kindLabel(item.kind)} · {item.title}
+            <button type="button" aria-label={t("移除 {{title}}", { title: item.title })} onClick={() => setMentions((list) => list.filter((m) => m !== item))}>×</button></span>)}
           {fileNames.map((file) => <span key={file} className="composer-chip" data-kind="file">{file}</span>)}
-          {fileNames.length > 0 && <button type="button" className="composer-clear" onClick={reset}>清除文件</button>}
+          {fileNames.length > 0 && <button type="button" className="composer-clear" onClick={reset}>{t("清除文件")}</button>}
         </div>}
         <textarea ref={textRef} name={name} rows={batch ? 4 : 1} value={text} maxLength={4000} placeholder={placeholder} aria-label={placeholder}
           onChange={(event) => onChange(event.target.value)} onKeyDown={onKeyDown}
           onInput={(event) => fitTextarea(event.currentTarget)} />
       </div>
-      <button type="submit" className="composer-send" disabled={busy || (!text.trim() && !fileNames.length)} aria-label="发送">{busy ? "…" : "↑"}</button>
+      <button type="submit" className="composer-send" disabled={busy || (!text.trim() && !fileNames.length)} aria-label={t("发送")}>{busy ? "…" : "↑"}</button>
       <input ref={fileInputRef} type="file" multiple accept={ACCEPTED} hidden onChange={onInputChange} name="attachments" />
     </div>
-    {picker && <div className="composer-picker" role="listbox" aria-label="引用">
-      {!picker.fromAt && <input autoFocus value={picker.query} placeholder="搜索" aria-label="搜索引用" onChange={(event) => setPicker({ ...picker, query: event.target.value })}
+    {picker && <div className="composer-picker" role="listbox" aria-label={t("引用")}>
+      {!picker.fromAt && <input autoFocus value={picker.query} placeholder={t("搜索")} aria-label={t("搜索引用")} onChange={(event) => setPicker({ ...picker, query: event.target.value })}
         onKeyDown={(event) => { if (event.key === "Escape") setPicker(null); if (event.key === "Enter") { event.preventDefault(); if (results[0]) choose(results[0]); } }} />}
       {results.length ? results.map((item) => <button key={`${item.kind}:${item.id}`} type="button" role="option" aria-selected="false" onClick={() => choose(item)}>
-        <span className="composer-kind" data-kind={item.kind}>{KIND_LABEL[item.kind]}</span>{item.title}</button>)
-        : <small className="muted">{searching ? "正在搜索…" : "无匹配"}</small>}
-      <button type="button" className="composer-picker-close" onClick={() => setPicker(null)}>关闭</button>
+        <span className="composer-kind" data-kind={item.kind}>{kindLabel(item.kind)}</span>{item.title}</button>)
+        : <small className="muted">{searching ? t("正在搜索…") : t("无匹配")}</small>}
+      <button type="button" className="composer-picker-close" onClick={() => setPicker(null)}>{t("关闭")}</button>
     </div>}
     {children}
   </form>;

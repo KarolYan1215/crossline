@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { tOf } from "../../../lib/locale";
 import { saveMilestoneEdit, type MilestoneInput } from "../../../lib/crossline";
 import { resolveAccessContext } from "../../../lib/access-guard";
 import { isCrossSiteWrite } from "../../../lib/same-origin";
@@ -52,7 +53,7 @@ export async function POST(request: Request) {
     successCriteria: criteria,
     ...(typeof input.templateId === "string" ? { templateId: input.templateId } : {})
   };
-  const result = await withUndo(access.ctx, `${status === "archived" ? "归档" : "修改"}里程碑：${payload.title.slice(0, 24)}`, () => saveMilestoneEdit(access.ctx, payload));
+  const result = await withUndo(access.ctx, tOf(access.ctx)(status === "archived" ? "归档里程碑：{{title}}" : "修改里程碑：{{title}}", { title: payload.title.slice(0, 24) }), () => saveMilestoneEdit(access.ctx, payload));
   if (!result.ok) return NextResponse.json(result, { status: result.code === "MILESTONE_NOT_FOUND" ? 404 : 400 });
   return NextResponse.json(result);
 }

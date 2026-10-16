@@ -1,4 +1,5 @@
 import { CodexSupervisorRequestError, requestCodexSupervisor } from "../../../../lib/codex-runtime";
+import { tOf } from "../../../../lib/locale";
 import { validId, writeGuard } from "../guard";
 
 /**
@@ -18,6 +19,6 @@ export async function POST(request: Request) {
     return Response.json({ ok: true, ...(result as object) });
   } catch (error) {
     if (error instanceof CodexSupervisorRequestError) return Response.json({ ok: false, blocker: error.blocker }, { status: error.status });
-    return Response.json({ ok: false, blocker: { code: "AGENT_DISPATCH_FAILED", message: "没能交给助手。" } }, { status: 503 });
+    return Response.json({ ok: false, blocker: { code: "AGENT_DISPATCH_FAILED", message: tOf(guard.ctx)("没能交给助手。") } }, { status: 503 });
   }
 }

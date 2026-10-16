@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { tOf } from "../../../lib/locale";
 import { requestCodexSupervisor, CodexSupervisorRequestError } from "../../../lib/codex-runtime";
 import { resolveAccessContext } from "../../../lib/access-guard";
 import { isCrossSiteWrite } from "../../../lib/same-origin";
@@ -39,7 +40,7 @@ export async function POST(request: Request) {
       return NextResponse.json(result);
     } catch (error) {
       if (error instanceof CodexSupervisorRequestError) return NextResponse.json({ ok: false, blocker: error.blocker }, { status: error.status });
-      return NextResponse.json({ ok: false, blocker: { code: "DILIGENCE_FAILED", message: "尽调没有完成。" } }, { status: 503 });
+      return NextResponse.json({ ok: false, blocker: { code: "DILIGENCE_FAILED", message: tOf(access.ctx)("尽调没有完成。") } }, { status: 503 });
     }
   }
   return NextResponse.json({ ok: false, code: "DILIGENCE_ACTION_UNKNOWN" }, { status: 400 });

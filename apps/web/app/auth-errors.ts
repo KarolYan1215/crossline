@@ -4,7 +4,11 @@
  * Every other error surface in this app is Chinese; login/signup/reset-password were the one place still
  * showing raw English strings straight from the library. Unmapped codes fall back to the library's own
  * message rather than a generic "出错了" — a specific English sentence is still more useful than nothing.
+ *
+ * The texts are Chinese keys; pass the page's `t` to have them in its language (docs/i18n.md).
  */
+import type { Translate } from "../lib/i18n";
+
 const AUTH_ERROR_TEXT: Record<string, string> = {
   // A code-made account has no password until one is set, and the two cases look the same from outside (no account enumeration).
   INVALID_EMAIL_OR_PASSWORD: "邮箱或密码不正确。用验证码注册的账号还没有密码：先用验证码登录后设置，或点「忘记密码」设一个。",
@@ -40,9 +44,10 @@ const AUTH_ERROR_TEXT: Record<string, string> = {
 };
 
 export function authErrorMessage(error: { code?: string | undefined; message?: string | null | undefined } | null | undefined,
-  fallback: string): string {
+  fallback: string, t: Translate = (key) => key): string {
   if (!error) return fallback;
   // Better Auth sends 「Invalid origin」 without a code: matched on the message so it is not shown in English either.
   const code = error.code ?? (/invalid origin/i.test(error.message ?? "") ? "INVALID_ORIGIN" : "");
-  return AUTH_ERROR_TEXT[code] ?? error.message ?? fallback;
+  const text = AUTH_ERROR_TEXT[code];
+  return text ? t(text) : error.message ?? fallback;
 }

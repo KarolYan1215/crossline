@@ -1,4 +1,5 @@
 import { approveWorkOrderProposal } from "../../../../../lib/crossline";
+import { tOf } from "../../../../../lib/locale";
 import { rejectUnsafeRequest } from "../guard";
 import { titleOf, withUndo } from "../../../../../lib/undo";
 
@@ -11,7 +12,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const body = (await request.json().catch(() => ({}))) as { acceptanceStandard?: unknown; completionMode?: unknown };
   const acceptanceStandard = Array.isArray(body.acceptanceStandard) ? body.acceptanceStandard.filter((line): line is string => typeof line === "string") : undefined;
   const completionMode = body.completionMode === "self_evident" || body.completionMode === "needs_assessment" ? body.completionMode : undefined;
-  const result = await withUndo(guard.ctx, `批准：${titleOf(guard.ctx, id)}`, () => approveWorkOrderProposal(guard.ctx, id,
+  const result = await withUndo(guard.ctx, tOf(guard.ctx)("批准：{{title}}", { title: titleOf(guard.ctx, id) }), () => approveWorkOrderProposal(guard.ctx, id,
     { ...(acceptanceStandard ? { acceptanceStandard } : {}), ...(completionMode ? { completionMode } : {}) }));
   return result.ok ? Response.json(result) : Response.json(result, { status: result.code === "WORK_ORDER_NOT_FOUND" ? 404 : 409 });
 }

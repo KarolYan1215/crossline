@@ -19,11 +19,13 @@ import { getLocale } from "../lib/locale";
 import { LocaleProvider } from "./locale-context";
 
 export async function generateMetadata(): Promise<Metadata> {
-  const t = tFor(await getLocale());
+  const locale = await getLocale();
+  const t = tFor(locale);
   return {
     title: "Crossline",
     description: t("跨人生主线 AI 工作流系统"),
-    manifest: "/manifest.webmanifest",
+    // The language goes in the address: a manifest is fetched without cookies (manifest.webmanifest/route.ts).
+    manifest: locale === "en" ? "/manifest.webmanifest?lang=en" : "/manifest.webmanifest",
     icons: { icon: "/pwa-icon/192", apple: "/pwa-icon/180" },
     // Opened from the home screen it runs full-screen like an app, under its own name.
     appleWebApp: { capable: true, title: "Crossline", statusBarStyle: "default" }

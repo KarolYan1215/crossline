@@ -11,6 +11,7 @@ import { Markdown } from "../ui/markdown";
 import { ClampBlock } from "../ui/clamp";
 import { announceThinking, HelperFace, useHelper } from "../helper-state";
 import { OpenerCard } from "./opener-card";
+import { useT } from "../locale-context";
 
 const PENDING_EVENTS = ["crossline:pending-changed", "crossline:plan-changed"];
 const ACCOUNT_KEY = "crossline-conversation-account";
@@ -41,6 +42,7 @@ export function Conversation({ variant, placeholder, page }: {
   /** Fixed for an entry that belongs to one object (a task dialog); otherwise read from the address. */
   page?: PageContext;
 }) {
+  const t = useT();
   const [messages, setMessages] = useState<MessageView[]>([]);
   const [choices, setChoices] = useState<CardChoices | null>(null);
   const [busy, setBusy] = useState(false);
@@ -79,8 +81,8 @@ export function Conversation({ variant, placeholder, page }: {
   }, [reviewing]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const keepAsCapture = async (input: ComposerInput, failure: string) => {
-    const kept = account ? await captureLine(account.ownerId, account.workspaceId, input) : null;
-    setStatus(kept ?? failure);
+    const kept = account ? await captureLine(account.ownerId, account.workspaceId, input, t) : null;
+    setStatus(kept ?? t(failure));
     return kept !== null;
   };
   const submit = async (input: ComposerInput): Promise<boolean> => {
@@ -91,12 +93,12 @@ export function Conversation({ variant, placeholder, page }: {
       // Files are stored and read first, then sent with the line by id: the box says what each one is and what to do with it.
       let files: string[] = [];
       if (input.files.length) {
-        setStatus("正在读取文件…");
+        setStatus(t("正在读取文件…"));
         const form = new FormData();
         for (const file of input.files) form.append("file", file);
         const uploaded = await fetch("/api/conversation/files", { method: "POST", body: form });
         const result = await uploaded.json().catch(() => null) as { ok?: boolean; documents?: Array<{ id: string }>; message?: string } | null;
-        if (!uploaded.ok || !result?.documents) { setStatus(result?.message ?? "文件未能保存，请重试"); return false; }
+        if (!uploaded.ok || !result?.documents) { setStatus(result?.message ?? t("文件未能保存，请重试")); return false; }
         files = result.documents.map((doc) => doc.id);
         setStatus("");
       }
@@ -104,7 +106,7 @@ export function Conversation({ variant, placeholder, page }: {
       const response = await fetch("/api/conversation/turn", { method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ text: input.text, mentions: input.mentions, page: page ?? pageFromLocation(), files }) });
       const body = await response.json().catch(() => null) as { messages?: MessageView[] } | null;
-      if (!response.ok || !body?.messages) { setStatus("未能发送，请重试"); return false; }
+      if (!response.ok || !body?.messages) { setStatus(t("未能发送，请重试")); return false; }
       setMessages((list) => [...list, ...body.messages!]);
       return true;
     } catch {
@@ -122,24 +124,24 @@ export function Conversation({ variant, placeholder, page }: {
   // On a page (Today, the return page) a long reply is held to three lines; the full conversation shows it whole.
   const item = (message: MessageView) => <MessageItem key={message.id} message={message} onUpdate={update} choices={choices} compact={variant === "inline"} />;
   if (variant === "task") return <div className="conversation" data-variant={variant}>
-    <Composer mode="capture" busy={busy} placeholder={placeholder ?? "对该任务的指令或问题：改截止、这一步做完了、记进度、推迟、讲解某一步…"} onSubmit={submit}>
-      {busy && <small className="muted composer-status" role="status">正在理解…</small>}
+    <Composer mode="capture" busy={busy} placeholder={t(placeholder ?? "对该任务的指令或问题：改截止、这一步做完了、记进度、推迟、讲解某一步…")} onSubmit={submit}>
+      {busy && <small className="muted composer-status" role="status">{t("正在理解…")}</small>}
       {status && <small className="muted composer-status" role="status">{status}</small>}
     </Composer>
-    {shown.length > 0 && <ol className="conversation-log" aria-label="关于该任务的对话">{shown.slice(-6).map(item)}</ol>}
+    {shown.length > 0 && <ol className="conversation-log" aria-label={t("关于该任务的对话")}>{shown.slice(-6).map(item)}</ol>}
   </div>;
   return <div className="conversation" data-variant={variant}>
     {variant === "panel" && <ConversationSearch />}
-    {variant === "panel" && <ol className="conversation-log" aria-label="今天的对话">
+    {variant === "panel" && <ol className="conversation-log" aria-label={t("今天的对话")}>
       {shown.map(item)}
       <div ref={endRef} />
     </ol>}
-    <Composer mode="capture" busy={busy} placeholder={placeholder ?? "任务、改期、回答待决、撤销、日程、问题……一句话即可"} onSubmit={submit}
+    <Composer mode="capture" busy={busy} placeholder={t(placeholder ?? "任务、改期、回答待决、撤销、日程、问题……一句话即可")} onSubmit={submit}
       takeShare={variant === "inline"}>
-      {busy && <small className="muted composer-status" role="status">正在理解…</small>}
+      {busy && <small className="muted composer-status" role="status">{t("正在理解…")}</small>}
       {status && <small className="muted composer-status" role="status">{status}</small>}
     </Composer>
-    {variant === "inline" && shown.length > 0 && <ol className="conversation-log" aria-label="最近一次对话">
+    {variant === "inline" && shown.length > 0 && <ol className="conversation-log" aria-label={t("最近一次对话")}>
       {shown.map(item)}
     </ol>}
   </div>;
@@ -180,6 +182,7 @@ function MessageItem({ message, onUpdate, choices, compact = false }: { message:
  */
 export function CardView({ messageId, card, onUpdate, choices, body }: { messageId: string; card: Card; onUpdate: (message: MessageView) => void;
   choices: CardChoices | null; body?: ReactNode }) {
+  const t = useT();
   const [working, setWorking] = useState(false);
   const [error, setError] = useState("");
   // Fields changed on the card, by action index; sent with 执行 and checked again on the server.
@@ -192,7 +195,7 @@ export function CardView({ messageId, card, onUpdate, choices, body }: { message
         body: JSON.stringify({ messageId, ...decision, ...(Object.keys(edits).length && !decision.dismiss ? { edits } : {}) }) });
       const body = await response.json().catch(() => null) as { ok?: boolean; message?: MessageView; code?: string } | null;
       if (body?.ok && body.message) { onUpdate(body.message); setEdits({}); setEditing(null); }
-      else setError(body?.code === "CARD_REVIEWING" ? "仍在核对，稍候再执行" : "未能执行，请刷新后重试");
+      else setError(body?.code === "CARD_REVIEWING" ? t("仍在核对，稍候再执行") : t("未能执行，请刷新后重试"));
     } finally { setWorking(false); }
   };
   const visible = cardActionIndexes({ actions: card.actions, clarify: card.clarify } as ConciergeTurn);
@@ -202,8 +205,8 @@ export function CardView({ messageId, card, onUpdate, choices, body }: { message
   // An answer with nothing to carry out, ask or report has no card: an empty one drew a grey bar under every plain reply.
   if (!card.reviewing && !(card.reviewed && card.revised) && !ran.length && !card.clarify.question && !error) return null;
   return <div className="conversation-card" data-error={card.error ? "" : undefined} aria-busy={card.reviewing || undefined}>
-    {card.reviewing && <small className="conversation-reviewing" role="status">正在用更强的模型仔细核对…</small>}
-    {card.reviewed && card.revised && <small className="muted">已核对并修改</small>}
+    {card.reviewing && <small className="conversation-reviewing" role="status">{t("正在用更强的模型仔细核对…")}</small>}
+    {card.reviewed && card.revised && <small className="muted">{t("已核对并修改")}</small>}
     {ran.length > 0 && <ul>{ran.map((index) => <ActionRow key={index} card={card} index={index}
       {...(card.items[index]?.state === "pending" && !card.reviewing && editableFields(card.actions[index]!).length ? {
         editing: editing === index, onEdit: () => setEditing(editing === index ? null : index),
@@ -212,7 +215,7 @@ export function CardView({ messageId, card, onUpdate, choices, body }: { message
         changed: Boolean(edits[index] && Object.keys(edits[index]!).length) } : {})} />)}</ul>}
     {card.clarify.question && <div className="conversation-clarify">
       {body ?? (card.nudgeKind ? <Markdown text={card.clarify.question} /> : <p>{card.clarify.question}</p>)}
-      {chosen ? <small className="muted">已选：{chosen.label}</small>
+      {chosen ? <small className="muted">{t("已选：{{label}}", { label: chosen.label })}</small>
         : <div className="conversation-options">{card.clarify.options.map((option, index) =>
           <button type="button" key={index} disabled={working} onClick={async () => {
             const focusBox = () => document.querySelector<HTMLTextAreaElement>(".conversation textarea")?.focus();
@@ -226,8 +229,8 @@ export function CardView({ messageId, card, onUpdate, choices, body }: { message
     </div>}
     {pending.length > 0 && <div className="conversation-actions">
       <button type="button" className="primary-button" disabled={working || card.reviewing} onClick={() => void decide({ indexes: pending })}>
-        {working ? "执行中…" : pending.length > 1 ? `全部执行（${pending.length}）` : "执行"}</button>
-      <button type="button" className="text-button" disabled={working} onClick={() => void decide({ indexes: pending, dismiss: true })}>不用了</button>
+        {working ? t("执行中…") : pending.length > 1 ? t("全部执行（{{count}}）", { count: pending.length }) : t("执行")}</button>
+      <button type="button" className="text-button" disabled={working} onClick={() => void decide({ indexes: pending, dismiss: true })}>{t("不用了")}</button>
     </div>}
     {error && <small role="alert">{error}</small>}
   </div>;
@@ -237,27 +240,29 @@ const STATE_WORD: Record<string, string> = { pending: "待执行", done: "已执
 
 function ActionRow({ card, index, editing, onEdit, fields, changed }: { card: Card; index: number; editing?: boolean; onEdit?: () => void;
   fields?: ReactNode; changed?: boolean }) {
+  const t = useT();
   const action = card.actions[index]!;
   const item = card.items[index] ?? { state: "pending" };
   const [undone, setUndone] = useState("");
   return <li data-state={item.state} data-risk={ACTIONS[action.action].risk}>
-    <b>{ACTIONS[action.action].label}</b><span className="gen">{action.summary}</span>
-    <small className="conversation-state">{undone || (changed && item.state === "pending" ? "已修改，待执行" : STATE_WORD[item.state])}</small>
-    {onEdit && <button type="button" className="text-button" aria-expanded={editing} onClick={onEdit}>{editing ? "收起" : "修改"}</button>}
+    <b>{t(ACTIONS[action.action].label)}</b><span className="gen">{action.summary}</span>
+    <small className="conversation-state">{undone || (changed && item.state === "pending" ? t("已修改，待执行") : STATE_WORD[item.state] ? t(STATE_WORD[item.state]!) : "")}</small>
+    {onEdit && <button type="button" className="text-button" aria-expanded={editing} onClick={onEdit}>{editing ? t("收起") : t("修改")}</button>}
     {editing && fields}
     {item.message && <small className="muted">{item.message}</small>}
     {item.state === "done" && <span className="conversation-links">
-      {item.href && <a href={item.href}>查看 →</a>}
+      {item.href && <a href={item.href}>{t("查看 →")}</a>}
       {item.opId && !undone && <button type="button" className="text-button" onClick={async () => {
-        const result = await undoOperation(item.opId!);
-        setUndone(result.ok ? "已撤销" : result.message);
-      }}>撤销</button>}
+        const result = await undoOperation(item.opId!, t);
+        setUndone(result.ok ? t("已撤销") : result.message);
+      }}>{t("撤销")}</button>}
     </span>}
   </li>;
 }
 
 /** Notes jotted in the box live only in the conversation; this finds them, and anything else said, on any day. */
 function ConversationSearch() {
+  const t = useT();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Array<MessageView & { day: string }>>([]);
   useEffect(() => {
@@ -271,8 +276,8 @@ function ConversationSearch() {
     return () => { clearTimeout(timer); controller.abort(); };
   }, [query]);
   return <div className="conversation-search">
-    <input type="search" value={query} placeholder="搜索对话记录" aria-label="搜索对话记录" onChange={(event) => setQuery(event.target.value)} />
+    <input type="search" value={query} placeholder={t("搜索对话记录")} aria-label={t("搜索对话记录")} onChange={(event) => setQuery(event.target.value)} />
     {query.trim() && <ul>{results.length ? results.map((item) => <li key={item.id}><small className="mono">{item.day}</small> {item.text.slice(0, 120)}</li>)
-      : <li className="muted">无匹配</li>}</ul>}
+      : <li className="muted">{t("无匹配")}</li>}</ul>}
   </div>;
 }

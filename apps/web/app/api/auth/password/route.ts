@@ -1,4 +1,5 @@
 import { isAPIError } from "better-auth/api";
+import { tOf } from "../../../../lib/locale";
 import { getAuth } from "../../../../lib/auth";
 import { resolveAccessContext } from "../../../../lib/access-guard";
 import { isCrossSiteWrite } from "../../../../lib/same-origin";
@@ -21,10 +22,11 @@ export async function POST(request: Request) {
   if (isCrossSiteWrite(request)) return Response.json({ ok: false, code: "REQUEST_FORBIDDEN" }, { status: 403 });
   const access = await resolveAccessContext(request);
   if ("response" in access) return access.response;
+  const t = tOf(access.ctx);
   const body = await request.json().catch(() => ({})) as { newPassword?: unknown };
   const newPassword = typeof body.newPassword === "string" ? body.newPassword : "";
   if (newPassword.length < 8 || newPassword.length > 128) {
-    return Response.json({ ok: false, code: "PASSWORD_LENGTH", message: "密码需要 8 到 128 个字符。" }, { status: 400 });
+    return Response.json({ ok: false, code: "PASSWORD_LENGTH", message: t("密码需要 8 到 128 个字符。") }, { status: 400 });
   }
   try {
     await getAuth().api.setPassword({ body: { newPassword }, headers: request.headers });
@@ -32,7 +34,7 @@ export async function POST(request: Request) {
   } catch (error) {
     // A stale session (signed in long ago) is refused by Better Auth's freshness check: the page says to sign in again.
     const code = isAPIError(error) ? String((error.body as { code?: unknown } | undefined)?.code ?? error.status) : "PASSWORD_NOT_SET";
-    return Response.json({ ok: false, code, message: authErrorMessage({ code }, "密码没有设置成功：请重新登录后再试，或在登录页用「忘记密码」设置。") },
+    return Response.json({ ok: false, code, message: authErrorMessage({ code }, t("密码没有设置成功：请重新登录后再试，或在登录页用「忘记密码」设置。"), t) },
       { status: isAPIError(error) && typeof error.statusCode === "number" ? error.statusCode : 400 });
   }
 }

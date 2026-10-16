@@ -7,6 +7,9 @@ import { PRESENCE_SETTING } from "../../../../lib/nudges";
 import { sendPush } from "../../../../lib/push";
 import { isCrossSiteWrite } from "../../../../lib/same-origin";
 import { isLocalInstall } from "../../../../lib/install-mode";
+import { readLocale } from "@crossline/db";
+import { tFor } from "../../../../lib/i18n";
+import { tOf } from "../../../../lib/locale";
 
 /** No page has been visible for this long: the person left while the model was thinking. */
 const AWAY_MS = 90_000;
@@ -20,9 +23,11 @@ function callBack(ctx: Parameters<typeof sendPush>[0], result: unknown): void {
   if ((result as { state?: string } | undefined)?.state === "blocked") return;
   const visibleAt = Date.parse(getStore().getSetting(ctx.workspaceId, PRESENCE_SETTING) ?? "");
   if (!Number.isFinite(visibleAt) || Date.now() - visibleAt < AWAY_MS) return;
-  void sendPush(ctx, { title: "访谈下一轮已就绪", body: "新的一组问题已经生成，可以回到访谈继续。", path: "/onboarding", tag: "onboarding-round" }).catch(() => {});
+  // Pushed to other devices: in the account's language, not this browser's (docs/i18n.md).
+  const t = tFor(readLocale(getStore(), ctx.workspaceId));
+  void sendPush(ctx, { title: t("访谈下一轮已就绪"), body: t("新的一组问题已经生成，可以回到访谈继续。"), path: "/onboarding", tag: "onboarding-round" }).catch(() => {});
   // The installed copy's tray shows a balloon for this line (apps/launcher `noticeFrom`); a click opens the interview.
-  if (isLocalInstall()) process.stdout.write(`@crossline:notify ${JSON.stringify({ title: "访谈下一轮已就绪", text: "新的一组问题已经生成，点这里回到访谈。", path: "/onboarding" })}
+  if (isLocalInstall()) process.stdout.write(`@crossline:notify ${JSON.stringify({ title: t("访谈下一轮已就绪"), text: t("新的一组问题已经生成，点这里回到访谈。"), path: "/onboarding" })}
 `);
 }
 
@@ -40,7 +45,7 @@ export async function POST(request: Request) {
   const sessionId = typeof input.sessionId === "string" ? input.sessionId : "";
   const typed = typeof input.text === "string" ? input.text.slice(0, 4000) : "";
   if (!/^[a-zA-Z0-9_-]{1,128}$/.test(sessionId)) {
-    return NextResponse.json({ ok: false, blocker: { code: "ONBOARDING_TURN_INVALID", message: "缺少会话 id" } }, { status: 400 });
+    return NextResponse.json({ ok: false, blocker: { code: "ONBOARDING_TURN_INVALID", message: tOf(access.ctx)("缺少会话 id") } }, { status: 400 });
   }
   // Answers given on 待决事项 while the interview was put aside travel with this reply (and replying here takes it up again).
   const earlier = typed ? takePendingAnswers(access.ctx, sessionId) : "";
@@ -54,6 +59,6 @@ export async function POST(request: Request) {
     return NextResponse.json(result);
   } catch (error) {
     if (error instanceof CodexSupervisorRequestError) return NextResponse.json({ ok: false, blocker: error.blocker }, { status: error.status });
-    return NextResponse.json({ ok: false, blocker: { code: "ONBOARDING_FAILED", message: "这一轮没有完成，可以重试。" } }, { status: 503 });
+    return NextResponse.json({ ok: false, blocker: { code: "ONBOARDING_FAILED", message: tOf(access.ctx)("这一轮没有完成，可以重试。") } }, { status: 503 });
   }
 }

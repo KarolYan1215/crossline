@@ -7,6 +7,8 @@ import {
 } from "./offline-queue";
 import { localStamp, type DeadLetter } from "@crossline/core";
 import type { ComposerInput } from "./chat/composer";
+import { tFor, type Translate } from "../lib/i18n";
+import { useT } from "./locale-context";
 
 /** Renews (or first-issues) this browser's 24-hour device lease. Best-effort: a lease that fails to
  * renew only matters once it actually expires, which `POST /api/commands` would then start refusing —
@@ -19,6 +21,7 @@ async function renewDeviceLease(): Promise<void> {
 }
 
 export function OfflineReplay({ workspaceId }: { workspaceId: string }) {
+  const t = useT();
   const [dead, setDead] = useState<Array<DeadLetter<OfflineCommand>>>([]);
   const [conflicts, setConflicts] = useState<Array<DeadLetter<OfflineCommand>>>([]);
   useEffect(() => {
@@ -45,34 +48,36 @@ export function OfflineReplay({ workspaceId }: { workspaceId: string }) {
   const total = dead.length + conflicts.length;
   if (!total) return null;
   return <aside className="dead-letters" role="alert">
-    <b>{dead.length > 0 && `${dead.length} 条离线记录无法同步`}{dead.length > 0 && conflicts.length > 0 && " · "}
-      {conflicts.length > 0 && `${conflicts.length} 条与其他设备冲突`}</b>
+    <b>{dead.length > 0 && t("{{count}} 条离线记录无法同步", { count: dead.length })}{dead.length > 0 && conflicts.length > 0 && " · "}
+      {conflicts.length > 0 && t("{{count}} 条与其他设备冲突", { count: conflicts.length })}</b>
     <ul>{[...dead, ...conflicts].map((entry) => <li key={entry.command.clientCommandId}>
       <span>{String(entry.command.payload.title ?? entry.command.type)}</span>
       <small>{entry.reason} · {localStamp(entry.failedAt)}</small>
     </li>)}</ul>
-    <a href="/offline">查看并处理 →</a>
+    <a href="/offline">{t("查看并处理 →")}</a>
   </aside>;
 }
 
 /**
  * Keeps a line as a capture: queued offline without a connection (replayed by `OfflineReplay`), with its files uploaded when online.
  * The one input box (`chat/conversation.tsx`) uses it only where the conversation cannot run — offline, and for files until the box
- * reads them itself. Returns the words shown under the box, or null when nothing could be kept.
+ * reads them itself. Returns the words shown under the box, or null when nothing could be kept. `t` is the page's language; the capture's
+ * own context line is written in it too, since it is new text written for display (docs/i18n.md).
  */
-export async function captureLine(ownerId: string, workspaceId: string, { text, files, mentions }: ComposerInput): Promise<string | null> {
+export async function captureLine(ownerId: string, workspaceId: string, { text, files, mentions }: ComposerInput, t: Translate = tFor(undefined)): Promise<string | null> {
   const [title, ...rest] = text.split("\n");
-  const linked = mentions.length ? `关联：${mentions.map((item) => `${{ material: "资料", task: "任务", milestone: "里程碑", goal: "长期目标" }[item.kind]}「${item.title}」`).join("；")}` : "";
+  const kindLabel = { material: "资料", task: "任务", milestone: "里程碑", goal: "长期目标" } as const;
+  const linked = mentions.length ? t("关联：{{items}}", { items: mentions.map((item) => t("{{kind}}「{{title}}」", { kind: t(kindLabel[item.kind], { context: "kind" }), title: item.title })).join(t("；")) }) : "";
   const command = createCommand(ownerId, workspaceId, await nextSequence(workspaceId), "task.capture", {
-    title: (title || files[0]?.name || "附件").slice(0, 240), context: [rest.join("\n").trim(), linked].filter(Boolean).join("\n").slice(0, 500) });
+    title: (title || files[0]?.name || t("附件")).slice(0, 240), context: [rest.join("\n").trim(), linked].filter(Boolean).join("\n").slice(0, 500) });
   const save = async (message: string) => {
     try {
       await enqueue(workspaceId, command);
       // A queued capture has no server row yet for a file to belong to, so files picked offline are not claimed as saved.
-      return files.length ? `${message}；离线时选择的 ${files.length} 个附件未保存，联网后需重新上传` : message;
+      return files.length ? t("{{message}}；离线时选择的 {{count}} 个附件未保存，联网后需重新上传", { message, count: files.length }) : message;
     } catch { return null; }
   };
-  if (!navigator.onLine) return save("已离线保存，联网后自动同步");
+  if (!navigator.onLine) return save(t("已离线保存，联网后自动同步"));
   try {
     const response = await fetch("/api/commands", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(command) });
     if (!response.ok) return null;
@@ -81,8 +86,8 @@ export async function captureLine(ownerId: string, workspaceId: string, { text, 
       const upload = new FormData();
       for (const file of files) upload.append("file", file);
       const uploaded = await fetch(`/api/captures/${encodeURIComponent(command.clientCommandId)}/attachments`, { method: "POST", body: upload }).catch(() => null);
-      if (!uploaded?.ok) return "已收集，附件上传失败，可在任务页重试";
+      if (!uploaded?.ok) return t("已收集，附件上传失败，可在任务页重试");
     }
-    return "已收集 · 约 1 分钟后完成分类与估时，结果进入「待确认」";
-  } catch { return save("网络不可用，已保存并等待同步"); }
+    return t("已收集 · 约 1 分钟后完成分类与估时，结果进入「待确认」");
+  } catch { return save(t("网络不可用，已保存并等待同步")); }
 }

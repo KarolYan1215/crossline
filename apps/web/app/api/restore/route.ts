@@ -1,4 +1,5 @@
 import { restoreCapture, restoreWorkOrder } from "../../../lib/crossline";
+import { tOf } from "../../../lib/locale";
 import { resolveAccessContext } from "../../../lib/access-guard";
 import { isCrossSiteWrite } from "../../../lib/same-origin";
 import { titleOf, undoMerge, withUndo } from "../../../lib/undo";
@@ -12,7 +13,7 @@ export async function POST(request: Request) {
   const id = String(body.id ?? "");
   if (!/^[a-zA-Z0-9_:#-]{1,160}$/.test(id)) return Response.json({ ok: false, code: "NOT_FOUND" }, { status: 404 });
   const result = body.kind === "merge" ? undoMerge(access.ctx, id)
-    : await withUndo(access.ctx, `恢复：${titleOf(access.ctx, id)}`, () => body.kind === "capture" ? restoreCapture(access.ctx, id) : restoreWorkOrder(access.ctx, id));
+    : await withUndo(access.ctx, tOf(access.ctx)("恢复：{{title}}", { title: titleOf(access.ctx, id) }), () => body.kind === "capture" ? restoreCapture(access.ctx, id) : restoreWorkOrder(access.ctx, id));
   if (result.ok) return Response.json(result);
   return Response.json(result, { status: /NOT_FOUND/.test(result.code) ? 404 : 409 });
 }

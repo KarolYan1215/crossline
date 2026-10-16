@@ -5,6 +5,7 @@ import {
   ATTRIBUTE_KIND_LABEL, cleanAttribute, composeGoal, duplicateAttributes, guessKind, insertByKind, orderAttributes, type AttributeKind
 } from "@crossline/core";
 import "./attribute-picker.css";
+import { useT } from "../locale-context";
 
 /** One attribute offered to choose from: its words and its kind (field, ability or lasting state). */
 export type AttributeOption = { text: string; kind: AttributeKind };
@@ -19,6 +20,7 @@ export function AttributePicker({ noun, candidates, initial, onAdopt, label = "�
   /** Saves the parts; resolves to an error message, or "" when saved. */
   onAdopt: (parts: string[]) => Promise<string>;
 }) {
+  const t = useT();
   const [selected, setSelected] = useState<string[]>(initial);
   const [editing, setEditing] = useState<number | null>(null);
   const [custom, setCustom] = useState("");
@@ -49,42 +51,42 @@ export function AttributePicker({ noun, candidates, initial, onAdopt, label = "�
   const unchanged = parts.length === initial.length && parts.every((part, index) => part === initial[index]);
   const preview = composeGoal(parts, noun);
   const adopt = async () => {
-    setStatus("保存中…");
+    setStatus(t("保存中…"));
     const error = await onAdopt(parts);
-    setStatus(error || "已采用");
+    setStatus(error || t("已采用"));
   };
   const drop = (event: DragEvent, index: number) => { event.preventDefault(); event.stopPropagation(); if (dragging !== null) move(dragging, index); setDragging(null); };
 
-  return <div className="attr-picker" aria-label={label} role="group">
-    <p className="attr-preview"><small className="muted">预览</small>
-      {preview ? <span className="gen">{preview}</span> : <span className="muted">从下方选择定语，组成「成为 … 的{noun}」</span>}</p>
-    {parts.length > 0 && <ol className="attr-selected" aria-label="已选定语，可拖动或用箭头调整顺序">
+  return <div className="attr-picker" aria-label={t(label)} role="group">
+    <p className="attr-preview"><small className="muted">{t("预览")}</small>
+      {preview ? <span className="gen">{preview}</span> : <span className="muted">{t("从下方选择定语，组成「成为 … 的{{noun}}」", { noun })}</span>}</p>
+    {parts.length > 0 && <ol className="attr-selected" aria-label={t("已选定语，可拖动或用箭头调整顺序")}>
       {selected.map((text, index) => <li key={`${index}-${text}`} draggable={editing !== index} data-kind={kindOf(text)}
         onDragStart={(event) => { event.stopPropagation(); setDragging(index); }} onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); }}
         onDrop={(event) => drop(event, index)}>
         {editing === index
-          ? <input value={text} maxLength={40} autoFocus aria-label="修改定语" onChange={(event) => rename(index, event.target.value)}
+          ? <input value={text} maxLength={40} autoFocus aria-label={t("修改定语")} onChange={(event) => rename(index, event.target.value)}
               onBlur={() => setEditing(null)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); setEditing(null); } }} />
-          : <button type="button" className="attr-text gen" title="点击修改文字" onClick={() => setEditing(index)}>{text}</button>}
+          : <button type="button" className="attr-text gen" title={t("点击修改文字")} onClick={() => setEditing(index)}>{text}</button>}
         <span className="attr-moves">
-          <button type="button" aria-label={`「${text}」前移`} disabled={index === 0} onClick={() => move(index, index - 1)}>←</button>
-          <button type="button" aria-label={`「${text}」后移`} disabled={index === selected.length - 1} onClick={() => move(index, index + 1)}>→</button>
-          <button type="button" aria-label={`移除「${text}」`} onClick={() => setSelected((list) => list.filter((_, i) => i !== index))}>×</button>
+          <button type="button" aria-label={t("「{{text}}」前移", { text })} disabled={index === 0} onClick={() => move(index, index - 1)}>←</button>
+          <button type="button" aria-label={t("「{{text}}」后移", { text })} disabled={index === selected.length - 1} onClick={() => move(index, index + 1)}>→</button>
+          <button type="button" aria-label={t("移除「{{text}}」", { text })} onClick={() => setSelected((list) => list.filter((_, i) => i !== index))}>×</button>
         </span>
       </li>)}
     </ol>}
-    {pool.length > 0 && <div className="attr-pool" role="group" aria-label="定语候选，可多选">
+    {pool.length > 0 && <div className="attr-pool" role="group" aria-label={t("定语候选，可多选")}>
       {pool.map((item) => <button key={item.text} type="button" className="attr-chip" aria-pressed={selected.includes(item.text)} data-kind={item.kind}
-        onClick={() => toggle(item.text)}><small>{ATTRIBUTE_KIND_LABEL[item.kind]}</small><span className="gen">{item.text}</span></button>)}
+        onClick={() => toggle(item.text)}><small>{t(ATTRIBUTE_KIND_LABEL[item.kind])}</small><span className="gen">{item.text}</span></button>)}
     </div>}
     <div className="attr-add">
-      <input value={custom} maxLength={40} placeholder="补充一个定语" aria-label="补充一个定语" onChange={(event) => setCustom(event.target.value)}
+      <input value={custom} maxLength={40} placeholder={t("补充一个定语")} aria-label={t("补充一个定语")} onChange={(event) => setCustom(event.target.value)}
         onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addCustom(); } }} />
-      <button type="button" className="text-button" disabled={!cleanAttribute(custom)} onClick={addCustom}>添加</button>
+      <button type="button" className="text-button" disabled={!cleanAttribute(custom)} onClick={addCustom}>{t("添加")}</button>
     </div>
-    {duplicate && <p className="attr-warning" role="alert">「{duplicate[0]}」与「{duplicate[1]}」重复，保留一个</p>}
+    {duplicate && <p className="attr-warning" role="alert">{t("「{{a}}」与「{{b}}」重复，保留一个", { a: duplicate[0], b: duplicate[1] })}</p>}
     <div className="attr-actions">
-      <button type="button" className="primary-button" disabled={!parts.length || Boolean(duplicate) || unchanged} onClick={() => void adopt()}>采用</button>
+      <button type="button" className="primary-button" disabled={!parts.length || Boolean(duplicate) || unchanged} onClick={() => void adopt()}>{t("采用")}</button>
       {status && <small role="status">{status}</small>}
     </div>
   </div>;

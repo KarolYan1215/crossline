@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { blockSpan, hoursText, minutesOfClock, openerAxis, workMinutes, type OpenerBlock, type OpenerView } from "../../lib/opener";
 import "./opener-card.css";
+import { useLocale, useT } from "../locale-context";
 
 const URGENCY: Record<"now" | "soon" | "later", string> = { now: "两天内", soon: "本周", later: "以后" };
 const md = (day: string) => `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}`;
@@ -27,9 +28,12 @@ function useNowMinute(day: string, timeZone: string): number | undefined {
 }
 
 function Lane({ label, blocks, axis, kind }: { label: string; blocks: OpenerBlock[]; axis: { from: number; to: number }; kind: "fixed" | "work" }) {
+  const t = useT();
+  const locale = useLocale();
   return <div className="opener-lane" data-kind={kind}>
-    <span className="opener-lane-label">{label}</span>
-    <ul className="opener-track" aria-label={`${label}：${blocks.length ? blocks.map((block) => `${block.start}–${block.end} ${block.title}${block.step ? ` · ${block.step}` : ""}`).join("；") : "无"}`}>
+    <span className="opener-lane-label">{t(label)}</span>
+    <ul className="opener-track" aria-label={t("{{label}}：{{value}}", { label: t(label), value: blocks.length
+      ? blocks.map((block) => `${block.start}–${block.end} ${block.title}${block.step ? ` · ${block.step}` : ""}`).join(locale === "en" ? "; " : "；") : t("无") })}>
       {blocks.map((block, index) => {
         const { left, width } = blockSpan(block, axis);
         return <li key={`${block.start}-${index}`} className="opener-block" data-line={block.line ?? "none"} style={{ left: `${left}%`, width: `${width}%` }}
@@ -45,22 +49,24 @@ function Lane({ label, blocks, axis, kind }: { label: string; blocks: OpenerBloc
  * due within three days, and the most urgent decision set apart — its answers are the card's own buttons, right under this.
  */
 export function OpenerCard({ opener }: { opener: OpenerView }) {
+  const t = useT();
+  const locale = useLocale();
   const axis = openerAxis(opener);
   const now = useNowMinute(opener.day, opener.timeZone);
   const nextWork = (now === undefined ? opener.work : opener.work.filter((block) => minutesOfClock(block.end) > now))[0];
   const ticks: number[] = [];
   for (let minute = Math.ceil(axis.from / 180) * 180; minute <= axis.to; minute += 180) ticks.push(minute);
   const top = opener.asks.top;
-  return <div className="opener-card" aria-label={`${opener.label}的安排`}>
+  return <div className="opener-card" aria-label={t("{{day}}的安排", { day: opener.label })}>
     <div className="opener-head">
       <b>{opener.label}</b>
       {opener.asks.count > 0
-        ? <a className="opener-badge" href="/approvals" aria-label={`待决 ${opener.asks.count} 项`}>待决 <span>{opener.asks.count}</span></a>
-        : <span className="opener-badge" data-empty="">没有待决</span>}
+        ? <a className="opener-badge" href="/approvals" aria-label={t("待决 {{count}} 项", { count: opener.asks.count })}>{t("待决")} <span>{opener.asks.count}</span></a>
+        : <span className="opener-badge" data-empty="">{t("没有待决")}</span>}
     </div>
     <div className="opener-figure">
-      <Lane label="固定" blocks={opener.fixed} axis={axis} kind="fixed" />
-      <Lane label="工作" blocks={opener.work} axis={axis} kind="work" />
+      <Lane label={"固定"} blocks={opener.fixed} axis={axis} kind="fixed" />
+      <Lane label={"工作"} blocks={opener.work} axis={axis} kind="work" />
       <div className="opener-axis" aria-hidden="true">
         {ticks.map((minute) => <span key={minute} style={{ left: `${((minute - axis.from) / (axis.to - axis.from)) * 100}%` }}>{clockLabel(minute)}</span>)}
       </div>
@@ -68,15 +74,15 @@ export function OpenerCard({ opener }: { opener: OpenerView }) {
         style={{ left: `calc(36px + (100% - 36px) * ${(now - axis.from) / (axis.to - axis.from)})` }} />}
     </div>
     <dl className="opener-facts">
-      <div><dt>工作</dt><dd>{opener.work.length ? `${opener.work.length} 段 · 共 ${hoursText(workMinutes(opener))}` : "今天没有排给工作的时段"}
-        {nextWork && <span className="opener-next">{now === undefined ? "第一段" : "接下来"} {nextWork.start} {nextWork.title}{nextWork.step ? ` · ${nextWork.step}` : ""}</span>}</dd></div>
-      <div><dt>固定</dt><dd>{opener.fixed.length ? opener.fixed.slice(0, 2).map((block) => `${block.start}–${block.end} ${block.title}`).join("；")
-        + (opener.fixed.length > 2 ? ` 等 ${opener.fixed.length} 项` : "") : "今天没有固定安排"}</dd></div>
-      {opener.soon.length > 0 && <div><dt>三天内截止</dt><dd><ul className="opener-soon">
+      <div><dt>{t("工作")}</dt><dd>{opener.work.length ? t("{{count}} 段 · 共 {{hours}}", { count: opener.work.length, hours: hoursText(workMinutes(opener)) }) : t("今天没有排给工作的时段")}
+        {nextWork && <span className="opener-next">{now === undefined ? t("第一段") : t("接下来")} {nextWork.start} {nextWork.title}{nextWork.step ? ` · ${nextWork.step}` : ""}</span>}</dd></div>
+      <div><dt>{t("固定")}</dt><dd>{opener.fixed.length ? opener.fixed.slice(0, 2).map((block) => `${block.start}–${block.end} ${block.title}`).join(locale === "en" ? "; " : "；")
+        + (opener.fixed.length > 2 ? t(" 等 {{count}} 项", { count: opener.fixed.length }) : "") : t("今天没有固定安排")}</dd></div>
+      {opener.soon.length > 0 && <div><dt>{t("三天内截止")}</dt><dd><ul className="opener-soon">
         {opener.soon.map((item) => <li key={`${item.title}-${item.due}`} data-line={item.line ?? "none"}>{item.title}<small>{md(item.due)}</small></li>)}</ul></dd></div>}
     </dl>
     {top && <div className="opener-urgent" data-line={top.line ?? "none"}>
-      <small>最紧急 · {URGENCY[top.urgency]}</small>
+      <small>{t("最紧急 · {{when}}", { when: t(URGENCY[top.urgency]) })}</small>
       <b>{top.title}</b>
     </div>}
   </div>;

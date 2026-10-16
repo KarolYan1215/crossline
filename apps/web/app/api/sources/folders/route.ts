@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { tOf } from "../../../../lib/locale";
+import type { Translate } from "../../../../lib/i18n";
 import { SOURCE_FOLDERS_SETTING, cleanFolderNames, cleanFolderRules, readSourceFolders } from "@crossline/core";
 import { assistantAvailable } from "@crossline/db";
 import { getStore } from "../../../../lib/crossline";
@@ -25,8 +27,8 @@ export async function GET(request: Request) {
   }, { headers: { "cache-control": "no-store" } });
 }
 
-const unavailable = (error: unknown) => NextResponse.json({ state: "blocked", code: error instanceof CodexSupervisorRequestError ? error.blocker.code : "FOLDER_FAILED",
-  message: "后台服务没有连上，稍后再试。" }, { status: 503 });
+const unavailable = (error: unknown, t: Translate) => NextResponse.json({ state: "blocked", code: error instanceof CodexSupervisorRequestError ? error.blocker.code : "FOLDER_FAILED",
+  message: t("后台服务没有连上，稍后再试。") }, { status: 503 });
 
 /** The account's own name, so the worker can tell a record that carries the person (name beside a student number) from course material. */
 async function accountNames(request: Request): Promise<string[]> {
@@ -57,8 +59,8 @@ export async function POST(request: Request) {
       return NextResponse.json(await requestCodexSupervisor(access.ctx, `/v1/sources/folders/${body.id}/lines`, {
         method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ lines }), signal: AbortSignal.timeout(30_000) }));
     }
-  } catch (error) { return unavailable(error); }
-  return NextResponse.json({ state: "blocked", code: "FOLDER_REQUEST_INVALID", message: "先填写文件夹路径。" }, { status: 400 });
+  } catch (error) { return unavailable(error, tOf(access.ctx)); }
+  return NextResponse.json({ state: "blocked", code: "FOLDER_REQUEST_INVALID", message: tOf(access.ctx)("先填写文件夹路径。") }, { status: 400 });
 }
 
 export async function DELETE(request: Request) {
@@ -69,5 +71,5 @@ export async function DELETE(request: Request) {
   if (!/^[A-Za-z0-9-]{1,40}$/.test(id)) return NextResponse.json({ state: "blocked", code: "FOLDER_ID_INVALID" }, { status: 400 });
   const purge = new URL(request.url).searchParams.get("purge") === "1";
   try { return NextResponse.json(await requestCodexSupervisor(access.ctx, `/v1/sources/folders/${id}${purge ? "/purge" : ""}`, { method: "DELETE", signal: AbortSignal.timeout(30_000) })); }
-  catch (error) { return unavailable(error); }
+  catch (error) { return unavailable(error, tOf(access.ctx)); }
 }

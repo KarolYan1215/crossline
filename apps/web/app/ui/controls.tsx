@@ -2,6 +2,8 @@
 
 import { useId, useRef, useState, type ReactNode } from "react";
 import { EDIT_MINUTES } from "@crossline/core";
+import { tFor, weekdayShort, type Locale } from "../../lib/i18n";
+import { useLocale, useT } from "../locale-context";
 
 /** A row of mutually exclusive choices that take effect at once — the standard settings control, in place of a select or a fold. */
 export function SegmentedControl<T extends string>({ value, options, onChange, label, disabled }: {
@@ -21,32 +23,34 @@ export function Slider({ value, onChange, onCommit, preset, label, min = 0, max 
   value: number; onChange: (value: number) => void; onCommit?: (value: number) => void; preset?: number; label: string;
   min?: number; max?: number; step?: number; format?: (value: number) => string;
 }) {
+  const t = useT();
   const pct = (v: number) => `${((v - min) / (max - min)) * 100}%`;
   return <div className="ui-slider" style={{ ["--fill" as string]: pct(value) }}>
     <input type="range" aria-label={label} min={min} max={max} step={step} value={value}
       onChange={(event) => onChange(Number(event.target.value))}
       onPointerUp={(event) => onCommit?.(Number((event.target as HTMLInputElement).value))}
       onKeyUp={(event) => onCommit?.(Number((event.target as HTMLInputElement).value))} />
-    {preset !== undefined && <i className="ui-slider-preset" style={{ left: pct(preset) }} title={`系统预设 ${format(preset)}`} />}
+    {preset !== undefined && <i className="ui-slider-preset" style={{ left: pct(preset) }} title={t("系统预设 {{value}}", { value: format(preset) })} />}
     <output className="mono">{format(value)}</output>
   </div>;
 }
 
-const WEEKDAY = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
-
 /** A date that is edited where it is shown: the chip opens the platform's own date picker. */
-/** A day as the app writes it everywhere: 「10/19 周一」. */
-export const dayLabel = (value: string) => { const day = new Date(`${value.slice(0, 10)}T12:00:00`); return `${day.getMonth() + 1}/${day.getDate()} ${WEEKDAY[day.getDay()]}`; };
+/** A day as the app writes it everywhere: 「10/19 周一」, "10/19 Mon" in English (pass the page's `locale`). */
+export const dayLabel = (value: string, locale?: Locale) => { const day = new Date(`${value.slice(0, 10)}T12:00:00`); return `${day.getMonth() + 1}/${day.getDate()} ${weekdayShort(locale, day.getDay())}`; };
 
+/** `empty` is a Chinese key (or already translated). */
 export function DateChip({ value, onChange, label, empty = "未定" }: { value: string | undefined; onChange: (value: string) => void; label: string; empty?: string }) {
+  const t = useT();
+  const locale = useLocale();
   const input = useRef<HTMLInputElement>(null);
   const day = value ? new Date(`${value}T12:00:00`) : undefined;
   return <span className="ui-date-chip">
-    <button type="button" aria-label={`${label}：${value ?? empty}`} onClick={() => {
+    <button type="button" aria-label={t("{{label}}：{{value}}", { label, value: value ?? t(empty) })} onClick={() => {
       const element = input.current;
       if (!element) return;
       try { element.showPicker(); } catch { element.focus(); }
-    }}>{value && day ? dayLabel(value) : empty}</button>
+    }}>{value && day ? dayLabel(value, locale) : t(empty)}</button>
     <input ref={input} type="date" tabIndex={-1} aria-hidden="true" value={value ?? ""} onChange={(event) => event.target.value && onChange(event.target.value)} />
   </span>;
 }
@@ -61,6 +65,9 @@ export { EDIT_MINUTES };
 export function DurationBar({ p25, p50, p85, samples = 0, bounds = EDIT_MINUTES, onCommit, label = "时长" }: {
   p25: number; p50: number; p85: number; samples?: number; bounds?: { min: number; max: number }; onCommit?: (p50: number) => void; label?: string;
 }) {
+  const t = useT();
+  const locale = useLocale();
+  const fm = (minutes: number) => formatMinutes(minutes, locale);
   const track = useRef<HTMLDivElement>(null);
   const [draft, setDraft] = useState<number | null>(null);
   const usual = draft ?? p50;
@@ -78,11 +85,12 @@ export function DurationBar({ p25, p50, p85, samples = 0, bounds = EDIT_MINUTES,
   const editable = Boolean(onCommit);
   const commit = (minutes: number) => { setDraft(null); if (minutes !== p50) onCommit?.(minutes); };
   return <div className="ui-duration" data-editable={editable || undefined}>
-    {draft !== null && <span className="ui-duration-live mono" style={{ left: at(usual) }}>{formatMinutes(usual)}</span>}
-    <div ref={track} className="ui-duration-track" title={`乐观 ${formatMinutes(low)} · 通常 ${formatMinutes(usual)} · 保守 ${formatMinutes(high)}${samples ? ` · ${samples} 次实测` : " · 尚无实测"}`}>
+    {draft !== null && <span className="ui-duration-live mono" style={{ left: at(usual) }}>{fm(usual)}</span>}
+    <div ref={track} className="ui-duration-track" title={t("乐观 {{low}} · 通常 {{usual}} · 保守 {{high}}", { low: fm(low), usual: fm(usual), high: fm(high) })
+      + (samples ? t(" · {{count}} 次实测", { count: samples }) : t(" · 尚无实测"))}>
       <i className="ui-duration-range" style={{ left: at(low), width: `calc(${at(high)} - ${at(low)})` }} />
       <button type="button" className="ui-duration-handle" style={{ left: at(usual) }} disabled={!editable}
-        aria-label={`${label}：通常 ${formatMinutes(usual)}`} role="slider" aria-valuenow={usual} aria-valuemin={bounds.min} aria-valuemax={bounds.max}
+        aria-label={t("{{label}}：通常 {{value}}", { label: t(label), value: fm(usual) })} role="slider" aria-valuenow={usual} aria-valuemin={bounds.min} aria-valuemax={bounds.max}
         onPointerDown={(event) => { if (!editable) return; event.currentTarget.setPointerCapture(event.pointerId); setDraft(minutesAt(event.clientX)); }}
         onPointerMove={(event) => { if (draft !== null) setDraft(minutesAt(event.clientX)); }}
         onPointerUp={() => draft !== null && commit(draft)}
@@ -92,14 +100,16 @@ export function DurationBar({ p25, p50, p85, samples = 0, bounds = EDIT_MINUTES,
           if (step) { event.preventDefault(); commit(clamp(p50 + step)); }
         }} />
     </div>
-    <span className="ui-duration-text mono"><span>{formatMinutes(usual)}</span><small><span>{formatMinutes(low)}–</span><span>{formatMinutes(high)}</span></small></span>
+    <span className="ui-duration-text mono"><span>{fm(usual)}</span><small><span>{fm(low)}–</span><span>{fm(high)}</span></small></span>
   </div>;
 }
 
-export function formatMinutes(minutes: number): string {
-  if (minutes < 60) return `${minutes} 分`;
+/** 「1 时 30 分」 / "1 h 30 min" (pass the page's `locale`; Chinese when absent). */
+export function formatMinutes(minutes: number, locale?: Locale): string {
+  const t = tFor(locale);
+  if (minutes < 60) return t("{{minutes}} 分", { minutes });
   const hours = Math.floor(minutes / 60), rest = minutes % 60;
-  return rest ? `${hours} 时 ${rest} 分` : `${hours} 小时`;
+  return rest ? t("{{hours}} 时 {{minutes}} 分", { hours, minutes: rest }) : t("{{hours}} 小时", { hours });
 }
 
 /**
@@ -107,6 +117,7 @@ export function formatMinutes(minutes: number): string {
  * complete: the person saying the standard is met with nothing to hand in.
  */
 export function ProgressRing({ quarters, label, onConfirm, size = 22 }: { quarters: number; label: string; onConfirm?: () => void; size?: number }) {
+  const t = useT();
   const q = Math.max(0, Math.min(4, Math.round(quarters)));
   const r = size / 2 - 3, c = size / 2;
   const arc = (index: number) => {
@@ -116,9 +127,9 @@ export function ProgressRing({ quarters, label, onConfirm, size = 22 }: { quarte
   const svg = <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden="true">
     {[0, 1, 2, 3].map((index) => <path key={index} d={arc(index)} className="ui-ring-seg" data-on={index < q || undefined} />)}
   </svg>;
-  const text = `${label}：${q === 4 ? "已达成" : `${q}/4`}`;
+  const text = t("{{label}}：{{value}}", { label, value: q === 4 ? t("已达成") : `${q}/4` });
   return onConfirm && q < 4
-    ? <button type="button" className="ui-ring" data-level={q} title={`${text} · 点击确认已达成`} aria-label={`${text}，点击确认已达成`} onClick={onConfirm}>{svg}</button>
+    ? <button type="button" className="ui-ring" data-level={q} title={t("{{text}} · 点击确认已达成", { text })} aria-label={t("{{text}}，点击确认已达成", { text })} onClick={onConfirm}>{svg}</button>
     : <span className="ui-ring" data-level={q} title={text} role="img" aria-label={text}>{svg}</span>;
 }
 

@@ -1,4 +1,5 @@
 import { resolveAccessContext } from "../../../../lib/access-guard";
+import { tOf } from "../../../../lib/locale";
 import { createMilestoneDraft } from "../../../../lib/input";
 import { isCrossSiteWrite } from "../../../../lib/same-origin";
 import { withUndo } from "../../../../lib/undo";
@@ -16,6 +17,6 @@ export async function POST(request: Request) {
   const date = text(body.date, 10);
   if (!title) return Response.json({ ok: false, code: "MILESTONE_TITLE_REQUIRED" }, { status: 400 });
   if (date && !DAY.test(date)) return Response.json({ ok: false, code: "MILESTONE_DATE_INVALID" }, { status: 400 });
-  const result = await withUndo(access.ctx, `新建里程碑草稿：${title}`, () => createMilestoneDraft(access.ctx, { lineId: text(body.lineId, 80), title, date, target: text(body.target, 500) }));
+  const result = await withUndo(access.ctx, tOf(access.ctx)("新建里程碑草稿：{{title}}", { title }), () => createMilestoneDraft(access.ctx, { lineId: text(body.lineId, 80), title, date, target: text(body.target, 500) }));
   return Response.json(result, { status: result.ok ? 200 : 400 });
 }

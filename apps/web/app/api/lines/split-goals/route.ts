@@ -1,4 +1,5 @@
 import { requestCodexSupervisor, CodexSupervisorRequestError } from "../../../../lib/codex-runtime";
+import { tOf } from "../../../../lib/locale";
 import { isCrossSiteWrite } from "../../../../lib/same-origin";
 import { resolveAccessContext } from "../../../../lib/access-guard";
 
@@ -19,6 +20,6 @@ export async function POST(request: Request) {
     if (error instanceof CodexSupervisorRequestError) {
       return Response.json({ ok: false, code: error.blocker.code, message: error.blocker.message }, { status: error.status });
     }
-    return Response.json({ ok: false, code: "GOAL_SPLIT_UNAVAILABLE", message: "后台服务暂不可用，稍后会自动拆分" }, { status: 503 });
+    return Response.json({ ok: false, code: "GOAL_SPLIT_UNAVAILABLE", message: tOf(access.ctx)("后台服务暂不可用，稍后会自动拆分") }, { status: 503 });
   }
 }

@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
+import { useT } from "../locale-context";
 
 /**
  * Sets the account's first password (POST /api/auth/password). Also used inside Settings (`embedded`), where it stays put after saving
  * instead of moving on.
  */
 export function SetPasswordForm({ next, embedded = false, onSaved }: { next?: string; embedded?: boolean; onSaved?: () => void }) {
+  const t = useT();
   const [status, setStatus] = useState("");
   const [error, setError] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -21,27 +23,27 @@ export function SetPasswordForm({ next, embedded = false, onSaved }: { next?: st
     event.preventDefault();
     const data = new FormData(event.currentTarget);
     const password = String(data.get("password") ?? ""), again = String(data.get("again") ?? "");
-    if (password !== again) { setStatus("两次输入的密码不一样。"); setError(true); return; }
-    setBusy(true); setError(false); setStatus("正在保存…");
+    if (password !== again) { setStatus(t("两次输入的密码不一样。")); setError(true); return; }
+    setBusy(true); setError(false); setStatus(t("正在保存…"));
     const response = await fetch("/api/auth/password", { method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ newPassword: password }) }).catch(() => undefined);
     const answer = await response?.json().catch(() => undefined) as { ok?: boolean; message?: string } | undefined;
     setBusy(false);
-    if (!answer?.ok) { setStatus(answer?.message ?? "密码没有设置成功，请稍后再试。"); setError(true); return; }
-    setStatus("密码已设置：之后用邮箱和密码，或邮箱验证码，都能登录。");
+    if (!answer?.ok) { setStatus(answer?.message ?? t("密码没有设置成功，请稍后再试。")); setError(true); return; }
+    setStatus(t("密码已设置：之后用邮箱和密码，或邮箱验证码，都能登录。"));
     onSaved?.();
     if (!embedded && next) location.replace(next);
   };
 
   return <div className="auth-form">
-    {!embedded && <p>账号已经建好。设一个密码，之后用邮箱和密码就能登录，不用每次等验证码。</p>}
+    {!embedded && <p>{t("账号已经建好。设一个密码，之后用邮箱和密码就能登录，不用每次等验证码。")}</p>}
     <form method="post" onSubmit={submit}>
-      <label><span>新密码</span><input name="password" type="password" required minLength={8} maxLength={128} autoComplete="new-password" autoFocus={!embedded} /></label>
-      <label><span>再输一次</span><input name="again" type="password" required minLength={8} maxLength={128} autoComplete="new-password" /></label>
-      <button className={embedded ? "secondary-button" : "primary-button"} type="submit" disabled={busy}>{busy ? "保存中…" : embedded ? "设置密码" : "保存并继续"}</button>
-      <small>至少 8 个字符。</small>
+      <label><span>{t("新密码")}</span><input name="password" type="password" required minLength={8} maxLength={128} autoComplete="new-password" autoFocus={!embedded} /></label>
+      <label><span>{t("再输一次")}</span><input name="again" type="password" required minLength={8} maxLength={128} autoComplete="new-password" /></label>
+      <button className={embedded ? "secondary-button" : "primary-button"} type="submit" disabled={busy}>{busy ? t("保存中…") : embedded ? t("设置密码") : t("保存并继续")}</button>
+      <small>{t("至少 8 个字符。")}</small>
     </form>
     {status && <small role={error ? "alert" : "status"}>{status}</small>}
-    {!embedded && next && <p><a href={next}>以后再说</a></p>}
+    {!embedded && next && <p><a href={next}>{t("以后再说")}</a></p>}
   </div>;
 }

@@ -4,6 +4,7 @@ import {
   type ExecutionResult
 } from "../../../../../lib/crossline";
 import { rejectUnsafeRequest } from "../guard";
+import { tOf } from "../../../../../lib/locale";
 import { requestCodexSupervisor } from "../../../../../lib/codex-runtime";
 import { titleOf, withUndo } from "../../../../../lib/undo";
 import { readChecklistAnswers, readEvidence, readReport } from "../../../../../lib/execution-input";
@@ -32,7 +33,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         }).catch(() => undefined);
       }
     }
-    else if (body.action === "archive") result = await withUndo(ctx, `归档：${titleOf(ctx, id)}`, () => archiveWorkOrder(ctx, id, reason));
+    else if (body.action === "archive") result = await withUndo(ctx, tOf(ctx)("归档：{{title}}", { title: titleOf(ctx, id) }), () => archiveWorkOrder(ctx, id, reason));
     else if (body.action === "pause") result = pauseWorkOrderExecution(ctx, id, reason);
     else if (body.action === "resume") result = resumeWorkOrderExecution(ctx, id);
     else if (body.action === "complete") {

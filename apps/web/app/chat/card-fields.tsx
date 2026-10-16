@@ -2,6 +2,7 @@
 
 import type { ProposedAction } from "@crossline/core";
 import type { CardChoices } from "../../lib/conversation";
+import { useT } from "../locale-context";
 
 const LABEL: Record<string, string> = {
   title: "标题", context: "补充", lineId: "主线", dueDate: "截止", milestoneId: "里程碑", workOrderId: "任务", date: "日期", minutes: "分钟",
@@ -47,6 +48,7 @@ export function CardFields({ item, value, choices, onChange }: {
   item: ProposedAction; value: Record<string, unknown>; choices: CardChoices | null;
   onChange: (field: string, next: unknown) => void;
 }) {
+  const t = useT();
   const args = { ...(item.args as Record<string, unknown>), ...value };
   const task = choices?.tasks.find((entry) => entry.id === args.workOrderId);
   return <div className="card-fields">{editableFields(item).map((field) => {
@@ -63,26 +65,27 @@ export function CardFields({ item, value, choices, onChange }: {
             onChange={(event) => onChange(field, Number(event.target.value))} />;
         case "energy": case "level":
           return <select id={id} value={String(current ?? "")} onChange={(event) => onChange(field, event.target.value)}>
-            {ENERGY.map(([key, word]) => <option key={key} value={key}>{word}</option>)}</select>;
+            {ENERGY.map(([key, word]) => <option key={key} value={key}>{t(word)}</option>)}</select>;
         case "workOrderId":
           return <select id={id} value={String(current ?? "")} onChange={(event) => onChange(field, event.target.value)}>
             {(choices?.tasks ?? []).map((entry) => <option key={entry.id} value={entry.id}>{entry.title}</option>)}</select>;
         case "stepId":
           return <select id={id} value={String(current ?? "")} onChange={(event) => onChange(field, event.target.value)}>
-            <option value="">（整个任务）</option>
+            <option value="">{t("（整个任务）")}</option>
             {(task?.steps ?? []).map((step) => <option key={step.id} value={step.id}>{step.title}</option>)}</select>;
         case "lineId":
           return <select id={id} value={String(current ?? "")} onChange={(event) => onChange(field, event.target.value)}>
-            <option value="">（不指定）</option>
+            <option value="">{t("（不指定）")}</option>
             {(choices?.lines ?? []).map((line) => <option key={line.id} value={line.id}>{line.label}</option>)}</select>;
         case "milestoneId":
           return <select id={id} value={String(current ?? "")} onChange={(event) => onChange(field, event.target.value)}>
-            <option value="">（不关联）</option>
+            <option value="">{t("（不关联）")}</option>
             {(choices?.milestones ?? []).map((milestone) => <option key={milestone.id} value={milestone.id}>{milestone.title}</option>)}</select>;
         default:
           return <input id={id} type="text" value={String(current ?? "")} onChange={(event) => onChange(field, event.target.value)} />;
       }
     })();
-    return <label key={field} htmlFor={id}><span>{LABEL[field] ?? field}</span>{input}</label>;
+    // Field names are read with the `field` context: 「任务」 here is one task, not the Tasks page.
+    return <label key={field} htmlFor={id}><span>{LABEL[field] ? t(LABEL[field]!, { context: "field" }) : field}</span>{input}</label>;
   })}</div>;
 }
