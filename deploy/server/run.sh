@@ -30,10 +30,11 @@ fi
 # The web app and the worker share the host's network (they talk on 127.0.0.1, as on the owner's machine) and one data/state volume.
 if [ "$want" = all ] || [ "$want" = web ]; then
   start crossline-web --network host --env-file /srv/crossline/app.env \
-    -v /srv/crossline/data:/data -v /srv/crossline/state:/state -v /srv/crossline/codex:/opt/codex:ro "$app_image"
+    -v /srv/crossline/data:/data -v /srv/crossline/state:/state -v /srv/crossline/codex:/opt/codex:ro \
+    -w /repo/apps/web "$app_image" node_modules/.bin/next start --hostname 127.0.0.1 --port 3210
 fi
 if [ "$want" = all ] || [ "$want" = worker ]; then
   start crossline-worker --network host --env-file /srv/crossline/app.env \
     -v /srv/crossline/data:/data -v /srv/crossline/state:/state -v /srv/crossline/codex:/opt/codex:ro \
-    "$app_image" pnpm --filter @crossline/worker start
+    -w /repo/apps/worker "$app_image" /repo/node_modules/.bin/tsx src/index.ts
 fi

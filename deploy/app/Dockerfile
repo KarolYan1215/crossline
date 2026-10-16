@@ -26,5 +26,8 @@ ENV NODE_ENV=production CROSSLINE_NEXT_DIR=.next-prod CROSSLINE_DATA_DIR=/data C
     CROSSLINE_CODEX_PATH=/opt/codex/codex CROSSLINE_DEPLOYMENT_MODE=private
 USER node
 VOLUME ["/data", "/state"]
-# The web app by default; the worker container runs `pnpm --filter @crossline/worker start`.
-CMD ["pnpm", "--filter", "@crossline/web", "start"]
+# The binaries are started directly, not through `pnpm --filter … start`: pnpm 12 checks the install before running a script and,
+# finding it made by root, tries to remove node_modules as the `node` user and exits (ERR_PNPM_PACKAGE_MANAGER_REMOVE_MODULES_DIR).
+# The web app by default; the worker container runs `tsx src/index.ts` in /repo/apps/worker (deploy/server/run.sh).
+WORKDIR /repo/apps/web
+CMD ["node_modules/.bin/next", "start", "--hostname", "127.0.0.1", "--port", "3210"]
