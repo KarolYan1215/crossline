@@ -49,7 +49,7 @@ export function TailscaleTrust() {
     </>}
     {bindings.length > 0 && <ul>{bindings.map((item) => <li key={item.id}>
       {item.tailscaleLogin} · {item.createdAt.slice(0, 10)}
-      <button type="button" onClick={() => void revoke(item.tailscaleLogin)}>{t("撤销")}</button>
+      <button type="button" onClick={() => void revoke(item.tailscaleLogin)}>{t("撤销", { context: "revoke" })}</button>
     </li>)}</ul>}
   </section>;
 }

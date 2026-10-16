@@ -39,7 +39,7 @@ export function DeviceLeases() {
   const leaseItem = (item: (typeof current)[number]) => <li key={item.deviceId}>
     <span>{item.deviceId === mine ? t("本机") : t("设备 {{n}}", { n: current.indexOf(item) + 1 })}</span>
     <small>{item.revokedAt ? t("已撤销") : t("有效至 {{day}}", { day: item.expiresAt.slice(0, 10) })}</small>
-    {!item.revokedAt && <button type="button" onClick={() => void revoke(item.deviceId)}>{t("撤销")}</button>}
+    {!item.revokedAt && <button type="button" onClick={() => void revoke(item.deviceId)}>{t("撤销", { context: "revoke" })}</button>}
   </li>;
   return <section className="st-card" aria-label={t("离线设备")}>
     <header><h3>{t("离线设备")}</h3><small>{t("撤销后，该设备离线期间的操作不再写入；不影响其登录")}</small></header>

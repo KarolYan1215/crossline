@@ -70,7 +70,7 @@ function MineLine({ line, onSaved }: { line: MineSkillView; onSaved: (line: Mine
   return <li className="sk-line">
     <div className="sk-line-head">
       <LineTag line={line.lineId}>{line.lineLabel}</LineTag>
-      {current ? <small>{t("第 {{version}} 版", { version: current.version })} · {current.by === "person" ? (current.restoredFrom ? t("回到第 {{version}} 版", { version: current.restoredFrom }) : t("本人编辑")) : t("整理")} · {day(current.at)}</small>
+      {current ? <small>{t("第 {{version}} 版", { version: current.version })} · {current.by === "person" ? (current.restoredFrom ? t("回到第 {{version}} 版", { version: current.restoredFrom }) : t("本人编辑")) : t("整理", { context: "compiled" })} · {day(current.at)}</small>
         : <p className="sk-status">{t("尚未整理：本人对这条主线的验收备注、纠正或回顾出现后自动整理")}</p>}
       <span className="sk-actions">
         <button type="button" className="secondary-button" onClick={() => { setDraft(current?.markdown ?? [t("# {{line}}：本人的做法", { line: line.lineLabel }), ...(["打法", "偏好", "红线"] as const).map((heading) => `## ${t(heading, { context: "heading" })}\n\n1. `)].join("\n\n") + "\n"); setEditing(!editing); }}>{editing ? t("取消") : current ? t("编辑") : t("手写一份")}</button>
@@ -116,7 +116,7 @@ function PublicSkill({ skill, onRemoved }: { skill: PublicSkillView; onRemoved: 
     </div>
     <p className="sk-desc" data-user-text><Clamp text={skill.description} /></p>
     <dl className="sk-facts">
-      <dt>{t("来源")}</dt><dd><a href={skill.url} target="_blank" rel="noreferrer">{skill.repo.replace("https://github.com/", "")}{skill.path ? `/${skill.path}` : ""}</a> · {t("提交")} <span className="mono">{skill.commit.slice(0, 7)}</span></dd>
+      <dt>{t("来源")}</dt><dd><a href={skill.url} target="_blank" rel="noreferrer">{skill.repo.replace("https://github.com/", "")}{skill.path ? `/${skill.path}` : ""}</a> · {t("提交", { context: "commit" })} <span className="mono">{skill.commit.slice(0, 7)}</span></dd>
       <dt>{t("许可证")}</dt><dd>{skill.license}</dd>
       <dt>{t("扫描")}</dt><dd>{skill.risk === "high" || skill.injection ? t("发现{{found}}，脚本未安装", { found: locale === "en" ? joinList(locale, flagged) : flagged.join("、") }) : t("未发现风险")} · {t("{{count}} 个文件已记录校验值", { count: skill.files })}{skill.skipped ? t("，{{count}} 个非文本文件未取回", { count: skill.skipped }) : ""}</dd>
       <dt>{t("审查")}</dt><dd className="gen"><Clamp lines={1} text={skill.reasons.join(sep)} /></dd>
