@@ -20,7 +20,7 @@ env:
 
 jobs:
   server:
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[server]') || contains(github.event.head_commit.message, '[deploy]') || contains(github.event.head_commit.message, '[codex-probe]') || contains(github.event.head_commit.message, '[migrate') || contains(github.event.head_commit.message, '[readiness]')
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[server]') || contains(github.event.head_commit.message, '[deploy]') || contains(github.event.head_commit.message, '[codex-probe]') || contains(github.event.head_commit.message, '[migrate') || contains(github.event.head_commit.message, '[readiness]') || contains(github.event.head_commit.message, '[usage]')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -78,6 +78,20 @@ jobs:
             $(sudo docker inspect -f "{{.Config.Image}}" crossline-web) sh -c "mkdir -p /tmp/copy && cp /live/crossline.db* /tmp/copy/ && \
             /repo/node_modules/.bin/tsx scripts/start-readiness.ts /tmp/copy/crossline.db"
             echo "== web errors"; sudo docker logs --since 2h crossline-web 2>&1 | grep -iE "error|unhandled|digest" | tail -30'
+      - name: Model usage and repairs
+        if: contains(github.event.head_commit.message, '[usage]')
+        run: |
+          # Every model run of the last two days from a copy of the ledger (time, repairs, error, tokens), and the worker's log lines
+          # about rejected or repaired answers. Read-only.
+          ssh -i ~/.ssh/id -o ConnectTimeout=30 admin@"$HOST" 'sudo docker run --rm -v /srv/crossline/data:/live:ro -w /repo \
+            $(sudo docker inspect -f "{{.Config.Image}}" crossline-web) sh -c "mkdir -p /tmp/copy && cp /live/crossline.db* /tmp/copy/ && cd /repo/packages/db && node -e \"
+              const D = require(\\\"better-sqlite3\\\"); const db = new D(\\\"/tmp/copy/crossline.db\\\", { readonly: true });
+              const since = new Date(Date.now() - 2 * 86400000).toISOString();
+              for (const r of db.prepare(\\\"SELECT at, skill, model, effort, ok, error_code, repairs, turns, duration_ms, output_tokens, reasoning_tokens FROM model_usage WHERE at >= ? ORDER BY at\\\").all(since))
+                console.log([r.at.slice(5, 19), r.skill, r.model + \\\":\\\" + r.effort, r.ok ? \\\"ok\\\" : \\\"FAIL \\\" + r.error_code, \\\"repairs=\\\" + r.repairs, \\\"turns=\\\" + r.turns,
+                  Math.round(r.duration_ms / 1000) + \\\"s\\\", \\\"out=\\\" + r.output_tokens, \\\"reason=\\\" + r.reasoning_tokens].join(\\\"  \\\"));
+            \""
+            echo "== worker repairs and rejections"; sudo docker logs --since 48h crossline-worker 2>&1 | grep -iE "repair|reject|invalid|blocked|stall|SKILL_" | cut -c1-400 | tail -40'
       - name: Migrate the owner's ledger
         if: contains(github.event.head_commit.message, '[migrate]') || contains(github.event.head_commit.message, '[migrate-apply]')
         env:
