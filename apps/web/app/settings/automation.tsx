@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { SegmentedControl } from "../ui/controls";
 import { Tag } from "../ui/tag";
+import { useT } from "../locale-context";
 
 type Mode = "off" | "review" | "auto";
 export type CategoryRow = { category: string; label: string; explained: string; mode: Mode; cleanRuns: number; runsToTrust: number };
@@ -24,8 +25,11 @@ function useSetting<T>(initial: T, save: (value: T) => Promise<boolean>) {
   };
   return { value, change, state };
 }
-const SaveState = ({ state }: { state: string }) => state === "failed" ? <small role="status" className="st-fail">未保存</small>
-  : state === "saved" ? <small role="status" className="st-ok">已保存</small> : null;
+function SaveState({ state }: { state: string }) {
+  const t = useT();
+  return state === "failed" ? <small role="status" className="st-fail">{t("未保存")}</small>
+    : state === "saved" ? <small role="status" className="st-ok">{t("已保存")}</small> : null;
+}
 
 /**
  * 自动化与助手: everything that decides what happens without a click, in one module (it used to be split over the assistant page,
@@ -39,34 +43,35 @@ export function AutomationModule({ categories, paused, permissionMode, recent, a
   /** 「自动交给 Agent」: steps on the calendar the system can do start by themselves when their block comes up. Off by default. */
   autoHandoff?: boolean;
 }) {
+  const t = useT();
   const pause = useSetting(paused ? "paused" : "running", (value) => post("/api/agent/pause", { paused: value === "paused" }));
   const handoff = useSetting(autoHandoff ? "on" : "off", (value) => post("/api/agent/auto-handoff", { enabled: value === "on" }));
   const permission = useSetting(permissionMode ? "on" : "off", (value) => post("/api/permission-mode", { enabled: value === "on" }));
   return <div className="st-modules">
-    {assistant && <section className="st-card" aria-label="助手能力">
-      <header><h3>助手能力</h3><small>开启后，助手做完的结果默认直接生效并通知本人；需要本人判断或涉及对外动作的才进待确认</small></header>
+    {assistant && <section className="st-card" aria-label={t("助手能力")}>
+      <header><h3>{t("助手能力")}</h3><small>{t("开启后，助手做完的结果默认直接生效并通知本人；需要本人判断或涉及对外动作的才进待确认")}</small></header>
       <ul className="st-rows">{categories.map((row) => <CapabilityRow key={row.category} row={row} />)}</ul>
-      <div className="st-row"><span className="st-row-label">自动开工<small>已批准、尚未开始的任务由助手接手，一次一个</small></span>
-        <SegmentedControl label="助手自动开工" value={pause.value} onChange={(value) => void pause.change(value)}
-          options={[{ value: "running", label: "运行" }, { value: "paused", label: "暂停" }]} /><SaveState state={pause.state} /></div>
-      <div className="st-row"><span className="st-row-label">自动交给 Agent<small>系统能做的步骤到排定时间（或助手空闲时提前）由后台直接开始；结果按上方各类别处理</small></span>
-        <SegmentedControl label="自动交给 Agent" value={handoff.value} onChange={(value) => void handoff.change(value)}
-          options={[{ value: "off", label: "关闭" }, { value: "on", label: "开启" }]} /><SaveState state={handoff.state} /></div>
-      <p className="st-note">对外发送、付款交易、代为承诺始终由本人完成。</p>
+      <div className="st-row"><span className="st-row-label">{t("自动开工")}<small>{t("已批准、尚未开始的任务由助手接手，一次一个")}</small></span>
+        <SegmentedControl label={t("助手自动开工")} value={pause.value} onChange={(value) => void pause.change(value)}
+          options={[{ value: "running", label: t("运行", { context: "state" }) }, { value: "paused", label: t("暂停", { context: "state" }) }]} /><SaveState state={pause.state} /></div>
+      <div className="st-row"><span className="st-row-label">{t("自动交给 Agent")}<small>{t("系统能做的步骤到排定时间（或助手空闲时提前）由后台直接开始；结果按上方各类别处理")}</small></span>
+        <SegmentedControl label={t("自动交给 Agent")} value={handoff.value} onChange={(value) => void handoff.change(value)}
+          options={[{ value: "off", label: t("关闭", { context: "state" }) }, { value: "on", label: t("开启", { context: "state" }) }]} /><SaveState state={handoff.state} /></div>
+      <p className="st-note">{t("对外发送、付款交易、代为承诺始终由本人完成。")}</p>
     </section>}
-    <section className="st-card" aria-label="自动生效">
-      <header><h3>自动生效</h3><small>撤销入口在「待确认 · 最近自动生效」</small></header>
-      <div className="st-row"><span className="st-row-label">低风险提案<small>在「待确认」前台停留 5 分钟且未拒绝即批准</small></span>
-        <SegmentedControl label="低风险提案默认批准" value={permission.value} onChange={(value) => void permission.change(value)}
-          options={[{ value: "off", label: "逐项批准" }, { value: "on", label: "默认批准" }]} /><SaveState state={permission.state} /></div>
-      <p className="st-note">内部、可撤销的准备步骤始终自动生效，24 小时内可撤销；里程碑、分数线与对外事项始终需要批准。</p>
+    <section className="st-card" aria-label={t("自动生效")}>
+      <header><h3>{t("自动生效")}</h3><small>{t("撤销入口在「待确认 · 最近自动生效」")}</small></header>
+      <div className="st-row"><span className="st-row-label">{t("低风险提案")}<small>{t("在「待确认」前台停留 5 分钟且未拒绝即批准")}</small></span>
+        <SegmentedControl label={t("低风险提案默认批准")} value={permission.value} onChange={(value) => void permission.change(value)}
+          options={[{ value: "off", label: t("逐项批准") }, { value: "on", label: t("默认批准") }]} /><SaveState state={permission.state} /></div>
+      <p className="st-note">{t("内部、可撤销的准备步骤始终自动生效，24 小时内可撤销；里程碑、分数线与对外事项始终需要批准。")}</p>
     </section>
-    {recent.length > 0 && <section className="st-card" aria-label="助手近期任务">
-      <header><h3>助手近期任务</h3><small>待审阅的产出在「待确认」</small></header>
+    {recent.length > 0 && <section className="st-card" aria-label={t("助手近期任务")}>
+      <header><h3>{t("助手近期任务")}</h3><small>{t("待审阅的产出在「待确认」")}</small></header>
       <ul className="st-list">{recent.map((task) => <li key={task.taskId}>
         <Tag tone={task.tone}>{task.status}</Tag>
         {task.workOrderId ? <a href={`/workbench/${encodeURIComponent(task.workOrderId)}`}>{task.title}</a> : <span>{task.title}</span>}
-        <small>{task.kind} · {task.day}</small>
+        <small>{task.kind ? t(task.kind) : ""} · {task.day}</small>
       </li>)}</ul>
     </section>}
   </div>;
@@ -75,11 +80,12 @@ export function AutomationModule({ categories, paused, permissionMode, recent, a
 function CapabilityRow({ row }: { row: CategoryRow }) {
   // Two positions (decided 2026-10-15): results take effect by default and only those that need the person go to 待确认
   // (`resultNeedsPerson` in the worker), so 「逐次审阅」 and 「自动」 no longer differ. On is stored as the old 「自动」 (`auto_checked`).
+  const t = useT();
   const mode = useSetting<"on" | "off">(row.mode === "off" ? "off" : "on", (value) => post("/api/agent/categories", { category: row.category, mode: value === "on" ? "auto" : "off" }));
-  return <li className="st-row" title={row.explained}>
-    <span className="st-row-label">{row.label}</span>
-    <SegmentedControl label={row.label} value={mode.value} onChange={(value) => void mode.change(value)}
-      options={[{ value: "off", label: "关闭" }, { value: "on", label: "开启" }]} />
+  return <li className="st-row" title={t(row.explained)}>
+    <span className="st-row-label">{t(row.label)}</span>
+    <SegmentedControl label={t(row.label)} value={mode.value} onChange={(value) => void mode.change(value)}
+      options={[{ value: "off", label: t("关闭", { context: "state" }) }, { value: "on", label: t("开启", { context: "state" }) }]} />
     <SaveState state={mode.state} />
   </li>;
 }

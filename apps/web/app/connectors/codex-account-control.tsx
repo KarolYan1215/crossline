@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { Tag } from "../ui/tag";
+import { useT } from "../locale-context";
+import { tFor, type Translate } from "../../lib/i18n";
 
 type Login = {
   state?: "pending" | "completed" | "failed" | "canceled";
@@ -34,10 +36,10 @@ export function reconcileCodexLoginUrl(loginUrl: string | undefined, state: Acco
   return loginState === "completed" || loginState === "failed" || loginState === "canceled" ? undefined : loginUrl;
 }
 
-export function visibleCodexBlocker(state: AccountState | undefined): { code: string; message: string } | undefined {
+export function visibleCodexBlocker(state: AccountState | undefined, t: Translate = tFor(undefined)): { code: string; message: string } | undefined {
   const blocker = state?.blocker ?? state?.supervisor?.blocker ?? loginOf(state)?.blocker;
   // The worker being down or not configured reaches here as the supervisor's own English; the page says it in words (copy-style).
-  return blocker && /SUPERVISOR|CAPABILITY/.test(blocker.code) ? { code: blocker.code, message: "后台服务没有连上，稍后点 ↻ 刷新。" } : blocker;
+  return blocker && /SUPERVISOR|CAPABILITY/.test(blocker.code) ? { code: blocker.code, message: t("后台服务没有连上，稍后点 ↻ 刷新。") } : blocker;
 }
 
 /**
@@ -50,6 +52,7 @@ export function visibleCodexBlocker(state: AccountState | undefined): { code: st
 export function CodexAccountControl({ onConnected }: {
   /** Told after every read whether this account now has a model connection (the interview waits on it). */
   onConnected?: (connected: boolean) => void } = {}) {
+  const t = useT();
   const [state, setState] = useState<AccountState>();
   const [loginUrl, setLoginUrl] = useState<string>();
   const [busy, setBusy] = useState(false);
@@ -88,7 +91,7 @@ export function CodexAccountControl({ onConnected }: {
   };
   const account = state?.account;
   const login = loginOf(state);
-  const blocker = visibleCodexBlocker(state);
+  const blocker = visibleCodexBlocker(state, t);
   const guest = state?.guest === true;
   // Away from this computer only the device code works, for the owner as for a guest; on it, the browser sign-in is the main button.
   const codeFirst = !local;
@@ -98,39 +101,39 @@ export function CodexAccountControl({ onConnected }: {
     if (code) void navigator.clipboard?.writeText(code).catch(() => undefined);
     window.open(url, "_blank", "noopener");
   };
-  return <section className="st-card codex-account-card" aria-label="模型连接" id="model">
-    <header><h3>模型连接</h3><Tag tone={account ? "ok" : "warn"}>{account ? "已连接" : state ? "未连接" : "检查中"}</Tag></header>
+  return <section className="st-card codex-account-card" aria-label={t("模型连接")} id="model">
+    <header><h3>{t("模型连接")}</h3><Tag tone={account ? "ok" : "warn"}>{account ? t("已连接") : state ? t("未连接") : t("检查中")}</Tag></header>
     <div className="st-row"><span className="st-row-label">{account
-      ? account.type === "apiKey" ? "API key（按用量计费，每月上限见「模型额度」）" : account.email ?? "ChatGPT 账号"
-      : !state ? "正在读取登录状态…" : guest ? "这个账号用自己的 Codex：分析、拆分与规划都在它上面运行，不使用电脑主人的额度与记忆。" : "分析、拆分与助手功能需要登录 ChatGPT 账号"}
+      ? account.type === "apiKey" ? t("API key（按用量计费，每月上限见「模型额度」）") : account.email ?? t("ChatGPT 账号")
+      : !state ? t("正在读取登录状态…") : guest ? t("这个账号用自己的 Codex：分析、拆分与规划都在它上面运行，不使用电脑主人的额度与记忆。") : t("分析、拆分与助手功能需要登录 ChatGPT 账号")}
       {blocker && <small role="status">{blocker.message}</small>}</span>
       <span className="st-row-actions">
         {state && !account && !loginUrl && local && <button type="button" className="primary-button" disabled={busy}
-          onClick={() => void post({ type: "chatgpt" })}>{busy ? "启动中…" : "用 ChatGPT 登录"}</button>}
+          onClick={() => void post({ type: "chatgpt" })}>{busy ? t("启动中…") : t("用 ChatGPT 登录")}</button>}
         {state && !account && !loginUrl && deviceCode && <button type="button" className={codeFirst ? "primary-button" : "secondary-button"} disabled={busy}
-          onClick={() => void post({ type: "chatgptDeviceCode" })}>{busy && codeFirst ? "正在取代码…" : "用一次性代码连接"}</button>}
-        {loginUrl && !login?.userCode && <a href={loginUrl} target="_blank" rel="noreferrer">打开登录页 →</a>}
-        {loginUrl && <button type="button" disabled={busy} onClick={cancelLogin}>取消</button>}
-        {account && guest && <button type="button" disabled={busy} onClick={() => void post({ action: "logout" })}>退出登录</button>}
-        <button type="button" onClick={refresh} aria-label="刷新登录状态" title="刷新">↻</button>
+          onClick={() => void post({ type: "chatgptDeviceCode" })}>{busy && codeFirst ? t("正在取代码…") : t("用一次性代码连接")}</button>}
+        {loginUrl && !login?.userCode && <a href={loginUrl} target="_blank" rel="noreferrer">{t("打开登录页 →")}</a>}
+        {loginUrl && <button type="button" disabled={busy} onClick={cancelLogin}>{t("取消")}</button>}
+        {account && guest && <button type="button" disabled={busy} onClick={() => void post({ action: "logout" })}>{t("退出登录")}</button>}
+        <button type="button" onClick={refresh} aria-label={t("刷新登录状态")} title={t("刷新")}>↻</button>
       </span></div>
     {state && !account && deviceCode && <ol className="codex-steps">
       {/* OpenAI refuses every code until this switch is on, and a code entered before it is spent (owner's run, 2026-10-15). */}
-      <li>先在 ChatGPT 网页版打开 设置 → 安全，开启「为 Codex、Excel、PowerPoint 和 Word 启用设备代码登录」（只需一次）</li>
-      <li>点「用一次性代码连接」，再点「复制代码并打开 OpenAI 页面」：代码已复制，在打开的页面用本人的 ChatGPT 账号登录后粘贴</li>
-      <li>回到这里，几秒内自动显示「已连接」</li>
+      <li>{t("先在 ChatGPT 网页版打开 设置 → 安全，开启「为 Codex、Excel、PowerPoint 和 Word 启用设备代码登录」（只需一次）")}</li>
+      <li>{t("点「用一次性代码连接」，再点「复制代码并打开 OpenAI 页面」：代码已复制，在打开的页面用本人的 ChatGPT 账号登录后粘贴")}</li>
+      <li>{t("回到这里，几秒内自动显示「已连接」")}</li>
     </ol>}
-    {login?.state === "pending" && login.userCode && <div className="st-row"><span className="st-row-label">在 OpenAI 的页面输入这串代码
-      <small>代码只给本人用，不要发给别人。页面提示要先启用设备代码登录时，按上面第 1 步开启后点「获取新代码」。</small></span>
+    {login?.state === "pending" && login.userCode && <div className="st-row"><span className="st-row-label">{t("在 OpenAI 的页面输入这串代码")}
+      <small>{t("代码只给本人用，不要发给别人。页面提示要先启用设备代码登录时，按上面第 1 步开启后点「获取新代码」。")}</small></span>
       <b className="mono codex-user-code">{login.userCode}</b>
       <span className="st-row-actions">
-        {loginUrl && <button type="button" className="primary-button" onClick={() => copyAndOpen(login.userCode, loginUrl)}>复制代码并打开 OpenAI 页面</button>}
-        <button type="button" disabled={busy} onClick={() => void (async () => { await cancelLogin(); await post({ type: "chatgptDeviceCode" }); })()}>获取新代码</button></span></div>}
-    {login?.state === "failed" && deviceCode && !account && <p className="muted" role="status">这串代码没有通过。确认已按第 1 步开启设备代码登录，再点「用一次性代码连接」取一串新代码。</p>}
+        {loginUrl && <button type="button" className="primary-button" onClick={() => copyAndOpen(login.userCode, loginUrl)}>{t("复制代码并打开 OpenAI 页面")}</button>}
+        <button type="button" disabled={busy} onClick={() => void (async () => { await cancelLogin(); await post({ type: "chatgptDeviceCode" }); })()}>{t("获取新代码")}</button></span></div>}
+    {login?.state === "failed" && deviceCode && !account && <p className="muted" role="status">{t("这串代码没有通过。确认已按第 1 步开启设备代码登录，再点「用一次性代码连接」取一串新代码。")}</p>}
     {!account && guest && <form className="st-row" onSubmit={(event) => { event.preventDefault(); if (apiKey.trim()) void post({ type: "apiKey", apiKey }); }}>
-      <label className="st-row-label">或填写 OpenAI API key<small>只交给这个账号自己的运行时保存，本应用不留存、不显示。</small>
+      <label className="st-row-label">{t("或填写 OpenAI API key")}<small>{t("只交给这个账号自己的运行时保存，本应用不留存、不显示。")}</small>
         <input type="password" autoComplete="off" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="sk-…" /></label>
-      <span className="st-row-actions"><button type="submit" disabled={busy || !apiKey.trim()}>保存</button></span>
+      <span className="st-row-actions"><button type="submit" disabled={busy || !apiKey.trim()}>{t("保存")}</button></span>
     </form>}
   </section>;
 }

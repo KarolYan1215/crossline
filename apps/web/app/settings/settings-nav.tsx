@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useT } from "../locale-context";
 
 /**
  * The settings index: a sticky column on a wide screen, a scrolling strip on a phone. The section in view is marked, so the index
  * also says where on the page one is.
  */
 export function SettingsNav({ sections }: { sections: Array<{ id: string; label: string }> }) {
+  const t = useT();
   const [current, setCurrent] = useState(sections[0]?.id ?? "");
   // A link to one module (a notification's 「查看」 → /settings#skills) lands on it: the browser jumps before the cards above have their
   // height, so the jump is made again once they have.
@@ -24,7 +26,7 @@ export function SettingsNav({ sections }: { sections: Array<{ id: string; label:
     for (const section of sections) { const element = document.getElementById(section.id); if (element) observer.observe(element); }
     return () => observer.disconnect();
   }, [sections]);
-  return <nav className="st-nav" aria-label="设置分类">
+  return <nav className="st-nav" aria-label={t("设置分类")}>
     {sections.map((section) => <a key={section.id} href={`#${section.id}`} aria-current={current === section.id ? "true" : undefined}>{section.label}</a>)}
   </nav>;
 }

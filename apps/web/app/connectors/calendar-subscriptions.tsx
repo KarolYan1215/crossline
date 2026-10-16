@@ -1,11 +1,14 @@
 "use client";
 import { useEffect, useState } from "react";
 import { SUBSCRIPTION_GUIDES, type CalendarSubscription } from "@crossline/core";
+import { useLocale, useT } from "../locale-context";
+import type { Translate } from "../../lib/i18n";
 
-const ago = (at: string | undefined, now: number) => {
+const ago = (at: string | undefined, now: number, t: Translate) => {
   if (!at) return "";
   const minutes = Math.max(0, Math.round((now - Date.parse(at)) / 60_000));
-  return minutes < 1 ? "刚刚读过" : minutes < 60 ? `${minutes} 分钟前读过` : minutes < 1440 ? `${Math.round(minutes / 60)} 小时前读过` : `${Math.round(minutes / 1440)} 天前读过`;
+  return minutes < 1 ? t("刚刚读过") : minutes < 60 ? t("{{count}} 分钟前读过", { count: minutes }) : minutes < 1440 ? t("{{count}} 小时前读过", { count: Math.round(minutes / 60) })
+    : t("{{count}} 天前读过", { count: Math.round(minutes / 1440) });
 };
 
 /**
@@ -14,6 +17,8 @@ const ago = (at: string | undefined, now: number) => {
  * backup; the card shows where it points and how the last read went.
  */
 export function CalendarSubscriptions({ onChanged }: { onChanged?: () => void }) {
+  const t = useT();
+  const en = useLocale() === "en";
   const [items, setItems] = useState<CalendarSubscription[] | undefined>();
   const [link, setLink] = useState("");
   const [label, setLabel] = useState("");
@@ -37,9 +42,9 @@ export function CalendarSubscriptions({ onChanged }: { onChanged?: () => void })
     const body = await response?.json().catch(() => undefined) as { state?: string; events?: number; message?: string } | undefined;
     if (body?.state === "added") {
       setLink(""); setLabel("");
-      setMessage(`已接入，读到未来九周的 ${body.events ?? 0} 个日程。`);
+      setMessage(t("已接入，读到未来九周的 {{count}} 个日程。", { count: body.events ?? 0 }));
       onChanged?.();
-    } else setMessage(body?.message ?? "没能接入这个日历，稍后再试。");
+    } else setMessage(body?.message ?? t("没能接入这个日历，稍后再试。"));
     await load();
     setBusy(false);
   };
@@ -56,29 +61,29 @@ export function CalendarSubscriptions({ onChanged }: { onChanged?: () => void })
   const pasteAndAdd = async () => {
     const text = (await navigator.clipboard?.readText().catch(() => "") ?? "").trim();
     if (/^(https|webcal):\/\/\S+$/i.test(text)) { setLink(text); await add(text); }
-    else setMessage(text ? "剪贴板里不是日历链接：请在日历的设置页拷贝订阅链接，再点一次。" : "浏览器没有允许读取剪贴板，请把链接粘贴到下面的框里。");
+    else setMessage(text ? t("剪贴板里不是日历链接：请在日历的设置页拷贝订阅链接，再点一次。") : t("浏览器没有允许读取剪贴板，请把链接粘贴到下面的框里。"));
   };
 
-  return <section className="st-card calendar-subscriptions" aria-label="订阅日历">
-    <header><h3>订阅日历</h3><small>点你用的日历，在打开的页面拷贝订阅链接，回来点「粘贴并接入」。只读，不用登录。</small></header>
+  return <section className="st-card calendar-subscriptions" aria-label={t("订阅日历")}>
+    <header><h3>{t("订阅日历")}</h3><small>{t("点你用的日历，在打开的页面拷贝订阅链接，回来点「粘贴并接入」。只读，不用登录。")}</small></header>
     {items?.map((item) => <div className="st-row" key={item.id}>
       <span className="st-row-label">{item.label}
-        <small>{item.host}{item.lastError ? ` · ${item.lastError}` : item.lastReadAt ? ` · ${ago(item.lastReadAt, now)}，${item.lastEvents ?? 0} 个日程` : ""}</small>
+        <small>{item.host}{item.lastError ? ` · ${item.lastError}` : item.lastReadAt ? ` · ${ago(item.lastReadAt, now, t)}${en ? ", " : "，"}${t("{{count}} 个日程", { count: item.lastEvents ?? 0 })}` : ""}</small>
       </span>
-      <button type="button" className="ob-btn ob-quiet secondary-button" disabled={busy} onClick={() => void remove(item.id)}>移除</button>
+      <button type="button" className="ob-btn ob-quiet secondary-button" disabled={busy} onClick={() => void remove(item.id)}>{t("移除")}</button>
     </div>)}
-    <div className="calendar-subscriptions-providers" role="group" aria-label="从哪个日历接入">
+    <div className="calendar-subscriptions-providers" role="group" aria-label={t("从哪个日历接入")}>
       {SUBSCRIPTION_GUIDES.map((item) => <a key={item.app} href={item.url} target="_blank" rel="noreferrer" className="ob-btn secondary-button"
-        aria-current={guide === item.app || undefined} onClick={() => setGuide(item.app)}>{item.app} ↗</a>)}
+        aria-current={guide === item.app || undefined} onClick={() => setGuide(item.app)}>{t(item.app)} ↗</a>)}
     </div>
-    {guide && <ol className="calendar-subscriptions-guide">{steps.map((step) => <li key={step}>{step}</li>)}</ol>}
-    <button type="button" className="ob-btn primary-button" disabled={busy} onClick={() => void pasteAndAdd()}>{busy ? "读取中…" : "粘贴并接入"}</button>
+    {guide && <ol className="calendar-subscriptions-guide">{steps.map((step) => <li key={step}>{t(step)}</li>)}</ol>}
+    <button type="button" className="ob-btn primary-button" disabled={busy} onClick={() => void pasteAndAdd()}>{busy ? t("读取中…") : t("粘贴并接入")}</button>
     <form className="calendar-subscriptions-form" onSubmit={(event) => { event.preventDefault(); if (link.trim()) void add(); }}>
-      <input type="url" inputMode="url" value={link} onChange={(event) => setLink(event.target.value)} placeholder="或手动粘贴：webcal://… 或 https://…ics" aria-label="日历订阅链接" disabled={busy} />
-      <input value={label} onChange={(event) => setLabel(event.target.value)} placeholder="名称（可选，如「课表」）" aria-label="日历名称" maxLength={40} disabled={busy} />
-      <button type="submit" className="ob-btn secondary-button" disabled={busy || !link.trim()}>接入</button>
+      <input type="url" inputMode="url" value={link} onChange={(event) => setLink(event.target.value)} placeholder={t("或手动粘贴：webcal://… 或 https://…ics")} aria-label={t("日历订阅链接")} disabled={busy} />
+      <input value={label} onChange={(event) => setLabel(event.target.value)} placeholder={t("名称（可选，如「课表」）")} aria-label={t("日历名称")} maxLength={40} disabled={busy} />
+      <button type="submit" className="ob-btn secondary-button" disabled={busy || !link.trim()}>{t("接入")}</button>
     </form>
     {message && <p role="status" className="muted">{message}</p>}
-    <small className="muted">链接相当于这本日历的钥匙：加密保存，只用来读取，不进备份。</small>
+    <small className="muted">{t("链接相当于这本日历的钥匙：加密保存，只用来读取，不进备份。")}</small>
   </section>;
 }

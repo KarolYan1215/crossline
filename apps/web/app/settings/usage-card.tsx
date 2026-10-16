@@ -1,5 +1,6 @@
 import type { ModelUsageSummary } from "@crossline/db";
 import { BarChart, Sparkline } from "../ui/charts";
+import { tFor, type Locale } from "../../lib/i18n";
 
 /** Each Skill by what it does for the person; no model names (decided 2026-10-07). */
 const FUNCTION_LABEL: Record<string, string> = {
@@ -17,7 +18,8 @@ const k = (n: number) => Math.round(n / 100) / 10;
  * Model use over the last week by function: tokens as bars (hover for runs, average and longest time, failures and repairs) and the
  * daily total as a trend. It is the app's own count of what the runtime reported, not the account's quota.
  */
-export function UsageCard({ summary, daily, days }: { summary: ModelUsageSummary[]; daily: Array<{ day: string; runs: number; totalTokens: number }>; days: number }) {
+export function UsageCard({ summary, daily, days, locale }: { summary: ModelUsageSummary[]; daily: Array<{ day: string; runs: number; totalTokens: number }>; days: number; locale?: Locale }) {
+  const t = tFor(locale);
   const byFunction = new Map<string, { tokens: number; runs: number; failed: number; repairs: number; longest: number; seconds: number }>();
   for (const row of summary) {
     const key = label(row.skill);
@@ -28,15 +30,17 @@ export function UsageCard({ summary, daily, days }: { summary: ModelUsageSummary
   const rows = [...byFunction].sort((a, b) => b[1].tokens - a[1].tokens);
   const total = rows.reduce((sum, [, row]) => sum + row.tokens, 0);
   const runs = rows.reduce((sum, [, row]) => sum + row.runs, 0);
-  if (!rows.length) return <p className="muted">近 {days} 天没有模型调用。</p>;
+  if (!rows.length) return <p className="muted">{t("近 {{days}} 天没有模型调用。", { days })}</p>;
   return <div className="st-usage">
     <div className="st-usage-head">
-      <div className="ui-stat"><b>{k(total)}k</b><span>近 {days} 天 tokens</span></div>
-      <div className="ui-stat"><b>{runs}</b><span>调用次数</span></div>
-      <Sparkline label="每日 tokens" unit="k" width={160} height={36} values={daily.map((day) => k(day.totalTokens))}
-        labels={daily.map((day) => `${day.day.slice(5)} · ${day.runs} 次`)} />
+      <div className="ui-stat"><b>{k(total)}k</b><span>{t("近 {{days}} 天 tokens", { days })}</span></div>
+      <div className="ui-stat"><b>{runs}</b><span>{t("调用次数")}</span></div>
+      <Sparkline label={t("每日 tokens")} unit="k" width={160} height={36} values={daily.map((day) => k(day.totalTokens))}
+        labels={daily.map((day) => t("{{day}} · {{count}} 次", { day: day.day.slice(5), count: day.runs }))} />
     </div>
-    <BarChart label="按功能的 tokens" unit="k" data={rows.map(([name, row]) => ({ label: name, value: k(row.tokens),
-      title: `${name}：${k(row.tokens)}k tokens · ${row.runs} 次 · 平均 ${Math.round(row.seconds / Math.max(1, row.runs))} 秒 · 最长 ${Math.round(row.longest)} 秒${row.failed ? ` · 失败 ${row.failed}` : ""}${row.repairs ? ` · 重试 ${row.repairs}` : ""}` }))} />
+    <BarChart label={t("按功能的 tokens")} unit="k" data={rows.map(([name, row]) => ({ label: t(name), value: k(row.tokens),
+      title: [`${t(name)}${locale === "en" ? ": " : "："}${k(row.tokens)}k tokens`, t("{{count}} 次", { count: row.runs }),
+        t("平均 {{seconds}} 秒", { seconds: Math.round(row.seconds / Math.max(1, row.runs)) }), t("最长 {{seconds}} 秒", { seconds: Math.round(row.longest) }),
+        ...(row.failed ? [t("失败 {{n}}", { n: row.failed })] : []), ...(row.repairs ? [t("重试 {{n}}", { n: row.repairs })] : [])].join(" · ") }))} />
   </div>;
 }
