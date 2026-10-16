@@ -78,13 +78,13 @@ test("mail is written in the reader's language: the page's cookie for a new addr
   // A sign-up from an English page.
   await auth.api.sendVerificationOTP!({ body: { email: "en@example.com", type: "sign-in" }, headers: new Headers({ cookie: "crossline-locale=en" }) });
   const english = read().find((message) => message.to === "en@example.com")!;
-  expect(english.subject).toMatch(/^Crossline sign-in code \d{6}$/);
-  expect(english.url).toMatch(/^Your code: \d{6} \(valid for 10 minutes\)$/);
+  expect(english.subject).toMatch(/^Your Crossline sign-in code: \d{6}$/);
+  expect(english.url).toMatch(/^Your sign-in code is \d{6}\. It is valid for 10 minutes\.$/);
   // An account that chose English gets English with no cookie at all.
   const otp = /\d{6}/.exec(english.url)![0];
   const signedIn = await auth.api.signInEmailOTP!({ body: { email: "en@example.com", otp } }) as { user: { id: string } };
   chosen.set(signedIn.user.id, "en");
   rmSync(mailbox, { recursive: true, force: true });
   await auth.api.sendVerificationOTP!({ body: { email: "en@example.com", type: "sign-in" } });
-  expect(read()[0]!.subject).toMatch(/^Crossline sign-in code \d{6}$/);
+  expect(read()[0]!.subject).toMatch(/^Your Crossline sign-in code: \d{6}$/);
 }, 30_000);
