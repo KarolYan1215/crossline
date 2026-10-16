@@ -30,20 +30,25 @@ start() {
 if [ "$want" = all ] || [ "$want" = assess ]; then
   # The quick test is what many people use at once: the largest share after the worker, and a heap ceiling under it so a burst of
   # posters and figures is collected before the container is near its limit.
-  start assess --env-file /srv/assess/assess.env -v /srv/assess/data:/data -p 127.0.0.1:3340:3340 --memory 350m --memory-swap 350m \
-    -e NODE_OPTIONS=--max-old-space-size=256 "$assess_image"
+  start assess --env-file /srv/assess/assess.env -v /srv/assess/data:/data -p 127.0.0.1:3340:3340 --memory 300m --memory-swap 300m \
+    -e NODE_OPTIONS=--max-old-space-size=224 "$assess_image"
 fi
 # The web app and the worker share the host's network (they talk on 127.0.0.1, as on the owner's machine) and one data/state volume.
 # Every container has a memory ceiling with no swap beyond it: on 2026-10-16 milestone design, a portrait rewrite and a figure ran at
 # once with no ceiling, the host swapped until Caddy and SSH stopped answering, and both sites were down. Over its ceiling a container
 # is killed and restarted by Docker instead (the worker's Codex runtimes are its children, so they count against the worker's).
-# The ceilings add up to 1.23 GB on a host with 1.6 GB: the first ones (1.7 GB) left nothing for the system, and the next deploy's image
+# The ceilings add up to 1.25 GB on a host with 1.6 GB: the first ones (1.7 GB) left nothing for the system, and the next deploy's image
 # pull froze the host again while the worker planned twenty milestones (2026-10-16). Keep their sum at least 350 MB under the host's.
+# Measured on 2026-10-16 (scripts/load-assess.ts, scripts/load-app.ts): assess peaked at 168 MB with 25 people at once; ten people
+# opening pages killed the web container twice at 280 MB, and the worker holds about 170 MB of its own once Codex threads are released.
 if [ "$want" = all ] || [ "$want" = web ]; then
   # A Node heap ceiling under the container's: the heap is collected harder before the container is anywhere near being killed.
-  start crossline-web --network host --env-file /srv/crossline/app.env --memory 280m --memory-swap 280m -e NODE_OPTIONS=--max-old-space-size=208 \
+  # Through apps/web/queue-server.mjs when the image has it: page renders wait in line (four at a time) instead of all holding memory.
+  web_cmd="node_modules/.bin/next start --hostname 127.0.0.1 --port 3210"
+  if docker run --rm --entrypoint test "$app_image" -f /repo/apps/web/queue-server.mjs; then web_cmd="node queue-server.mjs --hostname 127.0.0.1 --port 3210"; fi
+  start crossline-web --network host --env-file /srv/crossline/app.env --memory 400m --memory-swap 400m -e NODE_OPTIONS=--max-old-space-size=300 \
     -v /srv/crossline/data:/data -v /srv/crossline/state:/state -v /srv/crossline/codex:/opt/codex:ro \
-    -w /repo/apps/web "$app_image" node_modules/.bin/next start --hostname 127.0.0.1 --port 3210
+    -w /repo/apps/web "$app_image" $web_cmd
 fi
 if [ "$want" = all ] || [ "$want" = worker ]; then
   # The worker's heartbeat lock outlives a removed container and reads as fresh for 45 minutes, so the new worker would exit
@@ -54,7 +59,7 @@ if [ "$want" = all ] || [ "$want" = worker ]; then
   # live outside the Node heap, so the heap gets well under half the container.
   worker_cmd="/repo/node_modules/.bin/tsx src/index.ts"
   if docker run --rm --entrypoint test "$app_image" -f /repo/apps/worker/dist/index.mjs; then worker_cmd="node dist/index.mjs"; fi
-  start crossline-worker --network host --env-file /srv/crossline/app.env --memory 600m --memory-swap 600m -e NODE_OPTIONS=--max-old-space-size=300 \
+  start crossline-worker --network host --env-file /srv/crossline/app.env --memory 550m --memory-swap 550m -e NODE_OPTIONS=--max-old-space-size=280 \
     -v /srv/crossline/data:/data -v /srv/crossline/state:/state -v /srv/crossline/codex:/opt/codex:ro \
     -w /repo/apps/worker "$app_image" $worker_cmd
 fi
