@@ -45,7 +45,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
           <span><b>{step.title}</b><small>{step.detail}</small></span>
         </li>)}</ol>
       <p className="login-privacy">{process.env.CROSSLINE_PUBLIC_BETA === "1"
-        ? "内测期间，资料和本人的 ChatGPT 登录保存在开发者维护的服务器上，不与其他账号共享；模型用本人的 ChatGPT 额度。退出登录即删除这台服务器上的 ChatGPT 登录。"
+        ? "每个账号的资料和 ChatGPT 登录各自隔离，不与其他账号共享；模型用本人的 ChatGPT 额度。退出登录即删除这台服务器上的 ChatGPT 登录。"
         : "资料和本人的 ChatGPT 登录都保存在运行这个 Crossline 的电脑上，只能通过私有网络访问；模型用本人的 ChatGPT 额度。"}</p>
       {process.env.ASSESS_BASE_URL?.startsWith("https://") && <p className="login-privacy">还没做过测评？<a href={process.env.ASSESS_BASE_URL}>先做 4 分钟的思维模式测评 →</a>
         用同一个邮箱登录，测评结果会带进访谈。</p>}
@@ -58,5 +58,5 @@ const LEDE = "研究、创业、创作、投资……每条主线有自己的长
 const HOSTED_STEPS = [
   { title: "用邮箱验证码登录", detail: "第一次用这个邮箱登录即创建账号，不用设密码" },
   { title: "连接本人的 ChatGPT", detail: "需要能用 Codex 的 ChatGPT 账号。先在 ChatGPT 网页版 设置 → 安全 开启「设备代码登录」（只需一次），进入后按页面提示输入一次性代码，约 1 分钟" },
-  { title: "回答几轮问题", detail: "约 30 分钟得到第一版一周安排" }
+  { title: "和 AI 做一次深度访谈", detail: "约 30 分钟得到一份全面的 AI 时代超级个体跨人生主线报告和跨主线排程计划" }
 ] as const;

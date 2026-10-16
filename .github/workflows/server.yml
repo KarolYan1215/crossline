@@ -41,7 +41,12 @@ jobs:
             sudo systemctl is-active caddy
             tail -5 /tmp/build-app.log 2>/dev/null || true
             for p in 3340 3210; do printf "%s " $p; curl -s -m 5 -o /dev/null -w "%{http_code}\n" http://127.0.0.1:$p/ || echo down; done
-            for c in assess crossline-web crossline-worker; do echo "== $c"; sudo docker logs --tail 40 $c 2>&1 || true; done'
+            for c in assess crossline-web crossline-worker; do echo "== $c"; sudo docker logs --tail 40 $c 2>&1 || true; done
+            echo "== mail"
+            # Never prints a secret: PASSWORD lines are left out, and only whether one is filled in is counted.
+            for f in /srv/crossline/app.env /srv/assess/assess.env; do echo "-- $f"; sudo grep -E "^(CROSSLINE|ASSESS)_(SMTP|MAIL)" $f | grep -v PASSWORD; printf "password filled: "; sudo grep -cE "^[A-Z_]+SMTP_PASSWORD=.+" $f || true; done
+            for p in 465 587 2465; do printf "smtp.resend.com:%s " $p; timeout 8 bash -c "</dev/tcp/smtp.resend.com/$p" 2>/dev/null && echo open || echo blocked; done
+            sudo docker logs crossline-web 2>&1 | grep -iE "mail|smtp|otp|EMAIL" | tail -20 || true'
       - name: Deploy
         if: (github.event_name == 'workflow_dispatch' && inputs.action == 'deploy') || contains(github.event.head_commit.message, '[deploy]')
         env:

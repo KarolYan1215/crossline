@@ -131,7 +131,7 @@ export function ResultScreen({ token }: { token: string }) {
           <li><b>在 ChatGPT 打开一项设置（只需一次）。</b>ChatGPT 网页版 → 设置 → 安全 → 开启「为 Codex、Excel、PowerPoint 和 Word 启用设备代码登录」。不开的话，第 4 步的代码会被拒绝。</li>
           <li><b>打开 App，用邮箱验证码登录。</b>第一次登录就是注册，不用设密码。</li>
           <li><b>连接你的 ChatGPT。</b>页面会给一串一次性代码，在 OpenAI 的页面登录你的账号并输入它，几秒后显示「已连接」。</li>
-          <li><b>开始访谈。</b>先把简历、课表、课程大纲拖进去，约 30 分钟得到第一版一周安排。</li>
+          <li><b>和 AI 做一次深度访谈。</b>先把简历、课表、课程大纲拖进去，约 30 分钟得到一份全面的 AI 时代超级个体跨人生主线报告和跨主线排程计划。</li>
         </ol>
         <a className="as-button as-primary" href={view.appUrl} target="_blank" rel="noreferrer">打开 Crossline →</a>
       </> : <>

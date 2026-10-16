@@ -67,7 +67,7 @@ export function LocalLogin() {
       state: phase === "entering" ? "done" : ready ? "current" : "next", busy: phase === "waiting" },
     { title: "回到这里，自动进入", detail: "不用刷新，登录完成后本页自动继续",
       state: phase === "entering" ? "current" : "next", busy: phase === "entering" },
-    { title: "回答几轮问题", detail: "约 30 分钟得到第一版一周安排", state: "next" }
+    { title: "和 AI 做一次深度访谈", detail: "约 30 分钟得到一份全面的 AI 时代超级个体跨人生主线报告和跨主线排程计划", state: "next" }
   ];
 
   return <div className="login-panel-body" aria-live="polite">
