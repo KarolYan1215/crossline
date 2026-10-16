@@ -134,6 +134,6 @@ test("English goals: composed, cleaned, split and read by the same rules", () =>
 test("goal part problems are written in the person's language", async () => {
   await import("@crossline/i18n/catalog/worker");
   expect(checkGoalParts([], "en")).toMatchObject({ ok: false, message: "Choose at least one attribute" });
-  expect(checkGoalParts(["rigorous", "rigorous"], "en")).toMatchObject({ ok: false, message: "“rigorous” and “rigorous” say the same thing" });
+  expect(checkGoalParts(["rigorous", "rigorous"], "en")).toMatchObject({ ok: false, message: '"rigorous" and "rigorous" overlap' });
   expect(checkGoalParts([])).toMatchObject({ ok: false, message: "至少选一个定语" });
 });
