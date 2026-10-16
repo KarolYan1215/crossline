@@ -52,6 +52,17 @@ jobs:
             curl -s -m 10 http://127.0.0.1:3211/v1/codex/status | head -c 600; echo
             # OpenAI answers an unsupported region with 403 unsupported_country; 401 means reachable.
             for u in https://auth.openai.com/ https://api.openai.com/v1/models https://chatgpt.com/; do printf "%s " $u; curl -s -m 10 -o /tmp/oa -w "%{http_code} " $u; grep -o "unsupported_country[a-z_]*" /tmp/oa | head -1; echo; done'
+      - name: Codex device-code probe
+        if: contains(github.event.head_commit.message, '[codex-probe]')
+        run: |
+          # Starts a device-code login in a throwaway CODEX_HOME, waits for the one-time code, then kills it and deletes the home.
+          # Only whether a code arrived is printed (the code itself is masked), so nothing in the log can be used to sign in.
+          ssh -i ~/.ssh/id -o ConnectTimeout=30 admin@"$HOST" '
+            sudo docker exec crossline-worker sh -c "
+              home=\$(mktemp -d); CODEX_HOME=\$home timeout 40 /opt/codex/codex login --device-auth > \$home/out 2>&1; echo exit=\$?
+              grep -oE \"https://[a-z.]+openai\.com[^ ]*\" \$home/out | head -2
+              if grep -qE \"[A-Z0-9]{4}-[A-Z0-9]{4,5}\" \$home/out; then echo DEVICE_CODE_RECEIVED; else echo NO_CODE; sed -E \"s/[A-Z0-9]{4}-[A-Z0-9]{4,5}/XXXX-XXXX/g\" \$home/out | tail -15; fi
+              rm -rf \$home"'
       - name: Deploy
         if: (github.event_name == 'workflow_dispatch' && inputs.action == 'deploy') || contains(github.event.head_commit.message, '[deploy]')
         env:
