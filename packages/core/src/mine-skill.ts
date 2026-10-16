@@ -62,7 +62,8 @@ export const MINE_SKILL_SCHEMA = object({
 const squash = (value: string) => value.replace(/[^\p{L}\p{N}]+/gu, "").toLowerCase();
 const isPublicHttps = (value: string) => /^https:\/\/[^\s/]+\.[^\s/]+(\/\S*)?$/i.test(value.trim());
 
-/** Why one rule cannot be kept, or "" when it can. */
+/** Why one rule cannot be kept, or "" when it can. The reasons are repair messages to the compiler Skill, not interface text. */
+/* i18n-ignore-start */
 export function mineRuleProblem(rule: MineRule, context: MineSkillContext): string {
   const known = new Map(context.materials.map((material) => [material.id, material]));
   if (rule.text.trim().length < 4) return "规则太短";
@@ -94,6 +95,7 @@ export function validateMineSkill(value: unknown, context: MineSkillContext): Mi
   if (repeated) throw Object.assign(new Error("MINE_SKILL_RULE_REPEATED"), { detail: `规则重复：「${repeated.text.slice(0, 60)}」` });
   return answer;
 }
+/* i18n-ignore-end */
 
 /** Repairs spent: keep the rules that stand on their own, drop the rest. Nothing kept means nothing is written. */
 export function keepMineSkill(value: unknown, context: MineSkillContext): MineSkillCompilation | undefined {
@@ -137,6 +139,8 @@ export const currentMineVersion = (stored: StoredMineSkill | undefined): MineSki
 
 const KIND_HEADING: Record<MineRuleKind, string> = { play: "打法", preference: "偏好", redline: "红线" };
 
+// The SKILL.md below is instructions to a model run (in the language the person's rules are in), not interface text.
+/* i18n-ignore-start */
 const mineDescription = (label: string, version?: number) =>
   `本人在「${label}」主线上的打法、偏好与红线${version ? `（第 ${version} 版）` : ""}。为这条主线做任务、规划步骤、写教程或验收时读取并照做。`;
 
@@ -187,3 +191,4 @@ export function renderMineSkill(input: { line: { id: string; label: string }; ve
   lines.push(`<!-- crossline-mine ${input.line.id} v${input.version} ${input.at} -->`, "");
   return { markdown: lines.join("\n"), rules: stored };
 }
+/* i18n-ignore-end */

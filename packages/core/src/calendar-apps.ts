@@ -1,3 +1,5 @@
+import { tFor, type Locale } from "./i18n";
+
 /**
  * The calendars the local Codex runtime reads through ChatGPT's connectors (docs/loop-and-scout.md §13), and whether each is connected.
  *
@@ -38,14 +40,15 @@ export function safeInstallUrl(value: unknown): string | null {
   }
 }
 
-export function calendarAppStatuses(installed: unknown, metadata: unknown): CalendarAppStatus[] {
+export function calendarAppStatuses(installed: unknown, metadata: unknown, locale?: Locale): CalendarAppStatus[] {
+  const t = tFor(locale);
   const installedApps = (installed as { apps?: InstalledApp[] } | undefined)?.apps ?? [];
   const read = (metadata as { apps?: AppMetadata[] } | undefined)?.apps ?? [];
   return CALENDAR_APPS.map(({ app, connectorId, label }) => {
     const entry = installedApps.find((item) => item.id === connectorId);
     const connected = entry?.enabled === true;
     return {
-      app, label, connected,
+      app, label: t(label), connected,
       callable: connected && entry?.callable === true,
       installUrl: safeInstallUrl(read.find((item) => item.id === connectorId)?.installUrl)
     };

@@ -223,6 +223,8 @@ export function validateCuratedArchetypes(value: unknown, context: { existingIds
     const id = String(item.id ?? "");
     const quantify = item.quantify as { basis?: string; unit?: string; minutesLow?: number; minutesHigh?: number } | undefined;
     const sources = (item.sources as Array<{ url?: string; title?: string }> ?? []).filter((source) => /^https:\/\/[^\s/]+\.[^\s]+$/.test(source.url ?? ""));
+    // Why an item was dropped: a record for the log, not interface text.
+    /* i18n-ignore-start */
     const problem = !/^[a-z][a-z_]{2,30}$/.test(id) ? "id 不是小写下划线标识" : taken.has(id) ? `id「${id}」已存在`
       : roles.length < 2 ? "角色少于 2 个" : !within(item.requires) || !within(item.endsWith) || !within(item.agentRoles) ? "规则引用了不在角色中的步骤"
       : !Array.isArray(item.firstBefore) || !(item.firstBefore as unknown[]).every((pair) => Array.isArray(pair) && pair.length === 2 && within(pair)) ? "先后规则不成对或越界"
@@ -231,6 +233,7 @@ export function validateCuratedArchetypes(value: unknown, context: { existingIds
       : (item.basedOnTaskIds as string[] ?? []).filter((taskId) => tasks.has(taskId)).length < 2 ? "依据的本人任务少于 2 个"
       : !sources.length ? "没有可核对的公开来源" : "";
     if (problem) { dropped.push(`${id || "（无 id）"}：${problem}`); continue; }
+    /* i18n-ignore-end */
     taken.add(id);
     kept.push({ id, label: String(item.label).trim().slice(0, 40),
       primitives: (item.primitives as string[] ?? []).filter((key): key is StructurePrimitive => key in STRUCTURE_PRIMITIVES),

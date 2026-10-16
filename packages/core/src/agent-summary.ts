@@ -37,6 +37,8 @@ function refuse(code: string, detail: string): never {
 /** What the filesystem says about a path relative to the task directory; supplied by the caller so this file stays free of `node:fs`. */
 export type ArtifactProbe = (relativePath: string) => { exists: boolean; bytes: number; insideDirectory: boolean };
 
+// The refusals below go back to the assistant as a repair message: instructions to a model, not interface text.
+/* i18n-ignore-start */
 export function validateAgentSummary(value: unknown, probe: ArtifactProbe): AgentSummary {
   const out = value as AgentSummary | undefined;
   if (!out || typeof out.summary !== "string" || !Array.isArray(out.artifacts) || !Array.isArray(out.verification)
@@ -58,3 +60,4 @@ export function validateAgentSummary(value: unknown, probe: ArtifactProbe): Agen
   }
   return out;
 }
+/* i18n-ignore-end */

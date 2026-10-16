@@ -1,5 +1,6 @@
 import { isAgentCategory, type AgentCategory } from "./agent-dispatch";
 import { mentionsExternalAction } from "./external-action";
+import { tFor, weekdayShort, type Locale } from "./i18n";
 import type { PublicSkillReview, PublicSkillVerdict, SkillScan } from "./public-skills";
 
 /**
@@ -60,14 +61,19 @@ const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
 export function stepLeavesMachine(title: string): boolean {
   const cleaned = title.replace(/(发布|发送|上传|投稿|提交)[^，。；,.;]{0,14}?(之前|前)/g, "")
     .replace(/(发布|发送|上传|投稿|提交)(包|稿|版|清单|计划|时间|日期|渠道|格式|要求|说明|材料|准备)/g, "")
-    .replace(/(不|未|无需|不要|不会|暂不|待|可|准备)(发布|发送|上传|投稿|提交)/g, "").replace(/\b(pre-?publish|publish-ready|draft post|before (sending|posting|publishing))\b/gi, "");
+    .replace(/(不|未|无需|不要|不会|暂不|待|可|准备)(发布|发送|上传|投稿|提交)/g, "").replace(/\b(pre-?publish|publish-ready|draft post|before (sending|posting|publishing))\b/gi, "")
+    // The same exemptions in English: the thing to publish (a package, a checklist, a time), and a sentence about *not* sending.
+    .replace(/\b(publish|post|send|upload|submi(t|ssion))(ing)? ?(package|draft|checklist|plan|time|date|channel|format|requirements|instructions|materials|prep)\b/gi, "")
+    .replace(/\b(do not|don't|does not|doesn't|not|never|no need to|without|ready to|stop before|until you) (publish|post|send|upload|submit)\w*\b/gi, "");
   // The shared pattern has no 「上传」 or 「付款」, and a workflow's step says 「上传到小红书」 as often as 「发布」.
   return mentionsExternalAction(cleaned) || /上传|付款|支付|\b(upload|pay)\b/i.test(cleaned);
 }
-const READS = /只读|读取|采集|浏览|核验|调研|搜索|检索|查找|下载公开|read|fetch|scrape|search|verify/i;
+const READS = /只读|读取|采集|浏览|核验|调研|搜索|检索|查找|下载公开|read|fetch|scrape|search|verify|browse|collect|look up|check|download public/i;
 const short = (value: unknown, max: number) => typeof value === "string" && value.trim().length > 0 && value.length <= max;
 
 /** Refuses a manifest that cannot be stored or would let a step that leaves the machine run without the person. */
+// The problems below go back to the assistant that wrote the manifest: repair messages, not interface text.
+/* i18n-ignore-start */
 export function validateWorkflowManifest(value: unknown, lineIds: string[]): WorkflowManifest {
   const manifest = value as WorkflowManifest;
   const problems: string[] = [];
@@ -103,6 +109,7 @@ export function validateWorkflowManifest(value: unknown, lineIds: string[]): Wor
   }
   if (access.length && !risks.length) problems.push("读取本人账号或网站的工作流须在 risks 里写明风险");
   if (problems.length) throw Object.assign(new Error("WORKFLOW_MANIFEST_INVALID"), { detail: problems.slice(0, 6).join("；") });
+  /* i18n-ignore-end */
   // Anything that sends, uploads, publishes, submits or pays is the person's, whatever the manifest says: such a step is handed to the
   // person rather than the workflow refused, since refusing for a sentence about *not* publishing threw good workflows away.
   return { ...manifest, schedule: manifest.trigger === "schedule" ? manifest.schedule : null,
@@ -143,10 +150,17 @@ export function workflowDue(schedule: WorkflowSchedule, lastRunAt: string | unde
   return (nowHour! * 60 + nowMinute!) - (hour! * 60 + minute!) < 180;
 }
 
-const DAY_LABEL: Record<Weekday, string> = { MO: "一", TU: "二", WE: "三", TH: "四", FR: "五", SA: "六", SU: "日" };
-export const scheduleLabel = (schedule: WorkflowSchedule | null): string => !schedule ? "按需"
-  : schedule.type === "daily" ? `每天 ${schedule.time}` : schedule.type === "weekdays" ? `工作日 ${schedule.time}`
-  : `每周${schedule.days.map((day) => DAY_LABEL[day]).join("、")} ${schedule.time}`;
+const DAY_NUMBER: Record<Weekday, number> = { MO: 1, TU: 2, WE: 3, TH: 4, FR: 5, SA: 6, SU: 0 };
+/** 「每周一、五 09:00」 / "Every Mon, Fri 09:00"; 「按需」 / "On request". */
+export const scheduleLabel = (schedule: WorkflowSchedule | null, locale?: Locale): string => {
+  const t = tFor(locale);
+  if (!schedule) return t("按需");
+  if (schedule.type === "daily") return t("每天 {{time}}", { time: schedule.time });
+  if (schedule.type === "weekdays") return t("工作日 {{time}}", { time: schedule.time });
+  const days = locale === "en" ? schedule.days.map((day) => weekdayShort(locale, DAY_NUMBER[day])).join(", ")
+    : schedule.days.map((day) => weekdayShort(locale, DAY_NUMBER[day]).slice(1)).join("、");
+  return t("每周{{days}} {{time}}", { days, time: schedule.time });
+};
 
 /** Where a grown workflow came from: two accepted results of one kind, the person's words, or a task the library had nothing for. */
 export type WorkflowOrigin = { kind: "repeated"; taskIds: string[] } | { kind: "asked"; text: string; requestId: string };

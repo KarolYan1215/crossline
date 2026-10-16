@@ -9,7 +9,7 @@
  * phrase "work order", so nothing at all qualified.
  */
 export const EXTERNAL_ACTION_PATTERN =
-  /\b(email|message|publish|post|submit|purchase|sell|buy|sign|legal|transfer|delete|trade)\b|邮件|发送|发布|投稿|提交|购买|出售|签署|法律|转账|删除|交易|订单|券商|产权|财产/i;
+  /\b(email|message|publish|post|submit|purchase|sell|buy|sign|legal|transfer|delete|trade)\b|\b(e-?mails?|emailing|emailed|send|sends|sending|sent|messages|messaging|publish(es|ed|ing)|posting|submits|submitted|submitting|submission|purchas(es|ed|ing)|selling|buying|signs|signing|transfers|transferring|deletes|deleting|trades|trading|brokerage|broker)\b|邮件|发送|发布|投稿|提交|购买|出售|签署|法律|转账|删除|交易|订单|券商|产权|财产/i;
 
 export function mentionsExternalAction(...texts: Array<string | undefined>): boolean {
   return EXTERNAL_ACTION_PATTERN.test(texts.filter(Boolean).join(" "));

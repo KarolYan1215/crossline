@@ -1,3 +1,5 @@
+import { tFor, type Locale } from "./i18n";
+
 /**
  * The guard rails for the assistant that runs with a shell and file access.
  *
@@ -20,6 +22,8 @@ export type GuardContext = {
   writableRoots?: string[];
   /** The person's home directory, so `~` and `%USERPROFILE%` can be recognised. */
   homeDir: string;
+  /** The language of the reasons, which the person reads when a step is refused or asked about (default Chinese). */
+  locale?: Locale | undefined;
 };
 
 /** Lower-cased, backslashes, and `.`/`..` resolved by hand: this file ships to the browser too, so it cannot borrow node's path. */
@@ -80,21 +84,22 @@ const ASK: Array<{ rule: string; reason: string; pattern: RegExp }> = [
 const WINDOWS_ROOT = /^[a-z]:\\?$/i;
 
 export function decideCommand(command: string, context: GuardContext): GuardDecision {
+  const t = tFor(context.locale);
   const text = command.trim();
   if (!text) return { decision: "allow", rule: "empty", reason: "" };
   // A path is a path whichever way it is written: the quoted, forward-slash and 8.3 spellings of a secret location are all caught here.
   const unquoted = text.replace(/["'`]/g, "");
   for (const token of unquoted.split(/\s+|[,;|&()<>]/).filter(Boolean)) {
-    if (isSecretPath(token)) return { decision: "deny", rule: "secret.path", reason: `「${token.slice(0, 80)}」是凭据、密钥或会话所在的位置，不读不写` };
+    if (isSecretPath(token)) return { decision: "deny", rule: "secret.path", reason: t("「{{path}}」是凭据、密钥或会话所在的位置，不读不写", { path: token.slice(0, 80) }) };
   }
-  if (isSecretPath(unquoted)) return { decision: "deny", rule: "secret.path", reason: "命令里涉及凭据、密钥或会话所在的位置，不读不写" };
-  for (const entry of NEVER) if (entry.pattern.test(text)) return { decision: "deny", rule: entry.rule, reason: entry.reason };
+  if (isSecretPath(unquoted)) return { decision: "deny", rule: "secret.path", reason: t("命令里涉及凭据、密钥或会话所在的位置，不读不写") };
+  for (const entry of NEVER) if (entry.pattern.test(text)) return { decision: "deny", rule: entry.rule, reason: t(entry.reason) };
   // Deleting from a root or from the home directory is never a task.
   if (/(remove-item|\brm\b|\bdel\b|\brmdir\b|\brd\b)[^|;&]*(-recurse|\s-r|\s\/s)/i.test(text)) {
     for (const token of unquoted.split(/\s+/)) {
       const cleaned = token.replace(/\/$/, "");
       if (WINDOWS_ROOT.test(cleaned) || /^(~|\$home|\$env:userprofile|%userprofile%)\\?\*?$/i.test(cleaned) || normalise(cleaned) === normalise(context.homeDir)) {
-        return { decision: "deny", rule: "delete.root", reason: "不删除磁盘根目录或整个用户目录" };
+        return { decision: "deny", rule: "delete.root", reason: t("不删除磁盘根目录或整个用户目录") };
       }
     }
   }
@@ -105,7 +110,7 @@ export function decideCommand(command: string, context: GuardContext): GuardDeci
     // to the person twice in one evening (2026-10-14). Leaving it — `..`, `~`, a drive, an environment variable — still asks.
     if ((entry.rule === "delete.recursive" || entry.rule === "move.bulk")
       && (mentionsOnly(withoutShell(unquoted), [context.taskDir, ...(context.writableRoots ?? [])]) || onlyRelative(withoutShell(unquoted)))) continue;
-    return { decision: "ask", rule: entry.rule, reason: entry.reason };
+    return { decision: "ask", rule: entry.rule, reason: t(entry.reason) };
   }
   return { decision: "allow", rule: "default", reason: "" };
 }
@@ -127,11 +132,12 @@ function mentionsOnly(command: string, roots: string[]): boolean {
 
 /** A change the agent wants to make to files: confined to the task's own directories. */
 export function decideFileChange(paths: string[], context: GuardContext): GuardDecision {
+  const t = tFor(context.locale);
   const roots = [context.taskDir, ...(context.writableRoots ?? [])];
   for (const path of paths) {
-    if (isSecretPath(path)) return { decision: "deny", rule: "secret.path", reason: `「${path.slice(0, 80)}」是凭据、密钥或会话所在的位置` };
+    if (isSecretPath(path)) return { decision: "deny", rule: "secret.path", reason: t("「{{path}}」是凭据、密钥或会话所在的位置", { path: path.slice(0, 80) }) };
     if (!roots.some((root) => inside(path, root))) {
-      return { decision: "deny", rule: "write.outside", reason: `只能写任务自己的目录；「${path.slice(0, 80)}」在外面。需要改原文件时，把改动做成补丁放在任务目录里，由你合并` };
+      return { decision: "deny", rule: "write.outside", reason: t("只能写任务自己的目录；「{{path}}」在外面。需要改原文件时，把改动做成补丁放在任务目录里，由你合并", { path: path.slice(0, 80) }) };
     }
   }
   return { decision: "allow", rule: "write.inside", reason: "" };
@@ -141,8 +147,9 @@ const READ_ONLY_TOOL = /^(list|get|search|read|fetch|query|describe|find|lookup|
 const SENDS = /send|reply|forward|post|publish|share|invite|respond/i;
 
 /** An MCP tool call: reading is allowed, sending is refused, and anything else — including a tool nobody recognises — goes to the person. */
-export function decideMcpTool(server: string, tool: string): GuardDecision {
-  if (SENDS.test(tool)) return { decision: "deny", rule: "mcp.send", reason: `「${server}」的 ${tool} 会对外发送，只能由本人完成` };
+export function decideMcpTool(server: string, tool: string, locale?: Locale): GuardDecision {
+  const t = tFor(locale);
+  if (SENDS.test(tool)) return { decision: "deny", rule: "mcp.send", reason: t("「{{server}}」的 {{tool}} 会对外发送，只能由本人完成", { server, tool }) };
   if (READ_ONLY_TOOL.test(tool)) return { decision: "allow", rule: "mcp.read", reason: "" };
-  return { decision: "ask", rule: "mcp.write", reason: `「${server}」的 ${tool} 可能会改动账号数据` };
+  return { decision: "ask", rule: "mcp.write", reason: t("「{{server}}」的 {{tool}} 可能会改动账号数据", { server, tool }) };
 }

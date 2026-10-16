@@ -1,3 +1,5 @@
+import { monthDay, tFor, weekdayShort, type Locale } from "./i18n";
+
 /**
  * Fixed events: the person's own commitments with a time — a class every Monday and Friday, an exam on one day, a meeting they told the
  * input box about (decided 2026-10-08). Two kinds, kept apart because a calendar treats them differently: a **recurring** event is one
@@ -23,8 +25,8 @@ export type FixedEvent = {
   source: "input" | "interview" | "file";
 };
 
-const WEEKDAY = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
-const md = (day: string) => `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}`;
+const md = (day: string, locale?: Locale) => locale === "en" ? monthDay(locale, day) : `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}`;
+const weekdayOf = (day: string) => new Date(`${day}T12:00:00Z`).getUTCDay();
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
 
@@ -35,11 +37,17 @@ export function occurrences(event: FixedEvent, days: string[]): string[] {
   return days.filter((day) => day >= from && day <= until && !exceptions.includes(day) && weekdays.includes(new Date(`${day}T12:00:00Z`).getUTCDay()));
 }
 
-/** 「每周一、五 14:30–15:45（9/4–12/7）」 or 「10/27 周二 14:30–15:45」. */
-export function describeEvent(event: FixedEvent): string {
-  if (!event.repeat) return `${md(event.date)} ${WEEKDAY[new Date(`${event.date}T12:00:00Z`).getUTCDay()]} ${event.start}–${event.end}`;
-  const days = [...event.repeat.weekdays].sort((a, b) => ((a + 6) % 7) - ((b + 6) % 7)).map((day) => WEEKDAY[day]!.slice(1)).join("、");
-  return `每周${days} ${event.start}–${event.end}（${md(event.repeat.from)}–${md(event.repeat.until)}）`;
+/** 「每周一、五 14:30–15:45（9/4–12/7）」 or 「10/27 周二 14:30–15:45」; in English "Every Mon, Fri 14:30–15:45 (Sep 4–Dec 7)", "Tue Oct 27 14:30–15:45". */
+export function describeEvent(event: FixedEvent, locale?: Locale): string {
+  const t = tFor(locale);
+  const time = `${event.start}–${event.end}`;
+  if (!event.repeat) {
+    const date = md(event.date, locale), weekday = weekdayShort(locale, weekdayOf(event.date));
+    return locale === "en" ? `${weekday} ${date} ${time}` : `${date} ${weekday} ${time}`;
+  }
+  const sorted = [...event.repeat.weekdays].sort((a, b) => ((a + 6) % 7) - ((b + 6) % 7));
+  const days = locale === "en" ? sorted.map((day) => weekdayShort(locale, day)).join(", ") : sorted.map((day) => weekdayShort(locale, day).slice(1)).join("、");
+  return t("每周{{days}} {{time}}（{{from}}–{{until}}）", { days, time, from: md(event.repeat.from, locale), until: md(event.repeat.until, locale) });
 }
 
 /** An event that is whole: a title, times in order, and either a valid day or a valid series. */
@@ -78,7 +86,8 @@ const GRAPH_DAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "fri
 export const graphWeekdays = (weekdays: number[]) => weekdays.map((day) => GRAPH_DAYS[day]!);
 
 /** The events' occurrences on these days, as busy plan blocks (`event:<id>:<day>`). */
-export function fixedEventBlocks(events: FixedEvent[], days: string[]) {
+export function fixedEventBlocks(events: FixedEvent[], days: string[], locale?: Locale) {
+  const t = tFor(locale);
   return events.filter(validFixedEvent).flatMap((event) => occurrences(event, days).map((day) => ({ id: `event:${event.id}:${day}`, lane: "human" as const,
-    title: event.title, day, start: event.start, end: event.end, source: event.repeat ? "日程·每周" : "日程", readOnly: true })));
+    title: event.title, day, start: event.start, end: event.end, source: event.repeat ? t("日程·每周") : t("日程"), readOnly: true })));
 }

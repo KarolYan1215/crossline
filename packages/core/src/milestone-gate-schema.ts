@@ -213,11 +213,13 @@ export function validateMilestoneProposal(value: unknown, context: MilestoneProp
     for (const proposal of proposals) {
       if (!context.profile.projects.some((project) => project.id === proposal.projectId)) {
         const error = new Error("PROPOSAL_TARGET_PROJECT_UNKNOWN");
+        // i18n-ignore: a repair message to the model
         (error as Error & { detail?: string }).detail = `targetProposals 里的 projectId「${proposal.projectId}」不是这个人的项目。`;
         throw error;
       }
       if (proposal.value.trim().length < 2 || proposal.why.trim().length < 10) {
         const error = new Error("PROPOSAL_TARGET_UNREASONED");
+        // i18n-ignore: a repair message to the model
         (error as Error & { detail?: string }).detail = `「${proposal.projectId}」的目标要写清楚是什么，并用一两句话说明为什么按这个人的长期目标它合适。`;
         throw error;
       }

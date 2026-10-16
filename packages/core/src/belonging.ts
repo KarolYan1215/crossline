@@ -9,7 +9,7 @@ import { courseCodeOf } from "./task-title";
 export type KnownProject = { id: string; name: string; identityId: string };
 
 const squash = (text: string) => text.replace(/[\s_\-·.:：]+/g, "").toLowerCase();
-const UNCERTAIN = /待确认|可能|未定|不确定|[?？]/u;
+const UNCERTAIN = /待确认|可能|未定|不确定|[?？]|\b(possibly|maybe|probably|likely|perhaps|unconfirmed|uncertain|unsure|tbd|tbc)\b/iu;
 
 /** Known projects a piece of text names: by course code, or by a name of three or more characters appearing in it. */
 export function projectsNamedIn(text: string, projects: KnownProject[]): KnownProject[] {

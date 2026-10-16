@@ -1,5 +1,6 @@
 import { mentionsExternalAction } from "./external-action";
 import { AGENT_MAX_RUNS, classifyAgentFailure } from "./agent-failure";
+import { tFor, type Locale } from "./i18n";
 
 /**
  * Which work the assistant may take, and what to hand it.
@@ -34,20 +35,23 @@ export const AGENT_CATEGORY_EXPLAINED: Record<AgentCategory, string> = {
   media_edit: "按本人的素材剪辑视频与音频、加字幕、转码、裁图和做封面；成片只存放在产出目录，不上传不发布，由本人发出。"
 };
 
-/** Ordered: a tie goes to the earlier kind, because code and data are the most specific words. */
+/**
+ * Ordered: a tie goes to the earlier kind, because code and data are the most specific words. Each list reads Chinese and English
+ * wording alike: an English workspace's analyses and steps are written in English.
+ */
 const KEYWORDS: Array<[AgentCategory, RegExp]> = [
   // Before code: 「用脚本剪视频」 is editing, and the words for it are the more specific ones.
-  ["media_edit", /剪辑|剪视频|剪片|粗剪|精剪|成片|视频|音频|配音|字幕|转码|封面图|裁图|抠图|ffmpeg|vlog/i],
-  ["data_code_sim", /代码|脚本|程序|编程|仿真|模拟|数据|绘图|画图|图表|可视化|python|matlab|neurosim|spice|netlist|matplotlib|调试|重构|单元测试|批处理|跑一遍|拟合/i],
-  ["read_research_organize", /阅读|读一?[遍下]|文献|调研|检索|搜索|查找|查证|核实|整理|摘要|总结|笔记|资料|对照|清单|综述|梳理|纪要/],
-  ["draft_text", /起草|草稿|撰写|拟写|润色|改写|邮件|报告|帖子|文案|申请材料|说明书|提纲/],
-  ["files_calendar_prep", /归档|重命名|文件夹|整理文件|日程|会前|备齐|备料|准备材料|检查表|模板/]
+  ["media_edit", /剪辑|剪视频|剪片|粗剪|精剪|成片|视频|音频|配音|字幕|转码|封面图|裁图|抠图|ffmpeg|vlog|\b(video|videos|audio|footage|voice-?over|subtitles?|captions?|transcod\w*|thumbnails?|cover image|crop\w*|rough cut|final cut)\b/i],
+  ["data_code_sim", /代码|脚本|程序|编程|仿真|模拟|数据|绘图|画图|图表|可视化|python|matlab|neurosim|spice|netlist|matplotlib|调试|重构|单元测试|批处理|跑一遍|拟合|\b(code|coding|scripts?|program\w*|simulat\w*|data|dataset|plot\w*|charts?|graphs?|visuali[sz]\w*|debug\w*|refactor\w*|unit tests?|batch|curve fit\w*)\b/i],
+  ["read_research_organize", /阅读|读一?[遍下]|文献|调研|检索|搜索|查找|查证|核实|整理|摘要|总结|笔记|资料|对照|清单|综述|梳理|纪要|\b(read|reading|literature|papers?|research|search\w*|look up|verify|verif\w+|fact-?check\w*|organi[sz]e\w*|summar\w+|notes|sources|compare|comparison|checklist|survey|minutes)\b/i],
+  ["draft_text", /起草|草稿|撰写|拟写|润色|改写|邮件|报告|帖子|文案|申请材料|说明书|提纲|\b(draft\w*|write|writing|polish\w*|rewrite|rewriting|emails?|reports?|(?:social|blog) posts?|copywriting|application materials?|outline)\b/i],
+  ["files_calendar_prep", /归档|重命名|文件夹|整理文件|日程|会前|备齐|备料|准备材料|检查表|模板|\b(archive|archiving|renam\w+|folders?|organi[sz]e files|schedul\w+|calendar|before the meeting|prepare materials|templates?)\b/i]
 ];
 
 /** The kind of work a sentence points at (the first keyword list it matches), or undefined when it points at none. */
 export const categoryFromWording = (text: string): AgentCategory | undefined => KEYWORDS.find(([, pattern]) => pattern.test(text))?.[0];
 
-const PERSONS_CALL = /选定|选出|挑选|决定|拍板|亲自|本人确认|和.{0,8}(谈|聊|面谈)/;
+const PERSONS_CALL = /选定|选出|挑选|决定|拍板|亲自|本人确认|和.{0,8}(谈|聊|面谈)|\b(choose|choosing|chose|select|selecting|pick|picking|decide|deciding|decision|in person|personally|sign off)\b|\b(talk|speak|meet)s? (to|with)\b/i;
 const GRADED = /作业|小测|测验|考试|期中|期末|课程项目|大作业|实验报告|homework|\bhw\s?\d|quiz|exam|midterm|final project|\blab\b|assignment|take-?home/i;
 
 export type DispatchableOrder = {
@@ -67,7 +71,8 @@ const parts = (value: unknown): Part[] => Array.isArray(value) ? value as Part[]
  * Whether a work order has anything the assistant can take, and in what words to hand it over. `category` is `undefined` when the
  * wording does not point at one kind: the person chooses at dispatch, and nothing starts by itself.
  */
-export function planAssistantTask(order: DispatchableOrder, context: { projectIsCourse: boolean; milestoneTitle?: string }): AssistantPlan {
+export function planAssistantTask(order: DispatchableOrder, context: { projectIsCourse: boolean; milestoneTitle?: string; locale?: Locale | undefined }): AssistantPlan {
+  const t = tFor(context.locale);
   const payload = (order.payload ?? {}) as { automationParts?: unknown; humanCore?: unknown; materialContract?: unknown; evidenceContract?: unknown;
     family?: string; riskTier?: string };
   const ai = parts(payload.automationParts).filter((part) => part.intent?.trim());
@@ -84,11 +89,15 @@ export function planAssistantTask(order: DispatchableOrder, context: { projectIs
   return {
     fit: true,
     category: best?.category,
-    why: best ? `AI 部分的描述指向「${AGENT_CATEGORIES[best.category]}」。` : "可自动部分未明确对应某一类工作，需本人选择。",
+    why: best ? t("AI 部分的描述指向「{{category}}」。", { category: t(AGENT_CATEGORIES[best.category]) }) : t("可自动部分未明确对应某一类工作，需本人选择。"),
+    // The task handed to the assistant is an instruction to a model, kept in one language.
+    /* i18n-ignore-start */
     what: [`目标：${order.intent}`, `请完成其中可由 AI 准备的部分：${ai.map((part, i) => `${i + 1}) ${part.intent}`).join("；")}`,
       contract.length ? `需要的材料或证据：${contract.join("；")}` : ""].filter(Boolean).join("\n"),
-    humanPart: human.length ? human.map((part) => part.intent).join("；") : "审阅并决定如何使用产出",
+    /* i18n-ignore-end */
+    humanPart: human.length ? human.map((part) => part.intent).join("；") : t("审阅并决定如何使用产出"),
     graded,
+    // i18n-ignore: an instruction to the assistant
     notes: graded ? "这是带评分的课程工作：只做学习辅助（讲解、你自己设计的练习、检查你写的、整理资料），不要生成可提交的答案、代码、报告或图表。" : "",
     delegated: false
   };
@@ -99,27 +108,32 @@ const categoryOf = (text: string): AgentCategory | undefined => KEYWORDS
   .filter((entry) => entry.hits > 0).sort((a, b) => b.hits - a.hits)[0]?.category;
 
 /** An errand small and internal enough to hand over whole (see the file comment); anything else stays the person's. */
-function delegateWhole(order: DispatchableOrder, human: Part[], context: { projectIsCourse: boolean; milestoneTitle?: string }): AssistantPlan {
-  const nothing = { fit: false as const, reason: "该任务没有可交给助手的部分，需本人完成。" };
+function delegateWhole(order: DispatchableOrder, human: Part[], context: { projectIsCourse: boolean; milestoneTitle?: string; locale?: Locale | undefined }): AssistantPlan {
+  const t = tFor(context.locale);
+  const nothing = { fit: false as const, reason: t("该任务没有可交给助手的部分，需本人完成。") };
   const payload = (order.payload ?? {}) as { family?: string; evidenceContract?: unknown };
   if (payload.family !== "preparation" && payload.family !== "review") return nothing;
   const text = `${order.intent} ${human.map((part) => part.intent).join(" ")} ${context.milestoneTitle ?? ""}`;
-  if (mentionsExternalAction(order.intent, ...human.map((part) => part.intent))) return { fit: false, reason: "这件事要对外（发送、提交、发布等），不整件交给助手。" };
-  if (context.projectIsCourse && GRADED.test(text)) return { fit: false, reason: "这是带评分的课程工作，不整件交给助手。" };
+  if (mentionsExternalAction(order.intent, ...human.map((part) => part.intent))) return { fit: false, reason: t("这件事要对外（发送、提交、发布等），不整件交给助手。") };
+  if (context.projectIsCourse && GRADED.test(text)) return { fit: false, reason: t("这是带评分的课程工作，不整件交给助手。") };
   // Choosing, deciding, doing it in person: the step *is* the person's judgement. One real run was handed 「选定一项创始人正在处理的
   // 真实事项」 and chose for them — and chose the app itself.
-  if (PERSONS_CALL.test(order.intent)) return { fit: false, reason: "该步骤需本人选择或决定，不整件交给助手。" };
+  if (PERSONS_CALL.test(order.intent)) return { fit: false, reason: t("该步骤需本人选择或决定，不整件交给助手。") };
   const evidence = Array.isArray(payload.evidenceContract)
     ? (payload.evidenceContract as Array<{ description?: string }>).map((item) => item.description).filter(Boolean) : [];
   const category = categoryOf(order.intent) ?? "read_research_organize";
   return {
     fit: true, category, delegated: true, graded: false, notes: "",
-    why: `这是一件内部的${payload.family === "review" ? "检查" : "准备"}工作，整件交给助手做，做完的文件直接作为证据交验收。`,
+    why: payload.family === "review"
+      ? t("这是一件内部的检查工作，整件交给助手做，做完的文件直接作为证据交验收。")
+      : t("这是一件内部的准备工作，整件交给助手做，做完的文件直接作为证据交验收。"),
+    /* i18n-ignore-start */
     what: [`这件事整件交给你做：${order.intent}`,
       evidence.length ? `交付物必须满足：${evidence.join("；")}` : "交付物：一份能直接用的文件",
       "只用你查得到、读得到的内容；需要本人才知道的事实（他的经历、别人的回复、私有数据），写进 needsHuman 说明缺什么，绝不编造。",
       "交付物写成 Markdown 或纯文本文件，放在工作目录里，并在 artifacts 里列出。"].join("\n"),
-    humanPart: "审阅产出，决定用不用"
+    /* i18n-ignore-end */
+    humanPart: t("审阅产出，决定用不用")
   };
 }
 
