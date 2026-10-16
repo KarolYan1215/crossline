@@ -158,6 +158,21 @@ export function planMerges(tasks: MergeTask[], sameByModel: ReadonlySet<string> 
 }
 function keeperOrNone(tasks: MergeTask[]): MergeTask | undefined { return tasks.length ? keeperOf(tasks) : undefined; }
 
+/**
+ * Checked before a new task is kept (the owner's direction of 2026-10-15: planning should not write a task the board already has; the
+ * daily merge is only the backstop). The open task `candidate` is the same work as, by the same rules the daily merge uses — the closest
+ * one when several match. A pair the rules leave unsure is not stopped here: it is created and left to the daily merge and its reviewer.
+ */
+export function duplicateOf(candidate: MergeTask, tasks: readonly MergeTask[]): { keep: MergeTask; why: string } | undefined {
+  let best: { keep: MergeTask; why: string; score: number } | undefined;
+  for (const other of tasks) {
+    if (other.id === candidate.id || !KEEPABLE.has(other.state)) continue;
+    const pair = comparePair(candidate, other);
+    if (pair.verdict === "same" && (!best || pair.score > best.score)) best = { keep: other, why: pair.why, score: pair.score };
+  }
+  return best && { keep: best.keep, why: best.why };
+}
+
 const str = { type: "string" };
 /** The reviewer's answer for the pairs the rules left open: `same` merges them. */
 export const TASK_MERGE_REVIEW_SCHEMA = { type: "object", additionalProperties: false, required: ["pairs"], properties: {

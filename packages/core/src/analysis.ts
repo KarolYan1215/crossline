@@ -3,6 +3,7 @@ import { trimLeakedTail } from "./text-hygiene";
 import { quoteSupportsDate } from "./date-schema";
 import { cleanTaskTitle, withCourse } from "./task-title";
 import { infoRequestTraits } from "./info-request";
+import { COMPLETION_FIELD, readModelCompletion, type ModelCompletion } from "./completion";
 
 export type AnalysisContext = {
   version: string;
@@ -34,8 +35,18 @@ export type AnalysisContext = {
   referenceClass?: Array<{ identityId: string; family: "preparation" | "review" | "deep_work"; title: string; llmP50Minutes: number; actualMinutes: number }>;
   /** v2: approved links between lines, so a byproduct can name where it helps. */
   relations?: Array<{ fromMilestoneId: string; toMilestoneId: string; kind: string; explanation: string }>;
+  /**
+   * v2: the open tasks already on the board (the task library included), so the analysis does not write one that exists again and can
+   * say which one a capture only adds to (`extendsTaskId`). Absent on contexts stored before it.
+   */
+  existingTasks?: ExistingTask[];
   policy: { tools: never[]; externalSideEffects: boolean; humanApprovalRequired: boolean };
 };
+
+/** An open task as a task-writing Skill sees it, so it does not write the same work twice (the owner's direction of 2026-10-15). */
+export type ExistingTask = { id: string; title: string; intent: string; lineId: string; projectId: string; dueDate: string; state: string };
+/** At most this many existing tasks go into a context: the nearest due first. */
+export const EXISTING_TASKS_LIMIT = 60;
 
 /** A dated fact read from the capture itself: when work can start (`release`) or must be done (`due`). */
 export type AnalysisDate = { kind: "release" | "due"; date: string; quote: string; approximate: boolean };
@@ -64,6 +75,10 @@ export type AnalysisProposal = Omit<WorkOrder, "id" | "ownerId" | "workspaceId" 
   dates: AnalysisDate[];
   waitingOn: AnalysisWaitingOn;
   byproducts: AnalysisByproduct[];
+  /** How finishing it is taken (`completion.ts`): judged from what the task is, not its wording. Absent on answers recorded before it. */
+  completion?: ModelCompletion;
+  /** The open task this capture only adds to (its id from `existingTasks`), "" when it is new work. */
+  extendsTaskId?: string;
 };
 
 type Schema = { type: string; properties?: Record<string, Schema>; required?: string[]; additionalProperties?: false;
@@ -113,7 +128,10 @@ export const ANALYSIS_OUTPUT_SCHEMA = object({
   dates: array(object({ kind: choice("release", "due"), date: str, quote: str, approximate: bool }), 0, 4),
   waitingOn: object({ who: optionalText, what: optionalText, expectedDate: optionalText, quote: optionalText }),
   byproducts: array(object({ lineId: str, milestoneId: optionalMilestoneId, artifact: line,
-    captureSteps: array(object({ step: line, minutes: number }), 0, 4), landing: object({ minutes: number, description: line }), why }), 0, 3)
+    captureSteps: array(object({ step: line, minutes: number }), 0, 4), landing: object({ minutes: number, description: line }), why }), 0, 3),
+  completion: COMPLETION_FIELD as unknown as Schema,
+  // An open task (from `existingTasks`) that already covers this capture's work, which this capture only adds to; "" for new work.
+  extendsTaskId: optionalText
 });
 
 // Only the JSON Schema subset used above is accepted; unknown keys fail closed.
@@ -153,7 +171,9 @@ const V2_CONTEXT = object({ version: choice("crossline.analysis.v2"), ...sharedC
     deadline: { type: "string", minLength: 0, maxLength: 20 } }), 0),
   referenceClass: array(object({ identityId: str, family, title: str, llmP50Minutes: number, actualMinutes: number }), 0, 5),
   relations: array(object({ fromMilestoneId: str, toMilestoneId: str, kind: str, explanation: { type: "string", minLength: 0, maxLength: 4000 } }), 0, 40),
-  personalPreferences: array(str, 0, 30) });
+  personalPreferences: array(str, 0, 30),
+  existingTasks: array(object({ id: str, title: str, intent: str, lineId: str, projectId: { type: "string", minLength: 0, maxLength: 4000 },
+    dueDate: { type: "string", minLength: 0, maxLength: 20 }, state: str }), 0, EXISTING_TASKS_LIMIT) });
 export const ANALYSIS_CONTEXT_VERSION = "crossline.analysis.v2";
 
 export function validateAnalysisContext(value: unknown): AnalysisContext {
@@ -161,9 +181,9 @@ export function validateAnalysisContext(value: unknown): AnalysisContext {
   // A v1 context stored before the rhythm existed has none; it reads as "nothing measured".
   const full = version === "crossline.analysis.v1" && value && typeof value === "object" && !("rhythm" in value)
     ? { ...(value as object), rhythm: { focusRunMinutes: 0, productiveMinutesPerDay: 0, planActualRatio: 0, observedDays: 0, completed: 0 } }
-    // A v2 context stored before personal preferences existed reads as "nothing learned yet".
-    : version === "crossline.analysis.v2" && value && typeof value === "object" && !("personalPreferences" in value)
-      ? { ...(value as object), personalPreferences: [] } : value;
+    // A v2 context stored before personal preferences (or the existing tasks) existed reads as "nothing learned yet" ("no tasks shown").
+    : version === "crossline.analysis.v2" && value && typeof value === "object" && (!("personalPreferences" in value) || !("existingTasks" in value))
+      ? { personalPreferences: [], existingTasks: [], ...(value as object) } : value;
   if (!matches(full, version === "crossline.analysis.v2" ? V2_CONTEXT : V1_CONTEXT)) throw new Error("ANALYSIS_CONTEXT_INVALID");
   const context = full as AnalysisContext;
   // Every milestone offered must be backed by a pack; the Skill picks the identity, the app never guesses it.
@@ -180,6 +200,8 @@ export function validateAnalysisProposal(value: unknown, input: AnalysisContext)
     ...(!("dates" in withBreakdown) ? { dates: [] } : {}),
     ...(!("waitingOn" in withBreakdown) ? { waitingOn: { who: "", what: "", expectedDate: "", quote: "" } } : {}),
     ...(!("byproducts" in withBreakdown) ? { byproducts: [] } : {}),
+    ...(!("completion" in withBreakdown) ? { completion: { mode: "self_evident", reason: "", why: "legacy", question: "", askAfterHours: 0 } } : {}),
+    ...(!("extendsTaskId" in withBreakdown) ? { extendsTaskId: "" } : {}),
     ...(!("title" in withBreakdown) ? { title: cleanTaskTitle(String((withBreakdown as { intent?: unknown }).intent ?? "")) || "未命名任务" } : {})
   } : {};
   const candidate = Object.keys(legacyExtras).length ? { ...(withBreakdown as object), ...legacyExtras } : withBreakdown;
@@ -352,6 +374,9 @@ export function validateAnalysisProposal(value: unknown, input: AnalysisContext)
     }
     seenLines.add(byproduct.lineId);
   }
+  if (!("completion" in legacyExtras)) proposal.completion = readModelCompletion(proposal.completion)!;
+  // Only an id the context offered: anything else is new work, and the code-level duplicate check still runs on it.
+  if (proposal.extendsTaskId && !(context.existingTasks ?? []).some((task) => task.id === proposal.extendsTaskId)) proposal.extendsTaskId = "";
   // What was never in the answer is not stored as if it had been; readers treat the absent fields as empty.
   if (injected) delete (proposal as Partial<AnalysisProposal>).estimateBreakdown;
   for (const key of Object.keys(legacyExtras)) delete (proposal as Partial<AnalysisProposal> & Record<string, unknown>)[key];

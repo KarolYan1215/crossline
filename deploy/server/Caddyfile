@@ -1,0 +1,16 @@
+# /etc/caddy/Caddyfile on the hosted beta's server (docs/beta-launch.md §10.6). Caddy gets and renews the certificates itself.
+# Only the two web apps are reachable; the worker's Codex supervisor (127.0.0.1:3211) and everything else stay on loopback.
+
+test.crossline.lol {
+	encode zstd gzip
+	header Strict-Transport-Security "max-age=31536000"
+	reverse_proxy 127.0.0.1:3340
+}
+
+app.crossline.lol {
+	encode zstd gzip
+	# The supervisor's routes are never served publicly, whatever proxies to what later.
+	@supervisor path /v1/*
+	respond @supervisor 404
+	reverse_proxy 127.0.0.1:3210
+}

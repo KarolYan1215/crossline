@@ -16,7 +16,7 @@
 .st-rows{margin:0;padding:0;list-style:none;display:grid;gap:6px}
 .st-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;padding:4px 0;border-top:1px solid var(--chalk)}
 .st-row:first-child{border-top:0}
-.st-row-label{flex:1 1 180px;display:grid;gap:1px;font-size:13px;min-width:0}
+.st-row-label{flex:1 1 240px;display:grid;gap:1px;font-size:13px;min-width:0}
 .st-row-label small{font-size:12px;color:var(--graphite);font-weight:400}
 .st-row-actions{display:inline-flex;gap:6px;align-items:center}
 .st-row-wrap{align-items:flex-start}
@@ -123,6 +123,22 @@
 .source-folders-preview p{margin:0;font-size:13px}
 .source-folders-preview ul{margin:0;padding-left:18px;font-size:12px;color:var(--graphite);overflow-wrap:anywhere}
 .source-folders-preview .ob-btn{justify-self:start}
+/* The preview's groups and files, the exclusion list and the revoke choice: checkboxes with a name that wraps and a count beside it. */
+.source-folders-preview ul.sf-groups,.sf-groups ul,.sf-sensitive ul,.sf-rules ul{list-style:none;padding-left:0;margin:0;display:grid;gap:4px;color:var(--ink)}
+.sf-groups ul,.sf-sensitive ul{padding-left:22px;max-height:260px;overflow-y:auto}
+.sf-check{display:flex;flex-wrap:wrap;gap:2px 8px;align-items:baseline;font-size:13px;min-width:0}
+.sf-check input{flex:none}
+.sf-name{min-width:0;overflow-wrap:anywhere}
+.sf-check small,.sf-rules small,.sf-over p{font-size:12px;color:var(--graphite)}
+.sf-groups summary,.sf-sensitive summary,.sf-rules summary{font-size:12px;cursor:pointer;color:var(--ink)}
+.sf-over{display:grid;gap:4px;padding:6px 8px;border-left:3px solid var(--ink)}
+.sf-rules{display:grid;gap:6px}
+.sf-rules li{display:flex;flex-wrap:wrap;gap:2px 8px;align-items:baseline;font-size:13px}
+.source-folder-revoke{display:grid;gap:6px;padding:8px;border:1px solid var(--ink)}
+.source-folder-revoke p{margin:0;font-size:13px}
+.sf-actions{display:flex;flex-wrap:wrap;gap:6px}
 /* The model connection's three steps and the code itself: the code is what the person copies, so it is big enough to read off a phone. */
 .codex-steps{margin:0;padding:0 0 0 20px;display:grid;gap:4px;font-size:13px;line-height:1.6}
 .codex-user-code{font-size:20px;letter-spacing:.08em;user-select:all}
+/* A readable measure for the library's prose rows (docs/copy-style.md: about 40 characters a line). */
+.sk-rules li p,.sk-desc,.sk-facts dd{max-width:46em}

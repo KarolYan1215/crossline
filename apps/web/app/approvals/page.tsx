@@ -23,6 +23,9 @@ import "./approvals.css";
 
 export const dynamic = "force-dynamic";
 
+/** How many of the last day's automatic approvals are listed before the rest fold. */
+const AUTO_SHOWN = 5;
+
 export default async function ApprovalsPage() {
   const ctx = await requireSessionContext();
   gateUntilReady(ctx);
@@ -92,6 +95,10 @@ export default async function ApprovalsPage() {
       {enters && <small className="proposal-enters">{enters.slice(5)} 起列入本周</small>}
     </div>;
   };
+  const autoItem = (item: (typeof autoApproved)[number]) => <li key={item.id}>
+    <a href={`/workbench/${encodeURIComponent(item.id)}`}>{item.intent}</a>
+    {item.undoable ? <RevokeAutoApprovalButton workOrderId={item.id} /> : <small> · 已开始做</small>}
+  </li>;
   const assistantCount = pending.assistantKinds + pending.assistantQuestions + pending.assistantReviews;
   // Drafts, targets and interview items are decided where they live (主线, 访谈); here they are counted and linked. What is decided here
   // is laid out below: the week's questions in four quadrants, then the assistant's results, evidence and task proposals.
@@ -140,10 +147,10 @@ export default async function ApprovalsPage() {
     {autoApproved.length > 0 && <section className="pending-block ap-auto" id="auto" aria-label="最近自动生效">
       <h2>最近自动生效 · {autoApproved.length}</h2>
       <p className="review-note">无需本人决定、不对外的任务已自动生效；24 小时内可撤销，撤销后回到提案。</p>
-      <ul>{autoApproved.map((item) => <li key={item.id}>
-        <a href={`/workbench/${encodeURIComponent(item.id)}`}>{item.intent}</a>
-        {item.undoable ? <RevokeAutoApprovalButton workOrderId={item.id} /> : <small> · 已开始做</small>}
-      </li>)}</ul>
+      {/* The newest few in view; the rest folded, so a busy day does not turn the section into a page-long list. */}
+      <ul>{autoApproved.slice(0, AUTO_SHOWN).map(autoItem)}</ul>
+      {autoApproved.length > AUTO_SHOWN && <details className="fold advanced"><summary>其余 {autoApproved.length - AUTO_SHOWN} 项</summary>
+        <ul>{autoApproved.slice(AUTO_SHOWN).map(autoItem)}</ul></details>}
     </section>}
     {pending.later.total > 0 && <details className="fold advanced" id="later">
       {/* The same total as the line on top; the assistant's results it counts are listed in their own section. */}

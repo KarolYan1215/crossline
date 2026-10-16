@@ -124,10 +124,22 @@ export function ResultScreen({ token }: { token: string }) {
     <section className="as-block as-beta">
       <h2>把这三条线真的跑起来</h2>
       <p>Crossline 把你同时推进的几条线拆成里程碑，排进同一份日程，每天告诉你先做哪件；做完的东西留作证据，能看见每条线走了多远。</p>
-      <p className="as-note">现在小范围内测，名额有限，按申请先后用你留的邮箱发邀请。用同一个邮箱登录，这份结果会自动带进 App。</p>
-      {view.betaRequested ? <p className="as-done" role="status">已申请。邀请会发到你留的邮箱。</p>
-        : <button type="button" className="as-primary" disabled={beta.busy} onClick={() => void askBeta()}>{beta.busy ? "正在提交…" : "申请内测"}</button>}
-      {beta.error && <p className="as-error" role="alert">{beta.error}</p>}
+      {view.appUrl ? <>
+        <p className="as-note">内测现在开放，免费，名额有限。用你在这里留的邮箱登录，这份结果会自动带进 App，作为访谈的起点。</p>
+        <ol className="as-steps">
+          <li><b>准备一个能用 Codex 的 ChatGPT 账号。</b>App 用你自己的 ChatGPT 额度做访谈和规划，不需要另付费用。</li>
+          <li><b>在 ChatGPT 打开一项设置（只需一次）。</b>ChatGPT 网页版 → 设置 → 安全 → 开启「为 Codex、Excel、PowerPoint 和 Word 启用设备代码登录」。不开的话，第 4 步的代码会被拒绝。</li>
+          <li><b>打开 App，用邮箱验证码登录。</b>第一次登录就是注册，不用设密码。</li>
+          <li><b>连接你的 ChatGPT。</b>页面会给一串一次性代码，在 OpenAI 的页面登录你的账号并输入它，几秒后显示「已连接」。</li>
+          <li><b>开始访谈。</b>先把简历、课表、课程大纲拖进去，约 30 分钟得到第一版一周安排。</li>
+        </ol>
+        <a className="as-button as-primary" href={view.appUrl} target="_blank" rel="noreferrer">打开 Crossline →</a>
+      </> : <>
+        <p className="as-note">现在小范围内测，名额有限，按申请先后用你留的邮箱发邀请。用同一个邮箱登录，这份结果会自动带进 App。</p>
+        {view.betaRequested ? <p className="as-done" role="status">已申请。邀请会发到你留的邮箱。</p>
+          : <button type="button" className="as-primary" disabled={beta.busy} onClick={() => void askBeta()}>{beta.busy ? "正在提交…" : "申请内测"}</button>}
+        {beta.error && <p className="as-error" role="alert">{beta.error}</p>}
+      </>}
       <p className="as-note">也可以直接发邮件到 <a href={betaMailto(type.code, type.name)}>{BETA_EMAIL}</a> 申请；在各大平台私信我也可以。</p>
     </section>
 

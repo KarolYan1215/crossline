@@ -2,7 +2,7 @@ import { TYPE_TABLE } from "@crossline/core/assess";
 import type { AvatarStatus, InviteView, PairView, ResultView } from "../lib/contract";
 import { pairRelation, publicType } from "../lib/public-type";
 import { avatarStatus } from "./avatar";
-import { baseUrl } from "./config";
+import { appUrl, baseUrl } from "./config";
 import { mailConfigured } from "./mail";
 import { betaRequested, getResultById, listPairs, recordedScores, type StoredPair, type StoredResult } from "./store";
 
@@ -38,7 +38,7 @@ export function resultView(result: StoredResult): ResultView {
   return {
     nickname: result.nickname, type: typeOf(result), avatar: avatarOf(result), posterUrl: posterUrl(result), longUrl: longUrl(result),
     inviteUrl: inviteUrl(result), sendEmail: result.sendEmail, mailOn: mailConfigured(),
-    betaRequested: betaRequested(result.id), pairs, expiresAt: result.expiresAt
+    betaRequested: betaRequested(result.id), appUrl: appUrl(), pairs, expiresAt: result.expiresAt
   };
 }
 

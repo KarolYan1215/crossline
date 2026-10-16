@@ -1,0 +1,26 @@
+# Build context for deploy/app/Dockerfile. Nothing private (data, ledgers, env files, sign-ins) and none of the 16 GB Codex build tree.
+.git
+**/node_modules
+**/.next
+**/.next-*
+**/out
+**/data
+**/data-e2e
+**/*.db
+**/*.db-shm
+**/*.db-wal
+**/*.bak
+**/.env*
+**/*.log
+backups
+restored
+vendor
+.vendor
+.claude
+.crossline-evidence
+e2e
+playwright-report
+test-results
+coverage
+installer
+deploy/app/*.env

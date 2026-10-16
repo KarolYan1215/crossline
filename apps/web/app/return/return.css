@@ -26,3 +26,20 @@
   .return-say-form input{min-height:44px}
   .return-steps label{min-height:44px}
 }
+.return-partial{display:grid;gap:8px;min-width:0}
+.return-level[aria-checked="true"]{outline:2px solid currentColor}
+.return-level{display:inline-flex;align-items:center;gap:6px}
+.return-quarters{display:inline-flex;gap:2px}
+.return-quarters i{display:block;width:6px;height:12px;border:1px solid var(--ink);background:var(--paper)}
+.return-quarters i[data-on]{background:var(--ink)}
+.return-where{display:flex;flex-wrap:wrap;gap:6px 8px;align-items:center;min-width:0;font-size:14px}
+.return-where input{flex:1 1 220px;min-width:0;padding:6px 8px;border:1px solid var(--mist);font:inherit;font-size:14px;background:var(--paper);color:var(--ink)}
+.return-steps summary{cursor:pointer;font-size:13px}
+@media (max-width:680px){
+  .return-where input{min-height:44px;font-size:16px}
+}
+/* The next seven days' deadlines as a short list under the summary line. */
+.return-due{list-style:none;margin:0;padding:0;display:grid;gap:2px}
+.return-due li{display:flex;gap:8px;align-items:baseline;min-width:0;font-size:14px}
+.return-due li .clamp{flex:1 1 auto;min-width:0}
+.return-due small{color:var(--muted);font-size:13px;flex:none}

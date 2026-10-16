@@ -25,11 +25,11 @@
 .ar-output p{margin:0}
 .ar-output-head a{color:var(--ink);overflow-wrap:anywhere}
 .ar-output-purpose{font-size:13px}
-.ar-preview{font-size:13px;line-height:1.5;padding:6px 8px;border-left:3px solid var(--mist);background:var(--chalk);max-height:220px;overflow:hidden}
+.ar-preview{font-size:13px;line-height:1.5;padding:6px 8px;border-left:3px solid var(--mist);background:var(--chalk);max-height:9.5em;overflow:hidden}
 .ar-preview h1,.ar-preview h2,.ar-preview h3,.ar-preview h4{margin:2px 0;font-size:13px}
 .ar-preview p,.ar-preview ul,.ar-preview ol{margin:2px 0}
 .ar-preview ul,.ar-preview ol{padding-left:18px}
-.ar-preview a{font-size:12px;color:var(--ink)}
+.ar-preview a,.ar-read{font-size:12px;color:var(--ink)}
 .ar-table-wrap{display:grid;gap:3px;overflow-x:auto;min-width:0}
 .ar-table{border-collapse:collapse;font-size:12px;min-width:100%}
 .ar-table th,.ar-table td{border:1px solid var(--mist);padding:3px 6px;text-align:left;vertical-align:top;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -68,3 +68,5 @@
   .ar-flow li+li::before{content:"↓";left:12px;top:-13px;transform:none}
 }
 .ap-preparing{margin:10px 0 0;font-size:13px;color:var(--graphite)}
+/* The preview is a glimpse of the file: its own small type, six lines at most, the last one fading instead of being cut through. */
+.ar-preview.long-form{font-size:13px;line-height:1.5;max-height:9em;-webkit-mask-image:linear-gradient(to bottom,#000 70%,transparent);mask-image:linear-gradient(to bottom,#000 70%,transparent)}

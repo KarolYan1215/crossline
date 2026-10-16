@@ -29,6 +29,14 @@ test("what the provider cannot do or has not passed goes to the workspace's own 
   expect(decideRoute("crossline-milestone-gate", undefined)).toEqual({ via: "codex" });
 });
 
+test("with Crossline's own search configured, a web Skill may go to the provider; the assistant still may not", () => {
+  const withSearch = { ...routing(["crossline-due-diligence", "crossline-agent"], false), capabilities: { webSearch: true } };
+  expect(decideRoute("crossline-due-diligence", withSearch)).toMatchObject({ via: "provider" });
+  expect(decideRoute("crossline-agent", withSearch)).toMatchObject({ via: "blocked", code: "MODEL_CAPABILITY_MISSING" });
+  // An image API makes no gap, but the illustrator has no schema to pass, so it is never admitted: it draws through the image API directly.
+  expect(decideRoute("crossline-portrait-illustrator", { ...routing([], true), capabilities: { image: true } })).toEqual({ via: "codex" });
+});
+
 test("a provider address must be https, or http on this computer; no credentials or query in it", () => {
   const base = { id: "x", kind: "chat" as const, label: "X", model: "m" };
   expect(providerConfigProblem({ ...base, baseUrl: "https://api.example.com/v1" })).toBeUndefined();

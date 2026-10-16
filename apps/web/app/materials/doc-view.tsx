@@ -1,4 +1,5 @@
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
+import { splitParagraph } from "../ui/markdown";
 import { safeHref, type DocBlock, type ListItem, type Span } from "./doc-blocks";
 
 /** One run of text with its marks; a link only to a web address or an anchor. Text, never HTML. */
@@ -44,7 +45,13 @@ export function DocBlocksView({ blocks, className }: { blocks: DocBlock[]; class
   return <div className={["doc-body", className].filter(Boolean).join(" ")}>{blocks.map((block, index) => {
     switch (block.t) {
       case "h": { const Tag = (["h2", "h3", "h4", "h5"] as const)[block.level - 1]!; return <Tag key={index}><Spans spans={block.spans} /></Tag>; }
-      case "p": return <p key={index}><Spans spans={block.spans} /></p>;
+      case "p": {
+        // A long plain paragraph (a syllabus's policy section runs to 2,000 characters) is drawn as several of whole sentences.
+        const only = block.spans.length === 1 ? block.spans[0]! : undefined;
+        const plain = only && !only.b && !only.i && !only.code && !only.sup && !only.sub && !only.href && !only.text.includes("\n");
+        if (plain) return <Fragment key={index}>{splitParagraph(only.text).map((part, at) => <p key={at}>{part}</p>)}</Fragment>;
+        return <p key={index}><Spans spans={block.spans} /></p>;
+      }
       case "quote": return <blockquote key={index}><Spans spans={block.spans} /></blockquote>;
       case "list": return <List key={index} ordered={block.ordered} items={block.items} />;
       case "layout": return <pre key={index} className="doc-layout">{block.lines.join("\n")}</pre>;

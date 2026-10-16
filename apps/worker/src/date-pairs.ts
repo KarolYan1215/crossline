@@ -2,6 +2,7 @@ import type { CrosslineStore, StoredWorkOrder } from "@crossline/db";
 import { courseCodeOf } from "@crossline/core";
 import { autoApproveEligible } from "./auto-approval";
 import { ownerOf } from "./owner";
+import { decideFold, openTasks, recordFold } from "./duplicate-guard";
 
 /** How far ahead a confirmed due date turns into a task (the step planner then places its steps between release and due). */
 export const DATE_PAIR_HORIZON_DAYS = 56;
@@ -40,6 +41,10 @@ export function materializeDatePairs(store: CrosslineStore, workspaceId: string,
     return match && value && number ? [{ day: value[1]!, kind: match[1] as DateFact["kind"], number, title: value[2]!.trim(), projectKey: fact.projectId, identityId: fact.identityId }] : [];
   });
   const existing = new Set(store.listWorkOrders(workspaceId).map((order) => order.id));
+  // A homework already folded into a task the person had (below) is not written again on the next tick.
+  for (const event of store.listEvents(workspaceId, { type: "task.duplicate_prevented" }))
+    existing.add(String((event.payload as { candidate?: { id?: string } }).candidate?.id ?? ""));
+  const open = openTasks(store, workspaceId);
   const milestones = store.listMilestones(workspaceId).filter((item) => item.status !== "archived");
   const anchors = new Map(store.listMilestoneAnchors(workspaceId).map((anchor) => [anchor.milestoneId, anchor.deadline]));
   const created: string[] = [];
@@ -65,9 +70,64 @@ export function materializeDatePairs(store: CrosslineStore, workspaceId: string,
         humanCore: [{ id: `${id}-core`, intent, quote: due.title, rationale: "课程日期已确认", energy: "high", interruptible: true }],
         automationParts: [], materialContract: [],
         evidenceContract: [{ kind: "file", description: "提交的作业文件或提交确认截图", why: "作业以提交为准", required: true }] } };
+    // The person may already have this homework on the board (typed in, or planned from the milestone): it gets the dates, not a twin.
+    const payload = order.payload as { title: string; dueDate: string; datePair: unknown };
+    const fold = decideFold(open, { id, identityId: order.identityId, projectId: order.projectId, milestoneId: order.milestoneId, title: payload.title, intent,
+      state: order.state, dueDate: due.day, milestoneDeadline: anchors.get(milestone.id) ?? "", progress: 0, hasStepPlan: false, started: false, dependsOn: [] });
+    if (fold) {
+      const keep = store.listWorkOrders(workspaceId).find((item) => item.id === fold.keep)!;
+      const kept = (keep.payload ?? {}) as { dueDate?: string; datePair?: unknown };
+      store.saveWorkOrder({ ...keep, payload: { ...(keep.payload as object), ...(!kept.datePair ? { datePair: payload.datePair } : {}),
+        ...(!kept.dueDate || due.day < kept.dueDate ? { dueDate: due.day } : {}) } });
+      recordFold(store, workspaceId, fold, { id, title: payload.title, intent, source: "datepair" });
+      continue;
+    }
     if (store.saveBackplanDrafts(workspaceId, [order], { ownerId: order.ownerId, workspaceId, idempotencyKey: `datepair.created:${id}`,
       type: "datepair.created", entityId: id, payload: { projectId: project.id, releaseDay: out?.day ?? "", dueDay: due.day } })) created.push(id);
   }
   if (created.length) autoApproveEligible(store, workspaceId, created);
   return created;
+}
+
+const WORKING = new Set(["active", "evidence_review", "accepted", "archived"]);
+/** The homework number a file name names (「ECE555-F26-Homework2.docx」, 「HW-3 Solutions」, 「作业3」), never a bare number. */
+const fileHomework = (name: string) => /(?:作业|习题|homework|hw|assignment|problem\s*set)\s*[#_-]?\s*0*(\d+)/i.exec(name)?.[1];
+const courseKey = (text: string) => courseCodeOf(text)?.replace(/\s+/g, "").toUpperCase();
+
+/**
+ * A course schedule's release day is a plan, not the homework being out: on 2026-10-15 「ECE 555 作业 3」 was scheduled from 10/12, the
+ * day the schedule named, while the course had not posted it. Each homework task not yet started therefore waits on 「作业 N 发布」, a
+ * waiting item due on the planned day: until it is answered the scheduler keeps the work off the calendar (`releaseDayOf`) and Today
+ * asks 「到了吗？」 from that day. The homework's own file arriving — uploaded, or read from an authorized folder, named with the course and
+ * the number or filed under the course — is the answer too, and closes the wait without asking.
+ */
+export function releaseWaits(store: CrosslineStore, workspaceId: string): { opened: string[]; arrived: string[] } {
+  const owner = ownerOf(store, workspaceId);
+  const projects = store.listProjects(workspaceId, { includeArchived: true });
+  const waits = new Map(store.listWaitingItems(workspaceId).map((item) => [item.id, item]));
+  const documents = store.listSourceDocuments(workspaceId);
+  const opened: string[] = [], arrived: string[] = [];
+  for (const order of store.listWorkOrders(workspaceId)) {
+    const pair = (order.payload as { datePair?: { releaseDay?: string; number?: string } } | undefined)?.datePair;
+    if (!pair?.releaseDay || !pair.number || WORKING.has(order.state)) continue;
+    const project = projects.find((item) => item.id === order.projectId);
+    const course = courseKey(project?.name ?? "") ?? courseKey(order.projectId);
+    const file = documents.find((doc) => fileHomework(doc.fileName) === pair.number
+      && (doc.projectId === order.projectId || (course !== undefined && courseKey(doc.fileName) === course)));
+    const id = `wait-release-${order.id}`;
+    const wait = waits.get(id);
+    if (wait) {
+      if (wait.state === "open" && file && store.answerWaitingItem(workspaceId, id, { kind: "arrived" }, owner).changed) {
+        store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `waiting.arrived_by_file:${id}`, type: "waiting.arrived_by_file", entityId: id,
+          payload: { documentId: file.id, fileName: file.fileName } });
+        arrived.push(id);
+      }
+      continue;
+    }
+    if (file) continue;
+    const label = `${courseCodeOf(project?.name ?? "") ?? project?.name ?? ""} 作业 ${pair.number}`.trim();
+    if (store.saveWaitingItem({ id, ownerId: owner, workspaceId, title: `${label} 发布`, who: "", expectedAt: pair.releaseDay, approximate: false,
+      followUpAt: pair.releaseDay, state: "open", blocks: [order.id], source: "datepair" }).inserted) opened.push(id);
+  }
+  return { opened, arrived };
 }

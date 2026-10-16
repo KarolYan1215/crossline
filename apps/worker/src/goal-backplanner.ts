@@ -7,6 +7,7 @@ import { handOffArtifacts, linkArtifactWork, readStoredArtifactPlan, type Crossl
 import { ownerOf } from "./owner";
 import { autoApproveEligible } from "./auto-approval";
 import { identityLines } from "./lines";
+import { decideFold, existingTasksFor, openTasks, recordFold, type Fold } from "./duplicate-guard";
 const SKILL = "crossline:crossline-goal-backplanner";
 /** How many next steps an automatic (rolling) backplan keeps. */
 export const ROLLING_STEPS = 2;
@@ -91,7 +92,9 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
     }, sourceText: request?.request ?? "", approvedInsights,
       suppliedInputs: supplied, waitingInputs: waiting, missingInputs: [] as MissingInput[],
       existingWork: store.listWorkOrders(workspaceId)
-      .filter((order) => order.milestoneId === milestone.id).map((order) => ({ id: order.id, intent: order.intent, state: order.state })) };
+      .filter((order) => order.milestoneId === milestone.id).map((order) => ({ id: order.id, intent: order.intent, state: order.state })),
+      // Every open task of this line and project (the task library included): work one of them covers is not written again.
+      existingTasks: existingTasksFor(store, workspaceId, { identityId: milestone.identityId, projectId: milestone.projectId! }) };
     const rolling = options.rolling ? ` Return only the next ${ROLLING_STEPS} steps that can start now (existingWork shows what is already done or open); the rest is proposed after these are done.` : "";
     const run = (missingInputs: MissingInput[]) => {
       const input = { ...context, missingInputs };
@@ -102,11 +105,12 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
           : "Work backwards from the approved milestone. Return only sourced step drafts; never set a goal or deadline; every step's `acquires` is \"\". If a step needs an input that is in none of sourceText, suppliedInputs or approvedInsights (data, a specification, someone's decision), do not invent it: return it as a blocker with `what` (the input in a few words) and `whoHas` (who can provide it, \"\" if unknown). waitingInputs are on their way: steps that need them come after the steps that do not.")
           + " Each item in `steps` becomes one task in the person's list: group the work into coherent tasks that each produce one deliverable (an outline, a set of solved problems, a draft), not single actions — the step planner splits every task into its own steps afterwards."
           + " Getting a fact from someone (an exam's scope, a rubric, a format rule — one email and its reply, 15 minutes of the person's time) is never an item: it is the first part of the task that needs the answer."
+          + " existingTasks are open already: never write an item one of them covers; an item that only adds to one sets `extendsTaskId` to its id (otherwise \"\"). Each item's `completion` says how finishing it is taken, as the Skill describes."
           + (artifacts.produce.length || artifacts.use.length ? " Cross-line artifacts (artifacts): exactly one step produces each artifacts.produce id (`produces`), every artifacts.use id is listed in `uses` by the steps that work with it; all other steps have produces \"\" and uses []." : "")
           + rolling,
         outputSchema: BACKPLAN_SCHEMA, prepareInput: () => input,
         validateOutput: (output) => validateBackplan(output, runSources, dateSources, missingInputs.map((item) => item.id),
-          { produce: artifacts.produce.map((item) => item.id), use: artifacts.use.map((item) => item.id) }), onAudit: () => {},
+          { produce: artifacts.produce.map((item) => item.id), use: artifacts.use.map((item) => item.id) }, context.existingTasks.map((task) => task.id)), onAudit: () => {},
         ...(signal ? { signal } : {}), timeoutMs: 60 * 60_000 });
     };
     const recordBlocked = (code: string, message: string, missingInputs: MissingInput[]) => {
@@ -140,8 +144,20 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
     // A request for a fact that another item needs becomes that item's first step instead of a task (info-request.ts, 2026-10-15).
     const { steps: shaped } = foldInfoRequests(result.output.steps);
     // Steps come in dependency order (each depends only on earlier ones), so the first ones are the ones that can start.
-    const steps = options.rolling ? shaped.slice(0, ROLLING_STEPS) : shaped;
-    const ids = new Map(steps.map((step) => [step.id, `backplan-${randomUUID()}`]));
+    const planned = options.rolling ? shaped.slice(0, ROLLING_STEPS) : shaped;
+    // Before anything is written: an item that only adds to an open task, or that the merge rules call the same as one, goes into that
+    // task instead of standing beside it, and items depending on it depend on that task.
+    const open = openTasks(store, workspaceId);
+    const deadline = store.listMilestoneAnchors(workspaceId).find((anchor) => anchor.milestoneId === milestone.id)?.deadline ?? "";
+    const folds = new Map<string, Fold>();
+    for (const step of planned) {
+      const fold = decideFold(open, { id: `backplan:${key}:${step.id}`, identityId: milestone.identityId, projectId: milestone.projectId!, milestoneId: milestone.id,
+        title: withCourse(step.title, milestone.projectId), intent: step.intent, state: "awaiting_plan_approval", dueDate: "", milestoneDeadline: deadline,
+        progress: 0, hasStepPlan: false, started: false, dependsOn: [] }, step.extendsTaskId ?? "");
+      if (fold) folds.set(step.id, fold);
+    }
+    const steps = planned.filter((step) => !folds.has(step.id));
+    const ids = new Map([...steps.map((step) => [step.id, `backplan-${randomUUID()}`] as const), ...[...folds].map(([stepId, fold]) => [stepId, fold.keep] as const)]);
     const drafts: StoredWorkOrder[] = steps.map((step) => {
       const id = ids.get(step.id)!;
       // What the step *is*, not why or what it leaves behind: 「首轮发布清单草稿」 as evidence made picking topics high-risk.
@@ -157,6 +173,8 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
           ...(step.produces ? { produces: step.produces } : {}), ...(step.uses.length ? { uses: step.uses } : {}),
           // What the task first has to get from someone: the step planner makes each a drafted email (assistant) and a send (person).
           ...(step.infoRequests?.length ? { infoRequests: step.infoRequests } : {}),
+          // How finishing it is taken, as the backplanner judged it (`completion.ts`).
+          ...(step.completion ? { completion: step.completion } : {}),
           automationParts: [], humanCore: [{ id: `${id}-core`, intent: step.intent, quote: step.sourceQuote,
             rationale: step.rationale, energy: step.energy, interruptible: step.interruptible }],
           materialContract: [], evidenceContract: [{ kind: "record", description: step.evidence,
@@ -168,9 +186,18 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
     const inserted = store.saveBackplanDrafts(workspaceId, drafts, { ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: key,
       type: "goal.backplan_proposed", entityId: milestone.id,
       payload: { milestoneVersion: milestone.version, workOrderIds, ...(options.rolling ? { rolling: true, round: rounds } : {}),
-        ...(missing.length ? { missing } : {}),
+        ...(missing.length ? { missing } : {}), ...(folds.size ? { folded: [...folds].map(([stepId, fold]) => ({ stepId, into: fold.keep, kind: fold.kind })) } : {}),
         dateCandidates: result.output.dateCandidates, source: SKILL } });
     if (inserted) {
+      for (const [stepId, fold] of folds) {
+        const step = planned.find((item) => item.id === stepId)!;
+        recordFold(store, workspaceId, fold, { id: `backplan:${key}:${stepId}`, title: withCourse(step.title, milestone.projectId), intent: step.intent, source: "backplan" });
+        // The kept task now serves this milestone too, so the milestone is not split again for want of open work.
+        const keep = store.listWorkOrders(workspaceId).find((order) => order.id === fold.keep);
+        const serves = ((keep?.payload ?? {}) as { alsoServes?: string[] }).alsoServes ?? [];
+        if (keep && keep.milestoneId !== milestone.id && !serves.includes(milestone.id))
+          store.saveWorkOrder({ ...keep, payload: { ...(keep.payload as object), alsoServes: [...serves, milestone.id] } });
+      }
       // A use waits for its producer across lines, and a producer already delivered hands its files over now.
       linkArtifactWork(store, workspaceId);
       handOffArtifacts(store, workspaceId);

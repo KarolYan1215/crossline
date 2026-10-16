@@ -15,6 +15,8 @@ import { ScheduleSummary } from "./schedule-summary";
 import type { FinerSplitNote, ScheduleChange } from "../lib/crossline";
 import type { CalendarData } from "./plan/plan-view";
 import { FlywheelGraph } from "./flywheel/flywheel-graph";
+import { ReminderStrip } from "./reminder-strip";
+import type { Reminder } from "../lib/reminders";
 import type { FlywheelGraphData } from "./flywheel/graph-model";
 
 export type DashboardAction = {
@@ -67,6 +69,8 @@ export type DashboardData = {
   asks?: Ask[];
   /** What an ask's preview opens in place (`asks/previews.ts`), keyed by ask id. */
   askPreviews?: AskPreviews;
+  /** What other pages flag that is not an ask, one line each (`lib/reminders.ts`). */
+  reminders?: Reminder[];
   flywheel: Array<{ id: string; fromTitle: string; toTitle: string; kindLabel: string; explanation: string | null; pending: boolean }>;
   identities: Array<{ id: string; label: string; accent: string; completedCount: number; activeMilestone: string; taskCount: number; totalCount: number; pct: number }>;
   flywheelStrip: {
@@ -142,6 +146,8 @@ export function DashboardView({ data }: { data: DashboardData }) {
         <EnergyProbe context="after_rest" />
       </div>}
 
+      <ReminderStrip reminders={data.reminders ?? []} />
+
       <section className="panel capture-line" aria-labelledby="capture-title">
         <header><h2 id="capture-title">输入</h2><small>收集、修改、回答、提问，先确认再生效</small></header>
         <Conversation variant="inline" />
@@ -171,7 +177,7 @@ export function DashboardView({ data }: { data: DashboardData }) {
 
       {/* The day and what is waiting on the person side by side, the stack as tall as the timeline (the person's layout, 2026-10-13). */}
       <div className="today-day">
-        {data.calendar && <section className="panel today-timeline" aria-label="今天的时间轴">
+        {data.calendar && <section className="panel today-timeline" id="today-timeline" aria-label="今天的时间轴">
           <header><h2>今天的时间轴</h2><a href="/plan">打开计划 →</a></header>
           <ScheduleSummary changes={data.scheduleChanges ?? []} splits={data.finerSplits ?? []} />
           <CalendarPanel items={data.calendar.items} deadlines={data.calendar.deadlines} today={data.calendar.today} nowIso={data.calendar.nowIso}

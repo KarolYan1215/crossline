@@ -67,3 +67,8 @@ describe("the card's reading of a task", () => {
     expect(dueDistance("2026-10-13", TODAY)).toEqual({ text: "已过 2 天", overdue: true });
   });
 });
+
+test("a task sent back with a ledger code reads in words, never the code", () => {
+  expect(waitReason(detail({ state: "blocked", blocker: { reason: "MILESTONE_GATE_INSUFFICIENT" } }), TODAY)?.label).toBe("已退回 · 验收证据不足");
+  expect(waitReason(detail({ state: "blocked", blocker: { reason: "SOME_NEW_CODE" } }), TODAY)?.label).toBe("已退回");
+});

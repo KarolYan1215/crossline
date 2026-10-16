@@ -2,7 +2,7 @@
  * Does the interview itself draw out what Crossline needs? (asked 2026-10-08: the real account's interview was fed a profile the person
  * had already organised, so it never showed whether the interview leads — and it skipped stages and never asked when ECE 548 meets.)
  *
- *   pnpm exec tsx scripts/onboarding-eval.ts [persona.md] [--turns 20]
+ *   pnpm exec tsx scripts/onboarding-eval.ts [persona.md] [--turns 20] [--provider <config.json>:<id>]
  *
  * A throwaway database and a fresh account. The person is played by Skill `crossline-eval-persona` from a hidden persona sheet (default:
  * the person's own profile under `data/profile/`, never committed): it answers only what it is asked, never volunteers, uploads a file only
@@ -21,13 +21,14 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { runCodexSkill, setUsageSink, startCodexSupervisor } from "../packages/codex/src/index";
+import { enterUsageWorkspace, runCodexSkill, setUsageSink, startCodexSupervisor } from "../packages/codex/src/index";
 import { PROFILE_CONFIRMED, composeGoal, portraitFingerprint, readyToStart, type ProfileModel, type StoredLineProfile } from "../packages/core/src/index";
 import { CrosslineStore, interviewChecklistFor } from "../packages/db/src/index";
 import { MATERIALS_FIRST_REPLY, NO_MATERIALS_REPLY, composeAnswers, type Question } from "../apps/web/app/onboarding/onboarding-types";
 import { extractText, sha256 } from "../apps/worker/src/extract";
 import { identityLines } from "../apps/worker/src/lines";
 import { createOnboardingSessionRunner } from "../apps/worker/src/onboarding-session";
+import { readMatrixConfig, startProviderHarness } from "./provider-harness";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const args = process.argv.slice(2);
@@ -125,6 +126,21 @@ const supervisor = await startCodexSupervisor({
     requiredSkills: ["crossline:crossline-onboarding", "crossline:crossline-eval-persona"] }
 });
 const client = supervisor.client;
+// `--provider <config.json>:<id>`: every real Skill of this account runs on that model (docs/beta-launch.md §10.4); the simulated
+// person stays on the Codex sign-in, so only the interview's side changes between runs.
+const providerArg = args[args.indexOf("--provider") + 1];
+const harness = args.includes("--provider") && providerArg ? await (async () => {
+  const at = providerArg.lastIndexOf(":");
+  const spec = readMatrixConfig(providerArg.slice(0, at)).providers.find((item) => item.id === providerArg.slice(at + 1));
+  if (!spec) throw new Error(`provider not found: ${providerArg}`);
+  const started = await startProviderHarness(store, client, repoRoot);
+  await started.add(workspaceId, spec);
+  started.force(workspaceId);
+  console.info(JSON.stringify({ step: "provider", id: spec.id, model: spec.model }));
+  return started;
+})() : undefined;
+// Entered here, not inside the helper above: entering a workspace only reaches the async chain it is called in.
+if (harness) enterUsageWorkspace(workspaceId);
 const interview = createOnboardingSessionRunner(store, workspaceId, repoRoot, () => client);
 const PERSONA_SCHEMA = { type: "object", additionalProperties: false, required: ["answers", "freeText", "upload"], properties: {
   answers: { type: "array", maxItems: 12, items: { type: "object", additionalProperties: false, required: ["questionId", "picked", "other"], properties: {
@@ -213,6 +229,7 @@ try {
   writeFileSync(file, report);
   console.info(JSON.stringify({ report: file, interviewItems: `${own.filter((item) => item.done).length}/${own.length}`, turns, minutes, readyAt, completeAt,
     checks: checks.map((check) => `${check.ok ? "✓" : "✗"} ${check.label}`) }));
+  await harness?.close();
   await supervisor.stop();
   store.close();
 }

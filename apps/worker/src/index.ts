@@ -17,7 +17,7 @@ import { createNightlyFlywheel } from "./nightly";
 import { createDiligenceRunner, linesDueForDiligence } from "./diligence";
 import { createAgentService } from "./agent-service";
 import { createCalendarPublisher } from "./calendar-publish";
-import { repairFrozenRace } from "./calendar-repair";
+import { repairDuplicateImports, repairFrozenRace } from "./calendar-repair";
 import { createWriteLogin } from "./calendar-write-login";
 import { AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, BACKGROUND_PAUSED, backgroundSpend, CALENDAR_SYNC_FAILURE, FIRST_DRAFTS_SETTING, grownSkillName, publicSkillName, pausedKinds, readyToStart, spendAllows, type BackgroundKind, type PlanRankingInput } from "@crossline/core";
 import { createFlywheelExpander } from "./flywheel";
@@ -37,7 +37,7 @@ import { createMilestoneRiskReviewer, milestonesAwaitingRiskReview } from "./mil
 import { fileSourceDocuments } from "./source-filing";
 import { createPortraitWriter, PORTRAIT_GAP_AT, PORTRAIT_REWRITE_MARKER, portraitRewriteDue } from "./portrait-writer";
 import { createPortraitIllustrator } from "./portrait-illustrator";
-import { materializeDatePairs } from "./date-pairs";
+import { materializeDatePairs, releaseWaits } from "./date-pairs";
 import { createConcierge, type ConciergeRequest } from "./concierge";
 import { createMilestoneGate, pendingMilestoneGates } from "./milestone-gate-runner";
 import { createMilestoneConversation, createMilestoneProposer, createRelationReviser } from "./milestone-proposer";
@@ -50,7 +50,7 @@ import { createTranscriber, createWhisperEngine, modelsDirectory } from "./trans
 import { createBackgroundFactsExtractor } from "./background-facts-runner";
 import { createGraphSync, type SyncOutcome } from "./graph-sync";
 import { addSubscription, hasSubscriptions, removeSubscription, subscriptionSources } from "./calendar-subscriptions";
-import { addFolder, previewFolder, removeFolder, setFolderLines, syncFolders } from "./source-folders";
+import { addFolder, personNames, previewFolder, removeFolder, setFolderLines, setFolderRules, syncFolders } from "./source-folders";
 import { createFolderClassifier } from "./folder-classifier";
 import { homedir } from "node:os";
 import { defaultSafeGetDeps } from "./safe-fetch";
@@ -195,7 +195,7 @@ async function titlePass(workspaceId: string, checkedAt: string): Promise<void> 
 
 /** Files new calendar events under the person's lines after a sync, a batch a tick; a small model, so it still runs when quota is tight. */
 /**
- * Reads a stored document's text: the worker's one extraction path (the web's upload, the supervisor route and authorized folders).
+ * Reads a stored document's text: the worker's one extraction path (the web's upload and the supervisor route; authorized folders call `extractText` before keeping a file).
  * Only files this app wrote itself, by the path it recorded: the model and the browser never supply one.
  */
 async function extractDocument(documentId: string, workspaceId: string) {
@@ -218,10 +218,14 @@ async function extractDocument(documentId: string, workspaceId: string) {
 const machineOwner = (workspaceId: string) => runtimeOwner(analysisStore) === workspaceId;
 const OWNER_ONLY_FOLDER = { state: "blocked" as const, code: "FOLDER_OWNER_ONLY",
   message: "文件夹在运行 Crossline 的那台电脑上，只有那台电脑的主人能授权。请改用「添加文件」上传。" };
-const folderDeps = { dataDir, home: homedir(), extract: (workspaceId: string, documentId: string) => extractDocument(documentId, workspaceId) };
+const folderDeps = { dataDir, home: homedir(), readText: extractText };
 const readingFolders = new Set<string>();
+// A folder added while a pass runs would wait for the next tick (up to fifteen minutes) while its card says 「正在读取」 — four folders
+// authorized at once read only the first (2026-10-15) — so a call during a pass runs one more pass after it.
+const rereadFolders = new Set<string>();
 async function folderPass(workspaceId: string, checkedAt: string): Promise<void> {
-  if (readingFolders.has(workspaceId) || paused(workspaceId, "intake") || !machineOwner(workspaceId)) return;
+  if (readingFolders.has(workspaceId)) { rereadFolders.add(workspaceId); return; }
+  if (paused(workspaceId, "intake") || !machineOwner(workspaceId)) return;
   readingFolders.add(workspaceId);
   try {
     const outcomes = await syncFolders(analysisStore, workspaceId, folderDeps).catch(() => []);
@@ -231,7 +235,10 @@ async function folderPass(workspaceId: string, checkedAt: string): Promise<void>
     enterUsageWorkspace(workspaceId);
     const filed = await createFolderClassifier(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))().catch(() => undefined);
     if (filed && "filed" in filed && filed.filed) console.info(JSON.stringify({ type: "sources.folder_lines_filed", checkedAt, workspaceId, ...filed }));
-  } finally { readingFolders.delete(workspaceId); }
+  } finally {
+    readingFolders.delete(workspaceId);
+    if (rereadFolders.delete(workspaceId)) void folderPass(workspaceId, new Date().toISOString()).catch(() => undefined);
+  }
 }
 
 const filingCalendar = new Set<string>();
@@ -449,6 +456,8 @@ async function stepPlanPass(workspaceId: string, checkedAt = new Date().toISOStr
     try {
       const created = materializeDatePairs(analysisStore, workspaceId);
       if (created.length) console.info(JSON.stringify({ type: "datepair.created", checkedAt, workspaceId, created }));
+      const release = releaseWaits(analysisStore, workspaceId);
+      if (release.opened.length || release.arrived.length) console.info(JSON.stringify({ type: "datepair.release_waits", checkedAt, workspaceId, ...release }));
     } catch (error) { console.info(JSON.stringify({ type: "datepair.failed", checkedAt, workspaceId, message: error instanceof Error ? error.message : "" })); }
     // Questions of plans made before importance was judged: filtered by rule, no model call (docs/review-2026-10-13.md §11).
     try {
@@ -766,6 +775,9 @@ for (const workspace of analysisStore.listWorkspaces()) {
   const repaired = repairFrozenRace(analysisStore, workspace.id, ownerOf(analysisStore, workspace.id));
   if (repaired && (repaired.released.length || repaired.republished.length))
     console.info(JSON.stringify({ type: "repair.frozen_race", workspaceId: workspace.id, released: repaired.released.length, republished: repaired.republished.length, checkedAt: new Date().toISOString() }));
+  // Once: imported class blocks a date batch put on the plan twice (a weekly class and that day's dated session in one slot).
+  const deduped = repairDuplicateImports(analysisStore, workspace.id, ownerOf(analysisStore, workspace.id));
+  if (deduped) console.info(JSON.stringify({ type: "repair.import_duplicates", workspaceId: workspace.id, removed: deduped.removed, checkedAt: new Date().toISOString() }));
   // First drafts begun by a worker that stopped before any milestone existed were lost with it: forget the start, so the pass runs
   // again and the screens do not say 「正在设计」 for a run nobody is doing.
   if (analysisStore.getSetting(workspace.id, FIRST_DRAFTS_SETTING) && !analysisStore.listMilestones(workspace.id).length)
@@ -1073,15 +1085,18 @@ if (!capabilitySecret) {
     extractSource: (documentId, workspaceId) => extractDocument(documentId, workspaceId),
     // Authorized folders: a preview (what would be read) before anything is read, then the folder is kept and read in the background.
     sourceFolders: {
-      preview: async (workspaceId: string, folderPath: string) => machineOwner(workspaceId) ? previewFolder(folderPath, folderDeps) : OWNER_ONLY_FOLDER,
-      add: async (workspaceId: string, folderPath: string) => {
+      preview: async (workspaceId: string, folderPath: string, names?: string[]) =>
+        machineOwner(workspaceId) ? previewFolder(folderPath, folderDeps, personNames(analysisStore, workspaceId, names)) : OWNER_ONLY_FOLDER,
+      add: async (workspaceId: string, folderPath: string, rules?: { exclude?: unknown; include?: unknown; names?: unknown }) => {
         if (!machineOwner(workspaceId)) return OWNER_ONLY_FOLDER;
-        const added = await addFolder(analysisStore, workspaceId, folderPath, folderDeps);
+        const added = await addFolder(analysisStore, workspaceId, folderPath, folderDeps, rules);
         // Read in the background: a folder can take minutes; the page shows its progress from the folder list.
         if (added.state === "added") void folderPass(workspaceId, new Date().toISOString()).catch(() => undefined);
         return added;
       },
-      remove: async (workspaceId: string, id: string) => ({ removed: removeFolder(analysisStore, workspaceId, id) }),
+      remove: async (workspaceId: string, id: string, purge?: boolean) => removeFolder(analysisStore, workspaceId, id, { purge: Boolean(purge), dataDir }),
+      setRules: async (workspaceId: string, id: string, rules: { exclude?: unknown; include?: unknown; names?: unknown }) =>
+        machineOwner(workspaceId) ? setFolderRules(analysisStore, workspaceId, id, rules, folderDeps) : OWNER_ONLY_FOLDER,
       setLines: async (workspaceId: string, id: string, lines: string[]) => ({ saved: setFolderLines(analysisStore, workspaceId, id, lines) })
     },
     extractBackgroundFacts: (_client, captureTitle, captureContext, signal, workspaceId) =>

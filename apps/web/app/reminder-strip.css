@@ -1,0 +1,9 @@
+/* Today's 「提醒」: one line per thing another page flags, each a link. */
+.reminders{display:grid;gap:4px;min-width:0}
+.reminders h2{margin:0}
+.reminders ul{margin:0;padding:0;list-style:none;display:grid;gap:2px;min-width:0}
+.reminders li{min-width:0;border-left:3px solid var(--lc,var(--graphite))}
+.reminders a{display:flex;align-items:center;gap:8px;min-width:0;padding:4px 8px;font-size:13px;color:var(--ink);text-decoration:none;background:var(--chalk)}
+.reminders a:hover,.reminders a:focus-visible{text-decoration:underline}
+.reminders a span:first-child{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media (max-width:680px){ .reminders a{min-height:44px} }

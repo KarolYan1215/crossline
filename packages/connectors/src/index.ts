@@ -658,3 +658,5 @@ export * from "./web-push";
 export * from "./calendar-edits";
 export * from "./secret-file";
 export * from "./ical";
+export * from "./web-search";
+export * from "./image-generation";

@@ -40,7 +40,8 @@ test("a finished task is shown with what the assistant said and, apart from it, 
   const html = await render();
   expect(html).toContain("整理 Cadence 材料");
   expect(html).toContain("整理了笔记。");
-  expect(html).toMatch(/class="gen">整理了笔记。/);
+  // The summary is the model's, drawn as generated text and held to two lines on the card (`Clamp`).
+  expect(html).toMatch(/class="gen"><span class="clamp"[^>]*>整理了笔记。/);
   expect(html).toContain("/api/agent/tasks/t1/file?path=n.md");
   expect(html).toContain("确认课程环境");
   expect(html).toContain("助手做了哪些操作（1 步） · 拦下 1 次");

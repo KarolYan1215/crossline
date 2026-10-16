@@ -91,7 +91,7 @@
 .ak-qbar a[data-quadrant="urgent"]{background:var(--chalk);color:var(--ink);border-color:var(--ink)}
 .ak-qbar a[data-quadrant="neither"]{background:var(--paper);color:var(--graphite);border-color:var(--mist)}
 .ak-quadrants{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;align-items:start}
-.ak-quadrant{display:grid;gap:6px;min-width:0;padding:8px;border:1px solid var(--mist);border-top:2px solid var(--ink);background:var(--paper)}
+.ak-quadrant{display:grid;grid-template-columns:minmax(0,1fr);gap:6px;min-width:0;padding:8px;border:1px solid var(--mist);border-top:2px solid var(--ink);background:var(--paper)}
 .ak-quadrant[data-quadrant="important"],.ak-quadrant[data-quadrant="neither"]{border-top-color:var(--graphite)}
 .ak-quadrant[data-empty]{padding:4px 8px;border-top-width:1px}
 .ak-quadrant>header{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
@@ -117,3 +117,12 @@
   .ak-brief dt{padding-top:2px}
   .ak-qbar-label{display:none}
 }
+/* A milestone's reviewed risks (milestone_risk_review): the level as three bars, the kind as a tag. Same marks as the 主线 page. */
+.ak-risks{padding:8px 10px;border:1px solid var(--mist);background:var(--chalk)}
+.ak-risks .risk-list{margin:0;padding:0;list-style:none;display:grid;gap:6px}
+.ak-risks .risk-list li{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;font-size:13px}
+.ak-risks .risk-glyph{display:inline-block;width:18px;height:18px;flex:none}
+.ak-risks .risk-glyph rect{fill:var(--paper);stroke:var(--ink);stroke-width:1}
+.ak-risks .risk-glyph rect[data-on]{fill:var(--ink)}
+.ak-risks .risk-kind{display:inline-block;padding:0 5px;border:1px solid var(--ink);font-size:12px;line-height:18px;white-space:nowrap;color:var(--ink);background:var(--paper)}
+.ak-risks li[data-level="high"] .risk-kind{font-weight:700;border-width:2px}

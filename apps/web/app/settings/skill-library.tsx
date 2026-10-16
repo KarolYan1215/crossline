@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { AI_TOOL_KIND_LABEL, type AiTool, type AiToolKind } from "@crossline/core";
 import { Markdown } from "../ui/markdown";
+import { Clamp } from "../ui/clamp";
 import { LineTag, Tag } from "../ui/tag";
 import type { GrownSkillView, MineSkillView, PublicSkillView, SkillLibraryView } from "../../lib/skill-library";
 
@@ -77,8 +78,8 @@ function MineLine({ line, onSaved }: { line: MineSkillView; onSaved: (line: Mine
         <Tag tone={rule.kind === "redline" ? "risk" : "neutral"}>{KIND[rule.kind]}</Tag>
         <p className="gen">{rule.text}</p>
         {/* Where the rule came from is mostly the person's own words, quoted. */}
-        <p className="sk-source" data-user-text>来源：{rule.sources.length ? rule.sourceLabels.join("；") : <a href={rule.url} target="_blank" rel="noreferrer">平台规则页面</a>}
-          {rule.quote && `「${rule.quote}」`}</p>
+        <p className="sk-source" data-user-text>{rule.sources.length ? <Clamp lines={1} text={`来源：${rule.sourceLabels.join("；")}${rule.quote ? `「${rule.quote}」` : ""}`} />
+          : <>来源：<a href={rule.url} target="_blank" rel="noreferrer">平台规则页面</a>{rule.quote && `「${rule.quote}」`}</>}</p>
       </li>)}</ol>}
       <details className="advanced sk-full"><summary>全文</summary><Markdown className="long-form" text={current.markdown.replace(/^---[\s\S]*?\n---\n/, "")} /></details>
       {line.versions.length > 1 && <details className="advanced"><summary>历次版本 · {line.versions.length}</summary>
@@ -104,12 +105,12 @@ function PublicSkill({ skill, onRemoved }: { skill: PublicSkillView; onRemoved: 
         if (ok) onRemoved(); else setNote("删除未完成");
       }} /></span>
     </div>
-    <p className="sk-desc" data-user-text>{skill.description}</p>
+    <p className="sk-desc" data-user-text><Clamp text={skill.description} /></p>
     <dl className="sk-facts">
       <dt>来源</dt><dd><a href={skill.url} target="_blank" rel="noreferrer">{skill.repo.replace("https://github.com/", "")}{skill.path ? `/${skill.path}` : ""}</a> · 提交 <span className="mono">{skill.commit.slice(0, 7)}</span></dd>
       <dt>许可证</dt><dd>{skill.license}</dd>
       <dt>扫描</dt><dd>{skill.risk === "high" || skill.injection ? `发现${flagged.join("、")}，脚本未安装` : "未发现风险"} · {skill.files} 个文件已记录校验值{skill.skipped ? `，${skill.skipped} 个非文本文件未取回` : ""}</dd>
-      <dt>审查</dt><dd className="gen">{skill.reasons.join("；")}</dd>
+      <dt>审查</dt><dd className="gen"><Clamp lines={1} text={skill.reasons.join("；")} /></dd>
       <dt>上次调用</dt><dd>{skill.lastUsedAt === skill.installedAt ? `尚未调用（${day(skill.installedAt)} 安装）` : day(skill.lastUsedAt)}</dd>
     </dl>
     {note && <p role="status" className="st-note">{note}</p>}
@@ -134,7 +135,7 @@ function GrownFlow({ flow, onChanged }: { flow: GrownSkillView; onChanged: (flow
   const waiting = flow.status === "needs_consent";
   return <li className="sk-public">
     <div className="sk-line-head">
-      {flow.lines[0] && <LineTag line={flow.lines[0]}>{flow.lineLabel || flow.lines[0]}</LineTag>}<strong className="gen">{flow.summary}</strong><Tag>{flow.category}</Tag>
+      {flow.lines[0] && <LineTag line={flow.lines[0]}>{flow.lineLabel || flow.lines[0]}</LineTag>}<strong className="gen"><Clamp text={flow.summary} /></strong><Tag>{flow.category}</Tag>
       <Tag tone={flow.status === "active" ? "ok" : waiting ? "warn" : "neutral"}>{flow.status === "active" ? "启用" : waiting ? "待本人确认风险" : "已关闭"}</Tag>
       {flow.verdict === "text_only" && <Tag tone={verdict.tone}>{verdict.label}</Tag>}
       <span className="sk-actions">
@@ -167,13 +168,19 @@ function GrownFlow({ flow, onChanged }: { flow: GrownSkillView; onChanged: (flow
     <dl className="sk-facts">
       <dt>时间</dt><dd>{flow.schedule}{flow.action === "remind" ? "，到点提醒" : flow.schedule === "按需" ? "，同类任务出现时使用" : "，到点由助手执行"}</dd>
       <dt>来由</dt><dd>{flow.origin} · {day(flow.createdAt)}</dd>
-      {flow.access.length > 0 && <><dt>读取</dt><dd>{flow.access.map((item) => <span key={item.service} className="gen">
+      {flow.access.length > 0 && <><dt>读取</dt><dd>{flow.consentedAt
+          // Like the risks: in full until accepted, then one line with 「全文」.
+          ? <span className="gen"><Clamp lines={1} text={flow.access.map((item) => `${item.service}（${item.login ? item.loggedInAt ? `${day(item.loggedInAt)} 登录` : "需本人登录" : "公开页面"}）：${item.how}`).join("；")} /></span>
+          : flow.access.map((item) => <span key={item.service} className="gen">
         {item.service}（{item.login ? item.loggedInAt ? `${day(item.loggedInAt)} 登录` : "需本人登录" : "公开页面"}）：{item.how}<br /></span>)}</dd>
-        <dt>风险</dt><dd className="gen">{flow.risks.map((risk) => <span key={risk}>{risk}<br /></span>)}{flow.consentedAt ? `本人于 ${day(flow.consentedAt)} 接受` : "本人接受前不会运行"}</dd></>}
-      <dt>步骤</dt><dd>{flow.steps.map((step) => step.person ? `${step.title}（本人）` : step.title).join(" → ")}</dd>
+        <dt>风险</dt><dd className="gen">{flow.consentedAt
+          // Read in full before 「接受风险并启用」; once accepted, one line with 「全文」.
+          ? <Clamp lines={1} text={`${flow.risks.join("；")}。本人于 ${day(flow.consentedAt)} 接受`} />
+          : <>{flow.risks.map((risk) => <span key={risk}>{risk}<br /></span>)}本人接受前不会运行</>}</dd></>}
+      <dt>步骤</dt><dd><Clamp text={flow.steps.map((step) => step.person ? `${step.title}（本人）` : step.title).join(" → ")} /></dd>
       {person.length > 0 && <><dt>本人完成</dt><dd>{person.map((step) => step.title).join("；")}</dd></>}
       <dt>检查</dt><dd>{flow.risk === "high" ? "脚本扫描发现风险，只用文字" : "脚本扫描未发现风险"} · {flow.files} 个文件已记录校验值</dd>
-      <dt>审查</dt><dd className="gen">{flow.reasons.join("；")}</dd>
+      <dt>审查</dt><dd className="gen"><Clamp lines={1} text={flow.reasons.join("；")} /></dd>
       <dt>上次使用</dt><dd>{flow.lastRunAt ? `${day(flow.lastRunAt)} 执行` : day(flow.lastUsedAt)}{flow.pinned ? "" : "；30 天未用会被移除，保留后不再移除"}</dd>
     </dl>
     {flow.skillText && <details className="advanced sk-full"><summary>工作流全文</summary><Markdown className="long-form" text={flow.skillText} /></details>}

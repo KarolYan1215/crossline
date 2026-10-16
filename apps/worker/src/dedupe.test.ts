@@ -1,7 +1,8 @@
 import { afterEach, expect, test } from "vitest";
 import { CrosslineStore } from "@crossline/db";
 import { planMerges, type MergeTask } from "@crossline/core";
-import { DEDUPE_DAY_SETTING, dedupePass, mergeTasks } from "./dedupe";
+import { DEDUPE_DAY_SETTING, DEDUPE_JUDGED_SETTING, DEDUPE_REVIEW_DAY_SETTING, dedupePass, mergeTasks } from "./dedupe";
+import { fakeRuntime } from "./testing/fake-runtime";
 
 /** The daily self-check that merges repeated tasks and folds requests for a fact into the task they serve (2026-10-15). */
 let store: CrosslineStore;
@@ -77,4 +78,29 @@ test("requests in one milestone with nothing else to serve become one email; a t
   expect(["busy", "busy2"].map((id) => store.getWorkOrder(ws, id)!.state)).toEqual(["active", "active"]);
   const kept = store.getWorkOrder(ws, done[0]!.keep)!.payload as { infoRequests?: Array<{ what: string }> };
   expect(kept.infoRequests?.map((item) => item.what)).toEqual([done[0]!.keep === "req1" ? "ECE 555 课程项目评分标准" : "ECE 555 课程项目要求"]);
+});
+
+test("pairs left open while the quota was not normal are reviewed on a later tick the same day, once", async () => {
+  store = new CrosslineStore(":memory:");
+  order("outline", "整理 ECE 548 复习提纲", { payload: {} });
+  store.saveWorkOrder({ ...store.getWorkOrder(ws, "outline")!, intent: "在周末前整理前几章的复习提纲" });
+  order("mat", "汇集 ECE 548 复习材料");
+  store.saveWorkOrder({ ...store.getWorkOrder(ws, "mat")!, intent: "汇集讲义" });
+  const { rpc, turns } = fakeRuntime([JSON.stringify({ pairs: [{ id: "p1", same: true, why: "同一份复习材料" }] })], "crossline:crossline-validation-reviewer");
+  const economy = { ...deps(), client: () => rpc, spend: async () => ({ mode: "economy" as const }) as never };
+  // The day's run in economy: the rules settle nothing, the reviewer is not asked.
+  expect(await dedupePass(economy)).toEqual([]);
+  expect(turns()).toBe(0);
+  expect(store.getSetting(ws, DEDUPE_REVIEW_DAY_SETTING)).toBeUndefined();
+  // Later the same day, the quota normal again: the open pair is reviewed and merged, and said under its own key.
+  const later = { ...deps(new Date("2026-10-15T19:00:00.000Z")), client: () => rpc };
+  const done = await dedupePass(later);
+  expect(turns()).toBe(1);
+  expect(done.map((item) => item.absorbed.length)).toEqual([1]);
+  expect(JSON.parse(store.getSetting(ws, DEDUPE_JUDGED_SETTING)!)).toEqual({ [`${done[0]!.keep === "mat" ? "mat|outline" : "outline|mat"}`]: true });
+  expect(store.getSetting(ws, DEDUPE_REVIEW_DAY_SETTING)).toBe("2026-10-15");
+  // Once: nothing more that day.
+  order("dup", "汇集 ECE 548 复习材料");
+  expect(await dedupePass(later)).toEqual([]);
+  expect(turns()).toBe(1);
 });

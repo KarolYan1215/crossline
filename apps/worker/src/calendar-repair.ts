@@ -70,3 +70,34 @@ export function repairFrozenRace(store: CrosslineStore, workspaceId: string, own
   }
   return { released: released.map((entry) => entry.blockId!), republished };
 }
+
+/**
+ * One-time repair of imported class blocks a confirmed date batch put on the plan twice (real account, 2026-10-15). A syllabus lists a
+ * class both as a weekly pattern and as a dated session in the same slot — 「ECE 555 上课」 every Monday and 「课堂期末考试」 on
+ * 2026-12-07 14:30–15:45 — and batches confirmed before `decideDateBatch` kept one block per slot left both, so the day panel counted the
+ * slot twice. Per day, start and end among `import:` blocks the dated item is kept (it says what that session is: `import:<batch>:<item>`,
+ * where a weekly occurrence is `import:<batch>:<item>:<day>`), else the first. Runs once per workspace (`repair.import-duplicates.v1`) and
+ * leaves a `repair.import_duplicates` event carrying every removed block whole, so any of them can be put back as it was.
+ */
+export const IMPORT_DUPLICATE_REPAIR = "repair.import-duplicates.v1";
+type PlanBlock = { id: string; day?: string; start: string; end: string; title?: string };
+
+export function repairDuplicateImports(store: CrosslineStore, workspaceId: string, ownerId: string, now = new Date()): { removed: string[] } | undefined {
+  if (store.getSetting(workspaceId, IMPORT_DUPLICATE_REPAIR)) return undefined;
+  const plan = store.listPlanVersions(workspaceId)[0];
+  const blocks = ((plan?.payload as { blocks?: PlanBlock[] } | undefined)?.blocks) ?? [];
+  const weekly = (block: PlanBlock) => Boolean(block.day) && block.id.endsWith(`:${block.day}`);
+  const slots = new Map<string, PlanBlock[]>();
+  for (const block of blocks.filter((item) => item.id.startsWith("import:") && item.day))
+    slots.set(`${block.day}|${block.start}|${block.end}`, [...(slots.get(`${block.day}|${block.start}|${block.end}`) ?? []), block]);
+  const removed = [...slots.values()].filter((group) => group.length > 1)
+    .flatMap((group) => { const keep = group.find((block) => !weekly(block)) ?? group[0]!; return group.filter((block) => block !== keep); });
+  if (plan && removed.length) {
+    const gone = new Set(removed.map((block) => block.id));
+    store.savePlanVersion({ ...plan, payload: { ...(plan.payload as object), blocks: blocks.filter((block) => !gone.has(block.id)) } });
+    store.appendEvent({ ownerId, workspaceId, idempotencyKey: `repair.import_duplicates:${workspaceId}`, type: "repair.import_duplicates", entityId: plan.id,
+      payload: { removed, at: now.toISOString() } });
+  }
+  store.setSetting(workspaceId, IMPORT_DUPLICATE_REPAIR, now.toISOString());
+  return { removed: removed.map((block) => block.id) };
+}

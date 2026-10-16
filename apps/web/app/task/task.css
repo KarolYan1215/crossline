@@ -288,3 +288,7 @@
   .task-card-step-title{grid-template-columns:3em minmax(0,1fr)}
   .task-card-step-title .task-card-minutes{grid-column:2}
 }
+
+/* How finishing the task is taken: the label, the switch and its reason on one wrapping line. */
+.task-completion-choice { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 6px 0; }
+.step-covers{display:flex;flex-wrap:wrap;gap:4px}

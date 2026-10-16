@@ -5,6 +5,7 @@ import type { TaskDetail } from "../../lib/task-detail";
 import { dayLabel, formatMinutes } from "../ui/controls";
 import { useReturnState } from "../ui/return-state";
 import { currentStep, dueDistance, waitReason } from "./card-model";
+import { CompletionChoice } from "./completion-choice";
 import { Prepared } from "./prepared";
 import { StepStrip } from "./step-strip";
 import { TaskActions } from "./task-actions";
@@ -52,6 +53,7 @@ export function TaskCard({ detail, slot, reason, today, variant = "compact" }: {
     <StepStrip detail={detail} />
     <CardStep detail={detail} step={step} proposal={proposal} finished={finished} waiting={wait?.kind === "input"} />
     {wait && <p className="task-card-wait" data-kind={wait.kind}>{wait.label}</p>}
+    {proposal && <CompletionChoice detail={detail} />}
     {slot && <p className="task-card-slot"><small>下一次</small> <a href={`/plan?day=${slot.day}`} className="mono">{slotLabel(slot)}</a></p>}
     <Prepared detail={detail} />
     <TaskActions workOrderId={detail.id} state={detail.state} paused={detail.paused} agentReady={detail.agentSteps.length > 0} agentStepId={detail.agentSteps[0]?.id} onOpen={() => setOpen(true)}

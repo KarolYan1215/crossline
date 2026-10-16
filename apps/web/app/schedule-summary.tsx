@@ -8,6 +8,9 @@ import type { FinerSplitNote, ScheduleChange } from "../lib/crossline";
  * The re-plan is derived and has nothing to undo, so the way back is 「钉回原位」 — lock that block at its old time and accept the
  * overlap. Below them, steps planned again smaller after two days of not getting done (adaptive granularity), one line each.
  */
+/** One line per change: a task's name and an event's title are cut short here; the whole of both is on hover. */
+const short = (text: string, max: number) => text.length > max ? `${text.slice(0, max - 1)}…` : text;
+
 export function ScheduleSummary({ changes, splits = [] }: { changes: ScheduleChange[];
   /** Steps planned again smaller after two days of not getting done: a line each, nothing to answer. */
   splits?: FinerSplitNote[] }) {
@@ -29,12 +32,12 @@ export function ScheduleSummary({ changes, splits = [] }: { changes: ScheduleCha
   };
   return <ul className="schedule-summary" aria-label="排程变化">
     {changes.map((change) => <li key={change.blockId}>
-      <span>「{change.title}」因 {change.cause} {shift(change)}</span>
+      <span title={`「${change.title}」因 ${change.cause} ${shift(change)}`}>「{short(change.title, 18)}」因 {short(change.cause, 18)} {shift(change)}</span>
       <button type="button" className="secondary" disabled={busy === change.blockId} onClick={() => void pinBack(change)}>钉回原位</button>
       {failed === change.blockId && <small role="status">未能钉回，请重试</small>}
     </li>)}
     {splits.map((split) => <li key={`split:${split.orderId}`}>
-      <span>「{split.title}{split.step ? ` · ${split.step}` : ""}」{split.days} 天没做成，已拆成更小的步骤，第一步不超过 15 分钟</span>
+      <span title={`${split.title}${split.step ? ` · ${split.step}` : ""}`}>「{short(`${split.title}${split.step ? ` · ${split.step}` : ""}`, 24)}」{split.days} 天没做成，已拆成更小的步骤，第一步不超过 15 分钟</span>
     </li>)}
   </ul>;
 }

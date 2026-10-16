@@ -69,7 +69,7 @@
 .pt-next{margin:0;padding:0;list-style:none;display:grid;gap:8px}
 .pt-next li{display:grid;gap:2px;padding:10px 12px;border:1px solid var(--pt-track);border-left:5px solid var(--lc,var(--pt-track))}
 .pt-next li[data-done]{background:var(--pt-soft)}
-.pt-next span{font-size:13px;color:var(--pt-muted)}
+.pt-next span{font-size:13px;color:var(--pt-muted);max-width:46em}
 .pt-footer{display:flex;justify-content:space-between;align-items:flex-end;gap:10px;padding-top:10px;border-top:1px solid var(--pt-track);font-size:12px;color:var(--pt-muted)}
 .pt-qr{display:grid;justify-items:end;gap:2px}
 .pt-qr small{font-size:12px}
@@ -206,6 +206,9 @@
   .pt-labels{grid-template-columns:1fr}
   .pt-cols,.pt-compass,.pt-lines{grid-template-columns:1fr}
   .pt-anchor{grid-template-columns:1fr}.pt-anchor li::after{display:none}
+  /* Side by side the two halves were 7 characters wide on a phone; stacked, each reads as a line. */
+  .pt-gap,.pt-reframe{grid-template-columns:minmax(0,1fr)}
+  .pt-gap-sign{justify-self:center;line-height:1}
 }
 @media print{
   @page{size:A4;margin:0}

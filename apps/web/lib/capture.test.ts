@@ -72,3 +72,21 @@ test("an item whose human core was never described shows unknown energy, not a d
   // "medium" would be a guess wearing the clothes of an observation.
   expect(primary.energy).toBeUndefined();
 });
+
+test("work that waits for its release is not offered as 下一步 until the wait is answered", async () => {
+  const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
+  ensureSeeded(TEST_CTX);
+  store.saveWorkOrder({
+    id: "hw3", ownerId: TEST_CTX.principalId, workspaceId: TEST_CTX.workspaceId, identityId: "research",
+    projectId: "research-default", milestoneId: "research-starter", intent: "完成 ECE 555 作业 3",
+    state: "approved", riskTier: "milestone",
+    estimate: { p25Minutes: 45, p50Minutes: 70, p85Minutes: 105, source: "llm_prior", observationCount: 0, confidence: "low" },
+    payload: { humanCore: [{ id: "h", intent: "做题", energy: "medium", interruptible: true }], materialContract: [] }
+  });
+  store.saveWaitingItem({ id: "wait-release-hw3", ownerId: TEST_CTX.principalId, workspaceId: TEST_CTX.workspaceId, title: "ECE 555 作业 3 发布", who: "",
+    expectedAt: "2026-01-01", approximate: false, followUpAt: "2026-01-01", state: "open", blocks: ["hw3"], source: "datepair" });
+  const offered = async () => { const data = await loadDashboard(TEST_CTX); return [data.primary, data.lowEnergy, data.shortGap].some((action) => action?.id === "hw3"); };
+  expect(await offered()).toBe(false);
+  store.answerWaitingItem(TEST_CTX.workspaceId, "wait-release-hw3", { kind: "arrived" }, TEST_CTX.principalId);
+  expect(await offered()).toBe(true);
+});

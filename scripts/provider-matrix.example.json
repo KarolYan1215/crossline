@@ -1,0 +1,14 @@
+{
+  "_comment": "Copy to data/eval/provider-matrix.json (not committed) and keep only what you bought. Model ids: check the provider's own model list (SiliconFlow: GET https://api.siliconflow.cn/v1/models) — the ones below are starting points, not verified. Prices are per 1M tokens from the provider's price page; leave price out rather than guess. Keys are read from the environment variable named by keyEnv.",
+  "providers": [
+    { "id": "sf-deepseek", "label": "DeepSeek（硅基流动）", "kind": "chat", "baseUrl": "https://api.siliconflow.cn/v1", "model": "deepseek-ai/DeepSeek-V3.2", "keyEnv": "SILICONFLOW_API_KEY", "responseFormat": "json_object" },
+    { "id": "sf-qwen", "label": "通义千问（硅基流动）", "kind": "chat", "baseUrl": "https://api.siliconflow.cn/v1", "model": "Qwen/Qwen3-235B-A22B-Instruct-2507", "keyEnv": "SILICONFLOW_API_KEY", "responseFormat": "json_object" },
+    { "id": "sf-kimi", "label": "Kimi（硅基流动）", "kind": "chat", "baseUrl": "https://api.siliconflow.cn/v1", "model": "moonshotai/Kimi-K2-Instruct-0905", "keyEnv": "SILICONFLOW_API_KEY", "responseFormat": "json_object" },
+    { "id": "sf-glm", "label": "智谱 GLM（硅基流动）", "kind": "chat", "baseUrl": "https://api.siliconflow.cn/v1", "model": "zai-org/GLM-4.6", "keyEnv": "SILICONFLOW_API_KEY", "responseFormat": "json_object" },
+    { "id": "openai", "label": "OpenAI（对照）", "kind": "responses", "baseUrl": "https://api.openai.com/v1", "model": "gpt-5.6-terra", "keyEnv": "OPENAI_API_KEY" }
+  ],
+  "images": [
+    { "id": "sf-flux-dev", "baseUrl": "https://api.siliconflow.cn/v1", "model": "black-forest-labs/FLUX.1-dev", "keyEnv": "SILICONFLOW_API_KEY", "size": "1024x1024" },
+    { "id": "sf-qwen-image", "baseUrl": "https://api.siliconflow.cn/v1", "model": "Qwen/Qwen-Image", "keyEnv": "SILICONFLOW_API_KEY", "size": "1024x1024" }
+  ]
+}

@@ -30,7 +30,9 @@ const OUTCOMES: Record<AskKind, { answered: string; unanswered: string }> = {
   relation_check: { answered: "记录这条飞轮关系是否兑现，计入兑现率。", unanswered: "这条关系的兑现情况不计入。" },
   background_paused: { answered: "查看额度，恢复后自动继续。", unanswered: "新收集的事项等恢复后再分析。" },
   locked_conflict: { answered: "挪开锁定块，或保留两件事的重叠。", unanswered: "锁定块与新日程继续重叠。" },
-  outcome_check: { answered: "完成情况或结果记入任务与里程碑进度；说了出结果的日期就到那天再问。", unanswered: "任务保持已验收，完成情况不计入里程碑进度。" }
+  outcome_check: { answered: "完成情况或结果记入任务与里程碑进度；说了出结果的日期就到那天再问。", unanswered: "任务保持已验收，完成情况不计入里程碑进度。" },
+  progress_check: { answered: "这一步的进度按回答记下，排程按剩下的部分安排。", unanswered: "进度保持原样，不影响别的事。" },
+  milestone_risk_review: { answered: "接受则它的任务提前 1–2 天排完；也可调整截止或降低标准。", unanswered: "排程不变，不为这项风险提前。" }
 };
 
 /** What an answer does and what silence does. An option's own detail is preferred over the kind's sentence when it is the recommended one. */
@@ -43,7 +45,7 @@ export function askOutcome(ask: Pick<Ask, "kind" | "options">): { answered: stri
 export type AskSource = { label: string; href: string };
 
 const WORK_ORDER_KINDS = new Set<AskKind>(["materials_blocked", "gate_insufficient", "gate_failed", "evidence_manual", "missed_block", "locked_conflict", "step_question"]);
-const MILESTONE_KINDS = new Set<AskKind>(["backplan_input", "milestone_risk"]);
+const MILESTONE_KINDS = new Set<AskKind>(["backplan_input", "milestone_risk", "milestone_risk_review"]);
 
 /** The first 「…」 or 《…》 in a title: the name of the thing the ask is about. */
 export function quotedName(title: string): string | undefined {

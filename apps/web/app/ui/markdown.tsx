@@ -61,18 +61,39 @@ const isTableRule = (line: string) => /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)
  * drawn as such instead of showing 「## 假设」 and 「- 」 to the person. Pipe tables and `>` quotes too (what the assistant writes in a
  * ledger or a checklist). No HTML is ever interpreted. `cite` draws the tutorial's `[^n]` footnote marks.
  */
+/**
+ * A long paragraph cut into paragraphs of whole sentences, each at most about `max` characters (one sentence longer than that stays
+ * whole). Reading pages show documents and tutorials in full, but a 2,000-character block of a syllabus is easier read in pieces.
+ */
+export function splitParagraph(text: string, max = 300): string[] {
+  if (text.length <= max) return [text];
+  // Cut after a sentence's closing mark (and its closing quote), or after an English full stop followed by a space; nothing is dropped.
+  const sentences = text.split(/(?<=[。！？!?])(?![”’」』）)"。！？!?])|(?<=[。！？!?][”’」』）)"])|(?<=\.)(?=\s)/);
+  const parts: string[] = [];
+  let current = "";
+  for (const sentence of sentences) {
+    if (current && (current + sentence).length > max) { parts.push(current.trim()); current = ""; }
+    current += sentence;
+  }
+  if (current.trim()) parts.push(current.trim());
+  return parts.length ? parts : [text];
+}
+
+const SENTENCE_END = /[。！？!?；;.]["”’」』）)]?$/;
+
 export function Markdown({ text, className, cite }: { text: string; className?: string; cite?: CiteRenderer }) {
   const blocks: ReactNode[] = [];
-  let list: { ordered: boolean; items: string[] } | null = null;
+  let list: { ordered: boolean; start: number; items: string[] } | null = null;
   let paragraph: string[] = [];
   const flushParagraph = () => {
-    if (paragraph.length) blocks.push(<p key={`p${blocks.length}`}>{inline(paragraph.join(" "), `p${blocks.length}`, cite)}</p>);
+    for (const part of paragraph.length ? splitParagraph(paragraph.join(" ")) : []) blocks.push(<p key={`p${blocks.length}`}>{inline(part, `p${blocks.length}`, cite)}</p>);
     paragraph = [];
   };
   const flushList = () => {
     if (!list) return;
     const items = list.items.map((item, index) => <li key={index}>{inline(item, `l${blocks.length}-${index}`, cite)}</li>);
-    blocks.push(list.ordered ? <ol key={`l${blocks.length}`}>{items}</ol> : <ul key={`l${blocks.length}`}>{items}</ul>);
+    // A numbered list keeps its own numbers: a loose list (items apart by blank lines) is drawn as several, each starting where it left off.
+    blocks.push(list.ordered ? <ol key={`l${blocks.length}`} start={list.start === 1 ? undefined : list.start}>{items}</ol> : <ul key={`l${blocks.length}`}>{items}</ul>);
     list = null;
   };
   const lines = text.split("\n");
@@ -80,7 +101,7 @@ export function Markdown({ text, className, cite }: { text: string; className?: 
     const line = lines[index]!.trimEnd();
     const heading = /^(#{1,4})\s+(.*)$/.exec(line);
     const bullet = /^\s*[-*•]\s+(.*)$/.exec(line);
-    const numbered = /^\s*\d+[.)、]\s+(.*)$/.exec(line);
+    const numbered = /^\s*(\d+)[.)、]\s+(.*)$/.exec(line);
     if (!line.trim()) { flushParagraph(); flushList(); continue; }
     if (heading) { flushParagraph(); flushList(); blocks.push(<h5 key={`h${blocks.length}`}>{inline(heading[2]!, `h${blocks.length}`, cite)}</h5>); continue; }
     // A display formula: `$$ … $$` on one line, or opened by a line starting `$$` and closed by one ending `$$`. Unclosed, it is text.
@@ -117,11 +138,14 @@ export function Markdown({ text, className, cite }: { text: string; className?: 
       flushParagraph();
       const ordered = Boolean(numbered);
       if (list && list.ordered !== ordered) flushList();
-      list ??= { ordered, items: [] };
-      list.items.push((bullet ?? numbered)![1]!);
+      list ??= { ordered, start: numbered ? Number(numbered[1]) : 1, items: [] };
+      list.items.push(bullet ? bullet[1]! : numbered![2]!);
       continue;
     }
     flushList();
+    // A line that ends a sentence ends its paragraph: a file written one entry per line (「[2026-08-27] - …。」) stays one entry per
+    // paragraph instead of running together into a single block, while a line wrapped mid-sentence still joins the next.
+    if (paragraph.length && SENTENCE_END.test(paragraph[paragraph.length - 1]!)) flushParagraph();
     paragraph.push(line.trim());
   }
   flushParagraph(); flushList();

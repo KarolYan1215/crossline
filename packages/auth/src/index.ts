@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { betterAuth, type Auth, type BetterAuthOptions } from "better-auth";
@@ -102,8 +102,9 @@ function crosslineAuthConfig(options: CrosslineAuthOptions): BetterAuthOptions {
   // and letting `Options` infer as this specific literal object type makes the returned `Auth<...>`
   // embed non-portable types (`better-sqlite3`'s `Database`) that `tsc` cannot name when emitting this
   // package's declarations (`declaration: true` in tsconfig.base.json).
+  const database = new Database(options.authDbPath);
   return {
-    database: new Database(options.authDbPath),
+    database,
     secret: options.secret,
     baseURL: options.baseURL,
     trustedOrigins: options.trustedOrigins,
@@ -122,6 +123,22 @@ function crosslineAuthConfig(options: CrosslineAuthOptions): BetterAuthOptions {
       // the same machine would overwrite each other's session in one browser. The installed copy's cookies get their own names.
       ...(options.localCodex ? { cookiePrefix: "crossline-local" } : {})
     },
+    // The hosted beta (docs/beta-launch.md §10.6): who may create an account, by any path — email code, password or Google. Existing
+    // accounts sign in as before. Listed addresses always may; with `CROSSLINE_SIGNUP_CAP` anyone else may while the accounts number
+    // fewer than the cap (people come by the public test or straight to the interview, and neither path should need an invitation);
+    // past it the address goes on the waiting list. A list with no cap admits only the list.
+    ...(signupAllowlist() || signupCap() ? { databaseHooks: { user: { create: { before: async (user: { email: string }) => {
+      const email = user.email.trim().toLowerCase();
+      if (signupAllowlist()?.has(email)) return { data: user };
+      const cap = signupCap();
+      if (cap !== undefined) {
+        const { n } = database.prepare("SELECT count(*) AS n FROM \"user\"").get() as { n: number };
+        if (n < cap) return { data: user };
+        noteWaiting(email);
+        throw new APIError("FORBIDDEN", { code: "SIGNUP_FULL", message: "内测名额已满，已记下这个邮箱，有名额时会通知你。" });
+      }
+      throw new APIError("FORBIDDEN", { code: "SIGNUP_NOT_INVITED", message: "这个邮箱不在内测名单里。" });
+    } } } } } : {}),
     account: {
       // Same email, same account (the person's decision, 2026-10-13; it replaced explicit-only linking, which refused a Google or
       // ChatGPT sign-in for the owner's own address and offered no way to link). Better Auth links only when both sides vouch for the
@@ -160,6 +177,38 @@ function crosslineAuthConfig(options: CrosslineAuthOptions): BetterAuthOptions {
       expiresIn: 600 })] : []), ...(options.chatgpt ? [chatgptSignIn(options.chatgpt)] : []),
       ...(options.localCodex ? [codexLocalSignIn(options.localCodex)] : []), nextCookies()]
   };
+}
+
+/**
+ * The invited addresses, lower-cased; undefined when sign-up is open. Two sources, read on each use: `CROSSLINE_SIGNUP_ALLOWLIST`
+ * (comma-separated) and the file `CROSSLINE_SIGNUP_ALLOWLIST_FILE` (one address per line, `#` comments), which the server refreshes
+ * from the public test's 「申请内测」 requests — so an invitation takes effect without a restart. Naming a file closes sign-up even while
+ * it is empty or missing: an unreadable list must never mean an open door.
+ */
+export function signupAllowlist(env: NodeJS.ProcessEnv = process.env): Set<string> | undefined {
+  const file = env.CROSSLINE_SIGNUP_ALLOWLIST_FILE?.trim();
+  let fromFile: string[] = [];
+  if (file && existsSync(file)) { try { fromFile = readFileSync(file, "utf8").split(/\r?\n/).map((line) => line.replace(/#.*/, "")); } catch { fromFile = []; } }
+  const list = [...(env.CROSSLINE_SIGNUP_ALLOWLIST ?? "").split(","), ...fromFile].map((item) => item.trim().toLowerCase()).filter(Boolean);
+  return list.length || file ? new Set(list) : undefined;
+}
+
+/** At most this many accounts may be created outside the list (`CROSSLINE_SIGNUP_CAP`); undefined = no cap. */
+export function signupCap(env: NodeJS.ProcessEnv = process.env): number | undefined {
+  const cap = Number(env.CROSSLINE_SIGNUP_CAP?.trim());
+  return Number.isInteger(cap) && cap >= 0 && env.CROSSLINE_SIGNUP_CAP?.trim() ? cap : undefined;
+}
+
+/** Past the cap: the address and the time, one line each, in `CROSSLINE_SIGNUP_WAITLIST_FILE` (or nowhere when unset). */
+function noteWaiting(email: string, env: NodeJS.ProcessEnv = process.env): void {
+  const file = env.CROSSLINE_SIGNUP_WAITLIST_FILE?.trim();
+  if (!file) return;
+  try {
+    const known = existsSync(file) ? readFileSync(file, "utf8") : "";
+    if (known.split(/\r?\n/).some((line) => line.split("\t")[0] === email)) return;
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, `${known}${email}\t${new Date().toISOString()}\n`, { mode: 0o600 });
+  } catch { /* the refusal still stands; losing a waiting-list line is not worth failing the request over */ }
 }
 
 export function createCrosslineAuth(options: CrosslineAuthOptions): Auth {

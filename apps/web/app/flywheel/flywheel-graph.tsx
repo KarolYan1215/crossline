@@ -277,6 +277,8 @@ export function FlywheelGraph({ data }: { data: FlywheelGraphData }) {
         {line.goal && <small title={line.goal}>{short(line.goal, 36)}</small>}
       </li>)}
     </ul>
+    {/* The key is reference, read once: folded so the graph is not followed by a block of explanation. */}
+    <details className="fold advanced fw-key-fold"><summary>图例与操作</summary>
     <ul className="fw-key" aria-label="图例">
       <li>点：里程碑，大小为未完成任务数，空心为草稿</li>
       <li>细线：同一主线前后</li>
@@ -286,6 +288,6 @@ export function FlywheelGraph({ data }: { data: FlywheelGraphData }) {
       <li>健康是容量约束，不画在图中</li>
       <li>拖动节点或空白处，滚轮或双指缩放；点里程碑打开主线页，点关系线查看与确认</li>
       {!showNames && <li>里程碑名称：悬停或放大后显示</li>}
-    </ul>
+    </ul></details>
   </div>;
 }

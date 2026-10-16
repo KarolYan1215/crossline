@@ -7,7 +7,13 @@ import { MenuButton } from "../ui/controls";
 export type Mention = { kind: "material" | "task" | "milestone" | "goal"; id: string; title: string };
 export type ComposerInput = { text: string; files: File[]; mentions: Mention[]; batch: boolean };
 const KIND_LABEL: Record<Mention["kind"], string> = { material: "资料", task: "任务", milestone: "里程碑", goal: "长期目标" };
-const ACCEPTED = "image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain,text/markdown,text/csv,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.md,.csv,.txt,.docx";
+/**
+ * An `@` being typed at the end of the text, and the words after it. It may follow any character but a letter, digit or one that
+ * makes an email address (「name@site」 is not a mention): Chinese is written without spaces, and requiring one before `@` meant
+ * 「看看@作业」 never opened the list (2026-10-15).
+ */
+export const MENTION_AT = /(^|[^A-Za-z0-9._%+-])@([^\s@]*)$/;
+const ACCEPTED ="image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain,text/markdown,text/csv,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.md,.csv,.txt,.docx";
 
 /**
  * The one input box, for 快速收集 and 小帮手 alike, laid out like the chat products people already know: a ＋ menu on the left (files,
@@ -42,6 +48,8 @@ export function Composer({ mode, placeholder, onSubmit, busy = false, children, 
   const [batch, setBatch] = useState(false);
   const [picker, setPicker] = useState<{ query: string; kind?: Mention["kind"] | "linkable"; fromAt: boolean } | null>(null);
   const [results, setResults] = useState<Mention[]>([]);
+  // 「无匹配」 only once the answer for what is typed now is in; before that the list says it is searching.
+  const [searching, setSearching] = useState(false);
   const textRef = useRef<HTMLTextAreaElement>(null);
   // Neither what is typed nor the hint may be cut off on a narrow phone: fit on every change, on mount and when the width changes.
   useEffect(() => {
@@ -66,26 +74,28 @@ export function Composer({ mode, placeholder, onSubmit, busy = false, children, 
   useEffect(() => {
     if (!picker) return;
     const controller = new AbortController();
-    const kind = picker.kind && picker.kind !== "linkable" ? `&kind=${picker.kind}` : "";
+    // 「linkable」 is asked of the server: filtering files out here, after the server had cut the list, left nothing once files filled it.
+    const kind = picker.kind ? `&kind=${picker.kind}` : "";
+    setSearching(true);
     const timer = setTimeout(() => {
       fetch(`/api/mentions?q=${encodeURIComponent(picker.query)}${kind}`, { signal: controller.signal })
         .then((response) => response.ok ? response.json() : { results: [] })
-        .then((body: { results?: Mention[] }) => setResults((body.results ?? []).filter((item) => picker.kind !== "linkable" || item.kind !== "material")))
-        .catch(() => {});
+        .then((body: { results?: Mention[] }) => { setResults(body.results ?? []); setSearching(false); })
+        .catch(() => { if (!controller.signal.aborted) { setResults([]); setSearching(false); } });
     }, 120);
     return () => { clearTimeout(timer); controller.abort(); };
   }, [picker]);
 
   const choose = (item: Mention) => {
     setMentions((list) => list.some((m) => m.kind === item.kind && m.id === item.id) ? list : [...list, item]);
-    if (picker?.fromAt) setText((value) => value.replace(/@[^\s@]*$/, ""));
+    if (picker?.fromAt) setText((value) => value.replace(MENTION_AT, (whole, before: string) => before));
     setPicker(null);
     textRef.current?.focus();
   };
   const onChange = (value: string) => {
     setText(value);
-    const at = /(?:^|\s)@([^\s@]*)$/.exec(value);
-    setPicker(at ? { query: at[1]!, fromAt: true } : picker?.fromAt ? null : picker);
+    const at = MENTION_AT.exec(value);
+    setPicker(at ? { query: at[2]!, fromAt: true } : picker?.fromAt ? null : picker);
   };
   const submit = async (event?: FormEvent) => {
     event?.preventDefault();
@@ -95,7 +105,8 @@ export function Composer({ mode, placeholder, onSubmit, busy = false, children, 
   };
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (picker && event.key === "Escape") { setPicker(null); return; }
-    if (picker && event.key === "Enter" && results[0]) { event.preventDefault(); choose(results[0]); return; }
+    // Enter while an input method is composing confirms the characters, not the first result.
+    if (picker && event.key === "Enter" && results[0] && !event.nativeEvent.isComposing) { event.preventDefault(); choose(results[0]); return; }
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void submit(); }
   };
   const menu = [
@@ -129,7 +140,7 @@ export function Composer({ mode, placeholder, onSubmit, busy = false, children, 
         onKeyDown={(event) => { if (event.key === "Escape") setPicker(null); if (event.key === "Enter") { event.preventDefault(); if (results[0]) choose(results[0]); } }} />}
       {results.length ? results.map((item) => <button key={`${item.kind}:${item.id}`} type="button" role="option" aria-selected="false" onClick={() => choose(item)}>
         <span className="composer-kind" data-kind={item.kind}>{KIND_LABEL[item.kind]}</span>{item.title}</button>)
-        : <small className="muted">无匹配</small>}
+        : <small className="muted">{searching ? "正在搜索…" : "无匹配"}</small>}
       <button type="button" className="composer-picker-close" onClick={() => setPicker(null)}>关闭</button>
     </div>}
     {children}

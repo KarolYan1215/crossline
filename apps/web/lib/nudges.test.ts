@@ -36,6 +36,8 @@ test("the day opens with its arrangements, its work and what is due soon, once",
   const [opener] = nudges();
   expect(opener!.card!.clarify.question).toContain("三天内截止：完成 ECE 555 作业 2（10/14）");
   expect(opener!.card!.clarify.question.startsWith("10 月 12 日 周一。")).toBe(true);
+  // The text version is a few short lines (two of each, names cut short), never one run-on paragraph.
+  expect(opener!.card!.clarify.question.split("\n").every((line) => line.length <= 80)).toBe(true);
   expect(opener!.card!.clarify.options.map((option) => option.label)).toContain("打开计划");
 });
 

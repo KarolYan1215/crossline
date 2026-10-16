@@ -18,4 +18,12 @@ if ! ldconfig -p 2>/dev/null | grep -q 'libsecret-1.so.0'; then
   apt-get update -qq && apt-get install -y -qq --no-install-recommends libsecret-1-0
 fi
 
+# The hosted beta's deploy key (docs/beta-launch.md §10.6), when the owner put it in this environment's variables as one base64 line:
+# written where the deploy commands look for it, readable by this session only. Nothing happens without the variable.
+if [ -n "${CROSSLINE_DEPLOY_SSH_KEY_B64:-}" ]; then
+  mkdir -p "$HOME/.ssh" && chmod 700 "$HOME/.ssh"
+  printf '%s' "$CROSSLINE_DEPLOY_SSH_KEY_B64" | base64 -d > "$HOME/.ssh/crossline_hk"
+  chmod 600 "$HOME/.ssh/crossline_hk"
+fi
+
 pnpm install

@@ -221,7 +221,7 @@ export type StoredWaitingItem = {
   state: "open" | "arrived" | "cancelled";
   /** Work orders that cannot start until it arrives. */
   blocks: string[];
-  source: "analysis" | "manual" | "assistant" | "backplan";
+  source: "analysis" | "manual" | "assistant" | "backplan" | "datepair";
   createdAt: string; updatedAt: string;
 };
 
@@ -1855,6 +1855,19 @@ export class CrosslineStore {
     this.#db.prepare(
       "UPDATE source_documents SET extraction_status = ?, extracted_text = ?, extraction_note = ? WHERE workspace_id = ? AND id = ?"
     ).run(result.status, result.text ?? "", result.note ?? null, workspaceId, id);
+  }
+
+  /**
+   * Removes one document row (an authorized folder's file the person excluded or took back). Returns its stored file and whether any
+   * row in any workspace still points at it, so the caller deletes the copy only when nothing else reads it.
+   */
+  deleteSourceDocument(workspaceId: string, id: string): { uri: string; uriInUse: boolean } | undefined {
+    return this.#db.transaction(() => {
+      const row = this.#db.prepare("SELECT uri FROM source_documents WHERE workspace_id = ? AND id = ?").get(workspaceId, id) as { uri: string } | undefined;
+      if (!row) return undefined;
+      this.#db.prepare("DELETE FROM source_documents WHERE workspace_id = ? AND id = ?").run(workspaceId, id);
+      return { uri: row.uri, uriInUse: Boolean(this.#db.prepare("SELECT 1 FROM source_documents WHERE uri = ? LIMIT 1").get(row.uri)) };
+    })();
   }
 
   assignSourceDocumentProject(workspaceId: string, id: string, projectId: string | null): void {

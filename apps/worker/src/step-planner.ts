@@ -2,7 +2,7 @@ import {
   ARCHETYPES, AVAILABILITY_PROPOSED_SETTING, aiToolBrief, AVAILABILITY_SETTING, resolveAvailability, VALIDATION_REVIEW_SCHEMA, archetypeBrief, archetypeById, stepPlanSchema, goalSettingKey,
   normalizeStepPlan, readableFromMaterial, relevantDocuments, STEP_ANSWER_SLOT, stepAnswerSlot, stepPlanWarnings, unverifiedUnits, validateStepPlanShape, validateValidationReview, weeklyAvailableHours,
   PROGRESS_ASSESSMENT_SCHEMA, validateProgressAssessment, type ProgressAssessment, type StepPlan, type StepWarning, type ValidationReview,
-  FINER_SPLIT_FEEDBACK, stepsNeedingFinerSplit, type FinerSplit, type StepTrouble
+  FINER_SPLIT_FEEDBACK, stepsNeedingFinerSplit, readModelCompletion, type FinerSplit, type StepTrouble
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import { aiToolsFor, assistantAvailable, listAgentTasks, projectAgentOutputs, type CrosslineStore, type StoredWorkOrder } from "@crossline/db";
@@ -286,6 +286,12 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
     // only the rest goes to the reviewer.
     const warnings = [...fixed.filter((warning) => !AUTO_FIXED.has(warning.code)), ...stepPlanWarnings(normalized, window, learned)];
     const saved = store.saveStepPlan(workspaceId, workOrderId, normalized, ownerOf(store, workspaceId), feedback ? "revised" : "planned");
+    // A task nobody judged the completion of yet (one from a course's dates, or written before the field) takes the planner's judgement;
+    // one the analysis or backplanner already judged keeps theirs, and the person's own choice is `completionMode`, untouched here.
+    const completion = readModelCompletion(result.output.completion);
+    const current = store.listWorkOrders(workspaceId).find((item) => item.id === workOrderId);
+    if (completion && current && !readModelCompletion((current.payload as { completion?: unknown } | undefined)?.completion))
+      store.saveWorkOrder({ ...current, payload: { ...((current.payload ?? {}) as object), completion } });
     // Only an important task's questions go to the person; a minor task's are settled as assumptions the next plan reads (and the
     // person can still correct on the task), so they never become a decision to make.
     if (!research && !importantByRule(store, workspaceId, order) && !result.output.importance?.longTerm) assumeAnswers(store, workspaceId, order, normalized.questions);

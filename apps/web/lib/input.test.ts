@@ -46,3 +46,19 @@ test("a failed action says why in words and records nothing to undo", async () =
     .toEqual({ ok: false, message: "任务已不存在" });
   expect(recentOps(TEST_CTX)).toHaveLength(before);
 });
+
+test("@ finds tasks and milestones however many files there are, and reads ECE555, HW3 and several words", async () => {
+  const { searchMentions, mentionMatches } = await import("./input");
+  const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
+  for (let i = 0; i < 40; i++) store.saveSourceDocument({ id: `d${i}`, ownerId: TEST_CTX.principalId, workspaceId: ws, projectId: "", kind: "text",
+    fileName: `Downloads/ECE555-Lecture-${i}.pdf`, mediaType: "application/pdf", sha256: `h${i}`, uri: "", extractedText: "", extractionStatus: "done", createdAt: `2026-10-15T00:00:${String(i).padStart(2, "0")}Z` });
+  store.saveWorkOrder({ id: "hw3", ownerId: TEST_CTX.principalId, workspaceId: ws, identityId: "research", projectId: "ece555", milestoneId: "", intent: "完成 ECE 555 作业 3",
+    state: "approved", riskTier: "routine", estimate: { p25Minutes: 30, p50Minutes: 60, p85Minutes: 120, source: "llm_prior", observationCount: 0, confidence: "low" }, payload: { title: "完成 ECE 555 作业 3" } });
+  const ids = (query: string, kind?: Parameters<typeof searchMentions>[2]) => searchMentions(TEST_CTX, query, kind).map((item) => `${item.kind}:${item.id}`);
+  for (const query of ["ECE", "ece555", "hw3", "ECE 作业", "作业3"]) expect([query, ids(query).includes("task:hw3")]).toEqual([query, true]);
+  expect(ids("ECE").filter((id) => id.startsWith("material:")).length).toBe(6);
+  expect(ids("ECE", "linkable").some((id) => id.startsWith("material:"))).toBe(false);
+  expect(ids("ECE", "material").length).toBe(20);
+  expect(mentionMatches("hw 2", "ECE555-F26-Homework2.docx")).toBe(true);
+  expect(mentionMatches("hw4", "完成 ECE 555 作业 3")).toBe(false);
+});

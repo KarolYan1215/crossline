@@ -5,6 +5,7 @@ import { runCodexAnalysis, type CodexRpcBoundary } from "@crossline/codex";
 import { ANALYSIS_CONTEXT_VERSION, validateAnalysisContext, type AnalysisContext } from "@crossline/core";
 import { CrosslineStore, type StoredCapture } from "@crossline/db";
 import { identityLines } from "./lines";
+import { existingTasksFor, foldNewTask } from "./duplicate-guard";
 
 export type AnalysisOutcome = { id: string; state: string; attempt: number; audit: StoredCapture["audit"] };
 
@@ -119,6 +120,8 @@ export function createCaptureAnalyzer(store: CrosslineStore, workspaceId: string
             explanation: relation.explanation ?? "" })),
         // What the person has corrected or shown about how they work, across every line (the capture's line is not known yet).
         personalPreferences: store.preferenceLines(workspaceId, packs.map((pack) => pack.id), 20),
+        // The open tasks already on the board, so the same work is not written twice and an addition says what it adds to.
+        existingTasks: existingTasksFor(store, workspaceId),
         policy: { tools: [], externalSideEffects: false, humanApprovalRequired: true }
       });
       store.updateAnalysisAudit(workspaceId, id, { contextVersion: context.version });
@@ -131,7 +134,8 @@ export function createCaptureAnalyzer(store: CrosslineStore, workspaceId: string
           proposal: result.proposal, context, audit: { ...result.audit, contextVersion: context.version }
         });
         recordWaitingAndDates(store, workspaceId, id);
-        autoApproveEligible(store, workspaceId, [id]);
+        // Work the board already has is folded into that task instead of standing beside it (after the dates, so the earlier due day carries).
+        if (!foldNewTask(store, workspaceId, id, result.proposal.extendsTaskId ?? "")) autoApproveEligible(store, workspaceId, [id]);
         // A quality problem the repairs did not fix was corrected in the smallest way and kept; the reviewer looks at it next.
         if (result.audit.warnings?.length) store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId,
           idempotencyKey: `validation.warned:analysis:${id}:${attempt}`, type: "validation.warned", entityId: `analysis:${id}`,

@@ -1,7 +1,8 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { characterPrompt, type PortraitReport } from "@crossline/core";
-import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
+import { currentRoute, runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
+import { imageBackendFromEnv, type ImageBackend } from "@crossline/connectors";
 import type { CrosslineStore } from "@crossline/db";
 
 export const PORTRAIT_ILLUSTRATOR = "crossline:crossline-portrait-illustrator";
@@ -17,16 +18,31 @@ const SCHEMA = { type: "object", properties: { generated: { type: "boolean" }, n
  * `characterPrompt` builds: the fixed character standard, their type group's backdrop, and the writer's redacted outfit, props, pose and
  * expression. Saved to `<dataDir>/portrait/<workspace>/v<version>-character.png`; a failed run leaves the page without the figure.
  */
-export function createPortraitIllustrator(store: CrosslineStore, workspaceId: string, cwd: string, dataDir: string, getClient: () => CodexRpcBoundary | undefined) {
+export function createPortraitIllustrator(store: CrosslineStore, workspaceId: string, cwd: string, dataDir: string, getClient: () => CodexRpcBoundary | undefined,
+  imageApi: () => ImageBackend | undefined = imageBackendFromEnv) {
   return async function illustrate(): Promise<{ drawn: string[]; failed: string[] }> {
     const client = getClient();
     let saved: { version?: number; report?: PortraitReport } = {};
     try { saved = JSON.parse(store.getSetting(workspaceId, "portrait.report") ?? "{}"); } catch { /* none */ }
     const prompt = saved.report ? characterPrompt(saved.report) : null;
-    if (!client || !prompt) return { drawn: [], failed: [] };
+    // A workspace whose runs go to another model has no image tool through Codex: an image API draws from the same prompt directly
+    // (docs/beta-launch.md §10.4). With no image API configured it is left to the Codex sign-in, as before.
+    const direct = currentRoute(PORTRAIT_ILLUSTRATOR).via !== "codex" ? imageApi() : undefined;
+    if ((!client && !direct) || !prompt) return { drawn: [], failed: [] };
     const dir = join(dataDir, "portrait", workspaceId.replace(/[^a-zA-Z0-9_-]/g, "_"));
     mkdirSync(dir, { recursive: true });
     const file = `v${saved.version ?? 0}-character.png`;
+    const record = (ok: boolean) => store.setSetting(workspaceId, PORTRAIT_IMAGES,
+      JSON.stringify({ version: saved.version ?? 0, images: ok ? { character: { file, at: new Date().toISOString() } } : {} }));
+    if (direct) {
+      const ok = await direct.generate(prompt).then((bytes) => { writeFileSync(join(dir, file), bytes); return true; }, (error: unknown) => {
+        console.warn(JSON.stringify({ type: "portrait.image_api_failed", workspaceId, message: error instanceof Error ? error.message.slice(0, 200) : "failed" }));
+        return false;
+      });
+      record(ok);
+      return ok ? { drawn: ["character"], failed: [] } : { drawn: [], failed: ["character"] };
+    }
+    if (!client) return { drawn: [], failed: [] };
     let wrote = false;
     const context = { version: "crossline.portrait-image.v1", slot: "character", prompt };
     const result = await runCodexSkill<{ generated: boolean; note: string }>(client, context, {
@@ -35,7 +51,7 @@ export function createPortraitIllustrator(store: CrosslineStore, workspaceId: st
       onImage: (image) => { if (wrote) return; writeFileSync(join(dir, file), Buffer.from(image.base64, "base64")); wrote = true; },
       validateOutput: (output) => output as { generated: boolean; note: string }, onAudit: () => {}, timeoutMs: 15 * 60_000 });
     const ok = result.ok && wrote;
-    store.setSetting(workspaceId, PORTRAIT_IMAGES, JSON.stringify({ version: saved.version ?? 0, images: ok ? { character: { file, at: new Date().toISOString() } } : {} }));
+    record(ok);
     return ok ? { drawn: ["character"], failed: [] } : { drawn: [], failed: ["character"] };
   };
 }

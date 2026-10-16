@@ -94,6 +94,8 @@ export type ResultView = {
   mailOn: boolean;
   /** Whether the person has asked to be invited to the full Crossline app (「申请内测」). */
   betaRequested: boolean;
+  /** The full app's public address when it is open to sign up (`ASSESS_APP_URL`), else null and the page offers 「申请内测」. */
+  appUrl: string | null;
   pairs: Array<{ pairToken: string; nickname: string; code: string; name: string; relation: string }>;
   expiresAt: string;
 };

@@ -73,6 +73,8 @@ export type SkillRunOptions<T> = {
   tier?: RouteTier;
   /** Run on exactly this provider, bypassing routing: only the conformance check, which measures a provider before it may be routed to. */
   provider?: ThreadProvider;
+  /** With `provider`: the search functions to stand in for hosted web search (routing supplies them otherwise). */
+  webTools?: SkillTools;
   /**
    * Skills from the person's library switched on beside the target for this run only and named in the first prompt
    * (`$crossline-mine:<line>`, docs/skills-library.md §3). One that is not installed is skipped, never a failure: a line with no skill yet
@@ -164,8 +166,29 @@ function underConfigLock<T>(client: object, work: () => Promise<T>): Promise<T> 
 type RunContext = { route: ModelRoute | undefined; spendMode: SpendMode; usage: UsageCollector;
   /** Set when this run goes to a provider other than the workspace's Codex sign-in (providers.ts); the thread is started on it. */
   provider?: ThreadProvider;
+  /** On a provider: Crossline's own `web_search`/`web_fetch`, standing in for the OpenAI-hosted search the provider does not have. */
+  webTools?: SkillTools;
   /** The library skills switched on for this run, named in its first prompt beside the target. */
   extraSkills: string[] };
+
+const WEB_TOOLS_INSTRUCTION = "Web access in this run is through the functions `web_search` (results: title, url, snippet) and `web_fetch` "
+  + "(the page's text). Search, then fetch every page you rely on before citing it; cite only pages you fetched, by their exact url.";
+
+/**
+ * A run's options as the thread sees them: on a provider, a Skill granted the web gets Crossline's search functions instead of the
+ * hosted tool (which only exists on OpenAI), merged with any tools of its own.
+ */
+function withWebTools<T>(options: SkillRunOptions<T>, context: RunContext): SkillRunOptions<T> {
+  // The assistant always has the web on Codex (`startAgentThread`), so on a provider it always gets the stand-in.
+  if (!context.provider || !(options.allowWebSearch || options.agent)) return options;
+  const { allowWebSearch: _hosted, ...rest } = options;
+  const web = context.webTools;
+  if (!web) return rest;
+  const own = options.tools;
+  return { ...rest, developerInstructions: `${options.developerInstructions}\n\n${WEB_TOOLS_INSTRUCTION}`,
+    tools: { specs: [...(own?.specs ?? []), ...web.specs.filter((spec) => !own?.specs.some((mine) => mine.name === spec.name))],
+      call: (name, args) => own?.specs.some((spec) => spec.name === name) ? own.call(name, args) : web.call(name, args) } };
+}
 const DEFAULT_MAX_REPAIRS = 2;
 /** No event of any kind for this long means a hung turn. Generous: slow work still produces events, silence does not. */
 const DEFAULT_IDLE_MS = 20 * 60_000;
@@ -175,20 +198,22 @@ const MAX_STALL_RETRIES = 2;
  * Everything the two entry points share: waiting in the right lane, switching the Skill on, running, switching
  * it back off, and reporting what the run used.
  */
-async function executeSkill<T>(client: CodexRpcBoundary, options: { skillName: string; cwd: string; tier?: RouteTier; provider?: ThreadProvider; extraSkills?: string[] },
+async function executeSkill<T>(client: CodexRpcBoundary, options: { skillName: string; cwd: string; tier?: RouteTier; provider?: ThreadProvider; extraSkills?: string[]; webTools?: SkillTools },
   body: (context: RunContext) => Promise<SkillRunResult<T>>): Promise<SkillRunResult<T>> {
   return serializeSkillRun(client, options.skillName, async () => {
     const startedAt = Date.now();
     const spendMode = await currentSpendMode();
     // The workspace's own provider when it can serve this Skill, else its own Codex sign-in, else a blocker (never the owner's runtime).
-    const decision = options.provider ? { via: "provider" as const, provider: options.provider } : decideRoute(options.skillName, currentProviderRouting());
+    const routing = options.provider ? undefined : currentProviderRouting();
+    const decision = options.provider ? { via: "provider" as const, provider: options.provider } : decideRoute(options.skillName, routing);
     if (decision.via === "blocked") return { ok: false, blocker: { code: decision.code, message: decision.message }, audit: {} };
     const provider = decision.via === "provider" ? decision.provider : undefined;
     // A stronger look is a cost the person did not ask for: in economy mode the Skill keeps its own route.
     const route = provider ? { model: provider.model }
       : options.tier && spendMode === "normal" && process.env.CROSSLINE_MODEL_ROUTING?.trim().toLowerCase() !== "off"
       ? { ...tierRoutes()[options.tier] } : routeForSkill(options.skillName, process.env, spendMode);
-    const context: RunContext = { route, spendMode, usage: createUsageCollector(), ...(provider ? { provider } : {}), extraSkills: [] };
+    const webTools = provider ? options.webTools ?? routing?.webTools : undefined;
+    const context: RunContext = { route, spendMode, usage: createUsageCollector(), ...(provider ? { provider } : {}), ...(webTools ? { webTools } : {}), extraSkills: [] };
     let skill: NativeSkill | undefined;
     // Library skills switched on for this run, with whether they were on before (only those that were off are switched back).
     const extras: Array<NativeSkill & { name: string }> = [];
@@ -379,18 +404,23 @@ async function requireLogin(scope: Scope, context: RunContext): Promise<void> {
  */
 async function startAgentThread<T>(scope: Scope, options: SkillRunOptions<T>, context: RunContext): Promise<string> {
   const agent = options.agent!;
+  // On a provider (only ever measured by the evaluation matrix; routing never sends the assistant there) the hosted search does not
+  // exist: it is off, and `withWebTools` has given the thread Crossline's own search functions instead.
+  const hosted = !context.provider;
   const config: Record<string, unknown> = {
-    web_search: "live", include_environment_context: true,
+    web_search: hosted ? "live" : "disabled", include_environment_context: true,
     "memories.use_memories": false, "memories.generate_memories": false,
-    "features.shell_tool": true, "features.web_search": true, "features.standalone_web_search": true, "features.plugins": true,
-    "features.view_image": true, "features.apply_patch_freeform": true
+    "features.shell_tool": true, "features.web_search": hosted, "features.standalone_web_search": hosted, "features.plugins": true,
+    "features.view_image": true, "features.apply_patch_freeform": true,
+    ...(context.provider ? { [`model_providers.${context.provider.id}`]: context.provider.definition, "features.memories": false } : {})
   };
   const threadParams = {
     cwd: agent.cwd, sandbox: "danger-full-access", approvalPolicy: "untrusted", approvalsReviewer: "user",
     // Tools Crossline answers itself (reading a site behind the person's login, so the assistant never holds the browser profile).
     dynamicTools: (options.tools?.specs ?? []).map((spec) => ({ type: "function", name: spec.name, description: spec.description, inputSchema: spec.inputSchema })),
     ephemeral: false, experimentalRawEvents: false, developerInstructions: options.developerInstructions,
-    ...(context.route ? { model: context.route.model } : {})
+    ...(context.route ? { model: context.route.model } : {}),
+    ...(context.provider ? { modelProvider: context.provider.id } : {})
   };
   let started: Record<string, unknown> | undefined;
   for (;;) {
@@ -717,7 +747,8 @@ export function runCodexSkill<T>(client: CodexRpcBoundary, input: unknown, optio
   return executeSkill(client, options, (context) => runSkillTurn(client, input, options, context));
 }
 
-async function runSkillTurn<T>(client: CodexRpcBoundary, input: unknown, options: SkillRunOptions<T>, context: RunContext): Promise<SkillRunResult<T>> {
+async function runSkillTurn<T>(client: CodexRpcBoundary, input: unknown, requested: SkillRunOptions<T>, context: RunContext): Promise<SkillRunResult<T>> {
+  const options = withWebTools(requested, context);
   const audit: AnalysisAudit = {};
   // Web search is the only tool any Skill may use, and only when that Skill was granted it.
   const allowedItemTypes = ["agentMessage", "reasoning", "userMessage",

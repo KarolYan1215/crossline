@@ -2,8 +2,9 @@
  * What could keep a milestone from being reached, said once when it is drafted (the person's direction of 2026-10-15: 「里程碑创建时，Agent
  * 就要阅读这些里程碑，批判性地分析风险」). A risk is a level, a kind and one short note; a milestone may have none. The 主线 page draws the
  * level as a glyph and the kind as a short tag, tells the person the risks when they approve one milestone and all of them together when
- * they approve the whole batch, and the scheduler aims work for a risky milestone to finish a day or two early (`riskBufferDays`). The
- * risk never blocks anything: uncertainty is accepted, only planned around.
+ * they approve the whole batch. A medium or high risk from the model's review of an approved milestone is then put to the person (the
+ * `milestone_risk_review` ask, 2026-10-15); only once they accept that current review (`schedule.riskDecisions`) does the scheduler aim
+ * the milestone's work to finish a day or two early (`riskBufferDays`) — never silently. The risk never blocks anything.
  *
  * Two sources, one shape. The model's review (Skill `crossline-milestone-risk-reviewer`, run by the worker after drafts are saved) is
  * stored per milestone under `MILESTONE_RISKS_SETTING`, keyed by a fingerprint of what it read, so an edited milestone's old review is not

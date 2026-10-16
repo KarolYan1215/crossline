@@ -194,6 +194,16 @@ export interface RuntimeRegistry {
 
 第三方提供方一律没有：联网搜索（due-diligence、flywheel-scout、material-researcher、archetype-curator）、图像（portrait-illustrator）、带 shell 的助手（只给主人自己的 Codex）、托管连接器（apps 日历读取）、跨次记忆。设置卡片原话：「联网查证、画像插图、电脑上的助手、日历应用读取和跨次记忆只在 ChatGPT 登录（或 OpenAI API key）下可用；其余功能按检验结果开放。」工作区同时有 Codex 登录时，这些功能照常走它。
 
+**2026-10-15 补充：联网和画像插图可以由 Crossline 自己提供**（docs/beta-launch.md §10.4）。
+
+- **联网。** 配了搜索 API（`BOCHA_API_KEY` 或 `TAVILY_API_KEY`，用 `CROSSLINE_SEARCH_PROVIDER` 指定用哪家）后，worker 的 `routing()` 带上 `capabilities.webSearch` 和 `webTools`。这样要联网的 Skill 也能交给提供方，前提仍是通过一致性检验。
+  - 运行时关掉托管的 `web_search`，改为声明两个动态工具 `web_search` 和 `web_fetch`（`skill-runner.ts` 的 `withWebTools`，`apps/worker/src/web-tools.ts`）。
+  - 打开网页一律走 `safeGet`。
+  - 每次运行最多搜索 12 次、打开网页 24 次。
+  - 各 Skill 自己的来源核验照旧。
+- **画像插图。** 配了画图 API（`CROSSLINE_IMAGE_API_KEY`，否则用 `SILICONFLOW_API_KEY`）后，路由不走 Codex 的工作区由 `portrait-illustrator.ts` 直接调画图接口（`packages/connectors/src/image-generation.ts`），提示词不变。
+- **助手。** 仍然只给机主自己的 Codex。`startAgentThread` 已能在提供方上启动（同样换成上面两个联网工具），但这只供评测矩阵使用（`scripts/provider-matrix.ts`、`scripts/provider-harness.ts`），路由不会把助手交给提供方。托管版要给访客用助手，需要按工作区隔离的容器沙箱。
+
 ### 3.4 一致性检验（准入）
 
 - 用例：每个导出的 `*_SCHEMA`（30 个，发现式测试保证不漏）各一个最小真实提示，另加三个对抗用例：长文本（≥1500 字的字段）、`anyOf` 联合加 `null`、四层嵌套。critical（验收判定、收集分析）的 schema 各跑 3 次。

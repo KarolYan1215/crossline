@@ -4,7 +4,7 @@ import { useCallback, useRef, useState, type ReactNode } from "react";
 import { MILESTONE_STATE_ORDER, milestoneMarks, timelineMarks, timelineSpan, type CapacityWeek, type EstimatePoint, type GoalRow, type Investment, type MilestoneMark, type MilestoneState } from "../../lib/plan-stats";
 import { Ring } from "../ui/charts";
 import { LineTag, Tag } from "../ui/tag";
-import { bands, dayAt, heatLevel, hours, labelEvery, linear, linearTicks, logDomain, logScale, md, minuteLabel, monthTicks, packLabels, textWidth } from "./chart-geometry";
+import { bands, dayAt, heatLevel, hours, labelEvery, linear, linearTicks, logDomain, logScale, md, minuteLabel, monthTicks, packLabels, scatterMargins, textWidth } from "./chart-geometry";
 import { usePlanPreview } from "./preview-context";
 
 /**
@@ -371,8 +371,8 @@ export function EstimateChart({ estimates, labels }: { estimates: { points: Esti
 }
 
 function Scatter({ estimates, labels, size }: { estimates: { points: EstimatePoint[] }; labels: Record<string, string>; size: number }) {
-  const left = 40, bottom = 28, top = 6, right = 6;
   const domain = logDomain(estimates.points.flatMap((point) => [point.estimate, point.actual]));
+  const { left, right, top, bottom, titleBaseline } = scatterMargins(domain.ticks);
   const x = logScale(domain.min, domain.max, left, size - right), y = logScale(domain.min, domain.max, size - bottom, top);
   return <svg className="pl-svg" width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img"
     aria-label={`估时与实际：${estimates.points.length} 项`}>
@@ -386,7 +386,7 @@ function Scatter({ estimates, labels, size }: { estimates: { points: EstimatePoi
     {estimates.points.map((point) => <circle key={point.id} cx={x(point.estimate)} cy={y(point.actual)} r={4.5} data-line={point.line} data-covered={point.covered || undefined}
       className="pl-point"><title>{`${labels[point.line] ?? point.line} · 估时 ${point.estimate} 分 · 实际 ${point.actual} 分 · 保守估时 ${point.p85} 分${point.covered ? "以内" : "以外"}`}</title></circle>)}
     <text x={size - right} y={size - 2} textAnchor="end" className="pl-axis-text">估时</text>
-    <text x={2} y={top + 4} dy="0.6em" className="pl-axis-text">实际</text>
+    <text x={2} y={titleBaseline} className="pl-axis-text">实际</text>
   </svg>;
 }
 

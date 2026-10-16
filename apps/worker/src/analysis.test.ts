@@ -216,3 +216,16 @@ test("a promoted order's own dates become a release date, a due date and a waiti
   expect(store.listWaitingItems("w")).toMatchObject([{ id: "wait-wo", who: "师兄", expectedAt: "2026-10-08", approximate: true, blocks: ["wo"], state: "open" }]);
   store.close();
 });
+
+// The owner's direction of 2026-10-15: completion is the model's judgement, and the board's open tasks are read before writing one.
+test("the analysis sees the open tasks, stores its completion judgement, and a capture that adds to an open task is folded into it", async () => {
+  store.saveWorkOrder({ id: "open", ownerId: "local-owner", workspaceId: "personal-crossline", identityId: "research", projectId: "p", milestoneId: "m",
+    intent: "Hult Prize 第一轮", state: "approved", riskTier: "routine", estimate: proposal.estimate as never, payload: { title: "Hult Prize 第一轮" } });
+  const completion = { mode: "needs_assessment", reason: "result_pending", why: "第一轮由评委评审", question: "", askAfterHours: 72 };
+  const { rpc, prompts } = fakeRuntime([JSON.stringify({ ...proposal, title: "补 Hult Prize 第一轮材料", completion, extendsTaskId: "open" })]);
+  const result = await analysis.createCaptureAnalyzer(store, "personal-crossline", "C:\repo")(rpc, "c");
+  expect(result.state).toBe("archived");
+  expect((store.getWorkOrder("personal-crossline", "c")!.payload as { completion?: unknown }).completion).toMatchObject({ reason: "result_pending", askAfterHours: 72 });
+  expect(store.listEvents("personal-crossline", { type: "task.duplicate_prevented", entityId: "open" })[0]?.payload).toMatchObject({ kind: "extends" });
+  expect(prompts().join(" ")).toContain("existingTasks");
+});

@@ -14,6 +14,7 @@ import { interviewStatus } from "./interview-status";
 import { preparingProposalIds } from "./proposal-ready";
 import { energyModel } from "./energy";
 import { outcomeNudgeInputs } from "./outcome-check";
+import { progressNudgeInputs } from "./progress-check";
 import { systemContext } from "./auto-publish";
 import type { Card } from "./conversation";
 
@@ -141,6 +142,8 @@ export async function nudgesFor(ctx: AccessContext, now = new Date()): Promise<P
     blocks, ending, slack, finished, ...(energyCheck ? { energyCheck } : {}),
     // Finished work whose result is not known yet: asked at an idle moment (completion.ts).
     outcomes: outcomeNudgeInputs(ctx, now),
+    // A step the person said they did part of while away, without saying how far (the return page).
+    progressChecks: progressNudgeInputs(ctx, now),
     ...(running && timerOrder ? { timer: { orderId: timerOrder.id, title: taskTitleOf(timerOrder), stepId: currentStep?.id ?? "", stepTitle: currentStep?.title ?? "",
       startedAt: running.startedAt, usualMinutes: currentStep?.estimate.p50Minutes ?? timerOrder.estimate.p50Minutes } } : {})
   });
@@ -207,7 +210,7 @@ function backgroundDone(ctx: AccessContext, now: Date): Array<{ key: string; tex
  */
 function mutedKinds(ctx: AccessContext, recent: StoredConversationMessage[], today: string, now: Date): Set<NudgeKind> {
   const store = getStore();
-  const kinds: NudgeKind[] = ["block_start", "block_confirm", "latest_start", "timer_overrun", "background_done", "energy_check"];
+  const kinds: NudgeKind[] = ["block_start", "block_confirm", "latest_start", "timer_overrun", "background_done", "energy_check", "outcome_check", "progress_check"];
   const muted = new Set<NudgeKind>();
   for (const kind of kinds) {
     const until = store.getSetting(ctx.workspaceId, muteKey(kind));
@@ -273,12 +276,16 @@ export async function ensureOpener(ctx: AccessContext, now = new Date()): Promis
   // This week's, the same count as Today's stack and 待确认: the ones that can wait are not today's to mention.
   const asks = thisWeek(listed(openAsks(ctx, now)));
   const md = (day: string) => `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}`;
+  // The text version (push, older pages) stays a few short lines: two of each with names cut short, the rest counted. The card drawn
+  // from `opener` below carries the whole day.
+  const short = (text: string) => text.length > 16 ? `${text.slice(0, 15)}…` : text;
+  const few = (parts: string[]) => `${parts.slice(0, 2).join("；")}${parts.length > 2 ? ` 等 ${parts.length} 项` : ""}`;
   const lines = [
     `${Number(today.slice(5, 7))} 月 ${Number(today.slice(8, 10))} 日 周${"日一二三四五六"[new Date(`${today}T12:00:00Z`).getUTCDay()]}。`,
-    fixed.length ? `固定安排：${fixed.map((block) => `${block.start}–${block.end} ${block.title}`).join("；")}。` : "今天没有固定安排。",
-    work.length ? `排给工作的时段 ${work.length} 段：${work.slice(0, 4).map((block) => `${block.start} ${block.task ?? block.title}`).join("；")}${work.length > 4 ? " 等" : ""}。` : "今天没有排给工作的时段。",
-    ...(soon.length ? [`三天内截止：${soon.slice(0, 4).map((item) => `${taskTitleOf(item.order)}（${md(item.due)}）`).join("；")}。`] : []),
-    asks.length ? `待决事项 ${asks.length} 项${asks[0] ? `，最紧急的是「${asks[0].title}」` : ""}。` : "没有待决事项。"
+    fixed.length ? `固定安排：${few(fixed.map((block) => `${block.start}–${block.end} ${short(block.title)}`))}。` : "今天没有固定安排。",
+    work.length ? `排给工作的时段 ${work.length} 段：${few(work.map((block) => `${block.start} ${short(block.task ?? block.title)}`))}。` : "今天没有排给工作的时段。",
+    ...(soon.length ? [`三天内截止：${few(soon.map((item) => `${short(taskTitleOf(item.order))}（${md(item.due)}）`))}。`] : []),
+    asks.length ? `待决事项 ${asks.length} 项${asks[0] ? `，最紧急的是「${short(asks[0].title)}」` : ""}。` : "没有待决事项。"
   ];
   // The most urgent decision is answerable here when its options need nothing typed.
   const first = asks[0];

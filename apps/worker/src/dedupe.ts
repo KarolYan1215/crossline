@@ -18,6 +18,12 @@ import { sayToPerson } from "./workflow-smith";
 export const DEDUPE_DAY_SETTING = "tasks.dedupe.day";
 /** Pairs the reviewer already judged, so a pair is never asked about twice: `{"a|b": true|false}`. */
 export const DEDUPE_JUDGED_SETTING = "tasks.dedupe.judged";
+/**
+ * The day the reviewer was last asked. The rules run once a day, but the reviewer only while the quota is normal: a day whose run came
+ * while it was not (the real account, 2026-10-15: 16 pairs left open by a run at 05:40 in economy) has those pairs reviewed, and what it
+ * calls the same merged, on a later tick of the same day — once, so a failing review is not retried every tick.
+ */
+export const DEDUPE_REVIEW_DAY_SETTING = "tasks.dedupe.reviewDay";
 const REVIEWER = "crossline:crossline-validation-reviewer";
 const MAX_REVIEW_PAIRS = 12;
 
@@ -125,8 +131,9 @@ export function applyMerge(store: CrosslineStore, workspaceId: string, group: Me
 export async function reviewPairs(store: CrosslineStore, workspaceId: string, client: CodexRpcBoundary, cwd: string,
   pairs: Array<{ a: string; b: string; why: string }>): Promise<Set<string>> {
   const judged = readJudged(store, workspaceId);
-  const open = pairs.filter((pair) => judged[`${pair.a}|${pair.b}`] === undefined && judged[`${pair.b}|${pair.a}`] === undefined).slice(0, MAX_REVIEW_PAIRS);
-  if (open.length) {
+  const pending = pairs.filter((pair) => judged[`${pair.a}|${pair.b}`] === undefined && judged[`${pair.b}|${pair.a}`] === undefined);
+  for (let at = 0; at < pending.length; at += MAX_REVIEW_PAIRS) {
+    const open = pending.slice(at, at + MAX_REVIEW_PAIRS);
     const orders = new Map(store.listWorkOrders(workspaceId).map((order) => [order.id, order]));
     const milestones = new Map(store.listMilestones(workspaceId).map((milestone) => [milestone.id, milestone.title]));
     const brief = (id: string) => { const order = orders.get(id)!; return { title: taskTitleOf(order), intent: order.intent, milestone: milestones.get(order.milestoneId) ?? "",
@@ -150,25 +157,35 @@ const readJudged = (store: CrosslineStore, workspaceId: string): Record<string, 
   try { return JSON.parse(store.getSetting(workspaceId, DEDUPE_JUDGED_SETTING) ?? "{}") as Record<string, boolean>; } catch { return {}; }
 };
 
-/** Once a day per workspace: merge what the rules (and, for unclear pairs, the reviewer) call the same, and tell the person. */
+/**
+ * Once a day per workspace: merge what the rules (and, for unclear pairs, the reviewer) call the same, and tell the person. A later tick
+ * the same day only asks the reviewer about pairs left open because the quota was not normal at the first run (`DEDUPE_REVIEW_DAY_SETTING`).
+ */
 export async function dedupePass(deps: { store: CrosslineStore; workspaceId: string; cwd: string; client: () => CodexRpcBoundary | undefined;
   spend: () => Promise<BackgroundSpend>; paused: (kind: BackgroundKind) => boolean; enterUsage: (workspaceId: string) => void; now?: Date }) {
   const { store, workspaceId } = deps;
   const now = deps.now ?? new Date();
   const day = localDay(store, workspaceId, now);
-  if (deps.paused("planning") || store.getSetting(workspaceId, DEDUPE_DAY_SETTING) === day) return [];
-  store.setSetting(workspaceId, DEDUPE_DAY_SETTING, day);
-  let { groups, unsure } = planMerges(mergeTasks(store, workspaceId), new Set(Object.entries(readJudged(store, workspaceId)).filter(([, same]) => same).map(([key]) => key)));
+  if (deps.paused("planning")) return [];
+  const catchUp = store.getSetting(workspaceId, DEDUPE_DAY_SETTING) === day;
+  if (catchUp && store.getSetting(workspaceId, DEDUPE_REVIEW_DAY_SETTING) === day) return [];
+  const judged = readJudged(store, workspaceId);
+  const sameKeys = () => new Set(Object.entries(readJudged(store, workspaceId)).filter(([, same]) => same).map(([key]) => key));
+  let { groups, unsure } = planMerges(mergeTasks(store, workspaceId), sameKeys());
+  const open = unsure.filter((pair) => judged[`${pair.a}|${pair.b}`] === undefined && judged[`${pair.b}|${pair.a}`] === undefined);
+  if (catchUp && !open.length) return [];
+  if (!catchUp) store.setSetting(workspaceId, DEDUPE_DAY_SETTING, day);
   const client = deps.client();
-  if (unsure.length && client && spendAllows(await deps.spend(), "discretionary")) {
+  if (open.length && client && spendAllows(await deps.spend(), "discretionary")) {
+    store.setSetting(workspaceId, DEDUPE_REVIEW_DAY_SETTING, day);
     deps.enterUsage(workspaceId);
-    const same = await reviewPairs(store, workspaceId, client, deps.cwd, unsure).catch(() => undefined);
+    const same = await reviewPairs(store, workspaceId, client, deps.cwd, open).catch(() => undefined);
     if (same?.size) ({ groups, unsure } = planMerges(mergeTasks(store, workspaceId), same));
-  }
+  } else if (catchUp) return [];
   // Requests first, so a task that took one in and is then merged as a duplicate carries it along.
   const ordered = [...groups.filter((group) => group.kind === "info_request"), ...groups.filter((group) => group.kind === "duplicate")];
   const done = ordered.map((group) => applyMerge(store, workspaceId, group, now)).filter((item): item is NonNullable<typeof item> => Boolean(item));
   if (done.length) sayToPerson(store, workspaceId, `今天的自检合并了 ${done.reduce((sum, item) => sum + item.absorbed.length, 0)} 个重复或只需一封邮件的任务：\n${done.map((item) => `- ${item.label.replace(/^合并任务：/, "")}`).join("\n")}\n可在任务页「已归档」的「已合并」里撤销。`,
-    "tasks_merged", `merged:${day}`, [{ label: "查看", href: "/approvals" }], now);
+    "tasks_merged", catchUp ? `merged:${day}:review` : `merged:${day}`, [{ label: "查看", href: "/approvals" }], now);
   return done;
 }

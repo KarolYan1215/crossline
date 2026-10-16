@@ -1,6 +1,7 @@
 import { ARCHETYPE_IDS, STEP_ROLES, archetypeById, isStepRole, type Archetype, type StepRole } from "./archetypes";
 import { normalizeAiAssist } from "./ai-tools";
 import { INFO_REQUEST_PERSON_MINUTES, infoRequestTraits } from "./info-request";
+import { COMPLETION_FIELD, type ModelCompletion } from "./completion";
 
 /**
  * A task's step graph: the step planner's wire contract, the normalization that makes any answer usable, the warnings a reviewer
@@ -65,6 +66,11 @@ export type StepPlan = {
    * before it; the schema requires it.
    */
   importance?: { longTerm: boolean; why: string };
+  /**
+   * How finishing the task is taken (`completion.ts`), judged with the task's material in hand. Kept on the task only when the task has no
+   * judgement yet (one from a course's dates, or written before the field). Optional for plans stored before it; the schema requires it.
+   */
+  completion?: ModelCompletion;
   units: StepUnit[];
   questions: StepQuestion[];
   steps: PlannedStep[];
@@ -84,6 +90,7 @@ export const stepPlanSchema = (extraIds: readonly string[] = []) => object({
   quantity: object({ basis: str, amount: num, unit: str }),
   rationale: str,
   importance: object({ longTerm: { type: "boolean" }, why: str }),
+  completion: COMPLETION_FIELD,
   units: { type: "array", items: object({ id: str, title: str, docId: str, quote: str }) },
   questions: { type: "array", items: object({ id: str, text: str, why: str, options: { type: "array", items: str } }) },
   steps: { type: "array", items: object({

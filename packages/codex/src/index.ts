@@ -106,6 +106,11 @@ export const CODEX_GENERATED_PROTOCOL_SHA256 = "cff5bf0f8f52d3d4fd2d00145462c5a3
 export const CODEX_FORK_BINARY_SHA256 = "4bcc1d8452c75cd132e010f41ccfaf6afb8699317f9a90d88df0b20be2335497";
 /** The release build of the same pinned source that the installed copy ships (docs/local-installer.md, Codex 的 Release 构建). */
 export const CODEX_RELEASE_BINARY_SHA256 = "ce19ac66ee6204888bf6318f0ae1b02f83b35f512ca5144f1e8bf42b9f7b11b9";
+/**
+ * The Linux server of the hosted beta (docs/beta-launch.md §10): upstream's own release of the same tag, rust-v0.155.0
+ * (`codex-x86_64-unknown-linux-musl`, asset digest e415cc3a… checked on download). The fork's only change is a Windows migration fix.
+ */
+export const CODEX_LINUX_RELEASE_BINARY_SHA256 = "660e159a49e823ac8e5986cb238f73158ce4b957d40d9292f8de90862644b501";
 
 export function codexProcessEnvironment(
   base: NodeJS.ProcessEnv = process.env,
@@ -115,7 +120,8 @@ export function codexProcessEnvironment(
   // checkout's resident app the two never share a Codex login, its memories or guest homes.
   const stateDir = base.CROSSLINE_STATE_DIR?.trim();
   let crosslineHome: string;
-  if (stateDir) crosslineHome = path.win32.join(stateDir, "codex-home");
+  // A Linux server's state folder is a POSIX path (the hosted beta, docs/beta-launch.md §10); a Windows one keeps Windows rules.
+  if (stateDir) crosslineHome = (/^[A-Za-z]:[\\/]|\\/.test(stateDir) ? path.win32 : path.posix).join(stateDir, "codex-home");
   else {
     if (!localAppData) throw new Error("LOCALAPPDATA_UNAVAILABLE");
     const isPackagedRedirect = /\\packages\\[^\\]+\\localcache\\local$/i.test(localAppData);
@@ -153,7 +159,7 @@ export function resolveCodexCommand(
   const executable = env.CROSSLINE_CODEX_PATH ?? fork;
   if (!path.isAbsolute(executable) || !exists(executable)) throw new Error("CODEX_FORK_BINARY_NOT_FOUND");
   const hash = sha256(executable);
-  if (hash !== CODEX_FORK_BINARY_SHA256 && hash !== CODEX_RELEASE_BINARY_SHA256) throw new Error("CODEX_FORK_BINARY_MISMATCH");
+  if (hash !== CODEX_FORK_BINARY_SHA256 && hash !== CODEX_RELEASE_BINARY_SHA256 && hash !== CODEX_LINUX_RELEASE_BINARY_SHA256) throw new Error("CODEX_FORK_BINARY_MISMATCH");
   return { command: executable, args: [] };
 }
 
@@ -430,12 +436,17 @@ export async function startCodexSupervisor(options: {
   listCalendarSources?: (workspaceId: string) => Promise<unknown>;
   /** Replaces the ticked set with exactly these `<accountId>:<calendarId>` keys. */
   saveCalendarSources?: (workspaceId: string, keys: string[]) => Promise<unknown>;
-  /** Folders the person authorized: a preview before anything is read, then added (read in the background), removed, or given lines. */
+  /**
+   * Folders the person authorized: a preview before anything is read, then added with what the person left out (read in the background),
+   * removed (with `purge`, together with what was read from it), given lines, or given new exclusions.
+   */
   sourceFolders?: {
-    preview: (workspaceId: string, path: string) => Promise<unknown>;
-    add: (workspaceId: string, path: string) => Promise<unknown>;
-    remove: (workspaceId: string, id: string) => Promise<unknown>;
+    /** `names`: the person's own names (the account's), for spotting records that carry them. */
+    preview: (workspaceId: string, path: string, names?: string[]) => Promise<unknown>;
+    add: (workspaceId: string, path: string, rules?: { exclude?: unknown; include?: unknown; names?: unknown }) => Promise<unknown>;
+    remove: (workspaceId: string, id: string, purge?: boolean) => Promise<unknown>;
     setLines: (workspaceId: string, id: string, lines: string[]) => Promise<unknown>;
+    setRules: (workspaceId: string, id: string, rules: { exclude?: unknown; include?: unknown; names?: unknown }) => Promise<unknown>;
   };
   /** Signing in the account that holds the Crossline calendar by device code: the code goes to the page and the person signs in there. */
   calendarWriteLogin?: { start: (workspaceId: string) => Promise<unknown>; status: (workspaceId: string) => unknown };
@@ -878,19 +889,27 @@ export async function startCodexSupervisor(options: {
           return;
         }
         const folders = options.sourceFolders;
-        const one = /^\/v1\/sources\/folders\/([A-Za-z0-9-]{1,40})(\/lines)?$/.exec(pathname);
+        const one = /^\/v1\/sources\/folders\/([A-Za-z0-9-]{1,40})(\/lines|\/exclusions|\/purge)?$/.exec(pathname);
+        const strings = (value: unknown) => Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.length <= 300).slice(0, 500) : [];
         try {
           if (request.method === "POST" && (pathname === "/v1/sources/folders/preview" || pathname === "/v1/sources/folders")) {
-            const body = await readJsonBody(request).catch(() => undefined) as { path?: unknown } | undefined;
+            const body = await readJsonBody(request).catch(() => undefined) as { path?: unknown; exclude?: unknown; include?: unknown; names?: unknown } | undefined;
             if (typeof body?.path !== "string" || !body.path.trim() || body.path.length > 1000) {
               sendJson(response, 400, { blocker: { code: "FOLDER_PATH_REQUIRED", message: "需要文件夹路径" } });
               return;
             }
-            sendJson(response, 200, await (pathname.endsWith("/preview") ? folders.preview(callerWorkspaceId, body.path) : folders.add(callerWorkspaceId, body.path)));
+            sendJson(response, 200, await (pathname.endsWith("/preview") ? folders.preview(callerWorkspaceId, body.path, strings(body.names))
+              : folders.add(callerWorkspaceId, body.path, { exclude: strings(body.exclude), include: strings(body.include), names: strings(body.names) })));
             return;
           }
-          if (request.method === "DELETE" && one && !one[2]) { sendJson(response, 200, await folders.remove(callerWorkspaceId, one[1]!)); return; }
-          if (request.method === "POST" && one?.[2]) {
+          if (request.method === "DELETE" && one && (!one[2] || one[2] === "/purge")) { sendJson(response, 200, await folders.remove(callerWorkspaceId, one[1]!, one[2] === "/purge")); return; }
+          if (request.method === "POST" && one?.[2] === "/exclusions") {
+            const body = await readJsonBody(request).catch(() => undefined) as { exclude?: unknown; include?: unknown; names?: unknown } | undefined;
+            if (!Array.isArray(body?.exclude) || !Array.isArray(body?.include)) { sendJson(response, 400, { blocker: { code: "FOLDER_RULES_REQUIRED", message: "需要 exclude 与 include 数组" } }); return; }
+            sendJson(response, 200, await folders.setRules(callerWorkspaceId, one[1]!, { exclude: strings(body.exclude), include: strings(body.include), names: strings(body.names) }));
+            return;
+          }
+          if (request.method === "POST" && one?.[2] === "/lines") {
             const body = await readJsonBody(request).catch(() => undefined) as { lines?: unknown } | undefined;
             const lines = Array.isArray(body?.lines) ? body.lines.filter((line): line is string => typeof line === "string" && line.length <= 80) : undefined;
             if (!lines) { sendJson(response, 400, { blocker: { code: "FOLDER_LINES_REQUIRED", message: "需要 lines 数组" } }); return; }

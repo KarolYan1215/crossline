@@ -95,3 +95,15 @@ test("finished work whose result is not known is asked about at an idle moment o
   expect(planNudges(base({ blocks: [], outcomes, night: true }))).toEqual([]);
   expect(planNudges(base({ blocks: [], outcomes, sent: new Set(["outcome:e1:2026-10-10"]) }))).toEqual([]);
 });
+
+test("a partly done step with nothing said is asked 「做到哪了」 once, at an idle moment, with the three levels as buttons", () => {
+  const progressChecks = [{ askId: "progress:e9", orderId: "hw6", question: "「作业 6 · 推导第 1–2 题」做到哪了？", fingerprint: "e9",
+    options: [{ id: "started", label: "只开了个头" }, { id: "less", label: "做了一半左右" }, { id: "more", label: "做了一大半" }], laterLabel: "说说做到哪了" }];
+  const [nudge] = planNudges(base({ blocks: [], progressChecks }));
+  expect(nudge).toMatchObject({ kind: "progress_check", urgent: false, counted: true, fingerprint: "progress:e9" });
+  expect(nudge!.buttons.map((button) => button.label)).toEqual(["只开了个头", "做了一半左右", "做了一大半", "说说做到哪了", "少问这类"]);
+  expect(nudge!.buttons[2]).toMatchObject({ kind: "action", action: { action: "ask.answer", args: { askId: "progress:e9", optionId: "more" } } });
+  expect(planNudges(base({ blocks: [], progressChecks, quiet: { timerRunning: false, inMeeting: false, answeredRecently: true } }))).toEqual([]);
+  expect(planNudges(base({ blocks: [], progressChecks, night: true }))).toEqual([]);
+  expect(planNudges(base({ blocks: [], progressChecks, sent: new Set(["progress:e9"]) }))).toEqual([]);
+});

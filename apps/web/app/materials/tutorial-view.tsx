@@ -182,7 +182,8 @@ export function TutorialView({ workOrderId, building: preparing = false, canBuil
           {body(section)}
         </li>)}</ol>
 
-        {tutorial.footnotes.length > 0 && <section className="tv-footnotes" aria-label="来源">
+        {/* The book's reference list is part of what is read, so it is reading content (long-form) like the sections above it. */}
+        {tutorial.footnotes.length > 0 && <section className="tv-footnotes long-form" aria-label="来源">
           <h3>来源</h3>
           <ol>{tutorial.footnotes.map((note) => <li key={note.n} id={fn(note.n)}>
             {note.href ? <a href={note.href} target="_blank" rel="noreferrer noopener">{cleanText(note.title)}</a> : <span>{cleanText(note.title)}</span>}

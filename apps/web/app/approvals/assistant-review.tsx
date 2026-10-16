@@ -6,6 +6,7 @@ import { csvHead, groupOutputs, markdownHead, workflowSteps, type OutputItem } f
 import { Markdown } from "../ui/markdown";
 import { Namer, cleanText, humanTable, humanizeMarkdown } from "../materials/humanize";
 import { Tag } from "../ui/tag";
+import { Clamp } from "../ui/clamp";
 
 const minutes = (ms: number) => ms >= 60_000 ? `${Math.round(ms / 60_000)} 分钟` : `${Math.max(1, Math.round(ms / 1000))} 秒`;
 
@@ -26,8 +27,10 @@ function OutputCard({ ctx, taskId, item, namer }: { ctx: AccessContext; taskId: 
     <p className="ar-output-head"><a href={href(item.path)} target="_blank" rel="noreferrer"><b>{item.name}</b></a></p>
     {item.purpose && <p className="gen ar-output-purpose">{cleanText(item.purpose, namer)}</p>}
     {item.preview === "markdown" && text && (() => {
-      const head = markdownHead(text);
-      return <div className="ar-preview gen"><Markdown text={humanizeMarkdown(head.text, namer)} />{head.more && <a href={href(item.previewPath!)} target="_blank" rel="noreferrer">读全文 →</a>}</div>;
+      // A glimpse of the file, not its whole opening: the file is a click away (「读全文」).
+      const head = markdownHead(text, 6, 240);
+      return <><div className="ar-preview gen long-form"><Markdown text={humanizeMarkdown(head.text, namer)} /></div>
+        {head.more && <a className="ar-read" href={href(item.previewPath!)} target="_blank" rel="noreferrer">读全文 →</a>}</>;
     })()}
     {item.preview === "table" && text && (() => {
       const head = csvHead(text, 5, 64);
@@ -70,7 +73,7 @@ function TaskBody({ ctx, task }: { ctx: AccessContext; task: AssistantView["task
   const passed = detail.verification.filter((item) => item.result === "pass");
   const failed = detail.verification.filter((item) => item.result !== "pass");
   return <div className="assistant-detail">
-    <p className="gen">{cleanText(detail.summary, namer)}</p>
+    <p className="gen"><Clamp text={cleanText(detail.summary, namer)} /></p>
     {detail.inputsModified.length > 0 && <p role="alert"><strong>原文件被改动：</strong>{detail.inputsModified.join("；")}</p>}
 
     {(outputs.groups.length > 0 || outputs.workflow) && <div className="ar-outputs">

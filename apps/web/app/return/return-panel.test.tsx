@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test } from "vitest";
-import { ReturnPanel, absenceSummary, settledBy } from "./return-panel";
+import { DueSoon, PartialForm, ReturnPanel, absenceSummary, settledBy } from "./return-panel";
 
 const steps = [{ id: "v1s1", title: "推导第 1–2 题", done: false }, { id: "v1s2", title: "推导第 3–4 题", done: false }];
 const item = { key: "hw3#v1s1", orderId: "hw3", stepId: "v1s1", title: "ECE 555 完成作业 3", step: "推导第 1–2 题", line: "research", lineLabel: "研究者",
@@ -11,9 +11,19 @@ const view = { since: "2026-10-10T07:49:00.000Z", sinceDay: "2026-10-10", daysAw
 
 test("it says how long the person was away and what happened, before anything else", () => {
   expect(absenceSummary(view)).toEqual(["离开了 3 天（上次操作 10/10）。", "期间有 1 个步骤排了时间或到了截止，下面逐项点一下，或用自己的话说。",
-    "未来 7 天到期：ECE 548 期中 85 分（10/27）。", "助手期间做完 2 项准备。", "日历变化 1 次，排程已跟着调整。"]);
+    "未来 7 天有 1 项到期，最早 10/27：", "助手期间做完 2 项准备。", "日历变化 1 次，排程已跟着调整。"]);
   expect(absenceSummary({ ...view, items: [], happened: { assistantDone: 0, proposals: 0, calendarChanges: 0, deadlinesSoon: [] } }))
     .toEqual(["离开了 3 天（上次操作 10/10）。"]);
+});
+
+test("the coming deadlines are a short list under the summary, soonest first, the rest counted", () => {
+  const deadlinesSoon = Array.from({ length: 7 }, (_, index) => ({ title: `里程碑 ${7 - index}`, deadline: `2026-10-${String(20 - index).padStart(2, "0")}` }));
+  const html = renderToStaticMarkup(<DueSoon view={{ ...view, happened: { ...view.happened, deadlinesSoon } }} />);
+  expect(html.match(/<li/g)).toHaveLength(6);
+  expect(html.indexOf("里程碑 1")).toBeLessThan(html.indexOf("里程碑 2"));
+  expect(html).toContain("另 2 项");
+  expect(html).not.toContain("里程碑 7");
+  expect(absenceSummary({ ...view, happened: { ...view.happened, deadlinesSoon } })[2]).toBe("未来 7 天有 7 项到期，最早 10/14：");
 });
 
 test("opened under a day after the last action, it says the hours, and the day is the person's own, not UTC's", () => {
@@ -57,4 +67,13 @@ test("today's opener sits at the top, drawn from its data", () => {
   const html = renderToStaticMarkup(<ReturnPanel view={view} opener={opener} />);
   expect(html.indexOf("opener-card")).toBeLessThan(html.indexOf("离开了 3 天"));
   expect(html).toContain("打开计划");
+});
+
+test("做了一部分 asks how much as three drawn levels and where it got to in words; nothing chosen can still be sent, to be asked later", () => {
+  const html = renderToStaticMarkup(<PartialForm item={item} busy={false} onSend={() => {}} />);
+  for (const label of ["只开了个头", "做了一半左右", "做了一大半", "做到哪了", "其他已做完的步骤", "推导第 3–4 题", "先记下，之后再说", "小帮手之后会在空闲时问一次"]) expect(html).toContain(label);
+  // The levels are drawn: four cells each, one, two and three filled.
+  expect(html.match(/<i data-on="true"><\/i>/g)).toHaveLength(6);
+  // The step being answered is not offered as another finished step.
+  expect(html).not.toContain("推导第 1–2 题</label>");
 });

@@ -6,10 +6,12 @@ import type { TaskDetail } from "../../lib/task-detail";
 import { Sheet } from "../ui/overlay";
 import { ProgressRing, formatMinutes, dayLabel } from "../ui/controls";
 import { ArtifactTag, SupportsTag, Tag } from "../ui/tag";
+import { Clamp } from "../ui/clamp";
 import { riskLabel, riskTone, stateLabelFor } from "../../lib/labels";
 import { Conversation } from "../chat/conversation";
 import { ExecutionActions } from "../execution-actions";
 import { currentStep } from "./card-model";
+import { CompletionChoice } from "./completion-choice";
 import { PostponePanel } from "./postpone";
 import { StepDuration, TaskQuickEdit } from "./quick-edit";
 import { StepStrip } from "./step-strip";
@@ -43,7 +45,7 @@ function StepsPanel({ detail }: { detail: TaskDetail }) {
   return <div className="steps-panel">
     <p className="steps-meta"><small>{plan.archetypeLabel} · {plan.quantity.amount > 0 ? `${plan.quantity.amount} ${plan.quantity.unit}` : plan.quantity.basis}</small>
       <button type="button" className="text-button" onClick={() => setEditing(true)}>调整步骤</button></p>
-    {plan.rationale && <p className="gen steps-rationale">{plainEstimateWords(plan.rationale)}</p>}
+    {plan.rationale && <p className="gen steps-rationale"><Clamp text={plainEstimateWords(plan.rationale)} /></p>}
     {plan.units.length > 0 && <p className="steps-units"><small>依据材料的内容</small>{plan.units.map((unit) => <span key={unit.id} className="tag" title={unit.quote}>{unit.title}</span>)}</p>}
     {plan.questions.length > 0 && <p className="steps-questions"><small>需要本人回答后才能定下的</small>{plan.questions.map((question) => <a key={question.id} href="/approvals">{question.text}</a>)}</p>}
     <ol className="steps-list">{plan.steps.map((step, index) => {
@@ -93,7 +95,7 @@ function StepDetail({ detail, step, kind, onStatus }: { detail: TaskDetail; step
     {kind !== "current" && step.firstAction && kind !== "done" && <p className="step-first"><small>先做</small><span className="gen">{step.firstAction}</span></p>}
     {step.doneCriterion && <p className="step-line"><small>完成标准</small><span className="gen">{step.doneCriterion}</span></p>}
     {step.deliverable && kind === "agent" && <p className="step-line"><small>产出</small><span className="gen">{step.deliverable}</span></p>}
-    {covered.length > 0 && <p className="step-line"><small>内容</small><span>{covered.join("、")}</span></p>}
+    {covered.length > 0 && <p className="step-line"><small>内容</small><span className="step-covers">{covered.map((title) => <span key={title} className="tag">{title}</span>)}</span></p>}
     {step.why && <p className="step-line"><small>为什么</small><span className="gen">{step.why}</span></p>}
     {step.aiAssist?.tool && <p className="step-line" title="计划按用这个工具估算时间"><small>工具</small><span><Tag tone="info">{step.aiAssist.tool}</Tag> <span className="gen">{step.aiAssist.how}</span>
       {step.aiAssist.minutesSaved > 0 && <span className="muted">（约省 {step.aiAssist.minutesSaved} 分钟）</span>}</span></p>}
@@ -154,6 +156,7 @@ function FinishPanel({ detail }: { detail: TaskDetail }) {
   // Before work starts there is nothing to complete: the primary action above starts it, and this section says what will be asked.
   const notStarted = ["awaiting_plan_approval", "approved", "ready_for_human", "blocked"].includes(detail.state);
   return <div className="finish-panel">
+    <CompletionChoice detail={detail} />
     {detail.evidenceContract.length > 0 && <div><h4 className="task-subhead">要交付的</h4>
       <ul className="standards-contract">{detail.evidenceContract.map((item, index) => <li key={index}>
         <Tag tone={item.required ? "info" : "neutral"}>{item.required ? "必交" : "可选"}</Tag><span>{item.description}</span></li>)}</ul></div>}

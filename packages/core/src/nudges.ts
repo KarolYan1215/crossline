@@ -6,7 +6,18 @@
  */
 import type { ProposedAction } from "./concierge";
 
-export type NudgeKind = "block_start" | "block_confirm" | "latest_start" | "timer_overrun" | "background_done" | "energy_check" | "outcome_check";
+export type NudgeKind = "block_start" | "block_confirm" | "latest_start" | "timer_overrun" | "background_done" | "energy_check" | "outcome_check" | "progress_check";
+
+/**
+ * How far a step got, as the person says it in one tap (the return page's 「做了一部分」 and the `progress_check` question that follows a
+ * partial answer with nothing said): each is a step's quarters done.
+ */
+export const PROGRESS_LEVELS = [
+  { id: "started", label: "只开了个头", quarter: 1 },
+  { id: "less", label: "做了一半左右", quarter: 2 },
+  { id: "more", label: "做了一大半", quarter: 3 }
+] as const;
+export type ProgressLevelId = typeof PROGRESS_LEVELS[number]["id"];
 export type NotifyLevelName = "off" | "less" | "normal" | "more";
 
 /** A button: an action carried out on click, a page to open, an acknowledgement, 「少问这类」, or a cue to type. */
@@ -76,6 +87,11 @@ export type NudgeInput = {
    * Each option answers the ask `askId`; `later` is the person saying when the result comes, which needs a date, so it is typed.
    */
   outcomes?: Array<{ askId: string; orderId: string; question: string; options: Array<{ id: string; label: string }>; laterLabel: string; fingerprint: string }>;
+  /**
+   * A step the person said they did part of while away, without saying how far (the return page): 「做到哪了」, asked once at an idle
+   * moment under the same rules as `outcomes` — never urgent, one at a time. `laterLabel` is the cue to say it in words.
+   */
+  progressChecks?: Array<{ askId: string; orderId: string; question: string; options: Array<{ id: string; label: string }>; laterLabel: string; fingerprint: string }>;
 };
 
 export const DAILY_CAP: Record<NotifyLevelName, number> = { off: 0, less: 3, normal: 6, more: 10 };
@@ -139,12 +155,14 @@ export function nudgeCandidates(input: NudgeInput): PlannedNudge[] {
           { kind: "ack", label: "还差一点" }, { kind: "say", label: "卡住了" }, mute] });
     }
   }
-  const outcome = input.outcomes?.find((item) => !input.sent.has(`outcome:${item.fingerprint}`));
-  if (outcome) {
+  // Follow-ups on finished work and on partly done steps: the same idle-moment question, one of each kind at a time.
+  for (const [kind, prefix, list] of [["outcome_check", "outcome", input.outcomes], ["progress_check", "progress", input.progressChecks]] as const) {
+    const item = list?.find((entry) => !input.sent.has(`${prefix}:${entry.fingerprint}`));
+    if (!item) continue;
     const answer = (option: { id: string; label: string }): NudgeButton => ({ kind: "action", label: option.label,
-      action: { action: "ask.answer", summary: `${outcome.question} ${option.label}`.slice(0, 200), args: { askId: outcome.askId, optionId: option.id, fields: [] } } });
-    out.push({ kind: "outcome_check", fingerprint: `outcome:${outcome.fingerprint}`, urgent: false, counted: true, text: outcome.question,
-      buttons: [...outcome.options.map(answer), { kind: "say", label: outcome.laterLabel }, mute] });
+      action: { action: "ask.answer", summary: `${item.question} ${option.label}`.slice(0, 200), args: { askId: item.askId, optionId: option.id, fields: [] } } });
+    out.push({ kind, fingerprint: `${prefix}:${item.fingerprint}`, urgent: false, counted: true, text: item.question,
+      buttons: [...item.options.map(answer), { kind: "say", label: item.laterLabel }, mute] });
   }
   if (input.energyCheck) {
     const report = (level: "low" | "medium" | "high", word: string): NudgeButton => ({ kind: "action", label: word,

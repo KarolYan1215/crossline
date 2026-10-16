@@ -13,6 +13,7 @@
  */
 import { TASK_MINUTES } from "./steps";
 import { cleanTaskTitle } from "./task-title";
+import { COMPLETION_FIELD, readModelCompletion, type ModelCompletion } from "./completion";
 export type BackplanStep = { id: string; title: string; intent: string; sourceQuote: string; rationale: string; dependsOn: string[];
   estimate: { p25Minutes: number; p50Minutes: number; p85Minutes: number };
   energy: "low" | "medium" | "high"; interruptible: boolean;
@@ -23,7 +24,11 @@ export type BackplanStep = { id: string; title: string; intent: string; sourceQu
   /** The artifact (another line is promised it) this task's deliverable is, "" when none (docs/flywheel-and-views.md §5.5). */
   produces: string;
   /** Other lines' artifacts this task works with; it is scheduled after the task producing each, and handed its files. */
-  uses: string[] };
+  uses: string[];
+  /** How finishing it is taken (`completion.ts`). Optional for answers recorded before it; the schema requires it. */
+  completion?: ModelCompletion;
+  /** The open task (an `existingTasks` id) this item only adds to, "" when it is new work: it is folded into that task, not created. */
+  extendsTaskId?: string };
 /** The cross-line artifacts a milestone's tasks produce and use: from its anchor's `outputs`/`inputs`, less what existing work covers. */
 export type BackplanArtifacts = { produce: string[]; use: string[] };
 export type BackplanBlocker = { code: string; message: string; what: string; whoHas: string };
@@ -53,7 +58,7 @@ export const BACKPLAN_SCHEMA = object({ steps: { type: "array", items: object({
   energy: { type: "string", enum: ["low", "medium", "high"] }, interruptible: { type: "boolean" },
   family: { type: "string", enum: ["preparation", "review", "deep_work"] },
   riskTier: { type: "string", enum: ["routine", "milestone", "high_risk"] }, evidence: str, acquires: str,
-  produces: str, uses: { type: "array", items: str }
+  produces: str, uses: { type: "array", items: str }, completion: COMPLETION_FIELD, extendsTaskId: str
 }) }, dateCandidates: { type: "array", items: object({ date: str, quote: str }) },
   blockers: { type: "array", items: object({ code: str, message: str, what: str, whoHas: str }) } });
 
@@ -63,7 +68,7 @@ export const BACKPLAN_SCHEMA = object({ steps: { type: "array", items: object({
  * whether they stop the run (they do not in the assumptive mode, where they are more things to ask about).
  */
 export function validateBackplan(value: unknown, sources: string[], dateSources = sources, missingIds: string[] = [],
-  artifacts: BackplanArtifacts = { produce: [], use: [] }): BackplanAnswer {
+  artifacts: BackplanArtifacts = { produce: [], use: [] }, existingIds: readonly string[] = []): BackplanAnswer {
   const answer = value as BackplanAnswer | undefined;
   if (!answer || !Array.isArray(answer.steps) || !Array.isArray(answer.dateCandidates)
     || !Array.isArray(answer.blockers) || answer.steps.length > 20
@@ -109,6 +114,10 @@ export function validateBackplan(value: unknown, sources: string[], dateSources 
       throw new Error(`BACKPLAN_ARTIFACT_UNKNOWN: ${step.id} 的 produces「${step.produces}」不在 artifacts.produce 里；可选：${artifacts.produce.join("、") || "（无）"}`);
     const unknown = step.uses.find((id) => !artifacts.use.includes(id));
     if (unknown) throw new Error(`BACKPLAN_ARTIFACT_UNKNOWN: ${step.id} 的 uses「${unknown}」不在 artifacts.use 里；可选：${artifacts.use.join("、") || "（无）"}`);
+    // An answer recorded before these existed has neither; an id that was not offered is new work (the code-level check still runs).
+    const completion = readModelCompletion(step.completion);
+    if (completion) step.completion = completion; else delete step.completion;
+    step.extendsTaskId = typeof step.extendsTaskId === "string" && existingIds.includes(step.extendsTaskId.trim()) ? step.extendsTaskId.trim() : "";
     seen.add(step.id);
   }
   for (const id of artifacts.produce) {

@@ -4,6 +4,7 @@ import "./materials.css";
 import { useEffect, useMemo, useState } from "react";
 import type { GroupedOutputs, OutputItem } from "../approvals/assistant-outputs";
 import { Tag, type TagTone } from "../ui/tag";
+import { Clamp } from "../ui/clamp";
 import { checklistOf, flowOf, ledgerOf, outlineOf, previewBlocks, treeOf, visualFor, type TreeNode, type Visual } from "./assistant-visual";
 import { spansText, type DocBlock } from "./doc-blocks";
 import { Namer, cleanText, humanTable, humanizeBlocks, type Names, type Status } from "./humanize";
@@ -26,7 +27,8 @@ const VIEWABLE = new Set(["markdown", "text", "docx", "csv", "pdf", "image"]);
 
 function Tree({ nodes }: { nodes: TreeNode[] }) {
   return <ul className="av-tree">{nodes.map((node, index) => <li key={index}>
-    <span className="gen">{node.label}</span>{node.note && <small className="gen muted"> {node.note}</small>}
+    {/* A leaf can be a whole sentence of the catalogue; two lines in the tree, the rest with 「全文」. */}
+    <span className="gen"><Clamp text={node.label} /></span>{node.note && <small className="gen muted"> {node.note}</small>}
     {node.children.length > 0 && <Tree nodes={node.children} />}
   </li>)}</ul>;
 }

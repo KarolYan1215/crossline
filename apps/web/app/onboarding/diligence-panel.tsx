@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Clamp } from "../ui/clamp";
 import type { DiligenceReport, Identity } from "./onboarding-types";
 
 const DECISION: Record<string, string> = { pending: "待决定", accepted: "已采纳", rejected: "已拒绝" };
@@ -32,14 +33,14 @@ export function DiligencePanel({ reports, identities, busy, onRun, onDecide }: {
             {report?.status === "done" ? "重新查证" : "现在查证"}
           </button>
         </div>
-        {report?.status === "failed" && report.note && <p className="ob-muted">{report.note}</p>}
+        {report?.status === "failed" && report.note && <p className="ob-muted"><Clamp text={report.note} /></p>}
         {report?.status === "done" && <>
           <p className="ob-muted">{report.question}</p>
           <ul className="ob-dd-proposals">
             {report.proposals.map((proposal) => <li key={proposal.id} data-status={proposal.status}>
               <div className="ob-dd-title"><span className="ob-tag" data-kind="done">{KIND[proposal.kind] ?? proposal.kind}</span><b>{proposal.title}</b>
                 {proposal.dueDate && <span className="ob-muted">最晚 {proposal.dueDate}</span>}</div>
-              <p>{proposal.why}</p>
+              <p><Clamp text={proposal.why} /></p>
               <div className="ob-dd-actions">
                 <span className="ob-muted">{DECISION[proposal.status]}</span>
                 {proposal.status !== "accepted" && <button type="button" className="ob-btn" disabled={busy} onClick={() => onDecide(report.id, proposal.id, "accepted")}>采纳</button>}
@@ -57,7 +58,7 @@ export function DiligencePanel({ reports, identities, busy, onRun, onDecide }: {
             </li>)}
             {report.proposals.length === 0 && <li className="ob-muted">查到了事实，但还没有据此提出建议。</li>}
           </ul>
-          {report.note && <p className="ob-muted">{report.note}</p>}
+          {report.note && <p className="ob-muted"><Clamp text={report.note} /></p>}
         </>}
       </div>;
     })}

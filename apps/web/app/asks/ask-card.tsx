@@ -1,16 +1,16 @@
 "use client";
 
-import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useId, useState, type ReactNode } from "react";
 import type { Ask, AskField, AskOption, AskProgress } from "@crossline/core";
 import { Tag } from "../ui/tag";
+import { Clamp } from "../ui/clamp";
+import { RiskList } from "../milestones/risk-glyph";
 import { answerBody, answerProblem, askOutcome, askSources, shortDay } from "./model";
 import type { AskPreviewData } from "./types";
 import "./asks.css";
 
 const URGENCY: Record<Ask["urgency"], string> = { now: "今天要答", soon: "这周", later: "不急" };
 
-// useLayoutEffect warns during server rendering; the measurement only matters in the browser.
-const useBrowserLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
 async function post(path: string, body: Record<string, unknown>): Promise<{ ok?: boolean; code?: string } | null> {
   const response = await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).catch(() => null);
@@ -65,13 +65,14 @@ export function AskCard({ ask, preview, onDone, level = 3 }: { ask: Ask; preview
     <AskMeta ask={ask} />
     {level === 4 ? <h4 className="ak-title">{ask.title}</h4> : <h3 className="ak-title">{ask.title}</h3>}
     <dl className="ak-brief">
-      <div><dt>为何问</dt><dd><Clamp text={ask.why} /></dd></div>
+      <div><dt>为何问</dt><dd><Clamp text={ask.why} className="ak-clamp" moreClassName="ak-more" /></dd></div>
       <div><dt>答后</dt><dd>{outcome.answered}</dd></div>
       <div><dt>不答</dt><dd>{outcome.unanswered}</dd></div>
     </dl>
     {sources.length > 0 && <p className="ak-sources"><span>来源</span>{sources.map((source) =>
       <a key={source.href} href={source.href} {...(source.href.startsWith("/api/") ? { target: "_blank", rel: "noreferrer" } : {})}>{source.label}</a>)}</p>}
     {ask.progress && <AgentProgressView progress={ask.progress} />}
+    {ask.risks && <div className="ak-risks"><RiskList risks={ask.risks} gen /></div>}
     {ask.preview && <PreviewToggle href={ask.preview.href} label={ask.preview.label} data={preview} />}
 
     {many
@@ -147,21 +148,6 @@ export function AskMeta({ ask }: { ask: Ask }) {
       里程碑重要性 {ask.importance}</small>}
     {ask.entersOn && <small>{ask.entersOn.slice(5)} 起列入本周</small>}
   </p>;
-}
-
-/** A long reason is cut to two lines (with 「全文」 on a third, so the card stays within three), read in full in place. */
-function Clamp({ text }: { text: string }) {
-  const ref = useRef<HTMLSpanElement>(null);
-  const [long, setLong] = useState(false);
-  const [open, setOpen] = useState(false);
-  useBrowserLayoutEffect(() => {
-    const element = ref.current;
-    if (element && !open) setLong(element.scrollHeight > element.clientHeight + 1);
-  }, [text, open]);
-  return <>
-    <span ref={ref} className="ak-clamp" data-open={open || undefined}>{text}</span>
-    {(long || open) && <button type="button" className="ak-more" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? "收起" : "全文"}</button>}
-  </>;
 }
 
 /**

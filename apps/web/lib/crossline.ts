@@ -1410,7 +1410,7 @@ function findWorkOrder(workspaceId: string, workOrderId: string) {
  * the order of the proposal's evidence contract): it replaces the contract's wording, and from then on the task is judged by it and
  * nothing more (the owner's decision of 2026-10-15). Without it the proposal's own contract is the standard, fixed at approval.
  */
-export function approveWorkOrderProposal(ctx: AccessContext, workOrderId: string, options: { acceptanceStandard?: string[] } = {}): ExecutionResult {
+export function approveWorkOrderProposal(ctx: AccessContext, workOrderId: string, options: { acceptanceStandard?: string[]; completionMode?: CompletionMode } = {}): ExecutionResult {
   if (requiredApproval("approve_work_orders") === "never") return { ok: false, code: "APPROVAL_NOT_PERMITTED" };
   const workOrder = findWorkOrder(ctx.workspaceId, workOrderId);
   if (!workOrder) return { ok: false, code: "WORK_ORDER_NOT_FOUND" };
@@ -1427,8 +1427,22 @@ export function approveWorkOrderProposal(ctx: AccessContext, workOrderId: string
     getStore().saveWorkOrder({ ...workOrder, payload: { ...payload, evidenceContract,
       acceptanceStandard: { fixedAt: new Date().toISOString(), lines: edited, by: "person" } } });
   }
+  if (options.completionMode) setCompletionMode(ctx, workOrderId, options.completionMode);
   getStore().transitionWorkOrder(ctx.workspaceId, workOrderId, { type: "plan.approved", approvalId: ctx.principalId },
     `proposal-approved:${workOrderId}:${executionRun(ctx.workspaceId, workOrderId)}`);
+  return { ok: true };
+}
+
+/**
+ * The person's own choice of how finishing a task is taken (「点完成即验收」 / 「完成后再问结果」), on the proposal card or the task: it
+ * overrides the model's judgement (`completionRule` in core). Any state before completion.
+ */
+export function setCompletionMode(ctx: AccessContext, workOrderId: string, mode: CompletionMode): ExecutionResult {
+  if (mode !== "self_evident" && mode !== "needs_assessment") return { ok: false, code: "COMPLETION_MODE_INVALID" };
+  const workOrder = findWorkOrder(ctx.workspaceId, workOrderId);
+  if (!workOrder) return { ok: false, code: "WORK_ORDER_NOT_FOUND" };
+  if (["accepted", "archived"].includes(workOrder.state)) return { ok: false, code: "WORK_ORDER_CLOSED" };
+  getStore().saveWorkOrder({ ...workOrder, payload: { ...((workOrder.payload ?? {}) as object), completionMode: mode } });
   return { ok: true };
 }
 
@@ -1831,10 +1845,23 @@ export function libraryUntil(ctx: AccessContext, order: { state: string; milesto
 }
 const addDays = (day: string, days: number) => new Date(Date.parse(`${day}T12:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
 
-/** Days a milestone's reviewed risk asks its work to finish early (the reviewer's latest answer; none without a review). */
+/**
+ * The person's answer to a milestone's reviewed risk (the `milestone_risk_review` ask), per milestone, for the review it answered
+ * (`fingerprint`). A `schedule.` setting, so the answer is undoable. Only `accept` moves the schedule (the owner's decision of 2026-10-15:
+ * a reviewed risk is put to the person first, never planned around silently).
+ */
+export const RISK_DECISIONS_SETTING = "schedule.riskDecisions";
+export type RiskDecision = { fingerprint: string; how: "accept" | "extend" | "ignore"; at: string };
+export function readRiskDecisions(ctx: AccessContext): Record<string, RiskDecision> {
+  try { return JSON.parse(getStore().getSetting(ctx.workspaceId, RISK_DECISIONS_SETTING) ?? "{}") as Record<string, RiskDecision>; } catch { return {}; }
+}
+
+/** Days a milestone's reviewed risk asks its work to finish early: only once the person accepted that review; none otherwise. */
 const riskBufferOf = (ctx: AccessContext, milestoneId: string | undefined): number => {
   const stored = milestoneId ? parseMilestoneRisks(getStore().getSetting(ctx.workspaceId, MILESTONE_RISKS_SETTING))[milestoneId] : undefined;
-  return stored && "risks" in stored ? riskBufferDays(stored.risks) : 0;
+  if (!stored || !("risks" in stored)) return 0;
+  const decision = readRiskDecisions(ctx)[milestoneId!];
+  return decision?.how === "accept" && decision.fingerprint === stored.fingerprint ? riskBufferDays(stored.risks) : 0;
 };
 
 const plannerTaskOf = (ctx: AccessContext, order: ActionableOrder) => {
@@ -2127,7 +2154,10 @@ export async function loadDashboard(ctx: AccessContext): Promise<Omit<DashboardD
       ? [[order.id, predictEnergyTransition(capacity.level as "low" | "medium" | "high",
         needed, outcomes).predicted]] : [];
   }));
-  const actions = recommendNextActions(active.map((order) => plannerTaskOf(ctx, order)), 40,
+  // Work that may not start yet — a homework not out, a wait not answered (`releaseDayOf`) — is not offered as 「下一步」 with 开始计时:
+  // the scheduler already kept it off today, and the recommendation offered 「完成 ECE 555 作业 3」 before it was posted (2026-10-15).
+  const startable = active.filter((order) => { const release = releaseDayOf(ctx, order); return !release || release <= libraryDay; });
+  const actions = recommendNextActions(startable.map((order) => plannerTaskOf(ctx, order)), 40,
     capacity.level === "uncalibrated" ? undefined : capacity.level, now, forecast);
   const milestones = store.listMilestones(ctx.workspaceId);
   const identityPacks = identityLines(ctx);

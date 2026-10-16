@@ -1,14 +1,15 @@
 import {
   admittedSkills, conformanceCases, conformanceCurrent, jsonSchemaProblems, SKILL_NEEDS, summarizeConformance, UNAVAILABLE_ON_THIRD_PARTY,
-  capabilityGap, type ConformanceCase, type ConformanceRecord, type ConformanceRun, type CostSignal
+  capabilityGap, THIRD_PARTY_CAPABILITIES, type ConformanceCase, type ConformanceRecord, type ConformanceRun, type CostSignal
 } from "@crossline/core";
 import {
   CODEX_FORK_BINARY_SHA256, isLocalProvider, MODEL_PROVIDER_SETTING, providerConfigProblem, runCodexSkill, threadProvider,
   type CodexRpcBoundary, type GatewayUpstream, type ModelGateway, type ProviderConfig, type ProviderRouting
 } from "@crossline/codex";
-import type { SecretStore } from "@crossline/connectors";
+import { imageBackendFromEnv, webSearchFromEnv, type ImageBackend, type SecretStore, type WebSearchBackend } from "@crossline/connectors";
 import type { CrosslineStore } from "@crossline/db";
 import { ownerOf } from "./owner";
+import { createWebTools } from "./web-tools";
 
 /**
  * A workspace's own model provider, as the worker keeps it (R7, decided 2026-10-13): the `model.provider` setting (no key), the key
@@ -46,8 +47,14 @@ export function createModelProviderService(options: {
   client: (workspaceId: string) => Promise<CodexRpcBoundary | undefined>;
   cwd: string;
   now?: () => Date;
+  /** What Crossline adds on top of a provider (docs/beta-launch.md §10.4); from the environment unless given. Null turns one off. */
+  search?: WebSearchBackend | null;
+  image?: ImageBackend | null;
 }) {
   const now = options.now ?? (() => new Date());
+  const search = options.search === undefined ? webSearchFromEnv() : options.search ?? undefined;
+  const image = options.image === undefined ? imageBackendFromEnv() : options.image ?? undefined;
+  const capabilities = { ...THIRD_PARTY_CAPABILITIES, webSearch: Boolean(search), image: Boolean(image) };
   const keys = new Map<string, string | null>();
   const testing = new Map<string, Progress>();
 
@@ -76,7 +83,8 @@ export function createModelProviderService(options: {
     if (!provider) return undefined;
     const record = current(workspaceId, provider);
     return { provider, gatewayUrl: options.gateway.urlFor(workspaceId, provider.id),
-      admitted: new Set(record ? admittedSkills(record) : []), codexSignedIn: options.signedIn(workspaceId) };
+      admitted: new Set(record ? admittedSkills(record, capabilities) : []), codexSignedIn: options.signedIn(workspaceId),
+      capabilities, ...(search ? { webTools: createWebTools(search) } : {}) };
   };
 
   /** What the gateway forwards to for a route; a Sign in with ChatGPT plan is OpenAI's own Responses endpoint. */
@@ -137,9 +145,9 @@ export function createModelProviderService(options: {
     const provider = config(workspaceId);
     const record = provider ? latest(workspaceId, provider) : undefined;
     const valid = provider ? current(workspaceId, provider) : undefined;
-    const admitted = new Set(valid ? admittedSkills(valid) : []);
+    const admitted = new Set(valid ? admittedSkills(valid, capabilities) : []);
     const features = Object.entries(SKILL_NEEDS).filter(([, needs]) => !needs.testOnly).map(([skill, needs]) => {
-      const gap = capabilityGap(skill);
+      const gap = capabilityGap(skill, capabilities);
       const failed = record?.runs.filter((run) => needs.schemas.includes(run.caseId) && !run.ok).length ?? 0;
       return { skill, label: needs.label, critical: Boolean(needs.critical), served: admitted.has(skill),
         reason: admitted.has(skill) ? "" : gap ?? (!valid ? "还没有检验，或检验已过期" : failed ? `检验中 ${failed} 次没有按格式回答` : needs.critical ? "要求每次都一次答对" : "整体通过率不到 90%") };

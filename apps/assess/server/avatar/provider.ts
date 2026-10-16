@@ -146,10 +146,66 @@ export class SiliconFlowProvider implements ImageProvider {
 
 const clampSeed = (seed: number): number => Math.max(0, Math.min(MAX_SEED, Math.floor(seed)));
 
-/** The provider the environment names: none without `ASSESS_IMAGE_API_KEY`. */
+export const ARK_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3";
+export const ARK_DEFAULT_MODEL = "doubao-seedream-4-0-250828";
+/** The template's own 2:3 shape (1024×1536), inside Seedream 4.0's allowed pixel range. */
+const ARK_SIZE = "1024x1536";
+
+/**
+ * Volcengine Ark's Seedream 4.0 (`POST /images/generations`, chosen with `ASSESS_IMAGE_PROVIDER=ark`; tried 2026-10-16 after
+ * SiliconFlow's Qwen-Image-Edit drew poorly): the same call edits (with the template as `image`) and generates (without), the
+ * platform's own 「AI 生成」 mark is turned off (`watermark: false`), and the link it returns is fetched at once without the key.
+ */
+export class ArkProvider implements ImageProvider {
+  readonly #apiKey: string;
+  readonly #baseUrl: string;
+  readonly #model: string;
+  readonly #fetch: Fetch;
+
+  constructor(options: { apiKey: string; baseUrl?: string; model?: string; fetchImpl?: Fetch }) {
+    this.#apiKey = options.apiKey;
+    this.#baseUrl = (options.baseUrl ?? ARK_BASE_URL).replace(/\/+$/, "");
+    if (!this.#baseUrl.startsWith("https://")) throw new Error("ASSESS_IMAGE_BASE_URL must be https");
+    this.#model = options.model ?? ARK_DEFAULT_MODEL;
+    this.#fetch = options.fetchImpl ?? fetch;
+  }
+
+  async edit(input: EditInput): Promise<Buffer> {
+    const type = imageType(input.reference) ?? "image/png";
+    return this.#request({ prompt: input.prompt, seed: clampSeed(input.seed) % 2_147_483_647,
+      image: `data:${type};base64,${input.reference.toString("base64")}` }, input.signal);
+  }
+
+  async generate(input: GenerateInput): Promise<Buffer> {
+    return this.#request({ prompt: input.prompt, seed: clampSeed(input.seed) % 2_147_483_647 }, input.signal);
+  }
+
+  async #request(body: Record<string, unknown>, signal?: AbortSignal): Promise<Buffer> {
+    const response = await this.#fetch(`${this.#baseUrl}/images/generations`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${this.#apiKey}`, "content-type": "application/json" },
+      body: JSON.stringify({ model: this.#model, size: ARK_SIZE, response_format: "url", watermark: false, ...body }),
+      ...(signal ? { signal } : {})
+    });
+    if (!response.ok) {
+      const detail = (await response.text().catch(() => "")).slice(0, 200);
+      throw new ProviderError(`IMAGE_API_${response.status}: ${detail}`, response.status, retryAfterMs(response.headers.get("retry-after")));
+    }
+    const json = await response.json().catch(() => null) as { data?: Array<{ url?: unknown }> } | null;
+    const url = json?.data?.[0]?.url;
+    if (typeof url !== "string") throw new ProviderError("IMAGE_API_NO_URL", 502);
+    return downloadImage(url, this.#fetch, signal);
+  }
+}
+
+/** The provider the environment names: none without `ASSESS_IMAGE_API_KEY`; `ASSESS_IMAGE_PROVIDER=ark` picks Seedream. */
 export function providerFromEnv(env: Record<string, string | undefined> = process.env): ImageProvider | null {
   const apiKey = env.ASSESS_IMAGE_API_KEY?.trim();
   if (!apiKey) return null;
+  if (env.ASSESS_IMAGE_PROVIDER?.trim() === "ark") {
+    return new ArkProvider({ apiKey, ...(env.ASSESS_IMAGE_BASE_URL ? { baseUrl: env.ASSESS_IMAGE_BASE_URL } : {}),
+      ...(env.ASSESS_IMAGE_MODEL ? { model: env.ASSESS_IMAGE_MODEL } : {}) });
+  }
   return new SiliconFlowProvider({
     apiKey,
     ...(env.ASSESS_IMAGE_BASE_URL ? { baseUrl: env.ASSESS_IMAGE_BASE_URL } : {}),

@@ -14,3 +14,7 @@ Accept `{version: "crossline.conformance.v1", caseId, prompt}`. The output schem
 ## Language
 
 Simplified Chinese for free text; ids, codes and enum values exactly as the schema writes them.
+
+## Web checks
+
+A case whose prompt starts with 「联网核实测试」 is the one exception to plausible example content: answer with real facts. Use `web_search`, then `web_fetch` every page you cite; each `sources[].url` is a page you fetched and each `quote` is copied from that page's text. Do not answer from memory.

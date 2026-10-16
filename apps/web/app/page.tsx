@@ -8,6 +8,7 @@ import { currentWorkState, loadTimeline } from "../lib/timeline";
 import { loadCurrentPlan } from "../lib/crossline";
 import { loadTaskDetailsBatch, loadMilestoneDetailsBatch } from "../lib/task-detail";
 import { loadAsks } from "../lib/asks";
+import { loadReminders } from "../lib/reminders";
 import { loadAskPreviews } from "./asks/previews";
 import { nextSlots } from "../lib/steps";
 import { loadFlywheelGraph } from "../lib/flywheel-graph";
@@ -47,6 +48,7 @@ export default async function HomePage() {
     slotById: nextSlots(plan.blocks, planToday(ctx)),
     asks,
     askPreviews: loadAskPreviews(ctx, asks),
+    reminders: (() => { try { return loadReminders(ctx, plan, calendar.items, asks); } catch { return []; } })(),
     calendar,
     scheduleChanges: readChangeSummary(ctx),
     finerSplits: readFinerSplits(ctx),

@@ -142,3 +142,14 @@ button.ui-ring:hover .ui-ring-seg:not([data-on]){stroke:#9BD3AE}
 .ln-actions{display:flex;gap:6px}
 .ln-actions button{font:inherit;font-size:13px;border:1px solid var(--ink);background:var(--paper);color:var(--ink);padding:2px 10px;min-height:28px;cursor:pointer}
 .ln-actions .ln-quiet{border-color:var(--mist)}
+
+/* Clamp (ui/clamp.tsx): long card text cut to a few lines, 「全文」 opens it in place. */
+.clamp{display:-webkit-box;-webkit-line-clamp:var(--clamp-lines,2);line-clamp:var(--clamp-lines,2);-webkit-box-orient:vertical;overflow:hidden}
+.clamp[data-open]{display:block;-webkit-line-clamp:unset;line-clamp:none;overflow:visible}
+.clamp-more{border:0;background:transparent;padding:0;margin:0 0 0 4px;font:inherit;font-size:12px;color:var(--ink);text-decoration:underline;cursor:pointer}
+@media (max-width:680px){.clamp-more{min-height:44px;padding:0 6px}}
+.clamp-block{max-height:calc(var(--clamp-lines,3) * 1.6em);overflow:hidden}
+.clamp-block>*,.clamp-block .md-text>*{line-height:1.6}
+.clamp-block[data-open]{max-height:none;overflow:visible}
+/* A clamped summary keeps the readable measure (about 40 characters a line) even in a wide row. */
+.clamp,.clamp-block{max-width:46em}

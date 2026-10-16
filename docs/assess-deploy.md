@@ -128,6 +128,50 @@ docker build -f apps/assess/Dockerfile -t crossline-assess .
 - 构建上下文的排除表是 `apps/assess/Dockerfile.dockerignore`（BuildKit 会读和 Dockerfile 同名、同目录的忽略文件[^docker-ignore]）：不带 `node_modules`、`.next`、`data`、数据库、`.env*`、`.git`、`vendor` 等。
 - 2026-10-14 在本机 Docker（29.4.3）上实际构建并运行了镜像（约 439 MB）：提交、读取、自己的邀请被拒、配对、太快与蜜罐被拒、三张海报和形象图、删除后全部 404，进程以 `node` 用户运行，`/data` 里是 WAL 方式的 `assess.db`。第一次构建时三张海报都是 500：satori 运行时从模块旁读取的 `yoga.wasm` 和 harfbuzzjs 的 `hb.wasm` 没被追踪进 standalone；在仓库里直接跑 standalone 会悄悄回退到根目录的 `node_modules`，所以只有容器能暴露这类问题。`next.config.mjs` 的 `outputFileTracingIncludes` 现在带上这两个文件。**每次改依赖或配置后，部署前先在本机构建镜像跑一遍上面的流程**，不要只跑仓库里的 standalone。
 
+## 买主机与域名（2026-10-15，按性价比）
+
+**主机。** 首选阿里云或腾讯云的「轻量应用服务器」，地域选**中国香港**。理由：
+- 价格最低。第三方整理的价格是香港约 ¥25–72/月，按带宽和流量档位定，下单前以购买页为准；
+- 到大陆的线路通常好于东京；
+- 用国内账号实名即可付款。
+
+需要外币付款、或主要用户在海外时，选 Vultr 东京（2 GB 约 $12/月，同样以官网为准）。
+
+配置：
+- 2 核 2 GB，Debian 12 或 Ubuntu 24.04；
+- 流量 ≥1 TB/月。海报是服务器渲染的 PNG，一张约 1 MB，一千人做题约用掉十几 GB；
+- 防火墙只开 22、80、443；
+- 登录方式选 SSH 密钥，不用密码。
+
+**域名。**
+- 买 `.com`。Cloudflare Registrar 按批发价卖，约 $10.44/年，续费同价；它不开放新注册时，就在 Porkbun 买，再把 NS 改到 Cloudflare。
+- 内测阶段本人决定（2026-10-15）可以先用廉价后缀（`.xyz` 等），在海外注册商买，免实名、即时生效。代价是：这类后缀常被垃圾邮件和钓鱼使用，邮件更容易进垃圾箱或被 QQ 邮箱拒收，链接也更容易被拦截。公开宣推前换成 `.com`。
+- DNS 放 Cloudflare，`test.<域名>` 的 A 记录指向主机 IP，设为 **DNS only（灰云）**：Cloudflare 的代理节点在大陆访问慢，TLS 交给 Caddy。
+- 再加 `mail.<域名>` 给发信用（见「邮件」）。私有 App 的登录验证码也可以用同一个已验证的发信域名。
+
+**主机初始化**（Debian 12；Ubuntu 把仓库里的 `debian` 换成 `ubuntu`）：
+
+```bash
+apt update && apt -y upgrade && apt -y install sqlite3 ufw
+ufw allow 22,80,443/tcp && ufw --force enable
+curl -fsSL https://get.docker.com | sh
+apt -y install debian-keyring debian-archive-keyring apt-transport-https curl gnupg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list
+apt update && apt -y install caddy
+mkdir -p /srv/assess/data /srv/assess/backups && chown 1000:1000 /srv/assess/data
+```
+
+**镜像在本机构建，再传上去。** 2 GB 的主机上跑 `next build` 容易内存不够，本机 Docker 已经构建成功过（见「构建」）：
+
+```powershell
+docker build -f apps/assess/Dockerfile -t crossline-assess .
+docker save crossline-assess -o crossline-assess.tar
+scp crossline-assess.tar root@<主机IP>:/srv/assess/
+```
+
+在主机上 `docker load -i /srv/assess/crossline-assess.tar`，然后按下一节运行。
+
 ## 部署到一台 Linux 云主机
 
 主机：香港或东京，1–2 vCPU、1–2 GB 内存足够；Debian 12 或 Ubuntu 24.04；装 Docker、Caddy、`sqlite3`。域名用非 .cn 域名（不需要 ICP 备案，代价是微信里可能提示「非官方网页」，见 beta-launch §0）。

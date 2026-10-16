@@ -3,14 +3,15 @@ import { recordOp, retractedEventIds, withUndo } from "./undo";
 import {
   ATTENTION_SNAPSHOT, BACKGROUND_BLOCKER, CALENDAR_LINES, CALENDAR_PUBLISH_FAILURE, CALENDAR_SYNC_FAILURE, calendarEventKey, daysBetween, describeEvent, missingInputsOf, rankAsks,
   localStamp, prepStepRetried, readableFromMaterial, snoozeUntil, STEP_ANSWER_SLOT, stepAnswerSlot, taskTitleOf, urgencyFor, type CalendarLines,
-  validateAskChoice, withFrozen, type AccessContext, type Ask, type AskField, type AskOption, type AskPreview, type AskSnooze
+  validateAskChoice, withFrozen, type AccessContext, type Ask, type AskField, type AskOption, type AskPreview, type AskSnooze,
+  MILESTONE_RISK_KIND_LABEL, MILESTONE_RISK_LEVEL_LABEL, MILESTONE_RISKS_SETTING, milestoneRiskFingerprint, parseMilestoneRisks, riskBufferDays, riskCriteriaKeys, riskLevelOf
 } from "@crossline/core";
 import { listAgentTasks, type StoredWorkOrder } from "@crossline/db";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import {
   acceptWorkOrderEvidence, answerWaiting, appNow, approveWorkOrderProposal, archiveWorkOrder, discardCapture, effectiveSchedulePreferences, getStore, loadGoalForecast,
   markMaterialsReady, planToday, plannerIdOfBlock, readFrozen, readGoalSettings, retryMaterialPreparation, saveGoalSettings, TASK_LIBRARY_WINDOW_DAYS,
-  heldConflicts, unlockBlock, writeFrozen
+  heldConflicts, unlockBlock, writeFrozen, readRiskDecisions, RISK_DECISIONS_SETTING, type RiskDecision
 } from "./crossline";
 import { requestAutoBackplan } from "./approvals";
 import { readScheduledDay } from "./schedule-memory";
@@ -26,6 +27,7 @@ import { decisionHorizon } from "./horizon";
 import { answerRelationCheck, relationCheckAsks } from "./artifact-relations";
 import { agentBlockedAsks, answerAgentAsk } from "./agent-ask";
 import { answerOutcome, outcomeAsks } from "./outcome-check";
+import { answerProgress, progressAsks } from "./progress-check";
 
 /** Markers an undo has taken back are as if never written. */
 const live = <T extends { eventId: string }>(ctx: AccessContext, events: T[]): T[] => {
@@ -334,6 +336,43 @@ function riskAsks({ store, ctx, today }: Source): Ask[] {
 }
 
 /**
+ * A medium or high risk the reviewer found on an approved milestone (`milestones.risks`, `source: "model"`, current for the milestone as
+ * it stands). It used to move the schedule silently; now it is put to the person first (the owner's decision of 2026-10-15), and only
+ * 「接受，按风险提前安排」 lets the scheduler aim the milestone's work 1–2 days early (`riskBufferOf` in `lib/crossline.ts`). Asked once per
+ * review: any answer is kept against the review's fingerprint, so a later review of an edited milestone asks again.
+ */
+function riskReviewAsks({ store, ctx, today }: Source): Ask[] {
+  const stored = parseMilestoneRisks(store.getSetting(ctx.workspaceId, MILESTONE_RISKS_SETTING));
+  const decisions = readRiskDecisions(ctx);
+  const anchors = new Map(store.listMilestoneAnchors(ctx.workspaceId).map((anchor) => [anchor.milestoneId, anchor]));
+  const milestones = new Map(store.listMilestones(ctx.workspaceId).filter((item) => item.status === "approved").map((item) => [item.id, item]));
+  return [...milestones.values()].flatMap((milestone): Ask[] => {
+    const entry = stored[milestone.id];
+    if (!entry || !("risks" in entry) || decisions[milestone.id]?.fingerprint === entry.fingerprint) return [];
+    const anchor = anchors.get(milestone.id);
+    const deadline = readGoalSettings(ctx, milestone.id)?.confirmedDeadline || anchor?.deadline || null;
+    // Read the way the reviewer read it (`apps/worker/src/milestone-risk-review.ts`): a review of an earlier form is not this one's.
+    const fingerprint = milestoneRiskFingerprint({ title: milestone.title, deadline, criteria: riskCriteriaKeys(milestone.successCriteria ?? []), dependsOn: anchor?.dependsOn ?? [] });
+    const days = riskBufferDays(entry.risks);
+    if (entry.fingerprint !== fingerprint || !days || (deadline && deadline < today)) return [];
+    const risks = entry.risks.filter((risk) => risk.level !== "low");
+    const level = riskLevelOf(risks)!;
+    return [{ id: `riskreview:${milestone.id}`, kind: "milestone_risk_review", entityId: milestone.id, line: milestone.identityId, risks,
+      preview: milestonePreview(milestone.id), urgency: urgencyFor(deadline ?? undefined, today), ...(deadline ? { dueDay: deadline } : {}),
+      raisedAt: entry.at, fingerprint: entry.fingerprint, important: level === "high",
+      title: `「${short(milestone.title)}」有${MILESTONE_RISK_LEVEL_LABEL[level]}风险：${risks.map((risk) => MILESTONE_RISK_KIND_LABEL[risk.kind]).join("、")}`,
+      why: `审查认为：${clause(risks.map((risk) => risk.note).join("；"))}。${deadline ? `截止 ${format(deadline)}。` : ""}`
+        + `接受后，排程让它的任务提前 ${days} 天排完；不接受则排程不变。`,
+      options: [
+        { id: "accept", label: "接受，按风险提前安排", recommended: true, detail: `它的任务提前 ${days} 天排完` },
+        { id: "extend", label: "调整截止", fields: [{ id: "date", label: "截止改到", kind: "date" as const, required: true, ...(deadline ? { initial: deadline } : {}) }] },
+        { id: "lower", label: "降低标准", href: `/milestones?open=${encodeURIComponent(milestone.id)}` },
+        { id: "ignore", label: "不用管", detail: "排程不变，这次审查不再问" }
+      ] }];
+  });
+}
+
+/**
  * 「昨天排的没做」: work the plan gave a time yesterday that nobody started. The scheduler has already moved it to the next free time —
  * that part needs no one — so this asks only when it matters: when the work bears on a deadline within a week, where silently rolling
  * it forward can quietly eat the margin. Morgen asks the same thing the morning after; Motion just moves it, and its users complain
@@ -571,8 +610,9 @@ function lockedConflictAsks({ store, ctx, today, now }: Source): Ask[] {
 
 export function collectAsks(ctx: AccessContext, now = appNow()): Ask[] {
   const source = { store: getStore(), ctx, today: planToday(ctx, now), now };
-  return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskAsks, missedAsks, lockedConflictAsks, agentAsks, calendarAsks, sourceProjectAsks, calendarLineAsks, interviewAsks, eventAsks, stepQuestionAsks,
-    ({ ctx: context, now: at }: Source) => relationCheckAsks(context, at), backgroundAsks, ({ ctx: context, now: at }: Source) => outcomeAsks(context, at)]
+  return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskAsks, riskReviewAsks, missedAsks, lockedConflictAsks, agentAsks, calendarAsks, sourceProjectAsks, calendarLineAsks, interviewAsks, eventAsks, stepQuestionAsks,
+    ({ ctx: context, now: at }: Source) => relationCheckAsks(context, at), backgroundAsks, ({ ctx: context, now: at }: Source) => outcomeAsks(context, at),
+    ({ ctx: context, now: at }: Source) => progressAsks(context, at)]
     .flatMap((collect) => { try { return collect(source); } catch { return []; } })
     // One card per id: two with one id are the same question twice, and answering finds only the first.
     .filter((ask, index, all) => all.findIndex((other) => other.id === ask.id) === index);
@@ -639,9 +679,9 @@ export async function loadAsks(ctx: AccessContext, now = appNow()): Promise<Ask[
 /**
  * The asks that are listed and counted (Today's stack, 待确认, the badge, the opener). A follow-up on finished work (`outcome_check`) is
  * only ever asked by the 小帮手 at an idle moment (decided 2026-10-15): it stays answerable — from the nudge's buttons or typed into the
- * box — but is never a decision waiting on the person.
+ * box — but is never a decision waiting on the person. The same holds for 「做到哪了」 after a partial answer on the return page (`progress_check`).
  */
-export const listed = (asks: Ask[]) => asks.filter((ask) => ask.kind !== "outcome_check");
+export const listed = (asks: Ask[]) => asks.filter((ask) => ask.kind !== "outcome_check" && ask.kind !== "progress_check");
 
 export type AskResult = { ok: true } | { ok: false; code: string };
 
@@ -812,6 +852,21 @@ async function answerOne(ctx: AccessContext, ask: Ask, choice: AskChoice, values
     }
     case "relation_check": return answerRelationCheck(ctx, ask, optionId, values);
     case "outcome_check": return answerOutcome(ctx, ask, optionId, values, choice.note);
+    case "progress_check": return answerProgress(ctx, ask, optionId, choice.note);
+    case "milestone_risk_review": {
+      const how: RiskDecision["how"] | undefined = optionId === "accept" ? "accept" : optionId === "extend" ? "extend" : optionId === "ignore" ? "ignore" : undefined;
+      if (!how) return { ok: false, code: "ASK_OPTION_UNKNOWN" };
+      if (how === "extend") {
+        const settings = readGoalSettings(ctx, ask.entityId);
+        const saved = saveGoalSettings(ctx, ask.entityId, { importance: settings?.importance ?? "ordinary", confirmedDeadline: values.date!,
+          sourceQuote: "在里程碑风险的询问里调整截止" });
+        if (!saved.ok) return saved;
+      }
+      // A `schedule.` setting, so the answer is undone with the rest of the operation.
+      store.setSetting(ctx.workspaceId, RISK_DECISIONS_SETTING, JSON.stringify({ ...readRiskDecisions(ctx),
+        [ask.entityId]: { fingerprint: ask.fingerprint, how, at: new Date().toISOString() } satisfies RiskDecision }));
+      return { ok: true };
+    }
     default: return { ok: false, code: "ASK_NOT_ANSWERABLE" };
   }
 }

@@ -67,7 +67,7 @@ export function EnergyCard({ status, phoneUrl, hostSignals = true }: { status: E
     <div className="st-row"><span className="st-row-label">键鼠节律<small>只记每 15 分钟内有输入的秒数、5 秒以上的停顿次数和鼠标移动距离；不记按键、内容和窗口；关闭即删除</small></span>
       <SegmentedControl label="键鼠节律" value={rhythm ? "on" : "off"} onChange={(next) => void changeSignal("input_rhythm", next === "on")}
         options={[{ value: "off", label: "关闭" }, { value: "on", label: "开启" }]} /></div></>}
-    <div className="st-row"><span className="st-row-label">摄像头精力采样<small>仅电脑：页面在前台时每 20 分钟开摄像头 20 秒，在本机算眨眼、闭眼比例和心率估计，只保存这四个数；画面不保存、不上传；关闭即删除</small></span>
+    <div className="st-row"><span className="st-row-label">摄像头精力采样<small>仅电脑、页面在前台时：每 20 分钟开 20 秒，在本机算眨眼、闭眼比例与心率，只存这几个数；画面不存不传；关闭即删除</small></span>
       <SegmentedControl label="摄像头精力采样" value={camera ? "on" : "off"} onChange={(next) => void changeSignal("camera", next === "on")}
         options={[{ value: "off", label: "关闭" }, { value: "on", label: "开启" }]} /></div>
     {signalNote && <p role="status" className="st-note">{signalNote}</p>}

@@ -1,5 +1,5 @@
 import "server-only";
-import { archetypeById, goalSettingKey, producedArtifacts, relevantDocuments, taskProgress, taskTitleOf, usedArtifacts, type AccessContext, type SuccessCriterion,
+import { archetypeById, completionRule, goalSettingKey, producedArtifacts, relevantDocuments, taskProgress, taskTitleOf, usedArtifacts, type AccessContext, type SuccessCriterion,
   type EvidenceQuestionTemplate } from "@crossline/core";
 import { assistantAvailable, listAgentTasks, readStoredArtifactPlan, type CrosslineStore, type StoredMilestone, type StoredWorkOrder, type StoredMaterial, type StoredExecution, type StoredMilestoneRelation,
   type StoredBackgroundFact, type StoredStepPlan, type StoredTaskStep } from "@crossline/db";
@@ -97,7 +97,8 @@ function taskExtras(store: CrosslineStore, workspaceId: string, orders: StoredWo
         files: task.artifacts.map((artifact) => ({ path: artifact.path, name: artifact.path.split(/[\\/]/).at(-1) ?? artifact.path })) })),
       agentSteps: (assistant ? plan?.steps ?? [] : []).filter((step) => step.status === "planned" && step.schedulable && step.executor !== "human").map((step) => ({ id: step.id, title: step.title })),
       notes: notes.filter((event) => event.entityId === order.id).map((event) => { const payload = event.payload as { text?: string; kind?: string };
-        return { at: event.createdAt, text: payload.text ?? "", kind: payload.kind ?? "note" }; }).reverse().slice(0, 30)
+        return { at: event.createdAt, text: payload.text ?? "", kind: payload.kind ?? "note" }; }).reverse().slice(0, 30),
+      completion: (({ mode, why, by }) => ({ mode, why, by }))(completionRule(order))
     });
   }
   return result;
@@ -192,6 +193,8 @@ export type TaskExtras = {
   agentSteps: Array<{ id: string; title: string }>;
   /** The task's record in the person's own words (notes, postponements), newest first. */
   notes: Array<{ at: string; text: string; kind: string }>;
+  /** How finishing it is taken (`completionRule`): the mode, the one-line reason, and who decided (the person, the model, old title rules). */
+  completion?: { mode: "self_evident" | "needs_assessment"; why: string; by: "person" | "model" | "rule" };
 };
 
 export type MilestoneDetail = {

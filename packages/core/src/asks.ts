@@ -1,3 +1,4 @@
+import type { MilestoneRisk } from "./milestone-risk";
 /**
  * An ask: the one shape in which the system stops and puts a question to the person.
  *
@@ -24,7 +25,7 @@ export type AskKind =
   | "backplan_input" | "waiting_due" | "capture_blocked" | "materials_blocked" | "gate_insufficient" | "gate_failed"
   | "evidence_manual" | "milestone_risk" | "agent_blocked" | "calendar_publish_failed" | "calendar_sync_failed" | "codex_signed_out"
   | "missed_block" | "source_project" | "calendar_line_unclear" | "interview_open" | "interview_question" | "event_propose" | "step_question"
-  | "relation_check" | "background_paused" | "locked_conflict" | "outcome_check";
+  | "relation_check" | "background_paused" | "locked_conflict" | "outcome_check" | "progress_check" | "milestone_risk_review";
 
 export type AskField = { id: string; label: string; kind: "text" | "longtext" | "date"; required: boolean;
   initial?: string; placeholder?: string };
@@ -63,6 +64,8 @@ export type Ask = {
   freeText?: { placeholder: string };
   /** For the assistant's work: how far it got and where it stopped, so the person can decide the next step in place. */
   progress?: AskProgress;
+  /** A milestone's reviewed risks, drawn with their level (`milestone_risk_review`). */
+  risks?: MilestoneRisk[];
 };
 export type AskPreview = { kind: "portrait" | "milestones" | "plan" | "task" | "file" | "agent"; href: string; label: string };
 export type AskProgress = {

@@ -44,6 +44,9 @@ export function StepMaterials({ detail, stepId }: { detail: Pick<TaskDetail, "ag
  * Every material of the task, each opening its own page — the material on one side, the analysis of it for this task on the other —
  * the person's own files first, then what the tutorial found, the prepared files and the assistant's outputs.
  */
+/** How many of the tutorial's web materials are listed before the rest fold. */
+const WEB_SHOWN = 5;
+
 function MaterialsList({ detail }: { detail: TaskDetail }) {
   const [found, setFound] = useState<TutorialMaterial[]>([]);
   useEffect(() => {
@@ -56,6 +59,10 @@ function MaterialsList({ detail }: { detail: TaskDetail }) {
   // The tutorial's own files (its book, flow and index) are the tutorial below, not separate materials.
   const prepared = detail.preparedMaterials.filter((item) => !/\/(flow|manifest|materials)\.json$|\/manual\.md$|\/nodes\//.test(item.uri));
   const outputs = detail.agentOutputs.filter((task) => task.files.length);
+  const webItem = (item: TutorialMaterial) => <li key={item.index}>
+    <a href={preview(`m=${item.index}`)}>{item.title}</a>
+    <small className="muted">{item.publisher || "网络"} · {KEPT[item.kept] ?? "链接与摘要"} · {item.notes} 条解析</small>
+  </li>;
   const empty = !detail.sources.length && !web.length && !prepared.length && !outputs.length;
   return <div className="materials-panel">
     {empty && <p className="muted">暂无材料。本人上传的课程文件、教程找到的资料和 Agent 产出会出现在这里。</p>}
@@ -63,10 +70,9 @@ function MaterialsList({ detail }: { detail: TaskDetail }) {
       <a href={preview(`doc=${encodeURIComponent(doc.id)}`)}>{cleanText(doc.fileName)}</a>
       <small className="muted">{noted.get(doc.id) ? `${noted.get(doc.id)} 条解析` : "原文"}</small>
     </li>)}</ul></section>}
-    {web.length > 0 && <section><h4>教程资料</h4><ul>{web.map((item) => <li key={item.index}>
-      <a href={preview(`m=${item.index}`)}>{item.title}</a>
-      <small className="muted">{item.publisher || "网络"} · {KEPT[item.kept] ?? "链接与摘要"} · {item.notes} 条解析</small>
-    </li>)}</ul></section>}
+    {web.length > 0 && <section><h4>教程资料 · {web.length}</h4><ul>{web.slice(0, WEB_SHOWN).map(webItem)}</ul>
+      {/* A tutorial can cite twenty pages; the first few stay in view, the rest fold. */}
+      {web.length > WEB_SHOWN && <details className="fold advanced"><summary>其余 {web.length - WEB_SHOWN} 份</summary><ul>{web.slice(WEB_SHOWN).map(webItem)}</ul></details>}</section>}
     {prepared.length > 0 && <section><h4>已备文件</h4><ul>{prepared.map((item) => <li key={item.id}>
       <a href={`/api/work-orders/${encodeURIComponent(detail.id)}/materials?uri=${encodeURIComponent(item.uri)}`} target="_blank" rel="noreferrer">{cleanText(item.fileName)}</a></li>)}</ul></section>}
     {outputs.length > 0 && <section><h4>Agent 产出</h4>

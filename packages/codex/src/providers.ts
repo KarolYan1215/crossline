@@ -1,4 +1,5 @@
-import { capabilityGap, SKILL_NEEDS, skillKey } from "@crossline/core";
+import { capabilityGap, SKILL_NEEDS, skillKey, THIRD_PARTY_CAPABILITIES, type ProviderCapabilities } from "@crossline/core";
+import type { SkillTools } from "./skill-runner";
 import { currentUsageWorkspace } from "./usage";
 
 /**
@@ -58,6 +59,13 @@ export type ProviderRouting = {
   admitted: ReadonlySet<string>;
   /** Whether the workspace also has its own Codex sign-in, which serves what the provider cannot. Never the machine owner's runtime. */
   codexSignedIn: boolean;
+  /**
+   * What Crossline itself adds on top of the provider (docs/beta-launch.md §10.4): web search when a search API is configured, image
+   * generation when an image API is. Unset means the fixed third-party set.
+   */
+  capabilities?: Partial<ProviderCapabilities>;
+  /** The search functions that stand in for hosted web search on this provider (set exactly when `capabilities.webSearch` is). */
+  webTools?: SkillTools;
 };
 
 let resolver: ((workspaceId: string | undefined) => ProviderRouting | undefined) | undefined;
@@ -66,6 +74,8 @@ export function setProviderResolver(next: ((workspaceId: string | undefined) => 
 export function currentProviderRouting(): ProviderRouting | undefined {
   try { return resolver?.(currentUsageWorkspace()); } catch { return undefined; }
 }
+/** Where a run of this Skill would go for the current workspace, for callers that act outside a model turn (the portrait figure). */
+export const currentRoute = (skillName: string): RouteDecision => decideRoute(skillName, currentProviderRouting());
 
 /** What Codex is given for one thread: the provider's id and its definition (no key — the gateway adds it). */
 export type ThreadProvider = { id: string; model: string; definition: Record<string, unknown> };
@@ -87,7 +97,7 @@ export function threadProvider(routing: Pick<ProviderRouting, "provider" | "gate
 export function decideRoute(skillName: string, routing: ProviderRouting | undefined): RouteDecision {
   if (!routing) return { via: "codex" };
   const key = skillKey(skillName);
-  const gap = capabilityGap(key);
+  const gap = capabilityGap(key, { ...THIRD_PARTY_CAPABILITIES, ...routing.capabilities });
   if (!gap && routing.admitted.has(key)) return { via: "provider", provider: threadProvider(routing, routing.provider.model) };
   if (routing.codexSignedIn) return { via: "codex" };
   const label = SKILL_NEEDS[key]?.label ?? "这项功能";

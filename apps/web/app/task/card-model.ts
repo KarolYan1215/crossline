@@ -37,10 +37,24 @@ const awaited = (title: string) => title.replace(/^等待\s*/u, "");
 
 export type WaitKind = "approval" | "returned" | "material" | "gate" | "input" | "release";
 
+/**
+ * Why a task was sent back, in words: the ledger keeps a code (the gate's `MILESTONE_GATE_INSUFFICIENT`, an analysis blocker), which the
+ * card must never show (docs/copy-style.md, no developer text); a reason already in words is shown as it is.
+ */
+const RETURNED: Record<string, string> = {
+  MILESTONE_GATE_INSUFFICIENT: "验收证据不足", MILESTONE_GATE_PARTIAL: "交付与打法不符", MILESTONE_GATE_REFUTED: "证据与里程碑相矛盾",
+  ANALYSIS_RECOVERY_REQUIRED: "分析中断，需重新分析"
+};
+function returnedLabel(reason: string | undefined): string {
+  if (!reason) return "已退回";
+  if (!/^[A-Z][A-Z0-9_]+$/.test(reason)) return `已退回 · ${reason}`;
+  return RETURNED[reason] ? `已退回 · ${RETURNED[reason]}` : "已退回";
+}
+
 /** What the task waits for before the person can go on with it, in the page's words; none when it can be worked on now. */
 export function waitReason(detail: CardDetail, today: string): { kind: WaitKind; label: string } | undefined {
   if (detail.state === "awaiting_plan_approval") return { kind: "approval", label: detail.stepPlan ? "等本人批准" : "等本人批准 · 步骤规划中" };
-  if (detail.state === "blocked") return { kind: "returned", label: detail.blocker?.reason ? `已退回 · ${detail.blocker.reason}` : "已退回" };
+  if (detail.state === "blocked") return { kind: "returned", label: returnedLabel(detail.blocker?.reason) };
   if (detail.state === "preparing") return { kind: "material", label: detail.materialBlocker ? `材料准备已停止 · ${detail.materialBlocker.message}` : "等材料准备" };
   if (detail.state === "evidence_review") return { kind: "gate", label: "已提交 · 等验收" };
   if (detail.state === "active") return undefined;

@@ -1,11 +1,12 @@
 import "server-only";
-import { taskTitleOf, type AccessContext } from "@crossline/core";
+import { taskTitleOf, type AccessContext, type ProgressLevelId } from "@crossline/core";
 import { listAgentTasks } from "@crossline/db";
 import { archiveWorkOrder, completeWorkOrderExecution, effectiveSchedulePreferences, getStore, planToday, startWorkOrderExecution, toZonedInstant } from "./crossline";
 import { rejectMilestoneDrafts } from "./approvals";
 import { readScheduledDay } from "./schedule-memory";
 import { lineLabels } from "./lines";
 import { seenBlocksKey } from "./nudges";
+import { applyProgressLevel } from "./progress-check";
 import type { PageContext } from "./conversation";
 
 /**
@@ -174,11 +175,13 @@ export type ReturnVerdict = "done" | "partial" | "rolled" | "dropped";
 /**
  * One tap on one step (`detail.stepId`) or task. 完成 marks the step done — with how long it took as a session over the step's own block,
  * when said and the block is known — and, on the task's last step (or a task with no steps), hands the task in the way the completion
- * check does; 做了一部分 marks the ticked steps done; 没做顺延 leaves it to the scheduler; 不做了 discards the task.
+ * check does; 做了一部分 marks the ticked steps done and records how far (`level`); 没做顺延 leaves it to the scheduler; 不做了 discards the task.
  */
-export function answerReturn(ctx: AccessContext, orderId: string, verdict: ReturnVerdict, detail: { minutes?: number; stepIds?: string[]; stepId?: string } = {}, now = new Date()):
+export function answerReturn(ctx: AccessContext, orderId: string, verdict: ReturnVerdict,
+  detail: { minutes?: number; stepIds?: string[]; stepId?: string; level?: ProgressLevelId; note?: string } = {}, now = new Date()):
   { ok: true } | { ok: false; code: string } {
   const store = getStore();
+  let unclear = false;
   const order = store.getWorkOrder(ctx.workspaceId, orderId);
   if (!order) return { ok: false, code: "WORK_ORDER_NOT_FOUND" };
   const plan = store.getStepPlan(ctx.workspaceId, orderId);
@@ -198,22 +201,23 @@ export function answerReturn(ctx: AccessContext, orderId: string, verdict: Retur
     }
     if (stepId) store.updateStepProgress(ctx.workspaceId, orderId, stepId, { status: "done" }, ctx.principalId, "return");
   } else if (verdict === "partial") {
-    const steps = new Set(store.getStepPlan(ctx.workspaceId, orderId)?.steps.map((step) => step.id) ?? []);
+    // How far, as the person says it (the owner's decision of 2026-10-15): steps ticked done, a level (只开了个头 / 做了一半左右 / 做了一大半
+    // = 1/4, 2/4, 3/4 of this step — the task's current open step when the item is the task), and words, which the page sends to the box
+    // as a turn of its own. Nothing at all is accepted too, and the 小帮手 asks 「做到哪了」 later (`lib/progress-check.ts`).
+    const steps = new Set(plan?.steps.map((step) => step.id) ?? []);
     const ticked = (detail.stepIds ?? []).filter((id) => steps.has(id));
-    // Nothing ticked on a step's item: that step itself was begun, recorded as a quarter done (the owner's decision, 2026-10-15) so the
-    // planner and the box know it has started. Without a step there is nothing to record it on.
-    if (!ticked.length && !stepId) return { ok: false, code: "RETURN_STEPS_REQUIRED" };
     for (const id of ticked) store.updateStepProgress(ctx.workspaceId, orderId, id, { status: "done" }, ctx.principalId, "person");
-    const own = plan?.steps.find((step) => step.id === stepId);
-    if (!ticked.length && own && own.status !== "done")
-      store.updateStepProgress(ctx.workspaceId, orderId, stepId, { progressQuarter: Math.max(1, own.progressQuarter) }, ctx.principalId, "return");
+    const target = stepId || plan?.steps.find((step) => step.executor !== "agent" && step.status === "planned")?.id || "";
+    if (detail.level && !ticked.includes(target)) applyProgressLevel(ctx, orderId, target, detail.level);
+    unclear = !ticked.length && !detail.level && !detail.note?.trim();
   } else if (verdict === "dropped") {
     const archived = archiveWorkOrder(ctx, orderId, "回来时标为不做了");
     if (!archived.ok) return archived;
   }
   store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `return.answered:${orderId}:${attempt}`, type: "return.answered",
     entityId: orderId, payload: { verdict, ...(stepId ? { stepId } : {}), ...(detail.minutes ? { minutes: detail.minutes } : {}),
-      ...(detail.stepIds?.length ? { stepIds: detail.stepIds } : {}) } });
+      ...(detail.stepIds?.length ? { stepIds: detail.stepIds } : {}), ...(verdict === "partial" && detail.level ? { level: detail.level } : {}),
+      ...(verdict === "partial" && detail.note?.trim() ? { note: detail.note.trim().slice(0, 300) } : {}), ...(unclear ? { unclear: true } : {}) } });
   return { ok: true };
 }
 

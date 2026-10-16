@@ -62,6 +62,8 @@ export function MilestoneTimeline({ board, actions }: { board: MilestoneBoard; a
   const courseNodes = board.courses.map((course) => ({ id: `course:${course.projectId}`, line: course.identityId, title: `${course.name} · ${course.value}`,
     status: "approved" as const, kind: "course" as const, day: course.endDay ? new Date(Date.parse(`${course.endDay}T12:00:00Z`) + 2 * 86_400_000).toISOString().slice(0, 10) : undefined, dependsOn: [] }));
   const drafts = board.milestones.filter((item) => item.status === "draft");
+  // 「按主线」 beside 「一键批准」: one row per line with drafts, each approved on its own after its risks are shown.
+  const [byLine, setByLine] = useState(false);
   const layout = layoutTimeline({
     nodes: [...board.milestones.map((milestone) => ({ id: milestone.id, line: milestone.identityId, title: milestone.title, status: milestone.status,
       kind: "milestone" as const, day: milestone.deadline, dependsOn: milestone.dependsOn })), ...courseNodes],
@@ -75,9 +77,14 @@ export function MilestoneTimeline({ board, actions }: { board: MilestoneBoard; a
   const head = <header className="mt-head">
     <MilestoneStats board={board} />
     <div className="mt-head-actions">
-      {drafts.length > 0 && <BatchApprove drafts={drafts} labels={board.labels} lineOrder={board.lineOrder} />}
+      {drafts.length > 0 && <span className="ba-split">
+        <BatchApprove drafts={drafts} labels={board.labels} lineOrder={board.lineOrder} />
+        <button type="button" className="secondary-button ba-toggle" aria-expanded={byLine} aria-controls="ba-by-line"
+          onClick={() => setByLine(!byLine)}>按主线<span aria-hidden="true">{byLine ? " ▴" : " ▾"}</span></button>
+      </span>}
       {actions}
     </div>
+    {drafts.length > 0 && byLine && <LineApprovals id="ba-by-line" drafts={drafts} labels={board.labels} lineOrder={board.lineOrder} />}
   </header>;
   if (!layout.nodes.length) return <div className="mt">{head}<p className="flow-empty">{board.firstDrafts === "running"
     ? "系统正在按访谈为每条主线设计里程碑草稿（每条主线几分钟），好了会出现在这里等待批准。"
@@ -260,7 +267,8 @@ export function riskTally(milestones: Array<{ risks: MilestoneRisk[] }>) {
  * 「一键批准」: every draft at once, after their risks are shown together — how many carry a high, medium, low or no risk as bars, the
  * kinds as tags with counts, and each draft with its glyph and kinds, line by line. The approval is the existing batch route.
  */
-function BatchApprove({ drafts, labels, lineOrder }: { drafts: BoardMilestone[]; labels: Record<string, string>; lineOrder: string[] }) {
+function BatchApprove({ drafts, labels, lineOrder, label, title }: { drafts: BoardMilestone[]; labels: Record<string, string>; lineOrder: string[];
+  label?: string; title?: string }) {
   const [open, setOpen] = useState(false);
   const [state, setState] = useState("");
   const tally = riskTally(drafts);
@@ -275,8 +283,8 @@ function BatchApprove({ drafts, labels, lineOrder }: { drafts: BoardMilestone[];
     location.reload();
   };
   const rows: Array<[MilestoneRiskLevel | "none", string]> = [["high", "高"], ["medium", "中"], ["low", "低"], ["none", "无"]];
-  return <Sheet title={`批准 ${drafts.length} 个里程碑草稿`} open={open} onOpenChange={(value) => { setOpen(value); if (!value) setState(""); }}
-    trigger={<button type="button" className="primary-button">一键批准 {drafts.length} 个</button>}
+  return <Sheet title={title ?? `批准 ${drafts.length} 个里程碑草稿`} open={open} onOpenChange={(value) => { setOpen(value); if (!value) setState(""); }}
+    trigger={<button type="button" className="primary-button">{label ?? `一键批准 ${drafts.length} 个`}</button>}
     footer={<div className="md-actions">
       <button type="button" className="primary-button" disabled={Boolean(state)} onClick={() => void approve()}>批准全部 {drafts.length} 个</button>
       <button type="button" disabled={state === "批准中…"} onClick={() => setOpen(false)}>取消</button>
@@ -290,7 +298,7 @@ function BatchApprove({ drafts, labels, lineOrder }: { drafts: BoardMilestone[];
           <b className="mono">{tally.levels[level]}</b></div>)}
       </section>
       {tally.kinds.length > 0 && <p className="ba-kinds">{tally.kinds.map(([kind, count]) => <span key={kind} className="risk-kind">{MILESTONE_RISK_KIND_LABEL[kind]} × {count}</span>)}</p>}
-      <p className="muted ba-note">批准即接受这些风险；排程会让有中、高风险的里程碑的任务提前 1–2 天排完。</p>
+      <p className="muted ba-note">批准后，审查出的中、高风险会在今日页单独询问：接受才让它们的任务提前 1–2 天排完。</p>
       {lines.map((line) => <section key={line} className="ba-line" data-line={line} aria-label={labels[line] ?? line}>
         <h3>{labels[line] ?? line}</h3>
         <ul>{drafts.filter((item) => item.identityId === line).sort((a, b) => (a.deadline ?? "9").localeCompare(b.deadline ?? "9")).map((item) =>
@@ -301,6 +309,31 @@ function BatchApprove({ drafts, labels, lineOrder }: { drafts: BoardMilestone[];
       </section>)}
     </div>
   </Sheet>;
+}
+
+/**
+ * 「按主线」: each line with drafts on one row — its name, how many drafts, how many carry a high, medium or low risk (glyph and count) —
+ * and 「批准这条主线」, which shows that line's risks first, as 「一键批准」 does for all of them, then approves the line's drafts.
+ */
+export function LineApprovals({ id, drafts, labels, lineOrder }: { id: string; drafts: BoardMilestone[]; labels: Record<string, string>; lineOrder: string[] }) {
+  const lines = [...new Set(drafts.map((item) => item.identityId))].sort((a, b) => lineOrder.indexOf(a) - lineOrder.indexOf(b));
+  return <ul id={id} className="ba-lines" aria-label="按主线批准">
+    {lines.map((line) => {
+      const own = drafts.filter((item) => item.identityId === line);
+      const { levels } = riskTally(own);
+      const name = labels[line] ?? line;
+      return <li key={line} data-line={line}>
+        <b className="ba-lines-name">{name}</b>
+        <span className="mono">{own.length} 个</span>
+        <span className="ba-lines-risks" aria-label={`高风险 ${levels.high}、中风险 ${levels.medium}、低风险 ${levels.low}`}>
+          {(["high", "medium", "low"] as const).filter((level) => levels[level]).map((level) =>
+            <span key={level} className="ba-lines-risk"><RiskGlyph level={level} /><span className="mono">{levels[level]}</span></span>)}
+          {!levels.high && !levels.medium && !levels.low && <span className="muted">无风险</span>}
+        </span>
+        <BatchApprove drafts={own} labels={labels} lineOrder={lineOrder} label="批准这条主线" title={`批准「${name}」的 ${own.length} 个里程碑草稿`} />
+      </li>;
+    })}
+  </ul>;
 }
 
 /** The week in figures, from the ledger: ticks reached against planned, outputs reused by another line, and the nearest deadline. */

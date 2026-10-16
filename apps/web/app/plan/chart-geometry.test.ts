@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { bands, dayAt, dayTicks, heatLevel, hours, labelEvery, linear, linearTicks, logDomain, logScale, md, minuteLabel, monthTicks, packLabels, textWidth } from "./chart-geometry";
+import { bands, dayAt, dayTicks, heatLevel, hours, labelEvery, linear, linearTicks, logDomain, logScale, md, minuteLabel, monthTicks, packLabels, scatterMargins, textWidth } from "./chart-geometry";
 
 describe("chart geometry", () => {
   test("linear ticks are round, start at zero and reach the maximum", () => {
@@ -66,5 +66,22 @@ describe("chart geometry", () => {
     expect(monthTicks("2026-10-07", "2027-02-15").map((tick) => tick.label)).toEqual(["2026年11月", "12月", "2027年1月", "2月"]);
     expect(monthTicks("2026-10-01", "2027-10-01").map((tick) => tick.day)).toEqual(["2026-10-01", "2026-12-01", "2027-02-01", "2027-04-01", "2027-06-01", "2027-08-01", "2027-10-01"]);
     expect(monthTicks("2026-10-01", "2027-10-01")[2]!.label).toBe("2027年2月");
+  });
+
+  test("the estimate chart's axis title clears the top tick label, and the last x label fits inside the chart", () => {
+    const size = 220, px = 12;
+    const domain = logDomain([15, 480]);
+    const margins = scatterMargins(domain.ticks, px);
+    const y = logScale(domain.min, domain.max, size - margins.bottom, margins.top);
+    const x = logScale(domain.min, domain.max, margins.left, size - margins.right);
+    // 「实际」 occupies about one line above its baseline; the top y label is centred on the top tick.
+    const titleBottom = margins.titleBaseline + px * 0.3;
+    const topLabelTop = y(domain.ticks.at(-1)!) - px / 2;
+    expect(topLabelTop).toBeGreaterThan(titleBottom);
+    // The last x label is centred on the last tick and must end inside the chart.
+    const last = minuteLabel(domain.ticks.at(-1)!);
+    expect(x(domain.ticks.at(-1)!) + textWidth(last, px) / 2).toBeLessThanOrEqual(size);
+    // Every y label fits in the left margin.
+    for (const tick of domain.ticks) expect(textWidth(minuteLabel(tick), px) + 4).toBeLessThanOrEqual(margins.left);
   });
 });

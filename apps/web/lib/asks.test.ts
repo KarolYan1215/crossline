@@ -155,6 +155,36 @@ test("a milestone whose known work cannot finish by its deadline is asked about;
   expect(collectAsks(TEST_CTX, NOW).some((ask) => ask.kind === "milestone_risk")).toBe(false);
 });
 
+test("a reviewed medium or high risk is put to the person first: only 「接受」 lets the schedule aim the work early, and an answer is not asked again", async () => {
+  const store = setup();
+  const { MILESTONE_RISKS_SETTING, milestoneRiskFingerprint } = await import("@crossline/core");
+  const { planningInputFor, readRiskDecisions } = await import("./crossline");
+  store.saveWorkOrder({ id: "sim", ownerId: owner, workspaceId: ws, identityId: "research", projectId: "p", milestoneId: "mos2", intent: "跑一轮仿真",
+    state: "approved", riskTier: "milestone", estimate, payload: {} });
+  const fingerprint = milestoneRiskFingerprint({ title: "实测 MoS₂ 参数已可直接驱动 NeuroSim", deadline: "2026-10-09", criteria: [], dependsOn: [] });
+  store.setSetting(ws, MILESTONE_RISKS_SETTING, JSON.stringify({ mos2: { fingerprint, at: "2026-10-06T00:00:00Z", source: "model",
+    risks: [{ level: "high", kind: "time", note: "只剩两天且数据未到" }, { level: "low", kind: "unclear", note: "标准偏主观" }] } }));
+  const buffer = () => planningInputFor(TEST_CTX, "2026-10-07", []).input.tasks.find((task) => task.id === "sim")?.riskBufferDays;
+  // Reviewed but not answered: the schedule does not move.
+  expect(buffer()).toBeUndefined();
+  const ask = collectAsks(TEST_CTX, NOW).find((item) => item.kind === "milestone_risk_review")!;
+  expect(ask.title).toBe("「实测 MoS₂ 参数已可直接驱动 NeuroSim」有高风险：时间紧");
+  expect(ask.risks).toEqual([{ level: "high", kind: "time", note: "只剩两天且数据未到" }]);
+  expect(ask.options.map((option) => option.id)).toEqual(["accept", "extend", "lower", "ignore"]);
+  expect(ask.options.find((option) => option.id === "lower")?.href).toBe("/milestones?open=mos2");
+  expect(await answerAsk(TEST_CTX, ask.id, "accept", {}, NOW)).toMatchObject({ ok: true });
+  expect(readRiskDecisions(TEST_CTX).mos2).toMatchObject({ how: "accept", fingerprint });
+  expect(buffer()).toBe(2);
+  expect(collectAsks(TEST_CTX, NOW).some((item) => item.kind === "milestone_risk_review")).toBe(false);
+  // 「不用管」 on a later review: answered, and no buffer.
+  store.setSetting(ws, MILESTONE_RISKS_SETTING, JSON.stringify({ mos2: { fingerprint, at: "2026-10-07T00:00:00Z", source: "model",
+    risks: [{ level: "medium", kind: "capacity", note: "同周还有三个截止" }] } }));
+  store.setSetting(ws, "schedule.riskDecisions", "{}");
+  const again = collectAsks(TEST_CTX, NOW).find((item) => item.kind === "milestone_risk_review")!;
+  expect(await answerAsk(TEST_CTX, again.id, "ignore", {}, NOW)).toMatchObject({ ok: true });
+  expect(buffer()).toBeUndefined();
+});
+
 test("work given a time yesterday and never started is asked about when it bears on a deadline this week; the rest just rolls", async () => {
   const store = setup();
   const save = (id: string, dueDate: string) => store.saveWorkOrder({ id, ownerId: owner, workspaceId: ws, identityId: "research", projectId: "p",

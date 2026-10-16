@@ -24,11 +24,47 @@ export type CompletionRule = {
   question?: string;
   /** How long after completion it is first asked: a score needs a day at least; how it went can be asked the same day. */
   askAfterHours?: number;
+  /** Who decided: the person at approval or on the task, the model that wrote the task, or the old title rules. */
+  by: "person" | "model" | "rule";
 };
 
-type OrderLike = { intent: string; payload?: unknown };
-type PayloadLike = { title?: string; completionMode?: CompletionMode; evidenceContract?: Array<{ kind?: string; description?: string }> };
+/**
+ * How the model that wrote a task (capture analysis, backplanner, step planner) says its completion is taken, read from what the task
+ * is rather than from words in its title (the owner's direction of 2026-10-15: 「Hult Prize 第一轮」 names no exam yet waits for the
+ * judges). Strict-mode shape: every field present, "" for none.
+ */
+export type ModelCompletion = { mode: CompletionMode; reason: AssessmentReason | ""; why: string; question: string; askAfterHours: number };
+/** The `completion` field each of those schemas carries. Not named `*_SCHEMA`: it is a part, not a Skill's whole answer. */
+export const COMPLETION_FIELD = { type: "object", additionalProperties: false, required: ["mode", "reason", "why", "question", "askAfterHours"],
+  properties: {
+    mode: { type: "string", enum: ["self_evident", "needs_assessment"] },
+    reason: { type: "string", enum: ["result_pending", "quality", "exploration", ""] },
+    why: { type: "string", minLength: 1, maxLength: 300 },
+    question: { type: "string", maxLength: 300 },
+    askAfterHours: { type: "number", minimum: 0 }
+  } } as const;
 
+const REASONS: readonly AssessmentReason[] = ["result_pending", "quality", "exploration"];
+const DEFAULT_HOURS: Record<AssessmentReason, number> = { result_pending: 24, quality: 2, exploration: 2 };
+/** A model's `completion` made usable, or undefined when it is missing or malformed (a task written before the field existed). */
+export function readModelCompletion(value: unknown): ModelCompletion | undefined {
+  const raw = value as Partial<Record<keyof ModelCompletion, unknown>> | undefined;
+  if (!raw || typeof raw !== "object" || (raw.mode !== "self_evident" && raw.mode !== "needs_assessment")) return undefined;
+  const text = (field: unknown) => typeof field === "string" ? field.trim().slice(0, 300) : "";
+  if (raw.mode === "self_evident") return { mode: "self_evident", reason: "", why: text(raw.why) || "交付即完成", question: "", askAfterHours: 0 };
+  const reason = REASONS.includes(raw.reason as AssessmentReason) ? raw.reason as AssessmentReason : "quality";
+  const hours = Number(raw.askAfterHours);
+  return { mode: "needs_assessment", reason, why: text(raw.why), question: text(raw.question),
+    askAfterHours: Number.isFinite(hours) && hours > 0 ? Math.min(hours, 24 * 30) : DEFAULT_HOURS[reason] };
+}
+
+type OrderLike = { intent: string; payload?: unknown };
+type PayloadLike = { title?: string; completionMode?: CompletionMode; completion?: unknown; evidenceContract?: Array<{ kind?: string; description?: string }> };
+
+const askFor = (reason: AssessmentReason, title: string) => reason === "result_pending" ? `${quote(title)}的成绩或结果出来了吗？`
+  : reason === "exploration" ? `${quote(title)}有哪些收获，完成得怎么样？` : `${quote(title)}完成得怎么样？`;
+
+// Fallback for tasks written before the models judged completion (no `payload.completion`); a new task never reaches these rules.
 /** Something sat or submitted for somebody else's judgement. */
 const JUDGED_EVENT = /(考试|测验|小测|期中|期末|面试|答辩|投稿|竞赛|比赛|路演|评审|quiz|exam|midterm|final|interview|pitch|submission to)/i;
 /** Work towards such an event, not the event: preparing for an exam is not sitting it. */
@@ -40,23 +76,37 @@ const QUALITY = /(撰写|起草|写作|写出|设计|制作|剪辑|拍摄|录制
 
 const quote = (title: string) => `「${title.slice(0, 40)}」`;
 
-/** How a task's completion is taken; `completionMode` is its one-word form. The person's own choice at approval wins. */
+/**
+ * How a task's completion is taken; `completionMode` is its one-word form. In order: the person's own choice (`payload.completionMode`,
+ * at approval or on the task) > the judgement of the model that wrote the task (`payload.completion`) > the title rules below, which
+ * only old tasks without a model judgement still reach.
+ */
 export function completionRule(order: OrderLike): CompletionRule {
   const payload = (order.payload ?? {}) as PayloadLike;
   const title = (payload.title ?? "").trim() || order.intent.trim();
   const text = `${title} ${order.intent}`;
-  if (payload.completionMode === "self_evident") return { mode: "self_evident", why: "批准时本人选定：点完成即验收" };
-  if (payload.completionMode === "needs_assessment")
-    return { mode: "needs_assessment", reason: "quality", why: "批准时本人选定：完成后再问完成情况", question: `${quote(title)}完成得怎么样？`, askAfterHours: 2 };
+  const model = readModelCompletion(payload.completion);
+  if (payload.completionMode === "self_evident") return { mode: "self_evident", why: "本人选定：点完成即验收", by: "person" };
+  if (payload.completionMode === "needs_assessment") {
+    // The model's reason (a score to come, quality, exploration) still says what to ask; the person only chose to be asked.
+    const reason = model?.mode === "needs_assessment" ? model.reason as AssessmentReason : "quality";
+    return { mode: "needs_assessment", reason, why: "本人选定：完成后再问结果", question: model?.question || askFor(reason, title),
+      askAfterHours: model?.mode === "needs_assessment" ? model.askAfterHours : DEFAULT_HOURS[reason], by: "person" };
+  }
+  if (model?.mode === "self_evident") return { mode: "self_evident", why: model.why, by: "model" };
+  if (model) {
+    const reason = model.reason as AssessmentReason;
+    return { mode: "needs_assessment", reason, why: model.why || "完成后再问结果", question: model.question || askFor(reason, title), askAfterHours: model.askAfterHours, by: "model" };
+  }
   if (JUDGED_EVENT.test(title) && !TOWARDS.test(title))
     return { mode: "needs_assessment", reason: "result_pending", why: "结果由别人之后评定（成绩、录用、评审意见）",
-      question: `${quote(title)}的成绩或结果出来了吗？`, askAfterHours: 24 };
-  if (SELF_EVIDENT.test(title)) return { mode: "self_evident", why: "交付本身就是完成：点完成即验收" };
+      question: askFor("result_pending", title), askAfterHours: 24, by: "rule" };
+  if (SELF_EVIDENT.test(title)) return { mode: "self_evident", why: "交付本身就是完成：点完成即验收", by: "rule" };
   if (EXPLORATION.test(text)) return { mode: "needs_assessment", reason: "exploration", why: "探索类工作没有明确产物，完成程度要问本人",
-    question: `${quote(title)}有哪些收获，完成得怎么样？`, askAfterHours: 2 };
+    question: askFor("exploration", title), askAfterHours: 2, by: "rule" };
   if (QUALITY.test(title)) return { mode: "needs_assessment", reason: "quality", why: "产出的质量难以直接判断",
-    question: `${quote(title)}完成得怎么样？`, askAfterHours: 2 };
-  return { mode: "self_evident", why: "点完成即验收" };
+    question: askFor("quality", title), askAfterHours: 2, by: "rule" };
+  return { mode: "self_evident", why: "点完成即验收", by: "rule" };
 }
 
 export function completionMode(order: OrderLike): CompletionMode {

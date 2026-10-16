@@ -8,6 +8,7 @@ import { Composer, type ComposerInput } from "./composer";
 import { captureLine } from "../offline-command-forms";
 import { undoOperation } from "../undo-center";
 import { Markdown } from "../ui/markdown";
+import { ClampBlock } from "../ui/clamp";
 import { announceThinking, HelperFace, useHelper } from "../helper-state";
 import { OpenerCard } from "./opener-card";
 
@@ -118,7 +119,8 @@ export function Conversation({ variant, placeholder, page }: {
 
   // Today's box shows the latest exchange only; the panel shows the day; a task's entry shows what was said from its page.
   const shown = variant === "inline" ? lastExchange(messages) : variant === "task" && page ? fromPage(messages, page) : messages;
-  const item = (message: MessageView) => <MessageItem key={message.id} message={message} onUpdate={update} choices={choices} />;
+  // On a page (Today, the return page) a long reply is held to three lines; the full conversation shows it whole.
+  const item = (message: MessageView) => <MessageItem key={message.id} message={message} onUpdate={update} choices={choices} compact={variant === "inline"} />;
   if (variant === "task") return <div className="conversation" data-variant={variant}>
     <Composer mode="capture" busy={busy} placeholder={placeholder ?? "对该任务的指令或问题：改截止、这一步做完了、记进度、推迟、讲解某一步…"} onSubmit={submit}>
       {busy && <small className="muted composer-status" role="status">正在理解…</small>}
@@ -160,13 +162,13 @@ function lastExchange(messages: MessageView[]): MessageView[] {
   return index < 0 ? messages.slice(-1) : messages.slice(index);
 }
 
-function MessageItem({ message, onUpdate, choices }: { message: MessageView; onUpdate: (message: MessageView) => void; choices: CardChoices | null }) {
+function MessageItem({ message, onUpdate, choices, compact = false }: { message: MessageView; onUpdate: (message: MessageView) => void; choices: CardChoices | null; compact?: boolean }) {
   const { avatar } = useHelper();
   if (message.role === "person") return <li className="conversation-person"><p>{message.text}</p></li>;
   // The 小帮手 speaks with the upper half of the person's figure (the 分身); the person's own lines carry no face.
   return <li className={message.role === "nudge" ? "conversation-reply conversation-nudge" : "conversation-reply"} data-face={avatar ? "" : undefined}>
     {avatar && <HelperFace src={avatar} size="reply" />}
-    {message.text && <div className="gen"><Markdown text={message.text} /></div>}
+    {message.text && (compact ? <div className="gen"><ClampBlock><Markdown text={message.text} /></ClampBlock></div> : <div className="gen"><Markdown text={message.text} /></div>)}
     {message.card && <CardView messageId={message.id} card={message.card} onUpdate={onUpdate} choices={choices}
       {...(message.opener ? { body: <OpenerCard opener={message.opener} /> } : {})} />}
   </li>;

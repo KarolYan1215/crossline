@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Clamp } from "../ui/clamp";
 import { riskLevelOf, TARGET_GRADE_OPTIONS, type SuccessCriterion } from "@crossline/core";
 import type { BoardCourse, BoardCriterion, BoardMilestone } from "../../lib/milestone-board";
 import { Sheet } from "../ui/overlay";
@@ -131,7 +132,7 @@ export function MilestoneDrawer({ milestone, labels, onClose }: { milestone: Boa
 
       {milestone.retrospective && <Retrospective milestone={milestone} />}
 
-      {milestone.rationale && <section className="md-block" aria-label="依据与推导"><h3>依据与推导</h3><p className="gen md-rationale">{milestone.rationale.replace(/\s*[（(]?\s*bareLine\s*[)）]?/g, "（最低够线）").replace(/（最低够线）（最低够线）/g, "（最低够线）")}</p></section>}
+      {milestone.rationale && <section className="md-block" aria-label="依据与推导"><h3>依据与推导</h3><p className="gen md-rationale"><Clamp lines={3} text={milestone.rationale.replace(/\s*[（(]?\s*bareLine\s*[)）]?/g, "（最低够线）").replace(/（最低够线）（最低够线）/g, "（最低够线）")} /></p></section>}
       {action.message && <p role="status" className="md-status">{action.message}</p>}
     </div>
   </Sheet>;
@@ -283,7 +284,7 @@ export function CourseDrawer({ course, milestones, onClose }: { course: BoardCou
       <div className="md-tags"><Tag>课程分数线</Tag><Tag tone={course.proposed ? "info" : "ok"}>{course.proposed ? "待审阅" : "已确认"}</Tag></div>
       <section className="md-block" aria-label="分数线">
         <p className="md-target"><b>{course.value}</b></p>
-        {course.why && <p className="gen md-rationale">{course.why}</p>}
+        {course.why && <p className="gen md-rationale"><Clamp lines={3} text={course.why} /></p>}
         <div className="md-actions">
           {course.proposed && <button type="button" className="primary-button" disabled={state.busy} onClick={() => void setTarget(course.value, false)}>批准</button>}
           <select value={pick} disabled={state.busy} aria-label="改为" onChange={(event) => setPick(event.target.value)}>

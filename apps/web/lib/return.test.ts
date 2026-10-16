@@ -3,6 +3,7 @@ import { CrosslineStore } from "@crossline/db";
 vi.mock("server-only", () => ({}));
 import { saveSchedulePreferences } from "./crossline";
 import { answerReturn, cleanStale, dismissReturn, returnDue, returnPageLines, returnView } from "./return";
+import { answerProgress, progressAsks, progressNudgeInputs } from "./progress-check";
 import { TEST_CTX } from "./test-support";
 
 /** Coming back after days away, on a real store (docs/review-2026-10-13.md §6.3). */
@@ -92,7 +93,6 @@ test("one tap each: 完成 hands the task in with how long it took; 做了一部
   expect(store.getWorkOrder(ws, "hw3")!.state).toBe("accepted");
   expect(store.listDurationObservations(ws, "research", "deep_work")[0]).toMatchObject({ observedMinutes: 90, actualSource: "one_tap" });
   const first = store.getStepPlan(ws, "hw4")!.steps[0]!.id;
-  expect(answerReturn(TEST_CTX, "hw4", "partial", { stepIds: [] }, now)).toEqual({ ok: false, code: "RETURN_STEPS_REQUIRED" });
   expect(answerReturn(TEST_CTX, "hw4", "partial", { stepIds: [first] }, now)).toEqual({ ok: true });
   expect(store.getStepPlan(ws, "hw4")!.steps.map((item) => item.status)).toEqual(["done", "planned"]);
   expect(answerReturn(TEST_CTX, "club", "dropped", {}, now)).toEqual({ ok: true });
@@ -183,17 +183,33 @@ test("a line typed on the return page carries the absence's steps by id and the 
   expect(returnPageLines(TEST_CTX, { kind: "return", entityId: "" }, now).join("\n")).not.toContain("本人这句话说的是");
 });
 
-test("做了一部分 with nothing ticked records the step as begun (a quarter), so the planner knows it has started; a task with no step still needs a tick", () => {
+test("做了一部分: a level records 1/4, 2/4 or 3/4 of the step; nothing at all is kept and asked once later (「做到哪了」), never as a decision", () => {
   const { store, order } = setup();
   const now = new Date();
   said(store, new Date(now.getTime() - 4 * DAY));
   order("hw6", "完成 ECE 555 作业 6");
+  order("hw7", "完成 ECE 555 作业 7");
   order("plain", "读第 6 讲");
-  store.saveStepPlan(ws, "hw6", { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 4, unit: "题" }, rationale: "按题拆分",
+  for (const id of ["hw6", "hw7"]) store.saveStepPlan(ws, id, { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 4, unit: "题" }, rationale: "按题拆分",
     steps: [step("s1", "推导第 1–2 题"), step("s2", "推导第 3–4 题")] }, TEST_CTX.principalId, "t");
   const [s1] = store.getStepPlan(ws, "hw6")!.steps.map((item) => item.id);
+  const quarters = (id: string) => store.getStepPlan(ws, id)!.steps.map((item) => [item.status, item.progressQuarter]);
+  // A level: 做了一半左右 is two quarters of this step; nothing to ask later.
+  expect(answerReturn(TEST_CTX, "hw7", "partial", { stepId: s1!, level: "less" }, now)).toEqual({ ok: true });
+  expect(quarters("hw7")).toEqual([["planned", 2], ["planned", 0]]);
+  expect(store.listEvents(ws, { type: "return.answered", entityId: "hw7" })[0]?.payload).toMatchObject({ verdict: "partial", level: "less" });
+  // Words only: the page sends them to the box; the answer is not unclear.
+  expect(answerReturn(TEST_CTX, "plain", "partial", { note: "读到第 3 节" }, now)).toEqual({ ok: true });
+  expect(store.listEvents(ws, { type: "return.answered", entityId: "plain" })[0]?.payload).toMatchObject({ note: "读到第 3 节" });
+  // Nothing chosen, nothing said: no progress invented, the step is kept as unclear and asked about once, at an idle moment.
   expect(answerReturn(TEST_CTX, "hw6", "partial", { stepId: s1! }, now)).toEqual({ ok: true });
-  expect(store.getStepPlan(ws, "hw6")!.steps.map((item) => [item.status, item.progressQuarter])).toEqual([["planned", 1], ["planned", 0]]);
-  expect(store.listEvents(ws, { type: "return.answered", entityId: "hw6" })[0]?.payload).toMatchObject({ verdict: "partial", stepId: s1 });
-  expect(answerReturn(TEST_CTX, "plain", "partial", {}, now)).toEqual({ ok: false, code: "RETURN_STEPS_REQUIRED" });
+  expect(quarters("hw6")).toEqual([["planned", 0], ["planned", 0]]);
+  expect(store.listEvents(ws, { type: "return.answered", entityId: "hw6" })[0]?.payload).toMatchObject({ verdict: "partial", stepId: s1, unclear: true });
+  const asks = progressAsks(TEST_CTX, now);
+  expect(asks.map((ask) => [ask.kind, ask.entityId])).toEqual([["progress_check", "hw6"]]);
+  expect(asks[0]!.title).toContain("做到哪了");
+  expect(progressNudgeInputs(TEST_CTX, now)[0]!.options.map((option) => option.label)).toEqual(["只开了个头", "做了一半左右", "做了一大半"]);
+  expect(answerProgress(TEST_CTX, asks[0]!, "more", "")).toEqual({ ok: true });
+  expect(quarters("hw6")).toEqual([["planned", 3], ["planned", 0]]);
+  expect(progressAsks(TEST_CTX, now)).toEqual([]);
 });

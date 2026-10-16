@@ -6,4 +6,6 @@ import path from "node:path";
  * origin (`https://…`), `http://127.0.0.1:3340` in development.
  */
 export const dataDir = (): string => process.env.ASSESS_DATA_DIR ?? path.join(process.cwd(), "data");
+/** The full app's sign-in address for the hosted beta (`https://app.…`), or null while it is invitation-only. */
+export const appUrl = (): string | null => process.env.ASSESS_APP_URL?.trim().replace(/\/+$/, "") || null;
 export const baseUrl = (): string => (process.env.ASSESS_BASE_URL ?? "http://127.0.0.1:3340").replace(/\/+$/, "");

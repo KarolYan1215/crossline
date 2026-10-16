@@ -237,3 +237,12 @@
 .md-artifact{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px;margin:0;font-size:13px}
 .md-relation-remove{margin-left:auto}
 @media (min-width:768px) and (max-width:1100px){.lines-bar-row{grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}}
+
+/* 按主线: one row per line with drafts, approved line by line. */
+.ba-split{display:inline-flex;align-items:center;gap:4px}
+.ba-lines{flex-basis:100%;margin:0;padding:0;list-style:none;display:grid;gap:6px;min-width:0}
+.ba-lines li{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;padding:4px 0 4px 8px;border-left:4px solid var(--lc,var(--ink));font-size:13px}
+.ba-lines-name{color:var(--ink);min-width:0;overflow-wrap:anywhere}
+.ba-lines-risks{display:inline-flex;flex-wrap:wrap;align-items:center;gap:8px}
+.ba-lines-risk{display:inline-flex;align-items:center;gap:3px}
+.ba-lines li .primary-button{margin-left:auto}

@@ -585,3 +585,31 @@ test("an API-key login has no quota windows; its month's spend against the cap i
     expect(await supervisor.readCostSignal()).toMatchObject({ available: true, limitReached: false, money: { spent: 4, cap: 10 }, long: { usedPercent: 40 } });
   } finally { await supervisor.stop(); }
 });
+
+test("authorized folders: exclusions travel with the authorization and can be changed, revoking purges only when asked, and a browser cannot call any of it", async () => {
+  const sidecar = fakeSidecar();
+  const calls: unknown[][] = [];
+  const supervisor = await codexModule.startCodexSupervisor({ port: 0, sidecarFactory: async () => sidecar.handle as never,
+    sourceFolders: {
+      preview: async (...args) => { calls.push(["preview", ...args]); return { state: "preview" }; },
+      add: async (...args) => { calls.push(["add", ...args]); return { state: "added" }; },
+      remove: async (...args) => { calls.push(["remove", ...args]); return { removed: true, purged: args[2] ? 2 : 0 }; },
+      setLines: async (...args) => { calls.push(["lines", ...args]); return { saved: true }; },
+      setRules: async (...args) => { calls.push(["rules", ...args]); return { saved: true, removed: 1 }; }
+    } });
+  const call = (method: string, pathname: string, body?: unknown, headers: Record<string, string> = {}) => fetch(`${supervisor.url}${pathname}`, { method,
+    headers: { ...(body ? { "content-type": "application/json" } : {}), ...headers }, ...(body ? { body: JSON.stringify(body) } : {}) });
+  try {
+    expect((await call("POST", "/v1/sources/folders", { path: "D:/Downloads", exclude: ["Tax", 3], include: ["a.pdf"], names: ["Kai Yan"] })).status).toBe(200);
+    expect((await call("POST", "/v1/sources/folders/f1/exclusions", { exclude: ["old"], include: [] })).status).toBe(200);
+    expect((await call("POST", "/v1/sources/folders/f1/exclusions", { exclude: "old" })).status).toBe(400);
+    expect(await (await call("DELETE", "/v1/sources/folders/f1")).json()).toEqual({ removed: true, purged: 0 });
+    expect(await (await call("DELETE", "/v1/sources/folders/f1/purge")).json()).toEqual({ removed: true, purged: 2 });
+    expect((await call("DELETE", "/v1/sources/folders/f1/purge", undefined, { origin: "https://evil.example" })).status).toBe(403);
+    expect(calls.map(([kind, , ...rest]) => [kind, ...rest])).toEqual([
+      ["add", "D:/Downloads", { exclude: ["Tax"], include: ["a.pdf"], names: ["Kai Yan"] }],
+      ["rules", "f1", { exclude: ["old"], include: [], names: [] }],
+      ["remove", "f1", false],
+      ["remove", "f1", true]]);
+  } finally { await supervisor.stop(); }
+});

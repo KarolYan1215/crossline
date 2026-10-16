@@ -121,3 +121,21 @@ export function monthTicks(start: string, end: string): Array<{ day: string; lab
   }
   return ticks;
 }
+
+/**
+ * The margins of the square estimate-vs-actual chart, from its tick labels (12px): the y axis's title 「实际」 sits in a band above the
+ * plot so the top tick's label never runs into it, the left margin holds the widest y label, and the right margin is half the last x
+ * label so that label, centred on the last tick, is not cut off at the edge. `titleBaseline` is where 「实际」 is drawn.
+ */
+export function scatterMargins(ticks: number[], px = 12): { left: number; right: number; top: number; bottom: number; titleBaseline: number } {
+  const widths = ticks.map((tick) => textWidth(minuteLabel(tick), px));
+  const titleBaseline = px;
+  return {
+    left: Math.max(40, Math.max(0, ...widths) + 8),
+    right: Math.max(6, Math.ceil((widths.at(-1) ?? 0) / 2) + 2),
+    // The top tick's label is centred on the plot's top edge: half a line above it, plus a gap, clears the title's line.
+    top: titleBaseline + Math.ceil(px * 0.3) + Math.ceil(px / 2) + 4,
+    bottom: 28,
+    titleBaseline
+  };
+}

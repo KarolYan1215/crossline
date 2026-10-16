@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { acceptanceStandardLines, completionMode, completionRule, outcomeCriteriaVerdict, readCompletionOutcome } from "./completion";
+import { acceptanceStandardLines, completionMode, completionRule, outcomeCriteriaVerdict, readCompletionOutcome, readModelCompletion } from "./completion";
 import type { SuccessCriterion } from "./index";
 
 const order = (title: string, extra: Record<string, unknown> = {}) => ({ intent: title, payload: { title, ...extra } });
@@ -48,4 +48,32 @@ describe("what a reported score says about the milestone", () => {
 test("the acceptance standard reads as the checklist the person approved", () => {
   expect(acceptanceStandardLines([{ description: "作业 2 的 PDF", required: true }, { description: "  " }, { description: "草稿", required: false }]))
     .toEqual(["作业 2 的 PDF", "草稿（可选）"]);
+});
+
+describe("the model's judgement of completion (owner's direction, 2026-10-15)", () => {
+  const judged = { mode: "needs_assessment", reason: "result_pending", why: "第一轮由评委评审", question: "", askAfterHours: 72 };
+  test("the model's value wins over the title rules: 「Hult Prize 第一轮」 names no exam yet waits for the judges", () => {
+    expect(completionMode(order("Hult Prize 第一轮"))).toBe("self_evident");
+    expect(completionRule(order("Hult Prize 第一轮", { completion: judged }))).toMatchObject({ mode: "needs_assessment", reason: "result_pending",
+      askAfterHours: 72, by: "model", question: "「Hult Prize 第一轮」的成绩或结果出来了吗？" });
+    // And the other way: a title the rules read as an exam, judged done-when-said.
+    expect(completionRule(order("ECE 548 期中考试 1", { completion: { mode: "self_evident", reason: "", why: "只需到场", question: "", askAfterHours: 0 } })))
+      .toMatchObject({ mode: "self_evident", why: "只需到场", by: "model" });
+  });
+  test("a task written before the field falls back to the title rules", () => {
+    expect(completionRule(order("ECE 548 期中考试 1"))).toMatchObject({ reason: "result_pending", by: "rule" });
+    expect(completionRule(order("ECE 548 期中考试 1", { completion: { mode: "maybe" } }))).toMatchObject({ by: "rule" });
+  });
+  test("the person's choice overrides the model, keeping the model's question when the person also wants to be asked", () => {
+    expect(completionRule(order("Hult Prize 第一轮", { completion: judged, completionMode: "self_evident" }))).toMatchObject({ mode: "self_evident", by: "person" });
+    expect(completionRule(order("Hult Prize 第一轮", { completion: judged, completionMode: "needs_assessment" }))).toMatchObject({ reason: "result_pending", askAfterHours: 72, by: "person" });
+    expect(completionRule(order("完成 ECE 555 作业 2", { completion: { mode: "self_evident", reason: "", why: "x", question: "", askAfterHours: 0 },
+      completionMode: "needs_assessment" }))).toMatchObject({ mode: "needs_assessment", reason: "quality", by: "person" });
+  });
+  test("a malformed judgement is made usable", () => {
+    expect(readModelCompletion({ mode: "needs_assessment", reason: "", why: " w ", question: "", askAfterHours: -1 }))
+      .toEqual({ mode: "needs_assessment", reason: "quality", why: "w", question: "", askAfterHours: 2 });
+    expect(readModelCompletion({ mode: "self_evident", reason: "quality", why: "", question: "q", askAfterHours: 9 }))
+      .toEqual({ mode: "self_evident", reason: "", why: "交付即完成", question: "", askAfterHours: 0 });
+  });
 });

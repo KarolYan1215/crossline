@@ -29,7 +29,10 @@ const AUTH_ERROR_TEXT: Record<string, string> = {
   CHATGPT_CLIENT_INVALID: "这台电脑在 OpenAI 的注册已失效，请重试；仍不行时删除数据目录里的 chatgpt-signin.json 后重试。",
   CHATGPT_TOKEN_FAILED: "OpenAI 没有完成登录，请重试。",
   CHATGPT_EMAIL_MISSING: "这个 ChatGPT 账号没有提供邮箱，无法登录。",
-  account_not_linked: "这个邮箱已有 Crossline 账号，但登录方或原账号没有确认这个邮箱；请先用原来的方式登录。"
+  // The hosted beta's sign-up rules (packages/auth signupCap / signupAllowlist).
+  SIGNUP_FULL: "内测名额已满，已记下这个邮箱，有名额时会发邮件通知你。",
+  SIGNUP_NOT_INVITED: "这个邮箱还没有内测资格。先做公开测评并在结果页点「申请内测」，或联系发给你链接的人。",
+  account_not_linked:"这个邮箱已有 Crossline 账号，但登录方或原账号没有确认这个邮箱；请先用原来的方式登录。"
 };
 
 export function authErrorMessage(error: { code?: string | undefined; message?: string | null | undefined } | null | undefined,

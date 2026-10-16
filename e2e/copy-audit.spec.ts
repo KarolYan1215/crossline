@@ -1,9 +1,10 @@
 import { expect, test, type Page } from "@playwright/test";
-import { ensureMaterials, ensureSkillLibrary } from "./ledger.js";
+import { ensureMaterials, ensurePortrait, ensureSkillLibrary } from "./ledger.js";
+import { TEXT_LIMITS, textBlockAudit } from "./text-blocks.js";
 
 /**
  * The automatable half of the review rubric (docs/copy-style.md): no second person in the system's own text, folds only for advanced
- * content, nothing developer-facing on screen, and no long paragraphs outside material and tutorial bodies.
+ * content, nothing developer-facing on screen, and no large areas of text (`text-blocks.ts`: the limits and why they are what they are).
  *
  * Exempt on purpose: `.gen` (text a model wrote — it quotes the person and their files), `[data-user-text]` (what the person typed or
  * named), `.long-form` (material and tutorial bodies), and `details.advanced` (the one sanctioned use of a fold).
@@ -16,7 +17,7 @@ const PAGES = ["/", "/milestones", "/plan", "/workbench", "/approvals", "/settin
 const addressOf = async (page: Page, path: string) => path === "/materials/[id]" ? (await ensureMaterials(page)).tutorial
   : path === "/materials/view" ? (await ensureMaterials(page)).view : path;
 
-type Findings = { secondPerson: string[]; folds: string[]; developer: string[]; longText: string[] };
+type Findings = { secondPerson: string[]; folds: string[]; developer: string[] };
 
 const DEVELOPER = /\b[A-Z][A-Z0-9]*_[A-Z0-9_]{2,}\b|scripts[\\/]|\.ps1\b|\.tsx?\b|CROSSLINE_|CODEX_HOME|\bworker\b|\bsidecar\b|127\.0\.0\.1|localhost|\bthread\b|sha256/;
 
@@ -30,7 +31,7 @@ async function audit(page: Page): Promise<Findings> {
       const box = element.getBoundingClientRect();
       return style.visibility !== "hidden" && style.display !== "none" && box.width > 0 && box.height > 0;
     };
-    const found: Findings = { secondPerson: [], folds: [], developer: [], longText: [] };
+    const found: Findings = { secondPerson: [], folds: [], developer: [] };
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
       const text = node.textContent?.trim();
@@ -44,23 +45,12 @@ async function audit(page: Page): Promise<Findings> {
       if (fold.closest("nav, details.advanced")) continue;
       if (visible(fold)) found.folds.push(fold.querySelector("summary")?.textContent?.trim().slice(0, 30) ?? "(no summary)");
     }
-    for (const block of document.querySelectorAll("p, li, dd")) {
-      // A list item holding a whole card (an ask on 待确认: heading, paragraph, options) is a container, not a paragraph; its own
-      // paragraphs are measured one by one.
-      if (exempt(block) || !visible(block) || block.querySelector("p, h1, h2, h3, h4, h5, h6, ul, ol, fieldset, form")) continue;
-      const style = getComputedStyle(block);
-      const line = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.35;
-      // Lines are counted in the text's own height: a paragraph styled as a padded panel (Today's empty 下一步) is two lines on a phone.
-      const content = block.getBoundingClientRect().height - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom)
-        - parseFloat(style.borderTopWidth) - parseFloat(style.borderBottomWidth);
-      if (content > line * 3.5) found.longText.push((block.textContent ?? "").trim().slice(0, 40));
-    }
     return found;
   }, DEVELOPER.source);
 }
 
 for (const path of PAGES) {
-  test(`${path} reads as product copy: third person, few folds, nothing developer-facing, no long paragraphs`, async ({ page }) => {
+  test(`${path} reads as product copy: third person, few folds, nothing developer-facing`, async ({ page }) => {
     if (path === "/settings") await ensureSkillLibrary(page);
     await page.goto(await addressOf(page, path));
     await page.waitForLoadState("networkidle");
@@ -70,6 +60,22 @@ for (const path of PAGES) {
     expect.soft(found.secondPerson, "second person in system text").toEqual([]);
     expect.soft(found.folds, "folds outside advanced content").toEqual([]);
     expect.soft(found.developer, "developer-facing text").toEqual([]);
-    expect.soft(found.longText, "paragraphs over three lines").toEqual([]);
+  });
+}
+
+// The portrait is a page of its own text (its private half is read as reading content); /review carries the research reports.
+const TEXT_PAGES = [...PAGES, "/portrait", "/review"];
+for (const path of TEXT_PAGES) {
+  test(`${path} shows no large area of text: blocks within ${TEXT_LIMITS.BLOCK_LINES} lines and ${TEXT_LIMITS.BLOCK_CHARS} characters, reading text in readable paragraphs`, async ({ page }) => {
+    if (path === "/settings") await ensureSkillLibrary(page);
+    if (path === "/portrait") await ensurePortrait(page);
+    await page.goto(await addressOf(page, path));
+    await page.waitForLoadState("networkidle");
+    const found = await page.evaluate(textBlockAudit, TEXT_LIMITS);
+    if (process.env.AUDIT_VERBOSE || process.env.COPY_AUDIT_REPORT) console.log(`TEXT ${path} ${JSON.stringify(found)}`);
+    if (process.env.COPY_AUDIT_REPORT) return;
+    expect.soft(found.blocks, "text blocks over the limit outside reading content").toEqual([]);
+    expect.soft(found.reading, "reading paragraphs too long or lines too wide").toEqual([]);
+    expect.soft(found.lists, "long lists of plain entries").toEqual([]);
   });
 }

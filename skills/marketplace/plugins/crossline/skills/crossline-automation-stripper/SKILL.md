@@ -5,7 +5,7 @@ description: Separate a captured intent into reversible AI preparation and irred
 
 # Crossline Automation Stripper
 
-Accept `crossline.analysis.v2`: `{today, capture, approvedMilestones[] (each with its deadline, empty when none), availableInputs[], identityPacks[], referenceClass[], relations[], policy}`. `title` is the task's name: a short action starting with its verb (「完成 ECE 555 作业 2」, at most 24 characters, no closing punctuation) that names the course or project when the task belongs to one, since the title is often shown alone; `intent` is the description of exactly what is to be done, written freely. Return `{identityId, projectId, milestoneId, title, intent, family, automationParts[], humanCore[], materialContract[], evidenceContract[], estimate, estimateBreakdown[], riskTier, dates[], waitingOn, byproducts[], blockers[]}`.
+Accept `crossline.analysis.v2`: `{today, capture, approvedMilestones[] (each with its deadline, empty when none), availableInputs[], identityPacks[], referenceClass[], relations[], existingTasks[], policy}`. `title` is the task's name: a short action starting with its verb (「完成 ECE 555 作业 2」, at most 24 characters, no closing punctuation) that names the course or project when the task belongs to one, since the title is often shown alone; `intent` is the description of exactly what is to be done, written freely. Return `{identityId, projectId, milestoneId, title, intent, family, automationParts[], humanCore[], materialContract[], evidenceContract[], estimate, estimateBreakdown[], riskTier, dates[], waitingOn, byproducts[], completion, extendsTaskId, blockers[]}`.
 
 Keep judgment, relationship ownership, authorship, and accountable decisions in `humanCore`. Automate search, extraction, comparison, formatting, and local drafts when reversible. Estimate `{p25Minutes,p50Minutes,p85Minutes,source,observationCount,confidence}` without asking for a duration. Do not perform the work or change state.
 
@@ -61,6 +61,19 @@ A request for a fact has four marks: its only purpose is to obtain one fact, fil
 
 `byproducts[]` (zero to three, at most one per line other than this task's own) name what the same work can also produce for **another** line the person has — a research run can yield notes for a post on how research really happens, or a real use of the person's own product. Each is `{lineId, milestoneId, artifact, captureSteps[], landing, why}`: `lineId` one of `identityPacks[].id` other than this task's `identityId`; `milestoneId` that line's approved milestone it serves, or empty; `artifact` a concrete thing that can be handed over (a note, a draft post, a figure), never a state (「保持状态」); `captureSteps` are small things done **during** the main work so the byproduct is cheap later (「仿真时把每次调参的想法记进研究日记」, with minutes — they are part of this task's own steps and count in `p50Minutes`); `landing` `{minutes, description}` is the short follow-up after the main work is done that turns them into the artifact. Offer one only when the work genuinely produces the material — an invented connection costs the person time. The main deliverable always comes first; a byproduct never changes this task's own contract.
 
+
+## How completion is taken
+
+`completion` says how finishing the task is taken, judged from what the work is — not from words in its title: `{mode, reason, why, question, askAfterHours}`.
+- `reason` `result_pending`: the result is decided later by somebody else — an exam or quiz sat, a paper or application submitted, a review, a competition round (「Hult Prize 第一轮」), an interview, a pitch. The score or verdict is the point, so `mode` is `needs_assessment`, `question` asks whether the result is out (「「Hult Prize 第一轮」的评审结果出来了吗？」) and `askAfterHours` is when it could first be known (24 or more; the days the result is announced after, when the material says so).
+- `reason` `quality`: the quality of what was made cannot be read off it at a glance (a draft, a design, a post, a piece of writing meant to persuade): `mode` `needs_assessment`, `question` asks how it went, `askAfterHours` about 2.
+- `reason` `exploration`: exploring or researching with no definite product: `mode` `needs_assessment`, `question` asks what came of it, `askAfterHours` about 2.
+- Everything else — handing in, finishing homework, sending, attending, filing, looking something up, solving, practising, preparing for an exam (preparing is not sitting it) — is `mode` `self_evident` (done when the person says so), with `reason` `""`, `question` `""` and `askAfterHours` 0.
+`why` is one sentence on the judgement. The person can change it on the task; never ask about it.
+
+## Work already on the board
+
+`existingTasks[]` are the person's open tasks (the task library included): `{id, title, intent, lineId, projectId, dueDate, state}`. Read them before writing anything. When one of them already covers this capture's work (the same homework, the same material to gather, the same draft), this capture is not new work: write the analysis as usual and set `extendsTaskId` to that task's id — the app folds what the capture adds into that task's steps instead of creating a second task. Do the same when the capture only adds to one (one more problem, an extra file to read, a correction to its scope). Work that is genuinely separate — another homework number, another exam, a different deliverable, a due day more than a week apart — has `extendsTaskId` `""`.
 
 ## Personal preferences
 

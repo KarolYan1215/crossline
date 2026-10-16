@@ -16,11 +16,20 @@ Input is `crossline.step-plan.v1`:
 - `projectDates[]`: the project's dated items (exams, homework due, releases).
 - `archetypes`, `doneSteps` (when replanning), `acceptedOutputs` (work the assistant already produced for this course or project — `accepted`, or `awaiting_review` by the person; `forThisTask` says whether it was made for this task. Plan none of it again: refer to it as an input), `personalPreferences`, `feedback` (the latest instruction) and `earlierFeedback` (every earlier one — all still hold unless the latest contradicts them).
 
-Return raw JSON only: `{archetypeId, quantity, rationale, importance, units, questions, steps}`.
+Return raw JSON only: `{archetypeId, quantity, rationale, importance, completion, units, questions, steps}`.
 
 ## 0a. Does this task matter to the long-term plan: `importance`
 
 `{longTerm, why}`. `longTerm` is true when the task moves something the person cares about over months — a graded part of a course they set a target for, a deliverable others will see (a submission, a release, a paper, an MVP), a step a milestone's outcome depends on — and false for upkeep, filing and errands whose result nobody depends on. `why` is one sentence naming the milestone, grade or deliverable it rests on. Only an important task's `questions` are put to the person; a minor task's questions are settled by the app as assumptions (their first option), so for a minor task put the most likely answer first.
+
+## 0c. How finishing the task is taken: `completion`
+
+`completion` says how finishing the task is taken, judged from what the work is — not from words in its title: `{mode, reason, why, question, askAfterHours}`.
+- `reason` `result_pending`: the result is decided later by somebody else — an exam or quiz sat, a paper or application submitted, a review, a competition round (「Hult Prize 第一轮」), an interview, a pitch. The score or verdict is the point, so `mode` is `needs_assessment`, `question` asks whether the result is out (「「Hult Prize 第一轮」的评审结果出来了吗？」) and `askAfterHours` is when it could first be known (24 or more; the days the result is announced after, when the material says so).
+- `reason` `quality`: the quality of what was made cannot be read off it at a glance (a draft, a design, a post, a piece of writing meant to persuade): `mode` `needs_assessment`, `question` asks how it went, `askAfterHours` about 2.
+- `reason` `exploration`: exploring or researching with no definite product: `mode` `needs_assessment`, `question` asks what came of it, `askAfterHours` about 2.
+- Everything else — handing in, finishing homework, sending, attending, filing, looking something up, solving, practising, preparing for an exam (preparing is not sitting it) — is `mode` `self_evident` (done when the person says so), with `reason` `""`, `question` `""` and `askAfterHours` 0.
+`why` is one sentence on the judgement. The person can change it on the task; never ask about it. The app keeps your judgement only for a task that has none yet.
 
 ## 0b. When `research` is true: find the best way before planning
 
