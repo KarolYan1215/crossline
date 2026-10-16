@@ -1,4 +1,6 @@
 import type { TaskDetail } from "../../lib/task-detail";
+import { tFor, type Locale } from "../../lib/i18n";
+import { shortDate } from "./format";
 
 /**
  * What the task card and the 任务 page read off a task, kept pure so it is tested apart from either: the step the person is on, the
@@ -32,8 +34,11 @@ export function stepSegments(detail: Pick<CardDetail, "stepPlan">): Segment[] {
   });
 }
 
-const md = (day: string) => `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}`;
-const awaited = (title: string) => title.replace(/^等待\s*/u, "");
+/**
+ * A waiting step's title without its leading 「等待」 / "Wait for", which the wait line says itself. The title is the planner model's,
+ * written in either language.
+ */
+const awaited = (title: string) => title.replace(/^(?:等待\s*|wait(?:ing)?\s+(?:for|on)\s+)/iu, ""); // i18n-ignore
 
 export type WaitKind = "approval" | "returned" | "material" | "gate" | "input" | "release";
 
@@ -45,22 +50,27 @@ const RETURNED: Record<string, string> = {
   MILESTONE_GATE_INSUFFICIENT: "验收证据不足", MILESTONE_GATE_PARTIAL: "交付与打法不符", MILESTONE_GATE_REFUTED: "证据与里程碑相矛盾",
   ANALYSIS_RECOVERY_REQUIRED: "分析中断，需重新分析"
 };
-function returnedLabel(reason: string | undefined): string {
-  if (!reason) return "已退回";
-  if (!/^[A-Z][A-Z0-9_]+$/.test(reason)) return `已退回 · ${reason}`;
-  return RETURNED[reason] ? `已退回 · ${RETURNED[reason]}` : "已退回";
+function returnedLabel(reason: string | undefined, locale?: Locale): string {
+  const t = tFor(locale);
+  if (!reason) return t("已退回");
+  if (!/^[A-Z][A-Z0-9_]+$/.test(reason)) return t("已退回 · {{reason}}", { reason });
+  return RETURNED[reason] ? t("已退回 · {{reason}}", { reason: t(RETURNED[reason]) }) : t("已退回");
 }
 
 /** What the task waits for before the person can go on with it, in the page's words; none when it can be worked on now. */
-export function waitReason(detail: CardDetail, today: string): { kind: WaitKind; label: string } | undefined {
-  if (detail.state === "awaiting_plan_approval") return { kind: "approval", label: detail.stepPlan ? "等本人批准" : "等本人批准 · 步骤规划中" };
-  if (detail.state === "blocked") return { kind: "returned", label: returnedLabel(detail.blocker?.reason) };
-  if (detail.state === "preparing") return { kind: "material", label: detail.materialBlocker ? `材料准备已停止 · ${detail.materialBlocker.message}` : "等材料准备" };
-  if (detail.state === "evidence_review") return { kind: "gate", label: "已提交 · 等验收" };
+export function waitReason(detail: CardDetail, today: string, locale?: Locale): { kind: WaitKind; label: string } | undefined {
+  const t = tFor(locale);
+  if (detail.state === "awaiting_plan_approval") return { kind: "approval", label: detail.stepPlan ? t("等本人批准") : t("等本人批准 · 步骤规划中") };
+  if (detail.state === "blocked") return { kind: "returned", label: returnedLabel(detail.blocker?.reason, locale) };
+  if (detail.state === "preparing") return { kind: "material", label: detail.materialBlocker ? t("材料准备已停止 · {{message}}", { message: detail.materialBlocker.message }) : t("等材料准备") };
+  if (detail.state === "evidence_review") return { kind: "gate", label: t("已提交 · 等验收") };
   if (detail.state === "active") return undefined;
   const step = currentStep(detail);
-  if (step && !step.schedulable) return { kind: "input", label: `等待 · ${awaited(step.title)}${step.notBefore && step.notBefore > today ? `（${md(step.notBefore)} 起）` : ""}` };
-  if (detail.window.notBefore && detail.window.notBefore > today) return { kind: "release", label: `${md(detail.window.notBefore)} 起可开始` };
+  if (step && !step.schedulable) {
+    const what = awaited(step.title);
+    return { kind: "input", label: step.notBefore && step.notBefore > today ? t("等待 · {{what}}（{{day}} 起）", { what, day: shortDate(locale, step.notBefore) }) : t("等待 · {{what}}", { what }) };
+  }
+  if (detail.window.notBefore && detail.window.notBefore > today) return { kind: "release", label: t("{{day}} 起可开始", { day: shortDate(locale, detail.window.notBefore) }) };
   return undefined;
 }
 
@@ -97,9 +107,10 @@ export function compareInGroup(group: TaskGroup, today: string) {
 }
 
 /** 「还剩 5 天」「今天截止」「已过 2 天」 for a due day, given today. */
-export function dueDistance(dueBy: string, today: string): { text: string; overdue: boolean } {
+export function dueDistance(dueBy: string, today: string, locale?: Locale): { text: string; overdue: boolean } {
+  const t = tFor(locale);
   const days = Math.round((Date.parse(`${dueBy.slice(0, 10)}T12:00:00Z`) - Date.parse(`${today}T12:00:00Z`)) / 86_400_000);
-  if (days === 0) return { text: "今天截止", overdue: false };
-  if (days === 1) return { text: "明天截止", overdue: false };
-  return days > 0 ? { text: `还剩 ${days} 天`, overdue: false } : { text: `已过 ${-days} 天`, overdue: true };
+  if (days === 0) return { text: t("今天截止"), overdue: false };
+  if (days === 1) return { text: t("明天截止"), overdue: false };
+  return days > 0 ? { text: t("还剩 {{count}} 天", { count: days }), overdue: false } : { text: t("已过 {{count}} 天", { count: -days }), overdue: true };
 }

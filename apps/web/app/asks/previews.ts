@@ -2,6 +2,7 @@ import "server-only";
 import { portraitType, taskTitleOf, type AccessContext, type Ask, type PortraitReport } from "@crossline/core";
 import { getStore } from "../../lib/crossline";
 import { stateLabelFor } from "../../lib/labels";
+import { tOf } from "../../lib/locale";
 import type { AskPreviewData, AskPreviews } from "./types";
 
 const param = (href: string, name: string) => {
@@ -41,7 +42,7 @@ export function loadAskPreviews(ctx: AccessContext, asks: Ask[]): AskPreviews {
         if (order) {
           const due = (order.payload as { dueDate?: string } | undefined)?.dueDate;
           const steps = store.getStepPlan(ctx.workspaceId, order.id)?.steps ?? [];
-          previews[ask.id] = { kind: "task", title: taskTitleOf(order), state: stateLabelFor(order.state, false), ...(due ? { due } : {}),
+          previews[ask.id] = { kind: "task", title: taskTitleOf(order), state: tOf(ctx)(stateLabelFor(order.state, false)), ...(due ? { due } : {}),
             steps: steps.slice(0, 8).map((step) => ({ title: step.title, done: step.status === "done" })) };
         }
       } else if (preview.kind === "file") {

@@ -44,3 +44,15 @@ test("the days decisions that can wait come into the week are counted per day, t
   expect(bars[5]!.count).toBe(1);
   expect(bars[27]!.count).toBe(1);
 });
+
+test("in English the outcome, sources and refusals are English, and names quoted the English way are found", () => {
+  expect(quotedName("Is “Midterm” at risk before Nov 24?")).toBe("“Midterm”");
+  expect(quotedName('Which project does "syllabus.pdf" belong to?')).toBe('"syllabus.pdf"');
+  expect(askSources({ kind: "milestone_risk", entityId: "m1", title: "“Midterm” may be late", options: [] }, "en")[0])
+    .toEqual({ label: "Milestone “Midterm”", href: "/milestones?open=m1" });
+  expect(askSources({ kind: "capture_blocked", entityId: "c", title: "x", options: [] }, "en")[0]!.label).toBe("Capture");
+  expect(askOutcome({ kind: "gate_failed", options: [] }, "en")).toEqual({ answered: "The acceptance check runs again.", unanswered: "The submitted evidence stays waiting for a verdict." });
+  expect(askOutcome({ kind: "missed_block", options: [{ id: "r", label: "Roll over", detail: "Done at the new time", recommended: true }] }, "en").answered)
+    .toBe("Recommended, “Roll over”: Done at the new time");
+  expect(answerProblem("ASK_SINGLE_CHOICE", "en")).toBe("Pick only one for this question");
+});

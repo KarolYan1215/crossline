@@ -1,4 +1,6 @@
 import { ASK_QUADRANTS, askQuadrant, type Ask, type AskKind, type AskQuadrant } from "@crossline/core";
+import { tFor, type Locale } from "../../lib/i18n";
+import { shortDate } from "../task/format";
 
 /**
  * What the 待确认 page and Today's stack need to say about an ask beyond what the ask itself carries: what happens once it is
@@ -6,7 +8,7 @@ import { ASK_QUADRANTS, askQuadrant, type Ask, type AskKind, type AskQuadrant } 
  * browser and the wording stays in one place.
  */
 
-/** Per kind, the effect of an answer and of silence, in the app's own terms (read off `lib/asks.ts`'s handlers). */
+/** Per kind, the effect of an answer and of silence, in the app's own terms (read off `lib/asks.ts`'s handlers). Chinese keys, translated on the way out. */
 const OUTCOMES: Record<AskKind, { answered: string; unanswered: string }> = {
   backplan_input: { answered: "重新倒推该里程碑的步骤，或撤回尚未开始的自动步骤。", unanswered: "该里程碑没有新的自动步骤，排程只含已有工作。" },
   waiting_due: { answered: "到了：依赖它的工作排进日历；推迟：到新日期再问。", unanswered: "依赖它的工作继续留在日历之外。" },
@@ -36,10 +38,13 @@ const OUTCOMES: Record<AskKind, { answered: string; unanswered: string }> = {
 };
 
 /** What an answer does and what silence does. An option's own detail is preferred over the kind's sentence when it is the recommended one. */
-export function askOutcome(ask: Pick<Ask, "kind" | "options">): { answered: string; unanswered: string } {
+export function askOutcome(ask: Pick<Ask, "kind" | "options">, locale?: Locale): { answered: string; unanswered: string } {
+  const t = tFor(locale);
   const fallback = OUTCOMES[ask.kind] ?? { answered: "按所选处理。", unanswered: "相关工作保持现状。" };
   const recommended = ask.options.find((option) => option.recommended && !option.href && option.detail);
-  return { answered: recommended ? `推荐「${recommended.label}」：${recommended.detail}` : fallback.answered, unanswered: fallback.unanswered };
+  // The option's label and detail were written by the server in the page's language; only the frame is said here.
+  return { answered: recommended ? t("推荐「{{label}}」：{{detail}}", { label: recommended.label, detail: recommended.detail }) : t(fallback.answered),
+    unanswered: t(fallback.unanswered) };
 }
 
 export type AskSource = { label: string; href: string };
@@ -47,25 +52,31 @@ export type AskSource = { label: string; href: string };
 const WORK_ORDER_KINDS = new Set<AskKind>(["materials_blocked", "gate_insufficient", "gate_failed", "evidence_manual", "missed_block", "locked_conflict", "step_question"]);
 const MILESTONE_KINDS = new Set<AskKind>(["backplan_input", "milestone_risk", "milestone_risk_review"]);
 
-/** The first 「…」 or 《…》 in a title: the name of the thing the ask is about. */
+/**
+ * The first 「…」 or 《…》 in a title — or, in an English title, the first “…” or "…" — the name of the thing the ask is about. Titles are
+ * written by `lib/asks.ts` in the page's language and quote the names in them.
+ */
 export function quotedName(title: string): string | undefined {
-  return /[「《][^」》]+[」》]/.exec(title)?.[0];
+  return /[「《][^」》]+[」》]|“[^”]+”|"[^"]+"/.exec(title)?.[0];
 }
 
 /**
  * Where the thing an ask is about can be opened: the task, the milestone, the file, the interview. An option that already links to the
  * same page is not repeated, and the preview's own link is left to the preview.
  */
-export function askSources(ask: Pick<Ask, "kind" | "entityId" | "title" | "options" | "preview">): AskSource[] {
-  const name = quotedName(ask.title) ?? "";
+export function askSources(ask: Pick<Ask, "kind" | "entityId" | "title" | "options" | "preview">, locale?: Locale): AskSource[] {
+  const t = tFor(locale);
+  const quoted = quotedName(ask.title);
+  // 「任务「X」」 / "Task “X”": the name follows the word, with a space in English.
+  const named = (word: string) => quoted ? `${t(word)}${locale === "en" ? " " : ""}${quoted}` : t(word);
   const id = encodeURIComponent(ask.entityId);
   const sources: AskSource[] = [];
-  if (WORK_ORDER_KINDS.has(ask.kind)) sources.push({ label: `任务${ask.kind === "step_question" ? "" : name}`, href: `/workbench/${id}` });
-  if (MILESTONE_KINDS.has(ask.kind)) sources.push({ label: `里程碑${name}`, href: `/milestones?open=${id}` });
-  if (ask.kind === "source_project") sources.push({ label: `文件${name}`, href: `/api/source-documents/${id}/file` });
-  if (ask.kind === "capture_blocked") sources.push({ label: "收集", href: "/workbench" });
-  if (ask.kind === "interview_question") sources.push({ label: "访谈", href: "/onboarding" });
-  if (ask.kind === "relation_check") sources.push({ label: "飞轮关系", href: "/milestones" });
+  if (WORK_ORDER_KINDS.has(ask.kind)) sources.push({ label: ask.kind === "step_question" ? t("任务") : named("任务"), href: `/workbench/${id}` });
+  if (MILESTONE_KINDS.has(ask.kind)) sources.push({ label: named("里程碑"), href: `/milestones?open=${id}` });
+  if (ask.kind === "source_project") sources.push({ label: named("文件"), href: `/api/source-documents/${id}/file` });
+  if (ask.kind === "capture_blocked") sources.push({ label: t("收集"), href: "/workbench" });
+  if (ask.kind === "interview_question") sources.push({ label: t("访谈"), href: "/onboarding" });
+  if (ask.kind === "relation_check") sources.push({ label: t("飞轮关系"), href: "/milestones" });
   const taken = new Set([...ask.options.map((option) => option.href).filter(Boolean), ask.preview?.href]);
   return sources.filter((source) => !taken.has(source.href));
 }
@@ -90,16 +101,17 @@ export function answerBody(askId: string, optionIds: string[], values: Record<st
 }
 
 /** The person's words for a refused answer. */
-export function answerProblem(code: string | undefined): string {
+export function answerProblem(code: string | undefined, locale?: Locale): string {
+  const t = tFor(locale);
   switch (code) {
-    case "ASK_FIELD_REQUIRED": return "还有必填项未填写";
-    case "ASK_FIELD_DATE_INVALID": return "日期格式不对";
-    case "ASK_FIELD_TOO_LONG": return "内容过长";
-    case "ASK_SINGLE_CHOICE": return "这一题只能选一项";
-    case "ASK_NOTE_NOT_TAKEN": return "这一题需要从选项中选择";
-    case "ASK_OPTION_UNKNOWN": return "先选一项";
-    case "ASK_NOT_FOUND": return "这条已经处理过了";
-    default: return "未保存，请重试";
+    case "ASK_FIELD_REQUIRED": return t("还有必填项未填写");
+    case "ASK_FIELD_DATE_INVALID": return t("日期格式不对");
+    case "ASK_FIELD_TOO_LONG": return t("内容过长");
+    case "ASK_SINGLE_CHOICE": return t("这一题只能选一项");
+    case "ASK_NOTE_NOT_TAKEN": return t("这一题需要从选项中选择");
+    case "ASK_OPTION_UNKNOWN": return t("先选一项");
+    case "ASK_NOT_FOUND": return t("这条已经处理过了");
+    default: return t("未保存，请重试");
   }
 }
 
@@ -118,4 +130,5 @@ export function entryHistogram(entries: string[], today: string, days = 28): Arr
   return bars;
 }
 
-export const shortDay = (day: string) => `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}`;
+/** 「10/17」 / "Oct 17". */
+export const shortDay = (day: string, locale?: Locale) => shortDate(locale, day);

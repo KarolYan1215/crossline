@@ -72,3 +72,16 @@ test("a task sent back with a ledger code reads in words, never the code", () =>
   expect(waitReason(detail({ state: "blocked", blocker: { reason: "MILESTONE_GATE_INSUFFICIENT" } }), TODAY)?.label).toBe("已退回 · 验收证据不足");
   expect(waitReason(detail({ state: "blocked", blocker: { reason: "SOME_NEW_CODE" } }), TODAY)?.label).toBe("已退回");
 });
+
+test("in English the card reads in English, and a waiting step written in English loses its own 'Wait for'", () => {
+  expect(waitReason(detail({ state: "awaiting_plan_approval" }), TODAY, "en")?.label).toBe("Waiting for your approval · steps being planned");
+  expect(waitReason(detail({ state: "blocked", blocker: { reason: "MILESTONE_GATE_INSUFFICIENT" } }), TODAY, "en")?.label).toBe("Sent back · Not enough evidence to accept");
+  expect(waitReason(detail({ window: { notBefore: "2026-10-18" } }), TODAY, "en")?.label).toBe("Can start from Oct 18");
+  const waiting = (title: string) => waitReason(detail({ stepPlan: plan([step("a", { title, schedulable: false, notBefore: "2026-10-20" })]) }), TODAY, "en")?.label;
+  expect(waiting("Wait for the homework release")).toBe("Waiting on · the homework release (from Oct 20)");
+  expect(waiting("等待作业发布")).toBe("Waiting on · 作业发布 (from Oct 20)");
+  expect(dueDistance("2026-10-16", TODAY, "en").text).toBe("Due tomorrow");
+  expect(dueDistance("2026-10-16", "2026-10-15", "en").text).toBe("Due tomorrow");
+  expect(dueDistance("2026-10-20", TODAY, "en").text).toBe("5 days left");
+  expect(dueDistance("2026-10-14", TODAY, "en")).toEqual({ text: "1 day overdue", overdue: true });
+});

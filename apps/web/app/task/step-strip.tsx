@@ -1,5 +1,6 @@
 import type { TaskDetail } from "../../lib/task-detail";
 import { stepSegments } from "./card-model";
+import { useT } from "../locale-context";
 
 const KIND_LABEL = { done: "已完成", current: "当前", waiting: "等待中", agent: "助手准备", open: "未开始" } as const;
 
@@ -9,13 +10,14 @@ const KIND_LABEL = { done: "已完成", current: "当前", waiting: "等待中",
  * accessible name, not printed.
  */
 export function StepStrip({ detail, size = "card" }: { detail: Pick<TaskDetail, "stepPlan">; size?: "card" | "page" }) {
+  const t = useT();
   const segments = stepSegments(detail);
   if (!segments.length) return null;
   const done = segments.filter((segment) => segment.kind === "done").length;
   const percent = Math.round((detail.stepPlan?.progress ?? 0) * 100);
-  return <div className="step-strip" data-size={size} role="img" aria-label={`进度 ${percent}%，${done}/${segments.length} 步完成`}>
+  return <div className="step-strip" data-size={size} role="img" aria-label={t("进度 {{percent}}%，{{done}}/{{total}} 步完成", { percent, done, total: segments.length })}>
     {segments.map((segment) => <span key={segment.id} className="step-seg" data-kind={segment.kind} style={{ flexGrow: segment.weight }}
-      title={`${segment.title} · ${KIND_LABEL[segment.kind]}`}>
+      title={`${segment.title} · ${t(KIND_LABEL[segment.kind])}`}>
       <i style={{ width: `${Math.round(segment.fill * 100)}%` }} />
     </span>)}
   </div>;

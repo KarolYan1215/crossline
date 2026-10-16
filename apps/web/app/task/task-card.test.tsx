@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
 import type { TaskDetail } from "../../lib/task-detail";
 import { TaskCard } from "./task-card";
+import { LocaleProvider } from "../locale-context";
 
 type Step = NonNullable<TaskDetail["stepPlan"]>["steps"][number];
 const step = (id: string, over: Partial<Step> = {}): Step => ({
@@ -59,4 +60,17 @@ describe("task card", () => {
     expect(html).toContain("等本人批准");
     expect(renderToStaticMarkup(<TaskCard detail={base({ state: "awaiting_plan_approval" })} />)).toContain("准备中：步骤规划生成后再请本人确认。");
   });
+});
+
+test("in English the card reads in English: due day, distance, step and duration", () => {
+  const detail = base({ stepPlan: { archetypeLabel: "习题", quantity: { basis: "", amount: 5, unit: "题" }, rationale: "", progress: 0.3, units: [], questions: [],
+    steps: [step("a", { title: "Solve problem 2", firstAction: "Open the notes at section 4", estimate: { p25Minutes: 60, p50Minutes: 90, p85Minutes: 120 } })] } });
+  const html = renderToStaticMarkup(<LocaleProvider locale="en"><TaskCard detail={detail} today="2026-10-15" slot={{ day: "2026-10-16", start: "14:00", end: "15:30" }} /></LocaleProvider>);
+  expect(html).toContain("Nov 2 Mon");
+  expect(html).toContain("18 days left");
+  expect(html).toContain("about 1 h 30 min");
+  expect(html).toContain("Oct 16 Fri 14:00–15:30");
+  expect(html).toContain("Start timer");
+  expect(html).toContain("Start with");
+  expect(html).not.toMatch(/截止|先做|开始计时|还剩/);
 });

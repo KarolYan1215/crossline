@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { SegmentedControl } from "../ui/controls";
+import { useT } from "../locale-context";
 
 type Reason = "waiting" | "energy" | "conflict" | "time" | "other";
 const REASONS: Array<{ value: Reason; label: string; hint: string }> = [
@@ -26,6 +27,7 @@ export function PostponePanel({ workOrderId, onClose }: { workOrderId: string; o
   const [text, setText] = useState("");
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
+  const t = useT();
   const submit = async () => {
     setBusy(true); setStatus("");
     const response = await fetch(`/api/work-orders/${encodeURIComponent(workOrderId)}/postpone`, { method: "POST", headers: { "content-type": "application/json" },
@@ -33,23 +35,23 @@ export function PostponePanel({ workOrderId, onClose }: { workOrderId: string; o
     if (response?.ok) { location.reload(); return; }
     const body = await response?.json().catch(() => null) as { code?: string } | null;
     setBusy(false);
-    setStatus(body?.code === "POSTPONE_WHAT_REQUIRED" ? "请填写等待的内容" : body?.code === "INVALID_WAITING_INPUT" ? "等待内容或日期不完整" : "未能推迟，请重试");
+    setStatus(t(body?.code === "POSTPONE_WHAT_REQUIRED" ? "请填写等待的内容" : body?.code === "INVALID_WAITING_INPUT" ? "等待内容或日期不完整" : "未能推迟，请重试"));
   };
-  return <section className="postpone" aria-label="推迟">
-    <SegmentedControl label="推迟原因" value={reason} onChange={setReason} options={REASONS.map(({ value, label }) => ({ value, label }))} />
-    <small className="muted">{REASONS.find((item) => item.value === reason)!.hint}</small>
+  return <section className="postpone" aria-label={t("推迟")}>
+    <SegmentedControl label={t("推迟原因")} value={reason} onChange={setReason} options={REASONS.map(({ value, label }) => ({ value, label: t(label) }))} />
+    <small className="muted">{t(REASONS.find((item) => item.value === reason)!.hint)}</small>
     <div className="postpone-fields">
       {reason === "waiting" && <>
-        <label>提供方 <input value={who} maxLength={60} placeholder="例如：师兄" onChange={(event) => setWho(event.target.value)} /></label>
-        <label>内容 <input value={what} maxLength={200} placeholder="例如：真实测量数据" onChange={(event) => setWhat(event.target.value)} /></label>
+        <label>{t("提供方")} <input value={who} maxLength={60} placeholder={t("例如：师兄")} onChange={(event) => setWho(event.target.value)} /></label>
+        <label>{t("内容")} <input value={what} maxLength={200} placeholder={t("例如：真实测量数据")} onChange={(event) => setWhat(event.target.value)} /></label>
       </>}
-      <label>{reason === "waiting" ? "预计到达" : "推迟到"} <input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
-      {reason !== "waiting" && <label className="postpone-text">说明{reason === "other" ? "" : "（选填）"} <input value={text} maxLength={500}
-        placeholder={reason === "energy" ? "例如：熬夜后注意力差" : reason === "conflict" ? "例如：临时组会" : "原因"} onChange={(event) => setText(event.target.value)} /></label>}
+      <label>{t(reason === "waiting" ? "预计到达" : "推迟到")} <input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
+      {reason !== "waiting" && <label className="postpone-text">{t(reason === "other" ? "说明" : "说明（选填）")} <input value={text} maxLength={500}
+        placeholder={t(reason === "energy" ? "例如：熬夜后注意力差" : reason === "conflict" ? "例如：临时组会" : "原因")} onChange={(event) => setText(event.target.value)} /></label>}
     </div>
     <div className="postpone-actions">
-      <button type="button" className="primary-button" disabled={busy || (reason === "other" && !text.trim())} onClick={() => void submit()}>推迟</button>
-      <button type="button" onClick={onClose}>取消</button>
+      <button type="button" className="primary-button" disabled={busy || (reason === "other" && !text.trim())} onClick={() => void submit()}>{t("推迟")}</button>
+      <button type="button" onClick={onClose}>{t("取消")}</button>
       {status && <small role="status">{status}</small>}
     </div>
   </section>;

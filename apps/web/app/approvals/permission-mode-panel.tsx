@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { PermissionCandidate } from "../../lib/permission-mode";
+import { useT } from "../locale-context";
 
 /**
  * Proposals the default-approval mode (switched on in 设置 → 自动化与助手) will approve once this panel has been in view for five
@@ -9,6 +10,7 @@ import type { PermissionCandidate } from "../../lib/permission-mode";
  */
 export function PermissionModePanel({ initialCandidates }: { initialCandidates: PermissionCandidate[] }) {
   const enabled = true;
+  const t = useT();
   const [candidates, setCandidates] = useState(initialCandidates);
   const [message, setMessage] = useState("");
   const visibleRef = useRef(false);
@@ -44,18 +46,18 @@ export function PermissionModePanel({ initialCandidates }: { initialCandidates: 
   }, [enabled, eligibleKeys]);
 
   if (!candidates.length) return null;
-  return <section ref={panelRef} className="pending-block permission-mode-panel" aria-label="默认批准中">
-    <h2>默认批准中 · {candidates.length}</h2>
-    <p className="review-note">本区域在前台累计显示 5 分钟且未拒绝的提案将被批准；高风险、截止约束与日历冲突不在此列。</p>
+  return <section ref={panelRef} className="pending-block permission-mode-panel" aria-label={t("默认批准中")}>
+    <h2>{t("默认批准中 · {{count}}", { count: candidates.length })}</h2>
+    <p className="review-note">{t("本区域在前台累计显示 5 分钟且未拒绝的提案将被批准；高风险、截止约束与日历冲突不在此列。")}</p>
     {message && <span role="status">{message}</span>}
     <ul>{candidates.map((candidate) => <li key={candidate.key}>
       <strong>{candidate.title}</strong> · {candidate.reason}
-      {enabled && candidate.eligible && <small>前台累计 {Math.floor(candidate.elapsedMs / 1000)} / 300 秒</small>}
+      {enabled && candidate.eligible && <small>{t("前台累计 {{seconds}} / 300 秒", { seconds: Math.floor(candidate.elapsedMs / 1000) })}</small>}
       <button type="button" onClick={async () => {
         const response = await fetch("/api/permission-mode/reject", { method: "POST",
           headers: { "content-type": "application/json" }, body: JSON.stringify({ key: candidate.key }) }).catch(() => undefined);
-        if (response?.ok) location.reload(); else setMessage("拒绝未生效，请刷新核对状态");
-      }}>拒绝</button>
+        if (response?.ok) location.reload(); else setMessage(t("拒绝未生效，请刷新核对状态"));
+      }}>{t("拒绝")}</button>
     </li>)}</ul>
   </section>;
 }
