@@ -35,11 +35,19 @@ export function readSubscriptions(raw: string | undefined): CalendarSubscription
   } catch { return []; }
 }
 
-/** Where each calendar app keeps the link, in the person's words; the card shows these as steps. */
-export const SUBSCRIPTION_GUIDES: Array<{ app: string; steps: string[] }> = [
-  { app: "苹果日历（iCloud）", steps: ["在 iPhone 或 Mac 的日历里，打开要接入的日历的「共享」设置", "打开「公开日历」", "拷贝出现的链接（以 webcal:// 开头），粘贴到这里"] },
-  { app: "Google 日历", steps: ["在电脑浏览器打开 calendar.google.com，进入「设置」", "左侧选中要接入的日历，找到「集成日历」", "拷贝「iCal 格式的私密地址」，粘贴到这里"] },
-  { app: "Outlook / Microsoft 365", steps: ["在 outlook.com 或 Outlook 网页版打开「设置 → 日历 → 共享日历」", "在「发布日历」里选日历、选「可以查看所有详细信息」，点「发布」", "拷贝 ICS 链接，粘贴到这里"] }
+/**
+ * Where each calendar app keeps the link, in the person's words, and the page that holds it (`url`, opened by one button on the card, so
+ * the person lands where the link is instead of hunting for it). Each `url` is the provider's own https page (checked by a test).
+ */
+export const SUBSCRIPTION_GUIDES: Array<{ app: string; url: string; steps: string[] }> = [
+  { app: "Google 日历", url: "https://calendar.google.com/calendar/r/settings",
+    steps: ["在打开的设置页左侧「我的日历的设置」里点要接入的日历", "找到「集成日历」，拷贝「iCal 格式的私密地址」", "回到这里点「粘贴并接入」"] },
+  { app: "Outlook（个人）", url: "https://outlook.live.com/calendar/0/options/calendar/SharedCalendars",
+    steps: ["在打开的「共享日历」页，「发布日历」里选要接入的日历，权限选「可以查看所有详细信息」，点「发布」", "拷贝出现的 ICS 链接", "回到这里点「粘贴并接入」"] },
+  { app: "Outlook（工作或学校）", url: "https://outlook.office.com/calendar/options/calendar/SharedCalendars",
+    steps: ["在打开的「共享日历」页，「发布日历」里选要接入的日历，权限选「可以查看所有详细信息」，点「发布」", "拷贝出现的 ICS 链接（有的学校或公司关闭了发布，这时这里不会出现）", "回到这里点「粘贴并接入」"] },
+  { app: "苹果 iCloud", url: "https://www.icloud.com/calendar/",
+    steps: ["在打开的 iCloud 日历里，点要接入的日历旁的共享图标（在 iPhone 上是日历列表里的 ⓘ）", "打开「公开日历」，拷贝出现的链接（以 webcal:// 开头）", "回到这里点「粘贴并接入」"] }
 ];
 
 /** An event from a connected calendar (Graph or a subscription link) in the coming seven days, one per title, weekday and time. */

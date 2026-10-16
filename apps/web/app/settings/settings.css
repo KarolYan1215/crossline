@@ -106,11 +106,12 @@
 /* Subscription calendars (connectors/calendar-subscriptions.tsx): the link, an optional name, and where each app keeps the link. */
 .calendar-subscriptions-form{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,160px) auto;gap:6px;align-items:center}
 .calendar-subscriptions-form input{min-width:0;font:inherit;font-size:13px;padding:5px 8px;border:1px solid var(--ink);background:var(--paper);color:var(--ink)}
-.calendar-subscriptions-guide{display:grid;gap:6px}
-.calendar-subscriptions-guide ol{margin:0;padding-left:18px;display:grid;gap:2px;font-size:13px}
+.calendar-subscriptions-guide{margin:0;padding-left:18px;display:grid;gap:2px;font-size:13px}
+.calendar-subscriptions-providers{display:flex;flex-wrap:wrap;gap:6px}
+.calendar-subscriptions-providers a{text-decoration:none}
+.calendar-subscriptions-providers a[aria-current]{outline:2px solid var(--ink);outline-offset:1px}
 .ob-left .calendar-subscriptions-form{grid-template-columns:minmax(0,1fr)}
 @media (max-width:640px){.calendar-subscriptions-form{grid-template-columns:minmax(0,1fr)}}
-.calendar-subscriptions-help{justify-self:start}
 /* Authorized folders (connectors/source-folders.tsx): the path, what would be read, and each folder's lines. */
 .source-folder{display:grid;gap:4px;padding-bottom:6px;border-bottom:1px solid var(--mist)}
 .source-folder-lines{display:flex;flex-wrap:wrap;gap:4px 6px;align-items:center}

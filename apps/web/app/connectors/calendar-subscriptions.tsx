@@ -1,7 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
 import { SUBSCRIPTION_GUIDES, type CalendarSubscription } from "@crossline/core";
-import { SegmentedControl } from "../ui/controls";
 
 const ago = (at: string | undefined, now: number) => {
   if (!at) return "";
@@ -18,11 +17,10 @@ export function CalendarSubscriptions({ onChanged }: { onChanged?: () => void })
   const [items, setItems] = useState<CalendarSubscription[] | undefined>();
   const [link, setLink] = useState("");
   const [label, setLabel] = useState("");
-  const [guide, setGuide] = useState(SUBSCRIPTION_GUIDES[0]!.app);
+  const [guide, setGuide] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [now, setNow] = useState(0);
-  const [help, setHelp] = useState(false);
 
   const load = async () => {
     const response = await fetch("/api/calendar/subscriptions", { cache: "no-store" }).catch(() => undefined);
@@ -32,10 +30,10 @@ export function CalendarSubscriptions({ onChanged }: { onChanged?: () => void })
   };
   useEffect(() => { void load(); }, []);
 
-  const add = async () => {
+  const add = async (pasted?: string) => {
     setBusy(true); setMessage("");
     const response = await fetch("/api/calendar/subscriptions", { method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ link, label }) }).catch(() => undefined);
+      body: JSON.stringify({ link: pasted ?? link, label }) }).catch(() => undefined);
     const body = await response?.json().catch(() => undefined) as { state?: string; events?: number; message?: string } | undefined;
     if (body?.state === "added") {
       setLink(""); setLabel("");
@@ -53,27 +51,34 @@ export function CalendarSubscriptions({ onChanged }: { onChanged?: () => void })
     setBusy(false);
   };
   const steps = SUBSCRIPTION_GUIDES.find((item) => item.app === guide)?.steps ?? [];
+  // One click after copying the link on the calendar's page: read the clipboard and connect. A browser that will not give the clipboard
+  // (permission refused, or not a secure page) leaves the box below to paste into by hand.
+  const pasteAndAdd = async () => {
+    const text = (await navigator.clipboard?.readText().catch(() => "") ?? "").trim();
+    if (/^(https|webcal):\/\/\S+$/i.test(text)) { setLink(text); await add(text); }
+    else setMessage(text ? "剪贴板里不是日历链接：请在日历的设置页拷贝订阅链接，再点一次。" : "浏览器没有允许读取剪贴板，请把链接粘贴到下面的框里。");
+  };
 
   return <section className="st-card calendar-subscriptions" aria-label="订阅日历">
-    <header><h3>订阅日历</h3><small>粘贴日历的订阅链接，只读、不用登录；苹果、Google、Outlook 都能导出</small></header>
+    <header><h3>订阅日历</h3><small>点你用的日历，在打开的页面拷贝订阅链接，回来点「粘贴并接入」。只读，不用登录。</small></header>
     {items?.map((item) => <div className="st-row" key={item.id}>
       <span className="st-row-label">{item.label}
         <small>{item.host}{item.lastError ? ` · ${item.lastError}` : item.lastReadAt ? ` · ${ago(item.lastReadAt, now)}，${item.lastEvents ?? 0} 个日程` : ""}</small>
       </span>
       <button type="button" className="ob-btn ob-quiet secondary-button" disabled={busy} onClick={() => void remove(item.id)}>移除</button>
     </div>)}
+    <div className="calendar-subscriptions-providers" role="group" aria-label="从哪个日历接入">
+      {SUBSCRIPTION_GUIDES.map((item) => <a key={item.app} href={item.url} target="_blank" rel="noreferrer" className="ob-btn secondary-button"
+        aria-current={guide === item.app || undefined} onClick={() => setGuide(item.app)}>{item.app} ↗</a>)}
+    </div>
+    {guide && <ol className="calendar-subscriptions-guide">{steps.map((step) => <li key={step}>{step}</li>)}</ol>}
+    <button type="button" className="ob-btn primary-button" disabled={busy} onClick={() => void pasteAndAdd()}>{busy ? "读取中…" : "粘贴并接入"}</button>
     <form className="calendar-subscriptions-form" onSubmit={(event) => { event.preventDefault(); if (link.trim()) void add(); }}>
-      <input type="url" inputMode="url" value={link} onChange={(event) => setLink(event.target.value)} placeholder="webcal://… 或 https://…ics" aria-label="日历订阅链接" disabled={busy} />
+      <input type="url" inputMode="url" value={link} onChange={(event) => setLink(event.target.value)} placeholder="或手动粘贴：webcal://… 或 https://…ics" aria-label="日历订阅链接" disabled={busy} />
       <input value={label} onChange={(event) => setLabel(event.target.value)} placeholder="名称（可选，如「课表」）" aria-label="日历名称" maxLength={40} disabled={busy} />
-      <button type="submit" className="ob-btn primary-button" disabled={busy || !link.trim()}>{busy ? "读取中…" : "接入"}</button>
+      <button type="submit" className="ob-btn secondary-button" disabled={busy || !link.trim()}>接入</button>
     </form>
     {message && <p role="status" className="muted">{message}</p>}
-    <button type="button" className="ob-btn ob-quiet secondary-button calendar-subscriptions-help" aria-expanded={help} onClick={() => setHelp((open) => !open)}>
-      {help ? "收起说明" : "链接在哪里？"}</button>
-    {help && <div className="calendar-subscriptions-guide">
-      <SegmentedControl label="链接在哪里" value={guide} options={SUBSCRIPTION_GUIDES.map((item) => ({ value: item.app, label: item.app }))} onChange={setGuide} />
-      <ol>{steps.map((step) => <li key={step}>{step}</li>)}</ol>
-      <small className="muted">链接相当于这本日历的钥匙：只保存在这台电脑上，不进备份，换电脑后需要重新粘贴。</small>
-    </div>}
+    <small className="muted">链接相当于这本日历的钥匙：加密保存，只用来读取，不进备份。</small>
   </section>;
 }
