@@ -55,5 +55,5 @@ test("the date batch counts in English, with plurals", () => {
   expect(html).toContain("1 item found in 1 file(s)");
   expect(html).toContain("Add to calendar (1 item)");
   expect(html).toContain("2 more items couldn&#x27;t be verified against the source and were dropped, not saved.");
-  expect(html).toContain("Confident");
+  expect(html).toContain("High confidence");
 });

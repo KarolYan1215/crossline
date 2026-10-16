@@ -26,7 +26,7 @@
   "本机活动采集未开启；开启后可在没有自评时给出参考读数。": "Activity tracking on this computer is off. Turn it on to get a reading when you have not rated yourself.",
   "需要至少 {{days}} 天本机活动观测才能与本人基线比较（当前 {{current}} 天）。": "Needs at least {{days}} days of activity on this computer to compare with your own baseline ({{current}} so far).",
   "日程·每周": "Event · weekly",
-  "日程": "Event",
+  "日程": "Schedule",
   "通常": "usual",
   "保守": "cautious",
   "乐观": "optimistic",
