@@ -249,11 +249,13 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
   if (!state) return <p className="ob-muted" role="status">正在读取…</p>;
   const stage = open?.stage ?? state.session?.coverage.stage ?? "orientation";
   const complete = state.session?.state === "complete";
-  // Mixed pacing: in a deep stage the round is one question in the conversation; the app's own fact questions wait in the left column.
+  // In a deep stage the round is the model's own questions — several when they do not depend on each other (2026-10-16) — and the app's
+  // own fact questions wait in the left column. A single question keeps the large one-question view; several are answered as a batch.
   // While a round runs the questions just answered are not shown again: emptied, they read as answers lost (2026-10-15 walkthrough).
-  const deep = !state.focusLine && DEEP_STAGES.has(stage as OnboardingStage) && !waiting && busy !== "turn";
-  const centre = deep ? roundQuestions : batchQuestions;
-  const held = deep ? extra : [];
+  const deepStage = !state.focusLine && DEEP_STAGES.has(stage as OnboardingStage) && !waiting && busy !== "turn";
+  const deep = deepStage && roundQuestions.length <= 1;
+  const centre = deepStage ? roundQuestions : batchQuestions;
+  const held = deepStage ? extra : [];
   const opening = !state.focusLine && messages.length === 0 && busy !== "turn" && !pendingText;
   const filesRead = state.documents.some((doc) => doc.extractionStatus === "done");
 

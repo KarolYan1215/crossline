@@ -431,14 +431,18 @@ export function withChecklist(output: OnboardingTurn, open: Array<{ label: strin
 /** Besides those that block, at most this many of the app's own questions join one round, so a batch stays answerable. */
 export const GAPS_PER_ROUND = 3;
 
+/** At most this many of the model's own questions in one round of a deep stage. */
+export const DEEP_QUESTIONS_PER_ROUND = 4;
+
 /**
- * Mixed pacing (docs/onboarding-v3.md, decided 2026-10-14): in the deep stages — what weighs most, the compass, energy — a round is one
- * question and the reflection on the last answer, so the person thinks about one thing at a time. The model is told so; this holds it to
- * that, and the app's own fact questions wait for the next fact round (the screen lists them beside the conversation meanwhile).
+ * Pacing in the deep stages — the situation, motive and vision, energy (docs/onboarding-v3.md). Decided 2026-10-14 as one question a
+ * round; changed by the owner on 2026-10-16: questions that do not depend on each other's answers are asked together (at most four), and
+ * only a question that builds on another's answer waits for a later round — which the model is told to judge. The app's own fact
+ * questions still wait for a fact round (the screen lists them beside the conversation meanwhile), so a deep round stays about depth.
  */
 export function paceDeepRound(output: OnboardingTurn, focus: boolean): { output: OnboardingTurn; deep: boolean } {
   const deep = !focus && DEEP_STAGES.has(output.stage as OnboardingStage) && output.nextAction === "ask";
-  return { deep, output: deep ? { ...output, questions: output.questions.slice(0, 1) } : output };
+  return { deep, output: deep ? { ...output, questions: output.questions.slice(0, DEEP_QUESTIONS_PER_ROUND) } : output };
 }
 
 /**

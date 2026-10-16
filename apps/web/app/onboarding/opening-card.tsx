@@ -49,9 +49,9 @@ export function OpeningCard({ linesKnown, knownLines, initialTone, busy, hasMate
     <div className="ob-opening-intro">
       <p>人生更像一件可以反复修改、低成本试错的作品，而不是一道有标准答案的题。所有设计都从一件事开始：先看清你现在真实站在哪里，不回避。</p>
       <ol className="ob-opening-plan">
-        <li><b>认识你</b><span>几条主线和手上的材料，事实题一次答一组</span></li>
-        <li><b>聊深一点</b><span>现状、你为什么工作、什么让你投入；一次一个问题</span></li>
-        <li><b>补齐细节</b><span>每个项目的截止日和要交付的东西</span></li>
+        <li><b>认识你</b><span>你有哪些想成为的身份，手上有哪些材料支持你。</span></li>
+        <li><b>聊深一点</b><span>你现在的处境、为什么做这些，动机和愿景是什么、你日常的精力情况。</span></li>
+        <li><b>补齐细节</b><span>每个具体项目哪天截止、要交出什么，你用什么来验收具体项目的成果。</span></li>
       </ol>
       <p className="ob-opening-time">大约 30 分钟后拿到一份全面的 AI 时代超级个体跨人生主线报告和跨主线排程计划。左侧可以先放入简历、课表、课程大纲，访谈会先读材料，只问材料里没有的。</p>
     </div>

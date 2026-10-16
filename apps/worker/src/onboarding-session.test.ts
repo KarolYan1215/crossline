@@ -320,11 +320,13 @@ test("先读材料：首轮把已读出的文件全部带上，清单标出可�
   expect(context.stage).toBe("orientation");
 });
 
-test("a deep-stage round asks one thing at a time, and a fact stage keeps its batch", () => {
+test("a deep-stage round keeps independent questions together, at most four, and a fact stage keeps its batch", () => {
   const two = JSON.parse(turn({ stage: "compass", questions: [
     { id: "q1", text: "工作对你意味着什么？", kind: "free", allowOther: true, identityId: "person", projectId: "", options: [] },
     { id: "q2", text: "人生的意义？", kind: "free", allowOther: true, identityId: "person", projectId: "", options: [] }] }));
-  expect(paceDeepRound(two, false)).toMatchObject({ deep: true, output: { questions: [{ id: "q1" }] } });
+  expect(paceDeepRound(two, false)).toMatchObject({ deep: true, output: { questions: [{ id: "q1" }, { id: "q2" }] } });
+  const six = { ...two, questions: Array.from({ length: 6 }, (_, index) => ({ ...two.questions[0], id: `q${index + 1}` })) };
+  expect(paceDeepRound(six, false).output.questions.map((question: { id: string }) => question.id)).toEqual(["q1", "q2", "q3", "q4"]);
   // A line's own interview is all details; a fact stage keeps every question.
   expect(paceDeepRound(two, true).output.questions).toHaveLength(2);
   expect(paceDeepRound({ ...two, stage: "lines" }, false)).toMatchObject({ deep: false });
