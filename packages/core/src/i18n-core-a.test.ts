@@ -94,7 +94,7 @@ describe("core text in English", () => {
       proposals: new Set<string>(), agentResults: new Set<string>() };
     const kept = keepUsable({ reply: "Done.", confidence: "high", actions: [{ action: "undo", summary: "", args: { opId: "missing" } }], clarify: { question: "", options: [] } }, refs, "en");
     expect(kept?.reply).toBe("Done. 1 item could not be matched to anything and is not listed.");
-    expect(capabilityGap("crossline-due-diligence", undefined, "en")).toBe("Web fact-checking needs web search, which this model connection lacks. It needs a ChatGPT sign-in or an OpenAI API key.");
+    expect(capabilityGap("crossline-due-diligence", undefined, "en")).toBe("Web research needs web search, which this model connection lacks. It needs a ChatGPT sign-in or an OpenAI API key.");
     expect(unavailableOnThirdParty({ webSearch: false, image: false }, "en")).toMatch(/^On this server, Web fact-checking and Portrait figure work only/);
     expect(unavailableOnThirdParty({ webSearch: false, image: false })).toMatch(/^联网查证和画像插图在这台服务器上/);
   });

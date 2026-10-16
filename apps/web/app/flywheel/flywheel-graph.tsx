@@ -226,7 +226,7 @@ export function FlywheelGraph({ data }: { data: FlywheelGraphData }) {
             role="button" tabIndex={0} aria-label={`${t("{{from}} → {{to}}：{{kind}}", { from: titleOf(edge.from), to: titleOf(edge.to), kind: kindName(edge.relationKind) || t("关系") })}${edge.status === "candidate" ? t("，待确认") : ""}`}
             onPointerDown={(event) => event.stopPropagation()} onClick={() => setPicked(picked === edge.id ? null : edge.id)}
             onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setPicked(picked === edge.id ? null : edge.id); } }}>
-            <title>{`${t("{{from}} → {{to}}：{{kind}}", { from: titleOf(edge.from), to: titleOf(edge.to), kind: kindName(edge.relationKind) })}${edge.explanation ? `${t("。")}${edge.explanation}` : ""}`}</title></path>)}
+            <title>{`${t("{{from}} → {{to}}：{{kind}}", { from: titleOf(edge.from), to: titleOf(edge.to), kind: kindName(edge.relationKind) })}${edge.explanation ? `${t("。", { context: "join" })}${edge.explanation}` : ""}`}</title></path>)}
           {graph.nodes.map((node) => {
             const p = at(node.id);
             if (!p) return null;

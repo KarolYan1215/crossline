@@ -89,5 +89,5 @@ export function BackLink({ scope, fallback = "/workbench" }: { scope: string; fa
     if (origin && previous === origin && window.history.length > 1) window.history.back();
     else window.location.assign(target);
   };
-  return <a className="back-link" href={target} onClick={go}><span aria-hidden="true">←</span> {t("返回{{place}}", { place: t(placeLabel(target)) })}</a>;
+  return <a className="back-link" href={target} onClick={go}><span aria-hidden="true">←</span> {t("返回{{place}}", { place: t(placeLabel(target), { context: "place" }) })}</a>;
 }

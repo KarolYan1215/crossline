@@ -38,7 +38,7 @@ export function DeviceLeases() {
   const current = leases.filter((item) => item.expiresAt > new Date().toISOString());
   const leaseItem = (item: (typeof current)[number]) => <li key={item.deviceId}>
     <span>{item.deviceId === mine ? t("本机") : t("设备 {{n}}", { n: current.indexOf(item) + 1 })}</span>
-    <small>{item.revokedAt ? t("已撤销") : t("有效至 {{day}}", { day: item.expiresAt.slice(0, 10) })}</small>
+    <small>{item.revokedAt ? t("已撤销", { context: "revoked" }) : t("有效至 {{day}}", { day: item.expiresAt.slice(0, 10) })}</small>
     {!item.revokedAt && <button type="button" onClick={() => void revoke(item.deviceId)}>{t("撤销", { context: "revoke" })}</button>}
   </li>;
   return <section className="st-card" aria-label={t("离线设备")}>

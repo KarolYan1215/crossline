@@ -23,7 +23,9 @@ const SOURCES = ["apps/web/app", "apps/web/lib", "apps/assess/app", "apps/assess
   "apps/worker/src", "packages/core/src", "packages/db/src", "packages/auth/src", "packages/codex/src", "packages/planner/src",
   "packages/connectors/src", "packages/identity-packs/src"];
 /** Areas still being translated (removed one by one as each is done; empty when the work is complete). */
-const PENDING = ["apps/web/app", "apps/web/lib", "apps/assess", "apps/worker/src", "packages/core/src", "packages/db/src", "packages/auth/src",
+const PENDING = ["apps/web/app/onboarding", "apps/web/app/portrait", "apps/web/app/materials", "apps/web/app/review", "apps/web/app/confirm",
+  "apps/web/app/return", "apps/web/lib", "apps/assess", "packages/core/src/assess-content.ts", "packages/core/src/assess-wants.ts",
+  "packages/core/src/assess.ts", "packages/core/src/assess-link.ts", "apps/worker/src", "packages/db/src", "packages/auth/src",
   "packages/codex/src", "packages/planner/src", "packages/connectors/src", "packages/identity-packs/src"];
 const CATALOG_DIR = path.resolve(import.meta.dirname, "../locales/en");
 const HAN = /[㐀-鿿豈-﫿]/;
@@ -32,7 +34,7 @@ const PLURAL = /_(zero|one|two|few|many|other)$/;
 const baseOf = (key: string) => key.replace(PLURAL, "").replace(/_[a-z][a-zA-Z]*$/, "");
 const scope = (process.env.I18N_SCOPE ?? "").split(",").map((item) => item.trim()).filter(Boolean);
 
-type Finding = { file: string; line: number; rule: string; text: string };
+type Finding = { file: string; line: number; rule: string; text: string; full: string };
 
 function sourceFiles(dir: string): string[] {
   const absolute = path.join(ROOT, dir);
@@ -75,7 +77,9 @@ function walk(node: unknown, visit: (node: Node) => void): void {
 
 const literals = new Set<string>();
 const findings: Finding[] = [];
-const inScope = (file: string) => scope.length ? scope.some((prefix) => file.startsWith(prefix)) : !PENDING.some((prefix) => file.startsWith(prefix));
+/** A path names a file or a whole folder: `apps/web/app/connect` is not `apps/web/app/connectors`. */
+const under = (file: string, prefix: string) => { const clean = prefix.replace(/\/+$/, ""); return file === clean || file.startsWith(`${clean}/`); };
+const inScope = (file: string) => scope.length ? scope.some((prefix) => under(file, prefix)) : !PENDING.some((prefix) => under(file, prefix));
 
 for (const file of SOURCES.flatMap(sourceFiles)) {
   const source = readFileSync(path.join(ROOT, file), "utf8");
@@ -85,14 +89,15 @@ for (const file of SOURCES.flatMap(sourceFiles)) {
   try {
     ast = parse(source, { sourceType: "module", plugins: ["typescript", "jsx", "importAttributes", "decorators-legacy"], errorRecovery: true });
   } catch (error) {
-    findings.push({ file, line: 0, rule: "unparsed", text: String(error).slice(0, 120) });
+    findings.push({ file, line: 0, rule: "unparsed", text: String(error).slice(0, 120), full: "" });
     continue;
   }
   const ignored = ignoredLines(source);
   const report = (node: Node, rule: string, text: string) => {
     const line = node.loc?.start.line ?? 0;
     if (exempt || ignored.has(line) || !inScope(file)) return;
-    findings.push({ file, line, rule, text: text.replace(/\s+/g, " ").slice(0, 100) });
+    // The whole text is what is looked up; only the report is shortened.
+    findings.push({ file, line, rule, text: text.replace(/\s+/g, " ").slice(0, 100), full: text });
   };
   walk(ast, (node) => {
     if (node.type === "StringLiteral" && typeof node.value === "string" && HAN.test(node.value)) {
@@ -139,7 +144,7 @@ test("every catalogue is valid: English values, the same {{values}} as the key, 
 });
 
 test("no Chinese is shown without its English (JSX text, sentences built from values, strings with no catalogue entry)", () => {
-  const missing = findings.filter((finding) => finding.rule !== "literal" || !hasEnglish(finding.text))
+  const missing = findings.filter((finding) => finding.rule !== "literal" || !hasEnglish(finding.full))
     .map((finding) => `${finding.file}:${finding.line} [${finding.rule}] ${finding.text}`);
   expect(missing).toEqual([]);
 });

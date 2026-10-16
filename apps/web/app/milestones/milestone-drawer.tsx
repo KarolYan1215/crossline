@@ -254,7 +254,7 @@ function Retrospective({ milestone }: { milestone: BoardMilestone }) {
     <h3>{t("回顾")}</h3>
     <div className="md-retro-figures">
       <div className="ui-stat"><b>{retro.tasks}</b><span>{t("任务")}</span></div>
-      <div className="ui-stat"><b>{minutesText(locale, retro.workedMinutes)}</b><span>{t("计时")}</span></div>
+      <div className="ui-stat"><b>{minutesText(locale, retro.workedMinutes)}</b><span>{t("计时", { context: "stat" })}</span></div>
       <div className="ui-stat"><b>{retro.reused}</b><span>{t("跨主线复用")}</span></div>
     </div>
     {retro.readings.filter((reading) => reading.observed).map((reading) => <p key={reading.statement} className="md-reading">

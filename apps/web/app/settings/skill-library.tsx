@@ -87,7 +87,7 @@ function MineLine({ line, onSaved }: { line: MineSkillView; onSaved: (line: Mine
         <p className="sk-source" data-user-text>{rule.sources.length ? <Clamp lines={1} text={t("来源：{{sources}}", { sources: rule.sourceLabels.join(sep) }) + (rule.quote ? quote(rule.quote) : "")} />
           : <>{t("来源：")}<a href={rule.url} target="_blank" rel="noreferrer">{t("平台规则页面")}</a>{rule.quote && quote(rule.quote)}</>}</p>
       </li>)}</ol>}
-      <details className="advanced sk-full"><summary>{t("全文")}</summary><Markdown className="long-form" text={current.markdown.replace(/^---[\s\S]*?\n---\n/, "")} /></details>
+      <details className="advanced sk-full"><summary>{t("全文", { context: "label" })}</summary><Markdown className="long-form" text={current.markdown.replace(/^---[\s\S]*?\n---\n/, "")} /></details>
       {line.versions.length > 1 && <details className="advanced"><summary>{t("历次版本 · {{n}}", { n: line.versions.length })}</summary>
         <ul className="st-list">{line.versions.map((version) => <li key={version.version}>
           <span>{t("第 {{version}} 版", { version: version.version })}</span><small>{version.by === "person" ? (version.restoredFrom ? t("回到第 {{version}} 版", { version: version.restoredFrom }) : t("本人编辑")) : t("整理 · {{count}} 条", { count: version.rules.length })} · {day(version.at)}</small>
@@ -158,7 +158,7 @@ function GrownFlow({ flow, onChanged }: { flow: GrownSkillView; onChanged: (flow
         }}>{t("接受风险并启用")}</button> : <button type="button" className="secondary-button" onClick={async () => {
           const status = flow.status === "active" ? "off" : "active";
           if (await send("POST", { status })) onChanged({ ...flow, status }); else setNote(t("未保存"));
-        }}>{flow.status === "active" ? t("关闭") : t("启用")}</button>}
+        }}>{flow.status === "active" ? t("关闭", { context: "act" }) : t("启用")}</button>}
         {flow.access.filter((item) => item.login).map((item) => opened.includes(item.service)
           ? <button key={item.service} type="button" className="secondary-button" onClick={async () => {
             if ((await act({ action: "login_done", service: item.service }, t("已记下{{service}}的登录，登录窗口已关闭", { service: item.service }))).ok) {
