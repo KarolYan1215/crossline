@@ -165,6 +165,14 @@ export function avatarsDrawnFor(email: string): number {
   return row.n;
 }
 
+/**
+ * A call that drew nothing (the provider refused it, timed out or failed) is not one of the address's figures: its draw record goes, so a
+ * broken setting or an outage does not use up the three. A figure that was drawn is never given back (deleting the result keeps it).
+ */
+export function forgetFailedDraw(resultId: string): void {
+  db().prepare("DELETE FROM avatar_draws WHERE result_id = ?").run(resultId);
+}
+
 /** Tests this address has taken within the retention period, deleted or replaced ones included (`email_tests`, HMAC of the address). */
 export function testsTakenBy(email: string): number {
   const since = new Date(Date.now() - RESULT_RETENTION_DAYS * 86_400_000).toISOString();

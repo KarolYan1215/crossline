@@ -2,11 +2,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { AVATARS_PER_EMAIL, type AvatarStatus } from "../../lib/contract";
 import { dataDir } from "../config";
-import { avatarsDrawnFor, setAvatarState, type StoredResult } from "../store";
+import { avatarsDrawnFor, forgetFailedDraw, setAvatarState, type StoredResult } from "../store";
 import { dailyLimit, takeSlot } from "./budget";
 import { writeFileAtomic } from "./files";
 import { avatarPrompt, seedFor } from "./prompt";
-import { ProviderError, imageType, providerFromEnv, providerSummary, type ImageProvider } from "./provider";
+import { announceAvatarProvider } from "./announce";
+import { ProviderError, imageType, providerFromEnv, type ImageProvider } from "./provider";
 import { createQueue, type Queue } from "./queue";
 import { templatesDir, templateVariant, type TemplateVariant } from "./templates";
 
@@ -24,22 +25,25 @@ export const CONCURRENCY = 2;
 export const MAX_PENDING = 40;
 /** One call to the model, download included. Seedream's larger models take 30–60 s for a 1024×1536 edit (measured 2026-10-16: 39 s). */
 export const CALL_TIMEOUT_MS = 120_000;
-/** A figure still `queued`/`drawing` this long after its result was made was lost to a restart: show the fallback. */
+/** A figure still `queued`/`drawing` this long after it was last queued was lost to a restart: show the fallback. */
 export const STALE_AFTER_MS = 15 * 60_000;
+/** After a failure a wait can fix (a timeout, an overload, the network), the person's next visit this long after it draws again. */
+export const RETRY_AFTER_MS = 3 * 60_000;
+/** Calls per result at most, the first included; each still needs a slot of the day's budget and the address's limit. */
+export const MAX_RUNS = 3;
 
 type Runtime = { provider: ImageProvider | null; sleep: (ms: number) => Promise<void>; random: () => number; now: () => Date };
 
-let announced = false;
-
-/** The image settings, said once per process in the server log, so a missing or wrong provider is visible without a test draw. */
-function announce(): void {
-  if (announced) return;
-  announced = true;
-  console.info(JSON.stringify({ event: "avatar.provider", ...providerSummary() }));
-}
+/**
+ * Per-process memory of figures in flight and of failures worth another try. Kept on `globalThis` so that every route bundle of the one
+ * server process reads the same maps; lost on restart, which only means a stuck figure reads as the fallback and a failed one is not
+ * retried — both safe.
+ */
+type Memory = { queuedAt: Map<string, number>; retries: Map<string, { at: number; runs: number }> };
+const memory = ((globalThis as { __assessAvatarMemory?: Memory }).__assessAvatarMemory ??= { queuedAt: new Map(), retries: new Map() });
 
 const defaults = (): Runtime => {
-  announce();
+  announceAvatarProvider();
   return {
     provider: providerFromEnv(),
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
@@ -57,6 +61,8 @@ const jobs = (): Queue => (queue ??= createQueue({ concurrency: CONCURRENCY, max
 export function configureAvatarPipeline(overrides: Partial<Runtime>): void {
   runtime = { ...defaults(), ...overrides };
   queue = undefined;
+  memory.queuedAt.clear();
+  memory.retries.clear();
 }
 
 /** Resolves once every queued figure has settled (tests, graceful shutdown). */
@@ -76,16 +82,61 @@ function skip(result: StoredResult, reason: SkipReason): void {
   setAvatarState(result.id, "template");
 }
 
-/** Starts drawing this result's figure, or settles it on the fallback at once (over budget, over the address's limit, no provider). */
-export function enqueueAvatar(result: StoredResult): void {
+/**
+ * Starts drawing this result's figure, or settles it on the fallback at once (over budget, over the address's limit, no provider).
+ * True when it was queued.
+ */
+export function enqueueAvatar(result: StoredResult): boolean {
   const { provider } = current();
-  if (!provider) return skip(result, "no_provider");
-  if (avatarsDrawnFor(result.email) >= AVATARS_PER_EMAIL) return skip(result, "email_limit");
-  if (jobs().size() >= MAX_PENDING + CONCURRENCY) return skip(result, "queue_full");
-  if (!takeSlot(dailyLimit(), current().now())) return skip(result, "daily_budget");
+  const refused: SkipReason | undefined = !provider ? "no_provider"
+    : avatarsDrawnFor(result.email) >= AVATARS_PER_EMAIL ? "email_limit"
+    : jobs().size() >= MAX_PENDING + CONCURRENCY ? "queue_full"
+    : !takeSlot(dailyLimit(), current().now()) ? "daily_budget"
+    : undefined;
+  if (refused || !provider) {
+    skip(result, refused ?? "no_provider");
+    return false;
+  }
   setAvatarState(result.id, "queued");
+  memory.queuedAt.set(result.id, current().now().getTime());
   const taken = jobs().push(() => draw(provider, result));
-  if (!taken) skip(result, "queue_refused");
+  if (!taken) {
+    memory.queuedAt.delete(result.id);
+    skip(result, "queue_refused");
+  }
+  return taken;
+}
+
+/**
+ * A figure that fell back after a failure a wait can fix is drawn again when the person opens their result `RETRY_AFTER_MS` or more
+ * later (at most `MAX_RUNS` calls in all, each through the same limits as the first). True when it was queued again, so the caller
+ * re-reads the result. Refusals (a wrong key or model, the content check) are not retried: they would fail the same way.
+ */
+export function retryAvatarIfDue(result: StoredResult): boolean {
+  if (result.avatar.state !== "template") return false;
+  const entry = memory.retries.get(result.id);
+  if (!entry || current().now().getTime() - entry.at < RETRY_AFTER_MS) return false;
+  memory.retries.delete(result.id);
+  if (entry.runs >= MAX_RUNS) return false;
+  console.info(JSON.stringify({ event: "avatar.retry", resultId: result.id, run: entry.runs + 1 }));
+  const queued = enqueueAvatar(result);
+  if (queued) memory.retries.set(result.id, { at: Number.POSITIVE_INFINITY, runs: entry.runs });
+  return queued;
+}
+
+/** Whether a failed call is worth another try later: no answer at all, a timeout, an overload or a broken download — not a refusal. */
+function transient(error: unknown): boolean {
+  if (!(error instanceof ProviderError)) return true;
+  if (/^IMAGE_(API_NO_URL|FORMAT_UNSUPPORTED|NOT_AN_IMAGE|TOO_LARGE|URL_)/.test(error.message)) return false;
+  return error.status === 429 || error.status >= 500;
+}
+
+/** The error's own words plus, for a network failure (`fetch failed`), the system's code underneath (ECONNRESET, ENOTFOUND, UND_ERR_…). */
+function failureReason(error: unknown): string {
+  if (!(error instanceof Error)) return "unknown";
+  const cause = (error as { cause?: { code?: unknown; message?: unknown } }).cause;
+  const under = cause && typeof cause.code === "string" ? cause.code : cause && typeof cause.message === "string" ? cause.message : "";
+  return `${error.name === "AbortError" ? "ABORTED " : ""}${error.message}${under ? ` (${under})` : ""}`.slice(0, 300);
 }
 
 async function draw(provider: ImageProvider, result: StoredResult): Promise<void> {
@@ -111,13 +162,22 @@ async function draw(provider: ImageProvider, result: StoredResult): Promise<void
     const file = drawnFile(result.id);
     writeFileAtomic(absolute(file), image);
     setAvatarState(result.id, "ready", file);
+    memory.retries.delete(result.id);
     console.info(JSON.stringify({ event: "avatar.ready", resultId: result.id, provider: provider.label ?? "unknown", attempts,
       seconds: Math.round((Date.now() - started) / 1000) }));
   } catch (error) {
+    const runs = (memory.retries.get(result.id)?.runs ?? 0) + 1;
+    const retry = transient(error) && runs < MAX_RUNS;
     console.warn(JSON.stringify({ event: "avatar.failed", resultId: result.id, provider: provider.label ?? "unknown", attempts,
-      ...(error instanceof ProviderError ? { status: error.status } : {}),
-      reason: error instanceof Error ? error.message.slice(0, 200) : "unknown" }));
+      ...(error instanceof ProviderError ? { status: error.status } : {}), seconds: Math.round((Date.now() - started) / 1000),
+      reason: failureReason(error), retryLater: retry }));
+    if (retry) memory.retries.set(result.id, { at: current().now().getTime(), runs });
+    else memory.retries.delete(result.id);
+    // Nothing was drawn, so the address keeps its figure; then the page shows the fallback.
+    forgetFailedDraw(result.id);
     setAvatarState(result.id, "template");
+  } finally {
+    memory.queuedAt.delete(result.id);
   }
 }
 
@@ -144,8 +204,10 @@ async function withTimeout<T>(run: (signal: AbortSignal) => Promise<T>): Promise
   }
 }
 
+/** Queued or drawing for longer than any call takes, counted from the latest time this process queued it (else from the result's making). */
 const isStale = (result: StoredResult, now: Date): boolean =>
-  (result.avatar.state === "queued" || result.avatar.state === "drawing") && now.getTime() - Date.parse(result.createdAt) > STALE_AFTER_MS;
+  (result.avatar.state === "queued" || result.avatar.state === "drawing")
+  && now.getTime() - (memory.queuedAt.get(result.id) ?? Date.parse(result.createdAt)) > STALE_AFTER_MS;
 
 /** The drawn file on disk when the figure is ready and the file is there. */
 function drawnPath(result: StoredResult): string | undefined {

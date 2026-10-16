@@ -2,15 +2,15 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { avatarsDrawnFor, setAvatarState } from "../store";
+import { avatarsDrawnFor, forgetFailedDraw, setAvatarState } from "../store";
 import { budgetDay, budgetFile, spentToday, takeSlot } from "./budget";
 import { FakeImageProvider, TINY_PNG } from "./fake-provider";
-import { avatarImagePath, avatarQueueIdle, avatarStatus, configureAvatarPipeline, enqueueAvatar, templateImagePath } from "./index";
-import { ProviderError, downloadImage, providerFromEnv, providerSummary } from "./provider";
+import { RETRY_AFTER_MS, avatarImagePath, avatarQueueIdle, avatarStatus, configureAvatarPipeline, enqueueAvatar, retryAvatarIfDue, templateImagePath } from "./index";
+import { ARK_DEFAULT_MODEL, ArkProvider, ProviderError, arkSize, downloadImage, providerFromEnv, providerSummary } from "./provider";
 import { storedResult } from "./testing";
 import { templateVariant } from "./templates";
 
-vi.mock("../store", () => ({ setAvatarState: vi.fn(), avatarsDrawnFor: vi.fn(() => 0) }));
+vi.mock("../store", () => ({ setAvatarState: vi.fn(), avatarsDrawnFor: vi.fn(() => 0), forgetFailedDraw: vi.fn() }));
 
 const states = () => vi.mocked(setAvatarState).mock.calls.map((call) => call[1]);
 let dir: string;
@@ -20,6 +20,7 @@ beforeEach(() => {
   vi.stubEnv("ASSESS_DATA_DIR", dir);
   vi.stubEnv("ASSESS_IMAGE_DAILY_LIMIT", "");
   vi.mocked(setAvatarState).mockClear();
+  vi.mocked(forgetFailedDraw).mockClear();
   vi.mocked(avatarsDrawnFor).mockReturnValue(0);
 });
 
@@ -34,16 +35,27 @@ const pipeline = (provider: FakeImageProvider | null, sleep = vi.fn(async () => 
 };
 
 describe("settling on the template at once", () => {
-  test("the provider follows ASSESS_IMAGE_PROVIDER; a name it does not know gives none instead of sending the key elsewhere", () => {
+  test("the provider follows ASSESS_IMAGE_PROVIDER, its other names, or the key when it is unset or empty; an unknown name gives none", () => {
     expect(providerFromEnv({ ASSESS_IMAGE_API_KEY: "k", ASSESS_IMAGE_PROVIDER: "ark", ASSESS_IMAGE_MODEL: "doubao-seedream-x" })?.label).toBe("ark:doubao-seedream-x");
-    expect(providerFromEnv({ ASSESS_IMAGE_API_KEY: "k", ASSESS_IMAGE_PROVIDER: " Ark " })?.label).toBe("ark:doubao-seedream-4-0-250828");
-    expect(providerFromEnv({ ASSESS_IMAGE_API_KEY: "k" })?.label).toBe("siliconflow:black-forest-labs/FLUX.1-Kontext-dev");
-    expect(providerFromEnv({ ASSESS_IMAGE_API_KEY: "k", ASSESS_IMAGE_PROVIDER: "volcengine" })).toBeNull();
+    expect(providerFromEnv({ ASSESS_IMAGE_API_KEY: "k", ASSESS_IMAGE_PROVIDER: " Ark " })?.label).toBe(`ark:${ARK_DEFAULT_MODEL}`);
+    expect(providerFromEnv({ ASSESS_IMAGE_API_KEY: "k", ASSESS_IMAGE_PROVIDER: "volcengine" })?.label).toBe(`ark:${ARK_DEFAULT_MODEL}`);
+    // An env file line with nothing after `=` is unset: an Ark key (a UUID) means Ark, a SiliconFlow key starts with sk-.
+    const arkKey = "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0";
+    expect(providerFromEnv({ ASSESS_IMAGE_API_KEY: arkKey, ASSESS_IMAGE_PROVIDER: "", ASSESS_IMAGE_MODEL: "" })?.label).toBe(`ark:${ARK_DEFAULT_MODEL}`);
+    expect(providerFromEnv({ ASSESS_IMAGE_API_KEY: "sk-abc" })?.label).toBe("siliconflow:black-forest-labs/FLUX.1-Kontext-dev");
+    expect(providerFromEnv({ ASSESS_IMAGE_API_KEY: "sk-abc", ASSESS_IMAGE_BASE_URL: "https://ark.cn-beijing.volces.com/api/v3" })?.label).toBe(`ark:${ARK_DEFAULT_MODEL}`);
+    // A SiliconFlow model id left in the file is never sent to Ark.
+    expect(providerFromEnv({ ASSESS_IMAGE_API_KEY: "k", ASSESS_IMAGE_PROVIDER: "ark", ASSESS_IMAGE_MODEL: "Qwen/Qwen-Image-Edit" })?.label).toBe(`ark:${ARK_DEFAULT_MODEL}`);
+    expect(providerFromEnv({ ASSESS_IMAGE_API_KEY: "k", ASSESS_IMAGE_PROVIDER: "openai" })).toBeNull();
     expect(providerSummary({})).toEqual({ provider: "none", reason: expect.stringContaining("ASSESS_IMAGE_API_KEY") });
-    expect(providerSummary({ ASSESS_IMAGE_API_KEY: "k", ASSESS_IMAGE_PROVIDER: "volcengine" })).toEqual({ provider: "none", reason: expect.stringContaining("volcengine") });
-    expect(providerSummary({ ASSESS_IMAGE_API_KEY: "k" })).toEqual({ provider: "siliconflow", model: "black-forest-labs/FLUX.1-Kontext-dev", reason: expect.stringContaining("ark") });
-    expect(providerSummary({ ASSESS_IMAGE_API_KEY: "secret-key", ASSESS_IMAGE_PROVIDER: "ark", ASSESS_IMAGE_MODEL: "m" })).toEqual({ provider: "ark", model: "m" });
+    expect(providerSummary({ ASSESS_IMAGE_API_KEY: "k", ASSESS_IMAGE_PROVIDER: "openai" })).toEqual({ provider: "none", reason: expect.stringContaining("openai") });
+    expect(providerSummary({ ASSESS_IMAGE_API_KEY: arkKey, ASSESS_IMAGE_PROVIDER: "" }))
+      .toEqual({ provider: "ark", model: ARK_DEFAULT_MODEL, size: "1024x1536", reason: expect.stringContaining("read off the key") });
+    expect(providerSummary({ ASSESS_IMAGE_API_KEY: "secret-key", ASSESS_IMAGE_PROVIDER: "ark", ASSESS_IMAGE_MODEL: "doubao-seedream-4-5-251128" }))
+      .toEqual({ provider: "ark", model: "doubao-seedream-4-5-251128", size: "1664x2496" });
+    expect(providerSummary({ ASSESS_IMAGE_API_KEY: "k", ASSESS_IMAGE_PROVIDER: "ark", ASSESS_IMAGE_MODEL: "a/b" }).reason).toMatch(/not an Ark model id/);
     expect(JSON.stringify(providerSummary({ ASSESS_IMAGE_API_KEY: "secret-key" }))).not.toContain("secret-key");
+    expect(JSON.stringify(providerSummary({ ASSESS_IMAGE_API_KEY: arkKey, ASSESS_IMAGE_PROVIDER: "ark" }))).not.toContain(arkKey);
   });
 
   test("with no image key there is no provider, and the figure is the template", async () => {
@@ -159,6 +171,64 @@ describe("drawing", () => {
   });
 });
 
+describe("after a failure", () => {
+  test("a failed call gives the address its figure back; a drawn one does not", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    pipeline(new FakeImageProvider([new ProviderError("IMAGE_API_400: InvalidParameter", 400)]));
+    enqueueAvatar(storedResult({ id: "res_bad" }));
+    await avatarQueueIdle();
+    expect(vi.mocked(forgetFailedDraw).mock.calls).toEqual([["res_bad"]]);
+    pipeline(new FakeImageProvider([TINY_PNG]));
+    enqueueAvatar(storedResult({ id: "res_good" }));
+    await avatarQueueIdle();
+    expect(vi.mocked(forgetFailedDraw).mock.calls).toEqual([["res_bad"]]);
+  });
+
+  test("a passing failure (a timeout, an overload) is drawn again on the person's visit a few minutes later; a refusal is not", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    let now = new Date("2026-10-16T09:00:00Z");
+    const provider = new FakeImageProvider([new ProviderError("IMAGE_TIMEOUT", 504), new ProviderError("IMAGE_TIMEOUT", 504), TINY_PNG]);
+    configureAvatarPipeline({ provider, sleep: vi.fn(async () => undefined), random: () => 0.5, now: () => now });
+    const result = storedResult({ id: "res_slow" });
+    enqueueAvatar(result);
+    await avatarQueueIdle();
+    expect(states()).toEqual(["queued", "drawing", "template"]);
+    expect(JSON.parse(String(warn.mock.calls.at(-1)![0]))).toMatchObject({ event: "avatar.failed", status: 504, retryLater: true });
+    const fallen = { ...result, avatar: { state: "template" as const, file: "" } };
+    expect(retryAvatarIfDue(fallen)).toBe(false);
+    now = new Date(now.getTime() + RETRY_AFTER_MS);
+    expect(retryAvatarIfDue(fallen)).toBe(true);
+    expect(retryAvatarIfDue(fallen)).toBe(false);
+    await avatarQueueIdle();
+    expect(states()).toEqual(["queued", "drawing", "template", "queued", "drawing", "ready"]);
+    // The first visit's run made its call and the one immediate retry; the later visit drew it.
+    expect(provider.edits).toHaveLength(3);
+
+    vi.mocked(setAvatarState).mockClear();
+    const refusing = new FakeImageProvider([new ProviderError("IMAGE_API_401: AuthenticationError", 401)]);
+    configureAvatarPipeline({ provider: refusing, sleep: vi.fn(async () => undefined), random: () => 0.5, now: () => now });
+    enqueueAvatar(storedResult({ id: "res_refused" }));
+    await avatarQueueIdle();
+    now = new Date(now.getTime() + 10 * RETRY_AFTER_MS);
+    expect(retryAvatarIfDue(storedResult({ id: "res_refused", avatar: { state: "template", file: "" } }))).toBe(false);
+    expect(refusing.edits).toHaveLength(1);
+  });
+
+  test("a figure queued again long after its result was made is not mistaken for one lost to a restart", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    let resolveDraw: (bytes: Buffer) => void = () => {};
+    const slow = { label: "slow", generate: async () => TINY_PNG, edit: () => new Promise<Buffer>((resolve) => { resolveDraw = resolve; }) };
+    configureAvatarPipeline({ provider: slow, sleep: vi.fn(async () => undefined), random: () => 0.5 });
+    const old = storedResult({ id: "res_old", createdAt: new Date(Date.now() - 3_600_000).toISOString() });
+    enqueueAvatar(old);
+    expect(avatarStatus({ ...old, avatar: { state: "drawing", file: "" } }).state).toBe("drawing");
+    resolveDraw(TINY_PNG);
+    await avatarQueueIdle();
+  });
+});
+
 describe("what the pages and posters are given", () => {
   test("anything not ready shows the template address, and a figure lost to a restart reads as the template", () => {
     pipeline(null);
@@ -189,6 +259,60 @@ describe("what the pages and posters are given", () => {
     expect(templateVariant("neutral", "res_a")).toBe(templateVariant("neutral", "res_a"));
     const picks = new Set(Array.from({ length: 20 }, (_, index) => templateVariant("neutral", `res_${index}`)));
     expect([...picks].sort()).toEqual(["female", "male"]);
+  });
+});
+
+describe("Volcengine Ark's request", () => {
+  const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+  const calls = (fetchImpl: ReturnType<typeof vi.fn>) => fetchImpl.mock.calls as unknown as Array<[string | URL, RequestInit]>;
+
+  test("an edit sends the model, a size the model takes, the template as a lowercase PNG data URL, no seed and no watermark", async () => {
+    const fetchImpl = vi.fn(async (url: string | URL) => String(url).endsWith("/images/generations")
+      ? answer({ model: "m", created: 1, data: [{ url: "https://ark-content.tos-cn-beijing.volces.com/x.jpeg", size: "1024x1536" }] })
+      : new Response(new Uint8Array(Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0])), { status: 200 }));
+    const provider = new ArkProvider({ apiKey: "ark-secret", model: "doubao-seedream-5-0-pro-260628", fetchImpl: fetchImpl as unknown as typeof fetch });
+    const reference = fs.readFileSync(templateImagePath("GEMA"));
+    const image = await provider.edit({ reference, prompt: "Edit this cartoon character.", seed: 3_000_000_000 });
+    expect(image[0]).toBe(0xff);
+    const [url, init] = calls(fetchImpl)[0]!;
+    expect(String(url)).toBe("https://ark.cn-beijing.volces.com/api/v3/images/generations");
+    expect(init.method).toBe("POST");
+    expect((init.headers as Record<string, string>).authorization).toBe("Bearer ark-secret");
+    const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+    expect(Object.keys(body).sort()).toEqual(["image", "model", "prompt", "response_format", "size", "watermark"]);
+    expect(body).toMatchObject({ model: "doubao-seedream-5-0-pro-260628", size: "1024x1536", response_format: "url", watermark: false,
+      prompt: "Edit this cartoon character." });
+    expect(String(body.image).startsWith("data:image/png;base64,")).toBe(true);
+    expect(Buffer.from(String(body.image).split(",")[1]!, "base64").equals(reference)).toBe(true);
+    // The template stays far under the 30 MB the API takes for an input image.
+    expect(String(init.body).length).toBeLessThan(30 * 1024 * 1024);
+    // The download goes to the link only, without the key.
+    const [download, downloadInit] = calls(fetchImpl)[1]!;
+    expect(String(download)).toBe("https://ark-content.tos-cn-beijing.volces.com/x.jpeg");
+    expect(JSON.stringify(downloadInit)).not.toContain("ark-secret");
+  });
+
+  test("the size follows the model's pixel range: 1024×1536 where it is allowed, 1664×2496 for 4.5 and 5.0 lite, or ASSESS_IMAGE_SIZE", () => {
+    for (const model of ["doubao-seedream-4-0-250828", "doubao-seedream-5-0-pro-260628", "doubao-seedream-5-0-flash-260628"]) expect(arkSize(model)).toBe("1024x1536");
+    for (const model of ["doubao-seedream-4-5-251128", "doubao-seedream-5-0-260128", "doubao-seedream-5-0-lite-260128", "ep-20261016-abcde"]) {
+      const [width, height] = arkSize(model).split("x").map(Number) as [number, number];
+      expect(width * height).toBeGreaterThanOrEqual(2560 * 1440);
+      expect(width * height).toBeLessThanOrEqual(2048 * 2048 * 1.1025);
+      expect(height / width).toBe(1.5);
+    }
+    expect(arkSize("doubao-seedream-5-0-pro-260628", "2k")).toBe("2K");
+    expect(arkSize("doubao-seedream-5-0-pro-260628", "1200X1800")).toBe("1200x1800");
+    expect(arkSize("doubao-seedream-5-0-pro-260628", "huge; drop table")).toBe("1024x1536");
+  });
+
+  test("a refusal names Ark's error code in the log, and a 200 without a link says why", async () => {
+    const refused = vi.fn(async () => answer({ error: { code: "ModelNotOpen", message: "Your account has not activated the model.", param: "", type: "Not Found" } }, 404));
+    const provider = new ArkProvider({ apiKey: "k", fetchImpl: refused as unknown as typeof fetch });
+    await expect(provider.edit({ reference: TINY_PNG, prompt: "p", seed: 1 })).rejects.toMatchObject({
+      status: 404, message: "IMAGE_API_404: ModelNotOpen: Your account has not activated the model." });
+    const empty = vi.fn(async () => answer({ data: [{ error: { code: "OutputImageSensitiveContentDetected", message: "blocked" } }] }));
+    await expect(new ArkProvider({ apiKey: "k", fetchImpl: empty as unknown as typeof fetch }).edit({ reference: TINY_PNG, prompt: "p", seed: 1 }))
+      .rejects.toMatchObject({ status: 502, message: "IMAGE_API_NO_URL: OutputImageSensitiveContentDetected: blocked" });
   });
 });
 

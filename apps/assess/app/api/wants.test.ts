@@ -14,7 +14,7 @@ import { POST as setWantsRoute } from "./results/[token]/wants/route";
 import { POST as submit } from "./results/route";
 
 vi.mock("../../server/avatar", () => ({
-  enqueueAvatar: () => undefined, avatarStatus: () => ({ state: "drawing", url: "/api/avatar/x.png" }),
+  enqueueAvatar: () => undefined, retryAvatarIfDue: () => false, avatarStatus: () => ({ state: "drawing", url: "/api/avatar/x.png" }),
   avatarImagePath: () => "", drawnImagePath: () => undefined, templateImagePath: () => ""
 }));
 vi.mock("../../server/poster", () => ({ renderTypePoster: vi.fn(), renderLongImage: vi.fn(), renderPairCard: vi.fn() }));

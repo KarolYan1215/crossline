@@ -42,6 +42,15 @@ jobs:
             tail -5 /tmp/build-app.log 2>/dev/null || true
             for p in 3340 3210; do printf "%s " $p; curl -s -m 5 -o /dev/null -w "%{http_code}\n" http://127.0.0.1:$p/ || echo down; done
             for c in assess crossline-web crossline-worker; do echo "== $c"; sudo docker logs --tail 40 $c 2>&1 || true; done
+            echo "== assess figures"
+            # The app logs its image settings (provider, model, size; never the key) and every skipped, failed or drawn figure.
+            sudo docker logs assess 2>&1 | grep -E "avatar\.|assess\.avatar" | tail -30 || true
+            for k in ASSESS_IMAGE_PROVIDER ASSESS_IMAGE_MODEL ASSESS_IMAGE_SIZE ASSESS_IMAGE_BASE_URL ASSESS_IMAGE_DAILY_LIMIT ASSESS_IMAGE_API_KEY; do
+              printf "%s: " $k
+              if sudo grep -qE "^$k=.+" /srv/assess/assess.env; then echo filled; elif sudo grep -qE "^$k=" /srv/assess/assess.env; then echo empty; else echo absent; fi
+            done
+            printf "figures on disk: "; sudo ls /srv/assess/data/avatars 2>/dev/null | wc -l
+            printf "image calls today: "; sudo cat /srv/assess/data/avatar-budget.json 2>/dev/null || echo none; echo
             echo "== mail"
             # Never prints a secret: PASSWORD lines are left out, and only whether one is filled in is counted.
             for f in /srv/crossline/app.env /srv/assess/assess.env; do echo "-- $f"; sudo grep -E "^(CROSSLINE|ASSESS)_(SMTP|MAIL)" $f | grep -v PASSWORD; printf "password filled: "; sudo grep -cE "^[A-Z_]+SMTP_PASSWORD=.+" $f || true; done

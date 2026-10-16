@@ -101,21 +101,27 @@
 
 ## 形象生成
 
-结果创建时开始画（`server/avatar/`）：以类型模板为底图、按外貌选项改（穿衣风格 11 种：休闲日常、极简通勤、商务正装、学院风、街头潮流、运动户外、机能风、文艺复古、新中式、甜美、酷飒，各对应 `prompt.ts` 里一句写明具体衣物的英文，只换款式、不换模板的配色；原来的 4 个键保留，旧结果照常读取），队列同时 2 张，等待超过 40 张的直接用兜底；每个邮箱 3 张（`avatar_draws`），每天总数 `ASSESS_IMAGE_DAILY_LIMIT`（默认 300，重试也占名额）；一次调用（含下载）最多 120 秒，限流或过载重试一次。
+结果创建时开始画（`server/avatar/`）：以类型模板为底图、按外貌选项改（穿衣风格 11 种：休闲日常、极简通勤、商务正装、学院风、街头潮流、运动户外、机能风、文艺复古、新中式、甜美、酷飒，各对应 `prompt.ts` 里一句写明具体衣物的英文，只换款式、不换模板的配色；原来的 4 个键保留，旧结果照常读取），队列同时 2 张，等待超过 40 张的直接用兜底；每个邮箱 3 张（`avatar_draws`；调用失败、什么也没画出来的那次不算，画成的删了结果也不退），每天总数 `ASSESS_IMAGE_DAILY_LIMIT`（默认 300，重试也占名额）；一次调用（含下载）最多 120 秒，限流或过载重试一次。
 
 | 变量 | 说明 |
 |---|---|
 | `ASSESS_IMAGE_API_KEY` | 画图服务的 key；不设则不画，所有人用兜底 |
-| `ASSESS_IMAGE_PROVIDER` | `ark`（火山方舟 Seedream）或 `siliconflow`；**不设按 `siliconflow`**，写成别的名字则不画。用方舟的 key 时必须设 `ark`，否则 key 被发到硅基流动，每次 401 |
-| `ASSESS_IMAGE_MODEL` | 模型名；方舟默认 `doubao-seedream-4-0-250828`，硅基流动默认 Kontext [dev] |
+| `ASSESS_IMAGE_PROVIDER` | `ark`（火山方舟 Seedream；`volcengine`、`doubao`、`seedream`、`火山` 等写法也算）或 `siliconflow`；写成别的名字则不画。**不设或留空（`ASSESS_IMAGE_PROVIDER=` 后面没东西）时按 key 判断**：`sk-` 开头是硅基流动，否则是方舟（方舟的 key 是 UUID）；`ASSESS_IMAGE_BASE_URL` 是 `volces.com` 时也按方舟 |
+| `ASSESS_IMAGE_MODEL` | 模型名；方舟默认 `doubao-seedream-5-0-pro-260628`（与 App 画像同一个），留空用默认；带 `/` 的名字是硅基流动的模型，方舟下不用它、改用默认并在日志里说明；硅基流动默认 Kontext [dev] |
+| `ASSESS_IMAGE_SIZE` | 可选，只对方舟：`1024x1536` 这样的像素值或 `2K` 这样的档位；不设时按模型选（见下） |
 | `ASSESS_IMAGE_BASE_URL` | 可选，只接受 https |
 | `ASSESS_IMAGE_DAILY_LIMIT` | 可选，每天最多调用几次 |
 
-服务器日志里的事件（`docker logs assess`，每行一个 JSON）：
+托管内测每次部署都先跑 `deploy/server/ensure-env.sh`：`ASSESS_IMAGE_PROVIDER=ark` 和模型名，文件里没有这一行、或这一行等号后面是空的都会补上；已有的值不改。2026-10-16 之前它把 `KEY=`（留空）当作已设，从来没补过。
 
-- `avatar.provider`：进程第一次用到画图时打印一次，写明选中的服务和模型，或者为什么没有（没设 key、`ASSESS_IMAGE_PROVIDER` 写错、没设时提醒默认是硅基流动）。**看不到形象时先看这一行。**
+服务器日志里的事件（`docker logs assess`，每行一个 JSON；`[server]` 诊断会列出最近 30 条形象事件、各 `ASSESS_IMAGE_*` 是已填/留空/没有，以及当天调用次数，不打印任何值）：
+
+方舟的请求（`ArkProvider`，按方舟图片生成 API 参考 docs.volcengine.com/docs/82379/1541523，2026-10-16 查）：`model`、`prompt`、`image`（模板，`data:image/png;base64,…`，格式名小写，约 1.8 MB，上限 30 MB）、`size`、`response_format: "url"`（链接 24 小时有效，拿到即下载）、`watermark: false`。**不发 `seed`**：4.0 以后的 Seedream 参数表里没有它（那是 3.0 的参数），不认识的参数是这条请求里唯一可能被直接拒绝的东西。`size` 按模型的像素范围选：4.0、5.0 pro/flash 接受 1280×720 到约 462 万像素，用模板本身的 `1024x1536`；4.5、5.0 lite 至少 2560×1440（368.6 万像素），`1024x1536` 会被立刻以 InvalidParameter 拒绝，所以用 `1664x2496`（415 万像素，同为 2:3，所有版本都接受）。方舟画出的是 JPEG，形象接口、缩略图和海报都按文件内容认 PNG 和 JPEG。
+
+- `avatar.provider`：**服务启动时**打印一次（`instrumentation.ts`），写明选中的服务、模型和尺寸，或者为什么没有（没设 key、`ASSESS_IMAGE_PROVIDER` 写错），以及没按原样用的设置（provider 留空按 key 判断、模型名留空或是硅基流动的名字）。**看不到形象时先看这一行。**
 - `avatar.skipped`：没画就用了兜底，`reason` 是 `no_provider` / `email_limit`（这个邮箱 90 天内已画满 3 张，反复自测最容易碰到）/ `daily_budget` / `queue_full`。
-- `avatar.failed`：调用失败，带 HTTP 状态和服务返回的前 200 字（401 多半是 key 和服务对不上）；画出来的是 WebP 也算失败（`IMAGE_FORMAT_UNSUPPORTED`），因为海报只认 PNG 和 JPEG。
+- `avatar.failed`：调用失败，带 HTTP 状态、用时、方舟的错误码和说明（`IMAGE_API_404: ModelNotOpen: …`、`IMAGE_API_400: InvalidParameter: …`、`IMAGE_API_401: AuthenticationError: …`；401 多半是 key 和服务对不上），网络失败带系统的错误码（`fetch failed (UND_ERR_CONNECT_TIMEOUT)`），以及 `retryLater`；返回 200 却没有链接时带上方舟给这张图的错误码（如内容审核）；画出来的是 WebP 也算失败（`IMAGE_FORMAT_UNSUPPORTED`），因为海报只认 PNG 和 JPEG。
+- `avatar.retry`：超时、过载、网络断了这类等一等就可能好的失败（`retryLater: true`），本人 3 分钟后再打开自己的结果页时重画（页面回到等待卡）；每份结果最多调用 3 次，每次照样占当日名额、受每邮箱 3 张限制。key、模型、参数错误和内容审核这类拒绝不重试。记录在进程内存里，重启后不再重试。只在本人的结果页触发，朋友打开邀请页或双人卡不会。
 - `avatar.ready`：画好，带用时和重试次数。2026-10-16 实测方舟 `doubao-seedream-5-0-pro` 一张 1024×1536 约 39 秒。
 
 **结果页不再出现类型模板**（2026-10-16，本人反馈先看到通用模板的人会直接离开）：形象在画时，海报的位置是一张等待卡（组别底色、类型字母、进度条，不放海报，免得有人存下半成品）；画好后出现海报。没画成（没配服务、邮箱次数用完、当日预算用完、调用失败）时，海报上用四个字母排成 2×2 的徽记代替人像，页面写「这次没有画出你的专属形象」。邀请页、双人卡页的小头像和双人卡海报同一规则。只有 App 通过 `/api/link` 拿到的 `figureUrl` 仍可能是模板。

@@ -17,7 +17,7 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock("nodemailer", () => ({ createTransport: vi.fn(() => ({ sendMail: mocks.sendMail })) }));
 vi.mock("../../server/avatar", () => ({
-  enqueueAvatar: mocks.enqueueAvatar, avatarStatus: mocks.avatarStatus,
+  enqueueAvatar: mocks.enqueueAvatar, avatarStatus: mocks.avatarStatus, retryAvatarIfDue: () => false,
   avatarImagePath: () => "", templateImagePath: () => ""
 }));
 vi.mock("../../server/poster", () => ({ renderTypePoster: vi.fn(), renderLongImage: vi.fn(), renderPairCard: vi.fn() }));

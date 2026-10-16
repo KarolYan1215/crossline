@@ -151,75 +151,138 @@ export class SiliconFlowProvider implements ImageProvider {
 const clampSeed = (seed: number): number => Math.max(0, Math.min(MAX_SEED, Math.floor(seed)));
 
 export const ARK_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3";
-export const ARK_DEFAULT_MODEL = "doubao-seedream-4-0-250828";
-/** The template's own 2:3 shape (1024×1536), inside Seedream 4.0's allowed pixel range. */
-const ARK_SIZE = "1024x1536";
+/** The Seedream model the owner's Ark account has open (the App's portrait figure uses the same one). */
+export const ARK_DEFAULT_MODEL = "doubao-seedream-5-0-pro-260628";
+/** The template's own 2:3 shape (1024×1536, 1.57 MP): inside the pixel range of Seedream 4.0 and 5.0 pro/flash ([0.92 MP, 4.62 MP]). */
+export const ARK_SIZE_SMALL = "1024x1536";
+/** 2:3 at 4.15 MP: Seedream 4.5 and 5.0 lite refuse anything under 2560×1440 (3.69 MP), and this one also fits 5.0 pro's ceiling. */
+export const ARK_SIZE_LARGE = "1664x2496";
 
 /**
- * Volcengine Ark's Seedream 4.0 (`POST /images/generations`, chosen with `ASSESS_IMAGE_PROVIDER=ark`; tried 2026-10-16 after
- * SiliconFlow's Qwen-Image-Edit drew poorly): the same call edits (with the template as `image`) and generates (without), the
- * platform's own 「AI 生成」 mark is turned off (`watermark: false`), and the link it returns is fetched at once without the key.
+ * The output size for a Seedream model (docs.volcengine.com/docs/82379/1541523, 「size」, read 2026-10-16): 4.0 and 5.0 pro/flash take
+ * 0.92–4.62 MP (4.0 up to 16.7 MP), 4.5 and 5.0 lite take 3.69–16.7 MP. A size outside the model's range is refused at once
+ * (InvalidParameter), so a model we cannot place gets the size every version accepts. `ASSESS_IMAGE_SIZE` overrides it.
+ */
+export function arkSize(model: string, override?: string): string {
+  const named = override?.trim();
+  if (named && /^(\d{3,4}x\d{3,4}|[1-4](\.5)?K)$/i.test(named)) return /k$/i.test(named) ? named.toUpperCase() : named.toLowerCase();
+  if (/seedream-(3-0|4-0)|seedream-5-0-(pro|flash)/i.test(model)) return ARK_SIZE_SMALL;
+  return ARK_SIZE_LARGE;
+}
+
+/**
+ * Volcengine Ark's Seedream (`POST /images/generations`, chosen with `ASSESS_IMAGE_PROVIDER=ark`; tried 2026-10-16 after SiliconFlow's
+ * Qwen-Image-Edit drew poorly): the same call edits (with the template as `image`, a lowercase `data:image/png;base64,…` URL, at most
+ * 30 MB) and generates (without), the platform's own 「AI 生成」 mark is turned off (`watermark: false`), and the link it returns (valid 24
+ * hours) is fetched at once without the key. No `seed`: the current API reference lists none for Seedream 4.0 and later (it belonged to
+ * 3.0), and a parameter the model does not take is the one thing here that could be refused instead of ignored.
  */
 export class ArkProvider implements ImageProvider {
   readonly label: string;
+  readonly size: string;
   readonly #apiKey: string;
   readonly #baseUrl: string;
   readonly #model: string;
   readonly #fetch: Fetch;
 
-  constructor(options: { apiKey: string; baseUrl?: string; model?: string; fetchImpl?: Fetch }) {
+  constructor(options: { apiKey: string; baseUrl?: string; model?: string; size?: string; fetchImpl?: Fetch }) {
     this.#apiKey = options.apiKey;
     this.#baseUrl = (options.baseUrl ?? ARK_BASE_URL).replace(/\/+$/, "");
     if (!this.#baseUrl.startsWith("https://")) throw new Error("ASSESS_IMAGE_BASE_URL must be https");
     this.#model = options.model ?? ARK_DEFAULT_MODEL;
+    this.size = arkSize(this.#model, options.size);
     this.label = `ark:${this.#model}`;
     this.#fetch = options.fetchImpl ?? fetch;
   }
 
   async edit(input: EditInput): Promise<Buffer> {
     const type = imageType(input.reference) ?? "image/png";
-    return this.#request({ prompt: input.prompt, seed: clampSeed(input.seed) % 2_147_483_647,
-      image: `data:${type};base64,${input.reference.toString("base64")}` }, input.signal);
+    return this.#request({ prompt: input.prompt, image: `data:${type};base64,${input.reference.toString("base64")}` }, input.signal);
   }
 
   async generate(input: GenerateInput): Promise<Buffer> {
-    return this.#request({ prompt: input.prompt, seed: clampSeed(input.seed) % 2_147_483_647 }, input.signal);
+    return this.#request({ prompt: input.prompt }, input.signal);
   }
 
   async #request(body: Record<string, unknown>, signal?: AbortSignal): Promise<Buffer> {
     const response = await this.#fetch(`${this.#baseUrl}/images/generations`, {
       method: "POST",
       headers: { authorization: `Bearer ${this.#apiKey}`, "content-type": "application/json" },
-      body: JSON.stringify({ model: this.#model, size: ARK_SIZE, response_format: "url", watermark: false, ...body }),
+      body: JSON.stringify({ model: this.#model, size: this.size, response_format: "url", watermark: false, ...body }),
       ...(signal ? { signal } : {})
     });
     if (!response.ok) {
-      const detail = (await response.text().catch(() => "")).slice(0, 200);
-      throw new ProviderError(`IMAGE_API_${response.status}: ${detail}`, response.status, retryAfterMs(response.headers.get("retry-after")));
+      // Ark answers `{error: {code, message}}`; the code (ModelNotOpen, InvalidParameter, AuthenticationError…) goes first in the log.
+      const text = await response.text().catch(() => "");
+      throw new ProviderError(`IMAGE_API_${response.status}: ${arkErrorSummary(text)}`, response.status, retryAfterMs(response.headers.get("retry-after")));
     }
-    const json = await response.json().catch(() => null) as { data?: Array<{ url?: unknown }> } | null;
-    const url = json?.data?.[0]?.url;
-    if (typeof url !== "string") throw new ProviderError("IMAGE_API_NO_URL", 502);
+    const json = await response.json().catch(() => null) as { data?: Array<{ url?: unknown; error?: { code?: unknown; message?: unknown } }>; error?: unknown } | null;
+    const first = json?.data?.[0];
+    const url = first?.url;
+    if (typeof url !== "string") {
+      // A 200 can still carry a per-image refusal (e.g. the content check), with no url.
+      const reason = first?.error ? arkErrorSummary(JSON.stringify({ error: first.error })) : json?.error ? arkErrorSummary(JSON.stringify(json)) : "";
+      throw new ProviderError(`IMAGE_API_NO_URL${reason ? `: ${reason}` : ""}`, 502);
+    }
     return downloadImage(url, this.#fetch, signal);
   }
 }
 
-/** The image services `ASSESS_IMAGE_PROVIDER` may name; unset means SiliconFlow (the first one used). */
+/** `code: message` from an Ark error body, else the body itself, at most 200 characters. Never carries the key. */
+export function arkErrorSummary(text: string): string {
+  try {
+    const parsed = JSON.parse(text) as { error?: { code?: unknown; message?: unknown } };
+    const code = typeof parsed.error?.code === "string" ? parsed.error.code : "";
+    const message = typeof parsed.error?.message === "string" ? parsed.error.message : "";
+    if (code || message) return `${code}${code && message ? ": " : ""}${message}`.slice(0, 200);
+  } catch { /* not JSON */ }
+  return text.slice(0, 200);
+}
+
+/** The image services `ASSESS_IMAGE_PROVIDER` may name. */
 export const IMAGE_PROVIDERS = ["siliconflow", "ark"] as const;
+type ProviderName = (typeof IMAGE_PROVIDERS)[number];
+
+/** Other names people write for Volcengine Ark; all mean `ark`. */
+const ARK_ALIASES = ["ark", "volcengine", "volces", "volcano", "doubao", "seedream", "byteplus", "火山", "火山方舟", "方舟", "豆包"];
 
 /**
- * The provider the environment names: none without `ASSESS_IMAGE_API_KEY`; `ASSESS_IMAGE_PROVIDER=ark` picks Seedream, unset or
- * `siliconflow` picks SiliconFlow. A name it does not know gives no provider rather than sending the key to the wrong service (an Ark
- * key sent to SiliconFlow is refused on every call, and every figure quietly stays the template); `avatar.provider` in the server log
- * says which one was chosen, or why none was.
+ * Which service the environment means, and how that was decided. Named: `ark` (or one of its other names) or `siliconflow`. Unset or
+ * empty — an env file with `ASSESS_IMAGE_PROVIDER=` and nothing after it counts as unset — it is read off the key and the base URL:
+ * SiliconFlow keys start with `sk-`, Ark keys do not (they are UUIDs), and a `volces.com`/`byteplus` base URL is Ark. A name it does not
+ * know gives none rather than sending the key to the wrong service.
+ */
+export function providerChoice(env: Record<string, string | undefined>): { name: ProviderName | null; how: "named" | "inferred" | "unknown" } {
+  const named = env.ASSESS_IMAGE_PROVIDER?.trim().toLowerCase() || "";
+  if (named) {
+    if (ARK_ALIASES.includes(named)) return { name: "ark", how: "named" };
+    if (named === "siliconflow" || named === "硅基流动") return { name: "siliconflow", how: "named" };
+    return { name: null, how: "unknown" };
+  }
+  const baseUrl = env.ASSESS_IMAGE_BASE_URL?.trim() ?? "";
+  if (/volces\.com|byteplus/i.test(baseUrl)) return { name: "ark", how: "inferred" };
+  if (/siliconflow/i.test(baseUrl)) return { name: "siliconflow", how: "inferred" };
+  return { name: env.ASSESS_IMAGE_API_KEY?.trim().startsWith("sk-") ? "siliconflow" : "ark", how: "inferred" };
+}
+
+/** A SiliconFlow model id (`org/name`) is never an Ark model; sent to Ark it is refused with a 404 on every call. */
+const arkModelFrom = (model: string | undefined): string | undefined => (model && !model.includes("/") ? model : undefined);
+
+/**
+ * The provider the environment names (`providerChoice`): none without `ASSESS_IMAGE_API_KEY` or with a provider name it does not know.
+ * `avatar.provider` in the server log says which one was chosen, or why none was.
  */
 export function providerFromEnv(env: Record<string, string | undefined> = process.env): ImageProvider | null {
   const apiKey = env.ASSESS_IMAGE_API_KEY?.trim();
   if (!apiKey) return null;
-  const name = (env.ASSESS_IMAGE_PROVIDER?.trim().toLowerCase() || "siliconflow");
+  const { name } = providerChoice(env);
   const baseUrl = env.ASSESS_IMAGE_BASE_URL?.trim();
   const model = env.ASSESS_IMAGE_MODEL?.trim();
-  if (name === "ark") return new ArkProvider({ apiKey, ...(baseUrl ? { baseUrl } : {}), ...(model ? { model } : {}) });
+  if (name === "ark") {
+    const arkModel = arkModelFrom(model);
+    const size = env.ASSESS_IMAGE_SIZE?.trim();
+    return new ArkProvider({ apiKey, ...(baseUrl ? { baseUrl } : {}), ...(arkModel ? { model: arkModel } : {}), ...(size ? { size } : {}) });
+  }
   if (name !== "siliconflow") return null;
   const templateModel = env.ASSESS_IMAGE_TEMPLATE_MODEL?.trim();
   return new SiliconFlowProvider({
@@ -230,15 +293,24 @@ export function providerFromEnv(env: Record<string, string | undefined> = proces
   });
 }
 
-/** What the server log says about the image settings at start: the provider chosen, or the reason there is none. Never the key. */
-export function providerSummary(env: Record<string, string | undefined> = process.env): { provider: string; model?: string; reason?: string } {
-  if (!env.ASSESS_IMAGE_API_KEY?.trim()) return { provider: "none", reason: "ASSESS_IMAGE_API_KEY unset: every figure is the fallback" };
-  const named = env.ASSESS_IMAGE_PROVIDER?.trim().toLowerCase() || "";
-  if (named && !(IMAGE_PROVIDERS as readonly string[]).includes(named)) {
+/**
+ * What the server log says about the image settings at start: the provider chosen, its model and size, or the reason there is none, and
+ * a note for anything the environment said that was not used as written. Never the key.
+ */
+export function providerSummary(env: Record<string, string | undefined> = process.env): { provider: string; model?: string; size?: string; reason?: string } {
+  if (!env.ASSESS_IMAGE_API_KEY?.trim()) return { provider: "none", reason: "ASSESS_IMAGE_API_KEY unset or empty: every figure is the fallback" };
+  const choice = providerChoice(env);
+  if (!choice.name) {
+    const named = env.ASSESS_IMAGE_PROVIDER?.trim().toLowerCase() ?? "";
     return { provider: "none", reason: `ASSESS_IMAGE_PROVIDER=${named.slice(0, 40)} is not one of ${IMAGE_PROVIDERS.join(", ")}` };
   }
   const provider = providerFromEnv(env);
   const [service, model] = (provider?.label ?? "none").split(/:(.*)/s);
-  return { provider: service!, ...(model ? { model } : {}),
-    ...(!named ? { reason: "ASSESS_IMAGE_PROVIDER unset: using SiliconFlow; set it to ark for a Volcengine Ark key" } : {}) };
+  const notes: string[] = [];
+  if (choice.how === "inferred") notes.push(`ASSESS_IMAGE_PROVIDER unset or empty: ${choice.name} read off the key and base URL`);
+  const given = env.ASSESS_IMAGE_MODEL?.trim();
+  if (choice.name === "ark" && given && !arkModelFrom(given)) notes.push(`ASSESS_IMAGE_MODEL=${given.slice(0, 60)} is not an Ark model id: using ${ARK_DEFAULT_MODEL}`);
+  if (choice.name === "ark" && !given) notes.push(`ASSESS_IMAGE_MODEL unset or empty: using ${ARK_DEFAULT_MODEL}`);
+  return { provider: service!, ...(model ? { model } : {}), ...(provider instanceof ArkProvider ? { size: provider.size } : {}),
+    ...(notes.length ? { reason: notes.join("; ") } : {}) };
 }
