@@ -144,7 +144,7 @@
 |---|---|
 | `ASSESS_TEXT_API_KEY` | 文字模型的 key；三个变量都设了才开启，否则只用写好的组合和规则 |
 | `ASSESS_TEXT_BASE_URL` | OpenAI 兼容接口的地址（只接受 https），如 DeepSeek `https://api.deepseek.com/v1`、火山方舟 `https://ark.cn-beijing.volces.com/api/v3` |
-| `ASSESS_TEXT_MODEL` | 模型名（方舟填模型 ID 或推理接入点 ID） |
+| `ASSESS_TEXT_MODEL` | 模型名（方舟填模型 ID 或推理接入点 ID）。托管内测用硅基流动的 DeepSeek V4（`deepseek-ai/DeepSeek-V4-Pro`，`https://api.siliconflow.cn/v1`，2026-10-16 定；`ensure-env.sh` 补地址和模型，key 由 `set-secrets.sh` 填）；发往硅基流动的请求带 `enable_thinking: false`，免得推理用掉 700 个 token 的上限、答案为空 |
 | `ASSESS_TEXT_JSON_MODE` | 可选，`off` 时不发 `response_format: json_object`（个别服务不认这个字段） |
 | `ASSESS_TEXT_DAILY_LIMIT` | 可选，每天最多调用几次，默认 1000，计数在 `data/text-budget.json` |
 

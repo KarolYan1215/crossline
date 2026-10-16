@@ -15,6 +15,10 @@ ensure() { # file key value — only when the key is absent or empty; a value al
 # to SiliconFlow's API with that Ark key, every draw failed and the result page kept the template (2026-10-16).
 ensure /srv/assess/assess.env ASSESS_IMAGE_PROVIDER ark
 ensure /srv/assess/assess.env ASSESS_IMAGE_MODEL doubao-seedream-5-0-pro-260628
+# The test's 「你也许想做」 is written by DeepSeek V4 on SiliconFlow (decided 2026-10-16), whose key set-secrets.sh asks for; with no key
+# the test keeps its written combinations and rules. A SiliconFlow account made on siliconflow.com answers at api.siliconflow.com instead.
+ensure /srv/assess/assess.env ASSESS_TEXT_BASE_URL https://api.siliconflow.cn/v1
+ensure /srv/assess/assess.env ASSESS_TEXT_MODEL deepseek-ai/DeepSeek-V4-Pro
 # The app's portrait figure for accounts on another model is drawn with the same Ark key and Seedream model (decided 2026-10-16). The key
 # is copied between the two files on this host only, never printed; an app key already set is left alone.
 ensure /srv/crossline/app.env CROSSLINE_IMAGE_API_STYLE ark

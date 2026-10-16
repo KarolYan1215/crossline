@@ -23,6 +23,9 @@ if [ -n "$flow" ]; then put "$ASSESS" ASSESS_IMAGE_API_KEY "$flow"; echo "  Imag
 read -r -s -p "Tavily API key for web search on models other than ChatGPT (tvly-…): " tavily; echo
 if [ -n "$tavily" ]; then put "$APP" TAVILY_API_KEY "$tavily"; put "$APP" CROSSLINE_SEARCH_PROVIDER tavily; echo "  Tavily key saved."; fi
 
+read -r -s -p "SiliconFlow API key for the test's 「你也许想做」 (sk-…): " siliconflow; echo
+if [ -n "$siliconflow" ]; then put "$ASSESS" ASSESS_TEXT_API_KEY "$siliconflow"; echo "  SiliconFlow key saved."; fi
+
 read -r -p "Your own email (always allowed to sign up; Enter to skip): " owner
 if [ -n "$owner" ]; then put "$APP" CROSSLINE_SIGNUP_ALLOWLIST "$owner"; echo "  Owner email saved."; fi
 echo "Done. Restart: sudo sh /srv/crossline/run.sh"

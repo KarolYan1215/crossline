@@ -40,6 +40,11 @@ test("an OpenAI-compatible call: Bearer key, the model, JSON mode unless turned 
   const plain = new ChatCompletionsModel({ apiKey: "k", baseUrl: "https://api.example.com/v1", model: "m", jsonMode: false, fetchImpl: fetchImpl as unknown as typeof fetch });
   await plain.complete([]);
   expect(JSON.parse(String(fetchImpl.mock.calls[1]![1]!.body))).not.toHaveProperty("response_format");
+  expect(JSON.parse(String(fetchImpl.mock.calls[0]![1]!.body))).not.toHaveProperty("enable_thinking");
+  // DeepSeek V4 on SiliconFlow is told not to reason first: thinking would spend the token cap on a few short lines.
+  const siliconflow = new ChatCompletionsModel({ apiKey: "k", baseUrl: "https://api.siliconflow.cn/v1", model: "deepseek-ai/DeepSeek-V4-Pro", fetchImpl: fetchImpl as unknown as typeof fetch });
+  await siliconflow.complete([]);
+  expect(JSON.parse(String(fetchImpl.mock.calls[2]![1]!.body))).toMatchObject({ model: "deepseek-ai/DeepSeek-V4-Pro", enable_thinking: false });
   const refusing = new ChatCompletionsModel({ apiKey: "k", baseUrl: "https://api.example.com", model: "m", fetchImpl: (async () => new Response("no", { status: 401 })) as unknown as typeof fetch });
   await expect(refusing.complete([])).rejects.toThrow("TEXT_API_401");
 });

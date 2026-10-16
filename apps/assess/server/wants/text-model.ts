@@ -47,7 +47,10 @@ export class ChatCompletionsModel implements TextModel {
       response = await fetchImpl(`${baseUrl}/chat/completions`, {
         method: "POST",
         headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
-        body: JSON.stringify({ model, messages, temperature: 0.6, max_tokens: 700, ...(jsonMode ? { response_format: { type: "json_object" } } : {}) }),
+        body: JSON.stringify({ model, messages, temperature: 0.6, max_tokens: 700, ...(jsonMode ? { response_format: { type: "json_object" } } : {}),
+          // DeepSeek V4 on SiliconFlow reasons first unless told not to, and a few short lines need no reasoning: thinking would spend the
+          // token cap and leave the answer empty (SiliconFlow's own example sends this, 2026-10-16).
+          ...(/(^|\.)siliconflow\.(cn|com)$/.test(new URL(baseUrl).host) ? { enable_thinking: false } : {}) }),
         ...(signal ? { signal } : {})
       });
     } catch (error) {
