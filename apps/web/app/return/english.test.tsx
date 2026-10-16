@@ -11,7 +11,7 @@ const view = { since: "2026-10-10T07:49:00.000Z", sinceDay: "2026-10-10", daysAw
   stale: { orders: [], milestones: [] } };
 
 test("coming back is said in English, with plurals", () => {
-  expect(absenceSummary(view, "en")).toEqual(["You were away 3 days (last action 10/10).",
+  expect(absenceSummary(view, "en")).toEqual(["You were away for 3 days (last action 10/10).",
     "Meanwhile 1 step was scheduled or came due. Settle it below with a tap, or say it in your own words.",
     "1 item due in the next 7 days, on 10/27:", "The assistant finished 1 piece of preparation meanwhile.", "Your calendar changed 2 times, and the schedule followed."]);
   expect(absenceSummary({ ...view, daysAway: 0, hoursAway: 1 }, "en")[0]).toBe("Your last action was 1 hour ago (10/10).");
