@@ -97,7 +97,7 @@ export function OpeningCard({ linesKnown, knownLines, initialTone, busy, hasMate
       <button type="button" className="ob-btn ob-primary" disabled={busy || !lines.length || needsConnection} onClick={() => onStart({ tone, lines, base: chosenBase, fixed: chosenFixed })}>
         {hasMaterials ? "读完材料，开始访谈" : "开始访谈"}</button>
       {!lines.length ? <small className="ob-muted">先选至少一个身份</small>
-        : needsConnection && <small className="ob-muted">先完成上方的「连接本人的 ChatGPT」</small>}
+        : needsConnection && <small className="ob-muted">先<a href="/connect?next=/onboarding">连接本人的 ChatGPT</a></small>}
     </div>
   </section>;
 }
