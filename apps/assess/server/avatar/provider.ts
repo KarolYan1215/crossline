@@ -5,7 +5,9 @@
  * settles on its template at once.
  */
 
-export type EditInput = { reference: Buffer; prompt: string; seed: number; signal?: AbortSignal };
+/** Filled in as a call goes: when the service answered (the picture made) and how many bytes came back, so a slow call says which part was slow. */
+export type CallTiming = { answeredAt?: number; bytes?: number };
+export type EditInput = { reference: Buffer; prompt: string; seed: number; signal?: AbortSignal; timing?: CallTiming };
 export type GenerateInput = { prompt: string; seed: number; signal?: AbortSignal };
 
 export interface ImageProvider {
@@ -197,14 +199,14 @@ export class ArkProvider implements ImageProvider {
 
   async edit(input: EditInput): Promise<Buffer> {
     const type = imageType(input.reference) ?? "image/png";
-    return this.#request({ prompt: input.prompt, image: `data:${type};base64,${input.reference.toString("base64")}` }, input.signal);
+    return this.#request({ prompt: input.prompt, image: `data:${type};base64,${input.reference.toString("base64")}` }, input.signal, input.timing);
   }
 
   async generate(input: GenerateInput): Promise<Buffer> {
     return this.#request({ prompt: input.prompt }, input.signal);
   }
 
-  async #request(body: Record<string, unknown>, signal?: AbortSignal): Promise<Buffer> {
+  async #request(body: Record<string, unknown>, signal?: AbortSignal, timing?: CallTiming): Promise<Buffer> {
     const response = await this.#fetch(`${this.#baseUrl}/images/generations`, {
       method: "POST",
       headers: { authorization: `Bearer ${this.#apiKey}`, "content-type": "application/json" },
@@ -224,7 +226,10 @@ export class ArkProvider implements ImageProvider {
       const reason = first?.error ? arkErrorSummary(JSON.stringify({ error: first.error })) : json?.error ? arkErrorSummary(JSON.stringify(json)) : "";
       throw new ProviderError(`IMAGE_API_NO_URL${reason ? `: ${reason}` : ""}`, 502);
     }
-    return downloadImage(url, this.#fetch, signal);
+    if (timing) timing.answeredAt = Date.now();
+    const bytes = await downloadImage(url, this.#fetch, signal);
+    if (timing) timing.bytes = bytes.length;
+    return bytes;
   }
 }
 

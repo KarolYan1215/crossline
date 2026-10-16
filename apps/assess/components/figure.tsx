@@ -25,6 +25,6 @@ export function DrawingCard({ type }: { type: PublicType }) {
   return <div className="as-drawing" role="status">
     <div className="as-drawing-figure" aria-hidden="true"><span>{type.code}</span><i /></div>
     <p className="as-drawing-title">正在画你的专属形象</p>
-    <p className="as-note">按你选的外貌来画，通常半分钟到一分钟。画好后海报会出现在这里，不用刷新。</p>
+    <p className="as-note">按你选的外貌来画，通常一两分钟；同时测的人多时要排队，可能要等几分钟。画好后海报会出现在这里，不用刷新；也可以先离开，结果链接已发到你的邮箱。</p>
   </div>;
 }

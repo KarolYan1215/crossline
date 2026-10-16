@@ -7,7 +7,7 @@ import { dailyLimit, takeSlot } from "./budget";
 import { writeFileAtomic } from "./files";
 import { avatarPrompt, seedFor } from "./prompt";
 import { announceAvatarProvider } from "./announce";
-import { ProviderError, imageType, providerFromEnv, type ImageProvider } from "./provider";
+import { ProviderError, imageType, providerFromEnv, type CallTiming, type ImageProvider } from "./provider";
 import { createQueue, type Queue } from "./queue";
 import { templatesDir, templateVariant, type TemplateVariant } from "./templates";
 
@@ -22,20 +22,22 @@ import { templatesDir, templateVariant, type TemplateVariant } from "./templates
  */
 
 /**
- * Figures drawn at once. A Seedream call takes 30–60 s and holds only the request and the downloaded image (about 10 MB), so six at
- * once keep a burst of people moving (two made the twentieth wait six minutes) inside the container's memory; Ark's own limit is far
- * above it. `ASSESS_IMAGE_CONCURRENCY` overrides it (two suits SiliconFlow's lowest image tier).
+ * Figures drawn at once. A Seedream call holds only the request and the downloaded image (about 10 MB). Three at once all ran past
+ * two minutes on the first try (2026-10-16), so more at once does not move a burst faster until the logged `answeredSeconds` /
+ * `downloadSeconds` say which part is slow. `ASSESS_IMAGE_CONCURRENCY` overrides it (two suits SiliconFlow's lowest image tier).
  */
-export const CONCURRENCY = Math.max(1, Number(process.env.ASSESS_IMAGE_CONCURRENCY) || 6);
+export const CONCURRENCY = Math.max(1, Number(process.env.ASSESS_IMAGE_CONCURRENCY) || 3);
 /**
- * Waiting past this, a figure settles on the template: at six at once the last one waits about thirteen minutes, inside the fifteen
- * after which a figure still waiting reads as lost (`STALE_AFTER_MS`).
+ * Waiting past this, a figure settles on the template rather than wait longer than anyone keeps the page open.
  */
-export const MAX_PENDING = 120;
-/** One call to the model, download included. Seedream's larger models take 30–60 s for a 1024×1536 edit (measured 2026-10-16: 39 s). */
-export const CALL_TIMEOUT_MS = 120_000;
+export const MAX_PENDING = 60;
+/**
+ * One call to the model, download included. Seedream's larger models take 30–60 s for a 1024×1536 edit alone (measured 2026-10-16:
+ * 39 s), but three at once from the Singapore server all ran past two minutes, twice each — slow, not failed — so the limit is five.
+ */
+export const CALL_TIMEOUT_MS = 300_000;
 /** A figure still `queued`/`drawing` this long after it was last queued was lost to a restart: show the fallback. */
-export const STALE_AFTER_MS = 15 * 60_000;
+export const STALE_AFTER_MS = 30 * 60_000;
 /** After a failure a wait can fix (a timeout, an overload, the network), the person's next visit this long after it draws again. */
 export const RETRY_AFTER_MS = 3 * 60_000;
 /** Calls per result at most, the first included; each still needs a slot of the day's budget and the address's limit. */
@@ -151,19 +153,25 @@ function failureReason(error: unknown): string {
 async function draw(provider: ImageProvider, result: StoredResult): Promise<void> {
   const started = Date.now();
   let attempts = 1;
+  // The last call's own clock: how long until the service answered (upload and drawing) and how long the download took.
+  let timing: CallTiming = {};
+  let callStarted = Date.now();
   try {
     setAvatarState(result.id, "drawing");
     const reference = fs.readFileSync(templateImagePath(result.code, templateVariant(result.appearance.presentation, result.id)));
     const input = { reference, prompt: avatarPrompt(result.appearance), seed: seedFor(result.id) };
     let image: Buffer;
+    callStarted = Date.now();
     try {
-      image = await withTimeout((signal) => provider.edit({ ...input, signal }));
+      image = await withTimeout((signal) => provider.edit({ ...input, signal, timing }));
     } catch (error) {
       // One retry, only for what a wait can fix (rate limit, overload), and only if today's budget still has a slot for it.
       if (!(error instanceof ProviderError) || !error.retryable || !takeSlot(dailyLimit(), current().now())) throw error;
       await current().sleep(backoffMs(error));
       attempts = 2;
-      image = await withTimeout((signal) => provider.edit({ ...input, signal }));
+      timing = {};
+      callStarted = Date.now();
+      image = await withTimeout((signal) => provider.edit({ ...input, signal, timing }));
     }
     // The poster renderer reads PNG and JPEG only: a WebP figure would show on the page and never on the poster.
     const type = imageType(image);
@@ -173,13 +181,13 @@ async function draw(provider: ImageProvider, result: StoredResult): Promise<void
     setAvatarState(result.id, "ready", file);
     memory.retries.delete(result.id);
     console.info(JSON.stringify({ event: "avatar.ready", resultId: result.id, provider: provider.label ?? "unknown", attempts,
-      seconds: Math.round((Date.now() - started) / 1000) }));
+      seconds: Math.round((Date.now() - started) / 1000), ...phaseLog(callStarted, timing) }));
   } catch (error) {
     const runs = (memory.retries.get(result.id)?.runs ?? 0) + 1;
     const retry = transient(error) && runs < MAX_RUNS;
     console.warn(JSON.stringify({ event: "avatar.failed", resultId: result.id, provider: provider.label ?? "unknown", attempts,
       ...(error instanceof ProviderError ? { status: error.status } : {}), seconds: Math.round((Date.now() - started) / 1000),
-      reason: failureReason(error), retryLater: retry }));
+      reason: failureReason(error), retryLater: retry, ...phaseLog(callStarted, timing) }));
     if (retry) memory.retries.set(result.id, { at: current().now().getTime(), runs });
     else memory.retries.delete(result.id);
     // Nothing was drawn, so the address keeps its figure; then the page shows the fallback.
@@ -188,6 +196,13 @@ async function draw(provider: ImageProvider, result: StoredResult): Promise<void
   } finally {
     memory.queuedAt.delete(result.id);
   }
+}
+
+/** The last call's phases for the log; a call cut off while the service was still drawing has no `downloadSeconds`. */
+function phaseLog(callStarted: number, timing: CallTiming): Record<string, number> {
+  if (timing.answeredAt === undefined) return { waitedForAnswerSeconds: Math.round((Date.now() - callStarted) / 1000) };
+  return { answeredSeconds: Math.round((timing.answeredAt - callStarted) / 1000), downloadSeconds: Math.round((Date.now() - timing.answeredAt) / 1000),
+    ...(timing.bytes !== undefined ? { bytes: timing.bytes } : {}) };
 }
 
 /** The wait before the one retry: the server's `Retry-After` (capped), else 20–40 s after a rate limit and 2–5 s after an overload. */
