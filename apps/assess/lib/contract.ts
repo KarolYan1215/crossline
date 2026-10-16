@@ -10,7 +10,8 @@ export type Appearance = {
   hair: "short" | "medium" | "long" | "curly" | "tied" | "bald";
   glasses: boolean;
   skin: "light" | "medium" | "deep";
-  style: "casual" | "smart" | "sporty" | "artsy";
+  /** Clothing style (eleven since 2026-10-16); the first four keys are the original ones, kept so stored results still read. */
+  style: "casual" | "smart" | "sporty" | "artsy" | "minimal" | "preppy" | "street" | "techwear" | "chinese" | "sweet" | "cool";
   /** Optional free words (≤40 characters): a hair colour, a hat. Never shown to anyone else. */
   note: string;
 };
@@ -19,7 +20,10 @@ export const APPEARANCE_LABELS = {
   presentation: { female: "女生", male: "男生", neutral: "中性" },
   hair: { short: "短发", medium: "中长发", long: "长发", curly: "卷发", tied: "扎起来", bald: "光头" },
   skin: { light: "偏白", medium: "自然", deep: "偏深" },
-  style: { casual: "休闲", smart: "干练", sporty: "运动", artsy: "文艺" }
+  style: {
+    casual: "休闲日常", minimal: "极简通勤", smart: "商务正装", preppy: "学院风", street: "街头潮流", sporty: "运动户外",
+    techwear: "机能风", artsy: "文艺复古", chinese: "新中式", sweet: "甜美", cool: "酷飒"
+  }
 } as const;
 
 export const NOTE_MAX = 40;

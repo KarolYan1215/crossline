@@ -1,5 +1,5 @@
 import { QUIZ_ITEMS } from "@crossline/core/assess";
-import { NICKNAME_MAX, NOTE_MAX, TESTS_PER_EMAIL, type Appearance, type SubmitRequest } from "./contract";
+import { APPEARANCE_LABELS, NICKNAME_MAX, NOTE_MAX, TESTS_PER_EMAIL, type Appearance, type SubmitRequest } from "./contract";
 
 /**
  * The test's own state, kept pure so the pages stay thin and the rules are tested: intro → 32 statements one per screen → appearance →
@@ -147,8 +147,8 @@ export const LAST_RESULT_KEY = "crossline-assess:last-result";
 
 const STEPS: Step[] = ["intro", "quiz", "appearance", "email"];
 const OPTIONS: Record<keyof Omit<Appearance, "note" | "glasses">, readonly string[]> = {
-  presentation: ["female", "male", "neutral"], hair: ["short", "medium", "long", "curly", "tied", "bald"],
-  skin: ["light", "medium", "deep"], style: ["casual", "smart", "sporty", "artsy"]
+  presentation: Object.keys(APPEARANCE_LABELS.presentation), hair: Object.keys(APPEARANCE_LABELS.hair),
+  skin: Object.keys(APPEARANCE_LABELS.skin), style: Object.keys(APPEARANCE_LABELS.style)
 };
 
 /**

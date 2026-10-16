@@ -5,7 +5,9 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { setAvatarState } from "../store";
 import { FakeImageProvider, TINY_PNG } from "./fake-provider";
 import { avatarQueueIdle, configureAvatarPipeline, enqueueAvatar } from "./index";
-import { avatarPrompt, sanitizeNote, seedFor } from "./prompt";
+import { APPEARANCE_LABELS, type Appearance } from "../../lib/contract";
+import { parseAppearance } from "../security";
+import { STYLE, avatarPrompt, sanitizeNote, seedFor } from "./prompt";
 import { DEFAULT_EDIT_MODEL, SiliconFlowProvider } from "./provider";
 import { storedResult } from "./testing";
 
@@ -30,10 +32,37 @@ test("the prompt changes only the chosen appearance and names what stays", () =>
   expect(prompt).toMatch(/bald head/);
   expect(prompt).toMatch(/no glasses/);
   expect(prompt).toMatch(/#7A5139/);
-  expect(prompt).toMatch(/sporty cut .* same outfit colours/);
+  expect(prompt).toMatch(/outfit changes to sporty outdoor wear: .*, keeping exactly the same outfit colours/);
   expect(prompt).toMatch(/same pose/);
   expect(prompt).toMatch(/same flat plain background/);
   expect(prompt).not.toMatch(/Extra appearance details/);
+});
+
+test("every clothing style has its own label and its own garments in the prompt, and none of them changes the colours", () => {
+  const styles = Object.keys(APPEARANCE_LABELS.style) as Array<Appearance["style"]>;
+  expect(styles.length).toBeGreaterThanOrEqual(10);
+  expect(Object.keys(STYLE).sort()).toEqual([...styles].sort());
+  // The four original keys stay, so results stored before the list grew still read.
+  expect(styles).toEqual(expect.arrayContaining(["casual", "smart", "sporty", "artsy"]));
+  expect(new Set(Object.values(APPEARANCE_LABELS.style)).size).toBe(styles.length);
+  const prompts = styles.map((style) => avatarPrompt({ ...base, style }));
+  expect(new Set(prompts).size).toBe(styles.length);
+  for (const [index, style] of styles.entries()) {
+    const fragment = STYLE[style];
+    expect(prompts[index]).toContain(`outfit changes to ${fragment}, keeping exactly the same outfit colours`);
+    // Concrete garments, in English, with no colour words of their own (the template's colours stay) and no instruction-like text.
+    expect(fragment).toMatch(/^[a-z][a-zA-Z ,:'-]+$/);
+    expect(fragment).not.toMatch(/\b(red|blue|green|black|white|pink|yellow|purple|grey|gray|brown|orange|pastel)\b/i);
+    expect(fragment.length).toBeLessThan(160);
+  }
+  expect(avatarPrompt({ ...base, style: "chinese" })).toMatch(/mandarin collar/);
+  expect(avatarPrompt({ ...base, style: "techwear" })).toMatch(/utility pockets/);
+  expect(avatarPrompt({ ...base, style: "smart" })).toMatch(/blazer/);
+});
+
+test("the server accepts every listed style and refuses one that is not on the list", () => {
+  for (const style of Object.keys(APPEARANCE_LABELS.style)) expect(parseAppearance({ ...base, style })?.style).toBe(style);
+  expect(parseAppearance({ ...base, style: "gothic" })).toBeUndefined();
 });
 
 test("the prompt sent to the model never carries the email or the nickname", async () => {
