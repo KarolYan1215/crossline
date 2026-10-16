@@ -11,8 +11,9 @@ import { ensureMaterials, ensurePortrait, ensureSkillLibrary } from "./ledger.js
  * Chinese still on the page is listed, not failed: the example board's tasks and milestones are the person's own words and stay in the
  * language they were written in. `I18N_VERBOSE=1` prints each page's list, which is how system text that slipped through is found.
  *
- * The cookie makes the account English too (a first choice is kept on the account), so the run ends by setting it back to Chinese for
- * the suites that read this ledger after it.
+ * The suites share one account and run side by side. A cookie on an account with no choice of its own would become the account's choice
+ * (and turn every other suite's pages English), so each test first records Chinese as the account's choice from the page itself — the
+ * browser carries the session cookie, a bare request would not — and only then sets this browser's cookie to English.
  */
 const PAGES = ["/", "/milestones", "/plan", "/workbench", "/approvals", "/settings", "/onboarding", "/review", "/portrait", "/return",
   "/materials/[id]", "/materials/view", "/login", "/signup"];
@@ -21,12 +22,10 @@ const SHOTS = process.env.ENGLISH_SHOTS_DIR ?? path.join("test-results", "englis
 const addressOf = async (page: Page, where: string) => where === "/materials/[id]" ? (await ensureMaterials(page)).tutorial
   : where === "/materials/view" ? (await ensureMaterials(page)).view : where;
 
-test.beforeEach(async ({ context, baseURL }) => {
+test.beforeEach(async ({ page, context, baseURL }) => {
+  await page.goto("/api/health");
+  await page.evaluate(() => fetch("/api/locale", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ locale: "zh" }) }));
   await context.addCookies([{ name: "crossline-locale", value: "en", url: baseURL! }]);
-});
-
-test.afterAll(async ({ request }) => {
-  await request.post("/api/locale", { data: { locale: "zh" } });
 });
 
 for (const where of PAGES) {
@@ -49,12 +48,26 @@ for (const where of PAGES) {
         const style = getComputedStyle(element);
         if (style.visibility === "hidden" || style.display === "none" || Number(style.opacity) === 0) continue;
         if (han.test(text)) chinese.add(text.slice(0, 60));
-        // Overlap is measured where layout is ours: not inside a region that scrolls or clips on its own (an SVG chart is checked by its own tests).
+        // Overlap is measured where layout is ours (an SVG chart is checked by its own tests), and on what is actually drawn: text clipped
+        // by a box that hides its overflow (a clamped paragraph under its 「Show all」) is cut to that box first.
         if (element.closest("svg")) continue;
+        let clip = { left: -Infinity, top: -Infinity, right: Infinity, bottom: Infinity };
+        for (let up: Element | null = element; up && up !== document.body; up = up.parentElement) {
+          const css = getComputedStyle(up);
+          if (css.overflowX !== "visible" || css.overflowY !== "visible") {
+            const box = up.getBoundingClientRect();
+            clip = { left: Math.max(clip.left, box.left), top: Math.max(clip.top, box.top), right: Math.min(clip.right, box.right), bottom: Math.min(clip.bottom, box.bottom) };
+          }
+        }
         const range = document.createRange();
         range.selectNodeContents(node);
         index += 1;
-        for (const rect of range.getClientRects()) if (rect.width > 0 && rect.height > 0) boxes.push({ node: index, text: text.slice(0, 30), rect });
+        for (const raw of range.getClientRects()) {
+          const rect = new DOMRect(Math.max(raw.left, clip.left), Math.max(raw.top, clip.top), 0, 0);
+          rect.width = Math.min(raw.right, clip.right) - rect.left;
+          rect.height = Math.min(raw.bottom, clip.bottom) - rect.top;
+          if (rect.width > 0 && rect.height > 0) boxes.push({ node: index, text: text.slice(0, 30), rect });
+        }
       }
       const overlaps: string[] = [];
       for (let a = 0; a < boxes.length; a += 1) for (let b = a + 1; b < boxes.length; b += 1) {

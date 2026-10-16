@@ -133,17 +133,19 @@ export function MilestoneTimeline({ board, actions }: { board: MilestoneBoard; a
   };
   const todayLabelX = layout.years.some((year) => Math.abs(year.x - layout.todayX) < 40) ? layout.todayX + 40 : layout.todayX + 3;
 
+  const undatedHeading = layout.datedEnd < layout.width - 30 && layout.nodes.some((node) => node.undated);
   return <div className="mt" role="group" aria-label={t("里程碑时间轴")} data-hover={hover || edgeHover ? "" : undefined}>
     {head}
     <div className="mt-scroll" ref={frame}>
       <div className="mt-canvas" style={{ width: layout.width, height: layout.height }}>
         <svg width={layout.width} height={layout.height} aria-hidden="true" className="mt-svg">
           {layout.axis.map((mark) => <g key={`${mark.kind}${mark.x}`}><line x1={mark.x} x2={mark.x} y1={TL.headH - 4} y2={layout.height} className={mark.kind === "month" ? "mt-grid-month" : "mt-grid"} />
-            <text x={mark.x + 3} y={28} className={mark.kind === "month" ? "mt-axis-month" : "mt-axis"}>{mark.label}</text></g>)}
+            {/* A date mark too close to the 「未定日期」 zone's heading would run into it; the grid line stays. */}
+            {!(undatedHeading && mark.x + 40 > layout.datedEnd + 14) && <text x={mark.x + 3} y={28} className={mark.kind === "month" ? "mt-axis-month" : "mt-axis"}>{mark.label}</text>}</g>)}
           {layout.years.map((year) => <g key={year.label}>
             {year.boundary && <line x1={year.x} x2={year.x} y1={2} y2={layout.height} className="mt-year-line" />}
             <text x={year.x + (year.boundary ? 4 : 0)} y={12} className="mt-year">{year.label}</text></g>)}
-          {layout.datedEnd < layout.width - 30 && layout.nodes.some((node) => node.undated) && <text x={layout.datedEnd + 14} y={28} className="mt-axis">{t("未定日期")}</text>}
+          {undatedHeading && <text x={layout.datedEnd + 14} y={28} className="mt-axis">{t("未定日期")}</text>}
           {layout.rows.map((row) => <g key={row.line} data-line={row.line}>
             <line x1={TL.labelW} x2={layout.width - 8} y1={row.axisY} y2={row.axisY} className="mt-axisline" />
             <line x1={0} x2={layout.width} y1={row.y + row.height} y2={row.y + row.height} className="mt-rowrule" /></g>)}

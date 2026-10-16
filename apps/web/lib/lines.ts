@@ -3,10 +3,18 @@ import { checkGoalParts, composeGoal, type AccessContext } from "@crossline/core
 import { LINE_PALETTE, LINE_SETTING, MAX_HARD_LINES, defaultIdentityPacks, freeLineColor, identityPacksFor, newLineId, readLineSpecs, type IdentityPack, type LineSpec } from "@crossline/identity-packs";
 import { getStore } from "./crossline";
 import { localeFor } from "./locale";
+import { tFor } from "./i18n";
 
-/** Every pack this workspace works with: its lines (built-in or its own) and the capacity pack. */
+const BUILT_IN_LABEL = new Map(defaultIdentityPacks().map((pack) => [pack.id, pack.label]));
+
+/**
+ * Every pack this workspace works with: its lines (built-in or its own) and the capacity pack. A built-in line still under its built-in
+ * name (研究者 on `research`) is the app's word, shown in the page's language (docs/i18n.md); a name the person gave stays as written.
+ */
 export function linePacks(ctx: AccessContext, options: { includeArchived?: boolean } = {}): IdentityPack[] {
-  return identityPacksFor((key) => getStore().getSetting(ctx.workspaceId, key), options);
+  const packs = identityPacksFor((key) => getStore().getSetting(ctx.workspaceId, key), options);
+  const t = tFor(localeFor(ctx));
+  return packs.map((pack) => BUILT_IN_LABEL.get(pack.id) === pack.label ? { ...pack, label: t(pack.label) } : pack);
 }
 /** The lines alone (no capacity pack). */
 export const identityLines = (ctx: AccessContext) => linePacks(ctx).filter((pack) => pack.kind === "identity");
