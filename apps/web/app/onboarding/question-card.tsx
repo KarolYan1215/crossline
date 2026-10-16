@@ -1,5 +1,6 @@
 "use client";
 
+import { useT } from "../locale-context";
 import type { Answer, Identity, Project, Question } from "./onboarding-types";
 
 /**
@@ -13,6 +14,7 @@ export function QuestionCard({ question, answer, onChange, identities, projects,
   /** A deep question shows its words in the conversation itself and takes its answer from the composer below (docs/onboarding-v3.md). */
   hideText?: boolean; hideOther?: boolean;
 }) {
+  const t = useT();
   const about = [identities.find((identity) => identity.id === question.identityId)?.label,
     projects.find((project) => project.id === question.projectId)?.name].filter(Boolean).join(" · ");
   const toggle = (id: string) => {
@@ -28,7 +30,7 @@ export function QuestionCard({ question, answer, onChange, identities, projects,
         {option.label}{option.detail && <small>{option.detail}</small>}
       </button>)}
     </div>}
-    {!hideOther && (question.allowOther || question.kind === "free") && <input className="ob-other" value={answer.other} aria-label={`${question.text} — 其他`}
-      placeholder={question.kind === "free" ? "回答…" : "其他（可不填）…"} onChange={(event) => onChange({ ...answer, other: event.target.value })} />}
+    {!hideOther && (question.allowOther || question.kind === "free") && <input className="ob-other" value={answer.other} aria-label={t("{{question}} — 其他", { question: question.text })}
+      placeholder={question.kind === "free" ? t("回答…") : t("其他（可不填）…")} onChange={(event) => onChange({ ...answer, other: event.target.value })} />}
   </fieldset>;
 }

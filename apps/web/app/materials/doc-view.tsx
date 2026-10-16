@@ -1,6 +1,7 @@
 import { Fragment, type ReactNode } from "react";
 import { splitParagraph } from "../ui/markdown";
 import { safeHref, type DocBlock, type ListItem, type Span } from "./doc-blocks";
+import { useT } from "../locale-context";
 
 /** One run of text with its marks; a link only to a web address or an anchor. Text, never HTML. */
 export function Spans({ spans }: { spans: Span[] }) {
@@ -19,6 +20,7 @@ export function Spans({ spans }: { spans: Span[] }) {
 
 /** A flat list with depths drawn as nested lists, so a Word or Markdown outline keeps its levels. */
 function List({ ordered, items }: { ordered: boolean; items: ListItem[] }) {
+  const t = useT();
   type Node = { item: ListItem; children: Node[] };
   const roots: Node[] = [];
   const stack: Node[] = [];
@@ -31,7 +33,7 @@ function List({ ordered, items }: { ordered: boolean; items: ListItem[] }) {
   const draw = (nodes: Node[], top: boolean): ReactNode => {
     const Tag = top && ordered ? "ol" : "ul";
     return <Tag>{nodes.map((node, index) => <li key={index} data-checked={node.item.checked === undefined ? undefined : String(node.item.checked)}>
-      {node.item.checked !== undefined && <span className="doc-check" aria-label={node.item.checked ? "已完成" : "未完成"}>{node.item.checked ? "☑" : "☐"}</span>}
+      {node.item.checked !== undefined && <span className="doc-check" aria-label={node.item.checked ? t("已完成") : t("未完成")}>{node.item.checked ? "☑" : "☐"}</span>}
       <Spans spans={node.item.spans} />{node.children.length > 0 && draw(node.children, false)}</li>)}</Tag>;
   };
   return <>{draw(roots, true)}</>;

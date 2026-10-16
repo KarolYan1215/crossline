@@ -3,6 +3,7 @@ import { OnboardingWorkspace } from "./onboarding-workspace";
 import "./onboarding-v3.css";
 import { requireSessionContext } from "../../lib/access-guard";
 import { interviewStatus } from "../../lib/interview-status";
+import { tOf } from "../../lib/locale";
 
 export const dynamic = "force-dynamic";
 
@@ -15,8 +16,9 @@ export default async function OnboardingPage({ searchParams }: { searchParams: P
   const { line } = await searchParams;
   const valid = line && /^[a-z0-9-]{1,40}$/.test(line) ? line : undefined;
   const focus = !valid && !interviewStatus(ctx).readyToStart;
-  return <AppShell active="设置" className="ob-page" focus={focus} corner={false}>
-    <h1 className="sr-only">访谈</h1>
+  const t = tOf(ctx);
+  return <AppShell active={"设置"} className="ob-page" focus={focus} corner={false}>
+    <h1 className="sr-only">{t("访谈")}</h1>
     <OnboardingWorkspace line={valid} />
   </AppShell>;
 }

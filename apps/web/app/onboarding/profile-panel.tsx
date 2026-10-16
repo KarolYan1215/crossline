@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useT } from "../locale-context";
 import type { Fact } from "./onboarding-types";
 
 const SLOT_LABEL: Record<string, string> = {
@@ -13,25 +14,26 @@ const SLOT_PREFIX: Array<[string, string]> = [["flywheel_", "线间关系"], ["d
 /** A slot is the model's key, never shown as such: a known one gets its name, anything else a neutral 「备注」. */
 export const slotLabel = (slot: string) => SLOT_LABEL[slot] ?? SLOT_PREFIX.find(([prefix]) => slot.startsWith(prefix))?.[1] ?? "备注";
 export function FactList({ facts, onChange }: { facts: Fact[]; onChange: (body: Record<string, unknown>) => Promise<void> }) {
+  const t = useT();
   const [editing, setEditing] = useState<string | undefined>();
   const [draft, setDraft] = useState("");
   const key = (fact: Fact) => `${fact.projectId}|${fact.slot}`;
   return <dl className="ob-facts">
     {facts.map((fact) => <div key={key(fact)} data-status={fact.status}>
-      <dt>{slotLabel(fact.slot)}</dt>
+      <dt>{t(slotLabel(fact.slot), { context: "slot" })}</dt>
       <dd>
         {editing === key(fact)
           ? <form onSubmit={(event) => {
               event.preventDefault();
               void onChange({ action: "confirm_fact", identityId: fact.identityId, projectId: fact.projectId, slot: fact.slot, value: draft });
               setEditing(undefined);
-            }}><input autoFocus value={draft} onChange={(event) => setDraft(event.target.value)} /><button type="submit" className="ob-btn">保存</button></form>
+            }}><input autoFocus value={draft} onChange={(event) => setDraft(event.target.value)} /><button type="submit" className="ob-btn">{t("保存")}</button></form>
           : <>
-              <button type="button" className="ob-text" title="点击修改" onClick={() => { setEditing(key(fact)); setDraft(fact.value); }}>{fact.value}</button>
+              <button type="button" className="ob-text" title={t("点击修改")} onClick={() => { setEditing(key(fact)); setDraft(fact.value); }}>{fact.value}</button>
               {fact.status === "inferred" && <span className="ob-actions">
-                <span className="ob-tag" data-kind="inferred">推断</span>
-                <button type="button" className="ob-btn" aria-label={`确认${slotLabel(fact.slot)}`} onClick={() => void onChange({ action: "confirm_fact", identityId: fact.identityId, projectId: fact.projectId, slot: fact.slot })}>确认</button>
-                <button type="button" className="ob-btn ob-quiet" aria-label={`去掉${slotLabel(fact.slot)}`} onClick={() => void onChange({ action: "remove_fact", identityId: fact.identityId, projectId: fact.projectId, slot: fact.slot })}>去掉</button>
+                <span className="ob-tag" data-kind="inferred">{t("推断")}</span>
+                <button type="button" className="ob-btn" aria-label={t("确认{{slot}}", { slot: t(slotLabel(fact.slot), { context: "slot" }) })} onClick={() => void onChange({ action: "confirm_fact", identityId: fact.identityId, projectId: fact.projectId, slot: fact.slot })}>{t("确认")}</button>
+                <button type="button" className="ob-btn ob-quiet" aria-label={t("去掉{{slot}}", { slot: t(slotLabel(fact.slot), { context: "slot" }) })} onClick={() => void onChange({ action: "remove_fact", identityId: fact.identityId, projectId: fact.projectId, slot: fact.slot })}>{t("去掉")}</button>
               </span>}
             </>}
       </dd>

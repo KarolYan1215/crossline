@@ -92,9 +92,20 @@ export function composeAnswers(questions: Question[], answers: Record<string, An
     const answer = answers[question.id];
     if (!answer || (!answer.picked.length && !answer.other.trim())) continue;
     const labels = answer.picked.map((id) => question.options.find((option) => option.id === id)?.label).filter(Boolean);
+    // The markers are a wire format read back by `answeredGapFacts` (packages/core/src/profile-gaps.ts), not interface text.
+    /* i18n-ignore-start */
     const line = [labels.length ? `选择：${labels.join("；")}` : "", answer.other.trim() ? `补充：${answer.other.trim()}` : ""].filter(Boolean).join("。");
     parts.push(`【${question.text}】${line}`);
+    /* i18n-ignore-end */
   }
   if (freeText.trim()) parts.push(freeText.trim());
   return parts.join("\n");
+}
+
+/**
+ * Whether a round's question (written by the model, in either language) asks about a line's long-term goal, so that picking options for it
+ * adopts that goal (`adoptGoalsFromRound` in onboarding-workspace.tsx).
+ */
+export function asksLongTermGoal(text: string): boolean {
+  return /长期目标|long[- ]term goal/i.test(text); // i18n-ignore: matched against model-written text
 }

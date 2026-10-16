@@ -11,6 +11,7 @@ import { Namer, cleanText, humanTable, humanizeBlocks, type Names, type Status }
 import { isTooling, materialKind, viewerHref, withQuery } from "./kinds";
 import type { MaterialPreview } from "./preview";
 import { stepAnchor } from "./tutorial-model";
+import { useLocale, useT } from "../locale-context";
 
 export type AssistantOutput = { taskId: string; title: string; status: string; stepId: string; files: Array<{ path: string; name: string }> };
 export type AssistantMaterialsProps = {
@@ -58,9 +59,10 @@ function usePreview(src: string | undefined, namer: Namer): Loaded | undefined {
 /** One file drawn by its use, from its raw blocks; every string on the way out is cleaned of paths, hashes and internal codes. */
 function Drawing({ blocks, visual, namer }: { blocks: DocBlock[]; visual: Visual; namer: Namer }) {
   // A ledger or a checklist shows its first rows; the rest are one click away, so the task detail stays short.
+  const t = useT();
   const [all, setAll] = useState(false);
   const more = (total: number) => total > SHORT && <button type="button" className="text-button av-more" aria-expanded={all} onClick={() => setAll(!all)}>
-    {all ? "收起" : `显示全部 ${total} 项`}</button>;
+    {all ? t("收起") : t("显示全部 {{count}} 项", { count: total })}</button>;
   if (!blocks.length) return null;
   if (visual === "ledger") {
     const raw = ledgerOf(blocks);
@@ -69,7 +71,7 @@ function Drawing({ blocks, visual, namer }: { blocks: DocBlock[]; visual: Visual
     if (table) return <div className="doc-table-wrap"><table className="doc-table gen">
       {table.header.length > 0 && <thead><tr>{table.header.map((cell, index) => <th key={index} scope="col">{cell}</th>)}</tr></thead>}
       <tbody>{table.rows.slice(0, all ? 60 : SHORT).map((row, index) => <tr key={index}>{row.map((cell, column) => <td key={column}>{cell}</td>)}</tr>)}</tbody>
-    </table>{more(table.total)}{all && table.total > 60 && <small className="muted">共 {table.total} 行，显示前 60 行</small>}</div>;
+    </table>{more(table.total)}{all && table.total > 60 && <small className="muted">{t("共 {{count}} 行，显示前 60 行", { count: table.total })}</small>}</div>;
   }
   if (visual === "checklist") {
     const rows = checklistOf(blocks, namer);
@@ -77,10 +79,10 @@ function Drawing({ blocks, visual, namer }: { blocks: DocBlock[]; visual: Visual
       const done = rows.filter((row) => row.done).length;
       return <div className="av-check">
         <p className="av-check-count"><span className="av-check-bar" aria-hidden="true"><span style={{ width: `${(done / rows.length) * 100}%` }} /></span>
-          <small>{done} / {rows.length} 项已有</small></p>
+          <small>{t("{{done}} / {{total}} 项已有", { done, total: rows.length })}</small></p>
         <ul>{rows.slice(0, all ? 60 : SHORT).map((row, index) => <li key={index} data-done={row.done === undefined ? undefined : String(row.done)}>
-          {row.status ? <Tag tone={STATUS_TONE[row.status]}>{row.status}</Tag>
-            : <span className="doc-check" aria-label={row.done ? "已有" : "未有"}>{row.done ? "☑" : "☐"}</span>}
+          {row.status ? <Tag tone={STATUS_TONE[row.status]}>{t(row.status)}</Tag>
+            : <span className="doc-check" aria-label={row.done ? t("已有") : t("未有")}>{row.done ? "☑" : "☐"}</span>}
           <span className="gen">{row.label}</span>{row.note && <small className="gen muted">{row.note}</small>}</li>)}</ul>
         {more(rows.length)}
       </div>;
@@ -114,13 +116,14 @@ function OutputCard({ taskId, item, group, namer }: { taskId: string; item: Outp
   const visual = visualFor(group, item.name, item.purpose);
   const loaded = usePreview(DRAWN.has(kind) ? (item.previewPath ? fileHref(taskId, item.previewPath) : src) : undefined, namer);
   const named = cleanText(item.name, namer);
-  const title = loaded?.title || (named && !TECHNICAL_NAME.test(named) ? named : group);
+  const title = loaded?.title || (named && !TECHNICAL_NAME.test(named) ? named : namer.t(group));
   const purpose = cleanText(item.purpose, namer);
+  const t = namer.t;
   return <li className="av-item" data-visual={visual}>
     <p className="av-item-head"><a href={read}><b className="gen">{title}</b></a>
-      <a className="av-download" href={withQuery(src, "download", "1")} download>下载</a></p>
+      <a className="av-download" href={withQuery(src, "download", "1")} download>{t("下载")}</a></p>
     {purpose && visual !== "ledger" && <p className="gen av-purpose">{purpose}</p>}
-    {loaded === undefined && DRAWN.has(kind) && <p className="muted"><small>读取中…</small></p>}
+    {loaded === undefined && DRAWN.has(kind) && <p className="muted"><small>{t("读取中…")}</small></p>}
     {loaded && <Drawing blocks={loaded.blocks} visual={visual} namer={namer} />}
     {kind === "image" && <img className="mv-image" src={src} alt={title} loading="lazy" />}
   </li>;
@@ -128,9 +131,11 @@ function OutputCard({ taskId, item, group, namer }: { taskId: string; item: Outp
 
 /** One run's results, grouped by use; when its grouping cannot be read, its files by name (scaffolding left out). */
 function Run({ output }: { output: AssistantOutput }) {
+  const t = useT();
+  const locale = useLocale();
   const [grouped, setGrouped] = useState<(GroupedOutputs & { names?: Names }) | null | undefined>();
   // The readable names of the files this run read, keyed by the hash its copy was stored under and the code it gave each one.
-  const namer = useMemo(() => new Namer(grouped?.names ?? {}), [grouped]);
+  const namer = useMemo(() => new Namer(grouped?.names ?? {}, locale), [grouped, locale]);
   useEffect(() => {
     let live = true;
     void fetch(`/api/agent/tasks/${encodeURIComponent(output.taskId)}/file?view=outputs`, { cache: "no-store" })
@@ -138,12 +143,12 @@ function Run({ output }: { output: AssistantOutput }) {
       .then((value) => { if (live) setGrouped(value); });
     return () => { live = false; };
   }, [output.taskId]);
-  if (grouped === undefined) return <p className="muted"><small>读取中…</small></p>;
+  if (grouped === undefined) return <p className="muted"><small>{t("读取中…")}</small></p>;
   const groups = grouped?.groups.length ? grouped.groups : [{ group: "成品", items: output.files.filter((file) => !isTooling(file.path)).map((file): OutputItem => ({
     path: file.path.replace(/\\/g, "/"), name: file.name.replace(/\.[^.]+$/, ""), purpose: "", group: "成品", preview: "none" })) }].filter((entry) => entry.items.length);
-  if (!groups.length) return <p className="muted"><small>这次没有可读的成品。</small></p>;
-  return <>{groups.map((entry) => <section key={entry.group} className="av-group" aria-label={entry.group}>
-    <h5>{entry.group} · {entry.items.length}</h5>
+  if (!groups.length) return <p className="muted"><small>{t("这次没有可读的成品。")}</small></p>;
+  return <>{groups.map((entry) => <section key={entry.group} className="av-group" aria-label={t(entry.group)}>
+    <h5>{t(entry.group)} · {entry.items.length}</h5>
     <ul>{entry.items.map((item) => <OutputCard key={item.path} taskId={output.taskId} item={item} group={entry.group} namer={namer} />)}</ul>
   </section>)}</>;
 }
@@ -154,14 +159,15 @@ function Run({ output }: { output: AssistantOutput }) {
  * are ready (accepted, or waiting for review) are shown.
  */
 export function AssistantMaterials({ outputs, steps = [], stepHref = (id) => `#${stepAnchor(id)}` }: AssistantMaterialsProps) {
+  const t = useT();
   const ready = outputs.filter((output) => (output.status === "accepted" || output.status === "needs_review") && output.files.length);
   if (!ready.length) return null;
   return <div className="assistant-materials">{ready.map((output) => {
     const step = steps.find((item) => item.id === output.stepId);
     return <article key={output.taskId} className="av-run">
       <header><b className="gen">{output.title}</b>
-        {output.status === "needs_review" && <span className="tag">待审阅</span>}
-        {step && <a href={stepHref(step.id)}>步骤：{step.title}</a>}</header>
+        {output.status === "needs_review" && <span className="tag">{t("待审阅")}</span>}
+        {step && <a href={stepHref(step.id)}>{t("步骤：{{step}}", { step: step.title })}</a>}</header>
       <Run output={output} />
     </article>;
   })}</div>;

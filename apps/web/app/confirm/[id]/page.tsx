@@ -4,6 +4,7 @@ import { requireSessionContext } from "../../../lib/access-guard";
 import { confirmView } from "../../../lib/confirm";
 import { ConfirmForm } from "../confirm-form";
 import "../confirm.css";
+import { tOf } from "../../../lib/locale";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +14,8 @@ export default async function ConfirmPage({ params }: { params: Promise<{ id: st
   const { id } = await params;
   const view = confirmView(ctx, id);
   if (!view) notFound();
-  return <SubpageShell active="今日" title="确认时间块">
+  const t = tOf(ctx);
+  return <SubpageShell active={"今日"} title={t("确认时间块")}>
     <ConfirmForm view={view} />
   </SubpageShell>;
 }

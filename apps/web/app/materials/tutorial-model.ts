@@ -57,9 +57,22 @@ export function matchSteps(nodes: BookNode[], steps: Array<{ id: string; title: 
   return out;
 }
 
-/** A Markdown section (`## 怎样算做到`) of a step's task file, as text. */
+/**
+ * The book's own headings, as the worker writes them (in Chinese, and in English once it writes in the workspace's language): matched
+ * against the files, never shown.
+ */
+/* i18n-ignore-start */
+const DONE_WHEN = "怎样算做到|How it counts as done|Done when|Definition of done";
+const ASSUMPTIONS = "假设|Assumptions";
+const FLOW = "流程|Flow|Workflow";
+const SOURCES = "参考来源|Sources|References";
+const GOAL = "目标|Goal";
+const MISSING_EN = "Still needed|Needs adding|Missing";
+/* i18n-ignore-end */
+
+/** A Markdown section (`## 怎样算做到`) of a step's task file, as text; `heading` may be several alternatives. */
 function sectionOf(markdown: string, heading: string): string {
-  const match = new RegExp(`^##\\s*${heading}\\s*\\n([\\s\\S]*?)(?=\\n##\\s|$)`, "m").exec(markdown);
+  const match = new RegExp(`^##\\s*(?:${heading})\\s*\\n([\\s\\S]*?)(?=\\n##\\s|$)`, "m").exec(markdown);
   return match?.[1]?.trim() ?? "";
 }
 
@@ -81,6 +94,10 @@ function liftMissing(text: string): { text: string; missing: string[] } {
   const missing: string[] = [];
   const rest = text.replace(/^[ \t>*-]*需要补充[:：]\s*(.+?)(?:(?<=[。；;])|\n|$)/gm, (_whole, items: string) => {
     missing.push(...items.replace(/[。；;]$/, "").split(/[、；;]/).map((item) => item.trim()).filter(Boolean));
+    return "";
+  // The English line runs to its end ("Still needed: the problem sheet, the dataset."), its items split at commas and semicolons.
+  }).replace(new RegExp(`^[ \\t>*-]*(?:${MISSING_EN}):\\s*(.+)$`, "gmi"), (_whole, items: string) => {
+    missing.push(...items.replace(/[.;]\s*$/, "").split(/;\s*|,\s+/).map((item) => item.trim()).filter(Boolean));
     return "";
   });
   return { text: rest.trim(), missing: [...new Set(missing)] };
@@ -138,17 +155,18 @@ export function buildTutorial(workOrderId: string, book: Book): Tutorial {
     }).replace(/(\[\^\d+\])(\s*\1)+/g, "$1");
     const body = (text: string) => text.replace(/^# .*\n+/, "").trim();
     const guideRaw = liftMissing(cite(body(content.tutorial || "")));
-    const analysisRaw = liftMissing(cite(body(content.analysis || "").replace(/\n##\s*参考来源[\s\S]*$/, "")));
-    const guide = dropRepeats(guideRaw.text || cite(body(content.task || "").replace(/^\*\*目标\*\*[:：].*$/m, "").replace(/\n##\s*怎样算做到[\s\S]*?(?=\n##\s|$)/, "")));
+    const analysisRaw = liftMissing(cite(body(content.analysis || "").replace(new RegExp(`\\n##\\s*(?:${SOURCES})[\\s\\S]*$`), "")));
+    const guide = dropRepeats(guideRaw.text || cite(body(content.task || "").replace(new RegExp(`^\\*\\*(?:${GOAL})\\*\\*[:：].*$`, "m"), "")
+      .replace(new RegExp(`\\n##\\s*(?:${DONE_WHEN})[\\s\\S]*?(?=\\n##\\s|$)`), "")));
     const analysis = dropRepeats(analysisRaw.text, guide.split(/\n{2,}/));
     const materials = book.materials.filter((item) => item.nodes?.includes(node.id)).map((item) => item.index);
     const stepId = stepOf.get(node.id);
     return { nodeId: node.id, ...(stepId ? { stepId } : {}), number, title: node.title, kind: node.kind, goal: node.goal,
-      acceptance: sectionOf(content.task, "怎样算做到"), missing: [...new Set([...guideRaw.missing, ...analysisRaw.missing])],
+      acceptance: sectionOf(content.task, DONE_WHEN), missing: [...new Set([...guideRaw.missing, ...analysisRaw.missing])],
       guide, analysis, cites: [...cites].sort((a, b) => a - b), materials };
   });
 
-  const overview = book.manual.split(/\n## (?:假设|流程)/)[0]?.replace(/^# .*\n+/, "").trim() ?? "";
-  const assumptions = sectionOf(book.manual, "假设").split("\n").map((line) => line.replace(/^\s*[-*]\s*/, "").trim()).filter(Boolean);
+  const overview = book.manual.split(new RegExp(`\\n## (?:${ASSUMPTIONS}|${FLOW})`))[0]?.replace(/^# .*\n+/, "").trim() ?? "";
+  const assumptions = sectionOf(book.manual, ASSUMPTIONS).split("\n").map((line) => line.replace(/^\s*[-*]\s*/, "").trim()).filter(Boolean);
   return { overview, assumptions, sections, footnotes };
 }
