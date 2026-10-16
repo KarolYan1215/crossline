@@ -378,6 +378,9 @@
 **这台主机上的部署形态**（`deploy/`）
 - 镜像由 GitHub Actions 构建（`.github/workflows/images.yml`：`deploy/app/Dockerfile` 和 `apps/assess/Dockerfile`），推到 `ghcr.io/karolyan1215/crossline-{app,assess}:beta`，主机只 `docker pull`。2 GB 的主机上 `next build` 换页把香港、新加坡两台都拖死过，所以不再在主机上构建（`build.sh` 留作 `CROSSLINE_LOCAL_IMAGES=1` 的备用）。仓库是私有的：主机先执行一次 `sudo docker login ghcr.io -u <GitHub 用户名>`，密码填一个只有 `read:packages` 权限的 token。
 - 云端会话没有出站 SSH（代理只转 HTTPS），所以连主机走 GitHub Actions：`.github/workflows/server.yml` 用仓库密钥 `DEPLOY_SSH_KEY` 登录 `admin@47.245.88.172`。提交信息带 `[server]` 只做体检（负载、内存、容器、Caddy、本机端口），带 `[deploy]` 先换上本次提交的 `run.sh`，再用这次作业自带的 token 登录 ghcr 拉镜像、重启容器、登出；也可以在 Actions 页手动运行。
+- 把本人本机的账本搬到服务器上的账号（整份覆盖）：本机 `pnpm exec tsx scripts/pack-for-server.ts --to-email <服务器上登录用的邮箱>`（在线备份账本，连同 `materials`、`sources`、画像打包，写清单），`scp` 到主机的 `/tmp/crossline-transfer.tgz`；提交信息带 `[migrate]` 只预览，带 `[migrate-apply]` 停应用、把服务器账本复制到 `/srv/crossline/backups`、用 `scripts/migrate-workspace.ts --replace` 清空该账号已有内容后导入（Windows 路径改成服务器路径）、再启动应用。DPAPI 加密的本机密钥（日历、模型供应商）和本机 Codex 登录不随账本过去。
+- `run.sh` 重启 worker 前删 `/srv/crossline/data/worker.lock`：旧容器删掉后它的心跳锁 45 分钟内仍算新鲜，新 worker 会报 `worker.already_running` 退出并循环重启。
+- 2026-10-16 实测：新加坡主机上 Codex 0.155.0 能发起设备码登录并拿到验证码；`api.openai.com` 回 401（未按地区屏蔽）。
 - 三个容器：
   - `assess`：`127.0.0.1:3340`；
   - `crossline-web`：主机网络，`127.0.0.1:3210`；
