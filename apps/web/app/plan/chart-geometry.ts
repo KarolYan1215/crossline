@@ -3,6 +3,9 @@
  * rendering anything.
  */
 
+import { tFor, type Locale } from "../../lib/i18n";
+import { monthLabel } from "../timeline/format";
+
 const DAY = 86_400_000;
 
 /** Hours with one decimal, from minutes: 「4.5」. */
@@ -40,7 +43,9 @@ export function logDomain(values: number[]): { min: number; max: number; ticks: 
   const max = MINUTE_TICKS.find((tick) => tick >= high * 1.1) ?? 960;
   return { min, max: Math.max(max, min * 4), ticks: MINUTE_TICKS.filter((tick) => tick >= min && tick <= Math.max(max, min * 4)) };
 }
-export const minuteLabel = (minutes: number) => minutes >= 60 ? `${minutes / 60} 时` : `${minutes} 分`;
+/** 「30 分」, 「2 时」 / "30 min", "2 h". */
+export const minuteLabel = (minutes: number, locale?: Locale) =>
+  minutes >= 60 ? tFor(locale)("{{n}} 时", { n: minutes / 60 }) : tFor(locale)("{{n}} 分", { n: minutes });
 
 /** `count` equal bands across `width`, each with a centred bar of `fill` of the band. */
 export function bands(count: number, width: number, fill = 0.62) {
@@ -105,7 +110,7 @@ const DAY_MS = 86_400_000;
  * Month ticks from `start` to `end` (YYYY-MM-DD): the first of each month inside the span, every month up to nine months and every
  * other one beyond; a label carries the year on the first tick and wherever the year turns (「2026年10月」, 「11月」, 「2027年1月」).
  */
-export function monthTicks(start: string, end: string): Array<{ day: string; label: string }> {
+export function monthTicks(start: string, end: string, locale?: Locale): Array<{ day: string; label: string }> {
   const span = (Date.parse(`${end}T12:00:00Z`) - Date.parse(`${start}T12:00:00Z`)) / DAY_MS;
   const step = span > 270 ? 2 : 1;
   const ticks: Array<{ day: string; label: string }> = [];
@@ -115,7 +120,7 @@ export function monthTicks(start: string, end: string): Array<{ day: string; lab
     const day = `${year}-${String(month).padStart(2, "0")}-01`;
     if (day > end) break;
     const newYear = !ticks.length || ticks.at(-1)!.day.slice(0, 4) !== String(year);
-    ticks.push({ day, label: newYear ? `${year}年${month}月` : `${month}月` });
+    ticks.push({ day, label: monthLabel(locale, year, month, newYear) });
     month += step;
     while (month > 12) { month -= 12; year += 1; }
   }
@@ -127,8 +132,8 @@ export function monthTicks(start: string, end: string): Array<{ day: string; lab
  * plot so the top tick's label never runs into it, the left margin holds the widest y label, and the right margin is half the last x
  * label so that label, centred on the last tick, is not cut off at the edge. `titleBaseline` is where 「实际」 is drawn.
  */
-export function scatterMargins(ticks: number[], px = 12): { left: number; right: number; top: number; bottom: number; titleBaseline: number } {
-  const widths = ticks.map((tick) => textWidth(minuteLabel(tick), px));
+export function scatterMargins(ticks: number[], px = 12, locale?: Locale): { left: number; right: number; top: number; bottom: number; titleBaseline: number } {
+  const widths = ticks.map((tick) => textWidth(minuteLabel(tick, locale), px));
   const titleBaseline = px;
   return {
     left: Math.max(40, Math.max(0, ...widths) + 8),

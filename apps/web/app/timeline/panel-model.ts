@@ -1,3 +1,5 @@
+import type { Locale } from "../../lib/i18n";
+import { hoursText } from "./format";
 import { toMinutes, type TimelineItem } from "./model";
 
 /**
@@ -46,4 +48,5 @@ export function otherOpenSteps(stepId: string | undefined, steps: Array<{ id: st
   return steps.filter((step) => step.status === "planned" && step.schedulable && step.id !== stepId).length;
 }
 
-export const hoursLabel = (minutes: number) => `${Math.round(minutes / 6) / 10} 小时`;
+/** 「1.5 小时」 / "1.5 h". */
+export const hoursLabel = (minutes: number, locale?: Locale) => hoursText(locale, minutes);

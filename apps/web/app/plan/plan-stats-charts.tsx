@@ -6,6 +6,9 @@ import { Ring } from "../ui/charts";
 import { LineTag, Tag } from "../ui/tag";
 import { bands, dayAt, heatLevel, hours, labelEvery, linear, linearTicks, logDomain, logScale, md, minuteLabel, monthTicks, packLabels, scatterMargins, textWidth } from "./chart-geometry";
 import { usePlanPreview } from "./preview-context";
+import { useLocale, useT } from "../locale-context";
+import { weekdayShort, type Locale, type Translate } from "../../lib/i18n";
+import { clip } from "../timeline/format";
 
 /**
  * The plan page's charts (decided 2026-10-10, redrawn 2026-10-15): one milestone timeline per line, capacity against demand, planned
@@ -32,7 +35,12 @@ function useWidth(initial: number): [(node: HTMLDivElement | null) => void, numb
 }
 
 const h1 = (minutes: number) => `${hours(minutes)} h`;
-const WEEKDAY = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+
+/** A weekday in one character (「一」) or two letters ("Mo"), for the rhythm grid's narrow gutter. */
+const dayInitial = (locale: Locale, day: number) => locale === "en" ? weekdayShort(locale, day).slice(0, 2) : weekdayShort(locale, day).slice(1);
+/** A name cut to fit `px`: in Chinese it keeps `chars` characters as before; in English it is cut by its drawn width. */
+const fitName = (locale: Locale, name: string, px: number, size: number, chars: number) =>
+  locale === "en" ? clip(locale, name, Math.max(2, Math.floor(px / size))) : `${[...name].slice(0, chars).join("")}…`;
 
 function Card({ title, note, label, tags, children, data }: { title: string; note?: ReactNode; label: string; tags?: ReactNode; children: ReactNode;
   data?: Record<string, string | number> }) {
@@ -43,7 +51,8 @@ function Card({ title, note, label, tags, children, data }: { title: string; not
 }
 
 function PreviewNote() {
-  return <p className="pl-preview-note" role="status"><span className="pl-key" data-k="ghost" />虚线为改动前，实线为预览中的改动后</p>;
+  const t = useT();
+  return <p className="pl-preview-note" role="status"><span className="pl-key" data-k="ghost" />{t("虚线为改动前，实线为预览中的改动后")}</p>;
 }
 
 /* ── 1. capacity and demand ── */
@@ -61,6 +70,7 @@ export function CapacityChart({ weeks, labels, statedWeekly, configuredWeekly, u
   statedWeekly: number | null; configuredWeekly: number; usingDefault: boolean;
   /** Where the hours came from (`resolveAvailability`); anything but `saved` is said on the chart until the person paints their week. */
   source?: "saved" | "interview" | "stated_hours" | "default" }) {
+  const t = useT();
   const preview = usePlanPreview();
   const shown = preview?.after.capacity ?? weeks;
   const ghost = preview?.before.capacity ?? null;
@@ -78,17 +88,17 @@ export function CapacityChart({ weeks, labels, statedWeekly, configuredWeekly, u
   const scheduledFirst = shown[0]?.lines.reduce((sum, line) => sum + line.scheduled, 0) ?? 0;
   const point = (week: CapacityWeek, index: number) => `${left + layout.centre(index)},${y(week.usableMinutes / 60)}`;
   const tip = active !== null ? shown[active] : undefined;
-  return <Card title="容量与需求" label="容量与需求" data={{ "scheduled-minutes": scheduledFirst }}
-    note={<>{statedWeekly !== null && <span title={`画像所述每周投入 ${statedWeekly} 小时`}>所述每周 {statedWeekly} h · </span>}
-      <span title={`可用时段每周 ${configuredWeekly} 小时（未扣除日历）`}>可用时段每周 {configuredWeekly} h</span></>}
-    tags={<>{source === "interview" ? <Tag tone="warn" title="可用时段来自访谈中所述的作息，尚未确认；在下方「可用时段」中刷涂实际作息">推断时段（访谈）</Tag>
-      : source === "stated_hours" ? <Tag tone="warn" title={`可用时段按所述每周 ${statedWeekly ?? ""} 小时平均分到每天，尚未确认；在下方「可用时段」中刷涂实际作息`}>推断时段（每周小时）</Tag>
-      : (usingDefault || source === "default") && <Tag tone="warn" title="可用时段仍为默认值，在下方「可用时段」中刷涂实际作息">默认时段</Tag>}
-      {short && <Tag tone="warn" title="可用时段少于画像所述的每周投入，排程只能使用可用时段">可用时段不足</Tag>}</>}>
+  return <Card title={t("容量与需求")} label={t("容量与需求")} data={{ "scheduled-minutes": scheduledFirst }}
+    note={<>{statedWeekly !== null && <span title={t("画像所述每周投入 {{n}} 小时", { n: statedWeekly })}>{t("所述每周 {{n}} h · ", { n: statedWeekly })}</span>}
+      <span title={t("可用时段每周 {{n}} 小时（未扣除日历）", { n: configuredWeekly })}>{t("可用时段每周 {{n}} h", { n: configuredWeekly })}</span></>}
+    tags={<>{source === "interview" ? <Tag tone="warn" title={t("可用时段来自访谈中所述的作息，尚未确认；在下方「可用时段」中刷涂实际作息")}>{t("推断时段（访谈）")}</Tag>
+      : source === "stated_hours" ? <Tag tone="warn" title={t("可用时段按所述每周 {{n}} 小时平均分到每天，尚未确认；在下方「可用时段」中刷涂实际作息", { n: statedWeekly ?? "" })}>{t("推断时段（每周小时）")}</Tag>
+      : (usingDefault || source === "default") && <Tag tone="warn" title={t("可用时段仍为默认值，在下方「可用时段」中刷涂实际作息")}>{t("默认时段")}</Tag>}
+      {short && <Tag tone="warn" title={t("可用时段少于画像所述的每周投入，排程只能使用可用时段")}>{t("可用时段不足")}</Tag>}</>}>
     {preview && <PreviewNote />}
     <div ref={box} className="pl-chart-box">
       <svg className="pl-svg" width={width} height={H} viewBox={`0 0 ${width} ${H}`} role="img"
-        aria-label={`每周需求与可用小时：${shown.map((week) => `${md(week.start)} 起需求 ${hours(week.totalP50)} 小时，可用 ${hours(week.usableMinutes)} 小时`).join("；")}`}>
+        aria-label={t("每周需求与可用小时：{{weeks}}", { weeks: shown.map((week) => t("{{day}} 起需求 {{demand}} 小时，可用 {{usable}} 小时", { day: md(week.start), demand: hours(week.totalP50), usable: hours(week.usableMinutes) })).join(t("；")) })}>
         <defs>
           <pattern id="pl-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
             <rect width="6" height="6" className="pl-hatch-bg" /><line x1="0" y1="0" x2="0" y2="6" className="pl-hatch-line" />
@@ -98,7 +108,7 @@ export function CapacityChart({ weeks, labels, statedWeekly, configuredWeekly, u
           <line x1={left} x2={left + plotW} y1={y(tick)} y2={y(tick)} className="pl-grid-line" />
           <text x={left - 4} y={y(tick)} dy="0.32em" textAnchor="end" className="pl-axis-text">{tick}</text>
         </g>)}
-        <text x={2} y={11} className="pl-axis-text">小时</text>
+        <text x={2} y={11} className="pl-axis-text">{t("小时")}</text>
         {shown.map((week, index) => {
           const x = left + layout.x(index);
           let base = 0;
@@ -107,26 +117,26 @@ export function CapacityChart({ weeks, labels, statedWeekly, configuredWeekly, u
             const name = labels[line.line] ?? line.line;
             if (line.scheduled > 0) { const from = base; base += line.scheduled;
               marks.push(<rect key={`${line.line}-s`} x={x} width={layout.bar} y={y(base / 60)} height={y(from / 60) - y(base / 60)} data-line={line.line} className="pl-seg">
-                <title>{`${name} · 已排 ${h1(line.scheduled)}`}</title></rect>); }
+                <title>{`${name} · ${t("已排 {{hours}}", { hours: h1(line.scheduled) })}`}</title></rect>); }
             if (line.pending > 0) { const from = base; base += line.pending;
               marks.push(<g key={`${line.line}-p`} data-line={line.line}>
                 <rect x={x} width={layout.bar} y={y(base / 60)} height={y(from / 60) - y(base / 60)} className="pl-seg pl-seg-pending" />
-                <rect x={x} width={layout.bar} y={y(base / 60)} height={y(from / 60) - y(base / 60)} fill="url(#pl-hatch)"><title>{`${name} · 待排 ${h1(line.pending)}`}</title></rect>
+                <rect x={x} width={layout.bar} y={y(base / 60)} height={y(from / 60) - y(base / 60)} fill="url(#pl-hatch)"><title>{`${name} · ${t("待排 {{hours}}", { hours: h1(line.pending) })}`}</title></rect>
               </g>); }
           }
           for (const line of week.lines) if (line.extra > 0) { const from = base; base += line.extra;
             marks.push(<rect key={`${line.line}-x`} x={x} width={layout.bar} y={y(base / 60)} height={y(from / 60) - y(base / 60)} data-line={line.line} className="pl-seg pl-seg-extra">
-              <title>{`${labels[line.line] ?? line.line} · 保守估时多出 ${h1(line.extra)}`}</title></rect>); }
+              <title>{`${labels[line.line] ?? line.line} · ${t("保守估时多出 {{hours}}", { hours: h1(line.extra) })}`}</title></rect>); }
           const before = ghost?.[index];
           return <g key={week.week} className="pl-cd-week" tabIndex={0} data-active={active === index || undefined}
-            aria-label={`${md(week.start)}–${md(week.end)}：需求 ${hours(week.totalP50)} 小时，保守 ${hours(week.totalP85)} 小时，可用 ${hours(week.usableMinutes)} 小时${week.overloadMinutes ? `，超载 ${hours(week.overloadMinutes)} 小时` : ""}`}
+            aria-label={`${t("{{from}}–{{to}}：需求 {{demand}} 小时，保守 {{cautious}} 小时，可用 {{usable}} 小时", { from: md(week.start), to: md(week.end), demand: hours(week.totalP50), cautious: hours(week.totalP85), usable: hours(week.usableMinutes) })}${week.overloadMinutes ? t("，超载 {{n}} 小时", { n: hours(week.overloadMinutes) }) : ""}`}
             onMouseEnter={() => setActive(index)} onMouseLeave={() => setActive(null)} onFocus={() => setActive(index)} onBlur={() => setActive(null)}>
             <rect x={left + index * layout.band} width={layout.band} y={top} height={plotH} className="pl-hit" />
             {marks}
             {before && before.totalP50 !== week.totalP50 && <rect x={x - 1.5} width={layout.bar + 3} y={y(before.totalP50 / 60)} height={Math.max(0, y(0) - y(before.totalP50 / 60))} className="pl-ghost">
-              <title>{`改动前需求 ${h1(before.totalP50)}`}</title></rect>}
+              <title>{t("改动前需求 {{hours}}", { hours: h1(before.totalP50) })}</title></rect>}
             {week.overloadMinutes > 0 && layout.band >= 30 && <text x={left + layout.centre(index)} y={Math.max(12, y(week.totalP85 / 60) - 5)} textAnchor="middle" className="pl-over-text">
-              {layout.band >= 76 ? `超载 ${hours(week.overloadMinutes)} 小时` : `+${hours(week.overloadMinutes)}`}</text>}
+              {layout.band >= 76 ? t("超载 {{n}} 小时", { n: hours(week.overloadMinutes) }) : `+${hours(week.overloadMinutes)}`}</text>}
             {index % every === 0 && <text x={left + layout.centre(index)} y={H - 8} textAnchor="middle" className="pl-axis-text">{md(week.start)}</text>}
           </g>;
         })}
@@ -134,29 +144,30 @@ export function CapacityChart({ weeks, labels, statedWeekly, configuredWeekly, u
           <polyline points={ghost.map((week, index) => point(week, index)).join(" ")} className="pl-usable pl-usable-ghost" />}
         <polyline points={shown.map((week, index) => point(week, index)).join(" ")} className="pl-usable" />
         {shown.map((week, index) => <circle key={week.week} cx={left + layout.centre(index)} cy={y(week.usableMinutes / 60)} r={3} className="pl-usable-dot">
-          <title>{`${md(week.start)} 起可用 ${h1(week.usableMinutes)}（净可用 ${h1(week.netMinutes)}，扣除预留）`}</title></circle>)}
+          <title>{t("{{day}} 起可用 {{usable}}（净可用 {{net}}，扣除预留）", { day: md(week.start), usable: h1(week.usableMinutes), net: h1(week.netMinutes) })}</title></circle>)}
       </svg>
       {tip && <div className="pl-tip" role="tooltip" style={{ left: tipLeft(left + layout.centre(active!), layout.band, width) }}>
         <b>{md(tip.start)}–{md(tip.end)}</b>
-        <span className="mono">需求 {h1(tip.totalP50)}（保守 {h1(tip.totalP85)}）· 可用 {h1(tip.usableMinutes)}</span>
+        <span className="mono">{t("需求 {{demand}}（保守 {{cautious}}）· 可用 {{usable}}", { demand: h1(tip.totalP50), cautious: h1(tip.totalP85), usable: h1(tip.usableMinutes) })}</span>
         {tip.lines.map((line) => <span key={line.line} data-line={line.line} className="pl-tip-line">
           <i className="pl-swatch" />{labels[line.line] ?? line.line} {h1(line.scheduled + line.pending)}
-          <small>已排 {h1(line.scheduled)} · 待排 {h1(line.pending)}{line.extra ? ` · 保守多 ${h1(line.extra)}` : ""}</small></span>)}
-        {tip.top && <span>占用最多：{tip.top.title || "未命名里程碑"} {h1(tip.top.minutes)}</span>}
-        {tip.overdueMinutes > 0 && <span>其中逾期 {h1(tip.overdueMinutes)}（截止在本周、未按时完成的工作）</span>}
-        {tip.overloadMinutes > 0 && <strong className="pl-risk-text">超载 {hours(tip.overloadMinutes)} 小时</strong>}
+          <small>{t("已排 {{hours}}", { hours: h1(line.scheduled) })} · {t("待排 {{hours}}", { hours: h1(line.pending) })}{line.extra ? ` · ${t("保守多 {{hours}}", { hours: h1(line.extra) })}` : ""}</small></span>)}
+        {tip.top && <span>{t("占用最多：{{title}} {{hours}}", { title: tip.top.title || t("未命名里程碑"), hours: h1(tip.top.minutes) })}</span>}
+        {tip.overdueMinutes > 0 && <span>{t("其中逾期 {{hours}}（截止在本周、未按时完成的工作）", { hours: h1(tip.overdueMinutes) })}</span>}
+        {tip.overloadMinutes > 0 && <strong className="pl-risk-text">{t("超载 {{n}} 小时", { n: hours(tip.overloadMinutes) })}</strong>}
       </div>}
     </div>
-    <p className="pl-legend"><span className="pl-key" data-k="solid" />已排　<span className="pl-key" data-k="hatch" />待排　<span className="pl-key" data-k="extra" />保守估时多出
-      <span className="pl-key" data-k="usable" />可用小时（扣除预留）</p>
+    <p className="pl-legend"><span className="pl-key" data-k="solid" />{t("已排")}　<span className="pl-key" data-k="hatch" />{t("待排")}　<span className="pl-key" data-k="extra" />{t("保守估时多出")}
+      <span className="pl-key" data-k="usable" />{t("可用小时（扣除预留）")}</p>
     {overloaded.length > 0 ? <p className="pl-over-list">{overloaded.map((week) => <Tag key={week.week} tone="risk"
-      {...(week.top ? { title: `占用最多：${week.top.title}` } : {})}>{md(week.start)} 起超载 {hours(week.overloadMinutes)} 小时</Tag>)}</p>
-      : <p className="pl-chart-foot">各周需求均在可用小时内。</p>}
+      {...(week.top ? { title: t("占用最多：{{title}}", { title: week.top.title }) } : {})}>{t("{{day}} 起超载 {{n}} 小时", { day: md(week.start), n: hours(week.overloadMinutes) })}</Tag>)}</p>
+      : <p className="pl-chart-foot">{t("各周需求均在可用小时内。")}</p>}
   </Card>;
 }
 
 /* ── 2. one timeline per line ── */
 
+/** Kept in Chinese (they are the keys); translated where shown. */
 const STATE_LABEL: Record<MilestoneState, string> = { risk: "有完不成风险", unprepared: "待准备", library: "任务在任务库" };
 const STATE_TITLE: Record<MilestoneState, string> = { risk: "保守完成日距截止不足 2 天，或在统计范围内排不完", unprepared: "尚无可排程的任务，或只有待批准的提案",
   library: "任务仍在任务库，里程碑三周内到期时排入日程" };
@@ -171,14 +182,15 @@ function Marker({ states, cx, cy, size = 11 }: { states: MilestoneState[]; cx: n
   </g>;
 }
 
-function markDetail(mark: MilestoneMark, weeks: number): string {
+function markDetail(mark: MilestoneMark, weeks: number, t: Translate): string {
   const row = mark.row;
-  return [mark.title, row.deadline ? `截止 ${row.deadline}` : "无截止日",
-    row.p50Day ? `通常 ${row.p50Day} 完成${row.p85Day ? `，保守 ${row.p85Day}` : `，保守情景在 ${weeks} 周内未完成`}` : "",
-    row.remainingP50Minutes ? `剩余 ${hours(row.remainingP50Minutes)} 小时` : "", row.slackDays !== null ? `余量 ${row.slackDays} 天` : "",
-    row.status === "no_tasks" && row.proposals ? `${row.proposals} 项提案待批准` : "",
-    row.libraryDay ? `${row.libraryDay} 起排入日程` : "", row.bottleneck ?? "",
-    mark.states.length ? `状态：${mark.states.map((state) => STATE_LABEL[state]).join("、")}` : "状态：按计划"].filter(Boolean).join("\n");
+  return [mark.title, row.deadline ? t("截止 {{day}}", { day: row.deadline }) : t("无截止日"),
+    row.p50Day ? (row.p85Day ? t("通常 {{usual}} 完成，保守 {{cautious}}", { usual: row.p50Day, cautious: row.p85Day })
+      : t("通常 {{usual}} 完成，保守情景在 {{count}} 周内未完成", { usual: row.p50Day, count: weeks })) : "",
+    row.remainingP50Minutes ? t("剩余 {{n}} 小时", { n: hours(row.remainingP50Minutes) }) : "", row.slackDays !== null ? t("余量 {{count}} 天", { count: row.slackDays }) : "",
+    row.status === "no_tasks" && row.proposals ? t("{{count}} 项提案待批准", { count: row.proposals }) : "",
+    row.libraryDay ? t("{{day}} 起排入日程", { day: row.libraryDay }) : "", row.bottleneck ?? "",
+    mark.states.length ? t("状态：{{states}}", { states: mark.states.map((state) => t(STATE_LABEL[state])).join(t("、")) }) : t("状态：按计划")].filter(Boolean).join("\n");
 }
 
 /**
@@ -192,6 +204,7 @@ export function MilestoneTimeline({ rows, today, weeks, spanDays, done = [], lab
   /** The chosen horizon: only unfinished milestones due inside it (and overdue ones) are drawn. */ spanDays: number;
   /** Milestones whose work is all accepted. */ done?: string[];
   labels: Record<string, string>; lineOrder: string[]; aside?: ReactNode }) {
+  const t = useT();
   const preview = usePlanPreview();
   const shown = preview?.after.goals ?? rows;
   const before = new Map(milestoneMarks(preview?.before.goals ?? [], today).map((mark) => [mark.id, mark]));
@@ -201,21 +214,21 @@ export function MilestoneTimeline({ rows, today, weeks, spanDays, done = [], lab
   const rank = (line: string) => { const index = lineOrder.indexOf(line); return index < 0 ? lineOrder.length : index; };
   const lines = [...new Set(marks.map((mark) => mark.line))].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
   const moved = marks.some((mark) => { const ghost = before.get(mark.id); return ghost && ghost.day !== mark.day; });
-  return <section className="pl-card pl-stat pl-timeline" aria-label="里程碑时间轴">
-    <header><h2>里程碑时间轴</h2>
-      <small>范围内未完成 {marks.length} 个{outside ? ` · 范围外或已完成 ${outside} 个` : ""}{count("risk") ? ` · 有完不成风险 ${count("risk")}` : ""}{count("unprepared") ? ` · 待准备 ${count("unprepared")}` : ""}</small>
+  return <section className="pl-card pl-stat pl-timeline" aria-label={t("里程碑时间轴")}>
+    <header><h2>{t("里程碑时间轴")}</h2>
+      <small>{t("范围内未完成 {{n}} 个", { n: marks.length })}{outside ? ` · ${t("范围外或已完成 {{n}} 个", { n: outside })}` : ""}{count("risk") ? ` · ${t("有完不成风险 {{n}}", { n: count("risk") })}` : ""}{count("unprepared") ? ` · ${t("待准备 {{n}}", { n: count("unprepared") })}` : ""}</small>
       {aside}</header>
-    {preview && (moved ? <PreviewNote /> : <p className="pl-preview-note" role="status">预览中的改动不移动任何里程碑</p>)}
+    {preview && (moved ? <PreviewNote /> : <p className="pl-preview-note" role="status">{t("预览中的改动不移动任何里程碑")}</p>)}
     <div ref={box} className="pl-chart-box">
-      {!marks.length ? <p className="pl-empty">{outside ? "统计范围内没有未完成的里程碑。" : "尚无已批准的里程碑。"}</p>
+      {!marks.length ? <p className="pl-empty">{outside ? t("统计范围内没有未完成的里程碑。") : t("尚无已批准的里程碑。")}</p>
         : width < 560 ? <TimelineList marks={marks} lines={lines} labels={labels} weeks={weeks} />
         : <TimelineAxis marks={marks} before={before} lines={lines} labels={labels} today={today} width={width} weeks={weeks} spanDays={spanDays} />}
     </div>
     <div className="pl-legend">
-      <span><span className="pl-key" data-k="ms-on" />按计划（主线色）</span>
-      {MILESTONE_STATE_ORDER.map((state) => <span key={state} title={STATE_TITLE[state]}><span className="pl-key" data-k={`ms-${state}`} />{STATE_LABEL[state]}</span>)}
-      <span><span className="pl-key" data-k="ms-combo" />同时有多种状态</span>
-      <span>点位为截止日，无截止时为保守完成日；只画统计范围内未完成的和已过期的</span>
+      <span><span className="pl-key" data-k="ms-on" />{t("按计划（主线色）")}</span>
+      {MILESTONE_STATE_ORDER.map((state) => <span key={state} title={t(STATE_TITLE[state])}><span className="pl-key" data-k={`ms-${state}`} />{t(STATE_LABEL[state])}</span>)}
+      <span><span className="pl-key" data-k="ms-combo" />{t("同时有多种状态")}</span>
+      <span>{t("点位为截止日，无截止时为保守完成日；只画统计范围内未完成的和已过期的")}</span>
     </div>
   </section>;
 }
@@ -226,10 +239,12 @@ export const MAX_LABEL_ROWS = 3;
 
 function TimelineAxis({ marks, before, lines, labels, today, width, weeks, spanDays }: { marks: MilestoneMark[]; before: Map<string, MilestoneMark>; lines: string[];
   labels: Record<string, string>; today: string; width: number; weeks: number; spanDays: number }) {
+  const t = useT();
+  const locale = useLocale();
   const span = timelineSpan(marks, today, spanDays);
   const plotW = Math.max(120, width - GUTTER - RIGHT);
   const xOf = (day: string) => GUTTER + dayAt(day, span.start, span.days).at * plotW;
-  const ticks = monthTicks(span.start, span.end);
+  const ticks = monthTicks(span.start, span.end, locale);
   const bands: ReactNode[] = [];
   let y = AXIS_TOP;
   for (const line of lines) {
@@ -242,8 +257,8 @@ function TimelineAxis({ marks, before, lines, labels, today, width, weeks, spanD
     const name = labels[line] ?? line;
     bands.push(<g key={line} data-line={line} className="pl-ms-band">
       <rect x={0} y={y + 4} width={3} height={axisY - y} className="pl-ms-bar" />
-      <text x={10} y={axisY} dy="0.32em" className="pl-ms-line">{textWidth(name, 13) > GUTTER - 16 ? `${[...name].slice(0, 5).join("")}…` : name}<title>{name}</title></text>
-      {unnamed > 0 && <text x={10} y={axisY - 17} className="pl-axis-text pl-ms-more">+{unnamed}<title>{`另有 ${unnamed} 个里程碑未标名称，悬停圆点可看全名`}</title></text>}
+      <text x={10} y={axisY} dy="0.32em" className="pl-ms-line">{textWidth(name, 13) > GUTTER - 16 ? fitName(locale, name, GUTTER - 16, 13, 5) : name}<title>{name}</title></text>
+      {unnamed > 0 && <text x={10} y={axisY - 17} className="pl-axis-text pl-ms-more">+{unnamed}<title>{t("另有 {{count}} 个里程碑未标名称，悬停圆点可看全名", { count: unnamed })}</title></text>}
       <line x1={GUTTER} x2={GUTTER + plotW} y1={axisY} y2={axisY} className="pl-ms-track" />
       {own.map((mark, index) => {
         const x = xs[index]!, label = packed[index]!;
@@ -251,10 +266,10 @@ function TimelineAxis({ marks, before, lines, labels, today, width, weeks, spanD
         const labelY = axisY - 12 - label.row * LABEL_ROW;
         const ghost = before.get(mark.id);
         return <g key={mark.id}>
-          {ghost && ghost.day !== mark.day && ghost.day && <circle cx={xOf(ghost.day)} cy={axisY} r={5.5} className="pl-ms-ghost"><title>{`改动前：${ghost.day}`}</title></circle>}
+          {ghost && ghost.day !== mark.day && ghost.day && <circle cx={xOf(ghost.day)} cy={axisY} r={5.5} className="pl-ms-ghost"><title>{t("改动前：{{day}}", { day: ghost.day })}</title></circle>}
           <a href={`/milestones?open=${encodeURIComponent(mark.id)}`} className="pl-ms-point" data-deadline={mark.row.deadline ?? undefined}
-            data-states={mark.states.join(" ") || "on_track"} aria-label={markDetail(mark, weeks).replace(/\n/g, "，")}>
-            <title>{markDetail(mark, weeks)}</title>
+            data-states={mark.states.join(" ") || "on_track"} aria-label={markDetail(mark, weeks, t).replace(/\n/g, t("，"))}>
+            <title>{markDetail(mark, weeks, t)}</title>
             {named && <line x1={x} x2={x} y1={axisY - 6} y2={labelY + 3} className="pl-ms-leader" />}
             {named && <text x={GUTTER + label.left} y={labelY} className="pl-ms-label">{mark.title}</text>}
             <Marker states={mark.states} cx={x} cy={axisY} />
@@ -267,26 +282,27 @@ function TimelineAxis({ marks, before, lines, labels, today, width, weeks, spanD
   const height = y + 2;
   const todayX = xOf(today);
   return <svg className="pl-svg" width={width} height={height} viewBox={`0 0 ${width} ${height}`} role="img"
-    aria-label={`里程碑时间轴：${lines.map((line) => `${labels[line] ?? line} ${marks.filter((mark) => mark.line === line).length} 个`).join("，")}`}>
+    aria-label={t("里程碑时间轴：{{lines}}", { lines: lines.map((line) => t("{{line}} {{n}} 个", { line: labels[line] ?? line, n: marks.filter((mark) => mark.line === line).length })).join(t("，")) })}>
     {ticks.map((tick) => { const x = xOf(tick.day); return <g key={tick.day}>
       <line x1={x} x2={x} y1={AXIS_TOP - 4} y2={height} className="pl-grid-line" />
       <text x={x + 3} y={12} className="pl-axis-text">{tick.label}</text>
     </g>; })}
-    <line x1={todayX} x2={todayX} y1={AXIS_TOP - 4} y2={height} className="pl-ms-today"><title>今天</title></line>
+    <line x1={todayX} x2={todayX} y1={AXIS_TOP - 4} y2={height} className="pl-ms-today"><title>{t("今天")}</title></line>
     {bands}
   </svg>;
 }
 
 /** On a phone the axis would be a few pixels a week: the same marks as a dated list per line. */
 function TimelineList({ marks, lines, labels, weeks }: { marks: MilestoneMark[]; lines: string[]; labels: Record<string, string>; weeks: number }) {
+  const t = useT();
   return <div className="pl-ms-list">{lines.map((line) => <section key={line} data-line={line}>
     <LineTag line={line}>{labels[line] ?? line}</LineTag>
     <ol>{marks.filter((mark) => mark.line === line).sort((a, b) => (a.day ?? "9999").localeCompare(b.day ?? "9999")).map((mark) =>
-      <li key={mark.id}><a href={`/milestones?open=${encodeURIComponent(mark.id)}`} className="pl-ms-point" data-deadline={mark.row.deadline ?? undefined} title={markDetail(mark, weeks)}>
+      <li key={mark.id}><a href={`/milestones?open=${encodeURIComponent(mark.id)}`} className="pl-ms-point" data-deadline={mark.row.deadline ?? undefined} title={markDetail(mark, weeks, t)}>
         <svg width={14} height={14} viewBox="0 0 14 14" aria-hidden="true"><Marker states={mark.states} cx={7} cy={7} /></svg>
-        <span className="mono">{mark.day ? md(mark.day) : "未定"}</span>
+        <span className="mono">{mark.day ? md(mark.day) : t("未定")}</span>
         <span className="pl-ms-name">{mark.title}</span>
-        {mark.states.map((state) => <Tag key={state} tone={state === "risk" ? "risk" : "neutral"}>{STATE_LABEL[state]}</Tag>)}
+        {mark.states.map((state) => <Tag key={state} tone={state === "risk" ? "risk" : "neutral"}>{t(STATE_LABEL[state])}</Tag>)}
       </a></li>)}</ol>
   </section>)}</div>;
 }
@@ -299,6 +315,8 @@ function TimelineList({ marks, lines, labels, weeks }: { marks: MilestoneMark[];
  * is averaged over the days the plan was recorded, timed over the four weeks.
  */
 export function InvestmentChart({ data, labels }: { data: Investment; labels: Record<string, string> }) {
+  const t = useT();
+  const locale = useLocale();
   const preview = usePlanPreview();
   const next7 = preview?.after.next7 ?? data.next7;
   const ghost = preview?.before.next7 ?? null;
@@ -319,12 +337,13 @@ export function InvestmentChart({ data, labels }: { data: Investment; labels: Re
   const bar = Math.max(4, groups.bar / 3 - 2);
   const empty = !data.hasActual && !data.hasPlanned && !Object.values(next7).some(Boolean);
   const next7Moved = Boolean(ghost && Object.keys({ ...ghost, ...next7 }).some((line) => (ghost[line] ?? 0) !== (next7[line] ?? 0)));
-  const say = (value: number | null, none: string) => value === null ? none : `${hours(value)} 小时`;
-  return <Card title="主线投入：计划 vs 实际" label="主线投入：计划与实际" note="每周小时，近 4 周">
+  const say = (value: number | null, none: string) => value === null ? none : t("{{n}} 小时", { n: hours(value) });
+  return <Card title={t("主线投入：计划 vs 实际")} label={t("主线投入：计划与实际")} note={t("每周小时，近 4 周")}>
     {next7Moved && <PreviewNote />}
-    {empty ? <p className="pl-empty">尚无实测</p> : <div ref={box} className="pl-chart-box">
+    {empty ? <p className="pl-empty">{t("尚无实测")}</p> : <div ref={box} className="pl-chart-box">
       <svg className="pl-svg" width={width} height={H} viewBox={`0 0 ${width} ${H}`} role="img"
-        aria-label={`每周小时：${lines.map((line, index) => `${labels[line.line] ?? line.line} 计划 ${say(values[index]!.planned, "未记录")}，实际 ${say(values[index]!.actual, "尚无实测")}，未来 7 天 ${hours(values[index]!.next)} 小时`).join("；")}`}>
+        aria-label={t("每周小时：{{lines}}", { lines: lines.map((line, index) => t("{{line}} 计划 {{planned}}，实际 {{actual}}，未来 7 天 {{next}} 小时", { line: labels[line.line] ?? line.line,
+          planned: say(values[index]!.planned, t("未记录")), actual: say(values[index]!.actual, t("尚无实测")), next: hours(values[index]!.next) })).join(t("；")) })}>
         {ticks.map((tick) => <g key={tick}>
           <line x1={left} x2={left + plotW} y1={y(tick)} y2={y(tick)} className="pl-grid-line" />
           <text x={left - 4} y={y(tick)} dy="0.32em" textAnchor="end" className="pl-axis-text">{tick}</text>
@@ -332,24 +351,25 @@ export function InvestmentChart({ data, labels }: { data: Investment; labels: Re
         {lines.map((line, index) => {
           const value = values[index]!, name = labels[line.line] ?? line.line;
           const x0 = left + groups.x(index);
-          const shares = [line.stated !== null ? `所述 ${line.stated}%` : "", line.actualShare !== null ? `实际 ${line.actualShare}%` : "", line.plannedShare !== null ? `计划 ${line.plannedShare}%` : ""].filter(Boolean).join(" · ");
+          const shares = [line.stated !== null ? t("所述 {{n}}%", { n: line.stated }) : "", line.actualShare !== null ? t("实际 {{n}}%", { n: line.actualShare }) : "",
+            line.plannedShare !== null ? t("计划 {{n}}%", { n: line.plannedShare }) : ""].filter(Boolean).join(" · ");
           const rect = (slot: number, minutes: number, kind: string, title: string) => <rect key={kind} x={x0 + slot * (bar + 2)} width={bar} y={y(minutes / 60)}
             height={Math.max(minutes > 0 ? 1.5 : 0, y(0) - y(minutes / 60))} className={`pl-bar pl-bar-${kind}`}><title>{title}</title></rect>;
           return <g key={line.line} data-line={line.line}>
-            {value.planned !== null && rect(0, value.planned, "planned", `${name} · 计划 ${h1(value.planned)}/周（按有记录的 ${recorded} 天折算）${shares ? ` · ${shares}` : ""}`)}
-            {value.actual !== null && rect(1, value.actual, "actual", `${name} · 实际计时 ${h1(value.actual)}/周（近 4 周平均）${shares ? ` · ${shares}` : ""}`)}
-            {rect(2, value.next, "next", `${name} · 未来 7 天计划 ${h1(value.next)}`)}
+            {value.planned !== null && rect(0, value.planned, "planned", `${name} · ${t("计划 {{hours}}/周（按有记录的 {{count}} 天折算）", { hours: h1(value.planned), count: recorded })}${shares ? ` · ${shares}` : ""}`)}
+            {value.actual !== null && rect(1, value.actual, "actual", `${name} · ${t("实际计时 {{hours}}/周（近 4 周平均）", { hours: h1(value.actual) })}${shares ? ` · ${shares}` : ""}`)}
+            {rect(2, value.next, "next", `${name} · ${t("未来 7 天计划 {{hours}}", { hours: h1(value.next) })}`)}
             {value.before !== null && value.before !== value.next && <rect x={x0 + 2 * (bar + 2) - 1.5} width={bar + 3} y={y(value.before / 60)}
-              height={Math.max(0, y(0) - y(value.before / 60))} className="pl-ghost"><title>{`改动前未来 7 天计划 ${h1(value.before)}`}</title></rect>}
-            <text x={left + groups.centre(index)} y={H - 24} textAnchor="middle" className="pl-axis-text pl-axis-strong">{textWidth(name) > groups.band - 4 ? `${[...name].slice(0, 4).join("")}…` : name}<title>{name}</title></text>
-            {line.stated !== null && groups.band >= 56 && <text x={left + groups.centre(index)} y={H - 8} textAnchor="middle" className="pl-axis-text">所述 {line.stated}%</text>}
+              height={Math.max(0, y(0) - y(value.before / 60))} className="pl-ghost"><title>{t("改动前未来 7 天计划 {{hours}}", { hours: h1(value.before) })}</title></rect>}
+            <text x={left + groups.centre(index)} y={H - 24} textAnchor="middle" className="pl-axis-text pl-axis-strong">{textWidth(name) > groups.band - 4 ? fitName(locale, name, groups.band - 4, 12, 4) : name}<title>{name}</title></text>
+            {line.stated !== null && groups.band >= 56 && <text x={left + groups.centre(index)} y={H - 8} textAnchor="middle" className="pl-axis-text">{t("所述 {{n}}%", { n: line.stated })}</text>}
           </g>;
         })}
-        <text x={2} y={10} className="pl-axis-text">h/周</text>
+        <text x={2} y={10} className="pl-axis-text">{t("h/周")}</text>
       </svg>
-      <p className="pl-legend"><span><span className="pl-key" data-k="bar-planned" />计划</span><span><span className="pl-key" data-k="bar-actual" />实际计时</span>
-        <span><span className="pl-key" data-k="bar-next" />未来 7 天计划</span>
-        {!data.hasActual && <span>尚无实测</span>}{!data.hasPlanned && <span>计划时长尚未记录</span>}</p>
+      <p className="pl-legend"><span><span className="pl-key" data-k="bar-planned" />{t("计划", { context: "bar" })}</span><span><span className="pl-key" data-k="bar-actual" />{t("实际计时")}</span>
+        <span><span className="pl-key" data-k="bar-next" />{t("未来 7 天计划")}</span>
+        {!data.hasActual && <span>{t("尚无实测")}</span>}{!data.hasPlanned && <span>{t("计划时长尚未记录")}</span>}</p>
     </div>}
   </Card>;
 }
@@ -357,42 +377,48 @@ export function InvestmentChart({ data, labels }: { data: Investment; labels: Re
 /* ── 4. estimate accuracy ── */
 
 export function EstimateChart({ estimates, labels }: { estimates: { points: EstimatePoint[]; covered: number; coverage: number | null }; labels: Record<string, string> }) {
+  const t = useT();
   const [box, width] = useWidth(260);
-  return <Card title="估时准确度" label="估时准确度" note={estimates.points.length ? `${estimates.points.length} 项实测` : undefined}>
-    {!estimates.points.length ? <p className="pl-empty">尚无实测</p> : <div ref={box} className="pl-est">
+  return <Card title={t("估时准确度")} label={t("估时准确度")} note={estimates.points.length ? t("{{n}} 项实测", { n: estimates.points.length }) : undefined}>
+    {!estimates.points.length ? <p className="pl-empty">{t("尚无实测")}</p> : <div ref={box} className="pl-est">
       <Scatter estimates={estimates} labels={labels} size={Math.max(170, Math.min(width - 4, 230))} />
       <div className="pl-coverage">
-        <Ring value={estimates.coverage ?? 0} label="保守估时覆盖率" size={48} />
-        <span><b className="mono">{estimates.covered}/{estimates.points.length}</b> 项在保守估时以内</span>
+        <Ring value={estimates.coverage ?? 0} label={t("保守估时覆盖率")} size={48} />
+        <span><b className="mono">{estimates.covered}/{estimates.points.length}</b> {t("项在保守估时以内")}</span>
       </div>
-      <p className="pl-legend"><span><span className="pl-key" data-k="actual" />以内</span><span><span className="pl-key" data-k="outside" />超出</span><span>对角线上方为超出通常估时</span></p>
+      <p className="pl-legend"><span><span className="pl-key" data-k="actual" />{t("以内")}</span><span><span className="pl-key" data-k="outside" />{t("超出")}</span><span>{t("对角线上方为超出通常估时")}</span></p>
     </div>}
   </Card>;
 }
 
 function Scatter({ estimates, labels, size }: { estimates: { points: EstimatePoint[] }; labels: Record<string, string>; size: number }) {
+  const t = useT();
+  const locale = useLocale();
   const domain = logDomain(estimates.points.flatMap((point) => [point.estimate, point.actual]));
-  const { left, right, top, bottom, titleBaseline } = scatterMargins(domain.ticks);
+  const { left, right, top, bottom, titleBaseline } = scatterMargins(domain.ticks, 12, locale);
   const x = logScale(domain.min, domain.max, left, size - right), y = logScale(domain.min, domain.max, size - bottom, top);
   return <svg className="pl-svg" width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img"
-    aria-label={`估时与实际：${estimates.points.length} 项`}>
+    aria-label={t("估时与实际：{{count}} 项", { count: estimates.points.length })}>
     {domain.ticks.map((tick) => <g key={tick}>
       <line x1={x(tick)} x2={x(tick)} y1={top} y2={size - bottom} className="pl-grid-line" />
       <line x1={left} x2={size - right} y1={y(tick)} y2={y(tick)} className="pl-grid-line" />
-      <text x={x(tick)} y={size - bottom + 14} textAnchor="middle" className="pl-axis-text">{minuteLabel(tick)}</text>
-      <text x={left - 4} y={y(tick)} dy="0.32em" textAnchor="end" className="pl-axis-text">{minuteLabel(tick)}</text>
+      <text x={x(tick)} y={size - bottom + 14} textAnchor="middle" className="pl-axis-text">{minuteLabel(tick, locale)}</text>
+      <text x={left - 4} y={y(tick)} dy="0.32em" textAnchor="end" className="pl-axis-text">{minuteLabel(tick, locale)}</text>
     </g>)}
-    <line x1={x(domain.min)} y1={y(domain.min)} x2={x(domain.max)} y2={y(domain.max)} className="pl-diagonal"><title>对角线：实际等于估时</title></line>
+    <line x1={x(domain.min)} y1={y(domain.min)} x2={x(domain.max)} y2={y(domain.max)} className="pl-diagonal"><title>{t("对角线：实际等于估时")}</title></line>
     {estimates.points.map((point) => <circle key={point.id} cx={x(point.estimate)} cy={y(point.actual)} r={4.5} data-line={point.line} data-covered={point.covered || undefined}
-      className="pl-point"><title>{`${labels[point.line] ?? point.line} · 估时 ${point.estimate} 分 · 实际 ${point.actual} 分 · 保守估时 ${point.p85} 分${point.covered ? "以内" : "以外"}`}</title></circle>)}
-    <text x={size - right} y={size - 2} textAnchor="end" className="pl-axis-text">估时</text>
-    <text x={2} y={titleBaseline} className="pl-axis-text">实际</text>
+      className="pl-point"><title>{`${labels[point.line] ?? point.line} · ${point.covered
+        ? t("估时 {{estimate}} 分 · 实际 {{actual}} 分 · 保守估时 {{p85}} 分以内", { estimate: point.estimate, actual: point.actual, p85: point.p85 })
+        : t("估时 {{estimate}} 分 · 实际 {{actual}} 分 · 保守估时 {{p85}} 分以外", { estimate: point.estimate, actual: point.actual, p85: point.p85 })}`}</title></circle>)}
+    <text x={size - right} y={size - 2} textAnchor="end" className="pl-axis-text">{t("估时")}</text>
+    <text x={2} y={titleBaseline} className="pl-axis-text">{t("实际")}</text>
   </svg>;
 }
 
 /* ── 5. the timed rhythm under an energy pattern ── */
 
 const ORDER = [1, 2, 3, 4, 5, 6, 0];
+/** Kept in Chinese (they are the keys); translated where shown. */
 const LEVEL_WORD = ["不可用", "低精力", "中精力", "高精力"];
 
 /**
@@ -400,6 +426,8 @@ const LEVEL_WORD = ["不可用", "低精力", "中精力", "高精力"];
  * it — the hours the person said and the hours they worked, on one small grid. Two of them side by side are 「调整前 / 调整后」.
  */
 export function RhythmMini({ worked, pattern, title }: { worked: number[][]; pattern: number[][]; title: string }) {
+  const t = useT();
+  const locale = useLocale();
   const [box, width] = useWidth(300);
   const left = 22, top = 4, rowH = 14, cell = Math.max(5, (Math.min(width, 420) - left - 4) / 24);
   const W = left + cell * 24 + 4, H = top + rowH * 7 + 18;
@@ -408,15 +436,15 @@ export function RhythmMini({ worked, pattern, title }: { worked: number[][]; pat
   const levelAt = (day: number, hour: number) => Math.max(pattern[day]?.[hour * 2] ?? 0, pattern[day]?.[hour * 2 + 1] ?? 0);
   return <figure className="pl-mini" ref={box}>
     <figcaption>{title}</figcaption>
-    <svg className="pl-svg" width={W} height={H} viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`${title}：近 8 周计时 ${hours(total)} 小时，色条为精力设置`}>
+    <svg className="pl-svg" width={W} height={H} viewBox={`0 0 ${W} ${H}`} role="img" aria-label={t("{{title}}：近 8 周计时 {{n}} 小时，色条为精力设置", { title, n: hours(total) })}>
       {ORDER.map((day, index) => <g key={day}>
-        <text x={left - 4} y={top + index * rowH + rowH / 2} dy="0.32em" textAnchor="end" className="pl-axis-text">{WEEKDAY[day]!.slice(1)}</text>
+        <text x={left - 4} y={top + index * rowH + rowH / 2} dy="0.32em" textAnchor="end" className="pl-axis-text">{dayInitial(locale, day)}</text>
         {Array.from({ length: 24 }, (_, hour) => {
           const minutes = worked[day]?.[hour] ?? 0, level = levelAt(day, hour);
           const cx = left + hour * cell, cy = top + index * rowH;
           return <g key={hour}>
             <rect x={cx + 0.5} y={cy + 0.5} width={cell - 1} height={rowH - 1} className="pl-heat" data-level={heatLevel(minutes, max)}>
-              <title>{`${WEEKDAY[day]} ${hour}–${hour + 1} 时 · 实际 ${Math.round(minutes)} 分 · ${LEVEL_WORD[level]}`}</title></rect>
+              <title>{t("{{weekday}} {{from}}–{{to}} 时 · 实际 {{n}} 分 · {{level}}", { weekday: weekdayShort(locale, day), from: hour, to: hour + 1, n: Math.round(minutes), level: t(LEVEL_WORD[level]!) })}</title></rect>
             {level > 0 && <rect x={cx + 0.5} y={cy + rowH - 4} width={cell - 1} height={3.5} className="pl-lv" data-level={level} />}
           </g>;
         })}

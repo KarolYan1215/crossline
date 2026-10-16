@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { MILESTONE_RISK_KIND_LABEL, MILESTONE_RISK_LEVEL_LABEL, RELATION_KIND_LABEL, riskLevelOf, type MilestoneRisk, type MilestoneRiskLevel } from "@crossline/core";
+import { MILESTONE_RISK_KIND_LABEL, RELATION_KIND_LABEL, riskLevelOf, type MilestoneRisk, type MilestoneRiskLevel } from "@crossline/core";
 import { RiskGlyph } from "./risk-glyph";
 import type { BoardMilestone, BoardRelation, BoardTick, MilestoneBoard } from "../../lib/milestone-board";
 import { Sheet } from "../ui/overlay";
@@ -13,8 +13,14 @@ const KIND_OF_LABEL = new Map(Object.entries(RELATION_KIND_LABEL).map(([kind, la
 /** How long a hovered relation's labels stay after the pointer leaves, so it can reach a label (an artifact's chip) placed off the curve. */
 const LINGER_MS = 300;
 import { MilestoneDrawer, CourseDrawer } from "./milestone-drawer";
+import { useLocale, useT } from "../locale-context";
+import type { Translate } from "../../lib/i18n";
 
 const md = (day: string) => `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}`;
+/** A milestone's highest risk in words; the keys are Chinese and translated where shown. */
+const RISK_NAME: Record<MilestoneRiskLevel, string> = { low: "低风险", medium: "中风险", high: "高风险" };
+/** A tick's state in words (keys, translated where shown). */
+const TICK_STATE = { done: "已达成", postponed: "已顺延", planned: "计划中" } as const;
 /**
  * The lines on one shared date axis, fitted to the width of the page: a row per line, a marker at each milestone's deadline (filled when
  * approved, hollow with a halo while it waits for approval, a ring inside once reached), its risk as a glyph beside it where that fits, the
@@ -24,6 +30,8 @@ const md = (day: string) => `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10
  * together. Row heights are fixed (two label lanes at most), so the whole timeline stays inside one screen.
  */
 export function MilestoneTimeline({ board, actions }: { board: MilestoneBoard; actions?: ReactNode }) {
+  const t = useT();
+  const locale = useLocale();
   const [selected, setSelected] = useState<{ kind: "milestone"; id: string } | { kind: "course"; id: string } | null>(null);
   const [tick, setTick] = useState<BoardTick | null>(null);
   // Hovering (or focusing) a milestone lights up its chain steps and relations and the milestones at their other ends; the rest dims.
@@ -70,9 +78,9 @@ export function MilestoneTimeline({ board, actions }: { board: MilestoneBoard; a
     ticks: board.milestones.flatMap((milestone) => milestone.ticks.map((item) => ({ id: item.id, milestoneId: milestone.id, line: milestone.identityId,
       day: item.day, state: item.state, plannedDay: item.plannedDay }))),
     relations: board.milestones.flatMap((milestone) => milestone.relations.filter((relation) => relation.direction === "out")
-      .map((relation) => ({ id: relation.id, from: milestone.id, to: relation.otherId, pending: relation.pending, label: relation.kindLabel,
+      .map((relation) => ({ id: relation.id, from: milestone.id, to: relation.otherId, pending: relation.pending, label: t(relation.kindLabel),
         ...(KIND_OF_LABEL.has(relation.kindLabel) ? { kind: KIND_OF_LABEL.get(relation.kindLabel)! } : {}), broken: Boolean(relation.broken) }))),
-    lineOrder: board.lineOrder, today: board.today, width
+    lineOrder: board.lineOrder, today: board.today, width, locale
   });
   const head = <header className="mt-head">
     <MilestoneStats board={board} />
@@ -80,15 +88,15 @@ export function MilestoneTimeline({ board, actions }: { board: MilestoneBoard; a
       {drafts.length > 0 && <span className="ba-split">
         <BatchApprove drafts={drafts} labels={board.labels} lineOrder={board.lineOrder} />
         <button type="button" className="secondary-button ba-toggle" aria-expanded={byLine} aria-controls="ba-by-line"
-          onClick={() => setByLine(!byLine)}>按主线<span aria-hidden="true">{byLine ? " ▴" : " ▾"}</span></button>
+          onClick={() => setByLine(!byLine)}>{t("按主线")}<span aria-hidden="true">{byLine ? " ▴" : " ▾"}</span></button>
       </span>}
       {actions}
     </div>
     {drafts.length > 0 && byLine && <LineApprovals id="ba-by-line" drafts={drafts} labels={board.labels} lineOrder={board.lineOrder} />}
   </header>;
   if (!layout.nodes.length) return <div className="mt">{head}<p className="flow-empty">{board.firstDrafts === "running"
-    ? "系统正在按访谈为每条主线设计里程碑草稿（每条主线几分钟），好了会出现在这里等待批准。"
-    : board.firstDrafts === "stalled" ? "里程碑草稿没有生成，点上方「让 AI 重新提议草稿」再试一次。" : "尚无里程碑。完成初始访谈后生成里程碑草稿。"}</p></div>;
+    ? t("系统正在按访谈为每条主线设计里程碑草稿（每条主线几分钟），好了会出现在这里等待批准。")
+    : board.firstDrafts === "stalled" ? t("里程碑草稿没有生成，点上方「让 AI 重新提议草稿」再试一次。") : t("尚无里程碑。完成初始访谈后生成里程碑草稿。")}</p></div>;
   const milestone = selected?.kind === "milestone" ? board.milestones.find((item) => item.id === selected.id) : undefined;
   const course = selected?.kind === "course" ? board.courses.find((item) => `course:${item.projectId}` === selected.id) : undefined;
   const byId = new Map(board.milestones.map((item) => [item.id, item]));
@@ -112,20 +120,20 @@ export function MilestoneTimeline({ board, actions }: { board: MilestoneBoard; a
   const titleOf = new Map(layout.nodes.map((node) => [node.id, node.title]));
   const curveName = (edge: (typeof layout.edges)[number]) => {
     const relation = outgoing.get(edge.id)?.relation;
-    return [`${edge.label ?? "飞轮关系"}：${titleOf.get(edge.from) ?? edge.from} → ${titleOf.get(edge.to) ?? edge.to}`, relation ? flowSummary(relation) : "",
-      edge.pending ? "随下游里程碑一起批准" : ""].filter(Boolean).join("，");
+    return [t("{{kind}}：{{from}} → {{to}}", { kind: edge.label ?? t("飞轮关系"), from: titleOf.get(edge.from) ?? edge.from, to: titleOf.get(edge.to) ?? edge.to }),
+      relation ? flowSummary(relation, t) : "", edge.pending ? t("随下游里程碑一起批准") : ""].filter(Boolean).join(t("，"));
   };
   const kinds = Object.keys(RELATION_KIND_LABEL).filter((kind) => layout.edges.some((edge) => edge.relationKind === kind));
   const open = (id: string, kind: "milestone" | "course") => setSelected(kind === "course" ? { kind: "course", id } : { kind: "milestone", id });
   const nameOf = (id: string, kind: "milestone" | "course", title: string) => {
     const data = kind === "milestone" ? byId.get(id) : undefined;
     const level = data ? riskLevelOf(data.risks) : null;
-    return [title, data?.deadline ? `截止 ${md(data.deadline)}` : kind === "course" ? "课程分数线" : "未定日期", data?.status === "draft" ? "待批准" : "",
-      data?.retrospective ? "已达成" : "", level ? `${MILESTONE_RISK_LEVEL_LABEL[level]}风险` : ""].filter(Boolean).join(" · ");
+    return [title, data?.deadline ? t("截止 {{day}}", { day: md(data.deadline) }) : kind === "course" ? t("课程分数线") : t("未定日期"), data?.status === "draft" ? t("待批准") : "",
+      data?.retrospective ? t("已达成") : "", level ? t(RISK_NAME[level]) : ""].filter(Boolean).join(" · ");
   };
   const todayLabelX = layout.years.some((year) => Math.abs(year.x - layout.todayX) < 40) ? layout.todayX + 40 : layout.todayX + 3;
 
-  return <div className="mt" role="group" aria-label="里程碑时间轴" data-hover={hover || edgeHover ? "" : undefined}>
+  return <div className="mt" role="group" aria-label={t("里程碑时间轴")} data-hover={hover || edgeHover ? "" : undefined}>
     {head}
     <div className="mt-scroll" ref={frame}>
       <div className="mt-canvas" style={{ width: layout.width, height: layout.height }}>
@@ -135,7 +143,7 @@ export function MilestoneTimeline({ board, actions }: { board: MilestoneBoard; a
           {layout.years.map((year) => <g key={year.label}>
             {year.boundary && <line x1={year.x} x2={year.x} y1={2} y2={layout.height} className="mt-year-line" />}
             <text x={year.x + (year.boundary ? 4 : 0)} y={12} className="mt-year">{year.label}</text></g>)}
-          {layout.datedEnd < layout.width - 30 && layout.nodes.some((node) => node.undated) && <text x={layout.datedEnd + 14} y={28} className="mt-axis">未定日期</text>}
+          {layout.datedEnd < layout.width - 30 && layout.nodes.some((node) => node.undated) && <text x={layout.datedEnd + 14} y={28} className="mt-axis">{t("未定日期")}</text>}
           {layout.rows.map((row) => <g key={row.line} data-line={row.line}>
             <line x1={TL.labelW} x2={layout.width - 8} y1={row.axisY} y2={row.axisY} className="mt-axisline" />
             <line x1={0} x2={layout.width} y1={row.y + row.height} y2={row.y + row.height} className="mt-rowrule" /></g>)}
@@ -159,7 +167,7 @@ export function MilestoneTimeline({ board, actions }: { board: MilestoneBoard; a
               ? <text key={edge.id} x={box.x + box.w / 2} y={box.y + 12} textAnchor="middle" className="mt-relation-label">{edge.label}</text> : null;
           })}
           <line x1={layout.todayX} x2={layout.todayX} y1={TL.headH - 4} y2={layout.height} className="mt-today" />
-          <text x={todayLabelX} y={12} className="mt-today-label">今天</text>
+          <text x={todayLabelX} y={12} className="mt-today-label">{t("今天")}</text>
           {layout.ticks.map((item) => <g key={item.id} data-line={item.line}>
             {item.plannedX !== null && <circle cx={item.plannedX} cy={item.axisY} r={3} className="mt-tick-ghost" />}
           </g>)}
@@ -169,7 +177,7 @@ export function MilestoneTimeline({ board, actions }: { board: MilestoneBoard; a
           const box = placed.get(edge.id)!;
           return <div key={edge.id} className="mt-flow" style={{ left: box.x, top: box.y }} data-line={edge.line} data-hot={hot?.has(edge.id) || undefined}>
             <button type="button" className="mt-flow-chip" data-pending={edge.pending || undefined} data-broken={edge.broken || undefined}
-              aria-label={`${edge.label ?? "飞轮关系"}：${flowSummary(relation)}`} aria-expanded={flow === edge.id}
+              aria-label={t("{{kind}}：{{summary}}", { kind: edge.label ?? t("飞轮关系"), summary: flowSummary(relation, t) })} aria-expanded={flow === edge.id}
               onMouseEnter={() => { holdLabels(); setFlow(edge.id); }} onMouseLeave={() => { setFlow(null); hideLabels(); }}
               onFocus={() => { holdLabels(); setFlow(edge.id); }} onBlur={() => { setFlow(null); hideLabels(); }}
               onClick={() => setFlow(flow === edge.id ? null : edge.id)}>{edge.label}</button>
@@ -179,13 +187,13 @@ export function MilestoneTimeline({ board, actions }: { board: MilestoneBoard; a
         {layout.rows.map((row) => {
           const waiting = drafts.filter((item) => item.identityId === row.line).length;
           return <div key={row.line} className="mt-line" data-line={row.line} style={{ top: row.y, height: row.height, width: TL.labelW - 6 }}>
-            <b>{board.labels[row.line] ?? row.line}</b>{waiting > 0 && <small className="mt-line-waiting">{waiting} 待批准</small>}</div>;
+            <b>{board.labels[row.line] ?? row.line}</b>{waiting > 0 && <small className="mt-line-waiting">{t("{{n}} 待批准", { n: waiting })}</small>}</div>;
         })}
         {layout.ticks.map((item) => {
           const data = ticksById.get(item.id)!;
           return <button key={item.id} type="button" className="mt-tick" data-line={item.line} data-state={item.state}
-            style={{ left: item.x - 6, top: item.axisY - 6 }} aria-label={`${data.outcome} · ${item.state === "done" ? "已达成" : item.state === "postponed" ? "已顺延" : "计划中"}`}
-            title={`${data.outcome}${data.day ? ` · ${md(data.day)}` : ""}${item.state === "postponed" ? " · 已顺延" : ""}`} onClick={() => setTick(data)} />;
+            style={{ left: item.x - 6, top: item.axisY - 6 }} aria-label={`${data.outcome} · ${t(TICK_STATE[item.state])}`}
+            title={`${data.outcome}${data.day ? ` · ${md(data.day)}` : ""}${item.state === "postponed" ? ` · ${t("已顺延")}` : ""}`} onClick={() => setTick(data)} />;
         })}
         {layout.nodes.map((item) => {
           const data = item.kind === "milestone" ? byId.get(item.id) : undefined;
@@ -195,7 +203,7 @@ export function MilestoneTimeline({ board, actions }: { board: MilestoneBoard; a
             <button type="button" className="mt-marker" data-line={item.line} data-kind={item.kind} data-status={item.status}
               data-reached={data?.retrospective ? "" : undefined} data-hot={hot?.has(item.id) || undefined} {...focus(item.id)}
               style={{ left: item.x - 11, top: item.axisY - 11 }} aria-label={name} title={name} onClick={() => open(item.id, item.kind)}><i /></button>
-            {level && risky.has(item.id) && <span className="mt-risk" style={{ left: riskBox(item).x, top: riskBox(item).y }} title={data!.risks.map((risk) => MILESTONE_RISK_KIND_LABEL[risk.kind]).join("、")}>
+            {level && risky.has(item.id) && <span className="mt-risk" style={{ left: riskBox(item).x, top: riskBox(item).y }} title={data!.risks.map((risk) => t(MILESTONE_RISK_KIND_LABEL[risk.kind])).join(t("、"))}>
               <RiskGlyph level={level} /></span>}
             {item.labelW > 0 && <button type="button" className="mt-node" data-line={item.line} data-kind={item.kind} data-status={item.status}
               data-hot={hot?.has(item.id) || undefined} {...focus(item.id)} tabIndex={-1} title={name}
@@ -204,28 +212,28 @@ export function MilestoneTimeline({ board, actions }: { board: MilestoneBoard; a
         })}
       </div>
     </div>
-    <p className="mt-legend"><span><span className="mt-key" data-k="milestone" />已批准</span>
-      {drafts.length > 0 && <span><span className="mt-key" data-k="draft" />待批准</span>}
-      {board.milestones.some((item) => item.retrospective) && <span><span className="mt-key" data-k="reached" />已达成</span>}
-      {board.milestones.some((item) => item.risks.length) && <span><RiskGlyph level="medium" />风险等级</span>}
-      {board.courses.length > 0 && <span><span className="mt-key" data-k="course" />课程分数线</span>}
-      {layout.ticks.length > 0 && <span><span className="mt-key" data-k="done" />已达成刻度</span>}
-      {layout.ticks.length > 0 && <span><span className="mt-key" data-k="planned" />计划刻度</span>}
-      {layout.ticks.some((item) => item.state === "postponed") && <span><span className="mt-key" data-k="postponed" />已顺延</span>}
-      {layout.edges.some((edge) => edge.kind === "chain") && <span><span className="mt-key" data-k="chain" />前后依赖</span>}
+    <p className="mt-legend"><span><span className="mt-key" data-k="milestone" />{t("已批准")}</span>
+      {drafts.length > 0 && <span><span className="mt-key" data-k="draft" />{t("待批准")}</span>}
+      {board.milestones.some((item) => item.retrospective) && <span><span className="mt-key" data-k="reached" />{t("已达成")}</span>}
+      {board.milestones.some((item) => item.risks.length) && <span><RiskGlyph level="medium" />{t("风险等级")}</span>}
+      {board.courses.length > 0 && <span><span className="mt-key" data-k="course" />{t("课程分数线")}</span>}
+      {layout.ticks.length > 0 && <span><span className="mt-key" data-k="done" />{t("已达成刻度")}</span>}
+      {layout.ticks.length > 0 && <span><span className="mt-key" data-k="planned" />{t("计划刻度")}</span>}
+      {layout.ticks.some((item) => item.state === "postponed") && <span><span className="mt-key" data-k="postponed" />{t("已顺延")}</span>}
+      {layout.edges.some((edge) => edge.kind === "chain") && <span><span className="mt-key" data-k="chain" />{t("前后依赖")}</span>}
       {/* A relation's kind is its line style; its name shows when the curve or one of its milestones is hovered. */}
       {kinds.map((kind) => <span key={kind}><svg className="mt-kind-svg" width={26} height={6} aria-hidden="true">
-        <line x1={1} x2={25} y1={3} y2={3} className="mt-kind-key" data-kind={kind} /></svg>{RELATION_KIND_LABEL[kind]}</span>)}
-      {layout.edges.some((edge) => edge.kind === "relation" && !edge.relationKind) && <span><span className="mt-key" data-k="relation" />飞轮关系</span>}
+        <line x1={1} x2={25} y1={3} y2={3} className="mt-kind-key" data-kind={kind} /></svg>{t(RELATION_KIND_LABEL[kind]!)}</span>)}
+      {layout.edges.some((edge) => edge.kind === "relation" && !edge.relationKind) && <span><span className="mt-key" data-k="relation" />{t("飞轮关系")}</span>}
       {layout.edges.some((edge) => edge.kind === "relation" && edge.pending) && <span><svg className="mt-kind-svg" width={26} height={6} aria-hidden="true">
-        <line x1={1} x2={25} y1={3} y2={3} className="mt-kind-key" data-pending="" /></svg>候选关系</span>}
-      {layout.edges.some((edge) => edge.broken) && <span><span className="mt-key" data-k="broken" />时间顺序不成立</span>}</p>
-    {tick && <div className="mt-result" role="dialog" aria-label="刻度结果">
-      <header><b>{tick.state === "done" ? "已达成" : tick.state === "postponed" ? "已顺延" : "计划中"}</b>
-        <button type="button" className="ui-icon-button" aria-label="关闭" onClick={() => setTick(null)}>×</button></header>
+        <line x1={1} x2={25} y1={3} y2={3} className="mt-kind-key" data-pending="" /></svg>{t("候选关系")}</span>}
+      {layout.edges.some((edge) => edge.broken) && <span><span className="mt-key" data-k="broken" />{t("时间顺序不成立")}</span>}</p>
+    {tick && <div className="mt-result" role="dialog" aria-label={t("刻度结果")}>
+      <header><b>{t(TICK_STATE[tick.state])}</b>
+        <button type="button" className="ui-icon-button" aria-label={t("关闭")} onClick={() => setTick(null)}>×</button></header>
       <p className="gen">{tick.outcome}</p>
-      <small>{tick.taskTitle}{tick.day ? ` · ${tick.state === "done" ? "完成于" : "排在"} ${md(tick.day)}` : ""}{tick.state === "postponed" && tick.plannedDay ? ` · 原计划 ${md(tick.plannedDay)}` : ""}</small>
-      <a href={`/workbench/${encodeURIComponent(tick.workOrderId)}`}>打开任务</a>
+      <small>{tick.taskTitle}{tick.day ? ` · ${tick.state === "done" ? t("完成于 {{day}}", { day: md(tick.day) }) : t("排在 {{day}}", { day: md(tick.day) })}` : ""}{tick.state === "postponed" && tick.plannedDay ? ` · ${t("原计划 {{day}}", { day: md(tick.plannedDay) })}` : ""}</small>
+      <a href={`/workbench/${encodeURIComponent(tick.workOrderId)}`}>{t("打开任务")}</a>
     </div>}
     {milestone && <MilestoneDrawer milestone={milestone} labels={board.labels} onClose={() => setSelected(null)} />}
     {course && <CourseDrawer course={course} milestones={board.milestones.filter((item) => item.projectId === course.projectId)} onClose={() => setSelected(null)} />}
@@ -234,21 +242,23 @@ export function MilestoneTimeline({ board, actions }: { board: MilestoneBoard; a
 
 const mdOf = (day?: string) => day ? md(day) : "—";
 const amountOf = (relation: BoardRelation) => relation.transfer ? `${relation.transfer.expected} ${relation.transfer.unit}${relation.transfer.metric}` : "";
-const flowSummary = (relation: BoardRelation) => [relation.artifact ? `产物「${relation.artifact.title}」` : "", amountOf(relation) ? `预期 ${amountOf(relation)}` : "",
-  relation.checkOn ? `核对日 ${md(relation.checkOn)}` : "", relation.broken ? "时间顺序不成立" : ""].filter(Boolean).join("，");
+const flowSummary = (relation: BoardRelation, t: Translate) => [relation.artifact ? t("产物「{{title}}」", { title: relation.artifact.title }) : "",
+  amountOf(relation) ? t("预期 {{amount}}", { amount: amountOf(relation) }) : "", relation.checkOn ? t("核对日 {{day}}", { day: md(relation.checkOn) }) : "",
+  relation.broken ? t("时间顺序不成立") : ""].filter(Boolean).join(t("，"));
 
 /** What a cross-line edge carries, on hover or focus: the artifact, the transfer expected and measured, the check day and the counterfactual. */
 function FlowCard({ relation, from, labels }: { relation: BoardRelation; from: BoardMilestone; labels: Record<string, string> }) {
+  const t = useT();
   return <div className="mt-flow-card" role="tooltip">
     <b>{labels[from.identityId] ?? from.identityId} → {labels[relation.otherLine] ?? relation.otherLine}</b>
     <dl>
-      <dt>产物</dt><dd className="gen">{relation.artifact?.title}{relation.artifact?.kind ? ` · ${relation.artifact.kind}` : ""}</dd>
-      <dt>传递量</dt><dd><span className="mono">预期 {amountOf(relation)}</span>{" / "}<span className="mono">实测 {relation.transfer?.measured === null || relation.transfer?.measured === undefined ? "—" : `${relation.transfer.measured} ${relation.transfer.unit}`}</span></dd>
-      <dt>核对日</dt><dd className="mono">{mdOf(relation.checkOn)}{relation.transfer?.lagDays ? ` · 传递 ${relation.transfer.lagDays} 天` : ""}</dd>
-      <dt>反事实</dt><dd className="gen">{relation.counterfactual}{relation.transfer?.hoursSaved ? `（约 ${relation.transfer.hoursSaved} 小时）` : ""}</dd>
+      <dt>{t("产物")}</dt><dd className="gen">{relation.artifact?.title}{relation.artifact?.kind ? ` · ${relation.artifact.kind}` : ""}</dd>
+      <dt>{t("传递量")}</dt><dd><span className="mono">{t("预期 {{amount}}", { amount: amountOf(relation) })}</span>{" / "}<span className="mono">{t("实测 {{amount}}", { amount: relation.transfer?.measured === null || relation.transfer?.measured === undefined ? "—" : `${relation.transfer.measured} ${relation.transfer.unit}` })}</span></dd>
+      <dt>{t("核对日")}</dt><dd className="mono">{mdOf(relation.checkOn)}{relation.transfer?.lagDays ? ` · ${t("传递 {{count}} 天", { count: relation.transfer.lagDays })}` : ""}</dd>
+      <dt>{t("反事实")}</dt><dd className="gen">{relation.counterfactual}{relation.transfer?.hoursSaved ? t("（约 {{n}} 小时）", { n: relation.transfer.hoursSaved }) : ""}</dd>
     </dl>
-    {relation.broken && <p className="mt-flow-broken">时间顺序不成立：{relation.broken}</p>}
-    {relation.pending && <small>随下游里程碑「{relation.otherTitle}」一起批准</small>}
+    {relation.broken && <p className="mt-flow-broken">{t("时间顺序不成立：")}{relation.broken}</p>}
+    {relation.pending && <small>{t("随下游里程碑「{{title}}」一起批准", { title: relation.otherTitle })}</small>}
   </div>;
 }
 
@@ -269,42 +279,44 @@ export function riskTally(milestones: Array<{ risks: MilestoneRisk[] }>) {
  */
 function BatchApprove({ drafts, labels, lineOrder, label, title }: { drafts: BoardMilestone[]; labels: Record<string, string>; lineOrder: string[];
   label?: string; title?: string }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const [state, setState] = useState("");
   const tally = riskTally(drafts);
   const lines = [...new Set(drafts.map((item) => item.identityId))].sort((a, b) => lineOrder.indexOf(a) - lineOrder.indexOf(b));
   const approve = async () => {
-    setState("批准中…");
+    setState(t("批准中…"));
     const response = await fetch("/api/milestones/approve-batch", { method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ ids: drafts.map((item) => item.id), decision: "approved" }) }).catch(() => undefined);
     const result = await response?.json().catch(() => null) as { skipped?: unknown[] } | null;
-    if (!response?.ok || !result) { setState("未完成，请刷新后重试"); return; }
-    if (result.skipped?.length) { setState(`${result.skipped.length} 个已变化，其余已批准；刷新后查看`); return; }
+    if (!response?.ok || !result) { setState(t("未完成，请刷新后重试")); return; }
+    if (result.skipped?.length) { setState(t("{{n}} 个已变化，其余已批准；刷新后查看", { n: result.skipped.length })); return; }
     location.reload();
   };
+  /** Level names are keys, translated where shown. */
   const rows: Array<[MilestoneRiskLevel | "none", string]> = [["high", "高"], ["medium", "中"], ["low", "低"], ["none", "无"]];
-  return <Sheet title={title ?? `批准 ${drafts.length} 个里程碑草稿`} open={open} onOpenChange={(value) => { setOpen(value); if (!value) setState(""); }}
-    trigger={<button type="button" className="primary-button">{label ?? `一键批准 ${drafts.length} 个`}</button>}
+  return <Sheet title={title ?? t("批准 {{count}} 个里程碑草稿", { count: drafts.length })} open={open} onOpenChange={(value) => { setOpen(value); if (!value) setState(""); }}
+    trigger={<button type="button" className="primary-button">{label ?? t("一键批准 {{n}} 个", { n: drafts.length })}</button>}
     footer={<div className="md-actions">
-      <button type="button" className="primary-button" disabled={Boolean(state)} onClick={() => void approve()}>批准全部 {drafts.length} 个</button>
-      <button type="button" disabled={state === "批准中…"} onClick={() => setOpen(false)}>取消</button>
+      <button type="button" className="primary-button" disabled={Boolean(state)} onClick={() => void approve()}>{t("批准全部 {{n}} 个", { n: drafts.length })}</button>
+      <button type="button" disabled={state === t("批准中…")} onClick={() => setOpen(false)}>{t("取消")}</button>
       {state && <span role="status">{state}</span>}
     </div>}>
     <div className="ba">
-      <section className="ba-levels" aria-label="风险等级分布">
+      <section className="ba-levels" aria-label={t("风险等级分布")}>
         {rows.map(([level, label]) => <div key={level} className="ba-level">
-          <RiskGlyph level={level === "none" ? null : level} /><span>{label}</span>
+          <RiskGlyph level={level === "none" ? null : level} /><span>{t(label)}</span>
           <span className="ba-bar" aria-hidden="true"><i data-level={level} style={{ width: `${(tally.levels[level] / drafts.length) * 100}%` }} /></span>
           <b className="mono">{tally.levels[level]}</b></div>)}
       </section>
-      {tally.kinds.length > 0 && <p className="ba-kinds">{tally.kinds.map(([kind, count]) => <span key={kind} className="risk-kind">{MILESTONE_RISK_KIND_LABEL[kind]} × {count}</span>)}</p>}
-      <p className="muted ba-note">批准后，审查出的中、高风险会在今日页单独询问：接受才让它们的任务提前 1–2 天排完。</p>
+      {tally.kinds.length > 0 && <p className="ba-kinds">{tally.kinds.map(([kind, count]) => <span key={kind} className="risk-kind">{t(MILESTONE_RISK_KIND_LABEL[kind])} × {count}</span>)}</p>}
+      <p className="muted ba-note">{t("批准后，审查出的中、高风险会在今日页单独询问：接受才让它们的任务提前 1–2 天排完。")}</p>
       {lines.map((line) => <section key={line} className="ba-line" data-line={line} aria-label={labels[line] ?? line}>
         <h3>{labels[line] ?? line}</h3>
         <ul>{drafts.filter((item) => item.identityId === line).sort((a, b) => (a.deadline ?? "9").localeCompare(b.deadline ?? "9")).map((item) =>
-          <li key={item.id}><RiskGlyph level={riskLevelOf(item.risks)} /><span className="mono">{item.deadline ? md(item.deadline) : "未定"}</span>
+          <li key={item.id}><RiskGlyph level={riskLevelOf(item.risks)} /><span className="mono">{item.deadline ? md(item.deadline) : t("未定")}</span>
             <span className="ba-title">{item.title}</span>
-            <span className="ba-tags">{item.risks.map((risk) => <span key={risk.kind} className="risk-kind" data-level={risk.level} title={risk.note}>{MILESTONE_RISK_KIND_LABEL[risk.kind]}</span>)}</span>
+            <span className="ba-tags">{item.risks.map((risk) => <span key={risk.kind} className="risk-kind" data-level={risk.level} title={risk.note}>{t(MILESTONE_RISK_KIND_LABEL[risk.kind])}</span>)}</span>
           </li>)}</ul>
       </section>)}
     </div>
@@ -316,21 +328,22 @@ function BatchApprove({ drafts, labels, lineOrder, label, title }: { drafts: Boa
  * and 「批准这条主线」, which shows that line's risks first, as 「一键批准」 does for all of them, then approves the line's drafts.
  */
 export function LineApprovals({ id, drafts, labels, lineOrder }: { id: string; drafts: BoardMilestone[]; labels: Record<string, string>; lineOrder: string[] }) {
+  const t = useT();
   const lines = [...new Set(drafts.map((item) => item.identityId))].sort((a, b) => lineOrder.indexOf(a) - lineOrder.indexOf(b));
-  return <ul id={id} className="ba-lines" aria-label="按主线批准">
+  return <ul id={id} className="ba-lines" aria-label={t("按主线批准")}>
     {lines.map((line) => {
       const own = drafts.filter((item) => item.identityId === line);
       const { levels } = riskTally(own);
       const name = labels[line] ?? line;
       return <li key={line} data-line={line}>
         <b className="ba-lines-name">{name}</b>
-        <span className="mono">{own.length} 个</span>
-        <span className="ba-lines-risks" aria-label={`高风险 ${levels.high}、中风险 ${levels.medium}、低风险 ${levels.low}`}>
+        <span className="mono">{t("{{n}} 个", { n: own.length })}</span>
+        <span className="ba-lines-risks" aria-label={t("高风险 {{high}}、中风险 {{medium}}、低风险 {{low}}", { high: levels.high, medium: levels.medium, low: levels.low })}>
           {(["high", "medium", "low"] as const).filter((level) => levels[level]).map((level) =>
             <span key={level} className="ba-lines-risk"><RiskGlyph level={level} /><span className="mono">{levels[level]}</span></span>)}
-          {!levels.high && !levels.medium && !levels.low && <span className="muted">无风险</span>}
+          {!levels.high && !levels.medium && !levels.low && <span className="muted">{t("无风险")}</span>}
         </span>
-        <BatchApprove drafts={own} labels={labels} lineOrder={lineOrder} label="批准这条主线" title={`批准「${name}」的 ${own.length} 个里程碑草稿`} />
+        <BatchApprove drafts={own} labels={labels} lineOrder={lineOrder} label={t("批准这条主线")} title={t("批准「{{name}}」的 {{count}} 个里程碑草稿", { name, count: own.length })} />
       </li>;
     })}
   </ul>;
@@ -339,11 +352,12 @@ export function LineApprovals({ id, drafts, labels, lineOrder }: { id: string; d
 /** The week in figures, from the ledger: ticks reached against planned, outputs reused by another line, and the nearest deadline. */
 export function MilestoneStats({ board }: { board: MilestoneBoard }) {
   const { ticksDone, ticksPlanned, reuse, nearest } = board.stats;
+  const t = useT();
   const share = ticksPlanned ? Math.min(1, ticksDone / ticksPlanned) : 0;
-  return <section className="mt-stats" aria-label="本周进展">
-    <span className="mt-stat"><b className="mono">{ticksDone}<small> / {ticksPlanned}</small></b><span>本周刻度</span>
+  return <section className="mt-stats" aria-label={t("本周进展")}>
+    <span className="mt-stat"><b className="mono">{ticksDone}<small> / {ticksPlanned}</small></b><span>{t("本周刻度")}</span>
       <span className="mt-stat-bar" aria-hidden="true"><i style={{ width: `${share * 100}%` }} /></span></span>
-    <span className="mt-stat"><b className="mono">{reuse}</b><span>跨主线复用</span></span>
-    {nearest && <span className="mt-stat" data-line={nearest.line}><b className="mono hl-line">{nearest.days} 天</b><span className="mt-stat-title">距 {nearest.title}</span></span>}
+    <span className="mt-stat"><b className="mono">{reuse}</b><span>{t("跨主线复用")}</span></span>
+    {nearest && <span className="mt-stat" data-line={nearest.line}><b className="mono hl-line">{t("{{count}} 天", { count: nearest.days })}</b><span className="mt-stat-title">{t("距 {{title}}", { title: nearest.title })}</span></span>}
   </section>;
 }

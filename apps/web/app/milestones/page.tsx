@@ -11,6 +11,7 @@ import { LinesBar } from "./lines-bar";
 import { lineCardDetails } from "../../lib/line-cards";
 import { timed } from "../../lib/sections";
 import { memoByLedgerAsync } from "../../lib/ledger-memo";
+import { tOf } from "../../lib/locale";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +23,7 @@ export default async function MilestonesPage() {
   const ctx = await requireSessionContext();
   gateUntilReady(ctx);
   ensureSeeded(ctx);
+  const t = tOf(ctx);
   // Reused until the ledger changes or a minute passes (`lib/ledger-memo.ts`).
   const board = await timed("milestones.board", () => memoByLedgerAsync(getStore(), `milestoneBoard:${ctx.workspaceId}:${appNow().toISOString().slice(0, 16)}`,
     60_000, () => loadMilestoneBoard(ctx)));
@@ -34,8 +36,8 @@ export default async function MilestonesPage() {
   const identities = identityLines(ctx);
   const details = lineCardDetails(ctx);
 
-  return <SubpageShell active="主线" title="主线"
-    description={drafts ? `${drafts} 个里程碑待批准 · 点开查看风险与标准，或在时间轴右上方一键批准` : "各主线的里程碑排在同一条时间轴上，点开可修改。"}>
+  return <SubpageShell active={"主线"} title={t("主线")}
+    description={drafts ? t("{{count}} 个里程碑待批准 · 点开查看风险与标准，或在时间轴右上方一键批准", { count: drafts }) : t("各主线的里程碑排在同一条时间轴上，点开可修改。")}>
     <LinesBar lines={identities.map((pack) => ({ id: pack.id, label: pack.label, color: pack.color ?? pack.id, goals: pack.goals ?? [],
       hard: Boolean(pack.hard), rank: pack.rank ?? null,
       attributes: (details[pack.id]?.attributes ?? []).map(({ text, kind }) => ({ text, kind })), goalParts: details[pack.id]?.goalParts ?? [],
@@ -46,6 +48,6 @@ export default async function MilestonesPage() {
       drafts: board.milestones.filter((milestone) => milestone.identityId === pack.id && milestone.status === "draft").length }))}
       palette={Object.fromEntries(Object.entries(LINE_PALETTE).map(([key, value]) => [key, value.light]))} />
     <MilestoneTimeline board={board} actions={<MilestoneActions lines={identities.map((pack) => ({ id: pack.id, label: pack.label }))} archived={archived} />} />
-    <p className="muted ms-foot"><a href="/review">本周复盘 →</a></p>
+    <p className="muted ms-foot"><a href="/review">{t("本周复盘 →")}</a></p>
   </SubpageShell>;
 }

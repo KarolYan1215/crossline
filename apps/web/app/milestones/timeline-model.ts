@@ -8,6 +8,9 @@
  * separator line. A relation's kind is its dash pattern; its label is drawn only while it is hovered, and only where it covers nothing
  * (`placeEdgeLabels`). Pure arithmetic, tested without a browser.
  */
+import type { Locale } from "../../lib/i18n";
+import { monthLabel } from "../timeline/format";
+
 export type TimelineNodeInput = { id: string; line: string; title: string; status: "draft" | "approved"; kind: "milestone" | "course";
   day?: string | undefined; dependsOn: string[] };
 export type TimelineTickInput = { id: string; milestoneId: string; line: string; day: string | null; state: "done" | "planned" | "postponed"; plannedDay: string | null };
@@ -61,16 +64,21 @@ const DAY_MS = 86_400_000;
 const toTime = (day: string) => Date.parse(`${day}T12:00:00Z`);
 const toDay = (time: number) => new Date(time).toISOString().slice(0, 10);
 
-/** About how wide a label is drawn at 12px: a CJK character is 12px, anything else about 6.5px, plus the label's padding. */
+/**
+ * About how wide a label is drawn at 12px: a CJK character is 12px, a capital about 8px, a space about 3.5px, anything else about 6.5px,
+ * plus the label's padding. Measured by script, never by character count: an English label is twice as many characters as its Chinese.
+ */
 export function labelWidth(text: string): number {
   let width = 10;
-  for (const char of text) width += /[⺀-鿿豈-﫿＀-￯]/.test(char) ? 12 : 6.5;
+  for (const char of text) width += /[⺀-鿿豈-﫿＀-￯]/.test(char) ? 12 : /[A-Z]/.test(char) ? 8 : char === " " ? 3.5 : 6.5;
   return Math.ceil(width);
 }
 
 export function layoutTimeline(input: { nodes: TimelineNodeInput[]; ticks: TimelineTickInput[]; relations: TimelineRelationInput[]; lineOrder: string[]; today: string;
   /** The width of the frame the canvas is drawn in. */
-  width?: number }): TimelineLayout {
+  width?: number;
+  /** The page's language, for the axis's month names (「12月」 / "Dec"). */
+  locale?: Locale }): TimelineLayout {
   const days = [input.today, ...input.nodes.flatMap((node) => node.day ? [node.day] : []), ...input.ticks.flatMap((tick) => [tick.day, tick.plannedDay].filter((day): day is string => Boolean(day)))];
   const start = toDay(Math.min(...days.map(toTime)) - 3 * DAY_MS);
   const end = toDay(Math.max(...days.map(toTime)) + 5 * DAY_MS);
@@ -92,7 +100,7 @@ export function layoutTimeline(input: { nodes: TimelineNodeInput[]; ticks: Timel
     const monthStart = date.getUTCDate() === 1, month = date.getUTCMonth();
     const x = xOf(toDay(time));
     if (monthStart && month === 0 && time > toTime(start)) years.push({ x, label: String(date.getUTCFullYear()), boundary: true });
-    if (monthStart && (step !== "quarter" || month % 3 === 0)) axis.push({ x, label: `${month + 1}月`, kind: "month" });
+    if (monthStart && (step !== "quarter" || month % 3 === 0)) axis.push({ x, label: monthLabel(input.locale, date.getUTCFullYear(), month + 1), kind: "month" });
     else if (step === "week" && date.getUTCDay() === 1) axis.push({ x, label: `${month + 1}/${date.getUTCDate()}`, kind: "week" });
   }
   // A Monday within three days of a month's first day would print on top of it; the month label wins.

@@ -6,6 +6,7 @@ import type { TimelineItem } from "./model";
 import type { LineLabels } from "./views";
 import { BlockOverview } from "./block-overview";
 import { dayLoad, hoursLabel, nextBlock } from "./panel-model";
+import { useLocale, useT } from "../locale-context";
 import "./day-panel.css";
 
 export type QuickProposal = { id: string; title: string };
@@ -29,6 +30,8 @@ export function DayQuickActions({ day, today, items, proposals, nowMinute, selec
   /** Task details read with the page, by work order id; a task missing here is read on demand. */
   details?: Record<string, TaskDetail> | undefined;
 }) {
+  const t = useT();
+  const locale = useLocale();
   const [asks, setAsks] = useState<number | null>(null);
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
@@ -40,32 +43,32 @@ export function DayQuickActions({ day, today, items, proposals, nowMinute, selec
   const next = nextBlock(items, day, today, nowMinute);
 
   return <div className="dq">
-    <section className="dq-load" aria-label="当日负荷">
-      <h3>当日负荷</h3>
+    <section className="dq-load" aria-label={t("当日负荷")}>
+      <h3>{t("当日负荷")}</h3>
       <span className="dq-meter" aria-hidden="true">
         <i style={{ width: `${(load.planned / total) * 100}%` }} />
         <i data-kind="optional" style={{ width: `${(load.pencilled / total) * 100}%` }} />
         <i data-kind="fixed" style={{ width: `${(load.fixed / total) * 100}%` }} />
       </span>
-      <small>已排 {hoursLabel(load.planned)}{load.pencilled ? ` · 预排 ${hoursLabel(load.pencilled)}` : ""}{load.fixed ? ` · 固定日程 ${hoursLabel(load.fixed)}` : ""}</small>
+      <small>{t("已排 {{hours}}", { hours: hoursLabel(load.planned, locale) })}{load.pencilled ? ` · ${t("预排 {{hours}}", { hours: hoursLabel(load.pencilled, locale) })}` : ""}{load.fixed ? ` · ${t("固定日程 {{hours}}", { hours: hoursLabel(load.fixed, locale) })}` : ""}</small>
     </section>
-    <section className="dq-switch" aria-live="polite" aria-label={selected ? "选中的日程" : "下一项"}>
-      {selected ? <BlockOverview key={selected.id} item={selected} items={items} today={today} labels={labels} details={details} heading="选中的日程" onClose={onDeselect} />
+    <section className="dq-switch" aria-live="polite" aria-label={selected ? t("选中的日程") : t("下一项")}>
+      {selected ? <BlockOverview key={selected.id} item={selected} items={items} today={today} labels={labels} details={details} heading={t("选中的日程")} onClose={onDeselect} />
         : next ? <BlockOverview key={next.id} item={next} items={items} today={today} labels={labels} details={details} compact
-          heading={next.kind === "optional" ? "下一项（预排）" : "下一项"} />
-        : <p className="dq-empty">{day === today ? "今天没有待开始的任务。" : "当日没有排入任务。"}点选时间轴上的日程查看详情。</p>}
+          heading={next.kind === "optional" ? t("下一项（预排）") : t("下一项")} />
+        : <p className="dq-empty">{day === today ? t("今天没有待开始的任务。") : t("当日没有排入任务。")}{t("点选时间轴上的日程查看详情。")}</p>}
     </section>
-    <nav className="dq-links" aria-label="当日入口">
+    <nav className="dq-links" aria-label={t("当日入口")}>
       {proposals.length > 0 && <span className="dq-link">
-        <a href="/approvals#proposals" title={proposals.slice(0, 6).map((item) => item.title).join("\n")}>待批准任务 · <b className="mono">{proposals.length}</b></a>
+        <a href="/approvals#proposals" title={proposals.slice(0, 6).map((item) => item.title).join("\n")}>{t("待批准任务")} · <b className="mono">{proposals.length}</b></a>
         <button type="button" disabled={busy} onClick={async () => {
           setBusy(true); setStatus("");
           if (await post("/api/work-orders/approve-batch", { ids: proposals.map((item) => item.id) })) { location.reload(); return; }
-          setBusy(false); setStatus("未能批准，请到待确认页处理");
-        }}>全部批准</button>
+          setBusy(false); setStatus(t("未能批准，请到待确认页处理"));
+        }}>{t("全部批准")}</button>
       </span>}
-      {asks !== null && asks > 0 && <a className="dq-link" href="/approvals#asks">待决事项 · <b className="mono">{asks}</b></a>}
-      <a className="dq-link" href="/plan#time">调整可用时段</a>
+      {asks !== null && asks > 0 && <a className="dq-link" href="/approvals#asks">{t("待决事项")} · <b className="mono">{asks}</b></a>}
+      <a className="dq-link" href="/plan#time">{t("调整可用时段")}</a>
     </nav>
     {status && <small role="status">{status}</small>}
   </div>;
