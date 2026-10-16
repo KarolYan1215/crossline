@@ -285,7 +285,7 @@ function pausedSites(store: CrosslineStore, workspaceId: string, now: Date): Map
 }
 
 /** Every piece of the assistant's work with all its runs and where it stands (`agentChains` in core): the one reading of "run it again?". */
-export function agentChainsFor(store: CrosslineStore, workspaceId: string, now = new Date()): AgentChain[] {
+export function agentChainsFor(store: CrosslineStore, workspaceId: string, now = new Date(), locale?: Parameters<typeof agentChains>[2]): AgentChain[] {
   const sites = pausedSites(store, workspaceId, now);
   const runs: AgentRunRow[] = listAgentTasks(store, workspaceId, now).map((task) => ({
     taskId: task.taskId, workOrderId: task.workOrderId, stepId: task.stepId, title: task.title, requestedAt: task.requestedAt,
@@ -294,7 +294,7 @@ export function agentChainsFor(store: CrosslineStore, workspaceId: string, now =
     // A workflow run that was refused by a site, or whose site is paused after a security check, is never tried again by itself.
     siteStopped: task.siteRefusals > 0 || (!task.workOrderId && sites.get(task.title) === true)
   }));
-  return agentChains(runs, agentChainMarks(store, workspaceId));
+  return agentChains(runs, agentChainMarks(store, workspaceId), locale);
 }
 
 /**

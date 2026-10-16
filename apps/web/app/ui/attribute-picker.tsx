@@ -5,7 +5,7 @@ import {
   ATTRIBUTE_KIND_LABEL, cleanAttribute, composeGoal, duplicateAttributes, guessKind, insertByKind, orderAttributes, type AttributeKind
 } from "@crossline/core";
 import "./attribute-picker.css";
-import { useT } from "../locale-context";
+import { useLocale, useT } from "../locale-context";
 
 /** One attribute offered to choose from: its words and its kind (field, ability or lasting state). */
 export type AttributeOption = { text: string; kind: AttributeKind };
@@ -21,6 +21,7 @@ export function AttributePicker({ noun, candidates, initial, onAdopt, label = "�
   onAdopt: (parts: string[]) => Promise<string>;
 }) {
   const t = useT();
+  const locale = useLocale();
   const [selected, setSelected] = useState<string[]>(initial);
   const [editing, setEditing] = useState<number | null>(null);
   const [custom, setCustom] = useState("");
@@ -49,7 +50,7 @@ export function AttributePicker({ noun, candidates, initial, onAdopt, label = "�
   const parts = selected.map(cleanAttribute).filter(Boolean);
   const duplicate = duplicateAttributes(parts)[0];
   const unchanged = parts.length === initial.length && parts.every((part, index) => part === initial[index]);
-  const preview = composeGoal(parts, noun);
+  const preview = composeGoal(parts, noun, locale);
   const adopt = async () => {
     setStatus(t("保存中…"));
     const error = await onAdopt(parts);

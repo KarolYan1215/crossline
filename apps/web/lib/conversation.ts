@@ -15,6 +15,7 @@ import { recentOps } from "./undo";
 import { ANSWERED_SETTING, muteNudgeKind } from "./nudges";
 import { readOpener, type OpenerView } from "./opener";
 import { returnPageLines } from "./return";
+import { tOf } from "./locale";
 
 /** Where the person typed from: the page and the object open there (a task, a milestone, a plan day). */
 export type PageContext = { kind: string; entityId: string };
@@ -111,8 +112,9 @@ export async function contextPack(ctx: AccessContext, page: PageContext, now = n
       kind: block.id.split(":")[0] === "graph_calendar" ? "calendar" : block.id.split(":")[0]! })),
     capacity,
     ops: recentOps(ctx, now).map((op) => ({ id: op.id, label: op.label, at: op.at })),
+    /* i18n-ignore-start: the pack is model context */
     agentResults: listAgentTasks(store, ctx.workspaceId).filter((task) => task.status === "needs_review")
-      .map((task) => ({ taskId: task.taskId, title: task.title, summary: `产出：${task.artifacts.map((artifact) => artifact.path.split(/[\\/]/).at(-1)).slice(0, 6).join("、") || "无"}${task.needsHuman ? `；${task.needsHuman} 项需本人完成` : ""}` })),
+      .map((task) => ({ taskId: task.taskId, title: task.title, summary: `产出：${task.artifacts.map((artifact) => artifact.path.split(/[\\/]/).at(-1)).slice(0, 6).join("、") || "无"}${task.needsHuman ? `；${task.needsHuman} 项需本人完成` : ""}` })), /* i18n-ignore-end */
     materials: docs.map((doc) => ({ id: doc.id, fileName: doc.fileName, project: doc.projectId ? projects.get(doc.projectId) ?? "" : "" })),
     projects: store.listProjects(ctx.workspaceId).map((project) => ({ id: project.id, name: project.name, line: label(project.identityId) })),
     facts: store.listProfileFacts(ctx.workspaceId).filter((fact) => fact.status === "confirmed")
@@ -129,6 +131,7 @@ export async function contextPack(ctx: AccessContext, page: PageContext, now = n
  * waits, the recent operations — are named by id here, so a turn usually needs no lookup before it can propose (each lookup is another
  * model round, a few seconds each).
  */
+// i18n-ignore-start: the snapshot and page lines are the concierge model's context, not interface
 export function conciergeSnapshot(pack: ConciergePack, now = new Date(), options: { lists?: boolean } = {}): string {
   const today = pack.plan.filter((block) => block.day === pack.today);
   const lists = options.lists ? [
@@ -180,6 +183,7 @@ function pageTask(pack: ConciergePack): string[] {
   return [`本页任务：${task.id} | ${task.title} | 截止 ${task.dueDate || "—"}；步骤（id | 标题 | 状态，▶ 为当前步骤）：`,
     ...task.steps.map((step) => `- ${step === current ? "▶ " : ""}${step.id} | ${step.title} | ${step.status}${step.executor === "agent" ? "（助手做）" : ""}`)];
 }
+// i18n-ignore-end
 
 const view = (message: StoredConversationMessage): MessageView => ({ id: message.id, role: message.role, text: message.text, createdAt: message.createdAt,
   ...(message.payload.card ? { card: message.payload.card as Card } : {}), ...(message.payload.page ? { page: message.payload.page as PageContext } : {}),
@@ -229,8 +233,9 @@ export async function conversationTurn(ctx: AccessContext, input: { text: string
   const corrected = earlier.some((message) => (message.payload.card as Card | undefined)?.corrects);
   // Files dropped with the line (already stored and read): named in the message, described in the snapshot.
   const docs = (input.files ?? []).map((id) => store.listSourceDocuments(ctx.workspaceId).find((doc) => doc.id === id)).filter((doc) => doc !== undefined);
-  const text = [input.text.trim(), input.mentions.length ? `（引用：${input.mentions.map((item) => `${item.kind}:${item.id}「${item.title}」`).join("；")}）` : "",
-    docs.length ? `（附件：${docs.map((doc) => `《${doc.fileName}》`).join("")}）` : ""].filter(Boolean).join("\n");
+  const t = tOf(ctx);
+  const text = [input.text.trim(), input.mentions.length ? t("（引用：{{items}}）", { items: input.mentions.map((item) => `${item.kind}:${item.id}「${item.title}」`).join("；") }) : "", // i18n-ignore
+    docs.length ? t("（附件：{{files}}）", { files: docs.map((doc) => `《${doc.fileName}》`).join("") }) : ""].filter(Boolean).join("\n"); // i18n-ignore
   store.setSetting(ctx.workspaceId, ANSWERED_SETTING, now.toISOString());
   const person = store.appendConversationMessage({ id: randomUUID(), workspaceId: ctx.workspaceId, conversationId: conversation.id, role: "person", text,
     payload: { page: input.page, ...(docs.length ? { files: docs.map((doc) => doc.id) } : {}) } });
@@ -238,7 +243,7 @@ export async function conversationTurn(ctx: AccessContext, input: { text: string
   const attached = attachedFiles(docs, pack);
   // From the return page: what the absence left to settle, and which task and step a line typed beside one is about.
   const returning = input.page.kind === "return" ? ["", ...returnPageLines(ctx, input.page, now)].join("\n") : "";
-  const request = { conversationId: conversation.id, text: input.text || "（只附了文件）", mentions: input.mentions,
+  const request = { conversationId: conversation.id, text: input.text || "（只附了文件）", mentions: input.mentions, // i18n-ignore: model context
     snapshot: `${conciergeSnapshot(pack, now, { lists: true })}${returning}${attached}`, pack, history,
     ...(corrected ? { corrected: true } : {}) };
   let reply: { text: string; card: Card };
@@ -246,9 +251,9 @@ export async function conversationTurn(ctx: AccessContext, input: { text: string
   try {
     const outcome = await askWorker(ctx, request);
     if (outcome.state === "replied") { reply = { text: outcome.turn.reply, card: cardFrom(outcome.turn, text) }; warnings = outcome.warnings ?? []; }
-    else reply = fallback(input.text, outcome.message, outcome.code);
+    else reply = fallback(ctx, input.text, outcome.message, outcome.code);
   } catch (error) {
-    reply = fallback(input.text, "模型服务暂时不可用", error instanceof CodexSupervisorRequestError ? error.blocker.code : "CONVERSATION_TURN_FAILED");
+    reply = fallback(ctx, input.text, t("模型服务暂时不可用"), error instanceof CodexSupervisorRequestError ? error.blocker.code : "CONVERSATION_TURN_FAILED");
   }
   if (reply.card.corrects) withdrawPrevious(ctx, earlier, text);
   // 先快后准: a reading the quick model was unsure of, or one that changes several things, is shown at once and looked at again; it
@@ -262,12 +267,14 @@ export async function conversationTurn(ctx: AccessContext, input: { text: string
 }
 
 /** The files that came with a line, as the snapshot names them: id, name, kind, whether the text could be read, project, opening. */
+// i18n-ignore-start: model context
 export function attachedFiles(docs: Array<{ id: string; fileName: string; kind: string; extractionStatus: string; extractedText: string; projectId?: string }>,
   pack: ConciergePack): string {
   return docs.length ? ["\n本次附带的文件（id | 名称 | 类型 | 文本 | 所属项目 | 开头）：", ...docs.map((doc) => `- ${doc.id} | ${doc.fileName} | ${doc.kind} | `
     + `${doc.extractionStatus === "done" ? `${doc.extractedText.length} 字` : doc.extractionStatus === "pending" ? "尚未读取" : "无法读取文本"} | `
     + `${pack.projects.find((project) => project.id === doc.projectId)?.name ?? "未归入"} | ${doc.extractedText.slice(0, 400).replace(/\s+/g, " ")}`)].join("\n") : "";
 }
+// i18n-ignore-end
 
 const askWorker = (ctx: AccessContext, body: Record<string, unknown>) => requestCodexSupervisor<TurnOutcome>(ctx, "/v1/conversation/turn", {
   method: "POST", headers: { "content-type": "application/json" }, signal: AbortSignal.timeout(15 * 60_000), body: JSON.stringify(body) });
@@ -284,10 +291,11 @@ function withdrawPrevious(ctx: AccessContext, earlier: StoredConversationMessage
   });
   const card = previous?.payload.card as Card | undefined;
   if (!previous || !card) return;
-  card.items = card.items.map((item) => item.state === "pending" ? { state: "dismissed", message: "已由后一句更正" } : item);
+  card.items = card.items.map((item) => item.state === "pending" ? { state: "dismissed", message: tOf(ctx)("已由后一句更正") } : item);
   card.reviewing = false;
   store.updateConversationPayload(ctx.workspaceId, previous.id, { ...previous.payload, card });
-  rememberCorrection(ctx, previous.id, `输入框曾把「${(card.heard ?? "").slice(0, 80)}」理解为「${cardWords(card).slice(0, 120)}」；本人更正：「${correction.slice(0, 80)}」`);
+  rememberCorrection(ctx, previous.id, tOf(ctx)("输入框曾把「{{heard}}」理解为「{{read}}」；本人更正：「{{correction}}」",
+    { heard: (card.heard ?? "").slice(0, 80), read: cardWords(card).slice(0, 120), correction: correction.slice(0, 80) }));
 }
 
 /** The second look, in the background: the card is replaced by what the stronger model returns, or left as it was if that fails. */
@@ -308,9 +316,9 @@ async function reviewCard(ctx: AccessContext, messageId: string, body: Record<st
   if (revised && outcome.turn.reply) store.updateConversationText(ctx.workspaceId, messageId, outcome.turn.reply);
 }
 
-function fallback(text: string, why: string, code: string): { text: string; card: Card } {
+function fallback(ctx: AccessContext, text: string, why: string, code: string): { text: string; card: Card } {
   const action: ProposedAction = { action: "task.create", summary: text.slice(0, 200), args: { title: text.slice(0, 240), context: "", lineId: "", dueDate: "", milestoneId: "" } };
-  return { text: `未能理解这句话（${why}）。原话已保存在对话里，可稍后重新发送；也可以先作为新任务收集。`,
+  return { text: tOf(ctx)("未能理解这句话（{{why}}）。原话已保存在对话里，可稍后重新发送；也可以先作为新任务收集。", { why }),
     card: { actions: [action], items: [{ state: "pending" }], clarify: { question: "", options: [] }, confidence: "low", error: code } };
 }
 
@@ -350,7 +358,7 @@ export async function decideCard(ctx: AccessContext, messageId: string,
       const item = card.actions[index];
       if (!item || card.items[index]?.state !== "pending") continue;
       const problem = actionProblem(item, refs);
-      card.items[index] = problem ? { state: "failed", message: `未执行：${problem.replace(/（用 \w+ 查[^）]*）/, "")}` } : outcomeItem(await executeAction(ctx, item));
+      card.items[index] = problem ? { state: "failed", message: tOf(ctx)("未执行：{{problem}}", { problem: problem.replace(/（用 \w+ 查[^）]*）/, "") }) } : outcomeItem(await executeAction(ctx, item));
     }
   }
   store.updateConversationPayload(ctx.workspaceId, messageId, { ...message.payload, card });
@@ -374,12 +382,13 @@ function applyEdits(ctx: AccessContext, messageId: string, card: Card, edits: Re
       if (!type || JSON.stringify(args[field]) === JSON.stringify(value)) continue;
       const next = type === "number" ? Number(value) : type === "array" ? (Array.isArray(value) ? value : args[field]) : String(value ?? "").slice(0, 2000);
       if (type === "number" && !Number.isFinite(next as number)) continue;
-      changed.push(`${field}「${String(args[field] ?? "")}」改为「${String(next)}」`);
+      changed.push(tOf(ctx)("{{field}}「{{from}}」改为「{{to}}」", { field, from: String(args[field] ?? ""), to: String(next) }));
       args[field] = next;
     }
     if (!changed.length) continue;
     card.actions[index] = { ...item, args } as ProposedAction;
-    rememberCorrection(ctx, `${messageId}:${index}`, `输入框把「${(card.heard ?? "").slice(0, 80)}」理解为「${ACTIONS[item.action].label}：${item.summary.slice(0, 60)}」；本人把 ${changed.join("、").slice(0, 160)}`);
+    rememberCorrection(ctx, `${messageId}:${index}`, tOf(ctx)("输入框把「{{heard}}」理解为「{{action}}：{{summary}}」；本人把 {{changes}}", { heard: (card.heard ?? "").slice(0, 80),
+      action: tOf(ctx)(ACTIONS[item.action].label), summary: item.summary.slice(0, 60), changes: changed.join(tOf(ctx)("、")).slice(0, 160) }));
   }
 }
 

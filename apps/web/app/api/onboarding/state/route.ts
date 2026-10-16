@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { FIRST_DRAFTS_SETTING, ONBOARDING_TONE_SETTING, firstDraftsState, questionKind, readTone, screenQuestions, type StoredLineProfile, type TurnQuestion } from "@crossline/core";
-import { questionScreenFor } from "@crossline/db";
+import { INTERVIEW_LOCALE_SETTING, interviewLocale, questionScreenFor } from "@crossline/db";
+import { isLocale } from "@crossline/i18n";
 import { resolveAccessContext } from "../../../../lib/access-guard";
 import { getStore, planToday } from "../../../../lib/crossline";
 import { folderDocumentIds, projectTimeline, weekSkeleton } from "../../../../lib/onboarding-board";
@@ -65,6 +66,9 @@ export async function GET(request: Request) {
     week: weekSkeleton(access.ctx, planToday(access.ctx)),
     timeline: projectTimeline(access.ctx, planToday(access.ctx)),
     session: session ? { id: session.id, state: session.state, coverage: session.coverage } : null,
+    // The interview keeps the language it started in (docs/i18n.md); the page says so when it differs from its own.
+    interviewLocale: (() => { const locked = session ? store.getSetting(workspaceId, `${INTERVIEW_LOCALE_SETTING}:${session.id}`) : undefined;
+      return isLocale(locked) ? locked : focus ? null : interviewLocale(store, workspaceId) ?? null; })(),
     messages,
     dateBatch: loadPendingDateBatch(access.ctx),
     diligence: loadDiligence(access.ctx),

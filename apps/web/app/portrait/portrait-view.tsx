@@ -44,18 +44,8 @@ function Figure({ state, className }: { state: State; className: string }) {
 /** A hard-coded section title, set in the poster's serif, with its number. */
 const Heading = ({ number, children }: { number: string; children: string }) => <h2><small>{number}</small><span className="pt-serif">{children}</span></h2>;
 
-/**
- * A label cell's detail. The base's 「建议投入约 N%」 is written by `portraitLabels` in Chinese; on an English page it is said again from
- * the same share.
- */
-function cellDetail(cell: { title: string; detail?: string }, report: PortraitReport, t: Translate, locale: Locale): string | undefined {
-  if (!cell.detail || locale !== "en" || cell.title !== "建议底座") return cell.detail;
-  const share = Math.max(0, ...report.lines.items.map((item) => item.targetShare ?? 0));
-  return t("建议投入约 {{share}}%", { share });
-}
-
-/** A label cell's value: the top Schwartz value is a fixed name and is translated; the core word and line names are shown as written. */
-const cellValue = (cell: { title: string; value: string }, t: Translate) => cell.title === "价值核心" ? t(cell.value) : cell.value;
+/** How a label cell is set: the writer's core word in the model's face, the top Schwartz value (a fixed name) in the poster's serif. */
+const cellClass = (cell: { title: string }, t: Translate) => cell.title === t("核心词") ? "gen" : cell.title === t("价值核心") ? "pt-serif" : undefined;
 
 /** The type's closing sentence after the writer's summary, 「…，你是 GEMA 改装师。」, in the page's language. */
 function summaryWithType(summary: string, type: PortraitType, t: Translate, locale: Locale) {
@@ -76,7 +66,8 @@ function SharePart({ report, state, ordered }: { report: PortraitReport; state: 
   const locale = useLocale();
   const type = portraitType(report);
   const name = (id: string) => state.lines.find((line) => line.id === id)?.label ?? id;
-  const { cells, identities } = portraitLabels(report, { lineLabel: name });
+  // Labels come back in the page's language (`portraitLabels` translates titles, the value and the base's detail).
+  const { cells, identities } = portraitLabels(report, { lineLabel: name, locale });
   const edges = edgesOf(report);
   const allLines = [...report.lines.items].sort((a, b) => (b.targetShare ?? 0) - (a.targetShare ?? 0))
     .flatMap((item) => item.targetShare === undefined ? [] : [{ lineId: item.lineId, label: name(item.lineId), target: item.targetShare, now: item.share ?? null }]);
@@ -99,8 +90,8 @@ function SharePart({ report, state, ordered }: { report: PortraitReport; state: 
       {report.cover.tagline && <p className="pt-tagline gen">{t("「{{tagline}}」", { tagline: report.cover.tagline })}</p>}
       {type && <DivergingAxes type={type} evidence />}
       {(cells.length > 0 || identities.length > 0) && <dl className="pt-labels">
-        {cells.map((cell) => <div key={cell.title}><dt>{t(cell.title)}</dt>
-          <dd><b className={cell.title === "核心词" ? "gen" : cell.title === "价值核心" ? "pt-serif" : undefined}>{cellValue(cell, t)}</b>{cell.detail && <small>{cellDetail(cell, report, t, locale)}</small>}</dd></div>)}
+        {cells.map((cell) => <div key={cell.title}><dt>{cell.title}</dt>
+          <dd><b className={cellClass(cell, t)}>{cell.value}</b>{cell.detail && <small>{cell.detail}</small>}</dd></div>)}
         {identities.length > 0 && <div className="pt-labels-wide"><dt>{t("身份")}</dt><dd><IdentityBars rows={identities} /></dd></div>}
       </dl>}
       <div className="pt-summary">
@@ -200,7 +191,7 @@ export function PortraitView({ initial, publicUrl, name }: { initial: State; pub
   </section>;
   const shared = redactPortrait(raw);
   const sharedType = portraitType(shared);
-  const sharedLabels = portraitLabels(shared, { lineLabel: (id) => state.lines.find((line) => line.id === id)?.label ?? id });
+  const sharedLabels = portraitLabels(shared, { lineLabel: (id) => state.lines.find((line) => line.id === id)?.label ?? id, locale });
   const lineById = new Map(state.lines.map((line) => [line.id, line]));
   const ordered = [...state.lines].sort((a, b) => (a.hard === b.hard ? 0 : a.hard ? -1 : 1) || (a.rank ?? 99) - (b.rank ?? 99));
   const date = (state.at ?? new Date().toISOString()).slice(0, 10);
@@ -320,8 +311,8 @@ export function PortraitView({ initial, publicUrl, name }: { initial: State; pub
         </div>
         {shared.cover.tagline && <p className="pt-tagline gen">{t("「{{tagline}}」", { tagline: shared.cover.tagline })}</p>}
         {sharedType && <ul className="pt-card-axes">{sharedType.axes.map((axis) => <li key={axis.id}><b>{axis.percent}%</b> <span className="pt-serif">{t(axis.label)}</span></li>)}</ul>}
-        {sharedLabels.cells.length > 0 && <dl className="pt-card-labels">{sharedLabels.cells.map((cell) => <div key={cell.title}><dt>{t(cell.title)}</dt>
-          <dd className={cell.title === "核心词" ? "gen" : cell.title === "价值核心" ? "pt-serif" : undefined}>{cellValue(cell, t)}</dd></div>)}</dl>}
+        {sharedLabels.cells.length > 0 && <dl className="pt-card-labels">{sharedLabels.cells.map((cell) => <div key={cell.title}><dt>{cell.title}</dt>
+          <dd className={cellClass(cell, t)}>{cell.value}</dd></div>)}</dl>}
         {sharedLabels.identities.length > 0 && <div className="pt-card-identities"><small>{t("身份")}</small><IdentityBars rows={sharedLabels.identities} /></div>}
         <small className="pt-card-foot">{t(CREDIBILITY)} · Crossline{publicUrl ? ` · ${publicUrl}` : ""}</small>
       </div>

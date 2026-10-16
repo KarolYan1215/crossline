@@ -28,7 +28,7 @@ export function PasswordCard() {
     const { error: changeError } = await authClient.changePassword({ currentPassword: String(data.get("current") ?? ""),
       newPassword: String(data.get("next") ?? ""), revokeOtherSessions: false });
     setBusy(false);
-    if (changeError) { setStatus(authErrorMessage(changeError, t("密码没有修改成功，请检查当前密码。"))); setError(true); return; }
+    if (changeError) { setStatus(authErrorMessage(changeError, t("密码没有修改成功，请检查当前密码。"), t)); setError(true); return; }
     form.reset(); setStatus(t("密码已修改。"));
   };
 

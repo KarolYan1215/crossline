@@ -144,8 +144,7 @@ function GrownFlow({ flow, onChanged }: { flow: GrownSkillView; onChanged: (flow
   const verdict = VERDICT[flow.verdict];
   const person = flow.steps.filter((step) => step.person);
   const waiting = flow.status === "needs_consent";
-  // 「按需」 is how the schedule label names a workflow used on request (compared, not shown; i18n-ignore on the next line).
-  const onRequest = flow.schedule === "按需" || flow.schedule === t("按需");
+  const onRequest = flow.scheduleKind === "on_request";
   const accessLogin = (item: GrownSkillView["access"][number]) => item.login ? item.loggedInAt ? t("{{day}} 登录", { day: day(item.loggedInAt) }) : t("需本人登录") : t("公开页面");
   return <li className="sk-public">
     <div className="sk-line-head">

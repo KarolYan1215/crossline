@@ -2,6 +2,7 @@ import "server-only";
 import { PROGRESS_LEVELS, taskTitleOf, type AccessContext, type Ask, type NudgeInput } from "@crossline/core";
 import { getStore } from "./crossline";
 import { reportProgress } from "./steps";
+import { tOf } from "./locale";
 
 /**
  * 「做到哪了」 (the owner's decision of 2026-10-15): on the return page 「做了一部分」 may be sent with nothing chosen and nothing said.
@@ -28,6 +29,7 @@ export function applyProgressLevel(ctx: AccessContext, orderId: string, stepId: 
 
 export function progressAsks(ctx: AccessContext, now: Date): Ask[] {
   const store = getStore();
+  const t = tOf(ctx);
   const answered = new Set(store.listEvents(ctx.workspaceId, { type: "progress.answered" })
     .map((event) => String((event.payload as { refEventId?: string }).refEventId ?? "")));
   const orders = new Map(store.listWorkOrders(ctx.workspaceId).map((order) => [order.id, order]));
@@ -40,19 +42,20 @@ export function progressAsks(ctx: AccessContext, now: Date): Ask[] {
     if (step?.status === "done") return [];
     return [{ id: `progress:${event.eventId}`, kind: "progress_check", entityId: order.id, line: order.identityId, urgency: "later",
       raisedAt: event.createdAt, fingerprint: event.eventId,
-      title: `「${short(taskTitleOf(order))}${step ? ` · ${short(step.title, 20)}` : ""}」做到哪了？`,
-      why: "回来时记为做了一部分，没有说做到哪。说一下，排程按剩下的部分安排；不答也不影响别的事。",
-      freeText: { placeholder: "例如：推完了第 1 题，第 2 题写了一半" },
-      preview: { kind: "task", href: `/workbench/${encodeURIComponent(order.id)}`, label: "看任务" },
-      options: [...PROGRESS_LEVELS.map((level, index) => ({ id: level.id, label: level.label, ...(index === 0 ? { recommended: true } : {}),
-        detail: `记为这一步完成 ${level.quarter}/4` })), { id: "stop", label: "不记得了", detail: "不再问，进度保持原样" }] }];
+      title: t("「{{title}}」做到哪了？", { title: `${short(taskTitleOf(order))}${step ? ` · ${short(step.title, 20)}` : ""}` }),
+      why: t("回来时记为做了一部分，没有说做到哪。说一下，排程按剩下的部分安排；不答也不影响别的事。"),
+      freeText: { placeholder: t("例如：推完了第 1 题，第 2 题写了一半") },
+      preview: { kind: "task", href: `/workbench/${encodeURIComponent(order.id)}`, label: t("看任务") },
+      options: [...PROGRESS_LEVELS.map((level, index) => ({ id: level.id, label: t(level.label), ...(index === 0 ? { recommended: true } : {}),
+        detail: t("记为这一步完成 {{quarter}}/4", { quarter: level.quarter }) })), { id: "stop", label: t("不记得了"), detail: t("不再问，进度保持原样") }] }];
   });
 }
 
 /** What the nudge pass offers the 小帮手: the levels as one-tap buttons, and a cue to say it in words. */
 export function progressNudgeInputs(ctx: AccessContext, now: Date): NonNullable<NudgeInput["progressChecks"]> {
+  const t = tOf(ctx);
   return progressAsks(ctx, now).map((ask) => ({ askId: ask.id, orderId: ask.entityId, question: ask.title, fingerprint: ask.fingerprint,
-    options: PROGRESS_LEVELS.map((level) => ({ id: level.id, label: level.label })), laterLabel: "说说做到哪了" }));
+    options: PROGRESS_LEVELS.map((level) => ({ id: level.id, label: t(level.label) })), laterLabel: t("说说做到哪了") }));
 }
 
 /** Carries out the answer: a level on the step, words to the progress judge (the box's own `task.op progress`), or 「不记得了」. */

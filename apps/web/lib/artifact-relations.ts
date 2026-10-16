@@ -3,6 +3,8 @@ import type { AccessContext, Ask } from "@crossline/core";
 import { readStoredArtifactPlan, recordRelationCheck, relationsDueForCheck, removeArtifactRelation } from "@crossline/db";
 import { getStore, planToday } from "./crossline";
 import { identityLines } from "./lines";
+import { localeFor } from "./locale";
+import { tFor } from "./i18n";
 
 /**
  * The web side of the cross-line artifact relations (docs/flywheel-and-views.md §5.4): taking one off a draft, and the question on its
@@ -21,8 +23,10 @@ const short = (text: string, length = 28) => text.length > length ? `${text.slic
  */
 export function relationCheckAsks(ctx: AccessContext, now = new Date()): Ask[] {
   const store = getStore();
+  const locale = localeFor(ctx);
+  const t = tFor(locale);
   const today = planToday(ctx, now);
-  const labels = new Map(identityLines(ctx).map((pack) => [pack.id, pack.label]));
+  const labels = new Map(identityLines(ctx).map((pack) => [pack.id, t(pack.label)]));
   const milestones = new Map(store.listMilestones(ctx.workspaceId).map((milestone) => [milestone.id, milestone]));
   const artifacts = new Map(readStoredArtifactPlan(store, ctx.workspaceId).artifacts.map((artifact) => [artifact.id, artifact]));
   return relationsDueForCheck(store, ctx.workspaceId, today).flatMap((relation): Ask[] => {
@@ -30,17 +34,20 @@ export function relationCheckAsks(ctx: AccessContext, now = new Date()): Ask[] {
     const transfer = relation.transfer!;
     if (!from || !to) return [];
     const artifact = artifacts.get(relation.artifactId!);
-    const amount = `${transfer.expected} ${transfer.unit}${transfer.metric}`;
+    const unit = locale === "en" ? [transfer.unit, transfer.metric].filter(Boolean).join(" ") : `${transfer.unit}${transfer.metric}`;
+    const amount = `${transfer.expected} ${unit}`;
     return [{
       id: `relcheck:${relation.id}`, kind: "relation_check", entityId: relation.id, line: from.identityId, urgency: "soon",
       dueDay: relation.checkOn!, raisedAt: `${relation.checkOn}T00:00:00.000Z`, fingerprint: `${relation.checkOn}|${transfer.expected}`,
-      title: `${labels.get(from.identityId) ?? from.identityId} · ${short(from.title)} 是否给 ${labels.get(to.identityId) ?? to.identityId} · ${short(to.title)} 提供了 ${amount}？`,
-      why: `${artifact ? `产物「${artifact.title}」。` : ""}计划中的反事实：${(relation.counterfactual ?? "").replace(/[。.\s]+$/u, "")}。`
-        + `今天是核对日（下游截止 ${relation.checkOn}）。兑现与部分计入跨线关系兑现率；没有则这条飞轮关系标为不成立，同类产物下次规划时会少安排。`,
+      title: t("{{fromLine}} · {{from}} 是否给 {{toLine}} · {{to}} 提供了 {{amount}}？", { fromLine: labels.get(from.identityId) ?? from.identityId, from: short(from.title),
+        toLine: labels.get(to.identityId) ?? to.identityId, to: short(to.title), amount }),
+      why: (artifact ? t("产物「{{title}}」。", { title: artifact.title }) + (locale === "en" ? " " : "") : "")
+        + t("计划中的反事实：{{counterfactual}}。", { counterfactual: (relation.counterfactual ?? "").replace(/[。.\s]+$/u, "") }) + (locale === "en" ? " " : "")
+        + t("今天是核对日（下游截止 {{day}}）。兑现与部分计入跨线关系兑现率；没有则这条飞轮关系标为不成立，同类产物下次规划时会少安排。", { day: relation.checkOn }),
       options: [
-        { id: "fulfilled", label: "兑现", detail: `按 ${amount} 记录` },
-        { id: "partial", label: "部分", fields: [{ id: "measured", label: `实际数量（${transfer.unit}${transfer.metric}）`, kind: "text", required: true, placeholder: `计划 ${transfer.expected}` }] },
-        { id: "none", label: "没有", detail: "飞轮关系标为不成立", fields: [{ id: "note", label: "原因（可选）", kind: "text", required: false }] }
+        { id: "fulfilled", label: t("兑现"), detail: t("按 {{amount}} 记录", { amount }) },
+        { id: "partial", label: t("部分"), fields: [{ id: "measured", label: t("实际数量（{{unit}}）", { unit }), kind: "text", required: true, placeholder: t("计划 {{expected}}", { expected: transfer.expected }) }] },
+        { id: "none", label: t("没有"), detail: t("飞轮关系标为不成立"), fields: [{ id: "note", label: t("原因（可选）"), kind: "text", required: false }] }
       ]
     }];
   });

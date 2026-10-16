@@ -5,6 +5,7 @@ import { attachmentsRoot, saveCaptureAttachments } from "../../../../../lib/atta
 import { getStore } from "../../../../../lib/crossline";
 import { resolveAccessContext } from "../../../../../lib/access-guard";
 import { isCrossSiteWrite } from "../../../../../lib/same-origin";
+import { localeFor } from "../../../../../lib/locale";
 
 const MAX_FILES = 10;
 
@@ -27,7 +28,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     fileName: file.name || "attachment", mediaType: file.type, buffer: Buffer.from(await file.arrayBuffer())
   })));
   const result = saveCaptureAttachments(getStore(), {
-    workspaceId: ctx.workspaceId, ownerId: ctx.principalId, captureId: id, files: buffers
+    workspaceId: ctx.workspaceId, ownerId: ctx.principalId, captureId: id, files: buffers, locale: localeFor(ctx)
   });
   if (!result.ok) return Response.json({ code: result.code, message: result.message }, { status: 400 });
   return Response.json({ saved: result.saved.length });

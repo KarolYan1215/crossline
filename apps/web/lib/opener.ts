@@ -15,10 +15,15 @@ export type OpenerView = {
   asks: { count: number; top?: { title: string; urgency: "now" | "soon" | "later"; line?: string } };
 };
 
+import { monthDay, tFor, weekdayShort, type Locale } from "./i18n";
+
 export const minutesOfClock = (clock: string) => { const [h, m] = clock.split(":").map(Number); return (h ?? 0) * 60 + (m ?? 0); };
 
-export function dayLabel(day: string): string {
-  return `${Number(day.slice(5, 7))} 月 ${Number(day.slice(8, 10))} 日 周${"日一二三四五六"[new Date(`${day}T12:00:00Z`).getUTCDay()]}`;
+/** 「10 月 15 日 周四」 / "Thu, Oct 15". */
+export function dayLabel(day: string, locale?: Locale): string {
+  const weekday = new Date(`${day}T12:00:00Z`).getUTCDay();
+  const month = locale === "en" ? monthDay(locale, day).split(" ")[0] : Number(day.slice(5, 7));
+  return tFor(locale)("{{month}} 月 {{date}} 日 {{weekday}}", { month, date: Number(day.slice(8, 10)), weekday: weekdayShort(locale, weekday) });
 }
 
 /** The hours the card's axis covers: at least 08:00–20:00, widened to whole hours around anything earlier or later. */
@@ -42,10 +47,11 @@ export function blockSpan(block: OpenerBlock, axis: { from: number; to: number }
 export const workMinutes = (view: Pick<OpenerView, "work">) =>
   view.work.reduce((sum, block) => sum + Math.max(0, minutesOfClock(block.end) - minutesOfClock(block.start)), 0);
 
-export function hoursText(minutes: number): string {
-  if (minutes < 60) return `${minutes} 分钟`;
+export function hoursText(minutes: number, locale?: Locale): string {
+  const t = tFor(locale);
+  if (minutes < 60) return t("{{minutes}} 分钟", { minutes });
   const hours = Math.round(minutes / 6) / 10;
-  return `${Number.isInteger(hours) ? hours : hours.toFixed(1)} 小时`;
+  return t("{{hours}} 小时", { hours: Number.isInteger(hours) ? hours : hours.toFixed(1) });
 }
 
 /** Reads a stored payload back, or nothing when it is not one (an older message, or a shape this version does not know). */

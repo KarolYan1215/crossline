@@ -248,7 +248,7 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
   const inRound = new Set(roundQuestions.map((question) => question.id));
   const extra = waiting ? [] : (state?.extraQuestions ?? []).filter((question) => !inRound.has(question.id) && !answeredElsewhere.has(question.id));
   const batchQuestions = [...roundQuestions, ...extra];
-  const composed = composeAnswers(batchQuestions, answers, text);
+  const composed = composeAnswers(batchQuestions, answers, text, state?.interviewLocale ?? locale);
   const canSend = busy === "" && !background && (Boolean(composed.trim()) || waiting);
 
 
@@ -296,6 +296,9 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
           <SegmentedControl label={t("访谈语气")} value={state.tone} onChange={(next) => void changeTone(next)}
             options={ONBOARDING_TONES.map((id) => ({ value: id, label: t(ONBOARDING_TONE_LABEL[id].label) }))} /></div>}
       </header>
+      {/* The interview keeps the language it started in; said once, in the page's language, when the two differ. */}
+      {state.interviewLocale && state.interviewLocale !== locale && <p className="ob-muted ob-language" role="note">
+        {t("访谈以开始时的语言继续（{{language}}）。界面切换不影响访谈。", { language: state.interviewLocale === "en" ? "English" : t("中文") })}</p>}
       <div className="ob-thread ob-voice" aria-live="polite">
         {!state.focusLine && <AssessCard />}
         {opening && <OpeningCard linesKnown={!state.setupLines} knownLines={state.lines.map((line) => line.label)} initialTone={state.tone}

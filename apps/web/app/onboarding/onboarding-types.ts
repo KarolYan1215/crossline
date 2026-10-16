@@ -1,3 +1,6 @@
+import { answerLine } from "@crossline/core";
+import type { Locale } from "../../lib/i18n";
+
 /** What `GET /api/onboarding/state` returns — the shapes the screen reads, not the store's full rows. */
 export type Identity = { id: string; label: string };
 export type Project = { id: string; identityId: string; name: string; summary: string; status: string };
@@ -33,6 +36,8 @@ export type DiligenceReport = {
   sources: Array<{ id: string; title: string; publisher: string; finalUrl: string; accessedOn: string }>;
 };
 export type OnboardingState = {
+  /** The language the interview runs in (locked when it started); null before it has started, when it follows the page. */
+  interviewLocale?: Locale | null;
   /** The five start items stand (main interview; always true in a line's own interview): every page opens. */
   readyToStart: boolean;
   /** The worker's own first milestone drafts: being designed, or that run ended with none. */
@@ -86,17 +91,18 @@ export type Answer = { picked: string[]; other: string };
  * full on purpose: the interview grounds every fact it learns in a verbatim quote of what the person said,
  * and a bare option id would give it nothing to quote.
  */
-export function composeAnswers(questions: Question[], answers: Record<string, Answer>, freeText: string): string {
+/**
+ * The reply a batch of answers makes, line by line in core's `answerLine` format, in the interview's own language (`locale`: the language
+ * it started in, which may differ from the page's).
+ */
+export function composeAnswers(questions: Question[], answers: Record<string, Answer>, freeText: string, locale?: Locale): string {
   const parts: string[] = [];
   for (const question of questions) {
     const answer = answers[question.id];
     if (!answer || (!answer.picked.length && !answer.other.trim())) continue;
-    const labels = answer.picked.map((id) => question.options.find((option) => option.id === id)?.label).filter(Boolean);
-    // The markers are a wire format read back by `answeredGapFacts` (packages/core/src/profile-gaps.ts), not interface text.
-    /* i18n-ignore-start */
-    const line = [labels.length ? `选择：${labels.join("；")}` : "", answer.other.trim() ? `补充：${answer.other.trim()}` : ""].filter(Boolean).join("。");
-    parts.push(`【${question.text}】${line}`);
-    /* i18n-ignore-end */
+    const labels = answer.picked.map((id) => question.options.find((option) => option.id === id)?.label).filter((label): label is string => Boolean(label));
+    // A wire format read back by `answeredGapFacts` (packages/core/src/profile-gaps.ts) in either language.
+    parts.push(answerLine(question.text, labels, answer.other, locale));
   }
   if (freeText.trim()) parts.push(freeText.trim());
   return parts.join("\n");

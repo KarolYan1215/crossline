@@ -8,6 +8,7 @@ import { isCrossSiteWrite } from "../../../lib/same-origin";
 import { analyzeNewCapturesInBackground, extractBackgroundFactsInBackground } from "../../../lib/capture-followups";
 import { replayTime } from "../../../lib/replay-time";
 import { readChecklistAnswers, readEvidence, readReport } from "../../../lib/execution-input";
+import { localeFor } from "../../../lib/locale";
 
 // A queued command can be replayed long after it was written — another device, or the web UI itself,
 // may have already moved the same work order on by the time this one reaches the server. Every one of
@@ -33,7 +34,7 @@ export async function POST(request: Request) {
   const access = await resolveAccessContext(request);
   if ("response" in access) return access.response;
   const { ctx } = access;
-  const validation = validateCommandEnvelope(await request.json().catch(() => null));
+  const validation = validateCommandEnvelope(await request.json().catch(() => null), localeFor(ctx));
   if (!validation.ok) return Response.json(validation.blocker, { status: 400 });
   const command = validation.command;
   // The envelope's ownerId/workspaceId is the client's own claim, replayed from its offline outbox —

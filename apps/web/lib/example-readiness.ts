@@ -1,3 +1,4 @@
+// i18n-exempt: the example board, written as if by the person (tests and e2e only)
 import { DEFAULT_AVAILABILITY, LINE_PROFILES_SETTING, type AccessContext, type StoredLineProfile } from "@crossline/core";
 import type { CrosslineStore } from "@crossline/db";
 import { LINE_SETTING, defaultIdentityPacks, type LineSpec } from "@crossline/identity-packs";

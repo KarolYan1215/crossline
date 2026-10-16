@@ -1,5 +1,6 @@
 import { workedRhythm, type AvailabilityWindow } from "@crossline/core";
 import type { ForecastWeek, GoalForecast } from "@crossline/planner";
+import type { Translate } from "./i18n";
 
 /**
  * The plan page's long-range statistics as pure functions of what the ledger and the forecast already hold (decided 2026-10-10,
@@ -285,3 +286,17 @@ export function availabilityGrid(windows: AvailabilityWindow[]): number[][] {
 
 /** The part of the page a previewed change moves: drawn as it would be, with the current values as ghosts. */
 export type ForecastCharts = { capacity: CapacityWeek[]; goals: GoalRow[]; next7: Record<string, number>; windows: AvailabilityWindow[] };
+
+/**
+ * The forecast's bottleneck (`forecastGoals` in packages/planner, written in Chinese) in the page's language. Its few fixed shapes are
+ * read back and said again; anything else is shown as it came.
+ */
+export function bottleneckText(raw: string, t: Translate): string {
+  /* i18n-ignore-start: the planner's own wording, matched to be said again */
+  const horizon = /^(八周|(\d+) 周)内容量或步骤依赖不足$/.exec(raw);
+  if (horizon) return t("{{count}} 周内容量或步骤依赖不足", { count: horizon[2] ? Number(horizon[2]) : 8 });
+  const margin = /^p85 情景只比截止早 (-?\d+) 天，没有留出 (\d+) 天的余量$/.exec(raw);
+  /* i18n-ignore-end */
+  if (margin) return t("p85 情景只比截止早 {{count}} 天，没有留出 {{margin}} 天的余量", { count: Number(margin[1]), margin: Number(margin[2]) });
+  return t(raw);
+}

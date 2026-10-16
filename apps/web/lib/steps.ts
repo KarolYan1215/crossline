@@ -4,6 +4,7 @@ import { taskProgress, type AccessContext } from "@crossline/core";
 import type { StoredStepPlan } from "@crossline/db";
 import { getStore } from "./crossline";
 import { requestCodexSupervisor } from "./codex-runtime";
+import { tOf } from "./locale";
 
 /** Each task's next block on the calendar (today or later), for the card's 「下一次」 line. */
 export function nextSlots(blocks: Array<{ id: string; day?: string | undefined; start: string; end: string }>, today: string): Map<string, { day: string; start: string; end: string }> {
@@ -64,7 +65,7 @@ export function confirmCriterion(ctx: AccessContext, workOrderId: string, criter
   const statement = store.listMilestones(ctx.workspaceId).filter((item) => item.id === order.milestoneId).at(-1)?.successCriteria
     .find((criterion) => criterion.id === criterionId)?.statement ?? criterionId;
   store.addPreference({ workspaceId: ctx.workspaceId, source: "standard_confirmed", scope: order.identityId, weight: 0.3, refId: `${workOrderId}:${criterionId}`,
-    text: `任务「${order.intent}」的标准「${statement}」由本人确认达成，未提交成果` });
+    text: tOf(ctx)("任务「{{task}}」的标准「{{statement}}」由本人确认达成，未提交成果", { task: order.intent, statement }) });
   return { ok: true };
 }
 

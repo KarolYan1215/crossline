@@ -8,6 +8,7 @@ import { lineLabels } from "./lines";
 import { seenBlocksKey } from "./nudges";
 import { applyProgressLevel } from "./progress-check";
 import type { PageContext } from "./conversation";
+import { tOf } from "./locale";
 
 /**
  * Coming back (docs/review-2026-10-13.md §6.3, the person's decision): after days away the first thing shown is what happened meanwhile
@@ -165,7 +166,7 @@ export function returnView(ctx: AccessContext, since: string, now: Date, until?:
 /** Archives what nobody touched for fourteen days (recoverable from 已丢弃 and the milestone archive); returns what it archived. */
 export function cleanStale(ctx: AccessContext, now: Date): { ok: true; orders: string[]; milestones: string[] } {
   const stale = staleItems(ctx, now);
-  const orders = stale.orders.filter((order) => archiveWorkOrder(ctx, order.id, `超过 ${STALE_DAYS} 天无人处理，回来时自动归档`, { bySystem: true }).ok).map((order) => order.id);
+  const orders = stale.orders.filter((order) => archiveWorkOrder(ctx, order.id, tOf(ctx)("超过 {{count}} 天无人处理，回来时自动归档", { count: STALE_DAYS }), { bySystem: true }).ok).map((order) => order.id);
   const milestones = stale.milestones.length ? rejectMilestoneDrafts(ctx, stale.milestones.map((milestone) => milestone.id)).approved : [];
   return { ok: true, orders, milestones };
 }
@@ -211,7 +212,7 @@ export function answerReturn(ctx: AccessContext, orderId: string, verdict: Retur
     if (detail.level && !ticked.includes(target)) applyProgressLevel(ctx, orderId, target, detail.level);
     unclear = !ticked.length && !detail.level && !detail.note?.trim();
   } else if (verdict === "dropped") {
-    const archived = archiveWorkOrder(ctx, orderId, "回来时标为不做了");
+    const archived = archiveWorkOrder(ctx, orderId, tOf(ctx)("回来时标为不做了"));
     if (!archived.ok) return archived;
   }
   store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `return.answered:${orderId}:${attempt}`, type: "return.answered",
@@ -231,6 +232,7 @@ export function returnItems(ctx: AccessContext, since: string, now: Date, until?
  * an item is about (`entityId` = `<order>#<step>`, or the order alone), and how each answer maps onto the box's own actions — so the
  * person can say it in their own words and still confirm a card, rather than only pick a fixed option.
  */
+// i18n-ignore-start: the page's lines are the concierge model's context, not interface
 export function returnPageLines(ctx: AccessContext, page: PageContext, now: Date): string[] {
   const store = getStore();
   const due = returnDue(ctx, now);
@@ -249,6 +251,7 @@ export function returnPageLines(ctx: AccessContext, page: PageContext, now: Date
   out.push("说到做完了，用 task.op step_done 并填任务 id 与步骤 id；只做了一部分，用 task.op progress 记下做到哪；没做、往后放用 task.op defer；不做了用 task.op archive。一句话涉及几步就逐一提出动作，由本人确认后执行。");
   return out;
 }
+// i18n-ignore-end
 
 /** 「先跳过」: the return page is not shown again for this absence. */
 export function dismissReturn(ctx: AccessContext, since: string): { ok: true } {

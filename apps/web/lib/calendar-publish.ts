@@ -2,6 +2,7 @@ import "server-only";
 import { CALENDAR_PUBLISH_FAILURE, type AccessContext } from "@crossline/core";
 import { effectiveSchedulePreferences, getStore, loadCurrentPlan, planToday, toZonedInstant } from "./crossline";
 import { optimalWaitingMs } from "./optimal-schedule";
+import { tOf } from "./locale";
 
 /** How long the automatic publish waits for the optimal plan before writing the greedy one. */
 export const OPTIMAL_WAIT_MS = 60_000;
@@ -61,13 +62,14 @@ export function noticeBlocks(ctx: AccessContext, now = new Date()): PublishBlock
     } catch { return []; }
   };
   const followUps = store.listWaitingItems(ctx.workspaceId, { state: "open" }).filter((item) => item.followUpAt >= today)
-    .flatMap((item) => marker(`followup:${item.id}`, `跟进：${item.who ? `${item.who}的` : ""}${item.title}到了吗？`, item.followUpAt));
+    .flatMap((item) => marker(`followup:${item.id}`, item.who ? tOf(ctx)("跟进：{{who}}的{{title}}到了吗？", { who: item.who, title: item.title })
+      : tOf(ctx)("跟进：{{title}}到了吗？", { title: item.title }), item.followUpAt));
   const approved = new Map(store.listMilestones(ctx.workspaceId).filter((milestone) => milestone.status === "approved").map((milestone) => [milestone.id, milestone]));
   const deadlines = store.listMilestoneAnchors(ctx.workspaceId).flatMap((anchor) => {
     const milestone = approved.get(anchor.milestoneId);
     if (!milestone || !anchor.deadline) return [];
     const day = new Date(Date.parse(`${anchor.deadline}T00:00:00Z`) - DEADLINE_NOTICE_DAYS * 86_400_000).toISOString().slice(0, 10);
-    return day >= today ? marker(`deadline:${milestone.id}`, `${DEADLINE_NOTICE_DAYS} 天后到期：${milestone.title}`, day) : [];
+    return day >= today ? marker(`deadline:${milestone.id}`, tOf(ctx)("{{count}} 天后到期：{{title}}", { count: DEADLINE_NOTICE_DAYS, title: milestone.title }), day) : [];
   });
   return [...followUps, ...deadlines];
 }
@@ -92,8 +94,9 @@ export function publishStatus(ctx: AccessContext): PublishStatus {
     const raw = JSON.parse(store.getSetting(ctx.workspaceId, CALENDAR_PUBLISH_FAILURE) || "null") as { code?: string; message?: string; at?: string } | null;
     if (raw?.code && raw.at) {
       const relogin = raw.code === "CALENDAR_WRITE_NOT_AUTHORIZED";
-      failure = { at: raw.at, relogin, text: relogin ? "写入账号的登录已过期或未授权，需要本人重新登录" : raw.code === "CODEX_SUPERVISOR_UNAVAILABLE"
-        ? "后台服务未运行，恢复后自动重试" : raw.code === "GRAPH_NOT_CONFIGURED" ? "本机没有配置 Microsoft 日历" : "上次写入未完成，下次自动重试" };
+      const t = tOf(ctx);
+      failure = { at: raw.at, relogin, text: relogin ? t("写入账号的登录已过期或未授权，需要本人重新登录") : raw.code === "CODEX_SUPERVISOR_UNAVAILABLE"
+        ? t("后台服务未运行，恢复后自动重试") : raw.code === "GRAPH_NOT_CONFIGURED" ? t("本机没有配置 Microsoft 日历") : t("上次写入未完成，下次自动重试") };
     }
   } catch { /* unreadable: none */ }
   return { account, ...(event && payload ? { last: { at: event.createdAt, created: payload.created ?? 0, updated: payload.updated ?? 0, deleted: payload.deleted ?? 0,

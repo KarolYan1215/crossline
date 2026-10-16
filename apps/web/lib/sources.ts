@@ -7,6 +7,7 @@ import { SOURCE_SIZE_LIMIT, sourceKindFor, type AccessContext, type SourceKind }
 import type { StoredSourceDocument } from "@crossline/db";
 import { dataDirectory, getStore } from "./crossline";
 import { requestCodexSupervisor } from "./codex-runtime";
+import { tOf } from "./locale";
 
 /**
  * Files the person hands over so the system can learn about them: a syllabus, a lecture plan, notes, a
@@ -34,13 +35,13 @@ export function saveSourceFiles(ctx: AccessContext,
   const root = sourcesRoot();
   for (const file of files) {
     const kind = sourceKindFor(file.fileName, file.mediaType);
-    if (!kind) return { ok: false, code: "SOURCE_TYPE_NOT_ALLOWED", message: `不支持的文件类型：${file.fileName}` };
+    if (!kind) return { ok: false, code: "SOURCE_TYPE_NOT_ALLOWED", message: tOf(ctx)("不支持的文件类型：{{type}}", { type: file.fileName }) };
     if (file.buffer.byteLength > SOURCE_SIZE_LIMIT[kind]) {
-      return { ok: false, code: "SOURCE_TOO_LARGE", message: `${file.fileName} 超过大小上限（${Math.round(SOURCE_SIZE_LIMIT[kind] / 1024 / 1024)}MB）。` };
+      return { ok: false, code: "SOURCE_TOO_LARGE", message: tOf(ctx)("{{name}} 超过大小上限（{{mb}}MB）。", { name: file.fileName, mb: Math.round(SOURCE_SIZE_LIMIT[kind] / 1024 / 1024) }) };
     }
     const sha256 = createHash("sha256").update(file.buffer).digest("hex");
     const target = path.resolve(root, `${sha256}.${EXTENSION[kind]}`);
-    if (path.relative(root, target).startsWith("..")) return { ok: false, code: "SOURCE_PATH_OUTSIDE_ROOT", message: "文件路径越界；没有写入。" };
+    if (path.relative(root, target).startsWith("..")) return { ok: false, code: "SOURCE_PATH_OUTSIDE_ROOT", message: tOf(ctx)("文件路径越界；没有写入。") };
     mkdirSync(root, { recursive: true });
     writeFileSync(target, file.buffer);
     documents.push(store.saveSourceDocument({

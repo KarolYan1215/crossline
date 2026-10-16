@@ -184,7 +184,7 @@ export function PreviewBody({ data }: { data: AskPreviewData }): ReactNode {
     case "portrait": return <div className="ak-pv-portrait">
       {data.image && <img src={data.image} alt={t("画像人物")} width={96} height={144} loading="lazy" />}
       <div>
-        {data.code && <p className="ak-pv-type"><b>{data.code}</b> {data.name}</p>}
+        {data.code && <p className="ak-pv-type"><b>{data.code}</b> {data.name ? t(data.name) : ""}</p>}
         {data.tagline && <p className="gen">{data.tagline}</p>}
         {data.summary && <p className="gen ak-pv-summary">{data.summary}</p>}
         {data.keywords.length > 0 && <p className="ak-pv-tags">{data.keywords.map((word) => <Tag key={word}>{word}</Tag>)}</p>}

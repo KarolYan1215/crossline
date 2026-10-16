@@ -1,6 +1,7 @@
 import "server-only";
 import { rankCandidates, stalledIdentities, type AccessContext, type CandidateRelation } from "@crossline/core";
 import { getStore } from "./crossline";
+import { tOf } from "./locale";
 
 export type WeeklyReview = {
   /** Compensating control for automatic acceptance: every one is listed, never folded into a count. */
@@ -54,7 +55,7 @@ export function loadWeeklyReview(ctx: AccessContext, now = new Date()): WeeklyRe
       const payload = order?.payload as { autoAcceptance?: { acceptedAt?: string }; questioned?: boolean } | undefined;
       return {
         workOrderId: event.entityId,
-        intent: order?.intent ?? "(已不存在的作业)",
+        intent: order?.intent ?? tOf(ctx)("(已不存在的作业)"),
         milestoneId: (event.payload as { milestoneId?: string }).milestoneId ?? "",
         acceptedAt: payload?.autoAcceptance?.acceptedAt ?? event.createdAt,
         questioned: Boolean(payload?.questioned)

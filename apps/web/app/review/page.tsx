@@ -18,7 +18,7 @@ import { linePacks } from "../../lib/lines";
 import { loadDiligence } from "../../lib/diligence";
 import type { DiligenceReport } from "../onboarding/onboarding-types";
 import { DiligenceReview } from "./diligence-review";
-import { tOf } from "../../lib/locale";
+import { localeFor, tOf } from "../../lib/locale";
 
 export const dynamic = "force-dynamic";
 
@@ -37,7 +37,7 @@ export default async function ReviewPage() {
   const taskDetails = loadTaskDetailsBatch(ctx, review.autoAccepted.map((item) => item.workOrderId));
   const milestoneDetails = loadMilestoneDetailsBatch(ctx, review.milestoneProgress.map((item) => item.id));
   const insightKeys = new Map(permissionCandidates(ctx).filter((item) => item.kind === "insight" && item.eligible).map((item) => [item.id, item.key]));
-  const night = lastNight(ctx.workspaceId, new Date());
+  const night = lastNight(ctx.workspaceId, new Date(), localeFor(ctx));
   const lineLabel = new Map(linePacks(ctx, { includeArchived: true }).map((pack) => [pack.id, pack.label]));
   const diligence: DiligenceReport[] = loadDiligence(ctx);
   const identities = linePacks(ctx).filter((pack) => pack.kind === "identity").map((pack) => ({ id: pack.id, label: pack.label }));

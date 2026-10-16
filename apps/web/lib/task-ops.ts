@@ -6,6 +6,7 @@ import { addWaitingForOrder, archiveWorkOrder, effectiveSchedulePreferences, get
 import { applyChange } from "./impact";
 import { editSteps, recordStepProgress, reportProgress, requestStepReplan } from "./steps";
 import { requestTutorial } from "./tutorial";
+import { tOf } from "./locale";
 
 type Result = { ok: true } | { ok: false; code: string };
 
@@ -30,7 +31,8 @@ export function recordEnergy(ctx: AccessContext, level: "low" | "medium" | "high
     const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
     const when = formatInTimeZone(at, zone, "EEEE HH:00");
     store.addPreference({ workspaceId: ctx.workspaceId, source: "postpone", scope: "all", weight: 0.5, refId: `energy:${formatInTimeZone(at, zone, "e-HH")}`,
-      text: `${when} 前后自评精力低${note.trim() ? `（${note.trim().slice(0, 80)}）` : ""}，此时段宜安排低强度任务` });
+      text: tOf(ctx)("{{when}} 前后自评精力低{{note}}，此时段宜安排低强度任务", { when,
+        note: note.trim() ? tOf(ctx)("（{{note}}）", { note: note.trim().slice(0, 80) }) : "" }) });
   }
   return { ok: true };
 }
@@ -44,7 +46,7 @@ export async function applyTaskOp(ctx: AccessContext, workOrderId: string, op: T
     case "step_done": return recordStepProgress(ctx, workOrderId, op.stepId, { status: "done" });
     case "step_add": {
       const plan = getStore().getStepPlan(ctx.workspaceId, workOrderId);
-      if (!plan) return requestStepReplan(ctx, workOrderId, `增加步骤：${op.text}`);
+      if (!plan) return requestStepReplan(ctx, workOrderId, `增加步骤：${op.text}`); // i18n-ignore: feedback for the step planner
       const open = plan.steps.filter((step) => step.status === "planned").map((step) => ({ id: step.id, title: step.title }));
       return editSteps(ctx, workOrderId, [...open, { title: op.text }]);
     }
@@ -84,6 +86,9 @@ export function postponeTask(ctx: AccessContext, workOrderId: string, input: { r
   const store = getStore();
   store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `task.postponed:${workOrderId}:${randomUUID()}`,
     type: "task.postponed", entityId: workOrderId, payload: { reason: input.reason, until: date, text: input.text.trim().slice(0, 300) } });
-  recordTaskNote(ctx, workOrderId, `推迟至 ${date} · ${REASON_LABEL[input.reason]}${input.reason === "waiting" ? `：${input.who ? `${input.who} · ` : ""}${input.what}` : input.text.trim() ? `：${input.text.trim()}` : ""}`, "postpone");
+  const t = tOf(ctx);
+  const detail = input.reason === "waiting" ? `${input.who ? `${input.who} · ` : ""}${input.what}` : input.text.trim();
+  recordTaskNote(ctx, workOrderId, detail ? t("推迟至 {{day}} · {{reason}}：{{detail}}", { day: date, reason: t(REASON_LABEL[input.reason]), detail })
+    : t("推迟至 {{day}} · {{reason}}", { day: date, reason: t(REASON_LABEL[input.reason]) }), "postpone");
   return { ok: true };
 }

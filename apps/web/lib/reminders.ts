@@ -5,6 +5,8 @@ import {
 } from "@crossline/core";
 import { getStore, milestonesRetiredBySystem, planToday, readGoalSettings, type PersistedPlan } from "./crossline";
 import { overlapStates, type TimelineItem } from "../app/timeline/model";
+import { localeFor } from "./locale";
+import { monthDay, tFor } from "./i18n";
 
 /**
  * What other pages say needs the person's attention, gathered on Today (the owner's direction of 2026-10-15: 「其他页面上的提示需要在今日页有
@@ -18,7 +20,7 @@ const DAY = 86_400_000;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const addDays = (day: string, n: number) => new Date(Date.parse(`${day}T12:00:00Z`) + n * DAY).toISOString().slice(0, 10);
 const daysBetween = (from: string, to: string) => Math.round((Date.parse(`${to}T12:00:00Z`) - Date.parse(`${from}T12:00:00Z`)) / DAY);
-const md = (day: string) => `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}`;
+const mdZh = (day: string) => `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}`;
 const short = (text: string, length = 18) => text.length > length ? `${text.slice(0, length)}…` : text;
 
 /** The plan page's 「部分任务未排入」, counted per task as that page counts it: wholly unplaced, and placed only in part. */
@@ -44,6 +46,9 @@ export function weekClashes(items: TimelineItem[], today: string, skip: Set<stri
 
 export function loadReminders(ctx: AccessContext, plan: PersistedPlan, calendarItems: TimelineItem[], asks: Ask[]): Reminder[] {
   const store = getStore();
+  const locale = localeFor(ctx);
+  const t = tFor(locale);
+  const md = (day: string) => locale === "en" ? monthDay(locale, day) : mdZh(day);
   const today = planToday(ctx);
   const asked = new Set(asks.map((ask) => ask.entityId));
   const out: Reminder[] = [];
@@ -56,19 +61,20 @@ export function loadReminders(ctx: AccessContext, plan: PersistedPlan, calendarI
     const due = [(order.payload as { dueDate?: string }).dueDate, deadlineOf(order.milestoneId)].filter((day): day is string => Boolean(day && DATE.test(day))).sort()[0];
     return due && due < today ? [{ order, due }] : [];
   }).sort((a, b) => a.due.localeCompare(b.due));
-  if (overdue.length === 1) out.push({ id: "overdue", text: `「${short(taskTitleOf(overdue[0]!.order))}」已过截止 ${daysBetween(overdue[0]!.due, today)} 天`,
+  if (overdue.length === 1) out.push({ id: "overdue", text: t("「{{title}}」已过截止 {{count}} 天", { title: short(taskTitleOf(overdue[0]!.order)), count: daysBetween(overdue[0]!.due, today) }),
     href: `/workbench/${encodeURIComponent(overdue[0]!.order.id)}`, line: overdue[0]!.order.identityId });
-  else if (overdue.length > 1) out.push({ id: "overdue", text: `${overdue.length} 个任务已过截止，最早 ${md(overdue[0]!.due)}`, href: "/workbench" });
+  else if (overdue.length > 1) out.push({ id: "overdue", text: t("{{count}} 个任务已过截止，最早 {{day}}", { count: overdue.length, day: md(overdue[0]!.due) }), href: "/workbench" });
 
   // 计划页: 「部分任务未排入」.
   const unplaced = unplacedTasks(plan);
   if (unplaced.none || unplaced.partial) out.push({ id: "unplaced", href: "/plan#why",
-    text: [unplaced.none ? `${unplaced.none} 个任务未排进日历` : "", unplaced.partial ? `${unplaced.partial} 个任务有步骤未排入` : ""].filter(Boolean).join("，") });
+    text: [unplaced.none ? t("{{count}} 个任务未排进日历", { count: unplaced.none }) : "", unplaced.partial ? t("{{count}} 个任务有步骤未排入", { count: unplaced.partial }) : ""]
+      .filter(Boolean).join(t("，")) });
 
   // 日历: 「时间冲突」 on the coming week's blocks; a locked block's conflict is already an ask (`locked_conflict`).
   const lockedAsked = new Set(asks.filter((ask) => ask.kind === "locked_conflict").map((ask) => ask.id.slice("locked:".length)));
   const clashes = weekClashes(calendarItems, today, lockedAsked);
-  if (clashes.count) out.push({ id: "clash", text: `${clashes.count} 个工作时段与日程时间冲突，最早 ${md(clashes.firstDay!)}`, href: "#today-timeline" });
+  if (clashes.count) out.push({ id: "clash", text: t("{{count}} 个工作时段与日程时间冲突，最早 {{day}}", { count: clashes.count, day: md(clashes.firstDay!) }), href: "#today-timeline" });
 
   // 主线页: a high risk on an approved milestone (the reviewer's current one, else the rule estimate the page shows), drafts waiting, and
   // cross-line relations whose time order no longer holds. A milestone with an open ask (at risk, a reviewed risk) is left to that ask.
@@ -84,19 +90,19 @@ export function loadReminders(ctx: AccessContext, plan: PersistedPlan, calendarI
       milestoneRiskFingerprint({ title: milestone.title, deadline, criteria: riskCriteriaKeys(milestone.successCriteria ?? []), dependsOn }));
     const risks: MilestoneRisk[] = reviewed ?? ruleMilestoneRisks({ today, deadline, criteria: milestone.successCriteria ?? [],
       dependsOn: dependsOn.flatMap((id) => { const other = milestones.find((item) => item.id === id); return other ? [{ title: other.title, deadline: deadlines.get(id) ?? null }] : []; }),
-      otherDeadlines: milestones.filter((other) => other.id !== milestone.id && deadlines.get(other.id)).map((other) => deadlines.get(other.id)!) });
+      otherDeadlines: milestones.filter((other) => other.id !== milestone.id && deadlines.get(other.id)).map((other) => deadlines.get(other.id)!), locale });
     const high = risks.find((risk) => risk.level === "high");
     return riskLevelOf(risks) === "high" && high ? [{ milestone, note: high.note }] : [];
   });
-  if (risky.length === 1) out.push({ id: "risk", text: `「${short(risky[0]!.milestone.title)}」风险高：${risky[0]!.note}`,
+  if (risky.length === 1) out.push({ id: "risk", text: t("「{{title}}」风险高：{{note}}", { title: short(risky[0]!.milestone.title), note: risky[0]!.note }),
     href: `/milestones?open=${encodeURIComponent(risky[0]!.milestone.id)}`, line: risky[0]!.milestone.identityId });
-  else if (risky.length > 1) out.push({ id: "risk", text: `${risky.length} 个里程碑风险高`, href: "/milestones" });
+  else if (risky.length > 1) out.push({ id: "risk", text: t("{{count}} 个里程碑风险高", { count: risky.length }), href: "/milestones" });
   const live = new Set(milestones.map((item) => item.id));
   const broken = store.listMilestoneRelations(ctx.workspaceId).filter((relation) => (relation.status === "approved" || relation.status === "candidate")
     && relation.artifactId && relation.transfer && live.has(relation.fromMilestoneId) && live.has(relation.toMilestoneId)
     && timeOrderProblem(deadlines.get(relation.fromMilestoneId), deadlines.get(relation.toMilestoneId), relation.transfer.lagDays, relation.kind === "recurring_feedback"));
-  if (broken.length) out.push({ id: "relations", text: `${broken.length} 条跨主线关系的时间顺序不成立`, href: "/milestones" });
+  if (broken.length) out.push({ id: "relations", text: t("{{count}} 条跨主线关系的时间顺序不成立", { count: broken.length }), href: "/milestones" });
   const drafts = milestones.filter((item) => item.status === "draft").length;
-  if (drafts) out.push({ id: "drafts", text: `${drafts} 个里程碑草稿待批准`, href: "/milestones" });
+  if (drafts) out.push({ id: "drafts", text: t("{{count}} 个里程碑草稿待批准", { count: drafts }), href: "/milestones" });
   return out;
 }
