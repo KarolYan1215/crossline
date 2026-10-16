@@ -235,7 +235,7 @@ const ERROR_TEXT: Record<string, string> = {
   APPEARANCE_INVALID: "外貌的选择不完整，请返回检查。",
   EMAIL_INVALID: "邮箱格式不对，请检查。",
   NICKNAME_INVALID: `署名不能用，请换一个（最多 ${NICKNAME_MAX} 个字）。`,
-  TOO_FAST: "提交得太快了，需要确认是真人在答题。请等几秒再点「看结果」。",
+  TOO_FAST: "提交得太快了，需要确认是真人在答题。请等几秒再点「下一步」。",
   REJECTED: "这次提交没有通过检查。请刷新页面后再试。",
   RATE_LIMITED: "提交太频繁了，请过几分钟再试。",
   INVITE_NOT_FOUND: "这个邀请链接已失效（过期或已被删除）。可以不带邀请提交，只是不会生成双人卡。",
