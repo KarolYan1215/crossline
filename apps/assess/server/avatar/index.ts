@@ -27,8 +27,11 @@ import { templatesDir, templateVariant, type TemplateVariant } from "./templates
  * above it. `ASSESS_IMAGE_CONCURRENCY` overrides it (two suits SiliconFlow's lowest image tier).
  */
 export const CONCURRENCY = Math.max(1, Number(process.env.ASSESS_IMAGE_CONCURRENCY) || 6);
-/** Waiting past this, a figure settles on the template: at six at once the last one waits about seven minutes. */
-export const MAX_PENDING = 60;
+/**
+ * Waiting past this, a figure settles on the template: at six at once the last one waits about thirteen minutes, inside the fifteen
+ * after which a figure still waiting reads as lost (`STALE_AFTER_MS`).
+ */
+export const MAX_PENDING = 120;
 /** One call to the model, download included. Seedream's larger models take 30–60 s for a 1024×1536 edit (measured 2026-10-16: 39 s). */
 export const CALL_TIMEOUT_MS = 120_000;
 /** A figure still `queued`/`drawing` this long after it was last queued was lost to a restart: show the fallback. */

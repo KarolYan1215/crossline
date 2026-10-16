@@ -27,7 +27,10 @@ function transporter(config: SmtpConfig): Transporter {
   const key = `${config.host}:${config.port}:${config.user}`;
   if (transport?.key === key) return transport.send;
   // 465 is implicit TLS; any other port (587, Aliyun's 80) upgrades with STARTTLS and must not stay in clear text.
+  // Pooled: a burst of people finishing together queues behind two open connections instead of opening one each, which a mail
+  // service answers by refusing the extra ones.
   const send = createTransport({
+    pool: true, maxConnections: 2, maxMessages: 100,
     host: config.host, port: config.port, secure: config.port === 465, requireTLS: config.port !== 465,
     auth: { user: config.user, pass: config.password }, connectionTimeout: 15_000, greetingTimeout: 15_000, socketTimeout: 30_000
   });
@@ -44,18 +47,41 @@ export async function flushMail(): Promise<void> {
 
 export type Mail = { to: string; subject: string; text: string; html: string };
 
+/** Waits before another try at a mail the service turned away for now (a 4xx answer, a dropped connection, too many at once). */
+export const MAIL_RETRY_DELAYS_MS = [30_000, 120_000, 600_000];
+let retryDelays = MAIL_RETRY_DELAYS_MS;
+/** Tests shorten the waits. */
+export function setMailRetryDelays(delays: number[]): void { retryDelays = delays; }
+
+/** A refusal a later try can get past: a temporary SMTP answer (4xx) or no answer at all. A permanent one (5xx, a bad address) is final. */
+function temporary(error: unknown): boolean {
+  const code = (error as { responseCode?: unknown })?.responseCode;
+  return typeof code === "number" ? code >= 400 && code < 500 : true;
+}
+
 function deliver(mail: Mail, resultId: string, kind: string): void {
   const config = smtpConfig();
   if (!config) {
     console.info(JSON.stringify({ event: "assess.mail_skipped", kind, resultId, reason: "SMTP_NOT_CONFIGURED" }));
     return;
   }
-  const sending = transporter(config).sendMail({ from: config.from, ...mail })
-    .then(() => { console.info(JSON.stringify({ event: "assess.mail_sent", kind, resultId })); })
-    .catch((error: unknown) => {
-      console.error(JSON.stringify({ event: "assess.mail_failed", kind, resultId, error: error instanceof Error ? error.message : String(error) }));
-    })
-    .finally(() => { inflight.delete(sending); });
+  const attempt = async (tries: number): Promise<void> => {
+    try {
+      await transporter(config).sendMail({ from: config.from, ...mail });
+      console.info(JSON.stringify({ event: "assess.mail_sent", kind, resultId, ...(tries ? { tries: tries + 1 } : {}) }));
+    } catch (error) {
+      const wait = retryDelays[tries];
+      const message = error instanceof Error ? error.message : String(error);
+      if (wait === undefined || !temporary(error)) {
+        console.error(JSON.stringify({ event: "assess.mail_failed", kind, resultId, tries: tries + 1, error: message }));
+        return;
+      }
+      console.warn(JSON.stringify({ event: "assess.mail_retry", kind, resultId, tries: tries + 1, waitMs: wait, error: message }));
+      await new Promise((resolve) => setTimeout(resolve, wait));
+      await attempt(tries + 1);
+    }
+  };
+  const sending = attempt(0).finally(() => { inflight.delete(sending); });
   inflight.add(sending);
 }
 

@@ -33,6 +33,12 @@ export type RuntimeRegistry = {
   signedIn(workspaceId: string): boolean;
   /** The runtime for running Skills; starts a connected guest's process. */
   client(workspaceId: string): Promise<{ ok: true; client: CodexRpcBoundary } | { ok: false; blocker: RuntimeBlocker }>;
+  /**
+   * A connected account's client without starting or waiting for its process: the first request does that. For routes that hold the
+   * caller's connection open while they work (`sendJsonWhenReady`), so a wait for a free runtime happens inside the kept-alive answer
+   * rather than before its headers, where the caller's five-minute limit would cut it.
+   */
+  handle(workspaceId: string): { ok: true; client: CodexRpcBoundary } | { ok: false; blocker: RuntimeBlocker };
   /** Already running (the sync getters the worker's runners take); undefined until `client` has started it. */
   current(workspaceId: string): CodexRpcBoundary | undefined;
   login(workspaceId: string, method: LoginMethod): Promise<RuntimeLogin>;
@@ -63,14 +69,15 @@ export function createRuntimeRegistry(options: {
   hasProvider?: (workspaceId: string) => boolean;
   /** Longer than a Skill's own stall limit (20 min), so a long turn that is still producing events is never stopped under it. */
   idleMs?: number;
-  /** While every runtime is working, how often to look for one that finished, and how long to wait before refusing. */
+  /** While every runtime is working, how often to look for one that finished, and how long to wait before refusing (three hours). */
   pollMs?: number;
   maxQueueMs?: number;
   now?: () => number;
 }): RuntimeRegistry {
   const maxRunning = options.maxRunning ?? 3;
   const pollMs = options.pollMs ?? 2_000;
-  const maxQueueMs = options.maxQueueMs ?? 30 * 60_000;
+  // As long as the web's longest wait on a run (three hours): a full house means waiting, and only a runtime stuck busy past it is refused.
+  const maxQueueMs = options.maxQueueMs ?? 3 * 60 * 60_000;
   const idleMs = options.idleMs ?? 30 * 60_000;
   const now = options.now ?? Date.now;
   const running = new Map<string, { sidecar: RuntimeSidecar; lastUsed: number }>();
@@ -184,6 +191,8 @@ export function createRuntimeRegistry(options: {
   return {
     isOwner, connected, signedIn,
     client: (workspaceId) => clientFor(workspaceId),
+    handle: (workspaceId) => isOwner(workspaceId) ? { ok: true, client: options.owner.client }
+      : connected(workspaceId) ? { ok: true, client: handleFor(workspaceId) } : { ok: false, blocker: blocker("RUNTIME_UNCONNECTED") },
     current: (workspaceId) => isOwner(workspaceId) ? options.owner.client : (touch(workspaceId), running.has(workspaceId) ? handleFor(workspaceId) : undefined),
     async login(workspaceId, method) {
       // Not through the handle: an account that is not connected yet is exactly the one that logs in.

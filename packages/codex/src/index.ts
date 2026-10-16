@@ -534,7 +534,8 @@ export async function startCodexSupervisor(options: {
       if (runtimeBlocker) { sendJson(response, 503, { blocker: runtimeBlocker }); return undefined; }
       return sidecar.client;
     }
-    const runtime = await runtimes!.client(workspaceId);
+    // Not started here: with every runtime busy the start waits its turn, and that wait belongs inside the route's kept-alive answer.
+    const runtime = runtimes!.handle(workspaceId);
     if (!runtime.ok) { sendJson(response, 503, { blocker: runtime.blocker }); return undefined; }
     return runtime.client;
   };
@@ -565,8 +566,10 @@ export async function startCodexSupervisor(options: {
     return runtime.ok ? costFor(runtime.client, workspaceId) : { available: false, reason: runtime.blocker.code };
   };
   const analyses = new Map<string, AbortController>();
-  let proposing: AbortController | undefined;
-  let conversing: AbortController | undefined;
+  // One proposal (or milestone conversation) at a time per account, not per server: a second person's request used to be refused
+  // with 「已有一次提议在运行」 while someone else's ran. Across accounts the model gate queues them (model-gate.ts).
+  const proposing = new Map<string, AbortController>();
+  const conversing = new Map<string, AbortController>();
   // One profile-interview turn at a time per workspace: a second click while one is running would race on the
   // same Codex thread and the same message sequence.
   const profileTurns = new Set<string>();
@@ -577,7 +580,7 @@ export async function startCodexSupervisor(options: {
   const judging = new Set<string>();
   const explaining = new Set<string>();
   const insighting = new Set<string>();
-  let syncing = false;
+  const syncing = new Set<string>();
   /**
    * Starts a job whose answer the caller is not waiting for, and swallows its failure on purpose.
    *
@@ -965,18 +968,18 @@ export async function startCodexSupervisor(options: {
           sendJson(response, 403, { blocker: { code: "SYNC_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
           return;
         }
-        if (syncing) {
+        if (syncing.has(callerWorkspaceId)) {
           sendJson(response, 409, { blocker: { code: "SYNC_ALREADY_RUNNING", message: "日历同步已在运行" } });
           return;
         }
-        syncing = true;
+        syncing.add(callerWorkspaceId);
         // Awaited, unlike the two Skill routes: a calendar read takes a second or two, and the person
         // clicked it to find out what changed, so the answer is worth waiting for.
         try { sendJson(response, 200, await options.syncCalendar(callerWorkspaceId)); }
         catch (error) {
           sendJson(response, 502, { blocker: { code: "GRAPH_SYNC_FAILED",
             message: error instanceof Error ? error.message : "日历同步失败" } });
-        } finally { syncing = false; }
+        } finally { syncing.delete(callerWorkspaceId); }
         return;
       }
       if (pathname === "/v1/calendar/write-login" && options.calendarWriteLogin && (request.method === "GET" || request.method === "POST")) {
@@ -1079,16 +1082,16 @@ export async function startCodexSupervisor(options: {
         const rt = await modelClient(response, callerWorkspaceId); if (!rt) return;
         // One proposal run at a time: this Skill is premium-budget and a second concurrent run would
         // spend the window twice to answer the same question.
-        if (proposing) {
+        if (proposing.has(callerWorkspaceId)) {
           sendJson(response, 409, { blocker: { code: "PROPOSAL_ALREADY_RUNNING", message: "已有一次里程碑提议在运行" } });
           return;
         }
         const body = await readJsonBody(request);
         const controller = new AbortController();
-        proposing = controller;
+        proposing.set(callerWorkspaceId, controller);
         try { await sendJsonWhenReady(response, () => options.proposeMilestones!(rt, String(body?.request ?? ""), controller.signal, callerWorkspaceId,
           Array.isArray(body?.only) ? (body!.only as unknown[]).filter((item): item is string => typeof item === "string").slice(0, 8) : undefined)); }
-        finally { if (proposing === controller) proposing = undefined; }
+        finally { if (proposing.get(callerWorkspaceId) === controller) proposing.delete(callerWorkspaceId); }
         return;
       }
       if (request.method === "POST" && pathname === "/v1/milestones/propose/continue" && options.continueMilestoneConversation) {
@@ -1097,7 +1100,7 @@ export async function startCodexSupervisor(options: {
           return;
         }
         const rt = await modelClient(response, callerWorkspaceId); if (!rt) return;
-        if (conversing) {
+        if (conversing.has(callerWorkspaceId)) {
           sendJson(response, 409, { blocker: { code: "PROPOSAL_ALREADY_RUNNING", message: "已有一次对话在运行" } });
           return;
         }
@@ -1109,9 +1112,9 @@ export async function startCodexSupervisor(options: {
           return;
         }
         const controller = new AbortController();
-        conversing = controller;
+        conversing.set(callerWorkspaceId, controller);
         try { await sendJsonWhenReady(response, () => options.continueMilestoneConversation!(rt, threadId, message, controller.signal, callerWorkspaceId)); }
-        finally { if (conversing === controller) conversing = undefined; }
+        finally { if (conversing.get(callerWorkspaceId) === controller) conversing.delete(callerWorkspaceId); }
         return;
       }
       if (request.method === "POST" && pathname === "/v1/onboarding/turn" && options.onboardingTurn) {
@@ -1181,7 +1184,7 @@ export async function startCodexSupervisor(options: {
         const captureTitle = String(body?.captureTitle ?? "");
         const captureContext = String(body?.captureContext ?? "");
         const controller = new AbortController();
-        sendJson(response, 200, await options.extractBackgroundFacts(rt, captureTitle, captureContext, controller.signal, callerWorkspaceId));
+        await sendJsonWhenReady(response, () => options.extractBackgroundFacts!(rt, captureTitle, captureContext, controller.signal, callerWorkspaceId));
         return;
       }
       if (request.method === "POST" && pathname === "/v1/goals/backplan" && options.backplanGoal) {
@@ -1190,12 +1193,13 @@ export async function startCodexSupervisor(options: {
           return;
         }
         const rt = await modelClient(response, callerWorkspaceId); if (!rt) return;
-        if (proposing) { sendJson(response, 409, { blocker: { code: "PROPOSAL_ALREADY_RUNNING", message: "已有一次提议在运行" } }); return; }
+        if (proposing.has(callerWorkspaceId)) { sendJson(response, 409, { blocker: { code: "PROPOSAL_ALREADY_RUNNING", message: "已有一次提议在运行" } }); return; }
         const body = await readJsonBody(request);
         const controller = new AbortController();
-        proposing = controller;
-        try { sendJson(response, 200, await options.backplanGoal(rt, String(body?.milestoneId ?? ""), controller.signal, callerWorkspaceId)); }
-        finally { if (proposing === controller) proposing = undefined; }
+        proposing.set(callerWorkspaceId, controller);
+        // Kept alive: queued behind other people's runs this can take longer than the caller's five-minute limit on a silent answer.
+        try { await sendJsonWhenReady(response, () => options.backplanGoal!(rt, String(body?.milestoneId ?? ""), controller.signal, callerWorkspaceId)); }
+        finally { if (proposing.get(callerWorkspaceId) === controller) proposing.delete(callerWorkspaceId); }
         return;
       }
       if (options.modelProviders && pathname.startsWith("/v1/model/provider")) {

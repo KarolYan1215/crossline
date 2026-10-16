@@ -45,7 +45,9 @@ export type CrosslineAuthOptions = {
 export type CrosslineAuth = Auth;
 
 function mailer(smtp: SmtpConfig) {
+  // Pooled: codes asked for at the same moment queue behind two open connections instead of each opening its own.
   return nodemailer.createTransport({
+    pool: true, maxConnections: 2,
     host: smtp.host, port: smtp.port, secure: smtp.port === 465,
     auth: { user: smtp.user, pass: smtp.password }
   });

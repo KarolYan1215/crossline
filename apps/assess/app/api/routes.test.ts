@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { InviteView, PairView, ResultView, SubmitResponse } from "../../lib/contract";
-import { flushMail } from "../../server/mail";
+import { flushMail, MAIL_RETRY_DELAYS_MS, setMailRetryDelays } from "../../server/mail";
 import { resetRateLimits, submitsPerIp } from "../../server/security";
 import { createResult, getResultByToken, listPairs } from "../../server/store";
 import { answersFor, appearance, get, params, post, submission, useTempDataDir } from "../../server/testing";
@@ -83,11 +83,24 @@ test("no mail when the box is unticked, and none (logged as skipped) without SMT
 });
 
 test("a failing mail never fails the submission", async () => {
-  mocks.sendMail.mockRejectedValueOnce(new Error("550 rejected"));
+  mocks.sendMail.mockRejectedValueOnce(Object.assign(new Error("550 rejected"), { responseCode: 550 }));
   const error = vi.spyOn(console, "error").mockImplementation(() => {});
   await submitOk();
   await flushMail();
   expect(error.mock.calls.some(([line]) => String(line).includes("assess.mail_failed"))).toBe(true);
+  expect(mocks.sendMail).toHaveBeenCalledTimes(1);
+});
+
+test("a mail the service turns away for now (too many at once) is sent again later instead of being dropped", async () => {
+  setMailRetryDelays([5, 5]);
+  mocks.sendMail.mockRejectedValueOnce(Object.assign(new Error("421 too many connections"), { responseCode: 421 }));
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  const info = vi.spyOn(console, "info").mockImplementation(() => {});
+  await submitOk();
+  await flushMail();
+  setMailRetryDelays(MAIL_RETRY_DELAYS_MS);
+  expect(mocks.sendMail).toHaveBeenCalledTimes(2);
+  expect(info.mock.calls.some(([line]) => String(line).includes("assess.mail_sent"))).toBe(true);
 });
 
 test("every refusal answers its code and stores nothing", async () => {
