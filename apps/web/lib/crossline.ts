@@ -906,7 +906,7 @@ export function planningInputFor(ctx: AccessContext, today: string, committed: P
     busyInstants, (blockId) => releaseAt.get(plannerIdOfBlock(blockId))).kept;
   const pinned = frozen.map((item) => ({ taskId: plannerIdOfBlock(item.blockId), start: item.start, end: item.end }));
   const efficiency = personalEfficiency(ctx);
-  const input: PlanningInput = {
+  const input: PlanningInput = { locale: localeFor(ctx),
     now,
     horizonDays: days.length,
     mode: preferences.mode, params: effectiveParams(ctx),

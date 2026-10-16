@@ -17,9 +17,9 @@ describe("planner text in either language", () => {
     const goal = { id: "g", title: "G", importance: "ordinary" as const, confirmedDeadline: null };
     expect(forecastGoals([goal], [task("w", "g", 100)], days).goals[0]!.bottleneck).toBe("第四象限暂缓；请确认日期或提升重要性");
     expect(forecastGoals([goal], [task("w", "g", 100)], days, new Set(), "en").goals[0]!.bottleneck)
-      .toBe("On hold as not urgent and not important; confirm a date or raise its importance");
+      .toBe("On hold (no deadline, ordinary importance); confirm a date or raise its importance");
     const empty = { ...goal, importance: "important" as const };
-    expect(forecastGoals([empty], [], days, new Set(), "en").goals[0]!.bottleneck).toBe("No tasks are bound yet; work back the steps first");
+    expect(forecastGoals([empty], [], days, new Set(), "en").goals[0]!.bottleneck).toBe("No tasks bound yet; work back the steps first");
   });
 
   test("a task that does not fit says so in the plan's language", async () => {

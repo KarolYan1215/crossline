@@ -23,8 +23,7 @@ const SOURCES = ["apps/web/app", "apps/web/lib", "apps/assess/app", "apps/assess
   "apps/worker/src", "packages/core/src", "packages/db/src", "packages/auth/src", "packages/codex/src", "packages/planner/src",
   "packages/connectors/src", "packages/identity-packs/src"];
 /** Areas still being translated (removed one by one as each is done; empty when the work is complete). */
-const PENDING = ["apps/worker/src", "packages/db/src", "packages/auth/src",
-  "packages/codex/src", "packages/planner/src", "packages/connectors/src", "packages/identity-packs/src"];
+const PENDING: string[] = [];
 const CATALOG_DIR = path.resolve(import.meta.dirname, "../locales/en");
 const HAN = /[㐀-鿿豈-﫿]/;
 const PLURAL = /_(zero|one|two|few|many|other)$/;
@@ -74,6 +73,8 @@ function walk(node: unknown, visit: (node: Node) => void): void {
 }
 
 const literals = new Set<string>();
+/** Every string written anywhere in source, Chinese or not: a key may be pure punctuation and values (`{{a}}：{{b}}`). */
+const written = new Set<string>();
 const findings: Finding[] = [];
 /** A path names a file or a whole folder: `apps/web/app/connect` is not `apps/web/app/connectors`. */
 const under = (file: string, prefix: string) => { const clean = prefix.replace(/\/+$/, ""); return file === clean || file.startsWith(`${clean}/`); };
@@ -81,7 +82,7 @@ const inScope = (file: string) => scope.length ? scope.some((prefix) => under(fi
 
 for (const file of SOURCES.flatMap(sourceFiles)) {
   const source = readFileSync(path.join(ROOT, file), "utf8");
-  if (!HAN.test(source)) continue;
+  // Files with no Chinese are read too: a key may be written in one (`"PDF"`, `"{{a}}：{{b}}"`).
   const exempt = /^\s*\/\/\s*i18n-exempt:/m.test(source.split("\n").slice(0, 40).join("\n"));
   let ast: unknown;
   try {
@@ -98,6 +99,11 @@ for (const file of SOURCES.flatMap(sourceFiles)) {
     findings.push({ file, line, rule, text: text.replace(/\s+/g, " ").slice(0, 100), full: text });
   };
   walk(ast, (node) => {
+    if (node.type === "StringLiteral" && typeof node.value === "string") written.add(node.value);
+    if (node.type === "TemplateLiteral" && !(node.expressions as unknown[]).length) {
+      const only = (node.quasis as Array<{ value: { cooked: string | null; raw: string } }>)[0];
+      if (only) written.add(only.value.cooked ?? only.value.raw);
+    }
     if (node.type === "StringLiteral" && typeof node.value === "string" && HAN.test(node.value)) {
       literals.add(node.value);
       report(node, "literal", node.value);
@@ -151,6 +157,6 @@ test("no stale English: every catalogue key is still written somewhere in the so
   // Only once nothing is pending: until then a key may belong to an area whose source has not been converted on this checkout.
   if (PENDING.length || scope.length) return;
   const stale = [...bases]
-    .filter((key) => !literals.has(key));
+    .filter((key) => !literals.has(key) && !written.has(key));
   expect(stale).toEqual([]);
 });

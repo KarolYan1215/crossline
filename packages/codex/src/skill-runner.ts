@@ -366,7 +366,7 @@ export type ContinueTurnOptions<T> = {
   skillName: string;
   cwd: string;
   outputSchema: unknown;
-  /** The thread's language, as `SkillRunOptions.locale` (only the output schema's length limits follow it on a continued turn). */
+  /** The thread's language, as `SkillRunOptions.locale`: the output schema's length limits and the blocker the person reads follow it. */
   locale?: Locale;
   validateOutput: (output: unknown) => T;
   onAudit: (audit: AnalysisAudit) => void;
@@ -384,8 +384,6 @@ export type ContinueTurnOptions<T> = {
   tools?: SkillTools;
   /** As `SkillRunOptions.tier`. */
   tier?: RouteTier;
-  /** As `SkillRunOptions.locale`: the language of the blocker the person reads. */
-  locale?: Locale;
 };
 
 /**
