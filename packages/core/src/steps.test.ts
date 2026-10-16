@@ -103,3 +103,15 @@ describe("grounded, non-trivial plans", () => {
       { id: "u2", title: "MOS 电容", docId: "doc-1", quote: "L7 MOS capacitor" }, { id: "u3", title: "x", docId: "doc-9", quote: "Diode" }], docs).map((unit) => unit.id)).toEqual(["u2", "u3"]);
   });
 });
+
+describe("preparation written in English", async () => {
+  const { TRIVIAL_STEP } = await import("./steps");
+  it("is the assistant's, like its Chinese wording", () => {
+    expect(TRIVIAL_STEP.test("整理课程材料")).toBe(true);
+    expect(TRIVIAL_STEP.test("Collect the lecture slides")).toBe(true);
+    expect(TRIVIAL_STEP.test("Organize the course materials")).toBe(true);
+    expect(TRIVIAL_STEP.test("Build a reading list")).toBe(true);
+    expect(TRIVIAL_STEP.test("Derive the transfer function")).toBe(false);
+    expect(TRIVIAL_STEP.test("Review lecture 3")).toBe(false);
+  });
+});

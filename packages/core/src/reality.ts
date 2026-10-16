@@ -5,6 +5,7 @@
  * that decision must be reproducible from two lists rather than depending on when the sync happened to
  * run or what a model thought of it.
  */
+import { tFor, type Locale } from "./i18n";
 export type RealityBlock = {
   /** Stable across syncs — derived from the source item's identity, not from its position or title. */
   id: string;
@@ -53,7 +54,8 @@ const when = (block: RealityBlock, today: string) => {
  * A retitled or rescheduled block counts as a move rather than a remove plus an add: it is the same
  * commitment, and splitting it would make the review read as if something vanished.
  */
-export function realityChanges(previous: RealityBlock[], next: RealityBlock[], today = ""): RealityChange[] {
+export function realityChanges(previous: RealityBlock[], next: RealityBlock[], today = "", locale?: Locale): RealityChange[] {
+  const t = tFor(locale);
   const before = new Map(previous.map((block) => [block.id, block]));
   const after = new Map(next.map((block) => [block.id, block]));
   const changes: RealityChange[] = [];
@@ -63,14 +65,14 @@ export function realityChanges(previous: RealityBlock[], next: RealityBlock[], t
     if (!old) {
       changes.push({
         kind: "add", blockId: block.id, title: block.title,
-        explanation: `日历新增「${block.title}」${when(block, today)}`
+        explanation: t("日历新增「{{title}}」{{when}}", { title: block.title, when: when(block, today) })
       });
       continue;
     }
     if (old.start !== block.start || old.end !== block.end || old.title !== block.title || old.day !== block.day) {
       changes.push({
         kind: "move", blockId: block.id, title: block.title,
-        explanation: `「${old.title}」${when(old, today)} 变为「${block.title}」${when(block, today)}`
+        explanation: t("「{{from}}」{{fromWhen}} 变为「{{to}}」{{toWhen}}", { from: old.title, fromWhen: when(old, today), to: block.title, toWhen: when(block, today) })
       });
     }
   }
@@ -82,7 +84,7 @@ export function realityChanges(previous: RealityBlock[], next: RealityBlock[], t
     if (today && block.day && block.day < today) continue;
     changes.push({
       kind: "remove", blockId: block.id, title: block.title,
-      explanation: `日历中已不存在「${block.title}」${when(block, today)}`
+      explanation: t("日历中已不存在「{{title}}」{{when}}", { title: block.title, when: when(block, today) })
     });
   }
   // Ordered by day then id so two runs over the same data produce the same review, and the ledger
@@ -100,7 +102,7 @@ export function realityChanges(previous: RealityBlock[], next: RealityBlock[], t
  */
 export function toRealityBlock(item: {
   provider: string; externalId: string; title: string; start?: string; end?: string;
-}, timeZone?: string, source?: { key: string; label: string }): RealityBlock | undefined {
+}, timeZone?: string, source?: { key: string; label: string }, locale?: Locale): RealityBlock | undefined {
   if (!item.start || !item.end) return undefined;
   const start = new Date(item.start.endsWith("Z") ? item.start : `${item.start}Z`);
   const end = new Date(item.end.endsWith("Z") ? item.end : `${item.end}Z`);
@@ -119,7 +121,7 @@ export function toRealityBlock(item: {
     day,
     start: clock.format(start),
     end: clock.format(end),
-    source: source?.label ?? (item.provider === "graph_calendar" ? "日历" : item.provider),
+    source: source?.label ?? (item.provider === "graph_calendar" ? tFor(locale)("日历") : item.provider),
     ...(source ? { sourceKey: source.key } : {})
   };
 }

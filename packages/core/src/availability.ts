@@ -149,8 +149,9 @@ export function weeklyAvailableHours(windows: AvailabilityWindow[]): number {
  * pattern holds half the time they said they have, instead of only "this is a default".
  */
 export function statedWeeklyHours(facts: Array<{ slot: string; status: string; value: string }>): number | undefined {
-  const totals = facts.filter((fact) => fact.slot === "weekly_hours" && fact.status === "confirmed" && /合计|所有|总共|一共/.test(fact.value))
-    .flatMap((fact) => [...fact.value.matchAll(/(\d{1,3})\s*(?:个)?小时/g)].map((match) => Number(match[1])))
+  const totals = facts.filter((fact) => fact.slot === "weekly_hours" && fact.status === "confirmed"
+    && /合计|所有|总共|一共|\b(total|in all|altogether|overall|combined|everything|all (my |of my )?(work|things))\b/i.test(fact.value))
+    .flatMap((fact) => [...fact.value.matchAll(/(\d{1,3})\s*(?:(?:个)?小时|(?:hours?|hrs?|h)\b)/gi)].map((match) => Number(match[1])))
     .filter((hours) => hours > 0 && hours <= 112);
   return totals.length ? Math.max(...totals) : undefined;
 }

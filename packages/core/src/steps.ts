@@ -164,7 +164,7 @@ export function validateStepPlanShape(value: unknown, extra: readonly Archetype[
  * does the rest and puts the result in front of them). A step of the person's whose title is only collecting, listing, sorting or
  * filing material is handed to the assistant by normalization, whatever the model said.
  */
-export const TRIVIAL_STEP = /^(清点|整理(材料|资料|文件|课程材料)|收集|汇总|列出|归档|登记|下载|查找资料|检索|建立(材料|资料)?清单|准备材料|标注课程|核对(文件|材料)归属)/;
+export const TRIVIAL_STEP = /^(清点|整理(材料|资料|文件|课程材料)|收集|汇总|列出|归档|登记|下载|查找资料|检索|建立(材料|资料)?清单|准备材料|标注课程|核对(文件|材料)归属)|^(collect|gather|compile|list|archive|download|look up (materials|sources|references)|search for (materials|sources|references)|(build|make) (a |the )?(materials?|reading|file|source) list|prepare (the )?materials|organi[sz]e (the )?(materials|files|documents|notes|course materials)|sort (the )?(files|materials|documents))\b/i;
 
 /** A unit's quote must be in the document it names (letters and digits in order, ignoring spacing and punctuation). */
 export function unverifiedUnits(units: StepUnit[], documents: Array<{ id: string; text: string }>): StepUnit[] {
@@ -190,7 +190,7 @@ export function normalizeStepPlan(plan: StepPlan, toolNames?: string[], options:
       Number.isFinite(value) && (value as number) > 0 ? Math.min(10_080, Math.round(value as number)) : 0);
     const p50 = raw[1] || raw[0] || raw[2] || 30;
     const p25 = Math.min(raw[0] || Math.round(p50 * 0.7), p50), p85 = Math.max(raw[2] || Math.round(p50 * 1.5), p50);
-    if (!raw[1]) warnings.push({ code: "STEP_ESTIMATE_MISSING", detail: `「${step.title}」没有通常耗时，按 ${p50} 分钟计` });
+    if (!raw[1]) warnings.push({ code: "STEP_ESTIMATE_MISSING", detail: `「${step.title}」没有通常耗时，按 ${p50} 分钟计` }); // i18n-ignore
     return { ...step, id, title: step.title.trim().slice(0, 120), deliverable: (step.deliverable ?? "").trim().slice(0, 300),
       doneCriterion: (step.doneCriterion ?? "").trim().slice(0, 300), share: Number.isFinite(step.share) && step.share > 0 ? step.share : 0,
       estimate: { p25Minutes: p25, p50Minutes: p50, p85Minutes: p85 },
@@ -208,19 +208,19 @@ export function normalizeStepPlan(plan: StepPlan, toolNames?: string[], options:
     if (!assistant && step.executor === "agent") {
       step.executor = "human";
       step.schedulable = step.role !== "wait";
-      warnings.push({ code: "STEP_NO_ASSISTANT", detail: `「${step.title}」改由本人完成：这个账号没有电脑上的助手` });
+      warnings.push({ code: "STEP_NO_ASSISTANT", detail: `「${step.title}」改由本人完成：这个账号没有电脑上的助手` }); // i18n-ignore
     }
     // Asking someone for a fact: the assistant drafts the message, the person sends it — sending is an external act (info-request.ts).
-    const request = step.role === "prepare" || /草稿|起草/.test(step.title) ? null : infoRequestTraits({ title: step.title, p50Minutes: step.estimate.p50Minutes }).request;
+    const request = step.role === "prepare" || /草稿|起草|\bdraft/i.test(step.title) ? null : infoRequestTraits({ title: step.title, p50Minutes: step.estimate.p50Minutes }).request;
     if (request?.kind === "ask_person" && step.executor !== "human") {
       step.executor = "human";
       step.schedulable = true;
-      warnings.push({ code: "STEP_INFO_REQUEST_PERSON", detail: `「${step.title}」要向别人发出询问，改由本人检查草稿后发送` });
+      warnings.push({ code: "STEP_INFO_REQUEST_PERSON", detail: `「${step.title}」要向别人发出询问，改由本人检查草稿后发送` }); // i18n-ignore
       continue;
     }
     if (assistant && step.executor !== "agent" && step.role !== "wait" && TRIVIAL_STEP.test(step.title)) {
       step.executor = "agent";
-      warnings.push({ code: "STEP_TRIVIAL_TO_AGENT", detail: `「${step.title}」是准备工作，改由助手完成` });
+      warnings.push({ code: "STEP_TRIVIAL_TO_AGENT", detail: `「${step.title}」是准备工作，改由助手完成` }); // i18n-ignore
     }
     if (step.executor === "agent") step.schedulable = false;
     // A first move is the person's: the assistant's steps and waits have none.
@@ -229,7 +229,7 @@ export function normalizeStepPlan(plan: StepPlan, toolNames?: string[], options:
   // Dependencies: known ids only, then any edge that closes a cycle is dropped (the latest-listed edge first).
   for (const step of steps) {
     const known = step.dependsOn.map((dep) => idMap.get(dep)).filter((dep): dep is string => Boolean(dep) && dep !== step.id);
-    if (known.length !== step.dependsOn.length) warnings.push({ code: "STEP_DEPENDENCY_UNKNOWN", detail: `「${step.title}」依赖了不存在的步骤，已忽略` });
+    if (known.length !== step.dependsOn.length) warnings.push({ code: "STEP_DEPENDENCY_UNKNOWN", detail: `「${step.title}」依赖了不存在的步骤，已忽略` }); // i18n-ignore
     step.dependsOn = [...new Set(known)];
   }
   const reaches = (from: string, to: string, seen = new Set<string>()): boolean => {
@@ -242,7 +242,7 @@ export function normalizeStepPlan(plan: StepPlan, toolNames?: string[], options:
     for (const dep of [...step.dependsOn].reverse()) {
       if (reaches(dep, step.id)) {
         step.dependsOn = step.dependsOn.filter((item) => item !== dep);
-        warnings.push({ code: "STEP_CYCLE_BROKEN", detail: `「${step.title}」与前置步骤成环，已断开一条依赖` });
+        warnings.push({ code: "STEP_CYCLE_BROKEN", detail: `「${step.title}」与前置步骤成环，已断开一条依赖` }); // i18n-ignore
       }
     }
   }
@@ -250,9 +250,9 @@ export function normalizeStepPlan(plan: StepPlan, toolNames?: string[], options:
   if (total <= 0) {
     const minutes = steps.reduce((sum, step) => sum + step.estimate.p50Minutes, 0);
     for (const step of steps) step.share = step.estimate.p50Minutes / minutes;
-    warnings.push({ code: "STEP_SHARE_MISSING", detail: "步骤没有进度份额，已按耗时分配" });
+    warnings.push({ code: "STEP_SHARE_MISSING", detail: "步骤没有进度份额，已按耗时分配" }); // i18n-ignore
   } else {
-    if (Math.abs(total - 1) > 0.05) warnings.push({ code: "STEP_SHARE_NORMALIZED", detail: `进度份额合计 ${total.toFixed(2)}，已归一` });
+    if (Math.abs(total - 1) > 0.05) warnings.push({ code: "STEP_SHARE_NORMALIZED", detail: `进度份额合计 ${total.toFixed(2)}，已归一` }); // i18n-ignore
     for (const step of steps) step.share = step.share / total;
   }
   for (const step of steps) step.share = Math.round(step.share * 1000) / 1000;
@@ -280,28 +280,28 @@ export function stepPlanWarnings(plan: StepPlan, window: { notBefore?: string; d
   const roles = plan.steps.map((step) => step.role);
   for (const step of plan.steps) {
     // A request for a fact is a quarter of an hour by design (info-request.ts), not a step too short to schedule.
-    if (step.schedulable && step.estimate.p50Minutes < 15 && !(step.estimate.p50Minutes <= INFO_REQUEST_PERSON_MINUTES && infoRequestTraits({ title: step.title }).match)) warnings.push({ code: "STEP_TOO_SHORT", detail: `「${step.title}」只有 ${step.estimate.p50Minutes} 分钟，不足一个工作时段` });
-    if (!archetype.roles.includes(step.role)) warnings.push({ code: "STEP_ROLE_OUTSIDE_ARCHETYPE", detail: `「${step.title}」的类型「${STEP_ROLES[step.role]}」不在「${archetype.label}」的常见步骤中` });
-    if (!step.doneCriterion) warnings.push({ code: "STEP_DONE_CRITERION_MISSING", detail: `「${step.title}」没有完成标准` });
+    if (step.schedulable && step.estimate.p50Minutes < 15 && !(step.estimate.p50Minutes <= INFO_REQUEST_PERSON_MINUTES && infoRequestTraits({ title: step.title }).match)) warnings.push({ code: "STEP_TOO_SHORT", detail: `「${step.title}」只有 ${step.estimate.p50Minutes} 分钟，不足一个工作时段` }); // i18n-ignore
+    if (!archetype.roles.includes(step.role)) warnings.push({ code: "STEP_ROLE_OUTSIDE_ARCHETYPE", detail: `「${step.title}」的类型「${STEP_ROLES[step.role]}」不在「${archetype.label}」的常见步骤中` }); // i18n-ignore
+    if (!step.doneCriterion) warnings.push({ code: "STEP_DONE_CRITERION_MISSING", detail: `「${step.title}」没有完成标准` }); // i18n-ignore
   }
-  for (const role of archetype.requires) if (!roles.includes(role)) warnings.push({ code: "STEP_REQUIRED_ROLE_MISSING", detail: `缺少「${STEP_ROLES[role]}」步骤` });
+  for (const role of archetype.requires) if (!roles.includes(role)) warnings.push({ code: "STEP_REQUIRED_ROLE_MISSING", detail: `缺少「${STEP_ROLES[role]}」步骤` }); // i18n-ignore
   for (const [before, after] of archetype.firstBefore) {
     const a = roles.indexOf(before), b = roles.indexOf(after);
-    if (a >= 0 && b >= 0 && a > b) warnings.push({ code: "STEP_ORDER_RULE", detail: `首个「${STEP_ROLES[before]}」应在首个「${STEP_ROLES[after]}」之前` });
+    if (a >= 0 && b >= 0 && a > b) warnings.push({ code: "STEP_ORDER_RULE", detail: `首个「${STEP_ROLES[before]}」应在首个「${STEP_ROLES[after]}」之前` }); // i18n-ignore
   }
   if (archetype.endsWith?.length && !archetype.endsWith.includes(roles.at(-1)!))
-    warnings.push({ code: "STEP_END_RULE", detail: `最后一步通常是${archetype.endsWith.map((role) => `「${STEP_ROLES[role]}」`).join("或")}` });
+    warnings.push({ code: "STEP_END_RULE", detail: `最后一步通常是${archetype.endsWith.map((role) => `「${STEP_ROLES[role]}」`).join("或")}` }); // i18n-ignore
   const p50 = plan.steps.filter((step) => step.schedulable).reduce((sum, step) => sum + step.estimate.p50Minutes, 0);
   if (plan.quantity.amount > 0) {
     const [low, high] = archetype.quantify.minutesPerUnit;
     if (p50 < plan.quantity.amount * low * 0.5 || p50 > plan.quantity.amount * high * 1.5)
-      warnings.push({ code: "STEP_TOTAL_OFF_QUANTITY", detail: `合计 ${p50} 分钟，按 ${plan.quantity.amount}${plan.quantity.unit} 估算应在 ${plan.quantity.amount * low}–${plan.quantity.amount * high} 分钟` });
+      warnings.push({ code: "STEP_TOTAL_OFF_QUANTITY", detail: `合计 ${p50} 分钟，按 ${plan.quantity.amount}${plan.quantity.unit} 估算应在 ${plan.quantity.amount * low}–${plan.quantity.amount * high} 分钟` }); // i18n-ignore
   }
   if (window.availableMinutes !== undefined && p50 > window.availableMinutes)
-    warnings.push({ code: "STEP_WINDOW_TOO_SMALL", detail: `合计 ${p50} 分钟，可用时段只有 ${window.availableMinutes} 分钟` });
+    warnings.push({ code: "STEP_WINDOW_TOO_SMALL", detail: `合计 ${p50} 分钟，可用时段只有 ${window.availableMinutes} 分钟` }); // i18n-ignore
   for (const step of plan.steps) {
-    if (window.dueBy && step.dueBy && step.dueBy > window.dueBy) warnings.push({ code: "STEP_AFTER_DUE", detail: `「${step.title}」晚于截止日` });
-    if (window.notBefore && step.notBefore && step.notBefore < window.notBefore) warnings.push({ code: "STEP_BEFORE_RELEASE", detail: `「${step.title}」早于开始日` });
+    if (window.dueBy && step.dueBy && step.dueBy > window.dueBy) warnings.push({ code: "STEP_AFTER_DUE", detail: `「${step.title}」晚于截止日` }); // i18n-ignore
+    if (window.notBefore && step.notBefore && step.notBefore < window.notBefore) warnings.push({ code: "STEP_BEFORE_RELEASE", detail: `「${step.title}」早于开始日` }); // i18n-ignore
   }
   return warnings;
 }

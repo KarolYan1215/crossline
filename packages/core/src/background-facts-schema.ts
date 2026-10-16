@@ -64,6 +64,7 @@ export function validateBackgroundFactsProposal(value: unknown, context: Backgro
   if (fabricated.length) {
     const error = new Error("BACKGROUND_FACTS_EVIDENCE_INVALID");
     (error as Error & { detail?: string }).detail =
+      // i18n-ignore: a repair message sent back to the model
       `以下引用不是原文逐字内容，无法核对 —— ${fabricated.map((fact) => `「${fact.sourceQuote}」`).join("、")}`.slice(0, 400);
     throw error;
   }

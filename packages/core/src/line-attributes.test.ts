@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import {
   GOAL_SPLIT_SCHEMA, checkGoalParts, cleanAttribute, composeGoal, duplicateAttributes, goalCore, guessKind, insertByKind, keepGoalSplit, lineAttributes,
-  orderAttributes, recomposes, validateGoalSplit, type AttributeKind, type GoalSplitContext
+  notAtomic, orderAttributes, recomposes, validateGoalSplit, type AttributeKind, type GoalSplitContext
 } from "./line-attributes";
 import { structuredOutputProblems } from "./structured-output";
 
@@ -112,4 +112,28 @@ test("when the repairs run out, a goal whose split does not recompose is kept wh
   expect(kept.lines[1]!.goals[0]!.parts.map((part) => part.text)).toEqual(["有影响力", "科普"]);
   // Nothing usable at all: every goal whole.
   expect(keepGoalSplit(null, context).lines.flatMap((line) => line.goals.map((goal) => goal.parts.length))).toEqual([1, 1, 1]);
+});
+
+test("English goals: composed, cleaned, split and read by the same rules", () => {
+  expect(composeGoal(["AI hardware", "rigorous", "independent"], "researcher", "en")).toBe("Become an AI hardware, rigorous and independent researcher");
+  expect(composeGoal(["rigorous"], "researcher", "en")).toBe("Become a rigorous researcher");
+  expect(composeGoal([], "researcher", "en")).toBe("");
+  expect(cleanAttribute("become a rigorous")).toBe("rigorous");
+  expect(goalCore("Become a rigorous, prolific Researcher.", "researcher")).toBe("rigorous, prolific");
+  expect(recomposes(["rigorous", "prolific"], "researcher", "Become a rigorous, prolific researcher")).toBe(true);
+  expect(recomposes(["rigorous", "prolific"], "researcher", "Become a rigorous, prolific and famous researcher")).toBe(false);
+  expect(notAtomic("rigorous as well as prolific")).toBe(true);
+  expect(notAtomic("signal processing")).toBe(false);
+  expect(guessKind("good at writing papers")).toBe("ability");
+  expect(guessKind("strong experimental skills")).toBe("ability");
+  expect(guessKind("financially independent")).toBe("state");
+  expect(guessKind("trusted by peers")).toBe("state");
+  expect(guessKind("AI hardware")).toBe("domain");
+});
+
+test("goal part problems are written in the person's language", async () => {
+  await import("@crossline/i18n/catalog/worker");
+  expect(checkGoalParts([], "en")).toMatchObject({ ok: false, message: "Choose at least one attribute" });
+  expect(checkGoalParts(["rigorous", "rigorous"], "en")).toMatchObject({ ok: false, message: "“rigorous” and “rigorous” say the same thing" });
+  expect(checkGoalParts([])).toMatchObject({ ok: false, message: "至少选一个定语" });
 });

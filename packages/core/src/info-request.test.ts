@@ -67,3 +67,27 @@ describe("the backplanner's answer", () => {
     expect(foldInfoRequests([base("ask", "确认课程项目评分标准", [], 35)]).steps).toHaveLength(1);
   });
 });
+
+describe("requests written in English", () => {
+  test("are recognised by the same traits", async () => {
+    await import("@crossline/i18n/catalog/worker");
+    const scope = infoRequestTraits({ title: "Confirm the ECE 548 midterm scope", p50Minutes: 45, locale: "en" });
+    expect(scope.request).toEqual({ kind: "ask_person", what: "the ECE 548 midterm scope", who: "the TA or instructor" });
+    expect(infoRequestTraits({ title: "Ask the TA about the homework 3 format" }).request).toMatchObject({ kind: "ask_person", who: "TA" });
+    expect(infoRequestTraits({ title: "Confirm the NeuroSim version", p50Minutes: 30 }).request?.kind).toBe("look_up");
+    expect(isInfoRequest({ title: "Confirm the experiment plan and write the methods section" })).toBe(false);
+    expect(isInfoRequest({ title: "Confirm review time", intent: "Confirm the time and finalize the review materials" })).toBe(false);
+    expect(isInfoRequest({ title: "Finish ECE 555 homework 2" })).toBe(false);
+    // "data" is not a teaching assistant.
+    expect(infoRequestTraits({ title: "Confirm the data format" }).request?.who).toBe("");
+  });
+
+  test("the drafted email and the send are written in English", async () => {
+    await import("@crossline/i18n/catalog/worker");
+    const [draft, send] = infoRequestSteps({ kind: "ask_person", what: "the midterm scope", who: "the TA" }, { draft: "d", send: "s" }, [], "en");
+    expect(draft!.title).toBe("Draft an email to the TA: confirm the midterm scope");
+    expect(send!.title).toBe("Confirm the midterm scope with the TA");
+    expect(send!.firstAction).toBe("Open the email the assistant drafted, check the recipient and body, then send it");
+    expect(infoRequestSteps({ kind: "look_up", what: "NeuroSim version", who: "" }, { draft: "d", send: "s" }, [], "en")[0]!.title).toBe("Look up NeuroSim version");
+  });
+});

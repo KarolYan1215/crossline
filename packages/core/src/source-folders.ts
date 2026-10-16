@@ -1,5 +1,6 @@
 import { isSecretPath } from "./agent-guard";
 import { sourceKindFor, type SourceKind } from "./source-kinds";
+import { tFor, type Locale } from "./i18n";
 
 /**
  * Folders the person authorized (docs/onboarding-v3.md 「文件夹授权」, decided 2026-10-14): every readable file under them is read —
@@ -85,14 +86,15 @@ const NAME_ONLY = /\.(pptx?|xlsx?|doc|key|numbers|pages)$/i;
  * kind it cannot read yet), or leave it alone entirely (a secret, a hidden file, anything else — pictures and audio included, which
  * are personal and better uploaded on purpose).
  */
-export function folderFileAction(relativePath: string, size: number): { action: "read"; kind: SourceKind } | { action: "name_only"; reason: string } | { action: "skip" } {
+export function folderFileAction(relativePath: string, size: number, locale?: Locale): { action: "read"; kind: SourceKind } | { action: "name_only"; reason: string } | { action: "skip" } {
+  const t = tFor(locale);
   const name = relativePath.split(/[\\/]/).pop() ?? relativePath;
   if (!name || name.startsWith(".") || name.startsWith("~$") || isSecretPath(relativePath.replace(/\\/g, "/"))) return { action: "skip" };
   const kind = sourceKindFor(name, "");
   if (kind === "pdf" || kind === "docx" || kind === "text") {
-    return size > FOLDER_FILE_LIMIT ? { action: "name_only", reason: "超过 50 MB，只记文件名" } : { action: "read", kind };
+    return size > FOLDER_FILE_LIMIT ? { action: "name_only", reason: t("超过 50 MB，只记文件名") } : { action: "read", kind };
   }
-  if (NAME_ONLY.test(name)) return { action: "name_only", reason: "这种文件暂时读不了正文，只记文件名" };
+  if (NAME_ONLY.test(name)) return { action: "name_only", reason: t("这种文件暂时读不了正文，只记文件名") };
   return { action: "skip" };
 }
 
@@ -252,16 +254,17 @@ export const cleanFolderNames = (value: unknown) => [...new Set((Array.isArray(v
  * Why a path cannot be authorized, in the person's words, or undefined. Not a whole drive, not the user folder itself, not the system's
  * own folders: authorizing those would read far more than anyone meant to hand over.
  */
-export function folderPathProblem(path: string, options: { home?: string; appData?: string } = {}): string | undefined {
+export function folderPathProblem(path: string, options: { home?: string; appData?: string; locale?: Locale } = {}): string | undefined {
+  const t = tFor(options.locale);
   const trimmed = path.trim().replace(/[\\/]+$/, "");
-  if (!/^[A-Za-z]:[\\/]|^\//.test(path.trim())) return "需要完整路径，例如 D:\\课程资料";
-  if (/^[A-Za-z]:$/.test(trimmed) || trimmed === "") return "不能授权整个磁盘，请选一个具体的文件夹";
+  if (!/^[A-Za-z]:[\\/]|^\//.test(path.trim())) return t("需要完整路径，例如 D:\\课程资料");
+  if (/^[A-Za-z]:$/.test(trimmed) || trimmed === "") return t("不能授权整个磁盘，请选一个具体的文件夹");
   const lower = trimmed.toLowerCase().replace(/\//g, "\\");
-  if (options.home && lower === options.home.toLowerCase().replace(/\//g, "\\").replace(/\\+$/, "")) return "不能授权整个用户文件夹，请选其中一个具体的文件夹";
-  if (/^[a-z]:\\(windows|program files( \(x86\))?|programdata)(\\|$)/.test(lower)) return "系统文件夹不能授权";
+  if (options.home && lower === options.home.toLowerCase().replace(/\//g, "\\").replace(/\\+$/, "")) return t("不能授权整个用户文件夹，请选其中一个具体的文件夹");
+  if (/^[a-z]:\\(windows|program files( \(x86\))?|programdata)(\\|$)/.test(lower)) return t("系统文件夹不能授权");
   // Applications' own data (settings, tokens, browser profiles) — but not the temporary folder, where an unzipped download may sit.
-  if (/\\appdata(\\|$)/.test(lower) && !/\\appdata\\local\\temp\\./.test(lower)) return "应用数据文件夹不能授权";
-  if (options.appData && lower.startsWith(options.appData.toLowerCase().replace(/\//g, "\\").replace(/\\+$/, ""))) return "Crossline 自己的数据文件夹不能授权";
+  if (/\\appdata(\\|$)/.test(lower) && !/\\appdata\\local\\temp\\./.test(lower)) return t("应用数据文件夹不能授权");
+  if (options.appData && lower.startsWith(options.appData.toLowerCase().replace(/\//g, "\\").replace(/\\+$/, ""))) return t("Crossline 自己的数据文件夹不能授权");
   return undefined;
 }
 

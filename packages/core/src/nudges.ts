@@ -5,6 +5,7 @@
  * button is the answer, carried out at once and undoable) or by typing.
  */
 import type { ProposedAction } from "./concierge";
+import { tFor, type Locale, type Translate } from "./i18n";
 
 export type NudgeKind = "block_start" | "block_confirm" | "latest_start" | "timer_overrun" | "background_done" | "energy_check" | "outcome_check" | "progress_check";
 
@@ -92,6 +93,8 @@ export type NudgeInput = {
    * moment under the same rules as `outcomes` — never urgent, one at a time. `laterLabel` is the cue to say it in words.
    */
   progressChecks?: Array<{ askId: string; orderId: string; question: string; options: Array<{ id: string; label: string }>; laterLabel: string; fingerprint: string }>;
+  /** The language the nudges are written in (the texts handed in — titles, questions, `why` — are shown as given). */
+  locale?: Locale;
 };
 
 export const DAILY_CAP: Record<NotifyLevelName, number> = { off: 0, less: 3, normal: 6, more: 10 };
@@ -102,23 +105,32 @@ const OVERRUN_RATIO = 1.5;
 
 const minutesOf = (clock: string) => { const [h, m] = clock.split(":").map(Number); return (h ?? 0) * 60 + (m ?? 0); };
 const md = (day: string) => `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}`;
-const hours = (minutes: number) => minutes >= 60 ? `${Math.round(minutes / 6) / 10} 小时` : `${Math.max(0, Math.round(minutes))} 分钟`;
+const hours = (t: Translate, minutes: number) => minutes >= 60 ? t("{{hours}} 小时", { hours: Math.round(minutes / 6) / 10 }) : t("{{minutes}} 分钟", { minutes: Math.max(0, Math.round(minutes)) });
+/** 「title · step」 in the language's quotes. */
+const quoted = (t: Translate, title: string, step?: string) => t("「{{text}}」", { text: `${title}${step ? ` · ${step}` : ""}` });
 const op = (orderId: string, type: "start" | "defer" | "step_done", summary: string, extra: { date?: string; stepId?: string } = {}): ProposedAction =>
   ({ action: "task.op", summary, args: { workOrderId: orderId, type, date: extra.date ?? "", minutes: 0, stepId: extra.stepId ?? "", text: "", who: "", energy: "" } });
-const mute: NudgeButton = { kind: "mute", label: "少问这类" };
-
 /** What would be said now, before the person's quiet hours, mutes and the day's cap are applied. */
 export function nudgeCandidates(input: NudgeInput): PlannedNudge[] {
+  const t = tFor(input.locale);
+  const en = input.locale === "en";
+  const mute: NudgeButton = { kind: "mute", label: t("少问这类") };
   const now = minutesOf(input.clock);
   const out: PlannedNudge[] = [];
   for (const block of input.blocks) {
     const start = minutesOf(block.start), end = minutesOf(block.end);
-    const label = `「${block.title}${block.step ? ` · ${block.step}` : ""}」`;
+    const label = quoted(t, block.title, block.step);
     if (now >= start - START_LEAD_MINUTES && now < start && input.timer?.orderId !== block.orderId) {
-      out.push({ kind: "block_start", fingerprint: `start:${block.id}:${input.today}`, urgent: true, counted: false,
-        text: `${block.start} 做${label}（${end - start} 分），关系到 ${md(block.dueDay)} 的截止。${block.firstAction ? `第一步：${block.firstAction}。` : ""}${block.prepared?.length ? `已备好：${block.prepared.slice(0, 3).join("、")}${block.prepared.length > 3 ? ` 等 ${block.prepared.length} 份` : ""}。` : ""}`,
-        buttons: [{ kind: "action", label: "开始计时", action: op(block.orderId, "start", `开始${label}`) },
-          { kind: "action", label: "推到明天", action: op(block.orderId, "defer", `${label}推到明天`, { date: input.tomorrow }) }, mute] });
+      const prepared = block.prepared?.length ? block.prepared.slice(0, 3).join(en ? ", " : "、") : "";
+      const text = [
+        t("{{start}} 做{{label}}（{{minutes}} 分），关系到 {{due}} 的截止。", { start: block.start, label, minutes: end - start, due: md(block.dueDay) }),
+        block.firstAction ? t("第一步：{{action}}。", { action: block.firstAction }) : "",
+        !prepared ? "" : block.prepared!.length > 3 ? t("已备好：{{items}} 等 {{count}} 份。", { items: prepared, count: block.prepared!.length })
+          : t("已备好：{{items}}。", { items: prepared })
+      ].filter(Boolean).join(en ? " " : "");
+      out.push({ kind: "block_start", fingerprint: `start:${block.id}:${input.today}`, urgent: true, counted: false, text,
+        buttons: [{ kind: "action", label: t("开始计时"), action: op(block.orderId, "start", t("开始{{label}}", { label })) },
+          { kind: "action", label: t("推到明天"), action: op(block.orderId, "defer", t("{{label}}推到明天", { label }), { date: input.tomorrow }) }, mute] });
     }
   }
   // The completion check (docs/loop-and-scout.md §3): every block of the day, once it ends, is asked about once — one tap records
@@ -127,10 +139,10 @@ export function nudgeCandidates(input: NudgeInput): PlannedNudge[] {
     const start = minutesOf(block.start), end = minutesOf(block.end);
     const stopped = block.endedTimerAt && minutesOf(block.endedTimerAt) >= start;
     if (now < end || now >= end + CONFIRM_WINDOW_MINUTES || stopped || input.timer?.orderId === block.orderId) continue;
-    const label = `「${block.title}${block.step ? ` · ${block.step}` : ""}」`;
+    const label = quoted(t, block.title, block.step);
     out.push({ kind: "block_confirm", fingerprint: `confirm:${block.id}:${input.today}`, urgent: true, counted: true, block,
-      text: `${block.start}–${block.end} 的${label}做得怎么样？`,
-      buttons: [{ kind: "href", label: "确认", href: CONFIRM_HREF }, mute] });
+      text: t("{{start}}–{{end}} 的{{label}}做得怎么样？", { start: block.start, end: block.end, label }),
+      buttons: [{ kind: "href", label: t("确认"), href: CONFIRM_HREF }, mute] });
   }
   for (const item of input.slack) {
     const slack = item.freeMinutes - item.remainingMinutes;
@@ -138,21 +150,23 @@ export function nudgeCandidates(input: NudgeInput): PlannedNudge[] {
     const late = slack < 0;
     out.push({ kind: "latest_start", fingerprint: `latest:${item.orderId}:${item.dueDay}:${late ? "late" : "tight"}`, urgent: late, counted: true,
       text: late
-        ? `「${item.title}」按保守估时还需 ${hours(item.remainingMinutes)}，${md(item.dueDay)} 截止前只剩 ${hours(item.freeMinutes)} 可用，来不及。`
-        : `「${item.title}」余量已不足一天：${md(item.dueDay)} 截止前可用 ${hours(item.freeMinutes)}，还需 ${hours(item.remainingMinutes)}。最晚现在开始。`,
-      buttons: [{ kind: "action", label: "现在开始", action: op(item.orderId, "start", `开始「${item.title}」`) },
-        { kind: "href", label: "调整计划", href: "/plan" }, mute] });
+        ? t("「{{title}}」按保守估时还需 {{remaining}}，{{due}} 截止前只剩 {{free}} 可用，来不及。",
+          { title: item.title, remaining: hours(t, item.remainingMinutes), due: md(item.dueDay), free: hours(t, item.freeMinutes) })
+        : t("「{{title}}」余量已不足一天：{{due}} 截止前可用 {{free}}，还需 {{remaining}}。最晚现在开始。",
+          { title: item.title, remaining: hours(t, item.remainingMinutes), due: md(item.dueDay), free: hours(t, item.freeMinutes) }),
+      buttons: [{ kind: "action", label: t("现在开始"), action: op(item.orderId, "start", t("开始{{label}}", { label: quoted(t, item.title) })) },
+        { kind: "href", label: t("调整计划"), href: "/plan" }, mute] });
   }
   const timer = input.timer;
   if (timer && timer.usualMinutes >= 10) {
     const elapsed = (Date.parse(input.now) - Date.parse(timer.startedAt)) / 60_000;
     if (elapsed >= timer.usualMinutes * OVERRUN_RATIO) {
-      const what = timer.stepTitle ? `「${timer.stepTitle}」` : `「${timer.title}」`;
+      const what = quoted(t, timer.stepTitle || timer.title);
       out.push({ kind: "timer_overrun", fingerprint: `overrun:${timer.startedAt}`, urgent: true, counted: true,
         ...(timer.stepId ? { step: { orderId: timer.orderId, stepId: timer.stepId } } : {}),
-        text: `${what}已计时 ${Math.round(elapsed)} 分钟，比通常的 ${timer.usualMinutes} 分钟多一半。`,
-        buttons: [...(timer.stepId ? [{ kind: "action" as const, label: "这步做完了", action: op(timer.orderId, "step_done", `${what}完成`, { stepId: timer.stepId }) }] : []),
-          { kind: "ack", label: "还差一点" }, { kind: "say", label: "卡住了" }, mute] });
+        text: t("{{what}}已计时 {{elapsed}} 分钟，比通常的 {{usual}} 分钟多一半。", { what, elapsed: Math.round(elapsed), usual: timer.usualMinutes }),
+        buttons: [...(timer.stepId ? [{ kind: "action" as const, label: t("这步做完了"), action: op(timer.orderId, "step_done", t("{{what}}完成", { what }), { stepId: timer.stepId }) }] : []),
+          { kind: "ack", label: t("还差一点") }, { kind: "say", label: t("卡住了") }, mute] });
     }
   }
   // Follow-ups on finished work and on partly done steps: the same idle-moment question, one of each kind at a time.
@@ -165,10 +179,10 @@ export function nudgeCandidates(input: NudgeInput): PlannedNudge[] {
       buttons: [...item.options.map(answer), { kind: "say", label: item.laterLabel }, mute] });
   }
   if (input.energyCheck) {
-    const report = (level: "low" | "medium" | "high", word: string): NudgeButton => ({ kind: "action", label: word,
-      action: { action: "energy.report", summary: `精力${word}`, args: { level, note: "" } } });
+    const report = (level: "low" | "medium" | "high", word: string): NudgeButton => ({ kind: "action", label: t(word),
+      action: { action: "energy.report", summary: t("精力{{level}}", { level: t(word) }), args: { level, note: "" } } });
     out.push({ kind: "energy_check", fingerprint: `energy:${input.today}:${Math.floor(now / 180)}`, urgent: false, counted: false,
-      text: `现在精力怎么样？接下来是${input.energyCheck.nextBlock}。${input.energyCheck.why}`,
+      text: [t("现在精力怎么样？接下来是{{next}}。", { next: input.energyCheck.nextBlock }), input.energyCheck.why].filter(Boolean).join(en ? " " : ""),
       buttons: [report("low", "低"), report("medium", "中"), report("high", "高"), mute] });
   }
   // Background work that finished together is said together: one message, every item in it, none of them said again.
@@ -176,12 +190,12 @@ export function nudgeCandidates(input: NudgeInput): PlannedNudge[] {
   if (finished.length === 1) {
     const [item] = finished;
     out.push({ kind: "background_done", fingerprint: `done:${item!.key}`, urgent: false, counted: true, text: item!.text,
-      buttons: [{ kind: "href", label: item!.label, href: item!.href }, { kind: "ack", label: "稍后" }, mute] });
+      buttons: [{ kind: "href", label: item!.label, href: item!.href }, { kind: "ack", label: t("稍后") }, mute] });
   } else if (finished.length > 1) {
     const review = finished.find((item) => item.href.startsWith("/approvals"));
     out.push({ kind: "background_done", fingerprint: `done:${finished[0]!.key}`, covers: finished.slice(1).map((item) => `done:${item.key}`), urgent: false, counted: true,
-      text: `后台完成了 ${finished.length} 件：\n${finished.map((item) => `- ${item.text}`).join("\n")}`,
-      buttons: [{ kind: "href", label: review ? review.label : finished[0]!.label, href: review ? review.href : finished[0]!.href }, { kind: "ack", label: "稍后" }, mute] });
+      text: `${t("后台完成了 {{count}} 件：", { count: finished.length })}\n${finished.map((item) => `- ${item.text}`).join("\n")}`,
+      buttons: [{ kind: "href", label: review ? review.label : finished[0]!.label, href: review ? review.href : finished[0]!.href }, { kind: "ack", label: t("稍后") }, mute] });
   }
   return out;
 }

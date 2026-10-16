@@ -8,6 +8,8 @@
  * another order or reword one, and 「采用」 writes the chosen parts (`goalParts`) plus the sentence composed from them (`goals[0]`), so
  * every reader of `goals` keeps working.
  */
+import { joinList, tFor, type Locale } from "./i18n";
+
 export const ATTRIBUTE_KINDS = ["domain", "ability", "state"] as const;
 export type AttributeKind = (typeof ATTRIBUTE_KINDS)[number];
 export const ATTRIBUTE_KIND_LABEL: Record<AttributeKind, string> = { domain: "领域", ability: "能力", state: "状态" };
@@ -32,12 +34,15 @@ export const ATTRIBUTE_CANDIDATES_MAX = 12;
 const KIND_RANK: Record<AttributeKind, number> = { domain: 0, ability: 1, state: 2 };
 const PUNCTUATION = /[^\p{L}\p{N}]+/gu;
 
-/** An attribute as kept: trimmed, without a leading 「成为」 or a trailing 「的」, inner whitespace collapsed. */
+/** A leading 「成为」 or "become (a/an/the)" — the goal's verb, not part of what it says about the person. */
+const BECOME = /^(成为|become(\s+(an?|the))?\b)\s*/i;
+
+/** An attribute as kept: trimmed, without a leading 「成为」 (or "become a") or a trailing 「的」, inner whitespace collapsed. */
 export function cleanAttribute(text: string): string {
   let value = text.replace(/\s+/g, " ").trim();
   value = value.replace(/^[\s\p{P}\p{S}]+|[\s\p{P}\p{S}]+$/gu, "");
-  value = value.replace(/^成为\s*/, "");
-  while (value.endsWith("的")) value = value.slice(0, -1).trimEnd();
+  value = value.replace(BECOME, "");
+  while (value.endsWith("的")) value = value.slice(0, -1).trimEnd(); // i18n-ignore: grammar of the text itself
   return value.replace(/[\s\p{P}\p{S}]+$/gu, "").slice(0, ATTRIBUTE_MAX_LENGTH);
 }
 
@@ -68,8 +73,8 @@ export function duplicateAttributes(texts: string[]): Array<[string, string]> {
   return pairs;
 }
 
-/** One attribute that is really two (「严谨、高产」): an enumeration comma or a clause break inside it. */
-export const notAtomic = (text: string) => /[、，,；;／/]|以及|并且/.test(text);
+/** One attribute that is really two (「严谨、高产」, "rigorous, prolific"): an enumeration comma or a clause break inside it. */
+export const notAtomic = (text: string) => /[、，,；;／/]|以及|并且|\b(as well as|and also)\b/i.test(text);
 
 /**
  * The kind of an attribute nobody labelled (one the person typed, or one read from an old whole-sentence candidate). A rule, not a
@@ -78,6 +83,9 @@ export const notAtomic = (text: string) => /[、，,；;／/]|以及|并且/.tes
 export function guessKind(text: string): AttributeKind {
   if (/^(能|会|可以|善于|擅长|懂得|具备|拥有.*能力)|能力|水平$|技能/.test(text)) return "ability";
   if (/^[被受]|稳定|持续|长期|自由|从容|平衡|健康|有影响力|认可|信任|信赖|尊重|知名|领先|自洽|松弛|坚定|可靠|靠谱|独当一面/.test(text)) return "state";
+  // The same rule in English: "able to…", "good at…", "…skills" are abilities; a lasting condition is a state.
+  if (/^(able to|can|good at|skilled (at|in)|capable of|knows? how)\b|\b(ability|abilities|skills?|skilled|proficien\w*|expertise)\b/i.test(text)) return "ability";
+  if (/^(trusted|respected|recogni[sz]ed) by\b|\b(stable|steady|sustained|sustainable|long-term|free|independent|calm|balanced|healthy|influential|well-known|renowned|leading|confident|reliable|dependable|self-sufficient|at ease)\b/i.test(text)) return "state";
   return "domain";
 }
 
@@ -97,22 +105,34 @@ export function insertByKind(selected: string[], text: string, kindOf: (text: st
   return [...selected.slice(0, at), text, ...selected.slice(at)];
 }
 
-/** 「成为 A 的、B 的<身份>」 from the chosen parts in their order; empty when nothing is chosen. */
-export function composeGoal(parts: string[], noun: string): string {
+/**
+ * 「成为 A 的、B 的<身份>」 from the chosen parts in their order ("Become a A, B and C <noun>" in English); empty when nothing is
+ * chosen. `recomposes` reads both forms, so a goal written in either language is checked the same way.
+ */
+export function composeGoal(parts: string[], noun: string, locale?: Locale): string {
   const clean = parts.map(cleanAttribute).filter(Boolean);
-  return clean.length ? `成为${clean.map((part) => `${part}的`).join("、")}${noun}` : "";
+  if (!clean.length) return "";
+  if (locale === "en") {
+    const article = /^[aeiou]/i.test(clean[0]!) ? "an" : "a";
+    return `Become ${article} ${joinList("en", clean)}${noun ? ` ${noun}` : ""}`;
+  }
+  return `成为${clean.map((part) => `${part}的`).join("、")}${noun}`; // i18n-ignore: the Chinese sentence's own grammar, built per locale above
 }
 
 /** A whole goal sentence's middle, without 「成为」 and 「…的<身份>」: what it says about the person. */
 export function goalCore(sentence: string, noun: string): string {
   let value = sentence.replace(/\s+/g, " ").trim().replace(/[\s\p{P}\p{S}]+$/gu, "");
-  value = value.replace(/^成为\s*/, "");
-  if (noun && value.endsWith(noun)) value = value.slice(0, -noun.length);
+  value = value.replace(BECOME, "");
+  if (noun && value.toLowerCase().endsWith(noun.toLowerCase())) value = value.slice(0, -noun.length);
   return cleanAttribute(value);
 }
 
-/** A goal compared for content: no whitespace, punctuation, leading 「成为」 or 「的」 — what changes when parts are joined is only those. */
-const looseGoal = (text: string) => text.replace(/\s+/g, "").replace(/^成为/, "").replace(/的/g, "").replace(PUNCTUATION, "").toLowerCase();
+/**
+ * A goal compared for content: no whitespace, punctuation, leading 「成为」 / "become a" or 「的」 / "and" — what changes when parts are
+ * joined is only those.
+ */
+const looseGoal = (text: string) => text.replace(/\s+/g, " ").trim().replace(BECOME, "").replace(/的/g, "").replace(/\band\b/gi, "")
+  .replace(PUNCTUATION, "").toLowerCase();
 
 /** Whether these parts, joined, say exactly what the original sentence said (the check a split must pass). */
 export function recomposes(parts: string[], noun: string, original: string): boolean {
@@ -135,13 +155,14 @@ export function lineAttributes(profile: StoredLineProfile | undefined, noun: str
  * Checks the chosen parts a person (or the interview) wants as a goal. Returns the parts as kept, or a code with the reason in words:
  * none chosen, too many, one that is really two, or two that say the same thing.
  */
-export function checkGoalParts(parts: unknown): { ok: true; parts: string[] } | { ok: false; code: string; message: string } {
-  if (!Array.isArray(parts)) return { ok: false, code: "LINE_GOAL_PARTS_INVALID", message: "定语格式不正确" };
+export function checkGoalParts(parts: unknown, locale?: Locale): { ok: true; parts: string[] } | { ok: false; code: string; message: string } {
+  const t = tFor(locale);
+  if (!Array.isArray(parts)) return { ok: false, code: "LINE_GOAL_PARTS_INVALID", message: t("定语格式不正确") };
   const clean = parts.filter((part): part is string => typeof part === "string").map(cleanAttribute).filter(Boolean);
-  if (!clean.length) return { ok: false, code: "LINE_GOAL_PARTS_EMPTY", message: "至少选一个定语" };
-  if (clean.length > 12) return { ok: false, code: "LINE_GOAL_PARTS_TOO_MANY", message: "定语最多 12 个" };
+  if (!clean.length) return { ok: false, code: "LINE_GOAL_PARTS_EMPTY", message: t("至少选一个定语") };
+  if (clean.length > 12) return { ok: false, code: "LINE_GOAL_PARTS_TOO_MANY", message: t("定语最多 12 个") };
   const duplicate = duplicateAttributes(clean)[0];
-  if (duplicate) return { ok: false, code: "LINE_GOAL_PARTS_DUPLICATE", message: `「${duplicate[0]}」与「${duplicate[1]}」重复` };
+  if (duplicate) return { ok: false, code: "LINE_GOAL_PARTS_DUPLICATE", message: t("「{{a}}」与「{{b}}」重复", { a: duplicate[0], b: duplicate[1] }) };
   return { ok: true, parts: clean };
 }
 
@@ -172,6 +193,7 @@ export const GOAL_SPLIT_SCHEMA = object({
 });
 
 /** Every goal given comes back with parts that recompose it; anything else is sent back naming the goal. */
+/* i18n-ignore-start: repair messages sent back to the model */
 export function validateGoalSplit(value: unknown, context: GoalSplitContext): GoalSplit {
   const answer = value as GoalSplit | undefined;
   if (!answer || !Array.isArray(answer.lines)) reject("GOAL_SPLIT_SCHEMA_INVALID", "输出结构不符合要求。");
@@ -198,6 +220,7 @@ export function validateGoalSplit(value: unknown, context: GoalSplitContext): Go
   }
   return kept;
 }
+/* i18n-ignore-end */
 
 /** The goal kept whole, as one attribute: what a goal becomes when no split of it recomposes. */
 export const wholeGoalPart = (goal: string, noun: string) => {

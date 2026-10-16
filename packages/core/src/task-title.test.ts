@@ -27,3 +27,10 @@ test("a name about a course carries its code, taken only from a project that is 
   expect(withCourse("完成 ECE 555 作业 2", "ece555")).toBe("完成 ECE 555 作业 2");
   expect(withCourse("期中考试 1", "课程待确认（可能为 ECE 548）")).toBe("期中考试 1");
 });
+
+test("a project marked uncertain in English names no course either", () => {
+  expect(courseCodeOf("ECE 548 (TBD)")).toBeUndefined();
+  expect(courseCodeOf("Possibly ECE 548")).toBeUndefined();
+  expect(courseCodeOf("ECE 548 Digital Design")).toBe("ECE 548");
+  expect(courseCodeOf("课程待确认（可能为 ECE 548）")).toBeUndefined();
+});

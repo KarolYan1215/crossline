@@ -1,4 +1,5 @@
 import { allowDiscretionarySpend, type CostSignal, type SpendPolicy } from "./cost";
+import { tFor, type Locale } from "./i18n";
 
 /**
  * When the nightly expansion may run.
@@ -28,6 +29,8 @@ export type NightlyInput = {
   /** Already ran for this local date. */
   lastRunDay?: string;
   timeZoneOffsetMinutes: number;
+  /** The language the skip reason is written in (shown on the review page's nightly status). */
+  locale?: Locale;
 };
 
 const GRACE_MINUTES = 5;
@@ -38,17 +41,18 @@ const localParts = (epochMs: number, offsetMinutes: number) => {
 };
 
 export function nightlyTrigger(input: NightlyInput): NightlyTrigger {
+  const t = tFor(input.locale);
   const nowMs = Date.parse(input.now);
   const today = localParts(nowMs, input.timeZoneOffsetMinutes).day;
   if (input.lastRunDay === today) {
-    return { run: false, code: "ALREADY_RAN_TODAY", message: "今晚已经跑过一次扩展。" };
+    return { run: false, code: "ALREADY_RAN_TODAY", message: t("今晚已经跑过一次扩展。") };
   }
 
   // An unreadable signal is reported as itself. Checking the window first would blame "no reset
   // tonight", which is a consequence of having no reading rather than the reason, and would send
   // anyone debugging it to the wrong place.
   if (!input.cost.available) {
-    return { run: false, code: "COST_SIGNAL_UNAVAILABLE", message: `读不到成本信号，今晚不运行：${input.cost.reason}` };
+    return { run: false, code: "COST_SIGNAL_UNAVAILABLE", message: t("读不到成本信号，今晚不运行：{{reason}}", { reason: input.cost.reason }) };
   }
 
   // Earliest reset that falls inside tonight's window, plus a short grace for the runtime to settle.
@@ -61,18 +65,18 @@ export function nightlyTrigger(input: NightlyInput): NightlyTrigger {
     .sort((a, b) => a - b);
   const plannedAt = candidates[0];
   if (plannedAt === undefined) {
-    return { run: false, code: "NO_RESET_IN_NIGHT_WINDOW", message: "今晚窗口内没有配额刷新，本次不运行。" };
+    return { run: false, code: "NO_RESET_IN_NIGHT_WINDOW", message: t("今晚窗口内没有配额刷新，本次不运行。") };
   }
   if (nowMs < plannedAt) {
-    return { run: false, code: "BEFORE_PLANNED_TIME", message: "还没到今晚的运行时刻。" };
+    return { run: false, code: "BEFORE_PLANNED_TIME", message: t("还没到今晚的运行时刻。") };
   }
 
   // Collection being off is not a reason to skip; it only means the activity check cannot be made.
   if (input.idleMs !== undefined && input.idleMs < input.idleRequiredMs) {
-    return { run: false, code: "USER_ACTIVE", message: "电脑正在使用中，稍后重试，避免占用当前额度。" };
+    return { run: false, code: "USER_ACTIVE", message: t("电脑正在使用中，稍后重试，避免占用当前额度。") };
   }
 
-  const decision = allowDiscretionarySpend(input.cost, input.spend);
+  const decision = allowDiscretionarySpend(input.cost, input.spend, input.locale);
   if (!decision.allowed) return { run: false, code: decision.code, message: decision.message };
   return { run: true, plannedAt: new Date(plannedAt).toISOString(), headroomPercent: decision.headroomPercent, mode: decision.mode };
 }

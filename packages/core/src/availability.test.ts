@@ -108,3 +108,12 @@ describe("where the hours come from when the person never painted them", () => {
     }
   });
 });
+
+test("the stated weekly total is read from English facts too", async () => {
+  const { statedWeeklyHours } = await import("./availability");
+  const fact = (value: string) => ({ slot: "weekly_hours", status: "confirmed", value });
+  expect(statedWeeklyHours([fact("所有事情合计每周约 72 小时")])).toBe(72);
+  expect(statedWeeklyHours([fact("About 60 hours a week in total")])).toBe(60);
+  expect(statedWeeklyHours([fact("Altogether roughly 45h per week")])).toBe(45);
+  expect(statedWeeklyHours([fact("Research takes 20 hours a week")])).toBeUndefined();
+});

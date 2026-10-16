@@ -12,6 +12,8 @@
  * the forecast, labelled as an estimate. The same rules are handed to the model as `ruleFindings`, to confirm, correct or extend.
  */
 
+import { tFor, type Locale } from "./i18n";
+
 export const MILESTONE_RISK_LEVELS = ["low", "medium", "high"] as const;
 export const MILESTONE_RISK_KINDS = ["time", "capacity", "dependency", "unrealistic", "unclear"] as const;
 export type MilestoneRiskLevel = typeof MILESTONE_RISK_LEVELS[number];
@@ -98,6 +100,8 @@ export type RuleRiskInput = {
   otherDeadlines: string[];
   /** The scheduler's forecast for an approved milestone with work: whole days between the cautious finish and the deadline. */
   slackDays?: number | null;
+  /** The language the notes are written in (they are shown on the 主线 page). */
+  locale?: Locale;
 };
 
 const days = (from: string, to: string) => Math.round((Date.parse(`${to}T12:00:00Z`) - Date.parse(`${from}T12:00:00Z`)) / 86_400_000);
@@ -109,39 +113,40 @@ const MARGIN = 0.03;
  * whether a result is realistic for this person — only that a score line leaves no margin — which is what the model review adds.
  */
 export function ruleMilestoneRisks(input: RuleRiskInput): MilestoneRisk[] {
+  const t = tFor(input.locale);
   const risks: MilestoneRisk[] = [];
   const left = input.deadline ? days(input.today, input.deadline) : null;
-  if (left === null) risks.push({ level: "medium", kind: "unclear", note: "未定截止日，无法排程与判断是否来得及" });
-  else if (left < 0) risks.push({ level: "high", kind: "time", note: `截止日已过 ${-left} 天` });
-  else if (left <= 3) risks.push({ level: "high", kind: "time", note: `距截止仅 ${left} 天` });
-  else if (left <= 10) risks.push({ level: "medium", kind: "time", note: `距截止 ${left} 天` });
+  if (left === null) risks.push({ level: "medium", kind: "unclear", note: t("未定截止日，无法排程与判断是否来得及") });
+  else if (left < 0) risks.push({ level: "high", kind: "time", note: t("截止日已过 {{count}} 天", { count: -left }) });
+  else if (left <= 3) risks.push({ level: "high", kind: "time", note: t("距截止仅 {{count}} 天", { count: left }) });
+  else if (left <= 10) risks.push({ level: "medium", kind: "time", note: t("距截止 {{count}} 天", { count: left }) });
 
-  if (!input.criteria.length) risks.push({ level: "medium", kind: "unclear", note: "没有验收标准，达成与否无从判断" });
+  if (!input.criteria.length) risks.push({ level: "medium", kind: "unclear", note: t("没有验收标准，达成与否无从判断") });
   else if (input.criteria.every((criterion) => criterion.measure.kind === "judgement" && !(criterion.measure.failsWhen ?? "").trim()))
-    risks.push({ level: "low", kind: "unclear", note: "标准只有主观判断，没有未达成的条件" });
+    risks.push({ level: "low", kind: "unclear", note: t("标准只有主观判断，没有未达成的条件") });
   for (const criterion of input.criteria) {
     const { value, bareLine, comparator } = criterion.measure;
     if (criterion.measure.kind !== "threshold" || typeof value !== "number" || typeof bareLine !== "number" || !bareLine) continue;
     const margin = comparator === "lte" ? (bareLine - value) / Math.abs(bareLine) : (value - bareLine) / Math.abs(bareLine);
-    if (margin < MARGIN) risks.push({ level: "medium", kind: "unrealistic", note: `分数线 ${value} 与最低够线 ${bareLine} 的余量不足 3%` });
+    if (margin < MARGIN) risks.push({ level: "medium", kind: "unrealistic", note: t("分数线 {{value}} 与最低够线 {{bareLine}} 的余量不足 3%", { value, bareLine }) });
   }
 
   for (const parent of input.dependsOn) {
     if (!input.deadline || !parent.deadline) continue;
     const gap = days(parent.deadline, input.deadline);
-    if (gap <= 0) risks.push({ level: "high", kind: "dependency", note: `前置「${short(parent.title)}」不早于本里程碑` });
-    else if (gap < 3) risks.push({ level: "medium", kind: "dependency", note: `前置「${short(parent.title)}」仅早 ${gap} 天` });
+    if (gap <= 0) risks.push({ level: "high", kind: "dependency", note: t("前置「{{title}}」不早于本里程碑", { title: short(parent.title) }) });
+    else if (gap < 3) risks.push({ level: "medium", kind: "dependency", note: t("前置「{{title}}」仅早 {{count}} 天", { title: short(parent.title), count: gap }) });
   }
 
   if (input.slackDays !== undefined && input.slackDays !== null) {
-    if (input.slackDays < 0) risks.push({ level: "high", kind: "capacity", note: `按现有排程预计晚 ${-input.slackDays} 天` });
-    else if (input.slackDays < 2) risks.push({ level: "medium", kind: "capacity", note: `按现有排程只余 ${input.slackDays} 天` });
+    if (input.slackDays < 0) risks.push({ level: "high", kind: "capacity", note: t("按现有排程预计晚 {{count}} 天", { count: -input.slackDays }) });
+    else if (input.slackDays < 2) risks.push({ level: "medium", kind: "capacity", note: t("按现有排程只余 {{count}} 天", { count: input.slackDays }) });
   }
   if (input.deadline && left !== null && left >= 0) {
     // A cluster counts only when it is dense for this person's board: several lines often end a term in the same fortnight.
     const near = input.otherDeadlines.filter((day) => Math.abs(days(day, input.deadline!)) <= 2).length;
-    if (near >= 4) risks.push({ level: "medium", kind: "capacity", note: `前后 2 天内另有 ${near} 个里程碑截止` });
-    else if (near === 3) risks.push({ level: "low", kind: "capacity", note: "前后 2 天内另有 3 个里程碑截止" });
+    if (near >= 4) risks.push({ level: "medium", kind: "capacity", note: t("前后 2 天内另有 {{count}} 个里程碑截止", { count: near }) });
+    else if (near === 3) risks.push({ level: "low", kind: "capacity", note: t("前后 2 天内另有 {{count}} 个里程碑截止", { count: 3 }) });
   }
   return mergeRisks(risks);
 }
@@ -198,9 +203,10 @@ function readAnswer(value: unknown, context: MilestoneRiskContext): Map<string, 
 
 /** Every milestone given comes back once; a missing one is sent back by name. An empty `risks` is a real answer: no risk. */
 export function validateMilestoneRisks(value: unknown, context: MilestoneRiskContext): Map<string, MilestoneRisk[]> {
-  if (!value || typeof value !== "object" || !Array.isArray((value as MilestoneRiskAnswer).milestones)) reject("MILESTONE_RISK_SCHEMA_INVALID", "输出结构不符合要求。");
+  if (!value || typeof value !== "object" || !Array.isArray((value as MilestoneRiskAnswer).milestones)) reject("MILESTONE_RISK_SCHEMA_INVALID", "输出结构不符合要求。"); // i18n-ignore: sent back to the model
   const kept = readAnswer(value, context);
   const missing = context.milestones.filter((item) => !kept.has(item.id));
+  // i18n-ignore: sent back to the model
   if (missing.length) reject("MILESTONE_RISK_MISSING", `缺少这些里程碑的审查：${missing.map((item) => `${item.id}「${item.title}」`).join("、")}；每个里程碑返回一项，没有风险时 risks 为空数组。`);
   return kept;
 }
