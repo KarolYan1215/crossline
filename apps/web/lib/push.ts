@@ -4,6 +4,7 @@ import { loadVapidKeys, sendWebPush, validPushSubscription } from "@crossline/co
 import type { AccessContext } from "@crossline/core";
 import { listPushSubscriptions, removePushSubscriptions, savePushSubscription } from "@crossline/db";
 import { dataDirectory, getStore } from "./crossline";
+import { localeFor, tOf } from "./locale";
 
 /** The public half of this install's push key, which the phone needs to subscribe. */
 export function pushPublicKey(): string {
@@ -23,7 +24,7 @@ export function subscribePush(ctx: AccessContext, input: { subscription: unknown
   if (!validPushSubscription(input.subscription)) return { ok: false, code: "PUSH_SUBSCRIPTION_INVALID" };
   const origin = typeof input.origin === "string" ? input.origin : "";
   if (!/^https:\/\/[a-z0-9.-]+$/i.test(origin)) return { ok: false, code: "PUSH_ORIGIN_NOT_HTTPS" };
-  const device = typeof input.device === "string" ? input.device.slice(0, 60) : "手机";
+  const device = typeof input.device === "string" ? input.device.slice(0, 60) : tOf(ctx)("手机");
   savePushSubscription(getStore(), ctx.workspaceId, { endpoint: input.subscription.endpoint, keys: input.subscription.keys, origin, device,
     createdAt: new Date().toISOString() });
   return { ok: true };
@@ -34,19 +35,21 @@ export function unsubscribePush(ctx: AccessContext, endpoint: unknown): { ok: tr
   return { ok: true };
 }
 
-type PushPayload = { title: string; body: string; path: string; tag: string };
+type PushPayload = { title: string; body: string; path: string; tag: string; start?: string };
 
 /** One message to every subscribed device. Devices the push service has forgotten are dropped. */
 export async function sendPush(ctx: AccessContext, payload: PushPayload): Promise<{ sent: number; gone: number; failed: number }> {
   const devices = listPushSubscriptions(getStore(), ctx.workspaceId);
   if (!devices.length) return { sent: 0, gone: 0, failed: 0 };
   const keys = loadVapidKeys(dataDirectory());
-  const results = await Promise.all(devices.map((device) => sendWebPush(device, payload, keys)));
+  // The text is written in the account's language; `lang` lets the service worker match its own button to it.
+  const results = await Promise.all(devices.map((device) => sendWebPush(device, { ...payload, lang: localeFor(ctx) }, keys)));
   removePushSubscriptions(getStore(), ctx.workspaceId, devices.filter((_, index) => results[index] === "gone").map((device) => device.endpoint));
   return { sent: results.filter((r) => r === "sent").length, gone: results.filter((r) => r === "gone").length, failed: results.filter((r) => r === "failed").length };
 }
 
 /** One test message to every device, so the person sees it arrive before relying on it. */
 export function sendTestPush(ctx: AccessContext): Promise<{ sent: number; gone: number; failed: number }> {
-  return sendPush(ctx, { title: "Crossline 手机推送已接通", body: "早报和当天会误事的提醒会同时出现在这里和电脑上。", path: "/", tag: "test" });
+  const t = tOf(ctx);
+  return sendPush(ctx, { title: t("Crossline 手机推送已接通"), body: t("早报和当天会误事的提醒会同时出现在这里和电脑上。"), path: "/", tag: "test" });
 }

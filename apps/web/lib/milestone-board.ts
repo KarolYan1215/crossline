@@ -8,6 +8,8 @@ import { readStoredArtifactPlan } from "@crossline/db";
 import { effectiveWeight, getStore, importancePresets, loadCurrentPlan, loadGoalForecast, milestonesRetiredBySystem, planToday, readGoalSettings, relationKindLabel, saveGoalSettings } from "./crossline";
 import { listCourseTargets } from "./targets";
 import { identityLines } from "./lines";
+import { localeFor, tOf } from "./locale";
+import { tFor } from "./i18n";
 
 /**
  * Everything the 主线 page draws, read once: milestones on a date axis, the ticks before each (the near-term results the step planner
@@ -57,6 +59,8 @@ const RANK: Record<string, number> = { unverifiable: 0, unmet: 1, partial: 2, me
 const dayDiff = (from: string, to: string) => Math.round((Date.parse(`${to}T12:00:00Z`) - Date.parse(`${from}T12:00:00Z`)) / 86_400_000);
 
 export async function loadMilestoneBoard(ctx: AccessContext): Promise<MilestoneBoard> {
+  const locale = localeFor(ctx);
+  const t = tFor(locale);
   const store = getStore();
   const today = planToday(ctx);
   const weekStart = new Date(Date.parse(`${today}T12:00:00Z`) - 6 * 86_400_000).toISOString().slice(0, 10);
@@ -135,10 +139,10 @@ export async function loadMilestoneBoard(ctx: AccessContext): Promise<MilestoneB
       // The same loose check the proposer runs on a derived relation (never blocking). Once the reviewer has found it sound, it is not shown again.
       const found = relation.artifactId && !dismissed.has(relation.id)
         ? supplyWarnings({ use: relation.explanation ?? "", counterfactual: relation.counterfactual ?? "", hoursSaved: relation.transfer?.hoursSaved ?? 0 }) : [];
-      const warning = found.map((item) => item.detail).join(" ") || undefined;
+      const warning = found.map((item) => t(item.detail)).join(" ") || undefined;
       const artifact = relation.artifactId ? artifacts.get(relation.artifactId) : undefined;
       const broken = relation.artifactId && relation.transfer
-        ? timeOrderProblem(deadlineOf.get(relation.fromMilestoneId), deadlineOf.get(relation.toMilestoneId), relation.transfer.lagDays, relation.kind === "recurring_feedback") ?? undefined
+        ? timeOrderProblem(deadlineOf.get(relation.fromMilestoneId), deadlineOf.get(relation.toMilestoneId), relation.transfer.lagDays, relation.kind === "recurring_feedback", locale) ?? undefined
         : undefined;
       return [{ id: relation.id, direction: out ? "out" as const : "in" as const, otherId: other.id, otherTitle: other.title, otherLine: other.identityId,
         kindLabel: relationKindLabel[relation.kind] ?? relation.kind, explanation: relation.explanation ?? "", refutedWhen: relation.refutedWhen ?? "",
@@ -174,7 +178,7 @@ export async function loadMilestoneBoard(ctx: AccessContext): Promise<MilestoneB
           risks: reviewed ?? ruleMilestoneRisks({ today, deadline: deadline ?? null, criteria: milestone.successCriteria,
             dependsOn: dependsOn.flatMap((id) => byId.get(id) ? [{ title: byId.get(id)!.title, deadline: deadlineOf.get(id) ?? null }] : []),
             otherDeadlines: milestones.filter((other) => other.id !== milestone.id && deadlineOf.get(other.id)).map((other) => deadlineOf.get(other.id)!),
-            slackDays: slack.get(milestone.id) ?? null }),
+            slackDays: slack.get(milestone.id) ?? null, locale }),
           riskSource: reviewed ? "model" as const : "rules" as const };
       })(),
       confirmedDeadline: goal?.confirmedDeadline ?? null,
@@ -220,7 +224,7 @@ export async function recordRetrospective(ctx: AccessContext, milestoneId: strin
     idempotencyKey: `milestone:retrospective:${milestoneId}:${randomUUID()}`,
     payload: { milestoneVersion: milestone.version, identityId: milestone.identityId, title: milestone.title, ...figures, note: text } });
   if (text) getStore().addPreference({ workspaceId: ctx.workspaceId, source: "retrospective", scope: milestone.identityId, weight: 1, refId: milestoneId,
-    text: `里程碑「${milestone.title}」回顾：${text}` });
+    text: tOf(ctx)("里程碑「{{title}}」回顾：{{note}}", { title: milestone.title, note: text }) });
   return { ok: true };
 }
 

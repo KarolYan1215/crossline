@@ -6,6 +6,8 @@ import { aiToolsFor, consentToGrownSkill, grownHomeLine, readGrownSkills, readPu
 import { CodexSupervisorRequestError, requestCodexSupervisor } from "./codex-runtime";
 import { getStore } from "./crossline";
 import { identityLines } from "./lines";
+import { localeFor, tOf } from "./locale";
+import { tFor } from "./i18n";
 
 /**
  * The settings page's Skill 库 (docs/skills-library.md §5): each line's own skill — the version in force in full, where every rule came
@@ -24,7 +26,9 @@ export type PublicSkillView = Pick<PublicSkillRecord, "id" | "name" | "descripti
   verdict: "usable" | "text_only" | "reject"; reasons: string[];
 };
 /** A workflow the assistant grew: what it does and when, where it came from, which steps stay the person's, and what the checks found. */
-export type GrownSkillView = { id: string; summary: string; name: string; category: string; lines: string[]; lineLabel: string; schedule: string; action: "run" | "remind";
+export type GrownSkillView = { id: string; summary: string; name: string; category: string; lines: string[]; lineLabel: string; schedule: string;
+  /** Used when a task of its kind comes up (no time of its own), or at a time. */
+  scheduleKind: "on_request" | "scheduled"; action: "run" | "remind";
   origin: string; steps: Array<{ title: string; person: boolean }>; status: "active" | "off" | "needs_consent"; pinned: boolean; verdict: "usable" | "text_only" | "reject";
   /** The sites it reads and the risks it was installed with; when the person accepted them and last logged in to each. */
   access: Array<{ service: string; site: string; login: boolean; how: string; loggedInAt?: string }>; risks: string[]; consentedAt?: string;
@@ -56,6 +60,8 @@ export function loadSkillLibrary(ctx: AccessContext): SkillLibraryView {
     const payload = event.payload as { name?: string; reason?: string; by?: string };
     return { name: String(payload.name ?? event.entityId), reason: String(payload.reason ?? ""), at: event.createdAt, by: String(payload.by ?? "system") };
   });
+  const locale = localeFor(ctx);
+  const t = tFor(locale);
   const grown = readGrownSkills(store, ctx.workspaceId).map((record): GrownSkillView => {
     let skillText = "";
     try { skillText = ((JSON.parse(store.getSetting(ctx.workspaceId, grownSkillFilesKey(record.id)) ?? "{}") as { files?: Array<{ path: string; text: string }> }).files ?? [])
@@ -64,8 +70,9 @@ export function loadSkillLibrary(ctx: AccessContext): SkillLibraryView {
     const homeLabel = identityLines(ctx).find((line) => line.id === home)?.label ?? "";
     return { id: record.id, summary: record.manifest.summary, name: record.name, category: AGENT_CATEGORIES[record.category] ?? record.category,
       lines: home ? [home] : record.lines, lineLabel: homeLabel,
-      schedule: scheduleLabel(record.manifest.schedule), action: record.manifest.action,
-      origin: record.origin.kind === "asked" ? `本人要求：「${record.origin.text.slice(0, 60)}」` : `由 ${record.origin.taskIds.length} 次采纳的同类结果生成`,
+      schedule: scheduleLabel(record.manifest.schedule, locale), scheduleKind: record.manifest.schedule ? "scheduled" : "on_request", action: record.manifest.action,
+      origin: record.origin.kind === "asked" ? t("本人要求：「{{text}}」", { text: record.origin.text.slice(0, 60) })
+        : t("由 {{count}} 次采纳的同类结果生成", { count: record.origin.taskIds.length }),
       steps: record.manifest.steps.map((step) => ({ title: step.title, person: step.by === "person" })), status: record.status, pinned: record.pinned,
       access: (record.manifest.access ?? []).map((item) => ({ ...item, ...(record.logins?.[item.service] ? { loggedInAt: record.logins[item.service] } : {}) })),
       risks: record.manifest.risks ?? [], ...(record.consentedAt ? { consentedAt: record.consentedAt } : {}),
@@ -130,8 +137,8 @@ export async function grownSkillAction(ctx: AccessContext, id: string, action: "
   } catch (error) {
     if (error instanceof CodexSupervisorRequestError) {
       const blocker = error.blocker as { code?: string; message?: string } | undefined;
-      return { ok: false, code: blocker?.code ?? "WORKER_UNAVAILABLE", message: blocker?.message ?? "后台服务没有回应。" };
+      return { ok: false, code: blocker?.code ?? "WORKER_UNAVAILABLE", message: blocker?.message ?? tOf(ctx)("后台服务没有回应。") };
     }
-    return { ok: false, code: "WORKER_UNAVAILABLE", message: "后台服务没有回应。" };
+    return { ok: false, code: "WORKER_UNAVAILABLE", message: tOf(ctx)("后台服务没有回应。") };
   }
 }

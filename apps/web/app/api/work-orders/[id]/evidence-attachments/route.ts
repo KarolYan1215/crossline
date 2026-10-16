@@ -1,6 +1,7 @@
 import { saveEvidenceFile } from "../../../../../lib/attachments";
 import { getStore } from "../../../../../lib/crossline";
 import { rejectUnsafeRequest } from "../guard";
+import { localeFor } from "../../../../../lib/locale";
 
 const MAX_FILES = 5;
 
@@ -29,7 +30,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const saved: Array<{ uri: string; fileName: string; mediaType: string }> = [];
   for (const file of files) {
     const buffer = Buffer.from(await file.arrayBuffer());
-    const result = saveEvidenceFile({ workOrderId: id, fileName: file.name || "evidence", mediaType: file.type, buffer });
+    const result = saveEvidenceFile({ workOrderId: id, fileName: file.name || "evidence", mediaType: file.type, buffer, locale: localeFor(ctx) });
     if (!result.ok) return Response.json({ code: result.code, message: result.message }, { status: 400 });
     saved.push({ uri: result.uri, fileName: result.fileName, mediaType: result.mediaType });
   }

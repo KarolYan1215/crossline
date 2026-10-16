@@ -17,6 +17,8 @@ import { outcomeNudgeInputs } from "./outcome-check";
 import { progressNudgeInputs } from "./progress-check";
 import { systemContext } from "./auto-publish";
 import type { Card } from "./conversation";
+import { localeFor } from "./locale";
+import { monthDay, tFor, type Locale } from "./i18n";
 
 /** How often the engine looks (docs/one-input.md §4): often enough that 「15 分钟后开始」 is said on time. */
 export const NUDGE_INTERVAL_MS = 2 * 60_000;
@@ -52,6 +54,8 @@ export async function nudgePass(now = new Date()): Promise<number> {
 /** Reads the account, decides (`planNudges`, rules only) and writes what is to be said into the day's conversation. */
 export async function nudgesFor(ctx: AccessContext, now = new Date()): Promise<PlannedNudge[]> {
   const store = getStore();
+  const locale = localeFor(ctx);
+  const t = tFor(locale);
   const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
   const today = planToday(ctx, now);
   const clock = formatInTimeZone(now, zone, "HH:mm");
@@ -119,7 +123,7 @@ export async function nudgesFor(ctx: AccessContext, now = new Date()): Promise<P
 
   const timerOrder = running ? byId.get(running.workOrderId) : undefined;
   const currentStep = timerOrder ? store.getStepPlan(ctx.workspaceId, timerOrder.id)?.steps.find((step) => step.status === "planned") : undefined;
-  const finished = backgroundDone(ctx, now);
+  const finished = backgroundDone(ctx, now, locale);
   const meeting = todays.some((block) => block.id.startsWith("graph_calendar:") && !isCancelledEvent(block.title)
     && minutesOf(block.start) <= nowMinute && nowMinute < minutesOf(block.end));
   const answeredAt = store.getSetting(ctx.workspaceId, ANSWERED_SETTING);
@@ -131,9 +135,10 @@ export async function nudgesFor(ctx: AccessContext, now = new Date()): Promise<P
   const stale = !model.lastReportAt || now.getTime() - Date.parse(model.lastReportAt) > 3 * 3_600_000;
   const prediction = model.predict(now.toISOString());
   const energyCheck = nextWork && stale && prediction.confidence === "low" && !muted.has("energy_check") && await energyAnswerMatters(ctx)
-    ? { nextBlock: `${nextWork.start}「${nextWork.task ?? nextWork.title}」`, why: "回答后，今天剩下和之后的时段会按精力重新安排。" } : undefined;
+    ? { nextBlock: t("{{time}}「{{title}}」", { time: nextWork.start, title: nextWork.task ?? nextWork.title }),
+      why: t("回答后，今天剩下和之后的时段会按精力重新安排。") } : undefined;
   const planned = planNudges({
-    now: now.toISOString(), today, clock, tomorrow: addDays(today, 1), level, muted,
+    now: now.toISOString(), today, clock, tomorrow: addDays(today, 1), level, muted, locale,
     quiet: { timerRunning: Boolean(running), inMeeting: meeting, answeredRecently: Boolean(answeredAt) && now.getTime() - Date.parse(answeredAt!) < ANSWERED_QUIET_MS },
     night: clock < "08:00" || clock >= "23:00",
     sent: new Set(recent.flatMap((message) => [payloadOf(message)?.fingerprint ?? "", ...(payloadOf(message)?.covers ?? [])])),
@@ -178,15 +183,16 @@ function rememberBlocks(ctx: AccessContext, today: string, clock: string, blocks
 }
 
 /** Background work that finished in the last six hours and is waiting for the person: assistant results, preparation, new proposals. */
-function backgroundDone(ctx: AccessContext, now: Date): Array<{ key: string; text: string; label: string; href: string }> {
+function backgroundDone(ctx: AccessContext, now: Date, locale?: Locale): Array<{ key: string; text: string; label: string; href: string }> {
   const store = getStore();
+  const t = tFor(locale);
   const since = now.getTime() - 6 * 3_600_000;
   const finishedAt = (task: { requestedAt: string; durationMs: number }) => Date.parse(task.requestedAt) + task.durationMs;
   const out: Array<{ key: string; text: string; label: string; href: string }> = [];
   for (const task of listAgentTasks(store, ctx.workspaceId).filter((item) => finishedAt(item) >= since)) {
     const name = task.title.split(" · ").at(-1) ?? task.title;
-    if (task.status === "needs_review") out.push({ key: `agent:${task.taskId}`, text: `助手做完了「${name}」，等待审阅。`, label: "去审阅", href: "/approvals#assistant" });
-    else if (task.status === "accepted" && task.stepId) out.push({ key: `agent:${task.taskId}`, text: `「${name}」已备好，可在任务的材料里查看。`, label: "打开任务",
+    if (task.status === "needs_review") out.push({ key: `agent:${task.taskId}`, text: t("助手做完了「{{name}}」，等待审阅。", { name }), label: t("去审阅"), href: "/approvals#assistant" });
+    else if (task.status === "accepted" && task.stepId) out.push({ key: `agent:${task.taskId}`, text: t("「{{name}}」已备好，可在任务的材料里查看。", { name }), label: t("打开任务"),
       href: `/workbench/${encodeURIComponent(task.workOrderId)}` });
   }
   const orders = new Map(store.listWorkOrders(ctx.workspaceId).map((order) => [order.id, order]));
@@ -199,7 +205,7 @@ function backgroundDone(ctx: AccessContext, now: Date): Array<{ key: string; tex
     if ((event.payload as { to?: string }).to === "awaiting_plan_approval") proposedAt.set(event.entityId, Date.parse(event.createdAt));
   for (const [id, at] of proposedAt) {
     const order = orders.get(id);
-    if (order?.state === "awaiting_plan_approval" && !preparing.has(id) && Math.max(at, plannedAt.get(id) ?? 0) >= since) out.push({ key: `proposal:${order.id}`, text: `「${taskTitleOf(order)}」已分析好，等待批准。`, label: "去批准", href: "/approvals#proposals" });
+    if (order?.state === "awaiting_plan_approval" && !preparing.has(id) && Math.max(at, plannedAt.get(id) ?? 0) >= since) out.push({ key: `proposal:${order.id}`, text: t("「{{name}}」已分析好，等待批准。", { name: taskTitleOf(order) }), label: t("去批准"), href: "/approvals#proposals" });
   }
   return out.slice(0, 5);
 }
@@ -263,6 +269,8 @@ function say(ctx: AccessContext, text: string, buttons: NudgeButton[], nudge: Om
  */
 export async function ensureOpener(ctx: AccessContext, now = new Date()): Promise<boolean> {
   const store = getStore();
+  const locale = localeFor(ctx);
+  const t = tFor(locale);
   const today = planToday(ctx, now);
   // The day's summary is written once: before the start standard it was written from an empty plan (the 小帮手 on the settings page
   // fetches the conversation during the interview) and said 「今天没有固定安排」 all day over a class the interview had just read in.
@@ -288,33 +296,35 @@ export async function ensureOpener(ctx: AccessContext, now = new Date()): Promis
     .filter((item) => item.due && item.due >= today && item.due <= addDays(today, 3)).sort((a, b) => a.due.localeCompare(b.due));
   // This week's, the same count as Today's stack and 待确认: the ones that can wait are not today's to mention.
   const asks = thisWeek(listed(openAsks(ctx, now)));
-  const md = (day: string) => `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}`;
+  const md = (day: string) => locale === "en" ? monthDay(locale, day) : `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}`;
   // The text version (push, older pages) stays a few short lines: two of each with names cut short, the rest counted. The card drawn
   // from `opener` below carries the whole day.
   const short = (text: string) => text.length > 16 ? `${text.slice(0, 15)}…` : text;
-  const few = (parts: string[]) => `${parts.slice(0, 2).join("；")}${parts.length > 2 ? ` 等 ${parts.length} 项` : ""}`;
+  const few = (parts: string[]) => `${parts.slice(0, 2).join(t("；"))}${parts.length > 2 ? t(" 等 {{count}} 项", { count: parts.length }) : ""}`;
   const lines = [
-    `${Number(today.slice(5, 7))} 月 ${Number(today.slice(8, 10))} 日 周${"日一二三四五六"[new Date(`${today}T12:00:00Z`).getUTCDay()]}。`,
-    fixed.length ? `固定安排：${few(fixed.map((block) => `${block.start}–${block.end} ${short(block.title)}`))}。` : "今天没有固定安排。",
-    work.length ? `排给工作的时段 ${work.length} 段：${few(work.map((block) => `${block.start} ${short(block.task ?? block.title)}`))}。` : "今天没有排给工作的时段。",
-    ...(soon.length ? [`三天内截止：${few(soon.map((item) => `${short(taskTitleOf(item.order))}（${md(item.due)}）`))}。`] : []),
-    asks.length ? `待决事项 ${asks.length} 项${asks[0] ? `，最紧急的是「${short(asks[0].title)}」` : ""}。` : "没有待决事项。"
+    t("{{reason}}。", { reason: dayLabel(today, locale) }),
+    fixed.length ? t("固定安排：{{items}}。", { items: few(fixed.map((block) => `${block.start}–${block.end} ${short(block.title)}`)) }) : t("今天没有固定安排。"),
+    work.length ? t("排给工作的时段 {{count}} 段：{{items}}。", { count: work.length, items: few(work.map((block) => `${block.start} ${short(block.task ?? block.title)}`)) })
+      : t("今天没有排给工作的时段。"),
+    ...(soon.length ? [t("三天内截止：{{items}}。", { items: few(soon.map((item) => t("{{title}}（{{day}}）", { title: short(taskTitleOf(item.order)), day: md(item.due) }))) })] : []),
+    asks.length ? (asks[0] ? t("待决事项 {{count}} 项，最紧急的是「{{title}}」。", { count: asks.length, title: short(asks[0].title) }) : t("待决事项 {{count}} 项。", { count: asks.length }))
+      : t("没有待决事项。")
   ];
   // The most urgent decision is answerable here when its options need nothing typed.
   const first = asks[0];
   const answerable = first ? first.options.filter((option) => !option.href && !(option.fields ?? []).some((field) => field.required)).slice(0, 4) : [];
   const buttons: NudgeButton[] = [
     ...(first ? answerable.map((option): NudgeButton => ({ kind: "action", label: option.label,
-      action: { action: "ask.answer", summary: `${first.title.slice(0, 40)}：${option.label}`, args: { askId: first.id, optionId: option.id, fields: [] } } })) : []),
-    ...(asks.length ? [{ kind: "href" as const, label: `全部待决（${asks.length}）`, href: "/approvals" }] : []),
-    { kind: "href", label: "打开计划", href: "/plan" }
+      action: { action: "ask.answer", summary: t("{{label}}：{{title}}", { label: first.title.slice(0, 40), title: option.label }), args: { askId: first.id, optionId: option.id, fields: [] } } })) : []),
+    ...(asks.length ? [{ kind: "href" as const, label: t("全部待决（{{count}}）", { count: asks.length }), href: "/approvals" }] : []),
+    { kind: "href", label: t("打开计划"), href: "/plan" }
   ];
   // The same day as data, for the card Today's conversation and the return page draw (the text above stays for push and older pages).
   const lineOfOrder = new Map(store.listWorkOrders(ctx.workspaceId).map((order) => [order.id, order.identityId]));
   const filing = (() => { try { return calendarFiling(ctx); } catch { return null; } })();
   const withLine = <T extends object>(item: T, line: string | undefined): T & { line?: string } => line ? { ...item, line } : item;
   const opener: OpenerView = {
-    day: today, label: dayLabel(today), timeZone: effectiveSchedulePreferences(ctx).preferences.timeZone,
+    day: today, label: dayLabel(today, locale), timeZone: effectiveSchedulePreferences(ctx).preferences.timeZone,
     fixed: fixed.map((block) => withLine({ start: block.start, end: block.end, title: block.title }, calendarLineOf(filing, block.title))),
     work: work.map((block) => withLine({ start: block.start, end: block.end, title: block.task ?? block.title, ...(block.step ? { step: block.step } : {}) },
       lineOfOrder.get(block.id.split(":")[1]!))),

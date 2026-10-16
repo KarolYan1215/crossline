@@ -2,6 +2,7 @@ import "server-only";
 import { retractedEventIdsIn, withdrawArtifactRelationsFor, type StepPlanInput } from "@crossline/db";
 import { taskTitleOf, type AccessContext, type WorkOrderState } from "@crossline/core";
 import { archiveWorkOrder, getStore, restoreCapture, restoreWorkOrder, saveMilestoneEdit } from "./crossline";
+import { tOf } from "./locale";
 
 /**
  * Undo (decided 2026-10-08): every change of state the person makes is recorded with the operation that reverses it, and can be undone
@@ -106,7 +107,7 @@ function applyInverse(ctx: AccessContext, inverse: Inverse): { ok: true } | { ok
         for (const id of inverse.ids) { const result = restoreWorkOrder(ctx, id); if (!result.ok) return result; }
         return { ok: true };
       case "work_order.archive":
-        for (const id of inverse.ids) { const result = archiveWorkOrder(ctx, id, "撤销恢复"); if (!result.ok) return result; }
+        for (const id of inverse.ids) { const result = archiveWorkOrder(ctx, id, tOf(ctx)("撤销恢复")); if (!result.ok) return result; }
         return { ok: true };
       case "capture.restore":
         for (const id of inverse.ids) { const result = restoreCapture(ctx, id); if (!result.ok) return result; }
@@ -118,7 +119,7 @@ function applyInverse(ctx: AccessContext, inverse: Inverse): { ok: true } | { ok
           // Only an approval nothing has acted on yet can be taken back; a started or handed-in task is past it.
           if (!state || !["approved", "preparing", "ready_for_human"].includes(state)) return { ok: false, code: "APPROVAL_ALREADY_ACTED_ON" };
           const attempt = store.listEvents(ctx.workspaceId, { type: "approval.revoked", entityId: id }).length;
-          store.transitionWorkOrder(ctx.workspaceId, id, { type: "approval.revoked", reason: "撤销批准" }, `undo-approval:${id}:${attempt}`);
+          store.transitionWorkOrder(ctx.workspaceId, id, { type: "approval.revoked", reason: tOf(ctx)("撤销批准") }, `undo-approval:${id}:${attempt}`);
         }
         return { ok: true };
       }
@@ -174,7 +175,7 @@ function applyInverse(ctx: AccessContext, inverse: Inverse): { ok: true } | { ok
             if (order.milestoneId === id && (order.payload as { backplan?: unknown } | undefined)?.backplan
               && ["awaiting_plan_approval", "approved", "ready_for_human"].includes(order.state)
               && !store.listExecutions(ctx.workspaceId).some((execution) => execution.workOrderId === order.id))
-              archiveWorkOrder(ctx, order.id, "里程碑批准已撤销", { bySystem: true });
+              archiveWorkOrder(ctx, order.id, tOf(ctx)("里程碑批准已撤销"), { bySystem: true });
           }
         }
         return { ok: true };

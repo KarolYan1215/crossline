@@ -1,9 +1,10 @@
 import "server-only";
-import { ONBOARDING_STAGES, gapCoveredBy, questionKind, readyToStart as startReady, screenQuestions, screenedNote, startMissing as startOpen, type AccessContext, type ChecklistItem,
+import { ONBOARDING_STAGES, answerLine, gapCoveredBy, questionKind, readyToStart as startReady, screenQuestions, screenedNote, startMissing as startOpen, type AccessContext, type ChecklistItem,
   type ScreenReason } from "@crossline/core";
 import { interviewChecklistFor, interviewGapsFor, questionScreenFor } from "@crossline/db";
 import { identityLines } from "./lines";
 import { getStore, planToday } from "./crossline";
+import { interviewLocale, readLocale } from "@crossline/db";
 import { unfiledFiles } from "./file-belonging";
 
 type Question = { id: string; text: string; options?: Array<{ label?: string; detail?: string }> };
@@ -119,9 +120,12 @@ export function interviewStatus(ctx: AccessContext): InterviewStatus {
     questions, screened, openQuestions: questions.length, checklist, sessionId: session.id };
 }
 
-/** The answer in the words the interview screen sends (`composeAnswers`): several options joined by 「；」, the person's own words after 补充. */
-const lineOf = (question: InterviewQuestion, options: Array<{ label: string }>, other: string) =>
-  `【${question.text}】${[options.length ? `选择：${options.map((option) => option.label).join("；")}` : "", other.trim() ? `补充：${other.trim()}` : ""].filter(Boolean).join("。")}`;
+/**
+ * The answer in the words the interview screen sends (`composeAnswers`, core `answerLine`), in the interview's own language (it keeps the
+ * one it started in): several options joined, the person's own words after 补充 / Added.
+ */
+const lineOf = (ctx: AccessContext, question: InterviewQuestion, options: Array<{ label: string }>, other: string) =>
+  answerLine(question.text, options.map((option) => option.label), other, interviewLocale(getStore(), ctx.workspaceId) ?? readLocale(getStore(), ctx.workspaceId));
 
 /**
  * The answers that still count: one given to a question the screen now keeps from the person (a room, class times on record, a
@@ -151,7 +155,7 @@ export async function answerInterviewQuestion(ctx: AccessContext, questionId: st
   if (!options.length && !other.trim()) return { ok: false, code: "INTERVIEW_ANSWER_EMPTY" };
   const store = getStore();
   const pending = readPending(ctx, status.sessionId, lastAssistantSeq(store.listOnboardingMessages(ctx.workspaceId, status.sessionId)));
-  pending.answers[questionId] = lineOf(question, options, other);
+  pending.answers[questionId] = lineOf(ctx, question, options, other);
   if (status.questions.some((item) => item.id !== questionId)) {
     store.setSetting(ctx.workspaceId, PENDING_ANSWERS, JSON.stringify(pending));
     return { ok: true, sent: false };

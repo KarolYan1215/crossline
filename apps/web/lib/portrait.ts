@@ -6,6 +6,7 @@ import { requestCodexSupervisor } from "./codex-runtime";
 import { effectiveSchedulePreferences, getStore, readAvailability } from "./crossline";
 import { energyModel } from "./energy";
 import { identityLines } from "./lines";
+import { tOf } from "./locale";
 
 export type PortraitState = {
   report: PortraitReport | null; version: number; at: string | null;
@@ -38,7 +39,7 @@ export function loadPortrait(ctx: AccessContext): PortraitState {
     sayDo: sayDoFor(store, ctx.workspaceId, now),
     rhythm: portraitRhythm(ctx, now),
     writing: last?.type === "portrait.requested" && Date.now() - Date.parse(last.createdAt) < 3_600_000,
-    blocker: last?.type === "portrait.blocked" ? String((last.payload as { message?: string }).message ?? "未能生成") : null,
+    blocker: last?.type === "portrait.blocked" ? String((last.payload as { message?: string }).message ?? tOf(ctx)("未能生成")) : null,
     lines: lines.map((line) => ({ id: line.id, label: line.label, rank: line.rank ?? null, hard: Boolean(line.hard) })),
     next: {
       lines: lines.map((line) => ({ id: line.id, label: line.label,

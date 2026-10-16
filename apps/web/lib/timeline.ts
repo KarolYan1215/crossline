@@ -8,6 +8,8 @@ import {
 import { itemsFromPlan, toMinutes, withAgentMarks, type TimelineDeadline, type TimelineItem } from "../app/timeline/model";
 import { identityLines } from "./lines";
 import { inputEvents } from "./fixed-events";
+import { localeFor, tOf } from "./locale";
+import { tFor } from "./i18n";
 
 export type TimelineData = {
   today: string; nowIso: string; timeZone: string;
@@ -81,8 +83,9 @@ export function currentWorkState(ctx: AccessContext, plan: Awaited<ReturnType<ty
     .flatMap((block) => { try { return [{ start: toZonedInstant(block.day ?? today, block.start, zone), end: toZonedInstant(block.day ?? today, block.end === "24:00" ? "23:59" : block.end, zone) }]; } catch { return []; } });
   const segments: ActivitySegment[] = getStore().listActivitySegments(ctx.workspaceId, new Date(now.getTime() - 20 * 60_000).toISOString())
     .map((segment) => ({ start: segment.start, end: segment.end, app: segment.app, category: segment.category as ActivitySegment["category"], idle: segment.idle }));
-  const state = inferWorkState({ segments, now: now.toISOString(), calendar });
-  const label = { focused: "专注", switching: "频繁切换", in_meeting: "会议中", away: "离开键盘", leisure: "娱乐", mixed: "说不准", unknown: "数据不足" }[state.state];
+  const locale = localeFor(ctx);
+  const state = inferWorkState({ segments, now: now.toISOString(), calendar, locale });
+  const label = tFor(locale)({ focused: "专注", switching: "频繁切换", in_meeting: "会议中", away: "离开键盘", leisure: "娱乐", mixed: "说不准", unknown: "数据不足" }[state.state]);
   return { ...state, label };
 }
 
@@ -105,6 +108,7 @@ function withFrozenState(item: TimelineItem, held: Map<string, FrozenBlock>, zon
 /** Everything the three calendar views draw, read once: the plan's blocks, what is due, and the person's own hours. */
 export async function loadTimeline(ctx: AccessContext, loaded?: Awaited<ReturnType<typeof loadCurrentPlan>>): Promise<TimelineData> {
   const store = getStore();
+  const t = tOf(ctx);
   const plan = loaded ?? await loadCurrentPlan(ctx);
   const today = planToday(ctx);
   const milestones = store.listMilestones(ctx.workspaceId);
@@ -135,17 +139,17 @@ export async function loadTimeline(ctx: AccessContext, loaded?: Awaited<ReturnTy
   const deadlines: TimelineDeadline[] = [
     ...milestones.filter((milestone) => milestone.status !== "archived" && anchors.get(milestone.id)?.deadline).map((milestone) => ({
       id: `milestone:${milestone.id}`, day: anchors.get(milestone.id)!.deadline, title: milestone.title, identityId: milestone.identityId,
-      detail: milestone.status === "draft" ? "里程碑截止 · 草稿" : "里程碑截止" })),
+      detail: milestone.status === "draft" ? t("里程碑截止 · 草稿") : t("里程碑截止") })),
     ...store.listProfileFacts(ctx.workspaceId).filter((fact) => fact.slot.startsWith("date_") && fact.status === "confirmed" && /^\d{4}-\d{2}-\d{2} /.test(fact.value))
       .map((fact) => {
         // The course by name in front of the item (「ECE 555 · 作业 2 截止」), and what kind of date it is with the file's own words on hover.
         // The fact's own project, or — when the interview could not tell which course — the project its source file has since been filed under.
         const resolved = projectOfItem({ project: fact.projectId, sourceRef: fact.sourceRef });
         const project = projects.find((item) => item.id === fact.projectId || item.name === fact.projectId || item.name === resolved);
-        const kind = DATE_KIND_LABEL[/^date_\d{8}_(\w+)$/.exec(fact.slot)?.[1] ?? ""] ?? "日期";
+        const kind = t(DATE_KIND_LABEL[/^date_\d{8}_(\w+)$/.exec(fact.slot)?.[1] ?? ""] ?? "日期");
         return { id: `fact:${fact.identityId}:${fact.projectId}:${fact.slot}`, day: fact.value.slice(0, 10),
           title: project ? `${project.name} · ${fact.value.slice(11)}` : fact.value.slice(11), identityId: fact.identityId,
-          detail: `${kind}${fact.sourceQuote ? ` · 原文「${fact.sourceQuote.slice(0, 80)}」` : ""}` };
+          detail: fact.sourceQuote ? t("{{kind}} · 原文「{{quote}}」", { kind, quote: fact.sourceQuote.slice(0, 80) }) : kind };
       })
   ];
 
@@ -153,7 +157,7 @@ export async function loadTimeline(ctx: AccessContext, loaded?: Awaited<ReturnTy
   const nowIso = instantNow().toISOString();
   return {
     today, nowIso, timeZone: zone, items, deadlines,
-    labels: Object.fromEntries(identityLines(ctx).map((pack) => [pack.id, pack.label])),
+    labels: Object.fromEntries(identityLines(ctx).map((pack) => [pack.id, t(pack.label)])),
     quietByWeekday: Object.fromEntries([0, 1, 2, 3, 4, 5, 6].map((weekday) => [weekday, quietRanges(windows, weekday)])),
     proposals: store.listWorkOrders(ctx.workspaceId).filter((order) => order.state === "awaiting_plan_approval" && !(order.payload as { seeded?: boolean }).seeded)
       .map((order) => ({ id: order.id, title: order.intent }))

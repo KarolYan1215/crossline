@@ -2,6 +2,8 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { expandRecurring, requiredApproval, type AccessContext, type DateCandidate, type RecurringMeeting } from "@crossline/core";
 import { ensureSeeded, getStore, type PersistedScheduleBlock } from "./crossline";
+import { localeFor } from "./locale";
+import { tFor, weekdayShort } from "./i18n";
 
 /**
  * Dates read out of the person's own files, waiting for their confirmation.
@@ -19,7 +21,6 @@ export type PendingBatch = { id: string; documentCount: number; items: PendingIt
 
 type ExtractedPayload = { documentIds?: string[]; dates?: DateCandidate[]; recurring?: RecurringMeeting[]; questions?: string[]; dropped?: unknown[] };
 
-const WEEKDAY = ["日", "一", "二", "三", "四", "五", "六"];
 
 /** A class that already met is history, not a plan: only today and later reach the calendar. */
 const upcomingDays = (meeting: Parameters<typeof expandRecurring>[0], today: string) => expandRecurring(meeting).filter((day) => day >= today);
@@ -27,6 +28,7 @@ const todayIso = () => (process.env.CROSSLINE_FIXED_NOW ? new Date(process.env.C
 
 export function loadPendingDateBatch(ctx: AccessContext): PendingBatch | null {
   const store = getStore();
+  const locale = localeFor(ctx);
   const decided = new Set(store.listEvents(ctx.workspaceId, { type: "dates.decided" }).map((event) => event.entityId));
   const batch = [...store.listEvents(ctx.workspaceId, { type: "dates.extracted" })].reverse()
     .find((event) => !decided.has(event.entityId));
@@ -42,7 +44,9 @@ export function loadPendingDateBatch(ctx: AccessContext): PendingBatch | null {
   const recurring = (payload.recurring ?? []).filter((item) => item.to >= today).map((item): PendingItem => {
     const days = upcomingDays(item, todayIso());
     return { id: item.id, kind: "recurring", title: item.title, project: item.project, confidence: item.confidence,
-      when: `每周${item.weekdays.map((day) => WEEKDAY[day]).join("、")} ${item.startTime}–${item.endTime}，${item.from} 至 ${item.to}（还剩 ${days.length} 次）`,
+      when: tFor(locale)("每周{{days}} {{start}}–{{end}}，{{from}} 至 {{to}}（还剩 {{count}} 次）", {
+        days: locale === "en" ? item.weekdays.map((day) => weekdayShort(locale, day)).join(", ") : item.weekdays.map((day) => weekdayShort(locale, day).slice(1)).join("、"),
+        start: item.startTime, end: item.endTime, from: item.from, to: item.to, count: days.length }),
       quote: item.quote, sourceRef: item.sourceRef, note: item.location, checked: item.confidence !== "low", blocks: days.length };
   });
   return { id: batch.entityId, documentCount: payload.documentIds?.length ?? 0, items: [...recurring, ...dates], questions: payload.questions ?? [], dropped: payload.dropped?.length ?? 0 };
@@ -68,7 +72,7 @@ export function decideDateBatch(ctx: AccessContext, batchId: string, includedIds
   for (const item of (payload.dates ?? []).filter((candidate) => included.has(candidate.id))) {
     if (item.startTime) {
       blocks.push({ id: `import:${batchId}:${item.id}`, lane: "human", title: item.title, day: item.date, start: item.startTime,
-        end: item.endTime || item.startTime, source: "文件导入", readOnly: true });
+        end: item.endTime || item.startTime, source: "文件导入", readOnly: true }); // i18n-ignore: a stored source marker
     }
     // Untimed dates are deadlines and exam days, not blocks of time. They are kept as profile facts so the
     // milestone design can start from them instead of from nothing.
@@ -80,7 +84,7 @@ export function decideDateBatch(ctx: AccessContext, batchId: string, includedIds
   for (const meeting of (payload.recurring ?? []).filter((candidate) => included.has(candidate.id))) {
     for (const day of upcomingDays(meeting, todayIso())) {
       blocks.push({ id: `import:${batchId}:${meeting.id}:${day}`, lane: "human", title: meeting.title, day,
-        start: meeting.startTime, end: meeting.endTime, source: "文件导入", readOnly: true });
+        start: meeting.startTime, end: meeting.endTime, source: "文件导入", readOnly: true }); // i18n-ignore: a stored source marker
     }
   }
 

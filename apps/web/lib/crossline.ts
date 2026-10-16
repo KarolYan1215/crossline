@@ -63,6 +63,8 @@ import { completionRule, type CompletionMode, type CompletionOutcome } from "@cr
 import { MILESTONE_RISKS_SETTING, parseMilestoneRisks, riskBufferDays } from "@crossline/core";
 import { identityLines, linePacks } from "./lines";
 import { memoByLedgerAsync } from "./ledger-memo";
+import { localeFor, tOf } from "./locale";
+import { tFor, type Locale } from "./i18n";
 const PREFERENCES_SETTING = "schedule.preferences";
 export type SchedulePreferences = { timeZone: string; mode: "buffered" | "asap";
   importance: Record<string, "important" | "ordinary">;
@@ -150,7 +152,7 @@ export function importancePresets(ctx: AccessContext, options: { withHistory?: b
     return [item.id, presetImportance({ standing: standing.get(item.identityId) ?? { rank: null, hard: false }, line: item.identityId, relations: degree(item.id), maxRelations,
       graded: Boolean(item.projectId && graded.has(item.projectId)),
       daysToDeadline: deadline ? Math.round((Date.parse(`${deadline}T12:00:00Z`) - Date.parse(`${today}T12:00:00Z`)) / 86_400_000) : null,
-      pastAdjustments: [...(adjustments.get(item.identityId)?.values() ?? [])] })];
+      pastAdjustments: [...(adjustments.get(item.identityId)?.values() ?? [])], locale: localeFor(ctx) })];
   }));
 }
 
@@ -342,6 +344,7 @@ export const accents: Record<string, string> = {
  */
 const seedIdentities = () => defaultIdentityPacks().filter((pack) => pack.kind === "identity");
 
+/* i18n-ignore-start: example content for the test board (person-written data, not interface) */
 // Example content for the packs this repo happens to ship. Keyed by id, so an unknown identity falls
 // back to a generic starter written from the pack's own label instead of being skipped.
 const starterMilestoneTitles: Record<string, string> = {
@@ -360,6 +363,7 @@ const starterWorkOrders: Record<string, StarterWorkOrder> = {
   media: { title: "从本周工作中提取一个可公开选题", energy: "low", priorFamily: "review" },
   investment: { title: "整理当前美股与 ETF 关注清单", energy: "medium", priorFamily: "review" }
 };
+/* i18n-ignore-end */
 
 // A prior is honest only when it really comes from the pack. Deriving p25/p85 from one hand-written
 // number and labelling the result `identity_prior` was a fabricated interval wearing a real label.
@@ -406,7 +410,7 @@ export function ensureSeeded(ctx: AccessContext): void {
         store.saveMilestone({
           id: `${pack.id}-starter`, ownerId: ctx.principalId, workspaceId: ctx.workspaceId,
           identityId: pack.id, projectId: `${pack.id}-default`,
-          title: starterMilestoneTitles[pack.id] ?? `为「${pack.label}」确定第一个可验收的里程碑`,
+          title: starterMilestoneTitles[pack.id] ?? `为「${pack.label}」确定第一个可验收的里程碑`, // i18n-ignore: example data
           version: 1, status: "approved"
         });
       }
@@ -434,7 +438,7 @@ export function ensureSeeded(ctx: AccessContext): void {
       for (const pack of seedIdentities()) {
         const identityId = pack.id;
         const { title, energy, priorFamily } = starterWorkOrders[identityId]
-          ?? { title: `写下「${pack.label}」当前最该推进的一件事`, energy: "medium" as const, priorFamily: "review" };
+          ?? { title: `写下「${pack.label}」当前最该推进的一件事`, energy: "medium" as const, priorFamily: "review" }; // i18n-ignore: example data
         const id = `${identityId}-starter-work-order`;
         const milestoneId = store.listMilestones(ctx.workspaceId).find((item) => item.identityId === identityId)?.id ?? `${identityId}-unassigned`;
         store.saveWorkOrder({
@@ -464,7 +468,7 @@ export function ensureSeeded(ctx: AccessContext): void {
   // A database seeded before the scheduler was wired up still holds the five example blocks; `loadCurrentPlan` no longer reads them.
   for (const plan of store.listPlanVersions(ctx.workspaceId)) {
     const blocks = (plan.payload as { blocks?: PersistedScheduleBlock[] }).blocks ?? [];
-    const real = blocks.filter((block) => block.source !== "示例数据");
+    const real = blocks.filter((block) => block.source !== "示例数据"); // i18n-ignore: a stored marker
     if (real.length === blocks.length) continue;
     store.savePlanVersion({ ...plan, payload: { blocks: real } });
   }
@@ -665,7 +669,9 @@ export function shiftToday(ctx: AccessContext, minutes: number, now = appNow()):
   getStore().setSetting(ctx.workspaceId, DELAY_SETTING, new Date(Math.max(current, now.getTime()) + minutes * 60_000).toISOString());
   const held = after.filter((item) => (item.reason === "pinned" || item.reason === "locked") && Date.parse(item.end) > now.getTime()
     && formatInTimeZone(new Date(item.start), zone, "yyyy-MM-dd") === today).length;
-  return { ok: true, message: `今天之后的安排顺延 ${minutes} 分钟${held ? `，已锁定的 ${held} 块不动` : ""}` };
+  const t = tOf(ctx);
+  return { ok: true, message: held ? t("今天之后的安排顺延 {{minutes}} 分钟，已锁定的 {{count}} 块不动", { minutes, count: held })
+    : t("今天之后的安排顺延 {{minutes}} 分钟", { minutes }) };
 }
 /** The stretch `schedule.shift` holds from now on, as a busy block of today in the person's clock; undefined once it has passed. */
 function delayBlock(ctx: AccessContext, now: Date, zone: string): { day: string; start: string; end: string } | undefined {
@@ -860,7 +866,7 @@ export function planningInputFor(ctx: AccessContext, today: string, committed: P
       day: slot.day, energy: currentEnergy && index === currentSlot ? currentEnergy : slotEnergy(model, String(start), slot.energy) }]; }
     catch (error) {
       clockBlockers.push({ taskId: "availability", code: error instanceof Error ? error.message : "AVAILABILITY_LOCAL_TIME_INVALID",
-        message: `${slot.day} ${slot.start}–${slot.end} 跨越时钟调整，请修改这段可用时间` });
+        message: tOf(ctx)("{{day}} {{start}}–{{end}} 跨越时钟调整，请修改这段可用时间", { day: slot.day, start: slot.start, end: slot.end }) });
       return [];
     }
   });
@@ -872,7 +878,7 @@ export function planningInputFor(ctx: AccessContext, today: string, committed: P
   const dependencyBlockers = orders.filter((order) => (plannerTaskOf(ctx, order).dependsOn ?? [])
     .some((id) => stateById.get(id) !== "accepted" && !orders.some((item) => item.id === id)))
     .map((order) => ({ taskId: order.id, code: "DEPENDENCY_NOT_READY",
-      message: `${order.intent}的前置作业尚未验收，暂不排入` }));
+      message: tOf(ctx)("{{title}}的前置作业尚未验收，暂不排入", { title: order.intent }) }));
   // Each line's share of the week: what the person set, else what they said in the interview. A line with a share also offers its
   // library work (milestone due beyond the window) as floor-only, so a far deadline no longer means no hours at all.
   const shares = readLineShares(ctx);
@@ -1141,7 +1147,7 @@ export async function energyAnswerMatters(ctx: AccessContext): Promise<boolean> 
 export async function loadCurrentPlan(ctx: AccessContext): Promise<PersistedPlan> {
   // Reused until the ledger changes or a minute passes (`lib/ledger-memo.ts`); a preview always computes its own.
   if (inPreview()) return computeCurrentPlan(ctx);
-  return memoByLedgerAsync(getStore(), `plan:${ctx.workspaceId}:${appNow().toISOString().slice(0, 16)}`, 60_000, () => computeCurrentPlan(ctx));
+  return memoByLedgerAsync(getStore(), `plan:${ctx.workspaceId}:${localeFor(ctx)}:${appNow().toISOString().slice(0, 16)}`, 60_000, () => computeCurrentPlan(ctx));
 }
 
 async function computeCurrentPlan(ctx: AccessContext): Promise<PersistedPlan> {
@@ -1383,7 +1389,8 @@ export function decideMilestoneRelations(ctx: AccessContext, ids: string[], deci
     const titles = new Map(store.listMilestones(ctx.workspaceId).map((milestone) => [milestone.id, milestone.title]));
     for (const relation of store.listMilestoneRelations(ctx.workspaceId).filter((item) => result.decided.includes(item.id))) {
       store.addPreference({ workspaceId: ctx.workspaceId, source: "relation_rejected", scope: "all", weight: 0.8, refId: relation.id,
-        text: `跨主线关系「${titles.get(relation.fromMilestoneId) ?? relation.fromMilestoneId} → ${titles.get(relation.toMilestoneId) ?? relation.toMilestoneId}」（${relationKindLabel[relation.kind] ?? relation.kind}）被本人驳回` });
+        text: tOf(ctx)("跨主线关系「{{from}} → {{to}}」（{{kind}}）被本人驳回", { from: titles.get(relation.fromMilestoneId) ?? relation.fromMilestoneId,
+          to: titles.get(relation.toMilestoneId) ?? relation.toMilestoneId, kind: relationKindLabel[relation.kind] ? tOf(ctx)(relationKindLabel[relation.kind]!) : relation.kind }) });
     }
   }
   return { ok: true, ...result };
@@ -1430,7 +1437,7 @@ export function approveWorkOrderProposal(ctx: AccessContext, workOrderId: string
     const payload = (workOrder.payload ?? {}) as { evidenceContract?: Array<{ kind?: string; description?: string; why?: string; required?: boolean }> };
     const before = payload.evidenceContract ?? [];
     const evidenceContract = edited.map((description, index) => ({ kind: before[index]?.kind ?? "record", description,
-      why: before[index]?.why ?? "本人批准时定下的验收标准", required: before[index]?.required ?? true }));
+      why: before[index]?.why ?? tOf(ctx)("本人批准时定下的验收标准"), required: before[index]?.required ?? true }));
     getStore().saveWorkOrder({ ...workOrder, payload: { ...payload, evidenceContract,
       acceptanceStandard: { fixedAt: new Date().toISOString(), lines: edited, by: "person" } } });
   }
@@ -1501,8 +1508,10 @@ export function retryMaterialPreparation(ctx: AccessContext, workOrderId: string
  * this list; it covers the ones written before that flag existed.
  */
 // Older rows carry the earlier wording, so both forms stay in the list.
+// i18n-ignore-start: stored reasons matched by code
 const SYSTEM_ARCHIVE_REASONS = ["示例作业自动清理", "自动反推旧版", "你已经在等这项输入", "你已经提供了这项输入", "你说这个里程碑先不拆",
   "该输入已在等待中", "该输入已由本人提供", "本人选择暂不拆分该里程碑"];
+// i18n-ignore-end
 export function archivedBySystem(payload: unknown): boolean {
   const value = payload as { bySystem?: boolean; reason?: string } | undefined;
   return value?.bySystem === true || SYSTEM_ARCHIVE_REASONS.some((reason) => (value?.reason ?? "").startsWith(reason));
@@ -1747,6 +1756,7 @@ export type RankedTask = { id: string; title: string; line: string; milestoneId:
  */
 export function planRanking(ctx: AccessContext, plan: PersistedPlan): RankedTask[] {
   const store = getStore();
+  const t = tOf(ctx);
   const capacityIds = new Set(defaultIdentityPacks().filter((pack) => pack.kind === "capacity").map((pack) => pack.id));
   const orders = withoutShadowingDemos(store.listWorkOrders(ctx.workspaceId), capacityIds)
     .filter((order) => ACTIONABLE.includes(order.state) && !capacityIds.has(order.identityId));
@@ -1769,7 +1779,7 @@ export function planRanking(ctx: AccessContext, plan: PersistedPlan): RankedTask
       weight: task.weight, deadline: local(task.deadline), notBefore: local(task.notBefore),
       firstDay: blocks[0]?.day ?? null, firstStart: blocks[0]?.start ?? null,
       weekMinutes: blocks.filter((block) => block.day! >= today && block.day! < weekEnd).reduce((sum, block) => sum + minutesOf(block), 0),
-      blocker: blocks.length || !blocker ? null : UNPLACED_REASON[blocker.code] ?? blocker.message,
+      blocker: blocks.length || !blocker ? null : UNPLACED_REASON[blocker.code] ? t(UNPLACED_REASON[blocker.code]!) : blocker.message,
       libraryUntil: libraryUntil(ctx, order, today),
       p50Minutes: own.reduce((sum, item) => sum + item.task.estimate.p50Minutes, 0),
       p85Minutes: own.reduce((sum, item) => sum + item.task.estimate.p85Minutes, 0) };
@@ -2005,13 +2015,14 @@ export function releaseDayOf(ctx: AccessContext, order: { id: string; payload: u
  * The earliest-due approved milestone wins; with only drafts, the card says so instead.
  */
 export function currentMilestoneLabel(milestones: Array<{ id: string; identityId: string; status: string; title: string }>,
-  deadlines: Map<string, string | null | undefined>, identityId: string): string {
+  deadlines: Map<string, string | null | undefined>, identityId: string, locale?: Locale): string {
   const mine = milestones.filter((milestone) => milestone.identityId === identityId);
   const approved = mine.filter((milestone) => milestone.status === "approved")
     .sort((a, b) => (deadlines.get(a.id) ?? "9999").localeCompare(deadlines.get(b.id) ?? "9999"));
   if (approved[0]) return approved[0].title;
   const drafts = mine.filter((milestone) => milestone.status === "draft").length;
-  return drafts ? `${drafts} 个里程碑草稿待批准` : "等待批准里程碑";
+  const t = tFor(locale);
+  return drafts ? t("{{count}} 个里程碑草稿待批准", { count: drafts }) : t("等待批准里程碑");
 }
 
 export const LOCAL_ACTIVITY_CONSENT = "localActivity.consent";
@@ -2026,7 +2037,7 @@ export const ACTIVITY_BLACKLIST = "activity.blacklist";
  * lie as a fabricated metric.
  */
 export type LastNight = { state: "none" } | { state: "ran"; proposals: number } | { state: "skipped"; reason: string };
-export function lastNight(workspaceId: string, now: Date): LastNight {
+export function lastNight(workspaceId: string, now: Date, locale?: Locale): LastNight {
   const since = new Date(now.getTime() - 36 * 60 * 60_000).toISOString();
   const event = [...getStore().listEvents(workspaceId)]
     .reverse()
@@ -2037,7 +2048,8 @@ export function lastNight(workspaceId: string, now: Date): LastNight {
   // Shown on 周复盘: the stored message of a failed run or an unreadable quota is the runtime's own error text (a JSON-RPC body), so
   // those two are said in words by their code.
   const plain: Record<string, string> = { COST_SIGNAL_UNAVAILABLE: "读不到模型额度，今晚不运行。", FLYWHEEL_RUN_FAILED: "扩展运行出错，下一晚重试。" };
-  return { state: "skipped", reason: (payload.code && plain[payload.code]) ?? payload.message ?? payload.code ?? "未记录原因" };
+  const t = tFor(locale);
+  return { state: "skipped", reason: (payload.code && plain[payload.code] ? t(plain[payload.code]!) : undefined) ?? payload.message ?? payload.code ?? t("未记录原因") };
 }
 
 const dayOf = (iso: string) => iso.slice(0, 10);
@@ -2101,7 +2113,8 @@ function latestCapacity(ctx: AccessContext, now: Date): DashboardData["capacity"
       .filter((item) => item.source === "local_activity")
       .map((item) => ({ day: dayOf(item.observedAt), activeMinutes: item.aggregate.activeMinutes ?? 0, windowSwitches: item.aggregate.windowSwitches ?? 0 })),
     interruptionDensity: interruptionDensity(ctx.workspaceId),
-    localActivityConsent: consent === "granted" ? "granted" : consent === "denied" ? "denied" : "unasked"
+    localActivityConsent: consent === "granted" ? "granted" : consent === "denied" ? "denied" : "unasked",
+    locale: localeFor(ctx)
   });
 }
 
@@ -2113,7 +2126,7 @@ const toAction = (ctx: AccessContext, order: ActionableOrder | undefined, reason
   ...(humanCoreOf(order)?.energy ? { energy: humanCoreOf(order)!.energy as "low" | "medium" | "high" } : {}),
   reason,
   // An unbound task (analysed before any milestone existed, or serving none) is not waiting for anything; it says so.
-  milestone: getStore().listMilestones(ctx.workspaceId).find((item) => item.id === order.milestoneId)?.title ?? "未挂里程碑",
+  milestone: getStore().listMilestones(ctx.workspaceId).find((item) => item.id === order.milestoneId)?.title ?? tOf(ctx)("未挂里程碑"),
   inputsReady: inputsReady(order)
 }) : undefined;
 
@@ -2139,6 +2152,7 @@ function energyEstimateFor(ctx: AccessContext, now: Date, today: string): NonNul
 }
 
 export async function loadDashboard(ctx: AccessContext): Promise<Omit<DashboardData, "taskDetailById" | "milestoneDetailById">> {
+  const t = tOf(ctx);
   ensureSeeded(ctx);
   const store = getStore();
   const orders = store.listWorkOrders(ctx.workspaceId);
@@ -2259,8 +2273,8 @@ export async function loadDashboard(ctx: AccessContext): Promise<Omit<DashboardD
       const milestone = milestoneById.get(id)!;
       const acceptedCount = orders.filter((order) => order.milestoneId === id && order.state === "accepted").length;
       const gateCount = gateEvents.filter((event) => (event.payload as { milestoneId?: string }).milestoneId === id).length;
-      const latestSignal = acceptedCount > 0 ? `已验收 ${acceptedCount} 次`
-        : gateCount > 0 ? `已判定 ${gateCount} 次` : "等待进展";
+      const latestSignal = acceptedCount > 0 ? t("已验收 {{count}} 次", { count: acceptedCount })
+        : gateCount > 0 ? t("已判定 {{count}} 次", { count: gateCount }) : t("等待进展");
       return { id, identityId: milestone.identityId, title: milestone.title, latestSignal, recency: recencyOf(id) };
     }).sort((a, b) => a.recency < b.recency ? -1 : a.recency > b.recency ? 1 : 0);
 
@@ -2277,7 +2291,7 @@ export async function loadDashboard(ctx: AccessContext): Promise<Omit<DashboardD
     }
     const edges = [...edgeBuckets.values()].map((bucket) => {
       const topKind = Object.entries(bucket.kinds).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "";
-      return { from: bucket.from, to: bucket.to, count: bucket.count, pending: bucket.pending, kindLabel: relationKindLabel[topKind] ?? topKind };
+      return { from: bucket.from, to: bucket.to, count: bucket.count, pending: bucket.pending, kindLabel: relationKindLabel[topKind] ? t(relationKindLabel[topKind]!) : topKind };
     });
 
     return { nodes: nodes.map(({ id, identityId, title, latestSignal }) => ({ id, identityId, title, latestSignal })), edges };
@@ -2286,16 +2300,17 @@ export async function loadDashboard(ctx: AccessContext): Promise<Omit<DashboardD
   const energySelected = capacity.level !== "uncalibrated";
   const primaryReason = energySelected
     ? actions.primary?.deadline && Date.parse(actions.primary.deadline) - now.getTime() <= 24 * 60 * 60_000
-      ? "已确认截止时间临近；即使当前精力不匹配仍优先显示，请考虑先休息 10 分钟"
+      ? t("已确认截止时间临近；即使当前精力不匹配仍优先显示，请考虑先休息 10 分钟")
       : actions.primary?.energy === capacity.level
-        ? `当前${capacity.level === "low" ? "低" : capacity.level === "high" ? "高" : "中"}精力自评与所需精力匹配，输入已就绪`
-        : "暂无精力完全匹配的就绪作业，展示可执行的最高优先级备选"
-    : "输入已就绪，按目标重要性和估时推荐；尚无新鲜精力自评";
+        ? t(capacity.level === "low" ? "当前低精力自评与所需精力匹配，输入已就绪" : capacity.level === "high" ? "当前高精力自评与所需精力匹配，输入已就绪"
+          : "当前中精力自评与所需精力匹配，输入已就绪")
+        : t("暂无精力完全匹配的就绪作业，展示可执行的最高优先级备选")
+    : t("输入已就绪，按目标重要性和估时推荐；尚无新鲜精力自评");
   const primary = toAction(ctx, active.find((task) => task.id === actions.primary?.id), primaryReason);
   const higherPriority = toAction(ctx, active.find((task) => task.id === actions.higherPriority?.id),
-    "优先级更高，但当前精力与任务要求不匹配；保留供本人决定");
-  const lowEnergy = toAction(ctx, active.find((task) => task.id === actions.lowEnergy?.id), "标注为低精力任务，启动阻力最小");
-  const shortGap = toAction(ctx, active.find((task) => task.id === actions.shortGap?.id), "先验 p85 在 40 分钟以内，可放进短空档");
+    t("优先级更高，但当前精力与任务要求不匹配；保留供本人决定"));
+  const lowEnergy = toAction(ctx, active.find((task) => task.id === actions.lowEnergy?.id), t("标注为低精力任务，启动阻力最小"));
+  const shortGap = toAction(ctx, active.find((task) => task.id === actions.shortGap?.id), t("先验 p85 在 40 分钟以内，可放进短空档"));
   return {
     principalId: ctx.principalId,
     workspaceId: ctx.workspaceId,
@@ -2334,7 +2349,7 @@ export async function loadDashboard(ctx: AccessContext): Promise<Omit<DashboardD
         label: pack.label,
         accent: accents[pack.id] ?? "#6D5EF5",
         completedCount: completed,
-        activeMilestone: currentMilestoneLabel(milestones, anchorsByMilestone, pack.id),
+        activeMilestone: currentMilestoneLabel(milestones, anchorsByMilestone, pack.id, localeFor(ctx)),
         taskCount: total - completed,
         totalCount: total,
         pct: total > 0 ? Math.round((completed / total) * 100) : 0
@@ -2347,7 +2362,7 @@ export async function loadDashboard(ctx: AccessContext): Promise<Omit<DashboardD
     // come back as though the system were still working on something the person had thrown away.
     upcoming: [
       ...orders.filter((order) => order.state === "awaiting_plan_approval").map((order) => ({
-        id: order.id, title: order.intent, identityId: order.identityId, status: "待批准",
+        id: order.id, title: order.intent, identityId: order.identityId, status: t("待批准"),
         ...(order.milestoneId && milestoneTitleById.has(order.milestoneId)
           ? { milestoneTitle: milestoneTitleById.get(order.milestoneId)! } : {})
       })),
@@ -2356,11 +2371,11 @@ export async function loadDashboard(ctx: AccessContext): Promise<Omit<DashboardD
       // later day), `time` stays unset and the status text says so explicitly instead of a vague "待排程".
       ...active.map((order) => {
         const block = blockByWorkOrderToday.get(order.id);
-        const status = order.state === "approved" ? "已批准 · 等待材料"
-          : order.state === "preparing" ? "材料准备中"
-          : order.state === "active" ? "执行中"
-          : block ? `预计 ${resolvedEstimate(ctx, order).p50Minutes} 分钟`
-          : `预计 ${resolvedEstimate(ctx, order).p50Minutes} 分钟 · 规划器未排入今天`;
+        const status = order.state === "approved" ? t("已批准 · 等待材料")
+          : order.state === "preparing" ? t("材料准备中")
+          : order.state === "active" ? t("执行中")
+          : block ? t("预计 {{minutes}} 分钟", { minutes: resolvedEstimate(ctx, order).p50Minutes })
+          : t("预计 {{minutes}} 分钟 · 规划器未排入今天", { minutes: resolvedEstimate(ctx, order).p50Minutes });
         return {
           id: order.id, title: order.intent, identityId: order.identityId, status,
           ...(block ? { time: `${block.start}–${block.end}` } : {}),
@@ -2372,8 +2387,8 @@ export async function loadDashboard(ctx: AccessContext): Promise<Omit<DashboardD
         .filter((item) => item.state === "blocked" || item.state === "captured" || item.state === "analyzing")
         .map((item) => ({
           id: item.id, title: item.title, identityId: "unclassified",
-          status: item.state === "captured" ? "已保存 · 未分类 / 未估时 · Workbench 分析"
-            : item.state === "blocked" ? "分析阻塞 · 可人工处理" : "正在分析"
+          status: item.state === "captured" ? t("已保存 · 未分类 / 未估时 · Workbench 分析")
+            : item.state === "blocked" ? t("分析阻塞 · 可人工处理") : t("正在分析")
         }))
     ].slice(0, 6),
     // Real activity, not a proxy read off `milestone.status` alone — that used to call every
@@ -2384,11 +2399,11 @@ export async function loadDashboard(ctx: AccessContext): Promise<Omit<DashboardD
         .filter((id) => orders.find((order) => order.id === id)?.milestoneId === milestone.id).length;
       return {
         id: milestone.id,
-        identity: identityPacks.find((pack) => pack.id === milestone.identityId)?.label ?? milestone.identityId,
+        identity: ((label) => label ? t(label) : milestone.identityId)(identityPacks.find((pack) => pack.id === milestone.identityId)?.label),
         title: milestone.title,
         evidence: acceptedCount
-          ? `${milestone.status === "approved" ? "已批准" : "等待批准"} · 已验收 ${acceptedCount} 次`
-          : milestone.status === "approved" ? "已批准 · 等待新证据" : "等待批准"
+          ? t(milestone.status === "approved" ? "已批准 · 已验收 {{count}} 次" : "等待批准 · 已验收 {{count}} 次", { count: acceptedCount })
+          : milestone.status === "approved" ? t("已批准 · 等待新证据") : t("等待批准")
       };
     })
   };

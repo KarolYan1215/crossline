@@ -4,6 +4,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import path from "node:path";
 import type { CrosslineStore } from "@crossline/db";
+import { tFor, type Locale } from "./i18n";
 
 const PROJECT_ROOT = path.resolve(process.cwd(), "..", "..");
 
@@ -53,18 +54,19 @@ export type AttachmentSaveResult =
  * file name — the original name is kept only as a display label in the ledger row, so there is nothing
  * in it that ever has to be sanitized into a safe path.
  */
-function writeAttachmentFiles(root: string, files: Array<{ fileName: string; mediaType: string; buffer: Buffer }>):
+function writeAttachmentFiles(root: string, files: Array<{ fileName: string; mediaType: string; buffer: Buffer }>, locale?: Locale):
   AttachmentSaveResult {
+  const t = tFor(locale);
   const saved: Array<{ id: string; uri: string; mediaType: string; fileName: string }> = [];
   for (const file of files) {
     const mediaType = attachmentMediaType(file.mediaType, file.fileName);
     const ext = ALLOWED_ATTACHMENT_TYPES[mediaType];
-    if (!ext) return { ok: false, code: "ATTACHMENT_TYPE_NOT_ALLOWED", message: `不支持的文件类型：${file.mediaType || "未知"}` };
-    if (file.buffer.byteLength > MAX_BYTES) return { ok: false, code: "ATTACHMENT_TOO_LARGE", message: "单个文件不能超过 10MB。" };
+    if (!ext) return { ok: false, code: "ATTACHMENT_TYPE_NOT_ALLOWED", message: t("不支持的文件类型：{{type}}", { type: file.mediaType || t("未知") }) };
+    if (file.buffer.byteLength > MAX_BYTES) return { ok: false, code: "ATTACHMENT_TOO_LARGE", message: t("单个文件不能超过 10MB。") };
     const target = path.resolve(root, `${randomUUID()}.${ext}`);
     const relative = path.relative(root, target);
     if (relative.startsWith("..") || path.isAbsolute(relative)) {
-      return { ok: false, code: "ATTACHMENT_PATH_OUTSIDE_ROOT", message: "附件路径越出获准目录；没有写入文件。" };
+      return { ok: false, code: "ATTACHMENT_PATH_OUTSIDE_ROOT", message: t("附件路径越出获准目录；没有写入文件。") };
     }
     mkdirSync(root, { recursive: true });
     writeFileSync(target, file.buffer);
@@ -77,12 +79,12 @@ function writeAttachmentFiles(root: string, files: Array<{ fileName: string; med
 
 export function saveCaptureAttachments(store: CrosslineStore, input: {
   workspaceId: string; ownerId: string; captureId: string;
-  files: Array<{ fileName: string; mediaType: string; buffer: Buffer }>;
+  files: Array<{ fileName: string; mediaType: string; buffer: Buffer }>; locale?: Locale;
 }): AttachmentSaveResult {
   if (!/^[a-zA-Z0-9_-]{1,128}$/.test(input.captureId)) {
-    return { ok: false, code: "ATTACHMENT_CAPTURE_ID_INVALID", message: "无效的捕获 id；没有保存附件。" };
+    return { ok: false, code: "ATTACHMENT_CAPTURE_ID_INVALID", message: tFor(input.locale)("无效的捕获 id；没有保存附件。") };
   }
-  const result = writeAttachmentFiles(attachmentsRoot(input.captureId), input.files);
+  const result = writeAttachmentFiles(attachmentsRoot(input.captureId), input.files, input.locale);
   if (!result.ok) return result;
   const createdAt = new Date().toISOString();
   for (const file of result.saved) {
@@ -100,13 +102,13 @@ export function saveCaptureAttachments(store: CrosslineStore, input: {
  * `EvidenceClaimInput` itself from the returned `uri`/`fileName`.
  */
 export function saveEvidenceFile(input: {
-  workOrderId: string; fileName: string; mediaType: string; buffer: Buffer;
+  workOrderId: string; fileName: string; mediaType: string; buffer: Buffer; locale?: Locale;
 }): { ok: true; uri: string; mediaType: string; fileName: string } | { ok: false; code: string; message: string } {
   if (!/^[a-zA-Z0-9_-]{1,128}$/.test(input.workOrderId)) {
-    return { ok: false, code: "ATTACHMENT_WORK_ORDER_ID_INVALID", message: "无效的作业 id；没有保存文件。" };
+    return { ok: false, code: "ATTACHMENT_WORK_ORDER_ID_INVALID", message: tFor(input.locale)("无效的作业 id；没有保存文件。") };
   }
   const result = writeAttachmentFiles(evidenceAttachmentsRoot(input.workOrderId),
-    [{ fileName: input.fileName, mediaType: input.mediaType, buffer: input.buffer }]);
+    [{ fileName: input.fileName, mediaType: input.mediaType, buffer: input.buffer }], input.locale);
   if (!result.ok) return result;
   const saved = result.saved[0]!;
   return { ok: true, uri: saved.uri, mediaType: saved.mediaType, fileName: saved.fileName };

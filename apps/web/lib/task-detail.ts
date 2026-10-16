@@ -6,6 +6,8 @@ import { assistantAvailable, listAgentTasks, readStoredArtifactPlan, type Crossl
 import { defaultIdentityPacks, identityPacksFor } from "@crossline/identity-packs";
 import { effectiveSchedulePreferences, getStore, resolvedEstimate, relationKindLabel, accents, suggestedSessionMinutes } from "./crossline";
 import { linePacks } from "./lines";
+import { localeFor } from "./locale";
+import { tFor, type Locale } from "./i18n";
 
 const quartersOfVerdict: Record<string, number> = { met: 4, partial: 2, unmet: 0, unverifiable: 0 };
 
@@ -13,14 +15,15 @@ const quartersOfVerdict: Record<string, number> = { met: 4, partial: 2, unmet: 0
  * One read per table for a set of orders, then per-order extras. Both the single and the batch tier use it, so a card and the page it
  * opens always agree.
  */
-function taskExtras(store: CrosslineStore, workspaceId: string, orders: StoredWorkOrder[]): Map<string, TaskExtras> {
+function taskExtras(store: CrosslineStore, workspaceId: string, orders: StoredWorkOrder[], locale?: Locale): Map<string, TaskExtras> {
+  const t = tFor(locale);
   const ids = new Set(orders.map((order) => order.id));
   const projects = new Map(store.listProjects(workspaceId, { includeArchived: true }).map((project) => [project.id, project.name]));
   const plans = new Map(store.listStepPlans(workspaceId).filter((plan) => ids.has(plan.workOrderId)).map((plan) => [plan.workOrderId, plan]));
   const milestones = new Map(store.listMilestones(workspaceId).map((milestone) => [milestone.id, milestone]));
   const anchors = new Map(store.listMilestoneAnchors(workspaceId).map((anchor) => [anchor.milestoneId, anchor.deadline]));
   const relations = store.listMilestoneRelations(workspaceId).filter((relation) => relation.status === "approved" || relation.status === "candidate");
-  const labels = new Map(identityPacksFor((key) => store.getSetting(workspaceId, key), { includeArchived: true }).map((pack) => [pack.id, pack.label]));
+  const labels = new Map(identityPacksFor((key) => store.getSetting(workspaceId, key), { includeArchived: true }).map((pack) => [pack.id, t(pack.label)]));
   const executions = store.listExecutions(workspaceId);
   const documents = store.listSourceDocuments(workspaceId);
   const agentTasks = listAgentTasks(store, workspaceId).filter((task) => ids.has(task.workOrderId));
@@ -81,7 +84,7 @@ function taskExtras(store: CrosslineStore, workspaceId: string, orders: StoredWo
     result.set(order.id, {
       ...(projects.get(order.projectId) ? { projectName: projects.get(order.projectId)! } : {}),
       window: { ...(payload.notBefore ? { notBefore: payload.notBefore } : {}), ...(dueBy ? { dueBy } : {}) },
-      ...(plan ? { stepPlan: { archetypeLabel: archetypeById(plan.archetypeId)?.label ?? plan.archetypeId, quantity: plan.quantity, rationale: plan.rationale,
+      ...(plan ? { stepPlan: { archetypeLabel: ((label) => label ? t(label) : plan.archetypeId)(archetypeById(plan.archetypeId)?.label), quantity: plan.quantity, rationale: plan.rationale,
         progress: taskProgress(plan.steps), steps: plan.steps, units: plan.units, questions: plan.questions } } : {}),
       supports, workedMinutes: worked, ...(artifactLinks.length ? { artifactLinks } : {}),
       criteria: (milestone?.successCriteria ?? []).map((criterion) => {
@@ -98,7 +101,7 @@ function taskExtras(store: CrosslineStore, workspaceId: string, orders: StoredWo
       agentSteps: (assistant ? plan?.steps ?? [] : []).filter((step) => step.status === "planned" && step.schedulable && step.executor !== "human").map((step) => ({ id: step.id, title: step.title })),
       notes: notes.filter((event) => event.entityId === order.id).map((event) => { const payload = event.payload as { text?: string; kind?: string };
         return { at: event.createdAt, text: payload.text ?? "", kind: payload.kind ?? "note" }; }).reverse().slice(0, 30),
-      completion: (({ mode, why, by }) => ({ mode, why, by }))(completionRule(order))
+      completion: (({ mode, why, by }) => ({ mode, why, by }))(completionRule(order, locale))
     });
   }
   return result;
@@ -211,9 +214,10 @@ export type MilestoneDetail = {
   background: StoredBackgroundFact[] | null;
 };
 
-function identityInfo(identityId: string, ctx?: AccessContext): { label: string; accent: string } {
+function identityInfo(identityId: string, ctx?: AccessContext, locale = ctx ? localeFor(ctx) : undefined): { label: string; accent: string } {
   const pack = (ctx ? linePacks(ctx, { includeArchived: true }) : defaultIdentityPacks()).find((item) => item.id === identityId);
-  return { label: pack?.label ?? "未分类", accent: accents[identityId] ?? "#5A5B54" };
+  const t = tFor(locale);
+  return { label: t(pack?.label ?? "未分类"), accent: accents[identityId] ?? "#5A5B54" };
 }
 
 /**
@@ -239,12 +243,12 @@ function flywheelTouching(relations: StoredMilestoneRelation[], milestoneId: str
 /** Last-word-wins over a `materials.blocked`/`materials.retry_requested` trail already narrowed to one
  * work order (by SQL `entityId` in the single-id tier, by a pre-grouped Map in the batch tier) — same
  * read Workbench's own `materialStatus` does. */
-function materialBlockerFrom(events: StoredEvent[]): TaskDetail["materialBlocker"] {
+function materialBlockerFrom(events: StoredEvent[], locale?: Locale): TaskDetail["materialBlocker"] {
   let blocker: TaskDetail["materialBlocker"];
   for (const event of events) {
     if (event.type === "materials.blocked") {
       const detail = event.payload as { code?: string; message?: string };
-      blocker = { message: detail.message ?? detail.code ?? "材料准备被阻塞" };
+      blocker = { message: detail.message ?? detail.code ?? tFor(locale)("材料准备被阻塞") };
     } else blocker = undefined;
   }
   return blocker;
@@ -285,7 +289,7 @@ function assembleTaskDetail(ctx: AccessContext, order: StoredWorkOrder, deps: {
     pauseMinutes: item.pauseMinutes, durationObserved: item.durationObserved,
     ...(item.outcome ? { outcome: item.outcome } : {}), interruptions: item.interruptions
   }));
-  const materialBlocker = materialBlockerFrom(deps.materialEvents);
+  const materialBlocker = materialBlockerFrom(deps.materialEvents, localeFor(ctx));
   const discardReason = discardReasonFrom(order.state, deps.archivedEvents);
 
   return {
@@ -313,8 +317,14 @@ function assembleTaskDetail(ctx: AccessContext, order: StoredWorkOrder, deps: {
 }
 
 /** Two-character words too common to say two texts are about the same thing. */
+/* i18n-ignore-start: words matched against what the person and models wrote */
 const COMMON_BIGRAMS = new Set(["完成", "任务", "进行", "相关", "已经", "需要", "可以", "一个", "一次", "这是", "方向", "主线", "项目", "持续", "推进", "整理",
   "确认", "准备", "内容", "当前", "本人", "通过", "支撑", "达到", "已支", "作为", "后续", "具体"]);
+/* i18n-ignore-end */
+/** English words of three letters or more too common to say two texts are about the same thing (English users write English). */
+const COMMON_WORDS = new Set(["the", "and", "for", "with", "this", "that", "from", "into", "task", "tasks", "work", "project", "track", "goal", "goals",
+  "milestone", "step", "steps", "make", "done", "finish", "complete", "prepare", "review", "write", "draft", "plan", "about", "your", "you", "are", "was",
+  "will", "have", "has", "can", "not", "all", "any", "one", "two", "first", "next", "week", "weekly", "current", "keep", "more", "own"]);
 /**
  * The line's background facts that bear on this task: a fact is kept when it names the course or project, shares a distinctive Latin term
  * or code of three or more characters (ECE, 555, MoS2, SRAM), or shares a two-character Chinese word that is not a common one (论文,
@@ -325,7 +335,7 @@ export function relevantBackground<T extends { value: string; why: string }>(fac
   const squash = (text: string) => text.toLowerCase().replace(/[\s_\-·.]+/g, "");
   const names = about.slice(0, 1).map(squash).filter((name) => name.length >= 3);
   const joined = about.join(" ");
-  const terms = new Set(joined.toLowerCase().match(/[a-z0-9₀-₉]{3,}/g) ?? []);
+  const terms = new Set((joined.toLowerCase().match(/[a-z0-9₀-₉]{3,}/g) ?? []).filter((term) => !COMMON_WORDS.has(term)));
   const bigrams = new Set((joined.match(/[一-鿿]+/g) ?? []).flatMap((run) => Array.from({ length: Math.max(0, run.length - 1) }, (_, i) => run.slice(i, i + 2)))
     .filter((pair) => !COMMON_BIGRAMS.has(pair)));
   return facts.filter((fact) => {
@@ -336,8 +346,8 @@ export function relevantBackground<T extends { value: string; why: string }>(fac
 
 function assembleMilestoneDetail(milestone: StoredMilestone, rationale: string | undefined,
   relatedWorkOrders: MilestoneDetail["relatedWorkOrders"], relatedFlywheel: TaskDetail["relatedFlywheel"],
-  background: StoredBackgroundFact[]): MilestoneDetail {
-  const { label: identityLabel, accent } = identityInfo(milestone.identityId);
+  background: StoredBackgroundFact[], locale?: Locale): MilestoneDetail {
+  const { label: identityLabel, accent } = identityInfo(milestone.identityId, undefined, locale);
   return {
     id: milestone.id, identityId: milestone.identityId, identityLabel, accent, title: milestone.title,
     status: milestone.status, ...(rationale ? { rationale } : {}),
@@ -378,7 +388,7 @@ export function loadTaskDetail(ctx: AccessContext, workOrderId: string): TaskDet
       ? store.listEvents(ctx.workspaceId, { type: "work_order.archived", entityId: workOrderId }) : [],
     relatedFlywheel: flywheelTouching(relations, order.milestoneId, titleOf),
     background: store.getBackgroundFacts(ctx.workspaceId, order.identityId),
-    extras: taskExtras(store, ctx.workspaceId, [order]).get(order.id)!
+    extras: taskExtras(store, ctx.workspaceId, [order], localeFor(ctx)).get(order.id)!
   });
 }
 
@@ -400,7 +410,7 @@ export function loadMilestoneDetail(ctx: AccessContext, milestoneId: string): Mi
     return title;
   };
   return assembleMilestoneDetail(milestone, rationale?.rationale, relatedWorkOrders,
-    flywheelTouching(relations, milestoneId, titleOf), store.getBackgroundFacts(ctx.workspaceId, milestone.identityId));
+    flywheelTouching(relations, milestoneId, titleOf), store.getBackgroundFacts(ctx.workspaceId, milestone.identityId), localeFor(ctx));
 }
 
 /**
@@ -438,7 +448,7 @@ export function loadTaskDetailsBatch(ctx: AccessContext, workOrderIds: string[])
     return facts;
   };
 
-  const extras = taskExtras(store, ctx.workspaceId, orders);
+  const extras = taskExtras(store, ctx.workspaceId, orders, localeFor(ctx));
   for (const order of orders) {
     const milestone = order.milestoneId ? milestoneById.get(order.milestoneId) : undefined;
     result.set(order.id, assembleTaskDetail(ctx, order, { extras: extras.get(order.id)!,
@@ -480,7 +490,7 @@ export function loadMilestoneDetailsBatch(ctx: AccessContext, milestoneIds: stri
     const relatedWorkOrders = (workOrdersByMilestone.get(milestone.id) ?? [])
       .map((order) => ({ id: order.id, intent: order.intent, state: order.state }));
     result.set(milestone.id, assembleMilestoneDetail(milestone, rationale?.rationale, relatedWorkOrders,
-      flywheelTouching(relations, milestone.id, titleOf), backgroundOf(milestone.identityId)));
+      flywheelTouching(relations, milestone.id, titleOf), backgroundOf(milestone.identityId), localeFor(ctx)));
   }
   return result;
 }

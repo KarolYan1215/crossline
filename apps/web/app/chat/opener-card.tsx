@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { blockSpan, hoursText, minutesOfClock, openerAxis, workMinutes, type OpenerBlock, type OpenerView } from "../../lib/opener";
+import { blockSpan, dayLabel, hoursText, minutesOfClock, openerAxis, workMinutes, type OpenerBlock, type OpenerView } from "../../lib/opener";
 import "./opener-card.css";
 import { useLocale, useT } from "../locale-context";
 
@@ -57,9 +57,9 @@ export function OpenerCard({ opener }: { opener: OpenerView }) {
   const ticks: number[] = [];
   for (let minute = Math.ceil(axis.from / 180) * 180; minute <= axis.to; minute += 180) ticks.push(minute);
   const top = opener.asks.top;
-  return <div className="opener-card" aria-label={t("{{day}}的安排", { day: opener.label })}>
+  return <div className="opener-card" aria-label={t("{{day}}的安排", { day: dayLabel(opener.day, locale) })}>
     <div className="opener-head">
-      <b>{opener.label}</b>
+      <b>{dayLabel(opener.day, locale)}</b>
       {opener.asks.count > 0
         ? <a className="opener-badge" href="/approvals" aria-label={t("待决 {{count}} 项", { count: opener.asks.count })}>{t("待决")} <span>{opener.asks.count}</span></a>
         : <span className="opener-badge" data-empty="">{t("没有待决")}</span>}
@@ -74,7 +74,7 @@ export function OpenerCard({ opener }: { opener: OpenerView }) {
         style={{ left: `calc(36px + (100% - 36px) * ${(now - axis.from) / (axis.to - axis.from)})` }} />}
     </div>
     <dl className="opener-facts">
-      <div><dt>{t("工作")}</dt><dd>{opener.work.length ? t("{{count}} 段 · 共 {{hours}}", { count: opener.work.length, hours: hoursText(workMinutes(opener)) }) : t("今天没有排给工作的时段")}
+      <div><dt>{t("工作")}</dt><dd>{opener.work.length ? t("{{count}} 段 · 共 {{hours}}", { count: opener.work.length, hours: hoursText(workMinutes(opener), locale) }) : t("今天没有排给工作的时段")}
         {nextWork && <span className="opener-next">{now === undefined ? t("第一段") : t("接下来")} {nextWork.start} {nextWork.title}{nextWork.step ? ` · ${nextWork.step}` : ""}</span>}</dd></div>
       <div><dt>{t("固定")}</dt><dd>{opener.fixed.length ? opener.fixed.slice(0, 2).map((block) => `${block.start}–${block.end} ${block.title}`).join(locale === "en" ? "; " : "；")
         + (opener.fixed.length > 2 ? t(" 等 {{count}} 项", { count: opener.fixed.length }) : "") : t("今天没有固定安排")}</dd></div>

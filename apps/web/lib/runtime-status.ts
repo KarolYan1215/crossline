@@ -1,5 +1,6 @@
 import type { AccessContext } from "@crossline/core";
 import { requestCodexSupervisor } from "./codex-runtime";
+import { tOf } from "./locale";
 
 /** Why the AI cannot work at all right now, or null when it can. An error to show, not a decision: it is never one of the asks. */
 export type RuntimeStatus = { code: "worker_down" | "signed_out"; title: string; message: string };
@@ -12,7 +13,8 @@ let cached: { workspaceId: string; at: number; status: RuntimeStatus | null } | 
  */
 export async function runtimeStatus(ctx: AccessContext, now = Date.now()): Promise<RuntimeStatus | null> {
   if (process.env.CROSSLINE_E2E_DATA_DIR || process.env.VITEST) return null;
-  if (cached && cached.workspaceId === ctx.workspaceId && now - cached.at < 60_000) return cached.status;
+  // The cache keeps the finding; its words are written in the language of each request.
+  if (cached && cached.workspaceId === ctx.workspaceId && now - cached.at < 60_000) return worded(ctx, cached.status);
   const timeout = new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), 2_500));
   const account = await Promise.race([requestCodexSupervisor<{ account?: unknown }>(ctx, "/v1/codex/account")
     .then((value) => ({ ok: true as const, value })).catch(() => ({ ok: false as const })), timeout]);
@@ -23,5 +25,11 @@ export async function runtimeStatus(ctx: AccessContext, now = Date.now()): Promi
       ? { code: "signed_out", title: "还没有连接 ChatGPT", message: "访谈、自动分析、倒推、材料准备与验收都要用它；用本人的 ChatGPT 账号连接一次即可，约 1 分钟。" }
       : null;
   cached = { workspaceId: ctx.workspaceId, at: now, status };
-  return status;
+  return worded(ctx, status);
+}
+
+function worded(ctx: AccessContext, status: RuntimeStatus | null): RuntimeStatus | null {
+  if (!status) return null;
+  const t = tOf(ctx);
+  return { ...status, title: t(status.title), message: t(status.message) };
 }

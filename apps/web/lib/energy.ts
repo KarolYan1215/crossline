@@ -6,6 +6,8 @@ import {
   type AccessContext, type AvailabilityWindow, type CovariateVerdict, type DailyPhysiology, type InputRhythmBucket, type DayCapacity, type EnergyCalibration, type EnergyLevel, type EnergyPrediction, type EnergySource, type PhoneSleepEvent, type SleepEpisode
 } from "@crossline/core";
 import { effectiveSchedulePreferences, getStore } from "./crossline";
+import { localeFor, tOf } from "./locale";
+import { tFor } from "./i18n";
 
 /** Where a phone's sleep and heart-rate summaries are kept (the last 30 nights), and the hash of the token its shortcut sends. */
 export const HEALTH_SLEEP_SETTING = "health.sleep";
@@ -51,18 +53,19 @@ type Signal = { id: string; label: string; valueAt: (at: string) => number | und
  */
 function optionalSignals(ctx: AccessContext): Signal[] {
   const store = getStore(), ws = ctx.workspaceId;
+  const t = tOf(ctx);
   const signals: Signal[] = [];
   if (store.getSetting(ws, INPUT_RHYTHM_CONSENT) === "granted") {
     const buckets = read(store.getSetting(ws, INPUT_RHYTHM_BUCKETS), [] as InputRhythmBucket[]);
-    signals.push({ id: "input.fragmentation", label: "键鼠停顿", valueAt: (at) => inputRhythmAt(buckets, at)?.fragmentation },
-      { id: "input.pointer", label: "鼠标移动", valueAt: (at) => inputRhythmAt(buckets, at)?.pointerPace });
+    signals.push({ id: "input.fragmentation", label: t("键鼠停顿"), valueAt: (at) => inputRhythmAt(buckets, at)?.fragmentation },
+      { id: "input.pointer", label: t("鼠标移动"), valueAt: (at) => inputRhythmAt(buckets, at)?.pointerPace });
   }
   if (store.getSetting(ws, CAMERA_ENERGY_CONSENT) === "granted") {
     const windows = store.listEnergyObservations(ws).filter((item) => item.source === "camera_aggregate");
     const near = (at: string) => windows.find((item) => item.observedAt <= at && Date.parse(at) - Date.parse(item.observedAt) <= 30 * 60_000);
-    signals.push({ id: "camera.perclos", label: "闭眼比例", valueAt: (at) => near(at)?.aggregate.perclos },
-      { id: "camera.blinks", label: "眨眼频率", valueAt: (at) => near(at)?.aggregate.blinkRate },
-      { id: "camera.pulse", label: "心率", valueAt: (at) => { const item = near(at); return item && (item.aggregate.quality ?? 0) >= 0.4 ? item.aggregate.heartRate : undefined; } });
+    signals.push({ id: "camera.perclos", label: t("闭眼比例"), valueAt: (at) => near(at)?.aggregate.perclos },
+      { id: "camera.blinks", label: t("眨眼频率"), valueAt: (at) => near(at)?.aggregate.blinkRate },
+      { id: "camera.pulse", label: t("心率"), valueAt: (at) => { const item = near(at); return item && (item.aggregate.quality ?? 0) >= 0.4 ? item.aggregate.heartRate : undefined; } });
   }
   return signals;
 }
@@ -73,6 +76,7 @@ function optionalSignals(ctx: AccessContext): Signal[] {
  */
 export function energyModel(ctx: AccessContext, windows: AvailabilityWindow[]): EnergyModel {
   const store = getStore();
+  const locale = localeFor(ctx);
   const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
   const hourOf = (iso: string) => { const [h, m] = formatInTimeZone(new Date(iso), zone, "HH:mm").split(":").map(Number); return (h ?? 0) + (m ?? 0) / 60; };
   const phone = phoneSource(ctx);
@@ -94,7 +98,7 @@ export function energyModel(ctx: AccessContext, windows: AvailabilityWindow[]): 
     return value === undefined ? [] : [{ at: report.observedAt, alertness: value, level: report.level as EnergyLevel, value: signal.valueAt(report.observedAt) }];
   }), calibration) }));
   const predict = (at: string): EnergyPrediction => {
-    const base = predictEnergy(at, episodes, calibration, hourOf, phaseShift);
+    const base = predictEnergy(at, episodes, calibration, hourOf, phaseShift, locale);
     if (base.alertness === undefined) return base;
     let shift = 0;
     const used: string[] = [];
@@ -107,10 +111,10 @@ export function energyModel(ctx: AccessContext, windows: AvailabilityWindow[]): 
     if (!used.length) return base;
     const value = base.alertness + shift;
     const level: EnergyLevel = value < calibration.low ? "low" : value < calibration.high ? "medium" : "high";
-    return { ...base, level, alertness: Math.round(value * 10) / 10, basis: [...base.basis, `按${used.join("、")}修正`] };
+    return { ...base, level, alertness: Math.round(value * 10) / 10, basis: [...base.basis, tFor(locale)("按{{signals}}修正", { signals: used.join(locale === "en" ? ", " : "、") })] };
   };
   return { episodes, calibration, phaseShift, hourOf, lastReportAt, covariates, predict,
-    capacity: (at, day) => dayCapacity(at, day, episodes, phone.physiology?.() ?? []) };
+    capacity: (at, day) => dayCapacity(at, day, episodes, phone.physiology?.() ?? [], locale) };
 }
 
 /** A slot's energy for the scheduler: the model's when it is at least moderately sure, the pattern's otherwise. */

@@ -23,7 +23,7 @@ export function createMilestoneDraft(ctx: AccessContext, input: { lineId: string
  */
 export function mentionKey(text: string): string {
   return text.toLowerCase().replace(/[\s_\-·.,，。、:：;；/\\|()（）[\]【】「」『』"'“”‘’《》<>!?！？#*]+/g, "")
-    .replace(/homework|assignment|hw/g, "作业");
+    .replace(/homework|assignment|hw/g, "作业"); // i18n-ignore: a matching key, never shown
 }
 
 /** Every word of the query appears in one of the texts (in any order); an empty query matches everything. */

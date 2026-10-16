@@ -6,6 +6,8 @@ import { agentAskProgress, urgencyFor, type AccessContext, type AgentChain, type
 import { agentChainsFor, closeAgentTask, listAgentTasks, requestAgentRetry, takeStepBack, type AgentTaskRow } from "@crossline/db";
 import { archiveWorkOrder, getStore } from "./crossline";
 import { CodexSupervisorRequestError, requestCodexSupervisor } from "./codex-runtime";
+import { localeFor, tOf } from "./locale";
+import { tFor, type Translate } from "./i18n";
 
 /**
  * The card for the assistant's work that stopped (`agent_blocked`), built from the same reading of its runs the worker retries from
@@ -24,48 +26,51 @@ function progressRecord(row: AgentTaskRow | undefined, taskId: string): AgentPro
   catch { return { filesChanged: (row?.artifacts ?? []).map((artifact) => artifact.path) }; }
 }
 
-function previewOf(chain: AgentChain, row: AgentTaskRow | undefined): AskPreview {
-  if (row?.partial) return { kind: "agent", href: "/approvals#assistant", label: "查看已写出的文件" };
-  if (chain.latest.workOrderId) return { kind: "agent", href: `/workbench/${encodeURIComponent(chain.latest.workOrderId)}`, label: "查看这件事和助手的进度" };
+function previewOf(t: Translate, chain: AgentChain, row: AgentTaskRow | undefined): AskPreview {
+  if (row?.partial) return { kind: "agent", href: "/approvals#assistant", label: t("查看已写出的文件") };
+  if (chain.latest.workOrderId) return { kind: "agent", href: `/workbench/${encodeURIComponent(chain.latest.workOrderId)}`, label: t("查看这件事和助手的进度") };
   return { kind: "agent", href: chain.latest.taskId.startsWith("grow-") || chain.latest.taskId.startsWith("flow-") ? "/settings#skills" : "/settings#automation",
-    label: "查看助手任务" };
+    label: t("查看助手任务") };
 }
 
 export function agentBlockedAsks(ctx: AccessContext, now: Date, today: string): Ask[] {
   const store = getStore();
+  const locale = localeFor(ctx);
+  const t = tFor(locale);
   const orders = new Map(store.listWorkOrders(ctx.workspaceId).map((order) => [order.id, order]));
   const rows = new Map(listAgentTasks(store, ctx.workspaceId, now).map((row) => [row.taskId, row]));
-  return agentChainsFor(store, ctx.workspaceId, now).filter((chain) => chain.state === "stuck" && chain.failure).map((chain): Ask => {
+  return agentChainsFor(store, ctx.workspaceId, now, locale).filter((chain) => chain.state === "stuck" && chain.failure).map((chain): Ask => {
     const failure = chain.failure!;
     const latest = chain.latest;
     const row = rows.get(latest.taskId);
     const order = orders.get(latest.workOrderId);
     const title = latest.stepId || !order ? latest.title : order.intent;
     const exhausted = failure.kind === "interrupted";
-    const progress = agentAskProgress({ title, failure, record: progressRecord(row, latest.taskId), retries: chain.retries, exhausted });
+    const progress = agentAskProgress({ title, failure, record: progressRecord(row, latest.taskId), retries: chain.retries, exhausted, locale });
     const dueDay = (order?.payload as { dueDate?: string } | undefined)?.dueDate;
-    const why = failure.kind === "interrupted" ? `${progress.stuckAt}。先停下，等本人安排下一步。`
-      : failure.kind === "external" ? `${progress.stuckAt}。不会自动重试：${failure.noRetryWhy}。`
-      : failure.kind === "needs_input" ? `${progress.stuckAt}。需要本人：${progress.needs[0] ?? "补充信息"}。`
-      : `${progress.stuckAt}。${failure.workaround ? `可以换个方法：${failure.workaround}。` : ""}`;
+    const why = failure.kind === "interrupted" ? t("{{stuck}}。先停下，等本人安排下一步。", { stuck: progress.stuckAt })
+      : failure.kind === "external" ? t("{{stuck}}。不会自动重试：{{why}}。", { stuck: progress.stuckAt, why: failure.noRetryWhy })
+      : failure.kind === "needs_input" ? t("{{stuck}}。需要本人：{{needs}}。", { stuck: progress.stuckAt, needs: progress.needs[0] ?? t("补充信息") })
+      : failure.workaround ? t("{{stuck}}。可以换个方法：{{workaround}}。", { stuck: progress.stuckAt, workaround: failure.workaround })
+      : t("{{reason}}。", { reason: progress.stuckAt });
     const options: AskOption[] = [
-      ...(failure.kind === "hard" && failure.workaround ? [{ id: "alternative", label: "换个方法重试", detail: failure.workaround, recommended: true }] : []),
-      { id: "retry", label: failure.external ? "我已处理好，按我的补充重试" : "按我的补充重试", detail: "把下面写的话交给助手，接着已写出的文件做",
+      ...(failure.kind === "hard" && failure.workaround ? [{ id: "alternative", label: t("换个方法重试"), detail: failure.workaround, recommended: true }] : []),
+      { id: "retry", label: failure.external ? t("我已处理好，按我的补充重试") : t("按我的补充重试"), detail: t("把下面写的话交给助手，接着已写出的文件做"),
         ...(failure.kind === "interrupted" || failure.kind === "needs_input" ? { recommended: true } : {}) },
-      { id: "self", label: latest.stepId ? "我自己做这一步" : "我自己做", detail: latest.stepId ? "这一步排进本人的日程，助手不再接手" : "助手不再接手",
+      { id: "self", label: latest.stepId ? t("我自己做这一步") : t("我自己做"), detail: latest.stepId ? t("这一步排进本人的日程，助手不再接手") : t("助手不再接手"),
         ...(failure.kind === "external" ? { recommended: true } : {}) },
-      { id: "drop", label: "不做了", detail: latest.stepId ? "跳过这一步" : latest.workOrderId && !latest.stepId ? "这件事归档" : "不再做这件事" },
-      { id: "look", label: "查看助手做到哪", href: previewOf(chain, row).href }
+      { id: "drop", label: t("不做了"), detail: latest.stepId ? t("跳过这一步") : latest.workOrderId && !latest.stepId ? t("这件事归档") : t("不再做这件事") },
+      { id: "look", label: t("查看助手做到哪"), href: previewOf(t, chain, row).href }
     ];
     return {
       id: `agent:${latest.taskId}`, kind: "agent_blocked", entityId: latest.taskId, urgency: urgencyFor(dueDay, today), ...(dueDay ? { dueDay } : {}),
       ...(order?.identityId ? { line: order.identityId } : {}), raisedAt: latest.endedAt ?? latest.requestedAt,
       fingerprint: `${latest.blockerCode}:${latest.taskId}`, important: true,
-      title: `助手没做成「${short(title)}」`, why, options, preview: previewOf(chain, row), progress,
-      freeText: { placeholder: failure.kind === "external" ? "例如：已在浏览器里完成验证；以后每期只读收藏页第一页"
-        : failure.kind === "needs_input" ? "把助手缺的信息或本人的选择写在这里"
-        : failure.kind === "hard" ? "例如：只整理已有的文件，不再联网"
-        : "可选：补充要求，例如只做第 1–3 讲，资料在哪个文件夹" }
+      title: t("助手没做成「{{title}}」", { title: short(title) }), why, options, preview: previewOf(t, chain, row), progress,
+      freeText: { placeholder: failure.kind === "external" ? t("例如：已在浏览器里完成验证；以后每期只读收藏页第一页")
+        : failure.kind === "needs_input" ? t("把助手缺的信息或本人的选择写在这里")
+        : failure.kind === "hard" ? t("例如：只整理已有的文件，不再联网")
+        : t("可选：补充要求，例如只做第 1–3 讲，资料在哪个文件夹") }
     };
   });
 }
@@ -96,6 +101,7 @@ export async function answerAgentAsk(ctx: AccessContext, ask: Ask, choice: Agent
   const optionId = choice.optionIds[0] ?? (note ? "retry" : "");
   if (optionId === "retry" || optionId === "alternative") {
     const workaround = ask.options.find((option) => option.id === "alternative")?.detail;
+    // i18n-ignore: instructions for the assistant's next run (model context)
     const words = [optionId === "alternative" && workaround ? `换个方法：${workaround}` : "", note].filter(Boolean).join("\n");
     return askForRetry(ctx, taskId, words);
   }
@@ -109,7 +115,7 @@ export async function answerAgentAsk(ctx: AccessContext, ask: Ask, choice: Agent
       try { store.updateStepProgress(ctx.workspaceId, task.workOrderId, task.stepId, { status: "skipped" }, ctx.principalId, "person"); } catch { /* replanned away */ }
     } else if (task.workOrderId) {
       const order = store.listWorkOrders(ctx.workspaceId).find((item) => item.id === task.workOrderId);
-      if (order && order.state !== "archived" && order.state !== "accepted") archiveWorkOrder(ctx, order.id, note || "本人决定不做了（助手没做成）");
+      if (order && order.state !== "archived" && order.state !== "accepted") archiveWorkOrder(ctx, order.id, note || tOf(ctx)("本人决定不做了（助手没做成）"));
     }
     closeAgentTask(store, ctx.workspaceId, taskId, "drop");
     return { ok: true };

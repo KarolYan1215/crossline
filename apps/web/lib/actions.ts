@@ -19,6 +19,7 @@ import { createMilestoneDraft } from "./input";
 import { addLine, identityLines, lineLabels, updateLine } from "./lines";
 import { applyTaskOp, recordEnergy } from "./task-ops";
 import { undoOp, withUndo } from "./undo";
+import { localeFor, tOf } from "./locale";
 
 /** What carrying out one action did: `message` is shown on the card; `opId` is what the card's 撤销 takes back. */
 export type ActionOutcome = { ok: true; message: string; opId?: string; href?: string } | { ok: false; message: string };
@@ -36,17 +37,19 @@ export const ACTION_HANDLERS: { [K in ActionId]: Handler<K> } = {
     const labels = lineLabels(ctx);
     const milestone = args.milestoneId ? getStore().listMilestones(ctx.workspaceId).find((item) => item.id === args.milestoneId) : undefined;
     // The light card's fields reach the analysis as context; it still decides the line, the estimate and the steps.
+    // i18n-ignore-start: context for the analysis model
     const hints = [args.lineId ? `主线：${labels[args.lineId] ?? args.lineId}` : "", args.dueDate ? `截止：${args.dueDate}` : "",
       milestone ? `关联里程碑：${milestone.title}` : ""].filter(Boolean).join("；");
+    // i18n-ignore-end
     const id = randomUUID();
     addCapturedTaskWithId(ctx, { title: args.title.trim().slice(0, 240), context: [args.context.trim(), hints].filter(Boolean).join("\n").slice(0, 500) }, id, id);
     analyzeNewCapturesInBackground(ctx);
     // No approved milestone is needed any more: the analysis files the task under its line unbound, so a new account's first task is
     // analysed and scheduled on its first day.
-    return { ok: true, message: "已收集，正在分析估时与步骤", href: "/workbench" };
+    return { ok: true, message: tOf(ctx)("已收集，正在分析估时与步骤"), href: "/workbench" };
   },
   // The note is the conversation's own message, searchable from the box; nothing else is written.
-  "note.add": () => ({ ok: true, message: "已记下，可在对话记录中搜索" }),
+  "note.add": (ctx) => ({ ok: true, message: tOf(ctx)("已记下，可在对话记录中搜索") }),
   "task.op": async (ctx, args) => {
     const result = await applyTaskOp(ctx, args.workOrderId, { ...args, summary: "" });
     return result.ok ? { ok: true, href: `/workbench/${encodeURIComponent(args.workOrderId)}` } : result;
@@ -55,7 +58,7 @@ export const ACTION_HANDLERS: { [K in ActionId]: Handler<K> } = {
   "ask.snooze": (ctx, args) => snoozeAsk(ctx, args.askId, args.until),
   "undo": (ctx, args) => {
     const result = undoOp(ctx, args.opId);
-    return result.ok ? { ok: true, message: `已撤销：${result.label}` } : result;
+    return result.ok ? { ok: true, message: tOf(ctx)("已撤销：{{label}}", { label: result.label }) } : result;
   },
   "energy.report": (ctx, args) => recordEnergy(ctx, args.level, args.note),
   // 「后面都推 10 分钟」: today's plan starts later; started and locked blocks stay. Undone like any `schedule.` setting.
@@ -67,33 +70,35 @@ export const ACTION_HANDLERS: { [K in ActionId]: Handler<K> } = {
     const result = await scheduleEvent(ctx, { title: args.title, lineId: args.lineId, date: args.date, weekdays: args.weekdays, startTime: args.startTime,
       endTime: args.endTime, until: args.until, minutes: args.minutes > 0 ? args.minutes : 60, location: args.location });
     if (!result.ok) return { ok: false, code: result.code, message: result.message };
-    return { ok: true, href: "/plan", message: `${describeEvent(result.event)}${result.placedBySystem ? "（系统选定的空档）" : ""}${result.moved ? ` · 重排了 ${result.moved} 个冲突的任务块` : ""}` };
+    const t = tOf(ctx);
+    return { ok: true, href: "/plan", message: describeEvent(result.event, localeFor(ctx)) + (result.placedBySystem ? t("（系统选定的空档）") : "")
+      + (result.moved ? t(" · 重排了 {{count}} 个冲突的任务块", { count: result.moved }) : "") };
   },
   "goal.add": (ctx, args) => {
     const line = identityLines(ctx).find((pack) => pack.id === args.lineId);
     if (!line) return { ok: false, code: "LINE_NOT_FOUND" };
     const goals = line.goals ?? [];
-    return goals.includes(args.title) ? { ok: true, message: "这个长期目标已在" } : { ...updateLine(ctx, args.lineId, { goals: [...goals, args.title] }), href: "/milestones" };
+    return goals.includes(args.title) ? { ok: true, message: tOf(ctx)("这个长期目标已在") } : { ...updateLine(ctx, args.lineId, { goals: [...goals, args.title] }), href: "/milestones" };
   },
   "milestone.draft": (ctx, args) => {
     const result = createMilestoneDraft(ctx, { lineId: args.lineId, title: args.title, date: args.date, target: args.target });
-    return result.ok ? { ok: true, message: "草稿已建立，在主线页批准", href: `/milestones?open=${encodeURIComponent(result.id)}` } : result;
+    return result.ok ? { ok: true, message: tOf(ctx)("草稿已建立，在主线页批准"), href: `/milestones?open=${encodeURIComponent(result.id)}` } : result;
   },
   "line.add": (ctx, args) => {
     const result = addLine(ctx, { label: args.label, goal: "" });
-    return result.ok ? { ok: true, message: "这条主线的访谈可以开始了", href: `/onboarding?line=${encodeURIComponent(result.id)}` } : result;
+    return result.ok ? { ok: true, message: tOf(ctx)("这条主线的访谈可以开始了"), href: `/onboarding?line=${encodeURIComponent(result.id)}` } : result;
   },
   "profile.tell": (ctx, args) => {
     // About one line (said on its card or page): that line's own interview, the same session its card and /onboarding?line= use.
     const line = args.lineId ? identityLines(ctx).find((pack) => pack.id === args.lineId) : undefined;
     if (args.lineId && !line) return { ok: false, code: "LINE_NOT_FOUND" };
     const session = line ? { id: `line-${line.id}` } : getStore().getLatestOnboardingSession(ctx.workspaceId);
-    if (!session) return { ok: false, code: "INTERVIEW_NOT_STARTED", message: "还没有访谈，先在画像页开始访谈" };
+    if (!session) return { ok: false, code: "INTERVIEW_NOT_STARTED", message: tOf(ctx)("还没有访谈，先在画像页开始访谈") };
     // The interview takes it as the person's reply, with its own instructions and everything it knows of them.
     void requestCodexSupervisor(ctx, "/v1/onboarding/turn", { method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ sessionId: session.id, text: args.text }), signal: AbortSignal.timeout(3 * 60 * 60_000) }).catch(() => undefined);
-    return line ? { ok: true, message: `已交给「${line.label}」的访谈，主线卡片随后更新`, href: `/milestones?line=${encodeURIComponent(line.id)}` }
-      : { ok: true, message: "已交给访谈，画像随后更新", href: "/onboarding" };
+    return line ? { ok: true, message: tOf(ctx)("已交给「{{line}}」的访谈，主线卡片随后更新", { line: line.label }), href: `/milestones?line=${encodeURIComponent(line.id)}` }
+      : { ok: true, message: tOf(ctx)("已交给访谈，画像随后更新"), href: "/onboarding" };
   },
   "workflow.request": (ctx, args) => {
     // The assistant grows it into a workflow on the worker's next pass (docs/skills-library.md §6) and says so when it is ready.
@@ -103,18 +108,19 @@ export const ACTION_HANDLERS: { [K in ActionId]: Handler<K> } = {
     if (args.reminder.trim() && args.time) {
       const record = createReminderWorkflow(getStore(), ctx.workspaceId,
         { text: args.text, reminder: args.reminder.trim(), time: args.time, weekdays: args.weekdays, lineId: line?.id ?? "" });
-      return { ok: true, message: `已设好：${scheduleLabel(record.manifest.schedule)}提醒「${args.reminder.trim()}」`, href: "/settings#skills" };
+      return { ok: true, message: tOf(ctx)("已设好：{{when}}提醒「{{reminder}}」", { when: scheduleLabel(record.manifest.schedule, localeFor(ctx)), reminder: args.reminder.trim() }),
+        href: "/settings#skills" };
     }
     // No line, no guess: the first line is not a default (a media request filed under research was grown in research's way).
     const target = line;
-    if (!target) return { ok: false, code: "LINE_REQUIRED", message: "请说明这件事服务哪条主线" };
+    if (!target) return { ok: false, code: "LINE_REQUIRED", message: tOf(ctx)("请说明这件事服务哪条主线") };
     requestWorkflow(getStore(), ctx.workspaceId, args.text, target.id, ctx.principalId);
     // Grown now, not at the worker's next tick; a worker that is down picks it up when it is back.
     void requestCodexSupervisor(ctx, "/v1/workflows/grow", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }).catch(() => undefined);
-    return { ok: true, message: "已交给助手建成工作流，建好后会通知；发出、发布一类的步骤仍由本人完成", href: "/settings#skills" };
+    return { ok: true, message: tOf(ctx)("已交给助手建成工作流，建好后会通知；发出、发布一类的步骤仍由本人完成"), href: "/settings#skills" };
   },
   "proposal.decide": (ctx, args) => {
-    if (args.decision !== "approve") return archiveWorkOrder(ctx, args.workOrderId, args.reason.trim() || "在输入框中拒绝");
+    if (args.decision !== "approve") return archiveWorkOrder(ctx, args.workOrderId, args.reason.trim() || tOf(ctx)("在输入框中拒绝"));
     const result = approveWorkOrderProposal(ctx, args.workOrderId);
     if (result.ok) requestTaskPass(ctx);
     return result;
@@ -122,7 +128,9 @@ export const ACTION_HANDLERS: { [K in ActionId]: Handler<K> } = {
   "milestones.decide": (ctx, args) => {
     const result = (args.decision === "approve" ? approveMilestoneDrafts : rejectMilestoneDrafts)(ctx, args.milestoneIds);
     if (!result.approved.length) return { ok: false, code: result.skipped[0]?.code ?? "MILESTONE_NOT_DRAFT" };
-    return { ok: true, message: `${args.decision === "approve" ? "已批准" : "已撤下"} ${result.approved.length} 个${result.skipped.length ? `，${result.skipped.length} 个未处理` : ""}`, href: "/milestones" };
+    const t = tOf(ctx);
+    const done = t(args.decision === "approve" ? "已批准 {{count}} 个" : "已撤下 {{count}} 个", { count: result.approved.length });
+    return { ok: true, message: done + (result.skipped.length ? t("，{{count}} 个未处理", { count: result.skipped.length }) : ""), href: "/milestones" };
   },
   "agent_result.review": (ctx, args) => {
     const result = reviewAgentTask(getStore(), ctx.workspaceId, args.taskId, args.decision, args.note);
@@ -136,16 +144,17 @@ export const ACTION_HANDLERS: { [K in ActionId]: Handler<K> } = {
     if (!doc) return { ok: false, code: "DOCUMENT_NOT_FOUND" };
     if (args.projectId && doc.projectId !== args.projectId) fileUnder(ctx, doc.id, args.projectId);
     const session = getStore().getLatestOnboardingSession(ctx.workspaceId);
-    if (!session) return { ok: false, code: "INTERVIEW_NOT_STARTED", message: "还没有访谈；先在画像页开始访谈，日期由访谈读取" };
+    if (!session) return { ok: false, code: "INTERVIEW_NOT_STARTED", message: tOf(ctx)("还没有访谈；先在画像页开始访谈，日期由访谈读取") };
     void requestCodexSupervisor(ctx, "/v1/onboarding/turn", { method: "POST", headers: { "content-type": "application/json" },
+      // i18n-ignore: a reply to the interview model
       body: JSON.stringify({ sessionId: session.id, text: `我在输入框添加了文件《${doc.fileName}》。请只整理其中的日期（上课、作业、测验、考试、项目）。` }),
       signal: AbortSignal.timeout(3 * 60 * 60_000) }).catch(() => undefined);
-    return { ok: true, message: "已交给访谈读取日期，几分钟后在「待确认 · 文件中的日期」确认", href: "/approvals" };
+    return { ok: true, message: tOf(ctx)("已交给访谈读取日期，几分钟后在「待确认 · 文件中的日期」确认"), href: "/approvals" };
   },
   "material.file": (ctx, args) => {
     if (!findDoc(ctx, args.documentId)) return { ok: false, code: "DOCUMENT_NOT_FOUND" };
     fileUnder(ctx, args.documentId, args.projectId);
-    return { ok: true, message: "已归入项目；该项目的任务会读到它" };
+    return { ok: true, message: tOf(ctx)("已归入项目；该项目的任务会读到它") };
   },
   // Material for a task: filed under the task's project (which is how plans and the assistant find a task's files) and the steps
   // re-planned against it, because a plan rests on the person's own material.
@@ -156,9 +165,10 @@ export const ACTION_HANDLERS: { [K in ActionId]: Handler<K> } = {
     if (!doc || !order) return { ok: false, code: doc ? "WORK_ORDER_NOT_FOUND" : "DOCUMENT_NOT_FOUND" };
     if (order.projectId && doc.projectId !== order.projectId) fileUnder(ctx, doc.id, order.projectId);
     store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `task.note:${order.id}:${randomUUID()}`, type: "task.note",
-      entityId: order.id, payload: { text: `添加材料《${doc.fileName}》`, kind: "material", documentId: doc.id } });
+      entityId: order.id, payload: { text: tOf(ctx)("添加材料《{{name}}》", { name: doc.fileName }), kind: "material", documentId: doc.id } });
+    // i18n-ignore: feedback for the step planner (model context)
     if (store.getStepPlan(ctx.workspaceId, order.id)) requestStepReplan(ctx, order.id, `新增材料《${doc.fileName}》，按其内容核对并调整步骤`);
-    return { ok: true, message: "已挂到任务，步骤将按新材料重新安排", href: `/workbench/${encodeURIComponent(order.id)}` };
+    return { ok: true, message: tOf(ctx)("已挂到任务，步骤将按新材料重新安排"), href: `/workbench/${encodeURIComponent(order.id)}` };
   },
   // A finished piece handed in: the task is started if it was not, and completed with the files as its evidence. A PDF or Word file is
   // handed in with its text beside it, because the gate can quote only text.
@@ -174,7 +184,7 @@ export const ACTION_HANDLERS: { [K in ActionId]: Handler<K> } = {
       if ((doc.kind === "pdf" || doc.kind === "docx") && doc.extractionStatus === "done" && doc.extractedText.trim()) {
         const text = `${fileURLToPath(doc.uri).replace(/\.[a-z]+$/i, "")}.extracted.txt`;
         writeFileSync(text, doc.extractedText, "utf8");
-        evidence.push({ kind: "file", uri: pathToFileURL(text).href, description: `${doc.fileName}（文本）`.slice(0, 500) });
+        evidence.push({ kind: "file", uri: pathToFileURL(text).href, description: tOf(ctx)("{{name}}（文本）", { name: doc.fileName }).slice(0, 500) });
       }
     }
     if (args.note.trim()) evidence.push({ kind: "record", uri: `note:${order.id}`, description: args.note.trim().slice(0, 500) });
@@ -183,7 +193,7 @@ export const ACTION_HANDLERS: { [K in ActionId]: Handler<K> } = {
       if (!started.ok) return started;
     }
     const done = completeWorkOrderExecution(ctx, order.id, evidence);
-    return done.ok ? { ok: true, message: "已提交，等待验收", href: `/workbench/${encodeURIComponent(order.id)}` } : done;
+    return done.ok ? { ok: true, message: tOf(ctx)("已提交，等待验收"), href: `/workbench/${encodeURIComponent(order.id)}` } : done;
   },
   // A file the box wrote for a task (a script, a table, notes): kept as one of the person's materials under the task's project.
   "material.save": (ctx, args) => {
@@ -193,14 +203,14 @@ export const ACTION_HANDLERS: { [K in ActionId]: Handler<K> } = {
     if (!saved.ok) return { ok: false, code: saved.code, message: saved.message };
     const doc = saved.documents[0]!;
     getStore().setSourceDocumentExtraction(ctx.workspaceId, doc.id, { status: "done", text: args.content });
-    return { ok: true, message: `已保存为《${args.fileName}》`, href: `/api/source-documents/${encodeURIComponent(doc.id)}/file` };
+    return { ok: true, message: tOf(ctx)("已保存为《{{name}}》", { name: args.fileName }), href: `/api/source-documents/${encodeURIComponent(doc.id)}/file` };
   },
   "template.add": (ctx, args) => {
     const criteria = args.criteria.map(templateCriterion);
-    if (criteria.some((item) => !item)) return { ok: false, code: "TEMPLATE_CRITERIA_INCOMPLETE", message: "有标准缺少衡量方式（单位、数值、产出物或判定规则）" };
+    if (criteria.some((item) => !item)) return { ok: false, code: "TEMPLATE_CRITERIA_INCOMPLETE", message: tOf(ctx)("有标准缺少衡量方式（单位、数值、产出物或判定规则）") };
     const result = saveMilestoneTemplate(ctx, { identityId: args.lineId, kind: args.kind, titleHint: args.titleHint,
       successCriteriaDefaults: criteria as NonNullable<(typeof criteria)[number]>[] });
-    return result.ok ? { ok: true, message: "模板已添加，新建里程碑时可选", href: "/milestones" } : result;
+    return result.ok ? { ok: true, message: tOf(ctx)("模板已添加，新建里程碑时可选"), href: "/milestones" } : result;
   }
 };
 
@@ -224,13 +234,14 @@ const FAILURE: Record<string, string> = {
 /** Carries out one confirmed action. Everything except an undo is recorded for 撤销; a failure changes nothing and says why. */
 export async function executeAction(ctx: AccessContext, item: ProposedAction): Promise<ActionOutcome> {
   const handler = ACTION_HANDLERS[item.action] as Handler<ActionId>;
-  const label = `${ACTIONS[item.action].label}：${item.summary || ""}`.slice(0, 160);
+  const t = tOf(ctx);
+  const label = t("{{label}}：{{title}}", { label: t(ACTIONS[item.action].label), title: item.summary || "" }).slice(0, 160);
   try {
     const result = item.action === "undo" ? await handler(ctx, item.args) : await withUndo(ctx, label, () => handler(ctx, item.args));
-    if (!result.ok) return { ok: false, message: result.message ?? FAILURE[result.code] ?? `未完成（${result.code}）` };
+    if (!result.ok) return { ok: false, message: result.message ?? (FAILURE[result.code] ? t(FAILURE[result.code]!) : t("未完成（{{code}}）", { code: result.code })) };
     const op = "op" in result ? (result as { op?: { id: string } }).op : undefined;
-    return { ok: true, message: result.message ?? "已完成", ...(op ? { opId: op.id } : {}), ...(result.href ? { href: result.href } : {}) };
+    return { ok: true, message: result.message ?? t("已完成"), ...(op ? { opId: op.id } : {}), ...(result.href ? { href: result.href } : {}) };
   } catch (error) {
-    return { ok: false, message: error instanceof Error && FAILURE[error.message] ? FAILURE[error.message]! : "未完成，请重试" };
+    return { ok: false, message: error instanceof Error && FAILURE[error.message] ? t(FAILURE[error.message]!) : t("未完成，请重试") };
   }
 }

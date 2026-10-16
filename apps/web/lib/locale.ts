@@ -16,7 +16,9 @@ export const getLocale = cache(async (): Promise<Locale> => {
 
 /** The language for text built for this context: the request's, else (a job's context) the workspace's setting. */
 export function localeFor(ctx: AccessContext): Locale {
-  return ctx.locale ?? readLocale(getStore(), ctx.workspaceId);
+  if (ctx.locale) return ctx.locale;
+  // A store that cannot say (a test's stand-in) reads as the default language.
+  try { return readLocale(getStore(), ctx.workspaceId); } catch { return DEFAULT_LOCALE; }
 }
 
 /** `const t = tOf(ctx); t("待确认")` in server code. */

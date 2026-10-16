@@ -2,6 +2,7 @@ import "server-only";
 import { createHash, randomUUID } from "node:crypto";
 import { autoApprovalEligible, type AccessContext } from "@crossline/core";
 import { ensureSeeded, getStore } from "./crossline";
+import { localeFor, tOf } from "./locale";
 
 const MODE_KEY = "permission.mode";
 const WAIT_MS = 5 * 60_000;
@@ -43,14 +44,15 @@ function readTimer(ctx: AccessContext, key: string): Timer {
 export function permissionCandidates(ctx: AccessContext): PermissionCandidate[] {
   ensureSeeded(ctx);
   const store = getStore();
+  const t = tOf(ctx);
   const orders = store.listWorkOrders(ctx.workspaceId).filter((order) => order.state === "awaiting_plan_approval")
     .map((order) => {
       // The same rule the worker applies the moment a proposal is written (`autoApprovalEligible`): two
       // rules for "may this go ahead without a click" would disagree about the same card.
-      const eligible = autoApprovalEligible(order).eligible;
+      const eligible = autoApprovalEligible(order, { locale: localeFor(ctx) }).eligible;
       const key = keyOf("work_order", order.id, order);
       return { key, kind: "work_order" as const, id: order.id, title: order.intent, eligible,
-        reason: eligible ? "普通本地作业，可在前台满 5 分钟后默认批准" : "风险或外部动作需要明确批准",
+        reason: eligible ? t("普通本地作业，可在前台满 5 分钟后默认批准") : t("风险或外部动作需要明确批准"),
         elapsedMs: readTimer(ctx, key).elapsedMs };
     });
   const decided = new Set(store.listEvents(ctx.workspaceId, { type: ["insight.approved", "insight.rejected"] })
@@ -62,8 +64,8 @@ export function permissionCandidates(ctx: AccessContext): PermissionCandidate[] 
         && finding.staleWhen?.trim() && store.listMilestones(ctx.workspaceId)
           .some((milestone) => milestone.id === finding.milestoneId && milestone.status === "approved"));
       const key = keyOf("insight", event.eventId, event.payload);
-      return { key, kind: "insight" as const, id: event.eventId, title: finding.summary ?? "未命名洞察",
-        eligible, reason: eligible ? "有来源、失效条件且可撤销的洞察补丁" : "来源或目标不足，须明确核对",
+      return { key, kind: "insight" as const, id: event.eventId, title: finding.summary ?? t("未命名洞察"),
+        eligible, reason: eligible ? t("有来源、失效条件且可撤销的洞察补丁") : t("来源或目标不足，须明确核对"),
         elapsedMs: readTimer(ctx, key).elapsedMs };
     });
   return [...orders, ...insights];

@@ -2,6 +2,8 @@ import "server-only";
 import { OUTCOME_LEVELS, outcomeCriteriaVerdict, taskTitleOf, type AccessContext, type Ask, type AskOption, type NudgeInput } from "@crossline/core";
 import { getStore } from "./crossline";
 import type { PendingAssessment } from "./crossline";
+import { localeFor } from "./locale";
+import { tFor, type Translate } from "./i18n";
 
 /**
  * Following up finished work whose result was not known when it was finished (the owner's decision of 2026-10-15; `completion.ts` in
@@ -38,40 +40,43 @@ export function openAssessments(ctx: AccessContext): Pending[] {
   });
 }
 
-const laterOption: AskOption = { id: "later", label: "结果还没出来", detail: "到那天再问",
-  fields: [{ id: "date", label: "预计哪天知道结果", kind: "date", required: true }] };
-const stopOption: AskOption = { id: "stop", label: "不再跟进", detail: "任务保持已验收，不记完成情况" };
+const laterOption = (t: Translate): AskOption => ({ id: "later", label: t("结果还没出来"), detail: t("到那天再问"),
+  fields: [{ id: "date", label: t("预计哪天知道结果"), kind: "date", required: true }] });
+const stopOption = (t: Translate): AskOption => ({ id: "stop", label: t("不再跟进"), detail: t("任务保持已验收，不记完成情况") });
 
 /** The asks: only those due now (a deferred one stays out until its day). */
 export function outcomeAsks(ctx: AccessContext, now: Date): Ask[] {
   const store = getStore();
+  const locale = localeFor(ctx);
+  const t = tFor(locale);
   const orders = new Map(store.listWorkOrders(ctx.workspaceId).map((order) => [order.id, order]));
   return openAssessments(ctx).filter((item) => Date.parse(item.askAfter) <= now.getTime()).flatMap((item): Ask[] => {
     const order = orders.get(item.orderId);
     if (!order) return [];
     const scored = item.pending.reason === "result_pending";
     const options: AskOption[] = scored
-      ? [{ id: "result", label: "结果已出", recommended: true, fields: [{ id: "score", label: "成绩或结果", kind: "text", required: true, placeholder: "例如：92/100，或「已录用」" }] }, laterOption, stopOption]
-      : [...OUTCOME_LEVELS.map((level, index) => ({ id: level.id, label: level.label, ...(index === 0 ? { recommended: true } : {}),
-        fields: [{ id: "note", label: "一句话", kind: "text" as const, required: false, placeholder: "可不填" }] })), { ...laterOption, label: "还说不准" }, stopOption];
+      ? [{ id: "result", label: t("结果已出"), recommended: true, fields: [{ id: "score", label: t("成绩或结果"), kind: "text", required: true, placeholder: t("例如：92/100，或「已录用」") }] }, laterOption(t), stopOption(t)]
+      : [...OUTCOME_LEVELS.map((level, index) => ({ id: level.id, label: t(level.label), ...(index === 0 ? { recommended: true } : {}),
+        fields: [{ id: "note", label: t("一句话"), kind: "text" as const, required: false, placeholder: t("可不填") }] })), { ...laterOption(t), label: t("还说不准") }, stopOption(t)];
     return [{ id: `outcome:${item.orderId}:${item.eventId}`, kind: "outcome_check", entityId: item.orderId, line: order.identityId,
       urgency: "later", raisedAt: item.raisedAt, fingerprint: `${item.eventId}:${item.askAfter}`,
-      title: item.pending.question || `「${short(taskTitleOf(order))}」完成得怎么样？`,
-      why: scored ? "任务已验收。成绩或结果出来后记入里程碑进度；还没出来就说哪天出，到那天再问。"
-        : "任务已验收。完成情况记入任务记录，帮助之后的安排；不必回答也不影响任何事。",
-      freeText: { placeholder: scored ? "例如：92 分；或「下周三出成绩」" : "用一句话说说完成情况" },
-      preview: { kind: "task", href: `/workbench/${encodeURIComponent(order.id)}`, label: "看任务" }, options }];
+      title: item.pending.question || t("「{{title}}」完成得怎么样？", { title: short(taskTitleOf(order)) }),
+      why: scored ? t("任务已验收。成绩或结果出来后记入里程碑进度；还没出来就说哪天出，到那天再问。")
+        : t("任务已验收。完成情况记入任务记录，帮助之后的安排；不必回答也不影响任何事。"),
+      freeText: { placeholder: scored ? t("例如：92 分；或「下周三出成绩」") : t("用一句话说说完成情况") },
+      preview: { kind: "task", href: `/workbench/${encodeURIComponent(order.id)}`, label: t("看任务") }, options }];
   });
 }
 
 /** What the nudge pass offers the 小帮手: due follow-ups with the buttons that answer them in one tap. */
 export function outcomeNudgeInputs(ctx: AccessContext, now: Date): NonNullable<NudgeInput["outcomes"]> {
+  const t = tFor(localeFor(ctx));
   return outcomeAsks(ctx, now).map((ask) => {
     const scored = ask.options.some((option) => option.id === "result");
     return { askId: ask.id, orderId: ask.entityId, question: ask.title, fingerprint: ask.fingerprint,
       // A score and a date need words, so for a score the buttons are only a cue to type.
-      options: scored ? [] : OUTCOME_LEVELS.map((level) => ({ id: level.id, label: level.label })),
-      laterLabel: scored ? "说一下成绩，或哪天出结果" : "还说不准，说个日期" };
+      options: scored ? [] : OUTCOME_LEVELS.map((level) => ({ id: level.id, label: t(level.label) })),
+      laterLabel: scored ? t("说一下成绩，或哪天出结果") : t("还说不准，说个日期") };
   });
 }
 
@@ -94,7 +99,7 @@ export function answerOutcome(ctx: AccessContext, ask: Ask, optionId: string, va
   write("assessment.answered", { level, score, note: (values.note ?? note ?? "").trim().slice(0, 300) });
   // A score against the milestone's one threshold is progress on the milestone, recorded the way the gate records it.
   const milestone = order.milestoneId ? store.listMilestones(ctx.workspaceId).filter((item) => item.id === order.milestoneId && item.status === "approved").at(-1) : undefined;
-  const readings = milestone && score ? outcomeCriteriaVerdict(milestone.successCriteria, score) : [];
+  const readings = milestone && score ? outcomeCriteriaVerdict(milestone.successCriteria, score, localeFor(ctx)) : [];
   if (milestone && readings.length) store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId,
     idempotencyKey: `milestone_gate.judged:outcome:${pendingEventId}`, type: "milestone_gate.judged", entityId: order.id,
     payload: { milestoneId: milestone.id, milestoneVersion: milestone.version, verdict: readings.every((item) => item.met === "met") ? "pass" : "partial",

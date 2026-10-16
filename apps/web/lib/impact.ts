@@ -6,6 +6,7 @@ import { effectiveSchedulePreferences, getStore, loadCurrentPlan, loadGoalForeca
 import { lineLabels } from "./lines";
 import { loadForecastCharts } from "./plan-board";
 import type { ForecastCharts } from "./plan-stats";
+import { tOf } from "./locale";
 
 /**
  * What a change does across the lines before it is made (decided 2026-10-07: every change is previewed, then applied). The schedule and
@@ -148,7 +149,7 @@ export function applyChange(ctx: AccessContext, requested: Change): { ok: true }
     const saved = saveGoalSettings(ctx, change.milestoneId, { weight: change.weight });
     const milestone = store.listMilestones(ctx.workspaceId).filter((item) => item.id === change.milestoneId).at(-1);
     if (saved.ok && milestone) store.addPreference({ workspaceId: ctx.workspaceId, source: "importance", scope: milestone.identityId, weight: 0.5,
-      refId: milestone.id, text: `里程碑「${milestone.title}」重要性由本人设为 ${change.weight}` });
+      refId: milestone.id, text: tOf(ctx)("里程碑「{{title}}」重要性由本人设为 {{weight}}", { title: milestone.title, weight: change.weight }) });
     return saved;
   }
   const order = store.listWorkOrders(ctx.workspaceId).find((item) => item.id === change.workOrderId);
@@ -192,6 +193,7 @@ export function applyChange(ctx: AccessContext, requested: Change): { ok: true }
   // A manual edit is a weak signal next to measured time (which calibration learns from), so it is recorded with a low weight.
   const step = change.stepId ? store.getStepPlan(ctx.workspaceId, order.id)?.steps.find((item) => item.id === change.stepId) : undefined;
   store.addPreference({ workspaceId: ctx.workspaceId, source: "estimate", scope: order.identityId, weight: 0.3, refId: `${order.id}:${change.stepId ?? ""}`,
-    text: `任务「${order.intent}」${step ? `的步骤「${step.title}」` : ""}估时由本人改为 ${minutes} 分钟` });
+    text: step ? tOf(ctx)("任务「{{task}}」的步骤「{{step}}」估时由本人改为 {{minutes}} 分钟", { task: order.intent, step: step.title, minutes })
+      : tOf(ctx)("任务「{{task}}」估时由本人改为 {{minutes}} 分钟", { task: order.intent, minutes }) });
   return { ok: true };
 }

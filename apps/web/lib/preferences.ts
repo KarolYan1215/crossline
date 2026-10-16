@@ -2,6 +2,7 @@ import "server-only";
 import type { AccessContext } from "@crossline/core";
 import { getStore } from "./crossline";
 import { lineLabels } from "./lines";
+import { tOf } from "./locale";
 
 /** How often the archetype curator looks for new task archetypes from this person's history: off, every two weeks, or monthly. */
 export const ARCHETYPE_CURATION_PERIOD = "archetypes.curation.period";
@@ -15,9 +16,11 @@ export type PreferenceRow = { id: string; source: string; sourceLabel: string; s
 /** What the system has learned about how this person works, newest first, as the settings module lists it. */
 export function loadPreferences(ctx: AccessContext): { rows: PreferenceRow[]; period: CurationPeriod; learned: Array<{ id: string; label: string; source: string }> } {
   const store = getStore();
+  const t = tOf(ctx);
   const labels = new Map(Object.entries(lineLabels(ctx)));
-  const rows = store.listPreferences(ctx.workspaceId).map((entry) => ({ id: entry.id, source: entry.source, sourceLabel: SOURCE_LABEL[entry.source] ?? entry.source,
-    scopeLabel: entry.scope === "all" ? "全部" : entry.scope.startsWith("task:") ? "单个任务" : entry.scope.startsWith("archetype:") ? "任务原型" : labels.get(entry.scope) ?? entry.scope,
+  const rows = store.listPreferences(ctx.workspaceId).map((entry) => ({ id: entry.id, source: entry.source, sourceLabel: SOURCE_LABEL[entry.source] ? t(SOURCE_LABEL[entry.source]!) : entry.source,
+    scopeLabel: entry.scope === "all" ? t("全部") : entry.scope.startsWith("task:") ? t("单个任务") : entry.scope.startsWith("archetype:") ? t("任务原型")
+      : labels.has(entry.scope) ? t(labels.get(entry.scope)!) : entry.scope,
     ...(labels.has(entry.scope) ? { line: entry.scope } : {}), text: entry.text, day: entry.createdAt.slice(5, 10).replace("-", "/") }));
   const period = store.getSetting(ctx.workspaceId, ARCHETYPE_CURATION_PERIOD);
   const learned = store.listLearnedArchetypes(ctx.workspaceId).map((row) => ({ id: row.id, label: row.label,
