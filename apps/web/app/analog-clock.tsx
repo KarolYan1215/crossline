@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { useT } from "./locale-context";
 
 /**
  * The day head's clock.
@@ -14,6 +15,7 @@ import { useEffect, useState } from "react";
  * and there is no second hand, so the snapshot stays reproducible.
  */
 export function AnalogClock({ nowIso, timeZone, fixed }: { nowIso: string; timeZone: string; fixed: boolean }) {
+  const t = useT();
   const [now, setNow] = useState(() => new Date(nowIso));
   useEffect(() => {
     if (fixed) return;
@@ -27,7 +29,7 @@ export function AnalogClock({ nowIso, timeZone, fixed }: { nowIso: string; timeZ
   const hourAngle = ((hours % 12) + minutes / 60) * 30;
   const minuteAngle = (minutes + seconds / 60) * 6;
   const secondAngle = seconds * 6;
-  const label = `此刻 ${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+  const label = t("此刻 {{time}}", { time: `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}` });
 
   return <svg className="analog-clock" viewBox="0 0 200 200" role="img" aria-label={label}>
     <circle className="ac-ring" cx="100" cy="100" r="96" />

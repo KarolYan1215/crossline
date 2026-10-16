@@ -18,6 +18,7 @@ import { FlywheelGraph } from "./flywheel/flywheel-graph";
 import { ReminderStrip } from "./reminder-strip";
 import type { Reminder } from "../lib/reminders";
 import type { FlywheelGraphData } from "./flywheel/graph-model";
+import { tFor, type Locale, type Translate } from "../lib/i18n";
 
 export type DashboardAction = {
   id: string;
@@ -31,6 +32,8 @@ export type DashboardAction = {
 };
 
 export type DashboardData = {
+  /** The page's language (docs/i18n.md); Chinese when absent. */
+  locale?: Locale;
   principalId: string;
   workspaceId: string;
   nowLabel: string;
@@ -104,12 +107,14 @@ const capacityLevelLabel = { low: "低", medium: "中", high: "高" } as const;
 
 // The label must name what the reading came from. Calling every observation a self-report was wrong
 // as soon as activity days started counting towards the same total.
-const capacityLabel = (capacity: DashboardData["capacity"]) =>
+const capacityLabel = (capacity: DashboardData["capacity"], t: Translate) =>
   capacity.level === "uncalibrated"
-    ? "精力未标定"
-    : `精力 ${capacityLevelLabel[capacity.level]} · 依据 ${capacity.basis.map((item) => basisLabel[item]).join(" + ")} · ${capacity.observationCount} 次观测`;
+    ? t("精力未标定")
+    : t("精力 {{level}} · 依据 {{basis}} · {{count}} 次观测", { level: t(capacityLevelLabel[capacity.level]),
+      basis: capacity.basis.map((item) => t(basisLabel[item])).join(" + "), count: capacity.observationCount });
 
 export function DashboardView({ data }: { data: DashboardData }) {
+  const t = tFor(data.locale);
   const primaryDetail = data.primary ? data.taskDetailById.get(data.primary.id) : undefined;
   const alternatives = ([[data.higherPriority, "更高优先级"], [data.lowEnergy, "低精力备选"], [data.shortGap, "短空档备选"]] as const)
     .flatMap(([item, label]) => { const detail = item && item.id !== data.primary?.id ? data.taskDetailById.get(item.id) : undefined; return detail ? [[label, detail] as const] : []; })
@@ -123,62 +128,62 @@ export function DashboardView({ data }: { data: DashboardData }) {
 
   return <>
     <OfflineReplay workspaceId={data.workspaceId} />
-    <AppShell active="今日">
-      <section className="day-head" aria-label="今天">
+    <AppShell active={"今日"}>
+      <section className="day-head" aria-label={t("今天")}>
         <AnalogClock nowIso={data.nowIso} timeZone={data.timeZone} fixed={data.clockPinned} />
-        <div className="day-title"><h1>{data.dateLabel} 日 <small>{data.monthLabel}</small></h1><span>{data.nowLabel}</span></div>
+        <div className="day-title"><h1>{t("{{day}} 日", { day: data.dateLabel })} <small>{data.monthLabel}</small></h1><span>{data.nowLabel}</span></div>
         <dl className="day-stats">
-          {!data.energyEstimate && <div><dt>精力</dt><dd>{capacityLabel(data.capacity)}</dd></div>}
-          <div><dt>今天可用 / 待办</dt><dd>{data.todayCapacity.availableMinutes} / {data.todayCapacity.committedMinutes} 分钟
+          {!data.energyEstimate && <div><dt>{t("精力")}</dt><dd>{capacityLabel(data.capacity, t)}</dd></div>}
+          <div><dt>{t("今天可用 / 待办")}</dt><dd>{t("{{available}} / {{committed}} 分钟", { available: data.todayCapacity.availableMinutes, committed: data.todayCapacity.committedMinutes })}
             <span className="time-bar" aria-hidden="true"><span className="time-bar-fill" style={{ "--pct": `${load}%` } as CSSProperties} /></span></dd></div>
-          {data.workState && <div data-testid="work-state"><dt>此刻状态</dt><dd title={data.workState.reasons.join(" ")}>{data.workState.label}
-            <small> · {{ low: "把握低", medium: "把握中", high: "把握高" }[data.workState.confidence]}</small></dd></div>}
-          <div><dt>本周完成</dt><dd>{data.progress.weekCount} 件</dd></div>
+          {data.workState && <div data-testid="work-state"><dt>{t("此刻状态")}</dt><dd title={data.workState.reasons.join(" ")}>{data.workState.label}
+            <small> · {t({ low: "把握低", medium: "把握中", high: "把握高" }[data.workState.confidence])}</small></dd></div>}
+          <div><dt>{t("本周完成")}</dt><dd>{t("{{count}} 件", { count: data.progress.weekCount })}</dd></div>
         </dl>
         {data.energyEstimate && <EnergyCapsule estimate={data.energyEstimate} />}
       </section>
       {/* 「需要至少 14 天本机活动观测…」 is a note about the system's own calibration, not something to act on today. */}
       {data.capacity.blockers.filter((blocker) => blocker.code !== "BASELINE_INSUFFICIENT")
         .map((blocker) => <p key={blocker.code} className="capacity-blocker">{blocker.message}</p>)}
-      {hasSeed && <p role="note" className="seed-notice">下面有系统预置的示例作业（用来演示流程），不需要的可以直接丢弃。</p>}
+      {hasSeed && <p role="note" className="seed-notice">{t("下面有系统预置的示例作业（用来演示流程），不需要的可以直接丢弃。")}</p>}
       {data.capacity.level === "low" && <div className="rest-prompt">
-        <p>当前精力低：建议留 10 分钟休息。休息后重新自评，系统会重排今天的建议；高负荷任务暂不视为已准备好。</p>
+        <p>{t("当前精力低：建议留 10 分钟休息。休息后重新自评，系统会重排今天的建议；高负荷任务暂不视为已准备好。")}</p>
         <EnergyProbe context="after_rest" />
       </div>}
 
       <ReminderStrip reminders={data.reminders ?? []} />
 
       <section className="panel capture-line" aria-labelledby="capture-title">
-        <header><h2 id="capture-title">输入</h2><small>收集、修改、回答、提问，先确认再生效</small></header>
+        <header><h2 id="capture-title">{t("输入")}</h2><small>{t("收集、修改、回答、提问，先确认再生效")}</small></header>
         <Conversation variant="inline" />
       </section>
 
-      <section className={`today-grid${alternatives.length ? "" : " today-grid-single"}`} aria-label="下一步">
+      <section className={`today-grid${alternatives.length ? "" : " today-grid-single"}`} aria-label={t("下一步")}>
         <div className="today-next">
-          <h2 className="section-label">下一步</h2>
+          <h2 className="section-label">{t("下一步")}</h2>
           {primaryDetail ? <TaskCard variant="hero" detail={primaryDetail} reason={data.primary!.reason} slot={data.slotById?.get(primaryDetail.id)} />
             : <p className="panel today-empty">{data.awaitingApproval
-              ? <><b className="mono">{data.awaitingApproval}</b> 项提案待批准，批准后在此推荐下一步。 <a href="/approvals#proposals">前往批准</a></>
+              ? <><b className="mono">{data.awaitingApproval}</b> {t("项提案待批准，批准后在此推荐下一步。", { count: data.awaitingApproval })} <a href="/approvals#proposals">{t("前往批准")}</a></>
               : data.milestones?.drafts
-                ? <><b className="mono">{data.milestones.drafts}</b> 个里程碑草稿待批准；批准后系统从它们倒推任务并排进日历。 <a href="/milestones">前往主线</a></>
+                ? <><b className="mono">{data.milestones.drafts}</b> {t("个里程碑草稿待批准；批准后系统从它们倒推任务并排进日历。", { count: data.milestones.drafts })} <a href="/milestones">{t("前往主线")}</a></>
                 : data.milestones?.firstDrafts === "running"
-                  ? "系统正在按访谈为每条主线设计里程碑草稿（每条主线几分钟），好了会出现在「主线」页等待批准。也可以先在上方输入框写下手头要做的事。"
+                  ? t("系统正在按访谈为每条主线设计里程碑草稿（每条主线几分钟），好了会出现在「主线」页等待批准。也可以先在上方输入框写下手头要做的事。")
                   : data.milestones?.firstDrafts === "stalled"
-                    ? <>里程碑草稿没有生成。到「主线」页点「让 AI 重新提议草稿」再试一次。 <a href="/milestones">前往主线</a></>
+                    ? <>{t("里程碑草稿没有生成。到「主线」页点「让 AI 重新提议草稿」再试一次。")} <a href="/milestones">{t("前往主线")}</a></>
                     : data.milestones && !data.milestones.any
-                      ? <>访谈结束（或停下 20 分钟）后，系统按访谈为每条主线设计里程碑草稿，批准后倒推出任务。想现在就设计，在 <a href="/onboarding">访谈页</a> 点「设计里程碑草稿」。</>
-                      : "暂无可执行任务。收集一项工作后，系统完成拆解与排程。"}</p>}
+                      ? <>{t("访谈结束（或停下 20 分钟）后，系统按访谈为每条主线设计里程碑草稿，批准后倒推出任务。想现在就设计，在")} <a href="/onboarding">{t("访谈页")}</a> {t("点「设计里程碑草稿」。")}</>
+                      : t("暂无可执行任务。收集一项工作后，系统完成拆解与排程。")}</p>}
         </div>
         {alternatives.length > 0 && <div className="today-alts">{alternatives.map(([label, detail]) => <div key={detail.id}>
-          <h3 className="section-label">{label}</h3>
+          <h3 className="section-label">{t(label)}</h3>
           <TaskCard detail={detail} slot={data.slotById?.get(detail.id)} />
         </div>)}</div>}
       </section>
 
       {/* The day and what is waiting on the person side by side, the stack as tall as the timeline (the person's layout, 2026-10-13). */}
       <div className="today-day">
-        {data.calendar && <section className="panel today-timeline" id="today-timeline" aria-label="今天的时间轴">
-          <header><h2>今天的时间轴</h2><a href="/plan">打开计划 →</a></header>
+        {data.calendar && <section className="panel today-timeline" id="today-timeline" aria-label={t("今天的时间轴")}>
+          <header><h2>{t("今天的时间轴")}</h2><a href="/plan">{t("打开计划 →")}</a></header>
           <ScheduleSummary changes={data.scheduleChanges ?? []} splits={data.finerSplits ?? []} />
           <CalendarPanel items={data.calendar.items} deadlines={data.calendar.deadlines} today={data.calendar.today} nowIso={data.calendar.nowIso}
             timeZone={data.calendar.timeZone} labels={data.calendar.labels} quietByWeekday={data.calendar.quietByWeekday} proposals={data.calendar.proposals}
@@ -188,12 +193,12 @@ export function DashboardView({ data }: { data: DashboardData }) {
       </div>
 
       {data.flywheelGraph && <section className="panel" aria-labelledby="flywheel-title">
-        <header><h2 id="flywheel-title">飞轮图谱</h2><a href="/milestones">打开主线 →</a></header>
+        <header><h2 id="flywheel-title">{t("飞轮图谱")}</h2><a href="/milestones">{t("打开主线 →")}</a></header>
         <FlywheelGraph data={data.flywheelGraph} />
       </section>}
 
-      {data.care.length > 0 && <section className="care-band" aria-label="健康容量策略">
-        <dl>{data.care.map((item) => <div key={item.title}><dt>{item.title}</dt><dd>最低 {item.minimumMinutes} 分钟</dd></div>)}</dl>
+      {data.care.length > 0 && <section className="care-band" aria-label={t("健康容量策略")}>
+        <dl>{data.care.map((item) => <div key={item.title}><dt>{item.title}</dt><dd>{t("最低 {{minutes}} 分钟", { minutes: item.minimumMinutes })}</dd></div>)}</dl>
       </section>}
     </AppShell>
   </>;

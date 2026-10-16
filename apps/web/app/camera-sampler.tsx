@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { cameraAggregate, eyeAspectRatio, LEFT_EYE, RIGHT_EYE } from "@crossline/core";
+import { useT } from "./locale-context";
 
 const EVERY_MS = 20 * 60_000;
 const WINDOW_MS = 20_000;
@@ -15,6 +16,7 @@ const LAST_KEY = "crossline.camera.lastSampleAt";
  * No frame, landmark or image is kept or sent; the camera is closed as soon as the window ends. A small chip says when it is on.
  */
 export function CameraSampler() {
+  const t = useT();
   const [active, setActive] = useState(false);
   useEffect(() => {
     if (typeof window === "undefined" || !window.matchMedia("(pointer: fine)").matches || !navigator.mediaDevices?.getUserMedia) return;
@@ -42,7 +44,7 @@ export function CameraSampler() {
     timer = setTimeout(() => void tick(), 10_000);
     return () => { stopped = true; if (timer) clearTimeout(timer); };
   }, []);
-  return active ? <span className="camera-chip" role="status">摄像头采样中（20 秒，只在本机计算）</span> : null;
+  return active ? <span className="camera-chip" role="status">{t("摄像头采样中（20 秒，只在本机计算）")}</span> : null;
 }
 
 /** One twenty-second window: landmarks and forehead colour per frame, reduced to the aggregate before anything leaves this function. */

@@ -26,14 +26,21 @@ serwist.addEventListeners();
 // Push from this machine's worker (packages/connectors/src/web-push.ts): the morning brief and the single "would be missed today"
 // messages, the same ones the desktop shows. The payload was encrypted for this device; the browser has already decrypted it.
 self.addEventListener("push", (event) => {
-  let message: { title?: string; body?: string; url?: string; tag?: string; start?: string } = {};
+  // `title` and `body` are written by the server in the account's language; `lang` names it, so the one button the service worker adds
+  // itself is in that language too (else the browser's), without bundling the catalogues into the worker (docs/i18n.md).
+  let message: { title?: string; body?: string; url?: string; tag?: string; start?: string; lang?: string } = {};
   try { message = event.data?.json() ?? {}; } catch { message = { body: event.data?.text() ?? "" }; }
   event.waitUntil(self.registration.showNotification(message.title || "Crossline", {
     body: message.body ?? "", icon: "/pwa-icon/192", badge: "/pwa-icon/192",
     data: { url: message.url || "/", start: message.start }, ...(message.tag ? { tag: message.tag } : {}),
-    ...(message.start ? { actions: [{ action: "start", title: "开始计时" }] } : {})
+    ...(message.start ? { actions: [{ action: "start", title: startLabel(message.lang) }] } : {})
   } as NotificationOptions));
 });
+
+function startLabel(lang: string | undefined): string {
+  const english = lang ? lang.startsWith("en") : !(self.navigator.language ?? "zh").toLowerCase().startsWith("zh");
+  return english ? "Start timer" : "开始计时";
+}
 
 // Tapping it opens the page it is about, reusing an open Crossline window when there is one.
 self.addEventListener("notificationclick", (event) => {

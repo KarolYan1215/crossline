@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { tOf } from "../../../../../lib/locale";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { dataDirectory, getStore } from "../../../../../lib/crossline";
@@ -20,7 +21,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const doc = getStore().listSourceDocuments(access.ctx.workspaceId).find((item) => item.id === id);
   if (!doc) return new Response("NOT_FOUND", { status: 404 });
   if (new URL(request.url).searchParams.get("view") === "text") {
-    return new Response(doc.extractedText || "（这份文件没有可读取的文字）", { headers: { "content-type": "text/plain; charset=utf-8", "x-content-type-options": "nosniff" } });
+    return new Response(doc.extractedText || tOf(access.ctx)("（这份文件没有可读取的文字）"), { headers: { "content-type": "text/plain; charset=utf-8", "x-content-type-options": "nosniff" } });
   }
   let file: string;
   try { file = fileURLToPath(doc.uri); } catch { return new Response("NOT_FOUND", { status: 404 }); }

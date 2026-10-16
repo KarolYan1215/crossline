@@ -1,4 +1,5 @@
 import { validateAvailability } from "@crossline/core";
+import { tOf } from "../../../../lib/locale";
 import { normalizeParams } from "@crossline/planner";
 import { applyChange, previewChange, type Change } from "../../../../lib/impact";
 import { resolveAccessContext } from "../../../../lib/access-guard";
@@ -44,7 +45,7 @@ export async function POST(request: Request) {
   const change = parse(body.change);
   if (!change) return Response.json({ ok: false, code: "CHANGE_INVALID" }, { status: 400 });
   if (body.apply === true) {
-    const result = await withUndo(access.ctx, CHANGE_LABEL[change.kind] ?? "修改计划", () => applyChange(access.ctx, change));
+    const result = await withUndo(access.ctx, tOf(access.ctx)(CHANGE_LABEL[change.kind] ?? "修改计划"), () => applyChange(access.ctx, change));
     return Response.json(result, { status: result.ok ? 200 : 400 });
   }
   try {

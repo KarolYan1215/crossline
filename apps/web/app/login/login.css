@@ -51,3 +51,8 @@
 /* Scaled to a phone, the drawing's labels would fall under 12px; the installed copy is used on the desktop anyway. */
 @media (max-width:600px){.login-preview{display:none}}
 .login-panel-body{display:grid;gap:16px}
+
+/* The language switch (docs/i18n.md): top right of every way in, above the panel. */
+.login-split{position:relative}
+.auth-locale{position:absolute;top:12px;right:16px;z-index:1}
+.auth-locale .locale-switch{background:none;border:1px solid var(--mist);color:var(--graphite);padding:4px 10px;min-height:32px;cursor:pointer;font-size:13px}

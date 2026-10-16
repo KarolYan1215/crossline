@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { FinerSplitNote, ScheduleChange } from "../lib/crossline";
+import { useT } from "./locale-context";
 
 /**
  * 「作业 3 因 11:30 会议后移 30 分钟」 above Today's timeline (docs/loop-and-scout.md §1): what a calendar change moved, one line each.
@@ -14,6 +15,7 @@ const short = (text: string, max: number) => text.length > max ? `${text.slice(0
 export function ScheduleSummary({ changes, splits = [] }: { changes: ScheduleChange[];
   /** Steps planned again smaller after two days of not getting done: a line each, nothing to answer. */
   splits?: FinerSplitNote[] }) {
+  const t = useT();
   const [busy, setBusy] = useState<string | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   if (!changes.length && !splits.length) return null;
@@ -26,18 +28,19 @@ export function ScheduleSummary({ changes, splits = [] }: { changes: ScheduleCha
   };
   const minutes = (time: string) => Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5));
   const shift = (change: ScheduleChange) => {
-    if (change.to.day !== change.day) return `改到 ${Number(change.to.day.slice(5, 7))}/${Number(change.to.day.slice(8, 10))} ${change.to.start}`;
+    if (change.to.day !== change.day) return t("改到 {{month}}/{{day}} {{time}}", { month: Number(change.to.day.slice(5, 7)), day: Number(change.to.day.slice(8, 10)), time: change.to.start });
     const delta = minutes(change.to.start) - minutes(change.from.start);
-    return delta > 0 ? `后移 ${delta} 分钟` : `提前 ${-delta} 分钟`;
+    return delta > 0 ? t("后移 {{minutes}} 分钟", { minutes: delta }) : t("提前 {{minutes}} 分钟", { minutes: -delta });
   };
-  return <ul className="schedule-summary" aria-label="排程变化">
+  const line = (title: string, cause: string, change: ScheduleChange) => t("「{{title}}」因 {{cause}} {{shift}}", { title, cause, shift: shift(change) });
+  return <ul className="schedule-summary" aria-label={t("排程变化")}>
     {changes.map((change) => <li key={change.blockId}>
-      <span title={`「${change.title}」因 ${change.cause} ${shift(change)}`}>「{short(change.title, 18)}」因 {short(change.cause, 18)} {shift(change)}</span>
-      <button type="button" className="secondary" disabled={busy === change.blockId} onClick={() => void pinBack(change)}>钉回原位</button>
-      {failed === change.blockId && <small role="status">未能钉回，请重试</small>}
+      <span title={line(change.title, change.cause, change)}>{line(short(change.title, 18), short(change.cause, 18), change)}</span>
+      <button type="button" className="secondary" disabled={busy === change.blockId} onClick={() => void pinBack(change)}>{t("钉回原位")}</button>
+      {failed === change.blockId && <small role="status">{t("未能钉回，请重试")}</small>}
     </li>)}
     {splits.map((split) => <li key={`split:${split.orderId}`}>
-      <span title={`${split.title}${split.step ? ` · ${split.step}` : ""}`}>「{short(`${split.title}${split.step ? ` · ${split.step}` : ""}`, 24)}」{split.days} 天没做成，已拆成更小的步骤，第一步不超过 15 分钟</span>
+      <span title={`${split.title}${split.step ? ` · ${split.step}` : ""}`}>{t("「{{title}}」{{count}} 天没做成，已拆成更小的步骤，第一步不超过 15 分钟", { title: short(`${split.title}${split.step ? ` · ${split.step}` : ""}`, 24), count: split.days })}</span>
     </li>)}
   </ul>;
 }

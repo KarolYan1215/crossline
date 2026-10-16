@@ -78,6 +78,11 @@ export function previewText(text: string, max = PREVIEW_CHARACTERS): string {
   let kept = characters.slice(0, max - 1).join("").replace(/[\s，、。；：,.;:]+$/u, "");
   // A cut right after an opening quote leaves nothing quoted: drop the quote instead of showing 「…」.
   kept = kept.replace(/[「『“‘(（]+$/u, "");
+  // English messages quote with "…" and “…” (docs/i18n.md): the same rule for them. A straight quote cannot say whether it opens or
+  // closes, so an odd one left last is an opening one and is dropped like 「.
+  if ((kept.match(/"/g) ?? []).length % 2 === 1 && kept.endsWith("\"")) kept = kept.slice(0, -1).trimEnd();
   const open = (kept.match(/「/g) ?? []).length - (kept.match(/」/g) ?? []).length;
-  return `${kept}…${open > 0 ? "」".repeat(open) : ""}`;
+  const curly = (kept.match(/“/g) ?? []).length - (kept.match(/”/g) ?? []).length;
+  const straight = (kept.match(/"/g) ?? []).length % 2;
+  return `${kept}…${open > 0 ? "」".repeat(open) : ""}${curly > 0 ? "”".repeat(curly) : ""}${straight ? "\"" : ""}`;
 }

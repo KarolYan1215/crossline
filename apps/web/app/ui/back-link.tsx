@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type MouseEvent } from "react";
+import { useT } from "../locale-context";
 import { forgetReturnDecision, lastPage, markReturning, pageKey, restoreFrame, returningSnapshot, saveReturnState } from "./return-state";
 
 /**
@@ -64,6 +65,7 @@ export function resolveOrigin(scope: string, { referrer, last, stored, reload }:
  * entry, else a navigation to it with its saved state restored. Without an origin it goes to `fallback`.
  */
 export function BackLink({ scope, fallback = "/workbench" }: { scope: string; fallback?: string }) {
+  const t = useT();
   const [origin, setOrigin] = useState<string | null>(null);
   useEffect(() => {
     let stored: string | null = null;
@@ -87,5 +89,5 @@ export function BackLink({ scope, fallback = "/workbench" }: { scope: string; fa
     if (origin && previous === origin && window.history.length > 1) window.history.back();
     else window.location.assign(target);
   };
-  return <a className="back-link" href={target} onClick={go}><span aria-hidden="true">←</span> 返回{placeLabel(target)}</a>;
+  return <a className="back-link" href={target} onClick={go}><span aria-hidden="true">←</span> {t("返回{{place}}", { place: t(placeLabel(target)) })}</a>;
 }

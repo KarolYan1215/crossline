@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { tOf } from "../../../../lib/locale";
 import { CodexSupervisorRequestError, requestCodexSupervisor } from "../../../../lib/codex-runtime";
 import { isCrossSiteWrite } from "../../../../lib/same-origin";
 import { resolveAccessContext } from "../../../../lib/access-guard";
@@ -44,7 +45,7 @@ export async function POST(request: Request) {
     if (body.action === "logout") return NextResponse.json(await requestCodexSupervisor(access.ctx, "/v1/codex/logout", { method: "POST" }));
     const type = body.type === "apiKey" || body.type === "chatgptDeviceCode" ? body.type : "chatgpt";
     const apiKey = typeof body.apiKey === "string" ? body.apiKey.trim() : "";
-    if (type === "apiKey" && (!apiKey || apiKey.length > 300)) return NextResponse.json({ blocker: { code: "API_KEY_INVALID", message: "请填写 API key" } }, { status: 400 });
+    if (type === "apiKey" && (!apiKey || apiKey.length > 300)) return NextResponse.json({ blocker: { code: "API_KEY_INVALID", message: tOf(access.ctx)("请填写 API key") } }, { status: 400 });
     // The key passes through to the account's own runtime, which stores it in that account's home; nothing here keeps or echoes it.
     return NextResponse.json(await requestCodexSupervisor(access.ctx, "/v1/codex/login", { method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify(type === "apiKey" ? { type, apiKey } : { type }) }));

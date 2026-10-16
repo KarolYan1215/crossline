@@ -1,4 +1,5 @@
 import { resolveAccessContext } from "../../../lib/access-guard";
+import { tOf } from "../../../lib/locale";
 import { appNow } from "../../../lib/crossline";
 import { PROGRESS_LEVELS, type ProgressLevelId } from "@crossline/core";
 import { answerReturn, dismissReturn, returnDue, returnItems, type ReturnVerdict } from "../../../lib/return";
@@ -29,7 +30,7 @@ export async function POST(request: Request) {
   const level = PROGRESS_LEVELS.find((item) => item.id === body.level)?.id as ProgressLevelId | undefined;
   const note = typeof body.note === "string" ? body.note.trim().slice(0, 1000) : "";
   const stepIds = Array.isArray(body.stepIds) ? body.stepIds.filter((id): id is string => typeof id === "string") : [];
-  const result = await withUndo(access.ctx, LABEL[verdict], () => answerReturn(access.ctx, body.orderId as string, verdict,
+  const result = await withUndo(access.ctx, tOf(access.ctx)(LABEL[verdict], { context: "op" }), () => answerReturn(access.ctx, body.orderId as string, verdict,
     { ...(Number.isFinite(minutes) && minutes > 0 ? { minutes } : {}), ...(stepIds.length ? { stepIds } : {}),
       ...(typeof body.stepId === "string" && body.stepId ? { stepId: body.stepId.slice(0, 40) } : {}), ...(level ? { level } : {}), ...(note ? { note } : {}) }, appNow()));
   return Response.json(result, { status: result.ok ? 200 : 400 });

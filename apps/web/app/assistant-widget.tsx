@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Conversation } from "./chat/conversation";
 import { HelperFace, helperMood, plainText, previewText, useHelper } from "./helper-state";
+import { useT } from "./locale-context";
 
 const SEEN_KEY = "crossline-nudge-seen";
 /** The last message the bubble popped out for, so one message pops once, not again on every page it is still unread on. */
@@ -35,6 +36,7 @@ function shownElsewhere(text: string): boolean {
  * shows it in a conversation of its own — Today's box showed the same line twice, and the bubble sat over the cards under it.
  */
 export function AssistantWidget() {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const [latest, setLatest] = useState<{ id: string; text: string; full: string } | null>(null);
   const [popped, setPopped] = useState(false);
@@ -42,7 +44,7 @@ export function AssistantWidget() {
   const timers = useRef<Array<ReturnType<typeof setTimeout>>>([]);
   const helper = useHelper();
   const mood = helperMood({ down: helper.down, thinking: helper.thinking, working: helper.working, unread: Boolean(latest) });
-  const label = { down: "小帮手：后台没在运行", thinking: "小帮手：正在想", working: "小帮手：助手在做事", unread: "小帮手：有新消息", idle: "打开小帮手" }[mood];
+  const label = t({ down: "小帮手：后台没在运行", thinking: "小帮手：正在想", working: "小帮手：助手在做事", unread: "小帮手：有新消息", idle: "打开小帮手" }[mood]);
   useEffect(() => {
     const ping = () => {
       if (document.visibilityState !== "visible") return;
@@ -81,18 +83,18 @@ export function AssistantWidget() {
     onFocus={() => setHover(true)} onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setHover(false); }}>
     {latest && shown && <div className="assistant-nudge-preview" role="status">
       <button type="button" className="assistant-nudge-text" onClick={openPanel} title={latest.full}>{latest.text}</button>
-      <button type="button" className="assistant-nudge-close" aria-label="收起这条提示" title="收起"
+      <button type="button" className="assistant-nudge-close" aria-label={t("收起这条提示")} title={t("收起")}
         onClick={() => { setPopped(false); setHover(false); }}>×</button>
     </div>}
     {helper.avatar
       ? <button type="button" className="assistant-bubble helper-bubble" data-mood={mood} data-unread={latest && !shown ? "" : undefined} onClick={openPanel} aria-label={label} title={label}>
         <HelperFace src={helper.avatar} size="button" mood={mood} /></button>
-      : <button type="button" className="assistant-bubble" data-unread={latest ? "" : undefined} data-mood={mood} onClick={openPanel} aria-label={label}>小帮手</button>}
+      : <button type="button" className="assistant-bubble" data-unread={latest ? "" : undefined} data-mood={mood} onClick={openPanel} aria-label={label}>{t("小帮手")}</button>}
   </div>;
-  return <section className="assistant-panel" aria-label="小帮手">
+  return <section className="assistant-panel" aria-label={t("小帮手")}>
     <header>
-      <span>{helper.avatar && <HelperFace src={helper.avatar} size="reply" />}小帮手</span>
-      <button type="button" className="text-button" onClick={() => setOpen(false)} aria-label="收起小帮手">收起</button>
+      <span>{helper.avatar && <HelperFace src={helper.avatar} size="reply" />}{t("小帮手")}</span>
+      <button type="button" className="text-button" onClick={() => setOpen(false)} aria-label={t("收起小帮手")}>{t("收起")}</button>
     </header>
     <Conversation variant="panel" />
   </section>;

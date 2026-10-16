@@ -14,6 +14,7 @@ import { nextSlots } from "../lib/steps";
 import { loadFlywheelGraph } from "../lib/flywheel-graph";
 import { shiftDay } from "./timeline/model";
 import { timed, timedSync } from "../lib/sections";
+import { localeFor } from "../lib/locale";
 
 export const dynamic = "force-dynamic";
 
@@ -43,6 +44,7 @@ export default async function HomePage() {
   const asks = await timed("asks", () => loadAsks(ctx));
   return <DashboardView data={{
     ...data,
+    locale: localeFor(ctx),
     taskDetailById: details,
     calendarDetails: Object.fromEntries(calendarOrderIds.flatMap((id) => details.has(id) ? [[id, details.get(id)!]] : [])),
     milestoneDetailById: timedSync("today.milestoneDetails", () => loadMilestoneDetailsBatch(ctx, milestoneIds)),

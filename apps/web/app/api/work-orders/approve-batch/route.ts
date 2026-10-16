@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { tOf } from "../../../../lib/locale";
 import { approveWorkOrderProposals } from "../../../../lib/approvals";
 import { resolveAccessContext } from "../../../../lib/access-guard";
 import { isCrossSiteWrite } from "../../../../lib/same-origin";
@@ -14,6 +15,6 @@ export async function POST(request: Request) {
   if (!Array.isArray(ids) || !ids.length || ids.some((id) => typeof id !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/.test(id))) {
     return NextResponse.json({ ok: false, code: "INVALID_WORK_ORDER_IDS" }, { status: 400 });
   }
-  const result = await withUndo(access.ctx, `批准 ${ids.length} 个任务`, () => ({ ok: true as const, ...approveWorkOrderProposals(access.ctx, ids as string[]) }));
+  const result = await withUndo(access.ctx, tOf(access.ctx)("批准 {{count}} 个任务", { count: ids.length }), () => ({ ok: true as const, ...approveWorkOrderProposals(access.ctx, ids as string[]) }));
   return NextResponse.json(result);
 }

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { tOf } from "../../../../lib/locale";
 import { getStore } from "../../../../lib/crossline";
 import { resolveAccessContext } from "../../../../lib/access-guard";
 import { isCrossSiteWrite } from "../../../../lib/same-origin";
@@ -30,7 +31,7 @@ export async function POST(request: Request) {
   const login = request.headers.get("tailscale-user-login");
   if (!login) {
     return Response.json({ ok: false, code: "TAILSCALE_IDENTITY_NOT_PRESENT",
-      message: "本次请求没有携带 Tailscale 身份头，请通过 tailscale serve 访问后再试" }, { status: 400 });
+      message: tOf(access.ctx)("本次请求没有携带 Tailscale 身份头，请通过 tailscale serve 访问后再试") }, { status: 400 });
   }
   const binding = getStore().saveTailscaleBinding({
     id: randomUUID(), principalId: access.ctx.principalId, workspaceId: access.ctx.workspaceId,

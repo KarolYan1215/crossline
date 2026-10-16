@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { tOf } from "../../../lib/locale";
 import { requestCodexSupervisor, CodexSupervisorRequestError } from "../../../lib/codex-runtime";
 import { resolveAccessContext } from "../../../lib/access-guard";
 import { isCrossSiteWrite } from "../../../lib/same-origin";
@@ -13,8 +14,8 @@ export async function GET(request: Request) {
   if ("response" in access) return access.response;
   try { return NextResponse.json(await requestCodexSupervisor<unknown>(access.ctx, "/v1/transcription/status")); }
   catch (error) {
-    if (error instanceof CodexSupervisorRequestError) return NextResponse.json({ state: "unavailable", code: error.blocker.code, message: "后台服务没有运行，暂时无法转写录音。" });
-    return NextResponse.json({ state: "unavailable", code: "TRANSCRIPTION_STATUS_FAILED", message: "读不到转写状态。" });
+    if (error instanceof CodexSupervisorRequestError) return NextResponse.json({ state: "unavailable", code: error.blocker.code, message: tOf(access.ctx)("后台服务没有运行，暂时无法转写录音。") });
+    return NextResponse.json({ state: "unavailable", code: "TRANSCRIPTION_STATUS_FAILED", message: tOf(access.ctx)("读不到转写状态。") });
   }
 }
 

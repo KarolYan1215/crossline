@@ -5,6 +5,7 @@ import type { Ask } from "@crossline/core";
 import { AskCard } from "./asks/ask-card";
 import { AskDeck, DeckNav, useAskList, useDeck } from "./asks/ask-drawer";
 import type { AskPreviews } from "./asks/types";
+import { useT } from "./locale-context";
 
 /**
  * The system's questions, a few at a time: each says what is asked, why, what an answer does and what silence does, with its options
@@ -16,10 +17,12 @@ const inScope = (scope: Scope) => (ask: Ask) => scope === "later" ? Boolean(ask.
 
 /** A plain list: on 待确认, the asks whose decision can wait (`scope="later"`), each with the day it comes up. */
 export function AskList({ initial, scope = "week", heading = "待决事项", previews }: { initial: Ask[]; scope?: Scope; heading?: string; previews?: AskPreviews }) {
+  const t = useT();
   const { asks, onDone } = useAskList(initial, inScope(scope));
   if (!asks.length) return null;
-  return <section className="ask-list" id={scope === "later" ? "later-asks" : "asks"} aria-label={heading}>
-    <header><h2>{heading} · {asks.length}</h2></header>
+  // `heading` is a Chinese key (or already translated, which `t` returns as it is).
+  return <section className="ask-list" id={scope === "later" ? "later-asks" : "asks"} aria-label={t(heading)}>
+    <header><h2>{t(heading)} · {asks.length}</h2></header>
     <ol className="ak-list">{asks.map((ask) => <AskCard key={ask.id} ask={ask} preview={previews?.[ask.id]} onDone={onDone} />)}</ol>
   </section>;
 }
@@ -30,6 +33,7 @@ export function AskList({ initial, scope = "week", heading = "待决事项", pre
  * (anywhere on the page, except while typing, on a slider or in a dialog) move through the stack without answering.
  */
 export function AskStack({ initial, moreHref, previews }: { initial: Ask[]; moreHref?: string; previews?: AskPreviews }) {
+  const t = useT();
   const { asks, onDone } = useAskList(initial, inScope("week"));
   const count = asks.length;
   const { at, go, pick } = useDeck(count);
@@ -47,9 +51,9 @@ export function AskStack({ initial, moreHref, previews }: { initial: Ask[]; more
     return () => window.removeEventListener("keydown", onKey);
   });
   if (!count) return null;
-  return <section className="ask-list ask-stack" id="asks" aria-label="待决事项">
-    <header><h2>待决事项 · {count}</h2>
-      <DeckNav at={at} count={count} go={go} label="切换待决事项">{moreHref && <a href={moreHref}>全部</a>}</DeckNav></header>
+  return <section className="ask-list ask-stack" id="asks" aria-label={t("待决事项")}>
+    <header><h2>{t("待决事项")} · {count}</h2>
+      <DeckNav at={at} count={count} go={go} label={t("切换待决事项")}>{moreHref && <a href={moreHref}>{t("全部")}</a>}</DeckNav></header>
     <AskDeck asks={asks} at={at} pick={pick} onDone={onDone} previews={previews} />
   </section>;
 }

@@ -1,4 +1,5 @@
 import { postponeTask, type PostponeReason } from "../../../../../lib/task-ops";
+import { tOf } from "../../../../../lib/locale";
 import { titleOf, withUndo } from "../../../../../lib/undo";
 import { rejectUnsafeRequest } from "../guard";
 
@@ -12,7 +13,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
   const reason = String(body.reason ?? "") as PostponeReason;
   if (!REASONS.has(reason)) return Response.json({ ok: false, code: "POSTPONE_REASON_INVALID" }, { status: 400 });
-  const result = await withUndo(guard.ctx, `推迟：${titleOf(guard.ctx, id)}`, () => postponeTask(guard.ctx, id, { reason, date: String(body.date ?? ""),
+  const result = await withUndo(guard.ctx, tOf(guard.ctx)("推迟：{{title}}", { title: titleOf(guard.ctx, id) }), () => postponeTask(guard.ctx, id, { reason, date: String(body.date ?? ""),
     who: String(body.who ?? "").slice(0, 60), what: String(body.what ?? "").slice(0, 200), text: String(body.text ?? "").slice(0, 500) }));
   return Response.json(result, { status: result.ok ? 200 : 400 });
 }

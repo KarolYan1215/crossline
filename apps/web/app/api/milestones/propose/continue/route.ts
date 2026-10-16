@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { tOf } from "../../../../../lib/locale";
 import { requestCodexSupervisor, CodexSupervisorRequestError } from "../../../../../lib/codex-runtime";
 import { resolveAccessContext } from "../../../../../lib/access-guard";
 import { isCrossSiteWrite } from "../../../../../lib/same-origin";
@@ -19,7 +20,7 @@ export async function POST(request: Request) {
   const threadId = typeof input.threadId === "string" ? input.threadId : "";
   const message = typeof input.message === "string" ? input.message.slice(0, 2000) : "";
   if (!/^[a-zA-Z0-9_-]{1,128}$/.test(threadId) || !message.trim()) {
-    return NextResponse.json({ ok: false, blocker: { code: "PROPOSAL_CONVERSATION_INVALID", message: "缺少 threadId 或消息内容" } }, { status: 400 });
+    return NextResponse.json({ ok: false, blocker: { code: "PROPOSAL_CONVERSATION_INVALID", message: tOf(access.ctx)("缺少 threadId 或消息内容") } }, { status: 400 });
   }
   try {
     const result = await requestCodexSupervisor<unknown>(access.ctx, "/v1/milestones/propose/continue", {
@@ -33,6 +34,6 @@ export async function POST(request: Request) {
     if (error instanceof CodexSupervisorRequestError) {
       return NextResponse.json({ ok: false, blocker: error.blocker }, { status: error.status });
     }
-    return NextResponse.json({ ok: false, blocker: { code: "PROPOSAL_FAILED", message: "对话未完成。" } }, { status: 503 });
+    return NextResponse.json({ ok: false, blocker: { code: "PROPOSAL_FAILED", message: tOf(access.ctx)("对话未完成。") } }, { status: 503 });
   }
 }

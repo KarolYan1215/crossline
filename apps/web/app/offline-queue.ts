@@ -1,6 +1,7 @@
 "use client";
 import Dexie, { type Table } from "dexie";
 import { classifyReplay, type DeadLetter } from "@crossline/core";
+import { tFor } from "../lib/i18n";
 
 export type OfflineCommandType =
   | "task.capture" | "work_order.start" | "work_order.pause" | "work_order.resume" | "work_order.complete";
@@ -221,6 +222,8 @@ export async function replayQueue(
   const active = store ?? dexieStore(workspaceId);
   const pending = (await active.listPending()).sort((a, b) => a.clientSequence - b.clientSequence);
   const summary: ReplaySummary = { sent: 0, retrying: 0, deadLettered: 0, conflicted: 0 };
+  // The reason is new text kept for display: written in the page's language at the time (docs/i18n.md).
+  const t = tFor(typeof document !== "undefined" && document.documentElement.lang === "en" ? "en" : "zh");
   for (const command of pending) {
     let status: number | undefined;
     let reason = "";
@@ -233,11 +236,11 @@ export async function replayQueue(
     const outcome = classifyReplay(status);
     if (outcome === "done") { await active.removePending(command.clientCommandId); summary.sent += 1; }
     else if (outcome === "dead_letter") {
-      await active.putDead({ command, status: status ?? 0, reason: reason || `服务器拒绝（HTTP ${status}）`, failedAt: new Date().toISOString() });
+      await active.putDead({ command, status: status ?? 0, reason: reason || t("服务器拒绝（HTTP {{status}}）", { status }), failedAt: new Date().toISOString() });
       await active.removePending(command.clientCommandId);
       summary.deadLettered += 1;
     } else if (outcome === "conflict") {
-      await active.putConflict({ command, status: status ?? 409, reason: reason || "该作业已被其他设备或网页改变状态", failedAt: new Date().toISOString() });
+      await active.putConflict({ command, status: status ?? 409, reason: reason || t("该作业已被其他设备或网页改变状态"), failedAt: new Date().toISOString() });
       await active.removePending(command.clientCommandId);
       summary.conflicted += 1;
     } else summary.retrying += 1;

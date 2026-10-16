@@ -1,4 +1,5 @@
 import { discardCapture } from "../../../../../lib/crossline";
+import { tOf } from "../../../../../lib/locale";
 import { resolveAccessContext } from "../../../../../lib/access-guard";
 import { isCrossSiteWrite } from "../../../../../lib/same-origin";
 import { titleOf, withUndo } from "../../../../../lib/undo";
@@ -11,7 +12,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   if ("response" in access) return access.response;
   if (!/^[a-zA-Z0-9_-]{1,128}$/.test(id)) return Response.json({ ok: false, code: "CAPTURE_NOT_FOUND" }, { status: 404 });
   const body = (await request.json().catch(() => ({}))) as { reason?: unknown };
-  const result = await withUndo(access.ctx, `丢弃：${titleOf(access.ctx, id)}`, () => discardCapture(access.ctx, id, String(body.reason ?? "")));
+  const result = await withUndo(access.ctx, tOf(access.ctx)("丢弃：{{title}}", { title: titleOf(access.ctx, id) }), () => discardCapture(access.ctx, id, String(body.reason ?? "")));
   if (result.ok) return Response.json(result);
   const status = result.code === "CAPTURE_NOT_FOUND" ? 404
     : 409;

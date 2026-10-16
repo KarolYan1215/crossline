@@ -2,6 +2,7 @@
 
 import { type ReactNode } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
+import { useT } from "./locale-context";
 
 /**
  * The quick-preview affordance every card gets: a small corner button that opens this in place, separate
@@ -10,9 +11,10 @@ import * as Dialog from "@radix-ui/react-dialog";
  * `MilestoneDetailView` output the standalone page uses; this component only supplies the dialog chrome.
  */
 export function PreviewDrawer({ title, href, children }: { title: string; href: string; children: ReactNode }) {
+  const t = useT();
   return <Dialog.Root>
     <Dialog.Trigger asChild>
-      <button type="button" className="card-preview-button" aria-label={`预览：${title}`}
+      <button type="button" className="card-preview-button" aria-label={t("预览：{{title}}", { title })}
         onClick={(event) => event.stopPropagation()}>⊕</button>
     </Dialog.Trigger>
     <Dialog.Portal>
@@ -21,8 +23,8 @@ export function PreviewDrawer({ title, href, children }: { title: string; href: 
         <Dialog.Title className="sr-only">{title}</Dialog.Title>
         {children}
         <div className="dialog-actions">
-          <a className="secondary" href={href}>⤢ 独立页面查看</a>
-          <Dialog.Close asChild><button type="button" className="secondary">关闭</button></Dialog.Close>
+          <a className="secondary" href={href}>{t("⤢ 独立页面查看")}</a>
+          <Dialog.Close asChild><button type="button" className="secondary">{t("关闭")}</button></Dialog.Close>
         </div>
       </Dialog.Content>
     </Dialog.Portal>

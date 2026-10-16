@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { tOf } from "../../../../lib/locale";
 import { requestCodexSupervisor, CodexSupervisorRequestError } from "../../../../lib/codex-runtime";
 import { resolveAccessContext } from "../../../../lib/access-guard";
 import { isCrossSiteWrite } from "../../../../lib/same-origin";
@@ -34,6 +35,6 @@ export async function POST(request: Request) {
     if (error instanceof CodexSupervisorRequestError) {
       return NextResponse.json({ ok: false, blocker: error.blocker }, { status: error.status });
     }
-    return NextResponse.json({ ok: false, blocker: { code: "PROPOSAL_FAILED", message: "提议未完成。" } }, { status: 503 });
+    return NextResponse.json({ ok: false, blocker: { code: "PROPOSAL_FAILED", message: tOf(access.ctx)("提议未完成。") } }, { status: 503 });
   }
 }

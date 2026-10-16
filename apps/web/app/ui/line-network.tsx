@@ -2,13 +2,15 @@
 
 import { useState } from "react";
 import { RELATION_KIND_LABEL, RELATION_KIND_MEANING, flywheelLoops } from "@crossline/core";
+import type { Translate } from "../../lib/i18n";
+import { useLocale, useT } from "../locale-context";
 
 export type NetworkLine = { id: string; label: string; rank?: number | null; hard?: boolean };
 /** One way a line feeds another. `candidate` = proposed, not yet judged by the person; drawn dashed until they say it holds. */
 export type NetworkEdge = { id: string; from: string; to: string; kind: string; explanation: string; status: "confirmed" | "candidate" };
 
 const SIZE = 360, C = SIZE / 2, R = 122, NODE = 32;
-const roleOf = (line: NetworkLine) => line.hard ? "硬约束" : line.rank === 1 ? "底座" : line.rank ? `第 ${line.rank}` : "";
+const roleOf = (line: NetworkLine, t: Translate) => line.hard ? t("硬约束") : line.rank === 1 ? t("底座") : line.rank ? t("第 {{rank}}", { rank: line.rank }) : "";
 const safe = (id: string) => id.replace(/[^a-zA-Z0-9_-]/g, "_");
 
 /**
@@ -20,6 +22,10 @@ export function LineNetwork({ lines, edges, onConfirm, onReject, title = "主线
   lines: NetworkLine[]; edges: NetworkEdge[]; title?: string;
   onConfirm?: (edge: NetworkEdge) => void; onReject?: (edge: NetworkEdge) => void;
 }) {
+  const t = useT();
+  const locale = useLocale();
+  // A relation kind's label and meaning, in the page's language.
+  const kindLabel = (kind: string) => RELATION_KIND_LABEL[kind] ? t(RELATION_KIND_LABEL[kind]!) : "";
   const [selected, setSelected] = useState<string | null>(null);
   const interactive = Boolean(onConfirm || onReject);
   const at = new Map(lines.map((line, index) => {
@@ -49,42 +55,48 @@ export function LineNetwork({ lines, edges, onConfirm, onReject, title = "主线
     return { edge, d: `M${start.x.toFixed(1)},${start.y.toFixed(1)} Q${mx.toFixed(1)},${my.toFixed(1)} ${end.x.toFixed(1)},${end.y.toFixed(1)}`, lx, ly };
   });
 
-  return <section className="ln" aria-label={title || "主线飞轮"}>
-    {title && <h3>{title}</h3>}
-    {drawn.length === 0 ? <p className="ln-muted">还没有主线之间的关系。访谈中提出的关系显示在此。</p> : <>
-      <svg className="ln-graph" viewBox={`0 0 ${SIZE} ${SIZE}`} role="img" aria-label={`${title}：${drawn.length} 条关系`}>
+  // `title` is a Chinese key (or already translated, which `t` returns as it is).
+  return <section className="ln" aria-label={t(title || "主线飞轮")}>
+    {title && <h3>{t(title)}</h3>}
+    {drawn.length === 0 ? <p className="ln-muted">{t("还没有主线之间的关系。访谈中提出的关系显示在此。")}</p> : <>
+      <svg className="ln-graph" viewBox={`0 0 ${SIZE} ${SIZE}`} role="img" aria-label={t("{{title}}：{{count}} 条关系", { title: t(title), count: drawn.length })}>
         <defs>{lines.map((line) => <marker key={line.id} id={`ln-arrow-${safe(line.id)}`} data-line={line.id} viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
           <path d="M0,0 L8,4 L0,8 z" style={{ fill: "var(--lc, var(--ink))" }} /></marker>)}</defs>
         {geometry.map(({ edge, d }) => <path key={edge.id} d={d} data-line={edge.from} className="ln-edge"
           data-status={edge.status} data-dim={selected && selected !== edge.id ? "" : undefined} data-on={selected === edge.id ? "" : undefined}
           markerEnd={`url(#ln-arrow-${safe(edge.from)})`} onClick={interactive ? () => setSelected(selected === edge.id ? null : edge.id) : undefined}>
-          <title>{`${name(edge.from)} → ${name(edge.to)}：${RELATION_KIND_LABEL[edge.kind] ?? ""}。${edge.explanation}`}</title></path>)}
-        {geometry.map(({ edge, lx, ly }) => RELATION_KIND_LABEL[edge.kind] ? <g key={`l-${edge.id}`} className="ln-label" data-line={edge.from}
-          data-dim={selected && selected !== edge.id ? "" : undefined} onClick={interactive ? () => setSelected(selected === edge.id ? null : edge.id) : undefined}>
-          <rect x={lx - 17} y={ly - 9} width={34} height={18} rx={2} />
-          <text x={lx} y={ly + 4} textAnchor="middle">{RELATION_KIND_LABEL[edge.kind]}</text>
-        </g> : null)}
-        {lines.map((line) => { const p = at.get(line.id)!; const role = roleOf(line); return <g key={line.id} data-line={line.id} className="ln-node">
+          <title>{t("{{from}} → {{to}}：{{kind}}。{{explanation}}", { from: name(edge.from), to: name(edge.to), kind: kindLabel(edge.kind), explanation: edge.explanation })}</title></path>)}
+        {geometry.map(({ edge, lx, ly }) => {
+          if (!RELATION_KIND_LABEL[edge.kind]) return null;
+          // English kind names are longer than two characters: the box follows the word.
+          const half = locale === "en" ? Math.max(17, kindLabel(edge.kind).length * 3.3 + 5) : 17;
+          return <g key={`l-${edge.id}`} className="ln-label" data-line={edge.from}
+            data-dim={selected && selected !== edge.id ? "" : undefined} onClick={interactive ? () => setSelected(selected === edge.id ? null : edge.id) : undefined}>
+            <rect x={lx - half} y={ly - 9} width={half * 2} height={18} rx={2} />
+            <text x={lx} y={ly + 4} textAnchor="middle">{kindLabel(edge.kind)}</text>
+          </g>;
+        })}
+        {lines.map((line) => { const p = at.get(line.id)!; const role = roleOf(line, t); return <g key={line.id} data-line={line.id} className="ln-node">
           <circle cx={p.x} cy={p.y} r={NODE} strokeWidth={line.rank === 1 || line.hard ? 4 : 2} />
           <text x={p.x} y={p.y + 5} textAnchor="middle">{line.label}</text>
           {role && <text className="ln-role" x={p.x} y={p.y < C - 1 ? p.y - NODE - 8 : p.y + NODE + 16} textAnchor="middle">{role}</text>}
         </g>; })}
       </svg>
-      {kinds.length > 0 && <dl className="ln-legend">{kinds.map((kind) => <div key={kind}><dt>{RELATION_KIND_LABEL[kind]}</dt><dd>{RELATION_KIND_MEANING[kind]}</dd></div>)}
-        <div><dt>实线 / 虚线</dt><dd>本人确认成立 / 尚待判断</dd></div></dl>}
-      {loops.length > 0 && <p className="ln-loops"><b>已形成的飞轮</b>{loops.slice(0, 3).map((loop) => <span key={loop.join()}>{[...loop, loop[0]!].map(name).join(" → ")}</span>)}
-        {loops.length > 3 && <small>等 {loops.length} 个回路</small>}</p>}
-      {!loops.length && possible.length > 0 && <p className="ln-loops"><b>可能的飞轮（待确认）</b>{possible.slice(0, 3).map((loop) => <span key={loop.join()}>{[...loop, loop[0]!].map(name).join(" → ")}</span>)}</p>}
+      {kinds.length > 0 && <dl className="ln-legend">{kinds.map((kind) => <div key={kind}><dt>{kindLabel(kind)}</dt><dd>{RELATION_KIND_MEANING[kind] ? t(RELATION_KIND_MEANING[kind]!) : ""}</dd></div>)}
+        <div><dt>{t("实线 / 虚线")}</dt><dd>{t("本人确认成立 / 尚待判断")}</dd></div></dl>}
+      {loops.length > 0 && <p className="ln-loops"><b>{t("已形成的飞轮")}</b>{loops.slice(0, 3).map((loop) => <span key={loop.join()}>{[...loop, loop[0]!].map(name).join(" → ")}</span>)}
+        {loops.length > 3 && <small>{t("等 {{count}} 个回路", { count: loops.length })}</small>}</p>}
+      {!loops.length && possible.length > 0 && <p className="ln-loops"><b>{t("可能的飞轮（待确认）")}</b>{possible.slice(0, 3).map((loop) => <span key={loop.join()}>{[...loop, loop[0]!].map(name).join(" → ")}</span>)}</p>}
       {interactive && <ul className="ln-list">
         {drawn.map((edge) => <li key={edge.id} data-line={edge.from} data-on={selected === edge.id ? "" : undefined} data-status={edge.status}>
           <button type="button" className="ln-pick" onClick={() => setSelected(selected === edge.id ? null : edge.id)}>
-            <b>{name(edge.from)} → {name(edge.to)}</b> <span className="ln-kind">{RELATION_KIND_LABEL[edge.kind] ?? edge.kind}</span>
-            {edge.status === "confirmed" && <span className="ln-kind">已确认</span>}
+            <b>{name(edge.from)} → {name(edge.to)}</b> <span className="ln-kind">{kindLabel(edge.kind) || edge.kind}</span>
+            {edge.status === "confirmed" && <span className="ln-kind">{t("已确认")}</span>}
           </button>
           <p>{edge.explanation}</p>
           {edge.status === "candidate" && <span className="ln-actions">
-            {onConfirm && <button type="button" onClick={() => onConfirm(edge)}>成立</button>}
-            {onReject && <button type="button" className="ln-quiet" onClick={() => onReject(edge)}>不成立</button>}
+            {onConfirm && <button type="button" onClick={() => onConfirm(edge)}>{t("成立")}</button>}
+            {onReject && <button type="button" className="ln-quiet" onClick={() => onReject(edge)}>{t("不成立")}</button>}
           </span>}
         </li>)}
       </ul>}

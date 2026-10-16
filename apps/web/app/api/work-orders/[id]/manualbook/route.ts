@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
+import { tOf } from "../../../../../lib/locale";
 import path from "node:path";
 import { NextResponse } from "next/server";
 import { dataDirectory, getStore } from "../../../../../lib/crossline";
@@ -28,7 +29,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const building = Boolean(last && ["tutorial.requested", "manualbook.progress", "materials.retry_requested"].includes(last.type)
     && Date.now() - Date.parse(last.createdAt) < 2 * 3_600_000);
   const progress = building && last?.type === "manualbook.progress" ? last.payload : null;
-  const blocker = last && (last.type === "materials.blocked" || last.type === "tutorial.blocked") ? (last.payload as { message?: string }).message ?? "教程未能生成" : null;
+  const blocker = last && (last.type === "materials.blocked" || last.type === "tutorial.blocked") ? (last.payload as { message?: string }).message ?? tOf(access.ctx)("教程未能生成") : null;
   if (!existsSync(path.join(root, "flow.json"))) return NextResponse.json({ built: false, building, progress, blocker, materials: [] });
   const inside = (relative: string) => { const target = path.resolve(root, relative); return target.startsWith(root + path.sep) ? target : undefined; };
   let flow: { nodes: Array<{ id: string; title: string; kind: string; goal: string; stage: number }>; edges: Array<{ from: string; to: string }> };
