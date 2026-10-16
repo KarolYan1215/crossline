@@ -215,7 +215,9 @@ async function extractDocument(documentId: string, workspaceId: string) {
  * owner's account only. A guest reaches this app over the private network from another device; offering them these readings handed
  * them the owner's documents, window titles and working hours (found walking the app as an invitee, 2026-10-15).
  */
-const machineOwner = (workspaceId: string) => runtimeOwner(analysisStore) === workspaceId;
+// On the hosted beta the machine is a shared server: nobody's account reads its folders, screen or logs, and nobody gets its shell.
+const hostedBeta = process.env.CROSSLINE_PUBLIC_BETA === "1";
+const machineOwner = (workspaceId: string) => !hostedBeta && runtimeOwner(analysisStore) === workspaceId;
 const OWNER_ONLY_FOLDER = { state: "blocked" as const, code: "FOLDER_OWNER_ONLY",
   message: "文件夹在运行 Crossline 的那台电脑上，只有那台电脑的主人能授权。请改用「添加文件」上传。" };
 const folderDeps = { dataDir, home: homedir(), readText: extractText };
@@ -763,7 +765,7 @@ const calendarWriteLogin = createWriteLogin(analysisStore, { session: getCalenda
 const agentService = createAgentService({
   // The shell assistant runs on the machine owner's runtime only: it works with the operating system user's files, and a guard is a
   // tripwire, not a sandbox, so it is not offered to other accounts on this machine (docs/model-providers.md).
-  store: analysisStore, repoRoot, getClient: () => codexSupervisor?.client, readCost: () => readCost(), isOwner: (workspaceId) => runtimeOwner(analysisStore) === workspaceId,
+  store: analysisStore, repoRoot, getClient: () => codexSupervisor?.client, readCost: () => readCost(), isOwner: machineOwner,
   log: (event) => console.info(JSON.stringify({ ...event, checkedAt: new Date().toISOString() }))
 });
 for (const workspace of analysisStore.listWorkspaces()) {

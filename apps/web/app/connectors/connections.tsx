@@ -11,6 +11,7 @@ import { publishStatus } from "../../lib/calendar-publish";
 import { CalendarWriteLogin } from "./calendar-write-login";
 import { localStamp, type AccessContext } from "@crossline/core";
 import { Tag } from "../ui/tag";
+import { graphConfigured, isHostedBeta } from "../../lib/hosting";
 
 /**
  * The calendar as one module (it was two cards that did not mention each other): which calendars are read, the last sync, and
@@ -22,8 +23,11 @@ export function CalendarModule({ ctx }: { ctx: AccessContext }) {
   const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
   // A failure older than the last write that went through is over.
   const failure = publish.failure && (!publish.last || publish.failure.at > publish.last.at) ? publish.failure : undefined;
+  // The Microsoft calendar (read sync, the writer's sign-in, the calendar list) needs an Entra app this install may not have: the
+  // hosted beta has none, and there its cards only offered a sign-in that could not work and a list that answered 404.
+  const graph = graphConfigured() || !isHostedBeta();
   return <div className="st-modules">
-    <section className="st-card" aria-label="日历状态">
+    {graph && <section className="st-card" aria-label="日历状态">
       <header><h3>日历</h3></header>
       <div className="st-row"><span className="st-row-label">读取<small>{calendar.synced
         ? `今日导入 ${calendar.importedBlocks} 个日程${calendar.lastChangeAt ? ` · 最近变化 ${localStamp(calendar.lastChangeAt, effectiveSchedulePreferences(ctx).preferences.timeZone)}（${calendar.lastChangeCount} 项）` : " · 无变化"}`
@@ -38,11 +42,11 @@ export function CalendarModule({ ctx }: { ctx: AccessContext }) {
       {failure && <div className="st-row"><span className="st-row-label">写入未完成<small>{localStamp(failure.at, zone)} · {failure.text}{failure.relogin
         ? "。用上面的「获取登录代码」重新登录后会自动重试" : ""}。其他日历未受影响。</small></span>
         <a href="/approvals#asks">去处理</a></div>}
-    </section>
+    </section>}
     <CalendarApps />
     <CalendarSubscriptions />
     <SourceFolders />
-    <CalendarSources />
+    {graph && <CalendarSources />}
   </div>;
 }
 
@@ -51,7 +55,7 @@ export function ConnectionsSection() {
   return <div className="st-modules">
     <CodexAccountControl />
     <ModelProviderCard />
-    <TailscaleTrust />
+    {!isHostedBeta() && <TailscaleTrust />}
     <DeviceLeases />
   </div>;
 }

@@ -178,8 +178,13 @@ export function aiToolsFor(store: CrosslineStore, workspaceId: string): AiTool[]
   return assistantAvailable(store, workspaceId) ? tools : tools.filter((tool) => tool.kind !== "assistant");
 }
 
-/** Whether this workspace has the machine's assistant: it is the runtime owner, or no workspace has been marked owner yet. */
-export function assistantAvailable(store: CrosslineStore, workspaceId: string): boolean {
+/**
+ * Whether this workspace has the machine's assistant: it is the runtime owner, or no workspace has been marked owner yet. Never on the
+ * hosted beta (`CROSSLINE_PUBLIC_BETA=1`): there the machine is a server every account's ledger sits on, and a shell guarded by a
+ * tripwire, not a sandbox, would reach all of them (found walking app.crossline.lol as its owner, 2026-10-16).
+ */
+export function assistantAvailable(store: CrosslineStore, workspaceId: string, env: NodeJS.ProcessEnv = process.env): boolean {
+  if (env.CROSSLINE_PUBLIC_BETA === "1") return false;
   if (store.getSetting(workspaceId, RUNTIME_OWNER_SETTING) === "1") return true;
   return !store.listWorkspaces().some((workspace) => store.getSetting(workspace.id, RUNTIME_OWNER_SETTING) === "1");
 }

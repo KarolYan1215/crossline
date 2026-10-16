@@ -372,7 +372,8 @@
 - `CROSSLINE_STATE_DIR` 是 POSIX 路径时按 POSIX 拼接（`codexProcessEnvironment`）。
 - Codex 用上游同一标签 rust-v0.155.0 的 Linux 发布版，按 `CODEX_LINUX_RELEASE_BINARY_SHA256` 固定哈希；fork 唯一的改动是 Windows 迁移修复。
 - 密钥存储在 Linux 上改用 AES-256-GCM，主密钥放在 `CROSSLINE_SECRET_KEY`（`createKeyFileSecretStore`）。
-- 机主专用的功能（屏幕活动、键鼠节律、桌面通知、读文件夹、带 shell 的助手）在服务器上本就只给机主工作区，访客看不到。
+- 机主专用的功能（屏幕活动、键鼠节律、作息、桌面通知、读文件夹、Codex 使用记录、带 shell 的助手）在 `CROSSLINE_PUBLIC_BETA=1` 时对**所有账号**关闭，机主也不例外（2026-10-16 走查发现）：之前机主的账号在服务器上仍算「电脑主人」，助手的 shell 和文件夹授权会落在装着所有人账本的服务器上，守卫只是绊线不是沙箱。`assistantAvailable` 与 worker 的 `machineOwner` 在这个开关下都返回否。
+- 设置页在托管内测里不显示：微软日历的读取与写入登录（没配 `CROSSLINE_MS_CLIENT_ID` 时；之前点了只会失败，日历列表答 404）、私有网络身份；「手机访问」改为给出 `CROSSLINE_WEB_BASE_URL` 和推送开关（`apps/web/lib/hosting.ts`）。
 - 第一个注册的账号就是这台服务器的「机主」，所以本人先注册。
 
 **这台主机上的部署形态**（`deploy/`）

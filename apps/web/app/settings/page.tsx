@@ -7,6 +7,7 @@ import { TelemetryCard } from "./telemetry-card";
 import { AutostartCard } from "./autostart-card";
 import { autostartAvailable, readAutostart } from "../../lib/autostart";
 import { isLocalInstall } from "../../lib/install-mode";
+import { isHostedBeta } from "../../lib/hosting";
 import { isEmailAuthConfigured } from "../../lib/auth";
 import { PasswordCard } from "./password-card";
 import { EnergyCard, type EnergyStatus } from "./energy-card";
@@ -78,7 +79,10 @@ export default async function SettingsPage() {
   const assistant = loadAssistant(ctx);
   const states = readCategories(store, ctx.workspaceId);
   const host = process.env.CROSSLINE_TAILSCALE_HOSTNAME?.trim();
-  const phoneUrl = process.env.CROSSLINE_DEPLOYMENT_MODE === "private" && host ? `https://${host}` : undefined;
+  const hosted = isHostedBeta();
+  // On the hosted beta the app already is a web address; elsewhere the phone reaches this machine over the private network.
+  const phoneUrl = hosted ? process.env.CROSSLINE_WEB_BASE_URL?.trim() || undefined
+    : process.env.CROSSLINE_DEPLOYMENT_MODE === "private" && host ? `https://${host}` : undefined;
   // 精力: what the model reads now, and from how many nights and reports (docs/one-input.md §5).
   const energy = energyModel(ctx, readAvailability(ctx));
   const fortnight = new Date(Date.now() - 14 * 86_400_000).toISOString();
@@ -110,9 +114,9 @@ export default async function SettingsPage() {
                 <a className="secondary-button" href="/onboarding">{interview.started && !interview.complete ? "继续访谈" : "打开访谈"}</a></div>
             </section>
             <section className="st-card" aria-label="手机访问" id="phone">
-              <header><h3>手机访问</h3><small>与电脑同一账本；本机需保持运行</small></header>
+              <header><h3>手机访问</h3><small>{hosted ? "手机与电脑用同一个账号、同一本账" : "与电脑同一账本；本机需保持运行"}</small></header>
               {phoneUrl ? <>
-                <div className="st-row"><span className="st-row-label">地址<small>手机连接同一私有网络后打开，添加到主屏幕</small></span><a href={phoneUrl}><b>{phoneUrl}</b></a></div>
+                <div className="st-row"><span className="st-row-label">地址<small>{hosted ? "在手机浏览器打开并登录，添加到主屏幕" : "手机连接同一私有网络后打开，添加到主屏幕"}</small></span><a href={phoneUrl}><b>{phoneUrl}</b></a></div>
                 <PhonePush />
               </> : <p className="muted">手机访问未开启。</p>}
             </section>
@@ -133,8 +137,9 @@ export default async function SettingsPage() {
 
         <section id="automation" className="st-section" aria-labelledby="st-automation"><h2 id="st-automation">自动化与助手</h2>
           {/* The shell assistant runs as this machine's user, so it works only for the machine owner's account (decided 2026-10-10). */}
-          {!machine
-            && <p className="muted">这台电脑上的助手只为电脑主人工作，这个账号的步骤都由本人完成；分析、拆分与规划照常在自己的模型连接上运行。</p>}
+          {!machine && <p className="muted">{hosted
+            ? "网页版不提供能在电脑上执行命令的助手，步骤都由本人完成；分析、拆分、规划和教程照常在自己的模型连接上运行。"
+            : "这台电脑上的助手只为电脑主人工作，这个账号的步骤都由本人完成；分析、拆分与规划照常在自己的模型连接上运行。"}</p>}
           <AutomationModule assistant={machine} paused={assistant.paused} permissionMode={permissionModeEnabled(ctx)} autoHandoff={isAutoHandoff(store, ctx.workspaceId)}
             categories={assistant.categories.map((item) => ({ category: item.category, label: item.label, explained: item.explained,
               mode: categoryMode(states[item.category]), cleanRuns: item.cleanRuns, runsToTrust: item.runsToTrust }))}
@@ -161,7 +166,9 @@ export default async function SettingsPage() {
         </section>
 
         <section id="privacy" className="st-section" aria-labelledby="st-privacy"><h2 id="st-privacy">隐私与屏幕活动</h2>
-          {!machine && <p className="muted">屏幕活动、作息记录、键鼠节律和 Codex 使用记录读的是运行 Crossline 的那台电脑，只对它的主人开放。</p>}
+          {!machine && <p className="muted">{hosted
+            ? "屏幕活动、作息记录、键鼠节律和 Codex 使用记录要读本人电脑，网页版不提供；精力按本人自评和手机记录推算。"
+            : "屏幕活动、作息记录、键鼠节律和 Codex 使用记录读的是运行 Crossline 的那台电脑，只对它的主人开放。"}</p>}
           {machine && <LocalActivityToggle consent={consent} detail={detail} pausedUntil={setting(ACTIVITY_PAUSED_UNTIL) || null} blacklist={blacklist}
             hours={hours} categories={[...byCategory].sort((a, b) => b[1] - a[1])
               .map(([category, minutes]) => ({ label: CATEGORY_LABEL[category as ActivityCategory] ?? "其他", minutes }))} />}
