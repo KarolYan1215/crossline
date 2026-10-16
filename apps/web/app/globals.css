@@ -263,6 +263,8 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .task-detail-flywheel small{display:block;color:var(--graphite);font-size:12px}
 .card-preview-button{position:absolute;top:6px;right:6px;border:1px solid var(--mist);background:var(--paper);padding:2px 5px;font-size:12px;line-height:1;cursor:pointer;z-index:1}
 .card-preview-button:hover{border-color:var(--ink)}
+/* A card with the corner preview button keeps its text clear of it (longer English lines reached under it on a phone). */
+.review-milestone > b, .review-milestone > .review-flag{display:block;padding-right:30px}
 
 /* ── review / approvals ────────────────────── */
 .review-block{padding:10px 0;border-bottom:1px solid var(--mist)}

@@ -54,6 +54,13 @@ for (const where of PAGES) {
         // Inside a closed <details> only the summary is drawn, though the browser still reports boxes for the rest.
         const folded = element.closest("details:not([open])");
         if (folded && !element.closest("summary")) continue;
+        // A fixed or sticky layer (the phone's tab bar, the Helper button) floats over the page by design; content scrolls under it.
+        let floating = false;
+        for (let up: Element | null = element; up && up !== document.body; up = up.parentElement) {
+          const position = getComputedStyle(up).position;
+          if (position === "fixed" || position === "sticky") { floating = true; break; }
+        }
+        if (floating) continue;
         let clip = { left: -Infinity, top: -Infinity, right: Infinity, bottom: Infinity };
         for (let up: Element | null = element; up && up !== document.body; up = up.parentElement) {
           const css = getComputedStyle(up);
@@ -98,5 +105,7 @@ test("the frame is English: the navigation and the switch back to Chinese", asyn
   await page.waitForLoadState("networkidle");
   const nav = testInfo.project.name.includes("mobile") ? page.locator(".bottom-nav") : page.locator("header");
   await expect(nav.getByText("Today", { exact: true }).first()).toBeVisible();
-  await expect(page.getByRole("button", { name: "切换到中文" }).first()).toBeAttached();
+  // On a phone the switch is under 「More」.
+  if (testInfo.project.name.includes("mobile")) await page.locator(".bottom-nav-more > summary").click();
+  await expect(page.getByRole("button", { name: "切换到中文" }).first()).toBeVisible();
 });
