@@ -1,5 +1,6 @@
-import { TYPE_AXES, TYPE_GROUPS, TYPE_TABLE } from "@crossline/core/assess";
+import { TYPE_AXES, TYPE_GROUPS, TYPE_TABLE, type TypeAxisId } from "@crossline/core/assess";
 import { RELATIONS, TYPE_LINES, TYPE_SUBTITLE } from "@crossline/core/assess-content";
+import { tFor, type Locale } from "../../lib/i18n";
 
 /**
  * Every fixed string the posters print, and the text the font subsets must cover (`posterFixedText`). Pure, so the font script
@@ -31,14 +32,49 @@ export const LABELS = {
   replacement: "·"
 } as const;
 
-/** 「跨界倾向约超过 93% 的人（理论估算）」 */
-export const rankLine = (rank: { pole: string; percent: number; estimated: boolean }): string =>
-  `${rank.pole}倾向约超过 ${rank.percent}% 的人${rank.estimated ? LABELS.rankTail : ""}`;
+export type PosterLabels = { -readonly [K in keyof typeof LABELS]: string };
 
-/** Each pole explained, read off the axis's own question (「A，还是 B」), so the long image adds no copy of its own. */
-export function poleExplanations(question: string): [string, string] {
-  const [left, right] = question.split("，还是");
+/**
+ * The labels in the reader's language. Chinese is `LABELS` itself; the English is plain ASCII (straight quotes, no dashes or ellipses),
+ * which both poster faces carry, so nothing English prints as 「·」.
+ */
+export function posterLabels(locale?: Locale): PosterLabels {
+  if (locale !== "en") return LABELS;
+  const t = tFor(locale);
+  return Object.fromEntries(Object.entries(LABELS).map(([key, value]) => [key, key === "replacement" || key === "brand" ? value : t(value)])) as PosterLabels;
+}
+
+/** 「跨界倾向约超过 93% 的人（理论估算）」, "Leans Generalist more than about 93% of people (estimate)". `rank.pole` is already translated. */
+export const rankLine = (rank: { pole: string; percent: number; estimated: boolean }, locale?: Locale): string =>
+  tFor(locale)("{{pole}}倾向约超过 {{percent}}% 的人", { pole: rank.pole, percent: rank.percent }) + (rank.estimated ? posterLabels(locale).rankTail : "");
+
+/** Each pole explained in English: what the long image prints under the pole's name (the Chinese is read off the axis's question). */
+const POLES_EN: Record<TypeAxisId, [string, string]> = {
+  scope: ["Puts attention on one track and goes deep", "Links several tracks together"],
+  basis: ["Judges by data and evidence", "Judges by feel and a vision"],
+  output: ["Gets satisfaction from making things", "Gets satisfaction from reaching people"],
+  rhythm: ["Moves forward by plan", "Adjusts along the way"]
+};
+
+/** Each pole explained, read off the axis's own question (「A，还是 B」), so the long image adds no copy of its own; English from `POLES_EN`. */
+export function poleExplanations(question: string, locale?: Locale, axis?: TypeAxisId): [string, string] {
+  if (locale === "en" && axis) return POLES_EN[axis];
+  const [left, right] = question.split("，还是"); // i18n-ignore: splits the stored Chinese question
   return [left!.trim(), (right ?? "").trim()];
+}
+
+/** Every English string a poster can print outside a nickname and a model's words, for the glyph test. */
+export function posterEnglishText(): string[] {
+  const t = tFor("en");
+  return [
+    ...Object.values(posterLabels("en")), ...Object.values(POLES_EN).flat(),
+    ...Object.values(TYPE_TABLE).map((type) => t(type.name)), ...Object.values(TYPE_GROUPS).flatMap((group) => [t(group.name), t(group.blurb)]),
+    ...TYPE_AXES.flatMap((axis) => [t(axis.left.label), t(axis.right.label), t("{{pole}}倾向约超过 {{percent}}% 的人", { pole: t(axis.left.label), percent: 95 })]),
+    ...Object.values(TYPE_SUBTITLE).map((text) => t(text)),
+    ...Object.values(TYPE_LINES).flatMap((lines) => [...lines.lines, ...lines.more.flat()].flatMap((line) => [t(line.identity), t(line.domain)]).concat(lines.loop.map((step) => t(step)))),
+    ...Object.values(RELATIONS).flatMap((relation) => [t(relation.name), t(relation.when), ...relation.tips.map((tip) => t(tip))]),
+    t("{{name}}的思维模式类型", { name: "A" }), t("{{also}}：", { also: t(LABELS.also) })
+  ];
 }
 
 const ASCII = Array.from({ length: 95 }, (_, index) => String.fromCharCode(32 + index)).join("");
@@ -48,12 +84,14 @@ export function posterFixedText(): string {
   const parts: string[] = [ASCII, ...Object.values(LABELS), "%", "→"];
   for (const [code, type] of Object.entries(TYPE_TABLE)) parts.push(code, type.name);
   for (const group of Object.values(TYPE_GROUPS)) parts.push(group.name, group.blurb);
+  // i18n-ignore-start: characters for the font subset, not interface text
   for (const axis of TYPE_AXES) parts.push(axis.left.letter, axis.left.label, axis.left.en, axis.right.letter, axis.right.label, axis.right.en, axis.question, `${axis.left.label}倾向约超过 ${axis.right.label}倾向约超过`);
   parts.push(...Object.values(TYPE_SUBTITLE));
   for (const lines of Object.values(TYPE_LINES)) {
     for (const line of [...lines.lines, ...lines.more.flat()]) parts.push(line.identity, `${line.domain}的`);
     parts.push(...lines.loop);
   }
+  // i18n-ignore-end
   for (const relation of Object.values(RELATIONS)) parts.push(relation.name, relation.when, ...relation.tips);
   return [...new Set(parts.join(""))].sort().join("");
 }

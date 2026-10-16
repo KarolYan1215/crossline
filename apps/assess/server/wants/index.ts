@@ -1,4 +1,5 @@
 import { validateWantLines, wantsPlan, type WantLines, type WantsInput } from "@crossline/core/assess-wants";
+import type { Locale } from "../../lib/i18n";
 import { publicType } from "../../lib/public-type";
 import { dailyLimit, takeSlot } from "../avatar/budget";
 import { posterFonts } from "../poster/fonts";
@@ -45,8 +46,8 @@ function printable(lines: WantLines): boolean {
 }
 
 /** What is wrong with one answer, or the lines when nothing is. */
-function judge(answer: string): { ok: true; lines: WantLines } | { ok: false; problem: string } {
-  const checked = validateWantLines(jsonFromAnswer(answer));
+function judge(answer: string, locale?: Locale): { ok: true; lines: WantLines } | { ok: false; problem: string } {
+  const checked = validateWantLines(jsonFromAnswer(answer), locale);
   if (!checked.ok) return { ok: false, problem: `TEXT_ANSWER_INVALID: ${checked.problems.slice(0, 4).join("; ").slice(0, 200)}` };
   if (!printable(checked.value)) return { ok: false, problem: "TEXT_ANSWER_UNPRINTABLE" };
   return { ok: true, lines: checked.value };
@@ -57,16 +58,16 @@ function judge(answer: string): { ok: true; lines: WantLines } | { ok: false; pr
  * loop steps of 11–17 characters where the poster's boxes hold 10 (2026-10-16), and a second look costs seconds where the rules' lines
  * lose what the person wrote.
  */
-async function askModel(model: TextModel, result: StoredResult, wants: WantsInput): Promise<WantLines> {
+async function askModel(model: TextModel, result: StoredResult, wants: WantsInput, locale?: Locale): Promise<WantLines> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TEXT_TIMEOUT_MS);
   try {
-    const messages = wantsMessages(publicType(result.scores, {}, result.id), wants);
+    const messages = wantsMessages(publicType(result.scores, {}, result.id, undefined, locale), wants, locale);
     const answer = await model.complete(messages, controller.signal);
-    const first = judge(answer);
+    const first = judge(answer, locale);
     if (first.ok) return first.lines;
     const repaired = judge(await model.complete([...messages, { role: "assistant", content: answer },
-      { role: "user", content: `这个回答不合规则：${first.problem}。按规则改好（每个字段的字数都要在范围内），只输出 JSON。` }], controller.signal));
+      { role: "user", content: repairMessage(first.problem, locale) }], controller.signal), locale);
     if (repaired.ok) return repaired.lines;
     throw new TextModelError(repaired.problem, 422);
   } catch (error) {
@@ -77,9 +78,18 @@ async function askModel(model: TextModel, result: StoredResult, wants: WantsInpu
   }
 }
 
-/** The three lines for this result and what the person said. Never throws. */
-export async function composeWants(result: StoredResult, wants: WantsInput): Promise<WantLines> {
-  const plan = wantsPlan(result.code, wants);
+/** The second turn when the first answer broke a rule (instructions to the model, in the language it is writing in). */
+function repairMessage(problem: string, locale?: Locale): string {
+  if (locale === "en") return `That answer breaks the rules: ${problem}. Fix it by the rules (every field within its length range) and output only JSON.`;
+  return `这个回答不合规则：${problem}。按规则改好（每个字段的字数都要在范围内），只输出 JSON。`; // i18n-ignore: an instruction to the model
+}
+
+/**
+ * The three lines for this result and what the person said, written in `locale` — the language of the page they answered on: the
+ * written combination and the rules in that language, and the model asked to write in it. Never throws.
+ */
+export async function composeWants(result: StoredResult, wants: WantsInput, locale?: Locale): Promise<WantLines> {
+  const plan = wantsPlan(result.code, wants, locale);
   if (!plan.needsModel) return plan.lines;
   const { model, now } = current();
   if (!model) return plan.lines;
@@ -89,7 +99,7 @@ export async function composeWants(result: StoredResult, wants: WantsInput): Pro
   }
   const started = Date.now();
   try {
-    const lines = await askModel(model, result, wants);
+    const lines = await askModel(model, result, wants, locale);
     console.info(JSON.stringify({ event: "wants.model_ready", resultId: result.id, model: model.label, seconds: Math.round((Date.now() - started) / 1000) }));
     return lines;
   } catch (error) {

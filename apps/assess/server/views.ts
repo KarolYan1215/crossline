@@ -1,5 +1,7 @@
 import { TYPE_TABLE } from "@crossline/core/assess";
+import { wantsPlan, type WantLines } from "@crossline/core/assess-wants";
 import type { AvatarStatus, InviteView, PairView, ResultView } from "../lib/contract";
+import { tFor, type Locale } from "../lib/i18n";
 import { pairRelation, publicType } from "../lib/public-type";
 import { avatarStatus } from "./avatar";
 import { appUrl, baseUrl } from "./config";
@@ -25,10 +27,18 @@ export function figureTag(avatar: AvatarStatus): string {
 /** The poster tag of one result: its figure, and — once set — how many times its lines were set (the poster prints them too). */
 const posterTag = (result: StoredResult, avatar: AvatarStatus) => `${figureTag(avatar)}${result.wantsUpdates ? `l${result.wantsUpdates}` : ""}`;
 
-export const posterUrl = (result: StoredResult, avatar = avatarOf(result)) => `/api/poster/${result.inviteToken}/type.png?f=${posterTag(result, avatar)}`;
-export const longUrl = (result: StoredResult, avatar = avatarOf(result)) => `/api/poster/${result.inviteToken}/long.png?f=${posterTag(result, avatar)}`;
-export const pairCardUrl = (pair: StoredPair, a: { result: StoredResult; avatar: AvatarStatus }, b: { result: StoredResult; avatar: AvatarStatus }) =>
-  `/api/poster/pair/${pair.pairToken}.png?f=${posterTag(a.result, a.avatar)}.${posterTag(b.result, b.avatar)}`;
+/**
+ * The reader's language on a poster address (`&l=en`; none for Chinese): the same poster in two languages is two addresses, so a
+ * browser that cached one never shows it after the reader switches. The poster routes read it before the cookie.
+ */
+const lang = (locale?: Locale) => locale === "en" ? "&l=en" : "";
+
+export const posterUrl = (result: StoredResult, avatar = avatarOf(result), locale?: Locale) =>
+  `/api/poster/${result.inviteToken}/type.png?f=${posterTag(result, avatar)}${lang(locale)}`;
+export const longUrl = (result: StoredResult, avatar = avatarOf(result), locale?: Locale) =>
+  `/api/poster/${result.inviteToken}/long.png?f=${posterTag(result, avatar)}${lang(locale)}`;
+export const pairCardUrl = (pair: StoredPair, a: { result: StoredResult; avatar: AvatarStatus }, b: { result: StoredResult; avatar: AvatarStatus }, locale?: Locale) =>
+  `/api/poster/pair/${pair.pairToken}.png?f=${posterTag(a.result, a.avatar)}.${posterTag(b.result, b.avatar)}${lang(locale)}`;
 export const inviteUrl = (result: StoredResult) => `${baseUrl()}/t/${result.inviteToken}`;
 
 /** The figure as the avatar pipeline reports it, or the type's template when the pipeline cannot answer. */
@@ -41,19 +51,32 @@ export function avatarOf(result: StoredResult): AvatarStatus {
   }
 }
 
-/** The public type of a result, with the lines the person said they want once they have. */
-export const typeOf = (result: StoredResult, recorded = recordedScores()) => publicType(result.scores, recorded, result.id, result.wants?.lines);
+/**
+ * The lines a result's person said they want, for a reader in `locale`. The rules' lines and a written combination are remade in the
+ * reader's language from what the person picked (the same choice, so the same lines); a model's lines stay as the model wrote them.
+ */
+export function wantLinesFor(result: StoredResult, locale?: Locale): WantLines | undefined {
+  const wants = result.wants;
+  if (!wants) return undefined;
+  if (wants.lines.source === "model" || (wants.lines.locale ?? "zh") === (locale ?? "zh")) return wants.lines;
+  return wantsPlan(result.code, wants.input, locale).lines;
+}
 
-export function resultView(result: StoredResult): ResultView {
+/** The public type of a result in the reader's language, with the lines the person said they want once they have. */
+export const typeOf = (result: StoredResult, recorded = recordedScores(), locale?: Locale) =>
+  publicType(result.scores, recorded, result.id, wantLinesFor(result, locale), locale);
+
+export function resultView(result: StoredResult, locale?: Locale): ResultView {
   const pairs = listPairs(result.id).flatMap((pair) => {
     const other = getResultById(pair.inviterId === result.id ? pair.inviteeId : pair.inviterId);
     if (!other) return [];
-    return [{ pairToken: pair.pairToken, nickname: other.nickname, code: other.code, name: TYPE_TABLE[other.code]?.name ?? other.code,
-      relation: pairRelation(result.code, other.code).primary.name }];
+    const name = TYPE_TABLE[other.code]?.name;
+    return [{ pairToken: pair.pairToken, nickname: other.nickname, code: other.code, name: name ? tFor(locale)(name) : other.code,
+      relation: pairRelation(result.code, other.code, undefined, undefined, locale).primary.name }];
   });
   const avatar = avatarOf(result);
   return {
-    nickname: result.nickname, type: typeOf(result), avatar, posterUrl: posterUrl(result, avatar), longUrl: longUrl(result, avatar),
+    nickname: result.nickname, type: typeOf(result, undefined, locale), avatar, posterUrl: posterUrl(result, avatar, locale), longUrl: longUrl(result, avatar, locale),
     inviteUrl: inviteUrl(result), sendEmail: result.sendEmail, mailOn: mailConfigured(),
     betaRequested: betaRequested(result.id), appUrl: appUrl(), pairs,
     wants: result.wants ? { picks: [...result.wants.input.picks], text: result.wants.input.text } : null,
@@ -61,18 +84,19 @@ export function resultView(result: StoredResult): ResultView {
   };
 }
 
-export const inviteView = (result: StoredResult): InviteView => ({ nickname: result.nickname, type: typeOf(result), avatar: avatarOf(result) });
+export const inviteView = (result: StoredResult, locale?: Locale): InviteView =>
+  ({ nickname: result.nickname, type: typeOf(result, undefined, locale), avatar: avatarOf(result) });
 
 /** The pair card: `a` is the inviter, `b` the person who answered the invitation. */
-export function pairView(pair: StoredPair, a: StoredResult, b: StoredResult): PairView {
-  const relation = pairRelation(a.code, b.code, a.wants?.lines.lines, b.wants?.lines.lines);
+export function pairView(pair: StoredPair, a: StoredResult, b: StoredResult, locale?: Locale): PairView {
+  const relation = pairRelation(a.code, b.code, wantLinesFor(a, locale)?.lines, wantLinesFor(b, locale)?.lines, locale);
   const figures = { a: avatarOf(a), b: avatarOf(b) };
   return {
-    a: { nickname: a.nickname, type: typeOf(a), avatar: figures.a },
-    b: { nickname: b.nickname, type: typeOf(b), avatar: figures.b },
+    a: { nickname: a.nickname, type: typeOf(a, undefined, locale), avatar: figures.a },
+    b: { nickname: b.nickname, type: typeOf(b, undefined, locale), avatar: figures.b },
     primary: relation.primary,
     ...(relation.secondary ? { secondary: relation.secondary } : {}),
     sharedLines: relation.sharedLines,
-    cardUrl: pairCardUrl(pair, { result: a, avatar: figures.a }, { result: b, avatar: figures.b })
+    cardUrl: pairCardUrl(pair, { result: a, avatar: figures.a }, { result: b, avatar: figures.b }, locale)
   };
 }

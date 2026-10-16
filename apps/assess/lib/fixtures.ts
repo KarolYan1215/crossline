@@ -1,3 +1,4 @@
+// i18n-exempt: made-up answers for previewing the pages without the server (development only)
 import type { AssessApi } from "./api-client";
 import type { ApiErrorCode, AvatarStatus, InviteView, PairView, PublicType, ResultView } from "./contract";
 import { RESULT_RETENTION_DAYS } from "./contract";

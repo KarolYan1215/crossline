@@ -5,7 +5,8 @@ import { TYPE_AXES, TYPE_GROUPS } from "@crossline/core/assess";
 import { RELATIONS, latinGap } from "@crossline/core/assess-content";
 import type { PartnerView, PublicAxis, PublicType, RelationView } from "../../lib/contract";
 import { faceFor, posterFonts, safe, type Family } from "./fonts";
-import { LABELS, poleExplanations, rankLine } from "./labels";
+import { posterLabels, poleExplanations, rankLine, type PosterLabels } from "./labels";
+import { tFor, type Locale } from "../../lib/i18n";
 import { withName } from "../../lib/names";
 import { qrDataUri } from "./qr";
 
@@ -14,6 +15,10 @@ import { qrDataUri } from "./qr";
  * (7.9:1 on the paper), ink rules between sections, the type group's colour for the type itself and its tint behind the figure. Every
  * size is set for a 1080-wide canvas and no text is under 24 px. Plain `{ type, props }` objects rather than JSX: satori reads them
  * the same, and the module then needs no JSX runtime under tsx, vitest or Next.
+ *
+ * Each poster is drawn in the reader's language (`locale`); the views it is handed are already translated (`lib/public-type.ts`). English
+ * runs longer than Chinese, so in English a type's name shrinks to its line, a loop step may take two lines and a line's field and
+ * identity may wrap — never under 24 px.
  */
 
 export const WIDTH = 1080;
@@ -70,19 +75,32 @@ export function strongestAxis(type: PublicType): PublicAxis {
   return [...type.axes].sort((a, b) => Number(a.ambiguous) - Number(b.ambiguous) || Math.abs(b.score - 50) - Math.abs(a.score - 50))[0]!;
 }
 
-function hero(type: PublicType, nickname: string, figure: Figure, compact: boolean): El {
-  const owner = nickname.trim() ? `${withName(nickname.trim(), "的")}${LABELS.kicker}` : LABELS.kicker;
+/** The size a type's name is set at: Chinese as before; an English name shrunk to fit the column on one line. */
+function nameSize(name: string, base: number, locale: Locale | undefined, column: number): number {
+  if (locale !== "en") return base;
+  // Noto Serif's bold Latin averages about 0.6 em a character.
+  return Math.max(48, Math.min(base, Math.floor(column / (Array.from(name).length * 0.6))));
+}
+
+function hero(type: PublicType, nickname: string, figure: Figure, compact: boolean, locale: Locale | undefined, labels: PosterLabels): El {
+  const t = tFor(locale);
+  const name = nickname.trim();
+  // i18n-ignore: 「的」 joins a nickname to the Chinese label; the English sentence is one key
+  const owner = !name ? labels.kicker : locale === "en" ? t("{{name}}的思维模式类型", { name }) : `${withName(name, "的")}${labels.kicker}`;
   const group = TYPE_GROUPS[type.group.key];
+  // English runs to more lines beside the figure, so on the poster the figure is a little smaller.
+  const panelWidth = compact ? (locale === "en" ? 260 : 300) : 280;
+  const column = INNER - panelWidth - 44;
   return box({ width: "100%", alignItems: "center" },
-    panel(figure, type, compact ? 300 : 280),
+    panel(figure, type, panelWidth),
     box({ flexDirection: "column", marginLeft: 44, flexGrow: 1, flexShrink: 1, minWidth: 0 },
       text(owner, "Sans", { fontSize: 26, color: GREY, marginBottom: 10 }),
       codeLetters(type, compact ? 58 : 64),
-      text(type.name, "Serif", { fontSize: compact ? 92 : 108, fontWeight: 700, color: INK, lineHeight: 1.15, marginTop: 4 }),
-      text(group ? `${type.group.name} · ${group.blurb}` : type.group.name, "Sans", { fontSize: 24, color: GREY, marginTop: 4 }),
-      text(type.subtitle, "Serif", { fontSize: compact ? 32 : 34, color: INK, lineHeight: 1.4, marginTop: 12, textWrap: "balance" }),
+      text(type.name, "Serif", { fontSize: nameSize(type.name, compact ? 92 : 108, locale, column), fontWeight: 700, color: INK, lineHeight: 1.15, marginTop: 4 }),
+      text(group ? `${type.group.name} · ${t(group.blurb)}` : type.group.name, "Sans", { fontSize: 24, color: GREY, marginTop: 4, ...(locale === "en" ? { lineHeight: 1.3 } : {}) }),
+      text(type.subtitle, "Serif", { fontSize: compact ? (locale === "en" ? 28 : 32) : 34, color: INK, lineHeight: locale === "en" ? 1.3 : 1.4, marginTop: 12, textWrap: "balance" }),
       compact ? box({ marginTop: 18, paddingTop: 12, borderTop: `2px solid ${type.group.colour}` },
-        text(rankLine(strongestAxis(type).rank), "Sans", { fontSize: 26, fontWeight: 700, color: INK })) : null));
+        text(rankLine(strongestAxis(type).rank, locale), "Sans", { fontSize: locale === "en" ? 24 : 26, fontWeight: 700, color: INK, ...(locale === "en" ? { lineHeight: 1.3 } : {}) })) : null));
 }
 
 /** A bar that grows from the middle towards the pole leaned to, as on the portrait (`axisBar`). */
@@ -96,37 +114,42 @@ function axisBar(axis: PublicAxis, colour: string, height: number): El {
 }
 
 const POLE_WIDTH = 178;
+/** English pole names are longer ("Generalist G 80%"): a wider column at 24 px keeps each on one line. */
+const POLE_WIDTH_EN = 230;
+const poleWidth = (locale?: Locale) => locale === "en" ? POLE_WIDTH_EN : POLE_WIDTH;
 
 /** One pole: its letter and name, and — on the side leaned to — the percentage, next to the bar. */
-function pole(label: string, letter: string, percent: number | null, align: "left" | "right"): El {
+function pole(label: string, letter: string, percent: number | null, align: "left" | "right", locale?: Locale): El {
   const on = percent !== null;
-  const style = { fontSize: 28, color: on ? INK : GREY, fontWeight: on ? 700 : 400 };
+  const size = locale === "en" ? 24 : 28;
+  const style = { fontSize: size, color: on ? INK : GREY, fontWeight: on ? 700 : 400 };
   const name = text(align === "left" ? `${letter} ${label}` : `${label} ${letter}`, "Serif", style);
-  const value = on ? text(`${percent}%`, "Sans", { fontSize: 28, fontWeight: 700, color: INK, [align === "left" ? "marginLeft" : "marginRight"]: 12 }) : null;
-  return box({ width: POLE_WIDTH, flexShrink: 0, justifyContent: align === "left" ? "flex-start" : "flex-end", alignItems: "baseline" },
+  const value = on ? text(`${percent}%`, "Sans", { fontSize: size, fontWeight: 700, color: INK, [align === "left" ? "marginLeft" : "marginRight"]: locale === "en" ? 8 : 12 }) : null;
+  return box({ width: poleWidth(locale), flexShrink: 0, justifyContent: align === "left" ? "flex-start" : "flex-end", alignItems: "baseline" },
     ...(align === "left" ? [name, value] : [value, name]));
 }
 
 /** One axis; the long image adds the rank under each bar, the poster prints only the strongest one, in the hero. */
-function axisRow(axis: PublicAxis, colour: string, withRank = true): El {
+function axisRow(axis: PublicAxis, colour: string, withRank = true, locale?: Locale): El {
   const right = axis.score >= 50;
   const percent = right ? axis.score : 100 - axis.score;
   return box({ flexDirection: "column", width: "100%" },
     box({ alignItems: "center", width: "100%" },
-      pole(axis.leftLabel, axis.leftLetter, right ? null : percent, "left"),
+      pole(axis.leftLabel, axis.leftLetter, right ? null : percent, "left", locale),
       axisBar(axis, colour, 16),
-      pole(axis.rightLabel, axis.rightLetter, right ? percent : null, "right")),
-    withRank ? text(rankLine(axis.rank), "Sans", { fontSize: 24, color: GREY, lineHeight: 1.25, marginTop: 2, marginLeft: POLE_WIDTH + 16 }) : null);
+      pole(axis.rightLabel, axis.rightLetter, right ? percent : null, "right", locale)),
+    withRank ? text(rankLine(axis.rank, locale), "Sans", { fontSize: 24, color: GREY, lineHeight: 1.25, marginTop: 2, marginLeft: poleWidth(locale) + 16 }) : null);
 }
 
 /** The four steps as a cycle: across the top, down, back along the bottom, up — the last step feeding the first. */
-function loopCycle(loop: PublicType["loop"], colour: string, tint: string): El {
-  // 256 wide holds a ten-character step at 24 px on one line (the content test caps steps at ten).
-  const boxW = 256, boxH = 58, gapX = 44, gapY = 40, width = boxW * 2 + gapX, height = boxH * 2 + gapY;
+function loopCycle(loop: PublicType["loop"], colour: string, tint: string, locale?: Locale): El {
+  // 256 wide holds a ten-character step at 24 px on one line (the content test caps steps at ten); an English step takes up to two lines.
+  const en = locale === "en";
+  const boxW = 256, boxH = en ? 66 : 58, gapX = 44, gapY = en ? 30 : 40, width = boxW * 2 + gapX, height = boxH * 2 + gapY;
   const at = [[0, 0], [boxW + gapX, 0], [boxW + gapX, boxH + gapY], [0, boxH + gapY]] as const;
   const step = (label: string, index: number) => box({ position: "absolute", left: at[index]![0], top: at[index]![1], width: boxW, height: boxH, alignItems: "center", justifyContent: "center",
-    border: `2px solid ${colour}`, borderRadius: 10, backgroundColor: index === 0 ? tint : PAPER },
-  text(label, "Sans", { fontSize: 24, color: INK }));
+    border: `2px solid ${colour}`, borderRadius: 10, backgroundColor: index === 0 ? tint : PAPER, ...(en ? { paddingLeft: 10, paddingRight: 10 } : {}) },
+  text(label, "Sans", { fontSize: 24, color: INK, ...(en ? { lineHeight: 1.15, textAlign: "center", justifyContent: "center" } : {}) }));
   const midY = boxH / 2, midX = boxW / 2, rightX = boxW + gapX + boxW / 2;
   const arrow = (x1: number, y1: number, x2: number, y2: number) => {
     const angle = Math.atan2(y2 - y1, x2 - x1), head = 12;
@@ -143,26 +166,38 @@ function loopCycle(loop: PublicType["loop"], colour: string, tint: string): El {
 }
 
 /** The three lines and the cycle they feed; the poster prints its heading above the lines and the call to run them on a row of its own. */
-function linesBlock(type: PublicType, withLabels: boolean): El {
+/** The gap between a line's field and its identity: a Latin identity after Chinese, and always in English. */
+const fieldGap = (line: { domain: string; identity: string }, locale?: Locale) => line.domain && (locale === "en" || latinGap(line.identity)) ? 8 : 0;
+
+function linesBlock(type: PublicType, withLabels: boolean, locale: Locale | undefined, labels: PosterLabels): El {
+  const t = tFor(locale);
+  const en = locale === "en";
   const row = box({ width: "100%", alignItems: "center", justifyContent: "space-between" },
-    box({ flexDirection: "column", flexShrink: 1, minWidth: 0 },
-      withLabels ? text(LABELS.linesHeading, "Sans", { fontSize: 24, color: GREY, marginBottom: 8 }) : null,
-      // The field small, the identity large: 「人工智能的 研究者」.
-      ...type.lines.map((line, index) => box({ alignItems: "baseline", marginTop: index ? 4 : 0 },
-        text(String(index + 1), "Serif", { fontSize: 26, fontWeight: 700, color: type.group.colour, width: 30 }),
-        line.domain ? text(`${line.domain}的`, "Sans", { fontSize: 24, color: GREY, lineHeight: 1.3 }) : null,
-        text(line.identity, faceFor(line.identity, "Serif"), { fontSize: 32, fontWeight: 700, color: INK, lineHeight: 1.3, marginLeft: line.domain && latinGap(line.identity) ? 8 : 0 })))),
-    loopCycle(type.loop, type.group.colour, type.group.tint));
-  return withLabels ? box({ flexDirection: "column", width: "100%" }, row, text(LABELS.loopCaption, "Sans", { fontSize: 24, color: GREY, marginTop: 12 })) : row;
+    box({ flexDirection: "column", flexShrink: 1, minWidth: 0, ...(en ? { marginRight: 20 } : {}) },
+      withLabels ? text(labels.linesHeading, "Sans", { fontSize: 24, color: GREY, marginBottom: 8 }) : null,
+      // The field small, the identity large: 「人工智能的 研究者」, "AI Researcher" (an English pair may wrap onto a second row).
+      ...type.lines.map((line, index) => en
+        ? box({ alignItems: "baseline", marginTop: index ? 4 : 0 },
+          text(String(index + 1), "Serif", { fontSize: 26, fontWeight: 700, color: type.group.colour, width: 30, flexShrink: 0 }),
+          box({ alignItems: "baseline", flexWrap: "wrap", flexShrink: 1, minWidth: 0 },
+            line.domain ? text(t("{{domain}}的", { domain: line.domain }), "Sans", { fontSize: 24, color: GREY, lineHeight: 1.3, marginRight: 8 }) : null,
+            text(line.identity, faceFor(line.identity, "Serif"), { fontSize: 28, fontWeight: 700, color: INK, lineHeight: 1.3 })))
+        : box({ alignItems: "baseline", marginTop: index ? 4 : 0 },
+          text(String(index + 1), "Serif", { fontSize: 26, fontWeight: 700, color: type.group.colour, width: 30 }),
+          line.domain ? text(t("{{domain}}的", { domain: line.domain }), "Sans", { fontSize: 24, color: GREY, lineHeight: 1.3 }) : null,
+          text(line.identity, faceFor(line.identity, "Serif"), { fontSize: 32, fontWeight: 700, color: INK, lineHeight: 1.3, marginLeft: fieldGap(line, locale) })))),
+    loopCycle(type.loop, type.group.colour, type.group.tint, locale));
+  return withLabels ? box({ flexDirection: "column", width: "100%" }, row, text(labels.loopCaption, "Sans", { fontSize: 24, color: GREY, marginTop: 12 })) : row;
 }
 
 /** One more combination on a row: fields small and grey, identities bold at `size`, joined by 「·」. */
-function comboLine(combo: PublicType["lines"], size: number, marginTop: number): El {
+function comboLine(combo: PublicType["lines"], size: number, marginTop: number, locale?: Locale): El {
+  const t = tFor(locale);
   return box({ alignItems: "baseline", flexWrap: "wrap", marginTop },
     ...combo.flatMap((line, index) => [
       index ? text(" · ", "Sans", { fontSize: 24, color: GREY, marginLeft: 6, marginRight: 6 }) : null,
-      line.domain ? text(`${line.domain}的`, "Sans", { fontSize: 24, color: GREY }) : null,
-      text(line.identity, faceFor(line.identity, "Serif"), { fontSize: size, fontWeight: 700, color: INK, marginLeft: line.domain && latinGap(line.identity) ? 8 : 0 })
+      line.domain ? text(t("{{domain}}的", { domain: line.domain }), "Sans", { fontSize: 24, color: GREY }) : null,
+      text(line.identity, faceFor(line.identity, "Serif"), { fontSize: size, fontWeight: 700, color: INK, marginLeft: fieldGap(line, locale) })
     ]));
 }
 
@@ -177,28 +212,28 @@ function partner(label: string, view: PartnerView, colour: string, tips: string[
     ...tips.map((tip) => text(tip, "Sans", { fontSize: 24, color: INK, lineHeight: 1.45, marginTop: 6 })));
 }
 
-function qrBlock(inviteUrl: string, size: number): El {
+function qrBlock(inviteUrl: string, size: number, labels: PosterLabels, locale?: Locale): El {
   const qr = qrDataUri(inviteUrl, INK);
-  return box({ alignItems: "center" },
+  return box({ alignItems: "center", ...(locale === "en" ? { flexShrink: 1, minWidth: 0 } : {}) },
     box({ width: size + 16, height: size + 16, backgroundColor: "#FFFFFF", alignItems: "center", justifyContent: "center", flexShrink: 0 },
       h("img", { src: qr.uri, width: size, height: size })),
-    box({ flexDirection: "column", marginLeft: 26 },
-      text(LABELS.scan, "Serif", { fontSize: 32, fontWeight: 700, color: INK }),
-      text(LABELS.scanSub, "Sans", { fontSize: 24, color: GREY, marginTop: 8 })));
+    box({ flexDirection: "column", marginLeft: 26, ...(locale === "en" ? { flexShrink: 1, minWidth: 0 } : {}) },
+      text(labels.scan, "Serif", { fontSize: 32, fontWeight: 700, color: INK }),
+      text(labels.scanSub, "Sans", { fontSize: 24, color: GREY, marginTop: 8 })));
 }
 
 /** The Crossline mark: two lines crossing, then the name. */
-function brand(): El {
+function brand(labels: PosterLabels): El {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 30 30"><path d="M3 5C12 5 18 25 27 25M3 25C12 25 18 5 27 5" fill="none" stroke="${INK}" stroke-width="3.2" stroke-linecap="round"/></svg>`;
   return box({ alignItems: "center" },
     h("img", { src: `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`, width: 30, height: 30 }),
-    text(LABELS.brand, "Sans", { fontSize: 26, fontWeight: 700, color: INK, marginLeft: 10 }));
+    text(labels.brand, "Sans", { fontSize: 26, fontWeight: 700, color: INK, marginLeft: 10 }));
 }
 
-function footer(): El {
+function footer(labels: PosterLabels, locale?: Locale): El {
   return box({ width: "100%", justifyContent: "space-between", alignItems: "center" },
-    text(LABELS.disclaimer, "Sans", { fontSize: 24, color: GREY }),
-    brand());
+    text(labels.disclaimer, "Sans", { fontSize: 24, color: GREY, ...(locale === "en" ? { flexShrink: 1, marginRight: 20 } : {}) }),
+    brand(labels));
 }
 
 /** The page; its sections never shrink, so a poster that runs long overflows (and the layout test fails) instead of overlapping. */
@@ -207,117 +242,125 @@ const page = (height: number | undefined, ...children: Child[]) =>
     ...children.map((child) => child && typeof child === "object"
       ? { ...child, props: { ...child.props, style: { flexShrink: 0, ...(child.props.style as Style) } } } : child));
 
-export function typePosterTree(type: PublicType, nickname: string, figure: Figure, inviteUrl: string): El {
+export function typePosterTree(type: PublicType, nickname: string, figure: Figure, inviteUrl: string, locale?: Locale): El {
+  const labels = posterLabels(locale);
   return page(HEIGHT,
-    hero(type, nickname, figure, true),
+    hero(type, nickname, figure, true, locale, labels),
     rule(17),
-    box({ flexDirection: "column", width: "100%" }, ...type.axes.map((axis, index) => box({ marginTop: index ? 16 : 0, width: "100%" }, axisRow(axis, type.group.colour, false)))),
+    box({ flexDirection: "column", width: "100%" }, ...type.axes.map((axis, index) => box({ marginTop: index ? 16 : 0, width: "100%" }, axisRow(axis, type.group.colour, false, locale)))),
     rule(17),
-    linesBlock(type, true),
+    linesBlock(type, true, locale, labels),
     rule(17),
     box({ width: "100%", justifyContent: "space-between" },
-      partner(LABELS.best, type.best, type.group.colour, [type.best.tip]),
-      partner(LABELS.hardest, type.hardest, type.group.colour, [type.hardest.tip])),
+      partner(labels.best, type.best, type.group.colour, [type.best.tip]),
+      partner(labels.hardest, type.hardest, type.group.colour, [type.hardest.tip])),
     box({ flexGrow: 1 }),
     rule(17),
     box({ width: "100%", justifyContent: "space-between", alignItems: "flex-end" },
-      qrBlock(inviteUrl, 112),
-      box({ flexDirection: "column", alignItems: "flex-end" },
-        text(LABELS.disclaimer, "Sans", { fontSize: 24, color: GREY, marginBottom: 10 }),
-        brand())));
+      qrBlock(inviteUrl, 112, labels, locale),
+      box({ flexDirection: "column", alignItems: "flex-end", ...(locale === "en" ? { width: 300, flexShrink: 0, marginLeft: 20 } : {}) },
+        text(labels.disclaimer, "Sans", { fontSize: 24, color: GREY, marginBottom: 10, ...(locale === "en" ? { textAlign: "right" } : {}) }),
+        brand(labels))));
 }
 
-const relationByName = (name: string) => Object.values(RELATIONS).find((relation) => relation.name === name);
+/** A relation from its shown name, in either language. */
+const relationByName = (name: string, locale?: Locale) => Object.values(RELATIONS).find((relation) => tFor(locale)(relation.name) === name);
 
 function section(title: string, ...children: Child[]): El {
   return box({ flexDirection: "column", width: "100%" }, text(title, "Serif", { fontSize: 36, fontWeight: 700, color: INK, marginBottom: 18 }), ...children);
 }
 
-export function longImageTree(type: PublicType, nickname: string, figure: Figure, inviteUrl: string): El {
+export function longImageTree(type: PublicType, nickname: string, figure: Figure, inviteUrl: string, locale?: Locale): El {
+  const t = tFor(locale);
+  const labels = posterLabels(locale);
   const axisDetail = (axis: PublicAxis, index: number) => {
     const definition = TYPE_AXES.find((item) => item.id === axis.id)!;
-    const [leftText, rightText] = poleExplanations(definition.question);
+    const [leftText, rightText] = poleExplanations(definition.question, locale, definition.id);
+    // In English the pole's name already is the English word, so it is not printed twice.
     const pole = (letter: string, label: string, en: string, explanation: string, on: boolean) => box({ flexDirection: "column", width: (INNER - 40) / 2 },
       box({ alignItems: "baseline" },
         text(`${letter} ${label}`, "Serif", { fontSize: 30, fontWeight: 700, color: on ? type.group.colour : INK }),
-        text(en, "Sans", { fontSize: 24, color: GREY, marginLeft: 10 })),
+        en !== label ? text(en, "Sans", { fontSize: 24, color: GREY, marginLeft: 10 }) : null),
       text(explanation, "Sans", { fontSize: 24, color: INK, lineHeight: 1.45, marginTop: 4 }));
     return box({ flexDirection: "column", width: "100%", marginTop: index ? 30 : 0 },
-      axisRow(axis, type.group.colour),
+      axisRow(axis, type.group.colour, true, locale),
       box({ width: "100%", justifyContent: "space-between", marginTop: 14 },
         pole(axis.leftLetter, axis.leftLabel, axis.leftEn, leftText, axis.score < 50),
         pole(axis.rightLetter, axis.rightLabel, axis.rightEn, rightText, axis.score >= 50)));
   };
   const detail = (label: string, view: PartnerView) => {
-    const relation = relationByName(view.relation);
-    return partner(label, view, type.group.colour, relation ? relation.tips.map((tip, index) => `${index + 1}. ${tip}`) : [view.tip], relation?.when);
+    const relation = relationByName(view.relation, locale);
+    return partner(label, view, type.group.colour, relation ? relation.tips.map((tip, index) => `${index + 1}. ${t(tip)}`) : [view.tip], relation ? t(relation.when) : undefined);
   };
   return page(undefined,
-    hero(type, nickname, figure, false),
+    hero(type, nickname, figure, false, locale, labels),
     rule(34),
-    section(LABELS.axesHeading,
-      type.axes.some((axis) => axis.ambiguous) ? text(LABELS.ambiguous, "Sans", { fontSize: 24, color: GREY, marginBottom: 20 }) : null,
+    section(labels.axesHeading,
+      type.axes.some((axis) => axis.ambiguous) ? text(labels.ambiguous, "Sans", { fontSize: 24, color: GREY, marginBottom: 20 }) : null,
       ...type.axes.map(axisDetail)),
     rule(34),
-    section(LABELS.linesHeading, linesBlock(type, false),
-      text(LABELS.loopHeading, "Serif", { fontSize: 28, fontWeight: 700, color: INK, marginTop: 24 }),
+    section(labels.linesHeading, linesBlock(type, false, locale, labels),
+      text(labels.loopHeading, "Serif", { fontSize: 28, fontWeight: 700, color: INK, marginTop: 24 }),
       text(`${type.loop.join(" → ")} → ${type.loop[0]}`, "Sans", { fontSize: 26, color: INK, lineHeight: 1.5, marginTop: 8 }),
-      text(LABELS.loopExplain, "Sans", { fontSize: 24, color: GREY, lineHeight: 1.5, marginTop: 6 }),
+      text(labels.loopExplain, "Sans", { fontSize: 24, color: GREY, lineHeight: 1.5, marginTop: 6 }),
       // Lines from what the person said they want: how each feeds the next, with the relation kind.
       ...type.links.map((link, index) => box({ alignItems: "baseline", marginTop: index ? 6 : 14, flexWrap: "wrap" },
         text(`${type.lines[link.from]?.identity ?? ""} → ${type.lines[link.to]?.identity ?? ""}`, "Sans", { fontSize: 24, fontWeight: 700, color: INK }),
         text(link.kind, "Sans", { fontSize: 24, fontWeight: 700, color: INK, backgroundColor: type.group.tint, paddingLeft: 8, paddingRight: 8, marginLeft: 10, marginRight: 10 }),
         text(link.how, "Sans", { fontSize: 24, color: INK }))),
-      text(LABELS.loopCaption, "Sans", { fontSize: 24, color: GREY, marginTop: 4 }),
-      type.more.length ? text(LABELS.moreHeading, "Serif", { fontSize: 28, fontWeight: 700, color: INK, marginTop: 28 }) : null,
+      text(labels.loopCaption, "Sans", { fontSize: 24, color: GREY, marginTop: 4 }),
+      type.more.length ? text(labels.moreHeading, "Serif", { fontSize: 28, fontWeight: 700, color: INK, marginTop: 28 }) : null,
       // Three more combinations, each a step smaller (30 / 27 / 24 px for the identities), never under 24 px.
-      ...type.more.map((combo, index) => comboLine(combo, [30, 27, 24][index]!, index ? 10 : 12))),
+      ...type.more.map((combo, index) => comboLine(combo, [30, 27, 24][index]!, index ? 10 : 12, locale))),
     rule(34),
-    section(LABELS.partnersHeading,
+    section(labels.partnersHeading,
       box({ width: "100%", justifyContent: "space-between" },
-        detail(LABELS.best, type.best),
-        detail(LABELS.hardest, type.hardest))),
+        detail(labels.best, type.best),
+        detail(labels.hardest, type.hardest))),
     rule(34),
-    qrBlock(inviteUrl, 168),
+    qrBlock(inviteUrl, 168, labels, locale),
     box({ height: 40 }),
-    footer());
+    footer(labels, locale));
 }
 
 type Side = { type: PublicType; nickname: string; figure: Figure };
 
-export function pairCardTree(a: Side, b: Side, primary: RelationView, secondary: RelationView | undefined, sharedLines: string[], inviteUrl: string): El {
+export function pairCardTree(a: Side, b: Side, primary: RelationView, secondary: RelationView | undefined, sharedLines: string[], inviteUrl: string,
+  locale?: Locale): El {
+  const t = tFor(locale);
+  const labels = posterLabels(locale);
   const person = (side: Side, fallback: string) => box({ flexDirection: "column", alignItems: "center", width: (INNER - 60) / 2 },
-    panel(side.figure, side.type, 300),
+    panel(side.figure, side.type, locale === "en" ? 260 : 300),
     text(side.nickname.trim() || fallback, "Sans", { fontSize: 32, fontWeight: 700, color: INK, marginTop: 20 }),
     box({ alignItems: "baseline", marginTop: 6 },
       text(side.type.name, "Serif", { fontSize: 46, fontWeight: 700, color: INK }),
       text(side.type.code, "Serif", { fontSize: 28, fontWeight: 700, color: side.type.group.colour, marginLeft: 12, letterSpacing: 2 })));
   return page(HEIGHT,
-    text(LABELS.pairKicker, "Sans", { fontSize: 26, color: GREY, marginBottom: 22 }),
-    box({ width: "100%", justifyContent: "space-between", alignItems: "flex-start" }, person(a, LABELS.friendA), person(b, LABELS.friendB)),
+    text(labels.pairKicker, "Sans", { fontSize: 26, color: GREY, marginBottom: 22 }),
+    box({ width: "100%", justifyContent: "space-between", alignItems: "flex-start" }, person(a, labels.friendA), person(b, labels.friendB)),
     rule(30),
-    text(primary.name, "Serif", { fontSize: 92, fontWeight: 700, color: INK, lineHeight: 1.1 }),
+    text(primary.name, "Serif", { fontSize: nameSize(primary.name, locale === "en" ? 72 : 92, locale, INNER), fontWeight: 700, color: INK, lineHeight: 1.1 }),
     text(primary.when, "Sans", { fontSize: 26, color: GREY, marginTop: 10 }),
     ...primary.tips.map((tip, index) => box({ marginTop: index ? 10 : 22, alignItems: "flex-start" },
       text(String(index + 1), "Serif", { fontSize: 30, fontWeight: 700, color: a.type.group.colour, width: 36, lineHeight: 1.4 }),
-      text(tip, "Sans", { fontSize: 30, color: INK, lineHeight: 1.4, flexShrink: 1 }))),
-    secondary ? box({ marginTop: 22, alignItems: "baseline" },
-      text(`${LABELS.also}：`, "Sans", { fontSize: 26, color: GREY }),
+      text(tip, "Sans", { fontSize: locale === "en" ? 28 : 30, color: INK, lineHeight: locale === "en" ? 1.3 : 1.4, flexShrink: 1 }))),
+    secondary ? box({ marginTop: 22, alignItems: "baseline", flexWrap: locale === "en" ? "wrap" : "nowrap" },
+      text(t("{{also}}：", { also: labels.also }), "Sans", { fontSize: 26, color: GREY, ...(locale === "en" ? { marginRight: 8 } : {}) }),
       text(secondary.name, "Serif", { fontSize: 30, fontWeight: 700, color: INK }),
-      text(`（${secondary.when}）`, "Sans", { fontSize: 24, color: GREY, flexShrink: 1 })) : null,
+      text(t("（{{when}}）", { when: secondary.when }), "Sans", { fontSize: 24, color: GREY, flexShrink: 1, ...(locale === "en" ? { marginLeft: 8 } : {}) })) : null,
     rule(30),
     box({ alignItems: "baseline", flexWrap: "wrap" },
-      text(LABELS.shared, "Sans", { fontSize: 24, color: GREY, marginRight: 20 }),
+      text(labels.shared, "Sans", { fontSize: 24, color: GREY, marginRight: 20 }),
       sharedLines.length
-        ? box({ alignItems: "baseline" }, ...sharedLines.map((line) => text(line, "Serif", { fontSize: 34, fontWeight: 700, color: INK, marginRight: 22 })))
-        : text(LABELS.noShared, "Serif", { fontSize: 34, fontWeight: 700, color: INK })),
+        ? box({ alignItems: "baseline", flexWrap: "wrap" }, ...sharedLines.map((line) => text(line, "Serif", { fontSize: 34, fontWeight: 700, color: INK, marginRight: 22 })))
+        : text(labels.noShared, "Serif", { fontSize: locale === "en" ? 30 : 34, fontWeight: 700, color: INK })),
     box({ flexGrow: 1 }),
     rule(22),
     box({ width: "100%", justifyContent: "space-between", alignItems: "flex-end" },
-      qrBlock(inviteUrl, 128),
-      box({ flexDirection: "column", alignItems: "flex-end" },
-        text(LABELS.disclaimer, "Sans", { fontSize: 24, color: GREY, marginBottom: 10 }),
-        brand())));
+      qrBlock(inviteUrl, 128, labels, locale),
+      box({ flexDirection: "column", alignItems: "flex-end", ...(locale === "en" ? { width: 300, flexShrink: 0, marginLeft: 20 } : {}) },
+        text(labels.disclaimer, "Sans", { fontSize: 24, color: GREY, marginBottom: 10, ...(locale === "en" ? { textAlign: "right" } : {}) }),
+        brand(labels))));
 }
 
 export type Rendered = { png: Buffer; height: number; nodes: SatoriNode[] };

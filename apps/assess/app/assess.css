@@ -158,3 +158,6 @@ input::placeholder{color:var(--muted);opacity:1}
 .as-steps{margin:8px 0 14px;padding-left:20px;display:grid;gap:8px;line-height:1.6}
 .as-steps b{display:block}
 
+/* the language switch, top right of every page */
+.as-topbar{max-width:640px;margin:0 auto;padding:10px 16px 0;display:flex;justify-content:flex-end}
+.as-lang{min-height:40px;padding:4px 14px;font-size:14px}

@@ -1,3 +1,4 @@
+import { requestLocale } from "../../../../lib/i18n";
 import { json, lookupBlocked, lookupMissed } from "../../../../server/security";
 import { getPairByToken, getResultById } from "../../../../server/store";
 import { pairView } from "../../../../server/views";
@@ -11,5 +12,5 @@ export async function GET(request: Request, context: { params: Promise<{ token: 
   const a = pair && getResultById(pair.inviterId);
   const b = pair && getResultById(pair.inviteeId);
   if (!pair || !a || !b) return lookupMissed(request);
-  return json(pairView(pair, a, b));
+  return json(pairView(pair, a, b, requestLocale(request)));
 }

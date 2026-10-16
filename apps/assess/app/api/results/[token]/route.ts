@@ -1,3 +1,4 @@
+import { requestLocale } from "../../../../lib/i18n";
 import { retryAvatarIfDue } from "../../../../server/avatar";
 import { crossSiteWrite, fail, json, lookupBlocked, lookupMissed } from "../../../../server/security";
 import { deleteResult, getResultByToken } from "../../../../server/store";
@@ -21,7 +22,7 @@ export async function GET(request: Request, context: Context): Promise<Response>
   } catch (error) {
     console.warn(JSON.stringify({ event: "assess.avatar_retry_failed", resultId: result.id, error: error instanceof Error ? error.message : String(error) }));
   }
-  return json(resultView(retried ? getResultByToken(token) ?? result : result));
+  return json(resultView(retried ? getResultByToken(token) ?? result : result, requestLocale(request)));
 }
 
 /** DELETE /api/results/[resultToken]: the result, its pairs on both sides, its figure and every link to them, at once. */

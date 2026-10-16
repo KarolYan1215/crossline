@@ -74,6 +74,11 @@ const MIGRATIONS: Migration[] = [
   (db) => db.exec(`
     ALTER TABLE results ADD COLUMN wants_json TEXT NOT NULL DEFAULT '';
     ALTER TABLE results ADD COLUMN wants_updates INTEGER NOT NULL DEFAULT 0;
+  `),
+  // 6: the language of the page the test was finished on (2026-10-16, docs/i18n.md): the result mail and the inviter's notices are
+  // written in it. Every result made before this was made on the Chinese page.
+  (db) => db.exec(`
+    ALTER TABLE results ADD COLUMN locale TEXT NOT NULL DEFAULT 'zh';
   `)
 ];
 

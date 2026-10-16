@@ -1,3 +1,4 @@
+import { tFor, type Locale } from "./i18n";
 import { TYPE_AXES, TYPE_TABLE, type TypeAxisId } from "./portrait-type";
 
 /**
@@ -40,9 +41,24 @@ export type LineIdentity = { domain: string; identity: string };
 /** Every identity a recommendation may use (§2.2's vocabulary, plus the licensed professions). */
 export const LINE_IDENTITIES = ["研究者", "学生", "职场人", "创业者", "自由职业者", "投资者", "创作者", "教育者", "社群主理人", "家长", "跑者", "健身者", "骑行者", "户外爱好者", "球友", "舞者", "音乐人", "画手", "摄影者", "写作者", "读者", "手作人", "书法爱好者", "coser", "医生", "律师", "中医师", "设计师", "开发者", "学习者"] as const;
 
-/** 「人工智能的研究者」, or 「医生」 for a line with no field. */
-export const lineText = (line: LineIdentity): string =>
-  line.domain ? `${line.domain}的${latinGap(line.identity)}${line.identity}` : line.identity;
+/**
+ * 「人工智能的研究者」, or 「医生」 for a line with no field; in English the field goes first as a modifier, "AI researcher". `line` is in
+ * Chinese (the tables) and is translated here; a line that is already English (or a model's own words) passes through unchanged.
+ */
+export function lineText(line: LineIdentity, locale?: Locale): string {
+  const t = tFor(locale);
+  if (!line.domain) return t(line.identity);
+  return locale === "en"
+    ? t("{{domain}}的{{identity}}", { domain: t(line.domain), identity: t(line.identity).toLowerCase() })
+    : t("{{domain}}的{{identity}}", { domain: line.domain, identity: `${latinGap(line.identity)}${line.identity}` });
+}
+
+/** One line from the tables in the reader's language: the field and the identity each translated (Chinese unchanged). */
+export const localizeLine = (line: LineIdentity, locale?: Locale): LineIdentity => {
+  if (locale !== "en") return line;
+  const t = tFor(locale);
+  return { domain: line.domain ? t(line.domain) : "", identity: t(line.identity) };
+};
 /** A space between Chinese and a Latin word (「二次元的 coser」), none between two runs of Chinese. */
 export const latinGap = (identity: string): string => /^[A-Za-z]/.test(identity) ? " " : "";
 
@@ -166,6 +182,13 @@ export const RELATIONS: Record<RelationId, Relation> = {
   data_vs_hunch: { id: "data_vs_hunch", name: "数据党 vs 直觉党", when: "一个实证、一个直觉", fit: -2,
     tips: ["争论前先说好：什么证据能让你改主意", "直觉提出假设，数据负责验证"] }
 };
+
+/** A relation in the reader's language (the table is Chinese; its English is in the quick test's catalogue). */
+export function localizeRelation(relation: Relation, locale?: Locale): Relation {
+  if (locale !== "en") return relation;
+  const t = tFor(locale);
+  return { ...relation, name: t(relation.name), when: t(relation.when), tips: [t(relation.tips[0]), t(relation.tips[1])] };
+}
 
 const AXIS_INDEX: Record<TypeAxisId, number> = { scope: 0, basis: 1, output: 2, rhythm: 3 };
 const DIFFERENCE_RELATION: Array<[TypeAxisId, RelationId]> = [["rhythm", "pace"], ["scope", "well_and_road"], ["output", "maker_and_teller"], ["basis", "data_vs_hunch"]];

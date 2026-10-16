@@ -1,3 +1,4 @@
+// i18n-exempt: test support (sample data)
 import type { StoredResult } from "../store";
 
 /** A stored result for the avatar tests: GEMA, an address and a nickname that must never reach the image model. */

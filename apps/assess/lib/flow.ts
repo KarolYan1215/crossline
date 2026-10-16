@@ -1,6 +1,7 @@
 import { QUIZ_ITEMS } from "@crossline/core/assess";
-import { WANT_OPTIONS, WANTS_PICKS_MAX, WANTS_TEXT_MAX } from "@crossline/core/assess-wants";
+import { WANT_OPTIONS, WANTS_PICKS_MAX, WANTS_TEXT_MAX_EN, wantsTextMax } from "@crossline/core/assess-wants";
 import { APPEARANCE_LABELS, NICKNAME_MAX, NOTE_MAX, TESTS_PER_EMAIL, type Appearance, type SubmitRequest, type WantsRequest } from "./contract";
+import { tFor, type Locale } from "./i18n";
 
 /**
  * The test's own state, kept pure so the pages stay thin and the rules are tested: intro → 32 statements one per screen → appearance →
@@ -55,10 +56,12 @@ export function togglePick(wants: WantsRequest, id: string): WantsRequest {
   return wants.picks.length >= WANTS_PICKS_MAX ? wants : { ...wants, picks: [...wants.picks, id] };
 }
 
-/** The last step's one message, or null when it can be sent. */
-export function wantsProblem(wants: WantsRequest): string | null {
-  if (charCount(wants.text.trim()) > WANTS_TEXT_MAX) return `最多 ${WANTS_TEXT_MAX} 个字`;
-  if (!wants.picks.length && !wants.text.trim()) return "选一两项，或者写一句你想做的事";
+/** The last step's one message, or null when it can be sent. An English line may be twice as long (`wantsTextMax`). */
+export function wantsProblem(wants: WantsRequest, locale?: Locale): string | null {
+  const t = tFor(locale);
+  const max = wantsTextMax(locale);
+  if (charCount(wants.text.trim()) > max) return t("最多 {{max}} 个字", { max });
+  if (!wants.picks.length && !wants.text.trim()) return t("选一两项，或者写一句你想做的事");
   return null;
 }
 
@@ -132,15 +135,16 @@ export const appearanceMissing = (draft: AppearanceDraft): string[] =>
 /** Characters as a person counts them (a Chinese character or an emoji is one). */
 export const charCount = (text: string): number => Array.from(text).length;
 
-export function noteProblem(note: string): string | null {
-  return charCount(note.trim()) > NOTE_MAX ? `补充描述最多 ${NOTE_MAX} 个字` : null;
+export function noteProblem(note: string, locale?: Locale): string | null {
+  return charCount(note.trim()) > NOTE_MAX ? tFor(locale)("补充描述最多 {{max}} 个字", { max: NOTE_MAX }) : null;
 }
 
 /** The appearance step's one message, or null when it can go on. */
-export function appearanceProblem(draft: AppearanceDraft): string | null {
+export function appearanceProblem(draft: AppearanceDraft, locale?: Locale): string | null {
+  const t = tFor(locale);
   const missing = appearanceMissing(draft);
-  if (missing.length) return `还差：${missing.join("、")}`;
-  return noteProblem(draft.note);
+  if (missing.length) return t("还差：{{fields}}", { fields: missing.map((label) => t(label)).join(locale === "en" ? ", " : "、") });
+  return noteProblem(draft.note, locale);
 }
 
 export function completeAppearance(draft: AppearanceDraft): Appearance | null {
@@ -150,15 +154,16 @@ export function completeAppearance(draft: AppearanceDraft): Appearance | null {
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@.]+$/;
 
-export function emailProblem(email: string): string | null {
+export function emailProblem(email: string, locale?: Locale): string | null {
+  const t = tFor(locale);
   const value = email.trim();
-  if (!value) return "请填写邮箱";
-  if (value.length > 254 || !EMAIL.test(value)) return "邮箱格式不对，请检查";
+  if (!value) return t("请填写邮箱");
+  if (value.length > 254 || !EMAIL.test(value)) return t("邮箱格式不对，请检查");
   return null;
 }
 
-export function nicknameProblem(nickname: string): string | null {
-  return charCount(nickname.trim()) > NICKNAME_MAX ? `署名最多 ${NICKNAME_MAX} 个字` : null;
+export function nicknameProblem(nickname: string, locale?: Locale): string | null {
+  return charCount(nickname.trim()) > NICKNAME_MAX ? tFor(locale)("署名最多 {{max}} 个字", { max: NICKNAME_MAX }) : null;
 }
 
 /** The request the email step posts, or null while anything is incomplete. */
@@ -214,7 +219,7 @@ export function parseFlow(raw: string | null): Flow | null {
   if (Array.isArray(wants.picks)) {
     flow.wants.picks = [...new Set(wants.picks.filter((pick): pick is string => typeof pick === "string" && WANT_IDS.has(pick)))].slice(0, WANTS_PICKS_MAX);
   }
-  if (typeof wants.text === "string") flow.wants.text = wants.text.slice(0, WANTS_TEXT_MAX * 2);
+  if (typeof wants.text === "string") flow.wants.text = wants.text.slice(0, WANTS_TEXT_MAX_EN * 2);
   const sent = stored.submitted && typeof stored.submitted === "object" ? stored.submitted as Record<string, unknown> : {};
   if (typeof sent.resultToken === "string" && TOKEN.test(sent.resultToken)) {
     flow.submitted = { resultToken: sent.resultToken, ...(typeof sent.pairToken === "string" && TOKEN.test(sent.pairToken) ? { pairToken: sent.pairToken } : {}) };
@@ -229,22 +234,28 @@ export function parseFlow(raw: string | null): Flow | null {
   return { ...flow, step, index };
 }
 
-/** What each refusal means to the person, in a sentence they can act on. */
-const ERROR_TEXT: Record<string, string> = {
-  QUIZ_INCOMPLETE: "还有题没答完，请返回补上。",
-  APPEARANCE_INVALID: "外貌的选择不完整，请返回检查。",
-  EMAIL_INVALID: "邮箱格式不对，请检查。",
-  NICKNAME_INVALID: `署名不能用，请换一个（最多 ${NICKNAME_MAX} 个字）。`,
-  TOO_FAST: "提交得太快了，需要确认是真人在答题。请等几秒再点「下一步」。",
-  REJECTED: "这次提交没有通过检查。请刷新页面后再试。",
-  RATE_LIMITED: "提交太频繁了，请过几分钟再试。",
-  INVITE_NOT_FOUND: "这个邀请链接已失效（过期或已被删除）。可以不带邀请提交，只是不会生成双人卡。",
-  ALREADY_PAIRED: "这是你自己的邀请链接。把它转发给朋友，让 TA 来测。",
-  NOT_FOUND: "没有找到这个结果，可能已过期或已被删除。",
-  EMAIL_LIMIT_REACHED: `这个邮箱已测满 ${TESTS_PER_EMAIL} 次，只保留最新一次的结果。最新结果的链接已重新发到这个邮箱；想再测，可以换一个邮箱。`,
-  WANTS_INVALID: `选一两项，或者写一句你想做的事（最多 ${WANTS_TEXT_MAX} 个字）。`,
-  WANTS_LIMIT_REACHED: "想做的事已经改过 3 次，这份结果不能再改了。",
-  NETWORK: "网络连不上，请检查网络后重试。"
+/** What each refusal means to the person, in a sentence they can act on: the key, and the values it is filled with. */
+const ERROR_TEXT: Record<string, [string, Record<string, unknown>?]> = {
+  QUIZ_INCOMPLETE: ["还有题没答完，请返回补上。"],
+  APPEARANCE_INVALID: ["外貌的选择不完整，请返回检查。"],
+  EMAIL_INVALID: ["邮箱格式不对，请检查。"],
+  NICKNAME_INVALID: ["署名不能用，请换一个（最多 {{max}} 个字）。", { max: NICKNAME_MAX }],
+  TOO_FAST: ["提交得太快了，需要确认是真人在答题。请等几秒再点「下一步」。"],
+  REJECTED: ["这次提交没有通过检查。请刷新页面后再试。"],
+  RATE_LIMITED: ["提交太频繁了，请过几分钟再试。"],
+  INVITE_NOT_FOUND: ["这个邀请链接已失效（过期或已被删除）。可以不带邀请提交，只是不会生成双人卡。"],
+  ALREADY_PAIRED: ["这是你自己的邀请链接。把它转发给朋友，让 TA 来测。"],
+  NOT_FOUND: ["没有找到这个结果，可能已过期或已被删除。"],
+  EMAIL_LIMIT_REACHED: ["这个邮箱已测满 {{n}} 次，只保留最新一次的结果。最新结果的链接已重新发到这个邮箱；想再测，可以换一个邮箱。", { n: TESTS_PER_EMAIL }],
+  WANTS_INVALID: ["选一两项，或者写一句你想做的事（最多 {{max}} 个字）。"],
+  WANTS_LIMIT_REACHED: ["想做的事已经改过 3 次，这份结果不能再改了。"],
+  NETWORK: ["网络连不上，请检查网络后重试。"]
 };
 
-export const errorMessage = (code: string): string => ERROR_TEXT[code] ?? "出了点问题，请稍后再试。";
+export const errorMessage = (code: string, locale?: Locale): string => {
+  const t = tFor(locale);
+  const entry = ERROR_TEXT[code];
+  if (!entry) return t("出了点问题，请稍后再试。");
+  const values = code === "WANTS_INVALID" ? { max: wantsTextMax(locale) } : entry[1];
+  return values ? t(entry[0], values) : t(entry[0]);
+};

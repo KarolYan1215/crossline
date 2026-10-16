@@ -52,8 +52,10 @@ export function fileDigest(file: string): string {
  * goes in front, so deleting a result can remove every poster drawn for it (`removeOwnedPosters`) instead of leaving a picture with the
  * person's nickname and figure on disk for up to a week. Tokens are base64url, which has no `.`, so `<owner>.` never matches another.
  */
-export function posterKey(kind: string, parts: unknown, owner?: string): string {
-  const key = `${kind}-${createHash("sha256").update(JSON.stringify({ v: LAYOUT_VERSION, kind, parts })).digest("hex").slice(0, 40)}`;
+export function posterKey(kind: string, parts: unknown, owner?: string, locale?: string): string {
+  // The language is in the hash and in the name (`type-en-…`): the same poster in two languages is two files.
+  const language = locale ?? "zh";
+  const key = `${kind}-${language}-${createHash("sha256").update(JSON.stringify({ v: LAYOUT_VERSION, kind, language, parts })).digest("hex").slice(0, 40)}`;
   return owner ? `${owner}.${key}` : key;
 }
 

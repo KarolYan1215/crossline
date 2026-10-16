@@ -33,11 +33,23 @@ test("a result is stored with a lowercased email, two distinct tokens and the re
 
 test("the schema is migrated once, inside the user_version gate, with WAL on", () => {
   createResult(input());
-  expect(db().pragma("user_version", { simple: true })).toBe(5);
+  expect(db().pragma("user_version", { simple: true })).toBe(6);
   expect(db().pragma("journal_mode", { simple: true })).toBe("wal");
   expect(fs.existsSync(path.join(dir, "assess.db"))).toBe(true);
   expect(db().prepare("SELECT name FROM pragma_table_info('results')").all().map((row) => (row as { name: string }).name))
     .not.toContain("answers_json");
+});
+
+test("a result keeps the language of the page it was made on; a row from before the language existed reads as Chinese", () => {
+  expect(createResult(input("zh@example.com")).locale).toBe("zh");
+  const english = createResult({ ...input("en@example.com"), locale: "en" });
+  expect(getResultById(english.id)?.locale).toBe("en");
+  // A row written the way every result was before migration 6: no language given.
+  db().prepare(`INSERT INTO results (id, result_token, invite_token, email, nickname, scores_json, code, appearance_json, send_email, created_at, expires_at)
+    SELECT 'old-row', 'old-result-token', 'old-invite-token', 'old@example.com', nickname, scores_json, code, appearance_json, send_email, created_at,
+      expires_at FROM results WHERE id = ?`).run(english.id);
+  expect(getResultById("old-row")?.locale).toBe("zh");
+  expect(db().prepare("SELECT dflt_value FROM pragma_table_info('results') WHERE name = 'locale'").get()).toEqual({ dflt_value: "'zh'" });
 });
 
 test("tokens carry 128 random bits, URL-safe, and never repeat", () => {
