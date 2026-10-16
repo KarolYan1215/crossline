@@ -62,6 +62,7 @@ import { statedShares } from "./plan-stats";
 import { completionRule, type CompletionMode, type CompletionOutcome } from "@crossline/core";
 import { MILESTONE_RISKS_SETTING, parseMilestoneRisks, riskBufferDays } from "@crossline/core";
 import { identityLines, linePacks } from "./lines";
+import { memoByLedgerAsync } from "./ledger-memo";
 const PREFERENCES_SETTING = "schedule.preferences";
 export type SchedulePreferences = { timeZone: string; mode: "buffered" | "asap";
   importance: Record<string, "important" | "ordinary">;
@@ -1138,6 +1139,12 @@ export async function energyAnswerMatters(ctx: AccessContext): Promise<boolean> 
 }
 
 export async function loadCurrentPlan(ctx: AccessContext): Promise<PersistedPlan> {
+  // Reused until the ledger changes or a minute passes (`lib/ledger-memo.ts`); a preview always computes its own.
+  if (inPreview()) return computeCurrentPlan(ctx);
+  return memoByLedgerAsync(getStore(), `plan:${ctx.workspaceId}:${appNow().toISOString().slice(0, 16)}`, 60_000, () => computeCurrentPlan(ctx));
+}
+
+async function computeCurrentPlan(ctx: AccessContext): Promise<PersistedPlan> {
   ensureSeeded(ctx);
   const store = getStore();
   const stored = store.listPlanVersions(ctx.workspaceId)[0];

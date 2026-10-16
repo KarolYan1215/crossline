@@ -1,7 +1,7 @@
 import "server-only";
 import { profileGaps, type AccessContext } from "@crossline/core";
 import { latestFileDates, listAgentTasks } from "@crossline/db";
-import { getStore } from "./crossline";
+import { appNow, getStore } from "./crossline";
 import { countProposedTargets } from "./targets";
 import { countAssistantPending } from "./agent";
 import { loadDiligence } from "./diligence";
@@ -10,6 +10,7 @@ import { listed, openAsks } from "./asks";
 import { decisionHorizon } from "./horizon";
 import { identityLines } from "./lines";
 import { preparingProposalIds } from "./proposal-ready";
+import { memoByLedger } from "./ledger-memo";
 
 /**
  * Everything waiting for the person to say yes or no this week, in one number per kind. The badge in the header and the
@@ -49,6 +50,11 @@ export type PendingCounts = {
 };
 
 export function countPending(ctx: AccessContext): PendingCounts {
+  // Polled by every open page's badge: reused until the ledger changes or half a minute passes (`lib/ledger-memo.ts`).
+  return memoByLedger(getStore(), `pending:${ctx.workspaceId}:${appNow().toISOString().slice(0, 16)}`, 30_000, () => computePending(ctx));
+}
+
+function computePending(ctx: AccessContext): PendingCounts {
   const store = getStore();
   const assistant = countAssistantPending(ctx);
   const horizon = decisionHorizon(ctx);

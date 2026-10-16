@@ -28,6 +28,7 @@ import { answerRelationCheck, relationCheckAsks } from "./artifact-relations";
 import { agentBlockedAsks, answerAgentAsk } from "./agent-ask";
 import { answerOutcome, outcomeAsks } from "./outcome-check";
 import { answerProgress, progressAsks } from "./progress-check";
+import { memoByLedger } from "./ledger-memo";
 
 /** Markers an undo has taken back are as if never written. */
 const live = <T extends { eventId: string }>(ctx: AccessContext, events: T[]): T[] => {
@@ -663,8 +664,10 @@ function snoozes(ctx: AccessContext): AskSnooze[] {
  * The open asks: snoozed ones left out, most urgent first, then the most important milestone's. Each carries `entersOn` when it is not
  * this week's decision (`lib/horizon.ts`); callers that show this week's decisions use `thisWeek`.
  */
-export function openAsks(ctx: AccessContext, now = appNow()): Ask[] {
-  return rankAsks(decisionHorizon(ctx, now).annotate(collectAsks(ctx, now)), snoozes(ctx), planToday(ctx, now));
+export function openAsks(ctx: AccessContext, now?: Date): Ask[] {
+  const build = (at: Date) => rankAsks(decisionHorizon(ctx, at).annotate(collectAsks(ctx, at)), snoozes(ctx), planToday(ctx, at));
+  // At the present moment the answer is reused until the ledger changes or half a minute passes (`lib/ledger-memo.ts`).
+  return now ? build(now) : memoByLedger(getStore(), `asks:${ctx.workspaceId}:${appNow().toISOString().slice(0, 16)}`, 30_000, () => build(appNow()));
 }
 export const thisWeek = (asks: Ask[]) => asks.filter((ask) => !ask.entersOn);
 
@@ -672,7 +675,7 @@ export const thisWeek = (asks: Ask[]) => asks.filter((ask) => !ask.entersOn);
  * What Today and 待确认 show. Whether the worker and its model runtime can run at all is not an ask: it is an error the banner on
  * every page shows (`lib/runtime-status.ts`), so the list and the count always agree.
  */
-export async function loadAsks(ctx: AccessContext, now = appNow()): Promise<Ask[]> {
+export async function loadAsks(ctx: AccessContext, now?: Date): Promise<Ask[]> {
   return listed(openAsks(ctx, now));
 }
 

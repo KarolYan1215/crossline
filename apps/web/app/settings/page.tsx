@@ -38,6 +38,7 @@ import { requireSessionContext } from "../../lib/access-guard";
 import { lineLabels } from "../../lib/lines";
 import { interviewStatus } from "../../lib/interview-status";
 import { timed, timedSync } from "../../lib/sections";
+import { memoForAsync } from "../../lib/ledger-memo";
 
 export const dynamic = "force-dynamic";
 const USAGE_DAYS = 7;
@@ -181,10 +182,10 @@ export default async function SettingsPage() {
         <section id="usage" className="st-section" aria-labelledby="st-usage"><h2 id="st-usage">用量与体检</h2>
           <div className="st-modules">
             <section className="st-card" aria-label="系统体检"><header><h3>系统体检</h3><small>每日从账本计算</small></header>
-              <EffectivenessCard data={await timed("settings.effectiveness", () => loadEffectiveness(ctx))} labels={lineLabels(ctx)} />
+              <EffectivenessCard data={await timed("settings.effectiveness", () => memoForAsync(`effectiveness:${ctx.workspaceId}`, 5 * 60_000, () => loadEffectiveness(ctx)))} labels={lineLabels(ctx)} />
             </section>
             <section className="st-card" aria-label="模型额度"><header><h3>模型额度</h3><small>账号的剩余额度与重置时间</small></header>
-              <QuotaCard signal={await timed("settings.quota", () => readQuota(ctx))} now={new Date()} timeZone={zone} />
+              <QuotaCard signal={await timed("settings.quota", () => memoForAsync(`quota:${ctx.workspaceId}`, 60_000, () => readQuota(ctx)))} now={new Date()} timeZone={zone} />
             </section>
             <section className="st-card" aria-label="模型用量"><header><h3>模型用量</h3><small>近 {USAGE_DAYS} 天，悬停查看次数与耗时</small></header>
               <UsageCard summary={store.summarizeModelUsage(ctx.workspaceId, since)} daily={store.dailyModelUsage(ctx.workspaceId, since)} days={USAGE_DAYS} />

@@ -3500,6 +3500,16 @@ export class CrosslineStore {
     return record;
   }
 
+  /**
+   * Changes whenever anything is written to the ledger, by this connection (`total_changes()`) or any other (`data_version`, e.g. the
+   * worker): two reads, for caching what is derived from the ledger until it changes.
+   */
+  changeToken(): string {
+    const dataVersion = this.#db.pragma("data_version", { simple: true });
+    const ownChanges = this.#db.prepare("SELECT total_changes()").pluck().get();
+    return `${String(dataVersion)}:${String(ownChanges)}`;
+  }
+
   close(): void {
     this.#db.close();
   }
