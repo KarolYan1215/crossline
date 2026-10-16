@@ -64,7 +64,7 @@ import { MILESTONE_RISKS_SETTING, parseMilestoneRisks, riskBufferDays } from "@c
 import { identityLines, linePacks } from "./lines";
 import { memoByLedgerAsync } from "./ledger-memo";
 import { localeFor, tOf } from "./locale";
-import { tFor, type Locale } from "./i18n";
+import { intlLocale, tFor, type Locale } from "./i18n";
 const PREFERENCES_SETTING = "schedule.preferences";
 export type SchedulePreferences = { timeZone: string; mode: "buffered" | "asap";
   importance: Record<string, "important" | "ordinary">;
@@ -2185,7 +2185,7 @@ export async function loadDashboard(ctx: AccessContext): Promise<Omit<DashboardD
   const identityPacks = identityLines(ctx);
   const timeZone = readSchedulePreferences(ctx)?.timeZone
     ?? process.env.CROSSLINE_TIME_ZONE?.trim() ?? "America/Chicago";
-  const time = new Intl.DateTimeFormat("zh-CN", {
+  const time = new Intl.DateTimeFormat(intlLocale(localeFor(ctx)), {
     weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false, timeZone
   }).format(now);
   const acceptedAt = firstAcceptedAt(ctx.workspaceId);
