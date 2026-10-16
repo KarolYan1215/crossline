@@ -254,6 +254,10 @@ type SafeCodexBlocker = { code: string; message: string };
 type LoginStatus = {
   loginId: string;
   state: "pending" | "completed" | "failed" | "canceled";
+  /** A device-code login's one-time code and the page it is entered on; the browser sign-in has neither. */
+  type?: "chatgpt" | "chatgptDeviceCode";
+  userCode?: string;
+  verificationUrl?: string;
   startedAt: string;
   updatedAt: string;
   blocker?: SafeCodexBlocker;
@@ -360,6 +364,14 @@ function loginStartResult(value: unknown): { type: "chatgpt"; loginId: string; a
     throw new Error("CODEX_LOGIN_RESPONSE_INVALID");
   }
   return { type: "chatgpt", loginId: result.loginId, authUrl: result.authUrl };
+}
+
+function deviceLoginStartResult(value: unknown): { type: "chatgptDeviceCode"; loginId: string; verificationUrl: string; userCode: string } {
+  const result = record(value);
+  if (typeof result?.loginId !== "string" || typeof result.verificationUrl !== "string" || typeof result.userCode !== "string") {
+    throw new Error("CODEX_LOGIN_RESPONSE_INVALID");
+  }
+  return { type: "chatgptDeviceCode", loginId: result.loginId, verificationUrl: result.verificationUrl, userCode: result.userCode };
 }
 
 export async function startCodexSupervisor(options: {
@@ -603,7 +615,7 @@ export async function startCodexSupervisor(options: {
               ...login,
               state: "failed",
               updatedAt,
-              blocker: { code: "CODEX_LOGIN_FAILED", message: "Codex login failed" }
+              blocker: { code: "CODEX_LOGIN_FAILED", message: "ChatGPT 登录没有完成，请重新连接。" }
             };
       }
     }
@@ -1231,14 +1243,23 @@ export async function startCodexSupervisor(options: {
         return;
       }
       if (request.method === "POST" && pathname === "/v1/codex/login") {
+        const now = new Date().toISOString();
+        // The browser sign-in calls back to localhost:1455 on the machine that opened the page, so on a hosted server the owner
+        // connects with a device code, the same way a guest does.
+        if (record(await readJsonBody(request))?.type === "chatgptDeviceCode") {
+          const result = deviceLoginStartResult(await sidecar.client.request("account/login/start", { type: "chatgptDeviceCode" }));
+          login = { loginId: result.loginId, state: "pending", startedAt: now, updatedAt: now, type: "chatgptDeviceCode",
+            userCode: result.userCode, verificationUrl: result.verificationUrl };
+          sendJson(response, 200, result);
+          return;
+        }
         const result = loginStartResult(await sidecar.client.request("account/login/start", {
           type: "chatgpt",
           appBrand: "codex",
           codexStreamlinedLogin: true,
           useHostedLoginSuccessPage: true
         }));
-        const now = new Date().toISOString();
-        login = { loginId: result.loginId, state: "pending", startedAt: now, updatedAt: now };
+        login = { loginId: result.loginId, state: "pending", startedAt: now, updatedAt: now, type: "chatgpt" };
         sendJson(response, 200, result);
         return;
       }

@@ -12,7 +12,6 @@ import { StageView } from "./stage-view";
 import { OpeningCard, openingReply, type OpeningAnswer } from "./opening-card";
 import { announceRound, TurnProgress } from "./turn-progress";
 import { SegmentedControl } from "../ui/controls";
-import { CodexAccountControl } from "../connectors/codex-account-control";
 import { AssessCard } from "./assess-card";
 import { composeAnswers, type Answer, type AssistantTurn, type DocumentRow, type Message, type OnboardingState } from "./onboarding-types";
 
@@ -50,6 +49,14 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
   // Whether this account has a model connection: every round runs on it, so until it has one the interview's first step is connecting,
   // here, instead of a red bar pointing to the bottom of the settings page (found walking the app as an invitee, 2026-10-15).
   const [connected, setConnected] = useState<boolean | undefined>();
+  // Connecting the model has its own page (/connect, the first stop after signing in); arriving here without it goes back there.
+  useEffect(() => {
+    void fetch("/api/codex/account", { cache: "no-store" }).then((response) => response.json())
+      // Only a definite "not signed in" sends the person there: with the background service unreachable /connect could not help either.
+      .then((answer: { account?: unknown; blocker?: unknown }) => setConnected(answer.account ? true : answer.blocker ? undefined : false))
+      .catch(() => undefined);
+  }, []);
+  useEffect(() => { if (connected === false && !line) location.replace("/connect?next=/onboarding"); }, [connected, line]);
   const bottom = useRef<HTMLDivElement>(null);
   const asked = useRef<HTMLDivElement>(null);
 
@@ -277,11 +284,6 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
             options={ONBOARDING_TONES.map((id) => ({ value: id, label: ONBOARDING_TONE_LABEL[id].label }))} /></div>}
       </header>
       <div className="ob-thread ob-voice" aria-live="polite">
-        {!state.focusLine && connected !== true && <section className="ob-connect" aria-label="连接 ChatGPT" hidden={connected === undefined}>
-          <b>第一步：连接本人的 ChatGPT</b>
-          <span className="ob-muted">访谈和之后的分析、规划都用本人的 ChatGPT 额度运行。连接一次即可，约 1 分钟；连接时可以先在左侧放入简历、课表、课程大纲。</span>
-          <CodexAccountControl onConnected={setConnected} />
-        </section>}
         {!state.focusLine && <AssessCard />}
         {opening && <OpeningCard linesKnown={!state.setupLines} knownLines={state.lines.map((line) => line.label)} initialTone={state.tone}
           busy={busy !== ""} hasMaterials={filesRead} needsConnection={!state.focusLine && connected === false} onStart={(answer) => void start(answer)} />}

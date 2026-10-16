@@ -33,6 +33,9 @@ function fakeSidecar() {
         request: async (method: string, params: unknown) => {
           requests.push({ method, params });
           if (method === "account/login/start") {
+            if ((params as { type?: string } | undefined)?.type === "chatgptDeviceCode") {
+              return { type: "chatgptDeviceCode", loginId: "login-2", verificationUrl: "https://auth.example.test/codex/device", userCode: "ABCD-EFGH" };
+            }
             return { type: "chatgpt", loginId: "login-1", authUrl: "https://auth.example.test" };
           }
           if (method === "account/login/cancel") return { status: "canceled" };
@@ -275,6 +278,24 @@ describe("Codex app-server boundary", () => {
     expect(sidecar.isStopped()).toBe(true);
   });
 
+  test("the owner can connect with a device code, which is the only sign-in that works from a hosted server", async () => {
+    const sidecar = fakeSidecar();
+    const supervisor = await codexModule.startCodexSupervisor({ port: 0, sidecarFactory: async () => sidecar.handle });
+    try {
+      const response = await fetch(`${supervisor.url}/v1/codex/login`, { method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ type: "chatgptDeviceCode" }) });
+      expect(await response.json()).toEqual({ type: "chatgptDeviceCode", loginId: "login-2",
+        verificationUrl: "https://auth.example.test/codex/device", userCode: "ABCD-EFGH" });
+      expect(sidecar.requests[0]).toEqual({ method: "account/login/start", params: { type: "chatgptDeviceCode" } });
+      // The page reads the code back from the status while it waits, as it does for a guest.
+      const status = await (await fetch(`${supervisor.url}/v1/codex/status`)).json() as { login?: Record<string, unknown> };
+      expect(status.login).toMatchObject({ state: "pending", type: "chatgptDeviceCode", userCode: "ABCD-EFGH",
+        verificationUrl: "https://auth.example.test/codex/device" });
+    } finally {
+      await supervisor.stop();
+    }
+  });
+
   test("calendar connection status comes from app/installed and app/read, never from the app/list directory", async () => {
     const sidecar = fakeSidecar();
     const supervisor = await codexModule.startCodexSupervisor({ port: 0, sidecarFactory: async () => sidecar.handle });
@@ -345,7 +366,7 @@ describe("Codex app-server boundary", () => {
         login: {
           loginId: "login-1",
           state: "failed",
-          blocker: { code: "CODEX_LOGIN_FAILED", message: "Codex login failed" }
+          blocker: { code: "CODEX_LOGIN_FAILED", message: "ChatGPT 登录没有完成，请重新连接。" }
         }
       });
       expect(JSON.stringify(body)).not.toContain("sensitive callback detail");

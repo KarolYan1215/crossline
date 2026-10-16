@@ -163,10 +163,6 @@
 .ob-calendar{fill:#8A8478;fill-opacity:.55}
 .ob-key[data-k="calendar"]{background:#8A8478;opacity:.55}
 /* The first step for an account with no model connection: above the opening card, in the thread, so it is the first thing read. */
-.ob-connect{display:grid;gap:8px;max-width:760px;margin-bottom:16px;padding:14px 16px;border:1.5px solid var(--ink);background:var(--paper)}
-.ob-connect>b{font-size:16px}
-.ob-connect .st-card{border:0;padding:0;background:transparent}
-.ob-connect[hidden]{display:none}
 /* The public quick test's result, offered before the interview (assess-card.tsx). */
 .ob-assess{display:grid;gap:8px;max-width:760px;margin-bottom:16px;padding:14px 16px;border:1px solid var(--mist);border-left:4px solid var(--ink);background:var(--paper)}
 .ob-assess-type{margin:0;display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;font-size:18px}

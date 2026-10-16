@@ -37,7 +37,7 @@ export function LoginForm({ googleEnabled, emailEnabled = true, chatgptEnabled =
       fail(signInError, "登录失败，请检查邮箱和密码");
       return;
     }
-    location.href = "/";
+    location.href = "/connect";
   };
 
   const resend = async () => {
@@ -62,12 +62,12 @@ export function LoginForm({ googleEnabled, emailEnabled = true, chatgptEnabled =
     }
     const { error: signInError } = await emailCode.signIn(codeSentTo, String(data.get("otp") ?? "").trim());
     if (signInError) { fail(signInError, "登录失败，请重新获取验证码。"); return; }
-    location.href = "/";
+    location.href = "/connect";
   };
 
   const signInWithGoogle = async () => {
     setBusy(true);
-    await authClient.signIn.social({ provider: "google", callbackURL: "/" });
+    await authClient.signIn.social({ provider: "google", callbackURL: "/connect" });
   };
 
   return <div className="auth-form">

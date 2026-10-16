@@ -40,10 +40,10 @@ describe("Codex account login observation", () => {
       supervisor: {
         login: {
           state: "failed",
-          blocker: { code: "CODEX_LOGIN_FAILED", message: "Codex login failed" }
+          blocker: { code: "CODEX_LOGIN_FAILED", message: "ChatGPT 登录没有完成，请重新连接。" }
         }
       }
-    })).toEqual({ code: "CODEX_LOGIN_FAILED", message: "Codex login failed" });
+    })).toEqual({ code: "CODEX_LOGIN_FAILED", message: "ChatGPT 登录没有完成，请重新连接。" });
   });
 
   test("a worker that is down or not configured is said in words, not as the supervisor's own English", () => {
