@@ -416,7 +416,7 @@ function missedAsks({ store, ctx, today, t, locale }: Source): Ask[] {
       raisedAt: `${yesterday}T${start}`, fingerprint: yesterday,
       title: t("昨天 {{time}} 排的「{{title}}」没开始", { time: start, title: short(order.intent) }),
       why: t("它已经被顺延到后面的空档，关系到 {{day}} 的截止（{{left}}）。顺延没问题就点一下；要是其实做了，去补记；要是已经不需要，就不做了。", {
-        day: format(dueDay, locale), left: ((left) => left > 0 ? t("还剩 {{count}} 天", { count: left }) : left === 0 ? t("今天截止") : t("已过 {{count}} 天", { count: -left }))(daysBetween(today, dueDay)) }),
+        day: format(dueDay, locale), left: ((left) => left > 0 ? t("还剩 {{count}} 天", { count: left }) : left === 0 ? t("今天截止", { context: "inline" }) : t("已过 {{count}} 天", { count: -left }))(daysBetween(today, dueDay)) }),
       options: [
         { id: "roll", label: t("顺延就好"), detail: t("按重新排的时间做"), recommended: true },
         { id: "later", label: t("推到某天再做"), fields: [{ id: "date", label: t("从哪天起再排"), kind: "date" as const, required: true }] },

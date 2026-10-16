@@ -347,7 +347,7 @@
   "频繁切换": "Switching often",
   "会议中": "In a meeting",
   "离开键盘": "Away",
-  "说不准": "Unclear",
+  "说不准": "Not sure",
   "数据不足": "Not enough data",
   "上课": "Class",
   "小测": "Quiz",
@@ -499,5 +499,6 @@
   "p85 情景只比截止早 {{count}} 天，没有留出 {{margin}} 天的余量_other": "The cautious case finishes only {{count}} days before the deadline, short of the {{margin}}-day margin",
   "尚无绑定作业；需先反推步骤": "No tasks bound yet; work back the steps first",
   "第四象限暂缓；请确认日期或提升重要性": "On hold (no deadline, ordinary importance); confirm a date or raise its importance",
-  "p85 情景晚于已确认截止时间": "The cautious case finishes after the confirmed deadline"
+  "p85 情景晚于已确认截止时间": "The cautious case finishes after the confirmed deadline",
+  "今天截止_inline": "due today"
 }
