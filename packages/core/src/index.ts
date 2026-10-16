@@ -44,6 +44,7 @@ export * from "./calibration";
 export * from "./telemetry";
 export * from "./effectiveness";
 import type { EvidenceQuestionTemplate } from "./milestone-templates";
+import { tFor, type Locale } from "./i18n";
 export type EnergyLevel = "low" | "medium" | "high";
 
 export type Estimate = {
@@ -217,6 +218,7 @@ export function validateMilestoneGateResult(
   const quoteIsExact = (quote: string) => plain(quote).length > 0 && evidencePlain.some((text) => text.includes(plain(quote)));
   // Which rule broke, said back to the Skill as the repair's detail (and to the person if the repairs run out). A bare code gave the
   // model nothing to correct, and both repairs of a real judgement were spent on it (2026-10-14).
+  /* i18n-ignore-start: the repair message to the gate Skill */
   const problem = !complete
     ? `每条达成标准恰好一条判定：缺 ${ids.filter((id) => !verdictIds.includes(id)).join("、") || "无"}${verdictIds.filter((id) => !ids.includes(id)).length ? `，多出 ${verdictIds.filter((id) => !ids.includes(id)).join("、")}` : ""}`
     : quotes.find((quote) => !quoteIsExact(quote)) !== undefined
@@ -232,23 +234,25 @@ export function validateMilestoneGateResult(
         : contractHolds && !fits && result.verdict === "insufficient"
           ? `契约已覆盖，只是不符合本人主线 skill，verdict 应为 partial 而不是 insufficient`
         : "";
+  /* i18n-ignore-end */
   if (problem) throw Object.assign(new Error("GATE_VERDICT_INCONSISTENT"), { detail: problem });
   return result;
 }
 
-export function validateSuccessCriteria(criteria: SuccessCriterion[]):
+export function validateSuccessCriteria(criteria: SuccessCriterion[], locale?: Locale):
   | { ok: true; verifiability: "measurable" | "judgement_only" }
   | { ok: false; blocker: { code: string; message: string } } {
+  const t = tFor(locale);
   if (!criteria.length) {
-    return { ok: false, blocker: { code: "MILESTONE_NEEDS_CRITERIA", message: "里程碑必须声明至少一条达成标准" } };
+    return { ok: false, blocker: { code: "MILESTONE_NEEDS_CRITERIA", message: t("里程碑必须声明至少一条达成标准") } };
   }
   for (const criterion of criteria) {
     if (!criterion.statement.trim()) {
-      return { ok: false, blocker: { code: "CRITERION_EMPTY", message: "达成标准不能为空" } };
+      return { ok: false, blocker: { code: "CRITERION_EMPTY", message: t("达成标准不能为空") } };
     }
     // "做得好" is not a standard; "没有给出任何反例检验" is.
     if (criterion.measure.kind === "judgement" && !criterion.measure.failsWhen.trim()) {
-      return { ok: false, blocker: { code: "CRITERION_NOT_FALSIFIABLE", message: "判断型标准必须写明什么情况下判不过" } };
+      return { ok: false, blocker: { code: "CRITERION_NOT_FALSIFIABLE", message: t("判断型标准必须写明什么情况下判不过") } };
     }
   }
   const measurable = criteria.some((criterion) => criterion.measure.kind !== "judgement");
@@ -359,7 +363,7 @@ const WORK_ORDER_TRANSITIONS: Partial<Record<WorkOrderState, Partial<Record<Work
   accepted: { "acceptance.revoked": "evidence_review", archived: "archived" }
 };
 
-export function advanceWorkOrder<T extends { state: WorkOrderState }>(workOrder: T, event: WorkOrderEvent):
+export function advanceWorkOrder<T extends { state: WorkOrderState }>(workOrder: T, event: WorkOrderEvent, locale?: Locale):
   | { ok: true; workOrder: T; from: WorkOrderState; to: WorkOrderState }
   | { ok: false; blocker: { code: "INVALID_WORK_ORDER_TRANSITION"; message: string } } {
   const next = event.type === "archive.restored"
@@ -370,7 +374,7 @@ export function advanceWorkOrder<T extends { state: WorkOrderState }>(workOrder:
       ok: false,
       blocker: {
         code: "INVALID_WORK_ORDER_TRANSITION",
-        message: `不能从 ${workOrder.state} 通过 ${event.type} 转换状态`
+        message: tFor(locale)("不能从 {{from}} 通过 {{event}} 转换状态", { from: workOrder.state, event: event.type })
       }
     };
   }
@@ -455,11 +459,12 @@ export type CommandEnvelope = {
   createdAt: string;
 };
 
-export function validateCommandEnvelope(value: unknown):
+export function validateCommandEnvelope(value: unknown, locale?: Locale):
   | { ok: true; command: CommandEnvelope }
   | { ok: false; blocker: { code: "INVALID_COMMAND_ENVELOPE"; message: string } } {
+  const t = tFor(locale);
   if (!value || typeof value !== "object") {
-    return { ok: false, blocker: { code: "INVALID_COMMAND_ENVELOPE", message: "离线命令缺少必填字段" } };
+    return { ok: false, blocker: { code: "INVALID_COMMAND_ENVELOPE", message: t("离线命令缺少必填字段") } };
   }
   const candidate = value as Record<string, unknown>;
   const valid =
@@ -471,7 +476,7 @@ export function validateCommandEnvelope(value: unknown):
     Object.hasOwn(candidate, "payload") &&
     typeof candidate.createdAt === "string" && !Number.isNaN(Date.parse(candidate.createdAt));
   if (!valid) {
-    return { ok: false, blocker: { code: "INVALID_COMMAND_ENVELOPE", message: "离线命令缺少必填字段" } };
+    return { ok: false, blocker: { code: "INVALID_COMMAND_ENVELOPE", message: t("离线命令缺少必填字段") } };
   }
   return { ok: true, command: candidate as CommandEnvelope };
 }

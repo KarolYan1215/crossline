@@ -1,5 +1,6 @@
 import { courseCodeOf } from "./task-title";
 import type { ProfileModel } from "./onboarding-turn-schema";
+import { joinList, tFor, type Locale } from "./i18n";
 
 /**
  * When the interview is finished, as a list anyone can tick (decided 2026-10-08). It used to be the model's own call — 「material rich
@@ -16,7 +17,7 @@ export type ChecklistItem = {
   group: "画像" | "主线" | "日程" | "项目" | "文件";
   label: string;
   done: boolean;
-  /** What is missing, in words, when not done. */
+  /** What is missing, in words, when not done. `group` stays a Chinese key (compared and grouped by); show it with `t(group)`. */
   detail: string;
   owner: "interview" | "person";
   /**
@@ -41,6 +42,8 @@ export type ChecklistInput = {
   /** Files only the person can place; null where this is not known (the worker). */
   unfiledFiles: number | null;
   portraitConfirmed: boolean;
+  /** The language of each item's label and detail (default Chinese). */
+  locale?: Locale | undefined;
 };
 
 const confirmedFact = (fact: { status: string; sourceRef: string }) => fact.status === "confirmed" && /^(reply|src)-\d+$/.test(fact.sourceRef);
@@ -48,7 +51,7 @@ const confirmedFact = (fact: { status: string; sourceRef: string }) => fact.stat
  * An assumption the interview wrote for what the person could not say (「假设：…」, inferred; decided 2026-10-09: missing information is
  * assumed, not asked about forever). It settles an item so the interview moves on, and the item says it rests on an assumption.
  */
-export const ASSUMPTION_PREFIX = /^假设[：:]/;
+export const ASSUMPTION_PREFIX = /^(假设|assumption|assumed)[：:]/i;
 const assumedFact = (fact: { status: string; value?: string }) => fact.status === "inferred" && ASSUMPTION_PREFIX.test(fact.value ?? "");
 const settledFact = (fact: { status: string; sourceRef: string; value?: string }) => confirmedFact(fact) || assumedFact(fact);
 /** The three parts of the portrait the person's own words must stand behind, read from the slots the interview files facts under. */
@@ -72,31 +75,34 @@ const MEETING_SLOTS = /^(meeting|class)_?(times?|schedule)$|^no_meetings$|^fixed
 const COURSE_PART = /项目|作业|考试|测验|报告|论文|展示|project|homework|assignment|exam|quiz|report|paper|presentation/i;
 
 export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
+  const t = tFor(input.locale);
+  const list = (labels: string[]) => input.locale === "en" ? joinList(input.locale, labels.map((label) => t(label))) : labels.join("、");
   const items: ChecklistItem[] = [];
   const profile = input.profile;
   const missingFields = PORTRAIT_FIELDS.filter(([key]) => !String(profile[key] ?? "").trim()).map(([, label]) => label);
   if (!String(profile.anchor ?? "").trim() && !String(profile.realWant ?? "").trim()) missingFields.push("锚与真正想要的");
   const energy = profile.energyMap ?? [];
   if (energy.length < 3 || !energy.some((item) => item.charge === "charge") || !energy.some((item) => item.charge === "drain")) missingFields.push("能量地图（至少 3 项，含充电与耗电）");
-  items.push({ id: "portrait_fields", group: "画像", label: "画像各部分已写出", done: !missingFields.length, detail: missingFields.length ? `缺：${missingFields.join("、")}` : "", owner: "interview" });
+  items.push({ id: "portrait_fields", group: "画像", label: t("画像各部分已写出"), done: !missingFields.length,
+    detail: missingFields.length ? t("缺：{{items}}", { items: list(missingFields) }) : "", owner: "interview" });
   const personFacts = input.facts.filter((fact) => fact.identityId === "person" && settledFact(fact));
   const unbacked = PORTRAIT_PARTS.filter((part) => !personFacts.some((fact) => part.slots.test(fact.slot))).map((part) => part.label);
   const assumedParts = PORTRAIT_PARTS.filter((part) => !personFacts.some((fact) => confirmedFact(fact) && part.slots.test(fact.slot))).map((part) => part.label)
     .filter((label) => !unbacked.includes(label));
-  items.push({ id: "portrait_grounded", group: "画像", label: "画像每部分都有本人原话或文件为据", done: !unbacked.length,
-    detail: unbacked.length ? `尚无本人依据：${unbacked.join("、")}` : assumedParts.length ? `以假设代替：${assumedParts.join("、")}` : "", owner: "interview" });
-  items.push({ id: "portrait_confirmed", group: "画像", label: "本人确认画像符合自己", done: input.portraitConfirmed,
-    detail: input.portraitConfirmed ? "" : "访谈问到「当前画像是否符合」时选「符合」，或说明哪里不对", owner: "person" });
+  items.push({ id: "portrait_grounded", group: "画像", label: t("画像每部分都有本人原话或文件为据"), done: !unbacked.length,
+    detail: unbacked.length ? t("尚无本人依据：{{items}}", { items: list(unbacked) }) : assumedParts.length ? t("以假设代替：{{items}}", { items: list(assumedParts) }) : "", owner: "interview" });
+  items.push({ id: "portrait_confirmed", group: "画像", label: t("本人确认画像符合自己"), done: input.portraitConfirmed,
+    detail: input.portraitConfirmed ? "" : t("访谈问到「当前画像是否符合」时选「符合」，或说明哪里不对"), owner: "person" });
 
   for (const line of input.lines) {
     const described = input.descriptions[line.id];
     // A goal the person wrote themselves needs no candidates to choose it from.
     const candidates = (described?.candidates ?? 0) > 0 || line.goals.length > 0;
-    items.push({ id: `line_desc:${line.id}`, group: "主线", label: `「${line.label}」有个性化描述与长期目标候选`,
+    items.push({ id: `line_desc:${line.id}`, group: "主线", label: t("「{{line}}」有个性化描述与长期目标候选", { line: line.label }),
       done: Boolean(described?.description.trim()) && candidates,
-      detail: !described?.description.trim() ? "尚无描述" : !candidates ? "尚无长期目标的定语候选" : "", owner: "interview", start: true });
-    items.push({ id: `line_goal:${line.id}`, group: "主线", label: `「${line.label}」已选定至少一个长期目标`, done: line.goals.length > 0,
-      detail: line.goals.length ? "" : "从候选中采用或自己写一个", owner: "person", start: true });
+      detail: !described?.description.trim() ? t("尚无描述") : !candidates ? t("尚无长期目标的定语候选") : "", owner: "interview", start: true });
+    items.push({ id: `line_goal:${line.id}`, group: "主线", label: t("「{{line}}」已选定至少一个长期目标", { line: line.label }), done: line.goals.length > 0,
+      detail: line.goals.length ? "" : t("从候选中采用或自己写一个"), owner: "person", start: true });
   }
 
   const projectLine = (project: string) => input.projects.find((item) => item.id === project || item.name === project)?.identityId
@@ -106,13 +112,14 @@ export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
     // A fixed weekly arrangement of this line: from its own projects, or — said in a reply under no project — when it is the only hard line.
     const fixed = input.dates.filter((entry) => entry.recurring && (projectLine(entry.project) === line.id || (!projectLine(entry.project) && hardLines.length === 1)));
     // A start item: an assumed schedule does not count (dates still waiting in a batch do — the person supplied the file that has them).
-    items.push({ id: `hard_schedule:${line.id}`, group: "日程", label: `硬约束「${line.label}」的固定日程已收集`, done: fixed.length > 0,
-      detail: fixed.length ? "" : "上课、组会、值班等每周固定安排尚未收集", owner: "interview", start: true });
+    items.push({ id: `hard_schedule:${line.id}`, group: "日程", label: t("硬约束「{{line}}」的固定日程已收集", { line: line.label }), done: fixed.length > 0,
+      detail: fixed.length ? "" : t("上课、组会、值班等每周固定安排尚未收集"), owner: "interview", start: true });
   }
-  items.push({ id: "availability", group: "日程", label: "已提出建议的可用时段", done: input.availability,
-    detail: input.availability ? "" : "固定日程之外，每周哪些时段可以安排工作", owner: "interview", start: true });
+  items.push({ id: "availability", group: "日程", label: t("已提出建议的可用时段"), done: input.availability,
+    detail: input.availability ? "" : t("固定日程之外，每周哪些时段可以安排工作"), owner: "interview", start: true });
   const pending = input.dates.filter((entry) => entry.pending).length;
-  if (pending) items.push({ id: "dates_confirmed", group: "日程", label: "文件与口述中的日期已确认", done: false, detail: `${pending} 项日期等待确认`, owner: "person" });
+  if (pending) items.push({ id: "dates_confirmed", group: "日程", label: t("文件与口述中的日期已确认"), done: false,
+    detail: t("{{count}} 项日期等待确认", { count: pending }), owner: "person" });
 
   // Every line has something it is working on now, and when that is due — or the person said it has no deadline.
   for (const line of input.lines) {
@@ -122,8 +129,10 @@ export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
         && (/^deadline$|^date_|^no_deadline$/.test(fact.slot) || NO_DEADLINE.test(fact.value ?? "")))
       || input.dates.some((entry) => !entry.recurring && (entry.project === project.id || entry.project === project.name));
     const done = current.some(knowsDeadline);
-    items.push({ id: `line_project:${line.id}`, group: "项目", label: `「${line.label}」有当前项目，且知道截止或没有截止`, done,
-      detail: done ? "" : current.length ? `缺截止（或说明没有截止）：${current.map((project) => project.name).join("、")}` : "尚无当前项目",
+    items.push({ id: `line_project:${line.id}`, group: "项目", label: t("「{{line}}」有当前项目，且知道截止或没有截止", { line: line.label }), done,
+      detail: done ? "" : current.length
+        ? t("缺截止（或说明没有截止）：{{projects}}", { projects: input.locale === "en" ? joinList(input.locale, current.map((project) => project.name)) : current.map((project) => project.name).join("、") })
+        : t("尚无当前项目"),
       owner: "interview", start: true });
   }
 
@@ -137,12 +146,13 @@ export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
     const meets = input.dates.some((entry) => entry.recurring && (entry.project === project.id || entry.project === project.name))
       || own.some((fact) => MEETING_SLOTS.test(fact.slot));
     if (course && !meets) missing.push("上课时间");
-    items.push({ id: `project:${project.id}`, group: "项目", label: `「${project.name}」${course ? "目标、截止、进展证据、评分占比与上课时间" : "目标、截止与进展证据"}`,
-      done: !missing.length, detail: missing.length ? `缺：${missing.join("、")}` : "", owner: "interview" });
+    items.push({ id: `project:${project.id}`, group: "项目",
+      label: course ? t("「{{project}}」目标、截止、进展证据、评分占比与上课时间", { project: project.name }) : t("「{{project}}」目标、截止与进展证据", { project: project.name }),
+      done: !missing.length, detail: missing.length ? t("缺：{{items}}", { items: list(missing) }) : "", owner: "interview" });
   }
 
-  if (input.unfiledFiles !== null) items.push({ id: "files_filed", group: "文件", label: "上传的文件都已归属项目", done: input.unfiledFiles === 0,
-    detail: input.unfiledFiles ? `${input.unfiledFiles} 份文件待说明归属（见待决事项）` : "", owner: "person" });
+  if (input.unfiledFiles !== null) items.push({ id: "files_filed", group: "文件", label: t("上传的文件都已归属项目"), done: input.unfiledFiles === 0,
+    detail: input.unfiledFiles ? t("{{count}} 份文件待说明归属（见待决事项）", { count: input.unfiledFiles }) : "", owner: "person" });
   return items;
 }
 

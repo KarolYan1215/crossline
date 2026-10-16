@@ -1,3 +1,5 @@
+import { tFor, type Locale } from "./i18n";
+
 /**
  * Clean-up for the kind of junk a model emits at the end of a free-text field, before any validator sees it.
  *
@@ -55,7 +57,10 @@ export function cleanAnswerStrings<T>(value: T): T {
  * Model text written before the style rule forbade it can still say 「p50 合计 180 分钟」; shown to the person it reads 「通常合计 180 分钟」.
  * p25 is the optimistic end, p50 the usual, p85 the cautious one.
  */
-export function plainEstimateWords(text: string): string {
-  return text.replace(/(?<![A-Za-z0-9])p\s?50(?![0-9])\s*/giu, "通常").replace(/(?<![A-Za-z0-9])p\s?85(?![0-9])\s*/giu, "保守")
-    .replace(/(?<![A-Za-z0-9])p\s?25(?![0-9])\s*/giu, "乐观");
+export function plainEstimateWords(text: string, locale?: Locale): string {
+  const t = tFor(locale);
+  // Chinese runs the word into what follows (「通常合计」); English keeps the space that was there ("usual total").
+  const word = (key: string) => (match: string) => locale === "en" && /\s$/.test(match) ? `${t(key)} ` : t(key);
+  return text.replace(/(?<![A-Za-z0-9])p\s?50(?![0-9])\s*/giu, word("通常")).replace(/(?<![A-Za-z0-9])p\s?85(?![0-9])\s*/giu, word("保守"))
+    .replace(/(?<![A-Za-z0-9])p\s?25(?![0-9])\s*/giu, word("乐观"));
 }

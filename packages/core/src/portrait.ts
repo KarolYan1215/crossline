@@ -107,6 +107,7 @@ function inFixedOrder<T>(items: T[] | undefined, names: readonly string[], nameO
   const repeated = seen.filter((name, index) => seen.indexOf(name) !== index);
   const missing = names.filter((name) => !seen.includes(name));
   if (!lenient && (repeated.length || missing.length)) {
+    // i18n-ignore: a repair message to the model
     throw refuse(code, [missing.length ? `缺少：${missing.join("、")}` : "", repeated.length ? `重复：${[...new Set(repeated)].join("、")}` : ""].filter(Boolean).join("；") + `；需恰好一次：${names.join("、")}`);
   }
   const rank = (item: T) => { const index = names.indexOf(nameOf(item)); return index < 0 ? names.length : index; };
@@ -125,6 +126,7 @@ export function validatePortrait(value: unknown, lineIds: string[], options: { l
   const known = new Set(lineIds);
   const unknown = report.lines.items.find((item) => !known.has(item.lineId));
   if (unknown) {
+    // i18n-ignore: a repair message to the model
     throw refuse("PORTRAIT_LINE_UNKNOWN", `主线「${unknown.lineId}」不存在；可用：${lineIds.join("、")}`);
   }
   const lenient = options.lenient ?? false;

@@ -75,6 +75,7 @@ export function summarizeAgentHistory(spans: ActivitySpan[], now: Date, timeZone
     daily: [...daily].sort((a, b) => a[0].localeCompare(b[0])).map(([day, minutes]) => ({ day, minutes })) };
 }
 
+/* i18n-ignore-start: these lines are context for a model, not interface text */
 const hours = (minutes: number) => `${(minutes / 60).toFixed(minutes >= 600 ? 0 : 1)} 小时`;
 
 /**
@@ -92,3 +93,4 @@ export function agentHistoryLines(summary: AgentHistorySummary | null): string[]
     `最常工作的时段：${peak.map((hour) => `${hour}:00`).join("、")}；最忙的是${busiest.join("和")}。`
   ];
 }
+/* i18n-ignore-end */

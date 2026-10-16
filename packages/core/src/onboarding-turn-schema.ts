@@ -270,6 +270,8 @@ function reject(code: string, detail: string): never {
   throw error;
 }
 
+// The refusals below are repair messages to the interview model, not interface text.
+/* i18n-ignore-start */
 export function validateOnboardingTurn(value: unknown, known: KnownSources): OnboardingTurn {
   const turn = value as OnboardingTurn | undefined;
   if (!turn || typeof turn.reply !== "string" || !Array.isArray(turn.questions) || !Array.isArray(turn.slotUpdates)
@@ -343,6 +345,7 @@ export function validateOnboardingTurn(value: unknown, known: KnownSources): Onb
   }
   for (const window of turn.availability?.windows ?? []) if (!/^\d{2}:\d{2}$/.test(window.start) || !/^\d{2}:\d{2}$/.test(window.end) || window.end <= window.start)
     reject("ONBOARDING_AVAILABILITY_INVALID", `可用时段 ${window.start}–${window.end} 不合法：用 HH:MM，且结束晚于开始。`);
+  /* i18n-ignore-end */
   // A turn recorded before the portrait existed has none of it; every live answer carries all of it (strict schema).
   return { ...turn, stage: turn.stage ?? "details", questions: turn.questions.map((question) => ({ ...question, kind: questionKind(question) })),
     lineProfiles: (turn.lineProfiles ?? []).map((line) => ({ ...line, attributeCandidates: cleanCandidates(line.attributeCandidates ?? []) })),
@@ -357,7 +360,8 @@ export function validateOnboardingTurn(value: unknown, known: KnownSources): Onb
  * `multi` even when the model wrote `single`, because a single choice there forces a wrong answer. A goal measured as one number
  * (目标分数, 目标成绩) stays single.
  */
-const MANY = /哪些|哪几|多选|可多选|都有什么|目标(?!分|成绩|绩点|线|是多少)/u;
+// English as well as Chinese: "which ones", "select all that apply", a goal (but not a target score or grade, which is one number).
+const MANY = /哪些|哪几|多选|可多选|都有什么|目标(?!分|成绩|绩点|线|是多少)|\bwhich (ones|of these|of the following|of them)\b|\bwhat are (all|the)\b|\bselect all\b|\bchoose all\b|\b(all|any) that apply\b|\bpick (any|several|all)\b|\bgoals?\b(?!\s+(score|scores|grade|grades|gpa|mark|marks|number))/iu;
 export function questionKind(question: Pick<TurnQuestion, "kind" | "text">): TurnQuestion["kind"] {
   return question.kind === "single" && MANY.test(question.text) ? "multi" : question.kind;
 }
@@ -381,6 +385,7 @@ const cleanCandidates = (list: AttributeCandidate[]) => list.map((item) => ({ te
  * 6–12, each cited to a reply or file, each one thing, and no two saying the same (after removing 「的」 and punctuation, one contains
  * the other). The detail names the offending attributes so the repair has something to act on.
  */
+/* i18n-ignore-start: repair messages to the model */
 function attributeProblem(list: AttributeCandidate[], citable: (ref: string) => boolean): { code: string; detail: string } | undefined {
   if (!list.length) return undefined;
   for (const item of list) {
@@ -395,6 +400,7 @@ function attributeProblem(list: AttributeCandidate[], citable: (ref: string) => 
   }
   return undefined;
 }
+/* i18n-ignore-end */
 
 /** The candidates that pass on their own (cited, one thing, not repeating an earlier one); fewer than six left means none (keep those on record). */
 function keepCandidates(list: AttributeCandidate[], citable: (ref: string) => boolean): AttributeCandidate[] {

@@ -1,3 +1,5 @@
+import { tFor, type Locale } from "./i18n";
+
 /**
  * Capacity is reported on the same coarse scale a person would use about themselves, and never as a
  * number. The literature that supports inferring effort from interaction data supports a two-to-three
@@ -24,6 +26,8 @@ export type CapacityInput = {
   /** Interruptions per active hour, from real executions. Corroborates; never classifies alone. */
   interruptionDensity: Array<{ day: string; perActiveHour: number }>;
   localActivityConsent: "granted" | "denied" | "unasked";
+  /** The language of the blockers' messages (default Chinese). */
+  locale?: Locale | undefined;
 };
 
 /** A self-report older than this says how the day started, not how it is now. */
@@ -42,6 +46,7 @@ const tercile = (values: number[], value: number): "low" | "medium" | "high" => 
 export function deriveCapacity(input: CapacityInput): CapacityReading {
   const observationCount = input.selfReports.length + input.dailyActivity.length;
   const blockers: Array<{ code: string; message: string }> = [];
+  const t = tFor(input.locale);
 
   // A person saying how they feel outranks anything inferred about them.
   const freshest = [...input.selfReports].sort((a, b) => Date.parse(b.observedAt) - Date.parse(a.observedAt))[0];
@@ -50,7 +55,7 @@ export function deriveCapacity(input: CapacityInput): CapacityReading {
   }
 
   if (input.localActivityConsent !== "granted") {
-    blockers.push({ code: "LOCAL_ACTIVITY_NOT_AUTHORISED", message: "本机活动采集未开启；开启后可在没有自评时给出参考读数。" });
+    blockers.push({ code: "LOCAL_ACTIVITY_NOT_AUTHORISED", message: t("本机活动采集未开启；开启后可在没有自评时给出参考读数。") });
     return { level: "uncalibrated", observationCount, basis: [], blockers };
   }
 
@@ -58,7 +63,7 @@ export function deriveCapacity(input: CapacityInput): CapacityReading {
   if (!today || baseline.length < BASELINE_DAYS) {
     blockers.push({
       code: "BASELINE_INSUFFICIENT",
-      message: `需要至少 ${BASELINE_DAYS} 天本机活动观测才能与本人基线比较（当前 ${baseline.length} 天）。`
+      message: t("需要至少 {{days}} 天本机活动观测才能与本人基线比较（当前 {{current}} 天）。", { days: BASELINE_DAYS, current: baseline.length })
     });
     return { level: "uncalibrated", observationCount, basis: [], blockers };
   }

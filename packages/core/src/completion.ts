@@ -1,4 +1,5 @@
 import type { SuccessCriterion } from "./index";
+import { tFor, type Locale } from "./i18n";
 
 /**
  * Pressing 完成 is acceptance (the owner's decision of 2026-10-15). 「ECE 555 作业 2」 marked done is done: nothing asks again, nothing
@@ -47,11 +48,11 @@ export const COMPLETION_FIELD = { type: "object", additionalProperties: false, r
 const REASONS: readonly AssessmentReason[] = ["result_pending", "quality", "exploration"];
 const DEFAULT_HOURS: Record<AssessmentReason, number> = { result_pending: 24, quality: 2, exploration: 2 };
 /** A model's `completion` made usable, or undefined when it is missing or malformed (a task written before the field existed). */
-export function readModelCompletion(value: unknown): ModelCompletion | undefined {
+export function readModelCompletion(value: unknown, locale?: Locale): ModelCompletion | undefined {
   const raw = value as Partial<Record<keyof ModelCompletion, unknown>> | undefined;
   if (!raw || typeof raw !== "object" || (raw.mode !== "self_evident" && raw.mode !== "needs_assessment")) return undefined;
   const text = (field: unknown) => typeof field === "string" ? field.trim().slice(0, 300) : "";
-  if (raw.mode === "self_evident") return { mode: "self_evident", reason: "", why: text(raw.why) || "交付即完成", question: "", askAfterHours: 0 };
+  if (raw.mode === "self_evident") return { mode: "self_evident", reason: "", why: text(raw.why) || tFor(locale)("交付即完成"), question: "", askAfterHours: 0 };
   const reason = REASONS.includes(raw.reason as AssessmentReason) ? raw.reason as AssessmentReason : "quality";
   const hours = Number(raw.askAfterHours);
   return { mode: "needs_assessment", reason, why: text(raw.why), question: text(raw.question),
@@ -61,52 +62,56 @@ export function readModelCompletion(value: unknown): ModelCompletion | undefined
 type OrderLike = { intent: string; payload?: unknown };
 type PayloadLike = { title?: string; completionMode?: CompletionMode; completion?: unknown; evidenceContract?: Array<{ kind?: string; description?: string }> };
 
-const askFor = (reason: AssessmentReason, title: string) => reason === "result_pending" ? `${quote(title)}的成绩或结果出来了吗？`
-  : reason === "exploration" ? `${quote(title)}有哪些收获，完成得怎么样？` : `${quote(title)}完成得怎么样？`;
+const askFor = (reason: AssessmentReason, title: string, locale?: Locale) => {
+  const t = tFor(locale);
+  const task = title.slice(0, 40);
+  return reason === "result_pending" ? t("「{{task}}」的成绩或结果出来了吗？", { task })
+    : reason === "exploration" ? t("「{{task}}」有哪些收获，完成得怎么样？", { task }) : t("「{{task}}」完成得怎么样？", { task });
+};
 
 // Fallback for tasks written before the models judged completion (no `payload.completion`); a new task never reaches these rules.
+// Each rule reads English titles as well as Chinese ones: an English workspace's tasks are written in English.
 /** Something sat or submitted for somebody else's judgement. */
-const JUDGED_EVENT = /(考试|测验|小测|期中|期末|面试|答辩|投稿|竞赛|比赛|路演|评审|quiz|exam|midterm|final|interview|pitch|submission to)/i;
+const JUDGED_EVENT = /(考试|测验|小测|期中|期末|面试|答辩|投稿|竞赛|比赛|路演|评审|quiz|exam|midterm|final|interview|pitch|submission to|\b(?:thesis )?defen[cs]e\b|\bcompetition\b|\bcontest\b)/i;
 /** Work towards such an event, not the event: preparing for an exam is not sitting it. */
-const TOWARDS = /(复习|准备|整理|汇集|汇总|确认|询问|练习|模拟|提纲|材料|范围|题型|规则|台账|成绩记录|当前成绩|报名)/;
+const TOWARDS = /(复习|准备|整理|汇集|汇总|确认|询问|练习|模拟|提纲|材料|范围|题型|规则|台账|成绩记录|当前成绩|报名|\b(?:review|revise|revision|prepar\w*|prep|organi[sz]e|gather|collect|compile|confirm|ask|practi[cs]e|mock|outline|materials?|scope|format|rules|register|registration|sign up)\b)/i;
 /** Done when said: handing in, finishing homework, sending, attending, filing, looking up. */
-const SELF_EVIDENT = /(提交|交付|上交|作业|发送|发出|寄出|发邮件|参加|出席|上课|听讲|报名|缴费|付款|预约|预订|注册|安装|下载|打印|归档|整理|汇集|汇总|导出|取得|获取|确认|询问|联系|登记|填写|盘点|配置|部署|复习|练习|解题|做题|推导)/;
-const EXPLORATION = /(探索|调研|研究|尝试|摸索|熟悉|了解|学习|阅读|读完|explore|research|investigate)/i;
-const QUALITY = /(撰写|起草|写作|写出|设计|制作|剪辑|拍摄|录制|方案|提纲|论文|报告|稿|笔记|视频|文章|内容包|deck|pitch)/i;
-
-const quote = (title: string) => `「${title.slice(0, 40)}」`;
+const SELF_EVIDENT = /(提交|交付|上交|作业|发送|发出|寄出|发邮件|参加|出席|上课|听讲|报名|缴费|付款|预约|预订|注册|安装|下载|打印|归档|整理|汇集|汇总|导出|取得|获取|确认|询问|联系|登记|填写|盘点|配置|部署|复习|练习|解题|做题|推导|\b(?:submit|hand in|turn in|deliver|homework|hw\s?\d+|problem set|send|mail|email|attend|go to class|lecture|register|sign up|pay|book|reserve|install|download|print|file|archive|organi[sz]e|gather|compile|export|obtain|confirm|ask|contact|fill in|fill out|configure|deploy|review|practi[cs]e|solve|derive)\b)/i;
+const EXPLORATION = /(探索|调研|研究|尝试|摸索|熟悉|了解|学习|阅读|读完|explore|research|investigate|\b(?:try|try out|figure out|get familiar|familiari[sz]e|learn|study|read)\b)/i;
+const QUALITY = /(撰写|起草|写作|写出|设计|制作|剪辑|拍摄|录制|方案|提纲|论文|报告|稿|笔记|视频|文章|内容包|deck|pitch|\b(?:write|draft|design|make|create|edit|film|shoot|record|proposal|outline|paper|report|essay|notes|video|article|post)\b)/i;
 
 /**
  * How a task's completion is taken; `completionMode` is its one-word form. In order: the person's own choice (`payload.completionMode`,
  * at approval or on the task) > the judgement of the model that wrote the task (`payload.completion`) > the title rules below, which
  * only old tasks without a model judgement still reach.
  */
-export function completionRule(order: OrderLike): CompletionRule {
+export function completionRule(order: OrderLike, locale?: Locale): CompletionRule {
+  const t = tFor(locale);
   const payload = (order.payload ?? {}) as PayloadLike;
   const title = (payload.title ?? "").trim() || order.intent.trim();
   const text = `${title} ${order.intent}`;
-  const model = readModelCompletion(payload.completion);
-  if (payload.completionMode === "self_evident") return { mode: "self_evident", why: "本人选定：点完成即验收", by: "person" };
+  const model = readModelCompletion(payload.completion, locale);
+  if (payload.completionMode === "self_evident") return { mode: "self_evident", why: t("本人选定：点完成即验收"), by: "person" };
   if (payload.completionMode === "needs_assessment") {
     // The model's reason (a score to come, quality, exploration) still says what to ask; the person only chose to be asked.
     const reason = model?.mode === "needs_assessment" ? model.reason as AssessmentReason : "quality";
-    return { mode: "needs_assessment", reason, why: "本人选定：完成后再问结果", question: model?.question || askFor(reason, title),
+    return { mode: "needs_assessment", reason, why: t("本人选定：完成后再问结果"), question: model?.question || askFor(reason, title, locale),
       askAfterHours: model?.mode === "needs_assessment" ? model.askAfterHours : DEFAULT_HOURS[reason], by: "person" };
   }
   if (model?.mode === "self_evident") return { mode: "self_evident", why: model.why, by: "model" };
   if (model) {
     const reason = model.reason as AssessmentReason;
-    return { mode: "needs_assessment", reason, why: model.why || "完成后再问结果", question: model.question || askFor(reason, title), askAfterHours: model.askAfterHours, by: "model" };
+    return { mode: "needs_assessment", reason, why: model.why || t("完成后再问结果"), question: model.question || askFor(reason, title, locale), askAfterHours: model.askAfterHours, by: "model" };
   }
   if (JUDGED_EVENT.test(title) && !TOWARDS.test(title))
-    return { mode: "needs_assessment", reason: "result_pending", why: "结果由别人之后评定（成绩、录用、评审意见）",
-      question: askFor("result_pending", title), askAfterHours: 24, by: "rule" };
-  if (SELF_EVIDENT.test(title)) return { mode: "self_evident", why: "交付本身就是完成：点完成即验收", by: "rule" };
-  if (EXPLORATION.test(text)) return { mode: "needs_assessment", reason: "exploration", why: "探索类工作没有明确产物，完成程度要问本人",
-    question: askFor("exploration", title), askAfterHours: 2, by: "rule" };
-  if (QUALITY.test(title)) return { mode: "needs_assessment", reason: "quality", why: "产出的质量难以直接判断",
-    question: askFor("quality", title), askAfterHours: 2, by: "rule" };
-  return { mode: "self_evident", why: "点完成即验收", by: "rule" };
+    return { mode: "needs_assessment", reason: "result_pending", why: t("结果由别人之后评定（成绩、录用、评审意见）"),
+      question: askFor("result_pending", title, locale), askAfterHours: 24, by: "rule" };
+  if (SELF_EVIDENT.test(title)) return { mode: "self_evident", why: t("交付本身就是完成：点完成即验收"), by: "rule" };
+  if (EXPLORATION.test(text)) return { mode: "needs_assessment", reason: "exploration", why: t("探索类工作没有明确产物，完成程度要问本人"),
+    question: askFor("exploration", title, locale), askAfterHours: 2, by: "rule" };
+  if (QUALITY.test(title)) return { mode: "needs_assessment", reason: "quality", why: t("产出的质量难以直接判断"),
+    question: askFor("quality", title, locale), askAfterHours: 2, by: "rule" };
+  return { mode: "self_evident", why: t("点完成即验收"), by: "rule" };
 }
 
 export function completionMode(order: OrderLike): CompletionMode {
@@ -130,7 +135,7 @@ export function readCompletionOutcome(value: unknown): CompletionOutcome | undef
  * A reported score read against the bound milestone's threshold: only when the milestone has exactly one threshold criterion, since a
  * single number cannot be matched to one of several. 「92/100」 reads 92; 「46/50」 reads 92 when the line is a percentage.
  */
-export function outcomeCriteriaVerdict(criteria: readonly SuccessCriterion[], score: string): Array<{ criterionId: string; met: "met" | "unmet"; observed: string }> {
+export function outcomeCriteriaVerdict(criteria: readonly SuccessCriterion[], score: string, locale?: Locale): Array<{ criterionId: string; met: "met" | "unmet"; observed: string }> {
   const thresholds = criteria.filter((criterion) => criterion.measure.kind === "threshold");
   if (thresholds.length !== 1) return [];
   const criterion = thresholds[0]!;
@@ -142,14 +147,15 @@ export function outcomeCriteriaVerdict(criteria: readonly SuccessCriterion[], sc
   if (outOf && outOf !== 100 && /%|百分/.test(measure.unit)) value = Math.round((value / outOf) * 1000) / 10;
   if (!Number.isFinite(value)) return [];
   const met = measure.comparator === "gte" ? value >= measure.value : value <= measure.value;
-  return [{ criterionId: criterion.id, met: met ? "met" : "unmet", observed: `本人报告：${score.trim().slice(0, 60)}` }];
+  return [{ criterionId: criterion.id, met: met ? "met" : "unmet", observed: tFor(locale)("本人报告：{{score}}", { score: score.trim().slice(0, 60) }) }];
 }
 
 /**
  * The acceptance standard in the person's words: the evidence contract as it reads on a card or an ask, fixed when the task is approved
  * (`acceptanceStandard` on the payload). Judging afterwards uses this standard only and adds none of its own.
  */
-export function acceptanceStandardLines(contract: ReadonlyArray<{ description?: string; required?: boolean }> | undefined): string[] {
+export function acceptanceStandardLines(contract: ReadonlyArray<{ description?: string; required?: boolean }> | undefined, locale?: Locale): string[] {
+  const t = tFor(locale);
   return (contract ?? []).map((item) => ({ line: (item.description ?? "").trim(), optional: item.required === false }))
-    .filter((item) => item.line).map((item) => `${item.line}${item.optional ? "（可选）" : ""}`);
+    .filter((item) => item.line).map((item) => item.optional ? t("{{line}}（可选）", { line: item.line }) : item.line);
 }

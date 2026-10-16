@@ -1,5 +1,6 @@
 import { SCHWARTZ_VALUES, redactPortrait, type PortraitReport } from "./portrait";
 export { CHARACTER_EXPRESSIONS, CHARACTER_POSES } from "./portrait-character";
+import { tFor, type Locale } from "./i18n";
 
 /**
  * Crossline's own personality typing (decided 2026-10-08, after the popular result pages of MBTI-style tests): four axes about how a
@@ -58,14 +59,20 @@ export const TYPE_TABLE: Record<string, { name: string; blurb: string }> = {
  * What stops the writer's personal type summary from being shown: it must speak to the person (「你…」), and it must not name a type or a
  * code — the page ends it with 「你是 GEMA 改装师。」 itself, from the scores, so the two can never disagree.
  */
+// The problems are repair messages to the portrait writer, not interface text. An English report speaks to "you" and is held to the
+// English type names as well.
+/* i18n-ignore-start */
 export function typeSummaryProblem(summary: string): string | null {
   const text = summary.trim();
   if (!text) return null;
-  if (!text.startsWith("你")) return "type.summary 须以「你」开头，直接对本人说";
+  if (!text.startsWith("你") && !/^you\b/i.test(text)) return "type.summary 须以「你」开头，直接对本人说";
+  const en = tFor("en");
   const named = Object.entries(TYPE_TABLE).flatMap(([code, type]) => [code, type.name]).find((word) => text.includes(word))
-    ?? (/人格|MBTI|[EI][NS][TF][JP]/.test(text) ? "外部人格类型" : undefined);
+    ?? Object.values(TYPE_TABLE).map((type) => en(type.name)).find((word) => word !== "" && new RegExp(`\\b${word}\\b`, "i").test(text) && /[A-Za-z]/.test(word))
+    ?? (/人格|MBTI|[EI][NS][TF][JP]|personality type/i.test(text) ? "外部人格类型" : undefined);
   return named ? `type.summary 不要写类型名或代码（含「${named}」）；结尾的「你是 …」由页面补上` : null;
 }
+/* i18n-ignore-end */
 
 export type PortraitType = {
   code: string; name: string; blurb: string;
@@ -81,22 +88,25 @@ export type PortraitType = {
  * is one. Shared by the portrait (scores from the writer) and the public quick test (scores from `quizScores`), so both land on the same
  * sixteen names.
  */
-export function typeFromScores(scores: Record<TypeAxisId, number>, evidence: Partial<Record<TypeAxisId, string>> = {}): PortraitType {
+export function typeFromScores(scores: Record<TypeAxisId, number>, evidence: Partial<Record<TypeAxisId, string>> = {}, locale?: Locale): PortraitType {
+  const t = tFor(locale);
   const axes = TYPE_AXES.map((axis) => {
     const score = Math.max(0, Math.min(100, Math.round(scores[axis.id])));
     const right = score >= 50;
     const side = right ? axis.right : axis.left;
-    return { id: axis.id, left: axis.left.label, right: axis.right.label, leftEn: axis.left.en, rightEn: axis.right.en, score, letter: side.letter, label: side.label,
+    return { id: axis.id, left: t(axis.left.label), right: t(axis.right.label), leftEn: axis.left.en, rightEn: axis.right.en, score, letter: side.letter, label: t(side.label),
       percent: right ? score : 100 - score, evidence: evidence[axis.id] ?? "" };
   });
   const code = axes.map((axis) => axis.letter).join("");
   const groupKey = code.slice(0, 2);
-  return { code, ...TYPE_TABLE[code]!, summary: "", group: { key: groupKey, ...TYPE_GROUPS[groupKey]! }, axes };
+  const type = TYPE_TABLE[code]!, group = TYPE_GROUPS[groupKey]!;
+  return { code, name: t(type.name), blurb: t(type.blurb), summary: "",
+    group: { key: groupKey, ...group, name: t(group.name), blurb: t(group.blurb) }, axes };
 }
 
 /** The person's type from the writer's axis scores, with the writer's summary; none for a report written before the axes existed. */
-export function portraitType(report: PortraitReport): PortraitType | null {
-  return report.type ? { ...typeFromScores(report.type, report.type.evidence), summary: (report.type.summary ?? "").trim() } : null;
+export function portraitType(report: PortraitReport, locale?: Locale): PortraitType | null {
+  return report.type ? { ...typeFromScores(report.type, report.type.evidence, locale), summary: (report.type.summary ?? "").trim() } : null;
 }
 
 export type PortraitLabelCell = { title: string; value: string; detail?: string };
@@ -108,19 +118,20 @@ export type PortraitIdentity = { lineId: string; label: string; target: number; 
  * as the base, and every other line as an identity row — suggested share as a bar, current share as a marker. A cell whose source is
  * missing (an older report) is left out.
  */
-export function portraitLabels(report: PortraitReport, options: { lineLabel: (id: string) => string }): { cells: PortraitLabelCell[]; identities: PortraitIdentity[] } {
+export function portraitLabels(report: PortraitReport, options: { lineLabel: (id: string) => string; locale?: Locale | undefined }): { cells: PortraitLabelCell[]; identities: PortraitIdentity[] } {
+  const t = tFor(options.locale);
   const cells: PortraitLabelCell[] = [];
   const coreWord = report.cover.coreWord?.trim();
-  if (coreWord) cells.push({ title: "核心词", value: coreWord });
+  if (coreWord) cells.push({ title: t("核心词"), value: coreWord });
   const values = report.compass.values ?? [];
   const names = SCHWARTZ_VALUES.map((value) => value.name as string);
   if (values.length === names.length && names.every((name) => values.some((value) => value.name === name))) {
     const top = names.map((name) => values.find((value) => value.name === name)!).reduce((best, value) => (value.score > best.score ? value : best));
-    cells.push({ title: "价值核心", value: top.name });
+    cells.push({ title: t("价值核心"), value: t(top.name) });
   }
   const ranked = [...report.lines.items].sort((a, b) => (b.targetShare ?? 0) - (a.targetShare ?? 0));
   const base = ranked[0];
-  if (base?.targetShare) cells.push({ title: "建议底座", value: options.lineLabel(base.lineId), detail: `建议投入约 ${base.targetShare}%` });
+  if (base?.targetShare) cells.push({ title: t("建议底座"), value: options.lineLabel(base.lineId), detail: t("建议投入约 {{share}}%", { share: base.targetShare }) });
   const identities = ranked.slice(base?.targetShare ? 1 : 0).map((item) => ({ lineId: item.lineId, label: options.lineLabel(item.lineId), target: item.targetShare ?? 0, now: item.share ?? null }));
   return { cells, identities };
 }

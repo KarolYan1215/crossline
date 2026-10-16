@@ -104,6 +104,8 @@ export const MARGIN_RATIO = 0.03;
  * actually sets sits beyond that by a margin. Returns what is wrong with it, or null. A score that cannot go past 100 is allowed to sit
  * at 100: a bare line of 99 has no room above it, and refusing that would make the only honest answer unsayable.
  */
+// From here to the end of the file every message is a repair message to the milestone architect, not interface text.
+/* i18n-ignore-start */
 export function thresholdProblem(measure: ProposedMeasure): string | null {
   if (measure.kind !== "threshold") return null;
   const { value, bareLine } = measure;
@@ -276,3 +278,4 @@ export function validateMilestonePlans(milestones: Proposed[], profile: ProfileF
     }
   }
 }
+/* i18n-ignore-end */

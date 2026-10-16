@@ -1,4 +1,5 @@
 import { publicHttpsUrl } from "./diligence-schema";
+import { tFor, type Locale } from "./i18n";
 
 /**
  * A manualbook: what a task becomes once someone has thought about how to do it.
@@ -90,6 +91,8 @@ export function topologicalOrder(ids: string[], edges: ManualEdge[]): string[] |
  * nothing loops, every step connects to the rest, and every required item the task must produce is served by some
  * step. A flow that fails any of these is sent back with the step named.
  */
+// Repair messages to the model, not interface text.
+/* i18n-ignore-start */
 export function validateManualDesign(value: unknown, context: ManualDesignContext): ManualDesign {
   const out = value as ManualDesign | undefined;
   if (!out || !Array.isArray(out.nodes) || !Array.isArray(out.edges) || !Array.isArray(out.blockers)) refuse("MANUAL_DESIGN_SCHEMA_INVALID", "输出结构不符合要求。");
@@ -125,6 +128,7 @@ export function validateManualDesign(value: unknown, context: ManualDesignContex
   if (missing) refuse("MANUAL_CONTRACT_UNSERVED", `必需的要求「${missing.description.slice(0, 40)}」没有任何步骤负责。`);
   return out;
 }
+/* i18n-ignore-end */
 
 // ---------------------------------------------------------------------------------------------------------
 // Finding material
@@ -156,6 +160,8 @@ export const MATERIAL_SEARCH_SCHEMA = object({
   blockers: { type: "array", maxItems: 4, items: object({ code: text(80), message: text(300) }) }
 });
 
+// Repair messages to the model, not interface text.
+/* i18n-ignore-start */
 export function validateMaterialSearch(value: unknown): MaterialSearch {
   const out = value as MaterialSearch | undefined;
   if (!out || !Array.isArray(out.sources) || !Array.isArray(out.gaps) || !Array.isArray(out.blockers)) refuse("MANUAL_SEARCH_SCHEMA_INVALID", "输出结构不符合要求。");
@@ -168,6 +174,7 @@ export function validateMaterialSearch(value: unknown): MaterialSearch {
   }
   return out;
 }
+/* i18n-ignore-end */
 
 /**
  * May the full text of this page be kept? Not the model's call. Only a short list of hosts that publish
@@ -188,13 +195,14 @@ const OPEN_ACCESS_HOSTS: Array<{ host: RegExp; why: string }> = [
 ];
 
 export type OpenAccessVerdict = { download: true; why: string } | { download: false; why: string };
-export function openAccessVerdict(source: Pick<FoundSource, "url" | "openAccess">): OpenAccessVerdict {
+export function openAccessVerdict(source: Pick<FoundSource, "url" | "openAccess">, locale?: Locale): OpenAccessVerdict {
+  const t = tFor(locale);
   const url = publicHttpsUrl(source.url);
-  if (!url) return { download: false, why: "不是公开的 https 页面" };
+  if (!url) return { download: false, why: t("不是公开的 https 页面") };
   const entry = OPEN_ACCESS_HOSTS.find((item) => item.host.test(url.hostname.toLowerCase()));
-  if (!entry) return { download: false, why: "来源不在已知的开放获取站点里：只保留链接和摘要" };
-  if (source.openAccess === "no") return { download: false, why: "模型判断这一篇不是开放获取：只保留链接和摘要" };
-  return { download: true, why: entry.why };
+  if (!entry) return { download: false, why: t("来源不在已知的开放获取站点里：只保留链接和摘要") };
+  if (source.openAccess === "no") return { download: false, why: t("模型判断这一篇不是开放获取：只保留链接和摘要") };
+  return { download: true, why: t(entry.why) };
 }
 
 // ---------------------------------------------------------------------------------------------------------
@@ -230,6 +238,8 @@ export const NODE_WRITEUP_SCHEMA = object({
   blockers: { type: "array", maxItems: 4, items: object({ code: text(80), message: text(300) }) }
 });
 
+// Repair messages to the model, not interface text.
+/* i18n-ignore-start */
 export function validateNodeWriteup(value: unknown, context: WriteContext): NodeWriteup {
   const out = value as NodeWriteup | undefined;
   if (!out || typeof out.analysis !== "string" || typeof out.tutorial !== "string" || !Array.isArray(out.citations) || !Array.isArray(out.blockers)) refuse("MANUAL_WRITEUP_SCHEMA_INVALID", "输出结构不符合要求。");
@@ -247,3 +257,4 @@ export function validateNodeWriteup(value: unknown, context: WriteContext): Node
   if (stray) refuse("MANUAL_URL_INVENTED", `正文里出现了没有提供给你的网址：${stray.slice(0, 80)}。要引用就用来源 id，不要自己写网址。`);
   return out;
 }
+/* i18n-ignore-end */

@@ -1,5 +1,6 @@
 import type { TurnQuestion } from "./onboarding-turn-schema";
 import { courseCodeOf } from "./task-title";
+import { tFor, type Locale } from "./i18n";
 
 /**
  * What the profile still has to learn from the person before milestones are designed from it.
@@ -30,6 +31,8 @@ export type ProfileGapInput = {
   calendarRecurring?: string[];
   /** The working portrait, once all its fields are written, and whether the person said it fits them (`profile.confirmed`). */
   portrait?: { written: boolean; confirmed: boolean };
+  /** The language the questions and their options are written in (default Chinese). `detail` is for the model and stays as it is. */
+  locale?: Locale | undefined;
 };
 export type ProfileGap = {
   code: "LINE_UNCONFIRMED" | "PROJECT_DEADLINE" | "DATE_UNDATED" | "COURSE_MEETINGS" | "FILE_UNFILED" | "PORTRAIT_UNCONFIRMED" | "APPEARANCE";
@@ -72,6 +75,7 @@ const confirmed = (fact: { status: string }) => fact.status === "confirmed";
 const flywheel = (slot: string) => slot.startsWith("flywheel_");
 
 export function profileGaps(input: ProfileGapInput): ProfileGap[] {
+  const t = tFor(input.locale);
   const gaps: ProfileGap[] = [];
   const lineLabel = new Map(input.identities.map((identity) => [identity.id, identity.label]));
 
@@ -84,14 +88,15 @@ export function profileGaps(input: ProfileGapInput): ProfileGap[] {
     const label = lineLabel.get(identity.id) ?? identity.id;
     gaps.push({
       code: "LINE_UNCONFIRMED", identityId: identity.id, projectId: "", blocking: true,
+      // i18n-ignore: what the model is told (`detail` is for the model)
       detail: `「${label}」线目前没有任何你确认过的事实，只有推断。要问，或者让人明确说这条线先不规划（记为 slot=skipped 的 confirmed 事实）。`,
       question: {
         id: `gap-line-${identity.id}`, kind: "single", allowOther: true, identityId: identity.id, projectId: "",
-        text: `「${label}」主线当前在推进的具体事项？（目前仅有推断）`,
+        text: t("「{{label}}」主线当前在推进的具体事项？（目前仅有推断）", { label }),
         options: [
-          { id: "doing", label: "有，我来写下具体在做什么", detail: "在下面的“其他”里写项目名、截止日期、卡在哪" },
-          { id: "later", label: "有，但现在不想规划", detail: "这条线先跳过，之后随时可以回来补" },
-          { id: "none", label: "目前没有在做的事", detail: "这条线暂时留空，不为它生成里程碑" }
+          { id: "doing", label: t("有，我来写下具体在做什么"), detail: t("在下面的“其他”里写项目名、截止日期、卡在哪") },
+          { id: "later", label: t("有，但现在不想规划"), detail: t("这条线先跳过，之后随时可以回来补") },
+          { id: "none", label: t("目前没有在做的事"), detail: t("这条线暂时留空，不为它生成里程碑") }
         ]
       }
     });
@@ -105,13 +110,14 @@ export function profileGaps(input: ProfileGapInput): ProfileGap[] {
     if (input.facts.some((fact) => fact.projectId === project.id && confirmed(fact) && /^deadline$|^date_|^no_deadline$/.test(fact.slot))) continue;
     gaps.push({
       code: "PROJECT_DEADLINE", identityId: project.identityId, projectId: project.id, blocking: true,
+      // i18n-ignore: for the model
       detail: `「${project.name}」还不知道截止日期，也没有说明没有截止。`,
       question: {
         id: `gap-deadline-${project.id}`, kind: "single", allowOther: true, identityId: project.identityId, projectId: project.id,
-        text: `「${project.name}」有截止日期吗？`,
+        text: t("「{{project}}」有截止日期吗？", { project: project.name }),
         options: [
-          { id: "date", label: "我来写日期", detail: "在“其他”里写日期，例如「2026-12-15」" },
-          { id: "none", label: "没有截止", detail: "不设截止，排程按主线份额安排" }
+          { id: "date", label: t("我来写日期"), detail: t("在“其他”里写日期，例如「2026-12-15」") },
+          { id: "none", label: t("没有截止"), detail: t("不设截止，排程按主线份额安排") }
         ]
       }
     });
@@ -124,7 +130,7 @@ export function profileGaps(input: ProfileGapInput): ProfileGap[] {
   for (const item of input.undated ?? []) {
     if (!GRADED_KINDS.has(item.kind) && item.kind !== "deadline") continue;
     // 「每周作业截止」 recurs on a weekday; asking for 「大致日期」 of it made no sense (2026-10-15 walkthrough).
-    if (/每周|每星期|weekly/i.test(item.title)) continue;
+    if (/每周|每星期|weekly|every week/i.test(item.title)) continue;
     const project = input.projects.find((entry) => entry.id === item.project);
     if (!project) continue;
     const key = undatedKey(item.title);
@@ -135,16 +141,17 @@ export function profileGaps(input: ProfileGapInput): ProfileGap[] {
     if ((input.datedItems ?? []).some((dated) => (dated.project === project.id || dated.project === project.name) && undatedKey(dated.title) === key)) continue;
     gaps.push({
       code: "DATE_UNDATED", identityId: project.identityId, projectId: project.id, blocking: false,
+      // i18n-ignore: for the model (and the start of the stored answer)
       detail: `「${project.name}」的「${item.title}」文件里写的是待定，不是日期。`,
       question: {
         id: `gap-undated-${project.id}-${key.slice(0, 30)}`, kind: "single", allowOther: true,
         identityId: project.identityId, projectId: project.id,
-        text: `「${project.name}」的「${item.title}」在文件中标为待定，大致日期？`,
+        text: t("「{{project}}」的「{{item}}」在文件中标为待定，大致日期？", { project: project.name, item: item.title }),
         options: [
-          { id: "known", label: "知道具体日期，我来写", detail: "在“其他”里写日期，里程碑会按它排" },
-          { id: "last-week", label: "学期最后一周前后", detail: "里程碑按学期最后一周之前暂定，通知下来再改" },
-          { id: "exam-week", label: "和期末考试差不多的时候", detail: "里程碑按期末前暂定，通知下来再改" },
-          { id: "unknown", label: "还不知道", detail: "里程碑先放一个暂定日期并标明待确认" }
+          { id: "known", label: t("知道具体日期，我来写"), detail: t("在“其他”里写日期，里程碑会按它排") },
+          { id: "last-week", label: t("学期最后一周前后"), detail: t("里程碑按学期最后一周之前暂定，通知下来再改") },
+          { id: "exam-week", label: t("和期末考试差不多的时候"), detail: t("里程碑按期末前暂定，通知下来再改") },
+          { id: "unknown", label: t("还不知道"), detail: t("里程碑先放一个暂定日期并标明待确认") }
         ]
       }
     });
@@ -168,14 +175,15 @@ export function profileGaps(input: ProfileGapInput): ProfileGap[] {
     // Only when it meets, never where: the room does not change the schedule (2026-10-15, 「ECE 548 上课地点」 asked twice).
     gaps.push({
       code: "COURSE_MEETINGS", identityId: project.identityId, projectId: project.id, blocking: false,
+      // i18n-ignore: for the model
       detail: `「${project.name}」还不知道每周什么时候上课。`,
       question: {
         id: `gap-meetings-${project.id}`, kind: "single", allowOther: true, identityId: project.identityId, projectId: project.id,
-        text: `「${project.name}」每周什么时候上课？`,
+        text: t("「{{project}}」每周什么时候上课？", { project: project.name }),
         options: [
-          { id: "write", label: "我来写上课时间", detail: "在“其他”里写，例如「周二、四 11:00–12:15」" },
-          { id: "file", label: "上传的课程文件里有", detail: "访谈会从文件里读出，读出后请确认" },
-          { id: "none", label: "没有固定上课时间", detail: "线上或自学，不占每周的固定时段" }
+          { id: "write", label: t("我来写上课时间"), detail: t("在“其他”里写，例如「周二、四 11:00–12:15」") },
+          { id: "file", label: t("上传的课程文件里有"), detail: t("访谈会从文件里读出，读出后请确认") },
+          { id: "none", label: t("没有固定上课时间"), detail: t("线上或自学，不占每周的固定时段") }
         ]
       }
     });
@@ -187,14 +195,15 @@ export function profileGaps(input: ProfileGapInput): ProfileGap[] {
     const ordered = lean ? [lean, ...input.projects.filter((project) => project !== lean)] : input.projects;
     gaps.push({
       code: "FILE_UNFILED", identityId: "", projectId: "", documentId: file.id, blocking: false,
+      // i18n-ignore: for the model
       detail: `《${file.fileName}》的所属项目不确定。`,
       question: {
         id: `gap-file-${file.id}`, kind: "single", allowOther: false, identityId: "", projectId: "",
-        text: `《${file.fileName}》属于哪个项目？`,
+        text: t("《{{file}}》属于哪个项目？", { file: file.fileName }),
         options: [
           ...ordered.slice(0, 8).map((project) => ({ id: project.id, label: project.name,
-            detail: project === lean ? "访谈判断更可能是它" : lineLabel.get(project.identityId) ?? "" })),
-          { id: "none", label: "不属于任何项目", detail: "作为通用资料保留" }
+            detail: project === lean ? t("访谈判断更可能是它") : lineLabel.get(project.identityId) ?? "" })),
+          { id: "none", label: t("不属于任何项目"), detail: t("作为通用资料保留") }
         ]
       }
     });
@@ -203,14 +212,15 @@ export function profileGaps(input: ProfileGapInput): ProfileGap[] {
   // The portrait is the person's to recognise: once it is written, they are asked whether it fits.
   if (input.portrait?.written && !input.portrait.confirmed) gaps.push({
     code: "PORTRAIT_UNCONFIRMED", identityId: "", projectId: "", blocking: false,
+    // i18n-ignore: for the model
     detail: "画像已写完，本人尚未确认。",
     question: {
       id: "gap-portrait", kind: "single", allowOther: true, identityId: "", projectId: "",
-      text: "「当前画像」写的是否符合本人？",
+      text: t("「当前画像」写的是否符合本人？"),
       options: [
-        { id: "yes", label: "符合", detail: "画像以此为准；之后改动会再请本人确认" },
-        { id: "mostly", label: "大体符合，有几处要改", detail: "在“其他”里写要改哪里" },
-        { id: "no", label: "不符合", detail: "在“其他”里写哪里不对" }
+        { id: "yes", label: t("符合"), detail: t("画像以此为准；之后改动会再请本人确认") },
+        { id: "mostly", label: t("大体符合，有几处要改"), detail: t("在“其他”里写要改哪里") },
+        { id: "no", label: t("不符合"), detail: t("在“其他”里写哪里不对") }
       ]
     }
   });
@@ -219,13 +229,14 @@ export function profileGaps(input: ProfileGapInput): ProfileGap[] {
   // is for. Never assumed — with nothing said, the figure stays neutral.
   if (input.portrait?.written && !input.facts.some((fact) => fact.identityId === "person" && APPEARANCE_SLOT.test(fact.slot))) gaps.push({
     code: "APPEARANCE", identityId: "person", projectId: "", blocking: false,
+    // i18n-ignore: for the model
     detail: "本人外貌未知，画像形象只能用中性默认。",
     question: {
       id: "gap-appearance", kind: "single", allowOther: true, identityId: "person", projectId: "",
-      text: "画像报告会为本人生成一个卡通形象。希望它是什么样子（性别、发型、常穿的衣服或颜色）？这些描述只用于生成形象。",
+      text: t("画像报告会为本人生成一个卡通形象。希望它是什么样子（性别、发型、常穿的衣服或颜色）？这些描述只用于生成形象。"),
       options: [
-        { id: "write", label: "我来描述", detail: "在“其他”里写，例如「男，狼尾长发，常穿全黑」" },
-        { id: "skip", label: "不描述，用中性形象", detail: "之后在输入框里说一句也能改" }
+        { id: "write", label: t("我来描述"), detail: t("在“其他”里写，例如「男，狼尾长发，常穿全黑」") },
+        { id: "skip", label: t("不描述，用中性形象"), detail: t("之后在输入框里说一句也能改") }
       ]
     }
   });
@@ -242,7 +253,7 @@ const squashCode = (text: string) => text.replace(/\s+/g, "").toLowerCase();
  * 报告截止」, 「提交 ECE 555 期末课程项目报告」 and 「ECE 555 期末课程项目报告截止」 are one item, asked about once.
  */
 export function undatedKey(title: string): string {
-  return title.replace(/提交|上交|交付|截止|due|submit(?:ted|sion)?/giu, "")
+  return title.replace(/提交|上交|交付|截止|due|submit(?:ted|sion)?|hand[- ]?in|turn[- ]?in|deadline|\b(?:the|a|an)\b/giu, "")
     .replace(/(?<![A-Za-z])[A-Za-z]{2,5}\s?\d{3,4}[A-Za-z]?(?![\dA-Za-z])/gu, "")
     .replace(/[^\p{L}\p{N}]+/gu, "").toLowerCase();
 }
@@ -254,9 +265,9 @@ const MEETING_SLOT = /^(meeting|class)_?times?$|^no_meetings$/;
 
 /** Words that say a question from the model already asks what a gap is about, so the code-built one is not asked on top of it. */
 const COVERS: Partial<Record<ProfileGap["code"], RegExp>> = {
-  PROJECT_DEADLINE: /截止|deadline|什么时候(交|完成)/i,
-  DATE_UNDATED: /待定|TBD|日期|什么时候/i,
-  COURSE_MEETINGS: /上课|几点|每周.*(时间|时段)/
+  PROJECT_DEADLINE: /截止|deadline|什么时候(交|完成)|\bdue\b|when .{0,30}\b(finish|finished|done|submit|hand in)\b/i,
+  DATE_UNDATED: /待定|TBD|日期|什么时候|\bdate\b|\bwhen\b/i,
+  COURSE_MEETINGS: /上课|几点|每周.*(时间|时段)|\b(class|classes|lecture|lectures)\b.{0,40}\b(meet|meets|time|times|when|schedule)\b|\b(when|what time)\b.{0,40}\b(class|lecture)\b|\bmeets?\b.{0,20}\bweek/i
 };
 
 /**
@@ -289,48 +300,93 @@ export type GapAnswer = { identityId: string; projectId: string; slot: string; v
 const stable = (text: string) => [...text].reduce((hash, char) => (hash * 31 + char.codePointAt(0)!) >>> 0, 7).toString(36);
 
 /**
+ * One answer as the person "says" it: `【question】选择：A；B。补充：text` in Chinese, `[question] Chose: A; B. Added: text` in English.
+ * Option labels are written out in full on purpose: the interview grounds every fact in a verbatim quote of the reply, and a bare id would
+ * give it nothing to quote. `answeredGapFacts` reads both forms back, whichever language the screen was in when it was written.
+ */
+export function answerLine(questionText: string, labels: string[], other: string, locale?: Locale): string {
+  const t = tFor(locale);
+  const en = locale === "en";
+  const parts = [labels.length ? t("选择：{{labels}}", { labels: labels.join(en ? "; " : "；") }) : "",
+    other.trim() ? t("补充：{{text}}", { text: other.trim() }) : ""].filter(Boolean);
+  return en ? `[${questionText}] ${parts.join(". ")}` : `【${questionText}】${parts.join("。")}`;
+}
+
+/** The picked labels and the person's own words in the rest of an answer line (after its marker), in either language. */
+export function readAnswerLine(line: string): { picked: string[]; other: string } {
+  const zhPicked = /选择：([^。]*)/.exec(line)?.[1];
+  const enPicked = /(?:^|\s)Chose: (.*?)(?:\. Added: |\.\s*$|$)/.exec(line)?.[1];
+  const picked = (zhPicked ?? enPicked ?? "").split(/；|; /).map((item) => item.trim()).filter(Boolean);
+  const other = (/补充：(.*)$/.exec(line)?.[1] ?? /(?:^|\s|\.)\s*Added: (.*)$/.exec(line)?.[1] ?? "").trim();
+  return { picked, other };
+}
+
+/**
+ * Whether a picked label means this option: the same words, or the same option in the other language — a round asked in one language
+ * can be answered after the screen was switched to the other.
+ */
+const sameOption = (label: string, picked: string) => {
+  const en = tFor("en");
+  return picked === label || en(label) === picked || en(picked) === label;
+};
+
+/**
  * What the person's answers to the code-built questions say, as facts. The message the screen sends is `【question】选择：label。补充：text`
- * (`composeAnswers`), so the answer is read straight out of it and written without asking the model to remember to: the label or the typed
- * text is a verbatim span of the reply, which is all a confirmed fact needs. A line answered 「有，我来写」 is not a fact yet; only what
- * they then write is.
+ * (`composeAnswers`; in English `[question] Chose: label. Added: text`, see `answerLine`), so the answer is read straight out of it and
+ * written without asking the model to remember to: the label or the typed text is a verbatim span of the reply, which is all a confirmed
+ * fact needs. A line answered 「有，我来写」 is not a fact yet; only what they then write is.
  */
 export function answeredGapFacts(replyText: string, gaps: ProfileGap[]): GapAnswer[] {
   const out: GapAnswer[] = [];
+  const en = tFor("en");
   for (const gap of gaps) {
     // A round stored before the portrait question was reworded still shows, and is answered in, its old words.
+    /* i18n-ignore-start: earlier wordings, matched against stored replies */
     const texts = gap.code === "PORTRAIT_UNCONFIRMED" ? [gap.question.text, "「当前画像」里写的是否符合你？"]
       : gap.code === "COURSE_MEETINGS" ? [gap.question.text, gap.question.text.replace(/？$/, "、在哪里？")] : [gap.question.text];
-    const marker = texts.map((text) => `【${text}】`).find((candidate) => replyText.includes(candidate)) ?? "";
+    /* i18n-ignore-end */
+    // The question in the other language too: the round may have been written before the screen was switched.
+    const both = [...new Set(texts.flatMap((text) => [text, en(text)]))];
+    const marker = both.flatMap((text) => [`【${text}】`, `[${text}]`]).find((candidate) => replyText.includes(candidate)) ?? "";
     const at = marker ? replyText.indexOf(marker) : -1;
     if (at < 0) continue;
     const line = replyText.slice(at + marker.length).split("\n")[0] ?? "";
-    const picked = (/选择：([^。]*)/.exec(line)?.[1] ?? "").split("；").map((item) => item.trim()).filter(Boolean);
-    const other = (/补充：(.*)$/.exec(line)?.[1] ?? "").trim();
+    const { picked, other } = readAnswerLine(line);
+    // The label as the person picked it (their words, so the quote stays verbatim) for the option with this id, if they picked it.
+    const pickedFor = (id: string) => {
+      const option = gap.question.options.find((item) => item.id === id);
+      return option ? picked.find((label) => sameOption(option.label, label)) : undefined;
+    };
     const base = { identityId: gap.identityId, projectId: gap.projectId };
     if (gap.code === "LINE_UNCONFIRMED") {
-      const declined = picked.find((label) => gap.question.options.some((option) => option.label === label && option.id !== "doing"));
+      const declined = gap.question.options.filter((option) => option.id !== "doing").map((option) => pickedFor(option.id)).find(Boolean);
       if (other) out.push({ ...base, slot: "what", value: other, quote: other });
       else if (declined) out.push({ ...base, slot: "skipped", value: declined, quote: declined });
     } else if (gap.code === "PROJECT_DEADLINE") {
+      const none = pickedFor("none");
       if (other) out.push({ ...base, slot: "deadline", value: other, quote: other });
-      else if (picked.includes("没有截止")) out.push({ ...base, slot: "no_deadline", value: "没有截止", quote: "没有截止" });
+      else if (none) out.push({ ...base, slot: "no_deadline", value: none, quote: none });
     } else if (gap.code === "DATE_UNDATED") {
       // 「知道具体日期」 without the date is not an answer.
-      const value = other || picked.find((label) => gap.question.options.some((option) => option.label === label && option.id !== "known"));
+      const value = other || gap.question.options.filter((option) => option.id !== "known").map((option) => pickedFor(option.id)).find(Boolean);
       if (value) out.push({ ...base, slot: `undated_${stable(gap.question.id)}`, value: `${gap.detail}${value}`, quote: value });
     } else if (gap.code === "COURSE_MEETINGS") {
       // The times themselves go to the interview, which turns them into a weekly pattern the person confirms; this only records them.
+      const none = pickedFor("none");
       if (other) out.push({ ...base, slot: "meeting_times", value: other, quote: other });
-      else if (picked.includes("没有固定上课时间")) out.push({ ...base, slot: "no_meetings", value: "没有固定上课时间", quote: "没有固定上课时间" });
+      else if (none) out.push({ ...base, slot: "no_meetings", value: none, quote: none });
     } else if (gap.code === "FILE_UNFILED") {
-      const option = gap.question.options.find((item) => picked.includes(item.label));
-      if (option) out.push({ identityId: "", projectId: "", slot: "", value: option.label, quote: option.label,
+      const option = gap.question.options.find((item) => picked.some((label) => sameOption(item.label, label)));
+      const label = option ? pickedFor(option.id)! : "";
+      if (option) out.push({ identityId: "", projectId: "", slot: "", value: label, quote: label,
         file: { documentId: gap.documentId ?? "", projectId: option.id === "none" ? "" : option.id } });
     } else if (gap.code === "APPEARANCE") {
+      const skip = pickedFor("skip");
       if (other) out.push({ ...base, slot: "appearance", value: other, quote: other });
-      else if (picked.includes("不描述，用中性形象")) out.push({ ...base, slot: "appearance_skipped", value: "不描述，用中性形象", quote: "不描述，用中性形象" });
+      else if (skip) out.push({ ...base, slot: "appearance_skipped", value: skip, quote: skip });
     } else if (gap.code === "PORTRAIT_UNCONFIRMED") {
-      if (picked.includes("符合")) out.push({ identityId: "", projectId: "", slot: "", value: "符合", quote: "符合", confirmPortrait: true });
+      const yes = pickedFor("yes");
+      if (yes) out.push({ identityId: "", projectId: "", slot: "", value: yes, quote: yes, confirmPortrait: true });
     }
   }
   return out;
@@ -351,11 +407,11 @@ export type QuestionScreenInput = {
   calendarRecurring?: string[];
 };
 
-const PLACE = /地点|在哪|教室|房间|地址|location|where|room|building|venue/i;
-const WHEN = /星期|周[一二三四五六日天几]|哪几天|几号|几点|时间|时段|起止|什么时候|哪天|日期|频率|多久|多长|结束|开始|几次|when|time|day|hour/i;
+const PLACE = /地点|在哪|教室|房间|地址|location|where|room|building|venue|address/i;
+const WHEN = /星期|周[一二三四五六日天几]|哪几天|几号|几点|时间|时段|起止|什么时候|哪天|日期|频率|多久|多长|结束|开始|几次|when|time|day|hour|date|weekday|how often|how long|start|end/i;
 const CLASS = /上课|课程?时间|课时|lecture|class/i;
 const CALENDAR = /日历|calendar/i;
-const RECURRENCE = /持续|重复|周期|每周都|每月|一次性|固定安排|长期安排|循环|recurr|one-?off/i;
+const RECURRENCE = /持续|重复|周期|每周都|每月|一次性|固定安排|长期安排|循环|recurr|one-?off|repeat|ongoing|every week|every month|monthly|regular/i;
 
 /**
  * The interview's questions that are not the person's to answer, taken out before a round is stored or listed: one that asks only where
@@ -389,6 +445,7 @@ export function screenQuestions<Q extends { id: string; text: string; projectId:
 }
 
 /** What is written in place of a screened question that something rests on: an assumption the person can correct (only the calendar's). */
+// i18n-ignore-start: an assumption written for the interview model to read (「假设：」 marks it as such)
 export function screenAssumption(item: { question: { id: string; text: string; identityId: string; projectId: string }; reason: ScreenReason }):
   { identityId: string; projectId: string; slot: string; value: string } | undefined {
   if (item.reason !== "calendar_inferable") return undefined;
@@ -396,11 +453,14 @@ export function screenAssumption(item: { question: { id: string; text: string; i
     value: `假设：${item.question.text.replace(/[？?]$/u, "")}——按日历自身的重复规则判断：重复的系列视为持续安排，单次事件视为一次性。本人说一句即可更正。` };
 }
 
+// i18n-ignore-end
 /** A line for the interview, sent with a round answered on 待决事项, naming the questions the app kept from the person and why. */
 export function screenedNote(screened: Array<{ question: { text: string }; reason: ScreenReason }>): string {
   if (!screened.length) return "";
+  /* i18n-ignore-start: a note to the interview model */
   return `（系统说明，不是本人的回答：以下问题未交给本人——${screened.map((item) => `「${item.question.text}」（${SCREEN_REASON_LABEL[item.reason]}）`).join("；")}。`
     + "不必再问；需要时按已有记录和常识自行判断，记为「假设：」。）";
+  /* i18n-ignore-end */
 }
 
 /**
@@ -409,7 +469,7 @@ export function screenedNote(screened: Array<{ question: { text: string }; reaso
  * them (by the assistant and the next plan), never asked; whatever the files do not say is assumed (the owner's decision, 2026-10-15:
  * 「作业 3 题面及题目数」「作业提交方式」「协作与 AI 使用规则」 were put to the person for a homework whose handout was on record).
  */
-const FROM_MATERIAL = /题面|题目|几道|题数|多少题|提交(方式|平台|渠道|格式|位置|地址)|怎么提交|如何提交|交到哪|格式要求|页数|字数|篇幅|协作(与|和)?.{0,6}规则|合作规则|AI.{0,4}(使用|规则|政策)|使用\s*AI|评分(标准|细则|方式)|rubric|截止(时间|日期)|几点截止|submission|handout/i;
+const FROM_MATERIAL = /题面|题目|几道|题数|多少题|提交(方式|平台|渠道|格式|位置|地址)|怎么提交|如何提交|交到哪|格式要求|页数|字数|篇幅|协作(与|和)?.{0,6}规则|合作规则|AI.{0,4}(使用|规则|政策)|使用\s*AI|评分(标准|细则|方式)|rubric|截止(时间|日期)|几点截止|submission|handout|problem set|how many (problems|questions)|number of (problems|questions)|how (to|do i|should i) (submit|hand in|turn in)|where to (submit|hand in|turn in)|required format|format requirements|page (limit|count)|word (limit|count)|length limit|collaboration (policy|rules)|(ai|chatgpt|llm) (use|usage|policy|rules)|use of (ai|chatgpt)|grading (criteria|scheme|policy)|due (time|date)|what time .{0,20}\bdue\b/i;
 export function readableFromMaterial(questionText: string): boolean {
   return FROM_MATERIAL.test(questionText);
 }

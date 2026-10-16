@@ -4,6 +4,7 @@ import { quoteSupportsDate } from "./date-schema";
 import { cleanTaskTitle, withCourse } from "./task-title";
 import { infoRequestTraits } from "./info-request";
 import { COMPLETION_FIELD, readModelCompletion, type ModelCompletion } from "./completion";
+import { tFor, type Locale } from "./i18n";
 
 export type AnalysisContext = {
   version: string;
@@ -191,7 +192,16 @@ export function validateAnalysisContext(value: unknown): AnalysisContext {
   return context;
 }
 
-export function validateAnalysisProposal(value: unknown, input: AnalysisContext): AnalysisProposal {
+/** Items named in a refusal: 「a」、「b」 in Chinese, "a", "b" in English. */
+const quotedIn = (locale: Locale | undefined) => (items: string[]) => locale === "en" ? items.map((item) => `"${item}"`).join(", ") : items.map((item) => `「${item}」`).join("、");
+
+/**
+ * `locale` is the language of the refusals the person reads on the capture (「分析被拒绝…可重新分析。」); the ones that only steer a
+ * repair turn stay in the model's language.
+ */
+export function validateAnalysisProposal(value: unknown, input: AnalysisContext, locale?: Locale): AnalysisProposal {
+  const t = tFor(locale);
+  const quoted = quotedIn(locale);
   const context = validateAnalysisContext(input);
   // An answer written before the breakdown existed (a recorded one) has none; the runtime's schema makes every live answer carry it.
   const withBreakdown = value && typeof value === "object" && !("estimateBreakdown" in value) ? { ...(value as object), estimateBreakdown: [{ step: "legacy", minutes: (value as { estimate?: { p50Minutes?: number } }).estimate?.p50Minutes ?? 1 }] } : value;
@@ -202,7 +212,7 @@ export function validateAnalysisProposal(value: unknown, input: AnalysisContext)
     ...(!("byproducts" in withBreakdown) ? { byproducts: [] } : {}),
     ...(!("completion" in withBreakdown) ? { completion: { mode: "self_evident", reason: "", why: "legacy", question: "", askAfterHours: 0 } } : {}),
     ...(!("extendsTaskId" in withBreakdown) ? { extendsTaskId: "" } : {}),
-    ...(!("title" in withBreakdown) ? { title: cleanTaskTitle(String((withBreakdown as { intent?: unknown }).intent ?? "")) || "未命名任务" } : {})
+    ...(!("title" in withBreakdown) ? { title: cleanTaskTitle(String((withBreakdown as { intent?: unknown }).intent ?? "")) || t("未命名任务") } : {})
   } : {};
   const candidate = Object.keys(legacyExtras).length ? { ...(withBreakdown as object), ...legacyExtras } : withBreakdown;
   if (!matches(candidate, ANALYSIS_OUTPUT_SCHEMA)) throw new Error("ANALYSIS_SCHEMA_INVALID");
@@ -215,6 +225,7 @@ export function validateAnalysisProposal(value: unknown, input: AnalysisContext)
   if (!context.identityPacks.some((pack) => pack.id === proposal.identityId)) {
     const error = new Error("ANALYSIS_IDENTITY_UNKNOWN");
     (error as Error & { detail?: string }).detail =
+      // i18n-ignore: a repair message to the model
       `identityId 「${proposal.identityId.slice(0, 40)}」不是已有的主线。可选：${context.identityPacks.map((pack) => pack.id).join("、")}；挑最贴近的一条（关于 Crossline 本身的事归创业线）。`;
     throw error;
   }
@@ -225,6 +236,7 @@ export function validateAnalysisProposal(value: unknown, input: AnalysisContext)
   // typical value is one overrun from a missed deadline. It is also bounded above, because a margin of three times is a guess wearing a margin's name.
   if (e.p85Minutes < Math.ceil(e.p50Minutes * 1.2) || e.p85Minutes > Math.max(e.p50Minutes * 3, e.p50Minutes + 30)) {
     const error = new Error("ANALYSIS_ESTIMATE_MARGIN_INVALID");
+    // i18n-ignore: a repair message to the model
     (error as Error & { detail?: string }).detail = `p85Minutes 是 ${e.p85Minutes}，p50Minutes 是 ${e.p50Minutes}：p85 是留的余量，要在 p50 的 1.2 倍到 3 倍之间（至少 ${Math.ceil(e.p50Minutes * 1.2)}），按最可能超时的那一步来定，不要把每一步都加长。`;
     throw error;
   }
@@ -232,6 +244,7 @@ export function validateAnalysisProposal(value: unknown, input: AnalysisContext)
   const stepTotal = proposal.estimateBreakdown.reduce((sum, item) => sum + item.minutes, 0);
   if (!(proposal.estimateBreakdown.length === 1 && proposal.estimateBreakdown[0]!.step === "legacy") && Math.abs(stepTotal - e.p50Minutes) > Math.max(10, e.p50Minutes * 0.25)) {
     const error = new Error("ANALYSIS_ESTIMATE_BREAKDOWN_MISMATCH");
+    // i18n-ignore: a repair message to the model
     (error as Error & { detail?: string }).detail = `estimateBreakdown 各步分钟数加起来是 ${Math.round(stepTotal)}，但 p50Minutes 是 ${e.p50Minutes}：两者要对得上（p50 就是各步之和，误差不超过四分之一）。`;
     throw error;
   }
@@ -284,7 +297,7 @@ export function validateAnalysisProposal(value: unknown, input: AnalysisContext)
   if (!proposal.evidenceContract.some((item) => item.required)) {
     const error = new Error("ANALYSIS_EVIDENCE_REQUIRED_MISSING");
     (error as Error & { detail?: string }).detail =
-      "分析被拒绝：证据要求里没有一条标为必需。至少要把“交付了这件事”的那条核心交付物设为 required=true（次要的佐证才设为 false）。可重新分析。";
+      t("分析被拒绝：证据要求里没有一条标为必需。至少要把“交付了这件事”的那条核心交付物设为 required=true（次要的佐证才设为 false）。可重新分析。");
     throw error;
   }
   // Brackets in the **label** mean the JSON leaked into it — one real run left `'}],` there followed by
@@ -299,7 +312,7 @@ export function validateAnalysisProposal(value: unknown, input: AnalysisContext)
   if (leaked.length) {
     const error = new Error("ANALYSIS_CONTRACT_NOT_PROSE");
     (error as Error & { detail?: string }).detail =
-      `分析被拒绝：材料/证据契约的名称里混进了不是给人读的文字 —— ${leaked.map((item) => `「${item.description.slice(0, 40)}」`).join("、")}。可重新分析。`.slice(0, 400);
+      t("分析被拒绝：材料/证据契约的名称里混进了不是给人读的文字 —— {{items}}。可重新分析。", { items: quoted(leaked.map((item) => item.description.slice(0, 40))) }).slice(0, 400);
     throw error;
   }
   // Exactly at the limit means the sentence was cut off, not that it happened to fit. Truncated text
@@ -308,7 +321,7 @@ export function validateAnalysisProposal(value: unknown, input: AnalysisContext)
   if (cut.length) {
     const error = new Error("ANALYSIS_CONTRACT_TRUNCATED");
     (error as Error & { detail?: string }).detail =
-      `分析被拒绝：契约条目被截断，读不完整 —— ${cut.map((item) => `「${item.description.slice(0, 40)}…」`).join("、")}。可重新分析。`.slice(0, 400);
+      t("分析被拒绝：契约条目被截断，读不完整 —— {{items}}。可重新分析。", { items: quoted(cut.map((item) => `${item.description.slice(0, 40)}…`)) }).slice(0, 400);
     throw error;
   }
 
@@ -321,7 +334,7 @@ export function validateAnalysisProposal(value: unknown, input: AnalysisContext)
     // way with nothing to act on. Naming the offending quote is what turns it into a retry they can win.
     const error = new Error("ANALYSIS_EVIDENCE_INVALID");
     (error as Error & { detail?: string }).detail =
-      `分析被拒绝：以下引用不是原文逐字内容，无法核对 —— ${fabricated.map((s) => `「${s.quote}」`).join("、")}。可重新分析。`.slice(0, 400);
+      t("分析被拒绝：以下引用不是原文逐字内容，无法核对 —— {{items}}。可重新分析。", { items: quoted(fabricated.map((s) => s.quote)) }).slice(0, 400);
     throw error;
   }
   // Getting a fact from someone (info-request.ts): the assistant may draft the message, but sending it is the person's, an external act.
@@ -330,7 +343,7 @@ export function validateAnalysisProposal(value: unknown, input: AnalysisContext)
   if (sends.length) {
     const error = new Error("ANALYSIS_INFO_REQUEST_SENT_BY_SYSTEM");
     (error as Error & { detail?: string }).detail =
-      `分析被拒绝：向别人询问时，系统只起草邮件（收件人、主题、正文），发送由本人完成 —— ${sends.map((part) => `「${part.intent.slice(0, 40)}」`).join("、")} 应改为起草，发送放进 humanCore。`.slice(0, 400);
+      t("分析被拒绝：向别人询问时，系统只起草邮件（收件人、主题、正文），发送由本人完成 —— {{items}} 应改为起草，发送放进 humanCore。", { items: quoted(sends.map((part) => part.intent.slice(0, 40))) }).slice(0, 400);
     throw error;
   }
   if (proposal.blockers.length) {
@@ -359,6 +372,7 @@ export function validateAnalysisProposal(value: unknown, input: AnalysisContext)
   const lines = new Set(context.identityPacks.map((pack) => pack.id));
   const seenLines = new Set<string>();
   for (const byproduct of proposal.byproducts) {
+    /* i18n-ignore-start: repair messages to the model */
     const problem = byproduct.lineId === proposal.identityId ? `顺带产出的主线「${byproduct.lineId}」就是这项任务自己的主线；顺带产出必须服务另一条主线。`
       : !lines.has(byproduct.lineId) ? `顺带产出的主线「${byproduct.lineId.slice(0, 40)}」不存在。可选：${[...lines].join("、")}。`
       : seenLines.has(byproduct.lineId) ? `主线「${byproduct.lineId}」有两个顺带产出；每条其他主线最多一个。`
@@ -367,6 +381,7 @@ export function validateAnalysisProposal(value: unknown, input: AnalysisContext)
       : !concreteArtifact(byproduct.artifact) ? `顺带产出「${byproduct.artifact.slice(0, 40)}」不是一个具体产物（要能交出来的东西，如一篇笔记、一条帖子草稿、一张图）。`
       : byproduct.landing.minutes <= 0 || byproduct.landing.minutes > 240 ? `顺带产出的落地用时 ${byproduct.landing.minutes} 分钟不合理（应在 1–240 分钟之间）。`
       : "";
+    /* i18n-ignore-end */
     if (problem) {
       const error = new Error("ANALYSIS_BYPRODUCT_INVALID");
       (error as Error & { detail?: string }).detail = problem;
@@ -424,7 +439,7 @@ const ANALYSIS_SOFT_FIXES: Record<string, (proposal: AnalysisProposal) => void> 
  * the answer usable (clamp the margin, take the steps' sum, strip brackets, mark the first evidence item required, drop byproducts)
  * and validated again, so everything the store relies on is still checked. Undefined when a hard refusal remains.
  */
-export function keepAnalysisProposal(value: unknown, input: AnalysisContext, code: string): AnalysisProposal | undefined {
+export function keepAnalysisProposal(value: unknown, input: AnalysisContext, code: string, locale?: Locale): AnalysisProposal | undefined {
   if (!ANALYSIS_SOFT_FIXES[code]) return undefined;
   const candidate = structuredClone(value) as AnalysisProposal;
   let current = code;
@@ -432,7 +447,7 @@ export function keepAnalysisProposal(value: unknown, input: AnalysisContext, cod
     const fix = ANALYSIS_SOFT_FIXES[current];
     if (!fix) return undefined;
     try { fix(candidate); } catch { return undefined; }
-    try { return validateAnalysisProposal(candidate, input); }
+    try { return validateAnalysisProposal(candidate, input, locale); }
     catch (error) { current = error instanceof Error ? error.message : ""; }
   }
   return undefined;

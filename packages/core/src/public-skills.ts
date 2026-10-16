@@ -1,4 +1,5 @@
 import { decideCommand, isSecretPath } from "./agent-guard";
+import { tFor, type Locale } from "./i18n";
 
 /**
  * Public skills (`crossline-public:<id>`, docs/skills-library.md §2): skills other people published, found by `crossline-skill-scout`,
@@ -27,10 +28,11 @@ export const PUBLIC_SKILL_CATEGORY_LABEL: Record<PublicSkillCategory, string> = 
 /** Licences that let anyone reuse the files (GitHub's SPDX ids). Missing, unknown, non-commercial or no-derivatives ones are not taken. */
 const REUSABLE = new Set(["MIT", "MIT-0", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "0BSD", "ISC", "Unlicense", "CC0-1.0", "CC-BY-4.0",
   "CC-BY-SA-4.0", "MPL-2.0", "GPL-2.0", "GPL-3.0", "LGPL-2.1", "LGPL-3.0", "AGPL-3.0", "EPL-2.0", "BSL-1.0", "Zlib", "WTFPL"]);
-export function licenseVerdict(spdx: string | null | undefined): { ok: true } | { ok: false; reason: string } {
+export function licenseVerdict(spdx: string | null | undefined, locale?: Locale): { ok: true } | { ok: false; reason: string } {
+  const t = tFor(locale);
   const id = (spdx ?? "").trim();
-  if (!id || id === "NOASSERTION" || id === "NONE") return { ok: false, reason: "仓库没有可识别的许可证" };
-  return REUSABLE.has(id) ? { ok: true } : { ok: false, reason: `许可证 ${id} 不允许复用或无法确认` };
+  if (!id || id === "NOASSERTION" || id === "NONE") return { ok: false, reason: t("仓库没有可识别的许可证") };
+  return REUSABLE.has(id) ? { ok: true } : { ok: false, reason: t("许可证 {{license}} 不允许复用或无法确认", { license: id }) };
 }
 
 /**
@@ -157,6 +159,8 @@ export function validateSkillScout(value: unknown, context: SkillScoutContext): 
     throw Object.assign(new Error("SKILL_SCOUT_BLOCKED"), { detail: answer.blockers.map((blocker) => blocker.message).join("；").slice(0, 400) });
   }
   const lineIds = new Set(context.lines.map((line) => line.id));
+  // Repair messages to the scout Skill, not interface text.
+  /* i18n-ignore-start */
   const problems = answer.candidates.flatMap((candidate, index) => {
     const name = `第 ${index + 1} 个「${candidate.name}」`;
     return [
@@ -168,6 +172,7 @@ export function validateSkillScout(value: unknown, context: SkillScoutContext): 
     ];
   });
   if (problems.length) throw Object.assign(new Error("SKILL_SCOUT_CANDIDATE_INVALID"), { detail: problems.slice(0, 6).join("；") });
+  /* i18n-ignore-end */
   return answer;
 }
 /** Repairs spent: the candidates that are well formed. */
@@ -191,6 +196,7 @@ export const PUBLIC_SKILL_REVIEW_SCHEMA = object({
 export function validatePublicSkillReview(value: unknown): PublicSkillReview {
   const answer = value as PublicSkillReview;
   if (!answer || !["usable", "text_only", "reject"].includes(answer.verdict) || !Array.isArray(answer.reasons) || !answer.reasons.length) {
+    // i18n-ignore: a repair message to the reviewer
     throw Object.assign(new Error("SKILL_REVIEW_SHAPE_INVALID"), { detail: "verdict 为 usable、text_only 或 reject，reasons 至少一条" });
   }
   return answer;

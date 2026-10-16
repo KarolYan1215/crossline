@@ -82,7 +82,8 @@ export function publicHttpsUrl(value: string): URL | undefined {
   return url;
 }
 
-/** Checks one answer against the context it was produced for. */
+/** Checks one answer against the context it was produced for. Its refusals are repair messages to the model, not interface text. */
+/* i18n-ignore-start */
 export function validateDiligence(value: unknown, context: DiligenceContext): DiligenceOutput {
   const out = value as DiligenceOutput | undefined;
   if (!out || !Array.isArray(out.sources) || !Array.isArray(out.findings) || !Array.isArray(out.proposals)
@@ -131,3 +132,4 @@ export function validateDiligence(value: unknown, context: DiligenceContext): Di
   }
   return out;
 }
+/* i18n-ignore-end */
