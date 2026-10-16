@@ -19,7 +19,7 @@ test("English titles: synonymous verbs and filler words set aside, numbers and l
 
 test("merge reasons are written in the person's language", () => {
   const same = [task("a", "Gather the ECE 548 review notes", "midterm review", { progress: 0.5 }), task("b", "Compile ECE 548 review materials", "midterm review")];
-  expect(planMerges(same, new Set(), "en").groups[0]!.reason).toMatch(/^Duplicates “Gather the ECE 548 review notes” \(titles/);
+  expect(planMerges(same, new Set(), "en").groups[0]!.reason).toMatch(/^Duplicates "Gather the ECE 548 review notes" \(titles/);
   expect(planMerges(same).groups[0]!.reason).toMatch(/^与「Gather the ECE 548 review notes」重复（标题规范化后相似度/);
   const request = [task("r", "Confirm the ECE 548 midterm scope"), task("w", "Write the ECE 548 review outline", "", { dependsOn: ["r"] })];
   expect(planMerges(request, new Set(), "en").groups[0]!.reason).toBe('"Confirm the ECE 548 midterm scope" only asks someone, so it becomes the first step of "Write the ECE 548 review outline", which it serves');

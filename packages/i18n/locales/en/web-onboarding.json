@@ -262,7 +262,7 @@
   "日程": "Schedule",
   "步骤排进一周的日历": "Steps are placed into the week's calendar",
   "、": ", ",
-  " 等 {{count}} 项": " and {{count}} in all",
+  " 等 {{count}} 项": " … ({{count}} in all)",
   "查看画像报告": "View the portrait report",
   "高_level": "high",
   "低_level": "low",

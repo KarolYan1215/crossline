@@ -38,7 +38,7 @@ describe("core text in English", () => {
   test("screen activity and energy", () => {
     const segments = [{ start: "2026-10-16T10:00:00Z", end: "2026-10-16T10:12:00Z", app: "code", category: "coding" as const, idle: false }];
     const state = inferWorkState({ segments, now: "2026-10-16T10:15:00Z", calendar: [], locale: "en" });
-    expect(state.reasons[0]).toBe("12 min on Coding work, longest stretch 12 min, 0 switches.");
+    expect(state.reasons[0]).toBe("12 min on coding work, longest stretch 12 min, 0 switches.");
     expect(inferWorkState({ segments, now: "2026-10-16T10:15:00Z", calendar: [] }).reasons[0]).toBe("12 分钟在编程类工作上，连续最长 12 分钟，切换 0 次。");
     const night = [{ sleepAt: "2026-10-15T23:00:00Z", wakeAt: "2026-10-16T07:00:00Z", source: "screen" as const }];
     const prediction = predictEnergy("2026-10-16T10:00:00Z", night, { low: 0, high: 20, reports: 1, agreement: 1 }, (iso) => new Date(iso).getUTCHours(), 0, "en");

@@ -14,6 +14,13 @@ export const CATEGORY_LABEL: Record<ActivityCategory | "idle", string> = {
   coding: "编程", research_tool: "科研工具", writing: "写作", reading: "阅读", communication: "沟通", meeting: "会议",
   browsing: "浏览", leisure: "娱乐", other: "其它", idle: "离开"
 };
+/**
+ * A category's name in the reader's language: on its own (`Reading`), or inside a sentence (`12 min on reading`), where English wants it
+ * lowercase. The Chinese is the same either way.
+ */
+export function activityCategoryLabel(category: string, locale?: Locale, inline = false): string {
+  return tFor(locale)(CATEGORY_LABEL[category as keyof typeof CATEGORY_LABEL] ?? CATEGORY_LABEL.other, { context: inline ? "activityInline" : "activity" });
+}
 /** Categories that count as working on something. Browsing is neither: it depends on what is in the tab, which is the title. */
 export const PRODUCTIVE: ReadonlySet<ActivityCategory> = new Set(["coding", "research_tool", "writing", "reading"]);
 
@@ -168,12 +175,12 @@ export function inferWorkState(input: {
   if (tracked < 5) return { ...base, state: "unknown", confidence: "low", reasons: [t("最近 {{window}} 分钟只有 {{tracked}} 分钟的记录，不够判断。", { window: windowMinutes, tracked: Math.round(tracked) })] };
   if (idle / tracked >= 0.7) return { ...base, state: "away", confidence: "high", reasons: [t("最近 {{window}} 分钟里有 {{idle}} 分钟没有键鼠输入。", { window: windowMinutes, idle: Math.round(idle) })] };
   const leisure = minutes.leisure ?? 0;
-  if (active > 0 && leisure / active >= 0.6) return { ...base, state: "leisure", confidence: leisure / active >= 0.8 ? "high" : "medium", reasons: [t("{{minutes}} 分钟在{{category}}类应用或页面上。", { minutes: Math.round(leisure), category: t(CATEGORY_LABEL.leisure) })] };
+  if (active > 0 && leisure / active >= 0.6) return { ...base, state: "leisure", confidence: leisure / active >= 0.8 ? "high" : "medium", reasons: [t("{{minutes}} 分钟在{{category}}类应用或页面上。", { minutes: Math.round(leisure), category: activityCategoryLabel("leisure", input.locale, true) })] };
   if (switches >= 8) return { ...base, state: "switching", confidence: "medium", reasons: [t("最近 {{window}} 分钟切换了 {{count}} 次应用。", { window: windowMinutes, count: switches })] };
   const productive = [...PRODUCTIVE].reduce((sum, category) => sum + (minutes[category] ?? 0), 0);
   if (active > 0 && productive / active >= 0.6) {
     return { ...base, state: "focused", confidence: longestRun >= 10 ? "high" : "medium",
-      reasons: [t("{{minutes}} 分钟在{{category}}类工作上，连续最长 {{longest}} 分钟，切换 {{count}} 次。", { minutes: Math.round(productive), category: t(CATEGORY_LABEL[dominant ?? "other"]), longest: Math.round(longestRun), count: switches })] };
+      reasons: [t("{{minutes}} 分钟在{{category}}类工作上，连续最长 {{longest}} 分钟，切换 {{count}} 次。", { minutes: Math.round(productive), category: activityCategoryLabel(dominant ?? "other", input.locale, true), longest: Math.round(longestRun), count: switches })] };
   }
   return { ...base, state: "mixed", confidence: "low", reasons: [t("工作类和非工作类应用各占一部分，看不出在做哪一种。")] };
 }

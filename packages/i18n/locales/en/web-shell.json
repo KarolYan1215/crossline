@@ -463,7 +463,7 @@
   "今天没有排给工作的时段": "No time set aside for work today",
   "第一段": "First",
   "接下来": "Next",
-  " 等 {{count}} 项": " and {{count}} in all",
+  " 等 {{count}} 项": " … ({{count}} in all)",
   "今天没有固定安排": "Nothing fixed today",
   "三天内截止": "Due within three days",
   "最紧急 · {{when}}": "Most urgent · {{when}}",

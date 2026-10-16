@@ -1,4 +1,4 @@
-import { AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, CATEGORY_LABEL, SLEEP_TRACKING_CONSENT, TELEMETRY_ENABLED_SETTING, type ActivityCategory, type AgentHistorySummary } from "@crossline/core";
+import { AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, activityCategoryLabel, SLEEP_TRACKING_CONSENT, TELEMETRY_ENABLED_SETTING, type ActivityCategory, type AgentHistorySummary } from "@crossline/core";
 import { assistantAvailable, categoryMode, isAutoHandoff, readCategories } from "@crossline/db";
 import { SubpageShell } from "../subpage-shell";
 import { LocalActivityToggle } from "./local-activity-toggle";
@@ -182,7 +182,7 @@ export default async function SettingsPage() {
             : t("屏幕活动、作息记录、键鼠节律和 Codex 使用记录读的是运行 Crossline 的那台电脑，只对它的主人开放。")}</p>}
           {machine && <LocalActivityToggle consent={consent} detail={detail} pausedUntil={setting(ACTIVITY_PAUSED_UNTIL) || null} blacklist={blacklist}
             hours={hours} categories={[...byCategory].sort((a, b) => b[1] - a[1])
-              .map(([category, minutes]) => ({ label: t(CATEGORY_LABEL[category as ActivityCategory] ?? "其他"), minutes }))} />}
+              .map(([category, minutes]) => ({ label: activityCategoryLabel(category, locale), minutes }))} />}
           <EnergyCard status={energyStatus} phoneUrl={phoneUrl ?? null} hostSignals={machine} />
           {machine && <AgentHistoryCard on={setting(AGENT_HISTORY_CONSENT) === "on"} summary={(() => { try { return JSON.parse(setting(AGENT_HISTORY_SUMMARY) ?? "null") as AgentHistorySummary | null; } catch { return null; } })()} />}
           {isLocalInstall() && <TelemetryCard on={setting(TELEMETRY_ENABLED_SETTING) !== "0"} />}

@@ -1,6 +1,6 @@
 import "server-only";
 import type { AccessContext, AvailabilityWindow, FrozenBlock } from "@crossline/core";
-import { CALENDAR_LINES, CATEGORY_LABEL, calendarLineOf, currentFiling, importedProjects, importedTitle, itemProjectResolver, inferWorkState, stepCategory, suggestAvailability, type ActivitySegment, type CalendarLines, type WorkState } from "@crossline/core";
+import { CALENDAR_LINES, activityCategoryLabel, calendarLineOf, currentFiling, importedProjects, importedTitle, itemProjectResolver, inferWorkState, stepCategory, suggestAvailability, type ActivitySegment, type CalendarLines, type WorkState } from "@crossline/core";
 import { isAutoHandoff, isPaused, listAgentTasks, readCategories } from "@crossline/db";
 import {
   ACTIVITY_DETAIL_CONSENT, effectiveSchedulePreferences, getStore, loadCurrentPlan, planToday, readAvailability, readFrozen, toZonedInstant
@@ -57,7 +57,7 @@ export function activityItems(ctx: AccessContext, timeZone: string, now: Date, d
     const from = local(block.start), to = local(block.end);
     // A block that crosses local midnight is cut at it: the views draw one day at a time.
     const end = to.day === from.day ? to.time : "24:00";
-    return [{ id: `activity:${block.start}`, title: CATEGORY_LABEL[block.category as keyof typeof CATEGORY_LABEL] ?? block.category,
+    return [{ id: `activity:${block.start}`, title: activityCategoryLabel(block.category, localeFor(ctx)),
       day: from.day, start: from.time, end, kind: "activity" as const, source: "screen-activity", readOnly: true }];
   });
 }

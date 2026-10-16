@@ -320,7 +320,7 @@
   "今天的自检合并了 {{count}} 个重复或只需一封邮件的任务：_other": "Today's self-check merged {{count}} tasks that were duplicates or needed only one email:",
   "可在任务页「已归档」的「已合并」里撤销。": "Undo it under \"Merged\" in the Archived drawer on the Tasks page.",
   "「{{title}}」是「{{target}}」的补充": "\"{{title}}\" adds to \"{{target}}\"",
-  "与「{{title}}」重复（{{why}}）": "Duplicates “{{title}}” ({{why}})",
+  "与「{{title}}」重复（{{why}}）": "Duplicates \"{{title}}\" ({{why}})",
   "「{{title}}」是已有任务「{{keep}}」的补充，已并入它的步骤。可在任务页「已归档」里撤销。": "\"{{title}}\" adds to the existing task \"{{keep}}\" and was merged into its steps. Undo it from the Archived drawer on the Tasks page.",
   "「{{title}}」和已有任务「{{keep}}」是同一件事，没有新建，已并入。可在任务页「已归档」里撤销。": "\"{{title}}\" is the same as the existing task \"{{keep}}\", so nothing new was made and it was merged. Undo it from the Archived drawer on the Tasks page.",
   "捕获内容为空。": "The capture is empty.",
