@@ -20,7 +20,7 @@ env:
 
 jobs:
   server:
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[server]') || contains(github.event.head_commit.message, '[deploy]') || contains(github.event.head_commit.message, '[codex-probe]') || contains(github.event.head_commit.message, '[migrate')
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[server]') || contains(github.event.head_commit.message, '[deploy]') || contains(github.event.head_commit.message, '[codex-probe]') || contains(github.event.head_commit.message, '[migrate') || contains(github.event.head_commit.message, '[readiness]')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -69,6 +69,15 @@ jobs:
               grep -oE \"https://[a-z.]+openai\.com[^ ]*\" \$home/out | head -2
               if grep -qE \"[A-Z0-9]{4}-[A-Z0-9]{4,5}\" \$home/out; then echo DEVICE_CODE_RECEIVED; else echo NO_CODE; sed -E \"s/[A-Z0-9]{4}-[A-Z0-9]{4,5}/XXXX-XXXX/g\" \$home/out | tail -15; fi
               rm -rf \$home"'
+      - name: Start readiness and web errors
+        if: contains(github.event.head_commit.message, '[readiness]')
+        run: |
+          # What each account still misses for the start standard, read from a copy of the ledger (the script refuses the live one),
+          # and the web app's recent errors. Nothing is changed.
+          ssh -i ~/.ssh/id -o ConnectTimeout=30 admin@"$HOST" 'sudo docker run --rm -v /srv/crossline/data:/live:ro -w /repo \
+            $(sudo docker inspect -f "{{.Config.Image}}" crossline-web) sh -c "mkdir -p /tmp/copy && cp /live/crossline.db* /tmp/copy/ && \
+            /repo/node_modules/.bin/tsx scripts/start-readiness.ts /tmp/copy/crossline.db"
+            echo "== web errors"; sudo docker logs --since 2h crossline-web 2>&1 | grep -iE "error|unhandled|digest" | tail -30'
       - name: Migrate the owner's ledger
         if: contains(github.event.head_commit.message, '[migrate]') || contains(github.event.head_commit.message, '[migrate-apply]')
         env:
