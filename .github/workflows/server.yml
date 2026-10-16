@@ -50,7 +50,8 @@ jobs:
             printf "worker peak bytes: "; sudo docker exec crossline-worker cat /sys/fs/cgroup/memory.peak 2>/dev/null || echo unknown
             # What holds the worker memory: anonymous (processes) against file cache, then each process resident size and its name.
             sudo docker exec crossline-worker sh -c "grep -E \"^(anon|file|active_file|inactive_file|shmem) \" /sys/fs/cgroup/memory.stat" 2>/dev/null || true
-            sudo docker exec crossline-worker sh -c "grep -H VmRSS /proc/[0-9]*/status; grep -H . /proc/[0-9]*/comm" 2>/dev/null | head -60 || true
+            sudo docker exec crossline-worker sh -c "grep -H -E \"^(VmRSS|PPid)\" /proc/[0-9]*/status; grep -H . /proc/[0-9]*/comm" 2>/dev/null | head -90 || true
+            sudo docker exec crossline-worker sh -c "for f in /proc/[0-9]*/cmdline; do echo \"\$f \$(tr \\\\0 \\  < \$f | cut -c1-160)\"; done" 2>/dev/null | head -30 || true
             sudo docker logs --since 24h crossline-worker 2>&1 | grep -E "worker.memory|model.gate|already_running" | tail -20 || true
             sudo dmesg 2>/dev/null | grep -iE "out of memory|oom-kill" | tail -5 || true
             echo "== assess figures"
