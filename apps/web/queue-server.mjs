@@ -70,20 +70,34 @@ setInterval(() => {
   stats = new Map();
 }, 60_000).unref();
 
-/** Runs `work` once a slot is free (pages before polls) and frees the slot when the response ends or the person goes away. */
+/** A slot a request still holds after this goes back to the pool, so no request — however it ends, or fails to — can stop the line. */
+const SLOT_MAX_MS = 120_000;
+
+/**
+ * Runs `work` once a slot is free (pages before polls) and frees the slot when the response ends or the person goes away. A person
+ * who leaves while still waiting leaves the line at once: the first version attached its listeners only when the turn came, after the
+ * connection had already closed, so each such slot was never freed and four of them stopped the site (2026-10-16).
+ */
 function inLine(request, response, work) {
   const queuedAt = Date.now();
   const route = routeOf(request.url);
   const kind = route.startsWith("/api/") ? "poll" : "page";
-  lines[kind].push(() => {
+  let started = false;
+  const turn = () => {
+    started = true;
     let freed = false;
     const startedAt = Date.now();
     const free = () => {
       if (freed) return;
       freed = true; active -= 1;
+      clearTimeout(watchdog);
       record(route, startedAt - queuedAt, Date.now() - startedAt);
       pump();
     };
+    const watchdog = setTimeout(free, SLOT_MAX_MS);
+    watchdog.unref?.();
+    // Gone while waiting (a closed tab, a timed-out client): nothing to render, the slot goes straight back.
+    if (response.destroyed || response.writableEnded) { free(); return; }
     response.once("close", free);
     response.once("finish", free);
     const waited = startedAt - queuedAt;
@@ -94,9 +108,15 @@ function inLine(request, response, work) {
     }
     Promise.resolve().then(work).catch((error) => {
       console.error(JSON.stringify({ type: "web.request_failed", error: error instanceof Error ? error.message : String(error) }));
-      if (!response.headersSent) { response.statusCode = 500; response.end(); }
+      if (!response.headersSent && !response.destroyed) { response.statusCode = 500; response.end(); }
       free();
     });
+  };
+  lines[kind].push(turn);
+  response.once("close", () => {
+    if (started) return;
+    const at = lines[kind].indexOf(turn);
+    if (at >= 0) lines[kind].splice(at, 1);
   });
   pump();
 }
@@ -113,7 +133,7 @@ createServer((request, response) => {
     Promise.resolve(handle(request, response)).catch(() => { if (!response.headersSent) { response.statusCode = 500; response.end(); } });
     return;
   }
-  inLine(request, response, () => response.destroyed ? undefined : handle(request, response));
+  inLine(request, response, () => handle(request, response));
 }).listen(port, hostname, () => {
   console.info(JSON.stringify({ type: "web.listening", hostname, port, concurrency: limit, ceilingMb: ceiling ? Math.round(ceiling / 1048576) : null }));
 });

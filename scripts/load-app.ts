@@ -45,7 +45,9 @@ async function timed(phase: string, what: string, path: string, init: RequestIni
   let body: unknown;
   let note: string | undefined;
   try {
-    const response = await fetch(`${base}${path}`, { ...init, redirect: "manual",
+    // A request that never answers is a failure to see, not a run that silently hangs until it is killed.
+    const signal = AbortSignal.timeout(phase === "model" ? 20 * 60_000 : 3 * 60_000);
+    const response = await fetch(`${base}${path}`, { ...init, redirect: "manual", signal,
       headers: { ...(init.signedIn === false ? {} : { cookie }), origin: base, ...(init.headers ?? {}) } });
     status = response.status;
     const type = response.headers.get("content-type") ?? "";
@@ -53,7 +55,7 @@ async function timed(phase: string, what: string, path: string, init: RequestIni
     // A signed-in page that sends the person to sign in means the session did not count.
     if (status >= 300 && status < 400) note = `→ ${response.headers.get("location") ?? "?"}`;
   } catch (error) {
-    note = `NETWORK ${(error as { cause?: { code?: string } }).cause?.code ?? (error as Error).message}`;
+    note = (error as Error).name === "TimeoutError" ? "TIMEOUT" : `NETWORK ${(error as { cause?: { code?: string } }).cause?.code ?? (error as Error).message}`;
   }
   samples.push({ phase, what, ms: Math.round(performance.now() - started), status, ...(note ? { note } : {}) });
   return body;
@@ -96,31 +98,34 @@ async function model(): Promise<void> {
   }));
 }
 
+let failed = 0;
+/** The table for one phase, printed as soon as the phase ends so a later phase that hangs cannot take the earlier numbers with it. */
+function summary(phase: string): void {
+  const groups = new Map<string, Sample[]>();
+  for (const sample of samples.filter((one) => one.phase === phase)) groups.set(sample.what, [...(groups.get(sample.what) ?? []), sample]);
+  for (const [what, group] of groups) {
+    const ms = group.map((sample) => sample.ms);
+    const others = new Map<string, number>();
+    for (const sample of group.filter((one) => !okStatus(one))) {
+      const label = `${sample.status}${sample.note ? ` ${sample.note}` : ""}`;
+      others.set(label, (others.get(label) ?? 0) + 1);
+      failed += 1;
+    }
+    console.log(`${phase.padEnd(10)}${what.padEnd(23)}${String(group.length).padStart(3)}${String(group.filter(okStatus).length).padStart(6)}${
+      String(percentile(ms, 50)).padStart(9)}${String(percentile(ms, 95)).padStart(9)}${String(Math.max(...ms)).padStart(9)}   ${
+      [...others].map(([label, count]) => `${label} ×${count}`).join(", ")}`);
+  }
+}
+
 console.log(`load-app: ${base}, ${users} people × ${rounds} rounds, ${turns} simultaneous model turns${cookie ? "" : " (no session)"}`);
+console.log(`\nphase     what                     n    ok   p50 ms   p95 ms   max ms   other answers`);
 const started = Date.now();
 for (const [name, phase] of [["pages", pages], ["visitors", visitors], ["model", model]] as const) {
   if (only && only !== name) continue;
   const at = Date.now();
   await phase();
-  console.log(`${name}: ${Math.round((Date.now() - at) / 1000)} s`);
-}
-
-console.log(`\nphase     what                     n    ok   p50 ms   p95 ms   max ms   other answers`);
-let failed = 0;
-const groups = new Map<string, Sample[]>();
-for (const sample of samples) groups.set(`${sample.phase}\u0000${sample.what}`, [...(groups.get(`${sample.phase}\u0000${sample.what}`) ?? []), sample]);
-for (const [key, group] of groups) {
-  const [phase, what] = key.split("\u0000") as [string, string];
-  const ms = group.map((sample) => sample.ms);
-  const others = new Map<string, number>();
-  for (const sample of group.filter((one) => !okStatus(one))) {
-    const label = `${sample.status}${sample.note ? ` ${sample.note}` : ""}`;
-    others.set(label, (others.get(label) ?? 0) + 1);
-    failed += 1;
-  }
-  console.log(`${phase.padEnd(10)}${what.padEnd(23)}${String(group.length).padStart(3)}${String(group.filter(okStatus).length).padStart(6)}${
-    String(percentile(ms, 50)).padStart(9)}${String(percentile(ms, 95)).padStart(9)}${String(Math.max(...ms)).padStart(9)}   ${
-    [...others].map(([label, count]) => `${label} ×${count}`).join(", ")}`);
+  summary(name);
+  console.log(`  (${name}: ${Math.round((Date.now() - at) / 1000)} s)`);
 }
 console.log(`\n${samples.length} requests in ${Math.round((Date.now() - started) / 1000)} s; ${failed} failed`);
 process.exit(failed ? 1 : 0);
