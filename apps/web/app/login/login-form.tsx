@@ -62,7 +62,10 @@ export function LoginForm({ googleEnabled, emailEnabled = true, chatgptEnabled =
     }
     const { error: signInError } = await emailCode.signIn(codeSentTo, String(data.get("otp") ?? "").trim());
     if (signInError) { fail(signInError, "登录失败，请重新获取验证码。"); return; }
-    location.href = "/connect";
+    // A code makes the account with no password; offer one now, while the sign-in is fresh enough to set it.
+    const password = await fetch("/api/auth/password", { cache: "no-store" }).then((response) => response.json() as Promise<{ hasPassword?: boolean }>)
+      .catch(() => ({ hasPassword: true }));
+    location.href = password.hasPassword ? "/connect" : "/set-password?next=/connect";
   };
 
   const signInWithGoogle = async () => {
@@ -83,7 +86,7 @@ export function LoginForm({ googleEnabled, emailEnabled = true, chatgptEnabled =
       <label><span>邮箱</span><input name="email" type="email" required autoComplete="email" autoFocus readOnly={Boolean(codeSentTo)} defaultValue={codeSentTo} /></label>
       {codeSentTo && <label><span>验证码</span><input name="otp" inputMode="numeric" autoComplete="one-time-code" required pattern="[0-9]{6}" maxLength={6} /></label>}
       <button className="secondary-button" type="submit" disabled={busy}>{busy ? "处理中…" : codeSentTo ? "登录" : "发送验证码"}</button>
-      <small>首次用这个邮箱登录即创建账号，不需要密码。</small>
+      <small>首次用这个邮箱登录即创建账号；登录后可以设一个密码。</small>
     </form>}
     {/* Hidden rather than shown-but-broken when no Google client id/secret is configured — a button
         that always fails with no useful reason is worse than one that is not there at all. */}

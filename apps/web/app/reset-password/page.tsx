@@ -1,13 +1,11 @@
 import { ResetPasswordForm } from "./reset-password-form";
+import { AuthLayout } from "../login/auth-layout";
+import { LOGIN_SERIF } from "../ui/serif-strings";
 
 export default async function ResetPasswordPage({ searchParams }: {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
   const params = await searchParams;
   const token = typeof params.token === "string" ? params.token : null;
-  return <main className="offline-page"><div>
-    <span className="brand-mark">C</span>
-    <h1>{token ? "设置新密码" : "重置密码"}</h1>
-    <ResetPasswordForm token={token} />
-  </div></main>;
+  return <AuthLayout title={token ? LOGIN_SERIF.newPassword : LOGIN_SERIF.reset}><ResetPasswordForm token={token} /></AuthLayout>;
 }

@@ -7,6 +7,8 @@ import { TelemetryCard } from "./telemetry-card";
 import { AutostartCard } from "./autostart-card";
 import { autostartAvailable, readAutostart } from "../../lib/autostart";
 import { isLocalInstall } from "../../lib/install-mode";
+import { isEmailAuthConfigured } from "../../lib/auth";
+import { PasswordCard } from "./password-card";
 import { EnergyCard, type EnergyStatus } from "./energy-card";
 import { HEALTH_TOKEN_SETTING, energyModel } from "../../lib/energy";
 import { UsageCard } from "./usage-card";
@@ -99,6 +101,7 @@ export default async function SettingsPage() {
       <div className="st-sections">
         <section id="general" className="st-section" aria-labelledby="st-general"><h2 id="st-general">通用</h2>
           <div className="st-modules">
+            {!isLocalInstall() && isEmailAuthConfigured() && <PasswordCard />}
             <section className="st-card" aria-label="个人情况">
               <header><h3>个人情况</h3><small>主线、项目、日期与长期目标的来源</small></header>
               <div className="st-row"><span className="st-row-label">访谈<small>{!interview.started ? "尚未开始"

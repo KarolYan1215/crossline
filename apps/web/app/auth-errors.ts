@@ -6,7 +6,11 @@
  * message rather than a generic "出错了" — a specific English sentence is still more useful than nothing.
  */
 const AUTH_ERROR_TEXT: Record<string, string> = {
-  INVALID_EMAIL_OR_PASSWORD: "邮箱或密码不正确。",
+  // A code-made account has no password until one is set, and the two cases look the same from outside (no account enumeration).
+  INVALID_EMAIL_OR_PASSWORD: "邮箱或密码不正确。用验证码注册的账号还没有密码：先用验证码登录后设置，或点「忘记密码」设一个。",
+  // setPassword on a session older than Better Auth's freshness window, and setPassword on an account that already has one.
+  SESSION_NOT_FRESH: "登录已有一段时间，为了安全请重新登录后再设置密码。",
+  PASSWORD_ALREADY_SET: "这个账号已经有密码了，可以在下面修改。",
   EMAIL_NOT_VERIFIED: "邮箱尚未验证，请查收验证邮件（包括垃圾邮件夹）并点击链接后再登录。",
   USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL: "这个邮箱已经注册过了，直接登录或用「忘记密码」找回。",
   USER_ALREADY_EXISTS: "这个邮箱已经注册过了，直接登录或用「忘记密码」找回。",
