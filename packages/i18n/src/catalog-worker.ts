@@ -1,8 +1,5 @@
 import { registerCatalog } from "./index";
-import common from "../locales/en/common.json";
-import core_a from "../locales/en/core-a.json";
-import core_b from "../locales/en/core-b.json";
-import worker from "../locales/en/worker.json";
+import { ALL_CATALOGS } from "./catalog-all";
 
-/** The English the worker reads (docs/i18n.md). Imported once, for its effect, at the worker's entry. */
-for (const catalog of [common, core_a, core_b, worker]) registerCatalog(catalog as Record<string, string>);
+/** The English the worker writes (notifications, asks, messages to the person). Imported once, for its effect, at the worker's entry. */
+for (const catalog of ALL_CATALOGS) registerCatalog(catalog);

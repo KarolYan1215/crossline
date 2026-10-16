@@ -1,3 +1,4 @@
+import "@crossline/i18n/catalog/worker";
 import { get } from "node:http";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
