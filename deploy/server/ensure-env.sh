@@ -11,3 +11,16 @@ ensure() { # file key value — only when the key is absent
 # to SiliconFlow's API with that Ark key, every draw failed and the result page kept the template (2026-10-16).
 ensure /srv/assess/assess.env ASSESS_IMAGE_PROVIDER ark
 ensure /srv/assess/assess.env ASSESS_IMAGE_MODEL doubao-seedream-5-0-pro-260628
+# The app's portrait figure for accounts on another model is drawn with the same Ark key and Seedream model (decided 2026-10-16). The key
+# is copied between the two files on this host only, never printed; an app key already set is left alone.
+ensure /srv/crossline/app.env CROSSLINE_IMAGE_API_STYLE ark
+ensure /srv/crossline/app.env CROSSLINE_IMAGE_MODEL doubao-seedream-5-0-pro-260628
+if [ -f /srv/crossline/app.env ] && ! grep -q "^CROSSLINE_IMAGE_API_KEY=." /srv/crossline/app.env; then
+  key=$(grep "^ASSESS_IMAGE_API_KEY=" /srv/assess/assess.env 2>/dev/null | cut -d= -f2-)
+  if [ -n "$key" ]; then
+    grep -v "^CROSSLINE_IMAGE_API_KEY=" /srv/crossline/app.env > /srv/crossline/app.env.tmp || true
+    printf 'CROSSLINE_IMAGE_API_KEY=%s\n' "$key" >> /srv/crossline/app.env.tmp && mv /srv/crossline/app.env.tmp /srv/crossline/app.env && chmod 600 /srv/crossline/app.env
+    echo "  app uses the test's Ark key for portrait figures"
+  fi
+  unset key
+fi

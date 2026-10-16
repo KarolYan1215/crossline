@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import * as core from "./index";
 import {
-  admittedSkills, capabilityGap, conformanceCases, conformanceCurrent, exportedSchemaNames, jsonSchemaProblems, SKILL_NEEDS, summarizeConformance,
+  admittedSkills, capabilityGap, conformanceCases, conformanceCurrent, exportedSchemaNames, jsonSchemaProblems, SKILL_NEEDS, summarizeConformance, unavailableOnThirdParty,
   type ConformanceRun
 } from "./provider-conformance";
 import { structuredOutputProblems } from "./structured-output";
@@ -77,4 +77,11 @@ test("a record goes stale with another model, another runtime, or after thirty d
   expect(conformanceCurrent(record, "m", "v2", now)).toBe(false);
   expect(conformanceCurrent(record, "m", "v", new Date("2026-11-13T00:00:00.000Z"))).toBe(false);
   expect(conformanceCurrent(undefined, "m", "v", now)).toBe(false);
+});
+
+test("the third-party note says what this install actually adds: search and the figure only when configured", () => {
+  expect(unavailableOnThirdParty({ webSearch: false, image: false })).toContain("联网查证和画像插图在这台服务器上只在 ChatGPT 登录");
+  expect(unavailableOnThirdParty({ webSearch: false, image: true })).toContain("联网查证在这台服务器上只在");
+  expect(unavailableOnThirdParty({ webSearch: true, image: true })).toContain("由 Crossline 自己完成");
+  expect(unavailableOnThirdParty({ webSearch: true, image: true })).toContain("日历用订阅链接接入");
 });

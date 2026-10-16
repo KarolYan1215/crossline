@@ -1,5 +1,5 @@
 import {
-  admittedSkills, conformanceCases, conformanceCurrent, jsonSchemaProblems, SKILL_NEEDS, summarizeConformance, UNAVAILABLE_ON_THIRD_PARTY,
+  admittedSkills, conformanceCases, conformanceCurrent, jsonSchemaProblems, SKILL_NEEDS, summarizeConformance, unavailableOnThirdParty,
   capabilityGap, THIRD_PARTY_CAPABILITIES, type ConformanceCase, type ConformanceRecord, type ConformanceRun, type CostSignal
 } from "@crossline/core";
 import {
@@ -152,7 +152,7 @@ export function createModelProviderService(options: {
       return { skill, label: needs.label, critical: Boolean(needs.critical), served: admitted.has(skill),
         reason: admitted.has(skill) ? "" : gap ?? (!valid ? "还没有检验，或检验已过期" : failed ? `检验中 ${failed} 次没有按格式回答` : needs.critical ? "要求每次都一次答对" : "整体通过率不到 90%") };
     });
-    return { provider: provider ?? null, presets: PROVIDER_PRESETS, unavailable: UNAVAILABLE_ON_THIRD_PARTY, signedIn: options.signedIn(workspaceId),
+    return { provider: provider ?? null, presets: PROVIDER_PRESETS, unavailable: unavailableOnThirdParty(capabilities), signedIn: options.signedIn(workspaceId),
       conformance: record ? { ranAt: record.ranAt, model: record.model, passRate: record.passRate, repairRate: record.repairRate, p95Ms: record.p95Ms,
         runs: record.runs.length, failures: record.failures, current: Boolean(valid) } : null,
       features, testing: testing.get(workspaceId) ?? null };

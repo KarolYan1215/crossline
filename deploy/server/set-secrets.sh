@@ -20,6 +20,9 @@ if [ -n "$resend" ]; then put "$APP" CROSSLINE_SMTP_PASSWORD "$resend"; put "$AS
 read -r -s -p "Image API key for the test's figures (Volcengine Ark key): " flow; echo
 if [ -n "$flow" ]; then put "$ASSESS" ASSESS_IMAGE_API_KEY "$flow"; echo "  Image key saved."; fi
 
+read -r -s -p "Tavily API key for web search on models other than ChatGPT (tvly-…): " tavily; echo
+if [ -n "$tavily" ]; then put "$APP" TAVILY_API_KEY "$tavily"; put "$APP" CROSSLINE_SEARCH_PROVIDER tavily; echo "  Tavily key saved."; fi
+
 read -r -p "Your own email (always allowed to sign up; Enter to skip): " owner
 if [ -n "$owner" ]; then put "$APP" CROSSLINE_SIGNUP_ALLOWLIST "$owner"; echo "  Owner email saved."; fi
 echo "Done. Restart: sudo sh /srv/crossline/run.sh"

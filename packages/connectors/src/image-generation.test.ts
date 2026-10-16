@@ -30,3 +30,16 @@ test("from the environment: no key, no backend; SiliconFlow's address picks its 
   expect(imageBackendFromEnv({ CROSSLINE_IMAGE_API_KEY: "k", CROSSLINE_IMAGE_BASE_URL: "https://ark.example.com/api/v3", CROSSLINE_IMAGE_MODEL: "seedream" }))
     .toMatchObject({ id: "openai", model: "seedream" });
 });
+
+test("Ark style: Seedream at 2:3 without the platform's mark, picked by name or by a volces.com address", async () => {
+  let body: Record<string, unknown> = {};
+  const fetchImpl = (async (url: string | URL | Request, init?: RequestInit) => {
+    if (String(url).endsWith("/images/generations")) { body = JSON.parse(String(init?.body)); return new Response(JSON.stringify({ data: [{ url: "https://ark-cdn.example.com/f.jpeg" }] })); }
+    return new Response(PNG);
+  }) as typeof fetch;
+  const backend = imageBackendFromEnv({ CROSSLINE_IMAGE_API_KEY: "k", CROSSLINE_IMAGE_API_STYLE: "ark" }, fetchImpl)!;
+  expect(backend).toMatchObject({ id: "ark", model: "doubao-seedream-5-0-pro-260628" });
+  await backend.generate("a figure");
+  expect(body).toMatchObject({ model: "doubao-seedream-5-0-pro-260628", size: "1024x1536", response_format: "url", watermark: false });
+  expect(imageBackendFromEnv({ CROSSLINE_IMAGE_API_KEY: "k", CROSSLINE_IMAGE_BASE_URL: "https://ark.cn-beijing.volces.com/api/v3" })).toMatchObject({ id: "ark" });
+});

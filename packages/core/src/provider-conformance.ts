@@ -103,8 +103,19 @@ export function capabilityGap(skill: string, capabilities: ProviderCapabilities 
   return undefined;
 }
 
-/** The capabilities a third-party connection lacks, as one sentence for the settings card. */
-export const UNAVAILABLE_ON_THIRD_PARTY = "联网查证、画像插图、电脑上的助手、日历应用读取和跨次记忆只在 ChatGPT 登录（或 OpenAI API key）下可用；其余功能按检验结果开放。";
+/**
+ * What a third-party connection can and cannot do on this install, as the settings card's sentence (2026-10-16: it used to say web
+ * search, the figure, calendars and memory were all ChatGPT-only, which stopped being true once Crossline searched and drew itself).
+ * Calendars come in by subscription link on any model, and what the person said is kept in the ledger whichever model runs; only the
+ * shell assistant stays with the machine owner's own Codex.
+ */
+export function unavailableOnThirdParty(capabilities: Pick<ProviderCapabilities, "webSearch" | "image">): string {
+  const missing = [capabilities.webSearch ? "" : "联网查证", capabilities.image ? "" : "画像插图"].filter(Boolean);
+  return [missing.length ? `${missing.join("和")}在这台服务器上只在 ChatGPT 登录（或 OpenAI API key）下可用` : "联网查证和画像插图由 Crossline 自己完成，用哪个模型都可以",
+    "日历用订阅链接接入，主线、事实和偏好记在 Crossline 自己的账本里，都和模型无关",
+    "电脑上的助手只在电脑主人自己的 Codex 上运行",
+    "其余功能按检验结果开放。"].join("；");
+}
 
 // ── Conformance ──────────────────────────────────────────────────────────────────────────────────────────────────────
 

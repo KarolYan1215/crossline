@@ -2,9 +2,12 @@
  * Text-to-image for runs on a model provider other than the person's own Codex sign-in (docs/beta-launch.md §10.4): the portrait
  * figure is drawn by an image model directly, from the prompt `characterPrompt` already builds, with no language model in between.
  *
- * Two request styles behind one `/images/generations` path:
+ * Three request styles behind one `/images/generations` path:
  * - `siliconflow`: `{model, prompt, image_size, prompt_enhancement}` → `{images: [{url}]}` (FLUX, Qwen-Image, Kolors on SiliconFlow);
- * - `openai`: `{model, prompt, size, n}` → `{data: [{url | b64_json}]}` (OpenAI, Volcengine Ark's Seedream).
+ * - `openai`: `{model, prompt, size, n}` → `{data: [{url | b64_json}]}` (OpenAI);
+ * - `ark`: Volcengine Ark's Seedream, `{model, prompt, size, response_format: "url", watermark: false}` → `{data: [{url}]}` — the same
+ *   service and key the public test draws its figures with (decided 2026-10-16), full length 2:3 by default, without the platform's
+ *   「AI 生成」 mark. Picked by `CROSSLINE_IMAGE_API_STYLE=ark` or a `volces.com` base URL.
  *
  * From the environment: `CROSSLINE_IMAGE_API_KEY` (else `SILICONFLOW_API_KEY`), `CROSSLINE_IMAGE_BASE_URL` (default SiliconFlow's
  * mainland address), `CROSSLINE_IMAGE_MODEL`, `CROSSLINE_IMAGE_SIZE`, `CROSSLINE_IMAGE_API_STYLE`. No key, no backend.
@@ -17,6 +20,9 @@ export interface ImageBackend {
 }
 
 type Fetch = typeof fetch;
+/** Volcengine Ark's mainland endpoint and the Seedream model the public test uses. */
+export const ARK_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3";
+export const ARK_DEFAULT_MODEL = "doubao-seedream-5-0-pro-260628";
 const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
 
 export function imageType(bytes: Buffer): "image/png" | "image/jpeg" | "image/webp" | null {
@@ -44,7 +50,7 @@ async function download(url: string, fetchImpl: Fetch, signal?: AbortSignal): Pr
   throw new Error("IMAGE_TOO_MANY_REDIRECTS");
 }
 
-export type ImageBackendOptions = { apiKey: string; baseUrl: string; model: string; size: string; style: "siliconflow" | "openai"; fetchImpl?: Fetch };
+export type ImageBackendOptions = { apiKey: string; baseUrl: string; model: string; size: string; style: "siliconflow" | "openai" | "ark"; fetchImpl?: Fetch };
 
 export function imageBackend(options: ImageBackendOptions): ImageBackend {
   const baseUrl = options.baseUrl.replace(/\/+$/, "");
@@ -55,6 +61,7 @@ export function imageBackend(options: ImageBackendOptions): ImageBackend {
     async generate(prompt, { seed, signal } = {}) {
       const body = options.style === "siliconflow"
         ? { model: options.model, prompt, image_size: options.size, prompt_enhancement: false, ...(seed !== undefined ? { seed } : {}) }
+        : options.style === "ark" ? { model: options.model, prompt, size: options.size, response_format: "url", watermark: false, ...(seed !== undefined ? { seed } : {}) }
         : { model: options.model, prompt, size: options.size, n: 1, ...(seed !== undefined ? { seed } : {}) };
       const response = await fetchImpl(`${baseUrl}/images/generations`, { method: "POST",
         headers: { authorization: `Bearer ${options.apiKey}`, "content-type": "application/json" }, body: JSON.stringify(body),
@@ -78,9 +85,11 @@ export function imageBackend(options: ImageBackendOptions): ImageBackend {
 export function imageBackendFromEnv(env: Record<string, string | undefined> = process.env, fetchImpl?: Fetch): ImageBackend | undefined {
   const apiKey = env.CROSSLINE_IMAGE_API_KEY?.trim() || env.SILICONFLOW_API_KEY?.trim();
   if (!apiKey) return undefined;
-  const baseUrl = env.CROSSLINE_IMAGE_BASE_URL?.trim() || "https://api.siliconflow.cn/v1";
-  const style = env.CROSSLINE_IMAGE_API_STYLE?.trim() === "openai" ? "openai"
-    : env.CROSSLINE_IMAGE_API_STYLE?.trim() === "siliconflow" || /siliconflow/i.test(baseUrl) ? "siliconflow" : "openai";
-  return imageBackend({ apiKey, baseUrl, style, model: env.CROSSLINE_IMAGE_MODEL?.trim() || "black-forest-labs/FLUX.1-dev",
-    size: env.CROSSLINE_IMAGE_SIZE?.trim() || "1024x1024", ...(fetchImpl ? { fetchImpl } : {}) });
+  const named = env.CROSSLINE_IMAGE_API_STYLE?.trim();
+  const ark = named === "ark" || (!named && /volces\.com/i.test(env.CROSSLINE_IMAGE_BASE_URL ?? ""));
+  const baseUrl = env.CROSSLINE_IMAGE_BASE_URL?.trim() || (ark ? ARK_BASE_URL : "https://api.siliconflow.cn/v1");
+  const style = ark ? "ark" : named === "openai" ? "openai" : named === "siliconflow" || /siliconflow/i.test(baseUrl) ? "siliconflow" : "openai";
+  return imageBackend({ apiKey, baseUrl, style,
+    model: env.CROSSLINE_IMAGE_MODEL?.trim() || (ark ? ARK_DEFAULT_MODEL : "black-forest-labs/FLUX.1-dev"),
+    size: env.CROSSLINE_IMAGE_SIZE?.trim() || (ark ? "1024x1536" : "1024x1024"), ...(fetchImpl ? { fetchImpl } : {}) });
 }
