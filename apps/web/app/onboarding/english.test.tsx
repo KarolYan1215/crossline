@@ -52,7 +52,7 @@ test("the date batch counts in English, with plurals", () => {
   const item = { id: "d1", kind: "date" as const, title: "Midterm", project: "ece548", confidence: "high" as const, when: "Oct 27", quote: "10/27 Midterm",
     sourceRef: "src-1", note: "", checked: true, blocks: 0 };
   const html = en(<DateBatchCard batch={{ id: "b", documentCount: 1, items: [item], questions: [], dropped: 2 }} busy={false} onDecide={() => {}} onRedo={() => {}} />);
-  expect(html).toContain("1 item found in 1 file(s)");
+  expect(html).toContain("1 item found in 1 file");
   expect(html).toContain("Add to calendar (1 item)");
   expect(html).toContain("2 more items couldn&#x27;t be verified against the source and were dropped, not saved.");
   expect(html).toContain("High confidence");

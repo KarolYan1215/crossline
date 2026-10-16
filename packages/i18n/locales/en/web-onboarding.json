@@ -16,8 +16,6 @@
   "需留意": "Check this",
   "不确定": "Unsure",
   "从文件识别到的日期": "Dates found in files",
-  "从 {{files}} 个文件识别到 {{count}} 项_one": "{{count}} item found in {{files}} file(s)",
-  "从 {{files}} 个文件识别到 {{count}} 项_other": "{{count}} items found in {{files}} file(s)",
   "从回答中识别到 {{count}} 项_one": "{{count}} item found in your answers",
   "从回答中识别到 {{count}} 项_other": "{{count}} items found in your answers",
   "勾选的日期加入日历与画像；不确定的默认不勾选。": "Checked dates go into your calendar and portrait; uncertain ones start unchecked.",
@@ -25,8 +23,6 @@
   "另有 {{count}} 项无法在原文里核实，已丢弃，没有写入。_one": "{{count}} more item couldn't be verified against the source and was dropped, not saved.",
   "另有 {{count}} 项无法在原文里核实，已丢弃，没有写入。_other": "{{count}} more items couldn't be verified against the source and were dropped, not saved.",
   "待确认：": "To confirm:",
-  "加入日历（{{count}} 项，{{blocks}} 个时间块）_one": "Add to calendar ({{count}} item, {{blocks}} blocks)",
-  "加入日历（{{count}} 项，{{blocks}} 个时间块）_other": "Add to calendar ({{count}} items, {{blocks}} blocks)",
   "加入日历（{{count}} 项）_one": "Add to calendar ({{count}} item)",
   "加入日历（{{count}} 项）_other": "Add to calendar ({{count}} items)",
   "都不加入": "Add none",
@@ -796,5 +792,13 @@
   "说说这几天的进展，可用 @ 指定": "What has moved these last few days? Use @ to name things",
   "先到这里，去今日": "Stop here and go to Today",
   "去今日": "Go to Today",
-  "这次先跳过": "Skip this time"
+  "这次先跳过": "Skip this time",
+  "从 {{files}}识别到 {{count}} 项_one": "{{count}} item found in {{files}}",
+  "从 {{files}}识别到 {{count}} 项_other": "{{count}} items found in {{files}}",
+  "{{count}} 个文件_one": "{{count}} file",
+  "{{count}} 个文件_other": "{{count}} files",
+  "加入日历（{{count}} 项，{{blocks}}）_one": "Add to calendar ({{count}} item, {{blocks}})",
+  "加入日历（{{count}} 项，{{blocks}}）_other": "Add to calendar ({{count}} items, {{blocks}})",
+  "{{count}} 个时间块_one": "{{count}} block",
+  "{{count}} 个时间块_other": "{{count}} blocks"
 }

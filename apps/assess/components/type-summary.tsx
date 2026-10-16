@@ -40,7 +40,7 @@ export function AxesList({ type, ranks = true }: { type: PublicType; ranks?: boo
 function Combo({ lines, className }: { lines: LineView[]; className?: string }) {
   const t = useT();
   // Chinese: 「人工智能的 研究者」; English: the field as a modifier, "AI Researcher".
-  const gap = useLocale() === "en" ? () => "" : latinGap;
+  const gap = useLocale() === "en" ? () => " " : latinGap;
   return <p className={className}>{lines.map((line, index) => <span key={line.identity}>{index ? " · " : ""}
     {line.domain && <span className="as-form">{t("{{domain}}的", { domain: line.domain })}{gap(line.identity)}</span>}<b>{line.identity}</b></span>)}</p>;
 }
