@@ -26,7 +26,7 @@ test("the morning brief and the urgent messages are written in the workspace's l
   expect(english[0]).toMatchObject({ kind: "brief", title: "Crossline today" });
   expect(english[0]!.body).toBe("Due to arrive today: the measured data from Alex; Due in 1 day: Paper draft; 4 decisions waiting");
   expect(english.filter((item) => item.kind === "urgent").map((item) => [item.title, item.body])).toEqual([
-    ["Has the measured data from Alex arrived?", "If it has, press \"Arrived\" so the work that depends on it can be scheduled."],
+    ["Has the measured data from Alex arrived?", "Once it arrives, press \"It has arrived\" so the work that depends on it can go on the calendar."],
     ["Due tomorrow: Paper draft", "Due Oct 9."]]);
 });
 
@@ -58,13 +58,13 @@ test("work that takes effect by itself is announced in the workspace's language"
 
 test("a file that cannot be read says why in the reader's language", async () => {
   expect((await extractText(new Uint8Array(4), "image")).note).toBe("图片没有文字层；需要以图片形式交给模型查看。");
-  expect((await extractText(new Uint8Array(4), "image", "en")).note).toBe("Images have no text layer; it needs to be given to the model as an image.");
+  expect((await extractText(new Uint8Array(4), "image", "en")).note).toBe("An image has no text layer; it has to be given to the model as an image.");
 });
 
 test("a page that refuses to open says so in the reader's language, and gives its status to the code that reads it", async () => {
   const deps = { fetchImpl: (async () => new Response("no", { status: 403 })) as typeof fetch, isPublicHost: async () => true };
   expect(await safeGet("https://example.edu/x", deps, { maxBytes: 1000 })).toEqual({ ok: false, reason: "返回 403", status: 403 });
-  expect(await safeGet("https://example.edu/x", deps, { maxBytes: 1000, locale: "en" })).toEqual({ ok: false, reason: "Answered 403", status: 403 });
+  expect(await safeGet("https://example.edu/x", deps, { maxBytes: 1000, locale: "en" })).toEqual({ ok: false, reason: "returned 403", status: 403 });
 });
 
 test("the interview's own closing line follows the interview's language", () => {

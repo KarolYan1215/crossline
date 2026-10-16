@@ -94,7 +94,7 @@ test("in English the card's own words are English; the ask's own text is shown a
   expect(html).toContain("<dt>Why asked</dt>");
   expect(html).toContain("<dt>If answered</dt><dd>Once this round&#x27;s questions are answered");
   expect(html).toContain("Bears on the Nov 2 deadline");
-  expect(html).toContain("Comes into this week on Oct 20");
+  expect(html).toContain("Joins this week on Oct 20");
   expect(html).toContain("Ask tomorrow");
   expect(html).toContain(" · Recommended");
   expect(html).not.toMatch(/为何问|明天再问|推荐/);
