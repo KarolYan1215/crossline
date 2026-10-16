@@ -55,3 +55,26 @@ export function runLocale(explicit: Locale | undefined, workspaceId: string | un
   if (explicit) return explicit;
   try { return localeProvider?.(workspaceId) ?? "zh"; } catch { return "zh"; }
 }
+
+/** How much longer English text runs than the Chinese a limit was set for (one Chinese character ≈ two to three letters). */
+export const ENGLISH_LENGTH_FACTOR = 2.5;
+
+/**
+ * The output schema as sent for this language. Every `maxLength` in the schemas was set against Chinese; an English answer of the same
+ * substance is about 2.5 times as many characters, and strict decoding would cut it off or the validator refuse it. In English each string
+ * limit is widened; formats are held by their own `pattern`/`enum` and by the validators, so widening ids and dates loses nothing. Chinese
+ * gets the schema untouched.
+ */
+export function schemaForLocale(schema: unknown, locale: Locale | undefined): unknown {
+  if (locale !== "en") return schema;
+  const widen = (node: unknown): unknown => {
+    if (Array.isArray(node)) return node.map(widen);
+    if (!node || typeof node !== "object") return node;
+    const out: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+      out[key] = key === "maxLength" && typeof value === "number" ? Math.ceil(value * ENGLISH_LENGTH_FACTOR) : widen(value);
+    }
+    return out;
+  };
+  return widen(schema);
+}

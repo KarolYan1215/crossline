@@ -1,3 +1,4 @@
+import { clipWidth, textWidth } from "./text-width";
 /**
  * A task's name (decided 2026-10-08): a short action that starts with its verb — 「完成 ECE 555 作业 2」「整理 ECE 548 复习提纲」 — used
  * wherever the task is named (cards, the calendar, lists). The sentence that says what exactly is to be done stays as the description
@@ -8,9 +9,9 @@ export const TASK_TITLE_MAX = 24;
 /** A name as kept: one line, no closing punctuation, at most `TASK_TITLE_MAX` characters (cut at a clause boundary when it can be). */
 export function cleanTaskTitle(value: string): string {
   const line = value.replace(/\s+/g, " ").trim().replace(/[。．.；;，,！!]+$/u, "");
-  if (line.length <= TASK_TITLE_MAX) return line;
+  if (textWidth(line) <= TASK_TITLE_MAX) return line;
   const clause = line.split(/[，,；;：:。]/u)[0]!.trim();
-  return (clause.length >= 4 && clause.length <= TASK_TITLE_MAX ? clause : line.slice(0, TASK_TITLE_MAX)).trim();
+  return (clause.length >= 4 && textWidth(clause) <= TASK_TITLE_MAX ? clause : clipWidth(line, TASK_TITLE_MAX)).trim();
 }
 
 /**

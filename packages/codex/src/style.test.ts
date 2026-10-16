@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "vitest";
-import { agentLanguageLine, runLocale, setLocaleProvider, STYLE_INSTRUCTIONS, styleInstructions } from "./style";
+import { agentLanguageLine, runLocale, schemaForLocale, setLocaleProvider, STYLE_INSTRUCTIONS, styleInstructions } from "./style";
 
 afterEach(() => setLocaleProvider(undefined));
 
@@ -21,4 +21,12 @@ test("the English block overrides the Skills' Chinese wording and keeps the fixe
   expect(english).toContain("overrides any instruction elsewhere to write in Chinese");
   expect(english).toContain("Track (主线)");
   expect(agentLanguageLine("en")).toContain("English");
+});
+
+test("an English answer gets room: string limits widen, everything else is the same schema", () => {
+  const schema = { type: "object", properties: { title: { type: "string", maxLength: 24 }, items: { type: "array", maxItems: 3, items: { type: "string", maxLength: 80 } } } };
+  expect(schemaForLocale(schema, "zh")).toBe(schema);
+  expect(schemaForLocale(schema, "en")).toEqual({ type: "object", properties: { title: { type: "string", maxLength: 60 },
+    items: { type: "array", maxItems: 3, items: { type: "string", maxLength: 200 } } } });
+  expect(schema.properties.title.maxLength).toBe(24);
 });

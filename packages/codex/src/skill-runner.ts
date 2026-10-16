@@ -1,5 +1,5 @@
 import { mkdirSync, writeFileSync } from "node:fs";
-import { agentLanguageLine, runLocale, styleInstructions } from "./style";
+import { agentLanguageLine, runLocale, schemaForLocale, styleInstructions } from "./style";
 import { join } from "node:path";
 import { cleanAnswerStrings, type Locale } from "@crossline/core";
 import type { CodexRpcBoundary } from "./index";
@@ -360,6 +360,8 @@ export type ContinueTurnOptions<T> = {
   skillName: string;
   cwd: string;
   outputSchema: unknown;
+  /** The thread's language, as `SkillRunOptions.locale` (only the output schema's length limits follow it on a continued turn). */
+  locale?: Locale;
   validateOutput: (output: unknown) => T;
   onAudit: (audit: AnalysisAudit) => void;
   onProgress?: (progress: SkillProgress) => void;
@@ -789,7 +791,7 @@ export function continueSkillTurn<T>(client: CodexRpcBoundary, threadId: string,
     try {
       await requireLogin(scope, context);
       const output = await runTurnsUntilValid(client, scope, context, audit, {
-        skillName: options.skillName, threadId, outputSchema: options.outputSchema,
+        skillName: options.skillName, threadId, outputSchema: schemaForLocale(options.outputSchema, runLocale(options.locale, currentUsageWorkspace())),
         allowedItemTypes: ["agentMessage", "reasoning", "userMessage", ...(options.tools ? ["dynamicToolCall"] : [])],
         firstPrompt: message, validate: options.validateOutput, onAudit: options.onAudit, ...(options.idleMs ? { idleMs: options.idleMs } : {}),
         ...(options.onProgress ? { onProgress: options.onProgress } : {}),
@@ -865,7 +867,7 @@ async function runSkillTurn<T>(client: CodexRpcBoundary, input: unknown, request
     }
     else if (options.tools) unregister = registerAgentThread(client, threadId, toolAnswerer(options.tools));
     const output = await runTurnsUntilValid(client, scope, context, audit, {
-      skillName: options.skillName, threadId, outputSchema: options.outputSchema, allowedItemTypes, ...(options.onImage ? { onImage: options.onImage } : {}),
+      skillName: options.skillName, threadId, outputSchema: schemaForLocale(options.outputSchema, runLocale(options.locale, currentUsageWorkspace())), allowedItemTypes, ...(options.onImage ? { onImage: options.onImage } : {}),
       ...(options.agent ? { agent: options.agent } : {}),
       firstPrompt: `${[options.skillName, ...context.extraSkills].map((name) => `$${name}`).join(" ")}\n\n${JSON.stringify(prepared)}`,
       validate: (answer) => options.validateOutput(answer, prepared), onAudit: options.onAudit, ...(options.idleMs ? { idleMs: options.idleMs } : {}),

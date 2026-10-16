@@ -384,7 +384,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
           tone: readTone(store.getSetting(workspaceId, ONBOARDING_TONE_SETTING)), ...(calendarChanged ? { calendar: week } : {}),
         ...(publicAssessment ? { publicAssessment } : {}), ...(waiting > 0 ? { sourcesWaiting: waiting } : {}) });
         result = await continueSkillTurn<OnboardingTurn>(client, session.codexThreadId, message, {
-          skillName: ONBOARDING_SKILL, cwd, outputSchema: ONBOARDING_TURN_SCHEMA, validateOutput, softAccept, keepEarly,
+          skillName: ONBOARDING_SKILL, cwd, locale, outputSchema: ONBOARDING_TURN_SCHEMA, validateOutput, softAccept, keepEarly,
           onAudit: () => {}, onProgress, onQueued, timeoutMs: 60 * 60_000
         });
         // The runtime forgets a conversation when it restarts. The interview does not: the profile, the files and

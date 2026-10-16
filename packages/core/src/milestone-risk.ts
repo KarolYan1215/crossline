@@ -1,3 +1,4 @@
+import { clipWidth } from "./text-width";
 /**
  * What could keep a milestone from being reached, said once when it is drafted (the person's direction of 2026-10-15: 「里程碑创建时，Agent
  * 就要阅读这些里程碑，批判性地分析风险」). A risk is a level, a kind and one short note; a milestone may have none. The 主线 page draws the
@@ -186,7 +187,7 @@ function reject(code: string, detail: string): never {
   throw error;
 }
 
-const cleanNote = (note: string) => note.replace(/[​-‏⁠﻿]/g, "").replace(/\s+/g, " ").trim().slice(0, MILESTONE_RISK_NOTE_MAX);
+const cleanNote = (note: string) => clipWidth(note.replace(/[​-‏⁠﻿]/g, "").replace(/\s+/g, " ").trim(), MILESTONE_RISK_NOTE_MAX);
 
 /** The usable part of an answer: given milestones only, known levels and kinds, one risk per kind. */
 function readAnswer(value: unknown, context: MilestoneRiskContext): Map<string, MilestoneRisk[]> {

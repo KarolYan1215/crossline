@@ -5,6 +5,7 @@ import { cleanTaskTitle, withCourse } from "./task-title";
 import { infoRequestTraits } from "./info-request";
 import { COMPLETION_FIELD, readModelCompletion, type ModelCompletion } from "./completion";
 import { tFor, type Locale } from "./i18n";
+import { textWidth } from "./text-width";
 
 export type AnalysisContext = {
   version: string;
@@ -139,7 +140,7 @@ export const ANALYSIS_OUTPUT_SCHEMA = object({
 function matches(value: unknown, schema: Schema): boolean {
   if (schema.enum && !schema.enum.includes(value as string)) return false;
   switch (schema.type) {
-    case "string": return typeof value === "string" && value.trim().length >= (schema.minLength ?? 0) && value.length <= (schema.maxLength ?? Infinity);
+    case "string": return typeof value === "string" && value.trim().length >= (schema.minLength ?? 0) && textWidth(value) <= (schema.maxLength ?? Infinity);
     case "number": case "integer": return typeof value === "number" && Number.isFinite(value) && value >= (schema.minimum ?? -Infinity) && (schema.type !== "integer" || Number.isInteger(value));
     case "boolean": return typeof value === "boolean";
     case "array": return Array.isArray(value) && value.length >= (schema.minItems ?? 0) && value.length <= (schema.maxItems ?? Infinity) && value.every((item) => matches(item, schema.items!));

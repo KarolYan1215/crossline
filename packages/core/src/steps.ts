@@ -1,3 +1,4 @@
+import { clipWidth } from "./text-width";
 import { ARCHETYPE_IDS, STEP_ROLES, archetypeById, isStepRole, type Archetype, type StepRole } from "./archetypes";
 import { normalizeAiAssist } from "./ai-tools";
 import { INFO_REQUEST_PERSON_MINUTES, infoRequestTraits } from "./info-request";
@@ -200,7 +201,7 @@ export function normalizeStepPlan(plan: StepPlan, toolNames?: string[], options:
       tickOutcome: (step.tickOutcome ?? "").trim().slice(0, 120), dependsOn: step.dependsOn ?? [],
       covers: Array.isArray(step.covers) ? step.covers.filter((id) => typeof id === "string") : [], why: (step.why ?? "").trim().slice(0, 300),
       aiAssist: normalizeAiAssist(step.aiAssist, toolNames, p50),
-      firstAction: (step.firstAction ?? "").trim().slice(0, FIRST_ACTION_MAX) };
+      firstAction: clipWidth((step.firstAction ?? "").trim(), FIRST_ACTION_MAX) };
   });
   // Preparation is the assistant's: a person's step that only gathers or files material moves to it, and the assistant's steps never
   // take time on the person's calendar.

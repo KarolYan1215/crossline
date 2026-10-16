@@ -14,6 +14,7 @@
 import { TASK_MINUTES } from "./steps";
 import { cleanTaskTitle } from "./task-title";
 import { COMPLETION_FIELD, readModelCompletion, type ModelCompletion } from "./completion";
+import { textWidth } from "./text-width";
 export type BackplanStep = { id: string; title: string; intent: string; sourceQuote: string; rationale: string; dependsOn: string[];
   estimate: { p25Minutes: number; p50Minutes: number; p85Minutes: number };
   energy: "low" | "medium" | "high"; interruptible: boolean;
@@ -75,7 +76,7 @@ export function validateBackplan(value: unknown, sources: string[], dateSources 
     || answer.dateCandidates.length > 5 || answer.blockers.length > 10) throw new Error("BACKPLAN_SCHEMA_INVALID");
   for (const blocker of answer.blockers) {
     if (!blocker || typeof blocker.message !== "string" || !blocker.message.trim() || typeof blocker.what !== "string"
-      || !blocker.what.trim() || blocker.what.length > 120 || typeof blocker.whoHas !== "string" || blocker.whoHas.length > 60)
+      || !blocker.what.trim() || textWidth(blocker.what) > 120 || typeof blocker.whoHas !== "string" || textWidth(blocker.whoHas) > 60)
       throw new Error("BACKPLAN_BLOCKER_INVALID");
   }
   for (const candidate of answer.dateCandidates) {
@@ -88,7 +89,7 @@ export function validateBackplan(value: unknown, sources: string[], dateSources 
   const seen = new Set<string>();
   for (const step of answer.steps) {
     if (!step || !/^[a-zA-Z0-9_-]{1,64}$/.test(step.id) || seen.has(step.id)
-      || !step.intent?.trim() || step.intent.length > 200 || !step.rationale?.trim()
+      || !step.intent?.trim() || textWidth(step.intent) > 200 || !step.rationale?.trim()
       || !step.evidence?.trim() || !step.sourceQuote?.trim()
       || !sources.some((source) => source.includes(step.sourceQuote))) throw new Error("BACKPLAN_SOURCE_INVALID");
     if (!Array.isArray(step.dependsOn) || step.dependsOn.some((id) => !seen.has(id)))
