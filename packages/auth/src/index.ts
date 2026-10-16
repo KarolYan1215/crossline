@@ -173,8 +173,11 @@ function crosslineAuthConfig(options: CrosslineAuthOptions): BetterAuthOptions {
     } : {}),
     // A six-digit code by email signs in without a password and creates the account on first use: one step fewer than sign-up →
     // verification link → sign-in, and only offered where mail can actually be delivered. `nextCookies` stays last, as Better Auth asks.
-    plugins: [...(emailCapable ? [emailOTP({ sendVerificationOTP: async ({ email, otp }) => { await deliver(email, "Crossline 登录验证码", `验证码：${otp}（10 分钟内有效）`); },
-      expiresIn: 600 })] : []), ...(options.chatgpt ? [chatgptSignIn(options.chatgpt)] : []),
+    // The code is in the subject so each message stands apart in the inbox (identical subjects collapse into one Gmail thread, and the
+    // hosted beta's first walkthrough typed an older message's code three times). A resend while the code is still valid sends the same
+    // code again (`resendStrategy: "reuse"`): mail can arrive minutes late, and a fresh code per click made the one in transit useless.
+    plugins: [...(emailCapable ? [emailOTP({ sendVerificationOTP: async ({ email, otp }) => { await deliver(email, `Crossline 登录验证码 ${otp}`, `验证码：${otp}（10 分钟内有效）`); },
+      expiresIn: 600, resendStrategy: "reuse" })] : []), ...(options.chatgpt ? [chatgptSignIn(options.chatgpt)] : []),
       ...(options.localCodex ? [codexLocalSignIn(options.localCodex)] : []), nextCookies()]
   };
 }

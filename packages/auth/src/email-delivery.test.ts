@@ -41,3 +41,22 @@ test("a code by email signs a person in without a password, creating the account
   const signedIn = await auth.api.signInEmailOTP!({ body: { email: "new@example.com", otp } }) as { user?: { email?: string } };
   expect(signedIn.user?.email).toBe("new@example.com");
 }, 30_000);
+
+test("sending the code again within its ten minutes sends the same code, with the code in the subject", async () => {
+  // The hosted beta's mail arrived minutes late: a fresh code per click made the message in transit worthless, and identical subjects
+  // collapsed into one thread where the older code was the one read.
+  const { readdirSync, readFileSync } = await import("node:fs");
+  const mailbox = path.join(dir, "mailbox-resend");
+  const local: CrosslineAuthOptions = { authDbPath: path.join(dir, "resend.db"), secret: "s".repeat(40), baseURL: "http://127.0.0.1:3210",
+    trustedOrigins: ["http://127.0.0.1:3210"], testMailboxDir: mailbox };
+  await migrateCrosslineAuth(local);
+  const auth = createCrosslineAuth(local) as unknown as { api: Record<string, (input: unknown) => Promise<unknown>> };
+  for (let i = 0; i < 3; i++) await auth.api.sendVerificationOTP!({ body: { email: "late@example.com", type: "sign-in" } });
+  const messages = readdirSync(mailbox).map((file) => JSON.parse(readFileSync(path.join(mailbox, file), "utf8")) as { subject: string; url: string });
+  const codes = messages.map((message) => /\d{6}/.exec(message.url)?.[0]);
+  expect(messages).toHaveLength(3);
+  expect(new Set(codes).size).toBe(1);
+  expect(messages[0]!.subject).toBe(`Crossline 登录验证码 ${codes[0]}`);
+  const signedIn = await auth.api.signInEmailOTP!({ body: { email: "late@example.com", otp: codes[0] } }) as { user?: { email?: string } };
+  expect(signedIn.user?.email).toBe("late@example.com");
+}, 30_000);
