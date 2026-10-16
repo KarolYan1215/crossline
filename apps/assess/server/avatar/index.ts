@@ -32,10 +32,13 @@ export const CONCURRENCY = Math.max(1, Number(process.env.ASSESS_IMAGE_CONCURREN
  */
 export const MAX_PENDING = 60;
 /**
- * One call to the model, download included. Seedream's larger models take 30–60 s for a 1024×1536 edit alone (measured 2026-10-16:
- * 39 s), but three at once from the Singapore server all ran past two minutes, twice each — slow, not failed — so the limit is five.
+ * One call to the model, download included. Seedream answers a 1024×1536 edit in 25–40 s and the download takes a second or two, but
+ * now and then a call hangs: three at once on 2026-10-16 answered after 27 s, after 293 s, and not within 300 s — whose retry then
+ * answered in 24 s. So a call is cut off at 100 s and tried again (`ATTEMPTS`), rather than waited on.
  */
-export const CALL_TIMEOUT_MS = 300_000;
+export const CALL_TIMEOUT_MS = 100_000;
+/** Calls within one run, the first included, for what a wait can fix (a hung call, a rate limit, an overload); each takes a budget slot. */
+export const ATTEMPTS = 3;
 /** A figure still `queued`/`drawing` this long after it was last queued was lost to a restart: show the fallback. */
 export const STALE_AFTER_MS = 30 * 60_000;
 /** After a failure a wait can fix (a timeout, an overload, the network), the person's next visit this long after it draws again. */
@@ -160,18 +163,20 @@ async function draw(provider: ImageProvider, result: StoredResult): Promise<void
     setAvatarState(result.id, "drawing");
     const reference = fs.readFileSync(templateImagePath(result.code, templateVariant(result.appearance.presentation, result.id)));
     const input = { reference, prompt: avatarPrompt(result.appearance), seed: seedFor(result.id) };
-    let image: Buffer;
-    callStarted = Date.now();
-    try {
-      image = await withTimeout((signal) => provider.edit({ ...input, signal, timing }));
-    } catch (error) {
-      // One retry, only for what a wait can fix (rate limit, overload), and only if today's budget still has a slot for it.
-      if (!(error instanceof ProviderError) || !error.retryable || !takeSlot(dailyLimit(), current().now())) throw error;
-      await current().sleep(backoffMs(error));
-      attempts = 2;
+    let image: Buffer | undefined;
+    for (;;) {
       timing = {};
       callStarted = Date.now();
-      image = await withTimeout((signal) => provider.edit({ ...input, signal, timing }));
+      try {
+        image = await withTimeout((signal) => provider.edit({ ...input, signal, timing }));
+        break;
+      } catch (error) {
+        // Again only for what a wait can fix, and only if today's budget still has a slot for it.
+        if (attempts >= ATTEMPTS || !(error instanceof ProviderError) || !error.retryable || !takeSlot(dailyLimit(), current().now())) throw error;
+        console.warn(JSON.stringify({ event: "avatar.retrying", resultId: result.id, attempt: attempts, reason: failureReason(error), ...phaseLog(callStarted, timing) }));
+        await current().sleep(backoffMs(error));
+        attempts += 1;
+      }
     }
     // The poster renderer reads PNG and JPEG only: a WebP figure would show on the page and never on the poster.
     const type = imageType(image);

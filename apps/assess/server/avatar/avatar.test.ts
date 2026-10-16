@@ -161,13 +161,13 @@ describe("drawing", () => {
     expect(states()).toEqual(["queued", "drawing", "template"]);
   });
 
-  test("a second overload after the retry gives up on the template", async () => {
-    const provider = new FakeImageProvider([new ProviderError("IMAGE_API_503", 503), new ProviderError("IMAGE_API_503", 503)]);
+  test("an overload on every try of the run gives up on the template", async () => {
+    const provider = new FakeImageProvider([new ProviderError("IMAGE_API_503", 503), new ProviderError("IMAGE_API_503", 503), new ProviderError("IMAGE_API_503", 503)]);
     pipeline(provider);
     enqueueAvatar(storedResult());
     await avatarQueueIdle();
     expect(states()).toEqual(["queued", "drawing", "template"]);
-    expect(provider.edits).toHaveLength(2);
+    expect(provider.edits).toHaveLength(3);
   });
 });
 
@@ -188,7 +188,8 @@ describe("after a failure", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     vi.spyOn(console, "info").mockImplementation(() => {});
     let now = new Date("2026-10-16T09:00:00Z");
-    const provider = new FakeImageProvider([new ProviderError("IMAGE_TIMEOUT", 504), new ProviderError("IMAGE_TIMEOUT", 504), TINY_PNG]);
+    const provider = new FakeImageProvider([new ProviderError("IMAGE_TIMEOUT", 504), new ProviderError("IMAGE_TIMEOUT", 504),
+      new ProviderError("IMAGE_TIMEOUT", 504), TINY_PNG]);
     configureAvatarPipeline({ provider, sleep: vi.fn(async () => undefined), random: () => 0.5, now: () => now });
     const result = storedResult({ id: "res_slow" });
     enqueueAvatar(result);
@@ -202,8 +203,8 @@ describe("after a failure", () => {
     expect(retryAvatarIfDue(fallen)).toBe(false);
     await avatarQueueIdle();
     expect(states()).toEqual(["queued", "drawing", "template", "queued", "drawing", "ready"]);
-    // The first visit's run made its call and the one immediate retry; the later visit drew it.
-    expect(provider.edits).toHaveLength(3);
+    // The first visit's run made its call and two immediate tries more; the later visit drew it.
+    expect(provider.edits).toHaveLength(4);
 
     vi.mocked(setAvatarState).mockClear();
     const refusing = new FakeImageProvider([new ProviderError("IMAGE_API_401: AuthenticationError", 401)]);
