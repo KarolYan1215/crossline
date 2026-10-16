@@ -1,4 +1,5 @@
 import { spansText, type DocBlock, type Span } from "./doc-blocks";
+import { tFor, type Locale, type Translate } from "../../lib/i18n";
 
 /**
  * What the assistant wrote, made fit for a person to read (the person's direction, 2026-10-15): no local paths, no hashes, no byte
@@ -37,11 +38,18 @@ export function namesFrom(texts: string[], docs: Array<{ sha256: string; fileNam
 export class Namer {
   readonly #names: Names;
   readonly #unknown = new Map<string, string>();
-  constructor(names: Names = {}) { this.#names = Object.fromEntries(Object.entries(names).map(([key, value]) => [key.toLowerCase(), value])); }
+  /** The language the labels this cleaning writes (「来源 1」, table headers, a table's one sentence) are in; Chinese by default. */
+  readonly locale: Locale | undefined;
+  readonly t: Translate;
+  constructor(names: Names = {}, locale?: Locale) {
+    this.#names = Object.fromEntries(Object.entries(names).map(([key, value]) => [key.toLowerCase(), value]));
+    this.locale = locale;
+    this.t = tFor(locale);
+  }
 
   #fallback(key: string): string {
     let label = this.#unknown.get(key);
-    if (!label) { label = `来源 ${this.#unknown.size + 1}`; this.#unknown.set(key, label); }
+    if (!label) { label = this.t("来源 {{n}}", { n: this.#unknown.size + 1 }); this.#unknown.set(key, label); }
     return label;
   }
 
@@ -54,7 +62,7 @@ export class Namer {
 
   /** A source code (`S01`): the file it stands for, else 「来源 1」 by its own number. */
   code(code: string): string {
-    return this.#names[code.toLowerCase()] ?? `来源 ${Number(code.slice(1))}`;
+    return this.#names[code.toLowerCase()] ?? this.t("来源 {{n}}", { n: Number(code.slice(1)) });
   }
 
   /** A bare hash: the file's name when it is one, else nothing (a checksum says nothing to a person). */
@@ -108,7 +116,8 @@ export function firstSentence(text: string, max = 80): string {
 
 const key = (header: string) => header.toLowerCase().replace(/[\s_\-()（）]/g, "");
 
-/** Header words a person reads, in Chinese. */
+/** Header words a person reads, in Chinese (translated where the table is built). Patterns match what the assistant wrote. */
+/* i18n-ignore-start */
 const HEADER_LABEL: Array<[RegExp, string]> = [
   [/^(filename|file|文件名?|文件名称|relativepath|path|filepath|原始路径|路径|uri|source|来源文件|matchedfiles)$/, "文件"],
   [/^(title|name|item|项|项目|名称|标题)$/, "名称"],
@@ -131,8 +140,10 @@ const PREFERRED_FILE = /^(filename|文件名|文件名称|file|文件)$/;
 /** Columns only the assistant's bookkeeping needs. */
 const TECH_COLUMN = /^(id|sourceid|来源编号|编号|candidatecategory|候选类别|extension|ext|扩展名|bytes|size|大小|filesize|sha256|sha-?256|hash|checksum|校验和?|modified(utc)?|mtime|modifiedtime|修改时间(utc)?|createdat|created|duplicategroup|重复组|error|errors|错误|priority|优先级|researchlink|研究关联|研究主线关联)$/;
 const STATUS_COLUMN = /^(status|accessstatus|state|状态|读取状态)$/;
+/* i18n-ignore-end */
 const TECH_VALUE = /^([0-9a-f]{16,}|\.[a-z0-9]{1,5}|\d+|\d{4}-\d{2}-\d{2}T[\d:.]+(?:Z|[+-]\d{2}:?\d{2})?|[A-Z]{1,4}\d{1,3}|[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+|P[0-3])$/;
 
+/** Compared as these Chinese words; translated where shown (`t(status)`). */
 export type Status = "可访问" | "缺" | "待核验";
 
 /** A status cell as one of three words, or nothing when it is not a status. */
@@ -144,8 +155,9 @@ export function statusOf(value: string): Status | undefined {
   return undefined;
 }
 
-const COUNT = ["零", "一", "两", "三", "四", "五", "六", "七", "八", "九", "十"];
-const count = (n: number) => (n <= 10 ? `${COUNT[n]}份` : `${n} 份`);
+// 「两份」: the Chinese count reads as words up to ten; English counts with digits and a plural.
+const COUNT = ["零", "一", "两", "三", "四", "五", "六", "七", "八", "九", "十"]; // i18n-ignore: Chinese numerals, used only when the page is Chinese
+const count = (n: number, namer: Namer) => namer.locale === "en" ? String(n) : n <= 10 ? namer.t("{{n}}份", { n: COUNT[n] }) : namer.t("{{n}} 份", { n });
 
 export type HumanTable = { kind: "table"; header: string[]; rows: string[][]; total: number } | { kind: "summary"; text: string };
 
@@ -177,23 +189,27 @@ export function humanTable(header: string[], rows: string[][], namer: Namer = ne
   if (fileColumn !== undefined && !others.length) {
     const files = rows.map((row) => cell(row, fileColumn)).filter(Boolean);
     const states = statusColumn === undefined ? [] : rows.map((row) => statusOf(row[statusColumn] ?? ""));
-    const listed = files.length && files.length <= 4 ? `：${files.join("、")}` : "";
-    if (states.length && states.every((state) => state === "可访问")) return { kind: "summary", text: `${count(files.length)}文件均可读取${listed}。` };
+    const t = namer.t;
+    const listed = files.length && files.length <= 4 ? t("：{{list}}", { list: files.join(t("、")) }) : "";
+    const fileCount = count(files.length, namer);
+    if (states.length && states.every((state) => state === "可访问")) return { kind: "summary", text: t("{{files}}文件均可读取{{listed}}。", { files: fileCount, count: files.length, listed }) };
     if (states.some(Boolean)) {
       const tally = (["可访问", "待核验", "缺"] as const).map((state) => [state, states.filter((item) => item === state).length] as const).filter(([, n]) => n);
-      return { kind: "summary", text: `${count(files.length)}文件${listed}；${tally.map(([state, n]) => `${state === "可访问" ? "可读取" : state === "缺" ? "缺" : "待核验"} ${n} 份`).join("，")}。` };
+      const said = tally.map(([state, n]) => state === "可访问" ? t("可读取 {{count}} 份", { count: n }) : state === "缺" ? t("缺 {{count}} 份", { count: n }) : t("待核验 {{count}} 份", { count: n }));
+      return { kind: "summary", text: t("{{files}}文件{{listed}}；{{tally}}。", { files: fileCount, count: files.length, listed, tally: said.join(t("，")) }) };
     }
-    return { kind: "summary", text: `${count(files.length)}文件${listed}。` };
+    return { kind: "summary", text: t("{{files}}文件{{listed}}。", { files: fileCount, count: files.length, listed }) };
   }
-  if (!kept.length) return { kind: "summary", text: `${rows.length} 行记录均为文件校验信息，不在此列出。` };
+  if (!kept.length) return { kind: "summary", text: namer.t("{{count}} 行记录均为文件校验信息，不在此列出。", { count: rows.length }) };
 
   const order = [...(fileColumn !== undefined ? [fileColumn] : []), ...kept.filter((column) => column !== fileColumn)].slice(0, max);
-  // A header the assistant already wrote in Chinese is kept as written; an English one is given its Chinese word.
+  // A header the assistant already wrote in Chinese is kept as written; an English one is given its word in the page's language.
   const label = (column: number) => {
     const raw = header[column] ?? "";
-    if (column === fileColumn) return "文件";
+    if (column === fileColumn) return namer.t("文件");
     if (/[一-鿿]/.test(raw)) return cleanText(raw, namer);
-    return HEADER_LABEL.find(([pattern]) => pattern.test(keys[column]!))?.[1] ?? cleanText(raw, namer);
+    const known = HEADER_LABEL.find(([pattern]) => pattern.test(keys[column]!))?.[1];
+    return known ? namer.t(known, { context: "column" }) : cleanText(raw, namer);
   };
   const out = rows.map((row) => order.map((column) => cell(row, column))).filter((row) => row.some(Boolean));
   return { kind: "table", header: order.map(label), rows: out, total: out.length };

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useT } from "../locale-context";
 
 const post = (path: string, body: unknown) => fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
   .then((response) => response.ok).catch(() => false);
@@ -10,13 +11,14 @@ const post = (path: string, body: unknown) => fetch(path, { method: "POST", head
  * rejected, an approved one can be revoked.
  */
 export function InsightActions({ eventId, status, candidateKey }: { eventId: string; status: string; candidateKey?: string | undefined }) {
+  const t = useT();
   const [message, setMessage] = useState("");
-  const act = async (path: string, body: unknown) => { if (await post(path, body)) location.reload(); else setMessage("未生效，请刷新后重试"); };
+  const act = async (path: string, body: unknown) => { if (await post(path, body)) location.reload(); else setMessage(t("未生效，请刷新后重试")); };
   return <span className="review-actions">
     {status === "candidate" && candidateKey && <>
-      <button type="button" onClick={() => void act("/api/permission-mode/approve", { key: candidateKey })}>批准</button>
-      <button type="button" onClick={() => void act("/api/permission-mode/reject", { key: candidateKey })}>拒绝</button></>}
-    {status === "approved" && <button type="button" onClick={() => void act("/api/permission-mode/revoke-insight", { eventId })}>撤销</button>}
+      <button type="button" onClick={() => void act("/api/permission-mode/approve", { key: candidateKey })}>{t("批准")}</button>
+      <button type="button" onClick={() => void act("/api/permission-mode/reject", { key: candidateKey })}>{t("拒绝")}</button></>}
+    {status === "approved" && <button type="button" onClick={() => void act("/api/permission-mode/revoke-insight", { eventId })}>{t("撤销")}</button>}
     {message && <span role="alert">{message}</span>}
   </span>;
 }

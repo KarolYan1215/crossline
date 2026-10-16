@@ -5,6 +5,8 @@ import { gateUntilReady } from "../../../lib/start-gate";
 import { getStore } from "../../../lib/crossline";
 import { MaterialViewer } from "../material-viewer";
 import { fileDigest } from "../material-digest";
+import { localeFor } from "../../../lib/locale";
+import { intlLocale, tFor } from "../../../lib/i18n";
 
 export const dynamic = "force-dynamic";
 
@@ -23,9 +25,11 @@ const ROUTES = [
 export default async function MaterialViewPage({ searchParams }: { searchParams: Promise<{ src?: string; name?: string; from?: string }> }) {
   const ctx = await requireSessionContext();
   gateUntilReady(ctx);
+  const locale = localeFor(ctx);
+  const t = tFor(locale);
   const { src = "", name = "", from } = await searchParams;
   if (!ROUTES.some((route) => route.test(src))) notFound();
-  const fileName = name.replace(/[\r\n]/g, " ").slice(0, 200) || "材料";
+  const fileName = name.replace(/[\r\n]/g, " ").slice(0, 200) || t("材料");
   const docId = ROUTES[0]!.exec(src)?.[1];
   const document = docId ? getStore().listSourceDocuments(ctx.workspaceId).find((item) => item.id === docId) : undefined;
   if (docId && !document) notFound();
@@ -33,13 +37,13 @@ export default async function MaterialViewPage({ searchParams }: { searchParams:
   const project = document?.projectId ? getStore().listProjects(ctx.workspaceId, { includeArchived: true }).find((item) => item.id === document.projectId)?.name : undefined;
   const back = from && /^\/workbench\/[A-Za-z0-9_-]{1,128}$/.test(from) ? from : undefined;
   const aside = digest && <div className="mt-digest">
-    <h2>这份材料</h2>
-    <p className="mt-digest-kind"><span className="tag">本人上传</span>
-      <small>{digest.kindLabel}{digest.characters ? ` · 约 ${digest.characters.toLocaleString("zh-CN")} 字` : ""}{project ? ` · ${project}` : ""}</small></p>
-    {digest.sections.length > 0 && <><h3>包含</h3><ul className="mt-digest-sections">{digest.sections.map((section) => <li key={section}>{section}</li>)}</ul></>}
+    <h2>{t("这份材料")}</h2>
+    <p className="mt-digest-kind"><span className="tag">{t("本人上传")}</span>
+      <small>{t(digest.kindLabel)}{digest.characters ? t(" · 约 {{chars}} 字", { chars: digest.characters.toLocaleString(intlLocale(locale)) }) : ""}{project ? ` · ${project}` : ""}</small></p>
+    {digest.sections.length > 0 && <><h3>{t("包含")}</h3><ul className="mt-digest-sections">{digest.sections.map((section) => <li key={section}>{section}</li>)}</ul></>}
   </div>;
-  return <SubpageShell active="任务" title={document?.fileName ?? fileName.split(/[\\/]/).pop() ?? fileName}>
-    {back && <p className="material-back"><a href={back}>← 回到任务</a></p>}
+  return <SubpageShell active={"任务"} title={document?.fileName ?? fileName.split(/[\\/]/).pop() ?? fileName}>
+    {back && <p className="material-back"><a href={back}>{t("← 回到任务")}</a></p>}
     <MaterialViewer src={src} name={document?.fileName ?? fileName} generated={!document} size="page" {...(aside ? { aside } : {})} />
   </SubpageShell>;
 }

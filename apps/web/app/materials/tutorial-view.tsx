@@ -5,6 +5,8 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Markdown } from "../ui/markdown";
 import { cleanText, firstSentence } from "./humanize";
 import { KIND_LABEL, buildTutorial, stepAnchor, tutorialAnchor, type Book } from "./tutorial-model";
+import { useT } from "../locale-context";
+import { withLink } from "../onboarding/rich-text";
 
 export type TutorialViewProps = {
   workOrderId: string;
@@ -30,6 +32,9 @@ type Loaded = (Status & { built: false }) | (Status & Book & { built: true });
 const STAGE: Record<string, string> = { designing: "设计步骤", researching: "查找资料", writing: "撰写教程与解析", assembling: "整理" };
 const KEPT: Record<string, string> = { full_text: "已存全文", summary_only: "链接与摘要", unverified: "未能自动核实" };
 
+/** 「见第 1、3 步」 / "See steps 1, 3": the translated sentence with the step links put where its `<a>` part is. */
+const seeSteps = (sentence: string, links: ReactNode[]) => withLink(sentence, () => <>{links}</>);
+
 /**
  * The task's tutorial as one reading page: a numbered section per step of the task (each linked to its step and back), a box with what
  * the step is for, how it counts as done and what is still missing, the guide itself, the materials for that step, the analysis of the
@@ -37,6 +42,7 @@ const KEPT: Record<string, string> = { full_text: "已存全文", summary_only: 
  * 生成教程 asks for one when there is none; while one is being built its progress shows, and a stopped build says why.
  */
 export function TutorialView({ workOrderId, building: preparing = false, canBuild = true, stepHref = (id) => `#${stepAnchor(id)}`, layout = "inline", currentStepId }: TutorialViewProps) {
+  const t = useT();
   const [state, setState] = useState<Loaded | undefined>();
   const [asked, setAsked] = useState(false);
   const [current, setCurrent] = useState(0);
@@ -90,21 +96,23 @@ export function TutorialView({ workOrderId, building: preparing = false, canBuil
     if (!response?.ok) setAsked(false);
     void look();
   };
-  if (!state) return <p className="muted" role="status">读取中…</p>;
+  if (!state) return <p className="muted" role="status">{t("读取中…")}</p>;
   const status = running
-    ? <p role="status" className="muted">正在生成教程：{state.progress ? `${STAGE[state.progress.stage] ?? state.progress.stage}（${state.progress.done}/${state.progress.total}）` : "排队中"}…</p>
-    : state.blocker ? <p role="status">上次未能生成：{state.blocker}</p> : null;
+    ? <p role="status" className="muted">{state.progress
+      ? t("正在生成教程：{{stage}}（{{done}}/{{total}}）…", { stage: STAGE[state.progress.stage] ? t(STAGE[state.progress.stage]!) : state.progress.stage, done: state.progress.done, total: state.progress.total })
+      : t("正在生成教程：排队中…")}</p>
+    : state.blocker ? <p role="status">{t("上次未能生成：{{reason}}", { reason: state.blocker })}</p> : null;
 
-  if (!state.built || !tutorial) return <section className="tutorial-view" aria-label="教程">
+  if (!state.built || !tutorial) return <section className="tutorial-view" aria-label={t("教程")}>
     {status}
-    {!running && <p className="muted">教程按该任务的步骤逐步写出：先读本人上传的课程文件，再联网查找资料，每份材料附针对本任务的解析。7 天内排有时间的任务会自动生成。</p>}
-    {!running && canBuild && <button type="button" className="primary-button" onClick={() => void generate()}>{state.blocker ? "重新生成" : "生成教程"}</button>}
+    {!running && <p className="muted">{t("教程按该任务的步骤逐步写出：先读本人上传的课程文件，再联网查找资料，每份材料附针对本任务的解析。")}{t("7 天内排有时间的任务会自动生成。")}</p>}
+    {!running && canBuild && <button type="button" className="primary-button" onClick={() => void generate()}>{state.blocker ? t("重新生成") : t("生成教程")}</button>}
   </section>;
 
   const fn = (n: number) => `tv-fn-${workOrderId}-${n}`;
   // In the table of contents the footnotes are on the reading page, so a mark links there.
   const footnoteHref = (n: number) => layout === "toc" ? `/materials/${encodeURIComponent(workOrderId)}#${fn(n)}` : `#${fn(n)}`;
-  const cite = (n: number, key: string) => <sup key={key} className="tv-cite"><a href={footnoteHref(n)} aria-label={`来源 ${n}`}>{n}</a></sup>;
+  const cite = (n: number, key: string) => <sup key={key} className="tv-cite"><a href={footnoteHref(n)} aria-label={t("来源 {{n}}", { n })}>{n}</a></sup>;
   const total = tutorial.sections.length;
   const materialHref = (index: number) => {
     const material = state.materials.find((item) => item.index === index);
@@ -115,19 +123,19 @@ export function TutorialView({ workOrderId, building: preparing = false, canBuil
   /** A section's body: what it is for and how it counts as done, what is missing, the guide, its materials, the analysis folded. */
   const body = (section: (typeof tutorial.sections)[number]) => <>
     {(section.goal || section.acceptance) && <dl className="tv-key">
-      {section.goal && <div><dt>目的</dt><dd className="gen">{section.goal}</dd></div>}
-      {section.acceptance && <div><dt>完成标准</dt><dd className="gen">{section.acceptance}</dd></div>}
+      {section.goal && <div><dt>{t("目的")}</dt><dd className="gen">{section.goal}</dd></div>}
+      {section.acceptance && <div><dt>{t("完成标准")}</dt><dd className="gen">{section.acceptance}</dd></div>}
     </dl>}
-    {section.missing.length > 0 && <div className="tv-missing" role="note"><b>需要补充</b><ul className="gen">{section.missing.map((item) => <li key={item}>{item}</li>)}</ul></div>}
-    {section.guide ? <Markdown className="gen long-form tv-guide" text={section.guide} cite={cite} /> : <p className="muted">该步骤没有写成教程。</p>}
-    {section.materials.length > 0 && <p className="tv-materials"><small>本步材料</small>{section.materials.map((index) => {
+    {section.missing.length > 0 && <div className="tv-missing" role="note"><b>{t("需要补充")}</b><ul className="gen">{section.missing.map((item) => <li key={item}>{item}</li>)}</ul></div>}
+    {section.guide ? <Markdown className="gen long-form tv-guide" text={section.guide} cite={cite} /> : <p className="muted">{t("该步骤没有写成教程。")}</p>}
+    {section.materials.length > 0 && <p className="tv-materials"><small>{t("本步材料")}</small>{section.materials.map((index) => {
       const material = state.materials.find((item) => item.index === index);
       return material ? <a key={index} href={materialHref(index)}>{cleanText(material.title)}</a> : null;
     })}</p>}
-    {section.analysis && <details className="advanced tv-analysis"><summary>资料解析</summary><Markdown className="gen long-form" text={section.analysis} cite={cite} /></details>}
+    {section.analysis && <details className="advanced tv-analysis"><summary>{t("资料解析")}</summary><Markdown className="gen long-form" text={section.analysis} cite={cite} /></details>}
   </>;
 
-  if (layout === "toc") return <section className="tutorial-view" data-layout="toc" aria-label="教程目录">
+  if (layout === "toc") return <section className="tutorial-view" data-layout="toc" aria-label={t("教程目录")}>
     {status && <div className="tv-toc-status">{status}</div>}
     <ol className="tv-toc-list">{tutorial.sections.map((section) => {
       const anchor = anchorOf(section);
@@ -138,61 +146,61 @@ export function TutorialView({ workOrderId, building: preparing = false, canBuil
           <span className="tv-num tv-num-big mono" aria-hidden="true">{section.number}</span>
           <span className="tv-toc-title">{section.title}</span>
           <span className="tv-toc-facts">
-            {currentStepId && section.stepId === currentStepId && <span className="tag">当前</span>}
-            {section.materials.length > 0 && <small className="mono">{section.materials.length} 份材料</small>}
+            {currentStepId && section.stepId === currentStepId && <span className="tag">{t("当前")}</span>}
+            {section.materials.length > 0 && <small className="mono">{t("{{count}} 份材料", { count: section.materials.length })}</small>}
           </span>
           {section.goal && <span className="tv-toc-goal gen">{firstSentence(section.goal)}</span>}
         </button>
         {expanded && <div className="tv-toc-body" id={`${anchor}-body`}>
-          <p className="tv-toc-links">{section.stepId && <a href={stepHref(section.stepId)}>回到步骤</a>}
-            <a href={`/materials/${encodeURIComponent(workOrderId)}#${anchor}`}>在阅读页打开</a></p>
+          <p className="tv-toc-links">{section.stepId && <a href={stepHref(section.stepId)}>{t("回到步骤")}</a>}
+            <a href={`/materials/${encodeURIComponent(workOrderId)}#${anchor}`}>{t("在阅读页打开")}</a></p>
           {body(section)}
         </div>}
       </li>;
     })}</ol>
   </section>;
 
-  return <section className="tutorial-view" data-layout={layout} aria-label="教程">
+  return <section className="tutorial-view" data-layout={layout} aria-label={t("教程")}>
     <header className="tv-head">
-      <div className="tv-progress" role="progressbar" aria-label="阅读进度" aria-valuemin={1} aria-valuemax={total} aria-valuenow={current + 1}
-        aria-valuetext={`第 ${current + 1} 步，共 ${total} 步`}>
+      <div className="tv-progress" role="progressbar" aria-label={t("阅读进度")} aria-valuemin={1} aria-valuemax={total} aria-valuenow={current + 1}
+        aria-valuetext={t("第 {{n}} 步，共 {{total}} 步", { n: current + 1, total })}>
         <span className="tv-progress-fill" style={{ width: `${total ? ((current + 1) / total) * 100 : 0}%` }} />
       </div>
-      <p className="tv-head-line"><span className="mono">第 {current + 1} / {total} 步</span>
+      <p className="tv-head-line"><span className="mono">{t("第 {{n}} / {{total}} 步", { n: current + 1, total })}</span>
         <span className="tv-head-title">{tutorial.sections[current]?.title}</span>
-        {status ?? (canBuild && !running && <button type="button" className="text-button" onClick={() => void generate()}>重新生成</button>)}</p>
+        {status ?? (canBuild && !running && <button type="button" className="text-button" onClick={() => void generate()}>{t("重新生成")}</button>)}</p>
     </header>
 
     <div className="tv-columns">
-      <nav className="tv-toc" aria-label="教程目录"><ol>{tutorial.sections.map((section, index) => <li key={section.nodeId} aria-current={index === current ? "step" : undefined}>
+      <nav className="tv-toc" aria-label={t("教程目录")}><ol>{tutorial.sections.map((section, index) => <li key={section.nodeId} aria-current={index === current ? "step" : undefined}>
         <a href={`#${anchorOf(section)}`}><span className="tv-num mono">{section.number}</span>{section.title}</a></li>)}</ol></nav>
 
       <div className="tv-text">
         {tutorial.overview && <Markdown className="gen long-form tv-overview" text={tutorial.overview} cite={cite} />}
-        {tutorial.assumptions.length > 0 && <details className="advanced tv-assumptions"><summary>所依据的假设（{tutorial.assumptions.length}）</summary>
+        {tutorial.assumptions.length > 0 && <details className="advanced tv-assumptions"><summary>{t("所依据的假设（{{count}}）", { count: tutorial.assumptions.length })}</summary>
           <ul className="gen">{tutorial.assumptions.map((item, index) => <li key={index}>{item}</li>)}</ul></details>}
 
         <ol className="tv-sections" ref={sectionsRef}>{tutorial.sections.map((section) => <li key={section.nodeId} id={anchorOf(section)} className="tv-section">
           <header className="tv-section-head">
             <span className="tv-num tv-num-big mono" aria-hidden="true">{section.number}</span>
             <h3>{section.title}</h3>
-            <span className="tag">{KIND_LABEL[section.kind] ?? section.kind}</span>
-            {section.stepId && <a className="tv-back" href={stepHref(section.stepId)}>回到步骤</a>}
+            <span className="tag">{KIND_LABEL[section.kind] ? t(KIND_LABEL[section.kind]!, { context: "step" }) : section.kind}</span>
+            {section.stepId && <a className="tv-back" href={stepHref(section.stepId)}>{t("回到步骤")}</a>}
           </header>
           {body(section)}
         </li>)}</ol>
 
         {/* The book's reference list is part of what is read, so it is reading content (long-form) like the sections above it. */}
-        {tutorial.footnotes.length > 0 && <section className="tv-footnotes long-form" aria-label="来源">
-          <h3>来源</h3>
+        {tutorial.footnotes.length > 0 && <section className="tv-footnotes long-form" aria-label={t("来源")}>
+          <h3>{t("来源")}</h3>
           <ol>{tutorial.footnotes.map((note) => <li key={note.n} id={fn(note.n)}>
             {note.href ? <a href={note.href} target="_blank" rel="noreferrer noopener">{cleanText(note.title)}</a> : <span>{cleanText(note.title)}</span>}
-            <small className="muted">{note.publisher || "网络"}{KEPT[note.kept] ? ` · ${KEPT[note.kept]}` : ""}</small>
-            {note.usedIn.length > 0 && <small>见第 {note.usedIn.map((number) => {
+            <small className="muted">{note.publisher || t("网络")}{KEPT[note.kept] ? ` · ${t(KEPT[note.kept]!)}` : ""}</small>
+            {note.usedIn.length > 0 && <small>{seeSteps(t("见第 <a></a> 步"), note.usedIn.map((number) => {
               const section = tutorial.sections[number - 1];
               return section ? <a key={number} href={`#${anchorOf(section)}`}>{number}</a> : null;
-            }).reduce<ReactNode[]>((all, link, index) => index ? [...all, "、", link] : [link], [])} 步</small>}
-            {note.material !== undefined && <a href={materialHref(note.material)}>解析</a>}
+            }).reduce<ReactNode[]>((all, link, index) => index ? [...all, t("、"), link] : [link], []))}</small>}
+            {note.material !== undefined && <a href={materialHref(note.material)}>{t("解析")}</a>}
           </li>)}</ol>
         </section>}
       </div>

@@ -4,6 +4,7 @@ import { requireSessionContext } from "../../../lib/access-guard";
 import { gateUntilReady } from "../../../lib/start-gate";
 import { getStore } from "../../../lib/crossline";
 import { TutorialStandalone } from "./tutorial-standalone";
+import { tOf } from "../../../lib/locale";
 
 export const dynamic = "force-dynamic";
 
@@ -15,8 +16,9 @@ export default async function TutorialPage({ params }: { params: Promise<{ id: s
   if (!/^[a-zA-Z0-9_-]{1,128}$/.test(id)) notFound();
   const order = getStore().getWorkOrder(ctx.workspaceId, id);
   if (!order) notFound();
-  return <SubpageShell active="任务" title={`教程：${order.intent}`}>
-    <p className="material-back"><a href={`/workbench/${encodeURIComponent(id)}`}>← 回到任务</a></p>
+  const t = tOf(ctx);
+  return <SubpageShell active={"任务"} title={t("教程：{{task}}", { task: order.intent })}>
+    <p className="material-back"><a href={`/workbench/${encodeURIComponent(id)}`}>{t("← 回到任务")}</a></p>
     <TutorialStandalone workOrderId={id} building={order.state === "preparing"} />
   </SubpageShell>;
 }

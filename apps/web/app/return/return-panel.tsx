@@ -7,10 +7,12 @@ import { CardView, Conversation } from "../chat/conversation";
 import { OpenerCard } from "../chat/opener-card";
 import { Markdown } from "../ui/markdown";
 import { Clamp } from "../ui/clamp";
+import { tFor, type Locale, type Translate } from "../../lib/i18n";
+import { useLocale, useT } from "../locale-context";
 
 type Cleaned = { orders: Array<{ id: string; title: string }>; milestones: Array<{ id: string; title: string }>; opId?: string | undefined };
 const md = (day: string) => `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}`;
-const duration = (minutes: number) => minutes >= 60 ? `${Math.round(minutes / 6) / 10} 小时` : `${minutes} 分钟`;
+const duration = (minutes: number, t: Translate) => minutes >= 60 ? t("{{h}} 小时", { h: Math.round(minutes / 6) / 10 }) : t("{{m}} 分钟", { m: minutes });
 /** Fired when something on the page may have settled steps (an answer here, a card carried out from a box). */
 const CHANGED = "crossline:pending-changed";
 
@@ -21,24 +23,27 @@ const DUE_SHOWN = 5;
 
 /** The deadlines under the summary: one line each, the name cut to one line, the day beside it. Exported for its test. */
 export function DueSoon({ view }: { view: ReturnView }) {
+  const t = useT();
   const due = dueSoon(view);
   if (!due.length) return null;
-  return <ul className="return-due" aria-label="未来 7 天到期">
+  return <ul className="return-due" aria-label={t("未来 7 天到期")}>
     {due.slice(0, DUE_SHOWN).map((item) => <li key={`${item.title}:${item.deadline}`}><Clamp lines={1} text={item.title} /><small>{md(item.deadline)}</small></li>)}
-    {due.length > DUE_SHOWN && <li className="return-due-more"><small>另 {due.length - DUE_SHOWN} 项</small></li>}
+    {due.length > DUE_SHOWN && <li className="return-due-more"><small>{t("另 {{count}} 项", { count: due.length - DUE_SHOWN })}</small></li>}
   </ul>;
 }
 
 /** What the page says the person has been away for and what happened; exported for its test. */
-export function absenceSummary(view: ReturnView): string[] {
+export function absenceSummary(view: ReturnView, locale?: Locale): string[] {
+  const t = tFor(locale);
   // The page can be opened at any time, not only after days away: under a day it says how many hours, never a rounded-up 「1 天」.
-  const lines = [view.hoursAway >= 24 ? `离开了 ${view.daysAway} 天（上次操作 ${md(view.sinceDay)}）。`
-    : `上次操作在${view.hoursAway >= 1 ? ` ${view.hoursAway} 小时前` : "不到 1 小时前"}（${md(view.sinceDay)}）。`];
-  if (view.items.length) lines.push(`期间有 ${view.items.length} 个步骤排了时间或到了截止，下面逐项点一下，或用自己的话说。`);
+  const lines = [view.hoursAway >= 24 ? t("离开了 {{count}} 天（上次操作 {{day}}）。", { count: view.daysAway, day: md(view.sinceDay) })
+    : view.hoursAway >= 1 ? t("上次操作在 {{count}} 小时前（{{day}}）。", { count: view.hoursAway, day: md(view.sinceDay) })
+    : t("上次操作在不到 1 小时前（{{day}}）。", { day: md(view.sinceDay) })];
+  if (view.items.length) lines.push(t("期间有 {{count}} 个步骤排了时间或到了截止，下面逐项点一下，或用自己的话说。", { count: view.items.length }));
   // The count and the first day in a line; the items themselves are a short list below it (`DueSoon`), not one run-on sentence.
-  if (view.happened.deadlinesSoon.length) lines.push(`未来 7 天有 ${view.happened.deadlinesSoon.length} 项到期，最早 ${md(dueSoon(view)[0]!.deadline)}：`);
-  if (view.happened.assistantDone) lines.push(`助手期间做完 ${view.happened.assistantDone} 项准备。`);
-  if (view.happened.calendarChanges) lines.push(`日历变化 ${view.happened.calendarChanges} 次，排程已跟着调整。`);
+  if (view.happened.deadlinesSoon.length) lines.push(t("未来 7 天有 {{count}} 项到期，最早 {{day}}：", { count: view.happened.deadlinesSoon.length, day: md(dueSoon(view)[0]!.deadline) }));
+  if (view.happened.assistantDone) lines.push(t("助手期间做完 {{count}} 项准备。", { count: view.happened.assistantDone }));
+  if (view.happened.calendarChanges) lines.push(t("日历变化 {{count}} 次，排程已跟着调整。", { count: view.happened.calendarChanges }));
   return lines;
 }
 
@@ -47,6 +52,7 @@ export function absenceSummary(view: ReturnView): string[] {
  * task and step, and comes back as a card of actions they confirm — the same card and the same 执行 as everywhere else.
  */
 function ItemSay({ item, onChanged }: { item: ReturnItem; onChanged: () => void }) {
+  const t = useT();
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [reply, setReply] = useState<MessageView | undefined>();
@@ -57,14 +63,14 @@ function ItemSay({ item, onChanged }: { item: ReturnItem; onChanged: () => void 
     setBusy(true); setStatus("");
     const answer = await sayTurn(item, text.trim());
     setBusy(false);
-    if (!answer) { setStatus("未能发送，请重试。"); return; }
+    if (!answer) { setStatus(t("未能发送，请重试。")); return; }
     setReply(answer); setText("");
   };
   return <div className="return-say">
     <form className="return-say-form" onSubmit={(event) => void submit(event)}>
-      <input value={text} maxLength={1000} disabled={busy} placeholder="说说这一步做到哪了" aria-label={`说说「${item.step || item.title}」做到哪了`}
+      <input value={text} maxLength={1000} disabled={busy} placeholder={t("说说这一步做到哪了")} aria-label={t("说说「{{step}}」做到哪了", { step: item.step || item.title })}
         onChange={(event) => setText(event.target.value)} />
-      <button type="submit" className="secondary-button" disabled={busy || !text.trim()}>{busy ? "正在理解…" : "发送"}</button>
+      <button type="submit" className="secondary-button" disabled={busy || !text.trim()}>{busy ? t("正在理解…") : t("发送")}</button>
     </form>
     {status && <small role="status">{status}</small>}
     {reply && <Reply key={reply.id} reply={reply} onChanged={onChanged} />}
@@ -100,30 +106,31 @@ export type PartialAnswer = { level?: ProgressLevelId; note?: string; stepIds: s
  * ticked. Sending with nothing chosen is allowed; the 小帮手 then asks once, at an idle moment, how far it got. Exported for its test.
  */
 export function PartialForm({ item, busy, onSend }: { item: ReturnItem; busy: boolean; onSend: (answer: PartialAnswer) => void }) {
+  const t = useT();
   const [level, setLevel] = useState<ProgressLevelId | undefined>();
   const [where, setWhere] = useState("");
   const [ticked, setTicked] = useState<string[]>([]);
   const others = item.steps.filter((step) => step.id !== item.stepId);
   const empty = !level && !where.trim() && !ticked.length;
-  return <div className="return-partial" role="group" aria-label={`${item.step || item.title} 做到哪了`}>
-    <div className="return-row" role="radiogroup" aria-label="大约做了多少">
+  return <div className="return-partial" role="group" aria-label={t("{{step}} 做到哪了", { step: item.step || item.title })}>
+    <div className="return-row" role="radiogroup" aria-label={t("大约做了多少")}>
       {PROGRESS_LEVELS.map((option) => <button key={option.id} type="button" role="radio" className="secondary-button return-level" aria-checked={level === option.id}
-        disabled={busy} onClick={() => setLevel(level === option.id ? undefined : option.id)}><Quarters quarter={option.quarter} />{option.label}</button>)}
+        disabled={busy} onClick={() => setLevel(level === option.id ? undefined : option.id)}><Quarters quarter={option.quarter} />{t(option.label)}</button>)}
     </div>
-    <label className="return-where"><span>做到哪了</span>
-      <input value={where} maxLength={1000} disabled={busy} placeholder="例如：推完了第 1 题，第 2 题写了一半" onChange={(event) => setWhere(event.target.value)} /></label>
+    <label className="return-where"><span>{t("做到哪了")}</span>
+      <input value={where} maxLength={1000} disabled={busy} placeholder={t("例如：推完了第 1 题，第 2 题写了一半")} onChange={(event) => setWhere(event.target.value)} /></label>
     {others.some((step) => !step.done) && <details className="return-steps">
-      <summary>其他已做完的步骤</summary>
+      <summary>{t("其他已做完的步骤")}</summary>
       {others.map((step) => <label key={step.id}>
         <input type="checkbox" checked={step.done || ticked.includes(step.id)} disabled={busy || step.done}
           onChange={() => setTicked(ticked.includes(step.id) ? ticked.filter((id) => id !== step.id) : [...ticked, step.id])} />
-        {step.title}{step.done ? "（已完成）" : ""}</label>)}
+        {step.title}{step.done ? t("（已完成）") : ""}</label>)}
     </details>}
     <div className="return-row">
       <button type="button" className="secondary-button" disabled={busy}
         onClick={() => onSend({ ...(level ? { level } : {}), ...(where.trim() ? { note: where.trim() } : {}), stepIds: ticked })}>
-        {busy ? "记下中…" : empty ? "先记下，之后再说" : "记下"}</button>
-      {empty && <small className="return-hint">不选也可以记下，小帮手之后会在空闲时问一次做到哪了。</small>}
+        {busy ? t("记下中…") : empty ? t("先记下，之后再说") : t("记下")}</button>
+      {empty && <small className="return-hint">{t("不选也可以记下，小帮手之后会在空闲时问一次做到哪了。")}</small>}
     </div>
   </div>;
 }
@@ -131,6 +138,7 @@ export function PartialForm({ item, busy, onSend }: { item: ReturnItem; busy: bo
 type Settle = { item: ReturnItem; verdict: ReturnVerdict; stepIds?: string[] | undefined; reply?: MessageView | undefined; label?: string | undefined };
 
 function Item({ item, onDone }: { item: ReturnItem; onDone: (settle: Settle) => void }) {
+  const t = useT();
   const [open, setOpen] = useState<"done" | "partial" | undefined>();
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
@@ -142,40 +150,40 @@ function Item({ item, onDone }: { item: ReturnItem; onDone: (settle: Settle) => 
     const body = await response?.json().catch(() => undefined) as { ok?: boolean; code?: string } | undefined;
     setBusy(false);
     if (body?.ok) onDone({ item, verdict, stepIds: extra.stepIds, ...settle });
-    else setStatus(body?.code === "MATERIALS_PREPARING" ? "这项任务的材料还在准备，稍后再标完成。" : "未能记下，请重试。");
+    else setStatus(body?.code === "MATERIALS_PREPARING" ? t("这项任务的材料还在准备，稍后再标完成。") : t("未能记下，请重试。"));
   };
   // Words about where it got to go to the box first, so the card that comes back can be confirmed under the settled item.
   const sendPartial = async (answer: PartialAnswer) => {
     let reply: MessageView | undefined;
     if (answer.note) {
       setBusy(true); setStatus("");
-      reply = await sayTurn(item, `做到哪了：${answer.note}`);
-      if (!reply) { setBusy(false); setStatus("未能发送，请重试。"); return; }
+      reply = await sayTurn(item, t("做到哪了：{{note}}", { note: answer.note }));
+      if (!reply) { setBusy(false); setStatus(t("未能发送，请重试。")); return; }
     }
     const level = PROGRESS_LEVELS.find((option) => option.id === answer.level);
     const empty = !answer.level && !answer.note && !answer.stepIds.length;
     await send("partial", { stepIds: answer.stepIds, ...(answer.level ? { level: answer.level } : {}), ...(answer.note ? { note: answer.note } : {}) },
-      { reply, label: empty ? "已记下部分完成，之后再问做到哪" : level ? `已记下：${level.label}（${level.quarter}/4）` : undefined });
+      { reply, label: empty ? t("已记下部分完成，之后再问做到哪") : level ? t("已记下：{{level}}（{{quarter}}/4）", { level: t(level.label), quarter: level.quarter }) : undefined });
   };
   const openSteps = item.steps.filter((step) => !step.done);
   const name = item.step ? `${item.title} · ${item.step}` : item.title;
   return <li className="return-item" data-line={item.line}>
     <div className="return-item-head"><b>{item.title}{item.step && <> · <span className="return-step">{item.step}</span></>}</b>
-      <small>{item.lineLabel}{item.plannedDays.length ? ` · 排在 ${item.plannedDays.map(md).join("、")}` : ""}{item.dueDay ? ` · 截止 ${md(item.dueDay)}` : ""}
-        {item.step && item.lastStep && item.steps.length > 1 ? " · 最后一步" : ""}</small></div>
-    <div className="return-row" role="group" aria-label={`${name} 的进展`}>
-      <button type="button" className="secondary-button" aria-pressed={open === "done"} disabled={busy} onClick={() => setOpen(open === "done" ? undefined : "done")}>完成</button>
+      <small>{item.lineLabel}{item.plannedDays.length ? t(" · 排在 {{days}}", { days: item.plannedDays.map(md).join(t("、")) }) : ""}{item.dueDay ? t(" · 截止 {{day}}", { day: md(item.dueDay) }) : ""}
+        {item.step && item.lastStep && item.steps.length > 1 ? t(" · 最后一步") : ""}</small></div>
+    <div className="return-row" role="group" aria-label={t("{{name}} 的进展", { name })}>
+      <button type="button" className="secondary-button" aria-pressed={open === "done"} disabled={busy} onClick={() => setOpen(open === "done" ? undefined : "done")}>{t("完成")}</button>
       {(item.stepId || openSteps.length > 1) && <button type="button" className="secondary-button" aria-pressed={open === "partial"} disabled={busy}
-        onClick={() => setOpen(open === "partial" ? undefined : "partial")}>做了一部分</button>}
-      <button type="button" className="secondary-button" disabled={busy} onClick={() => void send("rolled")}>没做，顺延</button>
-      <button type="button" className="secondary-button" disabled={busy} onClick={() => void send("dropped")}>不做了</button>
+        onClick={() => setOpen(open === "partial" ? undefined : "partial")}>{t("做了一部分")}</button>}
+      <button type="button" className="secondary-button" disabled={busy} onClick={() => void send("rolled")}>{t("没做，顺延")}</button>
+      <button type="button" className="secondary-button" disabled={busy} onClick={() => void send("dropped")}>{t("不做了")}</button>
     </div>
-    {open === "done" && <div className="return-row" role="group" aria-label="用了多久">
-      <span>用了多久：</span>
+    {open === "done" && <div className="return-row" role="group" aria-label={t("用了多久")}>
+      <span>{t("用了多久：")}</span>
       {[["约等于估时", item.p50Minutes], ["一半", Math.round(item.p50Minutes / 2)], ["一倍半", Math.round(item.p50Minutes * 1.5)], ["两倍", item.p50Minutes * 2]]
         .map(([label, minutes]) => <button key={label} type="button" className="secondary-button" disabled={busy}
-          onClick={() => void send("done", { minutes: minutes as number })}>{label}（{duration(minutes as number)}）</button>)}
-      <button type="button" className="secondary-button" disabled={busy} onClick={() => void send("done")}>不记得</button>
+          onClick={() => void send("done", { minutes: minutes as number })}>{t("{{label}}（{{duration}}）", { label: t(label as string), duration: duration(minutes as number, t) })}</button>)}
+      <button type="button" className="secondary-button" disabled={busy} onClick={() => void send("done")}>{t("不记得")}</button>
     </div>}
     {open === "partial" && <PartialForm item={item} busy={busy} onSend={(answer) => void sendPartial(answer)} />}
     {status && <p role="status">{status}</p>}
@@ -200,6 +208,8 @@ export function settledBy(items: ReturnItem[], item: ReturnItem, verdict: Return
 }
 
 export function ReturnPanel({ view, cleaned, opener }: { view: ReturnView; cleaned?: Cleaned | undefined; opener?: MessageView | undefined }) {
+  const t = useT();
+  const locale = useLocale();
   // The page's list as it was opened, kept in place as items get settled here or by a card carried out from a box.
   const [items, setItems] = useState(view.items);
   const [open, setOpen] = useState(() => new Set(view.items.map((item) => item.key)));
@@ -250,37 +260,37 @@ export function ReturnPanel({ view, cleaned, opener }: { view: ReturnView; clean
     location.href = "/";
   };
   return <div className="return-page">
-    {openerMessage?.card && <section className="return-card return-opener" aria-label="今天">
+    {openerMessage?.card && <section className="return-card return-opener" aria-label={t("今天")}>
       <CardView messageId={openerMessage.id} card={openerMessage.card} choices={null} onUpdate={setOpenerMessage}
         {...(openerMessage.opener ? { body: <OpenerCard opener={openerMessage.opener} /> } : {})} />
     </section>}
-    <section className="return-card" aria-label="离开期间">
-      {absenceSummary(view).map((line) => <p key={line}>{line}</p>)}
+    <section className="return-card" aria-label={t("离开期间")}>
+      {absenceSummary(view, locale).map((line) => <p key={line}>{line}</p>)}
       <DueSoon view={view} />
       {cleaned && (cleaned.orders.length + cleaned.milestones.length) > 0 && <p className="return-cleaned">
-        {undone ? "已恢复刚才归档的项目。" : `已归档超过 14 天无人处理的 ${cleaned.orders.length} 个任务提议、${cleaned.milestones.length} 个里程碑草稿（可在「已丢弃」与主线页恢复）。`}
-        {!undone && cleaned.opId && <button type="button" className="secondary-button" onClick={() => void undo()}>撤销</button>}</p>}
+        {undone ? t("已恢复刚才归档的项目。") : t("已归档超过 14 天无人处理的 {{orders}} 个任务提议、{{milestones}} 个里程碑草稿（可在「已丢弃」与主线页恢复）。", { orders: cleaned.orders.length, milestones: cleaned.milestones.length })}
+        {!undone && cleaned.opId && <button type="button" className="secondary-button" onClick={() => void undo()}>{t("撤销")}</button>}</p>}
     </section>
-    {items.length > 0 && <section className="return-card" aria-label="期间的步骤">
-      <h2>期间的步骤（还有 {left.length} 项）</h2>
+    {items.length > 0 && <section className="return-card" aria-label={t("期间的步骤")}>
+      <h2>{t("期间的步骤（还有 {{count}} 项）", { count: left.length })}</h2>
       {left.length > 1 && <div className="return-row"><button type="button" className="secondary-button" disabled={rolling}
-        onClick={() => void rollRest()}>{rolling ? "顺延中…" : `其余 ${left.length} 项都没做，顺延`}</button></div>}
+        onClick={() => void rollRest()}>{rolling ? t("顺延中…") : t("其余 {{count}} 项都没做，顺延", { count: left.length })}</button></div>}
       <ul className="return-list">
         {items.map((item) => settled[item.key] || !open.has(item.key)
           ? <li key={item.key} className="return-item return-item-settled" data-line={item.line}><b>{item.title}{item.step ? ` · ${item.step}` : ""}</b>
-            <small>{settled[item.key] ?? "已更新"}</small>
+            <small>{settled[item.key] ? t(settled[item.key]!) : t("已更新")}</small>
             {replies[item.key] && <Reply reply={replies[item.key]!} onChanged={() => window.dispatchEvent(new Event(CHANGED))} />}</li>
           : <Item key={item.key} item={item} onDone={answered} />)}
       </ul>
     </section>}
-    <section className="return-card" aria-label="其他进展">
-      <h2>还有别的进展？</h2>
-      <p className="return-hint">直接说，例如「作业 2 周一交了」；输入 @ 可指定任务、材料、里程碑或长期目标，系统整理成要确认的改动。</p>
-      <Conversation variant="task" page={{ kind: "return", entityId: "" }} placeholder="说说这几天的进展，可用 @ 指定" />
+    <section className="return-card" aria-label={t("其他进展")}>
+      <h2>{t("还有别的进展？")}</h2>
+      <p className="return-hint">{t("直接说，例如「作业 2 周一交了」；输入 @ 可指定任务、材料、里程碑或长期目标，系统整理成要确认的改动。")}</p>
+      <Conversation variant="task" page={{ kind: "return", entityId: "" }} placeholder={t("说说这几天的进展，可用 @ 指定")} />
     </section>
     <div className="return-actions">
-      <a className="primary-button" href="/">{left.length ? "先到这里，去今日" : "去今日"}</a>
-      <button type="button" className="secondary-button" onClick={() => void skip()}>这次先跳过</button>
+      <a className="primary-button" href="/">{left.length ? t("先到这里，去今日") : t("去今日")}</a>
+      <button type="button" className="secondary-button" onClick={() => void skip()}>{t("这次先跳过")}</button>
     </div>
   </div>;
 }

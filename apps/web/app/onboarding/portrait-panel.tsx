@@ -1,5 +1,6 @@
 "use client";
 
+import { useT } from "../locale-context";
 
 export type ProfileModelView = {
   portrait: string; coreConflict: string; problem: string; gravity: string[]; designable: string[]; reframes: Array<{ fallacy: string; reframe: string }>;
@@ -15,8 +16,9 @@ export const STAGES: Array<[string, string]> = [["orientation", "开场与规则
 
 /** Where the interview is, as a row of stages. */
 export function StageBar({ stage, line }: { stage: string; line?: string | undefined }) {
-  if (line) return <ol className="ob-stages"><li data-state="current">{line} · 细节</li></ol>;
+  const t = useT();
+  if (line) return <ol className="ob-stages"><li data-state="current">{t("{{line}} · 细节", { line })}</li></ol>;
   const at = Math.max(0, STAGES.findIndex(([id]) => id === stage));
-  return <ol className="ob-stages" aria-label="访谈阶段">{STAGES.map(([id, label], index) =>
-    <li key={id} data-state={index < at ? "done" : index === at ? "current" : "next"}>{label}</li>)}</ol>;
+  return <ol className="ob-stages" aria-label={t("访谈阶段")}>{STAGES.map(([id, label], index) =>
+    <li key={id} data-state={index < at ? "done" : index === at ? "current" : "next"}>{t(label)}</li>)}</ol>;
 }

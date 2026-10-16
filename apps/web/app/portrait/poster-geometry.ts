@@ -1,5 +1,6 @@
 import { CHRONOTYPE_LABEL, ENERGY_CATEGORIES, SCHWARTZ_VALUES, TYPE_AXES, TYPE_GROUPS, TYPE_TABLE, type EnergyRhythm, type PortraitReport } from "@crossline/core";
 import { INTERFACE_SERIF_STRINGS } from "../ui/serif-strings";
+import { tFor, type Locale } from "../../lib/i18n";
 
 /**
  * The poster's layout as pure functions (decided 2026-10-12, after the real report's render: percentages over captions, labels on top of
@@ -56,14 +57,18 @@ function spreadSameSpot<T extends { x: number; y: number }>(points: T[], r: numb
   return out;
 }
 
+/** The legend group for activities an older report left without a category. */
+export const UNCATEGORISED = "未分类";
+
 export type EnergyLegendEntry = PortraitReport["energy"]["map"][number] & { number: number };
 /**
  * The energy map's numbering: grouped by the six fixed categories (an older report's uncategorised activities last), the most loved and
  * skilled first within a group, numbered once so the dot and its legend line carry the same number.
  */
 export function energyLegend(map: PortraitReport["energy"]["map"]): Array<{ category: string; entries: EnergyLegendEntry[] }> {
-  const order = [...ENERGY_CATEGORIES as readonly string[], "未分类"];
-  const categoryOf = (item: PortraitReport["energy"]["map"][number]) => (item.category && order.includes(item.category) ? item.category : "未分类");
+  // The categories are stored values (Chinese in both languages); they are translated where the legend is drawn.
+  const order = [...ENERGY_CATEGORIES as readonly string[], UNCATEGORISED];
+  const categoryOf = (item: PortraitReport["energy"]["map"][number]) => (item.category && order.includes(item.category) ? item.category : UNCATEGORISED);
   const sum = (item: PortraitReport["energy"]["map"][number]) => (item.loveScore ?? 0) + (item.skillScore ?? 0);
   let number = 0;
   return order.map((category) => ({ category, entries: map.filter((item) => categoryOf(item) === category).sort((a, b) => sum(b) - sum(a))
@@ -84,17 +89,22 @@ export const hourClock = (hours: number) => { const m = ((Math.round(hours * 60)
  * The 「精力节律」 page's four readings under the curve, each with what it rests on; a reading the record cannot give yet says what it
  * needs instead of a number. Social jetlag keeps its sign: positive is later on free days.
  */
-export function rhythmStats(rhythm: EnergyRhythm): Array<{ title: string; value: string; detail: string }> {
+export function rhythmStats(rhythm: EnergyRhythm, locale?: Locale): Array<{ title: string; value: string; detail: string }> {
+  const t = tFor(locale);
   const chrono = rhythm.chronotype;
   const sjl = chrono ? Math.round(chrono.sjlRel * 10) / 10 : null;
+  const pending = t("待定");
+  const twoEach = t("需要工作日与休息日各两晚睡眠记录");
   return [
-    { title: "最佳时段", value: `${hourClock(rhythm.peak.start)}–${hourClock(rhythm.peak.end)}`, detail: "模型曲线最高的连续 3 小时" },
-    chrono?.chronotype ? { title: "早晚型", value: CHRONOTYPE_LABEL[chrono.chronotype], detail: `休息日校正睡眠中点 ${hourClock(chrono.msfSc!)}` }
-      : { title: "早晚型", value: "待定", detail: "需要工作日与休息日各两晚睡眠记录" },
-    sjl === null ? { title: "社会时差", value: "待定", detail: "需要工作日与休息日各两晚睡眠记录" }
-      : { title: "社会时差", value: `${sjl > 0 ? "+" : ""}${sjl.toFixed(1)} 小时`, detail: sjl === 0 ? "休息日与工作日睡眠中点相同" : `休息日睡眠中点比工作日${sjl > 0 ? "晚" : "早"}` },
-    rhythm.debt.nights >= 3 ? { title: "睡眠债", value: rhythm.debt.perNight > 0 ? `每晚少 ${rhythm.debt.perNight.toFixed(1)} 小时` : "无", detail: `近两周 ${rhythm.debt.nights} 晚加权，最近一晚占 15%` }
-      : { title: "睡眠债", value: "待定", detail: "需要至少 3 晚睡眠记录" }
+    { title: t("最佳时段"), value: `${hourClock(rhythm.peak.start)}–${hourClock(rhythm.peak.end)}`, detail: t("模型曲线最高的连续 3 小时") },
+    chrono?.chronotype ? { title: t("早晚型"), value: t(CHRONOTYPE_LABEL[chrono.chronotype]), detail: t("休息日校正睡眠中点 {{time}}", { time: hourClock(chrono.msfSc!) }) }
+      : { title: t("早晚型"), value: pending, detail: twoEach },
+    sjl === null ? { title: t("社会时差"), value: pending, detail: twoEach }
+      : { title: t("社会时差"), value: t("{{hours}} 小时", { hours: `${sjl > 0 ? "+" : ""}${sjl.toFixed(1)}` }),
+        detail: sjl === 0 ? t("休息日与工作日睡眠中点相同") : sjl > 0 ? t("休息日睡眠中点比工作日晚") : t("休息日睡眠中点比工作日早") },
+    rhythm.debt.nights >= 3 ? { title: t("睡眠债"), value: rhythm.debt.perNight > 0 ? t("每晚少 {{hours}} 小时", { hours: rhythm.debt.perNight.toFixed(1) }) : t("无"),
+      detail: t("近两周 {{nights}} 晚加权，最近一晚占 15%", { nights: rhythm.debt.nights }) }
+      : { title: t("睡眠债"), value: pending, detail: t("需要至少 3 晚睡眠记录") }
   ];
 }
 

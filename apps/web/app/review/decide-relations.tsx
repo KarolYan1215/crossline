@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { RELATION_KIND_LABEL } from "@crossline/core";
+import { useT } from "../locale-context";
 
 export type CandidateDetail = {
   id: string;
@@ -23,6 +24,7 @@ const kindLabel: Record<string, string> = RELATION_KIND_LABEL;
  * behind a disclosure.
  */
 export function DecideRelations({ candidates }: { candidates: CandidateDetail[] }) {
+  const t = useT();
   const [selected, setSelected] = useState<string[]>([]);
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
@@ -40,7 +42,7 @@ export function DecideRelations({ candidates }: { candidates: CandidateDetail[] 
       });
       const result = await response.json().catch(() => ({})) as { ok?: boolean; decided?: string[]; skipped?: string[]; code?: string };
       if (!response.ok || !result.ok) {
-        setStatus(result.code === "NO_RELATIONS_SELECTED" ? "先选中至少一条候选关系。" : "未生效，请刷新查看真实状态。");
+        setStatus(result.code === "NO_RELATIONS_SELECTED" ? t("先选中至少一条候选关系。") : t("未生效，请刷新查看真实状态。"));
         setBusy(false);
         return;
       }
@@ -48,18 +50,18 @@ export function DecideRelations({ candidates }: { candidates: CandidateDetail[] 
       // already decided, or has no evidence to approve on, did not move and saying otherwise would be
       // telling the person their click did something it did not.
       if (result.skipped?.length) {
-        setStatus(`已处理 ${result.decided?.length ?? 0} 条；${result.skipped.length} 条未变（已被决定过，或没有证据不能批准）。`);
+        setStatus(t("已处理 {{decided}} 条；{{skipped}} 条未变（已被决定过，或没有证据不能批准）。", { decided: result.decided?.length ?? 0, skipped: result.skipped.length }));
         setBusy(false);
         return;
       }
       location.reload();
     } catch {
-      setStatus("网络不可用，未生效。");
+      setStatus(t("网络不可用，未生效。"));
       setBusy(false);
     }
   };
 
-  if (!candidates.length) return <p className="review-empty">目前没有候选关系。</p>;
+  if (!candidates.length) return <p className="review-empty">{t("目前没有候选关系。")}</p>;
 
   return <div className="decide-relations">
     <ul className="review-list">{candidates.map((candidate) => <li key={candidate.id} data-highlighted={candidate.highlighted ? "1" : undefined}>
@@ -68,32 +70,32 @@ export function DecideRelations({ candidates }: { candidates: CandidateDetail[] 
         <b>{candidate.fromTitle} → {candidate.toTitle}</b>
       </label>
       <small className="relation-kind">
-        {kindLabel[candidate.kind] ?? candidate.kind}
+        {kindLabel[candidate.kind] ? t(kindLabel[candidate.kind]!) : candidate.kind}
         {candidate.fromIdentityId && candidate.toIdentityId ? ` · ${candidate.fromIdentityId} → ${candidate.toIdentityId}` : ""}
       </small>
       {candidate.explanation
         ? <p className="relation-claim">{candidate.explanation}</p>
-        : <p className="relation-claim relation-claim-missing">这条关系没有记录主张，无法审阅。下一次周复盘会补上依据；在此之前它只是占位，可以先搁置。</p>}
-      {candidate.refutedWhen && <p className="relation-falsifier">反证条件：{candidate.refutedWhen}</p>}
+        : <p className="relation-claim relation-claim-missing">{t("这条关系没有记录主张，无法审阅。下一次周复盘会补上依据；在此之前它只是占位，可以先搁置。")}</p>}
+      {candidate.refutedWhen && <p className="relation-falsifier">{t("反证条件：{{when}}", { when: candidate.refutedWhen })}</p>}
       {candidate.evidence.length === 0
-        ? <small className="relation-evidence-missing">没有来源，不能批准（先勾选并“搁置”，或等周复盘补来源）。</small>
+        ? <small className="relation-evidence-missing">{t("没有来源，不能批准（先勾选并“搁置”，或等周复盘补来源）。")}</small>
         : <ul className="relation-evidence">{candidate.evidence.map((item) => <li key={item.uri}>
           <a href={item.uri} target="_blank" rel="noreferrer noopener">{item.source || item.uri}</a>
-          <span> · 读取于 {item.observedAt.slice(0, 10)}</span>
+          <span>{t(" · 读取于 {{day}}", { day: item.observedAt.slice(0, 10) })}</span>
         </li>)}</ul>}
       <small className="relation-facts">
-        目标停滞 {candidate.targetStalledDays} 天 ·
-        {candidate.reusesExistingArtifact ? " 复用已有产物" : " 需要新产出"} ·
-        反例 {candidate.counterexampleCount} 条 ·
-        {candidate.costMinutes === null ? " 成本未观测" : ` 已花 ${candidate.costMinutes} 分钟`}
+        {[t("目标停滞 {{days}} 天", { days: candidate.targetStalledDays }),
+          candidate.reusesExistingArtifact ? t("复用已有产物") : t("需要新产出"),
+          t("反例 {{count}} 条", { count: candidate.counterexampleCount }),
+          candidate.costMinutes === null ? t("成本未观测") : t("已花 {{minutes}} 分钟", { minutes: candidate.costMinutes })].join(" · ")}
       </small>
     </li>)}</ul>
     <div className="relation-actions">
       <button type="button" disabled={busy || !selected.length} onClick={() => void decide("approved")}>
-        批准选中 {selected.length} 条
+        {t("批准选中 {{count}} 条", { count: selected.length })}
       </button>
       <button type="button" className="secondary-button" disabled={busy || !selected.length} onClick={() => void decide("archived")}>
-        搁置选中
+        {t("搁置选中")}
       </button>
       {status && <em role="alert">{status}</em>}
     </div>
