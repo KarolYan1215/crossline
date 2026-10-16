@@ -31,7 +31,7 @@
 - 拒绝顺序：跨站 `Origin`（`REJECTED`）→ 每个 IP 每小时 120 次（`RATE_LIMITED`；国内移动网络和宿舍大量共用出口 IP，挡脚本靠每邮箱每天 5 次、40 秒下限和蜜罐，带 `Retry-After`）→ 蜜罐字段 `website` 非空（`REJECTED`）→ `startedAt` 不是数字（`REJECTED`）→ 32 题有缺或不在 1–5（`QUIZ_INCOMPLETE`）→ 外貌不在枚举里、多了字段或备注去掉不可见字符后超过 40 字（`APPEARANCE_INVALID`）→ 邮箱格式或长度（≤254）不对（`EMAIL_INVALID`）→ 署名超过 12 字（`NICKNAME_INVALID`）→ 距 `startedAt` 不到 40 秒（`TOO_FAST`）→ 邀请令牌无效或已过期（`INVITE_NOT_FOUND`，页面可去掉邀请重新提交，答案不丢）→ 用发起人自己的邮箱回答自己的邀请（`ALREADY_PAIRED`，409）→ 同一邮箱每天 5 次（`RATE_LIMITED`）→ 同一邮箱已测满 3 次（`EMAIL_LIMIT_REACHED`，409；服务器把最新一份结果的链接重新发到这个邮箱，回答里不带任何令牌，因为填邮箱的人不一定是邮箱主人）。
 - 署名和外貌备注会去掉控制字符、零宽字符、双向控制符等不可见字符；只由这些字符组成的署名按空处理（页面显示「你的朋友」）。
 - **答案不保存**：只存四轴得分和类型代码，比 §6 列的「只收必要数据」更少一步。
-- 形象：创建结果后调用 W5 的 `enqueueAvatar`，包在 try/catch 里——形象出错不影响提交，页面先显示类型模板。
+- 形象：创建结果后调用 `enqueueAvatar`，包在 try/catch 里——形象出错不影响提交（见「形象生成」）。
 - **一个邮箱最多测 3 次，只保留最新一次**（2026-10-15 本人定）：每次提交成功后，删除这个邮箱之前的全部结果，规则和「删除我的结果」相同（结果、两边的双人卡、形象文件、海报缓存一起删，旧的邀请链接失效）。次数记在 `email_tests`，只存邮箱的 HMAC（与 `avatar_draws` 同一把 `draw-key`），删除结果不归还次数，记录 90 天后清除。迁移 4 之前留下的结果没有计数。
 - **同一邀请、同一邮箱再答一次**：按上一条替换掉第一次的结果和双人卡，发起人只在第一次收到通知。
 - 发起人关掉了邮件勾选时，不发配对通知；双人卡仍会出现在他的结果页（最多 20 张，新的在前）。
@@ -96,6 +96,27 @@
 - 用一个专门的发信子域名（如 `mail.<域名>`），配齐 SPF、DKIM、DMARC（先 `p=none` 观察）；QQ 邮箱对 DMARC 不通过的邮件会直接拒收[^qq]。
 - 新域名从小量开始：Resend 给出的新域名计划是第 1 天 150 封、第 2 天 250、第 3 天 400、第 4 天 700、第 5 天 1000、第 6 天 1500、第 7 天 2000，退信率保持在 4% 以下、投诉率 0.08% 以下，超了就放慢[^resend]。阿里云没有公开的预热表，按控制台的额度逐步提高。小范围邀请内测的量远低于这些数字，正常发送就是预热。
 - 上线前用真实的 QQ、163 账号各收一封，看邮件头里的 SPF/DKIM/DMARC 结果和是否进了垃圾箱。
+
+## 形象生成
+
+结果创建时开始画（`server/avatar/`）：以类型模板为底图、按外貌选项改，队列同时 2 张，等待超过 40 张的直接用兜底；每个邮箱 3 张（`avatar_draws`），每天总数 `ASSESS_IMAGE_DAILY_LIMIT`（默认 300，重试也占名额）；一次调用（含下载）最多 120 秒，限流或过载重试一次。
+
+| 变量 | 说明 |
+|---|---|
+| `ASSESS_IMAGE_API_KEY` | 画图服务的 key；不设则不画，所有人用兜底 |
+| `ASSESS_IMAGE_PROVIDER` | `ark`（火山方舟 Seedream）或 `siliconflow`；**不设按 `siliconflow`**，写成别的名字则不画。用方舟的 key 时必须设 `ark`，否则 key 被发到硅基流动，每次 401 |
+| `ASSESS_IMAGE_MODEL` | 模型名；方舟默认 `doubao-seedream-4-0-250828`，硅基流动默认 Kontext [dev] |
+| `ASSESS_IMAGE_BASE_URL` | 可选，只接受 https |
+| `ASSESS_IMAGE_DAILY_LIMIT` | 可选，每天最多调用几次 |
+
+服务器日志里的事件（`docker logs assess`，每行一个 JSON）：
+
+- `avatar.provider`：进程第一次用到画图时打印一次，写明选中的服务和模型，或者为什么没有（没设 key、`ASSESS_IMAGE_PROVIDER` 写错、没设时提醒默认是硅基流动）。**看不到形象时先看这一行。**
+- `avatar.skipped`：没画就用了兜底，`reason` 是 `no_provider` / `email_limit`（这个邮箱 90 天内已画满 3 张，反复自测最容易碰到）/ `daily_budget` / `queue_full`。
+- `avatar.failed`：调用失败，带 HTTP 状态和服务返回的前 200 字（401 多半是 key 和服务对不上）；画出来的是 WebP 也算失败（`IMAGE_FORMAT_UNSUPPORTED`），因为海报只认 PNG 和 JPEG。
+- `avatar.ready`：画好，带用时和重试次数。2026-10-16 实测方舟 `doubao-seedream-5-0-pro` 一张 1024×1536 约 39 秒。
+
+页面怎么换上形象：结果页和双人卡页在形象「排队 / 正在画」时每 5 秒问一次，某次请求失败只跳过这一次（以前失败一次就停）；海报、长图、双人卡的地址带 `?f=<形象标记>`（等待 `w`、兜底 `t`、画好 `d<文件时间>`），形象一变地址就变，浏览器不会继续用缓存的旧海报（以前刷新页面会在 5 分钟内看到旧海报）。
 
 ## 构建
 
@@ -188,7 +209,7 @@ scp crossline-assess.tar root@<主机IP>:/srv/assess/
    | `ASSESS_MAIL_FROM` | 如 `Crossline 测评 <noreply@mail.example.com>`，必须是已验证的发信地址 |
    | `ASSESS_TEMPLATES_DIR` | 可选，类型模板目录（W5），默认用镜像里自带的 |
    | `ASSESS_LINK_SECRET` | 可选，与 App 共享的密钥，开启 `/api/link`（见「与 App 的结果连接」）；不设则接口不存在 |
-   | W5 的形象生成变量 | 见 W5 的说明（模型 key、每日预算） |
+   | `ASSESS_IMAGE_*` | 形象生成，见上文「形象生成」 |
 
 3. 运行（端口只绑定本机）：
 

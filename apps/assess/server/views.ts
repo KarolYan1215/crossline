@@ -11,9 +11,21 @@ import { betaRequested, getResultById, listPairs, recordedScores, type StoredPai
  * token appears only in the person's own view and mails. No view carries the email, the answers or the appearance.
  */
 
-export const posterUrl = (result: StoredResult) => `/api/poster/${result.inviteToken}/type.png`;
-export const longUrl = (result: StoredResult) => `/api/poster/${result.inviteToken}/long.png`;
-export const pairCardUrl = (pair: StoredPair) => `/api/poster/pair/${pair.pairToken}.png`;
+/**
+ * A short tag that changes whenever what a poster shows as the figure changes (waiting, drawn — and which drawing — or the fallback). It
+ * goes on every poster address, so a browser that cached a poster drawn while the figure was still being made asks again instead of
+ * keeping it for its five minutes: a reload after the figure arrived used to show the old poster. The poster routes ignore it; the
+ * poster cache on disk is keyed by the figure's bytes anyway.
+ */
+export function figureTag(avatar: AvatarStatus): string {
+  if (avatar.state === "ready") return `d${/[?&]v=(\d+)/.exec(avatar.url)?.[1] ?? "0"}`;
+  return avatar.state === "template" ? "t" : "w";
+}
+
+export const posterUrl = (result: StoredResult, avatar = avatarOf(result)) => `/api/poster/${result.inviteToken}/type.png?f=${figureTag(avatar)}`;
+export const longUrl = (result: StoredResult, avatar = avatarOf(result)) => `/api/poster/${result.inviteToken}/long.png?f=${figureTag(avatar)}`;
+export const pairCardUrl = (pair: StoredPair, a: AvatarStatus, b: AvatarStatus) =>
+  `/api/poster/pair/${pair.pairToken}.png?f=${figureTag(a)}.${figureTag(b)}`;
 export const inviteUrl = (result: StoredResult) => `${baseUrl()}/t/${result.inviteToken}`;
 
 /** The figure as the avatar pipeline reports it, or the type's template when the pipeline cannot answer. */
@@ -35,8 +47,9 @@ export function resultView(result: StoredResult): ResultView {
     return [{ pairToken: pair.pairToken, nickname: other.nickname, code: other.code, name: TYPE_TABLE[other.code]?.name ?? other.code,
       relation: pairRelation(result.code, other.code).primary.name }];
   });
+  const avatar = avatarOf(result);
   return {
-    nickname: result.nickname, type: typeOf(result), avatar: avatarOf(result), posterUrl: posterUrl(result), longUrl: longUrl(result),
+    nickname: result.nickname, type: typeOf(result), avatar, posterUrl: posterUrl(result, avatar), longUrl: longUrl(result, avatar),
     inviteUrl: inviteUrl(result), sendEmail: result.sendEmail, mailOn: mailConfigured(),
     betaRequested: betaRequested(result.id), appUrl: appUrl(), pairs, expiresAt: result.expiresAt
   };
@@ -47,12 +60,13 @@ export const inviteView = (result: StoredResult): InviteView => ({ nickname: res
 /** The pair card: `a` is the inviter, `b` the person who answered the invitation. */
 export function pairView(pair: StoredPair, a: StoredResult, b: StoredResult): PairView {
   const relation = pairRelation(a.code, b.code);
+  const figures = { a: avatarOf(a), b: avatarOf(b) };
   return {
-    a: { nickname: a.nickname, type: typeOf(a), avatar: avatarOf(a) },
-    b: { nickname: b.nickname, type: typeOf(b), avatar: avatarOf(b) },
+    a: { nickname: a.nickname, type: typeOf(a), avatar: figures.a },
+    b: { nickname: b.nickname, type: typeOf(b), avatar: figures.b },
     primary: relation.primary,
     ...(relation.secondary ? { secondary: relation.secondary } : {}),
     sharedLines: relation.sharedLines,
-    cardUrl: pairCardUrl(pair)
+    cardUrl: pairCardUrl(pair, figures.a, figures.b)
   };
 }

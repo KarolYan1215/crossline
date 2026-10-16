@@ -5,7 +5,7 @@ import { api, type ClientErrorCode } from "../lib/api-client";
 import type { PairView, RelationView } from "../lib/contract";
 import { LAST_RESULT_KEY, errorMessage } from "../lib/flow";
 import { SavableImage, smallFigure } from "./poster";
-import { DISCLAIMER } from "./result-screen";
+import { AVATAR_POLL_MS, DISCLAIMER, isDrawing } from "./result-screen";
 import { readStored } from "./storage";
 import { TypeHeading, groupStyle } from "./type-summary";
 
@@ -27,6 +27,18 @@ export function PairScreen({ token }: { token: string }) {
     void api.getPair(token).then((result) => { if (live) setState(result.ok ? { kind: "ready", pair: result.data } : { kind: "error", code: result.code }); });
     return () => { live = false; };
   }, [token]);
+
+  // Someone who answered an invitation lands here seconds after submitting, while their own figure is still being drawn: keep asking
+  // until both figures are settled, and the card's address (which carries both figures' tags) changes with them.
+  const drawing = state.kind === "ready" && (isDrawing(state.pair.a.avatar) || isDrawing(state.pair.b.avatar));
+  useEffect(() => {
+    if (!drawing) return;
+    let live = true;
+    const timer = setInterval(() => {
+      void api.getPair(token).then((result) => { if (live && result.ok) setState({ kind: "ready", pair: result.data }); });
+    }, AVATAR_POLL_MS);
+    return () => { live = false; clearInterval(timer); };
+  }, [drawing, token]);
 
   if (state.kind === "loading") return <main className="as-main"><p className="as-note" role="status">正在读取双人卡…</p></main>;
   if (state.kind === "error") return <main className="as-main"><section className="as-sheet">

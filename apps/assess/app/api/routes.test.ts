@@ -179,7 +179,7 @@ test("the result view: the public type, the template figure when the pipeline ca
   expect(view).toMatchObject({
     nickname: "阿甲", sendEmail: true,
     avatar: { state: "template", url: `/api/avatar/${inviter.inviteToken}.png` },
-    posterUrl: `/api/poster/${inviter.inviteToken}/type.png`, longUrl: `/api/poster/${inviter.inviteToken}/long.png`,
+    posterUrl: `/api/poster/${inviter.inviteToken}/type.png?f=t`, longUrl: `/api/poster/${inviter.inviteToken}/long.png?f=t`,
     inviteUrl: `https://assess.example/t/${inviter.inviteToken}`
   });
   expect(view.type.code).toBe("GEMA");
@@ -201,7 +201,7 @@ test("the invitation and the pair card show only public parts, addressed by thei
   const pair = await (await getPair(get(`/api/pairs/${invited.pairToken}`), params(invited.pairToken!))).json() as PairView;
   expect(pair.a.nickname).toBe("阿甲");
   expect(pair.b.nickname).toBe("阿乙");
-  expect(pair.cardUrl).toBe(`/api/poster/pair/${invited.pairToken}.png`);
+  expect(pair.cardUrl).toBe(`/api/poster/pair/${invited.pairToken}.png?f=t.t`);
   expect(pair.primary.tips).toHaveLength(2);
 
   const resultBody = JSON.stringify(await (await getResult(get(`/api/results/${inviter.resultToken}`), params(inviter.resultToken))).json());

@@ -6,7 +6,7 @@ import { avatarsDrawnFor, setAvatarState } from "../store";
 import { budgetDay, budgetFile, spentToday, takeSlot } from "./budget";
 import { FakeImageProvider, TINY_PNG } from "./fake-provider";
 import { avatarImagePath, avatarQueueIdle, avatarStatus, configureAvatarPipeline, enqueueAvatar, templateImagePath } from "./index";
-import { ProviderError, downloadImage, providerFromEnv } from "./provider";
+import { ProviderError, downloadImage, providerFromEnv, providerSummary } from "./provider";
 import { storedResult } from "./testing";
 import { templateVariant } from "./templates";
 
@@ -34,7 +34,20 @@ const pipeline = (provider: FakeImageProvider | null, sleep = vi.fn(async () => 
 };
 
 describe("settling on the template at once", () => {
+  test("the provider follows ASSESS_IMAGE_PROVIDER; a name it does not know gives none instead of sending the key elsewhere", () => {
+    expect(providerFromEnv({ ASSESS_IMAGE_API_KEY: "k", ASSESS_IMAGE_PROVIDER: "ark", ASSESS_IMAGE_MODEL: "doubao-seedream-x" })?.label).toBe("ark:doubao-seedream-x");
+    expect(providerFromEnv({ ASSESS_IMAGE_API_KEY: "k", ASSESS_IMAGE_PROVIDER: " Ark " })?.label).toBe("ark:doubao-seedream-4-0-250828");
+    expect(providerFromEnv({ ASSESS_IMAGE_API_KEY: "k" })?.label).toBe("siliconflow:black-forest-labs/FLUX.1-Kontext-dev");
+    expect(providerFromEnv({ ASSESS_IMAGE_API_KEY: "k", ASSESS_IMAGE_PROVIDER: "volcengine" })).toBeNull();
+    expect(providerSummary({})).toEqual({ provider: "none", reason: expect.stringContaining("ASSESS_IMAGE_API_KEY") });
+    expect(providerSummary({ ASSESS_IMAGE_API_KEY: "k", ASSESS_IMAGE_PROVIDER: "volcengine" })).toEqual({ provider: "none", reason: expect.stringContaining("volcengine") });
+    expect(providerSummary({ ASSESS_IMAGE_API_KEY: "k" })).toEqual({ provider: "siliconflow", model: "black-forest-labs/FLUX.1-Kontext-dev", reason: expect.stringContaining("ark") });
+    expect(providerSummary({ ASSESS_IMAGE_API_KEY: "secret-key", ASSESS_IMAGE_PROVIDER: "ark", ASSESS_IMAGE_MODEL: "m" })).toEqual({ provider: "ark", model: "m" });
+    expect(JSON.stringify(providerSummary({ ASSESS_IMAGE_API_KEY: "secret-key" }))).not.toContain("secret-key");
+  });
+
   test("with no image key there is no provider, and the figure is the template", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
     expect(providerFromEnv({})).toBeNull();
     pipeline(null);
     enqueueAvatar(storedResult());
@@ -105,6 +118,35 @@ describe("drawing", () => {
     expect(provider.edits[0]!.seed).toBe(provider.edits[1]!.seed);
     expect(sleep).toHaveBeenCalledWith(3_500);
     expect(spentToday()).toBe(2);
+  });
+
+  test("every fallback says why in the server log: skipped with its reason, or failed with the provider's answer", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const events = () => warn.mock.calls.map((call) => JSON.parse(String(call[0])) as Record<string, unknown>);
+    pipeline(null);
+    enqueueAvatar(storedResult({ id: "res_none" }));
+    pipeline(new FakeImageProvider());
+    vi.mocked(avatarsDrawnFor).mockReturnValue(3);
+    enqueueAvatar(storedResult({ id: "res_full" }));
+    vi.mocked(avatarsDrawnFor).mockReturnValue(0);
+    pipeline(new FakeImageProvider([new ProviderError("IMAGE_API_401: bad key", 401)]));
+    enqueueAvatar(storedResult({ id: "res_401" }));
+    await avatarQueueIdle();
+    expect(events()).toEqual([
+      { event: "avatar.skipped", resultId: "res_none", reason: "no_provider" },
+      { event: "avatar.skipped", resultId: "res_full", reason: "email_limit" },
+      expect.objectContaining({ event: "avatar.failed", resultId: "res_401", status: 401, reason: "IMAGE_API_401: bad key", attempts: 1 })
+    ]);
+    warn.mockRestore();
+  });
+
+  test("an image the poster cannot print (WebP) is refused rather than shown on the page and missing from the poster", async () => {
+    const webp = Buffer.concat([Buffer.from("RIFF"), Buffer.alloc(4), Buffer.from("WEBPVP8 ")]);
+    pipeline(new FakeImageProvider([webp]));
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    enqueueAvatar(storedResult());
+    await avatarQueueIdle();
+    expect(states()).toEqual(["queued", "drawing", "template"]);
   });
 
   test("a second overload after the retry gives up on the template", async () => {

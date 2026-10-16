@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, type ClientErrorCode } from "../lib/api-client";
 import type { AvatarStatus, ResultView } from "../lib/contract";
 import { LAST_RESULT_KEY, errorMessage } from "../lib/flow";
-import { SavableImage, withVersion } from "./poster";
+import { SavableImage } from "./poster";
 import { CopyLink, ShareInvite } from "./share-invite";
 import { withName } from "../lib/names";
 import { readStored, writeStored } from "./storage";
@@ -28,7 +28,6 @@ type State = { kind: "loading" } | { kind: "error"; code: ClientErrorCode } | { 
 /** The person's own result (`?delete=1` opens on the deletion confirmation): poster, the type as text, the figure's progress, the invitation, pair cards, and deleting it all. */
 export function ResultScreen({ token }: { token: string }) {
   const [state, setState] = useState<State>({ kind: "loading" });
-  const [version, setVersion] = useState(0);
   const [wasDrawing, setWasDrawing] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const scrollToDelete = useRef(false);
@@ -57,17 +56,18 @@ export function ResultScreen({ token }: { token: string }) {
     document.getElementById("as-delete")?.scrollIntoView({ block: "center" });
   }, [state.kind]);
 
+  // While the figure is being drawn, ask again every few seconds. A failed ask (a network blip, a rate limit) is skipped, not the end of
+  // asking: the old one-shot timer re-armed only after a successful answer, so one failure froze the page on the waiting state. The
+  // poster addresses carry the figure's tag (server/views.ts), so the new answer brings a new poster with it.
   const drawing = state.kind === "ready" && isDrawing(state.view.avatar);
   useEffect(() => {
     if (!drawing) return;
-    const timer = setTimeout(async () => {
-      const result = await api.getResult(token);
-      if (!result.ok) return;
-      if (!isDrawing(result.data.avatar)) setVersion(Date.now());
-      setState({ kind: "ready", view: result.data });
+    let live = true;
+    const timer = setInterval(() => {
+      void api.getResult(token).then((result) => { if (live && result.ok) setState({ kind: "ready", view: result.data }); });
     }, AVATAR_POLL_MS);
-    return () => clearTimeout(timer);
-  }, [drawing, token, state]);
+    return () => { live = false; clearInterval(timer); };
+  }, [drawing, token]);
 
   const remove = async () => {
     setDeleting({ busy: true, error: null });
@@ -106,8 +106,8 @@ export function ResultScreen({ token }: { token: string }) {
     <p className="as-note" aria-live="polite">{isDrawing(view.avatar) ? "你的专属形象正在画，画好会自动换到海报上（约 1 分钟）。"
       : view.avatar.state === "template" ? `形象用的是${type.name}的基础角色。` : wasDrawing ? "专属形象已换上。" : ""}</p>
     {!mailed && <p className="as-done">{view.sendEmail ? "邮件暂时发不出去" : "你选了不发邮件"}：请收藏本页，或到页面底部复制结果链接，否则换了设备就找不回来。</p>}
-    <SavableImage src={withVersion(view.posterUrl, version)} alt={`${type.name} ${type.code} 的海报`} width={1080} height={1440}
-      downloadName={`crossline-${type.code}.png`} extra={{ src: withVersion(view.longUrl, version), label: "长图", downloadName: `crossline-${type.code}-长图.png` }} />
+    <SavableImage src={view.posterUrl} alt={`${type.name} ${type.code} 的海报`} width={1080} height={1440}
+      downloadName={`crossline-${type.code}.png`} extra={{ src: view.longUrl, label: "长图", downloadName: `crossline-${type.code}-长图.png` }} />
 
     <section className="as-block">
       <h2>拉朋友测，看你们是什么关系</h2>
