@@ -1,6 +1,6 @@
 import "server-only";
 import { profileGaps, type AccessContext } from "@crossline/core";
-import { latestFileDates, listAgentTasks } from "@crossline/db";
+import { interviewLocale, latestFileDates, listAgentTasks, readLocale } from "@crossline/db";
 import { appNow, getStore } from "./crossline";
 import { countProposedTargets } from "./targets";
 import { countAssistantPending } from "./agent";
@@ -85,7 +85,9 @@ function computePending(ctx: AccessContext): PendingCounts {
       identities: identityLines(ctx).map((pack) => ({ id: pack.id, label: pack.label })),
       projects: store.listProjects(ctx.workspaceId).map(({ id, identityId, name }) => ({ id, identityId, name })),
       facts: store.listProfileFacts(ctx.workspaceId),
-      undated: latestFileDates(store, ctx.workspaceId).undated
+      undated: latestFileDates(store, ctx.workspaceId).undated,
+      // The interview's language, which its own questions are asked in (only counted here).
+      locale: interviewLocale(store, ctx.workspaceId) ?? readLocale(store, ctx.workspaceId)
     }).filter((gap) => gap.blocking).length
   };
   // Candidate relations and research proposals are judged in the weekly review (`/review`), not one by one as they arrive (the

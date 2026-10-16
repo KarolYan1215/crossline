@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState, type ReactNode } from "react";
-import { MILESTONE_STATE_ORDER, milestoneMarks, timelineMarks, timelineSpan, type CapacityWeek, type EstimatePoint, type GoalRow, type Investment, type MilestoneMark, type MilestoneState } from "../../lib/plan-stats";
+import { MILESTONE_STATE_ORDER, bottleneckText, milestoneMarks, timelineMarks, timelineSpan, type CapacityWeek, type EstimatePoint, type GoalRow, type Investment, type MilestoneMark, type MilestoneState } from "../../lib/plan-stats";
 import { Ring } from "../ui/charts";
 import { LineTag, Tag } from "../ui/tag";
 import { bands, dayAt, heatLevel, hours, labelEvery, linear, linearTicks, logDomain, logScale, md, minuteLabel, monthTicks, packLabels, scatterMargins, textWidth } from "./chart-geometry";
@@ -189,7 +189,7 @@ function markDetail(mark: MilestoneMark, weeks: number, t: Translate): string {
       : t("通常 {{usual}} 完成，保守情景在 {{count}} 周内未完成", { usual: row.p50Day, count: weeks })) : "",
     row.remainingP50Minutes ? t("剩余 {{n}} 小时", { n: hours(row.remainingP50Minutes) }) : "", row.slackDays !== null ? t("余量 {{count}} 天", { count: row.slackDays }) : "",
     row.status === "no_tasks" && row.proposals ? t("{{count}} 项提案待批准", { count: row.proposals }) : "",
-    row.libraryDay ? t("{{day}} 起排入日程", { day: row.libraryDay }) : "", row.bottleneck ?? "",
+    row.libraryDay ? t("{{day}} 起排入日程", { day: row.libraryDay }) : "", row.bottleneck ? bottleneckText(row.bottleneck, t) : "",
     mark.states.length ? t("状态：{{states}}", { states: mark.states.map((state) => t(STATE_LABEL[state])).join(t("、")) }) : t("状态：按计划")].filter(Boolean).join("\n");
 }
 

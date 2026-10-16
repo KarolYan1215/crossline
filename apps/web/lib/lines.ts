@@ -2,6 +2,7 @@ import "server-only";
 import { checkGoalParts, composeGoal, type AccessContext } from "@crossline/core";
 import { LINE_PALETTE, LINE_SETTING, MAX_HARD_LINES, defaultIdentityPacks, freeLineColor, identityPacksFor, newLineId, readLineSpecs, type IdentityPack, type LineSpec } from "@crossline/identity-packs";
 import { getStore } from "./crossline";
+import { localeFor } from "./locale";
 
 /** Every pack this workspace works with: its lines (built-in or its own) and the capacity pack. */
 export function linePacks(ctx: AccessContext, options: { includeArchived?: boolean } = {}): IdentityPack[] {
@@ -58,16 +59,18 @@ export function updateLine(ctx: AccessContext, id: string, change: { label?: str
   let goals = change.goals !== undefined ? cleanGoals(change.goals) : change.goal !== undefined ? cleanGoals([change.goal, ...oldGoals.slice(1)]) : undefined;
   let goalParts = line.goalParts;
   if (change.goalParts !== undefined) {
-    const checked = checkGoalParts(change.goalParts);
+    const checked = checkGoalParts(change.goalParts, localeFor(ctx));
     if (!checked.ok) return { ok: false, code: checked.code, message: checked.message };
-    const composed = composeGoal(checked.parts, label);
+    // The composed goal is written in the language of this moment (the parts are the person's own words).
+    const composed = composeGoal(checked.parts, label, localeFor(ctx));
     goals = cleanGoals([composed, ...(goals ?? oldGoals).slice(1).filter((goal) => goal !== composed)]);
     goalParts = checked.parts;
   } else if (goals && goals[0] !== oldGoals[0]) {
     goalParts = undefined;
-  } else if (goalParts?.length && label !== line.label && oldGoals[0] === composeGoal(goalParts, line.label)) {
-    // A renamed line's composed goal follows its new name.
-    goals = cleanGoals([composeGoal(goalParts, label), ...oldGoals.slice(1)]);
+  } else if (goalParts?.length && label !== line.label && (["zh", "en"] as const).some((locale) => oldGoals[0] === composeGoal(goalParts!, line.label, locale))) {
+    // A renamed line's composed goal follows its new name (in whichever language it was composed).
+    const locale = (["zh", "en"] as const).find((item) => oldGoals[0] === composeGoal(goalParts!, line.label, item));
+    goals = cleanGoals([composeGoal(goalParts, label, locale), ...oldGoals.slice(1)]);
   }
   const { goalParts: _parts, ...rest } = line;
   const next: LineSpec = { ...rest, label,

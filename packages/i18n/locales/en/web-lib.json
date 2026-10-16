@@ -490,5 +490,14 @@
   "里程碑批准已撤销": "Milestone approval undone",
   "反事实未写明没有上游时下游要多花多少小时或缺什么。": "The counterfactual does not say how many more hours the downstream work would take without it, or what would be missing.",
   "未写清下游拿它做什么。": "It does not say what the downstream work does with it.",
-  "（{{note}}）": " ({{note}})"
+  "（{{note}}）": " ({{note}})",
+  "中文": "Chinese",
+  "访谈以开始时的语言继续（{{language}}）。界面切换不影响访谈。": "The interview continues in the language it started in ({{language}}). Switching the interface does not change it.",
+  "{{count}} 周内容量或步骤依赖不足_one": "Not enough capacity, or steps still waiting on others, within {{count}} week",
+  "{{count}} 周内容量或步骤依赖不足_other": "Not enough capacity, or steps still waiting on others, within {{count}} weeks",
+  "p85 情景只比截止早 {{count}} 天，没有留出 {{margin}} 天的余量_one": "The cautious case finishes only {{count}} day before the deadline, short of the {{margin}}-day margin",
+  "p85 情景只比截止早 {{count}} 天，没有留出 {{margin}} 天的余量_other": "The cautious case finishes only {{count}} days before the deadline, short of the {{margin}}-day margin",
+  "尚无绑定作业；需先反推步骤": "No tasks bound yet; work back the steps first",
+  "第四象限暂缓；请确认日期或提升重要性": "On hold (no deadline, ordinary importance); confirm a date or raise its importance",
+  "p85 情景晚于已确认截止时间": "The cautious case finishes after the confirmed deadline"
 }

@@ -7,6 +7,7 @@ import {
 import { effectiveSchedulePreferences, getStore, planToday, toZonedInstant, type PersistedScheduleBlock } from "./crossline";
 import { requestCodexSupervisor } from "./codex-runtime";
 import { interviewStatus } from "./interview-status";
+import { localeFor } from "./locale";
 
 type Decision = "create" | "exists" | "skip";
 const DAY_MS = 86_400_000;
@@ -87,7 +88,7 @@ export function addInputEvent(ctx: AccessContext, event: FixedEvent): { ok: true
 }
 
 /** The input-box events on these days, as plan blocks: busy time the scheduler places work around. File events are already on the plan. */
-export const eventBlocks = (ctx: AccessContext, days: string[]): PersistedScheduleBlock[] => fixedEventBlocks(inputEvents(ctx), days);
+export const eventBlocks = (ctx: AccessContext, days: string[]): PersistedScheduleBlock[] => fixedEventBlocks(inputEvents(ctx), days, localeFor(ctx));
 
 /**
  * What goes to the Crossline calendar as the person's fixed events: input-box events, and confirmed arrangements the person chose to

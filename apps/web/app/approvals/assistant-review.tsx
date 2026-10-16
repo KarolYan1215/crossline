@@ -75,7 +75,7 @@ function TaskBody({ ctx, task }: { ctx: AccessContext; task: AssistantView["task
   const detail = loadTaskAudit(ctx, task.taskId);
   if (!detail) return <p className="muted">{task.blockerCode ? t("未完成：{{reason}}", { reason: task.blockerMessage || t("运行中断") }) : t("未找到本次记录。")}</p>;
   const outputs = groupOutputs(detail.artifacts);
-  const namer = new Namer(outputNames(ctx, task.taskId, detail));
+  const namer = new Namer(outputNames(ctx, task.taskId, detail), localeFor(ctx));
   const passed = detail.verification.filter((item) => item.result === "pass");
   // The check's name is the assistant's own words, set in its own span: quoted the way each language quotes.
   const quote = localeFor(ctx) === "en" ? [" “", "”"] : ["「", "」"];

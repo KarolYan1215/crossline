@@ -48,7 +48,7 @@ function StepsPanel({ detail }: { detail: TaskDetail }) {
   return <div className="steps-panel">
     <p className="steps-meta"><small>{plan.archetypeLabel} · {plan.quantity.amount > 0 ? `${plan.quantity.amount} ${plan.quantity.unit}` : plan.quantity.basis}</small>
       <button type="button" className="text-button" onClick={() => setEditing(true)}>{t("调整步骤")}</button></p>
-    {plan.rationale && <p className="gen steps-rationale"><Clamp text={plainEstimateWords(plan.rationale)} /></p>}
+    {plan.rationale && <p className="gen steps-rationale"><Clamp text={plainEstimateWords(plan.rationale, locale)} /></p>}
     {plan.units.length > 0 && <p className="steps-units"><small>{t("依据材料的内容")}</small>{plan.units.map((unit) => <span key={unit.id} className="tag" title={unit.quote}>{unit.title}</span>)}</p>}
     {plan.questions.length > 0 && <p className="steps-questions"><small>{t("需要本人回答后才能定下的")}</small>{plan.questions.map((question) => <a key={question.id} href="/approvals">{question.text}</a>)}</p>}
     <ol className="steps-list">{plan.steps.map((step, index) => {

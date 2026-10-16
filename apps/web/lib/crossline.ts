@@ -1104,7 +1104,7 @@ export function loadGoalForecast(ctx: AccessContext, horizonDays = 56): Forecast
 
 /** The input-box events (`schedule.events`) on these days, as plan blocks. */
 function personEventBlocks(ctx: AccessContext, days: string[]): PersistedScheduleBlock[] {
-  try { return fixedEventBlocks(JSON.parse(getStore().getSetting(ctx.workspaceId, FIXED_EVENTS) ?? "[]") as FixedEvent[], days); } catch { return []; }
+  try { return fixedEventBlocks(JSON.parse(getStore().getSetting(ctx.workspaceId, FIXED_EVENTS) ?? "[]") as FixedEvent[], days, localeFor(ctx)); } catch { return []; }
 }
 
 /**
@@ -1357,7 +1357,7 @@ export function saveMilestoneTemplate(ctx: AccessContext, input: MilestoneTempla
   if (!identityLines(ctx).some((pack) => pack.id === input.identityId)) {
     return { ok: false, code: "TEMPLATE_IDENTITY_UNKNOWN" };
   }
-  const checked = validateSuccessCriteria(input.successCriteriaDefaults);
+  const checked = validateSuccessCriteria(input.successCriteriaDefaults, localeFor(ctx));
   if (!checked.ok) return { ok: false, code: checked.blocker.code };
   const id = `template-${randomUUID()}`;
   getStore().saveMilestoneTemplate({
@@ -1670,7 +1670,8 @@ export function completeWorkOrderExecution(ctx: AccessContext, workOrderId: stri
   const doneAt = at ?? new Date().toISOString();
   if (outcome) store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `work_order.outcome:${workOrderId}:${run}`,
     type: "work_order.outcome_reported", entityId: workOrderId, payload: { level: outcome.level, note: outcome.note, at: doneAt, source: "completion" } });
-  const rule = completionRule(workOrder);
+  // The follow-up question is written now, in the language of this moment.
+  const rule = completionRule(workOrder, localeFor(ctx));
   const followUp = rule.mode === "needs_assessment" && (rule.reason === "result_pending" || !outcome);
   if (followUp) {
     const pending: PendingAssessment = { reason: rule.reason ?? "quality", question: rule.question ?? "", milestoneId: workOrder.milestoneId,

@@ -124,7 +124,7 @@ export function BlockOverview({ item, items, today, labels, details, compact = f
     </p>
     <h4 className="dq-title">{detail?.title ?? item.title}</h4>
     <p className="dq-meta"><span className="mono">{slotText(item, locale)}</span>{item.tag ? ` · ${t(item.tag)}` : ""}
-      {detail && <> · {stateLabelFor(detail.state, detail.paused)}</>}</p>
+      {detail && <> · {t(stateLabelFor(detail.state, detail.paused))}</>}</p>
     {item.agent && <p className="dq-agent"><Tag tone="info">{t(AGENT_TEXT[item.agent])}</Tag></p>}
     {(step || progress !== undefined) && <div className="dq-step">
       <small>{step ? (step.executor === "human" ? t("本步") : t("本步 · 系统可做")) : t("进度")}</small>

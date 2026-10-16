@@ -5,10 +5,11 @@ import { useRouter } from "next/navigation";
 import { composeGoal } from "@crossline/core";
 import { composeAnswers, type Answer, type Question } from "../onboarding/onboarding-types";
 import { useLocale, useT } from "../locale-context";
+import type { Locale } from "../../lib/i18n";
 import "./line-card.css";
 
 /** What the card knows of the line's own interview, from the server (refreshed in place after every turn). */
-export type LineInterviewView = { reply: string; questions: Array<Pick<Question, "id" | "text" | "kind" | "options">>; waiting: boolean; turns: number };
+export type LineInterviewView = { reply: string; questions: Array<Pick<Question, "id" | "text" | "kind" | "options">>; waiting: boolean; turns: number; locale?: Locale };
 /** `composeAnswers` reads only the id, text and options of a question. */
 const asQuestions = (list: LineInterviewView["questions"]) => list as Question[];
 
@@ -28,7 +29,8 @@ export function LineCardInterview({ lineId, label, description, interview, pendi
   pendingEdit: { parts: string[] } | null; redraftDue: boolean;
 }) {
   const t = useT();
-  const english = useLocale() === "en";
+  const locale = useLocale();
+  const english = locale === "en";
   const router = useRouter();
   const [text, setText] = useState("");
   const [answers, setAnswers] = useState<Record<string, Answer>>({});
@@ -84,7 +86,7 @@ export function LineCardInterview({ lineId, label, description, interview, pendi
   };
 
   const send = () => {
-    const message = composeAnswers(asQuestions(interview.questions), answers, text).trim();
+    const message = composeAnswers(asQuestions(interview.questions), answers, text, interview.locale ?? locale).trim();
     if (!message) return;
     setText(""); setAnswers({});
     if (busy) { queue.current.push(message); setStatus(t("已排队，上一轮结束后发送")); return; }

@@ -3,6 +3,8 @@ import { GOAL_EDITS_SETTING, lineAttributes, type AccessContext, type AttributeC
 import { getStore } from "./crossline";
 import { identityLines, updateLine } from "./lines";
 import { tOf } from "./locale";
+import { isLocale, type Locale } from "./i18n";
+import { INTERVIEW_LOCALE_SETTING } from "@crossline/db";
 
 /** One question of a line's latest interview round, as the card shows it. */
 export type CardQuestion = { id: string; text: string; kind: "single" | "multi" | "free"; options: Array<{ id: string; label: string; detail: string }> };
@@ -21,6 +23,8 @@ export type LineCardDetail = {
     /** The person's last message has no answer yet: a turn is running, or the last one failed and can be resent. */
     waiting: boolean;
     turns: number;
+    /** The language this line's interview runs in, once it has started (it keeps it). */
+    locale?: Locale;
   };
 };
 
@@ -74,7 +78,8 @@ export function lineCardDetails(ctx: AccessContext): Record<string, LineCardDeta
         reply: lastTurn?.reply ?? "",
         questions: (lastTurn?.questions ?? []).map(({ id, text, kind, options }) => ({ id, text, kind, options: options ?? [] })),
         waiting: messages.at(-1)?.role === "user",
-        turns: messages.filter((message) => message.role === "user").length
+        turns: messages.filter((message) => message.role === "user").length,
+        ...(((value) => isLocale(value) ? { locale: value } : {})(getStore().getSetting(ctx.workspaceId, `${INTERVIEW_LOCALE_SETTING}:line-${line.id}`)))
       }
     };
   }
