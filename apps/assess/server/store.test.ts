@@ -33,7 +33,7 @@ test("a result is stored with a lowercased email, two distinct tokens and the re
 
 test("the schema is migrated once, inside the user_version gate, with WAL on", () => {
   createResult(input());
-  expect(db().pragma("user_version", { simple: true })).toBe(4);
+  expect(db().pragma("user_version", { simple: true })).toBe(5);
   expect(db().pragma("journal_mode", { simple: true })).toBe("wal");
   expect(fs.existsSync(path.join(dir, "assess.db"))).toBe(true);
   expect(db().prepare("SELECT name FROM pragma_table_info('results')").all().map((row) => (row as { name: string }).name))

@@ -2,7 +2,8 @@ import { expect, test } from "vitest";
 import { QUIZ_ITEMS } from "@crossline/core/assess";
 import { readResponse } from "./api-client";
 import {
-  QUIZ_LENGTH, answerCurrent, answeredCount, appearanceProblem, back, buildRequest, emailProblem, emptyFlow, errorMessage, flowKey, next,
+  QUIZ_LENGTH, afterSubmit, answerCurrent, answeredCount, appearanceProblem, back, buildRequest, destination, emailProblem, emptyFlow, errorMessage,
+  flowKey, next, togglePick, wantsProblem,
   nicknameProblem, noteProblem, parseFlow, setAnswer, startQuiz, type Flow
 } from "./flow";
 
@@ -61,6 +62,34 @@ test("a stored flow resumes, and anything malformed or out of reach is dropped",
   expect(tampered?.appearance).toEqual({ note: "x" });
   expect(parseFlow(JSON.stringify({ step: "quiz", index: 4 }))?.step).toBe("intro");
   expect(parseFlow(JSON.stringify({ step: "quiz", index: 40, startedAt: 1 }))?.index).toBe(QUIZ_LENGTH - 1);
+});
+
+test("the email step makes the result and leads to the last step, which keeps only what it needs and cannot go back", () => {
+  const before: Flow = { ...emptyFlow(), step: "email", startedAt: 5, answers: allAnswered(), appearance: { ...look }, email: "a@b.cn",
+    wants: { picks: ["media"], text: "" } };
+  const after = afterSubmit(before, { resultToken: "result_token_123", pairToken: undefined });
+  expect(after).toMatchObject({ step: "wants", submitted: { resultToken: "result_token_123" }, wants: { picks: ["media"] } });
+  // The answers, the appearance and the address are no longer kept in the browser once the server has them.
+  expect(after).toMatchObject({ answers: {}, email: "", appearance: { note: "" } });
+  expect(back(after)).toBe(after);
+  expect(destination(after.submitted!)).toBe("/r/result_token_123");
+  expect(destination({ resultToken: "result_token_123", pairToken: "pair_token_456" })).toBe("/p/pair_token_456");
+  expect(parseFlow(JSON.stringify(after))).toEqual(after);
+  // A last step without a result to belong to is not reachable; a tampered token is not followed.
+  expect(parseFlow(JSON.stringify({ ...after, submitted: null }))?.step).toBe("quiz");
+  expect(parseFlow(JSON.stringify({ ...after, submitted: { resultToken: "../x" } }))?.submitted).toBeNull();
+  expect(parseFlow(JSON.stringify({ ...after, wants: { picks: ["media", "hack", "media"], text: 3 } }))?.wants).toEqual({ picks: ["media"], text: "" });
+});
+
+test("chips toggle in the order they were picked, at most six; the last step needs a chip or a line", () => {
+  let wants = { picks: [] as string[], text: "" };
+  expect(wantsProblem(wants)).toMatch(/选一两项/);
+  for (const id of ["media", "research", "invest", "writing", "design", "build", "music"]) wants = togglePick(wants, id);
+  expect(wants.picks).toEqual(["media", "research", "invest", "writing", "design", "build"]);
+  expect(togglePick(wants, "research").picks).toEqual(["media", "invest", "writing", "design", "build"]);
+  expect(wantsProblem({ picks: [], text: "想做播客" })).toBeNull();
+  expect(wantsProblem({ picks: ["media"], text: "长".repeat(61) })).toMatch(/最多 60/);
+  expect(errorMessage("WANTS_LIMIT_REACHED")).toContain("3 次");
 });
 
 test("the email checkbox starts ticked, and each invitation keeps its own test", () => {

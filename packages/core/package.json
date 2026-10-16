@@ -3,6 +3,6 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "exports": { ".": "./src/index.ts", "./assess": "./src/assess.ts", "./assess-content": "./src/assess-content.ts", "./energy-rhythm": "./src/energy-rhythm.ts" },
+  "exports": { ".": "./src/index.ts", "./assess": "./src/assess.ts", "./assess-content": "./src/assess-content.ts", "./assess-wants": "./src/assess-wants.ts", "./energy-rhythm": "./src/energy-rhythm.ts" },
   "scripts": { "typecheck": "tsc --noEmit -p tsconfig.json" }
 }

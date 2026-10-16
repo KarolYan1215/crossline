@@ -5,6 +5,7 @@ import { QUIZ_ITEMS } from "@crossline/core/assess";
 import { emptyFlow } from "../lib/flow";
 import { fixtureResult } from "../lib/fixtures";
 import { EmailStep } from "./email-step";
+import { DrawingCard, FigureTile } from "./figure";
 import { SavableImage, withVersion } from "./poster";
 import { QuizStep } from "./quiz-step";
 import { AxesList, axisLean } from "./type-summary";
@@ -72,4 +73,20 @@ test("an axis reads as the pole leaned to and its percentage", () => {
   const type = fixtureResult("x").type;
   for (const axis of type.axes) expect(axisLean(axis).percent).toBeGreaterThanOrEqual(50);
   expect(renderToStaticMarkup(<AxesList type={type} />)).toContain("理论估算");
+});
+
+test("a figure is the person's own drawing or the type's code, never the shared template; while it is drawn the poster waits", () => {
+  const type = fixtureResult("x").type;
+  const ready = renderToStaticMarkup(<FigureTile avatar={{ state: "ready", url: "/api/avatar/t.png?v=1" }} type={type} alt="小林的形象" width={120} height={180} />);
+  expect(ready).toContain("<img");
+  expect(ready).toContain("size=small");
+  for (const state of ["queued", "drawing", "template"] as const) {
+    const html = renderToStaticMarkup(<FigureTile avatar={{ state, url: "/api/avatar/t.png" }} type={type} alt="小林的形象" width={120} height={180} />);
+    expect(html).not.toContain("<img");
+    expect(html).toContain(type.code);
+    expect(html.includes("data-waiting")).toBe(state !== "template");
+  }
+  const waiting = renderToStaticMarkup(<DrawingCard type={type} />);
+  expect(waiting).toContain("正在画你的专属形象");
+  expect(waiting).not.toContain("<img");
 });

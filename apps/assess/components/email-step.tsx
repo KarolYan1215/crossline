@@ -24,7 +24,7 @@ export function EmailStep({ fields, problems, error, busy, invited, onChange, on
 }) {
   const submit = (event: FormEvent) => { event.preventDefault(); if (!busy) onSubmit(); };
   return <form className="as-sheet" onSubmit={submit} noValidate>
-    <p className="as-kicker">最后两步 · 2 / 2</p>
+    <p className="as-kicker">最后三步 · 2 / 3</p>
     <h2>{invited ? "填邮箱，看你们的双人卡" : "填邮箱，看你的结果"}</h2>
     <label className="as-field">
       <span>邮箱</span>
@@ -60,7 +60,7 @@ export function EmailStep({ fields, problems, error, busy, invited, onChange, on
     </div>}
     <div className="as-nav">
       <button type="button" onClick={onBack} disabled={busy}>上一步</button>
-      <button type="submit" className="as-primary" disabled={busy}>{busy ? "正在生成…" : "看结果"}</button>
+      <button type="submit" className="as-primary" disabled={busy}>{busy ? "正在提交…" : "下一步"}</button>
     </div>
   </form>;
 }

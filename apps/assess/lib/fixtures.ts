@@ -46,7 +46,7 @@ export function fixtureResult(token: string): ResultView {
     polls.set(token, seen);
     state = seen === 1 ? "queued" : seen <= 2 ? "drawing" : "ready";
   }
-  const bust = state === "ready" ? "已换上专属形象" : "基础形象，专属形象绘制中";
+  const bust = state === "ready" ? "已换上专属形象" : "类型字母（没有画出形象）";
   return {
     nickname: "小林", type: INVITER, avatar: avatar(INVITER, state),
     posterUrl: placeholderImage(INVITER, `海报占位 · ${bust}`),
@@ -56,6 +56,7 @@ export function fixtureResult(token: string): ResultView {
       { pairToken: "fixture-pair", nickname: "阿青", code: VISITOR.code, name: VISITOR.name, relation: pairRelation(INVITER.code, VISITOR.code).primary.name },
       { pairToken: "fixture-pair-2", nickname: "你的朋友", code: INVITER.best.code, name: INVITER.best.name, relation: INVITER.best.relation }
     ],
+    wants: null, wantsLeft: 3,
     expiresAt: new Date(Date.now() + RESULT_RETENTION_DAYS * 86_400_000).toISOString()
   };
 }
@@ -81,6 +82,7 @@ export const fixtureApi: AssessApi = {
   },
   getResult: (token) => delay(token === "missing" ? notFound : { ok: true, data: fixtureResult(token) }),
   requestBeta: (token) => delay(token === "missing" ? notFound : { ok: true, data: null }),
+  setWants: (token) => delay(token === "missing" ? notFound : { ok: true, data: null }),
   deleteResult: (token) => delay(token === "missing" ? notFound : { ok: true, data: null }),
   getInvite: (token) => delay(token === "missing" ? notFound : { ok: true, data: fixtureInvite() }),
   getPair: (token) => delay(token === "missing" ? notFound : { ok: true, data: fixturePair() })

@@ -9,6 +9,8 @@ export type EditInput = { reference: Buffer; prompt: string; seed: number; signa
 export type GenerateInput = { prompt: string; seed: number; signal?: AbortSignal };
 
 export interface ImageProvider {
+  /** Which service and model this is, for the server log (never the key). */
+  readonly label?: string;
   edit(input: EditInput): Promise<Buffer>;
   generate(input: GenerateInput): Promise<Buffer>;
 }
@@ -99,6 +101,7 @@ export type SiliconFlowOptions = { apiKey: string; baseUrl?: string; editModel?:
  * (Kontext [dev]), `prompt_enhancement: false` so our fixed instruction reaches the model unchanged, and `{ images: [{ url }] }` back.
  */
 export class SiliconFlowProvider implements ImageProvider {
+  readonly label: string;
   readonly #apiKey: string;
   readonly #baseUrl: string;
   readonly #editModel: string;
@@ -110,6 +113,7 @@ export class SiliconFlowProvider implements ImageProvider {
     this.#baseUrl = (options.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, "");
     if (!this.#baseUrl.startsWith("https://")) throw new Error("ASSESS_IMAGE_BASE_URL must be https");
     this.#editModel = options.editModel ?? DEFAULT_EDIT_MODEL;
+    this.label = `siliconflow:${this.#editModel}`;
     this.#generateModel = options.generateModel ?? DEFAULT_GENERATE_MODEL;
     this.#fetch = options.fetchImpl ?? fetch;
   }
@@ -157,6 +161,7 @@ const ARK_SIZE = "1024x1536";
  * platform's own 「AI 生成」 mark is turned off (`watermark: false`), and the link it returns is fetched at once without the key.
  */
 export class ArkProvider implements ImageProvider {
+  readonly label: string;
   readonly #apiKey: string;
   readonly #baseUrl: string;
   readonly #model: string;
@@ -167,6 +172,7 @@ export class ArkProvider implements ImageProvider {
     this.#baseUrl = (options.baseUrl ?? ARK_BASE_URL).replace(/\/+$/, "");
     if (!this.#baseUrl.startsWith("https://")) throw new Error("ASSESS_IMAGE_BASE_URL must be https");
     this.#model = options.model ?? ARK_DEFAULT_MODEL;
+    this.label = `ark:${this.#model}`;
     this.#fetch = options.fetchImpl ?? fetch;
   }
 
@@ -198,18 +204,41 @@ export class ArkProvider implements ImageProvider {
   }
 }
 
-/** The provider the environment names: none without `ASSESS_IMAGE_API_KEY`; `ASSESS_IMAGE_PROVIDER=ark` picks Seedream. */
+/** The image services `ASSESS_IMAGE_PROVIDER` may name; unset means SiliconFlow (the first one used). */
+export const IMAGE_PROVIDERS = ["siliconflow", "ark"] as const;
+
+/**
+ * The provider the environment names: none without `ASSESS_IMAGE_API_KEY`; `ASSESS_IMAGE_PROVIDER=ark` picks Seedream, unset or
+ * `siliconflow` picks SiliconFlow. A name it does not know gives no provider rather than sending the key to the wrong service (an Ark
+ * key sent to SiliconFlow is refused on every call, and every figure quietly stays the template); `avatar.provider` in the server log
+ * says which one was chosen, or why none was.
+ */
 export function providerFromEnv(env: Record<string, string | undefined> = process.env): ImageProvider | null {
   const apiKey = env.ASSESS_IMAGE_API_KEY?.trim();
   if (!apiKey) return null;
-  if (env.ASSESS_IMAGE_PROVIDER?.trim() === "ark") {
-    return new ArkProvider({ apiKey, ...(env.ASSESS_IMAGE_BASE_URL ? { baseUrl: env.ASSESS_IMAGE_BASE_URL } : {}),
-      ...(env.ASSESS_IMAGE_MODEL ? { model: env.ASSESS_IMAGE_MODEL } : {}) });
-  }
+  const name = (env.ASSESS_IMAGE_PROVIDER?.trim().toLowerCase() || "siliconflow");
+  const baseUrl = env.ASSESS_IMAGE_BASE_URL?.trim();
+  const model = env.ASSESS_IMAGE_MODEL?.trim();
+  if (name === "ark") return new ArkProvider({ apiKey, ...(baseUrl ? { baseUrl } : {}), ...(model ? { model } : {}) });
+  if (name !== "siliconflow") return null;
+  const templateModel = env.ASSESS_IMAGE_TEMPLATE_MODEL?.trim();
   return new SiliconFlowProvider({
     apiKey,
-    ...(env.ASSESS_IMAGE_BASE_URL ? { baseUrl: env.ASSESS_IMAGE_BASE_URL } : {}),
-    ...(env.ASSESS_IMAGE_MODEL ? { editModel: env.ASSESS_IMAGE_MODEL } : {}),
-    ...(env.ASSESS_IMAGE_TEMPLATE_MODEL ? { generateModel: env.ASSESS_IMAGE_TEMPLATE_MODEL } : {})
+    ...(baseUrl ? { baseUrl } : {}),
+    ...(model ? { editModel: model } : {}),
+    ...(templateModel ? { generateModel: templateModel } : {})
   });
+}
+
+/** What the server log says about the image settings at start: the provider chosen, or the reason there is none. Never the key. */
+export function providerSummary(env: Record<string, string | undefined> = process.env): { provider: string; model?: string; reason?: string } {
+  if (!env.ASSESS_IMAGE_API_KEY?.trim()) return { provider: "none", reason: "ASSESS_IMAGE_API_KEY unset: every figure is the fallback" };
+  const named = env.ASSESS_IMAGE_PROVIDER?.trim().toLowerCase() || "";
+  if (named && !(IMAGE_PROVIDERS as readonly string[]).includes(named)) {
+    return { provider: "none", reason: `ASSESS_IMAGE_PROVIDER=${named.slice(0, 40)} is not one of ${IMAGE_PROVIDERS.join(", ")}` };
+  }
+  const provider = providerFromEnv(env);
+  const [service, model] = (provider?.label ?? "none").split(/:(.*)/s);
+  return { provider: service!, ...(model ? { model } : {}),
+    ...(!named ? { reason: "ASSESS_IMAGE_PROVIDER unset: using SiliconFlow; set it to ark for a Volcengine Ark key" } : {}) };
 }

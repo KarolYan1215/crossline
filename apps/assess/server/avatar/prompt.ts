@@ -29,12 +29,23 @@ const SKIN: Record<Appearance["skin"], string> = {
   deep: "a deep skin tone (#7A5139)"
 };
 
-/** Style changes the cut of the clothes only; the template's outfit colours always stay. */
-const STYLE: Record<Appearance["style"], string> = {
-  casual: "a relaxed, casual cut",
-  smart: "a neat, tailored cut",
-  sporty: "a sporty cut with a zip collar",
-  artsy: "a loose, artistic cut"
+/**
+ * Style changes the garments; the template's outfit colours always stay (they carry the type group's palette). Each phrase names
+ * concrete garments rather than a mood, since an editing model follows "a blazer" far better than "business-like", and none of them
+ * depends on how the person presents.
+ */
+export const STYLE: Record<Appearance["style"], string> = {
+  casual: "relaxed everyday casual wear: a loose T-shirt or sweater with comfortable trousers and sneakers",
+  minimal: "minimalist commuter wear: a plain knit top, straight-cut trousers and clean simple shoes, no patterns or logos",
+  smart: "formal business wear: a tailored blazer over a crisp shirt, with matching dress trousers and leather shoes",
+  preppy: "a preppy campus look: a collared shirt under a V-neck sweater or cardigan, pleated trousers or a pleated skirt, loafers",
+  street: "streetwear: an oversized hoodie or bomber jacket, baggy trousers and chunky sneakers",
+  sporty: "sporty outdoor wear: a zip-up shell or track jacket, joggers and trail running shoes",
+  techwear: "techwear: a technical shell jacket with straps and utility pockets, tapered cargo trousers and sturdy boots",
+  artsy: "a vintage artistic look: a loose linen shirt or a knit vest, high-waisted wide trousers and retro leather shoes",
+  chinese: "modern Chinese-style clothing: a jacket or top with a mandarin collar and knotted frog buttons, flowing trousers or a long skirt",
+  sweet: "a sweet, soft look: a soft cardigan or a blouse with gentle puff sleeves and a rounded collar, with a small ribbon detail",
+  cool: "a cool, edgy look: a cropped biker-style jacket over a fitted top, slim trousers and ankle boots"
 };
 
 const COLOURS: Array<[RegExp, string]> = [
@@ -127,7 +138,7 @@ export function avatarPrompt(appearance: Appearance): string {
     HAIR[appearance.hair],
     appearance.glasses ? "simple thin-framed round glasses" : "no glasses",
     SKIN[appearance.skin],
-    `the clothes take ${STYLE[appearance.style]} while keeping exactly the same outfit colours`
+    `the outfit changes to ${STYLE[appearance.style]}, keeping exactly the same outfit colours`
   ];
   const note = sanitizeNote(appearance.note);
   return [

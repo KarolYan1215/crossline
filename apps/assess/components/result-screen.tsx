@@ -2,17 +2,17 @@
 
 import { useEffect, useRef, useState } from "react";
 import { api, type ClientErrorCode } from "../lib/api-client";
-import type { AvatarStatus, ResultView } from "../lib/contract";
+import type { ResultView, WantsRequest } from "../lib/contract";
 import { LAST_RESULT_KEY, errorMessage } from "../lib/flow";
-import { SavableImage, withVersion } from "./poster";
+import { AVATAR_POLL_MS, DrawingCard, isDrawing } from "./figure";
+import { SavableImage } from "./poster";
 import { CopyLink, ShareInvite } from "./share-invite";
 import { withName } from "../lib/names";
 import { readStored, writeStored } from "./storage";
+import { WantsInline } from "./wants-step";
 import { AxesList, TypeDetails, TypeHeading, groupStyle } from "./type-summary";
 
-/** How often a figure still being drawn is checked on. */
-export const AVATAR_POLL_MS = 5_000;
-export const isDrawing = (avatar: AvatarStatus): boolean => avatar.state === "queued" || avatar.state === "drawing";
+export { AVATAR_POLL_MS, isDrawing } from "./figure";
 export const DISCLAIMER = "基于自评的趣味测评，非心理诊断";
 
 const dateText = (iso: string) => { const date = new Date(iso); return Number.isNaN(date.getTime()) ? "" : `${date.getFullYear()} 年 ${date.getMonth() + 1} 月 ${date.getDate()} 日`; };
@@ -28,12 +28,13 @@ type State = { kind: "loading" } | { kind: "error"; code: ClientErrorCode } | { 
 /** The person's own result (`?delete=1` opens on the deletion confirmation): poster, the type as text, the figure's progress, the invitation, pair cards, and deleting it all. */
 export function ResultScreen({ token }: { token: string }) {
   const [state, setState] = useState<State>({ kind: "loading" });
-  const [version, setVersion] = useState(0);
   const [wasDrawing, setWasDrawing] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const scrollToDelete = useRef(false);
   const [deleting, setDeleting] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null });
   const [beta, setBeta] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null });
+  const [editingWants, setEditingWants] = useState(false);
+  const [wantsSave, setWantsSave] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null });
   const [ownUrl, setOwnUrl] = useState("");
   useEffect(() => { setOwnUrl(`${window.location.origin}/r/${token}`); }, [token]);
 
@@ -57,17 +58,18 @@ export function ResultScreen({ token }: { token: string }) {
     document.getElementById("as-delete")?.scrollIntoView({ block: "center" });
   }, [state.kind]);
 
+  // While the figure is being drawn, ask again every few seconds. A failed ask (a network blip, a rate limit) is skipped, not the end of
+  // asking: the old one-shot timer re-armed only after a successful answer, so one failure froze the page on the waiting state. The
+  // poster addresses carry the figure's tag (server/views.ts), so the new answer brings a new poster with it.
   const drawing = state.kind === "ready" && isDrawing(state.view.avatar);
   useEffect(() => {
     if (!drawing) return;
-    const timer = setTimeout(async () => {
-      const result = await api.getResult(token);
-      if (!result.ok) return;
-      if (!isDrawing(result.data.avatar)) setVersion(Date.now());
-      setState({ kind: "ready", view: result.data });
+    let live = true;
+    const timer = setInterval(() => {
+      void api.getResult(token).then((result) => { if (live && result.ok) setState({ kind: "ready", view: result.data }); });
     }, AVATAR_POLL_MS);
-    return () => clearTimeout(timer);
-  }, [drawing, token, state]);
+    return () => { live = false; clearInterval(timer); };
+  }, [drawing, token]);
 
   const remove = async () => {
     setDeleting({ busy: true, error: null });
@@ -75,6 +77,16 @@ export function ResultScreen({ token }: { token: string }) {
     if (!result.ok && result.code !== "NOT_FOUND") { setDeleting({ busy: false, error: errorMessage(result.code) }); return; }
     if (readStored("local", LAST_RESULT_KEY) === token) writeStored("local", LAST_RESULT_KEY, null);
     setState({ kind: "deleted" });
+  };
+
+  const saveWants = async (wants: WantsRequest) => {
+    setWantsSave({ busy: true, error: null });
+    const result = await api.setWants(token, wants);
+    if (!result.ok) { setWantsSave({ busy: false, error: errorMessage(result.code) }); return; }
+    const fresh = await api.getResult(token);
+    if (fresh.ok) setState({ kind: "ready", view: fresh.data });
+    setWantsSave({ busy: false, error: null });
+    setEditingWants(false);
   };
 
   const askBeta = async () => {
@@ -103,11 +115,14 @@ export function ResultScreen({ token }: { token: string }) {
   const mailed = view.sendEmail && view.mailOn;
   return <main className="as-main as-result" style={groupStyle(type)}>
     <TypeHeading type={type} />
-    <p className="as-note" aria-live="polite">{isDrawing(view.avatar) ? "你的专属形象正在画，画好会自动换到海报上（约 1 分钟）。"
-      : view.avatar.state === "template" ? `形象用的是${type.name}的基础角色。` : wasDrawing ? "专属形象已换上。" : ""}</p>
     {!mailed && <p className="as-done">{view.sendEmail ? "邮件暂时发不出去" : "你选了不发邮件"}：请收藏本页，或到页面底部复制结果链接，否则换了设备就找不回来。</p>}
-    <SavableImage src={withVersion(view.posterUrl, version)} alt={`${type.name} ${type.code} 的海报`} width={1080} height={1440}
-      downloadName={`crossline-${type.code}.png`} extra={{ src: withVersion(view.longUrl, version), label: "长图", downloadName: `crossline-${type.code}-长图.png` }} />
+    {/* While the figure is drawn there is no poster yet: a waiting card, never the type's shared template (decided 2026-10-16). */}
+    {isDrawing(view.avatar) ? <DrawingCard type={type} /> : <>
+      <p className="as-note" aria-live="polite">{view.avatar.state === "template" ? "这次没有画出你的专属形象，海报上先用类型字母代替。"
+        : wasDrawing ? "专属形象画好了。" : ""}</p>
+      <SavableImage src={view.posterUrl} alt={`${type.name} ${type.code} 的海报`} width={1080} height={1440}
+        downloadName={`crossline-${type.code}.png`} extra={{ src: view.longUrl, label: "长图", downloadName: `crossline-${type.code}-长图.png` }} />
+    </>}
 
     <section className="as-block">
       <h2>拉朋友测，看你们是什么关系</h2>
@@ -119,7 +134,13 @@ export function ResultScreen({ token }: { token: string }) {
       <h2>四条轴</h2>
       <AxesList type={type} />
     </section>
-    <TypeDetails type={type} />
+    <TypeDetails type={type} wants={!view.wants || editingWants
+      ? view.wantsLeft > 0 && <div className="as-wants-ask">
+        {!view.wants && <p>上面是按你的类型推荐的。告诉我们你想同时做哪几件事，按你的选择重新组合：</p>}
+        <WantsInline initial={view.wants ?? { picks: [], text: "" }} left={view.wantsLeft} busy={wantsSave.busy} error={wantsSave.error}
+          onSubmit={(wants) => void saveWants(wants)} onCancel={view.wants ? () => setEditingWants(false) : undefined} />
+      </div>
+      : view.wantsLeft > 0 && <button type="button" onClick={() => setEditingWants(true)}>改一改想做的事</button>} />
 
     <section className="as-block as-beta">
       <h2>把这三条线真的跑起来</h2>
@@ -155,7 +176,7 @@ export function ResultScreen({ token }: { token: string }) {
       <p>{mailed ? "这个页面的链接已发到你的邮箱（没收到就看看垃圾邮件）。" : view.sendEmail ? "邮件暂时发不出去。请收藏本页，或复制下面的链接自己保存，这是回到结果的唯一入口。"
         : "你选了不发邮件。请收藏本页，或复制下面的链接自己保存，这是回到结果的唯一入口。"}</p>
       {!mailed && ownUrl && <CopyLink url={ownUrl} label="我的结果链接（只给自己看）" />}
-      <p className="as-note">结果保存到 {dateText(view.expiresAt)}，到期自动删除。保存的是四条轴的分数、邮箱、署名和外貌选项，不存每道题的答案。</p>
+      <p className="as-note">结果保存到 {dateText(view.expiresAt)}，到期自动删除。保存的是四条轴的分数、邮箱、署名、外貌选项和你想做的事，不存每道题的答案。</p>
       {confirming ? <div className="as-confirm" role="group" aria-label="确认删除" id="as-delete">
         <p>删除后，海报、邀请链接和所有双人卡都会失效，不能恢复。</p>
         <div className="as-row">

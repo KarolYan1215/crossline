@@ -6,33 +6,47 @@ import { avatarsDrawnFor, setAvatarState, type StoredResult } from "../store";
 import { dailyLimit, takeSlot } from "./budget";
 import { writeFileAtomic } from "./files";
 import { avatarPrompt, seedFor } from "./prompt";
-import { ProviderError, providerFromEnv, type ImageProvider } from "./provider";
+import { ProviderError, imageType, providerFromEnv, providerSummary, type ImageProvider } from "./provider";
 import { createQueue, type Queue } from "./queue";
 import { templatesDir, templateVariant, type TemplateVariant } from "./templates";
 
 /**
  * The figure pipeline (workstream W5, docs/beta-launch.md §4): the type's template plus the person's appearance, drawn by an image
- * model, with a queue, a per-address limit, a daily budget and the template as the fallback. Signatures fixed by the contract.
+ * model, with a queue, a per-address limit, a daily budget and a fallback. Signatures fixed by the contract.
  *
  * States: `template` at once when there is no provider, the address has had its figures, today's budget is spent or the queue is full;
- * otherwise `queued` → `drawing` → `ready` (file written) or `template` (the call failed). The template is always a correct answer, so
- * nothing here ever makes a result page wait or fail.
+ * otherwise `queued` → `drawing` → `ready` (file written) or `template` (the call failed). Every way to `template` is logged
+ * (`avatar.skipped` with its reason, `avatar.failed` with the provider's answer), so a fallback is never silent. The fallback is always a
+ * correct answer, so nothing here ever makes a result page wait or fail.
  */
 
 export const CONCURRENCY = 2;
 export const MAX_PENDING = 40;
-export const CALL_TIMEOUT_MS = 60_000;
-/** A figure still `queued`/`drawing` this long after its result was made was lost to a restart: show the template. */
+/** One call to the model, download included. Seedream's larger models take 30–60 s for a 1024×1536 edit (measured 2026-10-16: 39 s). */
+export const CALL_TIMEOUT_MS = 120_000;
+/** A figure still `queued`/`drawing` this long after its result was made was lost to a restart: show the fallback. */
 export const STALE_AFTER_MS = 15 * 60_000;
 
 type Runtime = { provider: ImageProvider | null; sleep: (ms: number) => Promise<void>; random: () => number; now: () => Date };
 
-const defaults = (): Runtime => ({
-  provider: providerFromEnv(),
-  sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-  random: Math.random,
-  now: () => new Date()
-});
+let announced = false;
+
+/** The image settings, said once per process in the server log, so a missing or wrong provider is visible without a test draw. */
+function announce(): void {
+  if (announced) return;
+  announced = true;
+  console.info(JSON.stringify({ event: "avatar.provider", ...providerSummary() }));
+}
+
+const defaults = (): Runtime => {
+  announce();
+  return {
+    provider: providerFromEnv(),
+    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    random: Math.random,
+    now: () => new Date()
+  };
+};
 
 let runtime: Runtime | undefined;
 let queue: Queue | undefined;
@@ -54,20 +68,29 @@ export function avatarQueueIdle(): Promise<void> {
 const drawnFile = (resultId: string): string => path.join("avatars", `${resultId}.png`);
 const absolute = (file: string): string => (path.isAbsolute(file) ? file : path.join(dataDir(), file));
 
-/** Starts drawing this result's figure, or settles it on the template at once (over budget, over the address's limit, no provider). */
+/** Why a figure was not drawn at all: logged as `avatar.skipped`, so a fallback is never silent. */
+export type SkipReason = "no_provider" | "email_limit" | "queue_full" | "daily_budget" | "queue_refused";
+
+function skip(result: StoredResult, reason: SkipReason): void {
+  console.warn(JSON.stringify({ event: "avatar.skipped", resultId: result.id, reason }));
+  setAvatarState(result.id, "template");
+}
+
+/** Starts drawing this result's figure, or settles it on the fallback at once (over budget, over the address's limit, no provider). */
 export function enqueueAvatar(result: StoredResult): void {
   const { provider } = current();
-  if (!provider || avatarsDrawnFor(result.email) >= AVATARS_PER_EMAIL || jobs().size() >= MAX_PENDING + CONCURRENCY
-      || !takeSlot(dailyLimit(), current().now())) {
-    setAvatarState(result.id, "template");
-    return;
-  }
+  if (!provider) return skip(result, "no_provider");
+  if (avatarsDrawnFor(result.email) >= AVATARS_PER_EMAIL) return skip(result, "email_limit");
+  if (jobs().size() >= MAX_PENDING + CONCURRENCY) return skip(result, "queue_full");
+  if (!takeSlot(dailyLimit(), current().now())) return skip(result, "daily_budget");
   setAvatarState(result.id, "queued");
   const taken = jobs().push(() => draw(provider, result));
-  if (!taken) setAvatarState(result.id, "template");
+  if (!taken) skip(result, "queue_refused");
 }
 
 async function draw(provider: ImageProvider, result: StoredResult): Promise<void> {
+  const started = Date.now();
+  let attempts = 1;
   try {
     setAvatarState(result.id, "drawing");
     const reference = fs.readFileSync(templateImagePath(result.code, templateVariant(result.appearance.presentation, result.id)));
@@ -79,13 +102,21 @@ async function draw(provider: ImageProvider, result: StoredResult): Promise<void
       // One retry, only for what a wait can fix (rate limit, overload), and only if today's budget still has a slot for it.
       if (!(error instanceof ProviderError) || !error.retryable || !takeSlot(dailyLimit(), current().now())) throw error;
       await current().sleep(backoffMs(error));
+      attempts = 2;
       image = await withTimeout((signal) => provider.edit({ ...input, signal }));
     }
+    // The poster renderer reads PNG and JPEG only: a WebP figure would show on the page and never on the poster.
+    const type = imageType(image);
+    if (type !== "image/png" && type !== "image/jpeg") throw new ProviderError(`IMAGE_FORMAT_UNSUPPORTED: ${type ?? "unknown"}`, 502);
     const file = drawnFile(result.id);
     writeFileAtomic(absolute(file), image);
     setAvatarState(result.id, "ready", file);
+    console.info(JSON.stringify({ event: "avatar.ready", resultId: result.id, provider: provider.label ?? "unknown", attempts,
+      seconds: Math.round((Date.now() - started) / 1000) }));
   } catch (error) {
-    console.warn(JSON.stringify({ event: "avatar.failed", resultId: result.id, reason: error instanceof Error ? error.message.slice(0, 200) : "unknown" }));
+    console.warn(JSON.stringify({ event: "avatar.failed", resultId: result.id, provider: provider.label ?? "unknown", attempts,
+      ...(error instanceof ProviderError ? { status: error.status } : {}),
+      reason: error instanceof Error ? error.message.slice(0, 200) : "unknown" }));
     setAvatarState(result.id, "template");
   }
 }
@@ -132,7 +163,15 @@ export function avatarStatus(result: StoredResult): AvatarStatus {
   return { state: result.avatar.state, url: base };
 }
 
-/** A PNG file on disk for the poster renderer: the drawn figure when ready, else the template. */
+/** The person's own drawn figure on disk, for the posters; undefined while it is drawn, or when it never was (posters then show the code). */
+export function drawnImagePath(result: StoredResult): string | undefined {
+  return drawnPath(result);
+}
+
+/**
+ * The figure the avatar route serves: the drawn one when ready, else the template. Only the App's link (`figureUrl`) still shows the
+ * template; the pages and posters show the drawn figure or the code tile (`FigureTile`, `figure.ts`).
+ */
 export function avatarImagePath(result: StoredResult): string {
   return drawnPath(result) ?? templateImagePath(result.code, templateVariant(result.appearance.presentation, result.id));
 }

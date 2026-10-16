@@ -34,7 +34,7 @@ export function AppearanceStep({ draft, onChange, onBack, onNext }: {
   const glasses = draft.glasses === undefined ? undefined : draft.glasses ? "yes" : "no";
 
   return <section className="as-sheet">
-    <p className="as-kicker">最后两步 · 1 / 2</p>
+    <p className="as-kicker">最后三步 · 1 / 3</p>
     <h2>你大概长什么样？</h2>
     <p className="as-note">这些选项只用来画你海报上的形象，选项本身不会给别人看。</p>
     <Segments name="presentation" legend="性别呈现" choices={entries(APPEARANCE_LABELS.presentation)} value={draft.presentation}

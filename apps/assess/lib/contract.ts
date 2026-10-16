@@ -10,7 +10,8 @@ export type Appearance = {
   hair: "short" | "medium" | "long" | "curly" | "tied" | "bald";
   glasses: boolean;
   skin: "light" | "medium" | "deep";
-  style: "casual" | "smart" | "sporty" | "artsy";
+  /** Clothing style (eleven since 2026-10-16); the first four keys are the original ones, kept so stored results still read. */
+  style: "casual" | "smart" | "sporty" | "artsy" | "minimal" | "preppy" | "street" | "techwear" | "chinese" | "sweet" | "cool";
   /** Optional free words (≤40 characters): a hair colour, a hat. Never shown to anyone else. */
   note: string;
 };
@@ -19,7 +20,10 @@ export const APPEARANCE_LABELS = {
   presentation: { female: "女生", male: "男生", neutral: "中性" },
   hair: { short: "短发", medium: "中长发", long: "长发", curly: "卷发", tied: "扎起来", bald: "光头" },
   skin: { light: "偏白", medium: "自然", deep: "偏深" },
-  style: { casual: "休闲", smart: "干练", sporty: "运动", artsy: "文艺" }
+  style: {
+    casual: "休闲日常", minimal: "极简通勤", smart: "商务正装", preppy: "学院风", street: "街头潮流", sporty: "运动户外",
+    techwear: "机能风", artsy: "文艺复古", chinese: "新中式", sweet: "甜美", cool: "酷飒"
+  }
 } as const;
 
 export const NOTE_MAX = 40;
@@ -43,12 +47,19 @@ export type SubmitRequest = {
   website: string;
 };
 
-export type SubmitResponse = { resultToken: string; inviteToken: string; pairToken?: string };
+/**
+ * POST /api/results/[resultToken]/wants — what the person wants to do, asked right after the email (so their figure is drawn while
+ * they answer): chips from `WANT_OPTIONS` and an optional free line of at most `WANTS_TEXT_MAX` characters.
+ */
+export type WantsRequest = { picks: string[]; text: string };
+
+export type SubmitResponse ={ resultToken: string; inviteToken: string; pairToken?: string };
 
 /** Every refusal the API gives, as `{ ok: false, code }` with an HTTP status. */
 export type ApiErrorCode =
   | "QUIZ_INCOMPLETE" | "APPEARANCE_INVALID" | "EMAIL_INVALID" | "NICKNAME_INVALID" | "TOO_FAST" | "REJECTED"
-  | "RATE_LIMITED" | "INVITE_NOT_FOUND" | "ALREADY_PAIRED" | "NOT_FOUND" | "UNAUTHORIZED" | "EMAIL_LIMIT_REACHED";
+  | "RATE_LIMITED" | "INVITE_NOT_FOUND" | "ALREADY_PAIRED" | "NOT_FOUND" | "UNAUTHORIZED" | "EMAIL_LIMIT_REACHED"
+  | "WANTS_INVALID" | "WANTS_LIMIT_REACHED";
 
 /** One axis as shown: both poles, the score 0–100 towards the right pole, light when ambiguous, and the rank. */
 export type PublicAxis = {
@@ -69,9 +80,16 @@ export type PublicType = {
   axes: PublicAxis[];
   /** The first combination, offered as 「你也许想做」, with `loop`. */
   lines: [LineView, LineView, LineView];
-  /** Three more combinations, shown smaller and without a loop. */
+  /** Three more combinations, shown smaller and without a loop; none once the lines come from what the person said they want. */
   more: Array<[LineView, LineView, LineView]>;
   loop: [string, string, string, string];
+  /**
+   * Where the lines came from: the type's own suggestion (`type`, before the person said what they want), or — from what they said —
+   * the owner's written combination that fits (`preset`), a text model's answer (`model`) or the rules (`rules`).
+   */
+  linesFrom: "type" | "preset" | "model" | "rules";
+  /** How each line feeds the next (0→1, 1→2, 2→0) with the relation kind (促成/复用/提供输入/约束/反馈回路); empty for `type`. */
+  links: Array<{ from: number; to: number; kind: string; how: string }>;
   best: PartnerView;
   hardest: PartnerView;
 };
@@ -97,6 +115,9 @@ export type ResultView = {
   /** The full app's public address when it is open to sign up (`ASSESS_APP_URL`), else null and the page offers 「申请内测」. */
   appUrl: string | null;
   pairs: Array<{ pairToken: string; nickname: string; code: string; name: string; relation: string }>;
+  /** What the person said they want to do (their own view only), or null before they answer; and how many more times they may change it. */
+  wants: WantsRequest | null;
+  wantsLeft: number;
   expiresAt: string;
 };
 

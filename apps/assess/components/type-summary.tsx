@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { latinGap } from "@crossline/core/assess-content";
 import type { LineView, PublicAxis, PublicType } from "../lib/contract";
 
@@ -39,13 +40,30 @@ function Combo({ lines, className }: { lines: LineView[]; className?: string }) 
     {line.domain && <span className="as-form">{line.domain}的{latinGap(line.identity)}</span>}<b>{line.identity}</b></span>)}</p>;
 }
 
-/** Everything else the poster says: the suggested lines and their loop (and three more combinations), the best partner and the hardest. */
-export function TypeDetails({ type }: { type: PublicType }) {
+/** Where the lines came from, said plainly under them. */
+const LINES_FROM: Record<PublicType["linesFrom"], string> = {
+  type: "按你的类型推荐。",
+  preset: "按你选的事，用我们为这类组合写好的方案。",
+  model: "按你选的事和你写的那句话组合。",
+  rules: "按你选的事组合。"
+};
+
+/**
+ * Everything else the poster says: the lines and their loop (with how each feeds the next once they come from what the person said,
+ * else three more combinations), the best partner and the hardest. `wants` is the person's own control to choose or change the lines.
+ */
+export function TypeDetails({ type, wants }: { type: PublicType; wants?: ReactNode }) {
   return <div className="as-details">
     <section>
       <h3>你也许想做</h3>
       <Combo lines={type.lines} className="as-lines" />
-      <p className="as-note">飞轮：{type.loop.join(" → ")}</p>
+      <p className="as-note">飞轮：{type.loop.join(" → ")} → {type.loop[0]}</p>
+      {type.links.length > 0 && <ul className="as-links">{type.links.map((link) => <li key={`${link.from}-${link.to}`}>
+        <b>{type.lines[link.from]?.identity} → {type.lines[link.to]?.identity}</b>
+        <span className="as-tag">{link.kind}</span>{link.how}
+      </li>)}</ul>}
+      <p className="as-note">{LINES_FROM[type.linesFrom]}</p>
+      {wants}
       {type.more.length > 0 && <>
         <p className="as-note">也可以这样组合：</p>
         {type.more.map((combo, index) => <Combo key={index} lines={combo} className={`as-more as-more-${index + 1}`} />)}

@@ -68,6 +68,12 @@ const MIGRATIONS: Migration[] = [
       created_at TEXT NOT NULL
     );
     CREATE INDEX email_tests_email ON email_tests(email_key);
+  `),
+  // 5: 「你也许想做」 from what the person says they want to do (2026-10-16): their picks and free line with the three lines made
+  // from them, as one JSON document ("" until they answer), and how many times they have set it (capped, since each may call a model).
+  (db) => db.exec(`
+    ALTER TABLE results ADD COLUMN wants_json TEXT NOT NULL DEFAULT '';
+    ALTER TABLE results ADD COLUMN wants_updates INTEGER NOT NULL DEFAULT 0;
   `)
 ];
 
