@@ -7,8 +7,9 @@ import { closeSync, existsSync, mkdirSync, openSync, readSync } from "node:fs";
 import path from "node:path";
 import { readCostSignal } from "./cost";
 import { verifyCapability } from "./capability";
-import { enterUsageWorkspace } from "./usage";
-import { CALENDAR_APPS, calendarAppStatuses, type CostSignal } from "@crossline/core";
+import { currentUsageWorkspace, enterUsageWorkspace } from "./usage";
+import { runLocale } from "./style";
+import { CALENDAR_APPS, calendarAppStatuses, tFor, type CostSignal } from "@crossline/core";
 import { createRuntimeRegistry, type RuntimeRegistry, type RuntimeSidecar } from "./runtime-registry";
 export * from "./skill-runner";
 export * from "./model-gate";
@@ -182,7 +183,7 @@ export function webResearchBlocker(
   const host = p.join(p.dirname(executable), platform === "win32" ? "codex-code-mode-host.exe" : "codex-code-mode-host");
   if (exists(host)) return undefined;
   return { code: "WEB_RESEARCH_HOST_MISSING",
-    message: `联网查证需要 ${host}，但它不在那里，网页搜索无法启动。把已安装 Codex 应用 bin 目录里的 codex-code-mode-host.exe 复制到这个位置，或在 vendor/codex 里构建 codex-code-mode-host。` };
+    message: tFor(runLocale(undefined, currentUsageWorkspace()))("联网查证需要 {{host}}，但它不在那里，网页搜索无法启动。把已安装 Codex 应用 bin 目录里的 codex-code-mode-host.exe 复制到这个位置，或在 vendor/codex 里构建 codex-code-mode-host。", { host }) };
 }
 
 export async function startCodexAppServer(codexHome?: string): Promise<{
@@ -350,7 +351,7 @@ async function sendJsonWhenReady(response: ServerResponse, work: () => Promise<u
   response.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
   const beat = setInterval(() => { if (!response.writableEnded) response.write(" "); }, 20_000);
   try { response.end(JSON.stringify(await work())); }
-  catch { response.end(JSON.stringify({ state: "blocked", code: "SUPERVISOR_RUN_FAILED", message: "这次运行没有完成，可以重试。" })); }
+  catch { response.end(JSON.stringify({ state: "blocked", code: "SUPERVISOR_RUN_FAILED", message: tFor(runLocale(undefined, currentUsageWorkspace()))("这次运行没有完成，可以重试。") })); }
   finally { clearInterval(beat); }
 }
 
@@ -657,6 +658,8 @@ export async function startCodexSupervisor(options: {
       }
       // Every Skill run this request starts is attributed to the workspace that asked for it.
       if (callerWorkspaceId) enterUsageWorkspace(callerWorkspaceId);
+      // What a route answers the person is in the caller's language (docs/i18n.md).
+      const say = (key: string) => tFor(runLocale(undefined, callerWorkspaceId || undefined))(key);
       if (request.method === "POST" && pathname === "/v1/captures/auto-analyze" && options.autoAnalyzeCaptures) {
         if (request.headers.origin || !request.headers["content-type"]?.startsWith("application/json")) {
           sendJson(response, 403, { blocker: { code: "ANALYSIS_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
@@ -676,7 +679,7 @@ export async function startCodexSupervisor(options: {
         // The context pack is the person's whole open state, so larger than the other bodies; the caller is already verified above.
         const body = await readJsonBody(request, 2_000_000);
         if (!body || typeof body.text !== "string" || !body.text.trim() || typeof body.conversationId !== "string" || typeof body.pack !== "object") {
-          sendJson(response, 400, { blocker: { code: "CONVERSATION_TURN_INVALID", message: "缺少会话、内容或上下文" } });
+          sendJson(response, 400, { blocker: { code: "CONVERSATION_TURN_INVALID", message: say("缺少会话、内容或上下文") } });
           return;
         }
         const controller = new AbortController();
@@ -761,7 +764,7 @@ export async function startCodexSupervisor(options: {
         const rt = await modelClient(response, callerWorkspaceId); if (!rt) return;
         const id = prepareRoute[1]!;
         if (preparing.has(id)) {
-          sendJson(response, 409, { blocker: { code: "MATERIALS_ALREADY_PREPARING", message: "该作业的材料准备已在运行" } });
+          sendJson(response, 409, { blocker: { code: "MATERIALS_ALREADY_PREPARING", message: say("该作业的材料准备已在运行") } });
           return;
         }
         // Answered immediately, not when the run finishes: preparation takes minutes, and the outcome
@@ -779,7 +782,7 @@ export async function startCodexSupervisor(options: {
         }
         const rt = await modelClient(response, callerWorkspaceId); if (!rt) return;
         const key = `portrait:${callerWorkspaceId}`;
-        if (preparing.has(key)) { sendJson(response, 409, { blocker: { code: "PORTRAIT_ALREADY_WRITING", message: "画像报告正在生成" } }); return; }
+        if (preparing.has(key)) { sendJson(response, 409, { blocker: { code: "PORTRAIT_ALREADY_WRITING", message: say("画像报告正在生成") } }); return; }
         preparing.add(key);
         runDetached(() => options.writePortrait!(callerWorkspaceId), () => preparing.delete(key));
         sendJson(response, 202, { started: true });
@@ -793,7 +796,7 @@ export async function startCodexSupervisor(options: {
         }
         const rt = await modelClient(response, callerWorkspaceId); if (!rt) return;
         const id = tutorialRoute[1]!;
-        if (preparing.has(id)) { sendJson(response, 409, { blocker: { code: "MATERIALS_ALREADY_PREPARING", message: "该任务的教程已在生成" } }); return; }
+        if (preparing.has(id)) { sendJson(response, 409, { blocker: { code: "MATERIALS_ALREADY_PREPARING", message: say("该任务的教程已在生成") } }); return; }
         preparing.add(id);
         runDetached(() => options.buildTutorial!(id, callerWorkspaceId), () => preparing.delete(id));
         sendJson(response, 202, { started: true });
@@ -810,7 +813,7 @@ export async function startCodexSupervisor(options: {
         const rt = await modelClient(response, callerWorkspaceId); if (!rt) return;
         const id = gateRoute[1]!;
         if (judging.has(id)) {
-          sendJson(response, 409, { blocker: { code: "GATE_ALREADY_RUNNING", message: "该作业的闸门判定已在运行" } });
+          sendJson(response, 409, { blocker: { code: "GATE_ALREADY_RUNNING", message: say("该作业的闸门判定已在运行") } });
           return;
         }
         judging.add(id);
@@ -829,7 +832,7 @@ export async function startCodexSupervisor(options: {
         const rt = await modelClient(response, callerWorkspaceId); if (!rt) return;
         const today = explainRoute[1]!;
         if (explaining.has(callerWorkspaceId)) {
-          sendJson(response, 409, { blocker: { code: "PLAN_EXPLAIN_ALREADY_RUNNING", message: "计划解释已在运行" } });
+          sendJson(response, 409, { blocker: { code: "PLAN_EXPLAIN_ALREADY_RUNNING", message: say("计划解释已在运行") } });
           return;
         }
         const body = await readJsonBody(request).catch(() => undefined) as { ranking?: unknown } | undefined;
@@ -846,7 +849,7 @@ export async function startCodexSupervisor(options: {
         }
         const rt = await modelClient(response, callerWorkspaceId); if (!rt) return;
         if (insighting.has(callerWorkspaceId)) {
-          sendJson(response, 409, { blocker: { code: "WEEKLY_INSIGHT_ALREADY_RUNNING", message: "周复盘洞察已在运行" } });
+          sendJson(response, 409, { blocker: { code: "WEEKLY_INSIGHT_ALREADY_RUNNING", message: say("周复盘洞察已在运行") } });
           return;
         }
         insighting.add(callerWorkspaceId);
@@ -863,9 +866,9 @@ export async function startCodexSupervisor(options: {
             rt.request("app/installed", { forceRefresh: true }),
             rt.request("app/read", { appIds: CALENDAR_APPS.map((item) => item.connectorId) }).catch(() => undefined)
           ]);
-          sendJson(response, 200, { apps: calendarAppStatuses(installed, metadata) });
+          sendJson(response, 200, { apps: calendarAppStatuses(installed, metadata, runLocale(undefined, callerWorkspaceId || undefined)) });
         } catch (error) {
-          sendJson(response, 502, { blocker: { code: "APPS_UNAVAILABLE", message: error instanceof Error ? error.message : "读取连接状态失败" } });
+          sendJson(response, 502, { blocker: { code: "APPS_UNAVAILABLE", message: error instanceof Error ? error.message : say("读取连接状态失败") } });
         }
         return;
       }
@@ -875,7 +878,7 @@ export async function startCodexSupervisor(options: {
         try { sendJson(response, 200, await options.listCalendarSources(callerWorkspaceId)); }
         catch (error) {
           sendJson(response, 502, { blocker: { code: "GRAPH_CALENDARS_UNAVAILABLE",
-            message: error instanceof Error ? error.message : "读取日历列表失败" } });
+            message: error instanceof Error ? error.message : say("读取日历列表失败") } });
         }
         return;
       }
@@ -887,13 +890,13 @@ export async function startCodexSupervisor(options: {
         const body = await readJsonBody(request).catch(() => undefined) as { keys?: unknown } | undefined;
         const keys = Array.isArray(body?.keys) ? body.keys.filter((key): key is string => typeof key === "string") : undefined;
         if (!keys) {
-          sendJson(response, 400, { blocker: { code: "CALENDAR_KEYS_REQUIRED", message: "需要 keys 数组" } });
+          sendJson(response, 400, { blocker: { code: "CALENDAR_KEYS_REQUIRED", message: say("需要 keys 数组") } });
           return;
         }
         try { sendJson(response, 200, await options.saveCalendarSources(callerWorkspaceId, keys)); }
         catch (error) {
           sendJson(response, 502, { blocker: { code: "GRAPH_CALENDARS_UNAVAILABLE",
-            message: error instanceof Error ? error.message : "保存日历选择失败" } });
+            message: error instanceof Error ? error.message : say("保存日历选择失败") } });
         }
         return;
       }
@@ -911,7 +914,7 @@ export async function startCodexSupervisor(options: {
           if (request.method === "POST" && (pathname === "/v1/sources/folders/preview" || pathname === "/v1/sources/folders")) {
             const body = await readJsonBody(request).catch(() => undefined) as { path?: unknown; exclude?: unknown; include?: unknown; names?: unknown } | undefined;
             if (typeof body?.path !== "string" || !body.path.trim() || body.path.length > 1000) {
-              sendJson(response, 400, { blocker: { code: "FOLDER_PATH_REQUIRED", message: "需要文件夹路径" } });
+              sendJson(response, 400, { blocker: { code: "FOLDER_PATH_REQUIRED", message: say("需要文件夹路径") } });
               return;
             }
             sendJson(response, 200, await (pathname.endsWith("/preview") ? folders.preview(callerWorkspaceId, body.path, strings(body.names))
@@ -921,18 +924,18 @@ export async function startCodexSupervisor(options: {
           if (request.method === "DELETE" && one && (!one[2] || one[2] === "/purge")) { sendJson(response, 200, await folders.remove(callerWorkspaceId, one[1]!, one[2] === "/purge")); return; }
           if (request.method === "POST" && one?.[2] === "/exclusions") {
             const body = await readJsonBody(request).catch(() => undefined) as { exclude?: unknown; include?: unknown; names?: unknown } | undefined;
-            if (!Array.isArray(body?.exclude) || !Array.isArray(body?.include)) { sendJson(response, 400, { blocker: { code: "FOLDER_RULES_REQUIRED", message: "需要 exclude 与 include 数组" } }); return; }
+            if (!Array.isArray(body?.exclude) || !Array.isArray(body?.include)) { sendJson(response, 400, { blocker: { code: "FOLDER_RULES_REQUIRED", message: say("需要 exclude 与 include 数组") } }); return; }
             sendJson(response, 200, await folders.setRules(callerWorkspaceId, one[1]!, { exclude: strings(body.exclude), include: strings(body.include), names: strings(body.names) }));
             return;
           }
           if (request.method === "POST" && one?.[2] === "/lines") {
             const body = await readJsonBody(request).catch(() => undefined) as { lines?: unknown } | undefined;
             const lines = Array.isArray(body?.lines) ? body.lines.filter((line): line is string => typeof line === "string" && line.length <= 80) : undefined;
-            if (!lines) { sendJson(response, 400, { blocker: { code: "FOLDER_LINES_REQUIRED", message: "需要 lines 数组" } }); return; }
+            if (!lines) { sendJson(response, 400, { blocker: { code: "FOLDER_LINES_REQUIRED", message: say("需要 lines 数组") } }); return; }
             sendJson(response, 200, await folders.setLines(callerWorkspaceId, one[1]!, lines));
             return;
           }
-        } catch { sendJson(response, 502, { blocker: { code: "FOLDER_FAILED", message: "文件夹操作没有完成" } }); return; }
+        } catch { sendJson(response, 502, { blocker: { code: "FOLDER_FAILED", message: say("文件夹操作没有完成") } }); return; }
       }
       // A subscription link (docs/onboarding-v3.md 「日历接入」): read once here before it is kept, so a link that does not open is refused
       // now rather than failing every tick. The answer is awaited: a read takes a second or two and the person is waiting for it.
@@ -943,11 +946,11 @@ export async function startCodexSupervisor(options: {
         }
         const body = await readJsonBody(request).catch(() => undefined) as { link?: unknown; label?: unknown } | undefined;
         if (typeof body?.link !== "string" || body.link.length > 2000) {
-          sendJson(response, 400, { blocker: { code: "ICAL_LINK_INVALID", message: "需要日历链接" } });
+          sendJson(response, 400, { blocker: { code: "ICAL_LINK_INVALID", message: say("需要日历链接") } });
           return;
         }
         try { sendJson(response, 200, await options.calendarSubscriptions.add(callerWorkspaceId, { link: body.link, label: typeof body.label === "string" ? body.label : "" })); }
-        catch { sendJson(response, 502, { blocker: { code: "ICAL_ADD_FAILED", message: "没能接入这个日历" } }); }
+        catch { sendJson(response, 502, { blocker: { code: "ICAL_ADD_FAILED", message: say("没能接入这个日历") } }); }
         return;
       }
       const subscriptionMatch = /^\/v1\/calendar\/subscriptions\/([A-Za-z0-9-]{1,40})$/.exec(pathname);
@@ -957,7 +960,7 @@ export async function startCodexSupervisor(options: {
           return;
         }
         try { sendJson(response, 200, await options.calendarSubscriptions.remove(callerWorkspaceId, subscriptionMatch[1]!)); }
-        catch { sendJson(response, 502, { blocker: { code: "ICAL_REMOVE_FAILED", message: "没能移除这个日历" } }); }
+        catch { sendJson(response, 502, { blocker: { code: "ICAL_REMOVE_FAILED", message: say("没能移除这个日历") } }); }
         return;
       }
       // Pull the calendar now. The tick is fifteen minutes wide, which makes "change your calendar and
@@ -969,7 +972,7 @@ export async function startCodexSupervisor(options: {
           return;
         }
         if (syncing.has(callerWorkspaceId)) {
-          sendJson(response, 409, { blocker: { code: "SYNC_ALREADY_RUNNING", message: "日历同步已在运行" } });
+          sendJson(response, 409, { blocker: { code: "SYNC_ALREADY_RUNNING", message: say("日历同步已在运行") } });
           return;
         }
         syncing.add(callerWorkspaceId);
@@ -978,7 +981,7 @@ export async function startCodexSupervisor(options: {
         try { sendJson(response, 200, await options.syncCalendar(callerWorkspaceId)); }
         catch (error) {
           sendJson(response, 502, { blocker: { code: "GRAPH_SYNC_FAILED",
-            message: error instanceof Error ? error.message : "日历同步失败" } });
+            message: error instanceof Error ? error.message : say("日历同步失败") } });
         } finally { syncing.delete(callerWorkspaceId); }
         return;
       }
@@ -1067,7 +1070,7 @@ export async function startCodexSupervisor(options: {
         const rt = await modelClient(response, callerWorkspaceId); if (!rt) return;
         const body = await readJsonBody(request);
         const workOrderId = typeof body?.workOrderId === "string" ? body.workOrderId : "";
-        if (!/^[a-zA-Z0-9_-]{1,128}$/.test(workOrderId)) { sendJson(response, 400, { blocker: { code: "AGENT_ORDER_INVALID", message: "缺少任务编号。" } }); return; }
+        if (!/^[a-zA-Z0-9_-]{1,128}$/.test(workOrderId)) { sendJson(response, 400, { blocker: { code: "AGENT_ORDER_INVALID", message: say("缺少任务编号。") } }); return; }
         sendJson(response, 200, options.dispatchAgentTask(callerWorkspaceId, workOrderId, typeof body?.category === "string" ? body.category : undefined,
           typeof body?.stepId === "string" && /^[a-zA-Z0-9_-]{1,64}$/.test(body.stepId) ? body.stepId : undefined));
         return;
@@ -1083,7 +1086,7 @@ export async function startCodexSupervisor(options: {
         // One proposal run at a time: this Skill is premium-budget and a second concurrent run would
         // spend the window twice to answer the same question.
         if (proposing.has(callerWorkspaceId)) {
-          sendJson(response, 409, { blocker: { code: "PROPOSAL_ALREADY_RUNNING", message: "已有一次里程碑提议在运行" } });
+          sendJson(response, 409, { blocker: { code: "PROPOSAL_ALREADY_RUNNING", message: say("已有一次里程碑提议在运行") } });
           return;
         }
         const body = await readJsonBody(request);
@@ -1101,14 +1104,14 @@ export async function startCodexSupervisor(options: {
         }
         const rt = await modelClient(response, callerWorkspaceId); if (!rt) return;
         if (conversing.has(callerWorkspaceId)) {
-          sendJson(response, 409, { blocker: { code: "PROPOSAL_ALREADY_RUNNING", message: "已有一次对话在运行" } });
+          sendJson(response, 409, { blocker: { code: "PROPOSAL_ALREADY_RUNNING", message: say("已有一次对话在运行") } });
           return;
         }
         const body = await readJsonBody(request);
         const threadId = String(body?.threadId ?? "");
         const message = String(body?.message ?? "");
         if (!/^[a-zA-Z0-9_-]{1,128}$/.test(threadId) || !message.trim()) {
-          sendJson(response, 400, { blocker: { code: "PROPOSAL_CONVERSATION_INVALID", message: "缺少 threadId 或消息内容" } });
+          sendJson(response, 400, { blocker: { code: "PROPOSAL_CONVERSATION_INVALID", message: say("缺少 threadId 或消息内容") } });
           return;
         }
         const controller = new AbortController();
@@ -1126,11 +1129,11 @@ export async function startCodexSupervisor(options: {
         const body = await readJsonBody(request);
         const sessionId = String(body?.sessionId ?? "");
         if (!/^[a-zA-Z0-9_-]{1,128}$/.test(sessionId)) {
-          sendJson(response, 400, { blocker: { code: "ONBOARDING_TURN_INVALID", message: "缺少会话 id" } });
+          sendJson(response, 400, { blocker: { code: "ONBOARDING_TURN_INVALID", message: say("缺少会话 id") } });
           return;
         }
         if (profileTurns.has(callerWorkspaceId)) {
-          sendJson(response, 409, { blocker: { code: "ONBOARDING_ALREADY_RUNNING", message: "上一轮还在处理，请稍等。" } });
+          sendJson(response, 409, { blocker: { code: "ONBOARDING_ALREADY_RUNNING", message: say("上一轮还在处理，请稍等。") } });
           return;
         }
         profileTurns.add(callerWorkspaceId);
@@ -1148,11 +1151,11 @@ export async function startCodexSupervisor(options: {
         const body = await readJsonBody(request).catch(() => undefined);
         const identityId = String(body?.identityId ?? "");
         if (!/^[a-zA-Z0-9_-]{1,64}$/.test(identityId)) {
-          sendJson(response, 400, { blocker: { code: "DILIGENCE_REQUEST_INVALID", message: "缺少主线 id" } });
+          sendJson(response, 400, { blocker: { code: "DILIGENCE_REQUEST_INVALID", message: say("缺少主线 id") } });
           return;
         }
         if (diligenceRuns.has(callerWorkspaceId)) {
-          sendJson(response, 409, { blocker: { code: "DILIGENCE_ALREADY_RUNNING", message: "正在做尽调，请稍等。" } });
+          sendJson(response, 409, { blocker: { code: "DILIGENCE_ALREADY_RUNNING", message: say("正在做尽调，请稍等。") } });
           return;
         }
         diligenceRuns.add(callerWorkspaceId);
@@ -1168,7 +1171,7 @@ export async function startCodexSupervisor(options: {
         const body = await readJsonBody(request);
         const documentId = String(body?.documentId ?? "");
         if (!/^[a-zA-Z0-9_-]{1,128}$/.test(documentId)) {
-          sendJson(response, 400, { blocker: { code: "SOURCE_EXTRACT_INVALID", message: "缺少文档 id" } });
+          sendJson(response, 400, { blocker: { code: "SOURCE_EXTRACT_INVALID", message: say("缺少文档 id") } });
           return;
         }
         sendJson(response, 200, await options.extractSource(documentId, callerWorkspaceId));
@@ -1193,7 +1196,7 @@ export async function startCodexSupervisor(options: {
           return;
         }
         const rt = await modelClient(response, callerWorkspaceId); if (!rt) return;
-        if (proposing.has(callerWorkspaceId)) { sendJson(response, 409, { blocker: { code: "PROPOSAL_ALREADY_RUNNING", message: "已有一次提议在运行" } }); return; }
+        if (proposing.has(callerWorkspaceId)) { sendJson(response, 409, { blocker: { code: "PROPOSAL_ALREADY_RUNNING", message: say("已有一次提议在运行") } }); return; }
         const body = await readJsonBody(request);
         const controller = new AbortController();
         proposing.set(callerWorkspaceId, controller);
@@ -1233,7 +1236,7 @@ export async function startCodexSupervisor(options: {
           const method = body?.type === "apiKey" && typeof body.apiKey === "string" && body.apiKey.trim() ? { type: "apiKey" as const, apiKey: body.apiKey.trim() }
             : body?.type === "chatgpt" ? { type: "chatgpt" as const } : { type: "chatgptDeviceCode" as const };
           try { sendJson(response, 200, await runtimes!.login(workspace, method)); }
-          catch (error) { sendJson(response, 503, { blocker: { code: error instanceof Error && /^RUNTIME_/.test(error.message) ? error.message : "RUNTIME_LOGIN_FAILED", message: "登录没有开始" } }); }
+          catch (error) { sendJson(response, 503, { blocker: { code: error instanceof Error && /^RUNTIME_/.test(error.message) ? error.message : "RUNTIME_LOGIN_FAILED", message: say("登录没有开始") } }); }
           return;
         }
         if (request.method === "POST" && pathname === "/v1/codex/login/cancel") { await runtimes!.cancelLogin(workspace); sendJson(response, 200, { ok: true }); return; }

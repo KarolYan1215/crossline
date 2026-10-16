@@ -9,6 +9,7 @@ import { aiToolsFor, assistantAvailable, listAgentTasks, projectAgentOutputs, ty
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { learnedArchetypes } from "./archetype-curator";
 import { ownerOf } from "./owner";
+import { tOfWorkspace } from "./locale";
 import { folderDocuments } from "./source-folders";
 
 import { libraryInstruction, librarySkillsFor } from "./skill-library";
@@ -43,10 +44,12 @@ export function planningContext(store: CrosslineStore, workspaceId: string, orde
       budget -= text.length;
       return { id: `doc-${index + 1}`, name: doc.fileName, text };
     }).filter((doc) => doc.text.trim());
+  /* i18n-ignore-start: the planner's input (model-facing) and the stored 「假设」 marker */
   const facts = store.listProfileFacts(workspaceId).filter((fact) => fact.status === "confirmed" || fact.value.startsWith("假设"));
   const own = (fact: (typeof facts)[number]) => fact.projectId === order.projectId ? 0 : fact.identityId === order.identityId ? 1 : fact.identityId === "person" ? 2 : 3;
   const person = facts.filter((fact) => own(fact) < 3 && !fact.slot.startsWith(STEP_ANSWER_SLOT)).sort((a, b) => own(a) - own(b)).slice(0, 50)
     .map((fact) => `${fact.projectId ? `[${fact.projectId}] ` : ""}${fact.slot}：${fact.value.slice(0, 240)}${fact.status === "inferred" ? "（假设）" : ""}`);
+  /* i18n-ignore-end */
   const answers = facts.filter((fact) => fact.slot.startsWith(STEP_ANSWER_SLOT) && (fact.projectId === order.projectId || fact.projectId === ""))
     .map((fact) => fact.value.slice(0, 400));
   const decided = new Map(store.listEvents(workspaceId, { type: "dates.decided" }).map((event) => [event.entityId, event.payload as { superseded?: boolean; included?: string[] }]));
@@ -176,6 +179,7 @@ export function requestFinerSplits(store: CrosslineStore, workspaceId: string, n
     const title = stepPlans.find((plan) => plan.workOrderId === split.orderId)?.steps.find((step) => step.id === split.stepId)?.title ?? "";
     store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `task.steps_finer_split:${split.orderId}:${split.stepId}:${split.version}`,
       type: "task.steps_replan_requested", entityId: split.orderId,
+      // i18n-ignore: the brief for the next plan (model-facing); the page builds its own line from `finerSplit`
       payload: { feedback: `「${title}」${split.days.length} 天没做成：${FINER_SPLIT_FEEDBACK}`, finerSplit: { stepId: split.stepId, version: split.version, title, days: split.days } } });
   }
   return splits;
@@ -199,10 +203,11 @@ export function importantByRule(store: CrosslineStore, workspaceId: string, orde
 export function createStepPlanner(store: CrosslineStore, workspaceId: string, cwd: string, getClient: () => CodexRpcBoundary | undefined,
   options: { libraryDir?: string } = {}) {
   return async function plan(workOrderId: string, feedback = "", signal?: AbortSignal): Promise<{ state: "planned"; version: number; warnings: StepWarning[] } | { state: "blocked"; code: string; message: string }> {
+    const t = tOfWorkspace(store, workspaceId);
     const order = store.listWorkOrders(workspaceId).find((item) => item.id === workOrderId);
-    if (!order) return { state: "blocked", code: "STEP_PLAN_TASK_NOT_FOUND", message: "任务不存在" };
+    if (!order) return { state: "blocked", code: "STEP_PLAN_TASK_NOT_FOUND", message: t("任务不存在") };
     const client = getClient();
-    if (!client) return { state: "blocked", code: "CODEX_SUPERVISOR_UNAVAILABLE", message: "Codex 运行时不可用" };
+    if (!client) return { state: "blocked", code: "CODEX_SUPERVISOR_UNAVAILABLE", message: t("Codex 运行时不可用。") };
     const payload = (order.payload ?? {}) as { humanCore?: Array<{ intent: string }>; automationParts?: Array<{ intent: string }>;
       evidenceContract?: Array<{ description: string }>; materialContract?: Array<{ description: string }>; infoRequests?: unknown[] };
     const milestone = store.listMilestones(workspaceId).filter((item) => item.id === order.milestoneId).at(-1);
@@ -262,6 +267,7 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
         const shaped = validateStepPlanShape(output, learned);
         // Units are the plan's footing: each must quote its own file verbatim, or the plan is sent back to read the file again.
         const bad = unverifiedUnits(shaped.units ?? [], grounding.documents);
+        // i18n-ignore: a repair message to the model
         if (bad.length) throw Object.assign(new Error("STEP_UNIT_UNVERIFIED"), { detail: `这些内容单元的 quote 在所注明的文件里找不到逐字原文：${bad.slice(0, 5)
           .map((unit) => `「${unit.title}」(${unit.docId})`).join("、")}。只引用 materials 中逐字出现的行；文件里没有的内容，写进 questions 问本人。` });
         return shaped;
@@ -339,6 +345,7 @@ function assumeAnswers(store: CrosslineStore, workspaceId: string, order: { iden
   for (const question of questions) {
     const slot = stepAnswerSlot(question.text);
     if (answered.has(`${order.projectId}|${slot}`) || (!question.options[0] && !fromMaterial)) continue;
+    // i18n-ignore: the stored assumption form, read back by code and by the next plan
     const value = fromMaterial ? `假设：【${question.text}】以任务材料为准${question.options[0] ? `；材料未写明时按「${question.options[0]}」` : ""}` : `假设：【${question.text}】${question.options[0]}`;
     store.upsertProfileFact({ workspaceId, identityId: order.identityId, projectId: order.projectId, slot, value,
       status: "inferred", sourceRef: "", sourceQuote: "", updatedAt: new Date().toISOString() });
@@ -419,13 +426,14 @@ export function createWarningReviewer(store: CrosslineStore, workspaceId: string
     const input = item.subject === "milestone_relation" ? relationSubject(store, workspaceId, item)
       : item.subject === "milestone_line" ? lineSubject(store, workspaceId, item)
       : item.subject === "analysis" ? analysisSubject(store, workspaceId, item) : stepSubject(store, workspaceId, item);
-    if (!input) { record({ verdict: "dismiss", notes: "已被新版本取代" }); return undefined; }
+    if (!input) { record({ verdict: "dismiss", notes: "已被新版本取代" }); return undefined; } // i18n-ignore: the ledger's own note, not shown
     const result = await runCodexSkill<ValidationReview>(client, input, { skillName: REVIEWER, cwd,
       developerInstructions: "Decide whether the warnings matter, as the Skill describes. Return raw JSON only.",
       outputSchema: VALIDATION_REVIEW_SCHEMA, prepareInput: () => input, validateOutput: validateValidationReview,
       onAudit: () => {}, timeoutMs: 30 * 60_000 });
     if (!result.ok) return undefined;
     const verdict: ValidationReview = item.revised && result.output.verdict === "redo"
+      // i18n-ignore: the ledger's own note, not shown
       ? { verdict: "dismiss", notes: `已重排过一次，保留当前版本。${result.output.notes}`.slice(0, 1200) } : result.output;
     record(verdict);
     if (verdict.verdict === "redo") {

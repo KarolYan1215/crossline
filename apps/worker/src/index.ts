@@ -21,7 +21,7 @@ import { createAgentService } from "./agent-service";
 import { createCalendarPublisher } from "./calendar-publish";
 import { repairDuplicateImports, repairFrozenRace } from "./calendar-repair";
 import { createWriteLogin } from "./calendar-write-login";
-import { AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, BACKGROUND_PAUSED, backgroundSpend, CALENDAR_SYNC_FAILURE, FIRST_DRAFTS_SETTING, grownSkillName, publicSkillName, pausedKinds, readyToStart, spendAllows, type BackgroundKind, type PlanRankingInput } from "@crossline/core";
+import { AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, BACKGROUND_PAUSED, backgroundSpend, CALENDAR_SYNC_FAILURE, htmlLang, tFor, FIRST_DRAFTS_SETTING, grownSkillName, publicSkillName, pausedKinds, readyToStart, spendAllows, type BackgroundKind, type PlanRankingInput } from "@crossline/core";
 import { createFlywheelExpander } from "./flywheel";
 import { createManualbookBuilder, pendingMaterialWorkOrders, pendingTutorials } from "./manualbook";
 import { createProgressJudge, createStepPlanner, createWarningReviewer, reportsAwaitingJudgement, requestFinerSplits, settleOldQuestions, tasksAwaitingStepPlan, warningsAwaitingReview } from "./step-planner";
@@ -34,6 +34,7 @@ import { createInsightCompiler, linesAwaitingMineSkill } from "./insight-compile
 import { cleanPublicSkills, createSkillScout, scoutDue } from "./public-skills";
 import { browserProfilesRoot, cleanGrownSkills, finishWorkflowLogin, growCandidates, growTask, installGrown, markWorkflowRun, openWorkflowLogin, sayToPerson, startWorkflowRun,
   workflowSchedulePass } from "./workflow-smith";
+import { localeOf, tOfWorkspace } from "./locale";
 import { createGoalSplitter, linesAwaitingCandidateSplit, linesAwaitingSplit } from "./goal-splitter";
 import { createMilestoneRiskReviewer, milestonesAwaitingRiskReview } from "./milestone-risk-review";
 import { fileSourceDocuments } from "./source-filing";
@@ -205,11 +206,12 @@ async function titlePass(workspaceId: string, checkedAt: string): Promise<void> 
  */
 async function extractDocument(documentId: string, workspaceId: string) {
   const doc = analysisStore.listSourceDocuments(workspaceId).find((item) => item.id === documentId);
-  if (!doc) return { state: "blocked" as const, code: "SOURCE_NOT_FOUND", message: "找不到这个文件。" };
+  const t = tOfWorkspace(analysisStore, workspaceId);
+  if (!doc) return { state: "blocked" as const, code: "SOURCE_NOT_FOUND", message: t("找不到这个文件。") };
   if (doc.kind === "audio") return transcribeDocument(workspaceId, doc.id);
   let result;
-  try { result = await extractText(new Uint8Array(readFileSync(fileURLToPath(doc.uri))), doc.kind); }
-  catch { result = { status: "failed" as const, text: "", note: "读不到已保存的文件。" }; }
+  try { result = await extractText(new Uint8Array(readFileSync(fileURLToPath(doc.uri))), doc.kind, localeOf(analysisStore, workspaceId)); }
+  catch { result = { status: "failed" as const, text: "", note: t("读不到已保存的文件。") }; }
   analysisStore.setSourceDocumentExtraction(workspaceId, doc.id, { status: result.status, text: result.text, ...(result.note ? { note: result.note } : {}) });
   return { state: "extracted" as const, documentId: doc.id, status: result.status, characters: result.text.length };
 }
@@ -223,8 +225,8 @@ async function extractDocument(documentId: string, workspaceId: string) {
 // On the hosted beta the machine is a shared server: nobody's account reads its folders, screen or logs, and nobody gets its shell.
 const hostedBeta = process.env.CROSSLINE_PUBLIC_BETA === "1";
 const machineOwner = (workspaceId: string) => !hostedBeta && runtimeOwner(analysisStore) === workspaceId;
-const OWNER_ONLY_FOLDER = { state: "blocked" as const, code: "FOLDER_OWNER_ONLY",
-  message: "文件夹在运行 Crossline 的那台电脑上，只有那台电脑的主人能授权。请改用「添加文件」上传。" };
+const ownerOnlyFolder = (workspaceId: string) => ({ state: "blocked" as const, code: "FOLDER_OWNER_ONLY",
+  message: tOfWorkspace(analysisStore, workspaceId)("文件夹在运行 Crossline 的那台电脑上，只有那台电脑的主人能授权。请改用「添加文件」上传。") });
 const folderDeps = { dataDir, home: homedir(), readText: extractText };
 const readingFolders = new Set<string>();
 // A folder added while a pass runs would wait for the next tick (up to fifteen minutes) while its card says 「正在读取」 — four folders
@@ -375,7 +377,7 @@ async function workflowPass(workspaceId: string, checkedAt: string): Promise<voi
   const assistantOff = isPaused(analysisStore, workspaceId) || !codexSupervisor;
   try {
     const fired = workflowSchedulePass(analysisStore, workspaceId, (input, after) => assistantOff
-      ? { state: "blocked", code: "AGENT_PAUSED", message: "助手已暂停。" } : agentService.runFree(workspaceId, input, after), new Date(), browserProfilesRoot(workspaceId));
+      ? { state: "blocked", code: "AGENT_PAUSED", message: tOfWorkspace(analysisStore, workspaceId)("助手已暂停。") } : agentService.runFree(workspaceId, input, after), new Date(), browserProfilesRoot(workspaceId));
     if (fired.length) console.info(JSON.stringify({ type: "skill.grown.scheduled", checkedAt, workspaceId, fired }));
   } catch { /* next tick */ }
   if (assistantOff || growingWorkflows.has(workspaceId) || agentService.runningTasks(workspaceId).length) return;
@@ -388,7 +390,7 @@ async function workflowPass(workspaceId: string, checkedAt: string): Promise<voi
     .map((skill) => ({ name: publicSkillName(skill.id), description: skill.description })),
     ...readGrownSkills(analysisStore, workspaceId).filter((skill) => skill.status === "active" && grownHomeLine(analysisStore, workspaceId, skill) === candidate.lineId)
       .map((skill) => ({ name: grownSkillName(skill.id), description: skill.manifest.summary }))];
-  const input = growTask(candidate, identityLines(analysisStore, workspaceId).map((line) => line.id), aiToolsFor(analysisStore, workspaceId), library);
+  const input = growTask(candidate, identityLines(analysisStore, workspaceId).map((line) => line.id), aiToolsFor(analysisStore, workspaceId), library, localeOf(analysisStore, workspaceId));
   growingWorkflows.add(workspaceId);
   const started = agentService.runFree(workspaceId, input, (outcome) => {
     void installGrown(analysisStore, workspaceId, candidate, outcome, { client: codexSupervisor?.clientFor(workspaceId), cwd: repoRoot })
@@ -406,8 +408,11 @@ async function workflowPass(workspaceId: string, checkedAt: string): Promise<voi
   // Tried once per errand or request: a kind the person has not allowed is said once, not every tick.
   analysisStore.appendEvent({ ownerId: ownerOf(analysisStore, workspaceId), workspaceId, idempotencyKey: "skill.grown.attempted:" + input.taskId, type: "skill.grown.attempted",
     entityId: candidate.lineId, payload: { taskId: input.taskId, state: started.state, ...(candidate.origin.kind === "asked" ? { requestId: candidate.origin.requestId } : { taskIds: candidate.origin.taskIds }) } });
-  if (started.state === "needs_category_approval") sayToPerson(analysisStore, workspaceId, "要把「" + candidate.text.slice(0, 40) + "」固化成工作流，需要先允许助手做「" + started.label + "」这类工作。",
-    "skill_grown", "grow-needs:" + input.taskId, [{ label: "去开启", href: "/settings#automation" }]);
+  if (started.state === "needs_category_approval") {
+    const t = tOfWorkspace(analysisStore, workspaceId);
+    sayToPerson(analysisStore, workspaceId, t("要把「{{text}}」固化成工作流，需要先允许助手做「{{label}}」这类工作。", { text: candidate.text.slice(0, 40), label: t(started.label) }),
+      "skill_grown", "grow-needs:" + input.taskId, [{ label: t("去开启"), href: "/settings#automation" }]);
+  }
 }
 
 /**
@@ -499,7 +504,7 @@ async function stepPlanPass(workspaceId: string, checkedAt = new Date().toISOStr
     }
     const reviewer = createWarningReviewer(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId), (id, feedback) => planner(id, feedback),
       createRelationReviser(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId)),
-      (line, notes) => createMilestoneProposer(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))(`复核意见：${notes}`, undefined, [line], { revised: true }));
+      (line, notes) => createMilestoneProposer(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))(`复核意见：${notes}`, undefined /* i18n-ignore: the architect's brief */, [line], { revised: true }));
     for (const item of reviews) {
       const verdict = await reviewer(item).catch(() => undefined);
       if (verdict) console.info(JSON.stringify({ type: `validation.${verdict.verdict}`, checkedAt, workspaceId, subject: item.subject, entityId: item.entityId }));
@@ -709,27 +714,29 @@ let transcribeQueue: Promise<void> = Promise.resolve();
 async function transcribeDocument(workspaceId: string, documentId: string): Promise<{ state: string; documentId: string }> {
   const doc = analysisStore.listSourceDocuments(workspaceId).find((item) => item.id === documentId);
   if (!doc) return { state: "blocked", documentId };
-  const status = await transcriber.status();
+  const locale = localeOf(analysisStore, workspaceId);
+  const t = tFor(locale);
+  const status = await transcriber.status(locale);
   if (status.state !== "ready") {
     const note = status.state === "unavailable" ? status.message
-      : status.state === "downloading" ? "正在下载语音识别模型，下载完会自动开始转写。"
-      : `转写录音需要先下载语音识别模型（约 ${status.approxMegabytes} MB，一次性，之后完全离线）。`;
+      : status.state === "downloading" ? t("正在下载语音识别模型，下载完会自动开始转写。")
+      : t("转写录音需要先下载语音识别模型（约 {{mb}} MB，一次性，之后完全离线）。", { mb: status.approxMegabytes });
     analysisStore.setSourceDocumentExtraction(workspaceId, doc.id, { status: "pending", text: "", note });
     return { state: "waiting_for_model", documentId };
   }
-  analysisStore.setSourceDocumentExtraction(workspaceId, doc.id, { status: "pending", text: "", note: "正在转写…" });
+  analysisStore.setSourceDocumentExtraction(workspaceId, doc.id, { status: "pending", text: "", note: t("正在转写…") });
   transcribeQueue = transcribeQueue.then(async () => {
     try {
       const bytes = new Uint8Array(readFileSync(fileURLToPath(doc.uri)));
-      const result = await transcriber.transcribe(bytes, doc.fileName, process.env.CROSSLINE_TRANSCRIBE_LANGUAGE?.trim() || undefined);
+      const result = await transcriber.transcribe(bytes, doc.fileName, process.env.CROSSLINE_TRANSCRIBE_LANGUAGE?.trim() || undefined, locale);
       if (result.state === "transcribed") {
-        analysisStore.setSourceDocumentExtraction(workspaceId, doc.id, { status: "done", text: result.text, note: `本机转写，约 ${Math.round(result.seconds / 60)} 分钟的录音。` });
+        analysisStore.setSourceDocumentExtraction(workspaceId, doc.id, { status: "done", text: result.text, note: t("本机转写，约 {{minutes}} 分钟的录音。", { minutes: Math.round(result.seconds / 60) }) });
       } else {
         analysisStore.setSourceDocumentExtraction(workspaceId, doc.id, { status: "failed", text: "",
-          note: result.state === "failed" ? result.message : "语音识别模型还没有准备好。" });
+          note: result.state === "failed" ? result.message : t("语音识别模型还没有准备好。") });
       }
     } catch {
-      analysisStore.setSourceDocumentExtraction(workspaceId, doc.id, { status: "failed", text: "", note: "读不到已保存的录音。" });
+      analysisStore.setSourceDocumentExtraction(workspaceId, doc.id, { status: "failed", text: "", note: t("读不到已保存的录音。") });
     }
   }).catch(() => undefined);
   return { state: "transcribing", documentId };
@@ -939,8 +946,9 @@ const calendar = await (async () => {
       console.info(JSON.stringify({ type: "graph.not_signed_in" }));
       return undefined;
     }
-    const reader = (bound: GraphCredentialProvider, calendarId?: string) =>
-      new GraphReadSource({ credential: bound, futureDays: 63, ...(calendarId ? { calendarId } : {}) });
+    // Per workspace: the placeholders a reader writes (an untitled event, an unnamed calendar) are in that workspace's language.
+    const readerFor = (workspaceId: string) => (bound: GraphCredentialProvider, calendarId?: string) =>
+      new GraphReadSource({ credential: bound, futureDays: 63, ...(calendarId ? { calendarId } : {}), locale: localeOf(analysisStore, workspaceId) });
 
     // A newly signed-in account arrives with its default calendar already ticked instead of appearing
     // to do nothing — done once per real workspace (not once globally), the first time any of the three
@@ -949,7 +957,7 @@ const calendar = await (async () => {
     const ensureCatalogueSeeded = async (workspaceId: string) => {
       if (catalogueSeeded.has(workspaceId)) return;
       catalogueSeeded.add(workspaceId);
-      const catalogue = await listCatalogue(credential, analysisStore, workspaceId, reader);
+      const catalogue = await listCatalogue(credential, analysisStore, workspaceId, readerFor(workspaceId));
       seedNewAccounts(analysisStore, workspaceId, catalogue);
       console.info(JSON.stringify({
         type: "graph.calendars", workspaceId, accounts: catalogue.length,
@@ -963,7 +971,7 @@ const calendar = await (async () => {
         syncer = createGraphSync(analysisStore, workspaceId, {
           // Resolved per tick, so unticking a calendar takes effect on the next sync with no restart. One syncer over every source
           // (Graph calendars and subscriptions alike): per-source authority drops the blocks of any source not in this list.
-          sources: () => [...buildSources(analysisStore, workspaceId, credential, reader), ...subscriptionsOf(workspaceId)],
+          sources: () => [...buildSources(analysisStore, workspaceId, credential, readerFor(workspaceId)), ...subscriptionsOf(workspaceId)],
           timeZone: () => calendarZone(workspaceId)
         });
         syncers.set(workspaceId, syncer);
@@ -989,7 +997,7 @@ const calendar = await (async () => {
         }
         if (withdrew || removedBlocks) console.info(JSON.stringify({ type: "graph.foreign_calendar_withdrawn", workspaceId, removedBlocks }));
       }
-      return { state: "blocked", code: "GRAPH_LOGIN_OTHER_ACCOUNT", message: "本机的日历登录属于另一个账号；这个账号要读日历需用自己的微软账号登录。" };
+      return { state: "blocked", code: "GRAPH_LOGIN_OTHER_ACCOUNT", message: tOfWorkspace(analysisStore, workspaceId)("本机的日历登录属于另一个账号；这个账号要读日历需用自己的微软账号登录。") };
     };
     return {
       sync: async (workspaceId: string) => {
@@ -1004,17 +1012,17 @@ const calendar = await (async () => {
       listSources: async (workspaceId: string) => {
         if (await foreign(workspaceId)) return [];
         await ensureCatalogueSeeded(workspaceId);
-        const fresh = await listCatalogue(credential, analysisStore, workspaceId, reader);
+        const fresh = await listCatalogue(credential, analysisStore, workspaceId, readerFor(workspaceId));
         seedNewAccounts(analysisStore, workspaceId, fresh);
         // Re-read rather than reuse: seeding may have ticked a calendar that the first pass showed
         // unticked, and showing the person a list that is already one step stale is how a checkbox
         // ends up disagreeing with what the next sync actually reads.
-        return listCatalogue(credential, analysisStore, workspaceId, reader);
+        return listCatalogue(credential, analysisStore, workspaceId, readerFor(workspaceId));
       },
       saveSources: async (workspaceId: string, keys: string[]) => {
         if (await foreign(workspaceId)) return [];
         await ensureCatalogueSeeded(workspaceId);
-        const fresh = await listCatalogue(credential, analysisStore, workspaceId, reader);
+        const fresh = await listCatalogue(credential, analysisStore, workspaceId, readerFor(workspaceId));
         const wanted = new Set(keys);
         const selection = fresh.flatMap((account) => account.calendars
           .filter((calendar) => wanted.has(sourceKey(account.accountId, calendar.id)))
@@ -1025,7 +1033,7 @@ const calendar = await (async () => {
         // A key naming a calendar this account cannot see is dropped rather than stored: the stored
         // selection is what the next tick reads, and a source nobody can read is a permanent failure.
         saveSelection(analysisStore, workspaceId, selection);
-        return listCatalogue(credential, analysisStore, workspaceId, reader);
+        return listCatalogue(credential, analysisStore, workspaceId, readerFor(workspaceId));
       }
     };
   } catch {
@@ -1099,9 +1107,9 @@ if (!capabilitySecret) {
     // Authorized folders: a preview (what would be read) before anything is read, then the folder is kept and read in the background.
     sourceFolders: {
       preview: async (workspaceId: string, folderPath: string, names?: string[]) =>
-        machineOwner(workspaceId) ? previewFolder(folderPath, folderDeps, personNames(analysisStore, workspaceId, names)) : OWNER_ONLY_FOLDER,
+        machineOwner(workspaceId) ? previewFolder(folderPath, folderDeps, personNames(analysisStore, workspaceId, names), localeOf(analysisStore, workspaceId)) : ownerOnlyFolder(workspaceId),
       add: async (workspaceId: string, folderPath: string, rules?: { exclude?: unknown; include?: unknown; names?: unknown }) => {
-        if (!machineOwner(workspaceId)) return OWNER_ONLY_FOLDER;
+        if (!machineOwner(workspaceId)) return ownerOnlyFolder(workspaceId);
         const added = await addFolder(analysisStore, workspaceId, folderPath, folderDeps, rules);
         // Read in the background: a folder can take minutes; the page shows its progress from the folder list.
         if (added.state === "added") void folderPass(workspaceId, new Date().toISOString()).catch(() => undefined);
@@ -1109,7 +1117,7 @@ if (!capabilitySecret) {
       },
       remove: async (workspaceId: string, id: string, purge?: boolean) => removeFolder(analysisStore, workspaceId, id, { purge: Boolean(purge), dataDir }),
       setRules: async (workspaceId: string, id: string, rules: { exclude?: unknown; include?: unknown; names?: unknown }) =>
-        machineOwner(workspaceId) ? setFolderRules(analysisStore, workspaceId, id, rules, folderDeps) : OWNER_ONLY_FOLDER,
+        machineOwner(workspaceId) ? setFolderRules(analysisStore, workspaceId, id, rules, folderDeps) : ownerOnlyFolder(workspaceId),
       setLines: async (workspaceId: string, id: string, lines: string[]) => ({ saved: setFolderLines(analysisStore, workspaceId, id, lines) })
     },
     extractBackgroundFacts: (_client, captureTitle, captureContext, signal, workspaceId) =>
@@ -1131,13 +1139,14 @@ if (!capabilitySecret) {
     workflowAction: (workspaceId, id, action, service) => {
       if (action === "login") return openWorkflowLogin(analysisStore, workspaceId, id, service, browserProfilesRoot(workspaceId));
       if (action === "login_done") return finishWorkflowLogin(analysisStore, workspaceId, id, service);
+      const t = tOfWorkspace(analysisStore, workspaceId);
       const record = readGrownSkills(analysisStore, workspaceId).find((item) => item.id === id && item.status === "active");
-      if (!record) return { ok: false, code: "WORKFLOW_NOT_ACTIVE", message: "这个工作流还没启用。" };
-      if (isPaused(analysisStore, workspaceId)) return { ok: false, code: "AGENT_PAUSED", message: "助手已暂停。" };
+      if (!record) return { ok: false, code: "WORKFLOW_NOT_ACTIVE", message: t("这个工作流还没启用。") };
+      if (isPaused(analysisStore, workspaceId)) return { ok: false, code: "AGENT_PAUSED", message: t("助手已暂停。") };
       const started = startWorkflowRun(analysisStore, workspaceId, record, (input, after) => agentService.runFree(workspaceId, input, after), browserProfilesRoot(workspaceId));
       if (started.state === "started") markWorkflowRun(analysisStore, workspaceId, id, "started_by_person");
       return started.state === "started" ? { ok: true, taskId: started.taskId }
-        : { ok: false, code: started.state === "blocked" ? started.code : "AGENT_CATEGORY_NOT_APPROVED", message: started.state === "blocked" ? started.message : `助手还没获准做「${started.label}」这类工作。` };
+        : { ok: false, code: started.state === "blocked" ? started.code : "AGENT_CATEGORY_NOT_APPROVED", message: started.state === "blocked" ? started.message : t("助手还没获准做「{{label}}」这类工作。", { label: t(started.label) }) };
     },
     calendarWriteLogin: {
       start: (workspaceId: string) => calendarWriteLogin.start(workspaceId),
@@ -1145,7 +1154,7 @@ if (!capabilitySecret) {
     },
     publishCalendar: async (workspaceId, blocks, scope) => {
       const session = await getCalendarWriteSession();
-      if (!session) return { state: "blocked", code: "GRAPH_NOT_CONFIGURED", message: "没有配置 Microsoft 日历（CROSSLINE_MS_CLIENT_ID）。" };
+      if (!session) return { state: "blocked", code: "GRAPH_NOT_CONFIGURED", message: tOfWorkspace(analysisStore, workspaceId)("没有配置 Microsoft 日历（CROSSLINE_MS_CLIENT_ID）。") };
       return createCalendarPublisher(analysisStore, workspaceId, { credentialFor: (accountId) => session.credentialFor(accountId) })(blocks, scope);
     },
     explainPlan: (today, workspaceId, ranking) => getPlanExplainer(workspaceId)(today, readRanking(ranking)),
@@ -1154,7 +1163,7 @@ if (!capabilitySecret) {
     // calendar at all is told so, and nothing is recorded (it is not a failure).
     syncCalendar: async (workspaceId: string) => {
       const outcome = await syncCalendarFor(workspaceId);
-      if (!outcome) return { state: "blocked", code: "CALENDAR_NOT_CONNECTED", message: "还没有接入任何日历。" };
+      if (!outcome) return { state: "blocked", code: "CALENDAR_NOT_CONNECTED", message: tOfWorkspace(analysisStore, workspaceId)("还没有接入任何日历。") };
       recordCalendarOutcome(analysisStore, workspaceId, outcome, new Date().toISOString());
       // New events are filed under their lines in the background; the answer does not wait for the model.
       void calendarLinePass(workspaceId, new Date().toISOString()).catch(() => undefined);
@@ -1213,7 +1222,9 @@ if (process.env.CROSSLINE_RUN_ONCE === "1") {
     const devices = listPushSubscriptions(analysisStore, workspaceId);
     if (!devices.length) return false;
     const keys = loadVapidKeys(dataDir);
-    const results = await Promise.all(devices.map((device) => sendWebPush(device, message, keys)));
+    // The text is in the workspace's language; `lang` tells the phone's service worker which, for the button it adds itself.
+    const sent = { ...message, lang: htmlLang(localeOf(analysisStore, workspaceId)) };
+    const results = await Promise.all(devices.map((device) => sendWebPush(device, sent, keys)));
     removePushSubscriptions(analysisStore, workspaceId, devices.filter((_, index) => results[index] === "gone").map((device) => device.endpoint));
     return results.includes("sent");
   };

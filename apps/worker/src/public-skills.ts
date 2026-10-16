@@ -3,12 +3,13 @@ import {
   PUBLIC_SKILL_CATEGORIES, PUBLIC_SKILL_CATEGORY_LABEL, PUBLIC_SKILL_IDLE_DAYS, PUBLIC_SKILL_REVIEW_SCHEMA, SKILL_SCOUT_SCHEMA,
   finalVerdict, keepSkillScout, licenseFromText, licenseVerdict, parseGithubRepo, publicSkillFilesKey, publicSkillId, safeRepoPath,
   scanSkillFiles, skillFrontmatter, validatePublicSkillReview, validateSkillScout,
-  type PublicSkillRecord, type PublicSkillReview, type SkillCandidate, type SkillScoutAnswer, type SkillScoutContext
+  type PublicSkillRecord, type PublicSkillReview, type SkillCandidate, type SkillScoutAnswer, type SkillScoutContext, tFor, type Locale, type Translate
 } from "@crossline/core";
 import { runCodexSkill, webResearchBlocker, type CodexRpcBoundary } from "@crossline/codex";
 import { readPublicSkills, removePublicSkill, writePublicSkills, type CrosslineStore } from "@crossline/db";
 import { identityLines } from "./lines";
 import { ownerOf } from "./owner";
+import { localeOf } from "./locale";
 
 export const SKILL_SCOUT = "crossline:crossline-skill-scout";
 const REVIEWER = "crossline:crossline-validation-reviewer";
@@ -34,15 +35,16 @@ export type HttpGet = (url: string) => Promise<{ status: number; url: string; te
 export const defaultHttpGet: HttpGet = (url) => fetch(url, { redirect: "follow", signal: AbortSignal.timeout(30_000),
   headers: { "user-agent": "crossline-skill-library", accept: url.startsWith("https://api.github.com/") ? "application/vnd.github+json" : "text/plain" } });
 
-async function get(http: HttpGet, url: string): Promise<{ ok: true; text: string } | { ok: false; reason: string }> {
+// The reasons end up in the removal record Settings → Skill 库 shows: in the workspace's language.
+async function get(http: HttpGet, url: string, t: Translate = tFor(undefined)): Promise<{ ok: true; text: string } | { ok: false; reason: string }> {
   const response = await http(url).catch(() => undefined);
-  if (!response) return { ok: false, reason: "无法连接 GitHub" };
+  if (!response) return { ok: false, reason: t("无法连接 GitHub") };
   let host = "";
   try { host = new URL(response.url || url).host; } catch { /* checked below */ }
-  if (!ALLOWED_HOSTS.has(host)) return { ok: false, reason: "跳转到了 GitHub 以外的地址" };
-  if (response.status === 404) return { ok: false, reason: "仓库或目录不存在" };
-  if (response.status === 403 || response.status === 429) return { ok: false, reason: "GitHub 暂时拒绝了请求（频率限制）" };
-  if (response.status !== 200) return { ok: false, reason: `GitHub 返回 ${response.status}` };
+  if (!ALLOWED_HOSTS.has(host)) return { ok: false, reason: t("跳转到了 GitHub 以外的地址") };
+  if (response.status === 404) return { ok: false, reason: t("仓库或目录不存在") };
+  if (response.status === 403 || response.status === 429) return { ok: false, reason: t("GitHub 暂时拒绝了请求（频率限制）") };
+  if (response.status !== 200) return { ok: false, reason: t("GitHub 返回 {{status}}", { status: response.status }) };
   return { ok: true, text: await response.text() };
 }
 const json = <T,>(text: string): T | undefined => { try { return JSON.parse(text) as T; } catch { return undefined; } };
@@ -55,49 +57,50 @@ export type FetchedSkill = { commit: string; license: string; files: Array<{ pat
  * default branch's head commit, the tree under the directory, and each text file from that commit. A directory without a SKILL.md at its
  * root is not a skill.
  */
-export async function fetchSkillDirectory(candidate: { repo: string; path: string }, http: HttpGet = defaultHttpGet):
+export async function fetchSkillDirectory(candidate: { repo: string; path: string }, http: HttpGet = defaultHttpGet, locale?: Locale):
   Promise<({ ok: true } & FetchedSkill) | { ok: false; reason: string }> {
+  const t = tFor(locale);
   const repo = parseGithubRepo(candidate.repo);
   const dir = safeRepoPath(candidate.path);
-  if (!repo || dir === undefined) return { ok: false, reason: "只收 GitHub 公开仓库里的目录" };
+  if (!repo || dir === undefined) return { ok: false, reason: t("只收 GitHub 公开仓库里的目录") };
   const base = `https://api.github.com/repos/${repo.owner}/${repo.repo}`;
-  const meta = await get(http, base);
+  const meta = await get(http, base, t);
   if (!meta.ok) return meta;
   const info = json<{ default_branch?: string; license?: { spdx_id?: string } | null; private?: boolean }>(meta.text);
-  if (!info?.default_branch || info.private) return { ok: false, reason: "仓库信息读不出" };
+  if (!info?.default_branch || info.private) return { ok: false, reason: t("仓库信息读不出") };
   let license = info.license?.spdx_id ?? "";
   // A repository naming a licence that does not allow reuse stops here; one naming none may still license the skill in its own folder.
-  const declared = licenseVerdict(license);
+  const declared = licenseVerdict(license, locale);
   if (!declared.ok && license && license !== "NOASSERTION") return declared;
-  const head = await get(http, `${base}/commits/${encodeURIComponent(info.default_branch)}`);
+  const head = await get(http, `${base}/commits/${encodeURIComponent(info.default_branch)}`, t);
   if (!head.ok) return head;
   const commit = json<{ sha?: string }>(head.text)?.sha ?? "";
-  if (!/^[0-9a-f]{40}$/.test(commit)) return { ok: false, reason: "读不出提交哈希" };
-  const treeText = await get(http, `${base}/git/trees/${commit}?recursive=1`);
+  if (!/^[0-9a-f]{40}$/.test(commit)) return { ok: false, reason: t("读不出提交哈希") };
+  const treeText = await get(http, `${base}/git/trees/${commit}?recursive=1`, t);
   if (!treeText.ok) return treeText;
   const tree = json<{ tree?: Array<{ path: string; type: string; size?: number }>; truncated?: boolean }>(treeText.text);
   const prefix = dir ? `${dir}/` : "";
   const blobs = (tree?.tree ?? []).filter((entry) => entry.type === "blob" && entry.path.startsWith(prefix))
     .map((entry) => ({ path: entry.path.slice(prefix.length), full: entry.path, size: entry.size ?? 0 }));
-  if (!blobs.some((entry) => entry.path === "SKILL.md")) return { ok: false, reason: tree?.truncated ? "仓库太大，目录读不全" : "目录里没有 SKILL.md" };
-  if (blobs.length > MAX_FILES) return { ok: false, reason: `目录里有 ${blobs.length} 个文件，超过 ${MAX_FILES} 个` };
+  if (!blobs.some((entry) => entry.path === "SKILL.md")) return { ok: false, reason: tree?.truncated ? t("仓库太大，目录读不全") : t("目录里没有 SKILL.md") };
+  if (blobs.length > MAX_FILES) return { ok: false, reason: t("目录里有 {{count}} 个文件，超过 {{max}} 个", { count: blobs.length, max: MAX_FILES }) };
   if (!declared.ok) {
     const file = blobs.find((entry) => /^licen[cs]e(\.(md|txt))?$/i.test(entry.path));
-    const text = file ? await get(http, `https://raw.githubusercontent.com/${repo.owner}/${repo.repo}/${commit}/${file.full.split("/").map(encodeURIComponent).join("/")}`) : undefined;
+    const text = file ? await get(http, `https://raw.githubusercontent.com/${repo.owner}/${repo.repo}/${commit}/${file.full.split("/").map(encodeURIComponent).join("/")}`, t) : undefined;
     license = text?.ok ? licenseFromText(text.text) ?? "" : "";
-    const own = licenseVerdict(license);
-    if (!own.ok) return { ok: false, reason: file ? "目录里的许可证不是可复用的标准许可证" : "仓库与目录都没有可识别的许可证" };
+    const own = licenseVerdict(license, locale);
+    if (!own.ok) return { ok: false, reason: file ? t("目录里的许可证不是可复用的标准许可证") : t("仓库与目录都没有可识别的许可证") };
   }
   const files: FetchedSkill["files"] = [];
   const skipped: string[] = [];
   let total = 0;
   for (const blob of blobs) {
     if (!TEXT_FILE.test(blob.path) || blob.size > MAX_FILE_BYTES) { skipped.push(blob.path); continue; }
-    const raw = await get(http, `https://raw.githubusercontent.com/${repo.owner}/${repo.repo}/${commit}/${blob.full.split("/").map(encodeURIComponent).join("/")}`);
-    if (!raw.ok) return { ok: false, reason: `${blob.path}：${raw.reason}` };
+    const raw = await get(http, `https://raw.githubusercontent.com/${repo.owner}/${repo.repo}/${commit}/${blob.full.split("/").map(encodeURIComponent).join("/")}`, t);
+    if (!raw.ok) return { ok: false, reason: t("{{path}}：{{reason}}", { path: blob.path, reason: raw.reason }) };
     const bytes = Buffer.byteLength(raw.text, "utf8");
     total += bytes;
-    if (total > MAX_TOTAL_BYTES) return { ok: false, reason: "目录内容超过 600 KB" };
+    if (total > MAX_TOTAL_BYTES) return { ok: false, reason: t("目录内容超过 600 KB") };
     files.push({ path: blob.path, text: raw.text, sha256: sha256(raw.text), bytes });
   }
   return { ok: true, commit, license, files, skipped };
@@ -125,7 +128,8 @@ export function cleanPublicSkills(store: CrosslineStore, workspaceId: string, no
   store.setSetting(workspaceId, "skills.public.cleanedOn", today);
   const cutoff = now.getTime() - PUBLIC_SKILL_IDLE_DAYS * 86_400_000;
   const stale = readPublicSkills(store, workspaceId).filter((record) => Date.parse(record.lastUsedAt || record.installedAt) < cutoff);
-  for (const record of stale) removePublicSkill(store, workspaceId, record.id, `${PUBLIC_SKILL_IDLE_DAYS} 天未调用`, "system", now);
+  const t = tFor(localeOf(store, workspaceId));
+  for (const record of stale) removePublicSkill(store, workspaceId, record.id, t("{{days}} 天未调用", { days: PUBLIC_SKILL_IDLE_DAYS }), "system", now);
   return stale.map((record) => record.id);
 }
 
@@ -167,6 +171,8 @@ type Deps = { http?: HttpGet; now?: () => Date };
  */
 export function createSkillScout(store: CrosslineStore, workspaceId: string, cwd: string, getClient: () => CodexRpcBoundary | undefined, deps: Deps = {}) {
   const http = deps.http ?? defaultHttpGet;
+  const locale = localeOf(store, workspaceId);
+  const t = tFor(locale);
   return async function scout(): Promise<{ installed: string[]; updated: string[]; rejected: Array<{ name: string; reason: string }>; removed: string[] } | { blocked: string }> {
     const client = getClient();
     if (!client) return { blocked: "CODEX_SUPERVISOR_UNAVAILABLE" };
@@ -226,14 +232,14 @@ export function createSkillScout(store: CrosslineStore, workspaceId: string, cwd
     async function consider(candidate: SkillCandidate, existing: PublicSkillRecord | undefined): Promise<{ state: "installed"; id: string } | { state: "rejected"; reason: string }> {
       const reject = (reason: string, extra: Record<string, unknown> = {}) => {
         event(store, workspaceId, "skill.public.rejected", existing?.id ?? candidate.name, { name: candidate.name, repo: candidate.repo, path: candidate.path, reason, ...extra }, now.toISOString());
-        if (existing) removePublicSkill(store, workspaceId, existing.id, `新版本未通过：${reason}`, "system", now);
+        if (existing) removePublicSkill(store, workspaceId, existing.id, t("新版本未通过：{{reason}}", { reason }), "system", now);
         return { state: "rejected" as const, reason };
       };
-      const fetched = await fetchSkillDirectory(candidate, http);
+      const fetched = await fetchSkillDirectory(candidate, http, locale);
       if (!fetched.ok) return reject(fetched.reason);
       const skillText = fetched.files.find((file) => file.path === "SKILL.md")?.text ?? "";
       const front = skillFrontmatter(skillText);
-      if (!front) return reject("SKILL.md 没有 name 和 description");
+      if (!front) return reject(t("SKILL.md 没有 name 和 description"));
       const scan = scanSkillFiles(fetched.files);
       const reviewInput = { version: "crossline.public-skill-review.v1", subject: { kind: "public_skill" },
         skill: { name: front.name, description: front.description.slice(0, 600), repo: candidate.repo, path: candidate.path, commit: fetched.commit, license: fetched.license, why: candidate.why },
@@ -242,9 +248,9 @@ export function createSkillScout(store: CrosslineStore, workspaceId: string, cwd
         skillName: REVIEWER, cwd, developerInstructions: REVIEW_INSTRUCTIONS, outputSchema: PUBLIC_SKILL_REVIEW_SCHEMA, prepareInput: () => reviewInput,
         validateOutput: validatePublicSkillReview, onAudit: () => {}, timeoutMs: 30 * 60_000 });
       // Unreviewed is not installed: the scan alone misses what is written to get round it.
-      if (!reviewed.ok) return reject(`审查未完成：${reviewed.blocker.message}`, { scan });
+      if (!reviewed.ok) return reject(t("审查未完成：{{message}}", { message: reviewed.blocker.message }), { scan });
       const final = finalVerdict(scan, reviewed.output);
-      if (final === "reject") return reject(scan.injection ? "SKILL.md 含有要求模型越权或外传的语句" : reviewed.output.reasons.join("；").slice(0, 300), { scan, review: reviewed.output });
+      if (final === "reject") return reject(scan.injection ? t("SKILL.md 含有要求模型越权或外传的语句") : reviewed.output.reasons.join(locale === "en" ? "; " : "；").slice(0, 300), { scan, review: reviewed.output });
       const at = now.toISOString();
       const all = readPublicSkills(store, workspaceId);
       const id = existing?.id ?? publicSkillId(front.name, all.map((item) => item.id));

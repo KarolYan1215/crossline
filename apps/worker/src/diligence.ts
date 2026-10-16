@@ -3,7 +3,7 @@ import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import {
   DILIGENCE_OUTPUT_SCHEMA, publicHttpsUrl, profileFactId, validateDiligence, backgroundSpend,
-  type CostSignal, type DiligenceContext, type DiligenceOutput, type DiligenceSource, type DiligenceTopic
+  type CostSignal, type DiligenceContext, type DiligenceOutput, type DiligenceSource, type DiligenceTopic, tFor
 } from "@crossline/core";
 import { runCodexSkill, webResearchBlocker, type CodexRpcBoundary } from "@crossline/codex";
 import type { CrosslineStore, StoredDiligenceReport } from "@crossline/db";
@@ -11,6 +11,7 @@ import { defaultIdentityPacks } from "@crossline/identity-packs";
 
 export const DILIGENCE_SKILL = "crossline:crossline-due-diligence";
 import { ownerOf } from "./owner";
+import { localeOf } from "./locale";
 import { identityLines } from "./lines";
 /** A weekly refresh, not a loop: a line is researched again only once its last report is this old. */
 export const DILIGENCE_REFRESH_DAYS = 7;
@@ -82,6 +83,7 @@ const decode = (html: string) => html.replace(/&amp;/g, "&").replace(/&#39;|&apo
  * names a page it never read usually names a page that does not exist or does not say that, and a link that
  * resolves but whose title shares nothing with the claimed one is treated the same way.
  */
+// i18n-ignore-start: the reasons are counted, never shown
 export async function verifySource(source: DiligenceSource, deps: Pick<DiligenceDeps, "fetchImpl" | "isPublicHost">): Promise<SourceCheck> {
   let url = publicHttpsUrl(source.url);
   for (let hop = 0; hop < 4; hop += 1) {
@@ -107,6 +109,7 @@ export async function verifySource(source: DiligenceSource, deps: Pick<Diligence
   }
   return { ok: false, reason: "跳转过多" };
 }
+// i18n-ignore-end
 
 /**
  * Does a page actually say what a finding claims it says? The names and figures in the claim — Latin words of
@@ -139,17 +142,31 @@ function decidedProposals(reports: StoredDiligenceReport[], identityId: string):
       .map((proposal) => ({ title: proposal.title, decision: proposal.status as "accepted" | "rejected" })));
 }
 
+/**
+ * What the person said limits the answer: facts in a slot that names a constraint, or whose words rule something out — in Chinese or in
+ * English, since the person writes in either.
+ */
+// i18n-ignore-start: matched against what the person said
+const CONSTRAINT_SLOT = /constraint|limit|约束|限制/;
+const CONSTRAINT_WORDS = /无法|不能|不要|不做|不给|\b(can'?t|cannot|won'?t|don'?t|do not|will not|never|unable|not able to)\b/i;
+// i18n-ignore-end
+export function statedConstraints(facts: Array<{ slot: string; value: string }>): string[] {
+  return facts.filter((fact) => CONSTRAINT_SLOT.test(fact.slot) || CONSTRAINT_WORDS.test(fact.value)).map((fact) => fact.value).slice(0, 8);
+}
+
 export function createDiligenceRunner(store: CrosslineStore, workspaceId: string, cwd: string,
   getClient: () => CodexRpcBoundary | undefined, deps: Partial<DiligenceDeps> & Pick<DiligenceDeps, "readCost">) {
   const all: DiligenceDeps = { fetchImpl: fetch, isPublicHost: resolvesPublicly, now: () => new Date(), webBlocker: webResearchBlocker, ...deps };
 
   return async function run(identityId: string, options: { force?: boolean } = {}): Promise<DiligenceOutcome> {
+    const locale = localeOf(store, workspaceId);
+    const t = tFor(locale);
     const client = getClient();
-    if (!client) return { state: "blocked", code: "CODEX_SUPERVISOR_UNAVAILABLE", message: "Codex 运行时不可用。" };
+    if (!client) return { state: "blocked", code: "CODEX_SUPERVISOR_UNAVAILABLE", message: t("Codex 运行时不可用。") };
     const unavailable = all.webBlocker();
     if (unavailable) return { state: "blocked", ...unavailable };
     const pack = identityLines(store, workspaceId).find((item) => item.id === identityId);
-    if (!pack) return { state: "blocked", code: "DILIGENCE_IDENTITY_UNKNOWN", message: "没有这条主线。" };
+    if (!pack) return { state: "blocked", code: "DILIGENCE_IDENTITY_UNKNOWN", message: t("没有这条主线。") };
     const facts = store.listProfileFacts(workspaceId).filter((fact) => fact.identityId === identityId);
     if (facts.length < 2) return { state: "skipped", reason: "no_profile" };
 
@@ -162,12 +179,12 @@ export function createDiligenceRunner(store: CrosslineStore, workspaceId: string
 
     // Web research is discretionary spend: when the window is nearly used up, the person's own work comes first.
     const cost = await all.readCost();
-    const mode = backgroundSpend(cost).mode;
+    const mode = backgroundSpend(cost, locale).mode;
     // Stricter than material preparation: this is background work nobody is waiting on, so it stops as soon as
     // the window is tight (economy mode) and not only when it is gone.
     if (mode !== "normal") {
       return { state: "blocked", code: cost.available ? "DILIGENCE_BUDGET_LOW" : "COST_SIGNAL_UNAVAILABLE",
-        message: cost.available ? "额度已经比较紧张；尽调等额度恢复后再做。" : "读不到用量信号；尽调暂缓。" };
+        message: cost.available ? t("额度已经比较紧张；尽调等额度恢复后再做。") : t("读不到用量信号；尽调暂缓。") };
     }
 
     const topic = topicFor(identityId);
@@ -180,12 +197,12 @@ export function createDiligenceRunner(store: CrosslineStore, workspaceId: string
     const runAt = now.toISOString();
     const context: DiligenceContext = {
       version: "crossline.diligence.v1", today: runAt.slice(0, 10), timeZone,
-      identity: { id: pack.id, label: pack.label }, topic: { kind: topic, question: QUESTIONS[topic] },
+      identity: { id: pack.id, label: pack.label }, topic: { kind: topic, question: t(QUESTIONS[topic]) },
       projects: store.listProjects(workspaceId).filter((project) => project.identityId === identityId)
         .map(({ id, name, summary }) => ({ id, name, summary })),
       facts: facts.map((fact) => ({ id: profileFactId(fact), projectId: fact.projectId, slot: fact.slot, value: fact.value, status: fact.status })),
       // Whatever the person said limits the answer: stated constraints are facts in the slots that name them.
-      constraints: facts.filter((fact) => /constraint|limit|约束|限制/.test(fact.slot) || /无法|不能|不要|不做|不给/.test(fact.value)).map((fact) => fact.value).slice(0, 8),
+      constraints: statedConstraints(facts),
       alreadyDecided: decidedProposals(reports, identityId)
     };
     store.saveDiligenceReport({ id: reportId, ownerId, workspaceId, scope: identityId, question: context.topic.question,
@@ -225,14 +242,14 @@ export function createDiligenceRunner(store: CrosslineStore, workspaceId: string
     if (!findings.length) {
       store.saveDiligenceReport({ id: reportId, ownerId, workspaceId, scope: identityId, question: context.topic.question,
         findings: [], proposals: [], sources: [], status: "failed", runAt,
-        note: `没有一个来源能被核实（${droppedSources} 个来源被丢弃），所以没有写入任何结论。` });
-      return { state: "blocked", code: "DILIGENCE_NO_VERIFIED_SOURCE", message: "没有一个来源能被核实，所以没有写入任何结论。" };
+        note: t("没有一个来源能被核实（{{count}} 个来源被丢弃），所以没有写入任何结论。", { count: droppedSources }) });
+      return { state: "blocked", code: "DILIGENCE_NO_VERIFIED_SOURCE", message: t("没有一个来源能被核实，所以没有写入任何结论。") };
     }
     store.saveDiligenceReport({ id: reportId, ownerId, workspaceId, scope: identityId, question: context.topic.question,
       findings, proposals, sources, status: "done", runAt,
       ...(result.output.gaps.length || droppedSources || unsupported
-        ? { note: [...result.output.gaps, ...(droppedSources ? [`${droppedSources} 个来源无法核实，已丢弃。`] : []),
-            ...(unsupported ? [`${unsupported} 处引用与所引页面的内容对不上，已去掉。`] : [])].join("；") } : {}) });
+        ? { note: [...result.output.gaps, ...(droppedSources ? [t("{{count}} 个来源无法核实，已丢弃。", { count: droppedSources })] : []),
+            ...(unsupported ? [t("{{count}} 处引用与所引页面的内容对不上，已去掉。", { count: unsupported })] : [])].join(locale === "en" ? " " : "；") } : {}) });
     store.appendEvent({ ownerId, workspaceId, idempotencyKey: `diligence:done:${reportId}`, type: "diligence.done", entityId: reportId,
       payload: { identityId, topic, findings: findings.length, proposals: proposals.length, droppedSources } });
     return { state: "done", reportId, findings: findings.length, proposals: proposals.length, droppedSources };

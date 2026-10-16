@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { publicHttpsUrl } from "@crossline/core";
+import { publicHttpsUrl, tFor, type Locale } from "@crossline/core";
 import { resolvesPublicly } from "./diligence";
 
 /**
@@ -18,7 +18,8 @@ export const defaultSafeGetDeps = (): SafeGetDeps => ({ fetchImpl: fetch, isPubl
 
 export type SafeGetResult =
   | { ok: true; finalUrl: string; status: number; contentType: string; bytes: Uint8Array; sha256: string }
-  | { ok: false; reason: string };
+  /** `reason` is shown to the person (in `options.locale`); `status` is the page's own answer when it gave one, for code to read. */
+  | { ok: false; reason: string; status?: number };
 
 const ALLOWED_TYPES = ["application/pdf", "text/html", "application/xhtml+xml", "text/plain", "text/markdown"];
 
@@ -44,33 +45,34 @@ async function readCapped(response: Response, maxBytes: number): Promise<Uint8Ar
 
 export async function safeGet(address: string, deps: SafeGetDeps, options: { maxBytes: number; timeoutMs?: number;
   /** Content types accepted instead of the page types (a calendar subscription reads `text/calendar`). */
-  types?: string[] }): Promise<SafeGetResult> {
+  types?: string[]; locale?: Locale | undefined }): Promise<SafeGetResult> {
+  const t = tFor(options.locale);
   const allowed = options.types ?? ALLOWED_TYPES;
   let url = publicHttpsUrl(address);
   for (let hop = 0; hop < 4; hop += 1) {
-    if (!url) return { ok: false, reason: "地址不是公开的 https 页面" };
-    if (!(await deps.isPublicHost(url.hostname))) return { ok: false, reason: "域名解析到非公开地址" };
+    if (!url) return { ok: false, reason: t("地址不是公开的 https 页面") };
+    if (!(await deps.isPublicHost(url.hostname))) return { ok: false, reason: t("域名解析到非公开地址") };
     let response: Response;
     try {
       response = await deps.fetchImpl(url.toString(), {
         redirect: "manual", signal: AbortSignal.timeout(options.timeoutMs ?? 30_000),
         headers: { "user-agent": "Crossline/1.0 (personal research; local)", accept: allowed.join(",") }
       });
-    } catch { return { ok: false, reason: "打不开" }; }
+    } catch { return { ok: false, reason: t("打不开") }; }
     if (response.status >= 300 && response.status < 400) {
       const location = response.headers.get("location");
       try { url = location ? publicHttpsUrl(new URL(location, url).toString()) : undefined; } catch { url = undefined; }
       continue;
     }
-    if (response.status < 200 || response.status >= 300) return { ok: false, reason: `返回 ${response.status}` };
+    if (response.status < 200 || response.status >= 300) return { ok: false, reason: t("返回 {{status}}", { status: response.status }), status: response.status };
     const contentType = (response.headers.get("content-type") ?? "").split(";")[0]!.trim().toLowerCase();
-    if (!allowed.includes(contentType)) return { ok: false, reason: `内容类型 ${contentType || "未知"} 不在允许范围内` };
+    if (!allowed.includes(contentType)) return { ok: false, reason: t("内容类型 {{type}} 不在允许范围内", { type: contentType || t("未知") }) };
     let bytes: Uint8Array | undefined;
-    try { bytes = await readCapped(response, options.maxBytes); } catch { return { ok: false, reason: "读取中断" }; }
-    if (!bytes) return { ok: false, reason: `超过 ${Math.round(options.maxBytes / 1_000_000)} MB 上限` };
+    try { bytes = await readCapped(response, options.maxBytes); } catch { return { ok: false, reason: t("读取中断") }; }
+    if (!bytes) return { ok: false, reason: t("超过 {{mb}} MB 上限", { mb: Math.round(options.maxBytes / 1_000_000) }) };
     return { ok: true, finalUrl: url.toString(), status: response.status, contentType, bytes, sha256: createHash("sha256").update(bytes).digest("hex") };
   }
-  return { ok: false, reason: "跳转过多" };
+  return { ok: false, reason: t("跳转过多") };
 }
 
 /** arXiv's abstract page is a web page; the paper itself is at `/pdf/<id>`. */

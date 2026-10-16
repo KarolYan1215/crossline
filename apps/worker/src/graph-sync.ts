@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { isCancelledEvent, realityChanges, syncWindowDays, toRealityBlock, type RealityBlock, type RealityChange } from "@crossline/core";
+import { isCancelledEvent, realityChanges, syncWindowDays, tFor, toRealityBlock, type RealityBlock, type RealityChange } from "@crossline/core";
+import { localeOf } from "./locale";
 import { reconcileExternalItems, type ExternalItem, type GraphDeltaPage } from "@crossline/connectors";
 import type { CrosslineStore } from "@crossline/db";
 
@@ -109,10 +110,12 @@ export function createGraphSync(store: CrosslineStore, workspaceId: string, opti
 }) {
   const now = options.now ?? (() => new Date());
   return async function sync(): Promise<SyncOutcome> {
+    const locale = localeOf(store, workspaceId);
+    const t = tFor(locale);
     const timeZone = typeof options.timeZone === "function" ? options.timeZone() : options.timeZone;
     const sources = options.sources();
     if (!sources.length) {
-      return { state: "blocked", code: "GRAPH_NO_CALENDAR_SELECTED", message: "没有勾选任何日历；在连接页选一个再同步。" };
+      return { state: "blocked", code: "GRAPH_NO_CALENDAR_SELECTED", message: t("没有勾选任何日历；在连接页选一个再同步。") };
     }
 
     const days = new Set(syncWindowDays(now(), WINDOW_DAYS, timeZone));
@@ -146,7 +149,7 @@ export function createGraphSync(store: CrosslineStore, workspaceId: string, opti
       const blocks: RealityBlock[] = [];
       let skipped = 0;
       for (const item of reconciled) {
-        const block = toRealityBlock(item, timeZone, { key: source.key, label: source.label });
+        const block = toRealityBlock(item, timeZone, { key: source.key, label: source.label }, locale);
         // Outside the window is not a skip worth reporting: the delta range is wider than the plan on
         // purpose, so that a change just beyond the edge is already known when the window rolls onto it.
         if (!block) { skipped += 1; continue; }
@@ -165,7 +168,7 @@ export function createGraphSync(store: CrosslineStore, workspaceId: string, opti
       .map((entry) => ({ key: entry.source.key, label: entry.source.label, code: (entry as { code: string }).code }));
     // Every source failing is the old single-source failure, and the old answer is still the right one.
     if (!read.length) {
-      return { state: "blocked", code: failed[0]?.code ?? "GRAPH_SYNC_FAILED", message: "读取日历失败；计划中的现实轨保持原样。" };
+      return { state: "blocked", code: failed[0]?.code ?? "GRAPH_SYNC_FAILED", message: t("读取日历失败；计划中的现实轨保持原样。") };
     }
 
     const skipped = read.reduce((total, entry) => total + entry.skipped, 0);
@@ -225,7 +228,7 @@ export function createGraphSync(store: CrosslineStore, workspaceId: string, opti
     next = next.filter((block) => days.has(block.day))
       .sort((a, b) => a.day.localeCompare(b.day) || a.start.localeCompare(b.start) || a.id.localeCompare(b.id));
 
-    const changes = realityChanges(previous, next, today);
+    const changes = realityChanges(previous, next, today, locale);
     if (!changes.length) {
       return {
         state: "synced", imported: next.length, skipped, changes: 0,

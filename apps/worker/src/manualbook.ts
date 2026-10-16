@@ -10,7 +10,8 @@ import {
 } from "@crossline/core";
 import { runCodexSkill, webResearchBlocker, type CodexRpcBoundary } from "@crossline/codex";
 import { aiToolsFor, listAgentTasks, type CrosslineStore } from "@crossline/db";
-import { aiToolBrief, requiredApproval } from "@crossline/core";
+import { aiToolBrief, requiredApproval, tFor, type Locale } from "@crossline/core";
+import { localeOf } from "./locale";
 import { claimedTitleMatches } from "./diligence";
 import { arxivPdfAddress, defaultSafeGetDeps, htmlToText, safeGet, type SafeGetDeps } from "./safe-fetch";
 import { extractText } from "./extract";
@@ -23,6 +24,7 @@ import { ownerOf } from "./owner";
 import { startingWithin } from "./schedule-window";
 import { planningContext } from "./step-planner";
 
+// i18n-ignore-start: instructions to the Skills (model-facing)
 const DESIGN_INSTRUCTIONS = "Design how this one task gets done, as a short flow of steps a person can follow from left to "
   + "right. Return only the requested JSON. Every step is concrete (what to do, in what order, how you know it is done), "
   + "serves at least one item of the task's contract by id, and a step that needs material the person does not have "
@@ -46,6 +48,7 @@ const WRITE_INSTRUCTIONS = "Write up ONE step of a task from the supplied source
   + "Concise and complete: cover everything this one step needs and nothing that belongs to another step; say each point once (the analysis "
   + "does not repeat the tutorial); a source's note says only what matters for this step, not what it already said for others. "
   + "Return only the requested JSON. Write in Chinese.";
+// i18n-ignore-end
 
 export type ManualProgress = { stage: "designing" | "researching" | "writing" | "assembling"; done: number; total: number };
 export type ManualOutcome =
@@ -68,7 +71,7 @@ type KeptSource = {
   /** The downloaded file itself, held only until it is written into the manualbook folder. */
   raw?: Uint8Array;
 };
-type NodeResult = { node: ManualNode; sources: KeptSource[]; gaps: string[]; writeup: NodeWriteup | undefined; note?: string };
+type NodeResult = { node: ManualNode; sources: KeptSource[]; gaps: string[]; writeup: NodeWriteup | undefined; note?: string; noteReason?: string };
 
 const TEXT_PER_SOURCE = 12_000;
 const DOWNLOADS_PER_NODE = 3;
@@ -142,23 +145,25 @@ export function createManualbookBuilder(store: CrosslineStore, workspaceId: stri
    */
   return async function build(workOrderId: string, options: { mode?: "prepare" | "tutorial" } = {}): Promise<ManualOutcome> {
     const mode = options.mode ?? "prepare";
+    const locale = localeOf(store, workspaceId);
+    const t = tFor(locale);
     const blocked = (code: string, message: string): ManualOutcome => ({ state: "blocked", workOrderId, code, message });
     const client = getClient();
-    if (!client) return blocked("CODEX_SUPERVISOR_UNAVAILABLE", "模型服务不可用；可手动准备材料。");
-    if (!/^[a-zA-Z0-9_-]{1,128}$/.test(workOrderId)) return blocked("MATERIAL_PATH_OUTSIDE_ROOT", "作业 id 不合法。");
+    if (!client) return blocked("CODEX_SUPERVISOR_UNAVAILABLE", t("模型服务不可用；可手动准备材料。"));
+    if (!/^[a-zA-Z0-9_-]{1,128}$/.test(workOrderId)) return blocked("MATERIAL_PATH_OUTSIDE_ROOT", t("作业 id 不合法。"));
     const order = store.getWorkOrder(workspaceId, workOrderId);
-    if (!order) return blocked("WORK_ORDER_NOT_FOUND", "找不到该作业。");
-    if (mode === "prepare" && order.state !== "preparing") return blocked("MATERIALS_NOT_PREPARING", "作业当前不在材料准备阶段。");
-    if (mode === "tutorial" && !["approved", "preparing", "ready_for_human", "active"].includes(order.state)) return blocked("TUTORIAL_NOT_AVAILABLE", "任务当前状态不需要教程。");
+    if (!order) return blocked("WORK_ORDER_NOT_FOUND", t("找不到该作业。"));
+    if (mode === "prepare" && order.state !== "preparing") return blocked("MATERIALS_NOT_PREPARING", t("作业当前不在材料准备阶段。"));
+    if (mode === "tutorial" && !["approved", "preparing", "ready_for_human", "active"].includes(order.state)) return blocked("TUTORIAL_NOT_AVAILABLE", t("任务当前状态不需要教程。"));
     const ownerId = ownerOf(store, workspaceId);
     const today = (process.env.CROSSLINE_FIXED_NOW ? new Date(process.env.CROSSLINE_FIXED_NOW) : all.now()).toISOString().slice(0, 10);
     const context = buildManualContext(store, workspaceId, workOrderId, today)!;
-    if (!context.contract.length) return blocked("MATERIALS_NOT_REQUIRED", "该任务没有步骤、材料或证据要求，无法生成教程。");
+    if (!context.contract.length) return blocked("MATERIALS_NOT_REQUIRED", t("该任务没有步骤、材料或证据要求，无法生成教程。"));
     // The person's own files for this task (a homework sheet, the syllabus), read from the app's copy and given to every step's writer.
     const projectName = store.listProjects(workspaceId, { includeArchived: true }).find((project) => project.id === order.projectId)?.name;
     const uploads: KeptSource[] = relevantDocuments(store.listSourceDocuments(workspaceId), { projectId: order.projectId, projectName })
       .filter((doc) => doc.extractedText.trim()).slice(0, 4).map((doc, index) => ({ id: `upload-${index + 1}`, url: `local:${doc.id}`, title: doc.fileName,
-        publisher: "本人上传", kind: "upload", summary: doc.extractedText.trim().slice(0, 300), kept: "full_text" as const, verdict: "本人上传的文件",
+        publisher: t("本人上传"), kind: "upload", summary: doc.extractedText.trim().slice(0, 300), kept: "full_text" as const, verdict: t("本人上传的文件"),
         fetchedAt: all.now().toISOString(), docId: doc.id, text: doc.extractedText.slice(0, TEXT_PER_SOURCE) }));
     // What the assistant prepared for this task (a formula sheet, a problem list) is material the tutorial builds on and links to.
     for (const task of listAgentTasks(store, workspaceId).filter((item) => item.workOrderId === workOrderId && item.status !== "blocked")) {
@@ -167,7 +172,7 @@ export function createManualbookBuilder(store: CrosslineStore, workspaceId: stri
         try { text = readFileSync(artifact.path, "utf8"); } catch { continue; }
         if (!text.trim()) continue;
         uploads.push({ id: `prep-${uploads.length + 1}`, url: `agent:${task.taskId}/${artifact.path}`, title: artifact.path.split(/[\\/]/).at(-1) ?? artifact.path,
-          publisher: "助手准备", kind: "prepared", summary: text.trim().slice(0, 300), kept: "full_text", verdict: "助手为此任务准备的文件",
+          publisher: t("助手准备", { context: "publisher" }), kind: "prepared", summary: text.trim().slice(0, 300), kept: "full_text", verdict: t("助手为此任务准备的文件"),
           fetchedAt: all.now().toISOString(), text: text.slice(0, TEXT_PER_SOURCE) });
       }
     }
@@ -175,9 +180,9 @@ export function createManualbookBuilder(store: CrosslineStore, workspaceId: stri
     // Discretionary spend: when the quota is gone the person prepares it themselves. A tight quota is handled one
     // level down, where the Skills step to a cheaper model instead of refusing.
     const cost = await all.readCost();
-    const spend = backgroundSpend(cost).mode;
+    const spend = backgroundSpend(cost, locale).mode;
     if (spend === "manual_core_only") {
-      return blocked(cost.available ? "MATERIAL_BUDGET_EXHAUSTED" : "COST_SIGNAL_UNAVAILABLE", cost.available ? "预算已用尽；材料请人工自备。" : "读不到用量信号；材料请人工自备。");
+      return blocked(cost.available ? "MATERIAL_BUDGET_EXHAUSTED" : "COST_SIGNAL_UNAVAILABLE", cost.available ? t("预算已用尽；材料请人工自备。") : t("读不到用量信号；材料请人工自备。"));
     }
 
     const progress = (stage: ManualProgress["stage"], done: number, total: number) => store.appendEvent({
@@ -213,20 +218,20 @@ export function createManualbookBuilder(store: CrosslineStore, workspaceId: stri
       const result: NodeResult = { node, sources: [], gaps: [], writeup: undefined };
       progress("researching", searched, nodes.length);
       searched += 1;
-      if (web) { result.gaps.push(`没有联网查资料：${web.message}`); }
+      if (web) { result.gaps.push(t("没有联网查资料：{{reason}}", { reason: web.message })); }
       else {
         const searchContext: MaterialSearchContext = { version: "crossline.manualbook.search.v1", today, task: { intent: context.workOrder.intent },
           node: { id: node.id, title: node.title, kind: node.kind, goal: node.goal, steps: node.steps,
-            researchQuestions: node.researchQuestions.length ? node.researchQuestions : [`${node.title}：${node.goal}`] },
+            researchQuestions: node.researchQuestions.length ? node.researchQuestions : [`${node.title}：${node.goal}`] /* i18n-ignore: model-facing */ },
           localFiles: context.localFiles, constraints: context.constraints };
         const found = await runCodexSkill<MaterialSearch>(client, searchContext, {
           skillName: MATERIAL_RESEARCHER_SKILL, cwd, developerInstructions: SEARCH_INSTRUCTIONS, outputSchema: MATERIAL_SEARCH_SCHEMA, allowWebSearch: true,
           prepareInput: () => searchContext, validateOutput: (output) => validateMaterialSearch(output), onAudit: () => {}, timeoutMs: 60 * 60_000
         });
-        if (!found.ok) result.gaps.push(`这一步没有找到可核实的资料：${found.blocker.message}`);
+        if (!found.ok) result.gaps.push(t("这一步没有找到可核实的资料：{{reason}}", { reason: found.blocker.message }));
         else {
           result.gaps.push(...found.output.gaps);
-          result.sources = await keepSources(found.output.sources, all, today, result.gaps);
+          result.sources = await keepSources(found.output.sources, all, today, result.gaps, locale);
         }
       }
       results.push(result);
@@ -250,24 +255,25 @@ export function createManualbookBuilder(store: CrosslineStore, workspaceId: stri
         prepareInput: () => writeContext, validateOutput: (output) => validateNodeWriteup(output, writeContext), onAudit: () => {}, timeoutMs: 60 * 60_000
       });
       if (written.ok) result.writeup = written.output;
-      else result.note = `这一步的分析和教程没有写成：${written.blocker.message}`;
+      else { result.note = t("这一步的分析和教程没有写成：{{reason}}", { reason: written.blocker.message }); result.noteReason = written.blocker.message; }
     }
     // The writer's own reason is what the person can act on (the material it was given was for another course, say): it is kept, not
     // replaced by a sentence that only says nothing was written.
     if (!results.some((result) => result.writeup)) {
-      const reason = results.map((result) => result.note).find(Boolean)?.replace(/^这一步的分析和教程没有写成：/, "") ?? "";
-      return fail("MANUALBOOK_NOTHING_WRITTEN", `每一步的分析和教程都没有写成，所以没有生成手册${reason ? `。第一步的原因：${reason}` : "。"}`);
+      const reason = results.map((result) => result.noteReason).find(Boolean) ?? "";
+      return fail("MANUALBOOK_NOTHING_WRITTEN", reason ? t("每一步的分析和教程都没有写成，所以没有生成手册。第一步的原因：{{reason}}", { reason })
+        : t("每一步的分析和教程都没有写成，所以没有生成手册。"));
     }
 
     // 4. assemble ---------------------------------------------------------------------------------------------
     progress("assembling", 0, 1);
-    const files = assemble({ design, nodes: results, context, uploads, builtAt: all.now().toISOString() });
+    const files = assemble({ design, nodes: results, context, uploads, builtAt: all.now().toISOString(), locale });
     const root = path.join(materialsDir, workOrderId);
     const staging = `${root}.building-${randomUUID().slice(0, 8)}`;
     try {
       for (const file of files) {
         const target = path.join(staging, file.path);
-        if (path.relative(staging, target).startsWith("..")) return fail("MATERIAL_PATH_OUTSIDE_ROOT", "手册里有越出目录的路径；没有写入。");
+        if (path.relative(staging, target).startsWith("..")) return fail("MATERIAL_PATH_OUTSIDE_ROOT", t("手册里有越出目录的路径；没有写入。"));
         mkdirSync(path.dirname(target), { recursive: true });
         writeFileSync(target, file.bytes);
       }
@@ -275,7 +281,7 @@ export function createManualbookBuilder(store: CrosslineStore, workspaceId: stri
       renameSync(staging, root);
     } catch {
       rmSync(staging, { recursive: true, force: true });
-      return fail("MATERIAL_PREPARATION_FAILED", "教程写入失败；可手动准备材料。");
+      return fail("MATERIAL_PREPARATION_FAILED", t("教程写入失败；可手动准备材料。"));
     }
     // A rebuild writes the same paths again; a row per path is kept, not one per build.
     const known = new Set(store.listMaterials(workspaceId, workOrderId).map((item) => item.uri));
@@ -300,17 +306,18 @@ export function createManualbookBuilder(store: CrosslineStore, workspaceId: stri
  * title, is dropped. An open-access page on a known host is downloaded in full (capped, typed, checksummed); everything
  * else keeps its link and the model's summary and nothing of the page itself.
  */
-async function keepSources(found: FoundSource[], deps: ManualbookDeps, today: string, gaps: string[]): Promise<KeptSource[]> {
+async function keepSources(found: FoundSource[], deps: ManualbookDeps, today: string, gaps: string[], locale?: Locale): Promise<KeptSource[]> {
+  const t = tFor(locale);
   const kept: KeptSource[] = [];
   let downloads = 0;
   for (const source of found.slice(0, 6)) {
-    const raw = openAccessVerdict(source);
+    const raw = openAccessVerdict(source, locale);
     // Whether downloading is allowed at all is the approval policy's word, checked here rather than assumed.
-    const verdict = raw.download && requiredApproval("download_open_access") !== "automatic" ? { download: false as const, why: "当前策略不允许自动下载" } : raw;
+    const verdict = raw.download && requiredApproval("download_open_access") !== "automatic" ? { download: false as const, why: t("当前策略不允许自动下载") } : raw;
     const fetchedAt = deps.now().toISOString();
     if (verdict.download && downloads < DOWNLOADS_PER_NODE) {
       const address = arxivPdfAddress(source.url);
-      const got = await safeGet(address, deps.safeGet, { maxBytes: MAX_PDF_BYTES, timeoutMs: 60_000 });
+      const got = await safeGet(address, deps.safeGet, { maxBytes: MAX_PDF_BYTES, timeoutMs: 60_000, locale });
       if (got.ok) {
         const isPdf = got.contentType === "application/pdf";
         const text = isPdf ? (await extractText(got.bytes, "pdf")).text : got.contentType.startsWith("text/html") || got.contentType.includes("xhtml")
@@ -322,27 +329,27 @@ async function keepSources(found: FoundSource[], deps: ManualbookDeps, today: st
             sha256: got.sha256, bytes: got.bytes.byteLength, text: text.slice(0, TEXT_PER_SOURCE), raw: got.bytes });
           continue;
         }
-        gaps.push(`「${source.title}」下载了，但内容与标题对不上，已丢弃。`);
+        gaps.push(t("「{{title}}」下载了，但内容与标题对不上，已丢弃。", { title: source.title }));
         continue;
       }
-      gaps.push(`「${source.title}」没能下载（${got.reason}）。`);
+      gaps.push(t("「{{title}}」没能下载（{{reason}}）。", { title: source.title, reason: got.reason }));
     }
     // Link and summary only: still opened, so a page that does not exist is not listed.
-    const page = await safeGet(source.url, deps.safeGet, { maxBytes: MAX_PAGE_BYTES });
+    const page = await safeGet(source.url, deps.safeGet, { maxBytes: MAX_PAGE_BYTES, locale });
     // A site that refuses automated readers (401/403) or asks them to slow down (429) answered — the page exists — but could not be read
     // here: its link and the researcher's summary are kept, marked as not checked by the app, instead of being dropped.
-    if (!page.ok && /返回 (401|403|429)$/.test(page.reason)) {
-      gaps.push(`「${source.title}」拒绝自动访问（${page.reason}），保留链接与摘要，未能自动核实。`);
+    if (!page.ok && [401, 403, 429].includes(page.status ?? 0)) {
+      gaps.push(t("「{{title}}」拒绝自动访问（{{reason}}），保留链接与摘要，未能自动核实。", { title: source.title, reason: page.reason }));
       kept.push({ id: source.id, url: source.url, title: source.title, publisher: source.publisher, kind: source.kind, summary: source.summary,
-        kept: "unverified", verdict: `网站拒绝自动访问（${page.reason}），内容未经本应用核实`, fetchedAt, text: source.summary });
+        kept: "unverified", verdict: t("网站拒绝自动访问（{{reason}}），内容未经本应用核实", { reason: page.reason }), fetchedAt, text: source.summary });
       continue;
     }
-    if (!page.ok) { gaps.push(`「${source.title}」打不开（${page.reason}），已丢弃。`); continue; }
+    if (!page.ok) { gaps.push(t("「{{title}}」打不开（{{reason}}），已丢弃。", { title: source.title, reason: page.reason })); continue; }
     if (page.contentType.startsWith("text/html") && !claimedTitleMatches(source.title, htmlToText(new TextDecoder().decode(page.bytes)).slice(0, 6000))) {
-      gaps.push(`「${source.title}」的页面内容与标题对不上，已丢弃。`); continue;
+      gaps.push(t("「{{title}}」的页面内容与标题对不上，已丢弃。", { title: source.title })); continue;
     }
     kept.push({ id: source.id, url: source.url, title: source.title, publisher: source.publisher, kind: source.kind, summary: source.summary,
-      kept: "summary_only", verdict: verdict.download ? "已达到下载数量上限：只保留链接和摘要" : verdict.why, fetchedAt, text: source.summary });
+      kept: "summary_only", verdict: verdict.download ? t("已达到下载数量上限：只保留链接和摘要") : verdict.why, fetchedAt, text: source.summary });
   }
   void today;
   return kept;
@@ -350,8 +357,10 @@ async function keepSources(found: FoundSource[], deps: ManualbookDeps, today: st
 
 type OutFile = { path: string; bytes: Uint8Array | string; mediaType: string; record: boolean; sourceRefs: string[] };
 
-function assemble(input: { design: ManualDesign; nodes: NodeResult[]; context: ManualDesignContext; uploads: KeptSource[]; builtAt: string }): Array<OutFile & { bytes: Uint8Array | string }> {
+function assemble(input: { design: ManualDesign; nodes: NodeResult[]; context: ManualDesignContext; uploads: KeptSource[]; builtAt: string; locale?: Locale }): Array<OutFile & { bytes: Uint8Array | string }> {
   const { design, nodes, context, uploads } = input;
+  // The book's headings are the ones the web's reader parses (apps/web/app/materials/tutorial-model.ts), in the workspace's language.
+  const t = tFor(input.locale);
   const files: OutFile[] = [];
   // Every material once, with what each step's writer said about it: the material's own preview page reads this.
   const materials = new Map<string, { id: string; title: string; publisher: string; url: string; docId?: string; kept: string; verdict: string; file?: string; summary: string;
@@ -384,22 +393,25 @@ function assemble(input: { design: ManualDesign; nodes: NodeResult[]; context: M
         stage: depth.get(result.node.id) ?? 0, order: order.get(result.node.id), hasWriteup: Boolean(result.writeup), sources: result.sources.length };
     }), edges: design.edges }, null, 2) });
 
-  const sourceList = (result: NodeResult) => result.sources.map((source) => `- **${source.id}** ${source.title}（${source.publisher || "—"}）${source.url}\n  - ${source.kept === "full_text" ? `已下载全文：${source.verdict}` : source.verdict}\n  - 摘要：${source.summary}`).join("\n");
+  const sourceList = (result: NodeResult) => result.sources.map((source) => [
+    t("- **{{id}}** {{title}}（{{publisher}}）{{url}}", { id: source.id, title: source.title, publisher: source.publisher || "—", url: source.url }),
+    `  - ${source.kept === "full_text" ? t("已下载全文：{{verdict}}", { verdict: source.verdict }) : source.verdict}`,
+    `  - ${t("摘要：{{summary}}", { summary: source.summary })}`].join("\n")).join("\n");
   files.push({ path: "manual.md", mediaType: "text/markdown", record: true, sourceRefs: [],
-    bytes: [`# ${context.workOrder.intent}`, "", design.overview, "", ...(design.assumptions.length ? ["## 假设", ...design.assumptions.map((item) => `- ${item}`), ""] : []),
-      "## 流程", ...nodes.map((result, index) => `${index + 1}. [${result.node.title}](nodes/${result.node.id}/task.md) — ${result.node.goal}`)].join("\n") });
+    bytes: [`# ${context.workOrder.intent}`, "", design.overview, "", ...(design.assumptions.length ? [t("## 假设"), ...design.assumptions.map((item) => `- ${item}`), ""] : []),
+      t("## 流程"), ...nodes.map((result, index) => `${index + 1}. [${result.node.title}](nodes/${result.node.id}/task.md) — ${result.node.goal}`)].join("\n") });
   for (const result of nodes) {
     const base = `nodes/${result.node.id}`;
     files.push({ path: `${base}/task.md`, mediaType: "text/markdown", record: true, sourceRefs: [],
-      bytes: [`# ${result.node.title}`, "", `**目标**：${result.node.goal}`, "", "## 步骤", ...result.node.steps.map((step, index) => `${index + 1}. ${step}`), "",
-        `## 怎样算做到\n${result.node.acceptance}`, ...(result.node.researchQuestions.length ? ["", "## 要查的问题", ...result.node.researchQuestions.map((q) => `- ${q}`)] : []),
-        ...(result.gaps.length ? ["", "## 没查到的", ...result.gaps.map((gap) => `- ${gap}`)] : [])].join("\n") });
+      bytes: [`# ${result.node.title}`, "", t("**目标**：{{goal}}", { goal: result.node.goal }), "", t("## 步骤"), ...result.node.steps.map((step, index) => `${index + 1}. ${step}`), "",
+        t("## 怎样算做到"), result.node.acceptance, ...(result.node.researchQuestions.length ? ["", t("## 要查的问题"), ...result.node.researchQuestions.map((q) => `- ${q}`)] : []),
+        ...(result.gaps.length ? ["", t("## 没查到的"), ...result.gaps.map((gap) => `- ${gap}`)] : [])].join("\n") });
     if (result.writeup) {
       const cited = result.sources.filter((source) => result.writeup!.citations.includes(source.id));
       files.push({ path: `${base}/analysis.md`, mediaType: "text/markdown", record: true, sourceRefs: cited.map((source) => source.url),
-        bytes: `# 分析：${result.node.title}\n\n${result.writeup.analysis}\n\n## 参考来源\n${sourceList(result) || "（这一步没有外部来源）"}\n` });
+        bytes: `${t("# 分析：{{title}}", { title: result.node.title })}\n\n${result.writeup.analysis}\n\n${t("## 参考来源")}\n${sourceList(result) || t("（这一步没有外部来源）")}\n` });
       files.push({ path: `${base}/tutorial.md`, mediaType: "text/markdown", record: true, sourceRefs: cited.map((source) => source.url),
-        bytes: `# 教程：${result.node.title}\n\n${result.writeup.tutorial}\n` });
+        bytes: `${t("# 教程：{{title}}", { title: result.node.title })}\n\n${result.writeup.tutorial}\n` });
     } else if (result.note) {
       files.push({ path: `${base}/analysis.md`, mediaType: "text/markdown", record: true, sourceRefs: [], bytes: `# ${result.node.title}\n\n${result.note}\n` });
     }

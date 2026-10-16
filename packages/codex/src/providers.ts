@@ -1,4 +1,5 @@
-import { capabilityGap, SKILL_NEEDS, skillKey, THIRD_PARTY_CAPABILITIES, type ProviderCapabilities } from "@crossline/core";
+import { capabilityGap, SKILL_NEEDS, skillKey, tFor, THIRD_PARTY_CAPABILITIES, type Locale, type ProviderCapabilities } from "@crossline/core";
+import { runLocale } from "./style";
 import type { SkillTools } from "./skill-runner";
 import { currentUsageWorkspace } from "./usage";
 
@@ -38,15 +39,16 @@ const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]"]);
 export const isLocalProvider = (baseUrl: string) => { try { return LOOPBACK.has(new URL(baseUrl).hostname); } catch { return false; } };
 
 /** Why a provider configuration cannot be saved, in words the person reads; undefined when it can. */
-export function providerConfigProblem(config: Pick<ProviderConfig, "id" | "kind" | "baseUrl" | "model" | "label">): string | undefined {
-  if (!/^[a-z0-9-]{1,32}$/.test(config.id)) return "名称只能用小写字母、数字和连字符。";
-  if (!["chat", "responses", "siwc-plan"].includes(config.kind)) return "接口类型不认识。";
-  if (!config.label.trim() || config.label.length > 40) return "请填一个 40 字以内的显示名称。";
+export function providerConfigProblem(config: Pick<ProviderConfig, "id" | "kind" | "baseUrl" | "model" | "label">, locale?: Locale): string | undefined {
+  const t = tFor(locale);
+  if (!/^[a-z0-9-]{1,32}$/.test(config.id)) return t("名称只能用小写字母、数字和连字符。");
+  if (!["chat", "responses", "siwc-plan"].includes(config.kind)) return t("接口类型不认识。");
+  if (!config.label.trim() || config.label.length > 40) return t("请填一个 40 字以内的显示名称。");
   let url: URL;
-  try { url = new URL(config.baseUrl); } catch { return "接口地址不是一个网址。"; }
-  if (url.username || url.password || url.search || url.hash) return "接口地址里不能带账号、参数或 #。";
-  if (url.protocol !== "https:" && !(url.protocol === "http:" && LOOPBACK.has(url.hostname))) return "接口地址必须是 https；只有本机模型（127.0.0.1）可以用 http。";
-  if (!config.model || config.model.length > 120 || /\s/.test(config.model)) return "请填写模型名（不含空格）。";
+  try { url = new URL(config.baseUrl); } catch { return t("接口地址不是一个网址。"); }
+  if (url.username || url.password || url.search || url.hash) return t("接口地址里不能带账号、参数或 #。");
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && LOOPBACK.has(url.hostname))) return t("接口地址必须是 https；只有本机模型（127.0.0.1）可以用 http。");
+  if (!config.model || config.model.length > 120 || /\s/.test(config.model)) return t("请填写模型名（不含空格）。");
   return undefined;
 }
 
@@ -94,13 +96,16 @@ export function threadProvider(routing: Pick<ProviderRouting, "provider" | "gate
  * its conformance admits the Skill; else the workspace's own Codex sign-in; else a blocker that says why, which the caller turns into
  * an ask. There is never a third option — a workspace that has neither does not borrow the machine owner's runtime.
  */
-export function decideRoute(skillName: string, routing: ProviderRouting | undefined): RouteDecision {
+export function decideRoute(skillName: string, routing: ProviderRouting | undefined, locale?: Locale): RouteDecision {
   if (!routing) return { via: "codex" };
+  // The blocker is shown to the person: in the run's language (the workspace's, unless the caller names one).
+  const language = locale ?? runLocale(undefined, currentUsageWorkspace());
+  const t = tFor(language);
   const key = skillKey(skillName);
-  const gap = capabilityGap(key, { ...THIRD_PARTY_CAPABILITIES, ...routing.capabilities });
+  const gap = capabilityGap(key, { ...THIRD_PARTY_CAPABILITIES, ...routing.capabilities }, language);
   if (!gap && routing.admitted.has(key)) return { via: "provider", provider: threadProvider(routing, routing.provider.model) };
   if (routing.codexSignedIn) return { via: "codex" };
-  const label = SKILL_NEEDS[key]?.label ?? "这项功能";
+  const label = t(SKILL_NEEDS[key]?.label ?? "这项功能");
   return gap ? { via: "blocked", code: "MODEL_CAPABILITY_MISSING", message: gap }
-    : { via: "blocked", code: "MODEL_NOT_ADMITTED", message: `${label}还没有交给「${routing.provider.label}」：它还没通过这项功能的检验。到 设置 → 模型连接 运行检验，或登录 ChatGPT。` };
+    : { via: "blocked", code: "MODEL_NOT_ADMITTED", message: t("{{feature}}还没有交给「{{provider}}」：它还没通过这项功能的检验。到 设置 → 模型连接 运行检验，或登录 ChatGPT。", { feature: label, provider: routing.provider.label }) };
 }

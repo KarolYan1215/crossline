@@ -1,6 +1,7 @@
 import { CrosslineCalendarWriter, PublishInterruptedError, type PublishBlock, type PublishLedger, type PublishResult } from "@crossline/connectors";
-import { FROZEN_SETTING, parseFrozen, withFrozen } from "@crossline/core";
+import { FROZEN_SETTING, parseFrozen, tFor, withFrozen, type Translate } from "@crossline/core";
 import type { CrosslineStore } from "@crossline/db";
+import { localeOf } from "./locale";
 
 /**
  * The plan's work blocks, written to the Crossline calendar in the person's Microsoft account.
@@ -15,8 +16,8 @@ export type PublishOutcome =
 
 const ACCOUNT = "calendar.write.account";
 const LEDGER = "calendar.published";
-const NOT_AUTHORIZED = { state: "blocked" as const, code: "CALENDAR_WRITE_NOT_AUTHORIZED",
-  message: "尚未授权写入 Crossline 日历；登录用于存放 Crossline 日历的账号后重试。" };
+const notAuthorized = (t: Translate) => ({ state: "blocked" as const, code: "CALENDAR_WRITE_NOT_AUTHORIZED",
+  message: t("尚未授权写入 Crossline 日历；登录用于存放 Crossline 日历的账号后重试。") });
 
 export function readPublishLedger(store: CrosslineStore, workspaceId: string): PublishLedger {
   try { return JSON.parse(store.getSetting(workspaceId, LEDGER) ?? "{}") as PublishLedger; } catch { return {}; }
@@ -46,10 +47,12 @@ export function createCalendarPublisher(store: CrosslineStore, workspaceId: stri
   /** `fixed`: the person's fixed events (ids `fixed:`); `work`: everything else this writer made. Each call manages only its own. */
   return (blocks: PublishBlock[], scope: "work" | "fixed" = "work"): Promise<PublishOutcome> => serialized(workspaceId, () => publishOnce(blocks, scope));
   async function publishOnce(blocks: PublishBlock[], scope: "work" | "fixed"): Promise<PublishOutcome> {
+    const locale = localeOf(store, workspaceId);
+    const t = tFor(locale);
     const accountId = store.getSetting(workspaceId, ACCOUNT);
-    if (!accountId) return NOT_AUTHORIZED;
+    if (!accountId) return notAuthorized(t);
     const writer = new CrosslineCalendarWriter({
-      credential: deps.credentialFor(accountId),
+      credential: deps.credentialFor(accountId), locale,
       ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}), ...(deps.now ? { now: deps.now } : {})
     });
     try {
@@ -79,8 +82,8 @@ export function createCalendarPublisher(store: CrosslineStore, workspaceId: stri
       // What was written before it stopped stays on record, so the next run does not take this run's own writes for the person's.
       if (error instanceof PublishInterruptedError) store.setSetting(workspaceId, LEDGER, JSON.stringify(error.ledger));
       const code = error instanceof Error ? error.message.split(":")[0]! : "CALENDAR_PUBLISH_FAILED";
-      if (code === "CALENDAR_WRITE_NOT_AUTHORIZED") return NOT_AUTHORIZED;
-      return { state: "blocked", code, message: `Crossline 日历写入未完成；其他日历未受影响。` };
+      if (code === "CALENDAR_WRITE_NOT_AUTHORIZED") return notAuthorized(t);
+      return { state: "blocked", code, message: t("Crossline 日历写入未完成；其他日历未受影响。") };
     }
   }
 }

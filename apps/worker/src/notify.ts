@@ -1,7 +1,8 @@
 import { spawn } from "node:child_process";
-import { ATTENTION_SNAPSHOT, AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, resolveAvailability, type AvailabilityWindow } from "@crossline/core";
+import { ATTENTION_SNAPSHOT, AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, monthDay, resolveAvailability, tFor, type AvailabilityWindow, type Locale } from "@crossline/core";
 import type { CrosslineStore } from "@crossline/db";
 import { ownerOf } from "./owner";
+import { localeOf } from "./locale";
 
 /**
  * Desktop notifications, in the rhythm the person chose: one morning brief, and single messages only when
@@ -38,6 +39,8 @@ export type NotifyInput = {
    * ask that would cost a deadline within two days (`urgency: "now"`) interrupts.
    */
   asks?: Array<{ id: string; title: string; urgency: "now" | "soon" | "later"; path: string }>;
+  /** The workspace's language: every message is written in it (omitted = Chinese). */
+  locale?: Locale;
 };
 
 const inWindow = (input: NotifyInput) => input.windows.some((window) => window.days.includes(input.weekday)
@@ -48,6 +51,8 @@ const firstStart = (input: NotifyInput) => input.windows.filter((window) => wind
 /** Which notifications are due now. Pure: the clock, the settings and what was already sent decide everything. */
 export function planNotifications(input: NotifyInput): PlannedNotification[] {
   if (input.level === "off") return [];
+  const t = tFor(input.locale);
+  const sep = input.locale === "en" ? "; " : "；";
   const out: PlannedNotification[] = [];
   const start = firstStart(input);
   const briefKey = `brief:${input.today}`;
@@ -57,27 +62,30 @@ export function planNotifications(input: NotifyInput): PlannedNotification[] {
   const briefEnd = `${String(Math.min(23, h! + 4)).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
   if (start && input.clock >= start && input.clock < briefEnd && !input.sent.has(briefKey)) {
     const lines = [
-      ...input.waitingDue.map((item) => `今天该到：${item.who ? `${item.who}的` : ""}${item.title}`),
-      ...input.dueSoon.map((item) => `${item.daysLeft === 0 ? "今天" : `${item.daysLeft} 天后`}到期：${item.title}`),
-      ...(input.asks ?? []).filter((ask) => ask.urgency === "now" && !ask.id.startsWith("wait:")).map((ask) => `待决：${ask.title}`)
+      ...input.waitingDue.map((item) => item.who ? t("今天该到：{{who}}的{{title}}", { who: item.who, title: item.title }) : t("今天该到：{{title}}", { title: item.title })),
+      ...input.dueSoon.map((item) => item.daysLeft === 0 ? t("今天到期：{{title}}", { title: item.title })
+        : t("{{count}} 天后到期：{{title}}", { count: item.daysLeft, title: item.title })),
+      ...(input.asks ?? []).filter((ask) => ask.urgency === "now" && !ask.id.startsWith("wait:")).map((ask) => t("待决：{{title}}", { title: ask.title }))
     ].slice(0, 3);
-    out.push({ key: briefKey, kind: "brief", path: "/", title: "今天的 Crossline",
-      body: [...lines, input.unconfirmedLastNight ? `昨晚 ${input.unconfirmedLastNight} 块待确认` : "",
-        input.pending ? `${input.pending} 项待决定` : ""].filter(Boolean).join("；") || "今日无到期事项。" });
+    out.push({ key: briefKey, kind: "brief", path: "/", title: t("今天的 Crossline"),
+      body: [...lines, input.unconfirmedLastNight ? t("昨晚 {{count}} 块待确认", { count: input.unconfirmedLastNight }) : "",
+        input.pending ? t("{{count}} 项待决定", { count: input.pending }) : ""].filter(Boolean).join(sep) || t("今日无到期事项。") });
   }
   if (!inWindow(input)) return out;
   const due = input.dueSoon.filter((item) => item.daysLeft <= 1).map((item) => ({ key: `due:${item.id}:${input.today}`, kind: "urgent" as const, path: "/milestones",
-    title: `${item.daysLeft === 0 ? "今天" : "明天"}到期：${item.title}`, body: `截止 ${item.deadline}。` }));
+    title: item.daysLeft === 0 ? t("今天到期：{{title}}", { title: item.title }) : t("明天到期：{{title}}", { title: item.title }),
+    body: t("截止 {{deadline}}。", { deadline: input.locale === "en" ? monthDay("en", item.deadline) : item.deadline }) }));
   const urgent: PlannedNotification[] = (input.asks
     ? [...input.asks.filter((ask) => ask.urgency === "now").map((ask) => ({ key: `ask:${ask.id}:${input.today}`, kind: "urgent" as const, path: ask.path,
-      title: ask.title, body: "关系到两天内的截止。打开 Crossline 选一个答案，或者让它明天再问。" })), ...due]
+      title: ask.title, body: t("关系到两天内的截止。打开 Crossline 选一个答案，或者让它明天再问。") })), ...due]
     : [
       ...input.waitingDue.map((item) => ({ key: `waiting:${item.id}:${input.today}`, kind: "urgent" as const, path: "/",
-        title: `${item.who ? `${item.who}的` : ""}${item.title}到了吗？`, body: "到了就点「到了」，依赖它的工作才会排进日历。" })),
+        title: item.who ? t("{{who}}的{{title}}到了吗？", { who: item.who, title: item.title }) : t("{{title}}到了吗？", { title: item.title }),
+        body: t("到了就点「到了」，依赖它的工作才会排进日历。") })),
       ...due,
       // A gate *run* that did not happen (logged out, quota): not a verdict on the work, and no longer titled as one.
       ...input.gateRefusals.map((item) => ({ key: `gate:${item.id}`, kind: "urgent" as const, path: "/approvals",
-        title: `验收没跑成：${item.title}`, body: item.message.slice(0, 120) }))
+        title: t("验收没跑成：{{title}}", { title: item.title }), body: item.message.slice(0, 120) }))
     ]).filter((item) => !input.sent.has(item.key));
   return [...out, ...urgent.slice(0, Math.max(0, URGENT_PER_DAY[input.level] - input.urgentSentToday))];
 }
@@ -141,7 +149,8 @@ export async function notifyPass(store: CrosslineStore, workspaceId: string, now
   let attention: { at: string; pending: number; asks: NonNullable<NotifyInput["asks"]> } | undefined;
   try { attention = JSON.parse(store.getSetting(workspaceId, ATTENTION_SNAPSHOT) || "null") ?? undefined; } catch { attention = undefined; }
   if (attention && now.getTime() - Date.parse(attention.at) > ATTENTION_FRESH_MS) attention = undefined;
-  const planned = planNotifications({ today, clock, weekday, level, windows, sent, urgentSentToday,
+  const locale = localeOf(store, workspaceId);
+  const planned = planNotifications({ today, clock, weekday, level, windows, sent, urgentSentToday, locale,
     ...(attention ? { asks: attention.asks } : {}),
     pending: attention?.pending ?? store.listWorkOrders(workspaceId).filter((order) => order.state === "awaiting_plan_approval").length
       + store.listMilestones(workspaceId).filter((milestone) => milestone.status === "draft").length,
@@ -151,7 +160,7 @@ export async function notifyPass(store: CrosslineStore, workspaceId: string, now
       .map((milestone) => ({ id: milestone.id, title: milestone.title, deadline: anchors.get(milestone.id)!, daysLeft: daysLeft(anchors.get(milestone.id)!) }))
       .filter((item) => item.daysLeft >= 0 && item.daysLeft <= 3).sort((a, b) => a.daysLeft - b.daysLeft),
     gateRefusals: store.listEvents(workspaceId, { type: "milestone_gate.blocked" }).filter((event) => event.createdAt >= since)
-      .map((event) => ({ id: event.eventId, title: orders.get(event.entityId) ?? "一项作业", message: String((event.payload as { message?: string }).message ?? "") })),
+      .map((event) => ({ id: event.eventId, title: orders.get(event.entityId) ?? tFor(locale)("一项作业"), message: String((event.payload as { message?: string }).message ?? "") })),
     unconfirmedLastNight: unconfirmedLastNight(store, workspaceId, today)
   });
   const delivered: string[] = [];

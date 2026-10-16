@@ -6,6 +6,7 @@ import { identityLines } from "./lines";
 
 export const CALENDAR_CLASSIFIER = "crossline:crossline-calendar-classifier";
 const BATCH = 40;
+// i18n-ignore: the classifier's input (model-facing)
 const WEEKDAY = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
 
 type Block = { id: string; title: string; day?: string; start: string; end: string };

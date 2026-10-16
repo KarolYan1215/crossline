@@ -10,6 +10,7 @@ import {
   requestAgentApproval, requestCategory, type CrosslineStore
 } from "@crossline/db";
 import type { AgentTaskInput } from "./agent-task";
+import { tOfWorkspace } from "./locale";
 
 /**
  * From a work order on the board to a task for the assistant, and the rules for starting one without being told.
@@ -28,11 +29,12 @@ export type TaskFromOrder = { ok: true; input: AgentTaskInput; category: AgentCa
  * marks the step done.
  */
 function taskFromStep(store: CrosslineStore, workspaceId: string, orderId: string, stepId: string, categoryOverride?: AgentCategory): TaskFromOrder {
+  const t = tOfWorkspace(store, workspaceId);
   const order = store.listWorkOrders(workspaceId).find((item) => item.id === orderId);
-  if (!order) return { ok: false, code: "ORDER_NOT_FOUND", message: "任务不存在" };
+  if (!order) return { ok: false, code: "ORDER_NOT_FOUND", message: t("任务不存在") };
   const step = store.getStepPlan(workspaceId, orderId)?.steps.find((item) => item.id === stepId);
   if (!step || step.status !== "planned" || step.executor === "human")
-    return { ok: false, code: "ORDER_NOT_DISPATCHABLE", message: "该步骤需要本人完成" };
+    return { ok: false, code: "ORDER_NOT_DISPATCHABLE", message: t("该步骤需要本人完成") };
   const inputs = projectFiles(store, workspaceId, order.projectId);
   const category = categoryOverride ?? stepCategory(step);
   const attempt = listAgentTasks(store, workspaceId).filter((task) => task.workOrderId === orderId).length + 1;
@@ -41,15 +43,19 @@ function taskFromStep(store: CrosslineStore, workspaceId: string, orderId: strin
   const feeds = (plan?.steps ?? []).filter((other) => other.dependsOn.includes(step.id)).map((other) => other.title);
   const facts = store.listProfileFacts(workspaceId).filter((fact) => fact.status === "confirmed" && (fact.projectId === order.projectId || fact.identityId === order.identityId))
     .slice(0, 15).map((fact) => `- ${fact.slot}：${fact.value.slice(0, 160)}`);
+  /* i18n-ignore-start: what the assistant is told (model-facing) */
   const context = [units.length ? `涉及的内容：\n${units.join("\n")}` : "", feeds.length ? `产出供本人在这些步骤中直接使用：${feeds.join("；")}` : "",
     facts.length ? `本人的相关情况（产出要贴合）：\n${facts.join("\n")}` : "", step.why ? `为什么做这一步：${step.why}` : ""].filter(Boolean).join("\n");
   const title = `${order.intent} · ${step.title}`;
   const before = retryContext(store, workspaceId, agentChainKey({ workOrderId: orderId, stepId, title }));
-  return { ok: true, category, why: `步骤「${step.title}」可由系统完成`, graded: false,
+  /* i18n-ignore-end */
+  return { ok: true, category, why: t("步骤「{{title}}」可由系统完成", { title: step.title }), graded: false,
+    /* i18n-ignore-start: what the assistant is told (model-facing) */
     input: { taskId: `agent-${orderId.replace(/[^a-zA-Z0-9]/g, "").slice(-8)}-${stepId}-${attempt}`, workOrderId: orderId, stepId, title,
       what: `完成任务「${order.intent}」中的一个准备步骤：${step.title}\n产出：${step.deliverable || "（未写明）"}\n完成标准：${step.doneCriterion || "（未写明）"}${context ? `\n${context}` : ""}\n产出是直接可用的成品（文件），不是计划或说明；只依据给出的文件与公开来源，找不到的写明。${before.text ? `\n${before.text}` : ""}`,
       category: category ?? "read_research_organize", humanPart: "该任务的其余步骤由本人完成；需要本人判断或选择的内容列入待本人处理。", inputs: [...inputs, ...before.inputs],
       ...(step.executor === "agent" ? { prep: true } : {}) } };
+  /* i18n-ignore-end */
 }
 
 /**
@@ -77,9 +83,9 @@ export function taskFromWorkOrder(store: CrosslineStore, workspaceId: string, or
   const facts = store.listProfileFacts(workspaceId)
     .filter((fact) => fact.status === "confirmed" && workOrder && fact.identityId === workOrder.identityId
       && (!fact.projectId || fact.projectId === workOrder.projectId || fact.projectId === `${workOrder.identityId}-default`))
-    .slice(0, 20).map((fact) => `- ${fact.slot}：${fact.value.slice(0, 200)}`);
+    .slice(0, 20).map((fact) => `- ${fact.slot}：${fact.value.slice(0, 200)}`); // i18n-ignore: model-facing
   const before = retryContext(store, workspaceId, agentChainKey({ workOrderId: orderId, stepId: "", title: order.intent }));
-  const what = [facts.length ? `${plan.what}\n本人确认过的相关事实（可以直接用）：\n${facts.join("\n")}` : plan.what, before.text].filter(Boolean).join("\n");
+  const what = [facts.length ? `${plan.what}\n本人确认过的相关事实（可以直接用）：\n${facts.join("\n")}` : plan.what, before.text].filter(Boolean).join("\n"); // i18n-ignore: model-facing
   const attempt = listAgentTasks(store, workspaceId).filter((task) => task.workOrderId === orderId).length + 1;
   return {
     ok: true, category, why: plan.why, graded: plan.graded,
@@ -140,7 +146,7 @@ export function stepDispatchCandidates(store: CrosslineStore, workspaceId: strin
       if (made.get(order.projectId)?.has(deliverableKey(step.title))) continue;
       const category = stepCategory(step) ?? "read_research_organize";
       if (declined.has(category)) continue;
-      if (!approved[category]) { requestCategory(store, workspaceId, category, plan.workOrderId, `准备步骤「${step.title}」`); continue; }
+      if (!approved[category]) { requestCategory(store, workspaceId, category, plan.workOrderId, tOfWorkspace(store, workspaceId)("准备步骤「{{title}}」", { title: step.title })); continue; }
       out.push({ orderId: plan.workOrderId, stepId: step.id, due, seq: step.seq });
     }
   }
@@ -209,6 +215,7 @@ export function retryContext(store: CrosslineStore, workspaceId: string, key: st
   if (!chain || chain.state === "done" && !chain.notes.length) return { text: "", inputs: [] };
   const rows = new Map(listAgentTasks(store, workspaceId).map((row) => [row.taskId, row]));
   const inputs = chain.runs.map((run) => rows.get(run.taskId)?.directory || path.join(outputRoot, run.taskId)).filter((dir) => existsSync(dir) && hasFiles(dir));
+  /* i18n-ignore-start: what the next run is told (model-facing) */
   const before = chain.failure ? `这件事之前做过 ${chain.runs.length} 次没做完，上一次停在：${chain.failure.stuckAt}。` : `这件事之前做过 ${chain.runs.length} 次，本人要求再做一次。`;
   return {
     text: [before,
@@ -216,6 +223,7 @@ export function retryContext(store: CrosslineStore, workspaceId: string, key: st
       chain.notes.length ? `本人的交代（按这个做，与上面的要求冲突时以这里为准）：\n${chain.notes.map((note) => `- ${note}`).join("\n")}` : ""].filter(Boolean).join("\n"),
     inputs
   };
+  /* i18n-ignore-end */
 }
 
 export function readStepStarts(store: CrosslineStore, workspaceId: string): Record<string, string> {
@@ -261,7 +269,7 @@ export function autoHandoffCandidates(store: CrosslineStore, workspaceId: string
       if (when === "unscheduled") continue;
       const category = stepCategory(step);
       if (!category || declined.has(category)) continue;
-      if (!approved[category]) { requestCategory(store, workspaceId, category, plan.workOrderId, `步骤「${step.title}」可由系统完成`); continue; }
+      if (!approved[category]) { requestCategory(store, workspaceId, category, plan.workOrderId, tOfWorkspace(store, workspaceId)("步骤「{{title}}」可由系统完成", { title: step.title })); continue; }
       out.push({ orderId: plan.workOrderId, stepId: step.id, at: at!, when });
     }
   }

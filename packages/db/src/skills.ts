@@ -1,10 +1,11 @@
 import {
   AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, AI_TOOLS_SETTING, RUNTIME_OWNER_SETTING, GROWN_LIBRARY_SETTING, SKILL_LIBRARY_SETTING, allAiTools, detectedAiTools, personAiTool, readPersonAiTools, categoryFromWording, grownSkillFilesKey, grownSkillId, isScriptFile, mineSkillSettingKey, publicSkillFilesKey,
-  readGrownLibrary, readMineSkill, readSkillLibrary,
+  readGrownLibrary, readMineSkill, readSkillLibrary, tFor,
   type AiTool, type GrownSkillRecord, type PublicSkillRecord, type StoredMineSkill, type Weekday, type WorkflowSchedule
 } from "@crossline/core";
 import { randomUUID } from "node:crypto";
 import type { CrosslineStore } from "./index";
+import { readLocale } from "./locale";
 import { listAgentTasks } from "./agent";
 
 /**
@@ -146,7 +147,7 @@ export function createReminderWorkflow(store: CrosslineStore, workspaceId: strin
     manifest: { name: id.replace(/^flow-/, ""), summary: input.reminder, lines: input.lineId ? [input.lineId] : [], category: "files_calendar_prep", trigger: "schedule",
       schedule, action: "remind", reminder: input.reminder, steps: [{ title: input.reminder, by: "person", external: false }], inputs: [], outputs: [], access: [], risks: [] },
     origin: { kind: "asked", text: input.text, requestId: `reminder-${id}` }, taskId: "", files: [],
-    scan: { risk: "low", injection: false, findings: [] }, review: { verdict: "usable", reasons: ["本人在输入框里设的提醒，没有脚本"], final: "usable" },
+    scan: { risk: "low", injection: false, findings: [] }, review: { verdict: "usable", reasons: [tFor(readLocale(store, workspaceId))("本人在输入框里设的提醒，没有脚本")], final: "usable" },
     status: "active", pinned: true, createdAt: at, updatedAt: at, lastUsedAt: at };
   writeGrownSkills(store, workspaceId, [...records, record]);
   store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.created:${id}`, type: "skill.grown.created", entityId: id,

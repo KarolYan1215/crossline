@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { tFor, type Locale } from "@crossline/i18n";
 import { classifyCalendarEdits, type CalendarEdits, type PublishedEntry, type ReadBack } from "./calendar-edits";
 
 /**
@@ -97,7 +98,11 @@ export class CrosslineCalendarWriter {
   #calendarId = "";
   #owned = new Set<string>();
 
-  constructor(config: { credential: Credential; fetchImpl?: typeof fetch; now?: () => Date }) {
+  /** The language of the note this writer puts in an event it makes (the workspace's). */
+  readonly #locale: Locale | undefined;
+
+  constructor(config: { credential: Credential; fetchImpl?: typeof fetch; now?: () => Date; locale?: Locale }) {
+    this.#locale = config.locale;
     this.#credential = config.credential;
     this.#fetch = config.fetchImpl ?? fetch;
     this.#now = config.now ?? (() => new Date());
@@ -272,7 +277,7 @@ export class CrosslineCalendarWriter {
         const response = await this.#call("POST", events, {
           subject: block.title, start: asGraphTime(block.start), end: asGraphTime(block.end), categories: [CROSSLINE_CALENDAR_NAME], showAs: "free", ...reminderFields,
           ...(block.recurrence ? { ...seriesFields(block.recurrence), showAs: "busy" } : {}),
-          body: { contentType: "text", content: block.note ?? "由 Crossline 排入。在 Crossline 里改计划，这里会跟着变；在这里拖到别的时间，Crossline 会把它锁定在那里；删掉它，Crossline 不会再放回来。" },
+          body: { contentType: "text", content: block.note ?? tFor(this.#locale)("由 Crossline 排入。在 Crossline 里改计划，这里会跟着变；在这里拖到别的时间，Crossline 会把它锁定在那里；删掉它，Crossline 不会再放回来。") },
           singleValueExtendedProperties: [{ id: OWNER_PROPERTY_ID, value: block.id }]
         });
         const made = response.ok ? await response.json() as { id?: string } : undefined;

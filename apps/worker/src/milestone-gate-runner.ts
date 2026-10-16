@@ -9,6 +9,7 @@ import type { CrosslineStore } from "@crossline/db";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 
 import { ownerOf } from "./owner";
+import { tOfWorkspace } from "./locale";
 export const MILESTONE_GATE_SKILL = "crossline:crossline-milestone-gate";
 // Enough of an artifact to judge, bounded so one large file cannot crowd out the rest of the evidence.
 const ARTIFACT_TEXT_LIMIT = 40_000;
@@ -36,11 +37,12 @@ type GateOutcome =
 
 export function buildMilestoneGateContext(store: CrosslineStore, workspaceId: string, workOrderId: string):
   { context: MilestoneGateContext; evidenceTexts: string[] } | { blocker: { code: string; message: string } } {
+  const t = tOfWorkspace(store, workspaceId);
   const order = store.listWorkOrders(workspaceId).find((item) => item.id === workOrderId);
-  if (!order) return { blocker: { code: "WORK_ORDER_NOT_FOUND", message: "找不到该作业。" } };
-  if (order.state !== "evidence_review") return { blocker: { code: "EVIDENCE_REVIEW_NOT_READY", message: "该作业不在证据审阅阶段。" } };
+  if (!order) return { blocker: { code: "WORK_ORDER_NOT_FOUND", message: t("找不到该作业。") } };
+  if (order.state !== "evidence_review") return { blocker: { code: "EVIDENCE_REVIEW_NOT_READY", message: t("该作业不在证据审阅阶段。") } };
   const milestone = store.listMilestones(workspaceId).find((item) => item.id === order.milestoneId && item.status === "approved");
-  if (!milestone) return { blocker: { code: "MILESTONE_NOT_FOUND", message: "找不到已批准的里程碑。" } };
+  if (!milestone) return { blocker: { code: "MILESTONE_NOT_FOUND", message: t("找不到已批准的里程碑。") } };
   // A milestone with no stated criteria is judged all the same. `pass` has meant "this work order
   // delivered what its own evidenceContract promised" since the gate stopped requiring the whole
   // milestone to be met by one submission, so the refusal that used to sit here was a leftover of the old

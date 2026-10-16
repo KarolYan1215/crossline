@@ -40,3 +40,14 @@ export function interviewLocale(store: CrosslineStore, workspaceId: string): Loc
   const value = store.getSetting(workspaceId, INTERVIEW_LOCALE_SETTING);
   return isLocale(value) ? value : undefined;
 }
+
+/**
+ * The language a signed-up account chose, by its Better Auth user id (mail to that account is written in it). Read only: an account
+ * with no principal or workspace yet has none.
+ */
+export function accountLocale(store: CrosslineStore, betterAuthUserId: string): Locale | undefined {
+  const principal = store.getPrincipalByBetterAuthId(betterAuthUserId);
+  if (!principal) return undefined;
+  const workspace = store.listWorkspaces().find((item) => store.getWorkspaceOwnerId(item.id) === principal.id);
+  return workspace ? chosenLocale(store, workspace.id) : undefined;
+}

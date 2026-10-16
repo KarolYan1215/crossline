@@ -2,6 +2,7 @@ import type { CrosslineStore, StoredWorkOrder } from "@crossline/db";
 import { courseCodeOf } from "@crossline/core";
 import { autoApproveEligible } from "./auto-approval";
 import { ownerOf } from "./owner";
+import { tOfWorkspace } from "./locale";
 import { decideFold, openTasks, recordFold } from "./duplicate-guard";
 
 /** How far ahead a confirmed due date turns into a task (the step planner then places its steps between release and due). */
@@ -48,6 +49,8 @@ export function materializeDatePairs(store: CrosslineStore, workspaceId: string,
   const milestones = store.listMilestones(workspaceId).filter((item) => item.status !== "archived");
   const anchors = new Map(store.listMilestoneAnchors(workspaceId).map((anchor) => [anchor.milestoneId, anchor.deadline]));
   const created: string[] = [];
+  // The task is written in the workspace's language; the homework's number and course stay as they are.
+  const t = tOfWorkspace(store, workspaceId);
   for (const due of facts.filter((fact) => fact.kind === "homework_due" && fact.day >= today && fact.day <= horizon)) {
     const project = projectOf(due.projectKey);
     if (!project) continue;
@@ -59,17 +62,17 @@ export function materializeDatePairs(store: CrosslineStore, workspaceId: string,
     const milestone = candidates.filter((item) => (anchors.get(item.id) ?? "") >= due.day).sort((a, b) => anchors.get(a.id)!.localeCompare(anchors.get(b.id)!))[0]
       ?? candidates.sort((a, b) => (anchors.get(b.id) ?? "").localeCompare(anchors.get(a.id) ?? ""))[0];
     if (!milestone) continue;
-    const intent = `完成 ${project.name} 作业 ${due.number}`;
+    const intent = t("完成 {{course}} 作业 {{number}}", { course: project.name, number: due.number });
     const order: StoredWorkOrder = { id, ownerId: ownerOf(store, workspaceId), workspaceId, identityId: project.identityId, projectId: project.id,
       milestoneId: milestone.id, intent, state: "awaiting_plan_approval", riskTier: "milestone",
       estimate: { p25Minutes: 120, p50Minutes: 180, p85Minutes: 360, source: "identity_prior", observationCount: 0, confidence: "low" },
       // A name that fits the title limit and keeps the homework's number: 「完成 RBT 610 Robot Perception 作业 3」 was cut to
       // 「完成 RBT 610 Robot Percept」, and three homeworks read the same (2026-10-15 walkthrough).
-      payload: { title: `完成 ${courseCodeOf(project.name) ?? project.name} 作业 ${due.number}`, family: "deep_work", dueDate: due.day, ...(out && out.day > today ? { notBefore: out.day } : {}),
+      payload: { title: t("完成 {{course}} 作业 {{number}}", { course: courseCodeOf(project.name) ?? project.name, number: due.number }), family: "deep_work", dueDate: due.day, ...(out && out.day > today ? { notBefore: out.day } : {}),
         datePair: { releaseDay: out?.day ?? "", dueDay: due.day, number: due.number, releaseTitle: out?.title ?? "", dueTitle: due.title },
-        humanCore: [{ id: `${id}-core`, intent, quote: due.title, rationale: "课程日期已确认", energy: "high", interruptible: true }],
+        humanCore: [{ id: `${id}-core`, intent, quote: due.title, rationale: t("课程日期已确认"), energy: "high", interruptible: true }],
         automationParts: [], materialContract: [],
-        evidenceContract: [{ kind: "file", description: "提交的作业文件或提交确认截图", why: "作业以提交为准", required: true }] } };
+        evidenceContract: [{ kind: "file", description: t("提交的作业文件或提交确认截图"), why: t("作业以提交为准"), required: true }] } };
     // The person may already have this homework on the board (typed in, or planned from the milestone): it gets the dates, not a twin.
     const payload = order.payload as { title: string; dueDate: string; datePair: unknown };
     const fold = decideFold(open, { id, identityId: order.identityId, projectId: order.projectId, milestoneId: order.milestoneId, title: payload.title, intent,
@@ -107,6 +110,7 @@ export function releaseWaits(store: CrosslineStore, workspaceId: string): { open
   const waits = new Map(store.listWaitingItems(workspaceId).map((item) => [item.id, item]));
   const documents = store.listSourceDocuments(workspaceId);
   const opened: string[] = [], arrived: string[] = [];
+  const t = tOfWorkspace(store, workspaceId);
   for (const order of store.listWorkOrders(workspaceId)) {
     const pair = (order.payload as { datePair?: { releaseDay?: string; number?: string } } | undefined)?.datePair;
     if (!pair?.releaseDay || !pair.number || WORKING.has(order.state)) continue;
@@ -125,8 +129,8 @@ export function releaseWaits(store: CrosslineStore, workspaceId: string): { open
       continue;
     }
     if (file) continue;
-    const label = `${courseCodeOf(project?.name ?? "") ?? project?.name ?? ""} 作业 ${pair.number}`.trim();
-    if (store.saveWaitingItem({ id, ownerId: owner, workspaceId, title: `${label} 发布`, who: "", expectedAt: pair.releaseDay, approximate: false,
+    const title = t("{{course}} 作业 {{number}} 发布", { course: courseCodeOf(project?.name ?? "") ?? project?.name ?? "", number: pair.number }).trim();
+    if (store.saveWaitingItem({ id, ownerId: owner, workspaceId, title, who: "", expectedAt: pair.releaseDay, approximate: false,
       followUpAt: pair.releaseDay, state: "open", blocks: [order.id], source: "datepair" }).inserted) opened.push(id);
   }
   return { opened, arrived };

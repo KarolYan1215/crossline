@@ -3,10 +3,14 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync } from "nod
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
-  ARTIFACT_PLAN_SETTING, producedArtifacts, readArtifactPlan, usedArtifacts,
+  ARTIFACT_PLAN_SETTING, producedArtifacts, readArtifactPlan, tFor, usedArtifacts,
   type DerivedRelation, type RelationCheckOutcome, type StoredArtifactPlan
 } from "@crossline/core";
 import type { CrosslineStore, StoredMilestoneRelation, StoredSourceDocument, StoredWorkOrder } from "./index";
+import { readLocale } from "./locale";
+
+/** What is written for the person here (notes, evidence labels, preferences) is in the workspace's language (docs/i18n.md). */
+const tOf = (store: CrosslineStore, workspaceId: string) => tFor(readLocale(store, workspaceId));
 
 /**
  * The ledger side of artifact-first planning (docs/flywheel-and-views.md §5–§6): the stored plan, the relations derived from the
@@ -43,7 +47,7 @@ export function syncArtifactRelations(store: CrosslineStore, workspaceId: string
       kind: relation.kind, status,
       // What the relation rests on is the artifact plan itself, so it can be approved; nothing here makes it true — the check day does.
       evidence: existing?.evidence.length ? existing.evidence : [{ uri: `/milestones?open=${encodeURIComponent(relation.fromMilestoneId)}`,
-        source: `产物计划 ${relation.artifactId}`, observedAt: at }],
+        source: tOf(store, workspaceId)("产物计划 {{artifact}}", { artifact: relation.artifactId }), observedAt: at }],
       counterexample: existing?.counterexample ?? [], costMinutes: existing?.costMinutes ?? null, lastValidatedAt: existing?.lastValidatedAt ?? null,
       explanation: relation.explanation, refutedWhen: relation.refutedWhen, artifactId: relation.artifactId,
       transfer: { ...relation.transfer, measured: existing?.transfer?.measured ?? null }, checkOn: relation.checkOn, counterfactual: relation.counterfactual
@@ -110,7 +114,8 @@ export function removeArtifactRelation(store: CrosslineStore, workspaceId: strin
   const milestones = new Map(store.listMilestones(workspaceId).map((milestone) => [milestone.id, milestone]));
   const from = milestones.get(relation.fromMilestoneId), to = milestones.get(relation.toMilestoneId);
   if (from && to) store.addPreference({ workspaceId, source: "relation_rejected", scope: from.identityId, weight: 1, refId: relationId,
-    text: `不采用「${from.title}」供「${to.title}」的飞轮关系${relation.explanation ? `（${relation.explanation.slice(0, 80)}）` : ""}` });
+    text: relation.explanation ? tOf(store, workspaceId)("不采用「{{from}}」供「{{to}}」的飞轮关系（{{why}}）", { from: from.title, to: to.title, why: relation.explanation.slice(0, 80) })
+      : tOf(store, workspaceId)("不采用「{{from}}」供「{{to}}」的飞轮关系", { from: from.title, to: to.title }) });
   return { ok: true };
 }
 
@@ -128,7 +133,8 @@ export function recordRelationCheck(store: CrosslineStore, workspaceId: string, 
   const at = new Date().toISOString();
   if (outcome === "none") {
     store.saveMilestoneRelation({ ...relation, transfer: { ...relation.transfer, measured: 0 } });
-    store.refuteMilestoneRelation(workspaceId, relationId, note.trim() || `核对日（${relation.checkOn ?? "下游截止"}）未兑现`, `milestone_relation.check_refuted:${relationId}`);
+    const t = tOf(store, workspaceId);
+    store.refuteMilestoneRelation(workspaceId, relationId, note.trim() || t("核对日（{{day}}）未兑现", { day: relation.checkOn ?? t("下游截止") }), `milestone_relation.check_refuted:${relationId}`);
   } else {
     store.saveMilestoneRelation({ ...relation, transfer: { ...relation.transfer, measured: value }, lastValidatedAt: at });
   }
@@ -215,9 +221,12 @@ export function handOffArtifacts(store: CrosslineStore, workspaceId: string, pro
         });
         const names = files.map((claim) => path.basename(safePath(claim.uri) ?? claim.uri)).slice(0, 5).join("》《");
         store.appendEvent({ ownerId: user.ownerId, workspaceId, idempotencyKey: `task.note:handoff:${artifactId}:${producer.id}:${user.id}`, type: "task.note", entityId: user.id,
-          payload: { text: `收到上游任务「${titleOf(producer)}」的产出${names ? `《${names}》` : ""}，已归入本任务的材料`, kind: "material", ...(documentIds[0] ? { documentId: documentIds[0] } : {}) } });
+          payload: { text: names ? tOf(store, workspaceId)("收到上游任务「{{title}}」的产出《{{names}}》，已归入本任务的材料", { title: titleOf(producer),
+              names: readLocale(store, workspaceId) === "en" ? names.split("》《").join(", ") : names })
+            : tOf(store, workspaceId)("收到上游任务「{{title}}」的产出，已归入本任务的材料", { title: titleOf(producer) }), kind: "material", ...(documentIds[0] ? { documentId: documentIds[0] } : {}) } });
         if (documentIds.length && store.getStepPlan(workspaceId, user.id)) {
           store.appendEvent({ ownerId: user.ownerId, workspaceId, idempotencyKey: `task.steps_replan_requested:handoff:${artifactId}:${user.id}`, type: "task.steps_replan_requested",
+            // i18n-ignore: the brief for the next plan (model-facing)
             entityId: user.id, payload: { feedback: `上游产出已到（${names}），按其内容核对并调整步骤：已有的部分不再重复做` } });
         }
         store.appendEvent({ ownerId: user.ownerId, workspaceId, idempotencyKey: key, type: "artifact.handed_off", entityId: user.id,
@@ -258,5 +267,5 @@ function handOffFile(store: CrosslineStore, workspaceId: string, producer: Store
   return store.saveSourceDocument({ id: `handoff-${sha256.slice(0, 24)}`, ownerId: user.ownerId, workspaceId, ...(user.projectId ? { projectId: user.projectId } : {}),
     kind, fileName: path.basename(file), mediaType: MEDIA[extension] ?? "application/octet-stream", sha256, uri: stored,
     extractedText: text, extractionStatus: text ? "done" : "unsupported",
-    ...(text ? {} : { extractionNote: `来自「${titleOf(producer)}」的产出，未提取文本` }), createdAt: new Date().toISOString() });
+    ...(text ? {} : { extractionNote: tOf(store, workspaceId)("来自「{{title}}」的产出，未提取文本", { title: titleOf(producer) }) }), createdAt: new Date().toISOString() });
 }

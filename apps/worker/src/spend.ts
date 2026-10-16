@@ -1,5 +1,6 @@
 import { BACKGROUND_BLOCKER, backgroundSpend, engagementTier, type BackgroundSpend, type CostSignal } from "@crossline/core";
 import type { CrosslineStore } from "@crossline/db";
+import { localeOf } from "./locale";
 
 /**
  * Reads the quota for one workspace's background passes and records the reason when it pauses them, so a paused
@@ -11,7 +12,7 @@ export function createBackgroundSpend(store: CrosslineStore, readCost: (workspac
       ({ available: false, reason: error instanceof Error ? error.message : String(error) }));
     // Spending follows the person: how recently they did something themselves decides what may run at all.
     const since = store.listWorkspaces().find((workspace) => workspace.id === workspaceId)?.createdAt;
-    const spend = { ...backgroundSpend(signal), engagement: engagementTier(store.lastPersonActivity(workspaceId), now(), since) };
+    const spend = { ...backgroundSpend(signal, localeOf(store, workspaceId)), engagement: engagementTier(store.lastPersonActivity(workspaceId), now(), since) };
     const recorded = store.getSetting(workspaceId, BACKGROUND_BLOCKER);
     if (spend.blocker) {
       // Written only when the reason changes, so `at` says since when, not when the tick last looked.

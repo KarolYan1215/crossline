@@ -1,9 +1,10 @@
 import {
   CONCIERGE_SCHEMA, CONCIERGE_TOOL_SPECS, answerFromPack, conciergeRefs, keepUsable, validateConciergeTurn,
-  type ConciergePack, type ConciergeTurn
+  tFor, type ConciergePack, type ConciergeTurn
 } from "@crossline/core";
 import { continueSkillTurn, runCodexSkill, type CodexRpcBoundary, type SkillTools } from "@crossline/codex";
 import type { CrosslineStore } from "@crossline/db";
+import { localeOf } from "./locale";
 
 export const CONCIERGE_SKILL = "crossline:crossline-concierge";
 
@@ -31,8 +32,10 @@ export type ConciergeRequest = {
   corrected?: boolean;
 };
 
+// i18n-ignore-start: model-facing
 const REVIEW = "复核上一个回答（review）：逐项核对动作、对象 id、日期、时长与本人原话是否一致，必要时重新查询；"
   + "确有把握的才提出，没把握的改为追问。返回完整的最终回答 JSON，不是修改说明。";
+// i18n-ignore-end
 
 export type ConciergeOutcome =
   | { state: "replied"; turn: ConciergeTurn; warnings: string[] }
@@ -46,10 +49,12 @@ export function conciergeTools(store: CrosslineStore, workspaceId: string, pack:
       const args = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
       if (name !== "read_material") return answerFromPack(pack, name, args);
       const doc = store.listSourceDocuments(workspaceId).find((item) => item.id === String(args.id ?? ""));
+      // i18n-ignore-start: tool answers, read by the model
       if (!doc) return `没有 id 为 ${String(args.id ?? "")} 的文件`;
       const offset = Math.max(0, Number(args.offset) || 0);
       const text = doc.extractedText.slice(offset, offset + 6000);
       return text ? `${doc.fileName}（第 ${offset}–${offset + text.length} 字，共 ${doc.extractedText.length} 字）\n${text}` : `${doc.fileName} 没有更多文本`;
+      // i18n-ignore-end
     }
   };
 }
@@ -61,10 +66,12 @@ export function conciergeTools(store: CrosslineStore, workspaceId: string, pack:
  */
 export function createConcierge(store: CrosslineStore, workspaceId: string, cwd: string, getClient: () => CodexRpcBoundary | undefined) {
   return async function turn(request: ConciergeRequest, signal?: AbortSignal): Promise<ConciergeOutcome> {
+    const locale = localeOf(store, workspaceId);
+    const t = tFor(locale);
     const client = getClient();
-    if (!client) return { state: "blocked", code: "CODEX_SUPERVISOR_UNAVAILABLE", message: "模型服务未运行。" };
+    if (!client) return { state: "blocked", code: "CODEX_SUPERVISOR_UNAVAILABLE", message: t("模型服务未运行。") };
     const conversation = store.getConversation(workspaceId, request.conversationId);
-    if (!conversation) return { state: "blocked", code: "CONVERSATION_NOT_FOUND", message: "会话不存在。" };
+    if (!conversation) return { state: "blocked", code: "CONVERSATION_NOT_FOUND", message: t("会话不存在。") };
     const refs = conciergeRefs(request.pack);
     const tools = conciergeTools(store, workspaceId, request.pack);
     const message = { snapshot: request.snapshot, text: request.text.slice(0, 4000), mentions: request.mentions.slice(0, 20) };
@@ -73,12 +80,12 @@ export function createConcierge(store: CrosslineStore, workspaceId: string, cwd:
       skillName: CONCIERGE_SKILL, cwd, outputSchema: CONCIERGE_SCHEMA, tools, timeoutMs: 10 * 60_000, ...(signal ? { signal } : {}), ...(tier ? { tier } : {}),
       validateOutput: (output: unknown) => validateConciergeTurn(output, refs),
       // After the repairs, what can be carried out is shown and the rest is named in the reply.
-      softAccept: (_rejection: Error, output: unknown) => keepUsable(output, refs)
+      softAccept: (_rejection: Error, output: unknown) => keepUsable(output, refs, locale)
     };
     let threadId = conversation.codexThreadId;
     if (request.review) {
       // Only the thread that gave the first answer can look at it again; without it the first card stands.
-      if (!threadId) return { state: "blocked", code: "CONCIERGE_REVIEW_NO_THREAD", message: "没有可复核的回答。" };
+      if (!threadId) return { state: "blocked", code: "CONCIERGE_REVIEW_NO_THREAD", message: t("没有可复核的回答。") };
       const reviewed = await continueSkillTurn<ConciergeTurn>(client, threadId, JSON.stringify({ review: true, snapshot: request.snapshot, text: REVIEW }),
         { ...shared, onAudit: () => {} });
       return reviewed.ok ? { state: "replied", turn: reviewed.output, warnings: (reviewed.audit.warnings ?? []).map((warning) => warning.code) }

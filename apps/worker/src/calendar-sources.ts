@@ -14,6 +14,7 @@ import { GraphReadSource, type GraphAccount, type GraphCalendar, type GraphCrede
 import type { CrosslineStore } from "@crossline/db";
 import { CALENDAR_LINES } from "@crossline/core";
 import type { CalendarSource } from "./graph-sync";
+import { tOfWorkspace } from "./locale";
 
 const SETTING = "calendar.sources";
 /**
@@ -60,7 +61,7 @@ export function readSelection(store: CrosslineStore, workspaceId: string): Selec
     // the sync says 「没有勾选任何日历」 rather than quietly emptying the plan.
     return Array.isArray(parsed)
       ? parsed.filter((entry) => typeof entry?.accountId === "string" && typeof entry?.calendarId === "string")
-        .map((entry) => ({ accountId: entry.accountId, calendarId: entry.calendarId, label: String(entry.label ?? "日历") }))
+        .map((entry) => ({ accountId: entry.accountId, calendarId: entry.calendarId, label: String(entry.label ?? tOfWorkspace(store, workspaceId)("日历")) }))
       : [];
   } catch { return []; }
 }

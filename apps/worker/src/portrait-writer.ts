@@ -1,8 +1,9 @@
-import { PORTRAIT_GAP_SCHEMA, PORTRAIT_SCHEMA, PORTRAIT_SCHEMA_VERSION, typeSummaryProblem, validatePortrait, type PortraitReport, AGENT_HISTORY_SUMMARY, agentHistoryLines, type AgentHistorySummary } from "@crossline/core";
+import { PORTRAIT_GAP_SCHEMA, PORTRAIT_SCHEMA, PORTRAIT_SCHEMA_VERSION, typeSummaryProblem, validatePortrait, type PortraitReport, AGENT_HISTORY_SUMMARY, agentHistoryLines, tFor, type AgentHistorySummary } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import { interviewLocale, sayDoFor, type CrosslineStore } from "@crossline/db";
 import { identityLines } from "./lines";
 import { ownerOf } from "./owner";
+import { localeOf } from "./locale";
 
 export const PORTRAIT_WRITER = "crossline:crossline-portrait-writer";
 /**
@@ -68,19 +69,21 @@ export function createPortraitWriter(store: CrosslineStore, workspaceId: string,
   /** The portrait is written in the interview's language (docs/i18n.md); before an interview, in the workspace's. */
   const languageOf = () => { const locale = interviewLocale(store, workspaceId); return locale ? { locale } : {}; };
   return async function write(): Promise<{ state: "written"; version: number } | { state: "blocked"; code: string; message: string }> {
+    // Shown on the portrait page: in the interview's language, else the workspace's.
+    const t = tFor(interviewLocale(store, workspaceId) ?? localeOf(store, workspaceId));
     const client = getClient();
-    if (!client) return { state: "blocked", code: "CODEX_SUPERVISOR_UNAVAILABLE", message: "模型服务不可用。" };
+    if (!client) return { state: "blocked", code: "CODEX_SUPERVISOR_UNAVAILABLE", message: t("模型服务不可用。") };
     const json = <T,>(key: string, fallback: T): T => { try { return JSON.parse(store.getSetting(workspaceId, key) ?? "null") ?? fallback; } catch { return fallback; } };
     const profiles = json<Record<string, { description?: string }>>("lines.profiles", {});
     const lines = identityLines(store, workspaceId).map((line) => ({ id: line.id, label: line.label, rank: line.rank ?? null, hard: Boolean(line.hard),
       goals: line.goals ?? [], description: profiles[line.id]?.description ?? "" }));
-    if (!lines.length) return { state: "blocked", code: "PORTRAIT_NO_LINES", message: "尚未设定主线。" };
+    if (!lines.length) return { state: "blocked", code: "PORTRAIT_NO_LINES", message: t("尚未设定主线。") };
     const lineIds = lines.map((line) => line.id);
     const doing = sayDoFor(store, workspaceId, new Date());
 
     if (options.only === "gap") {
       const previous = readSaved(store, workspaceId);
-      if (!previous) return { state: "blocked", code: "PORTRAIT_NONE", message: "还没有画像报告。" };
+      if (!previous) return { state: "blocked", code: "PORTRAIT_NONE", message: t("还没有画像报告。") };
       const merged = (output: unknown) => ({ ...previous.report, gap: (output as { gap: PortraitReport["gap"] }).gap });
       const context = { version: "crossline.portrait.v1", only: "gap", previous: previous.report, lines, doing };
       const result = await runCodexSkill<PortraitReport>(client, context, { skillName: PORTRAIT_WRITER, cwd, tier: "mid", ...languageOf(),

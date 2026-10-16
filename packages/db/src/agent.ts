@@ -1,7 +1,8 @@
 import {
   AGENT_CATEGORIES, AUTO_HANDOFF_SETTING, DISPATCH_STATES, GROWN_LIBRARY_SETTING, agentChains, isAgentCategory, isCourse, planAssistantTask, readGrownLibrary,
-  type AgentCategory, type AgentChain, type AgentChainMarks, type AgentRunRow, type AssistantPlan
+  tFor, type AgentCategory, type AgentChain, type AgentChainMarks, type AgentRunRow, type AssistantPlan
 } from "@crossline/core";
+import { readLocale } from "./locale";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { latestFileDates, type CrosslineStore } from "./index";
@@ -183,7 +184,7 @@ export function deliverAgentResult(store: CrosslineStore, workspaceId: string, t
   const order = store.listWorkOrders(workspaceId).find((item) => item.id === task.workOrderId);
   if (!order || !DISPATCH_STATES.has(order.state)) return { delivered: false, code: "ORDER_NOT_DELIVERABLE" };
   const evidence = task.artifacts.map((artifact) => ({ kind: "file" as const, uri: pathToFileURL(path.join(task.directory, artifact.path)).href,
-    description: `助手产出：${artifact.path}` }));
+    description: tFor(readLocale(store, workspaceId))("助手产出：{{path}}", { path: artifact.path }) }));
   const result = store.transitionWorkOrder(workspaceId, order.id, { type: "agent.delivered", taskId }, `agent-delivered:${taskId}`, { evidence });
   return { delivered: result.changed };
 }
@@ -242,14 +243,16 @@ export function pendingAgentApprovals(store: CrosslineStore, workspaceId: string
 export function assistantPlanFor(store: CrosslineStore, workspaceId: string, orderId: string):
   { ok: true; plan: Extract<AssistantPlan, { fit: true }>; title: string; projectId: string } | { ok: false; code: "ORDER_NOT_FOUND" | "ORDER_NOT_DISPATCHABLE" | "NOTHING_FOR_ASSISTANT"; message: string } {
   const order = store.listWorkOrders(workspaceId).find((item) => item.id === orderId);
-  if (!order) return { ok: false, code: "ORDER_NOT_FOUND", message: "找不到这个任务。" };
+  const locale = readLocale(store, workspaceId);
+  const t = tFor(locale);
+  if (!order) return { ok: false, code: "ORDER_NOT_FOUND", message: t("找不到这个任务。") };
   if (order.tombstone || !DISPATCH_STATES.has(order.state)) {
-    return { ok: false, code: "ORDER_NOT_DISPATCHABLE", message: "该任务不在可交给助手的阶段（需已批准且尚未开始）。" };
+    return { ok: false, code: "ORDER_NOT_DISPATCHABLE", message: t("该任务不在可交给助手的阶段（需已批准且尚未开始）。") };
   }
   const facts = store.listProfileFacts(workspaceId).filter((fact) => fact.projectId === order.projectId);
   const { dates, undated } = latestFileDates(store, workspaceId);
   const milestoneTitle = store.listMilestones(workspaceId).find((milestone) => milestone.id === order.milestoneId)?.title;
-  const plan = planAssistantTask(order, { projectIsCourse: isCourse(order.projectId, facts, dates, undated), ...(milestoneTitle ? { milestoneTitle } : {}) });
+  const plan = planAssistantTask(order, { projectIsCourse: isCourse(order.projectId, facts, dates, undated), ...(milestoneTitle ? { milestoneTitle } : {}), locale });
   if (!plan.fit) return { ok: false, code: "NOTHING_FOR_ASSISTANT", message: plan.reason };
   return { ok: true, plan, title: order.intent, projectId: order.projectId };
 }
@@ -263,7 +266,7 @@ export function agentChainMarks(store: CrosslineStore, workspaceId: string): Age
     retries: store.listEvents(workspaceId, { type: "agent.retry_requested" }).map((event) => {
       const p = event.payload as { note?: unknown; approach?: unknown; only?: unknown };
       const only = Array.isArray(p.only) ? p.only.map(String).filter(Boolean) : [];
-      const note = [typeof p.note === "string" ? p.note : "", only.length ? `只重做这些：${only.join("；")}` : ""].filter(Boolean).join("\n");
+      const note = [typeof p.note === "string" ? p.note : "", only.length ? `只重做这些：${only.join("；")}` /* i18n-ignore: told to the next run */ : ""].filter(Boolean).join("\n");
       return { taskId: event.entityId, at: event.createdAt, note, ...(typeof p.approach === "string" && p.approach ? { approach: p.approach } : {}) };
     }),
     closed: store.listEvents(workspaceId, { type: "agent.blocked_acknowledged" })
@@ -294,7 +297,7 @@ export function agentChainsFor(store: CrosslineStore, workspaceId: string, now =
     // A workflow run that was refused by a site, or whose site is paused after a security check, is never tried again by itself.
     siteStopped: task.siteRefusals > 0 || (!task.workOrderId && sites.get(task.title) === true)
   }));
-  return agentChains(runs, agentChainMarks(store, workspaceId));
+  return agentChains(runs, agentChainMarks(store, workspaceId), readLocale(store, workspaceId));
 }
 
 /**

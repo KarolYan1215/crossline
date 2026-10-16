@@ -1,12 +1,13 @@
 import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import { copyFileSync, existsSync } from "node:fs";
-import { byproductArtifactId, advanceWorkOrder, validateAnalysisProposal, validateAnalysisContext, validateMilestoneGateResult, requiredContractRequirements, validateSuccessCriteria, summarizeRhythm,
+import { byproductArtifactId, tFor, advanceWorkOrder, validateAnalysisProposal, validateAnalysisContext, validateMilestoneGateResult, requiredContractRequirements, validateSuccessCriteria, summarizeRhythm,
   currentMineVersion, mineSkillSettingKey, readMineSkill, acceptanceStandardLines,
   type MilestoneGateResult, type SuccessCriterion, type WorkOrderEvent, type WorkOrderState,
   type MilestoneTemplateKind, type EvidenceQuestionTemplate, type MilestoneTemplateSource,
   type ChecklistAnswer, type WorkRhythm } from "@crossline/core";
 import { handOffArtifacts } from "./artifacts";
+import { readLocale } from "./locale";
 
 type LedgerEventInput = {
   ownerId: string;
@@ -1204,7 +1205,7 @@ export class CrosslineStore {
       if (capture.state !== "blocked") return { changed: false };
       const text = note.trim().slice(0, 2000);
       if (!text) throw new Error("CAPTURE_NOTE_REQUIRED");
-      const context = capture.context ? `${capture.context}\n补充（${new Date().toISOString().slice(0, 10)}）：${text}` : text;
+      const context = capture.context ? `${capture.context}\n${tFor(readLocale(this, workspaceId))("补充（{{day}}）：{{text}}", { day: new Date().toISOString().slice(0, 10), text })}` : text;
       this.appendEvent({ ownerId: capture.ownerId, workspaceId, idempotencyKey: `capture-context:${id}:${capture.attempt}`,
         type: "capture.context_added", entityId: id, payload: { note: text } });
       this.#db.prepare("UPDATE captures SET context = ? WHERE workspace_id = ? AND id = ?").run(context, workspaceId, id);
@@ -1469,7 +1470,7 @@ export class CrosslineStore {
       const milestone = byproduct.milestoneId ? milestones.get(byproduct.milestoneId) : undefined;
       this.saveWorkOrder({ id, ownerId: primary.ownerId, workspaceId, identityId: byproduct.lineId,
         projectId: milestone?.projectId ?? `${byproduct.lineId}-default`, milestoneId: milestone ? milestone.id : "",
-        intent: `落地：${byproduct.artifact}`.slice(0, 200), state: "approved", riskTier: "routine",
+        intent: tFor(readLocale(this, workspaceId))("落地：{{artifact}}", { artifact: byproduct.artifact }).slice(0, 200), state: "approved", riskTier: "routine",
         estimate: { p25Minutes: Math.max(1, Math.round(minutes * 0.7)), p50Minutes: minutes, p85Minutes: Math.round(minutes * 1.6),
           source: "llm_prior", observationCount: 0, confidence: "low" },
         // A byproduct is a small artifact (`byproductArtifactId`) its main task produces and this task uses, landed within
@@ -1481,7 +1482,7 @@ export class CrosslineStore {
           automationParts: [], materialContract: [],
           evidenceContract: [{ kind: "record", description: byproduct.artifact.slice(0, 280), why: byproduct.why.slice(0, 280), required: true }] } });
       this.appendEvent({ ownerId: primary.ownerId, workspaceId, idempotencyKey: `work_order.auto_approved:${id}`, type: "work_order.auto_approved",
-        entityId: id, payload: { reason: `「${primary.intent.slice(0, 40)}」的顺带产出，排在它之后` } });
+        entityId: id, payload: { reason: tFor(readLocale(this, workspaceId))("「{{task}}」的顺带产出，排在它之后", { task: primary.intent.slice(0, 40) }) } });
       this.appendEvent({ ownerId: primary.ownerId, workspaceId, idempotencyKey: `byproduct.planned:${id}`, type: "byproduct.planned",
         entityId: id, payload: { primaryId: primary.id, lineId: byproduct.lineId, milestoneId: milestone?.id ?? "", artifact: byproduct.artifact } });
     }

@@ -4,6 +4,7 @@ import { mkdirSync } from "node:fs";
 import {
   createCrosslineAuth, type CrosslineAuth, type CrosslineAuthOptions, type GoogleConfig, type SmtpConfig
 } from "@crossline/auth";
+import { accountLocale, type CrosslineStore } from "@crossline/db";
 import { isLocalInstall, readLocalCodexAccount } from "./local-install";
 
 declare global {
@@ -103,6 +104,11 @@ export function getAuth(): CrosslineAuth {
   if (globalThis.crosslineAuth) return globalThis.crosslineAuth;
   const options = resolveCrosslineAuthOptions();
   if (!options) throw new Error("BETTER_AUTH_SECRET_MISSING");
-  globalThis.crosslineAuth = createCrosslineAuth(options);
+  // Mail to an existing account is written in the language it chose (docs/i18n.md); the ledger is read through the store the app
+  // already opened (`getStore` in ./crossline), without importing it here.
+  globalThis.crosslineAuth = createCrosslineAuth({ ...options, accountLocale: (userId) => {
+    const store = (globalThis as { crosslineStore?: CrosslineStore }).crosslineStore;
+    return store ? accountLocale(store, userId) : undefined;
+  } });
   return globalThis.crosslineAuth;
 }

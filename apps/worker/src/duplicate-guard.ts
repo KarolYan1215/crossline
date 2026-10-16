@@ -1,8 +1,9 @@
-import { EXISTING_TASKS_LIMIT, duplicateOf, type ExistingTask, type MergeTask } from "@crossline/core";
+import { EXISTING_TASKS_LIMIT, comparePair, duplicateOf, tFor, type ExistingTask, type Locale, type MergeTask } from "@crossline/core";
 import type { CrosslineStore } from "@crossline/db";
 import { applyMerge, mergeTasks } from "./dedupe";
 import { ownerOf } from "./owner";
 import { sayToPerson } from "./workflow-smith";
+import { localeOf, tOfWorkspace } from "./locale";
 
 /**
  * Duplicates are prevented where tasks are written, not only merged afterwards (the owner's direction of 2026-10-15: 「确认在规划任务时就
@@ -31,12 +32,15 @@ export function openTasks(store: CrosslineStore, workspaceId: string): MergeTask
 export type Fold = { kind: "duplicate" | "extends"; keep: string; keepTitle: string; why: string };
 
 /** Whether `candidate` should go into an open task instead of standing on its own: the Skill's `extendsTaskId` first, then the rules. */
-export function decideFold(open: readonly MergeTask[], candidate: MergeTask, extendsTaskId = ""): Fold | undefined {
+export function decideFold(open: readonly MergeTask[], candidate: MergeTask, extendsTaskId = "", locale?: Locale): Fold | undefined {
+  const t = tFor(locale);
   const others = open.filter((task) => task.id !== candidate.id);
   const target = extendsTaskId ? others.find((task) => task.id === extendsTaskId) : undefined;
-  if (target) return { kind: "extends", keep: target.id, keepTitle: target.title, why: `「${candidate.title}」是「${target.title}」的补充` };
+  if (target) return { kind: "extends", keep: target.id, keepTitle: target.title, why: t("「{{title}}」是「{{target}}」的补充", { title: candidate.title, target: target.title }) };
   const same = duplicateOf(candidate, others);
-  return same && { kind: "duplicate", keep: same.keep.id, keepTitle: same.keep.title, why: `与「${same.keep.title}」重复（${same.why}）` };
+  // The rule's own reason, in this language (`duplicateOf` gives it in Chinese).
+  const why = same && locale ? comparePair(candidate, same.keep, locale).why : same?.why;
+  return same && { kind: "duplicate", keep: same.keep.id, keepTitle: same.keep.title, why: t("与「{{title}}」重复（{{why}}）", { title: same.keep.title, why }) };
 }
 
 /**
@@ -49,6 +53,7 @@ export function recordFold(store: CrosslineStore, workspaceId: string, fold: Fol
   store.appendEvent({ ownerId, workspaceId, idempotencyKey: `task.duplicate_prevented:${added.id}`, type: "task.duplicate_prevented", entityId: fold.keep,
     payload: { kind: fold.kind, keep: fold.keep, candidate: { id: added.id, title: added.title, intent: added.intent }, source: added.source, why: fold.why } });
   if (fold.kind === "extends") store.appendEvent({ ownerId, workspaceId, idempotencyKey: `task.extended:${added.id}`, type: "task.steps_replan_requested",
+    // i18n-ignore: the brief for the next plan (model-facing)
     entityId: fold.keep, payload: { feedback: `并入补充内容「${added.title}」：${added.intent}`.slice(0, 600) } });
 }
 
@@ -60,14 +65,16 @@ export function foldNewTask(store: CrosslineStore, workspaceId: string, id: stri
   const open = openTasks(store, workspaceId);
   const candidate = open.find((task) => task.id === id);
   if (!candidate) return undefined;
-  const fold = decideFold(open, candidate, extendsTaskId);
+  const t = tOfWorkspace(store, workspaceId);
+  const fold = decideFold(open, candidate, extendsTaskId, localeOf(store, workspaceId));
   if (!fold) return undefined;
   const merged = applyMerge(store, workspaceId, { kind: "duplicate", keep: fold.keep, absorb: [id], reason: fold.why, requests: {} }, now);
   if (!merged) return undefined;
   recordFold(store, workspaceId, fold, { id, title: candidate.title, intent: candidate.intent, source: "analysis" });
+  const values = { title: candidate.title, keep: fold.keepTitle };
   sayToPerson(store, workspaceId, fold.kind === "extends"
-    ? `「${candidate.title}」是已有任务「${fold.keepTitle}」的补充，已并入它的步骤。可在任务页「已归档」里撤销。`
-    : `「${candidate.title}」和已有任务「${fold.keepTitle}」是同一件事，没有新建，已并入。可在任务页「已归档」里撤销。`,
-  "task_duplicate_prevented", `prevented:${id}`, [{ label: "查看", href: `/workbench/${encodeURIComponent(fold.keep)}` }], now);
+    ? t("「{{title}}」是已有任务「{{keep}}」的补充，已并入它的步骤。可在任务页「已归档」里撤销。", values)
+    : t("「{{title}}」和已有任务「{{keep}}」是同一件事，没有新建，已并入。可在任务页「已归档」里撤销。", values),
+  "task_duplicate_prevented", `prevented:${id}`, [{ label: t("查看", { context: "view" }), href: `/workbench/${encodeURIComponent(fold.keep)}` }], now);
   return fold;
 }

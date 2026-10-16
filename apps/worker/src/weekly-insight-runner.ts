@@ -6,6 +6,7 @@ import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import type { CrosslineStore } from "@crossline/db";
 
 import { ownerOf } from "./owner";
+import { tOfWorkspace } from "./locale";
 export const WEEKLY_INSIGHT_SKILL = "crossline:crossline-weekly-insight";
 
 const INSTRUCTIONS = "Turn the supplied week of execution history into reviewable proposals. Never "
@@ -74,11 +75,12 @@ export function buildWeeklyInsightContext(store: CrosslineStore, workspaceId: st
 export function createWeeklyInsight(store: CrosslineStore, workspaceId: string, projectRoot: string,
   getClient: () => CodexRpcBoundary | undefined) {
   return async function run(now = new Date()): Promise<InsightRunOutcome> {
+    const t = tOfWorkspace(store, workspaceId);
     const client = getClient();
-    if (!client) return { state: "blocked", code: "CODEX_SUPERVISOR_UNAVAILABLE", message: "Codex 运行时不可用。" };
+    if (!client) return { state: "blocked", code: "CODEX_SUPERVISOR_UNAVAILABLE", message: t("Codex 运行时不可用。") };
     const context = buildWeeklyInsightContext(store, workspaceId, now);
     if (context.executions.length < 3) {
-      return { state: "blocked", code: "WEEKLY_INSIGHT_INSUFFICIENT_EVIDENCE", message: "过去一周执行记录不足 3 条，无法生成有依据的洞察。" };
+      return { state: "blocked", code: "WEEKLY_INSIGHT_INSUFFICIENT_EVIDENCE", message: t("过去一周执行记录不足 3 条，无法生成有依据的洞察。") };
     }
 
     const result = await runCodexSkill<WeeklyInsightResult>(client, context, {

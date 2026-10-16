@@ -5,6 +5,7 @@ import { runCodexAnalysis, type CodexRpcBoundary } from "@crossline/codex";
 import { ANALYSIS_CONTEXT_VERSION, validateAnalysisContext, type AnalysisContext } from "@crossline/core";
 import { CrosslineStore, type StoredCapture } from "@crossline/db";
 import { identityLines } from "./lines";
+import { tOfWorkspace } from "./locale";
 import { existingTasksFor, foldNewTask } from "./duplicate-guard";
 
 export type AnalysisOutcome = { id: string; state: string; attempt: number; audit: StoredCapture["audit"] };
@@ -52,6 +53,7 @@ export function uploadedMaterialInputs(store: CrosslineStore, workspaceId: strin
     .slice(0, limit)
     .map((doc) => ({
       id: `uploaded-${doc.id}`,
+      // i18n-ignore: model-facing
       text: `用户此前已交给系统的资料《${doc.fileName}》（已读取，共 ${doc.extractedText.length} 字，不必再向用户要）。开头：${doc.extractedText.trim().replace(/\s+/g, " ").slice(0, 300)}`
     }));
 }
@@ -60,7 +62,7 @@ export function createCaptureAnalyzer(store: CrosslineStore, workspaceId: string
   // A new worker cannot safely replay an interrupted turn. Retain its IDs for audit.
   for (const capture of store.listCaptures(workspaceId).filter((item) => item.state === "analyzing")) {
     store.transitionWorkOrder(workspaceId, capture.id, { type: "blocked", reason: "ANALYSIS_RECOVERY_REQUIRED" }, `analysis:${capture.id}:${capture.attempt}:recovery`, {
-      audit: { blocker: { code: "ANALYSIS_RECOVERY_REQUIRED", message: "Worker 重启；上一次分析未完成，可重新分析。" } }
+      audit: { blocker: { code: "ANALYSIS_RECOVERY_REQUIRED", message: tOfWorkspace(store, workspaceId)("Worker 重启；上一次分析未完成，可重新分析。") } }
     });
   }
   const getCapture = (id: string) => {
@@ -109,6 +111,7 @@ export function createCaptureAnalyzer(store: CrosslineStore, workspaceId: string
           ...uploadedMaterialInputs(store, workspaceId),
           ...(capture.context.trim() ? [{ id: "capture-context", text: capture.context.trim() }] : []),
           ...(store.listCaptureAttachments(workspaceId, id).length
+            // i18n-ignore: model-facing
             ? [{ id: "capture-attachments", text: `用户上传了 ${store.listCaptureAttachments(workspaceId, id).length} 份附件，文件名：${
                 store.listCaptureAttachments(workspaceId, id).map((item) => item.fileName).join("、")}` }]
             : [])
@@ -145,7 +148,7 @@ export function createCaptureAnalyzer(store: CrosslineStore, workspaceId: string
       const message = error instanceof Error ? error.message : "";
       const code = /^ANALYSIS_[A-Z_]+$/.test(message) ? message : "ANALYSIS_RUNTIME_FAILED";
       store.transitionWorkOrder(workspaceId, id, { type: "blocked", reason: code }, `analysis:${id}:${attempt}:finish`, {
-        audit: { blocker: { code, message: BLOCKER_ADVICE[code] ?? "分析被阻塞；原始 Capture 已保留，可继续人工处理。" } }
+        audit: { blocker: { code, message: tOfWorkspace(store, workspaceId)(BLOCKER_ADVICE[code] ?? "分析被阻塞；原始 Capture 已保留，可继续人工处理。") } }
       });
     }
     return outcome(id);
