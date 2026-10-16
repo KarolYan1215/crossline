@@ -257,6 +257,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
 
     // The person's answers to the questions the app itself asked (target grade, an unconfirmed line, a TBD date) are facts the moment they
     // are given, written here and not left for the model to remember: the label they picked is a verbatim span of their reply.
+    let portraitConfirmedNow = false;
     for (const answer of answeredGapFacts(replyText, currentGaps())) {
       if (answer.file) {
         // The same record 待决事项 writes, so a file filed here is filed everywhere.
@@ -266,6 +267,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
           entityId: documentId, payload: { projectId, by: "person" } });
         else store.appendEvent({ ownerId, workspaceId, idempotencyKey: `source:cleared:${documentId}:${replyId}`, type: "source.project_cleared", entityId: documentId, payload: { by: "person" } });
       } else if (answer.confirmPortrait) {
+        portraitConfirmedNow = true;
         const profile = readProfile();
         store.setSetting(workspaceId, PROFILE_CONFIRMED, JSON.stringify({ fingerprint: portraitFingerprint(profile), at: now }));
         store.appendEvent({ ownerId, workspaceId, idempotencyKey: `profile:confirmed:${replyId}`, type: "profile.confirmed", entityId: workspaceId, payload: { via: "interview" } });
@@ -388,6 +390,11 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     if (!result.ok) return blocked(result.blocker.code, result.blocker.message);
 
     persistTurn(result.output, sessionId, ownerId);
+    // The 「符合」 was said in this reply, and this turn rewrote the portrait with that reply in hand: the confirmation holds for the
+    // portrait it wrote. Re-recording it here stops the confirmation being asked for again every round (the hosted walkthrough of
+    // 2026-10-16 answered 「符合」 four rounds running, and the interview never reached 「已完成」).
+    if (portraitConfirmedNow && !sessionId.startsWith("line-"))
+      store.setSetting(workspaceId, PROFILE_CONFIRMED, JSON.stringify({ fingerprint: portraitFingerprint(readProfile()), at: new Date().toISOString() }));
     // A fixed weekly arrangement the person said (「每周二四上午组会」) is quoted from their reply, so replies count as sources here too.
     persistFileDates(result.output, ownerId, sent.map(([, doc]) => doc.id), { ...known.sources, ...known.replies }, today, input.reread === true);
     // Questions that are not the person's to answer (a room, class times already on record, whether a calendar event repeats) are taken

@@ -357,3 +357,21 @@ test("a round keeps from the person what is not theirs to answer, writes the cal
   expect(store.listProfileFacts(workspaceId).find((fact) => fact.slot.startsWith("assumed_")))
     .toMatchObject({ status: "inferred", sourceRef: "inference", value: expect.stringMatching(/^假设：日历中的两项活动/) });
 });
+
+test("a 「符合」 for the portrait holds for the portrait the same turn rewrites, so it is not asked again next round", async () => {
+  // The hosted walkthrough of 2026-10-16 answered 「符合」 four rounds running: each turn rewrote the portrait after the answer was
+  // recorded against the old one, and the interview never reached 「已完成」.
+  const { readFileSync } = await import("node:fs");
+  const written = JSON.parse(readFileSync(new URL("./testing/fixtures/onboarding-profile.json", import.meta.url), "utf8")) as Record<string, unknown>;
+  store.setSetting(workspaceId, "profile.model", JSON.stringify(written));
+  const rewritten = { ...written, portrait: "一位在毕业前同时押注研究与产品的工程师，靠打球和讨论充电，最怕的是五件事都停在七成。",
+    coreConflict: "想把两条未来都留着，代价落在睡眠和周日下午上。", problem: "缺的不是时间，而是一条让某件事这周先慢下来的规则。" };
+  const { rpc } = fakeRuntime([turn({ profile: rewritten,
+    questions: [{ id: "q", text: "这周最想先收口哪件事？", kind: "free", options: [], allowOther: true, identityId: "", projectId: "" }] })]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc);
+  expect(await run({ sessionId: "s", text: "【「当前画像」写的是否符合本人？】选择：符合" })).toEqual({ state: "asked", sessionId: "s" });
+  const { PROFILE_CONFIRMED, portraitStillConfirmed } = await import("@crossline/core");
+  const confirmed = JSON.parse(store.getSetting(workspaceId, PROFILE_CONFIRMED) ?? "{}") as { fingerprint?: string };
+  expect(JSON.parse(store.getSetting(workspaceId, "profile.model")!)).toMatchObject({ portrait: rewritten.portrait });
+  expect(portraitStillConfirmed(confirmed.fingerprint, rewritten)).toBe(true);
+});
