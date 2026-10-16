@@ -1,7 +1,7 @@
 import { SubpageShell } from "../subpage-shell";
 import { MilestoneActions } from "./milestone-actions";
 import { MilestoneTimeline } from "./milestone-timeline";
-import { ensureSeeded, getStore, milestonesRetiredBySystem } from "../../lib/crossline";
+import { appNow, ensureSeeded, getStore, milestonesRetiredBySystem } from "../../lib/crossline";
 import { loadMilestoneBoard } from "../../lib/milestone-board";
 import { requireSessionContext } from "../../lib/access-guard";
 import { gateUntilReady } from "../../lib/start-gate";
@@ -10,6 +10,7 @@ import { LINE_PALETTE } from "@crossline/identity-packs";
 import { LinesBar } from "./lines-bar";
 import { lineCardDetails } from "../../lib/line-cards";
 import { timed } from "../../lib/sections";
+import { memoByLedgerAsync } from "../../lib/ledger-memo";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +22,9 @@ export default async function MilestonesPage() {
   const ctx = await requireSessionContext();
   gateUntilReady(ctx);
   ensureSeeded(ctx);
-  const board = await timed("milestones.board", () => loadMilestoneBoard(ctx));
+  // Reused until the ledger changes or a minute passes (`lib/ledger-memo.ts`).
+  const board = await timed("milestones.board", () => memoByLedgerAsync(getStore(), `milestoneBoard:${ctx.workspaceId}:${appNow().toISOString().slice(0, 16)}`,
+    60_000, () => loadMilestoneBoard(ctx)));
   // Drafts the architect replaced on its own are not shown; what the person archived themselves can be put back.
   const retired = milestonesRetiredBySystem(ctx);
   const archived = getStore().listMilestones(ctx.workspaceId).filter((milestone) => milestone.status === "archived" && !retired.has(milestone.id))

@@ -8,11 +8,12 @@ import { HorizonSelect } from "./horizon-select";
 import { PlanPreviewProvider } from "./preview-context";
 import { CapacityChart, EstimateChart, InvestmentChart, MilestoneTimeline } from "./plan-stats-charts";
 import { SubpageShell } from "../subpage-shell";
-import { getStore, loadCurrentPlan, loadPlanExplanation, planToday } from "../../lib/crossline";
+import { appNow, getStore, loadCurrentPlan, loadPlanExplanation, planToday } from "../../lib/crossline";
 import { loadPlanBoard } from "../../lib/plan-board";
 import { requireSessionContext } from "../../lib/access-guard";
 import { gateUntilReady } from "../../lib/start-gate";
 import { timed, timedSync } from "../../lib/sections";
+import { memoByLedgerAsync } from "../../lib/ledger-memo";
 
 export const dynamic = "force-dynamic";
 
@@ -28,7 +29,9 @@ export default async function PlanPage(props: { searchParams?: Promise<{ horizon
   gateUntilReady(ctx);
   const requested = (await props.searchParams)?.horizon;
   const plan = await timed("plan.current", () => loadCurrentPlan(ctx));
-  const board = await timed("plan.board", () => loadPlanBoard(ctx, plan, requested));
+  // Reused until the ledger changes or a minute passes, like the plan it is drawn from (`lib/ledger-memo.ts`).
+  const board = await timed("plan.board", () => memoByLedgerAsync(getStore(), `planBoard:${ctx.workspaceId}:${requested ?? ""}:${appNow().toISOString().slice(0, 16)}`,
+    60_000, () => loadPlanBoard(ctx, plan, requested)));
   const explanation = timedSync("plan.explanation", () => loadPlanExplanation(ctx, planToday(ctx)));
   const titles = new Map(getStore().listWorkOrders(ctx.workspaceId).map((order) => [order.id, order.intent]));
   const imported = plan.blocks.filter((block) => block.id.startsWith("graph_calendar:") || block.id.startsWith("import:")).length;
