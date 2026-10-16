@@ -44,7 +44,7 @@ describe("the milestone page in English", () => {
     const html = renderToStaticMarkup(<LocaleProvider locale="en"><MilestoneStats board={board} /></LocaleProvider>);
     expect(html).toContain("Waypoints this week");
     expect(html).toContain("1 day");
-    expect(html).toContain("to Paper");
+    expect(html).toContain("until Paper");
   });
 
   test("a line card reads in English and composes the goal without 「的」", () => {

@@ -19,8 +19,8 @@ describe("core text in English", () => {
   test("calendar changes", () => {
     const block = { id: "graph_calendar:1", title: "Sync up", day: "2026-10-16", start: "11:30", end: "12:00", source: "Calendar" };
     expect(realityChanges([], [block], "2026-10-16")[0]!.explanation).toBe("日历新增「Sync up」11:30–12:00");
-    expect(realityChanges([], [block], "2026-10-16", "en")[0]!.explanation).toBe("Calendar added “Sync up” 11:30–12:00");
-    expect(realityChanges([block], [], "2026-10-15", "en")[0]!.explanation).toBe("“Sync up” 10/16 11:30–12:00 is no longer on the calendar");
+    expect(realityChanges([], [block], "2026-10-16", "en")[0]!.explanation).toBe('New on the calendar: "Sync up" 11:30–12:00');
+    expect(realityChanges([block], [], "2026-10-15", "en")[0]!.explanation).toBe('"Sync up" 10/16 11:30–12:00 is no longer on the calendar');
     expect(toRealityBlock({ provider: "graph_calendar", externalId: "x", title: "A", start: "2026-10-16T10:00:00Z", end: "2026-10-16T11:00:00Z" }, "UTC", undefined, "en")?.source).toBe("Calendar");
   });
 
@@ -42,7 +42,7 @@ describe("core text in English", () => {
     expect(inferWorkState({ segments, now: "2026-10-16T10:15:00Z", calendar: [] }).reasons[0]).toBe("12 分钟在编程类工作上，连续最长 12 分钟，切换 0 次。");
     const night = [{ sleepAt: "2026-10-15T23:00:00Z", wakeAt: "2026-10-16T07:00:00Z", source: "screen" as const }];
     const prediction = predictEnergy("2026-10-16T10:00:00Z", night, { low: 0, high: 20, reports: 1, agreement: 1 }, (iso) => new Date(iso).getUTCHours(), 0, "en");
-    expect(prediction.basis).toEqual(["Slept about 8.0 h (inferred from computer idle time)", "Awake for 3.0 h", "Calibrated on 1 of your own report"]);
+    expect(prediction.basis).toEqual(["Slept about 8.0 h (inferred from computer idle time)", "Awake for 3.0 h", "Calibrated to 1 self-report"]);
     expect(predictEnergy("2026-10-16T10:00:00Z", [], { low: 0, high: 20, reports: 0, agreement: 0 }, () => 10, 0, "en").basis).toEqual(["Last sleep unknown"]);
     const physiology = [{ day: "2026-10-16", wristTempDeltaC: 0.6 }];
     expect(dayCapacity("2026-10-16T10:00:00Z", "2026-10-16", [], physiology, "en").basis).toEqual(["Wrist temperature 0.6°C above usual"]);
@@ -63,7 +63,7 @@ describe("core text in English", () => {
       blocks: [{ id: "b1", orderId: "o1", stepId: "s1", title: "Homework 3", step: "Problem 1", start: "10:00", end: "10:45", dueDay: "2026-10-18",
         firstAction: "Open the problem set", prepared: ["notes.md", "outline.md"] }], ending: [], slack: [], finished: [], locale: "en" };
     const [start] = nudgeCandidates(input);
-    expect(start!.text).toBe("“Homework 3 · Problem 1” at 10:00 (45 min), toward the deadline on 10/18. First step: Open the problem set. Ready: notes.md, outline.md.");
+    expect(start!.text).toBe('"Homework 3 · Problem 1" at 10:00 (45 min), toward the deadline on 10/18. First step: Open the problem set. Ready: notes.md, outline.md.');
     expect(start!.buttons.map((button) => button.label)).toEqual(["Start timer", "Postpone to tomorrow", "Ask less about this"]);
     const { locale: _locale, ...zhInput } = input;
     const zh = nudgeCandidates(zhInput)[0]!;
@@ -83,7 +83,7 @@ describe("core text in English", () => {
       .toEqual(["Left 1 thing for you: Pick a title", "Not every self-check passed"]);
     expect(resultNeedsPerson({ needsHuman: [{ what: "Decide whether to keep this workflow" }], checksPassed: true, inputsModified: [], decisions: [], growing: true })).toEqual([]);
     const progress = agentAskProgress({ title: "Collect sources", failure: lost, record: { commands: [{ command: "ls", exitCode: 0 }] }, retries: 0, exhausted: false, locale: "en" });
-    expect(progress.summary).toBe("The assistant was working on “Collect sources” and stopped after this: Ran 1 command.");
+    expect(progress.summary).toBe('The assistant stopped while working on "Collect sources". Done so far: Ran 1 command.');
     expect(progress.needs).toEqual(["Decide whether the assistant should try once more, or take it over yourself"]);
   });
 
@@ -104,6 +104,6 @@ describe("core text in English", () => {
     expect(folderPathProblem("courses")).toBe("需要完整路径，例如 D:\\课程资料");
     expect(timeOrderProblem("2026-11-10", "2026-11-05", 2, false, "en")).toBe("Upstream is due 2026-11-10, later than the downstream deadline 2026-11-05 less 2 days to hand it over (latest 2026-11-03)");
     const advice = energyAdviceRule({ now: "2026-10-16T12:00:00Z", zone: "UTC", episodes: [], reports: [], worked: [], locale: "en" });
-    expect("insufficient" in advice ? advice.insufficient : "").toBe("Needs at least 3 nights of sleep on record or 2 energy reports of your own");
+    expect("insufficient" in advice ? advice.insufficient : "").toBe("Needs at least 3 nights of sleep on record or 2 energy self-reports");
   });
 });
