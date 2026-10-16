@@ -34,6 +34,10 @@ if [ "$want" = all ] || [ "$want" = web ]; then
     -w /repo/apps/web "$app_image" node_modules/.bin/next start --hostname 127.0.0.1 --port 3210
 fi
 if [ "$want" = all ] || [ "$want" = worker ]; then
+  # The worker's heartbeat lock outlives a removed container and reads as fresh for 45 minutes, so the new worker would exit
+  # (worker.already_running) and restart in a loop. The old container is removed first, so no other worker holds it.
+  docker rm -f crossline-worker >/dev/null 2>&1 || true
+  rm -f /srv/crossline/data/worker.lock
   start crossline-worker --network host --env-file /srv/crossline/app.env \
     -v /srv/crossline/data:/data -v /srv/crossline/state:/state -v /srv/crossline/codex:/opt/codex:ro \
     -w /repo/apps/worker "$app_image" /repo/node_modules/.bin/tsx src/index.ts

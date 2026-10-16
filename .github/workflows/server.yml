@@ -86,6 +86,7 @@ jobs:
           }
           if [ -z "$APPLY" ]; then migrate; exit 0; fi
           docker stop crossline-worker crossline-web
+          rm -f /srv/crossline/data/worker.lock
           stamp=$(date +%Y%m%d-%H%M%S); mkdir -p /srv/crossline/backups
           for f in crossline.db crossline.db-wal crossline.db-shm; do [ -f /srv/crossline/data/$f ] && cp -a /srv/crossline/data/$f /srv/crossline/backups/$f.$stamp; done
           echo "server ledger copied to /srv/crossline/backups/*.$stamp"
