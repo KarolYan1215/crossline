@@ -13,8 +13,8 @@ import { TextModelError, jsonFromAnswer, textModelFromEnv, textModelSummary, typ
  * `wants.skipped`), so it is never silent.
  */
 
-/** One model call, the answer included; the person is on the last step meanwhile and their figure is being drawn. */
-export const TEXT_TIMEOUT_MS = 15_000;
+/** The model's call and its one repair together; the person is on the last step meanwhile and their figure is being drawn. */
+export const TEXT_TIMEOUT_MS = 25_000;
 export const DEFAULT_TEXT_DAILY_LIMIT = 1000;
 
 type Runtime = { model: TextModel | null; now: () => Date };
@@ -44,15 +44,31 @@ function printable(lines: WantLines): boolean {
   return [...text].every((char) => char === " " || glyphs.has(char));
 }
 
+/** What is wrong with one answer, or the lines when nothing is. */
+function judge(answer: string): { ok: true; lines: WantLines } | { ok: false; problem: string } {
+  const checked = validateWantLines(jsonFromAnswer(answer));
+  if (!checked.ok) return { ok: false, problem: `TEXT_ANSWER_INVALID: ${checked.problems.slice(0, 4).join("; ").slice(0, 200)}` };
+  if (!printable(checked.value)) return { ok: false, problem: "TEXT_ANSWER_UNPRINTABLE" };
+  return { ok: true, lines: checked.value };
+}
+
+/**
+ * One call and, when the answer breaks a rule, one repair in the same conversation with what was wrong: DeepSeek V4's first answers wrote
+ * loop steps of 11–17 characters where the poster's boxes hold 10 (2026-10-16), and a second look costs seconds where the rules' lines
+ * lose what the person wrote.
+ */
 async function askModel(model: TextModel, result: StoredResult, wants: WantsInput): Promise<WantLines> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TEXT_TIMEOUT_MS);
   try {
-    const answer = await model.complete(wantsMessages(publicType(result.scores, {}, result.id), wants), controller.signal);
-    const checked = validateWantLines(jsonFromAnswer(answer));
-    if (!checked.ok) throw new TextModelError(`TEXT_ANSWER_INVALID: ${checked.problems.slice(0, 4).join("; ").slice(0, 200)}`, 422);
-    if (!printable(checked.value)) throw new TextModelError("TEXT_ANSWER_UNPRINTABLE", 422);
-    return checked.value;
+    const messages = wantsMessages(publicType(result.scores, {}, result.id), wants);
+    const answer = await model.complete(messages, controller.signal);
+    const first = judge(answer);
+    if (first.ok) return first.lines;
+    const repaired = judge(await model.complete([...messages, { role: "assistant", content: answer },
+      { role: "user", content: `这个回答不合规则：${first.problem}。按规则改好（每个字段的字数都要在范围内），只输出 JSON。` }], controller.signal));
+    if (repaired.ok) return repaired.lines;
+    throw new TextModelError(repaired.problem, 422);
   } catch (error) {
     if (controller.signal.aborted) throw new TextModelError("TEXT_TIMEOUT", 504);
     throw error;

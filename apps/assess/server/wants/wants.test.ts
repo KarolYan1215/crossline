@@ -75,7 +75,8 @@ test("today's text budget stops model calls, not answers", async () => {
   configureWants({ model: { label: "fake", complete } });
   await composeWants(storedResult(), { picks: ["music"], text: "" });
   const second = await composeWants(storedResult(), { picks: ["music"], text: "" });
-  expect(complete).toHaveBeenCalledTimes(1);
+  // The first person's answer and its one repair; the second person gets the rules.
+  expect(complete).toHaveBeenCalledTimes(2);
   expect(second.source).toBe("rules");
 });
 
@@ -89,4 +90,19 @@ test("everything the rules and the written combinations can print is in the post
   }
   const missing = [...new Set(strings.join(""))].filter((char) => char !== " " && !glyphs.has(char));
   expect(missing).toEqual([]);
+});
+
+test("an answer that breaks a rule is sent back once with what was wrong, and the repaired answer is used", async () => {
+  const good = { lines: [{ domain: "", identity: "音乐人" }, { domain: "", identity: "投资者" }, { domain: "", identity: "跑者" }],
+    loop: ["原创作品", "投资素材", "跑出状态", "回到作曲"],
+    links: [{ from: 0, to: 1, kind: "复用", how: "作品成为素材" }, { from: 1, to: 2, kind: "约束", how: "留出跑步时间" }, { from: 2, to: 0, kind: "约束", how: "体力撑住创作" }] };
+  // DeepSeek V4's first answers on 2026-10-16: loop steps of 11 to 17 characters.
+  const long = { ...good, loop: ["用跑步心率数据给自己作曲", "投资", "跑步", "回到音乐"] };
+  const complete = vi.fn(async (messages: ChatMessage[]) => JSON.stringify(messages.length > 2 ? good : long));
+  configureWants({ model: { label: "fake", complete } });
+  const lines = await composeWants(storedResult(), { picks: ["music", "invest", "running"], text: "想用跑步心率数据给自己作曲" });
+  expect(lines.source).toBe("model");
+  expect(lines.loop).toEqual(good.loop);
+  const repair = complete.mock.calls[1]![0];
+  expect(repair.at(-1)!.content).toContain("loop[0]");
 });

@@ -148,6 +148,8 @@
 | `ASSESS_TEXT_JSON_MODE` | 可选，`off` 时不发 `response_format: json_object`（个别服务不认这个字段） |
 | `ASSESS_TEXT_DAILY_LIMIT` | 可选，每天最多调用几次，默认 1000，计数在 `data/text-budget.json` |
 
+模型的回答不合规则（2026-10-16 DeepSeek V4 第一次把飞轮每步写成 11–17 个字，海报方框只放得下 10 个）时，把错在哪里回给它重写一次，两次合计 25 秒为限；仍不合规才退回规则。结果页「你也许想做」下面不再写这组合从哪来（本人 2026-10-16 决定）。
+
 限流：`POST /api/results/<结果令牌>/wants` 每个 IP 每小时 30 次，每份结果 3 次（`WANTS_LIMIT_REACHED`）。日志：`wants.text_model`（启动时选中的模型或没有的原因）、`wants.model_ready`、`wants.model_failed`（带原因和用了哪种兜底）、`wants.skipped`（当天预算用完）。
 
 ## 构建

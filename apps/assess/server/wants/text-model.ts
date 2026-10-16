@@ -5,7 +5,7 @@
  * models, accounts or ledger is used.
  */
 
-export type ChatMessage = { role: "system" | "user"; content: string };
+export type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
 
 export interface TextModel {
   /** Service host and model, for the server log (never the key). */
