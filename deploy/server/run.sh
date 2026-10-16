@@ -28,17 +28,20 @@ start() {
 }
 
 if [ "$want" = all ] || [ "$want" = assess ]; then
-  start assess --env-file /srv/assess/assess.env -v /srv/assess/data:/data -p 127.0.0.1:3340:3340 --memory 250m --memory-swap 250m "$assess_image"
+  # The quick test is what many people use at once: the largest share after the worker, and a heap ceiling under it so a burst of
+  # posters and figures is collected before the container is near its limit.
+  start assess --env-file /srv/assess/assess.env -v /srv/assess/data:/data -p 127.0.0.1:3340:3340 --memory 350m --memory-swap 350m \
+    -e NODE_OPTIONS=--max-old-space-size=256 "$assess_image"
 fi
 # The web app and the worker share the host's network (they talk on 127.0.0.1, as on the owner's machine) and one data/state volume.
 # Every container has a memory ceiling with no swap beyond it: on 2026-10-16 milestone design, a portrait rewrite and a figure ran at
 # once with no ceiling, the host swapped until Caddy and SSH stopped answering, and both sites were down. Over its ceiling a container
 # is killed and restarted by Docker instead (the worker's Codex runtimes are its children, so they count against the worker's).
-# The ceilings add up to 1.2 GB on a host with 1.6 GB: the first ones (1.7 GB) left nothing for the system, and the next deploy's image
-# pull froze the host again while the worker planned twenty milestones (2026-10-16). Keep their sum at least 400 MB under the host's.
+# The ceilings add up to 1.23 GB on a host with 1.6 GB: the first ones (1.7 GB) left nothing for the system, and the next deploy's image
+# pull froze the host again while the worker planned twenty milestones (2026-10-16). Keep their sum at least 350 MB under the host's.
 if [ "$want" = all ] || [ "$want" = web ]; then
   # A Node heap ceiling under the container's: the heap is collected harder before the container is anywhere near being killed.
-  start crossline-web --network host --env-file /srv/crossline/app.env --memory 300m --memory-swap 300m -e NODE_OPTIONS=--max-old-space-size=224 \
+  start crossline-web --network host --env-file /srv/crossline/app.env --memory 280m --memory-swap 280m -e NODE_OPTIONS=--max-old-space-size=208 \
     -v /srv/crossline/data:/data -v /srv/crossline/state:/state -v /srv/crossline/codex:/opt/codex:ro \
     -w /repo/apps/web "$app_image" node_modules/.bin/next start --hostname 127.0.0.1 --port 3210
 fi
@@ -51,7 +54,7 @@ if [ "$want" = all ] || [ "$want" = worker ]; then
   # live outside the Node heap, so the heap gets well under half the container.
   worker_cmd="/repo/node_modules/.bin/tsx src/index.ts"
   if docker run --rm --entrypoint test "$app_image" -f /repo/apps/worker/dist/index.mjs; then worker_cmd="node dist/index.mjs"; fi
-  start crossline-worker --network host --env-file /srv/crossline/app.env --memory 650m --memory-swap 650m -e NODE_OPTIONS=--max-old-space-size=320 \
+  start crossline-worker --network host --env-file /srv/crossline/app.env --memory 600m --memory-swap 600m -e NODE_OPTIONS=--max-old-space-size=300 \
     -v /srv/crossline/data:/data -v /srv/crossline/state:/state -v /srv/crossline/codex:/opt/codex:ro \
     -w /repo/apps/worker "$app_image" $worker_cmd
 fi

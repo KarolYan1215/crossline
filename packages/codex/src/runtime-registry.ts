@@ -138,8 +138,10 @@ export function createRuntimeRegistry(options: {
       const arrived = running.get(workspaceId)?.sidecar ?? await starting.get(workspaceId)?.catch(() => undefined);
       if (arrived) return arrived;
     }
-    // Another process is the largest single thing this can add: with memory above the high-water mark, wait (reclaiming meanwhile).
-    await waitForMemory();
+    // Another process is the largest single thing this can add: with memory above the high-water mark, wait (reclaiming meanwhile)
+    // for as long as another guest's runtime is up, since its run ending is what frees memory. With none up the reading is the worker's
+    // own, and starting anyway is the only way forward.
+    while (!(await waitForMemory()) && running.size > 0 && now() - queuedAt < maxQueueMs) { /* keep waiting */ }
     // Another call may have started it while this one waited.
     const meanwhile = running.get(workspaceId)?.sidecar ?? await starting.get(workspaceId)?.catch(() => undefined);
     if (meanwhile) return meanwhile;

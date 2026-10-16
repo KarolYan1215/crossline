@@ -21,8 +21,14 @@ import { templatesDir, templateVariant, type TemplateVariant } from "./templates
  * correct answer, so nothing here ever makes a result page wait or fail.
  */
 
-export const CONCURRENCY = 2;
-export const MAX_PENDING = 40;
+/**
+ * Figures drawn at once. A Seedream call takes 30–60 s and holds only the request and the downloaded image (about 10 MB), so six at
+ * once keep a burst of people moving (two made the twentieth wait six minutes) inside the container's memory; Ark's own limit is far
+ * above it. `ASSESS_IMAGE_CONCURRENCY` overrides it (two suits SiliconFlow's lowest image tier).
+ */
+export const CONCURRENCY = Math.max(1, Number(process.env.ASSESS_IMAGE_CONCURRENCY) || 6);
+/** Waiting past this, a figure settles on the template: at six at once the last one waits about seven minutes. */
+export const MAX_PENDING = 60;
 /** One call to the model, download included. Seedream's larger models take 30–60 s for a 1024×1536 edit (measured 2026-10-16: 39 s). */
 export const CALL_TIMEOUT_MS = 120_000;
 /** A figure still `queued`/`drawing` this long after it was last queued was lost to a restart: show the fallback. */

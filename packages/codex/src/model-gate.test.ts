@@ -6,10 +6,10 @@ afterEach(() => resetModelGate());
 const deferred = () => { let resolve!: () => void; const promise = new Promise<void>((done) => { resolve = done; }); return { promise, resolve }; };
 const tick = () => new Promise((resolve) => setTimeout(resolve, 15));
 
-test("the hosted beta runs one model turn at a time; elsewhere there is no limit unless one is set", () => {
-  expect(modelGateLimit({ CROSSLINE_PUBLIC_BETA: "1" })).toBe(1);
+test("the hosted beta runs two model turns at a time; elsewhere there is no limit unless one is set", () => {
+  expect(modelGateLimit({ CROSSLINE_PUBLIC_BETA: "1" })).toBe(2);
   expect(modelGateLimit({})).toBe(Number.POSITIVE_INFINITY);
-  expect(modelGateLimit({ CROSSLINE_PUBLIC_BETA: "1", CROSSLINE_MODEL_CONCURRENCY: "2" })).toBe(2);
+  expect(modelGateLimit({ CROSSLINE_PUBLIC_BETA: "1", CROSSLINE_MODEL_CONCURRENCY: "1" })).toBe(1);
   expect(priorityForSkill("crossline:crossline-onboarding")).toBe("interactive");
   expect(priorityForSkill("crossline:crossline-milestone-architect")).toBe("background");
 });

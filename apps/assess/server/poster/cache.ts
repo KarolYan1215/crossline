@@ -19,6 +19,25 @@ const postersDir = () => path.join(dataDir(), "posters");
 const inFlight = new Map<string, Promise<Buffer>>();
 let lastPrune = 0;
 
+/**
+ * Renders at once, process-wide. A render holds the laid-out SVG and a 1080-wide bitmap (about 10 MB, a quarter of a second), and a
+ * burst of people reaching their results together must queue for the CPU rather than all hold one in a 250–350 MB container
+ * (decided 2026-10-16, to let many people take the test at the same time). `ASSESS_RENDER_CONCURRENCY` overrides it.
+ */
+const RENDERS = Math.max(1, Number(process.env.ASSESS_RENDER_CONCURRENCY) || 2);
+let rendering = 0;
+const renderWaiters: Array<() => void> = [];
+async function renderSlot<T>(work: () => Promise<T>): Promise<T> {
+  if (rendering >= RENDERS) await new Promise<void>((resolve) => renderWaiters.push(resolve));
+  else rendering += 1;
+  try { return await work(); }
+  finally {
+    // Hand the slot straight to the next waiter, so the count never dips and lets a newcomer jump the line.
+    const next = renderWaiters.shift();
+    if (next) next(); else rendering -= 1;
+  }
+}
+
 /** The bytes of a file, or "" when it cannot be read: the hash then changes the moment the figure appears. */
 export function fileDigest(file: string): string {
   try {
@@ -70,7 +89,7 @@ export async function cachedPng(key: string, render: () => Promise<Buffer>): Pro
   const pending = inFlight.get(key);
   if (pending) return pending;
   const work = (async () => {
-    const png = await render();
+    const png = await renderSlot(render);
     mkdirSync(dir, { recursive: true });
     const temp = `${file}.${process.pid}.${Date.now()}.tmp`;
     writeFileSync(temp, png);

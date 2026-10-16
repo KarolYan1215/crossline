@@ -2,8 +2,8 @@
  * One gate for every model run in this process (decided 2026-10-16, after the hosted beta's 2 GB server froze with one person on it:
  * milestone design, a portrait rewrite and a figure ran at once). Slower is acceptable, falling over is not, so:
  *
- * - At most `CROSSLINE_MODEL_CONCURRENCY` runs at a time across every account and tier (default 1 on the hosted beta, no limit
- *   elsewhere). The rest wait in one queue; work a person is waiting on (the interview, the input box) goes before background work.
+ * - At most `CROSSLINE_MODEL_CONCURRENCY` runs at a time across every account and tier (default 2 on the hosted beta — two people's
+ *   turns at once, the memory mark below holding back a third process — no limit elsewhere). The rest wait in one queue; work a person is waiting on (the interview, the input box) goes before background work.
  * - While the process uses more than `CROSSLINE_MEMORY_HIGH_WATER` (75%) of its memory ceiling, nothing new starts: a run already
  *   going finishes first, idle runtimes are reclaimed, and only after a minute of that with nothing running does the next run go anyway
  *   (a reading that never drops must not stop the service for good).
@@ -22,7 +22,7 @@ export const priorityForSkill = (skillName: string): ModelPriority =>
 export function modelGateLimit(env: NodeJS.ProcessEnv = process.env): number {
   const raw = Number(env.CROSSLINE_MODEL_CONCURRENCY);
   if (Number.isInteger(raw) && raw > 0) return raw;
-  return env.CROSSLINE_PUBLIC_BETA === "1" ? 1 : Number.POSITIVE_INFINITY;
+  return env.CROSSLINE_PUBLIC_BETA === "1" ? 2 : Number.POSITIVE_INFINITY;
 }
 
 export function memoryHighWater(env: NodeJS.ProcessEnv = process.env): number {

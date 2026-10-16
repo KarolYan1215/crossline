@@ -75,8 +75,9 @@ export const submitsPerEmail = new RateLimiter(5, 24 * 60 * 60_000);
 /** Token lookups that found nothing, per address per ten minutes: slows anyone walking the token space. */
 export const lookupMisses = new RateLimiter(30, 10 * 60_000);
 
-/** 「你也许想做」 answers per address per hour (each may call the text model; one result may also set it only three times). */
-export const wantsPerIp = new RateLimiter(30, 60 * 60_000);
+/** 「你也许想做」 answers per address per hour (each may call the text model; one result may also set it only three times). As generous as
+ * submissions, for the same shared addresses: thirty a classroom used to run out after ten people. */
+export const wantsPerIp = new RateLimiter(120, 60 * 60_000);
 
 /** Link lookups from the Crossline app (`/api/link`), per address per minute; wrong secrets count too. */
 export const linkLookups = new RateLimiter(60, 60_000);

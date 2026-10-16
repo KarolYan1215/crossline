@@ -1,5 +1,5 @@
 /**
- * A small in-process job queue: at most `concurrency` jobs at once (SiliconFlow's lowest image tier allows 2 images a minute), and at most
+ * A small in-process job queue: at most `concurrency` jobs at once (set by the caller from the provider's rate), and at most
  * `maxPending` waiting — past that a new job is refused, and its figure settles on the template rather than waiting minutes for a picture
  * nobody will still be looking at. Jobs are lost on restart; `avatarStatus` reports a figure stuck that way as its template.
  */
