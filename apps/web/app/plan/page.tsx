@@ -14,6 +14,8 @@ import { requireSessionContext } from "../../lib/access-guard";
 import { gateUntilReady } from "../../lib/start-gate";
 import { timed, timedSync } from "../../lib/sections";
 import { memoByLedgerAsync } from "../../lib/ledger-memo";
+import { localeFor } from "../../lib/locale";
+import { tFor } from "../../lib/i18n";
 
 export const dynamic = "force-dynamic";
 
@@ -27,6 +29,8 @@ export const dynamic = "force-dynamic";
 export default async function PlanPage(props: { searchParams?: Promise<{ horizon?: string }> }) {
   const ctx = await requireSessionContext();
   gateUntilReady(ctx);
+  const locale = localeFor(ctx);
+  const t = tFor(locale);
   const requested = (await props.searchParams)?.horizon;
   const plan = await timed("plan.current", () => loadCurrentPlan(ctx));
   // Reused until the ledger changes or a minute passes, like the plan it is drawn from (`lib/ledger-memo.ts`).
@@ -35,8 +39,8 @@ export default async function PlanPage(props: { searchParams?: Promise<{ horizon
   const explanation = timedSync("plan.explanation", () => loadPlanExplanation(ctx, planToday(ctx)));
   const titles = new Map(getStore().listWorkOrders(ctx.workspaceId).map((order) => [order.id, order.intent]));
   const imported = plan.blocks.filter((block) => block.id.startsWith("graph_calendar:") || block.id.startsWith("import:")).length;
-  return <SubpageShell active="计划" title="计划"
-    description={imported ? `日历与文件中的 ${imported} 个固定日程，加上按可用时段排入的任务；日程本身在今日页。` : "任务按可用时段排入；日程本身在今日页。"}>
+  return <SubpageShell active={"计划"} title={t("计划")}
+    description={imported ? t("日历与文件中的 {{count}} 个固定日程，加上按可用时段排入的任务；日程本身在今日页。", { count: imported }) : t("任务按可用时段排入；日程本身在今日页。")}>
     <PlanPreviewProvider horizonDays={board.horizon.days}>
       <PlanView plan={plan} aside={<HorizonSelect horizon={board.horizon} />} />
       <MilestoneTimeline rows={board.charts.goals} today={board.today} weeks={board.horizon.weeks} spanDays={board.horizon.days} done={board.doneMilestones}
@@ -48,18 +52,18 @@ export default async function PlanPage(props: { searchParams?: Promise<{ horizon
         <InvestmentChart data={board.investment} labels={board.labels} />
         <EstimateChart estimates={board.estimates} labels={board.labels} />
       </div>
-      {board.inferredRegularBlocks > 0 && <small className="pl-chart-foot">第 2 周起按日历中的 {board.inferredRegularBlocks} 个重复日程预留时间。</small>}
+      {board.inferredRegularBlocks > 0 && <small className="pl-chart-foot">{t("第 2 周起按日历中的 {{count}} 个重复日程预留时间。", { count: board.inferredRegularBlocks })}</small>}
       <TimeEnergy windows={board.week.windows} suggested={board.week.suggested} proposed={board.week.proposed} busy={board.week.busy}
         statedWeekly={board.capacity.statedWeekly} worked={board.rhythm.worked} advice={board.advice} />
       <LongTermGoals goals={board.goals} shares={board.shares.effective} />
       <AdvancedSettings params={board.params} presets={board.presets} shares={board.shares} labels={board.labels} lineOrder={board.lineOrder}>
-        <RankingTable ranking={board.ranking} today={board.today} />
+        <RankingTable ranking={board.ranking} today={board.today} locale={locale} />
         <div className="pl-explain">
           {explanation && <>
             <p className="gen">{explanation.summary}</p>
             <p className="gen">{explanation.nextActionReason}</p>
             {explanation.alternatives.length > 0 && <ul>{explanation.alternatives.map((item) =>
-              <li key={item.id}><b>{titles.get(item.id) ?? "已移除的任务"}</b> <span className="gen">{item.reason}</span></li>)}</ul>}
+              <li key={item.id}><b>{titles.get(item.id) ?? t("已移除的任务")}</b> <span className="gen">{item.reason}</span></li>)}</ul>}
           </>}
           <PlanExplainButton hasExplanation={Boolean(explanation)} />
         </div>

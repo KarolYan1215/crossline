@@ -6,12 +6,13 @@ import {
   buildGraph, createSimulation, edgeGeometry, fitTransform, graphLoops, layoutGraph, loopCentre, neighbours,
   type FlywheelGraphData, type GraphEdge, type GraphNode, type Point
 } from "./graph-model";
+import { useLocale, useT } from "../locale-context";
+import { clip } from "../timeline/format";
 import "./flywheel-graph.css";
 
 const ZOOM = { min: 0.5, max: 4 };
 const DEFAULT_WIDTH = 720;
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
-const short = (text: string, max: number) => text.length > max ? `${text.slice(0, max - 1)}…` : text;
 const r1 = (n: number) => Math.round(n * 10) / 10;
 const openMilestone = (id: string) => { location.href = `/milestones?open=${encodeURIComponent(id)}`; };
 
@@ -31,6 +32,11 @@ type Drag = { kind: "node"; id: string; pointerId: number; startX: number; start
  * the first paint, so the shape is the same on every load; with reduced motion nothing animates.
  */
 export function FlywheelGraph({ data }: { data: FlywheelGraphData }) {
+  const t = useT();
+  const locale = useLocale();
+  // Cut by width in English (a Latin label keeps about twice the characters), by characters in Chinese as before.
+  const short = (text: string, max: number) => clip(locale, text, max);
+  const kindName = (kind: string | undefined) => RELATION_KIND_LABEL[kind ?? ""] ? t(RELATION_KIND_LABEL[kind ?? ""]!) : "";
   const uid = useId().replace(/[^a-zA-Z0-9_-]/g, "");
   const [relations, setRelations] = useState(data.relations);
   const graph = useMemo(() => buildGraph({ ...data, relations }), [data, relations]);
@@ -176,12 +182,12 @@ export function FlywheelGraph({ data }: { data: FlywheelGraphData }) {
       body: JSON.stringify({ ids: [edge.relationId], decision }) }).catch(() => null);
     const body = await response?.json().catch(() => null) as { ok?: boolean; decided?: string[]; skipped?: string[] } | null;
     setBusy(false);
-    if (!response?.ok || !body?.ok) { setStatus("未能保存，请重试。"); return; }
-    if (!body.decided?.includes(edge.relationId)) { setStatus("该关系缺少依据，暂不能批准；可在主线页查看。"); return; }
+    if (!response?.ok || !body?.ok) { setStatus(t("未能保存，请重试。")); return; }
+    if (!body.decided?.includes(edge.relationId)) { setStatus(t("该关系缺少依据，暂不能批准；可在主线页查看。")); return; }
     setRelations((list) => decision === "archived" ? list.filter((relation) => relation.id !== edge.relationId)
       : list.map((relation) => relation.id === edge.relationId ? { ...relation, status: "approved" } : relation));
     setPicked(null);
-    setStatus(decision === "approved" ? "已批准，图中改为实线。" : "已驳回，关系已移除。");
+    setStatus(decision === "approved" ? t("已批准，图中改为实线。") : t("已驳回，关系已移除。"));
   };
 
   const at = (id: string) => { const p = positions.get(id); return p ? toScreen(p) : undefined; };
@@ -206,9 +212,9 @@ export function FlywheelGraph({ data }: { data: FlywheelGraphData }) {
 
   return <div className="fw" ref={wrap}>
     {graph.nodes.every((node) => node.kind === "anchor")
-      ? <p className="fw-empty">尚无进行中的里程碑。批准里程碑草稿后，各主线的里程碑与飞轮关系显示在此。</p>
+      ? <p className="fw-empty">{t("尚无进行中的里程碑。批准里程碑草稿后，各主线的里程碑与飞轮关系显示在此。")}</p>
       : <div className="fw-stage">
-        <svg ref={svg} className="fw-graph" viewBox={`0 0 ${width} ${height}`} role="group" aria-label={`飞轮图谱：${graph.nodes.filter((node) => node.kind === "milestone").length} 个里程碑，${graph.edges.filter((edge) => edge.kind === "cross").length} 条飞轮关系`}
+        <svg ref={svg} className="fw-graph" viewBox={`0 0 ${width} ${height}`} role="group" aria-label={t("飞轮图谱：{{milestones}} 个里程碑，{{links}} 条飞轮关系", { milestones: graph.nodes.filter((node) => node.kind === "milestone").length, links: graph.edges.filter((edge) => edge.kind === "cross").length })}
           onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}>
           <defs>{data.lines.map((line) => <marker key={line.id} id={`fw-${uid}-${line.id.replace(/[^a-zA-Z0-9_-]/g, "_")}`} data-line={line.id}
             viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto">
@@ -217,10 +223,10 @@ export function FlywheelGraph({ data }: { data: FlywheelGraphData }) {
             data-dim={dim([edge.from, edge.to])} data-on={picked === edge.id || undefined}
             markerEnd={edge.kind === "cross" ? `url(#fw-${uid}-${edge.line.replace(/[^a-zA-Z0-9_-]/g, "_")})` : undefined} />)}
           {drawn.filter(({ edge }) => edge.relationId).map(({ edge, path }) => <path key={`hit-${edge.id}`} d={path} className="fw-hit"
-            role="button" tabIndex={0} aria-label={`${titleOf(edge.from)} → ${titleOf(edge.to)}：${RELATION_KIND_LABEL[edge.relationKind ?? ""] ?? "关系"}${edge.status === "candidate" ? "，待确认" : ""}`}
+            role="button" tabIndex={0} aria-label={`${t("{{from}} → {{to}}：{{kind}}", { from: titleOf(edge.from), to: titleOf(edge.to), kind: kindName(edge.relationKind) || t("关系") })}${edge.status === "candidate" ? t("，待确认") : ""}`}
             onPointerDown={(event) => event.stopPropagation()} onClick={() => setPicked(picked === edge.id ? null : edge.id)}
             onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setPicked(picked === edge.id ? null : edge.id); } }}>
-            <title>{`${titleOf(edge.from)} → ${titleOf(edge.to)}：${RELATION_KIND_LABEL[edge.relationKind ?? ""] ?? ""}${edge.explanation ? `。${edge.explanation}` : ""}`}</title></path>)}
+            <title>{`${t("{{from}} → {{to}}：{{kind}}", { from: titleOf(edge.from), to: titleOf(edge.to), kind: kindName(edge.relationKind) })}${edge.explanation ? `${t("。")}${edge.explanation}` : ""}`}</title></path>)}
           {graph.nodes.map((node) => {
             const p = at(node.id);
             if (!p) return null;
@@ -230,10 +236,11 @@ export function FlywheelGraph({ data }: { data: FlywheelGraphData }) {
             return <g key={node.id} className="fw-node" data-kind={node.kind} data-line={node.line} data-status={node.status} data-dim={dim([node.id])}
               transform={`translate(${r1(p.x)},${r1(p.y)})`} onPointerDown={onNodeDown(node)}
               onPointerEnter={() => setHover(node.id)} onPointerLeave={() => setHover((current) => current === node.id ? null : current)}
-              {...(node.milestoneId ? { role: "link", tabIndex: 0, "aria-label": `${lineLabel.get(node.line) ?? ""} · ${node.label}，${node.openTasks ?? 0} 项未完成${node.status === "draft" ? "，草稿" : ""}，打开主线页`,
+              {...(node.milestoneId ? { role: "link", tabIndex: 0, "aria-label": t(node.status === "draft" ? "{{line}} · {{title}}，{{count}} 项未完成，草稿，打开主线页" : "{{line}} · {{title}}，{{count}} 项未完成，打开主线页",
+                { line: lineLabel.get(node.line) ?? "", title: node.label, count: node.openTasks ?? 0 }),
                 onFocus: () => setHover(node.id), onBlur: () => setHover(null),
                 onKeyDown: (event: ReactKeyboardEvent) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openMilestone(node.milestoneId!); } } } : { "aria-hidden": true })}>
-              <title>{anchor ? `${lineLabel.get(node.line) ?? ""}：${node.label}` : `${node.label} · ${node.openTasks ?? 0} 项未完成${node.status === "draft" ? " · 草稿" : ""}`}</title>
+              <title>{anchor ? `${lineLabel.get(node.line) ?? ""}${t("：")}${node.label}` : `${node.label} · ${t("{{count}} 项未完成", { count: node.openTasks ?? 0 })}${node.status === "draft" ? ` · ${t("草稿")}` : ""}`}</title>
               {anchor ? <><circle r={node.radius} className="fw-anchor-ring" /><circle r={5} className="fw-anchor-dot" /></> : <circle r={node.radius} className="fw-dot" />}
               {named && <text y={node.radius + 15} textAnchor="middle" className={anchor ? "fw-label fw-label-goal" : "fw-label"}>{label}</text>}
             </g>;
@@ -242,52 +249,52 @@ export function FlywheelGraph({ data }: { data: FlywheelGraphData }) {
             const centrePoint = loopCentre(loop, graph, at);
             if (!centrePoint) return null;
             return <g key={loop.id} className="fw-loop" transform={`translate(${r1(centrePoint.x)},${r1(centrePoint.y)})`}>
-              <title>{`飞轮回路：${[...loop.lines, loop.lines[0]!].map((line) => lineLabel.get(line) ?? line).join(" → ")}`}</title>
+              <title>{t("飞轮回路：{{lines}}", { lines: [...loop.lines, loop.lines[0]!].map((line) => lineLabel.get(line) ?? line).join(" → ") })}</title>
               <circle r={14} /><text y={4} textAnchor="middle">{loop.label}</text>
-              {loop.lagDays !== undefined && <text y={30} textAnchor="middle" className="fw-label">时延约 {loop.lagDays} 天</text>}
+              {loop.lagDays !== undefined && <text y={30} textAnchor="middle" className="fw-label">{t("时延约 {{count}} 天", { count: loop.lagDays })}</text>}
             </g>;
           })}
         </svg>
-        <div className="fw-zoom" role="group" aria-label="缩放">
-          <button type="button" aria-label="放大" onClick={() => zoomAbout(centre, view.zoom * 1.25)}>+</button>
-          <button type="button" aria-label="缩小" onClick={() => zoomAbout(centre, view.zoom / 1.25)}>−</button>
-          <button type="button" onClick={() => { setView({ zoom: 1, x: 0, y: 0 }); pinned.current.clear(); setPositions(base); }}>复位</button>
+        <div className="fw-zoom" role="group" aria-label={t("缩放")}>
+          <button type="button" aria-label={t("放大")} onClick={() => zoomAbout(centre, view.zoom * 1.25)}>+</button>
+          <button type="button" aria-label={t("缩小")} onClick={() => zoomAbout(centre, view.zoom / 1.25)}>−</button>
+          <button type="button" onClick={() => { setView({ zoom: 1, x: 0, y: 0 }); pinned.current.clear(); setPositions(base); }}>{t("复位")}</button>
         </div>
-        {pickedEdge?.edge.relationId && <div className="fw-pop" role="dialog" aria-label="飞轮关系" data-line={pickedEdge.edge.line}
+        {pickedEdge?.edge.relationId && <div className="fw-pop" role="dialog" aria-label={t("飞轮关系")} data-line={pickedEdge.edge.line}
           style={{ left: clamp(pickedEdge.mid.x - 150, 4, Math.max(4, width - 304)), top: pickedEdge.mid.y > height * 0.6 ? undefined : pickedEdge.mid.y + 12,
             bottom: pickedEdge.mid.y > height * 0.6 ? height - pickedEdge.mid.y + 12 : undefined }}>
           <p className="fw-pop-head"><b>{lineLabel.get(nodeById.get(pickedEdge.edge.from)?.line ?? "")} → {lineLabel.get(nodeById.get(pickedEdge.edge.to)?.line ?? "")}</b>
-            <span className="fw-kind">{RELATION_KIND_LABEL[pickedEdge.edge.relationKind ?? ""] ?? "关系"}</span>
-            <span className="fw-kind">{pickedEdge.edge.status === "candidate" ? "待确认" : "已确认"}</span></p>
+            <span className="fw-kind">{kindName(pickedEdge.edge.relationKind) || t("关系")}</span>
+            <span className="fw-kind">{pickedEdge.edge.status === "candidate" ? t("待确认", { context: "link" }) : t("已确认")}</span></p>
           <p className="fw-pop-ends">{titleOf(pickedEdge.edge.from)} → {titleOf(pickedEdge.edge.to)}</p>
           {pickedEdge.edge.explanation && <p className="fw-pop-why gen">{pickedEdge.edge.explanation}</p>}
           <div className="fw-pop-actions">
             {pickedEdge.edge.status === "candidate" && <>
-              <button type="button" className="primary-button" disabled={busy} onClick={() => void decide(pickedEdge.edge, "approved")}>成立</button>
-              <button type="button" disabled={busy} onClick={() => void decide(pickedEdge.edge, "archived")}>不成立</button>
+              <button type="button" className="primary-button" disabled={busy} onClick={() => void decide(pickedEdge.edge, "approved")}>{t("成立")}</button>
+              <button type="button" disabled={busy} onClick={() => void decide(pickedEdge.edge, "archived")}>{t("不成立")}</button>
             </>}
-            <button type="button" className="fw-quiet" onClick={() => setPicked(null)}>关闭</button>
+            <button type="button" className="fw-quiet" onClick={() => setPicked(null)}>{t("关闭")}</button>
           </div>
         </div>}
       </div>}
     {status && <small role="status" className="fw-status">{status}</small>}
-    <ul className="fw-lines" aria-label="各主线">
+    <ul className="fw-lines" aria-label={t("各主线")}>
       {data.lines.map((line) => <li key={line.id} data-line={line.id}>
-        <i aria-hidden="true" /><a href="/milestones"><b>{line.label}</b></a> · <span className="mono">{line.openTasks}</span> 项进行中
+        <i aria-hidden="true" /><a href="/milestones"><b>{line.label}</b></a> · <span className="mono">{line.openTasks}</span>{t(" 项进行中")}
         {line.goal && <small title={line.goal}>{short(line.goal, 36)}</small>}
       </li>)}
     </ul>
     {/* The key is reference, read once: folded so the graph is not followed by a block of explanation. */}
-    <details className="fold advanced fw-key-fold"><summary>图例与操作</summary>
-    <ul className="fw-key" aria-label="图例">
-      <li>点：里程碑，大小为未完成任务数，空心为草稿</li>
-      <li>细线：同一主线前后</li>
-      <li>粗线带箭头：飞轮关系，颜色取上游主线</li>
-      <li>实线已确认，虚线待确认</li>
-      <li>R：已确认关系构成的回路</li>
-      <li>健康是容量约束，不画在图中</li>
-      <li>拖动节点或空白处，滚轮或双指缩放；点里程碑打开主线页，点关系线查看与确认</li>
-      {!showNames && <li>里程碑名称：悬停或放大后显示</li>}
+    <details className="fold advanced fw-key-fold"><summary>{t("图例与操作")}</summary>
+    <ul className="fw-key" aria-label={t("图例")}>
+      <li>{t("点：里程碑，大小为未完成任务数，空心为草稿")}</li>
+      <li>{t("细线：同一主线前后")}</li>
+      <li>{t("粗线带箭头：飞轮关系，颜色取上游主线")}</li>
+      <li>{t("实线已确认，虚线待确认")}</li>
+      <li>{t("R：已确认关系构成的回路")}</li>
+      <li>{t("健康是容量约束，不画在图中")}</li>
+      <li>{t("拖动节点或空白处，滚轮或双指缩放；点里程碑打开主线页，点关系线查看与确认")}</li>
+      {!showNames && <li>{t("里程碑名称：悬停或放大后显示")}</li>}
     </ul></details>
   </div>;
 }

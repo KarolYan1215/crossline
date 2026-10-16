@@ -7,8 +7,11 @@ import { ImpactCard, useImpact } from "../task/impact";
 import { DayQuickActions, type QuickProposal } from "./quick-actions";
 import { useReturnState } from "../ui/return-state";
 import type { TaskDetail } from "../../lib/task-detail";
+import { useLocale, useT } from "../locale-context";
+import { intlLocale, weekdayShort } from "../../lib/i18n";
 
 export type CalendarView = "day" | "week" | "month";
+/** The tab names are keys, translated where shown. */
 const VIEWS: Array<[CalendarView, string]> = [["day", "日"], ["week", "周"], ["month", "月"]];
 
 /**
@@ -24,6 +27,8 @@ export function CalendarPanel({ items, deadlines, today, nowIso, timeZone, label
   /** Details of the tasks behind the blocks, read with the page (Today); a task not here is read when its block is picked. */
   taskDetails?: Record<string, TaskDetail> | undefined;
 }) {
+  const t = useT();
+  const locale = useLocale();
   const [view, setView] = useState<CalendarView>(initialView);
   const [anchor, setAnchor] = useState(today);
   const [selected, setSelected] = useState<TimelineItem | undefined>();
@@ -54,21 +59,24 @@ export function CalendarPanel({ items, deadlines, today, nowIso, timeZone, label
   };
   // The week has no panel of its own: picking a block there opens its day with the block picked.
   const pickInWeek = (item: TimelineItem) => { setAnchor(item.day); setView("day"); pick(item); };
-  const title = view === "day" ? `${anchor}（周${"日一二三四五六"[weekdayOf(anchor)]}）`
-    : view === "week" ? `${weekDays(anchor)[0]} 至 ${weekDays(anchor)[6]}` : `${monthOf(anchor).replace("-", " 年 ")} 月`;
+  const [year, month] = monthOf(anchor).split("-");
+  const title = view === "day" ? t("{{day}}（{{weekday}}）", { day: anchor, weekday: weekdayShort(locale, weekdayOf(anchor)) })
+    : view === "week" ? t("{{from}} 至 {{to}}", { from: weekDays(anchor)[0], to: weekDays(anchor)[6] })
+    : t("{{year}} 年 {{month}} 月", { year, month: locale === "en"
+      ? new Date(Date.UTC(Number(year), Number(month) - 1, 15)).toLocaleDateString(intlLocale(locale), { month: "long", timeZone: "UTC" }) : month });
 
-  return <section className="cal" aria-label="日历">
+  return <section className="cal" aria-label={t("日历")}>
     <header className="cal-head">
-      <div className="cal-tabs" role="tablist" aria-label="日历视图">
-        {VIEWS.map(([id, label]) => <button key={id} type="button" role="tab" aria-selected={view === id} onClick={() => { setView(id); setSelected(undefined); }}>{label}</button>)}
+      <div className="cal-tabs" role="tablist" aria-label={t("日历视图")}>
+        {VIEWS.map(([id, label]) => <button key={id} type="button" role="tab" aria-selected={view === id} onClick={() => { setView(id); setSelected(undefined); }}>{t(label)}</button>)}
       </div>
       <div className="cal-nav">
-        <button type="button" onClick={() => step(-1)} aria-label="上一个">←</button>
-        <button type="button" onClick={() => setAnchor(today)} disabled={anchor === today}>今天</button>
-        <button type="button" onClick={() => step(1)} aria-label="下一个">→</button>
+        <button type="button" onClick={() => step(-1)} aria-label={t("上一个")}>←</button>
+        <button type="button" onClick={() => setAnchor(today)} disabled={anchor === today}>{t("今天")}</button>
+        <button type="button" onClick={() => step(1)} aria-label={t("下一个")}>→</button>
         <b>{title}</b>
       </div>
-      <div className="cal-legend" aria-label="图例">
+      <div className="cal-legend" aria-label={t("图例")}>
         {Object.entries(labels).map(([id, label]) => <span key={id} data-line={id}>{label}</span>)}
       </div>
     </header>

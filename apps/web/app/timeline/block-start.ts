@@ -1,3 +1,4 @@
+import { tFor, type Locale } from "../../lib/i18n";
 import type { TimelineItem } from "./model";
 
 /**
@@ -5,9 +6,9 @@ import type { TimelineItem } from "./model";
  * so re-planning no longer moves what the person is doing; a pencilled-in block (预排) becomes formal at that time. Handed to
  * `TaskActions` as `beforeStart`; a message means the start stops.
  */
-export async function lockOnStart(item: TimelineItem): Promise<string | null> {
+export async function lockOnStart(item: TimelineItem, locale?: Locale): Promise<string | null> {
   if (item.kind !== "optional" && item.kind !== "scheduled") return null;
   const response = await fetch("/api/plan/pin", { method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify({ blockId: item.id, day: item.day, start: item.start, end: item.end, reason: "pinned" }) }).catch(() => null);
-  return response?.ok ? null : "未能锁定这段时间，请重试";
+  return response?.ok ? null : tFor(locale)("未能锁定这段时间，请重试");
 }
