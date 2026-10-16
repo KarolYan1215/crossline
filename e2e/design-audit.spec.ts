@@ -64,7 +64,9 @@ async function audit(page: Page): Promise<{ fonts: Finding[]; small: Finding[]; 
       // Arial would no longer read as mathematics. Its sub- and superscripts are set at about 70% of the line by mathematical
       // convention, so the size rule does not apply inside it either; the formula's base size follows the text around it.
       const formula = Boolean(element.closest(".katex"));
-      if (face !== expected && !formula) fonts.push(finding(style.fontFamily.slice(0, 60)));
+      // English poster text uses the Latin companion of the poster serif (portrait.css).
+      const same = face === expected || (expected === "crossline poster serif" && face === "crossline poster serif latin");
+      if (!same && !formula) fonts.push(finding(style.fontFamily.slice(0, 60)));
       if (parseFloat(style.fontSize) < 12 && !formula) small.push(finding(style.fontSize));
       if (element.closest(":disabled, [aria-disabled='true']")) continue;
       const fg = parse(style.color);
