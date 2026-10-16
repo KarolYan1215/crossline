@@ -181,3 +181,7 @@
 .ob-folder-plan fieldset label{display:flex;gap:6px;align-items:baseline;flex-wrap:wrap}
 .ob-folder-plan fieldset span{overflow-wrap:anywhere}
 .ob-folder-actions{display:flex;gap:8px;flex-wrap:wrap}
+.ob-opening-note{display:grid;gap:8px;max-width:760px}
+.ob-opening-note h3{margin:0;font-size:15px}
+.ob-opening-note p{margin:0;line-height:1.75}
+.ob-opening-sign{justify-self:end;color:var(--muted, inherit)}

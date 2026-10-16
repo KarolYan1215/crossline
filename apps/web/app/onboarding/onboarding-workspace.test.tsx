@@ -7,7 +7,9 @@ import { MATERIALS_FIRST_REPLY, NO_MATERIALS_REPLY } from "./onboarding-types";
 /** The interview v3 (docs/onboarding-v3.md): the opening card, the stage pictures and the time left. */
 test("the opening states the premise, the three parts and the time, then asks tone and lines — no six-level lecture", () => {
   const html = renderToStaticMarkup(<OpeningCard linesKnown={false} knownLines={[]} initialTone="neutral" busy={false} hasMaterials={false} onStart={() => {}} />);
-  expect(html).toContain("可以反复修改");
+  expect(html).toContain("开发者的话");
+  expect(html).toContain("在AI时代夺回属于人类的部分");
+  expect(html).toContain("——Y.K.");
   expect(html).toContain("大约 30 分钟");
   expect(html).toContain("你希望我怎么跟你说话");
   expect(html).toContain("中性客观");
