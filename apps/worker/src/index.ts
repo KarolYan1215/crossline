@@ -1056,10 +1056,11 @@ if (!capabilitySecret) {
       requiredSkills: REQUIRED_SKILLS
     },
     // Every account but the machine owner's runs on its own Codex (runtime-registry.ts), in its own home beside the owner's.
-    // On the hosted beta's 2 GB server at most two other accounts keep a runtime, each stopped after ten quiet minutes (never while a
-    // run is in flight, model-gate.ts); elsewhere three and half an hour.
+    // On the hosted beta's 1.6 GB server one other account at a time keeps a runtime (one model run at a time anyway), stopped after ten
+    // quiet minutes or when another account needs it and it has been quiet a minute (never while a run is in flight, model-gate.ts);
+    // elsewhere three and half an hour.
     runtimes: { baseDir: runtimesDir(), ownerWorkspaceId: () => runtimeOwner(analysisStore), hasProvider: (workspaceId) => modelProviders.hasProvider(workspaceId),
-      ...(hostedBeta ? { maxRunning: 2, idleMs: 10 * 60_000 } : {}) },
+      ...(hostedBeta ? { maxRunning: 1, idleMs: 10 * 60_000 } : {}) },
     modelProviders: { handle: (method, pathname, workspaceId, body) => modelProviders.handle(method, pathname, workspaceId, body),
       cost: (workspaceId) => modelProviders.cost(workspaceId) },
     monthSpend: (workspaceId) => monthSpend(analysisStore, workspaceId),

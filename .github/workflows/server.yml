@@ -151,8 +151,8 @@ jobs:
           ACTOR: ${{ github.actor }}
         run: |
           # run.sh on the host is replaced by this commit's, which pulls from ghcr.io.
-          scp -i ~/.ssh/id deploy/server/run.sh deploy/server/ensure-env.sh deploy/server/set-secrets.sh admin@"$HOST":/tmp/
-          ssh -i ~/.ssh/id admin@"$HOST" 'sudo install -m 755 /tmp/run.sh /tmp/ensure-env.sh /tmp/set-secrets.sh /srv/crossline/ && sudo sh /srv/crossline/ensure-env.sh'
+          scp -i ~/.ssh/id deploy/server/run.sh deploy/server/ensure-env.sh deploy/server/ensure-swap.sh deploy/server/set-secrets.sh admin@"$HOST":/tmp/
+          ssh -i ~/.ssh/id admin@"$HOST" 'sudo install -m 755 /tmp/run.sh /tmp/ensure-env.sh /tmp/ensure-swap.sh /tmp/set-secrets.sh /srv/crossline/ && sudo sh /srv/crossline/ensure-swap.sh && sudo sh /srv/crossline/ensure-env.sh'
           # The job's own token pulls the private images and is logged out again; nothing long-lived is left on the host.
           ssh -i ~/.ssh/id -o ConnectTimeout=30 -o ServerAliveInterval=15 admin@"$HOST" "
             echo '$TOKEN' | sudo docker login ghcr.io -u '$ACTOR' --password-stdin &&
