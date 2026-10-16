@@ -87,7 +87,7 @@ test("the result mail is in the language of the page the test was finished on; t
   await submitAs({}, { email: "b@example.com", nickname: "小鹿", inviteToken: inviter.inviteToken });
   await flushMail();
   const subjects = mocks.sendMail.mock.calls.map((call) => call[0].subject);
-  expect(subjects).toContain("小鹿 finished the test: see your pair card");
+  expect(subjects).toContain("小鹿 took the test: see your pair card");
   expect(subjects.some((subject) => subject.startsWith("你的测评结果："))).toBe(true);
 });
 

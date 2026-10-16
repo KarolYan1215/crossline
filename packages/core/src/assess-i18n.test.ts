@@ -42,12 +42,12 @@ describe("the quick test in English", () => {
     expect(english.locale).toBe("en");
     expect(english.lines.map((line) => line.identity)).toEqual(["Researcher", "Creator", "Entrepreneur"]);
     expect(english.loop).toEqual(["Findings", "Made into content", "Sold as a business", "User needs back to research"]);
-    expect(english.links.map((link) => link.how)).toEqual(["Findings become material for content", "Content gives business new input", "User needs back to research"]);
+    expect(english.links.map((link) => link.how)).toEqual(["Findings as raw material for content", "Content gives business new input", "User needs back to research"]);
     // The relation kind stays the Chinese label every set keeps; it is translated where it is shown.
     expect(english.links.map((link) => link.kind)).toEqual(zh.links.map((link) => link.kind));
     for (const text of [...english.loop, ...english.links.map((link) => link.how)]) expect(HAN.test(text), text).toBe(false);
     const body = ruleLines("SEMP", ["fitness", "writing"], "en");
-    expect(body.links.some((link) => /takes time but keeps|Leave time for/.test(link.how))).toBe(true);
+    expect(body.links.some((link) => /takes time but keeps|Make time for/.test(link.how))).toBe(true);
     const preset = presetLines("SEMP", ["research", "startup"], "en")!;
     expect(preset.lines[0]).toEqual({ domain: "AI", identity: "Researcher" });
     expect(preset.links[0]!.how).toBe("Code from research, then shipped as a tool");
