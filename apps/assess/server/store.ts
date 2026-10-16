@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { TYPE_AXES, type TypeAxisId } from "@crossline/core/assess";
 import type { WantLines, WantsInput } from "@crossline/core/assess-wants";
+import { asLocale, type Locale } from "../lib/i18n";
 import { PAIRS_SHOWN_MAX, RESULT_RETENTION_DAYS, type Appearance, type AvatarStatus } from "../lib/contract";
 import { dataDir } from "./config";
 import { db } from "./db";
@@ -33,6 +34,8 @@ export type StoredResult = {
   wants?: StoredWants;
   /** How many times they have set it. */
   wantsUpdates?: number;
+  /** The language of the page the test was finished on; the mails to this person are written in it (absent: Chinese). */
+  locale?: Locale;
   createdAt: string;
   expiresAt: string;
 };
@@ -42,7 +45,7 @@ export type StoredPair = { id: string; pairToken: string; inviterId: string; inv
 type ResultRow = {
   id: string; result_token: string; invite_token: string; email: string; nickname: string; scores_json: string; code: string;
   appearance_json: string; send_email: number; avatar_state: AvatarStatus["state"]; avatar_file: string; created_at: string; expires_at: string;
-  wants_json?: string; wants_updates?: number;
+  wants_json?: string; wants_updates?: number; locale?: string;
 };
 type PairRow = { id: string; pair_token: string; inviter_id: string; invitee_id: string; created_at: string };
 
@@ -80,7 +83,7 @@ const toResult = (row: ResultRow): StoredResult => ({
   scores: JSON.parse(row.scores_json) as Record<TypeAxisId, number>, code: row.code,
   appearance: JSON.parse(row.appearance_json) as Appearance, sendEmail: row.send_email === 1,
   avatar: { state: row.avatar_state, file: row.avatar_file }, createdAt: row.created_at, expiresAt: row.expires_at,
-  ...readWants(row.wants_json), wantsUpdates: row.wants_updates ?? 0
+  ...readWants(row.wants_json), wantsUpdates: row.wants_updates ?? 0, locale: asLocale(row.locale)
 });
 const toPair = (row: PairRow): StoredPair =>
   ({ id: row.id, pairToken: row.pair_token, inviterId: row.inviter_id, inviteeId: row.invitee_id, createdAt: row.created_at });
@@ -194,6 +197,8 @@ export function keepOnlyNewest(result: StoredResult): number {
 
 export type NewResult = {
   email: string; nickname: string; scores: Record<TypeAxisId, number>; code: string; appearance: Appearance; sendEmail: boolean;
+  /** The page's language; Chinese when not given. */
+  locale?: Locale;
 };
 
 /** Stores a result with two fresh tokens and its retention date. The email is kept lowercased. */
@@ -201,13 +206,13 @@ export function createResult(input: NewResult, now: Date = new Date()): StoredRe
   const result: StoredResult = {
     id: randomUUID(), resultToken: newToken(), inviteToken: newToken(), email: input.email.trim().toLowerCase(), nickname: input.nickname,
     scores: input.scores, code: input.code, appearance: input.appearance, sendEmail: input.sendEmail,
-    avatar: { state: "queued", file: "" }, wantsUpdates: 0, createdAt: now.toISOString(),
+    avatar: { state: "queued", file: "" }, wantsUpdates: 0, locale: input.locale ?? "zh", createdAt: now.toISOString(),
     expiresAt: new Date(now.getTime() + RESULT_RETENTION_DAYS * 86_400_000).toISOString()
   };
   db().prepare(`
     INSERT INTO results (id, result_token, invite_token, email, nickname, scores_json, code, appearance_json, send_email, avatar_state,
-      avatar_file, created_at, expires_at)
-    VALUES (@id, @resultToken, @inviteToken, @email, @nickname, @scores, @code, @appearance, @sendEmail, 'queued', '', @createdAt, @expiresAt)`)
+      avatar_file, created_at, expires_at, locale)
+    VALUES (@id, @resultToken, @inviteToken, @email, @nickname, @scores, @code, @appearance, @sendEmail, 'queued', '', @createdAt, @expiresAt, @locale)`)
     .run({ ...result, scores: JSON.stringify(result.scores), appearance: JSON.stringify(result.appearance), sendEmail: result.sendEmail ? 1 : 0 });
   recordedMemo = undefined;
   return result;

@@ -249,6 +249,7 @@ export const IMAGE_PROVIDERS = ["siliconflow", "ark"] as const;
 type ProviderName = (typeof IMAGE_PROVIDERS)[number];
 
 /** Other names people write for Volcengine Ark; all mean `ark`. */
+// i18n-ignore: names an operator may write in the environment
 const ARK_ALIASES = ["ark", "volcengine", "volces", "volcano", "doubao", "seedream", "byteplus", "火山", "火山方舟", "方舟", "豆包"];
 
 /**
@@ -261,6 +262,7 @@ export function providerChoice(env: Record<string, string | undefined>): { name:
   const named = env.ASSESS_IMAGE_PROVIDER?.trim().toLowerCase() || "";
   if (named) {
     if (ARK_ALIASES.includes(named)) return { name: "ark", how: "named" };
+    // i18n-ignore: an environment value
     if (named === "siliconflow" || named === "硅基流动") return { name: "siliconflow", how: "named" };
     return { name: null, how: "unknown" };
   }

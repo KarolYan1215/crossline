@@ -1,3 +1,4 @@
+// i18n-exempt: test support (sample data)
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";

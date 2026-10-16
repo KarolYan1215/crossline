@@ -1,3 +1,4 @@
+// i18n-exempt: placeholder drawings for the owner, never shown once real templates exist
 import { Resvg } from "@resvg/resvg-js";
 import { TYPE_GROUPS, TYPE_TABLE } from "@crossline/core/assess";
 import type { TemplateVariant } from "./templates";

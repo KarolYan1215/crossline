@@ -83,6 +83,7 @@ export function textModelFromEnv(env: Record<string, string | undefined> = proce
 /** What the log says about the text model at start: which one, or why there is none. Never the key. */
 export function textModelSummary(env: Record<string, string | undefined> = process.env): { model: string; reason?: string } {
   const missing = ["ASSESS_TEXT_API_KEY", "ASSESS_TEXT_BASE_URL", "ASSESS_TEXT_MODEL"].filter((name) => !env[name]?.trim());
+  // i18n-ignore: a log line
   if (missing.length) return { model: "none", reason: `${missing.join(", ")} unset: 「你也许想做」 uses the written combinations and rules` };
   const model = textModelFromEnv(env);
   return model ? { model: model.label } : { model: "none", reason: "ASSESS_TEXT_BASE_URL must be https" };

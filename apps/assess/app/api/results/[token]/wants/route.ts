@@ -1,4 +1,5 @@
 import { parseWants } from "@crossline/core/assess-wants";
+import { requestLocale } from "../../../../../lib/i18n";
 import { clientIp, crossSiteWrite, fail, json, lookupBlocked, lookupMissed, wantsPerIp } from "../../../../../server/security";
 import { WANTS_UPDATES_MAX, getResultByToken, setWants } from "../../../../../server/store";
 import { composeWants } from "../../../../../server/wants";
@@ -21,10 +22,12 @@ export async function POST(request: Request, context: Context): Promise<Response
   const { token } = await context.params;
   const result = getResultByToken(token);
   if (!result) return lookupMissed(request);
-  const wants = parseWants(await request.json().catch(() => undefined));
+  // The lines are written in the language of the page the person answered on.
+  const locale = requestLocale(request);
+  const wants = parseWants(await request.json().catch(() => undefined), locale);
   if (!wants) return fail("WANTS_INVALID");
   if ((result.wantsUpdates ?? 0) >= WANTS_UPDATES_MAX) return fail("WANTS_LIMIT_REACHED");
-  const lines = await composeWants(result, wants);
+  const lines = await composeWants(result, wants, locale);
   if (!setWants(result.id, { input: wants, lines })) return fail("WANTS_LIMIT_REACHED");
   return json({ ok: true });
 }

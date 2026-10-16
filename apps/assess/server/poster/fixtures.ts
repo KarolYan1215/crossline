@@ -1,6 +1,8 @@
+// i18n-exempt: test fixtures (sample nicknames)
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { Resvg } from "@resvg/resvg-js";
+import type { Locale } from "../../lib/i18n";
 import { pairRelation, publicType } from "../../lib/public-type";
 import type { PairCardInput, PosterInput } from "./index";
 
@@ -30,14 +32,14 @@ export function writeFigure(dir: string, name: string, shirt: string): string {
 
 const INVITE = "https://assess.example.com/t/9f2c4a1d0b7e4e1f8a3c5d6e7f809a1b";
 
-export function samplePoster(dir: string, scores: Record<"scope" | "basis" | "output" | "rhythm", number>, nickname: string, shirt: string): PosterInput {
-  const type = publicType(scores);
-  return { type, nickname, avatarPath: writeFigure(dir, type.code, shirt), inviteUrl: INVITE };
+export function samplePoster(dir: string, scores: Record<"scope" | "basis" | "output" | "rhythm", number>, nickname: string, shirt: string, locale?: Locale): PosterInput {
+  const type = publicType(scores, {}, "", undefined, locale);
+  return { type, nickname, avatarPath: writeFigure(dir, type.code, shirt), inviteUrl: INVITE, ...(locale ? { locale } : {}) };
 }
 
-export function samplePair(dir: string): PairCardInput {
-  const a = samplePoster(dir, PLANNER, "小林", "#085E3A");
-  const b = samplePoster(dir, ROAMER, "阿乔🙂", "#8C3709");
+export function samplePair(dir: string, locale?: Locale): PairCardInput {
+  const a = samplePoster(dir, PLANNER, locale === "en" ? "Robin" : "小林", "#085E3A", locale);
+  const b = samplePoster(dir, ROAMER, locale === "en" ? "Jo🙂" : "阿乔🙂", "#8C3709", locale);
   return { a: { type: a.type, nickname: a.nickname, avatarPath: a.avatarPath }, b: { type: b.type, nickname: b.nickname, avatarPath: b.avatarPath },
-    ...pairRelation(a.type.code, b.type.code), inviteUrl: INVITE };
+    ...pairRelation(a.type.code, b.type.code, undefined, undefined, locale), inviteUrl: INVITE, ...(locale ? { locale } : {}) };
 }

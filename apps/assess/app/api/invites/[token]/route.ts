@@ -1,3 +1,4 @@
+import { requestLocale } from "../../../../lib/i18n";
 import { json, lookupBlocked, lookupMissed } from "../../../../server/security";
 import { getResultByInvite } from "../../../../server/store";
 import { inviteView } from "../../../../server/views";
@@ -9,5 +10,5 @@ export async function GET(request: Request, context: { params: Promise<{ token: 
   const { token } = await context.params;
   const result = getResultByInvite(token);
   if (!result) return lookupMissed(request);
-  return json(inviteView(result));
+  return json(inviteView(result, requestLocale(request)));
 }

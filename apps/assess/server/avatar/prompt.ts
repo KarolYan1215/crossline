@@ -55,6 +55,7 @@ const COLOURS: Array<[RegExp, string]> = [
 ];
 
 /** Appearance words a note may contribute, longest first, each with its fixed English phrase; `coloured` takes a colour before it. */
+/* i18n-ignore-start: words matched against what the person typed */
 const VOCABULARY: Array<{ keys: string[]; phrase: string; coloured?: boolean; needsColour?: boolean }> = [
   { keys: ["贝雷帽", "beret"], phrase: "beret", coloured: true },
   { keys: ["渔夫帽", "bucket hat"], phrase: "bucket hat", coloured: true },
@@ -84,6 +85,7 @@ const VOCABULARY: Array<{ keys: string[]; phrase: string; coloured?: boolean; ne
   { keys: ["痣", "beauty mark", "mole"], phrase: "a small beauty mark" },
   { keys: ["头发", "发色", "发", "hair"], phrase: "hair", coloured: true, needsColour: true }
 ];
+/* i18n-ignore-end */
 
 /** Notes that try to steer the model rather than describe a look are dropped whole. */
 const INSTRUCTION_LIKE = /ignore|disregard|instruction|prompt|system|assistant|override|forget|pretend|jailbreak|you are|act as|previous|above|以上|之前|忽略|无视|指令|提示词|系统|扮演|你是|你现在|现在开始|规则|不要遵守|改为输出|生成一张|画一张/i;

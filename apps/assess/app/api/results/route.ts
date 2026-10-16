@@ -1,5 +1,6 @@
 import { typeFromScores } from "@crossline/core/assess";
 import { TESTS_PER_EMAIL, type SubmitResponse } from "../../../lib/contract";
+import { requestLocale } from "../../../lib/i18n";
 import { publicType } from "../../../lib/public-type";
 import { enqueueAvatar } from "../../../server/avatar";
 import { sendPairNotice, sendResultMail } from "../../../server/mail";
@@ -25,6 +26,8 @@ export async function POST(request: Request): Promise<Response> {
   const parsed = parseSubmission(body);
   if (!parsed.ok) return fail(parsed.code);
   const submission = parsed.value;
+  // The language of the page the test was finished on: the result mail is written in it, now and for the inviter's notices later.
+  const locale = requestLocale(request);
 
   const inviter = submission.inviteToken ? getResultByInvite(submission.inviteToken) : undefined;
   if (submission.inviteToken && !inviter) return fail("INVITE_NOT_FOUND");
@@ -34,8 +37,8 @@ export async function POST(request: Request): Promise<Response> {
   if (testsTakenBy(submission.email) >= TESTS_PER_EMAIL) {
     const latest = latestResultByEmail(submission.email);
     if (latest) {
-      const type = publicType(latest.scores, {}, latest.id);
-      sendResultMail(latest, { code: type.code, name: type.name, subtitle: type.subtitle });
+      const type = publicType(latest.scores, {}, latest.id, undefined, locale);
+      sendResultMail(latest, { code: type.code, name: type.name, subtitle: type.subtitle }, locale);
     }
     return fail("EMAIL_LIMIT_REACHED");
   }
@@ -44,7 +47,7 @@ export async function POST(request: Request): Promise<Response> {
 
   const result = createResult({
     email: submission.email, nickname: submission.nickname, scores: submission.scores, code: typeFromScores(submission.scores).code,
-    appearance: submission.appearance, sendEmail: submission.sendEmail
+    appearance: submission.appearance, sendEmail: submission.sendEmail, locale
   });
   try {
     enqueueAvatar(result);
@@ -61,8 +64,8 @@ export async function POST(request: Request): Promise<Response> {
     if (created && !pairedBefore && inviter.sendEmail) sendPairNotice(inviter, result.nickname, pair.pairToken);
   }
   if (result.sendEmail) {
-    const type = publicType(result.scores, {}, result.id);
-    sendResultMail(result, { code: type.code, name: type.name, subtitle: type.subtitle });
+    const type = publicType(result.scores, {}, result.id, undefined, locale);
+    sendResultMail(result, { code: type.code, name: type.name, subtitle: type.subtitle }, locale);
   }
   const response: SubmitResponse = { resultToken: result.resultToken, inviteToken: result.inviteToken, ...(pairToken ? { pairToken } : {}) };
   return json(response);
