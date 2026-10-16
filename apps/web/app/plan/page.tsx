@@ -12,6 +12,7 @@ import { getStore, loadCurrentPlan, loadPlanExplanation, planToday } from "../..
 import { loadPlanBoard } from "../../lib/plan-board";
 import { requireSessionContext } from "../../lib/access-guard";
 import { gateUntilReady } from "../../lib/start-gate";
+import { timed, timedSync } from "../../lib/sections";
 
 export const dynamic = "force-dynamic";
 
@@ -26,9 +27,9 @@ export default async function PlanPage(props: { searchParams?: Promise<{ horizon
   const ctx = await requireSessionContext();
   gateUntilReady(ctx);
   const requested = (await props.searchParams)?.horizon;
-  const plan = await loadCurrentPlan(ctx);
-  const board = await loadPlanBoard(ctx, plan, requested);
-  const explanation = loadPlanExplanation(ctx, planToday(ctx));
+  const plan = await timed("plan.current", () => loadCurrentPlan(ctx));
+  const board = await timed("plan.board", () => loadPlanBoard(ctx, plan, requested));
+  const explanation = timedSync("plan.explanation", () => loadPlanExplanation(ctx, planToday(ctx)));
   const titles = new Map(getStore().listWorkOrders(ctx.workspaceId).map((order) => [order.id, order.intent]));
   const imported = plan.blocks.filter((block) => block.id.startsWith("graph_calendar:") || block.id.startsWith("import:")).length;
   return <SubpageShell active="计划" title="计划"

@@ -11,6 +11,7 @@ import { nextSlots } from "../../lib/steps";
 import { TaskCard } from "../task/task-card";
 import { compareInGroup, groupOf, waitReason, type TaskGroup } from "../task/card-model";
 import { identityLines } from "../../lib/lines";
+import { timed, timedSync } from "../../lib/sections";
 
 export const dynamic = "force-dynamic";
 
@@ -68,8 +69,8 @@ export default async function WorkbenchPage({ searchParams }: {
     .map((milestone) => ({ id: milestone.id, title: milestone.title, identityId: milestone.identityId }));
   const live = all.filter((run) => run.state !== "archived");
   // One batched read for every card instead of one per card — see `loadTaskDetailsBatch`'s own doc comment.
-  const taskDetails = loadTaskDetailsBatch(ctx, live.map((run) => run.id));
-  const slots = nextSlots((await loadCurrentPlan(ctx)).blocks, today);
+  const taskDetails = timedSync("workbench.details", () => loadTaskDetailsBatch(ctx, live.map((run) => run.id)));
+  const slots = nextSlots((await timed("plan.current", () => loadCurrentPlan(ctx))).blocks, today);
   const groups = new Map<TaskGroup, Entry[]>();
   const lineCounts = new Map<string, number>();
   for (const run of live) {

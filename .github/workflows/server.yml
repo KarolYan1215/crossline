@@ -53,7 +53,7 @@ jobs:
             sudo docker exec crossline-worker sh -c "grep -H -E \"^(VmRSS|PPid)\" /proc/[0-9]*/status; grep -H . /proc/[0-9]*/comm" 2>/dev/null | head -90 || true
             sudo docker exec crossline-worker sh -c "for f in /proc/[0-9]*/cmdline; do echo \"\$f \$(tr \\\\0 \\  < \$f | cut -c1-160)\"; done" 2>/dev/null | head -30 || true
             sudo docker logs --since 24h crossline-worker 2>&1 | grep -E "worker.memory|model.gate|already_running" | tail -20 || true
-            sudo docker logs --since 2h crossline-web 2>&1 | grep -E "web.timing|web.queue" | tail -4 || true
+            sudo docker logs --since 2h crossline-web 2>&1 | grep -E "web.timing|web.sections|web.queue" | tail -6 || true
             sudo dmesg 2>/dev/null | grep -iE "out of memory|oom-kill" | tail -5 || true
             echo "== assess figures"
             # The app logs its image settings (provider, model, size; never the key) and every skipped, failed or drawn figure.

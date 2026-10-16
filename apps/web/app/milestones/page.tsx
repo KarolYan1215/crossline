@@ -9,6 +9,7 @@ import { identityLines } from "../../lib/lines";
 import { LINE_PALETTE } from "@crossline/identity-packs";
 import { LinesBar } from "./lines-bar";
 import { lineCardDetails } from "../../lib/line-cards";
+import { timed } from "../../lib/sections";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +21,7 @@ export default async function MilestonesPage() {
   const ctx = await requireSessionContext();
   gateUntilReady(ctx);
   ensureSeeded(ctx);
-  const board = await loadMilestoneBoard(ctx);
+  const board = await timed("milestones.board", () => loadMilestoneBoard(ctx));
   // Drafts the architect replaced on its own are not shown; what the person archived themselves can be put back.
   const retired = milestonesRetiredBySystem(ctx);
   const archived = getStore().listMilestones(ctx.workspaceId).filter((milestone) => milestone.status === "archived" && !retired.has(milestone.id))

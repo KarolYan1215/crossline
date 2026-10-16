@@ -4,6 +4,7 @@ import { readyToStart, startMissing, type AccessContext, type ChecklistItem } fr
 import { interviewChecklistFor } from "@crossline/db";
 import { ensureSeeded, getStore, planToday } from "./crossline";
 import { identityLines } from "./lines";
+import { timedSync } from "./sections";
 
 /**
  * Whether the five start items stand (`readyToStart`, decided 2026-10-12): a description of every line, the weekly hours, a hard line's
@@ -25,5 +26,5 @@ export function startReadiness(ctx: AccessContext): { ready: boolean; missing: C
  * replay depend on them; a person who is not ready has no page to reach them from).
  */
 export function gateUntilReady(ctx: AccessContext): void {
-  if (!startReadiness(ctx).ready) redirect("/onboarding");
+  if (!timedSync("startGate", () => startReadiness(ctx)).ready) redirect("/onboarding");
 }

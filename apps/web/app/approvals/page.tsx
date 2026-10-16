@@ -20,6 +20,7 @@ import { loadAskPreviews } from "../asks/previews";
 import { uniqueAsks } from "../asks/model";
 import { PendingSummary } from "./summary";
 import "./approvals.css";
+import { timed, timedSync } from "../../lib/sections";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +31,7 @@ export default async function ApprovalsPage() {
   const ctx = await requireSessionContext();
   gateUntilReady(ctx);
   ensureSeeded(ctx);
-  const plan = await loadCurrentPlan(ctx);
+  const plan = await timed("plan.current", () => loadCurrentPlan(ctx));
   const evidenceReviews = getStore().listWorkOrders(ctx.workspaceId).filter((item) => item.state === "evidence_review");
   // A proposal whose steps are still being planned is not a decision yet (`preparingProposalIds`): it is neither listed nor approvable here.
   const preparing = preparingProposalIds(ctx);
@@ -51,16 +52,16 @@ export default async function ApprovalsPage() {
     if (event.type === "milestone_gate.blocked") gateBlocks.set(event.entityId, event.payload as { code: string; message: string });
     else gateBlocks.delete(event.entityId);
   }
-  const pending = countPending(ctx);
-  const asks = uniqueAsks(await loadAsks(ctx));
+  const pending = timedSync("pending", () => countPending(ctx));
+  const asks = uniqueAsks(await timed("asks", () => loadAsks(ctx)));
   const weekAsks = asks.filter((ask) => !ask.entersOn), laterAsks = asks.filter((ask) => ask.entersOn);
-  const previews = loadAskPreviews(ctx, asks);
+  const previews = timedSync("approvals.previews", () => loadAskPreviews(ctx, asks));
   const horizon = decisionHorizon(ctx);
   const anchors = new Map(getStore().listMilestoneAnchors(ctx.workspaceId).map((anchor) => [anchor.milestoneId, anchor]));
   const executions = getStore().listExecutions(ctx.workspaceId);
   const ordersById = new Map(getStore().listWorkOrders(ctx.workspaceId).map((item) => [item.id, item]));
   const deferredOrder = (workOrderId: string) => { const order = ordersById.get(workOrderId); return order ? horizon.orderEntry(order) : undefined; };
-  const taskDetails = loadTaskDetailsBatch(ctx, [...evidenceReviews, ...proposals].map((item) => item.id));
+  const taskDetails = timedSync("approvals.details", () => loadTaskDetailsBatch(ctx, [...evidenceReviews, ...proposals].map((item) => item.id)));
   const autoApproved = recentAutoApprovals(ctx);
   // Soonest milestone deadline first. Proposals whose work need not start within a week wait folded under 「以后再定」, the soonest
   // to come up first, and come into the week's list by themselves (`lib/horizon.ts`).

@@ -37,6 +37,7 @@ import {
 import { requireSessionContext } from "../../lib/access-guard";
 import { lineLabels } from "../../lib/lines";
 import { interviewStatus } from "../../lib/interview-status";
+import { timed, timedSync } from "../../lib/sections";
 
 export const dynamic = "force-dynamic";
 const USAGE_DAYS = 7;
@@ -50,7 +51,7 @@ const TONE: Record<string, RecentTask["tone"]> = { running: "info", needs_review
  */
 export default async function SettingsPage() {
   const ctx = await requireSessionContext();
-  const interview = interviewStatus(ctx);
+  const interview = timedSync("settings.interview", () => interviewStatus(ctx));
   const store = getStore();
   const setting = (key: string) => store.getSetting(ctx.workspaceId, key);
   const level = (value: string | null | undefined) => value === "granted" || value === "denied" ? value : "unasked";
@@ -76,7 +77,7 @@ export default async function SettingsPage() {
   }
 
   const since = new Date(Date.now() - USAGE_DAYS * 86_400_000).toISOString();
-  const assistant = loadAssistant(ctx);
+  const assistant = timedSync("settings.assistant", () => loadAssistant(ctx));
   const states = readCategories(store, ctx.workspaceId);
   const host = process.env.CROSSLINE_TAILSCALE_HOSTNAME?.trim();
   const hosted = isHostedBeta();
@@ -84,7 +85,7 @@ export default async function SettingsPage() {
   const phoneUrl = hosted ? process.env.CROSSLINE_WEB_BASE_URL?.trim() || undefined
     : process.env.CROSSLINE_DEPLOYMENT_MODE === "private" && host ? `https://${host}` : undefined;
   // 精力: what the model reads now, and from how many nights and reports (docs/one-input.md §5).
-  const energy = energyModel(ctx, readAvailability(ctx));
+  const energy = timedSync("settings.energy", () => energyModel(ctx, readAvailability(ctx)));
   const fortnight = new Date(Date.now() - 14 * 86_400_000).toISOString();
   const recentNights = energy.episodes.filter((episode) => episode.wakeAt >= fortnight);
   const energyStatus: EnergyStatus = { now: energy.predict(new Date().toISOString()),
@@ -180,10 +181,10 @@ export default async function SettingsPage() {
         <section id="usage" className="st-section" aria-labelledby="st-usage"><h2 id="st-usage">用量与体检</h2>
           <div className="st-modules">
             <section className="st-card" aria-label="系统体检"><header><h3>系统体检</h3><small>每日从账本计算</small></header>
-              <EffectivenessCard data={await loadEffectiveness(ctx)} labels={lineLabels(ctx)} />
+              <EffectivenessCard data={await timed("settings.effectiveness", () => loadEffectiveness(ctx))} labels={lineLabels(ctx)} />
             </section>
             <section className="st-card" aria-label="模型额度"><header><h3>模型额度</h3><small>账号的剩余额度与重置时间</small></header>
-              <QuotaCard signal={await readQuota(ctx)} now={new Date()} timeZone={zone} />
+              <QuotaCard signal={await timed("settings.quota", () => readQuota(ctx))} now={new Date()} timeZone={zone} />
             </section>
             <section className="st-card" aria-label="模型用量"><header><h3>模型用量</h3><small>近 {USAGE_DAYS} 天，悬停查看次数与耗时</small></header>
               <UsageCard summary={store.summarizeModelUsage(ctx.workspaceId, since)} daily={store.dailyModelUsage(ctx.workspaceId, since)} days={USAGE_DAYS} />

@@ -6,6 +6,7 @@ import { requireAccessContext } from "@crossline/auth";
 import { getAuth } from "./auth";
 import { getStore } from "./crossline";
 import { currentLocalAccount, isLocalInstall } from "./local-install";
+import { timed } from "./sections";
 
 /** On an installed copy every session is checked against the account the machine's Codex still holds. */
 const localAccount = () => isLocalInstall() ? currentLocalAccount : undefined;
@@ -32,7 +33,7 @@ export async function resolveAccessContext(request: Request): Promise<ResolvedRo
  */
 export async function requireSessionContext(): Promise<AccessContext> {
   const request = new Request("http://internal.invalid/", { headers: await headers() });
-  const result = await requireAccessContext(getAuth(), getStore(), request, localAccount());
+  const result = await timed("session", () => requireAccessContext(getAuth(), getStore(), request, localAccount()));
   if ("ctx" in result) return result.ctx;
   redirect("/login");
 }
