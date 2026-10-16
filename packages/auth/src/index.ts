@@ -77,7 +77,8 @@ function mailer(smtp: SmtpConfig) {
  */
 function crosslineAuthConfig(options: CrosslineAuthOptions): BetterAuthOptions {
   const transport = options.smtp ? mailer(options.smtp) : undefined;
-  const sendMail = (to: string, subject: string, url: string): Promise<void> => {
+  /** `url` is what the message carries (a link or a code: the e2e sink records it as is); `text`, when given, is the whole body around it. */
+  const sendMail = (to: string, subject: string, url: string, text?: string): Promise<void> => {
     // The e2e sink takes priority when both are set (it never is in production — see the `testMailboxDir`
     // doc comment) so a captured message never silently also tries a real SMTP round trip.
     if (options.testMailboxDir) {
@@ -87,7 +88,7 @@ function crosslineAuthConfig(options: CrosslineAuthOptions): BetterAuthOptions {
       return Promise.resolve();
     }
     if (!transport || !options.smtp) return Promise.resolve();
-    return transport.sendMail({ from: options.smtp.from, to, subject, text: url }).then(() => undefined);
+    return transport.sendMail({ from: options.smtp.from, to, subject, text: text ?? url }).then(() => undefined);
   };
   const emailCapable = Boolean(options.smtp || options.testMailboxDir);
   // Better Auth sends through `runInBackgroundOrAwait`, which catches every error and only logs it, so a message that did not go out
@@ -103,8 +104,8 @@ function crosslineAuthConfig(options: CrosslineAuthOptions): BetterAuthOptions {
     try { chosen = userId ? options.accountLocale?.(userId) : undefined; } catch { chosen = undefined; }
     return chosen ?? localeFromCookieHeader(headers?.get("cookie"));
   };
-  const deliver = async (to: string, subject: string, url: string) => {
-    try { await sendMail(to, subject, url); undelivered.delete(to.toLowerCase()); }
+  const deliver = async (to: string, subject: string, url: string, text?: string) => {
+    try { await sendMail(to, subject, url, text); undelivered.delete(to.toLowerCase()); }
     catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       undelivered.set(to.toLowerCase(), reason);
@@ -167,11 +168,21 @@ function crosslineAuthConfig(options: CrosslineAuthOptions): BetterAuthOptions {
       emailAndPassword: {
         enabled: true,
         requireEmailVerification: true,
-        sendResetPassword: async ({ user, url }, request) => { await deliver(user.email, tFor(mailLocale(user.email, request?.headers))("重置 Crossline 密码"), url); }
+        sendResetPassword: async ({ user, url }, request) => {
+          const t = tFor(mailLocale(user.email, request?.headers));
+          // Better Auth's reset link lasts an hour (`resetPasswordTokenExpiresIn`, its default).
+          await deliver(user.email, t("重置 Crossline 密码"), url,
+            t("打开下面的链接，为 Crossline 账号设置新密码：\n\n{{url}}\n\n链接 1 小时内有效。如果没有申请重置密码，忽略这封邮件即可，原密码不变。", { url }));
+        }
       },
       emailVerification: {
         sendOnSignUp: true,
-        sendVerificationEmail: async ({ user, url }, request) => { await deliver(user.email, tFor(mailLocale(user.email, request?.headers))("验证你的 Crossline 邮箱"), url); }
+        sendVerificationEmail: async ({ user, url }, request) => {
+          const t = tFor(mailLocale(user.email, request?.headers));
+          // The verification link lasts an hour (`emailVerification.expiresIn`, Better Auth's default).
+          await deliver(user.email, t("验证你的 Crossline 邮箱"), url,
+            t("打开下面的链接，验证这个邮箱并完成 Crossline 注册：\n\n{{url}}\n\n链接 1 小时内有效。如果不是本人注册，忽略这封邮件即可。", { url }));
+        }
       },
       hooks: {
         after: createAuthMiddleware(async (ctx) => {

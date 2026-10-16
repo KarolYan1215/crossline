@@ -133,7 +133,7 @@ export function forecastGoals(goals: ForecastGoal[], tasks: PlannerTask[], days:
       : goal.importance === "ordinary" && !goal.confirmedDeadline ? t("第四象限暂缓；请确认日期或提升重要性")
         : !p85Day ? (weekCount === 8 ? t("八周内容量或步骤依赖不足") : t("{{count}} 周内容量或步骤依赖不足", { count: weekCount }))
           : goal.confirmedDeadline && p85Day > goal.confirmedDeadline ? t("p85 情景晚于已确认截止时间")
-            : slackDays !== null && slackDays < DEADLINE_MARGIN_DAYS ? t("p85 情景只比截止早 {{slack}} 天，没有留出 {{margin}} 天的余量", { slack: slackDays, margin: DEADLINE_MARGIN_DAYS }) : null;
+            : slackDays !== null && slackDays < DEADLINE_MARGIN_DAYS ? t("p85 情景只比截止早 {{count}} 天，没有留出 {{margin}} 天的余量", { count: slackDays, margin: DEADLINE_MARGIN_DAYS }) : null;
     return { milestoneId: goal.id, title: goal.title, p50Day, p85Day,
       suggestedTargetDay: goal.confirmedDeadline ? null : p85Day,
       confirmedDeadline: goal.confirmedDeadline, bottleneck, slackDays,

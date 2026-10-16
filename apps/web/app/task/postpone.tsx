@@ -43,7 +43,7 @@ export function PostponePanel({ workOrderId, onClose }: { workOrderId: string; o
     <div className="postpone-fields">
       {reason === "waiting" && <>
         <label>{t("提供方")} <input value={who} maxLength={60} placeholder={t("例如：师兄")} onChange={(event) => setWho(event.target.value)} /></label>
-        <label>{t("内容")} <input value={what} maxLength={200} placeholder={t("例如：真实测量数据")} onChange={(event) => setWhat(event.target.value)} /></label>
+        <label>{t("内容", { context: "waiting" })} <input value={what} maxLength={200} placeholder={t("例如：真实测量数据")} onChange={(event) => setWhat(event.target.value)} /></label>
       </>}
       <label>{t(reason === "waiting" ? "预计到达" : "推迟到")} <input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
       {reason !== "waiting" && <label className="postpone-text">{t(reason === "other" ? "说明" : "说明（选填）")} <input value={text} maxLength={500}

@@ -590,5 +590,8 @@
   "该步骤的内容取自这份文件。": "This step's content comes from this file.",
   "尚无解析。任务的教程生成时，会逐份材料写出与各步骤相关的要点。": "No notes yet. When the task's guide is written, it notes what each material contributes to each step.",
   "原网页": "Original page",
-  "解析": "Notes"
+  "解析": "Notes",
+  "下一项_button": "Next",
+  "内容_waiting": "What",
+  "内容_covers": "Covers"
 }

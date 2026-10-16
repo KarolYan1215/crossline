@@ -43,7 +43,7 @@ export function DeckNav({ at, count, go, label, children }: { at: number; count:
     {count > 1 && <>
       <button type="button" className="text-button" aria-label={t("上一项")} disabled={at === 0} onClick={() => go(-1)}>‹</button>
       <span className="mono" aria-live="polite">{at + 1} / {count}</span>
-      <button type="button" className="text-button" aria-label={t("下一项")} disabled={at === count - 1} onClick={() => go(1)}>›</button>
+      <button type="button" className="text-button" aria-label={t("下一项", { context: "button" })} disabled={at === count - 1} onClick={() => go(1)}>›</button>
     </>}
     {children}
   </nav>;

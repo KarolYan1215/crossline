@@ -99,7 +99,7 @@ function StepDetail({ detail, step, kind, onStatus }: { detail: TaskDetail; step
     {kind !== "current" && step.firstAction && kind !== "done" && <p className="step-first"><small>{t("先做")}</small><span className="gen">{step.firstAction}</span></p>}
     {step.doneCriterion && <p className="step-line"><small>{t("完成标准")}</small><span className="gen">{step.doneCriterion}</span></p>}
     {step.deliverable && kind === "agent" && <p className="step-line"><small>{t("产出")}</small><span className="gen">{step.deliverable}</span></p>}
-    {covered.length > 0 && <p className="step-line"><small>{t("内容")}</small><span className="step-covers">{covered.map((title) => <span key={title} className="tag">{title}</span>)}</span></p>}
+    {covered.length > 0 && <p className="step-line"><small>{t("内容", { context: "covers" })}</small><span className="step-covers">{covered.map((title) => <span key={title} className="tag">{title}</span>)}</span></p>}
     {step.why && <p className="step-line"><small>{t("为什么")}</small><span className="gen">{step.why}</span></p>}
     {step.aiAssist?.tool && <p className="step-line" title={t("计划按用这个工具估算时间")}><small>{t("工具")}</small><span><Tag tone="info">{step.aiAssist.tool}</Tag> <span className="gen">{step.aiAssist.how}</span>
       {step.aiAssist.minutesSaved > 0 && <span className="muted">{t("（约省 {{count}} 分钟）", { count: step.aiAssist.minutesSaved })}</span>}</span></p>}
