@@ -47,6 +47,10 @@ jobs:
             for f in /srv/crossline/app.env /srv/assess/assess.env; do echo "-- $f"; sudo grep -E "^(CROSSLINE|ASSESS)_(SMTP|MAIL)" $f | grep -v PASSWORD; printf "password filled: "; sudo grep -cE "^[A-Z_]+SMTP_PASSWORD=.+" $f || true; done
             for p in 465 587 2465; do printf "smtp.resend.com:%s " $p; timeout 8 bash -c "</dev/tcp/smtp.resend.com/$p" 2>/dev/null && echo open || echo blocked; done
             sudo docker logs crossline-web 2>&1 | grep -iE "mail|smtp|otp|EMAIL" | tail -20 || true
+            # Which domains the configured Resend key's account holds, and their status. The key is read on the host and never printed.
+            echo "-- resend domains for the configured key"
+            sudo sh -c ". /srv/crossline/app.env; curl -s -m 15 -H \"Authorization: Bearer \$CROSSLINE_SMTP_PASSWORD\" https://api.resend.com/domains" \
+              | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get(\"message\") or \"\"); [print(x.get(\"name\"), x.get(\"status\"), x.get(\"region\")) for x in d.get(\"data\",[])]" || true
             echo "== codex"
             sudo docker exec crossline-worker /opt/codex/codex --version 2>&1 | tail -1 || true
             curl -s -m 10 http://127.0.0.1:3211/v1/codex/status | head -c 600; echo
