@@ -97,6 +97,9 @@ function claimWorkerLock(): boolean {
     // it as "gone" would let a second worker start alongside a healthy one.
     try { process.kill(held.pid, 0); running = true; }
     catch (error) { running = (error as NodeJS.ErrnoException).code === "EPERM"; }
+    // A lock naming this very process was left by an earlier run that had the same pid: a container restarted after an out-of-memory
+    // kill starts the worker under the pid it had before, and honouring the lock made it exit and restart in a loop for 45 minutes.
+    if (held.pid === process.pid) running = false;
     if (running && Number.isFinite(age) && age >= 0 && age < staleAfterMs) return false;
   } catch { /* absent, malformed or unreadable lock: the holder left nothing worth honouring */ }
   writeFileSync(lockPath, JSON.stringify({ pid: process.pid, heartbeatAt: new Date().toISOString() }));

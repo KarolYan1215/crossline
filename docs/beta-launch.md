@@ -373,6 +373,7 @@
 - Codex 用上游同一标签 rust-v0.155.0 的 Linux 发布版，按 `CODEX_LINUX_RELEASE_BINARY_SHA256` 固定哈希；fork 唯一的改动是 Windows 迁移修复。
 - 密钥存储在 Linux 上改用 AES-256-GCM，主密钥放在 `CROSSLINE_SECRET_KEY`（`createKeyFileSecretStore`）。
 - 机主专用的功能（屏幕活动、键鼠节律、作息、桌面通知、读文件夹、Codex 使用记录、带 shell 的助手）在 `CROSSLINE_PUBLIC_BETA=1` 时对**所有账号**关闭，机主也不例外（2026-10-16 走查发现）：之前机主的账号在服务器上仍算「电脑主人」，助手的 shell 和文件夹授权会落在装着所有人账本的服务器上，守卫只是绊线不是沙箱。`assistantAvailable` 与 worker 的 `machineOwner` 在这个开关下都返回否。
+- 三个容器都有内存上限且不许再用交换分区（assess 350m、web 450m、worker 900m，worker 的 Codex 运行时是它的子进程，算在它头上）。2026-10-16 走查时里程碑设计、画像重写和生图同时跑，没有上限，整机换页到 Caddy 和 SSH 都不应答，两个站一起挂；超限时改为 Docker 杀掉并重启那一个容器。重启后的 worker 若拿到和上次相同的 pid，不再把自己留下的锁当成「已在运行」。
 - 设置页在托管内测里不显示：微软日历的读取与写入登录（没配 `CROSSLINE_MS_CLIENT_ID` 时；之前点了只会失败，日历列表答 404）、私有网络身份；「手机访问」改为给出 `CROSSLINE_WEB_BASE_URL` 和推送开关（`apps/web/lib/hosting.ts`）。
 - 第一个注册的账号就是这台服务器的「机主」，所以本人先注册。
 

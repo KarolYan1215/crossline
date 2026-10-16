@@ -25,11 +25,14 @@ start() {
 }
 
 if [ "$want" = all ] || [ "$want" = assess ]; then
-  start assess --env-file /srv/assess/assess.env -v /srv/assess/data:/data -p 127.0.0.1:3340:3340 --memory 400m "$assess_image"
+  start assess --env-file /srv/assess/assess.env -v /srv/assess/data:/data -p 127.0.0.1:3340:3340 --memory 350m --memory-swap 350m "$assess_image"
 fi
 # The web app and the worker share the host's network (they talk on 127.0.0.1, as on the owner's machine) and one data/state volume.
+# Every container has a memory ceiling with no swap beyond it: on 2026-10-16 milestone design, a portrait rewrite and a figure ran at
+# once with no ceiling, the host swapped until Caddy and SSH stopped answering, and both sites were down. Over its ceiling a container
+# is killed and restarted by Docker instead (the worker's Codex runtimes are its children, so they count against the worker's).
 if [ "$want" = all ] || [ "$want" = web ]; then
-  start crossline-web --network host --env-file /srv/crossline/app.env \
+  start crossline-web --network host --env-file /srv/crossline/app.env --memory 450m --memory-swap 450m \
     -v /srv/crossline/data:/data -v /srv/crossline/state:/state -v /srv/crossline/codex:/opt/codex:ro \
     -w /repo/apps/web "$app_image" node_modules/.bin/next start --hostname 127.0.0.1 --port 3210
 fi
@@ -38,7 +41,7 @@ if [ "$want" = all ] || [ "$want" = worker ]; then
   # (worker.already_running) and restart in a loop. The old container is removed first, so no other worker holds it.
   docker rm -f crossline-worker >/dev/null 2>&1 || true
   rm -f /srv/crossline/data/worker.lock
-  start crossline-worker --network host --env-file /srv/crossline/app.env \
+  start crossline-worker --network host --env-file /srv/crossline/app.env --memory 900m --memory-swap 900m \
     -v /srv/crossline/data:/data -v /srv/crossline/state:/state -v /srv/crossline/codex:/opt/codex:ro \
     -w /repo/apps/worker "$app_image" /repo/node_modules/.bin/tsx src/index.ts
 fi
