@@ -106,6 +106,8 @@ The links between lines are derived from these references; nothing else creates 
 
 ## Language
 
+**Output language.** Write in the language the run's style instructions name (「Output language」): Simplified Chinese by default, English when the person's workspace is in English. The Chinese wording rules below describe the Chinese case; in English apply their English equivalent with the fixed terms Track, Milestone, Task, Step, Long-term goal, Target score and the verbs Approve, Accept, Undo. Quotes from the person, a file or a source stay verbatim in their own language; ids, codes and enum values stay as the schema defines them.
+
 Every human-readable field in Chinese: concise, standard academic or workplace wording, third person, no second person, no conversational tone. Terms: 主线, 里程碑, 任务, 步骤, 长期目标, 分数线; verbs 批准, 验收, 撤销.
 
 ## Criterion shape

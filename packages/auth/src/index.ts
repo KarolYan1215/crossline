@@ -12,7 +12,7 @@ import { getMigrations } from "better-auth/db/migration";
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import nodemailer from "nodemailer";
 import { DEFAULT_LOCALE, localeFromCookieHeader, type AccessContext } from "@crossline/core";
-import { chosenLocale, CrosslineStore } from "@crossline/db";
+import { chosenLocale, CrosslineStore, writeLocale } from "@crossline/db";
 
 export type SmtpConfig = { host: string; port: number; user: string; password: string; from: string };
 export type GoogleConfig = { clientId: string; clientSecret: string };
@@ -276,6 +276,13 @@ export async function requireAccessContext(
   // read this function serves.
   const provider: AccessContext["identity"]["provider"] = "credential";
 
+  // The browser's choice renders the page; a device that has none yet takes the account's (docs/i18n.md). A choice made before signing
+  // in, on an account that has none, becomes the account's: the worker writes notifications and asks models in the account's language,
+  // and they must not stay Chinese under an English interface.
+  const cookieLocale = localeFromCookieHeader(request.headers.get("cookie"));
+  const accountLocale = chosenLocale(store, workspace.id);
+  if (cookieLocale && !accountLocale) writeLocale(store, workspace.id, cookieLocale);
+
   return {
     ctx: {
       principalId: principal.id,
@@ -284,8 +291,7 @@ export async function requireAccessContext(
       identity: { provider, issuer: "crossline", subject: session.user.id },
       authMethod: "session",
       requestId: randomUUID(),
-      // The browser's choice renders the page; a device that has none yet takes the account's (docs/i18n.md).
-      locale: localeFromCookieHeader(request.headers.get("cookie")) ?? chosenLocale(store, workspace.id) ?? DEFAULT_LOCALE
+      locale: cookieLocale ?? accountLocale ?? DEFAULT_LOCALE
     }
   };
 }

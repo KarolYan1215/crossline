@@ -3,11 +3,11 @@ import { get } from "node:http";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { configureModelGate, enterUsageWorkspace, modelGateStatus, setProviderResolver, setSpendModeProvider, setUsageSink, startCodexSupervisor, startModelGateway, type CodexSupervisor } from "@crossline/codex";
+import { configureModelGate, enterUsageWorkspace, modelGateStatus, setLocaleProvider, setProviderResolver, setSpendModeProvider, setUsageSink, startCodexSupervisor, startModelGateway, type CodexSupervisor } from "@crossline/codex";
 import { containerMemory, containerPeak } from "./memory";
 import { createDpapiSecretStore } from "@crossline/connectors";
 import { createModelProviderService } from "./model-provider";
-import { CrosslineStore, aiToolsFor, grownHomeLine, interviewChecklistFor, isPaused, listPushSubscriptions, readGrownSkills, readPublicSkills, removePushSubscriptions } from "@crossline/db";
+import { CrosslineStore, aiToolsFor, readLocale, grownHomeLine, interviewChecklistFor, isPaused, listPushSubscriptions, readGrownSkills, readPublicSkills, removePushSubscriptions } from "@crossline/db";
 import { capturesAwaitingAutoAnalysis, createCaptureAnalyzer } from "./analysis";
 import { autoApproveEligible } from "./auto-approval";
 import { retireShadowedDemos } from "./demo-cleanup";
@@ -683,6 +683,8 @@ setUsageSink((usage) => {
 });
 // Unreadable reads as manual_core_only here, which routes like normal: only economy steps a Skill down.
 setSpendModeProvider(async (workspaceId) => backgroundSpend(await readCost(workspaceId)).mode);
+// New model output is written in the workspace's language (docs/i18n.md); read per run, so a switch applies to the next run.
+setLocaleProvider((workspaceId) => workspaceId ? readLocale(analysisStore, workspaceId) : undefined);
 // The one quota gate for every background pass (core: keeps the person's own work moving; discretionary: nobody is waiting on it).
 const spendFor = createBackgroundSpend(analysisStore, (workspaceId) => readCost(workspaceId));
 /** A kind of background work the person paused on the background tasks page (the assistant has its own `agent.paused`). */

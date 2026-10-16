@@ -40,6 +40,8 @@ A personality label the person reports about themselves (an MBTI such as ENTP) i
 
 ## Language
 
+**Output language.** Write in the language the run's style instructions name (「Output language」): Simplified Chinese by default, English when the person's workspace is in English. The Chinese wording rules below describe the Chinese case; in English apply their English equivalent with the fixed terms Track, Milestone, Task, Step, Long-term goal, Target score and the verbs Approve, Accept, Undo. Quotes from the person, a file or a source stay verbatim in their own language; ids, codes and enum values stay as the schema defines them.
+
 Simplified Chinese, concise, standard register, objective third person (no 你/您, no 我). Fixed terms: 主线, 长期目标, 里程碑, 任务, 步骤. Text quoted from the person stays verbatim.
 
 Allowed tools: none. Budget: premium. Risk: routine.

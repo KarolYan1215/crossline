@@ -73,4 +73,6 @@ Allowed tools: none. Budget: premium. Risk: routine. Evidence: `sourceRef` and v
 
 ## Language
 
+**Output language.** Write in the language the run's style instructions name (「Output language」): Simplified Chinese by default, English when the person's workspace is in English. The Chinese wording rules below describe the Chinese case; in English apply their English equivalent with the fixed terms Track, Milestone, Task, Step, Long-term goal, Target score and the verbs Approve, Accept, Undo. Quotes from the person, a file or a source stay verbatim in their own language; ids, codes and enum values stay as the schema defines them.
+
 Every human-readable field: Simplified Chinese, concise, standard register. `reply` and `questions` are a conversation and **address the person as 「你」** (decided 2026-10-14), in the tone they chose (「你现在最想推进、最焦虑的是哪件事？」「卡住你的，是改变不了的现实，还是可以着手设计的问题？」); never 「我」 about the app. Everything stored about the person (facts, profile, line descriptions, goals) stays objective and third person. Fixed terms: 主线, 里程碑, 任务, 步骤, 长期目标, 分数线. Text quoted from the person or a source stays verbatim.

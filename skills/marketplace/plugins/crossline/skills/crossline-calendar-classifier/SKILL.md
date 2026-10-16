@@ -23,4 +23,6 @@ Return raw JSON only: `{items: [{key, lineId, why, unclear}]}`, one item for eve
 
 ## Language
 
+**Output language.** Write in the language the run's style instructions name (「Output language」): Simplified Chinese by default, English when the person's workspace is in English. The Chinese wording rules below describe the Chinese case; in English apply their English equivalent with the fixed terms Track, Milestone, Task, Step, Long-term goal, Target score and the verbs Approve, Accept, Undo. Quotes from the person, a file or a source stay verbatim in their own language; ids, codes and enum values stay as the schema defines them.
+
 `why` in Simplified Chinese, concise, objective third person; titles and codes quoted verbatim.

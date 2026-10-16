@@ -1,10 +1,10 @@
 import { mkdirSync, writeFileSync } from "node:fs";
-import { STYLE_INSTRUCTIONS } from "./style";
+import { agentLanguageLine, runLocale, styleInstructions } from "./style";
 import { join } from "node:path";
-import { cleanAnswerStrings } from "@crossline/core";
+import { cleanAnswerStrings, type Locale } from "@crossline/core";
 import type { CodexRpcBoundary } from "./index";
 import { routeForSkill, tierForSkill, tierRoutes, type ModelRoute, type RouteTier, type SpendMode } from "./model-policy";
-import { createUsageCollector, currentSpendMode, reportUsage, type UsageCollector } from "./usage";
+import { createUsageCollector, currentSpendMode, currentUsageWorkspace, reportUsage, type UsageCollector } from "./usage";
 import { currentProviderRouting, decideRoute, type ThreadProvider } from "./providers";
 import { markClientBusy, withModelSlot, type ModelPriority } from "./model-gate";
 
@@ -98,6 +98,11 @@ export type SkillRunOptions<T> = {
    * runs as before. Which ones were actually on is reported in `audit.skills`.
    */
   extraSkills?: string[];
+  /**
+   * The language the person reads (docs/i18n.md). Unset, the run follows its workspace's language (`setLocaleProvider`); the interview
+   * passes the language it started in, so a switch mid-interview does not change the conversation's language.
+   */
+  locale?: Locale;
 };
 
 /**
@@ -458,7 +463,8 @@ async function startAgentThread<T>(scope: Scope, options: SkillRunOptions<T>, co
     cwd: agent.cwd, sandbox: "danger-full-access", approvalPolicy: "untrusted", approvalsReviewer: "user",
     // Tools Crossline answers itself (reading a site behind the person's login, so the assistant never holds the browser profile).
     dynamicTools: (options.tools?.specs ?? []).map((spec) => ({ type: "function", name: spec.name, description: spec.description, inputSchema: spec.inputSchema })),
-    ephemeral: false, experimentalRawEvents: false, developerInstructions: options.developerInstructions,
+    ephemeral: false, experimentalRawEvents: false,
+    developerInstructions: `${options.developerInstructions}\n\n${agentLanguageLine(runLocale(options.locale, currentUsageWorkspace()))}`,
     ...(context.route ? { model: context.route.model } : {}),
     ...(context.provider ? { modelProvider: context.provider.id } : {})
   };
@@ -518,7 +524,7 @@ async function startIsolatedThread<T>(scope: Scope, options: SkillRunOptions<T>,
     environments: [], runtimeWorkspaceRoots: [], sandbox: "read-only", approvalPolicy: "untrusted", approvalsReviewer: "user",
     dynamicTools: (options.tools?.specs ?? []).map((spec) => ({ type: "function", name: spec.name, description: spec.description, inputSchema: spec.inputSchema })),
     ephemeral: false, experimentalRawEvents: false,
-    developerInstructions: `${options.developerInstructions}\n\n${STYLE_INSTRUCTIONS}`,
+    developerInstructions: `${options.developerInstructions}\n\n${styleInstructions(runLocale(options.locale, currentUsageWorkspace()))}`,
     // Left unset for a Skill with no route, so an unlisted job still runs on the runtime's default.
     ...(context.route ? { model: context.route.model } : {}),
     ...(context.provider ? { modelProvider: context.provider.id } : {})

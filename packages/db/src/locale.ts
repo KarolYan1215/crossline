@@ -15,3 +15,28 @@ export function chosenLocale(store: CrosslineStore, workspaceId: string): Locale
 export function writeLocale(store: CrosslineStore, workspaceId: string, locale: Locale): void {
   if (store.getSetting(workspaceId, LOCALE_SETTING) !== locale) store.setSetting(workspaceId, LOCALE_SETTING, locale);
 }
+
+/**
+ * The interview keeps the language it started in until it ends (docs/i18n.md, decided 2026-10-16): switching the interface mid-way
+ * would otherwise turn a conversation, its stored facts and the portrait into a mix of two languages. Locked per session on its first
+ * turn; the main interview's (not a line's own) is also kept as `onboarding.locale`, which the portrait report follows.
+ */
+export const INTERVIEW_LOCALE_SETTING = "onboarding.locale";
+
+export function lockInterviewLocale(store: CrosslineStore, workspaceId: string, sessionId: string): Locale {
+  const key = `${INTERVIEW_LOCALE_SETTING}:${sessionId}`;
+  const locked = store.getSetting(workspaceId, key);
+  if (isLocale(locked)) return locked;
+  const locale = readLocale(store, workspaceId);
+  store.setSetting(workspaceId, key, locale);
+  if (!sessionId.startsWith("line-") && !isLocale(store.getSetting(workspaceId, INTERVIEW_LOCALE_SETTING))) {
+    store.setSetting(workspaceId, INTERVIEW_LOCALE_SETTING, locale);
+  }
+  return locale;
+}
+
+/** The main interview's language, once it has started; undefined before, when everything follows the workspace's language. */
+export function interviewLocale(store: CrosslineStore, workspaceId: string): Locale | undefined {
+  const value = store.getSetting(workspaceId, INTERVIEW_LOCALE_SETTING);
+  return isLocale(value) ? value : undefined;
+}

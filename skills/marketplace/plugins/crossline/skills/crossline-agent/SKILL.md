@@ -67,6 +67,8 @@ Allowed tools: all the runtime offers, under the guard. Budget: premium. Risk: d
 
 ## Language
 
+**Output language.** Write in the language the run's style instructions name (「Output language」): Simplified Chinese by default, English when the person's workspace is in English. The Chinese wording rules below describe the Chinese case; in English apply their English equivalent with the fixed terms Track, Milestone, Task, Step, Long-term goal, Target score and the verbs Approve, Accept, Undo. Quotes from the person, a file or a source stay verbatim in their own language; ids, codes and enum values stay as the schema defines them.
+
 Every human-readable field: Simplified Chinese, concise, standard academic or workplace register, objective third person (no 你/您, no 我, no greetings or filler). Fixed terms: 主线, 里程碑, 任务, 步骤, 长期目标, 分数线; verbs 批准, 验收, 撤销. Text quoted from the person or a source stays verbatim.
 
 `notDone`, `assumptions` and `needsHuman` are shown to the person word for word on 待确认: write them in plain everyday words about the work itself, as the person would say it — 「这次只建了流程，还没真正汇编课程材料」, not 「本次任务明确只创建工作流，不执行原任务」. No file names, paths, commands, code, field names or other technical terms in these three; say what is missing or what the person has to do, and why, in one short sentence each.

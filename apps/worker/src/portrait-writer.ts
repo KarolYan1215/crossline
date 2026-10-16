@@ -1,6 +1,6 @@
 import { PORTRAIT_GAP_SCHEMA, PORTRAIT_SCHEMA, PORTRAIT_SCHEMA_VERSION, typeSummaryProblem, validatePortrait, type PortraitReport, AGENT_HISTORY_SUMMARY, agentHistoryLines, type AgentHistorySummary } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
-import { sayDoFor, type CrosslineStore } from "@crossline/db";
+import { interviewLocale, sayDoFor, type CrosslineStore } from "@crossline/db";
 import { identityLines } from "./lines";
 import { ownerOf } from "./owner";
 
@@ -65,6 +65,8 @@ export function portraitRewriteDue(store: CrosslineStore, workspaceId: string, n
  */
 export function createPortraitWriter(store: CrosslineStore, workspaceId: string, cwd: string, getClient: () => CodexRpcBoundary | undefined,
   options: { only?: "gap" } = {}) {
+  /** The portrait is written in the interview's language (docs/i18n.md); before an interview, in the workspace's. */
+  const languageOf = () => { const locale = interviewLocale(store, workspaceId); return locale ? { locale } : {}; };
   return async function write(): Promise<{ state: "written"; version: number } | { state: "blocked"; code: string; message: string }> {
     const client = getClient();
     if (!client) return { state: "blocked", code: "CODEX_SUPERVISOR_UNAVAILABLE", message: "模型服务不可用。" };
@@ -81,7 +83,7 @@ export function createPortraitWriter(store: CrosslineStore, workspaceId: string,
       if (!previous) return { state: "blocked", code: "PORTRAIT_NONE", message: "还没有画像报告。" };
       const merged = (output: unknown) => ({ ...previous.report, gap: (output as { gap: PortraitReport["gap"] }).gap });
       const context = { version: "crossline.portrait.v1", only: "gap", previous: previous.report, lines, doing };
-      const result = await runCodexSkill<PortraitReport>(client, context, { skillName: PORTRAIT_WRITER, cwd, tier: "mid",
+      const result = await runCodexSkill<PortraitReport>(client, context, { skillName: PORTRAIT_WRITER, cwd, tier: "mid", ...languageOf(),
         developerInstructions: "Rewrite only the say–do part of the portrait report as the Skill describes. Return raw JSON only.",
         outputSchema: PORTRAIT_GAP_SCHEMA, prepareInput: () => context, validateOutput: (output) => validatePortrait(merged(output), lineIds),
         softAccept: (rejection, output) => keepIncomplete(rejection, () => validatePortrait(merged(output), lineIds, { lenient: true })),
@@ -111,7 +113,7 @@ export function createPortraitWriter(store: CrosslineStore, workspaceId: string,
     const workHistory = agentHistoryLines(json<AgentHistorySummary | null>(AGENT_HISTORY_SUMMARY, null));
     const context = { version: "crossline.portrait.v1", lines, profile: json<Record<string, unknown>>("profile.model", {}), facts, replies, documents, doing,
       ...(workHistory.length ? { workHistory } : {}) };
-    const result = await runCodexSkill<PortraitReport>(client, context, { skillName: PORTRAIT_WRITER, cwd,
+    const result = await runCodexSkill<PortraitReport>(client, context, { skillName: PORTRAIT_WRITER, cwd, ...languageOf(),
       developerInstructions: "Write the portrait report as the Skill describes, from the supplied material only. Return raw JSON only.",
       outputSchema: PORTRAIT_SCHEMA, prepareInput: () => context, validateOutput: (output) => checked(output, lineIds),
       softAccept: (rejection, output) => keepIncomplete(rejection, () => checked(output, lineIds, { lenient: true })),

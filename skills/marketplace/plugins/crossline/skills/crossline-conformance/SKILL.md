@@ -13,6 +13,8 @@ Accept `{version: "crossline.conformance.v1", caseId, prompt}`. The output schem
 
 ## Language
 
+**Output language.** Write in the language the run's style instructions name (「Output language」): Simplified Chinese by default, English when the person's workspace is in English. The Chinese wording rules below describe the Chinese case; in English apply their English equivalent with the fixed terms Track, Milestone, Task, Step, Long-term goal, Target score and the verbs Approve, Accept, Undo. Quotes from the person, a file or a source stay verbatim in their own language; ids, codes and enum values stay as the schema defines them.
+
 Simplified Chinese for free text; ids, codes and enum values exactly as the schema writes them.
 
 ## Web checks

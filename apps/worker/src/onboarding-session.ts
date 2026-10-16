@@ -7,7 +7,7 @@ import {
   type KnownSources, type OnboardingTurn, type OnboardingTurnContext, ONBOARDING_PROGRESS_SETTING, readPartialTurn, type OnboardingProgress, calendarWeek
 } from "@crossline/core";
 import { continueSkillTurn, runCodexSkill, type CodexRpcBoundary, type SkillProgress } from "@crossline/codex";
-import { interviewChecklistFor, interviewGapsFor, questionScreenFor, unfiledFilesIn, type CrosslineStore, type StoredOnboardingMessage, type StoredSourceDocument } from "@crossline/db";
+import { interviewChecklistFor, interviewGapsFor, lockInterviewLocale, questionScreenFor, unfiledFilesIn, type CrosslineStore, type StoredOnboardingMessage, type StoredSourceDocument } from "@crossline/db";
 import { sourceIds } from "./source-ids";
 import { identityLines } from "./lines";
 
@@ -253,6 +253,8 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       store.appendOnboardingMessage({ sessionId, workspaceId, role: "user", content: { text }, createdAt: now });
       messages = store.listOnboardingMessages(workspaceId, sessionId);
     }
+    // The language this interview started in, kept to its end whatever the interface is switched to (docs/i18n.md).
+    const locale = lockInterviewLocale(store, workspaceId, sessionId);
     const userMessage = messages.at(-1)!;
     const replyId = `reply-${userMessage.seq}`;
     const replyText = String((userMessage.content as { text?: string }).text ?? "");
@@ -337,7 +339,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
           ...(line.goalParts?.length ? { goalParts: line.goalParts } : {}) }))
       };
       return runCodexSkill<OnboardingTurn>(client, context, {
-        skillName: ONBOARDING_SKILL, cwd, developerInstructions: INSTRUCTIONS, outputSchema: ONBOARDING_TURN_SCHEMA, keepThread: true,
+        skillName: ONBOARDING_SKILL, cwd, developerInstructions: INSTRUCTIONS, outputSchema: ONBOARDING_TURN_SCHEMA, keepThread: true, locale,
         prepareInput: () => context, validateOutput, softAccept, keepEarly,
         onAudit: (audit) => { if (audit.threadId) threadId = audit.threadId; }, onProgress, onQueued,
         timeoutMs: 60 * 60_000
