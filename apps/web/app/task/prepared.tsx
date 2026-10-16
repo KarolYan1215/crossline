@@ -1,4 +1,5 @@
 import type { TaskDetail } from "../../lib/task-detail";
+import { useT } from "../locale-context";
 
 /** Files the assistant wrote to do its work, not for the person to read (a helper script). */
 const TOOLING = /\.(ps1|py|js|mjs|ts|sh|bat|cmd)$/i;
@@ -15,12 +16,13 @@ export function preparedFiles(detail: Pick<TaskDetail, "agentOutputs">): Array<{
  * the day panel shows, not only in a review queue. The tutorial, when one was written, opens on the task's page.
  */
 export function Prepared({ detail, max = 3 }: { detail: Pick<TaskDetail, "id" | "agentOutputs" | "preparedMaterials">; max?: number }) {
+  const t = useT();
   const files = preparedFiles(detail);
   const tutorial = detail.preparedMaterials.some((item) => /manual\.md$/.test(item.uri));
   if (!files.length && !tutorial) return null;
-  return <p className="task-prepared"><small>已备好</small>
-    {tutorial && <a href={`/workbench/${encodeURIComponent(detail.id)}#tutorial`}>教程</a>}
+  return <p className="task-prepared"><small>{t("已备好")}</small>
+    {tutorial && <a href={`/workbench/${encodeURIComponent(detail.id)}#tutorial`}>{t("教程")}</a>}
     {files.slice(0, max).map((file) => <a key={file.href} href={file.href} target="_blank" rel="noreferrer">{file.name}</a>)}
-    {files.length > max && <a href={`/workbench/${encodeURIComponent(detail.id)}#materials`}>另有 {files.length - max} 份</a>}
+    {files.length > max && <a href={`/workbench/${encodeURIComponent(detail.id)}#materials`}>{t("另有 {{count}} 份", { count: files.length - max })}</a>}
   </p>;
 }

@@ -7,6 +7,8 @@ import { Clamp } from "../ui/clamp";
 import { RiskList } from "../milestones/risk-glyph";
 import { answerBody, answerProblem, askOutcome, askSources, shortDay } from "./model";
 import type { AskPreviewData } from "./types";
+import { useLocale, useT } from "../locale-context";
+import { entryDay } from "../task/format";
 import "./asks.css";
 
 const URGENCY: Record<Ask["urgency"], string> = { now: "今天要答", soon: "这周", later: "不急" };
@@ -33,17 +35,18 @@ export function AskCard({ ask, preview, onDone, level = 3 }: { ask: Ask; preview
   const [note, setNote] = useState("");
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
+  const t = useT(), locale = useLocale();
   const answerable = ask.options.filter((option) => !option.href);
   const links = ask.options.filter((option) => option.href);
   const chosen = answerable.filter((option) => picked.includes(option.id));
   const fields = uniqueFields(chosen.flatMap((option) => option.fields ?? []));
 
   const send = async (path: string, body: Record<string, unknown>) => {
-    setBusy(true); setStatus("保存中…");
+    setBusy(true); setStatus(t("保存中…"));
     const result = await post(path, body);
     setBusy(false);
     if (result?.ok) { onDone(ask.id); return; }
-    setStatus(answerProblem(result?.code));
+    setStatus(answerProblem(result?.code, locale));
   };
   const submit = (optionIds: string[]) => void send("/api/asks/answer", answerBody(ask.id, optionIds, values, note));
   const initials = (options: AskOption[]) => Object.fromEntries(options.flatMap((option) => option.fields ?? [])
@@ -58,18 +61,18 @@ export function AskCard({ ask, preview, onDone, level = 3 }: { ask: Ask; preview
     setPicked(next);
     setValues((current) => ({ ...initials(answerable.filter((item) => next.includes(item.id))), ...current }));
   };
-  const outcome = askOutcome(ask);
-  const sources = askSources(ask);
+  const outcome = askOutcome(ask, locale);
+  const sources = askSources(ask, locale);
 
   return <li className="ask-card ak-card" data-line={ask.line} data-urgency={ask.urgency} data-kind={ask.kind}>
     <AskMeta ask={ask} />
     {level === 4 ? <h4 className="ak-title">{ask.title}</h4> : <h3 className="ak-title">{ask.title}</h3>}
     <dl className="ak-brief">
-      <div><dt>为何问</dt><dd><Clamp text={ask.why} className="ak-clamp" moreClassName="ak-more" /></dd></div>
-      <div><dt>答后</dt><dd>{outcome.answered}</dd></div>
-      <div><dt>不答</dt><dd>{outcome.unanswered}</dd></div>
+      <div><dt>{t("为何问")}</dt><dd><Clamp text={ask.why} className="ak-clamp" moreClassName="ak-more" /></dd></div>
+      <div><dt>{t("答后")}</dt><dd>{outcome.answered}</dd></div>
+      <div><dt>{t("不答")}</dt><dd>{outcome.unanswered}</dd></div>
     </dl>
-    {sources.length > 0 && <p className="ak-sources"><span>来源</span>{sources.map((source) =>
+    {sources.length > 0 && <p className="ak-sources"><span>{t("来源")}</span>{sources.map((source) =>
       <a key={source.href} href={source.href} {...(source.href.startsWith("/api/") ? { target: "_blank", rel: "noreferrer" } : {})}>{source.label}</a>)}</p>}
     {ask.progress && <AgentProgressView progress={ask.progress} />}
     {ask.risks && <div className="ak-risks"><RiskList risks={ask.risks} gen /></div>}
@@ -77,17 +80,17 @@ export function AskCard({ ask, preview, onDone, level = 3 }: { ask: Ask; preview
 
     {many
       ? <fieldset className="ask-options ak-many" disabled={busy}>
-        <legend className="ak-legend">可多选</legend>
+        <legend className="ak-legend">{t("可多选")}</legend>
         {answerable.map((option) => <label key={option.id} className="ask-option ak-check" data-checked={picked.includes(option.id) || undefined}>
           <input type="checkbox" checked={picked.includes(option.id)} onChange={() => toggle(option)} />
-          <span><b>{option.label}{option.recommended && <span className="ask-recommended"> · 推荐</span>}</b>{option.detail && <small>{option.detail}</small>}</span>
+          <span><b>{option.label}{option.recommended && <span className="ask-recommended"> · {t("推荐")}</span>}</b>{option.detail && <small>{option.detail}</small>}</span>
         </label>)}
         {links.map((option) => <OptionLink key={option.id} option={option} />)}
       </fieldset>
-      : <div className="ask-options" role="group" aria-label="选一项">
+      : <div className="ask-options" role="group" aria-label={t("选一项")}>
         {answerable.map((option) => <button key={option.id} type="button" className="ask-option" disabled={busy} aria-pressed={picked.includes(option.id)}
           onClick={() => chooseOne(option)}>
-          <b>{option.label}{option.recommended && <span className="ask-recommended"> · 推荐</span>}</b>{option.detail && <small>{option.detail}</small>}
+          <b>{option.label}{option.recommended && <span className="ask-recommended"> · {t("推荐")}</span>}</b>{option.detail && <small>{option.detail}</small>}
         </button>)}
         {links.map((option) => <OptionLink key={option.id} option={option} />)}
       </div>}
@@ -97,7 +100,7 @@ export function AskCard({ ask, preview, onDone, level = 3 }: { ask: Ask; preview
         onChange={(value) => setValues((current) => ({ ...current, [field.id]: value }))} />)}
     </div>}
 
-    {ask.freeText && <label className="ak-free"><span className="sr-only">用自己的话回答</span>
+    {ask.freeText && <label className="ak-free"><span className="sr-only">{t("用自己的话回答")}</span>
       <textarea rows={1} value={note} maxLength={4000} placeholder={ask.freeText.placeholder} data-user-text
         onChange={(event) => setNote(event.target.value)}
         onKeyDown={(event) => {
@@ -108,15 +111,15 @@ export function AskCard({ ask, preview, onDone, level = 3 }: { ask: Ask; preview
     {(many || fields.length > 0 || note.trim()) && <div className="execution-actions ak-submit">
       <button type="button" className="primary-button" disabled={busy || (!picked.length && !note.trim())} onClick={() => {
         const missing = fields.find((field) => field.required && !(values[field.id] ?? "").trim());
-        if (missing) { setStatus(`「${missing.label}」未填写`); return; }
+        if (missing) { setStatus(t("「{{label}}」未填写", { label: missing.label })); return; }
         submit(picked);
-      }}>{many ? `确定${picked.length ? `（${picked.length} 项）` : ""}` : chosen[0] ? `确定：${chosen[0].label}` : "提交"}</button>
-      {!many && chosen.length > 0 && <button type="button" className="secondary-button" onClick={() => { setPicked([]); setValues({}); }}>换一个</button>}
+      }}>{many ? (picked.length ? t("确定（{{count}} 项）", { count: picked.length }) : t("确定")) : chosen[0] ? t("确定：{{label}}", { label: chosen[0].label }) : t("提交")}</button>
+      {!many && chosen.length > 0 && <button type="button" className="secondary-button" onClick={() => { setPicked([]); setValues({}); }}>{t("换一个")}</button>}
     </div>}
 
     <p className="ask-later">
-      <button type="button" className="text-button" disabled={busy} onClick={() => void send("/api/asks/snooze", { askId: ask.id, choice: "tomorrow" })}>明天再问</button>
-      <button type="button" className="text-button" disabled={busy} onClick={() => void send("/api/asks/snooze", { askId: ask.id, choice: "week" })}>下周再问</button>
+      <button type="button" className="text-button" disabled={busy} onClick={() => void send("/api/asks/snooze", { askId: ask.id, choice: "tomorrow" })}>{t("明天再问")}</button>
+      <button type="button" className="text-button" disabled={busy} onClick={() => void send("/api/asks/snooze", { askId: ask.id, choice: "week" })}>{t("下周再问")}</button>
       {status && <small role="status">{status}</small>}
     </p>
   </li>;
@@ -129,7 +132,8 @@ function OptionLink({ option }: { option: AskOption }) {
 }
 
 function FieldInput({ field, value, onChange }: { field: AskField; value: string; onChange: (value: string) => void }) {
-  return <label>{field.label}{field.required ? "" : "（可选）"}
+  const t = useT();
+  return <label>{field.required ? field.label : t("{{label}}（可选）", { label: field.label })}
     {field.kind === "longtext"
       ? <textarea rows={2} required={field.required} value={value} placeholder={field.placeholder} onChange={(event) => onChange(event.target.value)} />
       : <input type={field.kind === "date" ? "date" : "text"} required={field.required} value={value} placeholder={field.placeholder}
@@ -139,14 +143,15 @@ function FieldInput({ field, value, onChange }: { field: AskField; value: string
 
 /** Urgency, the deadline it bears on, the milestone's weight (drawn), and — for one that can wait — the day it comes into the week. */
 export function AskMeta({ ask }: { ask: Ask }) {
+  const t = useT(), locale = useLocale();
   return <p className="ask-meta">
-    <Tag tone={ask.urgency === "now" ? "info" : "neutral"}>{URGENCY[ask.urgency]}</Tag>
-    {ask.dueDay && <small>关系到 {shortDay(ask.dueDay)} 的截止</small>}
-    {ask.importance !== undefined && <small className="ak-weight" title={`里程碑重要性 ${ask.importance} / 100`}>
+    <Tag tone={ask.urgency === "now" ? "info" : "neutral"}>{t(URGENCY[ask.urgency])}</Tag>
+    {ask.dueDay && <small>{t("关系到 {{day}} 的截止", { day: shortDay(ask.dueDay, locale) })}</small>}
+    {ask.importance !== undefined && <small className="ak-weight" title={t("里程碑重要性 {{value}} / 100", { value: ask.importance })}>
       <svg viewBox="0 0 40 6" width="40" height="6" aria-hidden="true"><rect width="40" height="6" className="ak-weight-bg" />
         <rect width={Math.max(0, Math.min(100, ask.importance)) * 0.4} height="6" className="ak-weight-fill" /></svg>
-      里程碑重要性 {ask.importance}</small>}
-    {ask.entersOn && <small>{ask.entersOn.slice(5)} 起列入本周</small>}
+      {t("里程碑重要性 {{value}}", { value: ask.importance })}</small>}
+    {ask.entersOn && <small>{t("{{day}} 起列入本周", { day: entryDay(locale, ask.entersOn) })}</small>}
   </p>;
 }
 
@@ -157,12 +162,13 @@ export function AskMeta({ ask }: { ask: Ask }) {
 function PreviewToggle({ href, label, data }: { href: string; label: string; data: AskPreviewData | undefined }) {
   const [open, setOpen] = useState(false);
   const id = useId();
+  const t = useT();
   const external = href.startsWith("/api/");
   return <div className="ak-preview-wrap">
     <p className="ak-preview-bar">
       {data && <button type="button" className="text-button" aria-expanded={open} aria-controls={id} onClick={() => setOpen(!open)}>
-        {open ? "收起预览" : "预览"}：{label}</button>}
-      <a href={href} {...(external ? { target: "_blank", rel: "noreferrer" } : {})}>{data ? "打开" : `打开：${label}`} →</a>
+        {t(open ? "收起预览：{{label}}" : "预览：{{label}}", { label })}</button>}
+      <a href={href} {...(external ? { target: "_blank", rel: "noreferrer" } : {})}>{data ? t("打开") : t("打开：{{label}}", { label })} →</a>
     </p>
     {data && <div id={id} className="ak-preview" data-open={open || undefined} inert={!open} aria-hidden={!open}>
       <div className="ak-preview-inner"><PreviewBody data={data} /></div>
@@ -173,9 +179,10 @@ function PreviewToggle({ href, label, data }: { href: string; label: string; dat
 const STATUS: Record<string, string> = { draft: "草稿", approved: "已批准", archived: "已归档" };
 
 export function PreviewBody({ data }: { data: AskPreviewData }): ReactNode {
+  const t = useT(), locale = useLocale();
   switch (data.kind) {
     case "portrait": return <div className="ak-pv-portrait">
-      {data.image && <img src={data.image} alt="画像人物" width={96} height={144} loading="lazy" />}
+      {data.image && <img src={data.image} alt={t("画像人物")} width={96} height={144} loading="lazy" />}
       <div>
         {data.code && <p className="ak-pv-type"><b>{data.code}</b> {data.name}</p>}
         {data.tagline && <p className="gen">{data.tagline}</p>}
@@ -184,11 +191,11 @@ export function PreviewBody({ data }: { data: AskPreviewData }): ReactNode {
       </div>
     </div>;
     case "milestones": return <ol className="ak-pv-list">{data.items.map((item, index) => <li key={index} data-line={item.line}>
-      <span className="gen">{item.title}</span><small>{item.deadline ? shortDay(item.deadline) : "未定日期"} · {STATUS[item.status]}</small></li>)}</ol>;
+      <span className="gen">{item.title}</span><small>{item.deadline ? shortDay(item.deadline, locale) : t("未定日期")} · {t(STATUS[item.status] ?? item.status)}</small></li>)}</ol>;
     case "task": return <div className="ak-pv-task">
-      <p><b>{data.title}</b> <Tag>{data.state}</Tag>{data.due && <small> 截止 {shortDay(data.due)}</small>}</p>
+      <p><b>{data.title}</b> <Tag>{data.state}</Tag>{data.due && <small> {t("截止 {{day}}", { day: shortDay(data.due, locale) })}</small>}</p>
       {data.steps.length > 0 && <ol className="ak-pv-list">{data.steps.map((step, index) => <li key={index} data-done={step.done || undefined}>
-        <span className="gen">{step.title}</span><small>{step.done ? "已完成" : "未完成"}</small></li>)}</ol>}
+        <span className="gen">{step.title}</span><small>{t(step.done ? "已完成" : "未完成")}</small></li>)}</ol>}
     </div>;
     case "file": return <div className="ak-pv-file"><p><b>{data.fileName}</b></p>{data.excerpt && <p className="gen ak-pv-summary">{data.excerpt}</p>}</div>;
   }
@@ -199,22 +206,23 @@ export function PreviewBody({ data }: { data: AskPreviewData }): ReactNode {
  * stopped, and what only the person can supply for it to go on. A retry that could act outside this machine is flagged.
  */
 export function AgentProgressView({ progress }: { progress: AskProgress }) {
+  const t = useT();
   const total = progress.done.length + 1;
-  return <section className="ak-progress" aria-label="助手进度">
+  return <section className="ak-progress" aria-label={t("助手进度")}>
     {progress.summary && <p className="gen">{progress.summary}</p>}
     <div className="ak-progress-head">
-      <div className="ak-progress-bar" role="img" aria-label={`已完成 ${progress.done.length} 步，停在第 ${total} 步`}>
+      <div className="ak-progress-bar" role="img" aria-label={t("已完成 {{done}} 步，停在第 {{at}} 步", { done: progress.done.length, at: total })}>
         {progress.done.map((step, index) => <span key={index} className="ak-cell" data-state="done" title={step} />)}
         <span className="ak-cell" data-state="stuck" title={progress.stuckAt} />
       </div>
-      <small>已完成 {progress.done.length} 步 · 停在第 {total} 步{progress.retries > 0 ? ` · 已自动重试 ${progress.retries} 次` : ""}</small>
+      <small>{t("已完成 {{done}} 步 · 停在第 {{at}} 步", { done: progress.done.length, at: total })}{progress.retries > 0 ? ` · ${t("已自动重试 {{count}} 次", { count: progress.retries })}` : ""}</small>
     </div>
     <ol className="ak-steps">
       {progress.done.map((step, index) => <li key={index} data-state="done"><span aria-hidden="true">✓</span><span className="gen">{step}</span></li>)}
-      <li data-state="stuck"><span aria-hidden="true">■</span><span><b>停在</b> <span className="gen">{progress.stuckAt}</span></span></li>
+      <li data-state="stuck"><span aria-hidden="true">■</span><span><b>{t("停在")}</b> <span className="gen">{progress.stuckAt}</span></span></li>
     </ol>
-    {progress.needs.length > 0 && <div className="ak-needs"><h4>需本人决定或提供</h4>
+    {progress.needs.length > 0 && <div className="ak-needs"><h4>{t("需本人决定或提供")}</h4>
       <ul>{progress.needs.map((item, index) => <li key={index} className="gen">{item}</li>)}</ul></div>}
-    {progress.external && <p className="ak-external"><Tag tone="warn">涉及外部</Tag> 重试可能在本机之外产生动作（登录、付费或发送），需本人确认后再继续。</p>}
+    {progress.external && <p className="ak-external"><Tag tone="warn">{t("涉及外部")}</Tag> {t("重试可能在本机之外产生动作（登录、付费或发送），需本人确认后再继续。")}</p>}
   </section>;
 }

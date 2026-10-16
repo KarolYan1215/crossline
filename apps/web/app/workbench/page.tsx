@@ -12,6 +12,9 @@ import { TaskCard } from "../task/task-card";
 import { compareInGroup, groupOf, waitReason, type TaskGroup } from "../task/card-model";
 import { identityLines } from "../../lib/lines";
 import { timed, timedSync } from "../../lib/sections";
+import { localeFor } from "../../lib/locale";
+import { tFor } from "../../lib/i18n";
+import { punct, shortDate } from "../task/format";
 
 export const dynamic = "force-dynamic";
 
@@ -28,7 +31,6 @@ const WAIT_HEADINGS: Array<{ kinds: string[]; title: string }> = [
   { kinds: ["input", "release", "material"], title: "等他人、材料或开放日" },
   { kinds: ["gate"], title: "等验收" }
 ];
-const md = (day: string) => `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}`;
 
 /**
  * 任务 (redesigned 2026-10-15). Opened to answer four questions at a glance — what to do now, where each task stands and what its next
@@ -43,6 +45,8 @@ export default async function WorkbenchPage({ searchParams }: {
   gateUntilReady(ctx);
   const params = await searchParams;
   ensureSeeded(ctx);
+  const locale = localeFor(ctx), t = tFor(locale);
+  const md = (day: string) => shortDate(locale, day);
   const store = getStore();
   const all = store.listWorkOrders(ctx.workspaceId);
   const today = planToday(ctx);
@@ -89,15 +93,15 @@ export default async function WorkbenchPage({ searchParams }: {
   </div>;
   const nothing = !live.length && !captures.length;
   const shownLines = lines.filter((line) => lineCounts.has(line.id));
-  return <SubpageShell active="任务" title="任务">
-    {nothing ? <p className="panel today-empty">还没有任务。任务有两个来源：批准「主线」页的里程碑草稿后，系统从它们倒推出任务；或者在今日页的输入框写下要做的事，系统整理成任务。</p>
+  return <SubpageShell active={"任务"} title={t("任务")}>
+    {nothing ? <p className="panel today-empty">{t("还没有任务。任务有两个来源：批准「主线」页的里程碑草稿后，系统从它们倒推出任务；或者在今日页的输入框写下要做的事，系统整理成任务。")}</p>
       : <div className="tasks-top">
-        <nav className="tasks-index" aria-label="任务分组">
-          {SECTIONS.map((section) => <a key={section.group} href={`#tasks-${section.group}`}><span>{section.title}</span><b className="mono">{count(section.group)}</b></a>)}
-          <a href="#tasks-library"><span>任务库</span><b className="mono">{count("library")}</b></a>
+        <nav className="tasks-index" aria-label={t("任务分组")}>
+          {SECTIONS.map((section) => <a key={section.group} href={`#tasks-${section.group}`}><span>{t(section.title)}</span><b className="mono">{count(section.group)}</b></a>)}
+          <a href="#tasks-library"><span>{t("任务库")}</span><b className="mono">{count("library")}</b></a>
         </nav>
-        {shownLines.length > 1 && <nav className="tasks-filter" aria-label="按主线筛选">
-          <a href="/workbench" aria-current={!lineFilter ? "true" : undefined}>全部</a>
+        {shownLines.length > 1 && <nav className="tasks-filter" aria-label={t("按主线筛选")}>
+          <a href="/workbench" aria-current={!lineFilter ? "true" : undefined}>{t("全部")}</a>
           {shownLines.map((line) => <a key={line.id} href={`/workbench?line=${encodeURIComponent(line.id)}`} data-line={line.id}
             aria-current={lineFilter === line.id ? "true" : undefined}><i className="task-card-dot" aria-hidden="true" />{line.label}</a>)}
         </nav>}
@@ -107,27 +111,27 @@ export default async function WorkbenchPage({ searchParams }: {
       if (!entries.length && section.group !== "now") return null;
       return <section key={section.group} id={`tasks-${section.group}`} className="tasks-section" aria-labelledby={`tasks-${section.group}-title`}>
         <header className="tasks-section-head">
-          <h2 id={`tasks-${section.group}-title`}>{section.title} <span className="mono">{entries.length}</span></h2>
-          <small>{section.hint}</small>
+          <h2 id={`tasks-${section.group}-title`}>{t(section.title)} <span className="mono">{entries.length}</span></h2>
+          <small>{t(section.hint)}</small>
         </header>
-        {!entries.length ? <p className="tasks-empty">{count("next") ? "今天没有排到时段的任务；「接下来」里最早的一项可以提前开始。" : "今天没有排到时段的任务。"}</p>
+        {!entries.length ? <p className="tasks-empty">{t(count("next") ? "今天没有排到时段的任务；「接下来」里最早的一项可以提前开始。" : "今天没有排到时段的任务。")}</p>
           : section.group === "waiting" ? WAIT_HEADINGS.map((heading) => {
             const own = entries.filter((entry) => heading.kinds.includes(waitReason(entry.detail, today)?.kind ?? "gate"));
-            return own.length ? <div key={heading.title} className="tasks-subgroup"><h3>{heading.title} <span className="mono">{own.length}</span></h3>
+            return own.length ? <div key={heading.title} className="tasks-subgroup"><h3>{t(heading.title)} <span className="mono">{own.length}</span></h3>
               <div className="task-grid">{own.map(card)}</div></div> : null;
           })
           : <div className="task-grid">{entries.map(card)}</div>}
       </section>;
     })}
     {captures.length > 0 && <section className="tasks-section" aria-labelledby="tasks-captures-title">
-      <header className="tasks-section-head"><h2 id="tasks-captures-title">收集 <span className="mono">{captures.length}</span></h2><small>尚未整理成任务的输入；系统自动分析</small></header>
+      <header className="tasks-section-head"><h2 id="tasks-captures-title">{t("收集")} <span className="mono">{captures.length}</span></h2><small>{t("尚未整理成任务的输入；系统自动分析")}</small></header>
       <div className="work-order-list">{captures.map((capture) => <article key={capture.id}>
-        <header><span>收集</span><b>{stateLabel[capture.state]}</b></header>
+        <header><span>{t("收集")}</span><b>{stateLabel[capture.state] ? t(stateLabel[capture.state]!) : capture.state}</b></header>
         <h2>{capture.title}</h2><p>{capture.context}</p>
-        <p>未分类 · 未估时 · 原文已保存，可人工处理</p>
+        <p>{t("未分类 · 未估时 · 原文已保存，可人工处理")}</p>
         {(() => { const own = attachments.filter((item) => item.captureId === capture.id);
-          return own.length > 0 && <p>附件 {own.length} 份：{own.map((item, index) => <span key={item.id}>
-            {index > 0 ? "、" : ""}
+          return own.length > 0 && <p>{t("附件 {{count}} 份：", { count: own.length })}{own.map((item, index) => <span key={item.id}>
+            {index > 0 ? punct(locale, "、") : ""}
             <a href={`/api/captures/${encodeURIComponent(capture.id)}/attachments?uri=${encodeURIComponent(item.uri)}`}
               target="_blank" rel="noreferrer">{item.fileName}</a>
           </span>)}</p>; })()}
@@ -137,23 +141,23 @@ export default async function WorkbenchPage({ searchParams }: {
       </article>)}</div>
     </section>}
     {count("library") > 0 && <details id="tasks-library" className="work-order-drawer tasks-library">
-      <summary>任务库 <span className="mono">{count("library")}</span> 项 · 最早 {md(groups.get("library")![0]!.library!)} 起排入日程</summary>
-      <p className="tasks-empty">所属里程碑的截止日在三周窗口之外；窗口打开后自动排进日程。</p>
+      <summary>{t("任务库")} <span className="mono">{count("library")}</span> {t("项 · 最早 {{day}} 起排入日程", { count: count("library"), day: md(groups.get("library")![0]!.library!) })}</summary>
+      <p className="tasks-empty">{t("所属里程碑的截止日在三周窗口之外；窗口打开后自动排进日程。")}</p>
       <div className="task-grid">{groups.get("library")!.map((entry) => <div key={entry.id} id={`work-order-${entry.id}`} className="task-grid-item">
         <TaskCard detail={entry.detail} today={today} />
-        <p className="task-card-note">{md(entry.library!)} 起排入日程</p>
+        <p className="task-card-note">{t("{{day}} 起排入日程", { day: md(entry.library!) })}</p>
       </div>)}</div>
     </details>}
     {count("done") > 0 && <details className="work-order-drawer advanced">
-      <summary>已完成 <span className="mono">{count("done")}</span> 项</summary>
+      <summary>{t("已完成")} <span className="mono">{count("done")}</span> {t("项", { count: count("done") })}</summary>
       <div className="task-grid">{groups.get("done")!.map(card)}</div>
     </details>}
     {(discarded.length + discardedCaptures.length + merged.length) > 0
-      && <details className="work-order-drawer advanced"><summary>已归档 {discarded.length + discardedCaptures.length + merged.length} 项</summary>
+      && <details className="work-order-drawer advanced"><summary>{t("已归档 {{count}} 项", { count: discarded.length + discardedCaptures.length + merged.length })}</summary>
         {merged.length > 0 && <>
-          <h3>已合并 <span className="mono">{merged.length}</span></h3>
+          <h3>{t("已合并")} <span className="mono">{merged.length}</span></h3>
           <ul className="archive-list">
-            {merged.map((run) => <li key={run.id}><span>{titleOfId.get(run.id)}<small> · 已合并到「{titleOfId.get(mergedInto.get(run.id)!) ?? "另一项任务"}」</small></span>
+            {merged.map((run) => <li key={run.id}><span>{titleOfId.get(run.id)}<small> · {t("已合并到「{{title}}」", { title: titleOfId.get(mergedInto.get(run.id)!) ?? t("另一项任务") })}</small></span>
               <RestoreButton kind="merge" id={run.id} /></li>)}
           </ul>
         </>}

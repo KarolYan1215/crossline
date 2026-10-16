@@ -21,8 +21,14 @@ import { uniqueAsks } from "../asks/model";
 import { PendingSummary } from "./summary";
 import "./approvals.css";
 import { timed, timedSync } from "../../lib/sections";
+import { localeFor } from "../../lib/locale";
+import { tFor } from "../../lib/i18n";
+import { entryDay, punct } from "../task/format";
 
 export const dynamic = "force-dynamic";
+
+/** What each kind of evidence claim is called. */
+const CLAIM_KIND: Record<string, string> = { file: "文件", link: "链接", record: "记录", telemetry: "遥测" };
 
 /** How many of the last day's automatic approvals are listed before the rest fold. */
 const AUTO_SHOWN = 5;
@@ -31,6 +37,7 @@ export default async function ApprovalsPage() {
   const ctx = await requireSessionContext();
   gateUntilReady(ctx);
   ensureSeeded(ctx);
+  const locale = localeFor(ctx), t = tFor(locale);
   const plan = await timed("plan.current", () => loadCurrentPlan(ctx));
   const evidenceReviews = getStore().listWorkOrders(ctx.workspaceId).filter((item) => item.state === "evidence_review");
   // A proposal whose steps are still being planned is not a decision yet (`preparingProposalIds`): it is neither listed nor approvable here.
@@ -91,74 +98,79 @@ export default async function ApprovalsPage() {
     const slot = slotOf.get(item.id);
     const enters = entersOn.get(item.id);
     return <div key={item.id} className="proposal-item">
-      <label className="proposal-check"><input type="checkbox" name="proposal" value={item.id} defaultChecked /><span className="sr-only">选中「{item.intent}」</span></label>
+      <label className="proposal-check"><input type="checkbox" name="proposal" value={item.id} defaultChecked /><span className="sr-only">{t("选中「{{title}}」", { title: item.intent })}</span></label>
       <TaskCard detail={detail} slot={slot} />
-      {enters && <small className="proposal-enters">{enters.slice(5)} 起列入本周</small>}
+      {enters && <small className="proposal-enters">{t("{{day}} 起列入本周", { day: entryDay(locale, enters) })}</small>}
     </div>;
   };
   const autoItem = (item: (typeof autoApproved)[number]) => <li key={item.id}>
     <a href={`/workbench/${encodeURIComponent(item.id)}`}>{item.intent}</a>
-    {item.undoable ? <RevokeAutoApprovalButton workOrderId={item.id} /> : <small> · 已开始做</small>}
+    {item.undoable ? <RevokeAutoApprovalButton workOrderId={item.id} /> : <small> · {t("已开始做")}</small>}
   </li>;
   const assistantCount = pending.assistantKinds + pending.assistantQuestions + pending.assistantReviews;
   // Drafts, targets and interview items are decided where they live (主线, 访谈); here they are counted and linked. What is decided here
   // is laid out below: the week's questions in four quadrants, then the assistant's results, evidence and task proposals.
-  return <SubpageShell active="待确认" title="待确认"
-    description={`本周 ${pending.total} 项待决定${pending.later.total ? `，另有 ${pending.later.total} 项以后再定` : ""}。只有需本人选择、授权登录或涉及对外动作的才需确认，其余自动生效，24 小时内可撤销。`}>
-    <PendingSummary later={laterDays} today={planToday(ctx)}
-      here={[{ label: "助手", count: assistantCount, href: "#assistant" }, { label: "待验收", count: evidenceReviews.length, href: "#evidence" },
-        { label: "任务提案", count: pending.workOrders, href: "#proposals" }, { label: "最近自动生效", count: autoApproved.length, href: "#auto" }]}
-      elsewhere={[{ label: "里程碑草稿", count: pending.milestoneDrafts, href: "/milestones" }, { label: "分数线待审阅", count: pending.targets, href: "/milestones" },
-        { label: "调研建议", count: pending.research, href: "/review" }, { label: "文件中的日期", count: pending.dates, href: "/onboarding" },
-        { label: "访谈问题", count: pending.questions, href: "/onboarding" }]} />
+  return <SubpageShell active={"待确认"} title={t("待确认")}
+    description={pending.later.total
+      ? t("本周 {{count}} 项待决定，另有 {{later}} 项以后再定。只有需本人选择、授权登录或涉及对外动作的才需确认，其余自动生效，24 小时内可撤销。", { count: pending.total, later: pending.later.total })
+      : t("本周 {{count}} 项待决定。只有需本人选择、授权登录或涉及对外动作的才需确认，其余自动生效，24 小时内可撤销。", { count: pending.total })}>
+    <PendingSummary later={laterDays} today={planToday(ctx)} locale={locale}
+      here={[{ label: t("助手"), count: assistantCount, href: "#assistant" }, { label: t("待验收"), count: evidenceReviews.length, href: "#evidence" },
+        { label: t("任务提案"), count: pending.workOrders, href: "#proposals" }, { label: t("最近自动生效"), count: autoApproved.length, href: "#auto" }]}
+      elsewhere={[{ label: t("里程碑草稿"), count: pending.milestoneDrafts, href: "/milestones" }, { label: t("分数线待审阅"), count: pending.targets, href: "/milestones" },
+        { label: t("调研建议"), count: pending.research, href: "/review" }, { label: t("文件中的日期"), count: pending.dates, href: "/onboarding" },
+        { label: t("访谈问题"), count: pending.questions, href: "/onboarding" }]} />
     <AskBoard initial={weekAsks} previews={previews} />
     <AssistantReview ctx={ctx} deferred={deferredOrder} />
-    {evidenceReviews.length > 0 && <section className="approval-ledger" id="evidence" aria-label="待验收">
-      <h2>待验收 · {evidenceReviews.length}</h2>
+    {evidenceReviews.length > 0 && <section className="approval-ledger" id="evidence" aria-label={t("待验收")}>
+      <h2>{t("待验收 · {{count}}", { count: evidenceReviews.length })}</h2>
       {evidenceReviews.map((item) => {
         const own = claims.filter((claim) => claim.workOrderId === item.id && claim.reviewStatus === "submitted");
         const execution = executions.filter((entry) => entry.workOrderId === item.id).at(-1);
         return <article key={item.id}>
           <a href={`/workbench/${encodeURIComponent(item.id)}`}><strong>{item.intent}</strong></a>
           <p>
-            {own.length ? own.map((claim) => `${({ file: "文件", link: "链接", record: "记录", telemetry: "遥测" } as Record<string, string>)[claim.kind] ?? claim.kind} · ${claim.description}${claim.kind === "file" ? "" : ` · ${claim.uri}`}`).join("；") : "本次提交没有证据声明"}
-            {execution?.durationObserved
-              ? ` · 实际执行记录：被中断 ${execution.pauseMinutes} 分钟`
-              : " · 时长未观测"}
+            {own.length ? own.map((claim) => {
+              const kind = CLAIM_KIND[claim.kind];
+              return `${kind ? t(kind) : claim.kind} · ${claim.description}${claim.kind === "file" ? "" : ` · ${claim.uri}`}`;
+            }).join(punct(locale, "；")) : t("本次提交没有证据声明")}
+            {" · "}{execution?.durationObserved
+              ? t("实际执行记录：被中断 {{count}} 分钟", { count: execution.pauseMinutes })
+              : t("时长未观测")}
           </p>
           {item.milestoneId
             ? <>
                 {gateBlocks.has(item.id)
-                  ? <p role="alert"><strong>闸门没有判定这份证据</strong> · {gateBlocks.get(item.id)!.message}
+                  ? <p role="alert"><strong>{t("闸门没有判定这份证据")}</strong> · {gateBlocks.get(item.id)!.message}
                   </p>
-                  : <p><strong>等待里程碑闸门</strong> · 闸门判这份证据是否兑现了本任务的交付承诺；里程碑整体是否达成另行记录。</p>}
+                  : <p><strong>{t("等待里程碑闸门")}</strong> · {t("闸门判这份证据是否兑现了本任务的交付承诺；里程碑整体是否达成另行记录。")}</p>}
                 {revocations.has(item.id) && <p role="status">
-                  验收已撤销，原因：{revocations.get(item.id)}。同一份证据不会自动重判；补充后点「现在判定」。
+                  {t("验收已撤销，原因：{{reason}}。同一份证据不会自动重判；补充后点「现在判定」。", { reason: revocations.get(item.id) })}
                 </p>}
                 <JudgeMilestoneButton workOrderId={item.id} />
               </>
             : <AcceptEvidenceButton workOrderId={item.id} />}</article>;
       })}
     </section>}
-    {preparingCount > 0 && <p className="ap-preparing" role="status">{preparingCount} 项提案正在规划步骤，规划完成后列在这里。</p>}
+    {preparingCount > 0 && <p className="ap-preparing" role="status">{t("{{count}} 项提案正在规划步骤，规划完成后列在这里。", { count: preparingCount })}</p>}
     {weekProposals.length > 0 && <ProposalBatchForm count={weekProposals.length}>
       <section className="work-order-list" id="proposals">{weekProposals.map(renderProposal)}</section>
     </ProposalBatchForm>}
     {permissionModeEnabled(ctx) && <PermissionModePanel initialCandidates={permissionCandidates(ctx).filter((item) => item.kind !== "insight")} />}
-    {autoApproved.length > 0 && <section className="pending-block ap-auto" id="auto" aria-label="最近自动生效">
-      <h2>最近自动生效 · {autoApproved.length}</h2>
-      <p className="review-note">无需本人决定、不对外的任务已自动生效；24 小时内可撤销，撤销后回到提案。</p>
+    {autoApproved.length > 0 && <section className="pending-block ap-auto" id="auto" aria-label={t("最近自动生效")}>
+      <h2>{t("最近自动生效 · {{count}}", { count: autoApproved.length })}</h2>
+      <p className="review-note">{t("无需本人决定、不对外的任务已自动生效；24 小时内可撤销，撤销后回到提案。")}</p>
       {/* The newest few in view; the rest folded, so a busy day does not turn the section into a page-long list. */}
       <ul>{autoApproved.slice(0, AUTO_SHOWN).map(autoItem)}</ul>
-      {autoApproved.length > AUTO_SHOWN && <details className="fold advanced"><summary>其余 {autoApproved.length - AUTO_SHOWN} 项</summary>
+      {autoApproved.length > AUTO_SHOWN && <details className="fold advanced"><summary>{t("其余 {{count}} 项", { count: autoApproved.length - AUTO_SHOWN })}</summary>
         <ul>{autoApproved.slice(AUTO_SHOWN).map(autoItem)}</ul></details>}
     </section>}
     {pending.later.total > 0 && <details className="fold advanced" id="later">
       {/* The same total as the line on top; the assistant's results it counts are listed in their own section. */}
-      <summary>以后再定 · {pending.later.total} 项（工作一周后才需开始，到时自动列入本周）</summary>
-      <AskList initial={laterAsks} scope="later" heading="以后再定的待决事项" previews={previews} />
-      {pending.later.assistantReviews > 0 && <p><a href="#assistant">{pending.later.assistantReviews} 份助手成果</a>在「助手」一节，对应任务一周后才需开始。</p>}
-      {pending.later.milestoneDrafts > 0 && <p><a href="/milestones">{pending.later.milestoneDrafts} 个里程碑草稿</a>在主线页，截止较远。</p>}
+      <summary>{t("以后再定 · {{count}} 项（工作一周后才需开始，到时自动列入本周）", { count: pending.later.total })}</summary>
+      <AskList initial={laterAsks} scope="later" heading={t("以后再定的待决事项")} previews={previews} />
+      {pending.later.assistantReviews > 0 && <p><a href="#assistant">{t("{{count}} 份助手成果", { count: pending.later.assistantReviews })}</a>{t("在「助手」一节，对应任务一周后才需开始。")}</p>}
+      {pending.later.milestoneDrafts > 0 && <p><a href="/milestones">{t("{{count}} 个里程碑草稿", { count: pending.later.milestoneDrafts })}</a>{t("在主线页，截止较远。")}</p>}
       {laterProposals.length > 0 && <ProposalBatchForm count={laterProposals.length}>
         <section className="work-order-list">{laterProposals.map(renderProposal)}</section>
       </ProposalBatchForm>}

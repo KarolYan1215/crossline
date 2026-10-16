@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { TaskDetail } from "../../lib/task-detail";
 import { SegmentedControl } from "../ui/controls";
+import { useT } from "../locale-context";
 
 type Mode = NonNullable<TaskDetail["completion"]>["mode"];
 const OPTIONS: ReadonlyArray<{ value: Mode; label: string; title: string }> = [
@@ -17,18 +18,19 @@ const OPTIONS: ReadonlyArray<{ value: Mode; label: string; title: string }> = [
 export function CompletionChoice({ detail }: { detail: TaskDetail }) {
   const [mode, setMode] = useState<Mode | undefined>(detail.completion?.mode);
   const [status, setStatus] = useState("");
+  const t = useT();
   if (!detail.completion || !mode || ["accepted", "archived", "evidence_review"].includes(detail.state)) return null;
-  const why = mode === detail.completion.mode ? detail.completion.why : "本人选定";
+  const why = mode === detail.completion.mode ? detail.completion.why : t("本人选定");
   const choose = (next: Mode) => {
     const before = mode;
     setMode(next);
     void fetch(`/api/work-orders/${encodeURIComponent(detail.id)}/completion-mode`, { method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ mode: next }) }).then((response) => response.ok).catch(() => false)
-      .then((ok) => { if (!ok) { setMode(before); setStatus("未保存，请重试"); } else setStatus(""); });
+      .then((ok) => { if (!ok) { setMode(before); setStatus(t("未保存，请重试")); } else setStatus(""); });
   };
   return <div className="task-completion-choice">
-    <small>完成方式</small>
-    <SegmentedControl value={mode} options={OPTIONS} onChange={choose} label="完成方式" />
+    <small>{t("完成方式")}</small>
+    <SegmentedControl value={mode} options={OPTIONS.map((option) => ({ ...option, label: t(option.label), title: t(option.title) }))} onChange={choose} label={t("完成方式")} />
     {why && <small className={detail.completion.by === "model" && mode === detail.completion.mode ? "gen" : undefined}>{why}</small>}
     {status && <small role="status">{status}</small>}
   </div>;

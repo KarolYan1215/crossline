@@ -3,6 +3,7 @@ import { expect, test } from "vitest";
 import type { Ask } from "@crossline/core";
 import { AskCard } from "./ask-card";
 import { AskBoard } from "./ask-board";
+import { LocaleProvider } from "../locale-context";
 
 const base: Ask = { id: "iq:goals", kind: "interview_question", entityId: "q", title: "研究主线的长期目标是哪些？", why: "访谈在「主线」阶段的问题。",
   urgency: "later", raisedAt: "", fingerprint: "f", line: "research", options: [
@@ -85,4 +86,18 @@ test("待确认 lays the week's asks out in four quadrants, each a drawer with i
   expect(html).not.toContain("以后的");
   expect(html.match(/data-empty="true"/g)).toHaveLength(2);
   expect(renderToStaticMarkup(<AskBoard initial={[]} previews={{}} />)).toContain("本周暂无待决事项。");
+});
+
+test("in English the card's own words are English; the ask's own text is shown as written", () => {
+  const html = renderToStaticMarkup(<LocaleProvider locale="en"><AskCard ask={{ ...base, title: "Which long-term goals for research?", entersOn: "2026-10-20", dueDay: "2026-11-02" }} onDone={() => undefined} /></LocaleProvider>);
+  expect(html).toContain("Which long-term goals for research?");
+  expect(html).toContain("<dt>Why asked</dt>");
+  expect(html).toContain("<dt>If answered</dt><dd>Once this round&#x27;s questions are answered");
+  expect(html).toContain("Bears on the Nov 2 deadline");
+  expect(html).toContain("Comes into this week on Oct 20");
+  expect(html).toContain("Ask tomorrow");
+  expect(html).toContain(" · Recommended");
+  expect(html).not.toMatch(/为何问|明天再问|推荐/);
+  const board = renderToStaticMarkup(<LocaleProvider locale="en"><AskBoard initial={[]} previews={{}} /></LocaleProvider>);
+  expect(board).toContain("No decisions this week.");
 });

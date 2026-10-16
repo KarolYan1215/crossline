@@ -1,5 +1,8 @@
+"use client";
+
 import type { TaskDetail, MilestoneDetail } from "../lib/task-detail";
 import { stateLabel } from "../lib/labels";
+import { useT } from "./locale-context";
 
 const milestoneStatusLabel: Record<string, string> = { draft: "草稿", approved: "已批准", archived: "已归档" };
 const criterionKindLabel: Record<string, string> = { count: "计数", artifact: "产出物", threshold: "阈值", judgement: "判断" };
@@ -7,8 +10,9 @@ const criterionKindLabel: Record<string, string> = { count: "计数", artifact: 
 /** Real background facts once the compaction pipeline (onboarding + per-capture extraction) has found
  * some for this identity; a placeholder otherwise, so the layout does not shift between the two states. */
 function BackgroundFactsSection({ background }: { background: TaskDetail["background"] }) {
+  const t = useT();
   if (!background || !background.length) {
-    return <p className="task-detail-background-empty">暂无背景资料；在访谈或收集中补充后显示</p>;
+    return <p className="task-detail-background-empty">{t("暂无背景资料；在访谈或收集中补充后显示")}</p>;
   }
   return <ul className="task-detail-background-facts">{background.map((fact) => <li key={fact.key}>
     <strong>{fact.value}</strong>
@@ -17,12 +21,13 @@ function BackgroundFactsSection({ background }: { background: TaskDetail["backgr
 }
 
 function FlywheelList({ items }: { items: TaskDetail["relatedFlywheel"] }) {
+  const t = useT();
   if (!items.length) return null;
   return <div className="task-detail-flywheel">
-    <h3>相关飞轮关系</h3>
+    <h3>{t("相关飞轮关系")}</h3>
     {items.map((item) => <p key={item.id}>
-      <span>{item.kindLabel}</span> {item.fromTitle} → {item.toTitle}
-      {item.pending ? " · 待周复盘确认" : ""}
+      <span>{t(item.kindLabel)}</span> {item.fromTitle} → {item.toTitle}
+      {item.pending ? ` · ${t("待周复盘确认")}` : ""}
       {item.explanation && <small> · {item.explanation}</small>}
     </p>)}
   </div>;
@@ -30,37 +35,39 @@ function FlywheelList({ items }: { items: TaskDetail["relatedFlywheel"] }) {
 
 /** The display for one milestone: the preview drawer and the standalone `/milestones/[id]` page render the same view. */
 export function MilestoneDetailView({ detail }: { detail: MilestoneDetail }) {
+  const t = useT();
   return <div className="task-detail-view">
     <header className="task-detail-header">
       <span className="mono-label">{detail.identityLabel.toUpperCase()}</span>
-      <b>{milestoneStatusLabel[detail.status] ?? detail.status}</b>
+      <b>{milestoneStatusLabel[detail.status] ? t(milestoneStatusLabel[detail.status]!) : detail.status}</b>
     </header>
     <h2>{detail.title}</h2>
-    {detail.rationale && <p className="milestone-rationale">提议理由：{detail.rationale}</p>}
+    {detail.rationale && <p className="milestone-rationale">{t("提议理由：{{rationale}}", { rationale: detail.rationale })}</p>}
 
     <section className="task-detail-background">
-      <h3>背景资料</h3>
+      <h3>{t("背景资料")}</h3>
       <BackgroundFactsSection background={detail.background} />
     </section>
 
     {detail.successCriteria.length > 0 && <section>
-      <h3>达成标准</h3>
+      <h3>{t("达成标准")}</h3>
       <ul className="criterion-view">{detail.successCriteria.map((criterion) => <li key={criterion.id}>
         <span className="criterion-tag" data-evidence={criterion.evidenceOf ?? "unlabelled"}>
-          {criterion.evidenceOf === "outcome" ? "结果" : criterion.evidenceOf === "output" ? "产出物" : "未标注"}
+          {t(criterion.evidenceOf === "outcome" ? "结果" : criterion.evidenceOf === "output" ? "产出物" : "未标注")}
         </span>
-        <span>[{criterionKindLabel[criterion.measure.kind]}] {criterion.statement}</span>
-        {criterion.measure.kind === "judgement" && <small>判不过的条件：{criterion.measure.failsWhen}</small>}
+        <span>[{t(criterionKindLabel[criterion.measure.kind] ?? criterion.measure.kind)}] {criterion.statement}</span>
+        {criterion.measure.kind === "judgement" && <small>{t("判不过的条件：{{condition}}", { condition: criterion.measure.failsWhen })}</small>}
         {criterion.measure.kind === "threshold" && criterion.measure.bareLine !== undefined
-          && <small>从结果倒推，刚好够的最低线是 {criterion.measure.bareLine}{criterion.measure.unit}；定在 {criterion.measure.value}{criterion.measure.unit}，中间是留的余量</small>}
+          && <small>{t("从结果倒推，刚好够的最低线是 {{bare}}{{unit}}；定在 {{value}}{{unit}}，中间是留的余量",
+            { bare: criterion.measure.bareLine, value: criterion.measure.value, unit: criterion.measure.unit })}</small>}
       </li>)}</ul>
     </section>}
 
     {detail.relatedWorkOrders.length > 0 && <section>
-      <h3>相关任务</h3>
+      <h3>{t("相关任务")}</h3>
       <ul className="task-detail-related-orders">{detail.relatedWorkOrders.map((order) => <li key={order.id}>
         <a href={`/workbench/${encodeURIComponent(order.id)}`}>{order.intent}</a>
-        <small>{stateLabel[order.state] ?? order.state}</small>
+        <small>{stateLabel[order.state] ? t(stateLabel[order.state]!) : order.state}</small>
       </li>)}</ul>
     </section>}
 

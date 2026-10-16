@@ -2,8 +2,10 @@
 
 import { useState, type KeyboardEvent, type MouseEvent } from "react";
 import type { TaskDetail } from "../../lib/task-detail";
-import { dayLabel, formatMinutes } from "../ui/controls";
 import { useReturnState } from "../ui/return-state";
+import { useLocale, useT } from "../locale-context";
+import type { Locale } from "../../lib/i18n";
+import { dayText, minutesText } from "./format";
 import { currentStep, dueDistance, waitReason } from "./card-model";
 import { CompletionChoice } from "./completion-choice";
 import { Prepared } from "./prepared";
@@ -12,8 +14,7 @@ import { TaskActions } from "./task-actions";
 import { TaskDialog } from "./task-dialog";
 
 export type TaskSlot = { day: string; start: string; end: string };
-const WEEKDAY = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
-const slotLabel = (slot: TaskSlot) => { const date = new Date(`${slot.day}T12:00:00`); return `${date.getMonth() + 1}/${date.getDate()} ${WEEKDAY[date.getDay()]} ${slot.start}–${slot.end}`; };
+const slotLabel = (locale: Locale, slot: TaskSlot) => `${dayText(locale, slot.day)} ${slot.start}–${slot.end}`;
 
 /**
  * The one task card, used on Today, Tasks, Approvals and the weekly review (redesigned 2026-10-15). It answers, in reading order: which
@@ -26,24 +27,25 @@ export function TaskCard({ detail, slot, reason, today, variant = "compact" }: {
   detail: TaskDetail; slot?: TaskSlot | undefined; reason?: string; today?: string | undefined; variant?: "hero" | "compact";
 }) {
   const [open, setOpen] = useState(false);
+  const t = useT(), locale = useLocale();
   // Coming back from the task's full page reopens the dialog it was opened from.
   useReturnState(`task-dialog:${detail.id}:${variant}`, open, (value) => setOpen(value === true));
   const proposal = detail.state === "awaiting_plan_approval";
   const finished = detail.state === "accepted" || detail.state === "archived";
   const step = currentStep(detail);
-  const wait = today ? waitReason(detail, today) : proposal ? { kind: "approval" as const, label: "等本人批准" } : undefined;
+  const wait = today ? waitReason(detail, today, locale) : proposal ? { kind: "approval" as const, label: t("等本人批准") } : undefined;
   const due = detail.window.dueBy;
-  const distance = due && today && !finished ? dueDistance(due, today) : undefined;
+  const distance = due && today && !finished ? dueDistance(due, today, locale) : undefined;
   const openFrom = (event: MouseEvent | KeyboardEvent) => {
     if ((event.target as HTMLElement).closest("button, a, input, select, textarea, [role=dialog], [popover]")) return;
     setOpen(true);
   };
   return <article className="task-card" data-variant={variant} data-line={detail.identityId} data-state={detail.state}
-    tabIndex={0} aria-label={`${detail.title}，打开详情`} onClick={openFrom} onKeyDown={(event) => { if (event.key === "Enter") openFrom(event); }}>
+    tabIndex={0} aria-label={t("{{title}}，打开详情", { title: detail.title })} onClick={openFrom} onKeyDown={(event) => { if (event.key === "Enter") openFrom(event); }}>
     <header className="task-card-head">
       <span className="task-card-line"><i className="task-card-dot" aria-hidden="true" />{detail.identityLabel}{detail.projectName && <span className="task-card-project">{detail.projectName}</span>}</span>
       {due && <span className="task-card-due" data-overdue={distance?.overdue || undefined}>
-        <small>截止</small> <b className="mono">{dayLabel(due)}</b>{distance && <small className="task-card-distance">{distance.text}</small>}
+        <small>{t("截止")}</small> <b className="mono">{dayText(locale, due)}</b>{distance && <small className="task-card-distance">{distance.text}</small>}
       </span>}
     </header>
     <h3 className="task-card-title">{detail.title}</h3>
@@ -54,7 +56,7 @@ export function TaskCard({ detail, slot, reason, today, variant = "compact" }: {
     <CardStep detail={detail} step={step} proposal={proposal} finished={finished} waiting={wait?.kind === "input"} />
     {wait && <p className="task-card-wait" data-kind={wait.kind}>{wait.label}</p>}
     {proposal && <CompletionChoice detail={detail} />}
-    {slot && <p className="task-card-slot"><small>下一次</small> <a href={`/plan?day=${slot.day}`} className="mono">{slotLabel(slot)}</a></p>}
+    {slot && <p className="task-card-slot"><small>{t("下一次")}</small> <a href={`/plan?day=${slot.day}`} className="mono">{slotLabel(locale, slot)}</a></p>}
     <Prepared detail={detail} />
     <TaskActions workOrderId={detail.id} state={detail.state} paused={detail.paused} agentReady={detail.agentSteps.length > 0} agentStepId={detail.agentSteps[0]?.id} onOpen={() => setOpen(true)}
       offline={{ ownerId: detail.viewerId, workspaceId: detail.workspaceId, intent: detail.intent }} />
@@ -66,18 +68,19 @@ export function TaskCard({ detail, slot, reason, today, variant = "compact" }: {
 function CardStep({ detail, step, proposal, finished, waiting }: {
   detail: TaskDetail; step: ReturnType<typeof currentStep>; proposal: boolean; finished: boolean; waiting: boolean;
 }) {
+  const t = useT(), locale = useLocale();
   if (finished) return null;
   // A proposal is shown with what the person will do first; its tutorial is written once approved work is a week from its first block
   // (`TUTORIAL_LEAD_DAYS`, 2026-10-15), so the card says when rather than showing nothing. One without steps yet is still being prepared.
-  if (!detail.stepPlan) return <p className="task-card-step-note">{proposal ? "准备中：步骤规划生成后再请本人确认。"
-    : <>步骤规划中 · 全程约 <span className="mono">{formatMinutes(detail.estimate.p50Minutes)}</span></>}</p>;
-  if (!step) return <p className="task-card-step-note">步骤已完成</p>;
+  if (!detail.stepPlan) return <p className="task-card-step-note">{proposal ? t("准备中：步骤规划生成后再请本人确认。")
+    : <>{t("步骤规划中 · 全程约")} <span className="mono">{minutesText(locale, detail.estimate.p50Minutes)}</span></>}</p>;
+  if (!step) return <p className="task-card-step-note">{t("步骤已完成")}</p>;
   // A waiting step is said once, by the wait line under it.
   if (waiting) return null;
   return <div className="task-card-step">
-    <p className="task-card-step-title"><small>{proposal ? "第一步" : "当前"}</small><span>{step.title}</span>
-      {step.schedulable && <span className="mono task-card-minutes">约 {formatMinutes(step.estimate.p50Minutes)}</span>}</p>
-    {step.firstAction && <p className="task-card-first"><small>先做</small><span className="gen">{step.firstAction}</span></p>}
-    {proposal && <p className="task-card-step-note">开工前一周会备好教程。</p>}
+    <p className="task-card-step-title"><small>{t(proposal ? "第一步" : "当前")}</small><span>{step.title}</span>
+      {step.schedulable && <span className="mono task-card-minutes">{t("约 {{duration}}", { duration: minutesText(locale, step.estimate.p50Minutes) })}</span>}</p>
+    {step.firstAction && <p className="task-card-first"><small>{t("先做")}</small><span className="gen">{step.firstAction}</span></p>}
+    {proposal && <p className="task-card-step-note">{t("开工前一周会备好教程。")}</p>}
   </div>;
 }

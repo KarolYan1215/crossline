@@ -3,6 +3,7 @@
 import { useState, type ReactNode } from "react";
 import { MenuButton } from "../ui/controls";
 import { createCommand, enqueue, nextSequence, type OfflineCommandType } from "../offline-queue";
+import { useT } from "../locale-context";
 
 const OFFLINE_TYPES: Record<string, OfflineCommandType> = { start: "work_order.start", pause: "work_order.pause", resume: "work_order.resume" };
 
@@ -44,6 +45,7 @@ export function TaskActions({ workOrderId, state, paused, agentReady, agentStepI
   const [pausing, setPausing] = useState(false);
   const [archiving, setArchiving] = useState(false);
   const [reason, setReason] = useState("");
+  const t = useT();
   // Start, pause and resume survive a dead connection: queued on the device and replayed when it is back, as the offline workbench
   // promises. Everything else here (approve, archive, hand over) needs the server.
   const execution = async (body: Record<string, unknown>) => {
@@ -53,9 +55,9 @@ export function TaskActions({ workOrderId, state, paused, agentReady, agentStepI
       const command = createCommand(offline.ownerId, offline.workspaceId, await nextSequence(offline.workspaceId), type,
         { workOrderId, title: offline.intent, ...(body.reason ? { reason: body.reason } : {}) });
       await enqueue(offline.workspaceId, command);
-      return { ok: false, message: "已离线保存，联网后自动同步" };
+      return { ok: false, message: t("已离线保存，联网后自动同步") };
     };
-    if (!navigator.onLine) return (await queue()) ?? { ok: false, message: "网络不可用" };
+    if (!navigator.onLine) return (await queue()) ?? { ok: false, message: t("网络不可用") };
     const result = await post(`/api/work-orders/${encodeURIComponent(workOrderId)}/execution`, body);
     if (!result.ok && !result.code && !result.message) return (await queue()) ?? result;
     return result;
@@ -65,7 +67,8 @@ export function TaskActions({ workOrderId, state, paused, agentReady, agentStepI
     const result = await action();
     setBusy(false);
     if (result.ok) { if (then) then(); else location.reload(); return; }
-    setStatus(FAILURE[result.code ?? ""] ?? result.message ?? "操作未生效，请刷新。");
+    const known = FAILURE[result.code ?? ""];
+    setStatus(known ? t(known) : result.message ?? t("操作未生效，请刷新。"));
   };
   const start = () => {
     // The countdown notifies when the usual duration is up; the browser asks once, on the first start.
@@ -78,30 +81,31 @@ export function TaskActions({ workOrderId, state, paused, agentReady, agentStepI
   const delegate = () => void run(async () => {
     const result = await post("/api/agent/dispatch", { workOrderId, ...(agentStepId ? { stepId: agentStepId } : {}) });
     if (result.state === "started") return { ok: true };
-    if (result.state === "needs_category_approval") return { ok: false, message: "这类工作尚未允许 Agent 执行，已加入待决事项。" };
-    return { ok: false, message: result.message ?? "未能交给 Agent。" };
-  }, () => setStatus("已交给 Agent，产出完成后进入待审阅。"));
+    if (result.state === "needs_category_approval") return { ok: false, message: t("这类工作尚未允许 Agent 执行，已加入待决事项。") };
+    return { ok: false, message: result.message ?? t("未能交给 Agent。") };
+  }, () => setStatus(t("已交给 Agent，产出完成后进入待审阅。")));
 
   return <div className="task-actions">
     {state === "awaiting_plan_approval" && <button type="button" className="primary-button" disabled={busy}
-      onClick={() => void run(() => post(`/api/work-orders/${encodeURIComponent(workOrderId)}/approve`, {}))}>批准</button>}
+      onClick={() => void run(() => post(`/api/work-orders/${encodeURIComponent(workOrderId)}/approve`, {}))}>{t("批准")}</button>}
     {state === "blocked" && <button type="button" className="primary-button" disabled={busy}
-      onClick={() => void run(() => post(`/api/work-orders/${encodeURIComponent(workOrderId)}/approve`, {}))}>恢复</button>}
-    {(state === "approved" || state === "ready_for_human") && <button type="button" className="primary-button" disabled={busy} onClick={start}>开始计时</button>}
-    {state === "active" && !paused && !pausing && <button type="button" disabled={busy} onClick={() => setPausing(true)}>暂停</button>}
-    {state === "active" && paused && <button type="button" className="primary-button" disabled={busy} onClick={() => void run(() => execution({ action: "resume" }))}>继续计时</button>}
-    {pausing && <span className="task-actions-choices" role="group" aria-label="暂停原因">
-      {PAUSE_REASONS.map((item) => <button key={item} type="button" disabled={busy} onClick={() => void run(() => execution({ action: "pause", reason: item }))}>{item}</button>)}
-      <button type="button" onClick={() => setPausing(false)} aria-label="取消暂停">×</button>
+      onClick={() => void run(() => post(`/api/work-orders/${encodeURIComponent(workOrderId)}/approve`, {}))}>{t("恢复")}</button>}
+    {(state === "approved" || state === "ready_for_human") && <button type="button" className="primary-button" disabled={busy} onClick={start}>{t("开始计时")}</button>}
+    {state === "active" && !paused && !pausing && <button type="button" disabled={busy} onClick={() => setPausing(true)}>{t("暂停")}</button>}
+    {state === "active" && paused && <button type="button" className="primary-button" disabled={busy} onClick={() => void run(() => execution({ action: "resume" }))}>{t("继续计时")}</button>}
+    {pausing && <span className="task-actions-choices" role="group" aria-label={t("暂停原因")}>
+      {/* The reason is kept in the person's language, like anything they say about their own work. */}
+      {PAUSE_REASONS.map((item) => <button key={item} type="button" disabled={busy} onClick={() => void run(() => execution({ action: "pause", reason: t(item) }))}>{t(item)}</button>)}
+      <button type="button" onClick={() => setPausing(false)} aria-label={t("取消暂停")}>×</button>
     </span>}
-    {agentReady && !["accepted", "archived", "evidence_review"].includes(state) && <button type="button" disabled={busy} onClick={delegate}>交给 Agent</button>}
+    {agentReady && !["accepted", "archived", "evidence_review"].includes(state) && <button type="button" disabled={busy} onClick={delegate}>{t("交给 Agent")}</button>}
     {children}
-    {onOpen && <button type="button" onClick={onOpen}>打开</button>}
-    {!["accepted", "archived"].includes(state) && <MenuButton label="更多操作" icon="⋯" items={[{ label: "归档", hint: "可在已归档中恢复", onSelect: () => setArchiving(true) }]} />}
+    {onOpen && <button type="button" onClick={onOpen}>{t("打开")}</button>}
+    {!["accepted", "archived"].includes(state) && <MenuButton label={t("更多操作")} icon="⋯" items={[{ label: t("归档"), hint: t("可在已归档中恢复"), onSelect: () => setArchiving(true) }]} />}
     {archiving && <span className="task-actions-choices">
-      <input value={reason} maxLength={200} placeholder="归档原因（选填）" aria-label="归档原因（选填）" onChange={(event) => setReason(event.target.value)} />
-      <button type="button" disabled={busy} onClick={() => void run(() => execution({ action: "archive", reason }))}>归档</button>
-      <button type="button" onClick={() => setArchiving(false)} aria-label="取消归档">×</button>
+      <input value={reason} maxLength={200} placeholder={t("归档原因（选填）")} aria-label={t("归档原因（选填）")} onChange={(event) => setReason(event.target.value)} />
+      <button type="button" disabled={busy} onClick={() => void run(() => execution({ action: "archive", reason }))}>{t("归档")}</button>
+      <button type="button" onClick={() => setArchiving(false)} aria-label={t("取消归档")}>×</button>
     </span>}
     {status && <small role="status" className="task-actions-status">{status}</small>}
   </div>;

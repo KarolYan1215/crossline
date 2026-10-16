@@ -32,3 +32,14 @@ test("previews: the opening lines of a Markdown file, the first rows and columns
     .toEqual({ name: "复习提纲", summary: "先建台账", steps: [{ title: "整理材料", by: "assistant" }, { title: "确认范围", by: "person" }] });
   expect(workflowSteps(null).steps).toEqual([]);
 });
+
+test("files the assistant named in English are grouped the same way", () => {
+  const grouped = groupOutputs([
+    { path: "notes.md", purpose: "Summary of lectures 1–3" },
+    { path: "index.md", purpose: "Index of the course materials" },
+    { path: "file-register.csv", purpose: "Register of every input file" },
+    { path: "gaps.csv", purpose: "What is still missing" }
+  ]);
+  expect(grouped.groups.map((entry) => [entry.group, entry.items.map((item) => item.name)])).toEqual([
+    ["成品", ["notes"]], ["材料目录", ["index"]], ["文件台账", ["file-register"]], ["缺口清单", ["gaps"]]]);
+});

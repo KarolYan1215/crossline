@@ -5,6 +5,7 @@
  * file of the same name is that file's preview, not a second deliverable. Pure, so the grouping is tested without a task directory.
  */
 
+/** The groups' Chinese names are their keys (and their labels, translated where they are shown: `t(entry.group)`). */
 export type OutputGroup = "成品" | "材料目录" | "文件台账" | "缺口清单";
 export const OUTPUT_GROUPS: OutputGroup[] = ["成品", "材料目录", "文件台账", "缺口清单"];
 export type OutputItem = {
@@ -30,11 +31,12 @@ const ext = (file: string) => /\.[^./]+$/.exec(file)?.[0].toLowerCase() ?? "";
 const stem = (file: string) => file.replace(/\.[^./]+$/, "");
 const base = (file: string) => file.split("/").pop() ?? file;
 
+/** The assistant names and describes its files in the language it works in, so each group is read in both. */
 function groupOf(path: string, purpose: string): OutputGroup {
   const text = `${path} ${purpose}`;
   if (/缺口|缺项|gaps?\b|missing/i.test(text)) return "缺口清单";
-  if (/台账|inventory|ledger|登记表/i.test(text)) return "文件台账";
-  if (/目录|catalog|索引/i.test(text)) return "材料目录";
+  if (/台账|inventory|ledger|登记表|register\b/i.test(text)) return "文件台账";
+  if (/目录|catalog|索引|\bindex\b|table of contents/i.test(text)) return "材料目录";
   return "成品";
 }
 
