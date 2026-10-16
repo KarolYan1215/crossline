@@ -1,0 +1,22 @@
+{
+  "name": "@crossline/i18n",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./catalog/web": "./src/catalog-web.ts",
+    "./catalog/worker": "./src/catalog-worker.ts",
+    "./catalog/assess": "./src/catalog-assess.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "i18next": "26.4.2"
+  },
+  "devDependencies": {
+    "@babel/parser": "7.29.9",
+    "@types/node": "26.5.1"
+  }
+}

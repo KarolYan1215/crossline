@@ -14,21 +14,28 @@ import "./portrait/portrait.css";
 import "./mobile.css";
 import { isLocalInstall } from "../lib/install-mode";
 import { PageBeacon } from "./page-beacon";
+import { htmlLang, tFor } from "../lib/i18n";
+import { getLocale } from "../lib/locale";
+import { LocaleProvider } from "./locale-context";
 
-export const metadata: Metadata = {
-  title: "Crossline",
-  description: "跨人生主线 AI 工作流系统",
-  manifest: "/manifest.webmanifest",
-  icons: { icon: "/pwa-icon/192", apple: "/pwa-icon/180" },
-  // Opened from the home screen it runs full-screen like an app, under its own name.
-  appleWebApp: { capable: true, title: "Crossline", statusBarStyle: "default" }
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const t = tFor(await getLocale());
+  return {
+    title: "Crossline",
+    description: t("跨人生主线 AI 工作流系统"),
+    manifest: "/manifest.webmanifest",
+    icons: { icon: "/pwa-icon/192", apple: "/pwa-icon/180" },
+    // Opened from the home screen it runs full-screen like an app, under its own name.
+    appleWebApp: { capable: true, title: "Crossline", statusBarStyle: "default" }
+  };
+}
 
 /** `viewport-fit=cover` so the bottom tab bar can reach the screen edge and pad itself past the iPhone's home indicator. */
 export const viewport: Viewport = { width: "device-width", initialScale: 1, viewportFit: "cover", themeColor: "#0A0A0A" };
 
-export default function RootLayout({ children }: { children: ReactNode }) {
-  return <html lang="zh-CN">
-    <body>{children}{isLocalInstall() && <PageBeacon />}</body>
+export default async function RootLayout({ children }: { children: ReactNode }) {
+  const locale = await getLocale();
+  return <html lang={htmlLang(locale)}>
+    <body><LocaleProvider locale={locale}>{children}{isLocalInstall() && <PageBeacon />}</LocaleProvider></body>
   </html>;
 }

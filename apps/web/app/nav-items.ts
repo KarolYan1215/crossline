@@ -5,6 +5,7 @@
  * towards (主线), when it happens (计划), and the work itself (任务). What is waiting for a decision (待确认) and the
  * settings sit to the side, because they are visited when something asks, not as a place to work.
  */
+// `label` is also the id a page passes as `active`: it stays the Chinese key and is translated where it is shown (docs/i18n.md).
 export const NAV_ITEMS = [
   { label: "今日", href: "/" },
   { label: "主线", href: "/milestones" },

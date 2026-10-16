@@ -46,7 +46,7 @@ export default {
   poweredByHeader: false,
   devIndicators: false,
   images: { unoptimized: true },
-  transpilePackages: ["@crossline/core"],
+  transpilePackages: ["@crossline/core", "@crossline/i18n"],
   // Native modules, and satori (it loads its own .wasm from beside its file), stay plain `require`s at run time instead of being bundled.
   serverExternalPackages: ["better-sqlite3", "@resvg/resvg-js", "satori"],
   async headers() {

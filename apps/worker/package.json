@@ -15,6 +15,7 @@
     "@crossline/connectors": "workspace:*",
     "@crossline/core": "workspace:*",
     "@crossline/db": "workspace:*",
+    "@crossline/i18n": "workspace:*",
     "@crossline/identity-packs": "workspace:*",
     "@crossline/planner": "workspace:*",
     "@huggingface/transformers": "^4.3.0",

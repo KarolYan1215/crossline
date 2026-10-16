@@ -11,8 +11,8 @@ export { chatgptAccountOf, isDirectLoopbackRequest, type LocalCodexAccount, type
 import { getMigrations } from "better-auth/db/migration";
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import nodemailer from "nodemailer";
-import type { AccessContext } from "@crossline/core";
-import { CrosslineStore } from "@crossline/db";
+import { DEFAULT_LOCALE, localeFromCookieHeader, type AccessContext } from "@crossline/core";
+import { chosenLocale, CrosslineStore } from "@crossline/db";
 
 export type SmtpConfig = { host: string; port: number; user: string; password: string; from: string };
 export type GoogleConfig = { clientId: string; clientSecret: string };
@@ -283,7 +283,9 @@ export async function requireAccessContext(
       role,
       identity: { provider, issuer: "crossline", subject: session.user.id },
       authMethod: "session",
-      requestId: randomUUID()
+      requestId: randomUUID(),
+      // The browser's choice renders the page; a device that has none yet takes the account's (docs/i18n.md).
+      locale: localeFromCookieHeader(request.headers.get("cookie")) ?? chosenLocale(store, workspace.id) ?? DEFAULT_LOCALE
     }
   };
 }

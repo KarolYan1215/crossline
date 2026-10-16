@@ -9,6 +9,7 @@
 | [../README.md](../README.md) | 这是什么、整体闭环、各页面做什么、AI 能力和它们的确定性校验、安全边界、发布闸门 |
 | [getting-started.md](getting-started.md) | 从 `git clone` 到被采访、批准里程碑、验收第一件事的完整走查（含配置与启动） |
 | [user-guide.md](user-guide.md) | 账号与登录、Tailscale 私网、离线与冲突、Codex 令牌、日历、备份恢复，采访 / 转写 / 屏幕活动 / 用量的机制与隐私承诺，以及主线、计划、设置与个人偏好的用法 |
+| [i18n.md](i18n.md) | 中英双语界面：决定、写法、英文风格、术语表与守卫测试 |
 | [copy-style.md](copy-style.md) | 界面与 prompt 的固定术语、文案规范和每阶段的审查标准（A 摩擦与可用 · B 阅读负担 · C 语言 · D 视觉） |
 | [one-input.md](one-input.md) | 首页一个输入框：对话、命令、理解卡、动作注册表、主动气泡与精力模型（设计稿，待审） |
 | [flywheel-and-views.md](flywheel-and-views.md) | 跨主线飞轮（产物优先的联合规划）、今日页图谱与左侧面板、计划页统计、原子化身份定语（已审定） |

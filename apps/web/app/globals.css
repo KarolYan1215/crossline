@@ -566,6 +566,8 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .system-state a{padding:4px 10px;border:1px solid transparent;font-weight:600;color:var(--graphite)}
 .system-state a:hover{color:var(--ink);border-color:var(--mist)}
 .sign-out-button{font-size:13px;color:var(--graphite);padding:4px 8px}
+/* 「中文 / EN」: the one switch for the whole site (docs/i18n.md), quiet beside the sign-out link. */
+.locale-switch{font-size:13px;color:var(--graphite);padding:4px 8px;min-width:44px}
 .pending-badge{display:inline-block;min-width:18px;margin-left:6px;padding:0 5px;background:var(--ink);color:var(--paper);font-size:12px;line-height:18px;text-align:center;border-radius:9px}
 .system-state a.active .pending-badge{background:var(--paper);color:var(--ink)}
 .subpage-header{padding:10px 0 6px;border-bottom:1px solid var(--ink)}

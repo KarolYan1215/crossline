@@ -28,7 +28,8 @@ export default withSerwist({
     "@crossline/db",
     "@crossline/identity-packs",
     "@crossline/planner",
-    "@crossline/workflows"
+    "@crossline/workflows",
+    "@crossline/i18n"
   ],
   // Loopback-only (`local`) has never needed these — nothing outside this device can address the app at
   // all, so a browser enforcing them buys nothing. `private` is the first mode where a real network path

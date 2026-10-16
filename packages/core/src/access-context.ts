@@ -3,6 +3,8 @@
  * `packages/auth` so a package that only needs the *shape* (a route handler, a Skill wire contract)
  * never has to depend on the auth library that produces it — the same reason Skill contracts live here.
  */
+import type { Locale } from "./i18n";
+
 export type AccessRole = "viewer" | "member" | "owner";
 
 export type AccessContext = {
@@ -19,6 +21,11 @@ export type AccessContext = {
   /** `device-token`: a phone shortcut's bearer token, scoped to one kind of write (docs/energy-and-ecosystem.md §5). */
   authMethod: "session" | "tailscale-binding" | "system-job" | "device-token";
   requestId: string;
+  /**
+   * The language this request is served in (docs/i18n.md): the browser's cookie, else the workspace's setting, else Chinese. Absent on
+   * contexts made by jobs; readers fall back to the workspace's setting (`localeFor` in the web, `readLocale` in the worker).
+   */
+  locale?: Locale;
 };
 
 const ROLE_RANK: Record<AccessRole, number> = { viewer: 0, member: 1, owner: 2 };
