@@ -13,8 +13,11 @@ if [ "${CROSSLINE_LOCAL_IMAGES:-}" = 1 ]; then
   assess_image=crossline-assess; app_image=crossline-app
 else
   assess_image="$registry/crossline-assess:$tag"; app_image="$registry/crossline-app:$tag"
-  if [ "$want" = all ] || [ "$want" = assess ]; then docker pull "$assess_image"; fi
-  if [ "$want" != assess ]; then docker pull "$app_image"; fi
+  # The packages are private and the host keeps no registry login (a deploy logs in for its own pull and out again), so a restart by
+  # hand cannot pull: it then runs the copy of the image already on this host instead of stopping (2026-10-16).
+  pull() { docker pull "$1" || { docker image inspect "$1" >/dev/null 2>&1 && echo "pull refused; using the copy of $1 already on this host"; }; }
+  if [ "$want" = all ] || [ "$want" = assess ]; then pull "$assess_image"; fi
+  if [ "$want" != assess ]; then pull "$app_image"; fi
 fi
 
 start() {
