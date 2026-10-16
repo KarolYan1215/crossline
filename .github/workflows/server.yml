@@ -40,7 +40,8 @@ jobs:
             sudo docker images --format "{{.Repository}}:{{.Tag}} {{.Size}}" | head
             sudo systemctl is-active caddy
             tail -5 /tmp/build-app.log 2>/dev/null || true
-            for p in 3340 3210; do printf "%s " $p; curl -s -m 5 -o /dev/null -w "%{http_code}\n" http://127.0.0.1:$p/ || echo down; done'
+            for p in 3340 3210; do printf "%s " $p; curl -s -m 5 -o /dev/null -w "%{http_code}\n" http://127.0.0.1:$p/ || echo down; done
+            for c in assess crossline-web crossline-worker; do echo "== $c"; sudo docker logs --tail 40 $c 2>&1 || true; done'
       - name: Deploy
         if: (github.event_name == 'workflow_dispatch' && inputs.action == 'deploy') || contains(github.event.head_commit.message, '[deploy]')
         env:
