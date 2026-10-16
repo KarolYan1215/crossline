@@ -1,3 +1,4 @@
+import { tFor } from "@crossline/i18n";
 import { compareTasks, paramsFor, type PlanBlocker, type PlanResult, type PlannerTask, type PlanningInput, type ScheduleBlock } from "./index";
 import { createRequire } from "node:module";
 
@@ -150,6 +151,7 @@ function longestSlotMinutes(slots: Slot[], task: PlannerTask): number {
  */
 function clampContinuousBuffers(input: PlanningInput): { input: PlanningInput; notes: PlanBlocker[] } {
   const slots = freeSlots(input);
+  const t = tFor(input.locale);
   const notes: PlanBlocker[] = [];
   const tasks = input.tasks.map((task) => {
     if (task.interruptible !== false || task.estimate.confidence !== "low") return task;
@@ -157,7 +159,8 @@ function clampContinuousBuffers(input: PlanningInput): { input: PlanningInput; n
     const { p50Minutes, p85Minutes } = task.estimate;
     if (p85Minutes <= longest || p50Minutes > longest) return task;
     notes.push({ taskId: task.id, code: "BUFFER_CLAMPED",
-      message: `${task.title}要一口气做完，按保守估计需要 ${p85Minutes} 分钟，但最长的连续空档只有 ${longest} 分钟；已按 ${longest} 分钟预留（预期用时 ${p50Minutes} 分钟）` });
+      message: t("{{title}}要一口气做完，按保守估计需要 {{p85}} 分钟，但最长的连续空档只有 {{longest}} 分钟；已按 {{longest}} 分钟预留（预期用时 {{p50}} 分钟）",
+        { title: task.title, p85: p85Minutes, longest, p50: p50Minutes }) });
     return { ...task, estimate: { ...task.estimate, p85Minutes: longest } };
   });
   return { input: { ...input, tasks }, notes };
@@ -179,6 +182,7 @@ function worth(result: PlanResult, tasks: PlannerTask[]): number {
 
 function makeResult(input: PlanningInput, tasks: PlannerTask[], slots: Slot[], blocks: ScheduleBlock[],
   solver: PlanResult["solver"]): PlanResult {
+  const t = tFor(input.locale);
   const scheduled = new Set(blocks.filter((block) => !block.progressOnly).map((block) => block.taskId));
   // 「截止日前不够」 only when the deadline falls inside the days being planned; one beyond them is simply not reached yet.
   const horizon = Math.max(0, ...slots.map((slot) => slot.end));
@@ -195,12 +199,14 @@ function makeResult(input: PlanningInput, tasks: PlannerTask[], slots: Slot[], b
     code: blocks.some((block) => block.taskId === task.id && block.progressOnly) ? "PROGRESS_ONLY"
       : task.interruptible === false ? "NO_CONTINUOUS_SLOT" : task.deadline && Date.parse(task.deadline) <= horizon ? "DEADLINE_CAPACITY" : "NO_CAPACITY",
     message: blocks.some((block) => block.taskId === task.id && block.progressOnly)
-      ? `${task.title}本周已留 45 分钟进度，完整作业仍待排入`
+      ? t("{{title}}本周已留 45 分钟进度，完整作业仍待排入", { title: task.title })
       : task.interruptible === false
         ? longestSlotMinutes(slots, task) < durationOf(task)
-          ? `${task.title}需要连续 ${durationOf(task)} 分钟，但最长的连续空档只有 ${longestSlotMinutes(slots, task)} 分钟；可以补充更长的可用时间，或确认它其实可以分几次做`
-          : `${task.title}需要连续 ${durationOf(task)} 分钟`
-      : task.deadline && Date.parse(task.deadline) <= horizon ? `${task.title}无法在已确认截止时间前排入` : `${task.title}在排程窗口内没有可用容量`
+          ? t("{{title}}需要连续 {{minutes}} 分钟，但最长的连续空档只有 {{longest}} 分钟；可以补充更长的可用时间，或确认它其实可以分几次做",
+            { title: task.title, minutes: durationOf(task), longest: longestSlotMinutes(slots, task) })
+          : t("{{title}}需要连续 {{minutes}} 分钟", { title: task.title, minutes: durationOf(task) })
+      : task.deadline && Date.parse(task.deadline) <= horizon ? t("{{title}}无法在已确认截止时间前排入", { title: task.title })
+        : t("{{title}}在排程窗口内没有可用容量", { title: task.title })
   }));
   return { status: statusFor(blocks, blockers, input.frozenBlocks.length),
     plan: { blocks: blocks.sort((a, b) => Date.parse(a.start) - Date.parse(b.start)) }, blockers, solver };
@@ -617,8 +623,8 @@ async function schedule(input: PlanningInput, options: SolveOptions): Promise<Pl
   const blockers = [...result.blockers, ...deferred.map((task) => ({ taskId: task.id,
     code: !task.deadline ? "Q4_NEEDS_DATE_OR_PROMOTION"
       : beyondHorizon(task) ? "Q4_BEYOND_FORECAST_HORIZON" : "Q4_WAITING_LATEST_START",
-    message: task.deadline ? beyondHorizon(task) ? `${task.title}的截止日期超出 8 周预测窗口，暂不唤醒`
-      : `${task.title}暂缓；按剩余可用时间计算，最迟 ${new Date(latestStart(task)).toISOString()} 开工`
-      : `${task.title}暂无已确认截止时间；请补日期或手动提升重要性` }))];
+    message: task.deadline ? beyondHorizon(task) ? tFor(input.locale)("{{title}}的截止日期超出 8 周预测窗口，暂不唤醒", { title: task.title })
+      : tFor(input.locale)("{{title}}暂缓；按剩余可用时间计算，最迟 {{at}} 开工", { title: task.title, at: new Date(latestStart(task)).toISOString() })
+      : tFor(input.locale)("{{title}}暂无已确认截止时间；请补日期或手动提升重要性", { title: task.title }) }))];
   return { ...result, blockers, status: statusFor(result.plan.blocks, blockers, input.frozenBlocks.length) };
 }

@@ -1,4 +1,5 @@
 import ICAL from "ical.js";
+import { tFor, type Locale } from "@crossline/i18n";
 import type { ExternalItem } from "./index";
 
 /**
@@ -43,7 +44,8 @@ function instant(time: ICAL.Time, tzid: string | undefined, personZone: string):
   return zonedToUtc(time, named);
 }
 
-export function readIcal(text: string, options: { sourceId: string; from: Date; to: Date; timeZone: string }): IcalRead {
+/** `locale`: the language of the placeholder an event without a title gets (the workspace's). */
+export function readIcal(text: string, options: { sourceId: string; from: Date; to: Date; timeZone: string; locale?: Locale }): IcalRead {
   const root = new ICAL.Component(ICAL.parse(text));
   for (const zone of root.getAllSubcomponents("vtimezone")) {
     try { ICAL.TimezoneService.register(zone); } catch { /* a malformed zone falls back to the IANA reading below */ }
@@ -78,7 +80,7 @@ export function readIcal(text: string, options: { sourceId: string; from: Date; 
       provider: "graph_calendar", externalId: `ical:${options.sourceId}:${uid}:${occurrence}`,
       // One per occurrence: occurrences share the UID, and the sync collapses items that share an iCalUid.
       iCalUid: `${uid}@${occurrence}`,
-      title: event.summary || "（无标题）", start: startAt.toISOString(), end: endAt.toISOString()
+      title: event.summary || tFor(options.locale)("（无标题）"), start: startAt.toISOString(), end: endAt.toISOString()
     });
   };
 

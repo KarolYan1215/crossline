@@ -1,3 +1,4 @@
+import type { Locale } from "@crossline/i18n";
 
 export type PlannerTask = {
   id: string;
@@ -62,6 +63,8 @@ export function normalizeParams(value: unknown): ScheduleParams {
 
 export type PlanningInput = {
   now: Date;
+  /** The language of the blockers and notes the plan carries, which the pages show as written (omitted = Chinese; docs/i18n.md). */
+  locale?: Locale;
   horizonDays: number;
   mode?: "buffered" | "asap";
   /** Overrides what `mode` stands for; see `ScheduleParams`. */

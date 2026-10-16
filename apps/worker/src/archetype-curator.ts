@@ -67,7 +67,7 @@ export function createArchetypeCurator(store: CrosslineStore, workspaceId: strin
     const dropped = [...result.output.dropped];
     for (const archetype of result.output.kept) {
       const opened = await firstSourceThatOpens(archetype, deps.safeGet ?? defaultSafeGetDeps());
-      if (!opened) { dropped.push(`${archetype.id}：来源无法打开`); continue; }
+      if (!opened) { dropped.push(`${archetype.id}：来源无法打开`); continue; } // i18n-ignore: recorded on the event, not shown
       const { basedOnTaskIds, sources, why, ...shape } = archetype;
       store.saveLearnedArchetype(workspaceId, shape, { basedOnTaskIds, sources, why, verifiedSource: opened });
       added.push(archetype.id);

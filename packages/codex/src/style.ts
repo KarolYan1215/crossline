@@ -1,3 +1,4 @@
+// i18n-exempt: instructions to every model run (the style block), never shown to the person
 import type { Locale } from "@crossline/core";
 
 /**

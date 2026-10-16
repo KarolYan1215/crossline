@@ -4,11 +4,12 @@ import {
   EMPTY_PROFILE_MODEL, GOAL_EDITS_SETTING, ONBOARDING_TURN_SCHEMA, duplicateAttributes, type PendingGoalEdit, type StoredLineProfile, PROFILE_CONFIRMED, portraitFingerprint, answeredGapFacts, keepOnboardingTurn, droppedOnboardingItems, ONBOARDING_KEEP_EARLY_MAX, mergeFacts, sanitizeDateExtraction, validateOnboardingTurn,
   gapCoveredBy, screenQuestions, screenAssumption, mergeDateExtractions, withoutDecidedDates, withoutOffHours, resolveAvailability, AVAILABILITY_SETTING, AVAILABILITY_PROPOSED_SETTING, type DateExtraction,
   type ProfileGap, type ProfileModel, type OnboardingStage, DEEP_STAGES, ONBOARDING_TONE_SETTING, ASSESS_RESULT_SETTING, readTone,
-  type KnownSources, type OnboardingTurn, type OnboardingTurnContext, ONBOARDING_PROGRESS_SETTING, readPartialTurn, type OnboardingProgress, calendarWeek
+  type KnownSources, type OnboardingTurn, type OnboardingTurnContext, ONBOARDING_PROGRESS_SETTING, readPartialTurn, type OnboardingProgress, calendarWeek, tFor, type Locale
 } from "@crossline/core";
 import { continueSkillTurn, runCodexSkill, type CodexRpcBoundary, type SkillProgress } from "@crossline/codex";
-import { interviewChecklistFor, interviewGapsFor, lockInterviewLocale, questionScreenFor, unfiledFilesIn, type CrosslineStore, type StoredOnboardingMessage, type StoredSourceDocument } from "@crossline/db";
+import { interviewChecklistFor, interviewGapsFor, interviewLocale, lockInterviewLocale, questionScreenFor, unfiledFilesIn, type CrosslineStore, type StoredOnboardingMessage, type StoredSourceDocument } from "@crossline/db";
 import { sourceIds } from "./source-ids";
+import { localeOf } from "./locale";
 import { identityLines } from "./lines";
 
 export const ONBOARDING_SKILL = "crossline:crossline-onboarding";
@@ -19,6 +20,7 @@ const SOURCE_TEXT_TOTAL = 60_000;
 /** New files one turn reads at most; more wait for the next turn. */
 const SOURCES_PER_TURN = 12;
 
+// i18n-ignore-start: instructions to the interview Skill (model-facing)
 const INSTRUCTIONS = "You interview a Crossline user as the Skill describes: a life designer's interview in stages (orientation, "
   + "lines, situation, compass, energy, details), never proposing milestones. The first two stages gather the start standard: checklist "
   + "items marked `start` must be answered by the person or read from a file, never written as 「假设：」; while one is open stay in the "
@@ -48,6 +50,7 @@ const INSTRUCTIONS = "You interview a Crossline user as the Skill describes: a l
   + "are for you to read: every date they state goes into `fileDates`, each with a verbatim quote containing the day and a title that names its course or project (「ECE 555 期末考试」, never a bare 「期末考试」); never ask which course or project a file belongs to (the app asks that itself; a settled file carries its projectId); never turn TBD into "
   + "a date (list it in `undated`). When `history` is present the conversation is being resumed: continue it, do not greet again or re-ask "
   + "what is answered. All human-readable fields in Chinese.";
+// i18n-ignore-end
 
 export type OnboardingTurnOutcome =
   | { state: "asked" | "ready"; sessionId: string }
@@ -233,10 +236,12 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     const client = getClient();
     const sessionId = input.sessionId;
     const blocked = (code: string, message: string): OnboardingTurnOutcome => ({ state: "blocked", sessionId, code, message });
-    if (!client) return blocked("CODEX_SUPERVISOR_UNAVAILABLE", "Codex 运行时不可用。");
+    // Errors before the round starts are said in the interview's language, else the workspace's.
+    const said = tFor(interviewLocale(store, workspaceId) ?? localeOf(store, workspaceId));
+    if (!client) return blocked("CODEX_SUPERVISOR_UNAVAILABLE", said("Codex 运行时不可用。"));
     const text = input.text.trim().slice(0, 4000);
     const ownerId = store.getWorkspaceOwnerId(workspaceId);
-    if (!ownerId) return blocked("WORKSPACE_OWNER_MISSING", "找不到这个工作区的所有者。");
+    if (!ownerId) return blocked("WORKSPACE_OWNER_MISSING", said("找不到这个工作区的所有者。"));
 
     const now = new Date().toISOString();
     let session = store.getOnboardingSession(workspaceId, sessionId);
@@ -249,7 +254,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     const last = messages.at(-1);
     const retrying = last?.role === "user" && (!text || String((last.content as { text?: string }).text ?? "") === text);
     if (!retrying) {
-      if (!text) return blocked("ONBOARDING_MESSAGE_EMPTY", "请先写点什么，或选一个选项。");
+      if (!text) return blocked("ONBOARDING_MESSAGE_EMPTY", said("请先写点什么，或选一个选项。"));
       store.appendOnboardingMessage({ sessionId, workspaceId, role: "user", content: { text }, createdAt: now });
       messages = store.listOnboardingMessages(workspaceId, sessionId);
     }
@@ -319,7 +324,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
           axes?: Record<string, number>; takenAt?: string } | null;
         return kept?.source === "public-assess" && kept.code && kept.typeName && kept.axes && kept.takenAt
           ? { code: kept.code, typeName: kept.typeName, axes: kept.axes, takenAt: kept.takenAt,
-            note: "本人在公开测评（32 题自评）中的结果，由本人确认带入；只作佐证，画像四轴仍按访谈证据评分，不照抄" } : undefined;
+            note: "本人在公开测评（32 题自评）中的结果，由本人确认带入；只作佐证，画像四轴仍按访谈证据评分，不照抄" } : undefined; // i18n-ignore: model-facing
       } catch { return undefined; }
     })();
 
@@ -415,8 +420,8 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       if (assumption) store.upsertProfileFact({ workspaceId, ...assumption, status: "inferred", sourceRef: "inference", sourceQuote: "", updatedAt: new Date().toISOString() });
     }
     const paced = paceDeepRound({ ...result.output, questions: screen.keep }, Boolean(focusLine));
-    const output = withSomethingToAnswer(withChecklist(paced.deep ? paced.output : withGapQuestions(paced.output, currentGaps(), messages, { freshDocuments: sent.map(([, doc]) => doc.id) }),
-      focusLine || options.checklist === false ? [] : openChecklist()), currentGaps(), messages);
+    const output = withSomethingToAnswer(withChecklist(paced.deep ? paced.output : withGapQuestions(paced.output, currentGaps(), messages, { freshDocuments: sent.map(([, doc]) => doc.id), locale }),
+      focusLine || options.checklist === false ? [] : openChecklist(), locale), currentGaps(), messages, locale);
     store.appendOnboardingMessage({ sessionId, workspaceId, role: "assistant", content: output, createdAt: new Date().toISOString() });
     store.saveOnboardingSession({
       ...session, ...(threadId ? { codexThreadId: threadId } : {}),
@@ -434,15 +439,14 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
  * (`interviewChecklist`): a premature 「ready」 goes back to asking, says what is missing, and — when the model asked nothing — asks for it.
  * Items only the person can settle (confirming the portrait, adopting a goal) do not hold the interview; they show on the screen.
  */
-export function withChecklist(output: OnboardingTurn, open: Array<{ label: string; detail: string; owner: "interview" | "person" }>): OnboardingTurn {
+export function withChecklist(output: OnboardingTurn, open: Array<{ label: string; detail: string; owner: "interview" | "person" }>, locale?: Locale): OnboardingTurn {
   const owed = open.filter((item) => item.owner === "interview");
   if (output.nextAction !== "ready_for_milestones" || !owed.length) return output;
-  const missing = owed.slice(0, 6).map((item) => `${item.label}${item.detail ? `（${item.detail}）` : ""}`).join("；");
-  return { ...output, nextAction: "ask", reply: `${output.reply}
-
-完成访谈前还缺：${missing}。`,
+  const t = tFor(locale);
+  const missing = owed.slice(0, 6).map((item) => item.detail ? t("{{label}}（{{detail}}）", { label: item.label, detail: item.detail }) : item.label).join(locale === "en" ? "; " : "；");
+  return { ...output, nextAction: "ask", reply: `${output.reply}\n\n${t("完成访谈前还缺：{{missing}}。", { missing })}`,
     questions: output.questions.length ? output.questions
-      : [{ id: "checklist-open", text: `完成访谈前还缺：${missing}。请补充。`, kind: "free", allowOther: true, identityId: "", projectId: "", options: [] }] };
+      : [{ id: "checklist-open", text: t("完成访谈前还缺：{{missing}}。请补充。", { missing }), kind: "free", allowOther: true, identityId: "", projectId: "", options: [] }] };
 }
 
 /** What a round that still asks but holds no question asks, by stage: open, in the interview's own voice. */
@@ -461,12 +465,12 @@ const OPEN_QUESTION: Record<OnboardingStage, string> = {
  * a round with a reply and an empty box the moment the start standard stood. Then the app's waiting questions join, else one open question
  * for the stage.
  */
-export function withSomethingToAnswer(output: OnboardingTurn, gaps: ProfileGap[], messages: StoredOnboardingMessage[]): OnboardingTurn {
+export function withSomethingToAnswer(output: OnboardingTurn, gaps: ProfileGap[], messages: StoredOnboardingMessage[], locale?: Locale): OnboardingTurn {
   if (output.nextAction !== "ask" || output.questions.length) return output;
-  const withGaps = withGapQuestions(output, gaps, messages);
+  const withGaps = withGapQuestions(output, gaps, messages, { ...(locale ? { locale } : {}) });
   if (withGaps.questions.length) return withGaps;
   const stage = (output.stage && output.stage in OPEN_QUESTION ? output.stage : "situation") as OnboardingStage;
-  return { ...output, questions: [{ id: `open-${stage}`, text: OPEN_QUESTION[stage], kind: "free", allowOther: true, identityId: "", projectId: "", options: [] }] };
+  return { ...output, questions: [{ id: `open-${stage}`, text: tFor(locale)(OPEN_QUESTION[stage]), kind: "free", allowOther: true, identityId: "", projectId: "", options: [] }] };
 }
 
 /** Besides those that block, at most this many of the app's own questions join one round, so a batch stays answerable. */
@@ -493,7 +497,7 @@ export function paceDeepRound(output: OnboardingTurn, focus: boolean): { output:
  * is asked every round until answered, and turns a premature 「ready」 back into 「ask」.
  */
 export function withGapQuestions(output: OnboardingTurn, gaps: ProfileGap[], messages: StoredOnboardingMessage[],
-  round: { freshDocuments?: string[] } = {}): OnboardingTurn {
+  round: { freshDocuments?: string[]; locale?: Locale } = {}): OnboardingTurn {
   const asked = new Set(messages.flatMap((message) => message.role === "assistant"
     ? ((message.content as { questions?: Array<{ id: string }> }).questions ?? []).map((question) => question.id) : []));
   const open = gaps.filter((gap) => {
@@ -519,9 +523,7 @@ export function withGapQuestions(output: OnboardingTurn, gaps: ProfileGap[], mes
     questions: [...output.questions, ...added.map((gap) => gap.question)],
     nextAction: blocking ? "ask" : output.nextAction,
     ...(blocking && output.nextAction === "ready_for_milestones"
-      ? { reply: `${output.reply}
-
-设计里程碑前尚缺以下信息：分数线均由目标倒推，目标需本人确认。` } : {})
+      ? { reply: `${output.reply}\n\n${tFor(round.locale)("设计里程碑前尚缺以下信息：分数线均由目标倒推，目标需本人确认。")}` } : {})
   };
 }
 
@@ -538,7 +540,7 @@ export function stagePace(messages: Array<{ role: string; content: unknown }>, o
   let rounds = 0;
   for (let index = stages.length - 1; index >= 0 && stages[index] === current; index -= 1) rounds += 1;
   if (rounds < 2 || !current || (options.startOpen && FRONT_STAGES.has(current))) return { stageRounds: rounds };
-  return { stageRounds: rounds, moveOn: `「${current}」阶段已问 ${rounds} 轮：本轮进入下一阶段。` };
+  return { stageRounds: rounds, moveOn: `「${current}」阶段已问 ${rounds} 轮：本轮进入下一阶段。` }; // i18n-ignore: an instruction to the model
 }
 
 /** The conversation as plain lines, for a thread that has to be rebuilt. Questions are kept; option lists are not. */

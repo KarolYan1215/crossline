@@ -1,3 +1,4 @@
+import { tFor, type Locale } from "@crossline/i18n";
 import { PublicClientApplication } from "@azure/msal-node";
 import { DataProtectionScope, PersistenceCachePlugin, PersistenceCreator } from "@azure/msal-node-extensions";
 import { mkdirSync } from "node:fs";
@@ -482,6 +483,7 @@ export type GraphDeltaPage = {
  * on a different account, and it needs no lock because this class has no way to write at all — the
  * safety property is structural instead of conditional.
  */
+/** The marker an event without a subject carries while its series title is looked up; shown, if it stays, in the reader's language. */
 const UNTITLED = "(无标题)";
 // One lookup per distinct series, capped so a first sync over a busy calendar cannot fan out.
 const SERIES_LOOKUP_LIMIT = 50;
@@ -496,6 +498,7 @@ export class GraphReadSource {
   readonly #baseUrl = "https://graph.microsoft.com/v1.0";
   /** Series titles resolved so far. A long-running worker pays each lookup once. */
   readonly #seriesTitles = new Map<string, string>();
+  readonly #t: (key: string) => string;
 
   constructor(config: {
     credential: GraphCredentialProvider;
@@ -512,8 +515,11 @@ export class GraphReadSource {
     now?: () => Date;
     pastDays?: number;
     futureDays?: number;
+    /** The language of the placeholders this reader writes (an untitled event, an unnamed calendar): the workspace's. */
+    locale?: Locale;
   }) {
     this.#credential = config.credential;
+    this.#t = tFor(config.locale);
     this.#fetch = config.fetchImpl ?? fetch;
     this.#now = config.now ?? (() => new Date());
     this.#pastDays = config.pastDays ?? 7;
@@ -531,7 +537,7 @@ export class GraphReadSource {
       .map((row) => ({
         accountId,
         id: String(row.id),
-        name: typeof row.name === "string" && row.name ? row.name : "(未命名日历)",
+        name: typeof row.name === "string" && row.name ? row.name : this.#t("(未命名日历)"),
         isDefault: row.isDefaultCalendar === true
       }));
   }
@@ -556,6 +562,7 @@ export class GraphReadSource {
   async #deltaWithSeries(url: string, provider: string, read: (row: Record<string, unknown>) => ExternalItem): Promise<GraphDeltaPage> {
     const { page, rows } = await this.#delta(url, provider, read);
     await this.#fillSeriesTitles(page.items, rows);
+    for (const item of page.items) if (item.title === UNTITLED) item.title = this.#t(UNTITLED);
     return page;
   }
 
@@ -648,7 +655,7 @@ export class GraphReadSource {
     const url = cursor ?? `${this.#baseUrl}/me/todo/lists/${encodeURIComponent(listId)}/tasks/delta`;
     return (await this.#delta(url, "graph_todo", (row) => ({
       provider: "graph_todo", externalId: "",
-      title: typeof row.title === "string" && row.title ? row.title : UNTITLED,
+      title: typeof row.title === "string" && row.title ? row.title : this.#t(UNTITLED),
       ...(typeof row["@odata.etag"] === "string" ? { etag: row["@odata.etag"] } : {})
     }))).page;
   }

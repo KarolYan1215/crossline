@@ -8,6 +8,7 @@ import type { CrosslineStore } from "@crossline/db";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 
 import { ownerOf } from "./owner";
+import { tOfWorkspace } from "./locale";
 export const PLAN_EXPLAINER_SKILL = "crossline:crossline-plan-explainer";
 const ACTIONABLE = ["approved", "preparing", "ready_for_human", "active"];
 
@@ -85,7 +86,7 @@ export function createPlanExplainer(store: CrosslineStore, workspaceId: string, 
     const client = getClient();
     if (!client) return { state: "blocked", code: "CODEX_SUPERVISOR_UNAVAILABLE", message: "Codex 运行时不可用。" };
     const context = buildPlanExplainerContext(store, workspaceId, today, ranking);
-    if (!context.activeWorkOrders.length) return { state: "blocked", code: "PLAN_EXPLAINER_NOTHING_TO_EXPLAIN", message: "当前没有可排程的作业。" };
+    if (!context.activeWorkOrders.length) return { state: "blocked", code: "PLAN_EXPLAINER_NOTHING_TO_EXPLAIN", message: tOfWorkspace(store, workspaceId)("当前没有可排程的作业。") };
 
     const result = await runCodexSkill<PlanExplanation>(client, context, {
       skillName: PLAN_EXPLAINER_SKILL,

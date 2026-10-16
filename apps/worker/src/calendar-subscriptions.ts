@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import {
-  CALENDAR_SUBSCRIPTIONS_SETTING, readSubscriptions, subscriptionSecretName, subscriptionSourceKey, type CalendarSubscription
+  CALENDAR_SUBSCRIPTIONS_SETTING, readSubscriptions, subscriptionSecretName, subscriptionSourceKey, tFor, type CalendarSubscription, type Locale
 } from "@crossline/core";
+import { localeOf } from "./locale";
 import { icalAddress, readIcal, type SecretStore } from "@crossline/connectors";
 import type { CrosslineStore } from "@crossline/db";
 import type { CalendarSource } from "./graph-sync";
@@ -27,16 +28,17 @@ const save = (store: CrosslineStore, workspaceId: string, items: CalendarSubscri
 export const hasSubscriptions = (store: CrosslineStore, workspaceId: string) => list(store, workspaceId).length > 0;
 
 /** Reads one link: the calendar's events inside the window, or a reason in the person's words. */
-async function readLink(link: string, sourceId: string, deps: SubscriptionDeps, timeZone: string) {
-  const fetched = await safeGet(link, deps.fetch, { maxBytes: MAX_BYTES, types: TYPES });
-  if (!fetched.ok) return { ok: false as const, reason: `读不到这个链接：${fetched.reason}` };
+async function readLink(link: string, sourceId: string, deps: SubscriptionDeps, timeZone: string, locale?: Locale) {
+  const t = tFor(locale);
+  const fetched = await safeGet(link, deps.fetch, { maxBytes: MAX_BYTES, types: TYPES, ...(locale ? { locale } : {}) });
+  if (!fetched.ok) return { ok: false as const, reason: t("读不到这个链接：{{reason}}", { reason: fetched.reason }) };
   const text = new TextDecoder().decode(fetched.bytes);
-  if (!/BEGIN:VCALENDAR/i.test(text)) return { ok: false as const, reason: "这个链接打开的不是日历文件（应以 BEGIN:VCALENDAR 开头）" };
+  if (!/BEGIN:VCALENDAR/i.test(text)) return { ok: false as const, reason: t("这个链接打开的不是日历文件（应以 BEGIN:VCALENDAR 开头）") };
   const now = deps.now?.() ?? new Date();
   try {
-    const read = readIcal(text, { sourceId, from: new Date(now.getTime() - 86_400_000), to: new Date(now.getTime() + READ_DAYS * 86_400_000), timeZone });
+    const read = readIcal(text, { sourceId, from: new Date(now.getTime() - 86_400_000), to: new Date(now.getTime() + READ_DAYS * 86_400_000), timeZone, ...(locale ? { locale } : {}) });
     return { ok: true as const, read };
-  } catch { return { ok: false as const, reason: "日历文件格式有误，读不出来" }; }
+  } catch { return { ok: false as const, reason: t("日历文件格式有误，读不出来") }; }
 }
 
 /** The person's subscriptions as sync sources, resolved per tick (a link removed in Settings stops being read at once). */
@@ -48,8 +50,9 @@ export function subscriptionSources(store: CrosslineStore, workspaceId: string, 
         const note = (patch: Partial<CalendarSubscription>) => save(store, workspaceId,
           list(store, workspaceId).map((item) => item.id === subscription.id ? { ...item, ...patch, lastReadAt: new Date().toISOString() } : item));
         const link = await deps.secrets.read(workspaceId, subscriptionSecretName(subscription.id)).catch(() => undefined);
-        if (!link) { note({ lastError: "这台电脑上没有这个链接（换过电脑或恢复过备份）；删掉后重新粘贴" }); throw new Error("ICAL_LINK_MISSING"); }
-        const outcome = await readLink(link, subscription.id, deps, timeZone() ?? "UTC");
+        const locale = localeOf(store, workspaceId);
+        if (!link) { note({ lastError: tFor(locale)("这台电脑上没有这个链接（换过电脑或恢复过备份）；删掉后重新粘贴") }); throw new Error("ICAL_LINK_MISSING"); }
+        const outcome = await readLink(link, subscription.id, deps, timeZone() ?? "UTC", locale);
         if (!outcome.ok) { note({ lastError: outcome.reason }); throw new Error("ICAL_READ_FAILED"); }
         save(store, workspaceId, list(store, workspaceId).map((item) => {
           if (item.id !== subscription.id) return item;
@@ -73,13 +76,15 @@ export type SubscriptionAdded =
  */
 export async function addSubscription(store: CrosslineStore, workspaceId: string, deps: SubscriptionDeps,
   input: { link: string; label: string; timeZone: string }): Promise<SubscriptionAdded> {
+  const locale = localeOf(store, workspaceId);
+  const t = tFor(locale);
   const url = icalAddress(input.link);
-  if (!url) return { state: "blocked", code: "ICAL_LINK_INVALID", message: "需要一个 https:// 或 webcal:// 开头的日历链接。" };
+  if (!url) return { state: "blocked", code: "ICAL_LINK_INVALID", message: t("需要一个 https:// 或 webcal:// 开头的日历链接。") };
   const id = randomUUID().slice(0, 8);
-  const outcome = await readLink(url.toString(), id, deps, input.timeZone);
+  const outcome = await readLink(url.toString(), id, deps, input.timeZone, locale);
   if (!outcome.ok) return { state: "blocked", code: "ICAL_READ_FAILED", message: outcome.reason };
   try { await deps.secrets.write(workspaceId, subscriptionSecretName(id), url.toString()); }
-  catch { return { state: "blocked", code: "ICAL_SECRET_UNAVAILABLE", message: "这台电脑上没法安全保存链接（需要 Windows 的数据保护）。" }; }
+  catch { return { state: "blocked", code: "ICAL_SECRET_UNAVAILABLE", message: t("这台电脑上没法安全保存链接（需要 Windows 的数据保护）。") }; }
   const label = input.label.trim().slice(0, 40) || outcome.read.calendarName.slice(0, 40) || url.hostname;
   const subscription: CalendarSubscription = { id, label, host: url.hostname, addedAt: new Date().toISOString(),
     lastReadAt: new Date().toISOString(), lastEvents: outcome.read.items.length };

@@ -1,4 +1,5 @@
-import { interviewChecklist, profileGaps, PROFILE_CONFIRMED, portraitStillConfirmed, type ChecklistItem, type ProfileGap, type ProfileModel, type QuestionScreenInput, type StoredLineProfile } from "@crossline/core";
+import { interviewChecklist, profileGaps, PROFILE_CONFIRMED, portraitStillConfirmed, type ChecklistItem, type ProfileGap, type ProfileModel, type QuestionScreenInput, type StoredLineProfile, type Locale } from "@crossline/core";
+import { interviewLocale, readLocale } from "./locale";
 import { unfiledFilesIn } from "./file-belonging";
 import { latestFileDates } from "./index";
 import type { CrosslineStore } from "./index";
@@ -33,7 +34,7 @@ const datedProjects = (store: CrosslineStore, workspaceId: string, today: string
  * portrait — which holds only while the portrait is the one they confirmed.
  */
 export function interviewChecklistFor(store: CrosslineStore, workspaceId: string,
-  lines: Array<{ id: string; label: string; hard: boolean; goals: string[] }>, extras: { unfiledFiles: number | null; today?: string }): ChecklistItem[] {
+  lines: Array<{ id: string; label: string; hard: boolean; goals: string[] }>, extras: { unfiledFiles: number | null; today?: string; locale?: Locale }): ChecklistItem[] {
   const today = extras.today ?? new Date().toISOString().slice(0, 10);
   const json = <T,>(key: string, fallback: T): T => { try { return JSON.parse(store.getSetting(workspaceId, key) ?? "null") ?? fallback; } catch { return fallback; } };
   const profiles = json<Record<string, StoredLineProfile>>("lines.profiles", {});
@@ -49,7 +50,9 @@ export function interviewChecklistFor(store: CrosslineStore, workspaceId: string
     dates,
     availability: Boolean(store.getSetting(workspaceId, "schedule.availability.proposed") || store.getSetting(workspaceId, "schedule.availability")),
     unfiledFiles: extras.unfiledFiles,
-    portraitConfirmed: portraitStillConfirmed(confirmed?.fingerprint, profile)
+    portraitConfirmed: portraitStillConfirmed(confirmed?.fingerprint, profile),
+    // Labels in the interview's language (docs/i18n.md): the list is about the interview.
+    locale: extras.locale ?? interviewLocale(store, workspaceId) ?? readLocale(store, workspaceId)
   });
 }
 
@@ -72,10 +75,13 @@ type LineInput = { id: string; label: string; hard: boolean; goals: string[] };
  * on guesses, TBD dates, courses with no class times, files only the person can file, a written portrait not yet confirmed. The worker
  * adds them to each round; while the person uses the app with the interview unfinished, 待决事项 asks them instead.
  */
-export function interviewGapsFor(store: CrosslineStore, workspaceId: string, lines: LineInput[], today: string): ProfileGap[] {
+export function interviewGapsFor(store: CrosslineStore, workspaceId: string, lines: LineInput[], today: string, locale?: Locale): ProfileGap[] {
   const unfiled = unfiledFilesIn(store, workspaceId, { today, lineNames: lines.flatMap((line) => [line.id, line.label]) });
-  const items = interviewChecklistFor(store, workspaceId, lines, { unfiledFiles: unfiled.length, today });
+  // The app's own interview questions are in the interview's language, whatever the page is switched to.
+  const language = locale ?? interviewLocale(store, workspaceId) ?? readLocale(store, workspaceId);
+  const items = interviewChecklistFor(store, workspaceId, lines, { unfiledFiles: unfiled.length, today, locale: language });
   return profileGaps({
+    locale: language,
     identities: lines.map(({ id, label }) => ({ id, label })),
     projects: store.listProjects(workspaceId).map(({ id, identityId, name }) => ({ id, identityId, name })),
     facts: store.listProfileFacts(workspaceId),

@@ -2,6 +2,8 @@ import { clientBusy, waitForMemory } from "./model-gate";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import type { CodexRpcBoundary } from "./index";
+import { tFor } from "@crossline/core";
+import { runLocale } from "./style";
 
 /**
  * Which Codex runtime serves which workspace (decided 2026-10-10). The machine owner's workspace keeps the runtime the worker always
@@ -23,7 +25,8 @@ const BLOCKERS: Record<RuntimeBlocker["code"], string> = {
   RUNTIME_LIMIT_REACHED: "同时运行的模型连接已满，稍后再试。",
   RUNTIME_START_FAILED: "模型运行时没有启动起来，稍后再试。"
 };
-const blocker = (code: RuntimeBlocker["code"]): RuntimeBlocker => ({ code, message: BLOCKERS[code] });
+/** The message the person reads, in the workspace's language (docs/i18n.md). */
+const blocker = (code: RuntimeBlocker["code"], workspaceId?: string): RuntimeBlocker => ({ code, message: tFor(runLocale(undefined, workspaceId))(BLOCKERS[code]) });
 
 export type RuntimeRegistry = {
   isOwner(workspaceId: string): boolean;
@@ -140,7 +143,7 @@ export function createRuntimeRegistry(options: {
     while (running.size >= maxRunning) {
       const oldest = [...running].filter(([id, entry]) => stoppable(id, entry, EVICT_GRACE_MS)).sort((a, b) => a[1].lastUsed - b[1].lastUsed)[0];
       if (oldest) { stop(oldest[0]); break; }
-      if (now() - queuedAt >= maxQueueMs) return blocker("RUNTIME_LIMIT_REACHED");
+      if (now() - queuedAt >= maxQueueMs) return blocker("RUNTIME_LIMIT_REACHED", workspaceId);
       await new Promise((resolve) => setTimeout(resolve, pollMs));
       const arrived = running.get(workspaceId)?.sidecar ?? await starting.get(workspaceId)?.catch(() => undefined);
       if (arrived) return arrived;
@@ -177,13 +180,13 @@ export function createRuntimeRegistry(options: {
       sidecar.onExit(() => { if (running.get(workspaceId)?.sidecar === sidecar) running.delete(workspaceId); });
       return sidecar;
     } catch {
-      return blocker("RUNTIME_START_FAILED");
+      return blocker("RUNTIME_START_FAILED", workspaceId);
     } finally { starting.delete(workspaceId); }
   }
 
   const clientFor = async (workspaceId: string, forLogin = false): Promise<{ ok: true; client: CodexRpcBoundary } | { ok: false; blocker: RuntimeBlocker }> => {
     if (isOwner(workspaceId)) return { ok: true, client: options.owner.client };
-    if (!forLogin && !connected(workspaceId)) return { ok: false, blocker: blocker("RUNTIME_UNCONNECTED") };
+    if (!forLogin && !connected(workspaceId)) return { ok: false, blocker: blocker("RUNTIME_UNCONNECTED", workspaceId) };
     const started = await ensure(workspaceId);
     return "code" in started ? { ok: false, blocker: started } : { ok: true, client: handleFor(workspaceId) };
   };
@@ -192,7 +195,7 @@ export function createRuntimeRegistry(options: {
     isOwner, connected, signedIn,
     client: (workspaceId) => clientFor(workspaceId),
     handle: (workspaceId) => isOwner(workspaceId) ? { ok: true, client: options.owner.client }
-      : connected(workspaceId) ? { ok: true, client: handleFor(workspaceId) } : { ok: false, blocker: blocker("RUNTIME_UNCONNECTED") },
+      : connected(workspaceId) ? { ok: true, client: handleFor(workspaceId) } : { ok: false, blocker: blocker("RUNTIME_UNCONNECTED", workspaceId) },
     current: (workspaceId) => isOwner(workspaceId) ? options.owner.client : (touch(workspaceId), running.has(workspaceId) ? handleFor(workspaceId) : undefined),
     async login(workspaceId, method) {
       // Not through the handle: an account that is not connected yet is exactly the one that logs in.

@@ -2,6 +2,7 @@ import type { CrosslineStore } from "@crossline/db";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { ownerOf } from "./owner";
 
+/** The archive reason the web recognizes as the system's own (apps/web/lib/crossline.ts `SYSTEM_ARCHIVE_REASONS`): kept as written, shown through `t()`. */
 export const DEMO_RETIRED_REASON = "示例作业自动清理：你已经有自己的任务了";
 
 /**

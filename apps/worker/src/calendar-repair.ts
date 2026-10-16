@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { FROZEN_SETTING } from "@crossline/core";
 import type { CrosslineStore } from "@crossline/db";
+import { tOfWorkspace } from "./locale";
 
 /**
  * One-time repair of what overlapping calendar publishes left in the ledger (found on the real account, 2026-10-15; decided by the
@@ -66,7 +67,7 @@ export function repairFrozenRace(store: CrosslineStore, workspaceId: string, own
     // The same shape the web's undo writes (`recordOp`), so 撤销 in the input box and on 待确认 can take it back for a day.
     const id = `op-${Date.now().toString(36)}-${randomUUID().slice(0, 6)}`;
     store.appendEvent({ ownerId, workspaceId, idempotencyKey: `op.applied:${id}`, type: "op.applied", entityId: id,
-      payload: { label: `解除 ${released.length} 个由日历回读误加的锁定`, inverse: { kind: "settings.restore", entries: [{ key: FROZEN_SETTING, value: frozenRaw }] } } });
+      payload: { label: tOfWorkspace(store, workspaceId)("解除 {{count}} 个由日历回读误加的锁定", { count: released.length }), inverse: { kind: "settings.restore", entries: [{ key: FROZEN_SETTING, value: frozenRaw }] } } });
   }
   return { released: released.map((entry) => entry.blockId!), republished };
 }

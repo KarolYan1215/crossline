@@ -3,7 +3,7 @@ import {
   ARTIFACT_PLAN_SCHEMA, ARTIFACT_PLAN_VERSION, MILESTONE_PROPOSAL_SCHEMA, deriveArtifactRelations, goalSettingKey, keptArtifactPlan, lineArtifacts, mergeArtifactPlan,
   profileFactId, relationFulfilment, supplyWarnings, validateArtifactPlan, validateMilestoneProposal, keepMilestoneProposal, computeMilestoneConfidence,
   type ArtifactMilestone, type ArtifactPlanContext, type CheckedArtifactPlan, type LineArtifacts, type MilestoneProposal, type MilestoneProposalContext,
-  type StoredArtifactPlan
+  type StoredArtifactPlan, tFor
 } from "@crossline/core";
 import { continueSkillTurn, runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import {
@@ -12,6 +12,7 @@ import {
 
 /** Only for a ledger that has no workspace owner on record, which a real account never is. */
 import { ownerOf } from "./owner";
+import { localeOf } from "./locale";
 import { identityLines } from "./lines";
 export const MILESTONE_ARCHITECT_SKILL = "crossline:crossline-milestone-architect";
 export const ARTIFACT_PLANNER_SKILL = "crossline:crossline-artifact-planner";
@@ -123,7 +124,7 @@ export function artifactMilestones(store: CrosslineStore, workspaceId: string, e
 export function rederiveArtifactRelations(store: CrosslineStore, workspaceId: string, labels: Record<string, string> = {}, options: { revised?: boolean } = {}) {
   const plan = readStoredArtifactPlan(store, workspaceId);
   const locked = new Set(store.listMilestoneRelations(workspaceId).filter((relation) => relation.status === "approved" && relation.artifactId).map((relation) => relation.id));
-  const derived = deriveArtifactRelations(artifactMilestones(store, workspaceId), plan, { labels, locked });
+  const derived = deriveArtifactRelations(artifactMilestones(store, workspaceId), plan, { labels, locked, locale: localeOf(store, workspaceId) });
   const ownerId = ownerOf(store, workspaceId);
   const before = new Set(store.listMilestoneRelations(workspaceId).map((relation) => relation.id));
   const { saved } = syncArtifactRelations(store, workspaceId, ownerId, derived.relations);
@@ -152,7 +153,7 @@ export function buildProposalContext(store: CrosslineStore, workspaceId: string,
   return {
     version: "crossline.milestone-proposal.v1",
     // A line's long-term goal, when the person gave one, is what its milestones are worked toward.
-    identities: identities.map((pack) => ({ id: pack.id, label: pack.label, summary: pack.goal ? `长期目标：${pack.goal}` : pack.workflowTemplates.join(", ") })),
+    identities: identities.map((pack) => ({ id: pack.id, label: pack.label, summary: pack.goal ? `长期目标：${pack.goal}` : pack.workflowTemplates.join(", ") })), // i18n-ignore: model-facing
     // Drafts are included so the Skill does not re-propose something already waiting for a decision.
     existingMilestones: milestones.map((milestone) => ({
       id: milestone.id, identityId: milestone.identityId, title: milestone.title, status: milestone.status
@@ -287,14 +288,16 @@ export function createMilestoneProposer(store: CrosslineStore, workspaceId: stri
   /** `only` limits the run to those lines: changing a course's target redoes its line, not the whole board. */
   /** `options.revised` marks a run the reviewer asked for, so its own warnings are not sent back for another redo; `options.feedback` is its brief for the artifact plan. */
   return async function propose(request: string, signal?: AbortSignal, only?: string[], options?: { revised?: boolean; feedback?: string }): Promise<ProposalOutcome> {
+    const locale = localeOf(store, workspaceId);
+    const t = tFor(locale);
     const client = getClient();
-    if (!client) return { state: "blocked", code: "CODEX_SUPERVISOR_UNAVAILABLE", message: "Codex 运行时不可用。" };
+    if (!client) return { state: "blocked", code: "CODEX_SUPERVISOR_UNAVAILABLE", message: t("Codex 运行时不可用。") };
 
     // The starters go first: they would otherwise sit in `existingMilestones` and be offered back as precedent.
     if (store.listProfileFacts(workspaceId).length) retireStarterExamples(store, workspaceId);
     const context = buildProposalContext(store, workspaceId, request, { requireChains: true, replaceUntouchedDrafts: true, ...(now ? { now } : {}) });
     if (!context.identities.length) {
-      return { state: "blocked", code: "NO_IDENTITIES", message: "没有身份包，无法提议里程碑。" };
+      return { state: "blocked", code: "NO_IDENTITIES", message: t("没有身份包，无法提议里程碑。") };
     }
 
     const allLines = context.profile?.requiredIdentities ?? [];
@@ -310,7 +313,7 @@ export function createMilestoneProposer(store: CrosslineStore, workspaceId: stri
       return { state: "proposed", drafts, assumptions: result.output.assumptions, relations, ...(threadId ? { threadId } : {}) };
     }
 
-    if (!lines.length) return { state: "blocked", code: "NO_MATCHING_LINE", message: "该主线信息不足或没有已确认的事实，未重新设计。" };
+    if (!lines.length) return { state: "blocked", code: "NO_MATCHING_LINE", message: t("该主线信息不足或没有已确认的事实，未重新设计。") };
 
     // One run per line. A single answer for every line was eleven to fifteen milestones — about four and a half minutes a turn, so
     // that not even one repair fitted in a deadline — and one line's trouble (a thin profile, a refused date) threw away the lines
@@ -329,7 +332,7 @@ export function createMilestoneProposer(store: CrosslineStore, workspaceId: stri
     if (crossLine && !signal?.aborted) {
       const planning = await planArtifacts(client, context, lines, replaced, signal, options?.feedback);
       plan = planning.plan;
-      if (planning.note) assumptions.push(`跨主线产物计划本次未生成，按上次的计划设计：${planning.note}`);
+      if (planning.note) assumptions.push(t("跨主线产物计划本次未生成，按上次的计划设计：{{note}}", { note: planning.note }));
       for (const line of planning.checked?.dropped ?? []) assumptions.push(line);
     }
     for (const identityId of lines) {
@@ -352,17 +355,19 @@ export function createMilestoneProposer(store: CrosslineStore, workspaceId: stri
       assumptions.push(...result.output.assumptions);
       for (const proposal of result.output.targetProposals ?? []) {
         const name = context.profile?.projects.find((project) => project.id === proposal.projectId)?.name ?? proposal.projectId;
-        assumptions.push(`「${name}」分数线暂定为 ${proposal.value}（${proposal.why}）；各里程碑的分数线均由此倒推，可在「主线」页修改并重算。`);
+        assumptions.push(t("「{{name}}」分数线暂定为 {{value}}（{{why}}）；各里程碑的分数线均由此倒推，可在「主线」页修改并重算。", { name, value: proposal.value, why: proposal.why }));
       }
     }
     if (!drafts.length) {
       return { state: "blocked", code: skipped[0]?.code ?? "PROPOSAL_EMPTY",
-        message: skipped.map((item) => `${labelOf(context, item.identityId)}：${item.message}`).join("；").slice(0, 400) || "没有生成任何里程碑。" };
+        message: skipped.map((item) => t("{{line}}：{{message}}", { line: labelOf(context, item.identityId, t), message: item.message })).join(locale === "en" ? "; " : "；").slice(0, 400)
+          || t("没有生成任何里程碑。") };
     }
     // Only the lines that got new drafts lose their old untouched ones: a line that failed keeps what the person already had.
     supersedeUntouchedDrafts(store, workspaceId, new Set(drafts.map((draft) => draft.id)), new Set(drafts.map((draft) => draft.identityId)));
-    for (const item of skipped) assumptions.push(`「${labelOf(context, item.identityId)}」主线本次未生成：${item.message}`);
-    for (const identityId of thinLines(context, allLines).filter((id) => !only?.length || only.includes(id))) assumptions.push(`「${labelOf(context, identityId)}」主线信息不足或仅有推断，暂未设计里程碑；在访谈中补充或确认后重新设计。`);
+    for (const item of skipped) assumptions.push(t("「{{line}}」主线本次未生成：{{message}}", { line: labelOf(context, item.identityId, t), message: item.message }));
+    for (const identityId of thinLines(context, allLines).filter((id) => !only?.length || only.includes(id)))
+      assumptions.push(t("「{{line}}」主线信息不足或仅有推断，暂未设计里程碑；在访谈中补充或确认后重新设计。", { line: labelOf(context, identityId, t) }));
 
     // The links between lines follow from the references; nothing is asked of the model for them.
     const relations = rederiveArtifactRelations(store, workspaceId, labelsOf(context), { revised: Boolean(options?.revised) });
@@ -371,7 +376,9 @@ export function createMilestoneProposer(store: CrosslineStore, workspaceId: stri
 }
 
 const labelsOf = (context: MilestoneProposalContext) => Object.fromEntries(context.identities.map((identity) => [identity.id, identity.label]));
-const labelOf = (context: MilestoneProposalContext, identityId: string) => context.identities.find((item) => item.id === identityId)?.label ?? identityId;
+/** A line's name for the person: a default pack's label in the workspace's language, a name the person gave as written. */
+const labelOf = (context: MilestoneProposalContext, identityId: string, t: (key: string) => string = (key) => key) =>
+  t(context.identities.find((item) => item.id === identityId)?.label ?? identityId);
 
 /** Lines the profile has something about but too little for a chain; they are named so the person knows why they are absent. */
 const thinLines = (context: MilestoneProposalContext, asked: string[]): string[] =>
@@ -417,7 +424,7 @@ export function createMilestoneConversation(store: CrosslineStore, workspaceId: 
   getClient: () => CodexRpcBoundary | undefined) {
   return async function continueConversation(threadId: string, message: string, signal?: AbortSignal): Promise<ConversationOutcome> {
     const client = getClient();
-    if (!client) return { state: "blocked", code: "CODEX_SUPERVISOR_UNAVAILABLE", message: "Codex 运行时不可用。" };
+    if (!client) return { state: "blocked", code: "CODEX_SUPERVISOR_UNAVAILABLE", message: tFor(localeOf(store, workspaceId))("Codex 运行时不可用。") };
     // The existing milestones list is re-read fresh so a reply cannot duplicate a draft the first turn
     // already produced — `validateMilestoneProposal` checks titles against whatever context it is given.
     const context = buildProposalContext(store, workspaceId, message);
@@ -459,12 +466,15 @@ export function persistTargetProposals(store: CrosslineStore, workspaceId: strin
     const existing = store.listProfileFacts(workspaceId, { projectId: project.id }).find((fact) => fact.slot === "target_grade");
     if (existing) continue;
     store.upsertProfileFact({ workspaceId, identityId: project.identityId, projectId: project.id, slot: "target_grade",
+      // The stored form is read back by code (apps/web/lib/targets.ts), so it keeps its markers in either language.
+      // i18n-ignore
       value: `${proposal.value.trim()}（暂定：${proposal.why.trim()}）`, status: "inferred", sourceRef: "inference", sourceQuote: "", updatedAt: now });
   }
 }
 
 function persistProposals(store: CrosslineStore, workspaceId: string,
   milestones: MilestoneProposal["milestones"], request: string, artifacts?: LineArtifacts): Array<{ id: string; identityId: string; title: string }> {
+  const t = tFor(localeOf(store, workspaceId));
   // Only ids the run was given are stored: a reference to nothing would derive nothing, and would read as a promise on the board.
   const produced = new Set(artifacts?.produce.map((item) => item.id) ?? []);
   const consumed = new Set(artifacts?.consume.map((item) => item.id) ?? []);
@@ -504,8 +514,8 @@ function persistProposals(store: CrosslineStore, workspaceId: string,
       type: "milestone.proposed", entityId: id,
       // The rationale is kept with the proposal: judging a milestone without knowing why it was
       // suggested is the same problem as approving a relation with no stated claim.
-      payload: { rationale: proposal.plan ? `${proposal.rationale}
-从结果倒推：${proposal.plan.outcome.replace(/[。.\s]+$/, "")}。${proposal.plan.derivation}` : proposal.rationale, request }
+      payload: { rationale: proposal.plan ? `${proposal.rationale}\n${t("从结果倒推：{{outcome}}。{{derivation}}", { outcome: proposal.plan.outcome.replace(/[。.\s]+$/, ""), derivation: proposal.plan.derivation })}`
+        : proposal.rationale, request }
     });
     drafts.push({ id, identityId: proposal.identityId, title: proposal.title });
   }
@@ -523,6 +533,7 @@ export function createRelationReviser(store: CrosslineStore, workspaceId: string
     if (!relation || relation.status !== "candidate") return;
     const downstream = store.listMilestones(workspaceId).find((milestone) => milestone.id === relation.toMilestoneId);
     if (!downstream) return;
+    // i18n-ignore: the architect's brief
     await createMilestoneProposer(store, workspaceId, cwd, getClient, now)(`复核意见（飞轮关系「${relation.explanation ?? relation.id}」）：${notes}`, undefined,
       [downstream.identityId], { revised: true, feedback: notes });
   };

@@ -27,6 +27,8 @@ export function createWebTools(backend: WebSearchBackend, deps: SafeGetDeps = de
       { name: "web_fetch", description: "Open one public https page (or PDF) and return its text, up to 20,000 characters.",
         inputSchema: { type: "object", additionalProperties: false, required: ["url"], properties: { url: { type: "string" } } } }
     ],
+    // The tool's errors are answers to the model, not the person.
+    /* i18n-ignore-start */
     async call(name, args) {
       const input = (args ?? {}) as { query?: unknown; freshness?: unknown; url?: unknown };
       if (name === "web_search") {
@@ -51,5 +53,6 @@ export function createWebTools(backend: WebSearchBackend, deps: SafeGetDeps = de
       }
       throw new Error(`没有名为 ${name} 的工具`);
     }
+    /* i18n-ignore-end */
   };
 }

@@ -5,11 +5,12 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import {
   AGENT_CATEGORIES, AGENT_SUMMARY_SCHEMA, decideCommand, decideFileChange, decideMcpTool, resultNeedsPerson, validateAgentSummary,
-  type AgentCategory, type AgentProgressRecord, type AgentSummary, type GuardContext, type GuardDecision
+  type AgentCategory, type AgentProgressRecord, type AgentSummary, type GuardContext, type GuardDecision, tFor, type Locale
 } from "@crossline/core";
 import { runCodexSkill, type AgentItem, type CodexRpcBoundary, type SkillTools } from "@crossline/codex";
 import { agentChainsFor, approveCategory, CLEAN_RUNS_TO_TRUST, readCategories, recordReview, type CategoryState, type CrosslineStore } from "@crossline/db";
 import { libraryInstruction, librarySkillsFor } from "./skill-library";
+import { localeOf, tOfWorkspace } from "./locale";
 
 export const AGENT_SKILL = "crossline:crossline-agent";
 
@@ -92,15 +93,16 @@ export const LOOP_REFUSALS = 3;
  * Whether a run is going round in circles (decided 2026-10-14, after the person had to spot one themselves): the same command again
  * and again, or reads a site's reader keeps refusing. Returns why, in the person's words, or undefined.
  */
-export function loopReason(commands: Array<{ command: string }>, refusals: number): string | undefined {
+export function loopReason(commands: Array<{ command: string }>, refusals: number, locale?: Locale): string | undefined {
+  const t = tFor(locale);
   const counts = new Map<string, number>();
   for (const { command } of commands) {
     const key = command.replace(/\s+/g, " ").trim();
     const count = (counts.get(key) ?? 0) + 1;
     counts.set(key, count);
-    if (count >= LOOP_REPEATS) return `同一条命令重复执行了 ${count} 次`;
+    if (count >= LOOP_REPEATS) return t("同一条命令重复执行了 {{count}} 次", { count });
   }
-  return refusals >= LOOP_REFUSALS ? `读取网站被拒绝了 ${refusals} 次仍在继续尝试` : undefined;
+  return refusals >= LOOP_REFUSALS ? t("读取网站被拒绝了 {{count}} 次仍在继续尝试", { count: refusals }) : undefined;
 }
 const HELPER = /(^|[\\/])(__pycache__|node_modules|\.git)([\\/]|$)|\.(pyc|py|ps1|psm1|sh|bat|cmd|js|mjs|ts)$|(^|[\\/])(audit|progress)\.json$/i;
 
@@ -133,12 +135,13 @@ export function salvageStoppedRun(store: CrosslineStore, workspaceId: string, ta
   };
   walk(directory);
   if (!files.length) return false;
+  const t = tOfWorkspace(store, workspaceId);
   const message = String((blocked.payload as { message?: string }).message ?? "");
   const durationMs = Number((blocked.payload as { durationMs?: number }).durationMs ?? 0);
-  const artifacts = files.map((file) => ({ path: path.relative(directory, file).replace(/\\/g, "/"), purpose: "停下前已产出", sha256: sha(file), bytes: statSync(file).size }));
-  const summary = `这次运行没有做完（${message || code}），以下是停下前已经写出的文件，助手没有做最后的自查，请本人判断是否可用。`;
+  const artifacts = files.map((file) => ({ path: path.relative(directory, file).replace(/\\/g, "/"), purpose: t("停下前已产出"), sha256: sha(file), bytes: statSync(file).size }));
+  const summary = t("这次运行没有做完（{{reason}}），以下是停下前已经写出的文件，助手没有做最后的自查，请本人判断是否可用。", { reason: message || code });
   writeFileSync(path.join(directory, "audit.json"), JSON.stringify({ taskId, title: request.title ?? "", category: request.category ?? "", directory, durationMs, summary, artifacts,
-    verification: [], needsHuman: [{ what: "判断这份未完成的结果是否可用", why: `运行停在：${message || code}` }], notDone: [{ what: "助手的最后自查与总结", why: message || code }],
+    verification: [], needsHuman: [{ what: t("判断这份未完成的结果是否可用"), why: t("运行停在：{{reason}}", { reason: message || code }) }], notDone: [{ what: t("助手的最后自查与总结"), why: message || code }],
     assumptions: [], audit: { commands: [], filesChanged: [], mcpCalls: [], searches: [], decisions: [], requests: { total: 0, allowed: 0 } }, inputsModified: [], checksPassed: false,
     reviewRequired: true, partial: true }, null, 2), "utf8");
   store.appendEvent({ ownerId: store.getWorkspaceOwnerId(workspaceId) ?? "", workspaceId, idempotencyKey: `agent:completed:${taskId}`, type: "agent.task.completed", entityId: taskId,
@@ -185,7 +188,7 @@ export function createAgentAnswerer(context: GuardContext, audit: AuditRecord, p
       const command = typeof params.command === "string" ? params.command : "";
       if ((params.kind && params.kind !== "command") || params.additionalPermissions) {
         audit.requests.total += 1;
-        audit.decisions.push({ decision: "deny", rule: "permissions.extra", reason: "不授予额外权限", kind: "command", subject: cap(command, 300), outcome: "declined" });
+        audit.decisions.push({ decision: "deny", rule: "permissions.extra", reason: tFor(context.locale)("不授予额外权限"), kind: "command", subject: cap(command, 300), outcome: "declined" });
         return { decision: "decline" };
       }
       return { decision: (await settle("command", command, decideCommand(command, context))) ? "accept" : "decline" };
@@ -196,7 +199,7 @@ export function createAgentAnswerer(context: GuardContext, audit: AuditRecord, p
       // A request to widen where it may write, or one for files the app never saw announced, cannot be judged: declined.
       if (params.grantRoot || !paths.length) {
         audit.requests.total += 1;
-        audit.decisions.push({ decision: "deny", rule: "write.unverifiable", reason: "无法确认要改的文件都在任务目录里", kind: "fileChange", subject: itemId, outcome: "declined" });
+        audit.decisions.push({ decision: "deny", rule: "write.unverifiable", reason: tFor(context.locale)("无法确认要改的文件都在任务目录里"), kind: "fileChange", subject: itemId, outcome: "declined" });
         return { decision: "decline" };
       }
       return { decision: (await settle("fileChange", paths.join("; "), decideFileChange(paths, context))) ? "accept" : "decline" };
@@ -204,7 +207,7 @@ export function createAgentAnswerer(context: GuardContext, audit: AuditRecord, p
     if (method === "mcpServer/elicitation/request") {
       // Account tools arrive in a later phase; until then nothing is configured, and any prompt is declined.
       const server = typeof params.serverName === "string" ? params.serverName : "";
-      audit.decisions.push({ ...decideMcpTool(server, "unknown"), kind: "mcp", subject: server, outcome: "declined" });
+      audit.decisions.push({ ...decideMcpTool(server, "unknown", context.locale), kind: "mcp", subject: server, outcome: "declined" });
       return { action: "decline", content: null, _meta: null };
     }
     throw new Error(`request not handled: ${method}`);
@@ -261,18 +264,20 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
     const taskId = input.taskId ?? `agent-${randomUUID().slice(0, 8)}`;
     const directory = path.join(options.outputRoot, taskId);
     const blocked = (code: string, message: string): AgentOutcome => ({ state: "blocked", taskId, directory, code, message });
+    const locale = localeOf(store, workspaceId);
+    const t = tFor(locale);
     const client = getClient();
-    if (!client) return blocked("CODEX_SUPERVISOR_UNAVAILABLE", "Codex 运行时不可用。");
+    if (!client) return blocked("CODEX_SUPERVISOR_UNAVAILABLE", t("Codex 运行时不可用。"));
     const categories = readCategories(store, workspaceId);
     if (!categories[input.category]) return { state: "needs_category_approval", category: input.category, label: AGENT_CATEGORIES[input.category] };
     const ownerId = store.getWorkspaceOwnerId(workspaceId);
-    if (!ownerId) return blocked("WORKSPACE_OWNER_MISSING", "找不到这个工作区的所有者。");
+    if (!ownerId) return blocked("WORKSPACE_OWNER_MISSING", t("找不到这个工作区的所有者。"));
 
     mkdirSync(directory, { recursive: true });
     const inputs = (input.inputs ?? []).map((entry) => path.resolve(entry)).filter((entry) => existsSync(entry));
     const before = fingerprint(inputs);
     const worktree = input.projectRepo ? prepareWorktree(path.resolve(input.projectRepo), directory, taskId) : undefined;
-    const guard: GuardContext = { taskDir: directory, homeDir: options.homeDir ?? homedir(), ...(worktree ? { writableRoots: [worktree] } : {}) };
+    const guard: GuardContext = { taskDir: directory, homeDir: options.homeDir ?? homedir(), ...(worktree ? { writableRoots: [worktree] } : {}), locale };
     const audit: AuditRecord = { commands: [], filesChanged: [], mcpCalls: [], searches: [], decisions: [], requests: { total: 0, allowed: 0 } };
     options.onLive?.({ startedAt: new Date().toISOString(), audit });
     const pendingChanges = new Map<string, string[]>();
@@ -302,7 +307,7 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
     let loopStop: string | undefined;
     const watch = () => {
       if (loopStop) return;
-      loopStop = loopReason(audit.commands, input.reader?.refusals() ?? 0);
+      loopStop = loopReason(audit.commands, input.reader?.refusals() ?? 0, locale);
       if (loopStop) stopper.abort();
     };
     const signal = options.signal ? AbortSignal.any([options.signal, stopper.signal]) : stopper.signal;
@@ -331,7 +336,7 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
     if (!result.ok) {
       // Stopped by the person (「中止」): a code of its own, so it is never taken for a run the runtime lost and tried again.
       const code = loopStop ? "AGENT_LOOP_STOPPED" : options.signal?.aborted ? "AGENT_CANCELLED" : result.blocker.code;
-      const message = loopStop ? `${loopStop}，已自动停下；已写出的文件照常交本人查看。` : options.signal?.aborted ? "本人中止了这次运行。" : result.blocker.message;
+      const message = loopStop ? t("{{reason}}，已自动停下；已写出的文件照常交本人查看。", { reason: loopStop }) : options.signal?.aborted ? t("本人中止了这次运行。") : result.blocker.message;
       writeProgress(directory, audit);
       // What the card about it needs to say where it stopped and whether trying again could act outside the machine: the guard's refusals
       // (their rules, never their subjects), how often a site's reader refused, and where its files are.
@@ -352,7 +357,7 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
       && audit.commands.every((command) => command.exitCode === 0 || command.exitCode === null || result.output.verification.length > 0);
     // Accepted by itself unless the person has to act, allow or judge something (the owner's rule, 2026-10-15: automatic by default, the
     // exceptions are confirmed) — it replaced counting accepted results per kind before a kind was trusted.
-    const reviewReasons = resultNeedsPerson({ needsHuman: result.output.needsHuman, checksPassed, inputsModified, decisions: audit.decisions, ...(input.growing ? { growing: true } : {}) });
+    const reviewReasons = resultNeedsPerson({ needsHuman: result.output.needsHuman, checksPassed, inputsModified, decisions: audit.decisions, ...(input.growing ? { growing: true } : {}), locale });
     const reviewRequired = reviewReasons.length > 0;
     const record = { taskId, title: input.title, category: input.category, directory, durationMs: Date.now() - startedAt, summary: result.output.summary,
       artifacts, verification: result.output.verification, needsHuman: result.output.needsHuman, notDone: result.output.notDone, assumptions: result.output.assumptions,
@@ -369,6 +374,7 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
   };
 }
 
+// i18n-ignore-start: instructions to the assistant (model-facing)
 const AGENT_INSTRUCTIONS = "You are the person's assistant on their own computer, working on one task in your working directory. Use your tools to do the work; "
   + "do not describe it. Everything you make goes in the working directory; do not change the person's original files. Read only the inputs "
   + "you were given and public sources: do not browse the person's other folders, repositories or databases looking for material — if you "
@@ -381,3 +387,4 @@ const AGENT_INSTRUCTIONS = "You are the person's assistant on their own computer
   + "notDone, assumptions and needsHuman are shown to the person word for word: write them in plain everyday words about the work, as the "
   + "person would say it (「这次只建了流程，还没真正汇编课程材料」, not 「本次任务明确只创建工作流，不执行原任务」), with no file names, paths, "
   + "commands, code or field names, one short sentence each saying what is missing or what the person has to do and why.";
+// i18n-ignore-end

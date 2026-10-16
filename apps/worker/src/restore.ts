@@ -1,3 +1,4 @@
+// i18n-exempt: a command-line tool for the operator; its output is JSON log lines
 /**
  * Rebuilds a database from an exported snapshot. This is the half of the backup story that proves a
  * backup is usable: decrypting and unzipping a file only shows it is readable, not that a working

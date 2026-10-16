@@ -1,6 +1,8 @@
 import { ANALYSIS_OUTPUT_SCHEMA, keepAnalysisProposal, validateAnalysisContext, validateAnalysisProposal, type AnalysisContext, type AnalysisProposal } from "@crossline/core";
 import type { CodexRpcBoundary } from "./index";
 import { runCodexSkill, type AnalysisAudit } from "./skill-runner";
+import { runLocale } from "./style";
+import { currentUsageWorkspace } from "./usage";
 
 export type { AnalysisAudit } from "./skill-runner";
 export type AnalysisResult = { ok: true; proposal: AnalysisProposal; audit: AnalysisAudit }
@@ -50,8 +52,9 @@ export async function runCodexAnalysis(client: CodexRpcBoundary, input: unknown,
     developerInstructions: INSTRUCTIONS,
     outputSchema: ANALYSIS_OUTPUT_SCHEMA,
     prepareInput: (value) => validateAnalysisContext(value),
-    validateOutput: (output, prepared) => validateAnalysisProposal(output, prepared as AnalysisContext),
-    softAccept: (rejection, output, prepared) => keepAnalysisProposal(output, prepared as AnalysisContext, rejection.message)
+    // The refusal names what to fix, and is what the person reads when the repairs run out: in the workspace's language.
+    validateOutput: (output, prepared) => validateAnalysisProposal(output, prepared as AnalysisContext, runLocale(undefined, currentUsageWorkspace())),
+    softAccept: (rejection, output, prepared) => keepAnalysisProposal(output, prepared as AnalysisContext, rejection.message, runLocale(undefined, currentUsageWorkspace()))
   });
   if (result.ok) return { ok: true, proposal: result.output, audit: result.audit };
   return { ok: false, audit: result.audit, blocker: { code: analysisCode(result.blocker.code), message: result.blocker.message } };

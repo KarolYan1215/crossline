@@ -8,6 +8,7 @@ import { ownerOf } from "./owner";
 import { autoApproveEligible } from "./auto-approval";
 import { identityLines } from "./lines";
 import { decideFold, existingTasksFor, openTasks, recordFold, type Fold } from "./duplicate-guard";
+import { tOfWorkspace } from "./locale";
 const SKILL = "crossline:crossline-goal-backplanner";
 /** How many next steps an automatic (rolling) backplan keeps. */
 export const ROLLING_STEPS = 2;
@@ -59,7 +60,7 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
     const milestone = store.listMilestones(workspaceId).find((item) => item.id === milestoneId &&
       item.status === "approved" && item.projectId);
     if (!milestone || !identityLines(store, workspaceId).some((pack) => pack.id === milestone.identityId))
-      return { state: "blocked", code: "BACKPLAN_GOAL_NOT_APPROVED", message: "需要已批准且绑定真实身份、项目的里程碑。" };
+      return { state: "blocked", code: "BACKPLAN_GOAL_NOT_APPROVED", message: tOfWorkspace(store, workspaceId)("需要已批准且绑定真实身份、项目的里程碑。") };
     const rounds = store.listEvents(workspaceId, { type: "goal.backplan_proposed", entityId: milestone.id })
       .filter((event) => (event.payload as { rolling?: boolean }).rolling).length;
     const key = options.rolling ? `goal:backplan:${milestone.id}:${milestone.version}:round:${rounds}` : `goal:backplan:${milestone.id}:${milestone.version}`;
@@ -137,7 +138,7 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
       return { state: "blocked", code: result.blocker.code, message: result.blocker.message };
     }
     if (!result.output.steps.length) {
-      const message = result.output.blockers.map((item) => item.message).join("；") || "没有能拆出的步骤";
+      const message = result.output.blockers.map((item) => item.message).join("；") || tOfWorkspace(store, workspaceId)("没有能拆出的步骤");
       if (!missing.length) recordBlocked("BACKPLAN_INPUT_BLOCKED", message, toMissing(result.output.blockers));
       return { state: "blocked", code: "BACKPLAN_INPUT_BLOCKED", message };
     }
@@ -178,7 +179,7 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
           automationParts: [], humanCore: [{ id: `${id}-core`, intent: step.intent, quote: step.sourceQuote,
             rationale: step.rationale, energy: step.energy, interruptible: step.interruptible }],
           materialContract: [], evidenceContract: [{ kind: "record", description: step.evidence,
-            why: "反推步骤的交付证据", required: true }],
+            why: tOfWorkspace(store, workspaceId)("反推步骤的交付证据"), required: true }],
           audit: { threadId: result.audit.threadId ?? "unavailable", turnId: result.audit.turnId ?? "unavailable" },
           contextVersion: context.version } };
     });

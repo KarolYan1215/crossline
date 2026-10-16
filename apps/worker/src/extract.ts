@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { StoredSourceDocument } from "@crossline/db";
+import { tFor, type Locale } from "@crossline/core";
 
 /**
  * Turning an uploaded file into text a model can read.
@@ -65,6 +66,7 @@ export function layoutPage(items: PlacedText[]): string {
       end = item.x + item.width;
     }
     const columns = labelled.get(line);
+    // i18n-ignore: a layout marker inside the extracted text, read by models
     return columns ? `${out.trimEnd()}  [列 ${columns}]` : out.trimEnd();
   }).filter(Boolean).join("\n");
 }
@@ -113,7 +115,10 @@ export function htmlTablesToText(html: string): string {
     .replace(/<[^>]+>/g, "").replace(/&[a-z#0-9]+;/gi, (entity) => entities[entity.toLowerCase()] ?? " ");
 }
 
-export async function extractText(bytes: Uint8Array, kind: StoredSourceDocument["kind"]): Promise<ExtractionResult> {
+/** `locale`: the language of the note shown beside a file that could not be read (the workspace's). */
+export async function extractText(bytes: Uint8Array, kind: StoredSourceDocument["kind"], locale?: Locale): Promise<ExtractionResult> {
+  const t = tFor(locale);
+  const finish = (raw: string, emptyNote = t("文件里没有可提取的文字。")) => finished(raw, emptyNote);
   try {
     if (kind === "text") return finish(new TextDecoder("utf-8").decode(bytes));
     if (kind === "docx") {
@@ -135,18 +140,18 @@ export async function extractText(bytes: Uint8Array, kind: StoredSourceDocument[
           typeof item.str === "string" && item.transform ? [{ str: item.str, x: item.transform[4] ?? 0, y: item.transform[5] ?? 0, width: item.width ?? 0 }] : []);
         pages.push(layoutPage(placed));
       }
-      return finish(pages.filter(Boolean).join("\n\n"), "该 PDF 没有可提取的文字层（可能是扫描件）；需要图片或 OCR 输入。");
+      return finish(pages.filter(Boolean).join("\n\n"), t("该 PDF 没有可提取的文字层（可能是扫描件）；需要图片或 OCR 输入。"));
     }
     if (kind === "image") {
-      return { status: "unsupported", text: "", note: "图片没有文字层；需要以图片形式交给模型查看。" };
+      return { status: "unsupported", text: "", note: t("图片没有文字层；需要以图片形式交给模型查看。") };
     }
-    return { status: "unsupported", text: "", note: "录音需要本地转写，当前环境还没有配置转写引擎。" };
+    return { status: "unsupported", text: "", note: t("录音需要本地转写，当前环境还没有配置转写引擎。") };
   } catch (error) {
-    return { status: "failed", text: "", note: `解析失败：${error instanceof Error ? error.message : String(error)}`.slice(0, 300) };
+    return { status: "failed", text: "", note: t("解析失败：{{reason}}", { reason: error instanceof Error ? error.message : String(error) }).slice(0, 300) };
   }
 }
 
-function finish(raw: string, emptyNote = "文件里没有可提取的文字。"): ExtractionResult {
+function finished(raw: string, emptyNote: string): ExtractionResult {
   const text = tidy(raw);
   return text ? { status: "done", text: clip(text) } : { status: "unsupported", text: "", note: emptyNote };
 }

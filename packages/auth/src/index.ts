@@ -11,7 +11,7 @@ export { chatgptAccountOf, isDirectLoopbackRequest, type LocalCodexAccount, type
 import { getMigrations } from "better-auth/db/migration";
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import nodemailer from "nodemailer";
-import { DEFAULT_LOCALE, localeFromCookieHeader, type AccessContext } from "@crossline/core";
+import { DEFAULT_LOCALE, localeFromCookieHeader, tFor, type AccessContext, type Locale } from "@crossline/core";
 import { chosenLocale, CrosslineStore, writeLocale } from "@crossline/db";
 
 export type SmtpConfig = { host: string; port: number; user: string; password: string; from: string };
@@ -40,6 +40,11 @@ export type CrosslineAuthOptions = {
    * ChatGPT login (`codex-local.ts`), and nothing else signs in.
    */
   localCodex?: { readAccount: ReadLocalCodexAccount };
+  /**
+   * The language an account chose (`chosenLocale` of its workspace), by Better Auth user id: mail to an existing account is written in
+   * it (docs/i18n.md). Without it, or for an address with no account yet, the request's cookie decides; else Chinese.
+   */
+  accountLocale?: (betterAuthUserId: string) => Locale | undefined;
 };
 
 export type CrosslineAuth = Auth;
@@ -89,6 +94,15 @@ function crosslineAuthConfig(options: CrosslineAuthOptions): BetterAuthOptions {
   // still answered the sign-up with success and the page said 「已发送验证邮件」 (a provider in test mode refuses every address but its
   // owner's). A failure is noted here, by address, and turned into an honest error by the `after` hook below, in the same request.
   const undelivered = new Map<string, string>();
+  /** The reader's language: the account's when there is one for this address, else the page's cookie (a sign-up), else Chinese. */
+  const mailLocale = (email: string, headers?: { get(name: string): string | null } | null): Locale | undefined => {
+    let userId: string | undefined;
+    try { userId = (database.prepare("SELECT id FROM \"user\" WHERE lower(email) = ?").get(email.trim().toLowerCase()) as { id?: string } | undefined)?.id; }
+    catch { userId = undefined; }
+    let chosen: Locale | undefined;
+    try { chosen = userId ? options.accountLocale?.(userId) : undefined; } catch { chosen = undefined; }
+    return chosen ?? localeFromCookieHeader(headers?.get("cookie"));
+  };
   const deliver = async (to: string, subject: string, url: string) => {
     try { await sendMail(to, subject, url); undelivered.delete(to.toLowerCase()); }
     catch (error) {
@@ -129,7 +143,7 @@ function crosslineAuthConfig(options: CrosslineAuthOptions): BetterAuthOptions {
     // accounts sign in as before. Listed addresses always may; with `CROSSLINE_SIGNUP_CAP` anyone else may while the accounts number
     // fewer than the cap (people come by the public test or straight to the interview, and neither path should need an invitation);
     // past it the address goes on the waiting list. A list with no cap admits only the list.
-    ...(signupAllowlist() || signupCap() ? { databaseHooks: { user: { create: { before: async (user: { email: string }) => {
+    ...(signupAllowlist() || signupCap() ? { databaseHooks: { user: { create: { before: async (user: { email: string }, context?: { headers?: Headers | undefined } | null) => {
       const email = user.email.trim().toLowerCase();
       if (signupAllowlist()?.has(email)) return { data: user };
       const cap = signupCap();
@@ -137,9 +151,9 @@ function crosslineAuthConfig(options: CrosslineAuthOptions): BetterAuthOptions {
         const { n } = database.prepare("SELECT count(*) AS n FROM \"user\"").get() as { n: number };
         if (n < cap) return { data: user };
         noteWaiting(email);
-        throw new APIError("FORBIDDEN", { code: "SIGNUP_FULL", message: "内测名额已满，已记下这个邮箱，有名额时会通知你。" });
+        throw new APIError("FORBIDDEN", { code: "SIGNUP_FULL", message: tFor(localeFromCookieHeader(context?.headers?.get("cookie")))("内测名额已满，已记下这个邮箱，有名额时会通知你。") });
       }
-      throw new APIError("FORBIDDEN", { code: "SIGNUP_NOT_INVITED", message: "这个邮箱不在内测名单里。" });
+      throw new APIError("FORBIDDEN", { code: "SIGNUP_NOT_INVITED", message: tFor(localeFromCookieHeader(context?.headers?.get("cookie")))("这个邮箱不在内测名单里。") });
     } } } } } : {}),
     account: {
       // Same email, same account (the person's decision, 2026-10-13; it replaced explicit-only linking, which refused a Google or
@@ -153,11 +167,11 @@ function crosslineAuthConfig(options: CrosslineAuthOptions): BetterAuthOptions {
       emailAndPassword: {
         enabled: true,
         requireEmailVerification: true,
-        sendResetPassword: async ({ user, url }) => { await deliver(user.email, "重置 Crossline 密码", url); }
+        sendResetPassword: async ({ user, url }, request) => { await deliver(user.email, tFor(mailLocale(user.email, request?.headers))("重置 Crossline 密码"), url); }
       },
       emailVerification: {
         sendOnSignUp: true,
-        sendVerificationEmail: async ({ user, url }) => { await deliver(user.email, "验证你的 Crossline 邮箱", url); }
+        sendVerificationEmail: async ({ user, url }, request) => { await deliver(user.email, tFor(mailLocale(user.email, request?.headers))("验证你的 Crossline 邮箱"), url); }
       },
       hooks: {
         after: createAuthMiddleware(async (ctx) => {
@@ -178,7 +192,10 @@ function crosslineAuthConfig(options: CrosslineAuthOptions): BetterAuthOptions {
     // The code is in the subject so each message stands apart in the inbox (identical subjects collapse into one Gmail thread, and the
     // hosted beta's first walkthrough typed an older message's code three times). A resend while the code is still valid sends the same
     // code again (`resendStrategy: "reuse"`): mail can arrive minutes late, and a fresh code per click made the one in transit useless.
-    plugins: [...(emailCapable ? [emailOTP({ sendVerificationOTP: async ({ email, otp }) => { await deliver(email, `Crossline 登录验证码 ${otp}`, `验证码：${otp}（10 分钟内有效）`); },
+    plugins: [...(emailCapable ? [emailOTP({ sendVerificationOTP: async ({ email, otp }, ctx) => {
+      const t = tFor(mailLocale(email, ctx?.headers ?? ctx?.request?.headers));
+      await deliver(email, t("Crossline 登录验证码 {{code}}", { code: otp }), t("验证码：{{code}}（10 分钟内有效）", { code: otp }));
+    },
       expiresIn: 600, resendStrategy: "reuse" })] : []), ...(options.chatgpt ? [chatgptSignIn(options.chatgpt)] : []),
       ...(options.localCodex ? [codexLocalSignIn(options.localCodex)] : []), nextCookies()]
   };
@@ -266,7 +283,8 @@ export async function requireAccessContext(
   // `createPrincipalWithWorkspace` + a redundant `getWorkspaceMembership` used to cost per request — see
   // `resolvePrincipalWorkspace`'s own doc comment. Still re-derives role fresh from `workspace_members`
   // on every call, so a revoked/demoted membership is reflected exactly as immediately as before.
-  const { principal, workspace, role } = store.resolvePrincipalWorkspace(session.user.id, "个人 workspace");
+  // The workspace's name is an internal label, never shown.
+  const { principal, workspace, role } = store.resolvePrincipalWorkspace(session.user.id, "个人 workspace"); // i18n-ignore
 
   // `identity.provider` has no real consumer today (nothing in this codebase reads it) — the
   // `auth.api.listUserAccounts` call this used to make was a 5th per-request round trip, against a

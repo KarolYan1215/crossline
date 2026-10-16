@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { agentLanguageLine, runLocale, schemaForLocale, styleInstructions } from "./style";
 import { join } from "node:path";
-import { cleanAnswerStrings, type Locale } from "@crossline/core";
+import { cleanAnswerStrings, tFor, type Locale } from "@crossline/core";
 import type { CodexRpcBoundary } from "./index";
 import { routeForSkill, tierForSkill, tierRoutes, type ModelRoute, type RouteTier, type SpendMode } from "./model-policy";
 import { createUsageCollector, currentSpendMode, currentUsageWorkspace, reportUsage, type UsageCollector } from "./usage";
@@ -120,15 +120,21 @@ function toolAnswerer(tools: SkillTools) {
   return async (method: string, params: Record<string, unknown>) => {
     if (method !== "item/tool/call") throw new Error("only tool calls are answered for this thread");
     const name = String(params.tool ?? "");
+    // i18n-ignore: an answer to the model
     if (!tools.specs.some((spec) => spec.name === name)) return { contentItems: [{ type: "inputText", text: `没有名为 ${name} 的工具` }], success: false };
     try {
       const text = await tools.call(name, params.arguments ?? {});
       return { contentItems: [{ type: "inputText", text: text.slice(0, 60_000) }], success: true };
     } catch (error) {
-      return { contentItems: [{ type: "inputText", text: error instanceof Error ? error.message : "查询失败" }], success: false };
+      return { contentItems: [{ type: "inputText", text: error instanceof Error ? error.message : "查询失败" }], success: false }; // i18n-ignore: an answer to the model
     }
   };
 }
+/**
+ * The blocker vocabulary is shown to the person: in the run's language — the caller's (the interview's locked one), else the
+ * workspace's (docs/i18n.md).
+ */
+const said = (locale?: Locale) => tFor(runLocale(locale, currentUsageWorkspace()));
 const record = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 
@@ -230,7 +236,7 @@ async function executeSkill<T>(client: CodexRpcBoundary, options: { skillName: s
     const gated = await withModelSlot({ skill: options.skillName, ...(options.priority ? { priority: options.priority } : {}),
       ...(options.onQueued ? { onQueued: options.onQueued } : {}), ...(options.signal ? { signal: options.signal } : {}) },
     () => runGated(client, options, body));
-    return gated ?? { ok: false, blocker: { code: "SKILL_CANCELED", message: "已取消；排队时取消，没有开始运行。" }, audit: {} };
+    return gated ?? { ok: false, blocker: { code: "SKILL_CANCELED", message: said()("已取消；排队时取消，没有开始运行。") }, audit: {} };
   });
 }
 
@@ -346,9 +352,9 @@ const skillBlocker = <T,>(code: string, audit: AnalysisAudit = {}): SkillRunResu
   ok: false,
   blocker: {
     code,
-    message: code === "SKILL_MISSING" ? "Skill 未安装；请恢复 Crossline plugin 后重试。"
+    message: said()(code === "SKILL_MISSING" ? "Skill 未安装；请恢复 Crossline plugin 后重试。"
       : code === "SKILL_LIST_FAILED" ? "无法读取 Codex Skill 状态；请恢复运行时后重试。"
-      : "无法隔离启用该 Skill；未开始运行。"
+      : "无法隔离启用该 Skill；未开始运行。")
   },
   audit
 });
@@ -378,6 +384,8 @@ export type ContinueTurnOptions<T> = {
   tools?: SkillTools;
   /** As `SkillRunOptions.tier`. */
   tier?: RouteTier;
+  /** As `SkillRunOptions.locale`: the language of the blocker the person reads. */
+  locale?: Locale;
 };
 
 /**
@@ -754,7 +762,8 @@ async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, con
 }
 
 /** Turns whatever ended a run into the blocker the person sees, and stops the turn if one is still going. */
-function failureResult<T>(client: CodexRpcBoundary, error: unknown, audit: AnalysisAudit): SkillRunResult<T> {
+function failureResult<T>(client: CodexRpcBoundary, error: unknown, audit: AnalysisAudit, locale?: Locale): SkillRunResult<T> {
+  const t = said(locale);
   if (audit.threadId && audit.turnId) void client.request("turn/interrupt", { threadId: audit.threadId, turnId: audit.turnId }).catch(() => {});
   const message = error instanceof Error ? error.message : "";
   const code = /^[A-Z][A-Z_]{2,}$/.test(message) ? message
@@ -773,7 +782,7 @@ function failureResult<T>(client: CodexRpcBoundary, error: unknown, audit: Analy
   // A caller's validator may attach `detail` when the Skill itself explained the refusal; that text is the only thing the
   // person can act on, so it beats the generic fallback.
   const detail = (error as Detailed | undefined)?.detail;
-  return { ok: false, blocker: { code, message: advice[code] ?? detail ?? "运行未完成；请检查阻塞原因。" }, audit };
+  return { ok: false, blocker: { code, message: advice[code] ? t(advice[code]) : detail ?? t("运行未完成；请检查阻塞原因。") }, audit };
 }
 
 /**
@@ -782,7 +791,7 @@ function failureResult<T>(client: CodexRpcBoundary, error: unknown, audit: Analy
  */
 export function continueSkillTurn<T>(client: CodexRpcBoundary, threadId: string, message: string,
   options: ContinueTurnOptions<T>): Promise<SkillRunResult<T>> {
-  if (options.signal?.aborted) return Promise.resolve({ ok: false, blocker: { code: "SKILL_CANCELED", message: "已取消；未开始运行。" }, audit: {} });
+  if (options.signal?.aborted) return Promise.resolve({ ok: false, blocker: { code: "SKILL_CANCELED", message: said(options.locale)("已取消；未开始运行。") }, audit: {} });
   return executeSkill(client, options, async (context): Promise<SkillRunResult<T>> => {
     const audit: AnalysisAudit = { threadId };
     holdThread(client, threadId);
@@ -799,13 +808,13 @@ export function continueSkillTurn<T>(client: CodexRpcBoundary, threadId: string,
         ...(options.keepEarly ? { keepEarly: options.keepEarly } : {})
       });
       return { ok: true, output, audit };
-    } catch (error) { return failureResult<T>(client, error, audit); }
+    } catch (error) { return failureResult<T>(client, error, audit, options.locale); }
     finally { unregister?.(); scope.dispose(); releaseThread(client, threadId, THREAD_KEEP_MS); }
   });
 }
 
 export function runCodexSkill<T>(client: CodexRpcBoundary, input: unknown, options: SkillRunOptions<T>): Promise<SkillRunResult<T>> {
-  if (options.signal?.aborted) return Promise.resolve({ ok: false, blocker: { code: "SKILL_CANCELED", message: "已取消；未开始运行。" }, audit: {} });
+  if (options.signal?.aborted) return Promise.resolve({ ok: false, blocker: { code: "SKILL_CANCELED", message: said(options.locale)("已取消；未开始运行。") }, audit: {} });
   return executeSkill(client, options, (context) => runSkillTurn(client, input, options, context));
 }
 
@@ -876,7 +885,7 @@ async function runSkillTurn<T>(client: CodexRpcBoundary, input: unknown, request
       ...(options.keepEarly ? { keepEarly: (rejection: Error, answer: unknown) => options.keepEarly!(rejection, answer, prepared) } : {})
     });
     return { ok: true, output, audit };
-  } catch (error) { return failureResult<T>(client, error, audit); }
+  } catch (error) { return failureResult<T>(client, error, audit, options.locale); }
   finally {
     unregister?.(); scope?.dispose();
     if (audit.threadId) releaseThread(client, audit.threadId, options.keepThread ? THREAD_KEEP_MS : 0);

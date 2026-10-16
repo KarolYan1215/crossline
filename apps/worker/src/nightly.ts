@@ -5,6 +5,7 @@ import { LOCAL_ACTIVITY_CONSENT } from "./activity-recorder";
 
 export const NIGHTLY_LAST_RUN = "flywheel.nightly.lastRunDay";
 import { ownerOf } from "./owner";
+import { localeOf } from "./locale";
 
 export type NightlyDeps = {
   store: CrosslineStore;
@@ -42,6 +43,7 @@ export function createNightlyFlywheel(deps: NightlyDeps, options: {
 
     const decision = nightlyTrigger({
       now: now.toISOString(),
+      locale: localeOf(deps.store, deps.workspaceId),
       resetsAt,
       night,
       cost,

@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { tFor, type Locale } from "@crossline/core";
 
 /**
  * Turning a recording into text, on this machine.
@@ -31,6 +32,7 @@ export type TranscriptionEngine = {
 
 /** The languages the recording is matched against, with how they are named to the reader. Anything else is heard as the closest of these. */
 export const TRANSCRIPTION_LANGUAGES: Record<string, string> = {
+  // i18n-ignore: each language named in itself (autonyms), the same in either interface language
   zh: "中文", yue: "粤语", en: "English", ja: "日本語", ko: "한국어", de: "Deutsch", fr: "Français", es: "Español", ru: "Русский", it: "Italiano", pt: "Português"
 };
 export type DecodedAudio = { sampleRate: number; channels: Float32Array[] };
@@ -105,18 +107,22 @@ const markerPath = (dir: string) => path.join(dir, "whisper-small.ready.json");
 export function createTranscriber(options: TranscriberOptions) {
   let downloading: { progress: number } | undefined;
 
-  async function status(): Promise<TranscriptionStatus> {
+  // The status and failures are shown to the person, in the language asked for (the workspace's).
+  async function status(locale?: Locale): Promise<TranscriptionStatus> {
+    const t = tFor(locale);
     if (downloading) return { state: "downloading", progress: downloading.progress };
     try {
       if (existsSync(markerPath(options.modelsDir)) && await options.engine.modelReady()) return { state: "ready" };
     } catch (error) {
-      return { state: "unavailable", code: "TRANSCRIBER_UNAVAILABLE", message: error instanceof Error ? error.message : "语音识别组件不可用。" };
+      // A message the engine wrote itself (a missing component) has English too; anything else is shown as it came.
+      return { state: "unavailable", code: "TRANSCRIBER_UNAVAILABLE", message: error instanceof Error ? t(error.message) : t("语音识别组件不可用。") };
     }
     return { state: "needs_download", model: WHISPER_MODEL.id, source: WHISPER_MODEL.source, approxMegabytes: WHISPER_MODEL.approxMegabytes };
   }
 
   /** Only ever called after the person pressed the button that names the source and size. */
-  async function download(): Promise<TranscriptionStatus> {
+  async function download(locale?: Locale): Promise<TranscriptionStatus> {
+    const t = tFor(locale);
     if (downloading) return { state: "downloading", progress: downloading.progress };
     downloading = { progress: 0 };
     try {
@@ -125,34 +131,34 @@ export function createTranscriber(options: TranscriberOptions) {
       writeFileSync(markerPath(options.modelsDir), JSON.stringify({ model: WHISPER_MODEL.id, downloadedAt: new Date().toISOString() }));
     } catch (error) {
       downloading = undefined;
-      return { state: "unavailable", code: "MODEL_DOWNLOAD_FAILED", message: `模型没有下载成功：${error instanceof Error ? error.message.slice(0, 200) : "未知错误"}` };
+      return { state: "unavailable", code: "MODEL_DOWNLOAD_FAILED", message: t("模型没有下载成功：{{reason}}", { reason: error instanceof Error ? error.message.slice(0, 200) : t("未知错误") }) };
     }
     downloading = undefined;
-    return status();
+    return status(locale);
   }
 
-  async function transcribe(bytes: Uint8Array, fileName: string, language?: string): Promise<{ text: string } & TranscriptionOutcome> {
-    const current = await status();
+  async function transcribe(bytes: Uint8Array, fileName: string, language?: string, locale?: Locale): Promise<{ text: string } & TranscriptionOutcome> {
+    const t = tFor(locale);
+    const current = await status(locale);
     if (current.state === "needs_download" || current.state === "downloading") return { state: "needs_download", text: "" };
     if (current.state === "unavailable") return { state: "failed", code: current.code, message: current.message, text: "" };
     let samples: Float32Array;
     try { samples = toMono16k(await options.decode(bytes, fileName)); }
-    catch { return { state: "failed", code: "AUDIO_DECODE_FAILED", message: "这段录音的格式读不了；可以转成 mp3 或 wav 再传。", text: "" }; }
+    catch { return { state: "failed", code: "AUDIO_DECODE_FAILED", message: t("这段录音的格式读不了；可以转成 mp3 或 wav 再传。"), text: "" }; }
     const seconds = samples.length / TARGET_RATE;
-    if (seconds < 1) return { state: "failed", code: "AUDIO_EMPTY", message: "录音里没有可识别的内容。", text: "" };
-    if (seconds > MAX_SECONDS) return { state: "failed", code: "AUDIO_TOO_LONG", message: "这段录音超过 3 小时；请切成几段再传。", text: "" };
+    if (seconds < 1) return { state: "failed", code: "AUDIO_EMPTY", message: t("录音里没有可识别的内容。"), text: "" };
+    if (seconds > MAX_SECONDS) return { state: "failed", code: "AUDIO_TOO_LONG", message: t("这段录音超过 3 小时；请切成几段再传。"), text: "" };
     try {
       const result = await options.engine.recognise(samples, language);
       const spoken = result.language === "zh" ? await (options.simplify ?? simplifyChinese)(formatTranscript(result.chunks, result.text)) : formatTranscript(result.chunks, result.text);
       const body = spoken;
-      if (!body.trim()) return { state: "failed", code: "TRANSCRIPT_EMPTY", message: "没有识别出任何文字。", text: "" };
+      if (!body.trim()) return { state: "failed", code: "TRANSCRIPT_EMPTY", message: t("没有识别出任何文字。"), text: "" };
       // The language is stated at the top, so a wrong guess is visible to the person and to whatever reads the transcript next.
       const named = result.language ? TRANSCRIPTION_LANGUAGES[result.language] ?? result.language : "";
-      const text = named ? `[语言：${named}${language ? "" : "，自动识别"}]
-${body}` : body;
+      const text = named ? `${language ? t("[语言：{{name}}]", { name: named }) : t("[语言：{{name}}，自动识别]", { name: named })}\n${body}` : body;
       return { state: "transcribed", characters: text.length, seconds: Math.round(seconds), text };
     } catch (error) {
-      return { state: "failed", code: "TRANSCRIPTION_FAILED", message: `识别没有完成：${error instanceof Error ? error.message.slice(0, 200) : "未知错误"}`, text: "" };
+      return { state: "failed", code: "TRANSCRIPTION_FAILED", message: t("识别没有完成：{{reason}}", { reason: error instanceof Error ? error.message.slice(0, 200) : t("未知错误") }), text: "" };
     }
   }
 
@@ -239,6 +245,7 @@ export function createWhisperEngine(modelsDir: string): { engine: TranscriptionE
     type Decoded = { sampleRate: number; channelData?: Float32Array[]; numberOfChannels?: number; getChannelData?: (index: number) => Float32Array };
     let decoder: (buffer: Uint8Array) => Promise<Decoded>;
     try { decoder = ((await import(/* @vite-ignore */ moduleName)) as { default: typeof decoder }).default; }
+    // i18n-ignore: never shown — the caller replaces any decode failure with its own message
     catch { throw new Error(`没有安装音频解码组件（audio-decode），无法读取 ${fileName}。`); }
     const buffer = await decoder(bytes);
     const channels = buffer.channelData ?? Array.from({ length: buffer.numberOfChannels ?? 0 }, (_, index) => buffer.getChannelData!(index));

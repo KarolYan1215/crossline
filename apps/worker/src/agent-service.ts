@@ -2,10 +2,11 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { enterUsageWorkspace, type CodexRpcBoundary } from "@crossline/codex";
 import { agentChainsFor, deliverAgentResult, isPaused, listAgentTasks, readCategories, readGrownSkills, requestAgentRetry, requestCategory, type CrosslineStore } from "@crossline/db";
-import { AGENT_CATEGORIES, backgroundSpend, isAgentCategory, retryDue, type AgentCategory, type CostSignal } from "@crossline/core";
+import { AGENT_CATEGORIES, backgroundSpend, tFor, isAgentCategory, retryDue, type AgentCategory, type CostSignal } from "@crossline/core";
 import { createAgentRunner, salvageStoppedRun, type AgentOutcome, type AgentTaskInput } from "./agent-task";
 import { autoHandoffCandidates, dispatchCandidates, ledgerAsk, retryCandidates, stepDispatchCandidates, taskFromWorkOrder } from "./agent-dispatch";
 import { browserProfilesRoot, sayToPerson, startWorkflowRun } from "./workflow-smith";
+import { localeOf, tOfWorkspace } from "./locale";
 import { ASSISTANT_PREP_HOURS, startingWithin } from "./schedule-window";
 import { ownerOf } from "./owner";
 
@@ -39,11 +40,12 @@ export function createAgentService(deps: {
   const mark = (workspaceId: string) => running.get(workspaceId) ?? running.set(workspaceId, new Set()).get(workspaceId)!;
 
   function start(workspaceId: string, orderId: string, category: AgentCategory | undefined, stepId?: string, by: "person" | "system" = "system"): DispatchResult {
+    const t = tOfWorkspace(deps.store, workspaceId);
     if (deps.isOwner && !deps.isOwner(workspaceId))
-      return { state: "blocked", code: "AGENT_OWNER_ONLY", message: "这台电脑上的助手只为电脑主人工作；其他账号的任务请本人完成。" };
+      return { state: "blocked", code: "AGENT_OWNER_ONLY", message: t("这台电脑上的助手只为电脑主人工作；其他账号的任务请本人完成。") };
     const planned = taskFromWorkOrder(deps.store, workspaceId, orderId, category, stepId);
     if (!planned.ok) return { state: "blocked", code: planned.code, message: planned.message };
-    if (!planned.category) return { state: "blocked", code: "CATEGORY_REQUIRED", message: "这件事的描述没有明确指向某一类工作，请选一类再交给助手。" };
+    if (!planned.category) return { state: "blocked", code: "CATEGORY_REQUIRED", message: t("这件事的描述没有明确指向某一类工作，请选一类再交给助手。") };
     const chosen = planned.category;
     if (!readCategories(deps.store, workspaceId)[chosen]) {
       requestCategory(deps.store, workspaceId, chosen, orderId, planned.why);
@@ -92,22 +94,28 @@ export function createAgentService(deps: {
     const done = accepted.get(workspaceId) ?? [];
     if (!done.length) return;
     accepted.delete(workspaceId);
+    const locale = localeOf(deps.store, workspaceId);
+    const t = tFor(locale);
     const line = (item: (typeof done)[number]) => {
-      const shown = item.files.length > 3 ? `${item.files.slice(0, 3).join("、")} 等 ${item.files.length} 个文件` : item.files.join("、");
-      return `「${item.title.length > 40 ? `${item.title.slice(0, 40)}…` : item.title}」${shown ? `：${shown}` : ""}，放在 ${item.directory}`;
+      const list = (files: string[]) => locale === "en" ? files.join(", ") : files.join("、");
+      const files = item.files.length > 3 ? t("{{files}} 等 {{count}} 个文件", { files: list(item.files.slice(0, 3)), count: item.files.length }) : list(item.files);
+      const title = item.title.length > 40 ? `${item.title.slice(0, 40)}…` : item.title;
+      return files ? t("「{{title}}」：{{files}}，放在 {{directory}}", { title, files, directory: item.directory })
+        : t("「{{title}}」，放在 {{directory}}", { title, directory: item.directory });
     };
-    const text = done.length === 1 ? `助手做好了${line(done[0]!)}。自检全部通过、没有需要本人处理的事，已直接采纳。`
-      : `助手做好了 ${done.length} 件事，自检全部通过、没有需要本人处理的事，已直接采纳：\n${done.map((item, i) => `${i + 1}. ${line(item)}`).join("\n")}`;
+    const text = done.length === 1 ? t("助手做好了{{item}}。自检全部通过、没有需要本人处理的事，已直接采纳。", { item: line(done[0]!) })
+      : t("助手做好了 {{count}} 件事，自检全部通过、没有需要本人处理的事，已直接采纳：", { count: done.length }) + `\n${done.map((item, i) => `${i + 1}. ${line(item)}`).join("\n")}`;
     const orders = [...new Set(done.map((item) => item.orderId).filter(Boolean))];
     sayToPerson(deps.store, workspaceId, text, "agent_accepted", `accepted:${done.map((item) => item.taskId).join(",")}`,
-      [{ label: "查看", href: orders.length === 1 ? `/workbench/${encodeURIComponent(orders[0]!)}` : "/approvals#assistant" }], now);
+      [{ label: t("查看", { context: "view" }), href: orders.length === 1 ? `/workbench/${encodeURIComponent(orders[0]!)}` : "/approvals#assistant" }], now);
   }
 
   function runFree(workspaceId: string, input: AgentTaskInput & { taskId: string }, after?: (outcome: AgentOutcome | { state: "failed"; message: string }) => void): DispatchResult {
+    const t = tOfWorkspace(deps.store, workspaceId);
     if (deps.isOwner && !deps.isOwner(workspaceId))
-      return { state: "blocked", code: "AGENT_OWNER_ONLY", message: "这台电脑上的助手只为电脑主人工作。" };
+      return { state: "blocked", code: "AGENT_OWNER_ONLY", message: t("这台电脑上的助手只为电脑主人工作。") };
     if (!readCategories(deps.store, workspaceId)[input.category]) return { state: "needs_category_approval", category: input.category, label: AGENT_CATEGORIES[input.category] };
-    if (mark(workspaceId).size) return { state: "blocked", code: "AGENT_BUSY", message: "助手正在做别的事。" };
+    if (mark(workspaceId).size) return { state: "blocked", code: "AGENT_BUSY", message: t("助手正在做别的事。") };
     mark(workspaceId).add(input.taskId);
     const control = new AbortController();
     controls.set(input.taskId, control);
@@ -138,7 +146,7 @@ export function createAgentService(deps: {
   /** Whether the assistant may start background work now: its own ceiling (95% of either window), and a readable quota. */
   async function quotaAllows(workspaceId: string): Promise<boolean> {
     const signal = await deps.readCost().catch((error: unknown): CostSignal => ({ available: false, reason: String(error) }));
-    const spend = backgroundSpend(signal);
+    const spend = backgroundSpend(signal, localeOf(deps.store, workspaceId));
     const used = signal.available ? Math.max(signal.short?.usedPercent ?? 0, signal.long?.usedPercent ?? 0) : 100;
     if (spend.mode === "manual_core_only" || used >= QUOTA_CEILING_PERCENT) {
       log({ type: "agent.skipped", workspaceId, code: spend.blocker?.code ?? "QUOTA_LOW", budget: spend.mode, usedPercent: used });
@@ -159,16 +167,17 @@ export function createAgentService(deps: {
      */
     async retry(workspaceId: string, taskId: string, input: { note?: string; only?: string[] }, now = new Date()):
       Promise<{ ok: true; state: "started" | "queued"; message: string } | { ok: false; code: string; message: string }> {
-      if (deps.isOwner && !deps.isOwner(workspaceId)) return { ok: false, code: "AGENT_OWNER_ONLY", message: "这台电脑上的助手只为电脑主人工作。" };
-      if (mark(workspaceId).has(taskId)) return { ok: false, code: "TASK_RUNNING", message: "这个任务正在运行。" };
+      const t = tOfWorkspace(deps.store, workspaceId);
+      if (deps.isOwner && !deps.isOwner(workspaceId)) return { ok: false, code: "AGENT_OWNER_ONLY", message: t("这台电脑上的助手只为电脑主人工作。") };
+      if (mark(workspaceId).has(taskId)) return { ok: false, code: "TASK_RUNNING", message: t("这个任务正在运行。") };
       const recorded = requestAgentRetry(deps.store, workspaceId, taskId, input, now);
-      if (!recorded.ok) return { ok: false, code: recorded.code, message: recorded.code === "TASK_NOT_FOUND" ? "找不到这个助手任务。" : "这个任务正在运行。" };
-      if (isPaused(deps.store, workspaceId)) return { ok: true, state: "queued", message: "助手已暂停；恢复后按本人的说明重做。" };
-      if (mark(workspaceId).size) return { ok: true, state: "queued", message: "助手正在做别的事；做完后按本人的说明重做。" };
-      if (!(await quotaAllows(workspaceId))) return { ok: true, state: "queued", message: "额度紧张；额度恢复后按本人的说明重做。" };
+      if (!recorded.ok) return { ok: false, code: recorded.code, message: recorded.code === "TASK_NOT_FOUND" ? t("找不到这个助手任务。") : t("这个任务正在运行。") };
+      if (isPaused(deps.store, workspaceId)) return { ok: true, state: "queued", message: t("助手已暂停；恢复后按本人的说明重做。") };
+      if (mark(workspaceId).size) return { ok: true, state: "queued", message: t("助手正在做别的事；做完后按本人的说明重做。") };
+      if (!(await quotaAllows(workspaceId))) return { ok: true, state: "queued", message: t("额度紧张；额度恢复后按本人的说明重做。") };
       // A clock read after the request was written: the request is due from the moment it was recorded.
       await api.pass(workspaceId, new Date(Math.max(now.getTime(), Date.now())), { quotaChecked: true });
-      return mark(workspaceId).size ? { ok: true, state: "started", message: "已按本人的说明重新开始。" } : { ok: true, state: "queued", message: "已记下；稍后按本人的说明重做。" };
+      return mark(workspaceId).size ? { ok: true, state: "started", message: t("已按本人的说明重新开始。") } : { ok: true, state: "queued", message: t("已记下；稍后按本人的说明重做。") };
     },
 
     /** On the tick: at most one new task per workspace, only of an approved kind, only with quota to spare, only when none is going. */
@@ -247,7 +256,7 @@ export function createAgentService(deps: {
       const lost = listAgentTasks(deps.store, workspaceId).filter((task) => task.status === "running" && !mark(workspaceId).has(task.taskId));
       for (const task of lost) {
         deps.store.appendEvent({ ownerId: ownerOf(deps.store, workspaceId), workspaceId, idempotencyKey: `agent:blocked:${task.taskId}`, type: "agent.task.blocked",
-          entityId: task.taskId, payload: { taskId: task.taskId, code: AGENT_RUN_LOST, message: "后台进程重启，这次运行中断",
+          entityId: task.taskId, payload: { taskId: task.taskId, code: AGENT_RUN_LOST, message: tOfWorkspace(deps.store, workspaceId)("后台进程重启，这次运行中断"),
             directory: path.join(deps.outputRoot ?? defaultOutputRoot(), task.taskId) } });
       }
       return lost.map((task) => task.taskId);

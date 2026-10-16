@@ -6,10 +6,14 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   FOLDER_MAX_ENTRIES, FOLDER_MAX_FILES, SOURCE_FOLDERS_SETTING, cleanFolderNames, cleanFolderRules, credentialName, credentialText, excludedByRules, folderFileAction, folderGroup, folderLabel,
   folderPathProblem, readSourceFolders, sensitiveName, sensitiveText, skipFolderDirectory, sourceFolderIndexSetting, sourceKindFor,
-  type FolderIndexEntry, type SourceFolder, type SourceKind
+  type FolderIndexEntry, type SourceFolder, type SourceKind, tFor, type Locale
 } from "@crossline/core";
 import type { CrosslineStore, StoredSourceDocument } from "@crossline/db";
 import { ownerOf } from "./owner";
+import { localeOf } from "./locale";
+
+/** 「内容含身份证号」: what a file's opening was found to hold, said in the workspace's language (the label is core's). */
+const contains = (what: string, locale: Locale | undefined) => { const t = tFor(locale); return t("内容含{{what}}", { what: t(what) }); };
 
 /**
  * Authorized folders (docs/onboarding-v3.md 「文件夹授权」; the rules are in `packages/core/src/source-folders.ts`). The worker walks a
@@ -56,7 +60,7 @@ const kept = (file: ScannedFile) => !file.sensitive && !file.duplicateOf && !fil
  * person excluded, then marks suspected private papers, second copies and what lies past the cap. Only files of the same size are hashed.
  */
 // ponytail: same-size files are hashed on every scan; keep their hash in the index if a folder of many equal-size files gets slow.
-export async function scanFolder(root: string, rules: Rules = {}, options: { peekText?: boolean } = {}): Promise<FolderScan> {
+export async function scanFolder(root: string, rules: Rules = {}, options: { peekText?: boolean; locale?: Locale } = {}): Promise<FolderScan> {
   const files: ScannedFile[] = [];
   const credentials: FolderScan["credentials"] = [];
   let entries = 0, skippedDirectories = 0, truncated = false;
@@ -79,11 +83,11 @@ export async function scanFolder(root: string, rules: Rules = {}, options: { pee
       const credential = credentialName(relative);
       if (credential) { credentials.push({ relative: slash(relative), reason: credential }); continue; }
       // The name decides first, so files the app never reads (pictures, archives …) cost no disk read.
-      if (folderFileAction(relative, 0).action === "skip") continue;
+      if (folderFileAction(relative, 0, options.locale).action === "skip") continue;
       let info;
       try { info = await stat(path.join(root, relative)); } catch { continue; }
       const sensitive = included(relative, rules) ? undefined : sensitiveName(relative, rules.names);
-      files.push({ relative, size: info.size, mtimeMs: Math.round(info.mtimeMs), action: folderFileAction(relative, info.size), ...(sensitive ? { sensitive } : {}) });
+      files.push({ relative, size: info.size, mtimeMs: Math.round(info.mtimeMs), action: folderFileAction(relative, info.size, options.locale), ...(sensitive ? { sensitive } : {}) });
     }
   }
   // The preview also checks text files' openings for keys and IDs (PDF and Word are checked when they are read, from their extracted text).
@@ -91,10 +95,10 @@ export async function scanFolder(root: string, rules: Rules = {}, options: { pee
     if (file.action.action !== "read" || file.action.kind !== "text") continue;
     const head = await opening(path.join(root, file.relative)).catch(() => "");
     const key = credentialText(head);
-    if (key) { credentials.push({ relative: slash(file.relative), reason: `内容含${key}` }); files.splice(files.indexOf(file), 1); continue; }
+    if (key) { credentials.push({ relative: slash(file.relative), reason: contains(key, options.locale) }); files.splice(files.indexOf(file), 1); continue; }
     if (file.sensitive || included(file.relative, rules)) continue;
     const hit = sensitiveText(head);
-    if (hit) file.sensitive = `内容含${hit}`;
+    if (hit) file.sensitive = contains(hit, options.locale);
   }
   const readable = files.filter((file) => file.action.action === "read" && !file.sensitive);
   const bySize = new Map<number, ScannedFile[]>();
@@ -137,16 +141,17 @@ export type FolderDeps = {
   dataDir: string;
   home: string;
   /** Reads a file's text (the worker's own `extractText`), before anything is kept, so a file whose text holds an ID is never stored. */
-  readText: (bytes: Uint8Array, kind: StoredSourceDocument["kind"]) => Promise<{ status: StoredSourceDocument["extractionStatus"]; text: string; note?: string }>;
+  readText: (bytes: Uint8Array, kind: StoredSourceDocument["kind"], locale?: Locale) => Promise<{ status: StoredSourceDocument["extractionStatus"]; text: string; note?: string }>;
 };
 
 /** Checks a path the person typed: absolute, an existing folder, and not one of the places `folderPathProblem` refuses. */
-async function checkedPath(raw: string, deps: FolderDeps): Promise<{ ok: true; path: string } | { ok: false; message: string }> {
-  const problem = folderPathProblem(raw, { home: deps.home, appData: deps.dataDir });
+async function checkedPath(raw: string, deps: FolderDeps, locale?: Locale): Promise<{ ok: true; path: string } | { ok: false; message: string }> {
+  const t = tFor(locale);
+  const problem = folderPathProblem(raw, { home: deps.home, appData: deps.dataDir, ...(locale ? { locale } : {}) });
   if (problem) return { ok: false, message: problem };
   const resolved = path.resolve(raw.trim());
-  try { if (!(await stat(resolved)).isDirectory()) return { ok: false, message: "这不是一个文件夹" }; }
-  catch { return { ok: false, message: "找不到这个文件夹" }; }
+  try { if (!(await stat(resolved)).isDirectory()) return { ok: false, message: t("这不是一个文件夹") }; }
+  catch { return { ok: false, message: t("找不到这个文件夹") }; }
   return { ok: true, path: resolved };
 }
 
@@ -154,7 +159,7 @@ async function checkedPath(raw: string, deps: FolderDeps): Promise<{ ok: true; p
 const NAME_SLOTS = /^(name|full_name|legal_name|chinese_name|english_name|pinyin_name|preferred_name)$/;
 /** The person's names: those given with the request (the account's) and any the profile has confirmed. */
 export function personNames(store: CrosslineStore, workspaceId: string, given: unknown = []): string[] {
-  const facts = store.listProfileFacts(workspaceId, { identityId: "person" }).filter((fact) => NAME_SLOTS.test(fact.slot) && !fact.value.startsWith("假设")).map((fact) => fact.value);
+  const facts = store.listProfileFacts(workspaceId, { identityId: "person" }).filter((fact) => NAME_SLOTS.test(fact.slot) && !fact.value.startsWith("假设")).map((fact) => fact.value); // i18n-ignore: the stored assumption marker
   return cleanFolderNames([...cleanFolderNames(given), ...facts]);
 }
 
@@ -167,10 +172,10 @@ export type PreviewGroup = { name: string; files: number; nameOnly: number; byte
  * What authorizing a folder would read, before anything is read: grouped by top-level subfolder so the person can leave out a group or a
  * file, with suspected private papers listed apart (left out unless ticked back) and text files' openings checked for IDs.
  */
-export async function previewFolder(raw: string, deps: FolderDeps, names: string[] = []) {
-  const checked = await checkedPath(raw, deps);
+export async function previewFolder(raw: string, deps: FolderDeps, names: string[] = [], locale?: Locale) {
+  const checked = await checkedPath(raw, deps, locale);
   if (!checked.ok) return { state: "blocked" as const, code: "FOLDER_REFUSED", message: checked.message };
-  const scan = await scanFolder(checked.path, { names }, { peekText: true });
+  const scan = await scanFolder(checked.path, { names }, { peekText: true, ...(locale ? { locale } : {}) });
   const copies = new Map<string, number>();
   for (const file of scan.files) if (file.duplicateOf) copies.set(file.duplicateOf, (copies.get(file.duplicateOf) ?? 0) + 1);
   const groups = new Map<string, PreviewGroup & { all: ScannedFile[] }>();
@@ -196,7 +201,7 @@ export async function previewFolder(raw: string, deps: FolderDeps, names: string
 }
 
 export async function addFolder(store: CrosslineStore, workspaceId: string, raw: string, deps: FolderDeps, rules?: { exclude?: unknown; include?: unknown; names?: unknown }) {
-  const checked = await checkedPath(raw, deps);
+  const checked = await checkedPath(raw, deps, localeOf(store, workspaceId));
   if (!checked.ok) return { state: "blocked" as const, code: "FOLDER_REFUSED", message: checked.message };
   const clean = { ...cleanFolderRules(rules), names: personNames(store, workspaceId, rules?.names) };
   const existing = list(store, workspaceId).find((folder) => folder.path.toLowerCase() === checked.path.toLowerCase());
@@ -279,11 +284,13 @@ export async function setFolderRules(store: CrosslineStore, workspaceId: string,
  * or a suspected private paper now leaves out. A file whose content is the same as one already stored becomes that document.
  */
 export async function syncFolder(store: CrosslineStore, workspaceId: string, folder: SourceFolder, deps: FolderDeps): Promise<{ read: number; waiting: number; removed: number }> {
+  const locale = localeOf(store, workspaceId);
+  const t = tFor(locale);
   const exists = await stat(folder.path).then((info) => info.isDirectory()).catch(() => false);
-  if (!exists) { update(store, workspaceId, folder.id, { lastScanAt: new Date().toISOString(), lastError: "找不到这个文件夹了（移动、改名或拔掉了磁盘？）" }); return { read: 0, waiting: 0, removed: 0 }; }
+  if (!exists) { update(store, workspaceId, folder.id, { lastScanAt: new Date().toISOString(), lastError: t("找不到这个文件夹了（移动、改名或拔掉了磁盘？）") }); return { read: 0, waiting: 0, removed: 0 }; }
   const saved = list(store, workspaceId).find((item) => item.id === folder.id) ?? folder;
   const rules = { ...saved, names: personNames(store, workspaceId, saved.names) };
-  const scan = await scanFolder(folder.path, rules);
+  const scan = await scanFolder(folder.path, rules, { locale });
   const index = readIndex(store, workspaceId, folder.id);
   const present = new Map(scan.files.map((file) => [file.relative, file]));
   // Left out now (excluded, a credential, or a private paper not ticked back): what was read from it goes. Gone from disk: the entry goes,
@@ -321,14 +328,14 @@ export async function syncFolder(store: CrosslineStore, workspaceId: string, fol
       doc = bySha.get(sha256);
       if (doc) created = createdHere.has(doc.id);
       else {
-        const result = await deps.readText(new Uint8Array(bytes), file.action.kind).catch(() => ({ status: "failed" as const, text: "", note: "解析失败。" }));
+        const result = await deps.readText(new Uint8Array(bytes), file.action.kind, locale).catch(() => ({ status: "failed" as const, text: "", note: t("解析失败。") }));
         // A key in its text: never kept, and no tick in the page brings it back.
         const key = credentialText(result.text);
-        if (key) { index[file.relative] = { size: file.size, mtimeMs: file.mtimeMs, documentId: "", sensitive: `内容含${key}`, hard: true }; done += 1; continue; }
+        if (key) { index[file.relative] = { size: file.size, mtimeMs: file.mtimeMs, documentId: "", sensitive: contains(key, locale), hard: true }; done += 1; continue; }
         const hit = sensitiveText(result.text);
         // Its text holds an ID or an account number: nothing is kept, and the card lists it as left out — unless the person ticked it back.
-        if (hit && !included(file.relative, rules)) { index[file.relative] = { size: file.size, mtimeMs: file.mtimeMs, documentId: "", sensitive: `内容含${hit}` }; done += 1; continue; }
-        if (hit) flagged = `内容含${hit}`;
+        if (hit && !included(file.relative, rules)) { index[file.relative] = { size: file.size, mtimeMs: file.mtimeMs, documentId: "", sensitive: contains(hit, locale) }; done += 1; continue; }
+        if (hit) flagged = contains(hit, locale);
         const target = path.resolve(root, `${sha256}.${EXTENSION[file.action.kind]}`);
         mkdirSync(root, { recursive: true });
         writeFileSync(target, bytes);

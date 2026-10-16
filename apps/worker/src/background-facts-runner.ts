@@ -5,9 +5,11 @@ import {
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import type { CrosslineStore } from "@crossline/db";
 import { identityLines } from "./lines";
+import { tOfWorkspace } from "./locale";
 
 export const BACKGROUND_FACTS_SKILL = "crossline:crossline-background-facts";
 
+// i18n-ignore-start: model-facing
 const INSTRUCTIONS = "You are silently compacting one capture into structured background facts about "
   + "the user's own identities/主线 — current experiment or paper title, key file or repo paths, the "
   + "client or project name, anything durable that later tasks in the same identity would benefit from "
@@ -20,6 +22,7 @@ const INSTRUCTIONS = "You are silently compacting one capture into structured ba
   + "that supports it; never paraphrase into the quote. If nothing in the capture is durable background "
   + "(most short task notes), return an empty facts array — that is success, not a blocker. Only use a "
   + "blocker for something that actually prevents processing, not for \"nothing to extract\".";
+// i18n-ignore-end
 
 export type BackgroundFactsOutcome =
   | { state: "extracted"; factCount: number }
@@ -43,10 +46,11 @@ export function buildBackgroundFactsContext(store: CrosslineStore, workspaceId: 
 export function createBackgroundFactsExtractor(store: CrosslineStore, workspaceId: string, cwd: string,
   getClient: () => CodexRpcBoundary | undefined) {
   return async function extract(captureTitle: string, captureContext: string, signal?: AbortSignal): Promise<BackgroundFactsOutcome> {
+    const t = tOfWorkspace(store, workspaceId);
     const client = getClient();
-    if (!client) return { state: "blocked", code: "CODEX_SUPERVISOR_UNAVAILABLE", message: "Codex 运行时不可用。" };
+    if (!client) return { state: "blocked", code: "CODEX_SUPERVISOR_UNAVAILABLE", message: t("Codex 运行时不可用。") };
     if (!captureTitle.trim() && !captureContext.trim()) {
-      return { state: "blocked", code: "BACKGROUND_FACTS_NO_INPUT", message: "捕获内容为空。" };
+      return { state: "blocked", code: "BACKGROUND_FACTS_NO_INPUT", message: t("捕获内容为空。") };
     }
     const context = buildBackgroundFactsContext(store, workspaceId, captureTitle, captureContext);
 

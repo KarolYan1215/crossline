@@ -6,6 +6,7 @@ import {
 import { runCodexSkill, webResearchBlocker, type CodexRpcBoundary } from "@crossline/codex";
 import type { CrosslineStore } from "@crossline/db";
 import { claimedTitleMatches } from "./diligence";
+import { localeOf, tOfWorkspace } from "./locale";
 import { ownerOf } from "./owner";
 import { defaultSafeGetDeps, htmlToText, safeGet, type SafeGetDeps } from "./safe-fetch";
 
@@ -49,7 +50,7 @@ export function energyAdviceInputs(store: CrosslineStore, workspaceId: string, n
   // The person's best hours as the web's energy model reads them: the first high-energy window of their pattern.
   const peak = current.windows.find((window) => window.energy === "high");
   const hourOf = (value: string) => { const [h, m] = value.split(":").map(Number); return (h ?? 0) + (m ?? 0) / 60; };
-  return { zone, worked, current, rule: energyAdviceRule({ now: now.toISOString(), zone, episodes: sleepFor(store, workspaceId, clock.hour), reports, worked,
+  return { zone, worked, current, rule: energyAdviceRule({ locale: localeOf(store, workspaceId), now: now.toISOString(), zone, episodes: sleepFor(store, workspaceId, clock.hour), reports, worked,
     statedPeak: peak ? { start: hourOf(peak.start), end: hourOf(peak.end) } : null }) };
 }
 
@@ -94,7 +95,8 @@ export async function computeEnergyAdvice(store: CrosslineStore, workspaceId: st
     store.setSetting(workspaceId, ENERGY_ADVICE_SETTING, JSON.stringify(advice));
     return advice;
   }
-  let review: EnergyAdviceReviewRecord = { state: "skipped", summary: deps.skippedBecause ?? "本周未做联网复核",
+  const t = tOfWorkspace(store, workspaceId);
+  let review: EnergyAdviceReviewRecord = { state: "skipped", summary: deps.skippedBecause ?? t("本周未做联网复核"),
     findings: [], adjustments: [], droppedSources: 0 };
   let levels = rule.levels, sources: Array<{ id: string; url: string; title: string }> = [];
   const blocker = deps.review ? (deps.webBlocker ?? webResearchBlocker)() : undefined;
@@ -114,10 +116,10 @@ export async function computeEnergyAdvice(store: CrosslineStore, workspaceId: st
       const state = result.output.verdict === "insufficient" ? "insufficient"
         : !verified.review.sources.length ? "unverified"
         : adjusted.applied > 0 ? "adjusted" : "agreed";
-      review = { state, summary: state === "unverified" ? "联网复核引用的来源均未能打开，只保留规则结果" : result.output.summary,
+      review = { state, summary: state === "unverified" ? t("联网复核引用的来源均未能打开，只保留规则结果") : result.output.summary,
         findings: verified.review.findings, adjustments: verified.review.adjustments, droppedSources: verified.dropped };
-    } else review = { ...review, summary: "联网复核未完成，只保留规则结果" };
-  } else if (deps.review) review = { ...review, summary: "联网复核暂不可用，只保留规则结果" };
+    } else review = { ...review, summary: t("联网复核未完成，只保留规则结果") };
+  } else if (deps.review) review = { ...review, summary: t("联网复核暂不可用，只保留规则结果") };
   const advice: EnergyAdvice = { computedAt, evidence: rule.evidence, id: adviceId(levels), levels, ruleLevels: rule.levels,
     summary: review.state === "agreed" || review.state === "adjusted" ? review.summary : rule.summary, basis: rule.basis, review, sources };
   store.setSetting(workspaceId, ENERGY_ADVICE_SETTING, JSON.stringify(advice));
@@ -143,7 +145,7 @@ export async function energyAdvicePass(input: { store: CrosslineStore; workspace
     input.enterUsage?.(workspaceId);
     const review = spendAllows(spend, "discretionary");
     const advice = await computeEnergyAdvice(store, workspaceId, input.cwd, { client: input.client(), review,
-      ...(review ? {} : { skippedBecause: "额度偏紧，本周未做联网复核" }) });
+      ...(review ? {} : { skippedBecause: tOfWorkspace(store, workspaceId)("额度偏紧，本周未做联网复核") }) });
     console.info(JSON.stringify({ type: "energy.advice", workspaceId, ...("insufficient" in advice ? { insufficient: true } : { id: advice.id, review: advice.review.state }) }));
   } finally { running.delete(workspaceId); }
 }

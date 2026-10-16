@@ -6,6 +6,7 @@ import {
 import { runCodexSkill, webResearchBlocker, type CodexRpcBoundary } from "@crossline/codex";
 import { listAgentTasks, saveMineVersion, type CrosslineStore, type StoredPreference } from "@crossline/db";
 import { identityLines } from "./lines";
+import { tOfWorkspace } from "./locale";
 import { ownerOf } from "./owner";
 import { defaultSafeGetDeps, safeGet, type SafeGetDeps } from "./safe-fetch";
 
@@ -35,6 +36,8 @@ const short = (text: string, max = 30) => (text.length > max ? `${text.slice(0, 
  * 「部分」 explanations, and — when the person edited the skill by hand — that edit.
  */
 export function mineMaterials(store: CrosslineStore, workspaceId: string, lineId: string): Array<MineMaterial & { key: string }> {
+  // The labels are what the line's skill cites beside each rule (shown in Settings → Skill 库): in the workspace's language.
+  const t = tOfWorkspace(store, workspaceId);
   const orders = store.listWorkOrders(workspaceId);
   const onLine = new Map(orders.filter((order) => order.identityId === lineId).map((order) => [order.id, order]));
   const tasks = new Map(listAgentTasks(store, workspaceId).map((task) => [task.taskId, task]));
@@ -44,35 +47,39 @@ export function mineMaterials(store: CrosslineStore, workspaceId: string, lineId
     const note = String((event.payload as { note?: unknown }).note ?? "").trim();
     const task = tasks.get(event.entityId);
     if (!note || !task || !onLine.has(task.workOrderId)) continue;
-    const decision = (event.payload as { decision?: string }).decision === "accepted" ? "采纳" : "退回";
+    const accepted = (event.payload as { decision?: string }).decision === "accepted";
+    const values = { day: day(event.createdAt), title: short(task.title) };
     found.push({ key: `review:${event.eventId}`, kind: "review", text: note, at: event.createdAt,
-      label: `${day(event.createdAt)} 本人${decision}助手结果「${short(task.title)}」时的备注` });
+      label: accepted ? t("{{day}} 本人采纳助手结果「{{title}}」时的备注", values) : t("{{day}} 本人退回助手结果「{{title}}」时的备注", values) });
   }
   for (const entry of store.listPreferences(workspaceId)) {
     if (!PLAY_SOURCES.has(entry.source)) continue;
     const taskId = entry.scope.startsWith("task:") ? entry.scope.slice(5) : "";
     if (entry.scope !== lineId && !onLine.has(taskId)) continue;
     found.push({ key: `pref:${entry.id}`, kind: "preference", text: entry.text, at: entry.createdAt,
-      label: `${day(entry.createdAt)} ${PREFERENCE_LABEL[entry.source] ?? "本人的偏好"}` });
+      label: `${day(entry.createdAt)} ${t(PREFERENCE_LABEL[entry.source] ?? "本人的偏好")}` });
   }
   for (const order of onLine.values()) {
     const review = (order.payload as { gateReview?: { verdict?: string; fit?: { fits: boolean; violated: string[]; why: string } } }).gateReview;
     if (review?.verdict !== "partial" || !review.fit || review.fit.fits) continue;
     const judged = store.listEvents(workspaceId, { type: "milestone_gate.judged", entityId: order.id }).at(-1);
     found.push({ key: `gate:${order.id}:${judged?.eventId ?? ""}`, kind: "gate", at: judged?.createdAt ?? "",
-      text: `违背：${review.fit.violated.join("；")}。${review.fit.why}`, label: `${day(judged?.createdAt ?? "")} 验收判「${short(order.intent)}」为部分符合` });
+      // The material's text is part of the fingerprint that decides a recompile: kept in one wording, so switching the language does not
+      // rewrite every line's skill. The label is what the person reads.
+      text: `违背：${review.fit.violated.join("；")}。${review.fit.why}`, // i18n-ignore
+      label: t("{{day}} 验收判「{{title}}」为部分符合", { day: day(judged?.createdAt ?? ""), title: short(order.intent) }) });
   }
   const stored = readMineSkill(store.getSetting(workspaceId, mineSkillSettingKey(lineId)));
   const current = currentMineVersion(stored);
   if (current?.by === "person") {
-    found.push({ key: `edit:v${current.version}`, kind: "edit", text: current.markdown, at: current.at, label: `${day(current.at)} 本人编辑的第 ${current.version} 版` });
+    found.push({ key: `edit:v${current.version}`, kind: "edit", text: current.markdown, at: current.at, label: t("{{day}} 本人编辑的第 {{version}} 版", { day: day(current.at), version: current.version }) });
   }
   const facts = store.listProfileFacts(workspaceId, { identityId: lineId }).filter((fact) => fact.status === "confirmed")
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, MAX_FACTS);
   for (const fact of facts) {
     found.push({ key: `fact:${fact.projectId}/${fact.slot}`, kind: "fact", at: fact.updatedAt,
-      text: `${fact.value}${fact.sourceQuote && fact.sourceQuote !== fact.value ? `（原话：${fact.sourceQuote}）` : ""}`,
-      label: `访谈中确认的「${fact.slot}」` });
+      text: `${fact.value}${fact.sourceQuote && fact.sourceQuote !== fact.value ? `（原话：${fact.sourceQuote}）` : ""}`, // i18n-ignore: fingerprinted (see above)
+      label: t("访谈中确认的「{{slot}}」", { slot: fact.slot }) });
   }
   return found.map((material, index) => ({ ...material, id: `m${index + 1}` }));
 }
@@ -143,7 +150,7 @@ export function createInsightCompiler(store: CrosslineStore, workspaceId: string
     for (const rule of result.output.rules) {
       if (!rule.sources.length) {
         const page = await safeGet(rule.url, deps.safeGet ?? defaultSafeGetDeps(), { maxBytes: 2_000_000, timeoutMs: 20_000 }).catch(() => undefined);
-        if (!page?.ok) { dropped.push(`${rule.text.slice(0, 40)}：来源页面无法打开`); continue; }
+        if (!page?.ok) { dropped.push(`${rule.text.slice(0, 40)}：来源页面无法打开`); continue; } // i18n-ignore: logged only
       }
       rules.push(rule);
     }

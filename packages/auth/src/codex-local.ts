@@ -2,6 +2,7 @@ import { APIError, createAuthEndpoint } from "better-auth/api";
 import { setSessionCookie } from "better-auth/cookies";
 import { handleOAuthUserInfo } from "better-auth/oauth2";
 import type { BetterAuthPlugin } from "better-auth";
+import { localeFromCookieHeader, tFor } from "@crossline/core";
 
 /**
  * Signing in on an installed copy (docs/local-installer.md, 登录): the person signs in to Codex with ChatGPT once — the one OpenAI
@@ -51,19 +52,21 @@ export function codexLocalSignIn(options: { readAccount: ReadLocalCodexAccount }
     id: "crossline-codex-local",
     endpoints: {
       codexLocalSession: createAuthEndpoint("/codex-local/session", { method: "POST", requireHeaders: true }, async (ctx) => {
+        // Before anyone is signed in, the page's own language (its cookie) is the only one there is.
+        const t = tFor(localeFromCookieHeader(ctx.headers?.get("cookie")));
         if (!isDirectLoopbackRequest(ctx.headers!, ctx.context.baseURL))
-          throw new APIError("FORBIDDEN", { code: "LOCAL_SIGNIN_LOOPBACK_ONLY", message: "只能在本机地址上登录" });
+          throw new APIError("FORBIDDEN", { code: "LOCAL_SIGNIN_LOOPBACK_ONLY", message: t("只能在本机地址上登录") });
         let account: LocalCodexAccount | null | undefined;
         try { account = await options.readAccount(); }
-        catch { throw new APIError("SERVICE_UNAVAILABLE", { code: "CODEX_UNAVAILABLE", message: "Codex 还没有启动好" }); }
-        if (!account) throw new APIError("CONFLICT", { code: "CODEX_NOT_SIGNED_IN", message: "Codex 还没有用 ChatGPT 登录" });
+        catch { throw new APIError("SERVICE_UNAVAILABLE", { code: "CODEX_UNAVAILABLE", message: t("Codex 还没有启动好") }); }
+        if (!account) throw new APIError("CONFLICT", { code: "CODEX_NOT_SIGNED_IN", message: t("Codex 还没有用 ChatGPT 登录") });
         const result = await handleOAuthUserInfo(ctx, {
           userInfo: { id: account.email, email: account.email, name: account.email.split("@")[0] ?? account.email, emailVerified: true, image: null },
           account: { providerId: "codex", accountId: account.email },
           callbackURL: "/",
           source: { method: "oauth", oauth: { providerId: "codex", profile: { email: account.email } } }
         } as Parameters<typeof handleOAuthUserInfo>[1]);
-        if (result.error || !result.data) throw new APIError("BAD_REQUEST", { code: "LOCAL_SIGNIN_FAILED", message: String(result.error ?? "登录失败") });
+        if (result.error || !result.data) throw new APIError("BAD_REQUEST", { code: "LOCAL_SIGNIN_FAILED", message: String(result.error ?? t("登录失败")) });
         await setSessionCookie(ctx, { session: result.data.session, user: result.data.user });
         return ctx.json({ ok: true, email: account.email });
       })

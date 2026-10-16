@@ -1,3 +1,4 @@
+import { tFor, type Locale } from "@crossline/i18n";
 import type { PlannerTask } from "./index";
 
 export type ForecastGoal = { id: string; title: string; importance: "important" | "ordinary";
@@ -25,8 +26,10 @@ export const DEADLINE_MARGIN_DAYS = 2;
  * Daily capacity simulation, shared by p50 and p85 so the two dates have the same assumptions. The horizon is as many weeks as `days`
  * covers: eight for the usual 56 days; the plan page may ask for four, or up to six months.
  */
+/** `locale`: the language of each goal's `bottleneck`, which the plan page shows as written (omitted = Chinese). */
 export function forecastGoals(goals: ForecastGoal[], tasks: PlannerTask[], days: ForecastDay[],
-  completedIds = new Set<string>()): ForecastResult {
+  completedIds = new Set<string>(), locale?: Locale): ForecastResult {
+  const t = tFor(locale);
   const weekCount = Math.max(1, Math.ceil(days.length / 7));
   const spans = Array.from({ length: weekCount }, (_, week) => {
     const netMinutes = days.slice(week * 7, week * 7 + 7).reduce((sum, day) => sum + day.netMinutes, 0);
@@ -115,7 +118,7 @@ export function forecastGoals(goals: ForecastGoal[], tasks: PlannerTask[], days:
     });
     return { ...span, demand };
   });
-  const horizonLabel = weekCount === 8 ? "八周" : `${weekCount} 周`;
+
   return { weeks, goals: goals.map((goal) => {
     const own = work.filter((task) => task.milestoneId === goal.id);
     const finalDay = (result: { finished: Map<string, string>; blocked: Set<string> }) => {
@@ -126,11 +129,11 @@ export function forecastGoals(goals: ForecastGoal[], tasks: PlannerTask[], days:
     const p85Day = finalDay(p85);
     const slackDays = goal.confirmedDeadline && p85Day
       ? Math.round((Date.parse(`${goal.confirmedDeadline}T00:00:00Z`) - Date.parse(`${p85Day}T00:00:00Z`)) / 86_400_000) : null;
-    const bottleneck = !own.length ? "尚无绑定作业；需先反推步骤"
-      : goal.importance === "ordinary" && !goal.confirmedDeadline ? "第四象限暂缓；请确认日期或提升重要性"
-        : !p85Day ? `${horizonLabel}内容量或步骤依赖不足`
-          : goal.confirmedDeadline && p85Day > goal.confirmedDeadline ? "p85 情景晚于已确认截止时间"
-            : slackDays !== null && slackDays < DEADLINE_MARGIN_DAYS ? `p85 情景只比截止早 ${slackDays} 天，没有留出 ${DEADLINE_MARGIN_DAYS} 天的余量` : null;
+    const bottleneck = !own.length ? t("尚无绑定作业；需先反推步骤")
+      : goal.importance === "ordinary" && !goal.confirmedDeadline ? t("第四象限暂缓；请确认日期或提升重要性")
+        : !p85Day ? (weekCount === 8 ? t("八周内容量或步骤依赖不足") : t("{{count}} 周内容量或步骤依赖不足", { count: weekCount }))
+          : goal.confirmedDeadline && p85Day > goal.confirmedDeadline ? t("p85 情景晚于已确认截止时间")
+            : slackDays !== null && slackDays < DEADLINE_MARGIN_DAYS ? t("p85 情景只比截止早 {{slack}} 天，没有留出 {{margin}} 天的余量", { slack: slackDays, margin: DEADLINE_MARGIN_DAYS }) : null;
     return { milestoneId: goal.id, title: goal.title, p50Day, p85Day,
       suggestedTargetDay: goal.confirmedDeadline ? null : p85Day,
       confirmedDeadline: goal.confirmedDeadline, bottleneck, slackDays,

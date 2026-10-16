@@ -1,12 +1,13 @@
 import { randomUUID } from "node:crypto";
 import {
-  TASK_MERGE_REVIEW_SCHEMA, infoRequestSteps, planMerges, spendAllows, taskTitleOf, textSimilarity, normalizeTaskTitle, validateTaskMergeReview,
+  TASK_MERGE_REVIEW_SCHEMA, infoRequestSteps, planMerges, spendAllows, taskTitleOf, textSimilarity, normalizeTaskTitle, validateTaskMergeReview, tFor,
   type BackgroundKind, type BackgroundSpend, type InfoRequest, type MergeGroup, type MergeTask, type TaskMergeReview
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import type { CrosslineStore, StepPlanInput, StoredWorkOrder } from "@crossline/db";
 import { ownerOf } from "./owner";
 import { sayToPerson } from "./workflow-smith";
+import { localeOf } from "./locale";
 
 /**
  * The daily self-check (the owner's decision of 2026-10-15): near-identical open tasks are merged, and a standalone request for a fact is
@@ -61,12 +62,16 @@ const snapshotOf = (store: CrosslineStore, workspaceId: string, orderId: string)
  * task's open steps are appended (a step whose title the kept plan already has is dropped). Without a plan of its own the kept task
  * carries the requests in `infoRequests` for the step planner, or takes over the absorbed task's plan.
  */
-export function applyMerge(store: CrosslineStore, workspaceId: string, group: MergeGroup, now = new Date()): { keep: string; absorbed: string[]; label: string } | undefined {
+export function applyMerge(store: CrosslineStore, workspaceId: string, group: MergeGroup, now = new Date()): { keep: string; absorbed: string[]; label: string; merged: string } | undefined {
   const orders = new Map(store.listWorkOrders(workspaceId).map((order) => [order.id, order]));
   const keep = orders.get(group.keep);
   const absorbed = group.absorb.map((id) => orders.get(id)).filter((order): order is StoredWorkOrder => Boolean(order) && order!.state !== "archived" && order!.state !== "accepted");
   if (!keep || !absorbed.length || ["archived", "accepted"].includes(keep.state)) return undefined;
   const owner = ownerOf(store, workspaceId);
+  // What is written for the person (steps, the archive reason, the undo label) is in the workspace's language.
+  const locale = localeOf(store, workspaceId);
+  const t = tFor(locale);
+  const quoted = (title: string) => locale === "en" ? `"${title}"` : `「${title}」`;
   const beforePayload = keep.payload;
   const beforePlan = snapshotOf(store, workspaceId, keep.id);
   const payload = { ...((keep.payload ?? {}) as Record<string, unknown>) } as Record<string, unknown> & {
@@ -80,12 +85,12 @@ export function applyMerge(store: CrosslineStore, workspaceId: string, group: Me
     if (own) requests.push(own);
     const otherPlan = snapshotOf(store, workspaceId, order.id);
     if (plan) {
-      const front = requests.flatMap((request) => infoRequestSteps(request, { draft: fresh("m-d"), send: fresh("m-s") }));
+      const front = requests.flatMap((request) => infoRequestSteps(request, { draft: fresh("m-d"), send: fresh("m-s") }, [], locale));
       const titles = plan.steps.map((step) => normalizeTaskTitle(step.title));
       const carried = group.kind === "duplicate" && otherPlan ? otherPlan.steps.filter((step) => step.status === "planned"
         && !titles.some((title) => textSimilarity(title, normalizeTaskTitle(step.title)) >= 0.8)) : [];
       plan.steps = [...front, ...plan.steps, ...carried.map((step) => ({ ...step, id: fresh("m-c"), dependsOn: [] as string[],
-        why: step.why || `由「${taskTitleOf(order)}」并入` }))];
+        why: step.why || t("由「{{title}}」并入", { title: taskTitleOf(order) }) }))];
     } else if (group.kind === "duplicate" && otherPlan) {
       plan = { ...otherPlan, steps: otherPlan.steps.filter((step) => step.status === "planned").map((step) => ({ ...step })) };
       payload.infoRequests = [...(payload.infoRequests ?? []), ...requests];
@@ -114,17 +119,18 @@ export function applyMerge(store: CrosslineStore, workspaceId: string, group: Me
     const attempt = store.listEvents(workspaceId, { type: "work_order.archived", entityId: order.id }).length;
     const suffix = attempt ? `:${attempt}` : "";
     store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `archive-reason:${order.id}${suffix}`, type: "work_order.archived", entityId: order.id,
-      payload: { reason: `与「${keepTitle}」合并`, from: order.state, bySystem: true, mergedInto: keep.id } });
+      payload: { reason: t("与「{{title}}」合并", { title: keepTitle }), from: order.state, bySystem: true, mergedInto: keep.id } });
     store.transitionWorkOrder(workspaceId, order.id, { type: "archived" }, `archive:${order.id}${suffix}`);
   }
-  const label = `合并任务：${absorbed.map((order) => `「${taskTitleOf(order)}」`).join("、")}并入「${keepTitle}」`;
+  const merged = t("{{absorbed}}并入「{{keep}}」", { absorbed: absorbed.map((order) => quoted(taskTitleOf(order))).join(locale === "en" ? ", " : "、"), keep: keepTitle });
+  const label = t("合并任务：{{merged}}", { merged });
   // One undoable operation, in the shape the web's undo log reads (apps/web/lib/undo.ts).
   const opId = `op-${now.getTime().toString(36)}-${randomUUID().slice(0, 6)}`;
   store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `op.applied:${opId}`, type: "op.applied", entityId: opId,
     payload: { label: label.slice(0, 160), inverse: { kind: "task.unmerge", keepId: keep.id, payload: beforePayload, plan: beforePlan, restore: absorbed.map((order) => order.id) } } });
   store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `task.merged:${keep.id}:${opId}`, type: "task.merged", entityId: keep.id,
     payload: { kind: group.kind, absorbed: absorbed.map((order) => order.id), reason: group.reason, opId } });
-  return { keep: keep.id, absorbed: absorbed.map((order) => order.id), label };
+  return { keep: keep.id, absorbed: absorbed.map((order) => order.id), label, merged };
 }
 
 /** Asks the reviewer about the pairs the rules left open; remembers each answer so a pair is asked once. */
@@ -171,7 +177,9 @@ export async function dedupePass(deps: { store: CrosslineStore; workspaceId: str
   if (catchUp && store.getSetting(workspaceId, DEDUPE_REVIEW_DAY_SETTING) === day) return [];
   const judged = readJudged(store, workspaceId);
   const sameKeys = () => new Set(Object.entries(readJudged(store, workspaceId)).filter(([, same]) => same).map(([key]) => key));
-  let { groups, unsure } = planMerges(mergeTasks(store, workspaceId), sameKeys());
+  const locale = localeOf(store, workspaceId);
+  const t = tFor(locale);
+  let { groups, unsure } = planMerges(mergeTasks(store, workspaceId), sameKeys(), locale);
   const open = unsure.filter((pair) => judged[`${pair.a}|${pair.b}`] === undefined && judged[`${pair.b}|${pair.a}`] === undefined);
   if (catchUp && !open.length) return [];
   if (!catchUp) store.setSetting(workspaceId, DEDUPE_DAY_SETTING, day);
@@ -180,12 +188,13 @@ export async function dedupePass(deps: { store: CrosslineStore; workspaceId: str
     store.setSetting(workspaceId, DEDUPE_REVIEW_DAY_SETTING, day);
     deps.enterUsage(workspaceId);
     const same = await reviewPairs(store, workspaceId, client, deps.cwd, open).catch(() => undefined);
-    if (same?.size) ({ groups, unsure } = planMerges(mergeTasks(store, workspaceId), same));
+    if (same?.size) ({ groups, unsure } = planMerges(mergeTasks(store, workspaceId), same, locale));
   } else if (catchUp) return [];
   // Requests first, so a task that took one in and is then merged as a duplicate carries it along.
   const ordered = [...groups.filter((group) => group.kind === "info_request"), ...groups.filter((group) => group.kind === "duplicate")];
   const done = ordered.map((group) => applyMerge(store, workspaceId, group, now)).filter((item): item is NonNullable<typeof item> => Boolean(item));
-  if (done.length) sayToPerson(store, workspaceId, `今天的自检合并了 ${done.reduce((sum, item) => sum + item.absorbed.length, 0)} 个重复或只需一封邮件的任务：\n${done.map((item) => `- ${item.label.replace(/^合并任务：/, "")}`).join("\n")}\n可在任务页「已归档」的「已合并」里撤销。`,
-    "tasks_merged", catchUp ? `merged:${day}:review` : `merged:${day}`, [{ label: "查看", href: "/approvals" }], now);
+  if (done.length) sayToPerson(store, workspaceId, [t("今天的自检合并了 {{count}} 个重复或只需一封邮件的任务：", { count: done.reduce((sum, item) => sum + item.absorbed.length, 0) }),
+    ...done.map((item) => `- ${item.merged}`), t("可在任务页「已归档」的「已合并」里撤销。")].join("\n"),
+    "tasks_merged", catchUp ? `merged:${day}:review` : `merged:${day}`, [{ label: t("查看", { context: "view" }), href: "/approvals" }], now);
   return done;
 }

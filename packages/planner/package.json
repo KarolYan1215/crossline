@@ -8,6 +8,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@crossline/i18n": "workspace:*",
     "highs": "1.15.3"
   },
   "devDependencies": {

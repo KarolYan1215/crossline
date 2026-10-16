@@ -488,6 +488,9 @@ importers:
       '@azure/msal-node-extensions':
         specifier: ^5.5.0
         version: 5.5.0
+      '@crossline/i18n':
+        specifier: workspace:*
+        version: link:../i18n
       ical.js:
         specifier: 2.2.1
         version: 2.2.1
@@ -535,6 +538,9 @@ importers:
 
   packages/planner:
     dependencies:
+      '@crossline/i18n':
+        specifier: workspace:*
+        version: link:../i18n
       highs:
         specifier: 1.15.3
         version: 1.15.3

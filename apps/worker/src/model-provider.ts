@@ -1,6 +1,6 @@
 import {
   admittedSkills, conformanceCases, conformanceCurrent, jsonSchemaProblems, SKILL_NEEDS, summarizeConformance, unavailableOnThirdParty,
-  capabilityGap, THIRD_PARTY_CAPABILITIES, type ConformanceCase, type ConformanceRecord, type ConformanceRun, type CostSignal
+  capabilityGap, tFor, THIRD_PARTY_CAPABILITIES, type ConformanceCase, type ConformanceRecord, type ConformanceRun, type CostSignal
 } from "@crossline/core";
 import {
   CODEX_FORK_BINARY_SHA256, isLocalProvider, MODEL_PROVIDER_SETTING, providerConfigProblem, runCodexSkill, threadProvider,
@@ -9,6 +9,7 @@ import {
 import { imageBackendFromEnv, webSearchFromEnv, type ImageBackend, type SecretStore, type WebSearchBackend } from "@crossline/connectors";
 import type { CrosslineStore } from "@crossline/db";
 import { ownerOf } from "./owner";
+import { localeOf } from "./locale";
 import { createWebTools } from "./web-tools";
 
 /**
@@ -142,17 +143,21 @@ export function createModelProviderService(options: {
 
   /** What the settings card shows: the configuration (no key), and per function whether this provider serves it, and why not. */
   const view = (workspaceId: string) => {
+    const locale = localeOf(options.store, workspaceId);
+    const t = tFor(locale);
     const provider = config(workspaceId);
     const record = provider ? latest(workspaceId, provider) : undefined;
     const valid = provider ? current(workspaceId, provider) : undefined;
     const admitted = new Set(valid ? admittedSkills(valid, capabilities) : []);
     const features = Object.entries(SKILL_NEEDS).filter(([, needs]) => !needs.testOnly).map(([skill, needs]) => {
-      const gap = capabilityGap(skill, capabilities);
+      const gap = capabilityGap(skill, capabilities, locale);
       const failed = record?.runs.filter((run) => needs.schemas.includes(run.caseId) && !run.ok).length ?? 0;
-      return { skill, label: needs.label, critical: Boolean(needs.critical), served: admitted.has(skill),
-        reason: admitted.has(skill) ? "" : gap ?? (!valid ? "还没有检验，或检验已过期" : failed ? `检验中 ${failed} 次没有按格式回答` : needs.critical ? "要求每次都一次答对" : "整体通过率不到 90%") };
+      return { skill, label: t(needs.label), critical: Boolean(needs.critical), served: admitted.has(skill),
+        reason: admitted.has(skill) ? "" : gap ?? (!valid ? t("还没有检验，或检验已过期") : failed ? t("检验中 {{count}} 次没有按格式回答", { count: failed })
+          : needs.critical ? t("要求每次都一次答对") : t("整体通过率不到 90%")) };
     });
-    return { provider: provider ?? null, presets: PROVIDER_PRESETS, unavailable: unavailableOnThirdParty(capabilities), signedIn: options.signedIn(workspaceId),
+    return { provider: provider ?? null, presets: PROVIDER_PRESETS.map((preset) => ({ ...preset, label: t(preset.label) })),
+      unavailable: unavailableOnThirdParty(capabilities, locale), signedIn: options.signedIn(workspaceId),
       conformance: record ? { ranAt: record.ranAt, model: record.model, passRate: record.passRate, repairRate: record.repairRate, p95Ms: record.p95Ms,
         runs: record.runs.length, failures: record.failures, current: Boolean(valid) } : null,
       features, testing: testing.get(workspaceId) ?? null };
@@ -160,25 +165,26 @@ export function createModelProviderService(options: {
 
   async function save(workspaceId: string, body: Record<string, unknown>): Promise<{ status: number; body: unknown }> {
     const text = (value: unknown) => typeof value === "string" ? value.trim() : "";
+    const t = tFor(localeOf(options.store, workspaceId));
     const previous = config(workspaceId);
     const kind: ProviderConfig["kind"] | undefined = body.kind === "chat" || body.kind === "responses" ? body.kind : undefined;
     const next = { id: text(body.id), kind: kind ?? "responses" as const, label: text(body.label), baseUrl: text(body.baseUrl).replace(/\/+$/, ""), model: text(body.model) };
-    const problem = !kind ? "接口类型不认识。" : providerConfigProblem(next);
+    const problem = !kind ? t("接口类型不认识。") : providerConfigProblem(next, localeOf(options.store, workspaceId));
     if (problem) return { status: 400, body: { blocker: { code: "PROVIDER_CONFIG_INVALID", message: problem } } };
     const apiKey = text(body.apiKey);
-    if (apiKey.length > 400) return { status: 400, body: { blocker: { code: "PROVIDER_CONFIG_INVALID", message: "API key 太长。" } } };
+    if (apiKey.length > 400) return { status: 400, body: { blocker: { code: "PROVIDER_CONFIG_INVALID", message: t("API key 太长。") } } };
     // A key is kept only for the same provider and address it was given for; changing either asks for it again.
     const sameTarget = previous && previous.id === next.id && previous.baseUrl === next.baseUrl;
     let keyLast4 = sameTarget ? previous.keyLast4 : null;
     if (apiKey) {
       try { await options.secrets.write(workspaceId, SECRET_NAME, apiKey); }
-      catch { return { status: 503, body: { blocker: { code: "SECRET_STORE_UNAVAILABLE", message: "这台电脑上没有可用的加密存储，密钥没有保存。" } } }; }
+      catch { return { status: 503, body: { blocker: { code: "SECRET_STORE_UNAVAILABLE", message: t("这台电脑上没有可用的加密存储，密钥没有保存。") } } }; }
       keys.set(workspaceId, apiKey);
       keyLast4 = apiKey.slice(-4);
     } else if (!sameTarget) { options.secrets.remove(workspaceId, SECRET_NAME); keys.delete(workspaceId); }
     const saved: ProviderConfig = { ...next, keyLast4, updatedAt: now().toISOString(),
       ...(body.responseFormat === "json_object" && kind === "chat" ? { responseFormat: "json_object" as const } : {}) };
-    if (!saved.keyLast4 && !isLocalProvider(saved.baseUrl)) return { status: 400, body: { blocker: { code: "PROVIDER_KEY_MISSING", message: "这个接口需要 API key。" } } };
+    if (!saved.keyLast4 && !isLocalProvider(saved.baseUrl)) return { status: 400, body: { blocker: { code: "PROVIDER_KEY_MISSING", message: t("这个接口需要 API key。") } } };
     options.store.setSetting(workspaceId, MODEL_PROVIDER_SETTING, JSON.stringify(saved));
     options.store.appendEvent({ ownerId: ownerOf(options.store, workspaceId), workspaceId, idempotencyKey: `${PROVIDER_CHANGED_EVENT}:${saved.updatedAt}`,
       type: PROVIDER_CHANGED_EVENT, entityId: saved.id, payload: { id: saved.id, kind: saved.kind, label: saved.label, baseUrl: saved.baseUrl, model: saved.model } });
@@ -198,7 +204,7 @@ export function createModelProviderService(options: {
       return { status: 200, body: view(workspaceId) };
     }
     if (pathname === "/v1/model/provider/test" && method === "POST") {
-      if (!config(workspaceId)) return { status: 409, body: { blocker: { code: "PROVIDER_NOT_CONFIGURED", message: "还没有添加模型连接。" } } };
+      if (!config(workspaceId)) return { status: 409, body: { blocker: { code: "PROVIDER_NOT_CONFIGURED", message: tFor(localeOf(options.store, workspaceId))("还没有添加模型连接。") } } };
       if (testing.has(workspaceId)) return { status: 202, body: view(workspaceId) };
       // Answered at once; the run takes minutes per case and writes its record to the ledger, which the card polls.
       void runConformance(workspaceId).catch((error: unknown) => console.warn(JSON.stringify({ type: "model.provider.conformance_failed",
