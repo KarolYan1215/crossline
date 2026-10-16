@@ -9,6 +9,7 @@
  */
 import type { TaskOpType } from "./assistant-schema";
 import { SHIFT_MINUTES } from "./schedule-frozen";
+import { tFor, type Locale } from "./i18n";
 
 export type ActionRisk = "internal" | "commitment";
 
@@ -141,6 +142,7 @@ export type ConciergeRefs = {
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
 
+/* i18n-ignore-start: why an action cannot run, sent back to the model to repair against */
 /** Why one proposed action cannot be carried out, in words the model can repair against; "" when it can. */
 export function actionProblem(item: ProposedAction, refs: ConciergeRefs): string {
   const a = item.args as Record<string, unknown>;
@@ -229,6 +231,7 @@ export function actionProblem(item: ProposedAction, refs: ConciergeRefs): string
       return item.args.criteria.every((criterion) => criterion.statement.trim()) ? "" : "每条标准都需要表述";
   }
 }
+/* i18n-ignore-end */
 
 /**
  * The turn as it can be shown: every action carried out as proposed or not at all. An action that refers to something that does not
@@ -244,7 +247,7 @@ export function validateConciergeTurn(raw: unknown, refs: ConciergeRefs): Concie
 }
 
 /** After the repairs: drops the actions that still cannot be carried out, and clarify options left with nothing to do. */
-export function keepUsable(raw: unknown, refs: ConciergeRefs): ConciergeTurn | undefined {
+export function keepUsable(raw: unknown, refs: ConciergeRefs, locale?: Locale): ConciergeTurn | undefined {
   let turn: ConciergeTurn;
   try { turn = normalizeTurn(raw); } catch { return undefined; }
   const keep = turn.actions.map((item) => !actionProblem(item, refs));
@@ -254,7 +257,7 @@ export function keepUsable(raw: unknown, refs: ConciergeRefs): ConciergeTurn | u
   const options = turn.clarify.options.map((option) => ({ label: option.label, actions: option.actions.filter((index) => renumber.has(index)).map((index) => renumber.get(index)!) }))
     .filter((option, index) => option.actions.length || !turn.clarify.options[index]!.actions.length);
   const dropped = turn.actions.length - actions.length;
-  const reply = [turn.reply, dropped ? `有 ${dropped} 项无法确定对象，未列出。` : ""].filter(Boolean).join(" ");
+  const reply = [turn.reply, dropped ? tFor(locale)("有 {{count}} 项无法确定对象，未列出。", { count: dropped }) : ""].filter(Boolean).join(" ");
   if (!reply && !actions.length && !options.length) return undefined;
   return { reply, confidence: "low", actions, clarify: options.length ? { question: turn.clarify.question, options } : { question: "", options: [] }, corrects: turn.corrects };
 }
@@ -308,8 +311,8 @@ export function templateCriterion(raw: TemplateCriterion, index: number): import
   }
 }
 
-/** The words on the card for one action: its verb and the model's one-line summary. */
-export const actionLabel = (item: ProposedAction): string => ACTIONS[item.action].label;
+/** The words on the card for one action: its verb (in the person's language) and the model's one-line summary. */
+export const actionLabel = (item: ProposedAction, locale?: Locale): string => tFor(locale)(ACTIONS[item.action].label);
 
 /**
  * What the web knows right now, handed to the worker with each turn (docs/one-input.md §3.2). Only the short `snapshot` goes into the
@@ -353,6 +356,7 @@ export function conciergeRefs(pack: ConciergePack): ConciergeRefs {
   };
 }
 
+/* i18n-ignore-start: the lookups' descriptions and answers are read by the model */
 const QUERY = { type: "object", properties: { query: { type: "string", description: "关键词（标题、课程、项目或主线）；空字符串列出全部" } }, required: ["query"], additionalProperties: false };
 const ID = { type: "object", properties: { id: { type: "string" } }, required: ["id"], additionalProperties: false };
 const NONE = { type: "object", properties: {}, additionalProperties: false };
@@ -402,3 +406,4 @@ export function answerFromPack(pack: ConciergePack, name: string, args: Record<s
     default: return `没有名为 ${name} 的查询`;
   }
 }
+/* i18n-ignore-end */

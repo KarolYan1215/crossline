@@ -130,6 +130,10 @@ describe("the review's contract", () => {
     expect(() => validateEnergyAdviceReview({ ...ok, adjustments: [] })).toThrow("ADJUST_EMPTY");
     expect(() => validateEnergyAdviceReview({ ...ok, verdict: "agree" })).toThrow("ADJUST_UNEXPECTED");
     expect(() => validateEnergyAdviceReview({ ...ok, summary: "你的午后偏低" })).toThrow("ENERGY_REVIEW_PERSON");
+    // The same in English: third person only.
+    expect(() => validateEnergyAdviceReview({ ...ok, summary: "Your afternoons run low" })).toThrow("ENERGY_REVIEW_PERSON");
+    expect(() => validateEnergyAdviceReview({ ...ok, summary: "I would lower 13:30–15:00" })).toThrow("ENERGY_REVIEW_PERSON");
+    expect(validateEnergyAdviceReview({ ...ok, summary: "The post-lunch dip is well supported; 13:30–15:00 lowered." }).verdict).toBe("adjust");
     expect(() => validateEnergyAdviceReview({ ...ok, adjustments: [{ ...ok.adjustments[0], start: "15:00", end: "13:30" }] })).toThrow("RANGE_INVALID");
   });
 });

@@ -1,4 +1,5 @@
 import { budgetPolicy } from "./index";
+import { tFor, type Locale } from "./i18n";
 
 /**
  * What discretionary work is allowed to spend, expressed without naming a currency or a vendor.
@@ -39,18 +40,19 @@ export type SpendDecision =
  * for. Absence of a signal is a refusal, not a green light: without a reading there is no way to know
  * whether spending now would take the quota a person needs when they sit down.
  */
-export function allowDiscretionarySpend(signal: CostSignal, policy: SpendPolicy): SpendDecision {
+export function allowDiscretionarySpend(signal: CostSignal, policy: SpendPolicy, locale?: Locale): SpendDecision {
+  const t = tFor(locale);
   if (!signal.available) {
-    return { allowed: false, code: "COST_SIGNAL_UNAVAILABLE", message: `读不到成本信号，暂不运行自动任务：${signal.reason}` };
+    return { allowed: false, code: "COST_SIGNAL_UNAVAILABLE", message: t("读不到成本信号，暂不运行自动任务：{{reason}}", { reason: signal.reason }) };
   }
   if (signal.limitReached) {
-    return { allowed: false, code: "RATE_LIMIT_REACHED", message: "配额已用尽，等待窗口恢复后再运行。" };
+    return { allowed: false, code: "RATE_LIMIT_REACHED", message: t("配额已用尽，等待窗口恢复后再运行。") };
   }
   if (signal.long && signal.long.usedPercent >= policy.longWindowCeilingPercent) {
     return {
       allowed: false,
       code: "LONG_WINDOW_BUDGET_SPENT",
-      message: `周窗口已用 ${Math.round(signal.long.usedPercent)}%，超过 ${policy.longWindowCeilingPercent}% 上限，本轮搁置。`
+      message: t("周窗口已用 {{used}}%，超过 {{ceiling}}% 上限，本轮搁置。", { used: Math.round(signal.long.usedPercent), ceiling: policy.longWindowCeilingPercent })
     };
   }
   const used = signal.short?.usedPercent ?? 0;
@@ -59,7 +61,7 @@ export function allowDiscretionarySpend(signal: CostSignal, policy: SpendPolicy)
     return {
       allowed: false,
       code: "WINDOW_BUDGET_SPENT",
-      message: `当前窗口已用 ${Math.round(used)}%，达到 ${policy.windowSharePercent}% 的自动任务上限。`
+      message: t("当前窗口已用 {{used}}%，达到 {{share}}% 的自动任务上限。", { used: Math.round(used), share: policy.windowSharePercent })
     };
   }
   // The three-tier degradation is real here because it reads a measured percentage, not an estimate.
@@ -105,21 +107,22 @@ export type BackgroundSpend = { mode: SpendMode; blocker?: { code: string; messa
  * Skill runs at the same tier anyway. A quota that cannot be read pauses background work with a reason the person sees
  * (an API-key login reports no windows), instead of stopping silently or spending without knowing how much is left.
  */
-export function backgroundSpend(signal: CostSignal): BackgroundSpend {
+export function backgroundSpend(signal: CostSignal, locale?: Locale): BackgroundSpend {
+  const t = tFor(locale);
   if (!signal.available) return { mode: "manual_core_only", blocker: { code: "COST_SIGNAL_UNAVAILABLE", reason: signal.reason,
     message: /auth|login|apikey|api key/i.test(signal.reason)
-      ? "读不到模型额度（还没有登录模型账号，或 API key 登录没有额度窗口），后台自动工作已暂停；本人发起的操作照常运行。"
-      : "读不到模型额度，后台自动工作已暂停；本人发起的操作照常运行。" } };
+      ? t("读不到模型额度（还没有登录模型账号，或 API key 登录没有额度窗口），后台自动工作已暂停；本人发起的操作照常运行。")
+      : t("读不到模型额度，后台自动工作已暂停；本人发起的操作照常运行。") } };
   const used = Math.max(signal.short?.usedPercent ?? 0, signal.long?.usedPercent ?? 0);
   if (signal.limitReached) {
     const reset = [signal.short, signal.long].filter((window) => (window?.usedPercent ?? 0) >= 100).map((window) => window?.resetsAt).find((at) => at);
     const resetsAt = reset ? new Date(reset * 1000).toISOString() : undefined;
-    return { mode: "manual_core_only", blocker: { code: "RATE_LIMIT_REACHED", message: "模型额度已用尽，后台自动工作暂停到额度恢复。",
+    return { mode: "manual_core_only", blocker: { code: "RATE_LIMIT_REACHED", message: t("模型额度已用尽，后台自动工作暂停到额度恢复。"),
       ...(resetsAt ? { resetsAt } : {}) } };
   }
   const { mode } = budgetPolicy(used);
   return mode === "manual_core_only"
-    ? { mode, blocker: { code: "BUDGET_EXHAUSTED", message: `模型额度已用 ${Math.round(used)}%，后台自动工作暂停到额度恢复。` } }
+    ? { mode, blocker: { code: "BUDGET_EXHAUSTED", message: t("模型额度已用 {{used}}%，后台自动工作暂停到额度恢复。", { used: Math.round(used) }) } }
     : { mode };
 }
 

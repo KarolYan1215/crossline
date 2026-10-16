@@ -59,3 +59,23 @@ test("a proposal is shown once its steps are planned, or when they cannot be", (
   expect(proposalReady({ state: "approved" }, undefined)).toBe(true);
   expect(proposalReady({ ...proposal, payload: { seeded: true } }, undefined)).toBe(true);
 });
+
+test("English wording is read by the same rules (English users write English)", () => {
+  const en = { ...base, intent: "Outline chapters 1-3 of ECE 548 for revision" };
+  expect(autoApprovalEligible(en).eligible).toBe(true);
+  expect(autoApprovalEligible({ ...en, intent: "Pick four topics for the first round" }).eligible).toBe(false);
+  expect(autoApprovalEligible({ ...en, intent: "Confirm the review meeting time with the advisor" }).eligible).toBe(false);
+  expect(autoApprovalEligible({ ...en, intent: "Send the charts and data to the senior student" }).eligible).toBe(false);
+  expect(autoApprovalEligible({ ...en, intent: "Email the advisor about next week" }).eligible).toBe(false);
+  expect(autoApprovalEligible({ ...en, intent: "Hand the draft over to the lab manager" }).eligible).toBe(false);
+  expect(autoApprovalEligible({ ...en, intent: "Hand the literature search over to the assistant" }).eligible).toBe(true);
+  expect(autoApprovalEligible({ ...en, intent: "Export the brokerage account statement for October" }).eligible).toBe(false);
+  expect(autoApprovalEligible({ ...en, intent: "Collect the report structure and submission guidelines into a checklist" }).eligible).toBe(true);
+});
+
+test("the reason is written in the person's language", async () => {
+  await import("@crossline/i18n/catalog/worker");
+  expect(autoApprovalEligible(base).reason).toBe("无需本人选择、授权或对外动作，默认生效");
+  expect(autoApprovalEligible(base, { locale: "en" }).reason).toBe("Needs no choice, permission or outside action from you, so it takes effect by default");
+  expect(autoApprovalEligible({ ...base, payload: { ...base.payload, seeded: true } }, { locale: "en" }).reason).toMatch(/^Example task/);
+});

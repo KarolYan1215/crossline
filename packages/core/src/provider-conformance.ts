@@ -25,6 +25,7 @@ import { PROGRESS_ASSESSMENT_SCHEMA, STEP_PLAN_SCHEMA, VALIDATION_REVIEW_SCHEMA 
 import { TASK_TITLES_SCHEMA } from "./task-title";
 import { TASK_MERGE_REVIEW_SCHEMA } from "./task-merge";
 import { WEEKLY_INSIGHT_OUTPUT_SCHEMA } from "./weekly-insight-schema";
+import { tFor, type Locale } from "./i18n";
 
 /**
  * What a model provider other than the person's own Codex sign-in may be trusted with (R7, docs/review-2026-10-13.md §7, decided
@@ -92,14 +93,16 @@ export type ProviderCapabilities = { webSearch: boolean; image: boolean; shell: 
 export const THIRD_PARTY_CAPABILITIES: ProviderCapabilities = { webSearch: false, image: false, shell: false, connectors: false, memories: false, tools: true };
 
 /** Why a provider cannot serve a Skill whatever its conformance, in words the person reads; undefined when it can. */
-export function capabilityGap(skill: string, capabilities: ProviderCapabilities = THIRD_PARTY_CAPABILITIES): string | undefined {
+export function capabilityGap(skill: string, capabilities: ProviderCapabilities = THIRD_PARTY_CAPABILITIES, locale?: Locale): string | undefined {
+  const t = tFor(locale);
   const needs = SKILL_NEEDS[skillKey(skill)];
-  if (!needs) return "这项功能还没有登记它需要什么，暂不交给其他模型。";
-  if (needs.testOnly) return "测试用功能，不交给其他模型。";
-  if (needs.shell && !capabilities.shell) return `${needs.label}只在电脑主人自己的 Codex 上运行。`;
-  if (needs.webSearch && !capabilities.webSearch) return `${needs.label}要联网搜索，这个模型连接没有；需要 ChatGPT 登录或 OpenAI API key。`;
-  if (needs.image && !capabilities.image) return `${needs.label}要生成图片，这个模型连接没有；需要 ChatGPT 登录或 OpenAI API key。`;
-  if (needs.tools && !capabilities.tools) return `${needs.label}要在回答中途查资料，这个模型连接不支持。`;
+  if (!needs) return t("这项功能还没有登记它需要什么，暂不交给其他模型。");
+  if (needs.testOnly) return t("测试用功能，不交给其他模型。");
+  const label = t(needs.label);
+  if (needs.shell && !capabilities.shell) return t("{{label}}只在电脑主人自己的 Codex 上运行。", { label });
+  if (needs.webSearch && !capabilities.webSearch) return t("{{label}}要联网搜索，这个模型连接没有；需要 ChatGPT 登录或 OpenAI API key。", { label });
+  if (needs.image && !capabilities.image) return t("{{label}}要生成图片，这个模型连接没有；需要 ChatGPT 登录或 OpenAI API key。", { label });
+  if (needs.tools && !capabilities.tools) return t("{{label}}要在回答中途查资料，这个模型连接不支持。", { label });
   return undefined;
 }
 
@@ -109,12 +112,16 @@ export function capabilityGap(skill: string, capabilities: ProviderCapabilities 
  * Calendars come in by subscription link on any model, and what the person said is kept in the ledger whichever model runs; only the
  * shell assistant stays with the machine owner's own Codex.
  */
-export function unavailableOnThirdParty(capabilities: Pick<ProviderCapabilities, "webSearch" | "image">): string {
-  const missing = [capabilities.webSearch ? "" : "联网查证", capabilities.image ? "" : "画像插图"].filter(Boolean);
-  return [missing.length ? `${missing.join("和")}在这台服务器上只在 ChatGPT 登录（或 OpenAI API key）下可用` : "联网查证和画像插图由 Crossline 自己完成，用哪个模型都可以",
-    "日历用订阅链接接入，主线、事实和偏好记在 Crossline 自己的账本里，都和模型无关",
-    "电脑上的助手只在电脑主人自己的 Codex 上运行",
-    "其余功能按检验结果开放。"].join("；");
+export function unavailableOnThirdParty(capabilities: Pick<ProviderCapabilities, "webSearch" | "image">, locale?: Locale): string {
+  const t = tFor(locale);
+  const missing = [capabilities.webSearch ? "" : t("联网查证"), capabilities.image ? "" : t("画像插图")].filter(Boolean);
+  const parts = [missing.length ? t("{{features}}在这台服务器上只在 ChatGPT 登录（或 OpenAI API key）下可用", { features: missing.join(t("和", { context: "join" })) })
+      : t("联网查证和画像插图由 Crossline 自己完成，用哪个模型都可以"),
+    t("日历用订阅链接接入，主线、事实和偏好记在 Crossline 自己的账本里，都和模型无关"),
+    t("电脑上的助手只在电脑主人自己的 Codex 上运行"),
+    t("其余功能按检验结果开放。")];
+  // English reads as sentences; Chinese keeps its one sentence joined by semicolons.
+  return locale === "en" ? parts.map((part) => part.endsWith(".") ? part : `${part}.`).join(" ") : parts.join("；"); // i18n-ignore
 }
 
 // ── Conformance ──────────────────────────────────────────────────────────────────────────────────────────────────────

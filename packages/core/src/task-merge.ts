@@ -1,4 +1,5 @@
 import { infoRequestTraits, type InfoRequest } from "./info-request";
+import { tFor, type Locale } from "./i18n";
 
 /**
  * The daily self-check that merges near-identical open tasks (the owner's decision of 2026-10-15: the real board held 「整理 ECE 548 复习
@@ -41,13 +42,21 @@ const KEEPABLE = new Set([...ABSORBABLE, "active"]);
 const STATE_RANK: Record<string, number> = { active: 4, ready_for_human: 3, preparing: 2, approved: 1, awaiting_plan_approval: 0 };
 
 const COURSE = /[A-Z]{2,5}\s?\d{3}/gi;
+/* i18n-ignore-start: words compared with titles the person or a model wrote, never shown */
 const SYNONYMS: Array<[RegExp, string]> = [
   [/汇集|汇总|收集|整合|搜集|归集/g, "整理"], [/核实|取得|获取|明确|查明|弄清/g, "确认"], [/资料|素材/g, "材料"], [/目录|列表/g, "清单"],
-  [/考查|考核/g, "考试"], [/建立|编制|制作/g, "建立"]
+  [/考查|考核/g, "考试"], [/建立|编制|制作/g, "建立"],
+  // The same in English, matched once spaces are gone (the text is lowercased first).
+  [/gather|compile|collect|assemble|aggregate|consolidate|organi[sz]e|sortout/g, "organize"], [/verify|obtain|clarify|findout|lookup/g, "confirm"],
+  [/resources|sources|notes|material(?!s)/g, "materials"], [/catalog(ue)?|index|list(?!en)/g, "checklist"], [/assessment|test(?!ing)/g, "exam"],
+  [/create|prepare|make|build|setup/g, "build"]
 ];
-/** A title as compared: no course code, no punctuation or spaces, no 的, synonymous verbs and nouns made one. */
+/* i18n-ignore-end */
+/** English words that carry nothing a title compares on, like 的. */
+const FILLER = /\b(the|of|for|on|to|and)\b/gi;
+/** A title as compared: no course code, no punctuation or spaces, no 的 (or "the", "of"…), synonymous verbs and nouns made one. */
 export function normalizeTaskTitle(title: string): string {
-  let text = title.replace(COURSE, "").replace(/[\s\p{P}\p{S}]+/gu, "").replace(/的/g, "").toLowerCase();
+  let text = title.replace(COURSE, "").replace(FILLER, " ").replace(/[\s\p{P}\p{S}]+/gu, "").replace(/的/g, "").toLowerCase(); // i18n-ignore
   for (const [pattern, word] of SYNONYMS) text = text.replace(pattern, word);
   return text;
 }
@@ -66,19 +75,20 @@ const numbersOf = (title: string) => (title.replace(COURSE, "").match(/\d+/g) ??
 const days = (a: string, b: string) => Math.abs(Date.parse(`${a}T12:00:00Z`) - Date.parse(`${b}T12:00:00Z`)) / 86_400_000;
 
 /** What the rules say about two tasks: the same work, not, or the model's to decide. */
-export function comparePair(a: MergeTask, b: MergeTask): { verdict: "same" | "unsure" | "different"; why: string; score: number } {
-  if (a.identityId !== b.identityId || a.projectId !== b.projectId) return { verdict: "different", why: "不同主线或项目", score: 0 };
-  if (numbersOf(a.title) !== numbersOf(b.title)) return { verdict: "different", why: "标题中的编号不同", score: 0 };
-  if (a.dueDate && b.dueDate && days(a.dueDate, b.dueDate) > DUE_APART_DAYS) return { verdict: "different", why: "截止日相差一周以上", score: 0 };
+export function comparePair(a: MergeTask, b: MergeTask, locale?: Locale): { verdict: "same" | "unsure" | "different"; why: string; score: number } {
+  const t = tFor(locale);
+  if (a.identityId !== b.identityId || a.projectId !== b.projectId) return { verdict: "different", why: t("不同主线或项目"), score: 0 };
+  if (numbersOf(a.title) !== numbersOf(b.title)) return { verdict: "different", why: t("标题中的编号不同"), score: 0 };
+  if (a.dueDate && b.dueDate && days(a.dueDate, b.dueDate) > DUE_APART_DAYS) return { verdict: "different", why: t("截止日相差一周以上"), score: 0 };
   const score = textSimilarity(normalizeTaskTitle(a.title), normalizeTaskTitle(b.title));
   const intents = textSimilarity(normalizeTaskTitle(a.intent), normalizeTaskTitle(b.intent));
   if (a.milestoneId !== b.milestoneId && a.milestoneDeadline && b.milestoneDeadline && days(a.milestoneDeadline, b.milestoneDeadline) > FAR_DEADLINES_DAYS)
-    return { verdict: "different", why: "服务的里程碑截止相差三周以上", score: 0 };
+    return { verdict: "different", why: t("服务的里程碑截止相差三周以上"), score: 0 };
   // Short titles share bigrams easily (整理复习提纲 / 整理复习材料 is 0.6): a rule match needs the intents to agree too, or near-equal titles.
   const agrees = intents >= INTENT_UNSURE || score >= TITLE_CERTAIN;
-  if (score >= TITLE_SAME && agrees) return { verdict: "same", why: `标题规范化后相似度 ${score}，说明相似度 ${intents}`, score };
-  if (score >= TITLE_UNSURE) return { verdict: "unsure", why: `标题相似度 ${score}、说明相似度 ${intents}`, score };
-  return { verdict: "different", why: `标题相似度 ${score}`, score };
+  if (score >= TITLE_SAME && agrees) return { verdict: "same", why: t("标题规范化后相似度 {{score}}，说明相似度 {{intents}}", { score, intents }), score };
+  if (score >= TITLE_UNSURE) return { verdict: "unsure", why: t("标题相似度 {{score}}、说明相似度 {{intents}}", { score, intents }), score };
+  return { verdict: "different", why: t("标题相似度 {{score}}", { score }), score };
 }
 
 /** The task kept from a group: most progress, furthest state, a step plan, earliest due day, then the first listed. */
@@ -91,13 +101,14 @@ export function keeperOf(tasks: MergeTask[]): MergeTask {
  * The merges the rules decide, and the pairs left to the model. `sameByModel` are pairs the model already called the same (their ids
  * joined `a|b`, either order); they merge like rule matches. Info requests are placed first, then duplicates among what is left.
  */
-export function planMerges(tasks: MergeTask[], sameByModel: ReadonlySet<string> = new Set()): { groups: MergeGroup[]; unsure: MergePair[] } {
+export function planMerges(tasks: MergeTask[], sameByModel: ReadonlySet<string> = new Set(), locale?: Locale): { groups: MergeGroup[]; unsure: MergePair[] } {
+  const t = tFor(locale);
   const live = tasks.filter((task) => KEEPABLE.has(task.state));
   const absorbable = (task: MergeTask) => ABSORBABLE.has(task.state) && !task.started;
   const taken = new Set<string>();
   const groups: MergeGroup[] = [];
   // 1. Requests for a fact go into the task they serve.
-  const requests = live.filter((task) => absorbable(task)).map((task) => ({ task, traits: infoRequestTraits({ title: task.title, intent: task.intent }) }))
+  const requests = live.filter((task) => absorbable(task)).map((task) => ({ task, traits: infoRequestTraits({ title: task.title, intent: task.intent, ...(locale ? { locale } : {}) }) }))
     .filter((item) => item.traits.match);
   const requestIds = new Set(requests.map((item) => item.task.id));
   const servers = live.filter((task) => !requestIds.has(task.id));
@@ -109,9 +120,10 @@ export function planMerges(tasks: MergeTask[], sameByModel: ReadonlySet<string> 
       ?? (!task.milestoneId ? keeperOrNone(sameProject) : undefined);
     if (!served) { leftover.push({ task, traits }); continue; }
     const group = groups.find((item) => item.kind === "info_request" && item.keep === served.id);
-    const how = traits.request!.kind === "ask_person" ? "向别人询问" : "查找一项信息";
-    if (group) { group.absorb.push(task.id); group.requests[task.id] = traits.request!; group.reason += `；「${task.title}」同样并入`; }
-    else groups.push({ kind: "info_request", keep: served.id, absorb: [task.id], reason: `「${task.title}」只是${how}，并入它服务的「${served.title}」作为第一步`,
+    if (group) { group.absorb.push(task.id); group.requests[task.id] = traits.request!; group.reason += t("；「{{title}}」同样并入", { title: task.title }); }
+    else groups.push({ kind: "info_request", keep: served.id, absorb: [task.id], reason: traits.request!.kind === "ask_person"
+      ? t("「{{title}}」只是向别人询问，并入它服务的「{{served}}」作为第一步", { title: task.title, served: served.title })
+      : t("「{{title}}」只是查找一项信息，并入它服务的「{{served}}」作为第一步", { title: task.title, served: served.title }),
       requests: { [task.id]: traits.request! } });
     taken.add(task.id);
   }
@@ -123,7 +135,8 @@ export function planMerges(tasks: MergeTask[], sameByModel: ReadonlySet<string> 
     const keep = keeperOf(items.map((item) => item.task));
     const absorb = items.filter((item) => item.task.id !== keep.id).map((item) => item.task.id);
     const asks = items.some((item) => item.traits.request!.kind === "ask_person");
-    groups.push({ kind: "info_request", keep: keep.id, absorb, reason: `同一里程碑下的 ${items.length} 个获取信息任务合成${asks ? "一封邮件" : "一次查找"}`,
+    groups.push({ kind: "info_request", keep: keep.id, absorb, reason: asks ? t("同一里程碑下的 {{count}} 个获取信息任务合成一封邮件", { count: items.length })
+      : t("同一里程碑下的 {{count}} 个获取信息任务合成一次查找", { count: items.length }),
       requests: Object.fromEntries(items.filter((item) => item.task.id !== keep.id).map((item) => [item.task.id, item.traits.request!])) });
     for (const id of absorb) taken.add(id);
   }
@@ -137,12 +150,12 @@ export function planMerges(tasks: MergeTask[], sameByModel: ReadonlySet<string> 
     const a = rest[i]!, b = rest[j]!;
     // At least one side must be one that may go; two tasks under way are both kept.
     if (!absorbable(a) && !absorbable(b)) continue;
-    const pair = comparePair(a, b);
+    const pair = comparePair(a, b, locale);
     const model = sameByModel.has(`${a.id}|${b.id}`) || sameByModel.has(`${b.id}|${a.id}`);
     // The reviewer's yes merges only a pair the rules left open; what the rules call different stays apart.
     if (pair.verdict === "same" || (model && pair.verdict === "unsure")) {
       parent.set(find(b.id), find(a.id));
-      why.set(find(a.id), model && pair.verdict !== "same" ? "复核判断为同一项工作" : pair.why);
+      why.set(find(a.id), model && pair.verdict !== "same" ? t("复核判断为同一项工作") : pair.why);
     } else if (pair.verdict === "unsure") unsure.push({ a: a.id, b: b.id, why: pair.why });
   }
   const clusters = new Map<string, MergeTask[]>();
@@ -151,7 +164,7 @@ export function planMerges(tasks: MergeTask[], sameByModel: ReadonlySet<string> 
     if (members.length < 2) continue;
     const keep = keeperOf(members);
     const absorb = members.filter((task) => task.id !== keep.id && absorbable(task)).map((task) => task.id);
-    if (absorb.length) groups.push({ kind: "duplicate", keep: keep.id, absorb, reason: `与「${keep.title}」重复（${why.get(root) ?? "标题相同"}）`, requests: {} });
+    if (absorb.length) groups.push({ kind: "duplicate", keep: keep.id, absorb, reason: t("与「{{title}}」重复（{{why}}）", { title: keep.title, why: why.get(root) ?? t("标题相同") }), requests: {} });
   }
   const merged = new Set(groups.flatMap((group) => group.absorb));
   return { groups, unsure: unsure.filter((pair) => !merged.has(pair.a) && !merged.has(pair.b)) };

@@ -19,7 +19,7 @@ export function cleanTaskTitle(value: string): string {
  * spread the guess.
  */
 export function courseCodeOf(project: string | undefined): string | undefined {
-  if (!project || /待确认|可能|未定|不确定|[?？]/u.test(project)) return undefined;
+  if (!project || /待确认|可能|未定|不确定|[?？]|\b(tbd|tbc|to be confirmed|possibly|maybe|probably|perhaps|unsure|uncertain|unconfirmed)\b/iu.test(project)) return undefined;
   const match = /(?:^|[^A-Za-z])([A-Za-z]{2,5})\s?(\d{3,4}[A-Za-z]?)(?![\dA-Za-z])/u.exec(project);
   return match ? `${match[1]!.toUpperCase()} ${match[2]!.toUpperCase()}` : undefined;
 }

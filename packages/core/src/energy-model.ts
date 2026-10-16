@@ -9,6 +9,7 @@
  */
 
 import type { EnergyLevel } from "./index";
+import { tFor, type Locale } from "./i18n";
 
 export type SleepEpisode = { sleepAt: string; wakeAt: string; source: string };
 
@@ -197,10 +198,11 @@ export type EnergyPrediction = { level: EnergyLevel; confidence: "low" | "medium
  * the reports behind it allow: `high` from eight reports agreeing seven times in ten, `medium` from four agreeing six in ten.
  */
 export function predictEnergy(at: string, episodes: SleepEpisode[], calibration: EnergyCalibration, localHourOf: (iso: string) => number,
-  phaseShift = 0): EnergyPrediction {
+  phaseShift = 0, locale?: Locale): EnergyPrediction {
+  const t = tFor(locale);
   const episode = lastSleepBefore(episodes, at);
   const value = alertnessAt(at, episodes, localHourOf, phaseShift);
-  if (!episode || value === undefined) return { level: "medium", confidence: "low", basis: ["不知道最近一次睡眠"] };
+  if (!episode || value === undefined) return { level: "medium", confidence: "low", basis: [t("不知道最近一次睡眠")] };
   const level: EnergyLevel = value < calibration.low ? "low" : value < calibration.high ? "medium" : "high";
   const awake = (Date.parse(at) - Date.parse(episode.wakeAt)) / HOUR;
   const slept = (Date.parse(episode.wakeAt) - Date.parse(episode.sleepAt)) / HOUR;
@@ -208,10 +210,11 @@ export function predictEnergy(at: string, episodes: SleepEpisode[], calibration:
     : calibration.reports >= 4 && calibration.agreement >= 0.6 ? "medium" : "low";
   const debt = sleepDebt(at, episodes);
   return { level, confidence, alertness: Math.round(value * 10) / 10,
-    basis: [`睡了约 ${slept.toFixed(1)} 小时（${SOURCE_LABEL[episode.source] ?? "手机记录"}）`, `已醒 ${awake.toFixed(1)} 小时`,
-      ...(awake < 1 ? ["刚醒不久，头一小时偏低"] : []),
-      ...(debt.nights >= 3 && debt.hours >= 2 ? [`近两周少睡约 ${Math.round(debt.hours)} 小时`] : []),
-      calibration.reports ? `按本人 ${calibration.reports} 次自评校准` : "尚无自评，用通用曲线"] };
+    basis: [t("睡了约 {{hours}} 小时（{{source}}）", { hours: slept.toFixed(1), source: t(SOURCE_LABEL[episode.source] ?? "手机记录") }),
+      t("已醒 {{hours}} 小时", { hours: awake.toFixed(1) }),
+      ...(awake < 1 ? [t("刚醒不久，头一小时偏低")] : []),
+      ...(debt.nights >= 3 && debt.hours >= 2 ? [t("近两周少睡约 {{hours}} 小时", { hours: Math.round(debt.hours) })] : []),
+      calibration.reports ? t("按本人 {{count}} 次自评校准", { count: calibration.reports }) : t("尚无自评，用通用曲线")] };
 }
 const SOURCE_LABEL: Record<string, string> = { screen: "由电脑空闲推断", "phone-focus": "手机睡眠模式" };
 
@@ -254,14 +257,15 @@ export type DayCapacity = { multiplier: number; basis: string[] };
  * degree up. The sizes are priors, not fitted: each costs at most a tenth, and the day keeps at least 70%.
  */
 /** `day` is the person's local date (YYYY-MM-DD) the phone's readings are filed under. */
-export function dayCapacity(at: string, day: string, episodes: SleepEpisode[], physiology: DailyPhysiology[]): DayCapacity {
+export function dayCapacity(at: string, day: string, episodes: SleepEpisode[], physiology: DailyPhysiology[], locale?: Locale): DayCapacity {
+  const t = tFor(locale);
   let multiplier = 1;
   const basis: string[] = [];
   const debt = sleepDebt(at, episodes);
   if (debt.nights >= 3 && debt.perNight > 0.5) {
     const cut = Math.min(0.15, 0.06 * (debt.perNight - 0.5));
     multiplier -= cut;
-    basis.push(`近两周平均每晚少睡 ${debt.perNight.toFixed(1)} 小时`);
+    basis.push(t("近两周平均每晚少睡 {{hours}} 小时", { hours: debt.perNight.toFixed(1) }));
   }
   const today = physiology.find((item) => item.day === day);
   const before = physiology.filter((item) => item.day < day && Date.parse(day) - Date.parse(item.day) <= 28 * 24 * HOUR);
@@ -275,16 +279,16 @@ export function dayCapacity(at: string, day: string, episodes: SleepEpisode[], p
     before.flatMap((item) => item.hrvMs !== undefined ? [Math.log(item.hrvMs)] : []));
   if (hrvZ !== undefined && hrvZ < -1) {
     multiplier -= Math.min(0.1, 0.05 * (-hrvZ));
-    basis.push("心率变异性低于本人近期水平");
+    basis.push(t("心率变异性低于本人近期水平"));
   }
   const restingZ = zOf(today?.restingHr, before.flatMap((item) => item.restingHr !== undefined ? [item.restingHr] : []));
   if (restingZ !== undefined && restingZ > 1) {
     multiplier -= Math.min(0.1, 0.05 * restingZ);
-    basis.push("静息心率高于本人近期水平");
+    basis.push(t("静息心率高于本人近期水平"));
   }
   if (today?.wristTempDeltaC !== undefined && today.wristTempDeltaC >= 0.5) {
     multiplier -= 0.1;
-    basis.push(`手腕温度比平时高 ${today.wristTempDeltaC.toFixed(1)}°C`);
+    basis.push(t("手腕温度比平时高 {{delta}}°C", { delta: today.wristTempDeltaC.toFixed(1) }));
   }
   return { multiplier: Math.max(0.7, Math.round(multiplier * 100) / 100), basis };
 }

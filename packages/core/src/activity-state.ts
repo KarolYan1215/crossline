@@ -6,6 +6,7 @@
  * once, locally, to pick the category and then stays in the store the person can read and clear. A model context built
  * from segments therefore cannot contain a title, because there is no field to put it in.
  */
+import { tFor, type Locale } from "./i18n";
 export const ACTIVITY_CATEGORIES = ["coding", "research_tool", "writing", "reading", "communication", "meeting", "browsing", "leisure", "other"] as const;
 export type ActivityCategory = (typeof ACTIVITY_CATEGORIES)[number];
 
@@ -137,8 +138,9 @@ const MIN = 60_000;
  * unknown (under five minutes of tracked time says nothing).
  */
 export function inferWorkState(input: {
-  segments: ActivitySegment[]; now: string; calendar: Array<{ start: string; end: string }>; windowMinutes?: number;
+  segments: ActivitySegment[]; now: string; calendar: Array<{ start: string; end: string }>; windowMinutes?: number; locale?: Locale;
 }): WorkState {
+  const t = tFor(input.locale);
   const windowMinutes = input.windowMinutes ?? 15;
   const to = Date.parse(input.now), from = to - windowMinutes * MIN;
   const inMeeting = input.calendar.some((block) => Date.parse(block.start) <= to && to < Date.parse(block.end));
@@ -162,18 +164,18 @@ export function inferWorkState(input: {
   const dominant = (Object.entries(minutes).filter(([key]) => key !== "idle").sort((a, b) => b[1]! - a[1]!)[0]?.[0]) as ActivityCategory | undefined;
   const base = { windowMinutes, minutes, switches, inMeeting, ...(dominant ? { dominant } : {}) };
 
-  if (inMeeting) return { ...base, state: "in_meeting", confidence: "high", reasons: ["日历上现在有会议；会议里没有键鼠输入是正常的。"] };
-  if (tracked < 5) return { ...base, state: "unknown", confidence: "low", reasons: [`最近 ${windowMinutes} 分钟只有 ${Math.round(tracked)} 分钟的记录，不够判断。`] };
-  if (idle / tracked >= 0.7) return { ...base, state: "away", confidence: "high", reasons: [`最近 ${windowMinutes} 分钟里有 ${Math.round(idle)} 分钟没有键鼠输入。`] };
+  if (inMeeting) return { ...base, state: "in_meeting", confidence: "high", reasons: [t("日历上现在有会议；会议里没有键鼠输入是正常的。")] };
+  if (tracked < 5) return { ...base, state: "unknown", confidence: "low", reasons: [t("最近 {{window}} 分钟只有 {{tracked}} 分钟的记录，不够判断。", { window: windowMinutes, tracked: Math.round(tracked) })] };
+  if (idle / tracked >= 0.7) return { ...base, state: "away", confidence: "high", reasons: [t("最近 {{window}} 分钟里有 {{idle}} 分钟没有键鼠输入。", { window: windowMinutes, idle: Math.round(idle) })] };
   const leisure = minutes.leisure ?? 0;
-  if (active > 0 && leisure / active >= 0.6) return { ...base, state: "leisure", confidence: leisure / active >= 0.8 ? "high" : "medium", reasons: [`${Math.round(leisure)} 分钟在${CATEGORY_LABEL.leisure}类应用或页面上。`] };
-  if (switches >= 8) return { ...base, state: "switching", confidence: "medium", reasons: [`最近 ${windowMinutes} 分钟切换了 ${switches} 次应用。`] };
+  if (active > 0 && leisure / active >= 0.6) return { ...base, state: "leisure", confidence: leisure / active >= 0.8 ? "high" : "medium", reasons: [t("{{minutes}} 分钟在{{category}}类应用或页面上。", { minutes: Math.round(leisure), category: t(CATEGORY_LABEL.leisure) })] };
+  if (switches >= 8) return { ...base, state: "switching", confidence: "medium", reasons: [t("最近 {{window}} 分钟切换了 {{count}} 次应用。", { window: windowMinutes, count: switches })] };
   const productive = [...PRODUCTIVE].reduce((sum, category) => sum + (minutes[category] ?? 0), 0);
   if (active > 0 && productive / active >= 0.6) {
     return { ...base, state: "focused", confidence: longestRun >= 10 ? "high" : "medium",
-      reasons: [`${Math.round(productive)} 分钟在${CATEGORY_LABEL[dominant ?? "other"]}类工作上，连续最长 ${Math.round(longestRun)} 分钟，切换 ${switches} 次。`] };
+      reasons: [t("{{minutes}} 分钟在{{category}}类工作上，连续最长 {{longest}} 分钟，切换 {{count}} 次。", { minutes: Math.round(productive), category: t(CATEGORY_LABEL[dominant ?? "other"]), longest: Math.round(longestRun), count: switches })] };
   }
-  return { ...base, state: "mixed", confidence: "low", reasons: ["工作类和非工作类应用各占一部分，看不出在做哪一种。"] };
+  return { ...base, state: "mixed", confidence: "low", reasons: [t("工作类和非工作类应用各占一部分，看不出在做哪一种。")] };
 }
 
 /** Minutes per category over a set of segments, for what is allowed to leave the machine: no app names, no titles. */

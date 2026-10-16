@@ -1,6 +1,7 @@
 import { mctqLite, CHRONOTYPE_LABEL } from "./assess";
 import { alertnessAt, phaseShiftFromPeak, type SleepEpisode } from "./energy-model";
 import type { EnergyLevel } from "./index";
+import { tFor, type Locale } from "./i18n";
 
 /**
  * The weekly energy advice for the plan page (decided 2026-10-15): which of the person's available half hours should be marked high,
@@ -180,7 +181,11 @@ export type EnergyAdviceRule = { levels: AdviceGrid; summary: string; basis: str
 export function energyAdviceRule(input: { now: string; zone: string; episodes: SleepEpisode[]; reports: Array<{ at: string; level: EnergyLevel }>;
   worked: number[][];
   /** The person's own best hours (their high-energy window), local hours: the phase when no night is on record. */
-  statedPeak?: { start: number; end: number } | null }): EnergyAdviceRule {
+  statedPeak?: { start: number; end: number } | null;
+  /** The language the summary and basis are written in (the plan page shows them). */
+  locale?: Locale }): EnergyAdviceRule {
+  const t = tFor(input.locale);
+  const en = input.locale === "en";
   const clock = zoneClock(input.zone);
   const since = Date.parse(input.now) - 28 * 24 * HOUR;
   const nights: Night[] = input.episodes.filter((episode) => Date.parse(episode.wakeAt) >= since && Date.parse(episode.wakeAt) <= Date.parse(input.now))
@@ -212,7 +217,7 @@ export function energyAdviceRule(input: { now: string; zone: string; episodes: S
   const workedHours = Math.round(input.worked.flat().reduce((sum, value) => sum + value, 0) / 6) / 10;
   const evidenceBase = { nights: nights.length, usual: { workdays, free }, chronotype, phaseShift, phaseSource, reports: reports.length, workedHours };
   if (nights.length < ADVICE_MIN_NIGHTS && reports.length < ADVICE_MIN_REPORTS)
-    return { insufficient: `需要至少 ${ADVICE_MIN_NIGHTS} 晚睡眠记录或 ${ADVICE_MIN_REPORTS} 次精力自评`, evidence: { ...evidenceBase, reportBands: [], workedInLow: [] } };
+    return { insufficient: t("需要至少 {{nights}} 晚睡眠记录或 {{reports}} 次精力自评", { nights: ADVICE_MIN_NIGHTS, reports: ADVICE_MIN_REPORTS }), evidence: { ...evidenceBase, reportBands: [], workedInLow: [] } };
 
   // The person's own word wins where it is consistent: a two-hour band with two or more reports, two thirds of them one level.
   const reportBands: EnergyAdviceEvidence["reportBands"] = [];
@@ -241,16 +246,27 @@ export function energyAdviceRule(input: { now: string; zone: string; episodes: S
   });
 
   const lead = nights.length
-    ? `按近四周 ${nights.length} 晚睡眠（通常 ${clockLabel(wrap24(workdays.from))} 入睡、${clockLabel(workdays.to)} 醒）`
-    : "尚无睡眠记录，按通用作息（23:30 入睡、7:30 醒）";
+    ? t("按近四周 {{count}} 晚睡眠（通常 {{sleep}} 入睡、{{wake}} 醒）", { count: nights.length, sleep: clockLabel(wrap24(workdays.from)), wake: clockLabel(workdays.to) })
+    : t("尚无睡眠记录，按通用作息（23:30 入睡、7:30 醒）");
   const high = levelRanges(workRow, 3), low = levelRanges(workRow, 1);
-  const summary = `${lead}${reports.length ? `与 ${reports.length} 次自评` : ""}：${free ? "工作日" : ""}高精力 ${high.join("、") || "无"}${low.length ? `，低精力 ${low.join("、")}` : ""}。`;
+  const list = (items: string[]) => items.join(en ? ", " : "、");
+  const summary = [
+    lead,
+    reports.length ? t("与 {{count}} 次自评", { count: reports.length }) : "",
+    free ? t("：工作日高精力 {{high}}", { high: list(high) || t("无") }) : t("：高精力 {{high}}", { high: list(high) || t("无") }),
+    low.length ? t("，低精力 {{low}}", { low: list(low) }) : "",
+    t("。")
+  ].join("");
+  const shift = phaseShift === 0 ? t("不移动") : phaseShift > 0 ? t("推后 {{hours}} 小时", { hours: Math.abs(phaseShift).toFixed(1) })
+    : t("提前 {{hours}} 小时", { hours: Math.abs(phaseShift).toFixed(1) });
   const basis = [
-    nights.length ? `作息：近四周 ${nights.length} 晚记录${free ? `；休息日通常 ${clockLabel(wrap24(free.from))} 入睡、${clockLabel(free.to)} 醒` : ""}` : "作息：尚无记录，按通用作息",
-    chronotype ? `时型：休息日睡眠中点（校正后）${clockLabel(chronotype.msfSc)}${chronotype.label ? `，${chronotype.label}` : ""}` : "时型：工作日与休息日各满两晚后计算",
-    `节律峰值相对通用曲线${phaseShift === 0 ? "不移动" : `${phaseShift > 0 ? "推后" : "提前"} ${Math.abs(phaseShift).toFixed(1)} 小时`}（${PHASE_BASIS[phaseSource]}）`,
-    ...reportBands.map((band) => `${band.from}–${band.to} 时按本人 ${band.count} 次自评定为${LEVEL_LABEL[LEVEL_OF[band.level]]}精力`),
-    ...(workedInLow.length ? [`近八周 ${workedInLow.map((hour) => `${hour} 时`).join("、")}常有计时工作，规则仍判为低精力`] : [])
+    nights.length ? t("作息：近四周 {{count}} 晚记录", { count: nights.length })
+      + (free ? t("；休息日通常 {{sleep}} 入睡、{{wake}} 醒", { sleep: clockLabel(wrap24(free.from)), wake: clockLabel(free.to) }) : "") : t("作息：尚无记录，按通用作息"),
+    chronotype ? t("时型：休息日睡眠中点（校正后）{{mid}}", { mid: clockLabel(chronotype.msfSc) }) + (chronotype.label ? t("，{{label}}", { label: t(chronotype.label) }) : "")
+      : t("时型：工作日与休息日各满两晚后计算"),
+    t("节律峰值相对通用曲线{{shift}}（{{basis}}）", { shift, basis: t(PHASE_BASIS[phaseSource]) }),
+    ...reportBands.map((band) => t("{{from}}–{{to}} 时按本人 {{count}} 次自评定为{{level}}精力", { from: band.from, to: band.to, count: band.count, level: en ? t(LEVEL_LABEL[LEVEL_OF[band.level]]!).toLowerCase() : t(LEVEL_LABEL[LEVEL_OF[band.level]]!) })),
+    ...(workedInLow.length ? [t("近八周 {{hours}}常有计时工作，规则仍判为低精力", { hours: list(workedInLow.map((hour) => t("{{hour}} 时", { hour }))) })] : [])
   ];
   return { levels, summary, basis, evidence: { ...evidenceBase, reportBands, workedInLow } };
 }
@@ -379,8 +395,10 @@ export function validateEnergyAdviceReview(value: unknown): EnergyAdviceReview {
   answer.findings.forEach((item, index) => cited(item.sourceIds, `finding ${index + 1}`));
   if (answer.verdict === "adjust" && !answer.adjustments.length) throw new Error("ENERGY_REVIEW_ADJUST_EMPTY: verdict adjust needs at least one adjustment");
   if (answer.verdict !== "adjust" && answer.adjustments.length) throw new Error("ENERGY_REVIEW_ADJUST_UNEXPECTED: adjustments only with verdict adjust");
-  if (/[你您我]/.test([answer.summary, ...answer.adjustments.map((item) => item.why), ...answer.findings.map((item) => item.claim)].join("")))
-    throw new Error("ENERGY_REVIEW_PERSON: write in the third person, without 你/您/我");
+  const written = [answer.summary, ...answer.adjustments.map((item) => item.why), ...answer.findings.map((item) => item.claim)].join(" ");
+  // The same rule in English: no "you", "your", "I", "me" or "my".
+  if (/[你您我]/.test(written) || /\b(you|your|yours|me|my)\b/i.test(written) || /\bI\b/.test(written))
+    throw new Error("ENERGY_REVIEW_PERSON: write in the third person, without 你/您/我"); // i18n-ignore: sent back to the model
   return answer;
 }
 

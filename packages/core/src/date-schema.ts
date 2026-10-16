@@ -111,7 +111,7 @@ export function quoteSupportsDate(date: string, quote: string): boolean {
   const month = Number(mm), day = Number(dd);
   const q = quote.toLowerCase();
   if (new RegExp(`(^|[^0-9])0?${month}\\s*[/\\-.]\\s*0?${day}(?![0-9])`).test(q)) return true;
-  if (new RegExp(`0?${month}\\s*月\\s*0?${day}`).test(q)) return true;
+  if (new RegExp(`0?${month}\\s*月\\s*0?${day}`).test(q)) return true; // i18n-ignore
   for (const name of [MONTHS[month - 1]!, MONTH_NAMES[month - 1]!]) {
     if (new RegExp(`(^|[^a-z])${name}[a-z]*\\.?\\s*0?${day}(?![0-9])`).test(q)) return true;
     if (new RegExp(`(^|[^0-9])0?${day}(st|nd|rd|th)?\\s*(of\\s+)?${name}`).test(q)) return true;
@@ -132,38 +132,38 @@ function rangeCheck(known: Known) {
 }
 
 function checkSource(known: Known, sourceRef: string, quote: string, label: string): void {
-  if (!(sourceRef in known.sources)) reject("DATE_UNKNOWN_SOURCE", `「${label}」引用了不存在的文件「${sourceRef}」。`);
+  if (!(sourceRef in known.sources)) reject("DATE_UNKNOWN_SOURCE", `「${label}」引用了不存在的文件「${sourceRef}」。`); // i18n-ignore
   if (!squash(known.sources[sourceRef]!).includes(squash(quote))) {
-    reject("DATE_QUOTE_NOT_VERBATIM", `「${label}」的引用不是 ${sourceRef} 的原文逐字内容：「${quote.slice(0, 60)}」`);
+    reject("DATE_QUOTE_NOT_VERBATIM", `「${label}」的引用不是 ${sourceRef} 的原文逐字内容：「${quote.slice(0, 60)}」`); // i18n-ignore
   }
 }
 
 function checkDate(item: DateCandidate, known: Known): void {
   const inRange = rangeCheck(known);
-  if (!validDate(item.date)) reject("DATE_INVALID", `「${item.title}」的日期「${item.date}」不是有效的 YYYY-MM-DD。`);
-  if (!inRange(item.date)) reject("DATE_OUT_OF_RANGE", `「${item.title}」的日期 ${item.date} 离今天太远，很可能年份推错了。`);
+  if (!validDate(item.date)) reject("DATE_INVALID", `「${item.title}」的日期「${item.date}」不是有效的 YYYY-MM-DD。`); // i18n-ignore
+  if (!inRange(item.date)) reject("DATE_OUT_OF_RANGE", `「${item.title}」的日期 ${item.date} 离今天太远，很可能年份推错了。`); // i18n-ignore
   for (const time of [item.startTime, item.endTime]) {
-    if (time && !TIME.test(time)) reject("DATE_TIME_INVALID", `「${item.title}」的时间「${time}」必须是 24 小时制 HH:MM 或留空。`);
+    if (time && !TIME.test(time)) reject("DATE_TIME_INVALID", `「${item.title}」的时间「${time}」必须是 24 小时制 HH:MM 或留空。`); // i18n-ignore
   }
-  if (item.endTime && !item.startTime) reject("DATE_TIME_INVALID", `「${item.title}」有结束时间却没有开始时间。`);
-  if (item.startTime && item.endTime && item.endTime <= item.startTime) reject("DATE_TIME_INVALID", `「${item.title}」的结束时间不晚于开始时间。`);
+  if (item.endTime && !item.startTime) reject("DATE_TIME_INVALID", `「${item.title}」有结束时间却没有开始时间。`); // i18n-ignore
+  if (item.startTime && item.endTime && item.endTime <= item.startTime) reject("DATE_TIME_INVALID", `「${item.title}」的结束时间不晚于开始时间。`); // i18n-ignore
   checkSource(known, item.sourceRef, item.quote, item.title);
   if (!quoteSupportsDate(item.date, item.quote)) {
-    reject("DATE_QUOTE_DOES_NOT_SUPPORT_DATE", `「${item.title}」的引用「${item.quote.slice(0, 60)}」里找不到 ${item.date} 这一天。`);
+    reject("DATE_QUOTE_DOES_NOT_SUPPORT_DATE", `「${item.title}」的引用「${item.quote.slice(0, 60)}」里找不到 ${item.date} 这一天。`); // i18n-ignore
   }
 }
 
 function checkMeeting(meeting: RecurringMeeting, known: Known): void {
   const inRange = rangeCheck(known);
   if (!validDate(meeting.from) || !validDate(meeting.to) || meeting.to < meeting.from) {
-    reject("DATE_INVALID", `「${meeting.title}」的起止日期不是有效区间。`);
+    reject("DATE_INVALID", `「${meeting.title}」的起止日期不是有效区间。`); // i18n-ignore
   }
-  if (!inRange(meeting.from) || !inRange(meeting.to)) reject("DATE_OUT_OF_RANGE", `「${meeting.title}」的起止日期离今天太远。`);
+  if (!inRange(meeting.from) || !inRange(meeting.to)) reject("DATE_OUT_OF_RANGE", `「${meeting.title}」的起止日期离今天太远。`); // i18n-ignore
   if (!TIME.test(meeting.startTime) || !TIME.test(meeting.endTime) || meeting.endTime <= meeting.startTime) {
-    reject("DATE_TIME_INVALID", `「${meeting.title}」的上课时间必须是 24 小时制 HH:MM，且结束晚于开始。`);
+    reject("DATE_TIME_INVALID", `「${meeting.title}」的上课时间必须是 24 小时制 HH:MM，且结束晚于开始。`); // i18n-ignore
   }
   for (const exception of meeting.exceptions) {
-    if (!validDate(exception)) reject("DATE_INVALID", `「${meeting.title}」的例外日期「${exception}」无效。`);
+    if (!validDate(exception)) reject("DATE_INVALID", `「${meeting.title}」的例外日期「${exception}」无效。`); // i18n-ignore
   }
   checkSource(known, meeting.sourceRef, meeting.quote, meeting.title);
 }
@@ -171,7 +171,7 @@ function checkMeeting(meeting: RecurringMeeting, known: Known): void {
 function shape(value: unknown): DateExtraction {
   const out = value as DateExtraction | undefined;
   if (!out || !Array.isArray(out.dates) || !Array.isArray(out.recurring) || !Array.isArray(out.questions)) {
-    reject("DATE_SCHEMA_INVALID", "输出结构不符合要求。");
+    reject("DATE_SCHEMA_INVALID", "输出结构不符合要求。"); // i18n-ignore
   }
   return out;
 }
@@ -180,7 +180,7 @@ function shape(value: unknown): DateExtraction {
 export function validateDateExtraction(value: unknown, known: Known): DateExtraction {
   const out = shape(value);
   const ids = new Set<string>();
-  const checkId = (id: string) => { if (ids.has(id)) reject("DATE_DUPLICATE_ID", `id「${id}」重复。`); ids.add(id); };
+  const checkId = (id: string) => { if (ids.has(id)) reject("DATE_DUPLICATE_ID", `id「${id}」重复。`); ids.add(id); }; // i18n-ignore
   for (const item of out.dates) { checkId(item.id); checkDate(item, known); }
   for (const meeting of out.recurring) { checkId(meeting.id); checkMeeting(meeting, known); }
   return out;
@@ -199,7 +199,7 @@ export function sanitizeDateExtraction(value: unknown, known: Known):
   const dropped: Array<{ id: string; title: string; reason: string }> = [];
   const attempt = <T extends { id: string; title: string }>(items: T[], check: (item: T) => void): T[] => items.filter((item) => {
     try {
-      if (ids.has(item.id)) reject("DATE_DUPLICATE_ID", `id「${item.id}」重复。`);
+      if (ids.has(item.id)) reject("DATE_DUPLICATE_ID", `id「${item.id}」重复。`); // i18n-ignore
       check(item);
       ids.add(item.id);
       return true;
@@ -212,7 +212,7 @@ export function sanitizeDateExtraction(value: unknown, known: Known):
   const recurring = attempt(out.recurring, (meeting) => checkMeeting(meeting, known));
   const undated = attempt(out.undated ?? [], (item) => checkSource(known, item.sourceRef, item.quote, item.title));
   if (out.dates.length + out.recurring.length > 0 && dates.length + recurring.length === 0) {
-    reject("DATE_NOTHING_VERIFIABLE", `一条都没能在原文里核实：${dropped.slice(0, 3).map((item) => item.reason).join("；")}`);
+    reject("DATE_NOTHING_VERIFIABLE", `一条都没能在原文里核实：${dropped.slice(0, 3).map((item) => item.reason).join("；")}`); // i18n-ignore
   }
   // A date names its course (「ECE 555 课堂期末考试」, not 「课堂期末考试」): two courses each have a final, and the calendar shows the title alone.
   const named = <T extends { title: string; project: string }>(item: T): T => ({ ...item, title: withCourse(item.title, item.project) });

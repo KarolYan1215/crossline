@@ -100,7 +100,7 @@ export function validateBackplan(value: unknown, sources: string[], dateSources 
       || p25Minutes > p50Minutes || p50Minutes > p85Minutes) throw new Error("BACKPLAN_ESTIMATE_INVALID");
     // A task is 30 minutes to 8 hours of usual work. The detail names the task, so a repair can split or merge exactly that one.
     if (p50Minutes < TASK_MINUTES.min || p50Minutes > TASK_MINUTES.max)
-      throw new Error(`BACKPLAN_TASK_SIZE: ${step.id} 的 p50 为 ${p50Minutes} 分钟；任务的通常时长须在 ${TASK_MINUTES.min}–${TASK_MINUTES.max} 分钟之间，超过的拆成多个任务，不足的并入相邻任务`);
+      throw new Error(`BACKPLAN_TASK_SIZE: ${step.id} 的 p50 为 ${p50Minutes} 分钟；任务的通常时长须在 ${TASK_MINUTES.min}–${TASK_MINUTES.max} 分钟之间，超过的拆成多个任务，不足的并入相邻任务`); // i18n-ignore
     if (!["low", "medium", "high"].includes(step.energy)
       || !["routine", "milestone", "high_risk"].includes(step.riskTier)
       || !["preparation", "review", "deep_work"].includes(step.family)
@@ -111,9 +111,9 @@ export function validateBackplan(value: unknown, sources: string[], dateSources 
     step.produces = typeof step.produces === "string" ? step.produces.trim() : "";
     step.uses = Array.isArray(step.uses) ? step.uses.filter((id): id is string => typeof id === "string" && Boolean(id.trim())) : [];
     if (step.produces && !artifacts.produce.includes(step.produces))
-      throw new Error(`BACKPLAN_ARTIFACT_UNKNOWN: ${step.id} 的 produces「${step.produces}」不在 artifacts.produce 里；可选：${artifacts.produce.join("、") || "（无）"}`);
+      throw new Error(`BACKPLAN_ARTIFACT_UNKNOWN: ${step.id} 的 produces「${step.produces}」不在 artifacts.produce 里；可选：${artifacts.produce.join("、") || "（无）"}`); // i18n-ignore
     const unknown = step.uses.find((id) => !artifacts.use.includes(id));
-    if (unknown) throw new Error(`BACKPLAN_ARTIFACT_UNKNOWN: ${step.id} 的 uses「${unknown}」不在 artifacts.use 里；可选：${artifacts.use.join("、") || "（无）"}`);
+    if (unknown) throw new Error(`BACKPLAN_ARTIFACT_UNKNOWN: ${step.id} 的 uses「${unknown}」不在 artifacts.use 里；可选：${artifacts.use.join("、") || "（无）"}`); // i18n-ignore
     // An answer recorded before these existed has neither; an id that was not offered is new work (the code-level check still runs).
     const completion = readModelCompletion(step.completion);
     if (completion) step.completion = completion; else delete step.completion;
@@ -122,10 +122,10 @@ export function validateBackplan(value: unknown, sources: string[], dateSources 
   }
   for (const id of artifacts.produce) {
     const producers = answer.steps.filter((step) => step.produces === id).length;
-    if (producers !== 1) throw new Error(`BACKPLAN_ARTIFACT_UNPRODUCED: 产物「${id}」要由且只由一个任务产出（produces 设为它），现在是 ${producers} 个`);
+    if (producers !== 1) throw new Error(`BACKPLAN_ARTIFACT_UNPRODUCED: 产物「${id}」要由且只由一个任务产出（produces 设为它），现在是 ${producers} 个`); // i18n-ignore
   }
   for (const id of artifacts.use) {
-    if (!answer.steps.some((step) => step.uses.includes(id))) throw new Error(`BACKPLAN_ARTIFACT_UNUSED: 其他主线的产物「${id}」至少要被一个任务用到（uses 里列出它）`);
+    if (!answer.steps.some((step) => step.uses.includes(id))) throw new Error(`BACKPLAN_ARTIFACT_UNUSED: 其他主线的产物「${id}」至少要被一个任务用到（uses 里列出它）`); // i18n-ignore
   }
   return answer;
 }

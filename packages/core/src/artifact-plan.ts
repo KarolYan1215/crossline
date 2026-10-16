@@ -15,6 +15,7 @@
  *
  * The rules below are the ones code can hold a model to; quality (a vague counterfactual) is a warning for the reviewer, never a stop.
  */
+import { tFor, type Locale } from "./i18n";
 
 export const ARTIFACT_PLAN_VERSION = "crossline.artifact-plan.v1" as const;
 /** A line feeds at most this many cross-line edges: a task tied to many goals reads as less useful for each, and coordination costs. */
@@ -126,10 +127,11 @@ export function supplyWarnings(pair: { use: string; counterfactual: string; hour
   const warnings: ArtifactWarning[] = [];
   const counterfactual = pair.counterfactual.trim();
   // A counterfactual names hours or a concrete thing that would be missing; 「会更难」 says neither.
-  if (counterfactual.length < 12 || (!/\d/.test(counterfactual) && !/缺|没有|无法|拿不到|做不了/.test(counterfactual))) {
-    warnings.push({ code: "SUPPLY_COUNTERFACTUAL_VAGUE", detail: "反事实未写明没有上游时下游要多花多少小时或缺什么。" });
+  // The same in English: "missing", "without", "cannot", "no …" name what would be lacking.
+  if (counterfactual.length < 12 || (!/\d/.test(counterfactual) && !/缺|没有|无法|拿不到|做不了|\b(missing|lack(s|ing)?|without|cannot|can't|could not|couldn't|no|none)\b/i.test(counterfactual))) {
+    warnings.push({ code: "SUPPLY_COUNTERFACTUAL_VAGUE", detail: "反事实未写明没有上游时下游要多花多少小时或缺什么。" }); // i18n-ignore: read by the reviewer model
   }
-  if (pair.use.trim().length < 8) warnings.push({ code: "SUPPLY_USE_THIN", detail: "未写清下游拿它做什么。" });
+  if (pair.use.trim().length < 8) warnings.push({ code: "SUPPLY_USE_THIN", detail: "未写清下游拿它做什么。" }); // i18n-ignore: read by the reviewer model
   return warnings;
 }
 
@@ -137,6 +139,7 @@ export function supplyWarnings(pair: { use: string; counterfactual: string; hour
  * Checks an artifact plan against the context it was asked in. Throws a coded error whose detail names the artifact or pair at fault
  * (the runner sends it back for repair); pairs beyond a line's outgoing cap and exact repeats are dropped, not refused.
  */
+/* i18n-ignore-start: repair messages sent back to the model, and what it dropped (for the reviewer and the logs) */
 export function validateArtifactPlan(value: unknown, context: ArtifactPlanContext): CheckedArtifactPlan {
   const raw = value as ArtifactPlanAnswer | undefined;
   if (!raw || !Array.isArray(raw.artifacts) || !Array.isArray(raw.needs) || !Array.isArray(raw.supplies) || !Array.isArray(raw.assumptions)
@@ -208,6 +211,7 @@ export function validateArtifactPlan(value: unknown, context: ArtifactPlanContex
   const warnings = capped.kept.flatMap((pair) => { const found = supplyWarnings(pair); return found.length ? [{ from: pair.from, toLine: pair.toLine, warnings: found }] : []; });
   return { artifacts: raw.artifacts, needs: raw.needs, supplies: capped.kept, assumptions: raw.assumptions, blockers: [], dropped, warnings };
 }
+/* i18n-ignore-end */
 
 /** A stored plan, or an empty one when nothing (or something unreadable) is stored. */
 export function readArtifactPlan(raw: string | null | undefined): StoredArtifactPlan {
@@ -265,12 +269,14 @@ export function isFeedbackPair(plan: Pick<StoredArtifactPlan, "artifacts" | "sup
  * it returns to — the next period — and two milestones can never feed each other: loops exist between lines, never between milestones.
  * Returns what is wrong, or null; an edge with an undated end cannot be checked and passes.
  */
-export function timeOrderProblem(upDeadline: string | undefined, downDeadline: string | undefined, lagDays: number, feedback = false): string | null {
+export function timeOrderProblem(upDeadline: string | undefined, downDeadline: string | undefined, lagDays: number, feedback = false, locale?: Locale): string | null {
+  const t = tFor(locale);
   if (!upDeadline || !downDeadline || !validDay(upDeadline) || !validDay(downDeadline)) return null;
   const lag = Math.max(lagDays, feedback ? 1 : 0);
   const latest = addDays(downDeadline, -lag);
   return upDeadline <= latest ? null
-    : `上游 ${upDeadline} 截止，晚于下游截止 ${downDeadline} 减去 ${lag} 天传递时间（最晚 ${latest}）${feedback ? "；两条主线互相供给，回流要落在下一期的里程碑上" : ""}`;
+    : t("上游 {{up}} 截止，晚于下游截止 {{down}} 减去 {{count}} 天传递时间（最晚 {{latest}}）", { up: upDeadline, down: downDeadline, count: lag, latest })
+      + (feedback ? t("；两条主线互相供给，回流要落在下一期的里程碑上") : "");
 }
 
 export type RelationTransfer = ArtifactTransfer & { hoursSaved: number; lagDays: number;
@@ -292,8 +298,9 @@ export const artifactRelationId = (artifactId: string, from: string, to: string)
  * approved) first, the rest by the pair ranking (`rankSupplies`), then the earlier check day.
  */
 export function deriveArtifactRelations(milestones: ArtifactMilestone[], plan: Pick<StoredArtifactPlan, "artifacts" | "supplies">,
-  options: { labels?: Record<string, string>; locked?: ReadonlySet<string> } = {}):
+  options: { labels?: Record<string, string>; locked?: ReadonlySet<string>; locale?: Locale } = {}):
   { relations: DerivedRelation[]; refused: Array<{ artifactId: string; toMilestoneId: string; code: string; detail: string }> } {
+  const t = tFor(options.locale);
   const artifacts = new Map(plan.artifacts.map((artifact) => [artifact.id, artifact]));
   const label = (line: string) => options.labels?.[line] ?? line;
   const candidates: Array<DerivedRelation & { rank: SupplyPair }> = [];
@@ -305,12 +312,12 @@ export function deriveArtifactRelations(milestones: ArtifactMilestone[], plan: P
     const producers = milestones.filter((milestone) => milestone.line === artifact.line && milestone.outputs.includes(artifact.id));
     const consumers = milestones.filter((milestone) => milestone.line === pair.toLine && (milestone.inputs.includes(artifact.id) || milestone.id === pair.toMilestone));
     for (const consumer of consumers) {
-      const inTime = producers.filter((producer) => producer.line !== consumer.line && !timeOrderProblem(producer.deadline, consumer.deadline, pair.lagDays, feedback))
+      const inTime = producers.filter((producer) => producer.line !== consumer.line && !timeOrderProblem(producer.deadline, consumer.deadline, pair.lagDays, feedback, options.locale))
         .sort((a, b) => (b.deadline ?? "").localeCompare(a.deadline ?? ""));
       const producer = inTime[0];
       if (!producer) {
         if (producers.length) refused.push({ artifactId: artifact.id, toMilestoneId: consumer.id, code: "RELATION_TIME_ORDER",
-          detail: timeOrderProblem(producers[0]!.deadline, consumer.deadline, pair.lagDays, feedback) ?? "" });
+          detail: timeOrderProblem(producers[0]!.deadline, consumer.deadline, pair.lagDays, feedback, options.locale) ?? "" });
         continue;
       }
       const checkOn = consumer.deadline && validDay(consumer.deadline) ? consumer.deadline : null;
@@ -319,8 +326,11 @@ export function deriveArtifactRelations(milestones: ArtifactMilestone[], plan: P
         kind: feedback ? "recurring_feedback" : "reuses", artifactId: artifact.id,
         transfer: { ...pair.transfer, hoursSaved: pair.hoursSaved, lagDays: pair.lagDays, measured: null }, checkOn,
         counterfactual: pair.counterfactual, use: pair.use,
-        explanation: `${label(artifact.line)}的「${artifact.title}」供${label(pair.toLine)}「${consumer.title}」：${pair.use}`,
-        refutedWhen: `到 ${checkOn ?? "下游截止"}，${label(pair.toLine)}「${consumer.title}」没有用上「${artifact.title}」（预期 ${pair.transfer.expected} ${pair.transfer.unit}${pair.transfer.metric}）`,
+        explanation: t("{{fromLine}}的「{{artifact}}」供{{toLine}}「{{consumer}}」：{{use}}",
+          { fromLine: label(artifact.line), artifact: artifact.title, toLine: label(pair.toLine), consumer: consumer.title, use: pair.use }),
+        refutedWhen: t("到 {{day}}，{{toLine}}「{{consumer}}」没有用上「{{artifact}}」（预期 {{expected}} {{unit}}{{metric}}）", { day: checkOn ?? t("下游截止"),
+          toLine: label(pair.toLine), consumer: consumer.title, artifact: artifact.title, expected: pair.transfer.expected,
+          unit: pair.transfer.unit, metric: options.locale === "en" ? ` ${pair.transfer.metric}` : pair.transfer.metric }),
         rank: pair
       });
     }
@@ -339,7 +349,7 @@ export function deriveArtifactRelations(milestones: ArtifactMilestone[], plan: P
     const line = lineOf.get(relation.fromMilestoneId) ?? "";
     if ((used.get(line) ?? 0) >= MAX_OUTGOING_PER_LINE) {
       refused.push({ artifactId: relation.artifactId, toMilestoneId: relation.toMilestoneId, code: "RELATION_OUTGOING_CAP",
-        detail: `「${label(line)}」已有 ${MAX_OUTGOING_PER_LINE} 条出边` });
+        detail: t("「{{line}}」已有 {{count}} 条出边", { line: label(line), count: MAX_OUTGOING_PER_LINE }) });
       continue;
     }
     used.set(line, (used.get(line) ?? 0) + 1);
@@ -398,6 +408,7 @@ const derivationUses = (derivation: string, input: { id: string; title: string }
  * artifact's `readyBy`); an output must reach every milestone already waiting for it in time; every artifact promised to another line
  * must be produced by some milestone. Throws the first problem, naming the milestone.
  */
+/* i18n-ignore-start: repair messages sent back to the model */
 export function validateArtifactReferences(milestones: ProposedRefs[], artifacts: LineArtifacts): void {
   const produce = new Map(artifacts.produce.map((item) => [item.id, item]));
   const consume = new Map(artifacts.consume.map((item) => [item.id, item]));
@@ -436,6 +447,7 @@ export function validateArtifactReferences(milestones: ProposedRefs[], artifacts
     }
   }
 }
+/* i18n-ignore-end */
 
 /** The artifact problems a kept answer may still carry: soft, because the relations are derived only from references that pass. */
 export const ARTIFACT_SOFT_CODES = new Set(["MILESTONE_OUTPUT_UNKNOWN", "MILESTONE_INPUT_UNKNOWN", "MILESTONE_INPUT_NOT_DERIVED",
