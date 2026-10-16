@@ -10,6 +10,8 @@ test("the wait says what the turn is doing: reading named files, writing, checki
   expect(progressHeadline(at({ files: ["课程大纲.pdf", "简历.docx", "课表.png"] }))).toBe("正在读 3 个文件：课程大纲.pdf、简历.docx 等");
   expect(progressHeadline(at({}))).toBe("正在想下一组问题");
   expect(progressHeadline(at({ phase: "writing" }))).toBe("正在写回答");
+  // The hosted beta runs one model turn at a time: a turn behind others says how many are ahead.
+  expect(progressHeadline(at({ phase: "queued", ahead: 2 }))).toBe("排队中，前面还有 2 个");
   expect(progressHeadline(at({ phase: "checking" }))).toBe("写完了，正在核对引文和日期");
   expect(progressHeadline(at({ phase: "writing", repairs: 1 }))).toBe("第一次的回答有一处没过核对，正在修正（第 1 次）");
   expect(progressHeadline(at({ stalls: 1 }))).toBe("上一次没有回音，已重新发送");

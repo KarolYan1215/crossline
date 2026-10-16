@@ -32,7 +32,8 @@ fi
 # once with no ceiling, the host swapped until Caddy and SSH stopped answering, and both sites were down. Over its ceiling a container
 # is killed and restarted by Docker instead (the worker's Codex runtimes are its children, so they count against the worker's).
 if [ "$want" = all ] || [ "$want" = web ]; then
-  start crossline-web --network host --env-file /srv/crossline/app.env --memory 450m --memory-swap 450m \
+  # A Node heap ceiling under the container's: the heap is collected harder before the container is anywhere near being killed.
+  start crossline-web --network host --env-file /srv/crossline/app.env --memory 450m --memory-swap 450m -e NODE_OPTIONS=--max-old-space-size=320 \
     -v /srv/crossline/data:/data -v /srv/crossline/state:/state -v /srv/crossline/codex:/opt/codex:ro \
     -w /repo/apps/web "$app_image" node_modules/.bin/next start --hostname 127.0.0.1 --port 3210
 fi
@@ -41,7 +42,11 @@ if [ "$want" = all ] || [ "$want" = worker ]; then
   # (worker.already_running) and restart in a loop. The old container is removed first, so no other worker holds it.
   docker rm -f crossline-worker >/dev/null 2>&1 || true
   rm -f /srv/crossline/data/worker.lock
-  start crossline-worker --network host --env-file /srv/crossline/app.env --memory 900m --memory-swap 900m \
+  # The prebuilt worker (scripts/build-worker.mjs) when the image has it, else tsx as before. The Codex runtimes are its children and
+  # live outside the Node heap, so the heap gets well under half the container.
+  worker_cmd="/repo/node_modules/.bin/tsx src/index.ts"
+  if docker run --rm --entrypoint test "$app_image" -f /repo/apps/worker/dist/index.mjs; then worker_cmd="node dist/index.mjs"; fi
+  start crossline-worker --network host --env-file /srv/crossline/app.env --memory 900m --memory-swap 900m -e NODE_OPTIONS=--max-old-space-size=384 \
     -v /srv/crossline/data:/data -v /srv/crossline/state:/state -v /srv/crossline/codex:/opt/codex:ro \
-    -w /repo/apps/worker "$app_image" /repo/node_modules/.bin/tsx src/index.ts
+    -w /repo/apps/worker "$app_image" $worker_cmd
 fi

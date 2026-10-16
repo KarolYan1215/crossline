@@ -35,9 +35,11 @@ const listeners: Array<(workspaceId: string) => void> = [];
 /** When each workspace's latest input was first asked for: the calendar waits up to a minute for its optimal plan. */
 const requested = new Map<string, { hash: string; at: number }>();
 let solver: ModelSolver | undefined;
-// Off under vitest and e2e (their plans must not change under them mid-test); `CROSSLINE_BACKGROUND_SOLVE=on|off` overrides either way.
+// Off under vitest and e2e (their plans must not change under them mid-test) and on the hosted beta, whose 2 GB server cannot spare
+// a HiGHS thread beside everyone's model runs (2026-10-16): there every schedule is the greedy pass. `CROSSLINE_BACKGROUND_SOLVE=on|off`
+// overrides either way.
 let enabled = process.env.CROSSLINE_BACKGROUND_SOLVE ? process.env.CROSSLINE_BACKGROUND_SOLVE !== "off"
-  : !process.env.VITEST && !process.env.CROSSLINE_E2E_DATA_DIR;
+  : !process.env.VITEST && !process.env.CROSSLINE_E2E_DATA_DIR && process.env.CROSSLINE_PUBLIC_BETA !== "1";
 
 /** Tests: switch the background solve on with a solver of their own (or off). */
 export function configureOptimal(options: { enabled: boolean; solver?: ModelSolver }): void {

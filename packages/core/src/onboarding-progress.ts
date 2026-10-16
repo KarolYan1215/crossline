@@ -12,7 +12,9 @@ export type OnboardingProgress = {
   sessionId: string;
   startedAt: string;
   updatedAt: string;
-  phase: "thinking" | "writing" | "checking";
+  /** `queued`: waiting for the server's one model slot (the hosted beta runs one model turn at a time), `ahead` runs before it. */
+  phase: "queued" | "thinking" | "writing" | "checking";
+  ahead?: number;
   /** Files handed to this turn, by name: what the model is reading before it writes anything. */
   files: string[];
   facts: number;

@@ -42,10 +42,18 @@ jobs:
             tail -5 /tmp/build-app.log 2>/dev/null || true
             for p in 3340 3210; do printf "%s " $p; curl -s -m 5 -o /dev/null -w "%{http_code}\n" http://127.0.0.1:$p/ || echo down; done
             for c in assess crossline-web crossline-worker; do echo "== $c"; sudo docker logs --tail 40 $c 2>&1 || true; done
+            echo "== memory"
+            # Each container against its ceiling, whether one was killed for memory and how often it restarted, the worker peak, and the
+            # model gate (runs waiting for the one slot, waits caused by memory) from the worker log.
+            sudo docker stats --no-stream --format "{{.Name}} {{.MemUsage}} {{.MemPerc}} cpu {{.CPUPerc}}" || true
+            for c in assess crossline-web crossline-worker; do printf "%s " $c; sudo docker inspect -f "oomkilled={{.State.OOMKilled}} restarts={{.RestartCount}} started={{.State.StartedAt}}" $c 2>/dev/null || echo missing; done
+            printf "worker peak bytes: "; sudo docker exec crossline-worker cat /sys/fs/cgroup/memory.peak 2>/dev/null || echo unknown
+            sudo docker logs --since 24h crossline-worker 2>&1 | grep -E "worker.memory|model.gate|already_running" | tail -20 || true
+            sudo dmesg 2>/dev/null | grep -iE "out of memory|oom-kill" | tail -5 || true
             echo "== assess figures"
             # The app logs its image settings (provider, model, size; never the key) and every skipped, failed or drawn figure.
-            sudo docker logs assess 2>&1 | grep -E "avatar\.|assess\.avatar" | tail -30 || true
-            for k in ASSESS_IMAGE_PROVIDER ASSESS_IMAGE_MODEL ASSESS_IMAGE_SIZE ASSESS_IMAGE_BASE_URL ASSESS_IMAGE_DAILY_LIMIT ASSESS_IMAGE_API_KEY; do
+            sudo docker logs assess 2>&1 | grep -E "avatar\.|assess\.avatar|wants\." | tail -30 || true
+            for k in ASSESS_IMAGE_PROVIDER ASSESS_IMAGE_MODEL ASSESS_IMAGE_SIZE ASSESS_IMAGE_BASE_URL ASSESS_IMAGE_DAILY_LIMIT ASSESS_IMAGE_API_KEY ASSESS_TEXT_BASE_URL ASSESS_TEXT_MODEL ASSESS_TEXT_API_KEY; do
               printf "%s: " $k
               if sudo grep -qE "^$k=.+" /srv/assess/assess.env; then echo filled; elif sudo grep -qE "^$k=" /srv/assess/assess.env; then echo empty; else echo absent; fi
             done

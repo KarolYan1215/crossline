@@ -2,7 +2,8 @@ import { get } from "node:http";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { enterUsageWorkspace, setProviderResolver, setSpendModeProvider, setUsageSink, startCodexSupervisor, startModelGateway, type CodexSupervisor } from "@crossline/codex";
+import { configureModelGate, enterUsageWorkspace, modelGateStatus, setProviderResolver, setSpendModeProvider, setUsageSink, startCodexSupervisor, startModelGateway, type CodexSupervisor } from "@crossline/codex";
+import { containerMemory, containerPeak } from "./memory";
 import { createDpapiSecretStore } from "@crossline/connectors";
 import { createModelProviderService } from "./model-provider";
 import { CrosslineStore, aiToolsFor, grownHomeLine, interviewChecklistFor, isPaused, listPushSubscriptions, readGrownSkills, readPublicSkills, removePushSubscriptions } from "@crossline/db";
@@ -1055,7 +1056,10 @@ if (!capabilitySecret) {
       requiredSkills: REQUIRED_SKILLS
     },
     // Every account but the machine owner's runs on its own Codex (runtime-registry.ts), in its own home beside the owner's.
-    runtimes: { baseDir: runtimesDir(), ownerWorkspaceId: () => runtimeOwner(analysisStore), hasProvider: (workspaceId) => modelProviders.hasProvider(workspaceId) },
+    // On the hosted beta's 2 GB server at most two other accounts keep a runtime, each stopped after ten quiet minutes (never while a
+    // run is in flight, model-gate.ts); elsewhere three and half an hour.
+    runtimes: { baseDir: runtimesDir(), ownerWorkspaceId: () => runtimeOwner(analysisStore), hasProvider: (workspaceId) => modelProviders.hasProvider(workspaceId),
+      ...(hostedBeta ? { maxRunning: 2, idleMs: 10 * 60_000 } : {}) },
     modelProviders: { handle: (method, pathname, workspaceId, body) => modelProviders.handle(method, pathname, workspaceId, body),
       cost: (workspaceId) => modelProviders.cost(workspaceId) },
     monthSpend: (workspaceId) => monthSpend(analysisStore, workspaceId),
@@ -1166,8 +1170,17 @@ if (!capabilitySecret) {
     } : {})
   });
   console.info(JSON.stringify({ type: "codex.supervisor.ready", url: codexSupervisor.url, runtimeOwner: runtimeOwner(analysisStore) ?? null }));
-  // Other accounts' runtimes stop after half an hour without an event, so an idle account holds no process.
+  // Other accounts' runtimes stop after a quiet spell (above), so an idle account holds no process.
   setInterval(() => codexSupervisor?.runtimes?.stopIdle(), 60_000).unref();
+  // One model run at a time on the hosted beta, and none started above the memory high-water mark (model-gate.ts).
+  configureModelGate({ probe: () => containerMemory(), reclaim: () => codexSupervisor?.runtimes?.reclaim() });
+  // What the health check and the logs read: memory in use, its ceiling and peak, and the gate's line, every five minutes.
+  const mb = (bytes: number | undefined) => bytes === undefined ? null : Math.round(bytes / 1048576);
+  setInterval(() => {
+    const gate = modelGateStatus();
+    console.info(JSON.stringify({ type: "worker.memory", usedMb: mb(gate.memory?.used), limitMb: mb(gate.memory?.limit), peakMb: mb(containerPeak()),
+      active: gate.active, queued: gate.queued }));
+  }, 5 * 60_000).unref();
 } catch {
   console.warn(JSON.stringify({ type: "worker.blocked", code: "CODEX_SUPERVISOR_START_FAILED" }));
 }

@@ -11,6 +11,7 @@ import { enterUsageWorkspace } from "./usage";
 import { CALENDAR_APPS, calendarAppStatuses, type CostSignal } from "@crossline/core";
 import { createRuntimeRegistry, type RuntimeRegistry, type RuntimeSidecar } from "./runtime-registry";
 export * from "./skill-runner";
+export * from "./model-gate";
 export * from "./style";
 export * from "./usage";
 export * from "./analysis";

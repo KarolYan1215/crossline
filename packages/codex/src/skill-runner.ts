@@ -6,6 +6,7 @@ import type { CodexRpcBoundary } from "./index";
 import { routeForSkill, tierForSkill, tierRoutes, type ModelRoute, type RouteTier, type SpendMode } from "./model-policy";
 import { createUsageCollector, currentSpendMode, reportUsage, type UsageCollector } from "./usage";
 import { currentProviderRouting, decideRoute, type ThreadProvider } from "./providers";
+import { markClientBusy, withModelSlot, type ModelPriority } from "./model-gate";
 
 import { registerAgentThread, type AgentMode } from "./agent-mode";
 
@@ -67,6 +68,10 @@ export type SkillRunOptions<T> = {
   onAudit: (audit: AnalysisAudit) => void;
   /** Called as the turn moves (throttled to twice a second while it writes); see `SkillProgress`. */
   onProgress?: (progress: SkillProgress) => void;
+  /** While the run waits for the process-wide model gate (model-gate.ts): how many runs are ahead of it. */
+  onQueued?: (ahead: number) => void;
+  /** Overrides the gate's priority, which otherwise follows the Skill (`priorityForSkill`). */
+  priority?: ModelPriority;
   signal?: AbortSignal;
   timeoutMs?: number;
   /** Silence, in ms, after which a turn is treated as hung and sent again. Defaults to 20 minutes (`CROSSLINE_SKILL_IDLE_MINUTES`). */
@@ -204,63 +209,82 @@ const MAX_STALL_RETRIES = 2;
  * Everything the two entry points share: waiting in the right lane, switching the Skill on, running, switching
  * it back off, and reporting what the run used.
  */
-async function executeSkill<T>(client: CodexRpcBoundary, options: { skillName: string; cwd: string; tier?: RouteTier; provider?: ThreadProvider; extraSkills?: string[]; webTools?: SkillTools },
+async function executeSkill<T>(client: CodexRpcBoundary, options: { skillName: string; cwd: string; tier?: RouteTier; provider?: ThreadProvider; extraSkills?: string[]; webTools?: SkillTools;
+  onQueued?: (ahead: number) => void; priority?: ModelPriority; signal?: AbortSignal },
   body: (context: RunContext) => Promise<SkillRunResult<T>>): Promise<SkillRunResult<T>> {
+  // The assistant (owner's machine only, never on the hosted beta) runs for up to an hour in a lane of its own; holding the one gate
+  // slot that long would stop every interview behind it.
+  if (/crossline-agent$/.test(options.skillName)) return serializeSkillRun(client, options.skillName, () => runGated(client, options, body));
   return serializeSkillRun(client, options.skillName, async () => {
-    const startedAt = Date.now();
-    const spendMode = await currentSpendMode();
-    // The workspace's own provider when it can serve this Skill, else its own Codex sign-in, else a blocker (never the owner's runtime).
-    const routing = options.provider ? undefined : currentProviderRouting();
-    const decision = options.provider ? { via: "provider" as const, provider: options.provider } : decideRoute(options.skillName, routing);
-    if (decision.via === "blocked") return { ok: false, blocker: { code: decision.code, message: decision.message }, audit: {} };
-    const provider = decision.via === "provider" ? decision.provider : undefined;
-    // A stronger look is a cost the person did not ask for: in economy mode the Skill keeps its own route.
-    const route = provider ? { model: provider.model }
-      : options.tier && spendMode === "normal" && process.env.CROSSLINE_MODEL_ROUTING?.trim().toLowerCase() !== "off"
-      ? { ...tierRoutes()[options.tier] } : routeForSkill(options.skillName, process.env, spendMode);
-    const webTools = provider ? options.webTools ?? routing?.webTools : undefined;
-    const context: RunContext = { route, spendMode, usage: createUsageCollector(), ...(provider ? { provider } : {}), ...(webTools ? { webTools } : {}), extraSkills: [] };
-    let skill: NativeSkill | undefined;
-    // Library skills switched on for this run, with whether they were on before (only those that were off are switched back).
-    const extras: Array<NativeSkill & { name: string }> = [];
-    let result: SkillRunResult<T>;
-    try {
-      skill = await underConfigLock(client, async () => {
-        const found = await findNativeSkill(client, options.skillName, options.cwd);
-        if (!found.enabled) await setNativeSkill(client, found.path, true);
-        for (const name of options.extraSkills ?? []) {
-          const extra = await findNativeSkill(client, name, options.cwd).catch(() => undefined);
-          if (!extra) continue;
-          if (!extra.enabled) await setNativeSkill(client, extra.path, true);
-          extras.push({ ...extra, name });
-        }
-        return found;
-      });
-      context.extraSkills = extras.map((extra) => extra.name);
-      result = await body(context);
-      if (extras.length) result.audit.skills = context.extraSkills;
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "";
-      result = skillBlocker<T>(/^SKILL_(LIST_FAILED|MISSING|CONFIG_FAILED)$/.test(errorMessage) ? errorMessage : "SKILL_CONFIG_FAILED");
-    }
-    for (const extra of extras.filter((item) => !item.enabled)) {
-      try { await underConfigLock(client, () => setNativeSkill(client, extra.path, false)); }
-      catch { result = skillBlocker<T>("SKILL_CONFIG_FAILED", result.audit); }
-    }
-    if (skill && !skill.enabled) {
-      const path = skill.path;
-      try { await underConfigLock(client, () => setNativeSkill(client, path, false)); }
-      catch { result = skillBlocker<T>("SKILL_CONFIG_FAILED", result.audit); }
-    }
-    reportUsage({
-      skillName: options.skillName, ...(tierForSkill(options.skillName) ? { tier: tierForSkill(options.skillName)! } : {}),
-      ...(context.route ? { model: context.route.model, ...(context.route.effort ? { effort: context.route.effort } : {}) } : {}),
-      spendMode, ...(result.audit.threadId ? { threadId: result.audit.threadId } : {}), ok: result.ok,
-      ...(result.ok ? {} : { errorCode: result.blocker.code }), repairs: result.audit.repairs ?? 0, turns: context.usage.turns(),
-      durationMs: Date.now() - startedAt, at: new Date(startedAt).toISOString(), turnSeconds: context.usage.turnSeconds(), ...context.usage.total()
-    });
-    return result;
+    const gated = await withModelSlot({ skill: options.skillName, ...(options.priority ? { priority: options.priority } : {}),
+      ...(options.onQueued ? { onQueued: options.onQueued } : {}), ...(options.signal ? { signal: options.signal } : {}) },
+    () => runGated(client, options, body));
+    return gated ?? { ok: false, blocker: { code: "SKILL_CANCELED", message: "已取消；排队时取消，没有开始运行。" }, audit: {} };
   });
+}
+
+/** The run itself, once it holds a slot: counted as in flight on its runtime so the runtime is never reclaimed under it. */
+async function runGated<T>(client: CodexRpcBoundary, options: { skillName: string; cwd: string; tier?: RouteTier; provider?: ThreadProvider; extraSkills?: string[]; webTools?: SkillTools },
+  body: (context: RunContext) => Promise<SkillRunResult<T>>): Promise<SkillRunResult<T>> {
+  markClientBusy(client, 1);
+  try { return await runRouted(client, options, body); } finally { markClientBusy(client, -1); }
+}
+
+async function runRouted<T>(client: CodexRpcBoundary, options: { skillName: string; cwd: string; tier?: RouteTier; provider?: ThreadProvider; extraSkills?: string[]; webTools?: SkillTools },
+  body: (context: RunContext) => Promise<SkillRunResult<T>>): Promise<SkillRunResult<T>> {
+  const startedAt = Date.now();
+  const spendMode = await currentSpendMode();
+  // The workspace's own provider when it can serve this Skill, else its own Codex sign-in, else a blocker (never the owner's runtime).
+  const routing = options.provider ? undefined : currentProviderRouting();
+  const decision = options.provider ? { via: "provider" as const, provider: options.provider } : decideRoute(options.skillName, routing);
+  if (decision.via === "blocked") return { ok: false, blocker: { code: decision.code, message: decision.message }, audit: {} };
+  const provider = decision.via === "provider" ? decision.provider : undefined;
+  // A stronger look is a cost the person did not ask for: in economy mode the Skill keeps its own route.
+  const route = provider ? { model: provider.model }
+    : options.tier && spendMode === "normal" && process.env.CROSSLINE_MODEL_ROUTING?.trim().toLowerCase() !== "off"
+    ? { ...tierRoutes()[options.tier] } : routeForSkill(options.skillName, process.env, spendMode);
+  const webTools = provider ? options.webTools ?? routing?.webTools : undefined;
+  const context: RunContext = { route, spendMode, usage: createUsageCollector(), ...(provider ? { provider } : {}), ...(webTools ? { webTools } : {}), extraSkills: [] };
+  let skill: NativeSkill | undefined;
+  // Library skills switched on for this run, with whether they were on before (only those that were off are switched back).
+  const extras: Array<NativeSkill & { name: string }> = [];
+  let result: SkillRunResult<T>;
+  try {
+    skill = await underConfigLock(client, async () => {
+      const found = await findNativeSkill(client, options.skillName, options.cwd);
+      if (!found.enabled) await setNativeSkill(client, found.path, true);
+      for (const name of options.extraSkills ?? []) {
+        const extra = await findNativeSkill(client, name, options.cwd).catch(() => undefined);
+        if (!extra) continue;
+        if (!extra.enabled) await setNativeSkill(client, extra.path, true);
+        extras.push({ ...extra, name });
+      }
+      return found;
+    });
+    context.extraSkills = extras.map((extra) => extra.name);
+    result = await body(context);
+    if (extras.length) result.audit.skills = context.extraSkills;
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : "";
+    result = skillBlocker<T>(/^SKILL_(LIST_FAILED|MISSING|CONFIG_FAILED)$/.test(errorMessage) ? errorMessage : "SKILL_CONFIG_FAILED");
+  }
+  for (const extra of extras.filter((item) => !item.enabled)) {
+    try { await underConfigLock(client, () => setNativeSkill(client, extra.path, false)); }
+    catch { result = skillBlocker<T>("SKILL_CONFIG_FAILED", result.audit); }
+  }
+  if (skill && !skill.enabled) {
+    const path = skill.path;
+    try { await underConfigLock(client, () => setNativeSkill(client, path, false)); }
+    catch { result = skillBlocker<T>("SKILL_CONFIG_FAILED", result.audit); }
+  }
+  reportUsage({
+    skillName: options.skillName, ...(tierForSkill(options.skillName) ? { tier: tierForSkill(options.skillName)! } : {}),
+    ...(context.route ? { model: context.route.model, ...(context.route.effort ? { effort: context.route.effort } : {}) } : {}),
+    spendMode, ...(result.audit.threadId ? { threadId: result.audit.threadId } : {}), ok: result.ok,
+    ...(result.ok ? {} : { errorCode: result.blocker.code }), repairs: result.audit.repairs ?? 0, turns: context.usage.turns(),
+    durationMs: Date.now() - startedAt, at: new Date(startedAt).toISOString(), turnSeconds: context.usage.turnSeconds(), ...context.usage.total()
+  });
+  return result;
 }
 
 /**
@@ -328,6 +352,8 @@ export type ContinueTurnOptions<T> = {
   validateOutput: (output: unknown) => T;
   onAudit: (audit: AnalysisAudit) => void;
   onProgress?: (progress: SkillProgress) => void;
+  onQueued?: (ahead: number) => void;
+  priority?: ModelPriority;
   signal?: AbortSignal;
   timeoutMs?: number;
   idleMs?: number;

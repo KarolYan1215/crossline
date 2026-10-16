@@ -1,3 +1,4 @@
+import { clientBusy, waitForMemory } from "./model-gate";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import type { CodexRpcBoundary } from "./index";
@@ -40,6 +41,8 @@ export type RuntimeRegistry = {
   /** Signs a guest out and deletes its home (login and memories); the owner's runtime is not touched here. */
   logout(workspaceId: string): Promise<void>;
   stopIdle(): void;
+  /** Under memory pressure: stops every guest runtime with no run in flight that has been quiet for a minute. */
+  reclaim(): void;
   stopAll(): void;
 };
 
@@ -73,6 +76,8 @@ export function createRuntimeRegistry(options: {
     try { entry?.sidecar.stop(); } catch { /* already gone */ }
   };
   const touch = (workspaceId: string) => { const entry = running.get(workspaceId); if (entry) entry.lastUsed = now(); };
+  // A runtime with a run in flight is never stopped for being idle or to make room, however quiet its turn is (model-gate.ts).
+  const stoppable = (entry: { sidecar: RuntimeSidecar; lastUsed: number }, quietMs: number) => !clientBusy(entry.sidecar.client) && now() - entry.lastUsed >= quietMs;
 
   async function ensure(workspaceId: string): Promise<RuntimeSidecar | RuntimeBlocker> {
     const existing = running.get(workspaceId);
@@ -81,10 +86,15 @@ export function createRuntimeRegistry(options: {
     if (pending) return pending;
     if (running.size >= maxRunning) {
       // Make room by stopping the least recently used guest; if every one is in use right now, say so rather than queue for hours.
-      const oldest = [...running].sort((a, b) => a[1].lastUsed - b[1].lastUsed)[0];
-      if (!oldest || now() - oldest[1].lastUsed < 60_000) return blocker("RUNTIME_LIMIT_REACHED");
+      const oldest = [...running].filter(([, entry]) => stoppable(entry, 60_000)).sort((a, b) => a[1].lastUsed - b[1].lastUsed)[0];
+      if (!oldest) return blocker("RUNTIME_LIMIT_REACHED");
       stop(oldest[0]);
     }
+    // Another process is the largest single thing this can add: with memory above the high-water mark, wait (reclaiming meanwhile).
+    await waitForMemory();
+    // Another call may have started it while this one waited.
+    const meanwhile = running.get(workspaceId)?.sidecar ?? await starting.get(workspaceId)?.catch(() => undefined);
+    if (meanwhile) return meanwhile;
     const home = homeOf(workspaceId);
     mkdirSync(home, { recursive: true });
     const launch = options.start(home);
@@ -149,7 +159,8 @@ export function createRuntimeRegistry(options: {
       logins.delete(workspaceId);
       rmSync(path.dirname(homeOf(workspaceId)), { recursive: true, force: true });
     },
-    stopIdle() { for (const [workspaceId, entry] of [...running]) if (now() - entry.lastUsed >= idleMs) stop(workspaceId); },
+    stopIdle() { for (const [workspaceId, entry] of [...running]) if (stoppable(entry, idleMs)) stop(workspaceId); },
+    reclaim() { for (const [workspaceId, entry] of [...running]) if (stoppable(entry, 60_000)) stop(workspaceId); },
     stopAll() { for (const workspaceId of [...running.keys()]) stop(workspaceId); }
   };
 }

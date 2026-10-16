@@ -6,6 +6,7 @@ import type { OnboardingProgress } from "@crossline/core";
 /** The line that says what the turn is doing now, from the worker's progress record (or nothing yet). */
 export function progressHeadline(progress: OnboardingProgress | null): string {
   if (!progress) return "正在准备这一轮…";
+  if (progress.phase === "queued") return `排队中，前面还有 ${progress.ahead ?? 1} 个`;
   if (progress.stalls > 0 && progress.phase === "thinking") return "上一次没有回音，已重新发送";
   if (progress.repairs > 0 && progress.phase !== "checking") return `第一次的回答有一处没过核对，正在修正（第 ${progress.repairs} 次）`;
   if (progress.phase === "checking") return "写完了，正在核对引文和日期";
