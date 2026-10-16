@@ -61,7 +61,6 @@
   "上一步": "Back",
   "上一题": "Previous",
   "上面是按你的类型推荐的。告诉我们你想同时做哪几件事，按你的选择重新组合：": "The suggestions above come from your type. Tell us what you want to do at the same time and we'll combine your own picks:",
-  "下一步": "Next",
   "下一题": "Next",
   "下载{{label}}": "Download {{label}}",
   "不同意": "Disagree",
@@ -495,7 +494,7 @@
   "研究者": "Researcher",
   "研究里的追问": "Open research questions",
   "硬科技": "Deep tech",
-  "确认删除": "Confirm deletion",
+  "确认删除": "Confirm delete",
   "社交电商": "Social commerce",
   "社交舞": "Ballroom",
   "社会科学": "Social science",
@@ -698,5 +697,6 @@
   "（{{when}}）": "({{when}})",
   "（两可）": " (either way)",
   "（理论估算）": " (estimate)",
-  "，约超过 {{percent}}% 的人": ", ahead of about {{percent}}% of people"
+  "，约超过 {{percent}}% 的人": ", ahead of about {{percent}}% of people",
+  "下一步_button": "Next"
 }

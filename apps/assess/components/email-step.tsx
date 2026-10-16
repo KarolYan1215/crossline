@@ -62,7 +62,7 @@ export function EmailStep({ fields, problems, error, busy, invited, onChange, on
     </div>}
     <div className="as-nav">
       <button type="button" onClick={onBack} disabled={busy}>{t("上一步")}</button>
-      <button type="submit" className="as-primary" disabled={busy}>{busy ? t("正在提交…") : t("下一步")}</button>
+      <button type="submit" className="as-primary" disabled={busy}>{busy ? t("正在提交…") : t("下一步", { context: "button" })}</button>
     </div>
   </form>;
 }

@@ -23,8 +23,7 @@ const SOURCES = ["apps/web/app", "apps/web/lib", "apps/assess/app", "apps/assess
   "apps/worker/src", "packages/core/src", "packages/db/src", "packages/auth/src", "packages/codex/src", "packages/planner/src",
   "packages/connectors/src", "packages/identity-packs/src"];
 /** Areas still being translated (removed one by one as each is done; empty when the work is complete). */
-const PENDING = ["apps/web/lib", "apps/assess", "packages/core/src/assess-content.ts", "packages/core/src/assess-wants.ts",
-  "packages/core/src/assess.ts", "packages/core/src/assess-link.ts", "apps/worker/src", "packages/db/src", "packages/auth/src",
+const PENDING = ["apps/web/lib", "apps/worker/src", "packages/db/src", "packages/auth/src",
   "packages/codex/src", "packages/planner/src", "packages/connectors/src", "packages/identity-packs/src"];
 const CATALOG_DIR = path.resolve(import.meta.dirname, "../locales/en");
 const HAN = /[㐀-鿿豈-﫿]/;

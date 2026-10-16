@@ -45,7 +45,7 @@ export function QuizStep({ flow, onChoose, onBack, onNext }: {
     </fieldset>
     <div className="as-nav">
       <button type="button" onClick={onBack}>{flow.index === 0 ? t("返回") : t("上一题")}</button>
-      {chosen !== undefined && <button type="button" onClick={onNext}>{flow.index === QUIZ_LENGTH - 1 ? t("下一步") : t("下一题")}</button>}
+      {chosen !== undefined && <button type="button" onClick={onNext}>{flow.index === QUIZ_LENGTH - 1 ? t("下一步", { context: "button" }) : t("下一题")}</button>}
     </div>
     <p className="as-note as-only-mouse">{t("键盘：按 1–5 作答，Enter 下一题")}</p>
   </section>;

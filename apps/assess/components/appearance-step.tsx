@@ -59,7 +59,7 @@ export function AppearanceStep({ draft, onChange, onBack, onNext }: {
     {problem && <p className="as-error" role="alert">{problem}</p>}
     <div className="as-nav">
       <button type="button" onClick={onBack}>{t("上一步")}</button>
-      <button type="button" className="as-primary" onClick={submit}>{t("下一步")}</button>
+      <button type="button" className="as-primary" onClick={submit}>{t("下一步", { context: "button" })}</button>
     </div>
   </section>;
 }
