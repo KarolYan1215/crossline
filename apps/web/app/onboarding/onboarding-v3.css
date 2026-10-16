@@ -175,3 +175,9 @@
 .ob-assess-actions{display:flex;flex-wrap:wrap;gap:8px}
 .ob-assess-used{margin:0 0 12px;display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;font-size:13px;color:var(--graphite)}
 .ob-assess-figure{float:right;width:96px;height:144px;object-fit:cover;object-position:top;margin:0 0 4px 12px;background:var(--chalk)}
+.ob-folder-plan{display:grid;gap:8px;padding:10px 12px;border:1px solid var(--line)}
+.ob-folder-plan p{margin:0}
+.ob-folder-plan fieldset{display:grid;gap:4px;margin:0;padding:6px 8px;border:1px dashed var(--line)}
+.ob-folder-plan fieldset label{display:flex;gap:6px;align-items:baseline;flex-wrap:wrap}
+.ob-folder-plan fieldset span{overflow-wrap:anywhere}
+.ob-folder-actions{display:flex;gap:8px;flex-wrap:wrap}

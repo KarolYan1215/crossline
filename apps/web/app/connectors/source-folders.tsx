@@ -31,6 +31,10 @@ export function SourceFolders({ onChanged }: { onChanged?: () => void }) {
   const [message, setMessage] = useState("");
   // Folders are on the computer Crossline runs on: only its owner's account may authorize one (a guest uploads files instead).
   const [available, setAvailable] = useState(true);
+  // A path names a folder on the computer Crossline runs on; opened from anywhere else (the hosted app) it would name a folder on the
+  // server, so the card shows only on that computer and the interview's 「选择文件夹」 uploads from the browser instead.
+  const [local, setLocal] = useState(false);
+  useEffect(() => { setLocal(["127.0.0.1", "localhost"].includes(location.hostname)); }, []);
 
   const load = useCallback(async () => {
     const response = await fetch("/api/sources/folders", { cache: "no-store" }).catch(() => undefined);
@@ -110,7 +114,7 @@ export function SourceFolders({ onChanged }: { onChanged?: () => void }) {
     setBusy(false);
   };
 
-  if (!available) return null;
+  if (!available || !local) return null;
   return <section className="st-card source-folders" aria-label="授权文件夹">
     <header><h3>授权文件夹</h3><small>读取文件夹里能读的文件（PDF、Word、文本），之后有新文件或改动会自动重读</small></header>
     {folders?.map((folder) => <div className="source-folder" key={folder.id}>

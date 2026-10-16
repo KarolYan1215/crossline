@@ -169,10 +169,15 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
     const list = [...files];
     if (!list.length) return;
     setBusy("upload"); setError("");
-    const form = new FormData();
-    list.forEach((file) => form.append("file", file));
-    const response = await fetch("/api/onboarding/sources", { method: "POST", body: form }).catch(() => undefined);
-    const body = await response?.json().catch(() => undefined) as { ok?: boolean; message?: string; code?: string; deferred?: boolean } | undefined;
+    // The route takes at most 12 files a request; a picked folder sends many, so they go up in batches and the first failure stops it.
+    let response: Response | undefined, body: { ok?: boolean; message?: string; code?: string; deferred?: boolean } | undefined;
+    for (let start = 0; start < list.length; start += 10) {
+      const form = new FormData();
+      list.slice(start, start + 10).forEach((file) => form.append("file", file));
+      response = await fetch("/api/onboarding/sources", { method: "POST", body: form }).catch(() => undefined);
+      body = await response?.json().catch(() => undefined) as typeof body;
+      if (!response?.ok) break;
+    }
     if (!response?.ok) setError(body?.message ?? "文件没有上传成功。");
     else if (body?.deferred) setError("文件已保存，但后台还没读取它（worker 没有运行）。");
     const next = await load();

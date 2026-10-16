@@ -5,6 +5,7 @@ import { lineAttributes } from "@crossline/core";
 import { AttributePicker, type AttributeOption } from "../ui/attribute-picker";
 import { CalendarSubscriptions } from "../connectors/calendar-subscriptions";
 import { SourceFolders } from "../connectors/source-folders";
+import { FolderPicker } from "./folder-picker";
 import { FactList } from "./profile-panel";
 import { QuestionCard } from "./question-card";
 import type { Answer, DocumentRow, OnboardingState, Question } from "./onboarding-types";
@@ -46,6 +47,7 @@ export function LeftColumn({ state, busy, accept, onUpload, onChanged, heldQuest
         <b>{busy ? "处理中…" : "添加文件或录音"}</b>
         <small>简历、课表、课程大纲、项目说明；也可以直接拖进页面</small>
       </label>
+      <FolderPicker busy={busy} onUpload={onUpload} />
       {uploads.length > 0 && <ul className="ob-doclist">{uploads.map((doc) => <li key={doc.id} data-status={doc.extractionStatus}>
         <span>{doc.fileName}</span><small>{DOC_STATUS[doc.extractionStatus]}{doc.projectId ? ` · ${state.projects.find((project) => project.id === doc.projectId)?.name ?? ""}` : ""}</small>
       </li>)}</ul>}
