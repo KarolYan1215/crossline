@@ -1,0 +1,56 @@
+name: Hosted beta server
+
+# Reaches the hosted beta's host over SSH from a GitHub runner: the cloud sessions that drive the deploy have no outbound SSH
+# (docs/beta-launch.md §10.6). Runs on dispatch, or on a push whose commit message carries [server] (diagnose) or [deploy]
+# (pull the images and restart). Needs the repository secret DEPLOY_SSH_KEY (the private key for admin@ the host).
+on:
+  push:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: diagnose or deploy
+        default: diagnose
+
+permissions:
+  contents: read
+  packages: read
+
+env:
+  HOST: 47.245.88.172
+
+jobs:
+  server:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[server]') || contains(github.event.head_commit.message, '[deploy]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: SSH key
+        env:
+          KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          test -n "$KEY" || { echo "DEPLOY_SSH_KEY is not set"; exit 1; }
+          mkdir -p ~/.ssh && printf '%s\n' "$KEY" > ~/.ssh/id && chmod 600 ~/.ssh/id
+          ssh-keyscan -T 15 "$HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+      - name: Diagnose
+        run: |
+          ssh -i ~/.ssh/id -o ConnectTimeout=30 -o ServerAliveInterval=15 admin@"$HOST" '
+            uptime; free -m; df -h / | tail -1
+            sudo docker ps -a --format "table {{.Names}}\t{{.Image}}\t{{.Status}}"
+            sudo docker images --format "{{.Repository}}:{{.Tag}} {{.Size}}" | head
+            sudo systemctl is-active caddy
+            tail -5 /tmp/build-app.log 2>/dev/null || true
+            for p in 3340 3210; do printf "%s " $p; curl -s -m 5 -o /dev/null -w "%{http_code}\n" http://127.0.0.1:$p/ || echo down; done'
+      - name: Deploy
+        if: (github.event_name == 'workflow_dispatch' && inputs.action == 'deploy') || contains(github.event.head_commit.message, '[deploy]')
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          # run.sh on the host is replaced by this commit's, which pulls from ghcr.io.
+          scp -i ~/.ssh/id deploy/server/run.sh admin@"$HOST":/tmp/run.sh
+          ssh -i ~/.ssh/id admin@"$HOST" 'sudo install -m 755 /tmp/run.sh /srv/crossline/run.sh'
+          # The job's own token pulls the private images and is logged out again; nothing long-lived is left on the host.
+          ssh -i ~/.ssh/id -o ConnectTimeout=30 -o ServerAliveInterval=15 admin@"$HOST" "
+            echo '$TOKEN' | sudo docker login ghcr.io -u '$ACTOR' --password-stdin &&
+            sudo sh /srv/crossline/run.sh; status=\$?; sudo docker logout ghcr.io; sudo docker image prune -f >/dev/null; exit \$status"

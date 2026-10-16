@@ -377,6 +377,7 @@
 
 **这台主机上的部署形态**（`deploy/`）
 - 镜像由 GitHub Actions 构建（`.github/workflows/images.yml`：`deploy/app/Dockerfile` 和 `apps/assess/Dockerfile`），推到 `ghcr.io/karolyan1215/crossline-{app,assess}:beta`，主机只 `docker pull`。2 GB 的主机上 `next build` 换页把香港、新加坡两台都拖死过，所以不再在主机上构建（`build.sh` 留作 `CROSSLINE_LOCAL_IMAGES=1` 的备用）。仓库是私有的：主机先执行一次 `sudo docker login ghcr.io -u <GitHub 用户名>`，密码填一个只有 `read:packages` 权限的 token。
+- 云端会话没有出站 SSH（代理只转 HTTPS），所以连主机走 GitHub Actions：`.github/workflows/server.yml` 用仓库密钥 `DEPLOY_SSH_KEY` 登录 `admin@47.245.88.172`。提交信息带 `[server]` 只做体检（负载、内存、容器、Caddy、本机端口），带 `[deploy]` 先换上本次提交的 `run.sh`，再用这次作业自带的 token 登录 ghcr 拉镜像、重启容器、登出；也可以在 Actions 页手动运行。
 - 三个容器：
   - `assess`：`127.0.0.1:3340`；
   - `crossline-web`：主机网络，`127.0.0.1:3210`；
