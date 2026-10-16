@@ -3485,6 +3485,35 @@ export class CrosslineStore {
     return { principal, workspace, role: membership.role };
   }
 
+  /**
+   * Deletes a workspace and everything recorded in it (the person's 「删除账号」, decided 2026-10-17): every row of every table that
+   * carries this `workspace_id` — found from the schema, so a table added later is covered without a change here — then the workspace,
+   * then each member principal that belongs to no other workspace. One transaction: a failure leaves the workspace whole.
+   * Returns what the caller still has to remove outside this database: the Better Auth users whose principal went, the work orders
+   * (their material folders) and the stored files no other workspace points at.
+   */
+  purgeWorkspace(workspaceId: string): { rows: number; betterAuthUserIds: string[]; workOrderIds: string[]; fileUris: string[] } {
+    return this.#db.transaction(() => {
+      const members = this.#db.prepare("SELECT principal_id FROM workspace_members WHERE workspace_id = ?").pluck().all(workspaceId) as string[];
+      const workOrderIds = this.#db.prepare("SELECT DISTINCT id FROM work_orders WHERE workspace_id = ?").pluck().all(workspaceId) as string[];
+      const fileUris = this.#db.prepare(`SELECT DISTINCT uri FROM source_documents WHERE workspace_id = ?
+        AND uri NOT IN (SELECT uri FROM source_documents WHERE workspace_id <> ?)`).pluck().all(workspaceId, workspaceId) as string[];
+      const tables = (this.#db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").pluck().all() as string[])
+        .filter((name) => (this.#db.prepare(`PRAGMA table_info("${name}")`).all() as Array<{ name: string }>).some((column) => column.name === "workspace_id"));
+      let rows = 0;
+      for (const name of tables) rows += this.#db.prepare(`DELETE FROM "${name}" WHERE workspace_id = ?`).run(workspaceId).changes;
+      rows += this.#db.prepare("DELETE FROM workspaces WHERE id = ?").run(workspaceId).changes;
+      const betterAuthUserIds: string[] = [];
+      for (const principalId of members) {
+        if (this.#db.prepare("SELECT 1 FROM workspace_members WHERE principal_id = ? LIMIT 1").get(principalId)) continue;
+        const row = this.#db.prepare("SELECT better_auth_user_id FROM principals WHERE id = ?").get(principalId) as { better_auth_user_id: string } | undefined;
+        if (row) betterAuthUserIds.push(row.better_auth_user_id);
+        rows += this.#db.prepare("DELETE FROM principals WHERE id = ?").run(principalId).changes;
+      }
+      return { rows, betterAuthUserIds, workOrderIds, fileUris };
+    }).immediate();
+  }
+
   appendAuditEvent(event: Omit<StoredAuditEvent, "id" | "createdAt">): StoredAuditEvent {
     const record: StoredAuditEvent = { ...event, id: randomUUID(), createdAt: new Date().toISOString() };
     this.#db.prepare(`

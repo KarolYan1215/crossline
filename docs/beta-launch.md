@@ -359,12 +359,12 @@
 - 直接做访谈：登录页的三步里写明需要能用 Codex 的 ChatGPT 账号，以及先在 ChatGPT 设置 → 安全开启设备代码登录；访谈页的「第一步：连接本人的 ChatGPT」给出同样三步、代码和「获取新代码」。
 
 **谁能注册**（`packages/auth` 的 `signupCap` 与 `signupAllowlist`）
-- 账号数少于 `CROSSLINE_SIGNUP_CAP`（30）时，任何人都能注册；`CROSSLINE_SIGNUP_ALLOWLIST` 列出的邮箱不受上限限制。
-- 超出上限的邮箱写进等候名单（`CROSSLINE_SIGNUP_WAITLIST_FILE`），并得到 `SIGNUP_FULL`。
-- 起初设计的「只有测评申请者能注册」会挡住直接来做访谈的人，所以改成了上限制。
+- 不设上限（2026-10-17 本人决定）：任何人都能注册。部署时 `ensure-env.sh` 从服务器的 `app.env` 删掉旧的 `CROSSLINE_SIGNUP_CAP=30`。
+- 机制仍在：设了 `CROSSLINE_SIGNUP_CAP` 时，账号数达到上限后新邮箱写进等候名单（`CROSSLINE_SIGNUP_WAITLIST_FILE`）并得到 `SIGNUP_FULL`；`CROSSLINE_SIGNUP_ALLOWLIST` 列出的邮箱总能注册。
+- 起初设计的「只有测评申请者能注册」会挡住直接来做访谈的人，所以没有采用。
 
 **模型**
-- 每个访客用自己的 Codex 登录（设备码），在服务器上各自一个运行时，最多同时 3 个。
+- 每个访客用自己的 Codex 登录（设备码），在服务器上各自一个运行时，同时最多 2 个（`CROSSLINE_PUBLIC_BETA=1` 时）。
 - §10.3 的 OpenAI 条款风险由本人承担。
 - 登录页在 `CROSSLINE_PUBLIC_BETA=1` 时如实写明：登录凭据保存在服务器上，退出登录即删除。
 
@@ -374,7 +374,12 @@
 - 密钥存储在 Linux 上改用 AES-256-GCM，主密钥放在 `CROSSLINE_SECRET_KEY`（`createKeyFileSecretStore`）。
 - 机主专用的功能（屏幕活动、键鼠节律、作息、桌面通知、读文件夹、Codex 使用记录、带 shell 的助手）在 `CROSSLINE_PUBLIC_BETA=1` 时对**所有账号**关闭，机主也不例外（2026-10-16 走查发现）：之前机主的账号在服务器上仍算「电脑主人」，助手的 shell 和文件夹授权会落在装着所有人账本的服务器上，守卫只是绊线不是沙箱。`assistantAvailable` 与 worker 的 `machineOwner` 在这个开关下都返回否。
 - 多人同时用时不崩（2026-10-16，本人决定不升级 2 GB）：整台服务器同一时刻最多跑 2 轮模型（`CROSSLINE_MODEL_CONCURRENCY` 可改），其余排队，访谈和输入框优先、后台任务让路，访谈页显示「排队中，前面还有 N 个」；worker 内存超过上限的 75% 时不再启动新的模型调用和新的 Codex 进程，先回收空闲进程；其他账号的 Codex 进程同时最多 2 个、空闲 10 分钟回收，正在跑的不回收，第三个人等其中一个空出来（不再报「连接已满」），排队中的任务若其进程被让出，轮到时自动重启；worker 预编译后用 node 直接跑，web/worker 设了 Node 堆上限，排程只用贪心（不开 HiGHS 求解线程）。代价：几个人同时做访谈时每轮要多等前面几轮，不会挂。
-- 网页按队列渲染（2026-10-16）：10 个登录用户同时开页面时 280m 的 web 容器两次因内存被杀、两成页面 502；现在 web 通过 `apps/web/queue-server.mjs` 运行，页面渲染和 GET 读取同时最多 4 个、其余排队，容器内存超过 80% 时先等手头的完成，静态文件和写操作不排队；容器上限改为 assess 300m、web 400m、worker 550m（合计 1.25 GB）。压测脚本 `scripts/load-assess.ts`、`scripts/load-app.ts`。
+- 网页按队列渲染（2026-10-16）：10 个登录用户同时开页面时 280m 的 web 容器两次因内存被杀、两成页面 502；现在 web 通过 `apps/web/queue-server.mjs` 运行，页面渲染同时最多 2 个（`CROSSLINE_WEB_CONCURRENCY`）、其余排队，容器内存超过 80% 时先等手头的完成，静态文件和写操作不排队；容器上限改为 assess 300m、web 400m、worker 550m（合计 1.25 GB）。压测脚本 `scripts/load-assess.ts`、`scripts/load-app.ts`。
+- 给交互预留一个模型位（2026-10-17）：托管版后台任务（里程碑设计、画像重写、拆步骤……）最多占 `上限 − 1` 个位置（`CROSSLINE_MODEL_INTERACTIVE_RESERVE`，默认 1），访谈和输入框总有一个位置可用，不会排在占满两个位置的后台任务后面。代价：后台任务一次只跑一个。
+- 出图只按账号限（2026-10-17 本人决定）：测评每个邮箱 3 张（`AVATARS_PER_EMAIL`），不再设每天总数（`ASSESS_IMAGE_DAILY_LIMIT` 不填即不限，部署时从 `assess.env` 删掉旧的 300）；App 里用服务器方舟 key 画的画像形象每个账号 3 张（`CROSSLINE_IMAGE_PER_ACCOUNT`，计数在 `portrait.imageDraws`，删除不退回；用本人 Codex 画的不计）。成本上限因此随人数线性增长：100 人做测评最多 300 张。
+- 备份（2026-10-17）：`deploy/server/backup.sh` 每天 19:17 UTC 用 SQLite 在线备份 `crossline.db`、`auth.db`、`assess.db`（逐个 `integrity_check`），连同账本旁的文件打包，保留 14 天（文件包保留 3 份），由部署时 `backup.sh --install` 装进 `/etc/cron.d`。异地：`server.yml` 每天和 `[backup]` 时把最新一份连同两个 env 文件经 openssl（AES-256，PBKDF2）加密成工作流制品，保留 30 天；需要仓库密钥 `BACKUP_PASSPHRASE`，没设就不上传。
+- 删除账号与隐私说明（2026-10-17）：设置 → 通用 → 删除账号（输入账号邮箱确认，机主账号与本机安装版不提供）删除工作区的所有账本行（按表结构找出所有带 `workspace_id` 的表，`purgeWorkspace`）、只属于它的上传文件、材料、画像形象、模型 key 文件、服务器上的 Codex 登录和 Better Auth 账号；测评结果不在其中，用结果邮件的删除链接。`/privacy` 是公开的隐私说明，登录页有链接；`CROSSLINE_CONTACT_EMAIL` 设了才显示联系邮箱。
+- 部署只从 `main`（2026-10-17）：`images.yml` 只在推送 `main` 时构建并覆盖 `:beta`，`server.yml` 的提交信息动作（`[deploy]`、`[server]`……）也只认 `main`。
 - 测评站多人同时做（2026-10-16）：海报同时最多渲染 2 张（`ASSESS_RENDER_CONCURRENCY`），其余排队；形象同时画 3 张（`ASSESS_IMAGE_CONCURRENCY`），方舟出图通常 25–40 秒、下载 1–2 秒，但偶尔一次调用卡住（实测 293 秒、超过 300 秒，重试 24 秒就好），所以每次调用 100 秒没回就放弃重试，一轮最多 3 次（日志 `answeredSeconds`/`downloadSeconds` 记录出图与下载各自耗时），排队超过 60 个才改用模板，页面提示人多时要排队；结果邮件走 2 条连接的连接池排队发送，邮件服务暂时拒收（4xx）会在 30 秒、2 分钟、10 分钟后重试；同一出口 IP（教室、宿舍、运营商 NAT）每小时可提交 120 次、写「想做的事」120 次；assess 容器 300m（25 人同时测时峰值 168 MB）。
 - 三个容器都有内存上限且不许再用交换分区（assess 300m、web 400m、worker 550m，合计 1.25 GB；服务器实际只有 1.6 GB，第一版上限合计 1.7 GB，部署拉镜像时整机又卡死了一次；主机要配 2 GB 交换文件给系统兜底，worker 的 Codex 运行时是它的子进程，算在它头上）。2026-10-16 走查时里程碑设计、画像重写和生图同时跑，没有上限，整机换页到 Caddy 和 SSH 都不应答，两个站一起挂；超限时改为 Docker 杀掉并重启那一个容器。重启后的 worker 若拿到和上次相同的 pid，不再把自己留下的锁当成「已在运行」。
 - 设置页在托管内测里不显示：微软日历的读取与写入登录（没配 `CROSSLINE_MS_CLIENT_ID` 时；之前点了只会失败，日历列表答 404）、私有网络身份；「手机访问」改为给出 `CROSSLINE_WEB_BASE_URL` 和推送开关（`apps/web/lib/hosting.ts`）。

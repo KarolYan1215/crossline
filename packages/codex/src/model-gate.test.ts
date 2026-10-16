@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "vitest";
-import { clientBusy, configureModelGate, markClientBusy, modelGateLimit, priorityForSkill, resetModelGate, withModelSlot } from "./model-gate";
+import { clientBusy, configureModelGate, interactiveReserve, markClientBusy, modelGateLimit, priorityForSkill, resetModelGate, withModelSlot } from "./model-gate";
 
 afterEach(() => resetModelGate());
 
@@ -32,6 +32,31 @@ test("with one slot, runs wait in line, a person's interview goes before backgro
   first.resolve();
   await Promise.all([running, b, c, i]);
   expect(order).toEqual(["a", "i", "b", "c"]);
+});
+
+test("on the hosted beta one slot is kept for a person: background work never takes every slot", async () => {
+  expect(interactiveReserve({ CROSSLINE_PUBLIC_BETA: "1" })).toBe(1);
+  expect(interactiveReserve({})).toBe(0);
+  expect(interactiveReserve({ CROSSLINE_PUBLIC_BETA: "1", CROSSLINE_MODEL_INTERACTIVE_RESERVE: "0" })).toBe(0);
+  configureModelGate({ limit: 2, reserve: 1, log: () => {} });
+  const order: string[] = [];
+  const first = deferred();
+  const a = withModelSlot({ skill: "crossline-milestone-architect" }, async () => { order.push("a"); await first.promise; });
+  const b = withModelSlot({ skill: "crossline-backplanner" }, async () => { order.push("b"); });
+  await tick();
+  // The second background run waits although a slot is free: that slot belongs to the person.
+  expect(order).toEqual(["a"]);
+  const second = deferred();
+  const i = withModelSlot({ skill: "crossline-concierge" }, async () => { order.push("i"); await second.promise; });
+  await tick();
+  expect(order).toEqual(["a", "i"]);
+  first.resolve();
+  await a;
+  await tick();
+  // A background slot freed: the waiting background run takes it while the person's turn still runs.
+  expect(order).toEqual(["a", "i", "b"]);
+  second.resolve();
+  await Promise.all([b, i]);
 });
 
 test("above the memory high-water mark nothing new starts while a run is going; idle runtimes are reclaimed meanwhile", async () => {

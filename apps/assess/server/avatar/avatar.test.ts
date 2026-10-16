@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { avatarsDrawnFor, forgetFailedDraw, setAvatarState } from "../store";
-import { budgetDay, budgetFile, spentToday, takeSlot } from "./budget";
+import { budgetDay, budgetFile, dailyLimit, spentToday, takeSlot } from "./budget";
 import { FakeImageProvider, TINY_PNG } from "./fake-provider";
 import { RETRY_AFTER_MS, avatarImagePath, avatarQueueIdle, avatarStatus, configureAvatarPipeline, enqueueAvatar, retryAvatarIfDue, templateImagePath } from "./index";
 import { ARK_DEFAULT_MODEL, ArkProvider, ProviderError, arkSize, downloadImage, providerFromEnv, providerSummary } from "./provider";
@@ -75,6 +75,12 @@ describe("settling on the template at once", () => {
     await avatarQueueIdle();
     expect(states()).toEqual(["template"]);
     expect(provider.edits).toHaveLength(0);
+  });
+
+  test("there is no daily ceiling unless one is set: each address's own limit is what bounds the figures", () => {
+    expect(dailyLimit()).toBe(Number.POSITIVE_INFINITY);
+    vi.stubEnv("ASSESS_IMAGE_DAILY_LIMIT", "40");
+    expect(dailyLimit()).toBe(40);
   });
 
   test("once today's budget is spent, every further figure is the template", async () => {

@@ -158,7 +158,9 @@ export function resolveCodexCommand(
   const fork = path.resolve(import.meta.dirname, "../../../vendor/codex/codex-rs/target/debug",
     platform === "win32" ? "codex.exe" : "codex");
   const executable = env.CROSSLINE_CODEX_PATH ?? fork;
-  if (!path.isAbsolute(executable) || !exists(executable)) throw new Error("CODEX_FORK_BINARY_NOT_FOUND");
+  // The platform's own path rules, as in `webResearchBlocker`: a Windows path is absolute on Windows whatever the host checking it.
+  const rules = platform === "win32" ? path.win32 : path.posix;
+  if (!rules.isAbsolute(executable) || !exists(executable)) throw new Error("CODEX_FORK_BINARY_NOT_FOUND");
   const hash = sha256(executable);
   if (hash !== CODEX_FORK_BINARY_SHA256 && hash !== CODEX_RELEASE_BINARY_SHA256 && hash !== CODEX_LINUX_RELEASE_BINARY_SHA256) throw new Error("CODEX_FORK_BINARY_MISMATCH");
   return { command: executable, args: [] };

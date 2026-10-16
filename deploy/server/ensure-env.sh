@@ -11,6 +11,17 @@ ensure() { # file key value — only when the key is absent or empty; a value al
   echo "$2=$3" >> "$1.tmp" && mv "$1.tmp" "$1" && chmod 600 "$1"
   echo "  set $2 in $1"
 }
+drop() { # file key — removes a setting a decision has retired; reported once, a no-op afterwards
+  [ -f "$1" ] || return 0
+  grep -q "^$2=" "$1" || return 0
+  grep -v "^$2=" "$1" > "$1.tmp" || true
+  mv "$1.tmp" "$1" && chmod 600 "$1"
+  echo "  removed $2 from $1"
+}
+# No sign-up cap and no daily ceiling on the test's figures (the owner's decision of 2026-10-17): each address's own figure limit
+# bounds the cost instead. Both were written by an earlier make-env.sh.
+drop /srv/crossline/app.env CROSSLINE_SIGNUP_CAP
+drop /srv/assess/assess.env ASSESS_IMAGE_DAILY_LIMIT
 # The figures are drawn with Volcengine Ark's Seedream, whose key set-secrets.sh asks for; without the provider named the test fell back
 # to SiliconFlow's API with that Ark key, every draw failed and the result page kept the template (2026-10-16).
 ensure /srv/assess/assess.env ASSESS_IMAGE_PROVIDER ark

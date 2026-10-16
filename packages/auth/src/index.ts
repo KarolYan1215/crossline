@@ -186,8 +186,8 @@ function crosslineAuthConfig(options: CrosslineAuthOptions): BetterAuthOptions {
 
 /**
  * The invited addresses, lower-cased; undefined when sign-up is open. Two sources, read on each use: `CROSSLINE_SIGNUP_ALLOWLIST`
- * (comma-separated) and the file `CROSSLINE_SIGNUP_ALLOWLIST_FILE` (one address per line, `#` comments), which the server refreshes
- * from the public test's 「申请内测」 requests — so an invitation takes effect without a restart. Naming a file closes sign-up even while
+ * (comma-separated) and the file `CROSSLINE_SIGNUP_ALLOWLIST_FILE` (one address per line, `#` comments), re-read on every sign-up, so an
+ * address added to the file by hand takes effect without a restart (nothing writes it automatically). Naming a file closes sign-up even while
  * it is empty or missing: an unreadable list must never mean an open door.
  */
 export function signupAllowlist(env: NodeJS.ProcessEnv = process.env): Set<string> | undefined {
@@ -244,6 +244,23 @@ export type ResolvedAccessContext = { ctx: AccessContext } | { error: "UNAUTHENT
  * anywhere else today, which is exactly the gap `isolation.test.ts`'s own doc comment names: nothing
  * previously verified the caller was allowed to use the `workspaceId` it passed.
  */
+/**
+ * Removes a Better Auth user for good — sessions, linked sign-ins (password, Google, ChatGPT) and the user row — the way Better Auth's
+ * own delete-user route does, without its email round trip: the web asks for the account's email typed out instead (「删除账号」,
+ * decided 2026-10-17). Pending email codes for the address go too.
+ */
+export async function deleteAuthUser(auth: CrosslineAuth, userId: string, email?: string): Promise<void> {
+  const adapter = (await auth.$context).internalAdapter;
+  await adapter.deleteUserSessions(userId);
+  await adapter.deleteAccounts(userId);
+  await adapter.deleteUser(userId);
+  if (email) {
+    for (const identifier of [`sign-in-otp-${email}`, `email-verification-otp-${email}`, `forget-password-otp-${email}`, email]) {
+      await adapter.deleteVerificationByIdentifier(identifier).catch(() => undefined);
+    }
+  }
+}
+
 export async function requireAccessContext(
   auth: CrosslineAuth, store: CrosslineStore, request: Request, localAccount?: ReadLocalCodexAccount
 ): Promise<ResolvedAccessContext> {

@@ -8,8 +8,11 @@ import { AutostartCard } from "./autostart-card";
 import { autostartAvailable, readAutostart } from "../../lib/autostart";
 import { isLocalInstall } from "../../lib/install-mode";
 import { isHostedBeta } from "../../lib/hosting";
-import { isEmailAuthConfigured } from "../../lib/auth";
+import { headers } from "next/headers";
+import { getAuth, isEmailAuthConfigured } from "../../lib/auth";
 import { PasswordCard } from "./password-card";
+import { DeleteAccountCard } from "./delete-account-card";
+import { deletionRefused } from "../../lib/account-deletion";
 import { EnergyCard, type EnergyStatus } from "./energy-card";
 import { HEALTH_TOKEN_SETTING, energyModel } from "../../lib/energy";
 import { UsageCard } from "./usage-card";
@@ -82,6 +85,9 @@ export default async function SettingsPage() {
   const states = readCategories(store, ctx.workspaceId);
   const host = process.env.CROSSLINE_TAILSCALE_HOSTNAME?.trim();
   const hosted = isHostedBeta();
+  // 删除账号 is offered on the hosted beta to every account but the machine owner's (lib/account-deletion.ts).
+  const deletable = hosted && !deletionRefused(store, ctx.workspaceId)
+    ? (await getAuth().api.getSession({ headers: await headers() }).catch(() => null))?.user.email : undefined;
   // On the hosted beta the app already is a web address; elsewhere the phone reaches this machine over the private network.
   const phoneUrl = hosted ? process.env.CROSSLINE_WEB_BASE_URL?.trim() || undefined
     : process.env.CROSSLINE_DEPLOYMENT_MODE === "private" && host ? `https://${host}` : undefined;
@@ -123,6 +129,7 @@ export default async function SettingsPage() {
               </> : <p className="muted">手机访问未开启。</p>}
             </section>
             {autostart !== undefined && <AutostartCard on={autostart} />}
+            {deletable && <DeleteAccountCard email={deletable} />}
           </div>
         </section>
 

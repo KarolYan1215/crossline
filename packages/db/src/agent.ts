@@ -310,7 +310,10 @@ export function requestAgentRetry(store: CrosslineStore, workspaceId: string, ta
   const only = (input.only ?? []).map((item) => item.trim().slice(0, 300)).filter(Boolean).slice(0, 20);
   if (task.status === "needs_review" && !task.partial) store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:reviewed:${taskId}:redo:${now.getTime()}`,
     type: "agent.task.reviewed", entityId: taskId, payload: { taskId, decision: "redo", note: (input.note ?? "").slice(0, 500), category: task.category } });
-  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:retry:${taskId}:${now.getTime()}`, type: "agent.retry_requested", entityId: taskId,
+  // Keyed on how many times this task was asked for already, not the clock: two requests in one millisecond shared a key and the
+  // second (with its words) was silently dropped by `appendEvent`.
+  const attempt = store.listEvents(workspaceId, { type: "agent.retry_requested", entityId: taskId }).length;
+  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:retry:${taskId}:${attempt}`, type: "agent.retry_requested", entityId: taskId,
     payload: { taskId, note: (input.note ?? "").trim().slice(0, 4000), ...(only.length ? { only } : {}), ...(input.approach ? { approach: input.approach.slice(0, 300) } : {}), by: "person" } });
   return { ok: true };
 }

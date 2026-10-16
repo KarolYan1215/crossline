@@ -42,7 +42,7 @@ export type TelemetryEvent = {
  * page is added here or never reported.
  */
 export const APP_PAGES = ["/", "/approvals", "/assistant", "/confirm/[id]", "/connect", "/login", "/materials/[id]", "/materials/view", "/milestones", "/milestones/[id]", "/offline",
-  "/onboarding", "/plan", "/portrait", "/reset-password", "/return", "/review", "/set-password", "/settings", "/signup", "/workbench", "/workbench/[id]",
+  "/onboarding", "/plan", "/portrait", "/privacy", "/reset-password", "/return", "/review", "/set-password", "/settings", "/signup", "/workbench", "/workbench/[id]",
   "/workbench/[id]/material"] as const;
 
 /** Ledger event types that are passed on (as themselves), and the ones made here from other tables. */

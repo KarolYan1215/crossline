@@ -4,6 +4,9 @@
  *
  * - At most `CROSSLINE_MODEL_CONCURRENCY` runs at a time across every account and tier (default 2 on the hosted beta — two people's
  *   turns at once, the memory mark below holding back a third process — no limit elsewhere). The rest wait in one queue; work a person is waiting on (the interview, the input box) goes before background work.
+ * - `CROSSLINE_MODEL_INTERACTIVE_RESERVE` slots (default 1 on the hosted beta, 0 elsewhere) are kept for that work: background runs
+ *   never hold more than `limit − reserve`, so a person who sends a line waits for at most the runs of other people, never behind a
+ *   milestone design that took every slot (decided 2026-10-17).
  * - While the process uses more than `CROSSLINE_MEMORY_HIGH_WATER` (75%) of its memory ceiling, nothing new starts: a run already
  *   going finishes first, idle runtimes are reclaimed, and only after a minute of that with nothing running does the next run go anyway
  *   (a reading that never drops must not stop the service for good).
@@ -25,6 +28,12 @@ export function modelGateLimit(env: NodeJS.ProcessEnv = process.env): number {
   return env.CROSSLINE_PUBLIC_BETA === "1" ? 2 : Number.POSITIVE_INFINITY;
 }
 
+export function interactiveReserve(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = Number(env.CROSSLINE_MODEL_INTERACTIVE_RESERVE);
+  if (env.CROSSLINE_MODEL_INTERACTIVE_RESERVE?.trim() && Number.isInteger(raw) && raw >= 0) return raw;
+  return env.CROSSLINE_PUBLIC_BETA === "1" ? 1 : 0;
+}
+
 export function memoryHighWater(env: NodeJS.ProcessEnv = process.env): number {
   const raw = Number(env.CROSSLINE_MEMORY_HIGH_WATER);
   return Number.isFinite(raw) && raw > 0 && raw < 1 ? raw : 0.75;
@@ -32,6 +41,8 @@ export function memoryHighWater(env: NodeJS.ProcessEnv = process.env): number {
 
 type GateConfig = {
   limit: number;
+  /** Slots background runs may not take (kept for interactive ones); never below one slot for background. */
+  reserve: number;
   highWater: number;
   probe?: () => MemoryReading | undefined;
   /** Frees what can be freed (idle runtimes) while memory is high. */
@@ -47,6 +58,7 @@ type Waiter = { skill: string; priority: ModelPriority; seq: number; queuedAt: n
 
 let config: GateConfig = defaults();
 let active = 0;
+let activeBackground = 0;
 let seq = 0;
 let waiters: Waiter[] = [];
 let blockedSince: number | undefined;
@@ -54,7 +66,7 @@ let reclaimedAt: number | undefined;
 let timer: ReturnType<typeof setTimeout> | undefined;
 
 function defaults(): GateConfig {
-  return { limit: modelGateLimit(), highWater: memoryHighWater(), maxMemoryWaitMs: 60_000, pollMs: 5_000, now: Date.now,
+  return { limit: modelGateLimit(), reserve: interactiveReserve(), highWater: memoryHighWater(), maxMemoryWaitMs: 60_000, pollMs: 5_000, now: Date.now,
     log: (event) => console.info(JSON.stringify(event)) };
 }
 
@@ -69,6 +81,7 @@ export function resetModelGate(): void {
   timer = undefined;
   config = defaults();
   active = 0;
+  activeBackground = 0;
   waiters = [];
   blockedSince = undefined;
   reclaimedAt = undefined;
@@ -104,8 +117,15 @@ function tellPositions(): void {
   });
 }
 
+/** How many background runs may hold a slot at once: the limit less the reserve, but at least one. */
+function backgroundLimit(): number {
+  return Number.isFinite(config.limit) ? Math.max(1, config.limit - config.reserve) : config.limit;
+}
+
 function pump(): void {
   while (waiters.length && active < config.limit) {
+    // Waiters are ordered interactive first, so a background head means only background work waits.
+    if (waiters[0]!.priority === "background" && activeBackground >= backgroundLimit()) break;
     if (memoryHigh()) {
       const now = config.now();
       blockedSince ??= now;
@@ -124,6 +144,7 @@ function pump(): void {
     blockedSince = undefined;
     const next = waiters.shift()!;
     active += 1;
+    if (next.priority === "background") activeBackground += 1;
     const waitedMs = config.now() - next.queuedAt;
     if (waitedMs > 0) config.log({ type: "model.gate", skill: next.skill, priority: next.priority, waitedMs, queued: waiters.length });
     // A waiter that was told it had runs ahead hears 0 when its own run starts, so a page stops saying it is queued.
@@ -140,8 +161,9 @@ function pump(): void {
  */
 export async function withModelSlot<T>(input: { skill: string; priority?: ModelPriority; onQueued?: (ahead: number) => void; signal?: AbortSignal },
   run: () => Promise<T>): Promise<T | undefined> {
+  const priority = input.priority ?? priorityForSkill(input.skill);
   const granted = await new Promise<boolean>((resolve) => {
-    const waiter: Waiter = { skill: input.skill, priority: input.priority ?? priorityForSkill(input.skill), seq: ++seq, queuedAt: config.now(),
+    const waiter: Waiter = { skill: input.skill, priority, seq: ++seq, queuedAt: config.now(),
       grant: () => { input.signal?.removeEventListener("abort", onAbort); resolve(true); }, ...(input.onQueued ? { onQueued: input.onQueued } : {}) };
     function onAbort() {
       const index = waiters.indexOf(waiter);
@@ -159,7 +181,7 @@ export async function withModelSlot<T>(input: { skill: string; priority?: ModelP
   });
   if (!granted) return undefined;
   try { return await run(); }
-  finally { active -= 1; pump(); }
+  finally { active -= 1; if (priority === "background") activeBackground -= 1; pump(); }
 }
 
 /** Waits (polling) while memory is above the high-water mark, at most `maxMs`; used before starting another runtime process. */

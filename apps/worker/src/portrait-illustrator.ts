@@ -8,6 +8,18 @@ import type { CrosslineStore } from "@crossline/db";
 export const PORTRAIT_ILLUSTRATOR = "crossline:crossline-portrait-illustrator";
 /** `{version, images: {slot: {file, at}}}`: which report version the pictures were drawn for, and where each one is. */
 export const PORTRAIT_IMAGES = "portrait.images";
+/** How many figures this account has had drawn on the server's image key (`{count}`); never reset, deleting a figure does not give one back. */
+export const PORTRAIT_IMAGE_DRAWS = "portrait.imageDraws";
+
+/**
+ * Figures each account may have drawn on the server's own image key (`CROSSLINE_IMAGE_PER_ACCOUNT`, default 3; the owner's decision of
+ * 2026-10-17: a limit per account, none per day). A report rewritten for a new schema draws again, so the limit is what bounds the cost.
+ * Figures drawn by the account's own Codex sign-in spend its own quota and are not counted.
+ */
+export function imageDrawsPerAccount(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = Number(env.CROSSLINE_IMAGE_PER_ACCOUNT);
+  return env.CROSSLINE_IMAGE_PER_ACCOUNT?.trim() && Number.isInteger(raw) && raw >= 0 ? raw : 3;
+}
 
 const SCHEMA = { type: "object", properties: { generated: { type: "boolean" }, note: { type: "string", minLength: 0, maxLength: 200 } },
   required: ["generated", "note"], additionalProperties: false };
@@ -35,6 +47,15 @@ export function createPortraitIllustrator(store: CrosslineStore, workspaceId: st
     const record = (ok: boolean) => store.setSetting(workspaceId, PORTRAIT_IMAGES,
       JSON.stringify({ version: saved.version ?? 0, images: ok ? { character: { file, at: new Date().toISOString() } } : {} }));
     if (direct) {
+      let drawn = 0;
+      try { drawn = Number((JSON.parse(store.getSetting(workspaceId, PORTRAIT_IMAGE_DRAWS) ?? "{}") as { count?: unknown }).count) || 0; } catch { /* none */ }
+      // Over the limit the figure already drawn stays on the page; nothing is recorded as failed.
+      if (drawn >= imageDrawsPerAccount()) {
+        console.warn(JSON.stringify({ type: "portrait.image_limit", workspaceId, drawn }));
+        return { drawn: [], failed: [] };
+      }
+      // Counted before the call: a call that fails still cost a request, so the count can only overstate what was spent.
+      store.setSetting(workspaceId, PORTRAIT_IMAGE_DRAWS, JSON.stringify({ count: drawn + 1, at: new Date().toISOString() }));
       const ok = await direct.generate(prompt).then((bytes) => { writeFileSync(join(dir, file), bytes); return true; }, (error: unknown) => {
         console.warn(JSON.stringify({ type: "portrait.image_api_failed", workspaceId, message: error instanceof Error ? error.message.slice(0, 200) : "failed" }));
         return false;
