@@ -20,7 +20,7 @@ env:
 
 jobs:
   server:
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[server]') || contains(github.event.head_commit.message, '[deploy]') || contains(github.event.head_commit.message, '[codex-probe]')
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[server]') || contains(github.event.head_commit.message, '[deploy]') || contains(github.event.head_commit.message, '[codex-probe]') || contains(github.event.head_commit.message, '[migrate')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -63,8 +63,39 @@ jobs:
               grep -oE \"https://[a-z.]+openai\.com[^ ]*\" \$home/out | head -2
               if grep -qE \"[A-Z0-9]{4}-[A-Z0-9]{4,5}\" \$home/out; then echo DEVICE_CODE_RECEIVED; else echo NO_CODE; sed -E \"s/[A-Z0-9]{4}-[A-Z0-9]{4,5}/XXXX-XXXX/g\" \$home/out | tail -15; fi
               rm -rf \$home"'
+      - name: Migrate the owner's ledger
+        if: contains(github.event.head_commit.message, '[migrate]') || contains(github.event.head_commit.message, '[migrate-apply]')
+        env:
+          APPLY: ${{ contains(github.event.head_commit.message, '[migrate-apply]') && '1' || '' }}
+        run: |
+          # Reads /tmp/crossline-transfer.tgz (scripts/pack-for-server.ts) and runs scripts/migrate-workspace.ts --replace in a one-off
+          # container of the app image. [migrate] only previews. [migrate-apply] stops the app, copies the server ledger aside,
+          # writes, and starts the app again — also when the write fails, so the site is never left down.
+          ssh -i ~/.ssh/id -o ConnectTimeout=30 admin@"$HOST" "APPLY='$APPLY' sudo -E sh -s" <<'REMOTE'
+          set -e
+          test -f /tmp/crossline-transfer.tgz || { echo "no /tmp/crossline-transfer.tgz uploaded"; exit 1; }
+          dir=/srv/crossline/import; rm -rf $dir; mkdir -p $dir; tar -xzf /tmp/crossline-transfer.tgz -C $dir; chown -R 1000:1000 $dir
+          m() { python3 -c "import json,sys;print(json.load(open('$dir/manifest.json'))[sys.argv[1]])" "$1"; }
+          ws=$(m workspaceId); from=$(m fromData); email=$(m toEmail)
+          echo "workspace $ws  from $from  to $email"
+          image=$(docker inspect -f '{{.Config.Image}}' crossline-web)
+          migrate() {
+            docker run --rm -v /srv/crossline/data:/data -v $dir:/import -w /repo "$image" /repo/node_modules/.bin/tsx scripts/migrate-workspace.ts \
+              --from-db /import/crossline.db --from-data "$from" --workspace "$ws" --to-db /data/crossline.db --to-data /data \
+              --files /import/files --to-email "$email" --replace "$@"
+          }
+          if [ -z "$APPLY" ]; then migrate; exit 0; fi
+          docker stop crossline-worker crossline-web
+          stamp=$(date +%Y%m%d-%H%M%S); mkdir -p /srv/crossline/backups
+          for f in crossline.db crossline.db-wal crossline.db-shm; do [ -f /srv/crossline/data/$f ] && cp -a /srv/crossline/data/$f /srv/crossline/backups/$f.$stamp; done
+          echo "server ledger copied to /srv/crossline/backups/*.$stamp"
+          status=0; migrate --apply || status=$?
+          docker start crossline-web crossline-worker
+          rm -f /tmp/crossline-transfer.tgz
+          exit $status
+          REMOTE
       - name: Deploy
-        if: (github.event_name == 'workflow_dispatch' && inputs.action == 'deploy') || contains(github.event.head_commit.message, '[deploy]') || contains(github.event.head_commit.message, '[codex-probe]')
+        if: (github.event_name == 'workflow_dispatch' && inputs.action == 'deploy') || contains(github.event.head_commit.message, '[deploy]')
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ACTOR: ${{ github.actor }}
