@@ -20,7 +20,7 @@ env:
 
 jobs:
   server:
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[server]') || contains(github.event.head_commit.message, '[deploy]')
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[server]') || contains(github.event.head_commit.message, '[deploy]') || contains(github.event.head_commit.message, '[codex-probe]')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -64,7 +64,7 @@ jobs:
               if grep -qE \"[A-Z0-9]{4}-[A-Z0-9]{4,5}\" \$home/out; then echo DEVICE_CODE_RECEIVED; else echo NO_CODE; sed -E \"s/[A-Z0-9]{4}-[A-Z0-9]{4,5}/XXXX-XXXX/g\" \$home/out | tail -15; fi
               rm -rf \$home"'
       - name: Deploy
-        if: (github.event_name == 'workflow_dispatch' && inputs.action == 'deploy') || contains(github.event.head_commit.message, '[deploy]')
+        if: (github.event_name == 'workflow_dispatch' && inputs.action == 'deploy') || contains(github.event.head_commit.message, '[deploy]') || contains(github.event.head_commit.message, '[codex-probe]')
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ACTOR: ${{ github.actor }}
