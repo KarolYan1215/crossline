@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { ONBOARDING_TURN_SCHEMA, keepOnboardingTurn, validateOnboardingTurn, type OnboardingTurn } from "./onboarding-turn-schema";
+import { ONBOARDING_TURN_SCHEMA, droppedOnboardingItems, keepOnboardingTurn, validateOnboardingTurn, type OnboardingTurn } from "./onboarding-turn-schema";
 
 const known = {
   identities: ["research", "startup", "media", "investment"],
@@ -158,4 +158,13 @@ test("when repairs run out, bad attributes are dropped one by one, and fewer tha
   expect(kept?.goalEdits).toEqual([]);
   const thin = keepOnboardingTurn(turn({ lineProfiles: [{ lineId: "research", description: "d", attributeCandidates: [...SIX.slice(0, 5), attribute("x", "domain", "reply-9")] }] }), known);
   expect(thin?.lineProfiles?.[0]?.attributeCandidates).toEqual([]);
+});
+
+test("droppedOnboardingItems counts what pruning left out across facts, questions and candidates", () => {
+  const original = { slotUpdates: [1, 2, 3], questions: [1, 2], projectsDetected: [], flywheelCandidates: [1], goalEdits: [],
+    lineProfiles: [{ attributeCandidates: [1, 2, 3] }], availability: { windows: [1, 2] } };
+  const kept = { slotUpdates: [1, 2], questions: [1, 2], projectsDetected: [], flywheelCandidates: [], goalEdits: [],
+    lineProfiles: [{ attributeCandidates: [1, 2] }], availability: { windows: [1, 2] } };
+  expect(droppedOnboardingItems(original, kept as never)).toBe(3);
+  expect(droppedOnboardingItems(original, original as never)).toBe(0);
 });

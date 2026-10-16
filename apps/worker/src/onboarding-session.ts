@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   AGENT_HISTORY_SUMMARY, agentHistoryLines, type AgentHistorySummary,
-  EMPTY_PROFILE_MODEL, GOAL_EDITS_SETTING, ONBOARDING_TURN_SCHEMA, duplicateAttributes, type PendingGoalEdit, type StoredLineProfile, PROFILE_CONFIRMED, portraitFingerprint, answeredGapFacts, keepOnboardingTurn, mergeFacts, sanitizeDateExtraction, validateOnboardingTurn,
+  EMPTY_PROFILE_MODEL, GOAL_EDITS_SETTING, ONBOARDING_TURN_SCHEMA, duplicateAttributes, type PendingGoalEdit, type StoredLineProfile, PROFILE_CONFIRMED, portraitFingerprint, answeredGapFacts, keepOnboardingTurn, droppedOnboardingItems, ONBOARDING_KEEP_EARLY_MAX, mergeFacts, sanitizeDateExtraction, validateOnboardingTurn,
   gapCoveredBy, screenQuestions, screenAssumption, mergeDateExtractions, withoutDecidedDates, withoutOffHours, resolveAvailability, AVAILABILITY_SETTING, AVAILABILITY_PROPOSED_SETTING, type DateExtraction,
   type ProfileGap, type ProfileModel, type OnboardingStage, DEEP_STAGES, ONBOARDING_TONE_SETTING, ASSESS_RESULT_SETTING, readTone,
   type KnownSources, type OnboardingTurn, type OnboardingTurnContext, ONBOARDING_PROGRESS_SETTING, readPartialTurn, type OnboardingProgress, calendarWeek
@@ -299,6 +299,11 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     let sent = fresh;
     const validateOutput = (output: unknown) => validateOnboardingTurn(output, known);
     const softAccept = (_rejection: Error, output: unknown) => keepOnboardingTurn(output, known);
+    // A turn that only needs one or two items dropped is kept now instead of rewritten in full by a repair.
+    const keepEarly = (_rejection: Error, output: unknown) => {
+      const kept = keepOnboardingTurn(output, known);
+      return kept && droppedOnboardingItems(output, kept) <= ONBOARDING_KEEP_EARLY_MAX ? kept : undefined;
+    };
 
     // The public quick test's result, only when the person pressed 「使用该结果」 (apps/web/lib/assess-link.ts): corroboration for the
     // portrait, never its scores. Sent with every turn while it is kept, so removing it stops it at once.
@@ -329,7 +334,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       };
       return runCodexSkill<OnboardingTurn>(client, context, {
         skillName: ONBOARDING_SKILL, cwd, developerInstructions: INSTRUCTIONS, outputSchema: ONBOARDING_TURN_SCHEMA,
-        prepareInput: () => context, validateOutput, softAccept,
+        prepareInput: () => context, validateOutput, softAccept, keepEarly,
         onAudit: (audit) => { if (audit.threadId) threadId = audit.threadId; }, onProgress,
         timeoutMs: 60 * 60_000
       });
@@ -367,7 +372,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
           tone: readTone(store.getSetting(workspaceId, ONBOARDING_TONE_SETTING)), ...(calendarChanged ? { calendar: week } : {}),
         ...(publicAssessment ? { publicAssessment } : {}), ...(waiting > 0 ? { sourcesWaiting: waiting } : {}) });
         result = await continueSkillTurn<OnboardingTurn>(client, session.codexThreadId, message, {
-          skillName: ONBOARDING_SKILL, cwd, outputSchema: ONBOARDING_TURN_SCHEMA, validateOutput, softAccept,
+          skillName: ONBOARDING_SKILL, cwd, outputSchema: ONBOARDING_TURN_SCHEMA, validateOutput, softAccept, keepEarly,
           onAudit: () => {}, onProgress, timeoutMs: 60 * 60_000
         });
         // The runtime forgets a conversation when it restarts. The interview does not: the profile, the files and

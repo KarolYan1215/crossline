@@ -32,3 +32,21 @@ test("only quality codes are soft for the milestone architect, and an analysis m
   expect(keepMilestoneProposal({}, { identities: [], existingMilestones: [], templates: [] } as never, "MILESTONE_DEPENDENCY_UNKNOWN")).toBeUndefined();
   expect(keepAnalysisProposal({}, {} as never, "ANALYSIS_POLICY_BLOCKED")).toBeUndefined();
 });
+
+test("keepEarly keeps a small fix at the first rejection, with no repair turn; when it declines, the repairs go on as before", async () => {
+  const early = fakeRuntime(['{"v":1}', '{"v":2}'], SKILL);
+  const kept = await runCodexSkill<{ v: number }>(early.rpc, {}, { skillName: SKILL, cwd: "C:\repo", developerInstructions: "", outputSchema: {},
+    prepareInput: (input) => input, validateOutput: () => refuse("ONE_BAD_ITEM"), onAudit: () => {},
+    keepEarly: (_rejection, output) => output as { v: number } });
+  expect(early.turns()).toBe(1);
+  expect(kept).toMatchObject({ ok: true, output: { v: 1 }, audit: { warnings: [{ code: "ONE_BAD_ITEM" }] } });
+
+  const declined = fakeRuntime(['{"v":1}', '{"v":2}'], SKILL);
+  let calls = 0;
+  const repaired = await runCodexSkill<{ v: number }>(declined.rpc, {}, { skillName: SKILL, cwd: "C:\repo", developerInstructions: "", outputSchema: {},
+    prepareInput: (input) => input, validateOutput: (output) => (output as { v: number }).v === 2 ? output as { v: number } : refuse("TOO_MUCH"),
+    onAudit: () => {}, keepEarly: () => { calls += 1; return undefined; } });
+  expect(declined.turns()).toBe(2);
+  expect(calls).toBe(1);
+  expect(repaired).toMatchObject({ ok: true, output: { v: 2 }, audit: { repairs: 1 } });
+});

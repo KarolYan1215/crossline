@@ -50,6 +50,12 @@ export type SkillRunOptions<T> = {
    * returning undefined keeps the refusal (decided 2026-10-07: quality checks warn, safety checks block).
    */
   softAccept?: (rejection: Error, output: unknown, prepared: unknown) => T | undefined;
+  /**
+   * Tried at every rejection before a repair is asked for: an answer whose trouble is small enough to drop (a caller-defined bound,
+   * e.g. at most two items) is kept at once with `audit.warnings`, instead of the model rewriting the whole answer. Each repair of a
+   * long answer is a full regeneration — a real interview turn spent 174 s, two thirds of it on two repairs (2026-10-16).
+   */
+  keepEarly?: (rejection: Error, output: unknown, prepared: unknown) => T | undefined;
   /** Only a Skill that must reach outside gets this; it is off for every other run. */
   allowWebSearch?: boolean;
   /**
@@ -327,6 +333,8 @@ export type ContinueTurnOptions<T> = {
   idleMs?: number;
   /** As `SkillRunOptions.softAccept`: keep part of an answer the repairs could not fix, when the problem is about content quality. */
   softAccept?: (rejection: Error, output: unknown) => T | undefined;
+  /** As `SkillRunOptions.keepEarly`. */
+  keepEarly?: (rejection: Error, output: unknown) => T | undefined;
   /** The tools the thread was started with (they are declared at `thread/start`; this answers their calls on the follow-up turn). */
   tools?: SkillTools;
   /** As `SkillRunOptions.tier`. */
@@ -528,6 +536,7 @@ async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, con
   skillName: string; threadId: string; outputSchema: unknown; allowedItemTypes: string[]; firstPrompt: string;
   validate: (output: unknown) => T; onAudit: (audit: AnalysisAudit) => void; idleMs?: number; agent?: AgentMode;
   soften?: (rejection: Error, output: unknown) => T | undefined;
+  keepEarly?: (rejection: Error, output: unknown) => T | undefined;
   onImage?: (image: { base64: string; revisedPrompt: string }) => void;
   onProgress?: (progress: SkillProgress) => void;
 }): Promise<T> {
@@ -674,6 +683,17 @@ async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, con
         return run.validate(parsed);
       } catch (error) {
         rejection = error instanceof Error ? error : new Error(String(error));
+        const detail = (rejection as Detailed).detail ?? "";
+        // What the receiving layer refused, so the cause of slow turns can be read from the log (codes and a short detail, never the answer).
+        console.log(JSON.stringify({ type: "skill.rejected", skill: run.skillName, attempt, code: rejection.message.slice(0, 80), detail: detail.slice(0, 240) }));
+        if (parsed !== undefined && run.keepEarly && !/_BLOCKED$/.test(rejection.message)) {
+          const kept = run.keepEarly(rejection, parsed);
+          if (kept !== undefined) {
+            audit.warnings = [{ code: rejection.message, detail }];
+            run.onAudit({ ...audit });
+            return kept;
+          }
+        }
         if (attempt >= maxRepairs && parsed !== undefined && run.soften && !/_BLOCKED$/.test(rejection.message)) {
           const kept = run.soften(rejection, parsed);
           if (kept !== undefined) {
@@ -734,7 +754,8 @@ export function continueSkillTurn<T>(client: CodexRpcBoundary, threadId: string,
         allowedItemTypes: ["agentMessage", "reasoning", "userMessage", ...(options.tools ? ["dynamicToolCall"] : [])],
         firstPrompt: message, validate: options.validateOutput, onAudit: options.onAudit, ...(options.idleMs ? { idleMs: options.idleMs } : {}),
         ...(options.onProgress ? { onProgress: options.onProgress } : {}),
-        ...(options.softAccept ? { soften: options.softAccept } : {})
+        ...(options.softAccept ? { soften: options.softAccept } : {}),
+        ...(options.keepEarly ? { keepEarly: options.keepEarly } : {})
       });
       return { ok: true, output, audit };
     } catch (error) { return failureResult<T>(client, error, audit); }
@@ -776,7 +797,8 @@ async function runSkillTurn<T>(client: CodexRpcBoundary, input: unknown, request
       firstPrompt: `${[options.skillName, ...context.extraSkills].map((name) => `$${name}`).join(" ")}\n\n${JSON.stringify(prepared)}`,
       validate: (answer) => options.validateOutput(answer, prepared), onAudit: options.onAudit, ...(options.idleMs ? { idleMs: options.idleMs } : {}),
       ...(options.onProgress ? { onProgress: options.onProgress } : {}),
-      ...(options.softAccept ? { soften: (rejection: Error, answer: unknown) => options.softAccept!(rejection, answer, prepared) } : {})
+      ...(options.softAccept ? { soften: (rejection: Error, answer: unknown) => options.softAccept!(rejection, answer, prepared) } : {}),
+      ...(options.keepEarly ? { keepEarly: (rejection: Error, answer: unknown) => options.keepEarly!(rejection, answer, prepared) } : {})
     });
     return { ok: true, output, audit };
   } catch (error) { return failureResult<T>(client, error, audit); }

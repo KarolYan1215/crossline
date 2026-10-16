@@ -413,6 +413,25 @@ function keepCandidates(list: AttributeCandidate[], citable: (ref: string) => bo
  * (a real run lost a whole turn, profile and line descriptions included, to one fact named 「指南针」). Returns undefined when what is
  * left still does not validate, so a turn that is wrong as a whole stays refused.
  */
+/**
+ * How many items `keepOnboardingTurn` left out of an answer: facts, questions, projects, feeds, goal edits, attribute candidates and
+ * availability windows. The interview keeps a pruned turn at once when this is small (`ONBOARDING_KEEP_EARLY_MAX`) rather than asking
+ * the model to rewrite the whole answer, which costs a full regeneration (2026-10-16: two repairs were two thirds of a 174 s turn).
+ */
+export function droppedOnboardingItems(original: unknown, kept: OnboardingTurn): number {
+  const turn = original as Partial<OnboardingTurn> | undefined;
+  const count = (list: unknown) => Array.isArray(list) ? list.length : 0;
+  const candidates = (lines: unknown) => Array.isArray(lines)
+    ? lines.reduce((sum: number, line: { attributeCandidates?: unknown }) => sum + count(line?.attributeCandidates), 0) : 0;
+  return Math.max(0, count(turn?.slotUpdates) - kept.slotUpdates.length) + Math.max(0, count(turn?.questions) - kept.questions.length)
+    + Math.max(0, count(turn?.projectsDetected) - kept.projectsDetected.length)
+    + Math.max(0, count(turn?.flywheelCandidates) - count(kept.flywheelCandidates)) + Math.max(0, count(turn?.goalEdits) - count(kept.goalEdits))
+    + Math.max(0, candidates(turn?.lineProfiles) - candidates(kept.lineProfiles))
+    + Math.max(0, count(turn?.availability?.windows) - count(kept.availability?.windows));
+}
+/** At most this many items are dropped from a turn to keep it without a repair. */
+export const ONBOARDING_KEEP_EARLY_MAX = 2;
+
 export function keepOnboardingTurn(value: unknown, known: KnownSources): OnboardingTurn | undefined {
   const turn = value as OnboardingTurn | undefined;
   if (!turn || !Array.isArray(turn.slotUpdates) || !Array.isArray(turn.questions) || !Array.isArray(turn.projectsDetected)) return undefined;
