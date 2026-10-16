@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { pollWhileVisible } from "./ui/visible-poll";
 
 /** Fired by anything that answers a decision without reloading the page, so the badge counts again at once. */
 export const PENDING_CHANGED = "crossline:pending-changed";
@@ -15,11 +16,10 @@ export function PendingBadge() {
       const body = await response?.json().catch(() => undefined) as { total?: number } | undefined;
       if (live && typeof body?.total === "number") setCount(body.total);
     };
-    void look();
-    const timer = setInterval(() => void look(), 60_000);
+    const stop = pollWhileVisible(look, 60_000);
     const changed = () => void look();
     window.addEventListener(PENDING_CHANGED, changed);
-    return () => { live = false; clearInterval(timer); window.removeEventListener(PENDING_CHANGED, changed); };
+    return () => { live = false; stop(); window.removeEventListener(PENDING_CHANGED, changed); };
   }, []);
   return count > 0 ? <b className="pending-badge" aria-label={`${count} 项待确认`}>{count}</b> : null;
 }

@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { pollWhileVisible } from "./ui/visible-poll";
 
 /** What the 小帮手 is doing, most pressing first: the background stopped, thinking over a line, the assistant at work, a new message. */
 export type HelperMood = "down" | "thinking" | "working" | "unread" | "idle";
@@ -17,7 +18,7 @@ export function announceThinking(thinking: boolean): void {
 type Shared = { avatar: string | null; working: boolean; down: boolean };
 let shared: Shared = { avatar: null, working: false, down: false };
 const listeners = new Set<(next: Shared) => void>();
-let polling: ReturnType<typeof setInterval> | undefined;
+let polling: (() => void) | undefined;
 
 async function refresh(): Promise<void> {
   const body = await fetch("/api/helper", { cache: "no-store" }).then((response) => response.ok ? response.json() : null).catch(() => null) as
@@ -36,14 +37,14 @@ export function useHelper(): Shared & { thinking: boolean } {
   const [thinking, setThinking] = useState(false);
   useEffect(() => {
     listeners.add(setState);
-    if (!polling) { void refresh(); polling = setInterval(() => void refresh(), 30_000); }
+    if (!polling) polling = pollWhileVisible(refresh, 30_000);
     else setState(shared);
     const onThinking = (event: Event) => setThinking(Boolean((event as CustomEvent<boolean>).detail));
     window.addEventListener(HELPER_THINKING, onThinking);
     return () => {
       listeners.delete(setState);
       window.removeEventListener(HELPER_THINKING, onThinking);
-      if (!listeners.size && polling) { clearInterval(polling); polling = undefined; }
+      if (!listeners.size && polling) { polling(); polling = undefined; }
     };
   }, []);
   return { ...state, thinking };

@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import type { RuntimeStatus } from "../lib/runtime-status";
+import { pollWhileVisible } from "./ui/visible-poll";
 
 /**
  * An error bar under the header while the background worker is down or its model runtime is signed out: everything automatic has
@@ -12,9 +13,8 @@ export function RuntimeBanner() {
     let live = true;
     const read = () => fetch("/api/runtime", { cache: "no-store" }).then((response) => response.json())
       .then((body: { ok?: boolean; status?: RuntimeStatus | null }) => { if (live && body.ok) setStatus(body.status ?? null); }).catch(() => undefined);
-    void read();
-    const timer = setInterval(read, 60_000);
-    return () => { live = false; clearInterval(timer); };
+    const stop = pollWhileVisible(read, 60_000);
+    return () => { live = false; stop(); };
   }, []);
   return status ? <RuntimeAlert status={status} /> : null;
 }

@@ -8,7 +8,7 @@ describe("authErrorMessage", () => {
     expect(authErrorMessage({ code: "EMAIL_NOT_VERIFIED", message: "Email not verified" }, "登录失败"))
       .toBe("邮箱尚未验证，请查收验证邮件（包括垃圾邮件夹）并点击链接后再登录。");
     expect(authErrorMessage({ code: "INVALID_EMAIL_OR_PASSWORD", message: "Invalid email or password" }, "登录失败"))
-      .toBe("邮箱或密码不正确。");
+      .toBe("邮箱或密码不正确。用验证码注册的账号还没有密码：先用验证码登录后设置，或点「忘记密码」设一个。");
   });
 
   test("「Invalid origin」 (sent without a code, e.g. the page opened at localhost instead of 127.0.0.1) is shown in Chinese", () => {
