@@ -38,7 +38,7 @@ export const TYPE_SUBTITLE: Record<string, string> = {
 export type LineIdentity = { domain: string; identity: string };
 
 /** Every identity a recommendation may use (§2.2's vocabulary, plus the licensed professions). */
-export const LINE_IDENTITIES = ["研究者", "学生", "职场人", "创业者", "自由职业者", "投资者", "创作者", "教育者", "社群主理人", "家长", "跑者", "健身者", "骑行者", "户外爱好者", "球友", "舞者", "音乐人", "画手", "摄影者", "写作者", "读者", "手作人", "书法爱好者", "coser", "医生", "律师", "中医师"] as const;
+export const LINE_IDENTITIES = ["研究者", "学生", "职场人", "创业者", "自由职业者", "投资者", "创作者", "教育者", "社群主理人", "家长", "跑者", "健身者", "骑行者", "户外爱好者", "球友", "舞者", "音乐人", "画手", "摄影者", "写作者", "读者", "手作人", "书法爱好者", "coser", "医生", "律师", "中医师", "设计师", "开发者", "学习者"] as const;
 
 /** 「人工智能的研究者」, or 「医生」 for a line with no field. */
 export const lineText = (line: LineIdentity): string =>

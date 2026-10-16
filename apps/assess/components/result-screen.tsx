@@ -2,13 +2,14 @@
 
 import { useEffect, useRef, useState } from "react";
 import { api, type ClientErrorCode } from "../lib/api-client";
-import type { ResultView } from "../lib/contract";
+import type { ResultView, WantsRequest } from "../lib/contract";
 import { LAST_RESULT_KEY, errorMessage } from "../lib/flow";
 import { AVATAR_POLL_MS, DrawingCard, isDrawing } from "./figure";
 import { SavableImage } from "./poster";
 import { CopyLink, ShareInvite } from "./share-invite";
 import { withName } from "../lib/names";
 import { readStored, writeStored } from "./storage";
+import { WantsInline } from "./wants-step";
 import { AxesList, TypeDetails, TypeHeading, groupStyle } from "./type-summary";
 
 export { AVATAR_POLL_MS, isDrawing } from "./figure";
@@ -32,6 +33,8 @@ export function ResultScreen({ token }: { token: string }) {
   const scrollToDelete = useRef(false);
   const [deleting, setDeleting] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null });
   const [beta, setBeta] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null });
+  const [editingWants, setEditingWants] = useState(false);
+  const [wantsSave, setWantsSave] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null });
   const [ownUrl, setOwnUrl] = useState("");
   useEffect(() => { setOwnUrl(`${window.location.origin}/r/${token}`); }, [token]);
 
@@ -74,6 +77,16 @@ export function ResultScreen({ token }: { token: string }) {
     if (!result.ok && result.code !== "NOT_FOUND") { setDeleting({ busy: false, error: errorMessage(result.code) }); return; }
     if (readStored("local", LAST_RESULT_KEY) === token) writeStored("local", LAST_RESULT_KEY, null);
     setState({ kind: "deleted" });
+  };
+
+  const saveWants = async (wants: WantsRequest) => {
+    setWantsSave({ busy: true, error: null });
+    const result = await api.setWants(token, wants);
+    if (!result.ok) { setWantsSave({ busy: false, error: errorMessage(result.code) }); return; }
+    const fresh = await api.getResult(token);
+    if (fresh.ok) setState({ kind: "ready", view: fresh.data });
+    setWantsSave({ busy: false, error: null });
+    setEditingWants(false);
   };
 
   const askBeta = async () => {
@@ -121,7 +134,13 @@ export function ResultScreen({ token }: { token: string }) {
       <h2>四条轴</h2>
       <AxesList type={type} />
     </section>
-    <TypeDetails type={type} />
+    <TypeDetails type={type} wants={!view.wants || editingWants
+      ? view.wantsLeft > 0 && <div className="as-wants-ask">
+        {!view.wants && <p>上面是按你的类型推荐的。告诉我们你想同时做哪几件事，按你的选择重新组合：</p>}
+        <WantsInline initial={view.wants ?? { picks: [], text: "" }} left={view.wantsLeft} busy={wantsSave.busy} error={wantsSave.error}
+          onSubmit={(wants) => void saveWants(wants)} onCancel={view.wants ? () => setEditingWants(false) : undefined} />
+      </div>
+      : view.wantsLeft > 0 && <button type="button" onClick={() => setEditingWants(true)}>改一改想做的事</button>} />
 
     <section className="as-block as-beta">
       <h2>把这三条线真的跑起来</h2>
@@ -157,7 +176,7 @@ export function ResultScreen({ token }: { token: string }) {
       <p>{mailed ? "这个页面的链接已发到你的邮箱（没收到就看看垃圾邮件）。" : view.sendEmail ? "邮件暂时发不出去。请收藏本页，或复制下面的链接自己保存，这是回到结果的唯一入口。"
         : "你选了不发邮件。请收藏本页，或复制下面的链接自己保存，这是回到结果的唯一入口。"}</p>
       {!mailed && ownUrl && <CopyLink url={ownUrl} label="我的结果链接（只给自己看）" />}
-      <p className="as-note">结果保存到 {dateText(view.expiresAt)}，到期自动删除。保存的是四条轴的分数、邮箱、署名和外貌选项，不存每道题的答案。</p>
+      <p className="as-note">结果保存到 {dateText(view.expiresAt)}，到期自动删除。保存的是四条轴的分数、邮箱、署名、外貌选项和你想做的事，不存每道题的答案。</p>
       {confirming ? <div className="as-confirm" role="group" aria-label="确认删除" id="as-delete">
         <p>删除后，海报、邀请链接和所有双人卡都会失效，不能恢复。</p>
         <div className="as-row">

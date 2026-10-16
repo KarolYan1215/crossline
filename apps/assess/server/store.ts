@@ -2,6 +2,7 @@ import { createHmac, randomBytes, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { TYPE_AXES, type TypeAxisId } from "@crossline/core/assess";
+import type { WantLines, WantsInput } from "@crossline/core/assess-wants";
 import { PAIRS_SHOWN_MAX, RESULT_RETENTION_DAYS, type Appearance, type AvatarStatus } from "../lib/contract";
 import { dataDir } from "./config";
 import { db } from "./db";
@@ -28,6 +29,10 @@ export type StoredResult = {
   appearance: Appearance;
   sendEmail: boolean;
   avatar: { state: AvatarStatus["state"]; file: string };
+  /** What the person said they want to do and the three lines made from it; absent until they answer. */
+  wants?: StoredWants;
+  /** How many times they have set it. */
+  wantsUpdates?: number;
   createdAt: string;
   expiresAt: string;
 };
@@ -37,6 +42,7 @@ export type StoredPair = { id: string; pairToken: string; inviterId: string; inv
 type ResultRow = {
   id: string; result_token: string; invite_token: string; email: string; nickname: string; scores_json: string; code: string;
   appearance_json: string; send_email: number; avatar_state: AvatarStatus["state"]; avatar_file: string; created_at: string; expires_at: string;
+  wants_json?: string; wants_updates?: number;
 };
 type PairRow = { id: string; pair_token: string; inviter_id: string; invitee_id: string; created_at: string };
 
@@ -45,11 +51,36 @@ export const newToken = (): string => randomBytes(16).toString("base64url");
 
 const nowIso = () => new Date().toISOString();
 
+/** The person's own words (`input`, never shown to anyone else) and the lines made from them (shown on the poster). */
+export type StoredWants = { input: WantsInput; lines: WantLines };
+
+/** Times one result may set its wants: each may call the text model. */
+export const WANTS_UPDATES_MAX = 3;
+
+/** A stored wants document read back; anything unreadable counts as not answered. */
+function readWants(json: string | undefined): { wants?: StoredWants } {
+  if (!json) return {};
+  try {
+    const value = JSON.parse(json) as StoredWants;
+    return value?.input && Array.isArray(value.lines?.lines) ? { wants: value } : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Stores what the person wants and the lines made from it, counting the update; false (nothing written) once the cap is reached. */
+export function setWants(resultId: string, wants: StoredWants): boolean {
+  const changed = db().prepare("UPDATE results SET wants_json = ?, wants_updates = wants_updates + 1 WHERE id = ? AND wants_updates < ?")
+    .run(JSON.stringify(wants), resultId, WANTS_UPDATES_MAX).changes;
+  return changed === 1;
+}
+
 const toResult = (row: ResultRow): StoredResult => ({
   id: row.id, resultToken: row.result_token, inviteToken: row.invite_token, email: row.email, nickname: row.nickname,
   scores: JSON.parse(row.scores_json) as Record<TypeAxisId, number>, code: row.code,
   appearance: JSON.parse(row.appearance_json) as Appearance, sendEmail: row.send_email === 1,
-  avatar: { state: row.avatar_state, file: row.avatar_file }, createdAt: row.created_at, expiresAt: row.expires_at
+  avatar: { state: row.avatar_state, file: row.avatar_file }, createdAt: row.created_at, expiresAt: row.expires_at,
+  ...readWants(row.wants_json), wantsUpdates: row.wants_updates ?? 0
 });
 const toPair = (row: PairRow): StoredPair =>
   ({ id: row.id, pairToken: row.pair_token, inviterId: row.inviter_id, inviteeId: row.invitee_id, createdAt: row.created_at });
@@ -162,7 +193,7 @@ export function createResult(input: NewResult, now: Date = new Date()): StoredRe
   const result: StoredResult = {
     id: randomUUID(), resultToken: newToken(), inviteToken: newToken(), email: input.email.trim().toLowerCase(), nickname: input.nickname,
     scores: input.scores, code: input.code, appearance: input.appearance, sendEmail: input.sendEmail,
-    avatar: { state: "queued", file: "" }, createdAt: now.toISOString(),
+    avatar: { state: "queued", file: "" }, wantsUpdates: 0, createdAt: now.toISOString(),
     expiresAt: new Date(now.getTime() + RESULT_RETENTION_DAYS * 86_400_000).toISOString()
   };
   db().prepare(`

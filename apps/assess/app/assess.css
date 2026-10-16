@@ -107,7 +107,16 @@ h3.as-type-name{font-size:20px}
 .as-inviter .as-type-name{font-size:22px}
 .as-inviter .as-subtitle{font-size:14px}
 .as-figure{display:block;width:96px;height:144px;object-fit:contain;border-radius:10px;background:var(--group-tint);border:2px solid var(--ink)}
-/* no drawn figure: the type's code in ink on the group's tint, never the shared template */
+/* what the person wants to do: chips that toggle, and how the three lines feed each other */
+.as-wants,.as-wants-inline,.as-wants-ask{display:grid;gap:14px}
+.as-chips{display:flex;flex-wrap:wrap;gap:8px}
+.as-chip{min-height:44px;padding:8px 14px;border:2px solid var(--line);background:#fff;color:var(--ink);font:inherit;cursor:pointer}
+.as-chip[data-on]{border-color:var(--ink);background:var(--ink);color:#fff}
+.as-chip:disabled{cursor:not-allowed;opacity:.55}
+.as-links{margin:0;padding:0;list-style:none;display:grid;gap:6px}
+.as-links li{display:flex;flex-wrap:wrap;gap:6px;align-items:baseline}
+.as-tag{display:inline-block;padding:0 6px;border-left:4px solid var(--group);background:var(--group-tint);font-size:13px;font-weight:700}
+/* no drawn figure:the type's code in ink on the group's tint, never the shared template */
 .as-figure-tile{display:grid;place-items:center;font-weight:700;font-size:22px;line-height:1;letter-spacing:.08em;color:var(--ink)}
 .as-figure-tile[data-waiting]{animation:as-breathe 2.4s ease-in-out infinite}
 /* in place of the poster while the figure is drawn */

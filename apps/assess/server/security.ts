@@ -16,7 +16,8 @@ export function json(body: unknown, status = 200, headers: Record<string, string
 
 const STATUS: Record<ApiErrorCode, number> = {
   QUIZ_INCOMPLETE: 400, APPEARANCE_INVALID: 400, EMAIL_INVALID: 400, NICKNAME_INVALID: 400, TOO_FAST: 400, REJECTED: 400,
-  RATE_LIMITED: 429, INVITE_NOT_FOUND: 404, ALREADY_PAIRED: 409, NOT_FOUND: 404, UNAUTHORIZED: 401, EMAIL_LIMIT_REACHED: 409
+  RATE_LIMITED: 429, INVITE_NOT_FOUND: 404, ALREADY_PAIRED: 409, NOT_FOUND: 404, UNAUTHORIZED: 401, EMAIL_LIMIT_REACHED: 409,
+  WANTS_INVALID: 400, WANTS_LIMIT_REACHED: 409
 };
 
 export function fail(code: ApiErrorCode, retryAfterSeconds?: number): Response {
@@ -74,11 +75,15 @@ export const submitsPerEmail = new RateLimiter(5, 24 * 60 * 60_000);
 /** Token lookups that found nothing, per address per ten minutes: slows anyone walking the token space. */
 export const lookupMisses = new RateLimiter(30, 10 * 60_000);
 
+/** 「你也许想做」 answers per address per hour (each may call the text model; one result may also set it only three times). */
+export const wantsPerIp = new RateLimiter(30, 60 * 60_000);
+
 /** Link lookups from the Crossline app (`/api/link`), per address per minute; wrong secrets count too. */
 export const linkLookups = new RateLimiter(60, 60_000);
 
 export function resetRateLimits(): void {
   linkLookups.reset();
+  wantsPerIp.reset();
   submitsPerIp.reset();
   submitsPerEmail.reset();
   lookupMisses.reset();

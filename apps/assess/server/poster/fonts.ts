@@ -42,6 +42,16 @@ export function posterFonts(): { fonts: Font[]; glyphs: Record<Family, Set<strin
   return loaded;
 }
 
+/**
+ * `preferred` when that face holds every character, else Sans. The Serif subset carries only the fixed copy; a line the person chose
+ * (「你也许想做」 from what they said they want, 2026-10-16) can use any common character, and Sans carries GB2312 level 1.
+ */
+export function faceFor(text: string, preferred: Family): Family {
+  if (preferred === "Sans") return "Sans";
+  const glyphs = posterFonts().glyphs.Serif;
+  return [...text].every((char) => /\s/.test(char) || glyphs.has(char)) ? "Serif" : "Sans";
+}
+
 /** The text with every character the face cannot print replaced by 「·」 (whitespace kept as a plain space). */
 export function safe(text: string, family: Family): string {
   const glyphs = posterFonts().glyphs[family];

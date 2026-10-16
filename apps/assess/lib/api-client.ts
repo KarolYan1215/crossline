@@ -1,4 +1,4 @@
-import type { ApiErrorCode, InviteView, PairView, ResultView, SubmitRequest, SubmitResponse } from "./contract";
+import type { ApiErrorCode, InviteView, PairView, ResultView, SubmitRequest, SubmitResponse, WantsRequest } from "./contract";
 import { fixtureApi } from "./fixtures";
 
 /**
@@ -14,12 +14,13 @@ export type AssessApi = {
   getResult(resultToken: string): Promise<ApiResult<ResultView>>;
   deleteResult(resultToken: string): Promise<ApiResult<null>>;
   requestBeta(resultToken: string): Promise<ApiResult<null>>;
+  setWants(resultToken: string, wants: WantsRequest): Promise<ApiResult<null>>;
   getInvite(inviteToken: string): Promise<ApiResult<InviteView>>;
   getPair(pairToken: string): Promise<ApiResult<PairView>>;
 };
 
 const KNOWN: ApiErrorCode[] = ["QUIZ_INCOMPLETE", "APPEARANCE_INVALID", "EMAIL_INVALID", "NICKNAME_INVALID", "TOO_FAST", "REJECTED",
-  "RATE_LIMITED", "INVITE_NOT_FOUND", "ALREADY_PAIRED", "NOT_FOUND", "UNAUTHORIZED", "EMAIL_LIMIT_REACHED"];
+  "RATE_LIMITED", "INVITE_NOT_FOUND", "ALREADY_PAIRED", "NOT_FOUND", "UNAUTHORIZED", "EMAIL_LIMIT_REACHED", "WANTS_INVALID", "WANTS_LIMIT_REACHED"];
 
 /** A response read into the result shape: a refusal's code when the body names one, `NOT_FOUND` for a bare 404. */
 export async function readResponse<T>(response: Response): Promise<ApiResult<T>> {
@@ -56,6 +57,10 @@ export const httpApi: AssessApi = {
   },
   requestBeta: async (resultToken) => {
     const result = await call<unknown>(`/api/results/${token(resultToken)}/beta`, { method: "POST" });
+    return result.ok ? { ok: true, data: null } : result;
+  },
+  setWants: async (resultToken, wants) => {
+    const result = await call<unknown>(`/api/results/${token(resultToken)}/wants`, { method: "POST", body: JSON.stringify(wants) });
     return result.ok ? { ok: true, data: null } : result;
   },
   getInvite: (inviteToken) => call<InviteView>(`/api/invites/${token(inviteToken)}`),

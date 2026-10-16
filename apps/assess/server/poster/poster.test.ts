@@ -4,11 +4,12 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import type { SatoriNode } from "satori";
 import { TYPE_CODES } from "@crossline/core/assess-content";
+import { ruleLines, wantsPlan, type WantLines } from "@crossline/core/assess-wants";
 import { pairRelation, publicType } from "../../lib/public-type";
 import { fontsDir, safe } from "./fonts";
 import { PLANNER, ROAMER, samplePair, samplePoster, writeFigure } from "./fixtures";
 import { renderLongImage, renderPairCard, renderTypePoster } from "./index";
-import { posterFixedText } from "./labels";
+import { LABELS, posterFixedText } from "./labels";
 import { figureFrom, imageMime } from "./figure";
 import { HEIGHT, WIDTH, longImageTree, pairCardTree, strongestAxis, toPng, typePosterTree } from "./render";
 
@@ -168,6 +169,30 @@ describe("layout", () => {
       assertClean(poster.nodes, HEIGHT, `${code} poster`);
       const long = await toPng(longImageTree(type, nickname, { dataUri: null }, "https://assess.example.com/t/x"), undefined, { collect: true });
       assertClean(long.nodes, long.height, `${code} long`);
+    }
+  });
+
+  test("lines from what the person said (rules, a written combination, a model's longest answer) lay out clean, with no missing glyph", { timeout: 120_000 }, async () => {
+    const longest: WantLines = {
+      lines: [{ domain: "七个字的领域名", identity: "社群主理人" }, { domain: "人工智能", identity: "设计师" }, { domain: "", identity: "开发者" }],
+      loop: ["十个字的第一步产出物", "十个字的第二步做成什", "十个字的第三步卖成什", "用户需求回到这条主线"],
+      links: [{ from: 0, to: 1, kind: "提供输入", how: "二十四个字的一句话说清前一条线给了后一条线什么东西" },
+        { from: 1, to: 2, kind: "促成", how: "设计作品成为开发的素材" }, { from: 2, to: 0, kind: "反馈回路", how: "使用数据回到社群" }],
+      source: "model"
+    };
+    for (const [code, chosen] of [["GEMA", longest], ["SEMP", ruleLines("SEMP", ["language", "build", "running"])],
+      ["GIRA", wantsPlan("GIRA", { picks: ["research", "media", "writing"], text: "" }).lines]] as const) {
+      const type = publicType(scoresFor(code), {}, "", chosen);
+      const missing: string[] = [];
+      const poster = await toPng(typePosterTree(type, "小林", { dataUri: null }, "https://assess.example.com/t/x"), HEIGHT,
+        { collect: true, onMissing: (segment) => missing.push(segment) });
+      assertClean(poster.nodes, HEIGHT, `${code} wants poster`);
+      const long = await toPng(longImageTree(type, "小林", { dataUri: null }, "https://assess.example.com/t/x"), undefined,
+        { collect: true, onMissing: (segment) => missing.push(segment) });
+      assertClean(long.nodes, long.height, `${code} wants long`);
+      expect(missing).toEqual([]);
+      expect(poster.nodes.some((node) => node.textContent === chosen.lines[0].identity)).toBe(true);
+      expect(long.nodes.some((node) => node.textContent === LABELS.moreHeading)).toBe(false);
     }
   });
 

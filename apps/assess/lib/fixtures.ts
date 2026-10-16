@@ -56,6 +56,7 @@ export function fixtureResult(token: string): ResultView {
       { pairToken: "fixture-pair", nickname: "阿青", code: VISITOR.code, name: VISITOR.name, relation: pairRelation(INVITER.code, VISITOR.code).primary.name },
       { pairToken: "fixture-pair-2", nickname: "你的朋友", code: INVITER.best.code, name: INVITER.best.name, relation: INVITER.best.relation }
     ],
+    wants: null, wantsLeft: 3,
     expiresAt: new Date(Date.now() + RESULT_RETENTION_DAYS * 86_400_000).toISOString()
   };
 }
@@ -81,6 +82,7 @@ export const fixtureApi: AssessApi = {
   },
   getResult: (token) => delay(token === "missing" ? notFound : { ok: true, data: fixtureResult(token) }),
   requestBeta: (token) => delay(token === "missing" ? notFound : { ok: true, data: null }),
+  setWants: (token) => delay(token === "missing" ? notFound : { ok: true, data: null }),
   deleteResult: (token) => delay(token === "missing" ? notFound : { ok: true, data: null }),
   getInvite: (token) => delay(token === "missing" ? notFound : { ok: true, data: fixtureInvite() }),
   getPair: (token) => delay(token === "missing" ? notFound : { ok: true, data: fixturePair() })

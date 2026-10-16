@@ -4,7 +4,7 @@ import { Resvg } from "@resvg/resvg-js";
 import { TYPE_AXES, TYPE_GROUPS } from "@crossline/core/assess";
 import { RELATIONS, latinGap } from "@crossline/core/assess-content";
 import type { PartnerView, PublicAxis, PublicType, RelationView } from "../../lib/contract";
-import { posterFonts, safe, type Family } from "./fonts";
+import { faceFor, posterFonts, safe, type Family } from "./fonts";
 import { LABELS, poleExplanations, rankLine } from "./labels";
 import { withName } from "../../lib/names";
 import { qrDataUri } from "./qr";
@@ -151,7 +151,7 @@ function linesBlock(type: PublicType, withLabels: boolean): El {
       ...type.lines.map((line, index) => box({ alignItems: "baseline", marginTop: index ? 4 : 0 },
         text(String(index + 1), "Serif", { fontSize: 26, fontWeight: 700, color: type.group.colour, width: 30 }),
         line.domain ? text(`${line.domain}的`, "Sans", { fontSize: 24, color: GREY, lineHeight: 1.3 }) : null,
-        text(line.identity, "Serif", { fontSize: 32, fontWeight: 700, color: INK, lineHeight: 1.3, marginLeft: line.domain && latinGap(line.identity) ? 8 : 0 })))),
+        text(line.identity, faceFor(line.identity, "Serif"), { fontSize: 32, fontWeight: 700, color: INK, lineHeight: 1.3, marginLeft: line.domain && latinGap(line.identity) ? 8 : 0 })))),
     loopCycle(type.loop, type.group.colour, type.group.tint));
   return withLabels ? box({ flexDirection: "column", width: "100%" }, row, text(LABELS.loopCaption, "Sans", { fontSize: 24, color: GREY, marginTop: 12 })) : row;
 }
@@ -162,7 +162,7 @@ function comboLine(combo: PublicType["lines"], size: number, marginTop: number):
     ...combo.flatMap((line, index) => [
       index ? text(" · ", "Sans", { fontSize: 24, color: GREY, marginLeft: 6, marginRight: 6 }) : null,
       line.domain ? text(`${line.domain}的`, "Sans", { fontSize: 24, color: GREY }) : null,
-      text(line.identity, "Serif", { fontSize: size, fontWeight: 700, color: INK, marginLeft: line.domain && latinGap(line.identity) ? 8 : 0 })
+      text(line.identity, faceFor(line.identity, "Serif"), { fontSize: size, fontWeight: 700, color: INK, marginLeft: line.domain && latinGap(line.identity) ? 8 : 0 })
     ]));
 }
 
@@ -263,8 +263,13 @@ export function longImageTree(type: PublicType, nickname: string, figure: Figure
       text(LABELS.loopHeading, "Serif", { fontSize: 28, fontWeight: 700, color: INK, marginTop: 24 }),
       text(`${type.loop.join(" → ")} → ${type.loop[0]}`, "Sans", { fontSize: 26, color: INK, lineHeight: 1.5, marginTop: 8 }),
       text(LABELS.loopExplain, "Sans", { fontSize: 24, color: GREY, lineHeight: 1.5, marginTop: 6 }),
+      // Lines from what the person said they want: how each feeds the next, with the relation kind.
+      ...type.links.map((link, index) => box({ alignItems: "baseline", marginTop: index ? 6 : 14, flexWrap: "wrap" },
+        text(`${type.lines[link.from]?.identity ?? ""} → ${type.lines[link.to]?.identity ?? ""}`, "Sans", { fontSize: 24, fontWeight: 700, color: INK }),
+        text(link.kind, "Sans", { fontSize: 24, fontWeight: 700, color: INK, backgroundColor: type.group.tint, paddingLeft: 8, paddingRight: 8, marginLeft: 10, marginRight: 10 }),
+        text(link.how, "Sans", { fontSize: 24, color: INK }))),
       text(LABELS.loopCaption, "Sans", { fontSize: 24, color: GREY, marginTop: 4 }),
-      text(LABELS.moreHeading, "Serif", { fontSize: 28, fontWeight: 700, color: INK, marginTop: 28 }),
+      type.more.length ? text(LABELS.moreHeading, "Serif", { fontSize: 28, fontWeight: 700, color: INK, marginTop: 28 }) : null,
       // Three more combinations, each a step smaller (30 / 27 / 24 px for the identities), never under 24 px.
       ...type.more.map((combo, index) => comboLine(combo, [30, 27, 24][index]!, index ? 10 : 12))),
     rule(34),

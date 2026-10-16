@@ -20,12 +20,12 @@ export async function GET(_request: Request, context: { params: Promise<{ pairTo
   const now = Date.now();
   if (!inviter || !invitee || Date.parse(inviter.expiresAt) <= now || Date.parse(invitee.expiresAt) <= now) return posterNotFound();
   const recorded = recordedScores();
-  const a = publicType(inviter.scores, recorded, inviter.id);
-  const b = publicType(invitee.scores, recorded, invitee.id);
+  const a = publicType(inviter.scores, recorded, inviter.id, inviter.wants?.lines);
+  const b = publicType(invitee.scores, recorded, invitee.id, invitee.wants?.lines);
   const png = await renderPairCard({
     a: { type: a, nickname: inviter.nickname, avatarPath: drawnImagePath(inviter) ?? "" },
     b: { type: b, nickname: invitee.nickname, avatarPath: drawnImagePath(invitee) ?? "" },
-    ...pairRelation(a.code, b.code),
+    ...pairRelation(a.code, b.code, a.lines, b.lines),
     inviteUrl: `${baseUrl()}/t/${inviter.inviteToken}`,
     cacheTag: pairToken
   });

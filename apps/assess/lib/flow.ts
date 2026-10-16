@@ -1,11 +1,13 @@
 import { QUIZ_ITEMS } from "@crossline/core/assess";
-import { APPEARANCE_LABELS, NICKNAME_MAX, NOTE_MAX, TESTS_PER_EMAIL, type Appearance, type SubmitRequest } from "./contract";
+import { WANT_OPTIONS, WANTS_PICKS_MAX, WANTS_TEXT_MAX } from "@crossline/core/assess-wants";
+import { APPEARANCE_LABELS, NICKNAME_MAX, NOTE_MAX, TESTS_PER_EMAIL, type Appearance, type SubmitRequest, type WantsRequest } from "./contract";
 
 /**
  * The test's own state, kept pure so the pages stay thin and the rules are tested: intro → 32 statements one per screen → appearance →
- * email. The whole state (bar the honeypot) is kept in sessionStorage under one key per invitation, so a reload resumes where it was.
+ * email (the result is made here and the figure starts drawing) → what the person wants to do (answered while the figure is drawn) →
+ * the result. The whole state (bar the honeypot) is kept in sessionStorage under one key per invitation, so a reload resumes where it was.
  */
-export type Step = "intro" | "quiz" | "appearance" | "email";
+export type Step = "intro" | "quiz" | "appearance" | "email" | "wants";
 
 /** Appearance while it is being chosen: every choice starts unset, so nobody gets a figure from a default they never looked at. */
 export type AppearanceDraft = Partial<Omit<Appearance, "note">> & { note: string };
@@ -21,13 +23,44 @@ export type Flow = {
   email: string;
   nickname: string;
   sendEmail: boolean;
+  /** What the person wants to do: chips from `WANT_OPTIONS` in the order they were picked, and a free line. */
+  wants: WantsRequest;
+  /** Once the email step has made the result: where to go when the last step is done. */
+  submitted: { resultToken: string; pairToken?: string } | null;
 };
 
 export const QUIZ_LENGTH = QUIZ_ITEMS.length;
 
 export const emptyFlow = (): Flow => ({
-  step: "intro", index: 0, answers: {}, startedAt: null, appearance: { note: "" }, email: "", nickname: "", sendEmail: true
+  step: "intro", index: 0, answers: {}, startedAt: null, appearance: { note: "" }, email: "", nickname: "", sendEmail: true,
+  wants: { picks: [], text: "" }, submitted: null
 });
+
+/**
+ * After the email step made the result: on to the last step, keeping where it leads and what was already picked. The answers, the
+ * appearance and the address are dropped from the stored state now — the server has them, and the browser no longer needs them.
+ */
+export const afterSubmit = (flow: Flow, submitted: { resultToken: string; pairToken?: string | undefined }): Flow => ({
+  ...emptyFlow(), step: "wants", wants: flow.wants,
+  submitted: { resultToken: submitted.resultToken, ...(submitted.pairToken ? { pairToken: submitted.pairToken } : {}) }
+});
+
+/** Where the finished test leads: the pair card through an invitation, else the person's own result. */
+export const destination = (submitted: NonNullable<Flow["submitted"]>): string =>
+  submitted.pairToken ? `/p/${submitted.pairToken}` : `/r/${submitted.resultToken}`;
+
+/** A chip on or off; past `WANTS_PICKS_MAX` a new one is not added. */
+export function togglePick(wants: WantsRequest, id: string): WantsRequest {
+  if (wants.picks.includes(id)) return { ...wants, picks: wants.picks.filter((pick) => pick !== id) };
+  return wants.picks.length >= WANTS_PICKS_MAX ? wants : { ...wants, picks: [...wants.picks, id] };
+}
+
+/** The last step's one message, or null when it can be sent. */
+export function wantsProblem(wants: WantsRequest): string | null {
+  if (charCount(wants.text.trim()) > WANTS_TEXT_MAX) return `最多 ${WANTS_TEXT_MAX} 个字`;
+  if (!wants.picks.length && !wants.text.trim()) return "选一两项，或者写一句你想做的事";
+  return null;
+}
 
 export const answeredCount = (flow: Flow): number => QUIZ_ITEMS.filter((item) => isAnswer(flow.answers[item.id])).length;
 const isAnswer = (value: unknown): value is number => typeof value === "number" && [1, 2, 3, 4, 5].includes(value);
@@ -145,7 +178,10 @@ export const flowKey = (inviteToken?: string): string => `crossline-assess:flow:
 /** localStorage key of the person's latest result, so the landing page can offer 「查看我的结果」. */
 export const LAST_RESULT_KEY = "crossline-assess:last-result";
 
-const STEPS: Step[] = ["intro", "quiz", "appearance", "email"];
+const STEPS: Step[] = ["intro", "quiz", "appearance", "email", "wants"];
+const WANT_IDS = new Set(WANT_OPTIONS.map((option) => option.id));
+/** A stored token as the server makes them (base64url); anything else is not followed. */
+const TOKEN = /^[A-Za-z0-9_-]{8,128}$/;
 const OPTIONS: Record<keyof Omit<Appearance, "note" | "glasses">, readonly string[]> = {
   presentation: Object.keys(APPEARANCE_LABELS.presentation), hair: Object.keys(APPEARANCE_LABELS.hair),
   skin: Object.keys(APPEARANCE_LABELS.skin), style: Object.keys(APPEARANCE_LABELS.style)
@@ -174,9 +210,20 @@ export function parseFlow(raw: string | null): Flow | null {
   if (typeof stored.email === "string") flow.email = stored.email.slice(0, 254);
   if (typeof stored.nickname === "string") flow.nickname = stored.nickname.slice(0, NICKNAME_MAX * 2);
   if (typeof stored.sendEmail === "boolean") flow.sendEmail = stored.sendEmail;
+  const wants = stored.wants && typeof stored.wants === "object" ? stored.wants as Record<string, unknown> : {};
+  if (Array.isArray(wants.picks)) {
+    flow.wants.picks = [...new Set(wants.picks.filter((pick): pick is string => typeof pick === "string" && WANT_IDS.has(pick)))].slice(0, WANTS_PICKS_MAX);
+  }
+  if (typeof wants.text === "string") flow.wants.text = wants.text.slice(0, WANTS_TEXT_MAX * 2);
+  const sent = stored.submitted && typeof stored.submitted === "object" ? stored.submitted as Record<string, unknown> : {};
+  if (typeof sent.resultToken === "string" && TOKEN.test(sent.resultToken)) {
+    flow.submitted = { resultToken: sent.resultToken, ...(typeof sent.pairToken === "string" && TOKEN.test(sent.pairToken) ? { pairToken: sent.pairToken } : {}) };
+  }
   const step = STEPS.includes(stored.step as Step) ? stored.step as Step : "intro";
   const index = typeof stored.index === "number" && Number.isInteger(stored.index) ? Math.min(Math.max(stored.index, 0), QUIZ_LENGTH - 1) : 0;
   const gap = firstUnanswered(flow.answers);
+  // The last step exists only once the result does; without its token the person is back at the email step.
+  if (step === "wants" && !flow.submitted) return gap < QUIZ_LENGTH ? { ...flow, step: "quiz", index: gap } : { ...flow, step: "email" };
   if ((step === "appearance" || step === "email") && gap < QUIZ_LENGTH) return { ...flow, step: "quiz", index: gap };
   if (step === "quiz" && flow.startedAt === null) return { ...flow, step: "intro" };
   return { ...flow, step, index };
@@ -195,6 +242,8 @@ const ERROR_TEXT: Record<string, string> = {
   ALREADY_PAIRED: "这是你自己的邀请链接。把它转发给朋友，让 TA 来测。",
   NOT_FOUND: "没有找到这个结果，可能已过期或已被删除。",
   EMAIL_LIMIT_REACHED: `这个邮箱已测满 ${TESTS_PER_EMAIL} 次，只保留最新一次的结果。最新结果的链接已重新发到这个邮箱；想再测，可以换一个邮箱。`,
+  WANTS_INVALID: `选一两项，或者写一句你想做的事（最多 ${WANTS_TEXT_MAX} 个字）。`,
+  WANTS_LIMIT_REACHED: "想做的事已经改过 3 次，这份结果不能再改了。",
   NETWORK: "网络连不上，请检查网络后重试。"
 };
 

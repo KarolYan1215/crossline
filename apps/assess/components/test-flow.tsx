@@ -4,21 +4,23 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { useRouter } from "next/navigation";
 import { api } from "../lib/api-client";
 import {
-  LAST_RESULT_KEY, QUIZ_LENGTH, answeredCount, back, buildRequest, emailProblem, emptyFlow, errorMessage, flowKey, next, nicknameProblem,
-  parseFlow, setAnswer, startQuiz, type Flow
+  LAST_RESULT_KEY, QUIZ_LENGTH, afterSubmit, answeredCount, back, buildRequest, destination, emailProblem, emptyFlow, errorMessage, flowKey, next,
+  nicknameProblem, parseFlow, setAnswer, startQuiz, type Flow
 } from "../lib/flow";
 import { AppearanceStep } from "./appearance-step";
 import { EmailStep } from "./email-step";
 import { LastResultLink } from "./last-result-link";
 import { QuizStep } from "./quiz-step";
 import { readStored, writeStored } from "./storage";
+import { WantsStep } from "./wants-step";
 
 /** How long a chosen answer stays on screen before the next statement, so the person sees what they picked. */
 const ADVANCE_MS = 260;
 
 /**
- * The whole test: the intro the page passes in, 32 statements, appearance, email, then off to the result (or, through an invitation,
- * straight to the pair card). Kept in sessionStorage per invitation so a reload resumes; cleared once the result exists.
+ * The whole test: the intro the page passes in, 32 statements, appearance, email — which makes the result and starts the figure —
+ * then what the person wants to do, answered while the figure is drawn, then off to the result (or, through an invitation, to the pair
+ * card). Kept in sessionStorage per invitation so a reload resumes; cleared once the last step is done or skipped.
  */
 export function TestFlow({ inviteToken, startLabel = "开始", children, after }: {
   inviteToken?: string; startLabel?: string; children?: ReactNode;
@@ -80,8 +82,26 @@ export function TestFlow({ inviteToken, startLabel = "开始", children, after }
       return;
     }
     writeStored("local", LAST_RESULT_KEY, response.data.resultToken);
+    setBusy(false);
+    // The result exists and its figure is being drawn: one more step, answered meanwhile.
+    move((current) => afterSubmit(current, response.data));
+  };
+
+  const finish = (submitted: NonNullable<Flow["submitted"]>) => {
     writeStored("session", key, null);
-    router.push(response.data.pairToken ? `/p/${response.data.pairToken}` : `/r/${response.data.resultToken}`);
+    router.push(destination(submitted));
+  };
+  const sendWants = async () => {
+    if (!flow.submitted) return;
+    setBusy(true);
+    setError(null);
+    const response = await api.setWants(flow.submitted.resultToken, { picks: flow.wants.picks, text: flow.wants.text.trim() });
+    if (!response.ok && response.code !== "WANTS_LIMIT_REACHED") {
+      setBusy(false);
+      setError({ text: errorMessage(response.code), inviteGone: false, full: false });
+      return;
+    }
+    finish(flow.submitted);
   };
 
   const answered = answeredCount(flow);
@@ -104,5 +124,8 @@ export function TestFlow({ inviteToken, startLabel = "开始", children, after }
       onSubmit={() => void submit()} onBack={() => move(back)}
       onSubmitWithoutInvite={error?.inviteGone ? () => void submit(false) : undefined}
       latestLink={error?.full ? <LastResultLink label="查看我的最新结果" /> : undefined} />}
+    {flow.step === "wants" && flow.submitted && <WantsStep wants={flow.wants} busy={busy} error={error?.text ?? null}
+      onChange={(wants) => setFlow((current) => ({ ...current, wants }))}
+      onSubmit={() => void sendWants()} onSkip={() => finish(flow.submitted!)} />}
   </>;
 }
