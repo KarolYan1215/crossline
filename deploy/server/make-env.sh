@@ -54,6 +54,8 @@ ASSESS_SMTP_USER=resend
 ASSESS_SMTP_PASSWORD=
 ASSESS_MAIL_FROM=Crossline 测评 <noreply@mail.crossline.lol>
 # SiliconFlow key for the personal figures; blank = every figure is its type's template.
+ASSESS_IMAGE_PROVIDER=ark
+ASSESS_IMAGE_MODEL=doubao-seedream-5-0-pro-260628
 ASSESS_IMAGE_API_KEY=
 ASSESS_IMAGE_DAILY_LIMIT=300
 EOF
