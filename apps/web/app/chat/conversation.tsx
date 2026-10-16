@@ -225,7 +225,7 @@ export function CardView({ messageId, card, onUpdate, choices, body }: { message
             await decide({ option: index });
             if (option.kind === "href" && option.href) window.location.assign(option.href);
             if (option.kind === "say") focusBox();
-          }}>{option.label}</button>)}</div>}
+          }}>{t(option.label)}</button>)}</div>}
     </div>}
     {pending.length > 0 && <div className="conversation-actions">
       <button type="button" className="primary-button" disabled={working || card.reviewing} onClick={() => void decide({ indexes: pending })}>

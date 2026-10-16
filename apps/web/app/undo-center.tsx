@@ -4,6 +4,7 @@ import { useCallback, useEffect, useId, useState } from "react";
 import { intlLocale, tFor, type Locale, type Translate } from "../lib/i18n";
 import { useLocale, useT } from "./locale-context";
 
+/** `label` is stored as written at the time; one the app wrote in Chinese is a catalogue key and reads in today's language (`t`). */
 type Op = { id: string; label: string; at: string };
 const FRESH_MS = 20_000;
 const SEEN_KEY = "crossline.undo.seen";
@@ -65,7 +66,7 @@ export function UndoCenter() {
   const undo = useCallback(async (op: Op) => {
     setStatus(t("正在撤销…"));
     const result = await undoOperation(op.id, t);
-    setStatus(result.ok ? t("已撤销：{{label}}", { label: op.label }) : result.message);
+    setStatus(result.ok ? t("已撤销：{{label}}", { label: t(op.label) }) : result.message);
     if (result.ok) setTimeout(() => location.reload(), 500);
   }, [t]);
 
@@ -90,12 +91,12 @@ export function UndoCenter() {
         {ops.slice(0, 15).map((op) => <button key={op.id} type="button" role="menuitem" onClick={(event) => {
           (event.currentTarget.parentElement as HTMLElement & { hidePopover?: () => void }).hidePopover?.();
           void undo(op);
-        }}><span>{op.label}</span><small className="mono">{timeOf(op.at, locale)}</small></button>)}
+        }}><span>{t(op.label)}</span><small className="mono">{timeOf(op.at, locale)}</small></button>)}
       </div>
     </>}
     {(toast || status) && <div className="undo-toast" role="status">
       {status ? <span>{status}</span> : toast && <>
-        <span>{toast.label}</span>
+        <span>{t(toast.label)}</span>
         <button type="button" onClick={() => void undo(toast)}>{t("撤销")}</button>
         <button type="button" aria-label={t("关闭")} onClick={() => setToast(null)}>×</button>
       </>}
