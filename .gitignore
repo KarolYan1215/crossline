@@ -46,3 +46,6 @@ next-env.d.ts
 # past the `*.db` patterns above — thirteen of them reached a commit before this line existed.
 *.bak
 apps/assess/templates/candidates/
+
+# Isolated git worktrees that background agents work in; their work comes back as commits on their own branches.
+.claude/worktrees/
