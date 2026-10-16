@@ -21,7 +21,7 @@
 | `GET /api/invites/<inviteToken>` | 邀请落地页（`InviteView`） | 邀请令牌 |
 | `GET /api/pairs/<pairToken>` | 双人卡（`PairView`） | 双人卡令牌 |
 | `POST /api/results/<resultToken>/beta` | 申请内测 | 结果令牌 |
-| `GET /api/avatar/<inviteToken>.png[?size=small]` | 形象；`size=small` 为 360 宽（邀请页、双人卡页用），模板缩图缓存在 `data/thumbs/` | 邀请令牌 |
+| `GET /api/avatar/<inviteToken>.png[?size=small]` | 形象（没画好时是类型模板，只给 App 的 `figureUrl` 用；页面只在画好后才显示它）；`size=small` 为 360 宽，缩图缓存在 `data/thumbs/` | 邀请令牌 |
 | `POST /api/link` | App 取某邮箱最近一份结果；只在设了 `ASSESS_LINK_SECRET` 时存在 | `Authorization: Bearer <ASSESS_LINK_SECRET>` |
 
 接口形状在 `apps/assess/lib/contract.ts`。所有公开视图都只由四轴得分算出（`lib/public-type.ts`），**任何视图都不含邮箱、答案或外貌**；邀请页和双人卡里也不出现结果令牌。
@@ -115,6 +115,8 @@
 - `avatar.skipped`：没画就用了兜底，`reason` 是 `no_provider` / `email_limit`（这个邮箱 90 天内已画满 3 张，反复自测最容易碰到）/ `daily_budget` / `queue_full`。
 - `avatar.failed`：调用失败，带 HTTP 状态和服务返回的前 200 字（401 多半是 key 和服务对不上）；画出来的是 WebP 也算失败（`IMAGE_FORMAT_UNSUPPORTED`），因为海报只认 PNG 和 JPEG。
 - `avatar.ready`：画好，带用时和重试次数。2026-10-16 实测方舟 `doubao-seedream-5-0-pro` 一张 1024×1536 约 39 秒。
+
+**结果页不再出现类型模板**（2026-10-16，本人反馈先看到通用模板的人会直接离开）：形象在画时，海报的位置是一张等待卡（组别底色、类型字母、进度条，不放海报，免得有人存下半成品）；画好后出现海报。没画成（没配服务、邮箱次数用完、当日预算用完、调用失败）时，海报上用四个字母排成 2×2 的徽记代替人像，页面写「这次没有画出你的专属形象」。邀请页、双人卡页的小头像和双人卡海报同一规则。只有 App 通过 `/api/link` 拿到的 `figureUrl` 仍可能是模板。
 
 页面怎么换上形象：结果页和双人卡页在形象「排队 / 正在画」时每 5 秒问一次，某次请求失败只跳过这一次（以前失败一次就停）；海报、长图、双人卡的地址带 `?f=<形象标记>`（等待 `w`、兜底 `t`、画好 `d<文件时间>`），形象一变地址就变，浏览器不会继续用缓存的旧海报（以前刷新页面会在 5 分钟内看到旧海报）。
 

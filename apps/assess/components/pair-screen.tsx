@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import { api, type ClientErrorCode } from "../lib/api-client";
 import type { PairView, RelationView } from "../lib/contract";
 import { LAST_RESULT_KEY, errorMessage } from "../lib/flow";
-import { SavableImage, smallFigure } from "./poster";
+import { FigureTile } from "./figure";
+import { SavableImage } from "./poster";
 import { AVATAR_POLL_MS, DISCLAIMER, isDrawing } from "./result-screen";
 import { readStored } from "./storage";
 import { TypeHeading, groupStyle } from "./type-summary";
@@ -55,6 +56,7 @@ export function PairScreen({ token }: { token: string }) {
       <p className="as-kicker">{names[0]} × {names[1]}</p>
       <h1>{pair.primary.name}</h1>
     </header>
+    {drawing && <p className="as-note" role="status">形象正在画，画好后双人卡会自动换上，不用刷新。</p>}
     <SavableImage src={pair.cardUrl} alt={`${names[0]}和${names[1]}的双人卡：${pair.primary.name}`} width={1080} height={1440}
       downloadName="crossline-双人卡.png" label="双人卡" />
     <Relation relation={pair.primary} />
@@ -62,8 +64,7 @@ export function PairScreen({ token }: { token: string }) {
     <section className="as-block">
       <h2>你们俩</h2>
       <div className="as-people">{people.map((person, index) => <div key={index} className="as-person" style={groupStyle(person.type)}>
-        {/* eslint-disable-next-line @next/next/no-img-element -- a figure, a plain image */}
-        <img className="as-figure" src={smallFigure(person.avatar.url)} alt={`${names[index]}的形象`} width={120} height={180} />
+        <FigureTile avatar={person.avatar} type={person.type} alt={`${names[index]}的形象`} width={120} height={180} />
         <p className="as-person-name">{names[index]}</p>
         <TypeHeading type={person.type} as="h3" />
       </div>)}</div>

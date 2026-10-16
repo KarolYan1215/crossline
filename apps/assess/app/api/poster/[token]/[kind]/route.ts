@@ -1,5 +1,5 @@
 import { baseUrl } from "../../../../../server/config";
-import { avatarImagePath } from "../../../../../server/avatar";
+import { drawnImagePath } from "../../../../../server/avatar";
 import { renderLongImage, renderTypePoster } from "../../../../../server/poster";
 import { pngResponse, posterNotFound } from "../../../../../server/poster/http";
 import { getResultByInvite, recordedScores } from "../../../../../server/store";
@@ -22,7 +22,7 @@ export async function GET(_request: Request, context: { params: Promise<{ token:
   const png = await render({
     type: publicType(result.scores, recordedScores(), result.id),
     nickname: result.nickname,
-    avatarPath: avatarImagePath(result),
+    avatarPath: drawnImagePath(result) ?? "",
     inviteUrl: `${baseUrl()}/t/${result.inviteToken}`,
     cacheTag: result.inviteToken
   });

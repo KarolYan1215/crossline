@@ -11,7 +11,7 @@ vi.mock("../../../server/store", () => ({
   getPairByToken: (token: string) => pairs.get(token),
   recordedScores: () => ({})
 }));
-vi.mock("../../../server/avatar", () => ({ avatarImagePath: (result: StoredResult) => `/figures/${result.id}.png` }));
+vi.mock("../../../server/avatar", () => ({ drawnImagePath: (result: StoredResult) => `/figures/${result.id}.png` }));
 vi.mock("../../../server/poster", () => ({
   renderTypePoster: vi.fn(async () => PNG),
   renderLongImage: vi.fn(async () => PNG),

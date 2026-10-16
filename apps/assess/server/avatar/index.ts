@@ -163,7 +163,15 @@ export function avatarStatus(result: StoredResult): AvatarStatus {
   return { state: result.avatar.state, url: base };
 }
 
-/** A PNG file on disk for the poster renderer: the drawn figure when ready, else the template. */
+/** The person's own drawn figure on disk, for the posters; undefined while it is drawn, or when it never was (posters then show the code). */
+export function drawnImagePath(result: StoredResult): string | undefined {
+  return drawnPath(result);
+}
+
+/**
+ * The figure the avatar route serves: the drawn one when ready, else the template. Only the App's link (`figureUrl`) still shows the
+ * template; the pages and posters show the drawn figure or the code tile (`FigureTile`, `figure.ts`).
+ */
 export function avatarImagePath(result: StoredResult): string {
   return drawnPath(result) ?? templateImagePath(result.code, templateVariant(result.appearance.presentation, result.id));
 }

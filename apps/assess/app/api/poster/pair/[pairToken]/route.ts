@@ -1,5 +1,5 @@
 import { baseUrl } from "../../../../../server/config";
-import { avatarImagePath } from "../../../../../server/avatar";
+import { drawnImagePath } from "../../../../../server/avatar";
 import { renderPairCard } from "../../../../../server/poster";
 import { pngResponse, posterNotFound } from "../../../../../server/poster/http";
 import { getPairByToken, getResultById, recordedScores } from "../../../../../server/store";
@@ -23,8 +23,8 @@ export async function GET(_request: Request, context: { params: Promise<{ pairTo
   const a = publicType(inviter.scores, recorded, inviter.id);
   const b = publicType(invitee.scores, recorded, invitee.id);
   const png = await renderPairCard({
-    a: { type: a, nickname: inviter.nickname, avatarPath: avatarImagePath(inviter) },
-    b: { type: b, nickname: invitee.nickname, avatarPath: avatarImagePath(invitee) },
+    a: { type: a, nickname: inviter.nickname, avatarPath: drawnImagePath(inviter) ?? "" },
+    b: { type: b, nickname: invitee.nickname, avatarPath: drawnImagePath(invitee) ?? "" },
     ...pairRelation(a.code, b.code),
     inviteUrl: `${baseUrl()}/t/${inviter.inviteToken}`,
     cacheTag: pairToken

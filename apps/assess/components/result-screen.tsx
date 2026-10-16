@@ -2,17 +2,16 @@
 
 import { useEffect, useRef, useState } from "react";
 import { api, type ClientErrorCode } from "../lib/api-client";
-import type { AvatarStatus, ResultView } from "../lib/contract";
+import type { ResultView } from "../lib/contract";
 import { LAST_RESULT_KEY, errorMessage } from "../lib/flow";
+import { AVATAR_POLL_MS, DrawingCard, isDrawing } from "./figure";
 import { SavableImage } from "./poster";
 import { CopyLink, ShareInvite } from "./share-invite";
 import { withName } from "../lib/names";
 import { readStored, writeStored } from "./storage";
 import { AxesList, TypeDetails, TypeHeading, groupStyle } from "./type-summary";
 
-/** How often a figure still being drawn is checked on. */
-export const AVATAR_POLL_MS = 5_000;
-export const isDrawing = (avatar: AvatarStatus): boolean => avatar.state === "queued" || avatar.state === "drawing";
+export { AVATAR_POLL_MS, isDrawing } from "./figure";
 export const DISCLAIMER = "基于自评的趣味测评，非心理诊断";
 
 const dateText = (iso: string) => { const date = new Date(iso); return Number.isNaN(date.getTime()) ? "" : `${date.getFullYear()} 年 ${date.getMonth() + 1} 月 ${date.getDate()} 日`; };
@@ -103,11 +102,14 @@ export function ResultScreen({ token }: { token: string }) {
   const mailed = view.sendEmail && view.mailOn;
   return <main className="as-main as-result" style={groupStyle(type)}>
     <TypeHeading type={type} />
-    <p className="as-note" aria-live="polite">{isDrawing(view.avatar) ? "你的专属形象正在画，画好会自动换到海报上（约 1 分钟）。"
-      : view.avatar.state === "template" ? `形象用的是${type.name}的基础角色。` : wasDrawing ? "专属形象已换上。" : ""}</p>
     {!mailed && <p className="as-done">{view.sendEmail ? "邮件暂时发不出去" : "你选了不发邮件"}：请收藏本页，或到页面底部复制结果链接，否则换了设备就找不回来。</p>}
-    <SavableImage src={view.posterUrl} alt={`${type.name} ${type.code} 的海报`} width={1080} height={1440}
-      downloadName={`crossline-${type.code}.png`} extra={{ src: view.longUrl, label: "长图", downloadName: `crossline-${type.code}-长图.png` }} />
+    {/* While the figure is drawn there is no poster yet: a waiting card, never the type's shared template (decided 2026-10-16). */}
+    {isDrawing(view.avatar) ? <DrawingCard type={type} /> : <>
+      <p className="as-note" aria-live="polite">{view.avatar.state === "template" ? "这次没有画出你的专属形象，海报上先用类型字母代替。"
+        : wasDrawing ? "专属形象画好了。" : ""}</p>
+      <SavableImage src={view.posterUrl} alt={`${type.name} ${type.code} 的海报`} width={1080} height={1440}
+        downloadName={`crossline-${type.code}.png`} extra={{ src: view.longUrl, label: "长图", downloadName: `crossline-${type.code}-长图.png` }} />
+    </>}
 
     <section className="as-block">
       <h2>拉朋友测，看你们是什么关系</h2>

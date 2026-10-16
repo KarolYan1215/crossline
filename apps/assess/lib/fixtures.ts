@@ -46,7 +46,7 @@ export function fixtureResult(token: string): ResultView {
     polls.set(token, seen);
     state = seen === 1 ? "queued" : seen <= 2 ? "drawing" : "ready";
   }
-  const bust = state === "ready" ? "已换上专属形象" : "基础形象，专属形象绘制中";
+  const bust = state === "ready" ? "已换上专属形象" : "类型字母（没有画出形象）";
   return {
     nickname: "小林", type: INVITER, avatar: avatar(INVITER, state),
     posterUrl: placeholderImage(INVITER, `海报占位 · ${bust}`),

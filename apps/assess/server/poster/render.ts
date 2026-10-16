@@ -42,15 +42,21 @@ const rule = (margin = 26) => box({ height: 2, backgroundColor: INK, marginTop: 
 export type Figure = { dataUri: string | null };
 
 /**
- * The full-length figure in a 2:3 panel of the group's tint (the templates are 2:3, a woman and a man per type); with no picture on disk,
- * the type's code in the group's colour instead.
+ * The person's drawn figure in a 2:3 panel of the group's tint; with no drawn figure (never the type's shared template, decided
+ * 2026-10-16), the four letters as a 2×2 monogram in the group's colour, an ambiguous letter faint — an emblem rather than a stand-in
+ * person.
  */
 function panel(figure: Figure, type: PublicType, width: number): El {
   const height = Math.round(width * 1.5);
+  const size = Math.round(width * 0.3);
+  const letter = (axis: PublicAxis) => box({ width: size * 1.1, justifyContent: "center" },
+    text(axis.letter, "Serif", { fontSize: size, fontWeight: 700, color: type.group.colour, opacity: axis.ambiguous ? 0.38 : 1, lineHeight: 1.1 }));
   return box({ width, height, borderRadius: 24, backgroundColor: type.group.tint, overflow: "hidden", alignItems: "center", justifyContent: "center", flexShrink: 0 },
     figure.dataUri
       ? h("img", { src: figure.dataUri, width, height, style: { width, height, objectFit: "contain" } })
-      : text(type.code, "Serif", { fontSize: width * 0.24, fontWeight: 700, color: type.group.colour, letterSpacing: 4 }));
+      : box({ flexDirection: "column", alignItems: "center" },
+        box({}, letter(type.axes[0]!), letter(type.axes[1]!)),
+        box({}, letter(type.axes[2]!), letter(type.axes[3]!))));
 }
 
 /** The four letters, each the group's colour; a letter within ten of the middle (both plausible) is drawn faint. */
