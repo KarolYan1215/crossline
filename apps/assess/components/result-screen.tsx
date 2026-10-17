@@ -147,12 +147,12 @@ export function ResultScreen({ token }: { token: string }) {
       <h2>把这三条线真的跑起来</h2>
       <p>Crossline 把你同时推进的几条线拆成里程碑，排进同一份日程，每天告诉你先做哪件；做完的东西留作证据，能看见每条线走了多远。</p>
       {view.appUrl ? <>
-        <p className="as-note">内测现在开放，免费，名额有限。用你在这里留的邮箱登录，这份结果会自动带进 App，作为访谈的起点。</p>
+        <p className="as-note">内测现在开放，免费，注册即可使用。用你在这里留的邮箱登录，这份结果会自动带进 App，作为访谈的起点。</p>
         <ol className="as-steps">
-          <li><b>准备一个能用 Codex 的 ChatGPT 账号。</b>App 用你自己的 ChatGPT 额度做访谈和规划，不需要另付费用。</li>
-          <li><b>在 ChatGPT 打开一项设置（只需一次）。</b>ChatGPT 网页版 → 设置 → 安全 → 开启「为 Codex、Excel、PowerPoint 和 Word 启用设备代码登录」。不开的话，第 4 步的代码会被拒绝。</li>
+          <li><b>准备一个能用 Codex 的 ChatGPT 账号，或一个模型 API key。</b>App 用你自己的 ChatGPT 额度或 API 做访谈和规划，不向你收费。</li>
+          <li><b>用 ChatGPT 的话，先打开一项设置（只需一次）。</b>ChatGPT 网页版 → 设置 → 安全 → 开启「为 Codex、Excel、PowerPoint 和 Word 启用设备代码登录」。不开的话，第 4 步的代码会被拒绝。</li>
           <li><b>打开 App，用邮箱验证码登录。</b>第一次登录就是注册，不用设密码。</li>
-          <li><b>连接你的 ChatGPT。</b>页面会给一串一次性代码，在 OpenAI 的页面登录你的账号并输入它，几秒后显示「已连接」。</li>
+          <li><b>连接模型。</b>用 ChatGPT：页面会给一串一次性代码，在 OpenAI 的页面登录并输入它，几秒后显示「已连接」；用 API：选模型、填入 key，检测通过后即可使用。服务器忙时会排队，稍等即可。</li>
           <li><b>和 AI 做一次深度访谈。</b>先把简历、课表、课程大纲拖进去，约 30 分钟得到一份全面的 AI 时代超级个体跨人生主线报告和跨主线排程计划。</li>
         </ol>
         <a className="as-button as-primary" href={view.appUrl} target="_blank" rel="noreferrer">打开 Crossline →</a>
