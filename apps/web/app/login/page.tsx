@@ -27,7 +27,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
       <p className="login-privacy">{process.env.CROSSLINE_PUBLIC_BETA === "1"
         ? <span>每个账号的资料和 ChatGPT 登录各自隔离，不与其他账号共享；模型用本人的 ChatGPT 额度。退出登录即删除这台服务器上的 ChatGPT 登录。<a href="/privacy">隐私说明</a></span>
         : "资料和本人的 ChatGPT 登录都保存在运行这个 Crossline 的电脑上，只能通过私有网络访问；模型用本人的 ChatGPT 额度。"}</p>
-      {process.env.ASSESS_BASE_URL?.startsWith("https://") && <p className="login-privacy">还没做过测评？<a href={process.env.ASSESS_BASE_URL}>先做 4 分钟的思维模式测评 →</a>
+      {process.env.ASSESS_BASE_URL?.startsWith("https://") && <p className="login-privacy">还没做过测评？<a href={process.env.ASSESS_BASE_URL}>先做约 5 分钟的思维模式测评 →</a>
         用同一个邮箱登录，测评结果会带进访谈。</p>}
   </AuthLayout>;
 }
