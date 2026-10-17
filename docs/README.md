@@ -21,6 +21,7 @@
 | [assess-deploy.md](assess-deploy.md) | 公开速测 `apps/assess`（32 题类型、类型海报、双人卡）：接口与规则、数据与保留期、邮件、Docker 构建、部署到香港/东京 VPS（未部署） |
 | [assess-redesign.md](assess-redesign.md) | 公开速测重设计提案（2026-10-17，待拍板）：四条对立轴的问题、调研来源、方案 A/B/C 对比、推荐方案 B（八个倾向单极测量、双极呈现）的新题草稿与迁移清单 |
 | [local-installer.md](local-installer.md) | 本机安装版（给内测者，不 clone 代码、用自己的 ChatGPT 额度）：目录结构、启动器与托盘、Codex 登录、使用记录回传与诊断快照、更新、已知限制与工作包 |
+| [walkthrough-ledger.md](walkthrough-ledger.md) | 内测走查账本：以内测用户身份走查线上站点时已走过哪些路径、还有哪些没走、每次的发现与修复状态（走查前先读，只走没走过或改过的） |
 | [onboarding-v3.md](onboarding-v3.md) | 登录页与访谈页 v3：安装版走查的审查发现，三栏访谈、引导开场、语气选择、混合节奏、iCal 订阅与授权文件夹，各阶段进展（2026-10-14） |
 | [calendar-write-setup.md](calendar-write-setup.md) | Crossline 日历的写入授权（只写名为 Crossline 的日历），以及分享到 Google 日历 |
 | [setup-google-oauth.md](setup-google-oauth.md) | 开启「用 Google 账号登录」的一次性配置 |
