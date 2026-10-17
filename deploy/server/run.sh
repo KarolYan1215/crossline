@@ -24,12 +24,14 @@ fi
 # The safeguards do not change with it: hard ceilings without swap, the worker's 75% high-water mark, queues that wait instead of
 # refusing. Measured on the 1.6 GB host: a guest Codex process holds ~130 MB idle and more during a turn, the worker ~170 MB of its own,
 # a page render up to ~70 MB, the test 168 MB with 25 people at once. Two CPUs bound the page renders more than memory does.
-#   ≥ 3.2 GB: worker 1500m (4 model runs, 4 guest runtimes), web 700m (3 renders), assess 450m (3 posters) — 2.65 GB, 850 MB free
+#   ≥ 3.2 GB: worker 1750m (5 model runs, 5 guest runtimes), web 650m (3 renders), assess 450m (3 posters) — 2.85 GB of the 3499 MB
+#             MemTotal; idle, the system itself (docker, Caddy, the cloud agent) held ~590 MB, and it keeps an 8 GB swap file the containers
+#             may not use. The fifth runtime was the owner's call on 2026-10-17; web gave back 50 MB (its renders peak near 330 MB)
 #   below:    worker 550m (2, 2), web 400m (2), assess 300m (2) — 1.25 GB on the 1.6 GB host
 host_mb=$(awk '/^MemTotal:/ { print int($2 / 1024) }' /proc/meminfo)
 if [ "${host_mb:-0}" -ge 3200 ]; then
-  assess_mem=450m; assess_heap=320; web_mem=700m; web_heap=500; worker_mem=1500m; worker_heap=384
-  model_runs=4; guest_runtimes=4; web_renders=3; posters=3
+  assess_mem=450m; assess_heap=320; web_mem=650m; web_heap=480; worker_mem=1750m; worker_heap=384
+  model_runs=5; guest_runtimes=5; web_renders=3; posters=3
 else
   assess_mem=300m; assess_heap=224; web_mem=400m; web_heap=300; worker_mem=550m; worker_heap=280
   model_runs=2; guest_runtimes=2; web_renders=2; posters=2
