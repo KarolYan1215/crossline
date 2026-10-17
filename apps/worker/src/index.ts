@@ -2,7 +2,7 @@ import { get } from "node:http";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { configureModelGate, enterUsageWorkspace, modelGateStatus, setProviderResolver, setSpendModeProvider, setUsageSink, startCodexSupervisor, startModelGateway, type CodexSupervisor } from "@crossline/codex";
+import { configureModelGate, enterUsageWorkspace, guestRuntimeLimit, modelGateStatus, setProviderResolver, setSpendModeProvider, setUsageSink, startCodexSupervisor, startModelGateway, type CodexSupervisor } from "@crossline/codex";
 import { containerMemory, containerPeak } from "./memory";
 import { createDpapiSecretStore } from "@crossline/connectors";
 import { createModelProviderService } from "./model-provider";
@@ -1056,11 +1056,11 @@ if (!capabilitySecret) {
       requiredSkills: REQUIRED_SKILLS
     },
     // Every account but the machine owner's runs on its own Codex (runtime-registry.ts), in its own home beside the owner's.
-    // On the hosted beta's 1.6 GB server two other accounts at a time keep a runtime (two model runs at a time, model-gate.ts), stopped
-    // after ten quiet minutes or when a third account needs one and it has been quiet 15 s (never while a run is in flight; the third
-    // waits); elsewhere three and half an hour.
+    // On the hosted beta as many other accounts at a time keep a runtime as model runs may go at once (`guestRuntimeLimit`: 2 on the
+    // 1.6 GB host, 4 on the 3.5 GB one, set by deploy/server/run.sh), stopped after ten quiet minutes or when one more account needs
+    // one and it has been quiet 15 s (never while a run is in flight; the newcomer waits); elsewhere three and half an hour.
     runtimes: { baseDir: runtimesDir(), ownerWorkspaceId: () => runtimeOwner(analysisStore), hasProvider: (workspaceId) => modelProviders.hasProvider(workspaceId),
-      ...(hostedBeta ? { maxRunning: 2, idleMs: 10 * 60_000 } : {}) },
+      ...(hostedBeta ? { maxRunning: guestRuntimeLimit() ?? 2, idleMs: 10 * 60_000 } : {}) },
     modelProviders: { handle: (method, pathname, workspaceId, body) => modelProviders.handle(method, pathname, workspaceId, body),
       cost: (workspaceId) => modelProviders.cost(workspaceId) },
     monthSpend: (workspaceId) => monthSpend(analysisStore, workspaceId),

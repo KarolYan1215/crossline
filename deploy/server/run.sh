@@ -20,6 +20,26 @@ else
   if [ "$want" != assess ]; then pull "$app_image"; fi
 fi
 
+# Ceilings and how many things run at once follow the host's memory (the owner moved to a 3.5 GB host on 2026-10-17; 2 CPUs as before).
+# The safeguards do not change with it: hard ceilings without swap, the worker's 75% high-water mark, queues that wait instead of
+# refusing. Measured on the 1.6 GB host: a guest Codex process holds ~130 MB idle and more during a turn, the worker ~170 MB of its own,
+# a page render up to ~70 MB, the test 168 MB with 25 people at once. Two CPUs bound the page renders more than memory does.
+#   ≥ 3.2 GB: worker 1500m (4 model runs, 4 guest runtimes), web 700m (3 renders), assess 450m (3 posters) — 2.65 GB, 850 MB free
+#   below:    worker 550m (2, 2), web 400m (2), assess 300m (2) — 1.25 GB on the 1.6 GB host
+host_mb=$(awk '/^MemTotal:/ { print int($2 / 1024) }' /proc/meminfo)
+if [ "${host_mb:-0}" -ge 3200 ]; then
+  assess_mem=450m; assess_heap=320; web_mem=700m; web_heap=500; worker_mem=1500m; worker_heap=384
+  model_runs=4; guest_runtimes=4; web_renders=3; posters=3
+else
+  assess_mem=300m; assess_heap=224; web_mem=400m; web_heap=300; worker_mem=550m; worker_heap=280
+  model_runs=2; guest_runtimes=2; web_renders=2; posters=2
+fi
+echo "host ${host_mb} MB: worker ${worker_mem}, web ${web_mem}, assess ${assess_mem}; ${model_runs} model runs, ${guest_runtimes} guest runtimes, ${web_renders} renders"
+# A value set by hand in the env file wins over the profile: `-e` would override `--env-file`, so it is passed only when the file lacks it.
+default_env() { # file key value
+  grep -q "^$2=." "$1" 2>/dev/null || printf -- '-e %s=%s ' "$2" "$3"
+}
+
 start() {
   name="$1"; shift
   docker rm -f "$name" >/dev/null 2>&1 || true
@@ -30,8 +50,8 @@ start() {
 if [ "$want" = all ] || [ "$want" = assess ]; then
   # The quick test is what many people use at once: the largest share after the worker, and a heap ceiling under it so a burst of
   # posters and figures is collected before the container is near its limit.
-  start assess --env-file /srv/assess/assess.env -v /srv/assess/data:/data -p 127.0.0.1:3340:3340 --memory 300m --memory-swap 300m \
-    -e NODE_OPTIONS=--max-old-space-size=224 "$assess_image"
+  start assess --env-file /srv/assess/assess.env -v /srv/assess/data:/data -p 127.0.0.1:3340:3340 --memory $assess_mem --memory-swap $assess_mem \
+    $(default_env /srv/assess/assess.env ASSESS_RENDER_CONCURRENCY $posters) -e NODE_OPTIONS=--max-old-space-size=$assess_heap "$assess_image"
 fi
 # The web app and the worker share the host's network (they talk on 127.0.0.1, as on the owner's machine) and one data/state volume.
 # Every container has a memory ceiling with no swap beyond it: on 2026-10-16 milestone design, a portrait rewrite and a figure ran at
@@ -46,7 +66,8 @@ if [ "$want" = all ] || [ "$want" = web ]; then
   # Through apps/web/queue-server.mjs when the image has it: page renders wait in line (four at a time) instead of all holding memory.
   web_cmd="node_modules/.bin/next start --hostname 127.0.0.1 --port 3210"
   if docker run --rm --entrypoint test "$app_image" -f /repo/apps/web/queue-server.mjs; then web_cmd="node queue-server.mjs --hostname 127.0.0.1 --port 3210"; fi
-  start crossline-web --network host --env-file /srv/crossline/app.env --memory 400m --memory-swap 400m -e NODE_OPTIONS=--max-old-space-size=300 \
+  start crossline-web --network host --env-file /srv/crossline/app.env --memory $web_mem --memory-swap $web_mem -e NODE_OPTIONS=--max-old-space-size=$web_heap \
+    $(default_env /srv/crossline/app.env CROSSLINE_WEB_CONCURRENCY $web_renders) \
     -v /srv/crossline/data:/data -v /srv/crossline/state:/state -v /srv/crossline/codex:/opt/codex:ro \
     -w /repo/apps/web "$app_image" $web_cmd
 fi
@@ -59,7 +80,8 @@ if [ "$want" = all ] || [ "$want" = worker ]; then
   # live outside the Node heap, so the heap gets well under half the container.
   worker_cmd="/repo/node_modules/.bin/tsx src/index.ts"
   if docker run --rm --entrypoint test "$app_image" -f /repo/apps/worker/dist/index.mjs; then worker_cmd="node dist/index.mjs"; fi
-  start crossline-worker --network host --env-file /srv/crossline/app.env --memory 550m --memory-swap 550m -e NODE_OPTIONS=--max-old-space-size=280 \
+  start crossline-worker --network host --env-file /srv/crossline/app.env --memory $worker_mem --memory-swap $worker_mem -e NODE_OPTIONS=--max-old-space-size=$worker_heap \
+    $(default_env /srv/crossline/app.env CROSSLINE_MODEL_CONCURRENCY $model_runs) $(default_env /srv/crossline/app.env CROSSLINE_GUEST_RUNTIMES $guest_runtimes) \
     -v /srv/crossline/data:/data -v /srv/crossline/state:/state -v /srv/crossline/codex:/opt/codex:ro \
     -w /repo/apps/worker "$app_image" $worker_cmd
 fi

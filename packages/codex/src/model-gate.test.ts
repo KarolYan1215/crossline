@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "vitest";
-import { clientBusy, configureModelGate, interactiveReserve, markClientBusy, modelGateLimit, priorityForSkill, resetModelGate, withModelSlot } from "./model-gate";
+import { clientBusy, configureModelGate, guestRuntimeLimit, interactiveReserve, markClientBusy, modelGateLimit, priorityForSkill, resetModelGate, withModelSlot } from "./model-gate";
 
 afterEach(() => resetModelGate());
 
@@ -11,6 +11,11 @@ test("the hosted beta runs two model turns at a time; elsewhere there is no limi
   expect(modelGateLimit({})).toBe(Number.POSITIVE_INFINITY);
   expect(modelGateLimit({ CROSSLINE_PUBLIC_BETA: "1", CROSSLINE_MODEL_CONCURRENCY: "1" })).toBe(1);
   expect(priorityForSkill("crossline:crossline-onboarding")).toBe("interactive");
+  // Guest runtimes follow the model slots on the hosted beta unless set themselves (the 4 GB host sets both to 4).
+  expect(guestRuntimeLimit({ CROSSLINE_PUBLIC_BETA: "1" })).toBe(2);
+  expect(guestRuntimeLimit({ CROSSLINE_PUBLIC_BETA: "1", CROSSLINE_MODEL_CONCURRENCY: "4" })).toBe(4);
+  expect(guestRuntimeLimit({ CROSSLINE_PUBLIC_BETA: "1", CROSSLINE_MODEL_CONCURRENCY: "4", CROSSLINE_GUEST_RUNTIMES: "3" })).toBe(3);
+  expect(guestRuntimeLimit({})).toBeUndefined();
   expect(priorityForSkill("crossline:crossline-milestone-architect")).toBe("background");
 });
 

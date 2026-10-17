@@ -28,6 +28,16 @@ export function modelGateLimit(env: NodeJS.ProcessEnv = process.env): number {
   return env.CROSSLINE_PUBLIC_BETA === "1" ? 2 : Number.POSITIVE_INFINITY;
 }
 
+/**
+ * Other accounts' Codex processes kept up at once on the hosted beta (`CROSSLINE_GUEST_RUNTIMES`): as many as model runs may go at once,
+ * so a free model slot is never left idle for want of a runtime. Undefined elsewhere (the registry's own default).
+ */
+export function guestRuntimeLimit(env: NodeJS.ProcessEnv = process.env): number | undefined {
+  const raw = Number(env.CROSSLINE_GUEST_RUNTIMES);
+  if (Number.isInteger(raw) && raw > 0) return raw;
+  return env.CROSSLINE_PUBLIC_BETA === "1" ? modelGateLimit(env) : undefined;
+}
+
 export function interactiveReserve(env: NodeJS.ProcessEnv = process.env): number {
   const raw = Number(env.CROSSLINE_MODEL_INTERACTIVE_RESERVE);
   if (env.CROSSLINE_MODEL_INTERACTIVE_RESERVE?.trim() && Number.isInteger(raw) && raw >= 0) return raw;

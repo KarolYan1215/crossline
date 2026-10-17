@@ -250,7 +250,10 @@ describe("what the pages and posters are given", () => {
   test("every type has a woman's and a man's template PNG on disk, full length 2:3", () => {
     for (const code of ["SEMP", "SEMA", "SERP", "SERA", "SIMP", "SIMA", "SIRP", "SIRA", "GEMP", "GEMA", "GERP", "GERA", "GIMP", "GIMA", "GIRP", "GIRA"]) {
       for (const variant of ["female", "male"] as const) {
-        const png = fs.readFileSync(templateImagePath(code, variant));
+        // Only the header: the 32 templates are ~55 MB, and reading them whole timed this test out under a full parallel run.
+        const png = Buffer.alloc(24);
+        const fd = fs.openSync(templateImagePath(code, variant), "r");
+        try { fs.readSync(fd, png, 0, 24, 0); } finally { fs.closeSync(fd); }
         expect(png.subarray(1, 4).toString()).toBe("PNG");
         expect(png.readUInt32BE(20) / png.readUInt32BE(16)).toBeCloseTo(1.5, 2);
       }
