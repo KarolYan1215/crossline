@@ -31,9 +31,11 @@ RUN set -e; out=apps/assess/.next/standalone/apps/assess; \
 FROM node:22-bookworm-slim AS run
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 HOSTNAME=0.0.0.0 PORT=3340 ASSESS_DATA_DIR=/data
 WORKDIR /app
-# The code stays root-owned and read-only to the server; only /data (the SQLite file and the drawn figures) is writable.
+# The code stays root-owned and read-only to the server; only /data (the SQLite file and the drawn figures) and Next's own cache
+# directory are writable. Next creates `.next/cache` on first use (the image optimizer, the fetch cache); with the folder root-owned
+# every start logged an unhandled `EACCES: mkdir '/app/apps/assess/.next/cache'` (found 2026-10-17).
 COPY --from=build /repo/apps/assess/.next/standalone ./
-RUN mkdir -p /data && chown node:node /data
+RUN mkdir -p /data /app/apps/assess/.next/cache && chown node:node /data /app/apps/assess/.next/cache
 USER node
 VOLUME /data
 EXPOSE 3340

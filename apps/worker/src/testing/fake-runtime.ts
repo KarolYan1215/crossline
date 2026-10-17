@@ -29,7 +29,7 @@ export type AgentScript = (tools: {
   ask: (method: string, params: Record<string, unknown>) => Promise<Record<string, unknown>>;
 }) => Promise<void>;
 
-export function fakeRuntime(answers: Array<string | ((prompts: string[]) => string)>, skillName: string, options: { lostThreads?: string[]; delayMs?: number; stallTurns?: number[];
+export function fakeRuntime(answers: Array<string | ((prompts: string[]) => string)>, skillName: string, options: { lostThreads?: string[]; unloadedThreads?: string[]; delayMs?: number; stallTurns?: number[];
   /** As the real runtime does: an interrupted turn then reports `turn/completed` with status `interrupted`, right away. */
   completeOnInterrupt?: boolean; usage?: { input: number; cached?: number; output: number; reasoning?: number };
   /** What the runtime does during a turn before it answers: tool items, and requests the client has to answer. */
@@ -46,8 +46,15 @@ export function fakeRuntime(answers: Array<string | ((prompts: string[]) => stri
   configCalls: () => Array<{ method: string; params: Record<string, unknown> }>;
   /** Threads the runner let go of (`thread/unsubscribe`), in order. */
   unsubscribed: () => string[];
+  /** Threads the runner subscribed to again (`thread/resume`), in order. */
+  resumes: () => string[];
 } {
   const unsubscribed: string[] = [];
+  const resumes: string[] = [];
+  // As the real runtime does: a connection gets a thread's events only while subscribed (thread/start, thread/resume); a turn
+  // started on a thread it unsubscribed from still runs, silently.
+  const subscribed = new Set<string>();
+  const startedThreads: string[] = [];
   let turns = 0;
   let interrupts = 0;
   let threads = 0;
@@ -67,7 +74,15 @@ export function fakeRuntime(answers: Array<string | ((prompts: string[]) => stri
       return;
     }
     // Counted per thread, not per turn — that conflation is the bug this helper exists to fix.
-    if (request.method === "thread/start") { threadId = `thread-${(threads += 1)}`; starts.push(request.params ?? {}); }
+    if (request.method === "thread/start") { threadId = `thread-${(threads += 1)}`; starts.push(request.params ?? {}); subscribed.add(threadId); startedThreads.push(threadId); }
+    if (request.method === "thread/resume") {
+      const id = String(request.params?.threadId);
+      if (options.lostThreads?.includes(id)) {
+        queueMicrotask(() => rpc.receiveLine(JSON.stringify({ id: request.id, error: { code: -32600, message: `thread not found: ${id}` } })));
+        return;
+      }
+      resumes.push(id); subscribed.add(id);
+    }
     if (request.method === "turn/start" && options.lostThreads?.includes(String(request.params?.threadId))) {
       queueMicrotask(() => rpc.receiveLine(JSON.stringify({ id: request.id, error: { code: -32600, message: `thread not found: ${String(request.params?.threadId)}` } })));
       return;
@@ -77,7 +92,7 @@ export function fakeRuntime(answers: Array<string | ((prompts: string[]) => stri
       if (options.completeOnInterrupt) queueMicrotask(() => rpc.receiveLine(JSON.stringify({ method: "turn/completed",
         params: { threadId, turn: { id: String(request.params?.turnId), status: "interrupted" } } })));
     }
-    if (request.method === "thread/unsubscribe") unsubscribed.push(String(request.params?.threadId));
+    if (request.method === "thread/unsubscribe") { unsubscribed.push(String(request.params?.threadId)); subscribed.delete(String(request.params?.threadId)); }
     if (request.method === "skills/config/write" || request.method === "plugin/install") configCalls.push({ method: request.method, params: request.params ?? {} });
     if (request.method === "skills/config/write" && libraryEnabled.has(String(request.params?.path))) libraryEnabled.set(String(request.params?.path), request.params?.enabled === true);
     const result = request.method === "skills/list"
@@ -86,6 +101,8 @@ export function fakeRuntime(answers: Array<string | ((prompts: string[]) => stri
       : request.method === "skills/config/write" ? { effectiveEnabled: request.params?.enabled === true }
       : request.method === "account/read" ? { account: { type: "chatgpt" } }
       : request.method === "config/read" ? { config: {} }
+      : request.method === "thread/loaded/list" ? { data: startedThreads.filter((id) => !options.lostThreads?.includes(id) && !options.unloadedThreads?.includes(id)), nextCursor: null }
+      : request.method === "thread/resume" ? { thread: { id: String(request.params?.threadId) } }
       : request.method === "thread/start"
         ? { thread: { id: threadId }, approvalPolicy: "untrusted", sandbox: { type: "readOnly" }, instructionSources: [], ...(options.threadResponse ?? {}) }
         : { turn: { id: `turn-${turns + 1}`, status: "inProgress" } };
@@ -98,6 +115,8 @@ export function fakeRuntime(answers: Array<string | ((prompts: string[]) => stri
       prompts.push(Array.isArray(input) ? String((input[0] as { text?: unknown })?.text ?? "") : "");
       // A hung backend: the turn starts and then nothing, ever, comes back for it.
       if (options.stallTurns?.includes(turns)) return;
+      // A turn on a thread this connection unsubscribed from runs, but none of its events reach the connection.
+      if (!subscribed.has(String(request.params?.threadId))) return;
       const entry = answers[turns - 1] ?? answers[answers.length - 1]!;
       // A function sees every prompt so far, for an answer that has to quote something only the run itself produced (a generated id).
       const text = typeof entry === "function" ? entry([...prompts]) : entry;
@@ -126,7 +145,7 @@ export function fakeRuntime(answers: Array<string | ((prompts: string[]) => stri
     }
   });
   return { rpc, turns: () => turns, prompts: () => prompts, interrupts: () => interrupts, threadStarts: () => starts, configCalls: () => configCalls,
-    unsubscribed: () => unsubscribed };
+    unsubscribed: () => unsubscribed, resumes: () => resumes };
 }
 
 const FIXTURES = path.join(import.meta.dirname, "fixtures");

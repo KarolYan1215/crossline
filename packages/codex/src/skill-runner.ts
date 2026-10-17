@@ -696,6 +696,8 @@ async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, con
         if (audit.threadId && audit.turnId) void client.request("turn/interrupt", { threadId: audit.threadId, turnId: audit.turnId }).catch(() => {});
         audit.stalls = (audit.stalls ?? 0) + 1;
         run.onAudit({ ...audit });
+        // A resent turn is the one thing a person feels as a long wait; the log says so, so the cause can be read without guessing.
+        console.log(JSON.stringify({ type: "skill.stalled", skill: run.skillName, stalls: audit.stalls, idleMinutes: Math.round(idleMs / 60_000) }));
       }
     }
   };
@@ -782,6 +784,7 @@ export function continueSkillTurn<T>(client: CodexRpcBoundary, threadId: string,
     const unregister = options.tools ? registerAgentThread(client, threadId, toolAnswerer(options.tools)) : undefined;
     try {
       await requireLogin(scope, context);
+      await resubscribe(client, scope, threadId);
       const output = await runTurnsUntilValid(client, scope, context, audit, {
         skillName: options.skillName, threadId, outputSchema: options.outputSchema,
         allowedItemTypes: ["agentMessage", "reasoning", "userMessage", ...(options.tools ? ["dynamicToolCall"] : [])],
@@ -810,6 +813,13 @@ export function runCodexSkill<T>(client: CodexRpcBoundary, input: unknown, optio
  */
 export const THREAD_KEEP_MS = Math.max(60_000, (Number(process.env.CROSSLINE_THREAD_KEEP_MINUTES) || 10) * 60_000);
 const releaseTimers = new WeakMap<object, Map<string, ReturnType<typeof setTimeout>>>();
+/** Threads this client unsubscribed from: a later turn on one must subscribe again first (`resubscribe`). */
+const releasedThreads = new WeakMap<object, Set<string>>();
+function releasedOf(client: CodexRpcBoundary): Set<string> {
+  let released = releasedThreads.get(client);
+  if (!released) { released = new Set(); releasedThreads.set(client, released); }
+  return released;
+}
 function timersOf(client: CodexRpcBoundary): Map<string, ReturnType<typeof setTimeout>> {
   let timers = releaseTimers.get(client);
   if (!timers) { timers = new Map(); releaseTimers.set(client, timers); }
@@ -826,6 +836,7 @@ export function releaseThread(client: CodexRpcBoundary, threadId: string, afterM
   holdThread(client, threadId);
   const release = () => {
     timersOf(client).delete(threadId);
+    releasedOf(client).add(threadId);
     // Best effort: a runtime that is gone or restarted has unloaded the thread already.
     void Promise.resolve().then(() => client.request("thread/unsubscribe", { threadId })).catch(() => undefined);
   };
@@ -833,6 +844,32 @@ export function releaseThread(client: CodexRpcBoundary, threadId: string, afterM
   const timer = setTimeout(release, afterMs);
   (timer as { unref?: () => void }).unref?.();
   timersOf(client).set(threadId, timer);
+}
+
+/**
+ * Subscribes this client to a thread it let go of, before another turn on it (found on the hosted beta, 2026-10-17). An unsubscribed
+ * thread stays loaded until the runtime's idle unload, and `turn/start` on it runs — but the runtime sends this connection none of the
+ * turn's events, since only `thread/start` and `thread/resume` attach a listener. An interview round sent eleven minutes after the
+ * previous one sat silent until the 20-minute stall check resent it, and the person waited 26 minutes for an answer the model had
+ * long finished. A thread that is still loaded is resumed (warm, keeping the settings it was started with); one the runtime has
+ * already unloaded is reported lost, so the caller rebuilds it from the conversation (`SKILL_THREAD_LOST`) instead of a cold resume
+ * that would not carry those settings.
+ */
+async function resubscribe(client: CodexRpcBoundary, scope: Scope, threadId: string): Promise<void> {
+  const released = releasedOf(client);
+  if (!released.has(threadId)) return;
+  let loaded = false;
+  let cursor: string | undefined;
+  for (let page = 0; page < 10 && !loaded; page += 1) {
+    const listed = record(await scope.rpc("thread/loaded/list", cursor ? { cursor } : {}));
+    const ids = Array.isArray(listed?.data) ? listed.data : [];
+    loaded = ids.includes(threadId);
+    cursor = typeof listed?.nextCursor === "string" && listed.nextCursor ? listed.nextCursor : undefined;
+    if (!cursor) break;
+  }
+  if (!loaded) { released.delete(threadId); throw new Error(`thread not found: ${threadId}`); }
+  await scope.rpc("thread/resume", { threadId, excludeTurns: true });
+  released.delete(threadId);
 }
 
 async function runSkillTurn<T>(client: CodexRpcBoundary, input: unknown, requested: SkillRunOptions<T>, context: RunContext): Promise<SkillRunResult<T>> {
