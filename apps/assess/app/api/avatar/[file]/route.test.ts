@@ -24,13 +24,13 @@ afterEach(() => {
 const get = (file: string, query = "") => GET(new Request(`http://127.0.0.1:3340/api/avatar/${file}${query}`), { params: Promise.resolve({ file }) });
 
 test("a figure still drawing is served as its type's template, revalidated every time", async () => {
-  vi.mocked(getResultByInvite).mockReturnValue(storedResult({ code: "SEMP", avatar: { state: "drawing", file: "" } }));
+  vi.mocked(getResultByInvite).mockReturnValue(storedResult({ code: "CLWU", avatar: { state: "drawing", file: "" } }));
   const response = await get("inv_public_token_0001.png");
   expect(response.status).toBe(200);
   expect(response.headers.get("content-type")).toBe("image/png");
   expect(response.headers.get("cache-control")).toMatch(/max-age=0/);
   // Buffer.equals: toEqual walks a 1.7 MB template byte by byte and runs past the test timeout.
-  expect(Buffer.from(await response.arrayBuffer()).equals(fs.readFileSync(templateImagePath("SEMP")))).toBe(true);
+  expect(Buffer.from(await response.arrayBuffer()).equals(fs.readFileSync(templateImagePath("CLWU")))).toBe(true);
   expect(getResultByInvite).toHaveBeenCalledWith("inv_public_token_0001");
 });
 
@@ -53,10 +53,10 @@ test("an unknown token, a malformed name or a path is a 404", async () => {
 });
 
 test("?size=small answers the figure 360 wide; a template's copy is cached, a drawn figure's is not", async () => {
-  vi.mocked(getResultByInvite).mockReturnValue(storedResult({ code: "SEMP", avatar: { state: "drawing", file: "" } }));
+  vi.mocked(getResultByInvite).mockReturnValue(storedResult({ code: "CLWU", avatar: { state: "drawing", file: "" } }));
   const small = Buffer.from(await (await get("inv_public_token_0001.png", "?size=small")).arrayBuffer());
   expect(small.readUInt32BE(16)).toBe(360);
-  expect(small.length).toBeLessThan(fs.statSync(templateImagePath("SEMP")).size / 4);
+  expect(small.length).toBeLessThan(fs.statSync(templateImagePath("CLWU")).size / 4);
   expect(fs.readdirSync(path.join(dir, "thumbs"))).toHaveLength(1);
   fs.mkdirSync(path.join(dir, "avatars"));
   fs.writeFileSync(path.join(dir, "avatars", "res_0001.png"), TINY_PNG);

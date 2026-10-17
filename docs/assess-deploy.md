@@ -55,7 +55,7 @@
 加入内测的人用同一个邮箱登录 Crossline App 后，App 在服务器之间取回这份速测结果，作为访谈的上下文。契约在 `packages/core/src/assess-link.ts`（经 `@crossline/core/assess` 导出）：
 
 - 请求：`POST <ASSESS_BASE_URL>/api/link`，头 `Authorization: Bearer <ASSESS_LINK_SECRET>`，正文 `{"email": "…"}`。
-- 回答 `AssessLinkResponse`：`{found:false}`，或 `{found:true, code, typeName, group, axes:{scope,basis,output,rhythm}, takenAt, resultUrl?, figureUrl?}`。`group` 是组别代码（`SE`/`SI`/`GE`/`GI`）；`resultUrl` 是本人的结果页，`figureUrl` 是形象缩略图（`/api/avatar/<邀请令牌>.png?size=small`，360 宽），两者都是绝对地址，只在设了 `ASSESS_BASE_URL` 时给出。不返回外貌、署名、答案，也不涉及任何其他人。App 用 `parseAssessLinkResponse` 校验后再用。
+- 回答 `AssessLinkResponse`：`{found:false}`，或 `{found:true, code, typeName, group, axes:{concentration,orientation,boundary,pacing}, takenAt, resultUrl?, figureUrl?}`。`group` 是组别代码（`CL`/`CX`/`DL`/`DX`）；`resultUrl` 是本人的结果页，`figureUrl` 是形象缩略图（`/api/avatar/<邀请令牌>.png?size=small`，360 宽），两者都是绝对地址，只在设了 `ASSESS_BASE_URL` 时给出。不返回外貌、署名、答案，也不涉及任何其他人。App 用 `parseAssessLinkResponse` 校验后再用。
 - 查的是该邮箱**最近一份未过期**的结果；因为同一邮箱只保留最新一次，这也是它唯一的一份。删除或过期后永远是 `{found:false}`。
 - App 只能用本人验证过的邮箱来查：回答属于邮箱的主人，`resultUrl` 还能删除这份结果。
 - **`ASSESS_LINK_SECRET`**：两台服务器共享的一串随机密钥，用来证明请求来自 App。生成：`openssl rand -base64 32`；在测评的 `assess.env` 和 App 的环境里各设一次同样的值。没设时 `/api/link` 返回 404，等于没有这个接口。密钥按 SHA-256 后常量时间比较。错误密钥 401；每个 IP 每分钟 60 次（错误密钥也计数），超出 429。换密钥：两边同时改、重启。

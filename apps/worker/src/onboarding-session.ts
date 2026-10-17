@@ -3,7 +3,7 @@ import {
   AGENT_HISTORY_SUMMARY, agentHistoryLines, type AgentHistorySummary,
   EMPTY_PROFILE_MODEL, GOAL_EDITS_SETTING, ONBOARDING_TURN_SCHEMA, duplicateAttributes, type PendingGoalEdit, type StoredLineProfile, PROFILE_CONFIRMED, portraitFingerprint, answeredGapFacts, keepOnboardingTurn, droppedOnboardingItems, ONBOARDING_KEEP_EARLY_MAX, mergeFacts, sanitizeDateExtraction, validateOnboardingTurn,
   gapCoveredBy, screenQuestions, screenAssumption, mergeDateExtractions, withoutDecidedDates, withoutOffHours, resolveAvailability, AVAILABILITY_SETTING, AVAILABILITY_PROPOSED_SETTING, type DateExtraction,
-  type ProfileGap, type ProfileModel, type OnboardingStage, DEEP_STAGES, ONBOARDING_TONE_SETTING, ASSESS_RESULT_SETTING, readTone,
+  type ProfileGap, type ProfileModel, type OnboardingStage, DEEP_STAGES, ONBOARDING_TONE_SETTING, ASSESS_RESULT_SETTING, TYPE_TABLE, readTone,
   type KnownSources, type OnboardingTurn, type OnboardingTurnContext, ONBOARDING_PROGRESS_SETTING, readPartialTurn, type OnboardingProgress, calendarWeek
 } from "@crossline/core";
 import { continueSkillTurn, runCodexSkill, type CodexRpcBoundary, type SkillProgress } from "@crossline/codex";
@@ -315,9 +315,10 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       try {
         const kept = JSON.parse(store.getSetting(workspaceId, ASSESS_RESULT_SETTING) ?? "null") as { source?: string; code?: string; typeName?: string;
           axes?: Record<string, number>; takenAt?: string } | null;
-        return kept?.source === "public-assess" && kept.code && kept.typeName && kept.axes && kept.takenAt
+        // Only a result on the current four dimensions (a code of `TYPE_TABLE`); one kept from the first version is left out.
+        return kept?.source === "public-assess" && kept.code && TYPE_TABLE[kept.code] && kept.typeName && kept.axes && kept.takenAt
           ? { code: kept.code, typeName: kept.typeName, axes: kept.axes, takenAt: kept.takenAt,
-            note: "本人在公开测评（32 题自评）中的结果，由本人确认带入；只作佐证，画像四轴仍按访谈证据评分，不照抄" } : undefined;
+            note: "本人在公开测评（32 题自评）中的结果，由本人确认带入；只作佐证，画像四个维度仍按访谈证据评分，不照抄" } : undefined;
       } catch { return undefined; }
     })();
 

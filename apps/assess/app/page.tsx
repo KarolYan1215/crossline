@@ -33,6 +33,6 @@ function Samples() {
         <p className="as-note">{TYPE_SUBTITLE[code]}</p>
       </li>;
     })}</ul>
-    <p className="as-note">答完你也会得到一张：你的形象、类型、四条轴，和一个能拉朋友测关系的二维码。</p>
+    <p className="as-note">答完你也会得到一张：你的形象、类型、四个维度，和一个能拉朋友测关系的二维码。</p>
   </section>;
 }

@@ -1,4 +1,4 @@
-import { TYPE_AXES, TYPE_TABLE, typeFromScores, type TypeAxisId } from "@crossline/core/assess";
+import { TYPE_AXES, TYPE_TABLE, poleBalance, typeFromScores, type PoleScores, type TypeAxisId } from "@crossline/core/assess";
 import { TYPE_LINES, TYPE_SUBTITLE, axisRank, isAmbiguous, partnersOf, relationOf, type Relation } from "@crossline/core/assess-content";
 import type { WantLines } from "@crossline/core/assess-wants";
 import type { LineView, PartnerView, PublicType, RelationView } from "./contract";
@@ -8,7 +8,8 @@ import type { LineView, PartnerView, PublicType, RelationView } from "./contract
  * `seed` — the result's id — which picks a capped rank's shown number, so every view of one result agrees):
  * the views the result page, the invitation, the pair card and the poster all draw from. Pure.
  */
-export function publicType(scores: Record<TypeAxisId, number>, recorded: Partial<Record<TypeAxisId, number[]>> = {}, seed = "", chosen?: WantLines): PublicType {
+export function publicType(scores: Record<TypeAxisId, number>, recorded: Partial<Record<TypeAxisId, number[]>> = {}, seed = "", chosen?: WantLines,
+  poles?: PoleScores): PublicType {
   const type = typeFromScores(scores);
   const partners = partnersOf(type.code);
   const partner = (side: { code: string; relation: Relation }): PartnerView =>
@@ -20,7 +21,7 @@ export function publicType(scores: Record<TypeAxisId, number>, recorded: Partial
       const shown = type.axes[index]!;
       return { id: axis.id, leftLetter: axis.left.letter, rightLetter: axis.right.letter, leftLabel: axis.left.label, rightLabel: axis.right.label,
         leftEn: axis.left.en, rightEn: axis.right.en, score: shown.score, letter: shown.letter, ambiguous: isAmbiguous(shown.score),
-        rank: axisRank(axis.id, shown.score, recorded[axis.id] ?? [], seed) };
+        rank: axisRank(axis.id, shown.score, recorded[axis.id] ?? [], seed), balance: poles ? poleBalance(poles[axis.id]) : null };
     }),
     // What the person said they want to do replaces the type's own suggestion, and the extra combinations with it.
     lines: chosen?.lines ?? TYPE_LINES[type.code]!.lines,

@@ -26,7 +26,7 @@ const SAMPLES = TYPE_CODES.map((code, index) => {
   const strength = (axis: number) => axis === soft ? 57 : 72 + ((index * 7 + axis * 5) % 22);
   return {
     code,
-    scores: { scope: lean(code[0] === "G", strength(0)), basis: lean(code[1] === "I", strength(1)), output: lean(code[2] === "R", strength(2)), rhythm: lean(code[3] === "A", strength(3)) },
+    scores: { concentration: lean(code[0] === "D", strength(0)), orientation: lean(code[1] === "X", strength(1)), boundary: lean(code[2] === "B", strength(2)), pacing: lean(code[3] === "V", strength(3)) },
     nickname: NICKNAMES[index % NICKNAMES.length]!,
     variant: index % 2 ? "male" as const : "female" as const
   };
@@ -42,7 +42,7 @@ for (const [index, sample] of SAMPLES.entries()) {
 }
 
 // Two pair cards: one pair with no line in common, one that shares some.
-for (const [codeA, codeB] of [["GEMA", "SIMP"], ["GERA", "GIRP"]] as const) {
+for (const [codeA, codeB] of [["DLWV", "CXWU"], ["DLBV", "DXBU"]] as const) {
   const a = SAMPLES.find((sample) => sample.code === codeA)!, b = SAMPLES.find((sample) => sample.code === codeB)!;
   const typeA = publicType(a.scores, {}, `pair-${codeA}`), typeB = publicType(b.scores, {}, `pair-${codeB}`);
   const card = await renderPairCard({

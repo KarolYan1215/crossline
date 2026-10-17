@@ -4,7 +4,7 @@ import { ASSESS_DECLINED_SETTING, ASSESS_RESULT_SETTING } from "@crossline/core"
 import { assessFigure, assessOffer, decideAssess } from "./assess-link";
 
 const env = { ASSESS_BASE_URL: "http://127.0.0.1:3340/", ASSESS_LINK_SECRET: "s3cret" } as unknown as NodeJS.ProcessEnv;
-const found = { found: true, code: "GERA", typeName: "联络官", group: "GE", axes: { scope: 70, basis: 40, output: 80, rhythm: 65 },
+const found = { found: true, code: "DLBV", typeName: "联络官", group: "DL", axes: { concentration: 70, orientation: 40, boundary: 80, pacing: 65 },
   takenAt: "2026-10-14T10:00:00.000Z", resultUrl: "http://127.0.0.1:3340/r/abc" };
 const answering = (body: unknown, status = 200) => vi.fn(async () => new Response(JSON.stringify(body), { status }));
 function memory() {
@@ -22,13 +22,13 @@ test("off without both variables; nothing is asked", async () => {
 test("asks with the bearer secret and the verified address; found is offered and nothing is written until it is used", async () => {
   const store = memory(), fetcher = answering(found);
   const offer = await assessOffer(store, "ws", "a@b.c", fetcher, env);
-  expect(offer).toMatchObject({ state: "offered", result: { code: "GERA", typeName: "联络官" } });
+  expect(offer).toMatchObject({ state: "offered", result: { code: "DLBV", typeName: "联络官" } });
   expect(fetcher).toHaveBeenCalledWith("http://127.0.0.1:3340/api/link", expect.objectContaining({ method: "POST", body: JSON.stringify({ email: "a@b.c" }),
     headers: expect.objectContaining({ authorization: "Bearer s3cret" }) }));
   expect(store.values.size).toBe(0);
   const used = await decideAssess(store, "ws", "a@b.c", "use", fetcher, env, new Date("2026-10-15T08:00:00Z"));
   expect(used).toMatchObject({ state: "used", result: { source: "public-assess", acceptedAt: "2026-10-15T08:00:00.000Z", axes: found.axes } });
-  expect(JSON.parse(store.values.get(ASSESS_RESULT_SETTING)!)).toMatchObject({ code: "GERA", source: "public-assess" });
+  expect(JSON.parse(store.values.get(ASSESS_RESULT_SETTING)!)).toMatchObject({ code: "DLBV", source: "public-assess" });
   expect(await assessOffer(store, "ws", "a@b.c", answering({ found: false }), env)).toMatchObject({ state: "used" });
 });
 
@@ -55,7 +55,7 @@ test("「不是我的结果」 or removing deletes it and stops asking", async (
 test("the figure is fetched only from the test server's own origin and only as an image", async () => {
   const image = vi.fn(async () => new Response(new Uint8Array([1, 2, 3]), { headers: { "content-type": "image/png" } }));
   type Figured = Parameters<typeof assessFigure>[0];
-  const result = { ...found, found: true, figureUrl: "http://127.0.0.1:3340/api/figure/GERA.png" } as unknown as Figured;
+  const result = { ...found, found: true, figureUrl: "http://127.0.0.1:3340/api/figure/DLBV.png" } as unknown as Figured;
   expect((await assessFigure(result, image, env))?.type).toBe("image/png");
   expect(await assessFigure({ ...result, figureUrl: "http://169.254.169.254/latest" } as unknown as Figured, image, env)).toBeUndefined();
   expect(await assessFigure(result, vi.fn(async () => new Response("<html>", { headers: { "content-type": "text/html" } })), env)).toBeUndefined();

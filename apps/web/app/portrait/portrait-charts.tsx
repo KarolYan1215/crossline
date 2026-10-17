@@ -34,9 +34,13 @@ const colourOf = (lineId: string) => LINE_COLOUR[lineId] ?? INK;
  * The four typing axes as diverging bars: both poles named, the one leaned to in bold, the bar growing from the middle towards it, the
  * percentage inside a long bar and beside a short one. `evidence` adds each axis's reason under it.
  */
-/** The English word a type letter stands for, its initial in bold: the code reads as words (GEMA = Generalist, Evidence, Making, Adapting). */
+/**
+ * The English word a type letter stands for, the letter in bold: the code reads as words (DLWV = Diversified, Leverage, Walled, Variable).
+ * The letter is the word's first capital, which is not always its first character (eXplore).
+ */
 function AxisWord({ word }: { word: string }) {
-  return <small className="pt-axis-en"><b>{word[0]}</b>{word.slice(1)}</small>;
+  const at = Math.max(0, word.search(/[A-Z]/));
+  return <small className="pt-axis-en">{word.slice(0, at)}<b>{word[at]}</b>{word.slice(at + 1)}</small>;
 }
 
 export function DivergingAxes({ type, evidence }: { type: PortraitType; evidence?: boolean }) {

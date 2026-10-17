@@ -48,7 +48,7 @@ beforeEach(() => { temp.dir(); vi.spyOn(console, "info").mockImplementation(() =
 afterEach(() => { temp.cleanup(); vi.restoreAllMocks(); });
 
 test("the purge removes only results past their retention", () => {
-  const input = { email: "a@example.com", nickname: "", scores: { scope: 50, basis: 50, output: 50, rhythm: 50 }, code: "GIRA", appearance, sendEmail: false };
+  const input = { email: "a@example.com", nickname: "", scores: { concentration: 50, orientation: 50, boundary: 50, pacing: 50 }, code: "DXBV", appearance, sendEmail: false };
   const old = createResult(input, new Date(Date.now() - RESULT_RETENTION_DAYS * 86_400_000 - 1000));
   const fresh = createResult(input);
   expect(runPurge()).toBe(1);

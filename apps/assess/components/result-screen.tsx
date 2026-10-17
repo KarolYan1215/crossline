@@ -10,7 +10,7 @@ import { CopyLink, ShareInvite } from "./share-invite";
 import { withName } from "../lib/names";
 import { readStored, writeStored } from "./storage";
 import { WantsInline } from "./wants-step";
-import { AxesList, TypeDetails, TypeHeading, groupStyle } from "./type-summary";
+import { AxesList, DimensionNotes, TypeDetails, TypeHeading, groupStyle } from "./type-summary";
 
 export { AVATAR_POLL_MS, isDrawing } from "./figure";
 export const DISCLAIMER = "基于自评的趣味测评，非心理诊断";
@@ -126,13 +126,14 @@ export function ResultScreen({ token }: { token: string }) {
 
     <section className="as-block">
       <h2>拉朋友测，看你们是什么关系</h2>
-      <p>朋友用这个链接答完 32 题，你们的双人卡当场生成{mailed ? "，你也会收到邮件" : ""}。海报上的二维码也是这个链接。</p>
+      <p>朋友用这个链接答完 32 道题，你们的双人卡当场生成{mailed ? "，你也会收到邮件" : ""}。海报上的二维码也是这个链接。</p>
       <ShareInvite url={view.inviteUrl} title="测测我们是什么关系" text={withName(view.nickname || "你的朋友", "邀请你测测你们是什么关系")} />
     </section>
 
     <section className="as-block">
-      <h2>四条轴</h2>
+      <h2>四个维度</h2>
       <AxesList type={type} />
+      <DimensionNotes />
     </section>
     <TypeDetails type={type} wants={!view.wants || editingWants
       ? view.wantsLeft > 0 && <div className="as-wants-ask">
@@ -176,7 +177,7 @@ export function ResultScreen({ token }: { token: string }) {
       <p>{mailed ? "这个页面的链接已发到你的邮箱（没收到就看看垃圾邮件）。" : view.sendEmail ? "邮件暂时发不出去。请收藏本页，或复制下面的链接自己保存，这是回到结果的唯一入口。"
         : "你选了不发邮件。请收藏本页，或复制下面的链接自己保存，这是回到结果的唯一入口。"}</p>
       {!mailed && ownUrl && <CopyLink url={ownUrl} label="我的结果链接（只给自己看）" />}
-      <p className="as-note">结果保存到 {dateText(view.expiresAt)}，到期自动删除。保存的是四条轴的分数、邮箱、署名、外貌选项和你想做的事，不存每道题的答案。</p>
+      <p className="as-note">结果保存到 {dateText(view.expiresAt)}，到期自动删除。保存的是四个维度的分数、邮箱、署名、外貌选项和你想做的事，不存每道题的答案。</p>
       {confirming ? <div className="as-confirm" role="group" aria-label="确认删除" id="as-delete">
         <p>删除后，海报、邀请链接和所有双人卡都会失效，不能恢复。</p>
         <div className="as-row">

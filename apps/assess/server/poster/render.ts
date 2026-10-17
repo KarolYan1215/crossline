@@ -5,7 +5,7 @@ import { TYPE_AXES, TYPE_GROUPS } from "@crossline/core/assess";
 import { RELATIONS, latinGap } from "@crossline/core/assess-content";
 import type { PartnerView, PublicAxis, PublicType, RelationView } from "../../lib/contract";
 import { faceFor, posterFonts, safe, type Family } from "./fonts";
-import { LABELS, poleExplanations, rankLine } from "./labels";
+import { LABELS, rankLine } from "./labels";
 import { withName } from "../../lib/names";
 import { qrDataUri } from "./qr";
 
@@ -95,7 +95,8 @@ function axisBar(axis: PublicAxis, colour: string, height: number): El {
     box({ position: "absolute", top: -6, left: "50%", width: 2, height: height + 12, backgroundColor: INK }));
 }
 
-const POLE_WIDTH = 178;
+// Four-character pole names (「单线主导 78%」) at 28 px: 2026-10-17, up from 178 for the two-character first version.
+const POLE_WIDTH = 236;
 
 /** One pole: its letter and name, and — on the side leaned to — the percentage, next to the bar. */
 function pole(label: string, letter: string, percent: number | null, align: "left" | "right"): El {
@@ -116,7 +117,8 @@ function axisRow(axis: PublicAxis, colour: string, withRank = true): El {
       pole(axis.leftLabel, axis.leftLetter, right ? null : percent, "left"),
       axisBar(axis, colour, 16),
       pole(axis.rightLabel, axis.rightLetter, right ? percent : null, "right")),
-    withRank ? text(rankLine(axis.rank), "Sans", { fontSize: 24, color: GREY, lineHeight: 1.25, marginTop: 2, marginLeft: POLE_WIDTH + 16 }) : null);
+    withRank ? text(rankLine(axis.rank) + (axis.balance ? `；${axis.balance === "both_high" ? LABELS.bothHigh : LABELS.bothLow}` : ""), "Sans",
+      { fontSize: 24, color: GREY, lineHeight: 1.25, marginTop: 2, marginLeft: POLE_WIDTH + 16 }) : null);
 }
 
 /** The four steps as a cycle: across the top, down, back along the bottom, up — the last step feeding the first. */
@@ -236,17 +238,19 @@ function section(title: string, ...children: Child[]): El {
 export function longImageTree(type: PublicType, nickname: string, figure: Figure, inviteUrl: string): El {
   const axisDetail = (axis: PublicAxis, index: number) => {
     const definition = TYPE_AXES.find((item) => item.id === axis.id)!;
-    const [leftText, rightText] = poleExplanations(definition.question);
+    const leftText = definition.left.definition, rightText = definition.right.definition;
     const pole = (letter: string, label: string, en: string, explanation: string, on: boolean) => box({ flexDirection: "column", width: (INNER - 40) / 2 },
       box({ alignItems: "baseline" },
         text(`${letter} ${label}`, "Serif", { fontSize: 30, fontWeight: 700, color: on ? type.group.colour : INK }),
         text(en, "Sans", { fontSize: 24, color: GREY, marginLeft: 10 })),
       text(explanation, "Sans", { fontSize: 24, color: INK, lineHeight: 1.45, marginTop: 4 }));
-    return box({ flexDirection: "column", width: "100%", marginTop: index ? 30 : 0 },
+    return box({ flexDirection: "column", width: "100%", marginTop: index ? 34 : 0 },
+      text(definition.name, "Serif", { fontSize: 28, fontWeight: 700, color: INK, marginBottom: 10 }),
       axisRow(axis, type.group.colour),
       box({ width: "100%", justifyContent: "space-between", marginTop: 14 },
         pole(axis.leftLetter, axis.leftLabel, axis.leftEn, leftText, axis.score < 50),
-        pole(axis.rightLetter, axis.rightLabel, axis.rightEn, rightText, axis.score >= 50)));
+        pole(axis.rightLetter, axis.rightLabel, axis.rightEn, rightText, axis.score >= 50)),
+      text(`${LABELS.sources}${definition.sources}`, "Sans", { fontSize: 24, color: GREY, lineHeight: 1.45, marginTop: 10 }));
   };
   const detail = (label: string, view: PartnerView) => {
     const relation = relationByName(view.relation);

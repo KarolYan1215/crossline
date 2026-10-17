@@ -3,22 +3,18 @@ import { QUIZ_ITEMS, quizScores } from "./assess";
 import { LINE_IDENTITIES, RELATIONS, TYPE_CODES, TYPE_LINES, TYPE_SUBTITLE, axisRank, isAmbiguous, shownRank, pairFit, partnersOf, relationOf } from "./assess-content";
 import { TYPE_AXES } from "./portrait-type";
 
-describe("the thirty-two statements", () => {
-  test("eight per axis, four keyed to each pole, ids unique, neighbours never on one axis", () => {
+describe("the thirty-two questions", () => {
+  test("eight per dimension, ids unique, neighbours never on one dimension", () => {
     expect(QUIZ_ITEMS).toHaveLength(32);
     expect(new Set(QUIZ_ITEMS.map((item) => item.id)).size).toBe(32);
-    for (const axis of TYPE_AXES) {
-      const own = QUIZ_ITEMS.filter((item) => item.axis === axis.id);
-      expect(own).toHaveLength(8);
-      expect(own.filter((item) => item.reverse)).toHaveLength(4);
-    }
+    for (const axis of TYPE_AXES) expect(QUIZ_ITEMS.filter((item) => item.axis === axis.id)).toHaveLength(8);
     QUIZ_ITEMS.slice(1).forEach((item, index) => expect(item.axis).not.toBe(QUIZ_ITEMS[index]!.axis));
   });
-  test("all agree on the right pole and disagree on the left reads 100; the opposite 0", () => {
-    const right = Object.fromEntries(QUIZ_ITEMS.map((item) => [item.id, item.reverse ? 1 : 5]));
-    expect(Object.values(quizScores(right))).toEqual([100, 100, 100, 100]);
-    const left = Object.fromEntries(QUIZ_ITEMS.map((item) => [item.id, item.reverse ? 5 : 1]));
-    expect(Object.values(quizScores(left))).toEqual([0, 0, 0, 0]);
+  test("statements are positively worded: no negation and no 「比起」 comparison inside a statement", () => {
+    for (const item of QUIZ_ITEMS.filter((entry) => entry.kind === "pole")) expect(item.text, item.id).not.toMatch(/不会|从不|并不|比起/);
+  });
+  test("all neutral reads just under the middle on every dimension, decided left", () => {
+    expect(Object.values(quizScores(Object.fromEntries(QUIZ_ITEMS.map((item) => [item.id, 3]))))).toEqual([49, 49, 49, 49]);
   });
 });
 
@@ -59,13 +55,15 @@ describe("relations", () => {
     }
   });
   test("the same type is a twin, none alike mirrors, one letter apart names the difference first and twin second", () => {
-    expect(relationOf("SEMP", "SEMP").primary.id).toBe("twin");
-    expect(relationOf("SEMP", "SEMA")).toMatchObject({ primary: { id: "pace" }, secondary: { id: "twin" } });
-    expect(relationOf("SEMP", "SIMP")).toMatchObject({ primary: { id: "data_vs_hunch" }, secondary: { id: "twin" } });
-    expect(relationOf("SEMP", "GIRA").primary.id).toBe("mirror");
-    expect(relationOf("GIMA", "SIRA").primary.id).toBe("rabbit_holes");
-    expect(relationOf("SEMP", "GERP").primary.id).toBe("double_safe");
-    expect(relationOf("SEMP", "SERA").primary.id).toBe("pace");
+    expect(relationOf("CLWU", "CLWU").primary.id).toBe("twin");
+    expect(relationOf("CLWU", "CLWV")).toMatchObject({ primary: { id: "pace" }, secondary: { id: "twin" } });
+    expect(relationOf("CLWU", "CXWU")).toMatchObject({ primary: { id: "explore_exploit" }, secondary: { id: "twin" } });
+    expect(relationOf("CLWU", "DXBV").primary.id).toBe("mirror");
+    expect(relationOf("DXWV", "CXBV").primary.id).toBe("rabbit_holes");
+    expect(relationOf("CLWU", "DLBU").primary.id).toBe("double_safe");
+    expect(relationOf("CLWU", "CLBV").primary.id).toBe("pace");
+    expect(relationOf("CLWV", "CLBV")).toMatchObject({ primary: { id: "boundary" }, secondary: { id: "twin" } });
+    expect(relationOf("CXWU", "DXWU")).toMatchObject({ primary: { id: "well_and_road" }, secondary: { id: "twin" } });
   });
   test("every relation is reachable, and each type's best and hardest partner differ", () => {
     const seen = new Set(TYPE_CODES.flatMap((a) => TYPE_CODES.map((b) => relationOf(a, b).primary.id)));
@@ -78,7 +76,7 @@ describe("relations", () => {
     }
   });
   test("an unknown code is refused", () => {
-    expect(() => relationOf("XXXX", "SEMP")).toThrow("TYPE_CODE_UNKNOWN");
+    expect(() => relationOf("XXXX", "CLWU")).toThrow("TYPE_CODE_UNKNOWN");
   });
 });
 
@@ -89,28 +87,28 @@ describe("rank and ambiguity", () => {
     expect(isAmbiguous(61)).toBe(false);
   });
   test("the estimate rises with the lean, names the pole and says it is an estimate", () => {
-    const mild = axisRank("scope", 60), strong = axisRank("scope", 90);
-    expect(mild).toMatchObject({ pole: "跨界", estimated: true });
+    const mild = axisRank("concentration", 60), strong = axisRank("concentration", 90);
+    expect(mild).toMatchObject({ pole: "多线并行", estimated: true });
     expect(strong.percent).toBeGreaterThan(mild.percent);
-    expect(axisRank("scope", 10).pole).toBe("深耕");
-    expect(axisRank("scope", 100).percent).toBeLessThanOrEqual(96);
+    expect(axisRank("concentration", 10).pole).toBe("单线主导");
+    expect(axisRank("concentration", 100).percent).toBeLessThanOrEqual(96);
   });
   test("over 95 the rank is 91–96, fixed per result and axis, spread across results; at or under 95 it is untouched", () => {
     const seeds = Array.from({ length: 200 }, (_, index) => `result-${index}`);
-    const shown = seeds.map((seed) => axisRank("scope", 95, [], seed).percent);
+    const shown = seeds.map((seed) => axisRank("concentration", 95, [], seed).percent);
     for (const value of shown) expect(value).toBeGreaterThanOrEqual(91), expect(value).toBeLessThanOrEqual(96);
     expect(new Set(shown).size).toBe(6);
-    expect(axisRank("scope", 95, [], "result-7").percent).toBe(axisRank("scope", 95, [], "result-7").percent);
-    expect(axisRank("scope", 60, [], "x").percent).toBe(axisRank("scope", 60).percent);
-    expect(shownRank(95, "a", "scope")).toBe(95);
-    expect(shownRank(42, "a", "basis")).toBe(42);
+    expect(axisRank("concentration", 95, [], "result-7").percent).toBe(axisRank("concentration", 95, [], "result-7").percent);
+    expect(axisRank("concentration", 60, [], "x").percent).toBe(axisRank("concentration", 60).percent);
+    expect(shownRank(95, "a", "concentration")).toBe(95);
+    expect(shownRank(42, "a", "orientation")).toBe(42);
   });
   test("from two hundred recorded scores the rank is the people's own", () => {
     const recorded = Array.from({ length: 200 }, (_, index) => index % 2 ? 55 : 45);
-    const rank = axisRank("scope", 80, recorded, "r1");
+    const rank = axisRank("concentration", 80, recorded, "r1");
     expect(rank.estimated).toBe(false);
     // 99% of recorded people lean less far, shown capped like the estimate.
-    expect(rank.percent).toBe(shownRank(99, "r1", "scope"));
+    expect(rank.percent).toBe(shownRank(99, "r1", "concentration"));
     expect(rank.percent).toBeLessThanOrEqual(96);
   });
 });

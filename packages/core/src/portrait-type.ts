@@ -2,61 +2,90 @@ import { SCHWARTZ_VALUES, redactPortrait, type PortraitReport } from "./portrait
 export { CHARACTER_EXPRESSIONS, CHARACTER_POSES } from "./portrait-character";
 
 /**
- * Crossline's own personality typing (decided 2026-10-08, after the popular result pages of MBTI-style tests): four axes about how a
- * person runs several lines of work, each scored 0–100 by the portrait writer from evidence, read as a four-letter code into one of
- * sixteen fixed types in four groups. The names live here, not in the model's answer, so the same profile always lands on the same,
- * comparable, shareable type — the model only says where on each axis the person stands and why.
+ * Crossline's own typing (redesigned 2026-10-17 with the owner, docs/assess-redesign.md): four dimensions of how a person runs several
+ * lines of life, each taken from a body of research and scored 0–100 (0 = left pole, 100 = right pole) — by the quick test from
+ * independently measured poles, by the portrait writer from evidence — read as a four-letter code into one of sixteen fixed types in four
+ * groups. The names live here, not in the model's answer, so the same profile always lands on the same, comparable, shareable type.
+ *
+ * The sixteen names and the thirty-two figures were kept from the first version (2026-10-08); only the codes moved, letter for letter in
+ * the same positions: S→C, G→D, E→L, I→X, M→W, R→B, P→U, A→V. No letter is one of MBTI's (E I S N T F J P) or the first version's.
  */
 
-export type TypeAxisId = "scope" | "basis" | "output" | "rhythm";
-/** Each letter is the initial of an English word (`en`), so the code reads as words: GEMA = Generalist, Evidence, Making, Adapting. */
-export const TYPE_AXES: Array<{ id: TypeAxisId; left: { letter: string; label: string; en: string }; right: { letter: string; label: string; en: string }; question: string }> = [
-  { id: "scope", left: { letter: "S", label: "深耕", en: "Specialist" }, right: { letter: "G", label: "跨界", en: "Generalist" }, question: "注意力集中在一条线做深，还是在几条线之间连起来" },
-  { id: "basis", left: { letter: "E", label: "实证", en: "Evidence" }, right: { letter: "I", label: "直觉", en: "Intuition" }, question: "做判断靠数据与证据，还是靠感觉与远景" },
-  { id: "output", left: { letter: "M", label: "造物", en: "Making" }, right: { letter: "R", label: "传播", en: "Reaching" }, question: "成就感来自做出东西，还是来自影响他人" },
-  { id: "rhythm", left: { letter: "P", label: "规划", en: "Planning" }, right: { letter: "A", label: "应变", en: "Adapting" }, question: "按计划推进，还是边做边调整" }
+export type TypeAxisId = "concentration" | "orientation" | "boundary" | "pacing";
+/** Each letter is the initial of an English word (`en`), so the code reads as words: DLWU = Diversified, Leverage, Walled, Uniform. */
+export type TypeAxis = {
+  id: TypeAxisId;
+  /** The dimension's name, and what it measures in one sentence. */
+  name: string;
+  question: string;
+  left: { letter: string; label: string; en: string; definition: string };
+  right: { letter: string; label: string; en: string; definition: string };
+  /** The research it rests on, as short citations. */
+  sources: string;
+};
+export const TYPE_AXES: TypeAxis[] = [
+  { id: "concentration", name: "主线集中度", question: "时间与身份认同集中在一条主线上，还是分布在几条主线上",
+    left: { letter: "C", label: "单线主导", en: "Concentrated", definition: "一条主线占主导地位，其他领域服务于它或为它让路" },
+    right: { letter: "D", label: "多线并行", en: "Diversified", definition: "两条及以上主线获得相近的时间与认同投入" },
+    sources: "Sieber 1974 角色累积；Handy 1989 组合型职业；Unsworth, Yeo & Beck 2014 多目标追求" },
+  { id: "orientation", name: "探索–利用取向", question: "深化已掌握的能力与领域，还是进入陌生的领域与方法",
+    left: { letter: "L", label: "利用", en: "Leverage", definition: "在已掌握的能力与领域内持续改进，追求效率与确定的回报" },
+    right: { letter: "X", label: "探索", en: "eXplore", definition: "主动进入陌生领域、尝试新方法，接受更高的不确定性" },
+    sources: "March 1991；Gupta, Smith & Shalley 2006；Mom, van den Bosch & Volberda 2009" },
+  { id: "boundary", name: "角色边界管理", question: "各条主线之间划清时间与情境的边界，还是让边界可渗透、相互交织",
+    left: { letter: "W", label: "分隔", en: "Walled", definition: "为每条主线划定明确的时间与情境边界，减少相互干扰" },
+    right: { letter: "B", label: "整合", en: "Blended", definition: "各条主线在时间、情境与思维上相互渗透，允许随时切换与借用" },
+    sources: "Nippert-Eng 1996；Ashforth, Kreiner & Fugate 2000；Kreiner 2006" },
+  { id: "pacing", name: "投入节律", question: "投入在时间上均匀分布，还是集中在若干高强度阶段",
+    left: { letter: "U", label: "均匀", en: "Uniform", definition: "投入在时间上分布较为平均，按固定节奏持续推进" },
+    right: { letter: "V", label: "波动", en: "Variable", definition: "投入集中在截止期前或状态好的阶段，其余时间投入较低" },
+    sources: "Gersick 1988 间断平衡；Gevers, Rutte & van Eerde 2006 工作节奏风格" }
 ];
 
 /**
- * The four groups (first two letters), each one muted Morandi hue (decided 2026-10-14: not the purple/green/blue/yellow of the popular
- * MBTI test): `tone` is the figure's outfit colour, `tint` the card's and the figure's backdrop, `colour` the same hue deep enough for
- * text (at least 7:1 on the poster's paper, checked in portrait-type.test.ts) — sage for 工匠组, dusty rose for 求索组, haze blue for
- * 架构组, clay for 开拓组.
+ * The four groups (first two letters: concentration × orientation), each one muted Morandi hue (decided 2026-10-14): `tone` is the
+ * figure's outfit colour, `tint` the card's and the figure's backdrop, `colour` the same hue deep enough for text (at least 7:1 on the
+ * poster's paper, checked in portrait-type.test.ts) — sage for 工匠组, dusty rose for 求索组, haze blue for 架构组, clay for 开拓组.
  */
 export const TYPE_GROUPS: Record<string, { name: string; colour: string; tone: string; tint: string; blurb: string }> = {
-  SE: { name: "工匠组", colour: "#3D4A35", tone: "#8C9A7E", tint: "#E2E6DA", blurb: "在一处做深，用证据说话" },
-  SI: { name: "求索组", colour: "#66404A", tone: "#A88C93", tint: "#EBDEE0", blurb: "在一处做深，跟随内在的问题" },
-  GE: { name: "架构组", colour: "#34495A", tone: "#8497A6", tint: "#DCE3E9", blurb: "连接多条线，用证据搭结构" },
-  GI: { name: "开拓组", colour: "#623E29", tone: "#B48C72", tint: "#EFE2D7", blurb: "连接多条线，凭远景开新路" }
+  CL: { name: "工匠组", colour: "#3D4A35", tone: "#8C9A7E", tint: "#E2E6DA", blurb: "集中一条主线，深化已有优势" },
+  CX: { name: "求索组", colour: "#66404A", tone: "#A88C93", tint: "#EBDEE0", blurb: "集中一条主线，开辟新问题" },
+  DL: { name: "架构组", colour: "#34495A", tone: "#8497A6", tint: "#DCE3E9", blurb: "多线并行，深化已有优势" },
+  DX: { name: "开拓组", colour: "#623E29", tone: "#B48C72", tint: "#EFE2D7", blurb: "多线并行，进入新领域" }
 };
 
 /**
- * Sixteen types (renamed 2026-10-14 so no two share a word): one role noun each, kept within the group's image, and the two of a pair that
- * differ only in rhythm read as opposites (钟表匠 ↔ 试验家). `blurb` is the fallback one-liner for a report written before the writer gave
- * a personal `summary`.
+ * Sixteen types (names kept from 2026-10-14, codes moved 2026-10-17). `blurb` describes the four positions in plain words; it is also the
+ * fallback one-liner for a report written before the writer gave a personal `summary`.
  */
 export const TYPE_TABLE: Record<string, { name: string; blurb: string }> = {
-  SEMP: { name: "钟表匠", blurb: "守着一个领域，按证据和计划把东西做到经得起检验" },
-  SEMA: { name: "试验家", blurb: "守着一个领域边做边试，让结果替自己说话" },
-  SERP: { name: "讲师", blurb: "守着一个领域，按体系把证据讲清楚、讲成课" },
-  SERA: { name: "顾问", blurb: "守着一个领域随问随答，拿证据回应每个问题" },
-  SIMP: { name: "雕刻家", blurb: "循着心里的问题，在一个领域长期打磨一件作品" },
-  SIMA: { name: "即兴艺人", blurb: "在一个领域里凭灵感随手做出新东西" },
-  SIRP: { name: "布道者", blurb: "守着一个信念，系统地把它讲给更多人" },
-  SIRA: { name: "吟游诗人", blurb: "在一个领域边走边追问，随时把所得分享出去" },
-  GEMP: { name: "架构师", blurb: "连起多条线，按证据和计划组成一个系统" },
-  GEMA: { name: "改装师", blurb: "连起多条线，拿现成的东西快速拼成能用的产品" },
-  GERP: { name: "参谋长", blurb: "连起多条线，梳理证据，提出并推行方案" },
-  GERA: { name: "联络官", blurb: "连起多条线，随时用证据在不同圈子之间牵线" },
-  GIMP: { name: "创始人", blurb: "连起多条线，凭远景按计划汇成一项事业" },
-  GIMA: { name: "发明家", blurb: "在多个领域间跳跃，不断造出新东西" },
-  GIRP: { name: "旗手", blurb: "描绘一个跨领域的愿景，按计划带动他人" },
-  GIRA: { name: "探险家", blurb: "在多个领域开路，把所见随时带给别人" }
+  CLWU: { name: "钟表匠", blurb: "专注一条主线，深化既有能力；给主线划出固定时段，按稳定节奏推进" },
+  CLWV: { name: "试验家", blurb: "专注一条主线，深化既有能力；给主线留出完整时段，集中高强度投入" },
+  CLBU: { name: "讲师", blurb: "专注一条主线，深化既有能力；把相邻领域融入主线，按稳定节奏推进" },
+  CLBV: { name: "顾问", blurb: "专注一条主线，深化既有能力；随需求在各场景间切换，投入时多时少" },
+  CXWU: { name: "雕刻家", blurb: "专注一条主线，持续探索新问题；在独立时段里长期、稳定地打磨" },
+  CXWV: { name: "即兴艺人", blurb: "专注一条主线，持续探索新问题；在独立时段里，状态到时集中投入" },
+  CXBU: { name: "布道者", blurb: "专注一条主线，持续探索新问题；把生活其他部分融入主线，稳定推进" },
+  CXBV: { name: "吟游诗人", blurb: "专注一条主线，持续探索新问题；各场景间自由切换，投入随状态起伏" },
+  DLWU: { name: "架构师", blurb: "多线并行，深化各线既有能力；每条线边界清楚，按固定节奏轮转" },
+  DLWV: { name: "改装师", blurb: "多线并行，深化各线既有能力；每条线分开处理，轮流集中突击" },
+  DLBU: { name: "参谋长", blurb: "多线并行，深化各线既有能力；各线互相借力，按稳定节奏统筹推进" },
+  DLBV: { name: "联络官", blurb: "多线并行，深化各线既有能力；各线互相渗透，随时机灵活调配投入" },
+  DXWU: { name: "创始人", blurb: "多线并行，持续进入新领域；每条线边界清楚，长期稳定投入" },
+  DXWV: { name: "发明家", blurb: "多线并行，持续进入新领域；每条线分开推进，阶段性高强度攻关" },
+  DXBU: { name: "旗手", blurb: "多线并行，持续进入新领域；各线汇入一个整体，稳定持续推进" },
+  DXBV: { name: "探险家", blurb: "多线并行，持续进入新领域；各线自由交织，投入随机会起伏" }
 };
+
+/** The first version's code for each type (2026-10-08 to 2026-10-17), for files and texts written under it. */
+export const LEGACY_TYPE_CODE: Record<string, string> = Object.fromEntries(Object.keys(TYPE_TABLE).map((code) => {
+  const back: Record<string, string> = { C: "S", D: "G", L: "E", X: "I", W: "M", B: "R", U: "P", V: "A" };
+  return [code, [...code].map((letter) => back[letter]!).join("")];
+}));
 
 /**
  * What stops the writer's personal type summary from being shown: it must speak to the person (「你…」), and it must not name a type or a
- * code — the page ends it with 「你是 GEMA 改装师。」 itself, from the scores, so the two can never disagree.
+ * code — the page ends it with 「你是 DLWV 改装师。」 itself, from the scores, so the two can never disagree.
  */
 export function typeSummaryProblem(summary: string): string | null {
   const text = summary.trim();
@@ -96,7 +125,9 @@ export function typeFromScores(scores: Record<TypeAxisId, number>, evidence: Par
 
 /** The person's type from the writer's axis scores, with the writer's summary; none for a report written before the axes existed. */
 export function portraitType(report: PortraitReport): PortraitType | null {
-  return report.type ? { ...typeFromScores(report.type, report.type.evidence), summary: (report.type.summary ?? "").trim() } : null;
+  // A report written on the first version's axes (scope/basis/output/rhythm) has no type until it is rewritten (schema 4).
+  if (!report.type || !TYPE_AXES.every((axis) => typeof report.type![axis.id] === "number")) return null;
+  return { ...typeFromScores(report.type, report.type.evidence), summary: (report.type.summary ?? "").trim() };
 }
 
 export type PortraitLabelCell = { title: string; value: string; detail?: string };

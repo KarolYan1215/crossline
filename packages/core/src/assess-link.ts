@@ -22,13 +22,13 @@ export type AssessLinkResponse =
   | { found: false }
   | {
     found: true;
-    /** Four letters, e.g. "GERA". */
+    /** Four letters, e.g. "DLBV". */
     code: string;
     /** The type's name, e.g. "联络官". */
     typeName: string;
-    /** The type group's key ("SE" | "SI" | "GE" | "GI"); its name and colours are `TYPE_GROUPS[group]`. */
+    /** The type group's key ("CL" | "CX" | "DL" | "DX"); its name and colours are `TYPE_GROUPS[group]`. */
     group: string;
-    /** Each axis 0–100 towards its right pole (scope → 跨界, basis → 直觉, output → 传播, rhythm → 应变). */
+    /** Each dimension 0–100 towards its right pole (concentration → 多线并行, orientation → 探索, boundary → 整合, pacing → 波动). */
     axes: AssessLinkAxes;
     /** When the test was finished, ISO 8601. */
     takenAt: string;
@@ -38,9 +38,9 @@ export type AssessLinkResponse =
     figureUrl?: string;
   };
 
-const AXES: TypeAxisId[] = ["scope", "basis", "output", "rhythm"];
-const CODE = /^[SG][EI][MR][PA]$/;
-const GROUPS = ["SE", "SI", "GE", "GI"];
+const AXES: TypeAxisId[] = ["concentration", "orientation", "boundary", "pacing"];
+const CODE = /^[CD][LX][WB][UV]$/;
+const GROUPS = ["CL", "CX", "DL", "DX"];
 
 /** The answer read back and checked field by field; anything malformed, extra or out of range is null rather than half-trusted. */
 export function parseAssessLinkResponse(raw: unknown): AssessLinkResponse | null {

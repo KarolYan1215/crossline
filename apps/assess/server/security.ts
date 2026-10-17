@@ -1,4 +1,4 @@
-import { quizScores, type TypeAxisId } from "@crossline/core/assess";
+import { quizResult, type PoleScores, type TypeAxisId } from "@crossline/core/assess";
 import { APPEARANCE_LABELS, NICKNAME_MAX, NOTE_MAX, type ApiErrorCode, type Appearance, type SubmitRequest } from "../lib/contract";
 
 /**
@@ -146,6 +146,8 @@ export function parseAppearance(raw: unknown): Appearance | undefined {
 
 export type ParsedSubmission = {
   scores: Record<TypeAxisId, number>;
+  /** Each pole's own score, kept so the result can say when both poles are strong or both weak. */
+  poles: PoleScores;
   appearance: Appearance;
   email: string;
   nickname: string;
@@ -163,9 +165,10 @@ export function parseSubmission(raw: unknown, now = Date.now()): { ok: true; val
   if (typeof body.website === "string" ? body.website.trim() !== "" : body.website !== undefined) return { ok: false, code: "REJECTED" };
   if (typeof body.startedAt !== "number" || !Number.isFinite(body.startedAt)) return { ok: false, code: "REJECTED" };
   let scores: Record<TypeAxisId, number>;
+  let poles: PoleScores;
   try {
     if (!body.answers || typeof body.answers !== "object" || Array.isArray(body.answers)) throw new Error("QUIZ_INCOMPLETE");
-    scores = quizScores(body.answers as Record<string, number>);
+    ({ scores, poles } = quizResult(body.answers as Record<string, number>));
   } catch {
     return { ok: false, code: "QUIZ_INCOMPLETE" };
   }
@@ -180,6 +183,6 @@ export function parseSubmission(raw: unknown, now = Date.now()): { ok: true; val
   if (body.inviteToken !== undefined && typeof body.inviteToken !== "string") return { ok: false, code: "INVITE_NOT_FOUND" };
   const elapsed = now - body.startedAt;
   if (elapsed < MIN_ANSWER_MS) return { ok: false, code: "TOO_FAST" };
-  return { ok: true, value: { scores, appearance, email, nickname, sendEmail: body.sendEmail,
+  return { ok: true, value: { scores, poles, appearance, email, nickname, sendEmail: body.sendEmail,
     ...(body.inviteToken ? { inviteToken: body.inviteToken } : {}) } };
 }

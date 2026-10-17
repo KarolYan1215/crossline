@@ -16,7 +16,7 @@ export const LABELS = {
   loopExplain: "每一步的产出是下一步的输入，最后一步又回到第一步。",
   best: "最佳搭子",
   hardest: "一起做事容易吵",
-  axesHeading: "四条轴",
+  axesHeading: "四个维度",
   partnersHeading: "和谁一起做事",
   scan: "扫码测测我们是什么关系",
   scanSub: "朋友做完，你们的双人卡当场生成",
@@ -28,27 +28,25 @@ export const LABELS = {
   friendA: "你的朋友",
   friendB: "新朋友",
   ambiguous: "浅色字母表示两可",
+  bothHigh: "两端都强",
+  bothLow: "两端都弱",
+  sources: "依据：",
   replacement: "·"
 } as const;
 
-/** 「跨界倾向约超过 93% 的人（理论估算）」 */
+/** 「多线并行倾向约超过 93% 的人（理论估算）」 */
 export const rankLine = (rank: { pole: string; percent: number; estimated: boolean }): string =>
   `${rank.pole}倾向约超过 ${rank.percent}% 的人${rank.estimated ? LABELS.rankTail : ""}`;
-
-/** Each pole explained, read off the axis's own question (「A，还是 B」), so the long image adds no copy of its own. */
-export function poleExplanations(question: string): [string, string] {
-  const [left, right] = question.split("，还是");
-  return [left!.trim(), (right ?? "").trim()];
-}
 
 const ASCII = Array.from({ length: 95 }, (_, index) => String.fromCharCode(32 + index)).join("");
 
 /** Every character a poster can print outside a nickname: fixed copy, the type tables, relations, digits and ASCII. */
 export function posterFixedText(): string {
-  const parts: string[] = [ASCII, ...Object.values(LABELS), "%", "→"];
+  const parts: string[] = [ASCII, ...Object.values(LABELS), "%", "→", "；"];
   for (const [code, type] of Object.entries(TYPE_TABLE)) parts.push(code, type.name);
   for (const group of Object.values(TYPE_GROUPS)) parts.push(group.name, group.blurb);
-  for (const axis of TYPE_AXES) parts.push(axis.left.letter, axis.left.label, axis.left.en, axis.right.letter, axis.right.label, axis.right.en, axis.question, `${axis.left.label}倾向约超过 ${axis.right.label}倾向约超过`);
+  for (const axis of TYPE_AXES) parts.push(axis.name, axis.left.letter, axis.left.label, axis.left.en, axis.left.definition, axis.right.letter, axis.right.label, axis.right.en,
+    axis.right.definition, axis.question, axis.sources, `${axis.left.label}倾向约超过 ${axis.right.label}倾向约超过`);
   parts.push(...Object.values(TYPE_SUBTITLE));
   for (const lines of Object.values(TYPE_LINES)) {
     for (const line of [...lines.lines, ...lines.more.flat()]) parts.push(line.identity, `${line.domain}的`);

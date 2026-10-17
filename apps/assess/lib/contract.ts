@@ -31,7 +31,7 @@ export const NICKNAME_MAX = 12;
 
 /** POST /api/results */
 export type SubmitRequest = {
-  /** Every one of the 32 statements answered 1–5. */
+  /** Every one of the 32 questions answered 1–5. */
   answers: Record<string, number>;
   appearance: Appearance;
   email: string;
@@ -66,6 +66,8 @@ export type PublicAxis = {
   id: string; leftLetter: string; rightLetter: string; leftLabel: string; rightLabel: string; leftEn: string; rightEn: string;
   score: number; letter: string; ambiguous: boolean;
   rank: { pole: string; percent: number; estimated: boolean };
+  /** Both poles strong (「两端都强」) or both weak (「两端都弱」), each measured on its own; null otherwise or when not measured. */
+  balance: "both_high" | "both_low" | null;
 };
 
 /** A recommended line, 「<domain>的<identity>」: the identity large on the poster, the field small; a licensed profession has no field. */

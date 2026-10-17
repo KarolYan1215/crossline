@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { QUIZ_ITEMS, clockHours, mctqLite, pvtIsi, pvtSummary, quizScores, quizType } from "./assess";
+import { QUIZ_ITEMS, clockHours, mctqLite, poleBalance, pvtIsi, pvtSummary, quizResult, quizScores, quizType } from "./assess";
 import { TYPE_AXES, portraitType, typeFromScores } from "./portrait-type";
 import { DEFAULT_CALIBRATION } from "./energy-model";
 import { energyRhythm } from "./energy-rhythm";
@@ -7,32 +7,53 @@ import { energyRhythm } from "./energy-rhythm";
 const all = (value: number) => Object.fromEntries(QUIZ_ITEMS.map((item) => [item.id, value]));
 
 describe("quiz", () => {
-  test("eight statements per axis, four keyed to each pole", () => {
+  test("eight questions per dimension: three statements for each pole and two situations", () => {
     for (const axis of TYPE_AXES) {
       const items = QUIZ_ITEMS.filter((item) => item.axis === axis.id);
       expect(items).toHaveLength(8);
-      expect(items.filter((item) => item.reverse)).toHaveLength(4);
+      expect(items.filter((item) => item.kind === "pole" && item.pole === "left")).toHaveLength(3);
+      expect(items.filter((item) => item.kind === "pole" && item.pole === "right")).toHaveLength(3);
+      expect(items.filter((item) => item.kind === "pair")).toHaveLength(2);
     }
     expect(new Set(QUIZ_ITEMS.map((item) => item.id)).size).toBe(32);
+    for (let index = 1; index < QUIZ_ITEMS.length; index++) expect(QUIZ_ITEMS[index]!.axis).not.toBe(QUIZ_ITEMS[index - 1]!.axis);
   });
 
-  test("agreeing with everything cancels out on every axis; reversed statements are keyed the other way", () => {
-    expect(quizScores(all(5))).toEqual({ scope: 50, basis: 50, output: 50, rhythm: 50 });
-    // Agree with the right-keyed statements, disagree with the reversed ones: every axis at its right pole.
-    const right = Object.fromEntries(QUIZ_ITEMS.map((item) => [item.id, item.reverse ? 1 : 5]));
-    expect(quizScores(right)).toEqual({ scope: 100, basis: 100, output: 100, rhythm: 100 });
-    expect(quizType(right).code).toBe("GIRA");
-    const left = Object.fromEntries(QUIZ_ITEMS.map((item) => [item.id, item.reverse ? 5 : 1]));
-    expect(quizType(left).code).toBe("SEMP");
+  // The answer that points every question towards one side: agree with that side's statements, disagree with the other's, and pick that
+  // side's option clearly.
+  const towards = (side: "left" | "right") => Object.fromEntries(QUIZ_ITEMS.map((item) => {
+    if (item.kind === "pole") return [item.id, item.pole === side ? 5 : 1];
+    const aIsSide = (side === "right") === item.aRight;
+    return [item.id, aIsSide ? 1 : 5];
+  }));
+
+  test("each side's answers land on its pole; the poles are kept apart", () => {
+    expect(quizScores(towards("right"))).toEqual({ concentration: 100, orientation: 100, boundary: 100, pacing: 100 });
+    expect(quizType(towards("right")).code).toBe("DXBV");
+    expect(quizType(towards("left")).code).toBe("CLWU");
+    expect(quizResult(towards("left")).poles.boundary).toEqual({ left: 100, right: 0 });
   });
 
-  test("a single axis moves only with its own statements", () => {
+  test("agreeing with both poles is shown as both strong, and the situations decide the letter", () => {
+    const answers = Object.fromEntries(QUIZ_ITEMS.map((item) => [item.id, item.kind === "pole" ? 5 : 3]));
+    for (const item of QUIZ_ITEMS.filter((entry) => entry.axis === "orientation" && entry.kind === "pair")) answers[item.id] = item.kind === "pair" && item.aRight ? 2 : 4;
+    const { scores, poles } = quizResult(answers);
+    expect(poles.orientation).toEqual({ left: 100, right: 100 });
+    expect(poleBalance(poles.orientation)).toBe("both_high");
+    expect(scores.orientation).toBe(56);
+    // Everything else even: exactly 50, decided by the poles' order (equal) → left, shown as 49.
+    expect(scores.concentration).toBe(49);
+    expect(poleBalance({ left: 0, right: 25 })).toBe("both_low");
+    expect(poleBalance({ left: 80, right: 50 })).toBeNull();
+  });
+
+  test("a single dimension moves only with its own questions", () => {
     const answers = all(3);
-    for (const item of QUIZ_ITEMS.filter((entry) => entry.axis === "basis")) answers[item.id] = item.reverse ? 2 : 4;
-    expect(quizScores(answers)).toEqual({ scope: 50, basis: 75, output: 50, rhythm: 50 });
+    for (const item of QUIZ_ITEMS.filter((entry) => entry.axis === "pacing" && entry.kind === "pole")) answers[item.id] = item.kind === "pole" && item.pole === "right" ? 4 : 2;
+    expect(quizScores(answers)).toEqual({ concentration: 49, orientation: 49, boundary: 49, pacing: 69 });
   });
 
-  test("an unanswered or out-of-range statement is refused", () => {
+  test("an unanswered or out-of-range answer is refused", () => {
     const answers = all(3);
     delete answers.q7;
     expect(() => quizScores(answers)).toThrow(/QUIZ_INCOMPLETE: q7/);
@@ -40,11 +61,16 @@ describe("quiz", () => {
   });
 
   test("the portrait's type and the quiz's type are the same reading of the same scores", () => {
-    const scores = { scope: 20, basis: 80, output: 50, rhythm: 49 };
-    const report = { type: { ...scores, evidence: { scope: "因为", basis: "", output: "", rhythm: "" } } } as unknown as Parameters<typeof portraitType>[0];
+    const scores = { concentration: 20, orientation: 80, boundary: 50, pacing: 49 };
+    const report = { type: { ...scores, evidence: { concentration: "因为", orientation: "", boundary: "", pacing: "" } } } as unknown as Parameters<typeof portraitType>[0];
     expect(portraitType(report)).toEqual(typeFromScores(scores, report.type!.evidence));
-    expect(typeFromScores(scores).code).toBe("SIRP");
+    expect(typeFromScores(scores).code).toBe("CXBU");
     expect(typeFromScores(scores).axes.map((axis) => axis.percent)).toEqual([80, 80, 50, 51]);
+  });
+
+  test("a report on the first version's axes has no type until it is rewritten", () => {
+    const report = { type: { scope: 20, basis: 80, output: 50, rhythm: 49, evidence: {} } } as unknown as Parameters<typeof portraitType>[0];
+    expect(portraitType(report)).toBeNull();
   });
 });
 

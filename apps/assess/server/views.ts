@@ -42,7 +42,7 @@ export function avatarOf(result: StoredResult): AvatarStatus {
 }
 
 /** The public type of a result, with the lines the person said they want once they have. */
-export const typeOf = (result: StoredResult, recorded = recordedScores()) => publicType(result.scores, recorded, result.id, result.wants?.lines);
+export const typeOf = (result: StoredResult, recorded = recordedScores()) => publicType(result.scores, recorded, result.id, result.wants?.lines, result.poles);
 
 export function resultView(result: StoredResult): ResultView {
   const pairs = listPairs(result.id).flatMap((pair) => {

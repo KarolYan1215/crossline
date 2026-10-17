@@ -1,70 +1,108 @@
 import { TYPE_AXES, typeFromScores, type PortraitType, type TypeAxisId } from "./portrait-type";
 
 /**
- * The public quick test (docs/energy-and-ecosystem.md §7, docs/beta-launch.md, decided 2026-10-14): thirty-two statements for the four typing axes, a short
+ * The public quick test (docs/energy-and-ecosystem.md §7, docs/beta-launch.md, decided 2026-10-14): thirty-two questions on the four typing dimensions, a short
  * Munich ChronoType Questionnaire and a three-minute psychomotor vigilance test, all scored here as pure functions so the static
  * `apps/assess` site computes everything in the browser — no ledger, no model, no account. Every module this file imports must stay pure.
  */
 
-/** A statement on one axis. Agreeing points to the axis's right pole, or to its left pole when `reverse`. */
-export type QuizItem = { id: string; axis: TypeAxisId; text: string; reverse: boolean };
+/**
+ * One question of the quick test (redesigned 2026-10-17, docs/assess-redesign.md): a statement measuring one pole on its own (`pole`),
+ * answered on `LIKERT`, or a situation with two options, one per pole (`pair`), answered on `PAIR_SCALE` from 1 (clearly `a`) to 5
+ * (clearly `b`). `a` describes the left pole unless `aRight`.
+ */
+export type QuizItem =
+  | { id: string; axis: TypeAxisId; kind: "pole"; pole: "left" | "right"; text: string }
+  | { id: string; axis: TypeAxisId; kind: "pair"; text: string; a: string; b: string; aRight: boolean };
+
+const pole = (id: string, axis: TypeAxisId, side: "left" | "right", text: string): QuizItem => ({ id, axis, kind: "pole", pole: side, text });
+const pair = (id: string, axis: TypeAxisId, text: string, a: string, b: string, aRight = false): QuizItem => ({ id, axis, kind: "pair", text, a, b, aRight });
 
 /**
- * Eight statements per axis, four keyed to each pole, interleaved so neighbours never share an axis (decided 2026-10-14,
- * docs/beta-launch.md: thirty-two rather than sixteen, so a type sits on more than four answers an axis).
+ * Eight questions per dimension: three statements for each pole, measured independently (two high poles and two low ones are both
+ * possible and both shown), and two situations that make the person choose. Ordered so neighbours never share a dimension, and a
+ * situation comes every few statements. Every statement is positively worded and asks about one behaviour or preference.
  */
 export const QUIZ_ITEMS: QuizItem[] = [
-  { id: "q1", axis: "scope", text: "我常把一个领域里学到的东西，用到另一个完全不同的领域。", reverse: false },
-  { id: "q2", axis: "basis", text: "做重要决定前，我一定要先看到数据或证据。", reverse: true },
-  { id: "q3", axis: "output", text: "做出一个能用的东西，比让很多人知道它更让我满足。", reverse: true },
-  { id: "q4", axis: "rhythm", text: "开始一件事之前，我习惯先列好计划和时间表。", reverse: true },
-  { id: "q5", axis: "scope", text: "我宁愿在一件事上做到顶尖，也不愿样样都懂一点。", reverse: true },
-  { id: "q6", axis: "basis", text: "我常凭直觉判断一件事值不值得做，事后多半是对的。", reverse: false },
-  { id: "q7", axis: "output", text: "把想法讲给别人听、看到别人被说服，让我很有成就感。", reverse: false },
-  { id: "q8", axis: "rhythm", text: "我更喜欢边做边调整，而不是事先定好每一步。", reverse: false },
-  { id: "q9", axis: "scope", text: "同时推进几件不相关的事，比只做一件事更让我有劲。", reverse: false },
-  { id: "q10", axis: "basis", text: "做完一件事，我会用数字回头核对效果，而不是凭感觉说好不好。", reverse: true },
-  { id: "q11", axis: "output", text: "我享受独自把东西一点点做出来的过程。", reverse: true },
-  { id: "q12", axis: "rhythm", text: "计划被打乱会让我明显不舒服。", reverse: true },
-  { id: "q13", axis: "scope", text: "新方向再有意思，我也会先把手头这一件做深。", reverse: true },
-  { id: "q14", axis: "basis", text: "打动我的往往是一个远景，而不是眼前的数字。", reverse: false },
-  { id: "q15", axis: "output", text: "我会花不少时间写作、演讲或在网上分享。", reverse: false },
-  { id: "q16", axis: "rhythm", text: "临时冒出来的机会，我通常会马上抓住。", reverse: false },
-  { id: "q17", axis: "scope", text: "别人问我是做什么的，我很难用一个词回答。", reverse: false },
-  { id: "q18", axis: "basis", text: "遇到重要的选择，我会专门列表格或给各项打分。", reverse: true },
-  { id: "q19", axis: "output", text: "有空的时候，我更愿意钻研一门手艺或工具，而不是经营自己的账号和人脉。", reverse: true },
-  { id: "q20", axis: "rhythm", text: "我的待办清单经常被我自己推翻重排。", reverse: false },
-  { id: "q21", axis: "scope", text: "我能说出自己最擅长的那一件事，而且十年后大概还在做它。", reverse: true },
-  { id: "q22", axis: "basis", text: "认识一个人几分钟，我对他靠不靠谱的判断通常八九不离十。", reverse: false },
-  { id: "q23", axis: "output", text: "我很容易和陌生人聊起来，并让对方记住我在做什么。", reverse: false },
-  { id: "q24", axis: "rhythm", text: "离截止日期还早，我就会把事情做完。", reverse: true },
-  { id: "q25", axis: "scope", text: "我的收藏夹里，什么领域的东西都有。", reverse: false },
-  { id: "q26", axis: "basis", text: "听到一个新说法，我的第一反应是去找出处。", reverse: true },
-  { id: "q27", axis: "output", text: "比起开会讨论，我更愿意自己动手先把原型做出来。", reverse: true },
-  { id: "q28", axis: "rhythm", text: "我常看当天的状态和心情，再决定先做哪件事。", reverse: false },
-  { id: "q29", axis: "scope", text: "比起认识很多圈子的人，我更愿意和同行深入交流。", reverse: true },
-  { id: "q30", axis: "basis", text: "我做决定常常是先有答案，再去找理由。", reverse: false },
-  { id: "q31", axis: "output", text: "能把复杂的事讲明白，是我最得意的本事之一。", reverse: false },
-  { id: "q32", axis: "rhythm", text: "我的作息和工作习惯，每天都差不多固定。", reverse: true }
+  pole("q1", "concentration", "left", "我的时间和精力，大部分投在一件最重要的事上。"),
+  pole("q2", "orientation", "left", "我会反复打磨已经掌握的方法，让它越来越高效。"),
+  pole("q3", "boundary", "left", "我会给不同的事安排固定、分开的时间段。"),
+  pole("q4", "pacing", "left", "我每周在主要的事上投入的时间大致稳定。"),
+  pole("q5", "concentration", "right", "我同时在推进两件以上分量相近的事，如学业、工作、副业或创作。"),
+  pole("q6", "orientation", "right", "我经常主动尝试自己从没做过的领域或方法。"),
+  pole("q7", "boundary", "right", "一天里在几件不同的事之间来回切换，我也能很快进入状态。"),
+  pole("q8", "pacing", "right", "我常在一段时间里高强度投入，之后明显放松一阵。"),
+  pair("q9", "concentration", "回顾过去半年，你的投入更接近哪一种？", "大部分时间集中在一件事上", "时间分配给几件分量相近的事"),
+  pair("q10", "orientation", "有一段空闲的时间，你更可能用来做什么？", "去尝试一个全新的方向", "把擅长的事再推进一步", true),
+  pole("q11", "boundary", "left", "做一件事的时候，我不希望被另一件事的消息打断。"),
+  pole("q12", "pacing", "left", "我习惯每天推进一点，而不是攒到一起做。"),
+  pole("q13", "concentration", "left", "其他事和主线冲突时，我通常先保证主线。"),
+  pole("q14", "orientation", "left", "一件事做出成效后，我会沿着同样的路继续加码。"),
+  pole("q15", "boundary", "right", "我会有意把一件事的成果或人脉用到另一件事上。"),
+  pole("q16", "pacing", "right", "截止日期临近时，我的效率最高。"),
+  pair("q17", "boundary", "你理想的一周安排更接近哪一种？", "几件事穿插进行，随时切换", "每件事有各自固定的时段", true),
+  pair("q18", "pacing", "完成一个需要一个月的项目，你更常见的做法是？", "每天推进一部分", "集中几段时间完成大部分"),
+  pole("q19", "concentration", "right", "少了正在做的任何一条线，我都会觉得自己不完整。"),
+  pole("q20", "orientation", "right", "即使成功的可能不明，我也愿意花时间做新的尝试。"),
+  pole("q21", "boundary", "left", "我倾向于让不同领域的人和事互不交叉。"),
+  pole("q22", "pacing", "left", "截止日期前，我的工作量和平时相差不大。"),
+  pole("q23", "concentration", "left", "我有一件事明显比其他事都重要。"),
+  pole("q24", "orientation", "left", "选择下一步时，我优先考虑能用上现有积累的机会。"),
+  pair("q25", "concentration", "设想未来三年理想的状态，你更倾向于？", "同时经营几个分量相近的方向", "在一个方向上走得很深", true),
+  pair("q26", "orientation", "面前有两个机会，你更可能选择？", "回报较确定、用得上现有能力的", "回报不确定、但能进入新领域的"),
+  pole("q27", "boundary", "right", "做一件事时想到另一件事的点子，我会马上记下或处理。"),
+  pole("q28", "pacing", "right", "状态好的时候，我会连续投入很长时间。"),
+  pole("q29", "concentration", "right", "我会有意识地把时间分给几件同样重要的事，而不是只押在一件上。"),
+  pole("q30", "orientation", "right", "一件事做熟练之后，我会开始寻找新的方向。"),
+  pair("q31", "boundary", "你在不同领域认识的人，更接近哪一种？", "分属不同圈子，很少交叉", "经常互相介绍，交织在一起"),
+  pair("q32", "pacing", "回顾你的投入曲线，更接近哪一种？", "起伏明显，有高峰也有低谷", "比较平稳", true)
 ];
 
-/** The five Likert answers, 1 to 5. */
+/** The five Likert answers to a statement, 1 to 5. */
 export const LIKERT = ["非常不同意", "不同意", "说不准", "同意", "非常同意"] as const;
+/** The five answers to a situation, 1 (clearly the first option) to 5 (clearly the second). */
+export const PAIR_SCALE = ["明显更像 A", "偏 A", "两者差不多", "偏 B", "明显更像 B"] as const;
+
+/** Each pole's own score, 0–100, from its three statements alone. */
+export type PoleScores = Record<TypeAxisId, { left: number; right: number }>;
+
+/** A pole at or above this is strong, at or below `POLE_LOW` weak: both strong (or both weak) is said on the result, not hidden. */
+export const POLE_HIGH = 75;
+export const POLE_LOW = 25;
+/** 「两端都强」, 「两端都弱」, or nothing. */
+export const poleBalance = (poles: { left: number; right: number }): "both_high" | "both_low" | null =>
+  poles.left >= POLE_HIGH && poles.right >= POLE_HIGH ? "both_high" : poles.left <= POLE_LOW && poles.right <= POLE_LOW ? "both_low" : null;
+
+const toHundred = (mean: number) => ((mean - 1) / 4) * 100;
 
 /**
- * Axis scores 0–100 (0 = left pole, 100 = right pole) from an answer of 1–5 to every statement: each answer is keyed towards the right
- * pole (a reversed statement as 6 − answer), the axis mean of 1–5 is mapped to 0–100. Throws `QUIZ_INCOMPLETE` when a statement is
- * unanswered or an answer is not 1–5.
+ * The poles and the dimension scores from an answer of 1–5 to every question. Each pole is the mean of its three statements mapped to
+ * 0–100. A dimension's score (0 = left pole, 100 = right pole) weighs the six statements and the two situations by count: three quarters
+ * from the difference of the poles (50 + (right − left) / 2), one quarter from the situations' mean towards the right. A dimension that
+ * lands exactly on 50 is decided by the situations, then by the poles, then left: it is shown as 49 or 51. Throws `QUIZ_INCOMPLETE` when
+ * a question is unanswered or an answer is not 1–5.
  */
-export function quizScores(answers: Record<string, number>): Record<TypeAxisId, number> {
+export function quizResult(answers: Record<string, number>): { scores: Record<TypeAxisId, number>; poles: PoleScores } {
   const missing = QUIZ_ITEMS.filter((item) => ![1, 2, 3, 4, 5].includes(answers[item.id] ?? 0));
   if (missing.length) throw new Error(`QUIZ_INCOMPLETE: ${missing.map((item) => item.id).join(",")}`);
-  return Object.fromEntries(TYPE_AXES.map((axis) => {
-    const keyed = QUIZ_ITEMS.filter((item) => item.axis === axis.id).map((item) => item.reverse ? 6 - answers[item.id]! : answers[item.id]!);
-    const mean = keyed.reduce((sum, value) => sum + value, 0) / keyed.length;
-    return [axis.id, Math.round(((mean - 1) / 4) * 100)];
-  })) as Record<TypeAxisId, number>;
+  const mean = (values: number[]) => values.reduce((sum, value) => sum + value, 0) / values.length;
+  const scores = {} as Record<TypeAxisId, number>;
+  const poles = {} as PoleScores;
+  for (const axis of TYPE_AXES) {
+    const items = QUIZ_ITEMS.filter((item) => item.axis === axis.id);
+    const side = (which: "left" | "right") => toHundred(mean(items.filter((item) => item.kind === "pole" && item.pole === which).map((item) => answers[item.id]!)));
+    const left = side("left"), right = side("right");
+    const situations = toHundred(mean(items.flatMap((item) => item.kind === "pair" ? [item.aRight ? 6 - answers[item.id]! : answers[item.id]!] : [])));
+    let score = Math.round(0.75 * (50 + (right - left) / 2) + 0.25 * situations);
+    if (score === 50) score = situations !== 50 ? (situations > 50 ? 51 : 49) : right > left ? 51 : 49;
+    scores[axis.id] = score;
+    poles[axis.id] = { left: Math.round(left), right: Math.round(right) };
+  }
+  return { scores, poles };
 }
+
+/** The dimension scores alone (`quizResult`). */
+export const quizScores = (answers: Record<string, number>): Record<TypeAxisId, number> => quizResult(answers).scores;
 
 /** The quick test's type: the same sixteen names as the portrait. */
 export const quizType = (answers: Record<string, number>): PortraitType => typeFromScores(quizScores(answers));
@@ -169,6 +207,6 @@ export function pvtSummary(trials: PvtTrial[], prematureTaps = 0): PvtSummary {
 }
 export type { PortraitType, TypeAxisId } from "./portrait-type";
 /** The type tables, for the public app, which may import only this module and the other pure subpaths. */
-export { TYPE_AXES, TYPE_GROUPS, TYPE_TABLE, typeFromScores } from "./portrait-type";
+export { LEGACY_TYPE_CODE, TYPE_AXES, TYPE_GROUPS, TYPE_TABLE, typeFromScores } from "./portrait-type";
 /** The quick test ↔ app link contract (`assess-link.ts`): reached as `@crossline/core/assess` or `@crossline/core`, so no new subpath. */
 export * from "./assess-link";

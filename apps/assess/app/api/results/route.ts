@@ -34,7 +34,7 @@ export async function POST(request: Request): Promise<Response> {
   if (testsTakenBy(submission.email) >= TESTS_PER_EMAIL) {
     const latest = latestResultByEmail(submission.email);
     if (latest) {
-      const type = publicType(latest.scores, {}, latest.id);
+      const type = publicType(latest.scores, {}, latest.id, undefined, latest.poles);
       sendResultMail(latest, { code: type.code, name: type.name, subtitle: type.subtitle });
     }
     return fail("EMAIL_LIMIT_REACHED");
@@ -43,7 +43,7 @@ export async function POST(request: Request): Promise<Response> {
   const pairedBefore = inviter ? Boolean(findPair(inviter.id, submission.email)) : false;
 
   const result = createResult({
-    email: submission.email, nickname: submission.nickname, scores: submission.scores, code: typeFromScores(submission.scores).code,
+    email: submission.email, nickname: submission.nickname, scores: submission.scores, poles: submission.poles, code: typeFromScores(submission.scores).code,
     appearance: submission.appearance, sendEmail: submission.sendEmail
   });
   try {
@@ -61,7 +61,7 @@ export async function POST(request: Request): Promise<Response> {
     if (created && !pairedBefore && inviter.sendEmail) sendPairNotice(inviter, result.nickname, pair.pairToken);
   }
   if (result.sendEmail) {
-    const type = publicType(result.scores, {}, result.id);
+    const type = publicType(result.scores, {}, result.id, undefined, result.poles);
     sendResultMail(result, { code: type.code, name: type.name, subtitle: type.subtitle });
   }
   const response: SubmitResponse = { resultToken: result.resultToken, inviteToken: result.inviteToken, ...(pairToken ? { pairToken } : {}) };

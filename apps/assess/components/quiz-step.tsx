@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { LIKERT, QUIZ_ITEMS } from "@crossline/core/assess";
+import { LIKERT, PAIR_SCALE, QUIZ_ITEMS } from "@crossline/core/assess";
 import { QUIZ_LENGTH, answeredCount, type Flow } from "../lib/flow";
 
 /**
- * One statement per screen as a native radio group (the browser gives arrow keys and screen-reader semantics for free). A click, a tap
+ * One question per screen — a statement answered on agreement, or a situation with two options A and B answered on which it is closer to — as a native radio group (the browser gives arrow keys and screen-reader semantics for free). A click, a tap
  * or Space answers and moves on; an arrow key only moves the choice, so walking the options never skips a statement. 1–5 and Enter are
  * handled by the parent for the whole page.
  */
@@ -30,7 +30,11 @@ export function QuizStep({ flow, onChoose, onBack, onNext }: {
     <p className="as-kicker"><span className="as-num">{flow.index + 1}</span> / {QUIZ_LENGTH}</p>
     <fieldset className="as-likert" onKeyDown={(event) => { if (event.key.startsWith("Arrow")) arrow.current = true; }}>
       <legend><h2 ref={heading} tabIndex={-1} className="as-statement">{item.text}</h2></legend>
-      {LIKERT.map((label, offset) => {
+      {item.kind === "pair" && <dl className="as-pair">
+        <div><dt>A</dt><dd>{item.a}</dd></div>
+        <div><dt>B</dt><dd>{item.b}</dd></div>
+      </dl>}
+      {(item.kind === "pair" ? PAIR_SCALE : LIKERT).map((label, offset) => {
         const value = offset + 1;
         return <label key={value} className="as-option" data-on={chosen === value || undefined}>
           <input type="radio" name={item.id} value={value} checked={chosen === value}

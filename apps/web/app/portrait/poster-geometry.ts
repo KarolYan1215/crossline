@@ -8,7 +8,7 @@ import { INTERFACE_SERIF_STRINGS } from "../ui/serif-strings";
 
 /**
  * One typing axis as a bar on a track (percent of the track's width): it grows from the middle towards the pole the person leans to, so
- * 「深耕 94% 跨界」 cannot be read backwards; a lean of two thirds or more carries its percentage inside the bar, a weaker one beside its end.
+ * 「单线主导 94% 多线并行」 cannot be read backwards; a lean of two thirds or more carries its percentage inside the bar, a weaker one beside its end.
  */
 export function axisBar(score: number): { side: "left" | "right"; percent: number; from: number; width: number; inside: boolean } {
   const right = score >= 50;
@@ -110,7 +110,7 @@ export const POSTER_LABEL_TITLES = ["核心词", "价值核心", "建议底座",
  */
 export function posterSerifText(): string {
   const strings = [
-    ...TYPE_AXES.flatMap((axis) => [axis.left.letter, axis.right.letter]),
+    ...TYPE_AXES.flatMap((axis) => [axis.left.letter, axis.right.letter, axis.left.label, axis.right.label]),
     ...Object.values(TYPE_TABLE).map((type) => type.name), ...Object.values(TYPE_GROUPS).map((group) => group.name),
     ...SCHWARTZ_VALUES.map((value) => value.name), ...POSTER_SECTION_TITLES, ...POSTER_LABEL_TITLES, ...INTERFACE_SERIF_STRINGS, "0123456789%· "
   ];
