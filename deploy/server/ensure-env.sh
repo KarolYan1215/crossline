@@ -21,6 +21,10 @@ drop() { # file key — removes a setting a decision has retired; reported once,
 # No sign-up cap and no daily ceiling on the test's figures (the owner's decision of 2026-10-17): each address's own figure limit
 # bounds the cost instead. Both were written by an earlier make-env.sh.
 drop /srv/crossline/app.env CROSSLINE_SIGNUP_CAP
+# A list with no cap admits only the list (packages/auth): with the cap gone, the owner's own address that set-secrets.sh wrote there
+# turned open sign-up into invitation only and refused everyone else (found 2026-10-17). Open sign-up carries no list.
+drop /srv/crossline/app.env CROSSLINE_SIGNUP_ALLOWLIST
+drop /srv/crossline/app.env CROSSLINE_SIGNUP_ALLOWLIST_FILE
 drop /srv/assess/assess.env ASSESS_IMAGE_DAILY_LIMIT
 # The figures are drawn with Volcengine Ark's Seedream, whose key set-secrets.sh asks for; without the provider named the test fell back
 # to SiliconFlow's API with that Ark key, every draw failed and the result page kept the template (2026-10-16).

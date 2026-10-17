@@ -8,3 +8,10 @@ test("the connection control is on the page from the first render, so it can rea
   expect(html).toContain('aria-label="模型连接"');
   expect(html).toContain("连接后自动进入访谈");
 });
+
+// An account may connect another model's API instead of ChatGPT (decided 2026-10-17): the card is on the connect page, not only in settings.
+test("the connect page offers another model's API beside ChatGPT", () => {
+  const html = renderToStaticMarkup(<ConnectFlow next="/onboarding" />);
+  expect(html).toContain("或者用其他模型的 API");
+  expect(html).toContain('aria-label="其他模型"');
+});

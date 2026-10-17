@@ -24,11 +24,11 @@ CROSSLINE_AUTO_PUBLISH=off
 BETTER_AUTH_SECRET=$(rand 48)
 CROSSLINE_SUPERVISOR_CAPABILITY_SECRET=$(rand 48)
 CROSSLINE_SECRET_KEY=$(rand 32)
-# Who may create an account: anyone (the owner's decision of 2026-10-17: no cap). CROSSLINE_SIGNUP_CAP=<n> would admit anyone while there
-# are fewer than n accounts and put the rest on the waiting list file; the addresses listed here are always admitted.
+# Who may create an account: anyone (the owner's decision of 2026-10-17: no cap, no list). CROSSLINE_SIGNUP_CAP=<n> would admit anyone
+# while there are fewer than n accounts and put the rest on the waiting list file. CROSSLINE_SIGNUP_ALLOWLIST is left out on purpose: a
+# list with no cap admits only the list.
 CROSSLINE_PUBLIC_BETA=1
 CROSSLINE_SIGNUP_WAITLIST_FILE=/data/signup-waitlist.txt
-CROSSLINE_SIGNUP_ALLOWLIST=
 # Sign-in codes go out through this SMTP account (Resend: host smtp.resend.com, port 465, user resend, password = API key).
 CROSSLINE_SMTP_HOST=smtp.resend.com
 CROSSLINE_SMTP_PORT=465

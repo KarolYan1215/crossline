@@ -31,8 +31,11 @@ const shown = (blocker: { code: string; message: string }) => /SUPERVISOR|CAPABI
  * OpenAI API, OpenRouter or a model on this computer — and every one runs through the same Codex path. It serves only what it has passed
  * the check for, and the card says plainly what it can never do here. The key is sent once and never shown again (only its last four).
  */
-export function ModelProviderCard({ initial }: { initial?: ProviderView }) {
+export function ModelProviderCard({ initial, onReady }: { initial?: ProviderView; onReady?: (ready: boolean) => void }) {
   const [view, setView] = useState<ProviderView | undefined>(initial);
+  // The interview is the first thing an account does: once the added model has passed the check for it, the connect page moves on.
+  const interviewServed = Boolean(view?.features.some((feature) => feature.skill.endsWith("crossline-onboarding") && feature.served));
+  useEffect(() => { if (view) onReady?.(interviewServed); }, [interviewServed, Boolean(view)]);
   const [draft, setDraft] = useState<Draft>();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string>();
@@ -103,7 +106,7 @@ export function ModelProviderCard({ initial }: { initial?: ProviderView }) {
         onChange={(event) => setDraft({ ...draft, json: event.target.checked })} />这个接口只支持 JSON 模式（格式要求写进说明里）</label>}
       <label>API key<input type="password" autoComplete="off" value={draft.apiKey} placeholder={provider?.keyLast4 && provider.baseUrl === draft.baseUrl ? `已保存 ···${provider.keyLast4}，留空则不变` : "本机模型可以留空"}
         onChange={(event) => setDraft({ ...draft, apiKey: event.target.value })} />
-        <small>只交给后台加密保存在这台电脑上，不进账本、导出和备份，之后不再显示。</small></label>
+        <small>只交给后台加密保存，不进账本、导出和备份，之后不再显示。</small></label>
       <span className="st-row-actions"><button type="submit" className="primary-button" disabled={busy}>保存</button>
         <button type="button" disabled={busy} onClick={() => setDraft(undefined)}>取消</button></span>
     </form>}

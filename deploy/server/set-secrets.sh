@@ -26,6 +26,4 @@ if [ -n "$tavily" ]; then put "$APP" TAVILY_API_KEY "$tavily"; put "$APP" CROSSL
 read -r -s -p "SiliconFlow API key for the test's 「你也许想做」 (sk-…): " siliconflow; echo
 if [ -n "$siliconflow" ]; then put "$ASSESS" ASSESS_TEXT_API_KEY "$siliconflow"; echo "  SiliconFlow key saved."; fi
 
-read -r -p "Your own email (always allowed to sign up; Enter to skip): " owner
-if [ -n "$owner" ]; then put "$APP" CROSSLINE_SIGNUP_ALLOWLIST "$owner"; echo "  Owner email saved."; fi
 echo "Done. Restart: sudo sh /srv/crossline/run.sh"

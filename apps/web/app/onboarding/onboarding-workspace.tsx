@@ -51,10 +51,16 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
   const [connected, setConnected] = useState<boolean | undefined>();
   // Connecting the model has its own page (/connect, the first stop after signing in); arriving here without it goes back there.
   useEffect(() => {
-    void fetch("/api/codex/account", { cache: "no-store" }).then((response) => response.json())
+    const read = (url: string) => fetch(url, { cache: "no-store" }).then((response) => response.json()).catch(() => undefined);
+    void Promise.all([read("/api/codex/account"), read("/api/model/provider")]).then(([account, provider]: [
+      { account?: unknown; blocker?: unknown } | undefined,
+      { features?: Array<{ skill: string; served: boolean }> } | undefined
+    ]) => {
+      // Another model's API that has passed the check for the interview is a connection too (decided 2026-10-17).
+      if (provider?.features?.some((feature) => feature.skill.endsWith("crossline-onboarding") && feature.served)) { setConnected(true); return; }
       // Only a definite "not signed in" sends the person there: with the background service unreachable /connect could not help either.
-      .then((answer: { account?: unknown; blocker?: unknown }) => setConnected(answer.account ? true : answer.blocker ? undefined : false))
-      .catch(() => undefined);
+      if (account) setConnected(account.account ? true : account.blocker ? undefined : false);
+    });
   }, []);
   useEffect(() => { if (connected === false && !line) location.replace("/connect?next=/onboarding"); }, [connected, line]);
   const bottom = useRef<HTMLDivElement>(null);

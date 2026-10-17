@@ -128,7 +128,8 @@ function crosslineAuthConfig(options: CrosslineAuthOptions): BetterAuthOptions {
     // The hosted beta (docs/beta-launch.md §10.6): who may create an account, by any path — email code, password or Google. Existing
     // accounts sign in as before. Listed addresses always may; with `CROSSLINE_SIGNUP_CAP` anyone else may while the accounts number
     // fewer than the cap (people come by the public test or straight to the interview, and neither path should need an invitation);
-    // past it the address goes on the waiting list. A list with no cap admits only the list.
+    // past it the address goes on the waiting list. A list with no cap admits only the list — so open sign-up must carry no list at all:
+    // dropping the cap while the owner's own address stayed listed closed the hosted beta to everyone else (2026-10-17).
     ...(signupAllowlist() || signupCap() ? { databaseHooks: { user: { create: { before: async (user: { email: string }) => {
       const email = user.email.trim().toLowerCase();
       if (signupAllowlist()?.has(email)) return { data: user };

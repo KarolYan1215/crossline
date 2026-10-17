@@ -356,10 +356,10 @@
 
 **两条路都能单独走**
 - 只做测评：测评结果页给出 App 地址和五步说明（`ASSESS_APP_URL`；没设时仍是「申请内测」）。
-- 直接做访谈：登录页的三步里写明需要能用 Codex 的 ChatGPT 账号，以及先在 ChatGPT 设置 → 安全开启设备代码登录；访谈页的「第一步：连接本人的 ChatGPT」给出同样三步、代码和「获取新代码」。
+- 直接做访谈，不必先做测评：登录后的「连接模型」页有两条路。一条是能用 Codex 的 ChatGPT 账号（先在 ChatGPT 设置 → 安全开启设备代码登录，再输入一次性代码）。另一条是自己的模型 API（2026-10-17 本人决定）：DeepSeek、Kimi、通义千问、智谱、OpenAI API、OpenRouter 等，保存后自动检验回答格式，「访谈」一项通过就进入访谈。网页搜索、画形象和执行命令的助手只在 ChatGPT 账号上可用。
 
 **谁能注册**（`packages/auth` 的 `signupCap` 与 `signupAllowlist`）
-- 不设上限（2026-10-17 本人决定）：任何人都能注册。部署时 `ensure-env.sh` 从服务器的 `app.env` 删掉旧的 `CROSSLINE_SIGNUP_CAP=30`。
+- 不设上限，也不设名单（2026-10-17 本人决定）：任何人都能注册。部署时 `ensure-env.sh` 从服务器的 `app.env` 删掉旧的 `CROSSLINE_SIGNUP_CAP=30`，以及 `CROSSLINE_SIGNUP_ALLOWLIST`/`_FILE`。有名单而无上限时只放行名单上的地址：只删上限、留着本人邮箱的那一版，把其他人全挡在了门外（报「这个邮箱还没有内测资格」），这一版一并删掉名单。
 - 机制仍在：设了 `CROSSLINE_SIGNUP_CAP` 时，账号数达到上限后新邮箱写进等候名单（`CROSSLINE_SIGNUP_WAITLIST_FILE`）并得到 `SIGNUP_FULL`；`CROSSLINE_SIGNUP_ALLOWLIST` 列出的邮箱总能注册。
 - 起初设计的「只有测评申请者能注册」会挡住直接来做访谈的人，所以没有采用。
 
