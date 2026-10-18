@@ -153,6 +153,14 @@ export function layoutTimeline(input: { nodes: TimelineNodeInput[]; ticks: Timel
     const x = tick.day ? xOf(tick.day) : milestone.x - 12;
     return [{ ...tick, x, axisY: row.axisY, plannedX: tick.plannedDay && tick.state === "postponed" ? xOf(tick.plannedDay) : null }];
   });
+  // Ticks on one day of one row sat on the same spot, and the one underneath could not be clicked (2026-10-18 walkthrough): each is
+  // nudged right of the one before it on its row, by one dot's width.
+  const lastX = new Map<number, number>();
+  for (const tick of [...ticks].sort((a, b) => a.axisY - b.axisY || a.x - b.x)) {
+    const before = lastX.get(tick.axisY);
+    if (before !== undefined && tick.x < before + TICK_GAP) tick.x = before + TICK_GAP;
+    lastX.set(tick.axisY, tick.x);
+  }
 
   const edges: TimelineLayout["edges"] = [];
   // A step of a chain is an arc over the axis from the earlier marker to the later one, ending in an arrow just short of the marker. A
@@ -211,6 +219,8 @@ export type Box = { x: number; y: number; w: number; h: number };
 type LaidNode = TimelineLayout["nodes"][number];
 export const markerBox = (node: LaidNode): Box => ({ x: node.x - 11, y: node.axisY - 11, w: 22, h: 22 });
 export const nodeLabelBox = (node: LaidNode): Box | null => node.labelW > 0 ? { x: node.labelX, y: node.labelY, w: node.labelW, h: 17 } : null;
+/** The least distance between two ticks on one row: a dot (12px) and a hair. */
+const TICK_GAP = 13;
 export const tickBox = (tick: TimelineLayout["ticks"][number]): Box => ({ x: tick.x - 6, y: tick.axisY - 6, w: 12, h: 12 });
 export const riskBox = (node: LaidNode): Box => ({ x: node.x + 7, y: node.axisY - 21, w: 14, h: 14 });
 /** A relation's label: its kind as plain text, or as a chip (1px border, 6px padding) when the relation hands over an artifact. */

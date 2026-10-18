@@ -5,6 +5,15 @@ const node = (id: string, line: string, day?: string, dependsOn: string[] = []):
   ({ id, line, title: id, status: "approved", kind: "milestone", day, dependsOn });
 
 describe("milestone timeline", () => {
+  it("spreads ticks that fall on one day of one row, so each can be clicked", () => {
+    const tick = (id: string) => ({ id, milestoneId: "a", line: "research", day: "2026-10-18", state: "planned" as const, plannedDay: null });
+    const layout = layoutTimeline({ nodes: [node("a", "research", "2026-11-20")], ticks: [tick("t1"), tick("t2"), tick("t3")], relations: [],
+      lineOrder: ["research"], today: "2026-10-18" });
+    const xs = layout.ticks.map((item) => item.x).sort((a, b) => a - b);
+    expect(xs[1]! - xs[0]!).toBeGreaterThanOrEqual(12);
+    expect(xs[2]! - xs[1]!).toBeGreaterThanOrEqual(12);
+  });
+
   it("draws a cross-line edge in the upstream line's colour, dashed while a candidate, and marks one whose time order no longer holds", () => {
     const layout = layoutTimeline({ nodes: [node("up", "research", "2026-10-31"), node("down", "media", "2026-11-01")], ticks: [],
       relations: [{ id: "artifact:x:up->down", from: "up", to: "down", pending: true, label: "复用", broken: true },

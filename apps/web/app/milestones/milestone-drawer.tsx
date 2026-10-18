@@ -113,7 +113,11 @@ export function MilestoneDrawer({ milestone, labels, onClose }: { milestone: Boa
         <h3>验收标准 <span className="mono md-sub">{milestone.criteria.filter((criterion) => criterion.quarters === 4).length}/{milestone.criteria.length}</span></h3>
         {milestone.criteria.length === 0 && <p className="md-sub">尚无验收标准：关联任务仍按各自证据验收，但里程碑进度无法记录。</p>}
         {milestone.criteria.map((criterion) => <CriterionRow key={criterion.id} criterion={criterion} busy={action.busy}
-          onSave={(value) => void saveThreshold(criterion.id, value)} />)}
+          onSave={(value) => void saveThreshold(criterion.id, value)}
+          onReword={(statement) => void saveMilestone({ successCriteria: milestone.successCriteria.map((item: SuccessCriterion) =>
+            item.id === criterion.id ? { ...item, statement } : item) })}
+          {...(milestone.successCriteria.length > 1 ? { onRemove: () => void saveMilestone({
+            successCriteria: milestone.successCriteria.filter((item: SuccessCriterion) => item.id !== criterion.id) }, "去掉中…", "未去掉：至少保留一条衡量结果的标准。") } : {})} />)}
         {milestone.successCriteria.length < 10 && <AddCriterion busy={action.busy}
           onAdd={(criterion) => void saveMilestone({ successCriteria: [...milestone.successCriteria, criterion] })} />}
       </section>
@@ -189,9 +193,15 @@ function TickStrip({ milestone }: { milestone: BoardMilestone }) {
   </div>;
 }
 
-function CriterionRow({ criterion, busy, onSave }: { criterion: BoardCriterion; busy: boolean; onSave: (value: number) => void }) {
+/**
+ * One criterion: its reading as a ring, a score line edited in place, and its wording changed or the criterion taken out — before
+ * 2026-10-18 an approved milestone's criteria could only be added to. Each change is a new version, so past verdicts stay readable.
+ */
+function CriterionRow({ criterion, busy, onSave, onReword, onRemove }: { criterion: BoardCriterion; busy: boolean; onSave: (value: number) => void;
+  onReword: (statement: string) => void; onRemove?: (() => void) | undefined }) {
   const threshold = criterion.threshold;
   const [value, setValue] = useState(threshold ? String(threshold.value) : "");
+  const [wording, setWording] = useState<string | null>(null);
   const number = Number(value);
   const bare = threshold?.bare;
   const thin = threshold && bare !== undefined && Number.isFinite(number)
@@ -199,7 +209,15 @@ function CriterionRow({ criterion, busy, onSave }: { criterion: BoardCriterion; 
   return <div className="md-criterion">
     <ProgressRing quarters={criterion.quarters} label={criterion.statement} />
     <div>
-      <p>{criterion.statement}</p>
+      {wording === null
+        ? <p>{criterion.statement} <button type="button" className="text-button" disabled={busy} onClick={() => setWording(criterion.statement)}>改</button>
+          {onRemove && <button type="button" className="text-button" disabled={busy} onClick={onRemove}>去掉</button>}</p>
+        : <form className="md-reword" onSubmit={(event) => { event.preventDefault(); const next = wording.trim();
+            if (next && next !== criterion.statement) onReword(next); else setWording(null); }}>
+          <input value={wording} maxLength={300} aria-label="验收标准" autoFocus onChange={(event) => setWording(event.target.value)} />
+          <button type="submit" disabled={busy || !wording.trim()}>保存</button>
+          <button type="button" className="text-button" onClick={() => setWording(null)}>取消</button>
+        </form>}
       {criterion.observed && <small className="gen">{criterion.observed}</small>}
       {threshold && <div className="md-threshold">
         <Bullet label={criterion.statement} target={Number.isFinite(number) ? number : threshold.value} {...(bare !== undefined ? { bare } : {})}
