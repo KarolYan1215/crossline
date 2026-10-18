@@ -71,16 +71,30 @@ export type SchedulePreferences = { timeZone: string; mode: "buffered" | "asap";
   /** The four packing numbers set on the plan page; absent, `mode` stands for its preset. */
   params?: ScheduleParams };
 
-export type GoalSettings = { importance: "important" | "ordinary";
+export type GoalSettings = {
+  /** The older important/ordinary choice; absent when nobody chose one, so the system's preset weight keeps applying. */
+  importance?: "important" | "ordinary";
   confirmedDeadline: string | null; sourceQuote: string | null;
   /** 0–100, set with the slider; `importance` follows it (60 and above is important). */
   weight?: number };
 const goalKey = goalSettingKey;
 
+/** The notes the two risk questions saved a moved date with: settings carrying them and a bare 「ordinary」 had it written for them. */
+const IMPLIED_ORDINARY = new Set(["在「可能赶不上」的询问里推迟", "在里程碑风险的询问里调整截止"]);
+
 export function readGoalSettings(ctx: AccessContext, id: string): GoalSettings | null {
   const raw = getStore().getSetting(ctx.workspaceId, goalKey(id));
   if (!raw) return null;
-  try { return JSON.parse(raw) as GoalSettings; } catch { return null; }
+  try {
+    const settings = JSON.parse(raw) as GoalSettings;
+    // Moving a date from a risk question used to write 「ordinary」 the person never chose (fixed 2026-10-18): read as no choice, so the
+    // preset weight applies again on accounts that answered one before the fix.
+    if (settings.importance === "ordinary" && settings.weight === undefined && IMPLIED_ORDINARY.has(settings.sourceQuote ?? "")) {
+      const { importance: _implied, ...rest } = settings;
+      return rest;
+    }
+    return settings;
+  } catch { return null; }
 }
 
 /**
@@ -96,16 +110,17 @@ export function saveGoalSettings(ctx: AccessContext, id: string, input: { import
   const weight = typeof input.weight === "number" && Number.isFinite(input.weight) ? Math.max(0, Math.min(100, Math.round(input.weight))) : previous?.weight;
   const importance = input.importance === "important" || input.importance === "ordinary" ? input.importance
     : typeof input.weight === "number" && weight !== undefined ? (weight >= 60 ? "important" : "ordinary")
-    // A partial save (only a deadline, say) on a goal with no settings yet keeps the importance the schedule already used for it.
-    : input.importance === undefined ? previous?.importance ?? readSchedulePreferences(ctx)?.importance[id] ?? "ordinary" : undefined;
-  if (importance !== "important" && importance !== "ordinary") return { ok: false, code: "GOAL_IMPORTANCE_INVALID" };
+    // A partial save (only a deadline, say) keeps whatever importance was in effect — none chosen means the preset keeps applying; it
+    // used to default to 「ordinary」, which moved a milestone the presets weighed at 65 out of 「重要·有期限」.
+    : input.importance === undefined ? previous?.importance ?? readSchedulePreferences(ctx)?.importance[id] : "invalid";
+  if (importance !== undefined && importance !== "important" && importance !== "ordinary") return { ok: false, code: "GOAL_IMPORTANCE_INVALID" };
   const date = input.confirmedDeadline === undefined ? previous?.confirmedDeadline ?? null : input.confirmedDeadline;
   if (date !== null && (typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date)
     || Number.isNaN(Date.parse(`${date}T00:00:00Z`)) || new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) !== date))
     return { ok: false, code: "GOAL_DEADLINE_INVALID" };
   const quote = typeof input.sourceQuote === "string" ? input.sourceQuote.trim() : previous?.sourceQuote ?? "";
   if (quote.length > 500) return { ok: false, code: "GOAL_QUOTE_TOO_LONG" };
-  const next: GoalSettings = { importance, confirmedDeadline: date as string | null,
+  const next: GoalSettings = { ...(importance ? { importance } : {}), confirmedDeadline: date as string | null,
     sourceQuote: quote || null, ...(weight !== undefined ? { weight } : {}) };
   const store = getStore();
   if (JSON.stringify(previous) === JSON.stringify(next)) return { ok: true };

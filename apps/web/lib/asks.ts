@@ -830,9 +830,8 @@ async function answerOne(ctx: AccessContext, ask: Ask, choice: AskChoice, values
     case "evidence_manual": return acceptWorkOrderEvidence(ctx, ask.entityId);
     case "milestone_risk": {
       if (optionId === "extend") {
-        const settings = readGoalSettings(ctx, ask.entityId);
-        return saveGoalSettings(ctx, ask.entityId, { importance: settings?.importance ?? "ordinary", confirmedDeadline: values.date!,
-          sourceQuote: "在「可能赶不上」的询问里推迟" });
+        // Only the date: passing an importance here demoted every milestone moved this way to 「ordinary」 (2026-10-18 walkthrough).
+        return saveGoalSettings(ctx, ask.entityId, { confirmedDeadline: values.date!, sourceQuote: "在「可能赶不上」的询问里推迟" });
       }
       const goal = loadGoalForecast(ctx).goals.find((item) => item.milestoneId === ask.entityId);
       record(ctx, "risk.accepted", ask.entityId, `risk:accepted:${ask.entityId}:${Date.now()}`, { slackDays: goal?.slackDays ?? -999, p85Day: goal?.p85Day ?? null });
@@ -933,9 +932,7 @@ async function answerOne(ctx: AccessContext, ask: Ask, choice: AskChoice, values
       const how: RiskDecision["how"] | undefined = optionId === "accept" ? "accept" : optionId === "extend" ? "extend" : optionId === "ignore" ? "ignore" : undefined;
       if (!how) return { ok: false, code: "ASK_OPTION_UNKNOWN" };
       if (how === "extend") {
-        const settings = readGoalSettings(ctx, ask.entityId);
-        const saved = saveGoalSettings(ctx, ask.entityId, { importance: settings?.importance ?? "ordinary", confirmedDeadline: values.date!,
-          sourceQuote: "在里程碑风险的询问里调整截止" });
+        const saved = saveGoalSettings(ctx, ask.entityId, { confirmedDeadline: values.date!, sourceQuote: "在里程碑风险的询问里调整截止" });
         if (!saved.ok) return saved;
       }
       // A `schedule.` setting, so the answer is undone with the rest of the operation.
