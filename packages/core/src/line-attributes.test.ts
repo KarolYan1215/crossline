@@ -9,6 +9,7 @@ test("a goal is composed 「成为 A 的、B 的<身份>」 from the chosen part
   expect(composeGoal(["神经形态计算方向", "能独立立项"], "研究者")).toBe("成为神经形态计算方向的、能独立立项的研究者");
   expect(composeGoal(["有影响力"], "创作者")).toBe("成为有影响力的创作者");
   expect(composeGoal([], "创作者")).toBe("");
+  expect(composeGoal(["AI 排班与备料产品", "产品设计能力"], "产品人")).toBe("成为 AI 排班与备料的、有产品设计能力的产品人");
   // A part typed with its own 的 or 成为 is not doubled.
   expect(composeGoal(["成为科普的", " 有影响力的 "], "创作者")).toBe("成为科普的、有影响力的创作者");
 });

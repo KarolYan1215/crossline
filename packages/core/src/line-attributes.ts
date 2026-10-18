@@ -115,7 +115,9 @@ const nounStem = (noun: string) => { const stem = noun.replace(/[者人家师员
 export function composeGoal(parts: string[], noun: string): string {
   const stem = nounStem(noun);
   const clean = parts.map(cleanAttribute).filter(Boolean)
-    .map((part) => stem && part.endsWith(stem) && part.length - stem.length >= 2 ? cleanAttribute(part.slice(0, -stem.length)) : part);
+    .map((part) => stem && part.endsWith(stem) && part.length - stem.length >= 2 ? cleanAttribute(part.slice(0, -stem.length)) : part)
+    // 「产品设计能力的产品人」 reads as a noun stacked on a noun; 「有产品设计能力的」 is what is meant (2026-10-18 walkthrough, W-47).
+    .map((part) => part.endsWith("能力") && !/^(有|具备|能|会)/.test(part) ? `有${part}` : part);
   if (!clean.length) return "";
   const groups: string[][] = [];
   let kind: AttributeKind | undefined;
