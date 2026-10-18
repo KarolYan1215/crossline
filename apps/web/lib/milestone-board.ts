@@ -1,11 +1,11 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
 import {
-  currentRiskReview, FIRST_DRAFTS_SETTING, firstDraftsState, MILESTONE_RISKS_SETTING, milestoneRiskFingerprint, parseMilestoneRisks, riskCriteriaKeys,
+  currentRiskReview, draftingProgress, FIRST_DRAFTS_SETTING, firstDraftsState, MILESTONE_DRAFTING_SETTING, readMilestoneDrafting, type DraftingProgress, MILESTONE_RISKS_SETTING, milestoneRiskFingerprint, parseMilestoneRisks, riskCriteriaKeys,
   ruleMilestoneRisks, supplyWarnings, taskProgress, timeOrderProblem, type AccessContext, type MilestoneRisk, type SuccessCriterion
 } from "@crossline/core";
 import { readStoredArtifactPlan } from "@crossline/db";
-import { effectiveWeight, getStore, importancePresets, loadCurrentPlan, loadGoalForecast, milestonesRetiredBySystem, planToday, readGoalSettings, relationKindLabel, saveGoalSettings } from "./crossline";
+import { appNow, effectiveWeight, getStore, importancePresets, loadCurrentPlan, loadGoalForecast, milestonesRetiredBySystem, planToday, readGoalSettings, relationKindLabel, saveGoalSettings } from "./crossline";
 import { listCourseTargets } from "./targets";
 import { identityLines } from "./lines";
 
@@ -49,6 +49,8 @@ export type MilestoneBoard = {
   today: string; milestones: BoardMilestone[]; courses: BoardCourse[]; labels: Record<string, string>; lineOrder: string[];
   /** With no milestone yet: whether the worker is designing the first drafts on its own, or that run ended without any. */
   firstDrafts?: "none" | "running" | "stalled";
+  /** The last design run, line by line: lines still being designed, and why a line was left without drafts (`draftingProgress`). */
+  drafting?: DraftingProgress;
   stats: { ticksDone: number; ticksPlanned: number; reuse: number; nearest?: { id: string; title: string; line: string; days: number } };
 };
 
@@ -196,6 +198,8 @@ export async function loadMilestoneBoard(ctx: AccessContext): Promise<MilestoneB
   return {
     today, milestones: board, courses, labels, lineOrder: Object.keys(labels),
     firstDrafts: firstDraftsState(getStore().getSetting(ctx.workspaceId, FIRST_DRAFTS_SETTING), board.length > 0),
+    drafting: draftingProgress(readMilestoneDrafting(getStore().getSetting(ctx.workspaceId, MILESTONE_DRAFTING_SETTING)),
+      new Set(board.map((milestone) => milestone.identityId)), appNow()),
     stats: {
       ticksDone: allTicks.filter((tick) => tick.state === "done" && tick.day && tick.day >= weekStart && tick.day <= today).length,
       ticksPlanned: allTicks.filter((tick) => tick.day && tick.day >= weekStart && tick.day < weekEnd).length,

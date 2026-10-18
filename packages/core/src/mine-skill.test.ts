@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import {
-  keepMineSkill, mineSkillName, renderMineSkill, structuredOutputProblems, validateMilestoneGateResult, validateMineSkill,
+  keepMineSkill, mineFactLabel, readableMineSourceLabel, readableMineText, mineSkillName, renderMineSkill, structuredOutputProblems, validateMilestoneGateResult, validateMineSkill,
   MINE_SKILL_SCHEMA, type MilestoneGateResult, type MineSkillContext
 } from "./index";
 
@@ -91,4 +91,14 @@ test("the gate: a delivery that covers its contract but breaks the person's line
   // A judgement from before `fit` existed reads as fitting.
   const { fit: _fit, ...older } = covered;
   expect(validateMilestoneGateResult(older, criteria, evidence, contract)).toBe(older);
+});
+
+test("a rule's source never shows the interview's slot key (W-19)", () => {
+  expect(mineFactLabel("customer_data_gaps", "缺门店销量数据")).toBe("访谈中确认的「客户数据缺口」");
+  expect(mineFactLabel("pricing_anchor", "试用期每家门店月费 199 元起")).toBe("访谈中确认的「试用期每家门店月费 19…」");
+  expect(readableMineSourceLabel("访谈中确认的「long_term_goal」")).toBe("访谈中确认的「长期目标」");
+  expect(readableMineSourceLabel("访谈中确认的「odd_slot_x」")).toBe("访谈中确认的一条事实");
+  expect(readableMineSourceLabel("evidence")).toBe("访谈中确认的「进展证据」");
+  expect(readableMineSourceLabel("2026-10-14 本人编辑的第 2 版")).toBe("2026-10-14 本人编辑的第 2 版");
+  expect(readableMineText("1. 先抛冲突（来源：访谈中确认的「evidence」）")).toBe("1. 先抛冲突（来源：访谈中确认的「进展证据」）");
 });

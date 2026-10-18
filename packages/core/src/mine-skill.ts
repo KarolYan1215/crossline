@@ -110,6 +110,37 @@ export function keepMineSkill(value: unknown, context: MineSkillContext): MineSk
   return rules.length ? { summary: typeof answer.summary === "string" ? answer.summary : "", rules, blockers: [] } : undefined;
 }
 
+/**
+ * What an interview fact is called where a rule cites it. A fact's slot is the model's own key (`customer_data_gaps`, `long_term_goal`),
+ * never shown as such (2026-10-17 walkthrough, W-19): a known slot gets its name, any other the opening of what was said.
+ */
+const FACT_SLOT_LABEL: Record<string, string> = {
+  what: "在做什么", for_whom: "为谁", stage: "阶段", goal: "目标", long_term_goal: "长期目标", deadline: "截止", no_deadline: "截止",
+  blockers: "卡点", collaborators: "合作者", evidence: "进展证据", progress_evidence: "进展证据", evaluation_evidence: "评估依据",
+  local_assets: "已有资料", weekly_hours: "每周时间", tools: "工具", grading: "评分", target_grade: "目标成绩", meetings: "上课时间",
+  meeting_times: "上课时间", priority: "优先级", constraint: "约束", line_constraint: "约束", positioning: "定位", description: "描述",
+  work_view: "工作观", life_view: "人生观", true_north: "方向", values: "价值观", flow: "心流", energy: "精力", schedule: "作息",
+  customer_data_gaps: "客户数据缺口", trial_users: "试用用户", audience: "受众", platform: "平台", style: "风格", strategy: "策略"
+};
+const isModelKey = (text: string) => /^[a-z][a-z0-9]*(_[a-z0-9]+)*$/.test(text);
+export function mineFactLabel(slot: string, value: string): string {
+  const known = FACT_SLOT_LABEL[slot];
+  if (known) return `访谈中确认的「${known}」`;
+  const opening = value.replace(/\s+/g, " ").trim();
+  return opening ? `访谈中确认的「${opening.length > 12 ? `${opening.slice(0, 12)}…` : opening}」` : "访谈中确认的一条事实";
+}
+/** A label stored before `mineFactLabel` (「访谈中确认的「customer_data_gaps」」) or a bare key, made readable for the page. */
+export function readableMineSourceLabel(label: string): string {
+  const fact = /^访谈中确认的「([^」]+)」$/.exec(label);
+  if (fact && isModelKey(fact[1]!)) return FACT_SLOT_LABEL[fact[1]!] ? `访谈中确认的「${FACT_SLOT_LABEL[fact[1]!]}」` : "访谈中确认的一条事实";
+  if (isModelKey(label)) return FACT_SLOT_LABEL[label] ? `访谈中确认的「${FACT_SLOT_LABEL[label]}」` : "访谈中确认的一条事实";
+  return label;
+}
+
+/** The same inside a stored SKILL.md, whose rules list their sources in running text. */
+export const readableMineText = (markdown: string) =>
+  markdown.replace(/访谈中确认的「([a-z][a-z0-9]*(?:_[a-z0-9]+)*)」/g, (whole) => readableMineSourceLabel(whole));
+
 /** A rule as stored: what it rests on, spelled out, so the settings page shows it without re-reading the ledger. */
 export type StoredMineRule = MineRule & { sourceLabels: string[] };
 export type MineSkillVersion = {
@@ -157,7 +188,7 @@ export function ensureMineFrontmatter(markdown: string, line: { id: string; labe
 export function renderMineSkill(input: { line: { id: string; label: string }; version: number; at: string; summary: string;
   rules: MineRule[]; materials: MineMaterial[] }): { markdown: string; rules: StoredMineRule[] } {
   const labels = new Map(input.materials.map((material) => [material.id, material.label]));
-  const stored: StoredMineRule[] = input.rules.map((rule) => ({ ...rule, sourceLabels: rule.sources.map((id) => labels.get(id) ?? id) }));
+  const stored: StoredMineRule[] = input.rules.map((rule) => ({ ...rule, sourceLabels: rule.sources.map((id) => readableMineSourceLabel(labels.get(id) ?? "本人的材料")) }));
   const description = mineDescription(input.line.label, input.version);
   const lines = [
     "---",

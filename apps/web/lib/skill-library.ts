@@ -1,5 +1,5 @@
 import {
-  AGENT_CATEGORIES, PUBLIC_SKILL_CATEGORY_LABEL, currentMineVersion, scheduleLabel, ensureMineFrontmatter, mineSkillSettingKey, publicSkillFilesKey, grownSkillFilesKey, readMineSkill,
+  AGENT_CATEGORIES, PUBLIC_SKILL_CATEGORY_LABEL, currentMineVersion, scheduleLabel, ensureMineFrontmatter, mineSkillSettingKey, publicSkillFilesKey, grownSkillFilesKey, readMineSkill, readableMineSourceLabel, readableMineText,
   type AccessContext, type AiTool, type PublicSkillRecord, type StoredMineRule
 } from "@crossline/core";
 import { aiToolsFor, consentToGrownSkill, grownHomeLine, readGrownSkills, readPublicSkills, removeGrownSkill, removePublicSkill, saveMineVersion, updateGrownSkill } from "@crossline/db";
@@ -34,13 +34,15 @@ export type SkillLibraryView = { mine: MineSkillView[]; grown: GrownSkillView[];
 
 export function loadSkillLibrary(ctx: AccessContext): SkillLibraryView {
   const store = getStore();
+  // Labels stored before W-19 name the interview's slot keys; they are made readable on the way out, never rewritten in the ledger.
+  const readable = (rules: StoredMineRule[] | undefined) => (rules ?? []).map((rule) => ({ ...rule, sourceLabels: rule.sourceLabels.map(readableMineSourceLabel) }));
   const mine = identityLines(ctx).map((line): MineSkillView => {
     const stored = readMineSkill(store.getSetting(ctx.workspaceId, mineSkillSettingKey(line.id)));
     const current = currentMineVersion(stored);
     return { lineId: line.id, lineLabel: line.label,
-      ...(current ? { current: { version: current.version, by: current.by, at: current.at, markdown: current.markdown, rules: current.rules ?? [],
+      ...(current ? { current: { version: current.version, by: current.by, at: current.at, markdown: readableMineText(current.markdown), rules: readable(current.rules),
         ...(current.restoredFrom ? { restoredFrom: current.restoredFrom } : {}) } } : {}),
-      versions: (stored?.versions ?? []).map((version) => ({ version: version.version, by: version.by, at: version.at, markdown: version.markdown, rules: version.rules ?? [],
+      versions: (stored?.versions ?? []).map((version) => ({ version: version.version, by: version.by, at: version.at, markdown: readableMineText(version.markdown), rules: readable(version.rules),
         ...(version.restoredFrom ? { restoredFrom: version.restoredFrom } : {}) })).reverse() };
   });
   const publics = readPublicSkills(store, ctx.workspaceId).map((record): PublicSkillView => {

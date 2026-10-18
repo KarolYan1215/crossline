@@ -136,7 +136,9 @@ export default async function SettingsPage() {
         <section id="notify" className="st-section" aria-labelledby="st-notify"><h2 id="st-notify">时间与提醒</h2>
           <div className="st-modules">
             <section className="st-card" aria-label="通知">
-              <header><h3>通知</h3><small>工作块开始前 10 分钟、等待项到期日和截止前 2 天的提醒写在 Crossline 日历上</small></header>
+              <header><h3>通知</h3><small>{store.getSetting(ctx.workspaceId, "calendar.write.account")
+                ? "工作块开始前 10 分钟、等待项到期日和截止前 2 天的提醒写在 Crossline 日历上"
+                : "工作块开始、等待项到期和临近截止时提醒到桌面与手机"}</small></header>
               <NotifyLevel level={setting("notify.level") ?? "normal"} />
               <div className="st-row"><span className="st-row-label">可用时段、排程参数与重要性<small>在「计划」页设置，修改前预览影响</small></span>
                 <a className="secondary-button" href="/plan#why">打开计划</a></div>

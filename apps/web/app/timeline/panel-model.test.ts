@@ -15,8 +15,17 @@ describe("the day panel", () => {
   ];
 
   test("the load on top counts scheduled, pencilled and fixed minutes of that day only", () => {
-    expect(dayLoad(items, "2026-10-12")).toEqual({ planned: 90, pencilled: 60, fixed: 90 });
-    expect(dayLoad(items, "2026-10-14")).toEqual({ planned: 60, pencilled: 0, fixed: 0 });
+    expect(dayLoad(items, "2026-10-12")).toEqual({ planned: 90, pencilled: 60, fixed: 90, allDay: [] });
+    expect(dayLoad(items, "2026-10-14")).toEqual({ planned: 60, pencilled: 0, fixed: 0, allDay: [] });
+  });
+
+  test("an all-day item names the day instead of filling it, and overlapping fixed items count once (W-25)", () => {
+    const sunday = [
+      item("event:rest", { kind: "calendar", title: "周日休息", day: "2026-10-18", start: "00:00", end: "23:59" }),
+      item("graph_calendar:x", { kind: "calendar", day: "2026-10-18", start: "10:00", end: "11:00" }),
+      item("import:y:1", { kind: "import", day: "2026-10-18", start: "10:30", end: "11:30" })
+    ];
+    expect(dayLoad(sunday, "2026-10-18")).toEqual({ planned: 0, pencilled: 0, fixed: 90, allDay: ["周日休息"] });
   });
 
   test("with nothing picked, the next block of work that has not ended; on another day, its first", () => {

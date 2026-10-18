@@ -91,8 +91,9 @@ export function GoalChips({ line }: { line: Pick<LineCard, "label" | "goals" | "
   if (!line.goalParts.length) return line.goals[0] ? <p className="lb-goal gen">{line.goals[0]}</p> : <p className="lb-goal muted">未设长期目标</p>;
   return <p className="lb-goal" aria-label={composeGoal(line.goalParts, line.label)}>
     <span className="lb-goal-word">成为</span>
+    {/* The 「、」 ends the attribute before it, so a wrapped line never starts with one (W-24). */}
     {line.goalParts.map((part, index) => <span key={`${index}-${part}`} className="lb-attr-wrap">
-      {index > 0 && <span className="lb-goal-word">、</span>}<span className="lb-attr gen" data-i={index % 3}>{part}</span><span className="lb-goal-word">的</span></span>)}
+      <span className="lb-attr gen" data-i={index % 3}>{part}</span><span className="lb-goal-word">{index < line.goalParts.length - 1 ? "的、" : "的"}</span></span>)}
     <span className="lb-goal-noun">{line.label}</span>
   </p>;
 }

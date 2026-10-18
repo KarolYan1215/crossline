@@ -1,5 +1,5 @@
 import "server-only";
-import { checkGoalParts, composeGoal, type AccessContext } from "@crossline/core";
+import { checkGoalParts, composeGoal, plainComposeGoal, type AccessContext } from "@crossline/core";
 import { LINE_PALETTE, LINE_SETTING, MAX_HARD_LINES, defaultIdentityPacks, freeLineColor, identityPacksFor, newLineId, readLineSpecs, type IdentityPack, type LineSpec } from "@crossline/identity-packs";
 import { getStore } from "./crossline";
 
@@ -65,7 +65,7 @@ export function updateLine(ctx: AccessContext, id: string, change: { label?: str
     goalParts = checked.parts;
   } else if (goals && goals[0] !== oldGoals[0]) {
     goalParts = undefined;
-  } else if (goalParts?.length && label !== line.label && oldGoals[0] === composeGoal(goalParts, line.label)) {
+  } else if (goalParts?.length && label !== line.label && (oldGoals[0] === composeGoal(goalParts, line.label) || oldGoals[0] === plainComposeGoal(goalParts, line.label))) {
     // A renamed line's composed goal follows its new name.
     goals = cleanGoals([composeGoal(goalParts, label), ...oldGoals.slice(1)]);
   }

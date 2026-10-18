@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { approveArtifactRelationsFor, CrosslineStore } from "@crossline/db";
-import { defaultMilestoneTemplates } from "@crossline/core";
+import { defaultMilestoneTemplates, MILESTONE_DRAFTING_SETTING, readMilestoneDrafting } from "@crossline/core";
 import { ARTIFACT_PLANNER_SKILL, buildProposalContext, createMilestoneConversation, createMilestoneProposer, MILESTONE_ARCHITECT_SKILL } from "./milestone-proposer";
 import { fakeRuntime as sharedRuntime, scriptedRuntime } from "./testing/fake-runtime";
 
@@ -305,6 +305,11 @@ test("one line that cannot be done does not take the others with it, and the per
   expect(outcome.state === "proposed" && outcome.assumptions.some((line) => line.includes("创业") && line.includes("没有任何截止日期"))).toBe(true);
   expect(store.listMilestones(WORKSPACE).filter((milestone) => milestone.status === "draft" && milestone.identityId === "research")).toHaveLength(3);
   expect(store.listMilestones(WORKSPACE).filter((milestone) => milestone.identityId === "startup")).toHaveLength(0);
+  // The 主线 page reads the run line by line: research done, startup skipped with its reason, the run finished (W-26/W-27).
+  const drafting = readMilestoneDrafting(store.getSetting(WORKSPACE, MILESTONE_DRAFTING_SETTING))!;
+  expect(drafting).toMatchObject({ done: ["research"], skipped: [{ lineId: "startup" }] });
+  expect(drafting.skipped[0]!.why).toContain("没有任何截止日期");
+  expect(drafting.finishedAt).toBeTruthy();
 });
 
 test("a line whose run failed keeps the drafts the person already had", async () => {

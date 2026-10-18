@@ -5,6 +5,7 @@ import { PlanExplainButton } from "./plan-explain-button";
 import { AdvancedSettings, LongTermGoals, TimeEnergy } from "./plan-controls";
 import { RankingTable } from "./ranking-table";
 import { HorizonSelect } from "./horizon-select";
+import { FirstHint } from "../ui/first-hint";
 import { PlanPreviewProvider } from "./preview-context";
 import { CapacityChart, EstimateChart, InvestmentChart, MilestoneTimeline } from "./plan-stats-charts";
 import { SubpageShell } from "../subpage-shell";
@@ -38,7 +39,8 @@ export default async function PlanPage(props: { searchParams?: Promise<{ horizon
   return <SubpageShell active="计划" title="计划"
     description={imported ? `日历与文件中的 ${imported} 个固定日程，加上按可用时段排入的任务；日程本身在今日页。` : "任务按可用时段排入；日程本身在今日页。"}>
     <PlanPreviewProvider horizonDays={board.horizon.days}>
-      <PlanView plan={plan} aside={<HorizonSelect horizon={board.horizon} />} />
+      <PlanView plan={plan} aside={<HorizonSelect horizon={board.horizon} />}
+        calendarWrite={Boolean(getStore().getSetting(ctx.workspaceId, "calendar.write.account"))} />
       <MilestoneTimeline rows={board.charts.goals} today={board.today} weeks={board.horizon.weeks} spanDays={board.horizon.days} done={board.doneMilestones}
         labels={board.labels} lineOrder={board.lineOrder}
         aside={<ForecastDelta forecast={board.forecastSummary} storageKey={`h${board.horizon.days}`} />} />
@@ -49,6 +51,9 @@ export default async function PlanPage(props: { searchParams?: Promise<{ horizon
         <EstimateChart estimates={board.estimates} labels={board.labels} />
       </div>
       {board.inferredRegularBlocks > 0 && <small className="pl-chart-foot">第 2 周起按日历中的 {board.inferredRegularBlocks} 个重复日程预留时间。</small>}
+      <FirstHint id="plan-time" title="可用时段怎么改">
+        在下面的周表里按住拖动，就是告诉系统哪些时段可以安排任务；深浅表示那段时间的精力高低。改完先显示影响（这周多出或少了几小时、哪些任务会挪动），确认「应用」后才生效。
+      </FirstHint>
       <TimeEnergy windows={board.week.windows} suggested={board.week.suggested} proposed={board.week.proposed} busy={board.week.busy}
         statedWeekly={board.capacity.statedWeekly} worked={board.rhythm.worked} advice={board.advice} />
       <LongTermGoals goals={board.goals} shares={board.shares.effective} />

@@ -38,6 +38,7 @@ export * from "./rhythm";
 export * from "./backplan-schema";
 export * from "./external-action";
 export * from "./settings-keys";
+export * from "./milestone-drafting";
 export * from "./auto-approval";
 export * from "./calibration";
 export * from "./telemetry";

@@ -76,7 +76,8 @@ export function OpenerCard({ opener }: { opener: OpenerView }) {
         {opener.soon.map((item) => <li key={`${item.title}-${item.due}`} data-line={item.line ?? "none"}>{item.title}<small>{md(item.due)}</small></li>)}</ul></dd></div>}
     </dl>
     {top && <div className="opener-urgent" data-line={top.line ?? "none"}>
-      <small>最紧急 · {URGENCY[top.urgency]}</small>
+      {/* 「最紧急」 only for what cannot wait two days; the top of a calmer list is just the first to settle. */}
+      <small>{top.urgency === "now" ? "最紧急" : "先定这件"} · {URGENCY[top.urgency]}</small>
       <b>{top.title}</b>
     </div>}
   </div>;
