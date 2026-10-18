@@ -10,9 +10,18 @@ export type DiligenceView = {
   sources: Array<{ id: string; title: string; publisher: string; finalUrl: string; accessedOn: string }>;
 };
 
+/**
+ * The stored question is what the researcher was told, rules and all (「只列……facts 里查不到的条件写进 gaps，不要假设……」): the page
+ * showed that whole instruction to the person (2026-10-18 walkthrough). Only its first sentence says what was looked for.
+ */
+export function questionShown(question: string): string {
+  const first = question.split("。")[0]!.trim();
+  return `${first.replace(/这个人/g, "本人")}。`;
+}
+
 export function loadDiligence(ctx: AccessContext): DiligenceView[] {
   return getStore().listDiligenceReports(ctx.workspaceId).map((report) => ({
-    id: report.id, identityId: report.scope, question: report.question, status: report.status, runAt: report.runAt,
+    id: report.id, identityId: report.scope, question: questionShown(report.question), status: report.status, runAt: report.runAt,
     ...(report.note ? { note: report.note } : {}),
     findings: (report.findings as DiligenceView["findings"]) ?? [],
     proposals: (report.proposals as DiligenceView["proposals"]) ?? [],

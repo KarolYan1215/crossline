@@ -40,3 +40,9 @@ test("accepting a task writes it down once as a capture, so it is analysed into 
   expect(captures[0]).toMatchObject({ id: "diligence-r1-p1", title: "x" });
   expect(captures[0]?.context).toContain("来自调研建议");
 });
+
+test("the page shows what was looked for, not the researcher's rules", async () => {
+  const { questionShown } = await import("./diligence");
+  expect(questionShown("找出适合这个人当前阶段和身份约束的外部机会（比赛、孵化器、资助、合作渠道）。只列这个人按 facts 里的身份……不要假设这个人是学生。"))
+    .toBe("找出适合本人当前阶段和身份约束的外部机会（比赛、孵化器、资助、合作渠道）。");
+});
