@@ -16,12 +16,19 @@ const md = (day: string) => `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10
 /** The margin rule the architect is held to (`MARGIN_RATIO`): a line within 3% of the bare line is flagged, not refused. */
 const MARGIN = 0.03;
 
-function useAction() {
+/** Reloads with the drawer open again (`?open=<id>`): a plain reload closed it after every edit, and the person lost their place. */
+function reopen(id: string) {
+  const url = new URL(location.href);
+  url.searchParams.set("open", id);
+  location.replace(url.toString());
+}
+
+function useAction(reopenId?: string) {
   const [state, setState] = useState<{ busy: boolean; message: string }>({ busy: false, message: "" });
-  const run = async (pending: string, work: () => Promise<Response | undefined>, failed: string) => {
+  const run = async (pending: string, work: () => Promise<Response | undefined>, failed: string, keepOpen = true) => {
     setState({ busy: true, message: pending });
     const response = await work();
-    if (response?.ok) { location.reload(); return; }
+    if (response?.ok) { if (reopenId && keepOpen) reopen(reopenId); else location.reload(); return; }
     setState({ busy: false, message: failed });
   };
   return { ...state, run };
@@ -35,17 +42,18 @@ function useAction() {
  * withdrawn from the footer, next to its risks.
  */
 export function MilestoneDrawer({ milestone, labels, onClose }: { milestone: BoardMilestone; labels: Record<string, string>; onClose: () => void }) {
-  const action = useAction();
+  const action = useAction(milestone.id);
   const [weight, setWeight] = useState(milestone.weight);
   const approved = milestone.status === "approved";
   const saveGoal = (body: Record<string, unknown>) => action.run("保存中…", () => post(`/api/goals/${encodeURIComponent(milestone.id)}`, body), "未保存，请重试。");
   const decideDraft = (decision: "approved" | "archived") => action.run(decision === "approved" ? "批准中…" : "撤销中…",
-    () => post("/api/milestones/approve-batch", { ids: [milestone.id], decision }), "操作未完成，请刷新后重试。");
+    () => post("/api/milestones/approve-batch", { ids: [milestone.id], decision }), "操作未完成，请刷新后重试。", decision === "approved");
   // Every edit here is a new version of the milestone (`/api/milestones`), so the criteria a past verdict was judged against stay readable.
   const saveMilestone = (patch: { title?: string; status?: string; successCriteria?: SuccessCriterion[] }, pending = "保存中…", failed = "未保存，请检查后重试。") =>
     action.run(pending, () => post("/api/milestones", {
       id: milestone.id, identityId: milestone.identityId, projectId: milestone.projectId, title: milestone.title, status: milestone.status,
-      successCriteria: milestone.successCriteria, ...(milestone.templateId ? { templateId: milestone.templateId } : {}), ...patch }), failed);
+      successCriteria: milestone.successCriteria, ...(milestone.templateId ? { templateId: milestone.templateId } : {}), ...patch }), failed,
+    patch.status !== "archived");
   const saveThreshold = (criterionId: string, value: number) => saveMilestone({
     successCriteria: milestone.successCriteria.map((criterion: SuccessCriterion) => criterion.id === criterionId && criterion.measure.kind === "threshold"
       ? { ...criterion, measure: { ...criterion.measure, value } } : criterion) }, "保存中…", "未保存，请检查数值。");

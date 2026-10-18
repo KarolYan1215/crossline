@@ -56,6 +56,12 @@ export function MilestoneTimeline({ board, actions }: { board: MilestoneBoard; a
     const id = new URLSearchParams(location.search).get("open");
     if (id && board.milestones.some((item) => item.id === id)) setSelected({ kind: "milestone", id });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // Closing drops `?open=`, which an edit in the drawer reloads with, so a later reload does not open it again.
+  const closeDrawer = () => {
+    setSelected(null);
+    const url = new URL(location.href);
+    if (url.searchParams.has("open")) { url.searchParams.delete("open"); history.replaceState(history.state, "", url.toString()); }
+  };
   // Back from a task opened in the milestone's panel, the panel is open again.
   useReturnState("milestone-drawer", selected, setSelected);
 
@@ -227,7 +233,7 @@ export function MilestoneTimeline({ board, actions }: { board: MilestoneBoard; a
       <small>{tick.taskTitle}{tick.day ? ` · ${tick.state === "done" ? "完成于" : "排在"} ${md(tick.day)}` : ""}{tick.state === "postponed" && tick.plannedDay ? ` · 原计划 ${md(tick.plannedDay)}` : ""}</small>
       <a href={`/workbench/${encodeURIComponent(tick.workOrderId)}`}>打开任务</a>
     </div>}
-    {milestone && <MilestoneDrawer milestone={milestone} labels={board.labels} onClose={() => setSelected(null)} />}
+    {milestone && <MilestoneDrawer milestone={milestone} labels={board.labels} onClose={closeDrawer} />}
     {course && <CourseDrawer course={course} milestones={board.milestones.filter((item) => item.projectId === course.projectId)} onClose={() => setSelected(null)} />}
   </div>;
 }
