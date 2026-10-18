@@ -16,11 +16,13 @@ import { ReturnPoint } from "./ui/back-link";
  * The frame every signed-in page shares: the name, the four working views, the decisions waiting for you, the
  * settings, and the assistant. Pages put their content inside it and say which view they are.
  */
-export function AppShell({ active, children, className = "page", focus = false, corner = !focus }: { active?: string | undefined; children: ReactNode; className?: string;
+export function AppShell({ active, children, className = "page", focus = false, corner = !focus, banner = true }: { active?: string | undefined; children: ReactNode; className?: string;
   /** The interview before the start standard stands (docs/onboarding-v3.md): every working view would lead back to it, so none is offered, and no assistant. */
   focus?: boolean;
   /** The timer and 小帮手 corner; off on a page that is itself the conversation. */
-  corner?: boolean }) {
+  corner?: boolean;
+  /** The red 「还没有连接模型 … 去连接」 bar; off on the page that is itself where the model is connected (W-5). */
+  banner?: boolean }) {
   return <>
     <LineColors />
     {/* Every page in the frame is left and returned to as it was: scroll, open folds, and what components register. */}
@@ -43,6 +45,6 @@ export function AppShell({ active, children, className = "page", focus = false, 
       <TimerFloat />
       <AssistantWidget />
     </CornerStack>}
-    <main className={className}><RuntimeBanner />{children}</main>
+    <main className={className}>{banner && <RuntimeBanner />}{children}</main>
   </>;
 }

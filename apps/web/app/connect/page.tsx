@@ -14,7 +14,7 @@ export default async function ConnectPage({ searchParams }: { searchParams: Prom
   const { next } = await searchParams;
   // Only a path on this site, never another origin (`//host` or a full URL).
   const target = next && /^\/(?!\/)[\w\-/?=&.%]*$/.test(next) ? next : "/";
-  return <AppShell active="设置" focus corner={false}>
+  return <AppShell active="设置" focus corner={false} banner={false}>
     <h1>开始之前：连接模型</h1>
     <ConnectFlow next={target} />
   </AppShell>;

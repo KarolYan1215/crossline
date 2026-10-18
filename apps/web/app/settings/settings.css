@@ -141,5 +141,7 @@
 /* The model connection's three steps and the code itself: the code is what the person copies, so it is big enough to read off a phone. */
 .codex-steps{margin:0;padding:0 0 0 20px;display:grid;gap:4px;font-size:13px;line-height:1.6}
 .codex-user-code{font-size:20px;letter-spacing:.08em;user-select:all}
+.codex-verification-url{display:block;font-size:13px;color:var(--graphite);overflow-wrap:anywhere}
+.codex-verification-url .mono{color:var(--ink);user-select:all}
 /* A readable measure for the library's prose rows (docs/copy-style.md: about 40 characters a line). */
 .sk-rules li p,.sk-desc,.sk-facts dd{max-width:46em}
