@@ -4,7 +4,7 @@ import { AppShell } from "./app-shell";
 /** A page inside the shared frame, with its own title line. `active` names the view it belongs to. */
 export function SubpageShell({ title, description, active, eyebrow, back, children }: {
   title: string;
-  description?: string;
+  description?: ReactNode;
   active?: string | undefined;
   /** Kept for callers that still pass one; the new design has no eyebrow line. */
   eyebrow?: string;

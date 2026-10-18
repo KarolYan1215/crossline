@@ -11,6 +11,7 @@ import { gateUntilReady } from "../../lib/start-gate";
 import { TaskCard } from "../task/task-card";
 import { loadTaskDetailsBatch } from "../../lib/task-detail";
 import { countPending } from "../../lib/pending";
+import { LivePendingCount } from "../pending-badge";
 import { loadAsks } from "../../lib/asks";
 import { loadAssistant } from "../../lib/agent";
 import { preparingProposalIds } from "../../lib/proposal-ready";
@@ -105,7 +106,7 @@ export default async function ApprovalsPage() {
   // Drafts, targets and interview items are decided where they live (主线, 访谈); here they are counted and linked. What is decided here
   // is laid out below: the week's questions in four quadrants, then the assistant's results, evidence and task proposals.
   return <SubpageShell active="待确认" title="待确认"
-    description={`本周 ${pending.total} 项待决定${pending.later.total ? `，另有 ${pending.later.total} 项以后再定` : ""}。只有需本人选择、授权登录或涉及对外动作的才需确认，其余自动生效，24 小时内可撤销。`}>
+    description={<>本周 <LivePendingCount initial={pending.total} /> 项待决定{pending.later.total ? `，另有 ${pending.later.total} 项以后再定` : ""}。只有需本人选择、授权登录或涉及对外动作的才需确认，其余自动生效，24 小时内可撤销。</>}>
     <PendingSummary later={laterDays} today={planToday(ctx)}
       here={[{ label: "助手", count: assistantCount, href: "#assistant" }, { label: "待验收", count: evidenceReviews.length, href: "#evidence" },
         { label: "任务提案", count: pending.workOrders, href: "#proposals" }, { label: "最近自动生效", count: autoApproved.length, href: "#auto" }]}

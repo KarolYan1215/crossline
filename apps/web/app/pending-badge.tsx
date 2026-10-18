@@ -23,3 +23,23 @@ export function PendingBadge() {
   }, []);
   return count > 0 ? <b className="pending-badge" aria-label={`${count} 项待确认`}>{count}</b> : null;
 }
+
+/**
+ * The same count inside running text (待确认's 「本周 N 项待决定」): it was rendered once on the server and kept the old number after an
+ * answer on the page, while the badge beside it had already moved (2026-10-18 walkthrough).
+ */
+export function LivePendingCount({ initial }: { initial: number }) {
+  const [count, setCount] = useState(initial);
+  useEffect(() => {
+    let live = true;
+    const changed = async () => {
+      const response = await fetch("/api/pending", { cache: "no-store" }).catch(() => undefined);
+      const body = await response?.json().catch(() => undefined) as { total?: number } | undefined;
+      if (live && typeof body?.total === "number") setCount(body.total);
+    };
+    const listener = () => void changed();
+    window.addEventListener(PENDING_CHANGED, listener);
+    return () => { live = false; window.removeEventListener(PENDING_CHANGED, listener); };
+  }, []);
+  return <>{count}</>;
+}
