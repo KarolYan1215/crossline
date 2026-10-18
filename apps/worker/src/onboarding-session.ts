@@ -498,7 +498,7 @@ export function withGapQuestions(output: OnboardingTurn, gaps: ProfileGap[], mes
   const open = gaps.filter((gap) => {
     if (output.questions.some((question) => question.id === gap.question.id)) return false;
     // Already asked by the model in its own words: a line it asks anything about, a project question that is about the same thing.
-    if (gapCoveredBy(gap, output.questions)) return false;
+    if (gapCoveredBy(gap, output.questions, gaps)) return false;
     return gap.blocking || !asked.has(gap.question.id);
   });
   const lines = new Set([...output.questions.map((question) => question.identityId), ...output.slotUpdates.map((update) => update.identityId)].filter(Boolean));

@@ -109,8 +109,9 @@ export function interviewStatus(ctx: AccessContext): InterviewStatus {
   const owned = questionsOwnedElsewhere(ctx, round);
   const pending = readPending(ctx, session.id, lastAssistant?.seq ?? 0);
   const inRound = new Set(round.map((question) => question.id));
-  const gaps = answered ? [] : interviewGapsFor(store, ctx.workspaceId, lines, today)
-    .filter((gap) => gap.code !== "FILE_UNFILED" && !inRound.has(gap.question.id) && !gapCoveredBy(gap, round)).map((gap) => gap.question as InterviewQuestion);
+  const allGaps = answered ? [] : interviewGapsFor(store, ctx.workspaceId, lines, today);
+  const gaps = allGaps.filter((gap) => gap.code !== "FILE_UNFILED" && !inRound.has(gap.question.id) && !gapCoveredBy(gap, round, allGaps))
+    .map((gap) => gap.question as InterviewQuestion);
   const seen = new Set<string>();
   const questions = [...round.filter((question) => !owned.has(question.id) && !question.id.startsWith("gap-file-")), ...gaps]
     .filter((question) => !pending.answers[question.id] && !seen.has(question.id) && Boolean(seen.add(question.id)));

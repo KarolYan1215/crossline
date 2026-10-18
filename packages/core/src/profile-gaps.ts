@@ -254,7 +254,8 @@ const MEETING_SLOT = /^(meeting|class)_?times?$|^no_meetings$/;
 
 /** Words that say a question from the model already asks what a gap is about, so the code-built one is not asked on top of it. */
 const COVERS: Partial<Record<ProfileGap["code"], RegExp>> = {
-  PROJECT_DEADLINE: /截止|deadline|什么时候(交|完成)/i,
+  // Models ask a deadline in many words: 期限, 目标时间, 时间点, 时间线, 投稿日期, 哪一天 (the six candidates of 2026-10-18 each did).
+  PROJECT_DEADLINE: /截止|期限|deadline|due|什么时候|哪天|哪一天|几号|时间点|时间线|目标时间|投稿日期|上线时间/i,
   DATE_UNDATED: /待定|TBD|日期|什么时候/i,
   COURSE_MEETINGS: /上课|几点|每周.*(时间|时段)/
 };
@@ -264,10 +265,34 @@ const COVERS: Partial<Record<ProfileGap["code"], RegExp>> = {
  * project about the same thing. Used where a round is put together and where its open questions are listed, so a person is not asked
  * 「ECE 548 每周固定上课的星期」 and 「「ECE 548」每周什么时候上课」 side by side.
  */
-export function gapCoveredBy(gap: ProfileGap, questions: Array<{ identityId: string; projectId: string; text: string }>): boolean {
+export function gapCoveredBy(gap: Pick<ProfileGap, "code" | "identityId" | "projectId"> & { question: { text: string } },
+  questions: Array<{ identityId: string; projectId: string; text: string }>, others: Array<Pick<ProfileGap, "code" | "identityId">> = []): boolean {
   if (gap.code === "LINE_UNCONFIRMED") return questions.some((question) => question.identityId === gap.identityId);
   const covers = COVERS[gap.code];
-  return Boolean(covers) && questions.some((question) => question.projectId === gap.projectId && covers!.test(question.text));
+  if (!covers) return false;
+  // The project the gap is about, as its question names it (「研究生排期小工具」有截止日期吗？).
+  const name = /「([^」]+)」/u.exec(gap.question.text)?.[1] ?? "";
+  // A model often files a question about a project it found in the same round under the line only (projectId ""), or words it its own
+  // way: on the same line it counts when it names the project, or when it is the line's only deadline question the app would add.
+  const onlyOnLine = !others.some((other) => other !== gap && other.code === gap.code && other.identityId === gap.identityId);
+  const loose = gap.code === "PROJECT_DEADLINE";
+  return questions.some((question) => covers.test(question.text) && (question.projectId === gap.projectId
+    || (loose && question.identityId === gap.identityId && (sharesName(name, question.text) || (!question.projectId && onlyOnLine)))));
+}
+
+/**
+ * Whether a question names a project: three consecutive characters of a Chinese name (「排期小工具」 in 「研究生排期小工具」), or the whole of a
+ * Latin one — 「ECE 548」 and 「ECE 555」 share 「ECE」 and are different projects.
+ */
+function sharesName(name: string, text: string): boolean {
+  const squash = (value: string) => value.replace(/[^\p{L}\p{N}]+/gu, "").toLowerCase();
+  const squashed = squash(name), target = squash(text);
+  if (!/[^\x00-\x7f]/u.test(squashed)) return squashed.length >= 3 && target.includes(squashed);
+  for (let start = 0; start + 3 <= squashed.length; start += 1) {
+    const run = squashed.slice(start, start + 3);
+    if (/[^\x00-\x7f]/u.test(run) && target.includes(run)) return true;
+  }
+  return false;
 }
 
 /** Facts as they will stand once a turn's updates are written: a confirmed fact is never replaced by a guess. */
@@ -337,12 +362,13 @@ export function answeredGapFacts(replyText: string, gaps: ProfileGap[]): GapAnsw
 }
 
 /** Why one of the interview's own questions is kept from the person (rule 「只问只有本人知道、而且会改变计划的事」, 2026-10-15). */
-export type ScreenReason = "location" | "known_schedule" | "calendar_inferable" | "goal_picker";
+export type ScreenReason = "location" | "known_schedule" | "calendar_inferable" | "goal_picker" | "duplicate";
 export const SCREEN_REASON_LABEL: Record<ScreenReason, string> = {
   location: "只问地点，地点不影响排程",
   known_schedule: "上课时间已在文件、日历或回答里",
   calendar_inferable: "日历活动是否每周重复，按日历自身的重复规则判断",
-  goal_picker: "长期目标由本人在访谈页左栏从候选定语里选定，访谈继续给出候选即可"
+  goal_picker: "长期目标由本人在访谈页左栏从候选定语里选定，访谈继续给出候选即可",
+  duplicate: "同一轮里已有问题问到了同一件事"
 };
 export type QuestionScreenInput = {
   projects: Array<{ id: string; name: string }>;
@@ -385,8 +411,15 @@ export function screenQuestions<Q extends { id: string; text: string; projectId:
   const pickers = new Set(input.goalPickerLines ?? []);
   const picked = (identityId: string | undefined) => identityId ? pickers.has(identityId) : pickers.size > 0;
   const keep: Q[] = [], screened: Array<{ question: Q; reason: ScreenReason }> = [];
+  // The app's own deadline question stored beside the model's question about the same deadline (rounds stored before the match was
+  // widened carry both): the model's stays, in its own words.
+  const modelQuestions = questions.filter((question) => !question.id.startsWith("gap-")).map((question) => ({ ...question, identityId: question.identityId ?? "" }));
+  const deadlineGaps = questions.filter((question) => question.id.startsWith("gap-deadline-"))
+    .map((question) => ({ code: "PROJECT_DEADLINE" as const, identityId: question.identityId ?? "", projectId: question.projectId, question }));
   for (const question of questions) {
-    const reason: ScreenReason | undefined = question.id.startsWith("gap-") ? undefined
+    const gap = deadlineGaps.find((item) => item.question === question);
+    const reason: ScreenReason | undefined = gap ? (gapCoveredBy(gap, modelQuestions, deadlineGaps) ? "duplicate" : undefined)
+      : question.id.startsWith("gap-") ? undefined
       : LONG_TERM_GOAL.test(question.text) && picked(question.identityId) ? "goal_picker"
       : CALENDAR.test(question.text) && RECURRENCE.test(question.text) ? "calendar_inferable"
       : PLACE.test(question.text) && !WHEN.test(question.text) ? "location"
