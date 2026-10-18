@@ -82,6 +82,15 @@ jobs:
             sudo grep -E "^(CROSSLINE_INVITE_APPROVER|CROSSLINE_SPONSOR_BASE_URL|CROSSLINE_SPONSOR_MODELS|CROSSLINE_SPONSOR_MONTHLY_CNY)=" /srv/crossline/app.env || true
             printf "sponsor key filled: "; sudo grep -cE "^CROSSLINE_SPONSOR_API_KEY=.+" /srv/crossline/app.env || true
             sudo docker logs --since 7d crossline-worker 2>&1 | grep -E "\"sponsor\." | tail -20 || true
+            # Which text models the sponsor key can use (ids only), so a candidate is named as SiliconFlow names it. The key stays on the host.
+            echo "-- sponsor catalog"
+            key=$(sudo grep -E "^CROSSLINE_SPONSOR_API_KEY=" /srv/crossline/app.env | cut -d= -f2-)
+            curl -s -m 20 -H "Authorization: Bearer $key" "https://api.siliconflow.cn/v1/models?type=text" \
+              | python3 -c "import sys,json; d=json.load(sys.stdin); [print(x.get(\"id\")) for x in d.get(\"data\",[]) if any(k in str(x.get(\"id\",\"\")).lower() for k in (\"deepseek\",\"glm\",\"qwen\",\"kimi\"))]" || true
+            unset key
+            # Every conformance run of every candidate (synthetic cases only; no person data), for reading recovery and latency.
+            echo "-- sponsor evaluation runs"
+            sudo sh -c "cat /srv/crossline/data/sponsor-eval/*.jsonl 2>/dev/null" | tail -600 || true
             # The domains, and their status, held by the Resend account the configured key belongs to. The key never leaves the host.
             echo "-- resend domains for the configured key"
             key=$(sudo grep -E "^CROSSLINE_SMTP_PASSWORD=" /srv/crossline/app.env | cut -d= -f2-)
