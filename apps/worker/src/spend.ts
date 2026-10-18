@@ -15,8 +15,11 @@ export function createBackgroundSpend(store: CrosslineStore, readCost: (workspac
     const recorded = store.getSetting(workspaceId, BACKGROUND_BLOCKER);
     if (spend.blocker) {
       // Written only when the reason changes, so `at` says since when, not when the tick last looked.
-      if (!recorded || JSON.parse(recorded).code !== spend.blocker.code)
-        store.setSetting(workspaceId, BACKGROUND_BLOCKER, JSON.stringify({ ...spend.blocker, at: new Date().toISOString() }));
+      // A new reset time (a window rolled over, or a reading that first carries one) is written too.
+      const previous = recorded ? JSON.parse(recorded) as { code?: string; resetsAt?: string } : undefined;
+      if (!previous || previous.code !== spend.blocker.code || previous.resetsAt !== spend.blocker.resetsAt)
+        store.setSetting(workspaceId, BACKGROUND_BLOCKER, JSON.stringify({ ...spend.blocker,
+          at: previous?.code === spend.blocker.code && "at" in (previous ?? {}) ? (previous as { at: string }).at : new Date().toISOString() }));
     } else if (recorded) store.setSetting(workspaceId, BACKGROUND_BLOCKER, "");
     return spend;
   };

@@ -85,3 +85,13 @@ test("spending follows the person: active runs everything the quota allows, cool
   expect(kinds.map((kind) => spendAllows({ ...normal, engagement: "cooling" }, kind))).toEqual([true, false, false]);
   expect(kinds.map((kind) => spendAllows({ ...normal, engagement: "dormant" }, kind))).toEqual([false, false, false]);
 });
+
+test("a spent quota names when the fullest window comes back, and says the person's own turns stop too", async () => {
+  const { degradedService } = await import("./cost");
+  const spend = backgroundSpend({ available: true, limitReached: false,
+    short: { usedPercent: 40, windowDurationMins: 300, resetsAt: Date.UTC(2026, 9, 18, 9) / 1000 },
+    long: { usedPercent: 100, windowDurationMins: 10_080, resetsAt: Date.UTC(2026, 9, 20, 3) / 1000 } });
+  expect(spend.blocker).toMatchObject({ code: "BUDGET_EXHAUSTED", resetsAt: "2026-10-20T03:00:00.000Z" });
+  expect(degradedService("BUDGET_EXHAUSTED").personTurns).toBe(false);
+  expect(degradedService("COST_SIGNAL_UNAVAILABLE").works).toContain("排程与日历：按现有任务和步骤照常重排，写入 Crossline 日历");
+});

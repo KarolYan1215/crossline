@@ -130,14 +130,14 @@ export function backgroundSpend(signal: CostSignal): BackgroundSpend {
 /**
  * What still works while background work is paused, and what waits (the 2026-10-18 evaluation: the person saw only 「已暂停」 and a
  * stopped-looking system). The schedule, the calendar, reminders, timing and completion need no model at all; analysis, step plans,
- * tutorials, research and the assistant do. A spent quota (`RATE_LIMIT_REACHED`) also stops the person's own turns — the input box's
- * replies and the interview — while a quota nearly spent keeps them, holding what is left for them.
+ * tutorials, research and the assistant do. A spent quota (`RATE_LIMIT_REACHED`, or `BUDGET_EXHAUSTED`, which the policy writes only
+ * at 100%) also stops the person's own turns — the input box's replies and the interview; a quota that cannot be read does not say so.
  */
 export function degradedService(code: string): { works: string[]; paused: string[]; personTurns: boolean } {
-  const personTurns = code !== "RATE_LIMIT_REACHED";
+  const personTurns = code !== "RATE_LIMIT_REACHED" && code !== "BUDGET_EXHAUSTED";
   return {
     works: ["排程与日历：按现有任务和步骤照常重排，写入 Crossline 日历", "计时、完成确认与提交", "提醒与手机推送",
-      "手动改截止、时长和步骤", "回答待决事项（需要重排的，恢复后补上）", ...(personTurns ? ["输入框对话与访谈（为它们留着剩下的额度）"] : [])],
+      "手动改截止、时长和步骤", "回答待决事项（需要重排的，恢复后补上）", ...(personTurns ? ["输入框对话与访谈"] : [])],
     paused: ["新收集事项的分析与拆分", "拆步骤与按回答重排", "教程与调研", "助手代办", ...(personTurns ? [] : ["输入框的对话回复与访谈"])],
     personTurns
   };

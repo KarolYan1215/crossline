@@ -345,10 +345,14 @@ test("a spent quota says what still works, what waits and when it comes back, no
   expect(paused.why).toContain("照常可用：排程与日历");
   expect(paused.why).toContain("暂停到恢复：新收集事项的分析与拆分");
   expect(paused.why).toContain("预计");
-  // Nearly spent keeps the person's own turns; fully spent says they stop too.
-  expect(paused.why).toContain("输入框对话与访谈（为它们留着剩下的额度）");
-  store.setSetting(ws, "background.blocker", JSON.stringify({ code: "RATE_LIMIT_REACHED", message: "模型额度已用尽，后台自动工作暂停到额度恢复。", at: NOW.toISOString() }));
-  expect(collectAsks(TEST_CTX, NOW).find((ask) => ask.kind === "background_paused")!.why).toContain("暂停到恢复：新收集事项的分析与拆分；拆步骤与按回答重排；教程与调研；助手代办；输入框的对话回复与访谈");
+  // A spent quota stops the person's own turns too, and says so.
+  expect(paused.why).toContain("暂停到恢复：新收集事项的分析与拆分；拆步骤与按回答重排；教程与调研；助手代办；输入框的对话回复与访谈");
+  // An unreadable quota does not claim the input box is stopped.
+  store.setSetting(ws, "background.blocker", JSON.stringify({ code: "COST_SIGNAL_UNAVAILABLE", message: "读不到模型额度，后台自动工作已暂停。", at: NOW.toISOString() }));
+  const unread = collectAsks(TEST_CTX, NOW).find((ask) => ask.kind === "background_paused")!;
+  expect(unread.title).toBe("后台自动工作已暂停");
+  expect(unread.why).toContain("照常可用：");
+  expect(unread.why).toContain("输入框对话与访谈。暂停到恢复");
 });
 
 test("a locked block a calendar event lands on is asked about, and each answer does what it says", async () => {
