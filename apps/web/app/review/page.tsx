@@ -62,7 +62,7 @@ export default async function ReviewPage() {
 
     {diligence.length > 0 && <section className="review-block">
       <h2>本周调研结论</h2>
-      <p className="review-note">网上调研得出的提议在这里一周批一次；采纳后只作为里程碑设计的参考，不会直接变成任务。</p>
+      <p className="review-note">网上调研得出的提议在这里一周批一次；采纳「任务」类提议会收进待分析、变成任务；其余类型采纳后作为下次设计里程碑的参考。</p>
       <DiligenceReview reports={diligence} identities={identities} />
     </section>}
 
