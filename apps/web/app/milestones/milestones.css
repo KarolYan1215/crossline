@@ -3,6 +3,9 @@
 .mt-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:6px 12px;min-width:0}
 .mt-head-actions{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-left:auto}
 .mt-head-actions .ms-actions{gap:6px}
+.mt-drafting{flex-basis:100%;margin:2px 0 0;padding:6px 10px;border-left:3px solid var(--graphite);font-size:13px;line-height:1.6}
+.mt-drafting p{margin:0}
+.mt-drafting p+p{margin-top:4px}
 .mt-scroll{overflow-x:auto;overflow-y:hidden;border:1px solid var(--mist);background:var(--paper)}
 .mt-canvas{position:relative;color:var(--graphite)}
 .mt-svg{position:absolute;inset:0;overflow:visible}

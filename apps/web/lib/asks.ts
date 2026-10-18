@@ -9,7 +9,7 @@ import {
 import { listAgentTasks, type StoredWorkOrder } from "@crossline/db";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import {
-  acceptWorkOrderEvidence, answerWaiting, appNow, approveWorkOrderProposal, archiveWorkOrder, discardCapture, effectiveSchedulePreferences, getStore, loadGoalForecast,
+  acceptWorkOrderEvidence, answerWaiting, appNow, approveWorkOrderProposal, archiveWorkOrder, discardCapture, effectiveSchedulePreferences, effectiveWeight, getStore, IMPORTANT_WEIGHT, loadGoalForecast,
   markMaterialsReady, planToday, plannerIdOfBlock, readFrozen, readGoalSettings, retryMaterialPreparation, saveGoalSettings, TASK_LIBRARY_WINDOW_DAYS,
   heldConflicts, unlockBlock, writeFrozen, readRiskDecisions, RISK_DECISIONS_SETTING, type RiskDecision
 } from "./crossline";
@@ -342,7 +342,7 @@ function riskAsks({ store, ctx, today }: Source): Ask[] {
  * 「接受，按风险提前安排」 lets the scheduler aim the milestone's work 1–2 days early (`riskBufferOf` in `lib/crossline.ts`). Asked once per
  * review: any answer is kept against the review's fingerprint, so a later review of an edited milestone asks again.
  */
-function riskReviewAsks({ store, ctx, today }: Source): Ask[] {
+function riskReviewMembers({ store, ctx, today }: Source): Ask[] {
   const stored = parseMilestoneRisks(store.getSetting(ctx.workspaceId, MILESTONE_RISKS_SETTING));
   const decisions = readRiskDecisions(ctx);
   const anchors = new Map(store.listMilestoneAnchors(ctx.workspaceId).map((anchor) => [anchor.milestoneId, anchor]));
@@ -360,7 +360,9 @@ function riskReviewAsks({ store, ctx, today }: Source): Ask[] {
     const level = riskLevelOf(risks)!;
     return [{ id: `riskreview:${milestone.id}`, kind: "milestone_risk_review", entityId: milestone.id, line: milestone.identityId, risks,
       preview: milestonePreview(milestone.id), urgency: urgencyFor(deadline ?? undefined, today), ...(deadline ? { dueDay: deadline } : {}),
-      raisedAt: entry.at, fingerprint: entry.fingerprint, important: level === "high",
+      // A high risk is important by itself; otherwise the milestone's weight decides (`lib/horizon.ts` annotates it). An explicit
+      // `false` here overrode a weight of 65 and filed a milestone due in six days under 不重要不紧急 (W-29).
+      raisedAt: entry.at, fingerprint: entry.fingerprint, ...(level === "high" ? { important: true } : {}),
       title: `「${short(milestone.title)}」有${MILESTONE_RISK_LEVEL_LABEL[level]}风险：${risks.map((risk) => MILESTONE_RISK_KIND_LABEL[risk.kind]).join("、")}`,
       why: `审查认为：${clause(risks.map((risk) => risk.note).join("；"))}。${deadline ? `截止 ${format(deadline)}。` : ""}`
         + `接受后，排程让它的任务提前 ${days} 天排完；不接受则排程不变。`,
@@ -371,6 +373,40 @@ function riskReviewAsks({ store, ctx, today }: Source): Ask[] {
         { id: "ignore", label: "不用管", detail: "排程不变，这次审查不再问" }
       ] }];
   });
+}
+
+/** Set by 「逐个决定」 on the folded card: while the same reviews wait, each is its own card again. */
+const RISK_REVIEW_SPLIT = "asks.riskReview.split";
+const riskBatchFingerprint = (members: Ask[]) => members.map((ask) => `${ask.entityId}:${ask.fingerprint}`).sort().join("|");
+
+/**
+ * Two or more reviewed risks waiting are one card, not one each (2026-10-17 walkthrough, W-29: approving twelve milestones put twelve
+ * risk questions on the board, five this week). The card is as urgent as its nearest deadline and important when any risk is high or
+ * any milestone weighs 60 or more; 「全部接受」 and 「全部不用管」 settle them together, 「逐个决定」 splits them back into one card each.
+ */
+function riskReviewAsks(source: Source): Ask[] {
+  const members = riskReviewMembers(source);
+  if (members.length < 2) return members;
+  const fingerprint = riskBatchFingerprint(members);
+  if (source.store.getSetting(source.ctx.workspaceId, RISK_REVIEW_SPLIT) === fingerprint) return members;
+  return [riskReviewBatch(source.ctx, members, source.today, fingerprint)];
+}
+
+export function riskReviewBatch(ctx: AccessContext, members: Ask[], today: string, fingerprint: string): Ask {
+  const due = members.map((ask) => ask.dueDay).filter((day): day is string => Boolean(day)).sort()[0];
+  const weight = Math.max(0, ...members.map((ask) => effectiveWeight(ctx, ask.entityId)));
+  const high = members.some((ask) => ask.important);
+  const lines = members.map((ask) => `${ask.title}${ask.dueDay ? `（截止 ${format(ask.dueDay)}）` : ""}`);
+  return { id: "riskreview:batch", kind: "milestone_risk_review", entityId: "batch", urgency: urgencyFor(due, today), ...(due ? { dueDay: due } : {}),
+    raisedAt: members.map((ask) => ask.raisedAt).sort().at(-1) ?? "", fingerprint, important: high || weight >= IMPORTANT_WEIGHT, importance: weight,
+    preview: { kind: "milestones", href: "/milestones", label: "看里程碑" },
+    title: `${members.length} 个里程碑有风险待过目`,
+    why: `审查找出这些风险：${lines.join("；")}。接受后，排程让各自的任务提前 1–2 天排完；不接受则排程不变。`,
+    options: [
+      { id: "accept", label: "全部接受，按风险提前安排", recommended: true, detail: "各自的任务提前 1–2 天排完" },
+      { id: "split", label: "逐个决定", detail: "拆成每个里程碑一张卡，可分别调整截止或降低标准" },
+      { id: "ignore", label: "全部不用管", detail: "排程不变，这次审查不再问" }
+    ] };
 }
 
 /**
@@ -591,7 +627,9 @@ function backgroundAsks({ store, ctx }: Source): Ask[] {
   const paused = readFailure(store, ctx.workspaceId, BACKGROUND_BLOCKER) as ({ resetsAt?: string; reason?: string } & NonNullable<ReturnType<typeof readFailure>>) | null;
   if (!paused || paused.reason === "CODEX_SUPERVISOR_UNAVAILABLE") return [];
   const until = paused.resetsAt ? `，预计 ${localStamp(paused.resetsAt, effectiveSchedulePreferences(ctx).preferences.timeZone)} 恢复` : "";
-  return [{ id: `background:${paused.code}`, kind: "background_paused", entityId: "background", urgency: "soon", raisedAt: paused.at,
+  // Every analysis, plan and draft waits on this, so it is both urgent and important: on 待确认 it sat in 不重要不紧急 while Today's
+  // opener called it the most urgent thing (2026-10-17 walkthrough, W-22).
+  return [{ id: `background:${paused.code}`, kind: "background_paused", entityId: "background", urgency: "now", important: true, raisedAt: paused.at,
     fingerprint: paused.code, title: "后台自动工作已暂停",
     why: `${clause(paused.message)}${until}。新收集的事项会在恢复后自动分析；需要现在处理的可以在任务页手动点「分析」。`,
     options: [{ id: "settings", label: "去看额度", href: "/settings#usage", recommended: true }] }];
@@ -874,6 +912,18 @@ async function answerOne(ctx: AccessContext, ask: Ask, choice: AskChoice, values
     case "outcome_check": return answerOutcome(ctx, ask, optionId, values, choice.note);
     case "progress_check": return answerProgress(ctx, ask, optionId, choice.note);
     case "milestone_risk_review": {
+      if (ask.entityId === "batch") {
+        const members = riskReviewMembers({ store, ctx, today: planToday(ctx), now: appNow() });
+        if (optionId === "split") {
+          store.setSetting(ctx.workspaceId, RISK_REVIEW_SPLIT, ask.fingerprint);
+          return { ok: true };
+        }
+        if (optionId !== "accept" && optionId !== "ignore") return { ok: false, code: "ASK_OPTION_UNKNOWN" };
+        const at = new Date().toISOString();
+        store.setSetting(ctx.workspaceId, RISK_DECISIONS_SETTING, JSON.stringify({ ...readRiskDecisions(ctx),
+          ...Object.fromEntries(members.map((member) => [member.entityId, { fingerprint: member.fingerprint, how: optionId, at } satisfies RiskDecision])) }));
+        return { ok: true };
+      }
       const how: RiskDecision["how"] | undefined = optionId === "accept" ? "accept" : optionId === "extend" ? "extend" : optionId === "ignore" ? "ignore" : undefined;
       if (!how) return { ok: false, code: "ASK_OPTION_UNKNOWN" };
       if (how === "extend") {

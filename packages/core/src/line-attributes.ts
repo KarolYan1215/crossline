@@ -97,10 +97,35 @@ export function insertByKind(selected: string[], text: string, kindOf: (text: st
   return [...selected.slice(0, at), text, ...selected.slice(at)];
 }
 
-/** 「成为 A 的、B 的<身份>」 from the chosen parts in their order; empty when nothing is chosen. */
-export function composeGoal(parts: string[], noun: string): string {
+/** 「成为 A 的、B 的<身份>」 exactly as the parts say it: what a split must add up to (`recomposes`) and what goals were stored as before. */
+export function plainComposeGoal(parts: string[], noun: string): string {
   const clean = parts.map(cleanAttribute).filter(Boolean);
   return clean.length ? `成为${clean.map((part) => `${part}的`).join("、")}${noun}` : "";
+}
+
+/** The identity noun without its 「者/人/家」: what an attribute that ends with it repeats (「公众号长文创作」 before 「创作者」). */
+const nounStem = (noun: string) => { const stem = noun.replace(/[者人家师员]$/, ""); return stem.length >= 2 && stem !== noun ? stem : ""; };
+
+/**
+ * The goal as it reads (2026-10-17 walkthrough, W-24: 「成为即刻内容创作的、公众号长文创作的创作者」). Parts of one kind in a row share one
+ * 「的」 and are joined by 「、」 (「即刻内容、公众号长文的」), parts of different kinds keep their own (「器件物理方向的、能独立立项的」); a part that
+ * ends with the noun's own stem drops it, since the noun says it next; a part starting with a Latin letter or a digit gets a space after
+ * 「成为」, as the parts themselves write 「AI 排班」. Empty when nothing is chosen.
+ */
+export function composeGoal(parts: string[], noun: string): string {
+  const stem = nounStem(noun);
+  const clean = parts.map(cleanAttribute).filter(Boolean)
+    .map((part) => stem && part.endsWith(stem) && part.length - stem.length >= 2 ? cleanAttribute(part.slice(0, -stem.length)) : part);
+  if (!clean.length) return "";
+  const groups: string[][] = [];
+  let kind: AttributeKind | undefined;
+  for (const part of clean) {
+    const next = guessKind(part);
+    if (groups.length && next === kind) groups.at(-1)!.push(part); else groups.push([part]);
+    kind = next;
+  }
+  const middle = groups.map((group) => `${group.join("、")}的`).join("、");
+  return `成为${/^[A-Za-z0-9]/.test(middle) ? " " : ""}${middle}${noun}`;
 }
 
 /** A whole goal sentence's middle, without 「成为」 and 「…的<身份>」: what it says about the person. */
@@ -116,7 +141,7 @@ const looseGoal = (text: string) => text.replace(/\s+/g, "").replace(/^成为/, 
 
 /** Whether these parts, joined, say exactly what the original sentence said (the check a split must pass). */
 export function recomposes(parts: string[], noun: string, original: string): boolean {
-  return parts.length > 0 && looseGoal(composeGoal(parts, noun)) === looseGoal(original);
+  return parts.length > 0 && looseGoal(plainComposeGoal(parts, noun)) === looseGoal(original);
 }
 
 /**

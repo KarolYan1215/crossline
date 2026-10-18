@@ -91,8 +91,9 @@ export function MilestoneTimeline({ board, actions }: { board: MilestoneBoard; a
       {actions}
     </div>
     {drafts.length > 0 && byLine && <LineApprovals id="ba-by-line" drafts={drafts} labels={board.labels} lineOrder={board.lineOrder} />}
+    <DraftingNotes board={board} />
   </header>;
-  if (!layout.nodes.length) return <div className="mt">{head}<p className="flow-empty">{board.firstDrafts === "running"
+  if (!layout.nodes.length) return <div className="mt">{head}<p className="flow-empty">{board.drafting?.pending.length ? "里程碑草稿一条线一条线出来，好了会出现在这里等待批准。" : board.firstDrafts === "running"
     ? "系统正在按访谈为每条主线设计里程碑草稿（每条主线几分钟），好了会出现在这里等待批准。"
     : board.firstDrafts === "stalled" ? "里程碑草稿没有生成，点上方「让 AI 重新提议草稿」再试一次。" : "尚无里程碑。访谈结束（或达到开始标准后停下 20 分钟）时系统自动设计草稿；也可以点上方「让 AI 重新提议草稿」。"}</p></div>;
   const milestone = selected?.kind === "milestone" ? board.milestones.find((item) => item.id === selected.id) : undefined;
@@ -352,4 +353,20 @@ export function MilestoneStats({ board }: { board: MilestoneBoard }) {
     <span className="mt-stat"><b className="mono">{reuse}</b><span>跨主线复用</span></span>
     {nearest && <span className="mt-stat" data-line={nearest.line}><b className="mono hl-line">{nearest.days} 天</b><span className="mt-stat-title">距 {nearest.title}</span></span>}
   </section>;
+}
+
+/**
+ * What the last design run says beyond the drafts (W-26/W-27): lines it has not reached yet — drafts arrive one line at a time, and a
+ * page that stopped saying 「还在设计」 after the first line looked finished — and lines it left without drafts, with why and what to do.
+ */
+export function DraftingNotes({ board }: { board: Pick<MilestoneBoard, "drafting" | "labels"> }) {
+  const pending = board.drafting?.pending ?? [];
+  const missing = Object.entries(board.drafting?.missing ?? {});
+  if (!pending.length && !missing.length) return null;
+  const name = (line: string) => board.labels[line] ?? line;
+  return <div className="mt-drafting" role="status">
+    {pending.length > 0 && <p>还在设计其余 {pending.length} 条线的草稿：{pending.map(name).join("、")}（每条几分钟），全部出来后再一起批准。</p>}
+    {missing.map(([line, why]) => <p key={line} data-line={line}>
+      <b className="hl-line">{name(line)}</b> 没有草稿：{why} 可以在这条线卡片的「访谈」里补几句，再点「让 AI 重新提议草稿」。</p>)}
+  </div>;
 }

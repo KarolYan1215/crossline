@@ -13,6 +13,15 @@ test("a goal is composed 「成为 A 的、B 的<身份>」 from the chosen part
   expect(composeGoal(["成为科普的", " 有影响力的 "], "创作者")).toBe("成为科普的、有影响力的创作者");
 });
 
+test("a composed goal reads as Chinese: fields share one 的, the noun's stem is not said twice, Latin gets its space (W-24)", () => {
+  expect(composeGoal(["即刻内容创作", "公众号长文创作"], "创作者")).toBe("成为即刻内容、公众号长文的创作者");
+  expect(composeGoal(["AI 排班与备料", "连锁门店运营"], "创业者")).toBe("成为 AI 排班与备料、连锁门店运营的创业者");
+  // A part that is only the stem keeps it: nothing would be left.
+  expect(composeGoal(["创作", "有影响力"], "创作者")).toBe("成为创作的、有影响力的创作者");
+  // A split is still checked against the parts exactly as written.
+  expect(recomposes(["即刻内容创作", "公众号长文创作"], "创作者", "成为即刻内容创作的、公众号长文创作的创作者")).toBe(true);
+});
+
 test("cleaning keeps the phrase and drops what composing adds back", () => {
   expect(cleanAttribute("  成为 神经形态计算方向的。")).toBe("神经形态计算方向");
   expect(cleanAttribute("「能独立立项」")).toBe("能独立立项");

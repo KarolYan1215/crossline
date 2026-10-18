@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import {
   ARTIFACT_PLAN_SCHEMA, ARTIFACT_PLAN_VERSION, MILESTONE_PROPOSAL_SCHEMA, deriveArtifactRelations, goalSettingKey, keptArtifactPlan, lineArtifacts, mergeArtifactPlan,
-  profileFactId, relationFulfilment, supplyWarnings, validateArtifactPlan, validateMilestoneProposal, keepMilestoneProposal, computeMilestoneConfidence,
+  profileFactId, relationFulfilment, supplyWarnings, MILESTONE_DRAFTING_SETTING, readMilestoneDrafting, validateArtifactPlan, validateMilestoneProposal, keepMilestoneProposal, computeMilestoneConfidence,
   type ArtifactMilestone, type ArtifactPlanContext, type CheckedArtifactPlan, type LineArtifacts, type MilestoneProposal, type MilestoneProposalContext,
-  type StoredArtifactPlan
+  type StoredArtifactPlan, type MilestoneDrafting
 } from "@crossline/core";
 import { continueSkillTurn, runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import {
@@ -319,6 +319,15 @@ export function createMilestoneProposer(store: CrosslineStore, workspaceId: stri
     const assumptions: string[] = [];
     const skipped: Array<{ identityId: string; code: string; message: string }> = [];
     let lastThread: string | undefined;
+    // Progress for the 主线 page, line by line (`MILESTONE_DRAFTING_SETTING`). A run limited to some lines keeps what the last run said
+    // about the others.
+    const previous = readMilestoneDrafting(store.getSetting(workspaceId, MILESTONE_DRAFTING_SETTING));
+    const others = <T>(list: T[] | undefined, lineOf: (item: T) => string) => (list ?? []).filter((item) => !lines.includes(lineOf(item)));
+    const drafting: MilestoneDrafting = { startedAt: clockNow(now).toISOString(), lines, done: [],
+      skipped: others(previous?.skipped, (item) => item.lineId),
+      thin: [...others(previous?.thin, (line) => line), ...thinLines(context, allLines).filter((id) => !only?.length || only.includes(id))] };
+    const saveDrafting = () => store.setSetting(workspaceId, MILESTONE_DRAFTING_SETTING, JSON.stringify(drafting));
+    saveDrafting();
     // Drafts about to be replaced (untouched, in a line designed now, not from this run) are neither producers nor consumers any more.
     const planned = new Set(lines);
     const replaced = (milestone: { id: string; identityId: string; status: string; version: number }) =>
@@ -338,10 +347,17 @@ export function createMilestoneProposer(store: CrosslineStore, workspaceId: stri
       const own = lineContext(context, identityId, crossLine ? lineArtifacts(plan, identityId, artifactMilestones(store, workspaceId, replaced), labelsOf(context)) : undefined);
       const { result, threadId } = await runLine(client, own, signal);
       if (threadId) lastThread = threadId;
-      if (!result.ok) { skipped.push({ identityId, code: result.blocker.code, message: result.blocker.message }); continue; }
+      if (!result.ok) {
+        skipped.push({ identityId, code: result.blocker.code, message: result.blocker.message });
+        drafting.skipped.push({ lineId: identityId, why: `这次没有设计出来：${result.blocker.message}` });
+        saveDrafting();
+        continue;
+      }
       persistTargetProposals(store, workspaceId, result.output.targetProposals ?? []);
       const saved = persistProposals(store, workspaceId, result.output.milestones, context.request, own.artifacts);
       drafts.push(...saved);
+      drafting.done.push(identityId);
+      saveDrafting();
       if (result.audit.warnings?.length) {
         const entityId = `line:${identityId}`;
         const version = store.listEvents(workspaceId, { type: "validation.warned", entityId }).length + 1;
@@ -355,6 +371,8 @@ export function createMilestoneProposer(store: CrosslineStore, workspaceId: stri
         assumptions.push(`「${name}」分数线暂定为 ${proposal.value}（${proposal.why}）；各里程碑的分数线均由此倒推，可在「主线」页修改并重算。`);
       }
     }
+    drafting.finishedAt = clockNow(now).toISOString();
+    saveDrafting();
     if (!drafts.length) {
       return { state: "blocked", code: skipped[0]?.code ?? "PROPOSAL_EMPTY",
         message: skipped.map((item) => `${labelOf(context, item.identityId)}：${item.message}`).join("；").slice(0, 400) || "没有生成任何里程碑。" };
@@ -369,6 +387,9 @@ export function createMilestoneProposer(store: CrosslineStore, workspaceId: stri
     return { state: "proposed", drafts, assumptions, relations, ...(skipped.length ? { skipped } : {}), ...(lastThread ? { threadId: lastThread } : {}) };
   };
 }
+
+/** The clock a run reads, as the context does: the test seam, else `CROSSLINE_FIXED_NOW`, else now. */
+const clockNow = (now?: () => Date) => now?.() ?? (process.env.CROSSLINE_FIXED_NOW ? new Date(process.env.CROSSLINE_FIXED_NOW) : new Date());
 
 const labelsOf = (context: MilestoneProposalContext) => Object.fromEntries(context.identities.map((identity) => [identity.id, identity.label]));
 const labelOf = (context: MilestoneProposalContext, identityId: string) => context.identities.find((item) => item.id === identityId)?.label ?? identityId;

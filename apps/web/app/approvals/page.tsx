@@ -1,5 +1,6 @@
 import { ensureSeeded, getStore, loadCurrentPlan, planToday } from "../../lib/crossline";
 import { SubpageShell } from "../subpage-shell";
+import { FirstHint } from "../ui/first-hint";
 import { AcceptEvidenceButton, JudgeMilestoneButton, ProposalBatchForm, RevokeAutoApprovalButton } from "./approval-actions";
 import { AssistantReview } from "./assistant-review";
 import { recentAutoApprovals } from "../../lib/approvals";
@@ -111,6 +112,9 @@ export default async function ApprovalsPage() {
       elsewhere={[{ label: "里程碑草稿", count: pending.milestoneDrafts, href: "/milestones" }, { label: "分数线待审阅", count: pending.targets, href: "/milestones" },
         { label: "调研建议", count: pending.research, href: "/review" }, { label: "文件中的日期", count: pending.dates, href: "/onboarding" },
         { label: "访谈问题", count: pending.questions, href: "/onboarding" }]} />
+    <FirstHint id="approvals" title="四个格子怎么排">
+      需要本人决定的问题按「紧急」和「重要」分进四格：紧急是两天内不定就会误事，重要是关系到权重高的里程碑或开始使用的基本信息。先处理「紧急重要」；每格一次只摊开一张，答完下一张自动顶上来，也可以「明天再问」。
+    </FirstHint>
     <AskBoard initial={weekAsks} previews={previews} />
     <AssistantReview ctx={ctx} deferred={deferredOrder} />
     {evidenceReviews.length > 0 && <section className="approval-ledger" id="evidence" aria-label="待验收">

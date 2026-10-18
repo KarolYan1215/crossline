@@ -1,5 +1,6 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { CrosslineStore } from "@crossline/db";
+import { askQuadrant } from "@crossline/core";
 vi.mock("server-only", () => ({}));
 vi.mock("./codex-runtime", () => ({ requestCodexSupervisor: vi.fn(async () => ({})), CodexSupervisorRequestError: class extends Error {} }));
 import { requestCodexSupervisor } from "./codex-runtime";
@@ -185,6 +186,39 @@ test("a reviewed medium or high risk is put to the person first: only 「接受�
   expect(buffer()).toBeUndefined();
 });
 
+test("several reviewed risks are one card, as pressing as its nearest deadline and heaviest milestone; 「逐个决定」 splits it back (W-29)", async () => {
+  const store = setup();
+  const { MILESTONE_RISKS_SETTING, milestoneRiskFingerprint } = await import("@crossline/core");
+  const { readRiskDecisions, saveGoalSettings } = await import("./crossline");
+  store.saveMilestone({ id: "pitch", ownerId: owner, workspaceId: ws, identityId: "startup", projectId: "q", title: "首批 5 家门店签试用", status: "approved", version: 1 });
+  store.saveMilestoneAnchor({ workspaceId: ws, milestoneId: "pitch", stage: 1, deadline: "2026-10-13", baseline: "", target: "", stakeholders: [],
+    sourceFactIds: [], dependsOn: [], updatedAt: "2026-10-01T00:00:00Z" });
+  // Not the 2-day mos2 deadline this time: only the 6-day one, weighted 65 by the person (the walkthrough's case).
+  store.saveMilestoneAnchor({ workspaceId: ws, milestoneId: "mos2", stage: 1, deadline: "2026-11-30", baseline: "", target: "", stakeholders: [],
+    sourceFactIds: [], dependsOn: [], updatedAt: "2026-10-01T00:00:00Z" });
+  saveGoalSettings(TEST_CTX, "pitch", { importance: "ordinary", weight: 65 });
+  const review = (title: string, deadline: string) => milestoneRiskFingerprint({ title, deadline, criteria: [], dependsOn: [] });
+  store.setSetting(ws, MILESTONE_RISKS_SETTING, JSON.stringify({
+    mos2: { fingerprint: review("实测 MoS₂ 参数已可直接驱动 NeuroSim", "2026-11-30"), at: "2026-10-06T00:00:00Z", source: "model", risks: [{ level: "medium", kind: "capacity", note: "同月还有三个截止" }] },
+    pitch: { fingerprint: review("首批 5 家门店签试用", "2026-10-13"), at: "2026-10-06T00:00:00Z", source: "model", risks: [{ level: "medium", kind: "time", note: "只剩一周" }] } }));
+  const risky = () => collectAsks(TEST_CTX, NOW).filter((ask) => ask.kind === "milestone_risk_review");
+  const [batch, ...rest] = risky();
+  expect(rest).toEqual([]);
+  expect(batch).toMatchObject({ id: "riskreview:batch", title: "2 个里程碑有风险待过目", urgency: "soon", dueDay: "2026-10-13", important: true });
+  expect(askQuadrant(batch!)).toBe("important");
+  expect(batch!.why).toContain("「首批 5 家门店签试用」有中风险");
+  expect(batch!.options.map((option) => option.id)).toEqual(["accept", "split", "ignore"]);
+  // 逐个决定: one card each, the 65-weighted one no longer filed as unimportant by an explicit `important: false`.
+  expect(await answerAsk(TEST_CTX, batch!.id, "split", {}, NOW)).toMatchObject({ ok: true });
+  expect(risky().map((ask) => ask.entityId).sort()).toEqual(["mos2", "pitch"]);
+  expect(risky().find((ask) => ask.entityId === "pitch")!.important).toBeUndefined();
+  // A new review changes the set, so it folds again; 「全部接受」 answers every member.
+  store.setSetting(ws, "asks.riskReview.split", "");
+  expect(await answerAsk(TEST_CTX, "riskreview:batch", "accept", {}, NOW)).toMatchObject({ ok: true });
+  expect(Object.keys(readRiskDecisions(TEST_CTX)).sort()).toEqual(["mos2", "pitch"]);
+  expect(risky()).toEqual([]);
+});
+
 test("work given a time yesterday and never started is asked about when it bears on a deadline this week; the rest just rolls", async () => {
   const store = setup();
   const save = (id: string, dueDate: string) => store.saveWorkOrder({ id, ownerId: owner, workspaceId: ws, identityId: "research", projectId: "p",
@@ -278,6 +312,8 @@ test("background work the worker paused is told to the person, with where to loo
   expect(paused?.why).toContain("还没有登录模型账号");
   expect(paused?.why).not.toContain("chatgpt");
   expect(paused?.options[0]?.href).toBe("/settings#usage");
+  // Everything waits on it: 待确认 and Today's opener agree it is urgent and important (W-22).
+  expect(askQuadrant(paused!)).toBe("urgent_important");
   store.setSetting(ws, "background.blocker", JSON.stringify({ code: "COST_SIGNAL_UNAVAILABLE", reason: "CODEX_SUPERVISOR_UNAVAILABLE", message: "读不到模型额度", at: NOW.toISOString() }));
   expect(collectAsks(TEST_CTX, NOW).some((ask) => ask.kind === "background_paused")).toBe(false);
   store.setSetting(ws, "background.blocker", "");

@@ -120,7 +120,8 @@ test("Plan is the long view: no calendar, a milestone timeline and three charts 
   await expect(page.locator(".mo-cell, .wk-col, .dv-block")).toHaveCount(0);
   for (const chart of ["里程碑时间轴", "容量与需求", "主线投入：计划与实际", "估时准确度", "时段与精力"]) await expect(page.getByRole("region", { name: chart })).toBeVisible();
   await expect(page.getByRole("button", { name: "立即同步日历" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "发布到 Crossline 日历" })).toBeVisible();
+  // No writer account in the e2e ledger, so there is no Crossline calendar to publish to (W-20).
+  await expect(page.getByRole("button", { name: "发布到 Crossline 日历" })).toHaveCount(0);
   // Each milestone mark opens its drawer on 主线 (the default eight-week horizon).
   await expect(page.locator('.pl-ms-point[href^="/milestones?open="]').first()).toBeVisible();
   // Eight weekly bars by default; four once the horizon is switched, kept in the address.

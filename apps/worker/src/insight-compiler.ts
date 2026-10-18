@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import {
-  MINE_SKILL_SCHEMA, currentMineVersion, keepMineSkill, mineSkillSettingKey, readMineSkill, renderMineSkill, validateMineSkill,
+  mineFactLabel, MINE_SKILL_SCHEMA, currentMineVersion, keepMineSkill, mineSkillSettingKey, readMineSkill, renderMineSkill, validateMineSkill,
   type MineMaterial, type MineSkillCompilation, type MineSkillContext
 } from "@crossline/core";
 import { runCodexSkill, webResearchBlocker, type CodexRpcBoundary } from "@crossline/codex";
@@ -72,7 +72,7 @@ export function mineMaterials(store: CrosslineStore, workspaceId: string, lineId
   for (const fact of facts) {
     found.push({ key: `fact:${fact.projectId}/${fact.slot}`, kind: "fact", at: fact.updatedAt,
       text: `${fact.value}${fact.sourceQuote && fact.sourceQuote !== fact.value ? `（原话：${fact.sourceQuote}）` : ""}`,
-      label: `访谈中确认的「${fact.slot}」` });
+      label: mineFactLabel(fact.slot, fact.value) });
   }
   return found.map((material, index) => ({ ...material, id: `m${index + 1}` }));
 }

@@ -61,7 +61,8 @@ export function askSources(ask: Pick<Ask, "kind" | "entityId" | "title" | "optio
   const id = encodeURIComponent(ask.entityId);
   const sources: AskSource[] = [];
   if (WORK_ORDER_KINDS.has(ask.kind)) sources.push({ label: `任务${ask.kind === "step_question" ? "" : name}`, href: `/workbench/${id}` });
-  if (MILESTONE_KINDS.has(ask.kind)) sources.push({ label: `里程碑${name}`, href: `/milestones?open=${id}` });
+  // A folded card (`entityId: "batch"`, several milestones) has no one milestone to open; its preview links the page.
+  if (MILESTONE_KINDS.has(ask.kind) && ask.entityId !== "batch") sources.push({ label: `里程碑${name}`, href: `/milestones?open=${id}` });
   if (ask.kind === "source_project") sources.push({ label: `文件${name}`, href: `/api/source-documents/${id}/file` });
   if (ask.kind === "capture_blocked") sources.push({ label: "收集", href: "/workbench" });
   if (ask.kind === "interview_question") sources.push({ label: "访谈", href: "/onboarding" });

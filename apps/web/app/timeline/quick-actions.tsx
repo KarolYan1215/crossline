@@ -47,7 +47,8 @@ export function DayQuickActions({ day, today, items, proposals, nowMinute, selec
         <i data-kind="optional" style={{ width: `${(load.pencilled / total) * 100}%` }} />
         <i data-kind="fixed" style={{ width: `${(load.fixed / total) * 100}%` }} />
       </span>
-      <small>已排 {hoursLabel(load.planned)}{load.pencilled ? ` · 预排 ${hoursLabel(load.pencilled)}` : ""}{load.fixed ? ` · 固定日程 ${hoursLabel(load.fixed)}` : ""}</small>
+      <small>已排 {hoursLabel(load.planned)}{load.pencilled ? ` · 预排 ${hoursLabel(load.pencilled)}` : ""}{load.fixed ? ` · 固定日程 ${hoursLabel(load.fixed)}` : ""}
+        {load.allDay.length ? ` · 全天：${load.allDay.join("、")}` : ""}</small>
     </section>
     <section className="dq-switch" aria-live="polite" aria-label={selected ? "选中的日程" : "下一项"}>
       {selected ? <BlockOverview key={selected.id} item={selected} items={items} today={today} labels={labels} details={details} heading="选中的日程" onClose={onDeselect} />

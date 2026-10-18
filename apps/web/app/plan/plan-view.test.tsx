@@ -13,10 +13,12 @@ const plan: PlanVersionData = {
 
 describe("PlanView", () => {
   test("the top row: reading and writing the calendar and the horizon — no calendar, no version to approve", () => {
-    const html = renderToStaticMarkup(<PlanView plan={plan} aside={<span>统计范围</span>} />);
+    const html = renderToStaticMarkup(<PlanView plan={plan} aside={<span>统计范围</span>} calendarWrite />);
     expect(html).toContain('data-plan-version="plan-7"');
     expect(html).toContain("立即同步日历");
     expect(html).toContain("发布到 Crossline 日历");
+    // Without a writer account (the hosted beta) there is no Crossline calendar to publish to (W-20).
+    expect(renderToStaticMarkup(<PlanView plan={plan} />)).not.toContain("Crossline 日历");
     expect(html).toContain("统计范围");
     // The calendar lives on Today only (decided 2026-10-10).
     for (const view of [">日<", ">周<", ">月<"]) expect(html).not.toContain(view);
