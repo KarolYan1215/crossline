@@ -72,7 +72,7 @@ export function ModelProviderCard({ initial, onReady }: { initial?: ProviderView
   const served = view?.features.filter((feature) => feature.served) ?? [];
   const withheld = view?.features.filter((feature) => !feature.served) ?? [];
   return <section className="st-card model-provider-card" aria-label="其他模型">
-    <header><h3>其他模型</h3><small>经同一条 Codex 路径运行，只承担检验通过的功能</small>
+    <header><h3>其他模型</h3><small>保存后先自动检验它的回答格式，只承担检验通过的功能</small>
       <Tag tone={view?.testing ? "warn" : provider ? (served.length ? "ok" : "warn") : "neutral"}>
         {view?.testing ? "检验中" : provider ? (served.length ? `承担 ${served.length} 项` : "未通过检验") : "未添加"}</Tag></header>
     {message && <p role="status" className="muted">{message}</p>}
