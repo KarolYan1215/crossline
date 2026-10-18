@@ -50,6 +50,8 @@ export function createModelProviderService(options: {
   /** What Crossline adds on top of a provider (docs/beta-launch.md §10.4); from the environment unless given. Null turns one off. */
   search?: WebSearchBackend | null;
   image?: ImageBackend | null;
+  /** A conformance run just finished: what was decided while the provider was not admitted is decided again (W-11). */
+  onConformance?: (workspaceId: string) => void;
 }) {
   const now = options.now ?? (() => new Date());
   const search = options.search === undefined ? webSearchFromEnv() : options.search ?? undefined;
@@ -137,6 +139,7 @@ export function createModelProviderService(options: {
     const record = summarizeConformance({ providerId: provider.id, model: provider.model, runtimeVersion: RUNTIME_VERSION, ranAt: now().toISOString() }, runs);
     options.store.appendEvent({ ownerId: ownerOf(options.store, workspaceId), workspaceId, idempotencyKey: `${CONFORMANCE_EVENT}:${provider.id}:${record.ranAt}`,
       type: CONFORMANCE_EVENT, entityId: provider.id, payload: record });
+    try { options.onConformance?.(workspaceId); } catch { /* the listener's own concern */ }
     return record;
   }
 

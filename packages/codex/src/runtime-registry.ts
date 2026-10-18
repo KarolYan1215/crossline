@@ -67,6 +67,11 @@ export function createRuntimeRegistry(options: {
   maxRunning?: number;
   /** Whether a workspace has a model provider of its own; such a guest gets its own runtime even without a Codex sign-in. */
   hasProvider?: (workspaceId: string) => boolean;
+  /**
+   * A guest's login just succeeded. Whatever background state was decided while it had no model (a paused background, captures left
+   * unanalysed, first drafts not started) is decided again now instead of at the next tick, up to fifteen minutes later (W-11).
+   */
+  onConnected?: (workspaceId: string) => void;
   /** Longer than a Skill's own stall limit (20 min), so a long turn that is still producing events is never stopped under it. */
   idleMs?: number;
   /** While every runtime is working, how often to look for one that finished, and how long to wait before refusing (three hours). */
@@ -171,8 +176,10 @@ export function createRuntimeRegistry(options: {
         if (message.method !== "account/login/completed") return;
         const login = logins.get(workspaceId);
         const params = (message.params ?? {}) as { loginId?: unknown; success?: unknown };
-        if (login && (params.loginId === undefined || params.loginId === login.loginId))
+        if (login && (params.loginId === undefined || params.loginId === login.loginId)) {
           logins.set(workspaceId, { ...login, state: params.success === true ? "completed" : "failed", updatedAt: new Date(now()).toISOString() });
+          if (params.success === true) connectedNow(workspaceId);
+        }
       });
       sidecar.onExit(() => { if (running.get(workspaceId)?.sidecar === sidecar) running.delete(workspaceId); });
       return sidecar;
@@ -180,6 +187,9 @@ export function createRuntimeRegistry(options: {
       return blocker("RUNTIME_START_FAILED");
     } finally { starting.delete(workspaceId); }
   }
+
+  /** Told once per successful login; a listener's failure never reaches the runtime's notification loop. */
+  const connectedNow = (workspaceId: string) => { try { options.onConnected?.(workspaceId); } catch { /* the listener's own concern */ } };
 
   const clientFor = async (workspaceId: string, forLogin = false): Promise<{ ok: true; client: CodexRpcBoundary } | { ok: false; blocker: RuntimeBlocker }> => {
     if (isOwner(workspaceId)) return { ok: true, client: options.owner.client };
@@ -210,6 +220,7 @@ export function createRuntimeRegistry(options: {
         ...(typeof answer.verificationUrl === "string" ? { verificationUrl: answer.verificationUrl } : {}),
         ...(typeof answer.userCode === "string" ? { userCode: answer.userCode } : {}) };
       logins.set(workspaceId, login);
+      if (login.state === "completed") connectedNow(workspaceId);
       return login;
     },
     async cancelLogin(workspaceId) {

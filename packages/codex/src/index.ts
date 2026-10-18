@@ -483,7 +483,7 @@ export async function startCodexSupervisor(options: {
    * (tests that do not exercise this). The worker always sets it.
    */
   runtimes?: { baseDir: string; ownerWorkspaceId: () => string | undefined; start?: (codexHome: string) => Promise<RuntimeSidecar>;
-    maxRunning?: number; idleMs?: number; hasProvider?: (workspaceId: string) => boolean };
+    maxRunning?: number; idleMs?: number; hasProvider?: (workspaceId: string) => boolean; onConnected?: (workspaceId: string) => void };
   /**
    * A workspace's own model provider (R7, providers.ts): its routes under `/v1/model/provider*`, answered for the caller's workspace,
    * and the quota reading that replaces the Codex one while a provider serves that workspace.
@@ -523,6 +523,7 @@ export async function startCodexSupervisor(options: {
     baseDir: options.runtimes.baseDir, ...(options.runtimes.maxRunning ? { maxRunning: options.runtimes.maxRunning } : {}),
     ...(options.runtimes.idleMs ? { idleMs: options.runtimes.idleMs } : {}),
     ...(options.runtimes.hasProvider ? { hasProvider: options.runtimes.hasProvider } : {}),
+    ...(options.runtimes.onConnected ? { onConnected: options.runtimes.onConnected } : {}),
     // A guest's runtime gets the same Crossline plugin the owner's has.
     start: options.runtimes.start ?? (async (home) => {
       const started = await startCodexAppServer(home);

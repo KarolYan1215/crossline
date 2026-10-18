@@ -25,7 +25,9 @@ const INSTRUCTIONS = "Research the question on the public web, then report only 
   + "target. Write every human-readable field in Chinese.";
 
 const QUESTIONS: Record<DiligenceTopic, string> = {
-  opportunities: "找出适合这个人当前阶段和身份约束的外部机会（比赛、孵化器、资助、合作渠道）。每一项都要有申请条件、是否对在读学生开放和截止日期。",
+  // The person's own status and place come from `facts` (the line's and the person's): asking 「是否对在读学生开放」 of everyone made a
+  // Hangzhou founder who is not a student get UC Berkeley's student fund and SXSW (2026-10-17 walkthrough, W-14).
+  opportunities: "找出适合这个人当前阶段和身份约束的外部机会（比赛、孵化器、资助、合作渠道）。只列这个人按 facts 里的身份、所在地和阶段大致能申请的，优先所在地区或线上可参加的；每一项都要有申请条件（身份、地区、阶段等限制）和截止日期，facts 里查不到的条件写进 gaps，不要假设这个人是学生或身在某地。",
   positioning: "基于公开的事实（同类账号的数据、平台规则、受众需求）判断这条线最可行的定位和选题方向，并说明依据。",
   literature: "为这个人正在做的项目梳理最相关的文献和代表性工作，给出可以直接开始读的清单，并指出尚未被充分回答的空白。",
   tracking_framework: "给出个人账户收益率与风险的追踪框架和研究备忘录模板（指标口径、记录频率、数据来源），不包含任何买卖建议。"
@@ -150,8 +152,11 @@ export function createDiligenceRunner(store: CrosslineStore, workspaceId: string
     if (unavailable) return { state: "blocked", ...unavailable };
     const pack = identityLines(store, workspaceId).find((item) => item.id === identityId);
     if (!pack) return { state: "blocked", code: "DILIGENCE_IDENTITY_UNKNOWN", message: "没有这条主线。" };
-    const facts = store.listProfileFacts(workspaceId).filter((fact) => fact.identityId === identityId);
+    const allFacts = store.listProfileFacts(workspaceId);
+    const facts = allFacts.filter((fact) => fact.identityId === identityId);
     if (facts.length < 2) return { state: "skipped", reason: "no_profile" };
+    // Who the person is (city, schooling, work) decides which opportunities apply at all, and lives under `person`, not the line.
+    const personFacts = allFacts.filter((fact) => fact.identityId === "person" && fact.status === "confirmed" && !fact.value.startsWith("假设：")).slice(0, 20);
 
     const now = all.now();
     const reports = store.listDiligenceReports(workspaceId);
@@ -183,7 +188,7 @@ export function createDiligenceRunner(store: CrosslineStore, workspaceId: string
       identity: { id: pack.id, label: pack.label }, topic: { kind: topic, question: QUESTIONS[topic] },
       projects: store.listProjects(workspaceId).filter((project) => project.identityId === identityId)
         .map(({ id, name, summary }) => ({ id, name, summary })),
-      facts: facts.map((fact) => ({ id: profileFactId(fact), projectId: fact.projectId, slot: fact.slot, value: fact.value, status: fact.status })),
+      facts: [...facts, ...personFacts].map((fact) => ({ id: profileFactId(fact), projectId: fact.projectId, slot: fact.slot, value: fact.value, status: fact.status })),
       // Whatever the person said limits the answer: stated constraints are facts in the slots that name them.
       constraints: facts.filter((fact) => /constraint|limit|约束|限制/.test(fact.slot) || /无法|不能|不要|不做|不给/.test(fact.value)).map((fact) => fact.value).slice(0, 8),
       alreadyDecided: decidedProposals(reports, identityId)

@@ -16,7 +16,8 @@ test("the hosted beta runs two model turns at a time; elsewhere there is no limi
   expect(guestRuntimeLimit({ CROSSLINE_PUBLIC_BETA: "1", CROSSLINE_MODEL_CONCURRENCY: "4" })).toBe(4);
   expect(guestRuntimeLimit({ CROSSLINE_PUBLIC_BETA: "1", CROSSLINE_MODEL_CONCURRENCY: "4", CROSSLINE_GUEST_RUNTIMES: "3" })).toBe(3);
   expect(guestRuntimeLimit({})).toBeUndefined();
-  expect(priorityForSkill("crossline:crossline-milestone-architect")).toBe("background");
+  expect(priorityForSkill("crossline:crossline-milestone-architect")).toBe("planning");
+  expect(priorityForSkill("crossline:crossline-due-diligence")).toBe("background");
 });
 
 test("with one slot, runs wait in line, a person's interview goes before background work, and each waiter hears what is ahead", async () => {
@@ -37,6 +38,21 @@ test("with one slot, runs wait in line, a person's interview goes before backgro
   first.resolve();
   await Promise.all([running, b, c, i]);
   expect(order).toEqual(["a", "i", "b", "c"]);
+});
+
+test("planning work goes before discretionary background work, behind a person's turn, and still leaves the person's slot free", async () => {
+  configureModelGate({ limit: 2, reserve: 1, log: () => {} });
+  const order: string[] = [];
+  const first = deferred();
+  const running = withModelSlot({ skill: "crossline:crossline-due-diligence" }, async () => { order.push("research"); await first.promise; });
+  const tutorial = withModelSlot({ skill: "crossline:crossline-material-researcher" }, async () => { order.push("tutorial"); });
+  const backplan = withModelSlot({ skill: "crossline:crossline-goal-backplanner" }, async () => { order.push("backplan"); });
+  await tick();
+  // The free slot is the person's: neither background run takes it.
+  expect(order).toEqual(["research"]);
+  first.resolve();
+  await Promise.all([running, tutorial, backplan]);
+  expect(order).toEqual(["research", "backplan", "tutorial"]);
 });
 
 test("on the hosted beta one slot is kept for a person: background work never takes every slot", async () => {

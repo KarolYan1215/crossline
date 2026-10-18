@@ -59,6 +59,7 @@ export function planToday(ctx?: AccessContext,
 export { AVAILABILITY_SETTING } from "@crossline/core";
 import { FIRST_DRAFTS_SETTING, firstDraftsState, STEP_ENERGY_CEILING, learnedEfficiency, type StepRole, AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, BYPRODUCT_LAG_DAYS, RELATION_KIND_LABEL, isCancelledEvent, resolveAvailability, hoursFromText, type AvailabilitySource, type PortraitReport } from "@crossline/core";
 import { statedShares } from "./plan-stats";
+import { milestonesBeingBackplanned } from "./backplan-status";
 import { completionRule, type CompletionMode, type CompletionOutcome } from "@crossline/core";
 import { MILESTONE_RISKS_SETTING, parseMilestoneRisks, riskBufferDays } from "@crossline/core";
 import { identityLines, linePacks } from "./lines";
@@ -2314,7 +2315,8 @@ export async function loadDashboard(ctx: AccessContext): Promise<Omit<DashboardD
     // Milestones that exist and wait for approval, and whether any exist at all: an empty 「下一步」 says which step comes next.
     milestones: { drafts: new Set(store.listMilestones(ctx.workspaceId).filter((item) => item.status === "draft").map((item) => item.id)).size,
       any: store.listMilestones(ctx.workspaceId).some((item) => item.status !== "archived"),
-      firstDrafts: firstDraftsState(store.getSetting(ctx.workspaceId, FIRST_DRAFTS_SETTING), store.listMilestones(ctx.workspaceId).some((item) => item.status !== "archived"), now) },
+      firstDrafts: firstDraftsState(store.getSetting(ctx.workspaceId, FIRST_DRAFTS_SETTING), store.listMilestones(ctx.workspaceId).some((item) => item.status !== "archived"), now),
+      backplanning: milestonesBeingBackplanned(store, ctx.workspaceId, libraryDay) },
     ...(primary ? { primary } : {}),
     ...(higherPriority ? { higherPriority } : {}),
     ...(lowEnergy ? { lowEnergy } : {}),

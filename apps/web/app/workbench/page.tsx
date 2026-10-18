@@ -12,6 +12,7 @@ import { TaskCard } from "../task/task-card";
 import { compareInGroup, groupOf, waitReason, type TaskGroup } from "../task/card-model";
 import { identityLines } from "../../lib/lines";
 import { timed, timedSync } from "../../lib/sections";
+import { milestonesBeingBackplanned } from "../../lib/backplan-status";
 
 export const dynamic = "force-dynamic";
 
@@ -88,9 +89,12 @@ export default async function WorkbenchPage({ searchParams }: {
     <TaskCard detail={entry.detail} slot={entry.slot} today={today} />
   </div>;
   const nothing = !live.length && !captures.length;
+  const backplanning = nothing ? milestonesBeingBackplanned(getStore(), ctx.workspaceId, today) : 0;
   const shownLines = lines.filter((line) => lineCounts.has(line.id));
   return <SubpageShell active="任务" title="任务">
-    {nothing ? <p className="panel today-empty">还没有任务。任务有两个来源：批准「主线」页的里程碑草稿后，系统从它们倒推出任务；或者在今日页的输入框写下要做的事，系统整理成任务。</p>
+    {nothing ? <p className="panel today-empty">{backplanning
+      ? `系统正在从已批准的 ${backplanning} 个里程碑倒推任务（每个几分钟），出来的任务会出现在这里。`
+      : "还没有任务。任务有两个来源：批准「主线」页的里程碑草稿后，系统从它们倒推出任务；或者在今日页的输入框写下要做的事，系统整理成任务。"}</p>
       : <div className="tasks-top">
         <nav className="tasks-index" aria-label="任务分组">
           {SECTIONS.map((section) => <a key={section.group} href={`#tasks-${section.group}`}><span>{section.title}</span><b className="mono">{count(section.group)}</b></a>)}

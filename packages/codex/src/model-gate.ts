@@ -13,14 +13,24 @@
  * - Each waiter is told how many runs are ahead of it, so a page can say 「排队中，前面还有 N 个」.
  */
 
-export type ModelPriority = "interactive" | "background";
+export type ModelPriority = "interactive" | "planning" | "background";
 /** Bytes in use (without reclaimable page cache) and the ceiling they are measured against. */
 export type MemoryReading = { used: number; limit: number };
 
 /** Skills a person is looking at a spinner for. Everything else is background and waits behind them. */
 export const INTERACTIVE_SKILLS: readonly string[] = ["crossline-onboarding", "crossline-concierge"];
+/**
+ * Background Skills that turn what the person just did (a capture, approved milestones, a finished interview) into work on their board.
+ * They wait behind a person's turn but go before discretionary runs: after 12 milestones were approved the first task took 22 minutes,
+ * queued behind web research and tutorials nobody was waiting for (2026-10-17 walkthrough, W-28). They still count as background for the
+ * slot kept for a person.
+ */
+export const PLANNING_SKILLS: readonly string[] = ["crossline-automation-stripper", "crossline-goal-backplanner", "crossline-step-planner",
+  "crossline-milestone-architect", "crossline-artifact-planner"];
+const named = (list: readonly string[], skillName: string) => list.some((name) => skillName === name || skillName.endsWith(`:${name}`));
 export const priorityForSkill = (skillName: string): ModelPriority =>
-  INTERACTIVE_SKILLS.some((name) => skillName === name || skillName.endsWith(`:${name}`)) ? "interactive" : "background";
+  named(INTERACTIVE_SKILLS, skillName) ? "interactive" : named(PLANNING_SKILLS, skillName) ? "planning" : "background";
+const RANK: Record<ModelPriority, number> = { interactive: 0, planning: 1, background: 2 };
 
 export function modelGateLimit(env: NodeJS.ProcessEnv = process.env): number {
   const raw = Number(env.CROSSLINE_MODEL_CONCURRENCY);
@@ -134,8 +144,8 @@ function backgroundLimit(): number {
 
 function pump(): void {
   while (waiters.length && active < config.limit) {
-    // Waiters are ordered interactive first, so a background head means only background work waits.
-    if (waiters[0]!.priority === "background" && activeBackground >= backgroundLimit()) break;
+    // Waiters are ordered interactive first, so a non-interactive head means only background work waits.
+    if (waiters[0]!.priority !== "interactive" && activeBackground >= backgroundLimit()) break;
     if (memoryHigh()) {
       const now = config.now();
       blockedSince ??= now;
@@ -154,7 +164,7 @@ function pump(): void {
     blockedSince = undefined;
     const next = waiters.shift()!;
     active += 1;
-    if (next.priority === "background") activeBackground += 1;
+    if (next.priority !== "interactive") activeBackground += 1;
     const waitedMs = config.now() - next.queuedAt;
     if (waitedMs > 0) config.log({ type: "model.gate", skill: next.skill, priority: next.priority, waitedMs, queued: waiters.length });
     // A waiter that was told it had runs ahead hears 0 when its own run starts, so a page stops saying it is queued.
@@ -184,14 +194,14 @@ export async function withModelSlot<T>(input: { skill: string; priority?: ModelP
     }
     if (input.signal?.aborted) { resolve(false); return; }
     input.signal?.addEventListener("abort", onAbort, { once: true });
-    // Interactive before background; first come, first served within each.
-    const at = waiters.findIndex((other) => waiter.priority === "interactive" && other.priority === "background");
+    // Interactive, then planning, then the rest; first come, first served within each.
+    const at = waiters.findIndex((other) => RANK[other.priority] > RANK[waiter.priority]);
     if (at < 0) waiters.push(waiter); else waiters.splice(at, 0, waiter);
     pump();
   });
   if (!granted) return undefined;
   try { return await run(); }
-  finally { active -= 1; if (priority === "background") activeBackground -= 1; pump(); }
+  finally { active -= 1; if (priority !== "interactive") activeBackground -= 1; pump(); }
 }
 
 /** Waits (polling) while memory is above the high-water mark, at most `maxMs`; used before starting another runtime process. */

@@ -4,7 +4,7 @@ import { formatInTimeZone } from "date-fns-tz";
 import { listAgentTasks, type StoredConversationMessage } from "@crossline/db";
 import {
   ACTIONS, LINE_PROFILES_SETTING, actionProblem, availableSlots, conciergeRefs, needsReview, taskTitleOf, type StoredLineProfile,
-  type AccessContext, type ClarifyOption, type ConciergePack, type ConciergeTurn, type ProposedAction
+  type AccessContext, type AvailabilityWindow, type ClarifyOption, type ConciergePack, type ConciergeTurn, type ProposedAction
 } from "@crossline/core";
 import { effectiveSchedulePreferences, effectiveWeight, getStore, loadCurrentPlan, loadGoalForecast, planToday, readAvailability } from "./crossline";
 import { openAsks } from "./asks";
@@ -110,6 +110,7 @@ export async function contextPack(ctx: AccessContext, page: PageContext, now = n
     plan: upcoming.map((block) => ({ day: block.day!, start: block.start, end: block.end, title: block.title,
       kind: block.id.split(":")[0] === "graph_calendar" ? "calendar" : block.id.split(":")[0]! })),
     capacity,
+    weeklyPattern: weeklyPattern(readAvailability(ctx)),
     ops: recentOps(ctx, now).map((op) => ({ id: op.id, label: op.label, at: op.at })),
     agentResults: listAgentTasks(store, ctx.workspaceId).filter((task) => task.status === "needs_review")
       .map((task) => ({ taskId: task.taskId, title: task.title, summary: `产出：${task.artifacts.map((artifact) => artifact.path.split(/[\\/]/).at(-1)).slice(0, 6).join("、") || "无"}${task.needsHuman ? `；${task.needsHuman} 项需本人完成` : ""}` })),
@@ -141,6 +142,7 @@ export function conciergeSnapshot(pack: ConciergePack, now = new Date(), options
   return [
     `现在：${formatInTimeZone(now, pack.timeZone, "yyyy-MM-dd EEE HH:mm")}（${pack.timeZone}）`,
     `今天：${today.length ? today.map((block) => `${block.start}–${block.end} ${block.title}`).join("；") : "无安排"}`,
+    `每周可用时段（改动用 availability.set，给出改后的完整时段）：${pack.weeklyPattern?.join("；") || "未设置"}`,
     `未来 7 天可用于工作的时间（可用时段扣除固定安排；已排任务）：${pack.capacity.map((day) => `${day.day.slice(5)} ${(day.availableMinutes / 60).toFixed(1)}h；已排 ${(day.scheduledMinutes / 60).toFixed(1)}h`).join(" · ")}`,
     `待决事项 ${pack.asks.length} 项${pack.asks.length ? `，最紧急：${pack.asks.slice(0, 3).map((ask) => ask.title).join("；")}` : ""}`,
     `待批准的任务提案 ${pack.proposals.length} 项；里程碑草稿 ${pack.milestones.filter((item) => item.status === "draft").length} 个；待审阅的助手成果 ${pack.agentResults.length} 项`,
@@ -386,3 +388,11 @@ function applyEdits(ctx: AccessContext, messageId: string, card: Card, edits: Re
 const outcomeItem = (outcome: Awaited<ReturnType<typeof executeAction>>): CardItem => outcome.ok
   ? { state: "done", message: outcome.message, ...(outcome.opId ? { opId: outcome.opId } : {}), ...(outcome.href ? { href: outcome.href } : {}) }
   : { state: "failed", message: outcome.message };
+
+const WEEKDAY_LABEL = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+const ENERGY_LABEL = { high: "高", medium: "中", low: "低" } as const;
+/** The weekly pattern as the concierge reads it: one line per band, days in week order from Monday. */
+export function weeklyPattern(windows: AvailabilityWindow[]): string[] {
+  const order = (day: number) => (day + 6) % 7;
+  return windows.map((window) => `${[...window.days].sort((a, b) => order(a) - order(b)).map((day) => WEEKDAY_LABEL[day]).join(" ")} ${window.start}–${window.end} ${ENERGY_LABEL[window.energy]}`);
+}

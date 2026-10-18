@@ -149,16 +149,25 @@ async function autoBackplanPass(workspaceId: string, checkedAt = new Date().toIS
   if (!codexSupervisor || autoBackplanning.has(workspaceId)) return;
   autoBackplanning.add(workspaceId);
   try {
-    const ids = milestonesAwaitingBackplan(analysisStore, workspaceId);
+    let ids = milestonesAwaitingBackplan(analysisStore, workspaceId);
     if (!ids.length) return;
     if (!spendAllows(await spendFor(workspaceId), "core")) return;
     enterUsageWorkspace(workspaceId);
     const backplan = createGoalBackplanner(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId), { rolling: true });
-    for (const id of ids) {
-      const outcome = await backplan(id).catch(() => undefined);
-      if (outcome) console.info(JSON.stringify({ type: `backplan.auto.${outcome.state}`, checkedAt, workspaceId, milestoneId: id }));
+    // Batch after batch rather than three a tick: approving twelve milestones left nine of them for the next ticks, and each milestone's
+    // tasks get their steps as soon as they exist instead of after the whole batch (2026-10-17 walkthrough, W-28).
+    const tried = new Set<string>();
+    while (ids.length) {
+      for (const id of ids) {
+        tried.add(id);
+        const outcome = await backplan(id).catch(() => undefined);
+        if (outcome) console.info(JSON.stringify({ type: `backplan.auto.${outcome.state}`, checkedAt, workspaceId, milestoneId: id }));
+        void stepPlanPass(workspaceId).catch(() => {});
+      }
+      if (paused(workspaceId, "planning") || !spendAllows(await spendFor(workspaceId), "core")) break;
+      // A milestone that failed in a way the timer retries (a runtime error) comes back here: it waits for the tick, not this loop.
+      ids = milestonesAwaitingBackplan(analysisStore, workspaceId).filter((id) => !tried.has(id));
     }
-    void stepPlanPass(workspaceId).catch(() => {});
   } finally { autoBackplanning.delete(workspaceId); }
 }
 
@@ -320,6 +329,18 @@ async function firstDraftsPass(workspaceId: string, checkedAt = new Date().toISO
     console.info(JSON.stringify({ type: "milestones.first_drafts", checkedAt, workspaceId, state: outcome?.state ?? "failed" }));
   } finally { draftingFirst.delete(workspaceId); }
   void milestoneRiskPass(workspaceId).catch(() => undefined);
+}
+
+/**
+ * A guest just connected its model (W-11). The quota is read again, which clears the 「后台自动工作已暂停」 written by a tick that ran before
+ * the login, and the passes that were waiting on a model run now: a capture typed meanwhile, approved milestones, the first drafts.
+ */
+async function afterConnected(workspaceId: string): Promise<void> {
+  console.info(JSON.stringify({ type: "runtime.connected", workspaceId }));
+  await spendFor(workspaceId).catch(() => undefined);
+  await autoAnalyzePass(workspaceId).catch(() => undefined);
+  void autoBackplanPass(workspaceId).catch(() => undefined);
+  void firstDraftsPass(workspaceId).catch(() => undefined);
 }
 
 /**
@@ -649,6 +670,7 @@ const modelProviders = createModelProviderService({
   store: analysisStore, secrets, cwd: repoRoot,
   gateway: await startModelGateway({ resolve: (workspaceId, providerId) => modelProviders.upstream(workspaceId, providerId) }),
   signedIn: (workspaceId) => codexSupervisor?.runtimes?.signedIn(workspaceId) ?? true,
+  onConformance: (workspaceId) => { void afterConnected(workspaceId); },
   client: async (workspaceId) => {
     const runtime = await codexSupervisor?.runtimes?.client(workspaceId);
     return runtime?.ok ? runtime.client : codexSupervisor?.clientFor(workspaceId);
@@ -1060,6 +1082,7 @@ if (!capabilitySecret) {
     // 1.6 GB host, 4 on the 3.5 GB one, set by deploy/server/run.sh), stopped after ten quiet minutes or when one more account needs
     // one and it has been quiet 15 s (never while a run is in flight; the newcomer waits); elsewhere three and half an hour.
     runtimes: { baseDir: runtimesDir(), ownerWorkspaceId: () => runtimeOwner(analysisStore), hasProvider: (workspaceId) => modelProviders.hasProvider(workspaceId),
+      onConnected: (workspaceId) => { void afterConnected(workspaceId); },
       ...(hostedBeta ? { maxRunning: guestRuntimeLimit() ?? 2, idleMs: 10 * 60_000 } : {}) },
     modelProviders: { handle: (method, pathname, workspaceId, body) => modelProviders.handle(method, pathname, workspaceId, body),
       cost: (workspaceId) => modelProviders.cost(workspaceId) },
@@ -1082,7 +1105,10 @@ if (!capabilitySecret) {
     continueMilestoneConversation: (_client, threadId, message, signal, workspaceId) =>
       createMilestoneConversation(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))(threadId, message, signal),
     onboardingTurn: (_client, sessionId, text, _signal, workspaceId, reread) =>
-      createOnboardingSessionRunner(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))({ sessionId, text, ...(reread ? { reread: true } : {}) }),
+      createOnboardingSessionRunner(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))({ sessionId, text, ...(reread ? { reread: true } : {}) })
+        // The interview just finished: the first drafts start now, not at the next tick up to fifteen minutes later, while 主线 said
+        // 「完成初始访谈后生成」 to someone who had (2026-10-17 walkthrough, W-12).
+        .then((outcome) => { if (outcome.state === "ready") void firstDraftsPass(workspaceId).catch(() => undefined); return outcome; }),
     transcriptionStatus: () => transcriber.status(),
     startTranscriptionDownload: async () => {
       const current = await transcriber.status();

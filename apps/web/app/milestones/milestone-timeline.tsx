@@ -88,7 +88,7 @@ export function MilestoneTimeline({ board, actions }: { board: MilestoneBoard; a
   </header>;
   if (!layout.nodes.length) return <div className="mt">{head}<p className="flow-empty">{board.firstDrafts === "running"
     ? "系统正在按访谈为每条主线设计里程碑草稿（每条主线几分钟），好了会出现在这里等待批准。"
-    : board.firstDrafts === "stalled" ? "里程碑草稿没有生成，点上方「让 AI 重新提议草稿」再试一次。" : "尚无里程碑。完成初始访谈后生成里程碑草稿。"}</p></div>;
+    : board.firstDrafts === "stalled" ? "里程碑草稿没有生成，点上方「让 AI 重新提议草稿」再试一次。" : "尚无里程碑。访谈结束（或达到开始标准后停下 20 分钟）时系统自动设计草稿；也可以点上方「让 AI 重新提议草稿」。"}</p></div>;
   const milestone = selected?.kind === "milestone" ? board.milestones.find((item) => item.id === selected.id) : undefined;
   const course = selected?.kind === "course" ? board.courses.find((item) => `course:${item.projectId}` === selected.id) : undefined;
   const byId = new Map(board.milestones.map((item) => [item.id, item]));

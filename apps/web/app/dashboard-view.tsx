@@ -43,7 +43,7 @@ export type DashboardData = {
   monthLabel: string;
   /** Proposals the system has made that wait for the person; with nothing recommendable yet, Today says so instead of asking for more input. */
   awaitingApproval?: number;
-  milestones?: { drafts: number; any: boolean; firstDrafts: "none" | "running" | "stalled" };
+  milestones?: { drafts: number; any: boolean; firstDrafts: "none" | "running" | "stalled"; backplanning?: number };
   capacity: {
     level: "low" | "medium" | "high" | "uncalibrated";
     confidence?: "low" | "medium" | "high";
@@ -161,6 +161,8 @@ export function DashboardView({ data }: { data: DashboardData }) {
               ? <><b className="mono">{data.awaitingApproval}</b> 项提案待批准，批准后在此推荐下一步。 <a href="/approvals#proposals">前往批准</a></>
               : data.milestones?.drafts
                 ? <><b className="mono">{data.milestones.drafts}</b> 个里程碑草稿待批准；批准后系统从它们倒推任务并排进日历。 <a href="/milestones">前往主线</a></>
+                : data.milestones?.backplanning
+                  ? <>系统正在从已批准的 <b className="mono">{data.milestones.backplanning}</b> 个里程碑倒推任务（每个几分钟），出来的任务会排进日历并显示在这里。也可以先在上方输入框写下手头要做的事。</>
                 : data.milestones?.firstDrafts === "running"
                   ? "系统正在按访谈为每条主线设计里程碑草稿（每条主线几分钟），好了会出现在「主线」页等待批准。也可以先在上方输入框写下手头要做的事。"
                   : data.milestones?.firstDrafts === "stalled"

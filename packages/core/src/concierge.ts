@@ -40,6 +40,13 @@ export const ACTIONS = {
   "event.create": { label: "加入日程", risk: "internal", args: {
     title: str(120), date: day, weekdays: { type: "array", maxItems: 7, items: { type: "integer", minimum: 0, maximum: 6 } },
     startTime: str(5), endTime: str(5), until: day, minutes: { type: "number" }, lineId: str(64), location: str(300) } },
+  /**
+   * 「我每天能工作 10 小时，周日休息」: the whole weekly pattern, replaced. It used to have no action, so the same line became 「交给访谈」 plus an
+   * all-day Sunday event and the plan stayed on 15 hours a week (2026-10-17 walkthrough, W-15).
+   */
+  "availability.set": { label: "修改可用时段", risk: "internal", args: {
+    // `days` is a string ("1,2,3,4,5,6"; 0 = Sunday): an array here nests past the strict-mode depth limit.
+    windows: { type: "array", maxItems: 21, items: object({ days: str(20), start: str(5), end: str(5), energy: enumOf(["low", "medium", "high"]) }) } } },
   "goal.add": { label: "新增长期目标", risk: "internal", args: { lineId: str(64), title: str(60) } },
   "milestone.draft": { label: "新建里程碑草稿", risk: "internal", args: { lineId: str(64), title: str(200), date: day, target: str(500) } },
   "line.add": { label: "新增主线", risk: "internal", args: { label: str(12) } },
@@ -78,6 +85,7 @@ type ArgsOf = {
   "energy.report": { level: "low" | "medium" | "high"; note: string };
   "event.create": { title: string; date: string; weekdays: number[]; startTime: string; endTime: string; until: string; minutes: number; lineId: string; location: string };
   "schedule.shift": { minutes: number };
+  "availability.set": { windows: Array<{ days: string; start: string; end: string; energy: "low" | "medium" | "high" }> };
   "goal.add": { lineId: string; title: string };
   "milestone.draft": { lineId: string; title: string; date: string; target: string };
   "line.add": { label: string };
@@ -140,6 +148,12 @@ export type ConciergeRefs = {
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
+/** `availability.set`'s days ("1,2,3"; 0 = Sunday): the distinct weekdays in order, or [] when any part is not one. */
+export function windowDays(text: string): number[] {
+  const parts = text.split(/[,，\s]+/).filter(Boolean);
+  if (!parts.length || parts.some((part) => !/^[0-6]$/.test(part))) return [];
+  return [...new Set(parts.map(Number))].sort((a, b) => a - b);
+}
 
 /** Why one proposed action cannot be carried out, in words the model can repair against; "" when it can. */
 export function actionProblem(item: ProposedAction, refs: ConciergeRefs): string {
@@ -193,6 +207,12 @@ export function actionProblem(item: ProposedAction, refs: ConciergeRefs): string
       if (args.weekdays.length) return timed && DAY.test(args.until) ? "" : "周期日程需要起止时间和 until 日期";
       if (!DAY.test(args.date)) return "一次性日程需要 date";
       return refs.today && args.date < refs.today ? `日期 ${args.date} 已过去（今天 ${refs.today}）；本周已过的星期几指下一个` : "";
+    }
+    case "availability.set": {
+      const windows = item.args.windows;
+      if (!windows.length) return "需要至少一个时段（完整的新每周时段，不是改动的部分）";
+      const bad = windows.find((window) => !windowDays(window.days).length || !TIME.test(window.start) || !TIME.test(window.end) || window.end <= window.start);
+      return bad ? "每个时段需要 days（逗号分隔的 0–6，0 = 周日）和 HH:MM 起止时间，且结束晚于开始（跨午夜拆成两段）" : "";
     }
     case "goal.add": case "milestone.draft":
       if (!refs.lines.has(item.args.lineId)) return `主线 id「${item.args.lineId}」不存在`;
@@ -330,6 +350,8 @@ export type ConciergePack = {
   plan: Array<{ day: string; start: string; end: string; title: string; kind: string }>;
   /** Per day of the next seven: the person's available hours minus fixed arrangements (what work can use), and what work already holds. */
   capacity: Array<{ day: string; availableMinutes: number; scheduledMinutes: number }>;
+  /** The weekly pattern the plan uses, one band per item (「周一 周二 09:00–12:00 高」), so `availability.set` can change part of it. */
+  weeklyPattern?: string[];
   ops: Array<{ id: string; label: string; at: string }>;
   agentResults: Array<{ taskId: string; title: string; summary: string }>;
   materials: Array<{ id: string; fileName: string; project: string }>;

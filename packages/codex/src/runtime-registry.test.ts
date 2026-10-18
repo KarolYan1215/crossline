@@ -24,13 +24,14 @@ function fakeSidecar(home: string, answers: Record<string, unknown> = {}) {
 }
 const connect = (home: string) => { mkdirSync(home, { recursive: true }); writeFileSync(path.join(home, "auth.json"), "{}"); };
 
-function setup(extra: { maxRunning?: number; pollMs?: number; maxQueueMs?: number; answers?: Record<string, unknown> } = {}) {
+function setup(extra: { maxRunning?: number; pollMs?: number; maxQueueMs?: number; answers?: Record<string, unknown>; onConnected?: (ws: string) => void } = {}) {
   let clock = 0;
   const owner = fakeSidecar("owner");
   const started: ReturnType<typeof fakeSidecar>[] = [];
   const registry = createRuntimeRegistry({ owner, ownerWorkspaceId: () => "ws-owner", baseDir: dir, now: () => clock,
     ...(extra.maxRunning ? { maxRunning: extra.maxRunning } : {}),
     ...(extra.pollMs !== undefined ? { pollMs: extra.pollMs } : {}), ...(extra.maxQueueMs !== undefined ? { maxQueueMs: extra.maxQueueMs } : {}),
+    ...(extra.onConnected ? { onConnected: extra.onConnected } : {}),
     start: async (home) => { const sidecar = fakeSidecar(home, extra.answers); started.push(sidecar); return sidecar; } });
   return { registry, owner, started, advance: (ms: number) => { clock += ms; }, homeOf: (ws: string) => path.join(dir, ws, "codex-home") };
 }
@@ -124,6 +125,20 @@ test("logging in starts the guest's runtime even before it is connected; device 
   expect(started[0]!.calls).toEqual([{ method: "account/login/start", params: { type: "chatgptDeviceCode" } }]);
   started[0]!.emit({ method: "account/login/completed", params: { loginId: "L1", success: true } });
   expect(registry.loginStatus("ws-guest")?.state).toBe("completed");
+});
+
+test("a successful login is announced once, so background work decided without a model is decided again at once", async () => {
+  const heard: string[] = [];
+  const { registry, started } = setup({ onConnected: (ws) => heard.push(ws),
+    answers: { "account/login/start": { type: "chatgptDeviceCode", loginId: "L1", verificationUrl: "https://auth.openai.com/codex/device", userCode: "ABCD-1234" } } });
+  await registry.login("ws-guest", { type: "chatgptDeviceCode" });
+  expect(heard).toEqual([]);
+  started[0]!.emit({ method: "account/login/completed", params: { loginId: "L1", success: false } });
+  expect(heard).toEqual([]);
+  started[0]!.emit({ method: "account/login/completed", params: { loginId: "L1", success: true } });
+  expect(heard).toEqual(["ws-guest"]);
+  await registry.login("ws-key", { type: "apiKey", apiKey: "sk-test" });
+  expect(heard).toEqual(["ws-guest", "ws-key"]);
 });
 
 test("signing a guest out deletes its home — its login and its memories — and never touches the owner", async () => {

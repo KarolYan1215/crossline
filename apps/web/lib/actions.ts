@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createReminderWorkflow, requestWorkflow, reviewAgentTask } from "@crossline/db";
-import { ACTIONS, describeEvent, scheduleLabel, templateCriterion, type AccessContext, type ActionArgs, type ActionId, type ProposedAction } from "@crossline/core";
+import { ACTIONS, describeEvent, scheduleLabel, templateCriterion, windowDays, type AccessContext, type ActionArgs, type ActionId, type ProposedAction } from "@crossline/core";
 import type { EvidenceClaimInput } from "@crossline/db";
 import { addCapturedTaskWithId, approveWorkOrderProposal, archiveWorkOrder, completeWorkOrderExecution, getStore, saveMilestoneTemplate,
   shiftToday, startWorkOrderExecution } from "./crossline";
@@ -62,6 +62,14 @@ export const ACTION_HANDLERS: { [K in ActionId]: Handler<K> } = {
   "schedule.shift": (ctx, args) => {
     const result = shiftToday(ctx, args.minutes);
     return result.ok ? { ok: true, message: result.message, href: "/" } : result;
+  },
+  "availability.set": (ctx, args) => {
+    const windows = args.windows.map((window) => ({ days: windowDays(window.days), start: window.start, end: window.end, energy: window.energy }));
+    const result = applyChange(ctx, { kind: "availability", windows });
+    if (!result.ok) return result;
+    const minutes = (time: string) => Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5));
+    const hours = windows.reduce((sum, window) => sum + window.days.length * (minutes(window.end) - minutes(window.start)), 0) / 60;
+    return { ok: true, href: "/plan", message: `每周可用时段改为约 ${Math.round(hours)} 小时` };
   },
   "event.create": async (ctx, args) => {
     const result = await scheduleEvent(ctx, { title: args.title, lineId: args.lineId, date: args.date, weekdays: args.weekdays, startTime: args.startTime,
