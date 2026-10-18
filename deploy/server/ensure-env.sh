@@ -53,7 +53,12 @@ fi
 # replace them with the console's figures. The key is copied between the two files on this host only, never printed.
 ensure /srv/crossline/app.env CROSSLINE_INVITE_APPROVER karolyan1215@gmail.com
 ensure /srv/crossline/app.env CROSSLINE_SPONSOR_BASE_URL https://api.siliconflow.cn/v1
-ensure /srv/crossline/app.env CROSSLINE_SPONSOR_MODELS "deepseek-ai/DeepSeek-V4.1=4:8:1024,zai-org/GLM-5.2=4:12:1024,deepseek-ai/DeepSeek-V4-Pro=4:8:1024"
+# SiliconFlow serves DeepSeek V4.1 only as `DeepSeek-V4.1-Flash` (its /models, 2026-10-18): the first default named a model it does not have,
+# so that exact default is replaced; a list set by hand is left alone.
+if grep -q "^CROSSLINE_SPONSOR_MODELS=deepseek-ai/DeepSeek-V4.1=4:8:1024,zai-org/GLM-5.2=4:12:1024,deepseek-ai/DeepSeek-V4-Pro=4:8:1024$" /srv/crossline/app.env 2>/dev/null; then
+  drop /srv/crossline/app.env CROSSLINE_SPONSOR_MODELS
+fi
+ensure /srv/crossline/app.env CROSSLINE_SPONSOR_MODELS "deepseek-ai/DeepSeek-V4.1-Flash=2:8:1024,zai-org/GLM-5.2=4:16:1024,zai-org/GLM-5.3=4:16:1024,deepseek-ai/DeepSeek-V4-Pro=4:16:1024"
 ensure /srv/crossline/app.env CROSSLINE_SPONSOR_MONTHLY_CNY 30
 if [ -f /srv/crossline/app.env ] && ! grep -q "^CROSSLINE_SPONSOR_API_KEY=." /srv/crossline/app.env; then
   key=$(grep "^ASSESS_TEXT_API_KEY=" /srv/assess/assess.env 2>/dev/null | cut -d= -f2-)
