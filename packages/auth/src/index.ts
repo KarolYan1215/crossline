@@ -72,25 +72,26 @@ function mailer(smtp: SmtpConfig) {
  */
 function crosslineAuthConfig(options: CrosslineAuthOptions): BetterAuthOptions {
   const transport = options.smtp ? mailer(options.smtp) : undefined;
-  const sendMail = (to: string, subject: string, url: string): Promise<void> => {
+  const sendMail = (to: string, subject: string, text: string): Promise<void> => {
     // The e2e sink takes priority when both are set (it never is in production — see the `testMailboxDir`
     // doc comment) so a captured message never silently also tries a real SMTP round trip.
     if (options.testMailboxDir) {
       mkdirSync(options.testMailboxDir, { recursive: true });
       writeFileSync(path.join(options.testMailboxDir, `${Date.now()}-${randomUUID()}.json`),
-        JSON.stringify({ to, subject, url }));
+        // `url` is the link a test follows; the body now explains it around the link, so the link is read back out of it.
+        JSON.stringify({ to, subject, url: text.match(/https?:\/\/\S+/)?.[0] ?? text, text }));
       return Promise.resolve();
     }
     if (!transport || !options.smtp) return Promise.resolve();
-    return transport.sendMail({ from: options.smtp.from, to, subject, text: url }).then(() => undefined);
+    return transport.sendMail({ from: options.smtp.from, to, subject, text }).then(() => undefined);
   };
   const emailCapable = Boolean(options.smtp || options.testMailboxDir);
   // Better Auth sends through `runInBackgroundOrAwait`, which catches every error and only logs it, so a message that did not go out
   // still answered the sign-up with success and the page said 「已发送验证邮件」 (a provider in test mode refuses every address but its
   // owner's). A failure is noted here, by address, and turned into an honest error by the `after` hook below, in the same request.
   const undelivered = new Map<string, string>();
-  const deliver = async (to: string, subject: string, url: string) => {
-    try { await sendMail(to, subject, url); undelivered.delete(to.toLowerCase()); }
+  const deliver = async (to: string, subject: string, text: string) => {
+    try { await sendMail(to, subject, text); undelivered.delete(to.toLowerCase()); }
     catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       undelivered.set(to.toLowerCase(), reason);
@@ -154,11 +155,15 @@ function crosslineAuthConfig(options: CrosslineAuthOptions): BetterAuthOptions {
       emailAndPassword: {
         enabled: true,
         requireEmailVerification: true,
-        sendResetPassword: async ({ user, url }) => { await deliver(user.email, "重置 Crossline 密码", url); }
+        // A bare link read as phishing and said nothing about what it does or how long it lasts (2026-10-18 walkthrough); the
+        // reset token lives an hour (Better Auth's default `resetPasswordTokenExpiresIn`).
+        sendResetPassword: async ({ user, url }) => { await deliver(user.email, "重置 Crossline 密码",
+          `有人请求重置这个邮箱的 Crossline 密码。打开下面的链接设置新密码（1 小时内有效）：\n\n${url}\n\n如果不是本人操作，忽略这封邮件即可，密码不会改变。`); }
       },
       emailVerification: {
         sendOnSignUp: true,
-        sendVerificationEmail: async ({ user, url }) => { await deliver(user.email, "验证你的 Crossline 邮箱", url); }
+        sendVerificationEmail: async ({ user, url }) => { await deliver(user.email, "验证你的 Crossline 邮箱",
+          `打开下面的链接验证这个邮箱，之后就能登录 Crossline：\n\n${url}\n\n如果不是本人注册，忽略这封邮件即可。`); }
       },
       hooks: {
         after: createAuthMiddleware(async (ctx) => {
