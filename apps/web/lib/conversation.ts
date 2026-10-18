@@ -15,13 +15,14 @@ import { recentOps } from "./undo";
 import { ANSWERED_SETTING, muteNudgeKind } from "./nudges";
 import { readOpener, type OpenerView } from "./opener";
 import { returnPageLines } from "./return";
+import { captureProgress } from "./capture-progress";
 
 /** Where the person typed from: the page and the object open there (a task, a milestone, a plan day). */
 export type PageContext = { kind: string; entityId: string };
 export type Mention = { kind: "material" | "task" | "milestone" | "goal"; id: string; title: string };
 
 /** One action on a card and what became of it. */
-export type CardItem = { state: "pending" | "done" | "failed" | "dismissed"; message?: string; opId?: string; href?: string };
+export type CardItem = { state: "pending" | "done" | "failed" | "dismissed"; message?: string; opId?: string; href?: string; captureId?: string };
 /** An assistant message's card: what the turn proposed, the question back, and the state of each. */
 /**
  * An option of a card's question. A turn's options carry candidate actions; a nudge's buttons may instead open a page (`href`),
@@ -197,7 +198,21 @@ export async function cardChoices(ctx: AccessContext): Promise<CardChoices> {
 /** Today's conversation (made on first use), oldest first. */
 export function loadConversation(ctx: AccessContext, day = planToday(ctx)): { id: string; day: string; messages: MessageView[] } {
   const conversation = getStore().conversationFor(ctx.workspaceId, day);
-  return { id: conversation.id, day, messages: getStore().listConversationMessages(ctx.workspaceId, conversation.id).map(view) };
+  return { id: conversation.id, day, messages: withCaptureProgress(ctx, getStore().listConversationMessages(ctx.workspaceId, conversation.id).map(view)) };
+}
+
+/** A 「收集」 card's line follows its capture: analysed, done, accepted (W-16). Read when shown; the stored card is not rewritten. */
+function withCaptureProgress(ctx: AccessContext, messages: MessageView[]): MessageView[] {
+  if (!messages.some((message) => message.card?.items.some((item) => item.captureId))) return messages;
+  const store = getStore();
+  const captures = new Map(store.listCaptures(ctx.workspaceId).map((capture) => [capture.id, capture]));
+  return messages.map((message) => !message.card?.items.some((item) => item.captureId) ? message : { ...message, card: { ...message.card,
+    items: message.card.items.map((item) => {
+      if (!item.captureId || item.state !== "done") return item;
+      const order = store.getWorkOrder(ctx.workspaceId, item.captureId);
+      const now = captureProgress(captures.get(item.captureId), order && { id: order.id, state: order.state, title: taskTitleOf(order) });
+      return now ? { ...item, message: now.message, ...(now.href ? { href: now.href } : {}) } : item;
+    }) } });
 }
 
 export const searchConversation = (ctx: AccessContext, query: string) =>
@@ -386,7 +401,8 @@ function applyEdits(ctx: AccessContext, messageId: string, card: Card, edits: Re
 }
 
 const outcomeItem = (outcome: Awaited<ReturnType<typeof executeAction>>): CardItem => outcome.ok
-  ? { state: "done", message: outcome.message, ...(outcome.opId ? { opId: outcome.opId } : {}), ...(outcome.href ? { href: outcome.href } : {}) }
+  ? { state: "done", message: outcome.message, ...(outcome.opId ? { opId: outcome.opId } : {}), ...(outcome.href ? { href: outcome.href } : {}),
+    ...(outcome.captureId ? { captureId: outcome.captureId } : {}) }
   : { state: "failed", message: outcome.message };
 
 const WEEKDAY_LABEL = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];

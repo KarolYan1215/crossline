@@ -148,6 +148,7 @@
 .energy-capsule-basis{font-size:12px;color:var(--graphite)}
 .energy-capsule-correct{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--graphite)}
 .today-grid{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:8px;background:none;border:0}
+.today-proposal-note{margin:0 0 8px;padding:8px 10px;border-left:3px solid var(--ink);font-size:13px;line-height:1.6}
 .capture-line{display:block}
 .capture-line>*+*{margin-top:6px}
 .care-band{display:block;padding:0;border:0}

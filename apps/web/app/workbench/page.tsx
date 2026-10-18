@@ -13,6 +13,7 @@ import { compareInGroup, groupOf, waitReason, type TaskGroup } from "../task/car
 import { identityLines } from "../../lib/lines";
 import { timed, timedSync } from "../../lib/sections";
 import { milestonesBeingBackplanned } from "../../lib/backplan-status";
+import { FirstHint } from "../ui/first-hint";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +27,7 @@ const SECTIONS: Array<{ group: TaskGroup; title: string; hint: string }> = [
 ];
 const WAIT_HEADINGS: Array<{ kinds: string[]; title: string }> = [
   { kinds: ["returned", "approval"], title: "等本人决定" },
-  { kinds: ["input", "release", "material"], title: "等他人、材料或开放日" },
+  { kinds: ["input", "release", "material", "preparing"], title: "等他人、材料、步骤规划或开放日" },
   { kinds: ["gate"], title: "等验收" }
 ];
 const md = (day: string) => `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}`;
@@ -92,6 +93,10 @@ export default async function WorkbenchPage({ searchParams }: {
   const backplanning = nothing ? milestonesBeingBackplanned(getStore(), ctx.workspaceId, today) : 0;
   const shownLines = lines.filter((line) => lineCounts.has(line.id));
   return <SubpageShell active="任务" title="任务">
+    {!nothing && <FirstHint id="workbench" title="这一页怎么看">
+      任务按四个问题分组：<b>现在</b>是正在计时、今天有时段或今天到期的；<b>接下来</b>是之后有时段的；<b>在等</b>是等本人批准、等他人或材料、等验收的；<b>任务库</b>里的任务所属里程碑还远，进入三周窗口后才排进日历。
+      点开任务卡看步骤和材料；<b>开始计时</b>后右下角出现倒计时，整件做完在任务里按<b>完成</b>，本人提交即视为验收。
+    </FirstHint>}
     {nothing ? <p className="panel today-empty">{backplanning
       ? `系统正在从已批准的 ${backplanning} 个里程碑倒推任务（每个几分钟），出来的任务会出现在这里。`
       : "还没有任务。任务有两个来源：批准「主线」页的里程碑草稿后，系统从它们倒推出任务；或者在今日页的输入框写下要做的事，系统整理成任务。"}</p>

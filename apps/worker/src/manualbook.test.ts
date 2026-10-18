@@ -187,12 +187,16 @@ test("a tutorial is made just in time: only for work starting within a week, aga
   const hours = (n: number) => new Date(now.getTime() + n * 3_600_000).toISOString();
   store.saveWorkOrder({ id: "hw3", ownerId: "o", workspaceId: WS, identityId: "research", projectId: "p", milestoneId: "", intent: "作业 3", state: "approved", riskTier: "routine",
     estimate: { p25Minutes: 60, p50Minutes: 120, p85Minutes: 240, source: "llm_prior", observationCount: 0, confidence: "low" }, payload: {} });
-  store.saveStepPlan(WS, "hw3", { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 1, unit: "题" }, rationale: "", steps: [plannedStep("a", "解题")] }, "o", "t");
+  store.saveStepPlan(WS, "hw3", { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 1, unit: "题" }, rationale: "", steps: [plannedStep("a", "解题"), plannedStep("c", "检查")] }, "o", "t");
+  // A 30-minute send gets none, however soon it starts (W-17).
+  store.saveWorkOrder({ id: "send", ownerId: "o", workspaceId: WS, identityId: "research", projectId: "p", milestoneId: "", intent: "把名单发给陈默", state: "approved", riskTier: "routine",
+    estimate: { p25Minutes: 10, p50Minutes: 30, p85Minutes: 45, source: "llm_prior", observationCount: 0, confidence: "low" }, payload: {} });
+  store.saveStepPlan(WS, "send", { archetypeId: "problem_set", quantity: { basis: "份", amount: 1, unit: "份" }, rationale: "", steps: [plannedStep("s", "发名单")] }, "o", "t");
   expect(pendingTutorials(store, WS, now)).toEqual([]);
   // Nine days out: not yet. w1 is still preparing (material preparation handles it).
   store.setSetting(WS, "schedule.orderStarts", JSON.stringify({ hw3: hours(9 * 24), w1: hours(5) }));
   expect(pendingTutorials(store, WS, now)).toEqual([]);
-  store.setSetting(WS, "schedule.orderStarts", JSON.stringify({ hw3: hours(30), w1: hours(5) }));
+  store.setSetting(WS, "schedule.orderStarts", JSON.stringify({ hw3: hours(30), w1: hours(5), send: hours(2) }));
   expect(pendingTutorials(store, WS, now)).toEqual(["hw3"]);
   // Built from today's inputs: nothing to do.
   const built = (key: string, inputs: string) => store.appendEvent({ ownerId: "o", workspaceId: WS, idempotencyKey: key, type: "manualbook.built", entityId: "hw3",

@@ -27,7 +27,9 @@ describe("the card's reading of a task", () => {
   });
 
   test("each state that is not the person's to work on is a wait, with its reason", () => {
-    expect(waitReason(detail({ state: "awaiting_plan_approval" }), TODAY)?.label).toBe("等本人批准 · 步骤规划中");
+    expect(waitReason(detail({ state: "awaiting_plan_approval" }), TODAY)?.label).toBe("等本人批准");
+    // Steps still being planned: not a decision yet, so not 「等本人批准」 (W-31).
+    expect(waitReason(detail({ state: "awaiting_plan_approval", preparing: true }), TODAY)).toEqual({ kind: "preparing", label: "步骤规划中，规划好后再请本人批准" });
     expect(waitReason(detail({ state: "blocked", blocker: { reason: "证据不足" } }), TODAY)?.label).toBe("已退回 · 证据不足");
     expect(waitReason(detail({ state: "preparing", materialBlocker: { message: "缺讲义" } }), TODAY)?.label).toBe("材料准备已停止 · 缺讲义");
     expect(waitReason(detail({ state: "evidence_review" }), TODAY)?.kind).toBe("gate");

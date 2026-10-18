@@ -1296,6 +1296,10 @@ export class CrosslineStore {
       if (!isCapture) this.#recordExecutionEffects(workspaceId, id, current.ownerId, event, update);
       // A delivered task that produces an artifact hands its files to every task that uses it (docs/flywheel-and-views.md §5.5).
       if (!isCapture && (event.type === "human.completed" || event.type === "agent.delivered")) handOffArtifacts(this, workspaceId, id);
+      // An accepted task is finished, so are its steps: pressing 完成 left them at 0/3 with step 1 still 「当前」 and minutes still to go
+      // (walkthrough W-16). Steps the person skipped stay skipped.
+      if (!isCapture && next.to === "accepted") this.#db.prepare("UPDATE task_steps SET status = 'done', progress_quarter = 4, updated_at = ? WHERE workspace_id = ? AND work_order_id = ? AND status = 'planned'")
+        .run(update.occurredAt ?? new Date().toISOString(), workspaceId, id);
       if (isCapture && update.attempt !== undefined) {
         this.#db.prepare("UPDATE captures SET attempt = ? WHERE workspace_id = ? AND id = ?").run(update.attempt, workspaceId, id);
       }

@@ -18,6 +18,7 @@ import { StepStrip } from "./step-strip";
 import { TaskActions } from "./task-actions";
 import { StepMaterials, TaskMaterials } from "./task-materials";
 import { stepAnchor, tutorialAnchor } from "../materials/tutorial-model";
+import { FirstHint } from "../ui/first-hint";
 
 const post = (path: string, body: unknown) => fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
   .then((response) => response.ok).catch(() => false);
@@ -238,11 +239,15 @@ export function TaskPanels({ detail, anchors = false }: { detail: TaskDetail; an
         {detail.supports.map((item) => <SupportsTag key={`${item.line}:${item.target}`} line={item.line} lineLabel={item.lineLabel} target={item.target} {...(item.artifact ? { artifact: item.artifact } : {})} />)}
         {detail.artifactLinks?.map((item) => <ArtifactTag key={`${item.direction}:${item.line}:${item.title}`} {...item} />)}</p>}
     </header>
-    <TaskActions workOrderId={detail.id} state={detail.state} paused={detail.paused} agentReady={detail.agentSteps.length > 0} agentStepId={detail.agentSteps[0]?.id}
+    <TaskActions workOrderId={detail.id} state={detail.state} approvable={!detail.preparing} paused={detail.paused} agentReady={detail.agentSteps.length > 0} agentStepId={detail.agentSteps[0]?.id}
       offline={{ ownerId: detail.viewerId, workspaceId: detail.workspaceId, intent: detail.intent }}>
       {live && !postponing && <button type="button" onClick={() => setPostponing(true)}>推迟</button>}
     </TaskActions>
     {postponing && <PostponePanel workOrderId={detail.id} onClose={() => setPostponing(false)} />}
+    {live && <FirstHint id="task-detail" title="做一项任务">
+      从上往下读：<b>步骤</b>（当前一步标「当前」，「先做」是开头五分钟的动作）→ <b>材料与教程</b> → <b>提交与完成</b>。
+      <b>开始计时</b>后右下角倒计时当前一步；做完一步点它左边的圆环。整件做完在「提交与完成」里按完成（可附成果）：本人提交即视为验收，任务离开日历。下面的输入框可以改截止、记录卡在哪或请系统讲解某一步。
+    </FirstHint>}
     {/* One way in for everything about this task: ask about it, change it, record what happened. Changes come back as a card to apply. */}
     <div className="task-entry">
       <Conversation variant="task" page={{ kind: "task", entityId: detail.id }}

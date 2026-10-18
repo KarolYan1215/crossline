@@ -1,5 +1,5 @@
 import "server-only";
-import { archetypeById, completionRule, goalSettingKey, producedArtifacts, relevantDocuments, taskProgress, taskTitleOf, usedArtifacts, type AccessContext, type SuccessCriterion,
+import { archetypeById, completionRule, finishedSteps, goalSettingKey, proposalReady, producedArtifacts, relevantDocuments, taskProgress, taskTitleOf, usedArtifacts, type AccessContext, type SuccessCriterion,
   type EvidenceQuestionTemplate } from "@crossline/core";
 import { assistantAvailable, listAgentTasks, readStoredArtifactPlan, type CrosslineStore, type StoredMilestone, type StoredWorkOrder, type StoredMaterial, type StoredExecution, type StoredMilestoneRelation,
   type StoredBackgroundFact, type StoredStepPlan, type StoredTaskStep } from "@crossline/db";
@@ -34,6 +34,8 @@ function taskExtras(store: CrosslineStore, workspaceId: string, orders: StoredWo
   const liveOrders = store.listWorkOrders(workspaceId).filter((order) => order.state !== "archived");
   const label = (line: string) => labels.get(line) ?? line;
   const artifactRelations = relations.filter((relation) => relation.artifactId);
+  const planBlocked = new Set(store.listEvents(workspaceId, { type: "task.steps_blocked" }).map((event) => event.entityId));
+  const capacity = new Set(defaultIdentityPacks().filter((pack) => pack.kind === "capacity").map((pack) => pack.id));
   const result = new Map<string, TaskExtras>();
   for (const order of orders) {
     const payload = (order.payload ?? {}) as { notBefore?: string; dueDate?: string; byproducts?: Array<{ lineId: string; artifact: string }>;
@@ -80,9 +82,10 @@ function taskExtras(store: CrosslineStore, workspaceId: string, orders: StoredWo
     const personConfirmed = new Set(confirmed.filter((event) => event.entityId === order.id).map((event) => (event.payload as { criterionId: string }).criterionId));
     result.set(order.id, {
       ...(projects.get(order.projectId) ? { projectName: projects.get(order.projectId)! } : {}),
+      ...(!proposalReady(order, plan, { planBlocked: planBlocked.has(order.id), exempt: capacity.has(order.identityId) }) ? { preparing: true } : {}),
       window: { ...(payload.notBefore ? { notBefore: payload.notBefore } : {}), ...(dueBy ? { dueBy } : {}) },
       ...(plan ? { stepPlan: { archetypeLabel: archetypeById(plan.archetypeId)?.label ?? plan.archetypeId, quantity: plan.quantity, rationale: plan.rationale,
-        progress: taskProgress(plan.steps), steps: plan.steps, units: plan.units, questions: plan.questions } } : {}),
+        progress: taskProgress(finishedSteps(order.state, plan.steps)), steps: finishedSteps(order.state, plan.steps), units: plan.units, questions: plan.questions } } : {}),
       supports, workedMinutes: worked, ...(artifactLinks.length ? { artifactLinks } : {}),
       criteria: (milestone?.successCriteria ?? []).map((criterion) => {
         if (personConfirmed.has(criterion.id)) return { id: criterion.id, statement: criterion.statement, quarters: 4, by: "person" as const };
@@ -174,6 +177,8 @@ export type TaskDetail = {
 export type TaskExtras = {
   /** The course or project by name (「ECE 555」), not its id. */
   projectName?: string;
+  /** A proposal whose steps are still being planned (`proposalReady` false): not a decision yet, so the card offers no 批准 (W-31). */
+  preparing?: boolean;
   /** Earliest start and latest finish, as the scheduler uses them. */
   window: { notBefore?: string; dueBy?: string };
   stepPlan?: { archetypeLabel: string; quantity: { basis: string; amount: number; unit: string }; rationale: string; progress: number;

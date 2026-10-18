@@ -60,7 +60,8 @@ export { AVAILABILITY_SETTING } from "@crossline/core";
 import { FIRST_DRAFTS_SETTING, firstDraftsState, STEP_ENERGY_CEILING, learnedEfficiency, type StepRole, AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, BYPRODUCT_LAG_DAYS, RELATION_KIND_LABEL, isCancelledEvent, resolveAvailability, hoursFromText, type AvailabilitySource, type PortraitReport } from "@crossline/core";
 import { statedShares } from "./plan-stats";
 import { milestonesBeingBackplanned } from "./backplan-status";
-import { completionRule, type CompletionMode, type CompletionOutcome } from "@crossline/core";
+import { nearestDueProposal } from "./urgent-proposal";
+import { completionRule, proposalReady, type CompletionMode, type CompletionOutcome } from "@crossline/core";
 import { MILESTONE_RISKS_SETTING, parseMilestoneRisks, riskBufferDays } from "@crossline/core";
 import { identityLines, linePacks } from "./lines";
 import { memoByLedgerAsync } from "./ledger-memo";
@@ -2284,6 +2285,14 @@ export async function loadDashboard(ctx: AccessContext): Promise<Omit<DashboardD
     return { nodes: nodes.map(({ id, identityId, title, latestSignal }) => ({ id, identityId, title, latestSignal })), edges };
   })();
 
+  const stepPlans = new Map(store.listStepPlans(ctx.workspaceId).map((plan) => [plan.workOrderId, plan]));
+  const planBlocked = new Set(store.listEvents(ctx.workspaceId, { type: "task.steps_blocked" }).map((event) => event.entityId));
+  const readyProposals = orders.filter((order) => order.state === "awaiting_plan_approval" && !(order.payload as { seeded?: boolean } | undefined)?.seeded
+    && proposalReady(order, stepPlans.get(order.id), { planBlocked: planBlocked.has(order.id), exempt: capacityIdentityIds.has(order.identityId) }));
+  // Unapproved work is never scheduled, so a proposal due within a week is named above 「下一步」 (W-31).
+  const anchorDays = new Map(store.listMilestoneAnchors(ctx.workspaceId).map((anchor) => [anchor.milestoneId, anchor.deadline]));
+  const urgentProposal = nearestDueProposal(readyProposals.map((order) => ({ id: order.id, title: taskTitleOf(order),
+    due: (order.payload as { dueDate?: string } | undefined)?.dueDate || (order.milestoneId ? readGoalSettings(ctx, order.milestoneId)?.confirmedDeadline ?? anchorDays.get(order.milestoneId) : undefined) })), libraryDay);
   const energySelected = capacity.level !== "uncalibrated";
   const primaryReason = energySelected
     ? actions.primary?.deadline && Date.parse(actions.primary.deadline) - now.getTime() <= 24 * 60 * 60_000
@@ -2311,7 +2320,9 @@ export async function loadDashboard(ctx: AccessContext): Promise<Omit<DashboardD
       : { ...capacity, blockers: capacity.blockers.filter((blocker) => blocker.code !== "LOCAL_ACTIVITY_NOT_AUTHORISED") },
     energyEstimate: energyEstimateFor(ctx, now, today),
     energyLearning: energyCalibration(outcomes),
-    awaitingApproval: orders.filter((order) => order.state === "awaiting_plan_approval").length,
+    // Only proposals that are decisions already: one whose steps are still being planned is not counted (`proposalReady`, W-31).
+    awaitingApproval: readyProposals.length,
+    ...(urgentProposal ? { urgentProposal } : {}),
     // Milestones that exist and wait for approval, and whether any exist at all: an empty 「下一步」 says which step comes next.
     milestones: { drafts: new Set(store.listMilestones(ctx.workspaceId).filter((item) => item.status === "draft").map((item) => item.id)).size,
       any: store.listMilestones(ctx.workspaceId).some((item) => item.status !== "archived"),

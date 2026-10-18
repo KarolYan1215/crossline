@@ -511,5 +511,6 @@ export * from "./onboarding-progress";
 export * from "./calendar-subscriptions";
 export * from "./source-folders";
 export * from "./info-request";
+export * from "./tutorial-worth";
 export * from "./completion";
 export * from "./task-merge";

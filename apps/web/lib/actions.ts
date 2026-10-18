@@ -21,9 +21,10 @@ import { applyTaskOp, recordEnergy } from "./task-ops";
 import { undoOp, withUndo } from "./undo";
 
 /** What carrying out one action did: `message` is shown on the card; `opId` is what the card's 撤销 takes back. */
-export type ActionOutcome = { ok: true; message: string; opId?: string; href?: string } | { ok: false; message: string };
+export type ActionOutcome = { ok: true; message: string; opId?: string; href?: string; captureId?: string } | { ok: false; message: string };
 
-type Done = { ok: true; message?: string; href?: string } | { ok: false; code: string; message?: string };
+/** `captureId`: the capture a task.create wrote, so its card can say later what became of it (`captureProgress`). */
+type Done = { ok: true; message?: string; href?: string; captureId?: string } | { ok: false; code: string; message?: string };
 type Handler<K extends ActionId> = (ctx: AccessContext, args: ActionArgs<K>) => Done | Promise<Done>;
 
 /**
@@ -43,7 +44,7 @@ export const ACTION_HANDLERS: { [K in ActionId]: Handler<K> } = {
     analyzeNewCapturesInBackground(ctx);
     // No approved milestone is needed any more: the analysis files the task under its line unbound, so a new account's first task is
     // analysed and scheduled on its first day.
-    return { ok: true, message: "已收集，正在分析估时与步骤", href: "/workbench" };
+    return { ok: true, message: "已收集，正在分析估时与步骤", href: "/workbench", captureId: id };
   },
   // The note is the conversation's own message, searchable from the box; nothing else is written.
   "note.add": () => ({ ok: true, message: "已记下，可在对话记录中搜索" }),
@@ -237,7 +238,8 @@ export async function executeAction(ctx: AccessContext, item: ProposedAction): P
     const result = item.action === "undo" ? await handler(ctx, item.args) : await withUndo(ctx, label, () => handler(ctx, item.args));
     if (!result.ok) return { ok: false, message: result.message ?? FAILURE[result.code] ?? `未完成（${result.code}）` };
     const op = "op" in result ? (result as { op?: { id: string } }).op : undefined;
-    return { ok: true, message: result.message ?? "已完成", ...(op ? { opId: op.id } : {}), ...(result.href ? { href: result.href } : {}) };
+    return { ok: true, message: result.message ?? "已完成", ...(op ? { opId: op.id } : {}), ...(result.href ? { href: result.href } : {}),
+      ...(result.captureId ? { captureId: result.captureId } : {}) };
   } catch (error) {
     return { ok: false, message: error instanceof Error && FAILURE[error.message] ? FAILURE[error.message]! : "未完成，请重试" };
   }

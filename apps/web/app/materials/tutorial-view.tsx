@@ -10,6 +10,8 @@ export type TutorialViewProps = {
   workOrderId: string;
   /** The order is in `preparing`: the book is being built for it, so the view polls. */
   building?: boolean;
+  /** False for a task too small for one to be written by itself (`tutorialWorthIt`); the button still makes one. */
+  auto?: boolean;
   /** Offer 生成教程 / 重新生成 (off where the person cannot change the task). */
   canBuild?: boolean;
   /** Where a section's 「回到步骤」 goes. Default `#step-<stepId>`: the task's step rows carry `id={stepAnchor(step.id)}`. */
@@ -24,7 +26,7 @@ export type TutorialViewProps = {
   currentStepId?: string;
 };
 
-type Status = { building: boolean; progress: { stage: string; done: number; total: number } | null; blocker: string | null };
+type Status = { building: boolean; closed?: boolean; progress: { stage: string; done: number; total: number } | null; blocker: string | null };
 type Loaded = (Status & { built: false }) | (Status & Book & { built: true });
 
 const STAGE: Record<string, string> = { designing: "设计步骤", researching: "查找资料", writing: "撰写教程与解析", assembling: "整理" };
@@ -36,7 +38,7 @@ const KEPT: Record<string, string> = { full_text: "已存全文", summary_only: 
  * material one fold away, and every source once, as a numbered footnote. A bar shows how far through the steps the reader is.
  * 生成教程 asks for one when there is none; while one is being built its progress shows, and a stopped build says why.
  */
-export function TutorialView({ workOrderId, building: preparing = false, canBuild = true, stepHref = (id) => `#${stepAnchor(id)}`, layout = "inline", currentStepId }: TutorialViewProps) {
+export function TutorialView({ workOrderId, building: preparing = false, auto = true, canBuild = true, stepHref = (id) => `#${stepAnchor(id)}`, layout = "inline", currentStepId }: TutorialViewProps) {
   const [state, setState] = useState<Loaded | undefined>();
   const [asked, setAsked] = useState(false);
   const [current, setCurrent] = useState(0);
@@ -95,9 +97,15 @@ export function TutorialView({ workOrderId, building: preparing = false, canBuil
     ? <p role="status" className="muted">正在生成教程：{state.progress ? `${STAGE[state.progress.stage] ?? state.progress.stage}（${state.progress.done}/${state.progress.total}）` : "排队中"}…</p>
     : state.blocker ? <p role="status">上次未能生成：{state.blocker}</p> : null;
 
+  // A finished task without a tutorial gets none now: saying one 「会自动生成」 was wrong after 完成 (W-16).
+  if ((!state.built || !tutorial) && state.closed) return <section className="tutorial-view" aria-label="教程">
+    <p className="muted">任务已完成，没有生成教程。</p>
+  </section>;
   if (!state.built || !tutorial) return <section className="tutorial-view" aria-label="教程">
     {status}
-    {!running && <p className="muted">教程按该任务的步骤逐步写出：先读本人上传的课程文件，再联网查找资料，每份材料附针对本任务的解析。7 天内排有时间的任务会自动生成。</p>}
+    {!running && <p className="muted">{auto
+      ? "教程按该任务的步骤逐步写出：先读本人上传的课程文件，再联网查找资料，每份材料附针对本任务的解析。7 天内排有时间的任务会自动生成。"
+      : "这项任务较短，系统不自动生成教程；需要时可以点下方按钮生成。"}</p>}
     {!running && canBuild && <button type="button" className="primary-button" onClick={() => void generate()}>{state.blocker ? "重新生成" : "生成教程"}</button>}
   </section>;
 

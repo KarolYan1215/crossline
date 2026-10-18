@@ -7,7 +7,7 @@ import { handOffArtifacts, linkArtifactWork, readStoredArtifactPlan, type Crossl
 import { ownerOf } from "./owner";
 import { autoApproveEligible } from "./auto-approval";
 import { identityLines } from "./lines";
-import { decideFold, existingTasksFor, openTasks, recordFold, type Fold } from "./duplicate-guard";
+import { decideFold, existingTasksFor, openTasks, recentlyDoneTasks, recordFold, type Fold } from "./duplicate-guard";
 const SKILL = "crossline:crossline-goal-backplanner";
 /** How many next steps an automatic (rolling) backplan keeps. */
 export const ROLLING_STEPS = 2;
@@ -94,7 +94,10 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
       existingWork: store.listWorkOrders(workspaceId)
       .filter((order) => order.milestoneId === milestone.id).map((order) => ({ id: order.id, intent: order.intent, state: order.state })),
       // Every open task of this line and project (the task library included): work one of them covers is not written again.
-      existingTasks: existingTasksFor(store, workspaceId, { identityId: milestone.identityId, projectId: milestone.projectId! }) };
+      existingTasks: existingTasksFor(store, workspaceId, { identityId: milestone.identityId, projectId: milestone.projectId! }),
+      // Work of this line and project finished in the last 30 days: done once, not proposed again (walkthrough W-30).
+      recentlyDone: recentlyDoneTasks(store, workspaceId).filter((task) => task.identityId === milestone.identityId && task.projectId === milestone.projectId)
+        .slice(0, 20).map((task) => ({ id: task.id, title: task.title.slice(0, 120), intent: task.intent.slice(0, 160) })) };
     const rolling = options.rolling ? ` Return only the next ${ROLLING_STEPS} steps that can start now (existingWork shows what is already done or open); the rest is proposed after these are done.` : "";
     const run = (missingInputs: MissingInput[]) => {
       const input = { ...context, missingInputs };
@@ -148,12 +151,13 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
     // Before anything is written: an item that only adds to an open task, or that the merge rules call the same as one, goes into that
     // task instead of standing beside it, and items depending on it depend on that task.
     const open = openTasks(store, workspaceId);
+    const done = recentlyDoneTasks(store, workspaceId);
     const deadline = store.listMilestoneAnchors(workspaceId).find((anchor) => anchor.milestoneId === milestone.id)?.deadline ?? "";
     const folds = new Map<string, Fold>();
     for (const step of planned) {
       const fold = decideFold(open, { id: `backplan:${key}:${step.id}`, identityId: milestone.identityId, projectId: milestone.projectId!, milestoneId: milestone.id,
         title: withCourse(step.title, milestone.projectId), intent: step.intent, state: "awaiting_plan_approval", dueDate: "", milestoneDeadline: deadline,
-        progress: 0, hasStepPlan: false, started: false, dependsOn: [] }, step.extendsTaskId ?? "");
+        progress: 0, hasStepPlan: false, started: false, dependsOn: [] }, step.extendsTaskId ?? "", done);
       if (fold) folds.set(step.id, fold);
     }
     const steps = planned.filter((step) => !folds.has(step.id));

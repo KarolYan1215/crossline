@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type KeyboardEvent, type MouseEvent } from "react";
+import { tutorialWorthIt } from "@crossline/core";
 import type { TaskDetail } from "../../lib/task-detail";
 import { dayLabel, formatMinutes } from "../ui/controls";
 import { useReturnState } from "../ui/return-state";
@@ -31,7 +32,7 @@ export function TaskCard({ detail, slot, reason, today, variant = "compact" }: {
   const proposal = detail.state === "awaiting_plan_approval";
   const finished = detail.state === "accepted" || detail.state === "archived";
   const step = currentStep(detail);
-  const wait = today ? waitReason(detail, today) : proposal ? { kind: "approval" as const, label: "等本人批准" } : undefined;
+  const wait = today || proposal ? waitReason(detail, today ?? "") : undefined;
   const due = detail.window.dueBy;
   const distance = due && today && !finished ? dueDistance(due, today) : undefined;
   const openFrom = (event: MouseEvent | KeyboardEvent) => {
@@ -56,7 +57,7 @@ export function TaskCard({ detail, slot, reason, today, variant = "compact" }: {
     {proposal && <CompletionChoice detail={detail} />}
     {slot && <p className="task-card-slot"><small>下一次</small> <a href={`/plan?day=${slot.day}`} className="mono">{slotLabel(slot)}</a></p>}
     <Prepared detail={detail} />
-    <TaskActions workOrderId={detail.id} state={detail.state} paused={detail.paused} agentReady={detail.agentSteps.length > 0} agentStepId={detail.agentSteps[0]?.id} onOpen={() => setOpen(true)}
+    <TaskActions workOrderId={detail.id} state={detail.state} approvable={!detail.preparing} paused={detail.paused} agentReady={detail.agentSteps.length > 0} agentStepId={detail.agentSteps[0]?.id} onOpen={() => setOpen(true)}
       offline={{ ownerId: detail.viewerId, workspaceId: detail.workspaceId, intent: detail.intent }} />
     <TaskDialog detail={detail} open={open} onOpenChange={setOpen} />
   </article>;
@@ -78,6 +79,7 @@ function CardStep({ detail, step, proposal, finished, waiting }: {
     <p className="task-card-step-title"><small>{proposal ? "第一步" : "当前"}</small><span>{step.title}</span>
       {step.schedulable && <span className="mono task-card-minutes">约 {formatMinutes(step.estimate.p50Minutes)}</span>}</p>
     {step.firstAction && <p className="task-card-first"><small>先做</small><span className="gen">{step.firstAction}</span></p>}
-    {proposal && <p className="task-card-step-note">开工前一周会备好教程。</p>}
+    {proposal && tutorialWorthIt({ title: detail.title, intent: detail.intent, p50Minutes: detail.estimate.p50Minutes }, detail.stepPlan?.steps)
+      && <p className="task-card-step-note">开工前一周会备好教程。</p>}
   </div>;
 }
