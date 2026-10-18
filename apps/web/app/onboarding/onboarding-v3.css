@@ -84,6 +84,7 @@
 .ob-ring-row{display:grid;grid-template-columns:64px minmax(0,1fr);gap:12px;align-items:center}
 .ob-ring-row>div{display:grid;gap:3px}
 .ob-ring-row b{font-size:16px}
+.ob-ring-row .ob-ring-next{margin-top:4px;font-size:12px;line-height:1.6;color:var(--graphite)}
 .ob-ring-row small{font-size:13px;color:var(--graphite)}
 .ob-ring-row .ob-btn{justify-self:start;text-decoration:none;margin-top:4px}
 .ob-ring-on{stroke:#085E3A}

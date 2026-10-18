@@ -55,6 +55,8 @@ export function StageView({ state, stage, complete, onChanged }: {
         {!state.readyToStart && missing.length > 0 && <ul className="ob-ring-missing">{missing.slice(0, 3).map(({ label, href }) => <li key={label}>{href ? <a href={href}>{label}（在左栏采用）</a> : label}</li>)}
           {missing.length > 3 && <li>等 {missing.length - 3} 项</li>}</ul>}
         {state.readyToStart && <a className="ob-btn ob-primary" href="/">开始使用</a>}
+        {/* Two ways on from here, said once: the button looked like the end of the interview (2026-10-18 walkthrough). */}
+        {state.readyToStart && !complete && <small className="ob-ring-next">现在就能排日程；接着答完剩下几轮会拿到画像报告。先去用的话，剩下的问题会出现在待确认里，随时回来接着答。</small>}
       </div>
     </section>
     <nav className="ob-stage-tabs" aria-label="各阶段的图">
