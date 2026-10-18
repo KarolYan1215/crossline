@@ -133,6 +133,9 @@ export function invalidBlocks(blocks: ScheduleBlock[], slots: Slot[], input: Pla
   return undefined;
 }
 
+/** The longest any one sitting is held to be: work marked 「一口气做完」 beyond it is placed in sessions (`clampContinuousBuffers`). */
+export const MAX_SITTING_MINUTES = 180;
+
 /** The longest unbroken stretch this task could use: slots too low-energy for it do not count. */
 function longestSlotMinutes(slots: Slot[], task: PlannerTask): number {
   return Math.max(0, ...slots
@@ -151,7 +154,14 @@ function longestSlotMinutes(slots: Slot[], task: PlannerTask): number {
 function clampContinuousBuffers(input: PlanningInput): { input: PlanningInput; notes: PlanBlocker[] } {
   const slots = freeSlots(input);
   const notes: PlanBlocker[] = [];
-  const tasks = input.tasks.map((task) => {
+  const tasks = input.tasks.map((original) => {
+    // Nobody works six hours in one sitting: a 「一口气做完」 mark on longer work cannot be kept, and kept it left a 6-hour step of a
+    // milestone due in a week unplaced in every weekday and pencilled whole into a Sunday (2026-10-18 walkthrough, W-48). Such work is
+    // placed in sessions like any other; the mark still holds for anything that fits one sitting.
+    const task = original.interruptible === false && original.estimate.p50Minutes > MAX_SITTING_MINUTES
+      ? { ...original, interruptible: true } : original;
+    if (task !== original) notes.push({ taskId: task.id, code: "SITTING_SPLIT",
+      message: `${task.title}预计 ${task.estimate.p50Minutes} 分钟，超过一次能连续做的 ${MAX_SITTING_MINUTES} 分钟，已分成几段排入` });
     if (task.interruptible !== false || task.estimate.confidence !== "low") return task;
     const longest = longestSlotMinutes(slots, task);
     const { p50Minutes, p85Minutes } = task.estimate;

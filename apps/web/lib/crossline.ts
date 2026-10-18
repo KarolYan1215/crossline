@@ -737,6 +737,9 @@ function offHoursWindows(windows: AvailabilityWindow[]): AvailabilityWindow[] {
   return [0, 1, 2, 3, 4, 5, 6].flatMap((weekday) => {
     const covered = windows.filter((window) => window.days.includes(weekday))
       .map((window) => [minutes(window.start), Math.min(minutes(window.end) || 1440, 1440)] as const).sort((a, b) => a[0] - b[0]);
+    // A day with no hours at all is a day off: overflow is pencilled around working days, not into the rest day (it put nine hours on a
+    // Sunday the person keeps free, 2026-10-18 walkthrough, W-48).
+    if (!covered.length) return [];
     const out: AvailabilityWindow[] = [];
     let cursor = 7 * 60;
     for (const [from, to] of covered) {
@@ -1874,15 +1877,30 @@ const riskBufferOf = (ctx: AccessContext, milestoneId: string | undefined): numb
   return decision?.how === "accept" && decision.fingerprint === stored.fingerprint ? riskBufferDays(stored.risks) : 0;
 };
 
+/**
+ * A milestone's deadline for scheduling: the one set on the goal, else — for an approved milestone — the date it was approved with,
+ * which lives on its anchor. Approving a draft writes no goal setting, so the scheduler read every backplanned task of a fresh account
+ * as having no deadline at all, ordered it by importance alone and left work due in a week unplaced (2026-10-18 walkthrough).
+ */
+export function milestoneDeadline(ctx: AccessContext, milestoneId: string): string | undefined {
+  if (!milestoneId) return undefined;
+  const confirmed = readGoalSettings(ctx, milestoneId)?.confirmedDeadline;
+  if (confirmed) return confirmed;
+  const store = getStore();
+  if (!store.listMilestones(ctx.workspaceId).some((milestone) => milestone.id === milestoneId && milestone.status === "approved")) return undefined;
+  const day = store.listMilestoneAnchors(ctx.workspaceId).find((anchor) => anchor.milestoneId === milestoneId)?.deadline;
+  return day && /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : undefined;
+}
+
 const plannerTaskOf = (ctx: AccessContext, order: ActionableOrder) => {
   const preferences = readSchedulePreferences(ctx);
   const riskBuffer = riskBufferOf(ctx, order.milestoneId);
-  const goal = readGoalSettings(ctx, order.milestoneId);
+  const milestoneDue = milestoneDeadline(ctx, order.milestoneId);
   const weight = effectiveWeight(ctx, order.milestoneId);
   const important = weight >= IMPORTANT_WEIGHT;
   // A task with its own due day (a homework due Monday) has a deadline whether or not its milestone's was confirmed.
   const ownDue = (order.payload as { dueDate?: string }).dueDate;
-  const hasDeadline = Boolean(goal?.confirmedDeadline) || Boolean(ownDue && /^\d{4}-\d{2}-\d{2}$/.test(ownDue));
+  const hasDeadline = Boolean(milestoneDue) || Boolean(ownDue && /^\d{4}-\d{2}-\d{2}$/.test(ownDue));
   // Before the person saved any preferences the older rule applies to work without a deadline; a deadline always lifts it.
   const tier = hasDeadline ? important ? 1 : 2 : preferences ? important ? 3 : 4
     : order.state === "approved" ? 3 : order.identityId === (process.env.CROSSLINE_PRIMARY_CLOCK_ID ?? linePacks(ctx).find((pack) => pack.masterClock)?.id) ? 1 : 2;
@@ -1903,10 +1921,11 @@ const plannerTaskOf = (ctx: AccessContext, order: ActionableOrder) => {
     inputsReady: inputsReady(order),
     // A byproduct's landing never outranks real work: lowest tier, with its own T+2 window once the main order is done.
     deadlineTier: (landing ? 4 : tier) as 1 | 2 | 3 | 4,
-    // The earlier of the goal's confirmed deadline and the task's own due date (the capture's 「10月21号前」, a homework's due day):
-    // a homework due before the exam it counts towards is due on its own day.
+    // The earlier of the milestone's deadline and the task's own due date (the capture's 「10月21号前」, a homework's due day): a
+    // homework due before the exam it counts towards is due on its own day. The milestone's deadline used to count only once schedule
+    // preferences had been saved, which a new account never has.
     ...(() => {
-      const day = [goal?.confirmedDeadline && preferences ? goal.confirmedDeadline : undefined,
+      const day = [milestoneDue,
         dueDate && /^\d{4}-\d{2}-\d{2}$/.test(dueDate) ? dueDate : undefined].filter((value): value is string => Boolean(value)).sort()[0];
       return day ? { deadline: toZonedInstant(day, "23:59", zone) } : {};
     })(),

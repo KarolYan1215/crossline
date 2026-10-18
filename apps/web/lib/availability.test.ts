@@ -228,3 +228,15 @@ test("what finds no room in the person's hours is pencilled in outside them, and
   expect(after.blocks.find((block) => block.id === first.id.replace(/^optional:/, "scheduled:"))).toMatchObject({ tag: "已锁定", start: first.start, end: first.end });
   expect(lockBlock(TEST_CTX, "graph_calendar:x", { day: first.day!, start: first.start, end: first.end })).toEqual({ ok: false, code: "PIN_INVALID" });
 });
+
+test("nothing is pencilled into a day the person keeps free (W-48)", async () => {
+  globalThis.crosslineStore = new CrosslineStore(":memory:");
+  // Weekdays only, half an hour: the overflow goes around working days, never onto Saturday or Sunday.
+  const weekdays = [{ days: [1, 2, 3, 4, 5], start: "08:00", end: "08:30", energy: "high" as const }];
+  saveSchedulePreferences(TEST_CTX, { timeZone: "America/Chicago", mode: "buffered", windows: weekdays, importance: {} });
+  saveAvailability(TEST_CTX, weekdays);
+  const plan = await loadCurrentPlan(TEST_CTX);
+  const optional = plan.blocks.filter((block) => block.id.startsWith("optional:"));
+  expect(optional.length).toBeGreaterThan(0);
+  expect(optional.every((block) => ![0, 6].includes(new Date(`${block.day}T12:00:00Z`).getUTCDay()))).toBe(true);
+});

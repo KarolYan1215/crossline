@@ -506,6 +506,18 @@ describe("energy-aware planning", () => {
       expect(result.notes).toBeUndefined();
     });
 
+    test("work marked one-sitting but longer than any sitting is placed in sessions, with a note (W-48)", async () => {
+      // A 6-hour step whose longest free stretch is 5 hours: kept whole it found no weekday and was pencilled into a Sunday.
+      const result = await planSchedule({ now: start, horizonDays: 3, mode: "asap",
+        tasks: [{ ...task({ interruptible: false }), estimate: { p25Minutes: 300, p50Minutes: 360, p85Minutes: 420, confidence: "medium" as const } }],
+        availability: [slot(0, "13:00", "18:00"), slot(1, "13:00", "18:00")], frozenBlocks: [] });
+      expect(result.status).toBe("feasible");
+      const minutes = result.plan.blocks.reduce((sum, block) => sum + (Date.parse(block.end) - Date.parse(block.start)) / 60_000, 0);
+      expect(minutes).toBe(360);
+      expect(result.plan.blocks.length).toBeGreaterThan(1);
+      expect(result.notes).toEqual([expect.objectContaining({ taskId: "long", code: "SITTING_SPLIT" })]);
+    });
+
     test("slots too low-energy for the job do not count toward the longest stretch", async () => {
       const result = await planSchedule({ now: start, horizonDays: 2, mode: "asap",
         tasks: [task({ interruptible: false, energy: "high" })],
