@@ -1,6 +1,6 @@
 import "server-only";
-import { profileGaps, type AccessContext } from "@crossline/core";
-import { latestFileDates, listAgentTasks } from "@crossline/db";
+import type { AccessContext } from "@crossline/core";
+import { listAgentTasks } from "@crossline/db";
 import { appNow, getStore } from "./crossline";
 import { countProposedTargets } from "./targets";
 import { countAssistantPending } from "./agent";
@@ -8,7 +8,7 @@ import { loadDiligence } from "./diligence";
 import { loadPendingDateBatch } from "./imported-dates";
 import { listed, openAsks } from "./asks";
 import { decisionHorizon } from "./horizon";
-import { identityLines } from "./lines";
+import { interviewStatus } from "./interview-status";
 import { preparingProposalIds } from "./proposal-ready";
 import { memoByLedger } from "./ledger-memo";
 
@@ -30,7 +30,10 @@ export type PendingCounts = {
   research: number;
   /** A batch of dates read from files. */
   dates: number;
-  /** Questions the profile still needs answered: a line resting only on guesses. */
+  /**
+   * Interview questions waiting while the start standard is still open — exactly the ones the interview page shows (`interviewStatus`,
+   * screened). Once the person uses the app they are an ask (`interviewAsks` in `lib/asks.ts`) and counted under `asks` instead.
+   */
   questions: number;
   /** Targets the architect proposed (a course's grade) that the person has not yet accepted or changed. */
   targets: number;
@@ -81,12 +84,7 @@ function computePending(ctx: AccessContext): PendingCounts {
     assistantQuestions: assistant.approvals,
     assistantReviews: reviews.now,
     asks: asks.now,
-    questions: profileGaps({
-      identities: identityLines(ctx).map((pack) => ({ id: pack.id, label: pack.label })),
-      projects: store.listProjects(ctx.workspaceId).map(({ id, identityId, name }) => ({ id, identityId, name })),
-      facts: store.listProfileFacts(ctx.workspaceId),
-      undated: latestFileDates(store, ctx.workspaceId).undated
-    }).filter((gap) => gap.blocking).length
+    questions: interviewQuestionsOutsideAsks(ctx)
   };
   // Candidate relations and research proposals are judged in the weekly review (`/review`), not one by one as they arrive (the
   // person's decision, 2026-10-13): whether to take one is a judgement about direction, not a fact only they can give. They stay listed
@@ -95,4 +93,14 @@ function computePending(ctx: AccessContext): PendingCounts {
   const later = { workOrders: proposals.later, milestoneDrafts: drafts.later, asks: asks.later, assistantReviews: reviews.later };
   return { ...counts, total: Object.values(today).reduce((sum, value) => sum + value, 0),
     later: { ...later, total: Object.values(later).reduce((sum, value) => sum + value, 0) } };
+}
+
+/**
+ * The badge once counted the profile's blocking gaps unscreened, so a question the interview page had screened out (or that a file
+ * already answered) showed as 「访谈问题 1」 with nowhere to answer it (2026-10-17 walkthrough, W-13). It now reads the same list the
+ * interview page does; while parked those questions are an ask, and once the checklist is complete there are none.
+ */
+function interviewQuestionsOutsideAsks(ctx: AccessContext): number {
+  const status = interviewStatus(ctx);
+  return status.started && !status.parked && !status.complete ? status.openQuestions : 0;
 }

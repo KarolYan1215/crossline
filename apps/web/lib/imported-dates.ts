@@ -15,9 +15,9 @@ export type PendingItem = {
   id: string; kind: "date" | "recurring"; title: string; project: string; confidence: "high" | "medium" | "low";
   when: string; quote: string; sourceRef: string; note: string; checked: boolean; blocks: number;
 };
-export type PendingBatch = { id: string; documentCount: number; items: PendingItem[]; questions: string[]; dropped: number };
+export type PendingBatch = { id: string; documentCount: number; items: PendingItem[]; questions: string[]; dropped: string[] };
 
-type ExtractedPayload = { documentIds?: string[]; dates?: DateCandidate[]; recurring?: RecurringMeeting[]; questions?: string[]; dropped?: unknown[] };
+type ExtractedPayload = { documentIds?: string[]; dates?: DateCandidate[]; recurring?: RecurringMeeting[]; questions?: string[]; dropped?: Array<{ title?: string }> };
 
 const WEEKDAY = ["日", "一", "二", "三", "四", "五", "六"];
 
@@ -45,7 +45,9 @@ export function loadPendingDateBatch(ctx: AccessContext): PendingBatch | null {
       when: `每周${item.weekdays.map((day) => WEEKDAY[day]).join("、")} ${item.startTime}–${item.endTime}，${item.from} 至 ${item.to}（还剩 ${days.length} 次）`,
       quote: item.quote, sourceRef: item.sourceRef, note: item.location, checked: item.confidence !== "low", blocks: days.length };
   });
-  return { id: batch.entityId, documentCount: payload.documentIds?.length ?? 0, items: [...recurring, ...dates], questions: payload.questions ?? [], dropped: payload.dropped?.length ?? 0 };
+  return { id: batch.entityId, documentCount: payload.documentIds?.length ?? 0, items: [...recurring, ...dates], questions: payload.questions ?? [],
+    // The titles, not just a count: 「另有 6 项…已丢弃」 left the person no way to tell what to add by hand (W-10).
+    dropped: (payload.dropped ?? []).map((item) => (typeof item?.title === "string" && item.title.trim() ? item.title.trim() : "（未命名的一项）")) };
 }
 
 /** Writes the confirmed items and records the decision. Returns how many calendar blocks were added. */

@@ -1,4 +1,4 @@
-import { interviewChecklist, profileGaps, PROFILE_CONFIRMED, portraitStillConfirmed, type ChecklistItem, type ProfileGap, type ProfileModel, type QuestionScreenInput, type StoredLineProfile } from "@crossline/core";
+import { interviewChecklist, lineAttributes, profileGaps, PROFILE_CONFIRMED, portraitStillConfirmed, type ChecklistItem, type ProfileGap, type ProfileModel, type QuestionScreenInput, type StoredLineProfile } from "@crossline/core";
 import { unfiledFilesIn } from "./file-belonging";
 import { latestFileDates } from "./index";
 import type { CrosslineStore } from "./index";
@@ -110,9 +110,12 @@ export function calendarRecurringTitles(store: CrosslineStore, workspaceId: stri
 export function questionScreenFor(store: CrosslineStore, workspaceId: string): QuestionScreenInput {
   const meetingFacts = store.listProfileFacts(workspaceId).filter((fact) => fact.projectId && /^(meeting|class)_?times?$|^no_meetings$/.test(fact.slot)
     && fact.status === "confirmed").map((fact) => fact.projectId);
+  let profiles: Record<string, StoredLineProfile> = {};
+  try { profiles = JSON.parse(store.getSetting(workspaceId, "lines.profiles") ?? "{}") as Record<string, StoredLineProfile>; } catch { /* none */ }
   return {
     projects: store.listProjects(workspaceId).map(({ id, name }) => ({ id, name })),
     meetings: [...new Set([...meetingProjects(store, workspaceId), ...meetingFacts])],
-    calendarRecurring: calendarRecurringTitles(store, workspaceId)
+    calendarRecurring: calendarRecurringTitles(store, workspaceId),
+    goalPickerLines: Object.entries(profiles).filter(([, profile]) => lineAttributes(profile, "").length > 0).map(([id]) => id)
   };
 }

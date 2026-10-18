@@ -193,3 +193,15 @@ test("a step question the task's own files answer is recognised; one only the pe
   for (const text of ["作业 3 题面及题目数？", "作业提交方式？", "协作与 AI 使用规则？", "评分标准是什么？", "报告的字数要求？"]) expect(readableFromMaterial(text)).toBe(true);
   for (const text of ["当前完成状态？", "当前 A− 安全分数线？", "哪几讲已经掌握？"]) expect(readableFromMaterial(text)).toBe(false);
 });
+
+// W-8: the left column offers a line's goal as attributes to pick, and the round asked 「希望长期保持哪些特质」 again.
+test("a round question asking a line's long-term goal is screened once the left column offers that line's candidates", () => {
+  const q = (id: string, text: string, identityId = "") => ({ id, text, projectId: "", identityId });
+  const round = [q("q1", "希望长期保持哪些特质？", "startup"), q("q2", "想成为什么样的研究者？", "research"), q("q3", "长期目标是什么？"),
+    q("q4", "这周最卡的是哪件事？", "startup")];
+  const screen = screenQuestions(round, { projects: [], meetings: [], goalPickerLines: ["startup"] });
+  expect(screen.screened.map((item) => [item.question.id, item.reason])).toEqual([["q1", "goal_picker"], ["q3", "goal_picker"]]);
+  expect(screen.keep.map((item) => item.id)).toEqual(["q2", "q4"]);
+  // No candidates yet: the question is how the interview learns the goal, so it stays.
+  expect(screenQuestions(round, { projects: [], meetings: [] }).keep).toHaveLength(4);
+});
