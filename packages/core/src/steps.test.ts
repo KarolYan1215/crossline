@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ARCHETYPES, STEP_PLAN_SCHEMA, normalizeStepPlan, stepPlanWarnings, structuredOutputProblems, taskProgress, validateStepPlanShape, type StepPlan } from "./index";
+import { ARCHETYPES, STEP_PLAN_SCHEMA, finishedSteps, normalizeStepPlan, stepPlanWarnings, structuredOutputProblems, taskProgress, validateStepPlanShape, type StepPlan } from "./index";
 
 const step = (id: string, role: StepPlan["steps"][number]["role"], extra: Partial<StepPlan["steps"][number]> = {}) => ({
   id, role, title: `${role} ${id}`, deliverable: "产出", doneCriterion: "完成标准", share: 0.25,
@@ -78,6 +78,13 @@ describe("step plans", () => {
 
   it("task progress counts done shares and a started step's quarters", () => {
     expect(taskProgress([{ share: 0.5, status: "done", progressQuarter: 0 }, { share: 0.5, status: "planned", progressQuarter: 2 }])).toBeCloseTo(0.75);
+  });
+
+  it("an accepted task's open steps read as done; a skipped one stays skipped and an open task is untouched", () => {
+    const steps = [{ share: 0.5, status: "planned" as const, progressQuarter: 1 }, { share: 0.5, status: "skipped" as const, progressQuarter: 0 }];
+    expect(finishedSteps("accepted", steps).map((step) => step.status)).toEqual(["done", "skipped"]);
+    expect(taskProgress(finishedSteps("accepted", steps))).toBe(1);
+    expect(finishedSteps("active", steps)).toEqual(steps);
   });
 });
 

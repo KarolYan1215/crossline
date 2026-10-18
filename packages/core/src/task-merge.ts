@@ -42,7 +42,7 @@ const STATE_RANK: Record<string, number> = { active: 4, ready_for_human: 3, prep
 
 const COURSE = /[A-Z]{2,5}\s?\d{3}/gi;
 const SYNONYMS: Array<[RegExp, string]> = [
-  [/汇集|汇总|收集|整合|搜集|归集/g, "整理"], [/核实|取得|获取|明确|查明|弄清/g, "确认"], [/资料|素材/g, "材料"], [/目录|列表/g, "清单"],
+  [/汇集|汇总|收集|整合|搜集|归集/g, "整理"], [/核实|核对|取得|获取|明确|查明|弄清/g, "确认"], [/资料|素材/g, "材料"], [/目录|列表|名单/g, "清单"],
   [/考查|考核/g, "考试"], [/建立|编制|制作/g, "建立"]
 ];
 /** A title as compared: no course code, no punctuation or spaces, no 的, synonymous verbs and nouns made one. */
@@ -184,4 +184,19 @@ export function validateTaskMergeReview(value: unknown, ids: readonly string[]):
   if (!answer || !Array.isArray(answer.pairs)) throw new Error("TASK_MERGE_REVIEW_INVALID");
   return { pairs: answer.pairs.filter((pair) => pair && ids.includes(pair.id) && typeof pair.same === "boolean")
     .map((pair) => ({ id: pair.id, same: pair.same, why: String(pair.why ?? "").trim().slice(0, 200) })) };
+}
+
+/**
+ * A new item that is the same work as a task already finished (walkthrough W-30, 2026-10-17: the backplanner wrote 「整理5家试用门店
+ * 清单」 a few minutes after the person had finished 「核对5家试用门店的名单与联系人」). Same rules as an open duplicate; `done` are accepted
+ * tasks, which the open-task check never looked at. The closest one when several match.
+ */
+export function doneDuplicateOf(candidate: MergeTask, done: readonly MergeTask[]): { keep: MergeTask; why: string } | undefined {
+  let best: { keep: MergeTask; why: string; score: number } | undefined;
+  for (const other of done) {
+    if (other.id === candidate.id || other.state !== "accepted") continue;
+    const pair = comparePair(candidate, other);
+    if (pair.verdict === "same" && (!best || pair.score > best.score)) best = { keep: other, why: pair.why, score: pair.score };
+  }
+  return best && { keep: best.keep, why: best.why };
 }

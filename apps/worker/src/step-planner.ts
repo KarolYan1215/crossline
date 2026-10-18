@@ -81,7 +81,8 @@ export function taskWindow(store: CrosslineStore, workspaceId: string, order: St
   let goalDeadline: string | undefined;
   try { goalDeadline = (JSON.parse(store.getSetting(workspaceId, goalSettingKey(order.milestoneId)) ?? "{}") as { confirmedDeadline?: string }).confirmedDeadline; } catch { /* unreadable: none */ }
   const anchor = store.listMilestoneAnchors(workspaceId).find((item) => item.milestoneId === order.milestoneId)?.deadline;
-  const today = day(now.toISOString());
+  // The workspace's own day: an ISO (UTC) date is a day early between midnight and 08:00 in UTC+8 (walkthrough W-18).
+  const today = localDay(now.toISOString(), workspaceZone(store, workspaceId));
   const notBefore = payload.notBefore && payload.notBefore > today ? payload.notBefore : today;
   const dueBy = [payload.dueDate, goalDeadline, anchor].filter((value): value is string => Boolean(value && /^\d{4}-\d{2}-\d{2}$/.test(value)) && value! >= today).sort()[0] ?? "";
   const { windows } = resolveAvailability({ saved: store.getSetting(workspaceId, AVAILABILITY_SETTING),
@@ -120,7 +121,16 @@ export function tasksAwaitingStepPlan(store: CrosslineStore, workspaceId: string
 
 /** How far back adaptive granularity reads what happened to the steps. */
 const TROUBLE_LOOKBACK_DAYS = 14;
-const localDay = (iso: string, zone: string) => new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(iso));
+function localDay(iso: string, zone: string) {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(iso));
+}
+
+/** The zone the person's days are read in: their saved preference, else `CROSSLINE_TIME_ZONE`, else Chicago. */
+function workspaceZone(store: CrosslineStore, workspaceId: string) {
+  let zone = process.env.CROSSLINE_TIME_ZONE?.trim() || "America/Chicago";
+  try { zone = (JSON.parse(store.getSetting(workspaceId, "schedule.preferences") ?? "null") as { timeZone?: string } | null)?.timeZone || zone; } catch { /* default */ }
+  return zone;
+}
 
 /**
  * Adaptive granularity (docs/energy-and-ecosystem.md §6): reads what happened to each open step from the ledger (`StepTrouble`) and,
@@ -129,8 +139,7 @@ const localDay = (iso: string, zone: string) => new Intl.DateTimeFormat("en-CA",
  * in the change summary on Today once the new plan exists. Returns what it asked for.
  */
 export function requestFinerSplits(store: CrosslineStore, workspaceId: string, now = new Date()): FinerSplit[] {
-  let zone = process.env.CROSSLINE_TIME_ZONE?.trim() || "America/Chicago";
-  try { zone = (JSON.parse(store.getSetting(workspaceId, "schedule.preferences") ?? "null") as { timeZone?: string } | null)?.timeZone || zone; } catch { /* default */ }
+  const zone = workspaceZone(store, workspaceId);
   const today = localDay(now.toISOString(), zone);
   const orders = new Map(store.listWorkOrders(workspaceId).filter((order) => PLANNABLE.includes(order.state)).map((order) => [order.id, order]));
   const stepPlans = store.listStepPlans(workspaceId).filter((plan) => orders.has(plan.workOrderId));

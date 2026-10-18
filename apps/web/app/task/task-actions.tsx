@@ -25,8 +25,10 @@ async function post(path: string, body: unknown): Promise<{ ok: boolean; code?: 
  * countdown), 暂停 with a reason / 继续计时 (a running session), and 交给 Agent when the system can do the work or one of its steps.
  * Archiving sits in the overflow menu. Completion and evidence are in the task dialog, where the person can see what is being handed in.
  */
-export function TaskActions({ workOrderId, state, paused, agentReady, agentStepId, onOpen, offline, beforeStart, children }: {
+export function TaskActions({ workOrderId, state, approvable = true, paused, agentReady, agentStepId, onOpen, offline, beforeStart, children }: {
   workOrderId: string; state: string; paused: boolean; agentReady: boolean; onOpen?: (() => void) | undefined;
+  /** False for a proposal whose steps are still being planned: there is nothing to approve yet (W-31). */
+  approvable?: boolean;
   /** The step 「交给 Agent」 hands over (the first one the system can do); without it, the whole task. */
   agentStepId?: string | undefined;
   /** Who and which workspace a command queued offline belongs to, and the title the offline list shows. */
@@ -83,7 +85,7 @@ export function TaskActions({ workOrderId, state, paused, agentReady, agentStepI
   }, () => setStatus("已交给 Agent，产出完成后进入待审阅。"));
 
   return <div className="task-actions">
-    {state === "awaiting_plan_approval" && <button type="button" className="primary-button" disabled={busy}
+    {state === "awaiting_plan_approval" && approvable && <button type="button" className="primary-button" disabled={busy}
       onClick={() => void run(() => post(`/api/work-orders/${encodeURIComponent(workOrderId)}/approve`, {}))}>批准</button>}
     {state === "blocked" && <button type="button" className="primary-button" disabled={busy}
       onClick={() => void run(() => post(`/api/work-orders/${encodeURIComponent(workOrderId)}/approve`, {}))}>恢复</button>}

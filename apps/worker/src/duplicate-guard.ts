@@ -1,4 +1,4 @@
-import { EXISTING_TASKS_LIMIT, duplicateOf, type ExistingTask, type MergeTask } from "@crossline/core";
+import { EXISTING_TASKS_LIMIT, doneDuplicateOf, duplicateOf, type ExistingTask, type MergeTask } from "@crossline/core";
 import type { CrosslineStore } from "@crossline/db";
 import { applyMerge, mergeTasks } from "./dedupe";
 import { ownerOf } from "./owner";
@@ -28,15 +28,33 @@ export function openTasks(store: CrosslineStore, workspaceId: string): MergeTask
   return mergeTasks(store, workspaceId).filter((task) => OPEN.has(task.state));
 }
 
-export type Fold = { kind: "duplicate" | "extends"; keep: string; keepTitle: string; why: string };
+/** How far back finished work counts: an item the same as work accepted within this many days is already done. */
+export const RECENTLY_DONE_DAYS = 30;
 
-/** Whether `candidate` should go into an open task instead of standing on its own: the Skill's `extendsTaskId` first, then the rules. */
-export function decideFold(open: readonly MergeTask[], candidate: MergeTask, extendsTaskId = ""): Fold | undefined {
+/** Tasks accepted within `RECENTLY_DONE_DAYS` (newest first): work a planner should not write again. */
+export function recentlyDoneTasks(store: CrosslineStore, workspaceId: string, now = new Date(), days = RECENTLY_DONE_DAYS): MergeTask[] {
+  const since = new Date(now.getTime() - days * 86_400_000).toISOString();
+  const acceptedAt = new Map<string, string>();
+  for (const event of store.listEvents(workspaceId, { type: "work_order.transitioned" }))
+    if ((event.payload as { to?: string }).to === "accepted") acceptedAt.set(event.entityId, event.createdAt);
+  return mergeTasks(store, workspaceId).filter((task) => task.state === "accepted" && (acceptedAt.get(task.id) ?? "") >= since)
+    .sort((a, b) => (acceptedAt.get(b.id) ?? "").localeCompare(acceptedAt.get(a.id) ?? ""));
+}
+
+export type Fold = { kind: "duplicate" | "extends" | "done"; keep: string; keepTitle: string; why: string };
+
+/**
+ * Whether `candidate` should go into an open task instead of standing on its own: the Skill's `extendsTaskId` first, then the rules;
+ * last, whether it repeats work already finished (`done`, recently accepted tasks), which is then not written at all.
+ */
+export function decideFold(open: readonly MergeTask[], candidate: MergeTask, extendsTaskId = "", done: readonly MergeTask[] = []): Fold | undefined {
   const others = open.filter((task) => task.id !== candidate.id);
   const target = extendsTaskId ? others.find((task) => task.id === extendsTaskId) : undefined;
   if (target) return { kind: "extends", keep: target.id, keepTitle: target.title, why: `「${candidate.title}」是「${target.title}」的补充` };
   const same = duplicateOf(candidate, others);
-  return same && { kind: "duplicate", keep: same.keep.id, keepTitle: same.keep.title, why: `与「${same.keep.title}」重复（${same.why}）` };
+  if (same) return { kind: "duplicate", keep: same.keep.id, keepTitle: same.keep.title, why: `与「${same.keep.title}」重复（${same.why}）` };
+  const finished = doneDuplicateOf(candidate, done);
+  return finished && { kind: "done", keep: finished.keep.id, keepTitle: finished.keep.title, why: `「${finished.keep.title}」已完成（${finished.why}）` };
 }
 
 /**

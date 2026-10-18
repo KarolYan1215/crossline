@@ -43,6 +43,8 @@ export type DashboardData = {
   monthLabel: string;
   /** Proposals the system has made that wait for the person; with nothing recommendable yet, Today says so instead of asking for more input. */
   awaitingApproval?: number;
+  /** A proposal due within a week, still waiting for the person: unapproved work is not scheduled, so Today names it (W-31). */
+  urgentProposal?: { id: string; title: string; due: string };
   milestones?: { drafts: number; any: boolean; firstDrafts: "none" | "running" | "stalled"; backplanning?: number };
   capacity: {
     level: "low" | "medium" | "high" | "uncalibrated";
@@ -100,6 +102,8 @@ export type DashboardData = {
 };
 
 const basisLabel = { self_report: "自评", execution_history: "执行记录", local_activity: "本机活动" } as const;
+/** 「10/24」 from an ISO day. */
+const shortDay = (day: string) => `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}`;
 const capacityLevelLabel = { low: "低", medium: "中", high: "高" } as const;
 
 // The label must name what the reading came from. Calling every observation a self-report was wrong
@@ -156,6 +160,7 @@ export function DashboardView({ data }: { data: DashboardData }) {
       <section className={`today-grid${alternatives.length ? "" : " today-grid-single"}`} aria-label="下一步">
         <div className="today-next">
           <h2 className="section-label">下一步</h2>
+          {data.urgentProposal && <p className="today-proposal-note" role="note">「{data.urgentProposal.title}」<b className="mono">{shortDay(data.urgentProposal.due)}</b> 截止，还在等本人批准；批准后才会排进日历。 <a href="/approvals#proposals">去批准</a></p>}
           {primaryDetail ? <TaskCard variant="hero" detail={primaryDetail} reason={data.primary!.reason} slot={data.slotById?.get(primaryDetail.id)} />
             : <p className="panel today-empty">{data.awaitingApproval
               ? <><b className="mono">{data.awaitingApproval}</b> 项提案待批准，批准后在此推荐下一步。 <a href="/approvals#proposals">前往批准</a></>

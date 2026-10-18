@@ -1,6 +1,6 @@
 import { expect, test, vi } from "vitest";
 import { CrosslineStore, addAiTool } from "@crossline/db";
-import { createStepPlanner, createWarningReviewer, requestFinerSplits, tasksAwaitingStepPlan, warningsAwaitingReview } from "./step-planner";
+import { createStepPlanner, createWarningReviewer, requestFinerSplits, taskWindow, tasksAwaitingStepPlan, warningsAwaitingReview } from "./step-planner";
 import { materializeDatePairs } from "./date-pairs";
 import { taskFromWorkOrder } from "./agent-dispatch";
 import { scriptedRuntime } from "./testing/fake-runtime";
@@ -302,5 +302,15 @@ test("an important task's questions the files answer become assumptions; the res
   expect(facts.get(stepAnswerSlot("作业 3 题面及题目数？"))).toBe("假设：【作业 3 题面及题目数？】以任务材料为准；材料未写明时按「5 题」");
   expect(facts.get(stepAnswerSlot("协作与 AI 使用规则？"))).toBe("假设：【协作与 AI 使用规则？】以任务材料为准");
   expect(facts.has(stepAnswerSlot("当前完成状态？"))).toBe(false);
+  store.close();
+});
+
+test("a task's window starts on the person's own day, not the UTC one (W-18)", () => {
+  const store = new CrosslineStore(":memory:");
+  seed(store);
+  store.setSetting(workspaceId, "schedule.preferences", JSON.stringify({ timeZone: "Asia/Shanghai" }));
+  // 07:30 on Sunday 2026-10-18 in Beijing is still Saturday in UTC.
+  const window = taskWindow(store, workspaceId, store.getWorkOrder(workspaceId, "wo")!, new Date("2026-10-17T23:30:00Z"));
+  expect(window.notBefore).toBe("2026-10-18");
   store.close();
 });

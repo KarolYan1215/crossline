@@ -5,7 +5,7 @@ import type { TaskDetail } from "../../lib/task-detail";
  * picture of the steps, what the task waits for, and which of the page's four questions it answers — 现在 (do it today), 接下来 (it has
  * a time ahead), 在等 (it waits for a decision, an input, material or the gate) or 任务库 (its milestone is beyond the window).
  */
-export type CardDetail = Pick<TaskDetail, "state" | "paused" | "stepPlan" | "window" | "blocker" | "materialBlocker">;
+export type CardDetail = Pick<TaskDetail, "state" | "paused" | "stepPlan" | "window" | "blocker" | "materialBlocker"> & Partial<Pick<TaskDetail, "preparing">>;
 type Step = NonNullable<TaskDetail["stepPlan"]>["steps"][number];
 export type TaskSlotLike = { day: string; start: string; end: string };
 
@@ -35,7 +35,7 @@ export function stepSegments(detail: Pick<CardDetail, "stepPlan">): Segment[] {
 const md = (day: string) => `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}`;
 const awaited = (title: string) => title.replace(/^等待\s*/u, "");
 
-export type WaitKind = "approval" | "returned" | "material" | "gate" | "input" | "release";
+export type WaitKind = "approval" | "preparing" | "returned" | "material" | "gate" | "input" | "release";
 
 /**
  * Why a task was sent back, in words: the ledger keeps a code (the gate's `MILESTONE_GATE_INSUFFICIENT`, an analysis blocker), which the
@@ -53,7 +53,8 @@ function returnedLabel(reason: string | undefined): string {
 
 /** What the task waits for before the person can go on with it, in the page's words; none when it can be worked on now. */
 export function waitReason(detail: CardDetail, today: string): { kind: WaitKind; label: string } | undefined {
-  if (detail.state === "awaiting_plan_approval") return { kind: "approval", label: detail.stepPlan ? "等本人批准" : "等本人批准 · 步骤规划中" };
+  // A proposal whose steps are still being planned is not a decision yet: it waits for the planner, not for the person (W-31).
+  if (detail.state === "awaiting_plan_approval") return detail.preparing ? { kind: "preparing", label: "步骤规划中，规划好后再请本人批准" } : { kind: "approval", label: "等本人批准" };
   if (detail.state === "blocked") return { kind: "returned", label: returnedLabel(detail.blocker?.reason) };
   if (detail.state === "preparing") return { kind: "material", label: detail.materialBlocker ? `材料准备已停止 · ${detail.materialBlocker.message}` : "等材料准备" };
   if (detail.state === "evidence_review") return { kind: "gate", label: "已提交 · 等验收" };
@@ -77,7 +78,7 @@ export function groupOf(detail: CardDetail, { today, slot, library }: { today: s
 }
 
 /** The order inside a group: what runs first, then what comes up soonest, then the nearest deadline; the waiting by what is asked of the person first. */
-const WAIT_ORDER: Record<WaitKind, number> = { returned: 0, approval: 1, input: 2, release: 3, material: 4, gate: 5 };
+const WAIT_ORDER: Record<WaitKind, number> = { returned: 0, approval: 1, input: 2, release: 3, preparing: 4, material: 4, gate: 5 };
 export function compareInGroup(group: TaskGroup, today: string) {
   return (a: { detail: CardDetail; slot?: TaskSlotLike | undefined; library?: string | undefined; id: string },
     b: { detail: CardDetail; slot?: TaskSlotLike | undefined; library?: string | undefined; id: string }): number => {

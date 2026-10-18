@@ -10,7 +10,7 @@ import {
 } from "@crossline/core";
 import { runCodexSkill, webResearchBlocker, type CodexRpcBoundary } from "@crossline/codex";
 import { aiToolsFor, listAgentTasks, type CrosslineStore } from "@crossline/db";
-import { aiToolBrief, requiredApproval } from "@crossline/core";
+import { aiToolBrief, requiredApproval, taskTitleOf, tutorialWorthIt } from "@crossline/core";
 import { claimedTitleMatches } from "./diligence";
 import { arxivPdfAddress, defaultSafeGetDeps, htmlToText, safeGet, type SafeGetDeps } from "./safe-fetch";
 import { extractText } from "./extract";
@@ -193,6 +193,11 @@ export function createManualbookBuilder(store: CrosslineStore, workspaceId: stri
       return blocked(code, message);
     };
 
+    // A task finished while its tutorial was being written needs it no more (walkthrough W-16: the tutorial kept being written after 完成).
+    // Checked between model runs, so at most the run under way is spent; nothing is recorded, the task page simply stops asking.
+    const finished = () => mode === "tutorial" && ["accepted", "archived"].includes(store.getWorkOrder(workspaceId, workOrderId)?.state ?? "archived");
+    const stopped = (): ManualOutcome => blocked("TUTORIAL_TASK_FINISHED", "任务已完成，教程不再生成。");
+
     // 1. the flow ------------------------------------------------------------------------------------------------
     progress("designing", 0, 1);
     const designed = await runCodexSkill<ManualDesign>(client, context, {
@@ -210,6 +215,7 @@ export function createManualbookBuilder(store: CrosslineStore, workspaceId: stri
     // Every step is researched; a design from before that rule, or a step whose questions are missing, searches by its own title and goal.
     let searched = 0;
     for (const node of nodes) {
+      if (finished()) return stopped();
       const result: NodeResult = { node, sources: [], gaps: [], writeup: undefined };
       progress("researching", searched, nodes.length);
       searched += 1;
@@ -236,6 +242,7 @@ export function createManualbookBuilder(store: CrosslineStore, workspaceId: stri
     // The line's own skill and the public skills that fit the task, read beside the writer's: a tutorial for the person's way of doing it.
     const writerSkills = await librarySkillsFor(client, store, workspaceId, order.identityId, { cwd, task: order.intent, ...(all.libraryDir ? { dir: all.libraryDir } : {}) });
     for (const [index, result] of results.entries()) {
+      if (finished()) return stopped();
       progress("writing", index, results.length);
       const writeContext: WriteContext = { version: "crossline.manualbook.write.v1", today, task: { intent: context.workOrder.intent },
         node: { id: result.node.id, title: result.node.title, kind: result.node.kind, goal: result.node.goal, steps: result.node.steps, acceptance: result.node.acceptance },
@@ -260,6 +267,7 @@ export function createManualbookBuilder(store: CrosslineStore, workspaceId: stri
     }
 
     // 4. assemble ---------------------------------------------------------------------------------------------
+    if (finished()) return stopped();
     progress("assembling", 0, 1);
     const files = assemble({ design, nodes: results, context, uploads, builtAt: all.now().toISOString() });
     const root = path.join(materialsDir, workOrderId);
@@ -478,7 +486,10 @@ export function pendingTutorials(store: CrosslineStore, workspaceId: string, now
   const orders = new Map(store.listWorkOrders(workspaceId).map((order) => [order.id, order]));
   return [...soon].filter((id) => {
     const order = orders.get(id);
-    if (!order || !["approved", "ready_for_human", "active"].includes(order.state) || !store.getStepPlan(workspaceId, id)) return false;
+    const plan = store.getStepPlan(workspaceId, id);
+    if (!order || !["approved", "ready_for_human", "active"].includes(order.state) || !plan) return false;
+    // A short task or a request for a fact gets none on its own (W-17); the person can still ask for one on the task page.
+    if (!tutorialWorthIt({ title: taskTitleOf(order), intent: order.intent, p50Minutes: order.estimate.p50Minutes }, plan.steps)) return false;
     const build = built.get(id), failure = failed.get(id);
     if (failure && (!build || failure.createdAt > build.createdAt)) return false;
     if (!build) return true;

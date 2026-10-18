@@ -313,3 +313,11 @@ export function taskProgress(steps: ReadonlyArray<{ share: number; status: StepS
     : step.share * Math.max(0, Math.min(4, step.progressQuarter)) / 4), 0);
   return Math.max(0, Math.min(1, value));
 }
+
+/**
+ * The steps as shown for a task in `state`: an accepted task's open steps read as done (walkthrough W-16 — a task finished with 完成 still
+ * showed 0/3 with step 1 「当前」). Acceptance now marks them in the ledger too; this covers tasks accepted before that.
+ */
+export function finishedSteps<T extends { status: StepStatus; progressQuarter: number }>(state: string, steps: readonly T[]): T[] {
+  return state === "accepted" ? steps.map((step) => step.status === "planned" ? { ...step, status: "done" as const, progressQuarter: 4 } : step) : [...steps];
+}
