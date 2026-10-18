@@ -73,6 +73,8 @@ export type SponsorEvaluation = {
   tokens?: { input: number; cached: number; output: number; runs: number };
   /** The measuring code's version (`SPONSOR_EVAL_VERSION` in the worker); older records are measured again. */
   version?: number;
+  /** The sample interview's version (`SPONSOR_DIALOGUE_VERSION`); an older one has only its sample interview run again. */
+  dialogueVersion?: number;
 };
 
 /** Yuan per conformance run at the current prices. */

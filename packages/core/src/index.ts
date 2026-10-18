@@ -518,3 +518,4 @@ export * from "./info-request";
 export * from "./tutorial-worth";
 export * from "./completion";
 export * from "./task-merge";
+export * from "./plain-voice";

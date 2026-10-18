@@ -1,12 +1,13 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import {
-  admittedSkills, chooseSponsorModel, ONBOARDING_TONE_SETTING, conformanceCases, evaluationYuanPerRun, conformanceCurrent, jsonSchemaProblems, parseSponsorModels, sponsorMonth, sponsorSpend,
+  admittedSkills, chooseSponsorModel, ONBOARDING_TONE_SETTING, plainVoiceMarkers, plainVoiceRate, conformanceCases, evaluationYuanPerRun, conformanceCurrent, jsonSchemaProblems, parseSponsorModels, sponsorMonth, sponsorSpend,
   SPONSOR_MONTHLY_CAP_CNY, summarizeConformance, type ConformanceRecord, type ConformanceRun, type CostSignal, type ProviderCapabilities,
   type SponsorEvaluation, type SponsorModel
 } from "@crossline/core";
 import { runCodexSkill, withUsageWorkspace, threadProvider, type CodexRpcBoundary, type GatewayUpstream, type ModelGateway, type ProviderConfig, type ProviderRouting, type SkillUsage } from "@crossline/codex";
 import { CrosslineStore, sponsorshipOf, type StoredOnboardingMessage } from "@crossline/db";
+import { LINE_SETTING, type LineSpec } from "@crossline/identity-packs";
 import { createOnboardingSessionRunner } from "./onboarding-session";
 import { RUNTIME_VERSION } from "./model-provider";
 
@@ -25,6 +26,11 @@ const CONFORMANCE_SKILL = "crossline:crossline-conformance";
  * again so every candidate is measured the same way.
  */
 export const SPONSOR_EVAL_VERSION = 3;
+/**
+ * The sample interview's own version: a change to the interview prompt or the script re-runs only the three sample turns of every
+ * candidate (minutes and a few jiao each), not its thirty-odd conformance runs.
+ */
+export const SPONSOR_DIALOGUE_VERSION = 2;
 /** Usage and routing key of a candidate's sample interview (`sponsor-eval:dialogue:<model>`): counted with the evaluation, never a ledger. */
 export const SPONSOR_DIALOGUE_PREFIX = `${SPONSOR_EVAL_PREFIX}dialogue:`;
 
@@ -34,7 +40,7 @@ export const SPONSOR_DIALOGUE_PREFIX = `${SPONSOR_EVAL_PREFIX}dialogue:`;
  * opening card, a reply full of facts and one uncertainty, and a worried one. Synthetic, so the replies can be logged whole.
  */
 export const SPONSOR_DIALOGUE_SCRIPT = [
-  "【语气】温和支持\n【我的主线】科研、创业、自媒体\n【未来 12–24 个月的底座】科研\n【有固定日程的主线】科研\n没有材料，直接开始访谈。",
+  "【语气】温柔体贴\n【我的主线】研究者、创业者、创作者\n【未来 12–24 个月的底座】研究者\n【有固定日程的主线】研究者\n没有材料，直接开始访谈。",
   "我是研二，做忆阻器阵列的仿真，导师要求 12 月中投一篇会议论文，现在实验数据还差一半。创业是和本科室友做一个给研究生排期的小工具，还没有用户。"
     + "自媒体在小红书写科研日常，800 个粉丝，想做到 1 万。周一三五上午组会和上课，平时每周大概能拿出 50 小时，晚上效率最高。创业到底该投多少时间我也说不清。",
   "说实话最近有点焦虑。三条线都想做好，结果每条都推进很慢，一天要切换好几次，晚上复盘觉得什么都没做完。有时候会想是不是该砍掉一条，但又舍不得。"
@@ -45,6 +51,8 @@ export type SponsorDialogueLog = {
   at: string; model: string; turn: number; said: string; ok: boolean; code?: string; message?: string;
   reply: string; questions: Array<{ text: string; kind: string; options: string[] }>; stage: string; nextAction: string;
   serviceMs: number | null; wallMs: number; repairs: number;
+  /** Machine-made writing in the reply (`plainVoiceMarkers`) and all hits per thousand characters. */
+  voice: ReturnType<typeof plainVoiceMarkers>; voiceRate: number;
   tokens: { input: number; cached: number; output: number; reasoning: number };
 };
 
@@ -175,6 +183,15 @@ export function createSponsorService(options: {
       });
       // The candidates are tested side by side (each run takes minutes, one model's thirty-odd runs one after another take an hour or
       // two); each result is written as soon as it is in, so a restart keeps the models already measured.
+      // A candidate measured before the sample interview last changed gets only the new sample interview.
+      const redialogue = currentEvaluations().filter((item) => item.dialogueVersion !== SPONSOR_DIALOGUE_VERSION)
+        .map((item) => config.models.find((model) => model.model === item.model)).filter((model): model is SponsorModel => Boolean(model));
+      await Promise.all(redialogue.map(async (model) => {
+        await sampleDialogue(client, model).catch((error: unknown) => console.info(JSON.stringify({ type: "sponsor.dialogue_failed", model: model.model,
+          message: error instanceof Error ? error.message.slice(0, 160) : "unknown" })));
+        const saved = read().evaluations.map((item) => item.model === model.model ? { ...item, dialogueVersion: SPONSOR_DIALOGUE_VERSION } : item);
+        writeFileSync(file, JSON.stringify({ evaluations: saved } satisfies Saved, null, 2), "utf8");
+      }));
       await Promise.all(pending.map(async (model) => {
         const evaluation = await evaluateOne(client, model);
         const saved = read().evaluations.filter((item) => item.model !== model.model);
@@ -238,7 +255,7 @@ export function createSponsorService(options: {
     const tokens = evalUsage.get(key)!;
     evalUsage.delete(key);
     runUsage.delete(key);
-    const evaluation: SponsorEvaluation = { model: model.model, record, yuanPerRun: 0, version: SPONSOR_EVAL_VERSION,
+    const evaluation: SponsorEvaluation = { model: model.model, record, yuanPerRun: 0, version: SPONSOR_EVAL_VERSION, dialogueVersion: SPONSOR_DIALOGUE_VERSION,
       tokens: { input: tokens.inputTokens, cached: tokens.cachedInputTokens, output: tokens.outputTokens, runs: runs.length } };
     return { ...evaluation, yuanPerRun: evaluationYuanPerRun(evaluation, [model]) };
   }
@@ -253,6 +270,12 @@ export function createSponsorService(options: {
     try {
       const workspaceId = scratch.createPrincipalWithWorkspace(`sponsor-eval-${slug(model.model)}`, "检验").workspace.id;
       scratch.setSetting(workspaceId, ONBOARDING_TONE_SETTING, "warm");
+      // The lines the fictional person chose, saved as the opening card saves them (without, every candidate asked about a fourth line).
+      const at = new Date(0).toISOString();
+      scratch.setSetting(workspaceId, LINE_SETTING, JSON.stringify([
+        { id: "research", label: "研究者", color: "research", goal: "", createdAt: at, hard: true, rank: 1 },
+        { id: "startup", label: "创业者", color: "startup", goal: "", createdAt: at },
+        { id: "media", label: "创作者", color: "media", goal: "", createdAt: at }] satisfies LineSpec[]));
       const run = createOnboardingSessionRunner(scratch, workspaceId, options.cwd, () => client);
       const key = `${SPONSOR_DIALOGUE_PREFIX}${model.model}`;
       for (const [index, said] of SPONSOR_DIALOGUE_SCRIPT.entries()) {
@@ -268,6 +291,7 @@ export function createSponsorService(options: {
           reply: answer?.reply ?? "", questions: (answer?.questions ?? []).map((question) => ({ text: question.text ?? "", kind: question.kind ?? "",
             options: (question.options ?? []).map((option) => option.label ?? "") })), stage: answer?.stage ?? "", nextAction: answer?.nextAction ?? "",
           serviceMs: usage ? usage.durationMs : null, wallMs: Date.now() - started, repairs: usage?.repairs ?? 0,
+          voice: plainVoiceMarkers(answer?.reply ?? ""), voiceRate: plainVoiceRate(answer?.reply ?? ""),
           tokens: { input: usage?.inputTokens ?? 0, cached: usage?.cachedInputTokens ?? 0, output: usage?.outputTokens ?? 0, reasoning: usage?.reasoningOutputTokens ?? 0 } };
         try { appendFileSync(dialogueFile(model.model), `${JSON.stringify(line)}\n`, "utf8"); } catch { /* the log is for reading only */ }
         // A turn that failed leaves nothing to answer: the rest of the script would only measure the same failure again.

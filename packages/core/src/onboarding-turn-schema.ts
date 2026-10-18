@@ -56,13 +56,14 @@ export type OnboardingStage = (typeof ONBOARDING_STAGES)[number];
  */
 export const DEEP_STAGES: ReadonlySet<OnboardingStage> = new Set<OnboardingStage>(["situation", "compass", "energy"]);
 /** How the interview talks, chosen by the person at the start (default neutral); a setting, so it can change mid-interview. */
-export const ONBOARDING_TONES = ["direct", "warm", "neutral"] as const;
+// Two voices since 2026-10-18 (the owner's decision): 「直接犀利」 asked for exactly the 点破/反转 writing that reads as machine-made, so it
+// is gone, and an account that chose it reads as neutral (`readTone`).
+export const ONBOARDING_TONES = ["neutral", "warm"] as const;
 export type OnboardingTone = (typeof ONBOARDING_TONES)[number];
 export const ONBOARDING_TONE_SETTING = "onboarding.tone";
 export const ONBOARDING_TONE_LABEL: Record<OnboardingTone, { label: string; detail: string }> = {
-  direct: { label: "直接犀利", detail: "点破自我设限和逻辑漏洞，不绕弯，不做无谓攻击" },
-  warm: { label: "温和支持", detail: "先肯定再追问，语气柔和" },
-  neutral: { label: "中性客观", detail: "就事论事，不加情绪" }
+  neutral: { label: "冷静客观", detail: "就事论事，讲清依据，不带情绪" },
+  warm: { label: "温柔体贴", detail: "先回应感受，再问事情，语气柔和" }
 };
 export function readTone(value: string | null | undefined): OnboardingTone {
   return (ONBOARDING_TONES as readonly string[]).includes(value ?? "") ? value as OnboardingTone : "neutral";

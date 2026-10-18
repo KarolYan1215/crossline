@@ -12,7 +12,9 @@ test("the opening states the premise, the three parts and the time, then asks to
   expect(html).toContain("——Y.K.");
   expect(html).toContain("大约 30 分钟");
   expect(html).toContain("你希望我怎么跟你说话");
-  expect(html).toContain("中性客观");
+  expect(html).toContain("冷静客观");
+  expect(html).toContain("温柔体贴");
+  expect(html).not.toContain("直接犀利");
   expect(html).toContain("你正在投入的身份有哪些");
   expect(html).not.toContain("长期目标</b>");
   // Lines already set: only the tone is asked.
@@ -22,8 +24,8 @@ test("the opening states the premise, the three parts and the time, then asks to
 });
 
 test("the opening answers become the first reply in the screen's own words, ending with the materials sentence the eval also sends", () => {
-  const reply = openingReply({ tone: "direct", lines: ["研究者", "创业者"], base: "研究者", fixed: ["研究者"] }, true);
-  expect(reply).toContain("【语气】直接犀利");
+  const reply = openingReply({ tone: "warm", lines: ["研究者", "创业者"], base: "研究者", fixed: ["研究者"] }, true);
+  expect(reply).toContain("【语气】温柔体贴");
   expect(reply).toContain("【我的主线】研究者、创业者");
   expect(reply).toContain("【未来 12–24 个月的底座】研究者");
   expect(reply).toContain("【有固定日程的主线】研究者");

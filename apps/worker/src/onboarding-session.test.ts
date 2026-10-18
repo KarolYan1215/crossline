@@ -334,13 +334,14 @@ test("a deep-stage round keeps independent questions together, at most four, and
 });
 
 test("the tone the person chose goes with the first turn and every later one", async () => {
+  // An account that chose the retired 「直接犀利」 is spoken to as 冷静客观.
   store.setSetting(workspaceId, "onboarding.tone", "direct");
   const { rpc, prompts } = fakeRuntime([firstAnswer, turn()]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc);
   await run({ sessionId: "s1", text: "开始" });
   store.setSetting(workspaceId, "onboarding.tone", "warm");
   await run({ sessionId: "s1", text: "继续" });
-  expect(prompts()[0]).toContain('"tone":"direct"');
+  expect(prompts()[0]).toContain('"tone":"neutral"');
   expect(prompts().slice(1).some((prompt) => prompt.includes('"tone":"warm"'))).toBe(true);
 });
 
