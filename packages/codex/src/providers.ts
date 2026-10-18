@@ -66,6 +66,11 @@ export type ProviderRouting = {
   capabilities?: Partial<ProviderCapabilities>;
   /** The search functions that stand in for hosted web search on this provider (set exactly when `capabilities.webSearch` is). */
   webTools?: SkillTools;
+  /**
+   * Why this provider serves nothing right now, in the person's words (the developer's model for invited accounts: still being tested,
+   * or this month's cap reached). The workspace's own Codex sign-in still serves; without one the run stops with this.
+   */
+  blocked?: { code: "MODEL_SPONSOR_PENDING" | "MODEL_SPONSOR_BUDGET"; message: string };
 };
 
 let resolver: ((workspaceId: string | undefined) => ProviderRouting | undefined) | undefined;
@@ -80,7 +85,7 @@ export const currentRoute = (skillName: string): RouteDecision => decideRoute(sk
 /** What Codex is given for one thread: the provider's id and its definition (no key — the gateway adds it). */
 export type ThreadProvider = { id: string; model: string; definition: Record<string, unknown> };
 export type RouteDecision = { via: "codex" } | { via: "provider"; provider: ThreadProvider }
-  | { via: "blocked"; code: "MODEL_CAPABILITY_MISSING" | "MODEL_NOT_ADMITTED"; message: string };
+  | { via: "blocked"; code: "MODEL_CAPABILITY_MISSING" | "MODEL_NOT_ADMITTED" | "MODEL_SPONSOR_PENDING" | "MODEL_SPONSOR_BUDGET"; message: string };
 
 export function threadProvider(routing: Pick<ProviderRouting, "provider" | "gatewayUrl">, model: string): ThreadProvider {
   return { id: `crossline-${routing.provider.id}`, model, definition: {
@@ -96,6 +101,7 @@ export function threadProvider(routing: Pick<ProviderRouting, "provider" | "gate
  */
 export function decideRoute(skillName: string, routing: ProviderRouting | undefined): RouteDecision {
   if (!routing) return { via: "codex" };
+  if (routing.blocked) return routing.codexSignedIn ? { via: "codex" } : { via: "blocked", ...routing.blocked };
   const key = skillKey(skillName);
   const gap = capabilityGap(key, { ...THIRD_PARTY_CAPABILITIES, ...routing.capabilities });
   if (!gap && routing.admitted.has(key)) return { via: "provider", provider: threadProvider(routing, routing.provider.model) };

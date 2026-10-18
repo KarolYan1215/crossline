@@ -9,6 +9,7 @@ import {
 import { imageBackendFromEnv, webSearchFromEnv, type ImageBackend, type SecretStore, type WebSearchBackend } from "@crossline/connectors";
 import type { CrosslineStore } from "@crossline/db";
 import { ownerOf } from "./owner";
+import type { SponsorService } from "./sponsor";
 import { createWebTools } from "./web-tools";
 
 /**
@@ -52,6 +53,8 @@ export function createModelProviderService(options: {
   image?: ImageBackend | null;
   /** A conformance run just finished: what was decided while the provider was not admitted is decided again (W-11). */
   onConformance?: (workspaceId: string) => void;
+  /** The developer's model for accounts that redeemed an invite code (`sponsor.ts`); a workspace's own provider comes first. */
+  sponsor?: () => SponsorService | undefined;
 }) {
   const now = options.now ?? (() => new Date());
   const search = options.search === undefined ? webSearchFromEnv() : options.search ?? undefined;
@@ -79,10 +82,25 @@ export function createModelProviderService(options: {
     return keys.get(workspaceId) ?? undefined;
   };
 
+  /** The developer's model, for an account that redeemed a code and has no provider of its own. */
+  const sponsorRouting = (workspaceId: string): ProviderRouting | undefined => {
+    const sponsor = options.sponsor?.();
+    if (!sponsor?.active(workspaceId)) return undefined;
+    const pick = sponsor.chosen();
+    const budget = sponsor.budget(workspaceId);
+    const base = { gatewayUrl: options.gateway.urlFor(workspaceId, "sponsor"), codexSignedIn: options.signedIn(workspaceId), capabilities,
+      ...(search ? { webTools: createWebTools(search) } : {}) };
+    if (!pick) return { ...base, provider: sponsor.providerFor(""), admitted: new Set(),
+      blocked: { code: "MODEL_SPONSOR_PENDING", message: "开发者提供的模型还在检验，通常一小时内可用；也可以先连接自己的 ChatGPT。" } };
+    if (budget && budget.spent >= budget.cap) return { ...base, provider: sponsor.providerFor(pick.model), admitted: new Set(),
+      blocked: { code: "MODEL_SPONSOR_BUDGET", message: `本月邀请额度（¥${budget.cap}）已用完，下月 1 日恢复；也可以在 设置 → 模型连接 连接自己的 ChatGPT 或 API。` } };
+    return { ...base, provider: sponsor.providerFor(pick.model), admitted: new Set(admittedSkills(pick.record, capabilities)) };
+  };
+
   const routing = (workspaceId: string | undefined): ProviderRouting | undefined => {
     if (!workspaceId) return undefined;
     const provider = config(workspaceId);
-    if (!provider) return undefined;
+    if (!provider) return sponsorRouting(workspaceId);
     const record = current(workspaceId, provider);
     return { provider, gatewayUrl: options.gateway.urlFor(workspaceId, provider.id),
       admitted: new Set(record ? admittedSkills(record, capabilities) : []), codexSignedIn: options.signedIn(workspaceId),
@@ -91,6 +109,10 @@ export function createModelProviderService(options: {
 
   /** What the gateway forwards to for a route; a Sign in with ChatGPT plan is OpenAI's own Responses endpoint. */
   const upstream = async (workspaceId: string, providerId: string): Promise<GatewayUpstream | undefined> => {
+    if (providerId === "sponsor") {
+      const sponsor = options.sponsor?.();
+      return sponsor && (workspaceId.startsWith("sponsor-eval:") || (!config(workspaceId) && sponsor.active(workspaceId))) ? sponsor.upstream() : undefined;
+    }
     const provider = config(workspaceId);
     if (!provider || provider.id !== providerId) return undefined;
     const secret = await key(workspaceId);
@@ -104,7 +126,8 @@ export function createModelProviderService(options: {
    */
   const cost = (workspaceId: string): CostSignal | undefined => {
     const provider = config(workspaceId);
-    if (!provider || options.signedIn(workspaceId)) return undefined;
+    if (!provider) return options.sponsor?.()?.cost(workspaceId);
+    if (options.signedIn(workspaceId)) return undefined;
     return isLocalProvider(provider.baseUrl) ? { available: true, limitReached: false }
       : { available: false, reason: "PROVIDER_BUDGET_UNKNOWN" };
   };
@@ -148,17 +171,19 @@ export function createModelProviderService(options: {
     const provider = config(workspaceId);
     const record = provider ? latest(workspaceId, provider) : undefined;
     const valid = provider ? current(workspaceId, provider) : undefined;
-    const admitted = new Set(valid ? admittedSkills(valid, capabilities) : []);
+    // An invited account with no provider of its own is served by the developer's model: its admitted Skills count as served.
+    const sponsored = provider ? undefined : sponsorRouting(workspaceId);
+    const admitted = new Set(valid ? admittedSkills(valid, capabilities) : sponsored && !sponsored.blocked ? sponsored.admitted : []);
     const features = Object.entries(SKILL_NEEDS).filter(([, needs]) => !needs.testOnly).map(([skill, needs]) => {
       const gap = capabilityGap(skill, capabilities);
       const failed = record?.runs.filter((run) => needs.schemas.includes(run.caseId) && !run.ok).length ?? 0;
       return { skill, label: needs.label, critical: Boolean(needs.critical), served: admitted.has(skill),
-        reason: admitted.has(skill) ? "" : gap ?? (!valid ? "还没有检验，或检验已过期" : failed ? `检验中 ${failed} 次没有按格式回答` : needs.critical ? "要求每次都一次答对" : "整体通过率不到 90%") };
+        reason: admitted.has(skill) ? "" : gap ?? (sponsored ? sponsored.blocked?.message ?? "开发者提供的模型没有通过这项功能的检验" : !valid ? "还没有检验，或检验已过期" : failed ? `检验中 ${failed} 次没有按格式回答` : needs.critical ? "要求每次都一次答对" : "整体通过率不到 90%") };
     });
     return { provider: provider ?? null, presets: PROVIDER_PRESETS, unavailable: unavailableOnThirdParty(capabilities), signedIn: options.signedIn(workspaceId),
       conformance: record ? { ranAt: record.ranAt, model: record.model, passRate: record.passRate, repairRate: record.repairRate, p95Ms: record.p95Ms,
         runs: record.runs.length, failures: record.failures, current: Boolean(valid) } : null,
-      features, testing: testing.get(workspaceId) ?? null };
+      features, testing: testing.get(workspaceId) ?? null, sponsor: options.sponsor?.()?.view(workspaceId) ?? null };
   };
 
   async function save(workspaceId: string, body: Record<string, unknown>): Promise<{ status: number; body: unknown }> {
@@ -211,6 +236,7 @@ export function createModelProviderService(options: {
     return undefined;
   }
 
-  return { routing, upstream, cost, runConformance, view, handle, hasProvider: (workspaceId: string) => Boolean(config(workspaceId)) };
+  return { routing, upstream, cost, runConformance, view, handle, capabilities,
+    hasProvider: (workspaceId: string) => Boolean(config(workspaceId)) || Boolean(options.sponsor?.()?.active(workspaceId)) };
 }
 export type ModelProviderService = ReturnType<typeof createModelProviderService>;

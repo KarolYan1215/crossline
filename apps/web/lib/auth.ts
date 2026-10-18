@@ -2,7 +2,7 @@ import "server-only";
 import path from "node:path";
 import { mkdirSync } from "node:fs";
 import {
-  createCrosslineAuth, type CrosslineAuth, type CrosslineAuthOptions, type GoogleConfig, type SmtpConfig
+  createCrosslineAuth, createMailSender, type CrosslineAuth, type CrosslineAuthOptions, type GoogleConfig, type SmtpConfig
 } from "@crossline/auth";
 import { isLocalInstall, readLocalCodexAccount } from "./local-install";
 
@@ -38,6 +38,13 @@ export function isGoogleAuthConfigured(): boolean {
 /** Sign in with ChatGPT is opted into on this install (`CROSSLINE_CHATGPT_SIGNIN=1`, for a copy run on the person's own machine). */
 export function isChatgptSignInConfigured(): boolean {
   return process.env.CROSSLINE_CHATGPT_SIGNIN === "1" && !isLocalInstall();
+}
+
+/** Mail that is not about signing in (the beta invite flow), through the same account and the same e2e mailbox; undefined without mail. */
+export function appMailSender() {
+  const testMailboxDir = isLocalInstall() ? undefined : process.env.CROSSLINE_AUTH_TEST_MAILBOX_DIR?.trim();
+  const smtp = smtpFromEnv();
+  return createMailSender({ ...(testMailboxDir ? { testMailboxDir } : smtp ? { smtp } : {}) });
 }
 
 /** Mail can be sent (SMTP, or the e2e mailbox): only then do email sign-up, the email code and password reset exist at all. */

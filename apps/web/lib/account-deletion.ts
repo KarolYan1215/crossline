@@ -37,7 +37,7 @@ export type AccountReset = { ok: true; rows: number; files: number } | { ok: fal
  * What a reset keeps: the machine-owner mark (`deployment.runtimeOwner`), the model connection (`model.provider`, the worker's
  * `MODEL_PROVIDER_SETTING`, and its `model.provider.*` events), and the monthly cap of a pay-per-use login.
  */
-export const RESET_KEEPS = { settingPrefixes: ["deployment.", "model.provider", "model.budget"], eventTypePrefixes: ["model.provider"] };
+export const RESET_KEEPS = { settingPrefixes: ["deployment.", "model.provider", "model.budget", "model.sponsor"], eventTypePrefixes: ["model.provider"] };
 
 /**
  * 「清空数据重新开始」 (2026-10-18, the owner's request to rebuild their own account, which as the machine owner's cannot be deleted): the

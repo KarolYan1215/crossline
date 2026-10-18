@@ -54,6 +54,24 @@ function mailer(smtp: SmtpConfig) {
 }
 
 /**
+ * Mail that is not about signing in (the beta invite flow): the same SMTP account and the same e2e mailbox as the auth mail, so a test
+ * reads it back the same way. Unlike the auth mail it throws when the message does not go out, so the caller can say so.
+ */
+export function createMailSender(config: { smtp?: SmtpConfig; testMailboxDir?: string }): ((mail: { to: string; subject: string; text: string }) => Promise<void>) | undefined {
+  if (config.testMailboxDir) {
+    const dir = config.testMailboxDir;
+    return async ({ to, subject, text }) => {
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(path.join(dir, `${Date.now()}-${randomUUID()}.json`), JSON.stringify({ to, subject, url: text.match(/https?:\/\/\S+/)?.[0] ?? "", text }));
+    };
+  }
+  if (!config.smtp) return undefined;
+  const smtp = config.smtp;
+  const transport = mailer(smtp);
+  return async ({ to, subject, text }) => { await transport.sendMail({ from: smtp.from, to, subject, text }); };
+}
+
+/**
  * A factory, not a singleton: tests build one against a temp `authDbPath`, `apps/web` builds exactly
  * one against `CROSSLINE_DATA_DIR` and caches it the same way `getStore()` caches `CrosslineStore`.
  *

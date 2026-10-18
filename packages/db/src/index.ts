@@ -342,6 +342,10 @@ export type StoredEnergyObservation = {
 };
 
 export type StoredPrincipal = { id: string; betterAuthUserId: string; createdAt: string };
+export type StoredInvite = {
+  id: string; workspaceId: string; email: string; reason: string; status: "pending" | "approved" | "rejected" | "redeemed";
+  createdAt: string; codeHash?: string; decidedAt?: string; redeemedAt?: string; redeemedWorkspaceId?: string;
+};
 export type StoredWorkspace = { id: string; name: string; createdAt: string };
 export type StoredWorkspaceMember = {
   principalId: string; workspaceId: string; role: "viewer" | "member" | "owner"; createdAt: string;
@@ -1051,6 +1055,16 @@ export class CrosslineStore {
           this.#db.exec("DROP TABLE plan_changes");
         }
         this.#collapsePlanVersions();
+      } },
+      // Invite codes for the hosted beta (2026-10-18): who applied, the owner's decision, the code's hash (never the code), and which
+      // account redeemed it. `workspace_id` is the applicant's, so deleting an account deletes its application with it.
+      { version: 15, up: () => {
+        this.#db.exec(`
+          CREATE TABLE IF NOT EXISTS beta_invites (
+            id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, email TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL, code_hash TEXT, created_at TEXT NOT NULL, decided_at TEXT, redeemed_at TEXT, redeemed_workspace_id TEXT);
+          CREATE INDEX IF NOT EXISTS beta_invites_by_workspace ON beta_invites(workspace_id, created_at);
+          CREATE UNIQUE INDEX IF NOT EXISTS beta_invites_by_code ON beta_invites(code_hash) WHERE code_hash IS NOT NULL;`);
       } }
     ];
 
@@ -3071,7 +3085,7 @@ export class CrosslineStore {
       "assistant_threads", "assistant_attachments", "milestone_templates",
       "workspace_projects", "source_documents", "onboarding_sessions", "onboarding_messages", "profile_facts",
       "diligence_reports", "milestone_anchors", "model_usage", "activity_segments", "waiting_items",
-      "task_step_plans", "task_steps", "preference_entries", "learned_archetypes", "conversations", "conversation_messages",
+      "task_step_plans", "task_steps", "preference_entries", "learned_archetypes", "conversations", "conversation_messages", "beta_invites",
       // Consent state is part of the ledger: a restore that silently re-enables collection is not a restore.
       "settings",
       // `principals`/`workspaces` are not workspace-scoped rows themselves — a principal is scoped by
@@ -3400,6 +3414,26 @@ export class CrosslineStore {
     return summarizeRhythm({ segments: this.listActivitySegments(workspaceId, sinceIso).map((segment) => ({ start: segment.start, end: segment.end, category: segment.category, idle: segment.idle })), finished });
   }
 
+  /** One beta invite: an application, then the owner's decision, then the redemption (see `packages/db/src/invites.ts`). */
+  saveInvite(invite: StoredInvite): void {
+    this.#db.prepare(`INSERT INTO beta_invites (id, workspace_id, email, reason, status, code_hash, created_at, decided_at, redeemed_at, redeemed_workspace_id)
+      VALUES (@id, @workspaceId, @email, @reason, @status, @codeHash, @createdAt, @decidedAt, @redeemedAt, @redeemedWorkspaceId)
+      ON CONFLICT(id) DO UPDATE SET status = excluded.status, code_hash = excluded.code_hash, decided_at = excluded.decided_at,
+        redeemed_at = excluded.redeemed_at, redeemed_workspace_id = excluded.redeemed_workspace_id`)
+      .run({ codeHash: null, decidedAt: null, redeemedAt: null, redeemedWorkspaceId: null, ...invite });
+  }
+
+  /** Invites by id, applicant workspace, or code hash; newest first. */
+  listInvites(filter: { id?: string; workspaceId?: string; codeHash?: string } = {}): StoredInvite[] {
+    const where = [filter.id ? "id = @id" : "", filter.workspaceId ? "workspace_id = @workspaceId" : "", filter.codeHash ? "code_hash = @codeHash" : ""].filter(Boolean);
+    const rows = this.#db.prepare(`SELECT * FROM beta_invites ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY created_at DESC, rowid DESC`)
+      .all(Object.fromEntries(Object.entries(filter).filter(([, value]) => value))) as Array<Record<string, string | null>>;
+    return rows.map((row) => ({ id: row.id!, workspaceId: row.workspace_id!, email: row.email!, reason: row.reason ?? "",
+      status: row.status as StoredInvite["status"], createdAt: row.created_at!,
+      ...(row.code_hash ? { codeHash: row.code_hash } : {}), ...(row.decided_at ? { decidedAt: row.decided_at } : {}),
+      ...(row.redeemed_at ? { redeemedAt: row.redeemed_at } : {}), ...(row.redeemed_workspace_id ? { redeemedWorkspaceId: row.redeemed_workspace_id } : {}) }));
+  }
+
   listWorkspaces(): StoredWorkspace[] {
     // rowid breaks a same-millisecond tie by creation order; the random id would make "the first workspace" a coin flip.
     const rows = this.#db.prepare("SELECT * FROM workspaces ORDER BY created_at, rowid")
@@ -3497,7 +3531,7 @@ export class CrosslineStore {
    * workspace pointed at, for the caller to remove.
    */
   resetWorkspace(workspaceId: string, keep: { settingPrefixes: string[]; eventTypePrefixes: string[] }): { rows: number; workOrderIds: string[]; fileUris: string[] } {
-    const untouched = new Set(["workspace_members", "device_leases", "tailscale_bindings", "audit_events", "model_usage", "settings", "events"]);
+    const untouched = new Set(["workspace_members", "device_leases", "tailscale_bindings", "audit_events", "model_usage", "settings", "events", "beta_invites"]);
     const kept = (value: string, prefixes: string[]) => prefixes.some((prefix) => value.startsWith(prefix));
     return this.#db.transaction(() => {
       const workOrderIds = this.#db.prepare("SELECT DISTINCT id FROM work_orders WHERE workspace_id = ?").pluck().all(workspaceId) as string[];
@@ -3613,3 +3647,4 @@ export * from "./push";
 export * from "./artifacts";
 export * from "./portrait";
 export * from "./skills";
+export * from "./invites";

@@ -78,6 +78,10 @@ jobs:
             echo "-- search and image for other models (names only; keys counted, never shown)"
             sudo grep -E "^(CROSSLINE_SEARCH_PROVIDER|CROSSLINE_IMAGE_API_STYLE|CROSSLINE_IMAGE_MODEL)=" /srv/crossline/app.env || true
             printf "keys filled: "; sudo grep -cE "^(TAVILY_API_KEY|BOCHA_API_KEY|CROSSLINE_IMAGE_API_KEY)=.+" /srv/crossline/app.env || true
+            echo "-- invites and the developer's model (names only; the key counted, never shown)"
+            sudo grep -E "^(CROSSLINE_INVITE_APPROVER|CROSSLINE_SPONSOR_BASE_URL|CROSSLINE_SPONSOR_MODELS|CROSSLINE_SPONSOR_MONTHLY_CNY)=" /srv/crossline/app.env || true
+            printf "sponsor key filled: "; sudo grep -cE "^CROSSLINE_SPONSOR_API_KEY=.+" /srv/crossline/app.env || true
+            sudo docker logs --since 7d crossline-worker 2>&1 | grep -E "\"sponsor\." | tail -20 || true
             # The domains, and their status, held by the Resend account the configured key belongs to. The key never leaves the host.
             echo "-- resend domains for the configured key"
             key=$(sudo grep -E "^CROSSLINE_SMTP_PASSWORD=" /srv/crossline/app.env | cut -d= -f2-)

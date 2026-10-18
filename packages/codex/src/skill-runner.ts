@@ -7,6 +7,7 @@ import { routeForSkill, tierForSkill, tierRoutes, type ModelRoute, type RouteTie
 import { createUsageCollector, currentSpendMode, reportUsage, type UsageCollector } from "./usage";
 import { currentProviderRouting, decideRoute, type ThreadProvider } from "./providers";
 import { markClientBusy, withModelSlot, type ModelPriority } from "./model-gate";
+import { accountModels, fitRoute } from "./model-catalog";
 
 import { registerAgentThread, type AgentMode } from "./agent-mode";
 
@@ -246,9 +247,11 @@ async function runRouted<T>(client: CodexRpcBoundary, options: { skillName: stri
   if (decision.via === "blocked") return { ok: false, blocker: { code: decision.code, message: decision.message }, audit: {} };
   const provider = decision.via === "provider" ? decision.provider : undefined;
   // A stronger look is a cost the person did not ask for: in economy mode the Skill keeps its own route.
-  const route = provider ? { model: provider.model }
+  const wanted = provider ? { model: provider.model }
     : options.tier && spendMode === "normal" && process.env.CROSSLINE_MODEL_ROUTING?.trim().toLowerCase() !== "off"
     ? { ...tierRoutes()[options.tier] } : routeForSkill(options.skillName, process.env, spendMode);
+  // Fitted to the models this account is offered (a ChatGPT Free account has no `gpt-5.6-sol`); a provider's model is its own.
+  const route = provider ? wanted : fitRoute(wanted, options.tier ?? tierForSkill(options.skillName), await accountModels(client));
   const webTools = provider ? options.webTools ?? routing?.webTools : undefined;
   const context: RunContext = { route, spendMode, usage: createUsageCollector(), ...(provider ? { provider } : {}), ...(webTools ? { webTools } : {}), extraSkills: [] };
   let skill: NativeSkill | undefined;

@@ -2,10 +2,11 @@ import { get } from "node:http";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { configureModelGate, enterUsageWorkspace, guestRuntimeLimit, modelGateStatus, setProviderResolver, setSpendModeProvider, setUsageSink, startCodexSupervisor, startModelGateway, type CodexSupervisor } from "@crossline/codex";
+import { configureModelGate, enterUsageWorkspace, forgetAccountModels, guestRuntimeLimit, modelGateStatus, setProviderResolver, setSpendModeProvider, setUsageSink, startCodexSupervisor, startModelGateway, type CodexSupervisor } from "@crossline/codex";
 import { containerMemory, containerPeak } from "./memory";
 import { createDpapiSecretStore } from "@crossline/connectors";
 import { createModelProviderService } from "./model-provider";
+import { createSponsorService, sponsorFromEnv, type SponsorService } from "./sponsor";
 import { CrosslineStore, aiToolsFor, grownHomeLine, interviewChecklistFor, isPaused, listPushSubscriptions, readGrownSkills, readPublicSkills, removePushSubscriptions } from "@crossline/db";
 import { capturesAwaitingAutoAnalysis, createCaptureAnalyzer } from "./analysis";
 import { autoApproveEligible } from "./auto-approval";
@@ -337,6 +338,8 @@ async function firstDraftsPass(workspaceId: string, checkedAt = new Date().toISO
  */
 async function afterConnected(workspaceId: string): Promise<void> {
   console.info(JSON.stringify({ type: "runtime.connected", workspaceId }));
+  // Another account may be on another plan, with other models.
+  forgetAccountModels(workspaceId);
   await spendFor(workspaceId).catch(() => undefined);
   await autoAnalyzePass(workspaceId).catch(() => undefined);
   void autoBackplanPass(workspaceId).catch(() => undefined);
@@ -666,9 +669,12 @@ const analysisStore = new CrosslineStore(path.join(dataDir, "crossline.db"));
 // Keys and links that are credentials (a model provider's key, a calendar's private link): DPAPI files, never the ledger.
 const secrets = createDpapiSecretStore(dataDir);
 // A workspace's own third-party model (R7): Codex reaches it through this local gateway, which adds the key (model-gateway.ts).
+const modelGateway = await startModelGateway({ resolve: (workspaceId, providerId) => modelProviders.upstream(workspaceId, providerId) });
+// The developer's model for accounts that redeemed an invite code (sponsor.ts): only when the server has a key and candidates.
+let sponsorService: SponsorService | undefined;
 const modelProviders = createModelProviderService({
-  store: analysisStore, secrets, cwd: repoRoot,
-  gateway: await startModelGateway({ resolve: (workspaceId, providerId) => modelProviders.upstream(workspaceId, providerId) }),
+  store: analysisStore, secrets, cwd: repoRoot, sponsor: () => sponsorService,
+  gateway: modelGateway,
   signedIn: (workspaceId) => codexSupervisor?.runtimes?.signedIn(workspaceId) ?? true,
   onConformance: (workspaceId) => { void afterConnected(workspaceId); },
   client: async (workspaceId) => {
@@ -677,6 +683,8 @@ const modelProviders = createModelProviderService({
   }
 });
 setProviderResolver((workspaceId) => modelProviders.routing(workspaceId));
+if (sponsorFromEnv()) sponsorService = createSponsorService({ store: analysisStore, dataDir, cwd: repoRoot, gateway: modelGateway,
+  capabilities: modelProviders.capabilities, client: () => { const owner = runtimeOwner(analysisStore); return owner ? codexSupervisor?.clientFor(owner) : undefined; } });
 // Screen activity: a foreground-window reader feeding a tracker that asks every workspace for its own consent on every
 // reading. Without consent nothing is stored; the source itself reads only the window's app, title and idle time.
 const activityIntervalSeconds = Math.max(5, Number(process.env.CROSSLINE_ACTIVITY_INTERVAL_SECONDS) || 60);
@@ -694,7 +702,7 @@ const readCost = async (workspaceId?: string) => codexSupervisor
 // The quota reading is cached for a minute inside the runner; an unreadable quota counts as normal, so a broken
 // probe never quietly moves everything onto a cheaper model.
 setUsageSink((usage) => {
-  if (!usage.workspaceId) return;
+  if (!usage.workspaceId || sponsorService?.noteEvalUsage(usage)) return;
   analysisStore.saveModelUsage({
     workspaceId: usage.workspaceId, skill: usage.skillName, tier: usage.tier ?? "", model: usage.model ?? "", effort: usage.effort ?? "",
     spendMode: usage.spendMode, threadId: usage.threadId ?? "", ok: usage.ok, errorCode: usage.errorCode ?? "", repairs: usage.repairs, turns: usage.turns,
@@ -1197,6 +1205,14 @@ if (!capabilitySecret) {
     } : {})
   });
   console.info(JSON.stringify({ type: "codex.supervisor.ready", url: codexSupervisor.url, runtimeOwner: runtimeOwner(analysisStore) ?? null }));
+  // The developer's model is chosen by measurement: candidates without a current record are tested shortly after start, and again
+  // whenever a record goes stale (a new runtime, a changed list, thirty days); a model already measured is not tested again.
+  if (sponsorService && process.env.CROSSLINE_RUN_ONCE !== "1") {
+    const evaluateSponsor = () => void sponsorService?.evaluate().catch((error: unknown) =>
+      console.warn(JSON.stringify({ type: "sponsor.evaluate_failed", message: error instanceof Error ? error.message : String(error) })));
+    setTimeout(evaluateSponsor, 2 * 60_000).unref();
+    setInterval(evaluateSponsor, 6 * 60 * 60_000).unref();
+  }
   // Other accounts' runtimes stop after a quiet spell (above), so an idle account holds no process.
   setInterval(() => codexSupervisor?.runtimes?.stopIdle(), 60_000).unref();
   // One model run at a time on the hosted beta, and none started above the memory high-water mark (model-gate.ts).

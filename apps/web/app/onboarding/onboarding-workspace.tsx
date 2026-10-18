@@ -14,6 +14,7 @@ import { OpeningCard, openingReply, type OpeningAnswer } from "./opening-card";
 import { announceRound, TurnProgress } from "./turn-progress";
 import { SegmentedControl } from "../ui/controls";
 import { AssessCard } from "./assess-card";
+import { QuotaNotice } from "./quota-notice";
 import { composeAnswers, type Answer, type AssistantTurn, type DocumentRow, type Message, type OnboardingState } from "./onboarding-types";
 
 const ACCEPT = ".pdf,.docx,.txt,.md,.csv,.png,.jpg,.jpeg,.gif,.webp,.m4a,.mp3,.wav,.aac,.ogg,.flac";
@@ -40,6 +41,8 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
   const [background, setBackground] = useState(false);
   const [busy, setBusy] = useState<"" | "turn" | "upload" | "dates" | "milestones" | "diligence">("");
   const [error, setError] = useState("");
+  // The last round stopped because the ChatGPT quota was spent: the quota notice then says what to do next (Plus or an invite code).
+  const [usageLimitHit, setUsageLimitHit] = useState(false);
   const [text, setText] = useState("");
   // What was just sent, shown at once: the saved copy only arrives with the next read, after the turn ends.
   const [pendingText, setPendingText] = useState("");
@@ -55,10 +58,11 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
     const read = (url: string) => fetch(url, { cache: "no-store" }).then((response) => response.json()).catch(() => undefined);
     void Promise.all([read("/api/codex/account"), read("/api/model/provider")]).then(([account, provider]: [
       { account?: unknown; blocker?: unknown } | undefined,
-      { features?: Array<{ skill: string; served: boolean }> } | undefined
+      { features?: Array<{ skill: string; served: boolean }>; sponsor?: { active?: boolean } | null } | undefined
     ]) => {
-      // Another model's API that has passed the check for the interview is a connection too (decided 2026-10-17).
-      if (provider?.features?.some((feature) => feature.skill.endsWith("crossline-onboarding") && feature.served)) { setConnected(true); return; }
+      // Another model's API that has passed the check for the interview is a connection too (decided 2026-10-17), and so is an invite
+      // code: a round on the developer's model while it is still being tested says so itself, instead of sending the person away.
+      if (provider?.sponsor?.active || provider?.features?.some((feature) => feature.skill.endsWith("crossline-onboarding") && feature.served)) { setConnected(true); return; }
       // Only a definite "not signed in" sends the person there: with the background service unreachable /connect could not help either.
       if (account) setConnected(account.account ? true : account.blocker ? undefined : false);
     });
@@ -160,8 +164,9 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
     const response = await fetch("/api/onboarding/turn", {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sessionId: id, text: message, reread })
     }).catch(() => undefined);
-    const body = await response?.json().catch(() => undefined) as { state?: string; message?: string; blocker?: { message?: string } } | undefined;
+    const body = await response?.json().catch(() => undefined) as { state?: string; code?: string; message?: string; blocker?: { code?: string; message?: string } } | undefined;
     if (!response?.ok || body?.state === "blocked") setError(body?.message ?? body?.blocker?.message ?? "这一轮没有完成，可以重试。");
+    setUsageLimitHit((body?.code ?? body?.blocker?.code) === "SKILL_USAGE_LIMIT");
     // The full interview just finished: the portrait report is written now, so it is ready when the person opens it.
     if (body?.state === "ready" && !line) void fetch("/api/portrait", { method: "POST" }).catch(() => {});
     await load();
@@ -360,6 +365,7 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
         {transcription && waitingForAudio && <TranscriptionCard status={transcription} busy={busy !== ""} onDownload={() => void downloadModel()} />}
         <div ref={bottom} />
       </div>
+      {!line && <QuotaNotice rounds={state.messages.filter((message) => message.role === "assistant").length} usageLimitHit={usageLimitHit} />}
       {error && <p className="ob-error" role="alert">{error}{waiting && busy === "" && <button type="button" className="ob-btn" onClick={() => void runTurn("")}>重试</button>}</p>}
       {!opening && <form className="ob-composer ob-voice" onSubmit={(event) => { event.preventDefault(); if (canSend) void runTurn(composed || ""); }}>
         <textarea value={text} rows={deep ? 4 : open ? 2 : 3} onChange={(event) => setText(event.target.value)} disabled={busy !== ""}

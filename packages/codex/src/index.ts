@@ -17,6 +17,7 @@ export * from "./usage";
 export * from "./analysis";
 export * from "./cost";
 export * from "./model-policy";
+export * from "./model-catalog";
 export * from "./capability";
 export * from "./agent-mode";
 export * from "./runtime-registry";

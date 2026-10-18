@@ -62,6 +62,9 @@
 .ob3 .ob-composer{border-top:1.5px solid var(--ink);padding:10px 14px;background:var(--paper)}
 .ob3 .ob-composer textarea{border:1px solid var(--ink);background:#FFFDF9;border-radius:0;font-size:15px}
 .ob3 .ob-error{color:#5E1212;padding:6px 14px}
+.ob3 .ob-quota{display:grid;gap:8px;margin:8px 14px;padding:10px 12px;border-left:3px solid #8A5A00;background:#FBF6EA}
+.ob3 .ob-quota[data-verdict="spent"]{border-left-color:#5E1212}
+.ob3 .ob-quota>p{margin:0}
 .ob3 .ob-design,.ob3 .ob-diligence,.ob3 .ob-dates{border:1px solid var(--ink);background:var(--paper);font-family:var(--f-sans)}
 
 /* Opening */

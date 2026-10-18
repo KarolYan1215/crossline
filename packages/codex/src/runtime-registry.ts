@@ -1,4 +1,5 @@
 import { clientBusy, waitForMemory } from "./model-gate";
+import { forgetAccountModels } from "./model-catalog";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import type { CodexRpcBoundary } from "./index";
@@ -235,6 +236,7 @@ export function createRuntimeRegistry(options: {
       await running.get(workspaceId)?.sidecar.client.request("account/logout", {}).catch(() => undefined);
       stop(workspaceId);
       logins.delete(workspaceId);
+      forgetAccountModels(workspaceId);
       rmSync(path.dirname(homeOf(workspaceId)), { recursive: true, force: true });
     },
     stopIdle() { for (const [workspaceId, entry] of [...running]) if (stoppable(workspaceId, entry, idleMs)) stop(workspaceId); },

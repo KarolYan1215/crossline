@@ -4,6 +4,7 @@ import { resolveAccessContext } from "../../../../lib/access-guard";
 import { getStore } from "../../../../lib/crossline";
 import { interviewStatus } from "../../../../lib/interview-status";
 import { isCrossSiteWrite } from "../../../../lib/same-origin";
+import { noteRoundQuota } from "../../../../lib/interview-quota";
 
 /**
  * One attention beat from the interview page (every 15 seconds while it is visible): how long ago the person last typed, clicked or
@@ -26,5 +27,7 @@ export async function POST(request: Request) {
   try { record = JSON.parse(store.getSetting(access.ctx.workspaceId, ATTENTION_SETTING) ?? "null") ?? undefined; } catch { record = undefined; }
   const next = addAttentionBeat(record, { at: new Date().toISOString(), inputAgoMs, rounds, ready: status.readyToStart, complete: status.complete });
   store.setSetting(access.ctx.workspaceId, ATTENTION_SETTING, JSON.stringify(next));
+  // The account's usage after each round, for the quota outlook (lib/interview-quota.ts): read once per round, not on every beat.
+  await noteRoundQuota(access.ctx, rounds).catch(() => undefined);
   return NextResponse.json({ ok: true });
 }

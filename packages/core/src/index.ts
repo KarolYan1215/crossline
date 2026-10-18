@@ -44,6 +44,8 @@ export * from "./calibration";
 export * from "./telemetry";
 export * from "./effectiveness";
 export * from "./plan-churn";
+export * from "./interview-quota";
+export * from "./sponsor";
 import type { EvidenceQuestionTemplate } from "./milestone-templates";
 export type EnergyLevel = "low" | "medium" | "high";
 

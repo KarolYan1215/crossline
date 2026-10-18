@@ -47,3 +47,20 @@ if [ -f /srv/crossline/app.env ] && ! grep -q "^CROSSLINE_IMAGE_API_KEY=." /srv/
   fi
   unset key
 fi
+# Invite codes and the developer's model (the owner's decisions of 2026-10-18): applications are mailed to the owner, and accounts that
+# redeemed a code run on SiliconFlow with the test's own SiliconFlow key, at most 30 yuan a month each. The candidates are tested by the
+# worker and the cheapest that passes is used; prices are yuan per million tokens (input:output:context in K), set high where unknown —
+# replace them with the console's figures. The key is copied between the two files on this host only, never printed.
+ensure /srv/crossline/app.env CROSSLINE_INVITE_APPROVER karolyan1215@gmail.com
+ensure /srv/crossline/app.env CROSSLINE_SPONSOR_BASE_URL https://api.siliconflow.cn/v1
+ensure /srv/crossline/app.env CROSSLINE_SPONSOR_MODELS "deepseek-ai/DeepSeek-V4.1=4:8:1024,zai-org/GLM-5.2=4:12:1024,deepseek-ai/DeepSeek-V4-Pro=4:8:1024"
+ensure /srv/crossline/app.env CROSSLINE_SPONSOR_MONTHLY_CNY 30
+if [ -f /srv/crossline/app.env ] && ! grep -q "^CROSSLINE_SPONSOR_API_KEY=." /srv/crossline/app.env; then
+  key=$(grep "^ASSESS_TEXT_API_KEY=" /srv/assess/assess.env 2>/dev/null | cut -d= -f2-)
+  if [ -n "$key" ]; then
+    grep -v "^CROSSLINE_SPONSOR_API_KEY=" /srv/crossline/app.env > /srv/crossline/app.env.tmp || true
+    printf 'CROSSLINE_SPONSOR_API_KEY=%s\n' "$key" >> /srv/crossline/app.env.tmp && mv /srv/crossline/app.env.tmp /srv/crossline/app.env && chmod 600 /srv/crossline/app.env
+    echo "  app uses the test's SiliconFlow key for invited accounts"
+  fi
+  unset key
+fi
