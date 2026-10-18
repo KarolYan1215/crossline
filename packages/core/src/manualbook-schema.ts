@@ -34,6 +34,8 @@ export type ManualDesignContext = {
   /** What is known about the person that bears on how to do this (confirmed facts only). */
   profile: Array<{ id: string; value: string }>;
   constraints: string[];
+  /** Where the person lives and works and in what language (`MaterialSearchContext.setting`): research questions fit it. */
+  setting?: string[];
   /** The task's own steps, when it has a step plan: the tutorial follows them, one part per step, in this order. */
   plannedSteps?: Array<{ id: string; title: string; role: string; doneCriterion: string; covers?: string[]; why?: string;
     /** The tool the plan expects the person to speed this step with (docs/skills-library.md §7). */
@@ -144,6 +146,9 @@ export type MaterialSearchContext = {
   node: Pick<ManualNode, "id" | "title" | "kind" | "goal" | "steps" | "researchQuestions">;
   localFiles: string[];
   constraints: string[];
+  /** Where the person lives and works and in what language, from their own confirmed facts: a tutorial for a Hangzhou investor cited US
+   * federal archiving standards and SEC filings for want of it (2026-10-18 walkthrough). Absent when nothing is on record. */
+  setting?: string[];
 };
 
 export const MATERIAL_SEARCH_SCHEMA = object({

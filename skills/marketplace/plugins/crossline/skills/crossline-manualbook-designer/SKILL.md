@@ -5,7 +5,7 @@ description: Design the flow of steps a single Crossline task takes, so each ste
 
 # Crossline Manualbook Designer
 
-Accept `{version: "crossline.manualbook.design.v1", today, workOrder, contract[], inputs[], localFiles[], profile[], constraints[], person[], prepared?, plannedSteps?}`. `person` is what the person confirmed about themselves (background, level, target); `prepared` lists what the assistant already produced for this task (by step, file names) — material to build on, not work to plan again. Return exactly `{overview, nodes[], edges[], assumptions[], blockers[]}` as raw JSON, with no code fence and no prose around it.
+Accept `{version: "crossline.manualbook.design.v1", today, workOrder, contract[], inputs[], localFiles[], profile[], constraints[], setting?, person[], prepared?, plannedSteps?}`. `setting` is where the person lives and works and in what language, from their own facts. `person` is what the person confirmed about themselves (background, level, target); `prepared` lists what the assistant already produced for this task (by step, file names) — material to build on, not work to plan again. Return exactly `{overview, nodes[], edges[], assumptions[], blockers[]}` as raw JSON, with no code fence and no prose around it.
 
 A manualbook turns one task into a short chain of steps a person can follow from left to right. Your job is the chain, not the work: say what each step is, in what order, and how someone would know it is done.
 
@@ -19,6 +19,7 @@ A manualbook turns one task into a short chain of steps a person can follow from
 - `acceptance`: how the person knows the step is done — something observable.
 - `serves`: ids from `contract[]` this step helps produce or evidence. **Every `required` contract item must be served by at least one step.** An optional one may be left out.
 - `needsResearch`: **always true** (decided 2026-10-09: every step is researched on the web — a step written only from what the person already has gave them nothing they did not know). `researchQuestions`: two to four questions per step, each a concrete search a researcher can answer by opening public pages. At least one must be answerable on the open web whatever course or company this is (a textbook chapter, open courseware, official documentation, a standard); a question that only the person's course platform or inbox can answer may be added, but never as the only one.
+  - **Fit the person's setting and the step's scale.** Ask about the practice where the person works (`setting`, the line, the profile): early-stage investing in China is asked about Chinese practice, not US securities filings. A small administrative step — listing, filing, archiving a dozen files, sending a message — is researched for the judgement in it (what makes an entry useful, what to check before sending), never for records-management standards, hash algorithms, archive formats or copyright law it does not need. A question whose answer would not change how the person does this step is not worth a search.
 
 ### What to research, by kind
 

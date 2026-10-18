@@ -78,6 +78,12 @@ const MAX_PAGE_BYTES = 3_000_000;
 const slug = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "source";
 const sha = (bytes: Uint8Array | string) => createHash("sha256").update(bytes).digest("hex");
 
+/** Where the person is and what language they work in, from their own confirmed facts (never an assumption), for the researcher. */
+export function personSetting(facts: ReadonlyArray<{ identityId: string; slot: string; value: string; status: string }>): string[] {
+  return facts.filter((fact) => fact.identityId === "person" && fact.status === "confirmed" && !fact.value.startsWith("假设")
+    && /city|country|location|region|language|locale|所在|城市|国家|地区|语言/i.test(fact.slot)).map((fact) => fact.value.slice(0, 80)).slice(0, 4);
+}
+
 /** What the person attached when they captured this, still readable after promotion. */
 function captureInputs(store: CrosslineStore, workspaceId: string, workOrderId: string): Array<{ id: string; text: string }> {
   const capture = store.listCaptures(workspaceId).find((item) => item.id === workOrderId);
@@ -126,6 +132,7 @@ export function buildManualContext(store: CrosslineStore, workspaceId: string, w
     constraints: store.listProfileFacts(workspaceId).filter((fact) => (fact.identityId === order.identityId || fact.identityId === "person")
       && (/constraint|限制|约束/.test(fact.slot) || /无法|不能|不要/.test(fact.value))).map((fact) => fact.value).slice(0, 8),
     person: planningContext(store, workspaceId, order).person,
+    setting: personSetting(store.listProfileFacts(workspaceId)),
     ...(prepared.length ? { prepared } : {}),
     ...(steps.length ? { plannedSteps: steps.map((step) => ({ id: step.id, title: step.title, role: step.role, doneCriterion: step.doneCriterion ?? "",
       covers: (step.covers ?? []).map((id) => unitTitle.get(id) ?? id), why: step.why ?? "", ...(step.aiAssist?.tool ? { aiAssist: step.aiAssist } : {}) })) } : {})
@@ -224,7 +231,7 @@ export function createManualbookBuilder(store: CrosslineStore, workspaceId: stri
         const searchContext: MaterialSearchContext = { version: "crossline.manualbook.search.v1", today, task: { intent: context.workOrder.intent },
           node: { id: node.id, title: node.title, kind: node.kind, goal: node.goal, steps: node.steps,
             researchQuestions: node.researchQuestions.length ? node.researchQuestions : [`${node.title}：${node.goal}`] },
-          localFiles: context.localFiles, constraints: context.constraints };
+          localFiles: context.localFiles, constraints: context.constraints, ...(context.setting?.length ? { setting: context.setting } : {}) };
         const found = await runCodexSkill<MaterialSearch>(client, searchContext, {
           skillName: MATERIAL_RESEARCHER_SKILL, cwd, developerInstructions: SEARCH_INSTRUCTIONS, outputSchema: MATERIAL_SEARCH_SCHEMA, allowWebSearch: true,
           prepareInput: () => searchContext, validateOutput: (output) => validateMaterialSearch(output), onAudit: () => {}, timeoutMs: 60 * 60_000
