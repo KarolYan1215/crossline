@@ -12,6 +12,12 @@ describe("login form", () => {
     expect(html).not.toContain("Google");
   });
 
+  test("back from a password reset, says the password changed and opens the password form", () => {
+    const html = renderToStaticMarkup(<LoginForm googleEnabled={false} emailEnabled reset />);
+    expect(html).toContain("密码已更新，用新密码登录。");
+    expect(html).toContain('type="password"');
+  });
+
   test("shows the Google button when Google sign-in is configured", () => {
     const html = renderToStaticMarkup(<LoginForm googleEnabled={true} />);
     expect(html).toContain("用 Google 账号登录");

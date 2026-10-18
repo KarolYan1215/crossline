@@ -4,16 +4,18 @@ import { useState, type FormEvent } from "react";
 import { authClient, emailCode } from "../auth-client";
 import { authErrorMessage } from "../auth-errors";
 
-export function LoginForm({ googleEnabled, emailEnabled = true, chatgptEnabled = false, verified = false, errorCode }: { googleEnabled: boolean;
+export function LoginForm({ googleEnabled, emailEnabled = true, chatgptEnabled = false, verified = false, reset = false, errorCode }: { googleEnabled: boolean;
   emailEnabled?: boolean; chatgptEnabled?: boolean; verified?: boolean;
+  /** Back from 「设置新密码」 (`/login?reset=1`): say it worked and open the password tab, which it used to leave the person to guess. */
+  reset?: boolean;
   /** A redirect back from a sign-in that failed elsewhere (ChatGPT, Google), as `/login?error=CODE`. */
   errorCode?: string }) {
-  const [status, setStatus] = useState(errorCode ? authErrorMessage({ code: errorCode }, "登录没有完成，请重试。") : verified ? "邮箱已验证，请登录。" : "");
+  const [status, setStatus] = useState(errorCode ? authErrorMessage({ code: errorCode }, "登录没有完成，请重试。") : verified ? "邮箱已验证，请登录。" : reset ? "密码已更新，用新密码登录。" : "");
   const [error, setError] = useState(Boolean(errorCode));
   const [busy, setBusy] = useState(false);
   // 「邮箱验证码」 signs in (and on first use, signs up) without a password; offered only where mail can be sent.
   // The code is the default: one address, one code, and a first-time address is an account — no password, no separate verification mail.
-  const [mode, setMode] = useState<"password" | "code">(emailEnabled ? "code" : "password");
+  const [mode, setMode] = useState<"password" | "code">(emailEnabled && !reset ? "code" : "password");
   const [codeSentTo, setCodeSentTo] = useState("");
   // The address that was refused for being unverified: the person can have the link sent again right here.
   const [unverified, setUnverified] = useState("");

@@ -37,7 +37,7 @@ function SetNewPasswordForm({ token }: { token: string }) {
     setError(false);
     const { error: resetError } = await authClient.resetPassword({ newPassword, token });
     if (resetError) { setStatus(authErrorMessage(resetError, "重置失败，链接可能已过期。")); setError(true); setBusy(false); return; }
-    location.href = "/login";
+    location.href = "/login?reset=1";
   };
   return <form method="post" onSubmit={submit}>
     <label><span>新密码</span><input name="password" type="password" required minLength={8} autoComplete="new-password" autoFocus /></label>
