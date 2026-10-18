@@ -11,6 +11,8 @@ import { analyzeNewCapturesInBackground } from "../../../lib/capture-followups";
  * has been accepted here: an accepted task is written down as a capture and analysed, anything else is an input to the milestone design.
  */
 const ID = /^[a-zA-Z0-9_-]{1,80}$/;
+/** A proposal id is the researcher's own (「建议一」 is one it wrote): only compared with stored ids, so any short printable text is accepted. */
+const PROPOSAL_ID = /^[^\s\p{C}]{1,80}$/u;
 
 export async function POST(request: Request) {
   if (isCrossSiteWrite(request)) return NextResponse.json({ ok: false, blocker: { code: "REQUEST_FORBIDDEN", message: "Use the local Web API" } }, { status: 403 });
@@ -21,7 +23,7 @@ export async function POST(request: Request) {
 
   if (body.action === "decide") {
     const { reportId, proposalId, decision } = body;
-    if (typeof reportId !== "string" || typeof proposalId !== "string" || !ID.test(reportId) || !ID.test(proposalId)
+    if (typeof reportId !== "string" || typeof proposalId !== "string" || !ID.test(reportId) || !PROPOSAL_ID.test(proposalId)
       || (decision !== "accepted" && decision !== "rejected" && decision !== "pending")) {
       return NextResponse.json({ ok: false, code: "DILIGENCE_DECISION_INVALID" }, { status: 400 });
     }

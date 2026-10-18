@@ -46,3 +46,13 @@ test("the page shows what was looked for, not the researcher's rules", async () 
   expect(questionShown("找出适合这个人当前阶段和身份约束的外部机会（比赛、孵化器、资助、合作渠道）。只列这个人按 facts 里的身份……不要假设这个人是学生。"))
     .toBe("找出适合本人当前阶段和身份约束的外部机会（比赛、孵化器、资助、合作渠道）。");
 });
+
+test("a proposal the researcher named in Chinese can be decided, and its capture id stays plain", () => {
+  const store = globalThis.crosslineStore!;
+  store.saveDiligenceReport({ id: "r2", ownerId: "o", workspaceId: TEST_CTX.workspaceId, scope: "startup", question: "q", status: "done",
+    runAt: "2026-10-02T00:00:00.000Z", findings: [], sources: [],
+    proposals: [{ id: "建议一", title: "核验资格", why: "y", kind: "task", dueDate: "", findingIds: [], status: "pending" }] });
+  expect(decideDiligenceProposal(TEST_CTX, "r2", "建议一", "accepted")).toEqual({ ok: true, captured: true });
+  const capture = store.listCaptures(TEST_CTX.workspaceId).find((item) => item.title === "核验资格")!;
+  expect(capture.id).toMatch(/^diligence-r2-[a-f0-9]{12}$/);
+});
