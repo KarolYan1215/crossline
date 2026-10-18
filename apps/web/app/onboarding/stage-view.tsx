@@ -44,14 +44,15 @@ export function StageView({ state, stage, complete, onChanged }: {
   const total = state.startTotal;
   const done = Math.max(0, total - state.startMissing.length);
   const left = minutesLeft(state, stage);
-  const missing = state.startMissing.map((item) => item.label);
+  // A long-term goal is adopted in the left column, not answered in the conversation: its missing item links there (W-8).
+  const missing = state.startMissing.map((item) => ({ label: item.label, href: item.id.startsWith("line_goal:") ? "#ob-goals" : "" }));
   return <aside className="ob-stage" aria-label="正在成形">
     <section className="ob-ring-row" aria-label="开始使用的进度">
       <Ring done={state.readyToStart ? Math.max(1, total) : done} total={Math.max(1, total)} />
       <div>
         <b>{state.readyToStart ? "可以开始使用" : total ? `开始使用前还差 ${state.startMissing.length} 项` : "先回答中间的第一组问题"}</b>
         {complete ? <small>访谈已完成</small> : total > 0 && <small>{left.label} {left.minutes} 分钟</small>}
-        {!state.readyToStart && missing.length > 0 && <ul className="ob-ring-missing">{missing.slice(0, 3).map((label) => <li key={label}>{label}</li>)}
+        {!state.readyToStart && missing.length > 0 && <ul className="ob-ring-missing">{missing.slice(0, 3).map(({ label, href }) => <li key={label}>{href ? <a href={href}>{label}（在左栏采用）</a> : label}</li>)}
           {missing.length > 3 && <li>等 {missing.length - 3} 项</li>}</ul>}
         {state.readyToStart && <a className="ob-btn ob-primary" href="/">开始使用</a>}
       </div>

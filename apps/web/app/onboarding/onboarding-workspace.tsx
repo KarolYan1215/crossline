@@ -9,6 +9,7 @@ import { QuestionCard } from "./question-card";
 import { StageBar } from "./portrait-panel";
 import { LeftColumn } from "./left-column";
 import { StageView } from "./stage-view";
+import { FirstHint } from "../ui/first-hint";
 import { OpeningCard, openingReply, type OpeningAnswer } from "./opening-card";
 import { announceRound, TurnProgress } from "./turn-progress";
 import { SegmentedControl } from "../ui/controls";
@@ -295,6 +296,11 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
         {!opening && !state.focusLine && <div className="ob-tone"><span>语气</span>
           <SegmentedControl label="访谈语气" value={state.tone} onChange={(next) => void changeTone(next)}
             options={ONBOARDING_TONES.map((id) => ({ value: id, label: ONBOARDING_TONE_LABEL[id].label }))} /></div>}
+        {/* Inside the header: the column is a fixed grid of rows, and a note that comes and goes must not shift the thread's row. */}
+        {!state.focusLine && <FirstHint id="onboarding-columns" title="这一页怎么用">
+          中间是访谈：每轮一组问题，答不上来可以选「不确定」或跳过，系统先按假设记下，之后随时可改。
+          左栏放材料和长期目标，文件任何时候都能添加，传错了可以删除。右栏列出开始使用前还差的项，以及正在成形的画像。
+        </FirstHint>}
       </header>
       <div className="ob-thread ob-voice" aria-live="polite">
         {!state.focusLine && <AssessCard />}

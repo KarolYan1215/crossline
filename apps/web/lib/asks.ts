@@ -18,7 +18,7 @@ import { readScheduledDay } from "./schedule-memory";
 import { requestCodexSupervisor } from "./codex-runtime";
 import { autoPublishPass, forgetPublishedHash } from "./auto-publish";
 import { calendarFiling } from "./timeline";
-import { answerInterviewQuestion, flushPendingAnswers, interviewStatus } from "./interview-status";
+import { answerInterviewQuestion, flushPendingAnswers, interviewStatus, type InterviewStatus } from "./interview-status";
 import { requestStepReplan } from "./steps";
 import { unfiledFiles } from "./file-belonging";
 import { decideEvent, eventProposals, publishFixedEvents } from "./fixed-events";
@@ -506,6 +506,9 @@ const interviewPlaceholder = (question: { id: string; kind: string; options: Arr
 
 const STAGE_LABEL: Record<string, string> = { orientation: "开场与规则", situation: "现状", compass: "指南针", energy: "能量", lines: "主线", details: "细节" };
 
+const stageWhere = (status: InterviewStatus) =>
+  status.stage ? `访谈在「${STAGE_LABEL[status.stage] ?? status.stage}」阶段（第 ${status.stageIndex}/${status.stageCount} 阶段）` : "访谈";
+
 /**
  * The main interview stopped with questions still open. The system works meanwhile — approved milestones are worked back and scheduled —
  * but milestone drafts, long-term goals and the proposed hours are designed from what the interview has, so the gap is named here.
@@ -513,17 +516,37 @@ const STAGE_LABEL: Record<string, string> = { orientation: "开场与规则", si
 function interviewAsks({ ctx, now }: Source): Ask[] {
   const status = interviewStatus(ctx);
   // While the interview runs, its questions are asked in it, round by round; only once the start standard stands and the person uses the
-  // app (已可开始) with the portrait unfinished are they asked here as well, each answerable in place (decided 2026-10-08, 2026-10-12).
+  // app (已可开始) with the portrait unfinished are they asked here as well, answerable in place (decided 2026-10-08, 2026-10-12).
   if (!status.started || status.complete || !status.parked) return [];
-  const where = status.stage ? `访谈在「${STAGE_LABEL[status.stage] ?? status.stage}」阶段（第 ${status.stageIndex}/${status.stageCount} 阶段）` : "访谈";
-  const questions = status.questions.map((question): Ask => {
+  // One card, not one per question: the later stages' questions each became an ask and piled eight 「不急」 cards onto Today
+  // (2026-10-17 walkthrough, W-21). The first open question not snoozed is asked in place; answering it brings up the next, since an
+  // answered question leaves `status.questions` until the round goes to the interview together.
+  const today = planToday(ctx, now);
+  const held = new Map(snoozes(ctx).map((snooze) => [snooze.askId, snooze]));
+  const questions = interviewQuestionAsks(status);
+  const shown = questions.find((ask) => { const snooze = held.get(ask.id); return !snooze || snooze.until <= today || snooze.fingerprint !== ask.fingerprint; });
+  if (shown) return [shown];
+  if (questions.length) return [];
+  return [{ id: "interview:open", kind: "interview_open", entityId: "interview", urgency: "later", raisedAt: "",
+    fingerprint: `${status.stage}:${status.openQuestions}`,
+    title: "访谈未完成",
+    why: `${stageWhere(status)}，下一轮问题出来后可以在这里或访谈页回答。期间系统照常使用；`
+      + "补齐后，长期目标、里程碑草稿与建议的可用时段按新信息更新。",
+    options: [{ id: "open", label: "回到访谈", href: "/onboarding", recommended: true }] }];
+}
+
+/** Every open interview question as an answerable ask: `interviewAsks` lists one of them, `answerAsk` accepts any. */
+function interviewQuestionAsks(status: InterviewStatus): Ask[] {
+  const where = stageWhere(status);
+  const count = status.questions.length;
+  return status.questions.map((question): Ask => {
     const single = question.kind !== "free" && question.options.length > 0;
     const other: AskField = { id: "other", label: "补充", kind: "text", required: false, placeholder: "可不填" };
     const portrait = question.id === "gap-portrait" || question.id === "gap-appearance";
     return { id: `iq:${question.id}`, kind: "interview_question", entityId: question.id, urgency: "later", raisedAt: "",
       fingerprint: `${status.sessionId}:${question.id}`, ...(question.identityId ? { line: question.identityId } : {}),
-      title: question.text,
-      why: `${where}的问题。本轮的问题都答完后，会一起交给访谈，接着下一轮。`,
+      title: count > 1 ? `访谈还有 ${count} 个问题：${question.text}` : question.text,
+      why: `${where}的问题。${count > 1 ? "答完这个显示下一个，也可以回到访谈一起回答。" : ""}本轮的问题都答完后，会一起交给访谈，接着下一轮。`,
       // A line resting on guesses and a project's deadline are start items: milestones are designed from them.
       important: START_GAP.test(question.id),
       select: question.kind === "multi" ? "many" : "one",
@@ -534,12 +557,6 @@ function interviewAsks({ ctx, now }: Source): Ask[] {
           ...(question.allowOther ? { fields: [other] } : {}) }))
         : [{ id: "free", label: "回答", fields: [{ id: "other", label: "回答", kind: "longtext" as const, required: true }] }] };
   });
-  return [{ id: "interview:open", kind: "interview_open", entityId: "interview", urgency: "later", raisedAt: "",
-    fingerprint: `${status.stage}:${status.openQuestions}`,
-    title: "访谈未完成",
-    why: `${where}${status.openQuestions ? `，${status.openQuestions} 个问题列在下面，可以在这里逐个回答` : ""}。期间系统照常使用；`
-      + "补齐后，长期目标、里程碑草稿与建议的可用时段按新信息更新。",
-    options: [{ id: "open", label: "回到访谈", href: "/onboarding", recommended: true }] }, ...questions];
 }
 
 /**
@@ -903,7 +920,9 @@ function withNoteInFields(ask: Ask, optionIds: string[], values: Record<string, 
  */
 export async function answerAsk(ctx: AccessContext, askId: string, choice: string | { optionIds?: string[]; note?: string },
   values: Record<string, unknown>, now = appNow()): Promise<AskResult> {
-  const ask = collectAsks(ctx, now).find((item) => item.id === askId);
+  // An interview question further down the round is not listed (one card at a time) but is still the person's to answer.
+  const ask = collectAsks(ctx, now).find((item) => item.id === askId)
+    ?? (askId.startsWith("iq:") && interviewStatus(ctx).parked ? interviewQuestionAsks(interviewStatus(ctx)).find((item) => item.id === askId) : undefined);
   if (!ask) return { ok: false, code: "ASK_NOT_FOUND" };
   const optionIds = typeof choice === "string" ? [choice] : choice.optionIds ?? [];
   const note = typeof choice === "string" ? "" : choice.note ?? "";

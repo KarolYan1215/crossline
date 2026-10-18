@@ -34,6 +34,8 @@
 .ob-doclist li{display:flex;flex-wrap:wrap;justify-content:space-between;gap:2px 6px;border-top:1px solid var(--mist);padding-top:4px}
 .ob-doclist li span{flex:1 1 10em;min-width:0;overflow-wrap:anywhere}
 .ob-doclist li small{color:var(--graphite)}
+.ob-doclist .ob-doc-remove{min-height:26px;padding:0 8px;border:1px solid var(--mist);font-size:12px;color:var(--ink)}
+.ob-doclist .ob-doc-remove:hover{border-color:var(--ink)}
 .ob-doclist li[data-status="failed"] small,.ob-doclist li[data-status="unsupported"] small{color:#5E1212}
 .ob-card .st-card{border:0;padding:0;background:transparent}
 .ob-goal{display:grid;gap:4px;padding-top:8px;border-top:1px solid var(--mist);border-left:4px solid var(--lc,var(--ink));padding-left:8px}
@@ -185,3 +187,5 @@
 .ob-opening-note h3{margin:0;font-size:15px}
 .ob-opening-note p{margin:0;line-height:1.75}
 .ob-opening-sign{justify-self:end;color:var(--muted, inherit)}
+.ob-dates-dropped{margin:8px 0;font-size:13px}.ob-dates-dropped summary{cursor:pointer}.ob-dates-dropped ul{margin:6px 0;padding-left:18px}
+.ob-centre-head .ui-first-hint{flex:1 1 100%;margin:0}

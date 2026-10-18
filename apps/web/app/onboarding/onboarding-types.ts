@@ -25,7 +25,7 @@ export type DateBatchItem = {
   id: string; kind: "date" | "recurring"; title: string; project: string; confidence: "high" | "medium" | "low";
   when: string; quote: string; sourceRef: string; note: string; checked: boolean; blocks: number;
 };
-export type DateBatch = { id: string; documentCount: number; items: DateBatchItem[]; questions: string[]; dropped: number };
+export type DateBatch = { id: string; documentCount: number; items: DateBatchItem[]; questions: string[]; dropped: string[] };
 export type DiligenceReport = {
   id: string; identityId: string; question: string; status: "queued" | "running" | "done" | "failed"; runAt: string; note?: string;
   findings: Array<{ id: string; claim: string; sourceIds: string[]; confidence: string; staleWhen: string }>;

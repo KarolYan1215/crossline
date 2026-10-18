@@ -39,7 +39,24 @@ export function LeftColumn({ state, busy, accept, onUpload, onChanged, heldQuest
   // Files from an authorized folder are summed up in its own card.
   const uploads = state.documents.filter((doc) => !doc.fromFolder);
   const confirmed = facts.filter((fact) => fact.status === "confirmed").length;
+  const remove = async (doc: DocumentRow) => {
+    if (!window.confirm(`删除「${doc.fileName}」？访谈和计划不再读取这份文件。`)) return;
+    const response = await fetch(`/api/source-documents/${encodeURIComponent(doc.id)}`, { method: "DELETE" }).catch(() => undefined);
+    if (response?.ok) onChanged();
+    else window.alert("没有删除，请重试。");
+  };
+  // The long-term goals are a start item adopted here, not answered in the conversation; while any line has none they lead the column,
+  // since below the calendar card nobody scrolled to them while the right column listed them as missing (W-8).
+  const goalsOpen = state.lines.some((line) => !line.goals[0]);
+  const goals = state.lines.length > 0 && <section className="ob-card" id="ob-goals" aria-label="长期目标">
+    <h3>长期目标 {goalsOpen && <small>在这里选定，访谈不再另问</small>}</h3>
+    {state.lines.map((line) => {
+      const candidates = lineAttributes(state.lineProfiles[line.id], line.label).map(({ text, kind }) => ({ text, kind }));
+      return <GoalCard key={line.id} line={line} candidates={candidates} onAdopt={(parts) => adopt(line.id, parts)} />;
+    })}
+  </section>;
   return <aside className="ob-left" aria-label="材料与决定">
+    {goalsOpen && goals}
     <section className="ob-card" aria-label="材料与日历">
       <h3>材料与日历</h3>
       <label className="ob-drop">
@@ -50,6 +67,7 @@ export function LeftColumn({ state, busy, accept, onUpload, onChanged, heldQuest
       <FolderPicker busy={busy} onUpload={onUpload} />
       {uploads.length > 0 && <ul className="ob-doclist">{uploads.map((doc) => <li key={doc.id} data-status={doc.extractionStatus}>
         <span>{doc.fileName}</span><small>{DOC_STATUS[doc.extractionStatus]}{doc.projectId ? ` · ${state.projects.find((project) => project.id === doc.projectId)?.name ?? ""}` : ""}</small>
+        <button type="button" className="ob-doc-remove" disabled={busy} onClick={() => void remove(doc)} aria-label={`删除 ${doc.fileName}`}>删除</button>
       </li>)}</ul>}
       <SourceFolders onChanged={onChanged} />
       {/* Only the subscription link brings calendar events in: the ChatGPT connectors' card shows a status and imports nothing, and
@@ -63,13 +81,7 @@ export function LeftColumn({ state, busy, accept, onUpload, onChanged, heldQuest
         identities={state.identities} projects={state.projects} disabled={busy} onChange={(next) => onAnswer(question.id, next)} />)}
     </section>}
 
-    {state.lines.length > 0 && <section className="ob-card" aria-label="长期目标">
-      <h3>长期目标</h3>
-      {state.lines.map((line) => {
-        const candidates = lineAttributes(state.lineProfiles[line.id], line.label).map(({ text, kind }) => ({ text, kind }));
-        return <GoalCard key={line.id} line={line} candidates={candidates} onAdopt={(parts) => adopt(line.id, parts)} />;
-      })}
-    </section>}
+    {!goalsOpen && goals}
 
     <section className="ob-card" aria-label="已记下的事实">
       <h3>已记下 <small>{confirmed} 条确认 · {facts.length - confirmed} 条推断</small></h3>

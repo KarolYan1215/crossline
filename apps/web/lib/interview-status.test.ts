@@ -70,12 +70,14 @@ test("used without finishing it, the interview's questions are asked on 待决�
   // Ready to start and the portrait not finished: the interview's questions are listed on 待决事项 as well.
   seedReadyToStart(store, ws);
   expect(interviewStatus(TEST_CTX)).toMatchObject({ readyToStart: true, parked: true });
+  // One card for the whole round (W-21): the first question, naming how many are left; answering it brings up the next.
   const asks = collectAsks(TEST_CTX, SOON);
-  expect(asks.find((ask) => ask.kind === "interview_open")).toMatchObject({ title: "访谈未完成", options: [{ label: "回到访谈", href: "/onboarding" }] });
-  expect(asks.filter((ask) => ask.kind === "interview_question").map((ask) => ask.title)).toEqual(["组会和导师 1V1 的固定时间？", "「ECE 555」每周什么时候上课？", "「ECE 548」每周什么时候上课？"]);
+  expect(asks.some((ask) => ask.kind === "interview_open")).toBe(false);
+  expect(asks.filter((ask) => ask.kind === "interview_question").map((ask) => ask.title)).toEqual(["访谈还有 3 个问题：组会和导师 1V1 的固定时间？"]);
   expect(asks.filter((ask) => ask.kind === "source_project").map((ask) => ask.entityId).sort()).toEqual(["a", "b"]);
 
   expect(await answerAsk(TEST_CTX, "iq:q-meetings", "free", { other: "周三 10:00 组会" })).toMatchObject({ ok: true });
+  expect(collectAsks(TEST_CTX, SOON).filter((ask) => ask.kind === "interview_question").map((ask) => ask.title)).toEqual(["访谈还有 2 个问题：「ECE 555」每周什么时候上课？"]);
   expect(await answerAsk(TEST_CTX, "iq:gap-meetings-ece555", "file", {})).toMatchObject({ ok: true });
   expect(supervisor).not.toHaveBeenCalled();
   expect(await answerAsk(TEST_CTX, "iq:gap-meetings-ece548", "write", { other: "周二、四 11:00–12:15" })).toMatchObject({ ok: true });
@@ -150,11 +152,11 @@ test("the same TBD date twice in one batch is one card, and an answered one is n
   const undated = { id: "x", kind: "project_due", title: "ECE 555 期末课程项目报告截止", project: "ECE 555", sourceRef: "src-1", quote: "TBD" };
   store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: "dates:1", type: "dates.extracted", entityId: "batch-1",
     payload: { dates: [], recurring: [], undated: [undated, { ...undated, id: "y", sourceRef: "reply-21", quote: "还不知道" }] } });
-  const cards = collectAsks(TEST_CTX, SOON).filter((ask) => ask.id.startsWith("iq:gap-undated-"));
+  const cards = interviewStatus(TEST_CTX).questions.filter((question) => question.id.startsWith("gap-undated-"));
   expect(cards).toHaveLength(1);
   store.upsertProfileFact({ workspaceId: ws, identityId: "research", projectId: "ece555", slot: "undated_6uyhx6",
     value: "「ECE 555」的「ECE 555 期末课程项目报告截止」文件里写的是待定，不是日期。还不知道", status: "confirmed", sourceRef: "reply-21", sourceQuote: "还不知道", updatedAt: "2026-10-08T00:00:00Z" });
-  expect(collectAsks(TEST_CTX, SOON).some((ask) => ask.id.startsWith("iq:gap-undated-"))).toBe(false);
+  expect(interviewStatus(TEST_CTX).questions.some((question) => question.id.startsWith("gap-undated-"))).toBe(false);
 });
 
 test("answers given before the screen to questions it now keeps from the person are dropped; with nothing left, nothing is sent", async () => {
@@ -190,4 +192,25 @@ test("answers given before the screen to questions it now keeps from the person 
   expect(await flushPendingAnswers(TEST_CTX, async (_session, text) => { sends.push(text); })).toBe(false);
   expect(sends).toEqual([]);
   expect(store.getSetting(ws, "onboarding.pendingAnswers")).toBe("null");
+});
+
+// W-13: the badge counted the profile's blocking gaps unscreened, so it showed 「访谈问题 1」 that no page listed.
+test("the badge counts the interview's questions as the interview page shows them, and once parked only as the one ask", async () => {
+  const { store } = setup();
+  const { countPending } = await import("./pending");
+  const status = interviewStatus(TEST_CTX);
+  expect(countPending(TEST_CTX).questions).toBe(status.openQuestions);
+  seedReadyToStart(store, ws);
+  const parked = countPending(TEST_CTX);
+  expect(parked.questions).toBe(0);
+  expect(collectAsks(TEST_CTX, SOON).filter((ask) => ask.kind.startsWith("interview_"))).toHaveLength(1);
+});
+
+test("a snoozed interview question gives way to the next one; answering a question not listed still works", async () => {
+  const { store } = setup();
+  seedReadyToStart(store, ws);
+  const { snoozeAsk } = await import("./asks");
+  expect(snoozeAsk(TEST_CTX, "iq:q-meetings", "tomorrow", SOON)).toMatchObject({ ok: true });
+  expect(collectAsks(TEST_CTX, SOON).filter((ask) => ask.kind === "interview_question").map((ask) => ask.entityId)).toEqual(["gap-meetings-ece555"]);
+  expect(await answerAsk(TEST_CTX, "iq:gap-meetings-ece548", "write", { other: "周二、四 11:00–12:15" }, SOON)).toMatchObject({ ok: true });
 });
