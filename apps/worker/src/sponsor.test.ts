@@ -20,7 +20,7 @@ function setup(withEvaluation = true) {
   if (withEvaluation) {
     const record = summarizeConformance({ providerId: "sponsor", model: MODEL, runtimeVersion: RUNTIME_VERSION, ranAt: NOW.toISOString() },
       conformanceCases().flatMap((item) => Array.from({ length: item.runs }, () => ({ caseId: item.id, ok: true, repairs: 0, ms: 900 }))));
-    writeFileSync(path.join(dataDir, "sponsor.json"), JSON.stringify({ evaluations: [{ model: MODEL, record, yuanPerRun: 0.02 }] }));
+    writeFileSync(path.join(dataDir, "sponsor.json"), JSON.stringify({ evaluations: [{ model: MODEL, record, yuanPerRun: 0.02, tokens: { input: 100_000, cached: 0, output: 10_000, runs: 10 } }] }));
   }
   const store = new CrosslineStore(":memory:");
   const gateway = { urlFor: (workspaceId: string, providerId: string) => `http://127.0.0.1:1/${workspaceId}/${providerId}`, port: 1, close: async () => {} };
@@ -50,10 +50,10 @@ test("an account that redeemed a code runs on the chosen model through the gatew
 test("the month's cap stops the account with the reason, and its quota reads as spent", () => {
   const { store, providers } = setup();
   store.setSetting("ws", SPONSOR_SETTING, JSON.stringify({ inviteId: "inv", since: NOW.toISOString() }));
-  // 2M input × 4 + 1.5M output × 16 = 32 yuan this month; last month's use does not count.
+  // 2M input × 4 + 1.5M output (reasoning inside it) × 16 = 32 yuan this month; last month's use does not count.
   for (const at of ["2026-10-05T00:00:00.000Z", "2026-09-30T00:00:00.000Z"]) store.saveModelUsage({ workspaceId: "ws", skill: "crossline:crossline-onboarding", tier: "", model: MODEL,
     effort: "", spendMode: "normal", threadId: "", ok: true, errorCode: "", repairs: 0, turns: 1, inputTokens: 2_000_000, cachedInputTokens: 0,
-    outputTokens: 1_000_000, reasoningTokens: 500_000, totalTokens: 3_500_000, durationMs: 1, at });
+    outputTokens: 1_500_000, reasoningTokens: 500_000, totalTokens: 3_500_000, durationMs: 1, at });
   const routing = providers.routing("ws")!;
   expect(routing.blocked?.code).toBe("MODEL_SPONSOR_BUDGET");
   expect(decideRoute("crossline:crossline-onboarding", routing)).toMatchObject({ via: "blocked", code: "MODEL_SPONSOR_BUDGET" });

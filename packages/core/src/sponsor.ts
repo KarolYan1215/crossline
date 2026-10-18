@@ -8,10 +8,12 @@ import { admittedSkills, THIRD_PARTY_CAPABILITIES, type ConformanceRecord, type 
  */
 export type SponsorModel = {
   model: string;
-  /** Yuan per million tokens, input and output (reasoning bills as output). */
+  /** Yuan per million tokens, input and output (reasoning is part of output). */
   priceIn: number; priceOut: number;
   /** The context window in thousands of tokens, when stated. */
   contextK?: number;
+  /** Yuan per million input tokens served from the provider's cache, when it prices them apart; else they bill as input. */
+  priceCached?: number;
 };
 export const SPONSOR_MONTHLY_CAP_CNY = 30;
 /** A model this much below the best pass rate still counts as "as good" when comparing prices. */
@@ -21,27 +23,38 @@ export const SPONSOR_MIN_CONTEXT_K = 128;
 const REQUIRED_SKILLS = ["crossline-onboarding", "crossline-automation-stripper", "crossline-milestone-gate"];
 
 /**
- * `model=in:out[:ctxK],…` (`CROSSLINE_SPONSOR_MODELS`). Prices are deliberately set high where unknown: an estimate that runs over stops an
- * account early, one that runs under spends the owner's money.
+ * `model=in:out[:ctxK[:cached]],…` (`CROSSLINE_SPONSOR_MODELS`), yuan per million tokens as SiliconFlow lists them. A model priced by time
+ * of day is given its peak price: an estimate that runs over stops an account early, one that runs under spends the owner's money.
  */
 export function parseSponsorModels(text: string | undefined): SponsorModel[] {
   return (text ?? "").split(",").map((part) => part.trim()).filter(Boolean).flatMap((part) => {
     const at = part.lastIndexOf("=");
     const model = (at > 0 ? part.slice(0, at) : part).trim();
-    const [priceIn, priceOut, contextK] = (at > 0 ? part.slice(at + 1) : "").split(":").map(Number);
+    const [priceIn, priceOut, contextK, priceCached] = (at > 0 ? part.slice(at + 1) : "").split(":").map(Number);
     if (!model || !(priceIn! > 0) || !(priceOut! > 0)) return [];
-    return [{ model, priceIn: priceIn!, priceOut: priceOut!, ...(contextK! > 0 ? { contextK: contextK! } : {}) }];
+    return [{ model, priceIn: priceIn!, priceOut: priceOut!, ...(contextK! > 0 ? { contextK: contextK! } : {}),
+      ...(priceCached! >= 0 && priceCached! < priceIn! ? { priceCached: priceCached! } : {}) }];
   });
 }
 
-export type UsageForPrice = { model: string; inputTokens: number; outputTokens: number; reasoningTokens: number };
+/**
+ * Token counts as the runtime reports them: `inputTokens` includes the cached ones and `outputTokens` includes reasoning (Codex's
+ * `blended_total` is non-cached input + output), so reasoning is never billed a second time.
+ */
+export type UsageForPrice = { model: string; inputTokens: number; cachedInputTokens?: number; outputTokens: number };
+
+/** Yuan for one model's tokens at its listed prices. */
+export function tokenYuan(usage: Omit<UsageForPrice, "model">, price: SponsorModel): number {
+  const cached = Math.min(Math.max(usage.cachedInputTokens ?? 0, 0), usage.inputTokens);
+  return ((usage.inputTokens - cached) * price.priceIn + cached * (price.priceCached ?? price.priceIn) + usage.outputTokens * price.priceOut) / 1_000_000;
+}
 
 /** Yuan spent on the sponsor's models; rows on any other model (the account's own ChatGPT) are not counted. */
 export function sponsorSpend(usage: UsageForPrice[], models: SponsorModel[]): number {
   const byName = new Map(models.map((model) => [model.model, model]));
   return usage.reduce((sum, row) => {
     const price = byName.get(row.model);
-    return price ? sum + (row.inputTokens * price.priceIn + (row.outputTokens + row.reasoningTokens) * price.priceOut) / 1_000_000 : sum;
+    return price ? sum + tokenYuan(row, price) : sum;
   }, 0);
 }
 
@@ -51,7 +64,22 @@ export function sponsorMonth(now: Date): { start: string; next: Date } {
   return { start: start.toISOString(), next: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)) };
 }
 
-export type SponsorEvaluation = { model: string; record: ConformanceRecord; yuanPerRun: number };
+/**
+ * One candidate's measurement. `tokens` are the evaluation's totals, so the cost per run follows the prices in the environment and a
+ * price change needs no new test; `yuanPerRun` is what was computed when it ran (the only figure records from before tokens were kept have).
+ */
+export type SponsorEvaluation = {
+  model: string; record: ConformanceRecord; yuanPerRun: number;
+  tokens?: { input: number; cached: number; output: number; runs: number };
+};
+
+/** Yuan per conformance run at the current prices. */
+export function evaluationYuanPerRun(evaluation: SponsorEvaluation, models: SponsorModel[]): number {
+  const price = models.find((model) => model.model === evaluation.model);
+  const tokens = evaluation.tokens;
+  if (!price || !tokens || !tokens.runs) return evaluation.yuanPerRun;
+  return Math.round((tokenYuan({ inputTokens: tokens.input, cachedInputTokens: tokens.cached, outputTokens: tokens.output }, price) / tokens.runs) * 10_000) / 10_000;
+}
 
 /**
  * The model to use, or undefined while none passes. Among the candidates that serve the interview and both critical Skills and have the
@@ -68,6 +96,8 @@ export function chooseSponsorModel(models: SponsorModel[], evaluations: SponsorE
   });
   if (!fit.length) return undefined;
   const best = Math.max(...fit.map((evaluation) => evaluation.record.passRate));
-  return fit.filter((evaluation) => evaluation.record.passRate >= best - SPONSOR_PASS_MARGIN)
-    .sort((a, b) => a.yuanPerRun - b.yuanPerRun || (order.get(a.model) ?? 99) - (order.get(b.model) ?? 99))[0];
+  const cost = (evaluation: SponsorEvaluation) => evaluationYuanPerRun(evaluation, models);
+  const pick = fit.filter((evaluation) => evaluation.record.passRate >= best - SPONSOR_PASS_MARGIN)
+    .sort((a, b) => cost(a) - cost(b) || (order.get(a.model) ?? 99) - (order.get(b.model) ?? 99))[0];
+  return pick && { ...pick, yuanPerRun: cost(pick) };
 }

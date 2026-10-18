@@ -49,8 +49,8 @@ if [ -f /srv/crossline/app.env ] && ! grep -q "^CROSSLINE_IMAGE_API_KEY=." /srv/
 fi
 # Invite codes and the developer's model (the owner's decisions of 2026-10-18): applications are mailed to the owner, and accounts that
 # redeemed a code run on SiliconFlow with the test's own SiliconFlow key, at most 30 yuan a month each. The candidates are tested by the
-# worker and the cheapest that passes is used; prices are yuan per million tokens (input:output:context in K), set high where unknown —
-# replace them with the console's figures. The key is copied between the two files on this host only, never printed.
+# worker and the cheapest that passes is used; prices are yuan per million tokens (input:output:context in K:cache-hit input), from
+# SiliconFlow's price list. The key is copied between the two files on this host only, never printed.
 ensure /srv/crossline/app.env CROSSLINE_INVITE_APPROVER karolyan1215@gmail.com
 ensure /srv/crossline/app.env CROSSLINE_SPONSOR_BASE_URL https://api.siliconflow.cn/v1
 # SiliconFlow serves DeepSeek V4.1 only as `DeepSeek-V4.1-Flash` (its /models, 2026-10-18): the first default named a model it does not have,
@@ -58,7 +58,12 @@ ensure /srv/crossline/app.env CROSSLINE_SPONSOR_BASE_URL https://api.siliconflow
 if grep -q "^CROSSLINE_SPONSOR_MODELS=deepseek-ai/DeepSeek-V4.1=4:8:1024,zai-org/GLM-5.2=4:12:1024,deepseek-ai/DeepSeek-V4-Pro=4:8:1024$" /srv/crossline/app.env 2>/dev/null; then
   drop /srv/crossline/app.env CROSSLINE_SPONSOR_MODELS
 fi
-ensure /srv/crossline/app.env CROSSLINE_SPONSOR_MODELS "deepseek-ai/DeepSeek-V4.1-Flash=2:8:1024,zai-org/GLM-5.2=4:16:1024,zai-org/GLM-5.3=4:16:1024,deepseek-ai/DeepSeek-V4-Pro=4:16:1024"
+# SiliconFlow's listed prices (yuan per million tokens, input:output:context K:cache-hit input), 2026-10-18; DeepSeek-V4.1-Flash at its
+# peak price (00–02 and 08–24 Beijing time). Replaces only the estimated list an earlier deploy wrote, never one set by hand.
+if grep -q "^CROSSLINE_SPONSOR_MODELS=deepseek-ai/DeepSeek-V4.1-Flash=2:8:1024,zai-org/GLM-5.2=4:16:1024,zai-org/GLM-5.3=4:16:1024,deepseek-ai/DeepSeek-V4-Pro=4:16:1024$" /srv/crossline/app.env 2>/dev/null; then
+  drop /srv/crossline/app.env CROSSLINE_SPONSOR_MODELS
+fi
+ensure /srv/crossline/app.env CROSSLINE_SPONSOR_MODELS "deepseek-ai/DeepSeek-V4.1-Flash=2:8:1024:0.04,zai-org/GLM-5.2=8:28:1024:2,zai-org/GLM-5.3=8:28:1024:2,deepseek-ai/DeepSeek-V4-Pro=12:24:1024:1"
 ensure /srv/crossline/app.env CROSSLINE_SPONSOR_MONTHLY_CNY 30
 if [ -f /srv/crossline/app.env ] && ! grep -q "^CROSSLINE_SPONSOR_API_KEY=." /srv/crossline/app.env; then
   key=$(grep "^ASSESS_TEXT_API_KEY=" /srv/assess/assess.env 2>/dev/null | cut -d= -f2-)

@@ -253,7 +253,7 @@ export type StoredModelUsage = {
 };
 export type ModelUsageSummary = {
   skill: string; model: string; runs: number; failed: number; repairs: number;
-  inputTokens: number; outputTokens: number; reasoningTokens: number; totalTokens: number; averageSeconds: number;
+  inputTokens: number; cachedInputTokens: number; outputTokens: number; reasoningTokens: number; totalTokens: number; averageSeconds: number;
   /** The slowest single run in the window — what a time limit has to clear, which an average hides. */
   longestSeconds: number;
 };
@@ -2118,12 +2118,12 @@ export class CrosslineStore {
   summarizeModelUsage(workspaceId: string, sinceIso: string): ModelUsageSummary[] {
     const rows = this.#db.prepare(`
       SELECT skill, model, COUNT(*) AS runs, SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS failed, SUM(repairs) AS repairs,
-        SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens, SUM(reasoning_tokens) AS reasoning_tokens,
+        SUM(input_tokens) AS input_tokens, SUM(cached_input_tokens) AS cached_input_tokens, SUM(output_tokens) AS output_tokens, SUM(reasoning_tokens) AS reasoning_tokens,
         SUM(total_tokens) AS total_tokens, AVG(duration_ms) AS avg_ms, MAX(duration_ms) AS max_ms
       FROM model_usage WHERE workspace_id = ? AND at >= ? GROUP BY skill, model ORDER BY total_tokens DESC, runs DESC
     `).all(workspaceId, sinceIso) as Array<Record<string, number | string>>;
     return rows.map((row) => ({ skill: String(row.skill), model: String(row.model), runs: Number(row.runs), failed: Number(row.failed),
-      repairs: Number(row.repairs), inputTokens: Number(row.input_tokens), outputTokens: Number(row.output_tokens),
+      repairs: Number(row.repairs), inputTokens: Number(row.input_tokens), cachedInputTokens: Number(row.cached_input_tokens), outputTokens: Number(row.output_tokens),
       reasoningTokens: Number(row.reasoning_tokens), totalTokens: Number(row.total_tokens), averageSeconds: Math.round(Number(row.avg_ms) / 100) / 10, longestSeconds: Math.round(Number(row.max_ms) / 100) / 10 }));
   }
 

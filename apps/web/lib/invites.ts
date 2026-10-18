@@ -59,7 +59,7 @@ export function inviteState(ctx: AccessContext, now = new Date()): InviteState {
   const models = parseSponsorModels(process.env.CROSSLINE_SPONSOR_MODELS);
   const cap = Number(process.env.CROSSLINE_SPONSOR_MONTHLY_CNY) > 0 ? Number(process.env.CROSSLINE_SPONSOR_MONTHLY_CNY) : SPONSOR_MONTHLY_CAP_CNY;
   const budget = sponsored ? { spent: Math.round(sponsorSpend(store.summarizeModelUsage(ctx.workspaceId, sponsorMonth(now).start)
-    .map((row) => ({ model: row.model, inputTokens: row.inputTokens, outputTokens: row.outputTokens, reasoningTokens: row.reasoningTokens })), models) * 100) / 100, cap } : undefined;
+    .map((row) => ({ model: row.model, inputTokens: row.inputTokens, cachedInputTokens: row.cachedInputTokens, outputTokens: row.outputTokens })), models) * 100) / 100, cap } : undefined;
   return { available: invitesAvailable(), sponsored, ...(application ? { application: { status: application.status, createdAt: application.createdAt } } : {}),
     ...(budget ? { budget } : {}) };
 }

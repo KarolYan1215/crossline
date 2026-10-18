@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import {
-  admittedSkills, chooseSponsorModel, conformanceCases, conformanceCurrent, jsonSchemaProblems, parseSponsorModels, sponsorMonth, sponsorSpend,
+  admittedSkills, chooseSponsorModel, conformanceCases, evaluationYuanPerRun, conformanceCurrent, jsonSchemaProblems, parseSponsorModels, sponsorMonth, sponsorSpend,
   SPONSOR_MONTHLY_CAP_CNY, summarizeConformance, type ConformanceRecord, type ConformanceRun, type CostSignal, type ProviderCapabilities,
   type SponsorEvaluation, type SponsorModel
 } from "@crossline/core";
@@ -40,7 +40,7 @@ export function createSponsorService(options: {
   const env = options.env ?? process.env;
   const now = options.now ?? (() => new Date());
   const file = path.join(options.dataDir, "sponsor.json");
-  const evalUsage = new Map<string, { inputTokens: number; outputTokens: number; reasoningTokens: number }>();
+  const evalUsage = new Map<string, { inputTokens: number; cachedInputTokens: number; outputTokens: number }>();
   let evaluating = false;
 
   const settings = () => sponsorFromEnv(env);
@@ -50,7 +50,8 @@ export function createSponsorService(options: {
   const currentEvaluations = (): SponsorEvaluation[] => {
     const config = settings();
     if (!config) return [];
-    return read().evaluations.filter((item) => config.models.some((model) => model.model === item.model)
+    // A record without token totals predates pricing by tokens and could only be compared at the prices it ran under: tested again.
+    return read().evaluations.filter((item) => item.tokens && config.models.some((model) => model.model === item.model)
       && conformanceCurrent(item.record, item.model, RUNTIME_VERSION, now()));
   };
   const chosen = (): SponsorEvaluation | undefined => {
@@ -66,7 +67,7 @@ export function createSponsorService(options: {
     if (!config) return undefined;
     const month = sponsorMonth(now());
     const usage = options.store.summarizeModelUsage(workspaceId, month.start)
-      .map((row) => ({ model: row.model, inputTokens: row.inputTokens, outputTokens: row.outputTokens, reasoningTokens: row.reasoningTokens }));
+      .map((row) => ({ model: row.model, inputTokens: row.inputTokens, cachedInputTokens: row.cachedInputTokens, outputTokens: row.outputTokens }));
     return { spent: Math.round(sponsorSpend(usage, config.models) * 100) / 100, cap: config.capYuan, resetsAt: month.next };
   };
 
@@ -127,12 +128,15 @@ export function createSponsorService(options: {
         writeFileSync(file, JSON.stringify({ evaluations: [...saved, evaluation] } satisfies Saved, null, 2), "utf8");
         tested.push(model.model);
         console.info(JSON.stringify({ type: "sponsor.evaluated", model: model.model, passRate: evaluation.record.passRate,
-          repairRate: evaluation.record.repairRate, p95Ms: evaluation.record.p95Ms, yuanPerRun: evaluation.yuanPerRun,
+          repairRate: evaluation.record.repairRate, p95Ms: evaluation.record.p95Ms, yuanPerRun: evaluation.yuanPerRun, tokens: evaluation.tokens,
           admitted: admittedSkills(evaluation.record, options.capabilities).length, failures: evaluation.record.failures.slice(0, 6) }));
       }));
     } finally { evaluating = false; }
     const pick = chosen();
-    console.info(JSON.stringify({ type: "sponsor.chosen", model: pick?.model ?? null, skipped }));
+    // Every measured candidate at the current prices, so a price change shows its effect on the next start.
+    const candidates = currentEvaluations().map((item) => ({ model: item.model, passRate: item.record.passRate,
+      yuanPerRun: evaluationYuanPerRun(item, config.models), tokens: item.tokens ?? null }));
+    console.info(JSON.stringify({ type: "sponsor.chosen", model: pick?.model ?? null, skipped, candidates }));
     return { ...(pick ? { chosen: pick.model } : {}), tested, skipped };
   }
 
@@ -141,7 +145,7 @@ export function createSponsorService(options: {
     const thread = threadProvider({ provider, gatewayUrl: options.gateway.urlFor(`${SPONSOR_EVAL_PREFIX}${model.model}`, SPONSOR_PROVIDER_ID) }, model.model);
     const runs: ConformanceRun[] = [];
     const key = `${SPONSOR_EVAL_PREFIX}${model.model}`;
-    evalUsage.set(key, { inputTokens: 0, outputTokens: 0, reasoningTokens: 0 });
+    evalUsage.set(key, { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 });
     for (const item of conformanceCases()) for (let attempt = 0; attempt < item.runs; attempt += 1) {
       const started = Date.now();
       const input = { version: "crossline.conformance.v1", caseId: item.id, prompt: item.prompt };
@@ -158,8 +162,9 @@ export function createSponsorService(options: {
     const record: ConformanceRecord = summarizeConformance({ providerId: SPONSOR_PROVIDER_ID, model: model.model, runtimeVersion: RUNTIME_VERSION, ranAt: now().toISOString() }, runs);
     const tokens = evalUsage.get(key)!;
     evalUsage.delete(key);
-    const yuan = (tokens.inputTokens * model.priceIn + (tokens.outputTokens + tokens.reasoningTokens) * model.priceOut) / 1_000_000;
-    return { model: model.model, record, yuanPerRun: runs.length ? Math.round((yuan / runs.length) * 10_000) / 10_000 : 0 };
+    const evaluation: SponsorEvaluation = { model: model.model, record, yuanPerRun: 0,
+      tokens: { input: tokens.inputTokens, cached: tokens.cachedInputTokens, output: tokens.outputTokens, runs: runs.length } };
+    return { ...evaluation, yuanPerRun: evaluationYuanPerRun(evaluation, [model]) };
   }
 
   /** The usage sink's share: evaluation runs are counted here, never written to a workspace's ledger. */
@@ -168,8 +173,9 @@ export function createSponsorService(options: {
     const tally = evalUsage.get(usage.workspaceId);
     if (tally) {
       tally.inputTokens += usage.inputTokens;
+      tally.cachedInputTokens += usage.cachedInputTokens;
+      // Output already includes reasoning (see `UsageForPrice`).
       tally.outputTokens += usage.outputTokens;
-      tally.reasoningTokens += usage.reasoningOutputTokens;
     }
     return true;
   }
