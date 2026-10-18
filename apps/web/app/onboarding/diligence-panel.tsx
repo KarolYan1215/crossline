@@ -6,10 +6,16 @@ import type { DiligenceReport, Identity } from "./onboarding-types";
 
 const DECISION: Record<string, string> = { pending: "待决定", accepted: "已采纳", rejected: "已拒绝" };
 const KIND: Record<string, string> = { milestone: "里程碑", task: "任务", watch: "待观察" };
+/** What accepting did, so 「已采纳」 is not the end of the story (2026-10-18 walkthrough). */
+const ACCEPTED_NOTE: Record<string, string> = {
+  task: "已采纳，已收进待分析，稍后在任务页出现",
+  milestone: "已采纳，下次设计这条线的里程碑时用上",
+  watch: "已采纳，作为背景记下"
+};
 
 /**
  * What the app found out on the web for each line, with the pages it read. A proposal is only ever a proposal:
- * accepting one makes it an input to the milestone design, nothing more. The sources shown are the ones the
+ * accepting a task writes it down to be analysed into a task; accepting anything else makes it an input to the milestone design. The sources shown are the ones the
  * worker actually opened and checked; the ones that could not be checked were dropped before this was stored.
  */
 export function DiligencePanel({ reports, identities, busy, onRun, onDecide }: {
@@ -42,7 +48,7 @@ export function DiligencePanel({ reports, identities, busy, onRun, onDecide }: {
                 {proposal.dueDate && <span className="ob-muted">最晚 {proposal.dueDate}</span>}</div>
               <p><Clamp text={proposal.why} /></p>
               <div className="ob-dd-actions">
-                <span className="ob-muted">{DECISION[proposal.status]}</span>
+                <span className="ob-muted">{proposal.status === "accepted" ? ACCEPTED_NOTE[proposal.kind] ?? DECISION.accepted : DECISION[proposal.status]}</span>
                 {proposal.status !== "accepted" && <button type="button" className="ob-btn" disabled={busy} onClick={() => onDecide(report.id, proposal.id, "accepted")}>采纳</button>}
                 {proposal.status !== "rejected" && <button type="button" className="ob-btn ob-quiet" disabled={busy} onClick={() => onDecide(report.id, proposal.id, "rejected")}>不要</button>}
                 <button type="button" className="ob-text" aria-expanded={open === proposal.id} onClick={() => setOpen(open === proposal.id ? undefined : proposal.id)}>依据</button>

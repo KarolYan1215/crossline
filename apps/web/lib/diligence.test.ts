@@ -14,9 +14,9 @@ beforeEach(() => {
 afterEach(() => { globalThis.crosslineStore?.close(); globalThis.crosslineStore = undefined; });
 
 test("an answer to a proposal is recorded, can be changed, and leaves the rest of the report alone", () => {
-  expect(decideDiligenceProposal(TEST_CTX, "r1", "p1", "accepted")).toEqual({ ok: true });
+  expect(decideDiligenceProposal(TEST_CTX, "r1", "p1", "accepted")).toEqual({ ok: true, captured: true });
   expect(loadDiligence(TEST_CTX)[0]?.proposals[0]?.status).toBe("accepted");
-  expect(decideDiligenceProposal(TEST_CTX, "r1", "p1", "pending")).toEqual({ ok: true });
+  expect(decideDiligenceProposal(TEST_CTX, "r1", "p1", "pending")).toEqual({ ok: true, captured: false });
   expect(loadDiligence(TEST_CTX)[0]).toMatchObject({ status: "done", proposals: [{ status: "pending" }], sources: [{ finalUrl: "https://example.edu/a" }] });
 });
 
@@ -29,4 +29,14 @@ test("another workspace's reports are never visible or decidable", () => {
   const other = { ...TEST_CTX, workspaceId: "someone-else" };
   expect(loadDiligence(other)).toEqual([]);
   expect(decideDiligenceProposal(other, "r1", "p1", "accepted")).toEqual({ ok: false, code: "DILIGENCE_PROPOSAL_NOT_FOUND" });
+});
+
+test("accepting a task writes it down once as a capture, so it is analysed into a task", () => {
+  decideDiligenceProposal(TEST_CTX, "r1", "p1", "accepted");
+  decideDiligenceProposal(TEST_CTX, "r1", "p1", "pending");
+  expect(decideDiligenceProposal(TEST_CTX, "r1", "p1", "accepted")).toEqual({ ok: true, captured: false });
+  const captures = globalThis.crosslineStore!.listCaptures(TEST_CTX.workspaceId);
+  expect(captures).toHaveLength(1);
+  expect(captures[0]).toMatchObject({ id: "diligence-r1-p1", title: "x" });
+  expect(captures[0]?.context).toContain("来自调研建议");
 });

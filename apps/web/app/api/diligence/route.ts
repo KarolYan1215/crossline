@@ -3,11 +3,12 @@ import { requestCodexSupervisor, CodexSupervisorRequestError } from "../../../li
 import { resolveAccessContext } from "../../../lib/access-guard";
 import { isCrossSiteWrite } from "../../../lib/same-origin";
 import { decideDiligenceProposal } from "../../../lib/diligence";
+import { analyzeNewCapturesInBackground } from "../../../lib/capture-followups";
 
 /**
  * Due diligence on a line of the person's life: `run` asks the worker to research it on the web now, `decide`
  * records the person's answer to one proposal. Nothing a report proposes becomes a goal or a task until it
- * has been accepted here, and an accepted one is only an input to the milestone design, not a milestone.
+ * has been accepted here: an accepted task is written down as a capture and analysed, anything else is an input to the milestone design.
  */
 const ID = /^[a-zA-Z0-9_-]{1,80}$/;
 
@@ -25,6 +26,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, code: "DILIGENCE_DECISION_INVALID" }, { status: 400 });
     }
     const result = decideDiligenceProposal(access.ctx, reportId, proposalId, decision);
+    if (result.ok && result.captured) analyzeNewCapturesInBackground(access.ctx);
     return NextResponse.json(result, { status: result.ok ? 200 : 404 });
   }
 

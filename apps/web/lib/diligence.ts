@@ -1,6 +1,6 @@
 import "server-only";
 import type { AccessContext } from "@crossline/core";
-import { getStore } from "./crossline";
+import { addCapturedTaskWithId, getStore } from "./crossline";
 
 /** What the screen needs from a report: enough to judge it, nothing of the model's working. */
 export type DiligenceView = {
@@ -21,17 +21,28 @@ export function loadDiligence(ctx: AccessContext): DiligenceView[] {
   }));
 }
 
-/** Records the person's answer to one proposal. An answer can be changed, and `pending` takes it back. */
+/**
+ * Records the person's answer to one proposal. An answer can be changed, and `pending` takes it back. Accepting a 「任务」 also writes it
+ * down as a capture, which the analysis turns into a task like anything typed into the box: before, 「采纳」 only fed the next milestone
+ * design and the person saw nothing happen (2026-10-18 walkthrough). Milestone and watch proposals stay inputs to the milestone design.
+ */
 export function decideDiligenceProposal(ctx: AccessContext, reportId: string, proposalId: string, decision: "accepted" | "rejected" | "pending"):
-  { ok: true } | { ok: false; code: string } {
+  { ok: true; captured: boolean } | { ok: false; code: string } {
   const store = getStore();
   const report = store.listDiligenceReports(ctx.workspaceId).find((item) => item.id === reportId);
-  const proposals = (report?.proposals as Array<{ id: string; status: string }> | undefined) ?? [];
-  if (!report || !proposals.some((proposal) => proposal.id === proposalId)) return { ok: false, code: "DILIGENCE_PROPOSAL_NOT_FOUND" };
-  store.saveDiligenceReport({ ...report, proposals: proposals.map((proposal) => proposal.id === proposalId ? { ...proposal, status: decision } : proposal) });
+  const proposals = (report?.proposals as DiligenceView["proposals"] | undefined) ?? [];
+  const proposal = proposals.find((item) => item.id === proposalId);
+  if (!report || !proposal) return { ok: false, code: "DILIGENCE_PROPOSAL_NOT_FOUND" };
+  store.saveDiligenceReport({ ...report, proposals: proposals.map((item) => item.id === proposalId ? { ...item, status: decision } : item) });
   store.appendEvent({
     ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `diligence:decided:${reportId}:${proposalId}:${decision}:${Date.now()}`,
     type: "diligence.decided", entityId: reportId, payload: { proposalId, decision }
   });
-  return { ok: true };
+  const captureId = `diligence-${reportId}-${proposalId}`;
+  if (decision !== "accepted" || proposal.kind !== "task" || store.listCaptures(ctx.workspaceId).some((item) => item.id === captureId)) {
+    return { ok: true, captured: false };
+  }
+  const context = [proposal.why, proposal.dueDate ? `截止：${proposal.dueDate}` : "", `主线：${report.scope}`, "来自调研建议"].filter(Boolean).join("\n");
+  addCapturedTaskWithId(ctx, { title: proposal.title.slice(0, 240), context: context.slice(0, 500) }, captureId, captureId);
+  return { ok: true, captured: true };
 }
