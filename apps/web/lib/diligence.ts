@@ -2,6 +2,7 @@ import "server-only";
 import { createHash } from "node:crypto";
 import type { AccessContext } from "@crossline/core";
 import { addCapturedTaskWithId, getStore } from "./crossline";
+import { lineLabels } from "./lines";
 
 /** What the screen needs from a report: enough to judge it, nothing of the model's working. */
 export type DiligenceView = {
@@ -53,7 +54,7 @@ export function decideDiligenceProposal(ctx: AccessContext, reportId: string, pr
   if (decision !== "accepted" || proposal.kind !== "task" || store.listCaptures(ctx.workspaceId).some((item) => item.id === captureId)) {
     return { ok: true, captured: false };
   }
-  const context = [proposal.why, proposal.dueDate ? `截止：${proposal.dueDate}` : "", `主线：${report.scope}`, "来自调研建议"].filter(Boolean).join("\n");
+  const context = [proposal.why, proposal.dueDate ? `截止：${proposal.dueDate}` : "", `主线：${lineLabels(ctx)[report.scope] ?? report.scope}`, "来自调研建议"].filter(Boolean).join("\n");
   addCapturedTaskWithId(ctx, { title: proposal.title.slice(0, 240), context: context.slice(0, 500) }, captureId, captureId);
   return { ok: true, captured: true };
 }
