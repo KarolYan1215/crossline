@@ -62,7 +62,7 @@ export function OpeningCard({ linesKnown, knownLines, initialTone, busy, hasMate
         <li><b>聊深一点</b><span>你现在的处境、为什么做这些，动机和愿景是什么、你日常的精力情况。</span></li>
         <li><b>补齐细节</b><span>每个具体项目哪天截止、要交出什么，你用什么来验收具体项目的成果。</span></li>
       </ol>
-      <p className="ob-opening-time">大约 30 分钟后拿到一份全面的 AI 时代超级个体跨人生主线报告和跨主线排程计划。左侧可以先放入简历、课表、课程大纲，访谈会先读材料，只问材料里没有的。</p>
+      <p className="ob-opening-time">大约 30 分钟后拿到一份你的画像报告（几条主线各是什么、精力怎么分），以及把各条主线的事排进同一张日历的计划。左侧可以先放入简历、课表、课程大纲，访谈会先读材料，只问材料里没有的。</p>
     </div>
 
     <fieldset className="ob-question">
