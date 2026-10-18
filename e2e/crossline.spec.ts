@@ -63,7 +63,7 @@ function ensureOwnNextStep(): void {
 // ranking and the overload list are removed rather than hidden because how many rows they hold changes their height.
 const STABLE_FOR_SCREENSHOT = ".pending-badge,.dv-block,.dv-aside,.undo-trigger,.wk-block,.mo-chip[data-kind=\"scheduled\"],.ui-bar-value,.ui-bar-fill,"
   + ".task-card-slot a,.pl-hours,.pl-svg,.pl-timeline>header small,.pl-advice-count{visibility:hidden}"
-  + ".pl-rank-table,.pl-library,.pl-explain p,.pl-over-list,.pl-stat .pl-chart-foot,.forecast-delta{display:none}";
+  + ".ui-first-hint,.pl-rank-table,.pl-library,.pl-explain p,.pl-over-list,.pl-stat .pl-chart-foot,.forecast-delta{display:none}";
 
 test.beforeEach(async ({ page }, testInfo) => {
   if (testInfo.project.name === "desktop-chrome") await ensureScheduleSetup(page);
