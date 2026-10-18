@@ -56,7 +56,7 @@ export function OpenerCard({ opener }: { opener: OpenerView }) {
       <b>{opener.label}</b>
       {opener.asks.count > 0
         ? <a className="opener-badge" href="/approvals" aria-label={`待决 ${opener.asks.count} 项`}>待决 <span>{opener.asks.count}</span></a>
-        : <span className="opener-badge" data-empty="">没有待决</span>}
+        : <span className="opener-badge" data-empty="" title="待批准的里程碑和提案在待确认页">没有要回答的问题</span>}
     </div>
     <div className="opener-figure">
       <Lane label="固定" blocks={opener.fixed} axis={axis} kind="fixed" />

@@ -42,7 +42,7 @@ test("an empty day says so in words, and a stored payload of another shape is no
   const html = renderToStaticMarkup(<OpenerCard opener={{ ...opener, fixed: [], work: [], soon: [], asks: { count: 0 } }} />);
   expect(html).toContain("今天没有排给工作的时段");
   expect(html).toContain("今天没有固定安排");
-  expect(html).toContain("没有待决");
+  expect(html).toContain("没有要回答的问题");
   expect(readOpener(opener)).toBe(opener);
   expect(readOpener(undefined)).toBeUndefined();
   expect(readOpener({ day: "2026-10-15" })).toBeUndefined();
