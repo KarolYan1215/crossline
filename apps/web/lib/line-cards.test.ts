@@ -80,6 +80,9 @@ test("a card reads its line's description, candidates, pending goal change, own 
   recordRedraftRequested(TEST_CTX, ["research"]);
   details = lineCardDetails(TEST_CTX);
   expect(details.research!.redraftDue).toBe(false);
+  // The goal change must land at a later millisecond than the redraft request, or the two read as simultaneous (a flaky 1-in-3).
+  const requestedAt = Date.now();
+  while (Date.now() <= requestedAt) { /* wait out the millisecond */ }
   expect(updateLine(TEST_CTX, "research", { goalParts: ["器件物理"] })).toEqual({ ok: true });
   expect(lineCardDetails(TEST_CTX).research!.redraftDue).toBe(true);
 });
