@@ -791,7 +791,7 @@ function plannerItemsFor(ctx: AccessContext, orders: ActionableOrder[]) {
   return orders.flatMap((order) => {
     const base = plannerTaskOf(ctx, order);
     const steps = openSteps(order.id);
-    if (!steps.length) return [{ task: base, orderId: order.id, title: order.intent, step: undefined as string | undefined }];
+    if (!steps.length) return [{ task: base, orderId: order.id, title: base.title, step: undefined as string | undefined }];
     const open = new Set(steps.map((step) => step.id));
     const external = (base.dependsOn ?? []).flatMap((id) => plannerIdsOf(id));
     return steps.map((step) => {
@@ -808,8 +808,9 @@ function plannerItemsFor(ctx: AccessContext, orders: ActionableOrder[]) {
       const ceiling = STEP_ENERGY_CEILING[step.role as StepRole];
       const energy = taskEnergy && ceiling && ENERGY_RANK[ceiling] < ENERGY_RANK[taskEnergy] ? ceiling : taskEnergy;
       const id = stepTaskId(order.id, step.id);
-      return { orderId: order.id, title: `${order.intent} · ${step.title}`, step: step.title as string | undefined, task: { ...rest, id,
-        title: `${order.intent} · ${step.title}`, estimate: scaledEstimate({ ...base.estimate, ...step.estimate }, overrides[id]),
+      // The task's short name: its description reached the plan page's notes and blockers as a whole paragraph (2026-10-18 walkthrough).
+      return { orderId: order.id, title: `${taskTitleOf(order)} · ${step.title}`, step: step.title as string | undefined, task: { ...rest, id,
+        title: `${taskTitleOf(order)} · ${step.title}`, estimate: scaledEstimate({ ...base.estimate, ...step.estimate }, overrides[id]),
         ...(energy ? { energy } : {}), ...(notBefore ? { notBefore } : {}), ...(deadline ? { deadline } : {}),
         ...(internal.length || external.length ? { dependsOn: internal.length ? internal : external } : {}) } };
     });
@@ -1893,7 +1894,7 @@ const plannerTaskOf = (ctx: AccessContext, order: ActionableOrder) => {
   const release = preview?.notBefore?.[order.id] ?? releaseDayOf(ctx, order);
   const dueDate = preview?.dueDates?.[order.id] ?? landing?.dueDate ?? (order.payload as { dueDate?: string }).dueDate;
   return {
-    id: order.id, title: order.intent, identityId: order.identityId, milestoneId: order.milestoneId, weight,
+    id: order.id, title: taskTitleOf(order), identityId: order.identityId, milestoneId: order.milestoneId, weight,
     estimate: scaledEstimate(resolvedEstimate(ctx, order), preview?.estimates?.[order.id]),
     ...(core?.energy ? { energy: core.energy as "low" | "medium" | "high" } : {}),
     // Materials stand between the proposal and the human until the order reaches ready_for_human — when it needs any. An approved

@@ -98,7 +98,7 @@ export default async function ApprovalsPage() {
     </div>;
   };
   const autoItem = (item: (typeof autoApproved)[number]) => <li key={item.id}>
-    <a href={`/workbench/${encodeURIComponent(item.id)}`}>{item.intent}</a>
+    <a href={`/workbench/${encodeURIComponent(item.id)}`} title={item.intent}>{item.title}</a>
     {item.undoable ? <RevokeAutoApprovalButton workOrderId={item.id} /> : <small> · 已开始做</small>}
   </li>;
   const assistantCount = pending.assistantKinds + pending.assistantQuestions + pending.assistantReviews;

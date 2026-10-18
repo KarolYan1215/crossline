@@ -1,5 +1,5 @@
 import "server-only";
-import { AUTO_APPROVAL_UNDO_MS, requiredApproval, type AccessContext } from "@crossline/core";
+import { AUTO_APPROVAL_UNDO_MS, requiredApproval, taskTitleOf, type AccessContext } from "@crossline/core";
 import { approveWorkOrderProposal, ensureSeeded, getStore, saveMilestoneEdit } from "./crossline";
 import { requestCodexSupervisor } from "./codex-runtime";
 import { requestTaskPass } from "./steps";
@@ -72,7 +72,7 @@ export function requestAutoBackplan(ctx: AccessContext): void {
   }).catch(() => {});
 }
 
-export type AutoApproved = { id: string; intent: string; approvedAt: string; undoable: boolean; reason: string };
+export type AutoApproved = { id: string; intent: string; title: string; approvedAt: string; undoable: boolean; reason: string };
 
 /** What took effect without a click in the last day, newest first, with whether it can still be undone. */
 export function recentAutoApprovals(ctx: AccessContext, now = Date.now()): AutoApproved[] {
@@ -85,7 +85,7 @@ export function recentAutoApprovals(ctx: AccessContext, now = Date.now()): AutoA
     .flatMap((event) => {
       const order = orders.get(event.entityId);
       if (!order) return [];
-      return [{ id: order.id, intent: order.intent, approvedAt: event.createdAt,
+      return [{ id: order.id, intent: order.intent, title: taskTitleOf(order), approvedAt: event.createdAt,
         reason: String((event.payload as { reason?: string }).reason ?? ""),
         undoable: ["approved", "preparing", "ready_for_human"].includes(order.state) && !started.has(order.id) }];
     }).reverse();

@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { taskTitleOf } from "@crossline/core";
 import { SubpageShell } from "../../subpage-shell";
 import { requireSessionContext } from "../../../lib/access-guard";
 import { gateUntilReady } from "../../../lib/start-gate";
@@ -15,7 +16,7 @@ export default async function TutorialPage({ params }: { params: Promise<{ id: s
   if (!/^[a-zA-Z0-9_-]{1,128}$/.test(id)) notFound();
   const order = getStore().getWorkOrder(ctx.workspaceId, id);
   if (!order) notFound();
-  return <SubpageShell active="任务" title={`教程：${order.intent}`}>
+  return <SubpageShell active="任务" title={`教程：${taskTitleOf(order)}`}>
     <p className="material-back"><a href={`/workbench/${encodeURIComponent(id)}`}>← 回到任务</a></p>
     <TutorialStandalone workOrderId={id} building={order.state === "preparing"} />
   </SubpageShell>;
