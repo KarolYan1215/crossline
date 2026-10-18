@@ -63,7 +63,11 @@ fi
 if grep -q "^CROSSLINE_SPONSOR_MODELS=deepseek-ai/DeepSeek-V4.1-Flash=2:8:1024,zai-org/GLM-5.2=4:16:1024,zai-org/GLM-5.3=4:16:1024,deepseek-ai/DeepSeek-V4-Pro=4:16:1024$" /srv/crossline/app.env 2>/dev/null; then
   drop /srv/crossline/app.env CROSSLINE_SPONSOR_MODELS
 fi
-ensure /srv/crossline/app.env CROSSLINE_SPONSOR_MODELS "deepseek-ai/DeepSeek-V4.1-Flash=2:8:1024:0.04,zai-org/GLM-5.2=8:28:1024:2,zai-org/GLM-5.3=8:28:1024:2,deepseek-ai/DeepSeek-V4-Pro=12:24:1024:1"
+# Two cheaper candidates added at the owner's request (2026-10-18), named as the key's /models lists them; DeepSeek-V4-Flash at its peak price.
+if grep -q "^CROSSLINE_SPONSOR_MODELS=deepseek-ai/DeepSeek-V4.1-Flash=2:8:1024:0.04,zai-org/GLM-5.2=8:28:1024:2,zai-org/GLM-5.3=8:28:1024:2,deepseek-ai/DeepSeek-V4-Pro=12:24:1024:1$" /srv/crossline/app.env 2>/dev/null; then
+  drop /srv/crossline/app.env CROSSLINE_SPONSOR_MODELS
+fi
+ensure /srv/crossline/app.env CROSSLINE_SPONSOR_MODELS "deepseek-ai/DeepSeek-V4.1-Flash=2:8:1024:0.04,zai-org/GLM-5.2=8:28:1024:2,zai-org/GLM-5.3=8:28:1024:2,deepseek-ai/DeepSeek-V4-Pro=12:24:1024:1,zai-org/GLM-5.3-Flash=0.8:2.8:1024:0.23,deepseek-ai/DeepSeek-V4-Flash=3:9:1024:0.3"
 ensure /srv/crossline/app.env CROSSLINE_SPONSOR_MONTHLY_CNY 30
 if [ -f /srv/crossline/app.env ] && ! grep -q "^CROSSLINE_SPONSOR_API_KEY=." /srv/crossline/app.env; then
   key=$(grep "^ASSESS_TEXT_API_KEY=" /srv/assess/assess.env 2>/dev/null | cut -d= -f2-)

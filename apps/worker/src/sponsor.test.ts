@@ -1,12 +1,13 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, expect, test } from "vitest";
 import { conformanceCases, summarizeConformance } from "@crossline/core";
-import { decideRoute } from "@crossline/codex";
+import { decideRoute, setUsageSink } from "@crossline/codex";
 import { CrosslineStore, SPONSOR_SETTING } from "@crossline/db";
 import { createModelProviderService, RUNTIME_VERSION } from "./model-provider";
-import { createSponsorService } from "./sponsor";
+import { createSponsorService, type SponsorRunLog } from "./sponsor";
+import { scriptedRuntime } from "./testing/fake-runtime";
 
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -20,7 +21,7 @@ function setup(withEvaluation = true) {
   if (withEvaluation) {
     const record = summarizeConformance({ providerId: "sponsor", model: MODEL, runtimeVersion: RUNTIME_VERSION, ranAt: NOW.toISOString() },
       conformanceCases().flatMap((item) => Array.from({ length: item.runs }, () => ({ caseId: item.id, ok: true, repairs: 0, ms: 900 }))));
-    writeFileSync(path.join(dataDir, "sponsor.json"), JSON.stringify({ evaluations: [{ model: MODEL, record, yuanPerRun: 0.02, tokens: { input: 100_000, cached: 0, output: 10_000, runs: 10 } }] }));
+    writeFileSync(path.join(dataDir, "sponsor.json"), JSON.stringify({ evaluations: [{ model: MODEL, record, yuanPerRun: 0.02, tokens: { input: 100_000, cached: 0, output: 10_000, runs: 10 }, version: 2 }] }));
   }
   const store = new CrosslineStore(":memory:");
   const gateway = { urlFor: (workspaceId: string, providerId: string) => `http://127.0.0.1:1/${workspaceId}/${providerId}`, port: 1, close: async () => {} };
@@ -65,3 +66,29 @@ test("until a model has passed, the account is told it is being tested", () => {
   store.setSetting("ws", SPONSOR_SETTING, JSON.stringify({ inviteId: "inv", since: NOW.toISOString() }));
   expect(decideRoute("crossline:crossline-onboarding", providers.routing("ws"))).toMatchObject({ via: "blocked", code: "MODEL_SPONSOR_PENDING" });
 });
+
+test("an evaluation logs every run with what the validator sent back, and a model that never recovers is not chosen", async () => {
+  const dataDir = mkdtempSync(path.join(tmpdir(), "sponsor-eval-"));
+  dirs.push(dataDir);
+  const store = new CrosslineStore(":memory:");
+  const gateway = { urlFor: (workspaceId: string, providerId: string) => `http://127.0.0.1:1/${workspaceId}/${providerId}`, port: 1, close: async () => {} };
+  const env = { CROSSLINE_SPONSOR_API_KEY: "sk-test", CROSSLINE_SPONSOR_MODELS: "org/Broken=1:2:1024" } as NodeJS.ProcessEnv;
+  // Every answer is an empty object: valid JSON that no case's schema accepts, so each run is sent back for repair and still fails.
+  const { rpc } = scriptedRuntime(["crossline:crossline-conformance"], () => "{}");
+  const providers = createModelProviderService({ store, cwd: dataDir, gateway, signedIn: () => false, client: async () => undefined,
+    secrets: { read: async () => undefined, write: async () => {}, remove: () => {} } as never, search: null, image: null, sponsor: () => undefined, now: () => NOW });
+  const sponsor = createSponsorService({ store, dataDir, cwd: dataDir, gateway, capabilities: providers.capabilities, client: () => rpc, env, now: () => NOW,
+    fetch: (async () => new Response(JSON.stringify({ data: [{ id: "org/Broken" }] }), { status: 200 })) as typeof fetch });
+  setUsageSink((usage) => { sponsor.noteEvalUsage(usage); });
+  try {
+    const result = await sponsor.evaluate();
+    expect(result.tested).toEqual(["org/Broken"]);
+    expect(result.chosen).toBeUndefined();
+    const lines = readFileSync(path.join(dataDir, "sponsor-eval", "org_Broken.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line) as SponsorRunLog);
+    expect(lines).toHaveLength(conformanceCases().reduce((sum, item) => sum + item.runs, 0));
+    expect(lines[0]).toMatchObject({ model: "org/Broken", ok: false, repairs: 2, unparsed: 0 });
+    expect(lines[0]!.rejections).toHaveLength(3);
+    expect(lines[0]!.rejections[0]!.answer).toBe("{}");
+    expect(lines[0]!.serviceMs).toEqual(expect.any(Number));
+  } finally { setUsageSink(undefined); }
+}, 60_000);

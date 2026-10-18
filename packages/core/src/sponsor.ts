@@ -71,6 +71,8 @@ export function sponsorMonth(now: Date): { start: string; next: Date } {
 export type SponsorEvaluation = {
   model: string; record: ConformanceRecord; yuanPerRun: number;
   tokens?: { input: number; cached: number; output: number; runs: number };
+  /** The measuring code's version (`SPONSOR_EVAL_VERSION` in the worker); older records are measured again. */
+  version?: number;
 };
 
 /** Yuan per conformance run at the current prices. */

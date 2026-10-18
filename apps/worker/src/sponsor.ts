@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import {
   admittedSkills, chooseSponsorModel, conformanceCases, evaluationYuanPerRun, conformanceCurrent, jsonSchemaProblems, parseSponsorModels, sponsorMonth, sponsorSpend,
@@ -19,6 +19,24 @@ export const SPONSOR_PROVIDER_ID = "sponsor";
 /** Usage of evaluation runs is attributed to this prefix, never to a workspace: the sink hands it here instead of the ledger. */
 export const SPONSOR_EVAL_PREFIX = "sponsor-eval:";
 const CONFORMANCE_SKILL = "crossline:crossline-conformance";
+/**
+ * Records made before this version lack the per-run log (`sponsor-eval/<model>.jsonl`) the comparison is read from, and are tested
+ * again so every candidate is measured the same way.
+ */
+export const SPONSOR_EVAL_VERSION = 2;
+
+/**
+ * One conformance run as written to the log: whether it passed first time, what the validator sent back and what the model answered
+ * then (the cases are synthetic, so the answer carries no person's data), and the model's own time apart from the wait for a slot.
+ */
+export type SponsorRunLog = {
+  at: string; model: string; caseId: string; attempt: number; ok: boolean; code?: string; repairs: number; stalls: number;
+  rejections: Array<{ problems: string; answer: string }>;
+  /** Repairs the validator did not ask for: the answer was not JSON (or the turn failed before it was read). */
+  unparsed: number;
+  serviceMs: number | null; wallMs: number; turnSeconds: number[];
+  tokens: { input: number; cached: number; output: number; reasoning: number };
+};
 
 type Saved = { evaluations: SponsorEvaluation[] };
 
@@ -41,6 +59,10 @@ export function createSponsorService(options: {
   const now = options.now ?? (() => new Date());
   const file = path.join(options.dataDir, "sponsor.json");
   const evalUsage = new Map<string, { inputTokens: number; cachedInputTokens: number; outputTokens: number }>();
+  // The usage of the run under way for each candidate (one at a time per candidate), for its log line.
+  const runUsage = new Map<string, SkillUsage>();
+  const logDir = path.join(options.dataDir, "sponsor-eval");
+  const logFile = (model: string) => path.join(logDir, `${model.replace(/[^A-Za-z0-9._-]+/g, "_")}.jsonl`);
   let evaluating = false;
 
   const settings = () => sponsorFromEnv(env);
@@ -51,7 +73,7 @@ export function createSponsorService(options: {
     const config = settings();
     if (!config) return [];
     // A record without token totals predates pricing by tokens and could only be compared at the prices it ran under: tested again.
-    return read().evaluations.filter((item) => item.tokens && config.models.some((model) => model.model === item.model)
+    return read().evaluations.filter((item) => item.tokens && item.version === SPONSOR_EVAL_VERSION && config.models.some((model) => model.model === item.model)
       && conformanceCurrent(item.record, item.model, RUNTIME_VERSION, now()));
   };
   const chosen = (): SponsorEvaluation | undefined => {
@@ -95,13 +117,19 @@ export function createSponsorService(options: {
     if (!config) return undefined;
     try {
       const answer = await (options.fetch ?? fetch)(`${config.baseUrl}/models`, { headers: { authorization: `Bearer ${config.key}` }, signal: AbortSignal.timeout(20_000) });
-      if (!answer.ok) return undefined;
+      if (!answer.ok) {
+        console.info(JSON.stringify({ type: "sponsor.catalog_unread", status: answer.status }));
+        return undefined;
+      }
       const body = await answer.json() as { data?: Array<{ id?: string }> };
       const ids = (body.data ?? []).map((item) => item.id ?? "").filter(Boolean);
       // Which comparable models the key can use, so a candidate named wrongly in the list can be corrected from the log.
       console.info(JSON.stringify({ type: "sponsor.catalog", models: ids.filter((id) => /deepseek|glm|qwen|kimi/i.test(id)).slice(0, 40) }));
       return new Set(ids);
-    } catch { return undefined; }
+    } catch (error) {
+      console.info(JSON.stringify({ type: "sponsor.catalog_unread", error: error instanceof Error ? error.message.slice(0, 120) : "unknown" }));
+      return undefined;
+    }
   }
 
   /** Tests every candidate without a current record, one after another; the choice follows from the records. Safe to call often. */
@@ -146,23 +174,43 @@ export function createSponsorService(options: {
     const runs: ConformanceRun[] = [];
     const key = `${SPONSOR_EVAL_PREFIX}${model.model}`;
     evalUsage.set(key, { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 });
+    // A fresh log per evaluation: what is read afterwards is this measurement, whole.
+    mkdirSync(logDir, { recursive: true });
+    writeFileSync(logFile(model.model), "", "utf8");
     for (const item of conformanceCases()) for (let attempt = 0; attempt < item.runs; attempt += 1) {
       const started = Date.now();
       const input = { version: "crossline.conformance.v1", caseId: item.id, prompt: item.prompt };
+      const rejections: SponsorRunLog["rejections"] = [];
+      let audit: { repairs?: number; stalls?: number } = {};
+      runUsage.delete(key);
       const result = await withUsageWorkspace(key, () => runCodexSkill<unknown>(client, input, { skillName: CONFORMANCE_SKILL, cwd: options.cwd, provider: thread,
         developerInstructions: "Answer the conformance case as the Skill describes. Return raw JSON only.", outputSchema: item.schema,
-        prepareInput: () => input, onAudit: () => {}, timeoutMs: 20 * 60_000,
+        prepareInput: () => input, onAudit: (next) => { audit = next; }, timeoutMs: 20 * 60_000,
         validateOutput: (output) => {
           const problems = jsonSchemaProblems(output, item.schema);
-          if (problems.length) throw Object.assign(new Error("CONFORMANCE_SCHEMA_VIOLATED"), { detail: problems.slice(0, 6).join("; ") });
+          if (problems.length) {
+            rejections.push({ problems: problems.slice(0, 6).join("; ").slice(0, 500), answer: JSON.stringify(output).slice(0, 600) });
+            throw Object.assign(new Error("CONFORMANCE_SCHEMA_VIOLATED"), { detail: problems.slice(0, 6).join("; ") });
+          }
           return output;
-        } })).catch((error: unknown) => ({ ok: false as const, blocker: { code: error instanceof Error ? error.message : "SKILL_RUNTIME_FAILED", message: "" }, audit: {} as { repairs?: number } }));
-      runs.push({ caseId: item.id, ok: result.ok, repairs: result.audit.repairs ?? 0, ms: Date.now() - started, ...(result.ok ? {} : { code: result.blocker.code }) });
+        } })).catch((error: unknown) => ({ ok: false as const, blocker: { code: error instanceof Error ? error.message : "SKILL_RUNTIME_FAILED", message: "" }, audit: {} as { repairs?: number; stalls?: number } }));
+      const repairs = result.audit.repairs ?? audit.repairs ?? 0;
+      const usage = runUsage.get(key);
+      const wallMs = Date.now() - started;
+      // The model's own time when the run reported it, so the queue for a slot (shared by every candidate) does not count against one.
+      const serviceMs = usage ? usage.durationMs : null;
+      runs.push({ caseId: item.id, ok: result.ok, repairs, ms: serviceMs ?? wallMs, ...(result.ok ? {} : { code: result.blocker.code }) });
+      const line: SponsorRunLog = { at: new Date(started).toISOString(), model: model.model, caseId: item.id, attempt, ok: result.ok,
+        ...(result.ok ? {} : { code: result.blocker.code }), repairs, stalls: result.audit.stalls ?? audit.stalls ?? 0, rejections,
+        unparsed: Math.max(0, repairs - rejections.length + (result.ok ? 0 : 1)), serviceMs, wallMs, turnSeconds: usage?.turnSeconds ?? [],
+        tokens: { input: usage?.inputTokens ?? 0, cached: usage?.cachedInputTokens ?? 0, output: usage?.outputTokens ?? 0, reasoning: usage?.reasoningOutputTokens ?? 0 } };
+      try { appendFileSync(logFile(model.model), `${JSON.stringify(line)}\n`, "utf8"); } catch { /* the log is for reading, never a reason to fail the measurement */ }
     }
     const record: ConformanceRecord = summarizeConformance({ providerId: SPONSOR_PROVIDER_ID, model: model.model, runtimeVersion: RUNTIME_VERSION, ranAt: now().toISOString() }, runs);
     const tokens = evalUsage.get(key)!;
     evalUsage.delete(key);
-    const evaluation: SponsorEvaluation = { model: model.model, record, yuanPerRun: 0,
+    runUsage.delete(key);
+    const evaluation: SponsorEvaluation = { model: model.model, record, yuanPerRun: 0, version: SPONSOR_EVAL_VERSION,
       tokens: { input: tokens.inputTokens, cached: tokens.cachedInputTokens, output: tokens.outputTokens, runs: runs.length } };
     return { ...evaluation, yuanPerRun: evaluationYuanPerRun(evaluation, [model]) };
   }
@@ -171,6 +219,7 @@ export function createSponsorService(options: {
   function noteEvalUsage(usage: SkillUsage): boolean {
     if (!usage.workspaceId?.startsWith(SPONSOR_EVAL_PREFIX)) return false;
     const tally = evalUsage.get(usage.workspaceId);
+    runUsage.set(usage.workspaceId, usage);
     if (tally) {
       tally.inputTokens += usage.inputTokens;
       tally.cachedInputTokens += usage.cachedInputTokens;
