@@ -201,11 +201,17 @@ export function MilestoneTimeline({ rows, today, weeks, spanDays, done = [], lab
   const rank = (line: string) => { const index = lineOrder.indexOf(line); return index < 0 ? lineOrder.length : index; };
   const lines = [...new Set(marks.map((mark) => mark.line))].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
   const moved = marks.some((mark) => { const ghost = before.get(mark.id); return ghost && ghost.day !== mark.day; });
+  // A mark sits at its deadline, so it stays put while the cautious finish moves: saying 「不移动任何里程碑」 then contradicted the
+  // impact list beside it, which named milestones finishing days earlier (2026-10-18 walkthrough).
+  const finishBefore = new Map((preview?.before.goals ?? []).map((goal) => [goal.id, goal.p85Day]));
+  const finishMoved = shown.some((goal) => finishBefore.has(goal.id) && finishBefore.get(goal.id) !== goal.p85Day);
   return <section className="pl-card pl-stat pl-timeline" aria-label="里程碑时间轴">
     <header><h2>里程碑时间轴</h2>
       <small>范围内未完成 {marks.length} 个{outside ? ` · 范围外或已完成 ${outside} 个` : ""}{count("risk") ? ` · 有完不成风险 ${count("risk")}` : ""}{count("unprepared") ? ` · 待准备 ${count("unprepared")}` : ""}</small>
       {aside}</header>
-    {preview && (moved ? <PreviewNote /> : <p className="pl-preview-note" role="status">预览中的改动不移动任何里程碑</p>)}
+    {preview && (moved ? <PreviewNote /> : <p className="pl-preview-note" role="status">{finishMoved
+      ? "里程碑按截止日画，位置不变；预计完成日的变化见「改动影响」"
+      : "预览中的改动不移动任何里程碑"}</p>)}
     <div ref={box} className="pl-chart-box">
       {!marks.length ? <p className="pl-empty">{outside ? "统计范围内没有未完成的里程碑。" : "尚无已批准的里程碑。"}</p>
         : width < 560 ? <TimelineList marks={marks} lines={lines} labels={labels} weeks={weeks} />

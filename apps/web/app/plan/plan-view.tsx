@@ -2,6 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 import type { TimelineDeadline, TimelineItem } from "../timeline/model";
+import { unplacedTaskIds } from "../../lib/unplaced";
 
 export type ScheduleBlockData = {
   id: string;
@@ -33,11 +34,11 @@ export type CalendarData = {
 
 
 /**
- * The planner reports one blocker per unplaced *step*, while 「排程顺序」 lists tasks — counting blockers said 「13 项未排入」 over a list
- * with one. Counted per task here: wholly unplaced, and placed in part (some steps have a block, some do not).
+ * Counted per task (`unplacedTaskIds`): wholly unplaced, and placed in part (some steps have a block, some do not). Counting blockers
+ * once said 「13 项未排入」 over a list with one.
  */
 function unplacedNote(plan: PlanVersionData): string {
-  const blocked = new Set((plan.schedule?.blockers ?? []).map((blocker) => blocker.taskId.split("#")[0]!));
+  const blocked = unplacedTaskIds(plan.schedule?.blockers ?? []);
   if (!blocked.size) return "";
   const placed = new Set(plan.blocks.filter((block) => block.id.startsWith("scheduled:")).map((block) => block.id.split(":")[1]));
   const partial = [...blocked].filter((id) => placed.has(id)).length, none = blocked.size - partial;

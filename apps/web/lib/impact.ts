@@ -5,6 +5,7 @@ import { effectiveSchedulePreferences, getStore, loadCurrentPlan, loadGoalForeca
   saveLineShares, saveScheduleParams, clearKept, lockBlock, withPreview, type PreviewOverrides } from "./crossline";
 import { lineLabels } from "./lines";
 import { loadForecastCharts } from "./plan-board";
+import { unplacedTaskIds } from "./unplaced";
 import type { ForecastCharts } from "./plan-stats";
 
 /**
@@ -85,7 +86,7 @@ async function snapshot(ctx: AccessContext, workOrderId?: string, chartsHorizonD
     .map((block) => `${block.day} ${block.start}`).sort()[0] : undefined;
   return { goals: forecast.goals, minutesByLine, ...(first ? { first } : {}), ...(charts ? { charts } : {}), available: forecast.weeks[0]?.netMinutes ?? 0,
     planned: [...minutesByLine.values()].reduce((sum, minutes) => sum + minutes, 0),
-    unplaced: plan.schedule.blockers.filter((blocker) => !blocker.code.startsWith("Q4_")).length,
+    unplaced: unplacedTaskIds(plan.schedule.blockers).size,
     blocks: new Set(plan.blocks.filter((block) => block.id.startsWith("scheduled:") && block.day && block.day >= today && block.day < weekEnd)
       .map((block) => `${block.id.split(":").slice(0, 3).join(":")}|${block.day}|${block.start}|${block.end}`)) };
 }
