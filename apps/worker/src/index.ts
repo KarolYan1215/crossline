@@ -682,7 +682,8 @@ const modelProviders = createModelProviderService({
     return runtime?.ok ? runtime.client : codexSupervisor?.clientFor(workspaceId);
   }
 });
-setProviderResolver((workspaceId) => modelProviders.routing(workspaceId));
+// A candidate's sample interview (sponsor.ts) is routed to that candidate; every other run to the workspace's own provider.
+setProviderResolver((workspaceId) => sponsorService?.dialogueRouting(workspaceId) ?? modelProviders.routing(workspaceId));
 if (sponsorFromEnv()) sponsorService = createSponsorService({ store: analysisStore, dataDir, cwd: repoRoot, gateway: modelGateway,
   capabilities: modelProviders.capabilities, client: () => { const owner = runtimeOwner(analysisStore); return owner ? codexSupervisor?.clientFor(owner) : undefined; } });
 // Screen activity: a foreground-window reader feeding a tracker that asks every workspace for its own consent on every

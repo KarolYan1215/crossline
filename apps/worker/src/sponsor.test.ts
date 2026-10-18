@@ -6,7 +6,7 @@ import { conformanceCases, summarizeConformance } from "@crossline/core";
 import { decideRoute, setUsageSink } from "@crossline/codex";
 import { CrosslineStore, SPONSOR_SETTING } from "@crossline/db";
 import { createModelProviderService, RUNTIME_VERSION } from "./model-provider";
-import { createSponsorService, type SponsorRunLog } from "./sponsor";
+import { createSponsorService, type SponsorDialogueLog, type SponsorRunLog } from "./sponsor";
 import { scriptedRuntime } from "./testing/fake-runtime";
 
 const dirs: string[] = [];
@@ -21,7 +21,7 @@ function setup(withEvaluation = true) {
   if (withEvaluation) {
     const record = summarizeConformance({ providerId: "sponsor", model: MODEL, runtimeVersion: RUNTIME_VERSION, ranAt: NOW.toISOString() },
       conformanceCases().flatMap((item) => Array.from({ length: item.runs }, () => ({ caseId: item.id, ok: true, repairs: 0, ms: 900 }))));
-    writeFileSync(path.join(dataDir, "sponsor.json"), JSON.stringify({ evaluations: [{ model: MODEL, record, yuanPerRun: 0.02, tokens: { input: 100_000, cached: 0, output: 10_000, runs: 10 }, version: 2 }] }));
+    writeFileSync(path.join(dataDir, "sponsor.json"), JSON.stringify({ evaluations: [{ model: MODEL, record, yuanPerRun: 0.02, tokens: { input: 100_000, cached: 0, output: 10_000, runs: 10 }, version: 3 }] }));
   }
   const store = new CrosslineStore(":memory:");
   const gateway = { urlFor: (workspaceId: string, providerId: string) => `http://127.0.0.1:1/${workspaceId}/${providerId}`, port: 1, close: async () => {} };
@@ -74,7 +74,7 @@ test("an evaluation logs every run with what the validator sent back, and a mode
   const gateway = { urlFor: (workspaceId: string, providerId: string) => `http://127.0.0.1:1/${workspaceId}/${providerId}`, port: 1, close: async () => {} };
   const env = { CROSSLINE_SPONSOR_API_KEY: "sk-test", CROSSLINE_SPONSOR_MODELS: "org/Broken=1:2:1024" } as NodeJS.ProcessEnv;
   // Every answer is an empty object: valid JSON that no case's schema accepts, so each run is sent back for repair and still fails.
-  const { rpc } = scriptedRuntime(["crossline:crossline-conformance"], () => "{}");
+  const { rpc } = scriptedRuntime(["crossline:crossline-conformance", "crossline:crossline-onboarding"], () => "{}");
   const providers = createModelProviderService({ store, cwd: dataDir, gateway, signedIn: () => false, client: async () => undefined,
     secrets: { read: async () => undefined, write: async () => {}, remove: () => {} } as never, search: null, image: null, sponsor: () => undefined, now: () => NOW });
   const sponsor = createSponsorService({ store, dataDir, cwd: dataDir, gateway, capabilities: providers.capabilities, client: () => rpc, env, now: () => NOW,
@@ -90,5 +90,9 @@ test("an evaluation logs every run with what the validator sent back, and a mode
     expect(lines[0]!.rejections).toHaveLength(3);
     expect(lines[0]!.rejections[0]!.answer).toBe("{}");
     expect(lines[0]!.serviceMs).toEqual(expect.any(Number));
+    // The sample interview ran first on a throwaway ledger; its one failed turn is logged and the script stops there.
+    const dialogue = readFileSync(path.join(dataDir, "sponsor-eval", "org_Broken.dialogue.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line) as SponsorDialogueLog);
+    expect(dialogue).toHaveLength(1);
+    expect(dialogue[0]).toMatchObject({ model: "org/Broken", turn: 1, ok: false });
   } finally { setUsageSink(undefined); }
 }, 60_000);
