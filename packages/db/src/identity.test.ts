@@ -88,3 +88,31 @@ test("purging a workspace removes every row it owns and its principal, and leave
   expect(store.listEvents(kept.workspace.id)).toHaveLength(1);
   expect(store.getPrincipalByBetterAuthId("auth-kept")).toBeDefined();
 });
+
+test("resetting a workspace empties what it built and keeps the account, its membership and the settings it was told to keep", () => {
+  const mine = store.createPrincipalWithWorkspace("auth-reset", "A");
+  const other = store.createPrincipalWithWorkspace("auth-other", "B");
+  for (const { principal, workspace } of [mine, other]) {
+    store.setSetting(workspace.id, "onboarding.tone", "neutral");
+    store.appendEvent({ ownerId: principal.id, workspaceId: workspace.id, idempotencyKey: "k", type: "x", entityId: "e", payload: {} });
+  }
+  store.setSetting(mine.workspace.id, "deployment.runtimeOwner", "1");
+  store.setSetting(mine.workspace.id, "model.provider", "{}");
+  store.appendEvent({ ownerId: mine.principal.id, workspaceId: mine.workspace.id, idempotencyKey: "c", type: "model.provider.conformance", entityId: "p", payload: {} });
+  store.saveSourceDocument({ id: "doc", ownerId: mine.principal.id, workspaceId: mine.workspace.id, kind: "text", fileName: "a.txt", mediaType: "text/plain",
+    sha256: "a", uri: "file:///data/sources/a.txt", extractedText: "", extractionStatus: "done", createdAt: new Date().toISOString() });
+
+  const result = store.resetWorkspace(mine.workspace.id, { settingPrefixes: ["deployment.", "model.provider"], eventTypePrefixes: ["model.provider"] });
+  expect(result.fileUris).toEqual(["file:///data/sources/a.txt"]);
+  expect(store.listSourceDocuments(mine.workspace.id)).toEqual([]);
+  expect(store.getSetting(mine.workspace.id, "onboarding.tone")).toBeUndefined();
+  expect(store.getSetting(mine.workspace.id, "deployment.runtimeOwner")).toBe("1");
+  expect(store.getSetting(mine.workspace.id, "model.provider")).toBe("{}");
+  expect(store.listEvents(mine.workspace.id).map((event) => event.type)).toEqual(["model.provider.conformance"]);
+  // Still the same signed-in account in the same workspace.
+  expect(store.getPrincipalByBetterAuthId("auth-reset")).toBeDefined();
+  expect(store.listWorkspaces().map((w) => w.id)).toContain(mine.workspace.id);
+  // Another workspace is untouched.
+  expect(store.getSetting(other.workspace.id, "onboarding.tone")).toBe("neutral");
+  expect(store.listEvents(other.workspace.id)).toHaveLength(1);
+});

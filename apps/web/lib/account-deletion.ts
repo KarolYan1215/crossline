@@ -31,6 +31,37 @@ function removeInside(root: string, target: string): boolean {
   return true;
 }
 
+export type AccountReset = { ok: true; rows: number; files: number } | { ok: false; code: "ACCOUNT_RESET_LOCAL" | "EMAIL_MISMATCH" };
+
+/**
+ * What a reset keeps: the machine-owner mark (`deployment.runtimeOwner`), the model connection (`model.provider`, the worker's
+ * `MODEL_PROVIDER_SETTING`, and its `model.provider.*` events), and the monthly cap of a pay-per-use login.
+ */
+export const RESET_KEEPS = { settingPrefixes: ["deployment.", "model.provider", "model.budget"], eventTypePrefixes: ["model.provider"] };
+
+/**
+ * 「清空数据重新开始」 (2026-10-18, the owner's request to rebuild their own account, which as the machine owner's cannot be deleted): the
+ * person types the account's email and everything the account has built goes — the interview, portrait, lines, milestones, tasks, files,
+ * conversation and calendar links — while the login, the model connection and the machine-owner mark stay. The next page is the
+ * interview's opening card. Offered to every hosted account; an installed copy is reset by reinstalling.
+ */
+export function resetAccountData(ctx: AccessContext, session: { email: string }, typedEmail: string): AccountReset {
+  if (isLocalInstall()) return { ok: false, code: "ACCOUNT_RESET_LOCAL" };
+  if (typedEmail.trim().toLowerCase() !== session.email.trim().toLowerCase()) return { ok: false, code: "EMAIL_MISMATCH" };
+  const store = getStore();
+  const root = path.resolve(dataDirectory());
+  const safe = (part: string) => part.replace(/[^a-zA-Z0-9_-]/g, "_");
+  const reset = store.resetWorkspace(ctx.workspaceId, RESET_KEEPS);
+  let files = 0;
+  for (const uri of reset.fileUris) {
+    try { if (removeInside(root, uri.startsWith("file:") ? fileURLToPath(uri) : uri)) files += 1; } catch { /* an unreadable uri: nothing to remove */ }
+  }
+  for (const id of reset.workOrderIds) if (removeInside(root, path.join(root, "materials", id))) files += 1;
+  removeInside(root, path.join(root, "portrait", safe(ctx.workspaceId)));
+  console.info(JSON.stringify({ type: "account.reset", workspaceId: ctx.workspaceId, rows: reset.rows, files }));
+  return { ok: true, rows: reset.rows, files };
+}
+
 /**
  * 「删除账号」 (decided 2026-10-17, for the hosted beta): the person types the account's email, and everything the account holds goes —
  * its Codex sign-in and home on the server, every ledger row of its workspace, the files only it pointed at (uploads, prepared

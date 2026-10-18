@@ -3490,6 +3490,37 @@ export class CrosslineStore {
   }
 
   /**
+   * 「清空数据重新开始」: every row the workspace holds goes, as in `purgeWorkspace`, except what makes it the same account — its members,
+   * device leases, Tailscale bindings and audit trail, the model spend it has run up, and the settings and events whose key or type starts
+   * with one of `keep`'s prefixes (the machine-owner mark, the model connection and its conformance record). The workspace itself stays, so
+   * the next page lands on an empty board and the interview, signed in as before. Returns the work orders and the stored files only this
+   * workspace pointed at, for the caller to remove.
+   */
+  resetWorkspace(workspaceId: string, keep: { settingPrefixes: string[]; eventTypePrefixes: string[] }): { rows: number; workOrderIds: string[]; fileUris: string[] } {
+    const untouched = new Set(["workspace_members", "device_leases", "tailscale_bindings", "audit_events", "model_usage", "settings", "events"]);
+    const kept = (value: string, prefixes: string[]) => prefixes.some((prefix) => value.startsWith(prefix));
+    return this.#db.transaction(() => {
+      const workOrderIds = this.#db.prepare("SELECT DISTINCT id FROM work_orders WHERE workspace_id = ?").pluck().all(workspaceId) as string[];
+      const fileUris = this.#db.prepare(`SELECT DISTINCT uri FROM source_documents WHERE workspace_id = ?
+        AND uri NOT IN (SELECT uri FROM source_documents WHERE workspace_id <> ?)`).pluck().all(workspaceId, workspaceId) as string[];
+      const tables = (this.#db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").pluck().all() as string[])
+        .filter((name) => !untouched.has(name)
+          && (this.#db.prepare(`PRAGMA table_info("${name}")`).all() as Array<{ name: string }>).some((column) => column.name === "workspace_id"));
+      let rows = 0;
+      for (const name of tables) rows += this.#db.prepare(`DELETE FROM "${name}" WHERE workspace_id = ?`).run(workspaceId).changes;
+      const deleteSetting = this.#db.prepare("DELETE FROM settings WHERE workspace_id = ? AND key = ?");
+      for (const key of this.#db.prepare("SELECT key FROM settings WHERE workspace_id = ?").pluck().all(workspaceId) as string[]) {
+        if (!kept(key, keep.settingPrefixes)) rows += deleteSetting.run(workspaceId, key).changes;
+      }
+      const deleteEvents = this.#db.prepare("DELETE FROM events WHERE workspace_id = ? AND type = ?");
+      for (const type of this.#db.prepare("SELECT DISTINCT type FROM events WHERE workspace_id = ?").pluck().all(workspaceId) as string[]) {
+        if (!kept(type, keep.eventTypePrefixes)) rows += deleteEvents.run(workspaceId, type).changes;
+      }
+      return { rows, workOrderIds, fileUris };
+    }).immediate();
+  }
+
+  /**
    * Deletes a workspace and everything recorded in it (the person's 「删除账号」, decided 2026-10-17): every row of every table that
    * carries this `workspace_id` — found from the schema, so a table added later is covered without a change here — then the workspace,
    * then each member principal that belongs to no other workspace. One transaction: a failure leaves the workspace whole.
