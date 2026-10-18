@@ -166,6 +166,12 @@ test("only an important task's questions are asked: a minor task's become assump
   answer = plan(true);
   expect((await createStepPlanner(fresh, workspaceId, "C:\repo", () => runtime.rpc)("wo")).state).toBe("planned");
   expect(fresh.listProfileFacts(workspaceId).find((item) => item.slot === slot)).toBeUndefined();
+  // The replan after the person answered asks nothing more: what it still wonders about is settled as an assumption (no re-ask loop).
+  const followUp = { id: "q2", text: "海报印刷数量？", why: "影响预算", options: ["10 张", "50 张"] };
+  answer = JSON.stringify({ ...JSON.parse(plan(true)), questions: [followUp] });
+  expect((await createStepPlanner(fresh, workspaceId, "C:\repo", () => runtime.rpc)("wo", "按回答重新安排")).state).toBe("planned");
+  expect(fresh.listProfileFacts(workspaceId).find((item) => item.slot === stepAnswerSlot(followUp.text)))
+    .toMatchObject({ status: "inferred", value: "假设：【海报印刷数量？】10 张" });
 
   // Graded coursework read from the course's files is important by rule: researched on the web first, its questions asked.
   const graded = new CrosslineStore(":memory:");

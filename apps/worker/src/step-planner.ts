@@ -302,8 +302,10 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
     if (completion && current && !readModelCompletion((current.payload as { completion?: unknown } | undefined)?.completion))
       store.saveWorkOrder({ ...current, payload: { ...((current.payload ?? {}) as object), completion } });
     // Only an important task's questions go to the person; a minor task's are settled as assumptions the next plan reads (and the
-    // person can still correct on the task), so they never become a decision to make.
-    if (!research && !importantByRule(store, workspaceId, order) && !result.output.importance?.longTerm) assumeAnswers(store, workspaceId, order, normalized.questions);
+    // person can still correct on the task), so they never become a decision to make. A task's questions are put to the person once, on
+    // its first plan: a replan (after answers, a progress report or a reviewer's note) settles what it still wonders about as assumptions
+    // — answering three questions about 「核验排班价值指标」 brought three reworded ones back, every round (2026-10-18 walkthrough).
+    if (feedback || (!research && !importantByRule(store, workspaceId, order) && !result.output.importance?.longTerm)) assumeAnswers(store, workspaceId, order, normalized.questions);
     // What the task's own files settle (the problem set, how it is handed in, the AI rule) is read from them, not asked.
     else assumeAnswers(store, workspaceId, order, materialQuestions(store, workspaceId, order, normalized.questions), true);
     if (warnings.length) store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId,
