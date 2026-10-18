@@ -5,7 +5,7 @@ import {
   SPONSOR_MONTHLY_CAP_CNY, summarizeConformance, type ConformanceRecord, type ConformanceRun, type CostSignal, type ProviderCapabilities,
   type SponsorEvaluation, type SponsorModel
 } from "@crossline/core";
-import { enterUsageWorkspace, runCodexSkill, threadProvider, type CodexRpcBoundary, type GatewayUpstream, type ModelGateway, type ProviderConfig, type SkillUsage } from "@crossline/codex";
+import { runCodexSkill, withUsageWorkspace, threadProvider, type CodexRpcBoundary, type GatewayUpstream, type ModelGateway, type ProviderConfig, type SkillUsage } from "@crossline/codex";
 import { sponsorshipOf, type CrosslineStore } from "@crossline/db";
 import { RUNTIME_VERSION } from "./model-provider";
 
@@ -114,17 +114,22 @@ export function createSponsorService(options: {
     try {
       const available = await listed();
       const have = new Set(currentEvaluations().map((item) => item.model));
-      for (const model of config.models) {
-        if (have.has(model.model)) continue;
-        if (available && !available.has(model.model)) { skipped.push(model.model); continue; }
+      const pending = config.models.filter((model) => {
+        if (have.has(model.model)) return false;
+        if (available && !available.has(model.model)) { skipped.push(model.model); return false; }
+        return true;
+      });
+      // The candidates are tested side by side (each run takes minutes, one model's thirty-odd runs one after another take an hour or
+      // two); each result is written as soon as it is in, so a restart keeps the models already measured.
+      await Promise.all(pending.map(async (model) => {
         const evaluation = await evaluateOne(client, model);
         const saved = read().evaluations.filter((item) => item.model !== model.model);
         writeFileSync(file, JSON.stringify({ evaluations: [...saved, evaluation] } satisfies Saved, null, 2), "utf8");
         tested.push(model.model);
         console.info(JSON.stringify({ type: "sponsor.evaluated", model: model.model, passRate: evaluation.record.passRate,
           repairRate: evaluation.record.repairRate, p95Ms: evaluation.record.p95Ms, yuanPerRun: evaluation.yuanPerRun,
-          admitted: admittedSkills(evaluation.record, options.capabilities).length }));
-      }
+          admitted: admittedSkills(evaluation.record, options.capabilities).length, failures: evaluation.record.failures.slice(0, 6) }));
+      }));
     } finally { evaluating = false; }
     const pick = chosen();
     console.info(JSON.stringify({ type: "sponsor.chosen", model: pick?.model ?? null, skipped }));
@@ -140,15 +145,14 @@ export function createSponsorService(options: {
     for (const item of conformanceCases()) for (let attempt = 0; attempt < item.runs; attempt += 1) {
       const started = Date.now();
       const input = { version: "crossline.conformance.v1", caseId: item.id, prompt: item.prompt };
-      enterUsageWorkspace(key);
-      const result = await runCodexSkill<unknown>(client, input, { skillName: CONFORMANCE_SKILL, cwd: options.cwd, provider: thread,
+      const result = await withUsageWorkspace(key, () => runCodexSkill<unknown>(client, input, { skillName: CONFORMANCE_SKILL, cwd: options.cwd, provider: thread,
         developerInstructions: "Answer the conformance case as the Skill describes. Return raw JSON only.", outputSchema: item.schema,
         prepareInput: () => input, onAudit: () => {}, timeoutMs: 20 * 60_000,
         validateOutput: (output) => {
           const problems = jsonSchemaProblems(output, item.schema);
           if (problems.length) throw Object.assign(new Error("CONFORMANCE_SCHEMA_VIOLATED"), { detail: problems.slice(0, 6).join("; ") });
           return output;
-        } }).catch((error: unknown) => ({ ok: false as const, blocker: { code: error instanceof Error ? error.message : "SKILL_RUNTIME_FAILED", message: "" }, audit: {} as { repairs?: number } }));
+        } })).catch((error: unknown) => ({ ok: false as const, blocker: { code: error instanceof Error ? error.message : "SKILL_RUNTIME_FAILED", message: "" }, audit: {} as { repairs?: number } }));
       runs.push({ caseId: item.id, ok: result.ok, repairs: result.audit.repairs ?? 0, ms: Date.now() - started, ...(result.ok ? {} : { code: result.blocker.code }) });
     }
     const record: ConformanceRecord = summarizeConformance({ providerId: SPONSOR_PROVIDER_ID, model: model.model, runtimeVersion: RUNTIME_VERSION, ranAt: now().toISOString() }, runs);

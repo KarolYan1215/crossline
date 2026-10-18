@@ -106,7 +106,9 @@ export function responsesToChat(request: Json, upstream: Pick<BridgeUpstream, "r
       responseFormat = { type: "json_schema", json_schema: { name: text(format.name) || "output", schema: format.schema, strict: format.strict !== false } };
     else {
       responseFormat = { type: "json_object" };
-      system.push(`Reply with one JSON object only, no prose and no code fence, that validates against this JSON Schema:\n${JSON.stringify(format.schema)}`);
+      // Without a schema the endpoint enforces, models echoed the input's own keys (`version`, `caseId`, `prompt`) into the answer
+      // (GLM on SiliconFlow, 2026-10-18): the answer's keys are the schema's, and only those.
+      system.push(`Reply with one JSON object only, no prose and no code fence, that validates against this JSON Schema. Use exactly the schema's own properties: never copy keys or fields from the user's message into the answer.\n${JSON.stringify(format.schema)}`);
     }
   }
 
