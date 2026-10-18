@@ -156,6 +156,20 @@ test("a milestone whose known work cannot finish by its deadline is asked about;
   expect(collectAsks(TEST_CTX, NOW).some((ask) => ask.kind === "milestone_risk")).toBe(false);
 });
 
+test("while the reviewer's risk question on a milestone waits, the forecast's question on it does not stand beside it", async () => {
+  const store = setup();
+  const { MILESTONE_RISKS_SETTING, milestoneRiskFingerprint } = await import("@crossline/core");
+  store.saveWorkOrder({ id: "big", ownerId: owner, workspaceId: ws, identityId: "research", projectId: "p", milestoneId: "mos2", intent: "完整仿真",
+    state: "approved", riskTier: "milestone", estimate: { ...estimate, p50Minutes: 3000, p85Minutes: 6000 }, payload: {} });
+  const fingerprint = milestoneRiskFingerprint({ title: "实测 MoS₂ 参数已可直接驱动 NeuroSim", deadline: "2026-10-09", criteria: [], dependsOn: [] });
+  store.setSetting(ws, MILESTONE_RISKS_SETTING, JSON.stringify({ mos2: { fingerprint, at: "2026-10-06T00:00:00Z", source: "model",
+    risks: [{ level: "medium", kind: "time", note: "只剩两天" }] } }));
+  const kinds = () => collectAsks(TEST_CTX, NOW).filter((ask) => ask.entityId === "mos2").map((ask) => ask.kind);
+  expect(kinds()).toEqual(["milestone_risk_review"]);
+  expect(await answerAsk(TEST_CTX, "riskreview:mos2", "ignore", {}, NOW)).toMatchObject({ ok: true });
+  expect(kinds()).toEqual(["milestone_risk"]);
+});
+
 test("a reviewed medium or high risk is put to the person first: only 「接受」 lets the schedule aim the work early, and an answer is not asked again", async () => {
   const store = setup();
   const { MILESTONE_RISKS_SETTING, milestoneRiskFingerprint } = await import("@crossline/core");

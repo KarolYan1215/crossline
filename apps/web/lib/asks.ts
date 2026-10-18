@@ -298,8 +298,14 @@ export function explainRisk(input: { deadline: string; today: string; p50Day: st
 
 const ACCEPT_RISK_DAYS = 7;
 
-/** A milestone whose known work finishes too close to (or after) its deadline. Tability's three-check rule, as a question. */
-function riskAsks({ store, ctx, today }: Source): Ask[] {
+/**
+ * A milestone whose known work finishes too close to (or after) its deadline. Tability's three-check rule, as a question. Not while the
+ * reviewer's risk question on the same milestone waits: the two asked about one milestone side by side, with overlapping answers
+ * (2026-10-18 walkthrough); the review goes first and this one comes up afterwards if the forecast still says so.
+ */
+function riskAsks(source: Source): Ask[] {
+  const { store, ctx, today } = source;
+  const reviewed = new Set(riskReviewMembers(source).map((ask) => ask.entityId));
   const forecast = loadGoalForecast(ctx);
   const orders = store.listWorkOrders(ctx.workspaceId);
   const accepted = live(ctx, store.listEvents(ctx.workspaceId, { type: "risk.accepted" }));
@@ -309,7 +315,7 @@ function riskAsks({ store, ctx, today }: Source): Ask[] {
   return forecast.goals.flatMap((goal) => {
     const milestone = milestones.get(goal.milestoneId);
     const deadline = goal.confirmedDeadline;
-    if (!milestone || !deadline || deadline < today) return [];
+    if (!milestone || !deadline || deadline < today || reviewed.has(goal.milestoneId)) return [];
     const own = orders.filter((order) => order.milestoneId === goal.milestoneId && ["approved", "preparing", "ready_for_human", "active"].includes(order.state));
     if (!own.length) return [];
     const atRisk = goal.p85Day === null || (goal.slackDays !== null && goal.slackDays < 2);
