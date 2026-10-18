@@ -30,6 +30,45 @@ type Step = NonNullable<TaskDetail["stepPlan"]>["steps"][number];
  * there, the others a line each that opens on a click. Editing (reorder, rename, add, remove, a one-line replan) is a mode of its own, so
  * the list reads as a plan rather than a form.
  */
+type StepQuestion = NonNullable<TaskDetail["stepPlan"]>["questions"][number];
+
+/**
+ * The plan's questions with what they rest on now: the person's answer, the app's assumption (only important tasks' first two questions
+ * are put to the person; the rest are assumed so nothing waits), or still waiting on 待确认. Any of them can be changed here, which
+ * plans the task again with it.
+ */
+function StepQuestions({ workOrderId, questions }: { workOrderId: string; questions: StepQuestion[] }) {
+  const [editing, setEditing] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+  const [status, setStatus] = useState("");
+  const save = async (question: StepQuestion, answer: string) => {
+    if (!answer.trim()) { setStatus("回答未填写"); return; }
+    setStatus("保存中…");
+    const ok = await post(`/api/work-orders/${encodeURIComponent(workOrderId)}/step-answer`, { question: question.text, answer });
+    if (!ok) { setStatus("未能保存，请重试"); return; }
+    setEditing(null); setStatus("已记下，步骤会按此重排");
+    window.location.reload();
+  };
+  return <div className="steps-questions">
+    <small>计划依据的问题</small>
+    <ul>{questions.map((question) => <li key={question.id}>
+      <span>{question.text}</span>
+      {question.answer
+        ? <span className={question.answer.assumed ? "steps-answer-assumed" : "steps-answer"}>{question.answer.assumed ? "按假设：" : "已答："}{question.answer.text}</span>
+        : <a href="/approvals">待回答</a>}
+      {editing === question.id
+        ? <span className="steps-answer-edit">
+          {question.options.map((option) => <button key={option} type="button" className="text-button" onClick={() => void save(question, option)}>{option}</button>)}
+          <input type="text" value={draft} maxLength={300} placeholder="或自己写" onChange={(event) => setDraft(event.target.value)} />
+          <button type="button" className="secondary-button" onClick={() => void save(question, draft)}>保存</button>
+          <button type="button" className="text-button" onClick={() => setEditing(null)}>取消</button>
+        </span>
+        : <button type="button" className="text-button" onClick={() => { setEditing(question.id); setDraft(""); setStatus(""); }}>{question.answer ? "改" : "回答"}</button>}
+    </li>)}</ul>
+    {status && <small role="status">{status}</small>}
+  </div>;
+}
+
 function StepsPanel({ detail }: { detail: TaskDetail }) {
   const plan = detail.stepPlan;
   const current = currentStep(detail);
@@ -48,7 +87,7 @@ function StepsPanel({ detail }: { detail: TaskDetail }) {
       <button type="button" className="text-button" onClick={() => setEditing(true)}>调整步骤</button></p>
     {plan.rationale && <p className="gen steps-rationale"><Clamp text={plainEstimateWords(plan.rationale)} /></p>}
     {plan.units.length > 0 && <p className="steps-units"><small>依据材料的内容</small>{plan.units.map((unit) => <span key={unit.id} className="tag" title={unit.quote}>{unit.title}</span>)}</p>}
-    {plan.questions.length > 0 && <p className="steps-questions"><small>需要本人回答后才能定下的</small>{plan.questions.map((question) => <a key={question.id} href="/approvals">{question.text}</a>)}</p>}
+    {plan.questions.length > 0 && <StepQuestions workOrderId={detail.id} questions={plan.questions} />}
     <ol className="steps-list">{plan.steps.map((step, index) => {
       const open = expanded.has(step.id);
       const kind = step.status !== "planned" ? "done" : step.executor === "agent" ? "agent" : step === current ? "current" : "open";

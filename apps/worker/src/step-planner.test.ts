@@ -160,18 +160,12 @@ test("only an important task's questions are asked: a minor task's become assump
   expect(fact()).toMatchObject({ status: "inferred", value: "假设：【海报用哪种尺寸？】A3" });
   expect(prompts[0]).toContain('"research":false');
 
-  // The planner judging it important for the long run: the question stays for the person.
+  // The planner judging it important for the long run is not enough (2026-10-18: it said so of nearly everything): still an assumption.
   const fresh = new CrosslineStore(":memory:");
   seed(fresh);
   answer = plan(true);
   expect((await createStepPlanner(fresh, workspaceId, "C:\repo", () => runtime.rpc)("wo")).state).toBe("planned");
-  expect(fresh.listProfileFacts(workspaceId).find((item) => item.slot === slot)).toBeUndefined();
-  // The replan after the person answered asks nothing more: what it still wonders about is settled as an assumption (no re-ask loop).
-  const followUp = { id: "q2", text: "海报印刷数量？", why: "影响预算", options: ["10 张", "50 张"] };
-  answer = JSON.stringify({ ...JSON.parse(plan(true)), questions: [followUp] });
-  expect((await createStepPlanner(fresh, workspaceId, "C:\repo", () => runtime.rpc)("wo", "按回答重新安排")).state).toBe("planned");
-  expect(fresh.listProfileFacts(workspaceId).find((item) => item.slot === stepAnswerSlot(followUp.text)))
-    .toMatchObject({ status: "inferred", value: "假设：【海报印刷数量？】10 张" });
+  expect(fresh.listProfileFacts(workspaceId).find((item) => item.slot === slot)).toMatchObject({ status: "inferred", value: "假设：【海报用哪种尺寸？】A3" });
 
   // Graded coursework read from the course's files is important by rule: researched on the web first, its questions asked.
   const graded = new CrosslineStore(":memory:");
@@ -182,10 +176,22 @@ test("only an important task's questions are asked: a minor task's become assump
   expect((await createStepPlanner(graded, workspaceId, "C:\repo", () => runtime.rpc)("wo")).state).toBe("planned");
   expect(prompts.at(-1)).toContain('"research":true');
   expect(graded.listProfileFacts(workspaceId).find((item) => item.slot === slot)).toBeUndefined();
+  // The replan after the person answered asks nothing more: what it still wonders about is settled as an assumption (no re-ask loop).
+  const followUp = { id: "q2", text: "海报印刷数量？", why: "影响预算", options: ["10 张", "50 张"] };
+  answer = JSON.stringify({ ...JSON.parse(plan(true)), questions: [followUp] });
+  expect((await createStepPlanner(graded, workspaceId, "C:\repo", () => runtime.rpc)("wo", "按回答重新安排")).state).toBe("planned");
+  expect(graded.listProfileFacts(workspaceId).find((item) => item.slot === stepAnswerSlot(followUp.text)))
+    .toMatchObject({ status: "inferred", value: "假设：【海报印刷数量？】10 张" });
+  // Even an important task puts only its first two questions to the person; the third is an assumption.
+  const three = ["范围到第几讲？", "用哪本教材？", "交 PDF 还是纸质？"].map((text, index) => ({ id: `t${index}`, text, why: "", options: [`选项${index}`] }));
+  answer = JSON.stringify({ ...JSON.parse(plan(false)), questions: three });
+  expect((await createStepPlanner(graded, workspaceId, "C:\repo", () => runtime.rpc)("wo")).state).toBe("planned");
+  const assumed = graded.listProfileFacts(workspaceId).filter((item) => three.some((question) => item.slot === stepAnswerSlot(question.text)));
+  expect(assumed.map((item) => item.value)).toEqual(["假设：【交 PDF 还是纸质？】选项2"]);
   store.close(); fresh.close(); graded.close();
 });
 
-test("questions of plans made before importance was judged are filtered by rule: graded work keeps them, the rest become assumptions", async () => {
+test("stored questions are filtered by rule: graded work keeps them, the rest become assumptions, whatever the planner judged", async () => {
   const { stepAnswerSlot } = await import("@crossline/core");
   const { settleOldQuestions } = await import("./step-planner");
   const store = new CrosslineStore(":memory:");
@@ -199,9 +205,9 @@ test("questions of plans made before importance was judged are filtered by rule:
   store.saveWorkOrder({ id: "new", ownerId, workspaceId, identityId: "research", projectId: "ece999", milestoneId: "", intent: "新计划", state: "approved", riskTier: "routine",
     estimate: { p25Minutes: 60, p50Minutes: 120, p85Minutes: 240, source: "llm_prior", observationCount: 0, confidence: "low" }, payload: {} });
   store.saveStepPlan(workspaceId, "new", { ...old, importance: { longTerm: true, why: "毕业要求" } }, ownerId, "t");
-  expect(settleOldQuestions(store, workspaceId)).toEqual(["wo"]);
+  expect(settleOldQuestions(store, workspaceId).sort()).toEqual(["new", "wo"]);
   const facts = store.listProfileFacts(workspaceId).filter((fact) => fact.slot === stepAnswerSlot(question.text));
-  expect(facts.map((fact) => [fact.projectId, fact.value])).toEqual([["ece555", "假设：【期中考到第几讲？】L1–L5"]]);
+  expect(facts.map((fact) => [fact.projectId, fact.value]).sort()).toEqual([["ece555", "假设：【期中考到第几讲？】L1–L5"], ["ece999", "假设：【期中考到第几讲？】L1–L5"]]);
   // The planner's own judgement is kept with the plan.
   expect(store.getStepPlan(workspaceId, "new")!.importance).toEqual({ longTerm: true, why: "毕业要求" });
   store.close();

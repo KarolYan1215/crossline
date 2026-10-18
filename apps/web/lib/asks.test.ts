@@ -335,6 +335,22 @@ test("background work the worker paused is told to the person, with where to loo
 });
 
 
+test("a spent quota says what still works, what waits and when it comes back, not just 「已暂停」", () => {
+  const store = setup();
+  store.setSetting(ws, "schedule.preferences", JSON.stringify({ timeZone: "America/Chicago" }));
+  store.setSetting(ws, "background.blocker", JSON.stringify({ code: "BUDGET_EXHAUSTED", message: "模型额度已用 97%，后台自动工作暂停到额度恢复。",
+    resetsAt: "2026-10-18T20:00:00.000Z", at: NOW.toISOString() }));
+  const paused = collectAsks(TEST_CTX, NOW).find((ask) => ask.kind === "background_paused")!;
+  expect(paused.title).toBe("模型额度用完了：排程照常，AI 生成暂停");
+  expect(paused.why).toContain("照常可用：排程与日历");
+  expect(paused.why).toContain("暂停到恢复：新收集事项的分析与拆分");
+  expect(paused.why).toContain("预计");
+  // Nearly spent keeps the person's own turns; fully spent says they stop too.
+  expect(paused.why).toContain("输入框对话与访谈（为它们留着剩下的额度）");
+  store.setSetting(ws, "background.blocker", JSON.stringify({ code: "RATE_LIMIT_REACHED", message: "模型额度已用尽，后台自动工作暂停到额度恢复。", at: NOW.toISOString() }));
+  expect(collectAsks(TEST_CTX, NOW).find((ask) => ask.kind === "background_paused")!.why).toContain("暂停到恢复：新收集事项的分析与拆分；拆步骤与按回答重排；教程与调研；助手代办；输入框的对话回复与访谈");
+});
+
 test("a locked block a calendar event lands on is asked about, and each answer does what it says", async () => {
   const store = setup();
   store.setSetting(ws, "schedule.preferences", JSON.stringify({ timeZone: "America/Chicago", mode: "buffered" }));
@@ -414,9 +430,30 @@ test("a step question the task's own files answer is not asked; the same questio
   const plan = { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 1, unit: "题" }, rationale: "", steps: [],
     questions: [{ id: "q1", text: "作业提交方式？", why: "", options: ["Canvas"] }, { id: "q2", text: "当前完成状态？", why: "", options: ["未开始", "一半"] }] };
   for (const id of ["hw3", "hw4"]) store.saveStepPlan(ws, id, plan as never, owner, "t");
-  const titles = () => collectAsks(TEST_CTX, NOW).filter((ask) => ask.kind === "step_question").map((ask) => ask.title.split("：")[1]);
-  expect(titles()).toEqual(["作业提交方式？", "当前完成状态？"]);
+  const cards = () => collectAsks(TEST_CTX, NOW).filter((ask) => ask.kind === "step_question");
+  // Two questions of one project are one card, each a line of 「逐条改」.
+  expect(cards().map((ask) => ask.id)).toEqual(["stepq:p:ece555"]);
+  expect(cards()[0]!.options.find((option) => option.id === "edit")!.fields!.map((field) => field.label)).toEqual(["1. 作业提交方式？", "2. 当前完成状态？"]);
   store.saveSourceDocument({ id: "syl", ownerId: owner, workspaceId: ws, kind: "text", fileName: "syllabus.pdf", mediaType: "text/plain", sha256: "s", uri: "file://s",
     extractedText: "…", extractionStatus: "done", projectId: "ece555", createdAt: "2026-10-01T00:00:00Z" } as never);
-  expect(titles()).toEqual(["当前完成状态？"]);
+  expect(cards().map((ask) => ask.title.split("：")[1])).toEqual(["当前完成状态？"]);
+});
+
+test("a project's questions are settled on one card: 都按建议 in one tap, or 逐条改 where an empty line keeps the suggestion", async () => {
+  const store = setup();
+  for (const id of ["a", "b"]) store.saveWorkOrder({ id, ownerId: owner, workspaceId: ws, identityId: "startup", projectId: "mvp", milestoneId: "", intent: `任务 ${id}`,
+    state: "approved", riskTier: "routine", estimate, payload: {} });
+  const plan = (texts: string[]) => ({ archetypeId: "problem_set", quantity: { basis: "x", amount: 1, unit: "个" }, rationale: "", steps: [],
+    questions: texts.map((text, index) => ({ id: `q${index}`, text, why: "", options: [`${text}-建议`, "其他"] })) });
+  store.saveStepPlan(ws, "a", plan(["用户怎么联系？", "定价多少？"]) as never, owner, "t");
+  store.saveStepPlan(ws, "b", plan(["首批几家店？"]) as never, owner, "t");
+  const card = collectAsks(TEST_CTX, NOW).find((ask) => ask.id === "stepq:p:mvp")!;
+  expect(card.title).toContain("有 3 个问题");
+  expect(await answerAsk(TEST_CTX, card.id, { optionIds: ["edit"] }, { q1: "199 元/月" }, NOW)).toMatchObject({ ok: true });
+  const facts = store.listProfileFacts(ws).filter((fact) => fact.slot.startsWith("step_answer_")).map((fact) => fact.value).sort();
+  expect(facts).toEqual(["【定价多少？】199 元/月", "【用户怎么联系？】用户怎么联系？-建议", "【首批几家店？】首批几家店？-建议"]);
+  // One replan per task, carrying all its answers.
+  const replans = store.listEvents(ws, { type: "task.steps_replan_requested" });
+  expect(replans.map((event) => event.entityId).sort()).toEqual(["a", "b"]);
+  expect(collectAsks(TEST_CTX, NOW).some((ask) => ask.kind === "step_question")).toBe(false);
 });

@@ -1,7 +1,7 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { taskProgress, type AccessContext } from "@crossline/core";
-import type { StoredStepPlan } from "@crossline/db";
+import { stepAnswerSlot, taskProgress, type AccessContext } from "@crossline/core";
+import type { StoredStepPlan, StoredWorkOrder } from "@crossline/db";
 import { getStore } from "./crossline";
 import { requestCodexSupervisor } from "./codex-runtime";
 
@@ -105,4 +105,28 @@ export function recordStepProgress(ctx: AccessContext, workOrderId: string, step
   } catch (error) {
     return { ok: false, code: error instanceof Error ? error.message : "STEP_PROGRESS_FAILED" };
   }
+}
+
+/**
+ * Records the person's answer to one step question as a confirmed fact under the question's slot (the project's, so it answers every
+ * task of the project that asked it). Shared by the 待确认 cards and by changing an answer on the task.
+ */
+export function recordStepAnswer(ctx: AccessContext, order: Pick<StoredWorkOrder, "identityId" | "projectId">, question: string, answer: string, quote = answer): void {
+  getStore().upsertProfileFact({ workspaceId: ctx.workspaceId, identityId: order.identityId, projectId: order.projectId, slot: stepAnswerSlot(question),
+    value: `【${question}】${answer}`, status: "confirmed", sourceRef: "ask", sourceQuote: quote, updatedAt: new Date().toISOString() });
+}
+
+/**
+ * The person's answer to one of the task's plan questions, given or changed on the task itself: an assumption the app wrote becomes
+ * their own word, and the task is planned again with it.
+ */
+export function changeStepAnswer(ctx: AccessContext, workOrderId: string, question: string, answer: string): { ok: true } | { ok: false; code: string } {
+  const store = getStore();
+  const order = store.listWorkOrders(ctx.workspaceId).find((item) => item.id === workOrderId);
+  if (!order) return { ok: false, code: "WORK_ORDER_NOT_FOUND" };
+  if (!store.getStepPlan(ctx.workspaceId, workOrderId)?.questions.some((item) => item.text === question)) return { ok: false, code: "STEP_QUESTION_GONE" };
+  const text = answer.trim();
+  if (!text) return { ok: false, code: "STEP_ANSWER_EMPTY" };
+  recordStepAnswer(ctx, order, question, text.slice(0, 300));
+  return requestStepReplan(ctx, workOrderId, `本人把「${question}」的回答定为：${text.slice(0, 300)}。按此重新安排步骤。`);
 }

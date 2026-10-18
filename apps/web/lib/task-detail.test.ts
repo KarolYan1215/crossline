@@ -159,3 +159,23 @@ test("background facts set for an identity show up on both the task and mileston
   const batchDetail = loadTaskDetailsBatch(TEST_CTX, ["wo-1"]).get("wo-1");
   expect(batchDetail?.background).toEqual(taskDetail?.background);
 });
+
+test("each plan question shows what it rests on — the person's answer, the app's assumption, or nothing yet — and an assumption can be changed on the task", async () => {
+  const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
+  seedOrderWithMilestone(store);
+  const questions = ["初稿投哪个会？", "导师多久回复？", "要不要附代码？"].map((text, index) => ({ id: `q${index}`, text, why: "", options: [`建议${index}`, "其他"] }));
+  store.saveStepPlan(TEST_CTX.workspaceId, "wo-1", { archetypeId: "problem_set", quantity: { basis: "x", amount: 1, unit: "篇" }, rationale: "", steps: [], questions } as never,
+    TEST_CTX.principalId, "t");
+  const { stepAnswerSlot } = await import("@crossline/core");
+  const { changeStepAnswer } = await import("./steps");
+  store.upsertProfileFact({ workspaceId: TEST_CTX.workspaceId, identityId: "research", projectId: "research-default", slot: stepAnswerSlot("导师多久回复？"),
+    value: "假设：【导师多久回复？】建议1", status: "inferred", sourceRef: "", sourceQuote: "", updatedAt: "2026-10-18T00:00:00Z" });
+  store.upsertProfileFact({ workspaceId: TEST_CTX.workspaceId, identityId: "research", projectId: "research-default", slot: stepAnswerSlot("初稿投哪个会？"),
+    value: "【初稿投哪个会？】ISCA", status: "confirmed", sourceRef: "ask", sourceQuote: "ISCA", updatedAt: "2026-10-18T00:00:00Z" });
+  const shown = () => loadTaskDetail(TEST_CTX, "wo-1")!.stepPlan!.questions.map((question) => [question.text, question.answer ?? null]);
+  expect(shown()).toEqual([["初稿投哪个会？", { text: "ISCA", assumed: false }], ["导师多久回复？", { text: "建议1", assumed: true }], ["要不要附代码？", null]]);
+  expect(changeStepAnswer(TEST_CTX, "wo-1", "导师多久回复？", "一周")).toEqual({ ok: true });
+  expect(shown()[1]).toEqual(["导师多久回复？", { text: "一周", assumed: false }]);
+  expect(store.listEvents(TEST_CTX.workspaceId, { type: "task.steps_replan_requested", entityId: "wo-1" })).toHaveLength(1);
+  expect(changeStepAnswer(TEST_CTX, "wo-1", "不在计划里的问题？", "x")).toEqual({ ok: false, code: "STEP_QUESTION_GONE" });
+});

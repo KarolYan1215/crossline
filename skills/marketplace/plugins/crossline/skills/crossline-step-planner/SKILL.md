@@ -20,7 +20,7 @@ Return raw JSON only: `{archetypeId, quantity, rationale, importance, completion
 
 ## 0a. Does this task matter to the long-term plan: `importance`
 
-`{longTerm, why}`. `longTerm` is true when the task moves something the person cares about over months — a graded part of a course they set a target for, a deliverable others will see (a submission, a release, a paper, an MVP), a step a milestone's outcome depends on — and false for upkeep, filing and errands whose result nobody depends on. `why` is one sentence naming the milestone, grade or deliverable it rests on. Only an important task's `questions` are put to the person; a minor task's questions are settled by the app as assumptions (their first option), so for a minor task put the most likely answer first.
+`{longTerm, why}`. `longTerm` is true when the task moves something the person cares about over months — a graded part of a course they set a target for, a deliverable others will see (a submission, a release, a paper, an MVP), a step a milestone's outcome depends on — and false for upkeep, filing and errands whose result nobody depends on. `why` is one sentence naming the milestone, grade or deliverable it rests on. The app puts questions to the person only for a task important by rule (graded coursework, or a milestone weighted 60 or more), and then only the first two; every other question is settled as an assumption (its first option) the person can change on the task. So order `questions` by how much the answer changes the plan, and put the most likely answer first in every question.
 
 ## 0c. How finishing the task is taken: `completion`
 

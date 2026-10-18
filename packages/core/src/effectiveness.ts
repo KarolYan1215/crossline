@@ -13,6 +13,7 @@
  * on that day whether it was delivered. "The flywheel compounds" has no evidence at the personal level; this is where the app tests it.
  */
 import { relationFulfilment, type RelationCheckOutcome } from "./artifact-plan";
+import { churnPerDay, type PlanChurnDay } from "./plan-churn";
 export type EffectivenessInput = {
   today: string;
   /** Approved milestones with a deadline, and each criterion's best reading with the day it was first met. */
@@ -25,8 +26,15 @@ export type EffectivenessInput = {
   deadlineMinutes: number;
   totalMinutes: number;
   priorityOrder: string[];
-  /** The system's own cost over the last 7 days. */
-  decisions: { count: number; minutes: number };
+  /**
+   * The system's own cost over the last 7 days: decisions made, the minutes the cards that measured it were on screen, and how many of
+   * the decisions were timed (cards answered before timing existed, and approvals outside the cards, carry no time).
+   */
+  decisions: { count: number; minutes: number; timed?: number };
+  /** Each recorded day of the last 7: the work the plan moved or dropped (`plan-churn.ts`). */
+  planChurnDays?: PlanChurnDay[];
+  /** Attention minutes the interview took, once (`onboarding.attention`), when recorded. */
+  setupMinutes?: number | null;
   captureToScheduledMinutes: number[];
   pendingNow: number;
   /** Mechanism coverage inputs. */
@@ -43,7 +51,9 @@ export type Effectiveness = {
     /** Week by week (Monday's date), the median of actual ÷ the analysis's estimate; null under three observations that week. */
     weekly: Array<{ week: string; n: number; medianBias: number | null }> };
   priorities: { minutesByLine: Record<string, number>; deadlineShare: number | null; topLine: string | null; topLineShare: number | null };
-  overhead: { decisionsPerDay: number; decisionMinutesPerDay: number; medianCaptureToScheduled: number | null; pendingNow: number };
+  overhead: { decisionsPerDay: number; decisionMinutesPerDay: number; decisionsTimed: number; medianCaptureToScheduled: number | null; pendingNow: number;
+    /** Pieces of work the plan moved or dropped per recorded day; null before any day is recorded. */
+    planChangesPerDay: number | null; planDaysRecorded: number; setupMinutes: number | null };
   coverage: { datedAndTimed: number | null; progressRecorded: number | null; followUpsOnTime: number | null };
   relations: { checked: number; rate: number | null; byKind: Array<{ kind: string; checked: number; rate: number }> };
 };
@@ -101,7 +111,9 @@ export function computeEffectiveness(input: EffectivenessInput): Effectiveness {
     priorities: { minutesByLine: input.minutesByLine, deadlineShare: share(input.deadlineMinutes, input.totalMinutes),
       topLine, topLineShare: topLine ? share(input.minutesByLine[topLine] ?? 0, totalLine) : null },
     overhead: { decisionsPerDay: round(input.decisions.count / 7, 1)!, decisionMinutesPerDay: round(input.decisions.minutes / 7, 1)!,
-      medianCaptureToScheduled: median(input.captureToScheduledMinutes), pendingNow: input.pendingNow },
+      decisionsTimed: input.decisions.timed ?? 0, medianCaptureToScheduled: median(input.captureToScheduledMinutes), pendingNow: input.pendingNow,
+      planChangesPerDay: churnPerDay(input.planChurnDays ?? []), planDaysRecorded: (input.planChurnDays ?? []).length,
+      setupMinutes: input.setupMinutes === undefined || input.setupMinutes === null ? null : Math.round(input.setupMinutes) },
     coverage: { datedAndTimed: share(input.committedWithBlock, input.committedOrders),
       progressRecorded: share(input.milestonesWithProgressLast7d, input.liveMilestones),
       followUpsOnTime: share(input.waitingAnsweredOnTime, input.waitingAnswered) },

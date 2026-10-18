@@ -118,9 +118,29 @@ export function backgroundSpend(signal: CostSignal): BackgroundSpend {
       ...(resetsAt ? { resetsAt } : {}) } };
   }
   const { mode } = budgetPolicy(used);
+  // The window that is spent says when it comes back: the person is told the hour, not just 「暂停」.
+  const fullest = [signal.short, signal.long].filter((window): window is CostWindow => Boolean(window))
+    .sort((a, b) => b.usedPercent - a.usedPercent)[0];
+  const resetsAt = fullest?.resetsAt ? new Date(fullest.resetsAt * 1000).toISOString() : undefined;
   return mode === "manual_core_only"
-    ? { mode, blocker: { code: "BUDGET_EXHAUSTED", message: `模型额度已用 ${Math.round(used)}%，后台自动工作暂停到额度恢复。` } }
+    ? { mode, blocker: { code: "BUDGET_EXHAUSTED", message: `模型额度已用 ${Math.round(used)}%，后台自动工作暂停到额度恢复。`, ...(resetsAt ? { resetsAt } : {}) } }
     : { mode };
+}
+
+/**
+ * What still works while background work is paused, and what waits (the 2026-10-18 evaluation: the person saw only 「已暂停」 and a
+ * stopped-looking system). The schedule, the calendar, reminders, timing and completion need no model at all; analysis, step plans,
+ * tutorials, research and the assistant do. A spent quota (`RATE_LIMIT_REACHED`) also stops the person's own turns — the input box's
+ * replies and the interview — while a quota nearly spent keeps them, holding what is left for them.
+ */
+export function degradedService(code: string): { works: string[]; paused: string[]; personTurns: boolean } {
+  const personTurns = code !== "RATE_LIMIT_REACHED";
+  return {
+    works: ["排程与日历：按现有任务和步骤照常重排，写入 Crossline 日历", "计时、完成确认与提交", "提醒与手机推送",
+      "手动改截止、时长和步骤", "回答待决事项（需要重排的，恢复后补上）", ...(personTurns ? ["输入框对话与访谈（为它们留着剩下的额度）"] : [])],
+    paused: ["新收集事项的分析与拆分", "拆步骤与按回答重排", "教程与调研", "助手代办", ...(personTurns ? [] : ["输入框的对话回复与访谈"])],
+    personTurns
+  };
 }
 
 export function spendAllows(spend: BackgroundSpend, kind: SpendKind): boolean {

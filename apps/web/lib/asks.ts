@@ -1,7 +1,7 @@
 import "server-only";
 import { recordOp, retractedEventIds, withUndo } from "./undo";
 import {
-  ATTENTION_SNAPSHOT, BACKGROUND_BLOCKER, CALENDAR_LINES, CALENDAR_PUBLISH_FAILURE, CALENDAR_SYNC_FAILURE, calendarEventKey, daysBetween, describeEvent, missingInputsOf, rankAsks,
+  ATTENTION_SNAPSHOT, BACKGROUND_BLOCKER, CALENDAR_LINES, degradedService, CALENDAR_PUBLISH_FAILURE, CALENDAR_SYNC_FAILURE, calendarEventKey, daysBetween, describeEvent, missingInputsOf, rankAsks,
   localStamp, prepStepRetried, readableFromMaterial, snoozeUntil, STEP_ANSWER_SLOT, stepAnswerSlot, taskTitleOf, urgencyFor, type CalendarLines,
   validateAskChoice, withFrozen, type AccessContext, type Ask, type AskField, type AskOption, type AskPreview, type AskSnooze,
   MILESTONE_RISK_KIND_LABEL, MILESTONE_RISK_LEVEL_LABEL, MILESTONE_RISKS_SETTING, milestoneRiskFingerprint, parseMilestoneRisks, riskBufferDays, riskCriteriaKeys, riskLevelOf
@@ -19,7 +19,7 @@ import { requestCodexSupervisor } from "./codex-runtime";
 import { autoPublishPass, forgetPublishedHash } from "./auto-publish";
 import { calendarFiling } from "./timeline";
 import { answerInterviewQuestion, flushPendingAnswers, interviewStatus, type InterviewStatus } from "./interview-status";
-import { requestStepReplan } from "./steps";
+import { recordStepAnswer, requestStepReplan } from "./steps";
 import { unfiledFiles } from "./file-belonging";
 import { decideEvent, eventProposals, publishFixedEvents } from "./fixed-events";
 import { identityLines } from "./lines";
@@ -633,11 +633,15 @@ function backgroundAsks({ store, ctx }: Source): Ask[] {
   const paused = readFailure(store, ctx.workspaceId, BACKGROUND_BLOCKER) as ({ resetsAt?: string; reason?: string } & NonNullable<ReturnType<typeof readFailure>>) | null;
   if (!paused || paused.reason === "CODEX_SUPERVISOR_UNAVAILABLE") return [];
   const until = paused.resetsAt ? `，预计 ${localStamp(paused.resetsAt, effectiveSchedulePreferences(ctx).preferences.timeZone)} 恢复` : "";
+  // What still works is said first (2026-10-18 evaluation): the schedule, calendar, reminders and timing need no model, and a person
+  // told only 「已暂停」 read the whole system as stopped.
+  const service = degradedService(paused.code);
+  const spent = paused.code === "RATE_LIMIT_REACHED" || paused.code === "BUDGET_EXHAUSTED";
   // Every analysis, plan and draft waits on this, so it is both urgent and important: on 待确认 it sat in 不重要不紧急 while Today's
   // opener called it the most urgent thing (2026-10-17 walkthrough, W-22).
   return [{ id: `background:${paused.code}`, kind: "background_paused", entityId: "background", urgency: "now", important: true, raisedAt: paused.at,
-    fingerprint: paused.code, title: "后台自动工作已暂停",
-    why: `${clause(paused.message)}${until}。新收集的事项会在恢复后自动分析；需要现在处理的可以在任务页手动点「分析」。`,
+    fingerprint: paused.code, title: spent ? "模型额度用完了：排程照常，AI 生成暂停" : "后台自动工作已暂停",
+    why: `${clause(paused.message)}${until}。照常可用：${service.works.join("；")}。暂停到恢复：${service.paused.join("；")}。恢复后自动补上，不需要操作。`,
     options: [{ id: "settings", label: "去看额度", href: "/settings#usage", recommended: true }] }];
 }
 
@@ -682,14 +686,20 @@ export function collectAsks(ctx: AccessContext, now = appNow()): Ask[] {
 
 /**
  * What a task's step plan could not read from the person's material or facts (decided 2026-10-09): the exam's scope, what they already
- * master, the format of the deliverable. Asked here with the plan's own options; the answer is a confirmed fact every later plan reads,
- * and the task is planned again with it.
+ * master, the format of the deliverable. Asked with the plan's own options; the answer is a confirmed fact every later plan reads, and
+ * the task is planned again with it.
+ *
+ * Several open questions of one project come as one card (2026-10-18 evaluation: approving 19 milestones raised about 60 of them, one
+ * card each): 「都按建议」 settles them all in one tap, 「逐条改」 opens one line per question where an empty line keeps the suggestion.
+ * Batching interruptions is what the notification evidence supports (Fitz et al. 2019); each answer stays changeable on the task.
  */
-function stepQuestionAsks({ store, ctx, today }: Source): Ask[] {
+type StepQuestionEntry = { order: StoredWorkOrder; plannedAt: string; version: number; question: { text: string; why?: string; options: string[] } };
+
+/** The open step questions, one entry per question, the same question from two tasks of one project once (the answer is per project). */
+function openStepQuestions({ store, ctx }: Source): StepQuestionEntry[] {
   const orders = new Map(store.listWorkOrders(ctx.workspaceId).filter((order) => ["approved", "preparing", "ready_for_human", "active"].includes(order.state))
     .map((order) => [order.id, order]));
   const answered = new Set(store.listProfileFacts(ctx.workspaceId).filter((fact) => fact.slot.startsWith(STEP_ANSWER_SLOT)).map((fact) => `${fact.projectId}|${fact.slot}`));
-  // The answer is kept per project, so the same question from two tasks of one project is one question: asked once, it answers both.
   const asked = new Set<string>();
   // What a task's own files answer (the problem set, how it is handed in, the AI rule) is read from them, never asked: the worker's task
   // pass writes it as an assumption, and it is left out here already so it never shows meanwhile.
@@ -697,14 +707,63 @@ function stepQuestionAsks({ store, ctx, today }: Source): Ask[] {
   return store.listStepPlans(ctx.workspaceId).flatMap((plan) => {
     const order = orders.get(plan.workOrderId);
     if (!order) return [];
-    const due = (order.payload as { dueDate?: string } | undefined)?.dueDate;
     return plan.questions.filter((question) => {
       const key = `${order.projectId}|${stepAnswerSlot(question.text)}`;
       if (withFiles.has(order.projectId) && readableFromMaterial(question.text)) return false;
       return !answered.has(key) && !asked.has(key) && Boolean(asked.add(key));
-    }).map((question): Ask => ({
+    }).map((question) => ({ order, plannedAt: plan.plannedAt, version: plan.version, question }));
+  });
+}
+
+/** At most this many questions on one project card; the rest come on the next one. */
+const STEP_QUESTIONS_PER_CARD = 8;
+
+/** Questions with a suggestion, grouped by project where a project has two or more; the others are asked one by one. */
+function stepQuestionGroups(source: Source): { groups: Map<string, StepQuestionEntry[]>; single: StepQuestionEntry[] } {
+  const byProject = new Map<string, StepQuestionEntry[]>();
+  const single: StepQuestionEntry[] = [];
+  for (const entry of openStepQuestions(source)) {
+    if (!entry.order.projectId || !entry.question.options[0]) { single.push(entry); continue; }
+    byProject.set(entry.order.projectId, [...(byProject.get(entry.order.projectId) ?? []), entry]);
+  }
+  const groups = new Map<string, StepQuestionEntry[]>();
+  for (const [projectId, entries] of byProject) {
+    if (entries.length >= 2) groups.set(projectId, entries.slice(0, STEP_QUESTIONS_PER_CARD)); else single.push(...entries);
+  }
+  return { groups, single };
+}
+
+const URGENCY_RANK = { now: 0, soon: 1, later: 2 } as const;
+
+function stepQuestionAsks(source: Source): Ask[] {
+  const { store, ctx, today } = source;
+  const { groups, single } = stepQuestionGroups(source);
+  const projects = new Map(store.listProjects(ctx.workspaceId, { includeArchived: true }).map((project) => [project.id, project.name]));
+  const dueOf = (order: StoredWorkOrder) => (order.payload as { dueDate?: string } | undefined)?.dueDate;
+  const batched = [...groups.entries()].map(([projectId, entries]): Ask => {
+    const dueDay = entries.map((entry) => dueOf(entry.order)).filter((day): day is string => Boolean(day)).sort()[0];
+    const urgency = entries.map((entry) => urgencyFor(dueOf(entry.order), today)).sort((a, b) => URGENCY_RANK[a] - URGENCY_RANK[b])[0]!;
+    const name = projects.get(projectId) ?? projectId;
+    return {
+      id: `stepq:p:${projectId}`, kind: "step_question", entityId: projectId, line: entries[0]!.order.identityId,
+      urgency, ...(dueDay ? { dueDay } : {}), raisedAt: entries.map((entry) => entry.plannedAt).sort().at(-1)!,
+      fingerprint: entries.map((entry) => `${entry.version}:${stepAnswerSlot(entry.question.text)}`).join("|"),
+      important: true, preview: taskPreview(entries[0]!.order.id),
+      title: `「${short(name, 20)}」有 ${entries.length} 个问题只有本人知道`,
+      why: `${entries.map((entry, index) => `${index + 1}. 「${short(taskTitleOf(entry.order), 16)}」${clause(entry.question.text)} → 建议：${entry.question.options[0]}`).join("；")}。`
+        + "可以都按建议处理，之后在任务详情里随时改；也可以逐条写自己的答案，留空的按建议。",
+      options: [
+        { id: "accept", label: "都按建议", detail: "每个任务按回答重排一次步骤；之后可在任务详情里改", recommended: true },
+        { id: "edit", label: "逐条改", fields: entries.map((entry, index) => ({ id: `q${index}`, label: `${index + 1}. ${short(entry.question.text, 40)}`,
+          kind: "text" as const, required: false, placeholder: `留空按建议：${entry.question.options[0]}` })) }
+      ]
+    };
+  });
+  const one = single.map(({ order, plannedAt, version, question }): Ask => {
+    const due = dueOf(order);
+    return {
       id: `stepq:${order.id}:${stepAnswerSlot(question.text)}`, kind: "step_question", entityId: order.id, line: order.identityId,
-      urgency: urgencyFor(due, today), ...(due ? { dueDay: due } : {}), raisedAt: plan.plannedAt, fingerprint: `${plan.version}:${question.text}`,
+      urgency: urgencyFor(due, today), ...(due ? { dueDay: due } : {}), raisedAt: plannedAt, fingerprint: `${version}:${question.text}`,
       // The step planner asks only for important work and only what it cannot read from the material: its plan waits on the answer.
       important: true, preview: taskPreview(order.id),
       freeText: { placeholder: question.options[0] ? `例如：${question.options[0]}，或用自己的话说` : "用自己的话回答" },
@@ -713,8 +772,25 @@ function stepQuestionAsks({ store, ctx, today }: Source): Ask[] {
       options: [...question.options.map((option, index) => ({ id: `o${index}`, label: option,
         fields: [{ id: "other", label: "补充", kind: "text" as const, required: false, placeholder: "可不填" }] })),
         { id: "free", label: "都不是，我来写", fields: [{ id: "other", label: "回答", kind: "text" as const, required: true }] }]
-    }));
+    };
   });
+  return [...batched, ...one];
+}
+
+/** A project card's answer: each question its own line or the suggestion; each task asked is planned again once, with all its answers. */
+function answerStepQuestionBatch(ctx: AccessContext, ask: Ask, optionId: string, values: Record<string, string>): AskResult {
+  const entries = stepQuestionGroups({ store: getStore(), ctx, today: planToday(ctx), now: appNow() }).groups.get(ask.entityId);
+  if (!entries?.length) return { ok: false, code: "STEP_QUESTION_GONE" };
+  if (optionId !== "accept" && optionId !== "edit") return { ok: false, code: "ASK_OPTION_UNKNOWN" };
+  const byOrder = new Map<string, string[]>();
+  entries.forEach((entry, index) => {
+    const own = optionId === "edit" ? (values[`q${index}`] ?? "").trim() : "";
+    const answer = own || entry.question.options[0]!;
+    recordStepAnswer(ctx, entry.order, entry.question.text, answer, own || `按建议：${answer}`);
+    byOrder.set(entry.order.id, [...(byOrder.get(entry.order.id) ?? []), `「${entry.question.text}」：${answer}`]);
+  });
+  for (const [orderId, lines] of byOrder) requestStepReplan(ctx, orderId, `本人回答了${lines.join("；")}。按此重新安排步骤。`);
+  return { ok: true };
 }
 
 function snoozes(ctx: AccessContext): AskSnooze[] {
@@ -873,6 +949,7 @@ async function answerOne(ctx: AccessContext, ask: Ask, choice: AskChoice, values
       void autoPublishPass().catch(() => {});
       return { ok: true };
     case "step_question": {
+      if (ask.id.startsWith("stepq:p:")) return answerStepQuestionBatch(ctx, ask, optionId, values as Record<string, string>);
       const order = store.listWorkOrders(ctx.workspaceId).find((item) => item.id === ask.entityId);
       const plan = order ? store.getStepPlan(ctx.workspaceId, order.id) : undefined;
       const question = plan?.questions.find((item) => ask.id.endsWith(stepAnswerSlot(item.text)));
@@ -880,8 +957,7 @@ async function answerOne(ctx: AccessContext, ask: Ask, choice: AskChoice, values
       const labels = ask.options.filter((item) => choice.optionIds.includes(item.id) && item.id !== "free").map((item) => item.label);
       const answer = [...new Set([...labels, (values.other ?? "").trim(), choice.note].filter(Boolean))].join("；");
       if (!answer) return { ok: false, code: "STEP_ANSWER_EMPTY" };
-      store.upsertProfileFact({ workspaceId: ctx.workspaceId, identityId: order.identityId, projectId: order.projectId, slot: stepAnswerSlot(question.text),
-        value: `【${question.text}】${answer}`, status: "confirmed", sourceRef: "ask", sourceQuote: answer, updatedAt: new Date().toISOString() });
+      recordStepAnswer(ctx, order, question.text, answer);
       requestStepReplan(ctx, order.id, `本人回答了「${question.text}」：${answer}。按此重新安排步骤。`);
       return { ok: true };
     }
@@ -971,7 +1047,7 @@ function withNoteInFields(ask: Ask, optionIds: string[], values: Record<string, 
  * option id (the original shape) or `{optionIds, note}`: several options where the ask takes several, and the person's own words where it
  * takes them. Where nothing downstream reads the words they are kept on the `ask.answered` event.
  */
-export async function answerAsk(ctx: AccessContext, askId: string, choice: string | { optionIds?: string[]; note?: string },
+export async function answerAsk(ctx: AccessContext, askId: string, choice: string | { optionIds?: string[]; note?: string; seconds?: number },
   values: Record<string, unknown>, now = appNow()): Promise<AskResult> {
   // An interview question further down the round is not listed (one card at a time) but is still the person's to answer.
   const ask = collectAsks(ctx, now).find((item) => item.id === askId)
@@ -987,19 +1063,21 @@ export async function answerAsk(ctx: AccessContext, askId: string, choice: strin
   const label = checked.options.map((option) => option.label).join("、") || "自己回答";
   const result = await withUndo(ctx, `${label}：${ask.title}`, () => answerOne(ctx, ask, { optionIds: ids, note: checked.note }, checked.values));
   if (result.ok) record(ctx, "ask.answered", ask.entityId, `ask:answered:${ask.id}:${ids.join("+") || "note"}:${now.getTime()}`,
-    { askId: ask.id, kind: ask.kind, optionId: ids[0] ?? "", ...(ids.length > 1 ? { optionIds: ids } : {}), ...(checked.note ? { note: checked.note } : {}) });
+    { askId: ask.id, kind: ask.kind, optionId: ids[0] ?? "", ...(ids.length > 1 ? { optionIds: ids } : {}), ...(checked.note ? { note: checked.note } : {}),
+      // Seconds the card was on screen before the answer, when the page measured it: the decision's cost on 系统体检.
+      ...(typeof choice !== "string" && choice.seconds !== undefined ? { seconds: choice.seconds } : {}) });
   return result;
 }
 
 /** 「明天再问」/「下周再问」: hidden until then, back sooner if what it is about changes. */
-export function snoozeAsk(ctx: AccessContext, askId: string, choice: "tomorrow" | "week", now = appNow()): AskResult {
+export function snoozeAsk(ctx: AccessContext, askId: string, choice: "tomorrow" | "week", now = appNow(), seconds?: number): AskResult {
   const ask = collectAsks(ctx, now).find((item) => item.id === askId);
   if (!ask) return { ok: false, code: "ASK_NOT_FOUND" };
   const until = snoozeUntil(choice, planToday(ctx, now));
   // Recorded as an operation, so 「明天再问」 pressed by mistake can be undone like any other answer.
   const before = new Set(getStore().listEvents(ctx.workspaceId, { type: "ask.snoozed" }).map((event) => event.eventId));
   record(ctx, "ask.snoozed", ask.entityId, `ask:snoozed:${ask.id}:${now.getTime()}`,
-    { askId: ask.id, until, fingerprint: ask.fingerprint } satisfies AskSnooze);
+    { askId: ask.id, until, fingerprint: ask.fingerprint, ...(seconds === undefined ? {} : { seconds }) } satisfies AskSnooze & { seconds?: number });
   const added = getStore().listEvents(ctx.workspaceId, { type: "ask.snoozed" }).filter((event) => !before.has(event.eventId)).map((event) => event.eventId);
   if (added.length) recordOp(ctx, `${choice === "tomorrow" ? "明天再问" : "下周再问"}：${ask.title}`, { kind: "event.retract", eventIds: added });
   return { ok: true };

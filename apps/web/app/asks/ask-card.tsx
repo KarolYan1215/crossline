@@ -1,7 +1,7 @@
 "use client";
 
-import { useId, useState, type ReactNode } from "react";
-import type { Ask, AskField, AskOption, AskProgress } from "@crossline/core";
+import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from "react";
+import { DECISION_SECONDS_MAX, type Ask, type AskField, type AskOption, type AskProgress } from "@crossline/core";
 import { Tag } from "../ui/tag";
 import { Clamp } from "../ui/clamp";
 import { RiskList } from "../milestones/risk-glyph";
@@ -18,6 +18,33 @@ async function post(path: string, body: Record<string, unknown>): Promise<{ ok?:
 }
 
 /** An option needs its follow-up fields filled before it can be sent: a required one, or optional ones with nowhere else to say it. */
+/**
+ * Seconds the card has been at least half on screen while the page was in front: what deciding it cost, sent with the answer (capped
+ * at `DECISION_SECONDS_MAX`, past which the person had walked away). A list shows several cards at once, so mounting is not looking.
+ */
+function useVisibleSeconds(ref: RefObject<HTMLElement | null>): () => number {
+  const total = useRef(0);
+  const since = useRef<number | null>(null);
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    let inView = typeof IntersectionObserver === "undefined";
+    const update = () => {
+      const on = inView && document.visibilityState === "visible";
+      const now = performance.now();
+      if (on && since.current === null) since.current = now;
+      if (!on && since.current !== null) { total.current += now - since.current; since.current = null; }
+    };
+    const observer = typeof IntersectionObserver === "undefined" ? undefined
+      : new IntersectionObserver(([entry]) => { inView = Boolean(entry?.isIntersecting && entry.intersectionRatio >= 0.5); update(); }, { threshold: [0, 0.5, 1] });
+    observer?.observe(element);
+    document.addEventListener("visibilitychange", update);
+    update();
+    return () => { observer?.disconnect(); document.removeEventListener("visibilitychange", update); inView = false; update(); };
+  }, [ref]);
+  return () => Math.min(DECISION_SECONDS_MAX, Math.round((total.current + (since.current === null ? 0 : performance.now() - since.current)) / 1000));
+}
+
 const needsFields = (ask: Ask, option: AskOption) => Boolean(option.fields?.length) && (option.fields!.some((field) => field.required) || !ask.freeText);
 
 /**
@@ -33,6 +60,8 @@ export function AskCard({ ask, preview, onDone, level = 3 }: { ask: Ask; preview
   const [note, setNote] = useState("");
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
+  const cardRef = useRef<HTMLLIElement>(null);
+  const seconds = useVisibleSeconds(cardRef);
   const answerable = ask.options.filter((option) => !option.href);
   const links = ask.options.filter((option) => option.href);
   const chosen = answerable.filter((option) => picked.includes(option.id));
@@ -45,7 +74,7 @@ export function AskCard({ ask, preview, onDone, level = 3 }: { ask: Ask; preview
     if (result?.ok) { onDone(ask.id); return; }
     setStatus(answerProblem(result?.code));
   };
-  const submit = (optionIds: string[]) => void send("/api/asks/answer", answerBody(ask.id, optionIds, values, note));
+  const submit = (optionIds: string[]) => void send("/api/asks/answer", answerBody(ask.id, optionIds, values, note, seconds()));
   const initials = (options: AskOption[]) => Object.fromEntries(options.flatMap((option) => option.fields ?? [])
     .filter((field) => field.initial).map((field) => [field.id, field.initial!]));
 
@@ -61,7 +90,7 @@ export function AskCard({ ask, preview, onDone, level = 3 }: { ask: Ask; preview
   const outcome = askOutcome(ask);
   const sources = askSources(ask);
 
-  return <li className="ask-card ak-card" data-line={ask.line} data-urgency={ask.urgency} data-kind={ask.kind}>
+  return <li ref={cardRef} className="ask-card ak-card" data-line={ask.line} data-urgency={ask.urgency} data-kind={ask.kind}>
     <AskMeta ask={ask} />
     {level === 4 ? <h4 className="ak-title">{ask.title}</h4> : <h3 className="ak-title">{ask.title}</h3>}
     <dl className="ak-brief">
@@ -115,8 +144,8 @@ export function AskCard({ ask, preview, onDone, level = 3 }: { ask: Ask; preview
     </div>}
 
     <p className="ask-later">
-      <button type="button" className="text-button" disabled={busy} onClick={() => void send("/api/asks/snooze", { askId: ask.id, choice: "tomorrow" })}>明天再问</button>
-      <button type="button" className="text-button" disabled={busy} onClick={() => void send("/api/asks/snooze", { askId: ask.id, choice: "week" })}>下周再问</button>
+      <button type="button" className="text-button" disabled={busy} onClick={() => void send("/api/asks/snooze", { askId: ask.id, choice: "tomorrow", seconds: seconds() })}>明天再问</button>
+      <button type="button" className="text-button" disabled={busy} onClick={() => void send("/api/asks/snooze", { askId: ask.id, choice: "week", seconds: seconds() })}>下周再问</button>
       {status && <small role="status">{status}</small>}
     </p>
   </li>;

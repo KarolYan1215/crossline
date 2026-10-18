@@ -30,7 +30,12 @@ test("estimate accuracy is compared raw against calibrated, and coverage of the 
 test("priorities, overhead and mechanism coverage come out as shares and per-day figures", () => {
   const result = computeEffectiveness(base);
   expect(result.priorities).toMatchObject({ deadlineShare: 0.56, topLine: "research", topLineShare: 0.71 });
-  expect(result.overhead).toEqual({ decisionsPerDay: 3, decisionMinutesPerDay: 5, medianCaptureToScheduled: 10, pendingNow: 4 });
+  expect(result.overhead).toEqual({ decisionsPerDay: 3, decisionMinutesPerDay: 5, decisionsTimed: 0, medianCaptureToScheduled: 10, pendingNow: 4,
+    planChangesPerDay: null, planDaysRecorded: 0, setupMinutes: null });
+  // The cost of running the system: timed decisions, how often the plan moved, and the interview once.
+  const measured = computeEffectiveness({ ...base, decisions: { count: 21, minutes: 14, timed: 12 }, setupMinutes: 41.6,
+    planChurnDays: [{ moved: ["a", "b"], dropped: ["c"], readings: 40 }, { moved: [], dropped: [], readings: 30 }] });
+  expect(measured.overhead).toMatchObject({ decisionMinutesPerDay: 2, decisionsTimed: 12, planChangesPerDay: 1.5, planDaysRecorded: 2, setupMinutes: 42 });
   expect(result.coverage).toEqual({ datedAndTimed: 0.7, progressRecorded: 0.38, followUpsOnTime: 0.5 });
 });
 

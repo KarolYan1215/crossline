@@ -64,7 +64,12 @@ export function BackgroundModule({ overview }: { overview: BackgroundOverview })
     <section className="st-card" aria-label="后台任务">
       <header><h3>后台任务</h3><small>后台开销跟着最近一次本人操作走：48 小时内照常，7 天内只做收集分析与日历归类，更久不调用模型</small></header>
       <div className="st-row"><span className="st-row-label">当前状态<small>最近一次本人操作 {when(overview.engagement.lastActiveAt, overview.timeZone)}</small></span>
-        <Tag tone={tier.tone}>{tier.text}</Tag></div>
+        <Tag tone={tier.tone}>{overview.quotaPause ? "额度暂停中" : tier.text}</Tag></div>
+      {overview.quotaPause && <div className="bg-degraded" role="status">
+        <p>{overview.quotaPause.message}{overview.quotaPause.resetsAt ? `预计 ${when(overview.quotaPause.resetsAt, overview.timeZone)} 恢复。` : ""}恢复后自动补上，不需要操作。</p>
+        <div><b>照常可用</b><ul>{overview.quotaPause.works.map((item) => <li key={item}>{item}</li>)}</ul></div>
+        <div><b>暂停到恢复</b><ul>{overview.quotaPause.paused.map((item) => <li key={item}>{item}</li>)}</ul></div>
+      </div>}
       {kinds.map((item) => <div key={item.kind} className="st-row">
         <span className="st-row-label">{item.label}<small>{item.explained} · 上次 {when(item.lastRunAt, overview.timeZone)}{item.lastOk === false ? "（失败）" : ""} · 近 7 天 {item.weekRuns} 次、{tokens(item.weekTokens)} tokens</small></span>
         <SegmentedControl label={`${item.label}是否运行`} value={item.paused ? "paused" : "on"} options={[{ value: "on", label: "运行" }, { value: "paused", label: "暂停" }]}

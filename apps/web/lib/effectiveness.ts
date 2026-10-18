@@ -1,5 +1,5 @@
 import "server-only";
-import { answeredOnTime, computeEffectiveness, type AccessContext, type Effectiveness } from "@crossline/core";
+import { answeredOnTime, ATTENTION_SETTING, computeEffectiveness, planChurnKey, type AccessContext, type AttentionRecord, type Effectiveness, type PlanChurnDay } from "@crossline/core";
 import { relationChecks } from "@crossline/db";
 import { getStore, loadCurrentPlan, loadGoalForecast, planToday, resolvedEstimate, workspaceCalibration } from "./crossline";
 import { countPending } from "./pending";
@@ -13,7 +13,7 @@ const ACTIONABLE = new Set(["approved", "preparing", "ready_for_human", "active"
  * calibration's own rolling backtest (each finished task predicted only from the ones before it), not an
  * in-sample fit, so the calibrated figure is not flattered by having seen the answer.
  */
-export async function loadEffectiveness(ctx: AccessContext, now = new Date()): Promise<Effectiveness & { decisionMinutesMeasured: false }> {
+export async function loadEffectiveness(ctx: AccessContext, now = new Date()): Promise<Effectiveness> {
   const store = getStore();
   const today = planToday(ctx, now);
   const weekAgo = new Date(now.getTime() - 7 * DAY).toISOString();
@@ -64,6 +64,18 @@ export async function loadEffectiveness(ctx: AccessContext, now = new Date()): P
     .filter((event) => event.createdAt >= weekAgo && (event.type !== "work_order.transitioned"
       || (event.payload as { event?: { type?: string; approvalId?: string } }).event?.approvalId === ctx.principalId));
 
+  // What deciding cost: seconds on screen that the cards measured (`ask.answered`, `ask.snoozed`), since 2026-10-18.
+  const timed = store.listEvents(ctx.workspaceId, { type: ["ask.answered", "ask.snoozed"] })
+    .filter((event) => event.createdAt >= weekAgo && typeof (event.payload as { seconds?: unknown }).seconds === "number");
+  const timedSeconds = timed.reduce((sum, event) => sum + Number((event.payload as { seconds: number }).seconds), 0);
+  const timedDecisions = timed.filter((event) => event.type === "ask.answered").length;
+  // How often the plan moved under the person, per day of the last seven that the web's timer recorded.
+  const planChurnDays = [...new Set(Array.from({ length: 7 }, (_, index) => planToday(ctx, new Date(now.getTime() - index * DAY))))].flatMap((day) => {
+    try { const raw = store.getSetting(ctx.workspaceId, planChurnKey(day)); return raw ? [JSON.parse(raw) as PlanChurnDay] : []; } catch { return []; }
+  });
+  let setupMinutes: number | null = null;
+  try { const record = JSON.parse(store.getSetting(ctx.workspaceId, ATTENTION_SETTING) || "null") as AttentionRecord | null; if (record) setupMinutes = record.seconds / 60; } catch { /* none */ }
+
   const captureToScheduled = store.listEvents(ctx.workspaceId, { type: "capture.created" }).filter((event) => event.createdAt >= new Date(now.getTime() - 30 * DAY).toISOString())
     .flatMap((event) => {
       const approvedAt = store.listEvents(ctx.workspaceId, { type: "work_order.transitioned", entityId: event.entityId })
@@ -81,7 +93,8 @@ export async function loadEffectiveness(ctx: AccessContext, now = new Date()): P
   const result = computeEffectiveness({
     today, milestones, durations, minutesByLine, deadlineMinutes, totalMinutes,
     priorityOrder: identityLines(ctx).map((pack) => pack.id),
-    decisions: { count: decisionEvents.length, minutes: 0 }, captureToScheduledMinutes: captureToScheduled, pendingNow: countPending(ctx).total,
+    decisions: { count: decisionEvents.length, minutes: Math.round((timedSeconds / 60) * 10) / 10, timed: timedDecisions }, planChurnDays, setupMinutes,
+    captureToScheduledMinutes: captureToScheduled, pendingNow: countPending(ctx).total,
     committedOrders: committed.length, committedWithBlock: committed.filter((order) => scheduled.has(order.id)).length,
     liveMilestones: approved.length, milestonesWithProgressLast7d: approved.filter((milestone) => progressed.has(milestone.id)).length,
     waitingAnswered: waiting.length, waitingAnsweredOnTime: onTime.length,
@@ -93,7 +106,7 @@ export async function loadEffectiveness(ctx: AccessContext, now = new Date()): P
     result.estimates = { ...result.estimates, maeRaw: round(backtest.maeRaw), maeCalibrated: round(backtest.maeCalibrated),
       coverageRaw: round(backtest.coverageRaw), coverageCalibrated: round(backtest.coverageCalibrated) };
   }
-  return { ...result, decisionMinutesMeasured: false };
+  return result;
 }
 
 const round = (value: number | null) => value === null ? null : Math.round(value * 100) / 100;

@@ -1,6 +1,6 @@
 import "server-only";
-import { STEP_STARTS_SETTING, scheduledMinutesKey, type AccessContext } from "@crossline/core";
-import { effectiveSchedulePreferences, effectiveWeight, getStore, loadCurrentPlan, planToday, toZonedInstant } from "./crossline";
+import { addChurn, PLAN_SNAPSHOT_SETTING, planChanges, planChurnKey, STEP_STARTS_SETTING, scheduledMinutesKey, type AccessContext, type PlanChurnDay, type PlanSnapshot } from "@crossline/core";
+import { effectiveSchedulePreferences, effectiveWeight, getStore, loadCurrentPlan, plannerIdOfBlock, planToday, toZonedInstant } from "./crossline";
 
 /** The setting that remembers which work was given a time on a day: `schedule.day:<YYYY-MM-DD>` → `{ [orderId]: "HH:MM" }`. */
 export const scheduledDayKey = (day: string) => `schedule.day:${day}`;
@@ -75,6 +75,7 @@ export async function recordScheduledToday(ctx: AccessContext, now = new Date())
     if (at && (!orderStarts[orderId] || at < orderStarts[orderId]!)) orderStarts[orderId] = at;
   }
   getStore().setSetting(ctx.workspaceId, ORDER_STARTS_SETTING, JSON.stringify(orderStarts));
+  recordPlanChurn(ctx, plan.blocks, now, today, instant);
   // Each approved milestone's importance as the scheduler weighs it (the slider, else the presets): the worker cannot compute the
   // presets, and the step planner asks the person only about important work (docs/review-2026-10-13.md §11).
   const weights = Object.fromEntries(getStore().listMilestones(ctx.workspaceId).filter((milestone) => milestone.status === "approved")
@@ -98,4 +99,36 @@ export function stepStartsOf(blocks: Array<{ id: string; day?: string; start: st
     if (at && (!out[key] || at < out[key]!)) out[key] = at;
   }
   return out;
+}
+
+const OPEN_STATES = new Set(["approved", "preparing", "ready_for_human", "active"]);
+
+/**
+ * Compares where each piece of work starts in the next seven days with the last reading and adds what moved or lost its time to the
+ * day's record (`packages/core/src/plan-churn.ts`), which 系统体检 averages. Kept under `metrics.`, not `schedule.`, so undoing an
+ * operation never rewinds the measurement.
+ */
+function recordPlanChurn(ctx: AccessContext, blocks: Array<{ id: string; day?: string; start: string }>, now: Date, today: string,
+  instant: (day: string, time: string) => string | undefined): void {
+  const store = getStore();
+  const until = new Date(now.getTime() + 7 * 86_400_000).toISOString();
+  const starts: Record<string, string> = {};
+  for (const block of blocks) {
+    if (!block.id.startsWith("scheduled:") || !block.day || block.day < today) continue;
+    const at = instant(block.day, block.start);
+    const key = plannerIdOfBlock(block.id);
+    if (at && at < until && (!starts[key] || at < starts[key]!)) starts[key] = at;
+  }
+  const next: PlanSnapshot = { at: now.toISOString(), until, starts };
+  let previous: PlanSnapshot | undefined;
+  try { previous = JSON.parse(store.getSetting(ctx.workspaceId, PLAN_SNAPSHOT_SETTING) || "null") ?? undefined; } catch { previous = undefined; }
+  const orders = new Map(store.listWorkOrders(ctx.workspaceId).map((order) => [order.id, order]));
+  const doneSteps = new Set(store.listStepPlans(ctx.workspaceId).flatMap((plan) => plan.steps.filter((step) => step.status !== "planned")
+    .map((step) => `${plan.workOrderId}#${step.id}`)));
+  const alive = (key: string) => OPEN_STATES.has(orders.get(key.split("#")[0]!)?.state ?? "") && !doneSteps.has(key);
+  const changes = planChanges(previous, next, alive);
+  let day: PlanChurnDay | undefined;
+  try { day = JSON.parse(store.getSetting(ctx.workspaceId, planChurnKey(today)) || "null") ?? undefined; } catch { day = undefined; }
+  store.setSetting(ctx.workspaceId, planChurnKey(today), JSON.stringify(addChurn(day, changes)));
+  store.setSetting(ctx.workspaceId, PLAN_SNAPSHOT_SETTING, JSON.stringify(next));
 }

@@ -43,6 +43,7 @@ export * from "./auto-approval";
 export * from "./calibration";
 export * from "./telemetry";
 export * from "./effectiveness";
+export * from "./plan-churn";
 import type { EvidenceQuestionTemplate } from "./milestone-templates";
 export type EnergyLevel = "low" | "medium" | "high";
 

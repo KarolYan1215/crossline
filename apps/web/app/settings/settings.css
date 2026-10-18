@@ -45,6 +45,7 @@
 .st-health-cell b{font-size:13px}
 .st-health-cell small{font-size:12px;color:var(--graphite)}
 .st-health-wide{grid-column:1/-1;display:grid}
+.st-health-cell>.st-health-stats{display:flex;flex-wrap:wrap;gap:8px 18px}
 .st-health-bullet{flex:1 1 100%}
 .st-meter{display:grid;grid-template-columns:minmax(0,1fr) 120px 3.5em;gap:8px;align-items:center;font-size:13px}
 .st-meter-bar{height:6px;background:var(--mist)}
@@ -145,3 +146,7 @@
 .codex-verification-url .mono{color:var(--ink);user-select:all}
 /* A readable measure for the library's prose rows (docs/copy-style.md: about 40 characters a line). */
 .sk-rules li p,.sk-desc,.sk-facts dd{max-width:46em}
+
+.bg-degraded{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(240px,100%),1fr));gap:6px 16px;padding:8px 10px;background:var(--chalk);font-size:13px}
+.bg-degraded p{grid-column:1/-1;margin:0}
+.bg-degraded ul{margin:2px 0 0;padding-left:18px}

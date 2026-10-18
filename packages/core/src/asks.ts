@@ -171,6 +171,15 @@ export function validateAskAnswer(ask: Ask, optionId: string, values: Record<str
 /** The longest answer in the person's own words (`Ask.freeText`). */
 export const ASK_NOTE_MAX = 4000;
 /**
+ * The longest a card's time on screen counts as deciding: past five minutes the person had walked away. What a decision cost is the
+ * system's own price (the 2026-10-18 evaluation: without it nothing can show the system saves more time than it takes).
+ */
+export const DECISION_SECONDS_MAX = 300;
+/** A client's reported seconds on screen, or undefined when it reported none or something that is not a time. */
+export function decisionSeconds(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.min(DECISION_SECONDS_MAX, Math.round(value)) : undefined;
+}
+/**
  * Checks a choice that may hold several options (`select: "many"`) and/or the person's own words (`freeText`). Exactly one
  * option for a single-choice ask; at least one for a multiple-choice ask; none at all only when there is a note and the ask
  * takes free text. Each chosen option's fields are checked as `validateAskAnswer` checks them.

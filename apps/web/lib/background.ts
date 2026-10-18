@@ -1,5 +1,5 @@
 import "server-only";
-import { BACKGROUND_KINDS, BACKGROUND_PAUSED, backgroundKindOf, engagementTier, pausedKinds, type AccessContext, type BackgroundKind, type Engagement } from "@crossline/core";
+import { BACKGROUND_BLOCKER, BACKGROUND_KINDS, BACKGROUND_PAUSED, backgroundKindOf, degradedService, engagementTier, pausedKinds, type AccessContext, type BackgroundKind, type Engagement } from "@crossline/core";
 import { isPaused, listAgentTasks, setPaused } from "@crossline/db";
 import { getStore, readSchedulePreferences } from "./crossline";
 
@@ -13,6 +13,8 @@ export type BackgroundOverview = {
   engagement: { tier: Engagement; lastActiveAt: string | null };
   kinds: Array<{ kind: BackgroundKind; label: string; explained: string; paused: boolean; lastRunAt: string | null; lastOk: boolean | null; weekRuns: number; weekTokens: number }>;
   running: Array<{ taskId: string; title: string; startedAt: string }>;
+  /** Background work paused for the quota (`BACKGROUND_BLOCKER`): why, until when, and what still works meanwhile. */
+  quotaPause?: { message: string; resetsAt?: string; works: string[]; paused: string[] };
 };
 
 export function backgroundOverview(ctx: AccessContext, now = new Date()): BackgroundOverview {
@@ -33,7 +35,8 @@ export function backgroundOverview(ctx: AccessContext, now = new Date()): Backgr
         weekRuns: usage.reduce((sum, row) => sum + row.runs, 0), weekTokens: usage.reduce((sum, row) => sum + row.totalTokens, 0) };
     }),
     running: listAgentTasks(store, ctx.workspaceId).filter((task) => task.status === "running")
-      .map((task) => ({ taskId: task.taskId, title: task.title, startedAt: task.requestedAt }))
+      .map((task) => ({ taskId: task.taskId, title: task.title, startedAt: task.requestedAt })),
+    ...quotaPauseOf(store.getSetting(ctx.workspaceId, BACKGROUND_BLOCKER))
   };
 }
 
@@ -46,4 +49,14 @@ export function setBackgroundPaused(ctx: AccessContext, kind: BackgroundKind, pa
   if (paused) current.add(kind); else current.delete(kind);
   store.setSetting(ctx.workspaceId, BACKGROUND_PAUSED, JSON.stringify([...current]));
   return { ok: true };
+}
+
+function quotaPauseOf(raw: string | undefined): { quotaPause?: NonNullable<BackgroundOverview["quotaPause"]> } {
+  if (!raw) return {};
+  try {
+    const blocker = JSON.parse(raw) as { code?: string; message?: string; resetsAt?: string; reason?: string };
+    if (!blocker.code || blocker.reason === "CODEX_SUPERVISOR_UNAVAILABLE") return {};
+    const { works, paused } = degradedService(blocker.code);
+    return { quotaPause: { message: blocker.message ?? "后台自动工作已暂停", ...(blocker.resetsAt ? { resetsAt: blocker.resetsAt } : {}), works, paused } };
+  } catch { return {}; }
 }

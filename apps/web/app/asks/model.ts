@@ -28,7 +28,7 @@ const OUTCOMES: Record<AskKind, { answered: string; unanswered: string }> = {
   event_propose: { answered: "写入 Crossline 日历，提前 10 分钟提醒。", unanswered: "日历中不出现该日程；排程照样避开这段时间。" },
   step_question: { answered: "任务的步骤按回答重新安排。", unanswered: "步骤保持现有安排。" },
   relation_check: { answered: "记录这条飞轮关系是否兑现，计入兑现率。", unanswered: "这条关系的兑现情况不计入。" },
-  background_paused: { answered: "查看额度，恢复后自动继续。", unanswered: "新收集的事项等恢复后再分析。" },
+  background_paused: { answered: "查看额度；恢复后自动补上，排程与提醒一直照常。", unanswered: "排程、日历与提醒照常；分析与拆步骤等额度恢复后自动补上。" },
   locked_conflict: { answered: "挪开锁定块，或保留两件事的重叠。", unanswered: "锁定块与新日程继续重叠。" },
   outcome_check: { answered: "完成情况或结果记入任务与里程碑进度；说了出结果的日期就到那天再问。", unanswered: "任务保持已验收，完成情况不计入里程碑进度。" },
   progress_check: { answered: "这一步的进度按回答记下，排程按剩下的部分安排。", unanswered: "进度保持原样，不影响别的事。" },
@@ -84,10 +84,14 @@ export function byQuadrant(asks: Ask[]): Record<AskQuadrant, Ask[]> {
   return groups;
 }
 
-/** The request body for `POST /api/asks/answer`. A single option also goes as `optionId`, which the route has always taken. */
-export function answerBody(askId: string, optionIds: string[], values: Record<string, string>, note: string): Record<string, unknown> {
+/**
+ * The request body for `POST /api/asks/answer`. A single option also goes as `optionId`, which the route has always taken; `seconds` is
+ * how long the card was on screen (`useVisibleSeconds`).
+ */
+export function answerBody(askId: string, optionIds: string[], values: Record<string, string>, note: string, seconds?: number): Record<string, unknown> {
   const text = note.trim();
-  return { askId, optionIds, ...(optionIds.length === 1 ? { optionId: optionIds[0] } : {}), values, ...(text ? { note: text } : {}) };
+  return { askId, optionIds, ...(optionIds.length === 1 ? { optionId: optionIds[0] } : {}), values, ...(text ? { note: text } : {}),
+    ...(seconds === undefined ? {} : { seconds }) };
 }
 
 /** The person's words for a refused answer. */

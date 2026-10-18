@@ -305,9 +305,16 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
     // person can still correct on the task), so they never become a decision to make. A task's questions are put to the person once, on
     // its first plan: a replan (after answers, a progress report or a reviewer's note) settles what it still wonders about as assumptions
     // — answering three questions about 「核验排班价值指标」 brought three reworded ones back, every round (2026-10-18 walkthrough).
-    if (feedback || (!research && !importantByRule(store, workspaceId, order) && !result.output.importance?.longTerm)) assumeAnswers(store, workspaceId, order, normalized.questions);
-    // What the task's own files settle (the problem set, how it is handed in, the AI rule) is read from them, not asked.
-    else assumeAnswers(store, workspaceId, order, materialQuestions(store, workspaceId, order, normalized.questions), true);
+    // Important means important by rule only: the planner's own `importance.longTerm` was true for nearly everything, and approving 19
+    // milestones put about 60 questions in front of the person in one afternoon (2026-10-18 evaluation). Even an important task puts only
+    // its first `PERSON_QUESTIONS_PER_TASK` to the person; the rest are assumptions, shown on the task and changeable there.
+    if (feedback || !importantByRule(store, workspaceId, order)) assumeAnswers(store, workspaceId, order, normalized.questions);
+    else {
+      // What the task's own files settle (the problem set, how it is handed in, the AI rule) is read from them, not asked.
+      const readable = materialQuestions(store, workspaceId, order, normalized.questions);
+      assumeAnswers(store, workspaceId, order, readable, true);
+      assumeAnswers(store, workspaceId, order, beyondPersonShare(normalized.questions.filter((question) => !readable.includes(question))));
+    }
     if (warnings.length) store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId,
       idempotencyKey: `validation.warned:task_steps:${workOrderId}:${saved.version}`, type: "validation.warned", entityId: workOrderId,
       payload: { subject: "task_steps", version: saved.version, warnings, revised: Boolean(feedback) } });
@@ -316,8 +323,9 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
 }
 
 /**
- * Plans made before the planner judged importance keep questions nobody filtered (the person's decision, 2026-10-13: filter them by
- * rule): a task important by rule keeps its questions for the person; the others' are settled as assumptions. Runs on the task pass.
+ * Questions already stored are filtered by the same rule as new ones (the person's decision, 2026-10-13, tightened 2026-10-18): a task
+ * important by rule keeps its first `PERSON_QUESTIONS_PER_TASK` for the person; the rest, and every question of another task, are
+ * settled as assumptions. Runs on the task pass.
  */
 export function settleOldQuestions(store: CrosslineStore, workspaceId: string): string[] {
   const orders = new Map(store.listWorkOrders(workspaceId).map((order) => [order.id, order]));
@@ -327,12 +335,19 @@ export function settleOldQuestions(store: CrosslineStore, workspaceId: string): 
     if (!order || !plan.questions.length) continue;
     const readable = materialQuestions(store, workspaceId, order, plan.questions);
     if (readable.length) assumeAnswers(store, workspaceId, order, readable, true);
-    if (plan.importance || importantByRule(store, workspaceId, order)) { if (readable.length) settled.push(plan.workOrderId); continue; }
-    assumeAnswers(store, workspaceId, order, plan.questions);
-    settled.push(plan.workOrderId);
+    const rest = plan.questions.filter((question) => !readable.includes(question));
+    const assumed = importantByRule(store, workspaceId, order) ? beyondPersonShare(rest) : rest;
+    if (assumed.length) assumeAnswers(store, workspaceId, order, assumed);
+    if (readable.length || assumed.length) settled.push(plan.workOrderId);
   }
   return settled;
 }
+
+/** How many of an important task's questions go to the person; the planner lists the ones that change the plan most first. */
+export const PERSON_QUESTIONS_PER_TASK = 2;
+// Questions of the kind the task's files answer do not count: they leave as soon as a file arrives.
+const beyondPersonShare = (questions: StepPlan["questions"]) =>
+  questions.filter((question) => !readableFromMaterial(question.text)).slice(PERSON_QUESTIONS_PER_TASK);
 
 /** The questions the task's own files answer (`readableFromMaterial`), when the task's project has files at all. */
 function materialQuestions(store: CrosslineStore, workspaceId: string, order: { projectId: string }, questions: StepPlan["questions"]): StepPlan["questions"] {

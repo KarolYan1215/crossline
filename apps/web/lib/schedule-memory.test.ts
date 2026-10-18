@@ -1,6 +1,6 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { CrosslineStore } from "@crossline/db";
-import { scheduledMinutesKey } from "@crossline/core";
+import { PLAN_SNAPSHOT_SETTING, planChurnKey, scheduledMinutesKey } from "@crossline/core";
 vi.mock("server-only", () => ({}));
 import { loadCurrentPlan, planToday, saveSchedulePreferences, toZonedInstant } from "./crossline";
 import { MILESTONE_WEIGHTS_SETTING, ORDER_STARTS_SETTING, readScheduledDay, readScheduledMinutes, recordScheduledToday, stepStartsOf } from "./schedule-memory";
@@ -48,6 +48,16 @@ test("the day's plan is remembered with each order's planned minutes, keeping th
   store.setSetting(TEST_CTX.workspaceId, scheduledMinutesKey(today), JSON.stringify({ ...expected, [first!]: 999, gone: 30 }));
   await recordScheduledToday(TEST_CTX, new Date("2026-09-18T13:00:00.000Z"));
   expect(readScheduledMinutes(TEST_CTX, today)).toMatchObject({ [first!]: 999, gone: 30 });
+
+  // How often the plan moves: the snapshot of each piece of work's start, and the day's changes (none between two equal readings).
+  const snapshot = JSON.parse(store.getSetting(TEST_CTX.workspaceId, PLAN_SNAPSHOT_SETTING)!) as { starts: Record<string, string> };
+  expect(Object.keys(snapshot.starts).length).toBeGreaterThan(0);
+  expect(JSON.parse(store.getSetting(TEST_CTX.workspaceId, planChurnKey(today))!)).toEqual({ moved: [], dropped: [], readings: 2 });
+  // A start recorded two hours earlier than the plan now has counts as moved.
+  const [key, start] = Object.entries(snapshot.starts).find(([, at]) => at > "2026-09-18T13:00:00.000Z")!;
+  store.setSetting(TEST_CTX.workspaceId, PLAN_SNAPSHOT_SETTING, JSON.stringify({ ...snapshot, starts: { ...snapshot.starts, [key]: new Date(Date.parse(start) + 2 * 3_600_000).toISOString() } }));
+  await recordScheduledToday(TEST_CTX, new Date("2026-09-18T13:00:00.000Z"));
+  expect(JSON.parse(store.getSetting(TEST_CTX.workspaceId, planChurnKey(today))!)).toMatchObject({ moved: [key], readings: 3 });
 });
 
 // 「自动交给 Agent」 reads where each step's next block starts; the schedule itself is never stored, so this is the worker's only view of it.

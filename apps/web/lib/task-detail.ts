@@ -1,5 +1,5 @@
 import "server-only";
-import { archetypeById, completionRule, finishedSteps, goalSettingKey, proposalReady, producedArtifacts, relevantDocuments, taskProgress, taskTitleOf, usedArtifacts, type AccessContext, type SuccessCriterion,
+import { archetypeById, completionRule, STEP_ANSWER_SLOT, stepAnswerSlot, finishedSteps, goalSettingKey, proposalReady, producedArtifacts, relevantDocuments, taskProgress, taskTitleOf, usedArtifacts, type AccessContext, type SuccessCriterion,
   type EvidenceQuestionTemplate } from "@crossline/core";
 import { assistantAvailable, listAgentTasks, readStoredArtifactPlan, type CrosslineStore, type StoredMilestone, type StoredWorkOrder, type StoredMaterial, type StoredExecution, type StoredMilestoneRelation,
   type StoredBackgroundFact, type StoredStepPlan, type StoredTaskStep } from "@crossline/db";
@@ -36,6 +36,15 @@ function taskExtras(store: CrosslineStore, workspaceId: string, orders: StoredWo
   const artifactRelations = relations.filter((relation) => relation.artifactId);
   const planBlocked = new Set(store.listEvents(workspaceId, { type: "task.steps_blocked" }).map((event) => event.entityId));
   const capacity = new Set(defaultIdentityPacks().filter((pack) => pack.kind === "capacity").map((pack) => pack.id));
+  // Answers to step questions are kept per project (`step_answer_<hash>`): the person's own, or an assumption the app wrote (「假设：」).
+  const stepAnswers = new Map(store.listProfileFacts(workspaceId).filter((fact) => fact.slot.startsWith(STEP_ANSWER_SLOT))
+    .map((fact) => [`${fact.projectId}|${fact.slot}`, fact]));
+  const answerOf = (projectId: string, question: string): StepQuestionView["answer"] => {
+    const fact = stepAnswers.get(`${projectId}|${stepAnswerSlot(question)}`);
+    if (!fact) return undefined;
+    const text = fact.value.replace(/^假设：/, "").replace(/^【[^】]*】/, "");
+    return { text, assumed: fact.status !== "confirmed" };
+  };
   const result = new Map<string, TaskExtras>();
   for (const order of orders) {
     const payload = (order.payload ?? {}) as { notBefore?: string; dueDate?: string; byproducts?: Array<{ lineId: string; artifact: string }>;
@@ -85,7 +94,8 @@ function taskExtras(store: CrosslineStore, workspaceId: string, orders: StoredWo
       ...(!proposalReady(order, plan, { planBlocked: planBlocked.has(order.id), exempt: capacity.has(order.identityId) }) ? { preparing: true } : {}),
       window: { ...(payload.notBefore ? { notBefore: payload.notBefore } : {}), ...(dueBy ? { dueBy } : {}) },
       ...(plan ? { stepPlan: { archetypeLabel: archetypeById(plan.archetypeId)?.label ?? plan.archetypeId, quantity: plan.quantity, rationale: plan.rationale,
-        progress: taskProgress(finishedSteps(order.state, plan.steps)), steps: finishedSteps(order.state, plan.steps), units: plan.units, questions: plan.questions } } : {}),
+        progress: taskProgress(finishedSteps(order.state, plan.steps)), steps: finishedSteps(order.state, plan.steps), units: plan.units,
+        questions: plan.questions.map((question) => { const answer = answerOf(order.projectId, question.text); return { ...question, ...(answer ? { answer } : {}) }; }) } } : {}),
       supports, workedMinutes: worked, ...(artifactLinks.length ? { artifactLinks } : {}),
       criteria: (milestone?.successCriteria ?? []).map((criterion) => {
         if (personConfirmed.has(criterion.id)) return { id: criterion.id, statement: criterion.statement, quarters: 4, by: "person" as const };
@@ -173,6 +183,9 @@ export type TaskDetail = {
   background: StoredBackgroundFact[] | null;
 } & TaskExtras;
 
+/** A plan question with its answer: the person's own, or the app's assumption (changeable on the task), or none yet (asked on 待确认). */
+export type StepQuestionView = StoredStepPlan["questions"][number] & { answer?: { text: string; assumed: boolean } };
+
 /** What the card and the task dialog show beyond the analysis: where the task sits, its steps, and what it is judged against. */
 export type TaskExtras = {
   /** The course or project by name (「ECE 555」), not its id. */
@@ -182,7 +195,7 @@ export type TaskExtras = {
   /** Earliest start and latest finish, as the scheduler uses them. */
   window: { notBefore?: string; dueBy?: string };
   stepPlan?: { archetypeLabel: string; quantity: { basis: string; amount: number; unit: string }; rationale: string; progress: number;
-    steps: StoredTaskStep[]; units: StoredStepPlan["units"]; questions: StoredStepPlan["questions"] };
+    steps: StoredTaskStep[]; units: StoredStepPlan["units"]; questions: StepQuestionView[] };
   /** Other lines this work feeds: the milestone relations from this task's milestone, and its byproducts. */
   supports: Array<{ line: string; lineLabel: string; target: string; artifact?: string; pending: boolean }>;
   /** Cross-line artifacts at task level: what this task produces for another line's work, and whose output it uses (docs/flywheel-and-views.md §5.5). */
