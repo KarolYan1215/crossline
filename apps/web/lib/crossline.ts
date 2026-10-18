@@ -1886,10 +1886,21 @@ export function milestoneDeadline(ctx: AccessContext, milestoneId: string): stri
   if (!milestoneId) return undefined;
   const confirmed = readGoalSettings(ctx, milestoneId)?.confirmedDeadline;
   if (confirmed) return confirmed;
-  const store = getStore();
-  if (!store.listMilestones(ctx.workspaceId).some((milestone) => milestone.id === milestoneId && milestone.status === "approved")) return undefined;
-  const day = store.listMilestoneAnchors(ctx.workspaceId).find((anchor) => anchor.milestoneId === milestoneId)?.deadline;
+  const day = approvedAnchorDays(ctx).get(milestoneId);
   return day && /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : undefined;
+}
+
+/** Approved milestones' anchor dates, read once per ledger change: the planner asks for every task, and each read was two full scans. */
+const anchorDaysCache = new WeakMap<object, { key: string; days: Map<string, string> }>();
+function approvedAnchorDays(ctx: AccessContext): Map<string, string> {
+  const store = getStore();
+  const key = `${ctx.workspaceId}:${store.changeToken()}`;
+  const cached = anchorDaysCache.get(store);
+  if (cached?.key === key) return cached.days;
+  const approved = new Set(store.listMilestones(ctx.workspaceId).filter((milestone) => milestone.status === "approved").map((milestone) => milestone.id));
+  const days = new Map(store.listMilestoneAnchors(ctx.workspaceId).filter((anchor) => approved.has(anchor.milestoneId)).map((anchor) => [anchor.milestoneId, anchor.deadline]));
+  anchorDaysCache.set(store, { key, days });
+  return days;
 }
 
 const plannerTaskOf = (ctx: AccessContext, order: ActionableOrder) => {
