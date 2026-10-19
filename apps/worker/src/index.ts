@@ -1361,7 +1361,8 @@ if (!capabilitySecret) {
   // Other accounts' runtimes stop after a quiet spell (above), so an idle account holds no process.
   setInterval(() => codexSupervisor?.runtimes?.stopIdle(), 60_000).unref();
   // One model run at a time on the hosted beta, and none started above the memory high-water mark (model-gate.ts).
-  configureModelGate({ probe: () => containerMemory(), reclaim: () => codexSupervisor?.runtimes?.reclaim() });
+  // The candidates' measurement is no person's account (one tenant, `sponsor-eval`): it may use every background slot nobody else wants.
+  configureModelGate({ probe: () => containerMemory(), reclaim: () => codexSupervisor?.runtimes?.reclaim(), tenantLimits: { "sponsor-eval": Number.POSITIVE_INFINITY } });
   // What the health check and the logs read: memory in use, its ceiling and peak, and the gate's line, every five minutes.
   const mb = (bytes: number | undefined) => bytes === undefined ? null : Math.round(bytes / 1048576);
   setInterval(() => {

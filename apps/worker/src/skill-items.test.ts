@@ -29,6 +29,11 @@ test("a tool the run never offered, which the runtime answered with an error, do
   const done = runtime({ type: "mcpToolCall", id: "m2", server: "notion", tool: "search", status: "completed", error: null, result: { content: [] } });
   const refused = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => done.rpc, { checklist: false, extract: "off" });
   expect(await refused({ sessionId: "s2", text: "第二段对话。" })).toMatchObject({ state: "blocked", code: "SKILL_TOOL_FORBIDDEN", detail: "item:mcpToolCall" });
+
+  // The runtime's own resource listing, which it offered: read-only, so the turn goes on (Step-3.5-Flash, 2026-10-19).
+  const listed = runtime({ type: "mcpToolCall", id: "m3", server: "codex", tool: "list_mcp_resources", status: "completed", error: null, result: { content: [] } });
+  const allowed = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => listed.rpc, { checklist: false, extract: "off" });
+  expect(await allowed({ sessionId: "s3", text: "第三段对话。" })).toMatchObject({ state: "asked" });
 });
 
 test("the runtime's own features a run asks for: code mode with its tools, read-only connectors, the plan tool, a provider's context window", async () => {

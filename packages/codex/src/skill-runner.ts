@@ -38,6 +38,12 @@ export type SkillRunResult<T> = { ok: true; output: T; audit: AnalysisAudit }
  * interview failed six times in a row at the start of a turn, the moment the runtime compacts).
  */
 const HARMLESS_ITEM_TYPES = new Set(["contextCompaction", "plan"]);
+/**
+ * The runtime's own MCP resource tools, which it offers whenever an MCP server is configured (a plugin's), in structured runs too: they
+ * list and read resources and change nothing. A model that calls one used a tool it was offered, so the turn goes on (2026-10-19:
+ * Step-3.5-Flash called `list_mcp_resources` and failed conformance cases as 「使用了禁止的工具」).
+ */
+const RUNTIME_RESOURCE_TOOLS = new Set(["list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource"]);
 
 /**
  * ChatGPT connectors with reading only: every connector tool not marked read-only needs approval (`writes`), destructive ones are not
@@ -798,6 +804,9 @@ async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, con
         // is refused below.
         if (message.method === "item/completed") console.info(JSON.stringify({ type: "skill.tool_call_refused", skill: run.skillName,
           server: String(item.server ?? ""), tool: String(item.tool ?? ""), at: new Date().toISOString() }));
+      } else if (item?.type === "mcpToolCall" && RUNTIME_RESOURCE_TOOLS.has(String(item.tool ?? ""))) {
+        if (message.method === "item/completed") console.info(JSON.stringify({ type: "skill.resource_tool_used", skill: run.skillName,
+          tool: String(item.tool), at: new Date().toISOString() }));
       } else if (item && !run.allowedItemTypes.includes(String(item.type)) && !HARMLESS_ITEM_TYPES.has(String(item.type))) {
         console.info(JSON.stringify({ type: "skill.item_forbidden", skill: run.skillName, item: String(item.type),
           ...(item.type === "mcpToolCall" ? { server: String(item.server ?? ""), tool: String(item.tool ?? "") } : {}), at: new Date().toISOString() }));

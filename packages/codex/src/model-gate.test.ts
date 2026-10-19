@@ -78,6 +78,17 @@ test("accounts take turns within a priority, and one account holds at most its s
   expect(order).toHaveLength(5);
 });
 
+test("a tenant given its own limit (the candidates' measurement) may take every free background slot", async () => {
+  configureModelGate({ limit: 4, perTenant: 2, tenantLimits: { "sponsor-eval": Number.POSITIVE_INFINITY }, log: () => {} });
+  const order: string[] = [];
+  const gate = deferred();
+  const runs = ["a", "b", "c", "d"].map((name) => withModelSlot({ skill: "crossline-conformance", tenant: "sponsor-eval" }, async () => { order.push(name); await gate.promise; }));
+  await tick();
+  expect(order).toHaveLength(4);
+  gate.resolve();
+  await Promise.all(runs);
+});
+
 test("within one account the shorter job goes first, and a long wait moves a run up a priority", async () => {
   let now = 0;
   configureModelGate({ limit: 1, agingMs: 1000, now: () => now, log: () => {} });

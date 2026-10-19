@@ -84,6 +84,8 @@ type GateConfig = {
   limit: number;
   /** Background runs one account may hold at once. */
   perTenant: number;
+  /** Tenants held to another limit (the developer's model being measured is no person's account: it may use the whole background share). */
+  tenantLimits?: Record<string, number>;
   agingMs: number;
   /** Slots background runs may not take (kept for interactive ones); never below one slot for background. */
   reserve: number;
@@ -223,7 +225,7 @@ function backgroundLimit(): number {
  */
 function eligible(waiter: Waiter): boolean {
   if (waiter.priority === "interactive") return true;
-  return activeBackground < backgroundLimit() && (activeByTenant.get(waiter.tenant) ?? 0) < config.perTenant;
+  return activeBackground < backgroundLimit() && (activeByTenant.get(waiter.tenant) ?? 0) < (config.tenantLimits?.[waiter.tenant] ?? config.perTenant);
 }
 
 function pump(): void {
