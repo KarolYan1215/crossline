@@ -24,3 +24,9 @@ for (const row of db.prepare("SELECT workspace_id, type, created_at, payload_jso
       repairs: audit.audit?.repairs, turns: audit.audit?.turns, needsHuman: audit.needsHuman }).slice(0, 1500));
   } catch (error) { console.log("   audit unreadable:", file, String(error.message).slice(0, 120)); }
 }
+
+// The first milestone drafts: where each line's architect run is (`milestones.drafting`) and the drafts' own events.
+for (const row of db.prepare("SELECT workspace_id, key, value FROM settings WHERE key IN ('milestones.drafting', 'flywheel.artifacts') OR key LIKE 'firstDrafts%' OR key LIKE 'milestones.first%'").all())
+  console.log(["setting", row.workspace_id.slice(0, 8), row.key, String(row.value).slice(0, 600)].join("  "));
+for (const row of db.prepare("SELECT workspace_id, type, created_at, payload_json FROM events WHERE (type LIKE 'milestone%' OR type LIKE 'artifact%' OR type LIKE 'first_drafts%') AND created_at >= ? ORDER BY created_at").all(since))
+  console.log([row.created_at.slice(5, 19), row.workspace_id.slice(0, 8), row.type, String(row.payload_json).slice(0, 300)].join("  "));
