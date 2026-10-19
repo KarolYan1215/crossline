@@ -131,8 +131,9 @@ async function autoAnalyzePass(workspaceId: string, checkedAt = new Date().toISO
     const ids = capturesAwaitingAutoAnalysis(analysisStore, workspaceId);
     if (!ids.length) return;
     if (!spendAllows(await spendFor(workspaceId), "intake")) return;
-    // Started by the quota read just above when it is the account's own runtime; none means not connected, and that was just recorded.
-    const client = codexSupervisor.clientFor(workspaceId);
+    // Started on use: a guest's runtime that went idle is started again (an invited account's quota is read from the ledger and never
+    // starts it, so the old 「started by the quota read」 left its captures waiting); none means not connected, and that was just recorded.
+    const client = accountClient(workspaceId);
     if (!client) return;
     enterUsageWorkspace(workspaceId);
     for (const id of ids) {
@@ -158,7 +159,7 @@ async function autoBackplanPass(workspaceId: string, checkedAt = new Date().toIS
     if (!ids.length) return;
     if (!spendAllows(await spendFor(workspaceId), "core")) return;
     enterUsageWorkspace(workspaceId);
-    const backplan = createGoalBackplanner(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId), { rolling: true });
+    const backplan = createGoalBackplanner(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId), { rolling: true });
     // Batch after batch rather than three a tick: approving twelve milestones left nine of them for the next ticks, and each milestone's
     // tasks get their steps as soon as they exist instead of after the whole batch (2026-10-17 walkthrough, W-28).
     const tried = new Set<string>();
@@ -192,7 +193,7 @@ async function curatorPass(workspaceId: string, checkedAt: string): Promise<void
   curating.add(workspaceId);
   try {
     enterUsageWorkspace(workspaceId);
-    const outcome = await createArchetypeCurator(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))().catch(() => undefined);
+    const outcome = await createArchetypeCurator(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId))().catch(() => undefined);
     if (outcome) console.info(JSON.stringify({ type: "archetypes.curated", checkedAt, workspaceId, added: outcome.added.length, dropped: outcome.dropped.length }));
   } finally { curating.delete(workspaceId); }
 }
@@ -206,7 +207,7 @@ async function titlePass(workspaceId: string, checkedAt: string): Promise<void> 
   titling.add(workspaceId);
   try {
     enterUsageWorkspace(workspaceId);
-    const outcome = await createTaskTitler(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))().catch(() => undefined);
+    const outcome = await createTaskTitler(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId))().catch(() => undefined);
     if (outcome) console.info(JSON.stringify({ type: "tasks.titled", checkedAt, workspaceId, ...outcome }));
   } finally { titling.delete(workspaceId); }
 }
@@ -253,7 +254,7 @@ async function folderPass(workspaceId: string, checkedAt: string): Promise<void>
     if (read) console.info(JSON.stringify({ type: "sources.folders_read", checkedAt, workspaceId, outcomes }));
     if (!codexSupervisor || !spendAllows(await spendFor(workspaceId), "intake")) return;
     enterUsageWorkspace(workspaceId);
-    const filed = await createFolderClassifier(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))().catch(() => undefined);
+    const filed = await createFolderClassifier(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId))().catch(() => undefined);
     if (filed && "filed" in filed && filed.filed) console.info(JSON.stringify({ type: "sources.folder_lines_filed", checkedAt, workspaceId, ...filed }));
   } finally {
     readingFolders.delete(workspaceId);
@@ -269,7 +270,7 @@ async function calendarLinePass(workspaceId: string, checkedAt: string): Promise
   filingCalendar.add(workspaceId);
   try {
     enterUsageWorkspace(workspaceId);
-    const outcome = await createCalendarClassifier(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))().catch(() => undefined);
+    const outcome = await createCalendarClassifier(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId))().catch(() => undefined);
     if (outcome) console.info(JSON.stringify({ type: "calendar.lines_filed", checkedAt, workspaceId, ...outcome }));
   } finally { filingCalendar.delete(workspaceId); }
 }
@@ -287,7 +288,7 @@ async function goalSplitPass(workspaceId: string, checkedAt = new Date().toISOSt
   splittingGoals.add(workspaceId);
   try {
     enterUsageWorkspace(workspaceId);
-    const outcome = await createGoalSplitter(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))().catch(() => undefined);
+    const outcome = await createGoalSplitter(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId))().catch(() => undefined);
     if (outcome) console.info(JSON.stringify({ type: "lines.goals_split", checkedAt, workspaceId, ...outcome }));
   } finally { splittingGoals.delete(workspaceId); }
 }
@@ -304,7 +305,7 @@ async function milestoneRiskPass(workspaceId: string, checkedAt = new Date().toI
   reviewingRisks.add(workspaceId);
   try {
     enterUsageWorkspace(workspaceId);
-    const outcome = await createMilestoneRiskReviewer(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))().catch(() => undefined);
+    const outcome = await createMilestoneRiskReviewer(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId))().catch(() => undefined);
     if (outcome) console.info(JSON.stringify({ type: "milestones.risk_reviewed", checkedAt, workspaceId, ...outcome }));
   } finally { reviewingRisks.delete(workspaceId); }
 }
@@ -315,9 +316,12 @@ async function milestoneRiskPass(workspaceId: string, checkedAt = new Date().toI
  * effect only when approved on 主线, so designing them unasked costs a run and decides nothing. Once per account (`milestones.firstDrafts`).
  */
 const draftingFirst = new Set<string>();
+const FIRST_DRAFTS_RETRY_SETTING = "milestones.firstDrafts.retryAt";
 async function firstDraftsPass(workspaceId: string, checkedAt = new Date().toISOString()): Promise<void> {
   if (paused(workspaceId, "planning") || draftingFirst.has(workspaceId) || !codexSupervisor) return;
   if (analysisStore.getSetting(workspaceId, FIRST_DRAFTS_SETTING) || analysisStore.listMilestones(workspaceId).length) return;
+  const retryAt = analysisStore.getSetting(workspaceId, FIRST_DRAFTS_RETRY_SETTING);
+  if (retryAt && Date.parse(retryAt) > Date.parse(checkedAt)) return;
   const lines = identityLines(analysisStore, workspaceId).map((line) => ({ id: line.id, label: line.label, hard: Boolean(line.hard), goals: line.goals ?? [] }));
   if (!lines.length || !readyToStart(interviewChecklistFor(analysisStore, workspaceId, lines, { unfiledFiles: null }))) return;
   // Drafts rest on what the person confirmed before using the app (2026-10-19): not on facts they have not looked over yet.
@@ -332,8 +336,15 @@ async function firstDraftsPass(workspaceId: string, checkedAt = new Date().toISO
   analysisStore.setSetting(workspaceId, FIRST_DRAFTS_SETTING, checkedAt);
   try {
     enterUsageWorkspace(workspaceId);
-    const outcome = await createMilestoneProposer(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))("", undefined).catch(() => undefined);
-    console.info(JSON.stringify({ type: "milestones.first_drafts", checkedAt, workspaceId, state: outcome?.state ?? "failed" }));
+    const outcome = await createMilestoneProposer(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId))("", undefined).catch(() => undefined);
+    console.info(JSON.stringify({ type: "milestones.first_drafts", checkedAt, workspaceId, state: outcome?.state ?? "failed",
+      ...(outcome?.state === "blocked" ? { code: outcome.code } : {}) }));
+    // A run that made nothing is tried again in half an hour: the start mark used to stay, so a run blocked once (a runtime that had
+    // gone idle) was never retried and the screens said 「正在设计」 for good (2026-10-19).
+    if (!analysisStore.listMilestones(workspaceId).length) {
+      analysisStore.deleteSetting(workspaceId, FIRST_DRAFTS_SETTING);
+      analysisStore.setSetting(workspaceId, FIRST_DRAFTS_RETRY_SETTING, new Date(Date.now() + 30 * 60_000).toISOString());
+    }
   } finally { draftingFirst.delete(workspaceId); }
   void milestoneRiskPass(workspaceId).catch(() => undefined);
 }
@@ -376,7 +387,7 @@ async function minePass(workspaceId: string, checkedAt: string): Promise<void> {
   compilingMine.add(workspaceId);
   try {
     enterUsageWorkspace(workspaceId);
-    const outcome = await createInsightCompiler(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))().catch(() => undefined);
+    const outcome = await createInsightCompiler(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId))().catch(() => undefined);
     if (outcome) console.info(JSON.stringify({ type: "skill.mine.compiled", checkedAt, workspaceId, ...outcome }));
   } finally { compilingMine.delete(workspaceId); }
 }
@@ -397,7 +408,7 @@ async function publicSkillPass(workspaceId: string, checkedAt: string): Promise<
   scoutingSkills.add(workspaceId);
   try {
     enterUsageWorkspace(workspaceId);
-    const outcome = await createSkillScout(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))().catch(() => undefined);
+    const outcome = await createSkillScout(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId))().catch(() => undefined);
     if (outcome) console.info(JSON.stringify({ type: "skill.public.scouted", checkedAt, workspaceId, ...outcome }));
   } finally { scoutingSkills.delete(workspaceId); }
 }
@@ -433,7 +444,7 @@ async function workflowPass(workspaceId: string, checkedAt: string): Promise<voi
   const input = growTask(candidate, identityLines(analysisStore, workspaceId).map((line) => line.id), aiToolsFor(analysisStore, workspaceId), library);
   growingWorkflows.add(workspaceId);
   const started = agentService.runFree(workspaceId, input, (outcome) => {
-    void installGrown(analysisStore, workspaceId, candidate, outcome, { client: codexSupervisor?.clientFor(workspaceId), cwd: repoRoot })
+    void installGrown(analysisStore, workspaceId, candidate, outcome, { client: accountClient(workspaceId), cwd: repoRoot })
       .then((result) => console.info(JSON.stringify({ type: "skill.grown." + result.state, workspaceId, ...result })))
       .catch(() => undefined).finally(() => {
         growingWorkflows.delete(workspaceId);
@@ -460,11 +471,11 @@ async function writePortraitFor(workspaceId: string) {
   enterUsageWorkspace(workspaceId);
   const store = analysisStore;
   store.appendEvent({ ownerId: store.getWorkspaceOwnerId(workspaceId) ?? "", workspaceId, idempotencyKey: `portrait.requested:${Date.now()}`, type: "portrait.requested", entityId: workspaceId, payload: {} });
-  const outcome = await createPortraitWriter(store, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))();
+  const outcome = await createPortraitWriter(store, workspaceId, repoRoot, () => accountClient(workspaceId))();
   if (outcome.state === "blocked") store.appendEvent({ ownerId: store.getWorkspaceOwnerId(workspaceId) ?? "", workspaceId, idempotencyKey: `portrait.blocked:${Date.now()}`,
     type: "portrait.blocked", entityId: workspaceId, payload: { code: outcome.code, message: outcome.message } });
   // The pictures follow the words, in the background: the report is readable at once and gains its illustrations as they land.
-  else void createPortraitIllustrator(store, workspaceId, repoRoot, dataDir, () => codexSupervisor?.clientFor(workspaceId))()
+  else void createPortraitIllustrator(store, workspaceId, repoRoot, dataDir, () => accountClient(workspaceId))()
     .then((drawn) => console.info(JSON.stringify({ type: "portrait.illustrated", workspaceId, ...drawn })))
     .catch(() => undefined);
   return outcome;
@@ -489,7 +500,7 @@ async function portraitPass(workspaceId: string, checkedAt: string): Promise<voi
     } else {
       analysisStore.setSetting(workspaceId, PORTRAIT_GAP_AT, checkedAt);
       enterUsageWorkspace(workspaceId);
-      const outcome = await createPortraitWriter(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId), { only: "gap" })().catch(() => undefined);
+      const outcome = await createPortraitWriter(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId), { only: "gap" })().catch(() => undefined);
       console.info(JSON.stringify({ type: "portrait.gap_rewrite", checkedAt, workspaceId, state: outcome?.state ?? "failed" }));
     }
   } finally { rewritingPortraits.delete(workspaceId); }
@@ -526,12 +537,12 @@ async function stepPlanPass(workspaceId: string, checkedAt = new Date().toISOStr
     if (!spendAllows(await spendFor(workspaceId), "core")) return;
     enterUsageWorkspace(workspaceId);
     // A report the person just wrote comes first: they are waiting to see the rings move.
-    const judge = createProgressJudge(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId));
+    const judge = createProgressJudge(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId));
     for (const report of reports) {
       const assessment = await judge(report).catch(() => undefined);
       if (assessment) console.info(JSON.stringify({ type: "progress.judged", checkedAt, workspaceId, workOrderId: report.workOrderId }));
     }
-    const planner = createStepPlanner(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId));
+    const planner = createStepPlanner(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId));
     for (const id of ids) {
       // A replan the person (or the assistant) asked for carries what to change.
       const request = analysisStore.listEvents(workspaceId, { type: "task.steps_replan_requested", entityId: id }).at(-1)?.payload as { feedback?: string } | undefined;
@@ -539,9 +550,9 @@ async function stepPlanPass(workspaceId: string, checkedAt = new Date().toISOStr
       if (outcome) console.info(JSON.stringify({ type: `steps.${outcome.state}`, checkedAt, workspaceId, workOrderId: id,
         ...(outcome.state === "planned" ? { warnings: outcome.warnings.length } : { code: outcome.code }) }));
     }
-    const reviewer = createWarningReviewer(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId), (id, feedback) => planner(id, feedback),
-      createRelationReviser(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId)),
-      (line, notes) => createMilestoneProposer(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))(`复核意见：${notes}`, undefined, [line], { revised: true }));
+    const reviewer = createWarningReviewer(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId), (id, feedback) => planner(id, feedback),
+      createRelationReviser(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId)),
+      (line, notes) => createMilestoneProposer(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId))(`复核意见：${notes}`, undefined, [line], { revised: true }));
     for (const item of reviews) {
       const verdict = await reviewer(item).catch(() => undefined);
       if (verdict) console.info(JSON.stringify({ type: `validation.${verdict.verdict}`, checkedAt, workspaceId, subject: item.subject, entityId: item.entityId }));
@@ -597,8 +608,8 @@ async function tick(): Promise<void> {
   }
   for (const workspace of workspaces) await stepPlanPass(workspace.id, checkedAt);
   for (const workspace of workspaces) await curatorPass(workspace.id, checkedAt);
-  for (const workspace of workspaces) await energyAdvicePass({ store: analysisStore, workspaceId: workspace.id, cwd: repoRoot, client: () => codexSupervisor?.clientFor(workspace.id), spend: () => spendFor(workspace.id), paused: (kind) => paused(workspace.id, kind), enterUsage: enterUsageWorkspace }).catch(() => undefined);
-  for (const workspace of workspaces) await dedupePass({ store: analysisStore, workspaceId: workspace.id, cwd: repoRoot, client: () => codexSupervisor?.clientFor(workspace.id), spend: () => spendFor(workspace.id), paused: (kind) => paused(workspace.id, kind), enterUsage: enterUsageWorkspace }).catch(() => undefined);
+  for (const workspace of workspaces) await energyAdvicePass({ store: analysisStore, workspaceId: workspace.id, cwd: repoRoot, client: () => accountClient(workspace.id), spend: () => spendFor(workspace.id), paused: (kind) => paused(workspace.id, kind), enterUsage: enterUsageWorkspace }).catch(() => undefined);
+  for (const workspace of workspaces) await dedupePass({ store: analysisStore, workspaceId: workspace.id, cwd: repoRoot, client: () => accountClient(workspace.id), spend: () => spendFor(workspace.id), paused: (kind) => paused(workspace.id, kind), enterUsage: enterUsageWorkspace }).catch(() => undefined);
   for (const workspace of workspaces) await titlePass(workspace.id, checkedAt);
   for (const workspace of workspaces) await goalSplitPass(workspace.id, checkedAt);
   for (const workspace of workspaces) await milestoneRiskPass(workspace.id, checkedAt);
@@ -753,7 +764,7 @@ const getNightly = (workspaceId: string) => {
   if (!nightly) {
     nightly = createNightlyFlywheel({
       store: analysisStore, workspaceId, readCost: () => readCost(workspaceId),
-      expand: createFlywheelExpander(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))
+      expand: createFlywheelExpander(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId))
     });
     nightlies.set(workspaceId, nightly);
   }
@@ -812,7 +823,7 @@ const diligenceRunners = new Map<string, ReturnType<typeof createDiligenceRunner
 const getDiligence = (workspaceId: string) => {
   let runner = diligenceRunners.get(workspaceId);
   if (!runner) {
-    runner = createDiligenceRunner(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId), { readCost: () => readCost(workspaceId) });
+    runner = createDiligenceRunner(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId), { readCost: () => readCost(workspaceId) });
     diligenceRunners.set(workspaceId, runner);
   }
   return runner;
@@ -831,6 +842,8 @@ const calendarWriteLogin = createWriteLogin(analysisStore, { session: getCalenda
  * The account's own model runtime for work it asked for (tools-mode assistant, mail sorting, automations): the start-on-use handle,
  * so an idle guest runtime starts again instead of the run being skipped — and never the owner's runtime for anyone else.
  */
+// Every model run the worker starts for a workspace takes its client here (2026-10-19: background passes used the running runtime only,
+// so an invited account's drafts, backplans and step plans were skipped once its runtime went idle).
 const accountClient = (workspaceId: string) => {
   const handle = codexSupervisor?.runtimes?.handle(workspaceId);
   if (handle) return handle.ok ? handle.client : undefined;
@@ -946,7 +959,7 @@ const materialPreparers = new Map<string, ReturnType<typeof createManualbookBuil
 const getMaterialPreparer = (workspaceId: string) => {
   let preparer = materialPreparers.get(workspaceId);
   if (!preparer) {
-    preparer = createManualbookBuilder(analysisStore, workspaceId, materialsDir, repoRoot, () => codexSupervisor?.clientFor(workspaceId), { readCost: () => readCost(workspaceId) });
+    preparer = createManualbookBuilder(analysisStore, workspaceId, materialsDir, repoRoot, () => accountClient(workspaceId), { readCost: () => readCost(workspaceId) });
     materialPreparers.set(workspaceId, preparer);
   }
   return preparer;
@@ -955,7 +968,7 @@ const milestoneGates = new Map<string, ReturnType<typeof createMilestoneGate>>()
 const getMilestoneGate = (workspaceId: string) => {
   let gate = milestoneGates.get(workspaceId);
   if (!gate) {
-    gate = createMilestoneGate(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId));
+    gate = createMilestoneGate(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId));
     milestoneGates.set(workspaceId, gate);
   }
   return gate;
@@ -985,7 +998,7 @@ const planExplainers = new Map<string, ReturnType<typeof createPlanExplainer>>()
 const getPlanExplainer = (workspaceId: string) => {
   let explainer = planExplainers.get(workspaceId);
   if (!explainer) {
-    explainer = createPlanExplainer(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId));
+    explainer = createPlanExplainer(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId));
     planExplainers.set(workspaceId, explainer);
   }
   return explainer;
@@ -994,7 +1007,7 @@ const weeklyInsights = new Map<string, ReturnType<typeof createWeeklyInsight>>()
 const getWeeklyInsight = (workspaceId: string) => {
   let insight = weeklyInsights.get(workspaceId);
   if (!insight) {
-    insight = createWeeklyInsight(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId));
+    insight = createWeeklyInsight(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId));
     weeklyInsights.set(workspaceId, insight);
   }
   return insight;
@@ -1189,20 +1202,20 @@ if (!capabilitySecret) {
     runTaskPass: (workspaceId) => stepPlanPass(workspaceId),
     splitGoals: (workspaceId) => goalSplitPass(workspaceId),
     conciergeTurn: (workspaceId, request, signal) => { enterUsageWorkspace(workspaceId);
-      return createConcierge(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))(request as unknown as ConciergeRequest, signal); },
+      return createConcierge(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId))(request as unknown as ConciergeRequest, signal); },
     analyzeCapture: (client, id, signal, workspaceId) => getCaptureAnalyzer(workspaceId)(client, id, signal),
     // `workspaceId` is the real caller's, from its own verified capability token — not a hardcoded
     // constant, which is what left milestone proposal and goal backplanning invisible to any real
     // account the same way material prep/the milestone gate/calendar sync were (see `getMaterialPreparer`
     // above for the fuller explanation; this is the same bug, same fix, in the same file).
     proposeMilestones: (_client, request, signal, workspaceId, only) =>
-      createMilestoneProposer(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))(request, signal, only)
+      createMilestoneProposer(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId))(request, signal, only)
         // The new drafts are read for risks right away, so the person sees them when deciding (in the background; the answer is not held for it).
         .finally(() => { void milestoneRiskPass(workspaceId).catch(() => undefined); }),
     continueMilestoneConversation: (_client, threadId, message, signal, workspaceId) =>
-      createMilestoneConversation(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))(threadId, message, signal),
+      createMilestoneConversation(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId))(threadId, message, signal),
     onboardingTurn: (_client, sessionId, text, _signal, workspaceId, reread) =>
-      createOnboardingSessionRunner(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))({ sessionId, text, ...(reread ? { reread: true } : {}) })
+      createOnboardingSessionRunner(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId))({ sessionId, text, ...(reread ? { reread: true } : {}) })
         // The interview just finished: the first drafts start now, not at the next tick up to fifteen minutes later, while 主线 said
         // 「完成初始访谈后生成」 to someone who had (2026-10-17 walkthrough, W-12).
         .then((outcome) => { if (outcome.state === "ready") void firstDraftsPass(workspaceId).catch(() => undefined); return outcome; }),
@@ -1233,9 +1246,9 @@ if (!capabilitySecret) {
       setLines: async (workspaceId: string, id: string, lines: string[]) => ({ saved: setFolderLines(analysisStore, workspaceId, id, lines) })
     },
     extractBackgroundFacts: (_client, captureTitle, captureContext, signal, workspaceId) =>
-      createBackgroundFactsExtractor(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))(captureTitle, captureContext, signal),
+      createBackgroundFactsExtractor(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId))(captureTitle, captureContext, signal),
     backplanGoal: (_client, milestoneId, signal, workspaceId) =>
-      createGoalBackplanner(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))(milestoneId, signal),
+      createGoalBackplanner(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId))(milestoneId, signal),
     // The same preparer/gate the tick loop uses, exposed so a person's retry gets an answer now rather
     // than at the next tick. `pendingMaterialWorkOrders`/`pendingMilestoneGates` still govern which
     // orders the loop itself picks up.
