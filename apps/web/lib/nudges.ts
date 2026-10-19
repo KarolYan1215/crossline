@@ -185,6 +185,9 @@ function backgroundDone(ctx: AccessContext, now: Date): Array<{ key: string; tex
   const out: Array<{ key: string; text: string; label: string; href: string }> = [];
   for (const task of listAgentTasks(store, ctx.workspaceId).filter((item) => finishedAt(item) >= since)) {
     const name = task.title.split(" · ").at(-1) ?? task.title;
+    // An automation's run (task id `auto-…`, apps/worker/src/automations.ts) already sent its own message with the files and the
+    // link to 待确认; a second 「做完了，等待审阅」 for the same result was a duplicate (2026-10-19).
+    if (task.taskId.startsWith("auto-")) continue;
     if (task.status === "needs_review") out.push({ key: `agent:${task.taskId}`, text: `助手做完了「${name}」，等待审阅。`, label: "去审阅", href: "/approvals#assistant" });
     else if (task.status === "accepted" && task.stepId) out.push({ key: `agent:${task.taskId}`, text: `「${name}」已备好，可在任务的材料里查看。`, label: "打开任务",
       href: `/workbench/${encodeURIComponent(task.workOrderId)}` });

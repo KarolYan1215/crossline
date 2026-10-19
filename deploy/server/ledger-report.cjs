@@ -20,7 +20,7 @@ for (const row of db.prepare("SELECT workspace_id, type, created_at, payload_jso
   const file = String(payload.auditFile).replace(/^.*?\/ai-output\//, "/live/ai-output/");
   try {
     const audit = JSON.parse(fs.readFileSync(file, "utf8"));
-    console.log("   audit:", JSON.stringify({ artifacts: audit.artifacts, toolCalls: (audit.toolCalls ?? []).map((call) => `${call.name}:${call.ok === false ? "fail" : "ok"}`),
+    console.log("   audit:", JSON.stringify({ artifacts: audit.artifacts, toolCalls: (audit.toolCalls ?? []).map((call) => `${call.tool}:${call.ok === false ? "fail" : "ok"}`),
       repairs: audit.audit?.repairs, turns: audit.audit?.turns, needsHuman: audit.needsHuman }).slice(0, 1500));
   } catch (error) { console.log("   audit unreadable:", file, String(error.message).slice(0, 120)); }
 }
