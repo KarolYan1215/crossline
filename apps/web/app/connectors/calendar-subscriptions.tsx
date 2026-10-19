@@ -37,7 +37,9 @@ export function CalendarSubscriptions({ onChanged }: { onChanged?: () => void })
     const body = await response?.json().catch(() => undefined) as { state?: string; events?: number; message?: string } | undefined;
     if (body?.state === "added") {
       setLink(""); setLabel("");
-      setMessage(`已接入，读到未来九周的 ${body.events ?? 0} 个日程。`);
+      // All-day events (holidays, birthdays) are never read in: say so when that is why nothing came, or a holiday calendar reads as broken.
+      setMessage(body.events ? `已接入，读到未来九周的 ${body.events} 个日程（全天日程不读入）。`
+        : "已接入。未来九周里没有读到有具体时间的日程：全天日程（节假日、生日）和标为「空闲」的不读入。");
       onChanged?.();
     } else setMessage(body?.message ?? "没能接入这个日历，稍后再试。");
     await load();
@@ -45,7 +47,8 @@ export function CalendarSubscriptions({ onChanged }: { onChanged?: () => void })
   };
   const remove = async (id: string) => {
     setBusy(true);
-    await fetch(`/api/calendar/subscriptions?id=${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => undefined);
+    const response = await fetch(`/api/calendar/subscriptions?id=${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => undefined);
+    setMessage(response?.ok ? "已移除，这本日历的日程已从计划里拿掉。" : "没能移除，稍后再试。");
     await load();
     onChanged?.();
     setBusy(false);

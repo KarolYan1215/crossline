@@ -4,7 +4,7 @@ import { useState, type FormEvent } from "react";
 
 /**
  * 删除账号 (decided 2026-10-17): typing the account's email is the confirmation. Everything the account holds on the server goes and
- * cannot be brought back; the page then leaves for the sign-in page.
+ * cannot be brought back; the page then leaves for the sign-in page, which says the account is gone.
  */
 export function DeleteAccountCard({ email }: { email: string }) {
   const [typed, setTyped] = useState("");
@@ -18,7 +18,7 @@ export function DeleteAccountCard({ email }: { email: string }) {
     setBusy(true); setStatus("正在删除…");
     const answer = await fetch("/api/account/delete", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email: typed }) })
       .then((response) => response.json() as Promise<{ ok?: boolean; message?: string }>).catch(() => ({ ok: false, message: undefined }));
-    if (answer.ok) { window.location.assign("/login"); return; }
+    if (answer.ok) { window.location.assign("/login?deleted=1"); return; }
     setBusy(false); setStatus(answer.message ?? "没有删除成功，请稍后再试。");
   };
 

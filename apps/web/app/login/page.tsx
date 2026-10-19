@@ -6,8 +6,8 @@ import { LocalLogin } from "./local-login";
 import { AuthLayout } from "./auth-layout";
 import { LOGIN_SERIF } from "../ui/serif-strings";
 
-export default async function LoginPage({ searchParams }: { searchParams: Promise<{ verified?: string; reset?: string; error?: string }> }) {
-  const { verified, reset, error } = await searchParams;
+export default async function LoginPage({ searchParams }: { searchParams: Promise<{ verified?: string; reset?: string; deleted?: string; error?: string }> }) {
+  const { verified, reset, deleted, error } = await searchParams;
   // An installed copy signs in only through the machine's own Codex (docs/local-installer.md); what the page looks like is
   // docs/onboarding-v3.md: the product drawn on the left, the one way in on the right.
   if (isLocalInstall()) return <AuthLayout title={LOGIN_SERIF.panel}><LocalLogin /></AuthLayout>;
@@ -17,7 +17,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   // The same picture as the installed copy, with the way in for a shared server (an invitee over the private network): the steps say what
   // comes after signing in, so nobody needs a separate guide to know that their own ChatGPT is connected once, inside, by a code.
   return <AuthLayout title={LOGIN_SERIF.panel}>
-      <LoginForm googleEnabled={isGoogleAuthConfigured()} emailEnabled={isEmailAuthConfigured()} chatgptEnabled={chatgpt} verified={verified === "1"} reset={reset === "1"}
+      <LoginForm googleEnabled={isGoogleAuthConfigured()} emailEnabled={isEmailAuthConfigured()} chatgptEnabled={chatgpt} verified={verified === "1"} reset={reset === "1"} deleted={deleted === "1"}
         {...(error ? { errorCode: error.slice(0, 60) } : {})} />
       <ol className="login-steps" aria-label="开始使用的步骤">{HOSTED_STEPS.map((step, index) =>
         <li key={step.title} data-state={index === 0 ? "current" : "next"}>
